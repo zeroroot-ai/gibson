@@ -4,16 +4,18 @@ import (
 	"context"
 	"strings"
 
+	einoopenai "github.com/cloudwego/eino-ext/components/model/openai"
+
 	"github.com/zeroroot-ai/gibson/internal/llm"
 	"github.com/zeroroot-ai/gibson/internal/secrets"
 	"github.com/zeroroot-ai/gibson/internal/types"
-	"github.com/zeroroot-ai/langchaingo/llms/mistral"
 )
 
-// MistralProvider wraps langchaingo's Mistral La Plateforme integration.
+// MistralProvider talks to Mistral La Plateforme through its OpenAI-compatible
+// endpoint via the Eino OpenAI ChatModel.
 // Credential: cfg.APIKey or env MISTRAL_API_KEY.
 type MistralProvider struct {
-	client *mistral.Model
+	model  *einoopenai.ChatModel
 	config llm.ProviderConfig
 }
 
@@ -31,18 +33,21 @@ func newMistralProviderWithContext(ctx context.Context, service *secrets.Service
 	if err != nil {
 		return nil, err
 	}
-	opts := []mistral.Option{mistral.WithAPIKey(apiKey)}
-	if cfg.DefaultModel != "" {
-		opts = append(opts, mistral.WithModel(cfg.DefaultModel))
+
+	baseURL := cfg.BaseURL
+	if baseURL == "" {
+		baseURL = "https://api.mistral.ai/v1"
 	}
-	if cfg.BaseURL != "" {
-		opts = append(opts, mistral.WithEndpoint(cfg.BaseURL))
-	}
-	client, err := mistral.New(opts...)
+
+	m, err := einoopenai.NewChatModel(ctx, &einoopenai.ChatModelConfig{
+		APIKey:  apiKey,
+		Model:   cfg.DefaultModel,
+		BaseURL: baseURL,
+	})
 	if err != nil {
 		return nil, llm.TranslateError("mistral", err)
 	}
-	return &MistralProvider{client: client, config: cfg}, nil
+	return &MistralProvider{model: m, config: cfg}, nil
 }
 
 func (p *MistralProvider) Name() string { return "mistral" }
@@ -62,48 +67,40 @@ func (p *MistralProvider) Models(_ context.Context) ([]llm.ModelInfo, error) {
 }
 
 func (p *MistralProvider) Complete(ctx context.Context, req llm.CompletionRequest) (*llm.CompletionResponse, error) {
-	messages := toSchemaMessages(req.Messages)
-	opts := buildCallOptions(req)
-	resp, err := p.client.GenerateContent(ctx, messages, opts...)
+	msgs := toEinoMessages(req.Messages)
+	opts := buildEinoOptions(req)
+	out, err := p.model.Generate(ctx, msgs, opts...)
 	if err != nil {
 		return nil, translateMistralError(err)
 	}
-	return fromLangchainResponse(resp, req.Model), nil
+	return fromEinoMessage(out, req.Model), nil
 }
 
 func (p *MistralProvider) CompleteWithTools(ctx context.Context, req llm.CompletionRequest, tools []llm.ToolDef) (*llm.CompletionResponse, error) {
-	messages := toSchemaMessages(req.Messages)
-	opts := buildCallOptionsWithTools(req, tools)
-	resp, err := p.client.GenerateContent(ctx, messages, opts...)
+	msgs := toEinoMessages(req.Messages)
+	opts, err := buildEinoOptionsWithTools(req, tools)
 	if err != nil {
 		return nil, translateMistralError(err)
 	}
-	return fromLangchainResponse(resp, req.Model), nil
+	out, err := p.model.Generate(ctx, msgs, opts...)
+	if err != nil {
+		return nil, translateMistralError(err)
+	}
+	return fromEinoMessage(out, req.Model), nil
 }
 
 func (p *MistralProvider) Stream(ctx context.Context, req llm.CompletionRequest) (<-chan llm.StreamChunk, error) {
-	chunkChan := make(chan llm.StreamChunk, 10)
-	messages := toSchemaMessages(req.Messages)
-	opts := buildStreamingCallOptions(req, func(ctx context.Context, chunk []byte) error {
-		select {
-		case <-ctx.Done():
-			return ctx.Err()
-		case chunkChan <- llm.StreamChunk{Delta: llm.StreamDelta{Content: string(chunk)}}:
-			return nil
-		}
-	})
-	go func() {
-		defer close(chunkChan)
-		_, err := p.client.GenerateContent(ctx, messages, opts...)
-		if err != nil {
-			chunkChan <- llm.StreamChunk{Error: translateMistralError(err)}
-		}
-	}()
-	return chunkChan, nil
+	msgs := toEinoMessages(req.Messages)
+	opts := buildEinoOptions(req)
+	sr, err := p.model.Stream(ctx, msgs, opts...)
+	if err != nil {
+		return nil, translateMistralError(err)
+	}
+	return streamToChannel(sr, translateMistralError), nil
 }
 
 func (p *MistralProvider) Health(_ context.Context) types.HealthStatus {
-	if p.client == nil {
+	if p.model == nil {
 		return types.NewHealthStatus(types.HealthStateUnhealthy, "mistral client not initialised")
 	}
 	return types.NewHealthStatus(types.HealthStateHealthy, "")
@@ -114,7 +111,7 @@ func (p *MistralProvider) CredentialSchema() []llm.CredentialField { return Mist
 func MistralCredentialSchema() []llm.CredentialField {
 	return []llm.CredentialField{
 		{Key: "api_key", Label: "Mistral API Key", Required: true, Secret: true},
-		{Key: "base_url", Label: "Endpoint (optional)", Placeholder: "https://api.mistral.ai"},
+		{Key: "base_url", Label: "Endpoint (optional)", Placeholder: "https://api.mistral.ai/v1"},
 	}
 }
 
