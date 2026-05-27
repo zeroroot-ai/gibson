@@ -2,21 +2,35 @@ package providers
 
 import (
 	"context"
+	"encoding/json"
 	"errors"
 	"fmt"
 	"os"
 	"strings"
 
+	"github.com/aws/aws-sdk-go-v2/aws"
 	awsconfig "github.com/aws/aws-sdk-go-v2/config"
 	"github.com/aws/aws-sdk-go-v2/credentials"
 	bedrockcontrol "github.com/aws/aws-sdk-go-v2/service/bedrock"
 	"github.com/aws/aws-sdk-go-v2/service/bedrockruntime"
+	"github.com/aws/aws-sdk-go-v2/service/bedrockruntime/document"
+	bedrocktypes "github.com/aws/aws-sdk-go-v2/service/bedrockruntime/types"
+	"github.com/google/uuid"
 	"github.com/zeroroot-ai/gibson/internal/llm"
 	"github.com/zeroroot-ai/gibson/internal/types"
-	"github.com/zeroroot-ai/langchaingo/llms/bedrock"
 )
 
+// defaultBedrockModelID is the model the provider falls back to when neither
+// cfg.DefaultModel nor the per-request model is set. Matches the former
+// langchaingo bedrock.ModelAnthropicClaudeV3Sonnet constant value.
+const defaultBedrockModelID = "anthropic.claude-3-sonnet-20240229-v1:0"
+
 // BedrockProvider implements LLMProvider for AWS Bedrock foundation models.
+//
+// It speaks the unified Bedrock Converse API directly against an
+// aws-sdk-go-v2 bedrockruntime.Client. Converse is the single interface for
+// every Bedrock foundation model (Claude, Titan/Nova, Llama, Cohere, Mistral,
+// AI21), so the provider does not need per-family request shaping.
 //
 // Credential resolution (in order):
 //  1. use_irsa=true: skip static-key validation entirely; rely on the AWS SDK
@@ -29,13 +43,8 @@ import (
 //  4. The AWS SDK default credential chain (shared config, IAM role, IRSA, etc.).
 //
 // Region resolution: cfg.Extra["aws_region"] → AWS_REGION env → us-east-1.
-//
-// Note: langchaingo's bedrock package has no typed options for creds/region.
-// Customisation happens by constructing the bedrockruntime.Client yourself
-// and passing it with bedrock.WithClient — which is why this file imports
-// aws-sdk-go-v2 directly despite Gibson's general langchaingo-only policy.
 type BedrockProvider struct {
-	client        *bedrock.LLM
+	client        *bedrockruntime.Client
 	controlClient *bedrockcontrol.Client
 	config        llm.ProviderConfig
 	region        string
@@ -88,19 +97,11 @@ func NewBedrockProvider(cfg llm.ProviderConfig) (*BedrockProvider, error) {
 
 	modelID := cfg.DefaultModel
 	if modelID == "" {
-		modelID = bedrock.ModelAnthropicClaudeV3Sonnet
-	}
-
-	lc, err := bedrock.New(
-		bedrock.WithClient(brClient),
-		bedrock.WithModel(modelID),
-	)
-	if err != nil {
-		return nil, llm.TranslateError("bedrock", err)
+		modelID = defaultBedrockModelID
 	}
 
 	return &BedrockProvider{
-		client:        lc,
+		client:        brClient,
 		controlClient: controlClient,
 		config:        cfg,
 		region:        region,
@@ -118,51 +119,72 @@ func (p *BedrockProvider) Models(_ context.Context) ([]llm.ModelInfo, error) {
 
 // Complete performs a non-tool completion.
 func (p *BedrockProvider) Complete(ctx context.Context, req llm.CompletionRequest) (*llm.CompletionResponse, error) {
-	messages := toSchemaMessages(req.Messages)
-	opts := buildCallOptions(req)
-	resp, err := p.client.GenerateContent(ctx, messages, opts...)
+	input, err := buildConverseInput(req, p.modelID, nil)
 	if err != nil {
 		return nil, translateBedrockError(err)
 	}
-	return fromLangchainResponse(resp, req.Model), nil
+	out, err := p.client.Converse(ctx, input)
+	if err != nil {
+		return nil, translateBedrockError(err)
+	}
+	return fromConverseOutput(out, req.Model), nil
 }
 
 // CompleteWithTools performs a completion with tool definitions.
-// Only Anthropic Claude on Bedrock currently supports tool_use; the daemon's
-// slot resolver is expected to route tool-capable requests accordingly.
+// Only Anthropic Claude (and Amazon Nova) on Bedrock currently support
+// tool_use; the daemon's slot resolver is expected to route tool-capable
+// requests accordingly.
 func (p *BedrockProvider) CompleteWithTools(ctx context.Context, req llm.CompletionRequest, tools []llm.ToolDef) (*llm.CompletionResponse, error) {
-	messages := toSchemaMessages(req.Messages)
-	opts := buildCallOptionsWithTools(req, tools)
-	resp, err := p.client.GenerateContent(ctx, messages, opts...)
+	input, err := buildConverseInput(req, p.modelID, tools)
 	if err != nil {
 		return nil, translateBedrockError(err)
 	}
-	return fromLangchainResponse(resp, req.Model), nil
+	out, err := p.client.Converse(ctx, input)
+	if err != nil {
+		return nil, translateBedrockError(err)
+	}
+	return fromConverseOutput(out, req.Model), nil
 }
 
-// Stream emits a streaming completion.
+// Stream emits a streaming completion via the Converse streaming API.
 func (p *BedrockProvider) Stream(ctx context.Context, req llm.CompletionRequest) (<-chan llm.StreamChunk, error) {
-	chunkChan := make(chan llm.StreamChunk, 10)
-	messages := toSchemaMessages(req.Messages)
-	opts := buildStreamingCallOptions(req, func(ctx context.Context, chunk []byte) error {
-		select {
-		case <-ctx.Done():
-			return ctx.Err()
-		case chunkChan <- llm.StreamChunk{
-			Delta: llm.StreamDelta{Content: string(chunk)},
-		}:
-			return nil
+	input := &bedrockruntime.ConverseStreamInput{
+		ModelId:  aws.String(firstNonEmpty(req.Model, p.modelID)),
+		Messages: buildConverseMessages(req.Messages),
+	}
+	if sys := extractSystemPrompt(req.Messages); sys != "" {
+		input.System = []bedrocktypes.SystemContentBlock{
+			&bedrocktypes.SystemContentBlockMemberText{Value: sys},
 		}
-	})
+	}
+	if req.MaxTokens > 0 || req.Temperature != 0 || req.TopP != 0 || len(req.StopSequences) > 0 {
+		input.InferenceConfig = buildInferenceConfig(req)
+	}
 
+	out, err := p.client.ConverseStream(ctx, input)
+	if err != nil {
+		return nil, translateBedrockError(err)
+	}
+
+	chunkChan := make(chan llm.StreamChunk, 10)
 	go func() {
 		defer close(chunkChan)
-		_, err := p.client.GenerateContent(ctx, messages, opts...)
-		if err != nil {
+		stream := out.GetStream()
+		defer stream.Close()
+		for event := range stream.Events() {
+			switch v := event.(type) {
+			case *bedrocktypes.ConverseStreamOutputMemberContentBlockDelta:
+				if delta, ok := v.Value.Delta.(*bedrocktypes.ContentBlockDeltaMemberText); ok {
+					chunkChan <- llm.StreamChunk{Delta: llm.StreamDelta{Content: delta.Value}}
+				}
+			case *bedrocktypes.ConverseStreamOutputMemberMessageStop:
+				// stream ended normally
+			}
+		}
+		if err := stream.Err(); err != nil {
 			chunkChan <- llm.StreamChunk{Error: translateBedrockError(err)}
 		}
 	}()
-
 	return chunkChan, nil
 }
 
@@ -198,6 +220,215 @@ func BedrockCredentialSchema() []llm.CredentialField {
 	}
 }
 
+// buildConverseInput constructs a ConverseInput from a CompletionRequest.
+func buildConverseInput(req llm.CompletionRequest, defaultModelID string, tools []llm.ToolDef) (*bedrockruntime.ConverseInput, error) {
+	modelID := firstNonEmpty(req.Model, defaultModelID)
+	input := &bedrockruntime.ConverseInput{
+		ModelId:  aws.String(modelID),
+		Messages: buildConverseMessages(req.Messages),
+	}
+	if sys := extractSystemPrompt(req.Messages); sys != "" {
+		input.System = []bedrocktypes.SystemContentBlock{
+			&bedrocktypes.SystemContentBlockMemberText{Value: sys},
+		}
+	}
+	if req.MaxTokens > 0 || req.Temperature != 0 || req.TopP != 0 || len(req.StopSequences) > 0 {
+		input.InferenceConfig = buildInferenceConfig(req)
+	}
+	if len(tools) > 0 {
+		toolConfig, err := buildToolConfig(tools)
+		if err != nil {
+			return nil, err
+		}
+		input.ToolConfig = toolConfig
+	}
+	return input, nil
+}
+
+// buildConverseMessages converts Gibson messages to Bedrock Converse messages.
+// System messages are handled separately (they go in ConverseInput.System).
+func buildConverseMessages(msgs []llm.Message) []bedrocktypes.Message {
+	var out []bedrocktypes.Message
+	for _, m := range msgs {
+		switch m.Role {
+		case llm.RoleSystem:
+			continue // system handled separately
+		case llm.RoleAssistant:
+			msg := bedrocktypes.Message{Role: bedrocktypes.ConversationRoleAssistant}
+			if len(m.ToolCalls) > 0 {
+				for _, tc := range m.ToolCalls {
+					msg.Content = append(msg.Content, &bedrocktypes.ContentBlockMemberToolUse{
+						Value: bedrocktypes.ToolUseBlock{
+							ToolUseId: aws.String(tc.ID),
+							Name:      aws.String(tc.Name),
+							Input:     toolUseInputDocument(tc.Arguments),
+						},
+					})
+				}
+			} else {
+				msg.Content = []bedrocktypes.ContentBlock{
+					&bedrocktypes.ContentBlockMemberText{Value: m.Content},
+				}
+			}
+			out = append(out, msg)
+		case llm.RoleTool:
+			// tool results map to user messages with toolResult content
+			out = append(out, bedrocktypes.Message{
+				Role: bedrocktypes.ConversationRoleUser,
+				Content: []bedrocktypes.ContentBlock{
+					&bedrocktypes.ContentBlockMemberToolResult{
+						Value: bedrocktypes.ToolResultBlock{
+							ToolUseId: aws.String(m.ToolCallID),
+							Content: []bedrocktypes.ToolResultContentBlock{
+								&bedrocktypes.ToolResultContentBlockMemberText{Value: m.Content},
+							},
+						},
+					},
+				},
+			})
+		default: // user
+			out = append(out, bedrocktypes.Message{
+				Role: bedrocktypes.ConversationRoleUser,
+				Content: []bedrocktypes.ContentBlock{
+					&bedrocktypes.ContentBlockMemberText{Value: m.Content},
+				},
+			})
+		}
+	}
+	return out
+}
+
+// toolUseInputDocument turns a JSON-encoded tool-call argument string into the
+// document.Interface the Converse API expects. The arguments are decoded into a
+// generic value so the document marshaler re-emits proper JSON; an empty or
+// invalid argument string degrades to an empty object.
+func toolUseInputDocument(arguments string) document.Interface {
+	if strings.TrimSpace(arguments) == "" {
+		return document.NewLazyDocument(map[string]any{})
+	}
+	var v any
+	if err := json.Unmarshal([]byte(arguments), &v); err != nil {
+		return document.NewLazyDocument(map[string]any{})
+	}
+	return document.NewLazyDocument(v)
+}
+
+// extractSystemPrompt returns the content of the first system message, if any.
+func extractSystemPrompt(msgs []llm.Message) string {
+	for _, m := range msgs {
+		if m.Role == llm.RoleSystem {
+			return m.Content
+		}
+	}
+	return ""
+}
+
+func buildInferenceConfig(req llm.CompletionRequest) *bedrocktypes.InferenceConfiguration {
+	cfg := &bedrocktypes.InferenceConfiguration{}
+	if req.MaxTokens > 0 {
+		n := int32(req.MaxTokens)
+		cfg.MaxTokens = &n
+	}
+	if req.Temperature != 0 {
+		t := float32(req.Temperature)
+		cfg.Temperature = &t
+	}
+	if req.TopP != 0 {
+		t := float32(req.TopP)
+		cfg.TopP = &t
+	}
+	if len(req.StopSequences) > 0 {
+		cfg.StopSequences = req.StopSequences
+	}
+	return cfg
+}
+
+// buildToolConfig converts Gibson ToolDef slice to Bedrock ToolConfiguration.
+func buildToolConfig(tools []llm.ToolDef) (*bedrocktypes.ToolConfiguration, error) {
+	bedTools := make([]bedrocktypes.Tool, 0, len(tools))
+	for _, t := range tools {
+		// Round-trip the JSON schema through encoding/json so the document
+		// marshaler receives a plain Go value (map/slice/scalars) rather than
+		// the schema.JSON struct, which carries no document serde support.
+		schemaBytes, err := json.Marshal(t.Parameters)
+		if err != nil {
+			return nil, fmt.Errorf("tool %q: marshal schema: %w", t.Name, err)
+		}
+		var schemaValue any
+		if err := json.Unmarshal(schemaBytes, &schemaValue); err != nil {
+			return nil, fmt.Errorf("tool %q: decode schema: %w", t.Name, err)
+		}
+		bedTools = append(bedTools, &bedrocktypes.ToolMemberToolSpec{
+			Value: bedrocktypes.ToolSpecification{
+				Name:        aws.String(t.Name),
+				Description: aws.String(t.Description),
+				InputSchema: &bedrocktypes.ToolInputSchemaMemberJson{
+					Value: document.NewLazyDocument(schemaValue),
+				},
+			},
+		})
+	}
+	return &bedrocktypes.ToolConfiguration{Tools: bedTools}, nil
+}
+
+// fromConverseOutput converts a Bedrock ConverseOutput to a Gibson CompletionResponse.
+func fromConverseOutput(out *bedrockruntime.ConverseOutput, model string) *llm.CompletionResponse {
+	resp := &llm.CompletionResponse{
+		ID:           uuid.New().String(),
+		Model:        model,
+		FinishReason: llm.FinishReasonStop,
+	}
+	if out.Usage != nil {
+		resp.Usage = llm.CompletionTokenUsage{
+			PromptTokens:     int(aws.ToInt32(out.Usage.InputTokens)),
+			CompletionTokens: int(aws.ToInt32(out.Usage.OutputTokens)),
+			TotalTokens:      int(aws.ToInt32(out.Usage.TotalTokens)),
+		}
+	}
+	switch out.StopReason {
+	case bedrocktypes.StopReasonEndTurn, bedrocktypes.StopReasonStopSequence:
+		resp.FinishReason = llm.FinishReasonStop
+	case bedrocktypes.StopReasonMaxTokens:
+		resp.FinishReason = llm.FinishReasonLength
+	case bedrocktypes.StopReasonToolUse:
+		resp.FinishReason = llm.FinishReasonToolCalls
+	}
+	if msgOut, ok := out.Output.(*bedrocktypes.ConverseOutputMemberMessage); ok {
+		resp.Message.Role = llm.RoleAssistant
+		for _, block := range msgOut.Value.Content {
+			switch b := block.(type) {
+			case *bedrocktypes.ContentBlockMemberText:
+				resp.Message.Content += b.Value
+			case *bedrocktypes.ContentBlockMemberToolUse:
+				resp.Message.ToolCalls = append(resp.Message.ToolCalls, llm.ToolCall{
+					ID:        aws.ToString(b.Value.ToolUseId),
+					Type:      "function",
+					Name:      aws.ToString(b.Value.Name),
+					Arguments: toolUseInputJSON(b.Value.Input),
+				})
+			}
+		}
+	}
+	return resp
+}
+
+// toolUseInputJSON renders a Converse tool-use input document back into the
+// JSON string Gibson's ToolCall.Arguments expects.
+func toolUseInputJSON(input document.Interface) string {
+	if input == nil {
+		return ""
+	}
+	var v any
+	if err := input.UnmarshalSmithyDocument(&v); err != nil {
+		return ""
+	}
+	raw, err := json.Marshal(v)
+	if err != nil {
+		return ""
+	}
+	return string(raw)
+}
+
 // translateBedrockError maps AWS service errors into Gibson's error taxonomy.
 func translateBedrockError(err error) error {
 	if err == nil {
@@ -228,42 +459,41 @@ func translateBedrockError(err error) error {
 // Gibson exposes. Feature flags reflect the *provider-side* model's capability
 // so the slot resolver can match agent requirements correctly.
 //
-// Model IDs use langchaingo constants where available, and the raw Bedrock
-// model IDs for anything langchaingo hadn't pinned as of v0.1.14. Newer models
-// (Claude 3 Opus, Claude 3.5 Sonnet, Llama 3.1/3.2) work at runtime as long
-// as the operator's AWS account has access.
+// Model IDs are the raw Bedrock model IDs. Newer models (Claude 3 Opus,
+// Claude 3.5 Sonnet, Llama 3.1/3.2) work at runtime as long as the operator's
+// AWS account has access; the Converse API addresses every family uniformly.
 func bedrockModelCatalogue() []llm.ModelInfo {
 	chat := []string{"chat", "streaming"}
 	claude := []string{"chat", "streaming", "tools"}
 	return []llm.ModelInfo{
 		// Anthropic Claude family — full tool_use on Bedrock's Anthropic adapter.
 		{Name: "anthropic.claude-3-opus-20240229-v1:0", ContextWindow: 200000, MaxOutput: 4096, Features: claude},
-		{Name: bedrock.ModelAnthropicClaudeV3Sonnet, ContextWindow: 200000, MaxOutput: 4096, Features: claude},
-		{Name: bedrock.ModelAnthropicClaudeV3Haiku, ContextWindow: 200000, MaxOutput: 4096, Features: claude},
+		{Name: "anthropic.claude-3-sonnet-20240229-v1:0", ContextWindow: 200000, MaxOutput: 4096, Features: claude},
+		{Name: "anthropic.claude-3-haiku-20240307-v1:0", ContextWindow: 200000, MaxOutput: 4096, Features: claude},
 		{Name: "anthropic.claude-3-5-sonnet-20241022-v2:0", ContextWindow: 200000, MaxOutput: 8192, Features: claude},
 		{Name: "anthropic.claude-3-5-haiku-20241022-v1:0", ContextWindow: 200000, MaxOutput: 8192, Features: claude},
-		{Name: bedrock.ModelAnthropicClaudeV21, ContextWindow: 200000, MaxOutput: 4096, Features: chat},
+		{Name: "anthropic.claude-v2:1", ContextWindow: 200000, MaxOutput: 4096, Features: chat},
 
 		// Amazon Titan / Nova
-		{Name: bedrock.ModelAmazonTitanTextLiteV1, ContextWindow: 4096, MaxOutput: 4096, Features: chat},
-		{Name: bedrock.ModelAmazonTitanTextExpressV1, ContextWindow: 8192, MaxOutput: 8192, Features: chat},
-		{Name: bedrock.ModelAmazonNovaMicroV1, ContextWindow: 128000, MaxOutput: 5000, Features: chat},
-		{Name: bedrock.ModelAmazonNovaLiteV1, ContextWindow: 300000, MaxOutput: 5000, Features: chat},
-		{Name: bedrock.ModelAmazonNovaProV1, ContextWindow: 300000, MaxOutput: 5000, Features: chat},
+		{Name: "amazon.titan-text-lite-v1", ContextWindow: 4096, MaxOutput: 4096, Features: chat},
+		{Name: "amazon.titan-text-express-v1", ContextWindow: 8192, MaxOutput: 8192, Features: chat},
+		{Name: "us.amazon.nova-micro-v1:0", ContextWindow: 128000, MaxOutput: 5000, Features: chat},
+		{Name: "us.amazon.nova-lite-v1:0", ContextWindow: 300000, MaxOutput: 5000, Features: chat},
+		{Name: "us.amazon.nova-pro-v1:0", ContextWindow: 300000, MaxOutput: 5000, Features: chat},
 
 		// Meta Llama
-		{Name: bedrock.ModelMetaLlama213bChatV1, ContextWindow: 4096, MaxOutput: 2048, Features: chat},
-		{Name: bedrock.ModelMetaLlama270bChatV1, ContextWindow: 4096, MaxOutput: 2048, Features: chat},
-		{Name: bedrock.ModelMetaLlama38bInstructV1, ContextWindow: 8192, MaxOutput: 2048, Features: chat},
-		{Name: bedrock.ModelMetaLlama370bInstructV1, ContextWindow: 8192, MaxOutput: 2048, Features: chat},
+		{Name: "meta.llama2-13b-chat-v1", ContextWindow: 4096, MaxOutput: 2048, Features: chat},
+		{Name: "meta.llama2-70b-chat-v1", ContextWindow: 4096, MaxOutput: 2048, Features: chat},
+		{Name: "meta.llama3-8b-instruct-v1:0", ContextWindow: 8192, MaxOutput: 2048, Features: chat},
+		{Name: "meta.llama3-70b-instruct-v1:0", ContextWindow: 8192, MaxOutput: 2048, Features: chat},
 
 		// Cohere Command
-		{Name: bedrock.ModelCohereCommandTextV14, ContextWindow: 4096, MaxOutput: 4096, Features: chat},
-		{Name: bedrock.ModelCohereCommandLightTextV14, ContextWindow: 4096, MaxOutput: 4096, Features: chat},
+		{Name: "cohere.command-text-v14", ContextWindow: 4096, MaxOutput: 4096, Features: chat},
+		{Name: "cohere.command-light-text-v14", ContextWindow: 4096, MaxOutput: 4096, Features: chat},
 
 		// AI21 Jurassic-2
-		{Name: bedrock.ModelAi21J2UltraV1, ContextWindow: 8192, MaxOutput: 8192, Features: chat},
-		{Name: bedrock.ModelAi21J2MidV1, ContextWindow: 8192, MaxOutput: 8192, Features: chat},
+		{Name: "ai21.j2-ultra-v1", ContextWindow: 8192, MaxOutput: 8192, Features: chat},
+		{Name: "ai21.j2-mid-v1", ContextWindow: 8192, MaxOutput: 8192, Features: chat},
 
 		// Mistral
 		{Name: "mistral.mistral-large-2407-v1:0", ContextWindow: 128000, MaxOutput: 8192, Features: chat},
