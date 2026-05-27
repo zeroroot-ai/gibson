@@ -87,14 +87,14 @@ require (
 	github.com/bytedance/sonic v1.15.0 // indirect
 	github.com/bytedance/sonic/loader v0.5.0 // indirect
 	github.com/cloudwego/base64x v0.1.6 // indirect
-	github.com/cloudwego/eino v0.9.1 // indirect
+	github.com/cloudwego/eino v0.9.1
 	github.com/cloudwego/eino-ext v0.0.1-alpha // indirect
-	github.com/cloudwego/eino-ext/components/model/claude v0.1.18 // indirect
+	github.com/cloudwego/eino-ext/components/model/claude v0.1.18
 	github.com/cloudwego/eino-ext/components/model/gemini v0.1.32 // indirect
 	github.com/cloudwego/eino-ext/components/model/ollama v0.1.9 // indirect
 	github.com/cloudwego/eino-ext/components/model/openai v0.1.13 // indirect
 	github.com/cloudwego/eino-ext/libs/acl/openai v0.1.17 // indirect
-	github.com/eino-contrib/jsonschema v1.0.3 // indirect
+	github.com/eino-contrib/jsonschema v1.0.3
 	github.com/eino-contrib/ollama v0.1.0 // indirect
 	github.com/evanphx/json-patch v0.5.2 // indirect
 	github.com/google/go-cmp v0.7.0 // indirect
