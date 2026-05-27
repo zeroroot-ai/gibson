@@ -33,7 +33,7 @@ func TestNewCohereProvider_EnvFallback(t *testing.T) {
 		DefaultModel: "command-r",
 	})
 	require.NoError(t, err)
-	require.NotNil(t, p.client)
+	require.NotNil(t, p.model)
 }
 
 func TestCohereProvider_Models(t *testing.T) {
