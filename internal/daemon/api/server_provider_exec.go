@@ -194,7 +194,7 @@ func estimateTokens(req *tenantv1.ExecuteLLMRequest) int64 {
 // ---------------------------------------------------------------------------
 
 // ExecuteLLM resolves a named provider from the tenant's encrypted credential
-// store, constructs a langchaingo-backed provider for the duration of this
+// store, constructs an Eino-backed provider for the duration of this
 // call, dispatches the completion request, and translates the response into
 // proto. The decrypted credential is scoped strictly to this stack frame and
 // is never logged, cached, or embedded in any response field.
@@ -244,7 +244,7 @@ func (s *DaemonServer) ExecuteLLM(ctx context.Context, req *tenantv1.ExecuteLLMR
 	// stored or forwarded anywhere beyond the prov instance below.
 	provCfg := decryptedConfigToLLMConfig(dec, req.GetModel())
 
-	// 5. Construct langchaingo-backed provider.
+	// 5. Construct provider.
 	prov, err := s.providerFactory(provCfg)
 	if err != nil {
 		s.logger.WarnContext(ctx, "failed to construct provider", "type", string(dec.Type))
