@@ -55,6 +55,7 @@ func (s *DaemonServer) GetTenantQuota(ctx context.Context, req *tenantv1.GetTena
 			resp.ConcurrentMissions = row.concurrentMissions
 			resp.ConcurrentAgents = row.concurrentAgents
 			resp.UpdatedAt = row.updatedAt
+			resp.PlanId = row.planId
 		}
 	}
 	return resp, nil
@@ -64,13 +65,19 @@ type tenantQuotaRow struct {
 	concurrentMissions int32
 	concurrentAgents   int32
 	updatedAt          string
+	planId             string
 }
 
 // readTenantQuotasRow loads the tenant_quotas row for a tenant. Returns
 // (nil, nil) when the row is absent.
+//
+// plan_id is read via COALESCE so the query degrades gracefully when the
+// column has not yet been added by the tenant-operator migration (returns
+// empty string in that case).
 func readTenantQuotasRow(ctx context.Context, db *sql.DB, tenantID string) (*tenantQuotaRow, error) {
 	const q = `
-		SELECT concurrent_missions, concurrent_agents, updated_at
+		SELECT concurrent_missions, concurrent_agents, updated_at,
+		       COALESCE(plan_id, '') AS plan_id
 		FROM tenant_quotas
 		WHERE tenant_id = $1
 	`
@@ -80,6 +87,7 @@ func readTenantQuotasRow(ctx context.Context, db *sql.DB, tenantID string) (*ten
 		&r.concurrentMissions,
 		&r.concurrentAgents,
 		&updatedAt,
+		&r.planId,
 	)
 	if errors.Is(err, sql.ErrNoRows) {
 		return nil, nil

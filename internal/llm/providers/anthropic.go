@@ -6,9 +6,9 @@ import (
 	"fmt"
 	"os"
 
+	einoclaude "github.com/cloudwego/eino-ext/components/model/claude"
 	einomodel "github.com/cloudwego/eino/components/model"
 	einoschema "github.com/cloudwego/eino/schema"
-	einoclaude "github.com/cloudwego/eino-ext/components/model/claude"
 
 	"github.com/zeroroot-ai/gibson/internal/llm"
 	"github.com/zeroroot-ai/gibson/internal/types"

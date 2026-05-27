@@ -6,8 +6,11 @@ import (
 	"context"
 	"log/slog"
 	"os"
+	"regexp"
 	"testing"
+	"time"
 
+	sqlmock "github.com/DATA-DOG/go-sqlmock"
 	"google.golang.org/grpc/codes"
 	"google.golang.org/grpc/status"
 
@@ -88,5 +91,108 @@ func requireGRPCStatus(t *testing.T, err error, want codes.Code) {
 	}
 	if st.Code() != want {
 		t.Fatalf("expected gRPC code %s, got %s (%v)", want, st.Code(), err)
+	}
+}
+
+// ---------------------------------------------------------------------------
+// readTenantQuotasRow — unit tests (sqlmock)
+// ---------------------------------------------------------------------------
+
+func TestReadTenantQuotasRow_WithPlanId(t *testing.T) {
+	db, mock, err := sqlmock.New()
+	if err != nil {
+		t.Fatalf("sqlmock: %v", err)
+	}
+	defer db.Close()
+
+	now := time.Now().UTC().Truncate(time.Second)
+	cols := []string{"concurrent_missions", "concurrent_agents", "updated_at", "plan_id"}
+	mock.ExpectQuery(regexp.QuoteMeta("SELECT")).
+		WithArgs("acme").
+		WillReturnRows(sqlmock.NewRows(cols).AddRow(int32(10), int32(50), now, "enterprise"))
+
+	row, err := readTenantQuotasRow(context.Background(), db, "acme")
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if row == nil {
+		t.Fatal("expected non-nil row")
+	}
+	if row.planId != "enterprise" {
+		t.Errorf("plan_id: got %q, want %q", row.planId, "enterprise")
+	}
+	if row.concurrentMissions != 10 {
+		t.Errorf("concurrent_missions: got %d, want 10", row.concurrentMissions)
+	}
+	if row.concurrentAgents != 50 {
+		t.Errorf("concurrent_agents: got %d, want 50", row.concurrentAgents)
+	}
+	if err := mock.ExpectationsWereMet(); err != nil {
+		t.Errorf("unmet sqlmock expectations: %v", err)
+	}
+}
+
+func TestReadTenantQuotasRow_EmptyPlanId(t *testing.T) {
+	db, mock, err := sqlmock.New()
+	if err != nil {
+		t.Fatalf("sqlmock: %v", err)
+	}
+	defer db.Close()
+
+	now := time.Now().UTC().Truncate(time.Second)
+	cols := []string{"concurrent_missions", "concurrent_agents", "updated_at", "plan_id"}
+	// COALESCE returns "" when plan_id column is NULL or absent.
+	mock.ExpectQuery(regexp.QuoteMeta("SELECT")).
+		WithArgs("acme").
+		WillReturnRows(sqlmock.NewRows(cols).AddRow(int32(5), int32(20), now, ""))
+
+	row, err := readTenantQuotasRow(context.Background(), db, "acme")
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if row == nil {
+		t.Fatal("expected non-nil row")
+	}
+	if row.planId != "" {
+		t.Errorf("plan_id: got %q, want empty string", row.planId)
+	}
+	if err := mock.ExpectationsWereMet(); err != nil {
+		t.Errorf("unmet sqlmock expectations: %v", err)
+	}
+}
+
+func TestReadTenantQuotasRow_NoRow_ReturnsNil(t *testing.T) {
+	db, mock, err := sqlmock.New()
+	if err != nil {
+		t.Fatalf("sqlmock: %v", err)
+	}
+	defer db.Close()
+
+	cols := []string{"concurrent_missions", "concurrent_agents", "updated_at", "plan_id"}
+	mock.ExpectQuery(regexp.QuoteMeta("SELECT")).
+		WithArgs("unknown").
+		WillReturnRows(sqlmock.NewRows(cols))
+
+	row, err := readTenantQuotasRow(context.Background(), db, "unknown")
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if row != nil {
+		t.Errorf("expected nil row for missing tenant, got %+v", row)
+	}
+	if err := mock.ExpectationsWereMet(); err != nil {
+		t.Errorf("unmet sqlmock expectations: %v", err)
+	}
+}
+
+func TestGetTenantQuota_NilPlatformDB_PlanIdEmpty(t *testing.T) {
+	srv := newQuotaTestServer()
+	srv.platformDB = nil
+	resp, err := srv.GetTenantQuota(context.Background(), &tenantv1.GetTenantQuotaRequest{TenantId: "acme"})
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if resp.GetPlanId() != "" {
+		t.Errorf("plan_id: got %q, want empty when platformDB is nil", resp.GetPlanId())
 	}
 }

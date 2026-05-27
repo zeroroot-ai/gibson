@@ -4,10 +4,10 @@ import (
 	"encoding/json"
 	"fmt"
 
-	einojsonschema "github.com/eino-contrib/jsonschema"
-	"github.com/google/uuid"
 	einomodel "github.com/cloudwego/eino/components/model"
 	einoschema "github.com/cloudwego/eino/schema"
+	einojsonschema "github.com/eino-contrib/jsonschema"
+	"github.com/google/uuid"
 
 	"github.com/zeroroot-ai/gibson/internal/llm"
 )
