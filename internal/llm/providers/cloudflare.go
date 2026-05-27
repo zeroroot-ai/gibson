@@ -2,21 +2,22 @@ package providers
 
 import (
 	"context"
-	"net/http"
+	"fmt"
 	"strings"
-	"time"
+
+	einoopenai "github.com/cloudwego/eino-ext/components/model/openai"
 
 	"github.com/zeroroot-ai/gibson/internal/llm"
 	"github.com/zeroroot-ai/gibson/internal/secrets"
 	"github.com/zeroroot-ai/gibson/internal/types"
-	"github.com/zeroroot-ai/langchaingo/llms/cloudflare"
 )
 
-// CloudflareProvider wraps langchaingo's Cloudflare Workers AI integration.
+// CloudflareProvider talks to Cloudflare Workers AI through its
+// OpenAI-compatible endpoint via the Eino OpenAI ChatModel.
 // Credentials: cfg.Extra["cloudflare_account_id"] + cfg.APIKey (the Cloudflare
 // API token). Env fallbacks: CLOUDFLARE_ACCOUNT_ID / CLOUDFLARE_API_TOKEN.
 type CloudflareProvider struct {
-	client *cloudflare.LLM
+	model  *einoopenai.ChatModel
 	config llm.ProviderConfig
 }
 
@@ -39,28 +40,20 @@ func newCloudflareProviderWithContext(ctx context.Context, service *secrets.Serv
 		return nil, err
 	}
 
-	httpClient := &http.Client{Timeout: cfg.HTTPTimeout}
-	if httpClient.Timeout == 0 {
-		httpClient.Timeout = 120 * time.Second
+	baseURL := cfg.BaseURL
+	if baseURL == "" {
+		baseURL = fmt.Sprintf("https://api.cloudflare.com/client/v4/accounts/%s/ai/v1", accountID)
 	}
 
-	opts := []cloudflare.Option{
-		cloudflare.WithAccountID(accountID),
-		cloudflare.WithToken(token),
-		cloudflare.WithHTTPClient(httpClient),
-	}
-	if cfg.DefaultModel != "" {
-		opts = append(opts, cloudflare.WithModel(cfg.DefaultModel))
-	}
-	if cfg.BaseURL != "" {
-		opts = append(opts, cloudflare.WithServerURL(cfg.BaseURL))
-	}
-
-	client, err := cloudflare.New(opts...)
+	m, err := einoopenai.NewChatModel(ctx, &einoopenai.ChatModelConfig{
+		APIKey:  token,
+		Model:   cfg.DefaultModel,
+		BaseURL: baseURL,
+	})
 	if err != nil {
 		return nil, llm.TranslateError("cloudflare", err)
 	}
-	return &CloudflareProvider{client: client, config: cfg}, nil
+	return &CloudflareProvider{model: m, config: cfg}, nil
 }
 
 func (p *CloudflareProvider) Name() string { return "cloudflare" }
@@ -78,44 +71,40 @@ func (p *CloudflareProvider) Models(_ context.Context) ([]llm.ModelInfo, error) 
 }
 
 func (p *CloudflareProvider) Complete(ctx context.Context, req llm.CompletionRequest) (*llm.CompletionResponse, error) {
-	messages := toSchemaMessages(req.Messages)
-	opts := buildCallOptions(req)
-	resp, err := p.client.GenerateContent(ctx, messages, opts...)
+	msgs := toEinoMessages(req.Messages)
+	opts := buildEinoOptions(req)
+	out, err := p.model.Generate(ctx, msgs, opts...)
 	if err != nil {
 		return nil, translateCloudflareError(err)
 	}
-	return fromLangchainResponse(resp, req.Model), nil
+	return fromEinoMessage(out, req.Model), nil
 }
 
 func (p *CloudflareProvider) CompleteWithTools(ctx context.Context, req llm.CompletionRequest, tools []llm.ToolDef) (*llm.CompletionResponse, error) {
-	// Cloudflare Workers AI does not currently support structured tool calls
-	// via langchaingo. Fall back to plain Complete.
-	return p.Complete(ctx, req)
+	msgs := toEinoMessages(req.Messages)
+	opts, err := buildEinoOptionsWithTools(req, tools)
+	if err != nil {
+		return nil, translateCloudflareError(err)
+	}
+	out, err := p.model.Generate(ctx, msgs, opts...)
+	if err != nil {
+		return nil, translateCloudflareError(err)
+	}
+	return fromEinoMessage(out, req.Model), nil
 }
 
 func (p *CloudflareProvider) Stream(ctx context.Context, req llm.CompletionRequest) (<-chan llm.StreamChunk, error) {
-	chunkChan := make(chan llm.StreamChunk, 10)
-	messages := toSchemaMessages(req.Messages)
-	opts := buildStreamingCallOptions(req, func(ctx context.Context, chunk []byte) error {
-		select {
-		case <-ctx.Done():
-			return ctx.Err()
-		case chunkChan <- llm.StreamChunk{Delta: llm.StreamDelta{Content: string(chunk)}}:
-			return nil
-		}
-	})
-	go func() {
-		defer close(chunkChan)
-		_, err := p.client.GenerateContent(ctx, messages, opts...)
-		if err != nil {
-			chunkChan <- llm.StreamChunk{Error: translateCloudflareError(err)}
-		}
-	}()
-	return chunkChan, nil
+	msgs := toEinoMessages(req.Messages)
+	opts := buildEinoOptions(req)
+	sr, err := p.model.Stream(ctx, msgs, opts...)
+	if err != nil {
+		return nil, translateCloudflareError(err)
+	}
+	return streamToChannel(sr, translateCloudflareError), nil
 }
 
 func (p *CloudflareProvider) Health(_ context.Context) types.HealthStatus {
-	if p.client == nil {
+	if p.model == nil {
 		return types.NewHealthStatus(types.HealthStateUnhealthy, "cloudflare client not initialised")
 	}
 	return types.NewHealthStatus(types.HealthStateHealthy, "")
@@ -129,7 +118,7 @@ func CloudflareCredentialSchema() []llm.CredentialField {
 	return []llm.CredentialField{
 		{Key: "cloudflare_account_id", Label: "Cloudflare Account ID", Required: true, Secret: true, Placeholder: "ab12..."},
 		{Key: "api_key", Label: "Cloudflare API Token", Required: true, Secret: true, Help: "API token with Workers AI permission."},
-		{Key: "base_url", Label: "Server URL (optional)", Placeholder: "https://api.cloudflare.com/client/v4"},
+		{Key: "base_url", Label: "Server URL (optional)", Placeholder: "https://api.cloudflare.com/client/v4/accounts/<id>/ai/v1"},
 	}
 }
 
