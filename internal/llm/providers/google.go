@@ -4,23 +4,26 @@ import (
 	"context"
 	"os"
 
+	einogemini "github.com/cloudwego/eino-ext/components/model/gemini"
+	"google.golang.org/genai"
+
 	"github.com/zeroroot-ai/gibson/internal/llm"
 	"github.com/zeroroot-ai/gibson/internal/types"
-	"github.com/zeroroot-ai/langchaingo/llms/googleai"
 )
 
 // GoogleProvider implements LLMProvider for Google's Gemini models.
 //
 // NOTE: GoogleProvider does NOT implement StructuredOutputProvider.
 // Google Gemini API integration does not currently support native structured
-// output through langchaingo. Attempting to use structured output with Google
-// will fail with ErrStructuredOutputNotSupported at the SDK/manager level.
+// output through the Eino Gemini component. Attempting to use structured
+// output with Google will fail with ErrStructuredOutputNotSupported at the
+// SDK/manager level.
 type GoogleProvider struct {
-	client *googleai.GoogleAI
+	model  *einogemini.ChatModel
 	config llm.ProviderConfig
 }
 
-// NewGoogleProvider creates a new Google provider
+// NewGoogleProvider creates a new Google provider backed by the Eino Gemini component.
 func NewGoogleProvider(cfg llm.ProviderConfig) (*GoogleProvider, error) {
 	apiKey := cfg.APIKey
 	if apiKey == "" {
@@ -31,21 +34,25 @@ func NewGoogleProvider(cfg llm.ProviderConfig) (*GoogleProvider, error) {
 		return nil, llm.NewAuthError("google", nil)
 	}
 
-	opts := []googleai.Option{
-		googleai.WithAPIKey(apiKey),
+	genaiClient, err := genai.NewClient(context.Background(), &genai.ClientConfig{
+		APIKey:  apiKey,
+		Backend: genai.BackendGeminiAPI,
+	})
+	if err != nil {
+		return nil, llm.TranslateError("google", err)
 	}
 
-	if cfg.DefaultModel != "" {
-		opts = append(opts, googleai.WithDefaultModel(cfg.DefaultModel))
+	einoConfig := &einogemini.Config{
+		Client: genaiClient,
+		Model:  cfg.DefaultModel,
 	}
-
-	client, err := googleai.New(context.Background(), opts...)
+	m, err := einogemini.NewChatModel(context.Background(), einoConfig)
 	if err != nil {
 		return nil, llm.TranslateError("google", err)
 	}
 
 	return &GoogleProvider{
-		client: client,
+		model:  m,
 		config: cfg,
 	}, nil
 }
@@ -56,7 +63,7 @@ func (p *GoogleProvider) Name() string {
 }
 
 // Models returns information about available models
-func (p *GoogleProvider) Models(ctx context.Context) ([]llm.ModelInfo, error) {
+func (p *GoogleProvider) Models(_ context.Context) ([]llm.ModelInfo, error) {
 	models := []llm.ModelInfo{
 		{
 			Name:          "gemini-1.5-pro",
@@ -82,59 +89,44 @@ func (p *GoogleProvider) Models(ctx context.Context) ([]llm.ModelInfo, error) {
 
 // Complete sends a completion request
 func (p *GoogleProvider) Complete(ctx context.Context, req llm.CompletionRequest) (*llm.CompletionResponse, error) {
-	messages := toSchemaMessages(req.Messages)
-	callOpts := buildCallOptions(req)
+	msgs := toEinoMessages(req.Messages)
+	opts := buildEinoOptions(req)
 
-	resp, err := p.client.GenerateContent(ctx, messages, callOpts...)
+	out, err := p.model.Generate(ctx, msgs, opts...)
 	if err != nil {
 		return nil, llm.TranslateError("google", err)
 	}
 
-	return fromLangchainResponse(resp, req.Model), nil
+	return fromEinoMessage(out, req.Model), nil
 }
 
 // CompleteWithTools sends a completion request with tool definitions
 func (p *GoogleProvider) CompleteWithTools(ctx context.Context, req llm.CompletionRequest, tools []llm.ToolDef) (*llm.CompletionResponse, error) {
-	messages := toSchemaMessages(req.Messages)
-	callOpts := buildCallOptionsWithTools(req, tools)
-
-	resp, err := p.client.GenerateContent(ctx, messages, callOpts...)
+	msgs := toEinoMessages(req.Messages)
+	opts, err := buildEinoOptionsWithTools(req, tools)
 	if err != nil {
 		return nil, llm.TranslateError("google", err)
 	}
 
-	return fromLangchainResponse(resp, req.Model), nil
+	out, err := p.model.Generate(ctx, msgs, opts...)
+	if err != nil {
+		return nil, llm.TranslateError("google", err)
+	}
+
+	return fromEinoMessage(out, req.Model), nil
 }
 
 // Stream sends a streaming completion request
 func (p *GoogleProvider) Stream(ctx context.Context, req llm.CompletionRequest) (<-chan llm.StreamChunk, error) {
-	chunkChan := make(chan llm.StreamChunk, 10)
+	msgs := toEinoMessages(req.Messages)
+	opts := buildEinoOptions(req)
 
-	messages := toSchemaMessages(req.Messages)
-	callOpts := buildStreamingCallOptions(req, func(ctx context.Context, chunk []byte) error {
-		select {
-		case <-ctx.Done():
-			return ctx.Err()
-		case chunkChan <- llm.StreamChunk{
-			Delta: llm.StreamDelta{
-				Content: string(chunk),
-			},
-		}:
-			return nil
-		}
-	})
+	sr, err := p.model.Stream(ctx, msgs, opts...)
+	if err != nil {
+		return nil, llm.TranslateError("google", err)
+	}
 
-	go func() {
-		defer close(chunkChan)
-		_, err := p.client.GenerateContent(ctx, messages, callOpts...)
-		if err != nil {
-			chunkChan <- llm.StreamChunk{
-				Error: llm.TranslateError("google", err),
-			}
-		}
-	}()
-
-	return chunkChan, nil
+	return streamToChannel(sr, func(e error) error { return llm.TranslateError("google", e) }), nil
 }
 
 // Health checks the provider health

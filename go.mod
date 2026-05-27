@@ -90,7 +90,7 @@ require (
 	github.com/cloudwego/eino v0.9.1
 	github.com/cloudwego/eino-ext v0.0.1-alpha // indirect
 	github.com/cloudwego/eino-ext/components/model/claude v0.1.18
-	github.com/cloudwego/eino-ext/components/model/gemini v0.1.32 // indirect
+	github.com/cloudwego/eino-ext/components/model/gemini v0.1.32
 	github.com/cloudwego/eino-ext/components/model/openai v0.1.13
 	github.com/cloudwego/eino-ext/libs/acl/openai v0.1.17 // indirect
 	github.com/eino-contrib/jsonschema v1.0.3
@@ -111,7 +111,6 @@ require (
 	github.com/wk8/go-ordered-map/v2 v2.1.8 // indirect
 	github.com/yargevad/filepathx v1.0.0 // indirect
 	golang.org/x/arch v0.12.0 // indirect
-	google.golang.org/genai v1.36.0 // indirect
 )
 
 require (
@@ -153,6 +152,7 @@ require (
 	github.com/cenkalti/backoff/v4 v4.3.0 // indirect
 	github.com/cenkalti/backoff/v5 v5.0.3 // indirect
 	github.com/cespare/xxhash/v2 v2.3.0 // indirect
+	github.com/cloudwego/eino-ext/components/model/gemini v0.1.32
 	github.com/cloudwego/eino-ext/components/model/ollama v0.1.9
 	github.com/cockroachdb/apd/v3 v3.2.1 // indirect
 	github.com/cohere-ai/tokenizer v1.1.2 // indirect
@@ -280,6 +280,7 @@ require (
 	golang.org/x/sys v0.45.0 // indirect
 	golang.org/x/text v0.37.0 // indirect
 	google.golang.org/api v0.280.0 // indirect
+	google.golang.org/genai v1.36.0
 	google.golang.org/genproto v0.0.0-20260319201613-d00831a3d3e7 // indirect
 	google.golang.org/genproto/googleapis/api v0.0.0-20260401024825-9d38bb4040a9 // indirect
 	google.golang.org/genproto/googleapis/rpc v0.0.0-20260511170946-3700d4141b60 // indirect
