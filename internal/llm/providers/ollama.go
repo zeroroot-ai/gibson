@@ -3,9 +3,10 @@ package providers
 import (
 	"context"
 
+	einoollama "github.com/cloudwego/eino-ext/components/model/ollama"
+
 	"github.com/zeroroot-ai/gibson/internal/llm"
 	"github.com/zeroroot-ai/gibson/internal/types"
-	"github.com/zeroroot-ai/langchaingo/llms/ollama"
 )
 
 // OllamaProvider implements LLMProvider for local Ollama models.
@@ -15,32 +16,28 @@ import (
 // Attempting to use structured output with Ollama will fail with
 // ErrStructuredOutputNotSupported at the SDK/manager level.
 type OllamaProvider struct {
-	client *ollama.LLM
+	model  *einoollama.ChatModel
 	config llm.ProviderConfig
 }
 
-// NewOllamaProvider creates a new Ollama provider
+// NewOllamaProvider creates a new Ollama provider backed by the Eino Ollama component.
 func NewOllamaProvider(cfg llm.ProviderConfig) (*OllamaProvider, error) {
 	serverURL := cfg.BaseURL
 	if serverURL == "" {
 		serverURL = "http://localhost:11434"
 	}
 
-	opts := []ollama.Option{
-		ollama.WithServerURL(serverURL),
+	einoConfig := &einoollama.ChatModelConfig{
+		BaseURL: serverURL,
+		Model:   cfg.DefaultModel,
 	}
-
-	if cfg.DefaultModel != "" {
-		opts = append(opts, ollama.WithModel(cfg.DefaultModel))
-	}
-
-	client, err := ollama.New(opts...)
+	m, err := einoollama.NewChatModel(context.Background(), einoConfig)
 	if err != nil {
 		return nil, llm.TranslateError("ollama", err)
 	}
 
 	return &OllamaProvider{
-		client: client,
+		model:  m,
 		config: cfg,
 	}, nil
 }
@@ -51,7 +48,7 @@ func (p *OllamaProvider) Name() string {
 }
 
 // Models returns information about available models
-func (p *OllamaProvider) Models(ctx context.Context) ([]llm.ModelInfo, error) {
+func (p *OllamaProvider) Models(_ context.Context) ([]llm.ModelInfo, error) {
 	// Return default local models - actual models would need to be queried from Ollama
 	models := []llm.ModelInfo{
 		{
@@ -66,59 +63,44 @@ func (p *OllamaProvider) Models(ctx context.Context) ([]llm.ModelInfo, error) {
 
 // Complete sends a completion request
 func (p *OllamaProvider) Complete(ctx context.Context, req llm.CompletionRequest) (*llm.CompletionResponse, error) {
-	messages := toSchemaMessages(req.Messages)
-	callOpts := buildCallOptions(req)
+	msgs := toEinoMessages(req.Messages)
+	opts := buildEinoOptions(req)
 
-	resp, err := p.client.GenerateContent(ctx, messages, callOpts...)
+	out, err := p.model.Generate(ctx, msgs, opts...)
 	if err != nil {
 		return nil, llm.TranslateError("ollama", err)
 	}
 
-	return fromLangchainResponse(resp, req.Model), nil
+	return fromEinoMessage(out, req.Model), nil
 }
 
 // CompleteWithTools sends a completion request with tool definitions
 func (p *OllamaProvider) CompleteWithTools(ctx context.Context, req llm.CompletionRequest, tools []llm.ToolDef) (*llm.CompletionResponse, error) {
-	messages := toSchemaMessages(req.Messages)
-	callOpts := buildCallOptionsWithTools(req, tools)
-
-	resp, err := p.client.GenerateContent(ctx, messages, callOpts...)
+	msgs := toEinoMessages(req.Messages)
+	opts, err := buildEinoOptionsWithTools(req, tools)
 	if err != nil {
 		return nil, llm.TranslateError("ollama", err)
 	}
 
-	return fromLangchainResponse(resp, req.Model), nil
+	out, err := p.model.Generate(ctx, msgs, opts...)
+	if err != nil {
+		return nil, llm.TranslateError("ollama", err)
+	}
+
+	return fromEinoMessage(out, req.Model), nil
 }
 
 // Stream sends a streaming completion request
 func (p *OllamaProvider) Stream(ctx context.Context, req llm.CompletionRequest) (<-chan llm.StreamChunk, error) {
-	chunkChan := make(chan llm.StreamChunk, 10)
+	msgs := toEinoMessages(req.Messages)
+	opts := buildEinoOptions(req)
 
-	messages := toSchemaMessages(req.Messages)
-	callOpts := buildStreamingCallOptions(req, func(ctx context.Context, chunk []byte) error {
-		select {
-		case <-ctx.Done():
-			return ctx.Err()
-		case chunkChan <- llm.StreamChunk{
-			Delta: llm.StreamDelta{
-				Content: string(chunk),
-			},
-		}:
-			return nil
-		}
-	})
+	sr, err := p.model.Stream(ctx, msgs, opts...)
+	if err != nil {
+		return nil, llm.TranslateError("ollama", err)
+	}
 
-	go func() {
-		defer close(chunkChan)
-		_, err := p.client.GenerateContent(ctx, messages, callOpts...)
-		if err != nil {
-			chunkChan <- llm.StreamChunk{
-				Error: llm.TranslateError("ollama", err),
-			}
-		}
-	}()
-
-	return chunkChan, nil
+	return streamToChannel(sr, func(e error) error { return llm.TranslateError("ollama", e) }), nil
 }
 
 // Health checks the provider health
