@@ -33,7 +33,7 @@ func TestNewMistralProvider_EnvFallback(t *testing.T) {
 		DefaultModel: "mistral-large-latest",
 	})
 	require.NoError(t, err)
-	require.NotNil(t, p.client)
+	require.NotNil(t, p.model)
 }
 
 func TestMistralProvider_Models_ToolCapability(t *testing.T) {
