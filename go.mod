@@ -80,6 +80,42 @@ require (
 )
 
 require (
+	github.com/anthropics/anthropic-sdk-go v1.26.0 // indirect
+	github.com/bahlo/generic-list-go v0.2.0 // indirect
+	github.com/buger/jsonparser v1.1.1 // indirect
+	github.com/bytedance/gopkg v0.1.3 // indirect
+	github.com/bytedance/sonic v1.15.0 // indirect
+	github.com/bytedance/sonic/loader v0.5.0 // indirect
+	github.com/cloudwego/base64x v0.1.6 // indirect
+	github.com/cloudwego/eino v0.9.1 // indirect
+	github.com/cloudwego/eino-ext v0.0.1-alpha // indirect
+	github.com/cloudwego/eino-ext/components/model/claude v0.1.18 // indirect
+	github.com/cloudwego/eino-ext/components/model/gemini v0.1.32 // indirect
+	github.com/cloudwego/eino-ext/components/model/ollama v0.1.9 // indirect
+	github.com/cloudwego/eino-ext/components/model/openai v0.1.13 // indirect
+	github.com/cloudwego/eino-ext/libs/acl/openai v0.1.17 // indirect
+	github.com/eino-contrib/jsonschema v1.0.3 // indirect
+	github.com/eino-contrib/ollama v0.1.0 // indirect
+	github.com/evanphx/json-patch v0.5.2 // indirect
+	github.com/google/go-cmp v0.7.0 // indirect
+	github.com/goph/emperror v0.17.2 // indirect
+	github.com/gorilla/websocket v1.5.4-0.20250319132907-e064f32e3674 // indirect
+	github.com/klauspost/cpuid/v2 v2.2.10 // indirect
+	github.com/meguminnnnnnnnn/go-openai v0.1.2 // indirect
+	github.com/nikolalohinski/gonja v1.5.3 // indirect
+	github.com/slongfield/pyfmt v0.0.0-20220222012616-ea85ff4c361f // indirect
+	github.com/tidwall/gjson v1.18.0 // indirect
+	github.com/tidwall/match v1.1.1 // indirect
+	github.com/tidwall/pretty v1.2.1 // indirect
+	github.com/tidwall/sjson v1.2.5 // indirect
+	github.com/twitchyliquid64/golang-asm v0.15.1 // indirect
+	github.com/wk8/go-ordered-map/v2 v2.1.8 // indirect
+	github.com/yargevad/filepathx v1.0.0 // indirect
+	golang.org/x/arch v0.12.0 // indirect
+	google.golang.org/genai v1.36.0 // indirect
+)
+
+require (
 	buf.build/gen/go/bufbuild/protovalidate/protocolbuffers/go v1.36.11-20260415201107-50325440f8f2.1 // indirect
 	cel.dev/expr v0.25.1 // indirect
 	cloud.google.com/go v0.123.0 // indirect
@@ -128,7 +164,7 @@ require (
 	github.com/davecgh/go-spew v1.1.2-0.20180830191138-d8f796af33cc // indirect
 	github.com/decred/dcrd/dcrec/secp256k1/v4 v4.4.0 // indirect
 	github.com/distribution/reference v0.6.0 // indirect
-	github.com/dlclark/regexp2 v1.10.0 // indirect
+	github.com/dlclark/regexp2 v1.11.4 // indirect
 	github.com/docker/go-connections v0.6.0 // indirect
 	github.com/docker/go-units v0.5.0 // indirect
 	github.com/dustin/go-humanize v1.0.1 // indirect
