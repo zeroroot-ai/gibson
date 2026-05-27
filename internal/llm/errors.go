@@ -224,7 +224,7 @@ var (
 	ErrValidationFailedSentinel             = errors.New("response failed schema validation")
 )
 
-// Provider-specific error creation helpers for langchaingo integration
+// Provider-specific error creation helpers
 
 // NewAuthError creates an authentication error for provider integration
 func NewAuthError(provider string, err error) error {

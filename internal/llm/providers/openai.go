@@ -172,7 +172,7 @@ func (p *OpenAIProvider) CompleteStructured(ctx context.Context, req llm.Complet
 			fmt.Errorf("unsupported format type: %s", req.ResponseFormat.Type))
 	}
 
-	// Use direct HTTP client for structured output as langchaingo doesn't support json_schema
+	// Use direct HTTP client for structured output (Eino's OpenAI model doesn't expose json_schema via options)
 	return p.completeStructuredDirect(ctx, req)
 }
 

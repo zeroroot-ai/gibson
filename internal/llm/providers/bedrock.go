@@ -21,8 +21,7 @@ import (
 )
 
 // defaultBedrockModelID is the model the provider falls back to when neither
-// cfg.DefaultModel nor the per-request model is set. Matches the former
-// langchaingo bedrock.ModelAnthropicClaudeV3Sonnet constant value.
+// cfg.DefaultModel nor the per-request model is set.
 const defaultBedrockModelID = "anthropic.claude-3-sonnet-20240229-v1:0"
 
 // BedrockProvider implements LLMProvider for AWS Bedrock foundation models.
