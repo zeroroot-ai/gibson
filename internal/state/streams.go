@@ -69,8 +69,9 @@ type ConsumerGroupOptions struct {
 	// If 0, returns immediately (non-blocking)
 	Block time.Duration
 
-	// NoAck disables automatic acknowledgment (use XACK explicitly)
-	// When false, messages are auto-acked on read
+	// NoAck skips PEL tracking: messages are delivered without being added to the
+	// Pending Entries List and cannot be acknowledged. Leave false (the default)
+	// to require explicit XACK after processing.
 	NoAck bool
 }
 
@@ -481,8 +482,9 @@ func (c *StateClient) StreamCreateGroup(ctx context.Context, stream, group, star
 //   - "0" to read all pending messages for this consumer
 //   - Specific ID to read from that point
 //
-// Messages are not automatically acknowledged unless opts.NoAck is false.
-// Use StreamAck to explicitly acknowledge message processing.
+// Messages are delivered to the consumer group's Pending Entries List (PEL)
+// by default; call StreamAck to explicitly acknowledge each entry. Set
+// opts.NoAck to skip PEL tracking entirely — messages cannot be ACKed after read.
 //
 // Example:
 //
@@ -491,7 +493,7 @@ func (c *StateClient) StreamCreateGroup(ctx context.Context, stream, group, star
 //	    Consumer: "worker-1",
 //	    Count:    10,
 //	    Block:    5 * time.Second,
-//	    NoAck:    true, // Require explicit ACK
+//	    NoAck:    false, // default: messages tracked in PEL; call StreamAck to acknowledge
 //	}
 //
 //	entries, err := client.StreamReadGroup(ctx, "events:orders", ">", opts)
