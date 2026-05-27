@@ -19,7 +19,7 @@ func TestNewLlamafileProvider_NoCredentialsRequired(t *testing.T) {
 		DefaultModel: "llama-3.1-8b-instruct",
 	})
 	require.NoError(t, err)
-	require.NotNil(t, p.client)
+	require.NotNil(t, p.model)
 }
 
 func TestLlamafileProvider_Models_SyntheticEntry(t *testing.T) {
