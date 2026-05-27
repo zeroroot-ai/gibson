@@ -248,7 +248,7 @@ rpc,relation,object_type,deriver,identities,source_proto_file,mode
 /gibson.tenant.v1.TenantService/GetProviderHealth,member,tenant,tenant_from_identity,USER|SERVICE,gibson/tenant/v1/tenant.proto,rule
 /gibson.tenant.v1.TenantService/GetSupportedProviders,member,tenant,tenant_from_identity,USER|SERVICE,gibson/tenant/v1/tenant.proto,rule
 /gibson.tenant.v1.TenantService/GetTenantLangfuseCredentials,owner,tenant,tenant_from_identity,USER|SERVICE,gibson/tenant/v1/tenant.proto,rule
-/gibson.tenant.v1.TenantService/GetTenantQuota,member,tenant,tenant_from_identity,USER|SERVICE,gibson/tenant/v1/tenant.proto,rule
+/gibson.tenant.v1.TenantService/GetTenantQuota,admin,tenant,tenant_from_identity,USER|SERVICE,gibson/tenant/v1/tenant.proto,rule
 /gibson.tenant.v1.TenantService/GetTenantQuotaUsage,member,tenant,tenant_from_identity,USER|SERVICE,gibson/tenant/v1/tenant.proto,rule
 /gibson.tenant.v1.TenantService/ListAgentIdentities,writer,tenant,tenant_from_identity,USER|SERVICE,gibson/tenant/v1/tenant.proto,rule
 /gibson.tenant.v1.TenantService/ListAuditEvents,writer,tenant,tenant_from_identity,USER|SERVICE,gibson/tenant/v1/tenant.proto,rule

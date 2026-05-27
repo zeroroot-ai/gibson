@@ -2513,7 +2513,7 @@ export const AuthRegistry: Record<string, AuthEntry> = {
   "/gibson.tenant.v1.TenantService/GetTenantQuota": {
     method: "/gibson.tenant.v1.TenantService/GetTenantQuota",
     service: "gibson.tenant.v1.TenantService",
-    relation: "member",
+    relation: "admin",
     objectType: "tenant",
     objectDeriver: "tenant_from_identity",
     allowedIdentities: IdentityClass.USER | IdentityClass.SERVICE,
