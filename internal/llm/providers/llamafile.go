@@ -2,35 +2,43 @@ package providers
 
 import (
 	"context"
+	"strings"
+
+	einoopenai "github.com/cloudwego/eino-ext/components/model/openai"
 
 	"github.com/zeroroot-ai/gibson/internal/llm"
 	"github.com/zeroroot-ai/gibson/internal/types"
-	"github.com/zeroroot-ai/langchaingo/llms/llamafile"
 )
 
-// LlamafileProvider wraps langchaingo's llamafile integration.
+// LlamafileProvider talks to a llamafile / llama.cpp HTTP server through its
+// OpenAI-compatible endpoint via the Eino OpenAI ChatModel.
 //
-// Self-hosted — no API key. The upstream llamafileclient defaults to
-// http://localhost:8080. langchaingo v0.1.14 does not expose a public setter
-// for the server URL, so operators who need a non-default host should run
-// their llamafile binary with --host/--port matching the daemon's
-// reachability assumptions.
+// Self-hosted — no API key. The server defaults to http://localhost:8080;
+// operators may override via cfg.BaseURL. The OpenAI-compatible routes live
+// under /v1, so the BaseURL is normalised to end with /v1.
 type LlamafileProvider struct {
-	client *llamafile.LLM
+	model  *einoopenai.ChatModel
 	config llm.ProviderConfig
 }
 
 // NewLlamafileProvider constructs a Llamafile-backed provider.
 func NewLlamafileProvider(cfg llm.ProviderConfig) (*LlamafileProvider, error) {
-	var opts []llamafile.Option
-	if cfg.DefaultModel != "" {
-		opts = append(opts, llamafile.WithModel(cfg.DefaultModel))
+	baseURL := cfg.BaseURL
+	if baseURL == "" {
+		baseURL = "http://localhost:8080/v1"
+	} else if !strings.HasSuffix(baseURL, "/v1") {
+		baseURL = strings.TrimSuffix(baseURL, "/") + "/v1"
 	}
-	client, err := llamafile.New(opts...)
+
+	m, err := einoopenai.NewChatModel(context.Background(), &einoopenai.ChatModelConfig{
+		APIKey:  "llamafile", // dummy key; llamafile doesn't require auth
+		Model:   cfg.DefaultModel,
+		BaseURL: baseURL,
+	})
 	if err != nil {
 		return nil, llm.TranslateError("llamafile", err)
 	}
-	return &LlamafileProvider{client: client, config: cfg}, nil
+	return &LlamafileProvider{model: m, config: cfg}, nil
 }
 
 func (p *LlamafileProvider) Name() string { return "llamafile" }
@@ -48,13 +56,13 @@ func (p *LlamafileProvider) Models(_ context.Context) ([]llm.ModelInfo, error) {
 }
 
 func (p *LlamafileProvider) Complete(ctx context.Context, req llm.CompletionRequest) (*llm.CompletionResponse, error) {
-	messages := toSchemaMessages(req.Messages)
-	opts := buildCallOptions(req)
-	resp, err := p.client.GenerateContent(ctx, messages, opts...)
+	msgs := toEinoMessages(req.Messages)
+	opts := buildEinoOptions(req)
+	out, err := p.model.Generate(ctx, msgs, opts...)
 	if err != nil {
 		return nil, llm.TranslateError("llamafile", err)
 	}
-	return fromLangchainResponse(resp, req.Model), nil
+	return fromEinoMessage(out, req.Model), nil
 }
 
 func (p *LlamafileProvider) CompleteWithTools(ctx context.Context, req llm.CompletionRequest, tools []llm.ToolDef) (*llm.CompletionResponse, error) {
@@ -62,28 +70,17 @@ func (p *LlamafileProvider) CompleteWithTools(ctx context.Context, req llm.Compl
 }
 
 func (p *LlamafileProvider) Stream(ctx context.Context, req llm.CompletionRequest) (<-chan llm.StreamChunk, error) {
-	chunkChan := make(chan llm.StreamChunk, 10)
-	messages := toSchemaMessages(req.Messages)
-	opts := buildStreamingCallOptions(req, func(ctx context.Context, chunk []byte) error {
-		select {
-		case <-ctx.Done():
-			return ctx.Err()
-		case chunkChan <- llm.StreamChunk{Delta: llm.StreamDelta{Content: string(chunk)}}:
-			return nil
-		}
-	})
-	go func() {
-		defer close(chunkChan)
-		_, err := p.client.GenerateContent(ctx, messages, opts...)
-		if err != nil {
-			chunkChan <- llm.StreamChunk{Error: llm.TranslateError("llamafile", err)}
-		}
-	}()
-	return chunkChan, nil
+	msgs := toEinoMessages(req.Messages)
+	opts := buildEinoOptions(req)
+	sr, err := p.model.Stream(ctx, msgs, opts...)
+	if err != nil {
+		return nil, llm.TranslateError("llamafile", err)
+	}
+	return streamToChannel(sr, func(e error) error { return llm.TranslateError("llamafile", e) }), nil
 }
 
 func (p *LlamafileProvider) Health(_ context.Context) types.HealthStatus {
-	if p.client == nil {
+	if p.model == nil {
 		return types.NewHealthStatus(types.HealthStateUnhealthy, "llamafile client not initialised")
 	}
 	return types.NewHealthStatus(types.HealthStateHealthy, "")
