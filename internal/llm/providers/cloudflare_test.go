@@ -46,7 +46,7 @@ func TestNewCloudflareProvider_HappyPath(t *testing.T) {
 		Extra:        map[string]string{"cloudflare_account_id": "acct-123"},
 	})
 	require.NoError(t, err)
-	require.NotNil(t, p.client)
+	require.NotNil(t, p.model)
 }
 
 func TestCloudflareProvider_Models(t *testing.T) {
