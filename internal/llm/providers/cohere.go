@@ -4,16 +4,18 @@ import (
 	"context"
 	"strings"
 
+	einoopenai "github.com/cloudwego/eino-ext/components/model/openai"
+
 	"github.com/zeroroot-ai/gibson/internal/llm"
 	"github.com/zeroroot-ai/gibson/internal/secrets"
 	"github.com/zeroroot-ai/gibson/internal/types"
-	"github.com/zeroroot-ai/langchaingo/llms/cohere"
 )
 
-// CohereProvider wraps langchaingo's Cohere integration.
+// CohereProvider talks to Cohere through its OpenAI-compatibility endpoint
+// (https://api.cohere.com/compatibility/v1) via the Eino OpenAI ChatModel.
 // Credential: cfg.APIKey or env COHERE_API_KEY.
 type CohereProvider struct {
-	client *cohere.LLM
+	model  *einoopenai.ChatModel
 	config llm.ProviderConfig
 }
 
@@ -31,18 +33,21 @@ func newCohereProviderWithContext(ctx context.Context, service *secrets.Service,
 	if err != nil {
 		return nil, err
 	}
-	opts := []cohere.Option{cohere.WithToken(token)}
-	if cfg.DefaultModel != "" {
-		opts = append(opts, cohere.WithModel(cfg.DefaultModel))
+
+	baseURL := cfg.BaseURL
+	if baseURL == "" {
+		baseURL = "https://api.cohere.com/compatibility/v1"
 	}
-	if cfg.BaseURL != "" {
-		opts = append(opts, cohere.WithBaseURL(cfg.BaseURL))
-	}
-	client, err := cohere.New(opts...)
+
+	m, err := einoopenai.NewChatModel(ctx, &einoopenai.ChatModelConfig{
+		APIKey:  token,
+		Model:   cfg.DefaultModel,
+		BaseURL: baseURL,
+	})
 	if err != nil {
 		return nil, llm.TranslateError("cohere", err)
 	}
-	return &CohereProvider{client: client, config: cfg}, nil
+	return &CohereProvider{model: m, config: cfg}, nil
 }
 
 func (p *CohereProvider) Name() string { return "cohere" }
@@ -58,44 +63,32 @@ func (p *CohereProvider) Models(_ context.Context) ([]llm.ModelInfo, error) {
 }
 
 func (p *CohereProvider) Complete(ctx context.Context, req llm.CompletionRequest) (*llm.CompletionResponse, error) {
-	messages := toSchemaMessages(req.Messages)
-	opts := buildCallOptions(req)
-	resp, err := p.client.GenerateContent(ctx, messages, opts...)
+	msgs := toEinoMessages(req.Messages)
+	opts := buildEinoOptions(req)
+	out, err := p.model.Generate(ctx, msgs, opts...)
 	if err != nil {
 		return nil, translateCohereError(err)
 	}
-	return fromLangchainResponse(resp, req.Model), nil
+	return fromEinoMessage(out, req.Model), nil
 }
 
 func (p *CohereProvider) CompleteWithTools(ctx context.Context, req llm.CompletionRequest, tools []llm.ToolDef) (*llm.CompletionResponse, error) {
-	// langchaingo's Cohere adapter does not currently bridge Cohere's native
-	// tool_use API; fall back to text completion.
+	// Cohere compatibility endpoint does not bridge native tool_use API.
 	return p.Complete(ctx, req)
 }
 
 func (p *CohereProvider) Stream(ctx context.Context, req llm.CompletionRequest) (<-chan llm.StreamChunk, error) {
-	chunkChan := make(chan llm.StreamChunk, 10)
-	messages := toSchemaMessages(req.Messages)
-	opts := buildStreamingCallOptions(req, func(ctx context.Context, chunk []byte) error {
-		select {
-		case <-ctx.Done():
-			return ctx.Err()
-		case chunkChan <- llm.StreamChunk{Delta: llm.StreamDelta{Content: string(chunk)}}:
-			return nil
-		}
-	})
-	go func() {
-		defer close(chunkChan)
-		_, err := p.client.GenerateContent(ctx, messages, opts...)
-		if err != nil {
-			chunkChan <- llm.StreamChunk{Error: translateCohereError(err)}
-		}
-	}()
-	return chunkChan, nil
+	msgs := toEinoMessages(req.Messages)
+	opts := buildEinoOptions(req)
+	sr, err := p.model.Stream(ctx, msgs, opts...)
+	if err != nil {
+		return nil, translateCohereError(err)
+	}
+	return streamToChannel(sr, translateCohereError), nil
 }
 
 func (p *CohereProvider) Health(_ context.Context) types.HealthStatus {
-	if p.client == nil {
+	if p.model == nil {
 		return types.NewHealthStatus(types.HealthStateUnhealthy, "cohere client not initialised")
 	}
 	return types.NewHealthStatus(types.HealthStateHealthy, "")
@@ -106,7 +99,7 @@ func (p *CohereProvider) CredentialSchema() []llm.CredentialField { return Coher
 func CohereCredentialSchema() []llm.CredentialField {
 	return []llm.CredentialField{
 		{Key: "api_key", Label: "Cohere API Key", Required: true, Secret: true},
-		{Key: "base_url", Label: "Base URL (optional)", Placeholder: "https://api.cohere.ai"},
+		{Key: "base_url", Label: "Base URL (optional)", Placeholder: "https://api.cohere.com/compatibility/v1"},
 	}
 }
 
