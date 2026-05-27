@@ -4,17 +4,20 @@ import (
 	"context"
 	"strings"
 
+	einoopenai "github.com/cloudwego/eino-ext/components/model/openai"
+
 	"github.com/zeroroot-ai/gibson/internal/llm"
 	"github.com/zeroroot-ai/gibson/internal/secrets"
 	"github.com/zeroroot-ai/gibson/internal/types"
-	"github.com/zeroroot-ai/langchaingo/llms/huggingface"
 )
 
-// HuggingFaceProvider wraps langchaingo's HuggingFace Inference API integration.
+// HuggingFaceProvider talks to the HuggingFace Inference API (or a self-hosted
+// Text Generation Inference endpoint) through its OpenAI-compatible surface
+// via the Eino OpenAI ChatModel.
 // Credential: cfg.APIKey or env HUGGINGFACE_API_TOKEN.
-// Optional self-host: cfg.BaseURL points at a Text Generation Inference endpoint.
+// Optional self-host: cfg.BaseURL points at a TGI endpoint.
 type HuggingFaceProvider struct {
-	client *huggingface.LLM
+	model  *einoopenai.ChatModel
 	config llm.ProviderConfig
 }
 
@@ -32,18 +35,21 @@ func newHuggingFaceProviderWithContext(ctx context.Context, service *secrets.Ser
 	if err != nil {
 		return nil, err
 	}
-	opts := []huggingface.Option{huggingface.WithToken(token)}
-	if cfg.DefaultModel != "" {
-		opts = append(opts, huggingface.WithModel(cfg.DefaultModel))
+
+	baseURL := cfg.BaseURL
+	if baseURL == "" {
+		baseURL = "https://api-inference.huggingface.co/v1"
 	}
-	if cfg.BaseURL != "" {
-		opts = append(opts, huggingface.WithURL(cfg.BaseURL))
-	}
-	client, err := huggingface.New(opts...)
+
+	m, err := einoopenai.NewChatModel(ctx, &einoopenai.ChatModelConfig{
+		APIKey:  token,
+		Model:   cfg.DefaultModel,
+		BaseURL: baseURL,
+	})
 	if err != nil {
 		return nil, llm.TranslateError("huggingface", err)
 	}
-	return &HuggingFaceProvider{client: client, config: cfg}, nil
+	return &HuggingFaceProvider{model: m, config: cfg}, nil
 }
 
 func (p *HuggingFaceProvider) Name() string { return "huggingface" }
@@ -61,13 +67,13 @@ func (p *HuggingFaceProvider) Models(_ context.Context) ([]llm.ModelInfo, error)
 }
 
 func (p *HuggingFaceProvider) Complete(ctx context.Context, req llm.CompletionRequest) (*llm.CompletionResponse, error) {
-	messages := toSchemaMessages(req.Messages)
-	opts := buildCallOptions(req)
-	resp, err := p.client.GenerateContent(ctx, messages, opts...)
+	msgs := toEinoMessages(req.Messages)
+	opts := buildEinoOptions(req)
+	out, err := p.model.Generate(ctx, msgs, opts...)
 	if err != nil {
 		return nil, translateHuggingFaceError(err)
 	}
-	return fromLangchainResponse(resp, req.Model), nil
+	return fromEinoMessage(out, req.Model), nil
 }
 
 func (p *HuggingFaceProvider) CompleteWithTools(ctx context.Context, req llm.CompletionRequest, tools []llm.ToolDef) (*llm.CompletionResponse, error) {
@@ -75,28 +81,17 @@ func (p *HuggingFaceProvider) CompleteWithTools(ctx context.Context, req llm.Com
 }
 
 func (p *HuggingFaceProvider) Stream(ctx context.Context, req llm.CompletionRequest) (<-chan llm.StreamChunk, error) {
-	chunkChan := make(chan llm.StreamChunk, 10)
-	messages := toSchemaMessages(req.Messages)
-	opts := buildStreamingCallOptions(req, func(ctx context.Context, chunk []byte) error {
-		select {
-		case <-ctx.Done():
-			return ctx.Err()
-		case chunkChan <- llm.StreamChunk{Delta: llm.StreamDelta{Content: string(chunk)}}:
-			return nil
-		}
-	})
-	go func() {
-		defer close(chunkChan)
-		_, err := p.client.GenerateContent(ctx, messages, opts...)
-		if err != nil {
-			chunkChan <- llm.StreamChunk{Error: translateHuggingFaceError(err)}
-		}
-	}()
-	return chunkChan, nil
+	msgs := toEinoMessages(req.Messages)
+	opts := buildEinoOptions(req)
+	sr, err := p.model.Stream(ctx, msgs, opts...)
+	if err != nil {
+		return nil, translateHuggingFaceError(err)
+	}
+	return streamToChannel(sr, translateHuggingFaceError), nil
 }
 
 func (p *HuggingFaceProvider) Health(_ context.Context) types.HealthStatus {
-	if p.client == nil {
+	if p.model == nil {
 		return types.NewHealthStatus(types.HealthStateUnhealthy, "huggingface client not initialised")
 	}
 	return types.NewHealthStatus(types.HealthStateHealthy, "")
