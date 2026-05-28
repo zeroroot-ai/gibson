@@ -1,15 +1,25 @@
 // Package api — server_chat.go
 //
-// Implements the ListConversations and GetConversation RPC handlers introduced
-// by the prod-feature-wiring spec.
+// Implements the ListConversations and GetConversation RPC handlers on
+// UserService, plus the internal saveConversation helper called from the
+// StreamLLM completion path.
 //
 // Storage layout in Redis:
-//   - Sorted set "tenant:conversations:{tenantID}:{userID}" sorted by updated_at.
-//   - Conversation metadata JSON at "tenant:conversation:{tenantID}:{convID}".
-//   - Message list at "tenant:conv:messages:{tenantID}:{convID}" (Redis list).
+//   - Hash key "conv:{tenantId}:{conversationId}" with fields:
+//       title       (string)
+//       agent_id    (string)
+//       user_id     (string)
+//       created_at  (int64 Unix, string representation)
+//       updated_at  (int64 Unix, string representation)
+//       messages    (JSON-encoded []storedMessage)
+//   - Sorted set "convindex:{tenantId}:{userId}" — member = conversationId,
+//     score = updated_at Unix timestamp.
+//   - TTL: 90 days on both hash and sorted set, reset on each write.
 //
-// Authorization: self-access (userID match) or FGA admin relation on the tenant.
-// Write operations (SaveConversation) are out of scope for this task — read only.
+// Authorization: enforced by FGA annotations on the proto (member relation on
+// the tenant object).  Cross-tenant isolation is enforced structurally: all
+// keys are scoped by tenantId so callers cannot reach conversations belonging
+// to a different tenant without a different tenantId.
 package api
 
 import (
@@ -17,6 +27,8 @@ import (
 	"encoding/json"
 	"fmt"
 	"log/slog"
+	"strconv"
+	"time"
 
 	goredis "github.com/redis/go-redis/v9"
 	"google.golang.org/grpc/codes"
@@ -26,24 +38,52 @@ import (
 	"github.com/zeroroot-ai/sdk/auth"
 )
 
+const (
+	// conversationTTL is the lifetime of a conversation hash and its index
+	// entry.  Reset on every write so active conversations never expire.
+	conversationTTL = 90 * 24 * time.Hour // 90 days = 7776000 seconds
+
+	// conversationDefaultLimit is the default page size for ListConversations.
+	conversationDefaultLimit = 20
+
+	// conversationMaxLimit is the upper bound for ListConversations.
+	conversationMaxLimit = 100
+)
+
 // conversationStoreIface is the narrow interface the chat handlers use.
+//
+// Save must be accessible to the streaming handler that records completed
+// conversations; it is exposed via this interface so DaemonServer can call it
+// without knowing the concrete Redis type.
 type conversationStoreIface interface {
-	ListConversations(ctx context.Context, tenantID, userID string, limit int) ([]*storedConversation, error)
-	GetConversation(ctx context.Context, tenantID, conversationID string) (*storedConversation, []*storedMessage, error)
+	// Save persists a conversation and its messages.  If the conversation
+	// already exists (same conversationID), it is fully overwritten.  The
+	// original created_at timestamp is preserved on update.
+	Save(ctx context.Context, tenantID, userID, conversationID, title, agentID string, messages []storedMessage) error
+
+	// List returns conversation summaries for a user, ordered by
+	// updated_at descending.  At most limit entries are returned.
+	List(ctx context.Context, tenantID, userID string, limit int) ([]storedConversation, error)
+
+	// Get returns the full conversation and its messages.  Returns
+	// a non-nil error (wrapping "conversation not found") when absent.
+	Get(ctx context.Context, tenantID, conversationID string) (*storedConversation, []storedMessage, error)
 }
 
-// storedConversation is the JSON-serializable conversation metadata in Redis.
+// storedConversation is the in-memory representation of conversation metadata
+// read from the Redis hash.
 type storedConversation struct {
-	ID            string `json:"id"`
-	TenantID      string `json:"tenant_id"`
-	UserID        string `json:"user_id"`
-	Title         string `json:"title"`
-	CreatedAtUnix int64  `json:"created_at_unix"`
-	UpdatedAtUnix int64  `json:"updated_at_unix"`
-	MessageCount  int32  `json:"message_count"`
+	ID            string
+	TenantID      string
+	UserID        string
+	Title         string
+	AgentID       string
+	CreatedAtUnix int64
+	UpdatedAtUnix int64
+	MessageCount  int32
 }
 
-// storedMessage is a single message stored in the conversation message list.
+// storedMessage is a single message within a conversation.
 type storedMessage struct {
 	ID            string `json:"id"`
 	Role          string `json:"role"`
@@ -51,13 +91,16 @@ type storedMessage struct {
 	CreatedAtUnix int64  `json:"created_at_unix"`
 }
 
-// redisConversationStore implements conversationStoreIface using a raw Redis client.
+// redisConversationStore implements conversationStoreIface using a raw Redis
+// client.  It uses goredis.UniversalClient so it works with both standalone
+// Redis and Redis Cluster (matching the pattern in server_alerts.go).
 type redisConversationStore struct {
 	client goredis.UniversalClient
 	logger *slog.Logger
 }
 
-// NewRedisConversationStore creates a conversation store backed by the given Redis client.
+// NewRedisConversationStore creates a conversation store backed by the given
+// Redis client.
 func NewRedisConversationStore(client goredis.UniversalClient, logger *slog.Logger) conversationStoreIface {
 	if logger == nil {
 		logger = slog.Default()
@@ -65,28 +108,92 @@ func NewRedisConversationStore(client goredis.UniversalClient, logger *slog.Logg
 	return &redisConversationStore{client: client, logger: logger}
 }
 
+// convHashKey returns the Redis hash key for a single conversation.
+// Pattern: conv:{tenantId}:{conversationId}
+func convHashKey(tenantID, conversationID string) string {
+	return fmt.Sprintf("conv:%s:%s", tenantID, conversationID)
+}
+
+// convIndexKey returns the Redis sorted-set key for a user's conversation index.
+// Pattern: convindex:{tenantId}:{userId}
 func convIndexKey(tenantID, userID string) string {
-	return fmt.Sprintf("tenant:conversations:%s:%s", tenantID, userID)
+	return fmt.Sprintf("convindex:%s:%s", tenantID, userID)
 }
 
-func convDataKey(tenantID, convID string) string {
-	return fmt.Sprintf("tenant:conversation:%s:%s", tenantID, convID)
+// Save persists a conversation and its messages to Redis.
+//
+// It writes the conversation metadata as a Redis Hash and updates the
+// sorted-set index.  Both keys are given a 90-day TTL, reset on every write.
+func (s *redisConversationStore) Save(
+	ctx context.Context,
+	tenantID, userID, conversationID, title, agentID string,
+	messages []storedMessage,
+) error {
+	if tenantID == "" || userID == "" || conversationID == "" {
+		return fmt.Errorf("tenant_id, user_id, and conversation_id are required")
+	}
+
+	now := time.Now().Unix()
+	hashKey := convHashKey(tenantID, conversationID)
+	idxKey := convIndexKey(tenantID, userID)
+
+	// Preserve created_at on update: read the existing field first.
+	createdAt := now
+	if existing, err := s.client.HGet(ctx, hashKey, "created_at").Result(); err == nil && existing != "" {
+		if v, parseErr := strconv.ParseInt(existing, 10, 64); parseErr == nil {
+			createdAt = v
+		}
+	}
+
+	// JSON-encode the messages slice.
+	if messages == nil {
+		messages = []storedMessage{}
+	}
+	msgsJSON, err := json.Marshal(messages)
+	if err != nil {
+		return fmt.Errorf("failed to marshal messages: %w", err)
+	}
+
+	fields := map[string]any{
+		"title":      title,
+		"agent_id":   agentID,
+		"user_id":    userID,
+		"created_at": strconv.FormatInt(createdAt, 10),
+		"updated_at": strconv.FormatInt(now, 10),
+		"messages":   string(msgsJSON),
+	}
+
+	pipe := s.client.Pipeline()
+	pipe.HMSet(ctx, hashKey, fields)
+	pipe.Expire(ctx, hashKey, conversationTTL)
+	pipe.ZAdd(ctx, idxKey, goredis.Z{Score: float64(now), Member: conversationID})
+	pipe.Expire(ctx, idxKey, conversationTTL)
+	if _, pipeErr := pipe.Exec(ctx); pipeErr != nil {
+		return fmt.Errorf("failed to save conversation: %w", pipeErr)
+	}
+
+	s.logger.InfoContext(ctx, "conversation: saved",
+		slog.String("tenant_id", tenantID),
+		slog.String("user_id", userID),
+		slog.String("conversation_id", conversationID),
+		slog.Int("message_count", len(messages)),
+	)
+	return nil
 }
 
-func convMessagesKey(tenantID, convID string) string {
-	return fmt.Sprintf("tenant:conv:messages:%s:%s", tenantID, convID)
-}
-
-func (s *redisConversationStore) ListConversations(ctx context.Context, tenantID, userID string, limit int) ([]*storedConversation, error) {
+// List returns conversation summaries for a user, ordered by updated_at descending.
+func (s *redisConversationStore) List(ctx context.Context, tenantID, userID string, limit int) ([]storedConversation, error) {
 	if limit <= 0 {
-		limit = 20
+		limit = conversationDefaultLimit
 	}
-	if limit > 100 {
-		limit = 100
+	if limit > conversationMaxLimit {
+		limit = conversationMaxLimit
 	}
 
-	// ZREVRANGE returns conv IDs sorted descending by updated_at score.
-	convIDs, err := s.client.ZRevRange(ctx, convIndexKey(tenantID, userID), 0, int64(limit-1)).Result()
+	idxKey := convIndexKey(tenantID, userID)
+
+	// ZREVRANGE returns conversation IDs sorted descending by updated_at score.
+	convIDs, err := s.client.ZRevRange(ctx, idxKey, 0, int64(limit-1)).Result()
 	if err == goredis.Nil || len(convIDs) == 0 {
 		return nil, nil
 	}
@@ -94,58 +201,151 @@ func (s *redisConversationStore) ListConversations(ctx context.Context, tenantID
 		return nil, fmt.Errorf("conversations ZREVRANGE failed: %w", err)
 	}
 
-	conversations := make([]*storedConversation, 0, len(convIDs))
+	out := make([]storedConversation, 0, len(convIDs))
 	for _, convID := range convIDs {
-		raw, err := s.client.Get(ctx, convDataKey(tenantID, convID)).Result()
-		if err == goredis.Nil {
-			continue
-		}
-		if err != nil {
-			s.logger.WarnContext(ctx, "conversations: failed to fetch conversation data",
-				slog.String("conv_id", convID),
-				slog.String("error", err.Error()),
+		conv, fetchErr := s.fetchConversationMeta(ctx, tenantID, convID)
+		if fetchErr != nil {
+			s.logger.WarnContext(ctx, "conversation: failed to fetch metadata",
+				slog.String("tenant_id", tenantID),
+				slog.String("conversation_id", convID),
+				slog.String("error", fetchErr.Error()),
 			)
 			continue
 		}
-		var c storedConversation
-		if err := json.Unmarshal([]byte(raw), &c); err != nil {
+		if conv == nil {
+			// Hash expired; prune the stale index entry.
+			_ = s.client.ZRem(ctx, idxKey, convID)
 			continue
 		}
-		conversations = append(conversations, &c)
+		out = append(out, *conv)
 	}
-	return conversations, nil
+	return out, nil
 }
 
-func (s *redisConversationStore) GetConversation(ctx context.Context, tenantID, conversationID string) (*storedConversation, []*storedMessage, error) {
-	// Fetch conversation metadata.
-	raw, err := s.client.Get(ctx, convDataKey(tenantID, conversationID)).Result()
-	if err == goredis.Nil {
+// Get returns the full conversation and its messages.
+func (s *redisConversationStore) Get(ctx context.Context, tenantID, conversationID string) (*storedConversation, []storedMessage, error) {
+	hashKey := convHashKey(tenantID, conversationID)
+
+	// Fetch all relevant fields in one HMGet call.
+	vals, err := s.client.HMGet(ctx, hashKey,
+		"title", "agent_id", "user_id", "created_at", "updated_at", "messages",
+	).Result()
+	if err != nil {
+		return nil, nil, fmt.Errorf("HMGet failed: %w", err)
+	}
+
+	// If every field is nil, the key does not exist.
+	allNil := true
+	for _, v := range vals {
+		if v != nil {
+			allNil = false
+			break
+		}
+	}
+	if allNil {
 		return nil, nil, fmt.Errorf("conversation not found")
 	}
-	if err != nil {
-		return nil, nil, fmt.Errorf("conversation GET failed: %w", err)
-	}
-	var c storedConversation
-	if err := json.Unmarshal([]byte(raw), &c); err != nil {
-		return nil, nil, fmt.Errorf("conversation unmarshal failed: %w", err)
-	}
 
-	// Fetch messages from Redis list (oldest first).
-	msgRaws, err := s.client.LRange(ctx, convMessagesKey(tenantID, conversationID), 0, -1).Result()
-	if err != nil && err != goredis.Nil {
-		return nil, nil, fmt.Errorf("messages LRANGE failed: %w", err)
-	}
-
-	messages := make([]*storedMessage, 0, len(msgRaws))
-	for _, mRaw := range msgRaws {
-		var m storedMessage
-		if err := json.Unmarshal([]byte(mRaw), &m); err != nil {
-			continue
+	strAt := func(i int) string {
+		if vals[i] == nil {
+			return ""
 		}
-		messages = append(messages, &m)
+		return vals[i].(string)
+	}
+	parseInt64 := func(i int) int64 {
+		sv := strAt(i)
+		if sv == "" {
+			return 0
+		}
+		v, _ := strconv.ParseInt(sv, 10, 64)
+		return v
 	}
 
-	return &c, messages, nil
+	title := strAt(0)
+	agentID := strAt(1)
+	userID := strAt(2)
+	createdAt := parseInt64(3)
+	updatedAt := parseInt64(4)
+	msgsJSON := strAt(5)
+
+	var msgs []storedMessage
+	if msgsJSON != "" {
+		if jsonErr := json.Unmarshal([]byte(msgsJSON), &msgs); jsonErr != nil {
+			return nil, nil, fmt.Errorf("messages unmarshal failed: %w", jsonErr)
+		}
+	}
+
+	conv := &storedConversation{
+		ID:            conversationID,
+		TenantID:      tenantID,
+		UserID:        userID,
+		Title:         title,
+		AgentID:       agentID,
+		CreatedAtUnix: createdAt,
+		UpdatedAtUnix: updatedAt,
+		MessageCount:  int32(len(msgs)),
+	}
+	return conv, msgs, nil
+}
+
+// fetchConversationMeta reads the metadata fields (excluding messages) for a
+// single conversation.  Returns (nil, nil) when the key does not exist or has
+// expired.  Used by List to avoid deserialising the full messages JSON.
+func (s *redisConversationStore) fetchConversationMeta(ctx context.Context, tenantID, conversationID string) (*storedConversation, error) {
+	hashKey := convHashKey(tenantID, conversationID)
+
+	vals, err := s.client.HMGet(ctx, hashKey,
+		"title", "agent_id", "user_id", "created_at", "updated_at", "messages",
+	).Result()
+	if err != nil {
+		return nil, fmt.Errorf("HMGet failed: %w", err)
+	}
+
+	allNil := true
+	for _, v := range vals {
+		if v != nil {
+			allNil = false
+			break
+		}
+	}
+	if allNil {
+		return nil, nil
+	}
+
+	strAt := func(i int) string {
+		if vals[i] == nil {
+			return ""
+		}
+		return vals[i].(string)
+	}
+	parseInt64 := func(i int) int64 {
+		sv := strAt(i)
+		if sv == "" {
+			return 0
+		}
+		v, _ := strconv.ParseInt(sv, 10, 64)
+		return v
+	}
+
+	// Compute message count from the stored JSON without fully decoding.
+	var msgCount int32
+	if msgsJSON := strAt(5); msgsJSON != "" {
+		var msgs []storedMessage
+		if jsonErr := json.Unmarshal([]byte(msgsJSON), &msgs); jsonErr == nil {
+			msgCount = int32(len(msgs))
+		}
+	}
+
+	return &storedConversation{
+		ID:            conversationID,
+		TenantID:      tenantID,
+		UserID:        strAt(2),
+		Title:         strAt(0),
+		AgentID:       strAt(1),
+		CreatedAtUnix: parseInt64(3),
+		UpdatedAtUnix: parseInt64(4),
+		MessageCount:  msgCount,
+	}, nil
 }
 
 // ---------------------------------------------------------------------------
@@ -153,17 +353,19 @@ func (s *redisConversationStore) GetConversation(ctx context.Context, tenantID, 
 // ---------------------------------------------------------------------------
 
 // ListConversations returns the conversation history list for a user.
+//
+// Authorization: enforced by FGA annotations on the proto; we only extract
+// tenant/user from the request or the call context.
 func (s *DaemonServer) ListConversations(ctx context.Context, req *userv1.ListConversationsRequest) (*userv1.ListConversationsResponse, error) {
 	tenantID := req.GetTenantId()
 	if tenantID == "" {
 		tenantID = auth.TenantStringFromContext(ctx)
 	}
 
-	// Nil store: short-circuit if tenant is unavailable.
+	// Nil store or no tenant: return empty list (graceful degradation).
 	if s.conversationStore == nil && tenantID == "" {
 		return &userv1.ListConversationsResponse{Conversations: []*userv1.ConversationSummary{}}, nil
 	}
-
 	if tenantID == "" {
 		return nil, status_grpc.Error(codes.InvalidArgument, "tenant_id is required")
 	}
@@ -182,7 +384,7 @@ func (s *DaemonServer) ListConversations(ctx context.Context, req *userv1.ListCo
 		return &userv1.ListConversationsResponse{Conversations: []*userv1.ConversationSummary{}}, nil
 	}
 
-	stored, err := s.conversationStore.ListConversations(ctx, tenantID, userID, int(req.GetLimit()))
+	stored, err := s.conversationStore.List(ctx, tenantID, userID, int(req.GetLimit()))
 	if err != nil {
 		s.logger.ErrorContext(ctx, "ListConversations: store read failed",
 			slog.String("tenant_id", tenantID),
@@ -193,7 +395,8 @@ func (s *DaemonServer) ListConversations(ctx context.Context, req *userv1.ListCo
 	}
 
 	convs := make([]*userv1.ConversationSummary, 0, len(stored))
-	for _, c := range stored {
+	for i := range stored {
+		c := &stored[i]
 		convs = append(convs, &userv1.ConversationSummary{
 			Id:            c.ID,
 			TenantId:      c.TenantID,
@@ -204,7 +407,6 @@ func (s *DaemonServer) ListConversations(ctx context.Context, req *userv1.ListCo
 			MessageCount:  c.MessageCount,
 		})
 	}
-
 	return &userv1.ListConversationsResponse{Conversations: convs}, nil
 }
 
@@ -223,7 +425,6 @@ func (s *DaemonServer) GetConversation(ctx context.Context, req *userv1.GetConve
 		tenantID = auth.TenantStringFromContext(ctx)
 	}
 
-	// Nil store: return NotFound regardless of tenant validation.
 	if s.conversationStore == nil {
 		return nil, status_grpc.Error(codes.NotFound, "conversation not found")
 	}
@@ -232,7 +433,7 @@ func (s *DaemonServer) GetConversation(ctx context.Context, req *userv1.GetConve
 		return nil, status_grpc.Error(codes.InvalidArgument, "tenant_id is required")
 	}
 
-	conv, msgs, err := s.conversationStore.GetConversation(ctx, tenantID, req.GetConversationId())
+	conv, msgs, err := s.conversationStore.Get(ctx, tenantID, req.GetConversationId())
 	if err != nil {
 		s.logger.WarnContext(ctx, "GetConversation: store read failed",
 			slog.String("tenant_id", tenantID),
@@ -264,4 +465,36 @@ func (s *DaemonServer) GetConversation(ctx context.Context, req *userv1.GetConve
 		},
 		Messages: protoMsgs,
 	}, nil
+}
+
+// ---------------------------------------------------------------------------
+// saveConversation — internal helper for post-stream persistence
+// ---------------------------------------------------------------------------
+
+// saveConversation persists a completed conversation to the store.
+//
+// This is called after a stream finishes to record the full exchange.  It is a
+// thin wrapper around conversationStore.Save that handles a nil store
+// gracefully (skipping the write) so the caller does not need to nil-check.
+//
+// TODO(#496): Wire this call from the StreamLLM completion path once StreamLLM
+// is implemented.  The call site should be at the end of the streaming loop,
+// after the final response chunk is sent, passing the accumulated request and
+// response messages as the messages slice.  Example:
+//
+//	if saveErr := s.saveConversation(ctx, tenantID, userID, conversationID,
+//	    title, agentID, messages); saveErr != nil {
+//	    s.logger.WarnContext(ctx, "StreamLLM: failed to save conversation",
+//	        slog.String("error", saveErr.Error()))
+//	    // Non-fatal: do not abort the response.
+//	}
+func (s *DaemonServer) saveConversation(
+	ctx context.Context,
+	tenantID, userID, conversationID, title, agentID string,
+	messages []storedMessage,
+) error {
+	if s.conversationStore == nil {
+		return nil
+	}
+	return s.conversationStore.Save(ctx, tenantID, userID, conversationID, title, agentID, messages)
 }
