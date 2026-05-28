@@ -6,12 +6,12 @@
 //
 // Storage layout in Redis:
 //   - Hash key "conv:{tenantId}:{conversationId}" with fields:
-//       title       (string)
-//       agent_id    (string)
-//       user_id     (string)
-//       created_at  (int64 Unix, string representation)
-//       updated_at  (int64 Unix, string representation)
-//       messages    (JSON-encoded []storedMessage)
+//     title       (string)
+//     agent_id    (string)
+//     user_id     (string)
+//     created_at  (int64 Unix, string representation)
+//     updated_at  (int64 Unix, string representation)
+//     messages    (JSON-encoded []storedMessage)
 //   - Sorted set "convindex:{tenantId}:{userId}" — member = conversationId,
 //     score = updated_at Unix timestamp.
 //   - TTL: 90 days on both hash and sorted set, reset on each write.
