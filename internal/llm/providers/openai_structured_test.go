@@ -2,6 +2,7 @@ package providers
 
 import (
 	"context"
+	"encoding/json"
 	"testing"
 
 	"github.com/zeroroot-ai/gibson/internal/llm"
@@ -185,4 +186,118 @@ func TestOpenAIJSONSchemaConversion(t *testing.T) {
 
 func openaiFloat64Ptr(f float64) *float64 {
 	return &f
+}
+
+// TestBuildResponseFormat verifies the OpenAI response_format object built for
+// each supported format type.
+func TestBuildResponseFormat(t *testing.T) {
+	t.Run("JSONObject", func(t *testing.T) {
+		rf, err := buildResponseFormat(&types.ResponseFormat{Type: types.ResponseFormatJSONObject})
+		if err != nil {
+			t.Fatalf("buildResponseFormat: %v", err)
+		}
+		if rf["type"] != "json_object" {
+			t.Errorf("type = %v, want json_object", rf["type"])
+		}
+		if _, ok := rf["json_schema"]; ok {
+			t.Error("json_object format must not carry a json_schema field")
+		}
+	})
+
+	t.Run("JSONSchema", func(t *testing.T) {
+		rf, err := buildResponseFormat(&types.ResponseFormat{
+			Type:   types.ResponseFormatJSONSchema,
+			Name:   "person",
+			Strict: true,
+			Schema: &types.JSONSchema{
+				Type:       "object",
+				Properties: map[string]*types.JSONSchema{"name": {Type: "string"}},
+				Required:   []string{"name"},
+			},
+		})
+		if err != nil {
+			t.Fatalf("buildResponseFormat: %v", err)
+		}
+		if rf["type"] != "json_schema" {
+			t.Errorf("type = %v, want json_schema", rf["type"])
+		}
+		js, ok := rf["json_schema"].(map[string]any)
+		if !ok {
+			t.Fatal("json_schema is not a map")
+		}
+		if js["name"] != "person" {
+			t.Errorf("name = %v, want person", js["name"])
+		}
+		if js["strict"] != true {
+			t.Errorf("strict = %v, want true", js["strict"])
+		}
+		if _, ok := js["schema"].(map[string]interface{}); !ok {
+			t.Error("schema is not a map")
+		}
+	})
+
+	t.Run("JSONSchemaNilSchema", func(t *testing.T) {
+		_, err := buildResponseFormat(&types.ResponseFormat{
+			Type: types.ResponseFormatJSONSchema,
+			Name: "x",
+		})
+		if err == nil {
+			t.Error("expected error for json_schema with nil schema, got nil")
+		}
+	})
+}
+
+// TestInjectResponseFormat verifies the Eino request-payload modifier merges
+// response_format into the serialized request without dropping existing fields.
+func TestInjectResponseFormat(t *testing.T) {
+	rf := map[string]any{
+		"type": "json_schema",
+		"json_schema": map[string]any{
+			"name":   "person",
+			"schema": map[string]any{"type": "object"},
+			"strict": true,
+		},
+	}
+
+	body := []byte(`{"model":"gpt-4","messages":[{"role":"user","content":"hi"}],"temperature":0.5}`)
+
+	out, err := injectResponseFormat(rf)(context.Background(), nil, body)
+	if err != nil {
+		t.Fatalf("injectResponseFormat: %v", err)
+	}
+
+	var got map[string]json.RawMessage
+	if err := json.Unmarshal(out, &got); err != nil {
+		t.Fatalf("unmarshal modified payload: %v", err)
+	}
+
+	// Existing fields preserved.
+	for _, k := range []string{"model", "messages", "temperature"} {
+		if _, ok := got[k]; !ok {
+			t.Errorf("modifier dropped existing field %q", k)
+		}
+	}
+
+	// response_format injected and well-formed.
+	raw, ok := got["response_format"]
+	if !ok {
+		t.Fatal("response_format was not injected")
+	}
+	var injected map[string]any
+	if err := json.Unmarshal(raw, &injected); err != nil {
+		t.Fatalf("unmarshal response_format: %v", err)
+	}
+	if injected["type"] != "json_schema" {
+		t.Errorf("response_format.type = %v, want json_schema", injected["type"])
+	}
+}
+
+// TestInjectResponseFormatBadPayload verifies the modifier surfaces an error
+// when handed a non-object payload.
+func TestInjectResponseFormatBadPayload(t *testing.T) {
+	_, err := injectResponseFormat(map[string]any{"type": "json_object"})(
+		context.Background(), nil, []byte(`not-json`))
+	if err == nil {
+		t.Error("expected error for invalid payload, got nil")
+	}
 }
