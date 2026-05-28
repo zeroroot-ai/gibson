@@ -141,7 +141,7 @@ func TestNoGracefulNilInRequestPaths(t *testing.T) {
 		"internal/daemon/api/server.go:1551":                   astchecks.Entry{Category: astchecks.CategoryDefensiveGuard, Reason: "response helper, nil data means empty response"},
 		"internal/daemon/api/server.go:1578":                   astchecks.Entry{Category: astchecks.CategoryDefensiveGuard, Reason: "response helper, nil data means empty response"},
 		"internal/daemon/api/server_provider_config.go:75":     astchecks.Entry{Category: astchecks.CategoryDefensiveGuard, Reason: "nil cfg means no provider overlay"},
-		"internal/daemon/api/server_provider_config.go:150":    astchecks.Entry{Category: astchecks.CategoryLegacyOptional, Reason: "audit logger conditionally wired"},
+		"internal/daemon/api/server_provider_config.go:152":    astchecks.Entry{Category: astchecks.CategoryLegacyOptional, Reason: "audit logger conditionally wired"},
 		"internal/daemon/api/server_provider_exec.go:110":      astchecks.Entry{Category: astchecks.CategoryLegacyOptional, Reason: "budget enforcer conditionally wired; remove with budget-required slice"},
 		"internal/daemon/api/typed_value_helpers.go:25":        astchecks.Entry{Category: astchecks.CategoryDefensiveGuard, Reason: "typed-value converter, nil input → nil output"},
 		"internal/daemon/api/typed_value_helpers.go:77":        astchecks.Entry{Category: astchecks.CategoryDefensiveGuard, Reason: "typed-value converter, nil input → nil output"},
