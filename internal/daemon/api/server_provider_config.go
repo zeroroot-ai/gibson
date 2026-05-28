@@ -12,6 +12,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"log/slog"
 	"strings"
 	"time"
 
@@ -63,6 +64,7 @@ func toGRPCProviderError(op string, err error) error {
 		return status_grpc.Errorf(codes.FailedPrecondition,
 			"daemon `security.key_provider` not configured — provider storage is disabled")
 	default:
+		slog.Default().Error("providerconfig op failed", "op", op, "error", err)
 		return status_grpc.Errorf(codes.Internal, "%s: internal error", op)
 	}
 }
