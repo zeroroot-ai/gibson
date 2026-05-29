@@ -227,7 +227,19 @@ func (d *providerConfigDAO) getDefault(ctx context.Context) (string, error) {
 }
 
 func (d *providerConfigDAO) setDefault(ctx context.Context, name string) error {
-	return d.setMetaValue(ctx, metaKeyDefault, name)
+	// Keep the meta pointer (legacy path + GetDefault).
+	if err := d.setMetaValue(ctx, metaKeyDefault, name); err != nil {
+		return err
+	}
+	// Also sync provider_configs.is_default so list() returns the right value.
+	_, err := d.pg.Exec(ctx,
+		`UPDATE provider_configs SET is_default = (name = $1)`,
+		name,
+	)
+	if err != nil {
+		return fmt.Errorf("dao: sync is_default column: %w", err)
+	}
+	return nil
 }
 
 // legacyProviderNames returns provider names that still exist in tenant_secrets
