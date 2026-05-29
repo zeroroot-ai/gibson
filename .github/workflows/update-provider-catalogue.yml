@@ -117,7 +117,7 @@ jobs:
 
       - name: Upload updated catalogue
         if: steps.update.outputs.changed == 'true'
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@v7
         with:
           name: catalogue-openai
           path: internal/llm/providers/catalogue/provider-catalogue.yaml
@@ -200,7 +200,7 @@ jobs:
 
       - name: Upload updated catalogue
         if: steps.update.outputs.changed == 'true'
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@v7
         with:
           name: catalogue-google
           path: internal/llm/providers/catalogue/provider-catalogue.yaml
@@ -286,7 +286,7 @@ jobs:
 
       - name: Upload updated catalogue
         if: steps.update.outputs.changed == 'true'
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@v7
         with:
           name: catalogue-mistral
           path: internal/llm/providers/catalogue/provider-catalogue.yaml
@@ -373,7 +373,7 @@ jobs:
 
       - name: Upload updated catalogue
         if: steps.update.outputs.changed == 'true'
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@v7
         with:
           name: catalogue-cohere
           path: internal/llm/providers/catalogue/provider-catalogue.yaml
@@ -450,7 +450,7 @@ jobs:
 
       - name: Upload updated catalogue
         if: steps.update.outputs.changed == 'true'
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@v7
         with:
           name: catalogue-cloudflare
           path: internal/llm/providers/catalogue/provider-catalogue.yaml
@@ -528,7 +528,7 @@ jobs:
 
       - name: Upload updated catalogue
         if: steps.update.outputs.changed == 'true'
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@v7
         with:
           name: catalogue-huggingface
           path: internal/llm/providers/catalogue/provider-catalogue.yaml
@@ -627,7 +627,7 @@ jobs:
 
       - name: Upload updated catalogue
         if: steps.update.outputs.changed == 'true'
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@v7
         with:
           name: catalogue-bedrock
           path: internal/llm/providers/catalogue/provider-catalogue.yaml
