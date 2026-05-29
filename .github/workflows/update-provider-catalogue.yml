@@ -681,7 +681,7 @@ jobs:
       # checkout, so later downloads overwrite earlier ones — we re-apply all
       # changes in provider order below instead.
       - name: Download all catalogue artifacts
-        uses: actions/download-artifact@v4
+        uses: actions/download-artifact@v8
         with:
           pattern: catalogue-*
           merge-multiple: false
