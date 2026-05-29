@@ -96,6 +96,9 @@ func applyTargetDefaults(t *types.Target) {
 	if len(t.Connection) == 0 && strings.TrimSpace(t.URL) != "" {
 		t.Connection = map[string]any{"url": t.URL}
 	}
+	if t.Timeout <= 0 {
+		t.Timeout = 30 // seconds; matches types.NewTarget's default
+	}
 }
 
 // Get returns the target with the given UUID, provided it belongs to the

@@ -77,11 +77,25 @@ func TestCreate_MintsUUIDStampsTenant(t *testing.T) {
 	// metadata-only caller (no type/status supplied).
 	assert.Equal(t, "custom", got.Type, "type defaults to custom")
 	assert.Equal(t, types.TargetStatusActive, got.Status, "status defaults to active")
+	assert.Equal(t, 30, got.Timeout, "timeout defaults to 30s (Validate requires > 0)")
 
 	// Retrievable by its minted UUID within the same tenant.
 	fetched, err := svc.Get(context.Background(), tenantA, got.ID.String())
 	require.NoError(t, err)
 	assert.Equal(t, "prod-web", fetched.Name)
+}
+
+func TestCreate_OutputPassesDaemonValidation(t *testing.T) {
+	// A minimal metadata-only create (name + bare URL) must yield a target that
+	// satisfies types.Target.Validate — the contract the RedisTargetDAO enforces.
+	// Guards against field-by-field validation regressions.
+	svc := target.NewService(newFakeStore())
+	got, err := svc.Create(context.Background(), tenantA, &types.Target{
+		Name: "prod-web",
+		URL:  "https://example.com",
+	})
+	require.NoError(t, err)
+	assert.NoError(t, got.Validate(), "service output must pass daemon Target.Validate")
 }
 
 func TestCreate_RequiresTenant(t *testing.T) {
