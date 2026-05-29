@@ -27,7 +27,7 @@ func TestSave_CreatesWithUUID(t *testing.T) {
 	store := newTestStore(t)
 	ctx := context.Background()
 
-	draftID, err := store.Save(ctx, "tenant-a", "My Draft", "name: hello", "")
+	draftID, err := store.Save(ctx, "tenant-a", "My Draft", "name: hello", "", "")
 	require.NoError(t, err)
 	assert.NotEmpty(t, draftID)
 	// UUID format: 8-4-4-4-12
@@ -38,7 +38,7 @@ func TestList_ReturnsDraft(t *testing.T) {
 	store := newTestStore(t)
 	ctx := context.Background()
 
-	_, err := store.Save(ctx, "tenant-b", "Draft One", "name: one", "")
+	_, err := store.Save(ctx, "tenant-b", "Draft One", "name: one", "", "")
 	require.NoError(t, err)
 
 	drafts, err := store.List(ctx, "tenant-b")
@@ -52,10 +52,10 @@ func TestSave_WithExistingID_Updates(t *testing.T) {
 	store := newTestStore(t)
 	ctx := context.Background()
 
-	id, err := store.Save(ctx, "tenant-c", "Original", "name: original", "")
+	id, err := store.Save(ctx, "tenant-c", "Original", "name: original", "", "")
 	require.NoError(t, err)
 
-	_, err = store.Save(ctx, "tenant-c", "Updated", "name: updated", id)
+	_, err = store.Save(ctx, "tenant-c", "Updated", "name: updated", id, "")
 	require.NoError(t, err)
 
 	drafts, err := store.List(ctx, "tenant-c")
@@ -68,7 +68,7 @@ func TestDelete_RemovesFromList(t *testing.T) {
 	store := newTestStore(t)
 	ctx := context.Background()
 
-	id, err := store.Save(ctx, "tenant-d", "To Delete", "name: delete-me", "")
+	id, err := store.Save(ctx, "tenant-d", "To Delete", "name: delete-me", "", "")
 	require.NoError(t, err)
 
 	require.NoError(t, store.Delete(ctx, "tenant-d", id))
@@ -83,7 +83,7 @@ func TestSave_CUEExceedsLimit_ReturnsError(t *testing.T) {
 	ctx := context.Background()
 
 	bigCUE := strings.Repeat("x", 512*1024+1)
-	_, err := store.Save(ctx, "tenant-e", "Big Draft", bigCUE, "")
+	_, err := store.Save(ctx, "tenant-e", "Big Draft", bigCUE, "", "")
 	require.Error(t, err)
 	assert.Contains(t, err.Error(), "512 KB")
 }
@@ -102,7 +102,7 @@ func TestGet_IncludesCUESource(t *testing.T) {
 	ctx := context.Background()
 
 	const cue = "name: get-test\nversion: 1"
-	id, err := store.Save(ctx, "tenant-g", "Get Test", cue, "")
+	id, err := store.Save(ctx, "tenant-g", "Get Test", cue, "", "")
 	require.NoError(t, err)
 
 	draft, err := store.Get(ctx, "tenant-g", id)

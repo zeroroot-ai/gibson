@@ -37,7 +37,7 @@ func (s *DaemonServer) SaveMissionDraft(ctx context.Context, req *tenantv1.SaveM
 		return nil, err
 	}
 
-	draftID, err := s.missionDraftStore.Save(ctx, tenantID, req.GetName(), req.GetCueSource(), req.GetDraftId())
+	draftID, err := s.missionDraftStore.Save(ctx, tenantID, req.GetName(), req.GetCueSource(), req.GetDraftId(), req.GetMissionDefinitionId())
 	if err != nil {
 		return nil, status_grpc.Errorf(codes.Internal, "save mission draft: %v", err)
 	}
@@ -71,10 +71,11 @@ func (s *DaemonServer) ListMissionDrafts(ctx context.Context, req *tenantv1.List
 	out := make([]*tenantv1.MissionDraft, 0, len(drafts))
 	for _, d := range drafts {
 		out = append(out, &tenantv1.MissionDraft{
-			Id:        d.ID,
-			Name:      d.Name,
-			CreatedAt: d.CreatedAt,
-			UpdatedAt: d.UpdatedAt,
+			Id:                  d.ID,
+			Name:                d.Name,
+			MissionDefinitionId: d.MissionDefinitionID,
+			CreatedAt:           d.CreatedAt,
+			UpdatedAt:           d.UpdatedAt,
 		})
 	}
 	return &tenantv1.ListMissionDraftsResponse{Drafts: out}, nil
@@ -110,11 +111,12 @@ func (s *DaemonServer) GetMissionDraft(ctx context.Context, req *tenantv1.GetMis
 	}
 	return &tenantv1.GetMissionDraftResponse{
 		Draft: &tenantv1.MissionDraftFull{
-			Id:        d.ID,
-			Name:      d.Name,
-			CreatedAt: d.CreatedAt,
-			UpdatedAt: d.UpdatedAt,
-			CueSource: d.CueSource,
+			Id:                  d.ID,
+			Name:                d.Name,
+			MissionDefinitionId: d.MissionDefinitionID,
+			CreatedAt:           d.CreatedAt,
+			UpdatedAt:           d.UpdatedAt,
+			CueSource:           d.CueSource,
 		},
 	}, nil
 }

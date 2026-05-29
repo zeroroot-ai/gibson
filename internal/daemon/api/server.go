@@ -254,7 +254,7 @@ type auditQueryIface interface {
 // mission draft persistence. Using an interface allows tests to inject a
 // mock without spinning up Redis.
 type missionDraftStoreIface interface {
-	Save(ctx context.Context, tenantID, name, yaml, draftID string) (string, error)
+	Save(ctx context.Context, tenantID, name, cueSource, draftID, missionDefinitionID string) (string, error)
 	List(ctx context.Context, tenantID string) ([]*missiondraft.MissionDraft, error)
 	Get(ctx context.Context, tenantID, draftID string) (*missiondraft.MissionDraft, error)
 	Delete(ctx context.Context, tenantID, draftID string) error
