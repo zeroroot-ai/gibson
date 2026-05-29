@@ -526,19 +526,23 @@ func recordToMission(data any) (*schema.Mission, error) {
 		return nil, fmt.Errorf("invalid mission data type: %T", data)
 	}
 
-	id, err := types.ParseID(m["id"].(string))
+	idStr, _ := m["id"].(string)
+	id, err := types.ParseID(idStr)
 	if err != nil {
 		return nil, fmt.Errorf("invalid mission ID: %w", err)
 	}
 
+	// Use safe accessors: a missing graph property yields a nil map value, and a
+	// bare `.(string)` on nil panics (crashed the daemon during mission
+	// observation when optional fields like objective/yaml_source were unset).
 	mission := &schema.Mission{
 		ID:          id,
-		Name:        m["name"].(string),
-		Description: m["description"].(string),
-		Objective:   m["objective"].(string),
-		TargetRef:   m["target_ref"].(string),
-		Status:      schema.MissionStatus(m["status"].(string)),
-		YAMLSource:  m["yaml_source"].(string),
+		Name:        mapStr(m, "name"),
+		Description: mapStr(m, "description"),
+		Objective:   mapStr(m, "objective"),
+		TargetRef:   mapStr(m, "target_ref"),
+		Status:      schema.MissionStatus(mapStr(m, "status")),
+		YAMLSource:  mapStr(m, "yaml_source"),
 	}
 
 	if createdAt, ok := m["created_at"].(time.Time); ok {
@@ -554,30 +558,40 @@ func recordToMission(data any) (*schema.Mission, error) {
 	return mission, nil
 }
 
+// mapStr safely reads a string property from a graph-record map. A missing key
+// or nil/non-string value yields "" instead of panicking on a bare assertion.
+func mapStr(m map[string]any, key string) string {
+	s, _ := m[key].(string)
+	return s
+}
+
 func recordToMissionNode(data any) (*schema.MissionNode, error) {
 	n, ok := data.(map[string]any)
 	if !ok {
 		return nil, fmt.Errorf("invalid mission node data type: %T", data)
 	}
 
-	id, err := types.ParseID(n["id"].(string))
+	nodeIDStr, _ := n["id"].(string)
+	id, err := types.ParseID(nodeIDStr)
 	if err != nil {
 		return nil, fmt.Errorf("invalid node ID: %w", err)
 	}
 
-	missionID, err := types.ParseID(n["mission_id"].(string))
+	missionIDStr, _ := n["mission_id"].(string)
+	missionID, err := types.ParseID(missionIDStr)
 	if err != nil {
 		return nil, fmt.Errorf("invalid mission ID: %w", err)
 	}
 
+	isDynamic, _ := n["is_dynamic"].(bool)
 	node := &schema.MissionNode{
 		ID:          id,
 		MissionID:   missionID,
-		Type:        schema.MissionNodeType(n["type"].(string)),
-		Name:        n["name"].(string),
-		Description: n["description"].(string),
-		Status:      schema.MissionNodeStatus(n["status"].(string)),
-		IsDynamic:   n["is_dynamic"].(bool),
+		Type:        schema.MissionNodeType(mapStr(n, "type")),
+		Name:        mapStr(n, "name"),
+		Description: mapStr(n, "description"),
+		Status:      schema.MissionNodeStatus(mapStr(n, "status")),
+		IsDynamic:   isDynamic,
 		TaskConfig:  make(map[string]any),
 	}
 
@@ -624,24 +638,27 @@ func recordToDecision(data any) (*schema.Decision, error) {
 		return nil, fmt.Errorf("invalid decision data type: %T", data)
 	}
 
-	id, err := types.ParseID(d["id"].(string))
+	decIDStr, _ := d["id"].(string)
+	id, err := types.ParseID(decIDStr)
 	if err != nil {
 		return nil, fmt.Errorf("invalid decision ID: %w", err)
 	}
 
-	missionID, err := types.ParseID(d["mission_id"].(string))
+	decMissionIDStr, _ := d["mission_id"].(string)
+	missionID, err := types.ParseID(decMissionIDStr)
 	if err != nil {
 		return nil, fmt.Errorf("invalid mission ID: %w", err)
 	}
 
 	iteration, _ := toInt64(d["iteration"])
+	confidence, _ := d["confidence"].(float64)
 	decision := &schema.Decision{
 		ID:            id,
 		MissionID:     missionID,
 		Iteration:     int(iteration),
-		Action:        schema.DecisionAction(d["action"].(string)),
-		Reasoning:     d["reasoning"].(string),
-		Confidence:    d["confidence"].(float64),
+		Action:        schema.DecisionAction(mapStr(d, "action")),
+		Reasoning:     mapStr(d, "reasoning"),
+		Confidence:    confidence,
 		Modifications: make(map[string]any),
 	}
 
@@ -798,12 +815,14 @@ func recordToAgentExecution(data any) (*schema.AgentExecution, error) {
 		return nil, fmt.Errorf("invalid agent execution data type: %T", data)
 	}
 
-	id, err := types.ParseID(e["id"].(string))
+	execIDStr, _ := e["id"].(string)
+	id, err := types.ParseID(execIDStr)
 	if err != nil {
 		return nil, fmt.Errorf("invalid execution ID: %w", err)
 	}
 
-	missionID, err := types.ParseID(e["mission_id"].(string))
+	execMissionIDStr, _ := e["mission_id"].(string)
+	missionID, err := types.ParseID(execMissionIDStr)
 	if err != nil {
 		return nil, fmt.Errorf("invalid mission ID: %w", err)
 	}
@@ -811,9 +830,9 @@ func recordToAgentExecution(data any) (*schema.AgentExecution, error) {
 	attempt, _ := toInt64(e["attempt"])
 	exec := &schema.AgentExecution{
 		ID:            id,
-		MissionNodeID: e["mission_node_id"].(string),
+		MissionNodeID: mapStr(e, "mission_node_id"),
 		MissionID:     missionID,
-		Status:        schema.ExecutionStatus(e["status"].(string)),
+		Status:        schema.ExecutionStatus(mapStr(e, "status")),
 		Attempt:       int(attempt),
 		Error:         "",
 		ConfigUsed:    make(map[string]any),
