@@ -2534,8 +2534,12 @@ func (d *daemonImpl) CreateMission(ctx context.Context, req api.CreateMissionDat
 	mStoreForMission := mission.NewConnBoundMissionStore(connForMission.Redis)
 
 	// Create the mission record directly against the per-tenant store.
+	// TenantID MUST be stamped: the ListMissions gRPC handler filters by
+	// m.TenantID == caller tenant, so a mission saved without it is invisible
+	// on the dashboard even though it lives in the tenant's store.
 	m := &mission.Mission{
 		ID:                  types.NewID(),
+		TenantID:            tenantForMission.String(),
 		Name:                req.Name,
 		Description:         req.Description,
 		Status:              mission.MissionStatusPending,

@@ -389,6 +389,7 @@ func (m *missionManager) Run(ctx context.Context, missionDefinitionID string, ta
 	now := mission.NewUnixTimeNow()
 	missionTemplate := &mission.Mission{
 		ID:                    types.NewID(), // Template ID, may be replaced by existing
+		TenantID:              callingTenant.String(), // required: ListMissions filters by tenant
 		Name:                  def.GetName(),
 		Description:           def.GetDescription(),
 		Status:                mission.MissionStatusPending,
