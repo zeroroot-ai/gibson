@@ -123,6 +123,8 @@ rpc,relation,object_type,deriver,identities,source_proto_file,mode
 /gibson.daemon.v1.DaemonService/Connect,,,,,gibson/daemon/v1/daemon.proto,unauthenticated
 /gibson.daemon.v1.DaemonService/CreateMission,member,tenant,tenant_from_identity,USER|SERVICE,gibson/daemon/v1/daemon.proto,rule
 /gibson.daemon.v1.DaemonService/CreateMissionDefinition,writer,tenant,tenant_from_identity,USER|SERVICE,gibson/daemon/v1/daemon.proto,rule
+/gibson.daemon.v1.DaemonService/CreateTarget,member,tenant,tenant_from_identity,USER|SERVICE,gibson/daemon/v1/daemon.proto,rule
+/gibson.daemon.v1.DaemonService/DeleteTarget,member,tenant,tenant_from_identity,USER|SERVICE,gibson/daemon/v1/daemon.proto,rule
 /gibson.daemon.v1.DaemonService/DiffCheckpoints,member,tenant,tenant_from_identity,USER|SERVICE,gibson/daemon/v1/daemon.proto,rule
 /gibson.daemon.v1.DaemonService/GetAgentStatus,member,tenant,tenant_from_identity,USER|SERVICE,gibson/daemon/v1/daemon.proto,rule
 /gibson.daemon.v1.DaemonService/GetCapabilityManifest,member,tenant,tenant_from_identity,USER|SERVICE,gibson/daemon/v1/daemon.proto,rule
@@ -132,6 +134,7 @@ rpc,relation,object_type,deriver,identities,source_proto_file,mode
 /gibson.daemon.v1.DaemonService/GetMissionDefinition,member,tenant,tenant_from_identity,USER|SERVICE,gibson/daemon/v1/daemon.proto,rule
 /gibson.daemon.v1.DaemonService/GetMissionHistory,member,tenant,tenant_from_identity,USER|SERVICE,gibson/daemon/v1/daemon.proto,rule
 /gibson.daemon.v1.DaemonService/GetMyPermissions,,,,USER,gibson/daemon/v1/daemon.proto,self
+/gibson.daemon.v1.DaemonService/GetTarget,member,tenant,tenant_from_identity,USER|SERVICE,gibson/daemon/v1/daemon.proto,rule
 /gibson.daemon.v1.DaemonService/HoverMissionCUE,writer,tenant,tenant_from_identity,USER,gibson/daemon/v1/daemon.proto,rule
 /gibson.daemon.v1.DaemonService/ListAgents,member,tenant,tenant_from_identity,USER|SERVICE,gibson/daemon/v1/daemon.proto,rule
 /gibson.daemon.v1.DaemonService/ListCheckpoints,member,tenant,tenant_from_identity,USER|SERVICE,gibson/daemon/v1/daemon.proto,rule
@@ -139,6 +142,7 @@ rpc,relation,object_type,deriver,identities,source_proto_file,mode
 /gibson.daemon.v1.DaemonService/ListMissions,member,tenant,tenant_from_identity,USER|SERVICE,gibson/daemon/v1/daemon.proto,rule
 /gibson.daemon.v1.DaemonService/ListMyMemberships,,,,USER,gibson/daemon/v1/daemon.proto,self
 /gibson.daemon.v1.DaemonService/ListPlugins,member,tenant,tenant_from_identity,USER|SERVICE,gibson/daemon/v1/daemon.proto,rule
+/gibson.daemon.v1.DaemonService/ListTargets,member,tenant,tenant_from_identity,USER|SERVICE,gibson/daemon/v1/daemon.proto,rule
 /gibson.daemon.v1.DaemonService/ListTools,member,tenant,tenant_from_identity,USER|SERVICE,gibson/daemon/v1/daemon.proto,rule
 /gibson.daemon.v1.DaemonService/PauseMission,member,tenant,tenant_from_identity,USER|SERVICE,gibson/daemon/v1/daemon.proto,rule
 /gibson.daemon.v1.DaemonService/Ping,,,,,gibson/daemon/v1/daemon.proto,unauthenticated
@@ -153,6 +157,7 @@ rpc,relation,object_type,deriver,identities,source_proto_file,mode
 /gibson.daemon.v1.DaemonService/StopMission,member,tenant,tenant_from_identity,USER|SERVICE,gibson/daemon/v1/daemon.proto,rule
 /gibson.daemon.v1.DaemonService/Subscribe,member,tenant,tenant_from_identity,USER|SERVICE,gibson/daemon/v1/daemon.proto,rule
 /gibson.daemon.v1.DaemonService/UpdateMissionDefinition,writer,tenant,tenant_from_identity,USER|SERVICE,gibson/daemon/v1/daemon.proto,rule
+/gibson.daemon.v1.DaemonService/UpdateTarget,member,tenant,tenant_from_identity,USER|SERVICE,gibson/daemon/v1/daemon.proto,rule
 /gibson.daemon.v1.DaemonService/ValidateMissionCUE,writer,tenant,tenant_from_identity,USER,gibson/daemon/v1/daemon.proto,rule
 /gibson.daemon.v1.DaemonService/WatchManifestInvalidations,member,tenant,tenant_from_identity,USER|SERVICE,gibson/daemon/v1/daemon.proto,rule
 /gibson.graph.v1.GraphService/GetFindingCounts,member,tenant,tenant_from_identity,USER|SERVICE,gibson/graph/v1/graph.proto,rule

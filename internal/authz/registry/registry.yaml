@@ -781,6 +781,20 @@ entries:
     allowed_identities:
       - USER
       - SERVICE
+  "/gibson.daemon.v1.DaemonService/CreateTarget":
+    relation: "member"
+    object_type: "tenant"
+    object_deriver: "tenant_from_identity"
+    allowed_identities:
+      - USER
+      - SERVICE
+  "/gibson.daemon.v1.DaemonService/DeleteTarget":
+    relation: "member"
+    object_type: "tenant"
+    object_deriver: "tenant_from_identity"
+    allowed_identities:
+      - USER
+      - SERVICE
   "/gibson.daemon.v1.DaemonService/DiffCheckpoints":
     relation: "member"
     object_type: "tenant"
@@ -841,6 +855,13 @@ entries:
     self: true
     allowed_identities:
       - USER
+  "/gibson.daemon.v1.DaemonService/GetTarget":
+    relation: "member"
+    object_type: "tenant"
+    object_deriver: "tenant_from_identity"
+    allowed_identities:
+      - USER
+      - SERVICE
   "/gibson.daemon.v1.DaemonService/HoverMissionCUE":
     relation: "writer"
     object_type: "tenant"
@@ -880,6 +901,13 @@ entries:
     allowed_identities:
       - USER
   "/gibson.daemon.v1.DaemonService/ListPlugins":
+    relation: "member"
+    object_type: "tenant"
+    object_deriver: "tenant_from_identity"
+    allowed_identities:
+      - USER
+      - SERVICE
+  "/gibson.daemon.v1.DaemonService/ListTargets":
     relation: "member"
     object_type: "tenant"
     object_deriver: "tenant_from_identity"
@@ -973,6 +1001,13 @@ entries:
       - SERVICE
   "/gibson.daemon.v1.DaemonService/UpdateMissionDefinition":
     relation: "writer"
+    object_type: "tenant"
+    object_deriver: "tenant_from_identity"
+    allowed_identities:
+      - USER
+      - SERVICE
+  "/gibson.daemon.v1.DaemonService/UpdateTarget":
+    relation: "member"
     object_type: "tenant"
     object_deriver: "tenant_from_identity"
     allowed_identities:

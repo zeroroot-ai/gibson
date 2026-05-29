@@ -28,6 +28,7 @@ import (
 	"github.com/zeroroot-ai/gibson/internal/manifest"
 	"github.com/zeroroot-ai/gibson/internal/missiondraft"
 	"github.com/zeroroot-ai/gibson/internal/onboarding"
+	"github.com/zeroroot-ai/gibson/internal/target"
 	"github.com/zeroroot-ai/gibson/internal/types"
 	"github.com/zeroroot-ai/gibson/pkg/version"
 	modelaccesspb "github.com/zeroroot-ai/platform-sdk/gen/gibson/authz/v1"
@@ -64,6 +65,10 @@ type DaemonServer struct {
 
 	// daemon is the daemon instance this server exposes
 	daemon DaemonInterface
+
+	// targetService backs the target CRUD RPCs (tenant-scoped, UUID-canonical).
+	// Wired via WithTargetService; nil until then (handlers fail Unavailable).
+	targetService *target.Service
 
 	// credentialHandler provides secure credential storage for per-tenant credentials
 	credentialHandler *CredentialHandler
@@ -883,6 +888,14 @@ func NewDaemonServer(daemon DaemonInterface, credentialHandler *CredentialHandle
 //	api.RegisterDaemonServiceServer(grpcSrv, srv)
 func (s *DaemonServer) WithQuotaManager(qm MissionQuotaChecker) *DaemonServer {
 	s.quotaManager = qm
+	return s
+}
+
+// WithTargetService wires the tenant-scoped target service backing the
+// CreateTarget / GetTarget / ListTargets / UpdateTarget / DeleteTarget RPCs.
+// Call immediately after NewDaemonServer and before registering the server.
+func (s *DaemonServer) WithTargetService(svc *target.Service) *DaemonServer {
+	s.targetService = svc
 	return s
 }
 

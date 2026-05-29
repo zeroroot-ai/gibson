@@ -31,6 +31,7 @@ type RedisTargetDAO struct {
 type targetDocument struct {
 	ID           string                 `json:"id"`
 	Name         string                 `json:"name"`
+	TenantID     string                 `json:"tenant_id,omitempty"`
 	Type         string                 `json:"type"`
 	Provider     string                 `json:"provider,omitempty"`
 	Connection   map[string]any         `json:"connection,omitempty"`
@@ -73,6 +74,7 @@ func toTargetDocument(target *types.Target) *targetDocument {
 	doc := &targetDocument{
 		ID:           target.ID.String(),
 		Name:         target.Name,
+		TenantID:     target.TenantID,
 		Type:         target.Type,
 		Provider:     target.Provider.String(),
 		Connection:   target.Connection,
@@ -127,6 +129,7 @@ func fromTargetDocument(doc *targetDocument) (*types.Target, error) {
 	target := &types.Target{
 		ID:           id,
 		Name:         doc.Name,
+		TenantID:     doc.TenantID,
 		Type:         doc.Type,
 		Provider:     types.Provider(doc.Provider),
 		Connection:   doc.Connection,

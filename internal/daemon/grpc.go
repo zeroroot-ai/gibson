@@ -57,6 +57,7 @@ import (
 	"github.com/zeroroot-ai/gibson/internal/observability"
 	"github.com/zeroroot-ai/gibson/internal/onboarding"
 	"github.com/zeroroot-ai/gibson/internal/reservednames"
+	"github.com/zeroroot-ai/gibson/internal/target"
 	"github.com/zeroroot-ai/gibson/internal/types"
 	"go.opentelemetry.io/contrib/instrumentation/google.golang.org/grpc/otelgrpc"
 	"go.opentelemetry.io/otel/metric"
@@ -596,6 +597,13 @@ func (d *daemonImpl) buildGRPCServer(ctx context.Context) (*grpcSubsystem, error
 	if d.quotaManager != nil {
 		daemonSvc.WithQuotaManager(d.quotaManager)
 		d.logger.Info(ctx, "quota manager wired into DaemonServer for mission quota enforcement")
+	}
+
+	if d.targetStore != nil {
+		daemonSvc.WithTargetService(target.NewService(d.targetStore))
+		d.logger.Info(ctx, "target service wired into DaemonServer for target CRUD RPCs")
+	} else {
+		d.logger.Error(ctx, "target service NOT wired — targetStore is nil; target CRUD RPCs will fail")
 	}
 
 	if d.pool != nil && d.secretsService != nil {
