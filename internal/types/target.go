@@ -189,8 +189,12 @@ func (a *AuthType) UnmarshalJSON(data []byte) error {
 
 // Target represents a target LLM system to be tested
 type Target struct {
-	ID           ID                     `json:"id"`
-	Name         string                 `json:"name"`
+	ID   ID     `json:"id"`
+	Name string `json:"name"`
+	// TenantID scopes the target to its owning tenant. Set server-side from the
+	// caller's identity; never client-supplied and never exposed on the wire.
+	// Reads/writes filter on it to enforce tenant isolation.
+	TenantID     string                 `json:"tenant_id,omitempty"`
 	Type         string                 `json:"type"` // Changed from TargetType enum to string for schema-based types
 	Provider     Provider               `json:"provider,omitempty"`
 	Connection   map[string]any         `json:"connection,omitempty"` // Schema-based connection parameters

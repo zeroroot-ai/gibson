@@ -45,11 +45,17 @@ import (
 	sdktypes "github.com/zeroroot-ai/sdk/types"
 )
 
-// targetStore is an interface for target data access
+// targetStore is an interface for target data access. It is satisfied by
+// *dbredis.RedisTargetDAO. Widened (target-management epic) to expose the
+// full CRUD surface the target service drives; mission resolution uses the
+// read methods only.
 type targetStore interface {
 	Get(ctx context.Context, id types.ID) (*types.Target, error)
 	GetByName(ctx context.Context, name string) (*types.Target, error)
 	Create(ctx context.Context, target *types.Target) error
+	List(ctx context.Context, filter *types.TargetFilter) ([]*types.Target, error)
+	Update(ctx context.Context, target *types.Target) error
+	Delete(ctx context.Context, id types.ID) error
 }
 
 // AgentRuntimeState tracks runtime state for a single agent.
