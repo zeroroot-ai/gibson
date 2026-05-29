@@ -3,15 +3,21 @@ package missiondraft
 // store.go implements a Redis-backed mission draft store.
 //
 // Key patterns:
-//   missiondraft:{tenantID}:{draftID}   — hash per draft (TTL 30 days)
+//   missiondraft:{tenantID}:{draftID}   — hash per draft (durable, no TTL)
 //   missiondrafts:{tenantID}            — sorted set (score = updated_at Unix)
 //
 // Fields per hash:
-//   id          string  UUID
-//   name        string
-//   cue_source  string  raw CUE source (max 512 KB)
-//   created_at  string  RFC 3339
-//   updated_at  string  RFC 3339
+//   id                     string  UUID
+//   name                   string
+//   cue_source             string  raw CUE source (max 512 KB)
+//   mission_definition_id  string  the definition this record last compiled to
+//   created_at             string  RFC 3339
+//   updated_at             string  RFC 3339
+//
+// Authored records are durable: they carry no TTL so a mission can be reopened
+// at any time (gibson#505). Earlier records were written with a 30-day TTL;
+// rewriting one via Save clears the TTL (PERSIST) so reopened missions stop
+// expiring.
 //
 // Migration note: drafts written before the cue_source rename carry a "yaml"
 // field instead. Get falls back to "yaml" when "cue_source" is absent; Save
@@ -36,8 +42,7 @@ var ErrDraftNotFound = errors.New("draft not found")
 const (
 	draftKeyPrefix = "missiondraft:"
 	indexKeyPrefix = "missiondrafts:"
-	draftTTL       = 30 * 24 * time.Hour // 30 days
-	maxCUEBytes    = 512 * 1024          // 512 KB
+	maxCUEBytes    = 512 * 1024 // 512 KB
 )
 
 // MissionDraft is the in-memory representation of a saved draft.
@@ -45,8 +50,11 @@ type MissionDraft struct {
 	ID        string
 	Name      string
 	CueSource string
-	CreatedAt string
-	UpdatedAt string
+	// MissionDefinitionID links this authored record to the mission definition
+	// it last compiled to. Empty for records that have never been run.
+	MissionDefinitionID string
+	CreatedAt           string
+	UpdatedAt           string
 }
 
 // RedisMissionDraftStore persists mission YAML drafts in Redis.
@@ -79,9 +87,13 @@ func indexKey(tenantID string) string {
 
 // Save persists a mission draft for a tenant.
 // If draftID is empty a new UUID is generated (create); otherwise the existing
-// draft is overwritten (update). Returns the draftID.
+// draft is overwritten (update). missionDefinitionID links the record to the
+// definition it last compiled to (empty when never run). Returns the draftID.
 // Returns an error if the CUE source exceeds 512 KB.
-func (s *RedisMissionDraftStore) Save(ctx context.Context, tenantID, name, cueSource, draftID string) (string, error) {
+//
+// Saved records are durable (no TTL). Rewriting a record clears any TTL a
+// previous version carried so reopened missions stop expiring (gibson#505).
+func (s *RedisMissionDraftStore) Save(ctx context.Context, tenantID, name, cueSource, draftID, missionDefinitionID string) (string, error) {
 	if tenantID == "" {
 		return "", fmt.Errorf("tenant_id is required")
 	}
@@ -109,17 +121,18 @@ func (s *RedisMissionDraftStore) Save(ctx context.Context, tenantID, name, cueSo
 	}
 
 	fields := map[string]any{
-		"id":         draftID,
-		"name":       name,
-		"cue_source": cueSource,
-		"created_at": createdAt,
-		"updated_at": now,
+		"id":                    draftID,
+		"name":                  name,
+		"cue_source":            cueSource,
+		"mission_definition_id": missionDefinitionID,
+		"created_at":            createdAt,
+		"updated_at":            now,
 	}
 
 	pipe := s.client.Pipeline()
 	pipe.HMSet(ctx, key, fields)
 	pipe.HDel(ctx, key, "yaml") // remove legacy field from pre-rename drafts
-	pipe.Expire(ctx, key, draftTTL)
+	pipe.Persist(ctx, key)      // clear any TTL a pre-#505 record carried — authored records are durable
 	pipe.ZAdd(ctx, idx, goredis.Z{Score: score, Member: draftID})
 	if _, pipeErr := pipe.Exec(ctx); pipeErr != nil {
 		return "", fmt.Errorf("failed to save mission draft: %w", pipeErr)
@@ -157,7 +170,7 @@ func (s *RedisMissionDraftStore) List(ctx context.Context, tenantID string) ([]*
 		key := draftKey(tenantID, id)
 		fields, hErr := s.client.HGetAll(ctx, key).Result()
 		if hErr == goredis.Nil || len(fields) == 0 {
-			// Draft expired or removed; clean stale index entry.
+			// Draft removed; clean stale index entry.
 			_ = s.client.ZRem(ctx, idx, id)
 			continue
 		}
@@ -170,11 +183,12 @@ func (s *RedisMissionDraftStore) List(ctx context.Context, tenantID string) ([]*
 			continue
 		}
 		drafts = append(drafts, &MissionDraft{
-			ID:        fields["id"],
-			Name:      fields["name"],
-			CreatedAt: fields["created_at"],
-			UpdatedAt: fields["updated_at"],
-			// YAML omitted from list responses.
+			ID:                  fields["id"],
+			Name:                fields["name"],
+			MissionDefinitionID: fields["mission_definition_id"],
+			CreatedAt:           fields["created_at"],
+			UpdatedAt:           fields["updated_at"],
+			// CUE source omitted from list responses.
 		})
 	}
 
@@ -201,11 +215,12 @@ func (s *RedisMissionDraftStore) Get(ctx context.Context, tenantID, draftID stri
 		cueSource = fields["yaml"] // legacy fallback for drafts written before the rename
 	}
 	return &MissionDraft{
-		ID:        fields["id"],
-		Name:      fields["name"],
-		CueSource: cueSource,
-		CreatedAt: fields["created_at"],
-		UpdatedAt: fields["updated_at"],
+		ID:                  fields["id"],
+		Name:                fields["name"],
+		CueSource:           cueSource,
+		MissionDefinitionID: fields["mission_definition_id"],
+		CreatedAt:           fields["created_at"],
+		UpdatedAt:           fields["updated_at"],
 	}, nil
 }
 
