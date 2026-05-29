@@ -30,10 +30,39 @@ import (
 	"go.opentelemetry.io/otel/trace"
 )
 
-// targetStore is an interface for target lookup in mission manager
+// targetStoreLookup is the target read surface used by mission resolution.
+// Targets are referenced by UUID only — name resolution (GetByName) was
+// removed under the target-management epic, so only Get remains.
 type targetStoreLookup interface {
-	GetByName(ctx context.Context, name string) (*types.Target, error)
 	Get(ctx context.Context, id types.ID) (*types.Target, error)
+}
+
+// targetGetter is the minimal read surface needed to resolve a target by UUID.
+// Satisfied by both the mission manager's targetStoreLookup and the daemon's
+// targetStore, so CreateMission and RunMission share one resolution path.
+type targetGetter interface {
+	Get(ctx context.Context, id types.ID) (*types.Target, error)
+}
+
+// resolveTargetUUID enforces the UUID-only, tenant-scoped target contract shared
+// by CreateMission and RunMission. The target_id MUST be a UUID — a non-UUID is
+// a hard invalid-argument, never a name to look up. A missing or cross-tenant
+// target is reported as not-found. System/internal callers (no real tenant) and
+// legacy targets carrying no stamped tenant are exempt from the tenant check to
+// preserve existing internal flows.
+func resolveTargetUUID(ctx context.Context, store targetGetter, targetID, callerTenant string) (*types.Target, error) {
+	parsed, err := types.ParseID(targetID)
+	if err != nil {
+		return nil, fmt.Errorf("invalid target_id %q: a target UUID is required: %w", targetID, err)
+	}
+	t, err := store.Get(ctx, parsed)
+	if err != nil || t == nil {
+		return nil, fmt.Errorf("target %q not found", targetID)
+	}
+	if t.TenantID != "" && callerTenant != auth.SystemTenant.String() && callerTenant != t.TenantID {
+		return nil, fmt.Errorf("target %q not found", targetID)
+	}
+	return t, nil
 }
 
 // missionManager implements the MissionManager interface for daemon operations.
@@ -319,39 +348,22 @@ func (m *missionManager) Run(ctx context.Context, missionDefinitionID string, ta
 	// Shared-Neo4j-backed mission graph storage removed (spec graphrag-tenant-scope).
 	// Per-tenant mission graph storage via Pool will be added in a follow-up spec.
 
-	// Resolve target ID via the target store. The caller may supply either a
-	// target UUID or a target name; try both.
+	// Resolve the target by UUID only (no name resolution) and enforce tenant
+	// ownership. The shared resolveTargetUUID path is identical to the one
+	// CreateMission uses, so the two entry points cannot diverge.
 	if m.targetStore == nil {
 		return nil, fmt.Errorf("target_id '%s' supplied but target store not available", targetID)
 	}
-	var resolvedTargetID types.ID
-	var targetRef string
-	if parsed, parseErr := types.ParseID(targetID); parseErr == nil {
-		target, getErr := m.targetStore.Get(ctx, parsed)
-		if getErr == nil && target != nil {
-			resolvedTargetID = target.ID
-			if target.URL != "" {
-				targetRef = target.URL
-			} else if conn, ok := target.Connection["url"].(string); ok {
-				targetRef = conn
-			} else {
-				targetRef = target.Name
-			}
-		}
+	target, err := resolveTargetUUID(ctx, m.targetStore, targetID, callingTenantForDef.String())
+	if err != nil {
+		return nil, err
 	}
-	if resolvedTargetID.IsZero() {
-		target, getErr := m.targetStore.GetByName(ctx, targetID)
-		if getErr != nil || target == nil {
-			return nil, fmt.Errorf("target '%s' not found", targetID)
-		}
-		resolvedTargetID = target.ID
-		if target.URL != "" {
-			targetRef = target.URL
-		} else if conn, ok := target.Connection["url"].(string); ok {
-			targetRef = conn
-		} else {
-			targetRef = target.Name
-		}
+	resolvedTargetID := target.ID
+	targetRef := target.Name
+	if target.URL != "" {
+		targetRef = target.URL
+	} else if conn, ok := target.Connection["url"].(string); ok && conn != "" {
+		targetRef = conn
 	}
 	m.logger.Debug("resolved target", "target_id", resolvedTargetID, "target_ref", targetRef)
 
