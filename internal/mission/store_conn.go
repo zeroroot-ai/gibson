@@ -60,6 +60,14 @@ func cbMissionDefinitionIndexKey() string {
 	return "gibson:mission-definitions"
 }
 
+// cbMissionDefinitionCueKey is the sibling key holding the raw CUE source the
+// author submitted for a definition. Stored separately from the compiled proto
+// so GetMissionDefinition can return the exact source rather than a
+// reconstruction. gibson#504.
+func cbMissionDefinitionCueKey(name string) string {
+	return fmt.Sprintf("gibson:mission-definition-cue:%s", name)
+}
+
 // Save persists a new mission.
 func (s *ConnBoundMissionStore) Save(ctx context.Context, mission *Mission) error {
 	if mission == nil {
@@ -635,7 +643,7 @@ func (s *ConnBoundMissionStore) UpdateDefinition(ctx context.Context, def *missi
 	return s.rdb.Set(ctx, cbMissionDefinitionKey(def.GetName()), string(data), 0).Err()
 }
 
-// DeleteDefinition removes a mission definition.
+// DeleteDefinition removes a mission definition and its stored CUE source.
 func (s *ConnBoundMissionStore) DeleteDefinition(ctx context.Context, name string) error {
 	n, err := s.rdb.Del(ctx, cbMissionDefinitionKey(name)).Result()
 	if err != nil {
@@ -645,7 +653,46 @@ func (s *ConnBoundMissionStore) DeleteDefinition(ctx context.Context, name strin
 		return ErrDefinitionNotFound
 	}
 	_ = s.rdb.SRem(ctx, cbMissionDefinitionIndexKey(), name).Err()
+	_ = s.rdb.Del(ctx, cbMissionDefinitionCueKey(name)).Err()
 	return nil
+}
+
+// maxDefinitionCueBytes bounds the raw CUE source persisted per definition,
+// matching the authoring store's cap (internal/missiondraft).
+const maxDefinitionCueBytes = 512 * 1024
+
+// SetDefinitionSource persists the raw CUE source for a definition under its
+// sibling key, overwriting any previous source in place. A nil/empty source is
+// a no-op so callers that lack the source (e.g. legacy CLI registrations) leave
+// any existing source untouched. gibson#504.
+func (s *ConnBoundMissionStore) SetDefinitionSource(ctx context.Context, name, cueSource string) error {
+	if name == "" {
+		return fmt.Errorf("definition name is required")
+	}
+	if cueSource == "" {
+		return nil
+	}
+	if len(cueSource) > maxDefinitionCueBytes {
+		return fmt.Errorf("cue_source exceeds maximum size of 512 KB")
+	}
+	if err := s.rdb.Set(ctx, cbMissionDefinitionCueKey(name), cueSource, 0).Err(); err != nil {
+		return fmt.Errorf("failed to store definition cue source: %w", err)
+	}
+	return nil
+}
+
+// GetDefinitionSource returns the raw CUE source stored for a definition, or
+// the empty string when none was recorded (legacy definitions or those
+// registered without a source). gibson#504.
+func (s *ConnBoundMissionStore) GetDefinitionSource(ctx context.Context, name string) (string, error) {
+	src, err := s.rdb.Get(ctx, cbMissionDefinitionCueKey(name)).Result()
+	if err == goredis.Nil {
+		return "", nil
+	}
+	if err != nil {
+		return "", fmt.Errorf("failed to get definition cue source: %w", err)
+	}
+	return src, nil
 }
 
 // ---------------------------------------------------------------------------

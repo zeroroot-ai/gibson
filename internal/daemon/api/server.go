@@ -800,6 +800,10 @@ type CreateMissionResultData struct {
 // validated and persisted by the handler.
 type CreateMissionDefinitionData struct {
 	Definition *missionpb.MissionDefinition
+	// CueSource is the raw CUE the definition compiled from. Persisted
+	// alongside the definition so GetMissionDefinition can return the author's
+	// exact source. Optional. gibson#504.
+	CueSource string
 }
 
 // CreateMissionDefinitionResultData represents the result of registering a
@@ -813,6 +817,9 @@ type CreateMissionDefinitionResultData struct {
 // UpdateMissionDefinition. The Definition.Name is the lookup key.
 type UpdateMissionDefinitionData struct {
 	Definition *missionpb.MissionDefinition
+	// CueSource is the raw CUE the replacement definition compiled from.
+	// Overwrites the stored source in place. Optional. gibson#504.
+	CueSource string
 }
 
 // UpdateMissionDefinitionResultData is returned by UpdateMissionDefinition.
@@ -2441,7 +2448,10 @@ func (s *DaemonServer) CreateMissionDefinition(ctx context.Context, req *daemonp
 		return nil, status_grpc.Errorf(codes.InvalidArgument, "definition name is required")
 	}
 
-	result, err := s.daemon.CreateMissionDefinition(ctx, CreateMissionDefinitionData{Definition: def})
+	result, err := s.daemon.CreateMissionDefinition(ctx, CreateMissionDefinitionData{
+		Definition: def,
+		CueSource:  req.GetCueSource(),
+	})
 	if err != nil {
 		s.logger.Error("failed to create mission definition", "error", err, "name", def.GetName())
 		if strings.Contains(err.Error(), "already exists") {

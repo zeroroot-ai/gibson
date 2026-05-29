@@ -30,6 +30,7 @@ func (s *DaemonServer) UpdateMissionDefinition(ctx context.Context, req *daemonp
 
 	result, err := s.daemon.UpdateMissionDefinition(ctx, UpdateMissionDefinitionData{
 		Definition: req.GetDefinition(),
+		CueSource:  req.GetCueSource(),
 	})
 	if err != nil {
 		if errors.Is(err, mission.ErrDefinitionNotFound) {
