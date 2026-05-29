@@ -56,8 +56,16 @@ func (s *DaemonServer) GetMissionDefinition(ctx context.Context, req *daemonpb.G
 		return nil, status_grpc.Errorf(codes.NotFound, "mission definition %q not found", req.GetName())
 	}
 
+	// Return the author's raw CUE source when present. Empty for definitions
+	// registered before source persistence or without a source. gibson#504.
+	cueSource, srcErr := store.GetDefinitionSource(ctx, req.GetName())
+	if srcErr != nil {
+		return nil, status_grpc.Errorf(codes.Internal, "GetMissionDefinition: source get failed: %v", srcErr)
+	}
+
 	return &daemonpb.GetMissionDefinitionResponse{
 		MissionDefinitionId: def.GetId(),
 		Definition:          def,
+		CueSource:           cueSource,
 	}, nil
 }

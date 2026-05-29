@@ -2680,6 +2680,12 @@ func (d *daemonImpl) CreateMissionDefinition(ctx context.Context, req api.Create
 		return api.CreateMissionDefinitionResultData{}, fmt.Errorf("failed to create mission definition: %w", err)
 	}
 
+	// Persist the raw CUE source alongside the compiled definition so
+	// GetMissionDefinition can return the author's exact source. gibson#504.
+	if err := mStoreForCreate.SetDefinitionSource(ctx, def.GetName(), req.CueSource); err != nil {
+		d.logger.Warn(ctx, "failed to persist definition cue source", "error", err, "name", def.GetName())
+	}
+
 	d.logger.Info(ctx, "mission definition registered",
 		"mission_definition_id", def.GetId(),
 		"name", def.GetName(),
@@ -2741,6 +2747,11 @@ func (d *daemonImpl) UpdateMissionDefinition(ctx context.Context, req api.Update
 	if err := mStore.UpdateDefinition(ctx, def); err != nil {
 		d.logger.Error(ctx, "failed to update mission definition", "name", def.GetName(), "error", err)
 		return api.UpdateMissionDefinitionResultData{}, fmt.Errorf("failed to update mission definition: %w", err)
+	}
+
+	// Overwrite the stored CUE source in place under the stable id. gibson#504.
+	if err := mStore.SetDefinitionSource(ctx, def.GetName(), req.CueSource); err != nil {
+		d.logger.Warn(ctx, "failed to persist definition cue source on update", "error", err, "name", def.GetName())
 	}
 
 	d.logger.Info(ctx, "mission definition updated",
