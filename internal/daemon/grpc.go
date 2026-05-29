@@ -2505,10 +2505,17 @@ func (d *daemonImpl) CreateMission(ctx context.Context, req api.CreateMissionDat
 		return api.CreateMissionResultData{}, fmt.Errorf("mission_definition_id is required")
 	}
 
-	targetID, err := types.ParseID(req.TargetID)
-	if err != nil {
-		return api.CreateMissionResultData{}, fmt.Errorf("invalid target_id: %w", err)
+	// Resolve the target by UUID only, via the same shared path RunMission uses:
+	// a non-UUID target_id is invalid, and a missing or cross-tenant target is
+	// not-found. No name resolution.
+	if d.targetStore == nil {
+		return api.CreateMissionResultData{}, fmt.Errorf("target store not initialized")
 	}
+	resolvedTarget, err := resolveTargetUUID(ctx, d.targetStore, req.TargetID, tenantFromCtxOrSystem(ctx).String())
+	if err != nil {
+		return api.CreateMissionResultData{}, err
+	}
+	targetID := resolvedTarget.ID
 	missionDefinitionID, err := types.ParseID(req.MissionDefinitionID)
 	if err != nil {
 		return api.CreateMissionResultData{}, fmt.Errorf("invalid mission_definition_id: %w", err)
