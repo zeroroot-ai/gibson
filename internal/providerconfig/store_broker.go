@@ -217,6 +217,27 @@ func (s *brokerBackedStore) List(ctx context.Context, tenantID string) ([]*Provi
 		return nil, err
 	}
 
+	// If no row has is_default=true (e.g. set via legacy SetDefault that only
+	// wrote provider_config_meta), fall back to the meta key to determine which
+	// provider is the default and mark it in the result.
+	hasDefault := false
+	for _, m := range metas {
+		if m.IsDefault {
+			hasDefault = true
+			break
+		}
+	}
+	if !hasDefault && len(metas) > 0 {
+		if defaultName, metaErr := dao.getDefault(ctx); metaErr == nil && defaultName != "" {
+			for _, m := range metas {
+				if m.Name == defaultName {
+					m.IsDefault = true
+					break
+				}
+			}
+		}
+	}
+
 	result := make([]*ProviderConfig, 0, len(metas))
 	for _, meta := range metas {
 		creds, err := s.getCredentials(ctx, tenantID, meta.Name)
