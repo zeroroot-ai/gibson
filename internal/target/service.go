@@ -15,6 +15,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"strings"
 	"time"
 
 	"github.com/zeroroot-ai/gibson/internal/types"
@@ -69,6 +70,7 @@ func (s *Service) Create(ctx context.Context, tenantID string, t *types.Target) 
 	}
 	t.ID = types.NewID()
 	t.TenantID = tenantID
+	applyTargetDefaults(t)
 	now := time.Now()
 	if t.CreatedAt.IsZero() {
 		t.CreatedAt = now
@@ -78,6 +80,22 @@ func (s *Service) Create(ctx context.Context, tenantID string, t *types.Target) 
 		return nil, fmt.Errorf("create target: %w", err)
 	}
 	return t, nil
+}
+
+// applyTargetDefaults fills the fields the daemon's Target.Validate requires but
+// that a metadata-only caller (dashboard form, CLI, mission pre-step) may omit:
+// a non-empty type, an active status, and a Connection populated from a bare URL.
+// Without these, validation rejects every create with a cryptic error.
+func applyTargetDefaults(t *types.Target) {
+	if strings.TrimSpace(t.Type) == "" {
+		t.Type = string(types.TargetTypeCustom)
+	}
+	if t.Status == "" {
+		t.Status = types.TargetStatusActive
+	}
+	if len(t.Connection) == 0 && strings.TrimSpace(t.URL) != "" {
+		t.Connection = map[string]any{"url": t.URL}
+	}
 }
 
 // Get returns the target with the given UUID, provided it belongs to the
@@ -160,6 +178,7 @@ func (s *Service) Update(ctx context.Context, tenantID string, t *types.Target) 
 	t.ID = existing.ID
 	t.TenantID = existing.TenantID
 	t.CreatedAt = existing.CreatedAt
+	applyTargetDefaults(t)
 	t.UpdatedAt = time.Now()
 	if err := s.store.Update(ctx, t); err != nil {
 		return nil, fmt.Errorf("update target: %w", err)

@@ -73,6 +73,11 @@ func TestCreate_MintsUUIDStampsTenant(t *testing.T) {
 	assert.False(t, got.CreatedAt.IsZero())
 	assert.False(t, got.UpdatedAt.IsZero())
 
+	// Defaults are applied so the daemon's Target.Validate passes for a
+	// metadata-only caller (no type/status supplied).
+	assert.Equal(t, "custom", got.Type, "type defaults to custom")
+	assert.Equal(t, types.TargetStatusActive, got.Status, "status defaults to active")
+
 	// Retrievable by its minted UUID within the same tenant.
 	fetched, err := svc.Get(context.Background(), tenantA, got.ID.String())
 	require.NoError(t, err)

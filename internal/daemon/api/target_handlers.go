@@ -3,6 +3,7 @@ package api
 import (
 	"context"
 	"errors"
+	"strings"
 
 	"google.golang.org/grpc/codes"
 	status_grpc "google.golang.org/grpc/status"
@@ -236,6 +237,11 @@ func mapTargetError(err error) error {
 		return status_grpc.Errorf(codes.InvalidArgument, "%v", err)
 	case errors.Is(err, target.ErrTenantRequired):
 		return status_grpc.Error(codes.Internal, "no tenant in context")
+	case err != nil && strings.Contains(err.Error(), "validation"):
+		// Store-level validation (missing endpoint, bad provider, etc.) is a
+		// caller error, not an internal fault — surface it as InvalidArgument
+		// with the message so the dashboard/CLI can show what to fix.
+		return status_grpc.Errorf(codes.InvalidArgument, "%v", err)
 	default:
 		return preserveStatus(err, "target operation failed")
 	}
