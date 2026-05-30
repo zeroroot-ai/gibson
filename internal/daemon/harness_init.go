@@ -10,6 +10,7 @@ import (
 	"github.com/zeroroot-ai/gibson/internal/harness"
 	"github.com/zeroroot-ai/gibson/internal/harness/middleware"
 	"github.com/zeroroot-ai/gibson/internal/llm"
+	"github.com/zeroroot-ai/gibson/internal/llm/modelgate"
 	"github.com/zeroroot-ai/gibson/internal/llm/providers"
 	"github.com/zeroroot-ai/gibson/internal/memory"
 	"github.com/zeroroot-ai/gibson/internal/providerconfig"
@@ -91,6 +92,12 @@ func (d *daemonImpl) newHarnessFactory(ctx context.Context) (harness.HarnessFact
 			return nil, nil, err
 		}
 		sm := NewDaemonSlotManager(set.Registry, d.logger.WithComponent("slot-manager").Slog())
+		// Hard-enforce the FGA model-access gate on every per-tenant slot
+		// resolution (gibson#527): the acting principal (user / team-inherited /
+		// agent CG, from ctx) must be permitted to use the resolved model.
+		if d.authorizer != nil {
+			sm.WithModelFilter(modelgate.NewFGAFilter(d.authorizer, d.logger.Slog(), 0))
+		}
 		return sm, set.Registry, nil
 	}
 
