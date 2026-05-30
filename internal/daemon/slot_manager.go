@@ -5,6 +5,7 @@ import (
 	"errors"
 	"fmt"
 	"log/slog"
+	"sort"
 	"strings"
 	"sync"
 
@@ -41,6 +42,12 @@ type DaemonSlotManager struct {
 	// onResolve is fired after every successful slot resolution. Used
 	// by the daemon to emit model_resolved audit events.
 	onResolve func(ctx context.Context, picked modelgate.Candidate, allowed bool)
+
+	// defaultProvider is the tenant's default provider name. When a slot has no
+	// explicit provider, resolution prefers this provider before falling back to
+	// a deterministic (sorted) scan of the remaining providers. Empty = no
+	// default. Set per-tenant via WithDefaultProvider (gibson#531).
+	defaultProvider string
 }
 
 // NewDaemonSlotManager creates a new DaemonSlotManager with the given LLM registry.
@@ -68,6 +75,16 @@ func (m *DaemonSlotManager) SetProviderEnvVars(envVars map[string]string) {
 // calling user's FGA can_use grants against the picked (provider, model).
 // Pass nil to disable gating (which is also the default — permit-all).
 // Spec: llm-user-attribution-governance Requirement 4.
+// WithDefaultProvider sets the tenant's default provider, preferred when a slot
+// has no explicit provider (gibson#531). Makes resolution deterministic and
+// default-respecting instead of arbitrary "first available".
+func (m *DaemonSlotManager) WithDefaultProvider(name string) *DaemonSlotManager {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	m.defaultProvider = name
+	return m
+}
+
 func (m *DaemonSlotManager) WithModelFilter(f modelgate.Filter) *DaemonSlotManager {
 	m.mu.Lock()
 	defer m.mu.Unlock()
@@ -317,12 +334,15 @@ func (m *DaemonSlotManager) resolveByConstraints(ctx context.Context, slot agent
 		)
 	}
 
-	// Define provider preference order based on slot config
+	// Provider preference order: an explicit slot provider first, then the
+	// tenant's default provider (gibson#531) — never a hardcoded preference.
 	preferredProviders := []string{}
 	if config.Provider != "" {
 		preferredProviders = append(preferredProviders, config.Provider)
 	}
-	// DO NOT add hardcoded providers here anymore
+	if m.defaultProvider != "" && m.defaultProvider != config.Provider {
+		preferredProviders = append(preferredProviders, m.defaultProvider)
+	}
 
 	// Try preferred providers first
 	for _, providerName := range preferredProviders {
@@ -332,8 +352,13 @@ func (m *DaemonSlotManager) resolveByConstraints(ctx context.Context, slot agent
 		}
 	}
 
+	// Deterministic fallback: scan remaining providers in a stable (sorted)
+	// order so selection never depends on map-iteration order (gibson#531).
+	sortedNames := append([]string(nil), providerNames...)
+	sort.Strings(sortedNames)
+
 	// Try all other registered providers
-	for _, providerName := range providerNames {
+	for _, providerName := range sortedNames {
 		// Skip if already tried in preferred list
 		alreadyTried := false
 		for _, preferred := range preferredProviders {

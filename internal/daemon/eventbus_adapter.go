@@ -3,6 +3,7 @@ package daemon
 import (
 	"context"
 	"fmt"
+	"sort"
 	"strings"
 	"time"
 
@@ -481,17 +482,23 @@ func formatParameters(params map[string]any) string {
 		return "no parameters"
 	}
 
-	// Create a simple summary of parameters (just keys, not values for security)
-	summary := "parameters: "
-	count := 0
+	// Create a simple summary of parameters (just keys, not values for security).
+	// Keys are sorted so the summary is deterministic — map iteration order is
+	// not stable and made this flaky (gibson#536).
+	keys := make([]string, 0, len(params))
 	for key := range params {
+		keys = append(keys, key)
+	}
+	sort.Strings(keys)
+
+	summary := "parameters: "
+	for count, key := range keys {
 		if count > 0 {
 			summary += ", "
 		}
 		summary += key
-		count++
 		// Limit to first 5 parameters
-		if count >= 5 {
+		if count+1 >= 5 {
 			if len(params) > 5 {
 				summary += fmt.Sprintf("... (%d total)", len(params))
 			}

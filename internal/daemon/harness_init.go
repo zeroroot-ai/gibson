@@ -92,6 +92,8 @@ func (d *daemonImpl) newHarnessFactory(ctx context.Context) (harness.HarnessFact
 			return nil, nil, err
 		}
 		sm := NewDaemonSlotManager(set.Registry, d.logger.WithComponent("slot-manager").Slog())
+		// Prefer the tenant's default provider for unpinned slots (gibson#531).
+		sm.WithDefaultProvider(set.DefaultName)
 		// Hard-enforce the FGA model-access gate on every per-tenant slot
 		// resolution (gibson#527): the acting principal (user / team-inherited /
 		// agent CG, from ctx) must be permitted to use the resolved model.
