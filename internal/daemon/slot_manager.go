@@ -161,7 +161,7 @@ func (m *DaemonSlotManager) ResolveSlot(ctx context.Context, slot agent.SlotDefi
 	if len(providerNames) == 0 {
 		return nil, llm.ModelInfo{}, types.NewError(
 			llm.ErrNoMatchingProvider,
-			fmt.Sprintf("no LLM providers configured for slot %q - set ANTHROPIC_API_KEY, OPENAI_API_KEY, or configure a provider in ~/.gibson/config.yaml", slot.Name),
+			fmt.Sprintf("no LLM provider configured for this tenant (slot %q) — add one in Settings → Providers", slot.Name),
 		)
 	}
 

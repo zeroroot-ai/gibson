@@ -220,9 +220,12 @@ func (f *DefaultHarnessFactory) Create(agentName string, missionCtx MissionConte
 		}
 	}
 
-	// Per-tenant LLM provider scoping: when wired, resolve the slot manager +
-	// registry for this mission's tenant so slot resolution sees only that
-	// tenant's configured providers. Falls back to the global ones otherwise.
+	// Per-tenant LLM provider scoping (gibson#528): mission/agent execution
+	// resolves slots against the calling tenant's configured providers via
+	// SlotManagerForTenant. The production daemon ALWAYS wires this hook, so the
+	// legacy global config/env registry is never an execution source in prod.
+	// The f.config.SlotManager fallback below exists only as a unit-test seam
+	// (tests inject a slot manager directly without tenant resolution).
 	slotManager := f.config.SlotManager
 	llmRegistry := f.config.LLMRegistry
 	if f.config.SlotManagerForTenant != nil {
