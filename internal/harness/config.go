@@ -46,6 +46,13 @@ type HarnessConfig struct {
 	// This is the only required field - harness creation will fail if nil.
 	SlotManager llm.SlotManager
 
+	// SlotManagerForTenant, when set, produces a tenant-scoped SlotManager +
+	// LLMRegistry for a mission's tenant. The factory calls it on Create with
+	// missionCtx.TenantID so slot resolution sees only that tenant's configured
+	// providers (per-tenant LLM provider scoping). When nil, the global
+	// SlotManager/LLMRegistry above are used (legacy single-tenant path).
+	SlotManagerForTenant func(ctx context.Context, tenantID string) (llm.SlotManager, llm.LLMRegistry, error)
+
 	// ProtoResolver provides dynamic proto type resolution for tool execution.
 	// Used to convert structpb.Struct inputs to typed proto messages using FileDescriptorSets.
 	// Optional: defaults to DefaultProtoResolver with standard configuration if nil.
