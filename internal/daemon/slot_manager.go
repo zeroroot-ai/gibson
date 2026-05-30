@@ -101,11 +101,17 @@ func (m *DaemonSlotManager) applyModelGate(ctx context.Context, slot agent.SlotD
 	if m.modelFilter != nil {
 		permitted, ferr := m.modelFilter.Permitted(ctx, []modelgate.Candidate{picked})
 		if ferr != nil {
-			// Fail open — filter already logs; blocking LLM dispatch on
-			// every FGA blip is worse than missing a gate for a few
-			// seconds. Matches the budget enforcer's Redis-outage
-			// behavior.
-			permitted = []modelgate.Candidate{picked}
+			// Fail closed (gibson#527): a model-access gate is a hard security
+			// boundary. If the authorizer cannot confirm permission, deny rather
+			// than allow — an FGA error must not become an open door to a model.
+			if m.onResolve != nil {
+				m.onResolve(ctx, picked, false)
+			}
+			return types.NewError(
+				llm.ErrNoMatchingProvider,
+				fmt.Sprintf("model_access_denied: authorization check failed for model %q on provider %q (slot %q): %v",
+					model.Name, provider.Name(), slot.Name, ferr),
+			)
 		}
 		allowed = len(permitted) == 1
 	}
