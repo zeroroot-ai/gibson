@@ -2,6 +2,7 @@ package harness
 
 import (
 	"context"
+	"fmt"
 	"log/slog"
 
 	"github.com/zeroroot-ai/gibson/internal/component"
@@ -219,10 +220,27 @@ func (f *DefaultHarnessFactory) Create(agentName string, missionCtx MissionConte
 		}
 	}
 
+	// Per-tenant LLM provider scoping: when wired, resolve the slot manager +
+	// registry for this mission's tenant so slot resolution sees only that
+	// tenant's configured providers. Falls back to the global ones otherwise.
+	slotManager := f.config.SlotManager
+	llmRegistry := f.config.LLMRegistry
+	if f.config.SlotManagerForTenant != nil {
+		sm, reg, err := f.config.SlotManagerForTenant(context.Background(), missionCtx.TenantID)
+		if err != nil {
+			return nil, types.NewError(
+				ErrHarnessInvalidConfig,
+				fmt.Sprintf("failed to resolve providers for tenant %q: %v", missionCtx.TenantID, err),
+			)
+		}
+		slotManager = sm
+		llmRegistry = reg
+	}
+
 	// Create and return DefaultAgentHarness
 	var harness AgentHarness = &DefaultAgentHarness{
-		slotManager:         f.config.SlotManager,
-		llmRegistry:         f.config.LLMRegistry,
+		slotManager:         slotManager,
+		llmRegistry:         llmRegistry,
 		registryAdapter:     f.config.RegistryAdapter,
 		memoryStore:         memoryStore,
 		findingStore:        f.config.FindingStore,

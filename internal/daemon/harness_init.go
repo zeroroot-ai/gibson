@@ -2,12 +2,18 @@ package daemon
 
 import (
 	"context"
+	"fmt"
+	"sync"
 
 	"github.com/zeroroot-ai/gibson/internal/component"
 	"github.com/zeroroot-ai/gibson/internal/graphrag/ingest"
 	"github.com/zeroroot-ai/gibson/internal/harness"
 	"github.com/zeroroot-ai/gibson/internal/harness/middleware"
+	"github.com/zeroroot-ai/gibson/internal/llm"
+	"github.com/zeroroot-ai/gibson/internal/llm/providers"
 	"github.com/zeroroot-ai/gibson/internal/memory"
+	"github.com/zeroroot-ai/gibson/internal/providerconfig"
+	"github.com/zeroroot-ai/gibson/internal/tenantprovider"
 	"github.com/zeroroot-ai/gibson/internal/types"
 	"go.opentelemetry.io/otel/trace"
 )
@@ -58,11 +64,42 @@ func (d *daemonImpl) newHarnessFactory(ctx context.Context) (harness.HarnessFact
 		d.logger.Info(ctx, "initialized Redis work queue for remote component dispatch")
 	}
 
+	// Per-tenant LLM provider scoping (gibson#526): resolve each mission's slot
+	// manager + registry from the calling tenant's configured providers (via the
+	// broker-backed providerconfig store), replacing the global single-tenant
+	// registry. The resolver + store are built lazily on first mission run so the
+	// broker stack is guaranteed wired by then.
+	var (
+		tpOnce     sync.Once
+		tpResolver *tenantprovider.Resolver
+		tpInitErr  error
+	)
+	slotManagerForTenant := func(rctx context.Context, tenantID string) (llm.SlotManager, llm.LLMRegistry, error) {
+		tpOnce.Do(func() {
+			if d.pool == nil || d.secretsService == nil {
+				tpInitErr = fmt.Errorf("per-tenant provider store unavailable (pool/secretsService nil)")
+				return
+			}
+			store := providerconfig.NewBrokerBackedStore(d.pool, d.secretsService)
+			tpResolver = tenantprovider.NewResolver(store, providers.NewProvider)
+		})
+		if tpInitErr != nil {
+			return nil, nil, tpInitErr
+		}
+		set, err := tpResolver.Resolve(rctx, tenantID)
+		if err != nil {
+			return nil, nil, err
+		}
+		sm := NewDaemonSlotManager(set.Registry, d.logger.WithComponent("slot-manager").Slog())
+		return sm, set.Registry, nil
+	}
+
 	// Build HarnessConfig with all required dependencies
 	config := harness.HarnessConfig{
 		// LLM components
-		LLMRegistry: d.infrastructure.llmRegistry,
-		SlotManager: d.infrastructure.slotManager,
+		LLMRegistry:          d.infrastructure.llmRegistry,
+		SlotManager:          d.infrastructure.slotManager,
+		SlotManagerForTenant: slotManagerForTenant,
 
 		// Component registries
 		// PluginRegistry field was removed in plugin-runtime Spec 2 Phase 7;
