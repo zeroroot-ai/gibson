@@ -166,7 +166,7 @@ func TestEventFlow_ToolCallStarted(t *testing.T) {
 			wantEventType:    "tool.started",
 			wantToolName:     "nmap",
 			wantAgentName:    "recon-agent",
-			wantInputSummary: "parameters: target, ports, flags",
+			wantInputSummary: "parameters: flags, ports, target",
 			wantMissionID:    "mission-tool-1",
 		},
 		{

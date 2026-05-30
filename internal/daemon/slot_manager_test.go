@@ -334,11 +334,10 @@ func TestDaemonSlotManager_ResolveSlot_NoProvidersRegistered(t *testing.T) {
 
 	_, _, err := manager.ResolveSlot(ctx, slot, nil)
 	require.Error(t, err)
-	// Check error message includes configuration guidance
-	assert.Contains(t, err.Error(), "no LLM providers configured")
-	assert.Contains(t, err.Error(), "ANTHROPIC_API_KEY")
-	assert.Contains(t, err.Error(), "OPENAI_API_KEY")
-	assert.Contains(t, err.Error(), "config.yaml")
+	// Per-tenant world (gibson#528): the error points to the dashboard, not
+	// env-var/config single-tenant setup.
+	assert.Contains(t, err.Error(), "no LLM provider configured for this tenant")
+	assert.Contains(t, err.Error(), "Settings → Providers")
 }
 
 func TestDaemonSlotManager_ResolveSlot_ProviderNotFound(t *testing.T) {
@@ -681,7 +680,9 @@ func TestResolveByConstraints_NoPreferenceOrder(t *testing.T) {
 	provider, model, err := mgr.ResolveSlot(context.Background(), slot, nil)
 
 	require.NoError(t, err)
-	// Should use first registered provider (zebra), not alphabetically sorted or hardcoded preference
-	assert.Equal(t, "zebra", provider.Name())
-	assert.Equal(t, "zebra-model-1", model.Name)
+	// With no explicit/default provider, the fallback scan is deterministic
+	// (sorted) — never a hardcoded preference and never map-iteration-order
+	// dependent (gibson#531). "alpha" sorts before "zebra".
+	assert.Equal(t, "alpha", provider.Name())
+	assert.Equal(t, "alpha-model-1", model.Name)
 }
