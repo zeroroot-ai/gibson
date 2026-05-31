@@ -1,0 +1,250 @@
+syntax = "proto3";
+
+package gibson.traces.v1;
+
+option go_package = "github.com/zeroroot-ai/gibson/internal/daemon/api/gibson/traces/v1;tracesv1";
+
+import "gibson/auth/v1/options.proto";
+import "google/protobuf/timestamp.proto";
+
+// TracesService is the daemon-mediated gateway for all Langfuse trace reads and
+// feedback writes. The daemon resolves the caller's tenant's Langfuse project
+// credentials server-side and bounds every query to the tenant's project. The
+// dashboard never sees Langfuse host/keys. Every RPC is ext-authz-gated via
+// the tenant member relation.
+//
+// Spec: dashboard-no-backing-store-clients (Module 1 — TracesService).
+service TracesService {
+  // ListTraces returns a paginated, filtered list of traces for the requesting
+  // tenant. Project scoping is implicit — credentials resolve from the tenant's
+  // Langfuse project. Optional filters: pagination, userId, tags, time range.
+  rpc ListTraces(ListTracesRequest) returns (ListTracesResponse) {
+    option (gibson.auth.v1.authz) = {
+      relation: "member",
+      object_type: "tenant",
+      object_deriver: "tenant_from_identity",
+      allowed_identities: 3  // USER | SERVICE
+    };
+  }
+
+  // GetTrace returns the full trace metadata by ID, bounded to the calling
+  // tenant's project. Returns NOT_FOUND when the trace does not exist in this
+  // tenant's project (cross-tenant isolation).
+  rpc GetTrace(GetTraceRequest) returns (GetTraceResponse) {
+    option (gibson.auth.v1.authz) = {
+      relation: "member",
+      object_type: "tenant",
+      object_deriver: "tenant_from_identity",
+      allowed_identities: 3  // USER | SERVICE
+    };
+  }
+
+  // GetObservation returns a single observation by ID, bounded to the calling
+  // tenant's project. Returns NOT_FOUND when the observation does not exist in
+  // this tenant's project.
+  rpc GetObservation(GetObservationRequest) returns (GetObservationResponse) {
+    option (gibson.auth.v1.authz) = {
+      relation: "member",
+      object_type: "tenant",
+      object_deriver: "tenant_from_identity",
+      allowed_identities: 3  // USER | SERVICE
+    };
+  }
+
+  // AddTraceScore writes a feedback score to a trace (chat thumbs-up/down).
+  // The score is persisted in the tenant's Langfuse project.
+  rpc AddTraceScore(AddTraceScoreRequest) returns (AddTraceScoreResponse) {
+    option (gibson.auth.v1.authz) = {
+      relation: "member",
+      object_type: "tenant",
+      object_deriver: "tenant_from_identity",
+      allowed_identities: 3  // USER | SERVICE
+    };
+  }
+}
+
+// ---------------------------------------------------------------------------
+// ListTraces — request/response
+// ---------------------------------------------------------------------------
+
+// ListTracesRequest carries pagination and filter parameters for a trace list.
+// Pagination follows AIP-158: page_size + page_token.
+// page_token encodes an opaque cursor (the 1-based page number as a decimal
+// string for Langfuse offset pagination); omit for the first page.
+message ListTracesRequest {
+  // page_size is the maximum number of traces to return (default 25, max 100).
+  int32 page_size = 1;
+
+  // page_token is an opaque pagination cursor; omit or leave empty for the
+  // first page. Set to the next_page_token from the previous response.
+  string page_token = 2;
+
+  // from_timestamp is an optional ISO-8601 lower bound (inclusive) on trace timestamp.
+  string from_timestamp = 3;
+
+  // to_timestamp is an optional ISO-8601 upper bound on trace timestamp.
+  string to_timestamp = 4;
+
+  // name is an optional substring filter on trace name.
+  string name = 5;
+
+  // user_id restricts results to traces attributed to a single end-user id.
+  string user_id = 6;
+
+  // tags restricts to traces carrying ALL of the specified tags (AND semantics).
+  repeated string tags = 7;
+}
+
+// TraceRecord is a single trace summary returned by ListTraces.
+message TraceRecord {
+  // id is the Langfuse trace ID.
+  string id = 1;
+
+  // name is the trace name.
+  string name = 2;
+
+  // timestamp is the trace creation time.
+  google.protobuf.Timestamp timestamp = 3;
+
+  // tags is the list of tags on the trace.
+  repeated string tags = 4;
+
+  // user_id is the optional end-user ID attributed to this trace.
+  string user_id = 5;
+
+  // session_id is the optional session ID.
+  string session_id = 6;
+
+  // total_tokens is the total token count across all observations.
+  int64 total_tokens = 7;
+
+  // prompt_tokens is the total prompt token count.
+  int64 prompt_tokens = 8;
+
+  // completion_tokens is the total completion token count.
+  int64 completion_tokens = 9;
+
+  // latency_ms is the trace latency in milliseconds.
+  double latency_ms = 10;
+
+  // observation_ids is the list of observation IDs in this trace.
+  repeated string observation_ids = 11;
+}
+
+// ListTracesResponse carries a page of trace records and an AIP-158 cursor.
+message ListTracesResponse {
+  // traces is the list of trace summaries for the current page.
+  repeated TraceRecord traces = 1;
+
+  // next_page_token is the pagination cursor for the next page. Empty when
+  // there are no more results.
+  string next_page_token = 2;
+
+  // total_items is the total number of traces matching the filter.
+  int64 total_items = 3;
+}
+
+// ---------------------------------------------------------------------------
+// GetTrace — request/response
+// ---------------------------------------------------------------------------
+
+// GetTraceRequest fetches a single trace by ID.
+message GetTraceRequest {
+  // trace_id is the Langfuse trace ID to fetch.
+  string trace_id = 1;
+}
+
+// GetTraceResponse carries the full trace record.
+message GetTraceResponse {
+  // trace is the fetched trace record.
+  TraceRecord trace = 1;
+}
+
+// ---------------------------------------------------------------------------
+// GetObservation — request/response
+// ---------------------------------------------------------------------------
+
+// GetObservationRequest fetches a single observation by ID.
+message GetObservationRequest {
+  // observation_id is the Langfuse observation ID to fetch.
+  string observation_id = 1;
+}
+
+// ObservationRecord is a single observation (span, generation, or event).
+message ObservationRecord {
+  // id is the Langfuse observation ID.
+  string id = 1;
+
+  // trace_id is the parent trace ID.
+  string trace_id = 2;
+
+  // type is the observation type: GENERATION, SPAN, or EVENT.
+  string type = 3;
+
+  // name is the observation name.
+  string name = 4;
+
+  // start_time is the observation start time.
+  google.protobuf.Timestamp start_time = 5;
+
+  // end_time is the optional observation end time.
+  google.protobuf.Timestamp end_time = 6;
+
+  // parent_observation_id is the optional parent observation ID.
+  string parent_observation_id = 7;
+
+  // model is the optional LLM model name used (for GENERATION type).
+  string model = 8;
+
+  // input_json is the JSON-serialised input to this observation.
+  string input_json = 9;
+
+  // output_json is the JSON-serialised output from this observation.
+  string output_json = 10;
+
+  // metadata_json is the JSON-serialised metadata map.
+  string metadata_json = 11;
+
+  // prompt_tokens is the prompt token count (GENERATION only).
+  int64 prompt_tokens = 12;
+
+  // completion_tokens is the completion token count (GENERATION only).
+  int64 completion_tokens = 13;
+
+  // total_tokens is the total token count.
+  int64 total_tokens = 14;
+
+  // level is the observation log level: DEBUG, DEFAULT, WARNING, ERROR.
+  string level = 15;
+
+  // status_message is the optional status or error message.
+  string status_message = 16;
+}
+
+// GetObservationResponse carries the fetched observation.
+message GetObservationResponse {
+  // observation is the fetched observation record.
+  ObservationRecord observation = 1;
+}
+
+// ---------------------------------------------------------------------------
+// AddTraceScore — request/response
+// ---------------------------------------------------------------------------
+
+// AddTraceScoreRequest writes a feedback score to a trace.
+message AddTraceScoreRequest {
+  // trace_id is the Langfuse trace ID to score.
+  string trace_id = 1;
+
+  // name is the score name (e.g. "user_feedback", "thumbs").
+  string name = 2;
+
+  // value is the numeric score value (e.g. 1.0 = positive, 0.0 = negative).
+  double value = 3;
+
+  // comment is an optional free-text comment from the user.
+  string comment = 4;
+}
+
+// AddTraceScoreResponse is returned on successful score submission.
+message AddTraceScoreResponse {}
