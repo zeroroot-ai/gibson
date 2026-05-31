@@ -2823,6 +2823,16 @@ var Registry = map[string]Entry{
 		Unauthenticated:   false,
 		Self:              false,
 	},
+	"/gibson.user.v1.UserService/SaveConversation": {
+		Method:            "/gibson.user.v1.UserService/SaveConversation",
+		Service:           "gibson.user.v1.UserService",
+		Relation:          "member",
+		ObjectType:        "tenant",
+		ObjectDeriver:     "tenant_from_identity",
+		AllowedIdentities: IdentityUser | IdentityService,
+		Unauthenticated:   false,
+		Self:              false,
+	},
 	"/gibson.user.v1.UserService/UpdateUserProfile": {
 		Method:            "/gibson.user.v1.UserService/UpdateUserProfile",
 		Service:           "gibson.user.v1.UserService",

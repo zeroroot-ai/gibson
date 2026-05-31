@@ -948,6 +948,13 @@ func (s *DaemonServer) WithConversationStore(store conversationStoreIface) *Daem
 	return s
 }
 
+// GetConversationStore returns the wired conversation store, or nil if not yet
+// wired. Used by the daemon bootstrap to assert the store was wired before
+// the gRPC server starts accepting requests (dashboard#549 fail-loud requirement).
+func (s *DaemonServer) GetConversationStore() conversationStoreIface {
+	return s.conversationStore
+}
+
 // WithCapabilityGrantService wires the CapabilityGrantService so that the Agent Auth
 // Protocol RPCs are backed by Postgres storage and FGA authorization.
 // Added by agent-auth-fga-integration spec.

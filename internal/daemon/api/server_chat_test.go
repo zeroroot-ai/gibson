@@ -13,6 +13,7 @@ import (
 	"google.golang.org/grpc/codes"
 
 	userv1 "github.com/zeroroot-ai/gibson/internal/daemon/api/gibson/user/v1"
+	"github.com/zeroroot-ai/sdk/auth"
 )
 
 // ---------------------------------------------------------------------------
@@ -79,13 +80,14 @@ func (m *mockConversationStore) Get(_ context.Context, _, _ string) (*storedConv
 // ListConversations tests
 // ---------------------------------------------------------------------------
 
-func TestListConversations_EmptyTenantIDFallsBackToSystemTenant_NilStoreReturnsEmpty(t *testing.T) {
+func TestListConversations_EmptyTenantID_NilStore_Internal(t *testing.T) {
 	// Empty TenantId falls back to auth.TenantFromContext (returns SystemTenant).
-	// With nil conversationStore, the handler returns empty list successfully.
+	// With nil conversationStore, the handler now returns codes.Internal (not empty)
+	// because a nil store is a bootstrap defect per dashboard#549.
 	srv := blankServer()
-	resp, err := srv.ListConversations(context.Background(), &userv1.ListConversationsRequest{TenantId: "", UserId: "u1"})
-	require.NoError(t, err)
-	assert.Empty(t, resp.Conversations)
+	_, err := srv.ListConversations(context.Background(), &userv1.ListConversationsRequest{TenantId: "", UserId: "u1"})
+	// Empty tenant → InvalidArgument (tenant check comes before nil-store check)
+	assert.Equal(t, codes.InvalidArgument, grpcCode(err))
 }
 
 func TestListConversations_MissingUserID_InvalidArgument(t *testing.T) {
@@ -94,12 +96,11 @@ func TestListConversations_MissingUserID_InvalidArgument(t *testing.T) {
 	assert.Equal(t, codes.InvalidArgument, grpcCode(err))
 }
 
-func TestListConversations_NilStore_ReturnsEmpty(t *testing.T) {
-	// Nil conversationStore → returns empty list, not error.
+func TestListConversations_NilStore_Internal(t *testing.T) {
+	// Nil conversationStore is a bootstrap defect (dashboard#549) → codes.Internal.
 	srv := blankServer()
-	resp, err := srv.ListConversations(context.Background(), &userv1.ListConversationsRequest{TenantId: "acme", UserId: "u1"})
-	require.NoError(t, err)
-	assert.Empty(t, resp.Conversations)
+	_, err := srv.ListConversations(context.Background(), &userv1.ListConversationsRequest{TenantId: "acme", UserId: "u1"})
+	assert.Equal(t, codes.Internal, grpcCode(err))
 }
 
 func TestListConversations_StoreError_Internal(t *testing.T) {
@@ -136,15 +137,16 @@ func TestListConversations_Success_ReturnsMapped(t *testing.T) {
 // GetConversation tests
 // ---------------------------------------------------------------------------
 
-func TestGetConversation_EmptyTenantIDFallsBackToSystemTenant_NilStoreNotFound(t *testing.T) {
+func TestGetConversation_EmptyTenantID_NilStore_InvalidArgument(t *testing.T) {
 	// Empty TenantId falls back to auth.TenantFromContext (returns SystemTenant).
-	// With nil conversationStore, the handler returns NotFound.
+	// With nil store and empty tenant, the handler returns InvalidArgument now.
 	srv := blankServer()
 	_, err := srv.GetConversation(context.Background(), &userv1.GetConversationRequest{
 		TenantId:       "",
 		ConversationId: "c1",
 	})
-	assert.Equal(t, codes.NotFound, grpcCode(err))
+	// Empty tenant → InvalidArgument (tenant check comes before nil-store check)
+	assert.Equal(t, codes.InvalidArgument, grpcCode(err))
 }
 
 func TestGetConversation_MissingConversationID_InvalidArgument(t *testing.T) {
@@ -156,14 +158,14 @@ func TestGetConversation_MissingConversationID_InvalidArgument(t *testing.T) {
 	assert.Equal(t, codes.InvalidArgument, grpcCode(err))
 }
 
-func TestGetConversation_NilStore_NotFound(t *testing.T) {
-	// Nil conversationStore → NotFound (no store = conversation cannot exist).
+func TestGetConversation_NilStore_Internal(t *testing.T) {
+	// Nil conversationStore is a bootstrap defect (dashboard#549) → codes.Internal.
 	srv := blankServer()
 	_, err := srv.GetConversation(context.Background(), &userv1.GetConversationRequest{
 		TenantId:       "acme",
 		ConversationId: "c1",
 	})
-	assert.Equal(t, codes.NotFound, grpcCode(err))
+	assert.Equal(t, codes.Internal, grpcCode(err))
 }
 
 func TestGetConversation_StoreError_NotFound(t *testing.T) {
@@ -201,7 +203,171 @@ func TestGetConversation_Success_ReturnsMappedMessages(t *testing.T) {
 }
 
 // ---------------------------------------------------------------------------
-// Store unit tests: save + list, save + get, cross-tenant isolation, TTL
+// SaveConversation RPC tests
+// ---------------------------------------------------------------------------
+
+func TestSaveConversation_MissingConversationID_InvalidArgument(t *testing.T) {
+	srv := blankServer()
+	srv.conversationStore = &mockConversationStore{}
+	_, err := srv.SaveConversation(context.Background(), &userv1.SaveConversationRequest{
+		TenantId: "acme",
+		UserId:   "u1",
+		Title:    "My Chat",
+	})
+	assert.Equal(t, codes.InvalidArgument, grpcCode(err))
+}
+
+func TestSaveConversation_MissingTenantID_InvalidArgument(t *testing.T) {
+	srv := blankServer()
+	srv.conversationStore = &mockConversationStore{}
+	_, err := srv.SaveConversation(context.Background(), &userv1.SaveConversationRequest{
+		ConversationId: "conv-1",
+		UserId:         "u1",
+		Title:          "My Chat",
+	})
+	assert.Equal(t, codes.InvalidArgument, grpcCode(err))
+}
+
+func TestSaveConversation_MissingUserID_InvalidArgument(t *testing.T) {
+	// No caller identity in context and no UserId in request.
+	srv := blankServer()
+	srv.conversationStore = &mockConversationStore{}
+	_, err := srv.SaveConversation(context.Background(), &userv1.SaveConversationRequest{
+		TenantId:       "acme",
+		ConversationId: "conv-1",
+		Title:          "My Chat",
+	})
+	assert.Equal(t, codes.InvalidArgument, grpcCode(err))
+}
+
+func TestSaveConversation_NilStore_Internal(t *testing.T) {
+	// Nil store is a bootstrap defect → codes.Internal.
+	srv := blankServer()
+	_, err := srv.SaveConversation(context.Background(), &userv1.SaveConversationRequest{
+		TenantId:       "acme",
+		UserId:         "u1",
+		ConversationId: "conv-1",
+		Title:          "My Chat",
+	})
+	assert.Equal(t, codes.Internal, grpcCode(err))
+}
+
+func TestSaveConversation_StoreError_Internal(t *testing.T) {
+	srv := blankServer()
+	srv.conversationStore = &mockConversationStore{saveErr: assert.AnError}
+	_, err := srv.SaveConversation(context.Background(), &userv1.SaveConversationRequest{
+		TenantId:       "acme",
+		UserId:         "u1",
+		ConversationId: "conv-1",
+		Title:          "My Chat",
+	})
+	assert.Equal(t, codes.Internal, grpcCode(err))
+}
+
+func TestSaveConversation_Success_PersistsConversation(t *testing.T) {
+	srv := blankServer()
+	mock := &mockConversationStore{}
+	srv.conversationStore = mock
+
+	// Build request with messages.
+	req := &userv1.SaveConversationRequest{
+		TenantId:       "acme",
+		UserId:         "u1",
+		ConversationId: "conv-1",
+		Title:          "My First Chat",
+		AgentId:        "agent-42",
+		Messages: []*userv1.ConversationMessage{
+			{Id: "m1", Role: "user", Content: "Hello", CreatedAtUnix: 100},
+			{Id: "m2", Role: "assistant", Content: "Hi there", CreatedAtUnix: 200},
+		},
+	}
+
+	resp, err := srv.SaveConversation(context.Background(), req)
+	require.NoError(t, err)
+	require.NotNil(t, resp)
+
+	// Verify the store received correct arguments.
+	require.NotNil(t, mock.saved)
+	assert.Equal(t, "acme", mock.saved.tenantID)
+	assert.Equal(t, "u1", mock.saved.userID)
+	assert.Equal(t, "conv-1", mock.saved.conversationID)
+	assert.Equal(t, "My First Chat", mock.saved.title)
+	assert.Equal(t, "agent-42", mock.saved.agentID)
+	require.Len(t, mock.saved.messages, 2)
+	assert.Equal(t, "m1", mock.saved.messages[0].ID)
+	assert.Equal(t, "user", mock.saved.messages[0].Role)
+	assert.Equal(t, "Hello", mock.saved.messages[0].Content)
+	assert.Equal(t, int64(100), mock.saved.messages[0].CreatedAtUnix)
+}
+
+func TestSaveConversation_CallerIdentityOverridesRequestUserID(t *testing.T) {
+	// When the caller has an authenticated identity, the identity subject
+	// MUST override the request UserId to prevent writing into another user's index.
+	srv := blankServer()
+	mock := &mockConversationStore{}
+	srv.conversationStore = mock
+
+	// Inject caller identity with subject "caller-subject".
+	ctx := auth.WithIdentity(context.Background(), auth.Identity{
+		Subject: "caller-subject",
+	})
+
+	req := &userv1.SaveConversationRequest{
+		TenantId:       "acme",
+		UserId:         "different-user", // attacker tries to write as a different user
+		ConversationId: "conv-1",
+		Title:          "My Chat",
+	}
+
+	_, err := srv.SaveConversation(ctx, req)
+	require.NoError(t, err)
+
+	// The store must have received the caller's identity, not the request UserId.
+	require.NotNil(t, mock.saved)
+	assert.Equal(t, "caller-subject", mock.saved.userID, "caller identity must override request UserId")
+}
+
+func TestSaveConversation_TenantFromContext_WhenRequestTenantEmpty(t *testing.T) {
+	// When request TenantId is empty, tenant is resolved from auth context.
+	srv := blankServer()
+	mock := &mockConversationStore{}
+	srv.conversationStore = mock
+
+	ctx := auth.WithTenant(context.Background(), auth.MustNewTenantID("context-tenant"))
+
+	req := &userv1.SaveConversationRequest{
+		TenantId:       "", // empty — should fall back to context
+		UserId:         "u1",
+		ConversationId: "conv-1",
+		Title:          "My Chat",
+	}
+
+	_, err := srv.SaveConversation(ctx, req)
+	require.NoError(t, err)
+
+	require.NotNil(t, mock.saved)
+	assert.Equal(t, "context-tenant", mock.saved.tenantID)
+}
+
+// ---------------------------------------------------------------------------
+// GetConversationStore accessor — bootstrap nil-store guard test
+// ---------------------------------------------------------------------------
+
+func TestGetConversationStore_NilWhenNotWired(t *testing.T) {
+	srv := &DaemonServer{logger: testSlogLogger}
+	assert.Nil(t, srv.GetConversationStore(), "store must be nil when not wired")
+}
+
+func TestGetConversationStore_NonNilWhenWired(t *testing.T) {
+	srv := &DaemonServer{logger: testSlogLogger}
+	store := newInMemConvStore()
+	srv.WithConversationStore(store)
+	assert.NotNil(t, srv.GetConversationStore(), "store must be non-nil after wiring")
+}
+
+// ---------------------------------------------------------------------------
+// Store unit tests: save + list, save + get, cross-tenant isolation, TTL,
+// newest-first ordering, pagination bounds, user isolation
 //
 // These tests use an in-memory store double (inMemConvStore) that replicates
 // the key-schema and TTL-tracking logic of redisConversationStore, allowing
@@ -263,6 +429,113 @@ func TestConversationStore_SaveAndGet(t *testing.T) {
 	assert.Equal(t, "answer", gotMsgs[1].Content)
 }
 
+// TestConversationStore_RoundTrip_SaveListGet verifies the full round-trip:
+// Save → List includes it → Get returns same data with messages intact.
+func TestConversationStore_RoundTrip_SaveListGet(t *testing.T) {
+	store := newInMemConvStore()
+	ctx := context.Background()
+
+	msgs := []storedMessage{
+		{ID: "m1", Role: "user", Content: "first question", CreatedAtUnix: 1000},
+		{ID: "m2", Role: "assistant", Content: "first answer", CreatedAtUnix: 1001},
+		{ID: "m3", Role: "user", Content: "follow up", CreatedAtUnix: 1002},
+	}
+
+	err := store.Save(ctx, "tenant-RT", "user-RT", "conv-RT", "Round Trip Chat", "agent-RT", msgs)
+	require.NoError(t, err)
+
+	// List returns it.
+	convs, err := store.List(ctx, "tenant-RT", "user-RT", 10)
+	require.NoError(t, err)
+	require.Len(t, convs, 1)
+	assert.Equal(t, "conv-RT", convs[0].ID)
+	assert.Equal(t, "Round Trip Chat", convs[0].Title)
+	assert.Equal(t, int32(3), convs[0].MessageCount)
+
+	// Get returns same data with messages.
+	conv, gotMsgs, err := store.Get(ctx, "tenant-RT", "conv-RT")
+	require.NoError(t, err)
+	assert.Equal(t, convs[0].ID, conv.ID)
+	assert.Equal(t, convs[0].Title, conv.Title)
+	require.Len(t, gotMsgs, 3)
+	assert.Equal(t, "first question", gotMsgs[0].Content)
+	assert.Equal(t, "first answer", gotMsgs[1].Content)
+	assert.Equal(t, "follow up", gotMsgs[2].Content)
+}
+
+// TestConversationStore_NewestFirst verifies that List returns conversations
+// ordered by updated_at descending (newest first).
+//
+// The inMemConvStore uses time.Now().Unix() which has second-level precision.
+// To guarantee distinct scores without sleeping, we manipulate the sorted-set
+// scores directly on the store after each Save — the ordering logic is the
+// same regardless of whether the scores came from the clock or an explicit set.
+func TestConversationStore_NewestFirst(t *testing.T) {
+	store := newInMemConvStore()
+	ctx := context.Background()
+	mem := store.(*inMemConvStore)
+
+	err := store.Save(ctx, "tenant-Order", "user-Order", "conv-oldest", "Oldest", "", nil)
+	require.NoError(t, err)
+	err = store.Save(ctx, "tenant-Order", "user-Order", "conv-middle", "Middle", "", nil)
+	require.NoError(t, err)
+	err = store.Save(ctx, "tenant-Order", "user-Order", "conv-newest", "Newest", "", nil)
+	require.NoError(t, err)
+
+	// Override the scores to guarantee a deterministic order independent of
+	// the system clock's second-level precision.
+	idxKey := convIndexKey("tenant-Order", "user-Order")
+	for i, e := range mem.indexes[idxKey] {
+		switch e.member {
+		case "conv-oldest":
+			mem.indexes[idxKey][i].score = 1000
+		case "conv-middle":
+			mem.indexes[idxKey][i].score = 2000
+		case "conv-newest":
+			mem.indexes[idxKey][i].score = 3000
+		}
+	}
+
+	convs, err := store.List(ctx, "tenant-Order", "user-Order", 10)
+	require.NoError(t, err)
+	require.Len(t, convs, 3)
+
+	// Newest (highest score) must come first.
+	assert.Equal(t, "conv-newest", convs[0].ID, "newest conversation must be first")
+	assert.Equal(t, "conv-middle", convs[1].ID)
+	assert.Equal(t, "conv-oldest", convs[2].ID)
+}
+
+// TestConversationStore_PaginationLimit verifies that List respects the limit parameter.
+func TestConversationStore_PaginationLimit(t *testing.T) {
+	store := newInMemConvStore()
+	ctx := context.Background()
+	mem := store.(*inMemConvStore)
+
+	// Save 5 conversations.
+	for i := 0; i < 5; i++ {
+		id := fmt.Sprintf("conv-%d", i)
+		err := store.Save(ctx, "tenant-Pag", "user-Pag", id, fmt.Sprintf("Chat %d", i), "", nil)
+		require.NoError(t, err)
+	}
+
+	// Override scores to be distinct (clock has second precision).
+	idxKey := convIndexKey("tenant-Pag", "user-Pag")
+	for i := range mem.indexes[idxKey] {
+		mem.indexes[idxKey][i].score = float64(i + 1)
+	}
+
+	// Limit=2 must return exactly 2.
+	convs, err := store.List(ctx, "tenant-Pag", "user-Pag", 2)
+	require.NoError(t, err)
+	assert.Len(t, convs, 2, "limit=2 must return exactly 2 conversations")
+
+	// Limit=0 uses default (20 > 5), so all 5 are returned.
+	convs, err = store.List(ctx, "tenant-Pag", "user-Pag", 0)
+	require.NoError(t, err)
+	assert.Len(t, convs, 5, "limit=0 uses default, returning all 5")
+}
+
 // TestConversationStore_CrossTenantIsolation verifies that tenant A cannot
 // read conversations belonging to tenant B.
 func TestConversationStore_CrossTenantIsolation(t *testing.T) {
@@ -287,6 +560,31 @@ func TestConversationStore_CrossTenantIsolation(t *testing.T) {
 	require.NoError(t, err)
 	require.Len(t, convs, 1)
 	assert.Equal(t, "conv-tenant-a", convs[0].ID)
+}
+
+// TestConversationStore_CrossUserIsolation verifies that user A cannot list
+// user B's conversations within the same tenant (index is keyed by userID).
+func TestConversationStore_CrossUserIsolation(t *testing.T) {
+	store := newInMemConvStore()
+	ctx := context.Background()
+
+	err := store.Save(ctx, "shared-tenant", "user-A", "conv-user-a", "A's private chat", "", nil)
+	require.NoError(t, err)
+
+	err = store.Save(ctx, "shared-tenant", "user-B", "conv-user-b", "B's private chat", "", nil)
+	require.NoError(t, err)
+
+	// user-A's list must not include user-B's conversations.
+	convsA, err := store.List(ctx, "shared-tenant", "user-A", 10)
+	require.NoError(t, err)
+	require.Len(t, convsA, 1)
+	assert.Equal(t, "conv-user-a", convsA[0].ID)
+
+	// user-B's list must not include user-A's conversations.
+	convsB, err := store.List(ctx, "shared-tenant", "user-B", 10)
+	require.NoError(t, err)
+	require.Len(t, convsB, 1)
+	assert.Equal(t, "conv-user-b", convsB[0].ID)
 }
 
 // TestConversationStore_TTLSetOnSave verifies that Save records the TTL for

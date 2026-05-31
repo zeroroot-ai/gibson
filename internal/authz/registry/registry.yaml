@@ -1781,6 +1781,13 @@ entries:
     allowed_identities:
       - USER
       - SERVICE
+  "/gibson.user.v1.UserService/SaveConversation":
+    relation: "member"
+    object_type: "tenant"
+    object_deriver: "tenant_from_identity"
+    allowed_identities:
+      - USER
+      - SERVICE
   "/gibson.user.v1.UserService/UpdateUserProfile":
     relation: "member"
     object_type: "tenant"

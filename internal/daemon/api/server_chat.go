@@ -362,10 +362,6 @@ func (s *DaemonServer) ListConversations(ctx context.Context, req *userv1.ListCo
 		tenantID = auth.TenantStringFromContext(ctx)
 	}
 
-	// Nil store or no tenant: return empty list (graceful degradation).
-	if s.conversationStore == nil && tenantID == "" {
-		return &userv1.ListConversationsResponse{Conversations: []*userv1.ConversationSummary{}}, nil
-	}
 	if tenantID == "" {
 		return nil, status_grpc.Error(codes.InvalidArgument, "tenant_id is required")
 	}
@@ -381,7 +377,10 @@ func (s *DaemonServer) ListConversations(ctx context.Context, req *userv1.ListCo
 	}
 
 	if s.conversationStore == nil {
-		return &userv1.ListConversationsResponse{Conversations: []*userv1.ConversationSummary{}}, nil
+		// Store must always be wired at bootstrap (dashboard#549).
+		// A nil store at runtime indicates a bootstrap defect.
+		s.logger.ErrorContext(ctx, "ListConversations: conversationStore is nil (bootstrap defect)")
+		return nil, status_grpc.Error(codes.Internal, "conversation store not available")
 	}
 
 	stored, err := s.conversationStore.List(ctx, tenantID, userID, int(req.GetLimit()))
@@ -425,12 +424,15 @@ func (s *DaemonServer) GetConversation(ctx context.Context, req *userv1.GetConve
 		tenantID = auth.TenantStringFromContext(ctx)
 	}
 
-	if s.conversationStore == nil {
-		return nil, status_grpc.Error(codes.NotFound, "conversation not found")
-	}
-
 	if tenantID == "" {
 		return nil, status_grpc.Error(codes.InvalidArgument, "tenant_id is required")
+	}
+
+	if s.conversationStore == nil {
+		// Store must always be wired at bootstrap (dashboard#549).
+		// A nil store at runtime indicates a bootstrap defect.
+		s.logger.ErrorContext(ctx, "GetConversation: conversationStore is nil (bootstrap defect)")
+		return nil, status_grpc.Error(codes.Internal, "conversation store not available")
 	}
 
 	conv, msgs, err := s.conversationStore.Get(ctx, tenantID, req.GetConversationId())
@@ -494,7 +496,90 @@ func (s *DaemonServer) saveConversation(
 	messages []storedMessage,
 ) error {
 	if s.conversationStore == nil {
-		return nil
+		// Store must always be wired at bootstrap (dashboard#549).
+		return fmt.Errorf("conversationStore is nil (bootstrap defect)")
 	}
 	return s.conversationStore.Save(ctx, tenantID, userID, conversationID, title, agentID, messages)
+}
+
+// ---------------------------------------------------------------------------
+// SaveConversation handler
+// ---------------------------------------------------------------------------
+
+// SaveConversation persists or updates a conversation and its messages.
+//
+// Authorization: enforced by FGA annotations on the proto (member relation on
+// the tenant object). Cross-tenant isolation is structural: all Redis keys are
+// scoped by the caller's tenantID so a caller cannot write into another tenant's
+// namespace without a different tenantID arriving from ext-authz.
+//
+// User isolation: the userId is resolved from the caller identity, not from the
+// request body, so a caller cannot save into another user's conversation index.
+func (s *DaemonServer) SaveConversation(ctx context.Context, req *userv1.SaveConversationRequest) (*userv1.SaveConversationResponse, error) {
+	if req.GetConversationId() == "" {
+		return nil, status_grpc.Error(codes.InvalidArgument, "conversation_id is required")
+	}
+
+	// Resolve tenant: prefer explicit request field, fall back to auth context.
+	tenantID := req.GetTenantId()
+	if tenantID == "" {
+		tenantID = auth.TenantStringFromContext(ctx)
+	}
+	if tenantID == "" {
+		return nil, status_grpc.Error(codes.InvalidArgument, "tenant_id is required")
+	}
+
+	// Resolve user: always prefer the authenticated caller identity over the
+	// request field to prevent a caller from writing into another user's index.
+	userID := ""
+	if id, err := auth.IdentityFromContext(ctx); err == nil && id.Subject != "" {
+		userID = id.Subject
+	}
+	// Fall back to the request field (e.g. service-account callers that use a
+	// bearer token without an ext-authz user header).
+	if userID == "" {
+		userID = req.GetUserId()
+	}
+	if userID == "" {
+		return nil, status_grpc.Error(codes.InvalidArgument, "user_id is required (no caller identity in context)")
+	}
+
+	if s.conversationStore == nil {
+		// The store must always be wired at bootstrap (per the
+		// no-degradation convention); a nil store at runtime is a bug.
+		s.logger.ErrorContext(ctx, "SaveConversation: conversationStore is nil (bootstrap defect)")
+		return nil, status_grpc.Error(codes.Internal, "conversation store not available")
+	}
+
+	// Map proto messages → storedMessage slice.
+	protoMsgs := req.GetMessages()
+	msgs := make([]storedMessage, 0, len(protoMsgs))
+	for _, m := range protoMsgs {
+		msgs = append(msgs, storedMessage{
+			ID:            m.GetId(),
+			Role:          m.GetRole(),
+			Content:       m.GetContent(),
+			CreatedAtUnix: m.GetCreatedAtUnix(),
+		})
+	}
+
+	if err := s.conversationStore.Save(
+		ctx,
+		tenantID,
+		userID,
+		req.GetConversationId(),
+		req.GetTitle(),
+		req.GetAgentId(),
+		msgs,
+	); err != nil {
+		s.logger.ErrorContext(ctx, "SaveConversation: store write failed",
+			slog.String("tenant_id", tenantID),
+			slog.String("user_id", userID),
+			slog.String("conversation_id", req.GetConversationId()),
+			slog.String("error", err.Error()),
+		)
+		return nil, status_grpc.Error(codes.Internal, "conversation save failed")
+	}
+
+	return &userv1.SaveConversationResponse{}, nil
 }
