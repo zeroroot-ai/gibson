@@ -26,6 +26,7 @@ const (
 	UserService_MarkAllAlertsRead_FullMethodName = "/gibson.user.v1.UserService/MarkAllAlertsRead"
 	UserService_ListConversations_FullMethodName = "/gibson.user.v1.UserService/ListConversations"
 	UserService_GetConversation_FullMethodName   = "/gibson.user.v1.UserService/GetConversation"
+	UserService_SaveConversation_FullMethodName  = "/gibson.user.v1.UserService/SaveConversation"
 )
 
 // UserServiceClient is the client API for UserService service.
@@ -61,6 +62,10 @@ type UserServiceClient interface {
 	//
 	// Unimplemented: <owner-pending>
 	GetConversation(ctx context.Context, in *GetConversationRequest, opts ...grpc.CallOption) (*GetConversationResponse, error)
+	// SaveConversation persists or updates a conversation and its messages.
+	// The caller's tenant and user are used as the scope; a user can only
+	// save conversations belonging to themselves within their tenant.
+	SaveConversation(ctx context.Context, in *SaveConversationRequest, opts ...grpc.CallOption) (*SaveConversationResponse, error)
 }
 
 type userServiceClient struct {
@@ -141,6 +146,16 @@ func (c *userServiceClient) GetConversation(ctx context.Context, in *GetConversa
 	return out, nil
 }
 
+func (c *userServiceClient) SaveConversation(ctx context.Context, in *SaveConversationRequest, opts ...grpc.CallOption) (*SaveConversationResponse, error) {
+	cOpts := append([]grpc.CallOption{grpc.StaticMethod()}, opts...)
+	out := new(SaveConversationResponse)
+	err := c.cc.Invoke(ctx, UserService_SaveConversation_FullMethodName, in, out, cOpts...)
+	if err != nil {
+		return nil, err
+	}
+	return out, nil
+}
+
 // UserServiceServer is the server API for UserService service.
 // All implementations must embed UnimplementedUserServiceServer
 // for forward compatibility.
@@ -174,6 +189,10 @@ type UserServiceServer interface {
 	//
 	// Unimplemented: <owner-pending>
 	GetConversation(context.Context, *GetConversationRequest) (*GetConversationResponse, error)
+	// SaveConversation persists or updates a conversation and its messages.
+	// The caller's tenant and user are used as the scope; a user can only
+	// save conversations belonging to themselves within their tenant.
+	SaveConversation(context.Context, *SaveConversationRequest) (*SaveConversationResponse, error)
 	mustEmbedUnimplementedUserServiceServer()
 }
 
@@ -204,6 +223,9 @@ func (UnimplementedUserServiceServer) ListConversations(context.Context, *ListCo
 }
 func (UnimplementedUserServiceServer) GetConversation(context.Context, *GetConversationRequest) (*GetConversationResponse, error) {
 	return nil, status.Error(codes.Unimplemented, "method GetConversation not implemented")
+}
+func (UnimplementedUserServiceServer) SaveConversation(context.Context, *SaveConversationRequest) (*SaveConversationResponse, error) {
+	return nil, status.Error(codes.Unimplemented, "method SaveConversation not implemented")
 }
 func (UnimplementedUserServiceServer) mustEmbedUnimplementedUserServiceServer() {}
 func (UnimplementedUserServiceServer) testEmbeddedByValue()                     {}
@@ -352,6 +374,24 @@ func _UserService_GetConversation_Handler(srv interface{}, ctx context.Context, 
 	return interceptor(ctx, in, info, handler)
 }
 
+func _UserService_SaveConversation_Handler(srv interface{}, ctx context.Context, dec func(interface{}) error, interceptor grpc.UnaryServerInterceptor) (interface{}, error) {
+	in := new(SaveConversationRequest)
+	if err := dec(in); err != nil {
+		return nil, err
+	}
+	if interceptor == nil {
+		return srv.(UserServiceServer).SaveConversation(ctx, in)
+	}
+	info := &grpc.UnaryServerInfo{
+		Server:     srv,
+		FullMethod: UserService_SaveConversation_FullMethodName,
+	}
+	handler := func(ctx context.Context, req interface{}) (interface{}, error) {
+		return srv.(UserServiceServer).SaveConversation(ctx, req.(*SaveConversationRequest))
+	}
+	return interceptor(ctx, in, info, handler)
+}
+
 // UserService_ServiceDesc is the grpc.ServiceDesc for UserService service.
 // It's only intended for direct use with grpc.RegisterService,
 // and not to be introspected or modified (even as a copy)
@@ -386,6 +426,10 @@ var UserService_ServiceDesc = grpc.ServiceDesc{
 		{
 			MethodName: "GetConversation",
 			Handler:    _UserService_GetConversation_Handler,
+		},
+		{
+			MethodName: "SaveConversation",
+			Handler:    _UserService_SaveConversation_Handler,
 		},
 	},
 	Streams:  []grpc.StreamDesc{},

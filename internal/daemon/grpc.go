@@ -877,11 +877,32 @@ func (d *daemonImpl) buildGRPCServer(ctx context.Context) (*grpcSubsystem, error
 				d.logger.Info(ctx, "reserved-names provider wired for TenantAdminService", "mount_dir", reservednames.DefaultMountDir)
 			}
 
+			// Wire the conversation store backed by Redis.
+			// The conversation store is REQUIRED: a nil store means SaveConversation,
+			// ListConversations, and GetConversation would silently degrade.
+			// Per the no-degradation convention (dashboard#549) we wire here and
+			// fail-loud below if the store could not be constructed.
+			conversationStore := api.NewRedisConversationStore(redisClient, d.logger.Slog())
+			daemonSvc.WithConversationStore(conversationStore)
+			d.logger.Info(ctx, "conversation store wired into DaemonServer (Redis-backed)")
+
 		} else {
 			d.logger.Warn(ctx, "daemon runtime services not wired: Redis client is not standalone mode")
 		}
 	} else {
 		d.logger.Warn(ctx, "daemon runtime services not wired: stateClient is nil")
+	}
+
+	// The conversation store must always be wired by this point (dashboard#549,
+	// no-degradation convention). If Redis was absent or non-standalone, the store
+	// is nil and we fail-loud here rather than silently serving an empty or
+	// Unavailable conversation surface.
+	if daemonSvc.GetConversationStore() == nil {
+		return nil, fmt.Errorf(
+			"daemon: conversation store was not wired; Redis state client is required " +
+				"(stateClient nil or non-standalone mode) — " +
+				"dashboard#549: conversation store must always be present at startup",
+		)
 	}
 
 	daemonpb.RegisterDaemonServiceServer(srv, daemonSvc)

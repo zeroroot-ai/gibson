@@ -96,6 +96,17 @@ service UserService {
       allowed_identities: 3  // USER | SERVICE
     };
   }
+  // SaveConversation persists or updates a conversation and its messages.
+  // The caller's tenant and user are used as the scope; a user can only
+  // save conversations belonging to themselves within their tenant.
+  rpc SaveConversation(SaveConversationRequest) returns (SaveConversationResponse) {
+    option (gibson.auth.v1.authz) = {
+      relation: "member",
+      object_type: "tenant",
+      object_deriver: "tenant_from_identity",
+      allowed_identities: 3  // USER | SERVICE
+    };
+  }
 }
 
 // ---------------------------------------------------------------------------
@@ -326,3 +337,32 @@ message GetConversationResponse {
   // messages contains all messages in the conversation, ordered by creation time.
   repeated ConversationMessage messages = 2;
 }
+
+// ---------------------------------------------------------------------------
+// SaveConversation — request/response messages
+// ---------------------------------------------------------------------------
+
+// SaveConversationRequest carries a conversation and its messages to persist.
+message SaveConversationRequest {
+  // tenant_id is the tenant context. If empty, the caller's tenant is used.
+  string tenant_id = 1;
+
+  // user_id is the owner of the conversation. If empty, the caller's subject is used.
+  string user_id = 2;
+
+  // conversation_id is the stable unique identifier for the conversation.
+  // The store upserts: if a record with this ID already exists it is overwritten.
+  string conversation_id = 3;
+
+  // title is the human-readable conversation title.
+  string title = 4;
+
+  // agent_id is the optional agent associated with this conversation.
+  string agent_id = 5;
+
+  // messages contains all messages in the conversation, ordered by creation time.
+  repeated ConversationMessage messages = 6;
+}
+
+// SaveConversationResponse is returned on successful save.
+message SaveConversationResponse {}
