@@ -29,6 +29,13 @@ type mockConversationStore struct {
 	listErr       error
 	getErr        error
 	saveErr       error
+	renameErr     error
+	deleteErr     error
+
+	// renamedTitle records the last title passed to Rename.
+	renamedTitle string
+	// deletedID records the last conversationID passed to Delete.
+	deletedID string
 }
 
 type savedConvArgs struct {
@@ -74,6 +81,22 @@ func (m *mockConversationStore) Get(_ context.Context, _, _ string) (*storedConv
 		return nil, nil, assert.AnError
 	}
 	return &m.conversations[0], m.messages, nil
+}
+
+func (m *mockConversationStore) Rename(_ context.Context, _, _, newTitle string) error {
+	if m.renameErr != nil {
+		return m.renameErr
+	}
+	m.renamedTitle = newTitle
+	return nil
+}
+
+func (m *mockConversationStore) Delete(_ context.Context, _, _, conversationID string) error {
+	if m.deleteErr != nil {
+		return m.deleteErr
+	}
+	m.deletedID = conversationID
+	return nil
 }
 
 // ---------------------------------------------------------------------------
@@ -782,6 +805,40 @@ func (s *inMemConvStore) Get(_ context.Context, tenantID, conversationID string)
 	return conv, msgs, nil
 }
 
+func (s *inMemConvStore) Rename(_ context.Context, tenantID, conversationID, newTitle string) error {
+	if tenantID == "" || conversationID == "" {
+		return fmt.Errorf("tenant_id and conversation_id are required")
+	}
+	hashKey := convHashKey(tenantID, conversationID)
+	h := s.hashes[hashKey]
+	if h == nil {
+		return fmt.Errorf("conversation not found")
+	}
+	h["title"] = newTitle
+	h["updated_at"] = strconv.FormatInt(time.Now().Unix(), 10)
+	return nil
+}
+
+func (s *inMemConvStore) Delete(_ context.Context, tenantID, userID, conversationID string) error {
+	if tenantID == "" || userID == "" || conversationID == "" {
+		return fmt.Errorf("tenant_id, user_id, and conversation_id are required")
+	}
+	hashKey := convHashKey(tenantID, conversationID)
+	idxKey := convIndexKey(tenantID, userID)
+
+	delete(s.hashes, hashKey)
+
+	// Remove from sorted set.
+	newEntries := make([]zEntry, 0, len(s.indexes[idxKey]))
+	for _, e := range s.indexes[idxKey] {
+		if e.member != conversationID {
+			newEntries = append(newEntries, e)
+		}
+	}
+	s.indexes[idxKey] = newEntries
+	return nil
+}
+
 // ---------------------------------------------------------------------------
 // Parts round-trip tests (slice #550)
 //
@@ -980,4 +1037,285 @@ func TestPartsRoundTrip_StoreRoundTrip_AllPartTypes(t *testing.T) {
 	assert.Equal(t, "att-1", out.Parts[4].GetAttachmentRef().GetAttachmentId())
 	assert.Equal(t, "report.pdf", out.Parts[4].GetAttachmentRef().GetName())
 	assert.Equal(t, "internal thought", out.Parts[5].GetReasoning().GetText())
+}
+
+// ---------------------------------------------------------------------------
+// RenameConversation RPC tests (slice #551)
+// ---------------------------------------------------------------------------
+
+func TestRenameConversation_MissingConversationID_InvalidArgument(t *testing.T) {
+	srv := blankServer()
+	srv.conversationStore = &mockConversationStore{}
+	_, err := srv.RenameConversation(context.Background(), &userv1.RenameConversationRequest{
+		TenantId: "acme",
+		Title:    "New Title",
+	})
+	assert.Equal(t, codes.InvalidArgument, grpcCode(err))
+}
+
+func TestRenameConversation_MissingTitle_InvalidArgument(t *testing.T) {
+	srv := blankServer()
+	srv.conversationStore = &mockConversationStore{}
+	_, err := srv.RenameConversation(context.Background(), &userv1.RenameConversationRequest{
+		TenantId:       "acme",
+		ConversationId: "c1",
+	})
+	assert.Equal(t, codes.InvalidArgument, grpcCode(err))
+}
+
+func TestRenameConversation_MissingTenantID_InvalidArgument(t *testing.T) {
+	srv := blankServer()
+	srv.conversationStore = &mockConversationStore{}
+	_, err := srv.RenameConversation(context.Background(), &userv1.RenameConversationRequest{
+		ConversationId: "c1",
+		Title:          "New Title",
+	})
+	assert.Equal(t, codes.InvalidArgument, grpcCode(err))
+}
+
+func TestRenameConversation_NilStore_Internal(t *testing.T) {
+	srv := blankServer()
+	_, err := srv.RenameConversation(context.Background(), &userv1.RenameConversationRequest{
+		TenantId:       "acme",
+		ConversationId: "c1",
+		Title:          "New Title",
+	})
+	assert.Equal(t, codes.Internal, grpcCode(err))
+}
+
+func TestRenameConversation_NotFound_ReturnsNotFound(t *testing.T) {
+	srv := blankServer()
+	srv.conversationStore = &mockConversationStore{renameErr: fmt.Errorf("conversation not found")}
+	_, err := srv.RenameConversation(context.Background(), &userv1.RenameConversationRequest{
+		TenantId:       "acme",
+		ConversationId: "c1",
+		Title:          "New Title",
+	})
+	assert.Equal(t, codes.NotFound, grpcCode(err))
+}
+
+func TestRenameConversation_StoreError_Internal(t *testing.T) {
+	srv := blankServer()
+	srv.conversationStore = &mockConversationStore{renameErr: fmt.Errorf("redis down")}
+	_, err := srv.RenameConversation(context.Background(), &userv1.RenameConversationRequest{
+		TenantId:       "acme",
+		ConversationId: "c1",
+		Title:          "New Title",
+	})
+	assert.Equal(t, codes.Internal, grpcCode(err))
+}
+
+func TestRenameConversation_Success_UpdatesTitle(t *testing.T) {
+	srv := blankServer()
+	mock := &mockConversationStore{}
+	srv.conversationStore = mock
+
+	_, err := srv.RenameConversation(context.Background(), &userv1.RenameConversationRequest{
+		TenantId:       "acme",
+		ConversationId: "c1",
+		Title:          "Renamed Title",
+	})
+	require.NoError(t, err)
+	assert.Equal(t, "Renamed Title", mock.renamedTitle)
+}
+
+// ---------------------------------------------------------------------------
+// DeleteConversation RPC tests (slice #551)
+// ---------------------------------------------------------------------------
+
+func TestDeleteConversation_MissingConversationID_InvalidArgument(t *testing.T) {
+	srv := blankServer()
+	srv.conversationStore = &mockConversationStore{}
+	ctx := auth.WithIdentity(context.Background(), auth.Identity{Subject: "u1"})
+	_, err := srv.DeleteConversation(ctx, &userv1.DeleteConversationRequest{
+		TenantId: "acme",
+	})
+	assert.Equal(t, codes.InvalidArgument, grpcCode(err))
+}
+
+func TestDeleteConversation_MissingTenantID_InvalidArgument(t *testing.T) {
+	srv := blankServer()
+	srv.conversationStore = &mockConversationStore{}
+	ctx := auth.WithIdentity(context.Background(), auth.Identity{Subject: "u1"})
+	_, err := srv.DeleteConversation(ctx, &userv1.DeleteConversationRequest{
+		ConversationId: "c1",
+	})
+	assert.Equal(t, codes.InvalidArgument, grpcCode(err))
+}
+
+func TestDeleteConversation_NoCallerIdentity_InvalidArgument(t *testing.T) {
+	srv := blankServer()
+	srv.conversationStore = &mockConversationStore{}
+	_, err := srv.DeleteConversation(context.Background(), &userv1.DeleteConversationRequest{
+		TenantId:       "acme",
+		ConversationId: "c1",
+	})
+	assert.Equal(t, codes.InvalidArgument, grpcCode(err))
+}
+
+func TestDeleteConversation_NilStore_Internal(t *testing.T) {
+	srv := blankServer()
+	ctx := auth.WithIdentity(context.Background(), auth.Identity{Subject: "u1"})
+	_, err := srv.DeleteConversation(ctx, &userv1.DeleteConversationRequest{
+		TenantId:       "acme",
+		ConversationId: "c1",
+	})
+	assert.Equal(t, codes.Internal, grpcCode(err))
+}
+
+func TestDeleteConversation_StoreError_Internal(t *testing.T) {
+	srv := blankServer()
+	srv.conversationStore = &mockConversationStore{deleteErr: assert.AnError}
+	ctx := auth.WithIdentity(context.Background(), auth.Identity{Subject: "u1"})
+	_, err := srv.DeleteConversation(ctx, &userv1.DeleteConversationRequest{
+		TenantId:       "acme",
+		ConversationId: "c1",
+	})
+	assert.Equal(t, codes.Internal, grpcCode(err))
+}
+
+func TestDeleteConversation_Success_CallsStoreDelete(t *testing.T) {
+	srv := blankServer()
+	mock := &mockConversationStore{}
+	srv.conversationStore = mock
+	ctx := auth.WithIdentity(context.Background(), auth.Identity{Subject: "u1"})
+
+	_, err := srv.DeleteConversation(ctx, &userv1.DeleteConversationRequest{
+		TenantId:       "acme",
+		ConversationId: "conv-to-delete",
+	})
+	require.NoError(t, err)
+	assert.Equal(t, "conv-to-delete", mock.deletedID)
+}
+
+// ---------------------------------------------------------------------------
+// Store behavior tests: Rename and Delete (slice #551)
+// ---------------------------------------------------------------------------
+
+// TestConversationStore_Rename_UpdatesTitleDurably verifies that Rename updates
+// the title and the update is reflected in both List and Get.
+func TestConversationStore_Rename_UpdatesTitleDurably(t *testing.T) {
+	store := newInMemConvStore()
+	ctx := context.Background()
+
+	err := store.Save(ctx, "tenant-R", "user-R", "conv-R", "Original Title", "", nil)
+	require.NoError(t, err)
+
+	err = store.Rename(ctx, "tenant-R", "conv-R", "Renamed Title")
+	require.NoError(t, err)
+
+	// Get reflects the rename.
+	conv, _, err := store.Get(ctx, "tenant-R", "conv-R")
+	require.NoError(t, err)
+	assert.Equal(t, "Renamed Title", conv.Title)
+
+	// List also reflects the rename.
+	convs, err := store.List(ctx, "tenant-R", "user-R", 10)
+	require.NoError(t, err)
+	require.Len(t, convs, 1)
+	assert.Equal(t, "Renamed Title", convs[0].Title)
+}
+
+// TestConversationStore_Rename_NonExistent_Error verifies that renaming a
+// conversation that does not exist returns an error.
+func TestConversationStore_Rename_NonExistent_Error(t *testing.T) {
+	store := newInMemConvStore()
+	ctx := context.Background()
+
+	err := store.Rename(ctx, "tenant-R", "no-such-conv", "Title")
+	require.Error(t, err)
+	assert.Contains(t, err.Error(), "not found")
+}
+
+// TestConversationStore_Delete_RemovesFromListAndGet verifies that Delete
+// removes the conversation so it no longer appears in List or Get.
+func TestConversationStore_Delete_RemovesFromListAndGet(t *testing.T) {
+	store := newInMemConvStore()
+	ctx := context.Background()
+
+	err := store.Save(ctx, "tenant-D", "user-D", "conv-D", "To Delete", "", nil)
+	require.NoError(t, err)
+
+	err = store.Delete(ctx, "tenant-D", "user-D", "conv-D")
+	require.NoError(t, err)
+
+	// List returns empty.
+	convs, err := store.List(ctx, "tenant-D", "user-D", 10)
+	require.NoError(t, err)
+	assert.Empty(t, convs, "deleted conversation must not appear in List")
+
+	// Get returns not-found.
+	_, _, err = store.Get(ctx, "tenant-D", "conv-D")
+	require.Error(t, err)
+	assert.Contains(t, err.Error(), "not found", "Get must return not-found after Delete")
+}
+
+// TestConversationStore_Delete_Idempotent verifies that deleting a non-existent
+// conversation (or deleting twice) does not return an error.
+func TestConversationStore_Delete_Idempotent(t *testing.T) {
+	store := newInMemConvStore()
+	ctx := context.Background()
+
+	// Delete a conversation that was never saved.
+	err := store.Delete(ctx, "tenant-DI", "user-DI", "never-existed")
+	require.NoError(t, err, "Delete of non-existent conversation must be idempotent")
+
+	// Save and delete, then delete again.
+	_ = store.Save(ctx, "tenant-DI", "user-DI", "conv-x", "X", "", nil)
+	_ = store.Delete(ctx, "tenant-DI", "user-DI", "conv-x")
+	err = store.Delete(ctx, "tenant-DI", "user-DI", "conv-x")
+	require.NoError(t, err, "second Delete must be idempotent")
+}
+
+// TestConversationStore_Delete_TenantUserIsolation verifies that deleting
+// a conversation for (tenant-A, user-A) does not affect (tenant-A, user-B) or
+// (tenant-B, user-A).
+func TestConversationStore_Delete_TenantUserIsolation(t *testing.T) {
+	store := newInMemConvStore()
+	ctx := context.Background()
+
+	// Save conversations for two users in the same tenant, and one in another tenant.
+	_ = store.Save(ctx, "shared", "u-A", "conv-A", "A's chat", "", nil)
+	_ = store.Save(ctx, "shared", "u-B", "conv-B", "B's chat", "", nil)
+	_ = store.Save(ctx, "other", "u-A", "conv-other", "other tenant", "", nil)
+
+	// Delete u-A's conversation in "shared".
+	err := store.Delete(ctx, "shared", "u-A", "conv-A")
+	require.NoError(t, err)
+
+	// u-A's list in "shared" is now empty.
+	convsA, err := store.List(ctx, "shared", "u-A", 10)
+	require.NoError(t, err)
+	assert.Empty(t, convsA, "u-A's conversation must be gone")
+
+	// u-B's list in "shared" is unaffected.
+	convsB, err := store.List(ctx, "shared", "u-B", 10)
+	require.NoError(t, err)
+	require.Len(t, convsB, 1)
+	assert.Equal(t, "conv-B", convsB[0].ID, "u-B's conversation must be intact")
+
+	// u-A's conversation in "other" is unaffected.
+	convOther, _, err := store.Get(ctx, "other", "conv-other")
+	require.NoError(t, err)
+	assert.Equal(t, "conv-other", convOther.ID, "other-tenant conversation must be intact")
+}
+
+// TestConversationStore_Rename_TenantIsolation verifies that Rename using
+// tenant-A's ID cannot affect a conversation stored under tenant-B.
+func TestConversationStore_Rename_TenantIsolation(t *testing.T) {
+	store := newInMemConvStore()
+	ctx := context.Background()
+
+	// Save conversation under tenant-A.
+	_ = store.Save(ctx, "tenant-A", "u", "conv-1", "Tenant A Chat", "", nil)
+
+	// Attempt to rename using tenant-B as scope → must return not-found.
+	err := store.Rename(ctx, "tenant-B", "conv-1", "Hijacked")
+	require.Error(t, err)
+	assert.Contains(t, err.Error(), "not found")
+
+	// The original title in tenant-A must be unchanged.
+	conv, _, err := store.Get(ctx, "tenant-A", "conv-1")
+	require.NoError(t, err)
+	assert.Equal(t, "Tenant A Chat", conv.Title, "title must not have changed")
 }

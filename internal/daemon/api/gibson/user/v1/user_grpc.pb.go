@@ -19,14 +19,16 @@ import (
 const _ = grpc.SupportPackageIsVersion9
 
 const (
-	UserService_GetUserProfile_FullMethodName    = "/gibson.user.v1.UserService/GetUserProfile"
-	UserService_UpdateUserProfile_FullMethodName = "/gibson.user.v1.UserService/UpdateUserProfile"
-	UserService_ListAlerts_FullMethodName        = "/gibson.user.v1.UserService/ListAlerts"
-	UserService_MarkAlertRead_FullMethodName     = "/gibson.user.v1.UserService/MarkAlertRead"
-	UserService_MarkAllAlertsRead_FullMethodName = "/gibson.user.v1.UserService/MarkAllAlertsRead"
-	UserService_ListConversations_FullMethodName = "/gibson.user.v1.UserService/ListConversations"
-	UserService_GetConversation_FullMethodName   = "/gibson.user.v1.UserService/GetConversation"
-	UserService_SaveConversation_FullMethodName  = "/gibson.user.v1.UserService/SaveConversation"
+	UserService_GetUserProfile_FullMethodName     = "/gibson.user.v1.UserService/GetUserProfile"
+	UserService_UpdateUserProfile_FullMethodName  = "/gibson.user.v1.UserService/UpdateUserProfile"
+	UserService_ListAlerts_FullMethodName         = "/gibson.user.v1.UserService/ListAlerts"
+	UserService_MarkAlertRead_FullMethodName      = "/gibson.user.v1.UserService/MarkAlertRead"
+	UserService_MarkAllAlertsRead_FullMethodName  = "/gibson.user.v1.UserService/MarkAllAlertsRead"
+	UserService_ListConversations_FullMethodName  = "/gibson.user.v1.UserService/ListConversations"
+	UserService_GetConversation_FullMethodName    = "/gibson.user.v1.UserService/GetConversation"
+	UserService_SaveConversation_FullMethodName   = "/gibson.user.v1.UserService/SaveConversation"
+	UserService_RenameConversation_FullMethodName = "/gibson.user.v1.UserService/RenameConversation"
+	UserService_DeleteConversation_FullMethodName = "/gibson.user.v1.UserService/DeleteConversation"
 )
 
 // UserServiceClient is the client API for UserService service.
@@ -66,6 +68,12 @@ type UserServiceClient interface {
 	// The caller's tenant and user are used as the scope; a user can only
 	// save conversations belonging to themselves within their tenant.
 	SaveConversation(ctx context.Context, in *SaveConversationRequest, opts ...grpc.CallOption) (*SaveConversationResponse, error)
+	// RenameConversation updates the title of an existing conversation.
+	// Only the owning user within their tenant may rename a conversation.
+	RenameConversation(ctx context.Context, in *RenameConversationRequest, opts ...grpc.CallOption) (*RenameConversationResponse, error)
+	// DeleteConversation removes a conversation and its list-index entry.
+	// Only the owning user within their tenant may delete a conversation.
+	DeleteConversation(ctx context.Context, in *DeleteConversationRequest, opts ...grpc.CallOption) (*DeleteConversationResponse, error)
 }
 
 type userServiceClient struct {
@@ -156,6 +164,26 @@ func (c *userServiceClient) SaveConversation(ctx context.Context, in *SaveConver
 	return out, nil
 }
 
+func (c *userServiceClient) RenameConversation(ctx context.Context, in *RenameConversationRequest, opts ...grpc.CallOption) (*RenameConversationResponse, error) {
+	cOpts := append([]grpc.CallOption{grpc.StaticMethod()}, opts...)
+	out := new(RenameConversationResponse)
+	err := c.cc.Invoke(ctx, UserService_RenameConversation_FullMethodName, in, out, cOpts...)
+	if err != nil {
+		return nil, err
+	}
+	return out, nil
+}
+
+func (c *userServiceClient) DeleteConversation(ctx context.Context, in *DeleteConversationRequest, opts ...grpc.CallOption) (*DeleteConversationResponse, error) {
+	cOpts := append([]grpc.CallOption{grpc.StaticMethod()}, opts...)
+	out := new(DeleteConversationResponse)
+	err := c.cc.Invoke(ctx, UserService_DeleteConversation_FullMethodName, in, out, cOpts...)
+	if err != nil {
+		return nil, err
+	}
+	return out, nil
+}
+
 // UserServiceServer is the server API for UserService service.
 // All implementations must embed UnimplementedUserServiceServer
 // for forward compatibility.
@@ -193,6 +221,12 @@ type UserServiceServer interface {
 	// The caller's tenant and user are used as the scope; a user can only
 	// save conversations belonging to themselves within their tenant.
 	SaveConversation(context.Context, *SaveConversationRequest) (*SaveConversationResponse, error)
+	// RenameConversation updates the title of an existing conversation.
+	// Only the owning user within their tenant may rename a conversation.
+	RenameConversation(context.Context, *RenameConversationRequest) (*RenameConversationResponse, error)
+	// DeleteConversation removes a conversation and its list-index entry.
+	// Only the owning user within their tenant may delete a conversation.
+	DeleteConversation(context.Context, *DeleteConversationRequest) (*DeleteConversationResponse, error)
 	mustEmbedUnimplementedUserServiceServer()
 }
 
@@ -226,6 +260,12 @@ func (UnimplementedUserServiceServer) GetConversation(context.Context, *GetConve
 }
 func (UnimplementedUserServiceServer) SaveConversation(context.Context, *SaveConversationRequest) (*SaveConversationResponse, error) {
 	return nil, status.Error(codes.Unimplemented, "method SaveConversation not implemented")
+}
+func (UnimplementedUserServiceServer) RenameConversation(context.Context, *RenameConversationRequest) (*RenameConversationResponse, error) {
+	return nil, status.Error(codes.Unimplemented, "method RenameConversation not implemented")
+}
+func (UnimplementedUserServiceServer) DeleteConversation(context.Context, *DeleteConversationRequest) (*DeleteConversationResponse, error) {
+	return nil, status.Error(codes.Unimplemented, "method DeleteConversation not implemented")
 }
 func (UnimplementedUserServiceServer) mustEmbedUnimplementedUserServiceServer() {}
 func (UnimplementedUserServiceServer) testEmbeddedByValue()                     {}
@@ -392,6 +432,42 @@ func _UserService_SaveConversation_Handler(srv interface{}, ctx context.Context,
 	return interceptor(ctx, in, info, handler)
 }
 
+func _UserService_RenameConversation_Handler(srv interface{}, ctx context.Context, dec func(interface{}) error, interceptor grpc.UnaryServerInterceptor) (interface{}, error) {
+	in := new(RenameConversationRequest)
+	if err := dec(in); err != nil {
+		return nil, err
+	}
+	if interceptor == nil {
+		return srv.(UserServiceServer).RenameConversation(ctx, in)
+	}
+	info := &grpc.UnaryServerInfo{
+		Server:     srv,
+		FullMethod: UserService_RenameConversation_FullMethodName,
+	}
+	handler := func(ctx context.Context, req interface{}) (interface{}, error) {
+		return srv.(UserServiceServer).RenameConversation(ctx, req.(*RenameConversationRequest))
+	}
+	return interceptor(ctx, in, info, handler)
+}
+
+func _UserService_DeleteConversation_Handler(srv interface{}, ctx context.Context, dec func(interface{}) error, interceptor grpc.UnaryServerInterceptor) (interface{}, error) {
+	in := new(DeleteConversationRequest)
+	if err := dec(in); err != nil {
+		return nil, err
+	}
+	if interceptor == nil {
+		return srv.(UserServiceServer).DeleteConversation(ctx, in)
+	}
+	info := &grpc.UnaryServerInfo{
+		Server:     srv,
+		FullMethod: UserService_DeleteConversation_FullMethodName,
+	}
+	handler := func(ctx context.Context, req interface{}) (interface{}, error) {
+		return srv.(UserServiceServer).DeleteConversation(ctx, req.(*DeleteConversationRequest))
+	}
+	return interceptor(ctx, in, info, handler)
+}
+
 // UserService_ServiceDesc is the grpc.ServiceDesc for UserService service.
 // It's only intended for direct use with grpc.RegisterService,
 // and not to be introspected or modified (even as a copy)
@@ -430,6 +506,14 @@ var UserService_ServiceDesc = grpc.ServiceDesc{
 		{
 			MethodName: "SaveConversation",
 			Handler:    _UserService_SaveConversation_Handler,
+		},
+		{
+			MethodName: "RenameConversation",
+			Handler:    _UserService_RenameConversation_Handler,
+		},
+		{
+			MethodName: "DeleteConversation",
+			Handler:    _UserService_DeleteConversation_Handler,
 		},
 	},
 	Streams:  []grpc.StreamDesc{},

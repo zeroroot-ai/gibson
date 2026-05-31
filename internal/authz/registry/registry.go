@@ -2763,6 +2763,16 @@ var Registry = map[string]Entry{
 		Unauthenticated:   false,
 		Self:              false,
 	},
+	"/gibson.user.v1.UserService/DeleteConversation": {
+		Method:            "/gibson.user.v1.UserService/DeleteConversation",
+		Service:           "gibson.user.v1.UserService",
+		Relation:          "member",
+		ObjectType:        "tenant",
+		ObjectDeriver:     "tenant_from_identity",
+		AllowedIdentities: IdentityUser | IdentityService,
+		Unauthenticated:   false,
+		Self:              false,
+	},
 	"/gibson.user.v1.UserService/GetConversation": {
 		Method:            "/gibson.user.v1.UserService/GetConversation",
 		Service:           "gibson.user.v1.UserService",
@@ -2815,6 +2825,16 @@ var Registry = map[string]Entry{
 	},
 	"/gibson.user.v1.UserService/MarkAllAlertsRead": {
 		Method:            "/gibson.user.v1.UserService/MarkAllAlertsRead",
+		Service:           "gibson.user.v1.UserService",
+		Relation:          "member",
+		ObjectType:        "tenant",
+		ObjectDeriver:     "tenant_from_identity",
+		AllowedIdentities: IdentityUser | IdentityService,
+		Unauthenticated:   false,
+		Self:              false,
+	},
+	"/gibson.user.v1.UserService/RenameConversation": {
+		Method:            "/gibson.user.v1.UserService/RenameConversation",
 		Service:           "gibson.user.v1.UserService",
 		Relation:          "member",
 		ObjectType:        "tenant",

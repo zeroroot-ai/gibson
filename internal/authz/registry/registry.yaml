@@ -1739,6 +1739,13 @@ entries:
     allowed_identities:
       - USER
       - SERVICE
+  "/gibson.user.v1.UserService/DeleteConversation":
+    relation: "member"
+    object_type: "tenant"
+    object_deriver: "tenant_from_identity"
+    allowed_identities:
+      - USER
+      - SERVICE
   "/gibson.user.v1.UserService/GetConversation":
     relation: "member"
     object_type: "tenant"
@@ -1775,6 +1782,13 @@ entries:
       - USER
       - SERVICE
   "/gibson.user.v1.UserService/MarkAllAlertsRead":
+    relation: "member"
+    object_type: "tenant"
+    object_deriver: "tenant_from_identity"
+    allowed_identities:
+      - USER
+      - SERVICE
+  "/gibson.user.v1.UserService/RenameConversation":
     relation: "member"
     object_type: "tenant"
     object_deriver: "tenant_from_identity"
