@@ -22,6 +22,15 @@ type Task struct {
 	CreatedAt    time.Time      `json:"created_at"`
 	Priority     int            `json:"priority"` // Higher = more important
 	Tags         []string       `json:"tags,omitempty"`
+	// SlotOverrides carries per-slot LLM provider/model bindings declared on
+	// the agent node that spawned this task (from AgentNodeConfig.llm_slots).
+	// Keyed by slot name; nil pointer values are ignored (fall-through behavior).
+	// Set by the orchestrator's executeAgent path; consumed by DelegateToAgent
+	// to populate the executing harness's nodeSlotOverrides map.
+	// Empty (nil or zero-length) means no per-node overrides for this execution.
+	//
+	// Spec: per-node-slot-override (gibson#539).
+	SlotOverrides map[string]*SlotConfig `json:"slot_overrides,omitempty"`
 }
 
 // NewTask creates a new task with the given parameters

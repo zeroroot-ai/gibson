@@ -365,6 +365,23 @@ func (a *Actor) executeAgent(ctx context.Context, decision *Decision, missionID 
 		task.Input = node.TaskConfig
 	}
 
+	// Build per-node LLM slot overrides from the sentinel key persisted by
+	// graph_bootstrap.convertToSchemaNode. The "__llm_slots" entry may arrive in
+	// two forms depending on whether it was read from Neo4j (JSON round-trip) or
+	// used in-memory before a round-trip:
+	//   • In-memory form (graph_bootstrap → executeAgent same call): []map[string]string
+	//   • Post-Neo4j form (JSON.Unmarshal into map[string]any): []interface{} where
+	//     each element is map[string]interface{} with string values.
+	// Both forms are handled below. Entries with an empty provider are omitted at
+	// write time so we never encounter them here.
+	// Spec: per-node-slot-override (gibson#539).
+	if rawSlots, ok := node.TaskConfig["__llm_slots"]; ok {
+		overrides := decodeSlotOverrides(rawSlots)
+		if len(overrides) > 0 {
+			task.SlotOverrides = overrides
+		}
+	}
+
 	// Inject agent execution ID into context for callback services
 	// This allows the registry adapter to include AgentRunID in CallbackInfo
 	// The execution.ID is used for provenance tracking (DISCOVERED relationships)
@@ -1983,4 +2000,71 @@ type ResourceMetrics struct {
 	CPUUsage    float64 `json:"cpu_usage,omitempty"`
 	MemoryUsage int64   `json:"memory_usage,omitempty"`
 	NetworkIO   int64   `json:"network_io,omitempty"`
+}
+
+// decodeSlotOverrides converts the raw "__llm_slots" TaskConfig value into a
+// map suitable for agent.Task.SlotOverrides. It handles two wire forms:
+//
+//   - In-memory (bootstrap → first dispatch, no Neo4j round-trip):
+//     []map[string]string{{"slot":…,"provider":…,"model":…}, …}
+//
+//   - Post-Neo4j (JSON round-trip via json.Unmarshal into map[string]any):
+//     []interface{} where each element is map[string]interface{} with string vals.
+//
+// Returns nil when rawSlots does not match either form or has no valid entries.
+// Spec: per-node-slot-override (gibson#539).
+func decodeSlotOverrides(rawSlots any) map[string]*agent.SlotConfig {
+	// Helper that extracts string values from a single entry regardless of form.
+	extractEntry := func(v any) (slot, provider, model string, ok bool) {
+		switch e := v.(type) {
+		case map[string]string:
+			slot = e["slot"]
+			provider = e["provider"]
+			model = e["model"]
+		case map[string]any:
+			slot, _ = e["slot"].(string)
+			provider, _ = e["provider"].(string)
+			model, _ = e["model"].(string)
+		default:
+			return "", "", "", false
+		}
+		if slot == "" || provider == "" {
+			return "", "", "", false
+		}
+		return slot, provider, model, true
+	}
+
+	switch entries := rawSlots.(type) {
+	case []map[string]string:
+		if len(entries) == 0 {
+			return nil
+		}
+		overrides := make(map[string]*agent.SlotConfig, len(entries))
+		for _, e := range entries {
+			if slot, provider, model, ok := extractEntry(e); ok {
+				overrides[slot] = &agent.SlotConfig{Provider: provider, Model: model}
+			}
+		}
+		if len(overrides) == 0 {
+			return nil
+		}
+		return overrides
+
+	case []any:
+		if len(entries) == 0 {
+			return nil
+		}
+		overrides := make(map[string]*agent.SlotConfig, len(entries))
+		for _, raw := range entries {
+			if slot, provider, model, ok := extractEntry(raw); ok {
+				overrides[slot] = &agent.SlotConfig{Provider: provider, Model: model}
+			}
+		}
+		if len(overrides) == 0 {
+			return nil
+		}
+		return overrides
+	}
+
+	return nil
 }

@@ -191,6 +191,19 @@ type DefaultAgentHarness struct {
 	// present. nil means no mission-level cap from this mechanism.
 	// Spec: mission-author-experience M4 (gibson#133).
 	missionConstraints *missionv1.MissionConstraints
+
+	// nodeSlotOverrides carries per-slot LLM provider/model bindings for the
+	// agent node executing through this harness instance. Keyed by slot name;
+	// a nil value for a key means no override for that slot (fall through to
+	// tenant default). Populated from MissionContext.NodeSlotOverrides by
+	// DefaultHarnessFactory.Create.
+	//
+	// Every ResolveSlot call passes nodeSlotOverrides[slot] as the override
+	// argument (nil when absent), so the slot manager's precedence chain is:
+	//   explicit node binding > tenant default > deterministic constraint scan.
+	//
+	// Spec: per-node-slot-override (gibson#539).
+	nodeSlotOverrides map[string]*agent.SlotConfig
 }
 
 // Ensure DefaultAgentHarness implements AgentHarness
@@ -198,6 +211,18 @@ var _ AgentHarness = (*DefaultAgentHarness)(nil)
 
 // Ensure DefaultAgentHarness implements agent.AgentHarness (the minimal interface)
 var _ agent.AgentHarness = (*DefaultAgentHarness)(nil)
+
+// slotOverride returns the per-node SlotConfig override for the named slot, or nil
+// when no override is configured. The nil return preserves the existing fall-through
+// behavior (tenant default → deterministic constraint scan) inside the slot manager.
+//
+// Spec: per-node-slot-override (gibson#539).
+func (h *DefaultAgentHarness) slotOverride(slot string) *agent.SlotConfig {
+	if h.nodeSlotOverrides == nil {
+		return nil
+	}
+	return h.nodeSlotOverrides[slot]
+}
 
 // WithPerCallCapContext wires the per-call token cap into the harness.
 //
@@ -253,8 +278,8 @@ func (h *DefaultAgentHarness) Complete(ctx context.Context, slot string, message
 	// Create slot definition for the named slot
 	slotDef := agent.NewSlotDefinition(slot, "LLM slot", true)
 
-	// Resolve slot to provider and model
-	provider, modelInfo, err := h.slotManager.ResolveSlot(ctx, slotDef, nil)
+	// Resolve slot to provider and model; honor any per-node binding (gibson#539).
+	provider, modelInfo, err := h.slotManager.ResolveSlot(ctx, slotDef, h.slotOverride(slot))
 	if err != nil {
 		h.logger.Error("failed to resolve LLM slot",
 			"slot", slot,
@@ -390,8 +415,8 @@ func (h *DefaultAgentHarness) CompleteWithTools(ctx context.Context, slot string
 	// Create slot definition for the named slot
 	slotDef := agent.NewSlotDefinition(slot, "LLM slot", true)
 
-	// Resolve slot to provider and model
-	provider, modelInfo, err := h.slotManager.ResolveSlot(ctx, slotDef, nil)
+	// Resolve slot to provider and model; honor any per-node binding (gibson#539).
+	provider, modelInfo, err := h.slotManager.ResolveSlot(ctx, slotDef, h.slotOverride(slot))
 	if err != nil {
 		h.logger.Error("failed to resolve LLM slot",
 			"slot", slot,
@@ -524,8 +549,8 @@ func (h *DefaultAgentHarness) Stream(ctx context.Context, slot string, messages 
 	// Create slot definition for the named slot
 	slotDef := agent.NewSlotDefinition(slot, "LLM slot", true)
 
-	// Resolve slot to provider and model
-	provider, modelInfo, err := h.slotManager.ResolveSlot(ctx, slotDef, nil)
+	// Resolve slot to provider and model; honor any per-node binding (gibson#539).
+	provider, modelInfo, err := h.slotManager.ResolveSlot(ctx, slotDef, h.slotOverride(slot))
 	if err != nil {
 		h.logger.Error("failed to resolve LLM slot",
 			"slot", slot,
@@ -1853,6 +1878,12 @@ func (h *DefaultAgentHarness) DelegateToAgent(ctx context.Context, name string, 
 	childMissionCtx := h.missionCtx
 	childMissionCtx.CurrentAgent = name
 	childMissionCtx.DelegationDepth = currentDepth + 1
+	// Per-node slot overrides are node-specific — do NOT inherit the parent's
+	// overrides. Instead, apply the overrides carried by this task (set by the
+	// orchestrator for the executing agent node). Nil means no override for this
+	// execution, which preserves pre-#539 fall-through behavior.
+	// Spec: per-node-slot-override (gibson#539).
+	childMissionCtx.NodeSlotOverrides = task.SlotOverrides
 
 	// Create child harness for the sub-agent
 	childHarness, err := h.factory(ctx, childMissionCtx, h.targetInfo)

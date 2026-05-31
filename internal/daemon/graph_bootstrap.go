@@ -199,6 +199,28 @@ func convertToSchemaNode(missionID types.ID, nodeDef *missionpb.MissionNode, has
 				taskConfig["context"] = typedValueMapToAnyMap(ctx)
 			}
 		}
+		// Persist per-slot LLM bindings (AgentNodeConfig.llm_slots, field 5)
+		// using a sentinel key so executeAgent can rebuild the override map at
+		// dispatch time without touching the proto definition again.
+		// Each entry is {"slot":…,"provider":…,"model":…}; entries with an
+		// empty provider are omitted because they carry no override intent.
+		// Spec: per-node-slot-override (gibson#539).
+		if slots := nodeDef.GetAgentConfig().GetLlmSlots(); len(slots) > 0 {
+			serialized := make([]map[string]string, 0, len(slots))
+			for _, s := range slots {
+				if s.GetProvider() == "" {
+					continue // no override intent — skip
+				}
+				serialized = append(serialized, map[string]string{
+					"slot":     s.GetSlot(),
+					"provider": s.GetProvider(),
+					"model":    s.GetModel(),
+				})
+			}
+			if len(serialized) > 0 {
+				taskConfig["__llm_slots"] = serialized
+			}
+		}
 	case missionpb.NodeType_NODE_TYPE_TOOL:
 		for k, v := range nodeDef.GetToolConfig().GetInput() {
 			taskConfig[k] = v
