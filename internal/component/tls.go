@@ -4,6 +4,7 @@ import (
 	"crypto/tls"
 	"crypto/x509"
 	"fmt"
+	"log/slog"
 	"os"
 )
 
@@ -28,10 +29,19 @@ type TLSConfig struct {
 	// Used for SNI (Server Name Indication) and certificate verification
 	ServerName string
 
-	// InsecureSkipVerify disables server certificate verification
-	// WARNING: Only use for development/testing
-	// Setting this to true makes the connection vulnerable to man-in-the-middle attacks
+	// InsecureSkipVerify disables server certificate verification.
+	// WARNING: makes the connection vulnerable to man-in-the-middle attacks.
+	// This flag ALONE is rejected by BuildTLSConfig (fail-closed) — to actually
+	// disable verification you must ALSO set AllowInsecureSkipVerify. This makes
+	// an accidental InsecureSkipVerify:true fail fast rather than silently
+	// downgrading TLS in production.
 	InsecureSkipVerify bool
+
+	// AllowInsecureSkipVerify is the explicit, deliberately-verbose opt-in that
+	// must accompany InsecureSkipVerify for it to take effect. Intended ONLY for
+	// local development and tests against self-signed certs. Never set this on a
+	// production code path. When honored, BuildTLSConfig logs a loud WARN.
+	AllowInsecureSkipVerify bool
 }
 
 // BuildTLSConfig creates a *tls.Config from the TLSConfig
@@ -63,9 +73,24 @@ func (c *TLSConfig) BuildTLSConfig() (*tls.Config, error) {
 		return nil, nil
 	}
 
+	// Fail-closed: InsecureSkipVerify is only honored alongside the explicit
+	// AllowInsecureSkipVerify dev escape. A bare InsecureSkipVerify:true is a
+	// configuration error rather than a silent TLS downgrade.
+	if c.InsecureSkipVerify && !c.AllowInsecureSkipVerify {
+		return nil, fmt.Errorf(
+			"component/tls: InsecureSkipVerify=true requires the explicit " +
+				"AllowInsecureSkipVerify dev opt-in; refusing to disable certificate " +
+				"verification by default")
+	}
+	if c.InsecureSkipVerify && c.AllowInsecureSkipVerify {
+		slog.Warn("component/tls: TLS certificate verification DISABLED via "+
+			"AllowInsecureSkipVerify — development/test only, never use in production",
+			"server_name", c.ServerName)
+	}
+
 	tlsConfig := &tls.Config{
 		ServerName:         c.ServerName,
-		InsecureSkipVerify: c.InsecureSkipVerify,
+		InsecureSkipVerify: c.InsecureSkipVerify, //nolint:gosec // gated above: only true when AllowInsecureSkipVerify dev opt-in is also set
 	}
 
 	// Load client certificate if provided (for mTLS)
