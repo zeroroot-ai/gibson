@@ -148,10 +148,10 @@ func CompleteStructured[T any](
 		attribute.Bool(genAISchemaStrict, format.Strict),
 	)
 
-	// Resolve slot to provider and model
+	// Resolve slot to provider and model; honor any per-node binding (gibson#539).
 	// Create slot definition for the named slot
 	slotDef := agent.NewSlotDefinition(slot, "LLM slot for structured output", true)
-	provider, modelInfo, err := h.slotManager.ResolveSlot(ctx, slotDef, nil)
+	provider, modelInfo, err := h.slotManager.ResolveSlot(ctx, slotDef, h.slotOverride(slot))
 	if err != nil {
 		h.logger.Error("failed to resolve slot",
 			"slot", slot,
@@ -445,9 +445,9 @@ func (h *DefaultAgentHarness) CompleteWithSchema(
 		attribute.Bool(genAISchemaStrict, format.Strict),
 	)
 
-	// Resolve slot to provider and model
+	// Resolve slot to provider and model; honor any per-node binding (gibson#539).
 	slotDef := agent.NewSlotDefinition(slot, "LLM slot for structured output", true)
-	provider, modelInfo, err := h.slotManager.ResolveSlot(ctx, slotDef, nil)
+	provider, modelInfo, err := h.slotManager.ResolveSlot(ctx, slotDef, h.slotOverride(slot))
 	if err != nil {
 		h.logger.Error("failed to resolve slot",
 			"slot", slot,
@@ -812,9 +812,9 @@ func (h *DefaultAgentHarness) CompleteStructuredAny(
 		attribute.Int("gen_ai.request.message_count", len(messages)),
 	)
 
-	// Resolve slot to provider and model
+	// Resolve slot to provider and model; honor any per-node binding (gibson#539).
 	slotDef := agent.NewSlotDefinition(slot, "LLM slot for structured output", true)
-	provider, modelInfo, err := h.slotManager.ResolveSlot(ctx, slotDef, nil)
+	provider, modelInfo, err := h.slotManager.ResolveSlot(ctx, slotDef, h.slotOverride(slot))
 	if err != nil {
 		h.logger.Error("failed to resolve slot",
 			"slot", slot,
@@ -1094,9 +1094,9 @@ func (h *DefaultAgentHarness) CompleteStructuredAnyWithUsage(
 		}, req.Messages...)
 	}
 
-	// Resolve slot to provider and model
+	// Resolve slot to provider and model; honor any per-node binding (gibson#539).
 	slotDef := agent.NewSlotDefinition(slot, "LLM slot for structured output", true)
-	provider, modelInfo, err := h.slotManager.ResolveSlot(ctx, slotDef, nil)
+	provider, modelInfo, err := h.slotManager.ResolveSlot(ctx, slotDef, h.slotOverride(slot))
 	if err != nil {
 		return nil, fmt.Errorf("failed to resolve slot %s: %w", slot, err)
 	}

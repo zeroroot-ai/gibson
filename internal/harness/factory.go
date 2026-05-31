@@ -270,6 +270,13 @@ func (f *DefaultHarnessFactory) Create(agentName string, missionCtx MissionConte
 		sandboxedExecutor:   f.config.SandboxedExecutor,
 		toolRunnerEnabled:   f.config.ToolRunnerEnabled,
 		quotaCounter:        f.config.QuotaCounter,
+		// Per-node slot overrides: lifted from MissionContext so every
+		// ResolveSlot call within this agent execution sees the node's
+		// declared llm_slots bindings. Child harnesses created by
+		// DelegateToAgent start with their own (possibly empty) overrides
+		// from their own MissionContext — they do NOT inherit these.
+		// Spec: per-node-slot-override (gibson#539).
+		nodeSlotOverrides: missionCtx.NodeSlotOverrides,
 	}
 
 	// Wrap with ComplianceMiddleware BEFORE the OTel / Langfuse middleware so

@@ -6,6 +6,7 @@ import (
 
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
+	"github.com/zeroroot-ai/gibson/internal/agent"
 	"github.com/zeroroot-ai/gibson/internal/types"
 )
 
@@ -422,4 +423,75 @@ func TestTargetInfo_EmptyHeaders(t *testing.T) {
 
 	assert.NotNil(t, target.Headers)
 	assert.Empty(t, target.Headers)
+}
+
+// ────────────────────────────────────────────────────────────────────────────
+// NodeSlotOverrides Tests — Spec: per-node-slot-override (gibson#539)
+// ────────────────────────────────────────────────────────────────────────────
+
+func TestMissionContext_WithNodeSlotOverrides_Populated(t *testing.T) {
+	id := types.NewID()
+	overrides := map[string]*agent.SlotConfig{
+		"primary": {Provider: "anthropic", Model: "claude-3-5-sonnet"},
+		"fast":    {Provider: "openai", Model: "gpt-4o-mini"},
+	}
+
+	ctx := NewMissionContext(id, "test-mission", "test-agent").
+		WithNodeSlotOverrides(overrides)
+
+	require.NotNil(t, ctx.NodeSlotOverrides)
+	require.Len(t, ctx.NodeSlotOverrides, 2)
+	assert.Equal(t, "anthropic", ctx.NodeSlotOverrides["primary"].Provider)
+	assert.Equal(t, "claude-3-5-sonnet", ctx.NodeSlotOverrides["primary"].Model)
+	assert.Equal(t, "openai", ctx.NodeSlotOverrides["fast"].Provider)
+}
+
+func TestMissionContext_WithNodeSlotOverrides_Nil(t *testing.T) {
+	id := types.NewID()
+	ctx := NewMissionContext(id, "test-mission", "test-agent").
+		WithNodeSlotOverrides(nil)
+	assert.Nil(t, ctx.NodeSlotOverrides)
+}
+
+// TestMissionContext_NodeSlotOverrides_NotInheritedByChild verifies that
+// copying a MissionContext and clearing NodeSlotOverrides produces an isolated
+// child context — confirming that the copy-on-assign semantics (maps are
+// reference-typed but assignment replaces the pointer, not the contents) work
+// as expected for the DelegateToAgent path.
+func TestMissionContext_NodeSlotOverrides_NotInheritedByChild(t *testing.T) {
+	id := types.NewID()
+	parent := NewMissionContext(id, "mission", "parent-agent").
+		WithNodeSlotOverrides(map[string]*agent.SlotConfig{
+			"primary": {Provider: "anthropic"},
+		})
+
+	// Simulate what DelegateToAgent does: copy parent ctx, clear overrides.
+	child := parent
+	child.CurrentAgent = "child-agent"
+	child.NodeSlotOverrides = nil // child has its own overrides (none in this case)
+
+	assert.NotNil(t, parent.NodeSlotOverrides, "parent overrides must be unaffected")
+	assert.Nil(t, child.NodeSlotOverrides, "child overrides must be nil")
+}
+
+// TestMissionContext_NodeSlotOverrides_JSONRoundTrip confirms that the
+// NodeSlotOverrides survive a JSON marshal/unmarshal cycle (e.g. when mission
+// context is serialised to/from the wire or a checkpoint).
+func TestMissionContext_NodeSlotOverrides_JSONRoundTrip(t *testing.T) {
+	id := types.NewID()
+	original := NewMissionContext(id, "mission", "agent").
+		WithNodeSlotOverrides(map[string]*agent.SlotConfig{
+			"primary": {Provider: "anthropic", Model: "claude"},
+		})
+
+	data, err := json.Marshal(original)
+	require.NoError(t, err)
+
+	var decoded MissionContext
+	require.NoError(t, json.Unmarshal(data, &decoded))
+
+	require.NotNil(t, decoded.NodeSlotOverrides)
+	require.Contains(t, decoded.NodeSlotOverrides, "primary")
+	assert.Equal(t, "anthropic", decoded.NodeSlotOverrides["primary"].Provider)
+	assert.Equal(t, "claude", decoded.NodeSlotOverrides["primary"].Model)
 }

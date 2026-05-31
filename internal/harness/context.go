@@ -3,6 +3,7 @@ package harness
 import (
 	"context"
 
+	"github.com/zeroroot-ai/gibson/internal/agent"
 	"github.com/zeroroot-ai/gibson/internal/contextkeys"
 	"github.com/zeroroot-ai/gibson/internal/types"
 )
@@ -35,6 +36,18 @@ type MissionContext struct {
 	// DelegateToAgent call increments this by one in the child mission context.
 	// Capped at maxDelegationDepth in the harness to prevent runaway chains.
 	DelegationDepth int `json:"delegation_depth,omitempty"`
+	// NodeSlotOverrides carries per-slot LLM provider/model bindings declared
+	// on the executing agent node (from AgentNodeConfig.llm_slots in the proto
+	// mission definition). Keyed by slot name; a nil value for a given slot name
+	// means no override and resolution falls through to the tenant default.
+	//
+	// These overrides are populated by the orchestrator's executeAgent path from
+	// the stored LLM slot bindings and threaded into the harness by
+	// DefaultHarnessFactory.Create. They are NOT inherited by child harnesses
+	// created during DelegateToAgent — child nodes carry their own bindings.
+	//
+	// Spec: per-node-slot-override (gibson#539).
+	NodeSlotOverrides map[string]*agent.SlotConfig `json:"node_slot_overrides,omitempty"`
 }
 
 // NewMissionContext creates a new mission context with the given ID, name, and current agent.
@@ -92,6 +105,20 @@ func (m MissionContext) WithTenant(tenantID string) MissionContext {
 // WithDelegationDepth sets the delegation depth for sub-agent execution tracking.
 func (m MissionContext) WithDelegationDepth(depth int) MissionContext {
 	m.DelegationDepth = depth
+	return m
+}
+
+// WithNodeSlotOverrides sets the per-slot LLM provider/model overrides for the
+// executing agent node. The map is keyed by slot name; a nil pointer value for a
+// given slot means no override (fall through to tenant default). An empty map
+// (or nil) means no per-node overrides at all — identical to the pre-#539 behavior.
+//
+// Callers should pass only slots with a non-empty provider to avoid shadowing the
+// tenant default unnecessarily; the factory's Create path already applies this filter.
+//
+// Spec: per-node-slot-override (gibson#539).
+func (m MissionContext) WithNodeSlotOverrides(overrides map[string]*agent.SlotConfig) MissionContext {
+	m.NodeSlotOverrides = overrides
 	return m
 }
 

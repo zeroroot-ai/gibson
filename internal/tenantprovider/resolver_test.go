@@ -14,7 +14,7 @@ import (
 // type, so the fake does too — that is the registry key.
 type fakeProvider struct{ name string }
 
-func (f *fakeProvider) Name() string                          { return f.name }
+func (f *fakeProvider) Name() string                                    { return f.name }
 func (f *fakeProvider) Models(context.Context) ([]llm.ModelInfo, error) { return nil, nil }
 func (f *fakeProvider) Complete(context.Context, llm.CompletionRequest) (*llm.CompletionResponse, error) {
 	return nil, nil

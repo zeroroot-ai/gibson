@@ -16,7 +16,7 @@ import (
 // gateFakeProvider is a minimal llm.LLMProvider for gate tests.
 type gateFakeProvider struct{ name string }
 
-func (p *gateFakeProvider) Name() string                                  { return p.name }
+func (p *gateFakeProvider) Name() string                                    { return p.name }
 func (p *gateFakeProvider) Models(context.Context) ([]llm.ModelInfo, error) { return nil, nil }
 func (p *gateFakeProvider) Complete(context.Context, llm.CompletionRequest) (*llm.CompletionResponse, error) {
 	return nil, nil
