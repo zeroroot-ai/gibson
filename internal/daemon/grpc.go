@@ -27,6 +27,7 @@ import (
 	"github.com/zeroroot-ai/gibson/internal/capabilitygrant"
 	"github.com/zeroroot-ai/gibson/internal/component"
 	"github.com/zeroroot-ai/gibson/internal/daemon/api"
+	tracespb "github.com/zeroroot-ai/gibson/internal/daemon/api/gibson/traces/v1"
 	userv1 "github.com/zeroroot-ai/gibson/internal/daemon/api/gibson/user/v1"
 	"github.com/zeroroot-ai/gibson/internal/idempotency"
 	"github.com/zeroroot-ai/gibson/internal/identity"
@@ -1071,6 +1072,19 @@ func (d *daemonImpl) buildGRPCServer(ctx context.Context) (*grpcSubsystem, error
 	)
 	graphpb.RegisterGraphServiceServer(srv, graphSvc)
 	d.logger.Info(ctx, "registered GraphService gRPC endpoint")
+
+	// Register gibson.traces.v1.TracesService — the daemon-mediated Langfuse gateway
+	// for the dashboard traces view and chat feedback. The credential-getter closure
+	// defers resolution to request time, so registration is safe here even though the
+	// broker stack (which stores per-tenant Langfuse credentials) may not yet be
+	// initialised. A nil return from credentialGetter → codes.Unavailable per-RPC.
+	// Spec: dashboard-no-backing-store-clients (Module 1 — TracesService).
+	tracesSvc := NewTracesServer(
+		func() *api.CredentialHandler { return d.credentialHandler },
+		d.logger.WithComponent("traces-service").Slog(),
+	)
+	tracespb.RegisterTracesServiceServer(srv, tracesSvc)
+	d.logger.Info(ctx, "registered TracesService gRPC endpoint")
 
 	// Initialize and register the ComponentService on the same gRPC port.
 	//

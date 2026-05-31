@@ -1732,6 +1732,34 @@ entries:
     object_deriver: "tenant_from_identity"
     allowed_identities:
       - COMPONENT
+  "/gibson.traces.v1.TracesService/AddTraceScore":
+    relation: "member"
+    object_type: "tenant"
+    object_deriver: "tenant_from_identity"
+    allowed_identities:
+      - USER
+      - SERVICE
+  "/gibson.traces.v1.TracesService/GetObservation":
+    relation: "member"
+    object_type: "tenant"
+    object_deriver: "tenant_from_identity"
+    allowed_identities:
+      - USER
+      - SERVICE
+  "/gibson.traces.v1.TracesService/GetTrace":
+    relation: "member"
+    object_type: "tenant"
+    object_deriver: "tenant_from_identity"
+    allowed_identities:
+      - USER
+      - SERVICE
+  "/gibson.traces.v1.TracesService/ListTraces":
+    relation: "member"
+    object_type: "tenant"
+    object_deriver: "tenant_from_identity"
+    allowed_identities:
+      - USER
+      - SERVICE
   "/gibson.usage.v1.UsageService/ListUsage":
     relation: "member"
     object_type: "tenant"
