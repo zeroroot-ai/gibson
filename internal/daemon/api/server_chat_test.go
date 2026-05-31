@@ -185,8 +185,8 @@ func TestGetConversation_Success_ReturnsMappedMessages(t *testing.T) {
 			{ID: "c1", TenantID: "acme", UserID: "u1", Title: "My Chat"},
 		},
 		messages: []storedMessage{
-			{ID: "m1", Role: "user", Content: "Hello", CreatedAtUnix: 100},
-			{ID: "m2", Role: "assistant", Content: "Hi there", CreatedAtUnix: 200},
+			{ID: "m1", Role: "user", Parts: []storedMessagePart{{Type: storedPartTypeText, Text: "Hello"}}, CreatedAtUnix: 100},
+			{ID: "m2", Role: "assistant", Parts: []storedMessagePart{{Type: storedPartTypeText, Text: "Hi there"}}, CreatedAtUnix: 200},
 		},
 	}
 	resp, err := srv.GetConversation(context.Background(), &userv1.GetConversationRequest{
@@ -199,7 +199,8 @@ func TestGetConversation_Success_ReturnsMappedMessages(t *testing.T) {
 	require.Len(t, resp.Messages, 2)
 	assert.Equal(t, "user", resp.Messages[0].Role)
 	assert.Equal(t, "assistant", resp.Messages[1].Role)
-	assert.Equal(t, "Hello", resp.Messages[0].Content)
+	require.Len(t, resp.Messages[0].Parts, 1)
+	assert.Equal(t, "Hello", resp.Messages[0].Parts[0].GetText().GetText())
 }
 
 // ---------------------------------------------------------------------------
@@ -277,8 +278,8 @@ func TestSaveConversation_Success_PersistsConversation(t *testing.T) {
 		Title:          "My First Chat",
 		AgentId:        "agent-42",
 		Messages: []*userv1.ConversationMessage{
-			{Id: "m1", Role: "user", Content: "Hello", CreatedAtUnix: 100},
-			{Id: "m2", Role: "assistant", Content: "Hi there", CreatedAtUnix: 200},
+			{Id: "m1", Role: "user", Parts: []*userv1.MessagePart{{Part: &userv1.MessagePart_Text{Text: &userv1.MessagePartText{Text: "Hello"}}}}, CreatedAtUnix: 100},
+			{Id: "m2", Role: "assistant", Parts: []*userv1.MessagePart{{Part: &userv1.MessagePart_Text{Text: &userv1.MessagePartText{Text: "Hi there"}}}}, CreatedAtUnix: 200},
 		},
 	}
 
@@ -296,7 +297,8 @@ func TestSaveConversation_Success_PersistsConversation(t *testing.T) {
 	require.Len(t, mock.saved.messages, 2)
 	assert.Equal(t, "m1", mock.saved.messages[0].ID)
 	assert.Equal(t, "user", mock.saved.messages[0].Role)
-	assert.Equal(t, "Hello", mock.saved.messages[0].Content)
+	require.Len(t, mock.saved.messages[0].Parts, 1)
+	assert.Equal(t, "Hello", mock.saved.messages[0].Parts[0].Text)
 	assert.Equal(t, int64(100), mock.saved.messages[0].CreatedAtUnix)
 }
 
@@ -381,8 +383,8 @@ func TestConversationStore_SaveAndList(t *testing.T) {
 	ctx := context.Background()
 
 	msgs := []storedMessage{
-		{ID: "m1", Role: "user", Content: "hello", CreatedAtUnix: 1000},
-		{ID: "m2", Role: "assistant", Content: "hi", CreatedAtUnix: 1001},
+		{ID: "m1", Role: "user", Parts: []storedMessagePart{{Type: storedPartTypeText, Text: "hello"}}, CreatedAtUnix: 1000},
+		{ID: "m2", Role: "assistant", Parts: []storedMessagePart{{Type: storedPartTypeText, Text: "hi"}}, CreatedAtUnix: 1001},
 	}
 
 	err := store.Save(ctx, "tenant-A", "user-1", "conv-1", "My Chat", "agent-x", msgs)
@@ -408,8 +410,8 @@ func TestConversationStore_SaveAndGet(t *testing.T) {
 	ctx := context.Background()
 
 	msgs := []storedMessage{
-		{ID: "m1", Role: "user", Content: "question", CreatedAtUnix: 500},
-		{ID: "m2", Role: "assistant", Content: "answer", CreatedAtUnix: 501},
+		{ID: "m1", Role: "user", Parts: []storedMessagePart{{Type: storedPartTypeText, Text: "question"}}, CreatedAtUnix: 500},
+		{ID: "m2", Role: "assistant", Parts: []storedMessagePart{{Type: storedPartTypeText, Text: "answer"}}, CreatedAtUnix: 501},
 	}
 	err := store.Save(ctx, "tenant-B", "user-2", "conv-2", "Q&A", "agent-y", msgs)
 	require.NoError(t, err)
@@ -425,8 +427,9 @@ func TestConversationStore_SaveAndGet(t *testing.T) {
 	assert.Equal(t, int32(2), conv.MessageCount)
 
 	require.Len(t, gotMsgs, 2)
-	assert.Equal(t, "question", gotMsgs[0].Content)
-	assert.Equal(t, "answer", gotMsgs[1].Content)
+	require.NotEmpty(t, gotMsgs[0].Parts)
+	assert.Equal(t, "question", gotMsgs[0].Parts[0].Text)
+	assert.Equal(t, "answer", gotMsgs[1].Parts[0].Text)
 }
 
 // TestConversationStore_RoundTrip_SaveListGet verifies the full round-trip:
@@ -436,9 +439,9 @@ func TestConversationStore_RoundTrip_SaveListGet(t *testing.T) {
 	ctx := context.Background()
 
 	msgs := []storedMessage{
-		{ID: "m1", Role: "user", Content: "first question", CreatedAtUnix: 1000},
-		{ID: "m2", Role: "assistant", Content: "first answer", CreatedAtUnix: 1001},
-		{ID: "m3", Role: "user", Content: "follow up", CreatedAtUnix: 1002},
+		{ID: "m1", Role: "user", Parts: []storedMessagePart{{Type: storedPartTypeText, Text: "first question"}}, CreatedAtUnix: 1000},
+		{ID: "m2", Role: "assistant", Parts: []storedMessagePart{{Type: storedPartTypeText, Text: "first answer"}}, CreatedAtUnix: 1001},
+		{ID: "m3", Role: "user", Parts: []storedMessagePart{{Type: storedPartTypeText, Text: "follow up"}}, CreatedAtUnix: 1002},
 	}
 
 	err := store.Save(ctx, "tenant-RT", "user-RT", "conv-RT", "Round Trip Chat", "agent-RT", msgs)
@@ -458,9 +461,10 @@ func TestConversationStore_RoundTrip_SaveListGet(t *testing.T) {
 	assert.Equal(t, convs[0].ID, conv.ID)
 	assert.Equal(t, convs[0].Title, conv.Title)
 	require.Len(t, gotMsgs, 3)
-	assert.Equal(t, "first question", gotMsgs[0].Content)
-	assert.Equal(t, "first answer", gotMsgs[1].Content)
-	assert.Equal(t, "follow up", gotMsgs[2].Content)
+	require.NotEmpty(t, gotMsgs[0].Parts)
+	assert.Equal(t, "first question", gotMsgs[0].Parts[0].Text)
+	assert.Equal(t, "first answer", gotMsgs[1].Parts[0].Text)
+	assert.Equal(t, "follow up", gotMsgs[2].Parts[0].Text)
 }
 
 // TestConversationStore_NewestFirst verifies that List returns conversations
@@ -776,4 +780,204 @@ func (s *inMemConvStore) Get(_ context.Context, tenantID, conversationID string)
 		MessageCount:  int32(len(msgs)),
 	}
 	return conv, msgs, nil
+}
+
+// ---------------------------------------------------------------------------
+// Parts round-trip tests (slice #550)
+//
+// These tests verify that all six part types round-trip losslessly through
+// protoMessageToStored → storedMessageToProto and through the inMemConvStore.
+// ---------------------------------------------------------------------------
+
+// TestPartsRoundTrip_AllPartTypes verifies that a message containing one of
+// every part type (text, tool_call, tool_result, citation, attachment_ref,
+// reasoning) round-trips through protoMessageToStored → storedMessageToProto
+// with zero loss and preserved ordering.
+func TestPartsRoundTrip_AllPartTypes(t *testing.T) {
+	input := &userv1.ConversationMessage{
+		Id:            "msg-all",
+		Role:          "assistant",
+		CreatedAtUnix: 9999,
+		Parts: []*userv1.MessagePart{
+			{Part: &userv1.MessagePart_Text{Text: &userv1.MessagePartText{Text: "hello world"}}},
+			{Part: &userv1.MessagePart_ToolCall{ToolCall: &userv1.MessagePartToolCall{
+				ToolCallId: "tc-1",
+				Name:       "search",
+				Arguments:  `{"q":"foo"}`,
+			}}},
+			{Part: &userv1.MessagePart_ToolResult{ToolResult: &userv1.MessagePartToolResult{
+				ToolCallId: "tc-1",
+				Result:     `{"results":[]}`,
+			}}},
+			{Part: &userv1.MessagePart_Citation{Citation: &userv1.MessagePartCitation{
+				CitationId: "cite-42",
+				Label:      "Node A",
+				Url:        "https://example.com/node/42",
+			}}},
+			{Part: &userv1.MessagePart_AttachmentRef{AttachmentRef: &userv1.MessagePartAttachmentRef{
+				AttachmentId: "att-7",
+				MediaType:    "image/png",
+				Name:         "screenshot.png",
+			}}},
+			{Part: &userv1.MessagePart_Reasoning{Reasoning: &userv1.MessagePartReasoning{
+				Text: "Let me think about this...",
+			}}},
+		},
+	}
+
+	// Convert proto → stored → proto.
+	stored := protoMessageToStored(input)
+	output := storedMessageToProto(stored)
+
+	// Metadata preserved.
+	assert.Equal(t, "msg-all", output.Id)
+	assert.Equal(t, "assistant", output.Role)
+	assert.Equal(t, int64(9999), output.CreatedAtUnix)
+
+	// Exactly 6 parts, in order.
+	require.Len(t, output.Parts, 6, "all 6 parts must be preserved")
+
+	// Part 0: text
+	text := output.Parts[0].GetText()
+	require.NotNil(t, text, "part[0] must be text")
+	assert.Equal(t, "hello world", text.Text)
+
+	// Part 1: tool_call
+	tc := output.Parts[1].GetToolCall()
+	require.NotNil(t, tc, "part[1] must be tool_call")
+	assert.Equal(t, "tc-1", tc.ToolCallId)
+	assert.Equal(t, "search", tc.Name)
+	assert.Equal(t, `{"q":"foo"}`, tc.Arguments)
+
+	// Part 2: tool_result
+	tr := output.Parts[2].GetToolResult()
+	require.NotNil(t, tr, "part[2] must be tool_result")
+	assert.Equal(t, "tc-1", tr.ToolCallId)
+	assert.Equal(t, `{"results":[]}`, tr.Result)
+
+	// Part 3: citation
+	cit := output.Parts[3].GetCitation()
+	require.NotNil(t, cit, "part[3] must be citation")
+	assert.Equal(t, "cite-42", cit.CitationId)
+	assert.Equal(t, "Node A", cit.Label)
+	assert.Equal(t, "https://example.com/node/42", cit.Url)
+
+	// Part 4: attachment_ref
+	att := output.Parts[4].GetAttachmentRef()
+	require.NotNil(t, att, "part[4] must be attachment_ref")
+	assert.Equal(t, "att-7", att.AttachmentId)
+	assert.Equal(t, "image/png", att.MediaType)
+	assert.Equal(t, "screenshot.png", att.Name)
+
+	// Part 5: reasoning
+	rsn := output.Parts[5].GetReasoning()
+	require.NotNil(t, rsn, "part[5] must be reasoning")
+	assert.Equal(t, "Let me think about this...", rsn.Text)
+}
+
+// TestPartsRoundTrip_OrderingPreserved verifies that part ordering is stable
+// across the stored-message JSON round-trip (not just the in-memory conversion).
+func TestPartsRoundTrip_OrderingPreserved(t *testing.T) {
+	store := newInMemConvStore()
+	ctx := context.Background()
+
+	// Build a message with 4 parts in a deliberate interleaved order.
+	input := &userv1.ConversationMessage{
+		Id:   "msg-order",
+		Role: "assistant",
+		Parts: []*userv1.MessagePart{
+			{Part: &userv1.MessagePart_Text{Text: &userv1.MessagePartText{Text: "first"}}},
+			{Part: &userv1.MessagePart_ToolCall{ToolCall: &userv1.MessagePartToolCall{Name: "run", Arguments: "{}"}}},
+			{Part: &userv1.MessagePart_ToolResult{ToolResult: &userv1.MessagePartToolResult{Result: "ok"}}},
+			{Part: &userv1.MessagePart_Text{Text: &userv1.MessagePartText{Text: "second"}}},
+		},
+	}
+
+	msgs := []storedMessage{protoMessageToStored(input)}
+	err := store.Save(ctx, "t1", "u1", "c1", "Order Test", "", msgs)
+	require.NoError(t, err)
+
+	_, gotMsgs, err := store.Get(ctx, "t1", "c1")
+	require.NoError(t, err)
+	require.Len(t, gotMsgs, 1)
+
+	out := storedMessageToProto(gotMsgs[0])
+	require.Len(t, out.Parts, 4, "4 parts must survive store round-trip")
+
+	assert.Equal(t, "first", out.Parts[0].GetText().GetText(), "part[0]: first text")
+	assert.Equal(t, "run", out.Parts[1].GetToolCall().GetName(), "part[1]: tool_call")
+	assert.Equal(t, "ok", out.Parts[2].GetToolResult().GetResult(), "part[2]: tool_result")
+	assert.Equal(t, "second", out.Parts[3].GetText().GetText(), "part[3]: second text")
+}
+
+// TestPartsRoundTrip_TextOnlyMessage verifies that a message with a single text
+// part round-trips correctly (regression guard for the most common case).
+func TestPartsRoundTrip_TextOnlyMessage(t *testing.T) {
+	input := &userv1.ConversationMessage{
+		Id:            "msg-txt",
+		Role:          "user",
+		CreatedAtUnix: 1234,
+		Parts: []*userv1.MessagePart{
+			{Part: &userv1.MessagePart_Text{Text: &userv1.MessagePartText{Text: "just text"}}},
+		},
+	}
+
+	stored := protoMessageToStored(input)
+	output := storedMessageToProto(stored)
+
+	require.Len(t, output.Parts, 1)
+	assert.Equal(t, "just text", output.Parts[0].GetText().GetText())
+	assert.Equal(t, int64(1234), output.CreatedAtUnix)
+}
+
+// TestPartsRoundTrip_StoreRoundTrip_AllPartTypes verifies the full end-to-end
+// round-trip: proto → Save to inMemConvStore → Get from inMemConvStore → proto.
+// Every part type is checked.
+func TestPartsRoundTrip_StoreRoundTrip_AllPartTypes(t *testing.T) {
+	store := newInMemConvStore()
+	ctx := context.Background()
+
+	input := &userv1.ConversationMessage{
+		Id:   "msg-full",
+		Role: "assistant",
+		Parts: []*userv1.MessagePart{
+			{Part: &userv1.MessagePart_Text{Text: &userv1.MessagePartText{Text: "result text"}}},
+			{Part: &userv1.MessagePart_ToolCall{ToolCall: &userv1.MessagePartToolCall{
+				ToolCallId: "tc-99", Name: "fetch", Arguments: `{"url":"https://x.com"}`,
+			}}},
+			{Part: &userv1.MessagePart_ToolResult{ToolResult: &userv1.MessagePartToolResult{
+				ToolCallId: "tc-99", Result: `{"status":200}`,
+			}}},
+			{Part: &userv1.MessagePart_Citation{Citation: &userv1.MessagePartCitation{
+				CitationId: "cit-1", Label: "Ref Node", Url: "https://graph.example/1",
+			}}},
+			{Part: &userv1.MessagePart_AttachmentRef{AttachmentRef: &userv1.MessagePartAttachmentRef{
+				AttachmentId: "att-1", MediaType: "application/pdf", Name: "report.pdf",
+			}}},
+			{Part: &userv1.MessagePart_Reasoning{Reasoning: &userv1.MessagePartReasoning{
+				Text: "internal thought",
+			}}},
+		},
+	}
+
+	msgs := []storedMessage{protoMessageToStored(input)}
+	err := store.Save(ctx, "tenant-X", "user-X", "conv-X", "Full Round-Trip", "", msgs)
+	require.NoError(t, err)
+
+	_, gotMsgs, err := store.Get(ctx, "tenant-X", "conv-X")
+	require.NoError(t, err)
+	require.Len(t, gotMsgs, 1)
+
+	out := storedMessageToProto(gotMsgs[0])
+	require.Len(t, out.Parts, 6, "all 6 parts must survive full store round-trip")
+
+	assert.Equal(t, "result text", out.Parts[0].GetText().GetText())
+	assert.Equal(t, "tc-99", out.Parts[1].GetToolCall().GetToolCallId())
+	assert.Equal(t, `{"url":"https://x.com"}`, out.Parts[1].GetToolCall().GetArguments())
+	assert.Equal(t, `{"status":200}`, out.Parts[2].GetToolResult().GetResult())
+	assert.Equal(t, "cit-1", out.Parts[3].GetCitation().GetCitationId())
+	assert.Equal(t, "Ref Node", out.Parts[3].GetCitation().GetLabel())
+	assert.Equal(t, "att-1", out.Parts[4].GetAttachmentRef().GetAttachmentId())
+	assert.Equal(t, "report.pdf", out.Parts[4].GetAttachmentRef().GetName())
+	assert.Equal(t, "internal thought", out.Parts[5].GetReasoning().GetText())
 }

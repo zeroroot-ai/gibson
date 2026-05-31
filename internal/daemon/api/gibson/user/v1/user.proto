@@ -260,6 +260,92 @@ message MarkAllAlertsReadResponse {
 }
 
 // ---------------------------------------------------------------------------
+// Conversations — message parts (lossless parts-based model)
+// ---------------------------------------------------------------------------
+
+// MessagePartText carries a plain-text segment of a message.
+message MessagePartText {
+  // text is the textual content.
+  string text = 1;
+}
+
+// MessagePartToolCall carries a tool invocation.
+message MessagePartToolCall {
+  // tool_call_id is the opaque identifier for this tool call (used to correlate with the result).
+  string tool_call_id = 1;
+
+  // name is the tool function name.
+  string name = 2;
+
+  // arguments is the JSON-serialised argument object passed to the tool.
+  string arguments = 3;
+}
+
+// MessagePartToolResult carries the result of a tool invocation.
+message MessagePartToolResult {
+  // tool_call_id correlates this result with its originating tool call.
+  string tool_call_id = 1;
+
+  // result is the JSON-serialised result payload.
+  string result = 2;
+}
+
+// MessagePartCitation carries a graph or document reference inline in a message.
+message MessagePartCitation {
+  // citation_id is the stable ID of the referenced entity.
+  string citation_id = 1;
+
+  // label is the human-readable display label for the citation.
+  string label = 2;
+
+  // url is an optional deep-link URL to the referenced resource.
+  string url = 3;
+}
+
+// MessagePartAttachmentRef carries a reference to an attachment by ID.
+message MessagePartAttachmentRef {
+  // attachment_id is the stable ID of the attachment.
+  string attachment_id = 1;
+
+  // media_type is the MIME type of the attachment (e.g. "image/png").
+  string media_type = 2;
+
+  // name is the human-readable filename or display name of the attachment.
+  string name = 3;
+}
+
+// MessagePartReasoning carries an internal reasoning / chain-of-thought segment.
+message MessagePartReasoning {
+  // text is the reasoning text produced by the model.
+  string text = 1;
+}
+
+// MessagePart is a single ordered element within a ConversationMessage.
+// Exactly one of the part fields is set; callers should handle any unrecognised
+// oneof variant explicitly rather than silently dropping it.
+message MessagePart {
+  oneof part {
+    // text carries a plain-text segment.
+    MessagePartText text = 1;
+
+    // tool_call carries a tool invocation.
+    MessagePartToolCall tool_call = 2;
+
+    // tool_result carries the result of a tool invocation.
+    MessagePartToolResult tool_result = 3;
+
+    // citation carries a graph or document reference.
+    MessagePartCitation citation = 4;
+
+    // attachment_ref carries a reference to an attached file or image.
+    MessagePartAttachmentRef attachment_ref = 5;
+
+    // reasoning carries a chain-of-thought or internal reasoning segment.
+    MessagePartReasoning reasoning = 6;
+  }
+}
+
+// ---------------------------------------------------------------------------
 // Conversations — request/response messages
 // ---------------------------------------------------------------------------
 
@@ -288,6 +374,8 @@ message ConversationSummary {
 }
 
 // ConversationMessage is a single message within a conversation.
+// Messages are composed of an ordered list of typed parts so that tool calls,
+// graph citations, attachments, and reasoning are preserved losslessly.
 message ConversationMessage {
   // id is the unique message identifier.
   string id = 1;
@@ -295,8 +383,10 @@ message ConversationMessage {
   // role is the message author role (e.g., "user", "assistant").
   string role = 2;
 
-  // content is the message text content.
-  string content = 3;
+  // parts is the ordered list of message content parts.
+  // Every element of a message is represented here; no part type is silently
+  // dropped on save or load.
+  repeated MessagePart parts = 3;
 
   // created_at_unix is the message creation time as a Unix timestamp.
   int64 created_at_unix = 4;

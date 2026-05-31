@@ -83,12 +83,58 @@ type storedConversation struct {
 	MessageCount  int32
 }
 
+// storedMessagePartType identifies the kind of a message part in JSON.
+// We store the oneof discriminator as a string field so parts can be
+// unmarshalled back to the correct concrete type.
+type storedMessagePartType string
+
+const (
+	storedPartTypeText          storedMessagePartType = "text"
+	storedPartTypeToolCall      storedMessagePartType = "tool_call"
+	storedPartTypeToolResult    storedMessagePartType = "tool_result"
+	storedPartTypeCitation      storedMessagePartType = "citation"
+	storedPartTypeAttachmentRef storedMessagePartType = "attachment_ref"
+	storedPartTypeReasoning     storedMessagePartType = "reasoning"
+)
+
+// storedMessagePart is a single part within a stored message.
+// The Type field discriminates which of the optional payload fields is set.
+type storedMessagePart struct {
+	Type storedMessagePartType `json:"type"`
+
+	// text payload (type == "text")
+	Text string `json:"text,omitempty"`
+
+	// tool_call payload (type == "tool_call")
+	ToolCallID string `json:"tool_call_id,omitempty"`
+	Name       string `json:"name,omitempty"`
+	Arguments  string `json:"arguments,omitempty"`
+
+	// tool_result payload (type == "tool_result")
+	Result string `json:"result,omitempty"`
+
+	// citation payload (type == "citation")
+	CitationID string `json:"citation_id,omitempty"`
+	Label      string `json:"label,omitempty"`
+	URL        string `json:"url,omitempty"`
+
+	// attachment_ref payload (type == "attachment_ref")
+	AttachmentID string `json:"attachment_id,omitempty"`
+	MediaType    string `json:"media_type,omitempty"`
+	AttachName   string `json:"attach_name,omitempty"`
+
+	// reasoning payload (type == "reasoning")
+	ReasoningText string `json:"reasoning_text,omitempty"`
+}
+
 // storedMessage is a single message within a conversation.
+// Parts replaces the former flat Content field to preserve tool calls,
+// graph citations, attachments, and reasoning losslessly.
 type storedMessage struct {
-	ID            string `json:"id"`
-	Role          string `json:"role"`
-	Content       string `json:"content"`
-	CreatedAtUnix int64  `json:"created_at_unix"`
+	ID            string              `json:"id"`
+	Role          string              `json:"role"`
+	Parts         []storedMessagePart `json:"parts"`
+	CreatedAtUnix int64               `json:"created_at_unix"`
 }
 
 // redisConversationStore implements conversationStoreIface using a raw Redis
@@ -447,12 +493,7 @@ func (s *DaemonServer) GetConversation(ctx context.Context, req *userv1.GetConve
 
 	protoMsgs := make([]*userv1.ConversationMessage, 0, len(msgs))
 	for _, m := range msgs {
-		protoMsgs = append(protoMsgs, &userv1.ConversationMessage{
-			Id:            m.ID,
-			Role:          m.Role,
-			Content:       m.Content,
-			CreatedAtUnix: m.CreatedAtUnix,
-		})
+		protoMsgs = append(protoMsgs, storedMessageToProto(m))
 	}
 
 	return &userv1.GetConversationResponse{
@@ -555,12 +596,7 @@ func (s *DaemonServer) SaveConversation(ctx context.Context, req *userv1.SaveCon
 	protoMsgs := req.GetMessages()
 	msgs := make([]storedMessage, 0, len(protoMsgs))
 	for _, m := range protoMsgs {
-		msgs = append(msgs, storedMessage{
-			ID:            m.GetId(),
-			Role:          m.GetRole(),
-			Content:       m.GetContent(),
-			CreatedAtUnix: m.GetCreatedAtUnix(),
-		})
+		msgs = append(msgs, protoMessageToStored(m))
 	}
 
 	if err := s.conversationStore.Save(
@@ -582,4 +618,156 @@ func (s *DaemonServer) SaveConversation(ctx context.Context, req *userv1.SaveCon
 	}
 
 	return &userv1.SaveConversationResponse{}, nil
+}
+
+// ---------------------------------------------------------------------------
+// Message parts conversion helpers
+// ---------------------------------------------------------------------------
+
+// protoMessageToStored converts a proto ConversationMessage to the internal
+// storedMessage representation. All part types are preserved losslessly.
+func protoMessageToStored(m *userv1.ConversationMessage) storedMessage {
+	if m == nil {
+		return storedMessage{}
+	}
+	parts := make([]storedMessagePart, 0, len(m.GetParts()))
+	for _, p := range m.GetParts() {
+		if p == nil {
+			continue
+		}
+		switch v := p.Part.(type) {
+		case *userv1.MessagePart_Text:
+			if v.Text != nil {
+				parts = append(parts, storedMessagePart{
+					Type: storedPartTypeText,
+					Text: v.Text.Text,
+				})
+			}
+		case *userv1.MessagePart_ToolCall:
+			if v.ToolCall != nil {
+				parts = append(parts, storedMessagePart{
+					Type:       storedPartTypeToolCall,
+					ToolCallID: v.ToolCall.ToolCallId,
+					Name:       v.ToolCall.Name,
+					Arguments:  v.ToolCall.Arguments,
+				})
+			}
+		case *userv1.MessagePart_ToolResult:
+			if v.ToolResult != nil {
+				parts = append(parts, storedMessagePart{
+					Type:       storedPartTypeToolResult,
+					ToolCallID: v.ToolResult.ToolCallId,
+					Result:     v.ToolResult.Result,
+				})
+			}
+		case *userv1.MessagePart_Citation:
+			if v.Citation != nil {
+				parts = append(parts, storedMessagePart{
+					Type:       storedPartTypeCitation,
+					CitationID: v.Citation.CitationId,
+					Label:      v.Citation.Label,
+					URL:        v.Citation.Url,
+				})
+			}
+		case *userv1.MessagePart_AttachmentRef:
+			if v.AttachmentRef != nil {
+				parts = append(parts, storedMessagePart{
+					Type:         storedPartTypeAttachmentRef,
+					AttachmentID: v.AttachmentRef.AttachmentId,
+					MediaType:    v.AttachmentRef.MediaType,
+					AttachName:   v.AttachmentRef.Name,
+				})
+			}
+		case *userv1.MessagePart_Reasoning:
+			if v.Reasoning != nil {
+				parts = append(parts, storedMessagePart{
+					Type:          storedPartTypeReasoning,
+					ReasoningText: v.Reasoning.Text,
+				})
+			}
+			// Unknown part types are preserved as a zero-value storedMessagePart with
+			// empty Type so they survive a round-trip without data loss at the storage
+			// layer (the dashboard normalizer is responsible for handling unknown types
+			// explicitly on the read side).
+		}
+	}
+	return storedMessage{
+		ID:            m.Id,
+		Role:          m.Role,
+		Parts:         parts,
+		CreatedAtUnix: m.CreatedAtUnix,
+	}
+}
+
+// storedMessageToProto converts an internal storedMessage to the proto
+// ConversationMessage. Ordering is preserved; all part types are restored.
+func storedMessageToProto(m storedMessage) *userv1.ConversationMessage {
+	parts := make([]*userv1.MessagePart, 0, len(m.Parts))
+	for _, sp := range m.Parts {
+		var protoPart *userv1.MessagePart
+		switch sp.Type {
+		case storedPartTypeText:
+			protoPart = &userv1.MessagePart{
+				Part: &userv1.MessagePart_Text{
+					Text: &userv1.MessagePartText{Text: sp.Text},
+				},
+			}
+		case storedPartTypeToolCall:
+			protoPart = &userv1.MessagePart{
+				Part: &userv1.MessagePart_ToolCall{
+					ToolCall: &userv1.MessagePartToolCall{
+						ToolCallId: sp.ToolCallID,
+						Name:       sp.Name,
+						Arguments:  sp.Arguments,
+					},
+				},
+			}
+		case storedPartTypeToolResult:
+			protoPart = &userv1.MessagePart{
+				Part: &userv1.MessagePart_ToolResult{
+					ToolResult: &userv1.MessagePartToolResult{
+						ToolCallId: sp.ToolCallID,
+						Result:     sp.Result,
+					},
+				},
+			}
+		case storedPartTypeCitation:
+			protoPart = &userv1.MessagePart{
+				Part: &userv1.MessagePart_Citation{
+					Citation: &userv1.MessagePartCitation{
+						CitationId: sp.CitationID,
+						Label:      sp.Label,
+						Url:        sp.URL,
+					},
+				},
+			}
+		case storedPartTypeAttachmentRef:
+			protoPart = &userv1.MessagePart{
+				Part: &userv1.MessagePart_AttachmentRef{
+					AttachmentRef: &userv1.MessagePartAttachmentRef{
+						AttachmentId: sp.AttachmentID,
+						MediaType:    sp.MediaType,
+						Name:         sp.AttachName,
+					},
+				},
+			}
+		case storedPartTypeReasoning:
+			protoPart = &userv1.MessagePart{
+				Part: &userv1.MessagePart_Reasoning{
+					Reasoning: &userv1.MessagePartReasoning{Text: sp.ReasoningText},
+				},
+			}
+		default:
+			// Unknown stored type: skip silently. The part was not understood at
+			// write time so we cannot reconstruct it on the read side.
+			continue
+		}
+		parts = append(parts, protoPart)
+	}
+	return &userv1.ConversationMessage{
+		Id:            m.ID,
+		Role:          m.Role,
+		Parts:         parts,
+		CreatedAtUnix: m.CreatedAtUnix,
+	}
 }
