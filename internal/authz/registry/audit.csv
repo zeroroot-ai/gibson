@@ -272,12 +272,14 @@ rpc,relation,object_type,deriver,identities,source_proto_file,mode
 /gibson.tool.v1.ToolService/Health,member,tenant,tenant_from_identity,COMPONENT,gibson/tool/v1/tool.proto,rule
 /gibson.tool.v1.ToolService/StreamExecute,member,tenant,tenant_from_identity,COMPONENT,gibson/tool/v1/tool.proto,rule
 /gibson.usage.v1.UsageService/ListUsage,member,tenant,tenant_from_identity,USER|SERVICE,gibson/usage/v1/usage.proto,rule
+/gibson.user.v1.UserService/DeleteConversation,member,tenant,tenant_from_identity,USER|SERVICE,gibson/user/v1/user.proto,rule
 /gibson.user.v1.UserService/GetConversation,member,tenant,tenant_from_identity,USER|SERVICE,gibson/user/v1/user.proto,rule
 /gibson.user.v1.UserService/GetUserProfile,member,tenant,tenant_from_identity,USER|SERVICE,gibson/user/v1/user.proto,rule
 /gibson.user.v1.UserService/ListAlerts,member,tenant,tenant_from_identity,USER|SERVICE,gibson/user/v1/user.proto,rule
 /gibson.user.v1.UserService/ListConversations,member,tenant,tenant_from_identity,USER|SERVICE,gibson/user/v1/user.proto,rule
 /gibson.user.v1.UserService/MarkAlertRead,member,tenant,tenant_from_identity,USER|SERVICE,gibson/user/v1/user.proto,rule
 /gibson.user.v1.UserService/MarkAllAlertsRead,member,tenant,tenant_from_identity,USER|SERVICE,gibson/user/v1/user.proto,rule
+/gibson.user.v1.UserService/RenameConversation,member,tenant,tenant_from_identity,USER|SERVICE,gibson/user/v1/user.proto,rule
 /gibson.user.v1.UserService/SaveConversation,member,tenant,tenant_from_identity,USER|SERVICE,gibson/user/v1/user.proto,rule
 /gibson.user.v1.UserService/UpdateUserProfile,member,tenant,tenant_from_identity,USER|SERVICE,gibson/user/v1/user.proto,rule
 /intelligence.v1.IntelligenceService/GetAssetRiskScore,member,tenant,tenant_from_identity,USER|SERVICE,intelligence/v1/intelligence.proto,rule

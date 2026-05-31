@@ -2750,6 +2750,16 @@ export const AuthRegistry: Record<string, AuthEntry> = {
     unauthenticated: false,
     self: false,
   },
+  "/gibson.user.v1.UserService/DeleteConversation": {
+    method: "/gibson.user.v1.UserService/DeleteConversation",
+    service: "gibson.user.v1.UserService",
+    relation: "member",
+    objectType: "tenant",
+    objectDeriver: "tenant_from_identity",
+    allowedIdentities: IdentityClass.USER | IdentityClass.SERVICE,
+    unauthenticated: false,
+    self: false,
+  },
   "/gibson.user.v1.UserService/GetConversation": {
     method: "/gibson.user.v1.UserService/GetConversation",
     service: "gibson.user.v1.UserService",
@@ -2802,6 +2812,16 @@ export const AuthRegistry: Record<string, AuthEntry> = {
   },
   "/gibson.user.v1.UserService/MarkAllAlertsRead": {
     method: "/gibson.user.v1.UserService/MarkAllAlertsRead",
+    service: "gibson.user.v1.UserService",
+    relation: "member",
+    objectType: "tenant",
+    objectDeriver: "tenant_from_identity",
+    allowedIdentities: IdentityClass.USER | IdentityClass.SERVICE,
+    unauthenticated: false,
+    self: false,
+  },
+  "/gibson.user.v1.UserService/RenameConversation": {
+    method: "/gibson.user.v1.UserService/RenameConversation",
     service: "gibson.user.v1.UserService",
     relation: "member",
     objectType: "tenant",

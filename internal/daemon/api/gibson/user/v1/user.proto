@@ -107,6 +107,26 @@ service UserService {
       allowed_identities: 3  // USER | SERVICE
     };
   }
+  // RenameConversation updates the title of an existing conversation.
+  // Only the owning user within their tenant may rename a conversation.
+  rpc RenameConversation(RenameConversationRequest) returns (RenameConversationResponse) {
+    option (gibson.auth.v1.authz) = {
+      relation: "member",
+      object_type: "tenant",
+      object_deriver: "tenant_from_identity",
+      allowed_identities: 3  // USER | SERVICE
+    };
+  }
+  // DeleteConversation removes a conversation and its list-index entry.
+  // Only the owning user within their tenant may delete a conversation.
+  rpc DeleteConversation(DeleteConversationRequest) returns (DeleteConversationResponse) {
+    option (gibson.auth.v1.authz) = {
+      relation: "member",
+      object_type: "tenant",
+      object_deriver: "tenant_from_identity",
+      allowed_identities: 3  // USER | SERVICE
+    };
+  }
 }
 
 // ---------------------------------------------------------------------------
@@ -456,3 +476,38 @@ message SaveConversationRequest {
 
 // SaveConversationResponse is returned on successful save.
 message SaveConversationResponse {}
+
+// ---------------------------------------------------------------------------
+// RenameConversation — request/response messages
+// ---------------------------------------------------------------------------
+
+// RenameConversationRequest updates the title of a conversation.
+message RenameConversationRequest {
+  // tenant_id is the tenant context. If empty, the caller's tenant is used.
+  string tenant_id = 1;
+
+  // conversation_id is the unique identifier of the conversation to rename.
+  string conversation_id = 2;
+
+  // title is the new human-readable title for the conversation.
+  string title = 3;
+}
+
+// RenameConversationResponse is returned on successful rename.
+message RenameConversationResponse {}
+
+// ---------------------------------------------------------------------------
+// DeleteConversation — request/response messages
+// ---------------------------------------------------------------------------
+
+// DeleteConversationRequest removes a conversation permanently.
+message DeleteConversationRequest {
+  // tenant_id is the tenant context. If empty, the caller's tenant is used.
+  string tenant_id = 1;
+
+  // conversation_id is the unique identifier of the conversation to delete.
+  string conversation_id = 2;
+}
+
+// DeleteConversationResponse is returned on successful deletion.
+message DeleteConversationResponse {}
