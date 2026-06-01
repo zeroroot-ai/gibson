@@ -1767,6 +1767,13 @@ entries:
     allowed_identities:
       - USER
       - SERVICE
+  "/gibson.user.v1.UserService/ConsumeAttachment":
+    relation: "member"
+    object_type: "tenant"
+    object_deriver: "tenant_from_identity"
+    allowed_identities:
+      - USER
+      - SERVICE
   "/gibson.user.v1.UserService/DeleteConversation":
     relation: "member"
     object_type: "tenant"
@@ -1781,7 +1788,37 @@ entries:
     allowed_identities:
       - USER
       - SERVICE
+  "/gibson.user.v1.UserService/GetSignupProgress":
+    unauthenticated: true
+  "/gibson.user.v1.UserService/GetUserActivity":
+    relation: "member"
+    object_type: "tenant"
+    object_deriver: "tenant_from_identity"
+    allowed_identities:
+      - USER
+      - SERVICE
+  "/gibson.user.v1.UserService/GetUserLayout":
+    relation: "member"
+    object_type: "tenant"
+    object_deriver: "tenant_from_identity"
+    allowed_identities:
+      - USER
+      - SERVICE
+  "/gibson.user.v1.UserService/GetUserOnboardingState":
+    relation: "member"
+    object_type: "tenant"
+    object_deriver: "tenant_from_identity"
+    allowed_identities:
+      - USER
+      - SERVICE
   "/gibson.user.v1.UserService/GetUserProfile":
+    relation: "member"
+    object_type: "tenant"
+    object_deriver: "tenant_from_identity"
+    allowed_identities:
+      - USER
+      - SERVICE
+  "/gibson.user.v1.UserService/InvalidateMembershipCache":
     relation: "member"
     object_type: "tenant"
     object_deriver: "tenant_from_identity"
@@ -1816,6 +1853,13 @@ entries:
     allowed_identities:
       - USER
       - SERVICE
+  "/gibson.user.v1.UserService/RecordUserActivity":
+    relation: "member"
+    object_type: "tenant"
+    object_deriver: "tenant_from_identity"
+    allowed_identities:
+      - USER
+      - SERVICE
   "/gibson.user.v1.UserService/RenameConversation":
     relation: "member"
     object_type: "tenant"
@@ -1823,7 +1867,49 @@ entries:
     allowed_identities:
       - USER
       - SERVICE
+  "/gibson.user.v1.UserService/ResetUserLayout":
+    relation: "member"
+    object_type: "tenant"
+    object_deriver: "tenant_from_identity"
+    allowed_identities:
+      - USER
+      - SERVICE
+  "/gibson.user.v1.UserService/ResetUserOnboardingState":
+    relation: "member"
+    object_type: "tenant"
+    object_deriver: "tenant_from_identity"
+    allowed_identities:
+      - USER
+      - SERVICE
   "/gibson.user.v1.UserService/SaveConversation":
+    relation: "member"
+    object_type: "tenant"
+    object_deriver: "tenant_from_identity"
+    allowed_identities:
+      - USER
+      - SERVICE
+  "/gibson.user.v1.UserService/SaveUserLayout":
+    relation: "member"
+    object_type: "tenant"
+    object_deriver: "tenant_from_identity"
+    allowed_identities:
+      - USER
+      - SERVICE
+  "/gibson.user.v1.UserService/SetSignupProgress":
+    relation: "member"
+    object_type: "tenant"
+    object_deriver: "tenant_from_identity"
+    allowed_identities:
+      - USER
+      - SERVICE
+  "/gibson.user.v1.UserService/StageAttachment":
+    relation: "member"
+    object_type: "tenant"
+    object_deriver: "tenant_from_identity"
+    allowed_identities:
+      - USER
+      - SERVICE
+  "/gibson.user.v1.UserService/UpdateUserOnboardingState":
     relation: "member"
     object_type: "tenant"
     object_deriver: "tenant_from_identity"

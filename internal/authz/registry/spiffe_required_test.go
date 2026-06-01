@@ -35,6 +35,13 @@ var allowedUnauthenticated = map[string]bool{
 	// surface where no tenant JWT can be present. Spec: issue #395
 	// (tenant-service-admin-handlers: GetReservedNames).
 	"/gibson.admin.v1.TenantAdminService/GetReservedNames": true,
+
+	// GetSignupProgress is intentionally unauthenticated.
+	// Polled by the browser during the signup flow (before the user has an account).
+	// The attempt_id is an opaque UUID-v4 capability functioning as a single-use token;
+	// the response carries only step names + error codes, never PII.
+	// Spec: dashboard-no-backing-store-clients (Module 2 — Signup Progress RPC).
+	"/gibson.user.v1.UserService/GetSignupProgress": true,
 }
 
 // TestOnlyConnectAndPingAreUnauthenticated walks the generated Registry map

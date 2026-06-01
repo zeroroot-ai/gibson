@@ -153,10 +153,10 @@ func TestNoGracefulNilInRequestPaths(t *testing.T) {
 		"internal/daemon/daemon.go:481":                 astchecks.Entry{Category: astchecks.CategoryLegacyOptional, Reason: "SPIFFE wiring optional in non-SPIFFE deployments; reassert when SPIFFE-everywhere lands"},
 		"internal/daemon/grpc.go:1905":                  astchecks.Entry{Category: astchecks.CategoryLegacyOptional, Reason: "pool nil-guard; pool-required follow-up (one-code-path#195)"},
 		"internal/daemon/grpc.go:2002":                  astchecks.Entry{Category: astchecks.CategoryLegacyOptional, Reason: "pool nil-guard; pool-required follow-up (one-code-path#195)"},
-		"internal/daemon/grpc.go:2100":                  astchecks.Entry{Category: astchecks.CategoryLegacyOptional, Reason: "pool nil-guard in populateCheckpointPayload; pool-required follow-up"},
-		"internal/daemon/grpc.go:2110":                  astchecks.Entry{Category: astchecks.CategoryDefensiveGuard, Reason: "compound nil-check on mission store Get result + Checkpoint proto field in populateCheckpointPayload"},
+		"internal/daemon/grpc.go:2150":                  astchecks.Entry{Category: astchecks.CategoryLegacyOptional, Reason: "pool nil-guard in populateCheckpointPayload; pool-required follow-up"},
+		"internal/daemon/grpc.go:2160":                  astchecks.Entry{Category: astchecks.CategoryDefensiveGuard, Reason: "compound nil-check on mission store Get result + Checkpoint proto field in populateCheckpointPayload"},
 		"internal/daemon/grpc.go:2405":                  astchecks.Entry{Category: astchecks.CategoryLegacyOptional, Reason: "pool nil-guard; pool-required follow-up (one-code-path#195)"},
-		"internal/daemon/grpc.go:2574":                  astchecks.Entry{Category: astchecks.CategoryLegacyOptional, Reason: "Neo4j connection nil-guard; Neo4j not configured for this tenant — skip silently"},
+		"internal/daemon/grpc.go:2635":                  astchecks.Entry{Category: astchecks.CategoryLegacyOptional, Reason: "Neo4j connection nil-guard; Neo4j not configured for this tenant — skip silently"},
 		"internal/daemon/graph_bootstrap.go:411":        astchecks.Entry{Category: astchecks.CategoryDefensiveGuard, Reason: "tenant-value lookup helper, nil means no scoping"},
 		"internal/daemon/infrastructure.go:95":          astchecks.Entry{Category: astchecks.CategoryLegacyOptional, Reason: "semantic querier factory optional in non-graphrag deployments"},
 		"internal/daemon/log_watcher.go:197":            astchecks.Entry{Category: astchecks.CategoryDefensiveGuard, Reason: "log watcher file handle nil-guard during teardown"},
@@ -190,6 +190,7 @@ func TestNoGracefulNilInRequestPaths(t *testing.T) {
 		"internal/harness/filter.go:110":                        astchecks.Entry{Category: astchecks.CategoryDefensiveGuard, Reason: "nil CVSS means no min-score match"},
 		"internal/harness/filter.go:117":                        astchecks.Entry{Category: astchecks.CategoryDefensiveGuard, Reason: "nil CVSS means no max-score match"},
 		"internal/harness/graphrag_query_bridge.go:1095":        astchecks.Entry{Category: astchecks.CategoryDefensiveGuard, Reason: "nil props passthrough"},
+		"internal/harness/implementation.go:221": astchecks.Entry{Category: astchecks.CategoryDefensiveGuard, Reason: "nodeSlotOverrides nil-guard in slotOverride helper; nil means no override (spec: per-node-slot-override)"},
 		"internal/harness/implementation.go:2426":               astchecks.Entry{Category: astchecks.CategoryDefensiveGuard, Reason: "nil-input → nil-output converter"},
 		"internal/harness/implementation.go:3046":               astchecks.Entry{Category: astchecks.CategoryDefensiveGuard, Reason: "nil-input → nil-output converter"},
 		"internal/harness/middleware/events.go:170":             astchecks.Entry{Category: astchecks.CategoryDefensiveGuard, Reason: "nil result means middleware drops event"},
@@ -313,7 +314,7 @@ func TestNoGracefulNilInRequestPaths(t *testing.T) {
 		"internal/secrets/jwtsource/spire.go:136": astchecks.Entry{Category: astchecks.CategoryReceiverNilGuard, Reason: "composite nil-receiver shim for SPIRE JWT source"},
 
 		// internal/types — proto Capabilities field
-		"internal/types/target.go:334": astchecks.Entry{Category: astchecks.CategoryDefensiveGuard, Reason: "proto Capabilities field on Target, legitimately nil-able"},
+		"internal/types/target.go:338": astchecks.Entry{Category: astchecks.CategoryDefensiveGuard, Reason: "proto Capabilities field on Target, legitimately nil-able"},
 	}
 
 	// Real-code subtest: walk every gibson `internal/` package and fail

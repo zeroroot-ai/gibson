@@ -15,6 +15,7 @@ import (
 	grpcmeta "google.golang.org/grpc/metadata"
 	status_grpc "google.golang.org/grpc/status"
 
+	goredis "github.com/redis/go-redis/v9"
 	"github.com/zeroroot-ai/gibson/internal/audit"
 	"github.com/zeroroot-ai/gibson/internal/authz"
 	"github.com/zeroroot-ai/gibson/internal/budget"
@@ -156,6 +157,13 @@ type DaemonServer struct {
 	// May be nil; when nil, ListConversations/GetConversation return codes.Unavailable.
 	// Added by prod-feature-wiring spec.
 	conversationStore conversationStoreIface
+
+	// userStateRedis is the raw Redis client used by the per-user state handlers
+	// (onboarding, layout, activity, signup progress, membership cache, attachment staging).
+	// Wired by the daemon bootstrap from stateClient.Client() when the client is
+	// standalone Redis. May be nil before startup completes.
+	// Spec: dashboard-no-backing-store-clients (Module 2 — Redis-read RPCs).
+	userStateRedis goredis.UniversalClient
 
 	// capabilityGrantService handles the Agent Auth Protocol gRPC RPCs.
 	// May be nil; when nil, Agent Auth RPCs return codes.Unavailable.

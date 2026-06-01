@@ -127,6 +127,179 @@ service UserService {
       allowed_identities: 3  // USER | SERVICE
     };
   }
+
+  // ---------------------------------------------------------------------------
+  // User Onboarding State — IMPLEMENT-NOW
+  // User-scoped onboarding wizard progress. Distinct from the tenant-level
+  // onboarding that TenantAdminService.GetOnboardingState serves (which uses
+  // onboarding:{tenantID} keys). These RPCs use user-onboarding:{tenantID}:{userID}.
+  // ---------------------------------------------------------------------------
+
+  // GetUserOnboardingState returns the per-user onboarding state for the caller.
+  // Returns a freshly initialised default state when none is stored yet.
+  rpc GetUserOnboardingState(GetUserOnboardingStateRequest) returns (GetUserOnboardingStateResponse) {
+    option (gibson.auth.v1.authz) = {
+      relation: "member",
+      object_type: "tenant",
+      object_deriver: "tenant_from_identity",
+      allowed_identities: 3  // USER | SERVICE
+    };
+  }
+
+  // UpdateUserOnboardingState replaces the user's onboarding state.
+  rpc UpdateUserOnboardingState(UpdateUserOnboardingStateRequest) returns (UpdateUserOnboardingStateResponse) {
+    option (gibson.auth.v1.authz) = {
+      relation: "member",
+      object_type: "tenant",
+      object_deriver: "tenant_from_identity",
+      allowed_identities: 3  // USER | SERVICE
+    };
+  }
+
+  // ResetUserOnboardingState wipes the user's onboarding state and returns a default.
+  rpc ResetUserOnboardingState(ResetUserOnboardingStateRequest) returns (ResetUserOnboardingStateResponse) {
+    option (gibson.auth.v1.authz) = {
+      relation: "member",
+      object_type: "tenant",
+      object_deriver: "tenant_from_identity",
+      allowed_identities: 3  // USER | SERVICE
+    };
+  }
+
+  // ---------------------------------------------------------------------------
+  // User Layout Preferences — IMPLEMENT-NOW
+  // Per-user dashboard widget layout stored without TTL.
+  // Redis key: user-layout:{tenantID}:{userID}
+  // ---------------------------------------------------------------------------
+
+  // GetUserLayout returns the user's saved dashboard layout.
+  // Returns a platform default when no layout has been saved.
+  rpc GetUserLayout(GetUserLayoutRequest) returns (GetUserLayoutResponse) {
+    option (gibson.auth.v1.authz) = {
+      relation: "member",
+      object_type: "tenant",
+      object_deriver: "tenant_from_identity",
+      allowed_identities: 3  // USER | SERVICE
+    };
+  }
+
+  // SaveUserLayout persists the user's dashboard widget layout.
+  rpc SaveUserLayout(SaveUserLayoutRequest) returns (SaveUserLayoutResponse) {
+    option (gibson.auth.v1.authz) = {
+      relation: "member",
+      object_type: "tenant",
+      object_deriver: "tenant_from_identity",
+      allowed_identities: 3  // USER | SERVICE
+    };
+  }
+
+  // ResetUserLayout removes the user's saved layout so the default is served on next GET.
+  rpc ResetUserLayout(ResetUserLayoutRequest) returns (ResetUserLayoutResponse) {
+    option (gibson.auth.v1.authz) = {
+      relation: "member",
+      object_type: "tenant",
+      object_deriver: "tenant_from_identity",
+      allowed_identities: 3  // USER | SERVICE
+    };
+  }
+
+  // ---------------------------------------------------------------------------
+  // User Activity Feed — IMPLEMENT-NOW
+  // Per-user recent activity (missions, nodes, findings). TTL 7 days, max 5 items each.
+  // Redis keys: useract:{tenantID}:{userID}:{kind}, useract:{tenantID}:{userID}:lastActive
+  // ---------------------------------------------------------------------------
+
+  // GetUserActivity returns the user's aggregated recent platform activity.
+  rpc GetUserActivity(GetUserActivityRequest) returns (GetUserActivityResponse) {
+    option (gibson.auth.v1.authz) = {
+      relation: "member",
+      object_type: "tenant",
+      object_deriver: "tenant_from_identity",
+      allowed_identities: 3  // USER | SERVICE
+    };
+  }
+
+  // RecordUserActivity prepends one activity event to the user's feed.
+  rpc RecordUserActivity(RecordUserActivityRequest) returns (RecordUserActivityResponse) {
+    option (gibson.auth.v1.authz) = {
+      relation: "member",
+      object_type: "tenant",
+      object_deriver: "tenant_from_identity",
+      allowed_identities: 3  // USER | SERVICE
+    };
+  }
+
+  // ---------------------------------------------------------------------------
+  // Signup Progress — IMPLEMENT-NOW
+  // TTL-keyed provisioning step store for the public signup flow.
+  // GetSignupProgress is unauthenticated (attempt_id is a single-use UUID capability).
+  // SetSignupProgress is authenticated and only called by the dashboard server action.
+  // Redis key: signup-progress:{attemptID}  TTL 300s
+  // ---------------------------------------------------------------------------
+
+  // GetSignupProgress polls the provisioning state for a signup attempt.
+  // Unauthenticated: the attempt_id is an opaque UUID-v4 capability.
+  rpc GetSignupProgress(GetSignupProgressRequest) returns (GetSignupProgressResponse) {
+    option (gibson.auth.v1.authz) = {
+      unauthenticated: true
+    };
+  }
+
+  // SetSignupProgress writes or overwrites provisioning progress for a signup attempt.
+  // Only the dashboard server action calls this.
+  rpc SetSignupProgress(SetSignupProgressRequest) returns (SetSignupProgressResponse) {
+    option (gibson.auth.v1.authz) = {
+      relation: "member",
+      object_type: "tenant",
+      object_deriver: "tenant_from_identity",
+      allowed_identities: 3  // USER | SERVICE
+    };
+  }
+
+  // ---------------------------------------------------------------------------
+  // Membership Cache Invalidation — IMPLEMENT-NOW
+  // Removes the Redis cross-request membership cache for a user so that FGA tuple
+  // writes propagate without waiting for the 30-second TTL.
+  // Redis key: dashboard:memberships:user:{userID}
+  // ---------------------------------------------------------------------------
+
+  // InvalidateMembershipCache deletes the cross-request membership cache for a user.
+  rpc InvalidateMembershipCache(InvalidateMembershipCacheRequest) returns (InvalidateMembershipCacheResponse) {
+    option (gibson.auth.v1.authz) = {
+      relation: "member",
+      object_type: "tenant",
+      object_deriver: "tenant_from_identity",
+      allowed_identities: 3  // USER | SERVICE
+    };
+  }
+
+  // ---------------------------------------------------------------------------
+  // Chat Attachment Staging — IMPLEMENT-NOW
+  // Single-use extracted file content store for the chat attachments flow.
+  // Redis key: chatattach:{attachmentID}  TTL 3600s
+  // ---------------------------------------------------------------------------
+
+  // StageAttachment stores extracted file text under a short-lived UUID token.
+  // Returns the attachment_id the chat route passes on the next message.
+  rpc StageAttachment(StageAttachmentRequest) returns (StageAttachmentResponse) {
+    option (gibson.auth.v1.authz) = {
+      relation: "member",
+      object_type: "tenant",
+      object_deriver: "tenant_from_identity",
+      allowed_identities: 3  // USER | SERVICE
+    };
+  }
+
+  // ConsumeAttachment reads and atomically deletes a staged attachment.
+  // Returns NOT_FOUND when the attachment_id is unknown or has expired.
+  rpc ConsumeAttachment(ConsumeAttachmentRequest) returns (ConsumeAttachmentResponse) {
+    option (gibson.auth.v1.authz) = {
+      relation: "member",
+      object_type: "tenant",
+      object_deriver: "tenant_from_identity",
+      allowed_identities: 3  // USER | SERVICE
+    };
+  }
 }
 
 // ---------------------------------------------------------------------------
@@ -511,3 +684,401 @@ message DeleteConversationRequest {
 
 // DeleteConversationResponse is returned on successful deletion.
 message DeleteConversationResponse {}
+
+// ---------------------------------------------------------------------------
+// User Onboarding State — request/response messages
+// ---------------------------------------------------------------------------
+
+// OnboardingSetupTask is a single item in the user's onboarding checklist.
+message OnboardingSetupTask {
+  // id is the task identifier (e.g. "configure_llm", "select_agent").
+  string id = 1;
+
+  // status is the task status: "pending", "in_progress", "completed", or "skipped".
+  string status = 2;
+
+  // completed_at is the RFC 3339 timestamp when the task was completed (empty if not done).
+  string completed_at = 3;
+
+  // category is the task group: "essential", "recommended", or "optional".
+  string category = 4;
+
+  // estimated_minutes is the expected time to complete this task.
+  int32 estimated_minutes = 5;
+}
+
+// UserOnboardingState is the full per-user onboarding record.
+message UserOnboardingState {
+  // user_id is the user this state belongs to.
+  string user_id = 1;
+
+  // tenant_id is the tenant context.
+  string tenant_id = 2;
+
+  // wizard_completed indicates the onboarding wizard is done.
+  bool wizard_completed = 3;
+
+  // wizard_skipped indicates the user dismissed the wizard without completing it.
+  bool wizard_skipped = 4;
+
+  // current_step_id is the active wizard step (e.g. "welcome", "llm-provider").
+  string current_step_id = 5;
+
+  // completed_steps lists wizard step IDs the user has finished.
+  repeated string completed_steps = 6;
+
+  // skipped_steps lists wizard step IDs the user has skipped.
+  repeated string skipped_steps = 7;
+
+  // setup_tasks is the ordered checklist of onboarding tasks.
+  repeated OnboardingSetupTask setup_tasks = 8;
+
+  // llm_config_json is an opaque JSON blob for LLM provider configuration choices.
+  string llm_config_json = 9;
+
+  // selected_agent_id is the agent the user picked during onboarding.
+  string selected_agent_id = 10;
+
+  // created_mission_id is the first mission the user created during onboarding.
+  string created_mission_id = 11;
+
+  // started_at is the RFC 3339 timestamp when onboarding began.
+  string started_at = 12;
+
+  // completed_at is the RFC 3339 timestamp when onboarding finished.
+  string completed_at = 13;
+
+  // updated_at is the RFC 3339 timestamp of the last modification.
+  string updated_at = 14;
+
+  // version is a monotonic schema version to guard against migration skew.
+  int32 version = 15;
+}
+
+// GetUserOnboardingStateRequest fetches the per-user onboarding state.
+message GetUserOnboardingStateRequest {
+  // tenant_id is the tenant context (derived from caller identity when empty).
+  string tenant_id = 1;
+
+  // user_id is the user whose state to retrieve (derived from caller identity when empty).
+  string user_id = 2;
+}
+
+// GetUserOnboardingStateResponse carries the user's onboarding state.
+message GetUserOnboardingStateResponse {
+  // state is the current onboarding state. A default is returned for new users.
+  UserOnboardingState state = 1;
+}
+
+// UpdateUserOnboardingStateRequest replaces the user's onboarding state.
+message UpdateUserOnboardingStateRequest {
+  // tenant_id is the tenant context.
+  string tenant_id = 1;
+
+  // user_id is the user to update.
+  string user_id = 2;
+
+  // state is the full replacement state to persist.
+  UserOnboardingState state = 3;
+}
+
+// UpdateUserOnboardingStateResponse carries the persisted state.
+message UpdateUserOnboardingStateResponse {
+  // state is the persisted onboarding state after the update.
+  UserOnboardingState state = 1;
+}
+
+// ResetUserOnboardingStateRequest wipes the user's onboarding state.
+message ResetUserOnboardingStateRequest {
+  // tenant_id is the tenant context.
+  string tenant_id = 1;
+
+  // user_id is the user to reset.
+  string user_id = 2;
+}
+
+// ResetUserOnboardingStateResponse carries the new default state.
+message ResetUserOnboardingStateResponse {
+  // state is the freshly initialised default state.
+  UserOnboardingState state = 1;
+}
+
+// ---------------------------------------------------------------------------
+// User Layout Preferences — request/response messages
+// ---------------------------------------------------------------------------
+
+// WidgetPosition carries grid coordinates for a dashboard widget.
+message WidgetPosition {
+  // x is the grid column origin (0-based).
+  int32 x = 1;
+
+  // y is the grid row origin (0-based).
+  int32 y = 2;
+
+  // w is the widget width in grid columns.
+  int32 w = 3;
+
+  // h is the widget height in grid rows.
+  int32 h = 4;
+}
+
+// WidgetConfig is the configuration and placement record for a single widget.
+message WidgetConfig {
+  // id is the widget instance identifier.
+  string id = 1;
+
+  // type is the widget type token (e.g. "kpi-summary", "findings-chart").
+  string type = 2;
+
+  // position is the grid placement.
+  WidgetPosition position = 3;
+
+  // visible indicates whether the widget is rendered.
+  bool visible = 4;
+
+  // settings_json is an opaque JSON blob for widget-specific settings.
+  string settings_json = 5;
+}
+
+// UserLayoutPreferences is the full widget layout for a user's dashboard.
+message UserLayoutPreferences {
+  // widgets is the ordered list of widget configurations.
+  repeated WidgetConfig widgets = 1;
+
+  // cols is the total number of grid columns.
+  int32 cols = 2;
+
+  // row_height is the height of each grid row in pixels.
+  int32 row_height = 3;
+}
+
+// GetUserLayoutRequest fetches the user's saved layout.
+message GetUserLayoutRequest {
+  // tenant_id is the tenant context.
+  string tenant_id = 1;
+
+  // user_id is the user whose layout to retrieve.
+  string user_id = 2;
+}
+
+// GetUserLayoutResponse carries the user's layout.
+message GetUserLayoutResponse {
+  // layout is the user's layout. A platform default is returned when none is saved.
+  UserLayoutPreferences layout = 1;
+
+  // is_default is true when the response is the platform default (no user-saved layout).
+  bool is_default = 2;
+}
+
+// SaveUserLayoutRequest persists a new widget layout.
+message SaveUserLayoutRequest {
+  // tenant_id is the tenant context.
+  string tenant_id = 1;
+
+  // user_id is the user to update.
+  string user_id = 2;
+
+  // layout is the layout to persist.
+  UserLayoutPreferences layout = 3;
+}
+
+// SaveUserLayoutResponse is returned on successful save.
+message SaveUserLayoutResponse {
+  // layout is the persisted layout.
+  UserLayoutPreferences layout = 1;
+}
+
+// ResetUserLayoutRequest removes the user's saved layout.
+message ResetUserLayoutRequest {
+  // tenant_id is the tenant context.
+  string tenant_id = 1;
+
+  // user_id is the user whose layout to reset.
+  string user_id = 2;
+}
+
+// ResetUserLayoutResponse is returned on successful reset.
+message ResetUserLayoutResponse {}
+
+// ---------------------------------------------------------------------------
+// User Activity Feed — request/response messages
+// ---------------------------------------------------------------------------
+
+// ActivityItem is a single user activity event (a mission, node, or finding visit).
+message ActivityItem {
+  // id is the unique identifier of the referenced entity.
+  string id = 1;
+
+  // label is the human-readable display label.
+  string label = 2;
+
+  // timestamp_unix is the event time as a Unix timestamp in milliseconds.
+  int64 timestamp_unix = 3;
+}
+
+// UserActivityContext is the aggregated recent activity for a user.
+message UserActivityContext {
+  // recent_missions is the list of recently accessed missions (max 5).
+  repeated ActivityItem recent_missions = 1;
+
+  // recent_nodes is the list of recently accessed knowledge graph nodes (max 5).
+  repeated ActivityItem recent_nodes = 2;
+
+  // recent_findings is the list of recently accessed findings (max 5).
+  repeated ActivityItem recent_findings = 3;
+
+  // last_active_at_unix is the last activity timestamp in milliseconds.
+  // Zero when no activity has been recorded.
+  int64 last_active_at_unix = 4;
+}
+
+// GetUserActivityRequest fetches the user's recent activity.
+message GetUserActivityRequest {
+  // tenant_id is the tenant context.
+  string tenant_id = 1;
+
+  // user_id is the user whose activity to retrieve.
+  string user_id = 2;
+}
+
+// GetUserActivityResponse carries the user's activity context.
+message GetUserActivityResponse {
+  // activity is the user's aggregated recent activity.
+  UserActivityContext activity = 1;
+}
+
+// ActivityKind is the category of activity event.
+enum ActivityKind {
+  // ACTIVITY_KIND_UNSPECIFIED is unused; callers must set an explicit kind.
+  ACTIVITY_KIND_UNSPECIFIED = 0;
+
+  // ACTIVITY_KIND_MISSION represents a mission access event.
+  ACTIVITY_KIND_MISSION = 1;
+
+  // ACTIVITY_KIND_NODE represents a knowledge graph node access event.
+  ACTIVITY_KIND_NODE = 2;
+
+  // ACTIVITY_KIND_FINDING represents a finding access event.
+  ACTIVITY_KIND_FINDING = 3;
+}
+
+// RecordUserActivityRequest appends one activity event to the user's feed.
+message RecordUserActivityRequest {
+  // tenant_id is the tenant context.
+  string tenant_id = 1;
+
+  // user_id is the user performing the activity.
+  string user_id = 2;
+
+  // kind is the category of activity.
+  ActivityKind kind = 3;
+
+  // item is the activity event to record.
+  ActivityItem item = 4;
+}
+
+// RecordUserActivityResponse is returned on successful recording.
+message RecordUserActivityResponse {}
+
+// ---------------------------------------------------------------------------
+// Signup Progress — request/response messages
+// ---------------------------------------------------------------------------
+
+// SignupProgressState is the provisioning step record for a signup attempt.
+message SignupProgressState {
+  // step is the current pipeline step name (e.g. "create_user", "apply_tenant", "done").
+  string step = 1;
+
+  // step_started_at_unix is when the current step began, in Unix milliseconds.
+  int64 step_started_at_unix = 2;
+
+  // terminal_state is the final outcome marker: "ok", "failed", "timeout", or empty.
+  string terminal_state = 3;
+
+  // error_code is the typed failure code when terminal_state is "failed" or "timeout".
+  string error_code = 4;
+
+  // error_message is the user-safe description of the failure.
+  string error_message = 5;
+}
+
+// GetSignupProgressRequest polls provisioning state for an attempt.
+message GetSignupProgressRequest {
+  // attempt_id is the opaque UUID-v4 capability minted by signupAction.
+  string attempt_id = 1;
+}
+
+// GetSignupProgressResponse carries the provisioning state.
+message GetSignupProgressResponse {
+  // progress is the current state. Nil when found is false.
+  SignupProgressState progress = 1;
+
+  // found is false when the attempt_id is unknown or has expired (TTL elapsed).
+  bool found = 2;
+}
+
+// SetSignupProgressRequest persists progress for a signup attempt.
+message SetSignupProgressRequest {
+  // attempt_id is the opaque UUID for this attempt.
+  string attempt_id = 1;
+
+  // progress is the state to persist.
+  SignupProgressState progress = 2;
+
+  // ttl_seconds is the Redis TTL for this key. 0 uses the default (300 seconds).
+  int32 ttl_seconds = 3;
+}
+
+// SetSignupProgressResponse is returned on successful write.
+message SetSignupProgressResponse {}
+
+// ---------------------------------------------------------------------------
+// Membership Cache Invalidation — request/response messages
+// ---------------------------------------------------------------------------
+
+// InvalidateMembershipCacheRequest removes the cross-request membership cache entry.
+message InvalidateMembershipCacheRequest {
+  // user_id is the Zitadel subject (numeric sub) whose cache entry to delete.
+  string user_id = 1;
+}
+
+// InvalidateMembershipCacheResponse is returned on success.
+// Deletion is idempotent — returning success even when no entry existed.
+message InvalidateMembershipCacheResponse {}
+
+// ---------------------------------------------------------------------------
+// Chat Attachment Staging — request/response messages
+// ---------------------------------------------------------------------------
+
+// StageAttachmentRequest stores extracted file text for a single-use chat attachment.
+message StageAttachmentRequest {
+  // tenant_id is the tenant context.
+  string tenant_id = 1;
+
+  // text is the extracted plaintext content of the uploaded file.
+  string text = 2;
+
+  // ttl_seconds is the key TTL. 0 uses the default (3600 seconds — 1 hour).
+  int32 ttl_seconds = 3;
+}
+
+// StageAttachmentResponse carries the opaque attachment token.
+message StageAttachmentResponse {
+  // attachment_id is the UUID token the chat route passes back on the next message.
+  string attachment_id = 1;
+}
+
+// ConsumeAttachmentRequest reads and atomically deletes a staged attachment.
+message ConsumeAttachmentRequest {
+  // tenant_id is the tenant context.
+  string tenant_id = 1;
+
+  // attachment_id is the UUID token returned by StageAttachment.
+  string attachment_id = 2;
+}
+
+// ConsumeAttachmentResponse carries the attachment text.
+message ConsumeAttachmentResponse {
+  // text is the extracted file content.
+  string text = 1;
+}

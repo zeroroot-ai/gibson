@@ -65,9 +65,9 @@ func TestNoTimeNowInRPCHandlers(t *testing.T) {
 		"internal/daemon/api/findings_export.go:103": astchecks.Entry{Category: astchecks.CategoryDefensiveGuard, Reason: "export-filename timestamp; wall-clock UTC"},
 
 		// server_provider_config.go — latency-measurement + check timestamps
-		"internal/daemon/api/server_provider_config.go:332": astchecks.Entry{Category: astchecks.CategoryDefensiveGuard, Reason: "latency-measurement start for provider check"},
-		"internal/daemon/api/server_provider_config.go:464": astchecks.Entry{Category: astchecks.CategoryDefensiveGuard, Reason: "`checkedAt` field on provider check response"},
-		"internal/daemon/api/server_provider_config.go:589": astchecks.Entry{Category: astchecks.CategoryDefensiveGuard, Reason: "latency-measurement start for provider check"},
+		"internal/daemon/api/server_provider_config.go:334": astchecks.Entry{Category: astchecks.CategoryDefensiveGuard, Reason: "latency-measurement start for provider check"},
+		"internal/daemon/api/server_provider_config.go:466": astchecks.Entry{Category: astchecks.CategoryDefensiveGuard, Reason: "`checkedAt` field on provider check response"},
+		"internal/daemon/api/server_provider_config.go:591": astchecks.Entry{Category: astchecks.CategoryDefensiveGuard, Reason: "latency-measurement start for provider check"},
 
 		// credentials.go — credential metadata timestamps
 		"internal/daemon/api/credentials.go:88":  astchecks.Entry{Category: astchecks.CategoryDefensiveGuard, Reason: "credential creation timestamp"},
@@ -87,9 +87,9 @@ func TestNoTimeNowInRPCHandlers(t *testing.T) {
 		"internal/daemon/api/server_model_access.go:291": astchecks.Entry{Category: astchecks.CategoryDefensiveGuard, Reason: "named helper wrapping wall-clock Unix timestamp"},
 
 		// server.go — session IDs + response timestamps + latency
-		"internal/daemon/api/server.go:1038": astchecks.Entry{Category: astchecks.CategoryDefensiveGuard, Reason: "session ID generation uses wall-clock Unix epoch"},
-		"internal/daemon/api/server.go:1057": astchecks.Entry{Category: astchecks.CategoryDefensiveGuard, Reason: "response `Timestamp` field; wall-clock Unix"},
-		"internal/daemon/api/server.go:1403": astchecks.Entry{Category: astchecks.CategoryDefensiveGuard, Reason: "latency-measurement start"},
+		"internal/daemon/api/server.go:1073": astchecks.Entry{Category: astchecks.CategoryDefensiveGuard, Reason: "session ID generation uses wall-clock Unix epoch"},
+		"internal/daemon/api/server.go:1092": astchecks.Entry{Category: astchecks.CategoryDefensiveGuard, Reason: "response `Timestamp` field; wall-clock Unix"},
+		"internal/daemon/api/server.go:1438": astchecks.Entry{Category: astchecks.CategoryDefensiveGuard, Reason: "latency-measurement start"},
 
 		// server_usage.go — staleness markers on usage responses
 		"internal/daemon/api/server_usage.go:77":  astchecks.Entry{Category: astchecks.CategoryDefensiveGuard, Reason: "`StaleAsOfUnix` response field; wall-clock"},
@@ -100,6 +100,17 @@ func TestNoTimeNowInRPCHandlers(t *testing.T) {
 		"internal/daemon/api/llm_config.go:259": astchecks.Entry{Category: astchecks.CategoryDefensiveGuard, Reason: "LLM config `UpdatedAt` field"},
 		"internal/daemon/api/llm_config.go:364": astchecks.Entry{Category: astchecks.CategoryDefensiveGuard, Reason: "latency-measurement start for LLM probe"},
 		"internal/daemon/api/llm_config.go:403": astchecks.Entry{Category: astchecks.CategoryDefensiveGuard, Reason: "LLM `LastCheck` field; wall-clock"},
+
+		// server_chat.go — conversation store save timestamps
+		"internal/daemon/api/server_chat.go:191": astchecks.Entry{Category: astchecks.CategoryDefensiveGuard, Reason: "conversation save `createdAt`/`updatedAt` Redis hash fields; wall-clock Unix"},
+		"internal/daemon/api/server_chat.go:652": astchecks.Entry{Category: astchecks.CategoryDefensiveGuard, Reason: "conversation save `updatedAt` refresh; wall-clock Unix"},
+
+		// user_state.go — per-user state record timestamps + activity last-active marker
+		// (Module 2: Redis-read RPCs, dashboard-no-backing-store-clients).
+		"internal/daemon/api/user_state.go:138": astchecks.Entry{Category: astchecks.CategoryDefensiveGuard, Reason: "onboarding default-state `startedAt`/`updatedAt` fields; wall-clock RFC3339"},
+		"internal/daemon/api/user_state.go:217": astchecks.Entry{Category: astchecks.CategoryDefensiveGuard, Reason: "onboarding `updatedAt` field on Update; wall-clock RFC3339"},
+		"internal/daemon/api/user_state.go:420": astchecks.Entry{Category: astchecks.CategoryDefensiveGuard, Reason: "user-activity `lastActiveAt` Unix-ms wall-clock marker"},
+		"internal/daemon/api/user_state.go:651": astchecks.Entry{Category: astchecks.CategoryDefensiveGuard, Reason: "UUID fallback using wall-clock nonce when crypto/rand fails (unreachable in prod)"},
 	}
 
 	opts := astchecks.WalkOpts{
