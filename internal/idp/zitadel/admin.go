@@ -116,11 +116,16 @@ func New(ctx context.Context, cfg Config) (*Client, error) {
 	)
 
 	// Build an OAuth2 client_credentials token source for the admin account.
+	// The reserved ZITADEL project-audience scope is REQUIRED for the token to
+	// be accepted by the management/admin APIs. With "openid" alone the token is
+	// rejected (HTTP 401), so every management call — GetUserProfile (member and
+	// team-roster name/email enrichment), service-account creation, etc. — fails
+	// and enrichment silently falls back to the raw user id.
 	ccCfg := clientcredentials.Config{
 		ClientID:     cfg.ClientID,
 		ClientSecret: cfg.ClientSecret,
 		TokenURL:     tokenEndpoint,
-		Scopes:       []string{"openid"},
+		Scopes:       []string{"openid", "urn:zitadel:iam:org:project:id:zitadel:aud"},
 	}
 	tokenSrc := oauth2.ReuseTokenSource(nil, ccCfg.TokenSource(ctx))
 
