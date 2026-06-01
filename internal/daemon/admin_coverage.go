@@ -18,12 +18,9 @@ import (
 //
 // ADR-0039: prefix changed from gibson.admin.v1.* to gibson.tenant.v1.* following
 // the customer-surface recategorisation.
-var knownUnregisteredTenantServices = map[string]string{
-	// PluginsAdminServer is implemented (internal/admin/plugin_admin.go) but
-	// requires ZitadelClient, ManifestValidator, SecretWriter, and BootstrapAuditor
-	// deps that are not yet fully wired in grpc.go. Tracked: gibson#565.
-	"gibson.tenant.v1.PluginAdminService": "implemented but not yet registered — gibson#565",
-}
+//
+// gibson#565 resolved: PluginAdminService is now registered in grpc.go.
+var knownUnregisteredTenantServices = map[string]string{}
 
 // assertAdminServicesRegistered is the reverse of assertRegistryCoverage. The
 // latter checks registered -> registry (every served method has an authz rule).

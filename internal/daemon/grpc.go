@@ -1018,13 +1018,45 @@ func (d *daemonImpl) buildGRPCServer(ctx context.Context) (*grpcSubsystem, error
 			tenantv1.RegisterSecretsServiceServer(srv, admin.NewUnavailableSecretsServer())
 		}
 
-		// PluginAdminService (gibson.tenant.v1.PluginAdminService) — handler exists in
-		// internal/admin/plugin_admin.go but requires ZitadelClient, ManifestValidator,
-		// SecretWriter, and BootstrapAuditor deps that are not yet wired in grpc.go.
-		// Tracked: gibson#565. Acknowledged as a known gap in admin_coverage.go so the
-		// startup coverage check does not fail-closed on this service.
-		// Note: service name has changed from gibson.admin.v1.PluginsAdminService to
-		// gibson.tenant.v1.PluginAdminService (ADR-0039); known-gap entry updated accordingly.
+		// PluginAdminService (gibson.tenant.v1.PluginAdminService) — closes gibson#565.
+		//
+		// Dependencies:
+		//   Registry       — pluginRegistryReaderAdapter wraps platformDB (read-only SQL).
+		//   ManifestValidator — pluginManifestValidator parses the plugin YAML schema.
+		//   ZitadelClient  — idpPluginPrincipalAdapter wraps idpClient (CreateServiceAccount + MintClientSecret).
+		//   SecretWriter   — secretWriterAdapter wraps secretsService (tenant injected into ctx).
+		//   Authorizer     — d.authorizer (FGA; reused from the MembershipService block above).
+		//   BootstrapAuditor — d.brokerAuditWriter (*secrets.AuditWriter satisfies the interface).
+		//
+		// When the IdP client or secrets stack is absent we register an Unavailable stub
+		// consistent with the other tenant services above.
+		pluginAdminStackOK := secretsStackOK && idpClient != nil && d.brokerAuditWriter != nil
+
+		if pluginAdminStackOK {
+			pluginAdminSvc, paErr := admin.NewPluginsAdminServer(admin.PluginsAdminConfig{
+				Registry:          &pluginRegistryReaderAdapter{db: d.platformDB},
+				ManifestValidator: &pluginManifestValidator{},
+				ZitadelClient:     &idpPluginPrincipalAdapter{client: idpClient},
+				SecretWriter:      &secretWriterAdapter{svc: d.secretsService},
+				Authorizer:        d.authorizer,
+				BootstrapAuditor:  d.brokerAuditWriter,
+			})
+			if paErr != nil {
+				d.logger.Warn(ctx, "PluginAdminService: constructor failed; registering Unavailable stub",
+					"error", paErr)
+				tenantv1.RegisterPluginAdminServiceServer(srv, admin.NewUnavailablePluginAdminServer())
+			} else {
+				tenantv1.RegisterPluginAdminServiceServer(srv, pluginAdminSvc)
+				d.logger.Info(ctx, "registered gibson.tenant.v1.PluginAdminService gRPC endpoint (closes gibson#565)")
+			}
+		} else {
+			d.logger.Warn(ctx, "PluginAdminService: deps unavailable; registering Unavailable stub",
+				"secrets_stack_ok", secretsStackOK,
+				"idp_client_present", idpClient != nil,
+				"broker_audit_writer_present", d.brokerAuditWriter != nil,
+			)
+			tenantv1.RegisterPluginAdminServiceServer(srv, admin.NewUnavailablePluginAdminServer())
+		}
 	}
 
 	// Register IdentityService — caller-side "what can I do?" RPC.
