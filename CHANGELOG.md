@@ -62,6 +62,75 @@ Completed or cancelled missions are unaffected.
 
 ---
 
+## [0.120.0](https://github.com/zeroroot-ai/gibson/compare/v0.119.1...v0.120.0) (2026-06-01)
+
+
+### Features
+
+* **authz:** hard-enforce model-access gate on slot resolution (fail-closed) ([#532](https://github.com/zeroroot-ai/gibson/issues/532)) ([5672f11](https://github.com/zeroroot-ai/gibson/commit/5672f112b9d8ca8b58ab4ee032ebd47b33796635))
+* **daemon:** implement UpdateMissionDefinition RPC and expose missionDefinitionId in GetMissionDefinitionResponse ([#437](https://github.com/zeroroot-ai/gibson/issues/437), [#438](https://github.com/zeroroot-ai/gibson/issues/438)) ([#442](https://github.com/zeroroot-ai/gibson/issues/442)) ([20ace5d](https://github.com/zeroroot-ai/gibson/commit/20ace5d4b1e44f2687b072db6d7da3a0aecc1950))
+* honor per-node, per-slot LLM overrides in slot resolution ([#542](https://github.com/zeroroot-ai/gibson/issues/542)) ([ed1ae1b](https://github.com/zeroroot-ai/gibson/commit/ed1ae1b07c2c12f6fdf58ee93b949b10d6dcfaf3)), closes [#539](https://github.com/zeroroot-ai/gibson/issues/539)
+* **llm:** add buildEinoOptions / streamToChannel helpers to eino adapter ([#474](https://github.com/zeroroot-ai/gibson/issues/474)) ([5c7c5a7](https://github.com/zeroroot-ai/gibson/commit/5c7c5a7fe40ad4adac816c79cdca15ffc02f80e1))
+* **llm:** add Eino deps and Eino-to-internal type adapter (S1) ([#473](https://github.com/zeroroot-ai/gibson/issues/473)) ([48a25c5](https://github.com/zeroroot-ai/gibson/commit/48a25c56d6f956bfecf1d53f52ef3a5e1c1fc042)), closes [#460](https://github.com/zeroroot-ai/gibson/issues/460)
+* **llm:** delete langchaingo shim layer (S12) ([#486](https://github.com/zeroroot-ai/gibson/issues/486)) ([48f5fd3](https://github.com/zeroroot-ai/gibson/commit/48f5fd398baded029262024fb3010ff0933bfa21))
+* **llm:** OpenAI structured output via Eino response_format (S3) ([#499](https://github.com/zeroroot-ai/gibson/issues/499)) ([42e8c11](https://github.com/zeroroot-ai/gibson/commit/42e8c11c154cccd76c7823680828d3f7def9962a)), closes [#462](https://github.com/zeroroot-ai/gibson/issues/462)
+* **llm:** per-tenant execution cutover + actionable no-provider error ([#533](https://github.com/zeroroot-ai/gibson/issues/533)) ([9ad4cbf](https://github.com/zeroroot-ai/gibson/commit/9ad4cbf55b474b8c840b96b05389e92072aa56c3))
+* **llm:** remove langchaingo dependency entirely (S13) ([#487](https://github.com/zeroroot-ai/gibson/issues/487)) ([17f9a95](https://github.com/zeroroot-ai/gibson/commit/17f9a9516feb238a3faa723b1c3897f1762989d8))
+* **llm:** rewrite Anthropic provider to use Eino (S2) ([#477](https://github.com/zeroroot-ai/gibson/issues/477)) ([ee47f4f](https://github.com/zeroroot-ai/gibson/commit/ee47f4f4898a3c935c82f89075d059dabb4588ba))
+* **llm:** rewrite Bedrock provider to use AWS Converse API directly (S10) ([#480](https://github.com/zeroroot-ai/gibson/issues/480)) ([973dac1](https://github.com/zeroroot-ai/gibson/commit/973dac1c1add64003b31777605ce7d06cec150ee))
+* **llm:** rewrite Cloudflare provider to use Eino (S7) ([#479](https://github.com/zeroroot-ai/gibson/issues/479)) ([aa510cb](https://github.com/zeroroot-ai/gibson/commit/aa510cb8844bfaba3a1c41f425f31b7558162a92))
+* **llm:** rewrite Cohere provider to use Eino (S11) ([#484](https://github.com/zeroroot-ai/gibson/issues/484)) ([ac85186](https://github.com/zeroroot-ai/gibson/commit/ac851864843075aa89e282b6da47ee2da8207934))
+* **llm:** rewrite Google provider to use Eino (S4) ([#485](https://github.com/zeroroot-ai/gibson/issues/485)) ([01ca42b](https://github.com/zeroroot-ai/gibson/commit/01ca42b4c9149fbfeab19e79c78d6dc7789c86c2))
+* **llm:** rewrite HuggingFace provider to use Eino (S8) ([#482](https://github.com/zeroroot-ai/gibson/issues/482)) ([27ee02c](https://github.com/zeroroot-ai/gibson/commit/27ee02ce873e96280bc7592d134846784b08a969))
+* **llm:** rewrite Llamafile provider to use Eino (S9) ([#483](https://github.com/zeroroot-ai/gibson/issues/483)) ([5a04d71](https://github.com/zeroroot-ai/gibson/commit/5a04d714f9b190e110894a1ec7a776fde9bd197b))
+* **llm:** rewrite Mistral provider to use Eino (S6) ([#476](https://github.com/zeroroot-ai/gibson/issues/476)) ([cdd28a7](https://github.com/zeroroot-ai/gibson/commit/cdd28a740639db1ea72ff42ca98fef8c7b514910))
+* **llm:** rewrite Ollama provider to use Eino (S5) ([#478](https://github.com/zeroroot-ai/gibson/issues/478)) ([d3f118b](https://github.com/zeroroot-ai/gibson/commit/d3f118b7d5b5d2236faa15f6310a28c4e62622a0))
+* **llm:** rewrite OpenAI provider to use Eino (S3) ([#481](https://github.com/zeroroot-ai/gibson/issues/481)) ([820c88d](https://github.com/zeroroot-ai/gibson/commit/820c88d4b694f698b09ff824afd82ea7c9f10ebc))
+* **llm:** slot resolution reads the per-tenant resolver (orchestrator + agent slots) ([#530](https://github.com/zeroroot-ai/gibson/issues/530)) ([be209a7](https://github.com/zeroroot-ai/gibson/commit/be209a740727f7f74dac94cd486de653a85ead2c))
+* **llm:** TenantProviderResolver — per-tenant provider set from providerconfig.Store ([#529](https://github.com/zeroroot-ai/gibson/issues/529)) ([2b7a02d](https://github.com/zeroroot-ai/gibson/commit/2b7a02d2d6b5861c37f0efee29710c9c0f081fd9))
+* **mission:** durable authored records + definition link (drop 30-day TTL) ([#508](https://github.com/zeroroot-ai/gibson/issues/508)) ([81fb932](https://github.com/zeroroot-ai/gibson/commit/81fb932a5553bc4e6ab902704bbc4f1ebda24a95)), closes [#505](https://github.com/zeroroot-ai/gibson/issues/505)
+* **mission:** persist & round-trip CUE source in the definition store ([#507](https://github.com/zeroroot-ai/gibson/issues/507)) ([9fb48ab](https://github.com/zeroroot-ai/gibson/commit/9fb48ab063180e320ebad2198490793f7c0f2c89)), closes [#504](https://github.com/zeroroot-ai/gibson/issues/504)
+* **missions:** populate MissionDefinitionId in daemon responses ([#448](https://github.com/zeroroot-ai/gibson/issues/448)) ([a358309](https://github.com/zeroroot-ai/gibson/commit/a3583090eecc5799eb503ad40677b0429b19c48c))
+* **observability:** emit langfuse.user.id + langfuse.trace.tags for filterable traces ([#502](https://github.com/zeroroot-ai/gibson/issues/502)) ([d0659e0](https://github.com/zeroroot-ai/gibson/commit/d0659e08ceb758477fae59e094dd6d4aa48ca452))
+* **quota:** return plan_id in GetTenantQuotaResponse ([#490](https://github.com/zeroroot-ai/gibson/issues/490)) ([59d30c1](https://github.com/zeroroot-ai/gibson/commit/59d30c1bceabe80f000ebbdbf7c61ca0f5cfbcb4)), closes [#488](https://github.com/zeroroot-ai/gibson/issues/488)
+* **target:** daemon CreateTarget/Get/List/Update/Delete handlers over RedisTargetDAO ([#518](https://github.com/zeroroot-ai/gibson/issues/518)) ([c288b79](https://github.com/zeroroot-ai/gibson/commit/c288b7937743294db54705dc7c194cda98e09d05))
+* **traces:** daemon TracesService fronts Langfuse reads + feedback, tenant-scoped ([#554](https://github.com/zeroroot-ai/gibson/issues/554)) ([23285c3](https://github.com/zeroroot-ai/gibson/commit/23285c35b93ecca6d5830d773a049e3755ee33cb)), closes [#585](https://github.com/zeroroot-ai/gibson/issues/585)
+* **user:** add RenameConversation and DeleteConversation RPCs ([#550](https://github.com/zeroroot-ai/gibson/issues/550)) ([ac52627](https://github.com/zeroroot-ai/gibson/commit/ac52627cfd6e3dac2f82127a5606f9346b3ef654))
+* **user:** add SaveConversation RPC and wire conversation store fail-loud ([#544](https://github.com/zeroroot-ai/gibson/issues/544)) ([b9ef92f](https://github.com/zeroroot-ai/gibson/commit/b9ef92f5cb0bd79d7f6610b40ea1ed7f4ec4b503))
+* **user:** daemon RPCs front dashboard direct-Redis reads, tenant-scoped ([#555](https://github.com/zeroroot-ai/gibson/issues/555)) ([3996556](https://github.com/zeroroot-ai/gibson/commit/3996556bbb391891ee5490f2e141366919186ef4)), closes [#586](https://github.com/zeroroot-ai/gibson/issues/586)
+* **user:** implement ListConversations and GetConversation on UserService (Redis-backed) ([#497](https://github.com/zeroroot-ai/gibson/issues/497)) ([0ee8780](https://github.com/zeroroot-ai/gibson/commit/0ee8780dd87f7ab2074ca1148e34dde40f27a40f)), closes [#496](https://github.com/zeroroot-ai/gibson/issues/496)
+* **user:** lossless parts-based ConversationMessage ([#549](https://github.com/zeroroot-ai/gibson/issues/549)) ([3d9cbcd](https://github.com/zeroroot-ai/gibson/commit/3d9cbcde64d0e99a2d254584f0d73628b1681496))
+* **user:** tenant-scoped daemon RPC replacing the dashboard Postgres pool ([#556](https://github.com/zeroroot-ai/gibson/issues/556)) ([839e034](https://github.com/zeroroot-ai/gibson/commit/839e034a6a42df1fe64faef32bf42bd04036149d))
+
+
+### Bug Fixes
+
+* **authz:** fix in_tenant_catalog + deny expansion so user types satisfy component access checks ([#457](https://github.com/zeroroot-ai/gibson/issues/457)) ([31246f9](https://github.com/zeroroot-ai/gibson/commit/31246f9faf446d8b0212b72704a2753c05ded63f))
+* **ci:** upgrade Go to 1.26 and fix BSR authz-registry build ([#449](https://github.com/zeroroot-ai/gibson/issues/449)) ([51ad0a6](https://github.com/zeroroot-ai/gibson/commit/51ad0a60f42ec9bd3f1733df44a3e6770e8b4539))
+* **cue:** bump sdk to v0.124.1 to fix CUE module path after rebrand ([#451](https://github.com/zeroroot-ai/gibson/issues/451)) ([a648fb2](https://github.com/zeroroot-ai/gibson/commit/a648fb2f732ac330d1f4c2c4ba7fa9bd54eb13dc))
+* **daemon:** close LogTailer subscription channel under write lock ([#186](https://github.com/zeroroot-ai/gibson/issues/186)) ([#500](https://github.com/zeroroot-ai/gibson/issues/500)) ([2243c5c](https://github.com/zeroroot-ai/gibson/commit/2243c5c30fc8102ab79cb170fd24f8370e59e3cc))
+* **deps:** bump platform-clients to v0.11.4 ([#498](https://github.com/zeroroot-ai/gibson/issues/498)) ([9812b7f](https://github.com/zeroroot-ai/gibson/commit/9812b7f59b1149ca7ee6a3fb653500aa7ed3ebb1))
+* **graphrag:** nil-safe graph record conversion (daemon panic on mission run) ([#523](https://github.com/zeroroot-ai/gibson/issues/523)) ([a61190a](https://github.com/zeroroot-ai/gibson/commit/a61190a706d6df9577b7a464b3cedce4903758dc))
+* **llm:** deterministic provider selection + tenant-default preference; param order ([#537](https://github.com/zeroroot-ai/gibson/issues/537)) ([baa7a9d](https://github.com/zeroroot-ai/gibson/commit/baa7a9d81dcfa48015bbc5d8cec4b924fbc6b5af))
+* **mission:** stamp TenantID on created mission records so they list ([#522](https://github.com/zeroroot-ai/gibson/issues/522)) ([33300f2](https://github.com/zeroroot-ai/gibson/commit/33300f2c8770cc7d3dc9912a8da1087d35fe40c6))
+* **providerconfig:** List falls back to provider_config_meta when no is_default row ([#510](https://github.com/zeroroot-ai/gibson/issues/510)) ([4bc2f1e](https://github.com/zeroroot-ai/gibson/commit/4bc2f1e1aa8e37fa63dfb5843bba52ae20232420))
+* **providerconfig:** setDefault must also update is_default column in provider_configs ([#509](https://github.com/zeroroot-ai/gibson/issues/509)) ([1caaefe](https://github.com/zeroroot-ai/gibson/commit/1caaefe3fe234e24cbfe70c7da5e2d69e638f217))
+* **providers:** log original error before sanitizing to Code.Internal ([#493](https://github.com/zeroroot-ai/gibson/issues/493)) ([278bba6](https://github.com/zeroroot-ai/gibson/commit/278bba6f046b8f74e5cae65849917ce304e77f95))
+* **quota:** stamp plan_id on the tenant_quotas row (closes [#558](https://github.com/zeroroot-ai/gibson/issues/558)) ([#559](https://github.com/zeroroot-ai/gibson/issues/559)) ([06c1429](https://github.com/zeroroot-ai/gibson/commit/06c1429415d494fc2d527f18b95c15e6dc4d973e))
+* **state:** correct inverted NoAck doc comment in StreamReadGroup ([#458](https://github.com/zeroroot-ai/gibson/issues/458)) ([841fd0b](https://github.com/zeroroot-ai/gibson/commit/841fd0bf9646dcf4c6b4d237fade9e269145a154))
+* **target:** default timeout to 30s so CreateTarget passes validation ([#521](https://github.com/zeroroot-ai/gibson/issues/521)) ([1edc857](https://github.com/zeroroot-ai/gibson/commit/1edc85746c5e91a7f82650e7d2c4c764aeb69fa3))
+* **target:** default type/status/connection so CreateTarget passes validation ([#520](https://github.com/zeroroot-ai/gibson/issues/520)) ([2cc6ad6](https://github.com/zeroroot-ai/gibson/commit/2cc6ad64a3808990200bbaa905b7946414b98da6))
+* **test:** rename gibsoncheck testdata fixtures from zero-day-ai → zeroroot-ai ([#456](https://github.com/zeroroot-ai/gibson/issues/456)) ([0dad4e7](https://github.com/zeroroot-ai/gibson/commit/0dad4e7de869934c53657811a2852575a6547c5a))
+* **test:** update no_graceful_nil allowlist grpc.go:2573 → :2574 ([#455](https://github.com/zeroroot-ai/gibson/issues/455)) ([fd3f02a](https://github.com/zeroroot-ai/gibson/commit/fd3f02a4a7063a5cc55db159ce141c97d7d4b064))
+* **test:** update server_provider_config.go nil-guard allowlist line ([#494](https://github.com/zeroroot-ai/gibson/issues/494)) ([7b24d13](https://github.com/zeroroot-ai/gibson/commit/7b24d1372c81f3dfc997397a8506db21f982af17))
+* **test:** update time.Now allowlist line numbers shifted by plan_id handler ([#492](https://github.com/zeroroot-ai/gibson/issues/492)) ([f1387e2](https://github.com/zeroroot-ai/gibson/commit/f1387e233933c6e3fd9c17b20e7efcf0c61712fe))
+* **tls:** forbid InsecureSkipVerify in component TLS without explicit dev opt-in (closes [#545](https://github.com/zeroroot-ai/gibson/issues/545)) ([#552](https://github.com/zeroroot-ai/gibson/issues/552)) ([2db4f56](https://github.com/zeroroot-ai/gibson/commit/2db4f562744dd4af5c73e96903e29ab0dc5d3b4a))
+
+
+### Reverts
+
+* **providerconfig:** remove List fallback hack — sync via SQL instead ([#511](https://github.com/zeroroot-ai/gibson/issues/511)) ([3e0760e](https://github.com/zeroroot-ai/gibson/commit/3e0760e54d177951f3ee21f13aba905ec3f9115a))
+
 ## [0.119.1](https://github.com/zeroroot-ai/gibson/compare/v0.119.0...v0.119.1) (2026-05-26)
 
 
