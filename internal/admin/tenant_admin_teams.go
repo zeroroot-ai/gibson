@@ -98,6 +98,16 @@ func stripFGATypePrefix(s, typeName string) string {
 	return strings.TrimPrefix(s, typeName+":")
 }
 
+// tenantRefFromID builds the canonical FGA tenant reference from an inbound
+// tenant id, applying the "tenant:" type prefix exactly once. The id is
+// normalized defensively: a caller that already sends "tenant:<slug>" (a past
+// dashboard bug, fixed in dashboard#603) cannot produce a double-prefixed,
+// malformed tuple like "tenant:tenant:<slug>". The wire contract remains the
+// bare slug; this only guarantees the daemon never writes a bad tuple.
+func tenantRefFromID(tenantID string) string {
+	return "tenant:" + stripFGATypePrefix(tenantID, "tenant")
+}
+
 // ---------------------------------------------------------------------------
 // GetReservedNames (#395)
 // ---------------------------------------------------------------------------
@@ -156,7 +166,7 @@ func (s *TenantAdminServer) ListTeams(ctx context.Context, req *adminv1.ListTeam
 	}
 	pageSize := resolveTeamPageSize(req.GetPageSize())
 
-	tenantRef := "tenant:" + tenantID
+	tenantRef := tenantRefFromID(tenantID)
 	teamRefs, err := s.authorizer.ListObjects(ctx, tenantRef, "parent", "team")
 	if err != nil {
 		return nil, status.Errorf(codes.Internal, "fga ListObjects(teams): %v", err)
@@ -224,7 +234,7 @@ func (s *TenantAdminServer) ListTeamMembers(ctx context.Context, req *adminv1.Li
 	}
 	pageSize := resolveTeamPageSize(req.GetPageSize())
 
-	tenantRef := "tenant:" + tenantID
+	tenantRef := tenantRefFromID(tenantID)
 	teamRef := "team:" + req.GetTeamId()
 
 	// Cross-tenant denial: verify the requested team actually belongs to the
@@ -311,7 +321,7 @@ func (s *TenantAdminServer) CreateTeam(ctx context.Context, req *adminv1.CreateT
 	if tenantID == "" {
 		tenantID = tenant.String()
 	}
-	tenantRef := "tenant:" + tenantID
+	tenantRef := tenantRefFromID(tenantID)
 	teamRef := "team:" + req.GetTeamId()
 
 	if err := s.authorizer.Write(ctx, []authz.Tuple{
@@ -352,7 +362,7 @@ func (s *TenantAdminServer) DeleteTeam(ctx context.Context, req *adminv1.DeleteT
 	if tenantID == "" {
 		tenantID = tenant.String()
 	}
-	tenantRef := "tenant:" + tenantID
+	tenantRef := tenantRefFromID(tenantID)
 	teamRef := "team:" + req.GetTeamId()
 
 	// Cross-tenant denial: verify the team belongs to the caller's tenant.
@@ -397,7 +407,7 @@ func (s *TenantAdminServer) AddTeamMember(ctx context.Context, req *adminv1.AddT
 	if tenantID == "" {
 		tenantID = tenant.String()
 	}
-	tenantRef := "tenant:" + tenantID
+	tenantRef := tenantRefFromID(tenantID)
 	teamRef := "team:" + req.GetTeamId()
 
 	// Cross-tenant denial.
@@ -445,7 +455,7 @@ func (s *TenantAdminServer) RemoveTeamMember(ctx context.Context, req *adminv1.R
 	if tenantID == "" {
 		tenantID = tenant.String()
 	}
-	tenantRef := "tenant:" + tenantID
+	tenantRef := tenantRefFromID(tenantID)
 	teamRef := "team:" + req.GetTeamId()
 	userRef := "user:" + req.GetUserId()
 
@@ -515,7 +525,7 @@ func (s *TenantAdminServer) SetTeamAdmin(ctx context.Context, req *adminv1.SetTe
 	if tenantID == "" {
 		tenantID = tenant.String()
 	}
-	tenantRef := "tenant:" + tenantID
+	tenantRef := tenantRefFromID(tenantID)
 	teamRef := "team:" + req.GetTeamId()
 	userRef := "user:" + req.GetUserId()
 
