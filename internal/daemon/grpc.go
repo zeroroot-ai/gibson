@@ -4,6 +4,7 @@ import (
 	"bufio"
 	"context"
 	"crypto/x509"
+	"database/sql"
 	"encoding/json"
 	"fmt"
 	"io"
@@ -27,6 +28,7 @@ import (
 	"github.com/zeroroot-ai/gibson/internal/capabilitygrant"
 	"github.com/zeroroot-ai/gibson/internal/component"
 	"github.com/zeroroot-ai/gibson/internal/daemon/api"
+	billingpb "github.com/zeroroot-ai/gibson/internal/daemon/api/gibson/billing/v1"
 	tracespb "github.com/zeroroot-ai/gibson/internal/daemon/api/gibson/traces/v1"
 	userv1 "github.com/zeroroot-ai/gibson/internal/daemon/api/gibson/user/v1"
 	"github.com/zeroroot-ai/gibson/internal/idempotency"
@@ -1092,6 +1094,18 @@ func (d *daemonImpl) buildGRPCServer(ctx context.Context) (*grpcSubsystem, error
 	)
 	tracespb.RegisterTracesServiceServer(srv, tracesSvc)
 	d.logger.Info(ctx, "registered TracesService gRPC endpoint")
+
+	// Register gibson.billing.v1.BillingService — the daemon-mediated billing
+	// gateway replacing the dashboard's direct pg.Pool usage in the Stripe
+	// webhook handler. Uses the existing platformDB; a nil platformDB returns
+	// codes.Unavailable per-RPC until the pool is ready.
+	// Spec: dashboard-no-backing-store-clients (Module 3 — Postgres pool removal).
+	billingSvc := NewBillingServer(
+		func() *sql.DB { return d.platformDB },
+		d.logger.WithComponent("billing-service").Slog(),
+	)
+	billingpb.RegisterBillingServiceServer(srv, billingSvc)
+	d.logger.Info(ctx, "registered BillingService gRPC endpoint")
 
 	// Initialize and register the ComponentService on the same gRPC port.
 	//
