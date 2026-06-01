@@ -30,7 +30,7 @@ jobs:
       component_path: .
       dockerfile_path: Dockerfile
       image_name: ghcr.io/zeroroot-ai/gibson
-      tag_pattern: v(.*)
+      tag_pattern: (v.*)
       # spec setec-sandbox-prod-default R1.1: production GHCR images compile in
       # the Setec gRPC adapter by default. The Dockerfile's ARG default is also
       # `setec_integration`, but we declare it explicitly here to make CI's
