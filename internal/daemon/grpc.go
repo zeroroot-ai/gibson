@@ -986,6 +986,30 @@ func (d *daemonImpl) buildGRPCServer(ctx context.Context) (*grpcSubsystem, error
 		adminpb.RegisterTenantAdminServiceServer(srv, admin.NewUnavailableTenantAdminServer())
 	}
 
+	// Register SecretsAdminService — dashboard /settings/secrets. The handler
+	// (internal/admin/secrets_admin.go) was implemented but never wired here, so
+	// the page returned Unimplemented (gibson#564). Deps come off the daemon;
+	// PluginsBoundTo is a real FGA walker over can_resolve tuples. Falls back to
+	// an Unavailable stub when the secrets stack didn't initialise.
+	if d.secretsService != nil && d.secretsRegistry != nil && d.platformDB != nil && d.authorizer != nil {
+		secretsAdminSvc, saErr := admin.NewSecretsAdminServer(admin.SecretsAdminConfig{
+			Service:            d.secretsService,
+			Broker:             d.secretsRegistry,
+			PluginAssociations: admin.NewFGASecretsPluginAssociations(d.authorizer),
+			AuditQuery:         audit.NewQuery(d.platformDB),
+		})
+		if saErr != nil {
+			d.logger.Warn(ctx, "SecretsAdminService not constructed; registering Unavailable stub", slog.String("error", saErr.Error()))
+			adminpb.RegisterSecretsAdminServiceServer(srv, admin.NewUnavailableSecretsAdminServer())
+		} else {
+			adminpb.RegisterSecretsAdminServiceServer(srv, secretsAdminSvc)
+			d.logger.Info(ctx, "registered gibson.admin.v1.SecretsAdminService gRPC endpoint")
+		}
+	} else {
+		d.logger.Warn(ctx, "secrets stack not initialised: registering Unavailable stub for gibson.admin.v1.SecretsAdminService")
+		adminpb.RegisterSecretsAdminServiceServer(srv, admin.NewUnavailableSecretsAdminServer())
+	}
+
 	// Register IdentityService — caller-side "what can I do?" RPC.
 	// Spec: component-bootstrap-e2e Requirement 10.
 	if d.authorizer != nil {
@@ -1311,6 +1335,14 @@ func (d *daemonImpl) buildGRPCServer(ctx context.Context) (*grpcSubsystem, error
 	// authorize — fail closed at startup so deployment is blocked.
 	if err := assertRegistryCoverage(srv); err != nil {
 		return nil, fmt.Errorf("daemon: registry coverage check failed: %w", err)
+	}
+
+	// Reverse coverage (gibson#564 Part 2): every gibson.admin.v1.* service
+	// declared in the authz registry must actually be registered on this
+	// server, or be an acknowledged known gap. Catches an admin service that is
+	// fully declared + authz-gated but never served (boots clean, 500s on call).
+	if err := assertAdminServicesRegistered(registeredServiceNames(srv)); err != nil {
+		return nil, fmt.Errorf("daemon: admin service coverage check failed: %w", err)
 	}
 
 	return &grpcSubsystem{
