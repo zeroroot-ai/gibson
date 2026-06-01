@@ -211,6 +211,68 @@ func TestExecuteLLM_RoundTrip(t *testing.T) {
 	assert.Equal(t, "hello", capturedReq.Messages[0].Content)
 }
 
+// TestExecuteLLM_DefaultsMaxTokens verifies that a request which omits
+// max_tokens reaches the provider with the default floor applied, rather than
+// 0. A zero max_tokens makes Anthropic return an empty completion with
+// finishReason "length" — the blank-chat-reply bug.
+func TestExecuteLLM_DefaultsMaxTokens(t *testing.T) {
+	store := &stubProviderConfigStore{
+		resolveFunc: func(_ context.Context, _, _ string) (*providerconfig.DecryptedConfig, error) {
+			return knownDecryptedConfig(), nil
+		},
+	}
+	var capturedReq llm.CompletionRequest
+	prov := &stubMockProvider{
+		completeFunc: func(_ context.Context, req llm.CompletionRequest) (*llm.CompletionResponse, error) {
+			capturedReq = req
+			return &llm.CompletionResponse{
+				Message:      llm.Message{Role: llm.RoleAssistant, Content: "ok"},
+				FinishReason: llm.FinishReasonStop,
+			}, nil
+		},
+	}
+	s := newExecServer(store, func(_ llm.ProviderConfig) (llm.LLMProvider, error) { return prov, nil })
+
+	// No MaxTokens set on the request (mirrors the dashboard chat client).
+	_, err := s.ExecuteLLM(tenantCtx("tenant-a"), &tenantv1.ExecuteLLMRequest{
+		ProviderName: "my-openai",
+		Messages:     []*tenantv1.LLMMessageContent{{Role: "user", Content: "hi"}},
+	})
+	require.NoError(t, err)
+	assert.Equal(t, defaultMaxOutputTokens, capturedReq.MaxTokens,
+		"omitted max_tokens must be floored to the default, not left at 0")
+}
+
+// TestExecuteLLM_PreservesExplicitMaxTokens verifies an explicit max_tokens is
+// not overridden by the default floor.
+func TestExecuteLLM_PreservesExplicitMaxTokens(t *testing.T) {
+	store := &stubProviderConfigStore{
+		resolveFunc: func(_ context.Context, _, _ string) (*providerconfig.DecryptedConfig, error) {
+			return knownDecryptedConfig(), nil
+		},
+	}
+	var capturedReq llm.CompletionRequest
+	prov := &stubMockProvider{
+		completeFunc: func(_ context.Context, req llm.CompletionRequest) (*llm.CompletionResponse, error) {
+			capturedReq = req
+			return &llm.CompletionResponse{
+				Message:      llm.Message{Role: llm.RoleAssistant, Content: "ok"},
+				FinishReason: llm.FinishReasonStop,
+			}, nil
+		},
+	}
+	s := newExecServer(store, func(_ llm.ProviderConfig) (llm.LLMProvider, error) { return prov, nil })
+
+	want := int32(256)
+	_, err := s.ExecuteLLM(tenantCtx("tenant-a"), &tenantv1.ExecuteLLMRequest{
+		ProviderName: "my-openai",
+		Messages:     []*tenantv1.LLMMessageContent{{Role: "user", Content: "hi"}},
+		MaxTokens:    &want,
+	})
+	require.NoError(t, err)
+	assert.Equal(t, 256, capturedReq.MaxTokens, "explicit max_tokens must be preserved")
+}
+
 // TestExecuteLLM_NoProviderStore ensures FailedPrecondition is returned when
 // the server has no provider config store wired.
 func TestExecuteLLM_NoProviderStore(t *testing.T) {
