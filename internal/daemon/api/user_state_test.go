@@ -18,7 +18,7 @@ import (
 	"github.com/stretchr/testify/require"
 	"google.golang.org/grpc/codes"
 
-	userv1 "github.com/zeroroot-ai/gibson/internal/daemon/api/gibson/user/v1"
+	tenantv1 "github.com/zeroroot-ai/sdk/api/gen/gibson/tenant/v1"
 	"github.com/zeroroot-ai/sdk/auth"
 )
 
@@ -58,7 +58,7 @@ func TestGetUserOnboardingState_DefaultForNewUser(t *testing.T) {
 	srv := newUserStateServer(t)
 	ctx := tenantAndSubjectCtx("tenant-a", "user-1")
 
-	resp, err := srv.GetUserOnboardingState(ctx, &userv1.GetUserOnboardingStateRequest{})
+	resp, err := srv.GetUserOnboardingState(ctx, &tenantv1.GetUserOnboardingStateRequest{})
 	require.NoError(t, err)
 	require.NotNil(t, resp.GetState())
 	assert.Equal(t, "user-1", resp.GetState().GetUserId())
@@ -73,11 +73,11 @@ func TestGetUserOnboardingState_RoundTrip(t *testing.T) {
 	ctx := tenantAndSubjectCtx("tenant-a", "user-1")
 
 	// First GET creates the default.
-	_, err := srv.GetUserOnboardingState(ctx, &userv1.GetUserOnboardingStateRequest{})
+	_, err := srv.GetUserOnboardingState(ctx, &tenantv1.GetUserOnboardingStateRequest{})
 	require.NoError(t, err)
 
 	// Update.
-	state := &userv1.UserOnboardingState{
+	state := &tenantv1.UserOnboardingState{
 		UserId:          "user-1",
 		TenantId:        "tenant-a",
 		WizardCompleted: true,
@@ -85,13 +85,13 @@ func TestGetUserOnboardingState_RoundTrip(t *testing.T) {
 		CompletedSteps:  []string{"welcome", "llm-provider", "completion"},
 		Version:         1,
 	}
-	_, err = srv.UpdateUserOnboardingState(ctx, &userv1.UpdateUserOnboardingStateRequest{
+	_, err = srv.UpdateUserOnboardingState(ctx, &tenantv1.UpdateUserOnboardingStateRequest{
 		State: state,
 	})
 	require.NoError(t, err)
 
 	// Read back.
-	resp, err := srv.GetUserOnboardingState(ctx, &userv1.GetUserOnboardingStateRequest{})
+	resp, err := srv.GetUserOnboardingState(ctx, &tenantv1.GetUserOnboardingStateRequest{})
 	require.NoError(t, err)
 	assert.True(t, resp.GetState().GetWizardCompleted())
 	assert.Equal(t, "completion", resp.GetState().GetCurrentStepId())
@@ -102,18 +102,18 @@ func TestGetUserOnboardingState_CrossTenantIsolation(t *testing.T) {
 
 	// User-1 in tenant-A sets a custom state.
 	ctxA := tenantAndSubjectCtx("tenant-a", "user-1")
-	state := &userv1.UserOnboardingState{
+	state := &tenantv1.UserOnboardingState{
 		WizardCompleted: true,
 		CurrentStepId:   "completion",
 	}
-	_, err := srv.UpdateUserOnboardingState(ctxA, &userv1.UpdateUserOnboardingStateRequest{
+	_, err := srv.UpdateUserOnboardingState(ctxA, &tenantv1.UpdateUserOnboardingStateRequest{
 		State: state,
 	})
 	require.NoError(t, err)
 
 	// User-1 in tenant-B sees a fresh default (different key).
 	ctxB := tenantAndSubjectCtx("tenant-b", "user-1")
-	resp, err := srv.GetUserOnboardingState(ctxB, &userv1.GetUserOnboardingStateRequest{})
+	resp, err := srv.GetUserOnboardingState(ctxB, &tenantv1.GetUserOnboardingStateRequest{})
 	require.NoError(t, err)
 	assert.False(t, resp.GetState().GetWizardCompleted(), "tenant-B must not see tenant-A's state")
 }
@@ -123,13 +123,13 @@ func TestResetUserOnboardingState(t *testing.T) {
 	ctx := tenantAndSubjectCtx("tenant-a", "user-1")
 
 	// Advance past default.
-	_, err := srv.UpdateUserOnboardingState(ctx, &userv1.UpdateUserOnboardingStateRequest{
-		State: &userv1.UserOnboardingState{WizardCompleted: true, CurrentStepId: "completion"},
+	_, err := srv.UpdateUserOnboardingState(ctx, &tenantv1.UpdateUserOnboardingStateRequest{
+		State: &tenantv1.UserOnboardingState{WizardCompleted: true, CurrentStepId: "completion"},
 	})
 	require.NoError(t, err)
 
 	// Reset.
-	resp, err := srv.ResetUserOnboardingState(ctx, &userv1.ResetUserOnboardingStateRequest{})
+	resp, err := srv.ResetUserOnboardingState(ctx, &tenantv1.ResetUserOnboardingStateRequest{})
 	require.NoError(t, err)
 	assert.False(t, resp.GetState().GetWizardCompleted())
 	assert.Equal(t, "welcome", resp.GetState().GetCurrentStepId())
@@ -143,7 +143,7 @@ func TestGetUserLayout_DefaultWhenNoneSaved(t *testing.T) {
 	srv := newUserStateServer(t)
 	ctx := tenantAndSubjectCtx("tenant-a", "user-1")
 
-	resp, err := srv.GetUserLayout(ctx, &userv1.GetUserLayoutRequest{})
+	resp, err := srv.GetUserLayout(ctx, &tenantv1.GetUserLayoutRequest{})
 	require.NoError(t, err)
 	assert.True(t, resp.GetIsDefault())
 	assert.Equal(t, int32(12), resp.GetLayout().GetCols())
@@ -154,18 +154,18 @@ func TestSaveUserLayout_RoundTrip(t *testing.T) {
 	srv := newUserStateServer(t)
 	ctx := tenantAndSubjectCtx("tenant-a", "user-1")
 
-	layout := &userv1.UserLayoutPreferences{
+	layout := &tenantv1.UserLayoutPreferences{
 		Cols:      8,
 		RowHeight: 100,
-		Widgets: []*userv1.WidgetConfig{
-			{Id: "w1", Type: "kpi-summary", Position: &userv1.WidgetPosition{X: 0, Y: 0, W: 8, H: 2}, Visible: true},
+		Widgets: []*tenantv1.WidgetConfig{
+			{Id: "w1", Type: "kpi-summary", Position: &tenantv1.WidgetPosition{X: 0, Y: 0, W: 8, H: 2}, Visible: true},
 		},
 	}
-	saveResp, err := srv.SaveUserLayout(ctx, &userv1.SaveUserLayoutRequest{Layout: layout})
+	saveResp, err := srv.SaveUserLayout(ctx, &tenantv1.SaveUserLayoutRequest{Layout: layout})
 	require.NoError(t, err)
 	assert.Equal(t, int32(8), saveResp.GetLayout().GetCols())
 
-	getResp, err := srv.GetUserLayout(ctx, &userv1.GetUserLayoutRequest{})
+	getResp, err := srv.GetUserLayout(ctx, &tenantv1.GetUserLayoutRequest{})
 	require.NoError(t, err)
 	assert.False(t, getResp.GetIsDefault())
 	assert.Equal(t, int32(8), getResp.GetLayout().GetCols())
@@ -176,16 +176,16 @@ func TestSaveUserLayout_CrossTenantIsolation(t *testing.T) {
 	srv := newUserStateServer(t)
 
 	ctxA := tenantAndSubjectCtx("tenant-a", "user-1")
-	layout := &userv1.UserLayoutPreferences{
+	layout := &tenantv1.UserLayoutPreferences{
 		Cols:      4,
 		RowHeight: 50,
-		Widgets:   []*userv1.WidgetConfig{{Id: "w1", Type: "kpi-summary", Position: &userv1.WidgetPosition{X: 0, Y: 0, W: 4, H: 2}, Visible: true}},
+		Widgets:   []*tenantv1.WidgetConfig{{Id: "w1", Type: "kpi-summary", Position: &tenantv1.WidgetPosition{X: 0, Y: 0, W: 4, H: 2}, Visible: true}},
 	}
-	_, err := srv.SaveUserLayout(ctxA, &userv1.SaveUserLayoutRequest{Layout: layout})
+	_, err := srv.SaveUserLayout(ctxA, &tenantv1.SaveUserLayoutRequest{Layout: layout})
 	require.NoError(t, err)
 
 	ctxB := tenantAndSubjectCtx("tenant-b", "user-1")
-	resp, err := srv.GetUserLayout(ctxB, &userv1.GetUserLayoutRequest{})
+	resp, err := srv.GetUserLayout(ctxB, &tenantv1.GetUserLayoutRequest{})
 	require.NoError(t, err)
 	assert.True(t, resp.GetIsDefault(), "tenant-B must not see tenant-A's layout")
 }
@@ -195,19 +195,19 @@ func TestResetUserLayout(t *testing.T) {
 	ctx := tenantAndSubjectCtx("tenant-a", "user-1")
 
 	// Save a custom layout.
-	layout := &userv1.UserLayoutPreferences{
+	layout := &tenantv1.UserLayoutPreferences{
 		Cols:    4,
-		Widgets: []*userv1.WidgetConfig{{Id: "w1", Type: "kpi-summary", Position: &userv1.WidgetPosition{W: 4, H: 2}, Visible: true}},
+		Widgets: []*tenantv1.WidgetConfig{{Id: "w1", Type: "kpi-summary", Position: &tenantv1.WidgetPosition{W: 4, H: 2}, Visible: true}},
 	}
-	_, err := srv.SaveUserLayout(ctx, &userv1.SaveUserLayoutRequest{Layout: layout})
+	_, err := srv.SaveUserLayout(ctx, &tenantv1.SaveUserLayoutRequest{Layout: layout})
 	require.NoError(t, err)
 
 	// Reset.
-	_, err = srv.ResetUserLayout(ctx, &userv1.ResetUserLayoutRequest{})
+	_, err = srv.ResetUserLayout(ctx, &tenantv1.ResetUserLayoutRequest{})
 	require.NoError(t, err)
 
 	// Verify default is returned.
-	resp, err := srv.GetUserLayout(ctx, &userv1.GetUserLayoutRequest{})
+	resp, err := srv.GetUserLayout(ctx, &tenantv1.GetUserLayoutRequest{})
 	require.NoError(t, err)
 	assert.True(t, resp.GetIsDefault())
 }
@@ -220,14 +220,14 @@ func TestRecordAndGetUserActivity_RoundTrip(t *testing.T) {
 	srv := newUserStateServer(t)
 	ctx := tenantAndSubjectCtx("tenant-a", "user-1")
 
-	item := &userv1.ActivityItem{Id: "m1", Label: "My Mission", TimestampUnix: 1000}
-	_, err := srv.RecordUserActivity(ctx, &userv1.RecordUserActivityRequest{
-		Kind: userv1.ActivityKind_ACTIVITY_KIND_MISSION,
+	item := &tenantv1.ActivityItem{Id: "m1", Label: "My Mission", TimestampUnix: 1000}
+	_, err := srv.RecordUserActivity(ctx, &tenantv1.RecordUserActivityRequest{
+		Kind: tenantv1.ActivityKind_ACTIVITY_KIND_MISSION,
 		Item: item,
 	})
 	require.NoError(t, err)
 
-	resp, err := srv.GetUserActivity(ctx, &userv1.GetUserActivityRequest{})
+	resp, err := srv.GetUserActivity(ctx, &tenantv1.GetUserActivityRequest{})
 	require.NoError(t, err)
 	require.Len(t, resp.GetActivity().GetRecentMissions(), 1)
 	assert.Equal(t, "m1", resp.GetActivity().GetRecentMissions()[0].GetId())
@@ -238,14 +238,14 @@ func TestGetUserActivity_CrossTenantIsolation(t *testing.T) {
 	srv := newUserStateServer(t)
 
 	ctxA := tenantAndSubjectCtx("tenant-a", "user-1")
-	_, err := srv.RecordUserActivity(ctxA, &userv1.RecordUserActivityRequest{
-		Kind: userv1.ActivityKind_ACTIVITY_KIND_MISSION,
-		Item: &userv1.ActivityItem{Id: "m1", Label: "Tenant A Mission", TimestampUnix: 1000},
+	_, err := srv.RecordUserActivity(ctxA, &tenantv1.RecordUserActivityRequest{
+		Kind: tenantv1.ActivityKind_ACTIVITY_KIND_MISSION,
+		Item: &tenantv1.ActivityItem{Id: "m1", Label: "Tenant A Mission", TimestampUnix: 1000},
 	})
 	require.NoError(t, err)
 
 	ctxB := tenantAndSubjectCtx("tenant-b", "user-1")
-	resp, err := srv.GetUserActivity(ctxB, &userv1.GetUserActivityRequest{})
+	resp, err := srv.GetUserActivity(ctxB, &tenantv1.GetUserActivityRequest{})
 	require.NoError(t, err)
 	assert.Empty(t, resp.GetActivity().GetRecentMissions(), "tenant-B must not see tenant-A's activity")
 }
@@ -255,21 +255,21 @@ func TestRecordUserActivity_AllKinds(t *testing.T) {
 	ctx := tenantAndSubjectCtx("tenant-a", "user-1")
 
 	for _, tc := range []struct {
-		kind userv1.ActivityKind
+		kind tenantv1.ActivityKind
 		id   string
 	}{
-		{userv1.ActivityKind_ACTIVITY_KIND_MISSION, "m1"},
-		{userv1.ActivityKind_ACTIVITY_KIND_NODE, "n1"},
-		{userv1.ActivityKind_ACTIVITY_KIND_FINDING, "f1"},
+		{tenantv1.ActivityKind_ACTIVITY_KIND_MISSION, "m1"},
+		{tenantv1.ActivityKind_ACTIVITY_KIND_NODE, "n1"},
+		{tenantv1.ActivityKind_ACTIVITY_KIND_FINDING, "f1"},
 	} {
-		_, err := srv.RecordUserActivity(ctx, &userv1.RecordUserActivityRequest{
+		_, err := srv.RecordUserActivity(ctx, &tenantv1.RecordUserActivityRequest{
 			Kind: tc.kind,
-			Item: &userv1.ActivityItem{Id: tc.id, TimestampUnix: 1},
+			Item: &tenantv1.ActivityItem{Id: tc.id, TimestampUnix: 1},
 		})
 		require.NoError(t, err)
 	}
 
-	resp, err := srv.GetUserActivity(ctx, &userv1.GetUserActivityRequest{})
+	resp, err := srv.GetUserActivity(ctx, &tenantv1.GetUserActivityRequest{})
 	require.NoError(t, err)
 	assert.Len(t, resp.GetActivity().GetRecentMissions(), 1)
 	assert.Len(t, resp.GetActivity().GetRecentNodes(), 1)
@@ -282,16 +282,16 @@ func TestRecordUserActivity_MaxItemsTrimmed(t *testing.T) {
 
 	// Insert 7 items; the list must be trimmed to 5.
 	for i := 0; i < 7; i++ {
-		item, _ := json.Marshal(userv1.ActivityItem{Id: "m" + string(rune('0'+i)), TimestampUnix: int64(i)})
+		item, _ := json.Marshal(tenantv1.ActivityItem{Id: "m" + string(rune('0'+i)), TimestampUnix: int64(i)})
 		_ = item
-		_, err := srv.RecordUserActivity(ctx, &userv1.RecordUserActivityRequest{
-			Kind: userv1.ActivityKind_ACTIVITY_KIND_MISSION,
-			Item: &userv1.ActivityItem{Id: "m" + string(rune('0'+i)), TimestampUnix: int64(i)},
+		_, err := srv.RecordUserActivity(ctx, &tenantv1.RecordUserActivityRequest{
+			Kind: tenantv1.ActivityKind_ACTIVITY_KIND_MISSION,
+			Item: &tenantv1.ActivityItem{Id: "m" + string(rune('0'+i)), TimestampUnix: int64(i)},
 		})
 		require.NoError(t, err)
 	}
 
-	resp, err := srv.GetUserActivity(ctx, &userv1.GetUserActivityRequest{})
+	resp, err := srv.GetUserActivity(ctx, &tenantv1.GetUserActivityRequest{})
 	require.NoError(t, err)
 	assert.LessOrEqual(t, len(resp.GetActivity().GetRecentMissions()), activityMaxItems,
 		"activity list must be trimmed to %d", activityMaxItems)
@@ -307,21 +307,21 @@ func TestSignupProgress_RoundTrip(t *testing.T) {
 	ctx := context.Background()
 
 	id := mintUUID()
-	progress := &userv1.SignupProgressState{
+	progress := &tenantv1.SignupProgressState{
 		Step:              "create_user",
 		StepStartedAtUnix: 1000,
 	}
 
 	// Write (authenticated call — simulate with tenant context).
 	authCtx := tenantAndSubjectCtx("tenant-a", "user-1")
-	_, err := srv.SetSignupProgress(authCtx, &userv1.SetSignupProgressRequest{
+	_, err := srv.SetSignupProgress(authCtx, &tenantv1.SetSignupProgressRequest{
 		AttemptId: id,
 		Progress:  progress,
 	})
 	require.NoError(t, err)
 
 	// Poll (unauthenticated).
-	resp, err := srv.GetSignupProgress(ctx, &userv1.GetSignupProgressRequest{AttemptId: id})
+	resp, err := srv.GetSignupProgress(ctx, &tenantv1.GetSignupProgressRequest{AttemptId: id})
 	require.NoError(t, err)
 	assert.True(t, resp.GetFound())
 	assert.Equal(t, "create_user", resp.GetProgress().GetStep())
@@ -332,7 +332,7 @@ func TestGetSignupProgress_NotFound(t *testing.T) {
 	ctx := context.Background()
 
 	unknownID := mintUUID()
-	resp, err := srv.GetSignupProgress(ctx, &userv1.GetSignupProgressRequest{AttemptId: unknownID})
+	resp, err := srv.GetSignupProgress(ctx, &tenantv1.GetSignupProgressRequest{AttemptId: unknownID})
 	require.NoError(t, err)
 	assert.False(t, resp.GetFound())
 	assert.Nil(t, resp.GetProgress())
@@ -342,7 +342,7 @@ func TestGetSignupProgress_InvalidUUID(t *testing.T) {
 	srv := newUserStateServer(t)
 	ctx := context.Background()
 
-	_, err := srv.GetSignupProgress(ctx, &userv1.GetSignupProgressRequest{AttemptId: "not-a-uuid"})
+	_, err := srv.GetSignupProgress(ctx, &tenantv1.GetSignupProgressRequest{AttemptId: "not-a-uuid"})
 	assert.Equal(t, codes.InvalidArgument, grpcCode(err))
 }
 
@@ -355,7 +355,7 @@ func TestInvalidateMembershipCache_Idempotent(t *testing.T) {
 	ctx := tenantAndSubjectCtx("tenant-a", "user-1")
 
 	// Invalidate a key that doesn't exist — must succeed.
-	_, err := srv.InvalidateMembershipCache(ctx, &userv1.InvalidateMembershipCacheRequest{UserId: "sub-123"})
+	_, err := srv.InvalidateMembershipCache(ctx, &tenantv1.InvalidateMembershipCacheRequest{UserId: "sub-123"})
 	require.NoError(t, err)
 
 	// Set a fake cache entry directly.
@@ -363,7 +363,7 @@ func TestInvalidateMembershipCache_Idempotent(t *testing.T) {
 	require.NoError(t, rc.Set(ctx, membershipCacheKey("sub-123"), `[{"role":"admin"}]`, 0).Err())
 
 	// Invalidate again — must succeed and delete the key.
-	_, err = srv.InvalidateMembershipCache(ctx, &userv1.InvalidateMembershipCacheRequest{UserId: "sub-123"})
+	_, err = srv.InvalidateMembershipCache(ctx, &tenantv1.InvalidateMembershipCacheRequest{UserId: "sub-123"})
 	require.NoError(t, err)
 
 	// Key must be gone.
@@ -381,12 +381,12 @@ func TestChatAttachment_StageAndConsume(t *testing.T) {
 	ctx := tenantAndSubjectCtx("tenant-a", "user-1")
 
 	// Stage.
-	stageResp, err := srv.StageAttachment(ctx, &userv1.StageAttachmentRequest{Text: "hello world"})
+	stageResp, err := srv.StageAttachment(ctx, &tenantv1.StageAttachmentRequest{Text: "hello world"})
 	require.NoError(t, err)
 	require.NotEmpty(t, stageResp.GetAttachmentId())
 
 	// Consume.
-	consumeResp, err := srv.ConsumeAttachment(ctx, &userv1.ConsumeAttachmentRequest{
+	consumeResp, err := srv.ConsumeAttachment(ctx, &tenantv1.ConsumeAttachmentRequest{
 		AttachmentId: stageResp.GetAttachmentId(),
 	})
 	require.NoError(t, err)
@@ -397,17 +397,17 @@ func TestChatAttachment_SingleUse(t *testing.T) {
 	srv := newUserStateServer(t)
 	ctx := tenantAndSubjectCtx("tenant-a", "user-1")
 
-	stageResp, err := srv.StageAttachment(ctx, &userv1.StageAttachmentRequest{Text: "once"})
+	stageResp, err := srv.StageAttachment(ctx, &tenantv1.StageAttachmentRequest{Text: "once"})
 	require.NoError(t, err)
 
 	// First consume succeeds.
-	_, err = srv.ConsumeAttachment(ctx, &userv1.ConsumeAttachmentRequest{
+	_, err = srv.ConsumeAttachment(ctx, &tenantv1.ConsumeAttachmentRequest{
 		AttachmentId: stageResp.GetAttachmentId(),
 	})
 	require.NoError(t, err)
 
 	// Second consume must return NotFound (key was deleted).
-	_, err = srv.ConsumeAttachment(ctx, &userv1.ConsumeAttachmentRequest{
+	_, err = srv.ConsumeAttachment(ctx, &tenantv1.ConsumeAttachmentRequest{
 		AttachmentId: stageResp.GetAttachmentId(),
 	})
 	assert.Equal(t, codes.NotFound, grpcCode(err), "second consume must return NotFound")
@@ -417,12 +417,12 @@ func TestChatAttachment_CrossTenantIsolation(t *testing.T) {
 	srv := newUserStateServer(t)
 
 	ctxA := tenantAndSubjectCtx("tenant-a", "user-1")
-	stageResp, err := srv.StageAttachment(ctxA, &userv1.StageAttachmentRequest{Text: "secret"})
+	stageResp, err := srv.StageAttachment(ctxA, &tenantv1.StageAttachmentRequest{Text: "secret"})
 	require.NoError(t, err)
 
 	// Tenant B with the same attachment_id must not find the attachment.
 	ctxB := tenantAndSubjectCtx("tenant-b", "user-1")
-	_, err = srv.ConsumeAttachment(ctxB, &userv1.ConsumeAttachmentRequest{
+	_, err = srv.ConsumeAttachment(ctxB, &tenantv1.ConsumeAttachmentRequest{
 		AttachmentId: stageResp.GetAttachmentId(),
 	})
 	assert.Equal(t, codes.NotFound, grpcCode(err), "tenant-B must not access tenant-A's attachment")
@@ -431,7 +431,7 @@ func TestChatAttachment_CrossTenantIsolation(t *testing.T) {
 func TestStageAttachment_EmptyTextRejected(t *testing.T) {
 	srv := newUserStateServer(t)
 	ctx := tenantAndSubjectCtx("tenant-a", "user-1")
-	_, err := srv.StageAttachment(ctx, &userv1.StageAttachmentRequest{Text: ""})
+	_, err := srv.StageAttachment(ctx, &tenantv1.StageAttachmentRequest{Text: ""})
 	assert.Equal(t, codes.InvalidArgument, grpcCode(err))
 }
 
@@ -449,30 +449,30 @@ func TestUserStateHandlers_UnavailableWithoutRedis(t *testing.T) {
 		call func() error
 	}{
 		{"GetUserOnboardingState", func() error {
-			_, err := srv.GetUserOnboardingState(ctx, &userv1.GetUserOnboardingStateRequest{})
+			_, err := srv.GetUserOnboardingState(ctx, &tenantv1.GetUserOnboardingStateRequest{})
 			return err
 		}},
 		{"GetUserLayout", func() error {
-			_, err := srv.GetUserLayout(ctx, &userv1.GetUserLayoutRequest{})
+			_, err := srv.GetUserLayout(ctx, &tenantv1.GetUserLayoutRequest{})
 			return err
 		}},
 		{"GetUserActivity", func() error {
-			_, err := srv.GetUserActivity(ctx, &userv1.GetUserActivityRequest{})
+			_, err := srv.GetUserActivity(ctx, &tenantv1.GetUserActivityRequest{})
 			return err
 		}},
 		{"SetSignupProgress", func() error {
-			_, err := srv.SetSignupProgress(ctx, &userv1.SetSignupProgressRequest{
+			_, err := srv.SetSignupProgress(ctx, &tenantv1.SetSignupProgressRequest{
 				AttemptId: mintUUID(),
-				Progress:  &userv1.SignupProgressState{Step: "x"},
+				Progress:  &tenantv1.SignupProgressState{Step: "x"},
 			})
 			return err
 		}},
 		{"InvalidateMembershipCache", func() error {
-			_, err := srv.InvalidateMembershipCache(ctx, &userv1.InvalidateMembershipCacheRequest{UserId: "u1"})
+			_, err := srv.InvalidateMembershipCache(ctx, &tenantv1.InvalidateMembershipCacheRequest{UserId: "u1"})
 			return err
 		}},
 		{"StageAttachment", func() error {
-			_, err := srv.StageAttachment(ctx, &userv1.StageAttachmentRequest{Text: "x"})
+			_, err := srv.StageAttachment(ctx, &tenantv1.StageAttachmentRequest{Text: "x"})
 			return err
 		}},
 	}

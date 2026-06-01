@@ -12,15 +12,15 @@ import (
 	"google.golang.org/grpc/codes"
 	status_grpc "google.golang.org/grpc/status"
 
-	userv1 "github.com/zeroroot-ai/gibson/internal/daemon/api/gibson/user/v1"
 	"github.com/zeroroot-ai/gibson/internal/idp"
+	tenantv1 "github.com/zeroroot-ai/sdk/api/gen/gibson/tenant/v1"
 	"github.com/zeroroot-ai/sdk/auth"
 )
 
 // GetUserProfile retrieves a user's profile information from the identity provider.
 //
 // Authorization: the caller may only access their own profile (subject == req.user_id).
-func (s *DaemonServer) GetUserProfile(ctx context.Context, req *userv1.GetUserProfileRequest) (*userv1.GetUserProfileResponse, error) {
+func (s *DaemonServer) GetUserProfile(ctx context.Context, req *tenantv1.GetUserProfileRequest) (*tenantv1.GetUserProfileResponse, error) {
 	if req.UserId == "" {
 		return nil, status_grpc.Error(codes.InvalidArgument, "user_id is required")
 	}
@@ -50,8 +50,8 @@ func (s *DaemonServer) GetUserProfile(ctx context.Context, req *userv1.GetUserPr
 		return nil, status_grpc.Error(codes.Internal, "failed to retrieve user profile")
 	}
 
-	return &userv1.GetUserProfileResponse{
-		Profile: &userv1.UserProfileData{
+	return &tenantv1.GetUserProfileResponse{
+		Profile: &tenantv1.UserProfileData{
 			Id:              profile.AccountID,
 			Email:           profile.Email,
 			DisplayName:     profile.DisplayName,

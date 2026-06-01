@@ -20,7 +20,6 @@ import (
 	"github.com/zeroroot-ai/gibson/internal/authz"
 	"github.com/zeroroot-ai/gibson/internal/budget"
 	"github.com/zeroroot-ai/gibson/internal/capabilitygrant"
-	userv1 "github.com/zeroroot-ai/gibson/internal/daemon/api/gibson/user/v1"
 	"github.com/zeroroot-ai/gibson/internal/datapool"
 	"github.com/zeroroot-ai/gibson/internal/finding"
 	"github.com/zeroroot-ai/gibson/internal/idp"
@@ -32,11 +31,10 @@ import (
 	"github.com/zeroroot-ai/gibson/internal/target"
 	"github.com/zeroroot-ai/gibson/internal/types"
 	"github.com/zeroroot-ai/gibson/pkg/version"
-	modelaccesspb "github.com/zeroroot-ai/platform-sdk/gen/gibson/authz/v1"
 	daemonoperatorv1 "github.com/zeroroot-ai/platform-sdk/gen/gibson/daemon/operator/v1"
 	daemonpb "github.com/zeroroot-ai/sdk/api/gen/gibson/daemon/v1"
 	missionpb "github.com/zeroroot-ai/sdk/api/gen/gibson/mission/v1"
-	sdktenantv1 "github.com/zeroroot-ai/sdk/api/gen/gibson/tenant/v1"
+	tenantv1 "github.com/zeroroot-ai/sdk/api/gen/gibson/tenant/v1"
 	"github.com/zeroroot-ai/sdk/auth"
 )
 
@@ -59,10 +57,14 @@ type authzIface interface {
 // It acts as a facade that delegates to the daemon's internal services.
 type DaemonServer struct {
 	daemonpb.UnimplementedDaemonServiceServer
-	sdktenantv1.UnimplementedTenantServiceServer
+	tenantv1.UnimplementedTenantServiceServer
+	tenantv1.UnimplementedAgentIdentityServiceServer
+	tenantv1.UnimplementedProviderServiceServer
+	tenantv1.UnimplementedModelAccessServiceServer
+	tenantv1.UnimplementedBudgetServiceServer
+	tenantv1.UnimplementedUsageServiceServer
+	tenantv1.UnimplementedUserServiceServer
 	daemonoperatorv1.UnimplementedDaemonOperatorServiceServer
-	userv1.UnimplementedUserServiceServer
-	modelaccesspb.UnimplementedModelAccessServiceServer
 
 	// daemon is the daemon instance this server exposes
 	daemon DaemonInterface

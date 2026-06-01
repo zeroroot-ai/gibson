@@ -25,7 +25,6 @@ import (
 	"google.golang.org/grpc/status"
 
 	"github.com/zeroroot-ai/gibson/internal/daemon/api"
-	userv1 "github.com/zeroroot-ai/gibson/internal/daemon/api/gibson/user/v1"
 	"github.com/zeroroot-ai/gibson/internal/idp"
 	tenantv1 "github.com/zeroroot-ai/sdk/api/gen/gibson/tenant/v1"
 	"github.com/zeroroot-ai/sdk/auth"
@@ -135,7 +134,7 @@ func TestGetUserProfile_SelfCheck_Passes(t *testing.T) {
 	srv := newServerForTest()
 	// idpAdminClient is nil → codes.Unavailable (not PermissionDenied)
 	ctx := userCtx("acme", "user-123")
-	_, err := srv.GetUserProfile(ctx, &userv1.GetUserProfileRequest{
+	_, err := srv.GetUserProfile(ctx, &tenantv1.GetUserProfileRequest{
 		TenantId: "acme",
 		UserId:   "user-123",
 	})
@@ -148,7 +147,7 @@ func TestGetUserProfile_SelfCheck_Passes(t *testing.T) {
 func TestGetUserProfile_CrossUser_Denied(t *testing.T) {
 	srv := newServerForTest()
 	ctx := userCtx("acme", "user-123")
-	_, err := srv.GetUserProfile(ctx, &userv1.GetUserProfileRequest{
+	_, err := srv.GetUserProfile(ctx, &tenantv1.GetUserProfileRequest{
 		TenantId: "acme",
 		UserId:   "user-456", // different user
 	})
@@ -164,7 +163,7 @@ func TestGetUserProfile_CrossUser_Denied(t *testing.T) {
 func TestUpdateUserProfile_SelfCheck_Passes(t *testing.T) {
 	srv := newServerForTest()
 	ctx := userCtx("acme", "user-123")
-	_, err := srv.UpdateUserProfile(ctx, &userv1.UpdateUserProfileRequest{
+	_, err := srv.UpdateUserProfile(ctx, &tenantv1.UpdateUserProfileRequest{
 		TenantId:    "acme",
 		UserId:      "user-123",
 		DisplayName: "New Name",
@@ -177,7 +176,7 @@ func TestUpdateUserProfile_SelfCheck_Passes(t *testing.T) {
 func TestUpdateUserProfile_CrossUser_Denied(t *testing.T) {
 	srv := newServerForTest()
 	ctx := userCtx("acme", "user-123")
-	_, err := srv.UpdateUserProfile(ctx, &userv1.UpdateUserProfileRequest{
+	_, err := srv.UpdateUserProfile(ctx, &tenantv1.UpdateUserProfileRequest{
 		TenantId:    "acme",
 		UserId:      "user-456",
 		DisplayName: "New Name",
@@ -202,7 +201,7 @@ func TestUpdateUserProfile_WithMockIdP(t *testing.T) {
 	srv.WithIdPAdminClient(fakeIdP)
 
 	ctx := userCtx("acme", "user-123")
-	resp, err := srv.UpdateUserProfile(ctx, &userv1.UpdateUserProfileRequest{
+	resp, err := srv.UpdateUserProfile(ctx, &tenantv1.UpdateUserProfileRequest{
 		TenantId:        "acme",
 		UserId:          "user-123",
 		DisplayName:     "Updated Name",

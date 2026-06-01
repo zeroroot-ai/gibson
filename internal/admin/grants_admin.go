@@ -24,9 +24,9 @@ import (
 	"google.golang.org/grpc/codes"
 	"google.golang.org/grpc/status"
 
-	adminv1 "github.com/zeroroot-ai/platform-sdk/gen/gibson/admin/v1"
 	capabilityv1 "github.com/zeroroot-ai/sdk/api/gen/gibson/capability/v1"
 	identitypb "github.com/zeroroot-ai/sdk/api/gen/gibson/identity/v1"
+	tenantv1 "github.com/zeroroot-ai/sdk/api/gen/gibson/tenant/v1"
 	"github.com/zeroroot-ai/sdk/auth"
 
 	"github.com/zeroroot-ai/gibson/internal/audit"
@@ -61,9 +61,9 @@ type CapabilityGrantsReader interface {
 	ListActive(ctx context.Context, tenant auth.TenantID) ([]GrantInfo, error)
 }
 
-// GrantsAdminServer implements adminv1.GrantsAdminServiceServer.
+// GrantsAdminServer implements tenantv1.GrantsServiceServer (ADR-0039).
 type GrantsAdminServer struct {
-	adminv1.UnimplementedGrantsAdminServiceServer
+	tenantv1.UnimplementedGrantsServiceServer
 
 	reader CapabilityGrantsReader
 
@@ -143,7 +143,7 @@ const nearExpiryWindow = 5 * time.Minute
 // ListActiveGrants returns active capability grants for the tenant
 // resolved from identity, optionally filtered by recipient class, RPC,
 // and near-expiry.
-func (s *GrantsAdminServer) ListActiveGrants(ctx context.Context, req *adminv1.ListActiveGrantsRequest) (*adminv1.ListActiveGrantsResponse, error) {
+func (s *GrantsAdminServer) ListActiveGrants(ctx context.Context, req *tenantv1.ListActiveGrantsRequest) (*tenantv1.ListActiveGrantsResponse, error) {
 	tenant, ok := auth.TenantFromContext(ctx)
 	if !ok {
 		return nil, status.Error(codes.PermissionDenied, "no tenant in context")
@@ -229,7 +229,7 @@ func (s *GrantsAdminServer) ListActiveGrants(ctx context.Context, req *adminv1.L
 		out = out[offset:end]
 	}
 
-	return &adminv1.ListActiveGrantsResponse{
+	return &tenantv1.ListActiveGrantsResponse{
 		Grants: out,
 		Total:  total,
 	}, nil
@@ -274,7 +274,7 @@ var allowedRelations = map[string]struct{}{
 // already_present rather than failing.
 //
 // Spec: component-bootstrap-e2e Requirement 9.
-func (s *GrantsAdminServer) WriteAgentGrants(ctx context.Context, req *adminv1.WriteAgentGrantsRequest) (*adminv1.WriteAgentGrantsResponse, error) {
+func (s *GrantsAdminServer) WriteAgentGrants(ctx context.Context, req *tenantv1.WriteAgentGrantsRequest) (*tenantv1.WriteAgentGrantsResponse, error) {
 	if s.authorizer == nil || s.lookup == nil {
 		return nil, status.Error(codes.Unimplemented, "agent-grant write surface not enabled")
 	}
@@ -335,7 +335,7 @@ func (s *GrantsAdminServer) WriteAgentGrants(ctx context.Context, req *adminv1.W
 
 	s.emitGrantAudit(ctx, callerTenant, target.PrincipalID, "agent_grant_added", toWrite)
 
-	return &adminv1.WriteAgentGrantsResponse{
+	return &tenantv1.WriteAgentGrantsResponse{
 		Written:        int32(len(toWrite)),
 		AlreadyPresent: alreadyPresent,
 	}, nil
@@ -345,7 +345,7 @@ func (s *GrantsAdminServer) WriteAgentGrants(ctx context.Context, req *adminv1.W
 // that do not exist count as not_present.
 //
 // Spec: component-bootstrap-e2e Requirement 9.
-func (s *GrantsAdminServer) DeleteAgentGrants(ctx context.Context, req *adminv1.DeleteAgentGrantsRequest) (*adminv1.DeleteAgentGrantsResponse, error) {
+func (s *GrantsAdminServer) DeleteAgentGrants(ctx context.Context, req *tenantv1.DeleteAgentGrantsRequest) (*tenantv1.DeleteAgentGrantsResponse, error) {
 	if s.authorizer == nil || s.lookup == nil {
 		return nil, status.Error(codes.Unimplemented, "agent-grant write surface not enabled")
 	}
@@ -395,7 +395,7 @@ func (s *GrantsAdminServer) DeleteAgentGrants(ctx context.Context, req *adminv1.
 
 	s.emitGrantAudit(ctx, callerTenant, target.PrincipalID, "agent_grant_removed", toDelete)
 
-	return &adminv1.DeleteAgentGrantsResponse{
+	return &tenantv1.DeleteAgentGrantsResponse{
 		Deleted:    int32(len(toDelete)),
 		NotPresent: notPresent,
 	}, nil
@@ -442,7 +442,7 @@ func (s *GrantsAdminServer) validateTargetAndTenant(ctx context.Context, targetI
 //   - object is non-empty
 //   - if relation == "can_invoke", target's kind MUST be TOOL (FGA model
 //     excludes agent_principal from plugin.can_invoke)
-func validateGrantTuples(grants []*adminv1.GrantTuple, targetKind identitypb.PrincipalKind) error {
+func validateGrantTuples(grants []*tenantv1.GrantTuple, targetKind identitypb.PrincipalKind) error {
 	for i, g := range grants {
 		if strings.TrimSpace(g.GetObject()) == "" {
 			return status.Errorf(codes.InvalidArgument, "grants[%d].object is required", i)

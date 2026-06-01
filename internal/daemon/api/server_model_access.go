@@ -13,7 +13,7 @@ import (
 
 	"github.com/zeroroot-ai/gibson/internal/audit"
 	"github.com/zeroroot-ai/gibson/internal/authz"
-	modelaccesspb "github.com/zeroroot-ai/platform-sdk/gen/gibson/authz/v1"
+	tenantv1 "github.com/zeroroot-ai/sdk/api/gen/gibson/tenant/v1"
 	"github.com/zeroroot-ai/sdk/auth"
 )
 
@@ -29,24 +29,24 @@ import (
 // where subject is "user:...", "team:...#member", or "tenant:...#member".
 
 // subjectKindToFGA maps the proto enum to the FGA subject-reference prefix.
-func subjectKindToFGA(k modelaccesspb.GrantSubjectKind, id string) (string, error) {
+func subjectKindToFGA(k tenantv1.GrantSubjectKind, id string) (string, error) {
 	switch k {
-	case modelaccesspb.GrantSubjectKind_GRANT_SUBJECT_KIND_USER:
+	case tenantv1.GrantSubjectKind_GRANT_SUBJECT_KIND_USER:
 		return fmt.Sprintf("user:%s", id), nil
-	case modelaccesspb.GrantSubjectKind_GRANT_SUBJECT_KIND_TEAM:
+	case tenantv1.GrantSubjectKind_GRANT_SUBJECT_KIND_TEAM:
 		return fmt.Sprintf("team:%s#member", id), nil
-	case modelaccesspb.GrantSubjectKind_GRANT_SUBJECT_KIND_TENANT:
+	case tenantv1.GrantSubjectKind_GRANT_SUBJECT_KIND_TENANT:
 		return fmt.Sprintf("tenant:%s#member", id), nil
 	}
 	return "", status_grpc.Error(codes.InvalidArgument, "subject_kind must be user, team, or tenant")
 }
 
 // targetKindToFGA maps the proto enum + id to the FGA object reference.
-func targetKindToFGA(k modelaccesspb.GrantTargetKind, id string) (string, error) {
+func targetKindToFGA(k tenantv1.GrantTargetKind, id string) (string, error) {
 	switch k {
-	case modelaccesspb.GrantTargetKind_GRANT_TARGET_KIND_PROVIDER:
+	case tenantv1.GrantTargetKind_GRANT_TARGET_KIND_PROVIDER:
 		return fmt.Sprintf("provider:%s", id), nil
-	case modelaccesspb.GrantTargetKind_GRANT_TARGET_KIND_MODEL:
+	case tenantv1.GrantTargetKind_GRANT_TARGET_KIND_MODEL:
 		return fmt.Sprintf("model:%s", id), nil
 	}
 	return "", status_grpc.Error(codes.InvalidArgument, "target_kind must be provider or model")
@@ -54,21 +54,21 @@ func targetKindToFGA(k modelaccesspb.GrantTargetKind, id string) (string, error)
 
 // fgaTargetToProto converts an FGA object reference (e.g. "provider:anthropic")
 // back to (kind, id) pair for the AccessGrant response.
-func fgaTargetToProto(obj string) (modelaccesspb.GrantTargetKind, string) {
+func fgaTargetToProto(obj string) (tenantv1.GrantTargetKind, string) {
 	if len(obj) > 9 && obj[:9] == "provider:" {
-		return modelaccesspb.GrantTargetKind_GRANT_TARGET_KIND_PROVIDER, obj[9:]
+		return tenantv1.GrantTargetKind_GRANT_TARGET_KIND_PROVIDER, obj[9:]
 	}
 	if len(obj) > 6 && obj[:6] == "model:" {
-		return modelaccesspb.GrantTargetKind_GRANT_TARGET_KIND_MODEL, obj[6:]
+		return tenantv1.GrantTargetKind_GRANT_TARGET_KIND_MODEL, obj[6:]
 	}
-	return modelaccesspb.GrantTargetKind_GRANT_TARGET_KIND_UNSPECIFIED, obj
+	return tenantv1.GrantTargetKind_GRANT_TARGET_KIND_UNSPECIFIED, obj
 }
 
 // GrantAccess persists a tenant#admin → FGA tuple writing the grant.
 // The modelgate cache is invalidated as a best-effort so the next LLM
 // call picks up the new grant within milliseconds rather than the 30s
 // TTL.
-func (s *DaemonServer) GrantAccess(ctx context.Context, req *modelaccesspb.GrantAccessRequest) (*modelaccesspb.GrantAccessResponse, error) {
+func (s *DaemonServer) GrantAccess(ctx context.Context, req *tenantv1.GrantAccessRequest) (*tenantv1.GrantAccessResponse, error) {
 	tenantID := auth.TenantStringFromContext(ctx)
 	if tenantID == "" || tenantID == auth.SystemTenantString {
 		return nil, status_grpc.Error(codes.Unauthenticated, "tenant context required")
@@ -111,11 +111,11 @@ func (s *DaemonServer) GrantAccess(ctx context.Context, req *modelaccesspb.Grant
 		s.modelGateInvalidator.InvalidateCache()
 	}
 
-	return &modelaccesspb.GrantAccessResponse{Grant: g}, nil
+	return &tenantv1.GrantAccessResponse{Grant: g}, nil
 }
 
 // RevokeAccess removes an FGA tuple written by GrantAccess.
-func (s *DaemonServer) RevokeAccess(ctx context.Context, req *modelaccesspb.RevokeAccessRequest) (*modelaccesspb.RevokeAccessResponse, error) {
+func (s *DaemonServer) RevokeAccess(ctx context.Context, req *tenantv1.RevokeAccessRequest) (*tenantv1.RevokeAccessResponse, error) {
 	tenantID := auth.TenantStringFromContext(ctx)
 	if tenantID == "" || tenantID == auth.SystemTenantString {
 		return nil, status_grpc.Error(codes.Unauthenticated, "tenant context required")
@@ -151,14 +151,14 @@ func (s *DaemonServer) RevokeAccess(ctx context.Context, req *modelaccesspb.Revo
 		s.modelGateInvalidator.InvalidateCache()
 	}
 
-	return &modelaccesspb.RevokeAccessResponse{
+	return &tenantv1.RevokeAccessResponse{
 		RevokedAtUnix: timeNowUnix(),
 	}, nil
 }
 
 // ListAccess returns all grants for the tenant, optionally narrowed to a
 // specific subject. Admin-only (tenant admin FGA).
-func (s *DaemonServer) ListAccess(ctx context.Context, req *modelaccesspb.ListAccessRequest) (*modelaccesspb.ListAccessResponse, error) {
+func (s *DaemonServer) ListAccess(ctx context.Context, req *tenantv1.ListAccessRequest) (*tenantv1.ListAccessResponse, error) {
 	tenantID := auth.TenantStringFromContext(ctx)
 	if tenantID == "" || tenantID == auth.SystemTenantString {
 		return nil, status_grpc.Error(codes.Unauthenticated, "tenant context required")
@@ -181,7 +181,7 @@ func (s *DaemonServer) ListAccess(ctx context.Context, req *modelaccesspb.ListAc
 		subject = s
 	}
 
-	grants := make([]*modelaccesspb.AccessGrant, 0)
+	grants := make([]*tenantv1.AccessGrant, 0)
 	for _, targetType := range []string{"provider", "model"} {
 		if subject == "" {
 			// Without a specific subject, there is no efficient way to
@@ -198,7 +198,7 @@ func (s *DaemonServer) ListAccess(ctx context.Context, req *modelaccesspb.ListAc
 		}
 		for _, obj := range objects {
 			kind, id := fgaTargetToProto(obj)
-			grants = append(grants, &modelaccesspb.AccessGrant{
+			grants = append(grants, &tenantv1.AccessGrant{
 				TenantId:    tenantID,
 				SubjectKind: req.GetSubjectKind(),
 				SubjectId:   req.GetSubjectId(),
@@ -208,7 +208,7 @@ func (s *DaemonServer) ListAccess(ctx context.Context, req *modelaccesspb.ListAc
 		}
 	}
 
-	return &modelaccesspb.ListAccessResponse{Grants: grants}, nil
+	return &tenantv1.ListAccessResponse{Grants: grants}, nil
 }
 
 // ListModelResolutionEvents returns recent model_resolved events.
@@ -217,7 +217,7 @@ func (s *DaemonServer) ListAccess(ctx context.Context, req *modelaccesspb.ListAc
 // returns an empty response rather than failing — dashboard callers
 // render "no events in range" cleanly.
 // Spec: llm-user-attribution-governance Requirement 4.9.
-func (s *DaemonServer) ListModelResolutionEvents(ctx context.Context, req *modelaccesspb.ListModelResolutionEventsRequest) (*modelaccesspb.ListModelResolutionEventsResponse, error) {
+func (s *DaemonServer) ListModelResolutionEvents(ctx context.Context, req *tenantv1.ListModelResolutionEventsRequest) (*tenantv1.ListModelResolutionEventsResponse, error) {
 	tenantID := auth.TenantStringFromContext(ctx)
 	if tenantID == "" || tenantID == auth.SystemTenantString {
 		return nil, status_grpc.Error(codes.Unauthenticated, "tenant context required")
@@ -226,7 +226,7 @@ func (s *DaemonServer) ListModelResolutionEvents(ctx context.Context, req *model
 		return nil, err
 	}
 	if s.auditQuery == nil {
-		return &modelaccesspb.ListModelResolutionEventsResponse{}, nil
+		return &tenantv1.ListModelResolutionEventsResponse{}, nil
 	}
 
 	filters := audit.Filters{
@@ -248,12 +248,12 @@ func (s *DaemonServer) ListModelResolutionEvents(ctx context.Context, req *model
 	if err != nil {
 		s.logger.WarnContext(ctx, "model_access: audit query failed",
 			slog.String("error", err.Error()), slog.String("tenant", tenantID))
-		return &modelaccesspb.ListModelResolutionEventsResponse{}, nil
+		return &tenantv1.ListModelResolutionEventsResponse{}, nil
 	}
 
-	events := make([]*modelaccesspb.ModelResolutionEvent, 0, len(rows))
+	events := make([]*tenantv1.ModelResolutionEvent, 0, len(rows))
 	for _, r := range rows {
-		ev := &modelaccesspb.ModelResolutionEvent{
+		ev := &tenantv1.ModelResolutionEvent{
 			TenantId:      r.TenantID,
 			UserId:        r.ActorID,
 			TimestampUnix: r.CreatedAt.Unix(),
@@ -282,7 +282,7 @@ func (s *DaemonServer) ListModelResolutionEvents(ctx context.Context, req *model
 		}
 		events = append(events, ev)
 	}
-	return &modelaccesspb.ListModelResolutionEventsResponse{Events: events}, nil
+	return &tenantv1.ListModelResolutionEventsResponse{Events: events}, nil
 }
 
 // timeNowUnix wraps time.Now().Unix() in a named helper so the value

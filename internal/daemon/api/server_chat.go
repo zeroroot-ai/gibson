@@ -34,7 +34,7 @@ import (
 	"google.golang.org/grpc/codes"
 	status_grpc "google.golang.org/grpc/status"
 
-	userv1 "github.com/zeroroot-ai/gibson/internal/daemon/api/gibson/user/v1"
+	tenantv1 "github.com/zeroroot-ai/sdk/api/gen/gibson/tenant/v1"
 	"github.com/zeroroot-ai/sdk/auth"
 )
 
@@ -411,7 +411,7 @@ func (s *redisConversationStore) fetchConversationMeta(ctx context.Context, tena
 //
 // Authorization: enforced by FGA annotations on the proto; we only extract
 // tenant/user from the request or the call context.
-func (s *DaemonServer) ListConversations(ctx context.Context, req *userv1.ListConversationsRequest) (*userv1.ListConversationsResponse, error) {
+func (s *DaemonServer) ListConversations(ctx context.Context, req *tenantv1.ListConversationsRequest) (*tenantv1.ListConversationsResponse, error) {
 	tenantID := req.GetTenantId()
 	if tenantID == "" {
 		tenantID = auth.TenantStringFromContext(ctx)
@@ -448,10 +448,10 @@ func (s *DaemonServer) ListConversations(ctx context.Context, req *userv1.ListCo
 		return nil, status_grpc.Error(codes.Internal, "conversations read failed")
 	}
 
-	convs := make([]*userv1.ConversationSummary, 0, len(stored))
+	convs := make([]*tenantv1.ConversationSummary, 0, len(stored))
 	for i := range stored {
 		c := &stored[i]
-		convs = append(convs, &userv1.ConversationSummary{
+		convs = append(convs, &tenantv1.ConversationSummary{
 			Id:            c.ID,
 			TenantId:      c.TenantID,
 			UserId:        c.UserID,
@@ -461,7 +461,7 @@ func (s *DaemonServer) ListConversations(ctx context.Context, req *userv1.ListCo
 			MessageCount:  c.MessageCount,
 		})
 	}
-	return &userv1.ListConversationsResponse{Conversations: convs}, nil
+	return &tenantv1.ListConversationsResponse{Conversations: convs}, nil
 }
 
 // ---------------------------------------------------------------------------
@@ -469,7 +469,7 @@ func (s *DaemonServer) ListConversations(ctx context.Context, req *userv1.ListCo
 // ---------------------------------------------------------------------------
 
 // GetConversation returns the full message history for a single conversation.
-func (s *DaemonServer) GetConversation(ctx context.Context, req *userv1.GetConversationRequest) (*userv1.GetConversationResponse, error) {
+func (s *DaemonServer) GetConversation(ctx context.Context, req *tenantv1.GetConversationRequest) (*tenantv1.GetConversationResponse, error) {
 	if req.GetConversationId() == "" {
 		return nil, status_grpc.Error(codes.InvalidArgument, "conversation_id is required")
 	}
@@ -500,13 +500,13 @@ func (s *DaemonServer) GetConversation(ctx context.Context, req *userv1.GetConve
 		return nil, status_grpc.Error(codes.NotFound, "conversation not found")
 	}
 
-	protoMsgs := make([]*userv1.ConversationMessage, 0, len(msgs))
+	protoMsgs := make([]*tenantv1.ConversationMessage, 0, len(msgs))
 	for _, m := range msgs {
 		protoMsgs = append(protoMsgs, storedMessageToProto(m))
 	}
 
-	return &userv1.GetConversationResponse{
-		Conversation: &userv1.ConversationSummary{
+	return &tenantv1.GetConversationResponse{
+		Conversation: &tenantv1.ConversationSummary{
 			Id:            conv.ID,
 			TenantId:      conv.TenantID,
 			UserId:        conv.UserID,
@@ -565,7 +565,7 @@ func (s *DaemonServer) saveConversation(
 //
 // User isolation: the userId is resolved from the caller identity, not from the
 // request body, so a caller cannot save into another user's conversation index.
-func (s *DaemonServer) SaveConversation(ctx context.Context, req *userv1.SaveConversationRequest) (*userv1.SaveConversationResponse, error) {
+func (s *DaemonServer) SaveConversation(ctx context.Context, req *tenantv1.SaveConversationRequest) (*tenantv1.SaveConversationResponse, error) {
 	if req.GetConversationId() == "" {
 		return nil, status_grpc.Error(codes.InvalidArgument, "conversation_id is required")
 	}
@@ -626,7 +626,7 @@ func (s *DaemonServer) SaveConversation(ctx context.Context, req *userv1.SaveCon
 		return nil, status_grpc.Error(codes.Internal, "conversation save failed")
 	}
 
-	return &userv1.SaveConversationResponse{}, nil
+	return &tenantv1.SaveConversationResponse{}, nil
 }
 
 // ---------------------------------------------------------------------------
@@ -708,7 +708,7 @@ func (s *redisConversationStore) Delete(ctx context.Context, tenantID, userID, c
 // is acceptable given the FGA member-relation gate that ensures the caller is
 // in the same tenant; stronger per-conversation ownership checks are tracked
 // for a follow-up.
-func (s *DaemonServer) RenameConversation(ctx context.Context, req *userv1.RenameConversationRequest) (*userv1.RenameConversationResponse, error) {
+func (s *DaemonServer) RenameConversation(ctx context.Context, req *tenantv1.RenameConversationRequest) (*tenantv1.RenameConversationResponse, error) {
 	if req.GetConversationId() == "" {
 		return nil, status_grpc.Error(codes.InvalidArgument, "conversation_id is required")
 	}
@@ -741,7 +741,7 @@ func (s *DaemonServer) RenameConversation(ctx context.Context, req *userv1.Renam
 		return nil, status_grpc.Error(codes.Internal, "conversation rename failed")
 	}
 
-	return &userv1.RenameConversationResponse{}, nil
+	return &tenantv1.RenameConversationResponse{}, nil
 }
 
 // ---------------------------------------------------------------------------
@@ -753,7 +753,7 @@ func (s *DaemonServer) RenameConversation(ctx context.Context, req *userv1.Renam
 // Authorization: enforced by FGA annotations (member relation on the tenant).
 // User isolation: we resolve the userID from the caller's authenticated
 // identity so the index entry is removed from the correct user's sorted set.
-func (s *DaemonServer) DeleteConversation(ctx context.Context, req *userv1.DeleteConversationRequest) (*userv1.DeleteConversationResponse, error) {
+func (s *DaemonServer) DeleteConversation(ctx context.Context, req *tenantv1.DeleteConversationRequest) (*tenantv1.DeleteConversationResponse, error) {
 	if req.GetConversationId() == "" {
 		return nil, status_grpc.Error(codes.InvalidArgument, "conversation_id is required")
 	}
@@ -791,7 +791,7 @@ func (s *DaemonServer) DeleteConversation(ctx context.Context, req *userv1.Delet
 		return nil, status_grpc.Error(codes.Internal, "conversation delete failed")
 	}
 
-	return &userv1.DeleteConversationResponse{}, nil
+	return &tenantv1.DeleteConversationResponse{}, nil
 }
 
 // ---------------------------------------------------------------------------
@@ -800,7 +800,7 @@ func (s *DaemonServer) DeleteConversation(ctx context.Context, req *userv1.Delet
 
 // protoMessageToStored converts a proto ConversationMessage to the internal
 // storedMessage representation. All part types are preserved losslessly.
-func protoMessageToStored(m *userv1.ConversationMessage) storedMessage {
+func protoMessageToStored(m *tenantv1.ConversationMessage) storedMessage {
 	if m == nil {
 		return storedMessage{}
 	}
@@ -810,14 +810,14 @@ func protoMessageToStored(m *userv1.ConversationMessage) storedMessage {
 			continue
 		}
 		switch v := p.Part.(type) {
-		case *userv1.MessagePart_Text:
+		case *tenantv1.MessagePart_Text:
 			if v.Text != nil {
 				parts = append(parts, storedMessagePart{
 					Type: storedPartTypeText,
 					Text: v.Text.Text,
 				})
 			}
-		case *userv1.MessagePart_ToolCall:
+		case *tenantv1.MessagePart_ToolCall:
 			if v.ToolCall != nil {
 				parts = append(parts, storedMessagePart{
 					Type:       storedPartTypeToolCall,
@@ -826,7 +826,7 @@ func protoMessageToStored(m *userv1.ConversationMessage) storedMessage {
 					Arguments:  v.ToolCall.Arguments,
 				})
 			}
-		case *userv1.MessagePart_ToolResult:
+		case *tenantv1.MessagePart_ToolResult:
 			if v.ToolResult != nil {
 				parts = append(parts, storedMessagePart{
 					Type:       storedPartTypeToolResult,
@@ -834,7 +834,7 @@ func protoMessageToStored(m *userv1.ConversationMessage) storedMessage {
 					Result:     v.ToolResult.Result,
 				})
 			}
-		case *userv1.MessagePart_Citation:
+		case *tenantv1.MessagePart_Citation:
 			if v.Citation != nil {
 				parts = append(parts, storedMessagePart{
 					Type:       storedPartTypeCitation,
@@ -843,7 +843,7 @@ func protoMessageToStored(m *userv1.ConversationMessage) storedMessage {
 					URL:        v.Citation.Url,
 				})
 			}
-		case *userv1.MessagePart_AttachmentRef:
+		case *tenantv1.MessagePart_AttachmentRef:
 			if v.AttachmentRef != nil {
 				parts = append(parts, storedMessagePart{
 					Type:         storedPartTypeAttachmentRef,
@@ -852,7 +852,7 @@ func protoMessageToStored(m *userv1.ConversationMessage) storedMessage {
 					AttachName:   v.AttachmentRef.Name,
 				})
 			}
-		case *userv1.MessagePart_Reasoning:
+		case *tenantv1.MessagePart_Reasoning:
 			if v.Reasoning != nil {
 				parts = append(parts, storedMessagePart{
 					Type:          storedPartTypeReasoning,
@@ -875,21 +875,21 @@ func protoMessageToStored(m *userv1.ConversationMessage) storedMessage {
 
 // storedMessageToProto converts an internal storedMessage to the proto
 // ConversationMessage. Ordering is preserved; all part types are restored.
-func storedMessageToProto(m storedMessage) *userv1.ConversationMessage {
-	parts := make([]*userv1.MessagePart, 0, len(m.Parts))
+func storedMessageToProto(m storedMessage) *tenantv1.ConversationMessage {
+	parts := make([]*tenantv1.MessagePart, 0, len(m.Parts))
 	for _, sp := range m.Parts {
-		var protoPart *userv1.MessagePart
+		var protoPart *tenantv1.MessagePart
 		switch sp.Type {
 		case storedPartTypeText:
-			protoPart = &userv1.MessagePart{
-				Part: &userv1.MessagePart_Text{
-					Text: &userv1.MessagePartText{Text: sp.Text},
+			protoPart = &tenantv1.MessagePart{
+				Part: &tenantv1.MessagePart_Text{
+					Text: &tenantv1.MessagePartText{Text: sp.Text},
 				},
 			}
 		case storedPartTypeToolCall:
-			protoPart = &userv1.MessagePart{
-				Part: &userv1.MessagePart_ToolCall{
-					ToolCall: &userv1.MessagePartToolCall{
+			protoPart = &tenantv1.MessagePart{
+				Part: &tenantv1.MessagePart_ToolCall{
+					ToolCall: &tenantv1.MessagePartToolCall{
 						ToolCallId: sp.ToolCallID,
 						Name:       sp.Name,
 						Arguments:  sp.Arguments,
@@ -897,18 +897,18 @@ func storedMessageToProto(m storedMessage) *userv1.ConversationMessage {
 				},
 			}
 		case storedPartTypeToolResult:
-			protoPart = &userv1.MessagePart{
-				Part: &userv1.MessagePart_ToolResult{
-					ToolResult: &userv1.MessagePartToolResult{
+			protoPart = &tenantv1.MessagePart{
+				Part: &tenantv1.MessagePart_ToolResult{
+					ToolResult: &tenantv1.MessagePartToolResult{
 						ToolCallId: sp.ToolCallID,
 						Result:     sp.Result,
 					},
 				},
 			}
 		case storedPartTypeCitation:
-			protoPart = &userv1.MessagePart{
-				Part: &userv1.MessagePart_Citation{
-					Citation: &userv1.MessagePartCitation{
+			protoPart = &tenantv1.MessagePart{
+				Part: &tenantv1.MessagePart_Citation{
+					Citation: &tenantv1.MessagePartCitation{
 						CitationId: sp.CitationID,
 						Label:      sp.Label,
 						Url:        sp.URL,
@@ -916,9 +916,9 @@ func storedMessageToProto(m storedMessage) *userv1.ConversationMessage {
 				},
 			}
 		case storedPartTypeAttachmentRef:
-			protoPart = &userv1.MessagePart{
-				Part: &userv1.MessagePart_AttachmentRef{
-					AttachmentRef: &userv1.MessagePartAttachmentRef{
+			protoPart = &tenantv1.MessagePart{
+				Part: &tenantv1.MessagePart_AttachmentRef{
+					AttachmentRef: &tenantv1.MessagePartAttachmentRef{
 						AttachmentId: sp.AttachmentID,
 						MediaType:    sp.MediaType,
 						Name:         sp.AttachName,
@@ -926,9 +926,9 @@ func storedMessageToProto(m storedMessage) *userv1.ConversationMessage {
 				},
 			}
 		case storedPartTypeReasoning:
-			protoPart = &userv1.MessagePart{
-				Part: &userv1.MessagePart_Reasoning{
-					Reasoning: &userv1.MessagePartReasoning{Text: sp.ReasoningText},
+			protoPart = &tenantv1.MessagePart{
+				Part: &tenantv1.MessagePart_Reasoning{
+					Reasoning: &tenantv1.MessagePartReasoning{Text: sp.ReasoningText},
 				},
 			}
 		default:
@@ -938,7 +938,7 @@ func storedMessageToProto(m storedMessage) *userv1.ConversationMessage {
 		}
 		parts = append(parts, protoPart)
 	}
-	return &userv1.ConversationMessage{
+	return &tenantv1.ConversationMessage{
 		Id:            m.ID,
 		Role:          m.Role,
 		Parts:         parts,

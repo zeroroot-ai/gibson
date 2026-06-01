@@ -13,8 +13,8 @@ import (
 	"google.golang.org/grpc/codes"
 	status_grpc "google.golang.org/grpc/status"
 
-	userv1 "github.com/zeroroot-ai/gibson/internal/daemon/api/gibson/user/v1"
 	"github.com/zeroroot-ai/gibson/internal/idp"
+	tenantv1 "github.com/zeroroot-ai/sdk/api/gen/gibson/tenant/v1"
 	"github.com/zeroroot-ai/sdk/auth"
 )
 
@@ -25,7 +25,7 @@ import (
 // through a different field is handled by the IdP.
 //
 // Authorization: the caller may only update their own profile (subject == req.user_id).
-func (s *DaemonServer) UpdateUserProfile(ctx context.Context, req *userv1.UpdateUserProfileRequest) (*userv1.UpdateUserProfileResponse, error) {
+func (s *DaemonServer) UpdateUserProfile(ctx context.Context, req *tenantv1.UpdateUserProfileRequest) (*tenantv1.UpdateUserProfileResponse, error) {
 	if req.UserId == "" {
 		return nil, status_grpc.Error(codes.InvalidArgument, "user_id is required")
 	}
@@ -58,8 +58,8 @@ func (s *DaemonServer) UpdateUserProfile(ctx context.Context, req *userv1.Update
 		return nil, status_grpc.Error(codes.Internal, "failed to update user profile")
 	}
 
-	return &userv1.UpdateUserProfileResponse{
-		Profile: &userv1.UserProfileData{
+	return &tenantv1.UpdateUserProfileResponse{
+		Profile: &tenantv1.UserProfileData{
 			Id:              updated.AccountID,
 			Email:           updated.Email,
 			DisplayName:     updated.DisplayName,

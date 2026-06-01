@@ -10,7 +10,7 @@ import (
 	"github.com/zeroroot-ai/gibson/internal/authz"
 	"github.com/zeroroot-ai/gibson/internal/idp"
 
-	adminv1 "github.com/zeroroot-ai/platform-sdk/gen/gibson/admin/v1"
+	tenantv1 "github.com/zeroroot-ai/sdk/api/gen/gibson/tenant/v1"
 )
 
 // ---------------------------------------------------------------------------
@@ -153,7 +153,7 @@ func TestListMembers_TwoMembersOneAdmin(t *testing.T) {
 	srv := newMembersTestServer(t, az, idpC)
 	ctx := ctxWithTenant(t, "acme")
 
-	resp, err := srv.ListMembers(ctx, &adminv1.ListMembersRequest{})
+	resp, err := srv.ListMembers(ctx, &tenantv1.ListMembersRequest{})
 	if err != nil {
 		t.Fatalf("ListMembers: %v", err)
 	}
@@ -206,7 +206,7 @@ func TestListMembers_NilAuthorizer(t *testing.T) {
 	}
 
 	ctx := ctxWithTenant(t, "acme")
-	resp, err := srv.ListMembers(ctx, &adminv1.ListMembersRequest{})
+	resp, err := srv.ListMembers(ctx, &tenantv1.ListMembersRequest{})
 	if err != nil {
 		t.Fatalf("ListMembers: %v", err)
 	}
@@ -220,7 +220,7 @@ func TestListMembers_NilAuthorizer(t *testing.T) {
 func TestListMembers_RequiresTenant(t *testing.T) {
 	az := &membersAuthorizer{}
 	srv := newMembersTestServer(t, az, nil)
-	_, err := srv.ListMembers(context.Background(), &adminv1.ListMembersRequest{})
+	_, err := srv.ListMembers(context.Background(), &tenantv1.ListMembersRequest{})
 	if status.Code(err) != codes.PermissionDenied {
 		t.Errorf("want PermissionDenied, got %v", err)
 	}
@@ -244,7 +244,7 @@ func TestListMembers_NameFilterCaseInsensitive(t *testing.T) {
 	ctx := ctxWithTenant(t, "acme")
 
 	// "ali" should match "Alice Admin" case-insensitively.
-	resp, err := srv.ListMembers(ctx, &adminv1.ListMembersRequest{NameFilter: "ali"})
+	resp, err := srv.ListMembers(ctx, &tenantv1.ListMembersRequest{NameFilter: "ali"})
 	if err != nil {
 		t.Fatalf("ListMembers: %v", err)
 	}
@@ -273,7 +273,7 @@ func TestListMembers_NameFilterOnEmail(t *testing.T) {
 	ctx := ctxWithTenant(t, "acme")
 
 	// "carol@" matches carol's email prefix.
-	resp, err := srv.ListMembers(ctx, &adminv1.ListMembersRequest{NameFilter: "carol@"})
+	resp, err := srv.ListMembers(ctx, &tenantv1.ListMembersRequest{NameFilter: "carol@"})
 	if err != nil {
 		t.Fatalf("ListMembers: %v", err)
 	}
@@ -296,7 +296,7 @@ func TestListMembers_IdPClientNil(t *testing.T) {
 	srv := newMembersTestServer(t, az, nil) // nil idpClient
 	ctx := ctxWithTenant(t, "acme")
 
-	resp, err := srv.ListMembers(ctx, &adminv1.ListMembersRequest{})
+	resp, err := srv.ListMembers(ctx, &tenantv1.ListMembersRequest{})
 	if err != nil {
 		t.Fatalf("ListMembers: %v", err)
 	}
@@ -338,7 +338,7 @@ func TestListMembers_Pagination(t *testing.T) {
 	ctx := ctxWithTenant(t, "acme")
 
 	// First page: 2 members.
-	resp1, err := srv.ListMembers(ctx, &adminv1.ListMembersRequest{PageSize: 2})
+	resp1, err := srv.ListMembers(ctx, &tenantv1.ListMembersRequest{PageSize: 2})
 	if err != nil {
 		t.Fatalf("ListMembers page 1: %v", err)
 	}
@@ -350,7 +350,7 @@ func TestListMembers_Pagination(t *testing.T) {
 	}
 
 	// Second page: 2 members.
-	resp2, err := srv.ListMembers(ctx, &adminv1.ListMembersRequest{
+	resp2, err := srv.ListMembers(ctx, &tenantv1.ListMembersRequest{
 		PageSize:  2,
 		PageToken: resp1.GetNextPageToken(),
 	})
@@ -365,7 +365,7 @@ func TestListMembers_Pagination(t *testing.T) {
 	}
 
 	// Third (final) page: 1 member, no next_page_token.
-	resp3, err := srv.ListMembers(ctx, &adminv1.ListMembersRequest{
+	resp3, err := srv.ListMembers(ctx, &tenantv1.ListMembersRequest{
 		PageSize:  2,
 		PageToken: resp2.GetNextPageToken(),
 	})
@@ -381,7 +381,7 @@ func TestListMembers_Pagination(t *testing.T) {
 
 	// Assert all 5 user IDs appear across the three pages with no duplicates.
 	seen := map[string]bool{}
-	for _, page := range [][]*adminv1.TenantMember{resp1.GetMembers(), resp2.GetMembers(), resp3.GetMembers()} {
+	for _, page := range [][]*tenantv1.TenantMember{resp1.GetMembers(), resp2.GetMembers(), resp3.GetMembers()} {
 		for _, m := range page {
 			if seen[m.GetUserId()] {
 				t.Errorf("duplicate user_id %q across pages", m.GetUserId())
@@ -405,7 +405,7 @@ func TestListMembers_EmptyTenant(t *testing.T) {
 	srv := newMembersTestServer(t, az, nil)
 	ctx := ctxWithTenant(t, "acme")
 
-	resp, err := srv.ListMembers(ctx, &adminv1.ListMembersRequest{})
+	resp, err := srv.ListMembers(ctx, &tenantv1.ListMembersRequest{})
 	if err != nil {
 		t.Fatalf("ListMembers: %v", err)
 	}
@@ -432,7 +432,7 @@ func TestListMembers_IdPProfileFailureIsNonFatal(t *testing.T) {
 	srv := newMembersTestServer(t, az, idpC)
 	ctx := ctxWithTenant(t, "acme")
 
-	resp, err := srv.ListMembers(ctx, &adminv1.ListMembersRequest{})
+	resp, err := srv.ListMembers(ctx, &tenantv1.ListMembersRequest{})
 	if err != nil {
 		t.Fatalf("ListMembers: %v", err)
 	}

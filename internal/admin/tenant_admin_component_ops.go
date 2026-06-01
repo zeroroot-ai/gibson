@@ -38,7 +38,7 @@ import (
 
 	"github.com/zeroroot-ai/gibson/internal/authz"
 
-	adminv1 "github.com/zeroroot-ai/platform-sdk/gen/gibson/admin/v1"
+	tenantv1 "github.com/zeroroot-ai/sdk/api/gen/gibson/tenant/v1"
 	"github.com/zeroroot-ai/sdk/auth"
 )
 
@@ -58,7 +58,7 @@ import (
 //
 // Relations supported here follow the FGA model's team_*_disabled pattern used
 // to selectively gate component access for specific teams.
-func (s *TenantAdminServer) SetComponentAccess(ctx context.Context, req *adminv1.SetComponentAccessRequest) (*adminv1.SetComponentAccessResponse, error) {
+func (s *TenantAdminServer) SetComponentAccess(ctx context.Context, req *tenantv1.SetComponentAccessRequest) (*tenantv1.SetComponentAccessResponse, error) {
 	if s.authorizer == nil {
 		return nil, status.Error(codes.Unavailable, "authorizer not configured")
 	}
@@ -148,7 +148,7 @@ func (s *TenantAdminServer) SetComponentAccess(ctx context.Context, req *adminv1
 		}
 	}
 
-	return &adminv1.SetComponentAccessResponse{
+	return &tenantv1.SetComponentAccessResponse{
 		TuplesWritten: int32(len(toWrite)),
 		TuplesDeleted: int32(len(toDelete)),
 	}, nil
@@ -170,7 +170,7 @@ var allowedTenantRoles = map[string]struct{}{
 // SetTenantRole writes or removes a role relation for a user on the caller's
 // tenant. When remove is true the tuple is deleted; otherwise it is written.
 // Idempotent in both directions.
-func (s *TenantAdminServer) SetTenantRole(ctx context.Context, req *adminv1.SetTenantRoleRequest) (*adminv1.SetTenantRoleResponse, error) {
+func (s *TenantAdminServer) SetTenantRole(ctx context.Context, req *tenantv1.SetTenantRoleRequest) (*tenantv1.SetTenantRoleResponse, error) {
 	if s.authorizer == nil {
 		return nil, status.Error(codes.Unavailable, "authorizer not configured")
 	}
@@ -216,7 +216,7 @@ func (s *TenantAdminServer) SetTenantRole(ctx context.Context, req *adminv1.SetT
 			}
 		}
 	}
-	return &adminv1.SetTenantRoleResponse{}, nil
+	return &tenantv1.SetTenantRoleResponse{}, nil
 }
 
 // ---------------------------------------------------------------------------
@@ -231,7 +231,7 @@ func (s *TenantAdminServer) SetTenantRole(ctx context.Context, req *adminv1.SetT
 //
 // If new_owner_user_id already holds the owner relation, the operation is a
 // no-op beyond verifying the FGA state.
-func (s *TenantAdminServer) TransferOwnership(ctx context.Context, req *adminv1.TransferOwnershipRequest) (*adminv1.TransferOwnershipResponse, error) {
+func (s *TenantAdminServer) TransferOwnership(ctx context.Context, req *tenantv1.TransferOwnershipRequest) (*tenantv1.TransferOwnershipResponse, error) {
 	if s.authorizer == nil {
 		return nil, status.Error(codes.Unavailable, "authorizer not configured")
 	}
@@ -287,7 +287,7 @@ func (s *TenantAdminServer) TransferOwnership(ctx context.Context, req *adminv1.
 		}
 	}
 
-	return &adminv1.TransferOwnershipResponse{}, nil
+	return &tenantv1.TransferOwnershipResponse{}, nil
 }
 
 // ---------------------------------------------------------------------------
@@ -318,7 +318,7 @@ var actionToCallerRelation = map[string]string{
 // The caller-access intersection check prevents privilege escalation: a tenant
 // admin who cannot execute component:gitlab cannot grant execute access on that
 // component to any agent installation.
-func (s *TenantAdminServer) GrantComponentPermissions(ctx context.Context, req *adminv1.GrantComponentPermissionsRequest) (*adminv1.GrantComponentPermissionsResponse, error) {
+func (s *TenantAdminServer) GrantComponentPermissions(ctx context.Context, req *tenantv1.GrantComponentPermissionsRequest) (*tenantv1.GrantComponentPermissionsResponse, error) {
 	if s.authorizer == nil {
 		return nil, status.Error(codes.Unavailable, "authorizer not configured")
 	}
@@ -332,7 +332,7 @@ func (s *TenantAdminServer) GrantComponentPermissions(ctx context.Context, req *
 	if len(req.GetApprovals()) == 0 {
 		// Trivially a no-op, but we return early rather than error — the
 		// caller may be testing the endpoint or clearing all grants.
-		return &adminv1.GrantComponentPermissionsResponse{
+		return &tenantv1.GrantComponentPermissionsResponse{
 			AgentInstallationId: req.GetAgentInstallationId(),
 		}, nil
 	}
@@ -423,7 +423,7 @@ func (s *TenantAdminServer) GrantComponentPermissions(ctx context.Context, req *
 		}
 	}
 
-	return &adminv1.GrantComponentPermissionsResponse{
+	return &tenantv1.GrantComponentPermissionsResponse{
 		AgentInstallationId: req.GetAgentInstallationId(),
 	}, nil
 }

@@ -7,15 +7,19 @@ import (
 	"github.com/zeroroot-ai/gibson/internal/authz/registry"
 )
 
-// requiredAdminServices is every gibson.admin.v1.* service in the registry that
-// is NOT a known gap — i.e. the set the daemon must register.
-func requiredAdminServices() map[string]struct{} {
+// requiredTenantServices returns every gibson.tenant.v1.* service in the
+// registry that is NOT a known gap — i.e. the set the daemon must register.
+// Formerly only gibson.admin.v1.* was checked; ADR-0039 moved services to
+// the tenant surface.
+func requiredTenantServices() map[string]struct{} {
 	out := make(map[string]struct{})
 	for _, e := range registry.Registry {
-		if !strings.HasPrefix(e.Service, "gibson.admin.v1.") {
+		isTenant := strings.HasPrefix(e.Service, "gibson.tenant.v1.")
+		isAdmin := strings.HasPrefix(e.Service, "gibson.admin.v1.")
+		if !isTenant && !isAdmin {
 			continue
 		}
-		if _, gap := knownUnregisteredAdminServices[e.Service]; gap {
+		if _, gap := knownUnregisteredTenantServices[e.Service]; gap {
 			continue
 		}
 		out[e.Service] = struct{}{}
@@ -24,15 +28,15 @@ func requiredAdminServices() map[string]struct{} {
 }
 
 func TestAssertAdminServicesRegistered_AllPresent(t *testing.T) {
-	if err := assertAdminServicesRegistered(requiredAdminServices()); err != nil {
-		t.Fatalf("expected ok when all required admin services are registered, got: %v", err)
+	if err := assertAdminServicesRegistered(requiredTenantServices()); err != nil {
+		t.Fatalf("expected ok when all required tenant/admin services are registered, got: %v", err)
 	}
 }
 
 func TestAssertAdminServicesRegistered_MissingFailsLoud(t *testing.T) {
-	reg := requiredAdminServices()
+	reg := requiredTenantServices()
 	if len(reg) == 0 {
-		t.Skip("no required admin services in registry")
+		t.Skip("no required tenant/admin services in registry")
 	}
 	var dropped string
 	for k := range reg {
@@ -50,11 +54,11 @@ func TestAssertAdminServicesRegistered_MissingFailsLoud(t *testing.T) {
 }
 
 func TestAssertAdminServicesRegistered_KnownGapTolerated(t *testing.T) {
-	// A known gap (e.g. PluginsAdminService) being absent must NOT fail.
-	if err := assertAdminServicesRegistered(requiredAdminServices()); err != nil {
+	// A known gap (e.g. PluginAdminService) being absent must NOT fail.
+	if err := assertAdminServicesRegistered(requiredTenantServices()); err != nil {
 		t.Fatalf("known gaps must be tolerated: %v", err)
 	}
-	if len(knownUnregisteredAdminServices) == 0 {
+	if len(knownUnregisteredTenantServices) == 0 {
 		t.Skip("no known gaps to assert tolerance for")
 	}
 }

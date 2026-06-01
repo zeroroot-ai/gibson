@@ -15,7 +15,7 @@ import (
 	"github.com/zeroroot-ai/gibson/internal/secrets"
 
 	sdksecrets "github.com/zeroroot-ai/platform-clients/secrets"
-	adminv1 "github.com/zeroroot-ai/platform-sdk/gen/gibson/admin/v1"
+	tenantv1 "github.com/zeroroot-ai/sdk/api/gen/gibson/tenant/v1"
 	"github.com/zeroroot-ai/sdk/auth"
 )
 
@@ -160,9 +160,9 @@ func TestSetSecret_NoValueInResponse(t *testing.T) {
 	srv, broker, _, _, _ := newTestServer(t)
 	ctx := ctxWithTenant(t, "acme")
 
-	resp, err := srv.SetSecret(ctx, &adminv1.SetSecretRequest{
+	resp, err := srv.SetSecret(ctx, &tenantv1.SetSecretRequest{
 		Name:     "openai-prod",
-		Category: adminv1.SecretCategory_SECRET_CATEGORY_CRED,
+		Category: tenantv1.SecretCategory_SECRET_CATEGORY_CRED,
 		Value:    []byte("super-secret-value"),
 	})
 	if err != nil {
@@ -172,7 +172,7 @@ func TestSetSecret_NoValueInResponse(t *testing.T) {
 	if resp.GetMetadata().GetName() != "cred:openai-prod" {
 		t.Errorf("expected caller name cred:openai-prod, got %q", resp.GetMetadata().GetName())
 	}
-	if resp.GetMetadata().GetCategory() != adminv1.SecretCategory_SECRET_CATEGORY_CRED {
+	if resp.GetMetadata().GetCategory() != tenantv1.SecretCategory_SECRET_CATEGORY_CRED {
 		t.Errorf("category mismatch")
 	}
 	// Internally the broker stores the secret under the "user/" namespace.
@@ -183,9 +183,9 @@ func TestSetSecret_NoValueInResponse(t *testing.T) {
 
 func TestSetSecret_RequiresTenant(t *testing.T) {
 	srv, _, _, _, _ := newTestServer(t)
-	_, err := srv.SetSecret(context.Background(), &adminv1.SetSecretRequest{
+	_, err := srv.SetSecret(context.Background(), &tenantv1.SetSecretRequest{
 		Name:     "x",
-		Category: adminv1.SecretCategory_SECRET_CATEGORY_CRED,
+		Category: tenantv1.SecretCategory_SECRET_CATEGORY_CRED,
 		Value:    []byte("v"),
 	})
 	if err == nil {
@@ -199,9 +199,9 @@ func TestSetSecret_RequiresTenant(t *testing.T) {
 func TestSetSecret_RejectsEmptyValue(t *testing.T) {
 	srv, _, _, _, _ := newTestServer(t)
 	ctx := ctxWithTenant(t, "acme")
-	_, err := srv.SetSecret(ctx, &adminv1.SetSecretRequest{
+	_, err := srv.SetSecret(ctx, &tenantv1.SetSecretRequest{
 		Name:     "x",
-		Category: adminv1.SecretCategory_SECRET_CATEGORY_CRED,
+		Category: tenantv1.SecretCategory_SECRET_CATEGORY_CRED,
 	})
 	if status.Code(err) != codes.InvalidArgument {
 		t.Errorf("want InvalidArgument, got %v", err)
@@ -215,7 +215,7 @@ func TestGetSecret_MetadataOnly(t *testing.T) {
 	broker.store["user/cred:openai-prod"] = []byte("v")
 
 	// Caller passes the caller-facing name (no "user/" prefix).
-	resp, err := srv.GetSecret(ctx, &adminv1.GetSecretRequest{Name: "cred:openai-prod"})
+	resp, err := srv.GetSecret(ctx, &tenantv1.GetSecretRequest{Name: "cred:openai-prod"})
 	if err != nil {
 		t.Fatalf("GetSecret: %v", err)
 	}
@@ -223,7 +223,7 @@ func TestGetSecret_MetadataOnly(t *testing.T) {
 	if resp.GetMetadata().GetName() != "cred:openai-prod" {
 		t.Errorf("name mismatch: got %q", resp.GetMetadata().GetName())
 	}
-	if resp.GetMetadata().GetCategory() != adminv1.SecretCategory_SECRET_CATEGORY_CRED {
+	if resp.GetMetadata().GetCategory() != tenantv1.SecretCategory_SECRET_CATEGORY_CRED {
 		t.Errorf("category mismatch")
 	}
 	// SECURITY: response message has no value field by proto contract.
@@ -234,7 +234,7 @@ func TestGetSecret_MetadataOnly(t *testing.T) {
 func TestGetSecret_NotFound(t *testing.T) {
 	srv, _, _, _, _ := newTestServer(t)
 	ctx := ctxWithTenant(t, "acme")
-	_, err := srv.GetSecret(ctx, &adminv1.GetSecretRequest{Name: "missing"})
+	_, err := srv.GetSecret(ctx, &tenantv1.GetSecretRequest{Name: "missing"})
 	if status.Code(err) != codes.NotFound {
 		t.Errorf("want NotFound, got %v", err)
 	}
@@ -247,7 +247,7 @@ func TestRotateSecret_EmitsRotatedEvent(t *testing.T) {
 	broker.store["user/cred:db"] = []byte("old")
 
 	// Caller passes the caller-facing name (no "user/" prefix).
-	resp, err := srv.RotateSecret(ctx, &adminv1.RotateSecretRequest{
+	resp, err := srv.RotateSecret(ctx, &tenantv1.RotateSecretRequest{
 		Name:  "cred:db",
 		Value: []byte("new"),
 	})
@@ -272,7 +272,7 @@ func TestRotateSecret_NotFound(t *testing.T) {
 	ctx := ctxWithTenant(t, "acme")
 	// "cred:missing" is a known user-secret name so toStoredName maps it to
 	// "user/cred:missing" — which does not exist → NotFound.
-	_, err := srv.RotateSecret(ctx, &adminv1.RotateSecretRequest{
+	_, err := srv.RotateSecret(ctx, &tenantv1.RotateSecretRequest{
 		Name:  "cred:missing",
 		Value: []byte("v"),
 	})
@@ -288,7 +288,7 @@ func TestDeleteSecret_EmitsRevokedEvent(t *testing.T) {
 	broker.store["user/cred:db"] = []byte("v")
 
 	// Caller passes the caller-facing name.
-	_, err := srv.DeleteSecret(ctx, &adminv1.DeleteSecretRequest{Name: "cred:db"})
+	_, err := srv.DeleteSecret(ctx, &tenantv1.DeleteSecretRequest{Name: "cred:db"})
 	if err != nil {
 		t.Fatalf("DeleteSecret: %v", err)
 	}
@@ -309,8 +309,8 @@ func TestListSecrets_ReturnsMetadataOnly(t *testing.T) {
 	broker.store["user/cred:b"] = []byte("bv")
 	broker.store["user/provider_config:openai:default"] = []byte("k")
 
-	resp, err := srv.ListSecrets(ctx, &adminv1.ListSecretsRequest{
-		CategoryFilter: adminv1.SecretCategory_SECRET_CATEGORY_CRED,
+	resp, err := srv.ListSecrets(ctx, &tenantv1.ListSecretsRequest{
+		CategoryFilter: tenantv1.SecretCategory_SECRET_CATEGORY_CRED,
 	})
 	if err != nil {
 		t.Fatalf("ListSecrets: %v", err)
@@ -368,7 +368,7 @@ func TestGetMissionAudit_AggregatesByRef(t *testing.T) {
 		},
 	}
 
-	resp, err := srv.GetMissionAudit(ctx, &adminv1.GetMissionAuditRequest{MissionId: "mission-X"})
+	resp, err := srv.GetMissionAudit(ctx, &tenantv1.GetMissionAuditRequest{MissionId: "mission-X"})
 	if err != nil {
 		t.Fatalf("GetMissionAudit: %v", err)
 	}
@@ -389,7 +389,7 @@ func TestGetMissionAudit_AggregatesByRef(t *testing.T) {
 
 func TestGetMissionAudit_RequiresTenant(t *testing.T) {
 	srv, _, _, _, _ := newTestServer(t)
-	_, err := srv.GetMissionAudit(context.Background(), &adminv1.GetMissionAuditRequest{MissionId: "x"})
+	_, err := srv.GetMissionAudit(context.Background(), &tenantv1.GetMissionAuditRequest{MissionId: "x"})
 	if status.Code(err) != codes.PermissionDenied {
 		t.Errorf("want PermissionDenied, got %v", err)
 	}
@@ -398,7 +398,7 @@ func TestGetMissionAudit_RequiresTenant(t *testing.T) {
 func TestGetMissionAudit_RequiresMissionID(t *testing.T) {
 	srv, _, _, _, _ := newTestServer(t)
 	ctx := ctxWithTenant(t, "acme")
-	_, err := srv.GetMissionAudit(ctx, &adminv1.GetMissionAuditRequest{})
+	_, err := srv.GetMissionAudit(ctx, &tenantv1.GetMissionAuditRequest{})
 	if status.Code(err) != codes.InvalidArgument {
 		t.Errorf("want InvalidArgument, got %v", err)
 	}
@@ -407,15 +407,15 @@ func TestGetMissionAudit_RequiresMissionID(t *testing.T) {
 func TestParseCategory(t *testing.T) {
 	tests := []struct {
 		name string
-		want adminv1.SecretCategory
+		want tenantv1.SecretCategory
 	}{
 		// caller-facing form
-		{"cred:openai", adminv1.SecretCategory_SECRET_CATEGORY_CRED},
-		{"provider_config:anthropic:default", adminv1.SecretCategory_SECRET_CATEGORY_PROVIDER_CONFIG},
-		{"unknown", adminv1.SecretCategory_SECRET_CATEGORY_UNSPECIFIED},
+		{"cred:openai", tenantv1.SecretCategory_SECRET_CATEGORY_CRED},
+		{"provider_config:anthropic:default", tenantv1.SecretCategory_SECRET_CATEGORY_PROVIDER_CONFIG},
+		{"unknown", tenantv1.SecretCategory_SECRET_CATEGORY_UNSPECIFIED},
 		// stored form (with "user/" prefix) — parseCategory must handle both
-		{"user/cred:openai", adminv1.SecretCategory_SECRET_CATEGORY_CRED},
-		{"user/provider_config:anthropic:default", adminv1.SecretCategory_SECRET_CATEGORY_PROVIDER_CONFIG},
+		{"user/cred:openai", tenantv1.SecretCategory_SECRET_CATEGORY_CRED},
+		{"user/provider_config:anthropic:default", tenantv1.SecretCategory_SECRET_CATEGORY_PROVIDER_CONFIG},
 	}
 	for _, tc := range tests {
 		if got := parseCategory(tc.name); got != tc.want {
@@ -463,15 +463,15 @@ func TestNewSecretsAdminServer_RequiresBroker(t *testing.T) {
 
 func TestStoredName_PrependUserPrefix(t *testing.T) {
 	tests := []struct {
-		cat  adminv1.SecretCategory
+		cat  tenantv1.SecretCategory
 		name string
 		want string
 	}{
-		{adminv1.SecretCategory_SECRET_CATEGORY_CRED, "openai-prod", "user/cred:openai-prod"},
-		{adminv1.SecretCategory_SECRET_CATEGORY_CRED, "cred:openai-prod", "user/cred:openai-prod"},      // bare cat prefix stripped first
-		{adminv1.SecretCategory_SECRET_CATEGORY_CRED, "user/cred:openai-prod", "user/cred:openai-prod"}, // idempotent
-		{adminv1.SecretCategory_SECRET_CATEGORY_PROVIDER_CONFIG, "openai:default", "user/provider_config:openai:default"},
-		{adminv1.SecretCategory_SECRET_CATEGORY_UNSPECIFIED, "raw", "raw"}, // unspecified — no prefix added
+		{tenantv1.SecretCategory_SECRET_CATEGORY_CRED, "openai-prod", "user/cred:openai-prod"},
+		{tenantv1.SecretCategory_SECRET_CATEGORY_CRED, "cred:openai-prod", "user/cred:openai-prod"},      // bare cat prefix stripped first
+		{tenantv1.SecretCategory_SECRET_CATEGORY_CRED, "user/cred:openai-prod", "user/cred:openai-prod"}, // idempotent
+		{tenantv1.SecretCategory_SECRET_CATEGORY_PROVIDER_CONFIG, "openai:default", "user/provider_config:openai:default"},
+		{tenantv1.SecretCategory_SECRET_CATEGORY_UNSPECIFIED, "raw", "raw"}, // unspecified — no prefix added
 	}
 	for _, tc := range tests {
 		got := storedName(tc.cat, tc.name)
@@ -524,9 +524,9 @@ func TestSetSecret_UserPrefixNamespace(t *testing.T) {
 	srv, broker, _, _, _ := newTestServer(t)
 	ctx := ctxWithTenant(t, "acme")
 
-	resp, err := srv.SetSecret(ctx, &adminv1.SetSecretRequest{
+	resp, err := srv.SetSecret(ctx, &tenantv1.SetSecretRequest{
 		Name:     "my-key",
-		Category: adminv1.SecretCategory_SECRET_CATEGORY_CRED,
+		Category: tenantv1.SecretCategory_SECRET_CATEGORY_CRED,
 		Value:    []byte("secret"),
 	})
 	if err != nil {
@@ -559,14 +559,14 @@ func TestGetSecret_UserPrefixNamespace(t *testing.T) {
 	ctx := ctxWithTenant(t, "acme")
 	broker.store["user/provider_config:openai:key"] = []byte("v")
 
-	resp, err := srv.GetSecret(ctx, &adminv1.GetSecretRequest{Name: "provider_config:openai:key"})
+	resp, err := srv.GetSecret(ctx, &tenantv1.GetSecretRequest{Name: "provider_config:openai:key"})
 	if err != nil {
 		t.Fatalf("GetSecret: %v", err)
 	}
 	if resp.GetMetadata().GetName() != "provider_config:openai:key" {
 		t.Errorf("name: want provider_config:openai:key, got %q", resp.GetMetadata().GetName())
 	}
-	if resp.GetMetadata().GetCategory() != adminv1.SecretCategory_SECRET_CATEGORY_PROVIDER_CONFIG {
+	if resp.GetMetadata().GetCategory() != tenantv1.SecretCategory_SECRET_CATEGORY_PROVIDER_CONFIG {
 		t.Errorf("category mismatch")
 	}
 }
