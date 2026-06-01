@@ -47,7 +47,7 @@ require (
 	github.com/vmihailenco/msgpack/v5 v5.4.1
 	github.com/zeroroot-ai/ast-checks v0.1.2
 	github.com/zeroroot-ai/platform-clients v0.11.4
-	github.com/zeroroot-ai/platform-sdk v0.10.2
+	github.com/zeroroot-ai/platform-sdk v0.11.0
 	github.com/zeroroot-ai/sdk v0.128.0
 	github.com/zeroroot-ai/setec v0.104.3
 	github.com/zeroroot-ai/testfixtures v0.1.1

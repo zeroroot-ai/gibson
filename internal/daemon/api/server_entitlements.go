@@ -95,11 +95,12 @@ func (s *DaemonServer) UpsertTenantQuota(ctx context.Context, req *daemonoperato
 	}
 
 	const q = `
-		INSERT INTO tenant_quotas (tenant_id, concurrent_missions, concurrent_agents, updated_at)
-		VALUES ($1, $2, $3, NOW())
+		INSERT INTO tenant_quotas (tenant_id, concurrent_missions, concurrent_agents, plan_id, updated_at)
+		VALUES ($1, $2, $3, $4, NOW())
 		ON CONFLICT (tenant_id) DO UPDATE SET
 			concurrent_missions = EXCLUDED.concurrent_missions,
 			concurrent_agents = EXCLUDED.concurrent_agents,
+			plan_id = EXCLUDED.plan_id,
 			updated_at = NOW()
 		RETURNING updated_at
 	`
@@ -108,6 +109,7 @@ func (s *DaemonServer) UpsertTenantQuota(ctx context.Context, req *daemonoperato
 		req.GetTenantId(),
 		req.GetConcurrentMissions(),
 		req.GetConcurrentAgents(),
+		req.GetPlanId(),
 	).Scan(&updatedAt); err != nil {
 		return nil, status.Errorf(codes.Internal, "upsert: %v", err)
 	}
@@ -244,6 +246,7 @@ func ensureTenantQuotasTable(ctx context.Context, db *sql.DB) error {
 			tenant_id TEXT PRIMARY KEY,
 			concurrent_missions INT NOT NULL DEFAULT 0,
 			concurrent_agents INT NOT NULL DEFAULT 0,
+			plan_id TEXT NOT NULL DEFAULT '',
 			updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
 		)
 	`
@@ -259,6 +262,17 @@ func ensureTenantQuotasTable(ctx context.Context, db *sql.DB) error {
 	`
 	if _, err := db.ExecContext(ctx, ensure); err != nil {
 		return fmt.Errorf("alter tenant_quotas (concurrent_missions): %w", err)
+	}
+	// plan_id was added when the daemon began stamping the canonical plan
+	// onto the quota row (so the billing page shows the plan name, not
+	// "No plan assigned"). ADD COLUMN IF NOT EXISTS keeps pre-existing
+	// tables forward-compatible.
+	const ensurePlan = `
+		ALTER TABLE tenant_quotas
+			ADD COLUMN IF NOT EXISTS plan_id TEXT NOT NULL DEFAULT ''
+	`
+	if _, err := db.ExecContext(ctx, ensurePlan); err != nil {
+		return fmt.Errorf("alter tenant_quotas (plan_id): %w", err)
 	}
 	return nil
 }
