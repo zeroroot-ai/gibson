@@ -9,10 +9,10 @@ package registry
 type IdentityClass uint8
 
 const (
-	IdentityUser              IdentityClass = 1
-	IdentityService           IdentityClass = 2
-	IdentityComponent         IdentityClass = 4
-	IdentityPlatformOperator  IdentityClass = 8
+	IdentityUser             IdentityClass = 1
+	IdentityService          IdentityClass = 2
+	IdentityComponent        IdentityClass = 4
+	IdentityPlatformOperator IdentityClass = 8
 )
 
 // Has reports whether c contains every bit set in want.
@@ -2215,6 +2215,16 @@ var Registry = map[string]Entry{
 	},
 	"/gibson.tenant.v1.MembershipService/RemoveTeamMember": {
 		Method:            "/gibson.tenant.v1.MembershipService/RemoveTeamMember",
+		Service:           "gibson.tenant.v1.MembershipService",
+		Relation:          "admin",
+		ObjectType:        "tenant",
+		ObjectDeriver:     "tenant_from_identity",
+		AllowedIdentities: IdentityUser,
+		Unauthenticated:   false,
+		Self:              false,
+	},
+	"/gibson.tenant.v1.MembershipService/SetCatalogEnabled": {
+		Method:            "/gibson.tenant.v1.MembershipService/SetCatalogEnabled",
 		Service:           "gibson.tenant.v1.MembershipService",
 		Relation:          "admin",
 		ObjectType:        "tenant",
