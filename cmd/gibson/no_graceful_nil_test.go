@@ -190,7 +190,7 @@ func TestNoGracefulNilInRequestPaths(t *testing.T) {
 		"internal/harness/filter.go:110":                        astchecks.Entry{Category: astchecks.CategoryDefensiveGuard, Reason: "nil CVSS means no min-score match"},
 		"internal/harness/filter.go:117":                        astchecks.Entry{Category: astchecks.CategoryDefensiveGuard, Reason: "nil CVSS means no max-score match"},
 		"internal/harness/graphrag_query_bridge.go:1095":        astchecks.Entry{Category: astchecks.CategoryDefensiveGuard, Reason: "nil props passthrough"},
-		"internal/harness/implementation.go:221": astchecks.Entry{Category: astchecks.CategoryDefensiveGuard, Reason: "nodeSlotOverrides nil-guard in slotOverride helper; nil means no override (spec: per-node-slot-override)"},
+		"internal/harness/implementation.go:221":                astchecks.Entry{Category: astchecks.CategoryDefensiveGuard, Reason: "nodeSlotOverrides nil-guard in slotOverride helper; nil means no override (spec: per-node-slot-override)"},
 		"internal/harness/implementation.go:2426":               astchecks.Entry{Category: astchecks.CategoryDefensiveGuard, Reason: "nil-input → nil-output converter"},
 		"internal/harness/implementation.go:3046":               astchecks.Entry{Category: astchecks.CategoryDefensiveGuard, Reason: "nil-input → nil-output converter"},
 		"internal/harness/middleware/events.go:170":             astchecks.Entry{Category: astchecks.CategoryDefensiveGuard, Reason: "nil result means middleware drops event"},
