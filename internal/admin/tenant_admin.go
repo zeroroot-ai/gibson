@@ -394,12 +394,31 @@ func (s *TenantAdminServer) ListMembers(ctx context.Context, req *adminv1.ListMe
 
 		if s.idpClient != nil {
 			profile, profileErr := s.idpClient.GetUserProfile(ctx, userID)
-			if profileErr != nil {
-				// Non-fatal: log and continue without IdP data for this user.
-				s.logger.WarnContext(ctx, "ListMembers: GetUserProfile failed",
+			switch {
+			case profileErr != nil:
+				// Non-fatal: enrichment is best-effort and the member still
+				// appears with their id. Classify the failure so blank
+				// names are diagnosable — distinguish a directory outage from
+				// a genuinely-missing profile.
+				reason := "profile_lookup_failed"
+				switch {
+				case errors.Is(profileErr, idp.ErrUnreachable):
+					reason = "directory_unavailable"
+				case errors.Is(profileErr, idp.ErrNotFound):
+					reason = "profile_not_found"
+				}
+				s.logger.WarnContext(ctx, "ListMembers: identity enrichment failed",
 					slog.String("user_id", userID),
+					slog.String("reason", reason),
 					slog.String("error", profileErr.Error()))
-			} else {
+			case profile.DisplayName == "" && profile.Email == "":
+				// Lookup succeeded but the directory returned no name/email, so
+				// the row renders blank. Log it so an empty profile is
+				// observable and distinct from a directory outage.
+				s.logger.WarnContext(ctx, "ListMembers: identity enrichment returned an empty profile",
+					slog.String("user_id", userID),
+					slog.String("reason", "empty_profile"))
+			default:
 				m.DisplayName = profile.DisplayName
 				m.Email = profile.Email
 			}
