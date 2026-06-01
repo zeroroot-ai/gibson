@@ -41,6 +41,8 @@ rpc,relation,object_type,deriver,identities,source_proto_file,mode
 /gibson.authz.v1.ModelAccessService/ListAccess,member,tenant,tenant_from_identity,USER|SERVICE,gibson/authz/v1/model_access.proto,rule
 /gibson.authz.v1.ModelAccessService/ListModelResolutionEvents,member,tenant,tenant_from_identity,USER|SERVICE,gibson/authz/v1/model_access.proto,rule
 /gibson.authz.v1.ModelAccessService/RevokeAccess,member,tenant,tenant_from_identity,USER|SERVICE,gibson/authz/v1/model_access.proto,rule
+/gibson.billing.v1.BillingService/DeleteWebhookEvent,member,tenant,tenant_from_identity,USER|SERVICE,gibson/billing/v1/billing.proto,rule
+/gibson.billing.v1.BillingService/RecordWebhookEvent,member,tenant,tenant_from_identity,USER|SERVICE,gibson/billing/v1/billing.proto,rule
 /gibson.budget.v1.BudgetService/GetBudget,member,tenant,tenant_from_identity,USER|SERVICE,gibson/budget/v1/budget.proto,rule
 /gibson.budget.v1.BudgetService/GetTenantDefaults,member,tenant,tenant_from_identity,USER|SERVICE,gibson/budget/v1/budget.proto,rule
 /gibson.budget.v1.BudgetService/ListBudgets,member,tenant,tenant_from_identity,USER|SERVICE,gibson/budget/v1/budget.proto,rule

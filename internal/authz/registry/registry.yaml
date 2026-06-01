@@ -254,6 +254,20 @@ entries:
     allowed_identities:
       - USER
       - SERVICE
+  "/gibson.billing.v1.BillingService/DeleteWebhookEvent":
+    relation: "member"
+    object_type: "tenant"
+    object_deriver: "tenant_from_identity"
+    allowed_identities:
+      - USER
+      - SERVICE
+  "/gibson.billing.v1.BillingService/RecordWebhookEvent":
+    relation: "member"
+    object_type: "tenant"
+    object_deriver: "tenant_from_identity"
+    allowed_identities:
+      - USER
+      - SERVICE
   "/gibson.budget.v1.BudgetService/GetBudget":
     relation: "member"
     object_type: "tenant"
