@@ -167,6 +167,25 @@ func applyContextPerCallCap(ctx context.Context, req *llm.CompletionRequest) {
 	}
 }
 
+// defaultMaxOutputTokens is the max_tokens floor applied when a caller omits
+// it. max_tokens is REQUIRED by Anthropic and several other providers; sending
+// 0 (the zero value when the request and any per-call cap leave it unset) makes
+// the provider return an empty completion with finishReason "length", which
+// surfaces to the user as a blank chat reply. The dashboard chat client does
+// not set maxOutputTokens (it is optional in the AI SDK), so the daemon must
+// supply a sane floor. Matches the budget pre-check reservation in
+// estimateTokens.
+const defaultMaxOutputTokens = 4096
+
+// applyDefaultMaxTokens sets a sane max_tokens floor when the caller and any
+// per-call cap left it at 0. Without this the provider produces an empty
+// "length"-terminated completion.
+func applyDefaultMaxTokens(req *llm.CompletionRequest) {
+	if req.MaxTokens <= 0 {
+		req.MaxTokens = defaultMaxOutputTokens
+	}
+}
+
 // estimateTokens returns a conservative input-token + max-tokens estimate
 // for an LLM call. Used by the budget pre-check. The estimate is
 // intentionally conservative — over-reserving is preferable to letting
@@ -274,6 +293,13 @@ func (s *DaemonServer) ExecuteLLM(ctx context.Context, req *tenantv1.ExecuteLLMR
 	// When no cap is present in context this is a no-op.
 	// Spec: mission-author-experience M4 (gibson#133).
 	applyContextPerCallCap(ctx, &completionReq)
+
+	// 6c. Floor max_tokens. A request that omits max_tokens (and has no
+	// per-call cap) leaves MaxTokens at 0; providers like Anthropic then
+	// return an empty completion with finishReason "length" — a blank chat
+	// reply. Default to a sane value so callers that don't specify a budget
+	// (e.g. the dashboard chat client) still get output.
+	applyDefaultMaxTokens(&completionReq)
 
 	// 7. Dispatch: tools → CompleteWithTools, json_schema → CompleteStructured, else Complete.
 	var resp *llm.CompletionResponse
