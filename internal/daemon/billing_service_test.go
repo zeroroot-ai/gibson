@@ -80,9 +80,9 @@ func TestRecordWebhookEvent_InputValidation(t *testing.T) {
 	ctx := billingCtx("tenant-a", "sa-1")
 
 	cases := []struct {
-		name        string
-		req         *billingpb.RecordWebhookEventRequest
-		wantCode    codes.Code
+		name     string
+		req      *billingpb.RecordWebhookEventRequest
+		wantCode codes.Code
 	}{
 		{
 			name:     "missing event_id",
