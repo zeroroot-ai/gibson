@@ -887,6 +887,13 @@ func (d *daemonImpl) buildGRPCServer(ctx context.Context) (*grpcSubsystem, error
 			daemonSvc.WithConversationStore(conversationStore)
 			d.logger.Info(ctx, "conversation store wired into DaemonServer (Redis-backed)")
 
+			// Wire the per-user state Redis client for the Redis-read RPCs.
+			// These RPCs front all remaining dashboard direct-Redis reads
+			// (onboarding, layout, activity, signup progress, membership cache,
+			// attachment staging). Spec: dashboard-no-backing-store-clients (Module 2).
+			daemonSvc.WithUserStateRedis(redisClient)
+			d.logger.Info(ctx, "user state Redis wired into DaemonServer")
+
 		} else {
 			d.logger.Warn(ctx, "daemon runtime services not wired: Redis client is not standalone mode")
 		}

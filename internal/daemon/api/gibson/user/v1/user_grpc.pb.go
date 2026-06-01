@@ -19,16 +19,29 @@ import (
 const _ = grpc.SupportPackageIsVersion9
 
 const (
-	UserService_GetUserProfile_FullMethodName     = "/gibson.user.v1.UserService/GetUserProfile"
-	UserService_UpdateUserProfile_FullMethodName  = "/gibson.user.v1.UserService/UpdateUserProfile"
-	UserService_ListAlerts_FullMethodName         = "/gibson.user.v1.UserService/ListAlerts"
-	UserService_MarkAlertRead_FullMethodName      = "/gibson.user.v1.UserService/MarkAlertRead"
-	UserService_MarkAllAlertsRead_FullMethodName  = "/gibson.user.v1.UserService/MarkAllAlertsRead"
-	UserService_ListConversations_FullMethodName  = "/gibson.user.v1.UserService/ListConversations"
-	UserService_GetConversation_FullMethodName    = "/gibson.user.v1.UserService/GetConversation"
-	UserService_SaveConversation_FullMethodName   = "/gibson.user.v1.UserService/SaveConversation"
-	UserService_RenameConversation_FullMethodName = "/gibson.user.v1.UserService/RenameConversation"
-	UserService_DeleteConversation_FullMethodName = "/gibson.user.v1.UserService/DeleteConversation"
+	UserService_GetUserProfile_FullMethodName            = "/gibson.user.v1.UserService/GetUserProfile"
+	UserService_UpdateUserProfile_FullMethodName         = "/gibson.user.v1.UserService/UpdateUserProfile"
+	UserService_ListAlerts_FullMethodName                = "/gibson.user.v1.UserService/ListAlerts"
+	UserService_MarkAlertRead_FullMethodName             = "/gibson.user.v1.UserService/MarkAlertRead"
+	UserService_MarkAllAlertsRead_FullMethodName         = "/gibson.user.v1.UserService/MarkAllAlertsRead"
+	UserService_ListConversations_FullMethodName         = "/gibson.user.v1.UserService/ListConversations"
+	UserService_GetConversation_FullMethodName           = "/gibson.user.v1.UserService/GetConversation"
+	UserService_SaveConversation_FullMethodName          = "/gibson.user.v1.UserService/SaveConversation"
+	UserService_RenameConversation_FullMethodName        = "/gibson.user.v1.UserService/RenameConversation"
+	UserService_DeleteConversation_FullMethodName        = "/gibson.user.v1.UserService/DeleteConversation"
+	UserService_GetUserOnboardingState_FullMethodName    = "/gibson.user.v1.UserService/GetUserOnboardingState"
+	UserService_UpdateUserOnboardingState_FullMethodName = "/gibson.user.v1.UserService/UpdateUserOnboardingState"
+	UserService_ResetUserOnboardingState_FullMethodName  = "/gibson.user.v1.UserService/ResetUserOnboardingState"
+	UserService_GetUserLayout_FullMethodName             = "/gibson.user.v1.UserService/GetUserLayout"
+	UserService_SaveUserLayout_FullMethodName            = "/gibson.user.v1.UserService/SaveUserLayout"
+	UserService_ResetUserLayout_FullMethodName           = "/gibson.user.v1.UserService/ResetUserLayout"
+	UserService_GetUserActivity_FullMethodName           = "/gibson.user.v1.UserService/GetUserActivity"
+	UserService_RecordUserActivity_FullMethodName        = "/gibson.user.v1.UserService/RecordUserActivity"
+	UserService_GetSignupProgress_FullMethodName         = "/gibson.user.v1.UserService/GetSignupProgress"
+	UserService_SetSignupProgress_FullMethodName         = "/gibson.user.v1.UserService/SetSignupProgress"
+	UserService_InvalidateMembershipCache_FullMethodName = "/gibson.user.v1.UserService/InvalidateMembershipCache"
+	UserService_StageAttachment_FullMethodName           = "/gibson.user.v1.UserService/StageAttachment"
+	UserService_ConsumeAttachment_FullMethodName         = "/gibson.user.v1.UserService/ConsumeAttachment"
 )
 
 // UserServiceClient is the client API for UserService service.
@@ -74,6 +87,38 @@ type UserServiceClient interface {
 	// DeleteConversation removes a conversation and its list-index entry.
 	// Only the owning user within their tenant may delete a conversation.
 	DeleteConversation(ctx context.Context, in *DeleteConversationRequest, opts ...grpc.CallOption) (*DeleteConversationResponse, error)
+	// GetUserOnboardingState returns the per-user onboarding state for the caller.
+	// Returns a freshly initialised default state when none is stored yet.
+	GetUserOnboardingState(ctx context.Context, in *GetUserOnboardingStateRequest, opts ...grpc.CallOption) (*GetUserOnboardingStateResponse, error)
+	// UpdateUserOnboardingState replaces the user's onboarding state.
+	UpdateUserOnboardingState(ctx context.Context, in *UpdateUserOnboardingStateRequest, opts ...grpc.CallOption) (*UpdateUserOnboardingStateResponse, error)
+	// ResetUserOnboardingState wipes the user's onboarding state and returns a default.
+	ResetUserOnboardingState(ctx context.Context, in *ResetUserOnboardingStateRequest, opts ...grpc.CallOption) (*ResetUserOnboardingStateResponse, error)
+	// GetUserLayout returns the user's saved dashboard layout.
+	// Returns a platform default when no layout has been saved.
+	GetUserLayout(ctx context.Context, in *GetUserLayoutRequest, opts ...grpc.CallOption) (*GetUserLayoutResponse, error)
+	// SaveUserLayout persists the user's dashboard widget layout.
+	SaveUserLayout(ctx context.Context, in *SaveUserLayoutRequest, opts ...grpc.CallOption) (*SaveUserLayoutResponse, error)
+	// ResetUserLayout removes the user's saved layout so the default is served on next GET.
+	ResetUserLayout(ctx context.Context, in *ResetUserLayoutRequest, opts ...grpc.CallOption) (*ResetUserLayoutResponse, error)
+	// GetUserActivity returns the user's aggregated recent platform activity.
+	GetUserActivity(ctx context.Context, in *GetUserActivityRequest, opts ...grpc.CallOption) (*GetUserActivityResponse, error)
+	// RecordUserActivity prepends one activity event to the user's feed.
+	RecordUserActivity(ctx context.Context, in *RecordUserActivityRequest, opts ...grpc.CallOption) (*RecordUserActivityResponse, error)
+	// GetSignupProgress polls the provisioning state for a signup attempt.
+	// Unauthenticated: the attempt_id is an opaque UUID-v4 capability.
+	GetSignupProgress(ctx context.Context, in *GetSignupProgressRequest, opts ...grpc.CallOption) (*GetSignupProgressResponse, error)
+	// SetSignupProgress writes or overwrites provisioning progress for a signup attempt.
+	// Only the dashboard server action calls this.
+	SetSignupProgress(ctx context.Context, in *SetSignupProgressRequest, opts ...grpc.CallOption) (*SetSignupProgressResponse, error)
+	// InvalidateMembershipCache deletes the cross-request membership cache for a user.
+	InvalidateMembershipCache(ctx context.Context, in *InvalidateMembershipCacheRequest, opts ...grpc.CallOption) (*InvalidateMembershipCacheResponse, error)
+	// StageAttachment stores extracted file text under a short-lived UUID token.
+	// Returns the attachment_id the chat route passes on the next message.
+	StageAttachment(ctx context.Context, in *StageAttachmentRequest, opts ...grpc.CallOption) (*StageAttachmentResponse, error)
+	// ConsumeAttachment reads and atomically deletes a staged attachment.
+	// Returns NOT_FOUND when the attachment_id is unknown or has expired.
+	ConsumeAttachment(ctx context.Context, in *ConsumeAttachmentRequest, opts ...grpc.CallOption) (*ConsumeAttachmentResponse, error)
 }
 
 type userServiceClient struct {
@@ -184,6 +229,136 @@ func (c *userServiceClient) DeleteConversation(ctx context.Context, in *DeleteCo
 	return out, nil
 }
 
+func (c *userServiceClient) GetUserOnboardingState(ctx context.Context, in *GetUserOnboardingStateRequest, opts ...grpc.CallOption) (*GetUserOnboardingStateResponse, error) {
+	cOpts := append([]grpc.CallOption{grpc.StaticMethod()}, opts...)
+	out := new(GetUserOnboardingStateResponse)
+	err := c.cc.Invoke(ctx, UserService_GetUserOnboardingState_FullMethodName, in, out, cOpts...)
+	if err != nil {
+		return nil, err
+	}
+	return out, nil
+}
+
+func (c *userServiceClient) UpdateUserOnboardingState(ctx context.Context, in *UpdateUserOnboardingStateRequest, opts ...grpc.CallOption) (*UpdateUserOnboardingStateResponse, error) {
+	cOpts := append([]grpc.CallOption{grpc.StaticMethod()}, opts...)
+	out := new(UpdateUserOnboardingStateResponse)
+	err := c.cc.Invoke(ctx, UserService_UpdateUserOnboardingState_FullMethodName, in, out, cOpts...)
+	if err != nil {
+		return nil, err
+	}
+	return out, nil
+}
+
+func (c *userServiceClient) ResetUserOnboardingState(ctx context.Context, in *ResetUserOnboardingStateRequest, opts ...grpc.CallOption) (*ResetUserOnboardingStateResponse, error) {
+	cOpts := append([]grpc.CallOption{grpc.StaticMethod()}, opts...)
+	out := new(ResetUserOnboardingStateResponse)
+	err := c.cc.Invoke(ctx, UserService_ResetUserOnboardingState_FullMethodName, in, out, cOpts...)
+	if err != nil {
+		return nil, err
+	}
+	return out, nil
+}
+
+func (c *userServiceClient) GetUserLayout(ctx context.Context, in *GetUserLayoutRequest, opts ...grpc.CallOption) (*GetUserLayoutResponse, error) {
+	cOpts := append([]grpc.CallOption{grpc.StaticMethod()}, opts...)
+	out := new(GetUserLayoutResponse)
+	err := c.cc.Invoke(ctx, UserService_GetUserLayout_FullMethodName, in, out, cOpts...)
+	if err != nil {
+		return nil, err
+	}
+	return out, nil
+}
+
+func (c *userServiceClient) SaveUserLayout(ctx context.Context, in *SaveUserLayoutRequest, opts ...grpc.CallOption) (*SaveUserLayoutResponse, error) {
+	cOpts := append([]grpc.CallOption{grpc.StaticMethod()}, opts...)
+	out := new(SaveUserLayoutResponse)
+	err := c.cc.Invoke(ctx, UserService_SaveUserLayout_FullMethodName, in, out, cOpts...)
+	if err != nil {
+		return nil, err
+	}
+	return out, nil
+}
+
+func (c *userServiceClient) ResetUserLayout(ctx context.Context, in *ResetUserLayoutRequest, opts ...grpc.CallOption) (*ResetUserLayoutResponse, error) {
+	cOpts := append([]grpc.CallOption{grpc.StaticMethod()}, opts...)
+	out := new(ResetUserLayoutResponse)
+	err := c.cc.Invoke(ctx, UserService_ResetUserLayout_FullMethodName, in, out, cOpts...)
+	if err != nil {
+		return nil, err
+	}
+	return out, nil
+}
+
+func (c *userServiceClient) GetUserActivity(ctx context.Context, in *GetUserActivityRequest, opts ...grpc.CallOption) (*GetUserActivityResponse, error) {
+	cOpts := append([]grpc.CallOption{grpc.StaticMethod()}, opts...)
+	out := new(GetUserActivityResponse)
+	err := c.cc.Invoke(ctx, UserService_GetUserActivity_FullMethodName, in, out, cOpts...)
+	if err != nil {
+		return nil, err
+	}
+	return out, nil
+}
+
+func (c *userServiceClient) RecordUserActivity(ctx context.Context, in *RecordUserActivityRequest, opts ...grpc.CallOption) (*RecordUserActivityResponse, error) {
+	cOpts := append([]grpc.CallOption{grpc.StaticMethod()}, opts...)
+	out := new(RecordUserActivityResponse)
+	err := c.cc.Invoke(ctx, UserService_RecordUserActivity_FullMethodName, in, out, cOpts...)
+	if err != nil {
+		return nil, err
+	}
+	return out, nil
+}
+
+func (c *userServiceClient) GetSignupProgress(ctx context.Context, in *GetSignupProgressRequest, opts ...grpc.CallOption) (*GetSignupProgressResponse, error) {
+	cOpts := append([]grpc.CallOption{grpc.StaticMethod()}, opts...)
+	out := new(GetSignupProgressResponse)
+	err := c.cc.Invoke(ctx, UserService_GetSignupProgress_FullMethodName, in, out, cOpts...)
+	if err != nil {
+		return nil, err
+	}
+	return out, nil
+}
+
+func (c *userServiceClient) SetSignupProgress(ctx context.Context, in *SetSignupProgressRequest, opts ...grpc.CallOption) (*SetSignupProgressResponse, error) {
+	cOpts := append([]grpc.CallOption{grpc.StaticMethod()}, opts...)
+	out := new(SetSignupProgressResponse)
+	err := c.cc.Invoke(ctx, UserService_SetSignupProgress_FullMethodName, in, out, cOpts...)
+	if err != nil {
+		return nil, err
+	}
+	return out, nil
+}
+
+func (c *userServiceClient) InvalidateMembershipCache(ctx context.Context, in *InvalidateMembershipCacheRequest, opts ...grpc.CallOption) (*InvalidateMembershipCacheResponse, error) {
+	cOpts := append([]grpc.CallOption{grpc.StaticMethod()}, opts...)
+	out := new(InvalidateMembershipCacheResponse)
+	err := c.cc.Invoke(ctx, UserService_InvalidateMembershipCache_FullMethodName, in, out, cOpts...)
+	if err != nil {
+		return nil, err
+	}
+	return out, nil
+}
+
+func (c *userServiceClient) StageAttachment(ctx context.Context, in *StageAttachmentRequest, opts ...grpc.CallOption) (*StageAttachmentResponse, error) {
+	cOpts := append([]grpc.CallOption{grpc.StaticMethod()}, opts...)
+	out := new(StageAttachmentResponse)
+	err := c.cc.Invoke(ctx, UserService_StageAttachment_FullMethodName, in, out, cOpts...)
+	if err != nil {
+		return nil, err
+	}
+	return out, nil
+}
+
+func (c *userServiceClient) ConsumeAttachment(ctx context.Context, in *ConsumeAttachmentRequest, opts ...grpc.CallOption) (*ConsumeAttachmentResponse, error) {
+	cOpts := append([]grpc.CallOption{grpc.StaticMethod()}, opts...)
+	out := new(ConsumeAttachmentResponse)
+	err := c.cc.Invoke(ctx, UserService_ConsumeAttachment_FullMethodName, in, out, cOpts...)
+	if err != nil {
+		return nil, err
+	}
+	return out, nil
+}
+
 // UserServiceServer is the server API for UserService service.
 // All implementations must embed UnimplementedUserServiceServer
 // for forward compatibility.
@@ -227,6 +402,38 @@ type UserServiceServer interface {
 	// DeleteConversation removes a conversation and its list-index entry.
 	// Only the owning user within their tenant may delete a conversation.
 	DeleteConversation(context.Context, *DeleteConversationRequest) (*DeleteConversationResponse, error)
+	// GetUserOnboardingState returns the per-user onboarding state for the caller.
+	// Returns a freshly initialised default state when none is stored yet.
+	GetUserOnboardingState(context.Context, *GetUserOnboardingStateRequest) (*GetUserOnboardingStateResponse, error)
+	// UpdateUserOnboardingState replaces the user's onboarding state.
+	UpdateUserOnboardingState(context.Context, *UpdateUserOnboardingStateRequest) (*UpdateUserOnboardingStateResponse, error)
+	// ResetUserOnboardingState wipes the user's onboarding state and returns a default.
+	ResetUserOnboardingState(context.Context, *ResetUserOnboardingStateRequest) (*ResetUserOnboardingStateResponse, error)
+	// GetUserLayout returns the user's saved dashboard layout.
+	// Returns a platform default when no layout has been saved.
+	GetUserLayout(context.Context, *GetUserLayoutRequest) (*GetUserLayoutResponse, error)
+	// SaveUserLayout persists the user's dashboard widget layout.
+	SaveUserLayout(context.Context, *SaveUserLayoutRequest) (*SaveUserLayoutResponse, error)
+	// ResetUserLayout removes the user's saved layout so the default is served on next GET.
+	ResetUserLayout(context.Context, *ResetUserLayoutRequest) (*ResetUserLayoutResponse, error)
+	// GetUserActivity returns the user's aggregated recent platform activity.
+	GetUserActivity(context.Context, *GetUserActivityRequest) (*GetUserActivityResponse, error)
+	// RecordUserActivity prepends one activity event to the user's feed.
+	RecordUserActivity(context.Context, *RecordUserActivityRequest) (*RecordUserActivityResponse, error)
+	// GetSignupProgress polls the provisioning state for a signup attempt.
+	// Unauthenticated: the attempt_id is an opaque UUID-v4 capability.
+	GetSignupProgress(context.Context, *GetSignupProgressRequest) (*GetSignupProgressResponse, error)
+	// SetSignupProgress writes or overwrites provisioning progress for a signup attempt.
+	// Only the dashboard server action calls this.
+	SetSignupProgress(context.Context, *SetSignupProgressRequest) (*SetSignupProgressResponse, error)
+	// InvalidateMembershipCache deletes the cross-request membership cache for a user.
+	InvalidateMembershipCache(context.Context, *InvalidateMembershipCacheRequest) (*InvalidateMembershipCacheResponse, error)
+	// StageAttachment stores extracted file text under a short-lived UUID token.
+	// Returns the attachment_id the chat route passes on the next message.
+	StageAttachment(context.Context, *StageAttachmentRequest) (*StageAttachmentResponse, error)
+	// ConsumeAttachment reads and atomically deletes a staged attachment.
+	// Returns NOT_FOUND when the attachment_id is unknown or has expired.
+	ConsumeAttachment(context.Context, *ConsumeAttachmentRequest) (*ConsumeAttachmentResponse, error)
 	mustEmbedUnimplementedUserServiceServer()
 }
 
@@ -266,6 +473,45 @@ func (UnimplementedUserServiceServer) RenameConversation(context.Context, *Renam
 }
 func (UnimplementedUserServiceServer) DeleteConversation(context.Context, *DeleteConversationRequest) (*DeleteConversationResponse, error) {
 	return nil, status.Error(codes.Unimplemented, "method DeleteConversation not implemented")
+}
+func (UnimplementedUserServiceServer) GetUserOnboardingState(context.Context, *GetUserOnboardingStateRequest) (*GetUserOnboardingStateResponse, error) {
+	return nil, status.Error(codes.Unimplemented, "method GetUserOnboardingState not implemented")
+}
+func (UnimplementedUserServiceServer) UpdateUserOnboardingState(context.Context, *UpdateUserOnboardingStateRequest) (*UpdateUserOnboardingStateResponse, error) {
+	return nil, status.Error(codes.Unimplemented, "method UpdateUserOnboardingState not implemented")
+}
+func (UnimplementedUserServiceServer) ResetUserOnboardingState(context.Context, *ResetUserOnboardingStateRequest) (*ResetUserOnboardingStateResponse, error) {
+	return nil, status.Error(codes.Unimplemented, "method ResetUserOnboardingState not implemented")
+}
+func (UnimplementedUserServiceServer) GetUserLayout(context.Context, *GetUserLayoutRequest) (*GetUserLayoutResponse, error) {
+	return nil, status.Error(codes.Unimplemented, "method GetUserLayout not implemented")
+}
+func (UnimplementedUserServiceServer) SaveUserLayout(context.Context, *SaveUserLayoutRequest) (*SaveUserLayoutResponse, error) {
+	return nil, status.Error(codes.Unimplemented, "method SaveUserLayout not implemented")
+}
+func (UnimplementedUserServiceServer) ResetUserLayout(context.Context, *ResetUserLayoutRequest) (*ResetUserLayoutResponse, error) {
+	return nil, status.Error(codes.Unimplemented, "method ResetUserLayout not implemented")
+}
+func (UnimplementedUserServiceServer) GetUserActivity(context.Context, *GetUserActivityRequest) (*GetUserActivityResponse, error) {
+	return nil, status.Error(codes.Unimplemented, "method GetUserActivity not implemented")
+}
+func (UnimplementedUserServiceServer) RecordUserActivity(context.Context, *RecordUserActivityRequest) (*RecordUserActivityResponse, error) {
+	return nil, status.Error(codes.Unimplemented, "method RecordUserActivity not implemented")
+}
+func (UnimplementedUserServiceServer) GetSignupProgress(context.Context, *GetSignupProgressRequest) (*GetSignupProgressResponse, error) {
+	return nil, status.Error(codes.Unimplemented, "method GetSignupProgress not implemented")
+}
+func (UnimplementedUserServiceServer) SetSignupProgress(context.Context, *SetSignupProgressRequest) (*SetSignupProgressResponse, error) {
+	return nil, status.Error(codes.Unimplemented, "method SetSignupProgress not implemented")
+}
+func (UnimplementedUserServiceServer) InvalidateMembershipCache(context.Context, *InvalidateMembershipCacheRequest) (*InvalidateMembershipCacheResponse, error) {
+	return nil, status.Error(codes.Unimplemented, "method InvalidateMembershipCache not implemented")
+}
+func (UnimplementedUserServiceServer) StageAttachment(context.Context, *StageAttachmentRequest) (*StageAttachmentResponse, error) {
+	return nil, status.Error(codes.Unimplemented, "method StageAttachment not implemented")
+}
+func (UnimplementedUserServiceServer) ConsumeAttachment(context.Context, *ConsumeAttachmentRequest) (*ConsumeAttachmentResponse, error) {
+	return nil, status.Error(codes.Unimplemented, "method ConsumeAttachment not implemented")
 }
 func (UnimplementedUserServiceServer) mustEmbedUnimplementedUserServiceServer() {}
 func (UnimplementedUserServiceServer) testEmbeddedByValue()                     {}
@@ -468,6 +714,240 @@ func _UserService_DeleteConversation_Handler(srv interface{}, ctx context.Contex
 	return interceptor(ctx, in, info, handler)
 }
 
+func _UserService_GetUserOnboardingState_Handler(srv interface{}, ctx context.Context, dec func(interface{}) error, interceptor grpc.UnaryServerInterceptor) (interface{}, error) {
+	in := new(GetUserOnboardingStateRequest)
+	if err := dec(in); err != nil {
+		return nil, err
+	}
+	if interceptor == nil {
+		return srv.(UserServiceServer).GetUserOnboardingState(ctx, in)
+	}
+	info := &grpc.UnaryServerInfo{
+		Server:     srv,
+		FullMethod: UserService_GetUserOnboardingState_FullMethodName,
+	}
+	handler := func(ctx context.Context, req interface{}) (interface{}, error) {
+		return srv.(UserServiceServer).GetUserOnboardingState(ctx, req.(*GetUserOnboardingStateRequest))
+	}
+	return interceptor(ctx, in, info, handler)
+}
+
+func _UserService_UpdateUserOnboardingState_Handler(srv interface{}, ctx context.Context, dec func(interface{}) error, interceptor grpc.UnaryServerInterceptor) (interface{}, error) {
+	in := new(UpdateUserOnboardingStateRequest)
+	if err := dec(in); err != nil {
+		return nil, err
+	}
+	if interceptor == nil {
+		return srv.(UserServiceServer).UpdateUserOnboardingState(ctx, in)
+	}
+	info := &grpc.UnaryServerInfo{
+		Server:     srv,
+		FullMethod: UserService_UpdateUserOnboardingState_FullMethodName,
+	}
+	handler := func(ctx context.Context, req interface{}) (interface{}, error) {
+		return srv.(UserServiceServer).UpdateUserOnboardingState(ctx, req.(*UpdateUserOnboardingStateRequest))
+	}
+	return interceptor(ctx, in, info, handler)
+}
+
+func _UserService_ResetUserOnboardingState_Handler(srv interface{}, ctx context.Context, dec func(interface{}) error, interceptor grpc.UnaryServerInterceptor) (interface{}, error) {
+	in := new(ResetUserOnboardingStateRequest)
+	if err := dec(in); err != nil {
+		return nil, err
+	}
+	if interceptor == nil {
+		return srv.(UserServiceServer).ResetUserOnboardingState(ctx, in)
+	}
+	info := &grpc.UnaryServerInfo{
+		Server:     srv,
+		FullMethod: UserService_ResetUserOnboardingState_FullMethodName,
+	}
+	handler := func(ctx context.Context, req interface{}) (interface{}, error) {
+		return srv.(UserServiceServer).ResetUserOnboardingState(ctx, req.(*ResetUserOnboardingStateRequest))
+	}
+	return interceptor(ctx, in, info, handler)
+}
+
+func _UserService_GetUserLayout_Handler(srv interface{}, ctx context.Context, dec func(interface{}) error, interceptor grpc.UnaryServerInterceptor) (interface{}, error) {
+	in := new(GetUserLayoutRequest)
+	if err := dec(in); err != nil {
+		return nil, err
+	}
+	if interceptor == nil {
+		return srv.(UserServiceServer).GetUserLayout(ctx, in)
+	}
+	info := &grpc.UnaryServerInfo{
+		Server:     srv,
+		FullMethod: UserService_GetUserLayout_FullMethodName,
+	}
+	handler := func(ctx context.Context, req interface{}) (interface{}, error) {
+		return srv.(UserServiceServer).GetUserLayout(ctx, req.(*GetUserLayoutRequest))
+	}
+	return interceptor(ctx, in, info, handler)
+}
+
+func _UserService_SaveUserLayout_Handler(srv interface{}, ctx context.Context, dec func(interface{}) error, interceptor grpc.UnaryServerInterceptor) (interface{}, error) {
+	in := new(SaveUserLayoutRequest)
+	if err := dec(in); err != nil {
+		return nil, err
+	}
+	if interceptor == nil {
+		return srv.(UserServiceServer).SaveUserLayout(ctx, in)
+	}
+	info := &grpc.UnaryServerInfo{
+		Server:     srv,
+		FullMethod: UserService_SaveUserLayout_FullMethodName,
+	}
+	handler := func(ctx context.Context, req interface{}) (interface{}, error) {
+		return srv.(UserServiceServer).SaveUserLayout(ctx, req.(*SaveUserLayoutRequest))
+	}
+	return interceptor(ctx, in, info, handler)
+}
+
+func _UserService_ResetUserLayout_Handler(srv interface{}, ctx context.Context, dec func(interface{}) error, interceptor grpc.UnaryServerInterceptor) (interface{}, error) {
+	in := new(ResetUserLayoutRequest)
+	if err := dec(in); err != nil {
+		return nil, err
+	}
+	if interceptor == nil {
+		return srv.(UserServiceServer).ResetUserLayout(ctx, in)
+	}
+	info := &grpc.UnaryServerInfo{
+		Server:     srv,
+		FullMethod: UserService_ResetUserLayout_FullMethodName,
+	}
+	handler := func(ctx context.Context, req interface{}) (interface{}, error) {
+		return srv.(UserServiceServer).ResetUserLayout(ctx, req.(*ResetUserLayoutRequest))
+	}
+	return interceptor(ctx, in, info, handler)
+}
+
+func _UserService_GetUserActivity_Handler(srv interface{}, ctx context.Context, dec func(interface{}) error, interceptor grpc.UnaryServerInterceptor) (interface{}, error) {
+	in := new(GetUserActivityRequest)
+	if err := dec(in); err != nil {
+		return nil, err
+	}
+	if interceptor == nil {
+		return srv.(UserServiceServer).GetUserActivity(ctx, in)
+	}
+	info := &grpc.UnaryServerInfo{
+		Server:     srv,
+		FullMethod: UserService_GetUserActivity_FullMethodName,
+	}
+	handler := func(ctx context.Context, req interface{}) (interface{}, error) {
+		return srv.(UserServiceServer).GetUserActivity(ctx, req.(*GetUserActivityRequest))
+	}
+	return interceptor(ctx, in, info, handler)
+}
+
+func _UserService_RecordUserActivity_Handler(srv interface{}, ctx context.Context, dec func(interface{}) error, interceptor grpc.UnaryServerInterceptor) (interface{}, error) {
+	in := new(RecordUserActivityRequest)
+	if err := dec(in); err != nil {
+		return nil, err
+	}
+	if interceptor == nil {
+		return srv.(UserServiceServer).RecordUserActivity(ctx, in)
+	}
+	info := &grpc.UnaryServerInfo{
+		Server:     srv,
+		FullMethod: UserService_RecordUserActivity_FullMethodName,
+	}
+	handler := func(ctx context.Context, req interface{}) (interface{}, error) {
+		return srv.(UserServiceServer).RecordUserActivity(ctx, req.(*RecordUserActivityRequest))
+	}
+	return interceptor(ctx, in, info, handler)
+}
+
+func _UserService_GetSignupProgress_Handler(srv interface{}, ctx context.Context, dec func(interface{}) error, interceptor grpc.UnaryServerInterceptor) (interface{}, error) {
+	in := new(GetSignupProgressRequest)
+	if err := dec(in); err != nil {
+		return nil, err
+	}
+	if interceptor == nil {
+		return srv.(UserServiceServer).GetSignupProgress(ctx, in)
+	}
+	info := &grpc.UnaryServerInfo{
+		Server:     srv,
+		FullMethod: UserService_GetSignupProgress_FullMethodName,
+	}
+	handler := func(ctx context.Context, req interface{}) (interface{}, error) {
+		return srv.(UserServiceServer).GetSignupProgress(ctx, req.(*GetSignupProgressRequest))
+	}
+	return interceptor(ctx, in, info, handler)
+}
+
+func _UserService_SetSignupProgress_Handler(srv interface{}, ctx context.Context, dec func(interface{}) error, interceptor grpc.UnaryServerInterceptor) (interface{}, error) {
+	in := new(SetSignupProgressRequest)
+	if err := dec(in); err != nil {
+		return nil, err
+	}
+	if interceptor == nil {
+		return srv.(UserServiceServer).SetSignupProgress(ctx, in)
+	}
+	info := &grpc.UnaryServerInfo{
+		Server:     srv,
+		FullMethod: UserService_SetSignupProgress_FullMethodName,
+	}
+	handler := func(ctx context.Context, req interface{}) (interface{}, error) {
+		return srv.(UserServiceServer).SetSignupProgress(ctx, req.(*SetSignupProgressRequest))
+	}
+	return interceptor(ctx, in, info, handler)
+}
+
+func _UserService_InvalidateMembershipCache_Handler(srv interface{}, ctx context.Context, dec func(interface{}) error, interceptor grpc.UnaryServerInterceptor) (interface{}, error) {
+	in := new(InvalidateMembershipCacheRequest)
+	if err := dec(in); err != nil {
+		return nil, err
+	}
+	if interceptor == nil {
+		return srv.(UserServiceServer).InvalidateMembershipCache(ctx, in)
+	}
+	info := &grpc.UnaryServerInfo{
+		Server:     srv,
+		FullMethod: UserService_InvalidateMembershipCache_FullMethodName,
+	}
+	handler := func(ctx context.Context, req interface{}) (interface{}, error) {
+		return srv.(UserServiceServer).InvalidateMembershipCache(ctx, req.(*InvalidateMembershipCacheRequest))
+	}
+	return interceptor(ctx, in, info, handler)
+}
+
+func _UserService_StageAttachment_Handler(srv interface{}, ctx context.Context, dec func(interface{}) error, interceptor grpc.UnaryServerInterceptor) (interface{}, error) {
+	in := new(StageAttachmentRequest)
+	if err := dec(in); err != nil {
+		return nil, err
+	}
+	if interceptor == nil {
+		return srv.(UserServiceServer).StageAttachment(ctx, in)
+	}
+	info := &grpc.UnaryServerInfo{
+		Server:     srv,
+		FullMethod: UserService_StageAttachment_FullMethodName,
+	}
+	handler := func(ctx context.Context, req interface{}) (interface{}, error) {
+		return srv.(UserServiceServer).StageAttachment(ctx, req.(*StageAttachmentRequest))
+	}
+	return interceptor(ctx, in, info, handler)
+}
+
+func _UserService_ConsumeAttachment_Handler(srv interface{}, ctx context.Context, dec func(interface{}) error, interceptor grpc.UnaryServerInterceptor) (interface{}, error) {
+	in := new(ConsumeAttachmentRequest)
+	if err := dec(in); err != nil {
+		return nil, err
+	}
+	if interceptor == nil {
+		return srv.(UserServiceServer).ConsumeAttachment(ctx, in)
+	}
+	info := &grpc.UnaryServerInfo{
+		Server:     srv,
+		FullMethod: UserService_ConsumeAttachment_FullMethodName,
+	}
+	handler := func(ctx context.Context, req interface{}) (interface{}, error) {
+		return srv.(UserServiceServer).ConsumeAttachment(ctx, req.(*ConsumeAttachmentRequest))
+	}
+	return interceptor(ctx, in, info, handler)
+}
+
 // UserService_ServiceDesc is the grpc.ServiceDesc for UserService service.
 // It's only intended for direct use with grpc.RegisterService,
 // and not to be introspected or modified (even as a copy)
@@ -514,6 +994,58 @@ var UserService_ServiceDesc = grpc.ServiceDesc{
 		{
 			MethodName: "DeleteConversation",
 			Handler:    _UserService_DeleteConversation_Handler,
+		},
+		{
+			MethodName: "GetUserOnboardingState",
+			Handler:    _UserService_GetUserOnboardingState_Handler,
+		},
+		{
+			MethodName: "UpdateUserOnboardingState",
+			Handler:    _UserService_UpdateUserOnboardingState_Handler,
+		},
+		{
+			MethodName: "ResetUserOnboardingState",
+			Handler:    _UserService_ResetUserOnboardingState_Handler,
+		},
+		{
+			MethodName: "GetUserLayout",
+			Handler:    _UserService_GetUserLayout_Handler,
+		},
+		{
+			MethodName: "SaveUserLayout",
+			Handler:    _UserService_SaveUserLayout_Handler,
+		},
+		{
+			MethodName: "ResetUserLayout",
+			Handler:    _UserService_ResetUserLayout_Handler,
+		},
+		{
+			MethodName: "GetUserActivity",
+			Handler:    _UserService_GetUserActivity_Handler,
+		},
+		{
+			MethodName: "RecordUserActivity",
+			Handler:    _UserService_RecordUserActivity_Handler,
+		},
+		{
+			MethodName: "GetSignupProgress",
+			Handler:    _UserService_GetSignupProgress_Handler,
+		},
+		{
+			MethodName: "SetSignupProgress",
+			Handler:    _UserService_SetSignupProgress_Handler,
+		},
+		{
+			MethodName: "InvalidateMembershipCache",
+			Handler:    _UserService_InvalidateMembershipCache_Handler,
+		},
+		{
+			MethodName: "StageAttachment",
+			Handler:    _UserService_StageAttachment_Handler,
+		},
+		{
+			MethodName: "ConsumeAttachment",
+			Handler:    _UserService_ConsumeAttachment_Handler,
 		},
 	},
 	Streams:  []grpc.StreamDesc{},
