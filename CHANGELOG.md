@@ -62,6 +62,21 @@ Completed or cancelled missions are unaffected.
 
 ---
 
+## [0.121.0](https://github.com/zeroroot-ai/gibson/compare/v0.120.0...v0.121.0) (2026-06-01)
+
+
+### Features
+
+* **observability:** classify and log member identity-enrichment failures (closes [#561](https://github.com/zeroroot-ai/gibson/issues/561)) ([#570](https://github.com/zeroroot-ai/gibson/issues/570)) ([e81912f](https://github.com/zeroroot-ai/gibson/commit/e81912f5b34557cb03fdb687a2e189e9ae5350b5))
+
+
+### Bug Fixes
+
+* add private-module auth to authz-registry publish and fix image tag prefix ([#568](https://github.com/zeroroot-ai/gibson/issues/568)) ([6e9b068](https://github.com/zeroroot-ai/gibson/commit/6e9b068aa1697314d71e8a0e3c8712d3c6c203d5))
+* align authz registry IdentityClass const spacing (drift from regen) ([#571](https://github.com/zeroroot-ai/gibson/issues/571)) ([25832ac](https://github.com/zeroroot-ai/gibson/commit/25832acd4e3c8bb458d8500b995786f4ef30b8ea))
+* **authz:** normalize inbound tenant id once in team handlers (closes [#560](https://github.com/zeroroot-ai/gibson/issues/560)) ([#569](https://github.com/zeroroot-ai/gibson/issues/569)) ([6d905bd](https://github.com/zeroroot-ai/gibson/commit/6d905bd8484fb6085d41a2aaae7052924f744d45))
+* **secrets:** register SecretsAdminService + reverse admin-coverage guard (closes [#564](https://github.com/zeroroot-ai/gibson/issues/564)) ([#566](https://github.com/zeroroot-ai/gibson/issues/566)) ([a2af075](https://github.com/zeroroot-ai/gibson/commit/a2af0758a3504cc46c90ff84bd86346e389be7b6))
+
 ## [0.120.0](https://github.com/zeroroot-ai/gibson/compare/v0.119.1...v0.120.0) (2026-06-01)
 
 
