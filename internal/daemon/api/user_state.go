@@ -29,7 +29,7 @@ import (
 	"google.golang.org/grpc/codes"
 	status_grpc "google.golang.org/grpc/status"
 
-	userv1 "github.com/zeroroot-ai/gibson/internal/daemon/api/gibson/user/v1"
+	tenantv1 "github.com/zeroroot-ai/sdk/api/gen/gibson/tenant/v1"
 	"github.com/zeroroot-ai/sdk/auth"
 )
 
@@ -134,9 +134,9 @@ func userStateWarn(logger interface {
 // 1. User Onboarding State
 // ============================================================================
 
-func defaultUserOnboardingState(tenantID, userID string) *userv1.UserOnboardingState {
+func defaultUserOnboardingState(tenantID, userID string) *tenantv1.UserOnboardingState {
 	now := time.Now().UTC().Format(time.RFC3339)
-	return &userv1.UserOnboardingState{
+	return &tenantv1.UserOnboardingState{
 		UserId:          userID,
 		TenantId:        tenantID,
 		WizardCompleted: false,
@@ -151,8 +151,8 @@ func defaultUserOnboardingState(tenantID, userID string) *userv1.UserOnboardingS
 	}
 }
 
-func defaultSetupTasks() []*userv1.OnboardingSetupTask {
-	return []*userv1.OnboardingSetupTask{
+func defaultSetupTasks() []*tenantv1.OnboardingSetupTask {
+	return []*tenantv1.OnboardingSetupTask{
 		{Id: "configure_llm", Status: "pending", Category: "essential", EstimatedMinutes: 5},
 		{Id: "select_agent", Status: "pending", Category: "essential", EstimatedMinutes: 3},
 		{Id: "create_mission", Status: "pending", Category: "essential", EstimatedMinutes: 5},
@@ -164,8 +164,8 @@ func defaultSetupTasks() []*userv1.OnboardingSetupTask {
 // GetUserOnboardingState implements UserServiceServer.
 func (s *DaemonServer) GetUserOnboardingState(
 	ctx context.Context,
-	req *userv1.GetUserOnboardingStateRequest,
-) (*userv1.GetUserOnboardingStateResponse, error) {
+	req *tenantv1.GetUserOnboardingStateRequest,
+) (*tenantv1.GetUserOnboardingStateResponse, error) {
 	tenant, userID, err := resolveUserCtx(ctx, req.GetTenantId(), req.GetUserId())
 	if err != nil {
 		return nil, err
@@ -181,25 +181,25 @@ func (s *DaemonServer) GetUserOnboardingState(
 		if wErr := persistOnboardingState(ctx, rc, tenant, userID, state); wErr != nil {
 			userStateWarn(s.logger, ctx, "GetUserOnboardingState: failed to write default", wErr, tenant, userID)
 		}
-		return &userv1.GetUserOnboardingStateResponse{State: state}, nil
+		return &tenantv1.GetUserOnboardingStateResponse{State: state}, nil
 	}
 	if rErr != nil {
 		userStateWarn(s.logger, ctx, "GetUserOnboardingState: Redis read failed", rErr, tenant, userID)
 		return nil, status_grpc.Error(codes.Internal, "failed to read onboarding state")
 	}
-	var state userv1.UserOnboardingState
+	var state tenantv1.UserOnboardingState
 	if err := json.Unmarshal([]byte(raw), &state); err != nil {
 		userStateWarn(s.logger, ctx, "GetUserOnboardingState: unmarshal failed", err, tenant, userID)
 		return nil, status_grpc.Error(codes.Internal, "failed to parse onboarding state")
 	}
-	return &userv1.GetUserOnboardingStateResponse{State: &state}, nil
+	return &tenantv1.GetUserOnboardingStateResponse{State: &state}, nil
 }
 
 // UpdateUserOnboardingState implements UserServiceServer.
 func (s *DaemonServer) UpdateUserOnboardingState(
 	ctx context.Context,
-	req *userv1.UpdateUserOnboardingStateRequest,
-) (*userv1.UpdateUserOnboardingStateResponse, error) {
+	req *tenantv1.UpdateUserOnboardingStateRequest,
+) (*tenantv1.UpdateUserOnboardingStateResponse, error) {
 	tenant, userID, err := resolveUserCtx(ctx, req.GetTenantId(), req.GetUserId())
 	if err != nil {
 		return nil, err
@@ -218,14 +218,14 @@ func (s *DaemonServer) UpdateUserOnboardingState(
 	if wErr := persistOnboardingState(ctx, rc, tenant, userID, state); wErr != nil {
 		return nil, wErr
 	}
-	return &userv1.UpdateUserOnboardingStateResponse{State: state}, nil
+	return &tenantv1.UpdateUserOnboardingStateResponse{State: state}, nil
 }
 
 // ResetUserOnboardingState implements UserServiceServer.
 func (s *DaemonServer) ResetUserOnboardingState(
 	ctx context.Context,
-	req *userv1.ResetUserOnboardingStateRequest,
-) (*userv1.ResetUserOnboardingStateResponse, error) {
+	req *tenantv1.ResetUserOnboardingStateRequest,
+) (*tenantv1.ResetUserOnboardingStateResponse, error) {
 	tenant, userID, err := resolveUserCtx(ctx, req.GetTenantId(), req.GetUserId())
 	if err != nil {
 		return nil, err
@@ -238,14 +238,14 @@ func (s *DaemonServer) ResetUserOnboardingState(
 	if wErr := persistOnboardingState(ctx, rc, tenant, userID, state); wErr != nil {
 		return nil, wErr
 	}
-	return &userv1.ResetUserOnboardingStateResponse{State: state}, nil
+	return &tenantv1.ResetUserOnboardingStateResponse{State: state}, nil
 }
 
 func persistOnboardingState(
 	ctx context.Context,
 	rc goredis.UniversalClient,
 	tenantID, userID string,
-	state *userv1.UserOnboardingState,
+	state *tenantv1.UserOnboardingState,
 ) error {
 	b, err := json.Marshal(state)
 	if err != nil {
@@ -261,16 +261,16 @@ func persistOnboardingState(
 // 2. User Layout Preferences
 // ============================================================================
 
-func defaultLayoutPreferences() *userv1.UserLayoutPreferences {
-	return &userv1.UserLayoutPreferences{
+func defaultLayoutPreferences() *tenantv1.UserLayoutPreferences {
+	return &tenantv1.UserLayoutPreferences{
 		Cols:      12,
 		RowHeight: 80,
-		Widgets: []*userv1.WidgetConfig{
-			{Id: "kpi-summary", Type: "kpi-summary", Position: &userv1.WidgetPosition{X: 0, Y: 0, W: 12, H: 2}, Visible: true},
-			{Id: "findings-chart", Type: "findings-chart", Position: &userv1.WidgetPosition{X: 0, Y: 2, W: 8, H: 4}, Visible: true},
-			{Id: "severity-distribution", Type: "severity-distribution", Position: &userv1.WidgetPosition{X: 8, Y: 2, W: 4, H: 4}, Visible: true},
-			{Id: "mission-heatmap", Type: "mission-heatmap", Position: &userv1.WidgetPosition{X: 0, Y: 6, W: 6, H: 4}, Visible: true},
-			{Id: "agent-performance", Type: "agent-performance", Position: &userv1.WidgetPosition{X: 6, Y: 6, W: 6, H: 4}, Visible: true},
+		Widgets: []*tenantv1.WidgetConfig{
+			{Id: "kpi-summary", Type: "kpi-summary", Position: &tenantv1.WidgetPosition{X: 0, Y: 0, W: 12, H: 2}, Visible: true},
+			{Id: "findings-chart", Type: "findings-chart", Position: &tenantv1.WidgetPosition{X: 0, Y: 2, W: 8, H: 4}, Visible: true},
+			{Id: "severity-distribution", Type: "severity-distribution", Position: &tenantv1.WidgetPosition{X: 8, Y: 2, W: 4, H: 4}, Visible: true},
+			{Id: "mission-heatmap", Type: "mission-heatmap", Position: &tenantv1.WidgetPosition{X: 0, Y: 6, W: 6, H: 4}, Visible: true},
+			{Id: "agent-performance", Type: "agent-performance", Position: &tenantv1.WidgetPosition{X: 6, Y: 6, W: 6, H: 4}, Visible: true},
 		},
 	}
 }
@@ -278,8 +278,8 @@ func defaultLayoutPreferences() *userv1.UserLayoutPreferences {
 // GetUserLayout implements UserServiceServer.
 func (s *DaemonServer) GetUserLayout(
 	ctx context.Context,
-	req *userv1.GetUserLayoutRequest,
-) (*userv1.GetUserLayoutResponse, error) {
+	req *tenantv1.GetUserLayoutRequest,
+) (*tenantv1.GetUserLayoutResponse, error) {
 	tenant, userID, err := resolveUserCtx(ctx, req.GetTenantId(), req.GetUserId())
 	if err != nil {
 		return nil, err
@@ -290,25 +290,25 @@ func (s *DaemonServer) GetUserLayout(
 	}
 	raw, rErr := rc.Get(ctx, ulayoutKey(tenant, userID)).Result()
 	if rErr == goredis.Nil {
-		return &userv1.GetUserLayoutResponse{Layout: defaultLayoutPreferences(), IsDefault: true}, nil
+		return &tenantv1.GetUserLayoutResponse{Layout: defaultLayoutPreferences(), IsDefault: true}, nil
 	}
 	if rErr != nil {
 		userStateWarn(s.logger, ctx, "GetUserLayout: Redis read failed", rErr, tenant, userID)
 		return nil, status_grpc.Error(codes.Internal, "failed to read layout")
 	}
-	var layout userv1.UserLayoutPreferences
+	var layout tenantv1.UserLayoutPreferences
 	if err := json.Unmarshal([]byte(raw), &layout); err != nil {
 		userStateWarn(s.logger, ctx, "GetUserLayout: unmarshal failed", err, tenant, userID)
 		return nil, status_grpc.Error(codes.Internal, "failed to parse layout")
 	}
-	return &userv1.GetUserLayoutResponse{Layout: &layout, IsDefault: false}, nil
+	return &tenantv1.GetUserLayoutResponse{Layout: &layout, IsDefault: false}, nil
 }
 
 // SaveUserLayout implements UserServiceServer.
 func (s *DaemonServer) SaveUserLayout(
 	ctx context.Context,
-	req *userv1.SaveUserLayoutRequest,
-) (*userv1.SaveUserLayoutResponse, error) {
+	req *tenantv1.SaveUserLayoutRequest,
+) (*tenantv1.SaveUserLayoutResponse, error) {
 	tenant, userID, err := resolveUserCtx(ctx, req.GetTenantId(), req.GetUserId())
 	if err != nil {
 		return nil, err
@@ -328,14 +328,14 @@ func (s *DaemonServer) SaveUserLayout(
 		userStateWarn(s.logger, ctx, "SaveUserLayout: Redis write failed", rErr, tenant, userID)
 		return nil, status_grpc.Error(codes.Internal, "failed to persist layout")
 	}
-	return &userv1.SaveUserLayoutResponse{Layout: req.GetLayout()}, nil
+	return &tenantv1.SaveUserLayoutResponse{Layout: req.GetLayout()}, nil
 }
 
 // ResetUserLayout implements UserServiceServer.
 func (s *DaemonServer) ResetUserLayout(
 	ctx context.Context,
-	req *userv1.ResetUserLayoutRequest,
-) (*userv1.ResetUserLayoutResponse, error) {
+	req *tenantv1.ResetUserLayoutRequest,
+) (*tenantv1.ResetUserLayoutResponse, error) {
 	tenant, userID, err := resolveUserCtx(ctx, req.GetTenantId(), req.GetUserId())
 	if err != nil {
 		return nil, err
@@ -348,7 +348,7 @@ func (s *DaemonServer) ResetUserLayout(
 		userStateWarn(s.logger, ctx, "ResetUserLayout: Redis delete failed", rErr, tenant, userID)
 		return nil, status_grpc.Error(codes.Internal, "failed to reset layout")
 	}
-	return &userv1.ResetUserLayoutResponse{}, nil
+	return &tenantv1.ResetUserLayoutResponse{}, nil
 }
 
 // ============================================================================
@@ -358,8 +358,8 @@ func (s *DaemonServer) ResetUserLayout(
 // GetUserActivity implements UserServiceServer.
 func (s *DaemonServer) GetUserActivity(
 	ctx context.Context,
-	req *userv1.GetUserActivityRequest,
-) (*userv1.GetUserActivityResponse, error) {
+	req *tenantv1.GetUserActivityRequest,
+) (*tenantv1.GetUserActivityResponse, error) {
 	tenant, userID, err := resolveUserCtx(ctx, req.GetTenantId(), req.GetUserId())
 	if err != nil {
 		return nil, err
@@ -376,7 +376,7 @@ func (s *DaemonServer) GetUserActivity(
 	lastCmd := pipe.Get(ctx, uactivityLastActiveKey(tenant, userID))
 	if _, pErr := pipe.Exec(ctx); pErr != nil && pErr != goredis.Nil {
 		userStateWarn(s.logger, ctx, "GetUserActivity: pipeline failed", pErr, tenant, userID)
-		return &userv1.GetUserActivityResponse{Activity: &userv1.UserActivityContext{}}, nil
+		return &tenantv1.GetUserActivityResponse{Activity: &tenantv1.UserActivityContext{}}, nil
 	}
 
 	missionsRaw, _ := missionsCmd.Result()
@@ -384,8 +384,8 @@ func (s *DaemonServer) GetUserActivity(
 	findingsRaw, _ := findingsCmd.Result()
 	lastActiveStr, _ := lastCmd.Result()
 
-	return &userv1.GetUserActivityResponse{
-		Activity: &userv1.UserActivityContext{
+	return &tenantv1.GetUserActivityResponse{
+		Activity: &tenantv1.UserActivityContext{
 			RecentMissions:   parseActivityItems(missionsRaw),
 			RecentNodes:      parseActivityItems(nodesRaw),
 			RecentFindings:   parseActivityItems(findingsRaw),
@@ -397,8 +397,8 @@ func (s *DaemonServer) GetUserActivity(
 // RecordUserActivity implements UserServiceServer.
 func (s *DaemonServer) RecordUserActivity(
 	ctx context.Context,
-	req *userv1.RecordUserActivityRequest,
-) (*userv1.RecordUserActivityResponse, error) {
+	req *tenantv1.RecordUserActivityRequest,
+) (*tenantv1.RecordUserActivityResponse, error) {
 	tenant, userID, err := resolveUserCtx(ctx, req.GetTenantId(), req.GetUserId())
 	if err != nil {
 		return nil, err
@@ -406,7 +406,7 @@ func (s *DaemonServer) RecordUserActivity(
 	if req.GetItem() == nil {
 		return nil, status_grpc.Error(codes.InvalidArgument, "item is required")
 	}
-	if req.GetKind() == userv1.ActivityKind_ACTIVITY_KIND_UNSPECIFIED {
+	if req.GetKind() == tenantv1.ActivityKind_ACTIVITY_KIND_UNSPECIFIED {
 		return nil, status_grpc.Error(codes.InvalidArgument, "kind must be specified")
 	}
 	rc, err := s.requireUserStateRedis()
@@ -433,13 +433,13 @@ func (s *DaemonServer) RecordUserActivity(
 		userStateWarn(s.logger, ctx, "RecordUserActivity: pipeline failed (non-fatal)", pErr, tenant, userID)
 		// Fire-and-forget — don't fail the caller on non-critical recording.
 	}
-	return &userv1.RecordUserActivityResponse{}, nil
+	return &tenantv1.RecordUserActivityResponse{}, nil
 }
 
-func parseActivityItems(raw []string) []*userv1.ActivityItem {
-	out := make([]*userv1.ActivityItem, 0, len(raw))
+func parseActivityItems(raw []string) []*tenantv1.ActivityItem {
+	out := make([]*tenantv1.ActivityItem, 0, len(raw))
 	for _, s := range raw {
-		var item userv1.ActivityItem
+		var item tenantv1.ActivityItem
 		if jsonErr := json.Unmarshal([]byte(s), &item); jsonErr == nil {
 			out = append(out, &item)
 		}
@@ -458,13 +458,13 @@ func parseLastActive(s string) int64 {
 	return ms
 }
 
-func activityKindStr(k userv1.ActivityKind) string {
+func activityKindStr(k tenantv1.ActivityKind) string {
 	switch k {
-	case userv1.ActivityKind_ACTIVITY_KIND_MISSION:
+	case tenantv1.ActivityKind_ACTIVITY_KIND_MISSION:
 		return "mission"
-	case userv1.ActivityKind_ACTIVITY_KIND_NODE:
+	case tenantv1.ActivityKind_ACTIVITY_KIND_NODE:
 		return "node"
-	case userv1.ActivityKind_ACTIVITY_KIND_FINDING:
+	case tenantv1.ActivityKind_ACTIVITY_KIND_FINDING:
 		return "finding"
 	default:
 		return "unknown"
@@ -479,8 +479,8 @@ func activityKindStr(k userv1.ActivityKind) string {
 // This RPC is unauthenticated — no tenant/user context is needed.
 func (s *DaemonServer) GetSignupProgress(
 	ctx context.Context,
-	req *userv1.GetSignupProgressRequest,
-) (*userv1.GetSignupProgressResponse, error) {
+	req *tenantv1.GetSignupProgressRequest,
+) (*tenantv1.GetSignupProgressResponse, error) {
 	if req.GetAttemptId() == "" {
 		return nil, status_grpc.Error(codes.InvalidArgument, "attempt_id is required")
 	}
@@ -493,23 +493,23 @@ func (s *DaemonServer) GetSignupProgress(
 	}
 	raw, rErr := rc.Get(ctx, signupProgressKey(req.GetAttemptId())).Result()
 	if rErr == goredis.Nil {
-		return &userv1.GetSignupProgressResponse{Found: false}, nil
+		return &tenantv1.GetSignupProgressResponse{Found: false}, nil
 	}
 	if rErr != nil {
 		return nil, status_grpc.Error(codes.Internal, "failed to read signup progress")
 	}
-	var progress userv1.SignupProgressState
+	var progress tenantv1.SignupProgressState
 	if err := json.Unmarshal([]byte(raw), &progress); err != nil {
 		return nil, status_grpc.Error(codes.Internal, "failed to parse signup progress")
 	}
-	return &userv1.GetSignupProgressResponse{Progress: &progress, Found: true}, nil
+	return &tenantv1.GetSignupProgressResponse{Progress: &progress, Found: true}, nil
 }
 
 // SetSignupProgress implements UserServiceServer.
 func (s *DaemonServer) SetSignupProgress(
 	ctx context.Context,
-	req *userv1.SetSignupProgressRequest,
-) (*userv1.SetSignupProgressResponse, error) {
+	req *tenantv1.SetSignupProgressRequest,
+) (*tenantv1.SetSignupProgressResponse, error) {
 	if req.GetAttemptId() == "" {
 		return nil, status_grpc.Error(codes.InvalidArgument, "attempt_id is required")
 	}
@@ -534,7 +534,7 @@ func (s *DaemonServer) SetSignupProgress(
 	if rErr := rc.Set(ctx, signupProgressKey(req.GetAttemptId()), b, ttl).Err(); rErr != nil {
 		return nil, status_grpc.Error(codes.Internal, "failed to write signup progress")
 	}
-	return &userv1.SetSignupProgressResponse{}, nil
+	return &tenantv1.SetSignupProgressResponse{}, nil
 }
 
 // ============================================================================
@@ -544,8 +544,8 @@ func (s *DaemonServer) SetSignupProgress(
 // InvalidateMembershipCache implements UserServiceServer.
 func (s *DaemonServer) InvalidateMembershipCache(
 	ctx context.Context,
-	req *userv1.InvalidateMembershipCacheRequest,
-) (*userv1.InvalidateMembershipCacheResponse, error) {
+	req *tenantv1.InvalidateMembershipCacheRequest,
+) (*tenantv1.InvalidateMembershipCacheResponse, error) {
 	if req.GetUserId() == "" {
 		return nil, status_grpc.Error(codes.InvalidArgument, "user_id is required")
 	}
@@ -560,7 +560,7 @@ func (s *DaemonServer) InvalidateMembershipCache(
 		)
 		return nil, status_grpc.Error(codes.Internal, "failed to invalidate membership cache")
 	}
-	return &userv1.InvalidateMembershipCacheResponse{}, nil
+	return &tenantv1.InvalidateMembershipCacheResponse{}, nil
 }
 
 // ============================================================================
@@ -570,8 +570,8 @@ func (s *DaemonServer) InvalidateMembershipCache(
 // StageAttachment implements UserServiceServer.
 func (s *DaemonServer) StageAttachment(
 	ctx context.Context,
-	req *userv1.StageAttachmentRequest,
-) (*userv1.StageAttachmentResponse, error) {
+	req *tenantv1.StageAttachmentRequest,
+) (*tenantv1.StageAttachmentResponse, error) {
 	tenant, _, err := resolveUserCtx(ctx, req.GetTenantId(), "")
 	if err != nil {
 		return nil, err
@@ -591,14 +591,14 @@ func (s *DaemonServer) StageAttachment(
 	if rErr := rc.Set(ctx, chatAttachKey(tenant, attachmentID), req.GetText(), ttl).Err(); rErr != nil {
 		return nil, status_grpc.Error(codes.Internal, "failed to stage attachment")
 	}
-	return &userv1.StageAttachmentResponse{AttachmentId: attachmentID}, nil
+	return &tenantv1.StageAttachmentResponse{AttachmentId: attachmentID}, nil
 }
 
 // ConsumeAttachment implements UserServiceServer.
 func (s *DaemonServer) ConsumeAttachment(
 	ctx context.Context,
-	req *userv1.ConsumeAttachmentRequest,
-) (*userv1.ConsumeAttachmentResponse, error) {
+	req *tenantv1.ConsumeAttachmentRequest,
+) (*tenantv1.ConsumeAttachmentResponse, error) {
 	tenant, _, err := resolveUserCtx(ctx, req.GetTenantId(), "")
 	if err != nil {
 		return nil, err
@@ -618,7 +618,7 @@ func (s *DaemonServer) ConsumeAttachment(
 	if rErr != nil {
 		return nil, status_grpc.Error(codes.Internal, "failed to consume attachment")
 	}
-	return &userv1.ConsumeAttachmentResponse{Text: text}, nil
+	return &tenantv1.ConsumeAttachmentResponse{Text: text}, nil
 }
 
 // ============================================================================

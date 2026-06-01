@@ -38,7 +38,7 @@ import (
 
 	"github.com/zeroroot-ai/gibson/internal/authz"
 
-	adminv1 "github.com/zeroroot-ai/platform-sdk/gen/gibson/admin/v1"
+	tenantv1 "github.com/zeroroot-ai/sdk/api/gen/gibson/tenant/v1"
 	"github.com/zeroroot-ai/sdk/auth"
 )
 
@@ -119,19 +119,19 @@ func tenantRefFromID(tenantID string) string {
 // Returns empty lists when the ReservedNamesProvider is not wired. This is the
 // same fail-open behaviour as the equivalent DaemonServer handler so callers
 // can rely on the RPC being safe to call unconditionally.
-func (s *TenantAdminServer) GetReservedNames(ctx context.Context, _ *adminv1.GetReservedNamesRequest) (*adminv1.GetReservedNamesResponse, error) {
+func (s *TenantAdminServer) GetReservedNames(ctx context.Context, _ *tenantv1.GetReservedNamesRequest) (*tenantv1.GetReservedNamesResponse, error) {
 	if s.reservedNames == nil {
 		// Empty lists are a valid response — the chart may have wiped the
 		// ConfigMap or the daemon may be running without K8s access (kind
 		// dev path). Return empty rather than Unavailable so callers can
 		// rely on the RPC being safe to call unconditionally.
-		return &adminv1.GetReservedNamesResponse{}, nil
+		return &tenantv1.GetReservedNamesResponse{}, nil
 	}
 	exact, prefix, err := s.reservedNames.ReservedNames(ctx)
 	if err != nil {
 		return nil, status.Errorf(codes.Unavailable, "reserved-names provider failed: %v", err)
 	}
-	return &adminv1.GetReservedNamesResponse{
+	return &tenantv1.GetReservedNamesResponse{
 		Exact:  exact,
 		Prefix: prefix,
 	}, nil
@@ -147,7 +147,7 @@ func (s *TenantAdminServer) GetReservedNames(ctx context.Context, _ *adminv1.Get
 //
 // FGA query: ListObjects(user="tenant:<id>", relation="parent", object_type="team")
 // The tenant-operator writes (tenant:X, parent, team:Y) at team-create time.
-func (s *TenantAdminServer) ListTeams(ctx context.Context, req *adminv1.ListTeamsRequest) (*adminv1.ListTeamsResponse, error) {
+func (s *TenantAdminServer) ListTeams(ctx context.Context, req *tenantv1.ListTeamsRequest) (*tenantv1.ListTeamsResponse, error) {
 	if s.authorizer == nil {
 		return nil, status.Error(codes.Unavailable, "authorizer not configured")
 	}
@@ -174,7 +174,7 @@ func (s *TenantAdminServer) ListTeams(ctx context.Context, req *adminv1.ListTeam
 	// Deterministic order so pagination is stable across calls.
 	sort.Strings(teamRefs)
 
-	out := &adminv1.ListTeamsResponse{}
+	out := &tenantv1.ListTeamsResponse{}
 	end := offset + int(pageSize)
 	if end > len(teamRefs) {
 		end = len(teamRefs)
@@ -193,7 +193,7 @@ func (s *TenantAdminServer) ListTeams(ctx context.Context, req *adminv1.ListTeam
 		if adminErr != nil {
 			return nil, status.Errorf(codes.Internal, "fga ListUsers(admin) for %s: %v", teamObj, adminErr)
 		}
-		out.Teams = append(out.Teams, &adminv1.TeamAdmin{
+		out.Teams = append(out.Teams, &tenantv1.Team{
 			Id:          teamID,
 			DisplayName: "", // populated by a future display-name store
 			MemberCount: int32(len(members) + len(admins)),
@@ -212,7 +212,7 @@ func (s *TenantAdminServer) ListTeams(ctx context.Context, req *adminv1.ListTeam
 // ListTeamMembers enumerates the members and admins of a single team.
 // Enforces a cross-tenant guard: the team must belong to the caller's tenant
 // (verified via the FGA parent relation written at team-create time).
-func (s *TenantAdminServer) ListTeamMembers(ctx context.Context, req *adminv1.ListTeamMembersRequest) (*adminv1.ListTeamMembersResponse, error) {
+func (s *TenantAdminServer) ListTeamMembers(ctx context.Context, req *tenantv1.ListTeamMembersRequest) (*tenantv1.ListTeamMembersResponse, error) {
 	if s.authorizer == nil {
 		return nil, status.Error(codes.Unavailable, "authorizer not configured")
 	}
@@ -277,7 +277,7 @@ func (s *TenantAdminServer) ListTeamMembers(ctx context.Context, req *adminv1.Li
 	}
 	sort.Strings(combined)
 
-	out := &adminv1.ListTeamMembersResponse{}
+	out := &tenantv1.ListTeamMembersResponse{}
 	end := offset + int(pageSize)
 	if end > len(combined) {
 		end = len(combined)
@@ -285,7 +285,7 @@ func (s *TenantAdminServer) ListTeamMembers(ctx context.Context, req *adminv1.Li
 	for i := offset; i < end; i++ {
 		userRef := combined[i]
 		_, isAdmin := adminSet[userRef]
-		out.Members = append(out.Members, &adminv1.TeamMemberAdmin{
+		out.Members = append(out.Members, &tenantv1.TeamMember{
 			UserId:      stripFGATypePrefix(userRef, "user"),
 			Email:       "", // dashboard joins via Zitadel
 			DisplayName: "",
@@ -305,7 +305,7 @@ func (s *TenantAdminServer) ListTeamMembers(ctx context.Context, req *adminv1.Li
 // CreateTeam writes the (tenant:X, parent, team:Y) FGA tuple that anchors the
 // new team under the caller's tenant. The team_id must be provided by the
 // caller; the daemon does not generate IDs.
-func (s *TenantAdminServer) CreateTeam(ctx context.Context, req *adminv1.CreateTeamRequest) (*adminv1.CreateTeamResponse, error) {
+func (s *TenantAdminServer) CreateTeam(ctx context.Context, req *tenantv1.CreateTeamRequest) (*tenantv1.CreateTeamResponse, error) {
 	if s.authorizer == nil {
 		return nil, status.Error(codes.Unavailable, "authorizer not configured")
 	}
@@ -329,8 +329,8 @@ func (s *TenantAdminServer) CreateTeam(ctx context.Context, req *adminv1.CreateT
 	}); err != nil {
 		return nil, status.Errorf(codes.Internal, "fga Write team parent: %v", err)
 	}
-	return &adminv1.CreateTeamResponse{
-		Team: &adminv1.TeamAdmin{
+	return &tenantv1.CreateTeamResponse{
+		Team: &tenantv1.Team{
 			Id:          req.GetTeamId(),
 			DisplayName: req.GetDisplayName(),
 			MemberCount: 0,
@@ -346,7 +346,7 @@ func (s *TenantAdminServer) CreateTeam(ctx context.Context, req *adminv1.CreateT
 // team belongs to the tenant, then deletes the parent tuple. Member and admin
 // tuples on the team are left to garbage-collection; they become inaccessible
 // once the parent relation is gone.
-func (s *TenantAdminServer) DeleteTeam(ctx context.Context, req *adminv1.DeleteTeamRequest) (*adminv1.DeleteTeamResponse, error) {
+func (s *TenantAdminServer) DeleteTeam(ctx context.Context, req *tenantv1.DeleteTeamRequest) (*tenantv1.DeleteTeamResponse, error) {
 	if s.authorizer == nil {
 		return nil, status.Error(codes.Unavailable, "authorizer not configured")
 	}
@@ -379,7 +379,7 @@ func (s *TenantAdminServer) DeleteTeam(ctx context.Context, req *adminv1.DeleteT
 	}); err != nil {
 		return nil, status.Errorf(codes.Internal, "fga Delete team parent: %v", err)
 	}
-	return &adminv1.DeleteTeamResponse{}, nil
+	return &tenantv1.DeleteTeamResponse{}, nil
 }
 
 // ---------------------------------------------------------------------------
@@ -388,7 +388,7 @@ func (s *TenantAdminServer) DeleteTeam(ctx context.Context, req *adminv1.DeleteT
 
 // AddTeamMember writes a (user:X, member, team:Y) FGA tuple. Idempotent: if
 // the tuple already exists, FGA returns success (the Write is a no-op).
-func (s *TenantAdminServer) AddTeamMember(ctx context.Context, req *adminv1.AddTeamMemberRequest) (*adminv1.AddTeamMemberResponse, error) {
+func (s *TenantAdminServer) AddTeamMember(ctx context.Context, req *tenantv1.AddTeamMemberRequest) (*tenantv1.AddTeamMemberResponse, error) {
 	if s.authorizer == nil {
 		return nil, status.Error(codes.Unavailable, "authorizer not configured")
 	}
@@ -425,7 +425,7 @@ func (s *TenantAdminServer) AddTeamMember(ctx context.Context, req *adminv1.AddT
 	}); err != nil {
 		return nil, status.Errorf(codes.Internal, "fga Write member: %v", err)
 	}
-	return &adminv1.AddTeamMemberResponse{}, nil
+	return &tenantv1.AddTeamMemberResponse{}, nil
 }
 
 // ---------------------------------------------------------------------------
@@ -436,7 +436,7 @@ func (s *TenantAdminServer) AddTeamMember(ctx context.Context, req *adminv1.AddT
 // the team. Removing only the member tuple while leaving the admin tuple would
 // allow the admin relation (which implies member) to persist. Idempotent for
 // each tuple: only tuples that exist are deleted.
-func (s *TenantAdminServer) RemoveTeamMember(ctx context.Context, req *adminv1.RemoveTeamMemberRequest) (*adminv1.RemoveTeamMemberResponse, error) {
+func (s *TenantAdminServer) RemoveTeamMember(ctx context.Context, req *tenantv1.RemoveTeamMemberRequest) (*tenantv1.RemoveTeamMemberResponse, error) {
 	if s.authorizer == nil {
 		return nil, status.Error(codes.Unavailable, "authorizer not configured")
 	}
@@ -491,7 +491,7 @@ func (s *TenantAdminServer) RemoveTeamMember(ctx context.Context, req *adminv1.R
 			return nil, status.Errorf(codes.Internal, "fga Delete member/admin: %v", err)
 		}
 	}
-	return &adminv1.RemoveTeamMemberResponse{}, nil
+	return &tenantv1.RemoveTeamMemberResponse{}, nil
 }
 
 // ---------------------------------------------------------------------------
@@ -506,7 +506,7 @@ func (s *TenantAdminServer) RemoveTeamMember(ctx context.Context, req *adminv1.R
 //
 // When is_admin is false: removes only the admin tuple, leaving member intact.
 // If the user held neither, this is a no-op.
-func (s *TenantAdminServer) SetTeamAdmin(ctx context.Context, req *adminv1.SetTeamAdminRequest) (*adminv1.SetTeamAdminResponse, error) {
+func (s *TenantAdminServer) SetTeamAdmin(ctx context.Context, req *tenantv1.SetTeamAdminRequest) (*tenantv1.SetTeamAdminResponse, error) {
 	if s.authorizer == nil {
 		return nil, status.Error(codes.Unavailable, "authorizer not configured")
 	}
@@ -574,5 +574,5 @@ func (s *TenantAdminServer) SetTeamAdmin(ctx context.Context, req *adminv1.SetTe
 			}
 		}
 	}
-	return &adminv1.SetTeamAdminResponse{}, nil
+	return &tenantv1.SetTeamAdminResponse{}, nil
 }

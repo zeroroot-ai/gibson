@@ -9,7 +9,7 @@ import (
 	status_grpc "google.golang.org/grpc/status"
 
 	"github.com/zeroroot-ai/gibson/internal/budget"
-	usagepb "github.com/zeroroot-ai/platform-sdk/gen/gibson/usage/v1"
+	tenantv1 "github.com/zeroroot-ai/sdk/api/gen/gibson/tenant/v1"
 	"github.com/zeroroot-ai/sdk/auth"
 )
 
@@ -29,7 +29,7 @@ import (
 
 // ListUsage dispatches to the scope-specific handler. Non-admins are
 // narrowed to themselves regardless of subject_filter.
-func (s *DaemonServer) ListUsage(ctx context.Context, req *usagepb.ListUsageRequest) (*usagepb.ListUsageResponse, error) {
+func (s *DaemonServer) ListUsage(ctx context.Context, req *tenantv1.ListUsageRequest) (*tenantv1.ListUsageResponse, error) {
 	tenantID := auth.TenantStringFromContext(ctx)
 	if tenantID == "" || tenantID == auth.SystemTenantString {
 		return nil, status_grpc.Error(codes.Unauthenticated, "tenant context required")
@@ -40,19 +40,19 @@ func (s *DaemonServer) ListUsage(ctx context.Context, req *usagepb.ListUsageRequ
 	}
 
 	switch req.GetScope() {
-	case usagepb.UsageScope_USAGE_SCOPE_USER:
+	case tenantv1.UsageScope_USAGE_SCOPE_USER:
 		return s.listUsageByUser(ctx, userID, admin, req)
-	case usagepb.UsageScope_USAGE_SCOPE_TEAM:
+	case tenantv1.UsageScope_USAGE_SCOPE_TEAM:
 		if !admin {
 			return nil, status_grpc.Error(codes.PermissionDenied, "team usage is admin-only")
 		}
 		return s.listUsageByTeam(ctx, req)
-	case usagepb.UsageScope_USAGE_SCOPE_AGENT:
+	case tenantv1.UsageScope_USAGE_SCOPE_AGENT:
 		if !admin {
 			return nil, status_grpc.Error(codes.PermissionDenied, "agent usage is admin-only")
 		}
 		return s.listUsageByAgent(ctx, req)
-	case usagepb.UsageScope_USAGE_SCOPE_MISSION:
+	case tenantv1.UsageScope_USAGE_SCOPE_MISSION:
 		if !admin {
 			return nil, status_grpc.Error(codes.PermissionDenied, "mission usage is admin-only")
 		}
@@ -63,32 +63,32 @@ func (s *DaemonServer) ListUsage(ctx context.Context, req *usagepb.ListUsageRequ
 
 // listUsageByUser reads per-user budget counters. Non-admins see only
 // their own row.
-func (s *DaemonServer) listUsageByUser(ctx context.Context, callerID string, admin bool, req *usagepb.ListUsageRequest) (*usagepb.ListUsageResponse, error) {
+func (s *DaemonServer) listUsageByUser(ctx context.Context, callerID string, admin bool, req *tenantv1.ListUsageRequest) (*tenantv1.ListUsageResponse, error) {
 	enforcer, err := s.budgetEnforcerAdmin()
 	if err != nil {
 		// Budget not configured → return empty rows, not an error, so
 		// the dashboard renders cleanly.
-		return &usagepb.ListUsageResponse{}, nil
+		return &tenantv1.ListUsageResponse{}, nil
 	}
 	statuses, err := enforcer.ListStatusByScope(ctx, budget.ScopeUser)
 	if err != nil {
 		s.logger.WarnContext(ctx, "usage: ListStatusByScope(user) failed",
 			slog.String("error", err.Error()))
-		return &usagepb.ListUsageResponse{StaleAsOfUnix: time.Now().Unix()}, nil
+		return &tenantv1.ListUsageResponse{StaleAsOfUnix: time.Now().Unix()}, nil
 	}
 
 	filter := req.GetSubjectFilter()
 	if !admin {
 		filter = callerID
 	}
-	resp := &usagepb.ListUsageResponse{
-		Rows: make([]*usagepb.UsageRow, 0, len(statuses)),
+	resp := &tenantv1.ListUsageResponse{
+		Rows: make([]*tenantv1.UsageRow, 0, len(statuses)),
 	}
 	for _, st := range statuses {
 		if filter != "" && st.SubjectID != filter {
 			continue
 		}
-		resp.Rows = append(resp.Rows, &usagepb.UsageRow{
+		resp.Rows = append(resp.Rows, &tenantv1.UsageRow{
 			SubjectId:    st.SubjectID,
 			DisplayName:  st.SubjectID, // user-display-name lookup is a follow-up
 			InputTokens:  st.CurrentTokens,
@@ -101,26 +101,26 @@ func (s *DaemonServer) listUsageByUser(ctx context.Context, callerID string, adm
 }
 
 // listUsageByTeam reads per-team budget counters.
-func (s *DaemonServer) listUsageByTeam(ctx context.Context, req *usagepb.ListUsageRequest) (*usagepb.ListUsageResponse, error) {
+func (s *DaemonServer) listUsageByTeam(ctx context.Context, req *tenantv1.ListUsageRequest) (*tenantv1.ListUsageResponse, error) {
 	enforcer, err := s.budgetEnforcerAdmin()
 	if err != nil {
-		return &usagepb.ListUsageResponse{}, nil
+		return &tenantv1.ListUsageResponse{}, nil
 	}
 	statuses, err := enforcer.ListStatusByScope(ctx, budget.ScopeTeam)
 	if err != nil {
 		s.logger.WarnContext(ctx, "usage: ListStatusByScope(team) failed",
 			slog.String("error", err.Error()))
-		return &usagepb.ListUsageResponse{StaleAsOfUnix: time.Now().Unix()}, nil
+		return &tenantv1.ListUsageResponse{StaleAsOfUnix: time.Now().Unix()}, nil
 	}
-	resp := &usagepb.ListUsageResponse{
-		Rows: make([]*usagepb.UsageRow, 0, len(statuses)),
+	resp := &tenantv1.ListUsageResponse{
+		Rows: make([]*tenantv1.UsageRow, 0, len(statuses)),
 	}
 	filter := req.GetSubjectFilter()
 	for _, st := range statuses {
 		if filter != "" && st.SubjectID != filter {
 			continue
 		}
-		resp.Rows = append(resp.Rows, &usagepb.UsageRow{
+		resp.Rows = append(resp.Rows, &tenantv1.UsageRow{
 			SubjectId:    st.SubjectID,
 			DisplayName:  st.SubjectID,
 			InputTokens:  st.CurrentTokens,
@@ -134,12 +134,12 @@ func (s *DaemonServer) listUsageByTeam(ctx context.Context, req *usagepb.ListUsa
 // rollups require a ClickHouse query against Langfuse grouped by
 // agent_id which is not yet wired. Dashboard renders "no data" when
 // Rows is empty rather than erroring.
-func (s *DaemonServer) listUsageByAgent(_ context.Context, _ *usagepb.ListUsageRequest) (*usagepb.ListUsageResponse, error) {
-	return &usagepb.ListUsageResponse{}, nil
+func (s *DaemonServer) listUsageByAgent(_ context.Context, _ *tenantv1.ListUsageRequest) (*tenantv1.ListUsageResponse, error) {
+	return &tenantv1.ListUsageResponse{}, nil
 }
 
 // listUsageByMission returns an empty response for the same reason as
 // listUsageByAgent.
-func (s *DaemonServer) listUsageByMission(_ context.Context, _ *usagepb.ListUsageRequest) (*usagepb.ListUsageResponse, error) {
-	return &usagepb.ListUsageResponse{}, nil
+func (s *DaemonServer) listUsageByMission(_ context.Context, _ *tenantv1.ListUsageRequest) (*tenantv1.ListUsageResponse, error) {
+	return &tenantv1.ListUsageResponse{}, nil
 }

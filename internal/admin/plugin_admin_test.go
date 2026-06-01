@@ -14,7 +14,7 @@ import (
 	"github.com/zeroroot-ai/gibson/internal/authz"
 	"github.com/zeroroot-ai/gibson/internal/secrets"
 
-	adminv1 "github.com/zeroroot-ai/platform-sdk/gen/gibson/admin/v1"
+	tenantv1 "github.com/zeroroot-ai/sdk/api/gen/gibson/tenant/v1"
 	"github.com/zeroroot-ai/sdk/auth"
 )
 
@@ -202,7 +202,7 @@ func TestListPluginInstalls_FiltersByName(t *testing.T) {
 	reg.installs["b1"] = PluginInstallInfo{InstallID: "b1", TenantID: "acme", Name: "openai", Status: "serving"}
 
 	ctx := ctxWithTenant(t, "acme")
-	resp, err := srv.ListPluginInstalls(ctx, &adminv1.ListPluginInstallsRequest{NameFilter: "github"})
+	resp, err := srv.ListPluginInstalls(ctx, &tenantv1.ListPluginInstallsRequest{NameFilter: "github"})
 	if err != nil {
 		t.Fatalf("ListPluginInstalls: %v", err)
 	}
@@ -214,7 +214,7 @@ func TestListPluginInstalls_FiltersByName(t *testing.T) {
 func TestGetPluginInstall_NotFound(t *testing.T) {
 	srv, _, _, _, _, _, _ := newPluginsTestServer(t)
 	ctx := ctxWithTenant(t, "acme")
-	_, err := srv.GetPluginInstall(ctx, &adminv1.GetPluginInstallRequest{InstallId: "missing"})
+	_, err := srv.GetPluginInstall(ctx, &tenantv1.GetPluginInstallRequest{InstallId: "missing"})
 	if status.Code(err) != codes.NotFound {
 		t.Errorf("want NotFound, got %v", err)
 	}
@@ -233,9 +233,9 @@ func TestRegisterPlugin_AtomicSuccess(t *testing.T) {
 	}
 	ctx := ctxWithTenant(t, "acme")
 
-	resp, err := srv.RegisterPlugin(ctx, &adminv1.RegisterPluginRequest{
+	resp, err := srv.RegisterPlugin(ctx, &tenantv1.RegisterPluginRequest{
 		ManifestYaml: []byte("name: github-plugin"),
-		Bindings: []*adminv1.PluginSecretBinding{
+		Bindings: []*tenantv1.PluginSecretBinding{
 			{DeclaredName: "gh_token", Mode: "create", CreateValue: []byte("ghp_xxx")},
 			{DeclaredName: "gh_app_secret", Mode: "existing", ExistingRef: "cred:gh_app_secret"},
 		},
@@ -273,9 +273,9 @@ func TestRegisterPlugin_RollbackOnZitadelFailure(t *testing.T) {
 	sw.failPut = "s1"
 	ctx := ctxWithTenant(t, "acme")
 
-	_, err := srv.RegisterPlugin(ctx, &adminv1.RegisterPluginRequest{
+	_, err := srv.RegisterPlugin(ctx, &tenantv1.RegisterPluginRequest{
 		ManifestYaml: []byte("..."),
-		Bindings: []*adminv1.PluginSecretBinding{
+		Bindings: []*tenantv1.PluginSecretBinding{
 			{DeclaredName: "s1", Mode: "create", CreateValue: []byte("v")},
 		},
 	})
@@ -300,9 +300,9 @@ func TestRegisterPlugin_RollbackOnFGAFailure(t *testing.T) {
 	az.failWrite = true
 	ctx := ctxWithTenant(t, "acme")
 
-	_, err := srv.RegisterPlugin(ctx, &adminv1.RegisterPluginRequest{
+	_, err := srv.RegisterPlugin(ctx, &tenantv1.RegisterPluginRequest{
 		ManifestYaml: []byte("..."),
-		Bindings: []*adminv1.PluginSecretBinding{
+		Bindings: []*tenantv1.PluginSecretBinding{
 			{DeclaredName: "s1", Mode: "create", CreateValue: []byte("v")},
 		},
 	})
@@ -326,7 +326,7 @@ func TestRegisterPlugin_DryRun(t *testing.T) {
 	}
 	ctx := ctxWithTenant(t, "acme")
 
-	resp, err := srv.RegisterPlugin(ctx, &adminv1.RegisterPluginRequest{
+	resp, err := srv.RegisterPlugin(ctx, &tenantv1.RegisterPluginRequest{
 		ManifestYaml: []byte("..."),
 		DryRun:       true,
 	})
@@ -348,7 +348,7 @@ func TestRegisterPlugin_ManifestValidationErrors(t *testing.T) {
 	}
 	ctx := ctxWithTenant(t, "acme")
 
-	resp, err := srv.RegisterPlugin(ctx, &adminv1.RegisterPluginRequest{ManifestYaml: []byte("...")})
+	resp, err := srv.RegisterPlugin(ctx, &tenantv1.RegisterPluginRequest{ManifestYaml: []byte("...")})
 	if err == nil {
 		t.Fatal("expected error on validation failure")
 	}
@@ -368,9 +368,9 @@ func TestRegisterPlugin_CrossCheckBindings_Missing(t *testing.T) {
 	}
 	ctx := ctxWithTenant(t, "acme")
 
-	resp, err := srv.RegisterPlugin(ctx, &adminv1.RegisterPluginRequest{
+	resp, err := srv.RegisterPlugin(ctx, &tenantv1.RegisterPluginRequest{
 		ManifestYaml: []byte("..."),
-		Bindings: []*adminv1.PluginSecretBinding{
+		Bindings: []*tenantv1.PluginSecretBinding{
 			{DeclaredName: "a", Mode: "create", CreateValue: []byte("v")},
 			// "b" missing
 		},
@@ -388,7 +388,7 @@ func TestRegisterPlugin_BootstrapTokenAudited(t *testing.T) {
 	val.manifest = ValidatedManifest{Name: "p"}
 	ctx := ctxWithTenant(t, "acme")
 
-	resp, err := srv.RegisterPlugin(ctx, &adminv1.RegisterPluginRequest{ManifestYaml: []byte("...")})
+	resp, err := srv.RegisterPlugin(ctx, &tenantv1.RegisterPluginRequest{ManifestYaml: []byte("...")})
 	if err != nil {
 		t.Fatalf("RegisterPlugin: %v", err)
 	}
@@ -415,7 +415,7 @@ func TestRevokePluginSecretBinding_DeletesAndAudits(t *testing.T) {
 	srv, _, _, _, _, az, au := newPluginsTestServer(t)
 	ctx := ctxWithTenant(t, "acme")
 
-	_, err := srv.RevokePluginSecretBinding(ctx, &adminv1.RevokePluginSecretBindingRequest{
+	_, err := srv.RevokePluginSecretBinding(ctx, &tenantv1.RevokePluginSecretBindingRequest{
 		InstallId:    "abc",
 		DeclaredName: "cred:db",
 	})
@@ -435,7 +435,7 @@ func TestEditPluginSecretBinding_DeletesThenWrites(t *testing.T) {
 	reg.installs["i1"] = PluginInstallInfo{InstallID: "i1", TenantID: "acme", Name: "p"}
 	ctx := ctxWithTenant(t, "acme")
 
-	_, err := srv.EditPluginSecretBinding(ctx, &adminv1.EditPluginSecretBindingRequest{
+	_, err := srv.EditPluginSecretBinding(ctx, &tenantv1.EditPluginSecretBindingRequest{
 		InstallId:      "i1",
 		DeclaredName:   "cred:db",
 		NewExistingRef: "cred:db_v2",
@@ -476,7 +476,7 @@ func TestNewPluginsAdminServer_RequiresAllFields(t *testing.T) {
 func TestRevokePluginSecretBinding_RequiresFields(t *testing.T) {
 	srv, _, _, _, _, _, _ := newPluginsTestServer(t)
 	ctx := ctxWithTenant(t, "acme")
-	_, err := srv.RevokePluginSecretBinding(ctx, &adminv1.RevokePluginSecretBindingRequest{})
+	_, err := srv.RevokePluginSecretBinding(ctx, &tenantv1.RevokePluginSecretBindingRequest{})
 	if status.Code(err) != codes.InvalidArgument {
 		t.Errorf("want InvalidArgument, got %v", err)
 	}

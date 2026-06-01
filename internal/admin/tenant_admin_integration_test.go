@@ -9,7 +9,7 @@ import (
 	"github.com/zeroroot-ai/gibson/internal/secrets"
 
 	sdksecrets "github.com/zeroroot-ai/platform-clients/secrets"
-	adminv1 "github.com/zeroroot-ai/platform-sdk/gen/gibson/admin/v1"
+	tenantv1 "github.com/zeroroot-ai/sdk/api/gen/gibson/tenant/v1"
 	"github.com/zeroroot-ai/sdk/auth"
 )
 
@@ -189,9 +189,9 @@ func TestSetBrokerConfig_PersistAndReload_FullPath(t *testing.T) {
 	}
 
 	// Drive SetBrokerConfig with a vault candidate.
-	if _, err := srv.SetBrokerConfig(ctx, &adminv1.SetBrokerConfigRequest{
-		Candidate: &adminv1.CandidateConfig{
-			Provider:   adminv1.BrokerProvider_BROKER_PROVIDER_VAULT,
+	if _, err := srv.SetBrokerConfig(ctx, &tenantv1.SetBrokerConfigRequest{
+		Candidate: &tenantv1.CandidateConfig{
+			Provider:   tenantv1.BrokerProvider_BROKER_PROVIDER_VAULT,
 			Address:    "https://vault",
 			VaultToken: []byte("hvs.xyz"),
 		},
@@ -262,9 +262,9 @@ func TestSetBrokerConfig_PersistFailure_NoReload_FullPath(t *testing.T) {
 	}
 
 	// Drive SetBrokerConfig — writer fails.
-	_, err = srv.SetBrokerConfig(ctx, &adminv1.SetBrokerConfigRequest{
-		Candidate: &adminv1.CandidateConfig{
-			Provider:   adminv1.BrokerProvider_BROKER_PROVIDER_VAULT,
+	_, err = srv.SetBrokerConfig(ctx, &tenantv1.SetBrokerConfigRequest{
+		Candidate: &tenantv1.CandidateConfig{
+			Provider:   tenantv1.BrokerProvider_BROKER_PROVIDER_VAULT,
 			Address:    "https://vault",
 			VaultToken: []byte("hvs.xyz"),
 		},

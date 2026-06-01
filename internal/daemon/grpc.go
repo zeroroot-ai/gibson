@@ -30,15 +30,12 @@ import (
 	"github.com/zeroroot-ai/gibson/internal/daemon/api"
 	billingpb "github.com/zeroroot-ai/gibson/internal/daemon/api/gibson/billing/v1"
 	tracespb "github.com/zeroroot-ai/gibson/internal/daemon/api/gibson/traces/v1"
-	userv1 "github.com/zeroroot-ai/gibson/internal/daemon/api/gibson/user/v1"
 	"github.com/zeroroot-ai/gibson/internal/idempotency"
 	"github.com/zeroroot-ai/gibson/internal/identity"
 	"github.com/zeroroot-ai/gibson/internal/llm/modelgate"
 	"github.com/zeroroot-ai/gibson/internal/memory"
 	"github.com/zeroroot-ai/gibson/internal/providerconfig"
 	"github.com/zeroroot-ai/gibson/internal/ratelimit"
-	adminpb "github.com/zeroroot-ai/platform-sdk/gen/gibson/admin/v1"
-	modelaccesspb "github.com/zeroroot-ai/platform-sdk/gen/gibson/authz/v1"
 	discoverypb "github.com/zeroroot-ai/platform-sdk/gen/gibson/daemon/discovery/v1"
 	daemonoperatorv1 "github.com/zeroroot-ai/platform-sdk/gen/gibson/daemon/operator/v1"
 	componentpb "github.com/zeroroot-ai/sdk/api/gen/gibson/component/v1"
@@ -47,7 +44,7 @@ import (
 	identitypb "github.com/zeroroot-ai/sdk/api/gen/gibson/identity/v1"
 	missionpb "github.com/zeroroot-ai/sdk/api/gen/gibson/mission/v1"
 	pluginpb "github.com/zeroroot-ai/sdk/api/gen/gibson/plugin/v1"
-	sdktenantv1 "github.com/zeroroot-ai/sdk/api/gen/gibson/tenant/v1"
+	tenantv1 "github.com/zeroroot-ai/sdk/api/gen/gibson/tenant/v1"
 	intelligencepb "github.com/zeroroot-ai/sdk/api/gen/intelligence/v1"
 	"github.com/zeroroot-ai/sdk/auth"
 
@@ -922,7 +919,10 @@ func (d *daemonImpl) buildGRPCServer(ctx context.Context) (*grpcSubsystem, error
 	// orchestration state. Envoy gates /gibson.daemon.operator.v1.* with the
 	// operator JWT requirement.
 	daemonoperatorv1.RegisterDaemonOperatorServiceServer(srv, daemonSvc)
-	userv1.RegisterUserServiceServer(srv, daemonSvc)
+	// ADR-0039: UserService promoted from daemon-local gibson.user.v1 to
+	// sdk gibson.tenant.v1.UserService. Types are field-identical; the new
+	// service name is what the authz registry and ext-authz expect.
+	tenantv1.RegisterUserServiceServer(srv, daemonSvc)
 
 	// Register TenantService — the OSS SDK tenant-management surface (ADR-0037).
 	// Replaces gibson.tenant.v1.TenantAdminService (platform-sdk). Customer-
@@ -947,67 +947,84 @@ func (d *daemonImpl) buildGRPCServer(ctx context.Context) (*grpcSubsystem, error
 	// Wire pool getter for ExportFindings (Neo4j DashboardQueries path).
 	// Spec: dashboard-neo4j-crud-removal.
 	daemonSvc.WithPoolGetter(func() datapool.Pool { return d.pool })
-	sdktenantv1.RegisterTenantServiceServer(srv, daemonSvc)
+	tenantv1.RegisterTenantServiceServer(srv, daemonSvc)
 	d.logger.Info(ctx, "registered TenantService gRPC endpoint")
 
-	// Register gibson.admin.v1.TenantAdminService — SDK admin surface that
-	// the dashboard's /settings/secrets-backend page calls. Coexists with
-	// the daemon-local gibson.tenant.v1.TenantAdminService registered above
-	// (different proto package). When the broker stack failed to construct
-	// (no system KEK or dashboard Postgres), we register the unavailable
-	// stub so the dashboard sees codes.Unavailable with an actionable
-	// message instead of codes.Unimplemented (which would look like a
-	// daemon-version mismatch). Spec: tenant-secrets-broker-completion
-	// (Task 11, design D2).
-	if d.configStore != nil && d.brokerAuditWriter != nil && d.brokerFactories != nil &&
-		d.secretsRegistry != nil && d.secretsService != nil {
-		sdkAdminSvc, taErr := admin.NewTenantAdminServer(admin.TenantAdminConfig{
-			Reader:         d.configStore,
-			Writer:         d.configStore,
-			ProbeFactory:   admin.NewMapProbeFactory(d.brokerFactories),
-			Auditor:        d.brokerAuditWriter,
-			Reloader:       d.secretsRegistry,
-			SecretsService: d.secretsService,
-			Authorizer:     d.authorizer,
-			IdPAdminClient: idpClient,
-			ReservedNames:  rnpForAdmin,
-			Logger:         d.logger.Slog(),
-		})
-		if taErr != nil {
-			d.logger.Warn(ctx, "broker admin stack: NewTenantAdminServer failed; registering Unavailable stub for gibson.admin.v1.TenantAdminService",
-				slog.String("error", taErr.Error()))
-			adminpb.RegisterTenantAdminServiceServer(srv, admin.NewUnavailableTenantAdminServer())
-		} else {
-			adminpb.RegisterTenantAdminServiceServer(srv, sdkAdminSvc)
-			d.logger.Info(ctx, "registered gibson.admin.v1.TenantAdminService gRPC endpoint")
-		}
-	} else {
-		d.logger.Warn(ctx, "broker stack not initialised: registering Unavailable stub for gibson.admin.v1.TenantAdminService")
-		adminpb.RegisterTenantAdminServiceServer(srv, admin.NewUnavailableTenantAdminServer())
-	}
+	// ADR-0039: Register gibson.tenant.v1.MembershipService + SecretsService in place of
+	// the deleted platform-sdk admin.v1.TenantAdminService + admin.v1.SecretsAdminService.
+	//
+	// MembershipService: owns member/team/component-access RPCs — backed by TenantAdminServer.
+	// SecretsService: combines broker-config (TenantAdminServer) + secrets CRUD (SecretsAdminServer)
+	// into a single CombinedSecretsServer so both sets of RPCs live on one wire service.
+	//
+	// Both services share the same broker-stack availability gate. When the gate fails we
+	// register Unavailable stubs so the dashboard gets codes.Unavailable (actionable) rather
+	// than codes.Unimplemented (looks like a daemon-version mismatch).
+	// Spec: tenant-secrets-broker-completion (Task 11, design D2); ADR-0039.
+	{
+		brokerStackOK := d.configStore != nil && d.brokerAuditWriter != nil && d.brokerFactories != nil &&
+			d.secretsRegistry != nil && d.secretsService != nil
+		secretsStackOK := d.secretsService != nil && d.secretsRegistry != nil && d.platformDB != nil && d.authorizer != nil
 
-	// Register SecretsAdminService — dashboard /settings/secrets. The handler
-	// (internal/admin/secrets_admin.go) was implemented but never wired here, so
-	// the page returned Unimplemented (gibson#564). Deps come off the daemon;
-	// PluginsBoundTo is a real FGA walker over can_resolve tuples. Falls back to
-	// an Unavailable stub when the secrets stack didn't initialise.
-	if d.secretsService != nil && d.secretsRegistry != nil && d.platformDB != nil && d.authorizer != nil {
-		secretsAdminSvc, saErr := admin.NewSecretsAdminServer(admin.SecretsAdminConfig{
-			Service:            d.secretsService,
-			Broker:             d.secretsRegistry,
-			PluginAssociations: admin.NewFGASecretsPluginAssociations(d.authorizer),
-			AuditQuery:         audit.NewQuery(d.platformDB),
-		})
-		if saErr != nil {
-			d.logger.Warn(ctx, "SecretsAdminService not constructed; registering Unavailable stub", slog.String("error", saErr.Error()))
-			adminpb.RegisterSecretsAdminServiceServer(srv, admin.NewUnavailableSecretsAdminServer())
+		var tenantAdminSvc *admin.TenantAdminServer
+		if brokerStackOK {
+			var taErr error
+			tenantAdminSvc, taErr = admin.NewTenantAdminServer(admin.TenantAdminConfig{
+				Reader:         d.configStore,
+				Writer:         d.configStore,
+				ProbeFactory:   admin.NewMapProbeFactory(d.brokerFactories),
+				Auditor:        d.brokerAuditWriter,
+				Reloader:       d.secretsRegistry,
+				SecretsService: d.secretsService,
+				Authorizer:     d.authorizer,
+				IdPAdminClient: idpClient,
+				ReservedNames:  rnpForAdmin,
+				Logger:         d.logger.Slog(),
+			})
+			if taErr != nil {
+				d.logger.Warn(ctx, "broker admin stack: NewTenantAdminServer failed; MembershipService + SecretsService will use Unavailable stubs",
+					slog.String("error", taErr.Error()))
+				brokerStackOK = false
+			}
 		} else {
-			adminpb.RegisterSecretsAdminServiceServer(srv, secretsAdminSvc)
-			d.logger.Info(ctx, "registered gibson.admin.v1.SecretsAdminService gRPC endpoint")
+			d.logger.Warn(ctx, "broker stack not initialised: MembershipService + SecretsService will use Unavailable stubs")
 		}
-	} else {
-		d.logger.Warn(ctx, "secrets stack not initialised: registering Unavailable stub for gibson.admin.v1.SecretsAdminService")
-		adminpb.RegisterSecretsAdminServiceServer(srv, admin.NewUnavailableSecretsAdminServer())
+
+		// MembershipService (gibson.tenant.v1.MembershipService)
+		if brokerStackOK {
+			tenantv1.RegisterMembershipServiceServer(srv, tenantAdminSvc)
+			d.logger.Info(ctx, "registered gibson.tenant.v1.MembershipService gRPC endpoint")
+		} else {
+			tenantv1.RegisterMembershipServiceServer(srv, admin.NewUnavailableMembershipServer())
+		}
+
+		// SecretsService (gibson.tenant.v1.SecretsService) — combined broker-config + CRUD
+		if brokerStackOK && secretsStackOK {
+			secretsAdminSvc, saErr := admin.NewSecretsAdminServer(admin.SecretsAdminConfig{
+				Service:            d.secretsService,
+				Broker:             d.secretsRegistry,
+				PluginAssociations: admin.NewFGASecretsPluginAssociations(d.authorizer),
+				AuditQuery:         audit.NewQuery(d.platformDB),
+			})
+			if saErr != nil {
+				d.logger.Warn(ctx, "SecretsService CRUD side not constructed; registering Unavailable stub", slog.String("error", saErr.Error()))
+				tenantv1.RegisterSecretsServiceServer(srv, admin.NewUnavailableSecretsServer())
+			} else {
+				tenantv1.RegisterSecretsServiceServer(srv, admin.NewCombinedSecretsServer(tenantAdminSvc, secretsAdminSvc))
+				d.logger.Info(ctx, "registered gibson.tenant.v1.SecretsService gRPC endpoint")
+			}
+		} else {
+			d.logger.Warn(ctx, "secrets stack not initialised: registering Unavailable stub for gibson.tenant.v1.SecretsService")
+			tenantv1.RegisterSecretsServiceServer(srv, admin.NewUnavailableSecretsServer())
+		}
+
+		// PluginAdminService (gibson.tenant.v1.PluginAdminService) — handler exists in
+		// internal/admin/plugin_admin.go but requires ZitadelClient, ManifestValidator,
+		// SecretWriter, and BootstrapAuditor deps that are not yet wired in grpc.go.
+		// Tracked: gibson#565. Acknowledged as a known gap in admin_coverage.go so the
+		// startup coverage check does not fail-closed on this service.
+		// Note: service name has changed from gibson.admin.v1.PluginsAdminService to
+		// gibson.tenant.v1.PluginAdminService (ADR-0039); known-gap entry updated accordingly.
 	}
 
 	// Register IdentityService — caller-side "what can I do?" RPC.
@@ -1026,12 +1043,10 @@ func (d *daemonImpl) buildGRPCServer(ctx context.Context) (*grpcSubsystem, error
 			d.logger.Info(ctx, "registered IdentityService gRPC endpoint")
 		}
 
-		// Register GrantsAdminService — per-agent FGA-grant editor +
-		// CG-JWT inspector. Reader for the inspector side is a no-op
-		// stub until the CG-JWT store is wired through; the write side
-		// (Write/DeleteAgentGrants) is the new surface from this spec.
-		// Spec: component-bootstrap-e2e Requirement 9.
-		// platformDB is always non-nil after Start() (gibson#246).
+		// Register GrantsService (gibson.tenant.v1.GrantsService) — replaces
+		// the deleted platform-sdk admin.v1.GrantsAdminService (ADR-0039).
+		// Spec: component-bootstrap-e2e Requirement 9. platformDB is always
+		// non-nil after Start() (gibson#246).
 		grantsAuditWriter := audit.NewWriter(d.platformDB, d.logger.Slog())
 		grantsAuditWriter.Start(ctx)
 		grantsServer, gaErr := admin.NewGrantsAdminServer(admin.GrantsAdminConfig{
@@ -1042,23 +1057,43 @@ func (d *daemonImpl) buildGRPCServer(ctx context.Context) (*grpcSubsystem, error
 			Logger:      d.logger.Slog(),
 		})
 		if gaErr != nil {
-			d.logger.Warn(ctx, "GrantsAdminService not registered", slog.String("error", gaErr.Error()))
+			d.logger.Warn(ctx, "GrantsService not registered", slog.String("error", gaErr.Error()))
 		} else {
-			adminpb.RegisterGrantsAdminServiceServer(srv, grantsServer)
-			d.logger.Info(ctx, "registered GrantsAdminService gRPC endpoint")
+			tenantv1.RegisterGrantsServiceServer(srv, grantsServer)
+			d.logger.Info(ctx, "registered gibson.tenant.v1.GrantsService gRPC endpoint")
 		}
 
-		// Register ModelAccessService — dashboard /settings/model-access RPC surface.
-		// Manages per-user/team/tenant FGA grants on providers and models, and exposes
-		// the model_resolved audit stream. Same DaemonServer instance (implements the
-		// interface via server_model_access.go). Authorizer guard already satisfied
-		// by the enclosing if block.
+		// Register ModelAccessService (gibson.tenant.v1.ModelAccessService) —
+		// replaces the deleted platform-sdk authz.v1.ModelAccessService (ADR-0039).
+		// Same DaemonServer instance; implements the interface via server_model_access.go.
 		// Spec: llm-user-attribution-governance (Requirement 4).
-		modelaccesspb.RegisterModelAccessServiceServer(srv, daemonSvc)
-		d.logger.Info(ctx, "registered ModelAccessService gRPC endpoint")
+		tenantv1.RegisterModelAccessServiceServer(srv, daemonSvc)
+		d.logger.Info(ctx, "registered gibson.tenant.v1.ModelAccessService gRPC endpoint")
 	} else {
-		d.logger.Warn(ctx, "IdentityService, GrantsAdminService, and ModelAccessService not registered: authorizer unavailable")
+		d.logger.Warn(ctx, "IdentityService, GrantsService, and ModelAccessService not registered: authorizer unavailable")
 	}
+
+	// Register AgentIdentityService (gibson.tenant.v1.AgentIdentityService).
+	// Handlers live in internal/daemon/api/tenant_admin_create.go,
+	// tenant_admin_list.go, tenant_admin_revoke.go (ADR-0039).
+	tenantv1.RegisterAgentIdentityServiceServer(srv, daemonSvc)
+	d.logger.Info(ctx, "registered gibson.tenant.v1.AgentIdentityService gRPC endpoint")
+
+	// Register ProviderService (gibson.tenant.v1.ProviderService).
+	// DaemonServer implements all provider CRUD RPCs via server_provider_config.go
+	// and server_provider_exec.go (ADR-0039).
+	tenantv1.RegisterProviderServiceServer(srv, daemonSvc)
+	d.logger.Info(ctx, "registered gibson.tenant.v1.ProviderService gRPC endpoint")
+
+	// Register BudgetService (gibson.tenant.v1.BudgetService) — replaces
+	// the deleted platform-sdk budget.v1.BudgetService (ADR-0039).
+	tenantv1.RegisterBudgetServiceServer(srv, daemonSvc)
+	d.logger.Info(ctx, "registered gibson.tenant.v1.BudgetService gRPC endpoint")
+
+	// Register UsageService (gibson.tenant.v1.UsageService) — replaces
+	// the deleted platform-sdk usage.v1.UsageService (ADR-0039).
+	tenantv1.RegisterUsageServiceServer(srv, daemonSvc)
+	d.logger.Info(ctx, "registered gibson.tenant.v1.UsageService gRPC endpoint")
 
 	// Register DiscoveryService — the read-only introspection surface
 	// consumed by opensource/adk/cmd/gibson-mcp and the dashboard's

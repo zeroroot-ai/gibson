@@ -12,7 +12,7 @@ import (
 	"github.com/stretchr/testify/require"
 	"google.golang.org/grpc/codes"
 
-	userv1 "github.com/zeroroot-ai/gibson/internal/daemon/api/gibson/user/v1"
+	tenantv1 "github.com/zeroroot-ai/sdk/api/gen/gibson/tenant/v1"
 	"github.com/zeroroot-ai/sdk/auth"
 )
 
@@ -108,28 +108,28 @@ func TestListConversations_EmptyTenantID_NilStore_Internal(t *testing.T) {
 	// With nil conversationStore, the handler now returns codes.Internal (not empty)
 	// because a nil store is a bootstrap defect per dashboard#549.
 	srv := blankServer()
-	_, err := srv.ListConversations(context.Background(), &userv1.ListConversationsRequest{TenantId: "", UserId: "u1"})
+	_, err := srv.ListConversations(context.Background(), &tenantv1.ListConversationsRequest{TenantId: "", UserId: "u1"})
 	// Empty tenant → InvalidArgument (tenant check comes before nil-store check)
 	assert.Equal(t, codes.InvalidArgument, grpcCode(err))
 }
 
 func TestListConversations_MissingUserID_InvalidArgument(t *testing.T) {
 	srv := blankServer()
-	_, err := srv.ListConversations(context.Background(), &userv1.ListConversationsRequest{TenantId: "acme", UserId: ""})
+	_, err := srv.ListConversations(context.Background(), &tenantv1.ListConversationsRequest{TenantId: "acme", UserId: ""})
 	assert.Equal(t, codes.InvalidArgument, grpcCode(err))
 }
 
 func TestListConversations_NilStore_Internal(t *testing.T) {
 	// Nil conversationStore is a bootstrap defect (dashboard#549) → codes.Internal.
 	srv := blankServer()
-	_, err := srv.ListConversations(context.Background(), &userv1.ListConversationsRequest{TenantId: "acme", UserId: "u1"})
+	_, err := srv.ListConversations(context.Background(), &tenantv1.ListConversationsRequest{TenantId: "acme", UserId: "u1"})
 	assert.Equal(t, codes.Internal, grpcCode(err))
 }
 
 func TestListConversations_StoreError_Internal(t *testing.T) {
 	srv := blankServer()
 	srv.conversationStore = &mockConversationStore{listErr: assert.AnError}
-	_, err := srv.ListConversations(context.Background(), &userv1.ListConversationsRequest{TenantId: "acme", UserId: "u1"})
+	_, err := srv.ListConversations(context.Background(), &tenantv1.ListConversationsRequest{TenantId: "acme", UserId: "u1"})
 	assert.Equal(t, codes.Internal, grpcCode(err))
 }
 
@@ -148,7 +148,7 @@ func TestListConversations_Success_ReturnsMapped(t *testing.T) {
 			},
 		},
 	}
-	resp, err := srv.ListConversations(context.Background(), &userv1.ListConversationsRequest{TenantId: "acme", UserId: "u1"})
+	resp, err := srv.ListConversations(context.Background(), &tenantv1.ListConversationsRequest{TenantId: "acme", UserId: "u1"})
 	require.NoError(t, err)
 	require.Len(t, resp.Conversations, 1)
 	assert.Equal(t, "c1", resp.Conversations[0].Id)
@@ -164,7 +164,7 @@ func TestGetConversation_EmptyTenantID_NilStore_InvalidArgument(t *testing.T) {
 	// Empty TenantId falls back to auth.TenantFromContext (returns SystemTenant).
 	// With nil store and empty tenant, the handler returns InvalidArgument now.
 	srv := blankServer()
-	_, err := srv.GetConversation(context.Background(), &userv1.GetConversationRequest{
+	_, err := srv.GetConversation(context.Background(), &tenantv1.GetConversationRequest{
 		TenantId:       "",
 		ConversationId: "c1",
 	})
@@ -174,7 +174,7 @@ func TestGetConversation_EmptyTenantID_NilStore_InvalidArgument(t *testing.T) {
 
 func TestGetConversation_MissingConversationID_InvalidArgument(t *testing.T) {
 	srv := blankServer()
-	_, err := srv.GetConversation(context.Background(), &userv1.GetConversationRequest{
+	_, err := srv.GetConversation(context.Background(), &tenantv1.GetConversationRequest{
 		TenantId:       "acme",
 		ConversationId: "",
 	})
@@ -184,7 +184,7 @@ func TestGetConversation_MissingConversationID_InvalidArgument(t *testing.T) {
 func TestGetConversation_NilStore_Internal(t *testing.T) {
 	// Nil conversationStore is a bootstrap defect (dashboard#549) → codes.Internal.
 	srv := blankServer()
-	_, err := srv.GetConversation(context.Background(), &userv1.GetConversationRequest{
+	_, err := srv.GetConversation(context.Background(), &tenantv1.GetConversationRequest{
 		TenantId:       "acme",
 		ConversationId: "c1",
 	})
@@ -194,7 +194,7 @@ func TestGetConversation_NilStore_Internal(t *testing.T) {
 func TestGetConversation_StoreError_NotFound(t *testing.T) {
 	srv := blankServer()
 	srv.conversationStore = &mockConversationStore{getErr: assert.AnError}
-	_, err := srv.GetConversation(context.Background(), &userv1.GetConversationRequest{
+	_, err := srv.GetConversation(context.Background(), &tenantv1.GetConversationRequest{
 		TenantId:       "acme",
 		ConversationId: "c1",
 	})
@@ -212,7 +212,7 @@ func TestGetConversation_Success_ReturnsMappedMessages(t *testing.T) {
 			{ID: "m2", Role: "assistant", Parts: []storedMessagePart{{Type: storedPartTypeText, Text: "Hi there"}}, CreatedAtUnix: 200},
 		},
 	}
-	resp, err := srv.GetConversation(context.Background(), &userv1.GetConversationRequest{
+	resp, err := srv.GetConversation(context.Background(), &tenantv1.GetConversationRequest{
 		TenantId:       "acme",
 		ConversationId: "c1",
 	})
@@ -233,7 +233,7 @@ func TestGetConversation_Success_ReturnsMappedMessages(t *testing.T) {
 func TestSaveConversation_MissingConversationID_InvalidArgument(t *testing.T) {
 	srv := blankServer()
 	srv.conversationStore = &mockConversationStore{}
-	_, err := srv.SaveConversation(context.Background(), &userv1.SaveConversationRequest{
+	_, err := srv.SaveConversation(context.Background(), &tenantv1.SaveConversationRequest{
 		TenantId: "acme",
 		UserId:   "u1",
 		Title:    "My Chat",
@@ -244,7 +244,7 @@ func TestSaveConversation_MissingConversationID_InvalidArgument(t *testing.T) {
 func TestSaveConversation_MissingTenantID_InvalidArgument(t *testing.T) {
 	srv := blankServer()
 	srv.conversationStore = &mockConversationStore{}
-	_, err := srv.SaveConversation(context.Background(), &userv1.SaveConversationRequest{
+	_, err := srv.SaveConversation(context.Background(), &tenantv1.SaveConversationRequest{
 		ConversationId: "conv-1",
 		UserId:         "u1",
 		Title:          "My Chat",
@@ -256,7 +256,7 @@ func TestSaveConversation_MissingUserID_InvalidArgument(t *testing.T) {
 	// No caller identity in context and no UserId in request.
 	srv := blankServer()
 	srv.conversationStore = &mockConversationStore{}
-	_, err := srv.SaveConversation(context.Background(), &userv1.SaveConversationRequest{
+	_, err := srv.SaveConversation(context.Background(), &tenantv1.SaveConversationRequest{
 		TenantId:       "acme",
 		ConversationId: "conv-1",
 		Title:          "My Chat",
@@ -267,7 +267,7 @@ func TestSaveConversation_MissingUserID_InvalidArgument(t *testing.T) {
 func TestSaveConversation_NilStore_Internal(t *testing.T) {
 	// Nil store is a bootstrap defect → codes.Internal.
 	srv := blankServer()
-	_, err := srv.SaveConversation(context.Background(), &userv1.SaveConversationRequest{
+	_, err := srv.SaveConversation(context.Background(), &tenantv1.SaveConversationRequest{
 		TenantId:       "acme",
 		UserId:         "u1",
 		ConversationId: "conv-1",
@@ -279,7 +279,7 @@ func TestSaveConversation_NilStore_Internal(t *testing.T) {
 func TestSaveConversation_StoreError_Internal(t *testing.T) {
 	srv := blankServer()
 	srv.conversationStore = &mockConversationStore{saveErr: assert.AnError}
-	_, err := srv.SaveConversation(context.Background(), &userv1.SaveConversationRequest{
+	_, err := srv.SaveConversation(context.Background(), &tenantv1.SaveConversationRequest{
 		TenantId:       "acme",
 		UserId:         "u1",
 		ConversationId: "conv-1",
@@ -294,15 +294,15 @@ func TestSaveConversation_Success_PersistsConversation(t *testing.T) {
 	srv.conversationStore = mock
 
 	// Build request with messages.
-	req := &userv1.SaveConversationRequest{
+	req := &tenantv1.SaveConversationRequest{
 		TenantId:       "acme",
 		UserId:         "u1",
 		ConversationId: "conv-1",
 		Title:          "My First Chat",
 		AgentId:        "agent-42",
-		Messages: []*userv1.ConversationMessage{
-			{Id: "m1", Role: "user", Parts: []*userv1.MessagePart{{Part: &userv1.MessagePart_Text{Text: &userv1.MessagePartText{Text: "Hello"}}}}, CreatedAtUnix: 100},
-			{Id: "m2", Role: "assistant", Parts: []*userv1.MessagePart{{Part: &userv1.MessagePart_Text{Text: &userv1.MessagePartText{Text: "Hi there"}}}}, CreatedAtUnix: 200},
+		Messages: []*tenantv1.ConversationMessage{
+			{Id: "m1", Role: "user", Parts: []*tenantv1.MessagePart{{Part: &tenantv1.MessagePart_Text{Text: &tenantv1.MessagePartText{Text: "Hello"}}}}, CreatedAtUnix: 100},
+			{Id: "m2", Role: "assistant", Parts: []*tenantv1.MessagePart{{Part: &tenantv1.MessagePart_Text{Text: &tenantv1.MessagePartText{Text: "Hi there"}}}}, CreatedAtUnix: 200},
 		},
 	}
 
@@ -337,7 +337,7 @@ func TestSaveConversation_CallerIdentityOverridesRequestUserID(t *testing.T) {
 		Subject: "caller-subject",
 	})
 
-	req := &userv1.SaveConversationRequest{
+	req := &tenantv1.SaveConversationRequest{
 		TenantId:       "acme",
 		UserId:         "different-user", // attacker tries to write as a different user
 		ConversationId: "conv-1",
@@ -360,7 +360,7 @@ func TestSaveConversation_TenantFromContext_WhenRequestTenantEmpty(t *testing.T)
 
 	ctx := auth.WithTenant(context.Background(), auth.MustNewTenantID("context-tenant"))
 
-	req := &userv1.SaveConversationRequest{
+	req := &tenantv1.SaveConversationRequest{
 		TenantId:       "", // empty — should fall back to context
 		UserId:         "u1",
 		ConversationId: "conv-1",
@@ -851,32 +851,32 @@ func (s *inMemConvStore) Delete(_ context.Context, tenantID, userID, conversatio
 // reasoning) round-trips through protoMessageToStored → storedMessageToProto
 // with zero loss and preserved ordering.
 func TestPartsRoundTrip_AllPartTypes(t *testing.T) {
-	input := &userv1.ConversationMessage{
+	input := &tenantv1.ConversationMessage{
 		Id:            "msg-all",
 		Role:          "assistant",
 		CreatedAtUnix: 9999,
-		Parts: []*userv1.MessagePart{
-			{Part: &userv1.MessagePart_Text{Text: &userv1.MessagePartText{Text: "hello world"}}},
-			{Part: &userv1.MessagePart_ToolCall{ToolCall: &userv1.MessagePartToolCall{
+		Parts: []*tenantv1.MessagePart{
+			{Part: &tenantv1.MessagePart_Text{Text: &tenantv1.MessagePartText{Text: "hello world"}}},
+			{Part: &tenantv1.MessagePart_ToolCall{ToolCall: &tenantv1.MessagePartToolCall{
 				ToolCallId: "tc-1",
 				Name:       "search",
 				Arguments:  `{"q":"foo"}`,
 			}}},
-			{Part: &userv1.MessagePart_ToolResult{ToolResult: &userv1.MessagePartToolResult{
+			{Part: &tenantv1.MessagePart_ToolResult{ToolResult: &tenantv1.MessagePartToolResult{
 				ToolCallId: "tc-1",
 				Result:     `{"results":[]}`,
 			}}},
-			{Part: &userv1.MessagePart_Citation{Citation: &userv1.MessagePartCitation{
+			{Part: &tenantv1.MessagePart_Citation{Citation: &tenantv1.MessagePartCitation{
 				CitationId: "cite-42",
 				Label:      "Node A",
 				Url:        "https://example.com/node/42",
 			}}},
-			{Part: &userv1.MessagePart_AttachmentRef{AttachmentRef: &userv1.MessagePartAttachmentRef{
+			{Part: &tenantv1.MessagePart_AttachmentRef{AttachmentRef: &tenantv1.MessagePartAttachmentRef{
 				AttachmentId: "att-7",
 				MediaType:    "image/png",
 				Name:         "screenshot.png",
 			}}},
-			{Part: &userv1.MessagePart_Reasoning{Reasoning: &userv1.MessagePartReasoning{
+			{Part: &tenantv1.MessagePart_Reasoning{Reasoning: &tenantv1.MessagePartReasoning{
 				Text: "Let me think about this...",
 			}}},
 		},
@@ -939,14 +939,14 @@ func TestPartsRoundTrip_OrderingPreserved(t *testing.T) {
 	ctx := context.Background()
 
 	// Build a message with 4 parts in a deliberate interleaved order.
-	input := &userv1.ConversationMessage{
+	input := &tenantv1.ConversationMessage{
 		Id:   "msg-order",
 		Role: "assistant",
-		Parts: []*userv1.MessagePart{
-			{Part: &userv1.MessagePart_Text{Text: &userv1.MessagePartText{Text: "first"}}},
-			{Part: &userv1.MessagePart_ToolCall{ToolCall: &userv1.MessagePartToolCall{Name: "run", Arguments: "{}"}}},
-			{Part: &userv1.MessagePart_ToolResult{ToolResult: &userv1.MessagePartToolResult{Result: "ok"}}},
-			{Part: &userv1.MessagePart_Text{Text: &userv1.MessagePartText{Text: "second"}}},
+		Parts: []*tenantv1.MessagePart{
+			{Part: &tenantv1.MessagePart_Text{Text: &tenantv1.MessagePartText{Text: "first"}}},
+			{Part: &tenantv1.MessagePart_ToolCall{ToolCall: &tenantv1.MessagePartToolCall{Name: "run", Arguments: "{}"}}},
+			{Part: &tenantv1.MessagePart_ToolResult{ToolResult: &tenantv1.MessagePartToolResult{Result: "ok"}}},
+			{Part: &tenantv1.MessagePart_Text{Text: &tenantv1.MessagePartText{Text: "second"}}},
 		},
 	}
 
@@ -970,12 +970,12 @@ func TestPartsRoundTrip_OrderingPreserved(t *testing.T) {
 // TestPartsRoundTrip_TextOnlyMessage verifies that a message with a single text
 // part round-trips correctly (regression guard for the most common case).
 func TestPartsRoundTrip_TextOnlyMessage(t *testing.T) {
-	input := &userv1.ConversationMessage{
+	input := &tenantv1.ConversationMessage{
 		Id:            "msg-txt",
 		Role:          "user",
 		CreatedAtUnix: 1234,
-		Parts: []*userv1.MessagePart{
-			{Part: &userv1.MessagePart_Text{Text: &userv1.MessagePartText{Text: "just text"}}},
+		Parts: []*tenantv1.MessagePart{
+			{Part: &tenantv1.MessagePart_Text{Text: &tenantv1.MessagePartText{Text: "just text"}}},
 		},
 	}
 
@@ -994,24 +994,24 @@ func TestPartsRoundTrip_StoreRoundTrip_AllPartTypes(t *testing.T) {
 	store := newInMemConvStore()
 	ctx := context.Background()
 
-	input := &userv1.ConversationMessage{
+	input := &tenantv1.ConversationMessage{
 		Id:   "msg-full",
 		Role: "assistant",
-		Parts: []*userv1.MessagePart{
-			{Part: &userv1.MessagePart_Text{Text: &userv1.MessagePartText{Text: "result text"}}},
-			{Part: &userv1.MessagePart_ToolCall{ToolCall: &userv1.MessagePartToolCall{
+		Parts: []*tenantv1.MessagePart{
+			{Part: &tenantv1.MessagePart_Text{Text: &tenantv1.MessagePartText{Text: "result text"}}},
+			{Part: &tenantv1.MessagePart_ToolCall{ToolCall: &tenantv1.MessagePartToolCall{
 				ToolCallId: "tc-99", Name: "fetch", Arguments: `{"url":"https://x.com"}`,
 			}}},
-			{Part: &userv1.MessagePart_ToolResult{ToolResult: &userv1.MessagePartToolResult{
+			{Part: &tenantv1.MessagePart_ToolResult{ToolResult: &tenantv1.MessagePartToolResult{
 				ToolCallId: "tc-99", Result: `{"status":200}`,
 			}}},
-			{Part: &userv1.MessagePart_Citation{Citation: &userv1.MessagePartCitation{
+			{Part: &tenantv1.MessagePart_Citation{Citation: &tenantv1.MessagePartCitation{
 				CitationId: "cit-1", Label: "Ref Node", Url: "https://graph.example/1",
 			}}},
-			{Part: &userv1.MessagePart_AttachmentRef{AttachmentRef: &userv1.MessagePartAttachmentRef{
+			{Part: &tenantv1.MessagePart_AttachmentRef{AttachmentRef: &tenantv1.MessagePartAttachmentRef{
 				AttachmentId: "att-1", MediaType: "application/pdf", Name: "report.pdf",
 			}}},
-			{Part: &userv1.MessagePart_Reasoning{Reasoning: &userv1.MessagePartReasoning{
+			{Part: &tenantv1.MessagePart_Reasoning{Reasoning: &tenantv1.MessagePartReasoning{
 				Text: "internal thought",
 			}}},
 		},
@@ -1046,7 +1046,7 @@ func TestPartsRoundTrip_StoreRoundTrip_AllPartTypes(t *testing.T) {
 func TestRenameConversation_MissingConversationID_InvalidArgument(t *testing.T) {
 	srv := blankServer()
 	srv.conversationStore = &mockConversationStore{}
-	_, err := srv.RenameConversation(context.Background(), &userv1.RenameConversationRequest{
+	_, err := srv.RenameConversation(context.Background(), &tenantv1.RenameConversationRequest{
 		TenantId: "acme",
 		Title:    "New Title",
 	})
@@ -1056,7 +1056,7 @@ func TestRenameConversation_MissingConversationID_InvalidArgument(t *testing.T) 
 func TestRenameConversation_MissingTitle_InvalidArgument(t *testing.T) {
 	srv := blankServer()
 	srv.conversationStore = &mockConversationStore{}
-	_, err := srv.RenameConversation(context.Background(), &userv1.RenameConversationRequest{
+	_, err := srv.RenameConversation(context.Background(), &tenantv1.RenameConversationRequest{
 		TenantId:       "acme",
 		ConversationId: "c1",
 	})
@@ -1066,7 +1066,7 @@ func TestRenameConversation_MissingTitle_InvalidArgument(t *testing.T) {
 func TestRenameConversation_MissingTenantID_InvalidArgument(t *testing.T) {
 	srv := blankServer()
 	srv.conversationStore = &mockConversationStore{}
-	_, err := srv.RenameConversation(context.Background(), &userv1.RenameConversationRequest{
+	_, err := srv.RenameConversation(context.Background(), &tenantv1.RenameConversationRequest{
 		ConversationId: "c1",
 		Title:          "New Title",
 	})
@@ -1075,7 +1075,7 @@ func TestRenameConversation_MissingTenantID_InvalidArgument(t *testing.T) {
 
 func TestRenameConversation_NilStore_Internal(t *testing.T) {
 	srv := blankServer()
-	_, err := srv.RenameConversation(context.Background(), &userv1.RenameConversationRequest{
+	_, err := srv.RenameConversation(context.Background(), &tenantv1.RenameConversationRequest{
 		TenantId:       "acme",
 		ConversationId: "c1",
 		Title:          "New Title",
@@ -1086,7 +1086,7 @@ func TestRenameConversation_NilStore_Internal(t *testing.T) {
 func TestRenameConversation_NotFound_ReturnsNotFound(t *testing.T) {
 	srv := blankServer()
 	srv.conversationStore = &mockConversationStore{renameErr: fmt.Errorf("conversation not found")}
-	_, err := srv.RenameConversation(context.Background(), &userv1.RenameConversationRequest{
+	_, err := srv.RenameConversation(context.Background(), &tenantv1.RenameConversationRequest{
 		TenantId:       "acme",
 		ConversationId: "c1",
 		Title:          "New Title",
@@ -1097,7 +1097,7 @@ func TestRenameConversation_NotFound_ReturnsNotFound(t *testing.T) {
 func TestRenameConversation_StoreError_Internal(t *testing.T) {
 	srv := blankServer()
 	srv.conversationStore = &mockConversationStore{renameErr: fmt.Errorf("redis down")}
-	_, err := srv.RenameConversation(context.Background(), &userv1.RenameConversationRequest{
+	_, err := srv.RenameConversation(context.Background(), &tenantv1.RenameConversationRequest{
 		TenantId:       "acme",
 		ConversationId: "c1",
 		Title:          "New Title",
@@ -1110,7 +1110,7 @@ func TestRenameConversation_Success_UpdatesTitle(t *testing.T) {
 	mock := &mockConversationStore{}
 	srv.conversationStore = mock
 
-	_, err := srv.RenameConversation(context.Background(), &userv1.RenameConversationRequest{
+	_, err := srv.RenameConversation(context.Background(), &tenantv1.RenameConversationRequest{
 		TenantId:       "acme",
 		ConversationId: "c1",
 		Title:          "Renamed Title",
@@ -1127,7 +1127,7 @@ func TestDeleteConversation_MissingConversationID_InvalidArgument(t *testing.T) 
 	srv := blankServer()
 	srv.conversationStore = &mockConversationStore{}
 	ctx := auth.WithIdentity(context.Background(), auth.Identity{Subject: "u1"})
-	_, err := srv.DeleteConversation(ctx, &userv1.DeleteConversationRequest{
+	_, err := srv.DeleteConversation(ctx, &tenantv1.DeleteConversationRequest{
 		TenantId: "acme",
 	})
 	assert.Equal(t, codes.InvalidArgument, grpcCode(err))
@@ -1137,7 +1137,7 @@ func TestDeleteConversation_MissingTenantID_InvalidArgument(t *testing.T) {
 	srv := blankServer()
 	srv.conversationStore = &mockConversationStore{}
 	ctx := auth.WithIdentity(context.Background(), auth.Identity{Subject: "u1"})
-	_, err := srv.DeleteConversation(ctx, &userv1.DeleteConversationRequest{
+	_, err := srv.DeleteConversation(ctx, &tenantv1.DeleteConversationRequest{
 		ConversationId: "c1",
 	})
 	assert.Equal(t, codes.InvalidArgument, grpcCode(err))
@@ -1146,7 +1146,7 @@ func TestDeleteConversation_MissingTenantID_InvalidArgument(t *testing.T) {
 func TestDeleteConversation_NoCallerIdentity_InvalidArgument(t *testing.T) {
 	srv := blankServer()
 	srv.conversationStore = &mockConversationStore{}
-	_, err := srv.DeleteConversation(context.Background(), &userv1.DeleteConversationRequest{
+	_, err := srv.DeleteConversation(context.Background(), &tenantv1.DeleteConversationRequest{
 		TenantId:       "acme",
 		ConversationId: "c1",
 	})
@@ -1156,7 +1156,7 @@ func TestDeleteConversation_NoCallerIdentity_InvalidArgument(t *testing.T) {
 func TestDeleteConversation_NilStore_Internal(t *testing.T) {
 	srv := blankServer()
 	ctx := auth.WithIdentity(context.Background(), auth.Identity{Subject: "u1"})
-	_, err := srv.DeleteConversation(ctx, &userv1.DeleteConversationRequest{
+	_, err := srv.DeleteConversation(ctx, &tenantv1.DeleteConversationRequest{
 		TenantId:       "acme",
 		ConversationId: "c1",
 	})
@@ -1167,7 +1167,7 @@ func TestDeleteConversation_StoreError_Internal(t *testing.T) {
 	srv := blankServer()
 	srv.conversationStore = &mockConversationStore{deleteErr: assert.AnError}
 	ctx := auth.WithIdentity(context.Background(), auth.Identity{Subject: "u1"})
-	_, err := srv.DeleteConversation(ctx, &userv1.DeleteConversationRequest{
+	_, err := srv.DeleteConversation(ctx, &tenantv1.DeleteConversationRequest{
 		TenantId:       "acme",
 		ConversationId: "c1",
 	})
@@ -1180,7 +1180,7 @@ func TestDeleteConversation_Success_CallsStoreDelete(t *testing.T) {
 	srv.conversationStore = mock
 	ctx := auth.WithIdentity(context.Background(), auth.Identity{Subject: "u1"})
 
-	_, err := srv.DeleteConversation(ctx, &userv1.DeleteConversationRequest{
+	_, err := srv.DeleteConversation(ctx, &tenantv1.DeleteConversationRequest{
 		TenantId:       "acme",
 		ConversationId: "conv-to-delete",
 	})

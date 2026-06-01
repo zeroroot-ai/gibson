@@ -49,7 +49,7 @@ import (
 	"github.com/zeroroot-ai/gibson/internal/secrets"
 
 	sdksecrets "github.com/zeroroot-ai/platform-clients/secrets"
-	adminv1 "github.com/zeroroot-ai/platform-sdk/gen/gibson/admin/v1"
+	tenantv1 "github.com/zeroroot-ai/sdk/api/gen/gibson/tenant/v1"
 	"github.com/zeroroot-ai/sdk/auth"
 )
 
@@ -103,9 +103,10 @@ type ReservedNamesProvider interface {
 	ReservedNames(ctx context.Context) (exact, prefix []string, err error)
 }
 
-// TenantAdminServer implements adminv1.TenantAdminServiceServer.
+// TenantAdminServer implements the membership side of gibson.tenant.v1 (MembershipService)
+// and — via CombinedSecretsServer — the broker-config side of SecretsService (ADR-0039).
 type TenantAdminServer struct {
-	adminv1.UnimplementedTenantAdminServiceServer
+	tenantv1.UnimplementedMembershipServiceServer
 
 	reader        TenantConfigStoreReader
 	writer        TenantConfigStoreWriter
@@ -191,7 +192,7 @@ func NewTenantAdminServer(cfg TenantAdminConfig) (*TenantAdminServer, error) {
 
 // GetBrokerConfig returns the redacted current configuration. Sensitive
 // fields are NEVER returned.
-func (s *TenantAdminServer) GetBrokerConfig(ctx context.Context, _ *adminv1.GetBrokerConfigRequest) (*adminv1.GetBrokerConfigResponse, error) {
+func (s *TenantAdminServer) GetBrokerConfig(ctx context.Context, _ *tenantv1.GetBrokerConfigRequest) (*tenantv1.GetBrokerConfigResponse, error) {
 	tenant, ok := auth.TenantFromContext(ctx)
 	if !ok {
 		return nil, status.Error(codes.PermissionDenied, "no tenant in context")
@@ -200,7 +201,7 @@ func (s *TenantAdminServer) GetBrokerConfig(ctx context.Context, _ *adminv1.GetB
 	cfg, err := s.reader.Get(ctx, tenant)
 	if err != nil {
 		if errors.Is(err, secrets.ErrBrokerConfigNotFound) {
-			return &adminv1.GetBrokerConfigResponse{Configured: false}, nil
+			return &tenantv1.GetBrokerConfigResponse{Configured: false}, nil
 		}
 		return nil, status.Errorf(codes.Internal, "read broker config: %v", err)
 	}
@@ -209,14 +210,14 @@ func (s *TenantAdminServer) GetBrokerConfig(ctx context.Context, _ *adminv1.GetB
 	if err != nil {
 		return nil, status.Errorf(codes.Internal, "redact: %v", err)
 	}
-	return &adminv1.GetBrokerConfigResponse{
+	return &tenantv1.GetBrokerConfigResponse{
 		Config:     redacted,
 		Configured: true,
 	}, nil
 }
 
 // ProbeBrokerConfig tests a candidate config without persisting.
-func (s *TenantAdminServer) ProbeBrokerConfig(ctx context.Context, req *adminv1.ProbeBrokerConfigRequest) (*adminv1.ProbeBrokerConfigResponse, error) {
+func (s *TenantAdminServer) ProbeBrokerConfig(ctx context.Context, req *tenantv1.ProbeBrokerConfigRequest) (*tenantv1.ProbeBrokerConfigResponse, error) {
 	if _, ok := auth.TenantFromContext(ctx); !ok {
 		return nil, status.Error(codes.PermissionDenied, "no tenant in context")
 	}
@@ -232,11 +233,11 @@ func (s *TenantAdminServer) ProbeBrokerConfig(ctx context.Context, req *adminv1.
 	start := s.now()
 	probeRes := s.probeOnce(ctx, providerName, blob)
 	probeRes.DurationMs = time.Since(start).Milliseconds()
-	return &adminv1.ProbeBrokerConfigResponse{Result: probeRes}, nil
+	return &tenantv1.ProbeBrokerConfigResponse{Result: probeRes}, nil
 }
 
 // SetBrokerConfig probes then persists.
-func (s *TenantAdminServer) SetBrokerConfig(ctx context.Context, req *adminv1.SetBrokerConfigRequest) (*adminv1.SetBrokerConfigResponse, error) {
+func (s *TenantAdminServer) SetBrokerConfig(ctx context.Context, req *tenantv1.SetBrokerConfigRequest) (*tenantv1.SetBrokerConfigResponse, error) {
 	tenant, ok := auth.TenantFromContext(ctx)
 	if !ok {
 		return nil, status.Error(codes.PermissionDenied, "no tenant in context")
@@ -257,7 +258,7 @@ func (s *TenantAdminServer) SetBrokerConfig(ctx context.Context, req *adminv1.Se
 	probeRes.DurationMs = time.Since(start).Milliseconds()
 	if !probeRes.GetOk() {
 		// Return PreconditionFailed with the structured probe result.
-		return &adminv1.SetBrokerConfigResponse{ProbeResult: probeRes},
+		return &tenantv1.SetBrokerConfigResponse{ProbeResult: probeRes},
 			status.Errorf(codes.FailedPrecondition, "probe failed: %s", probeRes.GetErrorClass())
 	}
 
@@ -293,13 +294,13 @@ func (s *TenantAdminServer) SetBrokerConfig(ctx context.Context, req *adminv1.Se
 	if err != nil {
 		// Persistence succeeded; redaction read-back failed. Return
 		// success with a minimal redacted view.
-		redacted = &adminv1.RedactedConfig{
+		redacted = &tenantv1.RedactedConfig{
 			Provider:      candidateProvider(req.GetCandidate()),
 			UpdatedAtUnix: s.now().UTC().Unix(),
 			UpdatedBy:     identity.Subject,
 		}
 	}
-	return &adminv1.SetBrokerConfigResponse{
+	return &tenantv1.SetBrokerConfigResponse{
 		Config:      redacted,
 		ProbeResult: probeRes,
 	}, nil
@@ -315,7 +316,7 @@ func (s *TenantAdminServer) SetBrokerConfig(ctx context.Context, req *adminv1.Se
 // secrets.Service.List path already audits via the existing AuditWriter
 // pipeline. Double-auditing on a count surface would inflate the audit
 // stream for an essentially-free read.
-func (s *TenantAdminServer) CountSecrets(ctx context.Context, _ *adminv1.CountSecretsRequest) (*adminv1.CountSecretsResponse, error) {
+func (s *TenantAdminServer) CountSecrets(ctx context.Context, _ *tenantv1.CountSecretsRequest) (*tenantv1.CountSecretsResponse, error) {
 	if _, ok := auth.TenantFromContext(ctx); !ok {
 		return nil, status.Error(codes.PermissionDenied, "no tenant in context")
 	}
@@ -324,7 +325,7 @@ func (s *TenantAdminServer) CountSecrets(ctx context.Context, _ *adminv1.CountSe
 	if err != nil {
 		return nil, status.Errorf(codes.Internal, "list secrets: %v", err)
 	}
-	return &adminv1.CountSecretsResponse{Count: int64(len(names))}, nil
+	return &tenantv1.CountSecretsResponse{Count: int64(len(names))}, nil
 }
 
 // ListMembers enumerates the members of the caller's tenant. It:
@@ -339,7 +340,7 @@ func (s *TenantAdminServer) CountSecrets(ctx context.Context, _ *adminv1.CountSe
 // When the authorizer is nil (not wired), an empty list is returned.
 // When the IdP client is nil, members are returned with empty display_name
 // and email fields.
-func (s *TenantAdminServer) ListMembers(ctx context.Context, req *adminv1.ListMembersRequest) (*adminv1.ListMembersResponse, error) {
+func (s *TenantAdminServer) ListMembers(ctx context.Context, req *tenantv1.ListMembersRequest) (*tenantv1.ListMembersResponse, error) {
 	if _, ok := auth.TenantFromContext(ctx); !ok {
 		return nil, status.Error(codes.PermissionDenied, "no tenant in context")
 	}
@@ -348,7 +349,7 @@ func (s *TenantAdminServer) ListMembers(ctx context.Context, req *adminv1.ListMe
 
 	if s.authorizer == nil {
 		s.logger.WarnContext(ctx, "ListMembers: authorizer not wired; returning empty list")
-		return &adminv1.ListMembersResponse{}, nil
+		return &tenantv1.ListMembersResponse{}, nil
 	}
 
 	// 1. List all users with the "member" relation on this tenant.
@@ -359,7 +360,7 @@ func (s *TenantAdminServer) ListMembers(ctx context.Context, req *adminv1.ListMe
 	}
 
 	if len(userRefs) == 0 {
-		return &adminv1.ListMembersResponse{}, nil
+		return &tenantv1.ListMembersResponse{}, nil
 	}
 
 	// 2. Batch-check which users are also admins.
@@ -377,7 +378,7 @@ func (s *TenantAdminServer) ListMembers(ctx context.Context, req *adminv1.ListMe
 	}
 
 	// 3. Build member structs enriched from the IdP.
-	members := make([]*adminv1.TenantMember, 0, len(userRefs))
+	members := make([]*tenantv1.TenantMember, 0, len(userRefs))
 	for i, ref := range userRefs {
 		// FGA user refs have the form "user:<id>".
 		userID := strings.TrimPrefix(ref, "user:")
@@ -387,7 +388,7 @@ func (s *TenantAdminServer) ListMembers(ctx context.Context, req *adminv1.ListMe
 			role = "admin"
 		}
 
-		m := &adminv1.TenantMember{
+		m := &tenantv1.TenantMember{
 			UserId: userID,
 			Role:   role,
 		}
@@ -468,7 +469,7 @@ func (s *TenantAdminServer) ListMembers(ctx context.Context, req *adminv1.ListMe
 	}
 
 	if offset >= len(members) {
-		return &adminv1.ListMembersResponse{}, nil
+		return &tenantv1.ListMembersResponse{}, nil
 	}
 
 	end := offset + pageSize
@@ -480,7 +481,7 @@ func (s *TenantAdminServer) ListMembers(ctx context.Context, req *adminv1.ListMe
 		members = members[offset:]
 	}
 
-	return &adminv1.ListMembersResponse{
+	return &tenantv1.ListMembersResponse{
 		Members:       members,
 		NextPageToken: nextToken,
 	}, nil
@@ -500,30 +501,30 @@ func hasPrefixFold(s, prefix string) bool {
 
 // probeOnce constructs a candidate provider and probes it. Result.Ok is
 // true on success.
-func (s *TenantAdminServer) probeOnce(ctx context.Context, providerName string, blob []byte) *adminv1.ProbeResult {
+func (s *TenantAdminServer) probeOnce(ctx context.Context, providerName string, blob []byte) *tenantv1.ProbeResult {
 	candidate, err := s.probeFac.Construct(providerName, blob)
 	if err != nil {
-		return &adminv1.ProbeResult{
+		return &tenantv1.ProbeResult{
 			Ok:           false,
 			ErrorClass:   "provider_construct_failed",
 			ErrorMessage: redactProbeMessage(err.Error()),
 		}
 	}
 	if err := candidate.Probe(ctx); err != nil {
-		return &adminv1.ProbeResult{
+		return &tenantv1.ProbeResult{
 			Ok:           false,
 			ErrorClass:   classifyProbeError(err),
 			ErrorMessage: redactProbeMessage(err.Error()),
 		}
 	}
-	return &adminv1.ProbeResult{Ok: true}
+	return &tenantv1.ProbeResult{Ok: true}
 }
 
 // candidateProvider returns the provider name for a candidate without
 // converting to the canonical lowercase string. Used in fallback paths.
-func candidateProvider(c *adminv1.CandidateConfig) adminv1.BrokerProvider {
+func candidateProvider(c *tenantv1.CandidateConfig) tenantv1.BrokerProvider {
 	if c == nil {
-		return adminv1.BrokerProvider_BROKER_PROVIDER_UNSPECIFIED
+		return tenantv1.BrokerProvider_BROKER_PROVIDER_UNSPECIFIED
 	}
 	return c.GetProvider()
 }
@@ -532,7 +533,7 @@ func candidateProvider(c *adminv1.CandidateConfig) adminv1.BrokerProvider {
 // configBlob) shape the secrets package expects. configBlob is JSON. The
 // shape is provider-specific; we use a generic dictionary the production
 // factories also accept (the same blob shape Spec 1 task 19 documents).
-func candidateToBlob(c *adminv1.CandidateConfig) (string, []byte, error) {
+func candidateToBlob(c *tenantv1.CandidateConfig) (string, []byte, error) {
 	providerName := providerEnumToString(c.GetProvider())
 	if providerName == "" {
 		return "", nil, errors.New("unknown provider")
@@ -606,7 +607,7 @@ func candidateToBlob(c *adminv1.CandidateConfig) (string, []byte, error) {
 // every sensitive field stripped. The sensitive_fields_set list records
 // which sensitive fields were present so the dashboard can render
 // "(configured)" placeholders.
-func redactConfig(providerName string, blob []byte) (*adminv1.RedactedConfig, error) {
+func redactConfig(providerName string, blob []byte) (*tenantv1.RedactedConfig, error) {
 	dict := map[string]any{}
 	if len(blob) > 0 {
 		if err := json.Unmarshal(blob, &dict); err != nil {
@@ -614,7 +615,7 @@ func redactConfig(providerName string, blob []byte) (*adminv1.RedactedConfig, er
 		}
 	}
 
-	out := &adminv1.RedactedConfig{
+	out := &tenantv1.RedactedConfig{
 		Provider:         providerStringToEnum(providerName),
 		Address:          stringField(dict, "address"),
 		NamespaceOrPath:  stringField(dict, "namespace_or_path"),
@@ -664,15 +665,15 @@ func stringField(dict map[string]any, key string) string {
 
 // providerEnumToString maps the proto enum to the registry string name.
 // Returns "" for UNSPECIFIED or any reserved/removed provider.
-func providerEnumToString(p adminv1.BrokerProvider) string {
+func providerEnumToString(p tenantv1.BrokerProvider) string {
 	switch p {
-	case adminv1.BrokerProvider_BROKER_PROVIDER_VAULT:
+	case tenantv1.BrokerProvider_BROKER_PROVIDER_VAULT:
 		return "vault"
-	case adminv1.BrokerProvider_BROKER_PROVIDER_AWSSM:
+	case tenantv1.BrokerProvider_BROKER_PROVIDER_AWSSM:
 		return "awssm"
-	case adminv1.BrokerProvider_BROKER_PROVIDER_GCPSM:
+	case tenantv1.BrokerProvider_BROKER_PROVIDER_GCPSM:
 		return "gcpsm"
-	case adminv1.BrokerProvider_BROKER_PROVIDER_AZUREKV:
+	case tenantv1.BrokerProvider_BROKER_PROVIDER_AZUREKV:
 		return "azurekv"
 	default:
 		return ""
@@ -681,18 +682,18 @@ func providerEnumToString(p adminv1.BrokerProvider) string {
 
 // providerStringToEnum maps the registry string name back to the proto
 // enum. Returns UNSPECIFIED for unknown values.
-func providerStringToEnum(s string) adminv1.BrokerProvider {
+func providerStringToEnum(s string) tenantv1.BrokerProvider {
 	switch s {
 	case "vault":
-		return adminv1.BrokerProvider_BROKER_PROVIDER_VAULT
+		return tenantv1.BrokerProvider_BROKER_PROVIDER_VAULT
 	case "awssm":
-		return adminv1.BrokerProvider_BROKER_PROVIDER_AWSSM
+		return tenantv1.BrokerProvider_BROKER_PROVIDER_AWSSM
 	case "gcpsm":
-		return adminv1.BrokerProvider_BROKER_PROVIDER_GCPSM
+		return tenantv1.BrokerProvider_BROKER_PROVIDER_GCPSM
 	case "azurekv":
-		return adminv1.BrokerProvider_BROKER_PROVIDER_AZUREKV
+		return tenantv1.BrokerProvider_BROKER_PROVIDER_AZUREKV
 	default:
-		return adminv1.BrokerProvider_BROKER_PROVIDER_UNSPECIFIED
+		return tenantv1.BrokerProvider_BROKER_PROVIDER_UNSPECIFIED
 	}
 }
 

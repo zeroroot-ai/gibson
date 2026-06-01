@@ -8,7 +8,7 @@ import (
 	"github.com/stretchr/testify/require"
 	"google.golang.org/grpc/codes"
 
-	userv1 "github.com/zeroroot-ai/gibson/internal/daemon/api/gibson/user/v1"
+	tenantv1 "github.com/zeroroot-ai/sdk/api/gen/gibson/tenant/v1"
 )
 
 // ---------------------------------------------------------------------------
@@ -58,21 +58,21 @@ func TestListAlerts_EmptyTenantIDFallsBackToSystemTenant_NilStoreReturnsEmpty(t 
 	// Empty TenantId falls back to auth.TenantFromContext (returns SystemTenant).
 	// With nil alertStore, the handler returns an empty list successfully.
 	srv := blankServer()
-	resp, err := srv.ListAlerts(context.Background(), &userv1.ListAlertsRequest{TenantId: "", UserId: "u1"})
+	resp, err := srv.ListAlerts(context.Background(), &tenantv1.ListAlertsRequest{TenantId: "", UserId: "u1"})
 	assert.NoError(t, err)
 	assert.Empty(t, resp.Alerts)
 }
 
 func TestListAlerts_MissingUserID_InvalidArgument(t *testing.T) {
 	srv := blankServer()
-	_, err := srv.ListAlerts(context.Background(), &userv1.ListAlertsRequest{TenantId: "acme", UserId: ""})
+	_, err := srv.ListAlerts(context.Background(), &tenantv1.ListAlertsRequest{TenantId: "acme", UserId: ""})
 	assert.Equal(t, codes.InvalidArgument, grpcCode(err))
 }
 
 func TestListAlerts_NilStore_ReturnsEmpty(t *testing.T) {
 	// Nil alertStore → returns empty list, not error.
 	srv := blankServer()
-	resp, err := srv.ListAlerts(context.Background(), &userv1.ListAlertsRequest{TenantId: "acme", UserId: "u1"})
+	resp, err := srv.ListAlerts(context.Background(), &tenantv1.ListAlertsRequest{TenantId: "acme", UserId: "u1"})
 	require.NoError(t, err)
 	assert.Empty(t, resp.Alerts)
 }
@@ -80,7 +80,7 @@ func TestListAlerts_NilStore_ReturnsEmpty(t *testing.T) {
 func TestListAlerts_StoreError_Internal(t *testing.T) {
 	srv := blankServer()
 	srv.alertStore = &mockAlertStore{listErr: assert.AnError}
-	_, err := srv.ListAlerts(context.Background(), &userv1.ListAlertsRequest{TenantId: "acme", UserId: "u1"})
+	_, err := srv.ListAlerts(context.Background(), &tenantv1.ListAlertsRequest{TenantId: "acme", UserId: "u1"})
 	assert.Equal(t, codes.Internal, grpcCode(err))
 }
 
@@ -91,7 +91,7 @@ func TestListAlerts_Success_ReturnsMappedAlerts(t *testing.T) {
 			{ID: "a1", TenantID: "acme", UserID: "u1", Title: "Test", Severity: "high", Read: false},
 		},
 	}
-	resp, err := srv.ListAlerts(context.Background(), &userv1.ListAlertsRequest{TenantId: "acme", UserId: "u1"})
+	resp, err := srv.ListAlerts(context.Background(), &tenantv1.ListAlertsRequest{TenantId: "acme", UserId: "u1"})
 	require.NoError(t, err)
 	require.Len(t, resp.Alerts, 1)
 	assert.Equal(t, "a1", resp.Alerts[0].Id)
@@ -106,7 +106,7 @@ func TestListAlerts_UnreadOnly_FiltersReadAlerts(t *testing.T) {
 			{ID: "a2", Read: true},
 		},
 	}
-	resp, err := srv.ListAlerts(context.Background(), &userv1.ListAlertsRequest{
+	resp, err := srv.ListAlerts(context.Background(), &tenantv1.ListAlertsRequest{
 		TenantId:   "acme",
 		UserId:     "u1",
 		UnreadOnly: true,
@@ -124,34 +124,34 @@ func TestMarkAlertRead_EmptyTenantIDFallsBackToSystemTenant_NilStoreNoError(t *t
 	// Empty TenantId falls back to auth.TenantFromContext (returns SystemTenant).
 	// With nil alertStore, the handler is a no-op (returns success).
 	srv := blankServer()
-	_, err := srv.MarkAlertRead(context.Background(), &userv1.MarkAlertReadRequest{TenantId: "", AlertId: "a1"})
+	_, err := srv.MarkAlertRead(context.Background(), &tenantv1.MarkAlertReadRequest{TenantId: "", AlertId: "a1"})
 	assert.NoError(t, err)
 }
 
 func TestMarkAlertRead_MissingAlertID_InvalidArgument(t *testing.T) {
 	srv := blankServer()
-	_, err := srv.MarkAlertRead(context.Background(), &userv1.MarkAlertReadRequest{TenantId: "acme", AlertId: ""})
+	_, err := srv.MarkAlertRead(context.Background(), &tenantv1.MarkAlertReadRequest{TenantId: "acme", AlertId: ""})
 	assert.Equal(t, codes.InvalidArgument, grpcCode(err))
 }
 
 func TestMarkAlertRead_NilStore_NoError(t *testing.T) {
 	// Nil alertStore → success (no-op).
 	srv := blankServer()
-	_, err := srv.MarkAlertRead(context.Background(), &userv1.MarkAlertReadRequest{TenantId: "acme", AlertId: "a1"})
+	_, err := srv.MarkAlertRead(context.Background(), &tenantv1.MarkAlertReadRequest{TenantId: "acme", AlertId: "a1"})
 	assert.NoError(t, err)
 }
 
 func TestMarkAlertRead_StoreError_Internal(t *testing.T) {
 	srv := blankServer()
 	srv.alertStore = &mockAlertStore{markReadErr: assert.AnError}
-	_, err := srv.MarkAlertRead(context.Background(), &userv1.MarkAlertReadRequest{TenantId: "acme", AlertId: "a1"})
+	_, err := srv.MarkAlertRead(context.Background(), &tenantv1.MarkAlertReadRequest{TenantId: "acme", AlertId: "a1"})
 	assert.Equal(t, codes.Internal, grpcCode(err))
 }
 
 func TestMarkAlertRead_Success(t *testing.T) {
 	srv := blankServer()
 	srv.alertStore = &mockAlertStore{}
-	_, err := srv.MarkAlertRead(context.Background(), &userv1.MarkAlertReadRequest{TenantId: "acme", AlertId: "a1"})
+	_, err := srv.MarkAlertRead(context.Background(), &tenantv1.MarkAlertReadRequest{TenantId: "acme", AlertId: "a1"})
 	assert.NoError(t, err)
 }
 
@@ -163,21 +163,21 @@ func TestMarkAllAlertsRead_EmptyTenantIDFallsBackToSystemTenant_NilStoreReturnsZ
 	// Empty TenantId falls back to auth.TenantFromContext (returns SystemTenant).
 	// With nil alertStore, the handler returns count=0 successfully.
 	srv := blankServer()
-	resp, err := srv.MarkAllAlertsRead(context.Background(), &userv1.MarkAllAlertsReadRequest{TenantId: "", UserId: "u1"})
+	resp, err := srv.MarkAllAlertsRead(context.Background(), &tenantv1.MarkAllAlertsReadRequest{TenantId: "", UserId: "u1"})
 	require.NoError(t, err)
 	assert.Equal(t, int32(0), resp.Count)
 }
 
 func TestMarkAllAlertsRead_MissingUserID_InvalidArgument(t *testing.T) {
 	srv := blankServer()
-	_, err := srv.MarkAllAlertsRead(context.Background(), &userv1.MarkAllAlertsReadRequest{TenantId: "acme", UserId: ""})
+	_, err := srv.MarkAllAlertsRead(context.Background(), &tenantv1.MarkAllAlertsReadRequest{TenantId: "acme", UserId: ""})
 	assert.Equal(t, codes.InvalidArgument, grpcCode(err))
 }
 
 func TestMarkAllAlertsRead_NilStore_ReturnsZero(t *testing.T) {
 	// Nil alertStore → success with count=0.
 	srv := blankServer()
-	resp, err := srv.MarkAllAlertsRead(context.Background(), &userv1.MarkAllAlertsReadRequest{TenantId: "acme", UserId: "u1"})
+	resp, err := srv.MarkAllAlertsRead(context.Background(), &tenantv1.MarkAllAlertsReadRequest{TenantId: "acme", UserId: "u1"})
 	require.NoError(t, err)
 	assert.Equal(t, int32(0), resp.Count)
 }
@@ -185,14 +185,14 @@ func TestMarkAllAlertsRead_NilStore_ReturnsZero(t *testing.T) {
 func TestMarkAllAlertsRead_StoreError_Internal(t *testing.T) {
 	srv := blankServer()
 	srv.alertStore = &mockAlertStore{markAllErr: assert.AnError}
-	_, err := srv.MarkAllAlertsRead(context.Background(), &userv1.MarkAllAlertsReadRequest{TenantId: "acme", UserId: "u1"})
+	_, err := srv.MarkAllAlertsRead(context.Background(), &tenantv1.MarkAllAlertsReadRequest{TenantId: "acme", UserId: "u1"})
 	assert.Equal(t, codes.Internal, grpcCode(err))
 }
 
 func TestMarkAllAlertsRead_Success_ReturnsCount(t *testing.T) {
 	srv := blankServer()
 	srv.alertStore = &mockAlertStore{markAllCount: 7}
-	resp, err := srv.MarkAllAlertsRead(context.Background(), &userv1.MarkAllAlertsReadRequest{TenantId: "acme", UserId: "u1"})
+	resp, err := srv.MarkAllAlertsRead(context.Background(), &tenantv1.MarkAllAlertsReadRequest{TenantId: "acme", UserId: "u1"})
 	require.NoError(t, err)
 	assert.Equal(t, int32(7), resp.Count)
 }

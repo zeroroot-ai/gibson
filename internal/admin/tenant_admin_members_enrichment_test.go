@@ -6,7 +6,7 @@ import (
 	"strings"
 	"testing"
 
-	adminv1 "github.com/zeroroot-ai/platform-sdk/gen/gibson/admin/v1"
+	tenantv1 "github.com/zeroroot-ai/sdk/api/gen/gibson/tenant/v1"
 
 	"github.com/zeroroot-ai/gibson/internal/idp"
 )
@@ -49,7 +49,7 @@ func TestListMembers_EnrichmentFailuresAreLogged(t *testing.T) {
 	}
 
 	ctx := ctxWithTenant(t, "acme")
-	if _, err := srv.ListMembers(ctx, &adminv1.ListMembersRequest{}); err != nil {
+	if _, err := srv.ListMembers(ctx, &tenantv1.ListMembersRequest{}); err != nil {
 		t.Fatalf("ListMembers: %v", err)
 	}
 

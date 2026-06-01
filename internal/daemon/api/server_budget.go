@@ -10,14 +10,11 @@ import (
 	status_grpc "google.golang.org/grpc/status"
 
 	"github.com/zeroroot-ai/gibson/internal/budget"
-	// sdk#106 (MERGED) split the budget surface in two:
-	//   - admin BudgetService    → platform-sdk/gen/gibson/budget/v1   (`budgetpb` here)
-	//   - customer-visible enum  → sdk/api/gen/gibson/budget_status/v1 (`budgetstatuspb`)
-	// This handler implements the admin service, but its request/response
-	// messages embed `BudgetScope` which still lives on the OSS side, so we
-	// pull in both.
-	budgetpb "github.com/zeroroot-ai/platform-sdk/gen/gibson/budget/v1"
+	// ADR-0039: BudgetService moved from platform-sdk/gen/gibson/budget/v1 to
+	// sdk/api/gen/gibson/tenant/v1. BudgetScope is still from budget_status/v1
+	// (the OSS enum used by both Budget messages and the budget-exceeded error).
 	budgetstatuspb "github.com/zeroroot-ai/sdk/api/gen/gibson/budget_status/v1"
+	tenantv1 "github.com/zeroroot-ai/sdk/api/gen/gibson/tenant/v1"
 	"github.com/zeroroot-ai/sdk/auth"
 )
 
@@ -91,11 +88,11 @@ func scopeFromProto(s budgetstatuspb.BudgetScope) (budget.Scope, error) {
 	return "", status_grpc.Error(codes.InvalidArgument, "scope must be user, team, or tenant")
 }
 
-func budgetToProto(b *budget.Budget) *budgetpb.Budget {
+func budgetToProto(b *budget.Budget) *tenantv1.Budget {
 	if b == nil {
 		return nil
 	}
-	return &budgetpb.Budget{
+	return &tenantv1.Budget{
 		TenantId:             b.TenantID,
 		Scope:                budgetScopeToProto(b.Scope),
 		SubjectId:            b.SubjectID,
@@ -106,7 +103,7 @@ func budgetToProto(b *budget.Budget) *budgetpb.Budget {
 	}
 }
 
-func budgetFromProto(p *budgetpb.Budget) (*budget.Budget, error) {
+func budgetFromProto(p *tenantv1.Budget) (*budget.Budget, error) {
 	if p == nil {
 		return nil, status_grpc.Error(codes.InvalidArgument, "budget must not be nil")
 	}
@@ -125,11 +122,11 @@ func budgetFromProto(p *budgetpb.Budget) (*budget.Budget, error) {
 	}, nil
 }
 
-func statusToProto(s *budget.Status) *budgetpb.BudgetStatus {
+func statusToProto(s *budget.Status) *tenantv1.BudgetStatus {
 	if s == nil {
 		return nil
 	}
-	return &budgetpb.BudgetStatus{
+	return &tenantv1.BudgetStatus{
 		Scope:                budgetScopeToProto(s.Scope),
 		SubjectId:            s.SubjectID,
 		CurrentTokens:        s.CurrentTokens,
@@ -148,7 +145,7 @@ func statusToProto(s *budget.Status) *budgetpb.BudgetStatus {
 // GetBudget returns the configured budget for the given (scope, subject).
 // Non-admins may only read their own user-scope budget. Tenant defaults
 // are readable by any authenticated caller within the tenant.
-func (s *DaemonServer) GetBudget(ctx context.Context, req *budgetpb.GetBudgetRequest) (*budgetpb.GetBudgetResponse, error) {
+func (s *DaemonServer) GetBudget(ctx context.Context, req *tenantv1.GetBudgetRequest) (*tenantv1.GetBudgetResponse, error) {
 	tenantID := auth.TenantStringFromContext(ctx)
 	if tenantID == "" || tenantID == auth.SystemTenantString {
 		return nil, status_grpc.Error(codes.Unauthenticated, "tenant context required")
@@ -181,14 +178,14 @@ func (s *DaemonServer) GetBudget(ctx context.Context, req *budgetpb.GetBudgetReq
 			slog.String("error", err.Error()), slog.String("tenant", tenantID))
 		return nil, status_grpc.Error(codes.Internal, "failed to read budget")
 	}
-	return &budgetpb.GetBudgetResponse{
+	return &tenantv1.GetBudgetResponse{
 		Budget: budgetToProto(b),
 		Found:  b != nil,
 	}, nil
 }
 
 // SetBudget persists a budget. Tenant-admin only.
-func (s *DaemonServer) SetBudget(ctx context.Context, req *budgetpb.SetBudgetRequest) (*budgetpb.SetBudgetResponse, error) {
+func (s *DaemonServer) SetBudget(ctx context.Context, req *tenantv1.SetBudgetRequest) (*tenantv1.SetBudgetResponse, error) {
 	tenantID := auth.TenantStringFromContext(ctx)
 	if tenantID == "" || tenantID == auth.SystemTenantString {
 		return nil, status_grpc.Error(codes.Unauthenticated, "tenant context required")
@@ -211,12 +208,12 @@ func (s *DaemonServer) SetBudget(ctx context.Context, req *budgetpb.SetBudgetReq
 			slog.String("error", err.Error()), slog.String("tenant", tenantID))
 		return nil, status_grpc.Error(codes.Internal, "failed to persist budget")
 	}
-	return &budgetpb.SetBudgetResponse{Budget: budgetToProto(b)}, nil
+	return &tenantv1.SetBudgetResponse{Budget: budgetToProto(b)}, nil
 }
 
 // ListBudgets returns all configured budgets in the given scope. Admin-only
 // for user and team scopes; any caller can list tenant defaults.
-func (s *DaemonServer) ListBudgets(ctx context.Context, req *budgetpb.ListBudgetsRequest) (*budgetpb.ListBudgetsResponse, error) {
+func (s *DaemonServer) ListBudgets(ctx context.Context, req *tenantv1.ListBudgetsRequest) (*tenantv1.ListBudgetsResponse, error) {
 	tenantID := auth.TenantStringFromContext(ctx)
 	if tenantID == "" || tenantID == auth.SystemTenantString {
 		return nil, status_grpc.Error(codes.Unauthenticated, "tenant context required")
@@ -243,7 +240,7 @@ func (s *DaemonServer) ListBudgets(ctx context.Context, req *budgetpb.ListBudget
 	}
 	// Materialise Budget records from the statuses so the dashboard has
 	// the configured limits without a second round-trip per subject.
-	resp := &budgetpb.ListBudgetsResponse{Budgets: make([]*budgetpb.Budget, 0, len(statuses))}
+	resp := &tenantv1.ListBudgetsResponse{Budgets: make([]*tenantv1.Budget, 0, len(statuses))}
 	for _, st := range statuses {
 		b, err := admin.GetBudget(ctx, st.Scope, st.SubjectID)
 		if err != nil || b == nil {
@@ -256,7 +253,7 @@ func (s *DaemonServer) ListBudgets(ctx context.Context, req *budgetpb.ListBudget
 
 // ListStatus returns current usage for every subject in scope. Same
 // narrowing rules as ListBudgets.
-func (s *DaemonServer) ListStatus(ctx context.Context, req *budgetpb.ListStatusRequest) (*budgetpb.ListStatusResponse, error) {
+func (s *DaemonServer) ListBudgetStatus(ctx context.Context, req *tenantv1.ListBudgetStatusRequest) (*tenantv1.ListBudgetStatusResponse, error) {
 	tenantID := auth.TenantStringFromContext(ctx)
 	if tenantID == "" || tenantID == auth.SystemTenantString {
 		return nil, status_grpc.Error(codes.Unauthenticated, "tenant context required")
@@ -281,7 +278,7 @@ func (s *DaemonServer) ListStatus(ctx context.Context, req *budgetpb.ListStatusR
 		return nil, status_grpc.Error(codes.Internal, "failed to list status")
 	}
 
-	resp := &budgetpb.ListStatusResponse{Status: make([]*budgetpb.BudgetStatus, 0, len(statuses))}
+	resp := &tenantv1.ListBudgetStatusResponse{Status: make([]*tenantv1.BudgetStatus, 0, len(statuses))}
 	for _, st := range statuses {
 		// Non-admin narrowing: user-scope list filters to self.
 		if !admin && scope == budget.ScopeUser && st.SubjectID != userID {
@@ -298,7 +295,7 @@ func (s *DaemonServer) ListStatus(ctx context.Context, req *budgetpb.ListStatusR
 
 // GetTenantDefaults returns the tenant-level defaults. Any tenant member
 // can read (so they can see what applies to them by default).
-func (s *DaemonServer) GetTenantDefaults(ctx context.Context, _ *budgetpb.GetTenantDefaultsRequest) (*budgetpb.GetTenantDefaultsResponse, error) {
+func (s *DaemonServer) GetTenantBudgetDefaults(ctx context.Context, _ *tenantv1.GetTenantBudgetDefaultsRequest) (*tenantv1.GetTenantBudgetDefaultsResponse, error) {
 	tenantID := auth.TenantStringFromContext(ctx)
 	if tenantID == "" || tenantID == auth.SystemTenantString {
 		return nil, status_grpc.Error(codes.Unauthenticated, "tenant context required")
@@ -313,7 +310,7 @@ func (s *DaemonServer) GetTenantDefaults(ctx context.Context, _ *budgetpb.GetTen
 			slog.String("error", err.Error()), slog.String("tenant", tenantID))
 		return nil, status_grpc.Error(codes.Internal, "failed to read tenant defaults")
 	}
-	resp := &budgetpb.GetTenantDefaultsResponse{}
+	resp := &tenantv1.GetTenantBudgetDefaultsResponse{}
 	if b != nil {
 		// "Tenant defaults" share the Budget shape; monthly_tokens /
 		// monthly_spend_usd_cents apply to any user without an explicit
@@ -326,7 +323,7 @@ func (s *DaemonServer) GetTenantDefaults(ctx context.Context, _ *budgetpb.GetTen
 }
 
 // SetTenantDefaults persists the tenant-level defaults. Tenant-admin only.
-func (s *DaemonServer) SetTenantDefaults(ctx context.Context, req *budgetpb.SetTenantDefaultsRequest) (*budgetpb.SetTenantDefaultsResponse, error) {
+func (s *DaemonServer) SetTenantBudgetDefaults(ctx context.Context, req *tenantv1.SetTenantBudgetDefaultsRequest) (*tenantv1.SetTenantBudgetDefaultsResponse, error) {
 	tenantID := auth.TenantStringFromContext(ctx)
 	if tenantID == "" || tenantID == auth.SystemTenantString {
 		return nil, status_grpc.Error(codes.Unauthenticated, "tenant context required")
@@ -351,7 +348,7 @@ func (s *DaemonServer) SetTenantDefaults(ctx context.Context, req *budgetpb.SetT
 			slog.String("error", err.Error()), slog.String("tenant", tenantID))
 		return nil, status_grpc.Error(codes.Internal, "failed to persist tenant defaults")
 	}
-	return &budgetpb.SetTenantDefaultsResponse{
+	return &tenantv1.SetTenantBudgetDefaultsResponse{
 		AppliedAtUnix: time.Now().Unix(),
 	}, nil
 }

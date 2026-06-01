@@ -8,8 +8,8 @@ import (
 	"google.golang.org/grpc/codes"
 	"google.golang.org/grpc/status"
 
-	adminv1 "github.com/zeroroot-ai/platform-sdk/gen/gibson/admin/v1"
 	capabilityv1 "github.com/zeroroot-ai/sdk/api/gen/gibson/capability/v1"
+	tenantv1 "github.com/zeroroot-ai/sdk/api/gen/gibson/tenant/v1"
 	"github.com/zeroroot-ai/sdk/auth"
 )
 
@@ -44,7 +44,7 @@ func newGrantsTestServer(t *testing.T, grants []GrantInfo) (*GrantsAdminServer, 
 
 func TestListActiveGrants_RequiresTenant(t *testing.T) {
 	srv, _ := newGrantsTestServer(t, nil)
-	_, err := srv.ListActiveGrants(context.Background(), &adminv1.ListActiveGrantsRequest{})
+	_, err := srv.ListActiveGrants(context.Background(), &tenantv1.ListActiveGrantsRequest{})
 	if status.Code(err) != codes.PermissionDenied {
 		t.Errorf("want PermissionDenied, got %v", err)
 	}
@@ -58,7 +58,7 @@ func TestListActiveGrants_FiltersExpired(t *testing.T) {
 	srv, _ := newGrantsTestServer(t, grants)
 	ctx := ctxWithTenant(t, "acme")
 
-	resp, err := srv.ListActiveGrants(ctx, &adminv1.ListActiveGrantsRequest{})
+	resp, err := srv.ListActiveGrants(ctx, &tenantv1.ListActiveGrantsRequest{})
 	if err != nil {
 		t.Fatalf("ListActiveGrants: %v", err)
 	}
@@ -75,7 +75,7 @@ func TestListActiveGrants_NearExpiryHighlighted(t *testing.T) {
 	srv, _ := newGrantsTestServer(t, grants)
 	ctx := ctxWithTenant(t, "acme")
 
-	resp, err := srv.ListActiveGrants(ctx, &adminv1.ListActiveGrantsRequest{})
+	resp, err := srv.ListActiveGrants(ctx, &tenantv1.ListActiveGrantsRequest{})
 	if err != nil {
 		t.Fatalf("ListActiveGrants: %v", err)
 	}
@@ -99,7 +99,7 @@ func TestListActiveGrants_FilterByClass(t *testing.T) {
 	srv, _ := newGrantsTestServer(t, grants)
 	ctx := ctxWithTenant(t, "acme")
 
-	resp, err := srv.ListActiveGrants(ctx, &adminv1.ListActiveGrantsRequest{
+	resp, err := srv.ListActiveGrants(ctx, &tenantv1.ListActiveGrantsRequest{
 		RecipientClassFilter: capabilityv1.RecipientClass_RECIPIENT_CLASS_PLUGIN,
 	})
 	if err != nil {
@@ -118,7 +118,7 @@ func TestListActiveGrants_FilterByRPC(t *testing.T) {
 	srv, _ := newGrantsTestServer(t, grants)
 	ctx := ctxWithTenant(t, "acme")
 
-	resp, err := srv.ListActiveGrants(ctx, &adminv1.ListActiveGrantsRequest{RpcFilter: "GetCredential"})
+	resp, err := srv.ListActiveGrants(ctx, &tenantv1.ListActiveGrantsRequest{RpcFilter: "GetCredential"})
 	if err != nil {
 		t.Fatalf("ListActiveGrants: %v", err)
 	}
@@ -135,7 +135,7 @@ func TestListActiveGrants_NearExpiryOnly(t *testing.T) {
 	srv, _ := newGrantsTestServer(t, grants)
 	ctx := ctxWithTenant(t, "acme")
 
-	resp, err := srv.ListActiveGrants(ctx, &adminv1.ListActiveGrantsRequest{IncludeNearExpiryOnly: true})
+	resp, err := srv.ListActiveGrants(ctx, &tenantv1.ListActiveGrantsRequest{IncludeNearExpiryOnly: true})
 	if err != nil {
 		t.Fatalf("ListActiveGrants: %v", err)
 	}
@@ -156,7 +156,7 @@ func TestListActiveGrants_Pagination(t *testing.T) {
 	srv, _ := newGrantsTestServer(t, grants)
 	ctx := ctxWithTenant(t, "acme")
 
-	resp, err := srv.ListActiveGrants(ctx, &adminv1.ListActiveGrantsRequest{Limit: 2, Offset: 1})
+	resp, err := srv.ListActiveGrants(ctx, &tenantv1.ListActiveGrantsRequest{Limit: 2, Offset: 1})
 	if err != nil {
 		t.Fatalf("ListActiveGrants: %v", err)
 	}

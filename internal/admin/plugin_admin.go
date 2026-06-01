@@ -28,7 +28,7 @@ import (
 	"github.com/zeroroot-ai/gibson/internal/authz"
 	"github.com/zeroroot-ai/gibson/internal/secrets"
 
-	adminv1 "github.com/zeroroot-ai/platform-sdk/gen/gibson/admin/v1"
+	tenantv1 "github.com/zeroroot-ai/sdk/api/gen/gibson/tenant/v1"
 	"github.com/zeroroot-ai/sdk/auth"
 )
 
@@ -106,7 +106,7 @@ type ValidatedManifest struct {
 }
 
 // ManifestValidationError is the local mirror of
-// adminv1.PluginManifestValidationError used in interfaces.
+// tenantv1.PluginManifestValidationError used in interfaces.
 type ManifestValidationError struct {
 	Field   string
 	Line    int32
@@ -147,9 +147,9 @@ type BootstrapTokenAuditor interface {
 	Audit(ctx context.Context, event secrets.AuditEvent)
 }
 
-// PluginsAdminServer implements adminv1.PluginsAdminServiceServer.
+// PluginsAdminServer implements tenantv1.PluginAdminServiceServer (ADR-0039).
 type PluginsAdminServer struct {
-	adminv1.UnimplementedPluginsAdminServiceServer
+	tenantv1.UnimplementedPluginAdminServiceServer
 
 	registry  PluginRegistryReader
 	validator PluginManifestValidator
@@ -223,7 +223,7 @@ func NewPluginsAdminServer(cfg PluginsAdminConfig) (*PluginsAdminServer, error) 
 // ---------------------------------------------------------------------------
 
 // ListPluginInstalls returns the tenant's plugin installs.
-func (s *PluginsAdminServer) ListPluginInstalls(ctx context.Context, req *adminv1.ListPluginInstallsRequest) (*adminv1.ListPluginInstallsResponse, error) {
+func (s *PluginsAdminServer) ListPluginInstalls(ctx context.Context, req *tenantv1.ListPluginInstallsRequest) (*tenantv1.ListPluginInstallsResponse, error) {
 	tenant, ok := auth.TenantFromContext(ctx)
 	if !ok {
 		return nil, status.Error(codes.PermissionDenied, "no tenant in context")
@@ -234,13 +234,13 @@ func (s *PluginsAdminServer) ListPluginInstalls(ctx context.Context, req *adminv
 		return nil, status.Errorf(codes.Internal, "registry list: %v", err)
 	}
 
-	out := make([]*adminv1.PluginInstallSummary, 0, len(infos))
+	out := make([]*tenantv1.PluginInstallSummary, 0, len(infos))
 	for _, info := range infos {
 		if req.GetNameFilter() != "" && info.Name != req.GetNameFilter() {
 			continue
 		}
 		summary := pluginInstallToSummary(info)
-		if req.GetStatusFilter() != adminv1.PluginInstallStatus_PLUGIN_INSTALL_STATUS_UNSPECIFIED {
+		if req.GetStatusFilter() != tenantv1.PluginInstallStatus_PLUGIN_INSTALL_STATUS_UNSPECIFIED {
 			if summary.GetStatus() != req.GetStatusFilter() {
 				continue
 			}
@@ -251,14 +251,14 @@ func (s *PluginsAdminServer) ListPluginInstalls(ctx context.Context, req *adminv
 		out = append(out, summary)
 	}
 
-	return &adminv1.ListPluginInstallsResponse{
+	return &tenantv1.ListPluginInstallsResponse{
 		Installs: out,
 		Total:    int32(len(out)),
 	}, nil
 }
 
 // GetPluginInstall returns one install by ID.
-func (s *PluginsAdminServer) GetPluginInstall(ctx context.Context, req *adminv1.GetPluginInstallRequest) (*adminv1.GetPluginInstallResponse, error) {
+func (s *PluginsAdminServer) GetPluginInstall(ctx context.Context, req *tenantv1.GetPluginInstallRequest) (*tenantv1.GetPluginInstallResponse, error) {
 	tenant, ok := auth.TenantFromContext(ctx)
 	if !ok {
 		return nil, status.Error(codes.PermissionDenied, "no tenant in context")
@@ -277,7 +277,7 @@ func (s *PluginsAdminServer) GetPluginInstall(ctx context.Context, req *adminv1.
 
 	summary := pluginInstallToSummary(*info)
 	summary.BoundSecretRefs = s.bindingsFor(ctx, tenant, *info)
-	return &adminv1.GetPluginInstallResponse{Install: summary}, nil
+	return &tenantv1.GetPluginInstallResponse{Install: summary}, nil
 }
 
 // RegisterPlugin atomically registers a plugin per Spec 2 R3.1.
@@ -300,7 +300,7 @@ func (s *PluginsAdminServer) GetPluginInstall(ctx context.Context, req *adminv1.
 //
 // Rollback semantics: each step's rollback is best-effort and idempotent; a
 // rollback failure is logged but does not block the user-visible error.
-func (s *PluginsAdminServer) RegisterPlugin(ctx context.Context, req *adminv1.RegisterPluginRequest) (*adminv1.RegisterPluginResponse, error) {
+func (s *PluginsAdminServer) RegisterPlugin(ctx context.Context, req *tenantv1.RegisterPluginRequest) (*tenantv1.RegisterPluginResponse, error) {
 	tenant, ok := auth.TenantFromContext(ctx)
 	if !ok {
 		return nil, status.Error(codes.PermissionDenied, "no tenant in context")
@@ -312,33 +312,33 @@ func (s *PluginsAdminServer) RegisterPlugin(ctx context.Context, req *adminv1.Re
 	// --- Step 1: validate manifest --------------------------------------
 	manifest, vErrs := s.validator.Validate(req.GetManifestYaml())
 	if len(vErrs) > 0 {
-		out := make([]*adminv1.PluginManifestValidationError, 0, len(vErrs))
+		out := make([]*tenantv1.PluginManifestValidationError, 0, len(vErrs))
 		for _, e := range vErrs {
-			out = append(out, &adminv1.PluginManifestValidationError{
+			out = append(out, &tenantv1.PluginManifestValidationError{
 				Field:   e.Field,
 				Line:    e.Line,
 				Code:    e.Code,
 				Message: e.Message,
 			})
 		}
-		return &adminv1.RegisterPluginResponse{ValidationErrors: out}, status.Error(codes.InvalidArgument, "manifest validation failed")
+		return &tenantv1.RegisterPluginResponse{ValidationErrors: out}, status.Error(codes.InvalidArgument, "manifest validation failed")
 	}
 
 	// Cross-check: every declared secret must have exactly one binding.
 	if vErrs := crossCheckBindings(manifest.DeclaredSecrets, req.GetBindings()); len(vErrs) > 0 {
-		out := make([]*adminv1.PluginManifestValidationError, 0, len(vErrs))
+		out := make([]*tenantv1.PluginManifestValidationError, 0, len(vErrs))
 		for _, e := range vErrs {
-			out = append(out, &adminv1.PluginManifestValidationError{
+			out = append(out, &tenantv1.PluginManifestValidationError{
 				Field:   e.Field,
 				Code:    e.Code,
 				Message: e.Message,
 			})
 		}
-		return &adminv1.RegisterPluginResponse{ValidationErrors: out}, status.Error(codes.InvalidArgument, "binding cross-check failed")
+		return &tenantv1.RegisterPluginResponse{ValidationErrors: out}, status.Error(codes.InvalidArgument, "binding cross-check failed")
 	}
 
 	if req.GetDryRun() {
-		return &adminv1.RegisterPluginResponse{}, nil
+		return &tenantv1.RegisterPluginResponse{}, nil
 	}
 
 	// installID is generated locally — the production registry's Register
@@ -426,7 +426,7 @@ func (s *PluginsAdminServer) RegisterPlugin(ctx context.Context, req *adminv1.Re
 		OccurredAt:    s.now().UTC(),
 	})
 
-	return &adminv1.RegisterPluginResponse{
+	return &tenantv1.RegisterPluginResponse{
 		InstallId:                   installID,
 		PluginPrincipalId:           principalID,
 		BootstrapToken:              bootstrapToken,
@@ -435,7 +435,7 @@ func (s *PluginsAdminServer) RegisterPlugin(ctx context.Context, req *adminv1.Re
 }
 
 // EditPluginSecretBinding rebinds a binding to a different existing secret.
-func (s *PluginsAdminServer) EditPluginSecretBinding(ctx context.Context, req *adminv1.EditPluginSecretBindingRequest) (*adminv1.EditPluginSecretBindingResponse, error) {
+func (s *PluginsAdminServer) EditPluginSecretBinding(ctx context.Context, req *tenantv1.EditPluginSecretBindingRequest) (*tenantv1.EditPluginSecretBindingResponse, error) {
 	tenant, ok := auth.TenantFromContext(ctx)
 	if !ok {
 		return nil, status.Error(codes.PermissionDenied, "no tenant in context")
@@ -478,12 +478,12 @@ func (s *PluginsAdminServer) EditPluginSecretBinding(ctx context.Context, req *a
 	if err := s.authzr.Write(ctx, []authz.Tuple{newTuple}); err != nil {
 		return nil, status.Errorf(codes.Internal, "write new tuple: %v", err)
 	}
-	return &adminv1.EditPluginSecretBindingResponse{}, nil
+	return &tenantv1.EditPluginSecretBindingResponse{}, nil
 }
 
 // RevokePluginSecretBinding removes a single binding and emits a
 // secret_access_revoked audit event.
-func (s *PluginsAdminServer) RevokePluginSecretBinding(ctx context.Context, req *adminv1.RevokePluginSecretBindingRequest) (*adminv1.RevokePluginSecretBindingResponse, error) {
+func (s *PluginsAdminServer) RevokePluginSecretBinding(ctx context.Context, req *tenantv1.RevokePluginSecretBindingRequest) (*tenantv1.RevokePluginSecretBindingResponse, error) {
 	tenant, ok := auth.TenantFromContext(ctx)
 	if !ok {
 		return nil, status.Error(codes.PermissionDenied, "no tenant in context")
@@ -513,7 +513,7 @@ func (s *PluginsAdminServer) RevokePluginSecretBinding(ctx context.Context, req 
 		OccurredAt:    s.now().UTC(),
 	})
 
-	return &adminv1.RevokePluginSecretBindingResponse{}, nil
+	return &tenantv1.RevokePluginSecretBindingResponse{}, nil
 }
 
 // ---------------------------------------------------------------------------
@@ -522,8 +522,8 @@ func (s *PluginsAdminServer) RevokePluginSecretBinding(ctx context.Context, req 
 
 // pluginInstallToSummary maps the dashboard-shaped registry view to the
 // proto wire-shape.
-func pluginInstallToSummary(i PluginInstallInfo) *adminv1.PluginInstallSummary {
-	return &adminv1.PluginInstallSummary{
+func pluginInstallToSummary(i PluginInstallInfo) *tenantv1.PluginInstallSummary {
+	return &tenantv1.PluginInstallSummary{
 		InstallId:           i.InstallID,
 		Name:                i.Name,
 		Version:             i.Version,
@@ -540,22 +540,22 @@ func pluginInstallToSummary(i PluginInstallInfo) *adminv1.PluginInstallSummary {
 
 // statusToEnum maps the registry's lowercase string status to the proto
 // enum. Unknown values return UNSPECIFIED.
-func statusToEnum(s string) adminv1.PluginInstallStatus {
+func statusToEnum(s string) tenantv1.PluginInstallStatus {
 	switch s {
 	case "serving":
-		return adminv1.PluginInstallStatus_PLUGIN_INSTALL_STATUS_SERVING
+		return tenantv1.PluginInstallStatus_PLUGIN_INSTALL_STATUS_SERVING
 	case "unreachable":
-		return adminv1.PluginInstallStatus_PLUGIN_INSTALL_STATUS_UNREACHABLE
+		return tenantv1.PluginInstallStatus_PLUGIN_INSTALL_STATUS_UNREACHABLE
 	case "degraded":
-		return adminv1.PluginInstallStatus_PLUGIN_INSTALL_STATUS_DEGRADED
+		return tenantv1.PluginInstallStatus_PLUGIN_INSTALL_STATUS_DEGRADED
 	default:
-		return adminv1.PluginInstallStatus_PLUGIN_INSTALL_STATUS_UNSPECIFIED
+		return tenantv1.PluginInstallStatus_PLUGIN_INSTALL_STATUS_UNSPECIFIED
 	}
 }
 
 // crossCheckBindings ensures every declared secret has exactly one binding,
 // and every binding's mode + payload is well-formed.
-func crossCheckBindings(declared []string, bindings []*adminv1.PluginSecretBinding) []ManifestValidationError {
+func crossCheckBindings(declared []string, bindings []*tenantv1.PluginSecretBinding) []ManifestValidationError {
 	var errs []ManifestValidationError
 
 	seen := map[string]int{}
@@ -602,7 +602,7 @@ func crossCheckBindings(declared []string, bindings []*adminv1.PluginSecretBindi
 // bindingRef returns the broker-namespaced ref that a binding points at.
 // For mode=existing it is the existing_ref; for mode=create it is the
 // declared_name (the inline-created secret's stored name).
-func bindingRef(b *adminv1.PluginSecretBinding) string {
+func bindingRef(b *tenantv1.PluginSecretBinding) string {
 	if b == nil {
 		return ""
 	}

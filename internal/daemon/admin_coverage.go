@@ -10,36 +10,46 @@ import (
 	"github.com/zeroroot-ai/gibson/internal/authz/registry"
 )
 
-// knownUnregisteredAdminServices lists gibson.admin.v1.* services that appear in
+// knownUnregisteredTenantServices lists gibson.tenant.v1.* services that appear in
 // the authz registry but are intentionally NOT (yet) registered on the daemon
 // gRPC server. Every entry is an acknowledged gap with a tracking issue;
-// registering the service should delete its line here. A NEW admin service must
+// registering the service should delete its line here. A NEW tenant service must
 // be registered in grpc.go — not added here.
-var knownUnregisteredAdminServices = map[string]string{
-	// PluginsAdminServer is implemented (internal/admin/plugin_admin.go) but not
-	// yet wired into grpc.go — same class of gap as SecretsAdminService.
-	// Tracked: gibson#565.
-	"gibson.admin.v1.PluginsAdminService": "implemented but not yet registered — gibson#565",
+//
+// ADR-0039: prefix changed from gibson.admin.v1.* to gibson.tenant.v1.* following
+// the customer-surface recategorisation.
+var knownUnregisteredTenantServices = map[string]string{
+	// PluginsAdminServer is implemented (internal/admin/plugin_admin.go) but
+	// requires ZitadelClient, ManifestValidator, SecretWriter, and BootstrapAuditor
+	// deps that are not yet fully wired in grpc.go. Tracked: gibson#565.
+	"gibson.tenant.v1.PluginAdminService": "implemented but not yet registered — gibson#565",
 }
 
 // assertAdminServicesRegistered is the reverse of assertRegistryCoverage. The
 // latter checks registered -> registry (every served method has an authz rule).
-// This checks registry -> registered for admin services: every gibson.admin.v1.*
-// service declared in the authz registry must actually be registered on the
-// daemon gRPC server, or be an acknowledged known gap. It catches a service that
-// is fully declared + authz-gated but never served — which boots cleanly and
-// only fails (Unimplemented) when a client calls it (see gibson#564, where
-// SecretsAdminService had been unregistered since inception).
+// This checks registry -> registered for tenant-admin services: every
+// gibson.tenant.v1.* service declared in the authz registry must actually be
+// registered on the daemon gRPC server, or be an acknowledged known gap. It
+// catches a service that is fully declared + authz-gated but never served —
+// which boots cleanly and only fails (Unimplemented) when a client calls it
+// (see gibson#564, where SecretsAdminService had been unregistered since inception).
+//
+// ADR-0039: coverage now checks gibson.tenant.v1.* in addition to the
+// remaining gibson.admin.v1.* services (the latter set should be empty after
+// the migration; the prefix is kept for forward-compatibility until the
+// authz-registry is regenerated and confirmed clean).
 func assertAdminServicesRegistered(registered map[string]struct{}) error {
 	seen := map[string]bool{}
 	var missing []string
 	for _, e := range registry.Registry {
 		svc := e.Service
-		if !strings.HasPrefix(svc, "gibson.admin.v1.") || seen[svc] {
+		isTenant := strings.HasPrefix(svc, "gibson.tenant.v1.")
+		isAdmin := strings.HasPrefix(svc, "gibson.admin.v1.")
+		if (!isTenant && !isAdmin) || seen[svc] {
 			continue
 		}
 		seen[svc] = true
-		if _, ok := knownUnregisteredAdminServices[svc]; ok {
+		if _, ok := knownUnregisteredTenantServices[svc]; ok {
 			continue
 		}
 		if _, ok := registered[svc]; !ok {
@@ -51,9 +61,9 @@ func assertAdminServicesRegistered(registered map[string]struct{}) error {
 	}
 	sort.Strings(missing)
 	return fmt.Errorf(
-		"admin services declared in the authz registry but not registered on the daemon gRPC server "+
+		"tenant/admin services declared in the authz registry but not registered on the daemon gRPC server "+
 			"(add the Register<Svc>ServiceServer call in grpc.go, or — if intentionally served elsewhere — "+
-			"add to knownUnregisteredAdminServices with a tracking issue): %s",
+			"add to knownUnregisteredTenantServices with a tracking issue): %s",
 		strings.Join(missing, ", "))
 }
 

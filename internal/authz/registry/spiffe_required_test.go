@@ -30,18 +30,24 @@ var allowedUnauthenticated = map[string]bool{
 	"/gibson.daemon.v1.DaemonService/Connect": true,
 	"/gibson.daemon.v1.DaemonService/Ping":    true,
 
-	// GetReservedNames is intentionally unauthenticated on TenantAdminService.
+	// GetReservedNames is intentionally unauthenticated on MembershipService.
 	// It returns the chart-managed denylist for the signup form — a pre-auth
 	// surface where no tenant JWT can be present. Spec: issue #395
-	// (tenant-service-admin-handlers: GetReservedNames).
-	"/gibson.admin.v1.TenantAdminService/GetReservedNames": true,
+	// (tenant-service-admin-handlers: GetReservedNames). ADR-0039: moved from
+	// gibson.admin.v1.TenantAdminService to gibson.tenant.v1.MembershipService.
+	"/gibson.tenant.v1.MembershipService/GetReservedNames": true,
 
 	// GetSignupProgress is intentionally unauthenticated.
 	// Polled by the browser during the signup flow (before the user has an account).
 	// The attempt_id is an opaque UUID-v4 capability functioning as a single-use token;
 	// the response carries only step names + error codes, never PII.
 	// Spec: dashboard-no-backing-store-clients (Module 2 — Signup Progress RPC).
-	"/gibson.user.v1.UserService/GetSignupProgress": true,
+	// ADR-0039: promoted from daemon-local gibson.user.v1.UserService to
+	// sdk gibson.tenant.v1.UserService; both appear in the registry until the
+	// daemon-local proto is cleaned up in a follow-up (the old service is no
+	// longer registered on the gRPC server).
+	"/gibson.tenant.v1.UserService/GetSignupProgress": true,
+	"/gibson.user.v1.UserService/GetSignupProgress":   true, // daemon-local proto retained for registry until cleanup
 }
 
 // TestOnlyConnectAndPingAreUnauthenticated walks the generated Registry map

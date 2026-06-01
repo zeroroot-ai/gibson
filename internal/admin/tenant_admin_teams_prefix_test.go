@@ -3,7 +3,7 @@ package admin
 import (
 	"testing"
 
-	adminv1 "github.com/zeroroot-ai/platform-sdk/gen/gibson/admin/v1"
+	tenantv1 "github.com/zeroroot-ai/sdk/api/gen/gibson/tenant/v1"
 )
 
 // TestCreateTeam_NormalizesTenantPrefix locks the daemon-side defense against
@@ -30,7 +30,7 @@ func TestCreateTeam_NormalizesTenantPrefix(t *testing.T) {
 			srv.authorizer = sa
 
 			ctx := adminCtx(t, "zero-root")
-			_, err := srv.CreateTeam(ctx, &adminv1.CreateTeamRequest{
+			_, err := srv.CreateTeam(ctx, &tenantv1.CreateTeamRequest{
 				TenantId: tc.tenantID,
 				TeamId:   "test",
 			})
