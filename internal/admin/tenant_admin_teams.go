@@ -29,7 +29,9 @@ import (
 	"context"
 	"encoding/base64"
 	"encoding/json"
+	"errors"
 	"fmt"
+	"log/slog"
 	"sort"
 	"strings"
 
@@ -37,6 +39,7 @@ import (
 	"google.golang.org/grpc/status"
 
 	"github.com/zeroroot-ai/gibson/internal/authz"
+	"github.com/zeroroot-ai/gibson/internal/idp"
 
 	tenantv1 "github.com/zeroroot-ai/sdk/api/gen/gibson/tenant/v1"
 	"github.com/zeroroot-ai/sdk/auth"
@@ -284,13 +287,40 @@ func (s *TenantAdminServer) ListTeamMembers(ctx context.Context, req *tenantv1.L
 	}
 	for i := offset; i < end; i++ {
 		userRef := combined[i]
+		userID := stripFGATypePrefix(userRef, "user")
 		_, isAdmin := adminSet[userRef]
-		out.Members = append(out.Members, &tenantv1.TeamMember{
-			UserId:      stripFGATypePrefix(userRef, "user"),
-			Email:       "", // dashboard joins via Zitadel
-			DisplayName: "",
-			IsAdmin:     isAdmin,
-		})
+		m := &tenantv1.TeamMember{
+			UserId:  userID,
+			IsAdmin: isAdmin,
+		}
+		// Enrich display_name/email from the IdP, mirroring ListMembers — the
+		// roster must show who the member is, not a raw Zitadel sub. Best-
+		// effort: on failure/empty the dashboard falls back to the user id.
+		if s.idpClient != nil {
+			profile, profileErr := s.idpClient.GetUserProfile(ctx, userID)
+			switch {
+			case profileErr != nil:
+				reason := "profile_lookup_failed"
+				switch {
+				case errors.Is(profileErr, idp.ErrUnreachable):
+					reason = "directory_unavailable"
+				case errors.Is(profileErr, idp.ErrNotFound):
+					reason = "profile_not_found"
+				}
+				s.logger.WarnContext(ctx, "ListTeamMembers: identity enrichment failed",
+					slog.String("user_id", userID),
+					slog.String("reason", reason),
+					slog.String("error", profileErr.Error()))
+			case profile.DisplayName == "" && profile.Email == "":
+				s.logger.WarnContext(ctx, "ListTeamMembers: identity enrichment returned an empty profile",
+					slog.String("user_id", userID),
+					slog.String("reason", "empty_profile"))
+			default:
+				m.DisplayName = profile.DisplayName
+				m.Email = profile.Email
+			}
+		}
+		out.Members = append(out.Members, m)
 	}
 	if end < len(combined) {
 		out.NextPageToken = encodeTeamCursor(end)
