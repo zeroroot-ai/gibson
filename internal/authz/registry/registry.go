@@ -2223,6 +2223,16 @@ var Registry = map[string]Entry{
 		Unauthenticated:   false,
 		Self:              false,
 	},
+	"/gibson.tenant.v1.MembershipService/SetCatalogEnabled": {
+		Method:            "/gibson.tenant.v1.MembershipService/SetCatalogEnabled",
+		Service:           "gibson.tenant.v1.MembershipService",
+		Relation:          "admin",
+		ObjectType:        "tenant",
+		ObjectDeriver:     "tenant_from_identity",
+		AllowedIdentities: IdentityUser,
+		Unauthenticated:   false,
+		Self:              false,
+	},
 	"/gibson.tenant.v1.MembershipService/SetComponentAccess": {
 		Method:            "/gibson.tenant.v1.MembershipService/SetComponentAccess",
 		Service:           "gibson.tenant.v1.MembershipService",

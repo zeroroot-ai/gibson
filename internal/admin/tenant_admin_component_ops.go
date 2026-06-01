@@ -43,6 +43,76 @@ import (
 )
 
 // ---------------------------------------------------------------------------
+// SetCatalogEnabled (ADR-0041 remaining gap — catalog-enablement daemon route)
+// ---------------------------------------------------------------------------
+
+// SetCatalogEnabled writes or deletes the FGA tenant_enabled tuple for a
+// (tenant, component) pair, making the component appear in (or disappear
+// from) the tenant's catalog. This is the daemon-side replacement for the
+// dashboard's previous direct ComponentGrant CRD write.
+//
+// When enabled is true the tuple is written (idempotent if already present).
+// When enabled is false the tuple is deleted (idempotent if already absent).
+//
+// ADR-0041: catalog-enablement write routed through the daemon so the
+// dashboard can delete its direct K8s client; the ComponentGrant reconciler
+// in tenant-operator is superseded for new grants and can be retired once
+// existing CRDs are cleaned up.
+func (s *TenantAdminServer) SetCatalogEnabled(ctx context.Context, req *tenantv1.SetCatalogEnabledRequest) (*tenantv1.SetCatalogEnabledResponse, error) {
+	if s.authorizer == nil {
+		return nil, status.Error(codes.Unavailable, "authorizer not configured")
+	}
+	tenant, ok := auth.TenantFromContext(ctx)
+	if !ok {
+		return nil, status.Error(codes.PermissionDenied, "no tenant in context")
+	}
+	if req.GetComponentRef() == "" {
+		return nil, status.Error(codes.InvalidArgument, "component_ref is required")
+	}
+
+	componentRef := req.GetComponentRef()
+	if !strings.Contains(componentRef, ":") {
+		componentRef = "component:" + componentRef
+	}
+
+	tenantRef := "tenant:" + tenant.String()
+
+	tuple := authz.Tuple{
+		User:     tenantRef,
+		Relation: "tenant_enabled",
+		Object:   componentRef,
+	}
+
+	if req.GetEnabled() {
+		// Check if already present (idempotency).
+		present, err := s.authorizer.Check(ctx, tenantRef, "tenant_enabled", componentRef)
+		if err != nil {
+			return nil, status.Errorf(codes.Internal, "fga Check tenant_enabled: %v", err)
+		}
+		if present {
+			return &tenantv1.SetCatalogEnabledResponse{Written: false}, nil
+		}
+		if err := s.authorizer.Write(ctx, []authz.Tuple{tuple}); err != nil {
+			return nil, status.Errorf(codes.Internal, "fga Write tenant_enabled: %v", err)
+		}
+		return &tenantv1.SetCatalogEnabledResponse{Written: true}, nil
+	}
+
+	// Delete path.
+	present, err := s.authorizer.Check(ctx, tenantRef, "tenant_enabled", componentRef)
+	if err != nil {
+		return nil, status.Errorf(codes.Internal, "fga Check tenant_enabled: %v", err)
+	}
+	if !present {
+		return &tenantv1.SetCatalogEnabledResponse{Deleted: false}, nil
+	}
+	if err := s.authorizer.Delete(ctx, []authz.Tuple{tuple}); err != nil {
+		return nil, status.Errorf(codes.Internal, "fga Delete tenant_enabled: %v", err)
+	}
+	return &tenantv1.SetCatalogEnabledResponse{Deleted: true}, nil
+}
+
+// ---------------------------------------------------------------------------
 // SetComponentAccess (#397)
 // ---------------------------------------------------------------------------
 

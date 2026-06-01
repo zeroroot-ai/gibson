@@ -218,6 +218,7 @@ rpc,relation,object_type,deriver,identities,source_proto_file,mode
 /gibson.tenant.v1.MembershipService/ListTeamMembers,admin,tenant,tenant_from_identity,USER,gibson/tenant/v1/membership.proto,rule
 /gibson.tenant.v1.MembershipService/ListTeams,admin,tenant,tenant_from_identity,USER,gibson/tenant/v1/membership.proto,rule
 /gibson.tenant.v1.MembershipService/RemoveTeamMember,admin,tenant,tenant_from_identity,USER,gibson/tenant/v1/membership.proto,rule
+/gibson.tenant.v1.MembershipService/SetCatalogEnabled,admin,tenant,tenant_from_identity,USER,gibson/tenant/v1/membership.proto,rule
 /gibson.tenant.v1.MembershipService/SetComponentAccess,admin,tenant,tenant_from_identity,USER,gibson/tenant/v1/membership.proto,rule
 /gibson.tenant.v1.MembershipService/SetTeamAdmin,admin,tenant,tenant_from_identity,USER,gibson/tenant/v1/membership.proto,rule
 /gibson.tenant.v1.MembershipService/SetTenantRole,admin,tenant,tenant_from_identity,USER,gibson/tenant/v1/membership.proto,rule
