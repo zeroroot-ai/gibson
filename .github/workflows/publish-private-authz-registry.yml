@@ -41,6 +41,14 @@ on:
         description: 'Gibson tag whose registry artifact to publish'
         required: true
         type: string
+    secrets:
+      # PAT with read access to private zeroroot-ai org repos (platform-sdk,
+      # platform-clients, etc.). Used to configure git credentials so
+      # `go mod download github.com/zeroroot-ai/platform-sdk` succeeds on
+      # the runner. The same secret is used by gibson-daemon.yml via the
+      # reusable-image-build ghtoken mechanism. gibson#446.
+      GH_PAT_GIBSON_RO:
+        required: false
 
 permissions:
   contents: read
@@ -85,14 +93,26 @@ jobs:
           fi
           echo "tag=$TAG" >> "$GITHUB_OUTPUT"
 
-      - name: Hydrate Go module cache for SDK
-        # `make authz-registry` runs `go list -m -f '{{.Dir}}' github.com/zeroroot-ai/sdk`
-        # to resolve the pinned SDK source dir. On a fresh runner the module
-        # cache is empty until something downloads it; `setup-go`'s cache hit
-        # is keyed on go.sum and may miss. Pre-download to make resolution
-        # deterministic.
-        # Spec: zero-trust-hardening follow-up.
-        run: go mod download github.com/zeroroot-ai/sdk
+      - name: Configure git credentials for private Go modules
+        # `make authz-registry` downloads platform-sdk (private repo).
+        # Without credentials, `go mod download github.com/zeroroot-ai/platform-sdk`
+        # fails with "could not read Username for https://github.com".
+        # This mirrors the pattern used in the Dockerfile's go mod download step.
+        # gibson#446 — platform-sdk access was the root cause of publish failures.
+        env:
+          GOPRIVATE: github.com/zeroroot-ai
+        run: |
+          git config --global url."https://x-access-token:${{ secrets.GH_PAT_GIBSON_RO }}@github.com/".insteadOf "https://github.com/"
+          echo "GOPRIVATE=github.com/zeroroot-ai" >> "$GITHUB_ENV"
+
+      - name: Hydrate Go module cache for SDK and platform-sdk
+        # Pre-download both private modules so `go list -m -f '{{.Dir}}'`
+        # succeeds deterministically. go.sum is already committed; this
+        # step cannot introduce new dependencies.
+        # Spec: zero-trust-hardening follow-up / gibson#446.
+        run: |
+          go mod download github.com/zeroroot-ai/sdk
+          go mod download github.com/zeroroot-ai/platform-sdk
 
       - name: Regenerate authz registry and assert no drift
         # Runs `make authz-registry` which builds authz-registry-gen from the
