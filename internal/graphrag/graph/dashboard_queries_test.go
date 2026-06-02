@@ -3,6 +3,7 @@ package graph
 import (
 	"context"
 	"errors"
+	"strings"
 	"testing"
 	"time"
 
@@ -78,6 +79,65 @@ func TestApplyDepthCap(t *testing.T) {
 		if got != tc.want {
 			t.Errorf("applyDepthCap(%d) = %d, want %d", tc.in, got, tc.want)
 		}
+	}
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
+// Regression: graph queries must NOT filter on n.tenant_id.
+//
+// The data plane writes nodes WITHOUT a tenant_id property (neo4j.go
+// CreateNode — tenant isolation is the dedicated per-tenant Neo4j database
+// resolved by pool.For). A WHERE n.tenant_id = $tenant predicate therefore
+// matches zero rows and silently empties every dashboard read, even though
+// the tenant's graph is fully populated. These tests lock the predicate out of
+// the GetFullGraph builders — the path behind the dashboard graph view.
+// ─────────────────────────────────────────────────────────────────────────────
+
+func TestBuildCountCypher_NoTenantPredicate(t *testing.T) {
+	t.Parallel()
+
+	// No labels → must match every node, no tenant_id filter.
+	cypher, _ := buildCountCypher("acme", nil)
+	if strings.Contains(cypher, "tenant_id") {
+		t.Fatalf("count cypher must not filter on tenant_id (per-tenant DB isolation); got %q", cypher)
+	}
+	if !strings.HasPrefix(cypher, "MATCH (n) RETURN") {
+		t.Errorf("unfiltered count cypher should be a bare MATCH (n); got %q", cypher)
+	}
+
+	// With labels → label filter under WHERE, still no tenant_id, no dangling AND.
+	cypherL, _ := buildCountCypher("acme", []string{"Mission", "Finding"})
+	if strings.Contains(cypherL, "tenant_id") {
+		t.Fatalf("labelled count cypher must not filter on tenant_id; got %q", cypherL)
+	}
+	if !strings.Contains(cypherL, "WHERE (n:`Mission` OR n:`Finding`)") {
+		t.Errorf("label filter should be a well-formed WHERE clause; got %q", cypherL)
+	}
+	if strings.Contains(cypherL, " AND (") {
+		t.Errorf("label filter must not begin with a dangling AND; got %q", cypherL)
+	}
+}
+
+func TestBuildNodeFetchCypher_NoTenantPredicate(t *testing.T) {
+	t.Parallel()
+
+	cypher, params := buildNodeFetchCypher("acme", nil, 1000)
+	if strings.Contains(cypher, "tenant_id") {
+		t.Fatalf("node-fetch cypher must not filter on tenant_id; got %q", cypher)
+	}
+	if !strings.HasPrefix(cypher, "MATCH (n) RETURN DISTINCT n") {
+		t.Errorf("unfiltered node-fetch cypher should be a bare MATCH (n); got %q", cypher)
+	}
+	if _, ok := params["limit"]; !ok {
+		t.Errorf("node-fetch params must carry $limit; got %v", params)
+	}
+
+	cypherL, _ := buildNodeFetchCypher("acme", []string{"Host"}, 10)
+	if strings.Contains(cypherL, "tenant_id") {
+		t.Fatalf("labelled node-fetch cypher must not filter on tenant_id; got %q", cypherL)
+	}
+	if !strings.Contains(cypherL, "WHERE (n:`Host`)") {
+		t.Errorf("label filter should be a well-formed WHERE clause; got %q", cypherL)
 	}
 }
 
@@ -349,9 +409,9 @@ func TestGetMissionGraph_HappyPath(t *testing.T) {
 func TestGetMissionGraph_WrongTenantReturnsEmpty(t *testing.T) {
 	t.Parallel()
 	ctx := context.Background()
-	// The Cypher includes WHERE run.tenant_id = $tenant, so a mission belonging
-	// to a different tenant returns no rows. We simulate this by returning an
-	// empty node list from ExecuteRead.
+	// A mission belonging to a different tenant lives in that tenant's own
+	// dedicated Neo4j database (pool.For), so this tenant's session returns no
+	// rows. We simulate that by returning an empty node list from ExecuteRead.
 	tenant := mustTenantID("tenant-a")
 
 	callIdx := 0
@@ -501,7 +561,7 @@ func TestFindingCounts_TenantIsolation(t *testing.T) {
 
 	client := &callableGraphClient{
 		readFn: func(_ context.Context, fn func(neo4j.ManagedTransaction) (any, error)) (any, error) {
-			// Simulate Neo4j returning empty (tenant_id mismatch in WHERE clause).
+			// Simulate an empty per-tenant Neo4j database (no findings recorded).
 			return []CountBucket{}, nil
 		},
 	}
@@ -824,7 +884,7 @@ func TestGraphSummary_Empty(t *testing.T) {
 // ─────────────────────────────────────────────────────────────────────────────
 // GraphContext — missing node returns empty (soft-fail)
 // ExecuteRead returns (nil, nil) → simulates 0 rows from Neo4j when the node
-// does not exist or has a different tenant_id.
+// does not exist in this tenant's database.
 // ─────────────────────────────────────────────────────────────────────────────
 
 func TestGraphContext_MissingNode_SoftFail(t *testing.T) {
@@ -887,8 +947,9 @@ func TestGraphContext_CapEnforced(t *testing.T) {
 func TestGraphContext_TenantIsolation(t *testing.T) {
 	t.Parallel()
 	ctx := context.Background()
-	// Simulate tenant-B querying a node owned by tenant-A.
-	// Neo4j WHERE n.tenant_id = $tenant returns 0 rows → ExecuteRead returns nil.
+	// tenant-B queries a node owned by tenant-A: that node lives in tenant-A's
+	// dedicated Neo4j database, so tenant-B's session returns 0 rows →
+	// ExecuteRead returns nil.
 	tenantB := mustTenantID("tenant-b")
 
 	client := &callableGraphClient{
