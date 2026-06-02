@@ -14,8 +14,42 @@ import (
 
 	tenantv1 "github.com/zeroroot-ai/sdk/api/gen/gibson/tenant/v1"
 	pdataplane "github.com/zeroroot-ai/gibson/pkg/platform/dataplane"
+	sdksecrets "github.com/zeroroot-ai/platform-clients/secrets"
 	"github.com/zeroroot-ai/sdk/auth"
 )
+
+// TestGetTenantLangfuseCredentials_ErrorMapping pins the fix from gibson#596:
+// a genuine missing secret maps to NotFound, but any other secrets-backend
+// failure (e.g. a Vault PermissionDenied) maps to FailedPrecondition — it must
+// NOT be masked as "not configured", which hid the real cause of the Traces
+// outage (gibson#594). Regression guard for gibson#597.
+func TestGetTenantLangfuseCredentials_ErrorMapping(t *testing.T) {
+	cases := []struct {
+		name      string
+		brokerErr error
+		wantCode  codes.Code
+	}{
+		{"secret absent → NotFound", sdksecrets.ErrNotFound, codes.NotFound},
+		{"backend denied → FailedPrecondition (not masked as NotFound)", sdksecrets.ErrPermissionDenied, codes.FailedPrecondition},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			svc := buildAPITestService(t, &apiTestBroker{getErr: tc.brokerErr})
+			h, err := NewCredentialHandler(svc)
+			if err != nil {
+				t.Fatalf("NewCredentialHandler: %v", err)
+			}
+			srv := blankServer()
+			srv.credentialHandler = h
+			_, err = srv.GetTenantLangfuseCredentials(
+				tenantContext("acme"),
+				&tenantv1.GetTenantLangfuseCredentialsRequest{TenantId: "acme"},
+			)
+			assert.Equal(t, tc.wantCode, grpcCode(err),
+				"broker err %v must map to %v", tc.brokerErr, tc.wantCode)
+		})
+	}
+}
 
 // tenantContext returns a context with the given tenant ID.
 func tenantContext(tenantID string) context.Context {

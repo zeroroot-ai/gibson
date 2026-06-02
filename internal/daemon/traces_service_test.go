@@ -32,8 +32,38 @@ import (
 	"github.com/zeroroot-ai/gibson/internal/authz/registry"
 	daemonapi "github.com/zeroroot-ai/gibson/internal/daemon/api"
 	tracespb "github.com/zeroroot-ai/gibson/internal/daemon/api/gibson/traces/v1"
+	sdksecrets "github.com/zeroroot-ai/platform-clients/secrets"
 	"github.com/zeroroot-ai/sdk/auth"
 )
+
+// TestTracesService_ListTraces_CredentialErrorMapping is the TracesService
+// counterpart to the api-package test: a genuine missing Langfuse secret →
+// NotFound, but any other secrets-backend failure (e.g. Vault PermissionDenied)
+// → FailedPrecondition, never masked as "not configured" (gibson#594/#596/#597).
+func TestTracesService_ListTraces_CredentialErrorMapping(t *testing.T) {
+	cases := []struct {
+		name      string
+		brokerErr error
+		want      codes.Code
+	}{
+		{"secret absent → NotFound", sdksecrets.ErrNotFound, codes.NotFound},
+		{"backend denied → FailedPrecondition (not masked as NotFound)", sdksecrets.ErrPermissionDenied, codes.FailedPrecondition},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			svc := buildTestSecretsService(t, nil, tc.brokerErr)
+			h, err := daemonapi.NewCredentialHandler(svc)
+			if err != nil {
+				t.Fatalf("NewCredentialHandler: %v", err)
+			}
+			srv := NewTracesServer(func() *daemonapi.CredentialHandler { return h }, nil)
+			ctx := auth.ContextWithTenantString(context.Background(), "acme")
+			_, err = srv.ListTraces(ctx, &tracespb.ListTracesRequest{})
+			assert.Equal(t, tc.want, status.Code(err),
+				"broker err %v must map to %v", tc.brokerErr, tc.want)
+		})
+	}
+}
 
 // keep time import used in parseTimestamp tests.
 var _ = time.RFC3339
