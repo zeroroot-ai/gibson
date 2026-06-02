@@ -10,9 +10,10 @@
 //
 // Tenant-scoping is enforced by the Langfuse project credentials themselves:
 // each tenant is provisioned with a separate Langfuse project, and the
-// credentials stored under langfuse_project:<tenantID> scope all API calls to
-// that project. Cross-tenant reads are structurally impossible — a caller in
-// tenant A gets tenant A's credentials, which Langfuse rejects for tenant B's
+// credentials stored at infra/langfuse inside the tenant's Vault namespace
+// scope all API calls to that project. Cross-tenant reads are structurally
+// impossible — a caller in tenant A gets tenant A's credentials, which Langfuse
+// rejects for tenant B's
 // project.
 //
 // Spec: dashboard-no-backing-store-clients (Module 1 — TracesService).
@@ -22,7 +23,6 @@ import (
 	"context"
 	"encoding/json"
 	"errors"
-	"fmt"
 	"log/slog"
 	"strconv"
 	"time"
@@ -33,6 +33,7 @@ import (
 
 	daemonapi "github.com/zeroroot-ai/gibson/internal/daemon/api"
 	tracespb "github.com/zeroroot-ai/gibson/internal/daemon/api/gibson/traces/v1"
+	pdataplane "github.com/zeroroot-ai/gibson/pkg/platform/dataplane"
 	"github.com/zeroroot-ai/sdk/auth"
 )
 
@@ -69,13 +70,16 @@ func NewTracesServer(
 }
 
 // ---------------------------------------------------------------------------
-// langfuseCredentialName is the same helper used in the api package. Redeclared
-// here to keep the daemon package self-contained without importing internal/api
-// beyond the CredentialHandler type itself.
+// tracesLangfuseCredentialName mirrors langfuseCredentialName in the api
+// package: the Langfuse project credentials live at pdataplane.VaultPathInfra-
+// Langfuse ("infra/langfuse") — where the tenant-operator writes them and the
+// per-tenant OpenBao policy grants read (secret/data/infra/*). The tenant is
+// scoped by the per-tenant Vault namespace, so the name carries no tenant id.
+// The legacy "langfuse_project:<id>" name resolved to a path the policy denied.
 // ---------------------------------------------------------------------------
 
-func tracesLangfuseCredentialName(tenantID string) string {
-	return fmt.Sprintf("langfuse_project:%s", tenantID)
+func tracesLangfuseCredentialName(_ string) string {
+	return pdataplane.VaultPathInfraLangfuse
 }
 
 // resolveClient is the common preamble:

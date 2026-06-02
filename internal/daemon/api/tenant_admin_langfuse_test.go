@@ -13,6 +13,7 @@ import (
 	"google.golang.org/grpc/codes"
 
 	tenantv1 "github.com/zeroroot-ai/sdk/api/gen/gibson/tenant/v1"
+	pdataplane "github.com/zeroroot-ai/gibson/pkg/platform/dataplane"
 	"github.com/zeroroot-ai/sdk/auth"
 )
 
@@ -101,4 +102,24 @@ func TestGetTenantLangfuseCredentials_EmptyTenantId_InvalidArgument(t *testing.T
 		TenantId: "",
 	})
 	assert.Equal(t, codes.InvalidArgument, grpcCode(err))
+}
+
+// TestLangfuseCredentialName_MatchesInfraWritePath pins the Langfuse credential
+// name to the per-tenant Vault path the tenant-operator writes
+// (pdataplane.VaultPathInfraLangfuse = "infra/langfuse") and that the per-tenant
+// OpenBao policy grants read on (secret/data/infra/*). Regression guard for the
+// legacy "langfuse_project:<id>" name, which resolved to a path the policy
+// denied (403) — silently surfaced to the dashboard as "credentials not
+// configured". The tenant is scoped by the per-tenant Vault namespace, so the
+// name must NOT embed a tenant id.
+func TestLangfuseCredentialName_MatchesInfraWritePath(t *testing.T) {
+	const want = "infra/langfuse"
+	if pdataplane.VaultPathInfraLangfuse != want {
+		t.Fatalf("VaultPathInfraLangfuse = %q, want %q", pdataplane.VaultPathInfraLangfuse, want)
+	}
+	for _, tenant := range []string{"testoc", "acme", ""} {
+		if got := langfuseCredentialName(tenant); got != want {
+			t.Errorf("langfuseCredentialName(%q) = %q, want %q (must not embed tenant id)", tenant, got, want)
+		}
+	}
 }

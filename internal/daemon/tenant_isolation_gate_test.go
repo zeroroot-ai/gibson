@@ -19,7 +19,7 @@
 //  3. AuthzRegistry: every RPC carries the correct relation annotation
 //
 // Audit summary:
-//   - Langfuse:  PASS — credentials keyed by "langfuse_project:<tenantID>"
+//   - Langfuse:  PASS — credentials at "infra/langfuse" inside the per-tenant Vault namespace
 //   - Neo4j:     PASS — pool.For(ctx, tenant) is per-tenant; summary cache keyed by tenantID
 //   - Redis:     PASS — all user-scoped keys embed tenantID; cross-tenant tests in api/user_state_test.go
 //   - Postgres:  PASS (documented exception) — platform dedup table, no per-tenant data
@@ -72,9 +72,12 @@ func isoGRPCCode(err error) codes.Code {
 // AUDIT NOTE:
 //   Every TracesService RPC calls resolveClient(ctx) which:
 //     1. auth.TenantFromContext(ctx) → PermissionDenied when absent or zero.
-//     2. credHandler.GetDecrypted(ctx, "langfuse_project:<tenantID>") — the
-//        credential lookup key embeds the tenant ID, so tenant A's key is
-//        structurally unreachable from a tenant B context.
+//     2. credHandler.GetDecrypted(ctx, "infra/langfuse") — a stable name. The
+//        secrets broker reads it inside the AUTHENTICATED tenant's private Vault
+//        namespace (selected from the context tenant, not a caller-supplied
+//        value), so tenant A's secret is structurally unreachable from a tenant
+//        B context. (The old tenant-embedding name resolved to a path the
+//        per-tenant OpenBao policy denied — that was the traces-403 bug.)
 //     3. Constructs a per-call langfuseClient from the decrypted credentials.
 //
 //   Cross-tenant reads are structurally impossible: a caller in tenant A receives
@@ -154,22 +157,21 @@ func TestLangfuse_CredentialHandler_NilYieldsUnavailable(t *testing.T) {
 func TestLangfuse_CrossTenantCredentialIsolation(t *testing.T) {
 	t.Parallel()
 
-	nameA := tracesLangfuseCredentialName("tenant-alpha")
-	nameB := tracesLangfuseCredentialName("tenant-beta")
+	// Isolation is NOT name-based. The credential name is the stable infra path
+	// "infra/langfuse" for every tenant; the secrets broker reads it inside the
+	// authenticated tenant's private Vault namespace (selected from the context
+	// tenant), and the per-tenant OpenBao policy scopes access to that namespace.
+	// So the same name in two different tenant contexts resolves to two different,
+	// mutually-unreachable secrets. (The old tenant-embedding name resolved to a
+	// path the policy denied — the traces-403 bug this guards against recurring.)
+	require.Equal(t, "infra/langfuse", tracesLangfuseCredentialName("tenant-alpha"))
+	require.Equal(t, tracesLangfuseCredentialName("tenant-alpha"),
+		tracesLangfuseCredentialName("tenant-beta"),
+		"name is the stable infra path; tenant isolation comes from the per-tenant Vault namespace, not the name")
 
-	require.NotEqual(t, nameA, nameB,
-		"credential lookup keys must differ across tenants (cross-tenant IDOR guard)")
-	assert.Contains(t, nameA, "tenant-alpha",
-		"credential name must embed the full tenant ID")
-	assert.Contains(t, nameB, "tenant-beta",
-		"credential name must embed the full tenant ID")
-
-	// Two real tenants must never share a credential key.
-	assert.NotEqual(t,
-		tracesLangfuseCredentialName("acme"),
-		tracesLangfuseCredentialName("globex"),
-		"credential key must include the tenant ID, not be a fixed global key",
-	)
+	// The structural cross-tenant guard lives in resolveClient (tenant-from-context
+	// selects the namespace) and in the RPC handlers (req.TenantId == context
+	// tenant). Fail-closed behaviour is covered by TestLangfuse_FailClosed_MissingTenant.
 }
 
 // TestLangfuse_AuthzRegistry verifies that all four TracesService RPCs require

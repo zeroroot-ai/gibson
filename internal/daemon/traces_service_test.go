@@ -194,14 +194,19 @@ func TestAddTraceScore_NilCredentialHandler_Unavailable(t *testing.T) {
 // Cross-tenant isolation: credential names are distinct per tenant
 // ---------------------------------------------------------------------------
 
-func TestTracesLangfuseCredentialName_Isolation(t *testing.T) {
+func TestTracesLangfuseCredentialName_StableInfraPath(t *testing.T) {
 	t.Parallel()
-	nameA := tracesLangfuseCredentialName("tenant-A")
-	nameB := tracesLangfuseCredentialName("tenant-B")
-	assert.NotEqual(t, nameA, nameB,
-		"credential names for different tenants must be distinct")
-	assert.Contains(t, nameA, "tenant-A")
-	assert.Contains(t, nameB, "tenant-B")
+	// The credential name is the stable per-tenant Vault infra path
+	// (infra/langfuse) — NOT a tenant-embedding key. Tenant isolation is
+	// structural: the secrets broker resolves the authenticated tenant from
+	// context and reads inside that tenant's private Vault namespace, and the
+	// RPC handlers enforce req.TenantId == context tenant. Embedding the tenant
+	// id in the name (the old "langfuse_project:<id>") resolved to a path the
+	// per-tenant policy denied (403).
+	for _, tenant := range []string{"tenant-A", "tenant-B", "acme", ""} {
+		assert.Equal(t, "infra/langfuse", tracesLangfuseCredentialName(tenant),
+			"credential name must be the stable infra path for every tenant")
+	}
 }
 
 // ---------------------------------------------------------------------------
