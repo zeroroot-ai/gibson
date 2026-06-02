@@ -2926,11 +2926,11 @@ var Registry = map[string]Entry{
 	"/gibson.tenant.v1.UserService/SetSignupProgress": {
 		Method:            "/gibson.tenant.v1.UserService/SetSignupProgress",
 		Service:           "gibson.tenant.v1.UserService",
-		Relation:          "member",
-		ObjectType:        "tenant",
-		ObjectDeriver:     "tenant_from_identity",
-		AllowedIdentities: IdentityUser | IdentityService,
-		Unauthenticated:   false,
+		Relation:          "",
+		ObjectType:        "",
+		ObjectDeriver:     "",
+		AllowedIdentities: 0,
+		Unauthenticated:   true,
 		Self:              false,
 	},
 	"/gibson.tenant.v1.UserService/StageAttachment": {
