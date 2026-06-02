@@ -250,3 +250,38 @@ func TestCreateAgentIdentity_NoIdPConfigured(t *testing.T) {
 		t.Errorf("got code %v, want Unavailable", status.Code(err))
 	}
 }
+
+// TestBuildEnrollCommand pins the exact copy-pasteable command the
+// dashboard wizard and CLI surface to customers. It MUST be a runnable
+// `gibson component register` invocation against the shipped ADK CLI —
+// not `gibson-cli agent enroll` (wrong binary, and `agent enroll`
+// provisions a *new* identity and rejects these flags). See #590.
+func TestBuildEnrollCommand(t *testing.T) {
+	tests := []struct {
+		name      string
+		gibsonURL string
+		clientID  string
+		want      string
+	}{
+		{
+			name:      "populated url",
+			gibsonURL: "https://api.zeroroot.ai",
+			clientID:  "1234567890123456",
+			want:      "gibson component register --client-id 1234567890123456 --client-secret - --gibson-url https://api.zeroroot.ai",
+		},
+		{
+			name:      "empty url falls back to placeholder",
+			gibsonURL: "",
+			clientID:  "1234567890123456",
+			want:      "gibson component register --client-id 1234567890123456 --client-secret - --gibson-url <gibson-url>",
+		},
+	}
+	for _, tc := range tests {
+		t.Run(tc.name, func(t *testing.T) {
+			got := buildEnrollCommand(tc.gibsonURL, tc.clientID)
+			if got != tc.want {
+				t.Errorf("buildEnrollCommand() =\n  %q\nwant\n  %q", got, tc.want)
+			}
+		})
+	}
+}
