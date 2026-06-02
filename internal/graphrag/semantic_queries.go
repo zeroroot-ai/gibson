@@ -107,10 +107,14 @@ func (q *SemanticQuerier) queryComplianceSignalsByControlIDs(
 	}
 
 	// ANY(id IN $ids WHERE id IN cs.control_ids) handles multi-valued control_ids.
+	// No WHERE cs.tenant_id predicate: nodes are written without a tenant_id
+	// property and tenant isolation is the per-tenant Neo4j database resolved by
+	// pool.For (database-per-tenant-data-plane; matches the C18 closure in
+	// graphrag/queries and graphrag/provider). The predicate would match zero
+	// rows and silently empty every result.
 	cypher := `
 MATCH (cs:compliance_signal)
-WHERE cs.tenant_id = $tenant
-  AND ANY(id IN $ids WHERE id IN cs.control_ids)
+WHERE ANY(id IN $ids WHERE id IN cs.control_ids)
 RETURN cs.id        AS node_id,
        cs.control_ids AS control_ids,
        cs.action    AS action,
@@ -119,6 +123,8 @@ RETURN cs.id        AS node_id,
 ORDER BY cs.id
 `
 	params := map[string]any{
+		// tenantID is retained for call-site symmetry; the per-tenant database is
+		// the isolation boundary, so the query itself does not reference $tenant.
 		"tenant": tenantID,
 		"ids":    ids,
 	}

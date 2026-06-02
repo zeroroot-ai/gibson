@@ -2,9 +2,15 @@
 //
 // DashboardQueries provides per-tenant Cypher helpers used by the
 // GraphService gRPC handlers. All queries route through ExecuteRead on a
-// per-tenant SessionGraphClient so that tenant isolation is enforced both by
-// the Neo4j per-database chokepoint (pool.For) and by explicit
-// WHERE n.tenant_id = $tenant predicates (defense in depth, per design D7).
+// per-tenant SessionGraphClient so that tenant isolation is enforced by the
+// Neo4j per-database chokepoint (pool.For routes each tenant to its own
+// dedicated Neo4j instance — database-per-tenant-data-plane, Requirement 2.6).
+//
+// Queries do NOT carry a WHERE n.tenant_id = $tenant predicate: nodes are
+// written without a tenant_id property (see Neo4jClient.CreateNode in
+// neo4j.go), so such a predicate matches zero rows and silently empties every
+// read. The old shared-instance predicate was removed once the data plane
+// moved to dedicated per-tenant databases.
 //
 // Cypher bodies are ported from
 // enterprise/platform/dashboard/src/lib/neo4j-client.ts (lines 324–439),
@@ -98,8 +104,8 @@ func (q *DashboardQueries) GetFullGraph(
 }
 
 // GetMissionGraph returns the subgraph for a specific mission within the
-// tenant. The WHERE clause enforces tenant ownership (defense in depth on top
-// of the FGA check at ext-authz).
+// tenant. Tenant ownership is enforced by the per-tenant Neo4j database
+// (pool.For) plus the FGA check at ext-authz; no tenant_id predicate is used.
 func (q *DashboardQueries) GetMissionGraph(
 	ctx context.Context,
 	tenantID auth.TenantID,
@@ -109,9 +115,7 @@ func (q *DashboardQueries) GetMissionGraph(
 
 	cypher := `
 MATCH (run:mission_run {mission_id: $mission_id})
-WHERE run.tenant_id = $tenant
 MATCH (n)-[:BELONGS_TO]->(run)
-WHERE n.tenant_id = $tenant
 RETURN DISTINCT n, labels(n) AS lbls
 LIMIT 5000
 `
@@ -161,7 +165,6 @@ func (q *DashboardQueries) QueryPaths(
 	if toNodeID != "" {
 		cypher = fmt.Sprintf(`
 MATCH (a {id: $from_id}), (b {id: $to_id})
-WHERE a.tenant_id = $tenant AND b.tenant_id = $tenant
 MATCH p = (a)-[*1..%d]->(b)
 RETURN p
 LIMIT $max_paths
@@ -173,9 +176,7 @@ LIMIT $max_paths
 		// The caller must sanitise the input (alphanumeric + underscore).
 		cypher = fmt.Sprintf(`
 MATCH (a {id: $from_id})
-WHERE a.tenant_id = $tenant
 MATCH p = (a)-[*1..%d]->(b:%s)
-WHERE b.tenant_id = $tenant
 RETURN p
 LIMIT $max_paths
 `, maxDepth, toNodeKind)
@@ -331,7 +332,6 @@ func (q *DashboardQueries) fetchEdges(ctx context.Context, tenant string, nodeID
 	cypher := `
 MATCH (n1)-[r]->(n2)
 WHERE n1.id IN $node_ids AND n2.id IN $node_ids
-  AND n1.tenant_id = $tenant AND n2.tenant_id = $tenant
 RETURN DISTINCT r, type(r) AS rel_type,
        n1.id AS src_id,
        n2.id AS tgt_id,
@@ -389,13 +389,13 @@ RETURN DISTINCT r, type(r) AS rel_type,
 
 func buildCountCypher(tenant string, labels []string) (string, map[string]any) {
 	params := map[string]any{"tenant": tenant}
-	q := "MATCH (n) WHERE n.tenant_id = $tenant"
+	q := "MATCH (n)"
 	if len(labels) > 0 {
 		conds := make([]string, 0, len(labels))
 		for _, lbl := range labels {
 			conds = append(conds, fmt.Sprintf("n:`%s`", lbl))
 		}
-		q += " AND (" + strings.Join(conds, " OR ") + ")"
+		q += " WHERE (" + strings.Join(conds, " OR ") + ")"
 	}
 	q += " RETURN count(n) AS count"
 	return q, params
@@ -406,13 +406,13 @@ func buildNodeFetchCypher(tenant string, labels []string, limit uint32) (string,
 		"tenant": tenant,
 		"limit":  int64(limit),
 	}
-	q := "MATCH (n) WHERE n.tenant_id = $tenant"
+	q := "MATCH (n)"
 	if len(labels) > 0 {
 		conds := make([]string, 0, len(labels))
 		for _, lbl := range labels {
 			conds = append(conds, fmt.Sprintf("n:`%s`", lbl))
 		}
-		q += " AND (" + strings.Join(conds, " OR ") + ")"
+		q += " WHERE (" + strings.Join(conds, " OR ") + ")"
 	}
 	q += " RETURN DISTINCT n, labels(n) AS lbls LIMIT $limit"
 	return q, params
@@ -699,8 +699,7 @@ func (q *DashboardQueries) FindingCounts(
 	params := map[string]any{"tenant": tenant}
 	cypher := fmt.Sprintf(`
 MATCH (f)
-WHERE %s
-  AND f.tenant_id = $tenant`, nodeFilter)
+WHERE %s`, nodeFilter)
 
 	if windowSeconds > 0 {
 		params["win"] = int64(windowSeconds)
@@ -760,8 +759,7 @@ func (q *DashboardQueries) FindingTimeSeries(
 	tenant := tenantID.String()
 	cypher := `
 MATCH (f:Finding)
-WHERE f.tenant_id = $tenant
-  AND f.created_at > datetime() - duration({days: $days})
+WHERE f.created_at > datetime() - duration({days: $days})
 RETURN date(f.created_at) AS d, count(f) AS cnt
 ORDER BY d
 `
@@ -846,21 +844,19 @@ func (q *DashboardQueries) GraphStats(
 	// Query 1: nodes by label (UNWIND labels so multi-label nodes appear under each).
 	byLabelCypher := `
 MATCH (n)
-WHERE n.tenant_id = $tenant
 UNWIND labels(n) AS label
 RETURN label, count(*) AS cnt
 ORDER BY cnt DESC
 `
-	// Query 2: total edges (filter via endpoint nodes for tenant isolation).
+	// Query 2: total edges (tenant isolation is the per-tenant database).
 	edgeCypher := `
-MATCH (n1)-[r]->(n2)
-WHERE n1.tenant_id = $tenant AND n2.tenant_id = $tenant
+MATCH ()-[r]->()
 RETURN count(r) AS total
 `
 	// Query 3: max last_write_at.
 	lastWriteCypher := `
 MATCH (n)
-WHERE n.tenant_id = $tenant AND n.last_write_at IS NOT NULL
+WHERE n.last_write_at IS NOT NULL
 RETURN max(n.last_write_at) AS m
 `
 
@@ -970,7 +966,6 @@ func (q *DashboardQueries) GraphSummary(
 	// --- 1. Node counts by label (first label wins, same as TS labels(n)[0]) ---
 	countsCypher := `
 MATCH (n)
-WHERE n.tenant_id = $tenant
 WITH labels(n)[0] AS label, count(n) AS cnt
 RETURN label, cnt
 `
@@ -1010,8 +1005,7 @@ RETURN label, cnt
 	// --- 2. Critical/high findings with affected assets ---
 	findingsCypher := `
 MATCH (f)
-WHERE f.tenant_id = $tenant
-  AND (f:Finding OR f:Vulnerability)
+WHERE (f:Finding OR f:Vulnerability)
   AND f.severity IN ['critical', 'high']
 OPTIONAL MATCH (f)-[:AFFECTS]->(a)
 RETURN f.name AS name, f.severity AS severity, f.cve AS cve,
@@ -1056,7 +1050,6 @@ LIMIT 20
 	// --- 3. Recent missions ---
 	missionsCypher := `
 MATCH (m:Mission)
-WHERE m.tenant_id = $tenant
 RETURN m.name AS name, m.status AS status
 ORDER BY m.created_at DESC
 LIMIT 5
@@ -1211,9 +1204,8 @@ func (q *DashboardQueries) GraphContext(
 	// The original context.ts query does 1-hop; we support configurable hops
 	// but keep the same OPTIONAL MATCH structure and per-tenant filter.
 	cypher := `
-MATCH (n) WHERE n.id = $nodeId AND n.tenant_id = $tenant
+MATCH (n) WHERE n.id = $nodeId
 OPTIONAL MATCH (n)-[r]-(m)
-WHERE m.tenant_id = $tenant
 WITH n, labels(n) AS focusLabels,
      collect(DISTINCT {
        node: m,
@@ -1558,15 +1550,16 @@ func (q *DashboardQueries) Findings(
 
 	tenant := tenantID.String()
 
-	// Build the common WHERE clause (after the mandatory tenant filter).
-	// Mandatory base: (n:Finding OR n:Vulnerability) AND n.tenant_id = $tenant
+	// Build the common WHERE clause. Tenant isolation is the per-tenant Neo4j
+	// database (pool.For); nodes carry no tenant_id property, so the base filter
+	// is just the node-kind label predicate.
 	params := map[string]any{
 		"tenant": tenant,
 		"offset": int64(f.Offset),
 		"limit":  int64(limit),
 	}
 
-	where := "WHERE (n:Finding OR n:Vulnerability) AND n.tenant_id = $tenant"
+	where := "WHERE (n:Finding OR n:Vulnerability)"
 	if f.Severity != "" {
 		where += "\n  AND n.severity = $severity"
 		params["severity"] = f.Severity
@@ -1578,7 +1571,7 @@ func (q *DashboardQueries) Findings(
 	if f.MissionID != "" {
 		// Ported from route.ts: OPTIONAL MATCH (m:Mission)-[*1..3]->(n) WHERE m.id = $missionId
 		// Rewritten as an EXISTS sub-query to stay in the same MATCH scope.
-		where += "\n  AND EXISTS { MATCH (m:Mission { id: $mission_id, tenant_id: $tenant })-[*1..3]->(n) }"
+		where += "\n  AND EXISTS { MATCH (m:Mission { id: $mission_id })-[*1..3]->(n) }"
 		params["mission_id"] = f.MissionID
 	}
 	if f.Search != "" {
