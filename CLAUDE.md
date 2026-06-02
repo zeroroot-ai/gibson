@@ -2,7 +2,7 @@
 
 > **Workflow rules:** see [`zeroroot-ai/.github` → `AGENTS.md`](https://github.com/zeroroot-ai/.github/blob/main/AGENTS.md) for branch / PR / commit / release / rebase rules. Conventional Commits MANDATORY (drives release-please). Never push to main, never merge your own PR. Repo-local rules below override only when explicitly noted.
 
-Read this before editing the daemon (`core/gibson/`).
+Read this before editing the daemon. The daemon module is rooted at the repo top (`internal/`, `cmd/`, `pkg/`, `models/`); there is no `core/gibson/` subtree.
 
 ## Authz registry pipeline
 
@@ -13,7 +13,8 @@ The authorization rule book lives at `internal/authz/registry/`:
 - `audit.csv` — auditor-friendly flat table (rpc, relation, object_type, deriver, identities, source_proto_file)
 
 The OpenFGA model itself is hand-maintained at `internal/authz/model.fga`
-(loaded by `gibson-fga-init` via `files/fga-model.json`); the registry
+(compiled to the JSON `gibson-fga-init` loads by `cmd/gen-fga-model-json`,
+which the Helm chart runs to produce the init ConfigMap); the registry
 generator no longer emits an FGA stub.
 
 These are **generated artifacts** — do NOT hand-edit them. Run regen instead.
@@ -21,8 +22,8 @@ These are **generated artifacts** — do NOT hand-edit them. Run regen instead.
 The annotations come from **three** proto sources after the two-surface refactor (docs ADR-0025), merged via `cmd/fds-merge` into a single FileDescriptorSet before codegen:
 
 - **OSS SDK** at the pinned `github.com/zeroroot-ai/sdk` module (`gibson.daemon.v1.*` — customer-callable `DaemonService` RPCs only; admin protos no longer live here per sdk#105).
-- **platform-sdk** at the pinned `github.com/zeroroot-ai/platform-sdk` module (`gibson.daemon.admin.v1.*`, `gibson.platform.v1.*`, `gibson.tenant.v1.*`, `gibson.user.v1.*`, `gibson.usage.v1.*`). This is the **private** internal proto module that hosts admin shapes. Cross-module proto sharing flows through BSR (`buf.build/zeroroot-ai-platform/platform-sdk`); no local proto includes (docs ADR-0028 Clause 6).
-- **daemon-local** protos at `core/gibson/internal/daemon/api/**` — anything no other repo consumes. If another repo needs a type from here, promote it to `platform-sdk` and consume via BSR. Do not vendor.
+- **platform-sdk** at the pinned `github.com/zeroroot-ai/platform-sdk` module. After ADR-0039 (admin-surface recategorization, 2026-06-01) this module hosts only the genuinely-private platform protos: `gibson.daemon.operator.v1.*` (`DaemonOperatorService`), `gibson.billing.v1.*` (`BillingService`), and `gibson.daemon.discovery.v1.*` (`DiscoveryService`). The former tenant-admin surface (`gibson.tenant.v1.*`, user, usage) is now **customer-facing** and lives in the OSS SDK. Cross-module proto sharing flows through BSR (`buf.build/zeroroot-ai-platform/platform-sdk`); no local proto includes (docs ADR-0028 Clause 6).
+- **daemon-local** protos at `internal/daemon/api/gibson/<pkg>/v1/**` — anything no other repo consumes. If another repo needs a type from here, promote it to `platform-sdk` and consume via BSR. Do not vendor.
 
 All three sets must carry `option (gibson.auth.v1.authz) = {…};` on every authenticated RPC. The codegen tool fails closed on any unannotated method.
 
@@ -31,7 +32,7 @@ The annotation extension itself (`gibson.auth.v1.options.proto`) lives in EXACTL
 ### Regenerating
 
 ```bash
-# In core/gibson/:
+# In the gibson repo root:
 make authz-registry
 ```
 
@@ -122,27 +123,25 @@ CI does not run `make proto` itself, but the `authz-registry-drift` gate exercis
 The daemon consumes:
 
 - **OSS SDK** (`github.com/zeroroot-ai/sdk`) — customer-facing types. Imports here are visible to customers via the public surface. Per docs ADR-0025: agent / tool / plugin interfaces, customer-callable `DaemonService`, `gibson.budget.v1` types, the `gibson.auth.v1` annotation extension.
-- **platform-sdk** (`github.com/zeroroot-ai/platform-sdk`) — internal proto module. Hosts every admin proto and service stub (`DaemonAdminService`, `PlatformOperatorService`, `TenantAdminService`). Private; never re-exported through OSS SDK; never vendored. Cross-module proto sharing flows through BSR (`buf.build/zeroroot-ai-platform/platform-sdk`).
+- **platform-sdk** (`github.com/zeroroot-ai/platform-sdk`) — internal proto module. Post-ADR-0039 it hosts only the genuinely-private platform services: `DaemonOperatorService` (`gibson.daemon.operator.v1`), `BillingService` (`gibson.billing.v1`), `DiscoveryService` (`gibson.daemon.discovery.v1`). Private; never re-exported through OSS SDK; never vendored. Cross-module proto sharing flows through BSR (`buf.build/zeroroot-ai-platform/platform-sdk`).
 - **platform-clients** (`github.com/zeroroot-ai/platform-clients`) — shared Go primitives. Mandated for transport, secrets, readiness, pools, observability, authz per docs ADR-0026. Do NOT reinvent these primitives in this repo; CI greps for ad-hoc OTel init / interceptor chains / pool constructors.
 
-The daemon registers **two services on `:50051`**:
+The daemon registers **many gRPC services on `:50051`** — the customer-facing `gibson.daemon.v1.DaemonService` plus the decomposed tenant-admin surface from the OSS SDK (`gibson.tenant.v1` — `TenantService`, `UserService`, `UsageService`, `ProviderService`, `MembershipService`, `GrantsService`, `SecretsService`, `ModelAccessService`, `PluginAdminService`, `BudgetService`, `AgentIdentityService`), the daemon-local `TracesService` / `GraphService` / `IdentityService` / `IntelligenceService` / `ComponentService` / `HarnessCallbackService` / `PluginInvokeService`, and the private `DaemonOperatorService` (platform-sdk) + `BillingService`.
 
-- `gibson.daemon.v1.DaemonService` (proto in OSS SDK; FGA relation `member` / `can_use`).
-- `gibson.daemon.admin.v1.DaemonAdminService` (proto in platform-sdk; FGA relation `admin` / `writer`).
+There is a single listener. Surface separation is enforced on the wire by **Envoy's route table**, which gates the admin/operator prefixes — `/gibson.daemon.operator.v1.DaemonOperatorService/`, `/gibson.tenant.v1.TenantAdminService/`, `/gibson.platform.v1.PlatformOperatorService/` — behind the admin JWT requirement (see `enterprise/deploy/helm/gibson-workloads/files/envoy/envoy.yaml`, deploy#172). The daemon does NOT maintain a second listener.
 
-Envoy's route table gates the admin prefix `/gibson.daemon.admin.v1.*` with the admin JWT requirement (deploy#172). The daemon does NOT maintain a second listener; the route-gate enforcement on Envoy keeps the two surfaces distinct on the wire.
-
-Admin protos are imported from platform-sdk:
+The private operator protos are imported from platform-sdk; the tenant-admin protos come from the OSS SDK:
 
 ```go
 import (
-    daemonadminv1 "github.com/zeroroot-ai/platform-sdk/gen/gibson/daemon/admin/v1"
-    platformv1   "github.com/zeroroot-ai/platform-sdk/gen/gibson/platform/v1"
-    tenantv1     "github.com/zeroroot-ai/platform-sdk/gen/gibson/tenant/v1"
+    daemonoperatorv1 "github.com/zeroroot-ai/platform-sdk/gen/gibson/daemon/operator/v1"
+    discoverypb      "github.com/zeroroot-ai/platform-sdk/gen/gibson/daemon/discovery/v1"
+    billingpb        "github.com/zeroroot-ai/platform-sdk/gen/gibson/billing/v1"
+    tenantv1         "github.com/zeroroot-ai/sdk/api/gen/gibson/tenant/v1" // customer-facing per ADR-0039
 )
 ```
 
-A daemon handler that imports `github.com/zeroroot-ai/sdk/gen/gibson/admin/...` is post-purge dead code; that path no longer exists.
+(Note the path asymmetry: the OSS SDK publishes bindings under `sdk/api/gen/...`, platform-sdk under `platform-sdk/gen/...`.) A daemon handler that imports `github.com/zeroroot-ai/sdk/api/gen/gibson/admin/...` is post-purge dead code; that path no longer exists.
 
 ## Service-account identity (canonical sub)
 
