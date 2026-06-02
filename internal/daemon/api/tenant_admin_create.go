@@ -243,13 +243,21 @@ func isNonHumanPrincipal(subject string) bool {
 }
 
 // buildEnrollCommand returns a complete copy-pasteable shell invocation for
-// enrolling the agent with the daemon.
+// registering the agent install with the daemon.
+//
+// The verb is `gibson component register` — the ADK CLI command that
+// *consumes* already-issued credentials and writes the local credentials
+// file. It is deliberately NOT `gibson agent enroll`: that command
+// *provisions a new* identity (it calls CreateAgentIdentity again) and
+// does not accept --client-id/--client-secret/--gibson-url. The binary is
+// `gibson`, not `gibson-cli`. `--client-secret -` reads the secret from
+// stdin so it never lands in shell history.
 func buildEnrollCommand(gibsonURL, clientID string) string {
 	if gibsonURL == "" {
 		gibsonURL = "<gibson-url>"
 	}
 	return fmt.Sprintf(
-		"gibson-cli agent enroll --client-id %s --client-secret <paste-secret> --gibson-url %s",
+		"gibson component register --client-id %s --client-secret - --gibson-url %s",
 		clientID, gibsonURL,
 	)
 }
