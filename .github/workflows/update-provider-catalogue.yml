@@ -549,7 +549,7 @@ jobs:
         id: aws-creds
         # Use the deploy IAM role (same pattern as other workflows).
         # Requires bedrock:ListFoundationModels on the role — see operator checklist.
-        uses: aws-actions/configure-aws-credentials@v4
+        uses: aws-actions/configure-aws-credentials@v6
         continue-on-error: true
         with:
           role-to-assume: ${{ vars.AWS_DEPLOY_ROLE_ARN }}
