@@ -288,7 +288,7 @@ rpc,relation,object_type,deriver,identities,source_proto_file,mode
 /gibson.tenant.v1.UserService/ResetUserOnboardingState,member,tenant,tenant_from_identity,USER|SERVICE,gibson/tenant/v1/user.proto,rule
 /gibson.tenant.v1.UserService/SaveConversation,member,tenant,tenant_from_identity,USER|SERVICE,gibson/tenant/v1/user.proto,rule
 /gibson.tenant.v1.UserService/SaveUserLayout,member,tenant,tenant_from_identity,USER|SERVICE,gibson/tenant/v1/user.proto,rule
-/gibson.tenant.v1.UserService/SetSignupProgress,member,tenant,tenant_from_identity,USER|SERVICE,gibson/tenant/v1/user.proto,rule
+/gibson.tenant.v1.UserService/SetSignupProgress,,,,,gibson/tenant/v1/user.proto,unauthenticated
 /gibson.tenant.v1.UserService/StageAttachment,member,tenant,tenant_from_identity,USER|SERVICE,gibson/tenant/v1/user.proto,rule
 /gibson.tenant.v1.UserService/UpdateUserOnboardingState,member,tenant,tenant_from_identity,USER|SERVICE,gibson/tenant/v1/user.proto,rule
 /gibson.tenant.v1.UserService/UpdateUserProfile,member,tenant,tenant_from_identity,USER|SERVICE,gibson/tenant/v1/user.proto,rule

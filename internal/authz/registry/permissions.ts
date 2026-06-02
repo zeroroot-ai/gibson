@@ -2913,11 +2913,11 @@ export const AuthRegistry: Record<string, AuthEntry> = {
   "/gibson.tenant.v1.UserService/SetSignupProgress": {
     method: "/gibson.tenant.v1.UserService/SetSignupProgress",
     service: "gibson.tenant.v1.UserService",
-    relation: "member",
-    objectType: "tenant",
-    objectDeriver: "tenant_from_identity",
-    allowedIdentities: IdentityClass.USER | IdentityClass.SERVICE,
-    unauthenticated: false,
+    relation: "",
+    objectType: "",
+    objectDeriver: "",
+    allowedIdentities: 0,
+    unauthenticated: true,
     self: false,
   },
   "/gibson.tenant.v1.UserService/StageAttachment": {

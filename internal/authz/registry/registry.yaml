@@ -1851,12 +1851,7 @@ entries:
       - USER
       - SERVICE
   "/gibson.tenant.v1.UserService/SetSignupProgress":
-    relation: "member"
-    object_type: "tenant"
-    object_deriver: "tenant_from_identity"
-    allowed_identities:
-      - USER
-      - SERVICE
+    unauthenticated: true
   "/gibson.tenant.v1.UserService/StageAttachment":
     relation: "member"
     object_type: "tenant"

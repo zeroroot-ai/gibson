@@ -48,6 +48,14 @@ var allowedUnauthenticated = map[string]bool{
 	// longer registered on the gRPC server).
 	"/gibson.tenant.v1.UserService/GetSignupProgress": true,
 	"/gibson.user.v1.UserService/GetSignupProgress":   true, // daemon-local proto retained for registry until cleanup
+
+	// SetSignupProgress is intentionally unauthenticated, matching its Get
+	// sibling above. Signup writes progress before any tenant/membership
+	// exists (founding-user flow); the daemon must parse identity loosely
+	// (subject-only, no x-gibson-identity-tenant) for this RPC. The attempt_id
+	// is an opaque single-use capability; the payload is non-sensitive step
+	// labels. Was member/tenant-scoped — flipped in sdk#275 (dashboard#646).
+	"/gibson.tenant.v1.UserService/SetSignupProgress": true,
 }
 
 // TestOnlyConnectAndPingAreUnauthenticated walks the generated Registry map
