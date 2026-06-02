@@ -33,6 +33,7 @@ import (
 
 	daemonapi "github.com/zeroroot-ai/gibson/internal/daemon/api"
 	tracespb "github.com/zeroroot-ai/gibson/internal/daemon/api/gibson/traces/v1"
+	"github.com/zeroroot-ai/gibson/internal/types"
 	pdataplane "github.com/zeroroot-ai/gibson/pkg/platform/dataplane"
 	"github.com/zeroroot-ai/sdk/auth"
 )
@@ -101,11 +102,24 @@ func (s *tracesServer) resolveClient(ctx context.Context) (auth.TenantID, *langf
 	name := tracesLangfuseCredentialName(tenant.String())
 	_, decrypted, err := credHandler.GetDecrypted(ctx, name)
 	if err != nil {
-		s.logger.WarnContext(ctx, "TracesService: Langfuse credentials not found",
+		// Only a genuine missing secret is "not configured". Any other
+		// failure — e.g. the secrets backend DENIED the read (a per-tenant
+		// Vault policy gap) — must surface distinctly, not be masked as
+		// NotFound. Masking a PermissionDenied as "credentials not configured"
+		// cost real debugging time (gibson#594).
+		var ge *types.GibsonError
+		if errors.As(err, &ge) && ge.Code == types.CREDENTIAL_NOT_FOUND {
+			s.logger.WarnContext(ctx, "TracesService: Langfuse credentials not configured",
+				slog.String("tenant", tenant.String()),
+			)
+			return auth.TenantID{}, nil, status.Errorf(codes.NotFound, "Langfuse credentials not configured for this tenant")
+		}
+		s.logger.ErrorContext(ctx, "TracesService: failed to read Langfuse credentials from secrets backend",
 			slog.String("tenant", tenant.String()),
 			slog.String("error", err.Error()),
 		)
-		return auth.TenantID{}, nil, status.Errorf(codes.NotFound, "Langfuse credentials not configured for this tenant")
+		return auth.TenantID{}, nil, status.Errorf(codes.FailedPrecondition,
+			"could not read Langfuse credentials from the secrets backend for this tenant (check the tenant's Vault policy)")
 	}
 
 	var payload struct {

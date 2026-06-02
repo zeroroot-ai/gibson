@@ -9,10 +9,12 @@ package api
 import (
 	"context"
 	"encoding/json"
+	"errors"
 
 	"google.golang.org/grpc/codes"
 	status_grpc "google.golang.org/grpc/status"
 
+	"github.com/zeroroot-ai/gibson/internal/types"
 	tenantv1 "github.com/zeroroot-ai/sdk/api/gen/gibson/tenant/v1"
 	"github.com/zeroroot-ai/sdk/auth"
 )
@@ -44,8 +46,17 @@ func (s *DaemonServer) GetTenantLangfuseCredentials(ctx context.Context, req *te
 
 	_, decrypted, err := s.credentialHandler.GetDecrypted(ctx, name)
 	if err != nil {
-		s.logger.Debug("langfuse credentials not found", "tenant_id", req.TenantId, "error", err)
-		return nil, status_grpc.Errorf(codes.NotFound, "langfuse credentials not found for tenant %q", req.TenantId)
+		// Distinguish a genuine missing secret from a secrets-backend failure
+		// (e.g. Vault DENIED the read — a per-tenant policy gap). Masking the
+		// latter as NotFound hid the real cause (gibson#594).
+		var ge *types.GibsonError
+		if errors.As(err, &ge) && ge.Code == types.CREDENTIAL_NOT_FOUND {
+			s.logger.Debug("langfuse credentials not configured", "tenant_id", req.TenantId)
+			return nil, status_grpc.Errorf(codes.NotFound, "langfuse credentials not found for tenant %q", req.TenantId)
+		}
+		s.logger.Error("failed to read langfuse credentials from secrets backend", "tenant_id", req.TenantId, "error", err)
+		return nil, status_grpc.Errorf(codes.FailedPrecondition,
+			"could not read langfuse credentials for tenant %q from the secrets backend (check the tenant's Vault policy)", req.TenantId)
 	}
 
 	var payload langfuseCredentialPayload
