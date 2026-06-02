@@ -30,6 +30,7 @@ import (
 	"github.com/zeroroot-ai/gibson/internal/onboarding"
 	"github.com/zeroroot-ai/gibson/internal/target"
 	"github.com/zeroroot-ai/gibson/internal/types"
+	pdataplane "github.com/zeroroot-ai/gibson/pkg/platform/dataplane"
 	"github.com/zeroroot-ai/gibson/pkg/version"
 	daemonoperatorv1 "github.com/zeroroot-ai/platform-sdk/gen/gibson/daemon/operator/v1"
 	daemonpb "github.com/zeroroot-ai/sdk/api/gen/gibson/daemon/v1"
@@ -2517,9 +2518,14 @@ func (s *DaemonServer) CreateMissionDefinition(ctx context.Context, req *daemonp
 // here for use by the new Langfuse handler files.
 
 // langfuseCredentialName returns the credential name used to store Langfuse
-// project credentials for a given tenant.
-func langfuseCredentialName(tenantID string) string {
-	return fmt.Sprintf("langfuse_project:%s", tenantID)
+// project credentials. This MUST match where the tenant-operator writes them
+// (pdataplane.VaultPathInfraLangfuse = "infra/langfuse") and what the
+// per-tenant OpenBao policy grants read on (secret/data/infra/*). The tenant
+// is already scoped by the per-tenant Vault namespace, so the name carries no
+// tenant id — the legacy "langfuse_project:<id>" name resolved to a path the
+// policy denied (gibson#<traces-vault-path>).
+func langfuseCredentialName(_ string) string {
+	return pdataplane.VaultPathInfraLangfuse
 }
 
 // langfuseCredentialPayload is the JSON structure stored as the encrypted
