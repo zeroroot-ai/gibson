@@ -62,6 +62,32 @@ Completed or cancelled missions are unaffected.
 
 ---
 
+## [0.122.0](https://github.com/zeroroot-ai/gibson/compare/v0.121.0...v0.122.0) (2026-06-02)
+
+
+### ⚠ BREAKING CHANGES
+
+* **daemon:** serve decomposed tenant services, drop deleted admin services (ADR-0039) ([#574](https://github.com/zeroroot-ai/gibson/issues/574))
+
+### Features
+
+* **daemon:** serve decomposed tenant services, drop deleted admin services (ADR-0039) ([#574](https://github.com/zeroroot-ai/gibson/issues/574)) ([8aa5c95](https://github.com/zeroroot-ai/gibson/commit/8aa5c952cca54f796e52cc6394d0e71908cb1f48))
+* **daemon:** wire and register PluginAdminService (closes [#565](https://github.com/zeroroot-ai/gibson/issues/565)) ([#576](https://github.com/zeroroot-ai/gibson/issues/576)) ([f95155c](https://github.com/zeroroot-ai/gibson/commit/f95155c6e243d08915bf9a287226eefa541905ee))
+* **grants:** add SetCatalogEnabled handler, daemon-routes catalog-enablement write (closes [#577](https://github.com/zeroroot-ai/gibson/issues/577)) ([#580](https://github.com/zeroroot-ai/gibson/issues/580)) ([7249a94](https://github.com/zeroroot-ai/gibson/commit/7249a94a5d5c477f3e29be78553e54e4960c3afa))
+
+
+### Bug Fixes
+
+* **authz:** regen registry for unauthenticated SetSignupProgress (dashboard[#646](https://github.com/zeroroot-ai/gibson/issues/646)) ([#587](https://github.com/zeroroot-ai/gibson/issues/587)) ([0dda4eb](https://github.com/zeroroot-ai/gibson/commit/0dda4eb017ff465f6e25aca166a2f84ddc815769))
+* **daemon:** default max_tokens in ExecuteLLM to avoid empty completions ([#583](https://github.com/zeroroot-ai/gibson/issues/583)) ([5342452](https://github.com/zeroroot-ai/gibson/commit/5342452ffaf878adb1fca356da8b40dfeb1ba188)), closes [#582](https://github.com/zeroroot-ai/gibson/issues/582)
+* **daemon:** emit runnable enroll command (component register, not gibson-cli) ([#591](https://github.com/zeroroot-ai/gibson/issues/591)) ([262abd2](https://github.com/zeroroot-ai/gibson/commit/262abd26998a34542833282a018ef51b260a6f78)), closes [#590](https://github.com/zeroroot-ai/gibson/issues/590)
+* **daemon:** read Langfuse creds at infra/langfuse (matches Vault write path + policy) ([#595](https://github.com/zeroroot-ai/gibson/issues/595)) ([eb3eaf3](https://github.com/zeroroot-ai/gibson/commit/eb3eaf37e63cb86b6cf1857df37de11ffdc11b08))
+* **daemon:** stop masking secrets-backend errors as "Langfuse not configured" ([#596](https://github.com/zeroroot-ai/gibson/issues/596)) ([b0f7b1e](https://github.com/zeroroot-ai/gibson/commit/b0f7b1e0dc5588757dd572f6b096fa6ec9d4855b))
+* **graphrag:** drop dead tenant_id read predicate that emptied the graph ([#600](https://github.com/zeroroot-ai/gibson/issues/600)) ([0e38a1a](https://github.com/zeroroot-ai/gibson/commit/0e38a1ad6e4993b2bedd8f87a8dcbe2a95d784fc))
+* **idp:** request the ZITADEL API-audience scope so management calls authenticate (fixes member/roster name+email) ([#581](https://github.com/zeroroot-ai/gibson/issues/581)) ([c3a08f2](https://github.com/zeroroot-ai/gibson/commit/c3a08f27bad67e6fef06f91651d4581cb6fc318d))
+* **migrations:** add plan_id to tenant_quotas in the daemon (table owner) (tenant-operator[#316](https://github.com/zeroroot-ai/gibson/issues/316)) ([#585](https://github.com/zeroroot-ai/gibson/issues/585)) ([406745f](https://github.com/zeroroot-ai/gibson/commit/406745f82b7c53980ec7eff1c06606c3d2c0a05e))
+* **teams:** enrich team roster with name/email from the IdP (not the raw user id) ([#578](https://github.com/zeroroot-ai/gibson/issues/578)) ([c53b6e9](https://github.com/zeroroot-ai/gibson/commit/c53b6e9d6ba793edf8504e07393bde746b297b30))
+
 ## [0.121.0](https://github.com/zeroroot-ai/gibson/compare/v0.120.0...v0.121.0) (2026-06-01)
 
 
