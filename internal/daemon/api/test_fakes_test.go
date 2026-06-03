@@ -189,6 +189,7 @@ type fakeAuthorizer struct {
 	mu      sync.RWMutex
 	allowed map[string]bool // user|relation|object
 	checks  []checkRecord
+	writes  []authz.Tuple // tuples captured by Write
 }
 
 type checkRecord struct {
@@ -222,8 +223,22 @@ func (a *fakeAuthorizer) BatchCheck(ctx context.Context, checks []authz.CheckReq
 	return out, nil
 }
 
-func (a *fakeAuthorizer) Write(_ context.Context, _ []authz.Tuple) error  { return nil }
+func (a *fakeAuthorizer) Write(_ context.Context, tuples []authz.Tuple) error {
+	a.mu.Lock()
+	defer a.mu.Unlock()
+	a.writes = append(a.writes, tuples...)
+	return nil
+}
 func (a *fakeAuthorizer) Delete(_ context.Context, _ []authz.Tuple) error { return nil }
+
+// writtenTuples returns a copy of all tuples captured by Write.
+func (a *fakeAuthorizer) writtenTuples() []authz.Tuple {
+	a.mu.RLock()
+	defer a.mu.RUnlock()
+	out := make([]authz.Tuple, len(a.writes))
+	copy(out, a.writes)
+	return out
+}
 func (a *fakeAuthorizer) ListObjects(_ context.Context, _, _, _ string) ([]string, error) {
 	return nil, nil
 }

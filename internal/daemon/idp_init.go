@@ -51,9 +51,6 @@ const (
 
 	// envZitadelOrgID is the Zitadel organisation ID.
 	envZitadelOrgID = "GIBSON_IDP_ZITADEL_ORG_ID"
-
-	// envZitadelProjectID is the Zitadel project ID for tenant scope membership.
-	envZitadelProjectID = "GIBSON_IDP_ZITADEL_PROJECT_ID"
 )
 
 // initIDPAdminClient constructs an idp.AdminClient from environment variables.
@@ -94,7 +91,6 @@ func initZitadelClient(ctx context.Context) (idp.AdminClient, error) {
 		{envIDPAdminClientID, os.Getenv(envIDPAdminClientID)},
 		{envIDPAdminClientSecret, os.Getenv(envIDPAdminClientSecret)},
 		{envZitadelOrgID, os.Getenv(envZitadelOrgID)},
-		{envZitadelProjectID, os.Getenv(envZitadelProjectID)},
 	}
 
 	var missing []string
@@ -112,7 +108,6 @@ func initZitadelClient(ctx context.Context) (idp.AdminClient, error) {
 		ClientID:     os.Getenv(envIDPAdminClientID),
 		ClientSecret: os.Getenv(envIDPAdminClientSecret),
 		OrgID:        os.Getenv(envZitadelOrgID),
-		ProjectID:    os.Getenv(envZitadelProjectID),
 		HTTPTimeout:  10 * time.Second,
 		// Spec tier-2-host-aliases-cluster-dns: optional in-cluster
 		// discovery URL. Empty → discovery falls back to Issuer.

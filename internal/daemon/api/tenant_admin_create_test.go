@@ -6,6 +6,7 @@ import (
 	"testing"
 
 	"github.com/zeroroot-ai/gibson/internal/audit"
+	"github.com/zeroroot-ai/gibson/internal/authz"
 	"github.com/zeroroot-ai/gibson/internal/idp"
 	tenantpb "github.com/zeroroot-ai/sdk/api/gen/gibson/tenant/v1"
 	"github.com/zeroroot-ai/sdk/auth"
@@ -30,7 +31,6 @@ func newTestDaemonServer(t interface{ Helper() }) *DaemonServer {
 type fakeIDPClient struct {
 	createFn    func(ctx context.Context, req idp.CreateServiceAccountRequest) (*idp.ServiceAccount, error)
 	mintFn      func(ctx context.Context, accountID string) (string, error)
-	addMemberFn func(ctx context.Context, req idp.AddMembershipRequest) error
 	deleteFn    func(ctx context.Context, accountID string) error
 	listFn      func(ctx context.Context, req idp.ListServiceAccountsRequest) (*idp.ListServiceAccountsResponse, error)
 	deleteCalls []string // tracks deleted accountIDs for rollback verification
@@ -48,13 +48,6 @@ func (f *fakeIDPClient) MintClientSecret(ctx context.Context, accountID string) 
 		return f.mintFn(ctx, accountID)
 	}
 	return "test-secret", nil
-}
-
-func (f *fakeIDPClient) AddTenantScopeMembership(ctx context.Context, req idp.AddMembershipRequest) error {
-	if f.addMemberFn != nil {
-		return f.addMemberFn(ctx, req)
-	}
-	return nil
 }
 
 func (f *fakeIDPClient) DeleteServiceAccount(ctx context.Context, accountID string) error {
@@ -151,6 +144,67 @@ func TestCreateAgentIdentity_HappyPath(t *testing.T) {
 	// Verify no rollback was triggered.
 	if len(fakeidp.deleteCalls) != 0 {
 		t.Errorf("unexpected rollback: DeleteServiceAccount called %d times", len(fakeidp.deleteCalls))
+	}
+}
+
+// TestCreateAgentIdentity_FGAOnlyNoMembership is the regression test for
+// gibson#605. With an authorizer wired (the production configuration), every
+// principal kind must register end-to-end via the FGA path alone: there is no
+// IdP project/role membership step (the interface no longer exposes one), and
+// the tenant binding is the `tenant:<id> belongs_to <kind>_principal:<sub>`
+// tuple. Previously a vestigial AddTenantScopeMembership call failed closed
+// (HTTP 400) and broke all registration.
+func TestCreateAgentIdentity_FGAOnlyNoMembership(t *testing.T) {
+	cases := []struct {
+		kind    tenantpb.PrincipalKind
+		fgaType string
+	}{
+		{tenantpb.PrincipalKind_PRINCIPAL_KIND_AGENT, "agent_principal"},
+		{tenantpb.PrincipalKind_PRINCIPAL_KIND_TOOL, "tool_principal"},
+		{tenantpb.PrincipalKind_PRINCIPAL_KIND_PLUGIN, "plugin_principal"},
+	}
+	for _, tc := range cases {
+		t.Run(tc.fgaType, func(t *testing.T) {
+			fakeidp := &fakeIDPClient{}
+			az := newFakeAuthorizer()
+			srv := newTestDaemonServer(t).
+				WithIdPAdminClient(fakeidp).
+				WithAuthorizer(az).
+				WithTenantAdminAuditWriter(&fakeAuditWriter{})
+
+			ctx := ctxWithTenantAdmin(context.Background(), "acme", "user-admin")
+			resp, err := srv.CreateAgentIdentity(ctx, &tenantpb.CreateAgentIdentityRequest{
+				Name: "my-principal",
+				Kind: tc.kind,
+			})
+			if err != nil {
+				t.Fatalf("CreateAgentIdentity(%s): %v", tc.fgaType, err)
+			}
+			if resp.ClientSecret == "" {
+				t.Error("expected non-empty ClientSecret")
+			}
+			// No rollback: the saga must complete without deleting the SA.
+			if len(fakeidp.deleteCalls) != 0 {
+				t.Errorf("unexpected rollback: DeleteServiceAccount called %d times", len(fakeidp.deleteCalls))
+			}
+			// FGA is the sole tenancy authority: the belongs_to tuple binds the
+			// principal to its tenant.
+			want := authz.Tuple{
+				User:     "tenant:acme",
+				Relation: "belongs_to",
+				Object:   tc.fgaType + ":sa-test-id",
+			}
+			var found bool
+			for _, tup := range az.writtenTuples() {
+				if tup == want {
+					found = true
+					break
+				}
+			}
+			if !found {
+				t.Errorf("expected belongs_to tuple %+v in writes %+v", want, az.writtenTuples())
+			}
+		})
 	}
 }
 
