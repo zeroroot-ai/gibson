@@ -1,6 +1,6 @@
 module github.com/zeroroot-ai/gibson
 
-go 1.26.3
+go 1.26.4
 
 require (
 	buf.build/go/protovalidate v1.2.0
