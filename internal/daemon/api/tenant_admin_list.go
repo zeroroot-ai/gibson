@@ -34,6 +34,25 @@ func (s *DaemonServer) ListAgentIdentities(ctx context.Context, req *tenantpb.Li
 			"identity provider not configured; set GIBSON_IDP_PROVIDER and related env vars")
 	}
 
+	// FGA is the tenancy authority. Machine users live in a single shared IdP
+	// org, so the IdP listing below is NOT tenant-scoped — we MUST filter it to
+	// the principals FGA says belong to this tenant
+	// (`tenant:<id> belongs_to <kind>_principal:<sub>`). Without the authorizer
+	// we cannot scope safely, so fail closed rather than leak every tenant's
+	// identities (gibson#606). The username prefix is a naming convention, not
+	// an isolation boundary, and must never be used for scoping.
+	if s.authorizer == nil {
+		return nil, status_grpc.Error(codes.Unavailable, "authorization not configured")
+	}
+	allowed, err := s.tenantPrincipalSet(ctx, tenantID, req.KindFilter)
+	if err != nil {
+		s.logger.ErrorContext(ctx, "ListAgentIdentities: FGA scope lookup failed",
+			slog.String("tenant_id", tenantID),
+			slog.String("error", err.Error()),
+		)
+		return nil, status_grpc.Error(codes.Internal, "failed to resolve tenant identities")
+	}
+
 	// Normalise pagination parameters.
 	pageSize := int(req.PageSize)
 	if pageSize <= 0 {
@@ -72,9 +91,15 @@ func (s *DaemonServer) ListAgentIdentities(ctx context.Context, req *tenantpb.Li
 
 	identities := make([]*tenantpb.AgentIdentity, 0, len(resp.ServiceAccounts))
 	for _, sa := range resp.ServiceAccounts {
+		principalID := idpRoleFGAType(sa.Role) + ":" + sa.AccountID
+		// Drop any service account FGA does not attribute to this tenant. The
+		// IdP list spans the shared org; this is the isolation boundary.
+		if !allowed[principalID] {
+			continue
+		}
 		kind := roleToProtoKind(sa.Role)
 		entry := &tenantpb.AgentIdentity{
-			PrincipalId: idpRoleFGAType(sa.Role) + ":" + sa.AccountID,
+			PrincipalId: principalID,
 			Kind:        kind,
 			Name:        sa.Name,
 			Description: sa.Description,
@@ -92,6 +117,36 @@ func (s *DaemonServer) ListAgentIdentities(ctx context.Context, req *tenantpb.Li
 		Identities:    identities,
 		NextPageToken: resp.NextPageToken,
 	}, nil
+}
+
+// tenantPrincipalSet returns the set of FGA principal IDs
+// ("<kind>_principal:<sub>") that belong to the given tenant, via the
+// `tenant:<id> belongs_to <kind>_principal:<sub>` tuples written at
+// registration. When kindFilter is set, only that principal type is queried;
+// otherwise all three are unioned. This set is the authoritative tenant scope
+// for ListAgentIdentities.
+func (s *DaemonServer) tenantPrincipalSet(ctx context.Context, tenantID string, kindFilter tenantpb.PrincipalKind) (map[string]bool, error) {
+	fgaTypes := []string{"agent_principal", "tool_principal", "plugin_principal"}
+	if kindFilter != tenantpb.PrincipalKind_PRINCIPAL_KIND_UNSPECIFIED {
+		_, fgaType, err := principalKindToRole(kindFilter)
+		if err != nil {
+			return nil, err
+		}
+		fgaTypes = []string{fgaType}
+	}
+
+	user := "tenant:" + tenantID
+	set := make(map[string]bool)
+	for _, fgaType := range fgaTypes {
+		objects, err := s.authorizer.ListObjects(ctx, user, "belongs_to", fgaType)
+		if err != nil {
+			return nil, err
+		}
+		for _, obj := range objects {
+			set[obj] = true
+		}
+	}
+	return set, nil
 }
 
 // roleToProtoKind converts an idp.Role to a proto PrincipalKind.
