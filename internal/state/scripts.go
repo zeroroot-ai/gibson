@@ -325,9 +325,14 @@ func (c *StateClient) FindOrCreateMission(ctx context.Context, name, missionJSON
 	}()
 
 	// Step 2: Double-check pattern - search for existing mission after acquiring lock
-	// This handles both initial search and retry-after-lock scenarios
+	// This handles both initial search and retry-after-lock scenarios.
+	//
+	// Match against name_exact (TAG), NOT name (TEXT). TAG syntax `{...}` is an
+	// exact whole-value match; the TEXT `name` field tokenizes and silently
+	// misses names containing numeric/timestamp segments, producing duplicate
+	// missions. See gibson#617 and MissionIndexSchemaVersion 3.
 	escapedName := EscapeTag(name)
-	searchQuery := fmt.Sprintf("@name:{%s}", escapedName)
+	searchQuery := fmt.Sprintf("@name_exact:{%s}", escapedName)
 
 	searchResult, err := c.client.Do(ctx, "FT.SEARCH", indexName, searchQuery, "LIMIT", 0, 1).Result()
 	if err != nil && err != redis.Nil {
