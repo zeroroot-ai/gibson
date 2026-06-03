@@ -82,9 +82,6 @@ func (c *membersIdPClient) CreateServiceAccount(_ context.Context, _ idp.CreateS
 func (c *membersIdPClient) MintClientSecret(_ context.Context, _ string) (string, error) {
 	return "", nil
 }
-func (c *membersIdPClient) AddTenantScopeMembership(_ context.Context, _ idp.AddMembershipRequest) error {
-	return nil
-}
 func (c *membersIdPClient) DeleteServiceAccount(_ context.Context, _ string) error { return nil }
 func (c *membersIdPClient) ListServiceAccounts(_ context.Context, _ idp.ListServiceAccountsRequest) (*idp.ListServiceAccountsResponse, error) {
 	return nil, nil

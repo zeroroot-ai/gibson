@@ -46,11 +46,6 @@ type Config struct {
 	// header for management API calls. This is the platform-level admin org.
 	OrgID string
 
-	// ProjectID is the Zitadel project ID that agents are granted membership on.
-	// Project membership is what causes the project's role claims to appear in
-	// the issued JWT.
-	ProjectID string
-
 	// HTTPTimeout is the per-request timeout. Defaults to 10 seconds.
 	HTTPTimeout time.Duration
 
@@ -208,21 +203,6 @@ func (c *Client) MintClientSecret(ctx context.Context, accountID string) (string
 	}
 
 	return resp.ClientSecret, nil
-}
-
-// AddTenantScopeMembership adds the service account to the configured project
-// with the given role. Maps to POST /management/v1/projects/{projectId}/members.
-func (c *Client) AddTenantScopeMembership(ctx context.Context, req idp.AddMembershipRequest) error {
-	body := map[string]interface{}{
-		"userId": req.AccountID,
-		"roles":  []string{string(req.Role)},
-	}
-
-	path := "/management/v1/projects/" + req.TenantScopeID + "/members"
-	if err := c.doRequest(ctx, http.MethodPost, path, body, c.cfg.OrgID, nil); err != nil {
-		return mapError(err, "AddTenantScopeMembership")
-	}
-	return nil
 }
 
 // DeleteServiceAccount permanently removes the machine user from Zitadel.

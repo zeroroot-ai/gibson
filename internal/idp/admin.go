@@ -28,10 +28,6 @@ type AdminClient interface {
 	// handle it securely and never log it.
 	MintClientSecret(ctx context.Context, accountID string) (clientSecret string, err error)
 
-	// AddTenantScopeMembership adds the service account to a tenant scope with
-	// the specified role. For Zitadel this corresponds to project membership.
-	AddTenantScopeMembership(ctx context.Context, req AddMembershipRequest) error
-
 	// DeleteServiceAccount permanently removes the service account and revokes
 	// any active sessions. Returns ErrNotFound if the account does not exist.
 	DeleteServiceAccount(ctx context.Context, accountID string) error

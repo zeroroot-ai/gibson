@@ -59,7 +59,6 @@ func setupServer(t *testing.T, managementHandler http.HandlerFunc) (*httptest.Se
 		ClientID:     "admin-client",
 		ClientSecret: "admin-secret",
 		OrgID:        "org-123",
-		ProjectID:    "proj-456",
 	}
 
 	t.Cleanup(srv.Close)
@@ -205,60 +204,6 @@ func TestMintClientSecret_PermissionDenied(t *testing.T) {
 	_, err = client.MintClientSecret(context.Background(), "user-abc")
 	if !errors.Is(err, idp.ErrPermission) {
 		t.Errorf("want ErrPermission, got: %v", err)
-	}
-}
-
-// ---------------------------------------------------------------------------
-// AddTenantScopeMembership tests
-// ---------------------------------------------------------------------------
-
-func TestAddTenantScopeMembership_HappyPath(t *testing.T) {
-	called := false
-	_, cfg := setupServer(t, func(w http.ResponseWriter, r *http.Request) {
-		if r.Method == http.MethodPost && strings.Contains(r.URL.Path, "/members") {
-			called = true
-			w.WriteHeader(http.StatusOK)
-			return
-		}
-		http.NotFound(w, r)
-	})
-
-	client, err := zitadel.New(context.Background(), cfg)
-	if err != nil {
-		t.Fatalf("New: %v", err)
-	}
-	defer client.Close()
-
-	err = client.AddTenantScopeMembership(context.Background(), idp.AddMembershipRequest{
-		AccountID:     "user-abc",
-		TenantScopeID: "proj-456",
-		Role:          idp.RoleAgent,
-	})
-	if err != nil {
-		t.Fatalf("AddTenantScopeMembership: %v", err)
-	}
-	if !called {
-		t.Error("membership endpoint was not called")
-	}
-}
-
-func TestAddTenantScopeMembership_Upstream5xx(t *testing.T) {
-	_, cfg := setupServer(t, func(w http.ResponseWriter, r *http.Request) {
-		errorResp(w, http.StatusServiceUnavailable, "UNAVAILABLE", "service down")
-	})
-	client, err := zitadel.New(context.Background(), cfg)
-	if err != nil {
-		t.Fatalf("New: %v", err)
-	}
-	defer client.Close()
-
-	err = client.AddTenantScopeMembership(context.Background(), idp.AddMembershipRequest{
-		AccountID:     "user-abc",
-		TenantScopeID: "proj-456",
-		Role:          idp.RoleAgent,
-	})
-	if !errors.Is(err, idp.ErrUpstream) {
-		t.Errorf("want ErrUpstream, got: %v", err)
 	}
 }
 
@@ -586,7 +531,6 @@ func TestNew_DiscoveryURL_PrefersDiscoveryWhenSet(t *testing.T) {
 		ClientID:     "admin-client",
 		ClientSecret: "admin-secret",
 		OrgID:        "org-123",
-		ProjectID:    "proj-456",
 	}
 
 	client, err := zitadel.New(context.Background(), cfg)
@@ -682,7 +626,6 @@ func TestDiscoverTokenEndpoint_DoesNotMutateIssuer(t *testing.T) {
 		ClientID:     "admin-client",
 		ClientSecret: "admin-secret",
 		OrgID:        "org-123",
-		ProjectID:    "proj-456",
 	}
 
 	client, err := zitadel.New(context.Background(), cfg)

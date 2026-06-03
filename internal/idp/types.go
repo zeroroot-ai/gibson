@@ -89,21 +89,6 @@ type CreateServiceAccountRequest struct {
 	Role Role
 }
 
-// AddMembershipRequest carries parameters for adding a service account to a
-// tenant scope in the IdP.
-type AddMembershipRequest struct {
-	// AccountID is the IdP-assigned unique identifier for the service account.
-	AccountID string
-
-	// TenantScopeID identifies the tenant's scope in the IdP.
-	// For Zitadel this is the project ID. Other providers may use a different
-	// concept (org ID, namespace, etc.).
-	TenantScopeID string
-
-	// Role is the role to grant within the tenant scope.
-	Role Role
-}
-
 // ListServiceAccountsRequest carries parameters for listing service accounts.
 type ListServiceAccountsRequest struct {
 	// TenantScopeID identifies the tenant's scope in the IdP.

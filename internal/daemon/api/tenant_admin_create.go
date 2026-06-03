@@ -6,10 +6,13 @@
 //  3. Resolve tenant from context.
 //  4. CreateServiceAccount in IdP.
 //  5. MintClientSecret (rollback on failure: DeleteServiceAccount).
-//  6. AddTenantScopeMembership (rollback on failure: DeleteServiceAccount).
-//  7. Write FGA tuples (rollback on failure: DeleteServiceAccount).
-//  8. Emit audit event.
-//  9. Return response including the one-time client_secret.
+//  6. Write FGA tuples (rollback on failure: DeleteServiceAccount).
+//  7. Emit audit event.
+//  8. Return response including the one-time client_secret.
+//
+// There is no IdP project/role membership step. FGA tuples (step 6) are the
+// sole authority for a non-human principal's tenancy and permissions; the IdP
+// only authenticates the machine user. See gibson#605.
 //
 // Security: client_secret is returned once and NEVER appears in any log line,
 // audit event, error message, or trace span.
@@ -104,29 +107,16 @@ func (s *DaemonServer) CreateAgentIdentity(ctx context.Context, req *tenantpb.Cr
 		return nil, status_grpc.Error(codes.Internal, "failed to generate credentials")
 	}
 
-	// Step 6: Add service account to tenant scope membership (rollback on failure).
-	if s.authorizer != nil {
-		// Derive the tenant scope ID: for the current Zitadel implementation this
-		// is the Zitadel project ID, which is embedded in the service account name
-		// context. We use the tenantID as the scope identifier here; the concrete
-		// zitadel adapter reads GIBSON_IDP_ZITADEL_PROJECT_ID from its own config.
-		memberReq := idp.AddMembershipRequest{
-			AccountID:     sa.AccountID,
-			TenantScopeID: tenantID,
-			Role:          idpRole,
-		}
-		if err := s.idpAdminClient.AddTenantScopeMembership(ctx, memberReq); err != nil {
-			s.rollbackServiceAccount(ctx, sa.AccountID, "AddTenantScopeMembership failed")
-			s.logger.ErrorContext(ctx, "CreateAgentIdentity: AddTenantScopeMembership failed",
-				slog.String("tenant_id", tenantID),
-				slog.String("account_id", sa.AccountID),
-				slog.String("error", err.Error()),
-			)
-			return nil, status_grpc.Error(codes.Internal, "failed to configure identity tenant membership")
-		}
-	}
-
-	// Step 7: Write FGA tuples (rollback on failure).
+	// Step 6: Write FGA tuples (rollback on failure).
+	//
+	// FGA is the sole authority for a non-human principal's tenancy and
+	// permissions: the `tenant:<id> belongs_to <kind>_principal:<sub>` tuple
+	// below is what scopes this identity to its tenant, and component grants
+	// are what gate what it may do. The IdP (Zitadel) only authenticates the
+	// machine user — it is deliberately NOT a tenancy or authorization
+	// authority, so there is no project/role membership step. ext-authz
+	// reads the `gibson:tenant` claim + these FGA tuples (and capability-grant
+	// JWTs); it never consults an IdP project-role claim for a principal.
 	principalID := fgaType + ":" + sa.AccountID
 	if s.authorizer != nil {
 		tuples := []authz.Tuple{
@@ -162,7 +152,7 @@ func (s *DaemonServer) CreateAgentIdentity(ctx context.Context, req *tenantpb.Cr
 		}
 	}
 
-	// Step 8: Emit audit event (non-fatal — never include client_secret).
+	// Step 7: Emit audit event (non-fatal — never include client_secret).
 	if s.tenantAdminAuditWriter != nil {
 		s.tenantAdminAuditWriter.Log(audit.Event{
 			TenantID:   tenantID,
@@ -175,7 +165,7 @@ func (s *DaemonServer) CreateAgentIdentity(ctx context.Context, req *tenantpb.Cr
 		})
 	}
 
-	// Step 9: Build and return response.
+	// Step 8: Build and return response.
 	// The client_secret is included in the response exactly once.
 	// It MUST NOT be included in any log line below this point.
 	s.logger.InfoContext(ctx, "agent identity created",
