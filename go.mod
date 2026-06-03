@@ -16,7 +16,6 @@ require (
 	github.com/aws/aws-sdk-go-v2/service/bedrockruntime v1.50.5
 	github.com/aws/aws-sdk-go-v2/service/secretsmanager v1.41.7
 	github.com/buckhx/gobert v0.0.0-20190731141805-265756fed232
-	github.com/docker/docker v28.5.2+incompatible
 	github.com/fsnotify/fsnotify v1.9.0
 	github.com/go-jose/go-jose/v4 v4.1.4
 	github.com/go-playground/validator/v10 v10.30.1
@@ -78,6 +77,8 @@ require (
 	k8s.io/client-go v0.36.0
 	sigs.k8s.io/yaml v1.6.0
 )
+
+require github.com/docker/docker v28.5.2+incompatible // indirect
 
 require (
 	github.com/anthropics/anthropic-sdk-go v1.26.0 // indirect
@@ -214,7 +215,7 @@ require (
 	github.com/mitchellh/go-wordwrap v1.0.1 // indirect
 	github.com/moby/docker-image-spec v1.3.1 // indirect
 	github.com/moby/go-archive v0.2.0 // indirect
-	github.com/moby/moby/api v1.54.1 // indirect
+	github.com/moby/moby/api v1.54.1
 	github.com/moby/moby/client v0.4.0 // indirect
 	github.com/moby/patternmatcher v0.6.1 // indirect
 	github.com/moby/sys/sequential v0.6.0 // indirect
