@@ -61,7 +61,7 @@ jobs:
 
       - uses: actions/setup-go@v6
         with:
-          go-version: '1.26'
+          go-version-file: go.mod
 
       # Pre-download all modules so gibsoncheck's go/packages.Load can resolve imports
       # without network access.  This is a no-op on cache-warm runners.
@@ -130,7 +130,7 @@ jobs:
 
       - uses: actions/setup-go@v6
         with:
-          go-version: '1.26'
+          go-version-file: go.mod
 
       - uses: actions/setup-node@v4
         with:
