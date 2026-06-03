@@ -587,7 +587,21 @@ entries:
     allowed_identities:
       - USER
       - SERVICE
+  "/gibson.daemon.v1.DaemonService/GetMissionGraph":
+    relation: "member"
+    object_type: "tenant"
+    object_deriver: "tenant_from_identity"
+    allowed_identities:
+      - USER
+      - SERVICE
   "/gibson.daemon.v1.DaemonService/GetMissionHistory":
+    relation: "member"
+    object_type: "tenant"
+    object_deriver: "tenant_from_identity"
+    allowed_identities:
+      - USER
+      - SERVICE
+  "/gibson.daemon.v1.DaemonService/GetMissionLayout":
     relation: "member"
     object_type: "tenant"
     object_deriver: "tenant_from_identity"
@@ -695,6 +709,13 @@ entries:
       - SERVICE
   "/gibson.daemon.v1.DaemonService/RunMission":
     relation: "member"
+    object_type: "tenant"
+    object_deriver: "tenant_from_identity"
+    allowed_identities:
+      - USER
+      - SERVICE
+  "/gibson.daemon.v1.DaemonService/SaveMissionLayout":
+    relation: "writer"
     object_type: "tenant"
     object_deriver: "tenant_from_identity"
     allowed_identities:
