@@ -79,6 +79,11 @@ func ExampleStateClient_FindOrCreateMission() {
 	missionJSON := `{"id":"mission-123","name":"vulnerability-scan","status":"pending"}`
 	newID := "mission-123"
 
+	// Start from a clean slate so the example is deterministic regardless of
+	// prior state (FindOrCreateMission now exact-matches by name, so a leftover
+	// mission from an earlier run would otherwise be found instead of created).
+	_ = client.Client().Del(ctx, "gibson:mission:"+newID).Err()
+
 	// Try to find or create mission
 	result, err := client.FindOrCreateMission(ctx, missionName, missionJSON, newID)
 	if err != nil {

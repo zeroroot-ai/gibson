@@ -362,7 +362,10 @@ func TestFindOrCreateMission_Concurrent(t *testing.T) {
 	err := client.EnsureIndexes(ctx)
 	require.NoError(t, err)
 
-	missionName := "test-mission-concurrent-" + time.Now().Format("20060102150405")
+	// UnixNano (not second precision) so reruns never reuse a name — now that
+	// FindOrCreateMission exact-matches by name, a leftover from a prior run in
+	// the same second would otherwise be found by every goroutine (gibson#617).
+	missionName := fmt.Sprintf("test-mission-concurrent-%d", time.Now().UnixNano())
 
 	// Try to create the same mission concurrently
 	const numGoroutines = 20
@@ -386,7 +389,7 @@ func TestFindOrCreateMission_Concurrent(t *testing.T) {
 	// Collect results
 	var createdCount int
 	var foundCount int
-	var createdKey string
+	var createdKeys []string // every key that was created (may be >1 under races)
 
 	for i := 0; i < numGoroutines; i++ {
 		select {
@@ -395,7 +398,7 @@ func TestFindOrCreateMission_Concurrent(t *testing.T) {
 		case result := <-results:
 			if result.Created {
 				createdCount++
-				createdKey = result.Key
+				createdKeys = append(createdKeys, result.Key)
 			} else {
 				foundCount++
 			}
@@ -410,11 +413,10 @@ func TestFindOrCreateMission_Concurrent(t *testing.T) {
 	assert.GreaterOrEqual(t, createdCount, 1, "at least one mission should be created")
 	assert.Equal(t, numGoroutines, createdCount+foundCount, "all operations should succeed")
 
-	// Clean up
-	if createdKey != "" {
-		rdb := client.Client()
-		err = rdb.Del(ctx, createdKey).Err()
-		require.NoError(t, err)
+	// Clean up every created mission (not just one) so reruns start clean.
+	rdb := client.Client()
+	for _, key := range createdKeys {
+		require.NoError(t, rdb.Del(ctx, key).Err())
 	}
 }
 

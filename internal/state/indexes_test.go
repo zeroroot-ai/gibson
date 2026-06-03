@@ -450,7 +450,7 @@ func TestMissionIndex(t *testing.T) {
 		assert.Equal(t, "gibson:idx:missions", idx.Name)
 		assert.Equal(t, "gibson:mission:", idx.Prefix)
 		assert.True(t, idx.OnJSON)
-		assert.Len(t, idx.Schema, 9) // 8 original + tenant_id (schema version 2)
+		assert.Len(t, idx.Schema, 10) // 8 original + tenant_id (v2) + name_exact (v3, gibson#617)
 
 		// Verify field definitions
 		fields := make(map[string]FieldDefinition)
@@ -462,6 +462,12 @@ func TestMissionIndex(t *testing.T) {
 		assert.Equal(t, "$.name", fields["name"].Path)
 		assert.Equal(t, FieldTypeText, fields["name"].Type)
 		assert.Equal(t, 2.0, fields["name"].Weight)
+
+		// Check name_exact field (exact-match TAG on the same path) — gibson#617.
+		// FindOrCreateMission de-dups via @name_exact:{...}; the TEXT name field
+		// cannot be exact-matched with TAG syntax.
+		assert.Equal(t, "$.name", fields["name_exact"].Path)
+		assert.Equal(t, FieldTypeTag, fields["name_exact"].Type)
 
 		// Check status field (tag)
 		assert.Equal(t, "$.status", fields["status"].Path)
@@ -489,8 +495,8 @@ func TestMissionIndex(t *testing.T) {
 	})
 
 	t.Run("schema version constant matches expected bumped value", func(t *testing.T) {
-		assert.Equal(t, 2, MissionIndexSchemaVersion,
-			"MissionIndexSchemaVersion must be 2 after Phase 1 tenant_id addition")
+		assert.Equal(t, 3, MissionIndexSchemaVersion,
+			"MissionIndexSchemaVersion must be 3 after name_exact addition (gibson#617)")
 		assert.Equal(t, MissionIndexSchemaVersion, MissionIndex().SchemaVersion,
 			"MissionIndex().SchemaVersion must equal MissionIndexSchemaVersion constant")
 	})
@@ -962,8 +968,8 @@ func TestIndexDefinition_SchemaVersion(t *testing.T) {
 		assert.Equal(t, FindingIndexSchemaVersion, idx.SchemaVersion)
 	})
 
-	t.Run("MissionIndexSchemaVersion is 2", func(t *testing.T) {
-		assert.Equal(t, 2, MissionIndexSchemaVersion)
+	t.Run("MissionIndexSchemaVersion is 3", func(t *testing.T) {
+		assert.Equal(t, 3, MissionIndexSchemaVersion)
 	})
 
 	t.Run("FindingIndexSchemaVersion is 2", func(t *testing.T) {

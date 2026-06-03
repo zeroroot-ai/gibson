@@ -49,7 +49,10 @@ func AllIndexDefinitions() []*IndexDefinition {
 //
 //	0 (implicit) → original schema, no tenant_id field
 //	2             → added tenant_id AS tenant_id TAG SORTABLE (Phase 1)
-const MissionIndexSchemaVersion = 2
+//	3             → added name_exact AS name_exact TAG for exact-name dedup
+//	                (FindOrCreateMission); the TEXT `name` field cannot be
+//	                exact-matched with TAG syntax. See gibson#617.
+const MissionIndexSchemaVersion = 3
 
 func MissionIndex() *IndexDefinition {
 	return &IndexDefinition{
@@ -63,6 +66,16 @@ func MissionIndex() *IndexDefinition {
 				Alias:  "name",
 				Type:   FieldTypeText,
 				Weight: 2.0,
+			},
+			{
+				// Exact-match TAG view of the same field. FindOrCreateMission
+				// de-dups by exact name via `@name_exact:{...}`; the TEXT
+				// `name` field above (kept for full-text search) cannot be
+				// exact-matched with TAG syntax and misses names containing
+				// numeric/timestamp segments. See gibson#617.
+				Path:  "$.name",
+				Alias: "name_exact",
+				Type:  FieldTypeTag,
 			},
 			{
 				Path:  "$.description",
