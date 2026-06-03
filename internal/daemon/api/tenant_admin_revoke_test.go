@@ -13,8 +13,10 @@ import (
 func TestRevokeAgentIdentity_HappyPath(t *testing.T) {
 	fakeidp := &fakeIDPClient{}
 	fakeAudit := &fakeAuditWriter{}
+	az := newFakeAuthorizer().allow("tenant:acme", "belongs_to", "agent_principal:some-uuid")
 	srv := newTestDaemonServer(t).
 		WithIdPAdminClient(fakeidp).
+		WithAuthorizer(az).
 		WithTenantAdminAuditWriter(fakeAudit)
 
 	ctx := ctxWithTenantAdmin(context.Background(), "acme", "user-admin")
@@ -43,7 +45,8 @@ func TestRevokeAgentIdentity_NotFound(t *testing.T) {
 			return idp.ErrNotFound
 		},
 	}
-	srv := newTestDaemonServer(t).WithIdPAdminClient(fakeidp)
+	az := newFakeAuthorizer().allow("tenant:acme", "belongs_to", "agent_principal:missing-id")
+	srv := newTestDaemonServer(t).WithIdPAdminClient(fakeidp).WithAuthorizer(az)
 	ctx := ctxWithTenantAdmin(context.Background(), "acme", "user-admin")
 
 	_, err := srv.RevokeAgentIdentity(ctx, &tenantpb.RevokeAgentIdentityRequest{
@@ -51,6 +54,44 @@ func TestRevokeAgentIdentity_NotFound(t *testing.T) {
 	})
 	if status.Code(err) != codes.NotFound {
 		t.Errorf("got code %v, want NotFound", status.Code(err))
+	}
+}
+
+// TestRevokeAgentIdentity_CrossTenantNotFound ensures a tenant cannot revoke a
+// principal it does not own: with no belongs_to tuple for the caller's tenant,
+// the call returns NotFound and never reaches the IdP delete (gibson#606).
+func TestRevokeAgentIdentity_CrossTenantNotFound(t *testing.T) {
+	fakeidp := &fakeIDPClient{}
+	az := newFakeAuthorizer() // no ownership tuple for tenant acme
+	srv := newTestDaemonServer(t).WithIdPAdminClient(fakeidp).WithAuthorizer(az)
+	ctx := ctxWithTenantAdmin(context.Background(), "acme", "user-admin")
+
+	_, err := srv.RevokeAgentIdentity(ctx, &tenantpb.RevokeAgentIdentityRequest{
+		PrincipalId: "agent_principal:other-tenants-agent",
+	})
+	if status.Code(err) != codes.NotFound {
+		t.Errorf("got code %v, want NotFound", status.Code(err))
+	}
+	if len(fakeidp.deleteCalls) != 0 {
+		t.Errorf("cross-tenant revoke reached IdP delete: %d calls", len(fakeidp.deleteCalls))
+	}
+}
+
+// TestRevokeAgentIdentity_FailsClosedWithoutAuthorizer ensures revoke refuses to
+// delete when it cannot verify tenant ownership via FGA (gibson#606).
+func TestRevokeAgentIdentity_FailsClosedWithoutAuthorizer(t *testing.T) {
+	fakeidp := &fakeIDPClient{}
+	srv := newTestDaemonServer(t).WithIdPAdminClient(fakeidp) // no authorizer
+	ctx := ctxWithTenantAdmin(context.Background(), "acme", "user-admin")
+
+	_, err := srv.RevokeAgentIdentity(ctx, &tenantpb.RevokeAgentIdentityRequest{
+		PrincipalId: "agent_principal:some-uuid",
+	})
+	if status.Code(err) != codes.Unavailable {
+		t.Errorf("got code %v, want Unavailable", status.Code(err))
+	}
+	if len(fakeidp.deleteCalls) != 0 {
+		t.Errorf("fail-closed revoke reached IdP delete: %d calls", len(fakeidp.deleteCalls))
 	}
 }
 

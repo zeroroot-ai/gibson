@@ -187,7 +187,8 @@ func fakePayloadKey(missionID, checkpointID string) string {
 // responses by (user, relation, object) tuple. Unscripted tuples return false.
 type fakeAuthorizer struct {
 	mu      sync.RWMutex
-	allowed map[string]bool // user|relation|object
+	allowed map[string]bool     // user|relation|object
+	objects map[string][]string // user|relation|objectType -> object IDs (ListObjects)
 	checks  []checkRecord
 	writes  []authz.Tuple // tuples captured by Write
 }
@@ -197,7 +198,15 @@ type checkRecord struct {
 }
 
 func newFakeAuthorizer() *fakeAuthorizer {
-	return &fakeAuthorizer{allowed: make(map[string]bool)}
+	return &fakeAuthorizer{allowed: make(map[string]bool), objects: make(map[string][]string)}
+}
+
+// withObjects scripts the ListObjects(user, relation, objectType) result.
+func (a *fakeAuthorizer) withObjects(user, relation, objectType string, objects ...string) *fakeAuthorizer {
+	a.mu.Lock()
+	defer a.mu.Unlock()
+	a.objects[user+"|"+relation+"|"+objectType] = objects
+	return a
 }
 
 func (a *fakeAuthorizer) allow(user, relation, object string) *fakeAuthorizer {
@@ -239,8 +248,10 @@ func (a *fakeAuthorizer) writtenTuples() []authz.Tuple {
 	copy(out, a.writes)
 	return out
 }
-func (a *fakeAuthorizer) ListObjects(_ context.Context, _, _, _ string) ([]string, error) {
-	return nil, nil
+func (a *fakeAuthorizer) ListObjects(_ context.Context, user, relation, objectType string) ([]string, error) {
+	a.mu.RLock()
+	defer a.mu.RUnlock()
+	return a.objects[user+"|"+relation+"|"+objectType], nil
 }
 func (a *fakeAuthorizer) ListUsers(_ context.Context, _, _, _ string) ([]string, error) {
 	return nil, nil
