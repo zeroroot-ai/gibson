@@ -515,10 +515,16 @@ func TestStreamTrim(t *testing.T) {
 				assert.Equal(t, tt.wantRemoved, removed)
 			}
 
-			// Check remaining entries
+			// Check remaining entries. Approximate trim (MAXLEN ~) only drops
+			// whole macro nodes, so a small stream may not shrink at all; Redis
+			// guarantees only that at least MaxLen entries remain.
 			length, err := client.StreamLen(ctx, stream)
 			require.NoError(t, err)
-			assert.Equal(t, tt.wantRemaining, length)
+			if tt.opts != nil && tt.opts.Approximate {
+				assert.GreaterOrEqual(t, length, tt.opts.MaxLen)
+			} else {
+				assert.Equal(t, tt.wantRemaining, length)
+			}
 		})
 	}
 }
@@ -1151,12 +1157,15 @@ func TestStreamPending(t *testing.T) {
 		require.NoError(t, err)
 	}
 
-	// Read messages without ACK (creates pending entries)
+	// Read messages without ACK so they enter the PEL (pending entries).
+	// NoAck must be false: NOACK delivers messages WITHOUT adding them to the
+	// Pending Entries List, so StreamPending would see nothing (#458 corrected
+	// the inverted NoAck semantics).
 	opts := &ConsumerGroupOptions{
 		Group:    group,
 		Consumer: "worker-1",
 		Count:    5,
-		NoAck:    true,
+		NoAck:    false,
 	}
 	entries, err := client.StreamReadGroup(ctx, stream, ">", opts)
 	require.NoError(t, err)
@@ -1277,12 +1286,14 @@ func TestStreamClaim(t *testing.T) {
 		ids[i] = id
 	}
 
-	// Read messages with consumer-1 (creates pending entries)
+	// Read messages with consumer-1 so they enter the PEL (pending entries) and
+	// can later be claimed. NoAck must be false: NOACK skips PEL tracking, so
+	// there would be nothing to claim (#458 corrected the inverted semantics).
 	opts := &ConsumerGroupOptions{
 		Group:    group,
 		Consumer: "worker-1",
 		Count:    10,
-		NoAck:    true,
+		NoAck:    false,
 	}
 	entries, err := client.StreamReadGroup(ctx, stream, ">", opts)
 	require.NoError(t, err)
@@ -1373,6 +1384,12 @@ func TestStreamClaim(t *testing.T) {
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
+			// XCLAIM MIN-IDLE-TIME only claims entries idle for at least the
+			// threshold. Earlier subtests claim the same IDs (resetting their
+			// idle clock), so let the target age past minIdleTime first.
+			if tt.minIdleTime > 0 {
+				time.Sleep(tt.minIdleTime + 5*time.Millisecond)
+			}
 			claimed, err := client.StreamClaim(ctx, tt.stream, tt.group, tt.consumer, tt.minIdleTime, tt.ids...)
 
 			if tt.wantErr {
