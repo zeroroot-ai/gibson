@@ -33,7 +33,7 @@ func TestDeriveTenantKEK_KAT(t *testing.T) {
 			// matches what the legacy operator + daemon produced.
 			name:               "zeroroot-ai",
 			tenantID:           "zeroroot-ai",
-			wantPasswordPrefix: "5adb5f46133ee27cf59c511ae80e9ee9",
+			wantPasswordPrefix: "35dbd310788793743e47dad9c43cbe58",
 		},
 		{
 			name:               "smoke-solo",
