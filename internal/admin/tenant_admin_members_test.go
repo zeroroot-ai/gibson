@@ -79,6 +79,11 @@ type membersIdPClient struct {
 	added   []idp.TenantMembershipRequest
 	removed []idp.TenantMembershipRequest
 	addErr  error
+
+	// EnsureHumanUser recording (gibson#633)
+	ensuredEmails []string
+	ensureUserID  string
+	ensureErr     error
 }
 
 func (c *membersIdPClient) CreateServiceAccount(_ context.Context, _ idp.CreateServiceAccountRequest) (*idp.ServiceAccount, error) {
@@ -117,6 +122,16 @@ func (c *membersIdPClient) RemoveTenantMember(_ context.Context, req idp.TenantM
 }
 func (c *membersIdPClient) RevokeUserSessions(_ context.Context, _ string) (idp.RevokeUserSessionsResult, error) {
 	return idp.RevokeUserSessionsResult{}, nil
+}
+func (c *membersIdPClient) EnsureHumanUser(_ context.Context, req idp.EnsureHumanUserRequest) (string, error) {
+	c.ensuredEmails = append(c.ensuredEmails, req.Email)
+	if c.ensureErr != nil {
+		return "", c.ensureErr
+	}
+	if c.ensureUserID == "" {
+		return "user-ensured", nil
+	}
+	return c.ensureUserID, nil
 }
 func (c *membersIdPClient) Close() error { return nil }
 

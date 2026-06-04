@@ -75,6 +75,15 @@ type ServiceAccount struct {
 	Description string
 }
 
+// EnsureHumanUserRequest carries parameters for finding-or-creating a human
+// user in the IdP organization that bounds a tenant.
+type EnsureHumanUserRequest struct {
+	// OrgID is the IdP organization id the user belongs to / is created in.
+	OrgID string
+	// Email is the user's email address (also the login name). Required.
+	Email string
+}
+
 // RevokeUserSessionsResult reports what RevokeUserSessions did. Counts are
 // best-effort observability; callers must not treat zero as failure.
 type RevokeUserSessionsResult struct {

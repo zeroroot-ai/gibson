@@ -53,6 +53,13 @@ type AdminClient interface {
 	// bounds a tenant. Idempotent: a missing membership is treated as success.
 	RemoveTenantMember(ctx context.Context, req TenantMembershipRequest) error
 
+	// EnsureHumanUser finds the human user with the given email in the IdP
+	// organization, or creates one (triggering the IdP's verification /
+	// credential-setup email). Returns the user id. Idempotent: an existing
+	// user is found and returned rather than duplicated. Used by
+	// MembershipService.AcceptInvitation to provision an invited member.
+	EnsureHumanUser(ctx context.Context, req EnsureHumanUserRequest) (userID string, err error)
+
 	// RevokeUserSessions terminates the user's active IdP sessions and revokes
 	// their refresh-token grants. This blocks issuance of NEW tokens
 	// immediately; any already-issued stateless access token remains valid
