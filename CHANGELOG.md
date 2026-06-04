@@ -62,6 +62,27 @@ Completed or cancelled missions are unaffected.
 
 ---
 
+## [0.123.0](https://github.com/zeroroot-ai/gibson/compare/v0.122.0...v0.123.0) (2026-06-04)
+
+
+### Features
+
+* **identity:** implement RevokeUserSessions with composed can_revoke_sessions authz (gibson[#622](https://github.com/zeroroot-ai/gibson/issues/622)) ([#629](https://github.com/zeroroot-ai/gibson/issues/629)) ([b80ce1b](https://github.com/zeroroot-ai/gibson/commit/b80ce1b6d5c35faafed27704fca221a9bd8da439))
+* implement GetMissionGraph projection + layout store in the daemon ([#602](https://github.com/zeroroot-ai/gibson/issues/602)) ([a1e1be1](https://github.com/zeroroot-ai/gibson/commit/a1e1be1094e4499f63140e72282802e5a38b0e51))
+* **membership:** MembershipService writes the Zitadel org-membership half (gibson[#621](https://github.com/zeroroot-ai/gibson/issues/621)) ([#625](https://github.com/zeroroot-ai/gibson/issues/625)) ([b37e9e2](https://github.com/zeroroot-ai/gibson/commit/b37e9e28a72a5175c8eb665a9d8dbe1911244a9e))
+
+
+### Bug Fixes
+
+* **ci:** clear govulncheck findings — Go 1.26.4 stdlib + x/crypto v0.52.0 ([#612](https://github.com/zeroroot-ai/gibson/issues/612)) ([1251cc3](https://github.com/zeroroot-ai/gibson/commit/1251cc359c438c0779cd92d993e4afde9c68fc08))
+* **ci:** install Go from go.mod (go-version-file) instead of pinning '1.26' ([#615](https://github.com/zeroroot-ai/gibson/issues/615)) ([454c977](https://github.com/zeroroot-ai/gibson/commit/454c97711c1c11fb13653c4dfa4a682fc88450f5))
+* **daemon:** drop vestigial Zitadel project-membership from agent identity provisioning ([#607](https://github.com/zeroroot-ai/gibson/issues/607)) ([14eecbd](https://github.com/zeroroot-ai/gibson/commit/14eecbd262ffa600c99e0692e1b1b0cbe4ef7093)), closes [#605](https://github.com/zeroroot-ai/gibson/issues/605)
+* **daemon:** tenant-scope ListAgentIdentities + RevokeAgentIdentity via FGA ([#608](https://github.com/zeroroot-ai/gibson/issues/608)) ([645cad3](https://github.com/zeroroot-ai/gibson/commit/645cad318906988a454d85cb2644b5a02327c122)), closes [#606](https://github.com/zeroroot-ai/gibson/issues/606)
+* **state:** correct stream PEL/claim/trim test expectations ([#616](https://github.com/zeroroot-ai/gibson/issues/616)) ([25914f6](https://github.com/zeroroot-ai/gibson/commit/25914f603ebb6348b75d260c9afdcba25dd86380))
+* **state:** FindOrCreateMission exact-matches name via a TAG field ([#619](https://github.com/zeroroot-ai/gibson/issues/619)) ([ea7f247](https://github.com/zeroroot-ai/gibson/commit/ea7f2477c51ef0282f92735277ca875fc2937294)), closes [#617](https://github.com/zeroroot-ai/gibson/issues/617)
+* **tenant:** refresh stale rebrand KAT vectors in tenant name + KEK tests ([#611](https://github.com/zeroroot-ai/gibson/issues/611)) ([b4a0355](https://github.com/zeroroot-ai/gibson/commit/b4a035536c832ad7c6ccadf600d3f5f0e071f4ee)), closes [#588](https://github.com/zeroroot-ai/gibson/issues/588)
+* **tests:** drop obsolete redis-direct providerconfig integration test ([#614](https://github.com/zeroroot-ai/gibson/issues/614)) ([8505cc0](https://github.com/zeroroot-ai/gibson/commit/8505cc09d4298ff3259db3e0befe1ba4e76fdd19)), closes [#610](https://github.com/zeroroot-ai/gibson/issues/610)
+
 ## [0.122.0](https://github.com/zeroroot-ai/gibson/compare/v0.121.0...v0.122.0) (2026-06-02)
 
 
