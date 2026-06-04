@@ -290,6 +290,7 @@ rpc,relation,object_type,deriver,identities,source_proto_file,mode
 /gibson.tenant.v1.UserService/RenameConversation,member,tenant,tenant_from_identity,USER|SERVICE,gibson/tenant/v1/user.proto,rule
 /gibson.tenant.v1.UserService/ResetUserLayout,member,tenant,tenant_from_identity,USER|SERVICE,gibson/tenant/v1/user.proto,rule
 /gibson.tenant.v1.UserService/ResetUserOnboardingState,member,tenant,tenant_from_identity,USER|SERVICE,gibson/tenant/v1/user.proto,rule
+/gibson.tenant.v1.UserService/RevokeUserSessions,member,tenant,tenant_from_identity,USER,gibson/tenant/v1/user.proto,rule
 /gibson.tenant.v1.UserService/SaveConversation,member,tenant,tenant_from_identity,USER|SERVICE,gibson/tenant/v1/user.proto,rule
 /gibson.tenant.v1.UserService/SaveUserLayout,member,tenant,tenant_from_identity,USER|SERVICE,gibson/tenant/v1/user.proto,rule
 /gibson.tenant.v1.UserService/SetSignupProgress,,,,,gibson/tenant/v1/user.proto,unauthenticated

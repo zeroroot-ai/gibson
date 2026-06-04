@@ -34,6 +34,11 @@ type fakeIDPClient struct {
 	deleteFn    func(ctx context.Context, accountID string) error
 	listFn      func(ctx context.Context, req idp.ListServiceAccountsRequest) (*idp.ListServiceAccountsResponse, error)
 	deleteCalls []string // tracks deleted accountIDs for rollback verification
+
+	// RevokeUserSessions recording (gibson#622)
+	revokedUsers []string
+	revokeResult idp.RevokeUserSessionsResult
+	revokeErr    error
 }
 
 func (f *fakeIDPClient) CreateServiceAccount(ctx context.Context, req idp.CreateServiceAccountRequest) (*idp.ServiceAccount, error) {
@@ -78,6 +83,13 @@ func (f *fakeIDPClient) AddTenantMember(_ context.Context, _ idp.TenantMembershi
 }
 func (f *fakeIDPClient) RemoveTenantMember(_ context.Context, _ idp.TenantMembershipRequest) error {
 	return nil
+}
+func (f *fakeIDPClient) RevokeUserSessions(_ context.Context, userID string) (idp.RevokeUserSessionsResult, error) {
+	f.revokedUsers = append(f.revokedUsers, userID)
+	if f.revokeErr != nil {
+		return idp.RevokeUserSessionsResult{}, f.revokeErr
+	}
+	return f.revokeResult, nil
 }
 func (f *fakeIDPClient) Close() error { return nil }
 

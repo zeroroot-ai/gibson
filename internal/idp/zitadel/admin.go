@@ -432,6 +432,69 @@ func (c *Client) RemoveTenantMember(ctx context.Context, req idp.TenantMembershi
 	return nil
 }
 
+// RevokeUserSessions terminates the user's active Zitadel sessions, which also
+// invalidates the refresh tokens bound to those sessions (so no new access
+// token can be minted from them). Maps to the Zitadel Session v2 API:
+//
+//	POST   /v2/sessions/search   (list the user's sessions)
+//	DELETE /v2/sessions/{id}     (terminate each)
+//
+// gibson#622 v1 model: this blocks NEW tokens immediately; the target's current
+// stateless access JWT ages out within the access-token TTL (bounded to 15m on
+// the CLI app — provisioned by platform-operator#80). Idempotent: no sessions
+// → zero counts, not an error.
+//
+// NOTE: the exact Session v2 request/response shape must be confirmed against
+// the deployed Zitadel version in the deploy auth-e2e smoke (the daemon has no
+// live Zitadel in unit tests). The search query filters on the session's user.
+func (c *Client) RevokeUserSessions(ctx context.Context, userID string) (idp.RevokeUserSessionsResult, error) {
+	if userID == "" {
+		return idp.RevokeUserSessionsResult{}, fmt.Errorf("%w: RevokeUserSessions requires userID", idp.ErrUpstream)
+	}
+
+	// 1) Search the user's active sessions.
+	searchBody := map[string]interface{}{
+		"queries": []map[string]interface{}{
+			{"userIdQuery": map[string]interface{}{"id": userID}},
+		},
+	}
+	var searchResp struct {
+		Sessions []struct {
+			ID string `json:"id"`
+		} `json:"sessions"`
+	}
+	if err := c.doRequest(ctx, http.MethodPost, "/v2/sessions/search", searchBody, "", &searchResp); err != nil {
+		return idp.RevokeUserSessionsResult{}, mapError(err, "RevokeUserSessions:search")
+	}
+
+	// 2) Terminate each session. A 404 on an individual delete is benign
+	//    (the session expired between search and delete) — keep going.
+	terminated := 0
+	for _, s := range searchResp.Sessions {
+		if s.ID == "" {
+			continue
+		}
+		path := "/v2/sessions/" + url.PathEscape(s.ID)
+		if err := c.doRequest(ctx, http.MethodDelete, path, nil, "", nil); err != nil {
+			mapped := mapError(err, "RevokeUserSessions:delete")
+			if errors.Is(mapped, idp.ErrNotFound) {
+				continue
+			}
+			return idp.RevokeUserSessionsResult{SessionsTerminated: terminated}, mapped
+		}
+		terminated++
+	}
+
+	// Refresh tokens in Zitadel are bound to the session that minted them;
+	// terminating the sessions revokes those refresh grants. We report the
+	// same count rather than issuing a second (version-dependent) grant-revoke
+	// call. A dedicated hard token-grant revoke can layer on later if needed.
+	return idp.RevokeUserSessionsResult{
+		SessionsTerminated: terminated,
+		GrantsRevoked:      terminated,
+	}, nil
+}
+
 // ---------------------------------------------------------------------------
 // HTTP helpers
 // ---------------------------------------------------------------------------

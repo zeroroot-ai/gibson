@@ -1864,6 +1864,12 @@ entries:
     allowed_identities:
       - USER
       - SERVICE
+  "/gibson.tenant.v1.UserService/RevokeUserSessions":
+    relation: "member"
+    object_type: "tenant"
+    object_deriver: "tenant_from_identity"
+    allowed_identities:
+      - USER
   "/gibson.tenant.v1.UserService/SaveConversation":
     relation: "member"
     object_type: "tenant"

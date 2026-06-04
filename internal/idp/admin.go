@@ -53,6 +53,14 @@ type AdminClient interface {
 	// bounds a tenant. Idempotent: a missing membership is treated as success.
 	RemoveTenantMember(ctx context.Context, req TenantMembershipRequest) error
 
+	// RevokeUserSessions terminates the user's active IdP sessions and revokes
+	// their refresh-token grants. This blocks issuance of NEW tokens
+	// immediately; any already-issued stateless access token remains valid
+	// until it expires (the access-token TTL bounds the worst-case window —
+	// gibson#622 v1 model). Idempotent: a user with no active sessions returns
+	// zero counts, not an error.
+	RevokeUserSessions(ctx context.Context, userID string) (RevokeUserSessionsResult, error)
+
 	// Close releases any resources held by the client (HTTP connections, etc.).
 	Close() error
 }
