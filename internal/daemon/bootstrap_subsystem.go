@@ -46,6 +46,10 @@ type nativeLoginConfig struct {
 	Issuer   string
 	ClientID string
 	Scopes   []string
+	// PublicURL is the daemon's public base URL (GIBSON_PUBLIC_URL). It is the
+	// base for the Capability-Grant discovery document's absolute endpoint URLs
+	// (gibson#648), also served on this pre-auth listener.
+	PublicURL string
 }
 
 // nativeLoginConfigFromEnv assembles the config from the daemon's environment.
@@ -61,10 +65,11 @@ func nativeLoginConfigFromEnv() nativeLoginConfig {
 		scopesRaw = defaultNativeLoginScopes
 	}
 	return nativeLoginConfig{
-		Port:     port,
-		Issuer:   os.Getenv(envIDPAdminIssuer),
-		ClientID: os.Getenv(envNativeLoginClientID),
-		Scopes:   strings.Fields(scopesRaw),
+		Port:      port,
+		Issuer:    os.Getenv(envIDPAdminIssuer),
+		ClientID:  os.Getenv(envNativeLoginClientID),
+		Scopes:    strings.Fields(scopesRaw),
+		PublicURL: os.Getenv("GIBSON_PUBLIC_URL"),
 	}
 }
 
@@ -100,6 +105,10 @@ func nativeLoginHandler(cfg nativeLoginConfig) http.Handler {
 			Scopes:   cfg.Scopes,
 		})
 	})
+	// Capability-Grant registration discovery (gibson#648) — served on the same
+	// pre-auth listener; a component holds no Capability Grant yet at discovery
+	// time. Envoy publishes it on an allow_missing route alongside gibson-login.
+	mux.HandleFunc(agentConfigWellKnownPath, agentConfigHandler(cfg.PublicURL))
 	return mux
 }
 
