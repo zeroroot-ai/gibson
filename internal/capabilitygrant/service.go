@@ -138,6 +138,10 @@ type RegisterCapabilityGrantResult struct {
 	HostID       string
 	Capabilities []Capability
 	Status       string
+	// ComponentScope is the FGA component identifier bound to this installation
+	// ("component:{name}"). The SDK requires it in the registration response and
+	// the daemon stamps it into every per-RPC CG-JWT (gibson#648, ADR-0045).
+	ComponentScope string
 }
 
 // RegisterCapabilityGrant upserts the host, creates the agent, resolves FGA capability
@@ -270,10 +274,11 @@ func (s *CapabilityGrantService) RegisterCapabilityGrant(
 	)
 
 	return &RegisterCapabilityGrantResult{
-		AgentID:      agentID,
-		HostID:       hostID,
-		Capabilities: caps,
-		Status:       "active",
+		AgentID:        agentID,
+		HostID:         hostID,
+		Capabilities:   caps,
+		Status:         "active",
+		ComponentScope: "component:" + agentName,
 	}, nil
 }
 
