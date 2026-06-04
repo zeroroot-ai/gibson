@@ -2930,6 +2930,16 @@ export const AuthRegistry: Record<string, AuthEntry> = {
     unauthenticated: false,
     self: false,
   },
+  "/gibson.tenant.v1.UserService/RevokeUserSessions": {
+    method: "/gibson.tenant.v1.UserService/RevokeUserSessions",
+    service: "gibson.tenant.v1.UserService",
+    relation: "member",
+    objectType: "tenant",
+    objectDeriver: "tenant_from_identity",
+    allowedIdentities: IdentityClass.USER,
+    unauthenticated: false,
+    self: false,
+  },
   "/gibson.tenant.v1.UserService/SaveConversation": {
     method: "/gibson.tenant.v1.UserService/SaveConversation",
     service: "gibson.tenant.v1.UserService",

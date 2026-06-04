@@ -2943,6 +2943,16 @@ var Registry = map[string]Entry{
 		Unauthenticated:   false,
 		Self:              false,
 	},
+	"/gibson.tenant.v1.UserService/RevokeUserSessions": {
+		Method:            "/gibson.tenant.v1.UserService/RevokeUserSessions",
+		Service:           "gibson.tenant.v1.UserService",
+		Relation:          "member",
+		ObjectType:        "tenant",
+		ObjectDeriver:     "tenant_from_identity",
+		AllowedIdentities: IdentityUser,
+		Unauthenticated:   false,
+		Self:              false,
+	},
 	"/gibson.tenant.v1.UserService/SaveConversation": {
 		Method:            "/gibson.tenant.v1.UserService/SaveConversation",
 		Service:           "gibson.tenant.v1.UserService",

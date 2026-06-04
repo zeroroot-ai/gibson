@@ -75,6 +75,15 @@ type ServiceAccount struct {
 	Description string
 }
 
+// RevokeUserSessionsResult reports what RevokeUserSessions did. Counts are
+// best-effort observability; callers must not treat zero as failure.
+type RevokeUserSessionsResult struct {
+	// SessionsTerminated is the number of active IdP sessions terminated.
+	SessionsTerminated int
+	// GrantsRevoked is the number of refresh-token grants revoked.
+	GrantsRevoked int
+}
+
 // TenantMembershipRequest carries parameters for adding or removing a human
 // user's membership of the IdP organization that bounds a tenant.
 type TenantMembershipRequest struct {

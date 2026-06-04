@@ -115,6 +115,9 @@ func (c *membersIdPClient) RemoveTenantMember(_ context.Context, req idp.TenantM
 	c.removed = append(c.removed, req)
 	return nil
 }
+func (c *membersIdPClient) RevokeUserSessions(_ context.Context, _ string) (idp.RevokeUserSessionsResult, error) {
+	return idp.RevokeUserSessionsResult{}, nil
+}
 func (c *membersIdPClient) Close() error { return nil }
 
 // staticOrgResolver is a fixed tenant->org resolver for tests.
