@@ -23,10 +23,13 @@ type AdminClient interface {
 	// Returns ErrAlreadyExists if an account with the same name already exists.
 	CreateServiceAccount(ctx context.Context, req CreateServiceAccountRequest) (*ServiceAccount, error)
 
-	// MintClientSecret generates a new client secret for an existing service account.
-	// The returned string is the raw secret; it is the caller's responsibility to
-	// handle it securely and never log it.
-	MintClientSecret(ctx context.Context, accountID string) (clientSecret string, err error)
+	// MintClientSecret generates a new client secret for an existing service
+	// account. It returns BOTH the OAuth client_id (the IdP's loginName-based
+	// client identifier, used as the client_credentials username) and the raw
+	// secret. The client_id is NOT the same as the account/user id: Zitadel's
+	// client_credentials grant rejects the user id with invalid_client. The
+	// caller must handle the secret securely and never log it.
+	MintClientSecret(ctx context.Context, accountID string) (clientID, clientSecret string, err error)
 
 	// DeleteServiceAccount permanently removes the service account and revokes
 	// any active sessions. Returns ErrNotFound if the account does not exist.

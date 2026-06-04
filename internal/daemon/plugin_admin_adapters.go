@@ -219,7 +219,11 @@ func (a *idpPluginPrincipalAdapter) CreatePrincipal(
 		return "", "", time.Time{}, fmt.Errorf("create plugin principal: %w", err)
 	}
 
-	secret, err := a.client.MintClientSecret(ctx, sa.AccountID)
+	// Plugins authenticate via the capability-grant bootstrap (not a raw
+	// client_credentials grant), so the loginName-based clientID is not needed
+	// here; the principalID stays the user id. Revisit under gibson#643 if the
+	// plugin SDK ever does client_credentials.
+	_, secret, err := a.client.MintClientSecret(ctx, sa.AccountID)
 	if err != nil {
 		// Best-effort cleanup — if DeleteServiceAccount fails, the orphaned
 		// account will be cleaned up by the rollback path in RegisterPlugin.
