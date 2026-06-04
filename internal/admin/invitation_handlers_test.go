@@ -2,7 +2,9 @@ package admin
 
 import (
 	"context"
+	"errors"
 	"regexp"
+	"strings"
 	"testing"
 	"time"
 
@@ -10,6 +12,7 @@ import (
 	"google.golang.org/grpc/codes"
 	status_grpc "google.golang.org/grpc/status"
 
+	"github.com/zeroroot-ai/gibson/internal/mailer"
 	tenantv1 "github.com/zeroroot-ai/sdk/api/gen/gibson/tenant/v1"
 )
 
@@ -70,6 +73,70 @@ func TestInviteMember_IssuesPendingInvitation(t *testing.T) {
 	}
 	if err := mock.ExpectationsWereMet(); err != nil {
 		t.Errorf("sqlmock expectations: %v", err)
+	}
+}
+
+// captureInviteMailer records the last invitation email for assertions.
+type captureInviteMailer struct {
+	last mailer.InvitationEmail
+	err  error
+}
+
+func (c *captureInviteMailer) SendInvitation(_ context.Context, inv mailer.InvitationEmail) error {
+	c.last = inv
+	return c.err
+}
+
+func TestInviteMember_EmailsAcceptLink(t *testing.T) {
+	db, mock, err := sqlmock.New()
+	if err != nil {
+		t.Fatalf("sqlmock: %v", err)
+	}
+	t.Cleanup(func() { _ = db.Close() })
+	mock.ExpectExec("CREATE TABLE IF NOT EXISTS tenant_invitations").WillReturnResult(sqlmock.NewResult(0, 0))
+	mock.ExpectExec("CREATE UNIQUE INDEX").WillReturnResult(sqlmock.NewResult(0, 0))
+	mock.ExpectQuery(regexp.QuoteMeta("INSERT INTO tenant_invitations")).
+		WillReturnRows(sqlmock.NewRows([]string{"id", "expires_at"}).AddRow("inv-1", nowPlus()))
+
+	cap := &captureInviteMailer{}
+	srv := newMembersTestServer(t, &membersAuthorizer{}, nil)
+	srv.invitations = NewInvitationStore(db)
+	srv.inviteMailer = cap
+	srv.inviteBaseURL = "https://app.example.com/"
+
+	ctx := ctxWithTenant(t, "acme")
+	if _, err := srv.InviteMember(ctx, &tenantv1.InviteMemberRequest{Email: "alice@example.com", Role: "admin"}); err != nil {
+		t.Fatalf("InviteMember: %v", err)
+	}
+	if cap.last.To != "alice@example.com" || cap.last.Role != "admin" {
+		t.Errorf("email = %+v, want to=alice role=admin", cap.last)
+	}
+	// Base URL trailing slash is normalised; the raw token follows /invite/.
+	if !strings.HasPrefix(cap.last.AcceptURL, "https://app.example.com/invite/") ||
+		cap.last.AcceptURL == "https://app.example.com/invite/" {
+		t.Errorf("accept URL = %q, want https://app.example.com/invite/<token>", cap.last.AcceptURL)
+	}
+}
+
+func TestInviteMember_SendFailureSurfaces(t *testing.T) {
+	db, mock, err := sqlmock.New()
+	if err != nil {
+		t.Fatalf("sqlmock: %v", err)
+	}
+	t.Cleanup(func() { _ = db.Close() })
+	mock.ExpectExec("CREATE TABLE IF NOT EXISTS tenant_invitations").WillReturnResult(sqlmock.NewResult(0, 0))
+	mock.ExpectExec("CREATE UNIQUE INDEX").WillReturnResult(sqlmock.NewResult(0, 0))
+	mock.ExpectQuery(regexp.QuoteMeta("INSERT INTO tenant_invitations")).
+		WillReturnRows(sqlmock.NewRows([]string{"id", "expires_at"}).AddRow("inv-1", nowPlus()))
+
+	srv := newMembersTestServer(t, &membersAuthorizer{}, nil)
+	srv.invitations = NewInvitationStore(db)
+	srv.inviteMailer = &captureInviteMailer{err: errors.New("smtp down")}
+	srv.inviteBaseURL = "https://app.example.com"
+
+	ctx := ctxWithTenant(t, "acme")
+	if _, err := srv.InviteMember(ctx, &tenantv1.InviteMemberRequest{Email: "alice@example.com", Role: "member"}); err == nil {
+		t.Fatal("expected InviteMember to surface a send failure")
 	}
 }
 
