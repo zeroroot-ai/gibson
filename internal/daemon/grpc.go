@@ -979,6 +979,7 @@ func (d *daemonImpl) buildGRPCServer(ctx context.Context) (*grpcSubsystem, error
 				Authorizer:         d.authorizer,
 				IdPAdminClient:     idpClient,
 				ZitadelOrgResolver: api.NewZitadelOrgResolver(d.platformDB),
+				Invitations:        admin.NewInvitationStore(d.platformDB),
 				ReservedNames:      rnpForAdmin,
 				Logger:             d.logger.Slog(),
 			})

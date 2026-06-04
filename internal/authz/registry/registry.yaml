@@ -1364,7 +1364,15 @@ entries:
     object_deriver: "tenant_from_identity"
     allowed_identities:
       - USER
+  "/gibson.tenant.v1.MembershipService/AcceptInvitation":
+    unauthenticated: true
   "/gibson.tenant.v1.MembershipService/AddTeamMember":
+    relation: "admin"
+    object_type: "tenant"
+    object_deriver: "tenant_from_identity"
+    allowed_identities:
+      - USER
+  "/gibson.tenant.v1.MembershipService/CancelInvitation":
     relation: "admin"
     object_type: "tenant"
     object_deriver: "tenant_from_identity"
@@ -1390,6 +1398,12 @@ entries:
     object_deriver: "tenant_from_identity"
     allowed_identities:
       - USER
+  "/gibson.tenant.v1.MembershipService/InviteMember":
+    relation: "admin"
+    object_type: "tenant"
+    object_deriver: "tenant_from_identity"
+    allowed_identities:
+      - USER
   "/gibson.tenant.v1.MembershipService/ListMembers":
     relation: "admin"
     object_type: "tenant"
@@ -1409,6 +1423,12 @@ entries:
     allowed_identities:
       - USER
   "/gibson.tenant.v1.MembershipService/RemoveTeamMember":
+    relation: "admin"
+    object_type: "tenant"
+    object_deriver: "tenant_from_identity"
+    allowed_identities:
+      - USER
+  "/gibson.tenant.v1.MembershipService/ResendInvitation":
     relation: "admin"
     object_type: "tenant"
     object_deriver: "tenant_from_identity"
