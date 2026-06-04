@@ -1388,12 +1388,13 @@ func (d *daemonImpl) Start(ctx context.Context) error {
 		}
 	}()
 
-	// Start the unauthenticated CLI bootstrap server (gibson#623). It publishes
-	// {issuer, cli_client_id, scopes} for `gibson login` device-grant bootstrap.
-	// Best-effort: a failure here never takes the daemon down.
+	// Start the unauthenticated native-login bootstrap server (gibson#623). It
+	// publishes {issuer, client_id, scopes} for `gibson login` (and any future
+	// native client) device-grant bootstrap. Best-effort: a failure here never
+	// takes the daemon down.
 	go func() {
-		if err := newBootstrapSubsystem(bootstrapConfigFromEnv(), d.logger).Serve(ctx); err != nil {
-			d.logger.Warn(ctx, "cli bootstrap subsystem error (non-fatal)", "error", err)
+		if err := newNativeLoginSubsystem(nativeLoginConfigFromEnv(), d.logger).Serve(ctx); err != nil {
+			d.logger.Warn(ctx, "native-login subsystem error (non-fatal)", "error", err)
 		}
 	}()
 
