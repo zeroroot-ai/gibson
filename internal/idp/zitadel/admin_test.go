@@ -166,12 +166,17 @@ func TestMintClientSecret_HappyPath(t *testing.T) {
 	}
 	defer client.Close()
 
-	secret, err := client.MintClientSecret(context.Background(), "user-abc")
+	clientID, secret, err := client.MintClientSecret(context.Background(), "user-abc")
 	if err != nil {
 		t.Fatalf("MintClientSecret: %v", err)
 	}
 	if secret != "super-secret-value" {
 		t.Errorf("secret = %q, want %q", secret, "super-secret-value")
+	}
+	// gibson#643: the clientId from the secret endpoint must be returned (it is
+	// the client_credentials username), not silently dropped.
+	if clientID != "client-id-123" {
+		t.Errorf("clientID = %q, want %q", clientID, "client-id-123")
 	}
 }
 
@@ -185,7 +190,7 @@ func TestMintClientSecret_NotFound(t *testing.T) {
 	}
 	defer client.Close()
 
-	_, err = client.MintClientSecret(context.Background(), "missing-user")
+	_, _, err = client.MintClientSecret(context.Background(), "missing-user")
 	if !errors.Is(err, idp.ErrNotFound) {
 		t.Errorf("want ErrNotFound, got: %v", err)
 	}
@@ -201,7 +206,7 @@ func TestMintClientSecret_PermissionDenied(t *testing.T) {
 	}
 	defer client.Close()
 
-	_, err = client.MintClientSecret(context.Background(), "user-abc")
+	_, _, err = client.MintClientSecret(context.Background(), "user-abc")
 	if !errors.Is(err, idp.ErrPermission) {
 		t.Errorf("want ErrPermission, got: %v", err)
 	}

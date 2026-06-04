@@ -95,8 +95,11 @@ func (s *DaemonServer) CreateAgentIdentity(ctx context.Context, req *tenantpb.Cr
 		return nil, status_grpc.Error(codes.Internal, "failed to create identity in identity provider")
 	}
 
-	// Step 5: Mint client secret (rollback on failure).
-	clientSecret, err := s.idpAdminClient.MintClientSecret(ctx, sa.AccountID)
+	// Step 5: Mint client secret (rollback on failure). clientID is the
+	// loginName-based OAuth client_id the agent authenticates with via the
+	// client_credentials grant — distinct from sa.AccountID (the user id,
+	// which the FGA principal and token `sub` use). See gibson#643.
+	clientID, clientSecret, err := s.idpAdminClient.MintClientSecret(ctx, sa.AccountID)
 	if err != nil {
 		s.rollbackServiceAccount(ctx, sa.AccountID, "MintClientSecret failed")
 		s.logger.ErrorContext(ctx, "CreateAgentIdentity: MintClientSecret failed",
@@ -178,13 +181,13 @@ func (s *DaemonServer) CreateAgentIdentity(ctx context.Context, req *tenantpb.Cr
 	)
 
 	gibsonURL := s.gibsonPublicURL
-	enrollCmd := buildEnrollCommand(gibsonURL, sa.AccountID)
+	enrollCmd := buildEnrollCommand(gibsonURL, clientID)
 
 	return &tenantpb.CreateAgentIdentityResponse{
 		PrincipalId:   principalID,
 		Kind:          req.Kind,
 		Name:          req.Name,
-		ClientId:      sa.AccountID,
+		ClientId:      clientID, // loginName-based OAuth client_id (gibson#643)
 		ClientSecret:  clientSecret, // emitted once; caller must store immediately
 		GibsonUrl:     gibsonURL,
 		EnrollCommand: enrollCmd,

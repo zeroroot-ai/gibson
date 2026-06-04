@@ -30,7 +30,7 @@ func newTestDaemonServer(t interface{ Helper() }) *DaemonServer {
 
 type fakeIDPClient struct {
 	createFn    func(ctx context.Context, req idp.CreateServiceAccountRequest) (*idp.ServiceAccount, error)
-	mintFn      func(ctx context.Context, accountID string) (string, error)
+	mintFn      func(ctx context.Context, accountID string) (clientID, clientSecret string, err error)
 	deleteFn    func(ctx context.Context, accountID string) error
 	listFn      func(ctx context.Context, req idp.ListServiceAccountsRequest) (*idp.ListServiceAccountsResponse, error)
 	deleteCalls []string // tracks deleted accountIDs for rollback verification
@@ -48,11 +48,13 @@ func (f *fakeIDPClient) CreateServiceAccount(ctx context.Context, req idp.Create
 	return &idp.ServiceAccount{AccountID: "sa-test-id", Name: req.Name, Role: req.Role}, nil
 }
 
-func (f *fakeIDPClient) MintClientSecret(ctx context.Context, accountID string) (string, error) {
+func (f *fakeIDPClient) MintClientSecret(ctx context.Context, accountID string) (string, string, error) {
 	if f.mintFn != nil {
 		return f.mintFn(ctx, accountID)
 	}
-	return "test-secret", nil
+	// Distinct from the account/user id ("sa-test-id") on purpose: the response
+	// ClientId must be this loginName-based client_id, not the user id.
+	return "test-client-id", "test-secret", nil
 }
 
 func (f *fakeIDPClient) DeleteServiceAccount(ctx context.Context, accountID string) error {
@@ -151,6 +153,12 @@ func TestCreateAgentIdentity_HappyPath(t *testing.T) {
 	}
 	if resp.ClientSecret != "test-secret" {
 		t.Errorf("ClientSecret = %q, want %q", resp.ClientSecret, "test-secret")
+	}
+	// gibson#643: ClientId must be the loginName-based OAuth client_id returned
+	// by MintClientSecret ("test-client-id"), NOT the machine-user/account id
+	// ("sa-test-id"). The user id yields invalid_client at the token endpoint.
+	if resp.ClientId != "test-client-id" {
+		t.Errorf("ClientId = %q, want %q (loginName client_id, not the user id)", resp.ClientId, "test-client-id")
 	}
 	if resp.PrincipalId == "" {
 		t.Error("expected non-empty PrincipalId")
@@ -269,8 +277,8 @@ func TestCreateAgentIdentity_AlreadyExists(t *testing.T) {
 
 func TestCreateAgentIdentity_RollbackOnMintFailure(t *testing.T) {
 	fakeidp := &fakeIDPClient{
-		mintFn: func(_ context.Context, _ string) (string, error) {
-			return "", errors.New("mint failed")
+		mintFn: func(_ context.Context, _ string) (string, string, error) {
+			return "", "", errors.New("mint failed")
 		},
 	}
 	srv := newTestDaemonServer(t).WithIdPAdminClient(fakeidp)
