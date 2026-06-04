@@ -74,6 +74,11 @@ func (m *membersAuthorizer) Close() error    { return nil }
 type membersIdPClient struct {
 	profiles map[string]*idp.UserProfile
 	failFor  map[string]bool // accountIDs that should return an error
+
+	// recorded membership projection calls (gibson#621)
+	added   []idp.TenantMembershipRequest
+	removed []idp.TenantMembershipRequest
+	addErr  error
 }
 
 func (c *membersIdPClient) CreateServiceAccount(_ context.Context, _ idp.CreateServiceAccountRequest) (*idp.ServiceAccount, error) {
@@ -99,7 +104,28 @@ func (c *membersIdPClient) GetUserProfile(_ context.Context, accountID string) (
 	}
 	return p, nil
 }
+func (c *membersIdPClient) AddTenantMember(_ context.Context, req idp.TenantMembershipRequest) error {
+	if c.addErr != nil {
+		return c.addErr
+	}
+	c.added = append(c.added, req)
+	return nil
+}
+func (c *membersIdPClient) RemoveTenantMember(_ context.Context, req idp.TenantMembershipRequest) error {
+	c.removed = append(c.removed, req)
+	return nil
+}
 func (c *membersIdPClient) Close() error { return nil }
+
+// staticOrgResolver is a fixed tenant->org resolver for tests.
+type staticOrgResolver struct {
+	orgID string
+	err   error
+}
+
+func (r staticOrgResolver) ZitadelOrgID(_ context.Context, _ string) (string, error) {
+	return r.orgID, r.err
+}
 
 // ---------------------------------------------------------------------------
 // Test fixture for ListMembers

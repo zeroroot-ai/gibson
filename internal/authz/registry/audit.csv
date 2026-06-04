@@ -73,6 +73,7 @@ rpc,relation,object_type,deriver,identities,source_proto_file,mode
 /gibson.daemon.operator.v1.DaemonOperatorService/ListFeatureTuples,platform_operator,system_tenant,system_tenant,USER|SERVICE,gibson/daemon/operator/v1/operator.proto,rule
 /gibson.daemon.operator.v1.DaemonOperatorService/RefreshToolCatalog,platform_operator,system_tenant,system_tenant,USER|SERVICE,gibson/daemon/operator/v1/operator.proto,rule
 /gibson.daemon.operator.v1.DaemonOperatorService/SeedCatalogTenantEnabled,platform_operator,system_tenant,system_tenant,USER|SERVICE,gibson/daemon/operator/v1/operator.proto,rule
+/gibson.daemon.operator.v1.DaemonOperatorService/SetTenantZitadelOrg,platform_operator,system_tenant,system_tenant,USER|SERVICE,gibson/daemon/operator/v1/operator.proto,rule
 /gibson.daemon.operator.v1.DaemonOperatorService/Shutdown,platform_operator,system_tenant,system_tenant,USER|SERVICE,gibson/daemon/operator/v1/operator.proto,rule
 /gibson.daemon.operator.v1.DaemonOperatorService/UpsertTenantQuota,platform_operator,system_tenant,system_tenant,USER|SERVICE,gibson/daemon/operator/v1/operator.proto,rule
 /gibson.daemon.operator.v1.DaemonOperatorService/WriteAccessTuples,platform_operator,system_tenant,system_tenant,USER|SERVICE,gibson/daemon/operator/v1/operator.proto,rule

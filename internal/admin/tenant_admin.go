@@ -115,10 +115,19 @@ type TenantAdminServer struct {
 	reloader      Reloader
 	svc           SecretsLister
 	now           func() time.Time
-	authorizer    authz.Authorizer      // optional; ListMembers returns empty when nil
-	idpClient     idp.AdminClient       // optional; members have empty display_name/email when nil
-	reservedNames ReservedNamesProvider // optional; GetReservedNames returns empty when nil
+	authorizer    authz.Authorizer         // optional; ListMembers returns empty when nil
+	idpClient     idp.AdminClient          // optional; members have empty display_name/email when nil
+	orgResolver   TenantZitadelOrgResolver // optional; when nil SetTenantRole skips the Zitadel-membership half
+	reservedNames ReservedNamesProvider    // optional; GetReservedNames returns empty when nil
 	logger        *slog.Logger
+}
+
+// TenantZitadelOrgResolver resolves the IdP organization id seeded for a
+// tenant (by the operator via DaemonOperatorService.SetTenantZitadelOrg).
+// MembershipService uses it to write the Zitadel half of human membership.
+// Returning ("", nil) means "no mapping" — the caller skips the Zitadel half.
+type TenantZitadelOrgResolver interface {
+	ZitadelOrgID(ctx context.Context, tenantID string) (string, error)
 }
 
 // TenantAdminConfig groups the constructor's required dependencies.
@@ -135,6 +144,10 @@ type TenantAdminConfig struct {
 	// IdPAdminClient is optional. When nil, display_name and email fields are
 	// left empty in ListMembers responses.
 	IdPAdminClient idp.AdminClient
+	// ZitadelOrgResolver is optional. When nil (or when it resolves no mapping
+	// for a tenant), SetTenantRole writes only the FGA tuple and skips the
+	// Zitadel org-membership half.
+	ZitadelOrgResolver TenantZitadelOrgResolver
 	// ReservedNames is optional. When nil, GetReservedNames returns empty lists.
 	ReservedNames ReservedNamesProvider
 	// Logger is optional; falls back to slog.Default() when nil.
@@ -181,6 +194,7 @@ func NewTenantAdminServer(cfg TenantAdminConfig) (*TenantAdminServer, error) {
 		now:           now,
 		authorizer:    cfg.Authorizer,
 		idpClient:     cfg.IdPAdminClient,
+		orgResolver:   cfg.ZitadelOrgResolver,
 		reservedNames: cfg.ReservedNames,
 		logger:        logger,
 	}, nil
