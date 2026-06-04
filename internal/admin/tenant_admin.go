@@ -46,6 +46,7 @@ import (
 
 	"github.com/zeroroot-ai/gibson/internal/authz"
 	"github.com/zeroroot-ai/gibson/internal/idp"
+	"github.com/zeroroot-ai/gibson/internal/mailer"
 	"github.com/zeroroot-ai/gibson/internal/secrets"
 
 	sdksecrets "github.com/zeroroot-ai/platform-clients/secrets"
@@ -119,8 +120,19 @@ type TenantAdminServer struct {
 	idpClient     idp.AdminClient          // optional; members have empty display_name/email when nil
 	orgResolver   TenantZitadelOrgResolver // optional; when nil SetTenantRole skips the Zitadel-membership half
 	invitations   *InvitationStore         // optional; when nil InviteMember is Unavailable + ListMembers omits invited
+	inviteMailer  InvitationMailer         // optional; when nil InviteMember/ResendInvitation send no email
+	inviteBaseURL string                   // accept-link origin (GIBSON_PUBLIC_URL); when empty no email is sent
 	reservedNames ReservedNamesProvider    // optional; GetReservedNames returns empty when nil
 	logger        *slog.Logger
+}
+
+// InvitationMailer sends the member-invitation accept-link email. The concrete
+// implementation (internal/mailer.InvitationSender) renders the message; this
+// interface keeps the admin package free of transport + presentation. Optional:
+// when nil, InviteMember/ResendInvitation persist the invitation but send no
+// email (gibson#632).
+type InvitationMailer interface {
+	SendInvitation(ctx context.Context, inv mailer.InvitationEmail) error
 }
 
 // TenantZitadelOrgResolver resolves the IdP organization id seeded for a
@@ -152,6 +164,12 @@ type TenantAdminConfig struct {
 	// Invitations is optional. When nil, InviteMember returns Unavailable and
 	// ListMembers omits invited members.
 	Invitations *InvitationStore
+	// InvitationMailer is optional. When nil, invitations are persisted but no
+	// accept-link email is sent.
+	InvitationMailer InvitationMailer
+	// InviteBaseURL is the origin for accept links (e.g. https://app.example.com,
+	// from GIBSON_PUBLIC_URL). When empty, no invitation email is sent.
+	InviteBaseURL string
 	// ReservedNames is optional. When nil, GetReservedNames returns empty lists.
 	ReservedNames ReservedNamesProvider
 	// Logger is optional; falls back to slog.Default() when nil.
@@ -200,6 +218,8 @@ func NewTenantAdminServer(cfg TenantAdminConfig) (*TenantAdminServer, error) {
 		idpClient:     cfg.IdPAdminClient,
 		orgResolver:   cfg.ZitadelOrgResolver,
 		invitations:   cfg.Invitations,
+		inviteMailer:  cfg.InvitationMailer,
+		inviteBaseURL: cfg.InviteBaseURL,
 		reservedNames: cfg.ReservedNames,
 		logger:        logger,
 	}, nil

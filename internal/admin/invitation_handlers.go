@@ -10,6 +10,7 @@ import (
 	"context"
 	"errors"
 	"log/slog"
+	"strings"
 	"time"
 
 	"google.golang.org/grpc/codes"
@@ -18,6 +19,7 @@ import (
 
 	"github.com/zeroroot-ai/gibson/internal/authz"
 	"github.com/zeroroot-ai/gibson/internal/idp"
+	"github.com/zeroroot-ai/gibson/internal/mailer"
 	tenantv1 "github.com/zeroroot-ai/sdk/api/gen/gibson/tenant/v1"
 	"github.com/zeroroot-ai/sdk/auth"
 )
@@ -25,6 +27,26 @@ import (
 // invitableRoles are the roles InviteMember accepts. owner is excluded —
 // ownership transfers via TransferOwnership, not invitation.
 var invitableRoles = map[string]struct{}{"admin": {}, "member": {}, "writer": {}}
+
+// sendInvitationEmail builds the accept link and sends the invitation email.
+// No-op (logs a warning, returns nil) when the mailer or base URL is
+// unconfigured — the invitation record still exists and can be resent once mail
+// is configured. The raw token rides the link only; it is never stored or
+// returned over the RPC.
+func (s *TenantAdminServer) sendInvitationEmail(ctx context.Context, tenantID, to, role, rawToken string, expiresAt time.Time) error {
+	if s.inviteMailer == nil || s.inviteBaseURL == "" {
+		s.logger.WarnContext(ctx, "invitation email not sent (mailer or base URL unconfigured)", "tenant", tenantID, "to", to)
+		return nil
+	}
+	acceptURL := strings.TrimRight(s.inviteBaseURL, "/") + "/invite/" + rawToken
+	return s.inviteMailer.SendInvitation(ctx, mailer.InvitationEmail{
+		To:        to,
+		AcceptURL: acceptURL,
+		TenantID:  tenantID,
+		Role:      role,
+		ExpiresAt: expiresAt,
+	})
+}
 
 // InviteMember creates (or refreshes) a pending invitation for an email address
 // with a tenant role. It generates a random token, persists only its hash with
@@ -59,10 +81,9 @@ func (s *TenantAdminServer) InviteMember(ctx context.Context, req *tenantv1.Invi
 		invitedBy = id.Subject
 	}
 
-	// The raw token rides the accept email (gibson#632); only its hash is
-	// persisted. In this slice the raw token is generated + hashed + stored so
-	// the pending invitation exists; emailing the raw token lands in gibson#632.
-	_, hash, err := GenerateInvitationToken()
+	// The raw token rides the accept email; only its hash is persisted (it is
+	// never stored or returned over the RPC).
+	token, hash, err := GenerateInvitationToken()
 	if err != nil {
 		return nil, status.Errorf(codes.Internal, "generate invitation token: %v", err)
 	}
@@ -70,6 +91,13 @@ func (s *TenantAdminServer) InviteMember(ctx context.Context, req *tenantv1.Invi
 	id, expiresAt, err := s.invitations.Issue(ctx, tenantID, req.GetEmail(), role, hash, invitedBy)
 	if err != nil {
 		return nil, status.Errorf(codes.Internal, "issue invitation: %v", err)
+	}
+
+	// Email the accept link (gibson#632). The invitation is already persisted +
+	// idempotent on (tenant,email), so a send failure is recoverable via
+	// ResendInvitation; surface it so the admin knows delivery didn't happen.
+	if err := s.sendInvitationEmail(ctx, tenantID, req.GetEmail(), role, token, expiresAt); err != nil {
+		return nil, status.Errorf(codes.Internal, "send invitation email: %v", err)
 	}
 
 	return &tenantv1.InviteMemberResponse{
@@ -179,7 +207,7 @@ func (s *TenantAdminServer) ResendInvitation(ctx context.Context, req *tenantv1.
 	if err != nil {
 		return nil, err
 	}
-	_, hash, gerr := GenerateInvitationToken()
+	token, hash, gerr := GenerateInvitationToken()
 	if gerr != nil {
 		return nil, status.Errorf(codes.Internal, "generate invitation token: %v", gerr)
 	}
@@ -187,8 +215,12 @@ func (s *TenantAdminServer) ResendInvitation(ctx context.Context, req *tenantv1.
 	if id, ierr := auth.IdentityFromContext(ctx); ierr == nil {
 		invitedBy = id.Subject
 	}
-	if _, _, ierr := s.invitations.Issue(ctx, tenantID, rec.Email, rec.Role, hash, invitedBy); ierr != nil {
+	_, expiresAt, ierr := s.invitations.Issue(ctx, tenantID, rec.Email, rec.Role, hash, invitedBy)
+	if ierr != nil {
 		return nil, status.Errorf(codes.Internal, "reissue invitation: %v", ierr)
+	}
+	if err := s.sendInvitationEmail(ctx, tenantID, rec.Email, rec.Role, token, expiresAt); err != nil {
+		return nil, status.Errorf(codes.Internal, "send invitation email: %v", err)
 	}
 	return &tenantv1.ResendInvitationResponse{}, nil
 }

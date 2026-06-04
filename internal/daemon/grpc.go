@@ -33,6 +33,7 @@ import (
 	"github.com/zeroroot-ai/gibson/internal/idempotency"
 	"github.com/zeroroot-ai/gibson/internal/identity"
 	"github.com/zeroroot-ai/gibson/internal/llm/modelgate"
+	"github.com/zeroroot-ai/gibson/internal/mailer"
 	"github.com/zeroroot-ai/gibson/internal/memory"
 	"github.com/zeroroot-ai/gibson/internal/providerconfig"
 	"github.com/zeroroot-ai/gibson/internal/ratelimit"
@@ -966,6 +967,15 @@ func (d *daemonImpl) buildGRPCServer(ctx context.Context) (*grpcSubsystem, error
 			d.secretsRegistry != nil && d.secretsService != nil
 		secretsStackOK := d.secretsService != nil && d.secretsRegistry != nil && d.platformDB != nil && d.authorizer != nil
 
+		// Invitation mailer (gibson#632). NewFromEnv returns a LogMailer in dev
+		// (no SMTP); a genuine misconfig disables email (helper no-ops + warns).
+		var adminMailer admin.InvitationMailer
+		if m, mErr := mailer.NewFromEnv(d.logger.Slog()); mErr != nil {
+			d.logger.Warn(ctx, "mailer init failed; invitation emails disabled", slog.String("error", mErr.Error()))
+		} else {
+			adminMailer = mailer.NewInvitationSender(m)
+		}
+
 		var tenantAdminSvc *admin.TenantAdminServer
 		if brokerStackOK {
 			var taErr error
@@ -980,6 +990,8 @@ func (d *daemonImpl) buildGRPCServer(ctx context.Context) (*grpcSubsystem, error
 				IdPAdminClient:     idpClient,
 				ZitadelOrgResolver: api.NewZitadelOrgResolver(d.platformDB),
 				Invitations:        admin.NewInvitationStore(d.platformDB),
+				InvitationMailer:   adminMailer,
+				InviteBaseURL:      os.Getenv("GIBSON_PUBLIC_URL"),
 				ReservedNames:      rnpForAdmin,
 				Logger:             d.logger.Slog(),
 			})
