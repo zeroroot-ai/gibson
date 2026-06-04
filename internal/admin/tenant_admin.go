@@ -118,6 +118,7 @@ type TenantAdminServer struct {
 	authorizer    authz.Authorizer         // optional; ListMembers returns empty when nil
 	idpClient     idp.AdminClient          // optional; members have empty display_name/email when nil
 	orgResolver   TenantZitadelOrgResolver // optional; when nil SetTenantRole skips the Zitadel-membership half
+	invitations   *InvitationStore         // optional; when nil InviteMember is Unavailable + ListMembers omits invited
 	reservedNames ReservedNamesProvider    // optional; GetReservedNames returns empty when nil
 	logger        *slog.Logger
 }
@@ -148,6 +149,9 @@ type TenantAdminConfig struct {
 	// for a tenant), SetTenantRole writes only the FGA tuple and skips the
 	// Zitadel org-membership half.
 	ZitadelOrgResolver TenantZitadelOrgResolver
+	// Invitations is optional. When nil, InviteMember returns Unavailable and
+	// ListMembers omits invited members.
+	Invitations *InvitationStore
 	// ReservedNames is optional. When nil, GetReservedNames returns empty lists.
 	ReservedNames ReservedNamesProvider
 	// Logger is optional; falls back to slog.Default() when nil.
@@ -195,6 +199,7 @@ func NewTenantAdminServer(cfg TenantAdminConfig) (*TenantAdminServer, error) {
 		authorizer:    cfg.Authorizer,
 		idpClient:     cfg.IdPAdminClient,
 		orgResolver:   cfg.ZitadelOrgResolver,
+		invitations:   cfg.Invitations,
 		reservedNames: cfg.ReservedNames,
 		logger:        logger,
 	}, nil
@@ -405,6 +410,7 @@ func (s *TenantAdminServer) ListMembers(ctx context.Context, req *tenantv1.ListM
 		m := &tenantv1.TenantMember{
 			UserId: userID,
 			Role:   role,
+			Status: "active",
 		}
 
 		if s.idpClient != nil {
@@ -440,6 +446,25 @@ func (s *TenantAdminServer) ListMembers(ctx context.Context, req *tenantv1.ListM
 		}
 
 		members = append(members, m)
+	}
+
+	// 3b. Append pending invitations as "invited" members (gibson#626) so the
+	// roster is the single source for both active + invited. Best-effort: a
+	// store error must not blank the active roster.
+	if s.invitations != nil {
+		pending, perr := s.invitations.ListPending(ctx, tenant.String())
+		if perr != nil {
+			s.logger.WarnContext(ctx, "ListMembers: listing pending invitations failed (active members still returned)",
+				slog.String("error", perr.Error()))
+		} else {
+			for _, inv := range pending {
+				members = append(members, &tenantv1.TenantMember{
+					Email:  inv.Email,
+					Role:   inv.Role,
+					Status: "invited",
+				})
+			}
+		}
 	}
 
 	// 4. Apply name_filter (case-insensitive prefix on display_name or email).
