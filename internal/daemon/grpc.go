@@ -970,16 +970,17 @@ func (d *daemonImpl) buildGRPCServer(ctx context.Context) (*grpcSubsystem, error
 		if brokerStackOK {
 			var taErr error
 			tenantAdminSvc, taErr = admin.NewTenantAdminServer(admin.TenantAdminConfig{
-				Reader:         d.configStore,
-				Writer:         d.configStore,
-				ProbeFactory:   admin.NewMapProbeFactory(d.brokerFactories),
-				Auditor:        d.brokerAuditWriter,
-				Reloader:       d.secretsRegistry,
-				SecretsService: d.secretsService,
-				Authorizer:     d.authorizer,
-				IdPAdminClient: idpClient,
-				ReservedNames:  rnpForAdmin,
-				Logger:         d.logger.Slog(),
+				Reader:             d.configStore,
+				Writer:             d.configStore,
+				ProbeFactory:       admin.NewMapProbeFactory(d.brokerFactories),
+				Auditor:            d.brokerAuditWriter,
+				Reloader:           d.secretsRegistry,
+				SecretsService:     d.secretsService,
+				Authorizer:         d.authorizer,
+				IdPAdminClient:     idpClient,
+				ZitadelOrgResolver: api.NewZitadelOrgResolver(d.platformDB),
+				ReservedNames:      rnpForAdmin,
+				Logger:             d.logger.Slog(),
 			})
 			if taErr != nil {
 				d.logger.Warn(ctx, "broker admin stack: NewTenantAdminServer failed; MembershipService + SecretsService will use Unavailable stubs",

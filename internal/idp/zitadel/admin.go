@@ -20,6 +20,7 @@ import (
 	"io"
 	"log/slog"
 	"net/http"
+	"net/url"
 	"strings"
 	"time"
 
@@ -366,6 +367,69 @@ func (c *Client) UpdateUserProfile(ctx context.Context, accountID string, req id
 
 	// Fetch the updated profile to return the canonical state.
 	return c.GetUserProfile(ctx, accountID)
+}
+
+// orgRoleKeys are the Zitadel org-member role keys minted by the platform's
+// post-install Job. They mirror tenant-operator's zitadelRoleKey mapping so
+// the daemon and the operator project the same membership.
+const (
+	orgRoleKeyOwner  = "gibson.owner"
+	orgRoleKeyAdmin  = "gibson.admin"
+	orgRoleKeyMember = "gibson.member"
+)
+
+// tenantRoleToOrgRoleKey maps a neutral tenant role to its Zitadel org-member
+// role key. Unknown roles (including "writer") map to member.
+func tenantRoleToOrgRoleKey(role string) string {
+	switch role {
+	case "owner":
+		return orgRoleKeyOwner
+	case "admin":
+		return orgRoleKeyAdmin
+	default:
+		return orgRoleKeyMember
+	}
+}
+
+// AddTenantMember adds the human user as a member of the tenant's per-tenant
+// org. Maps to POST /management/v1/orgs/me/members with the target org selected
+// via the x-zitadel-orgid header (the admin PAT may act in any org). Idempotent:
+// a 409 (already a member) is treated as success.
+func (c *Client) AddTenantMember(ctx context.Context, req idp.TenantMembershipRequest) error {
+	if req.OrgID == "" || req.UserID == "" {
+		return fmt.Errorf("%w: AddTenantMember requires orgID and userID", idp.ErrUpstream)
+	}
+	body := map[string]interface{}{
+		"userId": req.UserID,
+		"roles":  []string{tenantRoleToOrgRoleKey(req.Role)},
+	}
+	if err := c.doRequest(ctx, http.MethodPost, "/management/v1/orgs/me/members", body, req.OrgID, nil); err != nil {
+		mapped := mapError(err, "AddTenantMember")
+		if errors.Is(mapped, idp.ErrAlreadyExists) {
+			// Already a member — desired state reached.
+			return nil
+		}
+		return mapped
+	}
+	return nil
+}
+
+// RemoveTenantMember removes the human user from the tenant's per-tenant org.
+// Maps to DELETE /management/v1/orgs/me/members/{userId} with the target org
+// selected via x-zitadel-orgid. Idempotent: a 404 (not a member) is success.
+func (c *Client) RemoveTenantMember(ctx context.Context, req idp.TenantMembershipRequest) error {
+	if req.OrgID == "" || req.UserID == "" {
+		return fmt.Errorf("%w: RemoveTenantMember requires orgID and userID", idp.ErrUpstream)
+	}
+	path := "/management/v1/orgs/me/members/" + url.PathEscape(req.UserID)
+	if err := c.doRequest(ctx, http.MethodDelete, path, nil, req.OrgID, nil); err != nil {
+		mapped := mapError(err, "RemoveTenantMember")
+		if errors.Is(mapped, idp.ErrNotFound) {
+			return nil
+		}
+		return mapped
+	}
+	return nil
 }
 
 // ---------------------------------------------------------------------------

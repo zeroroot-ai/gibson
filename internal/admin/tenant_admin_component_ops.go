@@ -37,10 +37,15 @@ import (
 	"google.golang.org/grpc/status"
 
 	"github.com/zeroroot-ai/gibson/internal/authz"
+	"github.com/zeroroot-ai/gibson/internal/idp"
 
 	tenantv1 "github.com/zeroroot-ai/sdk/api/gen/gibson/tenant/v1"
 	"github.com/zeroroot-ai/sdk/auth"
 )
+
+// tenantRoleRelations are the FGA relations that make a user a member of a
+// tenant. SetTenantRole removes Zitadel org membership only when none remain.
+var tenantRoleRelations = []string{"owner", "admin", "member", "writer"}
 
 // ---------------------------------------------------------------------------
 // SetCatalogEnabled (ADR-0041 remaining gap — catalog-enablement daemon route)
@@ -266,6 +271,10 @@ func (s *TenantAdminServer) SetTenantRole(ctx context.Context, req *tenantv1.Set
 	tuple := authz.Tuple{User: userRef, Relation: role, Object: tenantRef}
 
 	if req.GetRemove() {
+		// FGA first (revoke authority), then Zitadel (drop org membership only
+		// when no tenant role remains). On Zitadel failure the FGA tuple is
+		// already gone — fail-closed on authority; an idempotent retry and the
+		// operator's reconciler converge the org side (ADR-0043).
 		present, err := s.authorizer.Check(ctx, userRef, role, tenantRef)
 		if err != nil {
 			return nil, status.Errorf(codes.Internal, "fga Check %s: %v", role, err)
@@ -275,7 +284,15 @@ func (s *TenantAdminServer) SetTenantRole(ctx context.Context, req *tenantv1.Set
 				return nil, status.Errorf(codes.Internal, "fga Delete %s: %v", role, err)
 			}
 		}
+		if err := s.maybeRemoveZitadelMember(ctx, tenantID, req.GetUserId()); err != nil {
+			return nil, err
+		}
 	} else {
+		// Zitadel first (ensure org membership, idempotent), then FGA write. On
+		// FGA failure the user is in the org but holds no authority — fail-closed.
+		if err := s.addZitadelMember(ctx, tenantID, req.GetUserId(), role); err != nil {
+			return nil, err
+		}
 		present, err := s.authorizer.Check(ctx, userRef, role, tenantRef)
 		if err != nil {
 			return nil, status.Errorf(codes.Internal, "fga Check %s: %v", role, err)
@@ -287,6 +304,65 @@ func (s *TenantAdminServer) SetTenantRole(ctx context.Context, req *tenantv1.Set
 		}
 	}
 	return &tenantv1.SetTenantRoleResponse{}, nil
+}
+
+// resolveTenantOrgID returns the IdP org id seeded for the tenant, or "" when
+// the Zitadel-membership projection should be skipped (no resolver, no idp
+// client, or no mapping yet — the operator backfill/reconcile converges it).
+func (s *TenantAdminServer) resolveTenantOrgID(ctx context.Context, tenantID string) (string, error) {
+	if s.orgResolver == nil || s.idpClient == nil {
+		return "", nil
+	}
+	orgID, err := s.orgResolver.ZitadelOrgID(ctx, tenantID)
+	if err != nil {
+		return "", status.Errorf(codes.Internal, "resolve zitadel org for tenant %q: %v", tenantID, err)
+	}
+	return orgID, nil
+}
+
+// addZitadelMember writes the Zitadel half of a role-add: ensure the user is a
+// member of the tenant's per-tenant org with the given role. Idempotent.
+func (s *TenantAdminServer) addZitadelMember(ctx context.Context, tenantID, userID, role string) error {
+	orgID, err := s.resolveTenantOrgID(ctx, tenantID)
+	if err != nil {
+		return err
+	}
+	if orgID == "" {
+		return nil
+	}
+	if err := s.idpClient.AddTenantMember(ctx, idp.TenantMembershipRequest{OrgID: orgID, UserID: userID, Role: role}); err != nil {
+		return status.Errorf(codes.Internal, "zitadel add member: %v", err)
+	}
+	return nil
+}
+
+// maybeRemoveZitadelMember removes the user from the tenant's per-tenant org,
+// but only when they retain no tenant role (Zitadel org membership is binary,
+// not per-role). Idempotent.
+func (s *TenantAdminServer) maybeRemoveZitadelMember(ctx context.Context, tenantID, userID string) error {
+	orgID, err := s.resolveTenantOrgID(ctx, tenantID)
+	if err != nil {
+		return err
+	}
+	if orgID == "" {
+		return nil
+	}
+	tenantRef := "tenant:" + tenantID
+	userRef := "user:" + userID
+	for _, r := range tenantRoleRelations {
+		present, cerr := s.authorizer.Check(ctx, userRef, r, tenantRef)
+		if cerr != nil {
+			return status.Errorf(codes.Internal, "fga Check %s: %v", r, cerr)
+		}
+		if present {
+			// Still a tenant member via another role — keep org membership.
+			return nil
+		}
+	}
+	if err := s.idpClient.RemoveTenantMember(ctx, idp.TenantMembershipRequest{OrgID: orgID, UserID: userID}); err != nil {
+		return status.Errorf(codes.Internal, "zitadel remove member: %v", err)
+	}
+	return nil
 }
 
 // ---------------------------------------------------------------------------

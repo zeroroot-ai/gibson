@@ -75,6 +75,20 @@ type ServiceAccount struct {
 	Description string
 }
 
+// TenantMembershipRequest carries parameters for adding or removing a human
+// user's membership of the IdP organization that bounds a tenant.
+type TenantMembershipRequest struct {
+	// OrgID is the IdP organization id provisioned for the tenant. Required.
+	OrgID string
+
+	// UserID is the IdP-assigned id of the human user. Required.
+	UserID string
+
+	// Role is the neutral tenant role to grant on add ("owner", "admin",
+	// "member"); unknown values map to "member". Unused on remove.
+	Role string
+}
+
 // CreateServiceAccountRequest carries parameters for creating a new service account.
 type CreateServiceAccountRequest struct {
 	// Name is the pre-formatted service account name: "<kind>-<tenant>-<name>".
