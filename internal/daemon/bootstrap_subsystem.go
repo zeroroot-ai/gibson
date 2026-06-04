@@ -46,6 +46,10 @@ type nativeLoginConfig struct {
 	Issuer   string
 	ClientID string
 	Scopes   []string
+	// PublicURL is the daemon's public base URL (GIBSON_PUBLIC_URL). It is the
+	// base for the Capability-Grant discovery document's absolute endpoint URLs
+	// (gibson#648), also served on this pre-auth listener.
+	PublicURL string
 }
 
 // nativeLoginConfigFromEnv assembles the config from the daemon's environment.
@@ -61,10 +65,11 @@ func nativeLoginConfigFromEnv() nativeLoginConfig {
 		scopesRaw = defaultNativeLoginScopes
 	}
 	return nativeLoginConfig{
-		Port:     port,
-		Issuer:   os.Getenv(envIDPAdminIssuer),
-		ClientID: os.Getenv(envNativeLoginClientID),
-		Scopes:   strings.Fields(scopesRaw),
+		Port:      port,
+		Issuer:    os.Getenv(envIDPAdminIssuer),
+		ClientID:  os.Getenv(envNativeLoginClientID),
+		Scopes:    strings.Fields(scopesRaw),
+		PublicURL: os.Getenv("GIBSON_PUBLIC_URL"),
 	}
 }
 
@@ -77,7 +82,7 @@ type nativeLoginResponse struct {
 
 // nativeLoginHandler returns the HTTP handler for the well-known endpoint. It is
 // split from the listener so it can be tested with httptest directly.
-func nativeLoginHandler(cfg nativeLoginConfig) http.Handler {
+func nativeLoginHandler(cfg nativeLoginConfig, cgVerifier bootstrapVerifier, cgRegistrar capabilityGrantRegistrar) http.Handler {
 	mux := http.NewServeMux()
 	mux.HandleFunc(nativeLoginWellKnownPath, func(w http.ResponseWriter, r *http.Request) {
 		if r.Method != http.MethodGet {
@@ -100,6 +105,17 @@ func nativeLoginHandler(cfg nativeLoginConfig) http.Handler {
 			Scopes:   cfg.Scopes,
 		})
 	})
+	// Capability-Grant registration discovery (gibson#648) — served on the same
+	// pre-auth listener; a component holds no Capability Grant yet at discovery
+	// time. Envoy publishes it on an allow_missing route alongside gibson-login.
+	mux.HandleFunc(agentConfigWellKnownPath, agentConfigHandler(cfg.PublicURL))
+	// CG host registration (gibson#648). Mounted only when both the bootstrap
+	// verifier (daemon Minter) and the registrar (CapabilityGrantService) are
+	// wired; otherwise the route is absent and the SDK gets a clear 404 rather
+	// than a half-working endpoint.
+	if cgVerifier != nil && cgRegistrar != nil {
+		mux.HandleFunc(capabilityGrantRegisterPath, capabilityGrantRegisterHandler(cgVerifier, cgRegistrar))
+	}
 	return mux
 }
 
@@ -111,12 +127,14 @@ type nativeLoginSubsystem struct {
 	logger *observability.Logger
 }
 
-// newNativeLoginSubsystem builds the subsystem from the given config.
-func newNativeLoginSubsystem(cfg nativeLoginConfig, logger *observability.Logger) *nativeLoginSubsystem {
+// newNativeLoginSubsystem builds the subsystem from the given config. cgVerifier
+// and cgRegistrar wire the Capability-Grant register endpoint onto the same
+// pre-auth listener; pass nil interfaces to omit it (gibson#648).
+func newNativeLoginSubsystem(cfg nativeLoginConfig, logger *observability.Logger, cgVerifier bootstrapVerifier, cgRegistrar capabilityGrantRegistrar) *nativeLoginSubsystem {
 	return &nativeLoginSubsystem{
 		srv: &http.Server{
 			Addr:              ":" + cfg.Port,
-			Handler:           nativeLoginHandler(cfg),
+			Handler:           nativeLoginHandler(cfg, cgVerifier, cgRegistrar),
 			ReadHeaderTimeout: 5 * time.Second,
 		},
 		logger: logger,
