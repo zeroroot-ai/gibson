@@ -1388,6 +1388,15 @@ func (d *daemonImpl) Start(ctx context.Context) error {
 		}
 	}()
 
+	// Start the unauthenticated CLI bootstrap server (gibson#623). It publishes
+	// {issuer, cli_client_id, scopes} for `gibson login` device-grant bootstrap.
+	// Best-effort: a failure here never takes the daemon down.
+	go func() {
+		if err := newBootstrapSubsystem(bootstrapConfigFromEnv(), d.logger).Serve(ctx); err != nil {
+			d.logger.Warn(ctx, "cli bootstrap subsystem error (non-fatal)", "error", err)
+		}
+	}()
+
 	// Start :9090 mTLS metrics listener (Spec security-hardening R20 / Week-2
 	// task 18 — Option (a), daemon-owned listener). Fail fast if cert
 	// material is missing — there is no plaintext fallback.
