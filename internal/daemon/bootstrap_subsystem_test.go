@@ -12,7 +12,7 @@ func TestNativeLoginHandler_OK(t *testing.T) {
 		Issuer:   "https://idp.example.com",
 		ClientID: "cli-123",
 		Scopes:   []string{"openid", "profile", "email", "offline_access"},
-	})
+	}, nil, nil)
 	rec := httptest.NewRecorder()
 	h.ServeHTTP(rec, httptest.NewRequest(http.MethodGet, nativeLoginWellKnownPath, nil))
 
@@ -36,7 +36,7 @@ func TestNativeLoginHandler_OK(t *testing.T) {
 
 func TestNativeLoginHandler_Unconfigured503(t *testing.T) {
 	// Missing client id → 503, not an unusable empty document.
-	h := nativeLoginHandler(nativeLoginConfig{Issuer: "https://idp.example.com"})
+	h := nativeLoginHandler(nativeLoginConfig{Issuer: "https://idp.example.com"}, nil, nil)
 	rec := httptest.NewRecorder()
 	h.ServeHTTP(rec, httptest.NewRequest(http.MethodGet, nativeLoginWellKnownPath, nil))
 	if rec.Code != http.StatusServiceUnavailable {
@@ -45,7 +45,7 @@ func TestNativeLoginHandler_Unconfigured503(t *testing.T) {
 }
 
 func TestNativeLoginHandler_MethodNotAllowed(t *testing.T) {
-	h := nativeLoginHandler(nativeLoginConfig{Issuer: "https://i", ClientID: "c"})
+	h := nativeLoginHandler(nativeLoginConfig{Issuer: "https://i", ClientID: "c"}, nil, nil)
 	rec := httptest.NewRecorder()
 	h.ServeHTTP(rec, httptest.NewRequest(http.MethodPost, nativeLoginWellKnownPath, nil))
 	if rec.Code != http.StatusMethodNotAllowed {

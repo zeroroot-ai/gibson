@@ -822,6 +822,8 @@ func (d *daemonImpl) buildGRPCServer(ctx context.Context) (*grpcSubsystem, error
 					Logger:      d.logger.Slog(),
 				})
 				daemonSvc.WithCapabilityGrantService(capabilityGrantSvc)
+				// Hoist for the pre-auth :8085 listener's CG register endpoint (gibson#648).
+				d.capabilityGrantSvc = capabilityGrantSvc
 				d.logger.Info(ctx, "CapabilityGrantService wired into DaemonServer")
 			} else {
 				d.logger.Warn(ctx, "CapabilityGrantService not wired: requires the FGA authorizer")

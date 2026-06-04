@@ -19,6 +19,7 @@ import (
 	"github.com/spiffe/go-spiffe/v2/workloadapi"
 	"github.com/zeroroot-ai/gibson/internal/audit"
 	"github.com/zeroroot-ai/gibson/internal/authz"
+	"github.com/zeroroot-ai/gibson/internal/capabilitygrant"
 	"github.com/zeroroot-ai/gibson/internal/budget"
 	"github.com/zeroroot-ai/gibson/internal/component"
 	"github.com/zeroroot-ai/gibson/internal/config"
@@ -198,6 +199,16 @@ type daemonImpl struct {
 
 	// keyProvider provides access to encryption keys from secure storage
 	keyProvider crypto.KeyProvider
+
+	// cgMinter signs and verifies Capability-Grant bootstrap tokens (gibson#648,
+	// ADR-0045). Constructed from keyProvider during Start; nil when no key
+	// provider is configured, in which case the CG register endpoint reports 503.
+	cgMinter *capabilitygrant.Minter
+
+	// capabilityGrantSvc is hoisted out of buildGRPCServer so the pre-auth :8085
+	// listener can serve the Capability-Grant host-registration endpoint
+	// (gibson#648). Nil until buildGRPCServer wires it (needs the FGA authorizer).
+	capabilityGrantSvc *capabilitygrant.CapabilityGrantService
 
 	// credentialStore provides credential access with encryption
 	credentialStore *DaemonCredentialStore
@@ -884,6 +895,20 @@ func (d *daemonImpl) Start(ctx context.Context) error {
 		} else {
 			d.keyProvider = keyProvider
 
+			// Construct the Capability-Grant Minter for bootstrap-token
+			// mint/verify (gibson#648, ADR-0045). Best-effort: a failure only
+			// disables the CG register endpoint, never the daemon.
+			if minter, mErr := capabilitygrant.NewMinter(ctx, capabilitygrant.Config{
+				Issuer:      cgJWTIssuer(),
+				Audience:    cgJWTAudience(),
+				KeyProvider: keyProvider,
+				KeyID:       cgJWTKeyID(),
+			}); mErr != nil {
+				d.logger.Warn(ctx, "CG Minter init failed; capability-grant registration disabled", "error", mErr)
+			} else {
+				d.cgMinter = minter
+			}
+
 			// Phase D: instantiate the per-tenant data-plane Pool now that the
 			// keyProvider is available. The pool provides tenant-isolated Postgres,
 			// Redis, Neo4j, and vector store connections via Pool.For(ctx, tenant).
@@ -1390,10 +1415,24 @@ func (d *daemonImpl) Start(ctx context.Context) error {
 
 	// Start the unauthenticated native-login bootstrap server (gibson#623). It
 	// publishes {issuer, client_id, scopes} for `gibson login` (and any future
-	// native client) device-grant bootstrap. Best-effort: a failure here never
-	// takes the daemon down.
+	// native client) device-grant bootstrap, plus the Capability-Grant
+	// discovery + host-registration endpoints (gibson#648). Best-effort: a
+	// failure here never takes the daemon down.
+	//
+	// Wire the CG register endpoint only when both the bootstrap verifier (CG
+	// Minter) and the registrar (CapabilityGrantService) exist. Computed as
+	// interfaces here so a nil concrete value yields a nil interface (the
+	// handler/mux can then omit the route) rather than a typed-nil.
+	var cgVerifier bootstrapVerifier
+	var cgRegistrar capabilityGrantRegistrar
+	if d.cgMinter != nil {
+		cgVerifier = d.cgMinter
+	}
+	if d.capabilityGrantSvc != nil {
+		cgRegistrar = d.capabilityGrantSvc
+	}
 	go func() {
-		if err := newNativeLoginSubsystem(nativeLoginConfigFromEnv(), d.logger).Serve(ctx); err != nil {
+		if err := newNativeLoginSubsystem(nativeLoginConfigFromEnv(), d.logger, cgVerifier, cgRegistrar).Serve(ctx); err != nil {
 			d.logger.Warn(ctx, "native-login subsystem error (non-fatal)", "error", err)
 		}
 	}()

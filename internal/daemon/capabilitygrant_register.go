@@ -5,10 +5,39 @@ import (
 	"encoding/json"
 	"errors"
 	"net/http"
+	"os"
 	"strings"
 
 	"github.com/zeroroot-ai/gibson/internal/capabilitygrant"
 )
+
+// CG-JWT signing identity for the daemon Minter (gibson#648, ADR-0045). The
+// issuer/audience must match ext-authz's EXT_AUTHZ_CGJWT_ISSUER/_AUDIENCE for
+// daemon-minted dispatch tokens to verify; the bootstrap token uses its own
+// audience, so defaults are safe for the registration path on their own.
+func cgJWTIssuer() string {
+	if v := os.Getenv("GIBSON_CGJWT_ISSUER"); v != "" {
+		return v
+	}
+	if v := os.Getenv("GIBSON_PUBLIC_URL"); v != "" {
+		return v
+	}
+	return "gibson-daemon"
+}
+
+func cgJWTAudience() string {
+	if v := os.Getenv("GIBSON_CGJWT_AUDIENCE"); v != "" {
+		return v
+	}
+	return "gibson-daemon"
+}
+
+func cgJWTKeyID() string {
+	if v := os.Getenv("GIBSON_CGJWT_KEY_ID"); v != "" {
+		return v
+	}
+	return "cg-v1"
+}
 
 // Capability-Grant host registration endpoint (epic unified-cg-identity,
 // ADR-0045, gibson#648).
