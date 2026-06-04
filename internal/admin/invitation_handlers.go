@@ -8,11 +8,16 @@ package admin
 
 import (
 	"context"
+	"errors"
+	"log/slog"
+	"time"
 
 	"google.golang.org/grpc/codes"
 	"google.golang.org/grpc/status"
 	"google.golang.org/protobuf/types/known/timestamppb"
 
+	"github.com/zeroroot-ai/gibson/internal/authz"
+	"github.com/zeroroot-ai/gibson/internal/idp"
 	tenantv1 "github.com/zeroroot-ai/sdk/api/gen/gibson/tenant/v1"
 	"github.com/zeroroot-ai/sdk/auth"
 )
@@ -71,4 +76,132 @@ func (s *TenantAdminServer) InviteMember(ctx context.Context, req *tenantv1.Invi
 		InvitationId: id,
 		ExpiresAt:    timestamppb.New(expiresAt),
 	}, nil
+}
+
+// AcceptInvitation redeems an invitation token: validates it, ensures the IdP
+// user exists, projects full membership (FGA tuple + per-tenant Zitadel org
+// membership, reusing the gibson#621 dual-write), and marks the invitation
+// accepted. Unauthenticated — the token is the sole capability (gibson#633).
+func (s *TenantAdminServer) AcceptInvitation(ctx context.Context, req *tenantv1.AcceptInvitationRequest) (*tenantv1.AcceptInvitationResponse, error) {
+	if req.GetToken() == "" {
+		return nil, status.Error(codes.InvalidArgument, "token required")
+	}
+	if s.invitations == nil {
+		return nil, status.Error(codes.Unavailable, "invitation store not configured")
+	}
+	if s.authorizer == nil || s.idpClient == nil {
+		return nil, status.Error(codes.Unavailable, "membership backend not configured")
+	}
+
+	rec, err := s.invitations.GetByTokenHash(ctx, HashInvitationToken(req.GetToken()))
+	if errors.Is(err, ErrInvitationNotFound) {
+		return nil, status.Error(codes.PermissionDenied, "invalid or unknown invitation token")
+	}
+	if err != nil {
+		return nil, status.Errorf(codes.Internal, "look up invitation: %v", err)
+	}
+	if rec.Status != "pending" {
+		return nil, status.Errorf(codes.FailedPrecondition, "invitation is %s, not pending", rec.Status)
+	}
+	if time.Now().After(rec.ExpiresAt) {
+		return nil, status.Error(codes.FailedPrecondition, "invitation has expired")
+	}
+
+	// Ensure the invited human exists in the tenant's per-tenant org, then
+	// project both halves of membership. Zitadel-first (idempotent) then FGA,
+	// matching SetTenantRole's fail-closed-on-authority ordering.
+	orgID, err := s.resolveTenantOrgID(ctx, rec.TenantID)
+	if err != nil {
+		return nil, err
+	}
+	userID, err := s.idpClient.EnsureHumanUser(ctx, idp.EnsureHumanUserRequest{OrgID: orgID, Email: rec.Email})
+	if err != nil {
+		return nil, status.Errorf(codes.Internal, "ensure invited user: %v", err)
+	}
+	if err := s.addZitadelMember(ctx, rec.TenantID, userID, rec.Role); err != nil {
+		return nil, err
+	}
+	tuple := authz.Tuple{User: "user:" + userID, Relation: rec.Role, Object: "tenant:" + rec.TenantID}
+	present, err := s.authorizer.Check(ctx, tuple.User, tuple.Relation, tuple.Object)
+	if err != nil {
+		return nil, status.Errorf(codes.Internal, "fga Check %s: %v", rec.Role, err)
+	}
+	if !present {
+		if err := s.authorizer.Write(ctx, []authz.Tuple{tuple}); err != nil {
+			return nil, status.Errorf(codes.Internal, "fga Write %s: %v", rec.Role, err)
+		}
+	}
+
+	if err := s.invitations.SetStatus(ctx, rec.ID, "accepted"); err != nil {
+		// Membership is already projected (authoritative); a stale "pending"
+		// status is self-healing on a retry. Log-and-succeed rather than fail
+		// the now-completed accept.
+		s.logger.WarnContext(ctx, "AcceptInvitation: membership projected but status update failed",
+			slog.String("invitation_id", rec.ID), slog.String("error", err.Error()))
+	}
+	return &tenantv1.AcceptInvitationResponse{TenantId: rec.TenantID, UserId: userID}, nil
+}
+
+// lookupPendingInvitation resolves the target invitation for resend/cancel from
+// (tenant, email). invitation_id-based lookup can layer on later.
+func (s *TenantAdminServer) lookupPendingInvitation(ctx context.Context, req interface {
+	GetTenantId() string
+	GetEmail() string
+}) (string, *InvitationRecord, error) {
+	tenant, ok := auth.TenantFromContext(ctx)
+	if !ok {
+		return "", nil, status.Error(codes.PermissionDenied, "no tenant in context")
+	}
+	if s.invitations == nil {
+		return "", nil, status.Error(codes.Unavailable, "invitation store not configured")
+	}
+	if req.GetEmail() == "" {
+		return "", nil, status.Error(codes.InvalidArgument, "email required")
+	}
+	tenantID := req.GetTenantId()
+	if tenantID == "" {
+		tenantID = tenant.String()
+	}
+	rec, err := s.invitations.FindPendingByEmail(ctx, tenantID, req.GetEmail())
+	if errors.Is(err, ErrInvitationNotFound) {
+		return "", nil, status.Error(codes.NotFound, "no pending invitation for that email")
+	}
+	if err != nil {
+		return "", nil, status.Errorf(codes.Internal, "look up invitation: %v", err)
+	}
+	return tenantID, rec, nil
+}
+
+// ResendInvitation refreshes a pending invitation's token + TTL (re-issue).
+// Emailing the refreshed link lands in gibson#632.
+func (s *TenantAdminServer) ResendInvitation(ctx context.Context, req *tenantv1.ResendInvitationRequest) (*tenantv1.ResendInvitationResponse, error) {
+	tenantID, rec, err := s.lookupPendingInvitation(ctx, req)
+	if err != nil {
+		return nil, err
+	}
+	_, hash, gerr := GenerateInvitationToken()
+	if gerr != nil {
+		return nil, status.Errorf(codes.Internal, "generate invitation token: %v", gerr)
+	}
+	var invitedBy string
+	if id, ierr := auth.IdentityFromContext(ctx); ierr == nil {
+		invitedBy = id.Subject
+	}
+	if _, _, ierr := s.invitations.Issue(ctx, tenantID, rec.Email, rec.Role, hash, invitedBy); ierr != nil {
+		return nil, status.Errorf(codes.Internal, "reissue invitation: %v", ierr)
+	}
+	return &tenantv1.ResendInvitationResponse{}, nil
+}
+
+// CancelInvitation marks a pending invitation cancelled so it can no longer be
+// accepted.
+func (s *TenantAdminServer) CancelInvitation(ctx context.Context, req *tenantv1.CancelInvitationRequest) (*tenantv1.CancelInvitationResponse, error) {
+	_, rec, err := s.lookupPendingInvitation(ctx, req)
+	if err != nil {
+		return nil, err
+	}
+	if err := s.invitations.SetStatus(ctx, rec.ID, "cancelled"); err != nil {
+		return nil, status.Errorf(codes.Internal, "cancel invitation: %v", err)
+	}
+	return &tenantv1.CancelInvitationResponse{}, nil
 }

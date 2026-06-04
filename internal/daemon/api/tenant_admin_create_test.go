@@ -91,6 +91,9 @@ func (f *fakeIDPClient) RevokeUserSessions(_ context.Context, userID string) (id
 	}
 	return f.revokeResult, nil
 }
+func (f *fakeIDPClient) EnsureHumanUser(_ context.Context, _ idp.EnsureHumanUserRequest) (string, error) {
+	return "user-1", nil
+}
 func (f *fakeIDPClient) Close() error { return nil }
 
 // ---------------------------------------------------------------------------

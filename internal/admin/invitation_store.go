@@ -122,6 +122,85 @@ func (s *InvitationStore) Issue(ctx context.Context, tenantID, email, role, toke
 	return id, expiresAt, nil
 }
 
+// InvitationRecord is a full invitation row (used by accept/resend/cancel).
+type InvitationRecord struct {
+	ID        string
+	TenantID  string
+	Email     string
+	Role      string
+	Status    string
+	ExpiresAt time.Time
+}
+
+// ErrInvitationNotFound is returned when no invitation matches a lookup.
+var ErrInvitationNotFound = errors.New("invitation not found")
+
+// GetByTokenHash returns the invitation whose token hash matches, or
+// ErrInvitationNotFound. It does NOT filter on status/expiry — the caller
+// decides how to treat a cancelled/expired/accepted invitation.
+func (s *InvitationStore) GetByTokenHash(ctx context.Context, tokenHash string) (*InvitationRecord, error) {
+	if s == nil || s.db == nil {
+		return nil, errors.New("invitation store not configured")
+	}
+	if err := s.ensureTable(ctx); err != nil {
+		return nil, err
+	}
+	const q = `
+		SELECT id, tenant_id, email, role, status, expires_at
+		FROM tenant_invitations WHERE token_hash = $1`
+	var r InvitationRecord
+	switch err := s.db.QueryRowContext(ctx, q, tokenHash).
+		Scan(&r.ID, &r.TenantID, &r.Email, &r.Role, &r.Status, &r.ExpiresAt); {
+	case errors.Is(err, sql.ErrNoRows):
+		return nil, ErrInvitationNotFound
+	case err != nil:
+		return nil, fmt.Errorf("get invitation by token: %w", err)
+	default:
+		return &r, nil
+	}
+}
+
+// SetStatus transitions an invitation's status (e.g. accepted, cancelled).
+func (s *InvitationStore) SetStatus(ctx context.Context, id, status string) error {
+	if s == nil || s.db == nil {
+		return errors.New("invitation store not configured")
+	}
+	res, err := s.db.ExecContext(ctx,
+		`UPDATE tenant_invitations SET status = $2, updated_at = NOW() WHERE id = $1`, id, status)
+	if err != nil {
+		return fmt.Errorf("set invitation status: %w", err)
+	}
+	if n, _ := res.RowsAffected(); n == 0 {
+		return ErrInvitationNotFound
+	}
+	return nil
+}
+
+// FindPendingByEmail returns the pending invitation for (tenant, email), or
+// ErrInvitationNotFound. Used by resend/cancel when addressed by email.
+func (s *InvitationStore) FindPendingByEmail(ctx context.Context, tenantID, email string) (*InvitationRecord, error) {
+	if s == nil || s.db == nil {
+		return nil, errors.New("invitation store not configured")
+	}
+	if err := s.ensureTable(ctx); err != nil {
+		return nil, err
+	}
+	const q = `
+		SELECT id, tenant_id, email, role, status, expires_at
+		FROM tenant_invitations
+		WHERE tenant_id = $1 AND email = $2 AND status = 'pending'`
+	var r InvitationRecord
+	switch err := s.db.QueryRowContext(ctx, q, tenantID, email).
+		Scan(&r.ID, &r.TenantID, &r.Email, &r.Role, &r.Status, &r.ExpiresAt); {
+	case errors.Is(err, sql.ErrNoRows):
+		return nil, ErrInvitationNotFound
+	case err != nil:
+		return nil, fmt.Errorf("find pending invitation: %w", err)
+	default:
+		return &r, nil
+	}
+}
+
 // ListPending returns the non-expired pending invitations for a tenant.
 func (s *InvitationStore) ListPending(ctx context.Context, tenantID string) ([]PendingInvitation, error) {
 	if s == nil || s.db == nil {

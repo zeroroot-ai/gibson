@@ -266,6 +266,9 @@ func (f *fakeUserIdPClient) RemoveTenantMember(_ context.Context, _ idp.TenantMe
 func (f *fakeUserIdPClient) RevokeUserSessions(_ context.Context, _ string) (idp.RevokeUserSessionsResult, error) {
 	return idp.RevokeUserSessionsResult{}, nil
 }
+func (f *fakeUserIdPClient) EnsureHumanUser(_ context.Context, _ idp.EnsureHumanUserRequest) (string, error) {
+	return "user-1", nil
+}
 func (f *fakeUserIdPClient) Close() error { return nil }
 
 // Verify fakeUserIdPClient implements idp.AdminClient.

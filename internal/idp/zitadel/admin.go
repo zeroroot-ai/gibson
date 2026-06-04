@@ -432,6 +432,61 @@ func (c *Client) RemoveTenantMember(ctx context.Context, req idp.TenantMembershi
 	return nil
 }
 
+// EnsureHumanUser finds the human user with the given email in the org, or
+// creates one. Maps to the Zitadel v2 API:
+//
+//	POST /v2/users/human   (create; sendCode triggers the invite/verify email)
+//	POST /v2/users          (search by email when the user already exists)
+//
+// Idempotent: a 409 on create falls back to a by-email lookup. The created
+// user's email is unverified and has no password — Zitadel's emailed code lets
+// the invitee set credentials.
+//
+// NOTE: the exact v2 user create/search shapes must be confirmed against the
+// deployed Zitadel version in the deploy auth-e2e smoke (no live Zitadel in
+// unit tests).
+func (c *Client) EnsureHumanUser(ctx context.Context, req idp.EnsureHumanUserRequest) (string, error) {
+	if req.Email == "" {
+		return "", fmt.Errorf("%w: EnsureHumanUser requires email", idp.ErrUpstream)
+	}
+	createBody := map[string]interface{}{
+		"username": req.Email,
+		"profile":  map[string]interface{}{"givenName": "Invited", "familyName": "User"},
+		"email":    map[string]interface{}{"email": req.Email, "isVerified": false, "sendCode": map[string]interface{}{}},
+	}
+	if req.OrgID != "" {
+		createBody["organization"] = map[string]interface{}{"orgId": req.OrgID}
+	}
+	var createResp struct {
+		UserID string `json:"userId"`
+	}
+	err := c.doRequest(ctx, http.MethodPost, "/v2/users/human", createBody, req.OrgID, &createResp)
+	if err == nil && createResp.UserID != "" {
+		return createResp.UserID, nil
+	}
+	if err != nil && !errors.Is(mapError(err, "EnsureHumanUser:create"), idp.ErrAlreadyExists) {
+		return "", mapError(err, "EnsureHumanUser:create")
+	}
+	// User already exists (409) — look it up by email.
+	searchBody := map[string]interface{}{
+		"queries": []map[string]interface{}{
+			{"emailQuery": map[string]interface{}{"emailAddress": req.Email}},
+		},
+	}
+	var searchResp struct {
+		Result []struct {
+			UserID string `json:"userId"`
+		} `json:"result"`
+	}
+	if serr := c.doRequest(ctx, http.MethodPost, "/v2/users", searchBody, req.OrgID, &searchResp); serr != nil {
+		return "", mapError(serr, "EnsureHumanUser:search")
+	}
+	if len(searchResp.Result) == 0 || searchResp.Result[0].UserID == "" {
+		return "", fmt.Errorf("%w: EnsureHumanUser: user %q not found after conflict", idp.ErrUpstream, req.Email)
+	}
+	return searchResp.Result[0].UserID, nil
+}
+
 // RevokeUserSessions terminates the user's active Zitadel sessions, which also
 // invalidates the refresh tokens bound to those sessions (so no new access
 // token can be minted from them). Maps to the Zitadel Session v2 API:

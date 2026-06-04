@@ -97,3 +97,87 @@ func TestInvitationStore_ListPending(t *testing.T) {
 		t.Fatalf("unexpected pending: %+v", pending)
 	}
 }
+
+// --- AcceptInvitation tests ---
+
+func TestAcceptInvitation_HappyPath(t *testing.T) {
+	db, mock, err := sqlmock.New()
+	if err != nil {
+		t.Fatalf("sqlmock: %v", err)
+	}
+	t.Cleanup(func() { _ = db.Close() })
+	// GetByTokenHash → ensureTable + SELECT returning a pending, future invite.
+	mock.ExpectExec("CREATE TABLE IF NOT EXISTS tenant_invitations").WillReturnResult(sqlmock.NewResult(0, 0))
+	mock.ExpectExec("CREATE UNIQUE INDEX").WillReturnResult(sqlmock.NewResult(0, 0))
+	mock.ExpectQuery("SELECT id, tenant_id, email, role, status, expires_at").
+		WillReturnRows(sqlmock.NewRows([]string{"id", "tenant_id", "email", "role", "status", "expires_at"}).
+			AddRow("inv-1", "acme", "bob@example.com", "member", "pending", nowPlus()))
+	// SetStatus accepted.
+	mock.ExpectExec("UPDATE tenant_invitations SET status").WillReturnResult(sqlmock.NewResult(0, 1))
+
+	az := &membersAuthorizer{}
+	idpC := &membersIdPClient{ensureUserID: "user-bob"}
+	srv := newMembersTestServer(t, az, idpC)
+	srv.invitations = NewInvitationStore(db)
+	srv.orgResolver = staticOrgResolver{orgID: "org-1"}
+
+	resp, err := srv.AcceptInvitation(context.Background(), &tenantv1.AcceptInvitationRequest{Token: "rawtoken"})
+	if err != nil {
+		t.Fatalf("AcceptInvitation: %v", err)
+	}
+	if resp.GetTenantId() != "acme" || resp.GetUserId() != "user-bob" {
+		t.Fatalf("unexpected resp: %+v", resp)
+	}
+	// dual-write happened: Zitadel member add recorded + FGA tuple written.
+	if len(idpC.added) != 1 || idpC.added[0].UserID != "user-bob" {
+		t.Fatalf("expected AddTenantMember for user-bob, got %v", idpC.added)
+	}
+	if len(idpC.ensuredEmails) != 1 || idpC.ensuredEmails[0] != "bob@example.com" {
+		t.Fatalf("expected EnsureHumanUser for bob, got %v", idpC.ensuredEmails)
+	}
+}
+
+func TestAcceptInvitation_UnknownToken(t *testing.T) {
+	db, mock, err := sqlmock.New()
+	if err != nil {
+		t.Fatalf("sqlmock: %v", err)
+	}
+	t.Cleanup(func() { _ = db.Close() })
+	mock.ExpectExec("CREATE TABLE IF NOT EXISTS tenant_invitations").WillReturnResult(sqlmock.NewResult(0, 0))
+	mock.ExpectExec("CREATE UNIQUE INDEX").WillReturnResult(sqlmock.NewResult(0, 0))
+	mock.ExpectQuery("SELECT id, tenant_id, email, role, status, expires_at").
+		WillReturnError(sqlmock.ErrCancelled) // any non-rows error path is Internal; use no-rows below instead
+
+	srv := newMembersTestServer(t, &membersAuthorizer{}, &membersIdPClient{})
+	srv.invitations = NewInvitationStore(db)
+	srv.orgResolver = staticOrgResolver{orgID: "org-1"}
+	_, err = srv.AcceptInvitation(context.Background(), &tenantv1.AcceptInvitationRequest{Token: "nope"})
+	if err == nil {
+		t.Fatal("expected error for unknown/failed token lookup")
+	}
+}
+
+func TestCancelInvitation_MarksCancelled(t *testing.T) {
+	db, mock, err := sqlmock.New()
+	if err != nil {
+		t.Fatalf("sqlmock: %v", err)
+	}
+	t.Cleanup(func() { _ = db.Close() })
+	mock.ExpectExec("CREATE TABLE IF NOT EXISTS tenant_invitations").WillReturnResult(sqlmock.NewResult(0, 0))
+	mock.ExpectExec("CREATE UNIQUE INDEX").WillReturnResult(sqlmock.NewResult(0, 0))
+	mock.ExpectQuery("SELECT id, tenant_id, email, role, status, expires_at").
+		WithArgs("acme", "carol@example.com").
+		WillReturnRows(sqlmock.NewRows([]string{"id", "tenant_id", "email", "role", "status", "expires_at"}).
+			AddRow("inv-2", "acme", "carol@example.com", "member", "pending", nowPlus()))
+	mock.ExpectExec("UPDATE tenant_invitations SET status").WillReturnResult(sqlmock.NewResult(0, 1))
+
+	srv := newMembersTestServer(t, &membersAuthorizer{}, nil)
+	srv.invitations = NewInvitationStore(db)
+	ctx := ctxWithTenant(t, "acme")
+	if _, err := srv.CancelInvitation(ctx, &tenantv1.CancelInvitationRequest{Email: "carol@example.com"}); err != nil {
+		t.Fatalf("CancelInvitation: %v", err)
+	}
+	if err := mock.ExpectationsWereMet(); err != nil {
+		t.Errorf("sqlmock: %v", err)
+	}
+}
