@@ -134,6 +134,17 @@ func (s *DaemonServer) CreateAgentIdentity(ctx context.Context, req *tenantpb.Cr
 				Relation: "belongs_to",
 				Object:   principalID,
 			},
+			// Tenant membership: makes the principal a `member` of its tenant so
+			// rule-mode client RPCs (e.g. IdentityService/WhoAmI, member-on-
+			// tenant) authorize when the component presents its CG-JWT (ADR-0045).
+			// The model already lists <kind>_principal as an allowed tenant
+			// member; ext-authz's COMPONENT identity-class gate bounds which RPCs
+			// this unlocks, so membership is not a broad grant.
+			{
+				User:     principalID,
+				Relation: "member",
+				Object:   "tenant:" + tenantID,
+			},
 		}
 
 		// Optional component grants.

@@ -9,15 +9,18 @@ import (
 // Capability-Grant public-key endpoint (epic unified-cg-identity, ADR-0045,
 // gibson#648 / ext-authz#103).
 //
-// GET /capabilitygrant/v1/keys/{kid} returns a single-key JWKS for the kid:
-//   - the daemon CG signing key when kid is the Minter's KeyID (verifies
-//     daemon-minted dispatch CG-JWTs);
-//   - a registered agent's public key when kid is an agentID (verifies a
-//     component's self-signed per-RPC agent+jwt, whose kid is its agentID).
+// GET /capabilitygrant/v1/keys/{kid} returns a per-kid key document for the kid:
+//   - the daemon CG signing key (bare JWKS) when kid is the Minter's KeyID
+//     (verifies daemon-minted dispatch CG-JWTs, which carry their own claims);
+//   - a registered agent's key DESCRIPTOR when kid is an agentID — a JWKS
+//     superset that also carries the authoritative FGA principal + tenant
+//     (ADR-0045). ext-authz verifies the component's self-signed agent+jwt
+//     signature, then runs its per-method FGA check on the daemon-asserted
+//     principal/tenant — it trusts no caller-asserted identity.
 //
-// ext-authz's CG-JWT verifier fetches this per-kid (bounded — one key per
-// request, no JWKS-wide enumeration). Served on the pre-auth :8085 listener;
-// public keys are non-secret.
+// ext-authz fetches this per-kid (bounded — one key per request, no JWKS-wide
+// enumeration). Served on the pre-auth :8085 listener; public keys are
+// non-secret.
 
 // capabilityGrantKeysPath is the per-kid key endpoint prefix; the kid is the
 // trailing path segment.
@@ -29,9 +32,10 @@ type cgKeyMinter interface {
 	PublicKeyJWKS() ([]byte, error)
 }
 
-// cgAgentKeyLookup resolves a registered agent's public key as a single-key JWKS.
+// cgAgentKeyLookup resolves a registered agent's per-kid key descriptor (a JWKS
+// superset carrying the authoritative FGA principal + tenant; ADR-0045).
 type cgAgentKeyLookup interface {
-	AgentPublicKeyJWKS(ctx context.Context, kid string) ([]byte, error)
+	AgentKeyDescriptor(ctx context.Context, kid string) ([]byte, error)
 }
 
 // capabilityGrantKeysHandler serves the per-kid key document. minter and lookup
@@ -58,9 +62,12 @@ func capabilityGrantKeysHandler(minter cgKeyMinter, lookup cgAgentKeyLookup) htt
 			err  error
 		)
 		if kid == minter.KeyID() {
+			// The daemon's own dispatch key: bare JWKS (no component principal/
+			// tenant — dispatch CG-JWTs carry their own claims). The descriptor's
+			// `keys` field is JWKS-shaped, so ext-authz parses both uniformly.
 			body, err = minter.PublicKeyJWKS()
 		} else {
-			body, err = lookup.AgentPublicKeyJWKS(r.Context(), kid)
+			body, err = lookup.AgentKeyDescriptor(r.Context(), kid)
 		}
 		if err != nil {
 			// Unknown kid / inactive agent / parse failure — do not echo detail.

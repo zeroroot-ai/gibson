@@ -51,6 +51,12 @@ type Agent struct {
 	Mode         string // "delegated" or "autonomous"
 	PublicKeyJWK json.RawMessage
 	Status       string
+	// PrincipalRef is the typed FGA principal this agent authenticates as,
+	// e.g. "agent_principal:<zitadel-sa-account-id>" (ADR-0045). It is NOT the
+	// agent row ID (that is the per-RPC agent+jwt `sub`/`kid`). The per-kid key
+	// descriptor serves it so ext-authz can run its FGA check on the
+	// daemon-asserted principal. Set at registration from the bootstrap claims.
+	PrincipalRef string
 	SessionTTL   int
 	MaxLifetime  int
 	LastActiveAt *time.Time
@@ -168,11 +174,11 @@ func (s *CapabilityGrantStore) CreateAgent(ctx context.Context, agent Agent) err
 INSERT INTO capability_grant_agents (
     id, host_id, tenant_id, user_id, name, mode,
     public_key_jwk, status, session_ttl_s, max_lifetime_s,
-    last_active_at, expires_at, created_at
+    last_active_at, expires_at, principal_ref, created_at
 ) VALUES (
     $1, $2, $3, $4, $5, $6,
     $7, $8, $9, $10,
-    $11, $12, now()
+    $11, $12, $13, now()
 )`
 
 	_, err := s.db.ExecContext(ctx, query,
@@ -188,6 +194,7 @@ INSERT INTO capability_grant_agents (
 		agent.MaxLifetime,
 		nullableTime(agent.LastActiveAt),
 		nullableTime(agent.ExpiresAt),
+		agent.PrincipalRef,
 	)
 	if err != nil {
 		return fmt.Errorf("capabilitygrant: CreateAgent %q: %w", agent.ID, err)
@@ -201,7 +208,7 @@ func (s *CapabilityGrantStore) GetAgent(ctx context.Context, agentID string) (*A
 	const query = `
 SELECT a.id, a.host_id, a.tenant_id, COALESCE(a.user_id, ''), a.name, a.mode,
        a.public_key_jwk, a.status, a.session_ttl_s, a.max_lifetime_s,
-       a.last_active_at, a.expires_at, a.created_at
+       a.last_active_at, a.expires_at, COALESCE(a.principal_ref, ''), a.created_at
 FROM   capability_grant_agents a
 WHERE  a.id = $1`
 
@@ -223,6 +230,7 @@ WHERE  a.id = $1`
 		&ag.MaxLifetime,
 		&lastActive,
 		&expiresAt,
+		&ag.PrincipalRef,
 		&ag.CreatedAt,
 	)
 	if err == sql.ErrNoRows {

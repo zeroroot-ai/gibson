@@ -233,6 +233,24 @@ func TestCreateAgentIdentity_FGAOnlyNoMembership(t *testing.T) {
 			if !found {
 				t.Errorf("expected belongs_to tuple %+v in writes %+v", want, az.writtenTuples())
 			}
+			// Tenant membership: the principal is a `member` of its tenant so
+			// rule-mode client RPCs (WhoAmI etc.) authorize over its CG-JWT
+			// (ADR-0045). Model allows <kind>_principal as a tenant member.
+			wantMember := authz.Tuple{
+				User:     tc.fgaType + ":sa-test-id",
+				Relation: "member",
+				Object:   "tenant:acme",
+			}
+			var foundMember bool
+			for _, tup := range az.writtenTuples() {
+				if tup == wantMember {
+					foundMember = true
+					break
+				}
+			}
+			if !foundMember {
+				t.Errorf("expected member tuple %+v in writes %+v", wantMember, az.writtenTuples())
+			}
 		})
 	}
 }

@@ -23,7 +23,7 @@ type fakeAgentKeyLookup struct {
 	err    error
 }
 
-func (f *fakeAgentKeyLookup) AgentPublicKeyJWKS(_ context.Context, kid string) ([]byte, error) {
+func (f *fakeAgentKeyLookup) AgentKeyDescriptor(_ context.Context, kid string) ([]byte, error) {
 	f.gotKid = kid
 	return f.jwks, f.err
 }

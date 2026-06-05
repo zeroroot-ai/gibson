@@ -21,18 +21,18 @@ func (f fakeBootstrapVerifier) VerifyBootstrapToken(string) (*capabilitygrant.Bo
 }
 
 type fakeRegistrar struct {
-	gotTenant, gotOwner, gotName, gotMode, gotBootstrapType string
-	result                                                 *capabilitygrant.RegisterCapabilityGrantResult
-	err                                                    error
+	gotTenant, gotOwner, gotName, gotMode, gotPrincipal, gotBootstrapType string
+	result                                                               *capabilitygrant.RegisterCapabilityGrantResult
+	err                                                                  error
 }
 
 func (f *fakeRegistrar) RegisterCapabilityGrant(
 	_ context.Context,
-	tenantID, ownerUserID, agentName, agentMode string,
+	tenantID, ownerUserID, agentName, agentMode, principalRef string,
 	_, _ json.RawMessage,
 	bootstrapType, _ string,
 ) (*capabilitygrant.RegisterCapabilityGrantResult, error) {
-	f.gotTenant, f.gotOwner, f.gotName, f.gotMode, f.gotBootstrapType = tenantID, ownerUserID, agentName, agentMode, bootstrapType
+	f.gotTenant, f.gotOwner, f.gotName, f.gotMode, f.gotPrincipal, f.gotBootstrapType = tenantID, ownerUserID, agentName, agentMode, principalRef, bootstrapType
 	return f.result, f.err
 }
 
@@ -86,6 +86,11 @@ func TestCGRegister_HappyPath_SDKContract(t *testing.T) {
 	if reg.gotTenant != "acme" || reg.gotOwner != "user-1" || reg.gotName != "hello-agent" || reg.gotBootstrapType != "bootstrap" {
 		t.Errorf("registrar got tenant=%q owner=%q name=%q type=%q (name must be the signed claim, not body)",
 			reg.gotTenant, reg.gotOwner, reg.gotName, reg.gotBootstrapType)
+	}
+	// The typed FGA principal threads from the signed claims into the agent
+	// record so the per-kid descriptor can serve it (ADR-0045).
+	if reg.gotPrincipal != "agent_principal:9" {
+		t.Errorf("registrar got principal=%q, want the signed claim agent_principal:9", reg.gotPrincipal)
 	}
 }
 
