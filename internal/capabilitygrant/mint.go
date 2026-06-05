@@ -296,6 +296,11 @@ func (m *Minter) PublicKey() ed25519.PublicKey { return m.pub }
 // KeyID returns the JWS kid the Minter stamps on each token.
 func (m *Minter) KeyID() string { return m.keyID }
 
+// PublicKeyJWKS returns a single-key JWKS document for the daemon's CG signing
+// key, keyed by KeyID(). The per-kid key endpoint serves this when the requested
+// kid is the daemon key (verifying daemon-minted dispatch tokens). gibson#648.
+func (m *Minter) PublicKeyJWKS() ([]byte, error) { return buildJWKS(m.pub, m.keyID) }
+
 // deriveEd25519FromMaster derives a deterministic Ed25519 keypair
 // from the supplied master key bytes via HKDF-SHA256 with a domain-
 // separation tag. Same master + same code = same key, so process

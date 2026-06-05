@@ -1416,23 +1416,14 @@ func (d *daemonImpl) Start(ctx context.Context) error {
 	// Start the unauthenticated native-login bootstrap server (gibson#623). It
 	// publishes {issuer, client_id, scopes} for `gibson login` (and any future
 	// native client) device-grant bootstrap, plus the Capability-Grant
-	// discovery + host-registration endpoints (gibson#648). Best-effort: a
-	// failure here never takes the daemon down.
+	// discovery + host-registration + per-kid key endpoints (gibson#648).
+	// Best-effort: a failure here never takes the daemon down.
 	//
-	// Wire the CG register endpoint only when both the bootstrap verifier (CG
-	// Minter) and the registrar (CapabilityGrantService) exist. Computed as
-	// interfaces here so a nil concrete value yields a nil interface (the
-	// handler/mux can then omit the route) rather than a typed-nil.
-	var cgVerifier bootstrapVerifier
-	var cgRegistrar capabilityGrantRegistrar
-	if d.cgMinter != nil {
-		cgVerifier = d.cgMinter
-	}
-	if d.capabilityGrantSvc != nil {
-		cgRegistrar = d.capabilityGrantSvc
-	}
+	// The CG register + key routes mount only when both the Minter and the
+	// CapabilityGrantService exist (the subsystem nil-checks the concrete
+	// pointers); otherwise those routes are absent.
 	go func() {
-		if err := newNativeLoginSubsystem(nativeLoginConfigFromEnv(), d.logger, cgVerifier, cgRegistrar).Serve(ctx); err != nil {
+		if err := newNativeLoginSubsystem(nativeLoginConfigFromEnv(), d.logger, d.cgMinter, d.capabilityGrantSvc).Serve(ctx); err != nil {
 			d.logger.Warn(ctx, "native-login subsystem error (non-fatal)", "error", err)
 		}
 	}()
