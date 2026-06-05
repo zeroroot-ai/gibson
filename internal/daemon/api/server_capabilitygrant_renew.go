@@ -59,6 +59,15 @@ func (s *DaemonServer) WithCGRenewal(minter *capabilitygrant.Minter, verifier CG
 	return s
 }
 
+// WithCGMinter wires the CG Minter independently of the renewal verifier, so the
+// bootstrap-token issuance path (CreateAgentIdentity, gibson#648 / ADR-0045) can
+// mint a first-registration bootstrap token even when CG renewal is not
+// configured. Idempotent with WithCGRenewal (both set s.cgMinter).
+func (s *DaemonServer) WithCGMinter(minter *capabilitygrant.Minter) *DaemonServer {
+	s.cgMinter = minter
+	return s
+}
+
 // RenewCapabilityGrant implements daemonpb.DaemonServiceServer.
 func (s *DaemonServer) RenewCapabilityGrant(ctx context.Context, req *daemonpb.RenewCapabilityGrantRequest) (*daemonpb.RenewCapabilityGrantResponse, error) {
 	if s.cgMinter == nil || s.cgVerifier == nil {
