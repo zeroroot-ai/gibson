@@ -591,6 +591,12 @@ func (d *daemonImpl) buildGRPCServer(ctx context.Context) (*grpcSubsystem, error
 		daemonSvc.WithAuthorizer(d.authorizer)
 		d.logger.Info(ctx, "FGA authorizer wired into DaemonServer for admin RPCs")
 	}
+	// Wire the CG Minter so CreateAgentIdentity can issue a first-registration
+	// bootstrap token (gibson#648 / ADR-0045). d.cgMinter is constructed during
+	// Start once the key provider is available; nil disables issuance.
+	if d.cgMinter != nil {
+		daemonSvc.WithCGMinter(d.cgMinter)
+	}
 	// platformDB is always non-nil after Start() (gibson#246): initPlatformPostgres
 	// is fatal on failure, so the entitlements RPCs always have a real pool.
 	daemonSvc.WithPlatformDB(d.platformDB)

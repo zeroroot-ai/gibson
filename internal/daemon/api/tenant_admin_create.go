@@ -29,6 +29,7 @@ import (
 
 	"github.com/zeroroot-ai/gibson/internal/audit"
 	"github.com/zeroroot-ai/gibson/internal/authz"
+	"github.com/zeroroot-ai/gibson/internal/capabilitygrant"
 	"github.com/zeroroot-ai/gibson/internal/idp"
 	tenantpb "github.com/zeroroot-ai/sdk/api/gen/gibson/tenant/v1"
 	"github.com/zeroroot-ai/sdk/auth"
@@ -183,14 +184,39 @@ func (s *DaemonServer) CreateAgentIdentity(ctx context.Context, req *tenantpb.Cr
 	gibsonURL := s.gibsonPublicURL
 	enrollCmd := buildEnrollCommand(gibsonURL, clientID)
 
+	// Mint a first-registration Capability-Grant bootstrap token (gibson#648 /
+	// ADR-0045): the daemon-signed credential the component presents to the CG
+	// register endpoint to complete its first host registration. Best-effort —
+	// if the CG Minter is not wired the field is omitted and the component uses
+	// the legacy enroll path until the CLI migrates (adk#124). NEVER logged.
+	var bootstrapToken string
+	if s.cgMinter != nil {
+		bt, btErr := s.cgMinter.MintBootstrapToken(capabilitygrant.BootstrapClaims{
+			TenantID:    tenantID,
+			OwnerUserID: callerID.Subject,
+			PrincipalID: principalID,
+			Kind:        strings.TrimSuffix(fgaType, "_principal"),
+			Name:        req.Name,
+		}, 0)
+		if btErr != nil {
+			s.logger.WarnContext(ctx, "CreateAgentIdentity: bootstrap token mint failed (non-fatal)",
+				slog.String("tenant_id", tenantID),
+				slog.String("error", btErr.Error()),
+			)
+		} else {
+			bootstrapToken = bt
+		}
+	}
+
 	return &tenantpb.CreateAgentIdentityResponse{
-		PrincipalId:   principalID,
-		Kind:          req.Kind,
-		Name:          req.Name,
-		ClientId:      clientID, // loginName-based OAuth client_id (gibson#643)
-		ClientSecret:  clientSecret, // emitted once; caller must store immediately
-		GibsonUrl:     gibsonURL,
-		EnrollCommand: enrollCmd,
+		PrincipalId:    principalID,
+		Kind:           req.Kind,
+		Name:           req.Name,
+		ClientId:       clientID, // loginName-based OAuth client_id (gibson#643)
+		ClientSecret:   clientSecret, // emitted once; caller must store immediately
+		GibsonUrl:      gibsonURL,
+		EnrollCommand:  enrollCmd,
+		BootstrapToken: bootstrapToken, // first-registration CG credential (gibson#648)
 	}, nil
 }
 
