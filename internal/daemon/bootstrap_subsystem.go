@@ -8,6 +8,7 @@ import (
 	"strings"
 	"time"
 
+	"github.com/zeroroot-ai/gibson/internal/capabilitygrant"
 	"github.com/zeroroot-ai/gibson/internal/observability"
 )
 
@@ -82,7 +83,7 @@ type nativeLoginResponse struct {
 
 // nativeLoginHandler returns the HTTP handler for the well-known endpoint. It is
 // split from the listener so it can be tested with httptest directly.
-func nativeLoginHandler(cfg nativeLoginConfig, cgVerifier bootstrapVerifier, cgRegistrar capabilityGrantRegistrar) http.Handler {
+func nativeLoginHandler(cfg nativeLoginConfig, cgMinter *capabilitygrant.Minter, cgSvc *capabilitygrant.CapabilityGrantService) http.Handler {
 	mux := http.NewServeMux()
 	mux.HandleFunc(nativeLoginWellKnownPath, func(w http.ResponseWriter, r *http.Request) {
 		if r.Method != http.MethodGet {
@@ -109,12 +110,16 @@ func nativeLoginHandler(cfg nativeLoginConfig, cgVerifier bootstrapVerifier, cgR
 	// pre-auth listener; a component holds no Capability Grant yet at discovery
 	// time. Envoy publishes it on an allow_missing route alongside gibson-login.
 	mux.HandleFunc(agentConfigWellKnownPath, agentConfigHandler(cfg.PublicURL))
-	// CG host registration (gibson#648). Mounted only when both the bootstrap
-	// verifier (daemon Minter) and the registrar (CapabilityGrantService) are
-	// wired; otherwise the route is absent and the SDK gets a clear 404 rather
-	// than a half-working endpoint.
-	if cgVerifier != nil && cgRegistrar != nil {
-		mux.HandleFunc(capabilityGrantRegisterPath, capabilityGrantRegisterHandler(cgVerifier, cgRegistrar))
+	// CG host registration + per-kid key serving (gibson#648). Mounted only when
+	// both the daemon Minter and the CapabilityGrantService are wired; otherwise
+	// the routes are absent and the SDK gets a clear 404 rather than a
+	// half-working endpoint.
+	if cgMinter != nil && cgSvc != nil {
+		mux.HandleFunc(capabilityGrantRegisterPath, capabilityGrantRegisterHandler(cgMinter, cgSvc))
+		// Trailing-slash prefix mount so {kid} is the path tail; the handler
+		// resolves the daemon CG key (kid == Minter.KeyID) or a registered
+		// agent's key (kid == agentID). ext-authz fetches per-kid (ADR-0045).
+		mux.HandleFunc(capabilityGrantKeysPath, capabilityGrantKeysHandler(cgMinter, cgSvc))
 	}
 	return mux
 }
@@ -127,14 +132,14 @@ type nativeLoginSubsystem struct {
 	logger *observability.Logger
 }
 
-// newNativeLoginSubsystem builds the subsystem from the given config. cgVerifier
-// and cgRegistrar wire the Capability-Grant register endpoint onto the same
-// pre-auth listener; pass nil interfaces to omit it (gibson#648).
-func newNativeLoginSubsystem(cfg nativeLoginConfig, logger *observability.Logger, cgVerifier bootstrapVerifier, cgRegistrar capabilityGrantRegistrar) *nativeLoginSubsystem {
+// newNativeLoginSubsystem builds the subsystem from the given config. cgMinter
+// and cgSvc wire the Capability-Grant register + per-kid key endpoints onto the
+// same pre-auth listener; pass nil to omit them (gibson#648).
+func newNativeLoginSubsystem(cfg nativeLoginConfig, logger *observability.Logger, cgMinter *capabilitygrant.Minter, cgSvc *capabilitygrant.CapabilityGrantService) *nativeLoginSubsystem {
 	return &nativeLoginSubsystem{
 		srv: &http.Server{
 			Addr:              ":" + cfg.Port,
-			Handler:           nativeLoginHandler(cfg, cgVerifier, cgRegistrar),
+			Handler:           nativeLoginHandler(cfg, cgMinter, cgSvc),
 			ReadHeaderTimeout: 5 * time.Second,
 		},
 		logger: logger,

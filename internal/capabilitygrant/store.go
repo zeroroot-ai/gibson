@@ -1,7 +1,8 @@
 // Package capabilitygrant — store.go
 //
 // CapabilityGrantStore is the Postgres-backed CRUD layer for the Capability Grant Protocol.
-// It operates against the three tables created by RunCapabilityGrantMigrations:
+// It operates against the three tables created by platform migration 008
+// (pkg/platform/migrations/postgres/platform/008_capability_grant.up.sql):
 //
 //   - capability_grant_hosts   — registered host machines / runners
 //   - capability_grant_agents  — LLM-driven agents registered under hosts
