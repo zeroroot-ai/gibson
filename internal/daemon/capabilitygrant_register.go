@@ -61,7 +61,7 @@ type bootstrapVerifier interface {
 type capabilityGrantRegistrar interface {
 	RegisterCapabilityGrant(
 		ctx context.Context,
-		tenantID, ownerUserID, agentName, agentMode string,
+		tenantID, ownerUserID, agentName, agentMode, principalRef string,
 		hostPublicKeyJWK, agentPublicKeyJWK json.RawMessage,
 		bootstrapType, bootstrapCredential string,
 	) (*capabilitygrant.RegisterCapabilityGrantResult, error)
@@ -140,7 +140,7 @@ func capabilityGrantRegisterHandler(verifier bootstrapVerifier, registrar capabi
 
 		res, err := registrar.RegisterCapabilityGrant(
 			r.Context(),
-			claims.TenantID, claims.OwnerUserID, agentName, agentMode,
+			claims.TenantID, claims.OwnerUserID, agentName, agentMode, claims.PrincipalID,
 			req.HostKeyJWK, req.AgentKeyJWK,
 			"bootstrap", token,
 		)

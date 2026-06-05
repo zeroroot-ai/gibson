@@ -151,7 +151,7 @@ type RegisterCapabilityGrantResult struct {
 // the APIKeyAuthenticator before any writes occur.
 func (s *CapabilityGrantService) RegisterCapabilityGrant(
 	ctx context.Context,
-	tenantID, ownerUserID, agentName, agentMode string,
+	tenantID, ownerUserID, agentName, agentMode, principalRef string,
 	hostPublicKeyJWK, agentPublicKeyJWK json.RawMessage,
 	bootstrapType, bootstrapCredential string,
 ) (*RegisterCapabilityGrantResult, error) {
@@ -218,6 +218,7 @@ func (s *CapabilityGrantService) RegisterCapabilityGrant(
 		Mode:         mode,
 		PublicKeyJWK: agentPublicKeyJWK,
 		Status:       "active",
+		PrincipalRef: principalRef,
 	}); err != nil {
 		return nil, fmt.Errorf("capabilitygrant: RegisterCapabilityGrant: create agent: %w", err)
 	}

@@ -382,6 +382,43 @@ func buildJWKS(pub ed25519.PublicKey, kid string) ([]byte, error) {
 	}}})
 }
 
+// buildKeyDescriptor renders the per-kid key descriptor (ADR-0045, gibson#648):
+// a JWKS superset that also carries the authoritative FGA principal, tenant, and
+// status for a registered component key. ext-authz parses `keys` to verify the
+// signature, then runs its per-method FGA check on the daemon-asserted
+// `principal`/`tenant` — it trusts no caller-asserted identity. The `keys` field
+// keeps the standard JWKS shape so the same parser handles both this and the
+// daemon's own key document.
+func buildKeyDescriptor(pub ed25519.PublicKey, kid, principal, tenant, status string) ([]byte, error) {
+	type jwk struct {
+		Kty string `json:"kty"`
+		Crv string `json:"crv"`
+		X   string `json:"x"`
+		Kid string `json:"kid"`
+		Use string `json:"use"`
+		Alg string `json:"alg"`
+	}
+	type descriptor struct {
+		Keys      []jwk  `json:"keys"`
+		Principal string `json:"principal,omitempty"`
+		Tenant    string `json:"tenant,omitempty"`
+		Status    string `json:"status,omitempty"`
+	}
+	return json.Marshal(descriptor{
+		Keys: []jwk{{
+			Kty: "OKP",
+			Crv: "Ed25519",
+			X:   base64.RawURLEncoding.EncodeToString(pub),
+			Kid: kid,
+			Use: "sig",
+			Alg: "EdDSA",
+		}},
+		Principal: principal,
+		Tenant:    tenant,
+		Status:    status,
+	})
+}
+
 // Compile-time assert: rand is referenced so the import is valid even
 // if a future refactor stops using it directly. Cheap.
 var _ = rand.Reader
