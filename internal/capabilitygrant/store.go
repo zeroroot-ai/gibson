@@ -37,6 +37,11 @@ type Host struct {
 	DisplayName  string
 	PublicKeyJWK json.RawMessage
 	Status       string
+	// PrincipalRef is the typed FGA principal this host's agents authenticate
+	// as (ADR-0045, gibson#648). Stored on the host so re-registration via a
+	// host+jwt (which carries no bootstrap claims) can copy it onto each newly
+	// registered agent. Set at first registration from the bootstrap claims.
+	PrincipalRef string
 	CreatedAt    time.Time
 	UpdatedAt    time.Time
 }
@@ -105,10 +110,10 @@ func (s *CapabilityGrantStore) UpsertHost(ctx context.Context, host Host) error 
 	const query = `
 INSERT INTO capability_grant_hosts (
     id, tenant_id, user_id, display_name, public_key_jwk, status,
-    created_at, updated_at
+    principal_ref, created_at, updated_at
 ) VALUES (
     $1, $2, $3, $4, $5, $6,
-    now(), now()
+    $7, now(), now()
 )
 ON CONFLICT (id) DO UPDATE SET
     tenant_id      = EXCLUDED.tenant_id,
@@ -116,6 +121,10 @@ ON CONFLICT (id) DO UPDATE SET
     display_name   = EXCLUDED.display_name,
     public_key_jwk = EXCLUDED.public_key_jwk,
     status         = EXCLUDED.status,
+    -- Preserve an existing principal_ref when a re-registration upsert carries
+    -- an empty one (host+jwt path derives it from the row, not the request).
+    principal_ref  = CASE WHEN EXCLUDED.principal_ref <> '' THEN EXCLUDED.principal_ref
+                          ELSE capability_grant_hosts.principal_ref END,
     updated_at     = now()`
 
 	_, err := s.db.ExecContext(ctx, query,
@@ -125,6 +134,7 @@ ON CONFLICT (id) DO UPDATE SET
 		host.DisplayName,
 		[]byte(host.PublicKeyJWK),
 		host.Status,
+		host.PrincipalRef,
 	)
 	if err != nil {
 		return fmt.Errorf("capabilitygrant: UpsertHost %q: %w", host.ID, err)
@@ -137,7 +147,7 @@ ON CONFLICT (id) DO UPDATE SET
 func (s *CapabilityGrantStore) GetHost(ctx context.Context, hostID string) (*Host, error) {
 	const query = `
 SELECT id, tenant_id, COALESCE(user_id, ''), display_name,
-       public_key_jwk, status, created_at, updated_at
+       public_key_jwk, status, COALESCE(principal_ref, ''), created_at, updated_at
 FROM   capability_grant_hosts
 WHERE  id = $1`
 
@@ -150,6 +160,7 @@ WHERE  id = $1`
 		&h.DisplayName,
 		&jwk,
 		&h.Status,
+		&h.PrincipalRef,
 		&h.CreatedAt,
 		&h.UpdatedAt,
 	)

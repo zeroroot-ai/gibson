@@ -115,7 +115,7 @@ func nativeLoginHandler(cfg nativeLoginConfig, cgMinter *capabilitygrant.Minter,
 	// the routes are absent and the SDK gets a clear 404 rather than a
 	// half-working endpoint.
 	if cgMinter != nil && cgSvc != nil {
-		mux.HandleFunc(capabilityGrantRegisterPath, capabilityGrantRegisterHandler(cgMinter, cgSvc))
+		mux.HandleFunc(capabilityGrantRegisterPath, capabilityGrantRegisterHandler(cgMinter, cgSvc, cfg.PublicURL))
 		// Trailing-slash prefix mount so {kid} is the path tail; the handler
 		// resolves the daemon CG key (kid == Minter.KeyID) or a registered
 		// agent's key (kid == agentID). ext-authz fetches per-kid (ADR-0045).
