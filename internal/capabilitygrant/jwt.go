@@ -37,6 +37,11 @@ import (
 // token issuer and the verifier, plus the maximum token lifetime of 60 seconds.
 const maxTokenFuture = 65 * time.Second
 
+// HostTokenType is the JWS `typ` on a host+jwt (SignHostJWT), presented for
+// RE-registration. The register endpoint dispatches on it: host+jwt →
+// VerifyHostJWT; otherwise → bootstrap token (gibson#648).
+const HostTokenType = "host+jwt"
+
 // ---------------------------------------------------------------------------
 // Store interface — narrow contract used by JWTVerifier
 // ---------------------------------------------------------------------------
@@ -105,6 +110,11 @@ type HostClaims struct {
 
 	// OwnerUserID is sourced from the host's store record (not the JWT).
 	OwnerUserID string
+
+	// PrincipalRef is the typed FGA principal stored on the host record, so a
+	// re-registration (host+jwt) can re-issue a Capability Grant under the
+	// existing identity (gibson#648). Sourced from the store, not the JWT.
+	PrincipalRef string
 
 	// IssuedAt is when the token was created (JWT iat).
 	IssuedAt time.Time
@@ -362,11 +372,12 @@ func (v *JWTVerifier) VerifyHostJWT(ctx context.Context, tokenStr, expectedAud s
 	}
 
 	return &HostClaims{
-		HostID:      hostID,
-		TenantID:    host.TenantID,
-		OwnerUserID: host.UserID,
-		IssuedAt:    issuedAt,
-		ExpiresAt:   expiresAt,
+		HostID:       hostID,
+		TenantID:     host.TenantID,
+		OwnerUserID:  host.UserID,
+		PrincipalRef: host.PrincipalRef,
+		IssuedAt:     issuedAt,
+		ExpiresAt:    expiresAt,
 	}, nil
 }
 

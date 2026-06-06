@@ -198,6 +198,7 @@ func (s *CapabilityGrantService) RegisterCapabilityGrant(
 		DisplayName:  hostID[:8], // short display name until set explicitly
 		PublicKeyJWK: hostPublicKeyJWK,
 		Status:       "active",
+		PrincipalRef: principalRef,
 	}); err != nil {
 		return nil, fmt.Errorf("capabilitygrant: RegisterCapabilityGrant: upsert host: %w", err)
 	}

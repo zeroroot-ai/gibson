@@ -2,6 +2,7 @@ package daemon
 
 import (
 	"context"
+	"encoding/base64"
 	"encoding/json"
 	"errors"
 	"net/http"
@@ -57,7 +58,8 @@ type bootstrapVerifier interface {
 	VerifyBootstrapToken(token string) (*capabilitygrant.BootstrapClaims, error)
 }
 
-// capabilityGrantRegistrar registers a host+agent (the CapabilityGrantService).
+// capabilityGrantRegistrar registers a host+agent and verifies a host+jwt for
+// re-registration (the CapabilityGrantService).
 type capabilityGrantRegistrar interface {
 	RegisterCapabilityGrant(
 		ctx context.Context,
@@ -65,6 +67,11 @@ type capabilityGrantRegistrar interface {
 		hostPublicKeyJWK, agentPublicKeyJWK json.RawMessage,
 		bootstrapType, bootstrapCredential string,
 	) (*capabilitygrant.RegisterCapabilityGrantResult, error)
+
+	// VerifyHostJWT authenticates a re-registration (the caller already holds a
+	// registered host key) by verifying a host+jwt against the stored host key.
+	// expectedAud is the daemon's register-endpoint URL.
+	VerifyHostJWT(ctx context.Context, token, expectedAud string) (*capabilitygrant.HostClaims, error)
 }
 
 // cgRegisterRequest mirrors the SDK's registrationRequest.
@@ -92,7 +99,10 @@ type cgRegisterResponse struct {
 // capabilityGrantRegisterHandler returns the POST register handler. verifier and
 // registrar are required; when either is nil the endpoint reports 503 so a
 // partial wire-up is safe.
-func capabilityGrantRegisterHandler(verifier bootstrapVerifier, registrar capabilityGrantRegistrar) http.HandlerFunc {
+func capabilityGrantRegisterHandler(verifier bootstrapVerifier, registrar capabilityGrantRegistrar, publicURL string) http.HandlerFunc {
+	// The host+jwt audience the SDK signs against is the register URL advertised
+	// in the discovery document — derived from the same public base URL.
+	registerAudience := strings.TrimRight(publicURL, "/") + capabilityGrantRegisterPath
 	return func(w http.ResponseWriter, r *http.Request) {
 		if r.Method != http.MethodPost {
 			w.Header().Set("Allow", http.MethodPost)
@@ -109,12 +119,6 @@ func capabilityGrantRegisterHandler(verifier bootstrapVerifier, registrar capabi
 			http.Error(w, err.Error(), http.StatusUnauthorized)
 			return
 		}
-		claims, err := verifier.VerifyBootstrapToken(token)
-		if err != nil {
-			// Do not echo the verification detail (it can leak token internals).
-			http.Error(w, "invalid bootstrap credential", http.StatusUnauthorized)
-			return
-		}
 
 		var req cgRegisterRequest
 		if err := json.NewDecoder(http.MaxBytesReader(w, r.Body, 1<<20)).Decode(&req); err != nil {
@@ -126,10 +130,33 @@ func capabilityGrantRegisterHandler(verifier bootstrapVerifier, registrar capabi
 			return
 		}
 
-		// The signed bootstrap claims are authoritative for identity: a component
-		// registers under the name/mode it was enrolled as, never an arbitrary
-		// body value. The body supplies only the host/agent public keys.
-		agentName := claims.Name
+		// Resolve the authenticated identity from the credential type:
+		//   - host+jwt → RE-registration: the caller proves possession of an
+		//     already-registered host key; tenant/owner/principal come from the
+		//     stored host record (no bootstrap claim is present).
+		//   - otherwise → FIRST registration: a daemon-signed bootstrap token
+		//     carries the signed identity (the authoritative name/mode/principal).
+		var tenantID, ownerUserID, principalRef, signedName, bootstrapType string
+		if jwtTyp(token) == capabilitygrant.HostTokenType {
+			hc, verr := registrar.VerifyHostJWT(r.Context(), token, registerAudience)
+			if verr != nil {
+				http.Error(w, "invalid host credential", http.StatusUnauthorized)
+				return
+			}
+			tenantID, ownerUserID, principalRef, bootstrapType = hc.TenantID, hc.OwnerUserID, hc.PrincipalRef, "host_jwt"
+		} else {
+			claims, verr := verifier.VerifyBootstrapToken(token)
+			if verr != nil {
+				// Do not echo the verification detail (it can leak token internals).
+				http.Error(w, "invalid bootstrap credential", http.StatusUnauthorized)
+				return
+			}
+			tenantID, ownerUserID, principalRef, signedName, bootstrapType = claims.TenantID, claims.OwnerUserID, claims.PrincipalID, claims.Name, "bootstrap"
+		}
+
+		// On first registration the signed claim name is authoritative; on
+		// re-registration (no signed name) the request body supplies it.
+		agentName := signedName
 		if agentName == "" {
 			agentName = req.AgentName
 		}
@@ -140,9 +167,9 @@ func capabilityGrantRegisterHandler(verifier bootstrapVerifier, registrar capabi
 
 		res, err := registrar.RegisterCapabilityGrant(
 			r.Context(),
-			claims.TenantID, claims.OwnerUserID, agentName, agentMode, claims.PrincipalID,
+			tenantID, ownerUserID, agentName, agentMode, principalRef,
 			req.HostKeyJWK, req.AgentKeyJWK,
-			"bootstrap", token,
+			bootstrapType, token,
 		)
 		if err != nil {
 			http.Error(w, "registration failed", http.StatusInternalServerError)
@@ -164,6 +191,29 @@ func capabilityGrantRegisterHandler(verifier bootstrapVerifier, registrar capabi
 		w.WriteHeader(http.StatusCreated)
 		_ = json.NewEncoder(w).Encode(resp)
 	}
+}
+
+// jwtTyp base64url-decodes a compact JWT's header (WITHOUT verifying) to read
+// its `typ`, so the register handler can dispatch host+jwt re-registration vs a
+// bootstrap token. Verification happens afterward in the chosen path; this only
+// routes. Returns "" on any parse failure (→ the bootstrap path, which then
+// rejects it).
+func jwtTyp(token string) string {
+	parts := strings.Split(token, ".")
+	if len(parts) < 2 {
+		return ""
+	}
+	raw, err := base64.RawURLEncoding.DecodeString(parts[0])
+	if err != nil {
+		return ""
+	}
+	var h struct {
+		Typ string `json:"typ"`
+	}
+	if json.Unmarshal(raw, &h) != nil {
+		return ""
+	}
+	return h.Typ
 }
 
 // bearerToken extracts the token from an Authorization: Bearer header.
