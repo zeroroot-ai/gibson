@@ -251,9 +251,10 @@ func TestCreateAgentIdentity_FGAOnlyNoMembership(t *testing.T) {
 			if !foundMember {
 				t.Errorf("expected member tuple %+v in writes %+v", wantMember, az.writtenTuples())
 			}
-			// ADR-0046: an agent (client/invoker) is granted direct_execute on
-			// the synthetic system backplane (component:_system) so its client
-			// RPCs authorize; tools/plugins (invoked) are NOT granted it.
+			// ADR-0046 kind->grant policy: agents and tools are clients/invokers
+			// and are granted direct_execute on the system backplane
+			// (component:_system) so their client RPCs authorize; plugins are
+			// invoked-only and are NOT granted it.
 			wantSysExec := authz.Tuple{
 				User:     tc.fgaType + ":sa-test-id",
 				Relation: "direct_execute",
@@ -266,7 +267,7 @@ func TestCreateAgentIdentity_FGAOnlyNoMembership(t *testing.T) {
 					break
 				}
 			}
-			wantPresent := tc.fgaType == "agent_principal"
+			wantPresent := tc.fgaType == "agent_principal" || tc.fgaType == "tool_principal"
 			if foundSysExec != wantPresent {
 				t.Errorf("direct_execute component:_system for %s: got present=%v, want %v (writes %+v)",
 					tc.fgaType, foundSysExec, wantPresent, az.writtenTuples())
@@ -404,5 +405,32 @@ func TestBuildEnrollCommand(t *testing.T) {
 				t.Errorf("buildEnrollCommand() =\n  %q\nwant\n  %q", got, tc.want)
 			}
 		})
+	}
+}
+
+// TestClientCapabilityGrants_KindPolicy pins the ADR-0046 kind->grant table:
+// agents and tools are clients (granted execute on the system backplane),
+// plugins are invoked-only (no client grant).
+func TestClientCapabilityGrants_KindPolicy(t *testing.T) {
+	sysExec := authz.Tuple{User: "p:x", Relation: "direct_execute", Object: "component:_system"}
+	cases := []struct {
+		fgaType string
+		want    []authz.Tuple
+	}{
+		{"agent_principal", []authz.Tuple{sysExec}},
+		{"tool_principal", []authz.Tuple{sysExec}},
+		{"plugin_principal", nil},
+	}
+	for _, tc := range cases {
+		got := clientCapabilityGrants("p:x", tc.fgaType)
+		if len(got) != len(tc.want) {
+			t.Errorf("%s: got %d grants, want %d (%v)", tc.fgaType, len(got), len(tc.want), got)
+			continue
+		}
+		for i := range got {
+			if got[i] != tc.want[i] {
+				t.Errorf("%s grant[%d] = %+v, want %+v", tc.fgaType, i, got[i], tc.want[i])
+			}
+		}
 	}
 }

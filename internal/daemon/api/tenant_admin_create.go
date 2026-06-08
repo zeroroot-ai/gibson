@@ -147,22 +147,17 @@ func (s *DaemonServer) CreateAgentIdentity(ctx context.Context, req *tenantpb.Cr
 			},
 		}
 
-		// ADR-0046: an agent is a client/invoker — grant it execute on the
-		// synthetic system backplane (component:_system) so its CG-JWT
-		// authorizes the COMPONENT-identity client RPCs (RunMission, CallTool,
-		// the mission-management surface) via ext-authz's per-method FGA check.
-		// The universal `tenant_enabled component:_system` baseline (the catalog
-		// fan-out reconciler) satisfies in_tenant_catalog; THIS per-agent
-		// direct_execute grant is the real gate. Tools/plugins are invoked, not
-		// clients, and do NOT receive it; the kind->grant policy is generalized
-		// in gibson#661 (and tool grants need the model symmetry of gibson#659).
-		if fgaType == "agent_principal" {
-			tuples = append(tuples, authz.Tuple{
-				User:     principalID,
-				Relation: "direct_execute",
-				Object:   "component:_system",
-			})
-		}
+		// ADR-0046: capability is enrollment policy, not a type-system wall.
+		// One kind->grant table (clientCapabilityGrants) decides what each kind
+		// receives beyond the base identity tuples. Agents and tools are
+		// clients/invokers (ADR-0045: "server AND client") and are granted
+		// execute on the synthetic system backplane (component:_system) so their
+		// CG-JWT authorizes the COMPONENT-identity client RPCs via ext-authz's
+		// per-method FGA check; plugins are invoked-only (server) and receive no
+		// client grant. The universal `tenant_enabled component:_system` baseline
+		// (catalog fan-out) satisfies in_tenant_catalog; the per-principal grant
+		// here is the real gate.
+		tuples = append(tuples, clientCapabilityGrants(principalID, fgaType)...)
 
 		// Optional component grants.
 		for _, cg := range req.ComponentGrants {
@@ -240,7 +235,7 @@ func (s *DaemonServer) CreateAgentIdentity(ctx context.Context, req *tenantpb.Cr
 		PrincipalId:    principalID,
 		Kind:           req.Kind,
 		Name:           req.Name,
-		ClientId:       clientID, // loginName-based OAuth client_id (gibson#643)
+		ClientId:       clientID,     // loginName-based OAuth client_id (gibson#643)
 		ClientSecret:   clientSecret, // emitted once; caller must store immediately
 		GibsonUrl:      gibsonURL,
 		EnrollCommand:  enrollCmd,
@@ -264,6 +259,32 @@ func (s *DaemonServer) rollbackServiceAccount(ctx context.Context, accountID, re
 			slog.String("rollback_reason", reason),
 			slog.String("rollback_error", err.Error()),
 		)
+	}
+}
+
+// clientCapabilityGrants is the single kind->grant policy table (ADR-0046):
+// the capability tuples written at enrollment beyond the base identity tuples
+// (owner / belongs_to / member), keyed by FGA principal type.
+//
+//   - agent_principal, tool_principal — clients/invokers (ADR-0045: an agent or
+//     tool is "server AND client"). Granted direct_execute on the system
+//     backplane (component:_system) so their CG-JWT authorizes the
+//     COMPONENT-identity client RPCs (RunMission, CallTool, the
+//     mission-management surface).
+//   - plugin_principal — invoked-only (server). No client grant; a plugin
+//     receives work and answers, it does not drive the platform.
+//
+// This is the one auditable place that answers "what does each kind get at
+// enrollment." Tool/plugin principals are valid grantees for these relations
+// as of the symmetric model (gibson#659).
+func clientCapabilityGrants(principalID, fgaType string) []authz.Tuple {
+	switch fgaType {
+	case "agent_principal", "tool_principal":
+		return []authz.Tuple{
+			{User: principalID, Relation: "direct_execute", Object: "component:_system"},
+		}
+	default: // plugin_principal — invoked-only
+		return nil
 	}
 }
 
