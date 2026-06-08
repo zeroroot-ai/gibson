@@ -2,25 +2,55 @@ package api
 
 import (
 	"context"
-	"errors"
+	"strings"
 	"testing"
 
 	"github.com/zeroroot-ai/gibson/internal/audit"
 	"github.com/zeroroot-ai/gibson/internal/authz"
+	"github.com/zeroroot-ai/gibson/internal/capabilitygrant"
 	"github.com/zeroroot-ai/gibson/internal/idp"
+	"github.com/zeroroot-ai/gibson/internal/types"
 	tenantpb "github.com/zeroroot-ai/sdk/api/gen/gibson/tenant/v1"
 	"github.com/zeroroot-ai/sdk/auth"
 	"google.golang.org/grpc/codes"
 	"google.golang.org/grpc/status"
 )
 
+// staticKeyProvider is a crypto.KeyProvider test double returning a fixed
+// 32-byte master key, used to construct a real capability-grant Minter.
+type staticKeyProvider struct{}
+
+func (staticKeyProvider) GetEncryptionKey(context.Context) ([]byte, error) {
+	return []byte(strings.Repeat("k", 32)), nil
+}
+func (staticKeyProvider) Name() string                              { return "test" }
+func (staticKeyProvider) Health(context.Context) types.HealthStatus { return types.HealthStatus{} }
+func (staticKeyProvider) Close() error                              { return nil }
+
+// newTestCGMinter builds a real capability-grant Minter backed by a static key
+// so CreateAgentIdentity (which now requires the minter — ADR-0045/gibson#670)
+// can issue a bootstrap token in unit tests.
+func newTestCGMinter(t interface{ Helper() }) *capabilitygrant.Minter {
+	m, err := capabilitygrant.NewMinter(context.Background(), capabilitygrant.Config{
+		Issuer:      "https://test.daemon",
+		Audience:    "test-daemon",
+		KeyProvider: staticKeyProvider{},
+		KeyID:       "k1",
+	})
+	if err != nil {
+		panic("newTestCGMinter: " + err.Error())
+	}
+	return m
+}
+
 // newTestDaemonServer returns a minimal DaemonServer for handler unit tests.
-// It does NOT set up any external dependencies (FGA, audit, IdP).
-// Callers chain With* methods to add what they need.
+// It does NOT set up external dependencies (FGA, audit, IdP) — chain With*
+// methods to add those — but it DOES wire a working capability-grant minter,
+// since CreateAgentIdentity now treats a missing minter as a fail-loud error.
 func newTestDaemonServer(t interface{ Helper() }) *DaemonServer {
-	_ = t
 	return &DaemonServer{
-		logger: testSlogLogger,
+		logger:   testSlogLogger,
+		cgMinter: newTestCGMinter(t),
 	}
 }
 
@@ -148,17 +178,17 @@ func TestCreateAgentIdentity_HappyPath(t *testing.T) {
 	if err != nil {
 		t.Fatalf("CreateAgentIdentity: %v", err)
 	}
-	if resp.ClientSecret == "" {
-		t.Error("expected non-empty ClientSecret")
+	// gibson#670 / ADR-0045: the sole enrollment credential is the capability-grant
+	// bootstrap token. No OAuth client_id/client_secret is provisioned. (We assert
+	// the absence of OAuth creds via the enroll command rather than the response
+	// fields, which are being removed from the proto.)
+	if resp.BootstrapToken == "" {
+		t.Error("expected non-empty BootstrapToken")
 	}
-	if resp.ClientSecret != "test-secret" {
-		t.Errorf("ClientSecret = %q, want %q", resp.ClientSecret, "test-secret")
-	}
-	// gibson#643: ClientId must be the loginName-based OAuth client_id returned
-	// by MintClientSecret ("test-client-id"), NOT the machine-user/account id
-	// ("sa-test-id"). The user id yields invalid_client at the token endpoint.
-	if resp.ClientId != "test-client-id" {
-		t.Errorf("ClientId = %q, want %q (loginName client_id, not the user id)", resp.ClientId, "test-client-id")
+	// The enroll command uses the unified CG --token form for every kind — no
+	// --client-id/--client-secret.
+	if want := "gibson component register --kind agent --token -"; resp.EnrollCommand != want {
+		t.Errorf("EnrollCommand = %q, want %q", resp.EnrollCommand, want)
 	}
 	if resp.PrincipalId == "" {
 		t.Error("expected non-empty PrincipalId")
@@ -209,8 +239,8 @@ func TestCreateAgentIdentity_FGAOnlyNoMembership(t *testing.T) {
 			if err != nil {
 				t.Fatalf("CreateAgentIdentity(%s): %v", tc.fgaType, err)
 			}
-			if resp.ClientSecret == "" {
-				t.Error("expected non-empty ClientSecret")
+			if resp.BootstrapToken == "" {
+				t.Error("expected non-empty BootstrapToken")
 			}
 			// No rollback: the saga must complete without deleting the SA.
 			if len(fakeidp.deleteCalls) != 0 {
@@ -314,21 +344,23 @@ func TestCreateAgentIdentity_AlreadyExists(t *testing.T) {
 	}
 }
 
-func TestCreateAgentIdentity_RollbackOnMintFailure(t *testing.T) {
-	fakeidp := &fakeIDPClient{
-		mintFn: func(_ context.Context, _ string) (string, string, error) {
-			return "", "", errors.New("mint failed")
-		},
-	}
-	srv := newTestDaemonServer(t).WithIdPAdminClient(fakeidp)
+// TestCreateAgentIdentity_RollbackOnMissingCGMinter verifies the fail-loud
+// behavior (gibson#670): the capability-grant bootstrap token is the sole
+// enrollment credential, so a server without a minter must refuse and roll
+// back the freshly-created service account rather than leak a credential-less
+// principal.
+func TestCreateAgentIdentity_RollbackOnMissingCGMinter(t *testing.T) {
+	fakeidp := &fakeIDPClient{}
+	// Bare server WITH an IdP client but WITHOUT a CG minter.
+	srv := (&DaemonServer{logger: testSlogLogger}).WithIdPAdminClient(fakeidp)
 	ctx := ctxWithTenantAdmin(context.Background(), "acme", "user-admin")
 
 	_, err := srv.CreateAgentIdentity(ctx, &tenantpb.CreateAgentIdentityRequest{
 		Name: "rollback-agent",
 		Kind: tenantpb.PrincipalKind_PRINCIPAL_KIND_AGENT,
 	})
-	if status.Code(err) != codes.Internal {
-		t.Errorf("got code %v, want Internal", status.Code(err))
+	if status.Code(err) != codes.Unavailable {
+		t.Errorf("got code %v, want Unavailable", status.Code(err))
 	}
 	if len(fakeidp.deleteCalls) != 1 {
 		t.Errorf("expected 1 rollback delete call, got %d", len(fakeidp.deleteCalls))
@@ -373,34 +405,37 @@ func TestCreateAgentIdentity_NoIdPConfigured(t *testing.T) {
 	}
 }
 
-// TestBuildEnrollCommand pins the exact copy-pasteable command the
-// dashboard wizard and CLI surface to customers. It MUST be a runnable
-// `gibson component register` invocation against the shipped ADK CLI —
-// not `gibson-cli agent enroll` (wrong binary, and `agent enroll`
-// provisions a *new* identity and rejects these flags). See #590.
+// TestBuildEnrollCommand pins the exact copy-pasteable command the dashboard
+// wizard and CLI surface to customers. Under the unified-identity model
+// (ADR-0045) it MUST be the capability-grant `--token -` form of
+// `gibson component register` — the same command for every kind — not the
+// removed OAuth2 `--client-id/--client-secret` form (gibson#670). It is NOT
+// `gibson agent enroll`, which provisions a *new* identity. See #590.
 func TestBuildEnrollCommand(t *testing.T) {
 	tests := []struct {
-		name      string
-		gibsonURL string
-		clientID  string
-		want      string
+		name string
+		kind string
+		want string
 	}{
 		{
-			name:      "populated url",
-			gibsonURL: "https://api.zeroroot.ai",
-			clientID:  "1234567890123456",
-			want:      "gibson component register --client-id 1234567890123456 --client-secret - --gibson-url https://api.zeroroot.ai",
+			name: "agent",
+			kind: "agent",
+			want: "gibson component register --kind agent --token -",
 		},
 		{
-			name:      "empty url falls back to placeholder",
-			gibsonURL: "",
-			clientID:  "1234567890123456",
-			want:      "gibson component register --client-id 1234567890123456 --client-secret - --gibson-url <gibson-url>",
+			name: "tool",
+			kind: "tool",
+			want: "gibson component register --kind tool --token -",
+		},
+		{
+			name: "empty kind falls back to placeholder",
+			kind: "",
+			want: "gibson component register --kind <kind> --token -",
 		},
 	}
 	for _, tc := range tests {
 		t.Run(tc.name, func(t *testing.T) {
-			got := buildEnrollCommand(tc.gibsonURL, tc.clientID)
+			got := buildEnrollCommand(tc.kind)
 			if got != tc.want {
 				t.Errorf("buildEnrollCommand() =\n  %q\nwant\n  %q", got, tc.want)
 			}

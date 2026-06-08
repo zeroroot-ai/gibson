@@ -4,18 +4,26 @@
 //  1. Validate caller is not itself an agent/tool/plugin principal.
 //  2. Validate name regex and kind enum.
 //  3. Resolve tenant from context.
-//  4. CreateServiceAccount in IdP.
-//  5. MintClientSecret (rollback on failure: DeleteServiceAccount).
-//  6. Write FGA tuples (rollback on failure: DeleteServiceAccount).
+//  4. CreateServiceAccount in IdP (the canonical numeric sub the FGA principal
+//     and the capability-grant JWT key on).
+//  5. Write FGA tuples (rollback on failure: DeleteServiceAccount).
+//  6. Mint a one-time capability-grant bootstrap token (rollback on failure).
 //  7. Emit audit event.
-//  8. Return response including the one-time client_secret.
+//  8. Return response carrying the bootstrap token (+ enroll_command).
 //
-// There is no IdP project/role membership step. FGA tuples (step 6) are the
+// There is NO OAuth2 client_credentials step. Under the unified-identity model
+// (ADR-0045) every component kind — agent, tool, plugin — enrolls through the
+// one capability-grant handshake: the bootstrap token minted here is exchanged
+// by `gibson component register --token` for an Ed25519 host key, and the
+// component then signs a per-RPC CG-JWT. No Zitadel OAuth client is provisioned;
+// the service account exists only to anchor the canonical sub.
+//
+// There is no IdP project/role membership step. FGA tuples (step 5) are the
 // sole authority for a non-human principal's tenancy and permissions; the IdP
-// only authenticates the machine user. See gibson#605.
+// only anchors the machine user's identity. See gibson#605, gibson#670.
 //
-// Security: client_secret is returned once and NEVER appears in any log line,
-// audit event, error message, or trace span.
+// Security: the bootstrap token is returned once and NEVER appears in any log
+// line, audit event, error message, or trace span.
 package api
 
 import (
@@ -42,7 +50,7 @@ import (
 var nameRegex = regexp.MustCompile(`^[a-z][a-z0-9-]{2,40}$`)
 
 // CreateAgentIdentity provisions a new machine identity for an agent, tool, or plugin.
-// The returned client_secret is emitted exactly once and must be stored immediately.
+// The returned bootstrap token is emitted exactly once and must be stored immediately.
 func (s *DaemonServer) CreateAgentIdentity(ctx context.Context, req *tenantpb.CreateAgentIdentityRequest) (*tenantpb.CreateAgentIdentityResponse, error) {
 	// Step 1: Verify caller is not itself an agent/tool/plugin principal.
 	callerID, err := auth.IdentityFromContext(ctx)
@@ -96,22 +104,7 @@ func (s *DaemonServer) CreateAgentIdentity(ctx context.Context, req *tenantpb.Cr
 		return nil, status_grpc.Error(codes.Internal, "failed to create identity in identity provider")
 	}
 
-	// Step 5: Mint client secret (rollback on failure). clientID is the
-	// loginName-based OAuth client_id the agent authenticates with via the
-	// client_credentials grant — distinct from sa.AccountID (the user id,
-	// which the FGA principal and token `sub` use). See gibson#643.
-	clientID, clientSecret, err := s.idpAdminClient.MintClientSecret(ctx, sa.AccountID)
-	if err != nil {
-		s.rollbackServiceAccount(ctx, sa.AccountID, "MintClientSecret failed")
-		s.logger.ErrorContext(ctx, "CreateAgentIdentity: MintClientSecret failed",
-			slog.String("tenant_id", tenantID),
-			slog.String("account_id", sa.AccountID),
-			slog.String("error", err.Error()),
-		)
-		return nil, status_grpc.Error(codes.Internal, "failed to generate credentials")
-	}
-
-	// Step 6: Write FGA tuples (rollback on failure).
+	// Step 5: Write FGA tuples (rollback on failure).
 	//
 	// FGA is the sole authority for a non-human principal's tenancy and
 	// permissions: the `tenant:<id> belongs_to <kind>_principal:<sub>` tuple
@@ -179,7 +172,7 @@ func (s *DaemonServer) CreateAgentIdentity(ctx context.Context, req *tenantpb.Cr
 		}
 	}
 
-	// Step 7: Emit audit event (non-fatal — never include client_secret).
+	// Step 6: Emit audit event (non-fatal — never include the bootstrap token).
 	if s.tenantAdminAuditWriter != nil {
 		s.tenantAdminAuditWriter.Log(audit.Event{
 			TenantID:   tenantID,
@@ -192,54 +185,61 @@ func (s *DaemonServer) CreateAgentIdentity(ctx context.Context, req *tenantpb.Cr
 		})
 	}
 
-	// Step 8: Build and return response.
-	// The client_secret is included in the response exactly once.
-	// It MUST NOT be included in any log line below this point.
+	// Step 7: Mint the first-registration capability-grant bootstrap token
+	// (gibson#648 / ADR-0045) and build the response. The bootstrap token is the
+	// component's ONLY credential — it is exchanged by `gibson component register
+	// --token` for an Ed25519 host key. It MUST NOT appear in any log line below.
+	//
+	// The CG Minter is required: under the unified-identity model the bootstrap
+	// token is the sole enrollment credential for every kind, so a missing or
+	// failing minter is a fail-loud condition (rollback the service account
+	// rather than leak a credential-less principal).
+	kindStr := strings.TrimSuffix(fgaType, "_principal")
+	if s.cgMinter == nil {
+		s.rollbackServiceAccount(ctx, sa.AccountID, "CG minter not configured")
+		s.logger.ErrorContext(ctx, "CreateAgentIdentity: capability-grant minter not configured",
+			slog.String("tenant_id", tenantID),
+			slog.String("principal_id", principalID),
+		)
+		return nil, status_grpc.Error(codes.Unavailable,
+			"capability-grant minter not configured; cannot issue enrollment credential")
+	}
+	bootstrapToken, btErr := s.cgMinter.MintBootstrapToken(capabilitygrant.BootstrapClaims{
+		TenantID:    tenantID,
+		OwnerUserID: callerID.Subject,
+		PrincipalID: principalID,
+		Kind:        kindStr,
+		Name:        req.Name,
+	}, 0)
+	if btErr != nil {
+		s.rollbackServiceAccount(ctx, sa.AccountID, "MintBootstrapToken failed")
+		s.logger.ErrorContext(ctx, "CreateAgentIdentity: bootstrap token mint failed",
+			slog.String("tenant_id", tenantID),
+			slog.String("principal_id", principalID),
+			slog.String("error", btErr.Error()),
+		)
+		return nil, status_grpc.Error(codes.Internal, "failed to generate enrollment credential")
+	}
+
 	s.logger.InfoContext(ctx, "agent identity created",
 		slog.String("tenant_id", tenantID),
 		slog.String("principal_id", principalID),
 		slog.String("kind", req.Kind.String()),
 		slog.String("name", req.Name),
 		slog.String("actor", callerID.Subject),
-		// client_secret intentionally omitted
+		// bootstrap token intentionally omitted
 	)
 
 	gibsonURL := s.gibsonPublicURL
-	enrollCmd := buildEnrollCommand(gibsonURL, clientID)
-
-	// Mint a first-registration Capability-Grant bootstrap token (gibson#648 /
-	// ADR-0045): the daemon-signed credential the component presents to the CG
-	// register endpoint to complete its first host registration. Best-effort —
-	// if the CG Minter is not wired the field is omitted and the component uses
-	// the legacy enroll path until the CLI migrates (adk#124). NEVER logged.
-	var bootstrapToken string
-	if s.cgMinter != nil {
-		bt, btErr := s.cgMinter.MintBootstrapToken(capabilitygrant.BootstrapClaims{
-			TenantID:    tenantID,
-			OwnerUserID: callerID.Subject,
-			PrincipalID: principalID,
-			Kind:        strings.TrimSuffix(fgaType, "_principal"),
-			Name:        req.Name,
-		}, 0)
-		if btErr != nil {
-			s.logger.WarnContext(ctx, "CreateAgentIdentity: bootstrap token mint failed (non-fatal)",
-				slog.String("tenant_id", tenantID),
-				slog.String("error", btErr.Error()),
-			)
-		} else {
-			bootstrapToken = bt
-		}
-	}
+	enrollCmd := buildEnrollCommand(kindStr)
 
 	return &tenantpb.CreateAgentIdentityResponse{
 		PrincipalId:    principalID,
 		Kind:           req.Kind,
 		Name:           req.Name,
-		ClientId:       clientID,     // loginName-based OAuth client_id (gibson#643)
-		ClientSecret:   clientSecret, // emitted once; caller must store immediately
 		GibsonUrl:      gibsonURL,
 		EnrollCommand:  enrollCmd,
-		BootstrapToken: bootstrapToken, // first-registration CG credential (gibson#648)
+		BootstrapToken: bootstrapToken, // sole enrollment credential (ADR-0045, gibson#670)
 	}, nil
 }
 
@@ -311,21 +311,18 @@ func isNonHumanPrincipal(subject string) bool {
 }
 
 // buildEnrollCommand returns a complete copy-pasteable shell invocation for
-// registering the agent install with the daemon.
+// registering the component install with the daemon.
 //
-// The verb is `gibson component register` — the ADK CLI command that
-// *consumes* already-issued credentials and writes the local credentials
-// file. It is deliberately NOT `gibson agent enroll`: that command
-// *provisions a new* identity (it calls CreateAgentIdentity again) and
-// does not accept --client-id/--client-secret/--gibson-url. The binary is
-// `gibson`, not `gibson-cli`. `--client-secret -` reads the secret from
-// stdin so it never lands in shell history.
-func buildEnrollCommand(gibsonURL, clientID string) string {
-	if gibsonURL == "" {
-		gibsonURL = "<gibson-url>"
+// The verb is `gibson component register` — the ADK CLI command that *consumes*
+// an already-issued bootstrap token and runs the capability-grant handshake
+// (ADR-0045), writing the local host key + runtime credential. It is
+// deliberately NOT `gibson agent enroll`: that command *provisions a new*
+// identity (it calls CreateAgentIdentity again). `--token -` reads the
+// bootstrap token from stdin so it never lands in shell history. The same
+// command serves every kind; only --kind differs.
+func buildEnrollCommand(kind string) string {
+	if kind == "" {
+		kind = "<kind>"
 	}
-	return fmt.Sprintf(
-		"gibson component register --client-id %s --client-secret - --gibson-url %s",
-		clientID, gibsonURL,
-	)
+	return fmt.Sprintf("gibson component register --kind %s --token -", kind)
 }
