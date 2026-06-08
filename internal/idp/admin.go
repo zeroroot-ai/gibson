@@ -68,6 +68,19 @@ type AdminClient interface {
 	// zero counts, not an error.
 	RevokeUserSessions(ctx context.Context, userID string) (RevokeUserSessionsResult, error)
 
+	// ListUserSessions returns the user's active IdP login sessions with the
+	// metadata the IdP records (source IP, client/browser description, created
+	// and last-active timestamps). Used by self-service session management
+	// (UserService.ListMySessions). A user with no active sessions returns an
+	// empty slice, not an error. Fields the IdP omits are left zero.
+	ListUserSessions(ctx context.Context, userID string) ([]SessionInfo, error)
+
+	// RevokeSession terminates a single IdP session by id, invalidating the
+	// refresh tokens bound to it. Idempotent: terminating an already-gone
+	// session is not an error. Callers are responsible for confirming the
+	// session belongs to the acting principal before calling.
+	RevokeSession(ctx context.Context, sessionID string) error
+
 	// Close releases any resources held by the client (HTTP connections, etc.).
 	Close() error
 }

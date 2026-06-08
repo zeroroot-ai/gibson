@@ -527,6 +527,90 @@ func (c *Client) RevokeUserSessions(ctx context.Context, userID string) (idp.Rev
 	}, nil
 }
 
+// sessionSearchResult is the subset of the Zitadel Session v2
+// POST /v2/sessions/search response this package consumes. The full response
+// carries factors, sequence, and metadata we do not need. userAgent is
+// populated by the Login UI at session creation; for device-grant CLI logins
+// that is the approving browser.
+//
+// NOTE (matches the RevokeUserSessions note above): the exact Session v2
+// response shape must be confirmed against the deployed Zitadel version in the
+// deploy auth-e2e smoke; the daemon has no live Zitadel in unit tests. Any
+// field the IdP omits is left zero rather than failing the listing.
+type sessionSearchResult struct {
+	Sessions []struct {
+		ID           string `json:"id"`
+		CreationDate string `json:"creationDate"`
+		ChangeDate   string `json:"changeDate"`
+		UserAgent    struct {
+			IP          string `json:"ip"`
+			Description string `json:"description"`
+		} `json:"userAgent"`
+	} `json:"sessions"`
+}
+
+// parseTime parses an RFC3339 timestamp, returning the zero time on empty or
+// unparseable input (a missing timestamp must not fail the listing).
+func parseTime(s string) time.Time {
+	if s == "" {
+		return time.Time{}
+	}
+	t, err := time.Parse(time.RFC3339Nano, s)
+	if err != nil {
+		return time.Time{}
+	}
+	return t
+}
+
+// ListUserSessions returns the user's active Zitadel sessions with the metadata
+// the IdP records. Maps to POST /v2/sessions/search filtered by user id.
+func (c *Client) ListUserSessions(ctx context.Context, userID string) ([]idp.SessionInfo, error) {
+	if userID == "" {
+		return nil, fmt.Errorf("%w: ListUserSessions requires userID", idp.ErrUpstream)
+	}
+	searchBody := map[string]interface{}{
+		"queries": []map[string]interface{}{
+			{"userIdQuery": map[string]interface{}{"id": userID}},
+		},
+	}
+	var resp sessionSearchResult
+	if err := c.doRequest(ctx, http.MethodPost, "/v2/sessions/search", searchBody, "", &resp); err != nil {
+		return nil, mapError(err, "ListUserSessions:search")
+	}
+
+	out := make([]idp.SessionInfo, 0, len(resp.Sessions))
+	for _, s := range resp.Sessions {
+		if s.ID == "" {
+			continue
+		}
+		out = append(out, idp.SessionInfo{
+			ID:           s.ID,
+			IP:           s.UserAgent.IP,
+			Browser:      s.UserAgent.Description,
+			CreatedAt:    parseTime(s.CreationDate),
+			LastActiveAt: parseTime(s.ChangeDate),
+		})
+	}
+	return out, nil
+}
+
+// RevokeSession terminates a single Zitadel session by id. A 404 is treated as
+// success (the session already expired). Maps to DELETE /v2/sessions/{id}.
+func (c *Client) RevokeSession(ctx context.Context, sessionID string) error {
+	if sessionID == "" {
+		return fmt.Errorf("%w: RevokeSession requires sessionID", idp.ErrUpstream)
+	}
+	path := "/v2/sessions/" + url.PathEscape(sessionID)
+	if err := c.doRequest(ctx, http.MethodDelete, path, nil, "", nil); err != nil {
+		mapped := mapError(err, "RevokeSession:delete")
+		if errors.Is(mapped, idp.ErrNotFound) {
+			return nil
+		}
+		return mapped
+	}
+	return nil
+}
+
 // ---------------------------------------------------------------------------
 // HTTP helpers
 // ---------------------------------------------------------------------------

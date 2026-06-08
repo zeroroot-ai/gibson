@@ -93,6 +93,22 @@ type RevokeUserSessionsResult struct {
 	GrantsRevoked int
 }
 
+// SessionInfo describes one active login session of a user, as reported by the
+// IdP. Fields the IdP does not populate are left zero (empty string / zero
+// time); a missing optional field must never fail the whole listing.
+type SessionInfo struct {
+	// ID is the IdP's session id — the handle RevokeSession takes.
+	ID string
+	// IP is the source IP recorded at session creation, if any.
+	IP string
+	// Browser is a human-readable client description (browser / OS / device).
+	Browser string
+	// CreatedAt is when the session was established.
+	CreatedAt time.Time
+	// LastActiveAt is when the session was last seen active, if reported.
+	LastActiveAt time.Time
+}
+
 // TenantMembershipRequest carries parameters for adding or removing a human
 // user's membership of the IdP organization that bounds a tenant.
 type TenantMembershipRequest struct {

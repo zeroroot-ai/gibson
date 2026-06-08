@@ -73,7 +73,11 @@ func (s *stubIDP) EnsureHumanUser(_ context.Context, _ idp.EnsureHumanUserReques
 func (s *stubIDP) RevokeUserSessions(_ context.Context, _ string) (idp.RevokeUserSessionsResult, error) {
 	return idp.RevokeUserSessionsResult{}, nil
 }
-func (s *stubIDP) Close() error { return nil }
+func (s *stubIDP) ListUserSessions(_ context.Context, _ string) ([]idp.SessionInfo, error) {
+	return nil, nil
+}
+func (s *stubIDP) RevokeSession(_ context.Context, _ string) error { return nil }
+func (s *stubIDP) Close() error                                    { return nil }
 
 func adapterTestCtx(t *testing.T) (context.Context, auth.TenantID) {
 	t.Helper()

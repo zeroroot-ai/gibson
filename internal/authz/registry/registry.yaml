@@ -1283,6 +1283,18 @@ entries:
     object_deriver: "tenant_and_field('PluginName')"
     allowed_identities:
       - COMPONENT
+  "/gibson.session.v1.SessionService/ListMySessions":
+    relation: "member"
+    object_type: "tenant"
+    object_deriver: "tenant_from_identity"
+    allowed_identities:
+      - USER
+  "/gibson.session.v1.SessionService/RevokeMySession":
+    relation: "member"
+    object_type: "tenant"
+    object_deriver: "tenant_from_identity"
+    allowed_identities:
+      - USER
   "/gibson.tenant.v1.AgentIdentityService/CreateAgentIdentity":
     relation: "writer"
     object_type: "tenant"
