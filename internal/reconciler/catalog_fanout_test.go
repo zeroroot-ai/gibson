@@ -45,6 +45,8 @@ func TestCatalogFanoutTick_WritesMissingTuplesForOneTenantOneItem(t *testing.T) 
 	r.tick(context.Background())
 
 	want := []authz.Tuple{
+		// ADR-0046 option-B baseline: every tenant gets the system backplane.
+		{User: "tenant:t1", Relation: "tenant_enabled", Object: "component:_system"},
 		{User: "tenant:t1", Relation: "tenant_enabled", Object: "component:plugin/a"},
 	}
 	if !reflect.DeepEqual(sortTuples(az.writes), sortTuples(want)) {

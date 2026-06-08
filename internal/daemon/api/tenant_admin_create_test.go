@@ -251,6 +251,26 @@ func TestCreateAgentIdentity_FGAOnlyNoMembership(t *testing.T) {
 			if !foundMember {
 				t.Errorf("expected member tuple %+v in writes %+v", wantMember, az.writtenTuples())
 			}
+			// ADR-0046: an agent (client/invoker) is granted direct_execute on
+			// the synthetic system backplane (component:_system) so its client
+			// RPCs authorize; tools/plugins (invoked) are NOT granted it.
+			wantSysExec := authz.Tuple{
+				User:     tc.fgaType + ":sa-test-id",
+				Relation: "direct_execute",
+				Object:   "component:_system",
+			}
+			var foundSysExec bool
+			for _, tup := range az.writtenTuples() {
+				if tup == wantSysExec {
+					foundSysExec = true
+					break
+				}
+			}
+			wantPresent := tc.fgaType == "agent_principal"
+			if foundSysExec != wantPresent {
+				t.Errorf("direct_execute component:_system for %s: got present=%v, want %v (writes %+v)",
+					tc.fgaType, foundSysExec, wantPresent, az.writtenTuples())
+			}
 		})
 	}
 }

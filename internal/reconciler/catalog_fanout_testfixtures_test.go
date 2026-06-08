@@ -142,8 +142,9 @@ func TestCatalogFanoutTick_IdempotentWhenTenantAlreadyEnabled(t *testing.T) {
 
 	az.setListObjects("system_tenant:_system", "platform_enabled", "component", []string{"component:plugin/a"})
 	az.setListUsers("tenant", "system_tenant:_system", "parent", []string{"t1"})
-	// Tenant t1 already holds the tuple — reconciler should write nothing.
-	az.setListObjects("tenant:t1", "tenant_enabled", "component", []string{"component:plugin/a"})
+	// Tenant t1 already holds the catalog tuple AND the ADR-0046 _system
+	// baseline — reconciler should write nothing.
+	az.setListObjects("tenant:t1", "tenant_enabled", "component", []string{"component:plugin/a", "component:_system"})
 
 	r := NewCatalogFanout(CatalogFanoutConfig{Authorizer: az})
 	r.tick(context.Background())
@@ -153,21 +154,44 @@ func TestCatalogFanoutTick_IdempotentWhenTenantAlreadyEnabled(t *testing.T) {
 	}
 }
 
-// TestCatalogFanoutTick_EmptyCatalogShortCircuits asserts that when the
-// platform catalog is empty (no platform_enabled components), tick returns
-// without calling ListUsers or Write at all.
-func TestCatalogFanoutTick_EmptyCatalogShortCircuits(t *testing.T) {
+// TestCatalogFanoutTick_EmptyCatalogStillSeedsSystemBaseline asserts the
+// ADR-0046 option-B fix: even with an EMPTY platform catalog, every tenant is
+// seeded the `component:_system` baseline so the client backplane is
+// executable. (Before ADR-0046 an empty catalog short-circuited to zero
+// writes, leaving component:_system structurally un-authorizable.)
+func TestCatalogFanoutTick_EmptyCatalogStillSeedsSystemBaseline(t *testing.T) {
 	store := tfxfga.NewFakeStore()
 	az := newFGAStoreAuthorizer(store)
 
-	// Empty catalog — no platform_enabled components.
+	// Empty catalog, but one tenant exists with nothing enabled yet.
 	az.setListObjects("system_tenant:_system", "platform_enabled", "component", nil)
+	az.setListUsers("tenant", "system_tenant:_system", "parent", []string{"t1"})
+	az.setListObjects("tenant:t1", "tenant_enabled", "component", nil)
+
+	r := NewCatalogFanout(CatalogFanoutConfig{Authorizer: az})
+	r.tick(context.Background())
+
+	want := authz.Tuple{User: "tenant:t1", Relation: "tenant_enabled", Object: "component:_system"}
+	if len(az.written) != 1 || az.written[0] != want {
+		t.Errorf("expected exactly the _system baseline on empty catalog; got %d: %v", len(az.written), az.written)
+	}
+}
+
+// TestCatalogFanoutTick_NoTenantsShortCircuits asserts the reconciler still
+// exits cleanly (no writes) when there are no tenants under the system tenant,
+// regardless of catalog contents.
+func TestCatalogFanoutTick_NoTenantsShortCircuits(t *testing.T) {
+	store := tfxfga.NewFakeStore()
+	az := newFGAStoreAuthorizer(store)
+
+	az.setListObjects("system_tenant:_system", "platform_enabled", "component", []string{"component:plugin/a"})
+	// No tenants registered under the system tenant.
 
 	r := NewCatalogFanout(CatalogFanoutConfig{Authorizer: az})
 	r.tick(context.Background())
 
 	if len(az.written) != 0 {
-		t.Errorf("expected zero writes on empty catalog; got %d: %v", len(az.written), az.written)
+		t.Errorf("expected zero writes when no tenants exist; got %d: %v", len(az.written), az.written)
 	}
 }
 
@@ -180,9 +204,10 @@ func TestCatalogFanoutTick_MultiTenantFanout(t *testing.T) {
 
 	az.setListObjects("system_tenant:_system", "platform_enabled", "component", []string{"component:plugin/a"})
 	az.setListUsers("tenant", "system_tenant:_system", "parent", []string{"t1", "t2"})
-	// t1 already enabled; t2 is missing the tuple.
-	az.setListObjects("tenant:t1", "tenant_enabled", "component", []string{"component:plugin/a"})
-	az.setListObjects("tenant:t2", "tenant_enabled", "component", nil)
+	// Both tenants already hold the _system baseline; t1 already enabled the
+	// catalog item, t2 is missing it — so only t2's catalog tuple is written.
+	az.setListObjects("tenant:t1", "tenant_enabled", "component", []string{"component:plugin/a", "component:_system"})
+	az.setListObjects("tenant:t2", "tenant_enabled", "component", []string{"component:_system"})
 
 	r := NewCatalogFanout(CatalogFanoutConfig{Authorizer: az})
 	r.tick(context.Background())

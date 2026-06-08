@@ -147,6 +147,23 @@ func (s *DaemonServer) CreateAgentIdentity(ctx context.Context, req *tenantpb.Cr
 			},
 		}
 
+		// ADR-0046: an agent is a client/invoker — grant it execute on the
+		// synthetic system backplane (component:_system) so its CG-JWT
+		// authorizes the COMPONENT-identity client RPCs (RunMission, CallTool,
+		// the mission-management surface) via ext-authz's per-method FGA check.
+		// The universal `tenant_enabled component:_system` baseline (the catalog
+		// fan-out reconciler) satisfies in_tenant_catalog; THIS per-agent
+		// direct_execute grant is the real gate. Tools/plugins are invoked, not
+		// clients, and do NOT receive it; the kind->grant policy is generalized
+		// in gibson#661 (and tool grants need the model symmetry of gibson#659).
+		if fgaType == "agent_principal" {
+			tuples = append(tuples, authz.Tuple{
+				User:     principalID,
+				Relation: "direct_execute",
+				Object:   "component:_system",
+			})
+		}
+
 		// Optional component grants.
 		for _, cg := range req.ComponentGrants {
 			tuples = append(tuples, authz.Tuple{
