@@ -66,7 +66,10 @@ type PluginInstall struct {
 	ID string
 	// TenantID is the tenant that owns this install.
 	TenantID auth.TenantID
-	// Name is the plugin name from the manifest metadata.name field.
+	// Kind is the component kind: agent | tool | plugin (gibson#662). Empty is
+	// treated as "plugin" for back-compat.
+	Kind string
+	// Name is the component name from the manifest metadata.name field.
 	Name string
 	// Version is the semver version from the manifest.
 	Version string
@@ -229,13 +232,21 @@ func (r *postgresPluginRegistry) Register(ctx context.Context, install *PluginIn
 		return fmt.Errorf("plugin registry register: marshal declared_methods: %w", err)
 	}
 
+	// gibson#662: one install registry for every component kind. `kind`
+	// discriminates agent/tool/plugin; uniqueness is per (tenant, kind, name,
+	// host). Default to plugin when unset for back-compat with existing callers.
+	kind := install.Kind
+	if kind == "" {
+		kind = "plugin"
+	}
+
 	const upsertSQL = `
-INSERT INTO plugin_install (
-    id, tenant_id, plugin_name, version, manifest_hash,
+INSERT INTO component_install (
+    id, tenant_id, kind, component_name, version, manifest_hash,
     declared_methods, proto_descriptor_set, host_id,
     runtime_mode, setec_required, created_at, created_by
-) VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,now(),$11)
-ON CONFLICT (tenant_id, plugin_name, host_id)
+) VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,now(),$12)
+ON CONFLICT (tenant_id, kind, component_name, host_id)
 DO UPDATE SET
     id                   = EXCLUDED.id,
     version              = EXCLUDED.version,
@@ -250,6 +261,7 @@ RETURNING id`
 	err = r.db.QueryRowContext(ctx, upsertSQL,
 		install.ID,
 		install.TenantID.String(),
+		kind,
 		install.Name,
 		install.Version,
 		install.ManifestHash,
@@ -261,7 +273,7 @@ RETURNING id`
 		install.HostID, // created_by = host_id
 	).Scan(&assignedID)
 	if err != nil {
-		return fmt.Errorf("plugin registry register: upsert plugin_install: %w", err)
+		return fmt.Errorf("component registry register: upsert component_install: %w", err)
 	}
 	install.ID = assignedID
 
@@ -446,10 +458,10 @@ func (r *postgresPluginRegistry) Status(ctx context.Context, tenant auth.TenantI
 // not populated (the caller enriches it from Redis).
 func (r *postgresPluginRegistry) queryInstalls(ctx context.Context, tenant auth.TenantID, name string) ([]InstallInfo, error) {
 	const q = `
-SELECT id, tenant_id, plugin_name, version, declared_methods
-FROM   plugin_install
-WHERE  tenant_id   = $1
-AND    plugin_name = $2
+SELECT id, tenant_id, component_name, version, declared_methods
+FROM   component_install
+WHERE  tenant_id      = $1
+AND    component_name = $2
 ORDER BY created_at`
 
 	rows, err := r.db.QueryContext(ctx, q, tenant.String(), name)

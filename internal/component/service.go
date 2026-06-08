@@ -603,15 +603,16 @@ func (s *ComponentServiceServer) RegisterComponent(
 	//
 	// Best-effort: a failed pluginRegistry call is logged but never fails the RPC —
 	// the component is already in the Redis registry and will heartbeat normally.
-	if req.Kind == "plugin" && s.pluginRegistry != nil {
+	if s.pluginRegistry != nil {
 		tenantID, tenantParseErr := auth.NewTenantID(tenant)
 		if tenantParseErr != nil {
-			s.logger.WarnContext(ctx, "register component: invalid tenant for plugin registry forwarding; skipping",
+			s.logger.WarnContext(ctx, "register component: invalid tenant for component install registry forwarding; skipping",
 				slog.String("tenant", tenant), slog.String("error", tenantParseErr.Error()))
 		} else {
 			install := &PluginInstall{
 				ID:                 instanceID,
 				TenantID:           tenantID,
+				Kind:               req.Kind,
 				Name:               req.Name,
 				Version:            req.Version,
 				ManifestHash:       req.Metadata["plugin:manifest_hash"],
@@ -635,10 +636,11 @@ func (s *ComponentServiceServer) RegisterComponent(
 		}
 	}
 
-	// Auto-create access record for self-hosted plugins so they appear in tenant's inventory.
-	if req.Kind == "plugin" && tenant != "_system" && s.pluginAccess != nil {
+	// Auto-create access record for any self-hosted component (agent/tool/plugin)
+	// so it appears in the tenant's inventory (gibson#662 — kind-agnostic).
+	if tenant != "_system" && s.pluginAccess != nil {
 		if err := s.pluginAccess.EnableSelfHosted(ctx, tenant, req.Name); err != nil {
-			s.logger.WarnContext(ctx, "register component: failed to auto-create plugin access record",
+			s.logger.WarnContext(ctx, "register component: failed to auto-create component access record",
 				slog.String("tenant", tenant),
 				slog.String("plugin", req.Name),
 				slog.String("error", err.Error()),
@@ -647,10 +649,10 @@ func (s *ComponentServiceServer) RegisterComponent(
 		}
 	}
 
-	// Store plugin config schema if declared.
-	if req.Kind == "plugin" && req.ConfigSchemaJson != "" && s.pluginAccess != nil {
+	// Store component config schema if declared (any kind — gibson#662).
+	if req.ConfigSchemaJson != "" && s.pluginAccess != nil {
 		if err := s.pluginAccess.StoreConfigSchema(ctx, req.Name, req.ConfigSchemaJson); err != nil {
-			s.logger.WarnContext(ctx, "register component: failed to store plugin config schema",
+			s.logger.WarnContext(ctx, "register component: failed to store component config schema",
 				slog.String("plugin", req.Name),
 				slog.String("error", err.Error()),
 			)
