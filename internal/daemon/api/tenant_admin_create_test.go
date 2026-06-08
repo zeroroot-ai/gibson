@@ -68,6 +68,13 @@ type fakeIDPClient struct {
 	revokedUsers []string
 	revokeResult idp.RevokeUserSessionsResult
 	revokeErr    error
+
+	// Session self-service recording (PRD dashboard#738). sessionsByUser maps a
+	// user id to the sessions ListUserSessions returns; revokedSessionIDs
+	// records single-session revocations.
+	sessionsByUser    map[string][]idp.SessionInfo
+	listSessionsErr   error
+	revokedSessionIDs []string
 }
 
 func (f *fakeIDPClient) CreateServiceAccount(ctx context.Context, req idp.CreateServiceAccountRequest) (*idp.ServiceAccount, error) {
@@ -112,6 +119,16 @@ func (f *fakeIDPClient) RevokeUserSessions(_ context.Context, userID string) (id
 		return idp.RevokeUserSessionsResult{}, f.revokeErr
 	}
 	return f.revokeResult, nil
+}
+func (f *fakeIDPClient) ListUserSessions(_ context.Context, userID string) ([]idp.SessionInfo, error) {
+	if f.listSessionsErr != nil {
+		return nil, f.listSessionsErr
+	}
+	return f.sessionsByUser[userID], nil
+}
+func (f *fakeIDPClient) RevokeSession(_ context.Context, sessionID string) error {
+	f.revokedSessionIDs = append(f.revokedSessionIDs, sessionID)
+	return nil
 }
 func (f *fakeIDPClient) EnsureHumanUser(_ context.Context, _ idp.EnsureHumanUserRequest) (string, error) {
 	return "user-1", nil

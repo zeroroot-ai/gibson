@@ -1,0 +1,91 @@
+syntax = "proto3";
+
+package gibson.session.v1;
+
+option go_package = "github.com/zeroroot-ai/gibson/internal/daemon/api/gibson/session/v1;sessionv1";
+
+import "gibson/auth/v1/options.proto";
+import "google/protobuf/timestamp.proto";
+
+// SessionService is the daemon-mediated, self-service view of a user's own
+// login sessions (browser / CLI logins) held by the identity provider. It
+// backs the dashboard's Settings → CLI "active sessions" surface
+// (PRD dashboard#738).
+//
+// STRICTLY self: every RPC acts on the authenticated caller's own sessions
+// only — there is no user-id parameter and no admin path. Seeing or revoking
+// another user's sessions is intentionally not expressible here. The blunt
+// "log me out everywhere" operation lives on the OSS
+// gibson.tenant.v1.UserService.RevokeUserSessions (the `gibson logout` path);
+// this service is the per-session, dashboard-facing complement.
+//
+// The daemon does not receive the caller's own session id (ext-authz forwards
+// subject/issuer/credential-type only), so no "current session" flag is
+// carried — the dashboard marks "this device" by comparing ids against the
+// session it holds.
+service SessionService {
+  // ListMySessions returns the caller's active login sessions with the
+  // metadata the identity provider records. USER identities only — a machine
+  // principal has no human login sessions.
+  rpc ListMySessions(ListMySessionsRequest) returns (ListMySessionsResponse) {
+    option (gibson.auth.v1.authz) = {
+      relation: "member",
+      object_type: "tenant",
+      object_deriver: "tenant_from_identity",
+      allowed_identities: 1  // USER
+    };
+  }
+
+  // RevokeMySession terminates one of the caller's own sessions by id. The
+  // handler confirms the session belongs to the caller before deleting it;
+  // a session id that is not the caller's returns NOT_FOUND. Terminating a
+  // session also invalidates the refresh tokens bound to it.
+  rpc RevokeMySession(RevokeMySessionRequest) returns (RevokeMySessionResponse) {
+    option (gibson.auth.v1.authz) = {
+      relation: "member",
+      object_type: "tenant",
+      object_deriver: "tenant_from_identity",
+      allowed_identities: 1  // USER
+    };
+  }
+}
+
+// ListMySessionsRequest has no fields: the target is always the authenticated
+// caller.
+message ListMySessionsRequest {}
+
+// UserSession describes one active login session of the caller. Fields the
+// identity provider does not populate are left zero (empty string / unset
+// timestamp); a missing optional field never fails the listing.
+message UserSession {
+  // id is the identity provider's session id (the handle RevokeMySession takes).
+  string id = 1;
+
+  // ip is the source IP the session was created from, when recorded.
+  string ip = 2;
+
+  // browser is a human-readable client description (browser / OS / device).
+  string browser = 3;
+
+  // created_at is when the session was established.
+  google.protobuf.Timestamp created_at = 4;
+
+  // last_active_at is when the session was last seen active, when reported.
+  google.protobuf.Timestamp last_active_at = 5;
+}
+
+// ListMySessionsResponse carries the caller's active sessions.
+message ListMySessionsResponse {
+  repeated UserSession sessions = 1;
+}
+
+// RevokeMySessionRequest terminates one of the caller's own sessions.
+message RevokeMySessionRequest {
+  // session_id is the id of a session returned by ListMySessions. Must belong
+  // to the calling user.
+  string session_id = 1;
+}
+
+// RevokeMySessionResponse is empty: success is the absence of an error
+// (NOT_FOUND if the session is unknown or not the caller's).
+message RevokeMySessionResponse {}

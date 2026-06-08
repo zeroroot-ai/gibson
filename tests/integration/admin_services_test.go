@@ -262,6 +262,10 @@ func (f *fakeUserIdPClient) RemoveTenantMember(_ context.Context, _ idp.TenantMe
 func (f *fakeUserIdPClient) RevokeUserSessions(_ context.Context, _ string) (idp.RevokeUserSessionsResult, error) {
 	return idp.RevokeUserSessionsResult{}, nil
 }
+func (f *fakeUserIdPClient) ListUserSessions(_ context.Context, _ string) ([]idp.SessionInfo, error) {
+	return nil, nil
+}
+func (f *fakeUserIdPClient) RevokeSession(_ context.Context, _ string) error { return nil }
 func (f *fakeUserIdPClient) EnsureHumanUser(_ context.Context, _ idp.EnsureHumanUserRequest) (string, error) {
 	return "user-1", nil
 }

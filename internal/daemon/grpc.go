@@ -29,6 +29,7 @@ import (
 	"github.com/zeroroot-ai/gibson/internal/component"
 	"github.com/zeroroot-ai/gibson/internal/daemon/api"
 	billingpb "github.com/zeroroot-ai/gibson/internal/daemon/api/gibson/billing/v1"
+	sessionpb "github.com/zeroroot-ai/gibson/internal/daemon/api/gibson/session/v1"
 	tracespb "github.com/zeroroot-ai/gibson/internal/daemon/api/gibson/traces/v1"
 	"github.com/zeroroot-ai/gibson/internal/idempotency"
 	"github.com/zeroroot-ai/gibson/internal/identity"
@@ -1209,6 +1210,13 @@ func (d *daemonImpl) buildGRPCServer(ctx context.Context) (*grpcSubsystem, error
 	)
 	tracespb.RegisterTracesServiceServer(srv, tracesSvc)
 	d.logger.Info(ctx, "registered TracesService gRPC endpoint")
+
+	// Register gibson.session.v1.SessionService — the self-service view of a
+	// user's own login sessions, backing the dashboard's Settings → CLI
+	// surface (PRD dashboard#738). Implemented on daemonSvc, which holds the
+	// IdP admin client used to list/revoke sessions.
+	sessionpb.RegisterSessionServiceServer(srv, daemonSvc)
+	d.logger.Info(ctx, "registered SessionService gRPC endpoint")
 
 	// Register gibson.billing.v1.BillingService — the daemon-mediated billing
 	// gateway replacing the dashboard's direct pg.Pool usage in the Stripe

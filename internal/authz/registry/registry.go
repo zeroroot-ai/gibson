@@ -9,10 +9,10 @@ package registry
 type IdentityClass uint8
 
 const (
-	IdentityUser              IdentityClass = 1
-	IdentityService           IdentityClass = 2
-	IdentityComponent         IdentityClass = 4
-	IdentityPlatformOperator  IdentityClass = 8
+	IdentityUser             IdentityClass = 1
+	IdentityService          IdentityClass = 2
+	IdentityComponent        IdentityClass = 4
+	IdentityPlatformOperator IdentityClass = 8
 )
 
 // Has reports whether c contains every bit set in want.
@@ -2050,6 +2050,26 @@ var Registry = map[string]Entry{
 		ObjectType:        "plugin",
 		ObjectDeriver:     "tenant_and_field('PluginName')",
 		AllowedIdentities: IdentityComponent,
+		Unauthenticated:   false,
+		Self:              false,
+	},
+	"/gibson.session.v1.SessionService/ListMySessions": {
+		Method:            "/gibson.session.v1.SessionService/ListMySessions",
+		Service:           "gibson.session.v1.SessionService",
+		Relation:          "member",
+		ObjectType:        "tenant",
+		ObjectDeriver:     "tenant_from_identity",
+		AllowedIdentities: IdentityUser,
+		Unauthenticated:   false,
+		Self:              false,
+	},
+	"/gibson.session.v1.SessionService/RevokeMySession": {
+		Method:            "/gibson.session.v1.SessionService/RevokeMySession",
+		Service:           "gibson.session.v1.SessionService",
+		Relation:          "member",
+		ObjectType:        "tenant",
+		ObjectDeriver:     "tenant_from_identity",
+		AllowedIdentities: IdentityUser,
 		Unauthenticated:   false,
 		Self:              false,
 	},

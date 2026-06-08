@@ -20,6 +20,7 @@ import (
 	"github.com/zeroroot-ai/gibson/internal/authz"
 	"github.com/zeroroot-ai/gibson/internal/budget"
 	"github.com/zeroroot-ai/gibson/internal/capabilitygrant"
+	sessionv1 "github.com/zeroroot-ai/gibson/internal/daemon/api/gibson/session/v1"
 	"github.com/zeroroot-ai/gibson/internal/datapool"
 	"github.com/zeroroot-ai/gibson/internal/finding"
 	"github.com/zeroroot-ai/gibson/internal/idp"
@@ -65,6 +66,7 @@ type DaemonServer struct {
 	tenantv1.UnimplementedBudgetServiceServer
 	tenantv1.UnimplementedUsageServiceServer
 	tenantv1.UnimplementedUserServiceServer
+	sessionv1.UnimplementedSessionServiceServer
 	daemonoperatorv1.UnimplementedDaemonOperatorServiceServer
 
 	// daemon is the daemon instance this server exposes
