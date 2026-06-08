@@ -397,7 +397,10 @@ func (s *PluginsAdminServer) RegisterPlugin(ctx context.Context, req *tenantv1.R
 			continue
 		}
 		tuples = append(tuples, authz.Tuple{
-			User:     "user:" + principalID, // plugin_principal subject
+			// principalID is the unified `plugin_principal:<id>` subject — the only
+			// type `secret can_resolve` accepts (model.fga), and the subject the
+			// plugin's runtime CG-JWT carries.
+			User:     principalID,
 			Relation: "can_resolve",
 			Object:   fmt.Sprintf("secret:tenant-%s:%s", tenant, ref),
 		})

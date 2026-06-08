@@ -1045,20 +1045,22 @@ func (d *daemonImpl) buildGRPCServer(ctx context.Context) (*grpcSubsystem, error
 		// Dependencies:
 		//   Registry       — componentInstallRegistryReaderAdapter wraps platformDB (read-only SQL).
 		//   ManifestValidator — pluginManifestValidator parses the plugin YAML schema.
-		//   ZitadelClient  — idpPluginPrincipalAdapter wraps idpClient (CreateServiceAccount + MintClientSecret).
+		//   ZitadelClient  — idpPluginPrincipalAdapter wraps idpClient + cgMinter (CreateServiceAccount + CG bootstrap token; ADR-0045).
 		//   SecretWriter   — secretWriterAdapter wraps secretsService (tenant injected into ctx).
 		//   Authorizer     — d.authorizer (FGA; reused from the MembershipService block above).
 		//   BootstrapAuditor — d.brokerAuditWriter (*secrets.AuditWriter satisfies the interface).
 		//
-		// When the IdP client or secrets stack is absent we register an Unavailable stub
-		// consistent with the other tenant services above.
-		pluginAdminStackOK := secretsStackOK && idpClient != nil && d.brokerAuditWriter != nil
+		// When the IdP client, secrets stack, or CG minter is absent we register an
+		// Unavailable stub consistent with the other tenant services above. The CG
+		// minter is required: the plugin SDK consumes a CG bootstrap token, so a
+		// missing minter means plugins cannot enroll.
+		pluginAdminStackOK := secretsStackOK && idpClient != nil && d.brokerAuditWriter != nil && d.cgMinter != nil
 
 		if pluginAdminStackOK {
 			pluginAdminSvc, paErr := admin.NewPluginsAdminServer(admin.PluginsAdminConfig{
 				Registry:          &componentInstallRegistryReaderAdapter{db: d.platformDB},
 				ManifestValidator: &pluginManifestValidator{},
-				ZitadelClient:     &idpPluginPrincipalAdapter{client: idpClient},
+				ZitadelClient:     &idpPluginPrincipalAdapter{client: idpClient, cgMinter: d.cgMinter},
 				SecretWriter:      &secretWriterAdapter{svc: d.secretsService},
 				Authorizer:        d.authorizer,
 				BootstrapAuditor:  d.brokerAuditWriter,

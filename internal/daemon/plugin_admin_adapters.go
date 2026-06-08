@@ -27,11 +27,13 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"strings"
 	"time"
 
 	"gopkg.in/yaml.v3"
 
 	"github.com/zeroroot-ai/gibson/internal/admin"
+	"github.com/zeroroot-ai/gibson/internal/capabilitygrant"
 	"github.com/zeroroot-ai/gibson/internal/idp"
 	"github.com/zeroroot-ai/gibson/internal/secrets"
 	sdksecrets "github.com/zeroroot-ai/platform-clients/secrets"
@@ -185,30 +187,43 @@ func (a *secretWriterAdapter) Exists(ctx context.Context, tenant auth.TenantID, 
 // 3. idpPluginPrincipalAdapter
 // ---------------------------------------------------------------------------
 
-// idpPluginPrincipalAdapter adapts idp.AdminClient to
-// admin.ZitadelPluginPrincipalClient. CreatePrincipal calls
-// CreateServiceAccount then MintClientSecret to obtain the bootstrap token;
-// DeletePrincipal calls DeleteServiceAccount.
+// idpPluginPrincipalAdapter adapts idp.AdminClient + the capability-grant Minter
+// to admin.ZitadelPluginPrincipalClient. CreatePrincipal creates the Zitadel
+// service account (the canonical sub) and mints a CG bootstrap token — the SAME
+// mechanism agents and tools use (ADR-0045). DeletePrincipal deletes the SA.
 //
-// The bootstrap token TTL passed to CreatePrincipal is honoured at the
-// caller's discretion — the Zitadel client secret mechanism does not natively
-// support TTL-bound secrets. We record the expected expiry and return it to
-// the handler so it can be surfaced to the dashboard.
+// There is NO OAuth client_credentials / client-secret step: the plugin SDK
+// (plugin.Serve) consumes a capability-grant bootstrap token, not an OAuth
+// secret, so the bootstrap token MUST be CG-signed (gibson#673).
+const pluginPrincipalPrefix = "plugin_principal:"
+
 type idpPluginPrincipalAdapter struct {
-	client idp.AdminClient
+	client   idp.AdminClient
+	cgMinter *capabilitygrant.Minter
 }
 
 var _ admin.ZitadelPluginPrincipalClient = (*idpPluginPrincipalAdapter)(nil)
 
 // CreatePrincipal creates a plugin service-account and mints a one-time
-// bootstrap token. The principalID is the IdP-assigned machine-user ID;
-// bootstrapToken is the client secret.
+// capability-grant bootstrap token. The returned principalID is the unified
+// FGA principal id `plugin_principal:<account-id>` (matching agents/tools and
+// the `secret can_resolve: [plugin_principal]` model rule); bootstrapToken is a
+// CG-signed bootstrap JWT whose `sub` is that principal, so the plugin's
+// runtime CG-JWT authorizes against the same identity.
 func (a *idpPluginPrincipalAdapter) CreatePrincipal(
 	ctx context.Context,
 	tenant auth.TenantID,
 	installID, name string,
 	ttl time.Duration,
 ) (principalID, bootstrapToken string, expiresAt time.Time, err error) {
+	if a.cgMinter == nil {
+		return "", "", time.Time{}, errors.New("create plugin principal: capability-grant minter not configured")
+	}
+	owner, idErr := auth.IdentityFromContext(ctx)
+	if idErr != nil || owner.Subject == "" {
+		return "", "", time.Time{}, fmt.Errorf("create plugin principal: caller identity unavailable: %w", idErr)
+	}
+
 	saName := fmt.Sprintf("plugin-%s-%s", tenant.String(), installID)
 	sa, err := a.client.CreateServiceAccount(ctx, idp.CreateServiceAccountRequest{
 		Name:        saName,
@@ -219,24 +234,30 @@ func (a *idpPluginPrincipalAdapter) CreatePrincipal(
 		return "", "", time.Time{}, fmt.Errorf("create plugin principal: %w", err)
 	}
 
-	// Plugins authenticate via the capability-grant bootstrap (not a raw
-	// client_credentials grant), so the loginName-based clientID is not needed
-	// here; the principalID stays the user id. Revisit under gibson#643 if the
-	// plugin SDK ever does client_credentials.
-	_, secret, err := a.client.MintClientSecret(ctx, sa.AccountID)
-	if err != nil {
-		// Best-effort cleanup — if DeleteServiceAccount fails, the orphaned
-		// account will be cleaned up by the rollback path in RegisterPlugin.
+	principalID = pluginPrincipalPrefix + sa.AccountID
+	token, mintErr := a.cgMinter.MintBootstrapToken(capabilitygrant.BootstrapClaims{
+		TenantID:    tenant.String(),
+		OwnerUserID: owner.Subject,
+		PrincipalID: principalID,
+		Kind:        "plugin",
+		Name:        name,
+	}, ttl)
+	if mintErr != nil {
+		// Roll the SA back so a failed mint never leaves a credential-less
+		// principal (best-effort; RegisterPlugin's rollback also covers it).
 		_ = a.client.DeleteServiceAccount(ctx, sa.AccountID)
-		return "", "", time.Time{}, fmt.Errorf("mint client secret for plugin principal: %w", err)
+		return "", "", time.Time{}, fmt.Errorf("mint plugin bootstrap token: %w", mintErr)
 	}
 
-	return sa.AccountID, secret, time.Now().UTC().Add(ttl), nil
+	return principalID, token, time.Now().UTC().Add(ttl), nil
 }
 
-// DeletePrincipal removes the plugin service account from the IdP.
+// DeletePrincipal removes the plugin service account from the IdP. principalID
+// is the `plugin_principal:<account-id>` form; the Zitadel account id is the
+// suffix.
 func (a *idpPluginPrincipalAdapter) DeletePrincipal(ctx context.Context, principalID string) error {
-	if err := a.client.DeleteServiceAccount(ctx, principalID); err != nil {
+	accountID := strings.TrimPrefix(principalID, pluginPrincipalPrefix)
+	if err := a.client.DeleteServiceAccount(ctx, accountID); err != nil {
 		if errors.Is(err, idp.ErrNotFound) {
 			return nil // idempotent — already gone
 		}

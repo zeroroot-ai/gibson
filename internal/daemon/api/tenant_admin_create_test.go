@@ -60,7 +60,6 @@ func newTestDaemonServer(t interface{ Helper() }) *DaemonServer {
 
 type fakeIDPClient struct {
 	createFn    func(ctx context.Context, req idp.CreateServiceAccountRequest) (*idp.ServiceAccount, error)
-	mintFn      func(ctx context.Context, accountID string) (clientID, clientSecret string, err error)
 	deleteFn    func(ctx context.Context, accountID string) error
 	listFn      func(ctx context.Context, req idp.ListServiceAccountsRequest) (*idp.ListServiceAccountsResponse, error)
 	deleteCalls []string // tracks deleted accountIDs for rollback verification
@@ -76,15 +75,6 @@ func (f *fakeIDPClient) CreateServiceAccount(ctx context.Context, req idp.Create
 		return f.createFn(ctx, req)
 	}
 	return &idp.ServiceAccount{AccountID: "sa-test-id", Name: req.Name, Role: req.Role}, nil
-}
-
-func (f *fakeIDPClient) MintClientSecret(ctx context.Context, accountID string) (string, string, error) {
-	if f.mintFn != nil {
-		return f.mintFn(ctx, accountID)
-	}
-	// Distinct from the account/user id ("sa-test-id") on purpose: the response
-	// ClientId must be this loginName-based client_id, not the user id.
-	return "test-client-id", "test-secret", nil
 }
 
 func (f *fakeIDPClient) DeleteServiceAccount(ctx context.Context, accountID string) error {
