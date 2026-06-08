@@ -1125,112 +1125,27 @@ func (h *DefaultAgentHarness) callToolViaWorkQueue(
 		)
 	}
 
-	workCtx := map[string]string{
-		"mission_id": h.missionCtx.ID.String(),
-		"agent":      h.missionCtx.CurrentAgent,
-	}
-	if spanCtx := trace.SpanFromContext(ctx).SpanContext(); spanCtx.IsValid() {
-		workCtx["trace_id"] = spanCtx.TraceID().String()
-	}
-
-	// Attach AuthzContext so the SDK worker can resolve the mission context
-	// for FGA checks. The envelope HMAC signing system has been removed
-	// (admin-services-completion Req 6.4); run_id + issued_at + ttl_seconds
-	// are populated without signing — authorization is fully covered by FGA
-	// tuples binding agent_principal to mission.
-	if h.missionCtx.MissionRunID != "" {
-		ac := sdkqueue.AuthzContext{
-			RunID:      h.missionCtx.MissionRunID,
-			IssuedAt:   time.Now().Unix(),
-			TTLSeconds: authz.DefaultWorkTTLSeconds,
-		}
-		if acJSON, marshalErr := json.Marshal(ac); marshalErr == nil {
-			workCtx[authz.AuthzContextWorkKey] = string(acJSON)
-		} else {
-			h.logger.Warn("failed to marshal AuthzContext for work item, dispatching without authz context",
-				"tool", name,
-				"run_id", h.missionCtx.MissionRunID,
-				"error", marshalErr,
-			)
-		}
-	}
-
-	// Mint a capability-grant JWT scoped to this task so the
-	// component's harness callbacks can short-circuit FGA. Spec
-	// Requirement 13.1 / 5.1. The agent SDK reads this from
-	// WorkItem.Context["capability_grant"] and attaches it to
-	// every callback's X-Capability-Grant header.
-	if cgToken := h.mintCGForWork(name, "tool"); cgToken != "" {
-		workCtx["capability_grant"] = cgToken
-	}
-
-	// Pre-assign a WorkID so we can subscribe for the result by ID. The WorkQueue
-	// preserves an explicitly set WorkID (only auto-generates when WorkID == "").
-	workID := fmt.Sprintf("tool-%s-%d", name, time.Now().UnixNano())
-
-	workItem := component.WorkItem{
-		WorkID:   workID,
-		WorkType: "execute_proto",
-		Payload:  inputJSON,
-		Context:  workCtx,
-	}
-
-	if _, err = h.workQueue.Enqueue(ctx, tenant, "tool", name, workItem); err != nil {
-		h.logger.Error("failed to enqueue tool work item",
-			"tool", name,
-			"tenant", tenant,
-			"work_id", workID,
-			"instance_id", info.InstanceID,
-			"error", err)
-		return types.WrapError(
-			ErrHarnessToolExecutionFailed,
-			fmt.Sprintf("failed to enqueue tool work item: %s", name),
-			err,
-		)
-	}
-
-	h.logger.Debug("tool work item enqueued, waiting for result",
-		"tool", name,
-		"tenant", tenant,
-		"work_id", workID,
-		"instance_id", info.InstanceID)
-
-	result, err := h.workQueue.WaitForResult(ctx, workID, h.workQueueWaitTimeout())
+	// Kind-uniform work-queue dispatch (gibson#663): the work-queue mechanics
+	// (workCtx, AuthzContext, task CG-JWT, _system config injection, enqueue,
+	// wait) are shared across agent/tool/plugin via dispatchWorkAndWait; this
+	// wrapper only owns the tool-specific proto marshal/unmarshal + metrics.
+	resultBytes, err := h.dispatchWorkAndWait(ctx, tenant, "tool", name, "execute_proto", inputJSON, nil, info)
 	if err != nil {
-		h.logger.Error("timed out or error waiting for tool work result",
-			"tool", name,
-			"tenant", tenant,
-			"work_id", workID,
-			"error", err)
+		h.logger.Error("tool work queue dispatch failed",
+			"tool", name, "tenant", tenant, "instance_id", info.InstanceID, "error", err)
 		return types.WrapError(
 			ErrHarnessToolExecutionFailed,
-			fmt.Sprintf("tool work queue result wait failed: %s", name),
+			fmt.Sprintf("tool work queue call failed: %s", name),
 			err,
-		)
-	}
-
-	if result.Error != nil {
-		h.logger.Error("remote tool returned error",
-			"tool", name,
-			"tenant", tenant,
-			"work_id", workID,
-			"error_code", result.Error.Code,
-			"error_message", result.Error.Message,
-			"retryable", result.Error.Retryable)
-		return types.WrapError(
-			ErrHarnessToolExecutionFailed,
-			fmt.Sprintf("remote tool %s returned error [%s]: %s", name, result.Error.Code, result.Error.Message),
-			nil,
 		)
 	}
 
 	// Unmarshal the JSON result back into the response proto message.
 	unmarshaler := protojson.UnmarshalOptions{DiscardUnknown: true}
-	if err := unmarshaler.Unmarshal(result.Result, response); err != nil {
+	if err := unmarshaler.Unmarshal(resultBytes, response); err != nil {
 		h.logger.Error("failed to unmarshal tool work result",
 			"tool", name,
 			"tenant", tenant,
-			"work_id", workID,
 			"error", err)
 		return types.WrapError(
 			ErrHarnessToolExecutionFailed,
@@ -1242,7 +1157,6 @@ func (h *DefaultAgentHarness) callToolViaWorkQueue(
 	h.logger.Debug("tool work queue call succeeded",
 		"tool", name,
 		"tenant", tenant,
-		"work_id", workID,
 		"discovery", "component_registry_work_queue")
 
 	h.metrics.RecordCounter("tools.executions", 1, map[string]string{
@@ -1292,132 +1206,27 @@ func (h *DefaultAgentHarness) callPluginViaWorkQueue(
 		)
 	}
 
-	workCtx := map[string]string{
-		"mission_id": h.missionCtx.ID.String(),
-		"agent":      h.missionCtx.CurrentAgent,
-		"method":     method,
-	}
-	if spanCtx := trace.SpanFromContext(ctx).SpanContext(); spanCtx.IsValid() {
-		workCtx["trace_id"] = spanCtx.TraceID().String()
-	}
-
-	// Attach AuthzContext for plugin dispatches (unsigned; see tool dispatch comment).
-	if h.missionCtx.MissionRunID != "" {
-		ac := sdkqueue.AuthzContext{
-			RunID:      h.missionCtx.MissionRunID,
-			IssuedAt:   time.Now().Unix(),
-			TTLSeconds: authz.DefaultWorkTTLSeconds,
-		}
-		if acJSON, marshalErr := json.Marshal(ac); marshalErr == nil {
-			workCtx[authz.AuthzContextWorkKey] = string(acJSON)
-		} else {
-			h.logger.Warn("failed to marshal AuthzContext for plugin work item, dispatching without authz context",
-				"plugin", name,
-				"run_id", h.missionCtx.MissionRunID,
-				"error", marshalErr,
-			)
-		}
-	}
-
-	// Mint capability-grant JWT for plugin work items too — the
-	// plugin's harness callbacks go through the same FGA/CG-JWT
-	// chain. Spec Requirement 13.1.
-	if cgToken := h.mintCGForWork(name, "plugin"); cgToken != "" {
-		workCtx["capability_grant"] = cgToken
-	}
-
-	// Inject plugin_config for _system plugins so the remote worker has access
-	// to the tenant's decrypted credentials without a separate lookup.
-	// Only injected for _system instances — tenant-scoped plugins manage their
-	// own config and must never receive another tenant's credentials.
-	if info.TenantID == "_system" && h.pluginAccess != nil {
-		pluginCfg, cfgErr := h.pluginAccess.GetDecryptedConfig(ctx, tenant, name)
-		if cfgErr == nil {
-			cfgJSON, marshalErr := json.Marshal(pluginCfg)
-			if marshalErr == nil {
-				workCtx["plugin_config"] = string(cfgJSON)
-			} else {
-				h.logger.Warn("failed to marshal plugin config for work item context, proceeding without it",
-					"plugin", name,
-					"tenant", tenant,
-					"error", marshalErr)
-			}
-		} else {
-			h.logger.Warn("failed to retrieve plugin config for work item context, proceeding without it",
-				"plugin", name,
-				"tenant", tenant,
-				"error", cfgErr)
-		}
-	}
-
-	workID := fmt.Sprintf("plugin-%s-%s-%d", name, method, time.Now().UnixNano())
-
-	workItem := component.WorkItem{
-		WorkID:   workID,
-		WorkType: "query_plugin",
-		Payload:  payload,
-		Context:  workCtx,
-	}
-
-	if _, err = h.workQueue.Enqueue(ctx, tenant, "plugin", name, workItem); err != nil {
-		h.logger.Error("failed to enqueue plugin work item",
-			"plugin", name,
-			"method", method,
-			"tenant", tenant,
-			"work_id", workID,
-			"error", err)
-		return nil, types.WrapError(
-			ErrHarnessPluginNotFound,
-			fmt.Sprintf("failed to enqueue plugin work item: %s.%s", name, method),
-			err,
-		)
-	}
-
-	h.logger.Debug("plugin work item enqueued, waiting for result",
-		"plugin", name,
-		"method", method,
-		"tenant", tenant,
-		"work_id", workID,
-		"instance_id", info.InstanceID)
-
-	result, err := h.workQueue.WaitForResult(ctx, workID, h.workQueueWaitTimeout())
+	// Kind-uniform work-queue dispatch (gibson#663). The "method" goes in the
+	// work context; everything else (CG-JWT, AuthzContext, _system config
+	// injection, enqueue, wait) is shared via dispatchWorkAndWait.
+	resultBytes, err := h.dispatchWorkAndWait(ctx, tenant, "plugin", name, "query_plugin", payload, map[string]string{"method": method}, info)
 	if err != nil {
-		h.logger.Error("timed out or error waiting for plugin work result",
-			"plugin", name,
-			"method", method,
-			"tenant", tenant,
-			"work_id", workID,
-			"error", err)
+		h.logger.Error("plugin work queue dispatch failed",
+			"plugin", name, "method", method, "tenant", tenant, "instance_id", info.InstanceID, "error", err)
 		return nil, types.WrapError(
 			ErrHarnessPluginMethodNotFound,
-			fmt.Sprintf("plugin work queue result wait failed: %s.%s", name, method),
+			fmt.Sprintf("plugin work queue call failed: %s.%s", name, method),
 			err,
-		)
-	}
-
-	if result.Error != nil {
-		h.logger.Error("remote plugin returned error",
-			"plugin", name,
-			"method", method,
-			"tenant", tenant,
-			"work_id", workID,
-			"error_code", result.Error.Code,
-			"error_message", result.Error.Message)
-		return nil, types.WrapError(
-			ErrHarnessPluginMethodNotFound,
-			fmt.Sprintf("remote plugin %s.%s returned error [%s]: %s", name, method, result.Error.Code, result.Error.Message),
-			nil,
 		)
 	}
 
 	// Deserialise the JSON result into a generic value.
 	var output any
-	if err := json.Unmarshal(result.Result, &output); err != nil {
+	if err := json.Unmarshal(resultBytes, &output); err != nil {
 		h.logger.Error("failed to unmarshal plugin work result",
 			"plugin", name,
 			"method", method,
 			"tenant", tenant,
-			"work_id", workID,
 			"error", err)
 		return nil, types.WrapError(
 			ErrHarnessPluginMethodNotFound,
@@ -1430,7 +1239,6 @@ func (h *DefaultAgentHarness) callPluginViaWorkQueue(
 		"plugin", name,
 		"method", method,
 		"tenant", tenant,
-		"work_id", workID,
 		"discovery", "component_registry_work_queue")
 
 	h.metrics.RecordCounter("plugins.queries", 1, map[string]string{
@@ -1442,6 +1250,97 @@ func (h *DefaultAgentHarness) callPluginViaWorkQueue(
 	})
 
 	return output, nil
+}
+
+// dispatchWorkAndWait is the kind-uniform work-queue dispatch path for every
+// component kind (agent/tool/plugin, gibson#663). It builds the work context
+// (mission + caller extras), attaches the unsigned AuthzContext, mints the
+// task-scoped capability-grant JWT, injects the tenant's decrypted config for
+// SHARED (_system) instances of ANY kind, enqueues the work item, and waits for
+// the result — returning the raw result bytes. Per-kind wrappers
+// (callToolViaWorkQueue / callPluginViaWorkQueue) own only their payload
+// marshal/unmarshal and metrics. Replaces the former duplicated dispatch bodies.
+func (h *DefaultAgentHarness) dispatchWorkAndWait(
+	ctx context.Context,
+	tenant, kind, name, workType string,
+	payload []byte,
+	extraCtx map[string]string,
+	info component.ComponentInfo,
+) ([]byte, error) {
+	workCtx := map[string]string{
+		"mission_id": h.missionCtx.ID.String(),
+		"agent":      h.missionCtx.CurrentAgent,
+	}
+	for k, v := range extraCtx {
+		workCtx[k] = v
+	}
+	if spanCtx := trace.SpanFromContext(ctx).SpanContext(); spanCtx.IsValid() {
+		workCtx["trace_id"] = spanCtx.TraceID().String()
+	}
+
+	// Unsigned AuthzContext: run_id + issued_at + ttl_seconds; authorization is
+	// covered by the FGA tuples binding the principal to the mission.
+	if h.missionCtx.MissionRunID != "" {
+		ac := sdkqueue.AuthzContext{
+			RunID:      h.missionCtx.MissionRunID,
+			IssuedAt:   time.Now().Unix(),
+			TTLSeconds: authz.DefaultWorkTTLSeconds,
+		}
+		if acJSON, marshalErr := json.Marshal(ac); marshalErr == nil {
+			workCtx[authz.AuthzContextWorkKey] = string(acJSON)
+		} else {
+			h.logger.Warn("failed to marshal AuthzContext for work item, dispatching without authz context",
+				"kind", kind, "component", name, "run_id", h.missionCtx.MissionRunID, "error", marshalErr)
+		}
+	}
+
+	// Task-scoped capability-grant JWT for the component's harness callbacks.
+	if cgToken := h.mintCGForWork(name, kind); cgToken != "" {
+		workCtx["capability_grant"] = cgToken
+	}
+
+	// Shared (_system) instances of ANY kind: inject the tenant's decrypted
+	// per-component config so the remote worker has its credentials without a
+	// separate lookup. Tenant-scoped instances manage their own config and must
+	// never receive another tenant's credentials. Kind-agnostic via the
+	// component access store (gibson#662/#663).
+	if info.TenantID == "_system" && h.pluginAccess != nil {
+		if cfg, cfgErr := h.pluginAccess.GetDecryptedConfig(ctx, tenant, name); cfgErr == nil {
+			if cfgJSON, marshalErr := json.Marshal(cfg); marshalErr == nil {
+				workCtx["plugin_config"] = string(cfgJSON)
+			} else {
+				h.logger.Warn("failed to marshal component config for work item context, proceeding without it",
+					"kind", kind, "component", name, "tenant", tenant, "error", marshalErr)
+			}
+		} else {
+			h.logger.Warn("failed to retrieve component config for work item context, proceeding without it",
+				"kind", kind, "component", name, "tenant", tenant, "error", cfgErr)
+		}
+	}
+
+	workID := fmt.Sprintf("%s-%s-%d", kind, name, time.Now().UnixNano())
+	workItem := component.WorkItem{
+		WorkID:   workID,
+		WorkType: workType,
+		Payload:  payload,
+		Context:  workCtx,
+	}
+
+	if _, err := h.workQueue.Enqueue(ctx, tenant, kind, name, workItem); err != nil {
+		return nil, fmt.Errorf("enqueue %s work item %q: %w", kind, name, err)
+	}
+
+	h.logger.Debug("work item enqueued, waiting for result",
+		"kind", kind, "component", name, "tenant", tenant, "work_id", workID, "instance_id", info.InstanceID)
+
+	result, err := h.workQueue.WaitForResult(ctx, workID, h.workQueueWaitTimeout())
+	if err != nil {
+		return nil, fmt.Errorf("%s work queue result wait failed for %q: %w", kind, name, err)
+	}
+	if result.Error != nil {
+		return nil, fmt.Errorf("remote %s %q returned error [%s]: %s", kind, name, result.Error.Code, result.Error.Message)
+	}
+	return result.Result, nil
 }
 
 // ListTools returns descriptors for all tools discoverable via the
