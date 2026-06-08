@@ -21,15 +21,12 @@ import "context"
 type AdminClient interface {
 	// CreateServiceAccount creates a new machine service account in the IdP.
 	// Returns ErrAlreadyExists if an account with the same name already exists.
+	//
+	// Machine principals (agent/tool/plugin) authenticate at runtime via a
+	// capability-grant JWT, NOT an OAuth client_credentials grant — the service
+	// account exists only to anchor the canonical numeric sub. The IdP therefore
+	// mints no client secret (ADR-0045, gibson#670/#673).
 	CreateServiceAccount(ctx context.Context, req CreateServiceAccountRequest) (*ServiceAccount, error)
-
-	// MintClientSecret generates a new client secret for an existing service
-	// account. It returns BOTH the OAuth client_id (the IdP's loginName-based
-	// client identifier, used as the client_credentials username) and the raw
-	// secret. The client_id is NOT the same as the account/user id: Zitadel's
-	// client_credentials grant rejects the user id with invalid_client. The
-	// caller must handle the secret securely and never log it.
-	MintClientSecret(ctx context.Context, accountID string) (clientID, clientSecret string, err error)
 
 	// DeleteServiceAccount permanently removes the service account and revokes
 	// any active sessions. Returns ErrNotFound if the account does not exist.

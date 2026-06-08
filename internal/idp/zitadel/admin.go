@@ -183,36 +183,6 @@ func (c *Client) CreateServiceAccount(ctx context.Context, req idp.CreateService
 	}, nil
 }
 
-// MintClientSecret generates a client secret for the machine user.
-// Maps to PUT /management/v1/users/{userId}/secret.
-// The secret is returned exactly once; it cannot be retrieved again.
-func (c *Client) MintClientSecret(ctx context.Context, accountID string) (string, string, error) {
-	var resp struct {
-		ClientID     string `json:"clientId"`
-		ClientSecret string `json:"clientSecret"`
-	}
-
-	path := "/management/v1/users/" + accountID + "/secret"
-	if err := c.doRequest(ctx, http.MethodPut, path, map[string]interface{}{}, c.cfg.OrgID, &resp); err != nil {
-		return "", "", mapError(err, "MintClientSecret")
-	}
-
-	if resp.ClientSecret == "" {
-		// Do NOT log resp.ClientID or any other field — we could accidentally
-		// log the secret on malformed responses if field mapping shifts.
-		return "", "", fmt.Errorf("%w: response missing clientSecret", idp.ErrUpstream)
-	}
-
-	// The clientId (loginName-based) is the username the client_credentials
-	// grant authenticates with — it differs from accountID (the user id).
-	// Using the user id yields invalid_client "client not found" (gibson#643).
-	if resp.ClientID == "" {
-		return "", "", fmt.Errorf("%w: response missing clientId", idp.ErrUpstream)
-	}
-
-	return resp.ClientID, resp.ClientSecret, nil
-}
-
 // DeleteServiceAccount permanently removes the machine user from Zitadel.
 // Maps to DELETE /management/v1/users/{userId}.
 func (c *Client) DeleteServiceAccount(ctx context.Context, accountID string) error {

@@ -225,10 +225,6 @@ func (f *fakeUserIdPClient) CreateServiceAccount(_ context.Context, _ idp.Create
 	return nil, idp.ErrNotFound
 }
 
-func (f *fakeUserIdPClient) MintClientSecret(_ context.Context, _ string) (string, string, error) {
-	return "", "", idp.ErrNotFound
-}
-
 func (f *fakeUserIdPClient) DeleteServiceAccount(_ context.Context, _ string) error {
 	return idp.ErrNotFound
 }
