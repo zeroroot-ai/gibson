@@ -102,7 +102,7 @@ func (m *mockIntegrationHarness) GetToolDescriptor(ctx context.Context, name str
 	return nil, fmt.Errorf("GetToolDescriptor not implemented in mock harness")
 }
 
-func (m *mockIntegrationHarness) QueryPlugin(ctx context.Context, pluginName string, method string, params map[string]any) (any, error) {
+func (m *mockIntegrationHarness) QueryPlugin(ctx context.Context, componentName string, method string, params map[string]any) (any, error) {
 	return nil, fmt.Errorf("QueryPlugin not implemented in mock harness")
 }
 

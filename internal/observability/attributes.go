@@ -318,9 +318,9 @@ func ToolAttributes(toolName string) []attribute.KeyValue {
 }
 
 // PluginAttributes creates OpenTelemetry attributes for a plugin operation.
-func PluginAttributes(pluginName, method string) []attribute.KeyValue {
+func PluginAttributes(componentName, method string) []attribute.KeyValue {
 	attrs := []attribute.KeyValue{
-		attribute.String(GibsonPluginName, pluginName),
+		attribute.String(GibsonPluginName, componentName),
 	}
 
 	if method != "" {

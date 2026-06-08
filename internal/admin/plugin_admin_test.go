@@ -22,12 +22,12 @@ import (
 // Test fakes
 // ---------------------------------------------------------------------------
 
-type fakePluginRegistry struct {
-	installs map[string]PluginInstallInfo
+type fakeComponentInstallRegistry struct {
+	installs map[string]ComponentInstallInfo
 }
 
-func (r *fakePluginRegistry) ListAll(_ context.Context, tenant auth.TenantID) ([]PluginInstallInfo, error) {
-	out := []PluginInstallInfo{}
+func (r *fakeComponentInstallRegistry) ListAll(_ context.Context, tenant auth.TenantID) ([]ComponentInstallInfo, error) {
+	out := []ComponentInstallInfo{}
 	for _, v := range r.installs {
 		if v.TenantID == tenant.String() {
 			out = append(out, v)
@@ -36,7 +36,7 @@ func (r *fakePluginRegistry) ListAll(_ context.Context, tenant auth.TenantID) ([
 	return out, nil
 }
 
-func (r *fakePluginRegistry) Get(_ context.Context, tenant auth.TenantID, installID string) (*PluginInstallInfo, error) {
+func (r *fakeComponentInstallRegistry) Get(_ context.Context, tenant auth.TenantID, installID string) (*ComponentInstallInfo, error) {
 	v, ok := r.installs[installID]
 	if !ok || v.TenantID != tenant.String() {
 		return nil, ErrInstallNotFound
@@ -167,9 +167,9 @@ func (f *fakeAuthorizer) Close() error    { return nil }
 // Test fixture
 // ---------------------------------------------------------------------------
 
-func newPluginsTestServer(t *testing.T) (*PluginsAdminServer, *fakePluginRegistry, *fakeManifestValidator, *fakeZitadel, *fakeSecretWriter, *fakeAuthorizer, *fakeAuditor) {
+func newPluginsTestServer(t *testing.T) (*PluginsAdminServer, *fakeComponentInstallRegistry, *fakeManifestValidator, *fakeZitadel, *fakeSecretWriter, *fakeAuthorizer, *fakeAuditor) {
 	t.Helper()
-	reg := &fakePluginRegistry{installs: map[string]PluginInstallInfo{}}
+	reg := &fakeComponentInstallRegistry{installs: map[string]ComponentInstallInfo{}}
 	val := &fakeManifestValidator{}
 	zit := &fakeZitadel{}
 	sw := &fakeSecretWriter{}
@@ -198,8 +198,8 @@ func newPluginsTestServer(t *testing.T) (*PluginsAdminServer, *fakePluginRegistr
 
 func TestListPluginInstalls_FiltersByName(t *testing.T) {
 	srv, reg, _, _, _, _, _ := newPluginsTestServer(t)
-	reg.installs["a1"] = PluginInstallInfo{InstallID: "a1", TenantID: "acme", Name: "github", Status: "serving"}
-	reg.installs["b1"] = PluginInstallInfo{InstallID: "b1", TenantID: "acme", Name: "openai", Status: "serving"}
+	reg.installs["a1"] = ComponentInstallInfo{InstallID: "a1", TenantID: "acme", Name: "github", Status: "serving"}
+	reg.installs["b1"] = ComponentInstallInfo{InstallID: "b1", TenantID: "acme", Name: "openai", Status: "serving"}
 
 	ctx := ctxWithTenant(t, "acme")
 	resp, err := srv.ListPluginInstalls(ctx, &tenantv1.ListPluginInstallsRequest{NameFilter: "github"})
@@ -432,7 +432,7 @@ func TestRevokePluginSecretBinding_DeletesAndAudits(t *testing.T) {
 
 func TestEditPluginSecretBinding_DeletesThenWrites(t *testing.T) {
 	srv, reg, _, _, _, az, _ := newPluginsTestServer(t)
-	reg.installs["i1"] = PluginInstallInfo{InstallID: "i1", TenantID: "acme", Name: "p"}
+	reg.installs["i1"] = ComponentInstallInfo{InstallID: "i1", TenantID: "acme", Name: "p"}
 	ctx := ctxWithTenant(t, "acme")
 
 	_, err := srv.EditPluginSecretBinding(ctx, &tenantv1.EditPluginSecretBindingRequest{
@@ -458,11 +458,11 @@ func TestNewPluginsAdminServer_RequiresAllFields(t *testing.T) {
 		cfg  PluginsAdminConfig
 	}{
 		{"missing Registry", PluginsAdminConfig{}},
-		{"missing ManifestValidator", PluginsAdminConfig{Registry: &fakePluginRegistry{}}},
-		{"missing ZitadelClient", PluginsAdminConfig{Registry: &fakePluginRegistry{}, ManifestValidator: &fakeManifestValidator{}}},
-		{"missing SecretWriter", PluginsAdminConfig{Registry: &fakePluginRegistry{}, ManifestValidator: &fakeManifestValidator{}, ZitadelClient: &fakeZitadel{}}},
-		{"missing Authorizer", PluginsAdminConfig{Registry: &fakePluginRegistry{}, ManifestValidator: &fakeManifestValidator{}, ZitadelClient: &fakeZitadel{}, SecretWriter: &fakeSecretWriter{}}},
-		{"missing BootstrapAuditor", PluginsAdminConfig{Registry: &fakePluginRegistry{}, ManifestValidator: &fakeManifestValidator{}, ZitadelClient: &fakeZitadel{}, SecretWriter: &fakeSecretWriter{}, Authorizer: &fakeAuthorizer{}}},
+		{"missing ManifestValidator", PluginsAdminConfig{Registry: &fakeComponentInstallRegistry{}}},
+		{"missing ZitadelClient", PluginsAdminConfig{Registry: &fakeComponentInstallRegistry{}, ManifestValidator: &fakeManifestValidator{}}},
+		{"missing SecretWriter", PluginsAdminConfig{Registry: &fakeComponentInstallRegistry{}, ManifestValidator: &fakeManifestValidator{}, ZitadelClient: &fakeZitadel{}}},
+		{"missing Authorizer", PluginsAdminConfig{Registry: &fakeComponentInstallRegistry{}, ManifestValidator: &fakeManifestValidator{}, ZitadelClient: &fakeZitadel{}, SecretWriter: &fakeSecretWriter{}}},
+		{"missing BootstrapAuditor", PluginsAdminConfig{Registry: &fakeComponentInstallRegistry{}, ManifestValidator: &fakeManifestValidator{}, ZitadelClient: &fakeZitadel{}, SecretWriter: &fakeSecretWriter{}, Authorizer: &fakeAuthorizer{}}},
 	}
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {

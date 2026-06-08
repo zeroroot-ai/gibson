@@ -410,7 +410,7 @@ func (b *InventoryBuilder) convertPluginInfo(info component.PluginInfo) PluginSu
 // Plugin methods are stored as "method:<name>=true" entries in ComponentInfo.Metadata
 // during registration, but ComponentDiscovery.ListPlugins aggregates instances into
 // PluginInfo which does not carry the raw metadata map. Method discovery requires
-// the PluginAccessStore.ListAvailablePlugins path which returns PluginCatalogEntry
+// the ComponentAccessStore.ListAvailablePlugins path which returns PluginCatalogEntry
 // with the Methods field populated. At this level we only have PluginInfo, so
 // we return an empty slice; the plugin description remains the primary metadata source.
 func (b *InventoryBuilder) extractMethods(info component.PluginInfo) []MethodSummary {

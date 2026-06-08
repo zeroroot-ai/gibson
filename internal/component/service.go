@@ -168,9 +168,9 @@ type ComponentServiceServer struct {
 	// May be nil; SubmitFinding logs and generates an ID when nil.
 	findingSubmitter FindingSubmitter
 
-	// pluginAccess manages tenant opt-in and encrypted configuration for plugins.
+	// componentAccess manages tenant opt-in and encrypted configuration for plugins.
 	// May be nil; plugin access RPCs return codes.Unimplemented when nil.
-	pluginAccess PluginAccessStore
+	componentAccess ComponentAccessStore
 
 	// auditLog records security-relevant mutations for compliance purposes.
 	// May be nil; when nil, audit events are silently skipped.
@@ -239,14 +239,14 @@ type ComponentServiceServer struct {
 	// Set via WithAuthorizer. Added by agent-auth-fga-integration spec (task 3).
 	authorizer authz.Authorizer
 
-	// pluginRegistry is the daemon-side plugin install registry.
+	// componentInstallRegistry is the daemon-side plugin install registry.
 	// When non-nil, RegisterComponent calls with kind="plugin" are forwarded to
-	// pluginRegistry.Register so install metadata is persisted and transient state
+	// componentInstallRegistry.Register so install metadata is persisted and transient state
 	// is initialised in Redis. Heartbeat calls for plugin components are forwarded
-	// to pluginRegistry.Heartbeat to refresh the 90-second Redis TTL.
+	// to componentInstallRegistry.Heartbeat to refresh the 90-second Redis TTL.
 	// When nil, plugin registration is handled via the standard component registry only.
-	// Set via WithPluginRegistry. Added by plugin-runtime spec (Task 16).
-	pluginRegistry PluginRegistry
+	// Set via WithComponentInstallRegistry. Added by plugin-runtime spec (Task 16).
+	componentInstallRegistry ComponentInstallRegistry
 
 	// ontologyReasoner merges ontology extensions contributed by enrolling
 	// components. Set via WithOntologyReasoner. When nil, any OntologyExtension
@@ -260,7 +260,7 @@ type ComponentServiceServer struct {
 // lifecycle dependencies. Both registry and queue must be non-nil.
 //
 // Harness proxy dependencies (llmCompleter, memStore, findingSubmitter,
-// pluginAccess) are optional at this stage: pass nil to leave the
+// componentAccess) are optional at this stage: pass nil to leave the
 // corresponding RPCs returning codes.Unimplemented until the subsystems are
 // wired (tasks 5.3–5.5).
 //
@@ -272,7 +272,7 @@ func NewComponentServiceServer(
 	llmCompleter LLMCompleter,
 	memStore memory.MemoryStore,
 	findingSubmitter FindingSubmitter,
-	pluginAccess PluginAccessStore,
+	componentAccess ComponentAccessStore,
 	auditLog *audit.AuditLogger,
 ) *ComponentServiceServer {
 	if registry == nil {
@@ -291,7 +291,7 @@ func NewComponentServiceServer(
 		llmCompleter:     llmCompleter,
 		memory:           memStore,
 		findingSubmitter: findingSubmitter,
-		pluginAccess:     pluginAccess,
+		componentAccess:     componentAccess,
 		auditLog:         auditLog,
 	}
 }
@@ -439,7 +439,7 @@ func (s *ComponentServiceServer) WithAuthorizer(az authz.Authorizer) *ComponentS
 	return s
 }
 
-// WithPluginRegistry wires a PluginRegistry so that RegisterComponent calls with
+// WithComponentInstallRegistry wires a ComponentInstallRegistry so that RegisterComponent calls with
 // kind="plugin" are forwarded to persist install metadata in Postgres and initialise
 // transient Redis state. Heartbeat calls for plugin components are forwarded to
 // refresh the 90-second TTL.
@@ -448,8 +448,8 @@ func (s *ComponentServiceServer) WithAuthorizer(az authz.Authorizer) *ComponentS
 // registry only (install metadata is not persisted to the plugin_install table).
 //
 // Added by the plugin-runtime spec (Task 16).
-func (s *ComponentServiceServer) WithPluginRegistry(pr PluginRegistry) *ComponentServiceServer {
-	s.pluginRegistry = pr
+func (s *ComponentServiceServer) WithComponentInstallRegistry(pr ComponentInstallRegistry) *ComponentServiceServer {
+	s.componentInstallRegistry = pr
 	return s
 }
 
@@ -596,20 +596,20 @@ func (s *ComponentServiceServer) RegisterComponent(
 	// busy→idle. Wiring into the harness's per-agent inFlightTasks
 	// callbacks lives in the orchestrator/agent package.
 
-	// Forward plugin-kind registrations to the PluginRegistry for install persistence.
-	// The PluginRegistry persists install metadata in Postgres (plugin_install table) and
+	// Forward plugin-kind registrations to the ComponentInstallRegistry for install persistence.
+	// The ComponentInstallRegistry persists install metadata in Postgres (plugin_install table) and
 	// initialises transient Redis state. Plugin-specific metadata keys are carried in
 	// req.Metadata using the "plugin:" prefix convention.
 	//
-	// Best-effort: a failed pluginRegistry call is logged but never fails the RPC —
+	// Best-effort: a failed componentInstallRegistry call is logged but never fails the RPC —
 	// the component is already in the Redis registry and will heartbeat normally.
-	if s.pluginRegistry != nil {
+	if s.componentInstallRegistry != nil {
 		tenantID, tenantParseErr := auth.NewTenantID(tenant)
 		if tenantParseErr != nil {
 			s.logger.WarnContext(ctx, "register component: invalid tenant for component install registry forwarding; skipping",
 				slog.String("tenant", tenant), slog.String("error", tenantParseErr.Error()))
 		} else {
-			install := &PluginInstall{
+			install := &ComponentInstall{
 				ID:                 instanceID,
 				TenantID:           tenantID,
 				Kind:               req.Kind,
@@ -625,7 +625,7 @@ func (s *ComponentServiceServer) RegisterComponent(
 			if install.RuntimeMode == "" {
 				install.RuntimeMode = "process"
 			}
-			if prErr := s.pluginRegistry.Register(ctx, install); prErr != nil {
+			if prErr := s.componentInstallRegistry.Register(ctx, install); prErr != nil {
 				s.logger.WarnContext(ctx, "register component: plugin registry persistence failed (non-fatal)",
 					slog.String("tenant", tenant),
 					slog.String("plugin", req.Name),
@@ -638,8 +638,8 @@ func (s *ComponentServiceServer) RegisterComponent(
 
 	// Auto-create access record for any self-hosted component (agent/tool/plugin)
 	// so it appears in the tenant's inventory (gibson#662 — kind-agnostic).
-	if tenant != "_system" && s.pluginAccess != nil {
-		if err := s.pluginAccess.EnableSelfHosted(ctx, tenant, req.Name); err != nil {
+	if tenant != "_system" && s.componentAccess != nil {
+		if err := s.componentAccess.EnableSelfHosted(ctx, tenant, req.Name); err != nil {
 			s.logger.WarnContext(ctx, "register component: failed to auto-create component access record",
 				slog.String("tenant", tenant),
 				slog.String("plugin", req.Name),
@@ -650,8 +650,8 @@ func (s *ComponentServiceServer) RegisterComponent(
 	}
 
 	// Store component config schema if declared (any kind — gibson#662).
-	if req.ConfigSchemaJson != "" && s.pluginAccess != nil {
-		if err := s.pluginAccess.StoreConfigSchema(ctx, req.Name, req.ConfigSchemaJson); err != nil {
+	if req.ConfigSchemaJson != "" && s.componentAccess != nil {
+		if err := s.componentAccess.StoreConfigSchema(ctx, req.Name, req.ConfigSchemaJson); err != nil {
 			s.logger.WarnContext(ctx, "register component: failed to store component config schema",
 				slog.String("plugin", req.Name),
 				slog.String("error", err.Error()),
@@ -801,12 +801,12 @@ func (s *ComponentServiceServer) Heartbeat(
 		slog.String("health_status", req.HealthStatus),
 	)
 
-	// Forward plugin heartbeats to the PluginRegistry so the 90-second transient
+	// Forward plugin heartbeats to the ComponentInstallRegistry so the 90-second transient
 	// Redis TTL is refreshed and last_heartbeat_at is updated.
 	// The gRPC address is not available in HeartbeatRequest; pass "" so the registry
 	// preserves the address already stored from the prior heartbeat call.
-	if target.Kind == "plugin" && s.pluginRegistry != nil {
-		if prErr := s.pluginRegistry.Heartbeat(ctx, req.InstanceId, ""); prErr != nil {
+	if target.Kind == "plugin" && s.componentInstallRegistry != nil {
+		if prErr := s.componentInstallRegistry.Heartbeat(ctx, req.InstanceId, ""); prErr != nil {
 			s.logger.WarnContext(ctx, "heartbeat: plugin registry TTL refresh failed (non-fatal)",
 				slog.String("tenant", tenant),
 				slog.String("plugin", target.Name),
@@ -1502,8 +1502,8 @@ func (s *ComponentServiceServer) QueryPlugin(
 	// tenant's decrypted credentials available in the work item context.
 	// Only injected for _system instances — tenant-scoped plugins own their
 	// own config and must never receive another tenant's credentials.
-	if instances[0].TenantID == "_system" && s.pluginAccess != nil {
-		pluginCfg, cfgErr := s.pluginAccess.GetDecryptedConfig(ctx, tenant, req.PluginName)
+	if instances[0].TenantID == "_system" && s.componentAccess != nil {
+		pluginCfg, cfgErr := s.componentAccess.GetDecryptedConfig(ctx, tenant, req.PluginName)
 		if cfgErr == nil {
 			cfgJSON, marshalErr := json.Marshal(pluginCfg)
 			if marshalErr == nil {
@@ -1993,19 +1993,19 @@ func (s *ComponentServiceServer) MemorySearch(
 //
 // All handlers follow the same guard pattern:
 //  1. Extract tenant from context; return Unauthenticated if absent.
-//  2. Return Unimplemented when pluginAccess is not wired.
-//  3. Delegate to the PluginAccessStore and map sentinel errors to the
+//  2. Return Unimplemented when componentAccess is not wired.
+//  3. Delegate to the ComponentAccessStore and map sentinel errors to the
 //     appropriate gRPC status codes.
 // ---------------------------------------------------------------------------
 
-// pluginAccessErrToStatus converts sentinel errors from PluginAccessStore to
+// componentAccessErrToStatus converts sentinel errors from ComponentAccessStore to
 // the appropriate gRPC status codes.
-func pluginAccessErrToStatus(err error, pluginName string) error {
+func componentAccessErrToStatus(err error, componentName string) error {
 	switch {
-	case errors.Is(err, ErrPluginNotEnabled):
-		return status.Errorf(codes.NotFound, "plugin %q is not enabled for this tenant; enable it first", pluginName)
-	case errors.Is(err, ErrPluginNotConfigured):
-		return status.Errorf(codes.FailedPrecondition, "plugin %q is enabled but has no configuration stored", pluginName)
+	case errors.Is(err, ErrComponentNotEnabled):
+		return status.Errorf(codes.NotFound, "plugin %q is not enabled for this tenant; enable it first", componentName)
+	case errors.Is(err, ErrComponentNotConfigured):
+		return status.Errorf(codes.FailedPrecondition, "plugin %q is enabled but has no configuration stored", componentName)
 	default:
 		return status.Errorf(codes.Internal, "plugin access operation failed: %v", err)
 	}
@@ -2022,11 +2022,11 @@ func (s *ComponentServiceServer) ListAvailablePlugins(
 		return nil, status.Error(codes.Unauthenticated, "missing tenant in context")
 	}
 
-	if s.pluginAccess == nil {
+	if s.componentAccess == nil {
 		return nil, status.Error(codes.Unimplemented, "plugin access store not yet wired on this server")
 	}
 
-	entries, err := s.pluginAccess.ListAvailablePlugins(ctx, tenant)
+	entries, err := s.componentAccess.ListAvailablePlugins(ctx, tenant)
 	if err != nil {
 		s.logger.ErrorContext(ctx, "list available plugins: failed",
 			slog.String("tenant", tenant),
@@ -2070,7 +2070,7 @@ func (s *ComponentServiceServer) EnablePlugin(
 		return nil, status.Error(codes.Unauthenticated, "missing tenant in context")
 	}
 
-	if s.pluginAccess == nil {
+	if s.componentAccess == nil {
 		return nil, status.Error(codes.Unimplemented, "plugin access store not yet wired on this server")
 	}
 
@@ -2085,13 +2085,13 @@ func (s *ComponentServiceServer) EnablePlugin(
 		}
 	}
 
-	if err := s.pluginAccess.Enable(ctx, tenant, req.PluginName, cfg, tenant); err != nil {
+	if err := s.componentAccess.Enable(ctx, tenant, req.PluginName, cfg, tenant); err != nil {
 		s.logger.ErrorContext(ctx, "enable plugin: failed",
 			slog.String("tenant", tenant),
 			slog.String("plugin_name", req.PluginName),
 			slog.String("error", err.Error()),
 		)
-		return nil, pluginAccessErrToStatus(err, req.PluginName)
+		return nil, componentAccessErrToStatus(err, req.PluginName)
 	}
 
 	s.logger.InfoContext(ctx, "enable plugin: plugin enabled",
@@ -2120,7 +2120,7 @@ func (s *ComponentServiceServer) DisablePlugin(
 		return nil, status.Error(codes.Unauthenticated, "missing tenant in context")
 	}
 
-	if s.pluginAccess == nil {
+	if s.componentAccess == nil {
 		return nil, status.Error(codes.Unimplemented, "plugin access store not yet wired on this server")
 	}
 
@@ -2128,13 +2128,13 @@ func (s *ComponentServiceServer) DisablePlugin(
 		return nil, status.Error(codes.InvalidArgument, "plugin_name is required")
 	}
 
-	if err := s.pluginAccess.Disable(ctx, tenant, req.PluginName); err != nil {
+	if err := s.componentAccess.Disable(ctx, tenant, req.PluginName); err != nil {
 		s.logger.ErrorContext(ctx, "disable plugin: failed",
 			slog.String("tenant", tenant),
 			slog.String("plugin_name", req.PluginName),
 			slog.String("error", err.Error()),
 		)
-		return nil, pluginAccessErrToStatus(err, req.PluginName)
+		return nil, componentAccessErrToStatus(err, req.PluginName)
 	}
 
 	s.logger.InfoContext(ctx, "disable plugin: plugin disabled",
@@ -2163,7 +2163,7 @@ func (s *ComponentServiceServer) UpdatePluginConfig(
 		return nil, status.Error(codes.Unauthenticated, "missing tenant in context")
 	}
 
-	if s.pluginAccess == nil {
+	if s.componentAccess == nil {
 		return nil, status.Error(codes.Unimplemented, "plugin access store not yet wired on this server")
 	}
 
@@ -2179,13 +2179,13 @@ func (s *ComponentServiceServer) UpdatePluginConfig(
 		return nil, status.Errorf(codes.InvalidArgument, "config_json is not valid JSON: %v", err)
 	}
 
-	if err := s.pluginAccess.UpdateConfig(ctx, tenant, req.PluginName, cfg, tenant); err != nil {
+	if err := s.componentAccess.UpdateConfig(ctx, tenant, req.PluginName, cfg, tenant); err != nil {
 		s.logger.ErrorContext(ctx, "update plugin config: failed",
 			slog.String("tenant", tenant),
 			slog.String("plugin_name", req.PluginName),
 			slog.String("error", err.Error()),
 		)
-		return nil, pluginAccessErrToStatus(err, req.PluginName)
+		return nil, componentAccessErrToStatus(err, req.PluginName)
 	}
 
 	s.logger.InfoContext(ctx, "update plugin config: config updated",
@@ -2214,7 +2214,7 @@ func (s *ComponentServiceServer) GetPluginConfig(
 		return nil, status.Error(codes.Unauthenticated, "missing tenant in context")
 	}
 
-	if s.pluginAccess == nil {
+	if s.componentAccess == nil {
 		return nil, status.Error(codes.Unimplemented, "plugin access store not yet wired on this server")
 	}
 
@@ -2222,14 +2222,14 @@ func (s *ComponentServiceServer) GetPluginConfig(
 		return nil, status.Error(codes.InvalidArgument, "plugin_name is required")
 	}
 
-	maskedCfg, err := s.pluginAccess.GetMaskedConfig(ctx, tenant, req.PluginName)
+	maskedCfg, err := s.componentAccess.GetMaskedConfig(ctx, tenant, req.PluginName)
 	if err != nil {
 		s.logger.ErrorContext(ctx, "get plugin config: failed",
 			slog.String("tenant", tenant),
 			slog.String("plugin_name", req.PluginName),
 			slog.String("error", err.Error()),
 		)
-		return nil, pluginAccessErrToStatus(err, req.PluginName)
+		return nil, componentAccessErrToStatus(err, req.PluginName)
 	}
 
 	cfgBytes, err := json.Marshal(maskedCfg)
@@ -2240,7 +2240,7 @@ func (s *ComponentServiceServer) GetPluginConfig(
 	// Include the schema so clients can render a config form without a second
 	// round-trip. Missing schema is not an error — it is returned as an empty
 	// string and the caller renders a generic key-value editor.
-	schema, err := s.pluginAccess.GetConfigSchema(ctx, req.PluginName)
+	schema, err := s.componentAccess.GetConfigSchema(ctx, req.PluginName)
 	if err != nil {
 		s.logger.WarnContext(ctx, "get plugin config: schema lookup failed; returning empty schema",
 			slog.String("tenant", tenant),
@@ -2277,7 +2277,7 @@ func (s *ComponentServiceServer) TestPluginConnection(
 		return nil, status.Error(codes.Unauthenticated, "missing tenant in context")
 	}
 
-	if s.pluginAccess == nil {
+	if s.componentAccess == nil {
 		return nil, status.Error(codes.Unimplemented, "plugin access store not yet wired on this server")
 	}
 
@@ -2381,11 +2381,11 @@ func (s *ComponentServiceServer) ListTenantPlugins(
 		return nil, status.Error(codes.Unauthenticated, "missing tenant in context")
 	}
 
-	if s.pluginAccess == nil {
+	if s.componentAccess == nil {
 		return nil, status.Error(codes.Unimplemented, "plugin access store not yet wired on this server")
 	}
 
-	records, err := s.pluginAccess.ListTenantPlugins(ctx, tenant)
+	records, err := s.componentAccess.ListTenantPlugins(ctx, tenant)
 	if err != nil {
 		s.logger.ErrorContext(ctx, "list tenant plugins: failed",
 			slog.String("tenant", tenant),

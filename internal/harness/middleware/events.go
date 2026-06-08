@@ -228,10 +228,10 @@ func buildToolResultPayload(req any, result any) any {
 
 // buildPluginResultPayload builds payload for successful plugin query
 func buildPluginResultPayload(req any, result any) any {
-	pluginName, method := extractPluginInfo(req)
+	componentName, method := extractPluginInfo(req)
 
 	return events.PluginQueryCompletedPayload{
-		PluginName: pluginName,
+		PluginName: componentName,
 		Method:     method,
 		Success:    true,
 		// Duration is tracked by middleware
@@ -394,10 +394,10 @@ func buildToolCallFailedPayload(req any, err error) any {
 
 // buildPluginQueryFailedPayload builds payload for failed plugin query
 func buildPluginQueryFailedPayload(req any, err error) any {
-	pluginName, method := extractPluginInfo(req)
+	componentName, method := extractPluginInfo(req)
 
 	return events.PluginQueryFailedPayload{
-		PluginName: pluginName,
+		PluginName: componentName,
 		Method:     method,
 		Error:      err.Error(),
 		// Duration tracked by middleware
@@ -447,9 +447,9 @@ func extractPluginInfo(req any) (string, string) {
 	case *harnesspb.QueryPluginRequest:
 		return v.GetName(), v.GetMethod()
 	case map[string]any:
-		pluginName, _ := v["plugin_name"].(string)
+		componentName, _ := v["plugin_name"].(string)
 		method, _ := v["method"].(string)
-		return pluginName, method
+		return componentName, method
 	}
 	return "", ""
 }

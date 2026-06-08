@@ -47,7 +47,7 @@ func (p *staticKeyProvider) Close() error { return nil }
 
 // stubComponentRegistry is a minimal ComponentRegistry that returns empty
 // results for all discovery calls. It is sufficient for testing
-// RedisPluginAccessStore because ListAvailablePlugins calls DiscoverAll
+// RedisComponentAccessStore because ListAvailablePlugins calls DiscoverAll
 // on the registry; all other store operations do not touch the registry.
 type stubComponentRegistry struct{}
 
@@ -79,10 +79,10 @@ func (s *stubComponentRegistry) DiscoverSystemOnly(_ context.Context, _, _ strin
 	return nil, nil
 }
 
-// newTestPluginAccessStore creates a RedisPluginAccessStore backed by a fresh
+// newTestPluginAccessStore creates a RedisComponentAccessStore backed by a fresh
 // miniredis instance with a real AES-GCM encryptor and a static key provider.
 // Cleanup is registered on t so callers do not need to manage it.
-func newTestPluginAccessStore(t *testing.T) (*RedisPluginAccessStore, *miniredis.Miniredis) {
+func newTestPluginAccessStore(t *testing.T) (*RedisComponentAccessStore, *miniredis.Miniredis) {
 	t.Helper()
 
 	mr := miniredis.RunT(t)
@@ -108,8 +108,8 @@ func newTestPluginAccessStore(t *testing.T) (*RedisPluginAccessStore, *miniredis
 }
 
 // pluginAccessNames returns a sorted slice of plugin names from a slice of
-// PluginAccess records — useful for deterministic assertions.
-func pluginAccessNames(records []PluginAccess) []string {
+// ComponentAccess records — useful for deterministic assertions.
+func pluginAccessNames(records []ComponentAccess) []string {
 	names := make([]string, 0, len(records))
 	for _, r := range records {
 		names = append(names, r.PluginName)
@@ -168,7 +168,7 @@ func TestPluginAccessStore_Disable_RemovesRecord(t *testing.T) {
 
 	// Access record must be gone.
 	_, err = store.GetAccess(ctx, "tenant-a", "gitlab")
-	assert.ErrorIs(t, err, ErrPluginNotEnabled)
+	assert.ErrorIs(t, err, ErrComponentNotEnabled)
 }
 
 func TestPluginAccessStore_Disable_RemovesConfig(t *testing.T) {
@@ -186,7 +186,7 @@ func TestPluginAccessStore_Disable_RemovesConfig(t *testing.T) {
 
 	// After disabling, both the access record and the config must be gone.
 	_, err = store.GetDecryptedConfig(ctx, "tenant-a", "gitlab")
-	assert.ErrorIs(t, err, ErrPluginNotEnabled)
+	assert.ErrorIs(t, err, ErrComponentNotEnabled)
 }
 
 // ---------------------------------------------------------------------------
@@ -350,7 +350,7 @@ func TestPluginAccessStore_UpdateConfig_FailsWhenNotEnabled(t *testing.T) {
 	ctx := context.Background()
 
 	err := store.UpdateConfig(ctx, "tenant-a", "gitlab", map[string]any{"token": "tok"}, "admin")
-	assert.ErrorIs(t, err, ErrPluginNotEnabled)
+	assert.ErrorIs(t, err, ErrComponentNotEnabled)
 }
 
 // ---------------------------------------------------------------------------
@@ -465,7 +465,7 @@ func TestPluginAccessStore_CrossTenantIsolation_GetAccess(t *testing.T) {
 
 	// Tenant B must not see tenant A's plugin.
 	_, err := store.GetAccess(ctx, "tenant-b", "gitlab")
-	assert.ErrorIs(t, err, ErrPluginNotEnabled)
+	assert.ErrorIs(t, err, ErrComponentNotEnabled)
 }
 
 func TestPluginAccessStore_CrossTenantIsolation_Config(t *testing.T) {
@@ -513,7 +513,7 @@ func TestPluginAccessStore_GetAccess_NotEnabled_ReturnsErrPluginNotEnabled(t *te
 	ctx := context.Background()
 
 	_, err := store.GetAccess(ctx, "tenant-a", "nonexistent-plugin")
-	assert.ErrorIs(t, err, ErrPluginNotEnabled)
+	assert.ErrorIs(t, err, ErrComponentNotEnabled)
 }
 
 func TestPluginAccessStore_GetDecryptedConfig_NotEnabled_ReturnsErrPluginNotEnabled(t *testing.T) {
@@ -521,7 +521,7 @@ func TestPluginAccessStore_GetDecryptedConfig_NotEnabled_ReturnsErrPluginNotEnab
 	ctx := context.Background()
 
 	_, err := store.GetDecryptedConfig(ctx, "tenant-a", "nonexistent-plugin")
-	assert.ErrorIs(t, err, ErrPluginNotEnabled)
+	assert.ErrorIs(t, err, ErrComponentNotEnabled)
 }
 
 func TestPluginAccessStore_GetDecryptedConfig_EnabledWithoutConfig_ReturnsErrPluginNotConfigured(t *testing.T) {
@@ -532,7 +532,7 @@ func TestPluginAccessStore_GetDecryptedConfig_EnabledWithoutConfig_ReturnsErrPlu
 	require.NoError(t, store.Enable(ctx, "tenant-a", "gitlab", nil, "admin"))
 
 	_, err := store.GetDecryptedConfig(ctx, "tenant-a", "gitlab")
-	assert.ErrorIs(t, err, ErrPluginNotConfigured)
+	assert.ErrorIs(t, err, ErrComponentNotConfigured)
 }
 
 func TestPluginAccessStore_GetMaskedConfig_NotEnabled_ReturnsErrPluginNotEnabled(t *testing.T) {
@@ -540,7 +540,7 @@ func TestPluginAccessStore_GetMaskedConfig_NotEnabled_ReturnsErrPluginNotEnabled
 	ctx := context.Background()
 
 	_, err := store.GetMaskedConfig(ctx, "tenant-a", "nonexistent-plugin")
-	assert.ErrorIs(t, err, ErrPluginNotEnabled)
+	assert.ErrorIs(t, err, ErrComponentNotEnabled)
 }
 
 func TestPluginAccessStore_GetMaskedConfig_EnabledWithoutConfig_ReturnsErrPluginNotConfigured(t *testing.T) {
@@ -550,7 +550,7 @@ func TestPluginAccessStore_GetMaskedConfig_EnabledWithoutConfig_ReturnsErrPlugin
 	require.NoError(t, store.Enable(ctx, "tenant-a", "gitlab", nil, "admin"))
 
 	_, err := store.GetMaskedConfig(ctx, "tenant-a", "gitlab")
-	assert.ErrorIs(t, err, ErrPluginNotConfigured)
+	assert.ErrorIs(t, err, ErrComponentNotConfigured)
 }
 
 // ---------------------------------------------------------------------------
@@ -736,7 +736,7 @@ func TestPluginAccessStore_ListAvailablePlugins_EmptyWhenNoSystemPlugins(t *test
 func TestPluginAccess_EffectiveAccess_LegacyEnabledRecord(t *testing.T) {
 	// A record with Enabled=true and both granular flags false must be treated
 	// as full read+write for backward compatibility.
-	access := &PluginAccess{
+	access := &ComponentAccess{
 		TenantID:     "t",
 		PluginName:   "p",
 		Enabled:      true,
@@ -749,7 +749,7 @@ func TestPluginAccess_EffectiveAccess_LegacyEnabledRecord(t *testing.T) {
 }
 
 func TestPluginAccess_EffectiveAccess_ReadOnly(t *testing.T) {
-	access := &PluginAccess{
+	access := &ComponentAccess{
 		TenantID:     "t",
 		PluginName:   "p",
 		Enabled:      true,
@@ -762,7 +762,7 @@ func TestPluginAccess_EffectiveAccess_ReadOnly(t *testing.T) {
 }
 
 func TestPluginAccess_EffectiveAccess_WriteOnly(t *testing.T) {
-	access := &PluginAccess{
+	access := &ComponentAccess{
 		TenantID:     "t",
 		PluginName:   "p",
 		Enabled:      true,
@@ -775,7 +775,7 @@ func TestPluginAccess_EffectiveAccess_WriteOnly(t *testing.T) {
 }
 
 func TestPluginAccess_EffectiveAccess_DisabledRecordGrantsNothing(t *testing.T) {
-	access := &PluginAccess{
+	access := &ComponentAccess{
 		TenantID:     "t",
 		PluginName:   "p",
 		Enabled:      false,
@@ -840,7 +840,7 @@ func TestPluginAccessStore_SetAccessGranularity_FailsWhenNotEnabled(t *testing.T
 	ctx := context.Background()
 
 	err := store.SetAccessGranularity(ctx, "tenant-a", "nonexistent", true, false)
-	assert.ErrorIs(t, err, ErrPluginNotEnabled)
+	assert.ErrorIs(t, err, ErrComponentNotEnabled)
 }
 
 func TestPluginAccessStore_SetAccessGranularity_PreservesConfig(t *testing.T) {
@@ -881,7 +881,7 @@ func TestPluginAccessStore_CheckAccess_ReadOnlyRecord_DeniesWrite(t *testing.T) 
 	require.NoError(t, store.SetAccessGranularity(ctx, "tenant-a", "gitlab", true, false))
 
 	assert.NoError(t, store.CheckAccess(ctx, "tenant-a", "gitlab", false), "read must be allowed")
-	assert.ErrorIs(t, store.CheckAccess(ctx, "tenant-a", "gitlab", true), ErrPluginAccessDenied, "write must be denied")
+	assert.ErrorIs(t, store.CheckAccess(ctx, "tenant-a", "gitlab", true), ErrComponentAccessDenied, "write must be denied")
 }
 
 func TestPluginAccessStore_CheckAccess_WriteOnlyRecord_DeniesRead(t *testing.T) {
@@ -891,7 +891,7 @@ func TestPluginAccessStore_CheckAccess_WriteOnlyRecord_DeniesRead(t *testing.T) 
 	require.NoError(t, store.Enable(ctx, "tenant-a", "gitlab", nil, "admin"))
 	require.NoError(t, store.SetAccessGranularity(ctx, "tenant-a", "gitlab", false, true))
 
-	assert.ErrorIs(t, store.CheckAccess(ctx, "tenant-a", "gitlab", false), ErrPluginAccessDenied, "read must be denied")
+	assert.ErrorIs(t, store.CheckAccess(ctx, "tenant-a", "gitlab", false), ErrComponentAccessDenied, "read must be denied")
 	assert.NoError(t, store.CheckAccess(ctx, "tenant-a", "gitlab", true), "write must be allowed")
 }
 
@@ -900,7 +900,7 @@ func TestPluginAccessStore_CheckAccess_NotEnabled_ReturnsErrPluginNotEnabled(t *
 	ctx := context.Background()
 
 	err := store.CheckAccess(ctx, "tenant-a", "nonexistent", false)
-	assert.ErrorIs(t, err, ErrPluginNotEnabled)
+	assert.ErrorIs(t, err, ErrComponentNotEnabled)
 }
 
 func TestPluginAccessStore_CheckAccess_BothGranted_GrantsReadAndWrite(t *testing.T) {
@@ -922,5 +922,5 @@ func TestPluginAccessStore_CheckAccess_AfterDisable_ReturnsErrPluginNotEnabled(t
 	require.NoError(t, store.Disable(ctx, "tenant-a", "gitlab"))
 
 	err := store.CheckAccess(ctx, "tenant-a", "gitlab", false)
-	assert.ErrorIs(t, err, ErrPluginNotEnabled)
+	assert.ErrorIs(t, err, ErrComponentNotEnabled)
 }

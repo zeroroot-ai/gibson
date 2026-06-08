@@ -9,7 +9,7 @@ package component
 //
 // The production daemon-side plugin dispatch client is implemented in
 // plugin_dispatch.go (PluginInvokeService) and plugin_registry.go
-// (postgresPluginRegistry). Both use ComponentService PollWork/SubmitResult
+// (postgresComponentInstallRegistry). Both use ComponentService PollWork/SubmitResult
 // and the PluginInvokeService (invoke.proto) defined in Phase 6.
 //
 // The ComponentDiscovery.DiscoverPlugin interface method is retained but its

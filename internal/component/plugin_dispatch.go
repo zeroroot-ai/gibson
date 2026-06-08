@@ -6,14 +6,14 @@ package component
 // PluginInvokeService exposes a single RPC: PluginInvoke, which:
 //  1. Validates that the caller is authorised (ext-authz enforces at the edge;
 //     we apply a defense-in-depth principal-kind check here).
-//  2. Looks up a serving install of the named plugin in the PluginRegistry.
+//  2. Looks up a serving install of the named plugin in the ComponentInstallRegistry.
 //  3. Validates the requested method against the install's declared_methods.
 //  4. Marshals the PluginInvokeRequest to bytes and calls DispatchOne, which
 //     enqueues a plugin_invoke work item and awaits the result.
 //  5. Unmarshals the result bytes back into a PluginInvokeResponse and returns.
 //
 // Per-(tenant, plugin) concurrency is limited by a semaphore stored in a
-// sync.Map keyed by "tenantID/pluginName". The limit defaults to 10 and is
+// sync.Map keyed by "tenantID/componentName". The limit defaults to 10 and is
 // read from pluginConcurrencyDefault; future phases can wire the manifest's
 // per-invocation limit at registration time.
 //
@@ -49,14 +49,14 @@ const (
 // PluginInvokeService implements pluginpb.PluginInvokeServiceServer.
 //
 // It is registered on the daemon's gRPC server alongside ComponentServiceServer
-// and delegates dispatch to the PluginRegistry.
+// and delegates dispatch to the ComponentInstallRegistry.
 type PluginInvokeService struct {
 	pluginpb.UnimplementedPluginInvokeServiceServer
 
 	// registry is the plugin install registry used for install lookup and dispatch.
-	registry PluginRegistry
+	registry ComponentInstallRegistry
 
-	// semaphores holds a weighted semaphore per "(tenantID/pluginName)" key.
+	// semaphores holds a weighted semaphore per "(tenantID/componentName)" key.
 	// Each semaphore limits concurrent in-flight invocations to pluginConcurrencyDefault.
 	// Populated lazily on first use. Protected by semaphoresMu.
 	semaphores   sync.Map // map[string]*semaphore.Weighted
@@ -68,7 +68,7 @@ type PluginInvokeService struct {
 
 // NewPluginInvokeService constructs a PluginInvokeService.
 // registry must not be nil.
-func NewPluginInvokeService(registry PluginRegistry, logger *slog.Logger) *PluginInvokeService {
+func NewPluginInvokeService(registry ComponentInstallRegistry, logger *slog.Logger) *PluginInvokeService {
 	if logger == nil {
 		logger = slog.Default()
 	}
@@ -140,26 +140,26 @@ func (s *PluginInvokeService) PluginInvoke(
 		}
 	}
 
-	pluginName := req.GetPluginName()
+	componentName := req.GetPluginName()
 	method := req.GetMethod()
 
 	// 4. Look up serving installs.
-	installs, err := s.registry.ListInstalls(ctx, tenant, pluginName)
+	installs, err := s.registry.ListInstalls(ctx, tenant, componentName)
 	if err != nil {
 		s.logger.ErrorContext(ctx, "PluginInvoke: failed to list installs",
 			slog.String("tenant", tenantStr),
-			slog.String("plugin", pluginName),
+			slog.String("plugin", componentName),
 			slog.String("error", err.Error()),
 		)
 		return pluginErrorResponse(
 			pluginpb.PluginError_PLUGIN_ERROR_KIND_INTERNAL,
-			fmt.Sprintf("internal error listing installs for plugin %s", pluginName),
+			fmt.Sprintf("internal error listing installs for plugin %s", componentName),
 		), nil
 	}
 	if len(installs) == 0 {
 		return pluginErrorResponse(
 			pluginpb.PluginError_PLUGIN_ERROR_KIND_UNAVAILABLE,
-			fmt.Sprintf("no serving installs of plugin %s for tenant %s", pluginName, tenantStr),
+			fmt.Sprintf("no serving installs of plugin %s for tenant %s", componentName, tenantStr),
 		), nil
 	}
 
@@ -169,12 +169,12 @@ func (s *PluginInvokeService) PluginInvoke(
 	if !methodDeclared(installs[0].DeclaredMethods, method) {
 		return pluginErrorResponse(
 			pluginpb.PluginError_PLUGIN_ERROR_KIND_METHOD_NOT_FOUND,
-			fmt.Sprintf("method %q not declared by plugin %s", method, pluginName),
+			fmt.Sprintf("method %q not declared by plugin %s", method, componentName),
 		), nil
 	}
 
 	// 6. Acquire per-(tenant, plugin) concurrency semaphore.
-	semKey := tenantStr + "/" + pluginName
+	semKey := tenantStr + "/" + componentName
 	sem := s.getSemaphore(semKey)
 
 	// Try to acquire without blocking past the invocation deadline.
@@ -184,7 +184,7 @@ func (s *PluginInvokeService) PluginInvoke(
 		if errors.Is(err, context.DeadlineExceeded) || errors.Is(semCtx.Err(), context.DeadlineExceeded) {
 			return pluginErrorResponse(
 				pluginpb.PluginError_PLUGIN_ERROR_KIND_DEADLINE_EXCEEDED,
-				fmt.Sprintf("concurrency limit reached for plugin %s/%s; deadline exceeded waiting for a slot", tenantStr, pluginName),
+				fmt.Sprintf("concurrency limit reached for plugin %s/%s; deadline exceeded waiting for a slot", tenantStr, componentName),
 			), nil
 		}
 		return pluginErrorResponse(
@@ -206,9 +206,9 @@ func (s *PluginInvokeService) PluginInvoke(
 	}
 
 	// 8. Dispatch via registry.
-	resultBytes, dispatchErr := s.registry.DispatchOne(ctx, tenant, pluginName, method, payload, deadline)
+	resultBytes, dispatchErr := s.registry.DispatchOne(ctx, tenant, componentName, method, payload, deadline)
 	if dispatchErr != nil {
-		return s.classifyDispatchError(ctx, dispatchErr, pluginName, method), nil
+		return s.classifyDispatchError(ctx, dispatchErr, componentName, method), nil
 	}
 
 	// 9. Unmarshal the result bytes into a PluginInvokeResponse.
@@ -226,7 +226,7 @@ func (s *PluginInvokeService) PluginInvoke(
 
 	s.logger.InfoContext(ctx, "PluginInvoke: success",
 		slog.String("tenant", tenantStr),
-		slog.String("plugin", pluginName),
+		slog.String("plugin", componentName),
 		slog.String("method", method),
 		slog.Duration("deadline", deadline),
 	)
@@ -238,13 +238,13 @@ func (s *PluginInvokeService) PluginInvoke(
 func (s *PluginInvokeService) classifyDispatchError(
 	ctx context.Context,
 	err error,
-	pluginName, method string,
+	componentName, method string,
 ) *pluginpb.PluginInvokeResponse {
-	// ErrPluginUnavailable: no installs at dispatch time.
-	if errors.Is(err, ErrPluginUnavailable) {
+	// ErrComponentUnavailable: no installs at dispatch time.
+	if errors.Is(err, ErrComponentUnavailable) {
 		return pluginErrorResponse(
 			pluginpb.PluginError_PLUGIN_ERROR_KIND_UNAVAILABLE,
-			fmt.Sprintf("no serving installs of plugin %s at dispatch time", pluginName),
+			fmt.Sprintf("no serving installs of plugin %s at dispatch time", componentName),
 		)
 	}
 
@@ -270,13 +270,13 @@ func (s *PluginInvokeService) classifyDispatchError(
 		strings.Contains(err.Error(), "timeout waiting for work") {
 		return pluginErrorResponse(
 			pluginpb.PluginError_PLUGIN_ERROR_KIND_DEADLINE_EXCEEDED,
-			fmt.Sprintf("plugin %s/%s did not respond within the deadline", pluginName, method),
+			fmt.Sprintf("plugin %s/%s did not respond within the deadline", componentName, method),
 		)
 	}
 
 	// Default: internal error.
 	s.logger.ErrorContext(ctx, "PluginInvoke: unclassified dispatch error",
-		slog.String("plugin", pluginName),
+		slog.String("plugin", componentName),
 		slog.String("method", method),
 		slog.String("error", err.Error()),
 	)

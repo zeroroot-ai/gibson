@@ -1,6 +1,6 @@
 package component
 
-// plugin_registry.go implements the PluginRegistry for the daemon-side plugin
+// plugin_registry.go implements the ComponentInstallRegistry for the daemon-side plugin
 // runtime (Spec 2, plugin-runtime, Phase 7, Task 14).
 //
 // Design decisions:
@@ -33,15 +33,15 @@ import (
 	"github.com/zeroroot-ai/sdk/auth"
 )
 
-// PluginInstallStatus is the transient runtime status of a plugin install,
+// ComponentInstallStatus is the transient runtime status of a plugin install,
 // stored in Redis with a 90-second TTL.
-type PluginInstallStatus string
+type ComponentInstallStatus string
 
 const (
-	// PluginInstallStatusServing indicates the install is healthy and accepting work.
-	PluginInstallStatusServing PluginInstallStatus = "serving"
-	// PluginInstallStatusUnreachable indicates the install has not heartbeated within TTL.
-	PluginInstallStatusUnreachable PluginInstallStatus = "unreachable"
+	// ComponentInstallStatusServing indicates the install is healthy and accepting work.
+	ComponentInstallStatusServing ComponentInstallStatus = "serving"
+	// ComponentInstallStatusUnreachable indicates the install has not heartbeated within TTL.
+	ComponentInstallStatusUnreachable ComponentInstallStatus = "unreachable"
 )
 
 const (
@@ -59,9 +59,9 @@ const (
 	pluginKind = "plugin"
 )
 
-// PluginInstall describes a registered plugin install's persistent metadata.
+// ComponentInstall describes a registered plugin install's persistent metadata.
 // This is the value persisted to the plugin_install Postgres table.
-type PluginInstall struct {
+type ComponentInstall struct {
 	// ID is the UUID assigned by the daemon at registration time.
 	ID string
 	// TenantID is the tenant that owns this install.
@@ -113,7 +113,7 @@ type InstallInfo struct {
 	// LastHeartbeatAt is when the install last sent a heartbeat (from Redis).
 	LastHeartbeatAt time.Time
 	// Status is the transient status (from Redis): "serving" or "unreachable".
-	Status PluginInstallStatus
+	Status ComponentInstallStatus
 }
 
 // RegistryStatus is a summary of all installs of a named plugin, used for
@@ -123,15 +123,15 @@ type RegistryStatus struct {
 	Installs []InstallInfo
 }
 
-// PluginRegistry is the interface for the daemon-side plugin install registry.
+// ComponentInstallRegistry is the interface for the daemon-side plugin install registry.
 //
 // All methods are tenant-scoped. The registry does not perform FGA checks —
 // those are enforced upstream by ext-authz and by PluginInvokeService.
-type PluginRegistry interface {
+type ComponentInstallRegistry interface {
 	// Register persists a new plugin install row in Postgres and creates its
 	// initial Redis status key. Idempotent: if a row already exists for
 	// (tenant_id, plugin_name, host_id) the row is upserted with updated fields.
-	Register(ctx context.Context, install *PluginInstall) error
+	Register(ctx context.Context, install *ComponentInstall) error
 
 	// Heartbeat refreshes the Redis TTL for the install identified by installID
 	// and updates last_heartbeat_at in the status payload.
@@ -154,7 +154,7 @@ type PluginRegistry interface {
 	Status(ctx context.Context, tenant auth.TenantID, name string) (RegistryStatus, error)
 }
 
-// installRoundRobin tracks per-(tenantID+pluginName) dispatch indices for
+// installRoundRobin tracks per-(tenantID+componentName) dispatch indices for
 // round-robin load balancing. The zero value is valid.
 type installRoundRobin struct {
 	mu      sync.Mutex
@@ -179,10 +179,10 @@ func (r *installRoundRobin) next(key string) uint64 {
 	return counter.Add(1) - 1 // pre-increment; return previous value
 }
 
-// postgresPluginRegistry is the production implementation of PluginRegistry.
+// postgresComponentInstallRegistry is the production implementation of ComponentInstallRegistry.
 // It stores persistent metadata in the dashboard Postgres (plugin_install table)
 // and transient state in Redis.
-type postgresPluginRegistry struct {
+type postgresComponentInstallRegistry struct {
 	db         *sql.DB
 	redis      redis.UniversalClient
 	queue      WorkQueue
@@ -190,16 +190,16 @@ type postgresPluginRegistry struct {
 	logger     *slog.Logger
 }
 
-// NewPluginRegistry constructs a PluginRegistry backed by Postgres and Redis.
+// NewPluginRegistry constructs a ComponentInstallRegistry backed by Postgres and Redis.
 //
 // db must point to the operator-shared (dashboard) Postgres instance containing
 // the plugin_install table (migration 008). redisClient is the daemon's Redis
 // client used for transient state. queue is the WorkQueue used for DispatchOne.
-func NewPluginRegistry(db *sql.DB, redisClient redis.UniversalClient, queue WorkQueue, logger *slog.Logger) PluginRegistry {
+func NewPluginRegistry(db *sql.DB, redisClient redis.UniversalClient, queue WorkQueue, logger *slog.Logger) ComponentInstallRegistry {
 	if logger == nil {
 		logger = slog.Default()
 	}
-	return &postgresPluginRegistry{
+	return &postgresComponentInstallRegistry{
 		db:         db,
 		redis:      redisClient,
 		queue:      queue,
@@ -215,11 +215,11 @@ func pluginStatusKey(installID string) string {
 	return fmt.Sprintf("plugin:install:%s:status", installID)
 }
 
-// Register implements PluginRegistry.
+// Register implements ComponentInstallRegistry.
 //
 // It upserts a row in plugin_install (ON CONFLICT on the unique host constraint)
 // and sets the initial Redis status payload with a 90-second TTL and status "serving".
-func (r *postgresPluginRegistry) Register(ctx context.Context, install *PluginInstall) error {
+func (r *postgresComponentInstallRegistry) Register(ctx context.Context, install *ComponentInstall) error {
 	if install == nil {
 		return fmt.Errorf("plugin registry register: install must not be nil")
 	}
@@ -281,7 +281,7 @@ RETURNING id`
 	payload := pluginStatusPayload{
 		Address:         "",
 		LastHeartbeatAt: time.Now().UTC(),
-		Status:          string(PluginInstallStatusServing),
+		Status:          string(ComponentInstallStatusServing),
 	}
 	if err := r.setRedisStatus(ctx, assignedID, payload); err != nil {
 		return fmt.Errorf("plugin registry register: set redis status: %w", err)
@@ -298,12 +298,12 @@ RETURNING id`
 	return nil
 }
 
-// Heartbeat implements PluginRegistry.
+// Heartbeat implements ComponentInstallRegistry.
 //
 // It reads the current Redis status payload, updates last_heartbeat_at and
 // address, and resets the 90-second TTL. If the key has expired (install
 // previously unreachable) the payload is recreated with status "serving".
-func (r *postgresPluginRegistry) Heartbeat(ctx context.Context, installID string, address string) error {
+func (r *postgresComponentInstallRegistry) Heartbeat(ctx context.Context, installID string, address string) error {
 	if installID == "" {
 		return fmt.Errorf("plugin registry heartbeat: installID must not be empty")
 	}
@@ -328,7 +328,7 @@ func (r *postgresPluginRegistry) Heartbeat(ctx context.Context, installID string
 	if address != "" {
 		payload.Address = address
 	}
-	payload.Status = string(PluginInstallStatusServing)
+	payload.Status = string(ComponentInstallStatusServing)
 
 	if err := r.setRedisStatus(ctx, installID, payload); err != nil {
 		return fmt.Errorf("plugin registry heartbeat: update redis status: %w", err)
@@ -337,12 +337,12 @@ func (r *postgresPluginRegistry) Heartbeat(ctx context.Context, installID string
 	return nil
 }
 
-// ListInstalls implements PluginRegistry.
+// ListInstalls implements ComponentInstallRegistry.
 //
 // It queries plugin_install for all rows matching (tenant_id, plugin_name),
 // then checks each install's Redis status key. Only installs whose key exists
 // and whose status is "serving" are returned.
-func (r *postgresPluginRegistry) ListInstalls(ctx context.Context, tenant auth.TenantID, name string) ([]InstallInfo, error) {
+func (r *postgresComponentInstallRegistry) ListInstalls(ctx context.Context, tenant auth.TenantID, name string) ([]InstallInfo, error) {
 	rows, err := r.queryInstalls(ctx, tenant, name)
 	if err != nil {
 		return nil, err
@@ -351,7 +351,7 @@ func (r *postgresPluginRegistry) ListInstalls(ctx context.Context, tenant auth.T
 	var active []InstallInfo
 	for _, row := range rows {
 		status, addr, heartbeat, ok := r.redisStatus(ctx, row.InstallID)
-		if !ok || status != PluginInstallStatusServing {
+		if !ok || status != ComponentInstallStatusServing {
 			continue
 		}
 		row.Status = status
@@ -362,13 +362,13 @@ func (r *postgresPluginRegistry) ListInstalls(ctx context.Context, tenant auth.T
 	return active, nil
 }
 
-// DispatchOne implements PluginRegistry.
+// DispatchOne implements ComponentInstallRegistry.
 //
 // It selects a serving install via round-robin, enqueues a "plugin_invoke"
 // WorkItem to the install's per-tenant work stream, and waits for the result.
 // The payload bytes are stored verbatim in WorkItem.Payload; the result bytes
 // from WorkResult.Result are returned to the caller.
-func (r *postgresPluginRegistry) DispatchOne(
+func (r *postgresComponentInstallRegistry) DispatchOne(
 	ctx context.Context,
 	tenant auth.TenantID,
 	name, method string,
@@ -380,7 +380,7 @@ func (r *postgresPluginRegistry) DispatchOne(
 		return nil, fmt.Errorf("plugin dispatch: list installs for %s/%s: %w", tenant.String(), name, err)
 	}
 	if len(installs) == 0 {
-		return nil, ErrPluginUnavailable
+		return nil, ErrComponentUnavailable
 	}
 
 	// Cap deadline.
@@ -425,11 +425,11 @@ func (r *postgresPluginRegistry) DispatchOne(
 	return result.Result, nil
 }
 
-// Status implements PluginRegistry.
+// Status implements ComponentInstallRegistry.
 //
 // It returns a RegistryStatus with all installs (serving and unreachable) for
 // the named plugin. Useful for dashboard rendering.
-func (r *postgresPluginRegistry) Status(ctx context.Context, tenant auth.TenantID, name string) (RegistryStatus, error) {
+func (r *postgresComponentInstallRegistry) Status(ctx context.Context, tenant auth.TenantID, name string) (RegistryStatus, error) {
 	rows, err := r.queryInstalls(ctx, tenant, name)
 	if err != nil {
 		return RegistryStatus{}, err
@@ -442,7 +442,7 @@ func (r *postgresPluginRegistry) Status(ctx context.Context, tenant auth.TenantI
 			rows[i].Address = addr
 			rows[i].LastHeartbeatAt = heartbeat
 		} else {
-			rows[i].Status = PluginInstallStatusUnreachable
+			rows[i].Status = ComponentInstallStatusUnreachable
 		}
 	}
 
@@ -456,7 +456,7 @@ func (r *postgresPluginRegistry) Status(ctx context.Context, tenant auth.TenantI
 // queryInstalls returns all plugin_install rows for (tenant_id, plugin_name)
 // without filtering on Redis status. The returned InstallInfo.Status field is
 // not populated (the caller enriches it from Redis).
-func (r *postgresPluginRegistry) queryInstalls(ctx context.Context, tenant auth.TenantID, name string) ([]InstallInfo, error) {
+func (r *postgresComponentInstallRegistry) queryInstalls(ctx context.Context, tenant auth.TenantID, name string) ([]InstallInfo, error) {
 	const q = `
 SELECT id, tenant_id, component_name, version, declared_methods
 FROM   component_install
@@ -506,7 +506,7 @@ ORDER BY created_at`
 
 // setRedisStatus serialises payload and stores it under pluginStatusKey(installID)
 // with pluginInstallTTL.
-func (r *postgresPluginRegistry) setRedisStatus(ctx context.Context, installID string, payload pluginStatusPayload) error {
+func (r *postgresComponentInstallRegistry) setRedisStatus(ctx context.Context, installID string, payload pluginStatusPayload) error {
 	data, err := json.Marshal(payload)
 	if err != nil {
 		return fmt.Errorf("marshal status payload: %w", err)
@@ -516,24 +516,24 @@ func (r *postgresPluginRegistry) setRedisStatus(ctx context.Context, installID s
 
 // redisStatus reads the transient status for installID. Returns false when the
 // key is absent (expired or never written).
-func (r *postgresPluginRegistry) redisStatus(ctx context.Context, installID string) (PluginInstallStatus, string, time.Time, bool) {
+func (r *postgresComponentInstallRegistry) redisStatus(ctx context.Context, installID string) (ComponentInstallStatus, string, time.Time, bool) {
 	data, err := r.redis.Get(ctx, pluginStatusKey(installID)).Bytes()
 	if err != nil {
-		return PluginInstallStatusUnreachable, "", time.Time{}, false
+		return ComponentInstallStatusUnreachable, "", time.Time{}, false
 	}
 	var payload pluginStatusPayload
 	if err := json.Unmarshal(data, &payload); err != nil {
-		return PluginInstallStatusUnreachable, "", time.Time{}, false
+		return ComponentInstallStatusUnreachable, "", time.Time{}, false
 	}
-	return PluginInstallStatus(payload.Status), payload.Address, payload.LastHeartbeatAt, true
+	return ComponentInstallStatus(payload.Status), payload.Address, payload.LastHeartbeatAt, true
 }
 
 // ---------------------------------------------------------------------------
 // Sentinel errors
 // ---------------------------------------------------------------------------
 
-// ErrPluginUnavailable is returned by DispatchOne when no serving installs exist.
-var ErrPluginUnavailable = errors.New("plugin registry: no serving installs available")
+// ErrComponentUnavailable is returned by DispatchOne when no serving installs exist.
+var ErrComponentUnavailable = errors.New("plugin registry: no serving installs available")
 
 // PluginWorkError wraps a structured error returned by a plugin install via SubmitResult.
 type PluginWorkError struct {

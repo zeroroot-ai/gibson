@@ -317,12 +317,12 @@ func applyInterpolation(cfg *Config, interpolated map[string]interface{}) error 
 		if cfg.Plugins == nil {
 			cfg.Plugins = make(PluginsConfig)
 		}
-		for pluginName, pluginConfig := range plugins {
+		for componentName, pluginConfig := range plugins {
 			if pluginMap, ok := pluginConfig.(map[string]interface{}); ok {
-				cfg.Plugins[pluginName] = make(map[string]string)
+				cfg.Plugins[componentName] = make(map[string]string)
 				for key, value := range pluginMap {
 					if strVal, ok := value.(string); ok {
-						cfg.Plugins[pluginName][key] = interpolateString(strVal)
+						cfg.Plugins[componentName][key] = interpolateString(strVal)
 					}
 				}
 			}
