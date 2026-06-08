@@ -242,6 +242,6 @@ type registryPluginExecutor struct {
 	discovery ComponentDiscovery
 }
 
-func (e *registryPluginExecutor) QueryPlugin(_ context.Context, pluginName, method string, _ map[string]any) (any, error) {
-	return nil, fmt.Errorf("plugin %s.%s: DelegationHarness has no plugin dispatch path; in-process Plugin.Query was removed by the plugin-runtime spec — invoke plugins via AgentHarness.QueryPlugin (PluginInvokeService) on the live harness instead", pluginName, method)
+func (e *registryPluginExecutor) QueryPlugin(_ context.Context, componentName, method string, _ map[string]any) (any, error) {
+	return nil, fmt.Errorf("plugin %s.%s: DelegationHarness has no plugin dispatch path; in-process Plugin.Query was removed by the plugin-runtime spec — invoke plugins via AgentHarness.QueryPlugin (PluginInvokeService) on the live harness instead", componentName, method)
 }

@@ -1,7 +1,7 @@
 package component
 
 // Integration tests for the full plugin access flow. These tests exercise
-// end-to-end paths that cross the PluginAccessStore and a real
+// end-to-end paths that cross the ComponentAccessStore and a real
 // RedisComponentRegistry (backed by miniredis), covering the scenarios that
 // unit tests with the stubComponentRegistry cannot reach.
 //
@@ -66,10 +66,10 @@ func (r *richComponentRegistry) DiscoverAll(_ context.Context, tenant, kind stri
 	return results, nil
 }
 
-// newIntegrationStore creates a RedisPluginAccessStore backed by a fresh
+// newIntegrationStore creates a RedisComponentAccessStore backed by a fresh
 // miniredis instance with a real AES-GCM encryptor, static key provider, and
 // the supplied ComponentRegistry. Cleanup is registered on t.
-func newIntegrationStore(t *testing.T, registry ComponentRegistry) *RedisPluginAccessStore {
+func newIntegrationStore(t *testing.T, registry ComponentRegistry) *RedisComponentAccessStore {
 	t.Helper()
 
 	mr := miniredis.RunT(t)
@@ -219,7 +219,7 @@ func Test_SelfHostedPluginAutoAccess(t *testing.T) {
 	require.NoError(t, err)
 	assert.Contains(t, pluginAccessNames(plugins), "custom-scanner")
 
-	var found *PluginAccess
+	var found *ComponentAccess
 	for i := range plugins {
 		if plugins[i].PluginName == "custom-scanner" {
 			found = &plugins[i]
@@ -296,7 +296,7 @@ func Test_TenantIsolation_SystemPlugin(t *testing.T) {
 
 	// Tenant-A access must be gone.
 	_, err = store.GetAccess(ctx, "tenant-a", "jira")
-	assert.ErrorIs(t, err, ErrPluginNotEnabled)
+	assert.ErrorIs(t, err, ErrComponentNotEnabled)
 
 	// Tenant-B must be completely unaffected.
 	accessB, err := store.GetAccess(ctx, "tenant-b", "jira")
@@ -323,7 +323,7 @@ func Test_TenantIsolation_SystemPlugin(t *testing.T) {
 
 // Test_DisableRemovesConfig verifies that Disable removes both the access
 // record and the encrypted config blob — GetAccess and GetDecryptedConfig both
-// return ErrPluginNotEnabled after a Disable call.
+// return ErrComponentNotEnabled after a Disable call.
 func Test_DisableRemovesConfig(t *testing.T) {
 	ctx := context.Background()
 
@@ -350,14 +350,14 @@ func Test_DisableRemovesConfig(t *testing.T) {
 
 	// Access record must be gone.
 	_, err = store.GetAccess(ctx, "tenant-a", "aws-bedrock")
-	assert.ErrorIs(t, err, ErrPluginNotEnabled,
-		"GetAccess must return ErrPluginNotEnabled after Disable")
+	assert.ErrorIs(t, err, ErrComponentNotEnabled,
+		"GetAccess must return ErrComponentNotEnabled after Disable")
 
 	// Encrypted config must also be gone — GetDecryptedConfig returns
-	// ErrPluginNotEnabled because the access record check fires first.
+	// ErrComponentNotEnabled because the access record check fires first.
 	_, err = store.GetDecryptedConfig(ctx, "tenant-a", "aws-bedrock")
-	assert.ErrorIs(t, err, ErrPluginNotEnabled,
-		"GetDecryptedConfig must return ErrPluginNotEnabled after Disable")
+	assert.ErrorIs(t, err, ErrComponentNotEnabled,
+		"GetDecryptedConfig must return ErrComponentNotEnabled after Disable")
 
 	// Disabling an already-disabled plugin must not error.
 	require.NoError(t, store.Disable(ctx, "tenant-a", "aws-bedrock"),

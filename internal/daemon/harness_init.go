@@ -111,10 +111,10 @@ func (d *daemonImpl) newHarnessFactory(ctx context.Context) (harness.HarnessFact
 		SlotManagerForTenant: slotManagerForTenant,
 
 		// Component registries
-		// PluginRegistry field was removed in plugin-runtime Spec 2 Phase 7;
+		// ComponentInstallRegistry field was removed in plugin-runtime Spec 2 Phase 7;
 		// plugin dispatch goes through ComponentRegistry + WorkQueue
 		// (PluginInvokeService, see internal/component/plugin_dispatch.go).
-		PluginAccess: d.pluginAccessStore, // nil when no KeyProvider configured; harness skips opt-in checks
+		ComponentAccess: d.pluginAccessStore, // nil when no KeyProvider configured; harness skips opt-in checks
 
 		// ComponentRegistry enables tenant-scoped discovery (Path 2 in CallToolProto/QueryPlugin).
 		// RegistryAdapter handles direct gRPC dispatch when a component exposes grpc_endpoint.

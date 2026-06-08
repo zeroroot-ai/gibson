@@ -58,7 +58,7 @@ func TestHarnessConfig_ApplyDefaults(t *testing.T) {
 	if config.LLMRegistry == nil {
 		t.Error("expected LLMRegistry to be defaulted")
 	}
-	// PluginRegistry field was removed in plugin-runtime Spec 2 Phase 7;
+	// ComponentInstallRegistry field was removed in plugin-runtime Spec 2 Phase 7;
 	// plugin dispatch goes through ComponentRegistry + WorkQueue
 	// (component/plugin_dispatch.go).
 	if config.Logger == nil {

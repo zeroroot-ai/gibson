@@ -226,13 +226,13 @@ func TestToolAttributes(t *testing.T) {
 func TestPluginAttributes(t *testing.T) {
 	tests := []struct {
 		name       string
-		pluginName string
+		componentName string
 		method     string
 		want       map[string]any
 	}{
 		{
 			name:       "plugin with method",
-			pluginName: "scanner",
+			componentName: "scanner",
 			method:     "ScanPort",
 			want: map[string]any{
 				GibsonPluginName:   "scanner",
@@ -241,7 +241,7 @@ func TestPluginAttributes(t *testing.T) {
 		},
 		{
 			name:       "plugin without method",
-			pluginName: "analyzer",
+			componentName: "analyzer",
 			method:     "",
 			want: map[string]any{
 				GibsonPluginName: "analyzer",
@@ -251,7 +251,7 @@ func TestPluginAttributes(t *testing.T) {
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			attrs := PluginAttributes(tt.pluginName, tt.method)
+			attrs := PluginAttributes(tt.componentName, tt.method)
 
 			got := make(map[string]any)
 			for _, attr := range attrs {

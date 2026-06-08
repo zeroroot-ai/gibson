@@ -6,7 +6,7 @@ package daemon
 //
 // Three thin adapters live here:
 //
-//  1. pluginRegistryReaderAdapter — wraps component.PluginRegistry (which
+//  1. componentInstallRegistryReaderAdapter — wraps component.ComponentInstallRegistry (which
 //     has ListInstalls(tenant, name) and Status) to satisfy the
 //     admin.PluginRegistryReader interface (ListAll, Get).
 //
@@ -39,29 +39,29 @@ import (
 )
 
 // ---------------------------------------------------------------------------
-// 1. pluginRegistryReaderAdapter
+// 1. componentInstallRegistryReaderAdapter
 // ---------------------------------------------------------------------------
 
-// pluginRegistryReaderAdapter adapts the daemon's platformDB (same Postgres
-// instance the PluginRegistry uses) to admin.PluginRegistryReader. We query
+// componentInstallRegistryReaderAdapter adapts the daemon's platformDB (same Postgres
+// instance the ComponentInstallRegistry uses) to admin.PluginRegistryReader. We query
 // the plugin_install table directly so we can implement the ListAll and Get
 // operations needed by the admin surface without extending the
-// component.PluginRegistry interface.
+// component.ComponentInstallRegistry interface.
 //
 // The adapter is read-only and does not touch Redis transient state — the
 // admin dashboard cares about install metadata, not live liveness status.
 // Status is reported as "serving" for all rows (the liveness model is the
-// component.PluginRegistry's concern).
-type pluginRegistryReaderAdapter struct {
+// component.ComponentInstallRegistry's concern).
+type componentInstallRegistryReaderAdapter struct {
 	db *sql.DB
 }
 
-var _ admin.PluginRegistryReader = (*pluginRegistryReaderAdapter)(nil)
+var _ admin.PluginRegistryReader = (*componentInstallRegistryReaderAdapter)(nil)
 
 // ListAll returns all plugin_install rows for the given tenant. It does not
 // check Redis transient state — the admin surface needs the full list including
 // installs whose hosts are currently offline.
-func (a *pluginRegistryReaderAdapter) ListAll(ctx context.Context, tenant auth.TenantID) ([]admin.PluginInstallInfo, error) {
+func (a *componentInstallRegistryReaderAdapter) ListAll(ctx context.Context, tenant auth.TenantID) ([]admin.ComponentInstallInfo, error) {
 	const q = `
 SELECT id, tenant_id, plugin_name, version, declared_methods,
        runtime_mode, setec_required, created_at
@@ -75,10 +75,10 @@ ORDER BY created_at`
 	}
 	defer rows.Close() //nolint:errcheck
 
-	var out []admin.PluginInstallInfo
+	var out []admin.ComponentInstallInfo
 	for rows.Next() {
 		var (
-			info        admin.PluginInstallInfo
+			info        admin.ComponentInstallInfo
 			tenantIDStr string
 			methodsJSON []byte
 			createdAt   time.Time
@@ -109,7 +109,7 @@ ORDER BY created_at`
 }
 
 // Get returns a single plugin_install row by install ID and tenant.
-func (a *pluginRegistryReaderAdapter) Get(ctx context.Context, tenant auth.TenantID, installID string) (*admin.PluginInstallInfo, error) {
+func (a *componentInstallRegistryReaderAdapter) Get(ctx context.Context, tenant auth.TenantID, installID string) (*admin.ComponentInstallInfo, error) {
 	const q = `
 SELECT id, tenant_id, plugin_name, version, declared_methods,
        runtime_mode, setec_required, created_at
@@ -119,7 +119,7 @@ AND    id         = $2
 LIMIT 1`
 
 	var (
-		info        admin.PluginInstallInfo
+		info        admin.ComponentInstallInfo
 		tenantIDStr string
 		methodsJSON []byte
 		createdAt   time.Time

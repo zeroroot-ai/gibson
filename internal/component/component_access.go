@@ -16,13 +16,13 @@ import (
 
 // Sentinel errors for plugin access operations.
 var (
-	ErrPluginNotEnabled    = errors.New("plugin not enabled for tenant")
-	ErrPluginNotConfigured = errors.New("plugin enabled but not configured")
-	ErrPluginAlreadyExists = errors.New("plugin access record already exists")
-	ErrPluginAccessDenied  = errors.New("plugin access level not granted for tenant")
+	ErrComponentNotEnabled    = errors.New("plugin not enabled for tenant")
+	ErrComponentNotConfigured = errors.New("plugin enabled but not configured")
+	ErrComponentAlreadyExists = errors.New("plugin access record already exists")
+	ErrComponentAccessDenied  = errors.New("plugin access level not granted for tenant")
 )
 
-// PluginAccess represents a tenant's opt-in record for a plugin.
+// ComponentAccess represents a tenant's opt-in record for a plugin.
 //
 // ReadEnabled and WriteEnabled provide fine-grained access control within an
 // enabled plugin. When both are false (legacy records where only Enabled is
@@ -30,7 +30,7 @@ var (
 // records should always set at least one of ReadEnabled or WriteEnabled
 // explicitly; callers should use EffectiveReadEnabled / EffectiveWriteEnabled
 // (or CheckAccess) rather than reading these fields directly.
-type PluginAccess struct {
+type ComponentAccess struct {
 	TenantID     string `json:"tenant_id"`
 	PluginName   string `json:"plugin_name"`
 	Enabled      bool   `json:"enabled"`
@@ -45,7 +45,7 @@ type PluginAccess struct {
 // EffectiveReadEnabled returns whether the tenant has read access to the plugin,
 // applying backward-compat logic: if both ReadEnabled and WriteEnabled are false
 // but Enabled is true (a legacy record), read access is implicitly granted.
-func (a *PluginAccess) EffectiveReadEnabled() bool {
+func (a *ComponentAccess) EffectiveReadEnabled() bool {
 	if !a.Enabled {
 		return false
 	}
@@ -58,7 +58,7 @@ func (a *PluginAccess) EffectiveReadEnabled() bool {
 
 // EffectiveWriteEnabled returns whether the tenant has write access to the
 // plugin, applying the same backward-compat logic as EffectiveReadEnabled.
-func (a *PluginAccess) EffectiveWriteEnabled() bool {
+func (a *ComponentAccess) EffectiveWriteEnabled() bool {
 	if !a.Enabled {
 		return false
 	}
@@ -91,68 +91,68 @@ type encryptedConfig struct {
 	Salt       []byte `json:"salt"`
 }
 
-// PluginAccessStore manages tenant opt-in and encrypted configuration for
+// ComponentAccessStore manages tenant opt-in and encrypted configuration for
 // platform-hosted plugins.
-type PluginAccessStore interface {
+type ComponentAccessStore interface {
 	// Enable grants a tenant access to a _system plugin and stores their config.
 	// ReadEnabled and writeEnabled control the granular access flags; when both
 	// are false the record is stored with Enabled=true and no granular flags,
 	// which is treated as full read+write access (legacy behavior).
-	Enable(ctx context.Context, tenant, pluginName string, config map[string]any, configuredBy string) error
+	Enable(ctx context.Context, tenant, componentName string, config map[string]any, configuredBy string) error
 
 	// Disable removes access and deletes stored config.
-	Disable(ctx context.Context, tenant, pluginName string) error
+	Disable(ctx context.Context, tenant, componentName string) error
 
 	// SetAccessGranularity updates the ReadEnabled/WriteEnabled toggles for an
 	// already-enabled plugin without touching its configuration. Returns
-	// ErrPluginNotEnabled if the plugin has not been enabled first.
-	SetAccessGranularity(ctx context.Context, tenant, pluginName string, readEnabled, writeEnabled bool) error
+	// ErrComponentNotEnabled if the plugin has not been enabled first.
+	SetAccessGranularity(ctx context.Context, tenant, componentName string, readEnabled, writeEnabled bool) error
 
 	// CheckAccess returns nil if the tenant has the requested access level for
 	// the plugin. Pass write=false for read-only operations and write=true for
-	// mutations. Returns ErrPluginNotEnabled if the plugin is not enabled at all,
-	// or ErrPluginAccessDenied if the requested level is not granted.
-	CheckAccess(ctx context.Context, tenant, pluginName string, write bool) error
+	// mutations. Returns ErrComponentNotEnabled if the plugin is not enabled at all,
+	// or ErrComponentAccessDenied if the requested level is not granted.
+	CheckAccess(ctx context.Context, tenant, componentName string, write bool) error
 
 	// GetAccess returns the access record for a tenant+plugin.
-	// Returns ErrPluginNotEnabled if no record exists.
-	GetAccess(ctx context.Context, tenant, pluginName string) (*PluginAccess, error)
+	// Returns ErrComponentNotEnabled if no record exists.
+	GetAccess(ctx context.Context, tenant, componentName string) (*ComponentAccess, error)
 
 	// GetDecryptedConfig returns the decrypted config for an enabled plugin.
-	// Returns ErrPluginNotEnabled if not enabled, ErrPluginNotConfigured if enabled but no config.
-	GetDecryptedConfig(ctx context.Context, tenant, pluginName string) (map[string]any, error)
+	// Returns ErrComponentNotEnabled if not enabled, ErrComponentNotConfigured if enabled but no config.
+	GetDecryptedConfig(ctx context.Context, tenant, componentName string) (map[string]any, error)
 
 	// GetMaskedConfig returns the config with secret fields masked for API responses.
-	GetMaskedConfig(ctx context.Context, tenant, pluginName string) (map[string]any, error)
+	GetMaskedConfig(ctx context.Context, tenant, componentName string) (map[string]any, error)
 
 	// UpdateConfig replaces the stored config for an already-enabled plugin.
-	UpdateConfig(ctx context.Context, tenant, pluginName string, config map[string]any, configuredBy string) error
+	UpdateConfig(ctx context.Context, tenant, componentName string, config map[string]any, configuredBy string) error
 
 	// ListTenantPlugins returns all plugins the tenant has access to.
-	ListTenantPlugins(ctx context.Context, tenant string) ([]PluginAccess, error)
+	ListTenantPlugins(ctx context.Context, tenant string) ([]ComponentAccess, error)
 
 	// ListAvailablePlugins returns all _system plugins with the tenant's enablement status.
 	ListAvailablePlugins(ctx context.Context, tenant string) ([]PluginCatalogEntry, error)
 
 	// EnableSelfHosted creates an access record for a self-hosted plugin.
 	// Does not overwrite existing records.
-	EnableSelfHosted(ctx context.Context, tenant, pluginName string) error
+	EnableSelfHosted(ctx context.Context, tenant, componentName string) error
 
 	// StoreConfigSchema stores a plugin's config schema (called on registration).
-	StoreConfigSchema(ctx context.Context, pluginName, schemaJSON string) error
+	StoreConfigSchema(ctx context.Context, componentName, schemaJSON string) error
 
 	// GetConfigSchema returns the stored config schema for a plugin.
-	GetConfigSchema(ctx context.Context, pluginName string) (string, error)
+	GetConfigSchema(ctx context.Context, componentName string) (string, error)
 }
 
-// RedisPluginAccessStore implements PluginAccessStore using Redis for storage
+// RedisComponentAccessStore implements ComponentAccessStore using Redis for storage
 // and AES-256-GCM for config encryption.
 //
 // Per-plugin access decisions are made by the gRPC FGA interceptor at
 // `/ComponentService/QueryPlugin` (tenant-level `member`/`admin` relation) and
 // then by the QueryPlugin handler via GetAccess + EffectiveReadEnabled/
 // EffectiveWriteEnabled. No FGA tuple writes happen here.
-type RedisPluginAccessStore struct {
+type RedisComponentAccessStore struct {
 	client      *redis.Client
 	encryptor   crypto.Encryptor
 	keyProvider crypto.KeyProvider
@@ -167,8 +167,8 @@ func NewRedisPluginAccessStore(
 	keyProvider crypto.KeyProvider,
 	registry ComponentRegistry,
 	logger *slog.Logger,
-) *RedisPluginAccessStore {
-	return &RedisPluginAccessStore{
+) *RedisComponentAccessStore {
+	return &RedisComponentAccessStore{
 		client:      client,
 		encryptor:   encryptor,
 		keyProvider: keyProvider,
@@ -177,36 +177,36 @@ func NewRedisPluginAccessStore(
 	}
 }
 
-func accessKey(tenant, pluginName string) string {
-	return fmt.Sprintf("plugin-access:%s:%s", tenant, pluginName)
+func accessKey(tenant, componentName string) string {
+	return fmt.Sprintf("plugin-access:%s:%s", tenant, componentName)
 }
 
-func configKey(tenant, pluginName string) string {
-	return fmt.Sprintf("plugin-config:%s:%s", tenant, pluginName)
+func configKey(tenant, componentName string) string {
+	return fmt.Sprintf("plugin-config:%s:%s", tenant, componentName)
 }
 
-func schemaKey(pluginName string) string {
-	return fmt.Sprintf("plugin-schema:%s", pluginName)
+func schemaKey(componentName string) string {
+	return fmt.Sprintf("plugin-schema:%s", componentName)
 }
 
 func accessPattern(tenant string) string {
 	return fmt.Sprintf("plugin-access:%s:*", tenant)
 }
 
-// Enable implements PluginAccessStore.
+// Enable implements ComponentAccessStore.
 //
 // The access record is stored with Enabled=true. ReadEnabled and WriteEnabled
 // are left as their zero values (false), so EffectiveReadEnabled and
 // EffectiveWriteEnabled will both return true (legacy/full-access semantics).
 // Call SetAccessGranularity after Enable to apply granular restrictions.
-func (s *RedisPluginAccessStore) Enable(ctx context.Context, tenant, pluginName string, config map[string]any, configuredBy string) error {
+func (s *RedisComponentAccessStore) Enable(ctx context.Context, tenant, componentName string, config map[string]any, configuredBy string) error {
 	s.logger.InfoContext(ctx, "enabling plugin for tenant",
 		slog.String("tenant", tenant),
-		slog.String("plugin", pluginName))
+		slog.String("plugin", componentName))
 
-	access := PluginAccess{
+	access := ComponentAccess{
 		TenantID:     tenant,
-		PluginName:   pluginName,
+		PluginName:   componentName,
 		Enabled:      true,
 		Source:       "platform",
 		ConfiguredAt: time.Now().UTC().Format(time.RFC3339),
@@ -220,15 +220,15 @@ func (s *RedisPluginAccessStore) Enable(ctx context.Context, tenant, pluginName 
 	}
 
 	// Store access record (no TTL — persists until explicitly disabled).
-	if err := s.client.Set(ctx, accessKey(tenant, pluginName), accessJSON, 0).Err(); err != nil {
+	if err := s.client.Set(ctx, accessKey(tenant, componentName), accessJSON, 0).Err(); err != nil {
 		return fmt.Errorf("store access record: %w", err)
 	}
 
 	// Encrypt and store config if provided.
 	if config != nil && len(config) > 0 {
-		if err := s.storeEncryptedConfig(ctx, tenant, pluginName, config); err != nil {
+		if err := s.storeEncryptedConfig(ctx, tenant, componentName, config); err != nil {
 			// Roll back access record on config storage failure.
-			_ = s.client.Del(ctx, accessKey(tenant, pluginName)).Err()
+			_ = s.client.Del(ctx, accessKey(tenant, componentName)).Err()
 			return fmt.Errorf("store encrypted config: %w", err)
 		}
 	}
@@ -236,17 +236,17 @@ func (s *RedisPluginAccessStore) Enable(ctx context.Context, tenant, pluginName 
 	return nil
 }
 
-// Disable implements PluginAccessStore.
+// Disable implements ComponentAccessStore.
 //
 // Removes the access record and encrypted config from Redis.
-func (s *RedisPluginAccessStore) Disable(ctx context.Context, tenant, pluginName string) error {
+func (s *RedisComponentAccessStore) Disable(ctx context.Context, tenant, componentName string) error {
 	s.logger.InfoContext(ctx, "disabling plugin for tenant",
 		slog.String("tenant", tenant),
-		slog.String("plugin", pluginName))
+		slog.String("plugin", componentName))
 
 	pipe := s.client.Pipeline()
-	pipe.Del(ctx, accessKey(tenant, pluginName))
-	pipe.Del(ctx, configKey(tenant, pluginName))
+	pipe.Del(ctx, accessKey(tenant, componentName))
+	pipe.Del(ctx, configKey(tenant, componentName))
 	_, err := pipe.Exec(ctx)
 	if err != nil {
 		return fmt.Errorf("disable plugin: %w", err)
@@ -255,17 +255,17 @@ func (s *RedisPluginAccessStore) Disable(ctx context.Context, tenant, pluginName
 	return nil
 }
 
-// GetAccess implements PluginAccessStore.
-func (s *RedisPluginAccessStore) GetAccess(ctx context.Context, tenant, pluginName string) (*PluginAccess, error) {
-	data, err := s.client.Get(ctx, accessKey(tenant, pluginName)).Bytes()
+// GetAccess implements ComponentAccessStore.
+func (s *RedisComponentAccessStore) GetAccess(ctx context.Context, tenant, componentName string) (*ComponentAccess, error) {
+	data, err := s.client.Get(ctx, accessKey(tenant, componentName)).Bytes()
 	if err != nil {
 		if errors.Is(err, redis.Nil) {
-			return nil, ErrPluginNotEnabled
+			return nil, ErrComponentNotEnabled
 		}
 		return nil, fmt.Errorf("get access record: %w", err)
 	}
 
-	var access PluginAccess
+	var access ComponentAccess
 	if err := json.Unmarshal(data, &access); err != nil {
 		return nil, fmt.Errorf("unmarshal access record: %w", err)
 	}
@@ -273,13 +273,13 @@ func (s *RedisPluginAccessStore) GetAccess(ctx context.Context, tenant, pluginNa
 	return &access, nil
 }
 
-// SetAccessGranularity implements PluginAccessStore.
+// SetAccessGranularity implements ComponentAccessStore.
 //
 // Updates ReadEnabled and WriteEnabled on an existing access record without
-// touching the configuration. Returns ErrPluginNotEnabled if the plugin has not
+// touching the configuration. Returns ErrComponentNotEnabled if the plugin has not
 // been enabled first.
-func (s *RedisPluginAccessStore) SetAccessGranularity(ctx context.Context, tenant, pluginName string, readEnabled, writeEnabled bool) error {
-	access, err := s.GetAccess(ctx, tenant, pluginName)
+func (s *RedisComponentAccessStore) SetAccessGranularity(ctx context.Context, tenant, componentName string, readEnabled, writeEnabled bool) error {
+	access, err := s.GetAccess(ctx, tenant, componentName)
 	if err != nil {
 		return err
 	}
@@ -292,13 +292,13 @@ func (s *RedisPluginAccessStore) SetAccessGranularity(ctx context.Context, tenan
 		return fmt.Errorf("marshal access record: %w", err)
 	}
 
-	if err := s.client.Set(ctx, accessKey(tenant, pluginName), accessJSON, 0).Err(); err != nil {
+	if err := s.client.Set(ctx, accessKey(tenant, componentName), accessJSON, 0).Err(); err != nil {
 		return fmt.Errorf("store access record: %w", err)
 	}
 
 	s.logger.InfoContext(ctx, "plugin access granularity updated",
 		slog.String("tenant", tenant),
-		slog.String("plugin", pluginName),
+		slog.String("plugin", componentName),
 		slog.Bool("read_enabled", readEnabled),
 		slog.Bool("write_enabled", writeEnabled),
 	)
@@ -306,46 +306,46 @@ func (s *RedisPluginAccessStore) SetAccessGranularity(ctx context.Context, tenan
 	return nil
 }
 
-// CheckAccess implements PluginAccessStore.
+// CheckAccess implements ComponentAccessStore.
 //
 // Returns nil if the tenant has the requested access level for the plugin.
-// Returns ErrPluginNotEnabled if the plugin is not enabled at all.
-// Returns ErrPluginAccessDenied if the plugin is enabled but the requested
+// Returns ErrComponentNotEnabled if the plugin is not enabled at all.
+// Returns ErrComponentAccessDenied if the plugin is enabled but the requested
 // level (read or write) is not granted.
-func (s *RedisPluginAccessStore) CheckAccess(ctx context.Context, tenant, pluginName string, write bool) error {
-	access, err := s.GetAccess(ctx, tenant, pluginName)
+func (s *RedisComponentAccessStore) CheckAccess(ctx context.Context, tenant, componentName string, write bool) error {
+	access, err := s.GetAccess(ctx, tenant, componentName)
 	if err != nil {
-		return err // propagates ErrPluginNotEnabled
+		return err // propagates ErrComponentNotEnabled
 	}
 
 	if write {
 		if !access.EffectiveWriteEnabled() {
-			return ErrPluginAccessDenied
+			return ErrComponentAccessDenied
 		}
 		return nil
 	}
 
 	if !access.EffectiveReadEnabled() {
-		return ErrPluginAccessDenied
+		return ErrComponentAccessDenied
 	}
 	return nil
 }
 
-// GetDecryptedConfig implements PluginAccessStore.
-func (s *RedisPluginAccessStore) GetDecryptedConfig(ctx context.Context, tenant, pluginName string) (map[string]any, error) {
+// GetDecryptedConfig implements ComponentAccessStore.
+func (s *RedisComponentAccessStore) GetDecryptedConfig(ctx context.Context, tenant, componentName string) (map[string]any, error) {
 	// Verify access first.
-	access, err := s.GetAccess(ctx, tenant, pluginName)
+	access, err := s.GetAccess(ctx, tenant, componentName)
 	if err != nil {
 		return nil, err
 	}
 	if !access.HasConfig {
-		return nil, ErrPluginNotConfigured
+		return nil, ErrComponentNotConfigured
 	}
 
-	data, err := s.client.Get(ctx, configKey(tenant, pluginName)).Bytes()
+	data, err := s.client.Get(ctx, configKey(tenant, componentName)).Bytes()
 	if err != nil {
 		if errors.Is(err, redis.Nil) {
-			return nil, ErrPluginNotConfigured
+			return nil, ErrComponentNotConfigured
 		}
 		return nil, fmt.Errorf("get encrypted config: %w", err)
 	}
@@ -373,15 +373,15 @@ func (s *RedisPluginAccessStore) GetDecryptedConfig(ctx context.Context, tenant,
 	return config, nil
 }
 
-// GetMaskedConfig implements PluginAccessStore.
-func (s *RedisPluginAccessStore) GetMaskedConfig(ctx context.Context, tenant, pluginName string) (map[string]any, error) {
-	config, err := s.GetDecryptedConfig(ctx, tenant, pluginName)
+// GetMaskedConfig implements ComponentAccessStore.
+func (s *RedisComponentAccessStore) GetMaskedConfig(ctx context.Context, tenant, componentName string) (map[string]any, error) {
+	config, err := s.GetDecryptedConfig(ctx, tenant, componentName)
 	if err != nil {
 		return nil, err
 	}
 
 	// Load schema to determine which fields are secret.
-	schemaJSON, err := s.GetConfigSchema(ctx, pluginName)
+	schemaJSON, err := s.GetConfigSchema(ctx, componentName)
 	if err != nil || schemaJSON == "" {
 		// No schema — mask all string values as a safe default.
 		return maskAllStrings(config), nil
@@ -391,19 +391,19 @@ func (s *RedisPluginAccessStore) GetMaskedConfig(ctx context.Context, tenant, pl
 	return maskFields(config, secretFields), nil
 }
 
-// UpdateConfig implements PluginAccessStore.
-func (s *RedisPluginAccessStore) UpdateConfig(ctx context.Context, tenant, pluginName string, config map[string]any, configuredBy string) error {
+// UpdateConfig implements ComponentAccessStore.
+func (s *RedisComponentAccessStore) UpdateConfig(ctx context.Context, tenant, componentName string, config map[string]any, configuredBy string) error {
 	// Verify plugin is enabled.
-	access, err := s.GetAccess(ctx, tenant, pluginName)
+	access, err := s.GetAccess(ctx, tenant, componentName)
 	if err != nil {
 		return err
 	}
 
 	s.logger.InfoContext(ctx, "updating plugin config",
 		slog.String("tenant", tenant),
-		slog.String("plugin", pluginName))
+		slog.String("plugin", componentName))
 
-	if err := s.storeEncryptedConfig(ctx, tenant, pluginName, config); err != nil {
+	if err := s.storeEncryptedConfig(ctx, tenant, componentName, config); err != nil {
 		return fmt.Errorf("store encrypted config: %w", err)
 	}
 
@@ -417,16 +417,16 @@ func (s *RedisPluginAccessStore) UpdateConfig(ctx context.Context, tenant, plugi
 		return fmt.Errorf("marshal access record: %w", err)
 	}
 
-	if err := s.client.Set(ctx, accessKey(tenant, pluginName), accessJSON, 0).Err(); err != nil {
+	if err := s.client.Set(ctx, accessKey(tenant, componentName), accessJSON, 0).Err(); err != nil {
 		return fmt.Errorf("update access record: %w", err)
 	}
 
 	return nil
 }
 
-// ListTenantPlugins implements PluginAccessStore.
-func (s *RedisPluginAccessStore) ListTenantPlugins(ctx context.Context, tenant string) ([]PluginAccess, error) {
-	var results []PluginAccess
+// ListTenantPlugins implements ComponentAccessStore.
+func (s *RedisComponentAccessStore) ListTenantPlugins(ctx context.Context, tenant string) ([]ComponentAccess, error) {
+	var results []ComponentAccess
 	var cursor uint64
 
 	for {
@@ -444,7 +444,7 @@ func (s *RedisPluginAccessStore) ListTenantPlugins(ctx context.Context, tenant s
 				return nil, fmt.Errorf("get access record %s: %w", key, err)
 			}
 
-			var access PluginAccess
+			var access ComponentAccess
 			if err := json.Unmarshal(data, &access); err != nil {
 				continue
 			}
@@ -460,8 +460,8 @@ func (s *RedisPluginAccessStore) ListTenantPlugins(ctx context.Context, tenant s
 	return results, nil
 }
 
-// ListAvailablePlugins implements PluginAccessStore.
-func (s *RedisPluginAccessStore) ListAvailablePlugins(ctx context.Context, tenant string) ([]PluginCatalogEntry, error) {
+// ListAvailablePlugins implements ComponentAccessStore.
+func (s *RedisComponentAccessStore) ListAvailablePlugins(ctx context.Context, tenant string) ([]PluginCatalogEntry, error) {
 	// Get all _system plugins from registry.
 	systemPlugins, err := s.registry.DiscoverAll(ctx, systemTenant, "plugin")
 	if err != nil {
@@ -480,7 +480,7 @@ func (s *RedisPluginAccessStore) ListAvailablePlugins(ctx context.Context, tenan
 		return nil, fmt.Errorf("list tenant access: %w", err)
 	}
 
-	accessMap := make(map[string]*PluginAccess, len(accessRecords))
+	accessMap := make(map[string]*ComponentAccess, len(accessRecords))
 	for i := range accessRecords {
 		accessMap[accessRecords[i].PluginName] = &accessRecords[i]
 	}
@@ -546,20 +546,20 @@ func (s *RedisPluginAccessStore) ListAvailablePlugins(ctx context.Context, tenan
 	return catalog, nil
 }
 
-// EnableSelfHosted implements PluginAccessStore.
-func (s *RedisPluginAccessStore) EnableSelfHosted(ctx context.Context, tenant, pluginName string) error {
+// EnableSelfHosted implements ComponentAccessStore.
+func (s *RedisComponentAccessStore) EnableSelfHosted(ctx context.Context, tenant, componentName string) error {
 	// Don't overwrite existing records.
-	_, err := s.GetAccess(ctx, tenant, pluginName)
+	_, err := s.GetAccess(ctx, tenant, componentName)
 	if err == nil {
 		return nil // already exists
 	}
-	if !errors.Is(err, ErrPluginNotEnabled) {
+	if !errors.Is(err, ErrComponentNotEnabled) {
 		return err // real error
 	}
 
-	access := PluginAccess{
+	access := ComponentAccess{
 		TenantID:     tenant,
-		PluginName:   pluginName,
+		PluginName:   componentName,
 		Enabled:      true,
 		Source:       "self-hosted",
 		ConfiguredAt: time.Now().UTC().Format(time.RFC3339),
@@ -572,7 +572,7 @@ func (s *RedisPluginAccessStore) EnableSelfHosted(ctx context.Context, tenant, p
 	}
 
 	// NX ensures we don't overwrite if a concurrent registration won the race.
-	set, err := s.client.SetNX(ctx, accessKey(tenant, pluginName), accessJSON, 0).Result()
+	set, err := s.client.SetNX(ctx, accessKey(tenant, componentName), accessJSON, 0).Result()
 	if err != nil {
 		return fmt.Errorf("store self-hosted access record: %w", err)
 	}
@@ -582,22 +582,22 @@ func (s *RedisPluginAccessStore) EnableSelfHosted(ctx context.Context, tenant, p
 
 	s.logger.InfoContext(ctx, "auto-created access record for self-hosted plugin",
 		slog.String("tenant", tenant),
-		slog.String("plugin", pluginName))
+		slog.String("plugin", componentName))
 
 	return nil
 }
 
-// StoreConfigSchema implements PluginAccessStore.
-func (s *RedisPluginAccessStore) StoreConfigSchema(ctx context.Context, pluginName, schemaJSON string) error {
+// StoreConfigSchema implements ComponentAccessStore.
+func (s *RedisComponentAccessStore) StoreConfigSchema(ctx context.Context, componentName, schemaJSON string) error {
 	if schemaJSON == "" {
 		return nil
 	}
-	return s.client.Set(ctx, schemaKey(pluginName), schemaJSON, 0).Err()
+	return s.client.Set(ctx, schemaKey(componentName), schemaJSON, 0).Err()
 }
 
-// GetConfigSchema implements PluginAccessStore.
-func (s *RedisPluginAccessStore) GetConfigSchema(ctx context.Context, pluginName string) (string, error) {
-	val, err := s.client.Get(ctx, schemaKey(pluginName)).Result()
+// GetConfigSchema implements ComponentAccessStore.
+func (s *RedisComponentAccessStore) GetConfigSchema(ctx context.Context, componentName string) (string, error) {
+	val, err := s.client.Get(ctx, schemaKey(componentName)).Result()
 	if err != nil {
 		if errors.Is(err, redis.Nil) {
 			return "", nil
@@ -608,7 +608,7 @@ func (s *RedisPluginAccessStore) GetConfigSchema(ctx context.Context, pluginName
 }
 
 // storeEncryptedConfig encrypts and stores plugin config.
-func (s *RedisPluginAccessStore) storeEncryptedConfig(ctx context.Context, tenant, pluginName string, config map[string]any) error {
+func (s *RedisComponentAccessStore) storeEncryptedConfig(ctx context.Context, tenant, componentName string, config map[string]any) error {
 	plaintext, err := json.Marshal(config)
 	if err != nil {
 		return fmt.Errorf("marshal config: %w", err)
@@ -635,7 +635,7 @@ func (s *RedisPluginAccessStore) storeEncryptedConfig(ctx context.Context, tenan
 		return fmt.Errorf("marshal encrypted config: %w", err)
 	}
 
-	return s.client.Set(ctx, configKey(tenant, pluginName), encJSON, 0).Err()
+	return s.client.Set(ctx, configKey(tenant, componentName), encJSON, 0).Err()
 }
 
 // extractSecretFields parses a JSON Schema and returns field names marked with "secret": true.

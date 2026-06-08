@@ -136,12 +136,12 @@ type DefaultAgentHarness struct {
 	// deliver a WorkResult after enqueuing. Defaults to 5 minutes when zero.
 	workQueueTimeout time.Duration
 
-	// pluginAccess enforces per-tenant opt-in control for platform (_system) plugins.
+	// componentAccess enforces per-tenant opt-in control for platform (_system) plugins.
 	// When non-nil and a QueryPlugin call finds no tenant-scoped instances, the harness
 	// checks that the tenant has explicitly enabled the plugin and has a stored config
 	// before dispatching to the _system instance. Nil disables access enforcement
 	// (backward-compatible for deployments that have not yet wired this store).
-	pluginAccess component.PluginAccessStore
+	componentAccess component.ComponentAccessStore
 
 	// maxDelegationDepth is the maximum allowed DelegateToAgent nesting depth.
 	// When zero, defaultMaxDelegationDepth (8) is used. The daemon config flag
@@ -1304,8 +1304,8 @@ func (h *DefaultAgentHarness) dispatchWorkAndWait(
 	// separate lookup. Tenant-scoped instances manage their own config and must
 	// never receive another tenant's credentials. Kind-agnostic via the
 	// component access store (gibson#662/#663).
-	if info.TenantID == "_system" && h.pluginAccess != nil {
-		if cfg, cfgErr := h.pluginAccess.GetDecryptedConfig(ctx, tenant, name); cfgErr == nil {
+	if info.TenantID == "_system" && h.componentAccess != nil {
+		if cfg, cfgErr := h.componentAccess.GetDecryptedConfig(ctx, tenant, name); cfgErr == nil {
 			if cfgJSON, marshalErr := json.Marshal(cfg); marshalErr == nil {
 				workCtx["plugin_config"] = string(cfgJSON)
 			} else {
@@ -1501,7 +1501,7 @@ func (h *DefaultAgentHarness) GetAllToolCapabilities(ctx context.Context) (map[s
 // Dispatch path (post plugin-runtime Spec 2 Phase 7 — single path):
 //
 //	ComponentRegistry (Redis-backed, tenant-scoped) → WorkQueue dispatch.
-//	  • Tenant-scoped instances are tried first; if absent, PluginAccess gates a
+//	  • Tenant-scoped instances are tried first; if absent, ComponentAccess gates a
 //	    fallthrough to a _system instance for tenants that have explicitly
 //	    enabled and configured the plugin.
 //	  • Live dispatch is via the WorkQueue (poll/result) — the same path the
@@ -1577,8 +1577,8 @@ func (h *DefaultAgentHarness) QueryPlugin(ctx context.Context, name string, meth
 		return h.callPluginViaWorkQueue(ctx, tenant, name, method, params, info)
 	}
 
-	// ── _system fallback (gated by PluginAccess) ────────────────────────────
-	if h.pluginAccess == nil {
+	// ── _system fallback (gated by ComponentAccess) ────────────────────────────
+	if h.componentAccess == nil {
 		h.logger.Error("plugin not found and no _system fallback path",
 			"plugin", name,
 			"tenant", tenant)
@@ -1588,9 +1588,9 @@ func (h *DefaultAgentHarness) QueryPlugin(ctx context.Context, name string, meth
 		)
 	}
 
-	access, accessErr := h.pluginAccess.GetAccess(ctx, tenant, name)
+	access, accessErr := h.componentAccess.GetAccess(ctx, tenant, name)
 	if accessErr != nil {
-		if errors.Is(accessErr, component.ErrPluginNotEnabled) {
+		if errors.Is(accessErr, component.ErrComponentNotEnabled) {
 			h.logger.Warn("plugin access denied: not enabled for tenant",
 				"plugin", name,
 				"tenant", tenant)
@@ -1617,8 +1617,8 @@ func (h *DefaultAgentHarness) QueryPlugin(ctx context.Context, name string, meth
 		)
 	}
 
-	if _, configErr := h.pluginAccess.GetDecryptedConfig(ctx, tenant, name); configErr != nil {
-		if errors.Is(configErr, component.ErrPluginNotConfigured) {
+	if _, configErr := h.componentAccess.GetDecryptedConfig(ctx, tenant, name); configErr != nil {
+		if errors.Is(configErr, component.ErrComponentNotConfigured) {
 			h.logger.Warn("plugin access denied: enabled but not configured",
 				"plugin", name,
 				"tenant", tenant)

@@ -81,7 +81,7 @@ func TestMarshalDefinitionJSON_UsesSnakeCaseFieldNames(t *testing.T) {
 		`"parallelConfig"`,
 		`"agentName"`,
 		`"toolName"`,
-		`"pluginName"`,
+		`"componentName"`,
 		`"entryPoints"`,
 		`"exitPoints"`,
 	}

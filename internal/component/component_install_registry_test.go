@@ -33,7 +33,7 @@ func openTestDB(t *testing.T) *sql.DB {
 // ---------------------------------------------------------------------------
 
 // fakeDB is an in-memory implementation of the subset of *sql.DB used by
-// postgresPluginRegistry for testing without a real Postgres connection.
+// postgresComponentInstallRegistry for testing without a real Postgres connection.
 //
 // It is NOT a real sql.DB — instead we construct a testable registry directly
 // by satisfying the subset of operations via the testRegistry wrapper.
@@ -72,10 +72,10 @@ func (s *fakeInstallStore) upsert(row *fakeInstallRow) string {
 	return row.ID
 }
 
-func (s *fakeInstallStore) list(tenantID, pluginName string) []*fakeInstallRow {
+func (s *fakeInstallStore) list(tenantID, componentName string) []*fakeInstallRow {
 	var result []*fakeInstallRow
 	for _, row := range s.rows {
-		if row.TenantID == tenantID && row.PluginName == pluginName {
+		if row.TenantID == tenantID && row.PluginName == componentName {
 			result = append(result, row)
 		}
 	}
@@ -83,7 +83,7 @@ func (s *fakeInstallStore) list(tenantID, pluginName string) []*fakeInstallRow {
 }
 
 // ---------------------------------------------------------------------------
-// testPluginRegistry wraps postgresPluginRegistry with a fakeInstallStore
+// testPluginRegistry wraps postgresComponentInstallRegistry with a fakeInstallStore
 // so we can test without real Postgres.
 // ---------------------------------------------------------------------------
 
@@ -117,7 +117,7 @@ func newTestPluginRegistry(t *testing.T) *testPluginRegistry {
 }
 
 // register is a test-friendly version of Register that uses the fake store.
-func (tr *testPluginRegistry) register(ctx context.Context, install *PluginInstall) (string, error) {
+func (tr *testPluginRegistry) register(ctx context.Context, install *ComponentInstall) (string, error) {
 	if install.ID == "" {
 		install.ID = fmt.Sprintf("test-id-%s-%s", install.Name, install.HostID)
 	}
@@ -139,7 +139,7 @@ func (tr *testPluginRegistry) register(ctx context.Context, install *PluginInsta
 	payload := pluginStatusPayload{
 		Address:         "",
 		LastHeartbeatAt: time.Now().UTC(),
-		Status:          string(PluginInstallStatusServing),
+		Status:          string(ComponentInstallStatusServing),
 	}
 	data, _ := json.Marshal(payload)
 	return assignedID, tr.redisClient.Set(ctx, pluginStatusKey(assignedID), data, pluginInstallTTL).Err()
@@ -156,7 +156,7 @@ func (tr *testPluginRegistry) heartbeat(ctx context.Context, installID, address 
 	if address != "" {
 		payload.Address = address
 	}
-	payload.Status = string(PluginInstallStatusServing)
+	payload.Status = string(ComponentInstallStatusServing)
 
 	out, _ := json.Marshal(payload)
 	return tr.redisClient.Set(ctx, key, out, pluginInstallTTL).Err()
@@ -174,7 +174,7 @@ func (tr *testPluginRegistry) listInstalls(ctx context.Context, tenant auth.Tena
 		if err := json.Unmarshal(data, &payload); err != nil {
 			continue
 		}
-		if payload.Status != string(PluginInstallStatusServing) {
+		if payload.Status != string(ComponentInstallStatusServing) {
 			continue
 		}
 		active = append(active, InstallInfo{
@@ -185,7 +185,7 @@ func (tr *testPluginRegistry) listInstalls(ctx context.Context, tenant auth.Tena
 			DeclaredMethods: row.DeclaredMethods,
 			Address:         payload.Address,
 			LastHeartbeatAt: payload.LastHeartbeatAt,
-			Status:          PluginInstallStatusServing,
+			Status:          ComponentInstallStatusServing,
 		})
 	}
 	return active, nil
@@ -199,7 +199,7 @@ func TestPluginRegistry_Register(t *testing.T) {
 	ctx := context.Background()
 	tr := newTestPluginRegistry(t)
 
-	install := &PluginInstall{
+	install := &ComponentInstall{
 		TenantID:        auth.MustNewTenantID("tenant-abc"),
 		Name:            "shodan",
 		Version:         "1.0.0",
@@ -226,8 +226,8 @@ func TestPluginRegistry_Register(t *testing.T) {
 	if err := json.Unmarshal(data, &payload); err != nil {
 		t.Fatalf("unmarshal status: %v", err)
 	}
-	if payload.Status != string(PluginInstallStatusServing) {
-		t.Errorf("expected status %q, got %q", PluginInstallStatusServing, payload.Status)
+	if payload.Status != string(ComponentInstallStatusServing) {
+		t.Errorf("expected status %q, got %q", ComponentInstallStatusServing, payload.Status)
 	}
 }
 
@@ -235,7 +235,7 @@ func TestPluginRegistry_Upsert(t *testing.T) {
 	ctx := context.Background()
 	tr := newTestPluginRegistry(t)
 
-	install := &PluginInstall{
+	install := &ComponentInstall{
 		TenantID: auth.MustNewTenantID("tenant-abc"),
 		Name:     "shodan",
 		Version:  "1.0.0",
@@ -268,7 +268,7 @@ func TestPluginRegistry_Heartbeat_RefreshTTL(t *testing.T) {
 	ctx := context.Background()
 	tr := newTestPluginRegistry(t)
 
-	install := &PluginInstall{
+	install := &ComponentInstall{
 		TenantID: auth.MustNewTenantID("tenant-abc"),
 		Name:     "shodan",
 		Version:  "1.0.0",
@@ -303,7 +303,7 @@ func TestPluginRegistry_HeartbeatExpiry_ExcludedFromList(t *testing.T) {
 	ctx := context.Background()
 	tr := newTestPluginRegistry(t)
 
-	install := &PluginInstall{
+	install := &ComponentInstall{
 		TenantID: auth.MustNewTenantID("tenant-abc"),
 		Name:     "shodan",
 		Version:  "1.0.0",
@@ -332,7 +332,7 @@ func TestPluginRegistry_RoundRobin(t *testing.T) {
 	tenant := auth.MustNewTenantID("tenant-abc")
 
 	for i := 0; i < 3; i++ {
-		inst := &PluginInstall{
+		inst := &ComponentInstall{
 			TenantID: tenant,
 			Name:     "shodan",
 			Version:  "1.0.0",
@@ -366,8 +366,8 @@ func TestPluginRegistry_Status_IncludesUnreachable(t *testing.T) {
 
 	tenant := auth.MustNewTenantID("tenant-abc")
 
-	inst1 := &PluginInstall{TenantID: tenant, Name: "shodan", Version: "1.0", HostID: "h1"}
-	inst2 := &PluginInstall{TenantID: tenant, Name: "shodan", Version: "1.0", HostID: "h2"}
+	inst1 := &ComponentInstall{TenantID: tenant, Name: "shodan", Version: "1.0", HostID: "h1"}
+	inst2 := &ComponentInstall{TenantID: tenant, Name: "shodan", Version: "1.0", HostID: "h2"}
 	id1, _ := tr.register(ctx, inst1)
 	id2, _ := tr.register(ctx, inst2)
 
@@ -378,7 +378,7 @@ func TestPluginRegistry_Status_IncludesUnreachable(t *testing.T) {
 
 	rows := tr.store.list(tenant.String(), "shodan")
 
-	// Build a status response manually to mirror what postgresPluginRegistry.Status does.
+	// Build a status response manually to mirror what postgresComponentInstallRegistry.Status does.
 	var statusInstalls []InstallInfo
 	for _, row := range rows {
 		data, err := tr.redisClient.Get(ctx, pluginStatusKey(row.ID)).Bytes()
@@ -388,11 +388,11 @@ func TestPluginRegistry_Status_IncludesUnreachable(t *testing.T) {
 		info.Name = row.PluginName
 		info.Version = row.Version
 		if err != nil {
-			info.Status = PluginInstallStatusUnreachable
+			info.Status = ComponentInstallStatusUnreachable
 		} else {
 			var payload pluginStatusPayload
 			_ = json.Unmarshal(data, &payload)
-			info.Status = PluginInstallStatus(payload.Status)
+			info.Status = ComponentInstallStatus(payload.Status)
 		}
 		statusInstalls = append(statusInstalls, info)
 	}
@@ -400,10 +400,10 @@ func TestPluginRegistry_Status_IncludesUnreachable(t *testing.T) {
 	unreachable := 0
 	serving := 0
 	for _, s := range statusInstalls {
-		if s.Status == PluginInstallStatusUnreachable {
+		if s.Status == ComponentInstallStatusUnreachable {
 			unreachable++
 		}
-		if s.Status == PluginInstallStatusServing {
+		if s.Status == ComponentInstallStatusServing {
 			serving++
 		}
 	}

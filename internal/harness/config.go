@@ -227,12 +227,12 @@ type HarnessConfig struct {
 	// Optional.
 	WorkQueueTimeout time.Duration
 
-	// PluginAccess enforces per-tenant opt-in control for platform (_system) plugins.
+	// ComponentAccess enforces per-tenant opt-in control for platform (_system) plugins.
 	// When set, QueryPlugin will verify that the calling tenant has explicitly enabled
 	// the plugin and provided credentials before routing to a _system instance.
 	// When nil, access enforcement is skipped (backward-compatible behavior).
 	// Optional.
-	PluginAccess component.PluginAccessStore
+	ComponentAccess component.ComponentAccessStore
 
 	// MaxDelegationDepth caps the number of nested DelegateToAgent hops.
 	// When zero, the package default (8) is used. Set via daemon config flag

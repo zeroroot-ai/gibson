@@ -181,7 +181,7 @@ func (m *mockHarnessForResolver) ListTools() []ToolDescriptor {
 	return nil
 }
 
-func (m *mockHarnessForResolver) QueryPlugin(ctx context.Context, pluginName string, method string, params map[string]any) (any, error) {
+func (m *mockHarnessForResolver) QueryPlugin(ctx context.Context, componentName string, method string, params map[string]any) (any, error) {
 	return nil, fmt.Errorf("not implemented")
 }
 

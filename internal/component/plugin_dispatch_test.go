@@ -16,34 +16,34 @@ import (
 )
 
 // ---------------------------------------------------------------------------
-// fakePluginRegistry is a test double for PluginRegistry.
+// fakeComponentInstallRegistry is a test double for ComponentInstallRegistry.
 // ---------------------------------------------------------------------------
 
-type fakePluginRegistry struct {
-	installs     map[string][]InstallInfo // key: tenantID+"/"+pluginName
+type fakeComponentInstallRegistry struct {
+	installs     map[string][]InstallInfo // key: tenantID+"/"+componentName
 	dispatchFunc func(ctx context.Context, tenant auth.TenantID, name, method string, payload []byte, deadline time.Duration) ([]byte, error)
 }
 
-func newFakePluginRegistry() *fakePluginRegistry {
-	return &fakePluginRegistry{
+func newFakeComponentInstallRegistry() *fakeComponentInstallRegistry {
+	return &fakeComponentInstallRegistry{
 		installs: make(map[string][]InstallInfo),
 	}
 }
 
-func (f *fakePluginRegistry) Register(_ context.Context, _ *PluginInstall) error {
+func (f *fakeComponentInstallRegistry) Register(_ context.Context, _ *ComponentInstall) error {
 	return nil
 }
 
-func (f *fakePluginRegistry) Heartbeat(_ context.Context, _, _ string) error {
+func (f *fakeComponentInstallRegistry) Heartbeat(_ context.Context, _, _ string) error {
 	return nil
 }
 
-func (f *fakePluginRegistry) ListInstalls(_ context.Context, tenant auth.TenantID, name string) ([]InstallInfo, error) {
+func (f *fakeComponentInstallRegistry) ListInstalls(_ context.Context, tenant auth.TenantID, name string) ([]InstallInfo, error) {
 	key := tenant.String() + "/" + name
 	return f.installs[key], nil
 }
 
-func (f *fakePluginRegistry) DispatchOne(ctx context.Context, tenant auth.TenantID, name, method string, payload []byte, deadline time.Duration) ([]byte, error) {
+func (f *fakeComponentInstallRegistry) DispatchOne(ctx context.Context, tenant auth.TenantID, name, method string, payload []byte, deadline time.Duration) ([]byte, error) {
 	if f.dispatchFunc != nil {
 		return f.dispatchFunc(ctx, tenant, name, method, payload, deadline)
 	}
@@ -52,19 +52,19 @@ func (f *fakePluginRegistry) DispatchOne(ctx context.Context, tenant auth.Tenant
 	return proto.Marshal(resp)
 }
 
-func (f *fakePluginRegistry) Status(_ context.Context, tenant auth.TenantID, name string) (RegistryStatus, error) {
+func (f *fakeComponentInstallRegistry) Status(_ context.Context, tenant auth.TenantID, name string) (RegistryStatus, error) {
 	key := tenant.String() + "/" + name
 	return RegistryStatus{Installs: f.installs[key]}, nil
 }
 
-func (f *fakePluginRegistry) addInstall(tenant auth.TenantID, name string, methods []string) {
+func (f *fakeComponentInstallRegistry) addInstall(tenant auth.TenantID, name string, methods []string) {
 	key := tenant.String() + "/" + name
 	f.installs[key] = append(f.installs[key], InstallInfo{
 		InstallID:       fmt.Sprintf("install-%s-%s-%d", tenant.String(), name, len(f.installs[key])),
 		TenantID:        tenant,
 		Name:            name,
 		DeclaredMethods: methods,
-		Status:          PluginInstallStatusServing,
+		Status:          ComponentInstallStatusServing,
 	})
 }
 
@@ -92,7 +92,7 @@ func buildPluginInvokeCtx(tenantStr string) context.Context {
 
 func TestPluginInvokeService_HappyPath(t *testing.T) {
 	tenant := auth.MustNewTenantID("tenant-abc")
-	reg := newFakePluginRegistry()
+	reg := newFakeComponentInstallRegistry()
 	reg.addInstall(tenant, "shodan", []string{"search", "host"})
 
 	// Dispatch returns a successful PluginInvokeResponse.
@@ -119,7 +119,7 @@ func TestPluginInvokeService_HappyPath(t *testing.T) {
 }
 
 func TestPluginInvokeService_UNAVAILABLE_NoInstalls(t *testing.T) {
-	reg := newFakePluginRegistry() // no installs registered
+	reg := newFakeComponentInstallRegistry() // no installs registered
 	svc := NewPluginInvokeService(reg, nil)
 	ctx := buildPluginInvokeCtx("tenant-abc")
 
@@ -140,7 +140,7 @@ func TestPluginInvokeService_UNAVAILABLE_NoInstalls(t *testing.T) {
 
 func TestPluginInvokeService_METHOD_NOT_FOUND(t *testing.T) {
 	tenant := auth.MustNewTenantID("tenant-abc")
-	reg := newFakePluginRegistry()
+	reg := newFakeComponentInstallRegistry()
 	reg.addInstall(tenant, "shodan", []string{"search"}) // only "search" declared
 
 	svc := NewPluginInvokeService(reg, nil)
@@ -160,7 +160,7 @@ func TestPluginInvokeService_METHOD_NOT_FOUND(t *testing.T) {
 
 func TestPluginInvokeService_DEADLINE_EXCEEDED(t *testing.T) {
 	tenant := auth.MustNewTenantID("tenant-abc")
-	reg := newFakePluginRegistry()
+	reg := newFakeComponentInstallRegistry()
 	reg.addInstall(tenant, "shodan", []string{"search"})
 
 	reg.dispatchFunc = func(_ context.Context, _ auth.TenantID, _, _ string, _ []byte, _ time.Duration) ([]byte, error) {
@@ -185,7 +185,7 @@ func TestPluginInvokeService_DEADLINE_EXCEEDED(t *testing.T) {
 
 func TestPluginInvokeService_HANDLER_FAILED(t *testing.T) {
 	tenant := auth.MustNewTenantID("tenant-abc")
-	reg := newFakePluginRegistry()
+	reg := newFakeComponentInstallRegistry()
 	reg.addInstall(tenant, "shodan", []string{"search"})
 
 	reg.dispatchFunc = func(_ context.Context, _ auth.TenantID, _, _ string, _ []byte, _ time.Duration) ([]byte, error) {
@@ -209,11 +209,11 @@ func TestPluginInvokeService_HANDLER_FAILED(t *testing.T) {
 
 func TestPluginInvokeService_UNAVAILABLE_RegistryError(t *testing.T) {
 	tenant := auth.MustNewTenantID("tenant-abc")
-	reg := newFakePluginRegistry()
+	reg := newFakeComponentInstallRegistry()
 	reg.addInstall(tenant, "shodan", []string{"search"})
 
 	reg.dispatchFunc = func(_ context.Context, _ auth.TenantID, _, _ string, _ []byte, _ time.Duration) ([]byte, error) {
-		return nil, ErrPluginUnavailable
+		return nil, ErrComponentUnavailable
 	}
 
 	svc := NewPluginInvokeService(reg, nil)
@@ -232,7 +232,7 @@ func TestPluginInvokeService_UNAVAILABLE_RegistryError(t *testing.T) {
 }
 
 func TestPluginInvokeService_InvalidArgument_EmptyPluginName(t *testing.T) {
-	reg := newFakePluginRegistry()
+	reg := newFakeComponentInstallRegistry()
 	svc := NewPluginInvokeService(reg, nil)
 	ctx := buildPluginInvokeCtx("tenant-abc")
 
@@ -247,7 +247,7 @@ func TestPluginInvokeService_InvalidArgument_EmptyPluginName(t *testing.T) {
 
 func TestPluginInvokeService_ConcurrencyLimit(t *testing.T) {
 	tenant := auth.MustNewTenantID("tenant-abc")
-	reg := newFakePluginRegistry()
+	reg := newFakeComponentInstallRegistry()
 	reg.addInstall(tenant, "shodan", []string{"search"})
 
 	// Block all dispatch calls so we exhaust the semaphore.
@@ -308,7 +308,7 @@ func TestPluginInvokeService_ConcurrencyLimit(t *testing.T) {
 }
 
 func TestPluginInvokeService_MissingIdentity(t *testing.T) {
-	reg := newFakePluginRegistry()
+	reg := newFakeComponentInstallRegistry()
 	svc := NewPluginInvokeService(reg, nil)
 
 	// Context with no identity.
@@ -353,7 +353,7 @@ func TestPluginErrorResponse(t *testing.T) {
 }
 
 func TestPluginInvokeService_ClassifyDispatchError_PluginWorkError(t *testing.T) {
-	svc := NewPluginInvokeService(newFakePluginRegistry(), nil)
+	svc := NewPluginInvokeService(newFakeComponentInstallRegistry(), nil)
 	ctx := context.Background()
 
 	cases := []struct {
@@ -375,12 +375,12 @@ func TestPluginInvokeService_ClassifyDispatchError_PluginWorkError(t *testing.T)
 	}
 }
 
-// Ensure fakePluginRegistry implements PluginRegistry (compile-time check).
-var _ PluginRegistry = (*fakePluginRegistry)(nil)
+// Ensure fakeComponentInstallRegistry implements ComponentInstallRegistry (compile-time check).
+var _ ComponentInstallRegistry = (*fakeComponentInstallRegistry)(nil)
 
-// Ensure fakePluginRegistry.DispatchOne is reachable for coverage.
+// Ensure fakeComponentInstallRegistry.DispatchOne is reachable for coverage.
 func TestFakePluginRegistry_DispatchOne_Default(t *testing.T) {
-	reg := newFakePluginRegistry()
+	reg := newFakeComponentInstallRegistry()
 	tenant := auth.MustNewTenantID("t1")
 	b, err := reg.DispatchOne(context.Background(), tenant, "p", "m", nil, 5*time.Second)
 	if err != nil {
@@ -421,7 +421,7 @@ func TestDispatchEcho_ManifestDerived(t *testing.T) {
 	}
 
 	tenant := auth.MustNewTenantID("tenant-abc")
-	reg := newFakePluginRegistry()
+	reg := newFakeComponentInstallRegistry()
 	reg.addInstall(tenant, m.Metadata.Name, declaredMethods)
 
 	// The fake dispatch returns a successful empty PluginInvokeResponse.
@@ -452,7 +452,7 @@ func TestDispatchEcho_ManifestDerived(t *testing.T) {
 // documented in design.md "Error Handling — Plugin Errors item 8".
 func TestDispatchOne_MethodDeclaredCheck(t *testing.T) {
 	tenant := auth.MustNewTenantID("tenant-abc")
-	reg := newFakePluginRegistry()
+	reg := newFakeComponentInstallRegistry()
 	// Register debug-plugin with only "Echo" declared.
 	reg.addInstall(tenant, "debug-plugin", []string{"Echo"})
 

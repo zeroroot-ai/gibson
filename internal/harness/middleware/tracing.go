@@ -142,10 +142,10 @@ func addPreExecutionAttributes(span trace.Span, ctx context.Context, opType Oper
 			span.SetAttributes(attribute.String(AttrToolName, toolName))
 		}
 	case OpQueryPlugin:
-		pluginName, method := GetPluginInfo(ctx)
-		if pluginName != "" {
+		componentName, method := GetPluginInfo(ctx)
+		if componentName != "" {
 			span.SetAttributes(
-				attribute.String(AttrPluginName, pluginName),
+				attribute.String(AttrPluginName, componentName),
 				attribute.String(AttrPluginMethod, method),
 			)
 		}

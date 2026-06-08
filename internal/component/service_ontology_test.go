@@ -58,7 +58,7 @@ func newTestServiceWithReasoner(or OntologyReasoner) *ComponentServiceServer {
 		nil, // llmCompleter
 		nil, // memStore
 		nil, // findingSubmitter
-		nil, // pluginAccess
+		nil, // componentAccess
 		nil, // auditLog
 	)
 	svc.WithOntologyReasoner(or)

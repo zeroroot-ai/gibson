@@ -34,27 +34,27 @@ import (
 
 // PluginRegistryReader is the narrow read-side contract PluginsAdminServer
 // uses against the daemon's plugin install registry (Spec 2). It is a
-// subset of internal/component.PluginRegistry to avoid pulling the full
+// subset of internal/component.ComponentInstallRegistry to avoid pulling the full
 // dispatch surface into this package.
 type PluginRegistryReader interface {
 	// ListAll returns all installs (across all plugin names) for tenant. The
 	// production wiring filters out installs whose Redis status key has
 	// expired.
-	ListAll(ctx context.Context, tenant auth.TenantID) ([]PluginInstallInfo, error)
+	ListAll(ctx context.Context, tenant auth.TenantID) ([]ComponentInstallInfo, error)
 
 	// Get returns one install by ID. Returns ErrInstallNotFound when
 	// missing.
-	Get(ctx context.Context, tenant auth.TenantID, installID string) (*PluginInstallInfo, error)
+	Get(ctx context.Context, tenant auth.TenantID, installID string) (*ComponentInstallInfo, error)
 }
 
 // ErrInstallNotFound is returned by PluginRegistryReader.Get when the
 // requested install does not exist.
 var ErrInstallNotFound = errors.New("plugin install not found")
 
-// PluginInstallInfo is the dashboard-shaped view of one plugin install —
+// ComponentInstallInfo is the dashboard-shaped view of one plugin install —
 // independent from the lower-level component.InstallInfo to keep the admin
 // package free of cross-cutting types.
-type PluginInstallInfo struct {
+type ComponentInstallInfo struct {
 	InstallID       string
 	TenantID        string
 	Name            string
@@ -522,7 +522,7 @@ func (s *PluginsAdminServer) RevokePluginSecretBinding(ctx context.Context, req 
 
 // pluginInstallToSummary maps the dashboard-shaped registry view to the
 // proto wire-shape.
-func pluginInstallToSummary(i PluginInstallInfo) *tenantv1.PluginInstallSummary {
+func pluginInstallToSummary(i ComponentInstallInfo) *tenantv1.PluginInstallSummary {
 	return &tenantv1.PluginInstallSummary{
 		InstallId:           i.InstallID,
 		Name:                i.Name,
@@ -617,7 +617,7 @@ func bindingRef(b *tenantv1.PluginSecretBinding) string {
 
 // bindingsFor walks FGA can_resolve tuples for the install's principal and
 // returns the (decoded) ref names. Best-effort.
-func (s *PluginsAdminServer) bindingsFor(ctx context.Context, tenant auth.TenantID, info PluginInstallInfo) []string {
+func (s *PluginsAdminServer) bindingsFor(ctx context.Context, tenant auth.TenantID, info ComponentInstallInfo) []string {
 	principal := principalForInstall(info.InstallID)
 	objects, err := s.authzr.ListObjects(ctx, "user:"+principal, "can_resolve", "secret")
 	if err != nil {

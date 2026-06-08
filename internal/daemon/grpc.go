@@ -1043,7 +1043,7 @@ func (d *daemonImpl) buildGRPCServer(ctx context.Context) (*grpcSubsystem, error
 		// PluginAdminService (gibson.tenant.v1.PluginAdminService) — closes gibson#565.
 		//
 		// Dependencies:
-		//   Registry       — pluginRegistryReaderAdapter wraps platformDB (read-only SQL).
+		//   Registry       — componentInstallRegistryReaderAdapter wraps platformDB (read-only SQL).
 		//   ManifestValidator — pluginManifestValidator parses the plugin YAML schema.
 		//   ZitadelClient  — idpPluginPrincipalAdapter wraps idpClient (CreateServiceAccount + MintClientSecret).
 		//   SecretWriter   — secretWriterAdapter wraps secretsService (tenant injected into ctx).
@@ -1056,7 +1056,7 @@ func (d *daemonImpl) buildGRPCServer(ctx context.Context) (*grpcSubsystem, error
 
 		if pluginAdminStackOK {
 			pluginAdminSvc, paErr := admin.NewPluginsAdminServer(admin.PluginsAdminConfig{
-				Registry:          &pluginRegistryReaderAdapter{db: d.platformDB},
+				Registry:          &componentInstallRegistryReaderAdapter{db: d.platformDB},
 				ManifestValidator: &pluginManifestValidator{},
 				ZitadelClient:     &idpPluginPrincipalAdapter{client: idpClient},
 				SecretWriter:      &secretWriterAdapter{svc: d.secretsService},
@@ -1375,29 +1375,29 @@ func (d *daemonImpl) buildGRPCServer(ctx context.Context) (*grpcSubsystem, error
 
 			// Wire the plugin runtime (Spec 2, plugin-runtime, Phase 7, Task 16).
 			//
-			// The PluginRegistry needs:
+			// The ComponentInstallRegistry needs:
 			//   - platformDB: the operator-shared Postgres for plugin_install persistence
 			//   - redisClient: for transient install status (TTL-based liveness)
 			//   - compQueue: reuses the same WorkQueue as ComponentService
 			//
-			// On fresh installs with no plugins registered the PluginRegistry is
+			// On fresh installs with no plugins registered the ComponentInstallRegistry is
 			// a no-op: ListInstalls returns empty and PluginInvoke returns UNAVAILABLE.
 			//
 			// No background sweeper goroutine is started — Redis TTL expiry is the
 			// sweeper. When a key disappears, ListInstalls excludes the install.
 			//
 			// platformDB is always non-nil after Start() (gibson#246).
-			pluginRegistry := component.NewPluginRegistry(
+			componentInstallRegistry := component.NewPluginRegistry(
 				d.platformDB,
 				d.stateClient.Client(),
 				compQueue,
 				d.logger.WithComponent("plugin-registry").Slog(),
 			)
-			compSvc.WithPluginRegistry(pluginRegistry)
-			d.logger.Info(ctx, "PluginRegistry wired into ComponentService (Postgres + Redis transient state)")
+			compSvc.WithComponentInstallRegistry(componentInstallRegistry)
+			d.logger.Info(ctx, "ComponentInstallRegistry wired into ComponentService (Postgres + Redis transient state)")
 
 			// Register PluginInvokeService on the same gRPC port.
-			pluginInvokeSvc := component.NewPluginInvokeService(pluginRegistry, d.logger.WithComponent("plugin-invoke").Slog())
+			pluginInvokeSvc := component.NewPluginInvokeService(componentInstallRegistry, d.logger.WithComponent("plugin-invoke").Slog())
 			pluginpb.RegisterPluginInvokeServiceServer(srv, pluginInvokeSvc)
 			d.logger.Info(ctx, "PluginInvokeService gRPC endpoint registered")
 		} else {

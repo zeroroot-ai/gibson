@@ -282,7 +282,7 @@ type daemonImpl struct {
 	// pluginAccessStore manages tenant opt-in and encrypted configuration for platform plugins.
 	// Initialized alongside credentialStore when a KeyProvider is configured.
 	// May be nil when no key provider is set (plugin access RPCs will return Unimplemented).
-	pluginAccessStore component.PluginAccessStore
+	pluginAccessStore component.ComponentAccessStore
 
 	// toolAccessStore manages tenant opt-in for tools.
 	// Initialized when a standalone Redis client is available.
