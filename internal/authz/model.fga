@@ -179,11 +179,13 @@ type component
     define user_read_disabled: [user]
     define user_write_disabled: [user]
     define user_execute_disabled: [user]
-    # Component-scope per-action grants for agent_principal narrowing
-    # (owner approves at agent install time). Default absent = denied.
-    define component_read_enabled: [agent_principal]
-    define component_write_enabled: [agent_principal]
-    define component_execute_enabled: [agent_principal]
+    # Component-scope per-action grants for component-principal narrowing
+    # (owner approves at install time). Default absent = denied. Symmetric
+    # across the three principal kinds (ADR-0046): capability is policy
+    # (what enrollment grants per kind), not a type-system wall.
+    define component_read_enabled: [agent_principal, tool_principal, plugin_principal]
+    define component_write_enabled: [agent_principal, tool_principal, plugin_principal]
+    define component_execute_enabled: [agent_principal, tool_principal, plugin_principal]
     # Effective per-action evaluators — existing relation names preserved so
     # call sites keep compiling. Each layers the ownership/scope gate onto
     # the direct grant set and subtracts every matching deny relation.
@@ -194,10 +196,13 @@ type component
     define any_execute_deny: member from tenant_execute_disabled or team_execute_disabled or user_execute_disabled
     define any_write_deny: member from tenant_write_disabled or team_write_disabled or user_write_disabled
     define any_read_deny: member from tenant_read_disabled or team_read_disabled or user_read_disabled
-    # owner-side direct/role grant (pre-gate).
-    define direct_execute: [user, agent_principal, tenant#member, team#member] or member from owner
-    define direct_configure: [user, agent_principal, tenant#member, team#member] or member from owner
-    define direct_read: [user, agent_principal, tenant#member, team#member, team#can_view_data_from] or member from owner
+    # owner-side direct/role grant (pre-gate). Symmetric across the three
+    # principal kinds (ADR-0046): a tool/plugin principal may be granted the
+    # same component relations as an agent; what each kind actually receives is
+    # enrollment policy, not a model restriction.
+    define direct_execute: [user, agent_principal, tool_principal, plugin_principal, tenant#member, team#member] or member from owner
+    define direct_configure: [user, agent_principal, tool_principal, plugin_principal, tenant#member, team#member] or member from owner
+    define direct_read: [user, agent_principal, tool_principal, plugin_principal, tenant#member, team#member, team#can_view_data_from] or member from owner
     # ownership gate: accessible iff the caller's tenant has tenant_enabled for this component.
     # platform_enabled and tenant_published are operational markers enforced at write time
     # (operators only write tenant_enabled for platform-approved or tenant-published components).
