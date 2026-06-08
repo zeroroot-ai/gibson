@@ -340,5 +340,48 @@ func TestModel_CatalogGating(t *testing.T) {
 			"tenant_read_disabled kills agent's can_read_as_component")
 	})
 
+	// ADR-0046: the FGA model is symmetric across the three principal kinds.
+	// tool_principal and plugin_principal are grantable the same component
+	// relations as agent_principal — capability is enrollment policy, not a
+	// type-system wall. Exercised on component:_system (the client backplane),
+	// with the option-B universal `tenant_enabled` baseline in place.
+	t.Run("adr0046/symmetric_principals_on_system_backplane", func(t *testing.T) {
+		c := newClient(t)
+		const sysComp = "component:_system"
+		// Option-B baseline: the system surface is tenant_enabled for the tenant.
+		// One principal of each kind, member of acme. Grant execute to the agent
+		// and the tool (NOT the plugin). The tool_principal direct_execute write
+		// must SUCCEED — on the pre-ADR-0046 model OpenFGA rejects it (the type
+		// is not an allowed grantee), so addTuples' require.NoError fails.
+		addTuples(c,
+			fgaclient.ClientTupleKey{User: tenantA, Relation: "tenant_enabled", Object: sysComp},
+			fgaclient.ClientTupleKey{User: "agent_principal:a", Relation: "member", Object: tenantA},
+			fgaclient.ClientTupleKey{User: "tool_principal:t", Relation: "member", Object: tenantA},
+			fgaclient.ClientTupleKey{User: "plugin_principal:p", Relation: "member", Object: tenantA},
+			fgaclient.ClientTupleKey{User: "agent_principal:a", Relation: "direct_execute", Object: sysComp},
+			fgaclient.ClientTupleKey{User: "tool_principal:t", Relation: "direct_execute", Object: sysComp},
+		)
+		require.True(t, checkAllow(c, "agent_principal:a", "can_execute", sysComp),
+			"granted agent_principal must can_execute component:_system")
+		require.True(t, checkAllow(c, "tool_principal:t", "can_execute", sysComp),
+			"granted tool_principal must can_execute component:_system (symmetry)")
+		require.False(t, checkAllow(c, "plugin_principal:p", "can_execute", sysComp),
+			"un-granted plugin_principal must NOT can_execute component:_system (grant is the gate)")
+	})
+
+	// ADR-0046 / option B: without the `tenant_enabled component:_system`
+	// baseline, even a granted agent is denied — confirming the baseline (and
+	// not the grant alone) is required, i.e. why direct_execute alone is a no-op.
+	t.Run("adr0046/system_backplane_requires_tenant_enabled_baseline", func(t *testing.T) {
+		c := newClient(t)
+		const sysComp = "component:_system"
+		addTuples(c,
+			fgaclient.ClientTupleKey{User: "agent_principal:a", Relation: "member", Object: tenantA},
+			fgaclient.ClientTupleKey{User: "agent_principal:a", Relation: "direct_execute", Object: sysComp},
+		)
+		require.False(t, checkAllow(c, "agent_principal:a", "can_execute", sysComp),
+			"direct_execute without tenant_enabled baseline is a no-op (in_tenant_catalog unsatisfied)")
+	})
+
 	// has_* feature-flag tests removed by spec plans-and-quotas-simplification.
 }
