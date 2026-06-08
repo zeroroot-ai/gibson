@@ -67,33 +67,41 @@ func (r *CatalogFanout) Run(ctx context.Context) {
 	}
 }
 
-// tick performs a single reconciliation pass: enumerate the platform catalog,
-// enumerate the tenants, and write any missing tenant_enabled tuples.
+// systemComponentObject is the synthetic component object the `system_tenant`
+// deriver targets for the COMPONENT-identity client RPCs (ext-authz resolves
+// `object_type: component, object_deriver: system_tenant` to this). It is the
+// platform's client/mission backplane, not a catalog item, so it is never
+// `platform_enabled` and never enters the catalog fan-out below. ADR-0046
+// (option B) makes it executable by seeding a universal `tenant_enabled`
+// baseline for it on every tenant — written DIRECTLY here, never via
+// `platform_enabled`, so the synthetic object cannot leak into discovery /
+// catalog enumerations (which enumerate platform_enabled components).
+const systemComponentObject = "component:_system"
+
+// tick performs a single reconciliation pass: enumerate the tenants, seed the
+// `component:_system` baseline (ADR-0046 option B), and fan the platform
+// catalog (`platform_enabled` items) out as `tenant_enabled` per tenant.
 func (r *CatalogFanout) tick(ctx context.Context) {
-	// Platform catalog: components flagged platform_enabled by the system
-	// tenant. The model restricts `platform_enabled: [system_tenant]` so
-	// only _system publishes here.
-	catalog, err := r.cfg.Authorizer.ListObjects(ctx, "system_tenant:_system", "platform_enabled", "component")
-	if err != nil {
-		r.cfg.Logger.Warn("catalog fanout: list platform catalog failed", "err", err)
-		return
-	}
-	if len(catalog) == 0 {
-		return
-	}
-	// Tenants: system_tenant:_system#parent@tenant:X (per model.fga). We
-	// enumerate via the tenant type's parent tuples on the system tenant.
+	// Tenants: system_tenant:_system#parent@tenant:X (per model.fga). Needed
+	// for both the _system baseline and the catalog fan-out.
 	tenantIDs, err := r.cfg.Authorizer.ListUsers(ctx, "tenant", "system_tenant:_system", "parent")
 	if err != nil {
-		// Fallback: enumerate via "owner" on any component.
-		r.cfg.Logger.Debug("catalog fanout: list tenants via parent failed, falling back", "err", err)
+		r.cfg.Logger.Debug("catalog fanout: list tenants via parent failed", "err", err)
 		tenantIDs = nil
 	}
 	if len(tenantIDs) == 0 {
-		// No tenants registered as parents of the system tenant. This is
-		// normal when the daemon is running in dev with a single empty
-		// tenant — exit quietly.
+		// No tenants registered as parents of the system tenant. Normal in dev
+		// with a single empty tenant — exit quietly.
 		return
+	}
+
+	// Platform catalog: components flagged platform_enabled by the system
+	// tenant (`platform_enabled: [system_tenant]`, so only _system publishes).
+	// May be empty — the _system baseline below is written regardless.
+	catalog, err := r.cfg.Authorizer.ListObjects(ctx, "system_tenant:_system", "platform_enabled", "component")
+	if err != nil {
+		r.cfg.Logger.Warn("catalog fanout: list platform catalog failed", "err", err)
+		catalog = nil
 	}
 
 	var toWrite []authz.Tuple
@@ -109,6 +117,18 @@ func (r *CatalogFanout) tick(ctx context.Context) {
 		existingSet := make(map[string]struct{}, len(existing))
 		for _, e := range existing {
 			existingSet[e] = struct{}{}
+			// Tolerate unprefixed ListObjects results.
+			existingSet["component:"+e] = struct{}{}
+		}
+		// Option-B baseline: the system backplane is tenant_enabled for every
+		// tenant so `component:_system` satisfies in_tenant_catalog (the
+		// per-principal direct_execute grant is the real gate, ADR-0046).
+		if _, have := existingSet[systemComponentObject]; !have {
+			toWrite = append(toWrite, authz.Tuple{
+				User:     tenantRef,
+				Relation: "tenant_enabled",
+				Object:   systemComponentObject,
+			})
 		}
 		for _, item := range catalog {
 			if _, have := existingSet[item]; have {
