@@ -10,6 +10,8 @@ import (
 
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
+	"google.golang.org/grpc/codes"
+	"google.golang.org/grpc/status"
 
 	"github.com/zeroroot-ai/gibson/internal/harness/sandboxed"
 	"github.com/zeroroot-ai/sdk/auth"
@@ -175,6 +177,49 @@ func TestLaunch_MissingBootstrapToken_Rejected(t *testing.T) {
 	require.Error(t, err)
 	assert.Contains(t, err.Error(), "bootstrap token")
 	assert.Empty(t, client.launched)
+}
+
+// When Admit denies (plan-tier connector budget exceeded), Launch surfaces the
+// capacity error and never creates a sandbox.
+func TestLaunch_AdmitDenied_NoSandbox(t *testing.T) {
+	client := &fakeSandboxClient{}
+	l, err := New(Config{
+		Client:         client,
+		RunnerImage:    "img",
+		PlatformURL:    "http://gibson:8080",
+		PlatformEgress: platformEgress,
+		Admit: func(context.Context, auth.TenantID) error {
+			return status.Error(codes.ResourceExhausted, "concurrent_connectors quota exceeded (2/2)")
+		},
+	})
+	require.NoError(t, err)
+
+	_, err = l.Launch(context.Background(), auth.MustNewTenantID("acme"), []byte(connectorYAML), "tok")
+	require.Error(t, err)
+	assert.Equal(t, codes.ResourceExhausted, status.Code(err), "capacity error must propagate")
+	assert.Empty(t, client.launched, "over-budget tenant must not launch a sandbox")
+}
+
+// When Admit allows, the launch proceeds normally.
+func TestLaunch_AdmitAllows_Launches(t *testing.T) {
+	client := &fakeSandboxClient{}
+	admitted := false
+	l, err := New(Config{
+		Client:         client,
+		RunnerImage:    "img",
+		PlatformURL:    "http://gibson:8080",
+		PlatformEgress: platformEgress,
+		Admit: func(context.Context, auth.TenantID) error {
+			admitted = true
+			return nil
+		},
+	})
+	require.NoError(t, err)
+
+	_, err = l.Launch(context.Background(), auth.MustNewTenantID("acme"), []byte(connectorYAML), "tok")
+	require.NoError(t, err)
+	assert.True(t, admitted, "Admit must be consulted")
+	require.Len(t, client.launched, 1)
 }
 
 func TestLaunch_SandboxFailure_Propagates(t *testing.T) {

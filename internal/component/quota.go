@@ -28,6 +28,12 @@ type TenantQuota struct {
 	TenantID           string `json:"tenant_id"`
 	ConcurrentMissions int    `json:"concurrent_missions"`
 	ConcurrentAgents   int    `json:"concurrent_agents"`
+	// ConcurrentConnectors caps the hosted MCP connector instances a tenant
+	// may have running at once (ADR-0047 facet 3). 0 = unlimited. Unlike the
+	// mission/agent counters, the live count is read from the component
+	// registry (heartbeat liveness) at launch time, so there is no separate
+	// active counter to keep in sync.
+	ConcurrentConnectors int `json:"concurrent_connectors"`
 }
 
 // Redis active-counter keys (relative — TenantScopedStore prefixes
@@ -142,7 +148,7 @@ func (q *QuotaManager) GetQuota(ctx context.Context, tenant string) (*TenantQuot
 // when the row is absent.
 func (q *QuotaManager) readQuotaRow(ctx context.Context, tenant string) (*TenantQuota, error) {
 	const sqlQuery = `
-		SELECT concurrent_missions, concurrent_agents
+		SELECT concurrent_missions, concurrent_agents, concurrent_connectors
 		FROM tenant_quotas
 		WHERE tenant_id = $1
 	`
@@ -151,6 +157,7 @@ func (q *QuotaManager) readQuotaRow(ctx context.Context, tenant string) (*Tenant
 	err := q.db.QueryRowContext(ctx, sqlQuery, tenant).Scan(
 		&quota.ConcurrentMissions,
 		&quota.ConcurrentAgents,
+		&quota.ConcurrentConnectors,
 	)
 	if errors.Is(err, sql.ErrNoRows) {
 		return nil, nil
@@ -206,6 +213,28 @@ func (q *QuotaManager) CheckAgentQuota(ctx context.Context) error {
 		return status.Errorf(codes.ResourceExhausted,
 			"tenant %s concurrent_agents quota exceeded (%d/%d)",
 			tenant, current, quota.ConcurrentAgents)
+	}
+	return nil
+}
+
+// CheckConnectorQuota verifies that launching one more hosted connector for the
+// tenant in ctx would not exceed its configured concurrent-connector limit.
+// currentInstances is the tenant's live connector-instance count, read by the
+// caller from the component registry (heartbeat liveness) — there is no separate
+// active counter, so a connector that dies frees its slot automatically when its
+// registry entry expires. Returns nil when no quota is set, the limit is 0
+// (unlimited), or the count is below the limit; codes.ResourceExhausted
+// otherwise.
+func (q *QuotaManager) CheckConnectorQuota(ctx context.Context, currentInstances int) error {
+	tenant := auth.TenantStringFromContext(ctx)
+	quota, err := q.GetQuota(ctx, tenant)
+	if err != nil || quota == nil || quota.ConcurrentConnectors == 0 {
+		return nil
+	}
+	if currentInstances >= quota.ConcurrentConnectors {
+		return status.Errorf(codes.ResourceExhausted,
+			"tenant %s concurrent_connectors quota exceeded (%d/%d)",
+			tenant, currentInstances, quota.ConcurrentConnectors)
 	}
 	return nil
 }

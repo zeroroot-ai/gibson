@@ -69,6 +69,13 @@ type Config struct {
 	// this is a safety net, not a call budget. Default 8h.
 	Timeout time.Duration
 
+	// Admit, when set, is consulted before each launch to enforce the
+	// plan-tier connector-instance budget (ADR-0047 facet 3). It returns a
+	// codes.ResourceExhausted error when the tenant is already at its limit,
+	// which Launch surfaces unchanged. Nil disables budget enforcement
+	// (dev/kind clusters without a platform Postgres pool).
+	Admit func(ctx context.Context, tenant auth.TenantID) error
+
 	// Logger defaults to slog.Default.
 	Logger *slog.Logger
 }
@@ -125,6 +132,15 @@ func (l *Launcher) Launch(ctx context.Context, tenant auth.TenantID, connectorYA
 	}
 	if bootstrapToken == "" {
 		return "", fmt.Errorf("connector: bootstrap token is required for hosted launch")
+	}
+
+	// Plan-tier connector-instance budget (ADR-0047 facet 3). Enforced before
+	// the sandbox is created so an over-budget tenant gets an explicit capacity
+	// error and never over-provisions.
+	if l.cfg.Admit != nil {
+		if err := l.cfg.Admit(ctx, tenant); err != nil {
+			return "", fmt.Errorf("connector: launch denied for %q: %w", m.Metadata.Name, err)
+		}
 	}
 
 	// Egress allow-list: platform endpoints + manifest-declared vendor
