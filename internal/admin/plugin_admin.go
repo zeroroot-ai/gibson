@@ -362,11 +362,24 @@ func (s *PluginsAdminServer) RegisterPlugin(ctx context.Context, req *tenantv1.R
 		return &tenantv1.RegisterPluginResponse{ValidationErrors: out}, status.Error(codes.InvalidArgument, "binding cross-check failed")
 	}
 
-	if manifest.IsConnector && s.launcher == nil {
+	// remote (gibson#685, ADR-0048): the customer runs the MCP bridge in
+	// their own network. The daemon skips the hosted setec launch and the
+	// response carries the one-time bootstrap token for the customer-run
+	// bridge to redeem. Plain plugins are always customer-run and always
+	// receive the token, so the flag is connector-only.
+	remote := req.GetRemote()
+	if remote && !manifest.IsConnector {
+		return nil, status.Error(codes.InvalidArgument,
+			"remote applies only to connector manifests "+
+				"(connector.gibson.zeroroot.ai/v1); plain plugins are always "+
+				"customer-run and already receive the bootstrap token")
+	}
+
+	if manifest.IsConnector && !remote && s.launcher == nil {
 		return nil, status.Error(codes.FailedPrecondition,
 			"hosted connector launch is not available on this daemon "+
-				"(sandbox.connector is not configured); run the bridge in your "+
-				"own network instead")
+				"(sandbox.connector is not configured); register with "+
+				"remote: true and run the bridge in your own network instead")
 	}
 
 	if req.GetDryRun() {
@@ -454,8 +467,9 @@ func (s *PluginsAdminServer) RegisterPlugin(ctx context.Context, req *tenantv1.R
 	// it is injected into the MCP-bridge sandbox, which redeems it to
 	// register. Launch failure rolls back the whole registration so a tenant
 	// never holds a principal for a connector that cannot run.
+	// Remote connectors skip the launch: the customer runs the bridge.
 	var sandboxID string
-	if manifest.IsConnector {
+	if manifest.IsConnector && !remote {
 		var launchErr error
 		sandboxID, launchErr = s.launcher.Launch(ctx, tenant, req.GetManifestYaml(), bootstrapToken)
 		if launchErr != nil {
@@ -482,10 +496,12 @@ func (s *PluginsAdminServer) RegisterPlugin(ctx context.Context, req *tenantv1.R
 		BootstrapToken:              bootstrapToken,
 		BootstrapTokenExpiresAtUnix: expiresAt.Unix(),
 	}
-	if manifest.IsConnector {
-		// The single-use token went to the sandbox; returning it too would
-		// invite a redemption race with the bridge. The sandbox id is logged
-		// server-side, not returned (no response field).
+	if manifest.IsConnector && !remote {
+		// Hosted path: the single-use token went to the sandbox; returning it
+		// too would invite a redemption race with the bridge. The sandbox id
+		// is logged server-side, not returned (no response field). Remote
+		// connectors keep the token in the response — it is the customer-run
+		// bridge's sole enrollment credential.
 		resp.BootstrapToken = ""
 		resp.BootstrapTokenExpiresAtUnix = 0
 		_ = sandboxID
