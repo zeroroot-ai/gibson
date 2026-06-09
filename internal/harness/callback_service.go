@@ -695,6 +695,13 @@ func (s *HarnessCallbackService) LLMCompleteStructured(ctx context.Context, req 
 // CallToolProto implements the proto-based tool execution RPC.
 // This is the canonical way to execute tools from external agents.
 func (s *HarnessCallbackService) CallToolProto(ctx context.Context, req *harnesspb.CallToolProtoRequest) (*harnesspb.CallToolProtoResponse, error) {
+	// Meta-tools (search_tools / invoke_tool) are synthetic: they are not
+	// registered tools, so intercept before the registry dispatch and resolve
+	// them against the connector catalog (ADR-0047 facet 5).
+	if isMetaTool(req.GetName()) {
+		return s.callMetaTool(ctx, req)
+	}
+
 	harness, err := s.getHarness(ctx, req.Context)
 	if err != nil {
 		return nil, err
@@ -856,6 +863,13 @@ func (s *HarnessCallbackService) ListTools(ctx context.Context, req *harnesspb.L
 
 	// Get tool descriptors
 	tools := harness.ListTools()
+
+	// At MCP catalog scale the agent does not see the full tool set as native
+	// functions; it sees the two meta-tools and discovers via search_tools
+	// (ADR-0047 facet 5). Advertise them only when the catalog is wired.
+	if s.metaToolsWired() {
+		tools = append(tools, metaToolDescriptors()...)
+	}
 
 	// Convert to proto with structured schemas (including taxonomy)
 	protoTools := make([]*harnesspb.HarnessToolDescriptor, len(tools))
