@@ -56,6 +56,14 @@ var allowedUnauthenticated = map[string]bool{
 	// is an opaque single-use capability; the payload is non-sensitive step
 	// labels. Was member/tenant-scoped — flipped in sdk#275 (dashboard#646).
 	"/gibson.tenant.v1.UserService/SetSignupProgress": true,
+
+	// AcceptInvitation is intentionally unauthenticated: the invitee is not
+	// yet a member of any tenant, so no session or tenant JWT can exist. The
+	// single-use invitation token in the request is the sole capability —
+	// the same pre-auth pattern as GetSignupProgress above. The proto
+	// annotation documents this explicitly (sdk membership.proto). Spec:
+	// native-cli-login completion PRD (gibson#630, shipped via gibson#633).
+	"/gibson.tenant.v1.MembershipService/AcceptInvitation": true,
 }
 
 // TestOnlyConnectAndPingAreUnauthenticated walks the generated Registry map

@@ -194,15 +194,17 @@ func (s *RedisVectorStore) Search(ctx context.Context, query VectorQuery) ([]Vec
 	// Convert embedding to binary blob (FLOAT32 encoding for RediSearch)
 	vectorBlob := embeddingToFloat32Bytes(query.Embedding)
 
-	// Build KNN query string
-	// Format: "*=>[KNN {topK} @embedding $query_vec AS score]"
-	knnQuery := fmt.Sprintf("*=>[KNN %d @embedding $query_vec AS score]", query.TopK)
-
-	// If hybrid search with text query on content, combine queries
+	// Build KNN query string. Dialect-2 KNN takes a single pre-filter
+	// expression before `=>`: pure vector search filters on `*`; hybrid
+	// search replaces the `*` with the text filter — `(filter)=>[KNN ...]`.
+	// Prepending the filter alongside `*` (the previous form) is a syntax
+	// error on redis-stack 7.4 (gibson#695).
+	knnClause := fmt.Sprintf("[KNN %d @embedding $query_vec AS score]", query.TopK)
+	knnQuery := "*=>" + knnClause
 	if query.Text != "" {
 		// Escape special characters in text query
 		escapedText := state.EscapeQuery(query.Text)
-		knnQuery = fmt.Sprintf("@content:(%s) %s", escapedText, knnQuery)
+		knnQuery = fmt.Sprintf("(@content:(%s))=>%s", escapedText, knnClause)
 	}
 
 	// Build FT.SEARCH command with KNN parameters

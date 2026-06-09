@@ -130,6 +130,9 @@ func TestNoGracefulNilInRequestPaths(t *testing.T) {
 		"internal/admin/tenant_admin.go:337":               astchecks.Entry{Category: astchecks.CategoryLegacyOptional, Reason: "s.authorizer nil-guard in ListMembers; reassert when authorizer-required follow-up lands"},
 
 		// internal/daemon/api — handlers + helpers
+		"internal/daemon/api/server_revoke_sessions.go:77":     astchecks.Entry{Category: astchecks.CategoryDefensiveGuard, Reason: "fail-closed: nil FGA denies cross-user session revocation; self-revocation (gibson logout) needs no FGA round-trip (gibson#676 S4)"},
+		"internal/daemon/grpc.go:2306":                         astchecks.Entry{Category: astchecks.CategoryDefensiveGuard, Reason: "best-effort checkpoint payload enrichment; nil pool means no Redis rich payload, metadata path stays serviceable (documented in populateCheckpointPayload)"},
+		"internal/daemon/grpc.go:2316":                         astchecks.Entry{Category: astchecks.CategoryDefensiveGuard, Reason: "same best-effort path as :2306 — absent/legacy checkpoint simply yields no rich payload"},
 		"internal/daemon/api/mission_handlers.go:329":          astchecks.Entry{Category: astchecks.CategoryLegacyOptional, Reason: "s.authorizer nil-check in requireMissionViewer; predates noopAuthorizer deletion"},
 		"internal/daemon/api/mission_handlers.go:406":          astchecks.Entry{Category: astchecks.CategoryLegacyOptional, Reason: "s.authorizer nil-check in callerIsPlatformOperator; predates noopAuthorizer deletion"},
 		"internal/daemon/api/mission_handlers.go:979":          astchecks.Entry{Category: astchecks.CategoryDefensiveGuard, Reason: "err check followed by payload nil-check (caller-shape, not dep)"},
@@ -157,7 +160,7 @@ func TestNoGracefulNilInRequestPaths(t *testing.T) {
 		"internal/daemon/grpc.go:2263":                  astchecks.Entry{Category: astchecks.CategoryLegacyOptional, Reason: "pool nil-guard in populateCheckpointPayload; pool-required follow-up"},
 		"internal/daemon/grpc.go:2273":                  astchecks.Entry{Category: astchecks.CategoryDefensiveGuard, Reason: "compound nil-check on mission store Get result + Checkpoint proto field in populateCheckpointPayload"},
 		"internal/daemon/grpc.go:2405":                  astchecks.Entry{Category: astchecks.CategoryLegacyOptional, Reason: "pool nil-guard; pool-required follow-up (one-code-path#195)"},
-		"internal/daemon/grpc.go:2748":                  astchecks.Entry{Category: astchecks.CategoryLegacyOptional, Reason: "Neo4j connection nil-guard; Neo4j not configured for this tenant — skip silently"},
+		"internal/daemon/grpc.go:2791":                  astchecks.Entry{Category: astchecks.CategoryLegacyOptional, Reason: "Neo4j connection nil-guard; Neo4j not configured for this tenant — skip silently"},
 		"internal/daemon/graph_bootstrap.go:411":        astchecks.Entry{Category: astchecks.CategoryDefensiveGuard, Reason: "tenant-value lookup helper, nil means no scoping"},
 		"internal/daemon/infrastructure.go:95":          astchecks.Entry{Category: astchecks.CategoryLegacyOptional, Reason: "semantic querier factory optional in non-graphrag deployments"},
 		"internal/daemon/log_watcher.go:197":            astchecks.Entry{Category: astchecks.CategoryDefensiveGuard, Reason: "log watcher file handle nil-guard during teardown"},
