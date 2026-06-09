@@ -53,7 +53,7 @@ func TestNoContextBackgroundInRPCHandlers(t *testing.T) {
 			Category: astchecks.CategoryDefensiveGuard,
 			Reason:   "shutdown cleanup must outlive the inbound RPC ctx; bounded by WithTimeout",
 		},
-		"internal/daemon/api/tenant_admin_create.go:211": astchecks.Entry{
+		"internal/daemon/api/tenant_admin_create.go:253": astchecks.Entry{
 			Category: astchecks.CategoryDefensiveGuard,
 			Reason:   "saga rollback context must outlive the failed-RPC ctx; bounded by WithTimeout(10s)",
 		},

@@ -87,9 +87,9 @@ func TestNoTimeNowInRPCHandlers(t *testing.T) {
 		"internal/daemon/api/server_model_access.go:291": astchecks.Entry{Category: astchecks.CategoryDefensiveGuard, Reason: "named helper wrapping wall-clock Unix timestamp"},
 
 		// server.go — session IDs + response timestamps + latency
-		"internal/daemon/api/server.go:1075": astchecks.Entry{Category: astchecks.CategoryDefensiveGuard, Reason: "session ID generation uses wall-clock Unix epoch"},
-		"internal/daemon/api/server.go:1094": astchecks.Entry{Category: astchecks.CategoryDefensiveGuard, Reason: "response `Timestamp` field; wall-clock Unix"},
-		"internal/daemon/api/server.go:1440": astchecks.Entry{Category: astchecks.CategoryDefensiveGuard, Reason: "latency-measurement start"},
+		"internal/daemon/api/server.go:1078": astchecks.Entry{Category: astchecks.CategoryDefensiveGuard, Reason: "session ID generation uses wall-clock Unix epoch"},
+		"internal/daemon/api/server.go:1097": astchecks.Entry{Category: astchecks.CategoryDefensiveGuard, Reason: "response `Timestamp` field; wall-clock Unix"},
+		"internal/daemon/api/server.go:1443": astchecks.Entry{Category: astchecks.CategoryDefensiveGuard, Reason: "latency-measurement start"},
 
 		// server_usage.go — staleness markers on usage responses
 		"internal/daemon/api/server_usage.go:77":  astchecks.Entry{Category: astchecks.CategoryDefensiveGuard, Reason: "`StaleAsOfUnix` response field; wall-clock"},
