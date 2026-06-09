@@ -62,6 +62,47 @@ Completed or cancelled missions are unaffected.
 
 ---
 
+## [0.123.0](https://github.com/zeroroot-ai/gibson/compare/v0.122.0...v0.123.0) (2026-06-09)
+
+
+### Features
+
+* add SearchTools query engine for the connector catalog ([#689](https://github.com/zeroroot-ai/gibson/issues/689)) ([f190146](https://github.com/zeroroot-ai/gibson/commit/f1901461b54a7ca20e09a26f5c870f5bcdbff66c))
+* add tool-id codec for connector tool identifiers ([#687](https://github.com/zeroroot-ai/gibson/issues/687)) ([85ead99](https://github.com/zeroroot-ai/gibson/commit/85ead991862571a6362bccc17c23dcb1c7f6af60))
+* **authz:** make component:_system executable — universal baseline + agent grant (gibson[#660](https://github.com/zeroroot-ai/gibson/issues/660), gibson[#647](https://github.com/zeroroot-ai/gibson/issues/647)) ([#665](https://github.com/zeroroot-ai/gibson/issues/665)) ([a9ea6b1](https://github.com/zeroroot-ai/gibson/commit/a9ea6b1c26744af9d6d6715bcd3cbed282ce9eae))
+* **authz:** symmetric FGA model across agent/tool/plugin principals (gibson[#659](https://github.com/zeroroot-ai/gibson/issues/659)) ([#664](https://github.com/zeroroot-ai/gibson/issues/664)) ([9f12c00](https://github.com/zeroroot-ai/gibson/commit/9f12c009ae27105c10a0fa943ec4872171cf203b))
+* **authz:** unified enrollment policy — kind-&gt;grant table (gibson[#661](https://github.com/zeroroot-ai/gibson/issues/661)) ([#666](https://github.com/zeroroot-ai/gibson/issues/666)) ([cce716b](https://github.com/zeroroot-ai/gibson/commit/cce716bb0756816817c9b4c5a7b31ab747417ef8))
+* **capabilitygrant:** CG host-registration endpoint — discovery, bootstrap token, register handler, wiring (gibson[#648](https://github.com/zeroroot-ai/gibson/issues/648)) ([#649](https://github.com/zeroroot-ai/gibson/issues/649)) ([756a0f6](https://github.com/zeroroot-ai/gibson/commit/756a0f66881a44ee475e7bff07312dd54cc57be3))
+* **capabilitygrant:** per-kid key descriptor with FGA principal + tenant (gibson[#648](https://github.com/zeroroot-ai/gibson/issues/648)) ([#655](https://github.com/zeroroot-ai/gibson/issues/655)) ([43364ad](https://github.com/zeroroot-ai/gibson/commit/43364adb33bb1672f0c0e6ee753b0217a74cedca))
+* **capabilitygrant:** serve component public keys by kid (gibson[#648](https://github.com/zeroroot-ai/gibson/issues/648)) ([#654](https://github.com/zeroroot-ai/gibson/issues/654)) ([d6c61a3](https://github.com/zeroroot-ai/gibson/commit/d6c61a3e0e8c46f09f04af75bc1f44aacab9f5d8))
+* **capabilitygrant:** validate host+jwt re-registration at the register endpoint (gibson[#648](https://github.com/zeroroot-ai/gibson/issues/648)) ([#658](https://github.com/zeroroot-ai/gibson/issues/658)) ([fea37f3](https://github.com/zeroroot-ai/gibson/commit/fea37f30937ece7bac6fddef7fb4f83f0b1559e5))
+* **component:** one install/access/config path for agent/tool/plugin (gibson[#662](https://github.com/zeroroot-ai/gibson/issues/662)) ([#667](https://github.com/zeroroot-ai/gibson/issues/667)) ([6fd5fd9](https://github.com/zeroroot-ai/gibson/commit/6fd5fd9a37897502bcbe5f45e7e825de34901534))
+* **daemon:** serve unauthenticated GET /.well-known/gibson-cli bootstrap config (gibson[#623](https://github.com/zeroroot-ai/gibson/issues/623)) ([#640](https://github.com/zeroroot-ai/gibson/issues/640)) ([f1d87ce](https://github.com/zeroroot-ai/gibson/commit/f1d87ce16ea533ef4a560cf53bab1da1edfca236))
+* **harness:** one kind-uniform work-queue dispatch for agent/tool/plugin (gibson[#663](https://github.com/zeroroot-ai/gibson/issues/663)) ([#669](https://github.com/zeroroot-ai/gibson/issues/669)) ([545daf0](https://github.com/zeroroot-ai/gibson/commit/545daf0705a12b8bf95afaaeddd415f775acf46c))
+* **identity:** implement RevokeUserSessions with composed can_revoke_sessions authz (gibson[#622](https://github.com/zeroroot-ai/gibson/issues/622)) ([#629](https://github.com/zeroroot-ai/gibson/issues/629)) ([b80ce1b](https://github.com/zeroroot-ai/gibson/commit/b80ce1b6d5c35faafed27704fca221a9bd8da439))
+* implement GetMissionGraph projection + layout store in the daemon ([#602](https://github.com/zeroroot-ai/gibson/issues/602)) ([a1e1be1](https://github.com/zeroroot-ai/gibson/commit/a1e1be1094e4499f63140e72282802e5a38b0e51))
+* **membership:** add InviteMember + invitation store + pending members in ListMembers (gibson[#631](https://github.com/zeroroot-ai/gibson/issues/631)) ([#638](https://github.com/zeroroot-ai/gibson/issues/638)) ([b030577](https://github.com/zeroroot-ai/gibson/commit/b030577a4f078d6091d02b1feae188ced43986d3))
+* **membership:** implement AcceptInvitation + resend/cancel daemon handlers (gibson[#633](https://github.com/zeroroot-ai/gibson/issues/633), gibson[#634](https://github.com/zeroroot-ai/gibson/issues/634)) ([#639](https://github.com/zeroroot-ai/gibson/issues/639)) ([ed62050](https://github.com/zeroroot-ai/gibson/commit/ed620504322384157023dff1e97f6a5fb709cbe6))
+* **membership:** MembershipService writes the Zitadel org-membership half (gibson[#621](https://github.com/zeroroot-ai/gibson/issues/621)) ([#625](https://github.com/zeroroot-ai/gibson/issues/625)) ([b37e9e2](https://github.com/zeroroot-ai/gibson/commit/b37e9e28a72a5175c8eb665a9d8dbe1911244a9e))
+* **membership:** send invitation accept-link email from the daemon (gibson[#632](https://github.com/zeroroot-ai/gibson/issues/632)) ([#642](https://github.com/zeroroot-ai/gibson/issues/642)) ([8022539](https://github.com/zeroroot-ai/gibson/commit/8022539e20bde6b61a6a2ab3660b788883df2d51))
+* **session:** add daemon-local SessionService for self-service login sessions ([#677](https://github.com/zeroroot-ai/gibson/issues/677)) ([725ea83](https://github.com/zeroroot-ai/gibson/commit/725ea83fd11b77263888efdf2f5b2ddace531ca8)), closes [#676](https://github.com/zeroroot-ai/gibson/issues/676)
+* **tenant:** issue CG bootstrap token from CreateAgentIdentity (gibson[#648](https://github.com/zeroroot-ai/gibson/issues/648)) ([#652](https://github.com/zeroroot-ai/gibson/issues/652)) ([3fc9a89](https://github.com/zeroroot-ai/gibson/commit/3fc9a895917907d3ab809b8202494dc48fa3e184))
+
+
+### Bug Fixes
+
+* **ci:** clear govulncheck findings — Go 1.26.4 stdlib + x/crypto v0.52.0 ([#612](https://github.com/zeroroot-ai/gibson/issues/612)) ([1251cc3](https://github.com/zeroroot-ai/gibson/commit/1251cc359c438c0779cd92d993e4afde9c68fc08))
+* **ci:** install Go from go.mod (go-version-file) instead of pinning '1.26' ([#615](https://github.com/zeroroot-ai/gibson/issues/615)) ([454c977](https://github.com/zeroroot-ai/gibson/commit/454c97711c1c11fb13653c4dfa4a682fc88450f5))
+* **daemon:** drop vestigial Zitadel project-membership from agent identity provisioning ([#607](https://github.com/zeroroot-ai/gibson/issues/607)) ([14eecbd](https://github.com/zeroroot-ai/gibson/commit/14eecbd262ffa600c99e0692e1b1b0cbe4ef7093)), closes [#605](https://github.com/zeroroot-ai/gibson/issues/605)
+* **daemon:** return loginName client_id from agent identity enrollment ([#644](https://github.com/zeroroot-ai/gibson/issues/644)) ([299f87b](https://github.com/zeroroot-ai/gibson/commit/299f87b6f97570879a940206e4047505de697f38)), closes [#643](https://github.com/zeroroot-ai/gibson/issues/643)
+* **daemon:** stop minting OAuth client_secret in CreateAgentIdentity (CG-only) ([#672](https://github.com/zeroroot-ai/gibson/issues/672)) ([4739c78](https://github.com/zeroroot-ai/gibson/commit/4739c78ebbe6744a594784f9c1d542fa4d846d21))
+* **daemon:** tenant-scope ListAgentIdentities + RevokeAgentIdentity via FGA ([#608](https://github.com/zeroroot-ai/gibson/issues/608)) ([645cad3](https://github.com/zeroroot-ai/gibson/commit/645cad318906988a454d85cb2644b5a02327c122)), closes [#606](https://github.com/zeroroot-ai/gibson/issues/606)
+* **migrations:** create Capability-Grant store tables at startup (gibson[#648](https://github.com/zeroroot-ai/gibson/issues/648)) ([#653](https://github.com/zeroroot-ai/gibson/issues/653)) ([1db2a7c](https://github.com/zeroroot-ai/gibson/commit/1db2a7c759e672c5f6009d19c8d1e04d38c80455))
+* **state:** correct stream PEL/claim/trim test expectations ([#616](https://github.com/zeroroot-ai/gibson/issues/616)) ([25914f6](https://github.com/zeroroot-ai/gibson/commit/25914f603ebb6348b75d260c9afdcba25dd86380))
+* **state:** FindOrCreateMission exact-matches name via a TAG field ([#619](https://github.com/zeroroot-ai/gibson/issues/619)) ([ea7f247](https://github.com/zeroroot-ai/gibson/commit/ea7f2477c51ef0282f92735277ca875fc2937294)), closes [#617](https://github.com/zeroroot-ai/gibson/issues/617)
+* **tenant:** refresh stale rebrand KAT vectors in tenant name + KEK tests ([#611](https://github.com/zeroroot-ai/gibson/issues/611)) ([b4a0355](https://github.com/zeroroot-ai/gibson/commit/b4a035536c832ad7c6ccadf600d3f5f0e071f4ee)), closes [#588](https://github.com/zeroroot-ai/gibson/issues/588)
+* **tests:** drop obsolete redis-direct providerconfig integration test ([#614](https://github.com/zeroroot-ai/gibson/issues/614)) ([8505cc0](https://github.com/zeroroot-ai/gibson/commit/8505cc09d4298ff3259db3e0befe1ba4e76fdd19)), closes [#610](https://github.com/zeroroot-ai/gibson/issues/610)
+
 ## [0.122.0](https://github.com/zeroroot-ai/gibson/compare/v0.121.0...v0.122.0) (2026-06-02)
 
 
