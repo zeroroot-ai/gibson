@@ -78,7 +78,7 @@ func TestMetaInvoke_DispatchesAndWrapsResult(t *testing.T) {
 	q := &mtQuerier{ret: map[string]any{"number": 7}}
 	h := metatool.NewHandler(nil, mtAuthz{allow: map[string]bool{"mcp:gitlab:create_issue": true}}, q)
 
-	resp, err := newSvc().metaInvoke(context.Background(), h, catalog.Caller{Tenant: "acme"},
+	resp, err := newSvc().metaInvoke(context.Background(), h, catalog.Caller{Tenant: "acme"}, nil,
 		[]byte(`{"id":"mcp:gitlab:create_issue","args":{"title":"x"}}`))
 	if err != nil {
 		t.Fatalf("metaInvoke: %v", err)
@@ -102,7 +102,7 @@ func TestMetaInvoke_UnauthorizedIsPermissionDenied(t *testing.T) {
 	q := &mtQuerier{}
 	h := metatool.NewHandler(nil, mtAuthz{allow: map[string]bool{}}, q)
 
-	resp, err := newSvc().metaInvoke(context.Background(), h, catalog.Caller{Tenant: "acme"},
+	resp, err := newSvc().metaInvoke(context.Background(), h, catalog.Caller{Tenant: "acme"}, nil,
 		[]byte(`{"id":"mcp:github:create_issue"}`))
 	if err != nil {
 		t.Fatalf("metaInvoke: %v", err)
@@ -115,9 +115,45 @@ func TestMetaInvoke_UnauthorizedIsPermissionDenied(t *testing.T) {
 	}
 }
 
+// A mission-level blocked_tools entry denies the connector tool by canonical id,
+// before authz or dispatch — even though the caller would otherwise be allowed.
+func TestMetaInvoke_BlockedByMissionPolicy(t *testing.T) {
+	q := &mtQuerier{}
+	h := metatool.NewHandler(nil, mtAuthz{allow: map[string]bool{"mcp:gitlab:create_issue": true}}, q)
+
+	resp, err := newSvc().metaInvoke(context.Background(), h, catalog.Caller{Tenant: "acme"},
+		[]string{"mcp:gitlab:create_issue"},
+		[]byte(`{"id":"mcp:gitlab:create_issue","args":{"title":"x"}}`))
+	if err != nil {
+		t.Fatalf("metaInvoke: %v", err)
+	}
+	if resp.GetError().GetCode() != commonpb.ErrorCode_ERROR_CODE_PERMISSION_DENIED {
+		t.Fatalf("want PERMISSION_DENIED for blocked tool, got %v", resp.GetError())
+	}
+	if q.gotName != "" {
+		t.Fatal("blocked tool must not dispatch")
+	}
+}
+
+func TestMatchBlocked(t *testing.T) {
+	blocked := []string{"mcp:gitlab:create_issue", "NMAP"}
+	if id, ok := matchBlocked(blocked, "mcp:slack:post"); ok {
+		t.Fatalf("unexpected match: %s", id)
+	}
+	if _, ok := matchBlocked(blocked, "mcp:gitlab:create_issue"); !ok {
+		t.Fatal("should match exact canonical id")
+	}
+	if _, ok := matchBlocked(blocked, "native:nmap", "nmap"); !ok {
+		t.Fatal("should match case-insensitively across candidates")
+	}
+	if _, ok := matchBlocked(nil, "anything"); ok {
+		t.Fatal("empty blocklist must never match")
+	}
+}
+
 func TestMetaInvoke_MissingIdIsInvalidArgument(t *testing.T) {
 	h := metatool.NewHandler(nil, mtAuthz{}, &mtQuerier{})
-	resp, err := newSvc().metaInvoke(context.Background(), h, catalog.Caller{}, []byte(`{"args":{}}`))
+	resp, err := newSvc().metaInvoke(context.Background(), h, catalog.Caller{}, nil, []byte(`{"args":{}}`))
 	if err != nil {
 		t.Fatalf("metaInvoke: %v", err)
 	}

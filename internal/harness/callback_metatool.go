@@ -4,6 +4,7 @@ import (
 	"context"
 	"encoding/json"
 	"errors"
+	"strings"
 
 	commonpb "github.com/zeroroot-ai/sdk/api/gen/gibson/common/v1"
 	harnesspb "github.com/zeroroot-ai/sdk/api/gen/gibson/harness/v1"
@@ -12,7 +13,29 @@ import (
 	"github.com/zeroroot-ai/gibson/internal/catalog"
 	"github.com/zeroroot-ai/gibson/internal/component"
 	"github.com/zeroroot-ai/gibson/internal/metatool"
+	"github.com/zeroroot-ai/gibson/internal/toolid"
 )
+
+// matchBlocked reports the first candidate tool id that appears in the
+// mission-level deny list, matched case-insensitively. It is the single place
+// blocked_tools is compared, so native and meta-tool paths agree.
+func matchBlocked(blocked []string, candidates ...string) (string, bool) {
+	if len(blocked) == 0 {
+		return "", false
+	}
+	set := make(map[string]struct{}, len(blocked))
+	for _, b := range blocked {
+		if b = strings.ToLower(strings.TrimSpace(b)); b != "" {
+			set[b] = struct{}{}
+		}
+	}
+	for _, c := range candidates {
+		if _, ok := set[strings.ToLower(strings.TrimSpace(c))]; ok {
+			return c, true
+		}
+	}
+	return "", false
+}
 
 // metaToolsWired reports whether the connector catalog is fully wired on this
 // daemon. The two meta-tools are advertised and served only when it is, so a
@@ -100,7 +123,7 @@ func (s *HarnessCallbackService) callMetaTool(ctx context.Context, req *harnessp
 	case metatool.SearchToolsName:
 		return s.metaSearch(ctx, handler, caller, req.GetInputJson())
 	case metatool.InvokeToolName:
-		return s.metaInvoke(ctx, handler, caller, req.GetInputJson())
+		return s.metaInvoke(ctx, handler, caller, h.Mission().BlockedTools, req.GetInputJson())
 	default:
 		return metaToolErr(commonpb.ErrorCode_ERROR_CODE_NOT_FOUND, "unknown meta-tool: "+req.GetName()), nil
 	}
@@ -148,7 +171,7 @@ func (s *HarnessCallbackService) metaSearch(ctx context.Context, h *metatool.Han
 	return marshalMetaResult(s, out)
 }
 
-func (s *HarnessCallbackService) metaInvoke(ctx context.Context, h *metatool.Handler, caller catalog.Caller, inputJSON []byte) (*harnesspb.CallToolProtoResponse, error) {
+func (s *HarnessCallbackService) metaInvoke(ctx context.Context, h *metatool.Handler, caller catalog.Caller, blocked []string, inputJSON []byte) (*harnesspb.CallToolProtoResponse, error) {
 	var in struct {
 		ID   string         `json:"id"`
 		Args map[string]any `json:"args"`
@@ -158,6 +181,17 @@ func (s *HarnessCallbackService) metaInvoke(ctx context.Context, h *metatool.Han
 	}
 	if in.ID == "" {
 		return metaToolErr(commonpb.ErrorCode_ERROR_CODE_INVALID_ARGUMENT, "invoke_tool requires a non-empty id"), nil
+	}
+
+	// Mission-level blocked_tools denial, by canonical id. Checked here (before
+	// authz and dispatch) so the deny is independent of the agent and fails
+	// closed. Match both the id the agent supplied and its canonical form.
+	canon := in.ID
+	if tid, err := toolid.Parse(in.ID); err == nil {
+		canon = tid.Canonical()
+	}
+	if blockedID, ok := matchBlocked(blocked, in.ID, canon); ok {
+		return metaToolErr(commonpb.ErrorCode_ERROR_CODE_PERMISSION_DENIED, "tool '"+blockedID+"' is blocked by mission policy"), nil
 	}
 
 	result, err := h.Invoke(ctx, caller, in.ID, in.Args)

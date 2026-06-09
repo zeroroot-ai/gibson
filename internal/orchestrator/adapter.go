@@ -265,7 +265,8 @@ func (m *MissionAdapter) createOrchestrator(ctx context.Context, mis *mission.Mi
 	missionCtx := harness.NewMissionContext(mis.ID, mis.Name, "").
 		WithMissionRunID(missionRunID).
 		WithRunNumber(runNumber).
-		WithTenant(mis.TenantID)
+		WithTenant(mis.TenantID).
+		WithBlockedTools(def.GetConstraints().GetBlockedTools())
 
 	// Create target info
 	// Note: In a full implementation, we would load the target entity here
