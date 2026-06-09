@@ -1058,6 +1058,16 @@ func (d *daemonImpl) buildGRPCServer(ctx context.Context) (*grpcSubsystem, error
 		pluginAdminStackOK := secretsStackOK && idpClient != nil && d.brokerAuditWriter != nil && d.cgMinter != nil
 
 		if pluginAdminStackOK {
+			// Hosted MCP-connector launch (gibson#684). Nil when the binary
+			// lacks setec_integration or sandbox.connector is unconfigured;
+			// connector registrations are then rejected with a clear error
+			// while plain plugin registration continues to work.
+			connectorLauncher, clErr := NewConnectorLauncher(d.config.Sandbox, d.logger.Slog())
+			if clErr != nil {
+				d.logger.Warn(ctx, "connector launcher unavailable; connector registrations will be rejected",
+					"error", clErr)
+			}
+
 			pluginAdminSvc, paErr := admin.NewPluginsAdminServer(admin.PluginsAdminConfig{
 				Registry:          &componentInstallRegistryReaderAdapter{db: d.platformDB},
 				ManifestValidator: &pluginManifestValidator{},
@@ -1065,6 +1075,7 @@ func (d *daemonImpl) buildGRPCServer(ctx context.Context) (*grpcSubsystem, error
 				SecretWriter:      &secretWriterAdapter{svc: d.secretsService},
 				Authorizer:        d.authorizer,
 				BootstrapAuditor:  d.brokerAuditWriter,
+				ConnectorLauncher: connectorLauncher,
 			})
 			if paErr != nil {
 				d.logger.Warn(ctx, "PluginAdminService: constructor failed; registering Unavailable stub",

@@ -90,6 +90,19 @@ type LaunchRequest struct {
 	Memory  string
 	Tenant  string // informational; tenancy is resolved by Setec from client cert CN
 	Timeout time.Duration
+
+	// Egress, when non-empty, switches the sandbox network policy from the
+	// setec default (mode=full) to an egress-allow-list containing exactly
+	// these targets. Used by connector launches (gibson#684) so the vendor
+	// MCP server can reach only its declared hosts.
+	Egress []EgressRule
+}
+
+// EgressRule is one egress-allow-list entry, mirroring setec's
+// Network.allow shape (host + port).
+type EgressRule struct {
+	Host string
+	Port uint32
 }
 
 // LaunchResponse is the executor-facing result of Launch.
