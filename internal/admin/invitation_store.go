@@ -204,7 +204,10 @@ func (s *InvitationStore) FindPendingByEmail(ctx context.Context, tenantID, emai
 // ListPending returns the non-expired pending invitations for a tenant.
 func (s *InvitationStore) ListPending(ctx context.Context, tenantID string) ([]PendingInvitation, error) {
 	if s == nil || s.db == nil {
-		return nil, nil
+		// Match every sibling method: an unconfigured store is an error, not
+		// an empty roster — the ListMembers caller logs it and proceeds with
+		// active members, so the gap stays observable.
+		return nil, errors.New("invitation store not configured")
 	}
 	if err := s.ensureTable(ctx); err != nil {
 		return nil, err

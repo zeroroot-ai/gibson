@@ -1,6 +1,7 @@
 package vector
 
 import (
+	"encoding/json"
 	"fmt"
 	"time"
 
@@ -14,7 +15,47 @@ type VectorRecord struct {
 	Content   string         `json:"content"`
 	Embedding []float64      `json:"embedding"`
 	Metadata  map[string]any `json:"metadata,omitempty"`
-	CreatedAt time.Time      `json:"created_at"`
+	CreatedAt time.Time      `json:"-"`
+}
+
+// vectorRecordWire is the JSON shape persisted to Redis. created_at MUST be
+// a number (Unix milliseconds): the gibson:idx:vectors index declares
+// $.created_at NUMERIC, and RediSearch fails JSON indexing for the WHOLE
+// document on a type-mismatched field — the previous RFC3339 string made
+// every stored vector invisible to every FT.SEARCH (gibson#695).
+type vectorRecordWire struct {
+	ID          string         `json:"id"`
+	Content     string         `json:"content"`
+	Embedding   []float64      `json:"embedding"`
+	Metadata    map[string]any `json:"metadata,omitempty"`
+	CreatedAtMs int64          `json:"created_at"`
+}
+
+// MarshalJSON implements json.Marshaler via the wire shape.
+func (r VectorRecord) MarshalJSON() ([]byte, error) {
+	return json.Marshal(vectorRecordWire{
+		ID:          r.ID,
+		Content:     r.Content,
+		Embedding:   r.Embedding,
+		Metadata:    r.Metadata,
+		CreatedAtMs: r.CreatedAt.UnixMilli(),
+	})
+}
+
+// UnmarshalJSON implements json.Unmarshaler via the wire shape.
+func (r *VectorRecord) UnmarshalJSON(b []byte) error {
+	var w vectorRecordWire
+	if err := json.Unmarshal(b, &w); err != nil {
+		return err
+	}
+	*r = VectorRecord{
+		ID:        w.ID,
+		Content:   w.Content,
+		Embedding: w.Embedding,
+		Metadata:  w.Metadata,
+		CreatedAt: time.UnixMilli(w.CreatedAtMs),
+	}
+	return nil
 }
 
 // NewVectorRecord creates a new VectorRecord with the current timestamp.

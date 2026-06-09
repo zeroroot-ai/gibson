@@ -157,7 +157,11 @@ func TestRedisMissionMemory_Retrieve(t *testing.T) {
 	})
 
 	t.Run("retrieve with timestamps", func(t *testing.T) {
-		beforeStore := time.Now()
+		// MemoryEntry timestamps are stored as Unix milliseconds (documented
+		// on the struct), so the lower bound must be ms-truncated too —
+		// otherwise a store landing in the same millisecond reads as
+		// "before" the ns-precision bound and the assertion races.
+		beforeStore := time.Now().Truncate(time.Millisecond)
 		err := memory.Store(ctx, "timestamp_key", "value", nil)
 		require.NoError(t, err)
 		afterStore := time.Now()
