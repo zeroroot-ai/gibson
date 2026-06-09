@@ -6,7 +6,10 @@ package daemon
 // builds without setec_integration, so this file needs no build-tag split.
 
 import (
+	"context"
 	"log/slog"
+
+	"github.com/zeroroot-ai/sdk/auth"
 
 	"github.com/zeroroot-ai/gibson/internal/admin"
 	"github.com/zeroroot-ai/gibson/internal/config"
@@ -20,7 +23,7 @@ import (
 // when sandboxing is disabled, the binary lacks setec_integration, or
 // sandbox.connector.runner_image is unset. Returns (nil, err) on genuine
 // misconfiguration (e.g. setec mTLS failure) so the caller can log it.
-func NewConnectorLauncher(cfg config.SandboxConfig, logger *slog.Logger) (admin.ConnectorLauncher, error) {
+func NewConnectorLauncher(cfg config.SandboxConfig, logger *slog.Logger, admit func(context.Context, auth.TenantID) error) (admin.ConnectorLauncher, error) {
 	if !cfg.Enabled || cfg.Connector.RunnerImage == "" {
 		return nil, nil
 	}
@@ -46,6 +49,7 @@ func NewConnectorLauncher(cfg config.SandboxConfig, logger *slog.Logger) (admin.
 		PlatformEgress: egress,
 		VCPU:           cfg.Connector.VCPU,
 		Memory:         cfg.Connector.Memory,
+		Admit:          admit,
 		Logger:         logger,
 	})
 	if err != nil {

@@ -95,11 +95,12 @@ func (s *DaemonServer) UpsertTenantQuota(ctx context.Context, req *daemonoperato
 	}
 
 	const q = `
-		INSERT INTO tenant_quotas (tenant_id, concurrent_missions, concurrent_agents, plan_id, updated_at)
-		VALUES ($1, $2, $3, $4, NOW())
+		INSERT INTO tenant_quotas (tenant_id, concurrent_missions, concurrent_agents, concurrent_connectors, plan_id, updated_at)
+		VALUES ($1, $2, $3, $4, $5, NOW())
 		ON CONFLICT (tenant_id) DO UPDATE SET
 			concurrent_missions = EXCLUDED.concurrent_missions,
 			concurrent_agents = EXCLUDED.concurrent_agents,
+			concurrent_connectors = EXCLUDED.concurrent_connectors,
 			plan_id = EXCLUDED.plan_id,
 			updated_at = NOW()
 		RETURNING updated_at
@@ -109,6 +110,7 @@ func (s *DaemonServer) UpsertTenantQuota(ctx context.Context, req *daemonoperato
 		req.GetTenantId(),
 		req.GetConcurrentMissions(),
 		req.GetConcurrentAgents(),
+		req.GetConcurrentConnectors(),
 		req.GetPlanId(),
 	).Scan(&updatedAt); err != nil {
 		return nil, status.Errorf(codes.Internal, "upsert: %v", err)
@@ -246,6 +248,7 @@ func ensureTenantQuotasTable(ctx context.Context, db *sql.DB) error {
 			tenant_id TEXT PRIMARY KEY,
 			concurrent_missions INT NOT NULL DEFAULT 0,
 			concurrent_agents INT NOT NULL DEFAULT 0,
+			concurrent_connectors INT NOT NULL DEFAULT 0,
 			plan_id TEXT NOT NULL DEFAULT '',
 			updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
 		)
@@ -273,6 +276,16 @@ func ensureTenantQuotasTable(ctx context.Context, db *sql.DB) error {
 	`
 	if _, err := db.ExecContext(ctx, ensurePlan); err != nil {
 		return fmt.Errorf("alter tenant_quotas (plan_id): %w", err)
+	}
+	// concurrent_connectors is the plan-tier hosted-connector instance budget
+	// (ADR-0047 facet 3). ADD COLUMN IF NOT EXISTS keeps pre-existing tables
+	// forward-compatible.
+	const ensureConnectors = `
+		ALTER TABLE tenant_quotas
+			ADD COLUMN IF NOT EXISTS concurrent_connectors INT NOT NULL DEFAULT 0
+	`
+	if _, err := db.ExecContext(ctx, ensureConnectors); err != nil {
+		return fmt.Errorf("alter tenant_quotas (concurrent_connectors): %w", err)
 	}
 	return nil
 }

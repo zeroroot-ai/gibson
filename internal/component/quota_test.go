@@ -128,6 +128,45 @@ func TestQuotaManager_CheckMissionQuota_DecrementOpensSlot(t *testing.T) {
 	assert.NoError(t, qm.CheckMissionQuota(ctx))
 }
 
+// CheckConnectorQuota ---------------------------------------------------------
+
+// setConnectorLimit seeds the cache with a connector budget for the tenant.
+func setConnectorLimit(qm *QuotaManager, tenant string, connectors int) {
+	qm.cacheMu.Lock()
+	defer qm.cacheMu.Unlock()
+	if qm.cache == nil {
+		qm.cache = make(map[string]quotaCacheEntry)
+	}
+	qm.cache[tenant] = quotaCacheEntry{
+		q:        TenantQuota{TenantID: tenant, ConcurrentConnectors: connectors},
+		expireAt: timeFarFuture(),
+	}
+}
+
+func TestQuotaManager_CheckConnectorQuota_NoQuotaPasses(t *testing.T) {
+	qm, ctx := newTestQuotaManager(t, "acme")
+	assert.NoError(t, qm.CheckConnectorQuota(ctx, 999))
+}
+
+func TestQuotaManager_CheckConnectorQuota_UnlimitedPasses(t *testing.T) {
+	qm, ctx := newTestQuotaManager(t, "acme")
+	setConnectorLimit(qm, "acme", 0) // 0 = unlimited
+	assert.NoError(t, qm.CheckConnectorQuota(ctx, 999))
+}
+
+func TestQuotaManager_CheckConnectorQuota_BelowLimitPasses(t *testing.T) {
+	qm, ctx := newTestQuotaManager(t, "acme")
+	setConnectorLimit(qm, "acme", 5)
+	assert.NoError(t, qm.CheckConnectorQuota(ctx, 4))
+}
+
+func TestQuotaManager_CheckConnectorQuota_AtLimitFails(t *testing.T) {
+	qm, ctx := newTestQuotaManager(t, "acme")
+	setConnectorLimit(qm, "acme", 3)
+	err := qm.CheckConnectorQuota(ctx, 3)
+	assert.True(t, isResourceExhausted(err), "want ResourceExhausted, got %v", err)
+}
+
 // CheckAgentQuota -------------------------------------------------------------
 
 func TestQuotaManager_CheckAgentQuota_NoQuotaPasses(t *testing.T) {

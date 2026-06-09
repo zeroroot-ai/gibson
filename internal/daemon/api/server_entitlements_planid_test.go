@@ -18,13 +18,14 @@ func TestUpsertTenantQuota_WritesPlanID(t *testing.T) {
 	}
 	defer db.Close()
 
-	// ensureTenantQuotasTable: CREATE + two forward-compat ALTERs (missions, plan_id).
+	// ensureTenantQuotasTable: CREATE + three forward-compat ALTERs (missions, plan_id, connectors).
 	mock.ExpectExec("CREATE TABLE IF NOT EXISTS tenant_quotas").WillReturnResult(sqlmock.NewResult(0, 0))
 	mock.ExpectExec("ALTER TABLE tenant_quotas").WillReturnResult(sqlmock.NewResult(0, 0))
 	mock.ExpectExec("ALTER TABLE tenant_quotas").WillReturnResult(sqlmock.NewResult(0, 0))
-	// The upsert must bind plan_id as the 4th positional arg.
+	mock.ExpectExec("ALTER TABLE tenant_quotas").WillReturnResult(sqlmock.NewResult(0, 0))
+	// The upsert binds plan_id as the 5th positional arg (after the connector budget).
 	mock.ExpectQuery("INSERT INTO tenant_quotas").
-		WithArgs("t1", sqlmock.AnyArg(), sqlmock.AnyArg(), "team").
+		WithArgs("t1", sqlmock.AnyArg(), sqlmock.AnyArg(), sqlmock.AnyArg(), "team").
 		WillReturnRows(sqlmock.NewRows([]string{"updated_at"}).AddRow(time.Now()))
 
 	s := &DaemonServer{platformDB: db}
@@ -52,8 +53,9 @@ func TestUpsertTenantQuota_EmptyPlanIDOK(t *testing.T) {
 	mock.ExpectExec("CREATE TABLE IF NOT EXISTS tenant_quotas").WillReturnResult(sqlmock.NewResult(0, 0))
 	mock.ExpectExec("ALTER TABLE tenant_quotas").WillReturnResult(sqlmock.NewResult(0, 0))
 	mock.ExpectExec("ALTER TABLE tenant_quotas").WillReturnResult(sqlmock.NewResult(0, 0))
+	mock.ExpectExec("ALTER TABLE tenant_quotas").WillReturnResult(sqlmock.NewResult(0, 0))
 	mock.ExpectQuery("INSERT INTO tenant_quotas").
-		WithArgs("t2", sqlmock.AnyArg(), sqlmock.AnyArg(), "").
+		WithArgs("t2", sqlmock.AnyArg(), sqlmock.AnyArg(), sqlmock.AnyArg(), "").
 		WillReturnRows(sqlmock.NewRows([]string{"updated_at"}).AddRow(time.Now()))
 
 	s := &DaemonServer{platformDB: db}

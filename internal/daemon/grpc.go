@@ -1062,7 +1062,29 @@ func (d *daemonImpl) buildGRPCServer(ctx context.Context) (*grpcSubsystem, error
 			// lacks setec_integration or sandbox.connector is unconfigured;
 			// connector registrations are then rejected with a clear error
 			// while plain plugin registration continues to work.
-			connectorLauncher, clErr := NewConnectorLauncher(d.config.Sandbox, d.logger.Slog())
+			// Admit closure enforces the plan-tier connector-instance budget
+			// (ADR-0047 facet 3). It counts the tenant's live plugin/connector
+			// instances from the registry (heartbeat liveness — no leak) and
+			// defers the limit decision to the QuotaManager. Nil-safe: with no
+			// quota manager or registry, it admits unconditionally (dev/kind).
+			connectorAdmit := func(ctx context.Context, tenant auth.TenantID) error {
+				if d.quotaManager == nil || d.compRegistry == nil {
+					return nil
+				}
+				live, err := d.compRegistry.DiscoverAll(ctx, tenant.String(), "plugin")
+				if err != nil {
+					// Fail open on a registry hiccup: a capacity gate must not
+					// take down legitimate launches. The over-provision window
+					// is bounded by the next successful count.
+					d.logger.Warn(ctx, "connector budget: count failed, admitting",
+						"tenant", tenant.String(), "error", err)
+					return nil
+				}
+				tctx := auth.ContextWithTenantString(ctx, tenant.String())
+				return d.quotaManager.CheckConnectorQuota(tctx, len(live))
+			}
+
+			connectorLauncher, clErr := NewConnectorLauncher(d.config.Sandbox, d.logger.Slog(), connectorAdmit)
 			if clErr != nil {
 				d.logger.Warn(ctx, "connector launcher unavailable; connector registrations will be rejected",
 					"error", clErr)
