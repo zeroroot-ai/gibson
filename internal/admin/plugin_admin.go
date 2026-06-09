@@ -103,6 +103,12 @@ type ValidatedManifest struct {
 	// ManifestHash is the SHA-256 hex digest of manifestYAML. Used by the
 	// daemon to dedupe upserts.
 	ManifestHash string
+
+	// IsConnector reports that manifestYAML is an MCP connector manifest
+	// (connector.gibson.zeroroot.ai/v1) rather than a plain plugin manifest.
+	// Connector registrations additionally launch the hosted MCP-bridge
+	// sandbox (gibson#684, ADR-0048).
+	IsConnector bool
 }
 
 // ManifestValidationError is the local mirror of
@@ -147,6 +153,19 @@ type BootstrapTokenAuditor interface {
 	Audit(ctx context.Context, event secrets.AuditEvent)
 }
 
+// ConnectorLauncher launches a hosted MCP connector as a setec sandbox
+// after a successful connector registration (gibson#684, ADR-0048 Option 1).
+// The production wiring is the internal/connector launcher backed by the
+// setec sandbox client; daemons built without setec_integration (or without
+// sandbox.connector configured) wire nil, which rejects connector
+// registrations with a clear error.
+type ConnectorLauncher interface {
+	// Launch starts the MCP-bridge runner sandbox for the given connector
+	// manifest. bootstrapToken is the single-use capability-grant token the
+	// bridge redeems to register; it must never be logged.
+	Launch(ctx context.Context, tenant auth.TenantID, connectorYAML []byte, bootstrapToken string) (sandboxID string, err error)
+}
+
 // PluginsAdminServer implements tenantv1.PluginAdminServiceServer (ADR-0039).
 type PluginsAdminServer struct {
 	tenantv1.UnimplementedPluginAdminServiceServer
@@ -157,6 +176,7 @@ type PluginsAdminServer struct {
 	secretW   SecretWriter
 	authzr    authz.Authorizer
 	auditor   BootstrapTokenAuditor
+	launcher  ConnectorLauncher // optional; nil rejects connector registrations
 	now       func() time.Time
 
 	bootstrapTTL time.Duration
@@ -172,6 +192,10 @@ type PluginsAdminConfig struct {
 	BootstrapAuditor  BootstrapTokenAuditor
 	BootstrapTokenTTL time.Duration // ≤24h per Spec 2 R3.1; default 1h
 	Now               func() time.Time
+
+	// ConnectorLauncher launches hosted MCP connector sandboxes. Optional:
+	// nil disables connector registration on this daemon.
+	ConnectorLauncher ConnectorLauncher
 }
 
 // NewPluginsAdminServer constructs a PluginsAdminServer. All fields except
@@ -213,6 +237,7 @@ func NewPluginsAdminServer(cfg PluginsAdminConfig) (*PluginsAdminServer, error) 
 		secretW:      cfg.SecretWriter,
 		authzr:       cfg.Authorizer,
 		auditor:      cfg.BootstrapAuditor,
+		launcher:     cfg.ConnectorLauncher,
 		now:          now,
 		bootstrapTTL: ttl,
 	}, nil
@@ -337,6 +362,13 @@ func (s *PluginsAdminServer) RegisterPlugin(ctx context.Context, req *tenantv1.R
 		return &tenantv1.RegisterPluginResponse{ValidationErrors: out}, status.Error(codes.InvalidArgument, "binding cross-check failed")
 	}
 
+	if manifest.IsConnector && s.launcher == nil {
+		return nil, status.Error(codes.FailedPrecondition,
+			"hosted connector launch is not available on this daemon "+
+				"(sandbox.connector is not configured); run the bridge in your "+
+				"own network instead")
+	}
+
 	if req.GetDryRun() {
 		return &tenantv1.RegisterPluginResponse{}, nil
 	}
@@ -417,6 +449,21 @@ func (s *PluginsAdminServer) RegisterPlugin(ctx context.Context, req *tenantv1.R
 		})
 	}
 
+	// --- Step 5b: hosted connector launch (gibson#684) -------------------
+	// For connector manifests the daemon consumes the bootstrap token itself:
+	// it is injected into the MCP-bridge sandbox, which redeems it to
+	// register. Launch failure rolls back the whole registration so a tenant
+	// never holds a principal for a connector that cannot run.
+	var sandboxID string
+	if manifest.IsConnector {
+		var launchErr error
+		sandboxID, launchErr = s.launcher.Launch(ctx, tenant, req.GetManifestYaml(), bootstrapToken)
+		if launchErr != nil {
+			doRollback(launchErr)
+			return nil, status.Errorf(codes.Internal, "launch connector sandbox: %v", launchErr)
+		}
+	}
+
 	// --- Step 6: bootstrap-token audit ----------------------------------
 	s.auditor.Audit(ctx, secrets.AuditEvent{
 		ActorTenantID: tenant.String(),
@@ -429,12 +476,21 @@ func (s *PluginsAdminServer) RegisterPlugin(ctx context.Context, req *tenantv1.R
 		OccurredAt:    s.now().UTC(),
 	})
 
-	return &tenantv1.RegisterPluginResponse{
+	resp := &tenantv1.RegisterPluginResponse{
 		InstallId:                   installID,
 		PluginPrincipalId:           principalID,
 		BootstrapToken:              bootstrapToken,
 		BootstrapTokenExpiresAtUnix: expiresAt.Unix(),
-	}, nil
+	}
+	if manifest.IsConnector {
+		// The single-use token went to the sandbox; returning it too would
+		// invite a redemption race with the bridge. The sandbox id is logged
+		// server-side, not returned (no response field).
+		resp.BootstrapToken = ""
+		resp.BootstrapTokenExpiresAtUnix = 0
+		_ = sandboxID
+	}
+	return resp, nil
 }
 
 // EditPluginSecretBinding rebinds a binding to a different existing secret.

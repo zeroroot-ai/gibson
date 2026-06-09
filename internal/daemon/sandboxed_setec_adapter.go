@@ -203,6 +203,16 @@ func (c *setecClient) Launch(ctx context.Context, req sandboxed.LaunchRequest) (
 	if req.Timeout > 0 {
 		pbReq.Lifecycle = &setecv1.Lifecycle{Timeout: req.Timeout.String()}
 	}
+	// Egress allow-list: connector launches (gibson#684) confine the sandbox
+	// to the targets declared in the connector manifest plus the platform
+	// endpoints. Empty Egress keeps setec's default network mode.
+	if len(req.Egress) > 0 {
+		allow := make([]*setecv1.NetworkAllow, 0, len(req.Egress))
+		for _, e := range req.Egress {
+			allow = append(allow, &setecv1.NetworkAllow{Host: e.Host, Port: e.Port})
+		}
+		pbReq.Network = &setecv1.Network{Mode: "egress-allow-list", Allow: allow}
+	}
 	resp, err := c.inner.Launch(ctx, pbReq)
 	if err != nil {
 		return sandboxed.LaunchResponse{}, err

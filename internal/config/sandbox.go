@@ -18,8 +18,39 @@ import (
 // and continues; individual sandboxed tool calls will fail at invocation time
 // rather than at startup — per the design's Requirement 5.4.
 type SandboxConfig struct {
-	Enabled bool               `mapstructure:"enabled" yaml:"enabled"`
-	Setec   SandboxSetecConfig `mapstructure:"setec" yaml:"setec"`
+	Enabled   bool                   `mapstructure:"enabled" yaml:"enabled"`
+	Setec     SandboxSetecConfig     `mapstructure:"setec" yaml:"setec"`
+	Connector SandboxConnectorConfig `mapstructure:"connector" yaml:"connector"`
+}
+
+// SandboxConnectorConfig configures hosted MCP-connector launches
+// (gibson#684, ADR-0048 Option 1): the generic MCP-bridge runner image and
+// the platform endpoints every connector sandbox must reach. When
+// RunnerImage is empty, hosted connector launch is unavailable and connector
+// registrations are rejected with a clear error.
+type SandboxConnectorConfig struct {
+	// RunnerImage is the OCI reference of the generic MCP-bridge runner,
+	// e.g. ghcr.io/zeroroot-ai/gibson-mcp-bridge-runner:v0.107.0.
+	RunnerImage string `mapstructure:"runner_image" yaml:"runner_image"`
+
+	// PlatformURL is the gibson base URL the bridge dials from inside the
+	// sandbox (capability-grant register, ComponentService, GetCredential).
+	PlatformURL string `mapstructure:"platform_url" yaml:"platform_url"`
+
+	// PlatformEgress lists the always-allowed egress targets for connector
+	// sandboxes: the platform endpoints plus the package registries the
+	// runner fetches vendors from (registry.npmjs.org, pypi.org, …).
+	PlatformEgress []SandboxEgressRule `mapstructure:"platform_egress" yaml:"platform_egress"`
+
+	// VCPU / Memory bound each connector sandbox. Defaults: 1 vCPU, 512Mi.
+	VCPU   int32  `mapstructure:"vcpu" yaml:"vcpu"`
+	Memory string `mapstructure:"memory" yaml:"memory"`
+}
+
+// SandboxEgressRule is one host+port egress allow-list entry.
+type SandboxEgressRule struct {
+	Host string `mapstructure:"host" yaml:"host"`
+	Port uint32 `mapstructure:"port" yaml:"port"`
 }
 
 // SandboxSetecConfig describes how to reach and authenticate to the Setec
@@ -68,6 +99,22 @@ func (c *SandboxConfig) Validate() error {
 		}
 		if _, err := os.Stat(f.path); err != nil {
 			return fmt.Errorf("sandbox.setec.mtls.%s (%s): %w", f.name, f.path, err)
+		}
+	}
+	// Connector launch config is optional, but when a runner image is set the
+	// companion fields become required — a bridge with no platform URL or no
+	// egress to the control plane can never come up.
+	if c.Connector.RunnerImage != "" {
+		if c.Connector.PlatformURL == "" {
+			return fmt.Errorf("sandbox.connector.platform_url is required when sandbox.connector.runner_image is set")
+		}
+		if len(c.Connector.PlatformEgress) == 0 {
+			return fmt.Errorf("sandbox.connector.platform_egress is required when sandbox.connector.runner_image is set")
+		}
+		for i, e := range c.Connector.PlatformEgress {
+			if e.Host == "" || e.Port == 0 {
+				return fmt.Errorf("sandbox.connector.platform_egress[%d]: host and port are required", i)
+			}
 		}
 	}
 	return nil

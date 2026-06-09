@@ -38,6 +38,7 @@ import (
 	"github.com/zeroroot-ai/gibson/internal/secrets"
 	sdksecrets "github.com/zeroroot-ai/platform-clients/secrets"
 	"github.com/zeroroot-ai/sdk/auth"
+	sdkconnector "github.com/zeroroot-ai/sdk/mcpbridge/connector"
 )
 
 // ---------------------------------------------------------------------------
@@ -317,8 +318,19 @@ type pluginManifestYAML struct {
 }
 
 // Validate parses manifestYAML and returns the validated manifest fields and
-// any per-field validation errors.
+// any per-field validation errors. MCP connector manifests
+// (connector.gibson.zeroroot.ai/v1) are accepted alongside plain plugin
+// manifests and validated by the SDK connector schema (gibson#684).
 func (v *pluginManifestValidator) Validate(manifestYAML []byte) (admin.ValidatedManifest, []admin.ManifestValidationError) {
+	// apiVersion sniff: route connector manifests to the connector validator.
+	var head struct {
+		APIVersion string `yaml:"apiVersion"`
+	}
+	if err := yaml.Unmarshal(manifestYAML, &head); err == nil &&
+		head.APIVersion == sdkconnector.APIVersionV1 {
+		return validateConnectorManifest(manifestYAML)
+	}
+
 	var raw pluginManifestYAML
 	if err := yaml.Unmarshal(manifestYAML, &raw); err != nil {
 		return admin.ValidatedManifest{}, []admin.ManifestValidationError{{
@@ -402,5 +414,50 @@ func (v *pluginManifestValidator) Validate(manifestYAML []byte) (admin.Validated
 		RuntimeMode:     raw.Spec.Runtime,
 		SetecRequired:   raw.Spec.Policy.SetecRequired,
 		ManifestHash:    hex.EncodeToString(hash[:]),
+	}, nil
+}
+
+// validateConnectorManifest validates an MCP connector manifest via the SDK
+// connector schema and maps it onto the registration handler's
+// ValidatedManifest shape. Methods are discovered at bridge startup
+// (tools/list), so DeclaredMethods is empty; the runtime is setec because the
+// hosted path runs the bridge in a setec sandbox (gibson#684, ADR-0048).
+func validateConnectorManifest(manifestYAML []byte) (admin.ValidatedManifest, []admin.ManifestValidationError) {
+	m, err := sdkconnector.LoadBytes(manifestYAML)
+	if err != nil {
+		var ve *sdkconnector.ValidationError
+		if errors.As(err, &ve) {
+			errs := make([]admin.ManifestValidationError, 0, len(ve.Violations))
+			for _, violation := range ve.Violations {
+				errs = append(errs, admin.ManifestValidationError{
+					Field:   "manifest",
+					Code:    "invalid_value",
+					Message: violation,
+				})
+			}
+			return admin.ValidatedManifest{}, errs
+		}
+		return admin.ValidatedManifest{}, []admin.ManifestValidationError{{
+			Field:   "manifest",
+			Code:    "parse_error",
+			Message: fmt.Sprintf("failed to parse connector manifest: %v", err),
+		}}
+	}
+
+	declaredSecrets := make([]string, 0, len(m.Spec.Secrets))
+	for _, sec := range m.Spec.Secrets {
+		declaredSecrets = append(declaredSecrets, sec.Name)
+	}
+
+	hash := sha256.Sum256(manifestYAML)
+	return admin.ValidatedManifest{
+		Name:            m.Metadata.Name,
+		Version:         m.Metadata.Version,
+		DeclaredMethods: nil, // discovered via tools/list at bridge startup
+		DeclaredSecrets: declaredSecrets,
+		RuntimeMode:     "setec",
+		SetecRequired:   true,
+		ManifestHash:    hex.EncodeToString(hash[:]),
+		IsConnector:     true,
 	}, nil
 }
