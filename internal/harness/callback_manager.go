@@ -10,6 +10,7 @@ import (
 	"github.com/spiffe/go-spiffe/v2/spiffeid"
 	"github.com/spiffe/go-spiffe/v2/workloadapi"
 	"github.com/zeroroot-ai/gibson/internal/authz"
+	"github.com/zeroroot-ai/gibson/internal/component"
 	"github.com/zeroroot-ai/gibson/internal/graphrag/loader"
 	"github.com/zeroroot-ai/sdk/protoresolver"
 	sdktrace "go.opentelemetry.io/otel/sdk/trace"
@@ -562,6 +563,16 @@ func (m *CallbackManager) SetComponentAuthorizer(a authz.Authorizer) {
 	if m.server != nil {
 		m.server.SetComponentAuthorizer(a)
 		m.logger.Debug("set component authorizer on callback service")
+	}
+}
+
+// SetComponentRegistry wires the component registry into the callback service so
+// SearchTools can enumerate the tenant's connector catalog. Should be called
+// after NewCallbackManager and before Start().
+func (m *CallbackManager) SetComponentRegistry(reg component.ComponentRegistry) {
+	if m.server != nil {
+		m.server.SetComponentRegistry(reg)
+		m.logger.Debug("set component registry on callback service")
 	}
 }
 

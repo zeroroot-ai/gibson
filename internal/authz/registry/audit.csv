@@ -182,6 +182,7 @@ rpc,relation,object_type,deriver,identities,source_proto_file,mode
 /gibson.harness.v1.HarnessCallbackService/RecordSpans,can_use,component,system_tenant,COMPONENT,gibson/harness/v1/harness_callback.proto,rule
 /gibson.harness.v1.HarnessCallbackService/ReportStepHints,can_use,component,system_tenant,COMPONENT,gibson/harness/v1/harness_callback.proto,rule
 /gibson.harness.v1.HarnessCallbackService/RunMission,can_use,component,system_tenant,COMPONENT,gibson/harness/v1/harness_callback.proto,rule
+/gibson.harness.v1.HarnessCallbackService/SearchTools,can_use,component,system_tenant,COMPONENT,gibson/harness/v1/harness_callback.proto,rule
 /gibson.harness.v1.HarnessCallbackService/StoreGraphBatch,can_use,component,system_tenant,COMPONENT,gibson/harness/v1/harness_callback.proto,rule
 /gibson.harness.v1.HarnessCallbackService/StoreGraphNode,can_use,component,system_tenant,COMPONENT,gibson/harness/v1/harness_callback.proto,rule
 /gibson.harness.v1.HarnessCallbackService/StoreNode,can_use,component,system_tenant,COMPONENT,gibson/harness/v1/harness_callback.proto,rule

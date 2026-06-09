@@ -19,8 +19,8 @@ import (
 	"github.com/spiffe/go-spiffe/v2/workloadapi"
 	"github.com/zeroroot-ai/gibson/internal/audit"
 	"github.com/zeroroot-ai/gibson/internal/authz"
-	"github.com/zeroroot-ai/gibson/internal/capabilitygrant"
 	"github.com/zeroroot-ai/gibson/internal/budget"
+	"github.com/zeroroot-ai/gibson/internal/capabilitygrant"
 	"github.com/zeroroot-ai/gibson/internal/component"
 	"github.com/zeroroot-ai/gibson/internal/config"
 	"github.com/zeroroot-ai/gibson/internal/crypto"
@@ -1120,6 +1120,7 @@ func (d *daemonImpl) Start(ctx context.Context) error {
 	// after initAuthorizer (the noop fallback was deleted), so no more nil-guard.
 	d.callback.SetComponentAuthorizer(d.authorizer)
 	d.logger.Info(ctx, "configured callback service with FGA component authorizer")
+	d.callback.SetComponentRegistry(d.compRegistry)
 
 	// Wire the OTel metrics recorder into the Authorize handler so that each
 	// component authz decision increments gibson_component_authz_total.
