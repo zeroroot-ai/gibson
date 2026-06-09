@@ -154,9 +154,12 @@ func grpcCode(err error) codes.Code {
 func TestAuthorize_HappyPath(t *testing.T) {
 	// Seed the tuple the Authorize handler will check.
 	// run belongs to user "u-1"; action is "execute"; resource is "tool:nmap".
-	// Authorize derives: user="user:u-1", relation="can_execute", object="tool:nmap".
+	// Authorize canonicalizes the kind-qualified resource to the tenant-less,
+	// kind-less component object (gibson#694): user="user:u-1",
+	// relation="can_execute", object="component:nmap" — the form tuples are
+	// seeded under in the real store.
 	az := newFGABackedAuthorizer()
-	az.Seed("user:u-1", "can_execute", "tool:nmap")
+	az.Seed("user:u-1", "can_execute", "component:nmap")
 
 	store := &stubRunAuthzLookup{
 		state: &RunAuthzState{
@@ -248,7 +251,7 @@ func TestAuthorize_MissionInactive(t *testing.T) {
 	az := newFGABackedAuthorizer()
 	// Seed the tuple so that if FGA IS called it would return allow.
 	// The handler must short-circuit before reaching FGA.
-	az.Seed("user:u-3", "can_execute", "tool:nmap")
+	az.Seed("user:u-3", "can_execute", "component:nmap")
 
 	store := &stubRunAuthzLookup{
 		state: &RunAuthzState{

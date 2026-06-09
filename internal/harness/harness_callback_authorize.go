@@ -141,7 +141,9 @@ func (s *HarnessCallbackService) Authorize(ctx context.Context, req *harnesspb.A
 	// authorizer — there is no longer a "no authorizer wired → allow" branch.
 	// user format:   "user:<subject>"
 	// relation:      "can_<action>"  (FGA model uses "can_execute", "can_read", etc.)
-	// object format: caller-provided resource string (e.g., "tool:nmap", "system:192.168.1.1")
+	// object format: canonical "component:<name>" derived from the caller's
+	//                resource string (bare or kind-qualified); other typed
+	//                references pass through (see authz.CanonicalComponentResource)
 	fgaUser := fmt.Sprintf("user:%s", runState.UserID)
 	fgaRelation := "can_" + strings.ToLower(action)
 	fgaObject := deriveFGAObject(resource)
@@ -195,18 +197,19 @@ func (s *HarnessCallbackService) Authorize(ctx context.Context, req *harnesspb.A
 	return &harnesspb.AuthorizeResponse{Allowed: true, Reason: reason}, nil
 }
 
-// deriveFGAObject maps a component resource string to an FGA object identifier.
+// deriveFGAObject maps a component resource string to the canonical FGA
+// object identifier (gibson#694).
 //
-// Resource strings follow the convention: "type:name" (e.g., "tool:nmap",
-// "system:192.168.1.1"). When no colon is present, the resource is treated as
-// a component name.
+// Component resources arrive bare ("nmap") or kind-qualified ("tool:nmap");
+// both canonicalize to the tenant-less, kind-less "component:<name>" object
+// the model's tuples are seeded against. Previously kind-qualified resources
+// passed through verbatim, producing checks against FGA types that do not
+// exist ("tool:nmap") — an always-error, fail-closed mismatch. Non-component
+// typed references (e.g. "plugin:<tenant>:<name>") still pass through
+// unchanged; an unknown type fails the FGA check loudly rather than being
+// rewritten.
 func deriveFGAObject(resource string) string {
-	if strings.Contains(resource, ":") {
-		// Pass through as-is — caller already provides a typed object.
-		return resource
-	}
-	// Unqualified names are assumed to be component objects.
-	return "component:" + resource
+	return authz.CanonicalComponentResource(resource)
 }
 
 // emitComponentAuthzAudit logs a structured audit record for the component authz decision.
