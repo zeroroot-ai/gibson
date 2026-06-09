@@ -15,6 +15,7 @@ import (
 	"github.com/spiffe/go-spiffe/v2/spiffetls/tlsconfig"
 	"github.com/spiffe/go-spiffe/v2/workloadapi"
 	"github.com/zeroroot-ai/gibson/internal/authz"
+	"github.com/zeroroot-ai/gibson/internal/component"
 	"github.com/zeroroot-ai/gibson/internal/graphrag/loader"
 	harnesspb "github.com/zeroroot-ai/sdk/api/gen/gibson/harness/v1"
 	"github.com/zeroroot-ai/sdk/auth"
@@ -322,6 +323,13 @@ func (s *CallbackServer) SetAuthzStore(store RunAuthzLookup) {
 // When not set, all active-mission Authorize requests return allowed=true (dev mode).
 func (s *CallbackServer) SetComponentAuthorizer(a authz.Authorizer) {
 	s.service.componentAuthorizer = a
+}
+
+// SetComponentRegistry wires the tenant-scoped component registry the SearchTools
+// RPC enumerates to build the connector catalog. When not set, SearchTools
+// returns Unavailable.
+func (s *CallbackServer) SetComponentRegistry(reg component.ComponentRegistry) {
+	s.service.componentRegistry = reg
 }
 
 // SetComponentAuthzMetrics wires a metrics recorder into the Authorize handler.

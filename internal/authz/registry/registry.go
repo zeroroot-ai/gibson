@@ -1863,6 +1863,16 @@ var Registry = map[string]Entry{
 		Unauthenticated:   false,
 		Self:              false,
 	},
+	"/gibson.harness.v1.HarnessCallbackService/SearchTools": {
+		Method:            "/gibson.harness.v1.HarnessCallbackService/SearchTools",
+		Service:           "gibson.harness.v1.HarnessCallbackService",
+		Relation:          "can_use",
+		ObjectType:        "component",
+		ObjectDeriver:     "system_tenant",
+		AllowedIdentities: IdentityComponent,
+		Unauthenticated:   false,
+		Self:              false,
+	},
 	"/gibson.harness.v1.HarnessCallbackService/StoreGraphBatch": {
 		Method:            "/gibson.harness.v1.HarnessCallbackService/StoreGraphBatch",
 		Service:           "gibson.harness.v1.HarnessCallbackService",

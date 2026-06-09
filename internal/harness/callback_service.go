@@ -13,6 +13,7 @@ import (
 	"github.com/google/uuid"
 	"github.com/zeroroot-ai/gibson/internal/agent"
 	"github.com/zeroroot-ai/gibson/internal/authz"
+	"github.com/zeroroot-ai/gibson/internal/component"
 	"github.com/zeroroot-ai/gibson/internal/graphrag/loader"
 	"github.com/zeroroot-ai/gibson/internal/harness/middleware"
 	"github.com/zeroroot-ai/gibson/internal/llm"
@@ -133,6 +134,11 @@ type HarnessCallbackService struct {
 	// will actually serve Authorize calls. The daemon wires this in setup
 	// after FGA has been reached.
 	componentAuthorizer authz.Authorizer
+
+	// componentRegistry is the tenant-scoped component registry the SearchTools
+	// RPC enumerates to build the connector catalog. Wired by the daemon; when
+	// nil, SearchTools returns Unavailable.
+	componentRegistry component.ComponentRegistry
 
 	// componentAuthzMetrics emits counters for every component Authorize decision.
 	// When nil, metrics are not emitted (no-op).
