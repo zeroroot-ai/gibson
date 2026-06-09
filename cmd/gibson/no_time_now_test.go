@@ -78,7 +78,7 @@ func TestNoTimeNowInRPCHandlers(t *testing.T) {
 		// server_entitlements_audit.go — audit-log timestamps (per RFC3339Nano)
 		"internal/daemon/api/server_entitlements_audit.go:135": astchecks.Entry{Category: astchecks.CategoryDefensiveGuard, Reason: "audit-log timestamp; RFC3339Nano"},
 		"internal/daemon/api/server_entitlements_audit.go:171": astchecks.Entry{Category: astchecks.CategoryDefensiveGuard, Reason: "audit-log timestamp; RFC3339Nano"},
-		"internal/daemon/api/server_entitlements.go:210":       astchecks.Entry{Category: astchecks.CategoryDefensiveGuard, Reason: "audit-log timestamp; RFC3339Nano"},
+		"internal/daemon/api/server_entitlements.go:212":       astchecks.Entry{Category: astchecks.CategoryDefensiveGuard, Reason: "audit-log timestamp; RFC3339Nano"},
 
 		// server_budget.go — budget applied-at timestamp
 		"internal/daemon/api/server_budget.go:352": astchecks.Entry{Category: astchecks.CategoryDefensiveGuard, Reason: "AppliedAtUnix wall-clock for budget operations"},
