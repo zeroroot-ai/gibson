@@ -84,6 +84,21 @@ type ComponentInfo struct {
 	// evaluation time for backward compat with descriptors registered before
 	// the SDK shipped the field. Spec: setec-sandbox-prod-default R3.1, R3.2.
 	ContentTrust componentpb.ContentTrust `json:"content_trust,omitempty"`
+
+	// Methods carries per-method metadata for plugin components (name +
+	// description + optional JSON-Schema input), populated from
+	// RegisterComponentRequest.method_descriptors. Empty for tool/agent kinds and
+	// for plugins registered by SDKs that predate the field. The connector
+	// catalog (SearchTools) reads the descriptions from here so an agent can
+	// disambiguate a connector's tools. Per ADR-0047 facet 5.
+	Methods []MethodInfo `json:"methods,omitempty"`
+}
+
+// MethodInfo is the per-method metadata stored for a plugin/connector method.
+type MethodInfo struct {
+	Name            string `json:"name"`
+	Description     string `json:"description,omitempty"`
+	InputSchemaJSON string `json:"input_schema_json,omitempty"`
 }
 
 // ComponentRegistry provides service-discovery for Gibson components.

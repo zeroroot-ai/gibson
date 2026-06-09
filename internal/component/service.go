@@ -291,7 +291,7 @@ func NewComponentServiceServer(
 		llmCompleter:     llmCompleter,
 		memory:           memStore,
 		findingSubmitter: findingSubmitter,
-		componentAccess:     componentAccess,
+		componentAccess:  componentAccess,
 		auditLog:         auditLog,
 	}
 }
@@ -532,6 +532,16 @@ func (s *ComponentServiceServer) RegisterComponent(
 	}
 	for _, method := range req.Methods {
 		info.Metadata["method:"+method] = "true"
+	}
+	// Structured per-method descriptors (name + description + input schema) so the
+	// connector catalog / SearchTools can surface descriptions. The names-only
+	// metadata above is kept for back-compat. Per ADR-0047 facet 5.
+	for _, md := range req.GetMethodDescriptors() {
+		info.Methods = append(info.Methods, MethodInfo{
+			Name:            md.GetName(),
+			Description:     md.GetDescription(),
+			InputSchemaJSON: md.GetInputSchemaJson(),
+		})
 	}
 	// Populate input/output message types. Prefer the explicitly declared fields on the
 	// registration request. When a FileDescriptorSet is provided but the explicit fields
