@@ -48,6 +48,14 @@ type MissionContext struct {
 	//
 	// Spec: per-node-slot-override (gibson#539).
 	NodeSlotOverrides map[string]*agent.SlotConfig `json:"node_slot_overrides,omitempty"`
+
+	// BlockedTools is the mission-level deny list (MissionConstraints.blocked_tools)
+	// of tool ids that must not be invoked during this mission. Entries are matched
+	// against the canonical tool id (mcp:<connector>:<tool> / native:<tool>) and the
+	// raw tool name. The daemon enforces this at CallToolProto — including the
+	// invoke_tool meta-tool — so it fails closed regardless of the agent. Because it
+	// is mission-level it is inherited unchanged by delegated child harnesses.
+	BlockedTools []string `json:"blocked_tools,omitempty"`
 }
 
 // NewMissionContext creates a new mission context with the given ID, name, and current agent.
@@ -105,6 +113,13 @@ func (m MissionContext) WithTenant(tenantID string) MissionContext {
 // WithDelegationDepth sets the delegation depth for sub-agent execution tracking.
 func (m MissionContext) WithDelegationDepth(depth int) MissionContext {
 	m.DelegationDepth = depth
+	return m
+}
+
+// WithBlockedTools sets the mission-level tool deny list. The slice is stored as
+// given; matching is case-insensitive and applied at invocation time.
+func (m MissionContext) WithBlockedTools(blocked []string) MissionContext {
+	m.BlockedTools = blocked
 	return m
 }
 

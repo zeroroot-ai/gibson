@@ -707,6 +707,23 @@ func (s *HarnessCallbackService) CallToolProto(ctx context.Context, req *harness
 		return nil, err
 	}
 
+	// Mission-level blocked_tools denial (MissionConstraints.blocked_tools),
+	// matched against the raw name and the canonical native id. The daemon
+	// enforces this at dispatch so it fails closed regardless of the agent.
+	if blockedID, blockedOK := matchBlocked(harness.Mission().BlockedTools, req.Name, "native:"+req.Name); blockedOK {
+		s.publishEvent(ctx, "tool.call.blocked", map[string]interface{}{
+			"tool_name":  req.Name,
+			"mission_id": req.Context.MissionId,
+			"agent_name": req.Context.AgentName,
+		})
+		return &harnesspb.CallToolProtoResponse{
+			Error: &harnesspb.HarnessError{
+				Code:    commonpb.ErrorCode_ERROR_CODE_PERMISSION_DENIED,
+				Message: fmt.Sprintf("tool '%s' is blocked by mission policy", blockedID),
+			},
+		}, nil
+	}
+
 	// Publish tool.call.started event
 	s.publishEvent(ctx, "tool.call.started", map[string]interface{}{
 		"tool_name":      req.Name,
@@ -1115,6 +1132,19 @@ func (s *HarnessCallbackService) QueryPlugin(ctx context.Context, req *harnesspb
 	harness, err := s.getHarness(ctx, req.Context)
 	if err != nil {
 		return nil, err
+	}
+
+	// Mission-level blocked_tools denial on the direct plugin-invocation path,
+	// matched by the canonical connector id (mcp:<name>:<method>) and the bare
+	// connector name. Without this, a PLUGIN node or an agent calling QueryPlugin
+	// directly would sidestep the invoke_tool deny check — so enforce here too.
+	if blockedID, blockedOK := matchBlocked(harness.Mission().BlockedTools, "mcp:"+req.Name+":"+req.Method, req.Name); blockedOK {
+		return &harnesspb.QueryPluginResponse{
+			Error: &harnesspb.HarnessError{
+				Code:    commonpb.ErrorCode_ERROR_CODE_PERMISSION_DENIED,
+				Message: fmt.Sprintf("tool '%s' is blocked by mission policy", blockedID),
+			},
+		}, nil
 	}
 
 	// Convert params from proto map to Go map
