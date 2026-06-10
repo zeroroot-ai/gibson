@@ -225,6 +225,12 @@ type component
 type system_tenant
   relations
     define platform_operator: [user]
+    # parent: the set of tenants registered under the platform. Enumeration-only
+    # (NOT referenced by any computed/authz relation) — it lets the catalog
+    # fan-out reconciler list every tenant via
+    # system_tenant:_system#parent@tenant:X to fan platform_enabled catalog
+    # items out as tenant_enabled. Written at tenant provisioning. (deploy#782)
+    define parent: [tenant]
 
 type team
   relations

@@ -82,12 +82,29 @@ const systemComponentObject = "component:_system"
 // `component:_system` baseline (ADR-0046 option B), and fan the platform
 // catalog (`platform_enabled` items) out as `tenant_enabled` per tenant.
 func (r *CatalogFanout) tick(ctx context.Context) {
-	// Tenants: system_tenant:_system#parent@tenant:X (per model.fga). Needed
-	// for both the _system baseline and the catalog fan-out.
-	tenantIDs, err := r.cfg.Authorizer.ListUsers(ctx, "tenant", "system_tenant:_system", "parent")
+	// Tenants: enumerate tenant:X from system_tenant:_system#parent (per
+	// model.fga). The `parent` userset is typed [tenant], so the default
+	// ListUsers (hardcoded user-filter "user") would have OpenFGA reject the
+	// request — we need the typed ListUsersOfType. It is concrete-only on the
+	// FGA authorizer (not on the authz.Authorizer interface, to avoid the
+	// mock cascade), so type-assert; a non-FGA authorizer simply seeds nothing.
+	tenantLister, ok := r.cfg.Authorizer.(interface {
+		ListUsersOfType(ctx context.Context, objectType, object, relation, userType string) ([]string, error)
+	})
+	if !ok {
+		r.cfg.Logger.Debug("catalog fanout: authorizer does not support typed tenant enumeration, loop idle")
+		return
+	}
+	tenantRefs, err := tenantLister.ListUsersOfType(ctx, "system_tenant", "system_tenant:_system", "parent", "tenant")
 	if err != nil {
 		r.cfg.Logger.Debug("catalog fanout: list tenants via parent failed", "err", err)
-		tenantIDs = nil
+		tenantRefs = nil
+	}
+	// ListUsersOfType returns fully-qualified "tenant:<id>" refs; the loop
+	// below re-derives tenantRef from the bare id, so strip the prefix here.
+	tenantIDs := make([]string, 0, len(tenantRefs))
+	for _, ref := range tenantRefs {
+		tenantIDs = append(tenantIDs, extractTenantID(ref))
 	}
 	if len(tenantIDs) == 0 {
 		// No tenants registered as parents of the system tenant. Normal in dev
@@ -153,4 +170,14 @@ func (r *CatalogFanout) tick(ctx context.Context) {
 		return
 	}
 	r.cfg.Logger.Info("catalog fanout: tuples added", "count", len(toWrite))
+}
+
+// extractTenantID strips a leading "tenant:" type prefix from an FGA user
+// reference, tolerating an already-bare id. "tenant:acme" → "acme".
+func extractTenantID(ref string) string {
+	const pfx = "tenant:"
+	if len(ref) >= len(pfx) && ref[:len(pfx)] == pfx {
+		return ref[len(pfx):]
+	}
+	return ref
 }

@@ -334,6 +334,71 @@ func (f *fgaAuthorizer) ListUsers(ctx context.Context, objectType, object, relat
 	return userRefs, nil
 }
 
+// ListUsersOfType is like ListUsers but constrains the returned user references
+// to a single FGA user type. This is required when a relation's userset type is
+// NOT "user" — OpenFGA's ListUsers validates each user-filter type against the
+// relation's allowed types and errors on a mismatch, so the "user"-hardcoded
+// ListUsers cannot enumerate, e.g. the tenants under system_tenant#parent.
+//
+// objectType and object together identify the FGA object; userType is the FGA
+// type of the desired user references (e.g. "tenant"). Returned references are
+// fully qualified ("<userType>:<id>").
+func (f *fgaAuthorizer) ListUsersOfType(ctx context.Context, objectType, object, relation, userType string) ([]string, error) {
+	start := time.Now()
+	spanCtx, span := f.startSpan(ctx, spanListUsers,
+		attribute.String("authz.object_type", objectType),
+		attribute.String("authz.object", object),
+		attribute.String("authz.relation", relation),
+		attribute.String("authz.user_type", userType),
+	)
+	defer span.End()
+
+	callCtx, cancel := f.callContext(spanCtx)
+	defer cancel()
+
+	resp, err := f.client.ListUsers(callCtx).Body(fgaclient.ClientListUsersRequest{
+		Object: fgasdk.FgaObject{
+			Type: objectType,
+			Id:   extractID(object),
+		},
+		Relation: relation,
+		UserFilters: []fgasdk.UserTypeFilter{
+			{Type: userType},
+		},
+	}).Execute()
+
+	durationMs := time.Since(start).Milliseconds()
+	span.SetAttributes(attribute.Int64("authz.duration_ms", durationMs))
+
+	if err != nil {
+		typedErr := mapSDKError(err)
+		f.recordSpanError(span, typedErr, "ListUsersOfType")
+		return nil, typedErr
+	}
+
+	var userRefs []string
+	for _, u := range resp.GetUsers() {
+		if _, ok := u.GetObjectOk(); ok {
+			obj := u.GetObject()
+			userRefs = append(userRefs, obj.GetType()+":"+obj.GetId())
+		}
+	}
+
+	span.SetAttributes(attribute.Int("authz.result_count", len(userRefs)))
+	span.SetStatus(codes.Ok, "")
+
+	f.logger.Debug("authz: ListUsersOfType",
+		"object_type", objectType,
+		"object", object,
+		"relation", relation,
+		"user_type", userType,
+		"result_count", len(userRefs),
+		"duration_ms", durationMs,
+	)
+
+	return userRefs, nil
+}
+
 // extractID extracts the ID portion from an FGA object reference.
 // e.g. "tenant:acme" → "acme", "system_tenant:_system" → "_system"
 func extractID(objectRef string) string {
