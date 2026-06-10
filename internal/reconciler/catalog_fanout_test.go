@@ -36,8 +36,9 @@ func TestCatalogFanoutTick_WritesMissingTuplesForOneTenantOneItem(t *testing.T) 
 			{User: "tenant:t1", Relation: "tenant_enabled", ObjectType: "component"}: {},
 		},
 		listUsers: map[listUsersKey][]string{
-			// Tenants under the system tenant: one tenant.
-			{ObjectType: "tenant", Object: "system_tenant:_system", Relation: "parent"}: {"t1"},
+			// Tenants under the system tenant: one tenant. Keyed by the
+			// system_tenant object the fan-out enumerates parents of.
+			{ObjectType: "system_tenant", Object: "system_tenant:_system", Relation: "parent"}: {"tenant:t1"},
 		},
 	}
 
@@ -84,6 +85,13 @@ func (a *recordingAuthorizer) ListObjects(_ context.Context, user, relation, obj
 }
 
 func (a *recordingAuthorizer) ListUsers(_ context.Context, objectType, object, relation string) ([]string, error) {
+	return a.listUsers[listUsersKey{ObjectType: objectType, Object: object, Relation: relation}], nil
+}
+
+// ListUsersOfType is the typed enumeration the CatalogFanout type-asserts for.
+// The canned map is keyed by (objectType, object, relation); userType only
+// narrows the FGA user-filter and does not change the fixture lookup.
+func (a *recordingAuthorizer) ListUsersOfType(_ context.Context, objectType, object, relation, _ string) ([]string, error) {
 	return a.listUsers[listUsersKey{ObjectType: objectType, Object: object, Relation: relation}], nil
 }
 

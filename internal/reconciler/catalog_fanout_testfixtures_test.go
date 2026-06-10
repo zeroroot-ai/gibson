@@ -125,6 +125,14 @@ func (a *fgaStoreAuthorizer) ListUsers(_ context.Context, objectType, object, re
 	return a.listUsersData[listUsersKey{ObjectType: objectType, Object: object, Relation: relation}], nil
 }
 
+// ListUsersOfType mirrors the concrete fgaAuthorizer method the CatalogFanout
+// type-asserts for. The canned fixture is keyed by (objectType, object,
+// relation); userType only narrows the FGA user-filter and does not change the
+// fixture lookup.
+func (a *fgaStoreAuthorizer) ListUsersOfType(_ context.Context, objectType, object, relation, _ string) ([]string, error) {
+	return a.listUsersData[listUsersKey{ObjectType: objectType, Object: object, Relation: relation}], nil
+}
+
 func (a *fgaStoreAuthorizer) StoreID() string { return "fake" }
 func (a *fgaStoreAuthorizer) ModelID() string { return "fake" }
 func (a *fgaStoreAuthorizer) Close() error    { return nil }
@@ -141,7 +149,7 @@ func TestCatalogFanoutTick_IdempotentWhenTenantAlreadyEnabled(t *testing.T) {
 	az := newFGAStoreAuthorizer(store)
 
 	az.setListObjects("system_tenant:_system", "platform_enabled", "component", []string{"component:plugin/a"})
-	az.setListUsers("tenant", "system_tenant:_system", "parent", []string{"t1"})
+	az.setListUsers("system_tenant", "system_tenant:_system", "parent", []string{"tenant:t1"})
 	// Tenant t1 already holds the catalog tuple AND the ADR-0046 _system
 	// baseline — reconciler should write nothing.
 	az.setListObjects("tenant:t1", "tenant_enabled", "component", []string{"component:plugin/a", "component:_system"})
@@ -165,7 +173,7 @@ func TestCatalogFanoutTick_EmptyCatalogStillSeedsSystemBaseline(t *testing.T) {
 
 	// Empty catalog, but one tenant exists with nothing enabled yet.
 	az.setListObjects("system_tenant:_system", "platform_enabled", "component", nil)
-	az.setListUsers("tenant", "system_tenant:_system", "parent", []string{"t1"})
+	az.setListUsers("system_tenant", "system_tenant:_system", "parent", []string{"tenant:t1"})
 	az.setListObjects("tenant:t1", "tenant_enabled", "component", nil)
 
 	r := NewCatalogFanout(CatalogFanoutConfig{Authorizer: az})
@@ -203,7 +211,7 @@ func TestCatalogFanoutTick_MultiTenantFanout(t *testing.T) {
 	az := newFGAStoreAuthorizer(store)
 
 	az.setListObjects("system_tenant:_system", "platform_enabled", "component", []string{"component:plugin/a"})
-	az.setListUsers("tenant", "system_tenant:_system", "parent", []string{"t1", "t2"})
+	az.setListUsers("system_tenant", "system_tenant:_system", "parent", []string{"tenant:t1", "tenant:t2"})
 	// Both tenants already hold the _system baseline; t1 already enabled the
 	// catalog item, t2 is missing it — so only t2's catalog tuple is written.
 	az.setListObjects("tenant:t1", "tenant_enabled", "component", []string{"component:plugin/a", "component:_system"})
@@ -229,7 +237,7 @@ func TestCatalogFanoutTick_WriteErrorTolerated(t *testing.T) {
 	az := newFGAStoreAuthorizer(store)
 
 	az.setListObjects("system_tenant:_system", "platform_enabled", "component", []string{"component:plugin/a"})
-	az.setListUsers("tenant", "system_tenant:_system", "parent", []string{"t1"})
+	az.setListUsers("system_tenant", "system_tenant:_system", "parent", []string{"tenant:t1"})
 	az.setListObjects("tenant:t1", "tenant_enabled", "component", nil)
 	az.setWriteErr(errors.New("fga: store unavailable"))
 
