@@ -1429,6 +1429,30 @@ func (d *daemonImpl) Start(ctx context.Context) error {
 		}
 	}()
 
+	// Start the authz-registry mTLS listener so ext-authz fetches the daemon's
+	// compiled-in authz policy at runtime instead of a separately-versioned OCI
+	// artifact (deploy#852). The daemon is the single source of truth, so the
+	// version-pin skew that silently default-denied newly-added RPCs is gone.
+	// Served only over SPIFFE mTLS to an explicit reader allow-list; skipped
+	// (with a warning) when no SPIFFE source is available, in which case
+	// ext-authz uses its file fallback. A misconfigured reader allow-list is
+	// fatal here (fail-closed, never silently-open).
+	if x509Src, ok := d.spiffeX509Source.(*workloadapi.X509Source); ok && x509Src != nil {
+		authzRegSys, arErr := newAuthzRegistrySubsystem(x509Src, d.logger)
+		if arErr != nil {
+			return fmt.Errorf("authz-registry subsystem: %w", arErr)
+		}
+		if authzRegSys != nil {
+			go func() {
+				if err := authzRegSys.Serve(ctx); err != nil {
+					d.logger.Warn(ctx, "authz-registry subsystem error (non-fatal)", "error", err)
+				}
+			}()
+		}
+	} else {
+		d.logger.Warn(ctx, "authz-registry mTLS endpoint not started: no SPIFFE X.509 source (ext-authz will use its file fallback)")
+	}
+
 	// Start :9090 mTLS metrics listener (Spec security-hardening R20 / Week-2
 	// task 18 — Option (a), daemon-owned listener). Fail fast if cert
 	// material is missing — there is no plaintext fallback.

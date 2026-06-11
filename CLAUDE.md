@@ -8,9 +8,22 @@ Read this before editing the daemon. The daemon module is rooted at the repo top
 
 The authorization rule book lives at `internal/authz/registry/`:
 - `registry.go` — Go map `Registry` (import path `github.com/zeroroot-ai/gibson/internal/authz/registry`)
-- `registry.yaml` — runtime YAML consumed by ext-authz via oras pull
+- `registry.yaml` — runtime YAML; `embed.go` embeds it and the daemon serves it to ext-authz over mTLS (see below). `YAML()` returns the bytes.
 - `permissions.ts` — TypeScript map for the dashboard sister spec
 - `audit.csv` — auditor-friendly flat table (rpc, relation, object_type, deriver, identities, source_proto_file)
+
+**Runtime delivery to ext-authz (deploy#852).** The daemon serves the embedded
+`registry.yaml` from an mTLS listener (`internal/daemon/authz_registry_subsystem.go`,
+`GET /authz/registry.yaml` on `GIBSON_AUTHZ_REGISTRY_PORT`, default `:8086`),
+authorized to an explicit SPIFFE reader allow-list
+(`GIBSON_AUTHZ_REGISTRY_READER_SVIDS`, e.g. the ext-authz SVID). ext-authz
+fetches it at startup (`EXT_AUTHZ_REGISTRY_URL`), pinning the daemon's SVID. This
+makes the daemon the **single source of truth**: `registry.go` (the daemon's own
+enforcement view) and the served `registry.yaml` are generated together, so
+ext-authz can never enforce a policy that has drifted behind the deployed daemon.
+The old separately-versioned OCI artifact (`internal-authz-registry:<tag>` + chart
+`sdk.version` pin) is retired — it silently default-denied any RPC added after the
+last manual publish (e.g. `SetSignupProgress`).
 
 The OpenFGA model itself is hand-maintained at `internal/authz/model.fga`
 (compiled to the JSON `gibson-fga-init` loads by `cmd/gen-fga-model-json`,
