@@ -56,6 +56,17 @@ var allowedUnauthenticated = map[string]bool{
 	// is an opaque single-use capability; the payload is non-sensitive step
 	// labels. Was member/tenant-scoped — flipped in sdk#275 (dashboard#646).
 	"/gibson.tenant.v1.UserService/SetSignupProgress": true,
+
+	// AcceptInvitation is intentionally unauthenticated: a user follows an
+	// invitation link (carrying the invite token) BEFORE they have a session
+	// or membership in the inviting tenant — there is no JWT to present. The
+	// invitation TOKEN is the capability, enforced by the handler itself
+	// (internal/admin/invitation_handlers.go: GetByTokenHash + pending +
+	// expiry checks; PermissionDenied on an unknown/invalid token). Same
+	// token-capability pattern as SetSignupProgress above. The annotation
+	// shipped in the SDK proto (gibson/tenant/v1/membership.proto, ADR-0039
+	// decomposed MembershipService); this guard list lagged it.
+	"/gibson.tenant.v1.MembershipService/AcceptInvitation": true,
 }
 
 // TestOnlyConnectAndPingAreUnauthenticated walks the generated Registry map
