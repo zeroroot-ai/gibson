@@ -68,6 +68,8 @@ type fakeLauncher struct {
 	launchErrFor    map[string]error // token suffix (connector) -> err
 	terminated      []string         // sandbox ids passed to Terminate
 	terminateErrFor map[string]error // sandbox id -> err
+	aliveFor        map[string]bool  // sandbox id -> liveness (default true)
+	isAliveErrFor   map[string]error // sandbox id -> probe error
 }
 
 func (f *fakeLauncher) Launch(_ context.Context, tenant auth.TenantID, _ []byte, token string) (string, error) {
@@ -89,6 +91,20 @@ func (f *fakeLauncher) Terminate(_ context.Context, sandboxID string) error {
 	}
 	f.terminated = append(f.terminated, sandboxID)
 	return nil
+}
+
+// IsAlive defaults to alive=true (sandboxes are healthy unless a test marks
+// them dead via aliveFor or errors them via isAliveErrFor).
+func (f *fakeLauncher) IsAlive(_ context.Context, sandboxID string) (bool, error) {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	if e, ok := f.isAliveErrFor[sandboxID]; ok {
+		return false, e
+	}
+	if alive, ok := f.aliveFor[sandboxID]; ok {
+		return alive, nil
+	}
+	return true, nil
 }
 
 type fakeInventory struct {
@@ -366,6 +382,81 @@ func TestReconcile_TerminatesOnlyOrphan_KeepsDesired(t *testing.T) {
 	got, _ := inv.List(context.Background())
 	if len(got) != 1 || got[0].Connector != "connector-good" {
 		t.Errorf("only the desired connector should remain in inventory, got %+v", got)
+	}
+}
+
+// --- self-heal (gibson#724) -------------------------------------------------
+
+func TestReconcile_DeadSandbox_RelaunchesAndRevokesOldPrincipal(t *testing.T) {
+	acme := auth.MustNewTenantID("acme")
+	d := ConnectorSandbox{Tenant: acme, Connector: "connector-gitlab"}
+	cat := &fakeCatalog{desired: []ConnectorSandbox{d}}
+	man := &fakeManifest{manifests: manifestsFor(d)}
+	id := &fakeIdentity{}
+	l := &fakeLauncher{aliveFor: map[string]bool{"sandbox-old": false}}
+	inv := newFakeInventory(InventoryEntry{
+		Tenant: acme, Connector: "connector-gitlab", SandboxID: "sandbox-old", PrincipalID: "principal-old",
+	})
+
+	newTestReconciler(cat, man, id, l, inv).reconcile(context.Background())
+
+	// Dead sandbox husk torn down and its principal revoked (no identity leak).
+	if len(l.terminated) != 1 || l.terminated[0] != "sandbox-old" {
+		t.Errorf("dead sandbox must be terminated, got %v", l.terminated)
+	}
+	if len(id.revoked) != 1 || id.revoked[0] != "principal-old" {
+		t.Errorf("dead principal must be revoked, got %v", id.revoked)
+	}
+	// Re-launched under a fresh principal; inventory points at the new sandbox.
+	if len(l.launched) != 1 {
+		t.Fatalf("dead connector must be re-launched, got %d launches", len(l.launched))
+	}
+	got, _ := inv.List(context.Background())
+	if len(got) != 1 || got[0].SandboxID != "sandbox-connector-gitlab" || got[0].PrincipalID != "principal-connector-gitlab" {
+		t.Errorf("inventory must be updated to the new sandbox + principal, got %+v", got)
+	}
+}
+
+func TestReconcile_HealthySandbox_NoRelaunch(t *testing.T) {
+	acme := auth.MustNewTenantID("acme")
+	d := ConnectorSandbox{Tenant: acme, Connector: "connector-gitlab"}
+	cat := &fakeCatalog{desired: []ConnectorSandbox{d}}
+	man := &fakeManifest{manifests: manifestsFor(d)}
+	id := &fakeIdentity{}
+	l := &fakeLauncher{} // default: alive
+	inv := newFakeInventory(InventoryEntry{
+		Tenant: acme, Connector: "connector-gitlab", SandboxID: "sandbox-x", PrincipalID: "principal-x",
+	})
+
+	newTestReconciler(cat, man, id, l, inv).reconcile(context.Background())
+
+	if len(l.launched) != 0 || len(l.terminated) != 0 || len(id.minted) != 0 {
+		t.Errorf("a healthy sandbox must be left untouched: launches=%d terminated=%d minted=%d",
+			len(l.launched), len(l.terminated), len(id.minted))
+	}
+}
+
+func TestReconcile_LivenessProbeError_LeavesSandboxAsIs(t *testing.T) {
+	acme := auth.MustNewTenantID("acme")
+	d := ConnectorSandbox{Tenant: acme, Connector: "connector-gitlab"}
+	cat := &fakeCatalog{desired: []ConnectorSandbox{d}}
+	man := &fakeManifest{manifests: manifestsFor(d)}
+	id := &fakeIdentity{}
+	l := &fakeLauncher{isAliveErrFor: map[string]error{"sandbox-x": errors.New("setec unreachable")}}
+	inv := newFakeInventory(InventoryEntry{
+		Tenant: acme, Connector: "connector-gitlab", SandboxID: "sandbox-x", PrincipalID: "principal-x",
+	})
+
+	newTestReconciler(cat, man, id, l, inv).reconcile(context.Background())
+
+	// Unknown liveness must not churn a re-launch or a teardown.
+	if len(l.launched) != 0 || len(l.terminated) != 0 || len(id.revoked) != 0 {
+		t.Errorf("probe error must leave the sandbox as-is: launches=%d terminated=%d revoked=%d",
+			len(l.launched), len(l.terminated), len(id.revoked))
+	}
+	got, _ := inv.List(context.Background())
+	if len(got) != 1 || got[0].SandboxID != "sandbox-x" {
+		t.Errorf("inventory must be unchanged on probe error, got %+v", got)
 	}
 }
 

@@ -17,12 +17,15 @@ import (
 	"github.com/zeroroot-ai/sdk/auth"
 )
 
-// fakeSandboxClient records Launch and Kill calls.
+// fakeSandboxClient records Launch and Kill calls and drives Wait (used by the
+// liveness probe).
 type fakeSandboxClient struct {
-	launched  []sandboxed.LaunchRequest
-	launchErr error
-	killed    []string
-	killErr   error
+	launched   []sandboxed.LaunchRequest
+	launchErr  error
+	killed     []string
+	killErr    error
+	waitBlocks bool  // when true, Wait blocks until ctx is cancelled (sandbox still running)
+	waitErr    error // returned by Wait when not blocking
 }
 
 func (f *fakeSandboxClient) Launch(_ context.Context, req sandboxed.LaunchRequest) (sandboxed.LaunchResponse, error) {
@@ -37,8 +40,15 @@ func (f *fakeSandboxClient) StreamLogs(context.Context, string) (sandboxed.LogSt
 	return nil, fmt.Errorf("not implemented")
 }
 
-func (f *fakeSandboxClient) Wait(context.Context, string) (sandboxed.WaitResponse, error) {
-	return sandboxed.WaitResponse{}, fmt.Errorf("not implemented")
+func (f *fakeSandboxClient) Wait(ctx context.Context, _ string) (sandboxed.WaitResponse, error) {
+	if f.waitBlocks {
+		<-ctx.Done() // simulate a still-running sandbox: block until the probe deadline
+		return sandboxed.WaitResponse{}, ctx.Err()
+	}
+	if f.waitErr != nil {
+		return sandboxed.WaitResponse{}, f.waitErr
+	}
+	return sandboxed.WaitResponse{ExitCode: 0, Reason: "Completed"}, nil
 }
 
 func (f *fakeSandboxClient) Kill(_ context.Context, id string) error {
@@ -291,4 +301,67 @@ func TestTerminate_SurfacesNonNotFoundError(t *testing.T) {
 	err := l.Terminate(context.Background(), "ns/sbx-1/uid")
 	require.Error(t, err)
 	assert.Contains(t, err.Error(), "terminate sandbox")
+}
+
+func newTestLauncherWithProbe(t *testing.T, client sandboxed.SandboxClient, probe time.Duration) *Launcher {
+	t.Helper()
+	l, err := New(Config{
+		Client:               client,
+		RunnerImage:          "ghcr.io/zeroroot-ai/gibson-mcp-bridge-runner:dev",
+		PlatformURL:          "http://gibson.gibson-prod.svc.cluster.local:8080",
+		PlatformEgress:       platformEgress,
+		LivenessProbeTimeout: probe,
+	})
+	require.NoError(t, err)
+	return l
+}
+
+func TestIsAlive_RunningSandbox_ProbeDeadlineMeansAlive(t *testing.T) {
+	// Wait blocks (sandbox still running) → the probe hits its short deadline →
+	// reported alive.
+	client := &fakeSandboxClient{waitBlocks: true}
+	l := newTestLauncherWithProbe(t, client, 50*time.Millisecond)
+
+	alive, err := l.IsAlive(context.Background(), "ns/sbx-1/uid")
+	require.NoError(t, err)
+	assert.True(t, alive, "a sandbox whose Wait blocks past the probe deadline is alive")
+}
+
+func TestIsAlive_TerminatedSandbox_IsDead(t *testing.T) {
+	// Wait returns promptly (sandbox has exited) → reported dead.
+	client := &fakeSandboxClient{}
+	l := newTestLauncher(t, client)
+
+	alive, err := l.IsAlive(context.Background(), "ns/sbx-1/uid")
+	require.NoError(t, err)
+	assert.False(t, alive, "a sandbox whose Wait returns has terminated")
+}
+
+func TestIsAlive_NotFound_IsDeadNoError(t *testing.T) {
+	client := &fakeSandboxClient{waitErr: status.Error(codes.NotFound, "gone")}
+	l := newTestLauncher(t, client)
+
+	alive, err := l.IsAlive(context.Background(), "ns/sbx-gone/uid")
+	require.NoError(t, err)
+	assert.False(t, alive)
+}
+
+func TestIsAlive_EmptyID_IsDeadNoError(t *testing.T) {
+	client := &fakeSandboxClient{}
+	l := newTestLauncher(t, client)
+
+	alive, err := l.IsAlive(context.Background(), "")
+	require.NoError(t, err)
+	assert.False(t, alive)
+}
+
+func TestIsAlive_TransportError_SurfacesAsUnknown(t *testing.T) {
+	// A genuine transport error (setec unreachable) is surfaced so the caller
+	// skips rather than churning a re-launch on an unknown state.
+	client := &fakeSandboxClient{waitErr: status.Error(codes.Unavailable, "setec down")}
+	l := newTestLauncher(t, client)
+
+	_, err := l.IsAlive(context.Background(), "ns/sbx-1/uid")
+	require.Error(t, err)
+	assert.Contains(t, err.Error(), "liveness probe")
 }

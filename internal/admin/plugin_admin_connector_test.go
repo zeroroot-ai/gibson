@@ -54,6 +54,10 @@ func (f *fakeConnectorLauncher) Terminate(_ context.Context, sandboxID string) e
 	return nil
 }
 
+func (f *fakeConnectorLauncher) IsAlive(_ context.Context, _ string) (bool, error) {
+	return true, nil
+}
+
 // newConnectorTestServer builds a PluginsAdminServer with a connector-shaped
 // validator result and the given launcher (nil allowed).
 func newConnectorTestServer(t *testing.T, launcher ConnectorLauncher) (*PluginsAdminServer, *fakeZitadel, *fakeAuthorizer) {

@@ -58,6 +58,10 @@ type IdentityMinter interface {
 type Launcher interface {
 	Launch(ctx context.Context, tenant auth.TenantID, manifestYAML []byte, bootstrapToken string) (sandboxID string, err error)
 	Terminate(ctx context.Context, sandboxID string) error
+	// IsAlive reports whether the sandbox is still running. An error means the
+	// liveness is unknown (e.g. setec unreachable); the self-heal pass skips
+	// rather than churn a re-launch on an unknown state (gibson#724).
+	IsAlive(ctx context.Context, sandboxID string) (bool, error)
 }
 
 // Inventory is the durable record of which (tenant, connector) has which
@@ -127,10 +131,11 @@ func key(tenant auth.TenantID, connector string) string {
 	return tenant.String() + "\x00" + connector
 }
 
-// reconcile performs a single launch-missing pass: for every desired
-// connector not already in the inventory, mint an identity, launch a sandbox,
-// and record it. Errors on one connector are logged and skipped so one bad
-// connector never blocks the rest.
+// reconcile performs a single desired-vs-actual pass: terminate sandboxes no
+// longer desired (gibson#723), re-launch desired sandboxes that have died
+// (gibson#724), and launch desired connectors with no sandbox yet (gibson#722).
+// Errors on one connector are logged and isolated so one bad connector never
+// blocks the rest.
 func (r *ConnectorSandboxReconciler) reconcile(ctx context.Context) {
 	// DesiredConnectors returns an error (never a silently-partial list) when
 	// it cannot fully enumerate the catalog, so an FGA hiccup is never mistaken
@@ -189,54 +194,99 @@ func (r *ConnectorSandboxReconciler) reconcile(ctx context.Context) {
 			"tenant", e.Tenant.String(), "connector", e.Connector, "sandbox", e.SandboxID)
 	}
 
+	// --- self-heal: a desired connector whose recorded sandbox has died
+	// (crashed/evicted) is re-launched under a fresh principal; the dead
+	// principal is revoked so identities do not leak. A healthy sandbox is left
+	// untouched (no churn). Liveness-unknown (probe error) is skipped, not
+	// re-launched, so a setec hiccup never churns a healthy fleet. (gibson#724)
+	for _, e := range running {
+		if _, ok := desiredSet[key(e.Tenant, e.Connector)]; !ok {
+			continue // not desired — already handled by the terminate pass above
+		}
+		alive, err := r.cfg.Launcher.IsAlive(ctx, e.SandboxID)
+		if err != nil {
+			r.cfg.Logger.Warn("connector-sandbox: liveness probe failed, leaving as-is",
+				"tenant", e.Tenant.String(), "connector", e.Connector, "sandbox", e.SandboxID, "err", err)
+			continue
+		}
+		if alive {
+			continue // healthy — no needless re-launch
+		}
+		// Dead: clean up any husk and revoke the dead principal, then re-launch
+		// (the inventory Put below overwrites the row with the new sandbox id).
+		if err := r.cfg.Launcher.Terminate(ctx, e.SandboxID); err != nil {
+			r.cfg.Logger.Warn("connector-sandbox: terminate dead sandbox failed, will retry",
+				"tenant", e.Tenant.String(), "connector", e.Connector, "sandbox", e.SandboxID, "err", err)
+			continue
+		}
+		if e.PrincipalID != "" {
+			if err := r.cfg.Identity.RevokeConnectorPrincipal(ctx, e.PrincipalID); err != nil {
+				r.cfg.Logger.Warn("connector-sandbox: revoke dead principal failed",
+					"tenant", e.Tenant.String(), "connector", e.Connector, "principal", e.PrincipalID, "err", err)
+			}
+		}
+		r.cfg.Logger.Info("connector-sandbox: re-launching dead sandbox",
+			"tenant", e.Tenant.String(), "connector", e.Connector, "old_sandbox", e.SandboxID)
+		r.launchConnector(ctx, ConnectorSandbox{Tenant: e.Tenant, Connector: e.Connector})
+	}
+
+	// --- launch-missing: a desired connector with no sandbox yet is launched.
 	for _, d := range desired {
 		if _, ok := runningSet[key(d.Tenant, d.Connector)]; ok {
-			continue // already running — idempotent no-op
+			continue // already running (or just self-healed) — idempotent no-op
 		}
-
-		manifest, found, err := r.cfg.Manifest.ConnectorManifest(ctx, d.Tenant, d.Connector)
-		if err != nil {
-			r.cfg.Logger.Warn("connector-sandbox: fetch manifest failed, skipping",
-				"tenant", d.Tenant.String(), "connector", d.Connector, "err", err)
-			continue
-		}
-		if !found {
-			// Stale tenant_enabled whose definition is gone — do not launch.
-			r.cfg.Logger.Debug("connector-sandbox: no manifest on record, skipping",
-				"tenant", d.Tenant.String(), "connector", d.Connector)
-			continue
-		}
-
-		principalID, token, err := r.cfg.Identity.MintConnectorPrincipal(ctx, d.Tenant, d.Connector)
-		if err != nil {
-			r.cfg.Logger.Warn("connector-sandbox: mint principal failed, skipping",
-				"tenant", d.Tenant.String(), "connector", d.Connector, "err", err)
-			continue
-		}
-
-		sandboxID, err := r.cfg.Launcher.Launch(ctx, d.Tenant, manifest, token)
-		if err != nil {
-			// Roll back the principal so a failed launch never leaks identity.
-			if rerr := r.cfg.Identity.RevokeConnectorPrincipal(ctx, principalID); rerr != nil {
-				r.cfg.Logger.Warn("connector-sandbox: revoke after failed launch also failed",
-					"principal", principalID, "err", rerr)
-			}
-			r.cfg.Logger.Warn("connector-sandbox: launch failed, skipping",
-				"tenant", d.Tenant.String(), "connector", d.Connector, "err", err)
-			continue
-		}
-
-		if err := r.cfg.Inventory.Put(ctx, InventoryEntry{
-			Tenant:      d.Tenant,
-			Connector:   d.Connector,
-			SandboxID:   sandboxID,
-			PrincipalID: principalID,
-		}); err != nil {
-			r.cfg.Logger.Warn("connector-sandbox: record inventory failed",
-				"tenant", d.Tenant.String(), "connector", d.Connector, "sandbox", sandboxID, "err", err)
-			continue
-		}
-		r.cfg.Logger.Info("connector-sandbox: launched",
-			"tenant", d.Tenant.String(), "connector", d.Connector, "sandbox", sandboxID)
+		r.launchConnector(ctx, d)
 	}
+}
+
+// launchConnector fetches the connector's manifest, mints a fresh principal +
+// single-use bootstrap token, launches the sandbox, and upserts the inventory.
+// A failure at any step is logged and isolated (a partial launch revokes its
+// principal so identity never leaks); the (tenant, connector) is simply retried
+// on the next tick. Shared by the launch-missing and self-heal paths.
+func (r *ConnectorSandboxReconciler) launchConnector(ctx context.Context, d ConnectorSandbox) {
+	manifest, found, err := r.cfg.Manifest.ConnectorManifest(ctx, d.Tenant, d.Connector)
+	if err != nil {
+		r.cfg.Logger.Warn("connector-sandbox: fetch manifest failed, skipping",
+			"tenant", d.Tenant.String(), "connector", d.Connector, "err", err)
+		return
+	}
+	if !found {
+		// Stale tenant_enabled whose definition is gone — do not launch.
+		r.cfg.Logger.Debug("connector-sandbox: no manifest on record, skipping",
+			"tenant", d.Tenant.String(), "connector", d.Connector)
+		return
+	}
+
+	principalID, token, err := r.cfg.Identity.MintConnectorPrincipal(ctx, d.Tenant, d.Connector)
+	if err != nil {
+		r.cfg.Logger.Warn("connector-sandbox: mint principal failed, skipping",
+			"tenant", d.Tenant.String(), "connector", d.Connector, "err", err)
+		return
+	}
+
+	sandboxID, err := r.cfg.Launcher.Launch(ctx, d.Tenant, manifest, token)
+	if err != nil {
+		// Roll back the principal so a failed launch never leaks identity.
+		if rerr := r.cfg.Identity.RevokeConnectorPrincipal(ctx, principalID); rerr != nil {
+			r.cfg.Logger.Warn("connector-sandbox: revoke after failed launch also failed",
+				"principal", principalID, "err", rerr)
+		}
+		r.cfg.Logger.Warn("connector-sandbox: launch failed, skipping",
+			"tenant", d.Tenant.String(), "connector", d.Connector, "err", err)
+		return
+	}
+
+	if err := r.cfg.Inventory.Put(ctx, InventoryEntry{
+		Tenant:      d.Tenant,
+		Connector:   d.Connector,
+		SandboxID:   sandboxID,
+		PrincipalID: principalID,
+	}); err != nil {
+		r.cfg.Logger.Warn("connector-sandbox: record inventory failed",
+			"tenant", d.Tenant.String(), "connector", d.Connector, "sandbox", sandboxID, "err", err)
+		return
+	}
+	r.cfg.Logger.Info("connector-sandbox: launched",
+		"tenant", d.Tenant.String(), "connector", d.Connector, "sandbox", sandboxID)
 }

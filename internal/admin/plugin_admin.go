@@ -169,6 +169,11 @@ type ConnectorLauncher interface {
 	// Terminate stops a hosted connector sandbox by id, used by the on-disable
 	// reconciler (gibson#723). Idempotent: an already-gone sandbox is a no-op.
 	Terminate(ctx context.Context, sandboxID string) error
+
+	// IsAlive reports whether a hosted connector sandbox is still running, used
+	// by the self-heal reconciler (gibson#724) to detect a crashed sandbox. An
+	// error means liveness is unknown.
+	IsAlive(ctx context.Context, sandboxID string) (bool, error)
 }
 
 // PluginsAdminServer implements tenantv1.PluginAdminServiceServer (ADR-0039).
