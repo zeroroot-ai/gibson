@@ -202,3 +202,73 @@ func TestRegisterPlugin_PlainPlugin_NeverLaunches(t *testing.T) {
 		t.Error("plain plugin response must still return the bootstrap token")
 	}
 }
+
+// gibson#685 — remote connector registration: the daemon must NOT launch a
+// hosted sandbox and MUST return the one-time bootstrap token so the
+// customer's own MCP-bridge can redeem it to enroll.
+func TestRegisterPlugin_Connector_Remote_ReturnsTokenNoLaunch(t *testing.T) {
+	launcher := &fakeConnectorLauncher{}
+	srv, zit, _ := newConnectorTestServer(t, launcher)
+	ctx := ctxWithTenant(t, "acme")
+
+	req := connectorRegisterReq()
+	req.Remote = true
+
+	resp, err := srv.RegisterPlugin(ctx, req)
+	if err != nil {
+		t.Fatalf("RegisterPlugin(remote): %v", err)
+	}
+
+	// No hosted sandbox launch on the remote path.
+	if len(launcher.launched) != 0 {
+		t.Fatalf("remote connector must not launch a sandbox, got %d launches", len(launcher.launched))
+	}
+	// A principal was still provisioned.
+	if len(zit.created) != 1 {
+		t.Errorf("expected 1 principal, got %d", len(zit.created))
+	}
+	// The token IS returned so the customer-run bridge can redeem it.
+	if resp.GetBootstrapToken() == "" {
+		t.Error("remote connector response must return the bootstrap token")
+	}
+	if resp.GetBootstrapTokenExpiresAtUnix() == 0 {
+		t.Error("remote connector response must carry token expiry")
+	}
+	if resp.GetInstallId() == "" || resp.GetPluginPrincipalId() == "" {
+		t.Errorf("install/principal ids missing: %+v", resp)
+	}
+}
+
+// A remote connector registers even on a daemon with no hosted launcher
+// configured (the whole point: the customer runs the bridge).
+func TestRegisterPlugin_Connector_Remote_NoLauncherConfigured(t *testing.T) {
+	srv, _, _ := newConnectorTestServer(t, nil) // launcher == nil
+	ctx := ctxWithTenant(t, "acme")
+
+	req := connectorRegisterReq()
+	req.Remote = true
+
+	resp, err := srv.RegisterPlugin(ctx, req)
+	if err != nil {
+		t.Fatalf("remote connector must register without a hosted launcher: %v", err)
+	}
+	if resp.GetBootstrapToken() == "" {
+		t.Error("remote connector must return the bootstrap token")
+	}
+}
+
+// remote=true is rejected for a plain (non-connector) plugin manifest.
+func TestRegisterPlugin_Remote_RejectedForPlainPlugin(t *testing.T) {
+	srv, _, _ := newConnectorTestServer(t, &fakeConnectorLauncher{})
+	// Override the validator to report a non-connector manifest.
+	srv.validator = &fakeManifestValidator{manifest: ValidatedManifest{Name: "plain-plugin", IsConnector: false}}
+	ctx := ctxWithTenant(t, "acme")
+
+	req := connectorRegisterReq()
+	req.Remote = true
+
+	_, err := srv.RegisterPlugin(ctx, req)
+	if status.Code(err) != codes.InvalidArgument {
+		t.Fatalf("remote=true on a plain plugin must be InvalidArgument, got %v", err)
+	}
+}
