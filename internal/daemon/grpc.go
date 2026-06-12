@@ -38,6 +38,7 @@ import (
 	"github.com/zeroroot-ai/gibson/internal/memory"
 	"github.com/zeroroot-ai/gibson/internal/providerconfig"
 	"github.com/zeroroot-ai/gibson/internal/ratelimit"
+	"github.com/zeroroot-ai/gibson/internal/reconciler"
 	discoverypb "github.com/zeroroot-ai/platform-sdk/gen/gibson/daemon/discovery/v1"
 	daemonoperatorv1 "github.com/zeroroot-ai/platform-sdk/gen/gibson/daemon/operator/v1"
 	componentpb "github.com/zeroroot-ai/sdk/api/gen/gibson/component/v1"
@@ -1093,15 +1094,39 @@ func (d *daemonImpl) buildGRPCServer(ctx context.Context) (*grpcSubsystem, error
 					"error", clErr)
 			}
 
+			// Connector on-enable orchestration (gibson#721/#722): the manifest
+			// store persists a registered connector's manifest so the reconciler
+			// can later launch a per-tenant sandbox when the tenant enables it.
+			connectorManifestStore := reconciler.NewPostgresConnectorManifestStore(d.platformDB)
+			principalClient := &idpPluginPrincipalAdapter{client: idpClient, cgMinter: d.cgMinter}
+
 			pluginAdminSvc, paErr := admin.NewPluginsAdminServer(admin.PluginsAdminConfig{
-				Registry:          &componentInstallRegistryReaderAdapter{db: d.platformDB},
-				ManifestValidator: &pluginManifestValidator{},
-				ZitadelClient:     &idpPluginPrincipalAdapter{client: idpClient, cgMinter: d.cgMinter},
-				SecretWriter:      &secretWriterAdapter{svc: d.secretsService},
-				Authorizer:        d.authorizer,
-				BootstrapAuditor:  d.brokerAuditWriter,
-				ConnectorLauncher: connectorLauncher,
+				Registry:               &componentInstallRegistryReaderAdapter{db: d.platformDB},
+				ManifestValidator:      &pluginManifestValidator{},
+				ZitadelClient:          principalClient,
+				SecretWriter:           &secretWriterAdapter{svc: d.secretsService},
+				Authorizer:             d.authorizer,
+				BootstrapAuditor:       d.brokerAuditWriter,
+				ConnectorLauncher:      connectorLauncher,
+				ConnectorManifestStore: connectorManifestStore,
 			})
+
+			// Build the on-enable reconciler when hosted connector launch is
+			// available. Started by Start() alongside the catalog fan-out.
+			if connectorLauncher != nil && d.authorizer != nil {
+				d.connectorSandboxReconciler = reconciler.NewConnectorSandboxReconciler(reconciler.ConnectorSandboxConfig{
+					Catalog: &reconciler.FGACatalogSource{
+						Authorizer: d.authorizer,
+						Manifest:   connectorManifestStore,
+						Logger:     d.logger.Slog(),
+					},
+					Manifest:  connectorManifestStore,
+					Identity:  reconciler.PrincipalIdentityMinter{Minter: principalClient},
+					Launcher:  connectorLauncher,
+					Inventory: reconciler.NewPostgresConnectorSandboxInventory(d.platformDB),
+					Logger:    d.logger.Slog(),
+				})
+			}
 			if paErr != nil {
 				d.logger.Warn(ctx, "PluginAdminService: constructor failed; registering Unavailable stub",
 					"error", paErr)
