@@ -10,7 +10,9 @@ import (
 	"google.golang.org/grpc/status"
 
 	"github.com/zeroroot-ai/gibson/internal/authz"
+	"github.com/zeroroot-ai/gibson/internal/reconciler"
 	daemonoperatorv1 "github.com/zeroroot-ai/platform-sdk/gen/gibson/daemon/operator/v1"
+	"github.com/zeroroot-ai/sdk/plugin/manifest"
 )
 
 // entitlementsDB returns the *sql.DB used for tenant_quotas writes. The
@@ -302,18 +304,46 @@ func (s *DaemonServer) SetPlatformEnabled(ctx context.Context, req *daemonoperat
 	if req.GetComponentRef() == "" {
 		return nil, status.Error(codes.InvalidArgument, "component_ref required")
 	}
-	componentRef := req.GetComponentRef()
-	if !hasPrefix(componentRef, "component:") {
+	bareName := req.GetComponentRef()
+	componentRef := bareName
+	if hasPrefix(componentRef, "component:") {
+		bareName = componentRef[len("component:"):]
+	} else {
 		componentRef = "component:" + componentRef
 	}
 	const systemRef = "system_tenant:_system"
 	tuple := authz.Tuple{User: systemRef, Relation: "platform_enabled", Object: componentRef}
+
+	// Validate a supplied connector manifest up front (no DB needed): a shared
+	// connector is an mcp-bridge plugin (ADR-0049), and SetPlatformEnabled is
+	// the only point an operator-published-only connector's definition is
+	// captured (gibson#733). Non-connector components publish without a manifest.
+	manifestYAML := req.GetManifestYaml()
+	if req.GetPublished() && len(manifestYAML) > 0 {
+		m, mErr := manifest.LoadBytes(manifestYAML)
+		if mErr != nil {
+			return nil, status.Errorf(codes.InvalidArgument, "manifest_yaml is not a valid plugin manifest: %v", mErr)
+		}
+		if m.Spec.Runtime != manifest.RuntimeMCPBridge {
+			return nil, status.Errorf(codes.InvalidArgument,
+				"manifest_yaml must be a runtime: %q plugin manifest (a shared connector); got runtime %q",
+				manifest.RuntimeMCPBridge, m.Spec.Runtime)
+		}
+	}
 
 	present, err := s.authorizer.Check(ctx, systemRef, "platform_enabled", componentRef)
 	if err != nil {
 		return nil, status.Errorf(codes.Internal, "fga Check platform_enabled: %v", err)
 	}
 	if req.GetPublished() {
+		// Persist the shared component manifest first (before the present
+		// early-return) so a re-publish that only updates the definition still
+		// refreshes what the on-enable reconciler launches from.
+		if len(manifestYAML) > 0 {
+			if perr := s.putSharedConnectorManifest(ctx, bareName, manifestYAML); perr != nil {
+				return nil, status.Errorf(codes.Internal, "persist shared connector manifest: %v", perr)
+			}
+		}
 		if present {
 			return &daemonoperatorv1.SetPlatformEnabledResponse{Written: false}, nil
 		}
@@ -322,6 +352,11 @@ func (s *DaemonServer) SetPlatformEnabled(ctx context.Context, req *daemonoperat
 		}
 		return &daemonoperatorv1.SetPlatformEnabledResponse{Written: true}, nil
 	}
+	// Unpublish clears the shared manifest alongside the tuple (idempotent), so
+	// a pulled connector converges to no running sandboxes.
+	if derr := s.deleteSharedConnectorManifest(ctx, bareName); derr != nil {
+		return nil, status.Errorf(codes.Internal, "clear shared connector manifest: %v", derr)
+	}
 	if !present {
 		return &daemonoperatorv1.SetPlatformEnabledResponse{Deleted: false}, nil
 	}
@@ -329,4 +364,28 @@ func (s *DaemonServer) SetPlatformEnabled(ctx context.Context, req *daemonoperat
 		return nil, status.Errorf(codes.Internal, "fga Delete platform_enabled: %v", err)
 	}
 	return &daemonoperatorv1.SetPlatformEnabledResponse{Deleted: true}, nil
+}
+
+// putSharedConnectorManifest persists a shared connector's component manifest
+// under the system tenant so the on-enable reconciler can launch a per-tenant
+// sandbox from it (gibson#733). A daemon without a platform DB logs and skips —
+// on-enable orchestration for operator-published connectors is then unavailable.
+func (s *DaemonServer) putSharedConnectorManifest(ctx context.Context, connector string, manifestYAML []byte) error {
+	if s.platformDB == nil {
+		if s.logger != nil {
+			s.logger.Warn("SetPlatformEnabled: platform DB unavailable; shared connector manifest not persisted "+
+				"(it will not launch on enable)", "connector", connector)
+		}
+		return nil
+	}
+	return reconciler.NewPostgresConnectorManifestStore(s.platformDB).PutShared(ctx, connector, manifestYAML)
+}
+
+// deleteSharedConnectorManifest clears a shared connector's component manifest
+// on unpublish.
+func (s *DaemonServer) deleteSharedConnectorManifest(ctx context.Context, connector string) error {
+	if s.platformDB == nil {
+		return nil
+	}
+	return reconciler.NewPostgresConnectorManifestStore(s.platformDB).DeleteShared(ctx, connector)
 }

@@ -152,3 +152,31 @@ func TestPostgresSandboxInventory_IdempotentAndSurvivesReopen(t *testing.T) {
 	require.Empty(t, list, "row gone after delete")
 	require.NoError(t, inv.Delete(ctx, acme, "connector-gitlab"), "delete of an absent row is a no-op")
 }
+
+func TestPostgresManifestStore_PutSharedAndDeleteShared(t *testing.T) {
+	ctx := context.Background()
+	db := setupConnectorPostgres(t)
+	store := NewPostgresConnectorManifestStore(db)
+
+	// Operator publishes a shared connector: PutShared persists under _system.
+	require.NoError(t, store.PutShared(ctx, "connector-shared", []byte("shared-def-v1")))
+
+	// A tenant with no row of its own resolves it via the _system fallback.
+	got, found, err := store.ConnectorManifest(ctx, auth.MustNewTenantID("globex"), "connector-shared")
+	require.NoError(t, err)
+	require.True(t, found, "shared connector resolves via _system fallback")
+	require.Equal(t, []byte("shared-def-v1"), got)
+
+	// Re-publish updates the shared definition (upsert).
+	require.NoError(t, store.PutShared(ctx, "connector-shared", []byte("shared-def-v2")))
+	got, _, err = store.ConnectorManifest(ctx, auth.MustNewTenantID("globex"), "connector-shared")
+	require.NoError(t, err)
+	require.Equal(t, []byte("shared-def-v2"), got)
+
+	// Unpublish clears it; a tenant then resolves nothing (converges to no sandbox).
+	require.NoError(t, store.DeleteShared(ctx, "connector-shared"))
+	_, found, err = store.ConnectorManifest(ctx, auth.MustNewTenantID("globex"), "connector-shared")
+	require.NoError(t, err)
+	require.False(t, found, "unpublished shared connector is gone")
+	require.NoError(t, store.DeleteShared(ctx, "connector-shared"), "delete is idempotent")
+}

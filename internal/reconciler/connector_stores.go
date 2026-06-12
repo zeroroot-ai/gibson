@@ -68,6 +68,40 @@ func (s *PostgresConnectorManifestStore) ConnectorManifest(ctx context.Context, 
 	return nil, false, nil
 }
 
+// PutShared upserts a connector's manifest under the system tenant — the
+// shared-catalog definition an operator publishes (gibson#733). It is stored
+// as pure data: `_system` owns the row but never gets a principal, install, or
+// sandbox. Every enabling tenant resolves it via the _system fallback in
+// ConnectorManifest, so an operator-published-only connector (never
+// tenant-registered) still launches a per-tenant sandbox on enable.
+func (s *PostgresConnectorManifestStore) PutShared(ctx context.Context, connector string, manifestYAML []byte) error {
+	if connector == "" {
+		return fmt.Errorf("connector manifest store: connector name must not be empty")
+	}
+	if len(manifestYAML) == 0 {
+		return fmt.Errorf("connector manifest store: manifest must not be empty")
+	}
+	const q = `
+		INSERT INTO connector_manifest (tenant_id, connector_name, manifest_yaml, updated_at)
+		VALUES ($1, $2, $3, now())
+		ON CONFLICT (tenant_id, connector_name)
+		DO UPDATE SET manifest_yaml = EXCLUDED.manifest_yaml, updated_at = now()`
+	if _, err := s.db.ExecContext(ctx, q, systemTenantID, connector, manifestYAML); err != nil {
+		return fmt.Errorf("connector manifest store: upsert shared %q: %w", connector, err)
+	}
+	return nil
+}
+
+// DeleteShared removes a shared connector's manifest on unpublish. Deleting an
+// absent row is a no-op (idempotent unpublish).
+func (s *PostgresConnectorManifestStore) DeleteShared(ctx context.Context, connector string) error {
+	const q = `DELETE FROM connector_manifest WHERE tenant_id = $1 AND connector_name = $2`
+	if _, err := s.db.ExecContext(ctx, q, systemTenantID, connector); err != nil {
+		return fmt.Errorf("connector manifest store: delete shared %q: %w", connector, err)
+	}
+	return nil
+}
+
 // PostgresConnectorSandboxInventory is the durable record of which
 // (tenant, connector) currently has which running setec sandbox
 // (connector_sandbox table, migration 013). List drives reconciler
