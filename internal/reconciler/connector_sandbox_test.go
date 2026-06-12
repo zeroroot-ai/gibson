@@ -6,6 +6,9 @@ import (
 	"sync"
 	"testing"
 
+	"google.golang.org/grpc/codes"
+	"google.golang.org/grpc/status"
+
 	"github.com/zeroroot-ai/sdk/auth"
 )
 
@@ -457,6 +460,69 @@ func TestReconcile_LivenessProbeError_LeavesSandboxAsIs(t *testing.T) {
 	got, _ := inv.List(context.Background())
 	if len(got) != 1 || got[0].SandboxID != "sandbox-x" {
 		t.Errorf("inventory must be unchanged on probe error, got %+v", got)
+	}
+}
+
+// --- plan-tier connector budget (gibson#726) --------------------------------
+
+func TestReconcile_AtBudget_DoesNotLaunchAndRollsBackPrincipal(t *testing.T) {
+	acme := auth.MustNewTenantID("acme")
+	d := ConnectorSandbox{Tenant: acme, Connector: "connector-gitlab"}
+	cat := &fakeCatalog{desired: []ConnectorSandbox{d}}
+	man := &fakeManifest{manifests: manifestsFor(d)}
+	id := &fakeIdentity{}
+	// The launcher's Admit hook denies an over-budget tenant with
+	// ResourceExhausted; the fake models that as a launch error.
+	l := &fakeLauncher{launchErrFor: map[string]error{
+		"connector-gitlab": status.Error(codes.ResourceExhausted, "concurrent_connectors quota exceeded (2/2)"),
+	}}
+	inv := newFakeInventory()
+
+	newTestReconciler(cat, man, id, l, inv).reconcile(context.Background())
+
+	if len(l.launched) != 0 {
+		t.Errorf("an over-budget connector must not launch, got %d", len(l.launched))
+	}
+	// The minted principal is rolled back so a denied launch leaks no identity.
+	if len(id.revoked) != 1 || id.revoked[0] != "principal-connector-gitlab" {
+		t.Errorf("over-budget launch must revoke its minted principal, got %v", id.revoked)
+	}
+	got, _ := inv.List(context.Background())
+	if len(got) != 0 {
+		t.Errorf("over-budget connector must not be recorded in inventory, got %+v", got)
+	}
+}
+
+func TestReconcile_FreedSlot_LaunchesOnNextPass(t *testing.T) {
+	acme := auth.MustNewTenantID("acme")
+	d := ConnectorSandbox{Tenant: acme, Connector: "connector-gitlab"}
+	cat := &fakeCatalog{desired: []ConnectorSandbox{d}}
+	man := &fakeManifest{manifests: manifestsFor(d)}
+	id := &fakeIdentity{}
+	// At cap on the first pass; after a slot frees, the launcher admits it.
+	l := &fakeLauncher{launchErrFor: map[string]error{
+		"connector-gitlab": status.Error(codes.ResourceExhausted, "at cap"),
+	}}
+	inv := newFakeInventory()
+	r := newTestReconciler(cat, man, id, l, inv)
+
+	r.reconcile(context.Background()) // at cap → no launch
+	if len(l.launched) != 0 {
+		t.Fatalf("first pass must not launch while at cap, got %d", len(l.launched))
+	}
+
+	// A slot frees (a connector elsewhere was disabled).
+	l.mu.Lock()
+	delete(l.launchErrFor, "connector-gitlab")
+	l.mu.Unlock()
+
+	r.reconcile(context.Background()) // under cap → launches
+	if len(l.launched) != 1 {
+		t.Errorf("freed slot must let the deferred connector launch on the next pass, got %d", len(l.launched))
+	}
+	got, _ := inv.List(context.Background())
+	if len(got) != 1 {
+		t.Errorf("launched connector must now be recorded, got %+v", got)
 	}
 }
 
