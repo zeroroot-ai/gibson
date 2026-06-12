@@ -773,6 +773,16 @@ var Registry = map[string]Entry{
 		Unauthenticated:   false,
 		Self:              false,
 	},
+	"/gibson.daemon.operator.v1.DaemonOperatorService/SetPlatformEnabled": {
+		Method:            "/gibson.daemon.operator.v1.DaemonOperatorService/SetPlatformEnabled",
+		Service:           "gibson.daemon.operator.v1.DaemonOperatorService",
+		Relation:          "platform_operator",
+		ObjectType:        "system_tenant",
+		ObjectDeriver:     "system_tenant",
+		AllowedIdentities: IdentityUser | IdentityService,
+		Unauthenticated:   false,
+		Self:              false,
+	},
 	"/gibson.daemon.operator.v1.DaemonOperatorService/SetTenantZitadelOrg": {
 		Method:            "/gibson.daemon.operator.v1.DaemonOperatorService/SetTenantZitadelOrg",
 		Service:           "gibson.daemon.operator.v1.DaemonOperatorService",
@@ -2335,6 +2345,16 @@ var Registry = map[string]Entry{
 	},
 	"/gibson.tenant.v1.MembershipService/SetCatalogEnabled": {
 		Method:            "/gibson.tenant.v1.MembershipService/SetCatalogEnabled",
+		Service:           "gibson.tenant.v1.MembershipService",
+		Relation:          "admin",
+		ObjectType:        "tenant",
+		ObjectDeriver:     "tenant_from_identity",
+		AllowedIdentities: IdentityUser,
+		Unauthenticated:   false,
+		Self:              false,
+	},
+	"/gibson.tenant.v1.MembershipService/SetCatalogPublished": {
+		Method:            "/gibson.tenant.v1.MembershipService/SetCatalogPublished",
 		Service:           "gibson.tenant.v1.MembershipService",
 		Relation:          "admin",
 		ObjectType:        "tenant",

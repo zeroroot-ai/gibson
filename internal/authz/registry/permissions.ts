@@ -760,6 +760,16 @@ export const AuthRegistry: Record<string, AuthEntry> = {
     unauthenticated: false,
     self: false,
   },
+  "/gibson.daemon.operator.v1.DaemonOperatorService/SetPlatformEnabled": {
+    method: "/gibson.daemon.operator.v1.DaemonOperatorService/SetPlatformEnabled",
+    service: "gibson.daemon.operator.v1.DaemonOperatorService",
+    relation: "platform_operator",
+    objectType: "system_tenant",
+    objectDeriver: "system_tenant",
+    allowedIdentities: IdentityClass.USER | IdentityClass.SERVICE,
+    unauthenticated: false,
+    self: false,
+  },
   "/gibson.daemon.operator.v1.DaemonOperatorService/SetTenantZitadelOrg": {
     method: "/gibson.daemon.operator.v1.DaemonOperatorService/SetTenantZitadelOrg",
     service: "gibson.daemon.operator.v1.DaemonOperatorService",
@@ -2322,6 +2332,16 @@ export const AuthRegistry: Record<string, AuthEntry> = {
   },
   "/gibson.tenant.v1.MembershipService/SetCatalogEnabled": {
     method: "/gibson.tenant.v1.MembershipService/SetCatalogEnabled",
+    service: "gibson.tenant.v1.MembershipService",
+    relation: "admin",
+    objectType: "tenant",
+    objectDeriver: "tenant_from_identity",
+    allowedIdentities: IdentityClass.USER,
+    unauthenticated: false,
+    self: false,
+  },
+  "/gibson.tenant.v1.MembershipService/SetCatalogPublished": {
+    method: "/gibson.tenant.v1.MembershipService/SetCatalogPublished",
     service: "gibson.tenant.v1.MembershipService",
     relation: "admin",
     objectType: "tenant",

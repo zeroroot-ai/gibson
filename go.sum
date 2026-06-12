@@ -582,8 +582,8 @@ github.com/zeroroot-ai/ast-checks v0.1.2 h1:Y8AAHGRvtRS5ys2FmIZO7XyraaV921IHq440
 github.com/zeroroot-ai/ast-checks v0.1.2/go.mod h1:XO8hx6xKXUh9lHfNJA32cptXsHcwT1JNbrUH4NZMwdM=
 github.com/zeroroot-ai/platform-clients v0.11.4 h1:DFlmpixpt++SEHfeXL4ZcioRB2b6u7CeN6M02e9tWoI=
 github.com/zeroroot-ai/platform-clients v0.11.4/go.mod h1:3Ezb1pVGminyqThuiS+tSUg4w0sd0SY5b9MM3zfPy8Y=
-github.com/zeroroot-ai/platform-sdk v0.14.0 h1:lNTYMLrc81ffWeh5Mz3tYTbxV1OWTIpuOIawTvsZ00U=
-github.com/zeroroot-ai/platform-sdk v0.14.0/go.mod h1:v8oH1FhxepjCDgjTzrKKYrjX57hdIeGBggcLi3HTg7Y=
+github.com/zeroroot-ai/platform-sdk v0.15.0 h1:946GX1dVzWus9vqBVLPM+PxrnFojT+4H6nOAy07BMmQ=
+github.com/zeroroot-ai/platform-sdk v0.15.0/go.mod h1:v8oH1FhxepjCDgjTzrKKYrjX57hdIeGBggcLi3HTg7Y=
 github.com/zeroroot-ai/sdk v0.142.0 h1:tBHWwfJPXwF2ZxCn2j8GNgUcUamjJ6368OO4HN8SxdQ=
 github.com/zeroroot-ai/sdk v0.142.0/go.mod h1:JidCgHCJkB4Jqba1eY53vnZ4v74EDiGLo/+FJXLI8fo=
 github.com/zeroroot-ai/setec v0.104.3 h1:gbciYg69S0w7Al7f3Tgp2tCU9G5lZmfJA8NyBof0r+M=

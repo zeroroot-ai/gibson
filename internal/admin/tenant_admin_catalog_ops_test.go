@@ -285,3 +285,82 @@ func TestSetCatalogEnabled_WriteError(t *testing.T) {
 		t.Errorf("expected Internal, got %s", st.Code())
 	}
 }
+
+// ---------------------------------------------------------------------------
+// SetCatalogPublished (BYO connector path — gibson#683)
+// ---------------------------------------------------------------------------
+
+func TestSetCatalogPublished_Publish_WritesWhenAbsent(t *testing.T) {
+	fga := &fakeAuthorizerCatalog{}
+	srv := newCatalogServer(fga)
+
+	resp, err := srv.SetCatalogPublished(catalogCtx(), &tenantv1.SetCatalogPublishedRequest{
+		ComponentRef: "connector-gitlab",
+		Published:    true,
+	})
+	if err != nil {
+		t.Fatalf("SetCatalogPublished: %v", err)
+	}
+	if !resp.GetWritten() {
+		t.Error("expected Written=true when tuple was absent")
+	}
+	present, _ := fga.Check(context.Background(), "tenant:acme", "tenant_published", "component:connector-gitlab")
+	if !present {
+		t.Error("expected tenant_published tuple present after publish")
+	}
+}
+
+func TestSetCatalogPublished_Publish_IdempotentWhenPresent(t *testing.T) {
+	fga := &fakeAuthorizerCatalog{tuples: []authz.Tuple{
+		{User: "tenant:acme", Relation: "tenant_published", Object: "component:connector-gitlab"},
+	}}
+	srv := newCatalogServer(fga)
+	resp, err := srv.SetCatalogPublished(catalogCtx(), &tenantv1.SetCatalogPublishedRequest{
+		ComponentRef: "connector-gitlab", Published: true,
+	})
+	if err != nil {
+		t.Fatalf("SetCatalogPublished: %v", err)
+	}
+	if resp.GetWritten() {
+		t.Error("expected Written=false when already published")
+	}
+}
+
+func TestSetCatalogPublished_Unpublish_DeletesWhenPresent(t *testing.T) {
+	fga := &fakeAuthorizerCatalog{tuples: []authz.Tuple{
+		{User: "tenant:acme", Relation: "tenant_published", Object: "component:connector-gitlab"},
+	}}
+	srv := newCatalogServer(fga)
+	resp, err := srv.SetCatalogPublished(catalogCtx(), &tenantv1.SetCatalogPublishedRequest{
+		ComponentRef: "connector-gitlab", Published: false,
+	})
+	if err != nil {
+		t.Fatalf("SetCatalogPublished: %v", err)
+	}
+	if !resp.GetDeleted() {
+		t.Error("expected Deleted=true when tuple was present")
+	}
+}
+
+func TestSetCatalogPublished_EmptyComponentRef(t *testing.T) {
+	srv := newCatalogServer(&fakeAuthorizerCatalog{})
+	_, err := srv.SetCatalogPublished(catalogCtx(), &tenantv1.SetCatalogPublishedRequest{Published: true})
+	if status.Code(err) != codes.InvalidArgument {
+		t.Fatalf("empty component_ref must be InvalidArgument, got %v", err)
+	}
+}
+
+func TestSetCatalogPublished_AddsComponentPrefix(t *testing.T) {
+	fga := &fakeAuthorizerCatalog{}
+	srv := newCatalogServer(fga)
+	if _, err := srv.SetCatalogPublished(catalogCtx(), &tenantv1.SetCatalogPublishedRequest{
+		ComponentRef: "connector-gitlab", Published: true,
+	}); err != nil {
+		t.Fatalf("SetCatalogPublished: %v", err)
+	}
+	// Writing with an already-prefixed ref must hit the same object.
+	present, _ := fga.Check(context.Background(), "tenant:acme", "tenant_published", "component:connector-gitlab")
+	if !present {
+		t.Error("component: prefix not applied to the FGA object")
+	}
+}

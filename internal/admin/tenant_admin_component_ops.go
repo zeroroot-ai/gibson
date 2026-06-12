@@ -573,3 +573,60 @@ func (s *TenantAdminServer) GrantComponentPermissions(ctx context.Context, req *
 		AgentInstallationId: req.GetAgentInstallationId(),
 	}, nil
 }
+
+// SetCatalogPublished writes or deletes the FGA tenant_published tuple for a
+// component owned by the caller's tenant — the bring-your-own (BYO) connector
+// path (gibson#683). Mirrors SetCatalogEnabled but on the tenant_published
+// relation: published = "this tenant owns/offers it" (its private registry),
+// distinct from tenant_enabled = "this tenant has it switched on".
+func (s *TenantAdminServer) SetCatalogPublished(ctx context.Context, req *tenantv1.SetCatalogPublishedRequest) (*tenantv1.SetCatalogPublishedResponse, error) {
+	if s.authorizer == nil {
+		return nil, status.Error(codes.Unavailable, "authorizer not configured")
+	}
+	tenant, ok := auth.TenantFromContext(ctx)
+	if !ok {
+		return nil, status.Error(codes.PermissionDenied, "no tenant in context")
+	}
+	if req.GetComponentRef() == "" {
+		return nil, status.Error(codes.InvalidArgument, "component_ref is required")
+	}
+
+	componentRef := req.GetComponentRef()
+	if !strings.Contains(componentRef, ":") {
+		componentRef = "component:" + componentRef
+	}
+
+	tenantRef := "tenant:" + tenant.String()
+
+	tuple := authz.Tuple{
+		User:     tenantRef,
+		Relation: "tenant_published",
+		Object:   componentRef,
+	}
+
+	if req.GetPublished() {
+		present, err := s.authorizer.Check(ctx, tenantRef, "tenant_published", componentRef)
+		if err != nil {
+			return nil, status.Errorf(codes.Internal, "fga Check tenant_published: %v", err)
+		}
+		if present {
+			return &tenantv1.SetCatalogPublishedResponse{Written: false}, nil
+		}
+		if err := s.authorizer.Write(ctx, []authz.Tuple{tuple}); err != nil {
+			return nil, status.Errorf(codes.Internal, "fga Write tenant_published: %v", err)
+		}
+		return &tenantv1.SetCatalogPublishedResponse{Written: true}, nil
+	}
+
+	present, err := s.authorizer.Check(ctx, tenantRef, "tenant_published", componentRef)
+	if err != nil {
+		return nil, status.Errorf(codes.Internal, "fga Check tenant_published: %v", err)
+	}
+	if !present {
+		return &tenantv1.SetCatalogPublishedResponse{Deleted: false}, nil
+	}
+	if err := s.authorizer.Delete(ctx, []authz.Tuple{tuple}); err != nil {
+		return nil, status.Errorf(codes.Internal, "fga Delete tenant_published: %v", err)
+	}
+	return &tenantv1.SetCatalogPublishedResponse{Deleted: true}, nil
+}
