@@ -289,3 +289,44 @@ func ensureTenantQuotasTable(ctx context.Context, db *sql.DB) error {
 	}
 	return nil
 }
+
+// SetPlatformEnabled writes or deletes the FGA platform_enabled tuple for a
+// component from system_tenant:_system — the shared-catalog publish path
+// (gibson#682). Only the platform operator may publish a curated connector to
+// the shared catalog; the catalog fan-out then seeds tenant_enabled per
+// tenant. published=false unpublishes. Idempotent in both directions.
+func (s *DaemonServer) SetPlatformEnabled(ctx context.Context, req *daemonoperatorv1.SetPlatformEnabledRequest) (*daemonoperatorv1.SetPlatformEnabledResponse, error) {
+	if s.authorizer == nil {
+		return nil, status.Error(codes.Unavailable, "authorizer not configured")
+	}
+	if req.GetComponentRef() == "" {
+		return nil, status.Error(codes.InvalidArgument, "component_ref required")
+	}
+	componentRef := req.GetComponentRef()
+	if !hasPrefix(componentRef, "component:") {
+		componentRef = "component:" + componentRef
+	}
+	const systemRef = "system_tenant:_system"
+	tuple := authz.Tuple{User: systemRef, Relation: "platform_enabled", Object: componentRef}
+
+	present, err := s.authorizer.Check(ctx, systemRef, "platform_enabled", componentRef)
+	if err != nil {
+		return nil, status.Errorf(codes.Internal, "fga Check platform_enabled: %v", err)
+	}
+	if req.GetPublished() {
+		if present {
+			return &daemonoperatorv1.SetPlatformEnabledResponse{Written: false}, nil
+		}
+		if err := s.authorizer.Write(ctx, []authz.Tuple{tuple}); err != nil {
+			return nil, status.Errorf(codes.Internal, "fga Write platform_enabled: %v", err)
+		}
+		return &daemonoperatorv1.SetPlatformEnabledResponse{Written: true}, nil
+	}
+	if !present {
+		return &daemonoperatorv1.SetPlatformEnabledResponse{Deleted: false}, nil
+	}
+	if err := s.authorizer.Delete(ctx, []authz.Tuple{tuple}); err != nil {
+		return nil, status.Errorf(codes.Internal, "fga Delete platform_enabled: %v", err)
+	}
+	return &daemonoperatorv1.SetPlatformEnabledResponse{Deleted: true}, nil
+}
