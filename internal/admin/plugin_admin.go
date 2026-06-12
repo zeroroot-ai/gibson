@@ -20,6 +20,7 @@ import (
 	"encoding/hex"
 	"errors"
 	"fmt"
+	"log/slog"
 	"time"
 
 	"google.golang.org/grpc/codes"
@@ -176,10 +177,20 @@ type PluginsAdminServer struct {
 	secretW   SecretWriter
 	authzr    authz.Authorizer
 	auditor   BootstrapTokenAuditor
-	launcher  ConnectorLauncher // optional; nil rejects connector registrations
+	launcher  ConnectorLauncher      // optional; nil rejects connector registrations
+	manifests ConnectorManifestStore // optional; persists connector manifests for on-enable launch
 	now       func() time.Time
 
 	bootstrapTTL time.Duration
+}
+
+// ConnectorManifestStore persists a connector's raw manifest YAML keyed by
+// (tenant, connector) so the on-enable sandbox reconciler (gibson#721) can
+// launch a per-tenant sandbox from it later. Optional: a daemon without it
+// still registers connectors, but on-enable orchestration cannot recover the
+// manifest. The production wiring is the Postgres connector_manifest store.
+type ConnectorManifestStore interface {
+	Put(ctx context.Context, tenant auth.TenantID, connector string, manifestYAML []byte) error
 }
 
 // PluginsAdminConfig groups the constructor's required dependencies.
@@ -196,6 +207,11 @@ type PluginsAdminConfig struct {
 	// ConnectorLauncher launches hosted MCP connector sandboxes. Optional:
 	// nil disables connector registration on this daemon.
 	ConnectorLauncher ConnectorLauncher
+
+	// ConnectorManifestStore persists a registered connector's manifest so the
+	// on-enable reconciler can launch a per-tenant sandbox from it later.
+	// Optional: nil skips persistence (on-enable orchestration disabled).
+	ConnectorManifestStore ConnectorManifestStore
 }
 
 // NewPluginsAdminServer constructs a PluginsAdminServer. All fields except
@@ -238,6 +254,7 @@ func NewPluginsAdminServer(cfg PluginsAdminConfig) (*PluginsAdminServer, error) 
 		authzr:       cfg.Authorizer,
 		auditor:      cfg.BootstrapAuditor,
 		launcher:     cfg.ConnectorLauncher,
+		manifests:    cfg.ConnectorManifestStore,
 		now:          now,
 		bootstrapTTL: ttl,
 	}, nil
@@ -475,6 +492,21 @@ func (s *PluginsAdminServer) RegisterPlugin(ctx context.Context, req *tenantv1.R
 		if launchErr != nil {
 			doRollback(launchErr)
 			return nil, status.Errorf(codes.Internal, "launch connector sandbox: %v", launchErr)
+		}
+	}
+
+	// --- Step 5c: persist the connector manifest (gibson#722) -----------
+	// Record the raw manifest keyed by (tenant, connector) so the on-enable
+	// sandbox reconciler can launch a per-tenant sandbox from it later
+	// (component_install keeps only a manifest_hash). Persisted for both
+	// hosted and remote connectors; inert until the tenant has it
+	// tenant_enabled, so a manifest left behind by a rolled-back registration
+	// is never launched. Best-effort: a persistence failure must not fail an
+	// otherwise-successful registration.
+	if manifest.IsConnector && s.manifests != nil {
+		if perr := s.manifests.Put(ctx, tenant, manifest.Name, req.GetManifestYaml()); perr != nil {
+			slog.WarnContext(ctx, "connector manifest persistence failed; on-enable launch unavailable for this connector",
+				"tenant", tenant.String(), "connector", manifest.Name, "err", perr)
 		}
 	}
 

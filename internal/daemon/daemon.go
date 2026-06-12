@@ -210,6 +210,13 @@ type daemonImpl struct {
 	// (gibson#648). Nil until buildGRPCServer wires it (needs the FGA authorizer).
 	capabilityGrantSvc *capabilitygrant.CapabilityGrantService
 
+	// connectorSandboxReconciler eagerly launches a per-tenant setec sandbox for
+	// every connector a tenant has enabled (gibson#721). Constructed in
+	// buildGRPCServer (needs the connector launcher + principal minter) and
+	// started by Start alongside the catalog fan-out. Nil when connector
+	// hosting is unavailable on this daemon.
+	connectorSandboxReconciler *reconciler.ConnectorSandboxReconciler
+
 	// credentialStore provides credential access with encryption
 	credentialStore *DaemonCredentialStore
 
@@ -1538,6 +1545,17 @@ func (d *daemonImpl) Start(ctx context.Context) error {
 			}
 		}()
 		d.logger.Info(ctx, "catalog fan-out reconciler started (60s interval)")
+	}
+
+	// Start the connector on-enable sandbox reconciler — eagerly launches a
+	// per-tenant setec sandbox for every connector a tenant has enabled, so an
+	// enabled shared/BYO connector is warm before the tenant's agents need it
+	// (gibson#721/#722). Built in buildGRPCServer; nil when hosted connector
+	// launch is unavailable on this daemon. Runs best-effort; failures are
+	// logged per-connector, not fatal.
+	if d.connectorSandboxReconciler != nil {
+		go d.connectorSandboxReconciler.Run(ctx)
+		d.logger.Info(ctx, "connector on-enable sandbox reconciler started (30s interval)")
 	}
 
 	// Block until context cancellation (signal.NotifyContext in main() handles SIGTERM/SIGINT).
