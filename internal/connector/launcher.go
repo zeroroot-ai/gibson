@@ -16,6 +16,7 @@ package connector
 import (
 	"context"
 	"encoding/base64"
+	"errors"
 	"fmt"
 	"log/slog"
 	"time"
@@ -38,9 +39,10 @@ const (
 
 // Defaults applied when Config leaves the corresponding field zero.
 const (
-	defaultVCPU    = 1
-	defaultMemory  = "512Mi"
-	defaultTimeout = 8 * time.Hour
+	defaultVCPU         = 1
+	defaultMemory       = "512Mi"
+	defaultTimeout      = 8 * time.Hour
+	defaultLivenessWait = 2 * time.Second
 )
 
 // Config is the constructor input for the Launcher.
@@ -71,6 +73,11 @@ type Config struct {
 	// Timeout is the sandbox lifecycle ceiling. Connectors are persistent;
 	// this is a safety net, not a call budget. Default 8h.
 	Timeout time.Duration
+
+	// LivenessProbeTimeout bounds the IsAlive Wait-probe: a sandbox that has
+	// not terminated within this window is reported alive. Keep it short —
+	// it is a per-tick liveness check, not a call budget. Default 2s.
+	LivenessProbeTimeout time.Duration
 
 	// Admit, when set, is consulted before each launch to enforce the
 	// plan-tier connector-instance budget (ADR-0047 facet 3). It returns a
@@ -111,6 +118,9 @@ func New(cfg Config) (*Launcher, error) {
 	}
 	if cfg.Timeout <= 0 {
 		cfg.Timeout = defaultTimeout
+	}
+	if cfg.LivenessProbeTimeout <= 0 {
+		cfg.LivenessProbeTimeout = defaultLivenessWait
 	}
 	if cfg.Logger == nil {
 		cfg.Logger = slog.Default()
@@ -197,4 +207,34 @@ func (l *Launcher) Terminate(ctx context.Context, sandboxID string) error {
 	}
 	l.cfg.Logger.Info("connector: hosted sandbox terminated", "sandbox_id", sandboxID)
 	return nil
+}
+
+// IsAlive reports whether a hosted connector sandbox is still running, used by
+// the self-heal reconciler (gibson#724). setec exposes no status RPC, so this
+// probes liveness with a short-deadline Wait: Wait blocks until the sandbox
+// terminates, so a probe that hits its deadline means the sandbox is still
+// running, a prompt return means it has exited, and NotFound means it is gone.
+// A genuine transport error (setec unreachable) is surfaced so the caller can
+// skip rather than churn a re-launch on an unknown state.
+func (l *Launcher) IsAlive(ctx context.Context, sandboxID string) (bool, error) {
+	if sandboxID == "" {
+		return false, nil
+	}
+	probeCtx, cancel := context.WithTimeout(ctx, l.cfg.LivenessProbeTimeout)
+	defer cancel()
+
+	_, err := l.cfg.Client.Wait(probeCtx, sandboxID)
+	switch {
+	case err == nil:
+		// Wait returned a termination result — the sandbox has exited.
+		return false, nil
+	case errors.Is(err, context.DeadlineExceeded) || status.Code(err) == codes.DeadlineExceeded:
+		// Still running at the probe deadline.
+		return true, nil
+	case status.Code(err) == codes.NotFound:
+		// Gone.
+		return false, nil
+	default:
+		return false, fmt.Errorf("connector: liveness probe for %q: %w", sandboxID, err)
+	}
 }
