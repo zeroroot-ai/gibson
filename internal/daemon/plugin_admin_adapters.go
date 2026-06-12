@@ -38,7 +38,7 @@ import (
 	"github.com/zeroroot-ai/gibson/internal/secrets"
 	sdksecrets "github.com/zeroroot-ai/platform-clients/secrets"
 	"github.com/zeroroot-ai/sdk/auth"
-	sdkconnector "github.com/zeroroot-ai/sdk/mcpbridge/connector"
+	"github.com/zeroroot-ai/sdk/plugin/manifest"
 )
 
 // ---------------------------------------------------------------------------
@@ -314,6 +314,17 @@ type pluginManifestYAML struct {
 		Policy struct {
 			SetecRequired bool `yaml:"setec_required"`
 		} `yaml:"policy"`
+		// MCPBridge is present when runtime is "mcp-bridge" (a bridged plugin
+		// fronting a vendor MCP server). Its presence is what marks the
+		// component as a connector; the block's contents are validated by the
+		// SDK manifest schema at author time and consumed by the runner. Its
+		// secrets carry the vendor credential names (resolved via the broker).
+		MCPBridge *struct {
+			Transport string `yaml:"transport"`
+			Secrets   []struct {
+				Name string `yaml:"name"`
+			} `yaml:"secrets"`
+		} `yaml:"mcp_bridge"`
 	} `yaml:"spec"`
 }
 
@@ -322,15 +333,6 @@ type pluginManifestYAML struct {
 // (connector.gibson.zeroroot.ai/v1) are accepted alongside plain plugin
 // manifests and validated by the SDK connector schema (gibson#684).
 func (v *pluginManifestValidator) Validate(manifestYAML []byte) (admin.ValidatedManifest, []admin.ManifestValidationError) {
-	// apiVersion sniff: route connector manifests to the connector validator.
-	var head struct {
-		APIVersion string `yaml:"apiVersion"`
-	}
-	if err := yaml.Unmarshal(manifestYAML, &head); err == nil &&
-		head.APIVersion == sdkconnector.APIVersionV1 {
-		return validateConnectorManifest(manifestYAML)
-	}
-
 	var raw pluginManifestYAML
 	if err := yaml.Unmarshal(manifestYAML, &raw); err != nil {
 		return admin.ValidatedManifest{}, []admin.ManifestValidationError{{
@@ -357,25 +359,35 @@ func (v *pluginManifestValidator) Validate(manifestYAML []byte) (admin.Validated
 			Message: "metadata.version is required",
 		})
 	}
+	isMCPBridge := raw.Spec.Runtime == manifest.RuntimeMCPBridge
 	if raw.Spec.Runtime == "" {
 		errs = append(errs, admin.ManifestValidationError{
 			Field:   "spec.runtime",
 			Code:    "required",
-			Message: "spec.runtime is required (process | pod | setec)",
+			Message: "spec.runtime is required (process | pod | setec | mcp-bridge)",
 		})
 	} else {
 		switch raw.Spec.Runtime {
-		case "process", "pod", "setec":
+		case "process", "pod", "setec", manifest.RuntimeMCPBridge:
 		default:
 			errs = append(errs, admin.ManifestValidationError{
 				Field:   "spec.runtime",
 				Code:    "invalid_value",
-				Message: fmt.Sprintf("spec.runtime must be 'process', 'pod', or 'setec'; got %q", raw.Spec.Runtime),
+				Message: fmt.Sprintf("spec.runtime must be 'process', 'pod', 'setec', or %q; got %q", manifest.RuntimeMCPBridge, raw.Spec.Runtime),
 			})
 		}
 	}
+	if isMCPBridge && raw.Spec.MCPBridge == nil {
+		errs = append(errs, admin.ManifestValidationError{
+			Field:   "spec.mcp_bridge",
+			Code:    "required",
+			Message: "spec.mcp_bridge is required when spec.runtime is 'mcp-bridge'",
+		})
+	}
 
-	if len(raw.Spec.Methods) == 0 {
+	// An mcp-bridge plugin discovers its methods from the vendor at startup, so
+	// static methods are not required (and typically absent).
+	if len(raw.Spec.Methods) == 0 && !isMCPBridge {
 		errs = append(errs, admin.ManifestValidationError{
 			Field:   "spec.methods",
 			Code:    "required",
@@ -404,6 +416,21 @@ func (v *pluginManifestValidator) Validate(manifestYAML []byte) (admin.Validated
 	for _, s := range raw.Spec.Secrets {
 		declaredSecrets = append(declaredSecrets, s.Name)
 	}
+	// An mcp-bridge plugin declares its vendor credentials under
+	// spec.mcp_bridge.secrets (name→env); surface them as declared secrets.
+	if raw.Spec.MCPBridge != nil {
+		for _, s := range raw.Spec.MCPBridge.Secrets {
+			declaredSecrets = append(declaredSecrets, s.Name)
+		}
+	}
+
+	// An mcp-bridge plugin's methods are discovered from the vendor at startup
+	// (tools/list), so DeclaredMethods is empty; IsConnector marks it for the
+	// hosted-launch path. This replaces the old connector.yaml apiVersion sniff
+	// — a connector is one plugin manifest with runtime: mcp-bridge.
+	if isMCPBridge {
+		methods = nil
+	}
 
 	hash := sha256.Sum256(manifestYAML)
 	return admin.ValidatedManifest{
@@ -412,52 +439,9 @@ func (v *pluginManifestValidator) Validate(manifestYAML []byte) (admin.Validated
 		DeclaredMethods: methods,
 		DeclaredSecrets: declaredSecrets,
 		RuntimeMode:     raw.Spec.Runtime,
-		SetecRequired:   raw.Spec.Policy.SetecRequired,
+		SetecRequired:   raw.Spec.Policy.SetecRequired || isMCPBridge,
 		ManifestHash:    hex.EncodeToString(hash[:]),
+		IsConnector:     isMCPBridge,
 	}, nil
 }
 
-// validateConnectorManifest validates an MCP connector manifest via the SDK
-// connector schema and maps it onto the registration handler's
-// ValidatedManifest shape. Methods are discovered at bridge startup
-// (tools/list), so DeclaredMethods is empty; the runtime is setec because the
-// hosted path runs the bridge in a setec sandbox (gibson#684, ADR-0048).
-func validateConnectorManifest(manifestYAML []byte) (admin.ValidatedManifest, []admin.ManifestValidationError) {
-	m, err := sdkconnector.LoadBytes(manifestYAML)
-	if err != nil {
-		var ve *sdkconnector.ValidationError
-		if errors.As(err, &ve) {
-			errs := make([]admin.ManifestValidationError, 0, len(ve.Violations))
-			for _, violation := range ve.Violations {
-				errs = append(errs, admin.ManifestValidationError{
-					Field:   "manifest",
-					Code:    "invalid_value",
-					Message: violation,
-				})
-			}
-			return admin.ValidatedManifest{}, errs
-		}
-		return admin.ValidatedManifest{}, []admin.ManifestValidationError{{
-			Field:   "manifest",
-			Code:    "parse_error",
-			Message: fmt.Sprintf("failed to parse connector manifest: %v", err),
-		}}
-	}
-
-	declaredSecrets := make([]string, 0, len(m.Spec.Secrets))
-	for _, sec := range m.Spec.Secrets {
-		declaredSecrets = append(declaredSecrets, sec.Name)
-	}
-
-	hash := sha256.Sum256(manifestYAML)
-	return admin.ValidatedManifest{
-		Name:            m.Metadata.Name,
-		Version:         m.Metadata.Version,
-		DeclaredMethods: nil, // discovered via tools/list at bridge startup
-		DeclaredSecrets: declaredSecrets,
-		RuntimeMode:     "setec",
-		SetecRequired:   true,
-		ManifestHash:    hex.EncodeToString(hash[:]),
-		IsConnector:     true,
-	}, nil
-}

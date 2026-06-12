@@ -24,7 +24,7 @@ import (
 	"google.golang.org/grpc/codes"
 	"google.golang.org/grpc/status"
 
-	sdkconnector "github.com/zeroroot-ai/sdk/mcpbridge/connector"
+	"github.com/zeroroot-ai/sdk/plugin/manifest"
 
 	"github.com/zeroroot-ai/gibson/internal/harness/sandboxed"
 	"github.com/zeroroot-ai/sdk/auth"
@@ -128,20 +128,24 @@ func New(cfg Config) (*Launcher, error) {
 	return &Launcher{cfg: cfg}, nil
 }
 
-// Launch starts one hosted connector sandbox. connectorYAML is the validated
-// connector manifest; bootstrapToken is the single-use capability-grant token
-// minted at registration (it reaches the process environment of the runner
-// and is never logged). Returns the setec sandbox id.
-func (l *Launcher) Launch(ctx context.Context, tenant auth.TenantID, connectorYAML []byte, bootstrapToken string) (string, error) {
-	m, err := sdkconnector.LoadBytes(connectorYAML)
+// Launch starts one hosted connector sandbox. componentYAML is the validated
+// plugin manifest of a runtime: mcp-bridge component; bootstrapToken is the
+// single-use capability-grant token minted at registration (it reaches the
+// process environment of the runner and is never logged). Returns the setec
+// sandbox id.
+func (l *Launcher) Launch(ctx context.Context, tenant auth.TenantID, componentYAML []byte, bootstrapToken string) (string, error) {
+	m, err := manifest.LoadBytes(componentYAML)
 	if err != nil {
 		return "", fmt.Errorf("connector: parse manifest: %w", err)
 	}
-	if m.Spec.Transport != sdkconnector.TransportStdio {
+	if m.Spec.Runtime != manifest.RuntimeMCPBridge || m.Spec.MCPBridge == nil {
+		return "", fmt.Errorf("connector: hosted launch requires a runtime: %q plugin manifest", manifest.RuntimeMCPBridge)
+	}
+	if m.Spec.MCPBridge.Transport != manifest.TransportStdio {
 		// Option 1 hosts package-distributed (stdio) vendors only; http
 		// transport means the vendor is already running elsewhere and needs
 		// no sandbox.
-		return "", fmt.Errorf("connector: hosted launch supports stdio transport only, got %q", m.Spec.Transport)
+		return "", fmt.Errorf("connector: hosted launch supports stdio transport only, got %q", m.Spec.MCPBridge.Transport)
 	}
 	if bootstrapToken == "" {
 		return "", fmt.Errorf("connector: bootstrap token is required for hosted launch")
@@ -168,7 +172,7 @@ func (l *Launcher) Launch(ctx context.Context, tenant auth.TenantID, connectorYA
 		Image: l.cfg.RunnerImage,
 		// The image ENTRYPOINT is the runner binary; no command override.
 		Env: map[string]string{
-			envManifestB64:    base64.StdEncoding.EncodeToString(connectorYAML),
+			envManifestB64:    base64.StdEncoding.EncodeToString(componentYAML),
 			envPlatformURL:    l.cfg.PlatformURL,
 			envBootstrapToken: bootstrapToken,
 		},

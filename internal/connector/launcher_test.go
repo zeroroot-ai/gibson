@@ -56,33 +56,40 @@ func (f *fakeSandboxClient) Kill(_ context.Context, id string) error {
 	return f.killErr
 }
 
-const connectorYAML = `apiVersion: connector.gibson.zeroroot.ai/v1
-kind: Connector
+const connectorYAML = `apiVersion: plugin.gibson.zeroroot.ai/v1
+kind: Plugin
 metadata:
   name: github
   version: 0.1.0
 spec:
-  transport: stdio
-  vendor:
-    command: npx
-    args: ["-y", "@modelcontextprotocol/server-github"]
-  secrets:
-    - name: cred:github_token
-      env: GITHUB_PERSONAL_ACCESS_TOKEN
+  workload_class: plugin
+  runtime: mcp-bridge
+  mcp_bridge:
+    transport: stdio
+    vendor:
+      command: npx
+      args: ["-y", "@modelcontextprotocol/server-github"]
+    secrets:
+      - name: cred:github_token
+        env: GITHUB_PERSONAL_ACCESS_TOKEN
   egress:
     - host: api.github.com
       protocol: https
       port: 443
+      purpose: GitHub REST API
 `
 
-const httpConnectorYAML = `apiVersion: connector.gibson.zeroroot.ai/v1
-kind: Connector
+const httpConnectorYAML = `apiVersion: plugin.gibson.zeroroot.ai/v1
+kind: Plugin
 metadata:
   name: gitlab
   version: 0.1.0
 spec:
-  transport: http
-  endpoint: https://mcp.example.com/mcp
+  workload_class: plugin
+  runtime: mcp-bridge
+  mcp_bridge:
+    transport: http
+    endpoint: https://mcp.example.com/mcp
 `
 
 var platformEgress = []sandboxed.EgressRule{
