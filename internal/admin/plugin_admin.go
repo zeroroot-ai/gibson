@@ -362,11 +362,22 @@ func (s *PluginsAdminServer) RegisterPlugin(ctx context.Context, req *tenantv1.R
 		return &tenantv1.RegisterPluginResponse{ValidationErrors: out}, status.Error(codes.InvalidArgument, "binding cross-check failed")
 	}
 
-	if manifest.IsConnector && s.launcher == nil {
+	// remote=true asks for the customer-network deployment path (ADR-0048):
+	// the daemon registers the connector but does NOT launch a hosted setec
+	// sandbox; the bootstrap token is returned so the customer's own bridge
+	// can redeem it. Only meaningful for connector manifests — a plain plugin
+	// is always customer-run and already receives the token.
+	if req.GetRemote() && !manifest.IsConnector {
+		return nil, status.Error(codes.InvalidArgument,
+			"remote is only valid for connector manifests; plain plugins are "+
+				"always customer-run and already receive the bootstrap token")
+	}
+	// Hosted connectors need the launcher; remote connectors do not.
+	if manifest.IsConnector && !req.GetRemote() && s.launcher == nil {
 		return nil, status.Error(codes.FailedPrecondition,
 			"hosted connector launch is not available on this daemon "+
-				"(sandbox.connector is not configured); run the bridge in your "+
-				"own network instead")
+				"(sandbox.connector is not configured); register with remote=true "+
+				"and run the bridge in your own network instead")
 	}
 
 	if req.GetDryRun() {
@@ -450,12 +461,15 @@ func (s *PluginsAdminServer) RegisterPlugin(ctx context.Context, req *tenantv1.R
 	}
 
 	// --- Step 5b: hosted connector launch (gibson#684) -------------------
-	// For connector manifests the daemon consumes the bootstrap token itself:
-	// it is injected into the MCP-bridge sandbox, which redeems it to
+	// For HOSTED connector manifests the daemon consumes the bootstrap token
+	// itself: it is injected into the MCP-bridge sandbox, which redeems it to
 	// register. Launch failure rolls back the whole registration so a tenant
-	// never holds a principal for a connector that cannot run.
+	// never holds a principal for a connector that cannot run. REMOTE
+	// connectors skip this: the customer runs the bridge and redeems the
+	// token returned in the response.
+	hostedConnector := manifest.IsConnector && !req.GetRemote()
 	var sandboxID string
-	if manifest.IsConnector {
+	if hostedConnector {
 		var launchErr error
 		sandboxID, launchErr = s.launcher.Launch(ctx, tenant, req.GetManifestYaml(), bootstrapToken)
 		if launchErr != nil {
@@ -482,7 +496,7 @@ func (s *PluginsAdminServer) RegisterPlugin(ctx context.Context, req *tenantv1.R
 		BootstrapToken:              bootstrapToken,
 		BootstrapTokenExpiresAtUnix: expiresAt.Unix(),
 	}
-	if manifest.IsConnector {
+	if hostedConnector {
 		// The single-use token went to the sandbox; returning it too would
 		// invite a redemption race with the bridge. The sandbox id is logged
 		// server-side, not returned (no response field).
@@ -490,6 +504,8 @@ func (s *PluginsAdminServer) RegisterPlugin(ctx context.Context, req *tenantv1.R
 		resp.BootstrapTokenExpiresAtUnix = 0
 		_ = sandboxID
 	}
+	// Remote connectors (and plain plugins) keep the bootstrap token in the
+	// response so the customer-run bridge can redeem it to enroll.
 	return resp, nil
 }
 
