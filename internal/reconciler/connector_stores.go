@@ -83,7 +83,7 @@ func NewPostgresConnectorSandboxInventory(db *sql.DB) *PostgresConnectorSandboxI
 
 // List returns every recorded (tenant, connector) -> sandbox mapping.
 func (s *PostgresConnectorSandboxInventory) List(ctx context.Context) ([]InventoryEntry, error) {
-	const q = `SELECT tenant_id, connector_name, sandbox_id FROM connector_sandbox`
+	const q = `SELECT tenant_id, connector_name, sandbox_id, principal_id FROM connector_sandbox`
 	rows, err := s.db.QueryContext(ctx, q)
 	if err != nil {
 		return nil, fmt.Errorf("connector sandbox inventory: list: %w", err)
@@ -92,8 +92,8 @@ func (s *PostgresConnectorSandboxInventory) List(ctx context.Context) ([]Invento
 
 	var out []InventoryEntry
 	for rows.Next() {
-		var tenantID, connector, sandboxID string
-		if err := rows.Scan(&tenantID, &connector, &sandboxID); err != nil {
+		var tenantID, connector, sandboxID, principalID string
+		if err := rows.Scan(&tenantID, &connector, &sandboxID, &principalID); err != nil {
 			return nil, fmt.Errorf("connector sandbox inventory: scan: %w", err)
 		}
 		tid, err := auth.NewTenantID(tenantID)
@@ -102,7 +102,7 @@ func (s *PostgresConnectorSandboxInventory) List(ctx context.Context) ([]Invento
 			// drop the whole inventory and re-launch everything — skip the row.
 			continue
 		}
-		out = append(out, InventoryEntry{Tenant: tid, Connector: connector, SandboxID: sandboxID})
+		out = append(out, InventoryEntry{Tenant: tid, Connector: connector, SandboxID: sandboxID, PrincipalID: principalID})
 	}
 	if err := rows.Err(); err != nil {
 		return nil, fmt.Errorf("connector sandbox inventory: rows: %w", err)
@@ -117,12 +117,22 @@ func (s *PostgresConnectorSandboxInventory) Put(ctx context.Context, e Inventory
 		return fmt.Errorf("connector sandbox inventory: connector and sandbox_id must not be empty")
 	}
 	const q = `
-		INSERT INTO connector_sandbox (tenant_id, connector_name, sandbox_id, launched_at)
-		VALUES ($1, $2, $3, now())
+		INSERT INTO connector_sandbox (tenant_id, connector_name, sandbox_id, principal_id, launched_at)
+		VALUES ($1, $2, $3, $4, now())
 		ON CONFLICT (tenant_id, connector_name)
-		DO UPDATE SET sandbox_id = EXCLUDED.sandbox_id, launched_at = now()`
-	if _, err := s.db.ExecContext(ctx, q, e.Tenant.String(), e.Connector, e.SandboxID); err != nil {
+		DO UPDATE SET sandbox_id = EXCLUDED.sandbox_id, principal_id = EXCLUDED.principal_id, launched_at = now()`
+	if _, err := s.db.ExecContext(ctx, q, e.Tenant.String(), e.Connector, e.SandboxID, e.PrincipalID); err != nil {
 		return fmt.Errorf("connector sandbox inventory: upsert (%s, %s): %w", e.Tenant.String(), e.Connector, err)
+	}
+	return nil
+}
+
+// Delete removes the inventory row for a torn-down (tenant, connector).
+// Deleting an already-absent row is a no-op (idempotent teardown).
+func (s *PostgresConnectorSandboxInventory) Delete(ctx context.Context, tenant auth.TenantID, connector string) error {
+	const q = `DELETE FROM connector_sandbox WHERE tenant_id = $1 AND connector_name = $2`
+	if _, err := s.db.ExecContext(ctx, q, tenant.String(), connector); err != nil {
+		return fmt.Errorf("connector sandbox inventory: delete (%s, %s): %w", tenant.String(), connector, err)
 	}
 	return nil
 }

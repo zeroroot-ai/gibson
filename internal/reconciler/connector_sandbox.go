@@ -16,11 +16,15 @@ type ConnectorSandbox struct {
 }
 
 // InventoryEntry records that a (tenant, connector) currently has a running
-// sandbox with the given setec sandbox id.
+// sandbox with the given setec sandbox id, launched under the given
+// capability-grant principal. PrincipalID is revoked on teardown (gibson#723)
+// so a disabled connector cannot re-enroll; it is empty for rows that predate
+// principal tracking (those can be terminated but not revoked).
 type InventoryEntry struct {
-	Tenant    auth.TenantID
-	Connector string
-	SandboxID string
+	Tenant      auth.TenantID
+	Connector   string
+	SandboxID   string
+	PrincipalID string
 }
 
 // CatalogSource enumerates the connectors each tenant has enabled — the
@@ -47,19 +51,22 @@ type IdentityMinter interface {
 	RevokeConnectorPrincipal(ctx context.Context, principalID string) error
 }
 
-// Launcher launches one hosted connector sandbox from a manifest + bootstrap
-// token and returns the setec sandbox id. Same primitive the register path
-// uses (internal/connector.Launcher).
+// Launcher launches and terminates hosted connector sandboxes. Launch is the
+// same primitive the register path uses (internal/connector.Launcher);
+// Terminate tears one down on disable and is idempotent — terminating an
+// already-gone sandbox is a safe no-op (gibson#723).
 type Launcher interface {
 	Launch(ctx context.Context, tenant auth.TenantID, manifestYAML []byte, bootstrapToken string) (sandboxID string, err error)
+	Terminate(ctx context.Context, sandboxID string) error
 }
 
 // Inventory is the durable record of which (tenant, connector) has which
-// running sandbox. List drives idempotency; Put records a launch. (Delete
-// arrives with the teardown slice.)
+// running sandbox. List drives idempotency; Put records a launch; Delete
+// removes a torn-down sandbox's row (gibson#723).
 type Inventory interface {
 	List(ctx context.Context) ([]InventoryEntry, error)
 	Put(ctx context.Context, entry InventoryEntry) error
+	Delete(ctx context.Context, tenant auth.TenantID, connector string) error
 }
 
 // ConnectorSandboxConfig wires the reconciler to its dependencies.
@@ -125,12 +132,13 @@ func key(tenant auth.TenantID, connector string) string {
 // and record it. Errors on one connector are logged and skipped so one bad
 // connector never blocks the rest.
 func (r *ConnectorSandboxReconciler) reconcile(ctx context.Context) {
+	// DesiredConnectors returns an error (never a silently-partial list) when
+	// it cannot fully enumerate the catalog, so an FGA hiccup is never mistaken
+	// for "nothing is desired" — which would orphan-terminate healthy
+	// sandboxes below. On error we mutate nothing this tick and retry next.
 	desired, err := r.cfg.Catalog.DesiredConnectors(ctx)
 	if err != nil {
 		r.cfg.Logger.Warn("connector-sandbox: list desired connectors failed", "err", err)
-		return
-	}
-	if len(desired) == 0 {
 		return
 	}
 
@@ -139,9 +147,46 @@ func (r *ConnectorSandboxReconciler) reconcile(ctx context.Context) {
 		r.cfg.Logger.Warn("connector-sandbox: list inventory failed", "err", err)
 		return
 	}
+
+	desiredSet := make(map[string]struct{}, len(desired))
+	for _, d := range desired {
+		desiredSet[key(d.Tenant, d.Connector)] = struct{}{}
+	}
 	runningSet := make(map[string]struct{}, len(running))
 	for _, e := range running {
 		runningSet[key(e.Tenant, e.Connector)] = struct{}{}
+	}
+
+	// --- terminate-orphaned: a sandbox whose (tenant, connector) is no longer
+	// desired (disabled, or unpublished and only held via fan-out) is torn
+	// down, its principal revoked, and its inventory row deleted. Per-entry
+	// failures are isolated. (gibson#723)
+	for _, e := range running {
+		if _, ok := desiredSet[key(e.Tenant, e.Connector)]; ok {
+			continue // still desired — keep it
+		}
+		if err := r.cfg.Launcher.Terminate(ctx, e.SandboxID); err != nil {
+			// Leave the inventory row so a later tick retries the teardown;
+			// do not revoke/delete a sandbox we failed to stop.
+			r.cfg.Logger.Warn("connector-sandbox: terminate failed, will retry",
+				"tenant", e.Tenant.String(), "connector", e.Connector, "sandbox", e.SandboxID, "err", err)
+			continue
+		}
+		if e.PrincipalID != "" {
+			if err := r.cfg.Identity.RevokeConnectorPrincipal(ctx, e.PrincipalID); err != nil {
+				r.cfg.Logger.Warn("connector-sandbox: revoke principal after terminate failed",
+					"tenant", e.Tenant.String(), "connector", e.Connector, "principal", e.PrincipalID, "err", err)
+				// Still delete the inventory row — the sandbox is gone; a
+				// lingering principal is a smaller leak than a re-launch loop.
+			}
+		}
+		if err := r.cfg.Inventory.Delete(ctx, e.Tenant, e.Connector); err != nil {
+			r.cfg.Logger.Warn("connector-sandbox: delete inventory row after terminate failed",
+				"tenant", e.Tenant.String(), "connector", e.Connector, "err", err)
+			continue
+		}
+		r.cfg.Logger.Info("connector-sandbox: terminated (no longer enabled)",
+			"tenant", e.Tenant.String(), "connector", e.Connector, "sandbox", e.SandboxID)
 	}
 
 	for _, d := range desired {
@@ -182,9 +227,10 @@ func (r *ConnectorSandboxReconciler) reconcile(ctx context.Context) {
 		}
 
 		if err := r.cfg.Inventory.Put(ctx, InventoryEntry{
-			Tenant:    d.Tenant,
-			Connector: d.Connector,
-			SandboxID: sandboxID,
+			Tenant:      d.Tenant,
+			Connector:   d.Connector,
+			SandboxID:   sandboxID,
+			PrincipalID: principalID,
 		}); err != nil {
 			r.cfg.Logger.Warn("connector-sandbox: record inventory failed",
 				"tenant", d.Tenant.String(), "connector", d.Connector, "sandbox", sandboxID, "err", err)

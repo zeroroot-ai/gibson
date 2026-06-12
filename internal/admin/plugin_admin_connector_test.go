@@ -21,9 +21,10 @@ import (
 
 // fakeConnectorLauncher records Launch calls.
 type fakeConnectorLauncher struct {
-	mu        sync.Mutex
-	launched  []fakeLaunch
-	launchErr error
+	mu         sync.Mutex
+	launched   []fakeLaunch
+	launchErr  error
+	terminated []string
 }
 
 type fakeLaunch struct {
@@ -44,6 +45,13 @@ func (f *fakeConnectorLauncher) Launch(_ context.Context, tenant auth.TenantID, 
 		return "", f.launchErr
 	}
 	return "ns/sbx/uid", nil
+}
+
+func (f *fakeConnectorLauncher) Terminate(_ context.Context, sandboxID string) error {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	f.terminated = append(f.terminated, sandboxID)
+	return nil
 }
 
 // newConnectorTestServer builds a PluginsAdminServer with a connector-shaped

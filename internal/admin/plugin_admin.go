@@ -165,6 +165,10 @@ type ConnectorLauncher interface {
 	// manifest. bootstrapToken is the single-use capability-grant token the
 	// bridge redeems to register; it must never be logged.
 	Launch(ctx context.Context, tenant auth.TenantID, connectorYAML []byte, bootstrapToken string) (sandboxID string, err error)
+
+	// Terminate stops a hosted connector sandbox by id, used by the on-disable
+	// reconciler (gibson#723). Idempotent: an already-gone sandbox is a no-op.
+	Terminate(ctx context.Context, sandboxID string) error
 }
 
 // PluginsAdminServer implements tenantv1.PluginAdminServiceServer (ADR-0039).

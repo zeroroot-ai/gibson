@@ -20,6 +20,9 @@ import (
 	"log/slog"
 	"time"
 
+	"google.golang.org/grpc/codes"
+	"google.golang.org/grpc/status"
+
 	sdkconnector "github.com/zeroroot-ai/sdk/mcpbridge/connector"
 
 	"github.com/zeroroot-ai/gibson/internal/harness/sandboxed"
@@ -176,4 +179,22 @@ func (l *Launcher) Launch(ctx context.Context, tenant auth.TenantID, connectorYA
 		"egress_rules", len(egress),
 	)
 	return resp.SandboxID, nil
+}
+
+// Terminate stops a hosted connector sandbox by id, used on disable
+// (gibson#723). It is idempotent: an empty id or an already-gone sandbox
+// (setec reports NotFound) is a safe no-op, so a teardown that races sandbox
+// expiry does not error.
+func (l *Launcher) Terminate(ctx context.Context, sandboxID string) error {
+	if sandboxID == "" {
+		return nil
+	}
+	if err := l.cfg.Client.Kill(ctx, sandboxID); err != nil {
+		if status.Code(err) == codes.NotFound {
+			return nil
+		}
+		return fmt.Errorf("connector: terminate sandbox %q: %w", sandboxID, err)
+	}
+	l.cfg.Logger.Info("connector: hosted sandbox terminated", "sandbox_id", sandboxID)
+	return nil
 }
