@@ -17,10 +17,12 @@ import (
 	"github.com/zeroroot-ai/sdk/auth"
 )
 
-// fakeSandboxClient records Launch calls.
+// fakeSandboxClient records Launch and Kill calls.
 type fakeSandboxClient struct {
 	launched  []sandboxed.LaunchRequest
 	launchErr error
+	killed    []string
+	killErr   error
 }
 
 func (f *fakeSandboxClient) Launch(_ context.Context, req sandboxed.LaunchRequest) (sandboxed.LaunchResponse, error) {
@@ -39,7 +41,10 @@ func (f *fakeSandboxClient) Wait(context.Context, string) (sandboxed.WaitRespons
 	return sandboxed.WaitResponse{}, fmt.Errorf("not implemented")
 }
 
-func (f *fakeSandboxClient) Kill(context.Context, string) error { return nil }
+func (f *fakeSandboxClient) Kill(_ context.Context, id string) error {
+	f.killed = append(f.killed, id)
+	return f.killErr
+}
 
 const connectorYAML = `apiVersion: connector.gibson.zeroroot.ai/v1
 kind: Connector
@@ -252,4 +257,38 @@ func TestLaunch_DefaultsOverridable(t *testing.T) {
 	assert.Equal(t, int32(2), req.VCPU)
 	assert.Equal(t, "1Gi", req.Memory)
 	assert.Equal(t, time.Hour, req.Timeout)
+}
+
+func TestTerminate_CallsKillWithSandboxID(t *testing.T) {
+	client := &fakeSandboxClient{}
+	l := newTestLauncher(t, client)
+
+	require.NoError(t, l.Terminate(context.Background(), "ns/sbx-7/uid-7"))
+	require.Equal(t, []string{"ns/sbx-7/uid-7"}, client.killed)
+}
+
+func TestTerminate_EmptyID_NoOp(t *testing.T) {
+	client := &fakeSandboxClient{}
+	l := newTestLauncher(t, client)
+
+	require.NoError(t, l.Terminate(context.Background(), ""))
+	assert.Empty(t, client.killed, "empty sandbox id must not call Kill")
+}
+
+func TestTerminate_NotFound_IsIdempotentNoError(t *testing.T) {
+	client := &fakeSandboxClient{killErr: status.Error(codes.NotFound, "sandbox gone")}
+	l := newTestLauncher(t, client)
+
+	// An already-gone sandbox is a safe no-op (teardown racing expiry).
+	require.NoError(t, l.Terminate(context.Background(), "ns/sbx-gone/uid"))
+	require.Equal(t, []string{"ns/sbx-gone/uid"}, client.killed)
+}
+
+func TestTerminate_SurfacesNonNotFoundError(t *testing.T) {
+	client := &fakeSandboxClient{killErr: status.Error(codes.Unavailable, "setec down")}
+	l := newTestLauncher(t, client)
+
+	err := l.Terminate(context.Background(), "ns/sbx-1/uid")
+	require.Error(t, err)
+	assert.Contains(t, err.Error(), "terminate sandbox")
 }

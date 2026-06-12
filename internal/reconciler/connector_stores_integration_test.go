@@ -53,7 +53,7 @@ func setupConnectorPostgres(t *testing.T) *sql.DB {
 	}, 30*time.Second, 200*time.Millisecond, "Postgres did not become ready")
 
 	// Migrations 012 + 013 (kept in sync with
-	// pkg/platform/migrations/postgres/platform/012_*, 013_*).
+	// pkg/platform/migrations/postgres/platform/012_*, 013_*, 014_*).
 	for _, ddl := range []string{
 		`CREATE TABLE connector_manifest (
 			tenant_id      TEXT NOT NULL,
@@ -65,6 +65,7 @@ func setupConnectorPostgres(t *testing.T) *sql.DB {
 			tenant_id      TEXT NOT NULL,
 			connector_name TEXT NOT NULL,
 			sandbox_id     TEXT NOT NULL,
+			principal_id   TEXT NOT NULL DEFAULT '',
 			launched_at    TIMESTAMPTZ NOT NULL DEFAULT now(),
 			PRIMARY KEY (tenant_id, connector_name))`,
 	} {
@@ -124,15 +125,16 @@ func TestPostgresSandboxInventory_IdempotentAndSurvivesReopen(t *testing.T) {
 	inv := NewPostgresConnectorSandboxInventory(db)
 	acme := auth.MustNewTenantID("acme")
 
-	// First launch recorded.
-	require.NoError(t, inv.Put(ctx, InventoryEntry{Tenant: acme, Connector: "connector-gitlab", SandboxID: "sb-1"}))
+	// First launch recorded (with its principal).
+	require.NoError(t, inv.Put(ctx, InventoryEntry{Tenant: acme, Connector: "connector-gitlab", SandboxID: "sb-1", PrincipalID: "p-1"}))
 	// Re-Put the same pair (e.g. a re-launch) upserts, not duplicates.
-	require.NoError(t, inv.Put(ctx, InventoryEntry{Tenant: acme, Connector: "connector-gitlab", SandboxID: "sb-2"}))
+	require.NoError(t, inv.Put(ctx, InventoryEntry{Tenant: acme, Connector: "connector-gitlab", SandboxID: "sb-2", PrincipalID: "p-2"}))
 
 	list, err := inv.List(ctx)
 	require.NoError(t, err)
 	require.Len(t, list, 1, "one row per (tenant, connector)")
 	require.Equal(t, "sb-2", list[0].SandboxID)
+	require.Equal(t, "p-2", list[0].PrincipalID, "principal id round-trips for teardown revoke")
 
 	// A fresh store over the same DB (simulating a daemon restart) reads it
 	// back — the inventory is durable, not in-memory.
@@ -141,4 +143,12 @@ func TestPostgresSandboxInventory_IdempotentAndSurvivesReopen(t *testing.T) {
 	require.NoError(t, err)
 	require.Len(t, list, 1)
 	require.Equal(t, acme.String(), list[0].Tenant.String())
+
+	// Delete removes the row; deleting again is a safe no-op (idempotent
+	// teardown).
+	require.NoError(t, inv.Delete(ctx, acme, "connector-gitlab"))
+	list, err = inv.List(ctx)
+	require.NoError(t, err)
+	require.Empty(t, list, "row gone after delete")
+	require.NoError(t, inv.Delete(ctx, acme, "connector-gitlab"), "delete of an absent row is a no-op")
 }

@@ -2,6 +2,7 @@ package reconciler
 
 import (
 	"context"
+	"fmt"
 	"log/slog"
 	"strings"
 
@@ -49,6 +50,12 @@ func (s *FGACatalogSource) DesiredConnectors(ctx context.Context) ([]ConnectorSa
 		return nil, nil
 	}
 
+	// Any enumeration failure fails the whole pass: the desired set drives a
+	// DESTRUCTIVE terminate-orphaned reconcile (gibson#723), so a silently
+	// partial list would look like "these connectors are no longer enabled"
+	// and tear down healthy sandboxes. Better to do nothing this tick and
+	// retry than to act on incomplete state. (A malformed tenant id is data
+	// corruption, not a transient read failure, so it is skipped, not fatal.)
 	var desired []ConnectorSandbox
 	for _, ref := range tenantRefs {
 		tenantID := extractTenantID(ref)
@@ -59,8 +66,7 @@ func (s *FGACatalogSource) DesiredConnectors(ctx context.Context) ([]ConnectorSa
 		}
 		enabled, err := s.Authorizer.ListObjects(ctx, "tenant:"+tenantID, "tenant_enabled", "component")
 		if err != nil {
-			logger.Warn("connector catalog source: list tenant_enabled failed", "tenant", tenantID, "err", err)
-			continue
+			return nil, fmt.Errorf("connector catalog source: list tenant_enabled for %q: %w", tenantID, err)
 		}
 		for _, comp := range enabled {
 			name := strings.TrimPrefix(comp, "component:")
@@ -69,9 +75,7 @@ func (s *FGACatalogSource) DesiredConnectors(ctx context.Context) ([]ConnectorSa
 			}
 			_, found, err := s.Manifest.ConnectorManifest(ctx, tid, name)
 			if err != nil {
-				logger.Warn("connector catalog source: manifest lookup failed",
-					"tenant", tenantID, "connector", name, "err", err)
-				continue
+				return nil, fmt.Errorf("connector catalog source: manifest lookup for (%s, %s): %w", tenantID, name, err)
 			}
 			if !found {
 				continue // not a connector (or definition gone) — not desired
