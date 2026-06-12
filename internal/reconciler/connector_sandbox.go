@@ -5,6 +5,9 @@ import (
 	"log/slog"
 	"time"
 
+	"google.golang.org/grpc/codes"
+	"google.golang.org/grpc/status"
+
 	"github.com/zeroroot-ai/sdk/auth"
 )
 
@@ -271,6 +274,16 @@ func (r *ConnectorSandboxReconciler) launchConnector(ctx context.Context, d Conn
 		if rerr := r.cfg.Identity.RevokeConnectorPrincipal(ctx, principalID); rerr != nil {
 			r.cfg.Logger.Warn("connector-sandbox: revoke after failed launch also failed",
 				"principal", principalID, "err", rerr)
+		}
+		// A tenant at its plan-tier connector-instance budget is a distinct,
+		// expected condition (gibson#726) — surface it as its own signal rather
+		// than burying it in generic launch failures. The launcher enforces the
+		// budget via its Admit hook; freeing a slot (disable) lets a later tick
+		// launch the deferred connector. Not fatal: the rest still reconcile.
+		if status.Code(err) == codes.ResourceExhausted {
+			r.cfg.Logger.Warn("connector-sandbox: launch deferred — tenant at connector-instance budget",
+				"tenant", d.Tenant.String(), "connector", d.Connector, "reason", err.Error())
+			return
 		}
 		r.cfg.Logger.Warn("connector-sandbox: launch failed, skipping",
 			"tenant", d.Tenant.String(), "connector", d.Connector, "err", err)
