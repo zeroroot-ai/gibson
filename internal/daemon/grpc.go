@@ -362,7 +362,12 @@ func (d *daemonImpl) buildGRPCServer(ctx context.Context) (*grpcSubsystem, error
 			"/gibson.daemon.operator.v1.DaemonOperatorService/ListFeatureTuples":        true,
 			"/gibson.daemon.operator.v1.DaemonOperatorService/WriteAccessTuples":        true,
 			"/gibson.daemon.operator.v1.DaemonOperatorService/SeedCatalogTenantEnabled": true,
-			"/gibson.daemon.operator.v1.DaemonOperatorService/EmitAuditEvent":           true,
+			// SetTenantZitadelOrg seeds the tenant -> Zitadel-org mapping in the saga's
+			// Entitlements step (gibson#621); the RPC was added but this per-peer SPIFFE
+			// allowlist was never updated, so the operator was denied and every
+			// tenant provisioning blocked at Entitlements.
+			"/gibson.daemon.operator.v1.DaemonOperatorService/SetTenantZitadelOrg": true,
+			"/gibson.daemon.operator.v1.DaemonOperatorService/EmitAuditEvent":      true,
 		},
 	}
 	spiffePlatformBypass := func(ctx context.Context, method string) (context.Context, bool, error) {
