@@ -2,6 +2,15 @@
 -- No tenant_id column — the tenant is implied by which database this table lives in.
 -- Missions are stored as JSON documents in the document column for flexibility.
 
+-- The missions_name_trgm_idx below uses gin_trgm_ops, which requires the pg_trgm
+-- extension. On kind/CNPG pg_trgm is inherited from template1, but a fresh
+-- Aurora/RDS tenant database does not have it, so the index creation failed with
+-- "operator class gin_trgm_ops does not exist" and left schema_migrations dirty
+-- at version 3 — permanently blocking tenant data-plane provisioning (gibson#738).
+-- pg_trgm is a trusted extension (PG13+), so the tenant database owner
+-- can create it without superuser. Make the migration self-contained.
+CREATE EXTENSION IF NOT EXISTS pg_trgm;
+
 CREATE TABLE IF NOT EXISTS missions (
     id          UUID        PRIMARY KEY,
     name        TEXT        NOT NULL,
