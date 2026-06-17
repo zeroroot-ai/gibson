@@ -584,9 +584,9 @@ func TestPostgres_FailClosed_NilDB(t *testing.T) {
 func TestPostgres_PlatformLevelTable_DocumentedException(t *testing.T) {
 	t.Parallel()
 
-	// Table name must match migration 0042_webhook_idempotency.sql.
+	// Table name must match platform migration 015_webhook_idempotency.
 	assert.Equal(t, "webhook_idempotency", webhookTableName,
-		"table name must match migration 0042_webhook_idempotency.sql")
+		"table name must match platform migration 015_webhook_idempotency")
 
 	// Billing timeout must be short enough not to hold Stripe retry windows.
 	assert.LessOrEqual(t, billingQueryTimeout.Seconds(), 10.0,
