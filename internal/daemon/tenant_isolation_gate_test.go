@@ -593,8 +593,12 @@ func TestPostgres_PlatformLevelTable_DocumentedException(t *testing.T) {
 		"billing query timeout must be ≤ 10s")
 }
 
-// TestPostgres_AuthzRegistry verifies that the BillingService RPCs require
-// tenant membership in the authz registry.
+// TestPostgres_AuthzRegistry verifies that the BillingService webhook RPCs
+// authorize as PLATFORM infrastructure, not tenant membership. The Stripe
+// webhook call is pre-auth and frequently tenant-less (the dashboard's
+// platform service identity records into a single cross-tenant idempotency
+// ledger), so a member/tenant_from_identity rule default-denies (dashboard#780).
+// They use the system_tenant/platform_operator pattern instead.
 func TestPostgres_AuthzRegistry(t *testing.T) {
 	t.Parallel()
 
@@ -608,8 +612,12 @@ func TestPostgres_AuthzRegistry(t *testing.T) {
 			t.Parallel()
 			entry, ok := registry.Registry[m]
 			require.True(t, ok, "method %s must be in authz registry", m)
-			assert.Equal(t, "member", entry.Relation,
-				"BillingService RPCs must require member relation: %s", m)
+			assert.Equal(t, "platform_operator", entry.Relation,
+				"BillingService webhook RPCs must require platform_operator relation: %s", m)
+			assert.Equal(t, "system_tenant", entry.ObjectType,
+				"BillingService webhook RPCs must be scoped to system_tenant: %s", m)
+			assert.Equal(t, "system_tenant", entry.ObjectDeriver,
+				"BillingService webhook RPCs must use the system_tenant deriver (not tenant_from_identity): %s", m)
 			assert.False(t, entry.Unauthenticated,
 				"BillingService RPCs must be authenticated: %s", m)
 		})

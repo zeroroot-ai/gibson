@@ -3,8 +3,8 @@ rpc,relation,object_type,deriver,identities,source_proto_file,mode
 /gibson.agent.v1.AgentService/GetDescriptor,member,tenant,tenant_from_identity,COMPONENT,gibson/agent/v1/agent.proto,rule
 /gibson.agent.v1.AgentService/GetSlotSchema,member,tenant,tenant_from_identity,COMPONENT,gibson/agent/v1/agent.proto,rule
 /gibson.agent.v1.AgentService/Health,member,tenant,tenant_from_identity,COMPONENT,gibson/agent/v1/agent.proto,rule
-/gibson.billing.v1.BillingService/DeleteWebhookEvent,member,tenant,tenant_from_identity,USER|SERVICE,gibson/billing/v1/billing.proto,rule
-/gibson.billing.v1.BillingService/RecordWebhookEvent,member,tenant,tenant_from_identity,USER|SERVICE,gibson/billing/v1/billing.proto,rule
+/gibson.billing.v1.BillingService/DeleteWebhookEvent,platform_operator,system_tenant,system_tenant,USER|SERVICE,gibson/billing/v1/billing.proto,rule
+/gibson.billing.v1.BillingService/RecordWebhookEvent,platform_operator,system_tenant,system_tenant,USER|SERVICE,gibson/billing/v1/billing.proto,rule
 /gibson.component.v1.ComponentService/CallTool,can_execute,component,system_tenant,COMPONENT,gibson/component/v1/component.proto,rule
 /gibson.component.v1.ComponentService/CallToolStream,can_execute,component,system_tenant,COMPONENT,gibson/component/v1/component.proto,rule
 /gibson.component.v1.ComponentService/CancelMission,can_execute,component,system_tenant,COMPONENT,gibson/component/v1/component.proto,rule
