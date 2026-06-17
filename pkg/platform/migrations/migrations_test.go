@@ -20,11 +20,11 @@ func TestEmbed_TenantHasExpectedFiles(t *testing.T) {
 func TestEmbed_PlatformHasExpectedFiles(t *testing.T) {
 	t.Parallel()
 	upCount, downCount := countSQL(t, Platform, platformDir)
-	if upCount != 14 {
-		t.Errorf("platform: expected 14 up.sql files, got %d", upCount)
+	if upCount != 15 {
+		t.Errorf("platform: expected 15 up.sql files, got %d", upCount)
 	}
-	if downCount != 14 {
-		t.Errorf("platform: expected 14 down.sql files, got %d", downCount)
+	if downCount != 15 {
+		t.Errorf("platform: expected 15 down.sql files, got %d", downCount)
 	}
 }
 
@@ -88,14 +88,15 @@ func TestTenantMaxVersion(t *testing.T) {
 //	012 — connector_manifest (gibson#722)
 //	013 — connector_sandbox (gibson#722)
 //	014 — connector_sandbox_principal (gibson#723)
+//	015 — webhook_idempotency (dashboard#780/#785)
 func TestPlatformMaxVersion(t *testing.T) {
 	t.Parallel()
 	v, err := PlatformMaxVersion()
 	if err != nil {
 		t.Fatalf("PlatformMaxVersion: %v", err)
 	}
-	if v != 14 {
-		t.Errorf("PlatformMaxVersion: got %d, want 14", v)
+	if v != 15 {
+		t.Errorf("PlatformMaxVersion: got %d, want 15", v)
 	}
 }
 

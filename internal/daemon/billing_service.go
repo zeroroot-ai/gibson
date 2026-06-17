@@ -14,8 +14,8 @@
 //     best-effort rollback when processing fails after the idempotency row was
 //     written, allowing Stripe to retry.
 //
-// The table is created by migration 0042_webhook_idempotency.sql. Both RPCs
-// fail closed (codes.Unavailable) when platformDB is nil.
+// The table is created by platform migration 015_webhook_idempotency. Both
+// RPCs fail closed (codes.Unavailable) when platformDB is nil.
 //
 // Tenant-scoping note: the webhook_idempotency table is a platform-level table
 // (one row per Stripe event ID, global). It is not per-tenant — Stripe events

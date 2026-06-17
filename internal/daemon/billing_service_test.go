@@ -155,7 +155,7 @@ func TestBillingService_SqlContractIsNew(t *testing.T) {
 	t.Log("SQL contract verification: RecordWebhookEvent INSERT shape is correct")
 	// Verify the SQL string constants match what Postgres expects.
 	assert.Contains(t, "webhook_idempotency", "webhook_idempotency",
-		"table name must match the dashboard migration 0042")
+		"table name must match platform migration 015_webhook_idempotency")
 	// Verify INSERT shape
 	expectedSQL := fmt.Sprintf(
 		`INSERT INTO "%s" (event_id, event_type, tenant_id) VALUES ($1, $2, $3) ON CONFLICT DO NOTHING`,
