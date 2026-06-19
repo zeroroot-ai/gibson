@@ -71,7 +71,7 @@ func (d *daemonImpl) ensureMissionManager() error {
 			runLinker,
 			d.infrastructure,
 			d.infrastructure.otelStack,
-			NewOrchestratorEventBusAdapterWithRedis(d.eventBus, d.redisEventStream, d.registryTenant), // Bridge events to Redis Streams
+			NewOrchestratorEventBusAdapterWithRedis(d.eventBus, d.redisEventStream, d.registryTenant, d.brainRegistry), // Bridge events to Redis + the ECS brain
 			d.missionAuthzStore, // Required (one-code-path slice deploy#195); set during Redis init phase
 			d.quotaManager,      // Spec plans-and-quotas-simplification: may be nil in dev
 		)
