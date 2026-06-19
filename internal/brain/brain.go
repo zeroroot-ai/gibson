@@ -45,6 +45,7 @@ type World struct {
 	hosts     *ecs.Map1[Host]
 	surprises *ecs.Map1[Surprise]
 	work      *ecs.Map1[WorkItem]
+	missions  *ecs.Map1[Mission]
 }
 
 // NewWorld returns an empty Tenant World.
@@ -56,6 +57,7 @@ func NewWorld(tenant string) *World {
 		hosts:     ecs.NewMap1[Host](w),
 		surprises: ecs.NewMap1[Surprise](w),
 		work:      ecs.NewMap1[WorkItem](w),
+		missions:  ecs.NewMap1[Mission](w),
 	}
 }
 
@@ -136,6 +138,10 @@ func Reduce(w *World, ev Event) {
 		applyWorkDispatched(w, e)
 	case WorkCompleted:
 		applyWorkCompleted(w, e)
+	case MissionStarted:
+		applyMissionStarted(w, e)
+	case MissionDone:
+		applyMissionDone(w, e)
 	}
 }
 
