@@ -53,6 +53,40 @@ func TestServiceObservation_FoldEnrichReplay(t *testing.T) {
 	}
 }
 
+// TestServiceObservation_EndpointTechCert folds endpoint/technology/certificate
+// sub-state (ADR-0007) and proves progressive enrichment (union, never erased).
+func TestServiceObservation_EndpointTechCert(t *testing.T) {
+	w := NewWorld("t")
+	Reduce(w, HostObserved{
+		ScopeID: "s", Address: "10.0.0.5", OpenPorts: []int{443},
+		Endpoints:    map[int][]EndpointInfo{443: {{Path: "/login", Status: 200}}},
+		Technologies: map[int][]TechnologyInfo{443: {{Name: "nginx"}}},
+		Certificates: map[int]CertificateInfo{443: {Fingerprint: "ab12", Subject: "CN=example"}},
+	})
+	// Second scan: new endpoint + version on tech; bare cert obs must not erase.
+	Reduce(w, HostObserved{
+		ScopeID: "s", Address: "10.0.0.5", OpenPorts: []int{443},
+		Endpoints:    map[int][]EndpointInfo{443: {{Path: "/api"}}},
+		Technologies: map[int][]TechnologyInfo{443: {{Name: "nginx", Version: "1.25"}}},
+	})
+
+	snap := w.Snapshot()
+	if len(snap) != 1 {
+		t.Fatalf("want 1 host, got %d", len(snap))
+	}
+	eps := snap[0].Endpoints[443]
+	if len(eps) != 2 {
+		t.Fatalf("endpoints not unioned: %+v", eps)
+	}
+	techs := snap[0].Technologies[443]
+	if len(techs) != 1 || techs[0].Version != "1.25" {
+		t.Fatalf("technology not enriched: %+v", techs)
+	}
+	if c := snap[0].Certificates[443]; c.Fingerprint != "ab12" || c.Subject != "CN=example" {
+		t.Fatalf("certificate not retained: %+v", c)
+	}
+}
+
 // TestServiceObservation_ClosedPortKeepsService proves a port that goes closed
 // retains its service sub-state (ADR-0002: associations are time-bounded, kept not
 // deleted) — so the closed port carries no service in the open-only snapshot but is

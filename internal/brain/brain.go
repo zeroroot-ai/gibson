@@ -102,9 +102,13 @@ type HostSnapshot struct {
 	CloudID    string
 	OpenPorts  []int               // currently-open port numbers, ascending
 	Services   map[int]ServiceInfo // service detail by port, for open ports that carry it
-	Surprise   string              // non-empty if the entity carries a Surprise
-	Belief     Belief              // attack-path belief (zero until a BeliefSystem scores it)
-	Attention  float64             // derived: belief.Juicy + surprise boost (ADR-0005/0006)
+	// Per-port service-attached detail for open ports (nil when none observed).
+	Endpoints    map[int][]EndpointInfo
+	Technologies map[int][]TechnologyInfo
+	Certificates map[int]CertificateInfo
+	Surprise     string  // non-empty if the entity carries a Surprise
+	Belief       Belief  // attack-path belief (zero until a BeliefSystem scores it)
+	Attention    float64 // derived: belief.Juicy + surprise boost (ADR-0005/0006)
 }
 
 // Snapshot returns the current hosts in deterministic order — the materialized
@@ -123,6 +127,9 @@ func (w *World) Snapshot() []HostSnapshot {
 		h := q.Get()
 		var open []int
 		var svcs map[int]ServiceInfo
+		var eps map[int][]EndpointInfo
+		var techs map[int][]TechnologyInfo
+		var certs map[int]CertificateInfo
 		for _, p := range h.Ports {
 			if p.Open {
 				open = append(open, p.Number)
@@ -132,20 +139,41 @@ func (w *World) Snapshot() []HostSnapshot {
 					}
 					svcs[p.Number] = p.Service
 				}
+				if len(p.Endpoints) > 0 {
+					if eps == nil {
+						eps = map[int][]EndpointInfo{}
+					}
+					eps[p.Number] = append([]EndpointInfo(nil), p.Endpoints...)
+				}
+				if len(p.Technologies) > 0 {
+					if techs == nil {
+						techs = map[int][]TechnologyInfo{}
+					}
+					techs[p.Number] = append([]TechnologyInfo(nil), p.Technologies...)
+				}
+				if (p.Certificate != CertificateInfo{}) {
+					if certs == nil {
+						certs = map[int]CertificateInfo{}
+					}
+					certs[p.Number] = p.Certificate
+				}
 			}
 		}
 		sort.Ints(open)
 		out = append(out, HostSnapshot{
-			ID:         h.ID,
-			ScopeID:    h.ScopeID,
-			Address:    h.Address,
-			SSHHostKey: h.SSHHostKey,
-			CloudID:    h.CloudID,
-			OpenPorts:  open,
-			Services:   svcs,
-			Surprise:   surprised[q.Entity()],
-			Belief:     h.Belief,
-			Attention:  attentionScore(h.Belief.Juicy, surprised[q.Entity()] != ""),
+			ID:           h.ID,
+			ScopeID:      h.ScopeID,
+			Address:      h.Address,
+			SSHHostKey:   h.SSHHostKey,
+			CloudID:      h.CloudID,
+			OpenPorts:    open,
+			Services:     svcs,
+			Endpoints:    eps,
+			Technologies: techs,
+			Certificates: certs,
+			Surprise:     surprised[q.Entity()],
+			Belief:       h.Belief,
+			Attention:    attentionScore(h.Belief.Juicy, surprised[q.Entity()] != ""),
 		})
 	}
 	sort.Slice(out, func(i, j int) bool {
@@ -175,6 +203,10 @@ type HostObserved struct {
 	CloudID    string
 	OpenPorts  []int
 	Services   map[int]ServiceInfo
+	// Per-port service detail (keyed by port number; all optional).
+	Endpoints    map[int][]EndpointInfo
+	Technologies map[int][]TechnologyInfo
+	Certificates map[int]CertificateInfo
 }
 
 func (HostObserved) Kind() string { return "host.observed" }

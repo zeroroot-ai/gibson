@@ -42,23 +42,48 @@ func ingestObservation(reg *brain.Registry, tenant string) harness.ObservationSi
 			h := o.Host
 			var openPorts []int
 			var services map[int]brain.ServiceInfo
+			var endpoints map[int][]brain.EndpointInfo
+			var technologies map[int][]brain.TechnologyInfo
+			var certificates map[int]brain.CertificateInfo
 			for _, p := range h.Ports {
-				openPorts = append(openPorts, int(p.Number))
+				num := int(p.Number)
+				openPorts = append(openPorts, num)
 				svc := brain.ServiceInfo{Protocol: p.Protocol, Name: p.Service, Product: p.Product, Version: p.Version}
 				if (svc != brain.ServiceInfo{}) {
 					if services == nil {
 						services = map[int]brain.ServiceInfo{}
 					}
-					services[int(p.Number)] = svc
+					services[num] = svc
+				}
+				for _, e := range p.Endpoints {
+					if endpoints == nil {
+						endpoints = map[int][]brain.EndpointInfo{}
+					}
+					endpoints[num] = append(endpoints[num], brain.EndpointInfo{Path: e.Path, Status: int(e.Status)})
+				}
+				for _, tch := range p.Technologies {
+					if technologies == nil {
+						technologies = map[int][]brain.TechnologyInfo{}
+					}
+					technologies[num] = append(technologies[num], brain.TechnologyInfo{Name: tch.Name, Version: tch.Version})
+				}
+				if c := p.Certificate; c != nil {
+					if certificates == nil {
+						certificates = map[int]brain.CertificateInfo{}
+					}
+					certificates[num] = brain.CertificateInfo{Fingerprint: c.Fingerprint, Subject: c.Subject, Issuer: c.Issuer, NotAfter: c.NotAfter}
 				}
 			}
 			reg.For(tenant).Submit(brain.HostObserved{
-				ScopeID:    scope,
-				Address:    h.Address,
-				SSHHostKey: h.SshHostKey,
-				CloudID:    h.CloudId,
-				OpenPorts:  openPorts,
-				Services:   services,
+				ScopeID:      scope,
+				Address:      h.Address,
+				SSHHostKey:   h.SshHostKey,
+				CloudID:      h.CloudId,
+				OpenPorts:    openPorts,
+				Services:     services,
+				Endpoints:    endpoints,
+				Technologies: technologies,
+				Certificates: certificates,
 			})
 		case *harnesspb.ObserveRequest_Domain:
 			reg.For(tenant).Submit(brain.DomainObserved{ScopeID: scope, Name: o.Domain.Name})

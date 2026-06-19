@@ -25,9 +25,9 @@ projector from the World*, never written by an agent.
 | `host` | **entity** | `(scope, address)` + ssh-key / cloud-id strong signals | — → `:Host` | **done** |
 | `port` | sub-state | `number` within host | host `HAS_PORT` → `:Port` | **done** |
 | `service` | sub-state | `(host, port)` + protocol | port `RUNS_SERVICE` → `:Service` | **S1 (this slice)** |
-| `endpoint` | sub-state | `(service, path)` | service `HAS_ENDPOINT` → `:Endpoint` | planned |
-| `certificate` | sub-state | fingerprint (content) | service `SERVES_CERTIFICATE` → `:Certificate` | planned |
-| `technology` | sub-state | `name` (+ version) | `USES_TECHNOLOGY` → `:Technology` | planned |
+| `endpoint` | sub-state | `(service, path)` | service `HAS_ENDPOINT` → `:Endpoint` | **done** (World; projected as `:Service` props — node promotion deferred) |
+| `certificate` | sub-state | fingerprint (content) | service `SERVES_CERTIFICATE` → `:Certificate` | **done** (World; projected as `:Service` props) |
+| `technology` | sub-state | `name` (+ version) | `USES_TECHNOLOGY` → `:Technology` | **done** (World; projected as `:Service` props) |
 | `domain` | **entity** | `(scope, name)` | — → `:Domain` | planned |
 | `subdomain` | **entity** | `(scope, fqdn)` | domain `HAS_SUBDOMAIN`; `RESOLVES_TO` host | planned |
 | `credential` | **entity** | secret hash (content) | `:Credential` (scope-partitioned) | planned |
