@@ -36,21 +36,6 @@ type recordingGraphRAGQueryBridge struct {
 	relationships []sdkgraphrag.Relationship
 }
 
-func (r *recordingGraphRAGQueryBridge) Query(ctx context.Context, query sdkgraphrag.Query) ([]sdkgraphrag.Result, error) {
-	return nil, nil
-}
-func (r *recordingGraphRAGQueryBridge) FindSimilarAttacks(ctx context.Context, content string, topK int) ([]sdkgraphrag.AttackPattern, error) {
-	return nil, nil
-}
-func (r *recordingGraphRAGQueryBridge) FindSimilarFindings(ctx context.Context, findingID string, topK int) ([]sdkgraphrag.FindingNode, error) {
-	return nil, nil
-}
-func (r *recordingGraphRAGQueryBridge) GetAttackChains(ctx context.Context, techniqueID string, maxDepth int) ([]sdkgraphrag.AttackChain, error) {
-	return nil, nil
-}
-func (r *recordingGraphRAGQueryBridge) GetRelatedFindings(ctx context.Context, findingID string) ([]sdkgraphrag.FindingNode, error) {
-	return nil, nil
-}
 func (r *recordingGraphRAGQueryBridge) StoreNode(ctx context.Context, node sdkgraphrag.GraphNode, missionID, agentName string) (string, error) {
 	return "", nil
 }
@@ -63,20 +48,11 @@ func (r *recordingGraphRAGQueryBridge) CreateRelationship(ctx context.Context, r
 func (r *recordingGraphRAGQueryBridge) StoreBatch(ctx context.Context, batch sdkgraphrag.Batch, missionID, agentName string) ([]string, error) {
 	return nil, nil
 }
-func (r *recordingGraphRAGQueryBridge) Traverse(ctx context.Context, startNodeID string, opts sdkgraphrag.TraversalOptions) ([]sdkgraphrag.TraversalResult, error) {
-	return nil, nil
-}
 func (r *recordingGraphRAGQueryBridge) StoreSemantic(ctx context.Context, node sdkgraphrag.GraphNode, missionID, agentName string) (string, error) {
 	return "", nil
 }
 func (r *recordingGraphRAGQueryBridge) StoreStructured(ctx context.Context, node sdkgraphrag.GraphNode, missionID, agentName string) (string, error) {
 	return "", nil
-}
-func (r *recordingGraphRAGQueryBridge) QuerySemantic(ctx context.Context, query sdkgraphrag.Query) ([]sdkgraphrag.Result, error) {
-	return nil, nil
-}
-func (r *recordingGraphRAGQueryBridge) QueryStructured(ctx context.Context, query sdkgraphrag.Query) ([]sdkgraphrag.Result, error) {
-	return nil, nil
 }
 func (r *recordingGraphRAGQueryBridge) Health(ctx context.Context) types.HealthStatus {
 	return types.Healthy("ok")

@@ -70,18 +70,6 @@ func TestGraphRAGBridgeAdapter_MissingTenant(t *testing.T) {
 
 	ctx := context.Background() // no tenant
 
-	// QueryBridge.Query must fail with errNoTenantInContext.
-	_, qErr := adapter.Query(ctx, sdkgraphrag.Query{Text: "test"})
-	if !errors.Is(qErr, errNoTenantInContext) {
-		t.Errorf("Query with no tenant: got %v, want errNoTenantInContext", qErr)
-	}
-
-	// FindSimilarAttacks must fail with errNoTenantInContext.
-	_, fErr := adapter.FindSimilarAttacks(ctx, "test content", 5)
-	if !errors.Is(fErr, errNoTenantInContext) {
-		t.Errorf("FindSimilarAttacks with no tenant: got %v, want errNoTenantInContext", fErr)
-	}
-
 	// StoreNode must fail with errNoTenantInContext.
 	_, sErr := adapter.StoreNode(ctx, sdkgraphrag.GraphNode{ID: "x", Type: "Finding"}, "mission1", "agent1")
 	if !errors.Is(sErr, errNoTenantInContext) {
@@ -108,7 +96,7 @@ func TestGraphRAGBridgeAdapter_UnprovisionedTenant(t *testing.T) {
 	}
 
 	ctx := auth.WithTenant(context.Background(), auth.MustNewTenantID("test-tenant"))
-	_, qErr := adapter.Query(ctx, sdkgraphrag.Query{Text: "test"})
+	_, qErr := adapter.StoreNode(ctx, sdkgraphrag.GraphNode{ID: "x", Type: "Finding"}, "mission1", "agent1")
 	if qErr == nil {
 		t.Fatal("expected error for unprovisioned tenant; got nil")
 	}
@@ -136,7 +124,7 @@ func TestGraphRAGBridgeAdapter_TransientUnavailable(t *testing.T) {
 	}
 
 	ctx := auth.WithTenant(context.Background(), auth.MustNewTenantID("test-tenant-2"))
-	_, fErr := adapter.FindSimilarAttacks(ctx, "test", 5)
+	_, fErr := adapter.StoreNode(ctx, sdkgraphrag.GraphNode{ID: "x", Type: "Finding"}, "mission1", "agent1")
 	if fErr == nil {
 		t.Fatal("expected error from transient pool failure; got nil")
 	}

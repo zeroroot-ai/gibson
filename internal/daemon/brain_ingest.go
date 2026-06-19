@@ -13,9 +13,55 @@
 package daemon
 
 import (
+	"context"
+
 	"github.com/zeroroot-ai/gibson/internal/brain"
 	"github.com/zeroroot-ai/gibson/internal/daemon/api"
+	"github.com/zeroroot-ai/gibson/internal/harness"
+	harnesspb "github.com/zeroroot-ai/sdk/api/gen/gibson/harness/v1"
 )
+
+// ingestObservation returns the callback service's observation sink (ADR-0007):
+// it translates a typed agent observation into a brain Timeline event and submits
+// it to the tenant's World engine. The reducer + scope-relative identity
+// (ADR-0002) resolve the entity and its topology — the agent authors neither.
+//
+// Scope is taken from the mission context (each mission is a World partition for
+// now); a later slice refines this to the mission's declared scope / agent vantage.
+func ingestObservation(reg *brain.Registry, tenant string) harness.ObservationSink {
+	return func(_ context.Context, req *harnesspb.ObserveRequest) error {
+		if reg == nil || req == nil {
+			return nil
+		}
+		scope := ""
+		if req.Context != nil {
+			scope = req.Context.MissionId
+		}
+		if h := req.GetHost(); h != nil {
+			var openPorts []int
+			var services map[int]brain.ServiceInfo
+			for _, p := range h.Ports {
+				openPorts = append(openPorts, int(p.Number))
+				svc := brain.ServiceInfo{Protocol: p.Protocol, Name: p.Service, Product: p.Product, Version: p.Version}
+				if (svc != brain.ServiceInfo{}) {
+					if services == nil {
+						services = map[int]brain.ServiceInfo{}
+					}
+					services[int(p.Number)] = svc
+				}
+			}
+			reg.For(tenant).Submit(brain.HostObserved{
+				ScopeID:    scope,
+				Address:    h.Address,
+				SSHHostKey: h.SshHostKey,
+				CloudID:    h.CloudId,
+				OpenPorts:  openPorts,
+				Services:   services,
+			})
+		}
+		return nil
+	}
+}
 
 func payloadString(m map[string]interface{}, key string) string {
 	if m == nil {

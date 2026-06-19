@@ -103,7 +103,7 @@ func TestStoreNodeCreatesDiscoveredRelationship(t *testing.T) {
 			mockStore := &MockGraphRAGStore{
 				IsHealthy: true,
 			}
-			bridge := NewGraphRAGQueryBridge(mockStore, nil)
+			bridge := NewGraphRAGQueryBridge(mockStore)
 
 			// Set agent_run_id in context
 			ctx := context.Background()
@@ -166,7 +166,7 @@ func TestStoreNodeProvenanceProperties(t *testing.T) {
 	mockStore := &MockGraphRAGStore{
 		IsHealthy: true,
 	}
-	bridge := NewGraphRAGQueryBridge(mockStore, nil)
+	bridge := NewGraphRAGQueryBridge(mockStore)
 
 	agentRunID := "agent_run:trace-xyz:span-abc"
 	missionID := "mission-456"
@@ -271,7 +271,7 @@ func TestHierarchyRelationships(t *testing.T) {
 			mockStore := &MockGraphRAGStore{
 				IsHealthy: true,
 			}
-			bridge := NewGraphRAGQueryBridge(mockStore, nil)
+			bridge := NewGraphRAGQueryBridge(mockStore)
 
 			ctx := ContextWithAgentRunID(context.Background(), "agent_run:test:hierarchy")
 
@@ -310,7 +310,7 @@ func TestStoreBatchCreatesDiscoveredRelationships(t *testing.T) {
 	mockStore := &MockGraphRAGStore{
 		IsHealthy: true,
 	}
-	bridge := NewGraphRAGQueryBridge(mockStore, nil)
+	bridge := NewGraphRAGQueryBridge(mockStore)
 
 	agentRunID := "agent_run:batch-trace:batch-span"
 	ctx := ContextWithAgentRunID(context.Background(), agentRunID)
@@ -391,7 +391,7 @@ func TestNodesReachableFromMission(t *testing.T) {
 	mockStore := &MockGraphRAGStore{
 		IsHealthy: true,
 	}
-	bridge := NewGraphRAGQueryBridge(mockStore, nil)
+	bridge := NewGraphRAGQueryBridge(mockStore)
 
 	// Simulate a mission context with agent run
 	missionID := "mission:" + types.NewID().String()
@@ -469,7 +469,7 @@ func TestExecutionChainExcludedFromDiscovered(t *testing.T) {
 			mockStore := &MockGraphRAGStore{
 				IsHealthy: true,
 			}
-			bridge := NewGraphRAGQueryBridge(mockStore, nil)
+			bridge := NewGraphRAGQueryBridge(mockStore)
 
 			agentRunID := "agent_run:exec-test:span-test"
 			ctx := ContextWithAgentRunID(context.Background(), agentRunID)
@@ -510,7 +510,7 @@ func TestCompleteGraphConnectivity(t *testing.T) {
 	mockStore := &MockGraphRAGStore{
 		IsHealthy: true,
 	}
-	bridge := NewGraphRAGQueryBridge(mockStore, nil)
+	bridge := NewGraphRAGQueryBridge(mockStore)
 
 	// Scenario: Network reconnaissance discovers a web service
 	missionID := types.NewID().String()
@@ -618,7 +618,7 @@ func TestCompleteGraphConnectivity(t *testing.T) {
 func TestContextPropagation(t *testing.T) {
 	t.Run("With agent_run_id in context", func(t *testing.T) {
 		mockStore := &MockGraphRAGStore{IsHealthy: true}
-		bridge := NewGraphRAGQueryBridge(mockStore, nil)
+		bridge := NewGraphRAGQueryBridge(mockStore)
 
 		agentRunID := "agent_run:ctx-test:span-abc"
 		ctx := ContextWithAgentRunID(context.Background(), agentRunID)
@@ -641,7 +641,7 @@ func TestContextPropagation(t *testing.T) {
 
 	t.Run("Without agent_run_id in context", func(t *testing.T) {
 		mockStore := &MockGraphRAGStore{IsHealthy: true}
-		bridge := NewGraphRAGQueryBridge(mockStore, nil)
+		bridge := NewGraphRAGQueryBridge(mockStore)
 
 		ctx := context.Background() // No agent_run_id
 
@@ -665,7 +665,7 @@ func TestContextPropagation(t *testing.T) {
 
 	t.Run("Context with tool_execution_id", func(t *testing.T) {
 		mockStore := &MockGraphRAGStore{IsHealthy: true}
-		bridge := NewGraphRAGQueryBridge(mockStore, nil)
+		bridge := NewGraphRAGQueryBridge(mockStore)
 
 		agentRunID := "agent_run:tool-test:span-def"
 		toolExecutionID := "tool_execution:tool-test:span-tool:12345"

@@ -916,31 +916,7 @@ entries:
     object_deriver: "system_tenant"
     allowed_identities:
       - COMPONENT
-  "/gibson.harness.v1.HarnessCallbackService/FindSimilarAttacks":
-    relation: "can_use"
-    object_type: "component"
-    object_deriver: "system_tenant"
-    allowed_identities:
-      - COMPONENT
-  "/gibson.harness.v1.HarnessCallbackService/FindSimilarFindings":
-    relation: "can_use"
-    object_type: "component"
-    object_deriver: "system_tenant"
-    allowed_identities:
-      - COMPONENT
   "/gibson.harness.v1.HarnessCallbackService/GenerateNodeID":
-    relation: "can_use"
-    object_type: "component"
-    object_deriver: "system_tenant"
-    allowed_identities:
-      - COMPONENT
-  "/gibson.harness.v1.HarnessCallbackService/GetAllRunFindings":
-    relation: "can_use"
-    object_type: "component"
-    object_deriver: "system_tenant"
-    allowed_identities:
-      - COMPONENT
-  "/gibson.harness.v1.HarnessCallbackService/GetAttackChains":
     relation: "can_use"
     object_type: "component"
     object_deriver: "system_tenant"
@@ -952,19 +928,7 @@ entries:
     object_deriver: "tenant_and_field('Name')"
     allowed_identities:
       - COMPONENT
-  "/gibson.harness.v1.HarnessCallbackService/GetFindings":
-    relation: "can_use"
-    object_type: "component"
-    object_deriver: "system_tenant"
-    allowed_identities:
-      - COMPONENT
   "/gibson.harness.v1.HarnessCallbackService/GetMissionResults":
-    relation: "can_use"
-    object_type: "component"
-    object_deriver: "system_tenant"
-    allowed_identities:
-      - COMPONENT
-  "/gibson.harness.v1.HarnessCallbackService/GetMissionRunHistory":
     relation: "can_use"
     object_type: "component"
     object_deriver: "system_tenant"
@@ -982,31 +946,7 @@ entries:
     object_deriver: "system_tenant"
     allowed_identities:
       - COMPONENT
-  "/gibson.harness.v1.HarnessCallbackService/GetPreviousRunFindings":
-    relation: "can_use"
-    object_type: "component"
-    object_deriver: "system_tenant"
-    allowed_identities:
-      - COMPONENT
-  "/gibson.harness.v1.HarnessCallbackService/GetRelatedFindings":
-    relation: "can_use"
-    object_type: "component"
-    object_deriver: "system_tenant"
-    allowed_identities:
-      - COMPONENT
   "/gibson.harness.v1.HarnessCallbackService/GetTaxonomySchema":
-    relation: "can_use"
-    object_type: "component"
-    object_deriver: "system_tenant"
-    allowed_identities:
-      - COMPONENT
-  "/gibson.harness.v1.HarnessCallbackService/GraphRAGHealth":
-    relation: "can_use"
-    object_type: "component"
-    object_deriver: "system_tenant"
-    allowed_identities:
-      - COMPONENT
-  "/gibson.harness.v1.HarnessCallbackService/GraphRAGQuery":
     relation: "can_use"
     object_type: "component"
     object_deriver: "system_tenant"
@@ -1060,79 +1000,7 @@ entries:
     object_deriver: "system_tenant"
     allowed_identities:
       - COMPONENT
-  "/gibson.harness.v1.HarnessCallbackService/LongTermMemoryDelete":
-    relation: "can_use"
-    object_type: "component"
-    object_deriver: "system_tenant"
-    allowed_identities:
-      - COMPONENT
-  "/gibson.harness.v1.HarnessCallbackService/LongTermMemorySearch":
-    relation: "can_use"
-    object_type: "component"
-    object_deriver: "system_tenant"
-    allowed_identities:
-      - COMPONENT
-  "/gibson.harness.v1.HarnessCallbackService/LongTermMemoryStore":
-    relation: "can_use"
-    object_type: "component"
-    object_deriver: "system_tenant"
-    allowed_identities:
-      - COMPONENT
-  "/gibson.harness.v1.HarnessCallbackService/MemoryDelete":
-    relation: "can_use"
-    object_type: "component"
-    object_deriver: "system_tenant"
-    allowed_identities:
-      - COMPONENT
-  "/gibson.harness.v1.HarnessCallbackService/MemoryGet":
-    relation: "can_use"
-    object_type: "component"
-    object_deriver: "system_tenant"
-    allowed_identities:
-      - COMPONENT
-  "/gibson.harness.v1.HarnessCallbackService/MemoryList":
-    relation: "can_use"
-    object_type: "component"
-    object_deriver: "system_tenant"
-    allowed_identities:
-      - COMPONENT
-  "/gibson.harness.v1.HarnessCallbackService/MemorySet":
-    relation: "can_use"
-    object_type: "component"
-    object_deriver: "system_tenant"
-    allowed_identities:
-      - COMPONENT
-  "/gibson.harness.v1.HarnessCallbackService/MissionMemoryContinuityMode":
-    relation: "can_use"
-    object_type: "component"
-    object_deriver: "system_tenant"
-    allowed_identities:
-      - COMPONENT
-  "/gibson.harness.v1.HarnessCallbackService/MissionMemoryGetPreviousRunValue":
-    relation: "can_use"
-    object_type: "component"
-    object_deriver: "system_tenant"
-    allowed_identities:
-      - COMPONENT
-  "/gibson.harness.v1.HarnessCallbackService/MissionMemoryGetValueHistory":
-    relation: "can_use"
-    object_type: "component"
-    object_deriver: "system_tenant"
-    allowed_identities:
-      - COMPONENT
-  "/gibson.harness.v1.HarnessCallbackService/MissionMemoryHistory":
-    relation: "can_use"
-    object_type: "component"
-    object_deriver: "system_tenant"
-    allowed_identities:
-      - COMPONENT
-  "/gibson.harness.v1.HarnessCallbackService/MissionMemorySearch":
-    relation: "can_use"
-    object_type: "component"
-    object_deriver: "system_tenant"
-    allowed_identities:
-      - COMPONENT
-  "/gibson.harness.v1.HarnessCallbackService/QueryNodes":
+  "/gibson.harness.v1.HarnessCallbackService/Observe":
     relation: "can_use"
     object_type: "component"
     object_deriver: "system_tenant"
@@ -1205,12 +1073,6 @@ entries:
     allowed_identities:
       - COMPONENT
   "/gibson.harness.v1.HarnessCallbackService/ToolResults":
-    relation: "can_use"
-    object_type: "component"
-    object_deriver: "system_tenant"
-    allowed_identities:
-      - COMPONENT
-  "/gibson.harness.v1.HarnessCallbackService/TraverseGraph":
     relation: "can_use"
     object_type: "component"
     object_deriver: "system_tenant"

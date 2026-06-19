@@ -102,6 +102,10 @@ type HarnessCallbackService struct {
 	// eventBus publishes tool and LLM events for graph processing
 	eventBus EventBusPublisher
 
+	// observationSink receives typed agent observations (ADR-0007); the daemon
+	// wires it to the per-tenant brain. nil means observation ingest is disabled.
+	observationSink ObservationSink
+
 	// spanProcessors receives spans exported from remote agents for tracing integration
 	spanProcessors []sdktrace.SpanProcessor
 
@@ -208,6 +212,19 @@ func WithCredentialStore(store CredentialStore) CallbackServiceOption {
 func WithEventBus(eventBus EventBusPublisher) CallbackServiceOption {
 	return func(s *HarnessCallbackService) {
 		s.eventBus = eventBus
+	}
+}
+
+// ObservationSink consumes a typed observation emitted by an agent (ADR-0007).
+// The daemon wires this to translate the observation into a brain Timeline event
+// and submit it to the per-tenant World; harness stays decoupled from the brain.
+type ObservationSink func(ctx context.Context, req *harnesspb.ObserveRequest) error
+
+// WithObservationSink sets the sink the Observe RPC forwards observations to.
+// When unset, Observe is a no-op (the brain ingest is simply not wired).
+func WithObservationSink(sink ObservationSink) CallbackServiceOption {
+	return func(s *HarnessCallbackService) {
+		s.observationSink = sink
 	}
 }
 
@@ -420,14 +437,22 @@ func (s *HarnessCallbackService) getHarness(ctx context.Context, contextInfo *ha
 	return harness, nil
 }
 
-// getGraphRAGHarness retrieves a harness that supports GraphRAG operations.
-func (s *HarnessCallbackService) getGraphRAGHarness(ctx context.Context, contextInfo *harnesspb.ContextInfo) (GraphRAGSupport, error) {
+// graphRAGStorer is the agent EMIT surface a harness exposes for graph writes
+// (ADR-0007); the query/recall surface was removed in the ECS-brain cutover.
+type graphRAGStorer interface {
+	StoreGraphNode(ctx context.Context, node sdkgraphrag.GraphNode) (string, error)
+	CreateGraphRelationship(ctx context.Context, rel sdkgraphrag.Relationship) error
+	StoreGraphBatch(ctx context.Context, batch sdkgraphrag.Batch) ([]string, error)
+}
+
+// getGraphRAGHarness retrieves a harness that supports graph emit operations.
+func (s *HarnessCallbackService) getGraphRAGHarness(ctx context.Context, contextInfo *harnesspb.ContextInfo) (graphRAGStorer, error) {
 	harness, err := s.getHarness(ctx, contextInfo)
 	if err != nil {
 		return nil, err
 	}
 
-	graphRAG, ok := harness.(GraphRAGSupport)
+	graphRAG, ok := harness.(graphRAGStorer)
 	if !ok {
 		return nil, status.Error(codes.Unimplemented, "GraphRAG not supported by this harness")
 	}
@@ -1347,784 +1372,13 @@ func (s *HarnessCallbackService) SubmitFinding(ctx context.Context, req *harness
 	return &harnesspb.SubmitFindingResponse{}, nil
 }
 
-// GetFindings implements the finding retrieval RPC.
-func (s *HarnessCallbackService) GetFindings(ctx context.Context, req *harnesspb.GetFindingsRequest) (*harnesspb.GetFindingsResponse, error) {
-	harness, err := s.getHarness(ctx, req.Context)
-	if err != nil {
-		return nil, err
-	}
-
-	// Convert proto FindingFilter to internal FindingFilter
-	filter := protoFilterToFindingFilter(req.Filter)
-
-	// Get findings
-	findings, err := harness.GetFindings(ctx, filter)
-	if err != nil {
-		s.logger.Error("get findings failed", "error", err)
-		return &harnesspb.GetFindingsResponse{
-			Error: &harnesspb.HarnessError{
-				Code:    commonpb.ErrorCode_ERROR_CODE_INTERNAL,
-				Message: err.Error(),
-			},
-		}, nil
-	}
-
-	// Convert findings to proto
-	protoFindings := make([]*typespb.Finding, len(findings))
-	for i, finding := range findings {
-		protoFindings[i] = findingToProtoFinding(finding)
-	}
-
-	return &harnesspb.GetFindingsResponse{
-		Findings: protoFindings,
-	}, nil
-}
-
 // ============================================================================
 // Memory Operations
 // ============================================================================
 
-// MemoryGet implements the memory get RPC with tier routing.
-func (s *HarnessCallbackService) MemoryGet(ctx context.Context, req *harnesspb.MemoryGetRequest) (*harnesspb.MemoryGetResponse, error) {
-	harness, err := s.getHarness(ctx, req.Context)
-	if err != nil {
-		return nil, err
-	}
-
-	// Default to WORKING tier for backward compatibility
-	tier := req.Tier
-	if tier == harnesspb.MemoryTier_MEMORY_TIER_UNSPECIFIED {
-		tier = harnesspb.MemoryTier_MEMORY_TIER_WORKING
-	}
-
-	switch tier {
-	case harnesspb.MemoryTier_MEMORY_TIER_WORKING:
-		// Working memory: existing logic
-		value, found := harness.Memory().Working().Get(req.Key)
-		if !found {
-			return &harnesspb.MemoryGetResponse{
-				Found: false,
-			}, nil
-		}
-
-		return &harnesspb.MemoryGetResponse{
-			Value: anyToTypedValue(value),
-			Found: true,
-		}, nil
-
-	case harnesspb.MemoryTier_MEMORY_TIER_MISSION:
-		// Mission memory: use Retrieve method
-		item, err := harness.Memory().Mission().Retrieve(ctx, req.Key)
-		if err != nil {
-			// Check for not found error
-			if err.Error() == "memory: item not found" || err.Error() == "not found" {
-				return &harnesspb.MemoryGetResponse{
-					Found: false,
-				}, nil
-			}
-			return &harnesspb.MemoryGetResponse{
-				Error: &harnesspb.HarnessError{
-					Code:    commonpb.ErrorCode_ERROR_CODE_INTERNAL,
-					Message: fmt.Sprintf("failed to retrieve from mission memory: %v", err),
-				},
-			}, nil
-		}
-
-		typedMapMetadata := mapToTypedMap(item.Metadata)
-		return &harnesspb.MemoryGetResponse{
-			Value:     anyToTypedValue(item.Value),
-			Metadata:  typedMapMetadata.Entries,
-			Found:     true,
-			CreatedAt: item.CreatedAt.Format(time.RFC3339),
-		}, nil
-
-	case harnesspb.MemoryTier_MEMORY_TIER_LONG_TERM:
-		// Long-term memory does not support Get by key
-		return &harnesspb.MemoryGetResponse{
-			Error: &harnesspb.HarnessError{
-				Code:    commonpb.ErrorCode_ERROR_CODE_INVALID_ARGUMENT,
-				Message: "Long-term memory does not support Get by key. Use LongTermMemorySearch instead.",
-			},
-		}, nil
-
-	default:
-		return &harnesspb.MemoryGetResponse{
-			Error: &harnesspb.HarnessError{
-				Code:    commonpb.ErrorCode_ERROR_CODE_INVALID_ARGUMENT,
-				Message: fmt.Sprintf("unknown memory tier: %v", tier),
-			},
-		}, nil
-	}
-}
-
-// MemorySet implements the memory set RPC with tier routing.
-func (s *HarnessCallbackService) MemorySet(ctx context.Context, req *harnesspb.MemorySetRequest) (*harnesspb.MemorySetResponse, error) {
-	harness, err := s.getHarness(ctx, req.Context)
-	if err != nil {
-		return nil, err
-	}
-
-	// Convert value from proto TypedValue
-	value := typedValueToAny(req.Value)
-
-	// Default to WORKING tier for backward compatibility
-	tier := req.Tier
-	if tier == harnesspb.MemoryTier_MEMORY_TIER_UNSPECIFIED {
-		tier = harnesspb.MemoryTier_MEMORY_TIER_WORKING
-	}
-
-	switch tier {
-	case harnesspb.MemoryTier_MEMORY_TIER_WORKING:
-		// Working memory: existing logic
-		if err := harness.Memory().Working().Set(req.Key, value); err != nil {
-			return &harnesspb.MemorySetResponse{
-				Error: &harnesspb.HarnessError{
-					Code:    commonpb.ErrorCode_ERROR_CODE_INTERNAL,
-					Message: fmt.Sprintf("failed to set value: %v", err),
-				},
-			}, nil
-		}
-		return &harnesspb.MemorySetResponse{}, nil
-
-	case harnesspb.MemoryTier_MEMORY_TIER_MISSION:
-		// Mission memory: use Store method
-		// Convert metadata from proto TypedMap
-		metadata := typedValueMapToMap(req.Metadata)
-
-		if err := harness.Memory().Mission().Store(ctx, req.Key, value, metadata); err != nil {
-			return &harnesspb.MemorySetResponse{
-				Error: &harnesspb.HarnessError{
-					Code:    commonpb.ErrorCode_ERROR_CODE_INTERNAL,
-					Message: fmt.Sprintf("failed to store in mission memory: %v", err),
-				},
-			}, nil
-		}
-		return &harnesspb.MemorySetResponse{}, nil
-
-	case harnesspb.MemoryTier_MEMORY_TIER_LONG_TERM:
-		// Long-term memory does not support Set by key
-		return &harnesspb.MemorySetResponse{
-			Error: &harnesspb.HarnessError{
-				Code:    commonpb.ErrorCode_ERROR_CODE_INVALID_ARGUMENT,
-				Message: "Long-term memory does not support Set by key. Use LongTermMemoryStore instead.",
-			},
-		}, nil
-
-	default:
-		return &harnesspb.MemorySetResponse{
-			Error: &harnesspb.HarnessError{
-				Code:    commonpb.ErrorCode_ERROR_CODE_INVALID_ARGUMENT,
-				Message: fmt.Sprintf("unknown memory tier: %v", tier),
-			},
-		}, nil
-	}
-}
-
-// MemoryDelete implements the memory delete RPC with tier routing.
-func (s *HarnessCallbackService) MemoryDelete(ctx context.Context, req *harnesspb.MemoryDeleteRequest) (*harnesspb.MemoryDeleteResponse, error) {
-	harness, err := s.getHarness(ctx, req.Context)
-	if err != nil {
-		return nil, err
-	}
-
-	// Default to WORKING tier for backward compatibility
-	tier := req.Tier
-	if tier == harnesspb.MemoryTier_MEMORY_TIER_UNSPECIFIED {
-		tier = harnesspb.MemoryTier_MEMORY_TIER_WORKING
-	}
-
-	switch tier {
-	case harnesspb.MemoryTier_MEMORY_TIER_WORKING:
-		// Working memory: existing logic
-		harness.Memory().Working().Delete(req.Key)
-		return &harnesspb.MemoryDeleteResponse{}, nil
-
-	case harnesspb.MemoryTier_MEMORY_TIER_MISSION:
-		// Mission memory: use Delete method
-		if err := harness.Memory().Mission().Delete(ctx, req.Key); err != nil {
-			return &harnesspb.MemoryDeleteResponse{
-				Error: &harnesspb.HarnessError{
-					Code:    commonpb.ErrorCode_ERROR_CODE_INTERNAL,
-					Message: fmt.Sprintf("failed to delete from mission memory: %v", err),
-				},
-			}, nil
-		}
-		return &harnesspb.MemoryDeleteResponse{}, nil
-
-	case harnesspb.MemoryTier_MEMORY_TIER_LONG_TERM:
-		// Long-term memory does not support Delete by key
-		return &harnesspb.MemoryDeleteResponse{
-			Error: &harnesspb.HarnessError{
-				Code:    commonpb.ErrorCode_ERROR_CODE_INVALID_ARGUMENT,
-				Message: "Long-term memory does not support Delete by key. Use LongTermMemoryDelete instead.",
-			},
-		}, nil
-
-	default:
-		return &harnesspb.MemoryDeleteResponse{
-			Error: &harnesspb.HarnessError{
-				Code:    commonpb.ErrorCode_ERROR_CODE_INVALID_ARGUMENT,
-				Message: fmt.Sprintf("unknown memory tier: %v", tier),
-			},
-		}, nil
-	}
-}
-
-// MemoryList implements the memory list RPC with tier routing.
-func (s *HarnessCallbackService) MemoryList(ctx context.Context, req *harnesspb.MemoryListRequest) (*harnesspb.MemoryListResponse, error) {
-	harness, err := s.getHarness(ctx, req.Context)
-	if err != nil {
-		return nil, err
-	}
-
-	// Default to WORKING tier for backward compatibility
-	tier := req.Tier
-	if tier == harnesspb.MemoryTier_MEMORY_TIER_UNSPECIFIED {
-		tier = harnesspb.MemoryTier_MEMORY_TIER_WORKING
-	}
-
-	switch tier {
-	case harnesspb.MemoryTier_MEMORY_TIER_WORKING:
-		// List keys from working memory
-		// Note: The proto request has a prefix field, but the working memory List() doesn't support prefix filtering
-		// We'll get all keys and filter by prefix if needed
-		allKeys := harness.Memory().Working().List()
-
-		// Filter by prefix if provided
-		var keys []string
-		if req.Prefix != "" {
-			for _, key := range allKeys {
-				if len(key) >= len(req.Prefix) && key[:len(req.Prefix)] == req.Prefix {
-					keys = append(keys, key)
-				}
-			}
-		} else {
-			keys = allKeys
-		}
-
-		return &harnesspb.MemoryListResponse{
-			Keys: keys,
-		}, nil
-
-	case harnesspb.MemoryTier_MEMORY_TIER_MISSION:
-		// Mission memory: use Keys method
-		allKeys, err := harness.Memory().Mission().Keys(ctx)
-		if err != nil {
-			return &harnesspb.MemoryListResponse{
-				Error: &harnesspb.HarnessError{
-					Code:    commonpb.ErrorCode_ERROR_CODE_INTERNAL,
-					Message: fmt.Sprintf("failed to list keys from mission memory: %v", err),
-				},
-			}, nil
-		}
-
-		// Filter by prefix if provided
-		var keys []string
-		if req.Prefix != "" {
-			for _, key := range allKeys {
-				if len(key) >= len(req.Prefix) && key[:len(req.Prefix)] == req.Prefix {
-					keys = append(keys, key)
-				}
-			}
-		} else {
-			keys = allKeys
-		}
-
-		return &harnesspb.MemoryListResponse{
-			Keys: keys,
-		}, nil
-
-	case harnesspb.MemoryTier_MEMORY_TIER_LONG_TERM:
-		// Long-term memory does not support listing keys
-		return &harnesspb.MemoryListResponse{
-			Error: &harnesspb.HarnessError{
-				Code:    commonpb.ErrorCode_ERROR_CODE_INVALID_ARGUMENT,
-				Message: "Long-term memory does not support listing keys.",
-			},
-		}, nil
-
-	default:
-		return &harnesspb.MemoryListResponse{
-			Error: &harnesspb.HarnessError{
-				Code:    commonpb.ErrorCode_ERROR_CODE_INVALID_ARGUMENT,
-				Message: fmt.Sprintf("unknown memory tier: %v", tier),
-			},
-		}, nil
-	}
-}
-
-// LongTermMemoryStore implements the long-term memory store RPC.
-func (s *HarnessCallbackService) LongTermMemoryStore(ctx context.Context, req *harnesspb.LongTermMemoryStoreRequest) (*harnesspb.LongTermMemoryStoreResponse, error) {
-	harness, err := s.getHarness(ctx, req.Context)
-	if err != nil {
-		return nil, err
-	}
-
-	// Convert metadata from proto TypedMap
-	metadata := typedValueMapToMap(req.Metadata)
-
-	// Generate UUID for the content - SDK interface returns ID, daemon requires ID input
-	id := uuid.New().String()
-
-	// Daemon's LongTermMemory.Store takes (ctx, id, content, metadata)
-	err = harness.Memory().LongTerm().Store(ctx, id, req.Content, metadata)
-	if err != nil {
-		return &harnesspb.LongTermMemoryStoreResponse{
-			Error: &harnesspb.HarnessError{Code: commonpb.ErrorCode_ERROR_CODE_INTERNAL, Message: err.Error()},
-		}, nil
-	}
-
-	return &harnesspb.LongTermMemoryStoreResponse{Id: id}, nil
-}
-
-// LongTermMemorySearch implements the long-term memory search RPC.
-func (s *HarnessCallbackService) LongTermMemorySearch(ctx context.Context, req *harnesspb.LongTermMemorySearchRequest) (*harnesspb.LongTermMemorySearchResponse, error) {
-	harness, err := s.getHarness(ctx, req.Context)
-	if err != nil {
-		return nil, err
-	}
-
-	// Convert filters from proto TypedMap
-	filters := typedValueMapToMap(req.Filters)
-
-	results, err := harness.Memory().LongTerm().Search(ctx, req.Query, int(req.TopK), filters)
-	if err != nil {
-		return &harnesspb.LongTermMemorySearchResponse{
-			Error: &harnesspb.HarnessError{Code: commonpb.ErrorCode_ERROR_CODE_INTERNAL, Message: err.Error()},
-		}, nil
-	}
-
-	pbResults := make([]*harnesspb.LongTermMemoryResult, len(results))
-	for i, r := range results {
-		typedMapMetadata := mapToTypedMap(r.Item.Metadata)
-		pbResults[i] = &harnesspb.LongTermMemoryResult{
-			Id:        r.Item.Key,
-			Content:   r.Item.Value.(string), // Content is stored as string
-			Metadata:  typedMapMetadata.Entries,
-			Score:     r.Score,
-			CreatedAt: r.Item.CreatedAt.Format(time.RFC3339),
-		}
-	}
-
-	return &harnesspb.LongTermMemorySearchResponse{Results: pbResults}, nil
-}
-
-// LongTermMemoryDelete implements the long-term memory delete RPC.
-func (s *HarnessCallbackService) LongTermMemoryDelete(ctx context.Context, req *harnesspb.LongTermMemoryDeleteRequest) (*harnesspb.LongTermMemoryDeleteResponse, error) {
-	harness, err := s.getHarness(ctx, req.Context)
-	if err != nil {
-		return nil, err
-	}
-
-	err = harness.Memory().LongTerm().Delete(ctx, req.Id)
-	if err != nil {
-		return &harnesspb.LongTermMemoryDeleteResponse{
-			Error: &harnesspb.HarnessError{Code: commonpb.ErrorCode_ERROR_CODE_INTERNAL, Message: err.Error()},
-		}, nil
-	}
-
-	return &harnesspb.LongTermMemoryDeleteResponse{}, nil
-}
-
-// MissionMemorySearch implements the mission memory search RPC.
-func (s *HarnessCallbackService) MissionMemorySearch(ctx context.Context, req *harnesspb.MissionMemorySearchRequest) (*harnesspb.MissionMemorySearchResponse, error) {
-	harness, err := s.getHarness(ctx, req.Context)
-	if err != nil {
-		return nil, err
-	}
-
-	results, err := harness.Memory().Mission().Search(ctx, req.Query, int(req.Limit))
-	if err != nil {
-		return &harnesspb.MissionMemorySearchResponse{
-			Error: &harnesspb.HarnessError{Code: commonpb.ErrorCode_ERROR_CODE_INTERNAL, Message: err.Error()},
-		}, nil
-	}
-
-	pbResults := make([]*harnesspb.MissionMemoryResult, len(results))
-	for i, r := range results {
-		typedMapMetadata := mapToTypedMap(r.Item.Metadata)
-		pbResults[i] = &harnesspb.MissionMemoryResult{
-			Key:       r.Item.Key,
-			Value:     anyToTypedValue(r.Item.Value),
-			Metadata:  typedMapMetadata.Entries,
-			Score:     r.Score,
-			CreatedAt: r.Item.CreatedAt.Format(time.RFC3339),
-			UpdatedAt: r.Item.UpdatedAt.Format(time.RFC3339),
-		}
-	}
-
-	return &harnesspb.MissionMemorySearchResponse{Results: pbResults}, nil
-}
-
-// MissionMemoryHistory implements the mission memory history RPC.
-func (s *HarnessCallbackService) MissionMemoryHistory(ctx context.Context, req *harnesspb.MissionMemoryHistoryRequest) (*harnesspb.MissionMemoryHistoryResponse, error) {
-	harness, err := s.getHarness(ctx, req.Context)
-	if err != nil {
-		return nil, err
-	}
-
-	items, err := harness.Memory().Mission().History(ctx, int(req.Limit))
-	if err != nil {
-		return &harnesspb.MissionMemoryHistoryResponse{
-			Error: &harnesspb.HarnessError{Code: commonpb.ErrorCode_ERROR_CODE_INTERNAL, Message: err.Error()},
-		}, nil
-	}
-
-	pbItems := make([]*harnesspb.MissionMemoryItem, len(items))
-	for i, item := range items {
-		typedMapMetadata := mapToTypedMap(item.Metadata)
-		pbItems[i] = &harnesspb.MissionMemoryItem{
-			Key:       item.Key,
-			Value:     anyToTypedValue(item.Value),
-			Metadata:  typedMapMetadata.Entries,
-			CreatedAt: item.CreatedAt.Format(time.RFC3339),
-			UpdatedAt: item.UpdatedAt.Format(time.RFC3339),
-		}
-	}
-
-	return &harnesspb.MissionMemoryHistoryResponse{Items: pbItems}, nil
-}
-
-// MissionMemoryGetPreviousRunValue implements the mission memory get previous run value RPC.
-func (s *HarnessCallbackService) MissionMemoryGetPreviousRunValue(ctx context.Context, req *harnesspb.MissionMemoryGetPreviousRunValueRequest) (*harnesspb.MissionMemoryGetPreviousRunValueResponse, error) {
-	harness, err := s.getHarness(ctx, req.Context)
-	if err != nil {
-		return nil, err
-	}
-
-	value, err := harness.Memory().Mission().GetPreviousRunValue(ctx, req.Key)
-	if err != nil {
-		// Check for specific errors
-		errMsg := err.Error()
-		return &harnesspb.MissionMemoryGetPreviousRunValueResponse{
-			Found: false,
-			Error: &harnesspb.HarnessError{Code: commonpb.ErrorCode_ERROR_CODE_NOT_FOUND, Message: errMsg},
-		}, nil
-	}
-
-	return &harnesspb.MissionMemoryGetPreviousRunValueResponse{
-		Value: anyToTypedValue(value),
-		Found: true,
-	}, nil
-}
-
-// MissionMemoryGetValueHistory implements the mission memory get value history RPC.
-func (s *HarnessCallbackService) MissionMemoryGetValueHistory(ctx context.Context, req *harnesspb.MissionMemoryGetValueHistoryRequest) (*harnesspb.MissionMemoryGetValueHistoryResponse, error) {
-	harness, err := s.getHarness(ctx, req.Context)
-	if err != nil {
-		return nil, err
-	}
-
-	history, err := harness.Memory().Mission().GetValueHistory(ctx, req.Key)
-	if err != nil {
-		return &harnesspb.MissionMemoryGetValueHistoryResponse{
-			Error: &harnesspb.HarnessError{Code: commonpb.ErrorCode_ERROR_CODE_INTERNAL, Message: err.Error()},
-		}, nil
-	}
-
-	pbValues := make([]*harnesspb.HistoricalValueItem, len(history))
-	for i, h := range history {
-		pbValues[i] = &harnesspb.HistoricalValueItem{
-			Value:     anyToTypedValue(h.Value),
-			RunNumber: int32(h.RunNumber),
-			MissionId: h.MissionID,
-			StoredAt:  h.StoredAt.Format(time.RFC3339),
-		}
-	}
-
-	return &harnesspb.MissionMemoryGetValueHistoryResponse{Values: pbValues}, nil
-}
-
-// MissionMemoryContinuityMode implements the mission memory continuity mode RPC.
-func (s *HarnessCallbackService) MissionMemoryContinuityMode(ctx context.Context, req *harnesspb.MissionMemoryContinuityModeRequest) (*harnesspb.MissionMemoryContinuityModeResponse, error) {
-	harness, err := s.getHarness(ctx, req.Context)
-	if err != nil {
-		return nil, err
-	}
-
-	mode := harness.Memory().Mission().ContinuityMode()
-	return &harnesspb.MissionMemoryContinuityModeResponse{
-		Mode: string(mode),
-	}, nil
-}
-
 // ============================================================================
 // GraphRAG Query Operations
 // ============================================================================
-
-// GraphRAGSupport interface for harnesses that support GraphRAG operations.
-// The DefaultAgentHarness and MiddlewareHarness implement these methods.
-type GraphRAGSupport interface {
-	QueryGraphRAG(ctx context.Context, query sdkgraphrag.Query) ([]sdkgraphrag.Result, error)
-	FindSimilarAttacks(ctx context.Context, content string, topK int) ([]sdkgraphrag.AttackPattern, error)
-	FindSimilarFindings(ctx context.Context, findingID string, topK int) ([]sdkgraphrag.FindingNode, error)
-	GetAttackChains(ctx context.Context, techniqueID string, maxDepth int) ([]sdkgraphrag.AttackChain, error)
-	GetRelatedFindings(ctx context.Context, findingID string) ([]sdkgraphrag.FindingNode, error)
-	StoreGraphNode(ctx context.Context, node sdkgraphrag.GraphNode) (string, error)
-	CreateGraphRelationship(ctx context.Context, rel sdkgraphrag.Relationship) error
-	StoreGraphBatch(ctx context.Context, batch sdkgraphrag.Batch) ([]string, error)
-	TraverseGraph(ctx context.Context, startNodeID string, opts sdkgraphrag.TraversalOptions) ([]sdkgraphrag.TraversalResult, error)
-	GraphRAGHealth(ctx context.Context) types.HealthStatus
-}
-
-// GraphRAGQuery implements the GraphRAG query RPC.
-func (s *HarnessCallbackService) GraphRAGQuery(ctx context.Context, req *harnesspb.GraphRAGQueryRequest) (*harnesspb.GraphRAGQueryResponse, error) {
-	harness, err := s.getHarness(ctx, req.Context)
-	if err != nil {
-		return nil, err
-	}
-
-	// Check if harness supports GraphRAG
-	graphRAG, ok := harness.(GraphRAGSupport)
-	if !ok {
-		return &harnesspb.GraphRAGQueryResponse{
-			Error: &harnesspb.HarnessError{
-				Code:    commonpb.ErrorCode_ERROR_CODE_INTERNAL,
-				Message: "GraphRAG not supported by this harness",
-			},
-		}, nil
-	}
-
-	// Inject MissionRunID from proto context into Go context for mission-scoped queries
-	var missionRunID string
-	if req.Context != nil && req.Context.MissionRunId != "" {
-		missionRunID = req.Context.MissionRunId
-		ctx = ContextWithMissionRunID(ctx, missionRunID)
-		s.logger.Info("GraphRAGQuery: injected MissionRunID into context",
-			"mission_run_id", missionRunID,
-			"agent_name", req.Context.AgentName)
-	} else {
-		s.logger.Warn("GraphRAGQuery: no MissionRunID in request context",
-			"has_context", req.Context != nil)
-	}
-
-	// Deserialize query
-	query := protoQueryToSDKQuery(req.Query)
-
-	// Ensure query has MissionRunID from context if not explicitly set in the query
-	// This is the primary source of MissionRunID - the agent's callback context
-	if query.MissionRunID == "" && missionRunID != "" {
-		query.MissionRunID = missionRunID
-		s.logger.Info("GraphRAGQuery: set query.MissionRunID from context",
-			"mission_run_id", missionRunID)
-	}
-	if query.Text == "" && len(query.NodeTypes) == 0 {
-		return &harnesspb.GraphRAGQueryResponse{
-			Error: &harnesspb.HarnessError{
-				Code:    commonpb.ErrorCode_ERROR_CODE_INVALID_ARGUMENT,
-				Message: "query must have Text or NodeTypes",
-			},
-		}, nil
-	}
-
-	// Execute query
-	results, err := graphRAG.QueryGraphRAG(ctx, query)
-	if err != nil {
-		s.logger.Error("GraphRAG query failed", "error", err)
-		return &harnesspb.GraphRAGQueryResponse{
-			Error: &harnesspb.HarnessError{
-				Code:    commonpb.ErrorCode_ERROR_CODE_INTERNAL,
-				Message: err.Error(),
-			},
-		}, nil
-	}
-
-	// Convert results to proto
-	protoResults := make([]*harnesspb.GraphRAGResult, len(results))
-	for i, result := range results {
-		protoResults[i] = &harnesspb.GraphRAGResult{
-			Node:        s.graphNodeToProto(result.Node),
-			Score:       result.Score,
-			VectorScore: result.VectorScore,
-			GraphScore:  result.GraphScore,
-			Path:        result.Path,
-			Distance:    int32(result.Distance),
-		}
-	}
-
-	return &harnesspb.GraphRAGQueryResponse{
-		Results: protoResults,
-	}, nil
-}
-
-// FindSimilarAttacks implements the find similar attacks RPC.
-func (s *HarnessCallbackService) FindSimilarAttacks(ctx context.Context, req *harnesspb.FindSimilarAttacksRequest) (*harnesspb.FindSimilarAttacksResponse, error) {
-	graphRAG, err := s.getGraphRAGHarness(ctx, req.Context)
-	if err != nil {
-		return &harnesspb.FindSimilarAttacksResponse{
-			Error: &harnesspb.HarnessError{
-				Code:    commonpb.ErrorCode_ERROR_CODE_INTERNAL,
-				Message: err.Error(),
-			},
-		}, nil
-	}
-
-	// Find similar attacks
-	attacks, err := graphRAG.FindSimilarAttacks(ctx, req.Content, int(req.TopK))
-	if err != nil {
-		s.logger.Error("find similar attacks failed", "error", err)
-		return &harnesspb.FindSimilarAttacksResponse{
-			Error: &harnesspb.HarnessError{
-				Code:    commonpb.ErrorCode_ERROR_CODE_INTERNAL,
-				Message: err.Error(),
-			},
-		}, nil
-	}
-
-	// Convert to proto
-	protoAttacks := make([]*harnesspb.AttackPattern, len(attacks))
-	for i, attack := range attacks {
-		protoAttacks[i] = &harnesspb.AttackPattern{
-			TechniqueId: attack.TechniqueID,
-			Name:        attack.Name,
-			Description: attack.Description,
-			Tactics:     attack.Tactics,
-			Platforms:   attack.Platforms,
-			Similarity:  attack.Similarity,
-		}
-	}
-
-	return &harnesspb.FindSimilarAttacksResponse{
-		Attacks: protoAttacks,
-	}, nil
-}
-
-// FindSimilarFindings implements the find similar findings RPC.
-func (s *HarnessCallbackService) FindSimilarFindings(ctx context.Context, req *harnesspb.FindSimilarFindingsRequest) (*harnesspb.FindSimilarFindingsResponse, error) {
-	graphRAG, err := s.getGraphRAGHarness(ctx, req.Context)
-	if err != nil {
-		return &harnesspb.FindSimilarFindingsResponse{
-			Error: &harnesspb.HarnessError{
-				Code:    commonpb.ErrorCode_ERROR_CODE_INTERNAL,
-				Message: err.Error(),
-			},
-		}, nil
-	}
-
-	// Find similar findings
-	findings, err := graphRAG.FindSimilarFindings(ctx, req.FindingId, int(req.TopK))
-	if err != nil {
-		s.logger.Error("find similar findings failed", "error", err)
-		return &harnesspb.FindSimilarFindingsResponse{
-			Error: &harnesspb.HarnessError{
-				Code:    commonpb.ErrorCode_ERROR_CODE_INTERNAL,
-				Message: err.Error(),
-			},
-		}, nil
-	}
-
-	// Convert to proto
-	protoFindings := make([]*harnesspb.FindingNode, len(findings))
-	for i, finding := range findings {
-		protoFindings[i] = &harnesspb.FindingNode{
-			Id:          finding.ID,
-			Title:       finding.Title,
-			Description: finding.Description,
-			Severity:    finding.Severity,
-			Category:    finding.Category,
-			Confidence:  finding.Confidence,
-			Similarity:  finding.Similarity,
-		}
-	}
-
-	return &harnesspb.FindSimilarFindingsResponse{
-		Findings: protoFindings,
-	}, nil
-}
-
-// GetAttackChains implements the get attack chains RPC.
-func (s *HarnessCallbackService) GetAttackChains(ctx context.Context, req *harnesspb.GetAttackChainsRequest) (*harnesspb.GetAttackChainsResponse, error) {
-	graphRAG, err := s.getGraphRAGHarness(ctx, req.Context)
-	if err != nil {
-		return &harnesspb.GetAttackChainsResponse{
-			Error: &harnesspb.HarnessError{
-				Code:    commonpb.ErrorCode_ERROR_CODE_INTERNAL,
-				Message: err.Error(),
-			},
-		}, nil
-	}
-
-	// Get attack chains
-	chains, err := graphRAG.GetAttackChains(ctx, req.TechniqueId, int(req.MaxDepth))
-	if err != nil {
-		s.logger.Error("get attack chains failed", "error", err)
-		return &harnesspb.GetAttackChainsResponse{
-			Error: &harnesspb.HarnessError{
-				Code:    commonpb.ErrorCode_ERROR_CODE_INTERNAL,
-				Message: err.Error(),
-			},
-		}, nil
-	}
-
-	// Convert to proto
-	protoChains := make([]*harnesspb.AttackChain, len(chains))
-	for i, chain := range chains {
-		protoSteps := make([]*harnesspb.AttackStep, len(chain.Steps))
-		for j, step := range chain.Steps {
-			protoSteps[j] = &harnesspb.AttackStep{
-				Order:       int32(step.Order),
-				TechniqueId: step.TechniqueID,
-				NodeId:      step.NodeID,
-				Description: step.Description,
-				Confidence:  step.Confidence,
-			}
-		}
-
-		protoChains[i] = &harnesspb.AttackChain{
-			Id:       chain.ID,
-			Name:     chain.Name,
-			Severity: chain.Severity,
-			Steps:    protoSteps,
-		}
-	}
-
-	return &harnesspb.GetAttackChainsResponse{
-		Chains: protoChains,
-	}, nil
-}
-
-// GetRelatedFindings implements the get related findings RPC.
-func (s *HarnessCallbackService) GetRelatedFindings(ctx context.Context, req *harnesspb.GetRelatedFindingsRequest) (*harnesspb.GetRelatedFindingsResponse, error) {
-	graphRAG, err := s.getGraphRAGHarness(ctx, req.Context)
-	if err != nil {
-		return &harnesspb.GetRelatedFindingsResponse{
-			Error: &harnesspb.HarnessError{
-				Code:    commonpb.ErrorCode_ERROR_CODE_INTERNAL,
-				Message: err.Error(),
-			},
-		}, nil
-	}
-
-	// Get related findings
-	findings, err := graphRAG.GetRelatedFindings(ctx, req.FindingId)
-	if err != nil {
-		s.logger.Error("get related findings failed", "error", err)
-		return &harnesspb.GetRelatedFindingsResponse{
-			Error: &harnesspb.HarnessError{
-				Code:    commonpb.ErrorCode_ERROR_CODE_INTERNAL,
-				Message: err.Error(),
-			},
-		}, nil
-	}
-
-	// Convert to proto
-	protoFindings := make([]*harnesspb.FindingNode, len(findings))
-	for i, finding := range findings {
-		protoFindings[i] = &harnesspb.FindingNode{
-			Id:          finding.ID,
-			Title:       finding.Title,
-			Description: finding.Description,
-			Severity:    finding.Severity,
-			Category:    finding.Category,
-			Confidence:  finding.Confidence,
-			Similarity:  finding.Similarity,
-		}
-	}
-
-	return &harnesspb.GetRelatedFindingsResponse{
-		Findings: protoFindings,
-	}, nil
-}
 
 // ============================================================================
 // GraphRAG Storage Operations
@@ -2308,71 +1562,6 @@ func (s *HarnessCallbackService) StoreGraphBatch(ctx context.Context, req *harne
 
 	return &harnesspb.StoreGraphBatchResponse{
 		NodeIds: nodeIDs,
-	}, nil
-}
-
-// TraverseGraph implements the traverse graph RPC.
-func (s *HarnessCallbackService) TraverseGraph(ctx context.Context, req *harnesspb.TraverseGraphRequest) (*harnesspb.TraverseGraphResponse, error) {
-	graphRAG, err := s.getGraphRAGHarness(ctx, req.Context)
-	if err != nil {
-		return &harnesspb.TraverseGraphResponse{
-			Error: &harnesspb.HarnessError{
-				Code:    commonpb.ErrorCode_ERROR_CODE_INTERNAL,
-				Message: err.Error(),
-			},
-		}, nil
-	}
-
-	// Convert proto options to SDK options
-	opts := sdkgraphrag.TraversalOptions{
-		MaxDepth:          int(req.Options.MaxDepth),
-		RelationshipTypes: req.Options.RelationshipTypes,
-		NodeTypes:         req.Options.NodeTypes,
-		Direction:         req.Options.Direction,
-	}
-
-	// Traverse graph
-	results, err := graphRAG.TraverseGraph(ctx, req.StartNodeId, opts)
-	if err != nil {
-		s.logger.Error("traverse graph failed", "error", err)
-		return &harnesspb.TraverseGraphResponse{
-			Error: &harnesspb.HarnessError{
-				Code:    commonpb.ErrorCode_ERROR_CODE_INTERNAL,
-				Message: err.Error(),
-			},
-		}, nil
-	}
-
-	// Convert results to proto
-	protoResults := make([]*harnesspb.TraversalResult, len(results))
-	for i, result := range results {
-		protoResults[i] = &harnesspb.TraversalResult{
-			Node:     s.graphNodeToProto(result.Node),
-			Path:     result.Path,
-			Distance: int32(result.Distance),
-		}
-	}
-
-	return &harnesspb.TraverseGraphResponse{
-		Results: protoResults,
-	}, nil
-}
-
-// GraphRAGHealth implements the GraphRAG health check RPC.
-func (s *HarnessCallbackService) GraphRAGHealth(ctx context.Context, req *harnesspb.GraphRAGHealthRequest) (*harnesspb.GraphRAGHealthResponse, error) {
-	graphRAG, err := s.getGraphRAGHarness(ctx, req.Context)
-	if err != nil {
-		return nil, err
-	}
-
-	// Get health status
-	healthStatus := graphRAG.GraphRAGHealth(ctx)
-
-	return &harnesspb.GraphRAGHealthResponse{
-		Status: &harnesspb.HarnessHealthStatus{
-			State:   string(healthStatus.State),
-			Message: healthStatus.Message,
-		},
 	}, nil
 }
 
@@ -3645,44 +2834,6 @@ func protoFilterToFindingFilter(pf *harnesspb.FindingFilter) FindingFilter {
 	return filter
 }
 
-// protoQueryToSDKQuery converts a proto GraphQuery to SDK Query.
-func protoQueryToSDKQuery(pq *typespb.GraphQuery) sdkgraphrag.Query {
-	if pq == nil {
-		return sdkgraphrag.Query{}
-	}
-
-	// Apply default weights if both are zero (proto default values)
-	// SDK requires VectorWeight + GraphWeight == 1.0
-	vectorWeight := pq.VectorWeight
-	graphWeight := pq.GraphWeight
-	if vectorWeight == 0.0 && graphWeight == 0.0 {
-		// Use SDK default weights: 0.6 vector, 0.4 graph
-		vectorWeight = 0.6
-		graphWeight = 0.4
-	}
-
-	query := sdkgraphrag.Query{
-		Text:         pq.Text,
-		NodeTypes:    pq.NodeTypes,
-		TopK:         int(pq.TopK),
-		MinScore:     float64(pq.MinScore),
-		VectorWeight: vectorWeight,
-		GraphWeight:  graphWeight,
-		MissionRunID: pq.MissionRunId,
-	}
-
-	// Convert embedding if present (proto uses float32, SDK uses float64)
-	if len(pq.Embedding) > 0 {
-		embedding := make([]float64, len(pq.Embedding))
-		for i, v := range pq.Embedding {
-			embedding[i] = float64(v)
-		}
-		query.Embedding = embedding
-	}
-
-	return query
-}
-
 // StoreNode implements the proto-canonical StoreNode RPC using graphragpb.GraphNode.
 // This is the preferred method for storing graph nodes with full type safety.
 func (s *HarnessCallbackService) StoreNode(ctx context.Context, req *harnesspb.StoreNodeRequest) (*harnesspb.StoreNodeResponse, error) {
@@ -3754,48 +2905,25 @@ func (s *HarnessCallbackService) StoreNode(ctx context.Context, req *harnesspb.S
 	}, nil
 }
 
-// QueryNodes implements the proto-canonical QueryNodes RPC using graphragpb.GraphQuery.
-// This is the preferred method for querying graph nodes with full type safety.
-func (s *HarnessCallbackService) QueryNodes(ctx context.Context, req *harnesspb.QueryNodesRequest) (*harnesspb.QueryNodesResponse, error) {
-	graphRAG, err := s.getGraphRAGHarness(ctx, req.Context)
-	if err != nil {
-		return &harnesspb.QueryNodesResponse{
+// Observe forwards a typed agent observation to the brain via the observation
+// sink (ADR-0007). The brain resolves identity and topology; the daemon-wired
+// sink derives the scope from mission context. No-op when the sink is unwired.
+func (s *HarnessCallbackService) Observe(ctx context.Context, req *harnesspb.ObserveRequest) (*harnesspb.ObserveResponse, error) {
+	if req.Context != nil && req.Context.MissionId != "" {
+		ctx = middleware.WithMissionContext(ctx, req.Context.MissionId, req.Context.AgentName)
+	}
+	if s.observationSink == nil {
+		return &harnesspb.ObserveResponse{}, nil
+	}
+	if err := s.observationSink(ctx, req); err != nil {
+		return &harnesspb.ObserveResponse{
 			Error: &harnesspb.HarnessError{
 				Code:    commonpb.ErrorCode_ERROR_CODE_INTERNAL,
 				Message: err.Error(),
 			},
 		}, nil
 	}
-
-	// Inject MissionRunID from proto context into Go context
-	if req.Context != nil && req.Context.MissionRunId != "" {
-		ctx = ContextWithMissionRunID(ctx, req.Context.MissionRunId)
-	}
-
-	// Convert graphragpb.GraphQuery to SDK query
-	query := s.graphragpbQueryToSDKQuery(req.Query)
-
-	// Execute query
-	results, err := graphRAG.QueryGraphRAG(ctx, query)
-	if err != nil {
-		s.logger.Error("query graph nodes failed", "error", err)
-		return &harnesspb.QueryNodesResponse{
-			Error: &harnesspb.HarnessError{
-				Code:    commonpb.ErrorCode_ERROR_CODE_INTERNAL,
-				Message: err.Error(),
-			},
-		}, nil
-	}
-
-	// Convert SDK results to graphragpb.QueryResult
-	protoResults := make([]*graphragpb.QueryResult, len(results))
-	for i, r := range results {
-		protoResults[i] = s.sdkResultToGraphragpbResult(r)
-	}
-
-	return &harnesspb.QueryNodesResponse{
-		Results: protoResults,
-	}, nil
+	return &harnesspb.ObserveResponse{}, nil
 }
 
 // graphragpbNodeToSDKNode converts a graphragpb.GraphNode to an SDK sdkgraphrag.GraphNode.
@@ -3857,55 +2985,6 @@ func (s *HarnessCallbackService) graphragpbValueToAny(v *graphragpb.Value) any {
 		return k.TimestampValue
 	default:
 		return nil
-	}
-}
-
-// graphragpbQueryToSDKQuery converts a graphragpb.GraphQuery to an SDK sdkgraphrag.Query.
-func (s *HarnessCallbackService) graphragpbQueryToSDKQuery(pq *graphragpb.GraphQuery) sdkgraphrag.Query {
-	if pq == nil {
-		return sdkgraphrag.Query{}
-	}
-
-	// NodeTypes is now a repeated string field - just copy directly
-	nodeTypes := make([]string, len(pq.NodeTypes))
-	copy(nodeTypes, pq.NodeTypes)
-
-	// Note: QueryScope from proto is handled via MissionRunID injection in the context,
-	// not through the query struct. The SDK Query struct does not have a Scope field.
-
-	// graphragpb.GraphQuery does not have VectorWeight/GraphWeight fields,
-	// so we always use SDK default weights (0.6 vector, 0.4 graph).
-	// SDK requires VectorWeight + GraphWeight == 1.0
-
-	return sdkgraphrag.Query{
-		Text:         pq.Text,
-		NodeTypes:    nodeTypes,
-		TopK:         int(pq.TopK),
-		MinScore:     pq.MinScore,
-		VectorWeight: 0.6,
-		GraphWeight:  0.4,
-	}
-}
-
-// sdkResultToGraphragpbResult converts an SDK sdkgraphrag.Result to a graphragpb.QueryResult.
-func (s *HarnessCallbackService) sdkResultToGraphragpbResult(r sdkgraphrag.Result) *graphragpb.QueryResult {
-	// Type is now a string field
-	nodeType := r.Node.Type
-
-	// Convert properties to Value map
-	props := make(map[string]*graphragpb.Value, len(r.Node.Properties))
-	for k, v := range r.Node.Properties {
-		props[k] = s.anyToGraphragpbValue(v)
-	}
-
-	return &graphragpb.QueryResult{
-		Node: &graphragpb.GraphNode{
-			Id:         r.Node.ID,
-			Type:       nodeType,
-			Content:    r.Node.Content,
-			Properties: props,
-		},
-		Score: r.Score,
 	}
 }
 

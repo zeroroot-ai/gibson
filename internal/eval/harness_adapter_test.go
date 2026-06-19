@@ -16,7 +16,6 @@ import (
 	sdkAgent "github.com/zeroroot-ai/sdk/agent"
 	"github.com/zeroroot-ai/sdk/codegen/workspace"
 	"github.com/zeroroot-ai/sdk/finding"
-	"github.com/zeroroot-ai/sdk/graphrag"
 	"github.com/zeroroot-ai/sdk/llm"
 	sdktypes "github.com/zeroroot-ai/sdk/types"
 	"go.opentelemetry.io/otel/trace"
@@ -519,45 +518,6 @@ func TestGibsonHarnessAdapter_SubmitFinding(t *testing.T) {
 	})
 }
 
-// TestGibsonHarnessAdapter_GetFindings tests finding retrieval with filter and severity conversion.
-func TestGibsonHarnessAdapter_GetFindings(t *testing.T) {
-	ctx := context.Background()
-
-	inner := &mockInnerHarness{
-		getFindingsResult: []gibsonAgent.Finding{
-			{
-				ID:          gibsonTypes.ID("finding-1"),
-				Title:       "XSS Vulnerability",
-				Description: "Reflected XSS in search",
-				Severity:    gibsonAgent.SeverityHigh,
-				Confidence:  0.8,
-				Category:    "injection",
-			},
-			{
-				ID:          gibsonTypes.ID("finding-2"),
-				Title:       "Weak Password",
-				Description: "Default credentials in use",
-				Severity:    gibsonAgent.SeverityMedium,
-				Confidence:  0.95,
-				Category:    "auth",
-			},
-		},
-	}
-
-	adapter := NewGibsonHarnessAdapter(inner)
-	filter := finding.Filter{
-		Severities: []finding.Severity{finding.SeverityHigh},
-	}
-
-	findings, err := adapter.GetFindings(ctx, filter)
-	require.NoError(t, err)
-	require.Len(t, findings, 2)
-	assert.Equal(t, "finding-1", findings[0].ID)
-	assert.Equal(t, finding.SeverityHigh, findings[0].Severity)
-	assert.Equal(t, "finding-2", findings[1].ID)
-	assert.Equal(t, finding.SeverityMedium, findings[1].Severity)
-}
-
 // TestGibsonHarnessAdapter_Mission tests mission context conversion.
 func TestGibsonHarnessAdapter_Mission(t *testing.T) {
 	inner := &mockInnerHarness{}
@@ -627,77 +587,6 @@ func TestGibsonHarnessAdapter_TokenUsage(t *testing.T) {
 	// Reset clears all usage
 	tracker.Reset()
 	assert.Equal(t, 0, tracker.Total().TotalTokens)
-}
-
-// TestGibsonHarnessAdapter_GraphRAG tests that GraphRAG methods return ErrNotSupported
-// when the inner harness does not implement the graphragProvider interface.
-func TestGibsonHarnessAdapter_GraphRAG(t *testing.T) {
-	ctx := context.Background()
-	inner := &mockInnerHarness{}
-	adapter := NewGibsonHarnessAdapter(inner)
-
-	t.Run("QueryGraphRAG", func(t *testing.T) {
-		_, err := adapter.QueryGraphRAG(ctx, graphrag.Query{Text: "test"})
-		assert.ErrorIs(t, err, ErrNotSupported)
-	})
-
-	t.Run("FindSimilarAttacks", func(t *testing.T) {
-		_, err := adapter.FindSimilarAttacks(ctx, "payload", 5)
-		assert.ErrorIs(t, err, ErrNotSupported)
-	})
-
-	t.Run("FindSimilarFindings", func(t *testing.T) {
-		_, err := adapter.FindSimilarFindings(ctx, "finding-1", 5)
-		assert.ErrorIs(t, err, ErrNotSupported)
-	})
-
-	t.Run("StoreGraphNode", func(t *testing.T) {
-		_, err := adapter.StoreGraphNode(ctx, graphrag.GraphNode{Type: "Finding"})
-		assert.ErrorIs(t, err, ErrNotSupported)
-	})
-
-	t.Run("GraphRAGHealth", func(t *testing.T) {
-		health := adapter.GraphRAGHealth(ctx)
-		assert.Equal(t, "unavailable", health.Status)
-	})
-}
-
-// TestGibsonHarnessAdapter_Memory tests the memory store adapter with working memory operations.
-func TestGibsonHarnessAdapter_Memory(t *testing.T) {
-	ctx := context.Background()
-	inner := &mockInnerHarness{}
-	adapter := NewGibsonHarnessAdapter(inner)
-
-	mem := adapter.Memory()
-	require.NotNil(t, mem)
-
-	// Working memory should be available
-	working := mem.Working()
-	require.NotNil(t, working)
-
-	// Set a value
-	err := working.Set(ctx, "key1", "value1")
-	require.NoError(t, err)
-
-	// Get the value back
-	val, err := working.Get(ctx, "key1")
-	require.NoError(t, err)
-	assert.Equal(t, "value1", val)
-
-	// Missing key returns an error
-	_, err = working.Get(ctx, "nonexistent")
-	assert.Error(t, err)
-
-	// List keys
-	keys, err := working.Keys(ctx)
-	require.NoError(t, err)
-	assert.Contains(t, keys, "key1")
-
-	// Delete removes the key
-	err = working.Delete(ctx, "key1")
-	require.NoError(t, err)
-	_, err = working.Get(ctx, "key1")
-	assert.Error(t, err)
 }
 
 // TestGibsonHarnessAdapter_SeverityConversion tests bidirectional severity conversion.
@@ -802,11 +691,6 @@ func TestGibsonHarnessAdapter_CredentialAndProtoOpsNotSupported(t *testing.T) {
 		assert.ErrorIs(t, err, ErrNotSupported)
 	})
 
-	t.Run("QueryNodes", func(t *testing.T) {
-		_, err := adapter.QueryNodes(ctx, nil)
-		assert.ErrorIs(t, err, ErrNotSupported)
-	})
-
 	t.Run("StoreNode", func(t *testing.T) {
 		_, err := adapter.StoreNode(ctx, nil)
 		assert.ErrorIs(t, err, ErrNotSupported)
@@ -826,60 +710,6 @@ func TestGibsonHarnessAdapter_CredentialAndProtoOpsNotSupported(t *testing.T) {
 	})
 }
 
-// TestGibsonHarnessAdapter_GraphRAGPartialMethodsNotSupported verifies that
-// StoreSemantic, StoreStructured, QuerySemantic, QueryStructured return ErrNotSupported
-// when the inner harness doesn't implement the graphragProvider interface.
-func TestGibsonHarnessAdapter_GraphRAGPartialMethodsNotSupported(t *testing.T) {
-	ctx := context.Background()
-	inner := &mockInnerHarness{}
-	adapter := NewGibsonHarnessAdapter(inner)
-
-	t.Run("StoreSemantic", func(t *testing.T) {
-		_, err := adapter.StoreSemantic(ctx, graphrag.GraphNode{Type: "Host"})
-		assert.ErrorIs(t, err, ErrNotSupported)
-	})
-
-	t.Run("StoreStructured", func(t *testing.T) {
-		_, err := adapter.StoreStructured(ctx, graphrag.GraphNode{Type: "Port"})
-		assert.ErrorIs(t, err, ErrNotSupported)
-	})
-
-	t.Run("QuerySemantic", func(t *testing.T) {
-		_, err := adapter.QuerySemantic(ctx, graphrag.Query{Text: "test"})
-		assert.ErrorIs(t, err, ErrNotSupported)
-	})
-
-	t.Run("QueryStructured", func(t *testing.T) {
-		_, err := adapter.QueryStructured(ctx, graphrag.Query{Text: "test"})
-		assert.ErrorIs(t, err, ErrNotSupported)
-	})
-
-	t.Run("GetAttackChains", func(t *testing.T) {
-		_, err := adapter.GetAttackChains(ctx, "T1190", 3)
-		assert.ErrorIs(t, err, ErrNotSupported)
-	})
-
-	t.Run("GetRelatedFindings", func(t *testing.T) {
-		_, err := adapter.GetRelatedFindings(ctx, "finding-1")
-		assert.ErrorIs(t, err, ErrNotSupported)
-	})
-
-	t.Run("CreateGraphRelationship", func(t *testing.T) {
-		err := adapter.CreateGraphRelationship(ctx, graphrag.Relationship{})
-		assert.ErrorIs(t, err, ErrNotSupported)
-	})
-
-	t.Run("StoreGraphBatch", func(t *testing.T) {
-		_, err := adapter.StoreGraphBatch(ctx, graphrag.Batch{})
-		assert.ErrorIs(t, err, ErrNotSupported)
-	})
-
-	t.Run("TraverseGraph", func(t *testing.T) {
-		_, err := adapter.TraverseGraph(ctx, "node-1", graphrag.TraversalOptions{})
-		assert.ErrorIs(t, err, ErrNotSupported)
-	})
-}
-
 // TestGibsonHarnessAdapter_DelegateToAgent verifies that DelegateToAgent
 // calls the inner harness and converts task/result types correctly.
 func TestGibsonHarnessAdapter_DelegateToAgent(t *testing.T) {
@@ -896,22 +726,4 @@ func TestGibsonHarnessAdapter_DelegateToAgent(t *testing.T) {
 	require.NoError(t, err)
 	// The mock returns a new result with pending status
 	assert.NotEmpty(t, string(result.Status))
-}
-
-// TestGibsonHarnessAdapter_MemoryMissionNil verifies that Mission() returns nil
-// when the inner memory store has no mission memory configured.
-func TestGibsonHarnessAdapter_MemoryMissionNil(t *testing.T) {
-	inner := &mockInnerHarness{}
-	adapter := NewGibsonHarnessAdapter(inner)
-
-	mem := adapter.Memory()
-	require.NotNil(t, mem)
-
-	// Mock returns nil for Mission() — adapter should propagate nil
-	mission := mem.Mission()
-	assert.Nil(t, mission, "Mission() should be nil when inner store has no mission memory")
-
-	// Mock returns nil for LongTerm() — adapter should propagate nil
-	lt := mem.LongTerm()
-	assert.Nil(t, lt, "LongTerm() should be nil when inner store has no long-term memory")
 }
