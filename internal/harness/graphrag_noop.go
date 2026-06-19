@@ -37,31 +37,6 @@ type NoopGraphRAGQueryBridge struct{}
 // but GraphRAG is not configured.
 var ErrGraphRAGNotEnabled = fmt.Errorf("GraphRAG is not enabled. Configure GraphRAG provider in config to use these operations")
 
-// Query returns ErrGraphRAGNotEnabled.
-func (n *NoopGraphRAGQueryBridge) Query(ctx context.Context, query sdkgraphrag.Query) ([]sdkgraphrag.Result, error) {
-	return nil, ErrGraphRAGNotEnabled
-}
-
-// FindSimilarAttacks returns ErrGraphRAGNotEnabled.
-func (n *NoopGraphRAGQueryBridge) FindSimilarAttacks(ctx context.Context, content string, topK int) ([]sdkgraphrag.AttackPattern, error) {
-	return nil, ErrGraphRAGNotEnabled
-}
-
-// FindSimilarFindings returns ErrGraphRAGNotEnabled.
-func (n *NoopGraphRAGQueryBridge) FindSimilarFindings(ctx context.Context, findingID string, topK int) ([]sdkgraphrag.FindingNode, error) {
-	return nil, ErrGraphRAGNotEnabled
-}
-
-// GetAttackChains returns ErrGraphRAGNotEnabled.
-func (n *NoopGraphRAGQueryBridge) GetAttackChains(ctx context.Context, techniqueID string, maxDepth int) ([]sdkgraphrag.AttackChain, error) {
-	return nil, ErrGraphRAGNotEnabled
-}
-
-// GetRelatedFindings returns ErrGraphRAGNotEnabled.
-func (n *NoopGraphRAGQueryBridge) GetRelatedFindings(ctx context.Context, findingID string) ([]sdkgraphrag.FindingNode, error) {
-	return nil, ErrGraphRAGNotEnabled
-}
-
 // StoreNode returns ErrGraphRAGNotEnabled.
 func (n *NoopGraphRAGQueryBridge) StoreNode(ctx context.Context, node sdkgraphrag.GraphNode, missionID, agentName string) (string, error) {
 	return "", ErrGraphRAGNotEnabled
@@ -87,16 +62,6 @@ func (n *NoopGraphRAGQueryBridge) GetRelationships(ctx context.Context, nodeID s
 	return nil, ErrGraphRAGNotEnabled
 }
 
-// QueryByFilter returns ErrGraphRAGNotEnabled.
-func (n *NoopGraphRAGQueryBridge) QueryByFilter(ctx context.Context, filters map[string]interface{}) ([]sdkgraphrag.GraphNode, error) {
-	return nil, ErrGraphRAGNotEnabled
-}
-
-// Traverse returns ErrGraphRAGNotEnabled.
-func (n *NoopGraphRAGQueryBridge) Traverse(ctx context.Context, startNodeID string, opts sdkgraphrag.TraversalOptions) ([]sdkgraphrag.TraversalResult, error) {
-	return nil, ErrGraphRAGNotEnabled
-}
-
 // StoreSemantic returns ErrGraphRAGNotEnabled.
 func (n *NoopGraphRAGQueryBridge) StoreSemantic(ctx context.Context, node sdkgraphrag.GraphNode, missionID, agentName string) (string, error) {
 	return "", ErrGraphRAGNotEnabled
@@ -105,16 +70,6 @@ func (n *NoopGraphRAGQueryBridge) StoreSemantic(ctx context.Context, node sdkgra
 // StoreStructured returns ErrGraphRAGNotEnabled.
 func (n *NoopGraphRAGQueryBridge) StoreStructured(ctx context.Context, node sdkgraphrag.GraphNode, missionID, agentName string) (string, error) {
 	return "", ErrGraphRAGNotEnabled
-}
-
-// QuerySemantic returns ErrGraphRAGNotEnabled.
-func (n *NoopGraphRAGQueryBridge) QuerySemantic(ctx context.Context, query sdkgraphrag.Query) ([]sdkgraphrag.Result, error) {
-	return nil, ErrGraphRAGNotEnabled
-}
-
-// QueryStructured returns ErrGraphRAGNotEnabled.
-func (n *NoopGraphRAGQueryBridge) QueryStructured(ctx context.Context, query sdkgraphrag.Query) ([]sdkgraphrag.Result, error) {
-	return nil, ErrGraphRAGNotEnabled
 }
 
 // Health returns healthy status (no-op).

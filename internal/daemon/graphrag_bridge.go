@@ -153,62 +153,12 @@ func (a *GraphRAGBridgeAdapter) buildEphemeralQueryBridge(ctx context.Context) (
 		return nil, func() {}, fmt.Errorf("graphrag bridge: failed to create session store: %w", storeErr)
 	}
 
-	qb = harness.NewGraphRAGQueryBridge(store, nil)
+	qb = harness.NewGraphRAGQueryBridge(store)
 	return qb, release, nil
 }
 
 // --- harness.GraphRAGQueryBridge implementation ---
 // Each method delegates to an ephemeral DefaultGraphRAGQueryBridge built per-call.
-
-// Query implements harness.GraphRAGQueryBridge.
-func (a *GraphRAGBridgeAdapter) Query(ctx context.Context, query sdkgraphrag.Query) ([]sdkgraphrag.Result, error) {
-	qb, release, err := a.buildEphemeralQueryBridge(ctx)
-	if err != nil {
-		return nil, err
-	}
-	defer release()
-	return qb.Query(ctx, query)
-}
-
-// FindSimilarAttacks implements harness.GraphRAGQueryBridge.
-func (a *GraphRAGBridgeAdapter) FindSimilarAttacks(ctx context.Context, content string, topK int) ([]sdkgraphrag.AttackPattern, error) {
-	qb, release, err := a.buildEphemeralQueryBridge(ctx)
-	if err != nil {
-		return nil, err
-	}
-	defer release()
-	return qb.FindSimilarAttacks(ctx, content, topK)
-}
-
-// FindSimilarFindings implements harness.GraphRAGQueryBridge.
-func (a *GraphRAGBridgeAdapter) FindSimilarFindings(ctx context.Context, findingID string, topK int) ([]sdkgraphrag.FindingNode, error) {
-	qb, release, err := a.buildEphemeralQueryBridge(ctx)
-	if err != nil {
-		return nil, err
-	}
-	defer release()
-	return qb.FindSimilarFindings(ctx, findingID, topK)
-}
-
-// GetAttackChains implements harness.GraphRAGQueryBridge.
-func (a *GraphRAGBridgeAdapter) GetAttackChains(ctx context.Context, techniqueID string, maxDepth int) ([]sdkgraphrag.AttackChain, error) {
-	qb, release, err := a.buildEphemeralQueryBridge(ctx)
-	if err != nil {
-		return nil, err
-	}
-	defer release()
-	return qb.GetAttackChains(ctx, techniqueID, maxDepth)
-}
-
-// GetRelatedFindings implements harness.GraphRAGQueryBridge.
-func (a *GraphRAGBridgeAdapter) GetRelatedFindings(ctx context.Context, findingID string) ([]sdkgraphrag.FindingNode, error) {
-	qb, release, err := a.buildEphemeralQueryBridge(ctx)
-	if err != nil {
-		return nil, err
-	}
-	defer release()
-	return qb.GetRelatedFindings(ctx, findingID)
-}
 
 // StoreNode implements harness.GraphRAGQueryBridge.
 func (a *GraphRAGBridgeAdapter) StoreNode(ctx context.Context, node sdkgraphrag.GraphNode, missionID, agentName string) (string, error) {
@@ -240,16 +190,6 @@ func (a *GraphRAGBridgeAdapter) StoreBatch(ctx context.Context, batch sdkgraphra
 	return qb.StoreBatch(ctx, batch, missionID, agentName)
 }
 
-// Traverse implements harness.GraphRAGQueryBridge.
-func (a *GraphRAGBridgeAdapter) Traverse(ctx context.Context, startNodeID string, opts sdkgraphrag.TraversalOptions) ([]sdkgraphrag.TraversalResult, error) {
-	qb, release, err := a.buildEphemeralQueryBridge(ctx)
-	if err != nil {
-		return nil, err
-	}
-	defer release()
-	return qb.Traverse(ctx, startNodeID, opts)
-}
-
 // StoreSemantic implements harness.GraphRAGQueryBridge.
 func (a *GraphRAGBridgeAdapter) StoreSemantic(ctx context.Context, node sdkgraphrag.GraphNode, missionID, agentName string) (string, error) {
 	qb, release, err := a.buildEphemeralQueryBridge(ctx)
@@ -268,26 +208,6 @@ func (a *GraphRAGBridgeAdapter) StoreStructured(ctx context.Context, node sdkgra
 	}
 	defer release()
 	return qb.StoreStructured(ctx, node, missionID, agentName)
-}
-
-// QuerySemantic implements harness.GraphRAGQueryBridge.
-func (a *GraphRAGBridgeAdapter) QuerySemantic(ctx context.Context, query sdkgraphrag.Query) ([]sdkgraphrag.Result, error) {
-	qb, release, err := a.buildEphemeralQueryBridge(ctx)
-	if err != nil {
-		return nil, err
-	}
-	defer release()
-	return qb.QuerySemantic(ctx, query)
-}
-
-// QueryStructured implements harness.GraphRAGQueryBridge.
-func (a *GraphRAGBridgeAdapter) QueryStructured(ctx context.Context, query sdkgraphrag.Query) ([]sdkgraphrag.Result, error) {
-	qb, release, err := a.buildEphemeralQueryBridge(ctx)
-	if err != nil {
-		return nil, err
-	}
-	defer release()
-	return qb.QueryStructured(ctx, query)
 }
 
 // Health implements harness.GraphRAGQueryBridge. Returns healthy when the adapter

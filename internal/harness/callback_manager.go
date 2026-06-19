@@ -477,6 +477,18 @@ func (m *CallbackManager) SetEventBus(eventBus interface{}) {
 	}
 }
 
+// SetObservationSink sets the observation sink on the callback service, wiring
+// the Observe RPC to the brain (ADR-0007). Call after NewCallbackManager, before
+// Start(). Thread-safe.
+func (m *CallbackManager) SetObservationSink(sink ObservationSink) {
+	if m.server != nil && m.server.service != nil {
+		m.server.service.mu.Lock()
+		defer m.server.service.mu.Unlock()
+		m.server.service.observationSink = sink
+		m.logger.Debug("set observation sink on callback service")
+	}
+}
+
 // SetGraphLoader sets the GraphLoader on the callback service.
 // This enables tool outputs containing DiscoveryResult to be persisted
 // to the Neo4j knowledge graph automatically.

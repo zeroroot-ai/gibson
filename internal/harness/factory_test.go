@@ -216,7 +216,7 @@ func TestNewHarnessFactory_FullConfiguration(t *testing.T) {
 	// Note: GraphRAGBridge and GraphRAGQueryBridge are required - use mock implementations
 	graphRAGBridge := NewGraphRAGBridge(nil, DefaultGraphRAGBridgeConfig())
 	mockStore := &MockGraphRAGStore{IsHealthy: true}
-	graphRAGQueryBridge := NewGraphRAGQueryBridge(mockStore, nil)
+	graphRAGQueryBridge := NewGraphRAGQueryBridge(mockStore)
 
 	config := HarnessConfig{
 		SlotManager:         llm.NewSlotManager(llm.NewLLMRegistry()),

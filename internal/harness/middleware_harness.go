@@ -261,51 +261,6 @@ var _ AgentHarness = (*MiddlewareHarness)(nil)
 // GraphRAGSupport interface implementation - pass through to inner harness
 // These methods enable GraphRAG operations for external agents using callback RPCs.
 
-func (h *MiddlewareHarness) QueryGraphRAG(ctx context.Context, query sdkgraphrag.Query) ([]sdkgraphrag.Result, error) {
-	if inner, ok := h.inner.(interface {
-		QueryGraphRAG(context.Context, sdkgraphrag.Query) ([]sdkgraphrag.Result, error)
-	}); ok {
-		return inner.QueryGraphRAG(ctx, query)
-	}
-	return nil, fmt.Errorf("QueryGraphRAG not supported by inner harness")
-}
-
-func (h *MiddlewareHarness) FindSimilarAttacks(ctx context.Context, content string, topK int) ([]sdkgraphrag.AttackPattern, error) {
-	if inner, ok := h.inner.(interface {
-		FindSimilarAttacks(context.Context, string, int) ([]sdkgraphrag.AttackPattern, error)
-	}); ok {
-		return inner.FindSimilarAttacks(ctx, content, topK)
-	}
-	return nil, fmt.Errorf("FindSimilarAttacks not supported by inner harness")
-}
-
-func (h *MiddlewareHarness) FindSimilarFindings(ctx context.Context, findingID string, topK int) ([]sdkgraphrag.FindingNode, error) {
-	if inner, ok := h.inner.(interface {
-		FindSimilarFindings(context.Context, string, int) ([]sdkgraphrag.FindingNode, error)
-	}); ok {
-		return inner.FindSimilarFindings(ctx, findingID, topK)
-	}
-	return nil, fmt.Errorf("FindSimilarFindings not supported by inner harness")
-}
-
-func (h *MiddlewareHarness) GetAttackChains(ctx context.Context, techniqueID string, maxDepth int) ([]sdkgraphrag.AttackChain, error) {
-	if inner, ok := h.inner.(interface {
-		GetAttackChains(context.Context, string, int) ([]sdkgraphrag.AttackChain, error)
-	}); ok {
-		return inner.GetAttackChains(ctx, techniqueID, maxDepth)
-	}
-	return nil, fmt.Errorf("GetAttackChains not supported by inner harness")
-}
-
-func (h *MiddlewareHarness) GetRelatedFindings(ctx context.Context, findingID string) ([]sdkgraphrag.FindingNode, error) {
-	if inner, ok := h.inner.(interface {
-		GetRelatedFindings(context.Context, string) ([]sdkgraphrag.FindingNode, error)
-	}); ok {
-		return inner.GetRelatedFindings(ctx, findingID)
-	}
-	return nil, fmt.Errorf("GetRelatedFindings not supported by inner harness")
-}
-
 func (h *MiddlewareHarness) StoreGraphNode(ctx context.Context, node sdkgraphrag.GraphNode) (string, error) {
 	if inner, ok := h.inner.(interface {
 		StoreGraphNode(context.Context, sdkgraphrag.GraphNode) (string, error)
@@ -331,15 +286,6 @@ func (h *MiddlewareHarness) StoreGraphBatch(ctx context.Context, batch sdkgraphr
 		return inner.StoreGraphBatch(ctx, batch)
 	}
 	return nil, fmt.Errorf("StoreGraphBatch not supported by inner harness")
-}
-
-func (h *MiddlewareHarness) TraverseGraph(ctx context.Context, startNodeID string, opts sdkgraphrag.TraversalOptions) ([]sdkgraphrag.TraversalResult, error) {
-	if inner, ok := h.inner.(interface {
-		TraverseGraph(context.Context, string, sdkgraphrag.TraversalOptions) ([]sdkgraphrag.TraversalResult, error)
-	}); ok {
-		return inner.TraverseGraph(ctx, startNodeID, opts)
-	}
-	return nil, fmt.Errorf("TraverseGraph not supported by inner harness")
 }
 
 func (h *MiddlewareHarness) GraphRAGHealth(ctx context.Context) types.HealthStatus {

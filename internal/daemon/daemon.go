@@ -1103,6 +1103,15 @@ func (d *daemonImpl) Start(ctx context.Context) error {
 		d.logger.Info(ctx, "configured callback service with event bus")
 	}
 
+	// Wire the Observe RPC to the per-tenant brain (ADR-0007): typed agent
+	// observations become Timeline events the reducer folds into the World, where
+	// scope-relative identity (ADR-0002) resolves entities + topology. Scope is
+	// derived from mission context.
+	if d.brainRegistry != nil {
+		d.callback.SetObservationSink(ingestObservation(d.brainRegistry, d.registryTenant))
+		d.logger.Info(ctx, "wired callback Observe RPC to the ECS brain")
+	}
+
 	// GraphLoader is no longer wired at startup. Domain node persistence via the
 	// graph is handled per-call by GraphRAGBridgeAdapter (spec graphrag-tenant-scope).
 

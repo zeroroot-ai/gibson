@@ -24,27 +24,12 @@ import (
 //
 // All methods include OpenTelemetry instrumentation for observability.
 // GraphRAG is a core requirement - the daemon will fail to start if GraphRAG is not configured.
+//
+// This is the agent EMIT surface (ECS-brain cutover, ADR-0007). The query/recall
+// methods were removed — under ADR-0001 agents do not read the graph back; the
+// brain is the sole reader. The store methods persist to Neo4j directly today;
+// they are superseded by the World→graph projector (gibson#774) and cut in S4.
 type GraphRAGQueryBridge interface {
-	// Query executes a hybrid GraphRAG query combining semantic search and graph traversal.
-	// Returns results ranked by combined vector and graph scores.
-	Query(ctx context.Context, query sdkgraphrag.Query) ([]sdkgraphrag.Result, error)
-
-	// FindSimilarAttacks finds attack patterns similar to the given content.
-	// Uses vector similarity search on attack pattern descriptions.
-	FindSimilarAttacks(ctx context.Context, content string, topK int) ([]sdkgraphrag.AttackPattern, error)
-
-	// FindSimilarFindings finds findings similar to the specified finding.
-	// Uses vector similarity search on finding descriptions.
-	FindSimilarFindings(ctx context.Context, findingID string, topK int) ([]sdkgraphrag.FindingNode, error)
-
-	// GetAttackChains discovers attack chains (technique sequences) from a starting technique.
-	// Traverses USES_TECHNIQUE relationships to find multi-step attack patterns.
-	GetAttackChains(ctx context.Context, techniqueID string, maxDepth int) ([]sdkgraphrag.AttackChain, error)
-
-	// GetRelatedFindings retrieves findings related to the specified finding.
-	// Traverses SIMILAR_TO and other relationship types.
-	GetRelatedFindings(ctx context.Context, findingID string) ([]sdkgraphrag.FindingNode, error)
-
 	// StoreNode stores a single graph node with mission and agent context.
 	// Returns the node ID. MissionID and agentName are auto-populated.
 	StoreNode(ctx context.Context, node sdkgraphrag.GraphNode, missionID, agentName string) (string, error)
@@ -56,10 +41,6 @@ type GraphRAGQueryBridge interface {
 	// Returns node IDs for all created nodes. MissionID and agentName are auto-populated.
 	StoreBatch(ctx context.Context, batch sdkgraphrag.Batch, missionID, agentName string) ([]string, error)
 
-	// Traverse performs graph traversal from a starting node with filtering options.
-	// Returns all nodes visited during traversal with path information.
-	Traverse(ctx context.Context, startNodeID string, opts sdkgraphrag.TraversalOptions) ([]sdkgraphrag.TraversalResult, error)
-
 	// StoreSemantic stores a node with semantic search capabilities (requires Content).
 	// Validates that node.Content is non-empty, then generates embeddings and stores.
 	StoreSemantic(ctx context.Context, node sdkgraphrag.GraphNode, missionID, agentName string) (string, error)
@@ -68,14 +49,6 @@ type GraphRAGQueryBridge interface {
 	// Used for structured data like hosts, ports, services.
 	StoreStructured(ctx context.Context, node sdkgraphrag.GraphNode, missionID, agentName string) (string, error)
 
-	// QuerySemantic performs a semantic-only query (no structured fallback).
-	// Validates that Text or Embedding is present, sets ForceSemanticOnly=true.
-	QuerySemantic(ctx context.Context, query sdkgraphrag.Query) ([]sdkgraphrag.Result, error)
-
-	// QueryStructured performs a structured-only query (no vector search).
-	// Validates that NodeTypes is present, sets ForceStructuredOnly=true.
-	QueryStructured(ctx context.Context, query sdkgraphrag.Query) ([]sdkgraphrag.Result, error)
-
 	// Health returns the health status of the GraphRAG bridge.
 	Health(ctx context.Context) types.HealthStatus
 }
@@ -83,165 +56,18 @@ type GraphRAGQueryBridge interface {
 // DefaultGraphRAGQueryBridge is the default implementation of GraphRAGQueryBridge.
 // It wraps graphrag.GraphRAGStore and provides type conversion between SDK and internal types.
 type DefaultGraphRAGQueryBridge struct {
-	store          graphrag.GraphRAGStore
-	tracer         trace.Tracer
-	policyEnforcer DataPolicyEnforcer
+	store  graphrag.GraphRAGStore
+	tracer trace.Tracer
 }
 
 // NewGraphRAGQueryBridge creates a new DefaultGraphRAGQueryBridge.
 // If store is nil, methods will return ErrGraphRAGNotEnabled.
 // If policySource is nil, policy enforcement will be disabled (queries run unfiltered).
-func NewGraphRAGQueryBridge(store graphrag.GraphRAGStore, policySource PolicySource) *DefaultGraphRAGQueryBridge {
-	var enforcer DataPolicyEnforcer
-	if policySource != nil {
-		enforcer = NewDataPolicyEnforcer(policySource)
-	}
-
+func NewGraphRAGQueryBridge(store graphrag.GraphRAGStore) *DefaultGraphRAGQueryBridge {
 	return &DefaultGraphRAGQueryBridge{
-		store:          store,
-		tracer:         otel.Tracer("gibson/harness/graphrag_query_bridge"),
-		policyEnforcer: enforcer,
+		store:  store,
+		tracer: otel.Tracer("gibson/harness/graphrag_query_bridge"),
 	}
-}
-
-// Query executes a hybrid GraphRAG query.
-func (b *DefaultGraphRAGQueryBridge) Query(ctx context.Context, query sdkgraphrag.Query) ([]sdkgraphrag.Result, error) {
-	ctx, span := b.tracer.Start(ctx, "GraphRAGQueryBridge.Query",
-		trace.WithAttributes(
-			attribute.String("query.text", query.Text),
-			attribute.Int("query.top_k", query.TopK),
-			attribute.Int("query.max_hops", query.MaxHops),
-		))
-	defer span.End()
-
-	// Apply data policy enforcement BEFORE query execution
-	if b.policyEnforcer != nil {
-		if err := b.policyEnforcer.ApplyInputScope(ctx, &query); err != nil {
-			return nil, fmt.Errorf("policy enforcement failed: %w", err)
-		}
-	}
-
-	// Validate query
-	if err := query.Validate(); err != nil {
-		return nil, fmt.Errorf("%w: %v", sdkgraphrag.ErrInvalidQuery, err)
-	}
-
-	// Convert SDK query to internal query
-	internalQuery := sdkQueryToInternal(query)
-
-	// Execute query
-	internalResults, err := b.store.Query(ctx, internalQuery)
-	if err != nil {
-		return nil, fmt.Errorf("query execution failed: %w", err)
-	}
-
-	// Convert results back to SDK types
-	results := make([]sdkgraphrag.Result, len(internalResults))
-	for i, r := range internalResults {
-		results[i] = internalResultToSDK(r)
-	}
-
-	span.SetAttributes(attribute.Int("results.count", len(results)))
-	return results, nil
-}
-
-// FindSimilarAttacks finds attack patterns similar to the given content.
-func (b *DefaultGraphRAGQueryBridge) FindSimilarAttacks(ctx context.Context, content string, topK int) ([]sdkgraphrag.AttackPattern, error) {
-	ctx, span := b.tracer.Start(ctx, "GraphRAGQueryBridge.FindSimilarAttacks",
-		trace.WithAttributes(
-			attribute.String("content.preview", truncate(content, 100)),
-			attribute.Int("top_k", topK),
-		))
-	defer span.End()
-
-	// Execute similarity search
-	internalPatterns, err := b.store.FindSimilarAttacks(ctx, content, topK)
-	if err != nil {
-		return nil, fmt.Errorf("find similar attacks failed: %w", err)
-	}
-
-	// Convert to SDK types
-	patterns := make([]sdkgraphrag.AttackPattern, len(internalPatterns))
-	for i, p := range internalPatterns {
-		patterns[i] = internalAttackPatternToSDK(p)
-	}
-
-	span.SetAttributes(attribute.Int("patterns.count", len(patterns)))
-	return patterns, nil
-}
-
-// FindSimilarFindings finds findings similar to the specified finding.
-func (b *DefaultGraphRAGQueryBridge) FindSimilarFindings(ctx context.Context, findingID string, topK int) ([]sdkgraphrag.FindingNode, error) {
-	ctx, span := b.tracer.Start(ctx, "GraphRAGQueryBridge.FindSimilarFindings",
-		trace.WithAttributes(
-			attribute.String("finding_id", findingID),
-			attribute.Int("top_k", topK),
-		))
-	defer span.End()
-
-	// Execute similarity search
-	internalFindings, err := b.store.FindSimilarFindings(ctx, findingID, topK)
-	if err != nil {
-		return nil, fmt.Errorf("find similar findings failed: %w", err)
-	}
-
-	// Convert to SDK types
-	findings := make([]sdkgraphrag.FindingNode, len(internalFindings))
-	for i, f := range internalFindings {
-		findings[i] = internalFindingToSDK(f)
-	}
-
-	span.SetAttributes(attribute.Int("findings.count", len(findings)))
-	return findings, nil
-}
-
-// GetAttackChains discovers attack chains from a starting technique.
-func (b *DefaultGraphRAGQueryBridge) GetAttackChains(ctx context.Context, techniqueID string, maxDepth int) ([]sdkgraphrag.AttackChain, error) {
-	ctx, span := b.tracer.Start(ctx, "GraphRAGQueryBridge.GetAttackChains",
-		trace.WithAttributes(
-			attribute.String("technique_id", techniqueID),
-			attribute.Int("max_depth", maxDepth),
-		))
-	defer span.End()
-
-	// Execute attack chain discovery
-	internalChains, err := b.store.GetAttackChains(ctx, techniqueID, maxDepth)
-	if err != nil {
-		return nil, fmt.Errorf("get attack chains failed: %w", err)
-	}
-
-	// Convert to SDK types
-	chains := make([]sdkgraphrag.AttackChain, len(internalChains))
-	for i, c := range internalChains {
-		chains[i] = internalAttackChainToSDK(c)
-	}
-
-	span.SetAttributes(attribute.Int("chains.count", len(chains)))
-	return chains, nil
-}
-
-// GetRelatedFindings retrieves findings related to the specified finding.
-func (b *DefaultGraphRAGQueryBridge) GetRelatedFindings(ctx context.Context, findingID string) ([]sdkgraphrag.FindingNode, error) {
-	ctx, span := b.tracer.Start(ctx, "GraphRAGQueryBridge.GetRelatedFindings",
-		trace.WithAttributes(
-			attribute.String("finding_id", findingID),
-		))
-	defer span.End()
-
-	// Execute relationship traversal
-	internalFindings, err := b.store.GetRelatedFindings(ctx, findingID)
-	if err != nil {
-		return nil, fmt.Errorf("get related findings failed: %w", err)
-	}
-
-	// Convert to SDK types
-	findings := make([]sdkgraphrag.FindingNode, len(internalFindings))
-	for i, f := range internalFindings {
-		findings[i] = internalFindingToSDK(f)
-	}
-
-	span.SetAttributes(attribute.Int("findings.count", len(findings)))
-	return findings, nil
 }
 
 // StoreNode stores a single graph node.
@@ -547,68 +373,6 @@ func (b *DefaultGraphRAGQueryBridge) StoreBatch(ctx context.Context, batch sdkgr
 	return nodeIDs, nil
 }
 
-// Traverse performs graph traversal from a starting node.
-func (b *DefaultGraphRAGQueryBridge) Traverse(ctx context.Context, startNodeID string, opts sdkgraphrag.TraversalOptions) ([]sdkgraphrag.TraversalResult, error) {
-	ctx, span := b.tracer.Start(ctx, "GraphRAGQueryBridge.Traverse",
-		trace.WithAttributes(
-			attribute.String("start_node_id", startNodeID),
-			attribute.Int("max_depth", opts.MaxDepth),
-			attribute.String("direction", opts.Direction),
-		))
-	defer span.End()
-
-	// Convert relationship types to internal types
-	var relTypes []graphrag.RelationType
-	for _, rt := range opts.RelationshipTypes {
-		relTypes = append(relTypes, graphrag.RelationType(rt))
-	}
-
-	// Convert node types to internal types
-	var nodeTypes []graphrag.NodeType
-	for _, nt := range opts.NodeTypes {
-		nodeTypes = append(nodeTypes, graphrag.NodeType(nt))
-	}
-
-	// Create traversal filters
-	filters := graphrag.TraversalFilters{
-		AllowedRelations: relTypes,
-		AllowedNodeTypes: nodeTypes,
-	}
-
-	// Execute traversal via the store's TraverseGraph method.
-	internalNodes, err := b.store.TraverseGraph(ctx, startNodeID, opts.MaxDepth, filters)
-	if err != nil {
-		span.RecordError(err)
-		return nil, fmt.Errorf("graph traversal failed: %w", err)
-	}
-
-	// Convert internal GraphNode results to SDK TraversalResult.
-	results := make([]sdkgraphrag.TraversalResult, len(internalNodes))
-	for i, n := range internalNodes {
-		nodeType := ""
-		if len(n.Labels) > 0 {
-			nodeType = string(n.Labels[0])
-		}
-		props := make(map[string]any, len(n.Properties))
-		for k, v := range n.Properties {
-			props[k] = v
-		}
-		results[i] = sdkgraphrag.TraversalResult{
-			Node: sdkgraphrag.GraphNode{
-				ID:         n.ID.String(),
-				Type:       nodeType,
-				Properties: props,
-				CreatedAt:  n.CreatedAt,
-				UpdatedAt:  n.UpdatedAt,
-			},
-			Distance: i, // approximate: provider does not return depth per node
-		}
-	}
-
-	span.SetAttributes(attribute.Int("results.count", len(results)))
-	return results, nil
-}
-
 // StoreSemantic stores a node with semantic search capabilities (requires Content).
 // Validates that node.Content is non-empty, then generates embeddings and stores.
 func (b *DefaultGraphRAGQueryBridge) StoreSemantic(ctx context.Context, node sdkgraphrag.GraphNode, missionID, agentName string) (string, error) {
@@ -704,100 +468,6 @@ func (b *DefaultGraphRAGQueryBridge) StoreStructured(ctx context.Context, node s
 	return nodeID, nil
 }
 
-// QuerySemantic performs a semantic-only query (no structured fallback).
-// Validates that Text or Embedding is present, sets ForceSemanticOnly=true.
-func (b *DefaultGraphRAGQueryBridge) QuerySemantic(ctx context.Context, query sdkgraphrag.Query) ([]sdkgraphrag.Result, error) {
-	ctx, span := b.tracer.Start(ctx, "GraphRAGQueryBridge.QuerySemantic",
-		trace.WithAttributes(
-			attribute.String("query.text", query.Text),
-			attribute.Int("query.top_k", query.TopK),
-		))
-	defer span.End()
-
-	// Apply data policy enforcement BEFORE query execution
-	if b.policyEnforcer != nil {
-		if err := b.policyEnforcer.ApplyInputScope(ctx, &query); err != nil {
-			return nil, fmt.Errorf("policy enforcement failed: %w", err)
-		}
-	}
-
-	// Validate that Text or Embedding is present
-	if query.Text == "" && len(query.Embedding) == 0 {
-		return nil, fmt.Errorf("%w: Text or Embedding is required for semantic query", sdkgraphrag.ErrInvalidQuery)
-	}
-
-	// Validate query
-	if err := query.Validate(); err != nil {
-		return nil, fmt.Errorf("%w: %v", sdkgraphrag.ErrInvalidQuery, err)
-	}
-
-	// Convert SDK query to internal query with ForceSemanticOnly=true
-	internalQuery := sdkQueryToInternal(query)
-	internalQuery.ForceSemanticOnly = true
-
-	// Execute query
-	internalResults, err := b.store.Query(ctx, internalQuery)
-	if err != nil {
-		return nil, fmt.Errorf("semantic query execution failed: %w", err)
-	}
-
-	// Convert results back to SDK types
-	results := make([]sdkgraphrag.Result, len(internalResults))
-	for i, r := range internalResults {
-		results[i] = internalResultToSDK(r)
-	}
-
-	span.SetAttributes(attribute.Int("results.count", len(results)))
-	return results, nil
-}
-
-// QueryStructured performs a structured-only query (no vector search).
-// Validates that NodeTypes is present, sets ForceStructuredOnly=true.
-func (b *DefaultGraphRAGQueryBridge) QueryStructured(ctx context.Context, query sdkgraphrag.Query) ([]sdkgraphrag.Result, error) {
-	ctx, span := b.tracer.Start(ctx, "GraphRAGQueryBridge.QueryStructured",
-		trace.WithAttributes(
-			attribute.StringSlice("query.node_types", query.NodeTypes),
-			attribute.Int("query.top_k", query.TopK),
-		))
-	defer span.End()
-
-	// Apply data policy enforcement BEFORE query execution
-	if b.policyEnforcer != nil {
-		if err := b.policyEnforcer.ApplyInputScope(ctx, &query); err != nil {
-			return nil, fmt.Errorf("policy enforcement failed: %w", err)
-		}
-	}
-
-	// Validate that NodeTypes is present
-	if len(query.NodeTypes) == 0 {
-		return nil, fmt.Errorf("%w: NodeTypes is required for structured query", sdkgraphrag.ErrInvalidQuery)
-	}
-
-	// Validate query
-	if err := query.Validate(); err != nil {
-		return nil, fmt.Errorf("%w: %v", sdkgraphrag.ErrInvalidQuery, err)
-	}
-
-	// Convert SDK query to internal query with ForceStructuredOnly=true
-	internalQuery := sdkQueryToInternal(query)
-	internalQuery.ForceStructuredOnly = true
-
-	// Execute query
-	internalResults, err := b.store.Query(ctx, internalQuery)
-	if err != nil {
-		return nil, fmt.Errorf("structured query execution failed: %w", err)
-	}
-
-	// Convert results back to SDK types
-	results := make([]sdkgraphrag.Result, len(internalResults))
-	for i, r := range internalResults {
-		results[i] = internalResultToSDK(r)
-	}
-
-	span.SetAttributes(attribute.Int("results.count", len(results)))
-	return results, nil
-}
-
 // Health returns the health status of the GraphRAG bridge.
 func (b *DefaultGraphRAGQueryBridge) Health(ctx context.Context) types.HealthStatus {
 	return b.store.Health(ctx)
@@ -807,63 +477,6 @@ func (b *DefaultGraphRAGQueryBridge) Health(ctx context.Context) types.HealthSta
 var _ GraphRAGQueryBridge = (*DefaultGraphRAGQueryBridge)(nil)
 
 // Type conversion functions (adapters)
-
-// sdkQueryToInternal converts SDK Query to internal GraphRAGQuery.
-func sdkQueryToInternal(q sdkgraphrag.Query) graphrag.GraphRAGQuery {
-	// Convert mission ID if present
-	var missionID *types.ID
-	if q.MissionID != "" {
-		if id, err := types.ParseID(q.MissionID); err == nil {
-			missionID = &id
-		}
-	}
-
-	// Convert node types
-	var nodeTypes []graphrag.NodeType
-	for _, nt := range q.NodeTypes {
-		nodeTypes = append(nodeTypes, graphrag.NodeType(nt))
-	}
-
-	internalQuery := graphrag.GraphRAGQuery{
-		Text:         q.Text,
-		Embedding:    q.Embedding,
-		TopK:         q.TopK,
-		MaxHops:      q.MaxHops,
-		MinScore:     q.MinScore,
-		NodeTypes:    nodeTypes,
-		MissionID:    missionID,
-		MissionRunID: q.MissionRunID, // Pass through mission run ID for mission-run scoped queries
-		MissionName:  q.MissionName,  // Pass through mission name for mission scoped queries
-		VectorWeight: q.VectorWeight,
-		GraphWeight:  q.GraphWeight,
-	}
-
-	return internalQuery
-}
-
-// internalResultToSDK converts internal GraphRAGResult to SDK Result.
-func internalResultToSDK(r graphrag.GraphRAGResult) sdkgraphrag.Result {
-	result := sdkgraphrag.Result{
-		Node:        internalNodeToSDK(r.Node),
-		Score:       r.Score,
-		VectorScore: r.VectorScore,
-		GraphScore:  r.GraphScore,
-		Path:        internalIDsToStrings(r.Path),
-		Distance:    r.Distance,
-	}
-
-	// Include run metadata if available
-	// GetRunMetadata returns nil if no mission_name is set (backwards compatibility)
-	if metadata := r.Node.GetRunMetadata(); metadata != nil {
-		result.RunMetadata = &sdkgraphrag.RunMetadata{
-			MissionName:  metadata.MissionName,
-			RunNumber:    metadata.RunNumber,
-			DiscoveredAt: metadata.DiscoveredAt,
-		}
-	}
-
-	return result
-}
 
 // internalNodeToSDK converts internal GraphNode to SDK GraphNode.
 func internalNodeToSDK(n graphrag.GraphNode) sdkgraphrag.GraphNode {
@@ -1000,52 +613,6 @@ func resolveNodeID(id string, idMapping map[string]types.ID) (types.ID, error) {
 		}
 	}
 	return types.ParseID(id)
-}
-
-// internalAttackPatternToSDK converts internal AttackPattern to SDK AttackPattern.
-func internalAttackPatternToSDK(p graphrag.AttackPattern) sdkgraphrag.AttackPattern {
-	return sdkgraphrag.AttackPattern{
-		TechniqueID: p.TechniqueID,
-		Name:        p.Name,
-		Description: p.Description,
-		Tactics:     p.Tactics,
-		Platforms:   p.Platforms,
-		Similarity:  0.0, // Will be set by vector search
-	}
-}
-
-// internalFindingToSDK converts internal FindingNode to SDK FindingNode.
-func internalFindingToSDK(f graphrag.FindingNode) sdkgraphrag.FindingNode {
-	return sdkgraphrag.FindingNode{
-		ID:          f.ID.String(),
-		Title:       f.Title,
-		Description: f.Description,
-		Severity:    f.Severity,
-		Category:    f.Category,
-		Confidence:  f.Confidence,
-		Similarity:  0.0, // Will be set by vector search
-	}
-}
-
-// internalAttackChainToSDK converts internal AttackChain to SDK AttackChain.
-func internalAttackChainToSDK(c graphrag.AttackChain) sdkgraphrag.AttackChain {
-	steps := make([]sdkgraphrag.AttackStep, len(c.Steps))
-	for i, s := range c.Steps {
-		steps[i] = sdkgraphrag.AttackStep{
-			Order:       s.Order,
-			TechniqueID: s.TechniqueID,
-			NodeID:      s.NodeID.String(),
-			Description: s.Description,
-			Confidence:  s.Confidence,
-		}
-	}
-
-	return sdkgraphrag.AttackChain{
-		ID:       c.ID.String(),
-		Name:     c.Name,
-		Severity: c.Severity,
-		Steps:    steps,
-	}
 }
 
 // internalIDsToStrings converts internal ID slice to string slice.

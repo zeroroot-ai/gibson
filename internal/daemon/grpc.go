@@ -50,7 +50,6 @@ import (
 	missionpb "github.com/zeroroot-ai/sdk/api/gen/gibson/mission/v1"
 	pluginpb "github.com/zeroroot-ai/sdk/api/gen/gibson/plugin/v1"
 	tenantv1 "github.com/zeroroot-ai/sdk/api/gen/gibson/tenant/v1"
-	intelligencepb "github.com/zeroroot-ai/sdk/api/gen/intelligence/v1"
 	"github.com/zeroroot-ai/sdk/auth"
 
 	"github.com/zeroroot-ai/gibson/internal/authz/registry"
@@ -1233,21 +1232,8 @@ func (d *daemonImpl) buildGRPCServer(ctx context.Context) (*grpcSubsystem, error
 		d.logger.Warn(ctx, "DiscoveryService not registered: authorizer or compRegistry unavailable")
 	}
 
-	// Register IntelligenceService for cross-mission analytics RPCs
-	// (GetRecurringVulnerabilities, GetRemediationMetrics, GetAssetRiskScore,
-	// GetAttackPatterns, GetSimilarTargets). The SDK's
-	// platformIntelligenceProxy is the canonical client; agents and operators
-	// reach this endpoint indirectly via SDK PlatformHarness.
-	// Per spec graphrag-intelligence-tenant-scope, the service resolves each
-	// RPC's tenant from ctx → pool.For → per-tenant Neo4j session.
-	// The poolGetter closure defers resolution to request time, so registration
-	// is safe here even though the pool is not yet initialized.
-	intelSvc := NewIntelligenceServer(
-		func() datapool.Pool { return d.pool },
-		d.logger.WithComponent("intelligence-service").Slog(),
-	)
-	intelligencepb.RegisterIntelligenceServiceServer(srv, intelSvc)
-	d.logger.Info(ctx, "registered IntelligenceService gRPC endpoint")
+	// IntelligenceService (cross-mission GraphRAG analytics) retired in the
+	// ECS-brain cutover (ADR-0007): the brain's belief field + attention replace it.
 
 	// Register gibson.graph.v1.GraphService — the daemon-mediated knowledge-graph
 	// read API for the dashboard. Routes through pool.For(tenant).Neo4j() per-RPC.
