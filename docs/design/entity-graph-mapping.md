@@ -38,7 +38,7 @@ projector from the World*, never written by an agent.
 | `compliance_signal` | sub-state | `(finding, control)` | `EMITTED_SIGNAL` → `:ComplianceSignal` | planned |
 | `mission` | lifecycle | id | `:Mission` (from Mission entity) | **done** |
 | `mission_run` | lifecycle | run id | `RUN_OF` mission | **done** (WorkItem/Mission) |
-| `agent_run` | lifecycle | run id | `PART_OF` mission_run; `DISCOVERED` assets | **done** (WorkItem) |
+| `agent_run` | **entity** | run id (harness-assigned) | parent run `DELEGATED_TO` → `:AgentRun` | **done** (AgentRunObserved; run-provenance sole-written by projector, #837) |
 | `tool_execution` | lifecycle | id | `USED_TOOL`; `PRODUCED` | **done** (WorkItem) |
 | `llm_call` | lifecycle | id | `TRIGGERED` | lifecycle |
 

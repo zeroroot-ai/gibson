@@ -154,6 +154,10 @@ func (d *daemonImpl) newHarnessFactory(ctx context.Context) (harness.HarnessFact
 		// GraphRAG components
 		GraphRAGQueryBridge: d.infrastructure.graphRAGQueryBridge,
 
+		// Run-provenance: agent delegations fold into the World; the graph
+		// projector (sole writer, ADR-0007) materializes :AgentRun + DELEGATED_TO.
+		DelegationSink: ingestDelegation(d.brainRegistry),
+
 		// Compliance emitter — wires the ComplianceMiddleware into the
 		// harness chain so every harness call emits a compliance_signal
 		// node to Neo4j. The sink adapts the DiscoveryProcessor.

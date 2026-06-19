@@ -110,6 +110,11 @@ type HarnessConfig struct {
 	// If nil, a NoopGraphRAGQueryBridge will be created (GraphRAG operations will return ErrGraphRAGNotEnabled).
 	GraphRAGQueryBridge GraphRAGQueryBridge
 
+	// DelegationSink folds agent-delegation run-provenance into the World so the
+	// graph projector materializes :AgentRun + DELEGATED_TO (ADR-0007). Optional;
+	// when nil, delegation provenance is not recorded.
+	DelegationSink DelegationSink
+
 	// Middleware is the middleware chain to apply to harness operations.
 	// When set, operations are routed through the configured middleware chain
 	// for cross-cutting concerns like tracing, logging, and event emission.

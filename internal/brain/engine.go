@@ -179,6 +179,13 @@ func (e *Engine) Accounts() []AccountSnapshot {
 	return e.World.AccountSnapshot()
 }
 
+// AgentRuns returns the current agent-run snapshots (run-provenance).
+func (e *Engine) AgentRuns() []AgentRunSnapshot {
+	e.mu.RLock()
+	defer e.mu.RUnlock()
+	return e.World.AgentRunSnapshot()
+}
+
 // Events returns a copy of the Timeline (the Scroller scrubs this).
 func (e *Engine) Events() []Event {
 	e.mu.RLock()
