@@ -1,0 +1,99 @@
+syntax = "proto3";
+
+package gibson.world.v1;
+
+option go_package = "github.com/zeroroot-ai/gibson/internal/daemon/api/gibson/world/v1;worldv1";
+
+import "gibson/auth/v1/options.proto";
+
+// WorldService is the daemon-mediated read path into the ECS brain (epic
+// ecs-brain, gibson#752). The daemon resolves the caller's tenant server-side
+// and reads only that tenant's live brain World + Timeline (one World per tenant,
+// no cross-tenant anything — ADR-0001). The dashboard never touches the brain
+// directly; it reads through here over Envoy + ext-authz, like TracesService.
+//
+// Every RPC is ext-authz-gated via the tenant member relation.
+service WorldService {
+  // ListMissions returns the tenant's missions (the work-graph roots).
+  rpc ListMissions(ListMissionsRequest) returns (ListMissionsResponse) {
+    option (gibson.auth.v1.authz) = {
+      relation: "member",
+      object_type: "tenant",
+      object_deriver: "tenant_from_identity",
+      allowed_identities: 3  // USER | SERVICE
+    };
+  }
+
+  // ListHosts returns the tenant's discovered hosts with belief/attention.
+  rpc ListHosts(ListHostsRequest) returns (ListHostsResponse) {
+    option (gibson.auth.v1.authz) = {
+      relation: "member",
+      object_type: "tenant",
+      object_deriver: "tenant_from_identity",
+      allowed_identities: 3
+    };
+  }
+
+  // ListFindings returns the tenant's confirmed findings.
+  rpc ListFindings(ListFindingsRequest) returns (ListFindingsResponse) {
+    option (gibson.auth.v1.authz) = {
+      relation: "member",
+      object_type: "tenant",
+      object_deriver: "tenant_from_identity",
+      allowed_identities: 3
+    };
+  }
+
+  // GetTimeline returns the tenant's domain-event Timeline — the Scroller scrubs
+  // this. Optional mission_id filters to one mission's events.
+  rpc GetTimeline(GetTimelineRequest) returns (GetTimelineResponse) {
+    option (gibson.auth.v1.authz) = {
+      relation: "member",
+      object_type: "tenant",
+      object_deriver: "tenant_from_identity",
+      allowed_identities: 3
+    };
+  }
+}
+
+message MissionView {
+  string id = 1;
+  string goal = 2;
+  string status = 3;
+  string reason = 4;
+}
+
+message HostView {
+  string scope_id = 1;
+  string address = 2;
+  repeated int32 open_ports = 3;
+  double juicy = 4;
+  double attention = 5;
+  string surprise = 6;
+}
+
+message FindingView {
+  string id = 1;
+  string title = 2;
+  string scope_id = 3;
+  string address = 4;
+  string severity = 5;
+}
+
+message TimelineEvent {
+  uint64 seq = 1;     // 0-based position in the tenant Timeline
+  string kind = 2;    // event Kind(), e.g. "host.observed"
+  string summary = 3; // human-readable one-line summary
+}
+
+message ListMissionsRequest {}
+message ListMissionsResponse { repeated MissionView missions = 1; }
+
+message ListHostsRequest {}
+message ListHostsResponse { repeated HostView hosts = 1; }
+
+message ListFindingsRequest {}
+message ListFindingsResponse { repeated FindingView findings = 1; }
+
+message GetTimelineRequest { string mission_id = 1; }
+message GetTimelineResponse { repeated TimelineEvent events = 1; }

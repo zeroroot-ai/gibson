@@ -1,0 +1,121 @@
+// Package daemon — world_service.go
+//
+// worldServer implements gibson.world.v1.WorldService: the daemon-mediated read
+// path into the ECS brain (epic ecs-brain, gibson#752). It resolves the caller's
+// tenant from context and reads only that tenant's live brain World + Timeline
+// via the per-tenant brain.Registry — the dashboard never touches the brain
+// directly (it reads through here over Envoy + ext-authz, like TracesService).
+//
+// Note: until mission execution is wired to feed the brain (gated on the deferred
+// worker contract, sdk#341), a tenant's World/Timeline is populated only by events
+// submitted to its engine; the read API itself is complete and tenant-isolated.
+package daemon
+
+import (
+	"context"
+	"fmt"
+	"log/slog"
+
+	"google.golang.org/grpc/codes"
+	"google.golang.org/grpc/status"
+
+	"github.com/zeroroot-ai/gibson/internal/brain"
+	worldpb "github.com/zeroroot-ai/gibson/internal/daemon/api/gibson/world/v1"
+	"github.com/zeroroot-ai/sdk/auth"
+)
+
+type worldServer struct {
+	worldpb.UnimplementedWorldServiceServer
+
+	registry *brain.Registry
+	logger   *slog.Logger
+}
+
+// NewWorldServer constructs the WorldService backed by the per-tenant brain registry.
+func NewWorldServer(registry *brain.Registry, logger *slog.Logger) *worldServer {
+	if registry == nil {
+		panic("world server: registry cannot be nil")
+	}
+	if logger == nil {
+		logger = slog.Default()
+	}
+	return &worldServer{registry: registry, logger: logger}
+}
+
+// engine resolves the caller's tenant from context and returns its brain engine
+// (created on first use). Cross-tenant access is structurally impossible — a
+// caller only ever reaches its own tenant's engine.
+func (s *worldServer) engine(ctx context.Context) (*brain.Engine, error) {
+	t, ok := auth.TenantFromContext(ctx)
+	if !ok {
+		return nil, status.Error(codes.PermissionDenied, "no tenant in context")
+	}
+	return s.registry.For(t.String()), nil
+}
+
+func (s *worldServer) ListMissions(ctx context.Context, _ *worldpb.ListMissionsRequest) (*worldpb.ListMissionsResponse, error) {
+	e, err := s.engine(ctx)
+	if err != nil {
+		return nil, err
+	}
+	resp := &worldpb.ListMissionsResponse{}
+	for _, m := range e.Missions() {
+		resp.Missions = append(resp.Missions, &worldpb.MissionView{
+			Id: m.ID, Goal: m.Goal, Status: string(m.Status), Reason: m.Reason,
+		})
+	}
+	return resp, nil
+}
+
+func (s *worldServer) ListHosts(ctx context.Context, _ *worldpb.ListHostsRequest) (*worldpb.ListHostsResponse, error) {
+	e, err := s.engine(ctx)
+	if err != nil {
+		return nil, err
+	}
+	resp := &worldpb.ListHostsResponse{}
+	for _, h := range e.Hosts() {
+		ports := make([]int32, len(h.OpenPorts))
+		for i, p := range h.OpenPorts {
+			ports[i] = int32(p)
+		}
+		resp.Hosts = append(resp.Hosts, &worldpb.HostView{
+			ScopeId:   h.ScopeID,
+			Address:   h.Address,
+			OpenPorts: ports,
+			Juicy:     h.Belief.Juicy,
+			Attention: h.Attention,
+			Surprise:  h.Surprise,
+		})
+	}
+	return resp, nil
+}
+
+func (s *worldServer) ListFindings(ctx context.Context, _ *worldpb.ListFindingsRequest) (*worldpb.ListFindingsResponse, error) {
+	e, err := s.engine(ctx)
+	if err != nil {
+		return nil, err
+	}
+	resp := &worldpb.ListFindingsResponse{}
+	for _, f := range e.Findings() {
+		resp.Findings = append(resp.Findings, &worldpb.FindingView{
+			Id: f.ID, Title: f.Title, ScopeId: f.ScopeID, Address: f.Address, Severity: f.Severity,
+		})
+	}
+	return resp, nil
+}
+
+func (s *worldServer) GetTimeline(ctx context.Context, _ *worldpb.GetTimelineRequest) (*worldpb.GetTimelineResponse, error) {
+	e, err := s.engine(ctx)
+	if err != nil {
+		return nil, err
+	}
+	resp := &worldpb.GetTimelineResponse{}
+	for i, ev := range e.Events() {
+		resp.Events = append(resp.Events, &worldpb.TimelineEvent{
+			Seq:     uint64(i),
+			Kind:    ev.Kind(),
+			Summary: fmt.Sprintf("%+v", ev),
+		})
+	}
+	return resp, nil
+}

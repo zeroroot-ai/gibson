@@ -19,6 +19,7 @@ import (
 	"github.com/spiffe/go-spiffe/v2/workloadapi"
 	"github.com/zeroroot-ai/gibson/internal/audit"
 	"github.com/zeroroot-ai/gibson/internal/authz"
+	"github.com/zeroroot-ai/gibson/internal/brain"
 	"github.com/zeroroot-ai/gibson/internal/budget"
 	"github.com/zeroroot-ai/gibson/internal/capabilitygrant"
 	"github.com/zeroroot-ai/gibson/internal/component"
@@ -100,6 +101,10 @@ type daemonImpl struct {
 
 	// compRegistry is the Redis-backed component registry for runtime service discovery
 	compRegistry component.ComponentRegistry
+
+	// brainRegistry holds the per-tenant ECS brain engines (epic ecs-brain); the
+	// WorldService read path reads through it. Lazily created at gRPC registration.
+	brainRegistry *brain.Registry
 
 	// registryTenant is the tenant scope used for component registry discovery
 	registryTenant string
