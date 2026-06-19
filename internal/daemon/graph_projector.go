@@ -23,6 +23,8 @@ type GraphWriter interface {
 	UpsertFinding(ctx context.Context, tenant string, f brain.FindingSnapshot) error
 	UpsertDomain(ctx context.Context, tenant string, d brain.DomainSnapshot) error
 	UpsertSubdomain(ctx context.Context, tenant string, s brain.SubdomainSnapshot) error
+	UpsertCredential(ctx context.Context, tenant string, c brain.CredentialSnapshot) error
+	UpsertAccount(ctx context.Context, tenant string, a brain.AccountSnapshot) error
 }
 
 // GraphProjector periodically projects every tenant's World into the graph.
@@ -74,6 +76,18 @@ func (p *GraphProjector) project(ctx context.Context) {
 			if err := p.writer.UpsertSubdomain(ctx, tenant, s); err != nil {
 				p.logger.Warn("graph projection: subdomain upsert failed",
 					"tenant", tenant, "subdomain_id", s.ID, "error", err)
+			}
+		}
+		for _, c := range eng.Credentials() {
+			if err := p.writer.UpsertCredential(ctx, tenant, c); err != nil {
+				p.logger.Warn("graph projection: credential upsert failed",
+					"tenant", tenant, "credential_id", c.ID, "error", err)
+			}
+		}
+		for _, a := range eng.Accounts() {
+			if err := p.writer.UpsertAccount(ctx, tenant, a); err != nil {
+				p.logger.Warn("graph projection: account upsert failed",
+					"tenant", tenant, "account_id", a.ID, "error", err)
 			}
 		}
 	}

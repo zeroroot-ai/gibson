@@ -87,6 +87,14 @@ func ingestObservation(reg *brain.Registry, tenant string) harness.ObservationSi
 			})
 		case *harnesspb.ObserveRequest_Domain:
 			reg.For(tenant).Submit(brain.DomainObserved{ScopeID: scope, Name: o.Domain.Name})
+		case *harnesspb.ObserveRequest_Credential:
+			c := o.Credential
+			reg.For(tenant).Submit(brain.CredentialObserved{
+				ScopeID: scope, SecretHash: c.SecretHash, Username: c.Username, CredentialKind: c.Kind,
+			})
+		case *harnesspb.ObserveRequest_Account:
+			a := o.Account
+			reg.For(tenant).Submit(brain.AccountObserved{ScopeID: scope, Identifier: a.Identifier, AccountKind: a.Kind})
 		case *harnesspb.ObserveRequest_Subdomain:
 			s := o.Subdomain
 			reg.For(tenant).Submit(brain.SubdomainObserved{

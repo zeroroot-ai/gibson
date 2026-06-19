@@ -42,23 +42,37 @@ type Surprise struct {
 // World is a single tenant's in-memory ECS world (ADR-0001: one World per tenant,
 // never shared). Only the reducer mutates it.
 type World struct {
-	Tenant     string
-	ecs        *ecs.World
-	hosts      *ecs.Map1[Host]
-	surprises  *ecs.Map1[Surprise]
-	work       *ecs.Map1[WorkItem]
-	missions   *ecs.Map1[Mission]
-	findings   *ecs.Map1[Finding]
-	domains    *ecs.Map1[Domain]
-	subdomains *ecs.Map1[Subdomain]
+	Tenant      string
+	ecs         *ecs.World
+	hosts       *ecs.Map1[Host]
+	surprises   *ecs.Map1[Surprise]
+	work        *ecs.Map1[WorkItem]
+	missions    *ecs.Map1[Mission]
+	findings    *ecs.Map1[Finding]
+	domains     *ecs.Map1[Domain]
+	subdomains  *ecs.Map1[Subdomain]
+	credentials *ecs.Map1[Credential]
+	accounts    *ecs.Map1[Account]
 
 	// next*ID are monotonic, replay-deterministic counters for assigning stable
 	// ids (incremented in the single-writer reducer, so replay reproduces ids).
 	// Counters are per-entity-type; ids are unique within a (label) namespace,
 	// which is all the graph projection needs (nodes are keyed by label + brain_id).
-	nextHostID      uint64
-	nextDomainID    uint64
-	nextSubdomainID uint64
+	nextHostID       uint64
+	nextDomainID     uint64
+	nextSubdomainID  uint64
+	nextCredentialID uint64
+	nextAccountID    uint64
+}
+
+func (w *World) newCredentialID() uint64 {
+	w.nextCredentialID++
+	return w.nextCredentialID
+}
+
+func (w *World) newAccountID() uint64 {
+	w.nextAccountID++
+	return w.nextAccountID
 }
 
 // newHostID returns the next stable host id (single-writer; deterministic on replay).
@@ -81,15 +95,17 @@ func (w *World) newSubdomainID() uint64 {
 func NewWorld(tenant string) *World {
 	w := ecs.NewWorld()
 	return &World{
-		Tenant:     tenant,
-		ecs:        w,
-		hosts:      ecs.NewMap1[Host](w),
-		surprises:  ecs.NewMap1[Surprise](w),
-		work:       ecs.NewMap1[WorkItem](w),
-		missions:   ecs.NewMap1[Mission](w),
-		findings:   ecs.NewMap1[Finding](w),
-		domains:    ecs.NewMap1[Domain](w),
-		subdomains: ecs.NewMap1[Subdomain](w),
+		Tenant:      tenant,
+		ecs:         w,
+		hosts:       ecs.NewMap1[Host](w),
+		surprises:   ecs.NewMap1[Surprise](w),
+		work:        ecs.NewMap1[WorkItem](w),
+		missions:    ecs.NewMap1[Mission](w),
+		findings:    ecs.NewMap1[Finding](w),
+		domains:     ecs.NewMap1[Domain](w),
+		subdomains:  ecs.NewMap1[Subdomain](w),
+		credentials: ecs.NewMap1[Credential](w),
+		accounts:    ecs.NewMap1[Account](w),
 	}
 }
 
@@ -221,6 +237,10 @@ func Reduce(w *World, ev Event) {
 		applyDomainObserved(w, e)
 	case SubdomainObserved:
 		applySubdomainObserved(w, e)
+	case CredentialObserved:
+		applyCredentialObserved(w, e)
+	case AccountObserved:
+		applyAccountObserved(w, e)
 	case WorkDispatched:
 		applyWorkDispatched(w, e)
 	case WorkCompleted:

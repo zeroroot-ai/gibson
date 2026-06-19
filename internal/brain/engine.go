@@ -165,6 +165,20 @@ func (e *Engine) Subdomains() []SubdomainSnapshot {
 	return e.World.SubdomainSnapshot()
 }
 
+// Credentials returns the current credential snapshots.
+func (e *Engine) Credentials() []CredentialSnapshot {
+	e.mu.RLock()
+	defer e.mu.RUnlock()
+	return e.World.CredentialSnapshot()
+}
+
+// Accounts returns the current account snapshots.
+func (e *Engine) Accounts() []AccountSnapshot {
+	e.mu.RLock()
+	defer e.mu.RUnlock()
+	return e.World.AccountSnapshot()
+}
+
 // Events returns a copy of the Timeline (the Scroller scrubs this).
 func (e *Engine) Events() []Event {
 	e.mu.RLock()

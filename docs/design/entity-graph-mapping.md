@@ -30,8 +30,8 @@ projector from the World*, never written by an agent.
 | `technology` | sub-state | `name` (+ version) | `USES_TECHNOLOGY` → `:Technology` | **done** (World; projected as `:Service` props) |
 | `domain` | **entity** | `(scope, name)` | — → `:Domain` | planned |
 | `subdomain` | **entity** | `(scope, fqdn)` | domain `HAS_SUBDOMAIN`; `RESOLVES_TO` host | planned |
-| `credential` | **entity** | secret hash (content) | `:Credential` (scope-partitioned) | planned |
-| `account` | **entity** | `(scope, identifier)` | `:Account` | planned |
+| `credential` | **entity** | secret hash (content) | `:Credential` (scope-partitioned) | **done** |
+| `account` | **entity** | `(scope, identifier)` | `:Account` | **done** |
 | `finding` | **entity** | content / id | `AFFECTS` → asset; `:Finding` | **done** (FindingRaised) |
 | `evidence` | sub-state | — | finding `HAS_EVIDENCE` → `:Evidence` | planned |
 | `technique` | reference | external id (e.g. `T1190`) | finding `USES_TECHNIQUE` → `:Technique` | planned |
