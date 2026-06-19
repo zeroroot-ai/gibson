@@ -2,6 +2,7 @@ package brain
 
 import (
 	"context"
+	"sync"
 	"time"
 )
 
@@ -32,6 +33,12 @@ type Engine struct {
 	Timeline *Timeline
 	intake   chan Event
 	systems  []System
+
+	// mu guards World + Timeline. The tick (single writer) takes the write lock;
+	// external readers (e.g. the read-path gRPC handlers) take the read lock so
+	// they never race the reducer. Submit does not touch the World, so it is
+	// lock-free.
+	mu sync.RWMutex
 }
 
 // NewEngine creates an Engine with an empty Tenant World and Timeline.
@@ -83,6 +90,8 @@ func (e *Engine) runSystems() int {
 // beget systems beget events) until nothing new is produced. Returns the number
 // of events applied.
 func (e *Engine) Tick() int {
+	e.mu.Lock()
+	defer e.mu.Unlock()
 	applied := 0
 	for i := 0; i < maxSweeps; i++ {
 		n := e.drainIntake() + e.runSystems()
@@ -108,4 +117,43 @@ func (e *Engine) Run(ctx context.Context) {
 			e.Tick()
 		}
 	}
+}
+
+// Read accessors — read-locked, safe to call concurrently with the tick loop
+// (the read path / Scroller use these). They return value snapshots, never live
+// references into the World.
+
+// Hosts returns the current host snapshots.
+func (e *Engine) Hosts() []HostSnapshot {
+	e.mu.RLock()
+	defer e.mu.RUnlock()
+	return e.World.Snapshot()
+}
+
+// Missions returns the current mission snapshots.
+func (e *Engine) Missions() []MissionSnapshot {
+	e.mu.RLock()
+	defer e.mu.RUnlock()
+	return e.World.MissionSnapshot()
+}
+
+// Work returns the current work-item snapshots.
+func (e *Engine) Work() []WorkSnapshot {
+	e.mu.RLock()
+	defer e.mu.RUnlock()
+	return e.World.WorkSnapshot()
+}
+
+// Findings returns the current finding snapshots.
+func (e *Engine) Findings() []FindingSnapshot {
+	e.mu.RLock()
+	defer e.mu.RUnlock()
+	return e.World.FindingSnapshot()
+}
+
+// Events returns a copy of the Timeline (the Scroller scrubs this).
+func (e *Engine) Events() []Event {
+	e.mu.RLock()
+	defer e.mu.RUnlock()
+	return append([]Event(nil), e.Timeline.Events()...)
 }
