@@ -8,20 +8,20 @@ import (
 )
 
 // TestWorld_FoldAndReplay proves the core invariant: World == fold(Timeline).
-// It also exercises update-on-match for a repeated identity and scope
+// It also exercises update-on-match for a repeated coordinate and scope
 // disambiguation (same address, different scope = distinct entities).
 func TestWorld_FoldAndReplay(t *testing.T) {
 	tl := &Timeline{}
 	w := NewWorld("tenant-1")
 	apply := func(ev Event) { tl.Append(ev); Reduce(w, ev) }
 
-	apply(HostObserved{ScopeID: "scope-a", Address: "10.0.0.5", Ports: []int{22, 80}})
-	apply(HostObserved{ScopeID: "scope-a", Address: "10.0.0.5", Ports: []int{22, 443}}) // same host: ports change (volatile)
-	apply(HostObserved{ScopeID: "scope-b", Address: "10.0.0.5", Ports: []int{22}})       // same IP, different scope: distinct
+	apply(HostObserved{ScopeID: "scope-a", Address: "10.0.0.5", OpenPorts: []int{22, 80}})
+	apply(HostObserved{ScopeID: "scope-a", Address: "10.0.0.5", OpenPorts: []int{22, 443}}) // same coord: ports change
+	apply(HostObserved{ScopeID: "scope-b", Address: "10.0.0.5", OpenPorts: []int{22}})       // same IP, different scope: distinct
 
 	want := []HostSnapshot{
-		{ScopeID: "scope-a", Address: "10.0.0.5", Ports: []int{22, 443}},
-		{ScopeID: "scope-b", Address: "10.0.0.5", Ports: []int{22}},
+		{ScopeID: "scope-a", Address: "10.0.0.5", OpenPorts: []int{22, 443}},
+		{ScopeID: "scope-b", Address: "10.0.0.5", OpenPorts: []int{22}},
 	}
 	got := w.Snapshot()
 	if !reflect.DeepEqual(got, want) {
@@ -32,8 +32,7 @@ func TestWorld_FoldAndReplay(t *testing.T) {
 	}
 
 	// Replay reproduces the World exactly from the Timeline alone.
-	replayed := Replay("tenant-1", tl)
-	if !reflect.DeepEqual(replayed.Snapshot(), got) {
+	if replayed := Replay("tenant-1", tl); !reflect.DeepEqual(replayed.Snapshot(), got) {
 		t.Fatalf("replay diverged:\n got %+v\nwant %+v", replayed.Snapshot(), got)
 	}
 }
@@ -42,8 +41,8 @@ func TestWorld_FoldAndReplay(t *testing.T) {
 // queue into the Timeline and folds it into the World (sweep-to-quiescence).
 func TestEngine_TickAppliesAndFolds(t *testing.T) {
 	e := NewEngine("tenant-1")
-	e.Submit(HostObserved{ScopeID: "s", Address: "10.0.0.1", Ports: []int{22}})
-	e.Submit(HostObserved{ScopeID: "s", Address: "10.0.0.2", Ports: []int{443}})
+	e.Submit(HostObserved{ScopeID: "s", Address: "10.0.0.1", OpenPorts: []int{22}})
+	e.Submit(HostObserved{ScopeID: "s", Address: "10.0.0.2", OpenPorts: []int{443}})
 
 	if n := e.Tick(); n != 2 {
 		t.Fatalf("tick applied %d events, want 2", n)
@@ -64,7 +63,7 @@ func TestEngine_RunDrainsAndStops(t *testing.T) {
 	done := make(chan struct{})
 	go func() { e.Run(ctx); close(done) }()
 
-	e.Submit(HostObserved{ScopeID: "s", Address: "10.0.0.9", Ports: []int{22}})
+	e.Submit(HostObserved{ScopeID: "s", Address: "10.0.0.9", OpenPorts: []int{22}})
 	time.Sleep(3 * TickInterval) // let at least one tick apply it
 	cancel()
 	<-done // Run returns after its final drain; safe to read the World now
