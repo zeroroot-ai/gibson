@@ -152,12 +152,13 @@ func ingestToBrain(reg *brain.Registry, tenant string, ed api.EventData) {
 		if m := ed.MissionEvent; m != nil {
 			eng.Submit(brain.WorkCompleted{ID: m.MissionID + "/" + m.NodeID, Err: m.Error})
 		}
-	case "finding.discovered", "finding.submitted":
+	case "finding.discovered", "finding.submitted", "agent.finding_submitted":
 		if fe := ed.FindingEvent; fe != nil {
 			eng.Submit(brain.FindingRaised{
-				ID:       fe.Finding.ID,
-				Title:    fe.Finding.Title,
-				Severity: fe.Finding.Severity,
+				ID:          fe.Finding.ID,
+				Title:       fe.Finding.Title,
+				Description: fe.Finding.Description,
+				Severity:    fe.Finding.Severity,
 			})
 		}
 	}

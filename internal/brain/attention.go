@@ -27,21 +27,23 @@ func attentionScore(juicy float64, surprised bool) float64 {
 // is just an attention boost. Findings are the output; "anomaly" is not a separate
 // entity.
 type Finding struct {
-	ID       string
-	Title    string
-	ScopeID  string
-	Address  string
-	Severity string
+	ID          string
+	Title       string
+	Description string
+	ScopeID     string
+	Address     string
+	Severity    string
 }
 
 // FindingRaised promotes an observation/surprise into a confirmed Finding. The
 // trigger is an investigator (the Decider / an agent); this is the mechanism.
 type FindingRaised struct {
-	ID       string
-	Title    string
-	ScopeID  string
-	Address  string
-	Severity string
+	ID          string
+	Title       string
+	Description string
+	ScopeID     string
+	Address     string
+	Severity    string
 }
 
 func (FindingRaised) Kind() string { return "finding.raised" }
@@ -54,16 +56,17 @@ func applyFindingRaised(w *World, e FindingRaised) {
 			return
 		}
 	}
-	w.findings.NewEntity(&Finding{ID: e.ID, Title: e.Title, ScopeID: e.ScopeID, Address: e.Address, Severity: e.Severity})
+	w.findings.NewEntity(&Finding{ID: e.ID, Title: e.Title, Description: e.Description, ScopeID: e.ScopeID, Address: e.Address, Severity: e.Severity})
 }
 
 // FindingSnapshot is a stable, comparable view of a Finding.
 type FindingSnapshot struct {
-	ID       string
-	Title    string
-	ScopeID  string
-	Address  string
-	Severity string
+	ID          string
+	Title       string
+	Description string
+	ScopeID     string
+	Address     string
+	Severity    string
 }
 
 // FindingSnapshot returns the current findings in deterministic (ID) order.
@@ -72,7 +75,7 @@ func (w *World) FindingSnapshot() []FindingSnapshot {
 	q := ecs.NewFilter1[Finding](w.ecs).Query()
 	for q.Next() {
 		f := q.Get()
-		out = append(out, FindingSnapshot{ID: f.ID, Title: f.Title, ScopeID: f.ScopeID, Address: f.Address, Severity: f.Severity})
+		out = append(out, FindingSnapshot{ID: f.ID, Title: f.Title, Description: f.Description, ScopeID: f.ScopeID, Address: f.Address, Severity: f.Severity})
 	}
 	sort.Slice(out, func(i, j int) bool { return out[i].ID < out[j].ID })
 	return out

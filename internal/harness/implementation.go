@@ -2075,16 +2075,12 @@ func (h *DefaultAgentHarness) SubmitFinding(ctx context.Context, finding agent.F
 
 	// Async store to GraphRAG knowledge graph (non-blocking)
 	// This happens after local store succeeds to ensure findings are never lost
-	// GraphRAG is a required core component - always store
-	var targetID *types.ID
-	if h.targetInfo.ID != "" {
-		id, err := types.ParseID(string(h.targetInfo.ID))
-		if err == nil {
-			targetID = &id
-		}
-	}
-	h.graphRAGBridge.StoreAsync(ctx, finding, h.missionCtx.ID, targetID)
-
+	// The finding reaches the knowledge graph via the World projection (ADR-0007):
+	// SubmitFinding emits an agent.finding_submitted event → the brain folds it
+	// into the tenant World as a Finding → the graph projector writes the :Finding
+	// node. The old direct StoreAsync write was removed so the projector is the
+	// sole writer of finding nodes (gibson#837). The canonical finding record is
+	// still persisted above via findingStore (Postgres), independent of the graph.
 	return nil
 }
 

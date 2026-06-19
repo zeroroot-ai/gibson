@@ -46,3 +46,30 @@ func TestIngestToBrain_FeedsWorld(t *testing.T) {
 	eng := reg.For("acme")
 	t.Fatalf("brain not fed: missions=%+v work=%+v findings=%+v", eng.Missions(), eng.Work(), eng.Findings())
 }
+
+// TestIngestToBrain_AgentFindingSubmitted: agent-submitted findings (event type
+// agent.finding_submitted) reach the World — they previously did not (the ingest
+// only matched finding.submitted), which is why findings were direct-written to
+// the graph instead of flowing World→projector (gibson#837). Description carries.
+func TestIngestToBrain_AgentFindingSubmitted(t *testing.T) {
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+	reg := brain.NewRegistry(ctx)
+
+	ingestToBrain(reg, "acme", api.EventData{
+		EventType: "agent.finding_submitted",
+		FindingEvent: &api.FindingEventData{Finding: api.FindingData{
+			ID: "f7", Title: "SSRF", Description: "blind SSRF in /proxy", Severity: "high",
+		}},
+	})
+
+	deadline := time.Now().Add(2 * time.Second)
+	for time.Now().Before(deadline) {
+		fs := reg.For("acme").Findings()
+		if len(fs) == 1 && fs[0].Description == "blind SSRF in /proxy" {
+			return
+		}
+		time.Sleep(10 * time.Millisecond)
+	}
+	t.Fatalf("agent.finding_submitted not folded into the World: %+v", reg.For("acme").Findings())
+}

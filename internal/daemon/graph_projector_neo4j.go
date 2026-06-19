@@ -138,8 +138,8 @@ func (w *neo4jGraphWriter) UpsertHost(ctx context.Context, tenant string, h brai
 // the host lands (self-healing).
 const upsertFindingCypher = `
 MERGE (f:Finding {brain_id: $id})
-  SET f.title = $title, f.severity = $severity, f.scope = $scope,
-      f.address = $address, f.updated_at = timestamp()
+  SET f.title = $title, f.description = $description, f.severity = $severity,
+      f.scope = $scope, f.address = $address, f.updated_at = timestamp()
 WITH f
 OPTIONAL MATCH (h:Host {scope: $scope, address: $address})
 FOREACH (_ IN CASE WHEN h IS NULL THEN [] ELSE [1] END |
@@ -258,11 +258,12 @@ func (w *neo4jGraphWriter) UpsertFinding(ctx context.Context, tenant string, f b
 	defer conn.Release()
 
 	params := map[string]any{
-		"id":       f.ID,
-		"title":    f.Title,
-		"severity": f.Severity,
-		"scope":    f.ScopeID,
-		"address":  f.Address,
+		"id":          f.ID,
+		"title":       f.Title,
+		"description": f.Description,
+		"severity":    f.Severity,
+		"scope":       f.ScopeID,
+		"address":     f.Address,
 	}
 	_, err = conn.Neo4j.ExecuteWrite(ctx, func(tx neo4j.ManagedTransaction) (any, error) {
 		res, txErr := tx.Run(ctx, upsertFindingCypher, params)
