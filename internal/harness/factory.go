@@ -254,7 +254,6 @@ func (f *DefaultHarnessFactory) Create(agentName string, missionCtx MissionConte
 		logger:              logger,
 		metrics:             f.config.Metrics,
 		tokenUsage:          tokenTracker,
-		graphRAGBridge:      f.config.GraphRAGBridge,
 		graphRAGQueryBridge: f.config.GraphRAGQueryBridge,
 		missionClient:       f.config.MissionClient,
 		spawnLimits:         f.config.SpawnLimits,

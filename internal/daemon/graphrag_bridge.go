@@ -5,8 +5,6 @@ import (
 	"errors"
 	"fmt"
 	"log/slog"
-	"sync"
-	"time"
 
 	"github.com/zeroroot-ai/gibson/internal/datapool"
 	"github.com/zeroroot-ai/gibson/internal/graphrag"
@@ -17,7 +15,6 @@ import (
 	"github.com/zeroroot-ai/gibson/internal/types"
 	sdkgraphrag "github.com/zeroroot-ai/sdk/graphrag"
 
-	agentpkg "github.com/zeroroot-ai/gibson/internal/agent"
 	"github.com/zeroroot-ai/sdk/auth"
 )
 
@@ -55,9 +52,7 @@ type GraphRAGBridgeConfig struct {
 // constructs an ephemeral LocalGraphRAGProvider + GraphRAGStore, and executes the
 // operation — all within a single method call.
 //
-// The adapter implements both harness.GraphRAGBridge (async finding storage) and
-// harness.GraphRAGQueryBridge (synchronous graph queries). Harness consumers see
-// the same interface shapes as before; only the implementation changed.
+// The adapter implements harness.GraphRAGQueryBridge (synchronous graph queries).
 //
 // Thread-safety: safe for concurrent use. Each call is fully independent.
 type GraphRAGBridgeAdapter struct {
@@ -65,10 +60,6 @@ type GraphRAGBridgeAdapter struct {
 	embedder    embedder.Embedder
 	vectorStore vector.VectorStore
 	logger      *slog.Logger
-
-	// async bridge for StoreAsync / Shutdown / Health (GraphRAGBridge interface).
-	// StoreAsync is fire-and-forget; it constructs a per-call store internally.
-	asyncBridge *asyncBridge
 }
 
 // errPoolNotReady is returned when the bridge is invoked before the daemon's
@@ -97,15 +88,9 @@ func NewGraphRAGBridgeAdapter(cfg GraphRAGBridgeConfig) (*GraphRAGBridgeAdapter,
 		vectorStore: cfg.VectorStore,
 		logger:      logger,
 	}
-	a.asyncBridge = newAsyncBridge(a)
 
 	logger.Info("graphrag bridge adapter created (per-call per-tenant pool-backed)")
 	return a, nil
-}
-
-// Bridge returns this adapter as a harness.GraphRAGBridge.
-func (a *GraphRAGBridgeAdapter) Bridge() harness.GraphRAGBridge {
-	return a.asyncBridge
 }
 
 // QueryBridge returns this adapter as a harness.GraphRAGQueryBridge.
@@ -246,100 +231,4 @@ type HealthCheckError struct {
 
 func (e *HealthCheckError) Error() string {
 	return "graphrag health check failed: " + e.Component + ": " + e.Message
-}
-
-// --- asyncBridge implements harness.GraphRAGBridge (StoreAsync / Shutdown / Health) ---
-
-// asyncBridge wraps the adapter for the async finding-storage interface.
-// StoreAsync is fire-and-forget; it builds an ephemeral store per call.
-type asyncBridge struct {
-	adapter   *GraphRAGBridgeAdapter
-	logger    *slog.Logger
-	wg        sync.WaitGroup
-	semaphore chan struct{}
-}
-
-func newAsyncBridge(a *GraphRAGBridgeAdapter) *asyncBridge {
-	return &asyncBridge{
-		adapter:   a,
-		logger:    a.logger.With("bridge_type", "async"),
-		semaphore: make(chan struct{}, 10),
-	}
-}
-
-// StoreAsync implements harness.GraphRAGBridge. The finding is stored
-// asynchronously; errors are logged at WARN level and do not propagate.
-func (b *asyncBridge) StoreAsync(ctx context.Context, finding agentpkg.Finding, missionID types.ID, targetID *types.ID) {
-	b.wg.Add(1)
-	go func() {
-		defer b.wg.Done()
-
-		select {
-		case b.semaphore <- struct{}{}:
-		case <-ctx.Done():
-			b.logger.Warn("StoreAsync: context cancelled while waiting for semaphore",
-				"finding_id", finding.ID,
-			)
-			return
-		}
-		defer func() { <-b.semaphore }()
-
-		// Use a background context so shutdown doesn't kill in-flight stores.
-		storageCtx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
-		defer cancel()
-
-		// Propagate the tenant from the original request context.
-		tenant, ok := auth.TenantFromContext(ctx)
-		if !ok || tenant.IsZero() {
-			b.logger.Warn("StoreAsync: no tenant in context; skipping async store",
-				"finding_id", finding.ID,
-			)
-			return
-		}
-		storageCtx = auth.WithTenant(storageCtx, tenant)
-
-		qb, release, err := b.adapter.buildEphemeralQueryBridge(storageCtx)
-		if err != nil {
-			b.logger.Warn("StoreAsync: failed to build ephemeral bridge",
-				"finding_id", finding.ID,
-				"error", err,
-			)
-			return
-		}
-		defer release()
-
-		// Use the query bridge's StoreNode to persist the finding.
-		node := sdkgraphrag.GraphNode{
-			ID:      finding.ID.String(),
-			Content: finding.Description,
-			Type:    "Finding",
-		}
-		if _, storeErr := qb.StoreNode(storageCtx, node, missionID.String(), ""); storeErr != nil {
-			b.logger.Warn("StoreAsync: failed to store finding node",
-				"finding_id", finding.ID,
-				"error", storeErr,
-			)
-		}
-	}()
-}
-
-// Shutdown waits for all pending async storage operations to complete.
-func (b *asyncBridge) Shutdown(ctx context.Context) error {
-	done := make(chan struct{})
-	go func() {
-		b.wg.Wait()
-		close(done)
-	}()
-
-	select {
-	case <-done:
-		return nil
-	case <-ctx.Done():
-		return fmt.Errorf("graphrag async bridge shutdown: context cancelled: %w", ctx.Err())
-	}
-}
-
-// Health implements harness.GraphRAGBridge.
-func (b *asyncBridge) Health(ctx context.Context) types.HealthStatus {
-	return b.adapter.Health(ctx)
 }

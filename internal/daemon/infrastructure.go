@@ -53,10 +53,6 @@ type Infrastructure struct {
 	// runLinker manages relationships between mission runs with the same name
 	runLinker mission.MissionRunLinker
 
-	// graphRAGBridge provides per-tenant GraphRAG write operations.
-	// The bridge constructs Neo4j sessions lazily via the data-plane Pool.
-	graphRAGBridge harness.GraphRAGBridge
-
 	// graphRAGQueryBridge provides per-tenant GraphRAG read/query operations.
 	graphRAGQueryBridge harness.GraphRAGQueryBridge
 
@@ -207,14 +203,14 @@ func (d *daemonImpl) newInfrastructure(ctx context.Context) (*Infrastructure, er
 		"url", d.config.Redis.URL,
 		"database", d.config.Redis.Database)
 
-	// Initialize GraphRAG bridges backed by the per-tenant data-plane Pool.
+	// Initialize the GraphRAG query bridge backed by the per-tenant data-plane Pool.
 	// No shared Neo4j cluster is required at startup; each bridge method resolves
 	// the tenant's Neo4j session lazily via pool.For(ctx, tenant).Neo4j.
-	graphRAGBridge, graphRAGQueryBridge, err := d.initGraphRAGBridges(ctx)
+	graphRAGQueryBridge, err := d.initGraphRAGBridges(ctx)
 	if err != nil {
-		return nil, fmt.Errorf("failed to initialize GraphRAG bridges: %w", err)
+		return nil, fmt.Errorf("failed to initialize GraphRAG query bridge: %w", err)
 	}
-	d.logger.Info(ctx, "initialized GraphRAG bridges (per-tenant pool-backed)")
+	d.logger.Info(ctx, "initialized GraphRAG query bridge (per-tenant pool-backed)")
 
 	// Initialize OpenTelemetry observability stack (required for LLM tracing)
 	// This provides unified tracing and metrics to OTLP-compatible backends
@@ -254,7 +250,6 @@ func (d *daemonImpl) newInfrastructure(ctx context.Context) (*Infrastructure, er
 		llmRegistry:            llmRegistry,
 		slotManager:            slotManager,
 		memoryManagerFactory:   memoryFactory,
-		graphRAGBridge:         graphRAGBridge,
 		graphRAGQueryBridge:    graphRAGQueryBridge,
 		otelStack:              otelStack,
 		taxonomyRegistry:       taxonomyRegistry,
@@ -520,12 +515,12 @@ func (d *daemonImpl) checkInfrastructureHealth(ctx context.Context, infra *Infra
 //
 // An embedder is created once at startup (stateless, no Neo4j dependency) and
 // shared across all per-request provider instances for efficiency.
-func (d *daemonImpl) initGraphRAGBridges(ctx context.Context) (harness.GraphRAGBridge, harness.GraphRAGQueryBridge, error) {
+func (d *daemonImpl) initGraphRAGBridges(ctx context.Context) (harness.GraphRAGQueryBridge, error) {
 	// Create embedder from config once at startup. The embedder is stateless
 	// (no Neo4j dependency) and safe for concurrent use.
 	emb, err := embedder.CreateEmbedder(d.config.Embedder, d.logger.WithComponent("embedder").Slog())
 	if err != nil {
-		return nil, nil, fmt.Errorf("failed to create embedder: %w", err)
+		return nil, fmt.Errorf("failed to create embedder: %w", err)
 	}
 	d.logger.Info(ctx, "created embedder for GraphRAG",
 		"provider", d.config.Embedder.Provider,
@@ -551,10 +546,10 @@ func (d *daemonImpl) initGraphRAGBridges(ctx context.Context) (harness.GraphRAGB
 		Logger:      d.logger.WithComponent("graphrag-bridge").Slog(),
 	})
 	if err != nil {
-		return nil, nil, fmt.Errorf("failed to create GraphRAG bridge adapter: %w", err)
+		return nil, fmt.Errorf("failed to create GraphRAG bridge adapter: %w", err)
 	}
 
-	return adapter.Bridge(), adapter.QueryBridge(), nil
+	return adapter.QueryBridge(), nil
 }
 
 // initOTelObservability initializes the OpenTelemetry observability stack if enabled.

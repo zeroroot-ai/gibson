@@ -1315,9 +1315,10 @@ func (d *daemonImpl) buildGRPCServer(ctx context.Context) (*grpcSubsystem, error
 			auditLogger := audit.NewAuditLogger(ctx, d.stateClient, d.logger.Slog())
 
 			// Wire GraphRAGFindingSubmitter when infrastructure is available.
-			// It routes findings to the per-tenant data-plane (via Pool) and Neo4j
-			// (via GraphRAGBridge.StoreAsync, fire-and-forget). Falls back to nil
-			// when the bridge has not been initialized, in which case
+			// It persists findings to the per-tenant data-plane (via Pool) and
+			// routes them into the tenant World; the graph projector — the sole
+			// writer of :Finding nodes (ADR-0007) — materializes them. Falls back
+			// to nil when the brain registry is not yet ready, in which case
 			// ComponentServiceServer logs and returns a generated finding_id.
 			var findingSubmitter component.FindingSubmitter
 			if d.brainRegistry != nil {

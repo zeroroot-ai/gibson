@@ -87,7 +87,6 @@ type DefaultAgentHarness struct {
 	tokenUsage llm.TokenTracker
 
 	// Knowledge graph integration
-	graphRAGBridge      GraphRAGBridge
 	graphRAGQueryBridge GraphRAGQueryBridge
 
 	// Mission management (optional, nil = mission methods return error)
@@ -2700,18 +2699,8 @@ func (h *DefaultAgentHarness) WithCGMinter(m *capabilitygrant.Minter) *DefaultAg
 //   - Logs any shutdown errors at WARN level
 //
 // The context can be used to set a timeout for the shutdown.
-func (h *DefaultAgentHarness) Close(ctx context.Context) error {
+func (h *DefaultAgentHarness) Close(_ context.Context) error {
 	h.logger.Debug("closing harness")
-
-	// Shutdown GraphRAG bridge and wait for pending operations
-	if h.graphRAGBridge != nil {
-		if err := h.graphRAGBridge.Shutdown(ctx); err != nil {
-			h.logger.Warn("graphrag bridge shutdown error",
-				"error", err)
-			return err
-		}
-	}
-
 	h.logger.Debug("harness closed successfully")
 	return nil
 }

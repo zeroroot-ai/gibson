@@ -5,29 +5,9 @@ import (
 	"context"
 	"fmt"
 
-	"github.com/zeroroot-ai/gibson/internal/agent"
 	"github.com/zeroroot-ai/gibson/internal/types"
 	sdkgraphrag "github.com/zeroroot-ai/sdk/graphrag"
 )
-
-// NoopGraphRAGBridge is a no-op implementation of GraphRAGBridge that discards all findings.
-// Used when GraphRAG is disabled or not configured.
-type NoopGraphRAGBridge struct{}
-
-// StoreAsync does nothing (no-op).
-func (n *NoopGraphRAGBridge) StoreAsync(ctx context.Context, finding agent.Finding, missionID types.ID, targetID *types.ID) {
-	// No-op: discard finding
-}
-
-// Shutdown does nothing (no-op).
-func (n *NoopGraphRAGBridge) Shutdown(ctx context.Context) error {
-	return nil
-}
-
-// Health returns healthy status (no-op).
-func (n *NoopGraphRAGBridge) Health(ctx context.Context) types.HealthStatus {
-	return types.NewHealthStatus(types.HealthStateHealthy, "GraphRAG disabled (no-op bridge)")
-}
 
 // NoopGraphRAGQueryBridge is a no-op implementation of GraphRAGQueryBridge.
 // All query methods return ErrGraphRAGNotEnabled.
