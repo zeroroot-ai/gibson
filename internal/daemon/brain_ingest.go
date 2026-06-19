@@ -15,11 +15,31 @@ package daemon
 import (
 	"context"
 
+	gibsonagent "github.com/zeroroot-ai/gibson/internal/agent"
 	"github.com/zeroroot-ai/gibson/internal/brain"
+	"github.com/zeroroot-ai/gibson/internal/component"
 	"github.com/zeroroot-ai/gibson/internal/daemon/api"
 	"github.com/zeroroot-ai/gibson/internal/harness"
 	harnesspb "github.com/zeroroot-ai/sdk/api/gen/gibson/harness/v1"
 )
+
+// ingestComponentFinding returns the component finding submitter's World sink
+// (ADR-0007): a finding submitted over the component path is folded into the
+// tenant World as a Finding so the graph projector — the sole writer of finding
+// nodes — materializes it. Replaces the old direct StoreAsync graph write.
+func ingestComponentFinding(reg *brain.Registry) component.WorldFindingSink {
+	return func(_ context.Context, tenant string, f gibsonagent.Finding) {
+		if reg == nil {
+			return
+		}
+		reg.For(tenant).Submit(brain.FindingRaised{
+			ID:          f.ID.String(),
+			Title:       f.Title,
+			Description: f.Description,
+			Severity:    string(f.Severity),
+		})
+	}
+}
 
 // ingestObservation returns the callback service's observation sink (ADR-0007):
 // it translates a typed agent observation into a brain Timeline event and submits

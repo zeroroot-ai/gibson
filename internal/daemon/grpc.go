@@ -1320,17 +1320,16 @@ func (d *daemonImpl) buildGRPCServer(ctx context.Context) (*grpcSubsystem, error
 			// when the bridge has not been initialized, in which case
 			// ComponentServiceServer logs and returns a generated finding_id.
 			var findingSubmitter component.FindingSubmitter
-			if d.infrastructure != nil &&
-				d.infrastructure.graphRAGBridge != nil {
+			if d.brainRegistry != nil {
 				findingSubmitter = component.NewGraphRAGFindingSubmitter(
-					d.infrastructure.graphRAGBridge,
+					ingestComponentFinding(d.brainRegistry), // findings → World → projector (ADR-0007)
 					d.pool, // per-tenant Pool: nil when security.key_provider not configured
 					d.stateClient,
 					d.logger.WithComponent("finding-submitter").Slog(),
 				)
-				d.logger.Info(ctx, "GraphRAGFindingSubmitter wired: findings routed to per-tenant store and Neo4j")
+				d.logger.Info(ctx, "GraphRAGFindingSubmitter wired: findings → per-tenant store + World projection")
 			} else {
-				d.logger.Warn(ctx, "infrastructure not ready; finding submitter not wired (findings will be logged only)")
+				d.logger.Warn(ctx, "brain registry not ready; finding submitter not wired (findings will be logged only)")
 			}
 
 			// Build LLM adapter when the infrastructure (registry + slot manager) is ready.

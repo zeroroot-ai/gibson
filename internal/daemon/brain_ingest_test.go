@@ -5,8 +5,10 @@ import (
 	"testing"
 	"time"
 
+	gibsonagent "github.com/zeroroot-ai/gibson/internal/agent"
 	"github.com/zeroroot-ai/gibson/internal/brain"
 	"github.com/zeroroot-ai/gibson/internal/daemon/api"
+	"github.com/zeroroot-ai/gibson/internal/types"
 )
 
 // TestIngestToBrain_FeedsWorld: daemon mission events translate into brain
@@ -72,4 +74,28 @@ func TestIngestToBrain_AgentFindingSubmitted(t *testing.T) {
 		time.Sleep(10 * time.Millisecond)
 	}
 	t.Fatalf("agent.finding_submitted not folded into the World: %+v", reg.For("acme").Findings())
+}
+
+// TestIngestComponentFinding: the component finding path routes findings into the
+// World (sole-writer convergence, gibson#837) instead of a direct graph write.
+func TestIngestComponentFinding(t *testing.T) {
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+	reg := brain.NewRegistry(ctx)
+
+	sink := ingestComponentFinding(reg)
+	sink(ctx, "acme", gibsonagent.Finding{ID: types.NewID(), Title: "RCE", Description: "unauth RCE", Severity: gibsonagent.SeverityCritical})
+
+	deadline := time.Now().Add(2 * time.Second)
+	for time.Now().Before(deadline) {
+		fs := reg.For("acme").Findings()
+		if len(fs) == 1 && fs[0].Title == "RCE" && fs[0].Severity == "critical" {
+			if len(reg.For("other").Findings()) != 0 {
+				t.Fatal("cross-tenant leak")
+			}
+			return
+		}
+		time.Sleep(10 * time.Millisecond)
+	}
+	t.Fatalf("component finding not folded into the World: %+v", reg.For("acme").Findings())
 }
