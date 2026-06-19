@@ -24,19 +24,18 @@ type BeliefProvider interface {
 	Score(h Host) Belief
 }
 
-// BeliefScored records a (re)computed belief for the host at (ScopeID, Address).
-// Belief is derived + deterministic, but flows through an event so it is logged
-// and replay-reproducible like everything else.
+// BeliefScored records a (re)computed belief for a host (by stable id — a
+// coordinate is not unique after an identity contradiction). Belief is derived +
+// deterministic, but flows through an event so it is logged and replay-reproducible.
 type BeliefScored struct {
-	ScopeID string
-	Address string
-	Belief  Belief
+	HostID uint64
+	Belief Belief
 }
 
 func (BeliefScored) Kind() string { return "belief.scored" }
 
 func applyBeliefScored(w *World, e BeliefScored) {
-	if ent, ok := findHostByCoord(w, e.ScopeID, e.Address); ok {
+	if ent, ok := findHostByID(w, e.HostID); ok {
 		w.hosts.Get(ent).Belief = e.Belief
 	}
 }
@@ -52,7 +51,7 @@ func BeliefSystem(p BeliefProvider) System {
 		for q.Next() {
 			h := q.Get()
 			if b := p.Score(*h); b != h.Belief {
-				out = append(out, BeliefScored{ScopeID: h.ScopeID, Address: h.Address, Belief: b})
+				out = append(out, BeliefScored{HostID: h.ID, Belief: b})
 			}
 		}
 		return out

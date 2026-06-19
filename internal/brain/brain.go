@@ -23,6 +23,7 @@ import (
 // addresses. Ports is volatile state (updated-on-match, never compared).
 // Placeholder shape; sdk#340 will codegen components from taxonomy/v1.
 type Host struct {
+	ID         uint64 // stable, replay-deterministic id (assigned at creation) for event references
 	ScopeID    string // identity (coordinate)
 	Address    string // identity (coordinate, within scope)
 	SSHHostKey string // strong identity signal (stable across addresses)
@@ -47,6 +48,17 @@ type World struct {
 	surprises *ecs.Map1[Surprise]
 	work      *ecs.Map1[WorkItem]
 	missions  *ecs.Map1[Mission]
+	findings  *ecs.Map1[Finding]
+
+	// nextHostID is a monotonic, replay-deterministic counter for assigning stable
+	// host ids (incremented in the single-writer reducer, so replay reproduces ids).
+	nextHostID uint64
+}
+
+// newHostID returns the next stable host id (single-writer; deterministic on replay).
+func (w *World) newHostID() uint64 {
+	w.nextHostID++
+	return w.nextHostID
 }
 
 // NewWorld returns an empty Tenant World.
@@ -59,6 +71,7 @@ func NewWorld(tenant string) *World {
 		surprises: ecs.NewMap1[Surprise](w),
 		work:      ecs.NewMap1[WorkItem](w),
 		missions:  ecs.NewMap1[Mission](w),
+		findings:  ecs.NewMap1[Finding](w),
 	}
 }
 
@@ -69,8 +82,9 @@ type HostSnapshot struct {
 	SSHHostKey string
 	CloudID    string
 	OpenPorts  []int  // currently-open port numbers, ascending
-	Surprise   string // non-empty if the entity carries a Surprise
-	Belief     Belief // attack-path belief (zero until a BeliefSystem scores it)
+	Surprise   string  // non-empty if the entity carries a Surprise
+	Belief     Belief  // attack-path belief (zero until a BeliefSystem scores it)
+	Attention  float64 // derived: belief.Juicy + surprise boost (ADR-0005/0006)
 }
 
 // Snapshot returns the current hosts in deterministic order — the materialized
@@ -102,6 +116,7 @@ func (w *World) Snapshot() []HostSnapshot {
 			OpenPorts:  open,
 			Surprise:   surprised[q.Entity()],
 			Belief:     h.Belief,
+			Attention:  attentionScore(h.Belief.Juicy, surprised[q.Entity()] != ""),
 		})
 	}
 	sort.Slice(out, func(i, j int) bool {
@@ -147,6 +162,8 @@ func Reduce(w *World, ev Event) {
 		applyMissionDone(w, e)
 	case BeliefScored:
 		applyBeliefScored(w, e)
+	case FindingRaised:
+		applyFindingRaised(w, e)
 	}
 }
 
