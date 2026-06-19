@@ -44,7 +44,11 @@ CALL {
   WHERE p.has_service
   MERGE (svc:Service {brain_host_id: $id, port: p.number})
     SET svc.protocol = p.protocol, svc.name = p.service,
-        svc.product = p.product, svc.version = p.version, svc.updated_at = timestamp()
+        svc.product = p.product, svc.version = p.version,
+        svc.endpoints = p.endpoints, svc.technologies = p.technologies,
+        svc.cert_fingerprint = p.cert_fingerprint, svc.cert_subject = p.cert_subject,
+        svc.cert_issuer = p.cert_issuer, svc.cert_not_after = p.cert_not_after,
+        svc.updated_at = timestamp()
   MERGE (port)-[:RUNS_SERVICE]->(svc)
 }
 RETURN h.brain_id`
@@ -67,14 +71,39 @@ func (w *neo4jGraphWriter) UpsertHost(ctx context.Context, tenant string, h brai
 
 	ports := make([]map[string]any, 0, len(h.OpenPorts))
 	for _, num := range h.OpenPorts {
-		svc, hasService := h.Services[num]
+		svc, hasSvc := h.Services[num]
+		eps := h.Endpoints[num]
+		techs := h.Technologies[num]
+		cert, hasCert := h.Certificates[num]
+
+		paths := make([]string, 0, len(eps))
+		for _, e := range eps {
+			paths = append(paths, e.Path)
+		}
+		techNames := make([]string, 0, len(techs))
+		for _, t := range techs {
+			if t.Version != "" {
+				techNames = append(techNames, t.Name+" "+t.Version)
+			} else {
+				techNames = append(techNames, t.Name)
+			}
+		}
+		// A :Service node carries all service-attached detail; create it whenever
+		// any detail exists (endpoints/technologies/certificate imply a service).
+		hasService := hasSvc || len(paths) > 0 || len(techNames) > 0 || hasCert
 		ports = append(ports, map[string]any{
-			"number":      num,
-			"has_service": hasService,
-			"protocol":    svc.Protocol,
-			"service":     svc.Name,
-			"product":     svc.Product,
-			"version":     svc.Version,
+			"number":           num,
+			"has_service":      hasService,
+			"protocol":         svc.Protocol,
+			"service":          svc.Name,
+			"product":          svc.Product,
+			"version":          svc.Version,
+			"endpoints":        paths,
+			"technologies":     techNames,
+			"cert_fingerprint": cert.Fingerprint,
+			"cert_subject":     cert.Subject,
+			"cert_issuer":      cert.Issuer,
+			"cert_not_after":   cert.NotAfter,
 		})
 	}
 

@@ -48,7 +48,7 @@ require (
 	github.com/zeroroot-ai/ast-checks v0.1.2
 	github.com/zeroroot-ai/platform-clients v0.11.4
 	github.com/zeroroot-ai/platform-sdk v0.16.0
-	github.com/zeroroot-ai/sdk v0.148.0
+	github.com/zeroroot-ai/sdk v0.149.0
 	github.com/zeroroot-ai/setec v0.104.3
 	github.com/zeroroot-ai/testfixtures v0.1.1
 	go.opentelemetry.io/contrib/instrumentation/google.golang.org/grpc/otelgrpc v0.68.0

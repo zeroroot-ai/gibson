@@ -14,14 +14,39 @@ type ServiceInfo struct {
 	Version  string // product version, e.g. "8.9p1"
 }
 
+// EndpointInfo is a path observed on a service (sub-state of a port; ADR-0007).
+type EndpointInfo struct {
+	Path   string
+	Status int
+}
+
+// TechnologyInfo is a technology fingerprinted on a service (sub-state of a port).
+type TechnologyInfo struct {
+	Name    string
+	Version string
+}
+
+// CertificateInfo is a TLS certificate served on a port (sub-state; identity is
+// the fingerprint). Zero value means none observed.
+type CertificateInfo struct {
+	Fingerprint string
+	Subject     string
+	Issuer      string
+	NotAfter    string
+}
+
 // PortObservation is a port's state on a host. Open is volatile: a port no longer
 // observed is closed (Open=false), not deleted — the record (and thus history) is
-// kept (ADR-0002: associations are time-bounded, never deleted). Service is the
-// running-service sub-state, enriched progressively as observations refine it.
+// kept (ADR-0002: associations are time-bounded, never deleted). Service / Endpoints
+// / Technologies / Certificate are running-service sub-state, enriched progressively
+// as observations refine them.
 type PortObservation struct {
-	Number  int
-	Open    bool
-	Service ServiceInfo
+	Number       int
+	Open         bool
+	Service      ServiceInfo
+	Endpoints    []EndpointInfo
+	Technologies []TechnologyInfo
+	Certificate  CertificateInfo
 }
 
 // findHostByID returns the host entity with the given stable id, if present.
@@ -59,7 +84,7 @@ func applyHostObserved(w *World, e HostObserved) {
 	ent, matched, contradiction := resolveHost(w, e)
 	if !matched {
 		h := &Host{ID: w.newHostID(), ScopeID: e.ScopeID, Address: e.Address, SSHHostKey: e.SSHHostKey, CloudID: e.CloudID}
-		reconcilePorts(h, e.OpenPorts, e.Services)
+		reconcilePorts(h, e)
 		ne := w.hosts.NewEntity(h)
 		if contradiction {
 			// Same coordinate, different strong signal: a different host now answers
@@ -79,7 +104,7 @@ func applyHostObserved(w *World, e HostObserved) {
 	if h.CloudID == "" {
 		h.CloudID = e.CloudID
 	}
-	reconcilePorts(h, e.OpenPorts, e.Services)
+	reconcilePorts(h, e)
 }
 
 // resolveHost finds the entity for an observed host within its scope. It is
@@ -132,29 +157,68 @@ func resolveHost(w *World, e HostObserved) (ent ecs.Entity, matched bool, contra
 // applied with progressive enrichment — non-empty observed fields overwrite,
 // empty fields leave prior detail intact (a follow-up bare port scan never erases
 // service detail a richer scan already established).
-func reconcilePorts(h *Host, observedOpen []int, services map[int]ServiceInfo) {
-	obs := make(map[int]bool, len(observedOpen))
-	for _, p := range observedOpen {
+func reconcilePorts(h *Host, e HostObserved) {
+	obs := make(map[int]bool, len(e.OpenPorts))
+	for _, p := range e.OpenPorts {
 		obs[p] = true
 	}
 	known := make(map[int]bool, len(h.Ports))
 	for i := range h.Ports {
 		known[h.Ports[i].Number] = true
 		h.Ports[i].Open = obs[h.Ports[i].Number]
-		if svc, ok := services[h.Ports[i].Number]; ok {
-			enrichService(&h.Ports[i].Service, svc)
-		}
+		enrichPortDetail(&h.Ports[i], e)
 	}
-	for _, p := range observedOpen {
+	for _, p := range e.OpenPorts {
 		if !known[p] {
 			po := PortObservation{Number: p, Open: true}
-			if svc, ok := services[p]; ok {
-				po.Service = svc
-			}
+			enrichPortDetail(&po, e)
 			h.Ports = append(h.Ports, po)
 			known[p] = true
 		}
 	}
+}
+
+// enrichPortDetail folds an observation's service/endpoint/technology/certificate
+// detail for one port into its record, progressively (never erased by a barer scan).
+func enrichPortDetail(p *PortObservation, e HostObserved) {
+	if svc, ok := e.Services[p.Number]; ok {
+		enrichService(&p.Service, svc)
+	}
+	for _, ep := range e.Endpoints[p.Number] {
+		p.Endpoints = upsertEndpoint(p.Endpoints, ep)
+	}
+	for _, t := range e.Technologies[p.Number] {
+		p.Technologies = upsertTechnology(p.Technologies, t)
+	}
+	if cert, ok := e.Certificates[p.Number]; ok && cert != (CertificateInfo{}) {
+		p.Certificate = cert
+	}
+}
+
+// upsertEndpoint adds/updates an endpoint by Path (union, never shrinks).
+func upsertEndpoint(eps []EndpointInfo, obs EndpointInfo) []EndpointInfo {
+	for i := range eps {
+		if eps[i].Path == obs.Path {
+			if obs.Status != 0 {
+				eps[i].Status = obs.Status
+			}
+			return eps
+		}
+	}
+	return append(eps, obs)
+}
+
+// upsertTechnology adds/updates a technology by Name (union, never shrinks).
+func upsertTechnology(techs []TechnologyInfo, obs TechnologyInfo) []TechnologyInfo {
+	for i := range techs {
+		if techs[i].Name == obs.Name {
+			if obs.Version != "" {
+				techs[i].Version = obs.Version
+			}
+			return techs
+		}
+	}
+	return append(techs, obs)
 }
 
 // enrichService accretes non-empty observed service fields onto the existing
