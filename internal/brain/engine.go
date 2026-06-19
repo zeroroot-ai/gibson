@@ -151,6 +151,20 @@ func (e *Engine) Findings() []FindingSnapshot {
 	return e.World.FindingSnapshot()
 }
 
+// Domains returns the current domain snapshots.
+func (e *Engine) Domains() []DomainSnapshot {
+	e.mu.RLock()
+	defer e.mu.RUnlock()
+	return e.World.DomainSnapshot()
+}
+
+// Subdomains returns the current subdomain snapshots.
+func (e *Engine) Subdomains() []SubdomainSnapshot {
+	e.mu.RLock()
+	defer e.mu.RUnlock()
+	return e.World.SubdomainSnapshot()
+}
+
 // Events returns a copy of the Timeline (the Scroller scrubs this).
 func (e *Engine) Events() []Event {
 	e.mu.RLock()
