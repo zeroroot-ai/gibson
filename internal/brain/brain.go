@@ -81,10 +81,11 @@ type HostSnapshot struct {
 	Address    string
 	SSHHostKey string
 	CloudID    string
-	OpenPorts  []int  // currently-open port numbers, ascending
-	Surprise   string  // non-empty if the entity carries a Surprise
-	Belief     Belief  // attack-path belief (zero until a BeliefSystem scores it)
-	Attention  float64 // derived: belief.Juicy + surprise boost (ADR-0005/0006)
+	OpenPorts  []int               // currently-open port numbers, ascending
+	Services   map[int]ServiceInfo // service detail by port, for open ports that carry it
+	Surprise   string              // non-empty if the entity carries a Surprise
+	Belief     Belief              // attack-path belief (zero until a BeliefSystem scores it)
+	Attention  float64             // derived: belief.Juicy + surprise boost (ADR-0005/0006)
 }
 
 // Snapshot returns the current hosts in deterministic order — the materialized
@@ -102,9 +103,16 @@ func (w *World) Snapshot() []HostSnapshot {
 	for q.Next() {
 		h := q.Get()
 		var open []int
+		var svcs map[int]ServiceInfo
 		for _, p := range h.Ports {
 			if p.Open {
 				open = append(open, p.Number)
+				if (p.Service != ServiceInfo{}) {
+					if svcs == nil {
+						svcs = map[int]ServiceInfo{}
+					}
+					svcs[p.Number] = p.Service
+				}
 			}
 		}
 		sort.Ints(open)
@@ -114,6 +122,7 @@ func (w *World) Snapshot() []HostSnapshot {
 			SSHHostKey: h.SSHHostKey,
 			CloudID:    h.CloudID,
 			OpenPorts:  open,
+			Services:   svcs,
 			Surprise:   surprised[q.Entity()],
 			Belief:     h.Belief,
 			Attention:  attentionScore(h.Belief.Juicy, surprised[q.Entity()] != ""),
@@ -135,13 +144,17 @@ func (w *World) Snapshot() []HostSnapshot {
 type Event interface{ Kind() string }
 
 // HostObserved records that a host was seen at (ScopeID, Address), optionally
-// with strong identity signals, and the set of ports observed open in this scan.
+// with strong identity signals, the set of ports observed open in this scan, and
+// optional per-port service detail. Services is keyed by port number; a port may
+// appear in OpenPorts without a Services entry (a bare open port) — service detail
+// is enriched progressively across observations (ADR-0007).
 type HostObserved struct {
 	ScopeID    string
 	Address    string
 	SSHHostKey string
 	CloudID    string
 	OpenPorts  []int
+	Services   map[int]ServiceInfo
 }
 
 func (HostObserved) Kind() string { return "host.observed" }
