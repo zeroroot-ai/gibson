@@ -28,6 +28,7 @@ type Host struct {
 	SSHHostKey string // strong identity signal (stable across addresses)
 	CloudID    string // strong identity signal
 	Ports      []PortObservation
+	Belief     Belief // attack-path belief (derived; ADR-0005)
 }
 
 // Surprise marks an entity the model did not expect — here, an identity
@@ -69,6 +70,7 @@ type HostSnapshot struct {
 	CloudID    string
 	OpenPorts  []int  // currently-open port numbers, ascending
 	Surprise   string // non-empty if the entity carries a Surprise
+	Belief     Belief // attack-path belief (zero until a BeliefSystem scores it)
 }
 
 // Snapshot returns the current hosts in deterministic order — the materialized
@@ -99,6 +101,7 @@ func (w *World) Snapshot() []HostSnapshot {
 			CloudID:    h.CloudID,
 			OpenPorts:  open,
 			Surprise:   surprised[q.Entity()],
+			Belief:     h.Belief,
 		})
 	}
 	sort.Slice(out, func(i, j int) bool {
@@ -142,6 +145,8 @@ func Reduce(w *World, ev Event) {
 		applyMissionStarted(w, e)
 	case MissionDone:
 		applyMissionDone(w, e)
+	case BeliefScored:
+		applyBeliefScored(w, e)
 	}
 }
 
