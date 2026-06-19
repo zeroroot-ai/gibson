@@ -24,6 +24,7 @@ import (
 	"github.com/zeroroot-ai/gibson/internal/admin"
 	discoverysvc "github.com/zeroroot-ai/gibson/internal/api/discovery"
 	"github.com/zeroroot-ai/gibson/internal/audit"
+	"github.com/zeroroot-ai/gibson/internal/brain"
 	"github.com/zeroroot-ai/gibson/internal/budget"
 	"github.com/zeroroot-ai/gibson/internal/capabilitygrant"
 	"github.com/zeroroot-ai/gibson/internal/component"
@@ -31,6 +32,7 @@ import (
 	billingpb "github.com/zeroroot-ai/gibson/internal/daemon/api/gibson/billing/v1"
 	sessionpb "github.com/zeroroot-ai/gibson/internal/daemon/api/gibson/session/v1"
 	tracespb "github.com/zeroroot-ai/gibson/internal/daemon/api/gibson/traces/v1"
+	worldpb "github.com/zeroroot-ai/gibson/internal/daemon/api/gibson/world/v1"
 	"github.com/zeroroot-ai/gibson/internal/idempotency"
 	"github.com/zeroroot-ai/gibson/internal/identity"
 	"github.com/zeroroot-ai/gibson/internal/llm/modelgate"
@@ -1276,6 +1278,16 @@ func (d *daemonImpl) buildGRPCServer(ctx context.Context) (*grpcSubsystem, error
 	)
 	tracespb.RegisterTracesServiceServer(srv, tracesSvc)
 	d.logger.Info(ctx, "registered TracesService gRPC endpoint")
+
+	// Register gibson.world.v1.WorldService — the daemon-mediated read path into
+	// the ECS brain (epic ecs-brain, gibson#752). Per-tenant, tenant-isolated; the
+	// registry is created lazily here with the placeholder belief system (the pgmpy
+	// provider + orchestrator Decider wire in later).
+	if d.brainRegistry == nil {
+		d.brainRegistry = brain.NewRegistry(ctx, brain.BeliefSystem(brain.PlaceholderBeliefProvider()))
+	}
+	worldpb.RegisterWorldServiceServer(srv, NewWorldServer(d.brainRegistry, d.logger.WithComponent("world-service").Slog()))
+	d.logger.Info(ctx, "registered WorldService gRPC endpoint")
 
 	// Register gibson.session.v1.SessionService — the self-service view of a
 	// user's own login sessions, backing the dashboard's Settings → CLI
