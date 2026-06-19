@@ -187,6 +187,32 @@ func (w *neo4jGraphWriter) UpsertSubdomain(ctx context.Context, tenant string, s
 	}, "subdomain", s.ID)
 }
 
+const upsertCredentialCypher = `
+MERGE (c:Credential {brain_id: $id})
+  SET c.scope = $scope, c.secret_hash = $secret_hash, c.username = $username,
+      c.kind = $kind, c.updated_at = timestamp()
+RETURN c.brain_id`
+
+// UpsertCredential idempotently projects one credential (scope-partitioned).
+func (w *neo4jGraphWriter) UpsertCredential(ctx context.Context, tenant string, c brain.CredentialSnapshot) error {
+	return w.exec(ctx, tenant, upsertCredentialCypher, map[string]any{
+		"id": int64(c.ID), "scope": c.ScopeID, "secret_hash": c.SecretHash,
+		"username": c.Username, "kind": c.Kind,
+	}, "credential", c.ID)
+}
+
+const upsertAccountCypher = `
+MERGE (a:Account {brain_id: $id})
+  SET a.scope = $scope, a.identifier = $identifier, a.kind = $kind, a.updated_at = timestamp()
+RETURN a.brain_id`
+
+// UpsertAccount idempotently projects one account (scope-partitioned).
+func (w *neo4jGraphWriter) UpsertAccount(ctx context.Context, tenant string, a brain.AccountSnapshot) error {
+	return w.exec(ctx, tenant, upsertAccountCypher, map[string]any{
+		"id": int64(a.ID), "scope": a.ScopeID, "identifier": a.Identifier, "kind": a.Kind,
+	}, "account", a.ID)
+}
+
 // exec runs an idempotent projection write against the tenant's Neo4j.
 func (w *neo4jGraphWriter) exec(ctx context.Context, tenant, cypher string, params map[string]any, kind string, id uint64) error {
 	pool := w.poolGetter()
