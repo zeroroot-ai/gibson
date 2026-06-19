@@ -16,10 +16,11 @@ import (
 	"github.com/zeroroot-ai/gibson/internal/brain"
 )
 
-// GraphWriter upserts a host and its ports/services into a tenant's knowledge
-// graph. Abstracted so the projection loop is unit-testable without Neo4j.
+// GraphWriter upserts World entities into a tenant's knowledge graph. Abstracted
+// so the projection loop is unit-testable without Neo4j.
 type GraphWriter interface {
 	UpsertHost(ctx context.Context, tenant string, h brain.HostSnapshot) error
+	UpsertFinding(ctx context.Context, tenant string, f brain.FindingSnapshot) error
 }
 
 // GraphProjector periodically projects every tenant's World into the graph.
@@ -48,10 +49,17 @@ func (p *GraphProjector) project(ctx context.Context) {
 		return
 	}
 	for _, tenant := range p.reg.Tenants() {
-		for _, h := range p.reg.For(tenant).Hosts() {
+		eng := p.reg.For(tenant)
+		for _, h := range eng.Hosts() {
 			if err := p.writer.UpsertHost(ctx, tenant, h); err != nil {
-				p.logger.Warn("graph projection upsert failed",
+				p.logger.Warn("graph projection: host upsert failed",
 					"tenant", tenant, "host_id", h.ID, "address", h.Address, "error", err)
+			}
+		}
+		for _, f := range eng.Findings() {
+			if err := p.writer.UpsertFinding(ctx, tenant, f); err != nil {
+				p.logger.Warn("graph projection: finding upsert failed",
+					"tenant", tenant, "finding_id", f.ID, "error", err)
 			}
 		}
 	}
