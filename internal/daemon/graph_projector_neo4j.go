@@ -117,6 +117,75 @@ FOREACH (_ IN CASE WHEN h IS NULL THEN [] ELSE [1] END |
   MERGE (f)-[:AFFECTS]->(h))
 RETURN f.brain_id`
 
+const upsertDomainCypher = `
+MERGE (d:Domain {brain_id: $id})
+  SET d.scope = $scope, d.name = $name, d.updated_at = timestamp()
+RETURN d.brain_id`
+
+// UpsertDomain idempotently projects one domain into the tenant's graph.
+func (w *neo4jGraphWriter) UpsertDomain(ctx context.Context, tenant string, d brain.DomainSnapshot) error {
+	return w.exec(ctx, tenant, upsertDomainCypher, map[string]any{
+		"id": int64(d.ID), "scope": d.ScopeID, "name": d.Name,
+	}, "domain", d.ID)
+}
+
+const upsertSubdomainCypher = `
+MERGE (s:Subdomain {brain_id: $id})
+  SET s.scope = $scope, s.fqdn = $fqdn, s.domain = $domain, s.updated_at = timestamp()
+WITH s
+OPTIONAL MATCH (d:Domain {scope: $scope, name: $domain})
+FOREACH (_ IN CASE WHEN d IS NULL THEN [] ELSE [1] END |
+  MERGE (d)-[:HAS_SUBDOMAIN]->(s))
+WITH s
+UNWIND $addresses AS addr
+OPTIONAL MATCH (h:Host {scope: $scope, address: addr})
+FOREACH (_ IN CASE WHEN h IS NULL THEN [] ELSE [1] END |
+  MERGE (s)-[:RESOLVES_TO]->(h))
+RETURN s.brain_id`
+
+// UpsertSubdomain idempotently projects one subdomain, linking it under its parent
+// domain (HAS_SUBDOMAIN) and to the hosts it resolves to (RESOLVES_TO) when those
+// are already projected; the edges are conditional so the node is always created
+// and links self-heal on a later pass.
+func (w *neo4jGraphWriter) UpsertSubdomain(ctx context.Context, tenant string, s brain.SubdomainSnapshot) error {
+	addrs := s.Addresses
+	if addrs == nil {
+		addrs = []string{}
+	}
+	return w.exec(ctx, tenant, upsertSubdomainCypher, map[string]any{
+		"id": int64(s.ID), "scope": s.ScopeID, "fqdn": s.FQDN,
+		"domain": s.DomainName, "addresses": addrs,
+	}, "subdomain", s.ID)
+}
+
+// exec runs an idempotent projection write against the tenant's Neo4j.
+func (w *neo4jGraphWriter) exec(ctx context.Context, tenant, cypher string, params map[string]any, kind string, id uint64) error {
+	pool := w.poolGetter()
+	if pool == nil {
+		return fmt.Errorf("graph projector: pool not ready")
+	}
+	tid, err := auth.NewTenantID(tenant)
+	if err != nil {
+		return fmt.Errorf("graph projector: invalid tenant %q: %w", tenant, err)
+	}
+	conn, err := pool.For(ctx, tid)
+	if err != nil {
+		return fmt.Errorf("graph projector: pool.For(%s): %w", tenant, err)
+	}
+	defer conn.Release()
+	_, err = conn.Neo4j.ExecuteWrite(ctx, func(tx neo4j.ManagedTransaction) (any, error) {
+		res, txErr := tx.Run(ctx, cypher, params)
+		if txErr != nil {
+			return nil, txErr
+		}
+		return res.Consume(ctx)
+	})
+	if err != nil {
+		return fmt.Errorf("graph projector: upsert %s %d: %w", kind, id, err)
+	}
+	return nil
+}
+
 // UpsertFinding idempotently projects one finding into the tenant's graph.
 func (w *neo4jGraphWriter) UpsertFinding(ctx context.Context, tenant string, f brain.FindingSnapshot) error {
 	pool := w.poolGetter()

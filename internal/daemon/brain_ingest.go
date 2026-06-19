@@ -37,7 +37,9 @@ func ingestObservation(reg *brain.Registry, tenant string) harness.ObservationSi
 		if req.Context != nil {
 			scope = req.Context.MissionId
 		}
-		if h := req.GetHost(); h != nil {
+		switch o := req.Observation.(type) {
+		case *harnesspb.ObserveRequest_Host:
+			h := o.Host
 			var openPorts []int
 			var services map[int]brain.ServiceInfo
 			for _, p := range h.Ports {
@@ -57,6 +59,13 @@ func ingestObservation(reg *brain.Registry, tenant string) harness.ObservationSi
 				CloudID:    h.CloudId,
 				OpenPorts:  openPorts,
 				Services:   services,
+			})
+		case *harnesspb.ObserveRequest_Domain:
+			reg.For(tenant).Submit(brain.DomainObserved{ScopeID: scope, Name: o.Domain.Name})
+		case *harnesspb.ObserveRequest_Subdomain:
+			s := o.Subdomain
+			reg.For(tenant).Submit(brain.SubdomainObserved{
+				ScopeID: scope, FQDN: s.Fqdn, Domain: s.Domain, Addresses: s.Addresses,
 			})
 		}
 		return nil
