@@ -31,6 +31,7 @@ require (
 	github.com/klauspost/compress v1.18.5
 	github.com/lib/pq v1.12.3
 	github.com/mitchellh/mapstructure v1.5.0
+	github.com/mlange-42/ark v0.8.3
 	github.com/neo4j/neo4j-go-driver/v5 v5.28.4
 	github.com/oklog/ulid/v2 v2.1.1
 	github.com/openfga/go-sdk v0.8.1
