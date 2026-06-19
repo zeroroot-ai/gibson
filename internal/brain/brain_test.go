@@ -20,8 +20,8 @@ func TestWorld_FoldAndReplay(t *testing.T) {
 	apply(HostObserved{ScopeID: "scope-b", Address: "10.0.0.5", OpenPorts: []int{22}})       // same IP, different scope: distinct
 
 	want := []HostSnapshot{
-		{ScopeID: "scope-a", Address: "10.0.0.5", OpenPorts: []int{22, 443}},
-		{ScopeID: "scope-b", Address: "10.0.0.5", OpenPorts: []int{22}},
+		{ID: 1, ScopeID: "scope-a", Address: "10.0.0.5", OpenPorts: []int{22, 443}},
+		{ID: 2, ScopeID: "scope-b", Address: "10.0.0.5", OpenPorts: []int{22}},
 	}
 	got := w.Snapshot()
 	if !reflect.DeepEqual(got, want) {

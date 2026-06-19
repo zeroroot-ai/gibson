@@ -33,6 +33,7 @@ func TestServiceObservation_FoldEnrichReplay(t *testing.T) {
 	apply(HostObserved{ScopeID: "s", Address: "10.0.0.5", OpenPorts: []int{22, 80}})
 
 	want := []HostSnapshot{{
+		ID:        1,
 		ScopeID:   "s",
 		Address:   "10.0.0.5",
 		OpenPorts: []int{22, 80},
