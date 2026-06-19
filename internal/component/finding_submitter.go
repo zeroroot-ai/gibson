@@ -19,14 +19,11 @@ import (
 	"github.com/zeroroot-ai/sdk/auth"
 )
 
-// FindingGraphBridge is a narrow interface over harness.GraphRAGBridge used by
-// GraphRAGFindingSubmitter. It declares only the StoreAsync method to avoid
-// a circular import (harness imports component, so component cannot import harness).
-//
-// harness.GraphRAGBridge satisfies this interface at the call site in daemon/grpc.go.
-type FindingGraphBridge interface {
-	StoreAsync(ctx context.Context, finding agent.Finding, missionID types.ID, targetID *types.ID)
-}
+// WorldFindingSink routes a submitted finding into the per-tenant ECS brain World
+// (ADR-0007): the daemon wires this to fold the finding as a Timeline event so the
+// graph projector — the sole writer of finding nodes — materializes it. Kept as a
+// plain callback so component stays decoupled from the brain package.
+type WorldFindingSink func(ctx context.Context, tenant string, finding agent.Finding)
 
 // GraphRAGFindingSubmitter implements FindingSubmitter by routing findings to:
 //  1. The per-tenant finding store (via the data-plane Pool), for tenant-scoped writes.
@@ -40,7 +37,7 @@ type FindingGraphBridge interface {
 // GraphRAG storage is fully async: StoreAsync returns immediately and the actual
 // write happens in a background goroutine managed by the bridge.
 type GraphRAGFindingSubmitter struct {
-	bridge      FindingGraphBridge
+	worldSink   WorldFindingSink
 	pool        datapool.Pool
 	stateClient *state.StateClient
 	logger      *slog.Logger
@@ -55,7 +52,7 @@ type GraphRAGFindingSubmitter struct {
 //   - stateClient: StateClient used to resolve workID → missionID from Redis.
 //   - logger:      Structured logger; if nil, slog.Default() is used.
 func NewGraphRAGFindingSubmitter(
-	bridge FindingGraphBridge,
+	worldSink WorldFindingSink,
 	pool datapool.Pool,
 	stateClient *state.StateClient,
 	logger *slog.Logger,
@@ -64,7 +61,7 @@ func NewGraphRAGFindingSubmitter(
 		logger = slog.Default()
 	}
 	return &GraphRAGFindingSubmitter{
-		bridge:      bridge,
+		worldSink:   worldSink,
 		pool:        pool,
 		stateClient: stateClient,
 		logger:      logger.With("component", "graphrag_finding_submitter"),
@@ -119,13 +116,11 @@ func (s *GraphRAGFindingSubmitter) Submit(
 	// Step 4: Acquire a per-tenant Conn and persist the finding.
 	s.persistFinding(ctx, tenant, workID, findingID, baseFinding, missionID)
 
-	// Step 5: Queue async storage to Neo4j via the bridge.
-	// StoreAsync is fire-and-forget; the bridge manages its own goroutines.
-	var targetID *types.ID
-	if baseFinding.TargetID != nil {
-		targetID = baseFinding.TargetID
+	// Step 5: route the finding into the World; the graph projector (sole writer)
+	// materializes the :Finding node from it (ADR-0007, gibson#837).
+	if s.worldSink != nil {
+		s.worldSink(ctx, tenant, baseFinding)
 	}
-	s.bridge.StoreAsync(ctx, baseFinding, missionID, targetID)
 
 	s.logger.InfoContext(ctx, "finding submitter: finding queued for GraphRAG storage",
 		slog.String("tenant", tenant),
