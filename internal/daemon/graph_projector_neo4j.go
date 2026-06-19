@@ -213,6 +213,57 @@ func (w *neo4jGraphWriter) UpsertAccount(ctx context.Context, tenant string, a b
 	}, "account", a.ID)
 }
 
+// upsertAgentRunCypher MERGEs an :AgentRun (run-provenance, ADR-0007) keyed by the
+// harness run id, and — when its parent run is already projected — the DELEGATED_TO
+// edge from parent to child. The edge is conditional so the run node is always
+// created; a later pass links it once the parent lands (self-healing), mirroring
+// the AFFECTS/HAS_SUBDOMAIN projections.
+const upsertAgentRunCypher = `
+MERGE (r:AgentRun {brain_id: $run_id})
+  SET r.agent = $agent, r.scope = $scope, r.updated_at = timestamp()
+WITH r
+OPTIONAL MATCH (parent:AgentRun {brain_id: $parent_run_id})
+FOREACH (_ IN CASE WHEN $parent_run_id = '' OR parent IS NULL THEN [] ELSE [1] END |
+  MERGE (parent)-[:DELEGATED_TO]->(r))
+RETURN r.brain_id`
+
+// UpsertAgentRun idempotently projects one agent run and, when its parent run is
+// already projected, the DELEGATED_TO edge — replacing the old direct graph write
+// in DelegateToAgent so the projector is the sole writer (ADR-0007, #837).
+func (w *neo4jGraphWriter) UpsertAgentRun(ctx context.Context, tenant string, r brain.AgentRunSnapshot) error {
+	pool := w.poolGetter()
+	if pool == nil {
+		return fmt.Errorf("graph projector: pool not ready")
+	}
+	tid, err := auth.NewTenantID(tenant)
+	if err != nil {
+		return fmt.Errorf("graph projector: invalid tenant %q: %w", tenant, err)
+	}
+	conn, err := pool.For(ctx, tid)
+	if err != nil {
+		return fmt.Errorf("graph projector: pool.For(%s): %w", tenant, err)
+	}
+	defer conn.Release()
+
+	params := map[string]any{
+		"run_id":        r.RunID,
+		"parent_run_id": r.ParentRunID,
+		"agent":         r.AgentName,
+		"scope":         r.ScopeID,
+	}
+	_, err = conn.Neo4j.ExecuteWrite(ctx, func(tx neo4j.ManagedTransaction) (any, error) {
+		res, txErr := tx.Run(ctx, upsertAgentRunCypher, params)
+		if txErr != nil {
+			return nil, txErr
+		}
+		return res.Consume(ctx)
+	})
+	if err != nil {
+		return fmt.Errorf("graph projector: upsert agent_run %s: %w", r.RunID, err)
+	}
+	return nil
+}
+
 // exec runs an idempotent projection write against the tenant's Neo4j.
 func (w *neo4jGraphWriter) exec(ctx context.Context, tenant, cypher string, params map[string]any, kind string, id uint64) error {
 	pool := w.poolGetter()

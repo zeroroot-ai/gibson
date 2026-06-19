@@ -89,6 +89,9 @@ type DefaultAgentHarness struct {
 	// Knowledge graph integration
 	graphRAGQueryBridge GraphRAGQueryBridge
 
+	// delegationSink folds agent-delegation run-provenance into the World (ADR-0007).
+	delegationSink DelegationSink
+
 	// Mission management (optional, nil = mission methods return error)
 	missionClient MissionOperator
 	spawnLimits   SpawnLimits
@@ -1875,15 +1878,16 @@ func (h *DefaultAgentHarness) DelegateToAgent(ctx context.Context, name string, 
 		)
 	}
 
-	// ── DELEGATED_TO relationship ────────────────────────────────────────────
-	// Write the DELEGATED_TO edge from the parent agent_run to the child
-	// agent_run so that the knowledge graph reflects the full delegation tree.
+	// ── DELEGATED_TO run-provenance ──────────────────────────────────────────
+	// Record that this run delegated to a child run. We do NOT write the graph
+	// directly: the fact is folded into the tenant World (as AgentRunObserved
+	// events for both parent and child) via the DelegationSink, and the graph
+	// projector — the sole writer (ADR-0007, #837) — materializes the :AgentRun
+	// nodes and the DELEGATED_TO edge.
+	//
 	// The child run ID is read from the child harness's mission context (not
 	// childMissionCtx, which is a value copy). The factory may assign a new
 	// AgentRunID inside the child; we retrieve it via a type assertion.
-	//
-	// Both run IDs must be non-empty, and a GraphRAG query bridge must be
-	// available; otherwise we log a warning and continue (non-fatal).
 	var childRunID string
 	if dah, ok := childHarness.(*DefaultAgentHarness); ok {
 		childRunID = dah.missionCtx.AgentRunID
@@ -1892,14 +1896,15 @@ func (h *DefaultAgentHarness) DelegateToAgent(ctx context.Context, name string, 
 		// was in childMissionCtx before the factory ran.
 		childRunID = childMissionCtx.AgentRunID
 	}
-	if parentRunID != "" && childRunID != "" && h.graphRAGQueryBridge != nil {
-		rel := sdkgraphrag.NewRelationship(parentRunID, childRunID, "DELEGATED_TO")
-		if relErr := h.graphRAGQueryBridge.CreateRelationship(ctx, *rel); relErr != nil {
-			h.logger.Warn("failed to write DELEGATED_TO relationship",
-				"parent_run_id", parentRunID,
-				"child_run_id", childRunID,
-				"error", relErr)
-		}
+	if h.delegationSink != nil && parentRunID != "" && childRunID != "" {
+		h.delegationSink(ctx, DelegationObserved{
+			Tenant:      h.missionCtx.TenantID,
+			Scope:       h.missionCtx.ID.String(),
+			ParentRunID: parentRunID,
+			ParentAgent: h.missionCtx.CurrentAgent,
+			ChildRunID:  childRunID,
+			ChildAgent:  name,
+		})
 	} else if parentRunID != "" && childRunID == "" {
 		h.logger.Debug("skipping DELEGATED_TO edge: child agent_run_id not set on mission context",
 			"parent_run_id", parentRunID,

@@ -41,6 +41,31 @@ func ingestComponentFinding(reg *brain.Registry) component.WorldFindingSink {
 	}
 }
 
+// ingestDelegation returns the harness DelegationSink (ADR-0007): an agent
+// delegation is folded into the tenant World as AgentRunObserved events for both
+// the parent and child run, so the graph projector — the sole writer — materializes
+// the :AgentRun nodes and the DELEGATED_TO edge. Replaces the old direct
+// CreateRelationship write in the harness (gibson#837). The parent observation also
+// covers the root run, which is never itself delegated-to.
+func ingestDelegation(reg *brain.Registry) harness.DelegationSink {
+	return func(_ context.Context, d harness.DelegationObserved) {
+		if reg == nil || d.Tenant == "" {
+			return
+		}
+		eng := reg.For(d.Tenant)
+		if d.ParentRunID != "" {
+			eng.Submit(brain.AgentRunObserved{
+				RunID: d.ParentRunID, AgentName: d.ParentAgent, ScopeID: d.Scope,
+			})
+		}
+		if d.ChildRunID != "" {
+			eng.Submit(brain.AgentRunObserved{
+				RunID: d.ChildRunID, ParentRunID: d.ParentRunID, AgentName: d.ChildAgent, ScopeID: d.Scope,
+			})
+		}
+	}
+}
+
 // ingestObservation returns the callback service's observation sink (ADR-0007):
 // it translates a typed agent observation into a brain Timeline event and submits
 // it to the tenant's World engine. The reducer + scope-relative identity

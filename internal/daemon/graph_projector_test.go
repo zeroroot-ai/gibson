@@ -18,6 +18,7 @@ type fakeGraphWriter struct {
 	subdomains  map[string][]brain.SubdomainSnapshot
 	credentials map[string][]brain.CredentialSnapshot
 	accounts    map[string][]brain.AccountSnapshot
+	agentRuns   map[string][]brain.AgentRunSnapshot
 }
 
 func newFakeGraphWriter() *fakeGraphWriter {
@@ -28,6 +29,7 @@ func newFakeGraphWriter() *fakeGraphWriter {
 		subdomains:  map[string][]brain.SubdomainSnapshot{},
 		credentials: map[string][]brain.CredentialSnapshot{},
 		accounts:    map[string][]brain.AccountSnapshot{},
+		agentRuns:   map[string][]brain.AgentRunSnapshot{},
 	}
 }
 
@@ -73,6 +75,13 @@ func (f *fakeGraphWriter) UpsertAccount(_ context.Context, tenant string, a brai
 	return nil
 }
 
+func (f *fakeGraphWriter) UpsertAgentRun(_ context.Context, tenant string, r brain.AgentRunSnapshot) error {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	f.agentRuns[tenant] = append(f.agentRuns[tenant], r)
+	return nil
+}
+
 // TestGraphProjector_ProjectsWorldPerTenant: the projector reads each tenant's
 // World and upserts its hosts (ADR-0007), with strict per-tenant isolation and
 // the host's stable id + service detail carried through to the writer.
@@ -92,6 +101,9 @@ func TestGraphProjector_ProjectsWorldPerTenant(t *testing.T) {
 	reg.For("acme").Submit(brain.SubdomainObserved{ScopeID: "m1", FQDN: "api.example.com", Domain: "example.com", Addresses: []string{"10.0.0.5"}})
 	reg.For("acme").Submit(brain.CredentialObserved{ScopeID: "m1", SecretHash: "deadbeef", Username: "root", CredentialKind: "ssh_key"})
 	reg.For("acme").Submit(brain.AccountObserved{ScopeID: "m1", Identifier: "admin", AccountKind: "local"})
+	// Run-provenance: a parent run delegated to a child run.
+	reg.For("acme").Submit(brain.AgentRunObserved{RunID: "run-parent", AgentName: "orchestrator", ScopeID: "m1"})
+	reg.For("acme").Submit(brain.AgentRunObserved{RunID: "run-child", ParentRunID: "run-parent", AgentName: "recon", ScopeID: "m1"})
 	reg.For("globex").Submit(brain.HostObserved{ScopeID: "m9", Address: "192.168.1.1", OpenPorts: []int{443}})
 
 	// Wait for the engines to fold the observations into their Worlds.
@@ -99,7 +111,7 @@ func TestGraphProjector_ProjectsWorldPerTenant(t *testing.T) {
 	for time.Now().Before(deadline) {
 		a := reg.For("acme")
 		if len(a.Hosts()) == 1 && len(a.Findings()) == 1 && len(a.Domains()) == 1 && len(a.Subdomains()) == 1 &&
-			len(a.Credentials()) == 1 && len(a.Accounts()) == 1 && len(reg.For("globex").Hosts()) == 1 {
+			len(a.Credentials()) == 1 && len(a.Accounts()) == 1 && len(a.AgentRuns()) == 2 && len(reg.For("globex").Hosts()) == 1 {
 			break
 		}
 		time.Sleep(10 * time.Millisecond)
@@ -162,5 +174,23 @@ func TestGraphProjector_ProjectsWorldPerTenant(t *testing.T) {
 	}
 	if len(writer.credentials["globex"]) != 0 || len(writer.accounts["globex"]) != 0 {
 		t.Fatalf("globex credential/account isolation breached")
+	}
+
+	// Run-provenance projected under acme only, with the parent link carried so the
+	// writer can draw DELEGATED_TO (parent → child).
+	if got := len(writer.agentRuns["acme"]); got != 2 {
+		t.Fatalf("acme: projected %d agent runs, want 2", got)
+	}
+	if len(writer.agentRuns["globex"]) != 0 {
+		t.Fatalf("globex agent-run isolation breached: %+v", writer.agentRuns["globex"])
+	}
+	var child brain.AgentRunSnapshot
+	for _, r := range writer.agentRuns["acme"] {
+		if r.RunID == "run-child" {
+			child = r
+		}
+	}
+	if child.RunID != "run-child" || child.ParentRunID != "run-parent" || child.AgentName != "recon" {
+		t.Fatalf("acme child run wrong/missing parent link: %+v", writer.agentRuns["acme"])
 	}
 }

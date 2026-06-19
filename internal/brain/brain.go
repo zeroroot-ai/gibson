@@ -53,6 +53,7 @@ type World struct {
 	subdomains  *ecs.Map1[Subdomain]
 	credentials *ecs.Map1[Credential]
 	accounts    *ecs.Map1[Account]
+	agentRuns   *ecs.Map1[AgentRun]
 
 	// next*ID are monotonic, replay-deterministic counters for assigning stable
 	// ids (incremented in the single-writer reducer, so replay reproduces ids).
@@ -106,6 +107,7 @@ func NewWorld(tenant string) *World {
 		subdomains:  ecs.NewMap1[Subdomain](w),
 		credentials: ecs.NewMap1[Credential](w),
 		accounts:    ecs.NewMap1[Account](w),
+		agentRuns:   ecs.NewMap1[AgentRun](w),
 	}
 }
 
@@ -253,6 +255,8 @@ func Reduce(w *World, ev Event) {
 		applyBeliefScored(w, e)
 	case FindingRaised:
 		applyFindingRaised(w, e)
+	case AgentRunObserved:
+		applyAgentRunObserved(w, e)
 	}
 }
 

@@ -8,6 +8,7 @@ import (
 	gibsonagent "github.com/zeroroot-ai/gibson/internal/agent"
 	"github.com/zeroroot-ai/gibson/internal/brain"
 	"github.com/zeroroot-ai/gibson/internal/daemon/api"
+	"github.com/zeroroot-ai/gibson/internal/harness"
 	"github.com/zeroroot-ai/gibson/internal/types"
 )
 
@@ -98,4 +99,42 @@ func TestIngestComponentFinding(t *testing.T) {
 		time.Sleep(10 * time.Millisecond)
 	}
 	t.Fatalf("component finding not folded into the World: %+v", reg.For("acme").Findings())
+}
+
+// TestIngestDelegation: an agent delegation folds both the parent and child run
+// into the World (run-provenance), with the parent link carried so the projector
+// can draw DELEGATED_TO — replacing the old direct graph write (gibson#837).
+func TestIngestDelegation(t *testing.T) {
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+	reg := brain.NewRegistry(ctx)
+
+	sink := ingestDelegation(reg)
+	sink(ctx, harness.DelegationObserved{
+		Tenant: "acme", Scope: "m1",
+		ParentRunID: "run-parent", ParentAgent: "orchestrator",
+		ChildRunID: "run-child", ChildAgent: "recon",
+	})
+
+	deadline := time.Now().Add(2 * time.Second)
+	for time.Now().Before(deadline) {
+		runs := reg.For("acme").AgentRuns()
+		if len(runs) == 2 {
+			if len(reg.For("other").AgentRuns()) != 0 {
+				t.Fatal("cross-tenant leak")
+			}
+			var child brain.AgentRunSnapshot
+			for _, r := range runs {
+				if r.RunID == "run-child" {
+					child = r
+				}
+			}
+			if child.ParentRunID != "run-parent" || child.AgentName != "recon" {
+				t.Fatalf("child run missing parent link: %+v", runs)
+			}
+			return
+		}
+		time.Sleep(10 * time.Millisecond)
+	}
+	t.Fatalf("delegation not folded into the World: %+v", reg.For("acme").AgentRuns())
 }

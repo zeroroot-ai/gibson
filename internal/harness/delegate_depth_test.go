@@ -343,24 +343,12 @@ func TestDelegateToAgent_DepthBelowCap(t *testing.T) {
 	require.NoError(t, err, "delegation at depth 7 (max=8) should succeed")
 }
 
-// TestDelegateToAgent_DELEGATEDTORelationship verifies that a DELEGATED_TO
-// relationship is written from the parent agent_run to the child agent_run
-// when both run IDs are non-empty.
+// TestDelegateToAgent_DELEGATEDTORelationship verifies that a delegation emits a
+// run-provenance fact to the World DelegationSink (parent → child run) rather than
+// writing the graph directly — the graph projector is the sole writer (ADR-0007,
+// gibson#837).
 func TestDelegateToAgent_DELEGATEDTORelationship(t *testing.T) {
-	// delegatingAgent delegates to a child and sets child's AgentRunID via a
-	// custom captureAgent that sets its run ID into the harness.
 	childRunID := "run-child-42"
-
-	// Use a captureAgent whose Execute sets the childRunID onto the mission
-	// context. Since the child harness's missionCtx.AgentRunID is set at
-	// factory time, we pre-seed the child's AgentRunID via the factory used
-	// inside buildTestHarness (the recursive factory).  The simplest approach:
-	// directly construct a harness with childRunID set and call DelegateToAgent.
-
-	// We'll use a custom registry adapter that directly returns a result
-	// without going through a captureAgent, so we can set the child run ID
-	// predictably in the test.
-	type childResult struct{}
 
 	agentWithKnownRunID := &captureAgent{name: "child_agent"}
 	registry := &delegationRegistryAdapter{
@@ -372,6 +360,13 @@ func TestDelegateToAgent_DELEGATEDTORelationship(t *testing.T) {
 	// Parent harness: run_id="run-parent"
 	parentRunID := "run-parent"
 	harnessParent := buildTestHarness(t, parentRunID, 0, 8, registry, graphBridge)
+
+	// Capture the run-provenance fact folded into the World; the harness must not
+	// touch the graph directly.
+	var captured []DelegationObserved
+	harnessParent.delegationSink = func(_ context.Context, d DelegationObserved) {
+		captured = append(captured, d)
+	}
 
 	// Override the factory so the child harness gets childRunID pre-set.
 	harnessParent.factory = HarnessFactory(func(ctx context.Context, mc MissionContext, ti TargetInfo) (AgentHarness, error) {
@@ -400,15 +395,17 @@ func TestDelegateToAgent_DELEGATEDTORelationship(t *testing.T) {
 	_, err := harnessParent.DelegateToAgent(context.Background(), "child_agent", task)
 	require.NoError(t, err)
 
-	// Verify the DELEGATED_TO relationship was recorded.
+	// The harness emits the delegation to the World sink (not the graph).
+	require.Len(t, captured, 1, "expected exactly one delegation observation")
+	assert.Equal(t, parentRunID, captured[0].ParentRunID)
+	assert.Equal(t, childRunID, captured[0].ChildRunID)
+	assert.Equal(t, "child_agent", captured[0].ChildAgent)
+
+	// No direct graph write must happen anymore.
 	graphBridge.mu.Lock()
 	rels := graphBridge.relationships
 	graphBridge.mu.Unlock()
-
-	require.Len(t, rels, 1, "expected exactly one DELEGATED_TO relationship")
-	assert.Equal(t, parentRunID, rels[0].FromID)
-	assert.Equal(t, childRunID, rels[0].ToID)
-	assert.Equal(t, "DELEGATED_TO", rels[0].Type)
+	assert.Empty(t, rels, "DELEGATED_TO must not be written directly to the graph")
 }
 
 // TestDelegateToAgent_ExistingDelegationTestsUnbroken is a smoke test to
