@@ -768,6 +768,12 @@ func (d *daemonImpl) Start(ctx context.Context) error {
 	d.redisEventStream = NewRedisEventStream(stateClient, d.logger.Slog())
 	d.logger.Info(ctx, "redis event stream initialized")
 
+	// Initialize the per-tenant ECS brain registry (epic ecs-brain). Engines run
+	// for the daemon's lifetime; the orchestrator event-bus adapter feeds each
+	// tenant's World from its live mission event stream (ADR-0001 capture path).
+	d.brainRegistry = brain.NewRegistry(ctx, brain.BeliefSystem(brain.PlaceholderBeliefProvider()))
+	d.logger.Info(ctx, "ECS brain registry initialized")
+
 	// Initialize Redis stores (mission/run stores have been migrated to the
 	// per-tenant Pool path; only non-mission stores are initialized here).
 	d.checkpointStore = mission.NewRedisCheckpointStore(stateClient)

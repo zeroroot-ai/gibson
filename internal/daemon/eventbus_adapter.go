@@ -7,6 +7,7 @@ import (
 	"strings"
 	"time"
 
+	"github.com/zeroroot-ai/gibson/internal/brain"
 	"github.com/zeroroot-ai/gibson/internal/daemon/api"
 	"github.com/zeroroot-ai/gibson/internal/events"
 )
@@ -28,6 +29,7 @@ type OrchestratorEventBusAdapter struct {
 	eventBus    *EventBus
 	redisStream *RedisEventStream // optional; nil means Redis Streams disabled
 	tenant      string            // tenant scope for redis stream key
+	brainReg    *brain.Registry   // optional; nil means ECS-brain ingest disabled
 }
 
 // NewOrchestratorEventBusAdapter creates a new adapter for the orchestrator.
@@ -41,6 +43,7 @@ func NewOrchestratorEventBusAdapterWithRedis(
 	eventBus *EventBus,
 	redisStream *RedisEventStream,
 	tenant string,
+	brainReg *brain.Registry,
 ) *OrchestratorEventBusAdapter {
 	if tenant == "" {
 		tenant = "default"
@@ -49,6 +52,7 @@ func NewOrchestratorEventBusAdapterWithRedis(
 		eventBus:    eventBus,
 		redisStream: redisStream,
 		tenant:      tenant,
+		brainReg:    brainReg,
 	}
 }
 
@@ -67,6 +71,10 @@ func (a *OrchestratorEventBusAdapter) Publish(event events.Event) {
 			_ = err
 		}
 	}
+
+	// ECS-brain ingest (optional) — the capture path (ADR-0001): feed the
+	// tenant's brain World from the live mission event stream.
+	ingestToBrain(a.brainReg, a.tenant, eventData)
 }
 
 // NewEventBusAdapter creates a new adapter that wraps an EventBus.
