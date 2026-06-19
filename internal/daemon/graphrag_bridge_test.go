@@ -6,12 +6,9 @@ import (
 	"fmt"
 	"log/slog"
 	"testing"
-	"time"
 
-	"github.com/zeroroot-ai/gibson/internal/agent"
 	"github.com/zeroroot-ai/gibson/internal/datapool"
 	"github.com/zeroroot-ai/gibson/internal/memory/embedder"
-	"github.com/zeroroot-ai/gibson/internal/types"
 	"github.com/zeroroot-ai/sdk/auth"
 	sdkgraphrag "github.com/zeroroot-ai/sdk/graphrag"
 )
@@ -154,38 +151,6 @@ func TestGraphRAGBridgeAdapter_Health(t *testing.T) {
 	}
 }
 
-// TestGraphRAGBridgeAdapter_AsyncBridge_MissingTenant verifies that StoreAsync
-// is a no-op (logs warn) when the context carries no tenant and Shutdown completes.
-func TestGraphRAGBridgeAdapter_AsyncBridge_MissingTenant(t *testing.T) {
-	t.Parallel()
-
-	emb := embedder.NewMockEmbedder()
-	adapter, err := NewGraphRAGBridgeAdapter(GraphRAGBridgeConfig{
-		PoolGetter: func() datapool.Pool { return &mockPool{conn: minimalConn()} },
-		Embedder:   emb,
-		Logger:     slog.Default(),
-	})
-	if err != nil {
-		t.Fatalf("NewGraphRAGBridgeAdapter: %v", err)
-	}
-
-	bridge := adapter.Bridge()
-	ctx := context.Background() // no tenant
-	finding := agent.Finding{
-		ID:          types.NewID(),
-		Description: "test finding",
-	}
-	missionID := types.NewID()
-	bridge.StoreAsync(ctx, finding, missionID, nil)
-
-	// Shutdown with a 5-second budget — must not hang.
-	shutdownCtx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
-	defer cancel()
-	if sErr := bridge.Shutdown(shutdownCtx); sErr != nil {
-		t.Errorf("Shutdown: %v", sErr)
-	}
-}
-
 // TestGraphRAGBridgeAdapter_InterfaceShapes verifies compile-time interface compliance.
 func TestGraphRAGBridgeAdapter_InterfaceShapes(t *testing.T) {
 	t.Parallel()
@@ -199,12 +164,8 @@ func TestGraphRAGBridgeAdapter_InterfaceShapes(t *testing.T) {
 		t.Fatalf("NewGraphRAGBridgeAdapter: %v", err)
 	}
 
-	// Bridge() and QueryBridge() must satisfy the harness interfaces.
+	// QueryBridge() must satisfy the harness interface.
 	// Compilation verifies this; just exercise the call here.
-	b := adapter.Bridge()
-	if b == nil {
-		t.Error("Bridge() returned nil")
-	}
 	qb := adapter.QueryBridge()
 	if qb == nil {
 		t.Error("QueryBridge() returned nil")

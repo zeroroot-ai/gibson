@@ -106,14 +106,8 @@ type HarnessConfig struct {
 	// Optional: defaults to NoOpMetricsRecorder if nil.
 	Metrics MetricsRecorder
 
-	// GraphRAGBridge for storing findings to the knowledge graph.
-	// Used for async storage of findings to Neo4j with relationship detection.
-	// Optional: defaults to NoopGraphRAGBridge if nil.
-	GraphRAGBridge GraphRAGBridge
-
 	// GraphRAGQueryBridge provides access to GraphRAG query operations.
 	// If nil, a NoopGraphRAGQueryBridge will be created (GraphRAG operations will return ErrGraphRAGNotEnabled).
-	// To enable queries, provide a DefaultGraphRAGQueryBridge created with the same GraphRAGStore as GraphRAGBridge.
 	GraphRAGQueryBridge GraphRAGQueryBridge
 
 	// Middleware is the middleware chain to apply to harness operations.
@@ -323,7 +317,6 @@ func (c *HarnessConfig) Validate() error {
 //   - Logger: slog.Default()
 //   - FindingStore: NewInMemoryFindingStore()
 //   - Metrics: NewNoOpMetricsRecorder()
-//   - GraphRAGBridge: NoopGraphRAGBridge{} (no-op, no knowledge graph storage)
 //   - GraphRAGQueryBridge: NoopGraphRAGQueryBridge{} (no-op, GraphRAG queries disabled)
 //
 // Note: MemoryManager is not defaulted as it requires mission-specific configuration.
@@ -353,10 +346,6 @@ func (c *HarnessConfig) ApplyDefaults() {
 
 	if c.Metrics == nil {
 		c.Metrics = NewNoOpMetricsRecorder()
-	}
-
-	if c.GraphRAGBridge == nil {
-		c.GraphRAGBridge = &NoopGraphRAGBridge{}
 	}
 
 	if c.GraphRAGQueryBridge == nil {

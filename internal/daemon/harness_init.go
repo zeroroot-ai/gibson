@@ -152,7 +152,6 @@ func (d *daemonImpl) newHarnessFactory(ctx context.Context) (harness.HarnessFact
 		MemoryWrapper: memoryWrapper,
 
 		// GraphRAG components
-		GraphRAGBridge:      d.infrastructure.graphRAGBridge,
 		GraphRAGQueryBridge: d.infrastructure.graphRAGQueryBridge,
 
 		// Compliance emitter — wires the ComplianceMiddleware into the
