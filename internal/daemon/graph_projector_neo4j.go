@@ -102,3 +102,53 @@ func (w *neo4jGraphWriter) UpsertHost(ctx context.Context, tenant string, h brai
 	}
 	return nil
 }
+
+// upsertFindingCypher MERGEs a :Finding and, when the affected host is already
+// projected, an AFFECTS edge to it (matched by scope+address). The edge is
+// conditional so the finding node is always created; a later pass links it once
+// the host lands (self-healing).
+const upsertFindingCypher = `
+MERGE (f:Finding {brain_id: $id})
+  SET f.title = $title, f.severity = $severity, f.scope = $scope,
+      f.address = $address, f.updated_at = timestamp()
+WITH f
+OPTIONAL MATCH (h:Host {scope: $scope, address: $address})
+FOREACH (_ IN CASE WHEN h IS NULL THEN [] ELSE [1] END |
+  MERGE (f)-[:AFFECTS]->(h))
+RETURN f.brain_id`
+
+// UpsertFinding idempotently projects one finding into the tenant's graph.
+func (w *neo4jGraphWriter) UpsertFinding(ctx context.Context, tenant string, f brain.FindingSnapshot) error {
+	pool := w.poolGetter()
+	if pool == nil {
+		return fmt.Errorf("graph projector: pool not ready")
+	}
+	tid, err := auth.NewTenantID(tenant)
+	if err != nil {
+		return fmt.Errorf("graph projector: invalid tenant %q: %w", tenant, err)
+	}
+	conn, err := pool.For(ctx, tid)
+	if err != nil {
+		return fmt.Errorf("graph projector: pool.For(%s): %w", tenant, err)
+	}
+	defer conn.Release()
+
+	params := map[string]any{
+		"id":       f.ID,
+		"title":    f.Title,
+		"severity": f.Severity,
+		"scope":    f.ScopeID,
+		"address":  f.Address,
+	}
+	_, err = conn.Neo4j.ExecuteWrite(ctx, func(tx neo4j.ManagedTransaction) (any, error) {
+		res, txErr := tx.Run(ctx, upsertFindingCypher, params)
+		if txErr != nil {
+			return nil, txErr
+		}
+		return res.Consume(ctx)
+	})
+	if err != nil {
+		return fmt.Errorf("graph projector: upsert finding %s: %w", f.ID, err)
+	}
+	return nil
+}
