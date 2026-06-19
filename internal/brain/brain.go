@@ -1,16 +1,15 @@
-// Package brain is the ECS-native mission brain (epic ecs-brain, gibson#745).
+// Package brain is the ECS-native mission brain (epic ecs-brain).
 //
 // The brain is an Entity-Component-System (ark) per ADR-0001. Its core invariant
 // is log-first event sourcing: a per-tenant append-only Timeline of domain events
 // is the system of record, and the Tenant World is a fold of that Timeline. A
 // single-writer reducer is the only thing that mutates the World; everything else
 // emits events and reads snapshots. Replaying the Timeline into a fresh World
-// reproduces state exactly — which is what powers crash-resume and the Scroller.
+// reproduces state exactly.
 //
-// This file establishes that spine end-to-end for one event type (HostObserved).
-// Subsequent slices generalize it: scope-relative identity resolution (gibson#746),
-// the emit bus + worker contract (sdk#341), and components codegen'd from
-// taxonomy/v1 (sdk#340) replace the hand-written Host component below.
+// Entity identity is scope-relative (ADR-0002, gibson#746): the coordinate of a
+// host is (ScopeID, Address), and resolution is a scope-partitioned loop-compare
+// over strong identity signals — see identity.go.
 package brain
 
 import (
@@ -19,69 +18,93 @@ import (
 	"github.com/mlange-42/ark/ecs"
 )
 
-// Host is a minimal component for the world-engine tracer bullet.
-//
-// Identity is (ScopeID, Address) — the scope-relative coordinate from ADR-0002.
-// Ports is volatile state (updated-on-match, never compared). This struct is a
-// placeholder; sdk#340 will codegen the real components from taxonomy/v1.
+// Host is the host component. Identity is the (ScopeID, Address) coordinate plus
+// optional strong signals (SSHHostKey, CloudID) that identify the host across
+// addresses. Ports is volatile state (updated-on-match, never compared).
+// Placeholder shape; sdk#340 will codegen components from taxonomy/v1.
 type Host struct {
-	ScopeID string // identity
-	Address string // identity (within scope)
-	Ports   []int  // volatile
+	ScopeID    string // identity (coordinate)
+	Address    string // identity (coordinate, within scope)
+	SSHHostKey string // strong identity signal (stable across addresses)
+	CloudID    string // strong identity signal
+	Ports      []PortObservation
+}
+
+// Surprise marks an entity the model did not expect — here, an identity
+// contradiction (an address reused by a different host). It is the input to the
+// attention/anomaly signal (ADR-0005/0006); it is not itself a separate entity.
+type Surprise struct {
+	Reason string
 }
 
 // World is a single tenant's in-memory ECS world (ADR-0001: one World per tenant,
-// never shared; no cross-tenant anything). Only the reducer mutates it.
+// never shared). Only the reducer mutates it.
 type World struct {
-	Tenant string
-	ecs    *ecs.World
-	hosts  *ecs.Map1[Host]
+	Tenant    string
+	ecs       *ecs.World
+	hosts     *ecs.Map1[Host]
+	surprises *ecs.Map1[Surprise]
 }
 
 // NewWorld returns an empty Tenant World.
 func NewWorld(tenant string) *World {
 	w := ecs.NewWorld()
-	return &World{Tenant: tenant, ecs: w, hosts: ecs.NewMap1[Host](w)}
-}
-
-// findHost returns the entity for the host at (scope, address) if present.
-// This is a deliberately trivial linear match; gibson#746 replaces it with the
-// general scoped loop-compare resolution over identity signals.
-func (w *World) findHost(scope, addr string) (ecs.Entity, bool) {
-	q := ecs.NewFilter1[Host](w.ecs).Query()
-	for q.Next() {
-		h := q.Get()
-		if h.ScopeID == scope && h.Address == addr {
-			e := q.Entity()
-			q.Close()
-			return e, true
-		}
+	return &World{
+		Tenant:    tenant,
+		ecs:       w,
+		hosts:     ecs.NewMap1[Host](w),
+		surprises: ecs.NewMap1[Surprise](w),
 	}
-	return ecs.Entity{}, false
 }
 
 // HostSnapshot is a stable, comparable view of a Host for assertions/inspection.
 type HostSnapshot struct {
-	ScopeID string
-	Address string
-	Ports   []int
+	ScopeID    string
+	Address    string
+	SSHHostKey string
+	CloudID    string
+	OpenPorts  []int  // currently-open port numbers, ascending
+	Surprise   string // non-empty if the entity carries a Surprise
 }
 
 // Snapshot returns the current hosts in deterministic order — the materialized
 // state derived from the fold so far.
 func (w *World) Snapshot() []HostSnapshot {
+	// First collect entities carrying a Surprise (separate query; drains fully).
+	surprised := map[ecs.Entity]string{}
+	sq := ecs.NewFilter1[Surprise](w.ecs).Query()
+	for sq.Next() {
+		surprised[sq.Entity()] = sq.Get().Reason
+	}
+
 	var out []HostSnapshot
 	q := ecs.NewFilter1[Host](w.ecs).Query()
 	for q.Next() {
 		h := q.Get()
-		ports := append([]int(nil), h.Ports...)
-		out = append(out, HostSnapshot{ScopeID: h.ScopeID, Address: h.Address, Ports: ports})
+		var open []int
+		for _, p := range h.Ports {
+			if p.Open {
+				open = append(open, p.Number)
+			}
+		}
+		sort.Ints(open)
+		out = append(out, HostSnapshot{
+			ScopeID:    h.ScopeID,
+			Address:    h.Address,
+			SSHHostKey: h.SSHHostKey,
+			CloudID:    h.CloudID,
+			OpenPorts:  open,
+			Surprise:   surprised[q.Entity()],
+		})
 	}
 	sort.Slice(out, func(i, j int) bool {
 		if out[i].ScopeID != out[j].ScopeID {
 			return out[i].ScopeID < out[j].ScopeID
 		}
-		return out[i].Address < out[j].Address
+		if out[i].Address != out[j].Address {
+			return out[i].Address < out[j].Address
+		}
+		return out[i].SSHHostKey < out[j].SSHHostKey
 	})
 	return out
 }
@@ -89,12 +112,14 @@ func (w *World) Snapshot() []HostSnapshot {
 // Event is a domain event on the Timeline. Acting = emitting an event (the write).
 type Event interface{ Kind() string }
 
-// HostObserved records that a host was seen at (scope, address) with a set of
-// open ports.
+// HostObserved records that a host was seen at (ScopeID, Address), optionally
+// with strong identity signals, and the set of ports observed open in this scan.
 type HostObserved struct {
-	ScopeID string
-	Address string
-	Ports   []int
+	ScopeID    string
+	Address    string
+	SSHHostKey string
+	CloudID    string
+	OpenPorts  []int
 }
 
 func (HostObserved) Kind() string { return "host.observed" }
@@ -104,21 +129,11 @@ func (HostObserved) Kind() string { return "host.observed" }
 func Reduce(w *World, ev Event) {
 	switch e := ev.(type) {
 	case HostObserved:
-		if ent, ok := w.findHost(e.ScopeID, e.Address); ok {
-			h := w.hosts.Get(ent)
-			h.Ports = append([]int(nil), e.Ports...) // volatile: updated on match
-			return
-		}
-		w.hosts.NewEntity(&Host{
-			ScopeID: e.ScopeID,
-			Address: e.Address,
-			Ports:   append([]int(nil), e.Ports...),
-		})
+		applyHostObserved(w, e)
 	}
 }
 
 // Timeline is the per-tenant append-only event log — the system of record.
-// In-memory here; a durable append-only store backs it in a later slice.
 type Timeline struct{ events []Event }
 
 // Append adds an event to the end of the log.
@@ -130,8 +145,7 @@ func (t *Timeline) Events() []Event { return t.events }
 // Len is the number of events recorded.
 func (t *Timeline) Len() int { return len(t.events) }
 
-// Replay rebuilds a World by folding the whole Timeline. World == fold(Timeline),
-// so Replay(t).Snapshot() equals the live World's Snapshot at the same head.
+// Replay rebuilds a World by folding the whole Timeline. World == fold(Timeline).
 func Replay(tenant string, t *Timeline) *World {
 	w := NewWorld(tenant)
 	for _, ev := range t.Events() {
