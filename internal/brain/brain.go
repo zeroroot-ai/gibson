@@ -77,6 +77,7 @@ func NewWorld(tenant string) *World {
 
 // HostSnapshot is a stable, comparable view of a Host for assertions/inspection.
 type HostSnapshot struct {
+	ID         uint64 // stable, replay-deterministic id — the graph projection key (ADR-0007)
 	ScopeID    string
 	Address    string
 	SSHHostKey string
@@ -117,6 +118,7 @@ func (w *World) Snapshot() []HostSnapshot {
 		}
 		sort.Ints(open)
 		out = append(out, HostSnapshot{
+			ID:         h.ID,
 			ScopeID:    h.ScopeID,
 			Address:    h.Address,
 			SSHHostKey: h.SSHHostKey,

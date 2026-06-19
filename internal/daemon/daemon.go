@@ -774,6 +774,17 @@ func (d *daemonImpl) Start(ctx context.Context) error {
 	d.brainRegistry = brain.NewRegistry(ctx, brain.BeliefSystem(brain.PlaceholderBeliefProvider()))
 	d.logger.Info(ctx, "ECS brain registry initialized")
 
+	// Project each tenant's World into its Neo4j knowledge graph (ADR-0007): the
+	// graph is a read-model of the World, written only by this projector. Runs
+	// async (never in the brain tick) so Neo4j I/O never blocks the reducer; the
+	// pool is resolved lazily since it is initialized after this point.
+	go NewGraphProjector(
+		d.brainRegistry,
+		newNeo4jGraphWriter(func() datapool.Pool { return d.pool }),
+		0, // default interval
+		d.logger.WithComponent("graph-projector").Slog(),
+	).Run(ctx)
+
 	// Initialize Redis stores (mission/run stores have been migrated to the
 	// per-tenant Pool path; only non-mission stores are initialized here).
 	d.checkpointStore = mission.NewRedisCheckpointStore(stateClient)
