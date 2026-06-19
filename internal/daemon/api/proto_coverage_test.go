@@ -14,7 +14,6 @@ import (
 	_ "github.com/zeroroot-ai/sdk/api/gen/gibson/component/v1"
 	_ "github.com/zeroroot-ai/sdk/api/gen/gibson/daemon/v1"
 	_ "github.com/zeroroot-ai/sdk/api/gen/gibson/tenant/v1"
-	_ "github.com/zeroroot-ai/sdk/api/gen/intelligence/v1"
 )
 
 // Note: FGA registry coverage tests have been removed. FGA enforcement has
@@ -42,7 +41,6 @@ import (
 var coveredProtoPackages = map[string]struct{}{
 	"gibson.daemon.v1":          {},
 	"gibson.component.v1":       {},
-	"intelligence.v1":           {},
 	"gibson.tenant.v1":          {},
 	"gibson.daemon.operator.v1": {},
 	"gibson.user.v1":            {},

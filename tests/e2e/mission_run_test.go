@@ -405,13 +405,10 @@ func TestMission_Run_HappyPath(t *testing.T) {
 		}
 	})
 
-	// -------------------------------------------------------------------------
-	// Phase 11: Assert GraphRAG dual-write (Neo4j) (R1.9).
-	// -------------------------------------------------------------------------
-	t.Run("assert GraphRAG dual-write: Finding node in Neo4j", func(t *testing.T) {
-		require.NotEmpty(t, missionID, "missionID is empty")
-		helpers.MustHaveFindingForMissionFromClient(t, ctx, missionID)
-	})
+	// Phase 11 (GraphRAG dual-write assertion via IntelligenceService) was removed
+	// in the ECS-brain cutover: findings now reach Neo4j via the World→graph
+	// projector (:Finding nodes), and IntelligenceService is retired (gibson#819).
+	// A projector-based finding-in-graph assertion is a follow-up.
 
 	// -------------------------------------------------------------------------
 	// Phase 12: Write coordination file for Playwright spec (R5).
