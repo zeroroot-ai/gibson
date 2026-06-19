@@ -10,6 +10,19 @@ type PortObservation struct {
 	Open   bool
 }
 
+// findHostByID returns the host entity with the given stable id, if present.
+func findHostByID(w *World, id uint64) (ecs.Entity, bool) {
+	q := ecs.NewFilter1[Host](w.ecs).Query()
+	for q.Next() {
+		if q.Get().ID == id {
+			e := q.Entity()
+			q.Close()
+			return e, true
+		}
+	}
+	return ecs.Entity{}, false
+}
+
 // findHostByCoord returns the host entity at (scope, address), if present.
 func findHostByCoord(w *World, scope, addr string) (ecs.Entity, bool) {
 	q := ecs.NewFilter1[Host](w.ecs).Query()
@@ -31,7 +44,7 @@ func findHostByCoord(w *World, scope, addr string) (ecs.Entity, bool) {
 func applyHostObserved(w *World, e HostObserved) {
 	ent, matched, contradiction := resolveHost(w, e)
 	if !matched {
-		h := &Host{ScopeID: e.ScopeID, Address: e.Address, SSHHostKey: e.SSHHostKey, CloudID: e.CloudID}
+		h := &Host{ID: w.newHostID(), ScopeID: e.ScopeID, Address: e.Address, SSHHostKey: e.SSHHostKey, CloudID: e.CloudID}
 		reconcilePorts(h, e.OpenPorts)
 		ne := w.hosts.NewEntity(h)
 		if contradiction {
