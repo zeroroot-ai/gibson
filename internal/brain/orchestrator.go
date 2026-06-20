@@ -45,6 +45,9 @@ type Mission struct {
 	// (TokenUsed events); the budget System (gibson#849) aborts when it exceeds
 	// Budget.MaxTokens.
 	TokensUsed int64
+	// DeciderSlot is the mission-level LLM the Decider runs on (gibson#850); empty
+	// → tenant dashboard default.
+	DeciderSlot DeciderSlot
 }
 
 // MissionStarted launches a mission. (CUE-mission projection lands later; this is
@@ -164,6 +167,7 @@ type MissionSnapshot struct {
 	DecisionInFlight bool
 	DecisionCursor   int
 	TokensUsed       int64
+	DeciderSlot      DeciderSlot
 }
 
 // MissionSnapshot returns the current missions in deterministic (ID) order.
@@ -181,6 +185,7 @@ func (w *World) MissionSnapshot() []MissionSnapshot {
 			DecisionInFlight: m.DecisionInFlight,
 			DecisionCursor:   m.DecisionCursor,
 			TokensUsed:       m.TokensUsed,
+			DeciderSlot:      m.DeciderSlot,
 		})
 	}
 	sort.Slice(out, func(i, j int) bool { return out[i].ID < out[j].ID })

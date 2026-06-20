@@ -157,6 +157,21 @@ func TestDecider_ContextCarriesOwnMissionAndCapabilities(t *testing.T) {
 	}
 }
 
+func TestDecider_MissionSlotFlowsToContext(t *testing.T) {
+	var captured MissionContext
+	llm := llmFunc(func(_ context.Context, mc MissionContext) (DeciderOutput, error) {
+		captured = mc
+		return DeciderOutput{Complete: &DeciderComplete{Outcome: "success"}}, nil
+	})
+	e, dw := goalEngine(llm)
+	e.Submit(MissionProjected{ID: "m1", Goal: "g", DeciderSlot: DeciderSlot{Provider: "anthropic", Model: "claude-opus-4-8"}})
+	runRounds(e, dw, 4)
+
+	if captured.DeciderSlot.Provider != "anthropic" || captured.DeciderSlot.Model != "claude-opus-4-8" {
+		t.Fatalf("decider slot not carried into context: %+v", captured.DeciderSlot)
+	}
+}
+
 // llmFunc adapts a func to DeciderLLM.
 type llmFunc func(context.Context, MissionContext) (DeciderOutput, error)
 

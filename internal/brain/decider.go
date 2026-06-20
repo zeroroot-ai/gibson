@@ -29,6 +29,14 @@ type Capability struct {
 	InputSchema string // for tools/plugins (gibson#848); empty for agents
 }
 
+// DeciderSlot names the LLM the Decider runs on (gibson#850): the mission-level
+// slot, distinct from worker node slots. Empty fields mean "use the tenant's
+// dashboard-default provider/model" — the concrete DeciderLLM resolves it.
+type DeciderSlot struct {
+	Provider string
+	Model    string
+}
+
 // MissionContext is the serialized own-mission slice the Decider reasons over
 // (gibson#847: own mission only; no belief #750, no ambient #749, no siblings).
 type MissionContext struct {
@@ -38,6 +46,7 @@ type MissionContext struct {
 	Findings     []FindingSnapshot
 	Hosts        []HostSnapshot
 	Capabilities []Capability
+	DeciderSlot  DeciderSlot // which LLM to decide with (gibson#850)
 }
 
 // quiescent reports whether the mission has no work still running or dispatchable.
@@ -279,6 +288,7 @@ func (dw *DeciderWorker) buildContext(missionID string) MissionContext {
 	for _, m := range dw.eng.Missions() {
 		if m.ID == missionID {
 			mc.Goal = m.Goal
+			mc.DeciderSlot = m.DeciderSlot
 			break
 		}
 	}

@@ -22,10 +22,11 @@ type WorkNode struct {
 // quiescence with the Decider never firing (CONTEXT.md). Distinct from the
 // minimal MissionStarted, which only seeds an observed mission.
 type MissionProjected struct {
-	ID     string
-	Goal   string
-	Budget Budget
-	Nodes  []WorkNode
+	ID          string
+	Goal        string
+	Budget      Budget
+	Nodes       []WorkNode
+	DeciderSlot DeciderSlot // mission-level Decider LLM (gibson#850); empty → tenant default
 }
 
 func (MissionProjected) Kind() string { return "mission.projected" }
@@ -34,7 +35,7 @@ func applyMissionProjected(w *World, e MissionProjected) {
 	if _, ok := findMission(w, e.ID); ok {
 		return // idempotent: already projected
 	}
-	w.missions.NewEntity(&Mission{ID: e.ID, Goal: e.Goal, Status: MissionRunning, Budget: e.Budget, DecisionCursor: -1})
+	w.missions.NewEntity(&Mission{ID: e.ID, Goal: e.Goal, Status: MissionRunning, Budget: e.Budget, DecisionCursor: -1, DeciderSlot: e.DeciderSlot})
 	for _, n := range e.Nodes {
 		if _, ok := findWork(w, n.ID); ok {
 			continue // idempotent
