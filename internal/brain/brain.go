@@ -249,6 +249,8 @@ func Reduce(w *World, ev Event) {
 		applyWorkCompleted(w, e)
 	case MissionStarted:
 		applyMissionStarted(w, e)
+	case MissionProjected:
+		applyMissionProjected(w, e)
 	case MissionDone:
 		applyMissionDone(w, e)
 	case BeliefScored:

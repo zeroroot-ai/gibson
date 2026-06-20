@@ -6,29 +6,40 @@ import (
 	"github.com/mlange-42/ark/ecs"
 )
 
-// WorkState is the lifecycle state of a dispatched unit of work.
+// WorkState is the lifecycle state of a unit of work.
 type WorkState string
 
 const (
+	// WorkPending: projected into the World (e.g. from a CUE node) but not yet
+	// dispatched — the Scheduler dispatches it once its DependsOn are all done.
+	WorkPending WorkState = "pending"
 	WorkRunning WorkState = "running"
 	WorkDone    WorkState = "done"
 	WorkFailed  WorkState = "failed"
 )
 
-// WorkItem is a dispatched unit of work tracked as an entity — a tool call,
-// agent run, or plugin invocation (ADR-0004: capability vs. execution; this is
-// the execution side, e.g. a ToolExecution). Modeling work as an entity is what
-// lets long-running operations be async: the engine never blocks on them; their
+// WorkItem is a unit of work tracked as an entity — a tool call, agent run, or
+// plugin invocation (ADR-0004: capability vs. execution; this is the execution
+// side, e.g. a ToolExecution). Modeling work as an entity is what lets
+// long-running operations be async: the engine never blocks on them; their
 // completion arrives as an event whenever it lands (decided-by-observation — no
 // duration is declared or tracked; a 3-second tool and a 3-day callback are the
 // same path).
+//
+// A WorkItem may be born `pending` (projected from a CUE mission node, with its
+// DependsOn ordering, by the Scheduler's deferred-ordering model) or born
+// `running` (dispatched directly). DependsOn references other WorkItem IDs that
+// must reach `done` before this one is dispatchable.
 type WorkItem struct {
-	ID     string
-	Kind   string // "tool" | "agent" | "plugin"
-	Target string // the capability being executed
-	State  WorkState
-	Result string
-	Err    string
+	ID        string
+	MissionID string   // owning mission (empty for free-standing work)
+	Kind      string   // "tool" | "agent" | "plugin"
+	Target    string   // the capability being executed
+	Input     string   // opaque dispatch input (e.g. the CUE node config), carried for dispatch
+	DependsOn []string // WorkItem IDs that must be `done` before this is dispatchable
+	State     WorkState
+	Result    string
+	Err       string
 }
 
 // WorkDispatched records that a unit of work was launched. It does not block;
@@ -87,12 +98,15 @@ func applyWorkCompleted(w *World, e WorkCompleted) {
 
 // WorkSnapshot is a stable, comparable view of a WorkItem.
 type WorkSnapshot struct {
-	ID     string
-	Kind   string
-	Target string
-	State  WorkState
-	Result string
-	Err    string
+	ID        string
+	MissionID string
+	Kind      string
+	Target    string
+	Input     string
+	DependsOn []string
+	State     WorkState
+	Result    string
+	Err       string
 }
 
 // WorkSnapshot returns the current work items in deterministic (ID) order.
@@ -101,7 +115,17 @@ func (w *World) WorkSnapshot() []WorkSnapshot {
 	q := ecs.NewFilter1[WorkItem](w.ecs).Query()
 	for q.Next() {
 		wi := q.Get()
-		out = append(out, WorkSnapshot{ID: wi.ID, Kind: wi.Kind, Target: wi.Target, State: wi.State, Result: wi.Result, Err: wi.Err})
+		out = append(out, WorkSnapshot{
+			ID:        wi.ID,
+			MissionID: wi.MissionID,
+			Kind:      wi.Kind,
+			Target:    wi.Target,
+			Input:     wi.Input,
+			DependsOn: append([]string(nil), wi.DependsOn...),
+			State:     wi.State,
+			Result:    wi.Result,
+			Err:       wi.Err,
+		})
 	}
 	sort.Slice(out, func(i, j int) bool { return out[i].ID < out[j].ID })
 	return out
