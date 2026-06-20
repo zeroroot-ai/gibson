@@ -119,3 +119,48 @@ func (s *worldServer) GetTimeline(ctx context.Context, _ *worldpb.GetTimelineReq
 	}
 	return resp, nil
 }
+
+// GetFrameAt folds the tenant's Timeline to position seq and returns the World as
+// of that frame (ADR-0001: World == fold(Timeline)). This is the Scroller's scrub
+// primitive — a server-side fold, not a stored snapshot. seq is clamped to
+// [0, total]; seq == total reproduces the live World.
+func (s *worldServer) GetFrameAt(ctx context.Context, req *worldpb.GetFrameAtRequest) (*worldpb.GetFrameAtResponse, error) {
+	e, err := s.engine(ctx)
+	if err != nil {
+		return nil, err
+	}
+	total := len(e.Events())
+	n := int(req.GetSeq())
+	if n > total {
+		n = total
+	}
+
+	w := e.FrameAt(n)
+
+	resp := &worldpb.GetFrameAtResponse{Seq: uint64(n), Total: uint64(total)}
+	for _, m := range w.MissionSnapshot() {
+		resp.Missions = append(resp.Missions, &worldpb.MissionView{
+			Id: m.ID, Goal: m.Goal, Status: string(m.Status), Reason: m.Reason,
+		})
+	}
+	for _, h := range w.Snapshot() {
+		ports := make([]int32, len(h.OpenPorts))
+		for i, p := range h.OpenPorts {
+			ports[i] = int32(p)
+		}
+		resp.Hosts = append(resp.Hosts, &worldpb.HostView{
+			ScopeId:   h.ScopeID,
+			Address:   h.Address,
+			OpenPorts: ports,
+			Juicy:     h.Belief.Juicy,
+			Attention: h.Attention,
+			Surprise:  h.Surprise,
+		})
+	}
+	for _, f := range w.FindingSnapshot() {
+		resp.Findings = append(resp.Findings, &worldpb.FindingView{
+			Id: f.ID, Title: f.Title, ScopeId: f.ScopeID, Address: f.Address, Severity: f.Severity,
+		})
+	}
+	return resp, nil
+}

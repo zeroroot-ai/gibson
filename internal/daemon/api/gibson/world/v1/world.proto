@@ -54,6 +54,19 @@ service WorldService {
       allowed_identities: 3
     };
   }
+
+  // GetFrameAt returns the World as of folding the first `seq` Timeline events —
+  // a replay frame (ADR-0001: World == fold(Timeline)). This is what the Scroller
+  // scrubs to: a server-side fold of the log to a point, not a stored snapshot.
+  // `seq` is clamped to [0, total]; seq == total is the live World.
+  rpc GetFrameAt(GetFrameAtRequest) returns (GetFrameAtResponse) {
+    option (gibson.auth.v1.authz) = {
+      relation: "member",
+      object_type: "tenant",
+      object_deriver: "tenant_from_identity",
+      allowed_identities: 3
+    };
+  }
 }
 
 message MissionView {
@@ -97,3 +110,15 @@ message ListFindingsResponse { repeated FindingView findings = 1; }
 
 message GetTimelineRequest { string mission_id = 1; }
 message GetTimelineResponse { repeated TimelineEvent events = 1; }
+
+// GetFrameAtRequest scrubs to a Timeline position: fold the first `seq` events.
+message GetFrameAtRequest { uint64 seq = 1; }
+
+// GetFrameAtResponse is the World materialized at frame `seq` (a server-side fold).
+message GetFrameAtResponse {
+  uint64 seq = 1;                       // the position actually folded (clamped to [0,total])
+  uint64 total = 2;                     // total events in the tenant Timeline
+  repeated MissionView missions = 3;
+  repeated HostView hosts = 4;
+  repeated FindingView findings = 5;
+}

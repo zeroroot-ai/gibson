@@ -310,12 +310,8 @@ rpc,relation,object_type,deriver,identities,source_proto_file,mode
 /gibson.user.v1.UserService/StageAttachment,member,tenant,tenant_from_identity,USER|SERVICE,gibson/user/v1/user.proto,rule
 /gibson.user.v1.UserService/UpdateUserOnboardingState,member,tenant,tenant_from_identity,USER|SERVICE,gibson/user/v1/user.proto,rule
 /gibson.user.v1.UserService/UpdateUserProfile,member,tenant,tenant_from_identity,USER|SERVICE,gibson/user/v1/user.proto,rule
+/gibson.world.v1.WorldService/GetFrameAt,member,tenant,tenant_from_identity,USER|SERVICE,gibson/world/v1/world.proto,rule
 /gibson.world.v1.WorldService/GetTimeline,member,tenant,tenant_from_identity,USER|SERVICE,gibson/world/v1/world.proto,rule
 /gibson.world.v1.WorldService/ListFindings,member,tenant,tenant_from_identity,USER|SERVICE,gibson/world/v1/world.proto,rule
 /gibson.world.v1.WorldService/ListHosts,member,tenant,tenant_from_identity,USER|SERVICE,gibson/world/v1/world.proto,rule
 /gibson.world.v1.WorldService/ListMissions,member,tenant,tenant_from_identity,USER|SERVICE,gibson/world/v1/world.proto,rule
-/intelligence.v1.IntelligenceService/GetAssetRiskScore,member,tenant,tenant_from_identity,USER|SERVICE,intelligence/v1/intelligence.proto,rule
-/intelligence.v1.IntelligenceService/GetAttackPatterns,member,tenant,tenant_from_identity,USER|SERVICE,intelligence/v1/intelligence.proto,rule
-/intelligence.v1.IntelligenceService/GetRecurringVulnerabilities,member,tenant,tenant_from_identity,USER|SERVICE,intelligence/v1/intelligence.proto,rule
-/intelligence.v1.IntelligenceService/GetRemediationMetrics,member,tenant,tenant_from_identity,USER|SERVICE,intelligence/v1/intelligence.proto,rule
-/intelligence.v1.IntelligenceService/GetSimilarTargets,member,tenant,tenant_from_identity,USER|SERVICE,intelligence/v1/intelligence.proto,rule
