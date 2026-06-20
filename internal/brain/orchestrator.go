@@ -12,16 +12,29 @@ type MissionStatus string
 const (
 	MissionRunning   MissionStatus = "running"
 	MissionCompleted MissionStatus = "completed"
+	MissionFailed    MissionStatus = "failed"
 )
 
+// Budget is the per-mission resource ceiling carried from CUE MissionConstraints
+// (ADR-0004). It is recorded here at projection; the budget/limit System that
+// enforces it (forcing MissionDone{budget_exceeded}) is gibson#849. Zero in any
+// field means "unlimited" for that dimension.
+type Budget struct {
+	MaxExecutions int   // cap on dispatched WorkItems (the runaway guard)
+	MaxTokens     int64 // cumulative LLM token budget
+}
+
 // Mission is the root work-graph for a launched mission (ADR-0001): the unit of
-// identity/goal/accounting. A CUE mission projects into this at launch; here a
-// MissionStarted event seeds it.
+// identity/goal/accounting. A CUE mission projects into this at launch
+// (MissionProjected); a bare MissionStarted seeds the minimal form. A mission
+// with an empty Goal is a **no-goal** mission: it runs its scripted graph to
+// quiescence and completes mechanically, never invoking the Decider.
 type Mission struct {
 	ID     string
 	Goal   string
 	Status MissionStatus
 	Reason string // why it completed
+	Budget Budget
 }
 
 // MissionStarted launches a mission. (CUE-mission projection lands later; this is
@@ -33,10 +46,14 @@ type MissionStarted struct {
 
 func (MissionStarted) Kind() string { return "mission.started" }
 
-// MissionDone marks a mission complete with a reason.
+// MissionDone marks a mission terminal with an outcome and reason. Outcome
+// defaults to MissionCompleted when empty (back-compat with the minimal launch
+// path); the Scheduler emits MissionFailed when the scripted graph stalls on a
+// failed node, and the budget System (gibson#849) emits a budget-exceeded stop.
 type MissionDone struct {
-	ID     string
-	Reason string
+	ID      string
+	Reason  string
+	Outcome MissionStatus
 }
 
 func (MissionDone) Kind() string { return "mission.done" }
@@ -63,7 +80,14 @@ func applyMissionStarted(w *World, e MissionStarted) {
 func applyMissionDone(w *World, e MissionDone) {
 	if ent, ok := findMission(w, e.ID); ok {
 		m := w.missions.Get(ent)
-		m.Status = MissionCompleted
+		if m.Status != MissionRunning {
+			return // already terminal — idempotent
+		}
+		outcome := e.Outcome
+		if outcome == "" {
+			outcome = MissionCompleted
+		}
+		m.Status = outcome
 		m.Reason = e.Reason
 	}
 }
@@ -126,6 +150,7 @@ type MissionSnapshot struct {
 	Goal   string
 	Status MissionStatus
 	Reason string
+	Budget Budget
 }
 
 // MissionSnapshot returns the current missions in deterministic (ID) order.
@@ -134,7 +159,7 @@ func (w *World) MissionSnapshot() []MissionSnapshot {
 	q := ecs.NewFilter1[Mission](w.ecs).Query()
 	for q.Next() {
 		m := q.Get()
-		out = append(out, MissionSnapshot{ID: m.ID, Goal: m.Goal, Status: m.Status, Reason: m.Reason})
+		out = append(out, MissionSnapshot{ID: m.ID, Goal: m.Goal, Status: m.Status, Reason: m.Reason, Budget: m.Budget})
 	}
 	sort.Slice(out, func(i, j int) bool { return out[i].ID < out[j].ID })
 	return out
