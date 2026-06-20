@@ -2,7 +2,6 @@ package harness
 
 import (
 	"context"
-	"fmt"
 	"log/slog"
 
 	"github.com/zeroroot-ai/gibson/internal/agent"
@@ -12,7 +11,6 @@ import (
 	"github.com/zeroroot-ai/gibson/internal/types"
 	sdkagent "github.com/zeroroot-ai/sdk/agent"
 	"github.com/zeroroot-ai/sdk/codegen/workspace"
-	sdkgraphrag "github.com/zeroroot-ai/sdk/graphrag"
 	sdktypes "github.com/zeroroot-ai/sdk/types"
 	"go.opentelemetry.io/otel/trace"
 	"google.golang.org/protobuf/proto"
@@ -257,45 +255,6 @@ var _ AgentHarness = (*MiddlewareHarness)(nil)
 // to its purpose.
 //
 // var _ sdkagent.Harness = (*MiddlewareHarness)(nil)
-
-// GraphRAGSupport interface implementation - pass through to inner harness
-// These methods enable GraphRAG operations for external agents using callback RPCs.
-
-func (h *MiddlewareHarness) StoreGraphNode(ctx context.Context, node sdkgraphrag.GraphNode) (string, error) {
-	if inner, ok := h.inner.(interface {
-		StoreGraphNode(context.Context, sdkgraphrag.GraphNode) (string, error)
-	}); ok {
-		return inner.StoreGraphNode(ctx, node)
-	}
-	return "", fmt.Errorf("StoreGraphNode not supported by inner harness")
-}
-
-func (h *MiddlewareHarness) CreateGraphRelationship(ctx context.Context, rel sdkgraphrag.Relationship) error {
-	if inner, ok := h.inner.(interface {
-		CreateGraphRelationship(context.Context, sdkgraphrag.Relationship) error
-	}); ok {
-		return inner.CreateGraphRelationship(ctx, rel)
-	}
-	return fmt.Errorf("CreateGraphRelationship not supported by inner harness")
-}
-
-func (h *MiddlewareHarness) StoreGraphBatch(ctx context.Context, batch sdkgraphrag.Batch) ([]string, error) {
-	if inner, ok := h.inner.(interface {
-		StoreGraphBatch(context.Context, sdkgraphrag.Batch) ([]string, error)
-	}); ok {
-		return inner.StoreGraphBatch(ctx, batch)
-	}
-	return nil, fmt.Errorf("StoreGraphBatch not supported by inner harness")
-}
-
-func (h *MiddlewareHarness) GraphRAGHealth(ctx context.Context) types.HealthStatus {
-	if inner, ok := h.inner.(interface {
-		GraphRAGHealth(context.Context) types.HealthStatus
-	}); ok {
-		return inner.GraphRAGHealth(ctx)
-	}
-	return types.Unhealthy("GraphRAGHealth not supported by inner harness")
-}
 
 // Checkpoint returns the checkpoint access interface from the inner harness.
 func (h *MiddlewareHarness) Checkpoint() CheckpointAccess {

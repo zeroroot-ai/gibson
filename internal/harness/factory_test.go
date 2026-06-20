@@ -142,7 +142,6 @@ func TestNewHarnessFactory_Success(t *testing.T) {
 	assert.NotNil(t, storedConfig.FindingStore)
 	assert.NotNil(t, storedConfig.Metrics)
 	assert.NotNil(t, storedConfig.Tracer)
-	assert.NotNil(t, storedConfig.GraphRAGQueryBridge)
 }
 
 func TestNewHarnessFactory_InvalidConfig_NoSlotManager(t *testing.T) {
@@ -176,7 +175,6 @@ func TestNewHarnessFactory_AppliesDefaults(t *testing.T) {
 	assert.NotNil(t, storedConfig.FindingStore, "FindingStore should be defaulted")
 	assert.NotNil(t, storedConfig.Metrics, "Metrics should be defaulted")
 	assert.NotNil(t, storedConfig.Tracer, "Tracer should be defaulted")
-	assert.NotNil(t, storedConfig.GraphRAGQueryBridge, "GraphRAGQueryBridge should be defaulted")
 	assert.NotNil(t, storedConfig.SlotManager, "SlotManager should remain set")
 	assert.Nil(t, storedConfig.MemoryManager, "MemoryManager should not be defaulted")
 }
@@ -210,18 +208,13 @@ func TestNewHarnessFactory_PreservesProvidedConfig(t *testing.T) {
 }
 
 func TestNewHarnessFactory_FullConfiguration(t *testing.T) {
-	// Test with all fields specified
-	// Note: GraphRAGQueryBridge is required - use a mock implementation
-	mockStore := &MockGraphRAGStore{IsHealthy: true}
-	graphRAGQueryBridge := NewGraphRAGQueryBridge(mockStore)
-
+	// Test with all fields specified.
 	config := HarnessConfig{
-		SlotManager:         llm.NewSlotManager(llm.NewLLMRegistry()),
-		LLMRegistry:         llm.NewLLMRegistry(),
-		FindingStore:        NewInMemoryFindingStore(),
-		Metrics:             NewNoOpMetricsRecorder(),
-		MemoryManager:       &MockMemoryStore{},
-		GraphRAGQueryBridge: graphRAGQueryBridge,
+		SlotManager:   llm.NewSlotManager(llm.NewLLMRegistry()),
+		LLMRegistry:   llm.NewLLMRegistry(),
+		FindingStore:  NewInMemoryFindingStore(),
+		Metrics:       NewNoOpMetricsRecorder(),
+		MemoryManager: &MockMemoryStore{},
 	}
 
 	factory, err := NewHarnessFactory(config)
@@ -237,7 +230,6 @@ func TestNewHarnessFactory_FullConfiguration(t *testing.T) {
 	assert.NotNil(t, storedConfig.FindingStore)
 	assert.NotNil(t, storedConfig.Metrics)
 	assert.NotNil(t, storedConfig.MemoryManager)
-	assert.NotNil(t, storedConfig.GraphRAGQueryBridge)
 
 	// Defaults should still be applied for missing fields (Logger, Tracer)
 	assert.NotNil(t, storedConfig.Logger)

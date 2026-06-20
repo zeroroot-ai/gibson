@@ -106,10 +106,6 @@ type HarnessConfig struct {
 	// Optional: defaults to NoOpMetricsRecorder if nil.
 	Metrics MetricsRecorder
 
-	// GraphRAGQueryBridge provides access to GraphRAG query operations.
-	// If nil, a NoopGraphRAGQueryBridge will be created (GraphRAG operations will return ErrGraphRAGNotEnabled).
-	GraphRAGQueryBridge GraphRAGQueryBridge
-
 	// DelegationSink folds agent-delegation run-provenance into the World so the
 	// graph projector materializes :AgentRun + DELEGATED_TO (ADR-0007). Optional;
 	// when nil, delegation provenance is not recorded.
@@ -322,7 +318,6 @@ func (c *HarnessConfig) Validate() error {
 //   - Logger: slog.Default()
 //   - FindingStore: NewInMemoryFindingStore()
 //   - Metrics: NewNoOpMetricsRecorder()
-//   - GraphRAGQueryBridge: NoopGraphRAGQueryBridge{} (no-op, GraphRAG queries disabled)
 //
 // Note: MemoryManager is not defaulted as it requires mission-specific configuration.
 // Note: SlotManager is not defaulted as it is a required field.
@@ -351,10 +346,6 @@ func (c *HarnessConfig) ApplyDefaults() {
 
 	if c.Metrics == nil {
 		c.Metrics = NewNoOpMetricsRecorder()
-	}
-
-	if c.GraphRAGQueryBridge == nil {
-		c.GraphRAGQueryBridge = &NoopGraphRAGQueryBridge{}
 	}
 
 	// Apply default spawn limits if MissionClient is configured but limits are not set

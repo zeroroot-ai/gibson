@@ -17,7 +17,6 @@ import (
 	"github.com/zeroroot-ai/gibson/internal/llm"
 	"github.com/zeroroot-ai/gibson/internal/tool"
 	"github.com/zeroroot-ai/gibson/internal/types"
-	sdkgraphrag "github.com/zeroroot-ai/sdk/graphrag"
 	"go.opentelemetry.io/otel/trace/noop"
 )
 
@@ -29,34 +28,6 @@ func discardLogger() *slog.Logger {
 // ────────────────────────────────────────────────────────────────────────────
 // Helpers — minimal harness construction for delegation tests
 // ────────────────────────────────────────────────────────────────────────────
-
-// recordingGraphRAGQueryBridge captures CreateRelationship calls for assertion.
-type recordingGraphRAGQueryBridge struct {
-	mu            sync.Mutex
-	relationships []sdkgraphrag.Relationship
-}
-
-func (r *recordingGraphRAGQueryBridge) StoreNode(ctx context.Context, node sdkgraphrag.GraphNode, missionID, agentName string) (string, error) {
-	return "", nil
-}
-func (r *recordingGraphRAGQueryBridge) CreateRelationship(ctx context.Context, rel sdkgraphrag.Relationship) error {
-	r.mu.Lock()
-	defer r.mu.Unlock()
-	r.relationships = append(r.relationships, rel)
-	return nil
-}
-func (r *recordingGraphRAGQueryBridge) StoreBatch(ctx context.Context, batch sdkgraphrag.Batch, missionID, agentName string) ([]string, error) {
-	return nil, nil
-}
-func (r *recordingGraphRAGQueryBridge) StoreSemantic(ctx context.Context, node sdkgraphrag.GraphNode, missionID, agentName string) (string, error) {
-	return "", nil
-}
-func (r *recordingGraphRAGQueryBridge) StoreStructured(ctx context.Context, node sdkgraphrag.GraphNode, missionID, agentName string) (string, error) {
-	return "", nil
-}
-func (r *recordingGraphRAGQueryBridge) Health(ctx context.Context) types.HealthStatus {
-	return types.Healthy("ok")
-}
 
 // captureAgent is a minimal agent.Agent implementation that records context
 // state (CallerChain, DelegationDepth) on Execute and returns a simple result.
@@ -144,7 +115,7 @@ func (d *delegationRegistryAdapter) DelegateToAgent(ctx context.Context, name st
 // buildTestHarness creates a minimal *DefaultAgentHarness for delegation tests.
 // The missionCtx.AgentRunID is set to agentRunID so the parent-push logic has
 // a run ID to propagate.
-func buildTestHarness(t *testing.T, agentRunID string, depth int, maxDepth int, registry *delegationRegistryAdapter, graphBridge GraphRAGQueryBridge) *DefaultAgentHarness {
+func buildTestHarness(t *testing.T, agentRunID string, depth int, maxDepth int, registry *delegationRegistryAdapter) *DefaultAgentHarness {
 	t.Helper()
 
 	llmRegistry := llm.NewLLMRegistry()
@@ -164,45 +135,40 @@ func buildTestHarness(t *testing.T, agentRunID string, depth int, maxDepth int, 
 	logger := discardLogger()
 
 	// HarnessFactory that returns a new DefaultAgentHarness with the same
-	// registry and graphRAG bridge — mirrors what the real factory does for
-	// child harness creation in DelegateToAgent.
+	// registry — mirrors what the real factory does for child harness creation
+	// in DelegateToAgent.
 	factory := HarnessFactory(func(ctx context.Context, mc MissionContext, ti TargetInfo) (AgentHarness, error) {
 		child := &DefaultAgentHarness{
-			slotManager:         slotManager,
-			llmRegistry:         llmRegistry,
-			missionCtx:          mc,
-			targetInfo:          ti,
-			tracer:              noop.NewTracerProvider().Tracer("test"),
-			logger:              logger,
-			metrics:             &NoOpMetricsRecorder{},
-			registryAdapter:     registry,
-			findingStore:        NewInMemoryFindingStore(),
-			graphRAGQueryBridge: graphBridge,
-			maxDelegationDepth:  selfRef.maxDelegationDepth,
+			slotManager:        slotManager,
+			llmRegistry:        llmRegistry,
+			missionCtx:         mc,
+			targetInfo:         ti,
+			tracer:             noop.NewTracerProvider().Tracer("test"),
+			logger:             logger,
+			metrics:            &NoOpMetricsRecorder{},
+			registryAdapter:    registry,
+			findingStore:       NewInMemoryFindingStore(),
+			maxDelegationDepth: selfRef.maxDelegationDepth,
 		}
 		// Provide a recursive self-referencing factory so nested delegation works.
-		var childRef *DefaultAgentHarness
-		childRef = child
 		child.factory = HarnessFactory(func(ctx2 context.Context, mc2 MissionContext, ti2 TargetInfo) (AgentHarness, error) {
-			return buildTestHarness(t, mc2.AgentRunID, mc2.DelegationDepth, selfRef.maxDelegationDepth, registry, graphBridge), nil
+			return buildTestHarness(t, mc2.AgentRunID, mc2.DelegationDepth, selfRef.maxDelegationDepth, registry), nil
 		})
-		_ = childRef
 		return child, nil
 	})
 
 	h := &DefaultAgentHarness{
-		slotManager:         slotManager,
-		llmRegistry:         llmRegistry,
-		missionCtx:          missionCtx,
-		targetInfo:          targetInfo,
-		tracer:              noop.NewTracerProvider().Tracer("test"),
-		logger:              logger,
-		metrics:             &NoOpMetricsRecorder{},
-		registryAdapter:     registry,
-		findingStore:        NewInMemoryFindingStore(),
-		factory:             factory,
-		graphRAGQueryBridge: graphBridge,
-		maxDelegationDepth:  maxDepth,
+		slotManager:        slotManager,
+		llmRegistry:        llmRegistry,
+		missionCtx:         missionCtx,
+		targetInfo:         targetInfo,
+		tracer:             noop.NewTracerProvider().Tracer("test"),
+		logger:             logger,
+		metrics:            &NoOpMetricsRecorder{},
+		registryAdapter:    registry,
+		findingStore:       NewInMemoryFindingStore(),
+		factory:            factory,
+		maxDelegationDepth: maxDepth,
 	}
 	selfRef = h
 	return h
@@ -226,18 +192,10 @@ func TestDelegateToAgent_CallerChainPropagation(t *testing.T) {
 		},
 	}
 
-	graphBridge := &recordingGraphRAGQueryBridge{}
-
 	// Harness A: top-level agent with run ID "run-a".
 	// When A delegates to B, the chain on B's context must be ["run-a"].
 	// When B delegates to C (via its own harness), the chain on C must be ["run-a", "run-b"].
-
-	// Build A's harness. B needs its own harness (simulated by a recursive
-	// captureAgent that itself calls DelegateToAgent).  For simplicity in this
-	// unit test, we exercise A→B directly and then independently verify A→B→C
-	// by building a second level.
-
-	harnessA := buildTestHarness(t, "run-a", 0, defaultMaxDelegationDepth, registry, graphBridge)
+	harnessA := buildTestHarness(t, "run-a", 0, defaultMaxDelegationDepth, registry)
 
 	task := agent.NewTask("test", "test task", nil)
 
@@ -260,7 +218,7 @@ func TestDelegateToAgent_CallerChainPropagation(t *testing.T) {
 	ctxWithChain := contextkeys.WithCallerChain(context.Background(), []string{"run-a"})
 	ctxWithChain = contextkeys.WithParentAgentRunID(ctxWithChain, "run-a")
 
-	harnessB := buildTestHarness(t, "run-b", 1, defaultMaxDelegationDepth, registry, graphBridge)
+	harnessB := buildTestHarness(t, "run-b", 1, defaultMaxDelegationDepth, registry)
 	_, err = harnessB.DelegateToAgent(ctxWithChain, "agent_c", task)
 	require.NoError(t, err)
 
@@ -283,12 +241,11 @@ func TestDelegateToAgent_DepthCapReturnsError(t *testing.T) {
 	registry := &delegationRegistryAdapter{
 		agents: map[string]*captureAgent{"agent_x": agentX},
 	}
-	graphBridge := &recordingGraphRAGQueryBridge{}
 
 	// Build a harness that is already at the cap (depth == maxDepth).
 	// maxDepth=8, currentDepth=8 → next hop (depth=9) must be rejected.
 	const maxDepth = 8
-	harnessAtCap := buildTestHarness(t, "run-x", maxDepth, maxDepth, registry, graphBridge)
+	harnessAtCap := buildTestHarness(t, "run-x", maxDepth, maxDepth, registry)
 
 	task := agent.NewTask("test", "test task", nil)
 	_, err := harnessAtCap.DelegateToAgent(context.Background(), "agent_x", task)
@@ -313,10 +270,9 @@ func TestDelegateToAgent_DepthCapDefault(t *testing.T) {
 	registry := &delegationRegistryAdapter{
 		agents: map[string]*captureAgent{"agent_x": agentX},
 	}
-	graphBridge := &recordingGraphRAGQueryBridge{}
 
 	// maxDepth=0 means "use default=8". depth=defaultMaxDelegationDepth should fail.
-	harnessAtDefaultCap := buildTestHarness(t, "run-x", defaultMaxDelegationDepth, 0 /*maxDepth=use default*/, registry, graphBridge)
+	harnessAtDefaultCap := buildTestHarness(t, "run-x", defaultMaxDelegationDepth, 0 /*maxDepth=use default*/, registry)
 
 	task := agent.NewTask("test", "test task", nil)
 	_, err := harnessAtDefaultCap.DelegateToAgent(context.Background(), "agent_x", task)
@@ -332,10 +288,9 @@ func TestDelegateToAgent_DepthBelowCap(t *testing.T) {
 	registry := &delegationRegistryAdapter{
 		agents: map[string]*captureAgent{"agent_x": agentX},
 	}
-	graphBridge := &recordingGraphRAGQueryBridge{}
 
 	// depth=7, maxDepth=8 → should succeed.
-	harnessNearCap := buildTestHarness(t, "run-near", 7, 8, registry, graphBridge)
+	harnessNearCap := buildTestHarness(t, "run-near", 7, 8, registry)
 
 	task := agent.NewTask("test", "test task", nil)
 	_, err := harnessNearCap.DelegateToAgent(context.Background(), "agent_x", task)
@@ -355,14 +310,11 @@ func TestDelegateToAgent_DELEGATEDTORelationship(t *testing.T) {
 		agents: map[string]*captureAgent{"child_agent": agentWithKnownRunID},
 	}
 
-	graphBridge := &recordingGraphRAGQueryBridge{}
-
 	// Parent harness: run_id="run-parent"
 	parentRunID := "run-parent"
-	harnessParent := buildTestHarness(t, parentRunID, 0, 8, registry, graphBridge)
+	harnessParent := buildTestHarness(t, parentRunID, 0, 8, registry)
 
-	// Capture the run-provenance fact folded into the World; the harness must not
-	// touch the graph directly.
+	// Capture the run-provenance fact folded into the World.
 	var captured []DelegationObserved
 	harnessParent.delegationSink = func(_ context.Context, d DelegationObserved) {
 		captured = append(captured, d)
@@ -373,17 +325,16 @@ func TestDelegateToAgent_DELEGATEDTORelationship(t *testing.T) {
 		mc.AgentRunID = childRunID
 		llmReg := llm.NewLLMRegistry()
 		child := &DefaultAgentHarness{
-			slotManager:         llm.NewSlotManager(llmReg),
-			llmRegistry:         llmReg,
-			missionCtx:          mc,
-			targetInfo:          ti,
-			tracer:              noop.NewTracerProvider().Tracer("test"),
-			logger:              discardLogger(),
-			metrics:             &NoOpMetricsRecorder{},
-			registryAdapter:     registry,
-			findingStore:        NewInMemoryFindingStore(),
-			graphRAGQueryBridge: graphBridge,
-			maxDelegationDepth:  8,
+			slotManager:        llm.NewSlotManager(llmReg),
+			llmRegistry:        llmReg,
+			missionCtx:         mc,
+			targetInfo:         ti,
+			tracer:             noop.NewTracerProvider().Tracer("test"),
+			logger:             discardLogger(),
+			metrics:            &NoOpMetricsRecorder{},
+			registryAdapter:    registry,
+			findingStore:       NewInMemoryFindingStore(),
+			maxDelegationDepth: 8,
 			factory: HarnessFactory(func(ctx2 context.Context, mc2 MissionContext, ti2 TargetInfo) (AgentHarness, error) {
 				return nil, fmt.Errorf("nested delegation not expected in this test")
 			}),
@@ -400,12 +351,6 @@ func TestDelegateToAgent_DELEGATEDTORelationship(t *testing.T) {
 	assert.Equal(t, parentRunID, captured[0].ParentRunID)
 	assert.Equal(t, childRunID, captured[0].ChildRunID)
 	assert.Equal(t, "child_agent", captured[0].ChildAgent)
-
-	// No direct graph write must happen anymore.
-	graphBridge.mu.Lock()
-	rels := graphBridge.relationships
-	graphBridge.mu.Unlock()
-	assert.Empty(t, rels, "DELEGATED_TO must not be written directly to the graph")
 }
 
 // TestDelegateToAgent_ExistingDelegationTestsUnbroken is a smoke test to
@@ -423,7 +368,7 @@ func TestDelegateToAgent_ExistingDelegationTestsUnbroken(t *testing.T) {
 	}
 
 	// No AgentRunID — mirrors harnesses created without a run ID stamp.
-	h := buildTestHarness(t, "", 0, defaultMaxDelegationDepth, registry, nil)
+	h := buildTestHarness(t, "", 0, defaultMaxDelegationDepth, registry)
 
 	task := agent.NewTask("recon", "recon task", nil)
 
