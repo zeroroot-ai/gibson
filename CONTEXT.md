@@ -206,14 +206,97 @@ _Avoid_: event-driven cascade (rejected), per-tick frame storage, tying display 
   subgraph and is aware of sibling missions (running + previous).
 - A **Mission** is a root **Work-graph**; its **Orchestrator** (one LLM Decider) spawns
   sub-work and dispatches **Workers**, each with its own slot LLM.
+- **The Decider has its own mission-level LLM slot**, distinct from worker node slots: an
+  optional top-level field in the CUE mission, resolved through the same `ProviderService`
+  path as worker slots, **defaulting to the tenant's default provider/model configured in the
+  dashboard** when unspecified (operators may point the Decider at their strongest model; it
+  must work with zero config since tenants bring their own keys).
+- **Decider output v1 = `Dispatch{kind, capability, input}` + `Complete{outcome, reason}`.**
+  The Decider re-invokes **all three kinds**: `agent` (a `Task` — natural-language goal +
+  optional World-entity refs; the agent's slot LLM shapes specifics), `tool` (**structured
+  input conforming to the tool's proto input schema** — the LLM emits schema-shaped params,
+  validated/repaired, then marshalled to proto), `plugin` (`method` + params). Each dispatch
+  mints a new execution (`AgentRun`/`ToolExecution`) against an existing capability.
+  `Complete` carries an outcome (Mission gains a `Failed`/abandoned state). **Deferred:**
+  explicit sub-work-graph spawning with `DependsOn` (dispatch-after-results suffices),
+  priority-setting (belief field, #750), an explicit "wait" verb (empty decision list = wait).
+- **Decider input v1 = own mission, serialized directly.** The Decider reasons over its
+  own mission subgraph (work-graph nodes + states + results, findings, discovered
+  hosts/assets) plus the **capability catalog** (enrolled `Agent`/`Tool`/`Plugin` entities
+  + their input schemas — what it may dispatch and how to shape inputs), rendered as a
+  bounded structured serialization. **No dependency on the belief field (#750, parked) or
+  ambient projection (#749)**; those swap in later by replacing the context-rendering step
+  without changing the Decider contract. **Sibling-mission context is out for v1** — cross-
+  mission reuse arrives properly via the belief field at any distance, not an ad-hoc prompt
+  dump.
+- **The Decider runs async, never inside a tick** (ADR-0004 forbids slow work in the
+  ~50 ms tick). A mechanical **gate System** emits a `DecisionRequested` execution entity
+  when a goal-mission has new evidence and **no decision already in flight** (quiescent);
+  an async Decider worker (between ticks, like the tool dispatcher) serializes the World
+  slice, calls the LLM, and `Submit()`s the resulting decisions as events. A decision is
+  therefore **just another execution** in the World — its request, inputs, and emitted
+  decisions are all Timeline events, fully replayable. **One in-flight decision per
+  mission**: the Decider sees the whole mission World and returns a *list* of decisions, so
+  it can target whichever branch just produced results without concurrent decisions racing
+  on the shared World. (Per-branch decision concurrency is a deferred later phase.)
 - **Workers** and the daemon emit **domain events** → the per-tenant **Timeline** (one
   ordered log); a single per-tenant reducer folds it into the **Tenant World**; the
   **Scroller** is the UI over the Timeline, **scoped to a mission** by filtering. Log-first:
   World = fold of the Timeline.
+- **Cutover scope (#770, retiring `internal/orchestrator`).** *Survives, re-expressed:* the
+  **runaway guard** — an unbounded LLM Decider can loop forever, so a per-mission
+  **budget/limit System** (max executions / depth / token-cost, from CUE `MissionConstraints`
+  + the Entitlements provider) is **mandatory**, replacing the old ancestry-based
+  `spawn_cycle_guard`. *Removed entirely:* **HITL approval + escalation** — the brain runs
+  **fully autonomously**; bounds come from declared **Rules of Engagement** (CUE
+  `MissionConstraints`) + **FGA authz** + the budget System, never a runtime human gate (fits
+  "no polling on human replies"). This is distinct from the **labeling HITL** (#753 /
+  ADR-0006, belief-model training labels — untouched). *Dropped/subsumed:* **data-policy
+  reuse + scoping** (`data_policy`/`policy_checker`) — reuse is implicit (the Decider sees the
+  World), scoping is superseded by scope-relative identity (ADR-0002) + ambient projection;
+  the CUE `DataPolicy` fields are deprecated. *Already handled:* checkpoint/crash-resume →
+  Timeline replay; recall/reflect/embedding/graph-intelligence → ambient projection + belief.
+- **Mission completion.** *No-goal mission* completes **mechanically**: when the scheduler
+  reaches quiescence (every scripted node `done`/`failed` after its `RetryPolicy`, nothing
+  ready, no goal) a System emits `MissionDone`. *Goal mission*: the **Decider owns
+  completion** — emits `Complete{outcome, reason}` when it judges the goal met (or
+  unreachable → `Failed`); the LLM judges, auditability from recorded rationale. **On a
+  quiescent goal mission (nothing in flight), the Decider must return dispatch(es) or
+  `Complete` — an empty list there is terminal** (nothing left to do ⇒ complete); "wait"
+  (empty list) is valid only while work is outstanding. The **budget System** is the hard
+  backstop: it forces `MissionDone{outcome: budget_exceeded}` regardless of goal.
+- **Dispatch is a side effect of intent, not part of the reducer.** Systems/reducer stay
+  pure (replayable); a **dispatch effect-handler** subscribes to *live* `WorkDispatched`
+  events and actuates the real launch via the existing dispatch infra (Redis work-queue /
+  agent-runner), `Submit()`ing `WorkCompleted` when the SDK callback path reports back.
+  **Replay/crash-resume re-folds the Timeline silently — no effects re-fire** (the handler
+  listens only to live, post-replay events). On resume, work still `running` with no
+  completion is marked **`WorkFailed`** (a crash *is* a failure); the **mechanical retry
+  System** re-dispatches it iff the CUE node's `RetryPolicy` allows (deterministic), and the
+  **Decider** re-engages with judgment for goal missions. No blind auto-re-dispatch — that
+  would silently double-fire a side-effectful tool (e.g. an exploit).
 - The **Knowledge graph** (per tenant) is the durable projection of the Timeline; the
   Tenant World is a cache over it.
 - **CUE** authors a Work-graph; at launch it is *projected* into the Tenant World
   (nodes→entities, edges→`DependsOn`, constraints→budget components, goal→goal component).
+- **CUE node-type projection.** `agent`/`tool`/`plugin` nodes → `WorkItem` executions;
+  `parallel`/`join` **evaporate into pure `DependsOn` topology** (siblings with no edge run
+  concurrently; a join is a node depending on several — no special entity needed);
+  **`condition` survives as a mechanical branch System** — when its deps are satisfied it
+  evaluates its expression over the World (the legacy string-expression evaluator, ported)
+  and enables the true/false branch, deterministically, so a no-goal scripted mission can
+  branch without invoking the Decider.
+- **CUE declares dependencies, not a schedule.** The scripted graph executes
+  deterministically by honoring its `DependsOn` ordering — no LLM schedules it. As its
+  results land in the World, the **Decider re-engages**: it mints *new* executions
+  (`AgentRun` / `ToolExecution`) against the *existing* capability entities with adapted
+  I/O ("go back to stuff" — fire an agent again with different inputs, use a tool
+  differently) to chase the goal. The Decider's primary verb is **re-invocation of the
+  scripted repertoire**, not greenfield work. It may **re-engage a branch as soon as that
+  branch's scripted nodes produce results** — it interleaves with a still-running script;
+  it does not wait for whole-graph quiescence. A **no-goal** mission runs its script to
+  completion and stops (the Decider never fires → deterministic/repeatable); a **goal**
+  mission interleaves Decider re-engagement on top of the script.
 - The World's component/relationship types are **codegen'd from `taxonomy/v1`** (the public
   SDK schema). The proto is slimmed: generic `GraphNode`/`CoreNodeType`/`Relationship` are
   dropped (ark gives entities + native relationships); typed entities → components,
