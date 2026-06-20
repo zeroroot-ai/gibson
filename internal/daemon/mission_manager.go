@@ -10,12 +10,12 @@ import (
 	"time"
 
 	"github.com/zeroroot-ai/gibson/internal/agent"
+	"github.com/zeroroot-ai/gibson/internal/brain"
 	"github.com/zeroroot-ai/gibson/internal/component"
 	"github.com/zeroroot-ai/gibson/internal/config"
 	"github.com/zeroroot-ai/gibson/internal/daemon/api"
 	"github.com/zeroroot-ai/gibson/internal/datapool"
 	"github.com/zeroroot-ai/gibson/internal/graphrag/graph"
-	"github.com/zeroroot-ai/gibson/internal/graphrag/queries"
 	"github.com/zeroroot-ai/gibson/internal/graphrag/schema"
 	"github.com/zeroroot-ai/gibson/internal/harness"
 	"github.com/zeroroot-ai/gibson/internal/llm"
@@ -87,6 +87,12 @@ type missionManager struct {
 	otelStack       *observability.OTelObservabilityStack // nil when OTel is disabled
 	eventBus        orchestrator.EventBus                 // EventBus for emitting orchestration events
 
+	// brainRegistry + brainExecutor make the ECS brain the mission execution
+	// engine (gibson#851): executeMission projects the CUE mission into the
+	// tenant's World and the brain (scheduler + Decider) drives it.
+	brainRegistry *brain.Registry
+	brainExecutor *brainExecutor
+
 	// authzStore records the owning user per run so that HarnessCallbackService.Authorize
 	// can resolve run_id → (user_id, tenant_id) during component callbacks.
 	// One-code-path slice deploy#195: required, never nil after daemon startup.
@@ -139,6 +145,8 @@ func newMissionManager(
 	eventBus orchestrator.EventBus,
 	authzStore mission.MissionAuthzStore,
 	quotaCounter mission.QuotaCounter,
+	brainRegistry *brain.Registry,
+	brainExecutor *brainExecutor,
 ) *missionManager {
 	return &missionManager{
 		config:          cfg,
@@ -156,6 +164,8 @@ func newMissionManager(
 		eventBus:        eventBus,
 		authzStore:      authzStore,
 		quotaCounter:    quotaCounter,
+		brainRegistry:   brainRegistry,
+		brainExecutor:   brainExecutor,
 		activeMissions:  make(map[auth.TenantID]map[string]*activeMission),
 	}
 }
@@ -687,12 +697,8 @@ func (m *missionManager) executeMission(ctx context.Context, missionID string, d
 	}
 	defer poolConn.Release()
 
-	// Wrap the per-tenant session as a GraphClient for orchestrator query handlers.
+	// Wrap the per-tenant session as a GraphClient for the mission graph bootstrap.
 	graphClient := graph.NewSessionGraphClient(poolConn.Neo4j)
-
-	// Create query handlers for graph operations
-	missionQueries := queries.NewMissionQueries(graphClient)
-	executionQueries := queries.NewExecutionQueries(graphClient)
 
 	// Use the MissionRun from active mission (already created in Run())
 	missionRun := active.missionRun
@@ -769,253 +775,64 @@ func (m *missionManager) executeMission(ctx context.Context, missionID string, d
 		return
 	}
 
-	// Create LLM client adapter for the Thinker
-	llmClient := &llmClientAdapter{harness: agentHarness}
-
-	// Create harness adapter for the Actor
-	harnessAdapter := &orchestratorHarnessAdapter{harness: agentHarness}
-
-	// Build component inventory for validation
-	// Use a reasonable timeout for inventory building
-	inventoryCtx, inventoryCancel := context.WithTimeout(ctx, 5*time.Second)
-	defer inventoryCancel()
-
-	inventoryBuilder := orchestrator.NewInventoryBuilder(m.registry)
-	inventory, err := inventoryBuilder.Build(inventoryCtx)
-	if err != nil {
-		m.logger.Warn("failed to build component inventory, validation will be skipped",
-			"mission_id", missionID,
-			"error", err)
-		inventory = nil // Continue without inventory
-	}
-
-	// Create orchestrator components.
-	// Pass inventoryBuilder to Observer so it can include available components in observations.
-	// Wire WithGraphQueries when the GraphRAG client exposes a live Neo4j driver so the
-	// Observer can enrich each LLM decision prompt with cross-mission graph intelligence
-	// (target history, prior findings, known entities, successful attack patterns). Per
-	// spec productionize-graph-intelligence, falls back to no graph context when the
-	// driver is unavailable (e.g., GraphRAG-disabled deployments or test mocks).
-	observerOpts := []orchestrator.ObserverOption{
-		orchestrator.WithInventoryBuilder(inventoryBuilder),
-	}
-	if graphClient != nil {
-		observerOpts = append(observerOpts, orchestrator.WithGraphQueries(
-			orchestrator.NewNeo4jGraphQueries(graphClient, m.logger),
-		))
-	} else {
-		m.logger.Warn("graph intelligence disabled for mission: no graphrag client configured",
-			"mission_id", missionID)
-	}
-	observer := orchestrator.NewObserver(missionQueries, executionQueries, observerOpts...)
-	thinker := orchestrator.NewThinker(llmClient,
-		orchestrator.WithMaxRetries(3),
-		orchestrator.WithThinkerTemperature(0.2),
-	)
-
-	// Create PolicyChecker for data policy enforcement. def is already
-	// proto after PR4a; NewMissionPolicySource consumes it directly.
-	policySource := orchestrator.NewMissionPolicySource(def)
-	nodeStore := orchestrator.NewGraphNodeStore(graphClient, active.missionRun.ID.String())
-	policyChecker := orchestrator.NewPolicyChecker(policySource, nodeStore, m.logger)
-
-	// Pass DiscoveryProcessor from infrastructure to enable automatic storage of discovered
-	// hosts, ports, services, etc. from agent outputs to Neo4j for use by downstream agents.
-	// ApprovalManager, EscalationManager, CheckpointManager, ReflectionEngine, and MemoryRecaller are nil for now - they will be configured later
-	// discoveryProcessor removed from infrastructure (spec graphrag-tenant-scope); pass nil.
-	actor := orchestrator.NewActor(harnessAdapter, executionQueries, missionQueries, graphClient, inventory, policyChecker, nil, nil, nil, nil, nil, nil, m.logger)
-
-	// Create OTel DecisionLogWriterAdapter for tracing if OTel stack is available
-	var decisionLogWriter orchestrator.DecisionLogWriter
-	var otelDecisionLogAdapter *observability.OTelDecisionLogWriterAdapter // Keep reference for Close
-	if m.otelStack != nil && m.otelStack.MissionTracer != nil {
-		// Convert mission state to schema format for OTel.
-		schemaMission := convertToSchemaMission(active.mission, def)
-
-		// Create OTel adapter with tracer and schema mission
-		logAdapter, err := observability.NewOTelDecisionLogWriterAdapter(ctx, m.otelStack.MissionTracer, schemaMission)
-		if err != nil {
-			// Log warning but continue without tracing - don't fail mission
-			m.logger.Warn("failed to create OTelDecisionLogWriterAdapter, continuing without decision tracing",
-				"mission_id", missionID,
-				"error", err,
-			)
-		} else {
-			decisionLogWriter = logAdapter
-			otelDecisionLogAdapter = logAdapter
-			m.logger.Info("created OTelDecisionLogWriterAdapter for mission tracing",
-				"mission_id", missionID,
-			)
-		}
-	}
-
-	// Create the orchestrator with optional decision log writer and event bus
-	orchOptions := []orchestrator.OrchestratorOption{
-		orchestrator.WithMaxIterations(100),
-		orchestrator.WithMaxConcurrent(10),
-		orchestrator.WithLogger(orchestrator.WrapSlogLogger(m.logger.With("component", "orchestrator"))),
-	}
-
-	// Add decision log writer if available
-	if decisionLogWriter != nil {
-		orchOptions = append(orchOptions, orchestrator.WithDecisionLogWriter(decisionLogWriter))
-	}
-
-	// Add event bus for publishing orchestration events to daemon event bus
-	if m.eventBus != nil {
-		orchOptions = append(orchOptions, orchestrator.WithEventBus(m.eventBus))
-		m.logger.Info("orchestrator configured with event bus", "mission_id", missionID)
-	}
-
-	orch := orchestrator.NewOrchestrator(observer, thinker, actor, orchOptions...)
-
-	// Emit mission execution started event
-	m.emitEvent(eventChan, api.MissionEventData{
-		EventType: "mission.started",
-		Timestamp: time.Now(),
-		MissionID: missionID,
-		Message:   fmt.Sprintf("Starting orchestrator for mission %s", missionID),
-	})
-
-	// Execute mission through orchestrator's Observe → Think → Act loop
-	// Use defer to ensure decision log adapter is closed even on panic
-	var result *orchestrator.OrchestratorResult
+	// === ECS brain mission execution (gibson#851) ===
+	// The brain is the engine: project the CUE mission into the tenant's World and
+	// let the scheduler (scripted graph) + Decider (goal-directed) drive it. Agents
+	// are dispatched via the mission harness; observations/findings flow back through
+	// the harness callback path into the same World (ADR-0001/0007).
 	var finalStatus mission.MissionStatus
 	var errorMsg string
 	var missionDuration time.Duration
 
-	defer func() {
-		if otelDecisionLogAdapter != nil {
-			// Build summary from execution results
-			summary := buildMissionTraceSummary(result, finalStatus, missionDuration, errorMsg)
-			if closeErr := otelDecisionLogAdapter.Close(ctx, summary); closeErr != nil {
-				m.logger.Warn("failed to close OTel decision log adapter",
-					"mission_id", missionID,
-					"error", closeErr,
-				)
-			}
-		}
-	}()
+	eng := m.brainRegistry.For(active.tenantID.String())
 
-	result, err = orch.Run(ctx, missionID)
+	// Register the per-mission binding so the brain executor can dispatch this
+	// mission's agents and run its Decider on this mission's harness.
+	m.brainExecutor.register(missionID, &missionBinding{
+		ctx:     ctx,
+		eng:     eng,
+		harness: agentHarness,
+		slot:    deciderSlot,
+	})
+	defer m.brainExecutor.unregister(missionID)
 
-	// Calculate mission duration
-	missionDuration = time.Since(active.startTime)
-
-	if err != nil {
-		m.logger.Error("mission execution failed", "mission_id", missionID, "error", err)
+	// Project the mission. A goal (if any) drives the Decider; absent → the scripted
+	// graph runs deterministically and the mission completes mechanically.
+	proj, projErr := missionDefinitionToProjected(def, missionGoal(active.mission))
+	if projErr != nil {
 		finalStatus = mission.MissionStatusFailed
-		errorMsg = err.Error()
-
-		// Record error on span
+		errorMsg = fmt.Sprintf("failed to project mission into the World: %v", projErr)
 		if span != nil {
-			span.RecordError(err)
+			span.RecordError(projErr)
 			span.SetStatus(codes.Error, errorMsg)
-			span.SetAttributes(
-				attribute.Int("gibson.mission.duration_ms", int(missionDuration.Milliseconds())),
-			)
 		}
+		m.emitEvent(eventChan, api.MissionEventData{EventType: "mission.failed", Timestamp: time.Now(), MissionID: missionID, Error: errorMsg})
+	} else {
+		eng.Submit(proj)
+		m.emitEvent(eventChan, api.MissionEventData{EventType: "mission.started", Timestamp: time.Now(), MissionID: missionID, Message: fmt.Sprintf("Brain executing mission %s", missionID)})
 
-		m.emitEvent(eventChan, api.MissionEventData{
-			EventType: "mission.failed",
-			Timestamp: time.Now(),
-			MissionID: missionID,
-			Error:     errorMsg,
-		})
-	} else if result != nil {
-		// Map orchestrator status to mission status
-		switch result.Status {
-		case orchestrator.StatusCompleted:
-			finalStatus = mission.MissionStatusCompleted
-		case orchestrator.StatusFailed:
-			finalStatus = mission.MissionStatusFailed
-			errorMsg = "orchestrator reported failure"
-			if result.Error != nil {
-				errorMsg = result.Error.Error()
-			}
-		case orchestrator.StatusCancelled:
-			finalStatus = mission.MissionStatusCancelled
-			errorMsg = "mission was cancelled"
-		case orchestrator.StatusMaxIterations:
-			finalStatus = mission.MissionStatusFailed
-			errorMsg = "max iterations reached"
-		case orchestrator.StatusTimeout:
-			finalStatus = mission.MissionStatusFailed
-			errorMsg = "orchestrator timed out"
-		case orchestrator.StatusBudgetExceeded:
-			finalStatus = mission.MissionStatusFailed
-			errorMsg = "token budget exceeded"
-		default:
-			finalStatus = mission.MissionStatusFailed
-			errorMsg = fmt.Sprintf("unknown orchestrator status: %s", result.Status)
-		}
+		// Block until the brain reaches a terminal mission state (or ctx is cancelled).
+		finalStatus, errorMsg = m.awaitBrainMission(ctx, eng, missionID)
+		missionDuration = time.Since(active.startTime)
 
-		// Log orchestrator statistics
-		m.logger.Info("orchestrator completed",
-			"mission_id", missionID,
-			"status", result.Status,
-			"iterations", result.TotalIterations,
-			"decisions", result.TotalDecisions,
-			"tokens_used", result.TotalTokensUsed,
-			"completed_nodes", result.CompletedNodes,
-			"failed_nodes", result.FailedNodes,
-			"duration", result.Duration,
-			"stop_reason", result.StopReason,
-		)
+		m.logger.Info("brain mission execution finished",
+			"mission_id", missionID, "status", finalStatus, "duration", missionDuration)
 
-		if finalStatus == mission.MissionStatusFailed {
-			// Record error on span
-			if span != nil {
-				span.SetStatus(codes.Error, errorMsg)
-				span.SetAttributes(
-					attribute.Int("gibson.mission.iterations", result.TotalIterations),
-					attribute.Int("gibson.mission.decisions", result.TotalDecisions),
-					attribute.Int("gibson.mission.tokens_used", result.TotalTokensUsed),
-					attribute.Int("gibson.mission.duration_ms", int(missionDuration.Milliseconds())),
-				)
-			}
-		} else {
-			// Mission completed successfully
+		if finalStatus == mission.MissionStatusCompleted {
 			if span != nil {
 				span.SetStatus(codes.Ok, "mission completed")
-				span.SetAttributes(
-					attribute.Int("gibson.mission.iterations", result.TotalIterations),
-					attribute.Int("gibson.mission.decisions", result.TotalDecisions),
-					attribute.Int("gibson.mission.tokens_used", result.TotalTokensUsed),
-					attribute.Int("gibson.mission.completed_nodes", result.CompletedNodes),
-					attribute.Int("gibson.mission.failed_nodes", result.FailedNodes),
-					attribute.Int("gibson.mission.duration_ms", int(missionDuration.Milliseconds())),
-				)
+				span.SetAttributes(attribute.Int("gibson.mission.duration_ms", int(missionDuration.Milliseconds())))
 			}
+			m.emitEvent(eventChan, api.MissionEventData{EventType: "mission.completed", Timestamp: time.Now(), MissionID: missionID, Message: fmt.Sprintf("Mission completed with status: %s", finalStatus)})
+		} else {
+			if span != nil {
+				span.SetStatus(codes.Error, errorMsg)
+				span.SetAttributes(attribute.Int("gibson.mission.duration_ms", int(missionDuration.Milliseconds())))
+			}
+			m.emitEvent(eventChan, api.MissionEventData{EventType: "mission.failed", Timestamp: time.Now(), MissionID: missionID, Error: errorMsg})
 		}
-
-		m.emitEvent(eventChan, api.MissionEventData{
-			EventType: "mission.completed",
-			Timestamp: time.Now(),
-			MissionID: missionID,
-			Message:   fmt.Sprintf("Mission completed with status: %s (iterations: %d, decisions: %d)", finalStatus, result.TotalIterations, result.TotalDecisions),
-		})
-	} else {
-		// No result returned - treat as failed
-		finalStatus = mission.MissionStatusFailed
-		errorMsg = "no result returned from orchestrator"
-
-		// Record error on span
-		if span != nil {
-			span.RecordError(fmt.Errorf("%s", errorMsg))
-			span.SetStatus(codes.Error, errorMsg)
-			span.SetAttributes(
-				attribute.Int("gibson.mission.duration_ms", int(missionDuration.Milliseconds())),
-			)
-		}
-
-		m.emitEvent(eventChan, api.MissionEventData{
-			EventType: "mission.failed",
-			Timestamp: time.Now(),
-			MissionID: missionID,
-			Error:     errorMsg,
-		})
 	}
+	_ = missionDuration
 
 	// Transition authz state so that late-arriving component callbacks receive a
 	// proper inactive-mission error rather than stale "active" state. Errors are
@@ -1738,4 +1555,48 @@ func (m *missionManager) convertToGraphEdges(def *missionpb.MissionDefinition) [
 	}
 
 	return edges
+}
+
+// missionGoal returns the mission's Decider goal. A mission carries it in
+// metadata["goal"]; absent → empty, meaning a purely scripted mission that the
+// brain scheduler runs to completion without invoking the Decider (gibson#851).
+func missionGoal(m *mission.Mission) string {
+	if m == nil || m.Metadata == nil {
+		return ""
+	}
+	if g, ok := m.Metadata["goal"].(string); ok {
+		return g
+	}
+	return ""
+}
+
+// awaitBrainMission blocks until the brain reaches a terminal state for the given
+// mission, or ctx is cancelled. It polls the engine's mission snapshots (the
+// engine's own tick + drain loops drive execution). Returns the mapped mission
+// status and an error message (empty on success).
+func (m *missionManager) awaitBrainMission(ctx context.Context, eng *brain.Engine, missionID string) (mission.MissionStatus, string) {
+	ticker := time.NewTicker(200 * time.Millisecond)
+	defer ticker.Stop()
+	for {
+		select {
+		case <-ctx.Done():
+			return mission.MissionStatusCancelled, "mission cancelled"
+		case <-ticker.C:
+			for _, ms := range eng.Missions() {
+				if ms.ID != missionID {
+					continue
+				}
+				switch ms.Status {
+				case brain.MissionCompleted:
+					return mission.MissionStatusCompleted, ""
+				case brain.MissionFailed:
+					reason := ms.Reason
+					if reason == "" {
+						reason = "mission failed"
+					}
+					return mission.MissionStatusFailed, reason
+				}
+			}
+		}
+	}
 }

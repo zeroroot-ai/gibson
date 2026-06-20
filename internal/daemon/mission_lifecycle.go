@@ -74,6 +74,8 @@ func (d *daemonImpl) ensureMissionManager() error {
 			NewOrchestratorEventBusAdapterWithRedis(d.eventBus, d.redisEventStream, d.registryTenant, d.brainRegistry), // Bridge events to Redis + the ECS brain
 			d.missionAuthzStore, // Required (one-code-path slice deploy#195); set during Redis init phase
 			d.quotaManager,      // Spec plans-and-quotas-simplification: may be nil in dev
+			d.brainRegistry,     // ECS brain engine (gibson#851)
+			d.brainExecutor,     // concrete Dispatcher + DeciderLLM bindings (gibson#851)
 		)
 
 		d.logger.Info(context.Background(), "mission manager initialized")

@@ -105,6 +105,7 @@ type daemonImpl struct {
 	// brainRegistry holds the per-tenant ECS brain engines (epic ecs-brain); the
 	// WorldService read path reads through it. Lazily created at gRPC registration.
 	brainRegistry *brain.Registry
+	brainExecutor *brainExecutor
 
 	// registryTenant is the tenant scope used for component registry discovery
 	registryTenant string
@@ -771,7 +772,10 @@ func (d *daemonImpl) Start(ctx context.Context) error {
 	// Initialize the per-tenant ECS brain registry (epic ecs-brain). Engines run
 	// for the daemon's lifetime; the orchestrator event-bus adapter feeds each
 	// tenant's World from its live mission event stream (ADR-0001 capture path).
-	d.brainRegistry = brain.NewRegistry(ctx, brain.BeliefSystem(brain.PlaceholderBeliefProvider()))
+	d.brainRegistry = brain.NewRegistry(ctx, append(
+		[]brain.System{brain.BeliefSystem(brain.PlaceholderBeliefProvider())},
+		brain.ExecutorSystems()..., // scheduler/condition/decider-gate/budget/retry/completion (gibson#851)
+	)...)
 	d.logger.Info(ctx, "ECS brain registry initialized")
 
 	// Project each tenant's World into its Neo4j knowledge graph (ADR-0007): the
@@ -832,6 +836,22 @@ func (d *daemonImpl) Start(ctx context.Context) error {
 	regAdapter := component.NewRegistryAdapter(compRegistry, tenant)
 	d.registryAdapter = regAdapter
 	d.logger.Info(ctx, "initialized Redis-backed component registry adapter", "tenant", tenant)
+
+	// Wire the ECS brain as the mission execution engine (gibson#851): build the
+	// concrete Dispatcher + DeciderLLM bindings over the component registry, and
+	// install them onto every per-tenant engine via WireExecutor. Registered
+	// before any engine is created (engines fault in lazily on the first event).
+	if d.brainRegistry != nil {
+		d.brainExecutor = newBrainExecutor(d.registryAdapter, d.logger.WithComponent("brain-executor").Slog())
+		d.brainRegistry.OnEngine(func(e *brain.Engine) {
+			brain.WireExecutor(ctx, e, brain.ExecutorDeps{
+				Dispatcher: d.brainExecutor,
+				Decider:    d.brainExecutor,
+				Catalog:    d.brainExecutor.catalog,
+			})
+		})
+		d.logger.Info(ctx, "ECS brain executor wired (brain is the mission engine)")
+	}
 
 	// Wire callback manager to registry adapter for external agent callback support
 	regAdapter.SetCallbackManager(d.callback)
