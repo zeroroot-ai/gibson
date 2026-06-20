@@ -124,11 +124,21 @@ func missionDefinitionToProjected(def *missionpb.MissionDefinition, goal string)
 	sort.Slice(nodes, func(i, j int) bool { return nodes[i].ID < nodes[j].ID })
 
 	return brain.MissionProjected{
-		ID:     def.GetId(),
-		Goal:   goal,
-		Budget: budgetFromConstraints(def.GetConstraints()),
-		Nodes:  nodes,
+		ID:          def.GetId(),
+		Goal:        goal,
+		Budget:      budgetFromConstraints(def.GetConstraints()),
+		Nodes:       nodes,
+		DeciderSlot: deciderSlotFrom(def.GetDeciderSlot()),
 	}, nil
+}
+
+// deciderSlotFrom maps the mission's optional decider_slot (gibson#850) into the
+// brain-native form. Empty → the brain uses the tenant dashboard default.
+func deciderSlotFrom(s *missionpb.LLMSlotConfig) brain.DeciderSlot {
+	if s == nil {
+		return brain.DeciderSlot{}
+	}
+	return brain.DeciderSlot{Provider: s.GetProvider(), Model: s.GetModel()}
 }
 
 // makeResolver returns resolve(id) → real node ids. parallel/join expand to their

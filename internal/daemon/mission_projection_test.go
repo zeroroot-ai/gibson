@@ -74,6 +74,28 @@ func conditionNode(expr string, trueBranch, falseBranch []string, deps ...string
 	}
 }
 
+func TestMissionDefinitionToProjected_DeciderSlot(t *testing.T) {
+	def := &missionpb.MissionDefinition{
+		Id:          "m1",
+		Nodes:       map[string]*missionpb.MissionNode{"a": toolNode("ta")},
+		DeciderSlot: &missionpb.LLMSlotConfig{Provider: "anthropic", Model: "claude-opus-4-8"},
+	}
+	got, err := missionDefinitionToProjected(def, "find flag")
+	if err != nil {
+		t.Fatalf("translate: %v", err)
+	}
+	if got.DeciderSlot.Provider != "anthropic" || got.DeciderSlot.Model != "claude-opus-4-8" {
+		t.Fatalf("decider slot: got %+v", got.DeciderSlot)
+	}
+
+	// Absent decider_slot → empty (tenant default).
+	def.DeciderSlot = nil
+	got, _ = missionDefinitionToProjected(def, "")
+	if (got.DeciderSlot != brain.DeciderSlot{}) {
+		t.Errorf("absent slot should be empty, got %+v", got.DeciderSlot)
+	}
+}
+
 func TestMissionDefinitionToProjected_JoinCollapsesToDeps(t *testing.T) {
 	// a, b run; join j waits for both; c depends on j → c should depend on {a,b}.
 	def := &missionpb.MissionDefinition{
