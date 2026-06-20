@@ -14,7 +14,8 @@ type Registry struct {
 	ctx     context.Context
 	mu      sync.Mutex
 	engines map[string]*Engine
-	systems []System // installed on every per-tenant engine (e.g. belief, orchestrator)
+	systems []System        // installed on every per-tenant engine (e.g. belief, orchestrator)
+	hooks   []func(*Engine) // run once per engine at creation (e.g. WireExecutor)
 }
 
 // NewRegistry returns a Registry. The systems are installed on each engine as it
@@ -22,6 +23,16 @@ type Registry struct {
 // the *World passed at call time), so the same closures serve every tenant.
 func NewRegistry(ctx context.Context, systems ...System) *Registry {
 	return &Registry{ctx: ctx, engines: make(map[string]*Engine), systems: systems}
+}
+
+// OnEngine registers a hook run once for each engine at creation, after its
+// systems are installed and before its tick loop starts. The daemon uses this to
+// WireExecutor (dispatch + Decider) onto every per-tenant engine. Call before any
+// For().
+func (r *Registry) OnEngine(fn func(*Engine)) {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	r.hooks = append(r.hooks, fn)
 }
 
 // For returns the tenant's Engine, creating and starting its tick loop on first
@@ -35,6 +46,9 @@ func (r *Registry) For(tenant string) *Engine {
 	e := NewEngine(tenant)
 	for _, s := range r.systems {
 		e.AddSystem(s)
+	}
+	for _, h := range r.hooks {
+		h(e)
 	}
 	r.engines[tenant] = e
 	go e.Run(r.ctx)
