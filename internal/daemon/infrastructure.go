@@ -6,7 +6,6 @@ import (
 	"os"
 	"time"
 
-	"github.com/zeroroot-ai/gibson/internal/datapool"
 	"github.com/zeroroot-ai/gibson/internal/finding"
 	"github.com/zeroroot-ai/gibson/internal/graphrag"
 	"github.com/zeroroot-ai/gibson/internal/graphrag/graph"
@@ -15,8 +14,6 @@ import (
 	"github.com/zeroroot-ai/gibson/internal/llm/providers"
 	"github.com/zeroroot-ai/gibson/internal/llm/providers/catalogue"
 	"github.com/zeroroot-ai/gibson/internal/memory"
-	"github.com/zeroroot-ai/gibson/internal/memory/embedder"
-	"github.com/zeroroot-ai/gibson/internal/memory/vector"
 	"github.com/zeroroot-ai/gibson/internal/mission"
 	"github.com/zeroroot-ai/gibson/internal/observability"
 	"github.com/zeroroot-ai/gibson/internal/plan"
@@ -52,9 +49,6 @@ type Infrastructure struct {
 
 	// runLinker manages relationships between mission runs with the same name
 	runLinker mission.MissionRunLinker
-
-	// graphRAGQueryBridge provides per-tenant GraphRAG read/query operations.
-	graphRAGQueryBridge harness.GraphRAGQueryBridge
 
 	// otelStack holds the unified OTel observability stack (nil when disabled)
 	otelStack *observability.OTelObservabilityStack
@@ -203,15 +197,6 @@ func (d *daemonImpl) newInfrastructure(ctx context.Context) (*Infrastructure, er
 		"url", d.config.Redis.URL,
 		"database", d.config.Redis.Database)
 
-	// Initialize the GraphRAG query bridge backed by the per-tenant data-plane Pool.
-	// No shared Neo4j cluster is required at startup; each bridge method resolves
-	// the tenant's Neo4j session lazily via pool.For(ctx, tenant).Neo4j.
-	graphRAGQueryBridge, err := d.initGraphRAGBridges(ctx)
-	if err != nil {
-		return nil, fmt.Errorf("failed to initialize GraphRAG query bridge: %w", err)
-	}
-	d.logger.Info(ctx, "initialized GraphRAG query bridge (per-tenant pool-backed)")
-
 	// Initialize OpenTelemetry observability stack (required for LLM tracing)
 	// This provides unified tracing and metrics to OTLP-compatible backends
 	otelStack := d.initOTelObservability(ctx)
@@ -250,7 +235,6 @@ func (d *daemonImpl) newInfrastructure(ctx context.Context) (*Infrastructure, er
 		llmRegistry:            llmRegistry,
 		slotManager:            slotManager,
 		memoryManagerFactory:   memoryFactory,
-		graphRAGQueryBridge:    graphRAGQueryBridge,
 		otelStack:              otelStack,
 		taxonomyRegistry:       taxonomyRegistry,
 		redisClient:            redisClient,
@@ -505,51 +489,6 @@ func (d *daemonImpl) checkInfrastructureHealth(ctx context.Context, infra *Infra
 	}
 
 	return health
-}
-
-// initGraphRAGBridges creates pool-backed GraphRAG bridge interfaces.
-//
-// Unlike the old startup path, no shared Neo4j connection is established here.
-// The bridge resolves a per-tenant Neo4j session on each call via the
-// data-plane Pool, using the tenant extracted from the request context.
-//
-// An embedder is created once at startup (stateless, no Neo4j dependency) and
-// shared across all per-request provider instances for efficiency.
-func (d *daemonImpl) initGraphRAGBridges(ctx context.Context) (harness.GraphRAGQueryBridge, error) {
-	// Create embedder from config once at startup. The embedder is stateless
-	// (no Neo4j dependency) and safe for concurrent use.
-	emb, err := embedder.CreateEmbedder(d.config.Embedder, d.logger.WithComponent("embedder").Slog())
-	if err != nil {
-		return nil, fmt.Errorf("failed to create embedder: %w", err)
-	}
-	d.logger.Info(ctx, "created embedder for GraphRAG",
-		"provider", d.config.Embedder.Provider,
-		"dimensions", emb.Dimensions(),
-		"model", emb.Model())
-
-	// Shared in-process vector store — per-tenant namespace prefix is applied
-	// by getVectorStore(ctx) inside LocalGraphRAGProvider on each call.
-	vectorStore := vector.NewEmbeddedVectorStore(emb.Dimensions())
-	d.logger.Info(ctx, "created shared vector store for GraphRAG",
-		"dimensions", emb.Dimensions())
-
-	// Create bridge adapter — holds the pool, embedder, and shared vector
-	// store. Neo4j sessions are acquired lazily per-request from pool.
-	adapter, err := NewGraphRAGBridgeAdapter(GraphRAGBridgeConfig{
-		// Deferred pool resolution — daemon's pool initializes after this
-		// adapter is constructed (pool depends on key provider + secrets
-		// broker, which come up later in Start). The closure captures &d
-		// and returns the current pool at call time.
-		PoolGetter:  func() datapool.Pool { return d.pool },
-		Embedder:    emb,
-		VectorStore: vectorStore,
-		Logger:      d.logger.WithComponent("graphrag-bridge").Slog(),
-	})
-	if err != nil {
-		return nil, fmt.Errorf("failed to create GraphRAG bridge adapter: %w", err)
-	}
-
-	return adapter.QueryBridge(), nil
 }
 
 // initOTelObservability initializes the OpenTelemetry observability stack if enabled.
