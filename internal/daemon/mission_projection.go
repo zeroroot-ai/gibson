@@ -55,10 +55,11 @@ func missionDefinitionToProjected(def *missionpb.MissionDefinition, goal string)
 			return brain.MissionProjected{}, fmt.Errorf("node %q: %w", id, err)
 		}
 		nodes = append(nodes, brain.WorkNode{
-			ID:        id,
-			Kind:      kind,
-			Target:    target,
-			DependsOn: sortedKeys(deps[id]),
+			ID:         id,
+			Kind:       kind,
+			Target:     target,
+			DependsOn:  sortedKeys(deps[id]),
+			MaxRetries: int(n.GetRetryPolicy().GetMaxRetries()),
 		})
 	}
 	// Deterministic node order (map iteration is random) for replay stability.

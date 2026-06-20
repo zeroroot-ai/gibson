@@ -245,6 +245,8 @@ func Reduce(w *World, ev Event) {
 		applyAccountObserved(w, e)
 	case WorkDispatched:
 		applyWorkDispatched(w, e)
+	case WorkRetried:
+		applyWorkRetried(w, e)
 	case WorkCompleted:
 		applyWorkCompleted(w, e)
 	case MissionStarted:
