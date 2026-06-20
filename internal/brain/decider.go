@@ -2,6 +2,7 @@ package brain
 
 import (
 	"context"
+	"encoding/json"
 	"fmt"
 	"sync"
 )
@@ -49,12 +50,15 @@ func (mc MissionContext) quiescent() bool {
 	return true
 }
 
-// DeciderDispatch is one re-invocation the Decider chose. For gibson#847 only
-// agent dispatch is exercised end-to-end; tool/plugin structured input is #848.
+// DeciderDispatch is one re-invocation the Decider chose. Input is a free-text
+// task goal for an agent, or **structured JSON** for a tool/plugin (gibson#848):
+// the tool's input shaped to its schema, or {"method":...,"params":{...}} for a
+// plugin. Structured inputs are validated before dispatch (see validateDispatch);
+// proto-conformance + LLM repair is the concrete DeciderLLM's job (daemon-side).
 type DeciderDispatch struct {
 	Kind   string // agent | tool | plugin
 	Target string // capability name
-	Input  string // task goal (agent) or structured input (tool/plugin, #848)
+	Input  string // task goal (agent) or structured JSON (tool/plugin)
 }
 
 // DeciderComplete ends the mission. Outcome "failed" → MissionFailed, else completed.
@@ -189,6 +193,18 @@ func (dw *DeciderWorker) decide(ctx context.Context, missionID string) {
 	mc := dw.buildContext(missionID)
 
 	out, err := dw.llm.Decide(ctx, mc)
+	// Validate/filter dispatches against the catalog before acting: an agent/tool/
+	// plugin the Decider hallucinated, or a tool/plugin with non-JSON structured
+	// input, is dropped so garbage never reaches dispatch (gibson#848).
+	var valid []DeciderDispatch
+	if err == nil {
+		for _, d := range out.Dispatches {
+			if validateDispatch(d, mc.Capabilities) {
+				valid = append(valid, d)
+			}
+		}
+	}
+
 	var evs []Event
 	switch {
 	case err != nil:
@@ -197,13 +213,14 @@ func (dw *DeciderWorker) decide(ctx context.Context, missionID string) {
 		// by the budget System, gibson#849.)
 	case out.Complete != nil:
 		evs = append(evs, missionDoneFrom(missionID, *out.Complete))
-	case len(out.Dispatches) > 0:
-		for _, d := range out.Dispatches {
+	case len(valid) > 0:
+		for _, d := range valid {
 			evs = append(evs, dw.dispatchEvent(missionID, d))
 		}
 	default:
-		// Empty decision. On a quiescent mission (nothing left running/pending),
-		// that is terminal — the Decider has nothing more to do (CONTEXT.md).
+		// No actionable dispatch (empty, or all rejected). On a quiescent mission
+		// (nothing left running/pending), that is terminal — the Decider has nothing
+		// more to do (CONTEXT.md).
 		if mc.quiescent() {
 			evs = append(evs, MissionDone{ID: missionID, Outcome: MissionCompleted, Reason: "decider: goal resolved, nothing left to do"})
 		}
@@ -212,6 +229,28 @@ func (dw *DeciderWorker) decide(ctx context.Context, missionID string) {
 	for _, e := range evs {
 		dw.eng.Submit(e)
 	}
+}
+
+// validateDispatch rejects a dispatch the brain can't safely actuate: an unknown
+// capability (kind+name not in the catalog), or a tool/plugin whose structured
+// Input is not valid JSON. Agents take free-text input, so only catalog
+// membership is checked. (Full proto-schema conformance + LLM repair is the
+// concrete DeciderLLM's responsibility, daemon-side.)
+func validateDispatch(d DeciderDispatch, catalog []Capability) bool {
+	known := false
+	for _, c := range catalog {
+		if c.Kind == d.Kind && c.Name == d.Target {
+			known = true
+			break
+		}
+	}
+	if !known {
+		return false
+	}
+	if d.Kind == "tool" || d.Kind == "plugin" {
+		return json.Valid([]byte(d.Input))
+	}
+	return true
 }
 
 func (dw *DeciderWorker) dispatchEvent(missionID string, d DeciderDispatch) Event {
