@@ -31,26 +31,41 @@ const (
 // `running` (dispatched directly). DependsOn references other WorkItem IDs that
 // must reach `done` before this one is dispatchable.
 type WorkItem struct {
-	ID        string
-	MissionID string   // owning mission (empty for free-standing work)
-	Kind      string   // "tool" | "agent" | "plugin"
-	Target    string   // the capability being executed
-	Input     string   // opaque dispatch input (e.g. the CUE node config), carried for dispatch
-	DependsOn []string // WorkItem IDs that must be `done` before this is dispatchable
-	State     WorkState
-	Result    string
-	Err       string
+	ID         string
+	MissionID  string   // owning mission (empty for free-standing work)
+	Kind       string   // "tool" | "agent" | "plugin"
+	Target     string   // the capability being executed
+	Input      string   // opaque dispatch input (e.g. the CUE node config), carried for dispatch
+	DependsOn  []string // WorkItem IDs that must be `done` before this is dispatchable
+	State      WorkState
+	Result     string
+	Err        string
+	MaxRetries int // CUE RetryPolicy.max_retries; the retry System re-dispatches on failure up to this
+	Attempts   int // dispatch attempts so far (count-based, deterministic for replay)
 }
 
 // WorkDispatched records that a unit of work was launched. It does not block;
-// the work runs out-of-process and reports back via WorkCompleted.
+// the work runs out-of-process and reports back via WorkCompleted. It carries the
+// MissionID + Input so the live dispatch effect-handler (ADR-0009) can actuate the
+// launch without reading the World back inside the locked tick.
 type WorkDispatched struct {
-	ID       string
-	ItemKind string // tool | agent | plugin
-	Target   string
+	ID        string
+	MissionID string
+	ItemKind  string // tool | agent | plugin
+	Target    string
+	Input     string
 }
 
 func (WorkDispatched) Kind() string { return "work.dispatched" }
+
+// WorkRetried re-arms a failed WorkItem for another dispatch attempt (count-based,
+// deterministic). The reducer increments Attempts and returns it to `pending` so
+// the Scheduler re-dispatches it.
+type WorkRetried struct {
+	ID string
+}
+
+func (WorkRetried) Kind() string { return "work.retried" }
 
 // WorkCompleted records that a previously-dispatched unit of work finished —
 // whenever that is. Err non-empty means failure.
@@ -76,11 +91,37 @@ func findWork(w *World, id string) (ecs.Entity, bool) {
 }
 
 func applyWorkDispatched(w *World, e WorkDispatched) {
-	if ent, ok := findWork(w, e.ID); ok { // idempotent re-dispatch
-		w.work.Get(ent).State = WorkRunning
+	if ent, ok := findWork(w, e.ID); ok {
+		wi := w.work.Get(ent)
+		if wi.State == WorkRunning {
+			return // idempotent: already running
+		}
+		wi.State = WorkRunning
+		wi.Attempts++
 		return
 	}
-	w.work.NewEntity(&WorkItem{ID: e.ID, Kind: e.ItemKind, Target: e.Target, State: WorkRunning})
+	w.work.NewEntity(&WorkItem{
+		ID:        e.ID,
+		MissionID: e.MissionID,
+		Kind:      e.ItemKind,
+		Target:    e.Target,
+		Input:     e.Input,
+		State:     WorkRunning,
+		Attempts:  1,
+	})
+}
+
+func applyWorkRetried(w *World, e WorkRetried) {
+	ent, ok := findWork(w, e.ID)
+	if !ok {
+		return
+	}
+	wi := w.work.Get(ent)
+	if wi.State != WorkFailed {
+		return // only failed work can be re-armed
+	}
+	wi.State = WorkPending
+	wi.Err = ""
 }
 
 func applyWorkCompleted(w *World, e WorkCompleted) {
@@ -98,15 +139,17 @@ func applyWorkCompleted(w *World, e WorkCompleted) {
 
 // WorkSnapshot is a stable, comparable view of a WorkItem.
 type WorkSnapshot struct {
-	ID        string
-	MissionID string
-	Kind      string
-	Target    string
-	Input     string
-	DependsOn []string
-	State     WorkState
-	Result    string
-	Err       string
+	ID         string
+	MissionID  string
+	Kind       string
+	Target     string
+	Input      string
+	DependsOn  []string
+	State      WorkState
+	Result     string
+	Err        string
+	MaxRetries int
+	Attempts   int
 }
 
 // WorkSnapshot returns the current work items in deterministic (ID) order.
@@ -116,15 +159,17 @@ func (w *World) WorkSnapshot() []WorkSnapshot {
 	for q.Next() {
 		wi := q.Get()
 		out = append(out, WorkSnapshot{
-			ID:        wi.ID,
-			MissionID: wi.MissionID,
-			Kind:      wi.Kind,
-			Target:    wi.Target,
-			Input:     wi.Input,
-			DependsOn: append([]string(nil), wi.DependsOn...),
-			State:     wi.State,
-			Result:    wi.Result,
-			Err:       wi.Err,
+			ID:         wi.ID,
+			MissionID:  wi.MissionID,
+			Kind:       wi.Kind,
+			Target:     wi.Target,
+			Input:      wi.Input,
+			DependsOn:  append([]string(nil), wi.DependsOn...),
+			State:      wi.State,
+			Result:     wi.Result,
+			Err:        wi.Err,
+			MaxRetries: wi.MaxRetries,
+			Attempts:   wi.Attempts,
 		})
 	}
 	sort.Slice(out, func(i, j int) bool { return out[i].ID < out[j].ID })

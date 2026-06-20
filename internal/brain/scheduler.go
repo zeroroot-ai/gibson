@@ -21,7 +21,13 @@ func SchedulerSystem(w *World) []Event {
 			continue
 		}
 		if depsAllDone(wi.DependsOn, state) {
-			out = append(out, WorkDispatched{ID: wi.ID, ItemKind: wi.Kind, Target: wi.Target})
+			out = append(out, WorkDispatched{
+				ID:        wi.ID,
+				MissionID: wi.MissionID,
+				ItemKind:  wi.Kind,
+				Target:    wi.Target,
+				Input:     wi.Input,
+			})
 		}
 	}
 	return out

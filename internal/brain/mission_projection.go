@@ -7,11 +7,12 @@ package brain
 // need no node kind here (gibson#846), so Kind is one of "agent"|"tool"|"plugin"
 // (plus "condition" once gibson#846 lands).
 type WorkNode struct {
-	ID        string
-	Kind      string
-	Target    string   // capability name (agent/tool/plugin)
-	Input     string   // opaque dispatch input (the node config), carried for dispatch
-	DependsOn []string // node IDs this one depends on
+	ID         string
+	Kind       string
+	Target     string   // capability name (agent/tool/plugin)
+	Input      string   // opaque dispatch input (the node config), carried for dispatch
+	DependsOn  []string // node IDs this one depends on
+	MaxRetries int      // CUE RetryPolicy.max_retries (0 = no retry)
 }
 
 // MissionProjected is the launch event for a scripted CUE mission (ADR-0001): the
@@ -39,13 +40,14 @@ func applyMissionProjected(w *World, e MissionProjected) {
 			continue // idempotent
 		}
 		w.work.NewEntity(&WorkItem{
-			ID:        n.ID,
-			MissionID: e.ID,
-			Kind:      n.Kind,
-			Target:    n.Target,
-			Input:     n.Input,
-			DependsOn: append([]string(nil), n.DependsOn...),
-			State:     WorkPending,
+			ID:         n.ID,
+			MissionID:  e.ID,
+			Kind:       n.Kind,
+			Target:     n.Target,
+			Input:      n.Input,
+			DependsOn:  append([]string(nil), n.DependsOn...),
+			State:      WorkPending,
+			MaxRetries: n.MaxRetries,
 		})
 	}
 }

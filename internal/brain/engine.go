@@ -31,8 +31,9 @@ type System func(*World) []Event
 type Engine struct {
 	World    *World
 	Timeline *Timeline
-	intake   chan Event
-	systems  []System
+	intake      chan Event
+	systems     []System
+	subscribers []func(Event) // live-only event taps (ADR-0009); never fire on Replay
 
 	// mu guards World + Timeline. The tick (single writer) takes the write lock;
 	// external readers (e.g. the read-path gRPC handlers) take the read lock so
@@ -53,6 +54,13 @@ func NewEngine(tenant string) *Engine {
 // AddSystem registers a system to run every tick (e.g., the Orchestrator).
 func (e *Engine) AddSystem(s System) { e.systems = append(e.systems, s) }
 
+// Subscribe registers a live-only event tap, invoked (in Timeline order, inside
+// the tick) for every event applied during Tick — but NEVER during Replay, since
+// Replay re-folds the Timeline without effects (ADR-0009). The tap must not block
+// or do I/O (it runs under the tick lock); buffer and act off the tick. Used by
+// the dispatch effect-handler.
+func (e *Engine) Subscribe(fn func(Event)) { e.subscribers = append(e.subscribers, fn) }
+
 // Submit enqueues an event for application on the next tick. Safe from any
 // goroutine; never mutates the World directly.
 func (e *Engine) Submit(ev Event) { e.intake <- ev }
@@ -60,6 +68,9 @@ func (e *Engine) Submit(ev Event) { e.intake <- ev }
 func (e *Engine) apply(ev Event) {
 	e.Timeline.Append(ev)
 	Reduce(e.World, ev)
+	for _, fn := range e.subscribers {
+		fn(ev)
+	}
 }
 
 func (e *Engine) drainIntake() int {
