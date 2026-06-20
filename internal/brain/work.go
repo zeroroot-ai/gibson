@@ -16,6 +16,10 @@ const (
 	WorkRunning WorkState = "running"
 	WorkDone    WorkState = "done"
 	WorkFailed  WorkState = "failed"
+	// WorkSkipped: a node on a condition's not-taken branch — terminal, never
+	// executed, and (unlike failed) not a mission failure. Its dependents become
+	// dead (their dep never reaches `done`) and are ignored by completion.
+	WorkSkipped WorkState = "skipped"
 )
 
 // WorkItem is a unit of work tracked as an entity — a tool call, agent run, or

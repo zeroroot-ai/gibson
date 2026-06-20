@@ -97,6 +97,9 @@ func ResumeFailInFlight(w *World) []Event {
 func RetrySystem(w *World) []Event {
 	var out []Event
 	for _, wi := range w.WorkSnapshot() {
+		if wi.Kind == "condition" {
+			continue // conditions are evaluated, not dispatched — never retried
+		}
 		if wi.State == WorkFailed && wi.Attempts <= wi.MaxRetries {
 			out = append(out, WorkRetried{ID: wi.ID})
 		}

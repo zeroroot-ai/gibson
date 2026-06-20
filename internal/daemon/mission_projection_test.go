@@ -66,13 +66,106 @@ func TestMissionDefinitionToProjected_NodesEdgesConstraints(t *testing.T) {
 	}
 }
 
-func TestMissionDefinitionToProjected_RejectsControlFlowNodes(t *testing.T) {
-	def := &missionpb.MissionDefinition{
-		Id:    "m1",
-		Nodes: map[string]*missionpb.MissionNode{"x": {Type: missionpb.NodeType_NODE_TYPE_PARALLEL}},
+func conditionNode(expr string, trueBranch, falseBranch []string, deps ...string) *missionpb.MissionNode {
+	return &missionpb.MissionNode{
+		Type:         missionpb.NodeType_NODE_TYPE_CONDITION,
+		Config:       &missionpb.MissionNode_ConditionConfig{ConditionConfig: &missionpb.ConditionNodeConfig{Expression: expr, TrueBranch: trueBranch, FalseBranch: falseBranch}},
+		Dependencies: deps,
 	}
-	if _, err := missionDefinitionToProjected(def, ""); err == nil {
-		t.Fatal("expected error for parallel node (gibson#846), got nil")
+}
+
+func TestMissionDefinitionToProjected_JoinCollapsesToDeps(t *testing.T) {
+	// a, b run; join j waits for both; c depends on j → c should depend on {a,b}.
+	def := &missionpb.MissionDefinition{
+		Id: "m1",
+		Nodes: map[string]*missionpb.MissionNode{
+			"a": toolNode("ta"),
+			"b": toolNode("tb"),
+			"j": {Type: missionpb.NodeType_NODE_TYPE_JOIN, Config: &missionpb.MissionNode_JoinConfig{JoinConfig: &missionpb.JoinNodeConfig{WaitFor: []string{"a", "b"}}}},
+			"c": toolNode("tc", "j"),
+		},
+	}
+	got, err := missionDefinitionToProjected(def, "")
+	if err != nil {
+		t.Fatalf("translate: %v", err)
+	}
+	byID := map[string]brain.WorkNode{}
+	for _, n := range got.Nodes {
+		byID[n.ID] = n
+	}
+	if _, ok := byID["j"]; ok {
+		t.Error("join node should not appear as a WorkNode")
+	}
+	if !eqStrs(byID["c"].DependsOn, []string{"a", "b"}) {
+		t.Errorf("c deps: got %v want [a b]", byID["c"].DependsOn)
+	}
+}
+
+func TestMissionDefinitionToProjected_ParallelFlattensSubNodes(t *testing.T) {
+	// p (depends on a) contains sub-nodes s1, s2; d depends on p → d depends on {s1,s2}.
+	def := &missionpb.MissionDefinition{
+		Id: "m1",
+		Nodes: map[string]*missionpb.MissionNode{
+			"a": toolNode("ta"),
+			"p": {
+				Type:         missionpb.NodeType_NODE_TYPE_PARALLEL,
+				Dependencies: []string{"a"},
+				Config: &missionpb.MissionNode_ParallelConfig{ParallelConfig: &missionpb.ParallelNodeConfig{SubNodes: []*missionpb.MissionNode{
+					func() *missionpb.MissionNode { n := toolNode("ts1"); n.Id = "s1"; return n }(),
+					func() *missionpb.MissionNode { n := toolNode("ts2"); n.Id = "s2"; return n }(),
+				}}},
+			},
+			"d": toolNode("td", "p"),
+		},
+	}
+	got, err := missionDefinitionToProjected(def, "")
+	if err != nil {
+		t.Fatalf("translate: %v", err)
+	}
+	byID := map[string]brain.WorkNode{}
+	for _, n := range got.Nodes {
+		byID[n.ID] = n
+	}
+	if _, ok := byID["p"]; ok {
+		t.Error("parallel node should not appear as a WorkNode")
+	}
+	// sub-nodes are real nodes, both depending on a (the parallel's dep).
+	if !eqStrs(byID["s1"].DependsOn, []string{"a"}) || !eqStrs(byID["s2"].DependsOn, []string{"a"}) {
+		t.Errorf("sub-node deps: s1=%v s2=%v want [a]", byID["s1"].DependsOn, byID["s2"].DependsOn)
+	}
+	// d depends on the parallel → its sub-nodes.
+	if !eqStrs(byID["d"].DependsOn, []string{"s1", "s2"}) {
+		t.Errorf("d deps: got %v want [s1 s2]", byID["d"].DependsOn)
+	}
+}
+
+func TestMissionDefinitionToProjected_ConditionGatesBranches(t *testing.T) {
+	def := &missionpb.MissionDefinition{
+		Id: "m1",
+		Nodes: map[string]*missionpb.MissionNode{
+			"a":    toolNode("ta"),
+			"cond": conditionNode("nodes['a'] == 'vuln'", []string{"yes"}, []string{"no"}, "a"),
+			"yes":  toolNode("ty"),
+			"no":   toolNode("tn"),
+		},
+	}
+	got, err := missionDefinitionToProjected(def, "")
+	if err != nil {
+		t.Fatalf("translate: %v", err)
+	}
+	byID := map[string]brain.WorkNode{}
+	for _, n := range got.Nodes {
+		byID[n.ID] = n
+	}
+	if byID["cond"].Kind != "condition" {
+		t.Errorf("cond kind: got %q want condition", byID["cond"].Kind)
+	}
+	if !eqStrs(byID["cond"].DependsOn, []string{"a"}) {
+		t.Errorf("cond deps: got %v want [a]", byID["cond"].DependsOn)
+	}
+	// branch nodes are gated on the condition.
+	if !eqStrs(byID["yes"].DependsOn, []string{"cond"}) || !eqStrs(byID["no"].DependsOn, []string{"cond"}) {
+		t.Errorf("branch deps: yes=%v no=%v want [cond]", byID["yes"].DependsOn, byID["no"].DependsOn)
 	}
 }
 

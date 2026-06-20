@@ -20,6 +20,9 @@ func SchedulerSystem(w *World) []Event {
 		if wi.State != WorkPending {
 			continue
 		}
+		if wi.Kind == "condition" {
+			continue // resolved by ConditionSystem, not dispatched to infra
+		}
 		if depsAllDone(wi.DependsOn, state) {
 			out = append(out, WorkDispatched{
 				ID:        wi.ID,
