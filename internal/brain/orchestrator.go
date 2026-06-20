@@ -35,6 +35,12 @@ type Mission struct {
 	Status MissionStatus
 	Reason string // why it completed
 	Budget Budget
+	// Decider bookkeeping (gibson#847). DecisionInFlight enforces one in-flight
+	// decision per mission; DecisionCursor is the count of terminal work items at
+	// the last decision request (-1 = never decided) — the gate fires again only
+	// when new evidence has landed.
+	DecisionInFlight bool
+	DecisionCursor   int
 }
 
 // MissionStarted launches a mission. (CUE-mission projection lands later; this is
@@ -74,7 +80,7 @@ func applyMissionStarted(w *World, e MissionStarted) {
 	if _, ok := findMission(w, e.ID); ok {
 		return
 	}
-	w.missions.NewEntity(&Mission{ID: e.ID, Goal: e.Goal, Status: MissionRunning})
+	w.missions.NewEntity(&Mission{ID: e.ID, Goal: e.Goal, Status: MissionRunning, DecisionCursor: -1})
 }
 
 func applyMissionDone(w *World, e MissionDone) {
@@ -146,11 +152,13 @@ func (o Orchestrator) System() System {
 
 // MissionSnapshot is a stable, comparable view of a Mission.
 type MissionSnapshot struct {
-	ID     string
-	Goal   string
-	Status MissionStatus
-	Reason string
-	Budget Budget
+	ID               string
+	Goal             string
+	Status           MissionStatus
+	Reason           string
+	Budget           Budget
+	DecisionInFlight bool
+	DecisionCursor   int
 }
 
 // MissionSnapshot returns the current missions in deterministic (ID) order.
@@ -159,7 +167,15 @@ func (w *World) MissionSnapshot() []MissionSnapshot {
 	q := ecs.NewFilter1[Mission](w.ecs).Query()
 	for q.Next() {
 		m := q.Get()
-		out = append(out, MissionSnapshot{ID: m.ID, Goal: m.Goal, Status: m.Status, Reason: m.Reason, Budget: m.Budget})
+		out = append(out, MissionSnapshot{
+			ID:               m.ID,
+			Goal:             m.Goal,
+			Status:           m.Status,
+			Reason:           m.Reason,
+			Budget:           m.Budget,
+			DecisionInFlight: m.DecisionInFlight,
+			DecisionCursor:   m.DecisionCursor,
+		})
 	}
 	sort.Slice(out, func(i, j int) bool { return out[i].ID < out[j].ID })
 	return out

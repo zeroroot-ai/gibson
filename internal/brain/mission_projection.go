@@ -34,7 +34,7 @@ func applyMissionProjected(w *World, e MissionProjected) {
 	if _, ok := findMission(w, e.ID); ok {
 		return // idempotent: already projected
 	}
-	w.missions.NewEntity(&Mission{ID: e.ID, Goal: e.Goal, Status: MissionRunning, Budget: e.Budget})
+	w.missions.NewEntity(&Mission{ID: e.ID, Goal: e.Goal, Status: MissionRunning, Budget: e.Budget, DecisionCursor: -1})
 	for _, n := range e.Nodes {
 		if _, ok := findWork(w, n.ID); ok {
 			continue // idempotent
