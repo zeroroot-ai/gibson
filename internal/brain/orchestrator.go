@@ -41,6 +41,10 @@ type Mission struct {
 	// when new evidence has landed.
 	DecisionInFlight bool
 	DecisionCursor   int
+	// TokensUsed is the cumulative LLM token spend reported for this mission
+	// (TokenUsed events); the budget System (gibson#849) aborts when it exceeds
+	// Budget.MaxTokens.
+	TokensUsed int64
 }
 
 // MissionStarted launches a mission. (CUE-mission projection lands later; this is
@@ -159,6 +163,7 @@ type MissionSnapshot struct {
 	Budget           Budget
 	DecisionInFlight bool
 	DecisionCursor   int
+	TokensUsed       int64
 }
 
 // MissionSnapshot returns the current missions in deterministic (ID) order.
@@ -175,6 +180,7 @@ func (w *World) MissionSnapshot() []MissionSnapshot {
 			Budget:           m.Budget,
 			DecisionInFlight: m.DecisionInFlight,
 			DecisionCursor:   m.DecisionCursor,
+			TokensUsed:       m.TokensUsed,
 		})
 	}
 	sort.Slice(out, func(i, j int) bool { return out[i].ID < out[j].ID })
