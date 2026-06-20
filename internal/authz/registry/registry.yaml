@@ -2004,6 +2004,13 @@ entries:
     allowed_identities:
       - USER
       - SERVICE
+  "/gibson.world.v1.WorldService/GetFrameAt":
+    relation: "member"
+    object_type: "tenant"
+    object_deriver: "tenant_from_identity"
+    allowed_identities:
+      - USER
+      - SERVICE
   "/gibson.world.v1.WorldService/GetTimeline":
     relation: "member"
     object_type: "tenant"
@@ -2026,41 +2033,6 @@ entries:
       - USER
       - SERVICE
   "/gibson.world.v1.WorldService/ListMissions":
-    relation: "member"
-    object_type: "tenant"
-    object_deriver: "tenant_from_identity"
-    allowed_identities:
-      - USER
-      - SERVICE
-  "/intelligence.v1.IntelligenceService/GetAssetRiskScore":
-    relation: "member"
-    object_type: "tenant"
-    object_deriver: "tenant_from_identity"
-    allowed_identities:
-      - USER
-      - SERVICE
-  "/intelligence.v1.IntelligenceService/GetAttackPatterns":
-    relation: "member"
-    object_type: "tenant"
-    object_deriver: "tenant_from_identity"
-    allowed_identities:
-      - USER
-      - SERVICE
-  "/intelligence.v1.IntelligenceService/GetRecurringVulnerabilities":
-    relation: "member"
-    object_type: "tenant"
-    object_deriver: "tenant_from_identity"
-    allowed_identities:
-      - USER
-      - SERVICE
-  "/intelligence.v1.IntelligenceService/GetRemediationMetrics":
-    relation: "member"
-    object_type: "tenant"
-    object_deriver: "tenant_from_identity"
-    allowed_identities:
-      - USER
-      - SERVICE
-  "/intelligence.v1.IntelligenceService/GetSimilarTargets":
     relation: "member"
     object_type: "tenant"
     object_deriver: "tenant_from_identity"

@@ -42,3 +42,69 @@ func TestWorldService_TenantScopedRead(t *testing.T) {
 		t.Fatal("expected an error when no tenant is in context")
 	}
 }
+
+// TestWorldService_GetFrameAt: a replay frame is a server-side fold of the log to
+// a point (ADR-0001). Scrubbing to an earlier seq reproduces the World as it was;
+// seq == total reproduces the live World; isolation holds.
+func TestWorldService_GetFrameAt(t *testing.T) {
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+	reg := brain.NewRegistry(ctx)
+	srv := NewWorldServer(reg, nil)
+
+	// Three observations: host, then a finding, then a second host.
+	reg.For("acme").Submit(brain.HostObserved{ScopeID: "s", Address: "10.0.0.5", OpenPorts: []int{22}})
+	reg.For("acme").Submit(brain.FindingRaised{ID: "f1", Title: "weak ssh", ScopeID: "s", Address: "10.0.0.5", Severity: "high"})
+	reg.For("acme").Submit(brain.HostObserved{ScopeID: "s", Address: "10.0.0.6", OpenPorts: []int{443}})
+
+	tctx := auth.WithTenant(context.Background(), auth.MustNewTenantID("acme"))
+
+	// Wait until all three events have folded into the live World.
+	deadline := time.Now().Add(2 * time.Second)
+	for time.Now().Before(deadline) {
+		if len(reg.For("acme").Events()) == 3 {
+			break
+		}
+		time.Sleep(10 * time.Millisecond)
+	}
+
+	// Frame after the first event only: one host, no finding.
+	f1, err := srv.GetFrameAt(tctx, &worldpb.GetFrameAtRequest{Seq: 1})
+	if err != nil {
+		t.Fatalf("GetFrameAt(1): %v", err)
+	}
+	if f1.Seq != 1 || f1.Total != 3 {
+		t.Fatalf("frame meta = seq %d/total %d, want 1/3", f1.Seq, f1.Total)
+	}
+	if len(f1.Hosts) != 1 || len(f1.Findings) != 0 {
+		t.Fatalf("frame@1 = %d hosts %d findings, want 1/0", len(f1.Hosts), len(f1.Findings))
+	}
+
+	// Frame after two events: one host + the finding (the second host not yet seen).
+	f2, err := srv.GetFrameAt(tctx, &worldpb.GetFrameAtRequest{Seq: 2})
+	if err != nil {
+		t.Fatalf("GetFrameAt(2): %v", err)
+	}
+	if len(f2.Hosts) != 1 || len(f2.Findings) != 1 {
+		t.Fatalf("frame@2 = %d hosts %d findings, want 1/1", len(f2.Hosts), len(f2.Findings))
+	}
+
+	// seq past the end clamps to total → the live World: two hosts + one finding.
+	fEnd, err := srv.GetFrameAt(tctx, &worldpb.GetFrameAtRequest{Seq: 99})
+	if err != nil {
+		t.Fatalf("GetFrameAt(99): %v", err)
+	}
+	if fEnd.Seq != 3 || len(fEnd.Hosts) != 2 || len(fEnd.Findings) != 1 {
+		t.Fatalf("frame@end = seq %d, %d hosts %d findings, want 3/2/1", fEnd.Seq, len(fEnd.Hosts), len(fEnd.Findings))
+	}
+
+	// Folding a frame must not mutate the live World (still two hosts).
+	if live, _ := srv.ListHosts(tctx, &worldpb.ListHostsRequest{}); len(live.GetHosts()) != 2 {
+		t.Fatalf("live World mutated by frame fold: %d hosts, want 2", len(live.GetHosts()))
+	}
+
+	// No tenant -> error.
+	if _, err := srv.GetFrameAt(context.Background(), &worldpb.GetFrameAtRequest{Seq: 1}); err == nil {
+		t.Fatal("expected an error when no tenant is in context")
+	}
+}

@@ -192,3 +192,27 @@ func (e *Engine) Events() []Event {
 	defer e.mu.RUnlock()
 	return append([]Event(nil), e.Timeline.Events()...)
 }
+
+// FrameAt returns the World as of folding the first n Timeline events — a replay
+// frame (ADR-0001: World == fold(Timeline)). It is a fresh, independent fold, so
+// it never touches the live World and is safe to call concurrently with the tick.
+// n is clamped to [0, len(Timeline)]; FrameAt(len) reproduces the live World.
+func (e *Engine) FrameAt(n int) *World {
+	e.mu.RLock()
+	evs := e.Timeline.Events()
+	if n < 0 {
+		n = 0
+	}
+	if n > len(evs) {
+		n = len(evs)
+	}
+	prefix := append([]Event(nil), evs[:n]...)
+	tenant := e.World.Tenant
+	e.mu.RUnlock()
+
+	tl := &Timeline{}
+	for _, ev := range prefix {
+		tl.Append(ev)
+	}
+	return Replay(tenant, tl)
+}
