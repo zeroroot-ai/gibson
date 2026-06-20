@@ -55,7 +55,7 @@ func TestOrchestrator_Loop(t *testing.T) {
 	e.Submit(WorkCompleted{ID: "w1", Result: "done"})
 	e.Tick() // work done -> orchestrator completes the mission
 
-	want := []MissionSnapshot{{ID: "m1", Goal: "exfiltrate PII", Status: MissionCompleted, Reason: "work complete"}}
+	want := []MissionSnapshot{{ID: "m1", Goal: "exfiltrate PII", Status: MissionCompleted, Reason: "work complete", DecisionCursor: -1}}
 	if got := e.World.MissionSnapshot(); !reflect.DeepEqual(got, want) {
 		t.Fatalf("after completion:\n got %+v\nwant %+v", got, want)
 	}

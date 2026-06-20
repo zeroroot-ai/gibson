@@ -1,0 +1,254 @@
+package brain
+
+import (
+	"context"
+	"fmt"
+	"sync"
+)
+
+// decider.go is the LLM decision loop (ADR-0001/0004, CONTEXT.md). It fits a slow
+// LLM call to the ~50ms tick by the async-by-observation pattern:
+//
+//   - DeciderGateSystem (mechanical, in-tick, quiescent) emits a DecisionRequested
+//     for a goal mission when new evidence has landed and no decision is in flight
+//     (one in-flight decision per mission).
+//   - DeciderWorker (off-tick, like the dispatch handler) consumes DecisionRequested
+//     via a live tap, serializes the own-mission slice + capability catalog, calls
+//     the DeciderLLM, and Submits the resulting decisions as events.
+//
+// The brain stays LLM-client-free: DeciderLLM is an interface; the concrete
+// tenant-provider binding is daemon-side (wired at the cutover, gibson#851).
+
+// Capability is a catalog entry the Decider may dispatch (CONTEXT.md: capability
+// vs execution). Supplied by the daemon from the enrolled component registry.
+type Capability struct {
+	Kind        string // agent | tool | plugin
+	Name        string
+	Description string
+	InputSchema string // for tools/plugins (gibson#848); empty for agents
+}
+
+// MissionContext is the serialized own-mission slice the Decider reasons over
+// (gibson#847: own mission only; no belief #750, no ambient #749, no siblings).
+type MissionContext struct {
+	MissionID    string
+	Goal         string
+	Work         []WorkSnapshot
+	Findings     []FindingSnapshot
+	Hosts        []HostSnapshot
+	Capabilities []Capability
+}
+
+// quiescent reports whether the mission has no work still running or dispatchable.
+func (mc MissionContext) quiescent() bool {
+	for _, wi := range mc.Work {
+		if wi.State == WorkRunning || wi.State == WorkPending {
+			return false
+		}
+	}
+	return true
+}
+
+// DeciderDispatch is one re-invocation the Decider chose. For gibson#847 only
+// agent dispatch is exercised end-to-end; tool/plugin structured input is #848.
+type DeciderDispatch struct {
+	Kind   string // agent | tool | plugin
+	Target string // capability name
+	Input  string // task goal (agent) or structured input (tool/plugin, #848)
+}
+
+// DeciderComplete ends the mission. Outcome "failed" → MissionFailed, else completed.
+type DeciderComplete struct {
+	Outcome string
+	Reason  string
+}
+
+// DeciderOutput is the Decider's decision for one invocation.
+type DeciderOutput struct {
+	Dispatches []DeciderDispatch
+	Complete   *DeciderComplete
+}
+
+// DeciderLLM turns a MissionContext into a decision. Implementations call the
+// tenant's provider; the brain depends only on this interface.
+type DeciderLLM interface {
+	Decide(ctx context.Context, mc MissionContext) (DeciderOutput, error)
+}
+
+// DecisionRequested asks for a Decider decision on a goal mission. The reducer
+// marks the mission's decision in flight (one at a time) and records the evidence
+// cursor at request time.
+type DecisionRequested struct {
+	MissionID string
+	Cursor    int
+}
+
+func (DecisionRequested) Kind() string { return "decision.requested" }
+
+// DecisionCompleted clears the in-flight decision once the worker has Submitted
+// its resulting events.
+type DecisionCompleted struct {
+	MissionID string
+}
+
+func (DecisionCompleted) Kind() string { return "decision.completed" }
+
+func applyDecisionRequested(w *World, e DecisionRequested) {
+	if ent, ok := findMission(w, e.MissionID); ok {
+		m := w.missions.Get(ent)
+		m.DecisionInFlight = true
+		m.DecisionCursor = e.Cursor
+	}
+}
+
+func applyDecisionCompleted(w *World, e DecisionCompleted) {
+	if ent, ok := findMission(w, e.MissionID); ok {
+		w.missions.Get(ent).DecisionInFlight = false
+	}
+}
+
+// terminalWorkCount returns the number of terminal (done/failed/skipped) work
+// items for a mission — the evidence cursor.
+func terminalWorkCount(work []WorkSnapshot, missionID string) int {
+	n := 0
+	for _, wi := range work {
+		if wi.MissionID != missionID {
+			continue
+		}
+		switch wi.State {
+		case WorkDone, WorkFailed, WorkSkipped:
+			n++
+		}
+	}
+	return n
+}
+
+// DeciderGateSystem requests a decision for each goal mission that has new
+// evidence and no decision in flight. Quiescent: once DecisionRequested is
+// applied (in flight), it won't re-fire until the worker clears it and new
+// evidence (a changed terminal-work count) appears.
+func DeciderGateSystem(w *World) []Event {
+	work := w.WorkSnapshot()
+	var out []Event
+	for _, m := range w.MissionSnapshot() {
+		if m.Status != MissionRunning || m.Goal == "" || m.DecisionInFlight {
+			continue
+		}
+		terminal := terminalWorkCount(work, m.ID)
+		if m.DecisionCursor == -1 || terminal != m.DecisionCursor {
+			out = append(out, DecisionRequested{MissionID: m.ID, Cursor: terminal})
+		}
+	}
+	return out
+}
+
+// DeciderWorker drives the off-tick LLM decision. Tap buffers DecisionRequested
+// (live); Drain reads the World, calls the LLM, and Submits the decisions.
+type DeciderWorker struct {
+	eng     *Engine
+	llm     DeciderLLM
+	catalog func() []Capability // enrolled capabilities (daemon-supplied)
+
+	mu      sync.Mutex
+	pending []string // mission ids awaiting a decision
+	seq     int      // monotonic id suffix for dispatched executions
+}
+
+// NewDeciderWorker builds a worker. catalog may be nil (no capabilities offered).
+func NewDeciderWorker(eng *Engine, llm DeciderLLM, catalog func() []Capability) *DeciderWorker {
+	if catalog == nil {
+		catalog = func() []Capability { return nil }
+	}
+	return &DeciderWorker{eng: eng, llm: llm, catalog: catalog}
+}
+
+// Tap is the engine subscriber (in-tick, no I/O): buffer the mission id.
+func (dw *DeciderWorker) Tap(ev Event) {
+	if r, ok := ev.(DecisionRequested); ok {
+		dw.mu.Lock()
+		dw.pending = append(dw.pending, r.MissionID)
+		dw.mu.Unlock()
+	}
+}
+
+// Drain processes all buffered decision requests off the tick. Returns the count
+// processed.
+func (dw *DeciderWorker) Drain(ctx context.Context) int {
+	dw.mu.Lock()
+	ids := dw.pending
+	dw.pending = nil
+	dw.mu.Unlock()
+
+	for _, missionID := range ids {
+		dw.decide(ctx, missionID)
+	}
+	return len(ids)
+}
+
+func (dw *DeciderWorker) decide(ctx context.Context, missionID string) {
+	mc := dw.buildContext(missionID)
+
+	out, err := dw.llm.Decide(ctx, mc)
+	var evs []Event
+	switch {
+	case err != nil:
+		// A failed decision does not kill the mission; clear in-flight and let the
+		// gate retry on the next evidence change. (A persistent failure is bounded
+		// by the budget System, gibson#849.)
+	case out.Complete != nil:
+		evs = append(evs, missionDoneFrom(missionID, *out.Complete))
+	case len(out.Dispatches) > 0:
+		for _, d := range out.Dispatches {
+			evs = append(evs, dw.dispatchEvent(missionID, d))
+		}
+	default:
+		// Empty decision. On a quiescent mission (nothing left running/pending),
+		// that is terminal — the Decider has nothing more to do (CONTEXT.md).
+		if mc.quiescent() {
+			evs = append(evs, MissionDone{ID: missionID, Outcome: MissionCompleted, Reason: "decider: goal resolved, nothing left to do"})
+		}
+	}
+	evs = append(evs, DecisionCompleted{MissionID: missionID})
+	for _, e := range evs {
+		dw.eng.Submit(e)
+	}
+}
+
+func (dw *DeciderWorker) dispatchEvent(missionID string, d DeciderDispatch) Event {
+	dw.mu.Lock()
+	dw.seq++
+	id := fmt.Sprintf("%s-dec-%d", missionID, dw.seq)
+	dw.mu.Unlock()
+	return WorkDispatched{ID: id, MissionID: missionID, ItemKind: d.Kind, Target: d.Target, Input: d.Input}
+}
+
+func missionDoneFrom(missionID string, c DeciderComplete) MissionDone {
+	outcome := MissionCompleted
+	if c.Outcome == "failed" {
+		outcome = MissionFailed
+	}
+	reason := c.Reason
+	if reason == "" {
+		reason = "decider"
+	}
+	return MissionDone{ID: missionID, Outcome: outcome, Reason: reason}
+}
+
+// buildContext reads the own-mission slice off the tick (engine read-locked).
+func (dw *DeciderWorker) buildContext(missionID string) MissionContext {
+	mc := MissionContext{MissionID: missionID, Capabilities: dw.catalog()}
+	for _, m := range dw.eng.Missions() {
+		if m.ID == missionID {
+			mc.Goal = m.Goal
+			break
+		}
+	}
+	for _, wi := range dw.eng.Work() {
+		if wi.MissionID == missionID {
+			mc.Work = append(mc.Work, wi)
+		}
+	}
+	mc.Findings = dw.eng.Findings()
+	mc.Hosts = dw.eng.Hosts()
+	return mc
+}
