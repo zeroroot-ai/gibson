@@ -3050,6 +3050,16 @@ export const AuthRegistry: Record<string, AuthEntry> = {
     unauthenticated: false,
     self: false,
   },
+  "/gibson.world.v1.WorldService/GetLlmCall": {
+    method: "/gibson.world.v1.WorldService/GetLlmCall",
+    service: "gibson.world.v1.WorldService",
+    relation: "member",
+    objectType: "tenant",
+    objectDeriver: "tenant_from_identity",
+    allowedIdentities: IdentityClass.USER | IdentityClass.SERVICE,
+    unauthenticated: false,
+    self: false,
+  },
   "/gibson.world.v1.WorldService/GetTimeline": {
     method: "/gibson.world.v1.WorldService/GetTimeline",
     service: "gibson.world.v1.WorldService",

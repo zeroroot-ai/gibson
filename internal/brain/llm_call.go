@@ -22,6 +22,18 @@ type LlmCall struct {
 	ScopeID          string
 	PromptTokens     int
 	CompletionTokens int
+	// Transcript (optional): the prompt messages + the assistant completion. Set
+	// once on first observation and never re-folded (a call's transcript is
+	// immutable). Lets the dashboard conversation view replace Langfuse without a
+	// separate trace store; only the metadata projects to the graph.
+	Messages   []LlmMessage
+	Completion string
+}
+
+// LlmMessage is one prompt message in an LlmCall transcript (role + content).
+type LlmMessage struct {
+	Role    string
+	Content string
 }
 
 // LlmCallObserved records that an LLM completion happened. Emitted daemon-side
@@ -35,6 +47,8 @@ type LlmCallObserved struct {
 	ScopeID          string
 	PromptTokens     int
 	CompletionTokens int
+	Messages         []LlmMessage
+	Completion       string
 }
 
 func (LlmCallObserved) Kind() string { return "llm_call.observed" }
@@ -66,6 +80,12 @@ func applyLlmCallObserved(w *World, e LlmCallObserved) {
 			if c.CompletionTokens == 0 && e.CompletionTokens != 0 {
 				c.CompletionTokens = e.CompletionTokens
 			}
+			if len(c.Messages) == 0 && len(e.Messages) != 0 {
+				c.Messages = append([]LlmMessage(nil), e.Messages...)
+			}
+			if c.Completion == "" && e.Completion != "" {
+				c.Completion = e.Completion
+			}
 			q.Close()
 			return
 		}
@@ -77,6 +97,8 @@ func applyLlmCallObserved(w *World, e LlmCallObserved) {
 		ScopeID:          e.ScopeID,
 		PromptTokens:     e.PromptTokens,
 		CompletionTokens: e.CompletionTokens,
+		Messages:         append([]LlmMessage(nil), e.Messages...),
+		Completion:       e.Completion,
 	})
 }
 
@@ -88,6 +110,8 @@ type LlmCallSnapshot struct {
 	ScopeID          string
 	PromptTokens     int
 	CompletionTokens int
+	Messages         []LlmMessage
+	Completion       string
 }
 
 // TotalTokens is the prompt+completion token count — the per-call cost signal
@@ -107,6 +131,8 @@ func (w *World) LlmCallSnapshot() []LlmCallSnapshot {
 			ScopeID:          c.ScopeID,
 			PromptTokens:     c.PromptTokens,
 			CompletionTokens: c.CompletionTokens,
+			Messages:         append([]LlmMessage(nil), c.Messages...),
+			Completion:       c.Completion,
 		})
 	}
 	sort.Slice(out, func(i, j int) bool { return out[i].CallID < out[j].CallID })

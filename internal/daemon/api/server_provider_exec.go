@@ -364,11 +364,17 @@ func (s *DaemonServer) ExecuteLLM(ctx context.Context, req *tenantv1.ExecuteLLMR
 	// Scope/run linkage is left empty here (not carried on ExecuteLLM) — a
 	// mission-level call until a richer request context supplies them.
 	if s.llmCallSink != nil && resp != nil {
+		msgs := make([]LLMMessage, 0, len(completionReq.Messages))
+		for _, m := range completionReq.Messages {
+			msgs = append(msgs, LLMMessage{Role: string(m.Role), Content: m.Content})
+		}
 		s.llmCallSink(ctx, tenantID, LLMCallRecord{
 			CallID:           uuid.NewString(),
 			Model:            completionReq.Model,
 			PromptTokens:     resp.Usage.PromptTokens,
 			CompletionTokens: resp.Usage.CompletionTokens,
+			Messages:         msgs,
+			Completion:       resp.Message.Content,
 		})
 	}
 

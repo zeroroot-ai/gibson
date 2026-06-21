@@ -8,6 +8,8 @@ import (
 	"github.com/zeroroot-ai/gibson/internal/brain"
 	worldpb "github.com/zeroroot-ai/gibson/internal/daemon/api/gibson/world/v1"
 	"github.com/zeroroot-ai/sdk/auth"
+	"google.golang.org/grpc/codes"
+	"google.golang.org/grpc/status"
 )
 
 // TestWorldService_TenantScopedRead: the read path returns the caller's tenant's
@@ -78,6 +80,46 @@ func TestWorldService_ListLlmCalls(t *testing.T) {
 
 	if _, err := srv.ListLlmCalls(context.Background(), &worldpb.ListLlmCallsRequest{}); err == nil {
 		t.Fatal("expected an error when no tenant is in context")
+	}
+}
+
+// TestWorldService_GetLlmCall: a single call's transcript (prompt + completion)
+// is retrievable for the conversation view (gibson#755); unknown id -> NotFound.
+func TestWorldService_GetLlmCall(t *testing.T) {
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+	reg := brain.NewRegistry(ctx)
+	srv := NewWorldServer(reg, nil)
+
+	reg.For("acme").Submit(brain.LlmCallObserved{
+		CallID:     "c1",
+		Model:      "claude-haiku-4-5",
+		Messages:   []brain.LlmMessage{{Role: "user", Content: "scan the host"}},
+		Completion: "running nmap",
+	})
+
+	tctx := auth.WithTenant(context.Background(), auth.MustNewTenantID("acme"))
+	var resp *worldpb.GetLlmCallResponse
+	deadline := time.Now().Add(2 * time.Second)
+	for time.Now().Before(deadline) {
+		var err error
+		resp, err = srv.GetLlmCall(tctx, &worldpb.GetLlmCallRequest{CallId: "c1"})
+		if err == nil && resp.GetCall() != nil {
+			break
+		}
+		time.Sleep(10 * time.Millisecond)
+	}
+	if resp.GetCall() == nil {
+		t.Fatal("GetLlmCall returned no call")
+	}
+	call := resp.Call
+	if len(call.Messages) != 1 || call.Messages[0].Content != "scan the host" || call.Completion != "running nmap" {
+		t.Fatalf("transcript not returned: %+v", call)
+	}
+
+	// Unknown call id -> NotFound.
+	if _, err := srv.GetLlmCall(tctx, &worldpb.GetLlmCallRequest{CallId: "nope"}); status.Code(err) != codes.NotFound {
+		t.Fatalf("want NotFound for unknown call, got %v", err)
 	}
 }
 
