@@ -444,4 +444,3 @@ func (v *pluginManifestValidator) Validate(manifestYAML []byte) (admin.Validated
 		IsConnector:     isMCPBridge,
 	}, nil
 }
-

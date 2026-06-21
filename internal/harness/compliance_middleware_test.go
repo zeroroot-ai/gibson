@@ -10,7 +10,6 @@ import (
 	"github.com/zeroroot-ai/gibson/internal/agent"
 	"github.com/zeroroot-ai/gibson/internal/contextkeys"
 	"github.com/zeroroot-ai/gibson/internal/llm"
-	"github.com/zeroroot-ai/gibson/internal/memory"
 	"github.com/zeroroot-ai/gibson/internal/types"
 	sdkagent "github.com/zeroroot-ai/sdk/agent"
 	taxonomypb "github.com/zeroroot-ai/sdk/api/gen/taxonomy/v1"
@@ -115,9 +114,8 @@ func (*noopInnerHarness) SubmitFinding(context.Context, agent.Finding) error {
 func (*noopInnerHarness) GetFindings(context.Context, FindingFilter) ([]agent.Finding, error) {
 	return nil, nil
 }
-func (*noopInnerHarness) Memory() memory.MemoryStore { return nil }
-func (*noopInnerHarness) MissionID() types.ID        { return "" }
-func (*noopInnerHarness) Mission() MissionContext    { return MissionContext{} }
+func (*noopInnerHarness) MissionID() types.ID     { return "" }
+func (*noopInnerHarness) Mission() MissionContext { return MissionContext{} }
 func (*noopInnerHarness) MissionExecutionContext() MissionExecutionContextSDK {
 	return MissionExecutionContextSDK{}
 }

@@ -7,7 +7,6 @@ import (
 	"testing"
 
 	"github.com/zeroroot-ai/gibson/internal/config"
-	"github.com/zeroroot-ai/gibson/internal/types"
 )
 
 func TestInfrastructureInitialization(t *testing.T) {
@@ -88,10 +87,6 @@ func TestInfrastructureInitialization(t *testing.T) {
 		t.Fatal("harness factory is nil")
 	}
 
-	if infra.memoryManagerFactory == nil {
-		t.Fatal("memory manager factory is nil")
-	}
-
 	// Finding store is now per-tenant via Pool — no global infra.findingStore to test.
 
 	// Test LLM registry exists
@@ -122,23 +117,6 @@ func TestInfrastructureInitialization(t *testing.T) {
 	t.Run("HarnessFactory", func(t *testing.T) {
 		if infra.harnessFactory == nil {
 			t.Error("harness factory should not be nil")
-		}
-	})
-
-	// Test memory manager factory exists and can create managers
-	t.Run("MemoryManagerFactory", func(t *testing.T) {
-		if infra.memoryManagerFactory == nil {
-			t.Error("memory manager factory should not be nil")
-		}
-
-		// Try to create a memory manager for a mission
-		missionID := types.NewID()
-		memMgr, err := infra.memoryManagerFactory.CreateForMission(ctx, missionID, "test-tenant")
-		if err != nil {
-			t.Errorf("failed to create memory manager: %v", err)
-		}
-		if memMgr == nil {
-			t.Error("memory manager is nil")
 		}
 	})
 }

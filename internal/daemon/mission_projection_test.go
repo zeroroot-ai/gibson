@@ -29,8 +29,8 @@ func TestMissionDefinitionToProjected_NodesEdgesConstraints(t *testing.T) {
 		Id: "m1",
 		Nodes: map[string]*missionpb.MissionNode{
 			"a": toolNode("recon"),
-			"b": agentNode("scan", "a"),                  // dep via field
-			"c": toolNode("report"),                       // dep via edge below
+			"b": agentNode("scan", "a"), // dep via field
+			"c": toolNode("report"),     // dep via edge below
 		},
 		Edges: []*missionpb.MissionEdge{
 			{From: "b", To: "c"},

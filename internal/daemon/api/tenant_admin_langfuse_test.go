@@ -12,9 +12,9 @@ import (
 	"github.com/stretchr/testify/assert"
 	"google.golang.org/grpc/codes"
 
-	tenantv1 "github.com/zeroroot-ai/sdk/api/gen/gibson/tenant/v1"
 	pdataplane "github.com/zeroroot-ai/gibson/pkg/platform/dataplane"
 	sdksecrets "github.com/zeroroot-ai/platform-clients/secrets"
+	tenantv1 "github.com/zeroroot-ai/sdk/api/gen/gibson/tenant/v1"
 	"github.com/zeroroot-ai/sdk/auth"
 )
 

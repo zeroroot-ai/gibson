@@ -6,7 +6,6 @@ import (
 	"github.com/zeroroot-ai/gibson/internal/observability"
 )
 
-
 // GetOTelMissionTracer returns the OTelMissionTracer if OTel observability is enabled.
 // This is useful for components that need direct access to the mission tracer
 // for custom span creation or metrics recording.

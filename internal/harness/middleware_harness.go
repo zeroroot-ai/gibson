@@ -7,7 +7,6 @@ import (
 	"github.com/zeroroot-ai/gibson/internal/agent"
 	"github.com/zeroroot-ai/gibson/internal/harness/middleware"
 	"github.com/zeroroot-ai/gibson/internal/llm"
-	"github.com/zeroroot-ai/gibson/internal/memory"
 	"github.com/zeroroot-ai/gibson/internal/types"
 	sdkagent "github.com/zeroroot-ai/sdk/agent"
 	"github.com/zeroroot-ai/sdk/codegen/workspace"
@@ -186,7 +185,6 @@ func (h *MiddlewareHarness) SubmitFinding(ctx context.Context, finding agent.Fin
 func (h *MiddlewareHarness) GetFindings(ctx context.Context, filter FindingFilter) ([]agent.Finding, error) {
 	return h.inner.GetFindings(ctx, filter)
 }
-func (h *MiddlewareHarness) Memory() memory.MemoryStore  { return h.inner.Memory() }
 func (h *MiddlewareHarness) Mission() MissionContext     { return h.inner.Mission() }
 func (h *MiddlewareHarness) MissionID() types.ID         { return h.inner.MissionID() }
 func (h *MiddlewareHarness) Target() TargetInfo          { return h.inner.Target() }

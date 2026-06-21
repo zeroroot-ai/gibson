@@ -15,8 +15,6 @@ const (
 
 	ActionToolCall         = "tool_call"
 	ActionLLMCall          = "llm_call"
-	ActionMemoryRead       = "memory_read"
-	ActionMemoryWrite      = "memory_write"
 	ActionGraphRead        = "graph_read"
 	ActionGraphWrite       = "graph_write"
 	ActionPluginQuery      = "plugin_query"
@@ -77,10 +75,6 @@ const (
 
 	// Memory tier methods (keyed separately because the action/effect
 	// classification differs by tier operation, not by the Memory() getter).
-	MethodMemoryGet    HarnessMethod = "Memory.Get"
-	MethodMemorySet    HarnessMethod = "Memory.Set"
-	MethodMemoryDelete HarnessMethod = "Memory.Delete"
-	MethodMemoryAccess HarnessMethod = "Memory"
 
 	// Context / identity getters (no-op entries — pure getters that do not
 	// emit signals, but we still record them in the table so the coverage
@@ -156,12 +150,8 @@ var actionTable = ActionTable{
 	MethodGetAllRunFindings:      {Action: ActionGraphRead, DefaultEffect: EffectRead, Emit: true},
 
 	// --- Memory tier ops ---
-	MethodMemoryGet:    {Action: ActionMemoryRead, DefaultEffect: EffectRead, Emit: true},
-	MethodMemorySet:    {Action: ActionMemoryWrite, DefaultEffect: EffectWrite, Emit: true},
-	MethodMemoryDelete: {Action: ActionMemoryWrite, DefaultEffect: EffectWrite, Emit: true},
 	// Memory() getter returns the store; the store itself is wrapped by
 	// compliance_middleware.go so per-op signals emit at tier call time.
-	MethodMemoryAccess: {Action: ActionMemoryRead, DefaultEffect: EffectNone, Emit: false},
 
 	// --- Pure context/identity getters (no signal) ---
 	MethodMissionID:               {Action: ActionMissionLifecycle, DefaultEffect: EffectNone, Emit: false},

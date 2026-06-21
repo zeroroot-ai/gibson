@@ -1071,12 +1071,6 @@ func (d *daemonImpl) Start(ctx context.Context) error {
 			} else {
 				d.pool = p
 				d.logger.Info(ctx, "data-plane pool initialized (Phase D)")
-				// Inject pool into memory factory so CreateForMission uses per-tenant
-				// Redis clients (ConnBoundMissionMemory) instead of the global stateClient.
-				if d.infrastructure != nil && d.infrastructure.memoryManagerFactory != nil {
-					d.infrastructure.memoryManagerFactory.SetPool(p)
-					d.logger.Info(ctx, "data-plane pool wired into memory manager factory")
-				}
 			}
 
 			// Phase 11 (secrets-broker, Task 29): initialize the broker stack now

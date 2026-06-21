@@ -4,7 +4,6 @@ import (
 	"time"
 
 	"github.com/zeroroot-ai/gibson/internal/crypto"
-	"github.com/zeroroot-ai/gibson/internal/memory"
 	"github.com/zeroroot-ai/gibson/internal/memory/embedder"
 	"github.com/zeroroot-ai/gibson/internal/prompt"
 )
@@ -108,7 +107,6 @@ type Config struct {
 	Core              CoreConfig              `mapstructure:"core" yaml:"core" validate:"required"`
 	Security          SecurityConfig          `mapstructure:"security" yaml:"security" validate:"required"`
 	LLM               LLMConfig               `mapstructure:"llm" yaml:"llm"`
-	Memory            memory.MemoryConfig     `mapstructure:"memory" yaml:"memory"`
 	Prompt            prompt.PromptConfig     `mapstructure:"prompt" yaml:"prompt"`
 	Logging           LoggingConfig           `mapstructure:"logging" yaml:"logging"`
 	Tracing           TracingConfig           `mapstructure:"tracing" yaml:"tracing"`

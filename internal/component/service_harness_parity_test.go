@@ -203,7 +203,6 @@ func (m *mockCredentialStore) GetCredential(_ context.Context, _, _ string) ([]b
 	return m.credJSON, m.err
 }
 
-
 // ---------------------------------------------------------------------------
 // 1. QueryNodes — happy path
 // ---------------------------------------------------------------------------

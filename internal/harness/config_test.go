@@ -79,10 +79,6 @@ func TestHarnessConfig_ApplyDefaults(t *testing.T) {
 		t.Error("expected SlotManager to remain set")
 	}
 
-	// MemoryManager should remain nil (not defaulted)
-	if config.MemoryManager != nil {
-		t.Error("expected MemoryManager to remain nil (not defaulted)")
-	}
 }
 
 // TestHarnessConfig_ApplyDefaults_Idempotent tests that ApplyDefaults is idempotent

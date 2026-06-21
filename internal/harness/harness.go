@@ -6,7 +6,6 @@ import (
 
 	"github.com/zeroroot-ai/gibson/internal/agent"
 	"github.com/zeroroot-ai/gibson/internal/llm"
-	"github.com/zeroroot-ai/gibson/internal/memory"
 	"github.com/zeroroot-ai/gibson/internal/types"
 	sdkagent "github.com/zeroroot-ai/sdk/agent"
 	"github.com/zeroroot-ai/sdk/codegen/workspace"
@@ -543,40 +542,6 @@ type AgentHarness interface {
 	// ────────────────────────────────────────────────────────────────────────────
 	// Memory Access
 	// ────────────────────────────────────────────────────────────────────────────
-
-	// Memory provides access to the unified memory store with three tiers:
-	//   - Working: Ephemeral key-value storage scoped to agent execution
-	//   - Mission: Persistent storage scoped to the current mission
-	//   - LongTerm: Semantic search over historical data across all missions
-	//
-	// Returns:
-	//   - memory.MemoryStore: Interface for accessing all memory tiers
-	//
-	// Working memory:
-	//   - Isolated per agent execution (not shared with sub-agents)
-	//   - Cleared when agent completes
-	//   - Fast in-memory operations
-	//
-	// Mission memory:
-	//   - Shared across all agents in a mission
-	//   - Persisted for mission duration
-	//   - Enables inter-agent communication
-	//
-	// Long-term memory:
-	//   - Vector embeddings for semantic search
-	//   - Persisted across missions
-	//   - Enables learning from historical executions
-	//
-	// Example:
-	//   // Store in working memory
-	//   harness.Memory().Working().Set(ctx, "scan_results", data)
-	//
-	//   // Query mission memory
-	//   targets, _ := harness.Memory().Mission().Get(ctx, "discovered_targets")
-	//
-	//   // Search long-term memory
-	//   similar, _ := harness.Memory().LongTerm().Search(ctx, "SQL injection findings", 10)
-	Memory() memory.MemoryStore
 
 	// ────────────────────────────────────────────────────────────────────────────
 	// Context Access

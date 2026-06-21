@@ -6,7 +6,6 @@ import (
 
 	"github.com/zeroroot-ai/gibson/internal/agent"
 	"github.com/zeroroot-ai/gibson/internal/llm"
-	"github.com/zeroroot-ai/gibson/internal/memory"
 	"github.com/zeroroot-ai/gibson/internal/types"
 	sdkagent "github.com/zeroroot-ai/sdk/agent"
 	"github.com/zeroroot-ai/sdk/codegen/workspace"
@@ -191,14 +190,6 @@ func (m *ComplianceMiddleware) GetAllToolCapabilities(ctx context.Context) (map[
 // ────────────────────────────────────────────────────────────────────────────
 // Memory access
 // ────────────────────────────────────────────────────────────────────────────
-
-// Memory returns the inner harness's memory store. v1 does NOT wrap the
-// memory store with per-tier-operation interception — memory ops are
-// high-frequency and low-value for audit compared to tool/LLM calls. A
-// future iteration may wrap here with an audited MemoryStore decorator.
-func (m *ComplianceMiddleware) Memory() memory.MemoryStore {
-	return m.inner.Memory()
-}
 
 // ────────────────────────────────────────────────────────────────────────────
 // Context / identity getters (pure pass-through)

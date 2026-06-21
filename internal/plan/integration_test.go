@@ -17,7 +17,6 @@ import (
 	"github.com/zeroroot-ai/gibson/internal/guardrail"
 	"github.com/zeroroot-ai/gibson/internal/harness"
 	"github.com/zeroroot-ai/gibson/internal/llm"
-	"github.com/zeroroot-ai/gibson/internal/memory"
 	"github.com/zeroroot-ai/gibson/internal/types"
 	sdkagent "github.com/zeroroot-ai/sdk/agent"
 	"github.com/zeroroot-ai/sdk/codegen/workspace"
@@ -242,9 +241,6 @@ func (m *MockHarness) MissionID() types.ID {
 }
 
 // Memory implements harness.AgentHarness
-func (m *MockHarness) Memory() memory.MemoryStore {
-	return nil // Not needed for these tests
-}
 
 // Mission implements harness.AgentHarness
 func (m *MockHarness) Mission() harness.MissionContext {

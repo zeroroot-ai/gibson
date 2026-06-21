@@ -10,7 +10,6 @@ import (
 	"github.com/zeroroot-ai/gibson/internal/component"
 	"github.com/zeroroot-ai/gibson/internal/harness/middleware"
 	"github.com/zeroroot-ai/gibson/internal/llm"
-	"github.com/zeroroot-ai/gibson/internal/memory"
 	"github.com/zeroroot-ai/gibson/internal/tool"
 	"github.com/zeroroot-ai/gibson/internal/types"
 )
@@ -18,51 +17,6 @@ import (
 // ────────────────────────────────────────────────────────────────────────────
 // Mock Memory Store for Testing
 // ────────────────────────────────────────────────────────────────────────────
-
-type MockMemoryStore struct {
-	WorkingFn   func() memory.WorkingMemory
-	MissionFn   func() memory.MissionMemory
-	LongTermFn  func() memory.LongTermMemory
-	MissionIDFn func() types.ID
-	CloseFn     func() error
-}
-
-func (m *MockMemoryStore) Working() memory.WorkingMemory {
-	if m.WorkingFn != nil {
-		return m.WorkingFn()
-	}
-	return nil
-}
-
-func (m *MockMemoryStore) Mission() memory.MissionMemory {
-	if m.MissionFn != nil {
-		return m.MissionFn()
-	}
-	return nil
-}
-
-func (m *MockMemoryStore) LongTerm() memory.LongTermMemory {
-	if m.LongTermFn != nil {
-		return m.LongTermFn()
-	}
-	return nil
-}
-
-func (m *MockMemoryStore) MissionID() types.ID {
-	if m.MissionIDFn != nil {
-		return m.MissionIDFn()
-	}
-	return types.NewID()
-}
-
-func (m *MockMemoryStore) Close() error {
-	if m.CloseFn != nil {
-		return m.CloseFn()
-	}
-	return nil
-}
-
-var _ memory.MemoryManager = (*MockMemoryStore)(nil)
 
 // ────────────────────────────────────────────────────────────────────────────
 // Mock Registry Adapter for Testing
@@ -176,7 +130,6 @@ func TestNewHarnessFactory_AppliesDefaults(t *testing.T) {
 	assert.NotNil(t, storedConfig.Metrics, "Metrics should be defaulted")
 	assert.NotNil(t, storedConfig.Tracer, "Tracer should be defaulted")
 	assert.NotNil(t, storedConfig.SlotManager, "SlotManager should remain set")
-	assert.Nil(t, storedConfig.MemoryManager, "MemoryManager should not be defaulted")
 }
 
 func TestNewHarnessFactory_PreservesProvidedConfig(t *testing.T) {
@@ -184,14 +137,12 @@ func TestNewHarnessFactory_PreservesProvidedConfig(t *testing.T) {
 	slotMgr := llm.NewSlotManager(llmReg)
 	findingStore := NewInMemoryFindingStore()
 	metrics := NewNoOpMetricsRecorder()
-	memStore := &MockMemoryStore{}
 
 	config := HarnessConfig{
-		SlotManager:   slotMgr,
-		LLMRegistry:   llmReg,
-		FindingStore:  findingStore,
-		Metrics:       metrics,
-		MemoryManager: memStore,
+		SlotManager:  slotMgr,
+		LLMRegistry:  llmReg,
+		FindingStore: findingStore,
+		Metrics:      metrics,
 	}
 
 	factory, err := NewHarnessFactory(config)
@@ -204,17 +155,15 @@ func TestNewHarnessFactory_PreservesProvidedConfig(t *testing.T) {
 	assert.Equal(t, llmReg, storedConfig.LLMRegistry)
 	assert.Equal(t, findingStore, storedConfig.FindingStore)
 	assert.Equal(t, metrics, storedConfig.Metrics)
-	assert.Equal(t, memStore, storedConfig.MemoryManager)
 }
 
 func TestNewHarnessFactory_FullConfiguration(t *testing.T) {
 	// Test with all fields specified.
 	config := HarnessConfig{
-		SlotManager:   llm.NewSlotManager(llm.NewLLMRegistry()),
-		LLMRegistry:   llm.NewLLMRegistry(),
-		FindingStore:  NewInMemoryFindingStore(),
-		Metrics:       NewNoOpMetricsRecorder(),
-		MemoryManager: &MockMemoryStore{},
+		SlotManager:  llm.NewSlotManager(llm.NewLLMRegistry()),
+		LLMRegistry:  llm.NewLLMRegistry(),
+		FindingStore: NewInMemoryFindingStore(),
+		Metrics:      NewNoOpMetricsRecorder(),
 	}
 
 	factory, err := NewHarnessFactory(config)
@@ -229,7 +178,6 @@ func TestNewHarnessFactory_FullConfiguration(t *testing.T) {
 	// ComponentInstallRegistry was removed in plugin-runtime Spec 2 Phase 7.
 	assert.NotNil(t, storedConfig.FindingStore)
 	assert.NotNil(t, storedConfig.Metrics)
-	assert.NotNil(t, storedConfig.MemoryManager)
 
 	// Defaults should still be applied for missing fields (Logger, Tracer)
 	assert.NotNil(t, storedConfig.Logger)
@@ -304,29 +252,6 @@ func TestFactory_Create_EmptyAgentName(t *testing.T) {
 	require.Error(t, err)
 	assert.Nil(t, harness)
 	assert.Contains(t, err.Error(), "agent name")
-}
-
-func TestFactory_Create_WithMemoryManager(t *testing.T) {
-	memStore := &MockMemoryStore{}
-
-	config := HarnessConfig{
-		SlotManager:   llm.NewSlotManager(llm.NewLLMRegistry()),
-		MemoryManager: memStore,
-	}
-
-	factory, err := NewHarnessFactory(config)
-	require.NoError(t, err)
-
-	missionID := types.NewID()
-	missionCtx := NewMissionContext(missionID, "test-mission", "test-agent")
-	targetInfo := NewTargetInfo(types.NewID(), "test-target", "https://example.com", "web")
-
-	harness, err := factory.Create("test-agent", missionCtx, targetInfo)
-	require.NoError(t, err)
-	assert.NotNil(t, harness)
-
-	// Verify harness has access to memory
-	assert.NotNil(t, harness.Memory())
 }
 
 func TestFactory_Create_MultipleHarnesses(t *testing.T) {
@@ -505,37 +430,6 @@ func TestFactory_CreateChild_EmptyAgentName(t *testing.T) {
 	require.Error(t, err)
 	assert.Nil(t, harness)
 	assert.Contains(t, err.Error(), "agent name")
-}
-
-func TestFactory_CreateChild_SharedMemoryStore(t *testing.T) {
-	memStore := &MockMemoryStore{}
-
-	config := HarnessConfig{
-		SlotManager:   llm.NewSlotManager(llm.NewLLMRegistry()),
-		MemoryManager: memStore,
-	}
-
-	factory, err := NewHarnessFactory(config)
-	require.NoError(t, err)
-
-	missionID := types.NewID()
-	parentMissionCtx := NewMissionContext(missionID, "test-mission", "parent-agent")
-	targetInfo := NewTargetInfo(types.NewID(), "test-target", "https://example.com", "web")
-
-	// Create parent harness
-	parentHarness, err := factory.Create("parent-agent", parentMissionCtx, targetInfo)
-	require.NoError(t, err)
-
-	// Create child harness
-	childHarness, err := factory.CreateChild(parentHarness, "child-agent")
-	require.NoError(t, err)
-
-	// Verify both have access to memory (shared through factory config)
-	assert.NotNil(t, parentHarness.Memory())
-	assert.NotNil(t, childHarness.Memory())
-
-	// Memory manager should be the same instance (shared)
-	assert.Equal(t, parentHarness.Memory(), childHarness.Memory())
 }
 
 func TestFactory_CreateChild_SharedFindingStore(t *testing.T) {
