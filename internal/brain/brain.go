@@ -54,6 +54,7 @@ type World struct {
 	credentials *ecs.Map1[Credential]
 	accounts    *ecs.Map1[Account]
 	agentRuns   *ecs.Map1[AgentRun]
+	llmCalls    *ecs.Map1[LlmCall]
 
 	// next*ID are monotonic, replay-deterministic counters for assigning stable
 	// ids (incremented in the single-writer reducer, so replay reproduces ids).
@@ -108,6 +109,7 @@ func NewWorld(tenant string) *World {
 		credentials: ecs.NewMap1[Credential](w),
 		accounts:    ecs.NewMap1[Account](w),
 		agentRuns:   ecs.NewMap1[AgentRun](w),
+		llmCalls:    ecs.NewMap1[LlmCall](w),
 	}
 }
 
@@ -273,6 +275,8 @@ func Reduce(w *World, ev Event) {
 		applyFindingRaised(w, e)
 	case AgentRunObserved:
 		applyAgentRunObserved(w, e)
+	case LlmCallObserved:
+		applyLlmCallObserved(w, e)
 	}
 }
 

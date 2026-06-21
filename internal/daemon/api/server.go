@@ -208,6 +208,12 @@ type DaemonServer struct {
 	// Spec: llm-user-attribution-governance (Requirement 3).
 	budgetEnforcer budgetEnforcerIface
 
+	// llmCallSink captures completed LLM calls into the per-tenant ECS brain
+	// World (gibson#755 — the World LlmCall entity replaces Langfuse trace/cost
+	// views). May be nil; when nil, capture is skipped. Brain-agnostic by design
+	// (api must not import internal/brain) — the daemon supplies the closure.
+	llmCallSink LLMCallSink
+
 	// modelGateInvalidator is called from Grant/Revoke so that the
 	// next slot resolution picks up the new grant state within
 	// milliseconds (bypassing the filter's 30s TTL). May be nil; when
@@ -891,6 +897,27 @@ func NewDaemonServer(daemon DaemonInterface, credentialHandler *CredentialHandle
 		gibsonPublicURL:   os.Getenv("GIBSON_PUBLIC_URL"),
 	}
 }
+
+// LLMCallRecord is a completed LLM call reported to the World (gibson#755). It
+// carries call metadata only — model + token counts + provenance ids — never the
+// prompt/completion transcript, so the brain Timeline stays lean.
+type LLMCallRecord struct {
+	CallID           string
+	Model            string
+	ScopeID          string
+	RunID            string
+	PromptTokens     int
+	CompletionTokens int
+}
+
+// LLMCallSink consumes a completed LLM call for per-tenant World capture. It is
+// brain-agnostic so the api package need not import internal/brain; the daemon
+// supplies a closure that folds the record into the tenant's brain engine.
+type LLMCallSink func(ctx context.Context, tenant string, call LLMCallRecord)
+
+// SetLLMCallSink wires the World-capture sink (gibson#755). Called once at
+// startup; nil disables capture.
+func (s *DaemonServer) SetLLMCallSink(sink LLMCallSink) { s.llmCallSink = sink }
 
 // WithQuotaManager attaches a MissionQuotaChecker to the server so that
 // RunMission enforces per-tenant mission quotas.  Call this immediately

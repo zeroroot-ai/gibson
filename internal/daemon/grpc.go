@@ -588,6 +588,12 @@ func (d *daemonImpl) buildGRPCServer(ctx context.Context) (*grpcSubsystem, error
 		daemonSvc.WithAuthorizer(d.authorizer)
 		d.logger.Info(ctx, "FGA authorizer wired into DaemonServer for admin RPCs")
 	}
+	// Capture completed ExecuteLLM calls into the per-tenant brain World as
+	// LlmCall entities (gibson#755) — the World replacement for Langfuse.
+	if d.brainRegistry != nil {
+		daemonSvc.SetLLMCallSink(ingestLLMCall(d.brainRegistry))
+		d.logger.Info(ctx, "wired ExecuteLLM World-capture sink to the ECS brain")
+	}
 	// Wire the CG Minter so CreateAgentIdentity can issue a first-registration
 	// bootstrap token (gibson#648 / ADR-0045). d.cgMinter is constructed during
 	// Start once the key provider is available; nil disables issuance.

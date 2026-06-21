@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"errors"
 
+	"github.com/google/uuid"
 	"google.golang.org/grpc/codes"
 	status_grpc "google.golang.org/grpc/status"
 
@@ -354,6 +355,21 @@ func (s *DaemonServer) ExecuteLLM(ctx context.Context, req *tenantv1.ExecuteLLMR
 					"error", recErr, "tenant", tenantID)
 			}
 		}
+	}
+
+	// 8b. World capture — fold the completed call into the per-tenant ECS brain
+	// World as an LlmCall entity (gibson#755), the replacement for the Langfuse
+	// trace/cost views. Best-effort + metadata-only (resolved model + token
+	// counts); a fresh CallID gives each call a stable World/graph identity.
+	// Scope/run linkage is left empty here (not carried on ExecuteLLM) — a
+	// mission-level call until a richer request context supplies them.
+	if s.llmCallSink != nil && resp != nil {
+		s.llmCallSink(ctx, tenantID, LLMCallRecord{
+			CallID:           uuid.NewString(),
+			Model:            completionReq.Model,
+			PromptTokens:     resp.Usage.PromptTokens,
+			CompletionTokens: resp.Usage.CompletionTokens,
+		})
 	}
 
 	// 9. Translate response to proto.

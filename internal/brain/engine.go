@@ -224,6 +224,15 @@ func (e *Engine) AgentRuns() []AgentRunSnapshot {
 	return e.World.AgentRunSnapshot()
 }
 
+// LlmCalls returns the mission's LLM-call provenance (gibson#755) in deterministic
+// order — the per-call model + token data the dashboard surfaces in place of the
+// retired Langfuse trace/cost views.
+func (e *Engine) LlmCalls() []LlmCallSnapshot {
+	e.mu.RLock()
+	defer e.mu.RUnlock()
+	return e.World.LlmCallSnapshot()
+}
+
 // Events returns a copy of the Timeline (the Scroller scrubs this).
 func (e *Engine) Events() []Event {
 	e.mu.RLock()
