@@ -19,6 +19,7 @@ type fakeGraphWriter struct {
 	credentials map[string][]brain.CredentialSnapshot
 	accounts    map[string][]brain.AccountSnapshot
 	agentRuns   map[string][]brain.AgentRunSnapshot
+	llmCalls    map[string][]brain.LlmCallSnapshot
 }
 
 func newFakeGraphWriter() *fakeGraphWriter {
@@ -30,7 +31,15 @@ func newFakeGraphWriter() *fakeGraphWriter {
 		credentials: map[string][]brain.CredentialSnapshot{},
 		accounts:    map[string][]brain.AccountSnapshot{},
 		agentRuns:   map[string][]brain.AgentRunSnapshot{},
+		llmCalls:    map[string][]brain.LlmCallSnapshot{},
 	}
+}
+
+func (f *fakeGraphWriter) UpsertLlmCall(_ context.Context, tenant string, c brain.LlmCallSnapshot) error {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	f.llmCalls[tenant] = append(f.llmCalls[tenant], c)
+	return nil
 }
 
 func (f *fakeGraphWriter) UpsertHost(_ context.Context, tenant string, h brain.HostSnapshot) error {
@@ -104,6 +113,8 @@ func TestGraphProjector_ProjectsWorldPerTenant(t *testing.T) {
 	// Run-provenance: a parent run delegated to a child run.
 	reg.For("acme").Submit(brain.AgentRunObserved{RunID: "run-parent", AgentName: "orchestrator", ScopeID: "m1"})
 	reg.For("acme").Submit(brain.AgentRunObserved{RunID: "run-child", ParentRunID: "run-parent", AgentName: "recon", ScopeID: "m1"})
+	// LLM-call provenance issued by the child run (gibson#755).
+	reg.For("acme").Submit(brain.LlmCallObserved{CallID: "call-1", RunID: "run-child", Model: "claude-haiku-4-5", PromptTokens: 100, CompletionTokens: 40})
 	reg.For("globex").Submit(brain.HostObserved{ScopeID: "m9", Address: "192.168.1.1", OpenPorts: []int{443}})
 
 	// Wait for the engines to fold the observations into their Worlds.
@@ -111,7 +122,7 @@ func TestGraphProjector_ProjectsWorldPerTenant(t *testing.T) {
 	for time.Now().Before(deadline) {
 		a := reg.For("acme")
 		if len(a.Hosts()) == 1 && len(a.Findings()) == 1 && len(a.Domains()) == 1 && len(a.Subdomains()) == 1 &&
-			len(a.Credentials()) == 1 && len(a.Accounts()) == 1 && len(a.AgentRuns()) == 2 && len(reg.For("globex").Hosts()) == 1 {
+			len(a.Credentials()) == 1 && len(a.Accounts()) == 1 && len(a.AgentRuns()) == 2 && len(a.LlmCalls()) == 1 && len(reg.For("globex").Hosts()) == 1 {
 			break
 		}
 		time.Sleep(10 * time.Millisecond)
@@ -192,5 +203,17 @@ func TestGraphProjector_ProjectsWorldPerTenant(t *testing.T) {
 	}
 	if child.RunID != "run-child" || child.ParentRunID != "run-parent" || child.AgentName != "recon" {
 		t.Fatalf("acme child run wrong/missing parent link: %+v", writer.agentRuns["acme"])
+	}
+
+	// LLM-call provenance projects, tenant-isolated, carrying tokens + issuing run.
+	if got := len(writer.llmCalls["acme"]); got != 1 {
+		t.Fatalf("acme: projected %d llm calls, want 1", got)
+	}
+	if len(writer.llmCalls["globex"]) != 0 {
+		t.Fatalf("globex llm-call isolation breached: %+v", writer.llmCalls["globex"])
+	}
+	call := writer.llmCalls["acme"][0]
+	if call.CallID != "call-1" || call.RunID != "run-child" || call.Model != "claude-haiku-4-5" || call.TotalTokens() != 140 {
+		t.Fatalf("acme llm call wrong: %+v", call)
 	}
 }
