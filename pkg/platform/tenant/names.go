@@ -194,9 +194,3 @@ func (n Names) ZitadelOrgSlug() string {
 	return n.Slug()
 }
 
-// LangfuseProject returns the Langfuse project name for this tenant.
-//
-// Format: <slug>.
-func (n Names) LangfuseProject() string {
-	return n.Slug()
-}

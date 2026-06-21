@@ -67,8 +67,8 @@ type Runner struct {
 	// Err is the FIRST blocked step's error.
 	//
 	// Designed for teardown sagas where steps are mostly independent
-	// cleanup work (delete Langfuse project, delete OpenBao namespace,
-	// delete Zitadel org, etc.) and a single permanent fail on step N
+	// cleanup work (delete OpenBao namespace, delete Zitadel org, etc.)
+	// and a single permanent fail on step N
 	// must NOT silently skip the cleanup work on steps N+1..end. See
 	// gibson#TBD / tenant-operator#184 for the regression of #157.
 	//

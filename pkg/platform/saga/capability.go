@@ -53,10 +53,6 @@ const (
 	// process billing webhooks. Optional for free-tier tenants.
 	CapabilityStripe ClientCapability = "stripe"
 
-	// CapabilityLangfuse: Langfuse admin client used to create per-tenant
-	// projects and rotate keys.
-	CapabilityLangfuse ClientCapability = "langfuse"
-
 	// CapabilityDaemonGRPC: Connect-RPC client to the gibson daemon's
 	// PlatformOperatorService. Used by the entitlements steps to write
 	// tenant_quotas / FGA tuples / catalog seed via daemon gRPC, with
@@ -80,7 +76,6 @@ func AllCapabilities() []ClientCapability {
 		CapabilityRedisAdmin,
 		CapabilityQdrantAdmin,
 		CapabilityStripe,
-		CapabilityLangfuse,
 		CapabilityDaemonGRPC,
 		CapabilitySMTP,
 	}
