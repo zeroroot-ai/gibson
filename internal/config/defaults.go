@@ -89,13 +89,12 @@ func DefaultConfig() *Config {
 			TLSCAFile:      "",
 		},
 		ActivityLogging: ActivityLoggingConfig{
-			Enabled:             true,
-			Level:               "normal",
-			MaxContentLength:    500,
-			Output:              "stdout",
-			FilePath:            "",
-			BufferSize:          10000,
-			IncludeLangfuseURLs: true,
+			Enabled:          true,
+			Level:            "normal",
+			MaxContentLength: 500,
+			Output:           "stdout",
+			FilePath:         "",
+			BufferSize:       10000,
 		},
 		Shutdown: ShutdownConfig{
 			Timeout:           30 * time.Second,
@@ -104,8 +103,7 @@ func DefaultConfig() *Config {
 			AgentTimeout:      15 * time.Second,
 		},
 		Observability: ObservabilityConfig{
-			Neo4jBrowserURL:      "http://localhost:7474",
-			LangfuseDashboardURL: "http://localhost:3000",
+			Neo4jBrowserURL: "http://localhost:7474",
 		},
 		Auth: AuthConfig{
 			Enabled:   false, // Deprecated: use Mode instead

@@ -18,7 +18,6 @@ func TestActivityLoggingConfig_Defaults(t *testing.T) {
 	assert.Equal(t, "stdout", cfg.ActivityLogging.Output, "Default output should be stdout")
 	assert.Equal(t, "", cfg.ActivityLogging.FilePath, "Default file path should be empty")
 	assert.Equal(t, 10000, cfg.ActivityLogging.BufferSize, "Default buffer size should be 10000")
-	assert.True(t, cfg.ActivityLogging.IncludeLangfuseURLs, "Default include Langfuse URLs should be true")
 }
 
 func TestActivityLoggingConfig_EnvironmentOverrides(t *testing.T) {
@@ -44,13 +43,12 @@ func TestActivityLoggingConfig_EnvironmentOverrides(t *testing.T) {
 	os.Setenv("GIBSON_ACTIVITY_LOG_FILE", "/tmp/activity.log")
 
 	cfg := ActivityLoggingConfig{
-		Enabled:             true,
-		Level:               "normal",
-		MaxContentLength:    500,
-		Output:              "stdout",
-		FilePath:            "",
-		BufferSize:          10000,
-		IncludeLangfuseURLs: true,
+		Enabled:          true,
+		Level:            "normal",
+		MaxContentLength: 500,
+		Output:           "stdout",
+		FilePath:         "",
+		BufferSize:       10000,
 	}
 
 	cfg.ApplyEnvironmentOverrides()
@@ -85,13 +83,12 @@ func TestActivityLoggingConfig_EnvironmentOverrides_EmptyEnv(t *testing.T) {
 	os.Unsetenv("GIBSON_ACTIVITY_LOG_FILE")
 
 	cfg := ActivityLoggingConfig{
-		Enabled:             true,
-		Level:               "normal",
-		MaxContentLength:    500,
-		Output:              "stdout",
-		FilePath:            "",
-		BufferSize:          10000,
-		IncludeLangfuseURLs: true,
+		Enabled:          true,
+		Level:            "normal",
+		MaxContentLength: 500,
+		Output:           "stdout",
+		FilePath:         "",
+		BufferSize:       10000,
 	}
 
 	cfg.ApplyEnvironmentOverrides()
@@ -313,7 +310,6 @@ activity_logging:
   output: both
   file_path: /var/log/gibson/activity.log
   buffer_size: 20000
-  include_langfuse_urls: false
 `
 
 	err := os.WriteFile(configPath, []byte(configContent), 0644)
@@ -331,7 +327,6 @@ activity_logging:
 	assert.Equal(t, "both", cfg.ActivityLogging.Output)
 	assert.Equal(t, "/var/log/gibson/activity.log", cfg.ActivityLogging.FilePath)
 	assert.Equal(t, 20000, cfg.ActivityLogging.BufferSize)
-	assert.False(t, cfg.ActivityLogging.IncludeLangfuseURLs)
 }
 
 func TestLoadActivityLoggingWithDefaults(t *testing.T) {
@@ -370,7 +365,6 @@ security:
 	assert.Equal(t, "stdout", cfg.ActivityLogging.Output)
 	assert.Equal(t, "", cfg.ActivityLogging.FilePath)
 	assert.Equal(t, 10000, cfg.ActivityLogging.BufferSize)
-	assert.True(t, cfg.ActivityLogging.IncludeLangfuseURLs)
 }
 
 func TestActivityLoggingConfig_EnvVarInterpolation(t *testing.T) {
@@ -404,7 +398,6 @@ activity_logging:
   output: file
   file_path: ${TEST_ACTIVITY_LOG_PATH}
   buffer_size: 10000
-  include_langfuse_urls: true
 `
 
 	err := os.WriteFile(configPath, []byte(configContent), 0644)

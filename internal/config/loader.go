@@ -299,19 +299,6 @@ func applyInterpolation(cfg *Config, interpolated map[string]interface{}) error 
 		}
 	}
 
-	// Apply Langfuse config interpolation
-	if langfuse, ok := interpolated["langfuse"].(map[string]interface{}); ok {
-		if host, ok := langfuse["host"].(string); ok {
-			cfg.Langfuse.Host = interpolateString(host)
-		}
-		if publicKey, ok := langfuse["public_key"].(string); ok {
-			cfg.Langfuse.PublicKey = interpolateString(publicKey)
-		}
-		if secretKey, ok := langfuse["secret_key"].(string); ok {
-			cfg.Langfuse.SecretKey = interpolateString(secretKey)
-		}
-	}
-
 	// Apply Plugins config interpolation
 	if plugins, ok := interpolated["plugins"].(map[string]interface{}); ok {
 		if cfg.Plugins == nil {
@@ -457,9 +444,6 @@ func applyInterpolation(cfg *Config, interpolated map[string]interface{}) error 
 	if observability, ok := interpolated["observability"].(map[string]interface{}); ok {
 		if neo4jBrowserURL, ok := observability["neo4j_browser_url"].(string); ok {
 			cfg.Observability.Neo4jBrowserURL = interpolateString(neo4jBrowserURL)
-		}
-		if langfuseDashboardURL, ok := observability["langfuse_dashboard_url"].(string); ok {
-			cfg.Observability.LangfuseDashboardURL = interpolateString(langfuseDashboardURL)
 		}
 	}
 

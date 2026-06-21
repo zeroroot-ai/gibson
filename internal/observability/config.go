@@ -25,7 +25,7 @@ type TracingConfig struct {
 }
 
 // Validate validates the TracingConfig fields.
-// Returns an error if Provider is invalid (must be otlp, zipkin, langfuse, or noop),
+// Returns an error if Provider is invalid (must be otlp, zipkin, or noop),
 // or if SampleRate is out of range (must be between 0.0 and 1.0).
 func (c *TracingConfig) Validate() error {
 	if !c.Enabled {
@@ -33,7 +33,7 @@ func (c *TracingConfig) Validate() error {
 	}
 
 	// Validate provider
-	validProviders := []string{"otlp", "zipkin", "langfuse", "noop"}
+	validProviders := []string{"otlp", "zipkin", "noop"}
 	provider := strings.ToLower(c.Provider)
 	isValid := false
 	for _, valid := range validProviders {
@@ -61,29 +61,6 @@ func (c *TracingConfig) Validate() error {
 		return fmt.Errorf("service name is required when tracing is enabled")
 	}
 
-	return nil
-}
-
-// LangfuseConfig contains Langfuse LLM observability configuration.
-// Langfuse provides tracing and monitoring for LLM applications.
-type LangfuseConfig struct {
-	PublicKey string `yaml:"public_key" mapstructure:"public_key"`
-	SecretKey string `yaml:"secret_key" mapstructure:"secret_key"`
-	Host      string `yaml:"host" mapstructure:"host"`
-}
-
-// Validate validates the LangfuseConfig fields.
-// Returns an error if any required field is empty.
-func (c *LangfuseConfig) Validate() error {
-	if c.PublicKey == "" {
-		return fmt.Errorf("public key is required")
-	}
-	if c.SecretKey == "" {
-		return fmt.Errorf("secret key is required")
-	}
-	if c.Host == "" {
-		return fmt.Errorf("host is required")
-	}
 	return nil
 }
 

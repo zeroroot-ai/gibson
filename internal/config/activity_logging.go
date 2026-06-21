@@ -26,9 +26,6 @@ type ActivityLoggingConfig struct {
 
 	// BufferSize is the event buffer size for async writes
 	BufferSize int `mapstructure:"buffer_size" yaml:"buffer_size"`
-
-	// IncludeLangfuseURLs adds Langfuse deep links to events
-	IncludeLangfuseURLs bool `mapstructure:"include_langfuse_urls" yaml:"include_langfuse_urls"`
 }
 
 // ApplyEnvironmentOverrides checks for environment variables and overrides
