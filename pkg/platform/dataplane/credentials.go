@@ -29,10 +29,6 @@ const (
 	// Payload (JSON): {index_name}.
 	VaultPathInfraVector = "infra/vector"
 
-	// VaultPathInfraLangfuse is the per-tenant Langfuse project credentials
-	// path. Payload (JSON): {project_id, public_key, secret_key, host}.
-	VaultPathInfraLangfuse = "infra/langfuse"
-
 	// VaultPathInfraKEK is the per-tenant KEK path written by the
 	// DeriveTenantKEK saga step. The KEK itself is short-lived material
 	// the operator uses inside one reconcile to derive credentials for

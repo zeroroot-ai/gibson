@@ -191,7 +191,7 @@ func WithSpanProcessors(processors ...sdktrace.SpanProcessor) CallbackServiceOpt
 
 // WithTracerProvider sets the TracerProvider for creating real spans from proxy span data.
 // When set, proxy spans from remote agents are re-created as real spans and passed through
-// the TracerProvider's span processors (e.g., Langfuse exporter).
+// the TracerProvider's span processors (e.g., the OTLP exporter).
 func WithTracerProvider(tp *sdktrace.TracerProvider) CallbackServiceOption {
 	return func(s *HarnessCallbackService) {
 		s.tracerProvider = tp
@@ -1530,7 +1530,7 @@ func (s *HarnessCallbackService) protoToRelationship(protoRel *harnesspb.Relatio
 
 // protoToSpanData converts a proto Span to a proxySpanData container.
 // Since sdktrace.ReadOnlySpan has an unexported method, we can't implement it directly.
-// Instead, we extract the data and export it directly via the Langfuse exporter.
+// Instead, we extract the data and export it directly via the OTLP exporter.
 func (s *HarnessCallbackService) protoToSpanData(protoSpan *harnesspb.Span) *proxySpanData {
 	// Parse trace ID and span ID from hex strings
 	var traceID trace.TraceID
@@ -1665,7 +1665,7 @@ func (s *HarnessCallbackService) protoEventsToOtel(protoEvents []*harnesspb.Span
 
 // proxySpanData contains the data extracted from a proto span for export.
 // Since sdktrace.ReadOnlySpan has an unexported private() method that prevents
-// external implementation, we store the span data and export directly to Langfuse.
+// external implementation, we store the span data and export directly via OTLP.
 type proxySpanData struct {
 	Name        string
 	SpanContext trace.SpanContext

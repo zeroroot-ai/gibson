@@ -438,7 +438,7 @@ func (m *ComplianceMiddleware) stampChain(ctx context.Context, sig *taxonomypb.C
 }
 
 // stampTraceID copies the active OTel trace ID onto the signal so forensic
-// replay via Loki/Langfuse can join on a single field (Requirement 8.7).
+// replay via Loki/traces can join on a single field (Requirement 8.7).
 func (m *ComplianceMiddleware) stampTraceID(ctx context.Context, sig *taxonomypb.ComplianceSignal) {
 	span := trace.SpanFromContext(ctx)
 	if !span.SpanContext().IsValid() {

@@ -3,10 +3,9 @@
 // Tenant-scoping verification gate for dashboard#591.
 //
 // This file is the audit artifact confirming "every daemon store-access path is
-// tenant-bounded." It covers all four backing stores the daemon queries on
-// behalf of dashboard clients and documents the scoping mechanism for each:
+// tenant-bounded." It covers the backing stores the daemon queries on behalf of
+// dashboard clients and documents the scoping mechanism for each:
 //
-//   - Langfuse  (TracesService)   — per-tenant Langfuse project credentials
 //   - Neo4j     (GraphService)    — per-tenant pool.For(ctx, tenant)
 //   - Redis     (UserService)     — per-tenant key namespace (tenantID in prefix)
 //   - Postgres  (BillingService)  — platform-level idempotency table (documented
@@ -19,7 +18,6 @@
 //  3. AuthzRegistry: every RPC carries the correct relation annotation
 //
 // Audit summary:
-//   - Langfuse:  PASS — credentials at "infra/langfuse" inside the per-tenant Vault namespace
 //   - Neo4j:     PASS — pool.For(ctx, tenant) is per-tenant; summary cache keyed by tenantID
 //   - Redis:     PASS — all user-scoped keys embed tenantID; cross-tenant tests in api/user_state_test.go
 //   - Postgres:  PASS (documented exception) — platform dedup table, no per-tenant data
@@ -40,9 +38,7 @@ import (
 	"google.golang.org/grpc/status"
 
 	"github.com/zeroroot-ai/gibson/internal/authz/registry"
-	daemonapi "github.com/zeroroot-ai/gibson/internal/daemon/api"
 	billingpb "github.com/zeroroot-ai/gibson/internal/daemon/api/gibson/billing/v1"
-	tracespb "github.com/zeroroot-ai/gibson/internal/daemon/api/gibson/traces/v1"
 	"github.com/zeroroot-ai/gibson/internal/datapool"
 	graphpb "github.com/zeroroot-ai/sdk/api/gen/gibson/graph/v1"
 	"github.com/zeroroot-ai/sdk/auth"
@@ -64,141 +60,6 @@ func isoGRPCCode(err error) codes.Code {
 	}
 	s, _ := status.FromError(err)
 	return s.Code()
-}
-
-// ============================================================================
-// LANGFUSE — TracesService
-//
-// AUDIT NOTE:
-//   Every TracesService RPC calls resolveClient(ctx) which:
-//     1. auth.TenantFromContext(ctx) → PermissionDenied when absent or zero.
-//     2. credHandler.GetDecrypted(ctx, "infra/langfuse") — a stable name. The
-//        secrets broker reads it inside the AUTHENTICATED tenant's private Vault
-//        namespace (selected from the context tenant, not a caller-supplied
-//        value), so tenant A's secret is structurally unreachable from a tenant
-//        B context. (The old tenant-embedding name resolved to a path the
-//        per-tenant OpenBao policy denied — that was the traces-403 bug.)
-//     3. Constructs a per-call langfuseClient from the decrypted credentials.
-//
-//   Cross-tenant reads are structurally impossible: a caller in tenant A receives
-//   tenant A's Langfuse public/secret keys, which the Langfuse API rejects for
-//   any other tenant's project ID.
-//
-//   Result: PASS — all four RPCs are tenant-bounded.
-// ============================================================================
-
-// TestLangfuse_FailClosed_MissingTenant verifies that every TracesService RPC
-// refuses with PermissionDenied when no tenant is present in the context.
-func TestLangfuse_FailClosed_MissingTenant(t *testing.T) {
-	t.Parallel()
-	srv := NewTracesServer(func() *daemonapi.CredentialHandler { return nil }, nil)
-
-	cases := []struct {
-		name string
-		call func() error
-	}{
-		{"ListTraces", func() error {
-			_, err := srv.ListTraces(context.Background(), &tracespb.ListTracesRequest{})
-			return err
-		}},
-		{"GetTrace", func() error {
-			_, err := srv.GetTrace(context.Background(), &tracespb.GetTraceRequest{TraceId: "t1"})
-			return err
-		}},
-		{"GetObservation", func() error {
-			_, err := srv.GetObservation(context.Background(), &tracespb.GetObservationRequest{ObservationId: "o1"})
-			return err
-		}},
-		{"AddTraceScore", func() error {
-			_, err := srv.AddTraceScore(context.Background(), &tracespb.AddTraceScoreRequest{
-				TraceId: "t1", Name: "fb", Value: 1,
-			})
-			return err
-		}},
-	}
-	for _, tc := range cases {
-		tc := tc
-		t.Run(tc.name, func(t *testing.T) {
-			t.Parallel()
-			err := tc.call()
-			assert.Equal(t, codes.PermissionDenied, isoGRPCCode(err),
-				"%s: missing tenant must yield PermissionDenied", tc.name)
-		})
-	}
-}
-
-// TestLangfuse_FailClosed_ZeroTenant verifies that an empty string tenant
-// (simulating a stripped ext-authz header) is refused.
-func TestLangfuse_FailClosed_ZeroTenant(t *testing.T) {
-	t.Parallel()
-	srv := NewTracesServer(func() *daemonapi.CredentialHandler { return nil }, nil)
-
-	emptyCtx := auth.ContextWithTenantString(context.Background(), "")
-	_, err := srv.ListTraces(emptyCtx, &tracespb.ListTracesRequest{})
-	assert.Equal(t, codes.PermissionDenied, isoGRPCCode(err),
-		"zero tenant must yield PermissionDenied (no default Langfuse project served)")
-}
-
-// TestLangfuse_CredentialHandler_NilYieldsUnavailable verifies that a nil
-// credential handler (broker stack not yet initialised) returns Unavailable,
-// never cross-tenant or un-tenanted data.
-func TestLangfuse_CredentialHandler_NilYieldsUnavailable(t *testing.T) {
-	t.Parallel()
-	srv := NewTracesServer(func() *daemonapi.CredentialHandler { return nil }, nil)
-	ctx := isoTenantCtx("acme")
-
-	_, err := srv.ListTraces(ctx, &tracespb.ListTracesRequest{})
-	assert.Equal(t, codes.Unavailable, isoGRPCCode(err),
-		"nil credential handler must yield Unavailable, not cross-tenant data")
-}
-
-// TestLangfuse_CrossTenantCredentialIsolation verifies that the credential lookup
-// key is distinct per tenant — the structural guarantee preventing cross-tenant reads.
-func TestLangfuse_CrossTenantCredentialIsolation(t *testing.T) {
-	t.Parallel()
-
-	// Isolation is NOT name-based. The credential name is the stable infra path
-	// "infra/langfuse" for every tenant; the secrets broker reads it inside the
-	// authenticated tenant's private Vault namespace (selected from the context
-	// tenant), and the per-tenant OpenBao policy scopes access to that namespace.
-	// So the same name in two different tenant contexts resolves to two different,
-	// mutually-unreachable secrets. (The old tenant-embedding name resolved to a
-	// path the policy denied — the traces-403 bug this guards against recurring.)
-	require.Equal(t, "infra/langfuse", tracesLangfuseCredentialName("tenant-alpha"))
-	require.Equal(t, tracesLangfuseCredentialName("tenant-alpha"),
-		tracesLangfuseCredentialName("tenant-beta"),
-		"name is the stable infra path; tenant isolation comes from the per-tenant Vault namespace, not the name")
-
-	// The structural cross-tenant guard lives in resolveClient (tenant-from-context
-	// selects the namespace) and in the RPC handlers (req.TenantId == context
-	// tenant). Fail-closed behaviour is covered by TestLangfuse_FailClosed_MissingTenant.
-}
-
-// TestLangfuse_AuthzRegistry verifies that all four TracesService RPCs require
-// tenant membership, confirming ext-authz enforces the same tenant gate.
-func TestLangfuse_AuthzRegistry(t *testing.T) {
-	t.Parallel()
-
-	methods := []string{
-		"/gibson.traces.v1.TracesService/ListTraces",
-		"/gibson.traces.v1.TracesService/GetTrace",
-		"/gibson.traces.v1.TracesService/GetObservation",
-		"/gibson.traces.v1.TracesService/AddTraceScore",
-	}
-	for _, m := range methods {
-		m := m
-		t.Run(m, func(t *testing.T) {
-			t.Parallel()
-			entry, ok := registry.Registry[m]
-			require.True(t, ok, "method %s must be in authz registry", m)
-			assert.Equal(t, "member", entry.Relation,
-				"TracesService RPCs must require tenant member relation: %s", m)
-			assert.Equal(t, "tenant", entry.ObjectType, m)
-			assert.Equal(t, "tenant_from_identity", entry.ObjectDeriver, m)
-			assert.False(t, entry.Unauthenticated,
-				"TracesService RPCs must not be unauthenticated: %s", m)
-		})
-	}
 }
 
 // ============================================================================
@@ -640,24 +501,6 @@ func TestAllStores_FailClosed_UnresolvedTenant(t *testing.T) {
 	// Empty tenant string simulates a stripped X-Gibson-Tenant header or
 	// ext-authz middleware not running.
 	emptyCtx := auth.ContextWithTenantString(context.Background(), "")
-
-	t.Run("Langfuse_ListTraces", func(t *testing.T) {
-		t.Parallel()
-		srv := NewTracesServer(func() *daemonapi.CredentialHandler { return nil }, nil)
-		_, err := srv.ListTraces(emptyCtx, &tracespb.ListTracesRequest{})
-		assert.Equal(t, codes.PermissionDenied, isoGRPCCode(err),
-			"TracesService must refuse zero tenant — no default Langfuse project")
-	})
-
-	t.Run("Langfuse_AddTraceScore", func(t *testing.T) {
-		t.Parallel()
-		srv := NewTracesServer(func() *daemonapi.CredentialHandler { return nil }, nil)
-		_, err := srv.AddTraceScore(emptyCtx, &tracespb.AddTraceScoreRequest{
-			TraceId: "t1", Name: "fb", Value: 1,
-		})
-		assert.Equal(t, codes.PermissionDenied, isoGRPCCode(err),
-			"TracesService/AddTraceScore must refuse zero tenant")
-	})
 
 	t.Run("Neo4j_GetTenantGraph", func(t *testing.T) {
 		t.Parallel()

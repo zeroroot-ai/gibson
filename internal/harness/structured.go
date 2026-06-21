@@ -1016,7 +1016,7 @@ func (h *DefaultAgentHarness) CompleteStructured(
 // containing the parsed result, model name, raw JSON, and token usage information.
 //
 // This is useful for orchestration systems that need to track token usage for cost
-// accounting and observability (e.g., Langfuse integration).
+// accounting and observability (e.g., OTLP trace export).
 func (h *DefaultAgentHarness) CompleteStructuredAnyWithUsage(
 	ctx context.Context,
 	slot string,

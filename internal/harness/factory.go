@@ -6,7 +6,6 @@ import (
 	"log/slog"
 
 	"github.com/zeroroot-ai/gibson/internal/component"
-	"github.com/zeroroot-ai/gibson/internal/harness/middleware"
 	"github.com/zeroroot-ai/gibson/internal/llm"
 	"github.com/zeroroot-ai/gibson/internal/types"
 	"github.com/zeroroot-ai/sdk/protoresolver"
@@ -254,9 +253,9 @@ func (f *DefaultHarnessFactory) Create(agentName string, missionCtx MissionConte
 		nodeSlotOverrides: missionCtx.NodeSlotOverrides,
 	}
 
-	// Wrap with ComplianceMiddleware BEFORE the OTel / Langfuse middleware so
-	// the OTel span captures the emit overhead. This is the insertion order
-	// from audit-compliance-emitter requirement 1.2.
+	// Wrap with ComplianceMiddleware BEFORE the OTel middleware so the OTel
+	// span captures the emit overhead. This is the insertion order from
+	// audit-compliance-emitter requirement 1.2.
 	//
 	// ComplianceMiddleware is skipped when the signal sink is nil (default
 	// in the factory config today — daemon startup wiring lands the sink in
@@ -280,27 +279,8 @@ func (f *DefaultHarnessFactory) Create(agentName string, missionCtx MissionConte
 		}
 	}
 
-	// Apply middleware if configured
-	// Build middleware chain with Langfuse middleware if tracer and log are provided
+	// Apply middleware if configured.
 	middlewareChain := f.config.Middleware
-	if f.config.MissionTracer != nil && f.config.AgentExecLog != nil && f.config.LangfuseMiddlewareFactory != nil {
-		// Create Langfuse tracing middleware using the factory
-		langfuseMW := f.config.LangfuseMiddlewareFactory(f.config.MissionTracer, f.config.AgentExecLog)
-
-		// Chain with existing middleware if present
-		if middlewareChain != nil {
-			middlewareChain = middleware.Chain(middlewareChain, langfuseMW)
-		} else {
-			middlewareChain = langfuseMW
-		}
-
-		logger.Debug("langfuse tracing enabled for agent harness",
-			slog.String("mission_id", missionCtx.ID.String()),
-			slog.String("agent", agentName),
-		)
-	}
-
-	// Apply the final middleware chain
 	if middlewareChain != nil {
 		harness = NewMiddlewareHarness(harness, middlewareChain)
 	}
