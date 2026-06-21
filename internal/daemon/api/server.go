@@ -908,6 +908,17 @@ type LLMCallRecord struct {
 	RunID            string
 	PromptTokens     int
 	CompletionTokens int
+	// Transcript (optional): prompt messages + the assistant completion, so the
+	// World can back the dashboard conversation view without a separate trace
+	// store. Metadata-only consumers ignore these.
+	Messages   []LLMMessage
+	Completion string
+}
+
+// LLMMessage is one prompt message in an LLMCallRecord transcript.
+type LLMMessage struct {
+	Role    string
+	Content string
 }
 
 // LLMCallSink consumes a completed LLM call for per-tenant World capture. It is

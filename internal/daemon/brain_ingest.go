@@ -219,6 +219,10 @@ func ingestLLMCall(reg *brain.Registry) api.LLMCallSink {
 		if reg == nil || call.CallID == "" {
 			return
 		}
+		msgs := make([]brain.LlmMessage, 0, len(call.Messages))
+		for _, m := range call.Messages {
+			msgs = append(msgs, brain.LlmMessage{Role: m.Role, Content: m.Content})
+		}
 		reg.For(tenant).Submit(brain.LlmCallObserved{
 			CallID:           call.CallID,
 			RunID:            call.RunID,
@@ -226,6 +230,8 @@ func ingestLLMCall(reg *brain.Registry) api.LLMCallSink {
 			ScopeID:          call.ScopeID,
 			PromptTokens:     call.PromptTokens,
 			CompletionTokens: call.CompletionTokens,
+			Messages:         msgs,
+			Completion:       call.Completion,
 		})
 	}
 }

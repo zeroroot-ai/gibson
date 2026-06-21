@@ -1,6 +1,9 @@
 package brain
 
-import "testing"
+import (
+	"reflect"
+	"testing"
+)
 
 func TestLlmCall_CreateAndSnapshot(t *testing.T) {
 	w := NewWorld("t1")
@@ -54,6 +57,33 @@ func TestLlmCall_EnrichmentNeverErases(t *testing.T) {
 	}
 }
 
+func TestLlmCall_TranscriptSetOnce(t *testing.T) {
+	w := NewWorld("t1")
+	Reduce(w, LlmCallObserved{
+		CallID:   "c1",
+		Messages: []LlmMessage{{Role: "user", Content: "hello"}},
+	})
+	// A second observation must NOT overwrite an existing transcript.
+	Reduce(w, LlmCallObserved{
+		CallID:     "c1",
+		Completion: "world", // fills the empty completion
+		Messages:   []LlmMessage{{Role: "user", Content: "DIFFERENT"}},
+	})
+
+	c := w.LlmCallSnapshot()[0]
+	if len(c.Messages) != 1 || c.Messages[0].Content != "hello" {
+		t.Fatalf("transcript messages overwritten: %+v", c.Messages)
+	}
+	if c.Completion != "world" {
+		t.Fatalf("completion not filled: %q", c.Completion)
+	}
+	// Snapshot returns a copy: mutating it must not affect the World.
+	c.Messages[0].Content = "mutated"
+	if w.LlmCallSnapshot()[0].Messages[0].Content != "hello" {
+		t.Fatal("snapshot aliases the stored transcript")
+	}
+}
+
 func TestLlmCall_EmptyCallIDIgnored(t *testing.T) {
 	w := NewWorld("t1")
 	Reduce(w, LlmCallObserved{CallID: "", Model: "m"})
@@ -83,9 +113,7 @@ func TestLlmCall_DeterministicOrderAndReplay(t *testing.T) {
 		t.Fatalf("not CallID-sorted: %+v", a)
 	}
 	// Two independent folds of the same Timeline must be identical (ADR-0001).
-	for i := range a {
-		if a[i] != b[i] {
-			t.Fatalf("replay mismatch at %d: %+v vs %+v", i, a[i], b[i])
-		}
+	if !reflect.DeepEqual(a, b) {
+		t.Fatalf("replay mismatch: %+v vs %+v", a, b)
 	}
 }

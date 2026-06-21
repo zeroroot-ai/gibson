@@ -56,6 +56,18 @@ service WorldService {
     };
   }
 
+  // GetLlmCall returns one call's full detail including its transcript (prompt
+  // messages + completion) — the conversation-view source (gibson#755). ListLlmCalls
+  // stays metadata-only so a busy World's list response is not transcript-heavy.
+  rpc GetLlmCall(GetLlmCallRequest) returns (GetLlmCallResponse) {
+    option (gibson.auth.v1.authz) = {
+      relation: "member",
+      object_type: "tenant",
+      object_deriver: "tenant_from_identity",
+      allowed_identities: 3
+    };
+  }
+
   // GetTimeline returns the tenant's domain-event Timeline — the Scroller scrubs
   // this. Optional mission_id filters to one mission's events.
   rpc GetTimeline(GetTimelineRequest) returns (GetTimelineResponse) {
@@ -133,6 +145,28 @@ message ListFindingsResponse { repeated FindingView findings = 1; }
 
 message ListLlmCallsRequest {}
 message ListLlmCallsResponse { repeated LlmCallView llm_calls = 1; }
+
+// LlmMessage is one prompt message in an LlmCall transcript.
+message LlmMessage {
+  string role = 1;
+  string content = 2;
+}
+
+// LlmCallDetail is a single call's full record: the LlmCallView metadata plus the
+// transcript (prompt messages + assistant completion).
+message LlmCallDetail {
+  string call_id = 1;
+  string run_id = 2;
+  string model = 3;
+  string scope_id = 4;
+  int32 prompt_tokens = 5;
+  int32 completion_tokens = 6;
+  repeated LlmMessage messages = 7;
+  string completion = 8;
+}
+
+message GetLlmCallRequest { string call_id = 1; }
+message GetLlmCallResponse { LlmCallDetail call = 1; }
 
 message GetTimelineRequest { string mission_id = 1; }
 message GetTimelineResponse { repeated TimelineEvent events = 1; }

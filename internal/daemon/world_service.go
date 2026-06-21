@@ -123,6 +123,33 @@ func (s *worldServer) ListLlmCalls(ctx context.Context, _ *worldpb.ListLlmCallsR
 	return resp, nil
 }
 
+func (s *worldServer) GetLlmCall(ctx context.Context, req *worldpb.GetLlmCallRequest) (*worldpb.GetLlmCallResponse, error) {
+	e, err := s.engine(ctx)
+	if err != nil {
+		return nil, err
+	}
+	for _, c := range e.LlmCalls() {
+		if c.CallID != req.GetCallId() {
+			continue
+		}
+		msgs := make([]*worldpb.LlmMessage, 0, len(c.Messages))
+		for _, m := range c.Messages {
+			msgs = append(msgs, &worldpb.LlmMessage{Role: m.Role, Content: m.Content})
+		}
+		return &worldpb.GetLlmCallResponse{Call: &worldpb.LlmCallDetail{
+			CallId:           c.CallID,
+			RunId:            c.RunID,
+			Model:            c.Model,
+			ScopeId:          c.ScopeID,
+			PromptTokens:     int32(c.PromptTokens),
+			CompletionTokens: int32(c.CompletionTokens),
+			Messages:         msgs,
+			Completion:       c.Completion,
+		}}, nil
+	}
+	return nil, status.Errorf(codes.NotFound, "llm call %q not found", req.GetCallId())
+}
+
 func (s *worldServer) GetTimeline(ctx context.Context, _ *worldpb.GetTimelineRequest) (*worldpb.GetTimelineResponse, error) {
 	e, err := s.engine(ctx)
 	if err != nil {
