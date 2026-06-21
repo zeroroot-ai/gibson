@@ -395,7 +395,7 @@ func (m *CallbackManager) IsRunning() bool {
 
 // AddSpanProcessors adds span processors to the callback service.
 // This allows the callback service to forward spans received from remote agents
-// to the registered span processors (e.g., for Langfuse export or Neo4j recording).
+// to the registered span processors (e.g., for OTLP export or Neo4j recording).
 //
 // This method should be called after NewCallbackManager but before Start().
 //

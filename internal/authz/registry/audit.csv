@@ -274,10 +274,6 @@ rpc,relation,object_type,deriver,identities,source_proto_file,mode
 /gibson.tool.v1.ToolService/GetDescriptor,member,tenant,tenant_from_identity,COMPONENT,gibson/tool/v1/tool.proto,rule
 /gibson.tool.v1.ToolService/Health,member,tenant,tenant_from_identity,COMPONENT,gibson/tool/v1/tool.proto,rule
 /gibson.tool.v1.ToolService/StreamExecute,member,tenant,tenant_from_identity,COMPONENT,gibson/tool/v1/tool.proto,rule
-/gibson.traces.v1.TracesService/AddTraceScore,member,tenant,tenant_from_identity,USER|SERVICE,gibson/traces/v1/traces.proto,rule
-/gibson.traces.v1.TracesService/GetObservation,member,tenant,tenant_from_identity,USER|SERVICE,gibson/traces/v1/traces.proto,rule
-/gibson.traces.v1.TracesService/GetTrace,member,tenant,tenant_from_identity,USER|SERVICE,gibson/traces/v1/traces.proto,rule
-/gibson.traces.v1.TracesService/ListTraces,member,tenant,tenant_from_identity,USER|SERVICE,gibson/traces/v1/traces.proto,rule
 /gibson.user.v1.UserService/ConsumeAttachment,member,tenant,tenant_from_identity,USER|SERVICE,gibson/user/v1/user.proto,rule
 /gibson.user.v1.UserService/DeleteConversation,member,tenant,tenant_from_identity,USER|SERVICE,gibson/user/v1/user.proto,rule
 /gibson.user.v1.UserService/GetConversation,member,tenant,tenant_from_identity,USER|SERVICE,gibson/user/v1/user.proto,rule

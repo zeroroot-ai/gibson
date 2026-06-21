@@ -15,7 +15,6 @@ const (
 	CredentialTypeBasic           CredentialType = "basic"
 	CredentialTypeOAuth           CredentialType = "oauth"
 	CredentialTypeCustom          CredentialType = "custom"
-	CredentialTypeLangfuseProject CredentialType = "langfuse_project"
 )
 
 // String returns the string representation of CredentialType
@@ -27,7 +26,7 @@ func (t CredentialType) String() string {
 func (t CredentialType) IsValid() bool {
 	switch t {
 	case CredentialTypeAPIKey, CredentialTypeBearer, CredentialTypeBasic,
-		CredentialTypeOAuth, CredentialTypeCustom, CredentialTypeLangfuseProject:
+		CredentialTypeOAuth, CredentialTypeCustom:
 		return true
 	default:
 		return false

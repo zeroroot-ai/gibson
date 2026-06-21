@@ -31,7 +31,6 @@ import (
 	"github.com/zeroroot-ai/gibson/internal/daemon/api"
 	billingpb "github.com/zeroroot-ai/gibson/internal/daemon/api/gibson/billing/v1"
 	sessionpb "github.com/zeroroot-ai/gibson/internal/daemon/api/gibson/session/v1"
-	tracespb "github.com/zeroroot-ai/gibson/internal/daemon/api/gibson/traces/v1"
 	worldpb "github.com/zeroroot-ai/gibson/internal/daemon/api/gibson/world/v1"
 	"github.com/zeroroot-ai/gibson/internal/idempotency"
 	"github.com/zeroroot-ai/gibson/internal/identity"
@@ -1246,19 +1245,6 @@ func (d *daemonImpl) buildGRPCServer(ctx context.Context) (*grpcSubsystem, error
 	)
 	graphpb.RegisterGraphServiceServer(srv, graphSvc)
 	d.logger.Info(ctx, "registered GraphService gRPC endpoint")
-
-	// Register gibson.traces.v1.TracesService — the daemon-mediated Langfuse gateway
-	// for the dashboard traces view and chat feedback. The credential-getter closure
-	// defers resolution to request time, so registration is safe here even though the
-	// broker stack (which stores per-tenant Langfuse credentials) may not yet be
-	// initialised. A nil return from credentialGetter → codes.Unavailable per-RPC.
-	// Spec: dashboard-no-backing-store-clients (Module 1 — TracesService).
-	tracesSvc := NewTracesServer(
-		func() *api.CredentialHandler { return d.credentialHandler },
-		d.logger.WithComponent("traces-service").Slog(),
-	)
-	tracespb.RegisterTracesServiceServer(srv, tracesSvc)
-	d.logger.Info(ctx, "registered TracesService gRPC endpoint")
 
 	// Register gibson.world.v1.WorldService — the daemon-mediated read path into
 	// the ECS brain (epic ecs-brain, gibson#752). Per-tenant, tenant-isolated; the

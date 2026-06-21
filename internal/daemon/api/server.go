@@ -31,7 +31,6 @@ import (
 	"github.com/zeroroot-ai/gibson/internal/onboarding"
 	"github.com/zeroroot-ai/gibson/internal/target"
 	"github.com/zeroroot-ai/gibson/internal/types"
-	pdataplane "github.com/zeroroot-ai/gibson/pkg/platform/dataplane"
 	"github.com/zeroroot-ai/gibson/pkg/version"
 	daemonoperatorv1 "github.com/zeroroot-ai/platform-sdk/gen/gibson/daemon/operator/v1"
 	daemonpb "github.com/zeroroot-ai/sdk/api/gen/gibson/daemon/v1"
@@ -2554,33 +2553,8 @@ func (s *DaemonServer) CreateMissionDefinition(ctx context.Context, req *daemonp
 // Shutdown, ImpersonateTenant, and RefreshToolCatalog have been relocated
 // to platform_operator_shutdown.go, platform_operator_impersonate.go, and
 // platform_operator_refresh_tool_catalog.go as PlatformOperatorService handlers.
-// The langfuseCredentialName helper and langfuseCredentialPayload type remain
-// here for use by the new Langfuse handler files.
-
-// langfuseCredentialName returns the credential name used to store Langfuse
-// project credentials. This MUST match where the tenant-operator writes them
-// (pdataplane.VaultPathInfraLangfuse = "infra/langfuse") and what the
-// per-tenant OpenBao policy grants read on (secret/data/infra/*). The tenant
-// is already scoped by the per-tenant Vault namespace, so the name carries no
-// tenant id — the legacy "langfuse_project:<id>" name resolved to a path the
-// policy denied (gibson#<traces-vault-path>).
-func langfuseCredentialName(_ string) string {
-	return pdataplane.VaultPathInfraLangfuse
-}
-
-// langfuseCredentialPayload is the JSON structure stored as the encrypted
-// credential value for per-tenant Langfuse project credentials.
-type langfuseCredentialPayload struct {
-	PublicKey string `json:"public_key"`
-	SecretKey string `json:"secret_key"`
-	Host      string `json:"host"`
-	ProjectID string `json:"project_id"`
-}
-
-// GetTenantLangfuseCredentials, SetTenantLangfuseCredentials, and
-// DeleteTenantLangfuseCredentials have been relocated to
-// tenant_admin_langfuse_get.go, tenant_admin_langfuse_set.go, and
-// tenant_admin_langfuse_delete.go as TenantAdminService handlers.
+// Langfuse per-tenant credential handlers and the langfuseCredential* helpers
+// were removed with the Langfuse retirement (gibson#755).
 
 // ---------------------------------------------------------------------------
 // Tenant management RPCs

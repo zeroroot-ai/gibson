@@ -4,7 +4,6 @@
 //   - Phase H (Spec 2 tasks 20+25)
 //
 // Tests cover:
-//   - Langfuse cross-tenant guard rejects mismatch (Req 1.5)
 //   - GetTenantQuota happy path and cross-tenant denial
 //   - GetUserProfile / UpdateUserProfile happy paths
 //   - UpdateUserProfile immutable-field rejection
@@ -56,57 +55,6 @@ func userCtx(tenantID, userID string) context.Context {
 	ctx := auth.ContextWithTenantString(context.Background(), tenantID)
 	identity := auth.Identity{Subject: userID, Issuer: "zitadel"}
 	return auth.WithIdentity(ctx, identity)
-}
-
-// ---------------------------------------------------------------------------
-// Langfuse cross-tenant guard tests (Req 1.5)
-// ---------------------------------------------------------------------------
-
-// TestLangfuse_CrossTenantGuard_Rejects verifies that the inline tenant mismatch
-// guard on all three Langfuse handlers returns PermissionDenied when the context
-// tenant does not match the request tenant_id.
-func TestLangfuse_CrossTenantGuard_Rejects(t *testing.T) {
-	srv := newServerForTest()
-
-	// Context tenant is "tenant-A" but request targets "tenant-B".
-	ctx := tenantCtx("tenant-A")
-
-	t.Run("GetTenantLangfuseCredentials rejects mismatch", func(t *testing.T) {
-		_, err := srv.GetTenantLangfuseCredentials(ctx, &tenantv1.GetTenantLangfuseCredentialsRequest{
-			TenantId: "tenant-B",
-		})
-		assert.Equal(t, codes.PermissionDenied, grpcCode(err), "cross-tenant Get must be denied")
-	})
-
-	t.Run("SetTenantLangfuseCredentials rejects mismatch", func(t *testing.T) {
-		_, err := srv.SetTenantLangfuseCredentials(ctx, &tenantv1.SetTenantLangfuseCredentialsRequest{
-			TenantId: "tenant-B",
-		})
-		assert.Equal(t, codes.PermissionDenied, grpcCode(err), "cross-tenant Set must be denied")
-	})
-
-	t.Run("DeleteTenantLangfuseCredentials rejects mismatch", func(t *testing.T) {
-		_, err := srv.DeleteTenantLangfuseCredentials(ctx, &tenantv1.DeleteTenantLangfuseCredentialsRequest{
-			TenantId: "tenant-B",
-		})
-		assert.Equal(t, codes.PermissionDenied, grpcCode(err), "cross-tenant Delete must be denied")
-	})
-}
-
-// TestLangfuse_SameTenant_PassesGuard verifies that the guard passes when the
-// context tenant matches the request tenant_id.
-func TestLangfuse_SameTenant_PassesGuard(t *testing.T) {
-	srv := newServerForTest()
-	// No credential handler → Unavailable, NOT PermissionDenied.
-	ctx := tenantCtx("acme")
-
-	t.Run("GetTenantLangfuseCredentials passes guard", func(t *testing.T) {
-		_, err := srv.GetTenantLangfuseCredentials(ctx, &tenantv1.GetTenantLangfuseCredentialsRequest{
-			TenantId: "acme",
-		})
-		// No credential handler → Unavailable (not PermissionDenied)
-		assert.NotEqual(t, codes.PermissionDenied, grpcCode(err))
-	})
 }
 
 // ---------------------------------------------------------------------------
