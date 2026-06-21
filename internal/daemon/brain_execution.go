@@ -227,6 +227,9 @@ func buildDeciderPrompt(mc brain.MissionContext) []llm.Message {
 		for _, h := range mc.Hosts {
 			fmt.Fprintf(&b, "  - %s (ports: %v)\n", h.Address, h.OpenPorts)
 		}
+		if mc.OmittedHosts > 0 {
+			fmt.Fprintf(&b, "  …and %d more lower-relevance hosts omitted (ambient projection)\n", mc.OmittedHosts)
+		}
 	}
 
 	return []llm.Message{

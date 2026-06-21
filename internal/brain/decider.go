@@ -44,7 +44,8 @@ type MissionContext struct {
 	Goal         string
 	Work         []WorkSnapshot
 	Findings     []FindingSnapshot
-	Hosts        []HostSnapshot
+	Hosts        []HostSnapshot // ambient-projected: top-attention + anomalies (gibson#749)
+	OmittedHosts int            // lower-relevance hosts summarized away (LOD periphery)
 	Capabilities []Capability
 	DeciderSlot  DeciderSlot // which LLM to decide with (gibson#850)
 }
@@ -298,6 +299,8 @@ func (dw *DeciderWorker) buildContext(missionID string) MissionContext {
 		}
 	}
 	mc.Findings = dw.eng.Findings()
-	mc.Hosts = dw.eng.Hosts()
+	// Ambient projection (gibson#749): curate the relevant host slice to the
+	// context budget — top-attention + the anomaly channel; periphery summarized.
+	mc.Hosts, mc.OmittedHosts = dw.eng.AmbientHosts(deciderHostBudget)
 	return mc
 }
