@@ -208,3 +208,24 @@ func ingestToBrain(reg *brain.Registry, tenant string, ed api.EventData) {
 		}
 	}
 }
+
+// ingestLLMCall returns the DaemonServer's LLM-call capture sink (gibson#755):
+// it folds a completed ExecuteLLM call into the calling tenant's brain World as
+// an LlmCall entity — the World replacement for the Langfuse trace/cost views.
+// Unlike ingestObservation (single dev tenant), this routes by the tenant the
+// call ran under, so it is multi-tenant correct.
+func ingestLLMCall(reg *brain.Registry) api.LLMCallSink {
+	return func(_ context.Context, tenant string, call api.LLMCallRecord) {
+		if reg == nil || call.CallID == "" {
+			return
+		}
+		reg.For(tenant).Submit(brain.LlmCallObserved{
+			CallID:           call.CallID,
+			RunID:            call.RunID,
+			Model:            call.Model,
+			ScopeID:          call.ScopeID,
+			PromptTokens:     call.PromptTokens,
+			CompletionTokens: call.CompletionTokens,
+		})
+	}
+}

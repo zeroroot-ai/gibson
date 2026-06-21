@@ -50,6 +50,48 @@ func TestIngestToBrain_FeedsWorld(t *testing.T) {
 	t.Fatalf("brain not fed: missions=%+v work=%+v findings=%+v", eng.Missions(), eng.Work(), eng.Findings())
 }
 
+// TestIngestLLMCall_FeedsWorld: a completed ExecuteLLM call is folded into the
+// calling tenant's World as an LlmCall entity (gibson#755), routed by the call's
+// own tenant (multi-tenant correct), with no cross-tenant leak.
+func TestIngestLLMCall_FeedsWorld(t *testing.T) {
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+	reg := brain.NewRegistry(ctx)
+	sink := ingestLLMCall(reg)
+
+	sink(ctx, "acme", api.LLMCallRecord{
+		CallID: "call-1", Model: "claude-haiku-4-5", PromptTokens: 100, CompletionTokens: 40,
+	})
+
+	deadline := time.Now().Add(2 * time.Second)
+	for time.Now().Before(deadline) {
+		calls := reg.For("acme").LlmCalls()
+		if len(calls) == 1 && calls[0].Model == "claude-haiku-4-5" && calls[0].TotalTokens() == 140 {
+			if len(reg.For("other").LlmCalls()) != 0 {
+				t.Fatal("cross-tenant LLM-call leak")
+			}
+			return
+		}
+		time.Sleep(10 * time.Millisecond)
+	}
+	t.Fatalf("LLM call not captured: %+v", reg.For("acme").LlmCalls())
+}
+
+// TestIngestLLMCall_NilSafe: a nil registry and an empty CallID are no-ops, never
+// a panic (capture is best-effort and must not break ExecuteLLM).
+func TestIngestLLMCall_NilSafe(t *testing.T) {
+	ingestLLMCall(nil)(context.Background(), "acme", api.LLMCallRecord{CallID: "c1"})
+
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+	reg := brain.NewRegistry(ctx)
+	ingestLLMCall(reg)(ctx, "acme", api.LLMCallRecord{CallID: ""}) // empty id ignored
+	time.Sleep(50 * time.Millisecond)
+	if got := reg.For("acme").LlmCalls(); len(got) != 0 {
+		t.Fatalf("empty CallID must be ignored, got %+v", got)
+	}
+}
+
 // TestIngestToBrain_AgentFindingSubmitted: agent-submitted findings (event type
 // agent.finding_submitted) reach the World — they previously did not (the ingest
 // only matched finding.submitted), which is why findings were direct-written to
