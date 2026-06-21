@@ -55,12 +55,11 @@ func WithBatchTimeout(timeout time.Duration) TracingOption {
 }
 
 // InitTracing initializes distributed tracing with the specified configuration.
-// It supports multiple tracing providers: "langfuse", "otlp", and "noop".
+// It supports the "otlp", "zipkin", and "noop" tracing providers.
 //
 // Parameters:
 //   - ctx: Context for initialization and potential cancellation
 //   - cfg: Tracing configuration including provider type, endpoint, and sampling
-//   - langfuse: Langfuse-specific configuration (optional, used when provider is "langfuse")
 //
 // Returns:
 //   - *sdktrace.TracerProvider: The initialized tracer provider
@@ -68,7 +67,7 @@ func WithBatchTimeout(timeout time.Duration) TracingOption {
 //
 // When cfg.Enabled is false, returns a no-op tracer provider that doesn't record spans.
 // The no-op provider has zero overhead and is safe to use in production.
-func InitTracing(ctx context.Context, cfg TracingConfig, langfuse *LangfuseConfig, opts ...TracingOption) (*sdktrace.TracerProvider, error) {
+func InitTracing(ctx context.Context, cfg TracingConfig, opts ...TracingOption) (*sdktrace.TracerProvider, error) {
 	// Return no-op provider if tracing is disabled
 	if !cfg.Enabled {
 		return sdktrace.NewTracerProvider(), nil
@@ -124,16 +123,6 @@ func InitTracing(ctx context.Context, cfg TracingConfig, langfuse *LangfuseConfi
 
 	provider := strings.ToLower(cfg.Provider)
 	switch provider {
-	case "langfuse":
-		// Langfuse integration has been moved to MissionTracer.
-		// Use NewMissionTracer() directly instead of the OpenTelemetry provider.
-		if langfuse == nil || langfuse.Host == "" || langfuse.PublicKey == "" || langfuse.SecretKey == "" {
-			return nil, WrapObservabilityError(ErrExporterConnection,
-				"langfuse provider requires LangfuseConfig with host, public_key, and secret_key. Use NewMissionTracer() instead", nil)
-		}
-		return nil, WrapObservabilityError(ErrExporterConnection,
-			"langfuse provider is not supported in InitTracing. Use NewMissionTracer() directly for Langfuse integration", nil)
-
 	case "otlp":
 		// Build OTLP options based on TLS configuration
 		otlpOpts := []otlptracegrpc.Option{

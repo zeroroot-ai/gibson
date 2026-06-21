@@ -149,78 +149,6 @@ func TestTracingConfig_Validate(t *testing.T) {
 	}
 }
 
-// TestLangfuseConfig_Validate tests LangfuseConfig validation logic.
-func TestLangfuseConfig_Validate(t *testing.T) {
-	tests := []struct {
-		name      string
-		config    LangfuseConfig
-		wantError bool
-		errMsg    string
-	}{
-		{
-			name: "valid config",
-			config: LangfuseConfig{
-				PublicKey: "pk-lf-1234567890",
-				SecretKey: "sk-lf-0987654321",
-				Host:      "https://cloud.langfuse.com",
-			},
-			wantError: false,
-		},
-		{
-			name: "missing public key",
-			config: LangfuseConfig{
-				PublicKey: "",
-				SecretKey: "sk-lf-0987654321",
-				Host:      "https://cloud.langfuse.com",
-			},
-			wantError: true,
-			errMsg:    "public key is required",
-		},
-		{
-			name: "missing secret key",
-			config: LangfuseConfig{
-				PublicKey: "pk-lf-1234567890",
-				SecretKey: "",
-				Host:      "https://cloud.langfuse.com",
-			},
-			wantError: true,
-			errMsg:    "secret key is required",
-		},
-		{
-			name: "missing host",
-			config: LangfuseConfig{
-				PublicKey: "pk-lf-1234567890",
-				SecretKey: "sk-lf-0987654321",
-				Host:      "",
-			},
-			wantError: true,
-			errMsg:    "host is required",
-		},
-		{
-			name: "all fields empty",
-			config: LangfuseConfig{
-				PublicKey: "",
-				SecretKey: "",
-				Host:      "",
-			},
-			wantError: true,
-			errMsg:    "public key is required",
-		},
-	}
-
-	for _, tt := range tests {
-		t.Run(tt.name, func(t *testing.T) {
-			err := tt.config.Validate()
-			if tt.wantError {
-				require.Error(t, err)
-				assert.Contains(t, err.Error(), tt.errMsg)
-			} else {
-				assert.NoError(t, err)
-			}
-		})
-	}
-}
-
 // TestMetricsConfig_Validate tests MetricsConfig validation logic.
 func TestMetricsConfig_Validate(t *testing.T) {
 	tests := []struct {
@@ -499,36 +427,6 @@ func TestTracingConfig_YAMLSerialization(t *testing.T) {
 	assert.Equal(t, original.SampleRate, unmarshaled.SampleRate)
 }
 
-// TestLangfuseConfig_YAMLSerialization tests YAML marshaling and unmarshaling.
-func TestLangfuseConfig_YAMLSerialization(t *testing.T) {
-	original := LangfuseConfig{
-		PublicKey: "pk-lf-test-key",
-		SecretKey: "sk-lf-secret-key",
-		Host:      "https://cloud.langfuse.com",
-	}
-
-	// Marshal to YAML
-	data, err := yaml.Marshal(&original)
-	require.NoError(t, err)
-	assert.NotEmpty(t, data)
-
-	// Verify YAML contains expected fields
-	yamlStr := string(data)
-	assert.Contains(t, yamlStr, "public_key: pk-lf-test-key")
-	assert.Contains(t, yamlStr, "secret_key: sk-lf-secret-key")
-	assert.Contains(t, yamlStr, "host: https://cloud.langfuse.com")
-
-	// Unmarshal back
-	var unmarshaled LangfuseConfig
-	err = yaml.Unmarshal(data, &unmarshaled)
-	require.NoError(t, err)
-
-	// Verify fields match
-	assert.Equal(t, original.PublicKey, unmarshaled.PublicKey)
-	assert.Equal(t, original.SecretKey, unmarshaled.SecretKey)
-	assert.Equal(t, original.Host, unmarshaled.Host)
-}
-
 // TestMetricsConfig_YAMLSerialization tests YAML marshaling and unmarshaling.
 func TestMetricsConfig_YAMLSerialization(t *testing.T) {
 	original := MetricsConfig{
@@ -599,10 +497,6 @@ tracing:
   service_name: gibson
   sample_rate: 0.5
 
-langfuse:
-  public_key: pk-lf-abc123
-  secret_key: sk-lf-xyz789
-  host: https://cloud.langfuse.com
 
 metrics:
   enabled: true
@@ -617,10 +511,9 @@ logging:
 
 	// Parse as a composite struct
 	type ObservabilityConfig struct {
-		Tracing  TracingConfig  `yaml:"tracing"`
-		Langfuse LangfuseConfig `yaml:"langfuse"`
-		Metrics  MetricsConfig  `yaml:"metrics"`
-		Logging  LoggingConfig  `yaml:"logging"`
+		Tracing TracingConfig `yaml:"tracing"`
+		Metrics MetricsConfig `yaml:"metrics"`
+		Logging LoggingConfig `yaml:"logging"`
 	}
 
 	var config ObservabilityConfig
@@ -634,12 +527,6 @@ logging:
 	assert.Equal(t, "gibson", config.Tracing.ServiceName)
 	assert.Equal(t, 0.5, config.Tracing.SampleRate)
 	assert.NoError(t, config.Tracing.Validate())
-
-	// Validate langfuse
-	assert.Equal(t, "pk-lf-abc123", config.Langfuse.PublicKey)
-	assert.Equal(t, "sk-lf-xyz789", config.Langfuse.SecretKey)
-	assert.Equal(t, "https://cloud.langfuse.com", config.Langfuse.Host)
-	assert.NoError(t, config.Langfuse.Validate())
 
 	// Validate metrics
 	assert.True(t, config.Metrics.Enabled)

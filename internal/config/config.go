@@ -115,7 +115,6 @@ type Config struct {
 	Daemon            DaemonConfig            `mapstructure:"daemon" yaml:"daemon,omitempty"`
 	Health            HealthConfig            `mapstructure:"health" yaml:"health,omitempty"`
 	Embedder          embedder.EmbedderConfig `mapstructure:"embedder" yaml:"embedder"`
-	Langfuse          LangfuseConfig          `mapstructure:"langfuse" yaml:"langfuse"`
 	GraphRAG          GraphRAGConfig          `mapstructure:"graphrag" yaml:"graphrag"`
 	Redis             RedisConfig             `mapstructure:"redis" yaml:"redis" validate:"required"`
 	Plugins           PluginsConfig           `mapstructure:"plugins" yaml:"plugins,omitempty"`
@@ -380,20 +379,6 @@ type ResourceLimitsConfig struct {
 	MaxDuration time.Duration `mapstructure:"max_duration" yaml:"max_duration"`
 }
 
-// LangfuseConfig contains Langfuse LLM observability configuration.
-//
-// Deprecated: LangfuseConfig is deprecated. Use OTelObservabilityConfig instead.
-// Langfuse will be removed in a future version. See docs/migration/langfuse-to-otel.md
-//
-// The OTel observability stack provides unified tracing to any OTLP-compatible backend
-// (Jaeger, Tempo, Honeycomb, Datadog, etc.) with better standardization and ecosystem support.
-type LangfuseConfig struct {
-	Enabled   bool   `mapstructure:"enabled" yaml:"enabled"`
-	Host      string `mapstructure:"host" yaml:"host"`
-	PublicKey string `mapstructure:"public_key" yaml:"public_key"`
-	SecretKey string `mapstructure:"secret_key" yaml:"secret_key"`
-}
-
 // Neo4jConfig contains Neo4j connection settings for per-tenant GraphRAG.
 //
 // # TenantMode semantics
@@ -479,20 +464,14 @@ type ShutdownConfig struct {
 }
 
 // ObservabilityConfig contains configuration for observability dashboard integrations.
-// This includes URLs for Neo4j Browser and Langfuse dashboard, used for generating
-// deep links from traces to knowledge graph visualizations.
+// This includes the Neo4j Browser URL used for generating deep links from traces
+// to knowledge graph visualizations.
 type ObservabilityConfig struct {
 	// Neo4jBrowserURL is the base URL for Neo4j Browser UI
-	// Used to generate deep links from Langfuse traces to graph views
+	// Used to generate deep links from traces to graph views
 	// Default: http://localhost:7474
 	// Environment variable: GIBSON_OBSERVABILITY_NEO4J_BROWSER_URL
 	Neo4jBrowserURL string `mapstructure:"neo4j_browser_url" yaml:"neo4j_browser_url"`
-
-	// LangfuseDashboardURL is the URL for the Langfuse UI
-	// Used for generating links to Langfuse dashboards
-	// Default: http://localhost:3000
-	// Environment variable: GIBSON_OBSERVABILITY_LANGFUSE_DASHBOARD_URL
-	LangfuseDashboardURL string `mapstructure:"langfuse_dashboard_url" yaml:"langfuse_dashboard_url"`
 }
 
 // ApplyDefaults fills in zero-valued fields with sensible defaults.
@@ -518,10 +497,6 @@ func (c *ShutdownConfig) ApplyDefaults() {
 func (c *ObservabilityConfig) ApplyDefaults() {
 	if c.Neo4jBrowserURL == "" {
 		c.Neo4jBrowserURL = "http://localhost:7474"
-	}
-
-	if c.LangfuseDashboardURL == "" {
-		c.LangfuseDashboardURL = "http://localhost:3000"
 	}
 }
 

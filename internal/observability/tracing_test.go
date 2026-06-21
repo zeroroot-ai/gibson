@@ -19,7 +19,7 @@ func TestInitTracing_Disabled(t *testing.T) {
 	}
 
 	ctx := context.Background()
-	provider, err := InitTracing(ctx, cfg, nil)
+	provider, err := InitTracing(ctx, cfg)
 
 	require.NoError(t, err)
 	require.NotNil(t, provider)
@@ -42,7 +42,7 @@ func TestInitTracing_NoopProvider(t *testing.T) {
 	}
 
 	ctx := context.Background()
-	provider, err := InitTracing(ctx, cfg, nil)
+	provider, err := InitTracing(ctx, cfg)
 
 	require.NoError(t, err)
 	require.NotNil(t, provider)
@@ -58,7 +58,6 @@ func TestInitTracing_InvalidConfiguration(t *testing.T) {
 	tests := []struct {
 		name      string
 		cfg       TracingConfig
-		langfuse  *LangfuseConfig
 		expectErr bool
 	}{
 		{
@@ -114,23 +113,12 @@ func TestInitTracing_InvalidConfiguration(t *testing.T) {
 			},
 			expectErr: true,
 		},
-		{
-			name: "langfuse without config",
-			cfg: TracingConfig{
-				Enabled:     true,
-				Provider:    "langfuse",
-				ServiceName: "test-service",
-				Endpoint:    "http://localhost:4318",
-				SampleRate:  1.0,
-			},
-			expectErr: true,
-		},
 	}
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
 			ctx := context.Background()
-			provider, err := InitTracing(ctx, tt.cfg, tt.langfuse)
+			provider, err := InitTracing(ctx, tt.cfg)
 
 			if tt.expectErr {
 				assert.Error(t, err)
@@ -178,7 +166,7 @@ func TestInitTracing_SamplingConfiguration(t *testing.T) {
 			}
 
 			ctx := context.Background()
-			provider, err := InitTracing(ctx, cfg, nil)
+			provider, err := InitTracing(ctx, cfg)
 
 			require.NoError(t, err)
 			require.NotNil(t, provider)
@@ -209,7 +197,7 @@ func TestInitTracing_WithCustomSampler(t *testing.T) {
 	customSampler := sdktrace.AlwaysSample()
 
 	ctx := context.Background()
-	provider, err := InitTracing(ctx, cfg, nil, WithSampler(customSampler))
+	provider, err := InitTracing(ctx, cfg, WithSampler(customSampler))
 
 	require.NoError(t, err)
 	require.NotNil(t, provider)
@@ -238,7 +226,7 @@ func TestInitTracing_WithCustomResource(t *testing.T) {
 	)
 
 	ctx := context.Background()
-	provider, err := InitTracing(ctx, cfg, nil, WithResource(res))
+	provider, err := InitTracing(ctx, cfg, WithResource(res))
 
 	require.NoError(t, err)
 	require.NotNil(t, provider)
@@ -262,7 +250,7 @@ func TestInitTracing_WithBatchTimeout(t *testing.T) {
 	customTimeout := 10 * time.Second
 
 	ctx := context.Background()
-	provider, err := InitTracing(ctx, cfg, nil, WithBatchTimeout(customTimeout))
+	provider, err := InitTracing(ctx, cfg, WithBatchTimeout(customTimeout))
 
 	require.NoError(t, err)
 	require.NotNil(t, provider)
@@ -272,30 +260,6 @@ func TestInitTracing_WithBatchTimeout(t *testing.T) {
 		defer cancel()
 		_ = ShutdownTracing(shutdownCtx, provider)
 	}()
-}
-
-func TestInitTracing_WithLangfuse(t *testing.T) {
-	cfg := TracingConfig{
-		Enabled:     true,
-		Provider:    "langfuse",
-		ServiceName: "test-service",
-		Endpoint:    "http://localhost:4318",
-		SampleRate:  1.0,
-	}
-
-	langfuseCfg := &LangfuseConfig{
-		PublicKey: "pk-test-key",
-		SecretKey: "sk-test-key",
-		Host:      "http://localhost:3000",
-	}
-
-	ctx := context.Background()
-	provider, err := InitTracing(ctx, cfg, langfuseCfg)
-
-	// Langfuse is no longer supported via InitTracing - must use NewMissionTracer
-	require.Error(t, err)
-	require.Nil(t, provider)
-	require.Contains(t, err.Error(), "Use NewMissionTracer() directly")
 }
 
 func TestInitTracing_WithInMemoryExporter(t *testing.T) {
@@ -350,7 +314,7 @@ func TestShutdownTracing_Success(t *testing.T) {
 	}
 
 	ctx := context.Background()
-	provider, err := InitTracing(ctx, cfg, nil)
+	provider, err := InitTracing(ctx, cfg)
 
 	require.NoError(t, err)
 	require.NotNil(t, provider)
