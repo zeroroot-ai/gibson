@@ -227,6 +227,20 @@ FOREACH (_ IN CASE WHEN $parent_run_id = '' OR parent IS NULL THEN [] ELSE [1] E
   MERGE (parent)-[:DELEGATED_TO]->(r))
 RETURN r.brain_id`
 
+// upsertLlmCallCypher MERGEs an :LlmCall (call provenance, ADR-0007/gibson#755)
+// keyed by its brain_id (CallID) and conditionally links the issuing :AgentRun
+// via ISSUED — the edge appears once the run lands, self-healing on a later tick.
+const upsertLlmCallCypher = `
+MERGE (c:LlmCall {brain_id: $call_id})
+  SET c.model = $model, c.scope = $scope,
+      c.prompt_tokens = $prompt_tokens, c.completion_tokens = $completion_tokens,
+      c.total_tokens = $total_tokens, c.updated_at = timestamp()
+WITH c
+OPTIONAL MATCH (r:AgentRun {brain_id: $run_id})
+FOREACH (_ IN CASE WHEN $run_id = '' OR r IS NULL THEN [] ELSE [1] END |
+  MERGE (r)-[:ISSUED]->(c))
+RETURN c.brain_id`
+
 // UpsertAgentRun idempotently projects one agent run and, when its parent run is
 // already projected, the DELEGATED_TO edge — replacing the old direct graph write
 // in DelegateToAgent so the projector is the sole writer (ADR-0007, #837).
@@ -260,6 +274,46 @@ func (w *neo4jGraphWriter) UpsertAgentRun(ctx context.Context, tenant string, r 
 	})
 	if err != nil {
 		return fmt.Errorf("graph projector: upsert agent_run %s: %w", r.RunID, err)
+	}
+	return nil
+}
+
+// UpsertLlmCall idempotently projects one LLM call and, when its issuing agent
+// run is known, links it ISSUED← (gibson#755). String-keyed by CallID, so it
+// uses the dedicated writer path rather than the numeric-id exec helper.
+func (w *neo4jGraphWriter) UpsertLlmCall(ctx context.Context, tenant string, c brain.LlmCallSnapshot) error {
+	pool := w.poolGetter()
+	if pool == nil {
+		return fmt.Errorf("graph projector: pool not ready")
+	}
+	tid, err := auth.NewTenantID(tenant)
+	if err != nil {
+		return fmt.Errorf("graph projector: invalid tenant %q: %w", tenant, err)
+	}
+	conn, err := pool.For(ctx, tid)
+	if err != nil {
+		return fmt.Errorf("graph projector: pool.For(%s): %w", tenant, err)
+	}
+	defer conn.Release()
+
+	params := map[string]any{
+		"call_id":           c.CallID,
+		"run_id":            c.RunID,
+		"model":             c.Model,
+		"scope":             c.ScopeID,
+		"prompt_tokens":     c.PromptTokens,
+		"completion_tokens": c.CompletionTokens,
+		"total_tokens":      c.TotalTokens(),
+	}
+	_, err = conn.Neo4j.ExecuteWrite(ctx, func(tx neo4j.ManagedTransaction) (any, error) {
+		res, txErr := tx.Run(ctx, upsertLlmCallCypher, params)
+		if txErr != nil {
+			return nil, txErr
+		}
+		return res.Consume(ctx)
+	})
+	if err != nil {
+		return fmt.Errorf("graph projector: upsert llm_call %s: %w", c.CallID, err)
 	}
 	return nil
 }

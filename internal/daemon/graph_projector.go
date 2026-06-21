@@ -26,6 +26,7 @@ type GraphWriter interface {
 	UpsertCredential(ctx context.Context, tenant string, c brain.CredentialSnapshot) error
 	UpsertAccount(ctx context.Context, tenant string, a brain.AccountSnapshot) error
 	UpsertAgentRun(ctx context.Context, tenant string, r brain.AgentRunSnapshot) error
+	UpsertLlmCall(ctx context.Context, tenant string, c brain.LlmCallSnapshot) error
 }
 
 // GraphProjector periodically projects every tenant's World into the graph.
@@ -95,6 +96,12 @@ func (p *GraphProjector) project(ctx context.Context) {
 			if err := p.writer.UpsertAgentRun(ctx, tenant, r); err != nil {
 				p.logger.Warn("graph projection: agent-run upsert failed",
 					"tenant", tenant, "run_id", r.RunID, "error", err)
+			}
+		}
+		for _, c := range eng.LlmCalls() {
+			if err := p.writer.UpsertLlmCall(ctx, tenant, c); err != nil {
+				p.logger.Warn("graph projection: llm-call upsert failed",
+					"tenant", tenant, "call_id", c.CallID, "error", err)
 			}
 		}
 	}
