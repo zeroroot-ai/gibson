@@ -20,7 +20,7 @@ func TestNames_AllFormats(t *testing.T) {
 		vaultPrefix, vaultPolicy    string
 		vaultJWT                    string
 		fga                         string
-		zitadel, langfuse           string
+		zitadel                     string
 	}
 	cases := []struct {
 		name     string
@@ -41,7 +41,7 @@ func TestNames_AllFormats(t *testing.T) {
 				vaultPrefix:  "tenant/acme", vaultPolicy: "tenant-acme-app",
 				vaultJWT: "gibson-plugin-acme",
 				fga:      "tenant:acme",
-				zitadel:  "acme", langfuse: "acme",
+				zitadel:  "acme",
 			},
 		},
 		{
@@ -58,7 +58,7 @@ func TestNames_AllFormats(t *testing.T) {
 				vaultPrefix:  "tenant/zeroroot-ai", vaultPolicy: "tenant-zeroroot-ai-app",
 				vaultJWT: "gibson-plugin-zeroroot-ai",
 				fga:      "tenant:zeroroot-ai",
-				zitadel:  "zeroroot-ai", langfuse: "zeroroot-ai",
+				zitadel:  "zeroroot-ai",
 			},
 		},
 		{
@@ -75,7 +75,7 @@ func TestNames_AllFormats(t *testing.T) {
 				vaultPrefix:  "tenant/smoke_solo", vaultPolicy: "tenant-smoke_solo-app",
 				vaultJWT: "gibson-plugin-smoke_solo",
 				fga:      "tenant:smoke_solo",
-				zitadel:  "smoke_solo", langfuse: "smoke_solo",
+				zitadel:  "smoke_solo",
 			},
 		},
 		{
@@ -92,7 +92,7 @@ func TestNames_AllFormats(t *testing.T) {
 				vaultPrefix:  "tenant/a", vaultPolicy: "tenant-a-app",
 				vaultJWT: "gibson-plugin-a",
 				fga:      "tenant:a",
-				zitadel:  "a", langfuse: "a",
+				zitadel:  "a",
 			},
 		},
 	}
@@ -128,7 +128,6 @@ func TestNames_AllFormats(t *testing.T) {
 				{"VaultJWTRoleName", n.VaultJWTRoleName(), c.want.vaultJWT},
 				{"FGAObject", n.FGAObject(), c.want.fga},
 				{"ZitadelOrgSlug", n.ZitadelOrgSlug(), c.want.zitadel},
-				{"LangfuseProject", n.LangfuseProject(), c.want.langfuse},
 			}
 			for _, ck := range checks {
 				if ck.got != ck.want {

@@ -43,9 +43,6 @@ type Deps struct {
 	// Stripe is the Stripe API client.
 	Stripe StripeClient
 
-	// Langfuse is the Langfuse admin client.
-	Langfuse LangfuseClient
-
 	// DaemonGRPC is the Connect-RPC client to gibson's PlatformOperatorService.
 	DaemonGRPC DaemonGRPCClient
 
@@ -79,8 +76,6 @@ func (d *Deps) Has(c ClientCapability) bool {
 		return d.Qdrant != nil
 	case CapabilityStripe:
 		return d.Stripe != nil
-	case CapabilityLangfuse:
-		return d.Langfuse != nil
 	case CapabilityDaemonGRPC:
 		return d.DaemonGRPC != nil
 	case CapabilitySMTP:
@@ -108,7 +103,6 @@ type (
 	RedisAdminClient    any
 	QdrantAdminClient   any
 	StripeClient        any
-	LangfuseClient      any
 	DaemonGRPCClient    any
 	MailerClient        any
 )

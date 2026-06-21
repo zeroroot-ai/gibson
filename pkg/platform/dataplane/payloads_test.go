@@ -81,23 +81,6 @@ func TestVectorCredentials_RoundTrip(t *testing.T) {
 	}
 }
 
-func TestLangfuseCredentials_RoundTrip(t *testing.T) {
-	want := dataplane.LangfuseCredentials{
-		ProjectID: "cm0xxxx",
-		PublicKey: "pk-lf-12345",
-		SecretKey: "sk-lf-67890",
-		Host:      "https://langfuse.gibson.svc.cluster.local:3000",
-	}
-	b, _ := json.Marshal(want)
-	var got dataplane.LangfuseCredentials
-	if err := json.Unmarshal(b, &got); err != nil {
-		t.Fatalf("unmarshal: %v", err)
-	}
-	if got != want {
-		t.Errorf("round-trip mismatch: got %+v want %+v", got, want)
-	}
-}
-
 // Field-name guard: the JSON tags must match the design.md schema
 // byte-for-byte. A regression here breaks every existing tenant.
 func TestJSONFieldNames(t *testing.T) {
@@ -110,7 +93,6 @@ func TestJSONFieldNames(t *testing.T) {
 		{"Neo4jCredentials", dataplane.Neo4jCredentials{BoltURI: "u"}, `"bolt_uri":"u"`},
 		{"RedisCredentials", dataplane.RedisCredentials{DBIndex: 7}, `"db_index":7`},
 		{"VectorCredentials", dataplane.VectorCredentials{IndexName: "i"}, `"index_name":"i"`},
-		{"LangfuseCredentials", dataplane.LangfuseCredentials{ProjectID: "p"}, `"project_id":"p"`},
 	}
 	for _, c := range checks {
 		b, _ := json.Marshal(c.v)

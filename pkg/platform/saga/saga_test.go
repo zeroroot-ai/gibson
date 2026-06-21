@@ -71,9 +71,9 @@ func TestAllCapabilities_NoDuplicates(t *testing.T) {
 		}
 		seen[c] = true
 	}
-	// Sanity: at least 12 capabilities listed (matching design.md Component 3).
-	if got := len(saga.AllCapabilities()); got < 12 {
-		t.Errorf("AllCapabilities() returned %d entries, want >= 12", got)
+	// Sanity: at least 11 capabilities listed (Langfuse retired, gibson#755).
+	if got := len(saga.AllCapabilities()); got < 11 {
+		t.Errorf("AllCapabilities() returned %d entries, want >= 11", got)
 	}
 }
 

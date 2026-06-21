@@ -55,14 +55,3 @@ type RedisCredentials struct {
 type VectorCredentials struct {
 	IndexName string `json:"index_name"`
 }
-
-// LangfuseCredentials is the payload at tenant/<id>/infra/langfuse.
-//
-// Replaces the legacy `langfuse-creds` K8s Secret in the tenant
-// namespace per spec Requirement 1.5.
-type LangfuseCredentials struct {
-	ProjectID string `json:"project_id"`
-	PublicKey string `json:"public_key"`
-	SecretKey string `json:"secret_key"`
-	Host      string `json:"host"`
-}
