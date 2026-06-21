@@ -75,10 +75,6 @@ func TestInfrastructureInitialization(t *testing.T) {
 		t.Fatal("LLM registry is nil")
 	}
 
-	if infra.planExecutor == nil {
-		t.Fatal("plan executor is nil")
-	}
-
 	if infra.slotManager == nil {
 		t.Fatal("slot manager is nil")
 	}
@@ -99,12 +95,6 @@ func TestInfrastructureInitialization(t *testing.T) {
 		}
 	})
 
-	// Test plan executor exists
-	t.Run("PlanExecutor", func(t *testing.T) {
-		if infra.planExecutor == nil {
-			t.Error("plan executor should not be nil")
-		}
-	})
 
 	// Test slot manager exists
 	t.Run("SlotManager", func(t *testing.T) {

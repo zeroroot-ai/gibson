@@ -15,7 +15,6 @@ import (
 	"github.com/zeroroot-ai/gibson/internal/llm/providers/catalogue"
 	"github.com/zeroroot-ai/gibson/internal/mission"
 	"github.com/zeroroot-ai/gibson/internal/observability"
-	"github.com/zeroroot-ai/gibson/internal/plan"
 	"github.com/zeroroot-ai/gibson/internal/queue"
 	"github.com/zeroroot-ai/gibson/internal/state"
 	"github.com/zeroroot-ai/gibson/pkg/version"
@@ -28,9 +27,6 @@ import (
 // This struct is embedded in daemonImpl to provide access to these components
 // during mission execution, attack operations, and event streaming.
 type Infrastructure struct {
-	// planExecutor executes mission DAGs with guardrails and approvals
-	planExecutor *plan.PlanExecutor
-
 	// findingStore persists and retrieves findings
 	findingStore finding.FindingStore
 
@@ -90,7 +86,6 @@ func (i *Infrastructure) SemanticQuerier(client graph.GraphClient) *graphrag.Sem
 // that are needed for mission execution. It:
 //  1. Creates the finding store backed by the database
 //  2. Creates the LLM registry and registers configured providers
-//  3. Creates the plan executor with the configured components
 //
 // Returns an error if any component fails to initialize.
 func (d *daemonImpl) newInfrastructure(ctx context.Context) (*Infrastructure, error) {
@@ -185,17 +180,6 @@ func (d *daemonImpl) newInfrastructure(ctx context.Context) (*Infrastructure, er
 			"docs", "docs/runbooks/otel-observability.md")
 	}
 
-	// Create plan executor with dependencies.
-	// Executor configuration is read from config.Daemon.Executor.
-	planExecutorOpts := []plan.ExecutorOption{
-		plan.WithExecutorLogger(d.logger.WithComponent("plan-executor").Slog()),
-	}
-	if d.config != nil && d.config.Daemon.Executor.DefaultTimeout > 0 {
-		planExecutorOpts = append(planExecutorOpts, plan.WithStepTimeout(d.config.Daemon.Executor.DefaultTimeout))
-	}
-	planExecutor := plan.NewPlanExecutor(planExecutorOpts...)
-	d.logger.Info(ctx, "initialized plan executor")
-
 	// Build the semantic querier factory. The factory closes over d.reasoner so
 	// each per-request SemanticQuerier uses the same live reasoner singleton.
 	// If reasoner is nil (not expected in production), the factory produces nil.
@@ -210,7 +194,6 @@ func (d *daemonImpl) newInfrastructure(ctx context.Context) (*Infrastructure, er
 	// Store infrastructure components temporarily so newHarnessFactory can access them.
 	// findingStore is nil: findings are persisted via per-tenant Pool at handler time.
 	infra := &Infrastructure{
-		planExecutor:           planExecutor,
 		findingStore:           nil, // migrated to pool-backed per-tenant path
 		llmRegistry:            llmRegistry,
 		slotManager:            slotManager,
