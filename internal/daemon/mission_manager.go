@@ -9,19 +9,16 @@ import (
 	"sync"
 	"time"
 
-	"github.com/zeroroot-ai/gibson/internal/agent"
 	"github.com/zeroroot-ai/gibson/internal/brain"
 	"github.com/zeroroot-ai/gibson/internal/component"
 	"github.com/zeroroot-ai/gibson/internal/config"
 	"github.com/zeroroot-ai/gibson/internal/daemon/api"
 	"github.com/zeroroot-ai/gibson/internal/datapool"
 	"github.com/zeroroot-ai/gibson/internal/graphrag/graph"
-	"github.com/zeroroot-ai/gibson/internal/graphrag/schema"
 	"github.com/zeroroot-ai/gibson/internal/harness"
 	"github.com/zeroroot-ai/gibson/internal/llm"
 	"github.com/zeroroot-ai/gibson/internal/mission"
 	"github.com/zeroroot-ai/gibson/internal/observability"
-	"github.com/zeroroot-ai/gibson/internal/orchestrator"
 	"github.com/zeroroot-ai/gibson/internal/types"
 	missionpb "github.com/zeroroot-ai/sdk/api/gen/gibson/mission/v1"
 	"github.com/zeroroot-ai/sdk/auth"
@@ -85,7 +82,7 @@ type missionManager struct {
 	runLinker       mission.MissionRunLinker
 	infrastructure  *Infrastructure
 	otelStack       *observability.OTelObservabilityStack // nil when OTel is disabled
-	eventBus        orchestrator.EventBus                 // EventBus for emitting orchestration events
+	eventBus        eventPublisher                        // emits orchestration events to the brain + Redis stream
 
 	// brainRegistry + brainExecutor make the ECS brain the mission execution
 	// engine (gibson#851): executeMission projects the CUE mission into the
@@ -142,7 +139,7 @@ func newMissionManager(
 	runLinker mission.MissionRunLinker,
 	infrastructure *Infrastructure,
 	otelStack *observability.OTelObservabilityStack,
-	eventBus orchestrator.EventBus,
+	eventBus eventPublisher,
 	authzStore mission.MissionAuthzStore,
 	quotaCounter mission.QuotaCounter,
 	brainRegistry *brain.Registry,
@@ -1171,149 +1168,6 @@ func containsStr(s, substr string) bool {
 			}
 			return false
 		}())
-}
-
-// llmClientAdapter adapts an AgentHarness to the orchestrator.LLMClient interface.
-// This allows the orchestrator's Thinker to use the harness for LLM operations.
-type llmClientAdapter struct {
-	harness harness.AgentHarness
-}
-
-// Complete performs a synchronous LLM completion using the harness.
-func (a *llmClientAdapter) Complete(ctx context.Context, slot string, messages []llm.Message, opts ...orchestrator.CompletionOption) (*llm.CompletionResponse, error) {
-	// Convert orchestrator options to harness options
-	harnessOpts := make([]harness.CompletionOption, 0, len(opts))
-	compOpts := &orchestrator.CompletionOptions{}
-	for _, opt := range opts {
-		opt(compOpts)
-	}
-	if compOpts.Temperature > 0 {
-		harnessOpts = append(harnessOpts, harness.WithTemperature(compOpts.Temperature))
-	}
-	if compOpts.MaxTokens > 0 {
-		harnessOpts = append(harnessOpts, harness.WithMaxTokens(compOpts.MaxTokens))
-	}
-	if compOpts.TopP > 0 {
-		harnessOpts = append(harnessOpts, harness.WithTopP(compOpts.TopP))
-	}
-
-	return a.harness.Complete(ctx, slot, messages, harnessOpts...)
-}
-
-// CompleteStructuredAny performs a completion with provider-native structured output.
-func (a *llmClientAdapter) CompleteStructuredAny(ctx context.Context, slot string, messages []llm.Message, schemaType any, opts ...orchestrator.CompletionOption) (any, error) {
-	// Convert orchestrator options to harness options
-	harnessOpts := make([]harness.CompletionOption, 0, len(opts))
-	compOpts := &orchestrator.CompletionOptions{}
-	for _, opt := range opts {
-		opt(compOpts)
-	}
-	if compOpts.Temperature > 0 {
-		harnessOpts = append(harnessOpts, harness.WithTemperature(compOpts.Temperature))
-	}
-	if compOpts.MaxTokens > 0 {
-		harnessOpts = append(harnessOpts, harness.WithMaxTokens(compOpts.MaxTokens))
-	}
-	if compOpts.TopP > 0 {
-		harnessOpts = append(harnessOpts, harness.WithTopP(compOpts.TopP))
-	}
-
-	return a.harness.CompleteStructuredAny(ctx, slot, messages, schemaType, harnessOpts...)
-}
-
-// CompleteStructuredAnyWithUsage performs structured completion and returns token usage.
-func (a *llmClientAdapter) CompleteStructuredAnyWithUsage(ctx context.Context, slot string, messages []llm.Message, schemaType any, opts ...orchestrator.CompletionOption) (*orchestrator.StructuredCompletionResult, error) {
-	// Convert orchestrator options to harness options
-	harnessOpts := make([]harness.CompletionOption, 0, len(opts))
-	compOpts := &orchestrator.CompletionOptions{}
-	for _, opt := range opts {
-		opt(compOpts)
-	}
-	if compOpts.Temperature > 0 {
-		harnessOpts = append(harnessOpts, harness.WithTemperature(compOpts.Temperature))
-	}
-	if compOpts.MaxTokens > 0 {
-		harnessOpts = append(harnessOpts, harness.WithMaxTokens(compOpts.MaxTokens))
-	}
-	if compOpts.TopP > 0 {
-		harnessOpts = append(harnessOpts, harness.WithTopP(compOpts.TopP))
-	}
-
-	harnessResult, err := a.harness.CompleteStructuredAnyWithUsage(ctx, slot, messages, schemaType, harnessOpts...)
-	if err != nil {
-		return nil, err
-	}
-
-	// Convert harness.StructuredCompletionResult to orchestrator.StructuredCompletionResult
-	return &orchestrator.StructuredCompletionResult{
-		Result:           harnessResult.Result,
-		Model:            harnessResult.Model,
-		RawJSON:          harnessResult.RawJSON,
-		PromptTokens:     harnessResult.PromptTokens,
-		CompletionTokens: harnessResult.CompletionTokens,
-		TotalTokens:      harnessResult.TotalTokens,
-	}, nil
-}
-
-// orchestratorHarnessAdapter adapts an AgentHarness to the orchestrator.Harness interface.
-// This allows the orchestrator's Actor to delegate to agents.
-type orchestratorHarnessAdapter struct {
-	harness harness.AgentHarness
-}
-
-// DelegateToAgent delegates a task to another agent via the harness.
-func (a *orchestratorHarnessAdapter) DelegateToAgent(ctx context.Context, agentName string, task agent.Task) (agent.Result, error) {
-	return a.harness.DelegateToAgent(ctx, agentName, task)
-}
-
-// buildMissionTraceSummary constructs a MissionTraceSummary from orchestrator results.
-// This is used when closing the decision log adapter to provide final statistics.
-func buildMissionTraceSummary(result *orchestrator.OrchestratorResult, status mission.MissionStatus, duration time.Duration, errorMsg string) *observability.MissionTraceSummary {
-	summary := &observability.MissionTraceSummary{
-		Duration:   duration,
-		Outcome:    string(status),
-		GraphStats: make(map[string]int),
-	}
-
-	// Map mission status to schema status string
-	switch status {
-	case mission.MissionStatusCompleted:
-		summary.Status = string(schema.MissionStatusCompleted)
-	case mission.MissionStatusFailed:
-		summary.Status = string(schema.MissionStatusFailed)
-	case mission.MissionStatusCancelled:
-		summary.Status = string(schema.MissionStatusFailed) // Treat cancelled as failed for tracing
-	case mission.MissionStatusPaused:
-		summary.Status = string(schema.MissionStatusFailed) // Treat paused as failed for tracing
-	default:
-		summary.Status = string(schema.MissionStatusFailed)
-	}
-
-	// Extract statistics from orchestrator result if available
-	if result != nil {
-		summary.TotalDecisions = result.TotalDecisions
-		summary.TotalTokens = result.TotalTokensUsed
-		summary.Outcome = result.StopReason
-		if summary.Outcome == "" {
-			summary.Outcome = string(result.Status)
-		}
-
-		// Add graph statistics
-		summary.GraphStats["completed_nodes"] = result.CompletedNodes
-		summary.GraphStats["failed_nodes"] = result.FailedNodes
-		summary.GraphStats["total_iterations"] = result.TotalIterations
-	}
-
-	// Add error message to outcome if present
-	if errorMsg != "" {
-		if summary.Outcome != "" {
-			summary.Outcome = fmt.Sprintf("%s: %s", summary.Outcome, errorMsg)
-		} else {
-			summary.Outcome = errorMsg
-		}
-	}
-
-	return summary
 }
 
 // storeMissionInGraphRAG stored a mission definition in the shared Neo4j knowledge graph.

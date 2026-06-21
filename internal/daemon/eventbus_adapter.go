@@ -19,6 +19,13 @@ type EventBusAdapter struct {
 	eventBus *EventBus
 }
 
+// eventPublisher is the minimal event-emit surface the mission manager needs (it
+// feeds the ECS brain + Redis stream). Satisfied by *OrchestratorEventBusAdapter.
+// Replaces the former orchestrator.EventBus interface dependency (gibson#851).
+type eventPublisher interface {
+	Publish(event events.Event)
+}
+
 // OrchestratorEventBusAdapter adapts the daemon's EventBus to the orchestrator's
 // EventBus interface which expects Publish(event events.Event).
 //
