@@ -1350,13 +1350,6 @@ func (d *daemonImpl) buildGRPCServer(ctx context.Context) (*grpcSubsystem, error
 				d.logger.Warn(ctx, "LLM adapter not wired: infrastructure or LLM registry not ready; LLM completion RPCs will return Unimplemented")
 			}
 
-			// Build a daemon-wide shared memory store for the working memory tier.
-			// Mission-tier and long-term-tier operations are handled by the per-mission
-			// MemoryResolver (wired below); only Working() is served from this shared store.
-			sharedMemStore := &daemonMemoryStore{
-				working: memory.NewWorkingMemory(100_000),
-			}
-
 			var llmCompleterIface component.LLMCompleter
 			var llmToolCompleterIface component.LLMToolCompleter
 			if llmAdapter != nil {
@@ -1369,7 +1362,6 @@ func (d *daemonImpl) buildGRPCServer(ctx context.Context) (*grpcSubsystem, error
 				compQueue,
 				d.logger.Slog(),
 				llmCompleterIface,   // LLMRegistryAdapter or nil
-				sharedMemStore,      // daemon-wide shared working memory
 				findingSubmitter,    // GraphRAGFindingSubmitter or nil
 				d.pluginAccessStore, // nil when no KeyProvider configured
 				auditLogger,
@@ -1381,17 +1373,10 @@ func (d *daemonImpl) buildGRPCServer(ctx context.Context) (*grpcSubsystem, error
 				d.logger.Info(ctx, "LLMToolCompleter wired into ComponentService")
 			}
 
-			// Wire MemoryResolver so that MemoryGet/MemorySet/MemorySearch route
-			// mission-tier operations to the per-agent mission namespace.
-			// RedisMemoryResolver caches MissionMemory instances in a sync.Map and
-			// resolves work_id → mission_id via short-lived Redis hash keys written
-			// by PollWork when work items carrying mission_id context are dispatched.
-			memResolver := component.NewRedisMemoryResolver(d.stateClient)
-			if d.pool != nil {
-				memResolver.SetPool(d.pool)
-				d.logger.Info(ctx, "data-plane pool wired into memory resolver (Phase D)")
-			}
-			compSvc.WithMemoryResolver(memResolver)
+			// Wire the work-context registry so PollWork records work_id → mission/
+			// tenant mappings (used by the finding/mission-context paths). The memory
+			// tiers were retired (gibson#756); only this mapping remains.
+			compSvc.WithWorkContextRegistry(component.NewRedisWorkContextRegistry(d.stateClient))
 
 			// Wire the quota manager so RegisterComponent enforces per-tenant
 			// agent quotas before the agent is admitted to the registry.

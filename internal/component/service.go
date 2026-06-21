@@ -29,8 +29,6 @@ import (
 	"github.com/zeroroot-ai/gibson/internal/audit"
 	"github.com/zeroroot-ai/gibson/internal/authz"
 	"github.com/zeroroot-ai/gibson/internal/graphrag/loader"
-	"github.com/zeroroot-ai/gibson/internal/memory"
-	"github.com/zeroroot-ai/gibson/internal/types"
 	componentpb "github.com/zeroroot-ai/sdk/api/gen/gibson/component/v1"
 	graphragpb "github.com/zeroroot-ai/sdk/api/gen/gibson/graphrag/v1"
 	"github.com/zeroroot-ai/sdk/auth"
@@ -146,16 +144,9 @@ type ComponentServiceServer struct {
 	// May be nil; Complete and CompleteStream return codes.Unimplemented when nil.
 	llmCompleter LLMCompleter
 
-	// memory provides access to all three memory tiers on behalf of remote agents.
-	// May be nil; MemoryGet, MemorySet, and MemorySearch fall back to
-	// memoryResolver when non-nil, or return codes.Unimplemented when both are nil.
-	memory memory.MemoryStore
-
-	// memoryResolver maps a work_id to its mission-scoped MissionMemory instance.
-	// When non-nil it takes precedence over the shared s.memory.Mission() for
-	// mission-tier operations, giving each agent access to its own namespace.
-	// May be nil; the server falls back to s.memory when nil.
-	memoryResolver MemoryResolver
+	// workContext records the work-item→mission/tenant mapping (gibson#756; the
+	// memory tiers were retired). May be nil.
+	workContext WorkContextRegistry
 
 	// missionCtx resolves a work item ID to its parent mission ID and any
 	// per-mission LLM slot overrides. Used by Complete and CompleteStream to
@@ -270,7 +261,6 @@ func NewComponentServiceServer(
 	queue WorkQueue,
 	logger *slog.Logger,
 	llmCompleter LLMCompleter,
-	memStore memory.MemoryStore,
 	findingSubmitter FindingSubmitter,
 	componentAccess ComponentAccessStore,
 	auditLog *audit.AuditLogger,
@@ -289,7 +279,6 @@ func NewComponentServiceServer(
 		queue:            queue,
 		logger:           logger,
 		llmCompleter:     llmCompleter,
-		memory:           memStore,
 		findingSubmitter: findingSubmitter,
 		componentAccess:  componentAccess,
 		auditLog:         auditLog,
@@ -304,9 +293,9 @@ func NewComponentServiceServer(
 // RPCs:
 //
 //	svc := component.NewComponentServiceServer(...)
-//	svc.WithMemoryResolver(component.NewRedisMemoryResolver(stateClient))
-func (s *ComponentServiceServer) WithMemoryResolver(r MemoryResolver) *ComponentServiceServer {
-	s.memoryResolver = r
+//	svc.WithWorkContextRegistry(component.NewRedisWorkContextRegistry(stateClient))
+func (s *ComponentServiceServer) WithWorkContextRegistry(r WorkContextRegistry) *ComponentServiceServer {
+	s.workContext = r
 	return s
 }
 
@@ -935,10 +924,10 @@ func (s *ComponentServiceServer) PollWork(
 	// MemorySearch can resolve the correct per-mission namespace later.
 	// This is best-effort: if it fails we still return the work item; the
 	// agent will receive a NotFound on any memory RPC rather than a hard failure.
-	if s.memoryResolver != nil && item.WorkID != "" {
+	if s.workContext != nil && item.WorkID != "" {
 		missionID := item.Context["mission_id"]
 		if missionID != "" {
-			if err := s.memoryResolver.RegisterWorkContext(ctx, item.WorkID, missionID, tenant); err != nil {
+			if err := s.workContext.RegisterWorkContext(ctx, item.WorkID, missionID, tenant); err != nil {
 				s.logger.WarnContext(ctx, "poll work: failed to register work context for memory resolver; memory RPCs will return NotFound",
 					slog.String("tenant", tenant),
 					slog.String("work_id", item.WorkID),
@@ -1662,365 +1651,6 @@ func (s *ComponentServiceServer) SubmitFinding(
 	return &componentpb.SubmitFindingResponse{FindingId: findingID}, nil
 }
 
-// ---------------------------------------------------------------------------
-// Memory helpers
-// ---------------------------------------------------------------------------
-
-// resolveMissionMemory resolves the MissionMemory for a work item using the
-// MemoryResolver. It falls back to s.memory.Mission() when no MemoryResolver is
-// configured, so that the server works with a shared store during development.
-//
-// Returns a gRPC status error on failure:
-//   - codes.Unimplemented — neither resolver nor shared store is wired
-//   - codes.NotFound      — resolver found no mapping for workID
-//   - codes.Internal      — unexpected resolver or store error
-func (s *ComponentServiceServer) resolveMissionMemory(
-	ctx context.Context,
-	workID, tenant string,
-) (memory.MissionMemory, error) {
-	if s.memoryResolver != nil {
-		mm, err := s.memoryResolver.ResolveForWork(ctx, workID, tenant)
-		if err != nil {
-			var gibsonErr *types.GibsonError
-			if errors.As(err, &gibsonErr) && gibsonErr.Code == ErrCodeWorkContextNotFound {
-				return nil, status.Errorf(codes.NotFound,
-					"no mission context found for work item %q; ensure the agent was dispatched via PollWork", workID)
-			}
-			return nil, status.Errorf(codes.Internal, "failed to resolve mission memory for work %q: %v", workID, err)
-		}
-		return mm, nil
-	}
-
-	// Fall back to the shared mission memory store (useful when running without
-	// the full resolver stack, e.g., in integration tests).
-	if s.memory != nil {
-		return s.memory.Mission(), nil
-	}
-
-	return nil, status.Error(codes.Unimplemented, "mission memory not available: neither resolver nor shared store is wired")
-}
-
-// MemoryGet retrieves a value from the requested memory tier by key.
-//
-// Tier routing:
-//   - working   — in-process ephemeral map; returns not-found when key absent.
-//   - mission   — Redis-backed persistent store scoped to the work item's mission;
-//     requires memoryResolver to be wired (falls back to s.memory.Mission() when not).
-//   - long_term — not suitable for point lookups; returns codes.InvalidArgument.
-func (s *ComponentServiceServer) MemoryGet(
-	ctx context.Context,
-	req *componentpb.MemoryGetRequest,
-) (*componentpb.MemoryGetResponse, error) {
-	tenant := auth.TenantStringFromContext(ctx)
-	if tenant == "" {
-		return nil, status.Error(codes.Unauthenticated, "missing tenant in context")
-	}
-
-	if s.memory == nil && s.memoryResolver == nil {
-		return nil, status.Error(codes.Unimplemented, "memory store not yet wired on this server")
-	}
-
-	if req.Key == "" {
-		return nil, status.Error(codes.InvalidArgument, "key is required")
-	}
-
-	switch req.Tier {
-	case memTierWorking:
-		if s.memory == nil {
-			return nil, status.Error(codes.Unimplemented, "working memory not available (shared memory store not wired)")
-		}
-		val, ok := s.memory.Working().Get(req.Key)
-		if !ok {
-			return &componentpb.MemoryGetResponse{Found: false}, nil
-		}
-		// Serialize the retrieved value to JSON for the wire format.
-		// Working memory stores arbitrary any values; JSON is the lowest common
-		// denominator for cross-language clients.
-		item := memory.NewMemoryItem(req.Key, val, nil)
-		data, err := item.MarshalValue()
-		if err != nil {
-			return nil, status.Errorf(codes.Internal, "failed to serialize working memory value: %v", err)
-		}
-		return &componentpb.MemoryGetResponse{Found: true, Value: data}, nil
-
-	case memTierMission:
-		missionMem, err := s.resolveMissionMemory(ctx, req.WorkId, tenant)
-		if err != nil {
-			return nil, err
-		}
-		item, err := missionMem.Retrieve(ctx, req.Key)
-		if err != nil {
-			// Translate not-found into a Found=false response instead of an error
-			// to keep the client contract simple. Mission memory signals not-found
-			// via *types.GibsonError with code ErrCodeMissionMemoryNotFound.
-			var gibsonErr *types.GibsonError
-			if errors.As(err, &gibsonErr) && gibsonErr.Code == memory.ErrCodeMissionMemoryNotFound {
-				return &componentpb.MemoryGetResponse{Found: false}, nil
-			}
-			s.logger.ErrorContext(ctx, "memory get: mission retrieve failed",
-				slog.String("tenant", tenant),
-				slog.String("work_id", req.WorkId),
-				slog.String("key", req.Key),
-				slog.String("error", err.Error()),
-			)
-			return nil, status.Errorf(codes.Internal, "failed to retrieve mission memory key %q: %v", req.Key, err)
-		}
-		data, err := item.MarshalValue()
-		if err != nil {
-			return nil, status.Errorf(codes.Internal, "failed to serialize mission memory value: %v", err)
-		}
-		return &componentpb.MemoryGetResponse{Found: true, Value: data}, nil
-
-	case memTierLongTerm:
-		// Long-term memory is a semantic vector store; it does not support
-		// direct key lookups. Use MemorySearch with a precise query instead.
-		return nil, status.Error(codes.InvalidArgument,
-			"long-term memory does not support key-based Get; use MemorySearch instead")
-
-	default:
-		return nil, status.Errorf(codes.InvalidArgument, "unknown memory tier %q", req.Tier)
-	}
-}
-
-// MemorySet writes a value to the requested memory tier.
-//
-// Tier routing:
-//   - working   — in-process ephemeral map; value is deserialized into any.
-//   - mission   — Redis-backed persistent store scoped to the work item's mission;
-//     requires memoryResolver to be wired (falls back to s.memory.Mission() when not).
-//   - long_term — use the Store call (ID + content); key becomes the ID and
-//     value becomes the content.
-func (s *ComponentServiceServer) MemorySet(
-	ctx context.Context,
-	req *componentpb.MemorySetRequest,
-) (*componentpb.MemorySetResponse, error) {
-	tenant := auth.TenantStringFromContext(ctx)
-	if tenant == "" {
-		return nil, status.Error(codes.Unauthenticated, "missing tenant in context")
-	}
-
-	if s.memory == nil && s.memoryResolver == nil {
-		return nil, status.Error(codes.Unimplemented, "memory store not yet wired on this server")
-	}
-
-	if req.Key == "" {
-		return nil, status.Error(codes.InvalidArgument, "key is required")
-	}
-	if len(req.Value) == 0 {
-		return nil, status.Error(codes.InvalidArgument, "value is required")
-	}
-
-	valueStr := string(req.Value)
-
-	switch req.Tier {
-	case memTierWorking:
-		// Store the raw value string in working memory. The agent is responsible
-		// for deserializing on retrieval; this keeps working memory agnostic to
-		// schema.
-		if s.memory == nil {
-			return nil, status.Error(codes.Unimplemented, "working memory not available (shared memory store not wired)")
-		}
-		if err := s.memory.Working().Set(req.Key, valueStr); err != nil {
-			s.logger.ErrorContext(ctx, "memory set: working memory set failed",
-				slog.String("tenant", tenant),
-				slog.String("key", req.Key),
-				slog.String("error", err.Error()),
-			)
-			return nil, status.Errorf(codes.Internal, "failed to set working memory key %q: %v", req.Key, err)
-		}
-
-	case memTierMission:
-		missionMem, err := s.resolveMissionMemory(ctx, req.WorkId, tenant)
-		if err != nil {
-			return nil, err
-		}
-		// Mission memory accepts any value; store the string directly.
-		if err := missionMem.Store(ctx, req.Key, valueStr, nil); err != nil {
-			s.logger.ErrorContext(ctx, "memory set: mission memory store failed",
-				slog.String("tenant", tenant),
-				slog.String("work_id", req.WorkId),
-				slog.String("key", req.Key),
-				slog.String("error", err.Error()),
-			)
-			return nil, status.Errorf(codes.Internal, "failed to store mission memory key %q: %v", req.Key, err)
-		}
-
-	case memTierLongTerm:
-		// Long-term memory requires content as a plain string for embedding.
-		// value is treated as that content; key becomes the vector entry ID.
-		if s.memory == nil {
-			return nil, status.Error(codes.Unimplemented, "long-term memory not available (shared memory store not wired)")
-		}
-		if err := s.memory.LongTerm().Store(ctx, req.Key, valueStr, nil); err != nil {
-			s.logger.ErrorContext(ctx, "memory set: long-term memory store failed",
-				slog.String("tenant", tenant),
-				slog.String("key", req.Key),
-				slog.String("error", err.Error()),
-			)
-			return nil, status.Errorf(codes.Internal, "failed to store long-term memory entry %q: %v", req.Key, err)
-		}
-
-	default:
-		return nil, status.Errorf(codes.InvalidArgument, "unknown memory tier %q", req.Tier)
-	}
-
-	s.logger.DebugContext(ctx, "memory set: value stored",
-		slog.String("tenant", tenant),
-		slog.String("tier", req.Tier),
-		slog.String("key", req.Key),
-	)
-
-	return &componentpb.MemorySetResponse{}, nil
-}
-
-// MemorySearch performs a semantic or full-text search over a memory tier.
-//
-// Tier routing:
-//   - working   — not suitable for search; returns codes.InvalidArgument.
-//   - mission   — full-text search (RediSearch FTS) over the agent's mission-scoped
-//     namespace, resolved from the work_id via MemoryResolver.
-//   - long_term — vector-similarity search using the configured embedder.
-func (s *ComponentServiceServer) MemorySearch(
-	ctx context.Context,
-	req *componentpb.MemorySearchRequest,
-) (*componentpb.MemorySearchResponse, error) {
-	tenant := auth.TenantStringFromContext(ctx)
-	if tenant == "" {
-		return nil, status.Error(codes.Unauthenticated, "missing tenant in context")
-	}
-
-	if s.memory == nil && s.memoryResolver == nil {
-		return nil, status.Error(codes.Unimplemented, "memory store not yet wired on this server")
-	}
-
-	if req.Query == "" {
-		return nil, status.Error(codes.InvalidArgument, "query is required")
-	}
-
-	topK := int(req.Limit)
-	if topK <= 0 {
-		topK = 10
-	}
-
-	switch req.Tier {
-	case memTierWorking:
-		// Working memory is an in-process key-value map with no search index.
-		// Callers should iterate keys via MemoryGet or restructure data for
-		// mission/longterm tiers.
-		return nil, status.Error(codes.InvalidArgument,
-			"working memory does not support search; use mission or longterm tier")
-
-	case memTierMission:
-		missionMem, err := s.resolveMissionMemory(ctx, req.WorkId, tenant)
-		if err != nil {
-			return nil, err
-		}
-		rawResults, err := missionMem.Search(ctx, req.Query, topK)
-		if err != nil {
-			s.logger.ErrorContext(ctx, "memory search: mission FTS failed",
-				slog.String("tenant", tenant),
-				slog.String("work_id", req.WorkId),
-				slog.String("query", req.Query),
-				slog.String("error", err.Error()),
-			)
-			return nil, status.Errorf(codes.Internal, "mission memory search failed: %v", err)
-		}
-		results := make([]*componentpb.MemoryEntry, 0, len(rawResults))
-		for _, r := range rawResults {
-			data, err := r.Item.MarshalValue()
-			if err != nil {
-				s.logger.WarnContext(ctx, "memory search: failed to serialize mission result; skipping",
-					slog.String("tenant", tenant),
-					slog.String("key", r.Item.Key),
-					slog.String("error", err.Error()),
-				)
-				continue
-			}
-			results = append(results, &componentpb.MemoryEntry{
-				Key:   r.Item.Key,
-				Value: data,
-				Score: float32(r.Score),
-			})
-		}
-		s.logger.DebugContext(ctx, "memory search: mission FTS completed",
-			slog.String("tenant", tenant),
-			slog.String("work_id", req.WorkId),
-			slog.String("query", req.Query),
-			slog.Int("result_count", len(results)),
-		)
-		return &componentpb.MemorySearchResponse{Results: results}, nil
-
-	case memTierLongTerm:
-		rawResults, err := s.memory.LongTerm().Search(ctx, req.Query, topK, nil)
-		if err != nil {
-			s.logger.ErrorContext(ctx, "memory search: long-term search failed",
-				slog.String("tenant", tenant),
-				slog.String("query", req.Query),
-				slog.String("error", err.Error()),
-			)
-			return nil, status.Errorf(codes.Internal, "long-term memory search failed: %v", err)
-		}
-
-		results := make([]*componentpb.MemoryEntry, 0, len(rawResults))
-		for _, r := range rawResults {
-			data, err := r.Item.MarshalValue()
-			if err != nil {
-				// Skip results that cannot be serialized rather than failing the
-				// entire response — partial results are more useful than none.
-				s.logger.WarnContext(ctx, "memory search: failed to serialize result; skipping",
-					slog.String("tenant", tenant),
-					slog.String("key", r.Item.Key),
-					slog.String("error", err.Error()),
-				)
-				continue
-			}
-			results = append(results, &componentpb.MemoryEntry{
-				Key:   r.Item.Key,
-				Value: data,
-				Score: float32(r.Score),
-			})
-		}
-
-		s.logger.DebugContext(ctx, "memory search: long-term search completed",
-			slog.String("tenant", tenant),
-			slog.String("query", req.Query),
-			slog.Int("result_count", len(results)),
-		)
-
-		return &componentpb.MemorySearchResponse{Results: results}, nil
-
-	default:
-		return nil, status.Errorf(codes.InvalidArgument, "unknown memory tier %q", req.Tier)
-	}
-}
-
-// ---------------------------------------------------------------------------
-// Plugin access RPCs
-//
-// These seven RPCs expose tenant-scoped plugin management: browsing the
-// catalog, enabling/disabling plugins, updating configuration, retrieving
-// masked config, testing connectivity, and listing tenant-owned records.
-//
-// All handlers follow the same guard pattern:
-//  1. Extract tenant from context; return Unauthenticated if absent.
-//  2. Return Unimplemented when componentAccess is not wired.
-//  3. Delegate to the ComponentAccessStore and map sentinel errors to the
-//     appropriate gRPC status codes.
-// ---------------------------------------------------------------------------
-
-// componentAccessErrToStatus converts sentinel errors from ComponentAccessStore to
-// the appropriate gRPC status codes.
-func componentAccessErrToStatus(err error, componentName string) error {
-	switch {
-	case errors.Is(err, ErrComponentNotEnabled):
-		return status.Errorf(codes.NotFound, "plugin %q is not enabled for this tenant; enable it first", componentName)
-	case errors.Is(err, ErrComponentNotConfigured):
-		return status.Errorf(codes.FailedPrecondition, "plugin %q is enabled but has no configuration stored", componentName)
-	default:
-		return status.Errorf(codes.Internal, "plugin access operation failed: %v", err)
-	}
-}
-
 // ListAvailablePlugins returns the full plugin catalog visible to the calling
 // tenant, with each entry annotated with the tenant's enablement status.
 func (s *ComponentServiceServer) ListAvailablePlugins(
@@ -2453,4 +2083,17 @@ func extractMessageTypesFromFDS(fds *descriptorpb.FileDescriptorSet) (inputType,
 		}
 	}
 	return
+}
+
+// componentAccessErrToStatus converts sentinel errors from ComponentAccessStore to
+// the appropriate gRPC status codes.
+func componentAccessErrToStatus(err error, componentName string) error {
+	switch {
+	case errors.Is(err, ErrComponentNotEnabled):
+		return status.Errorf(codes.NotFound, "plugin %q is not enabled for this tenant; enable it first", componentName)
+	case errors.Is(err, ErrComponentNotConfigured):
+		return status.Errorf(codes.FailedPrecondition, "plugin %q is enabled but has no configuration stored", componentName)
+	default:
+		return status.Errorf(codes.Internal, "plugin access operation failed: %v", err)
+	}
 }
