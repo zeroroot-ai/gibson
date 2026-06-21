@@ -5,7 +5,6 @@ import (
 
 	"github.com/zeroroot-ai/gibson/internal/crypto"
 	"github.com/zeroroot-ai/gibson/internal/memory/embedder"
-	"github.com/zeroroot-ai/gibson/internal/prompt"
 )
 
 // PlatformPostgresConfig holds connection settings for the shared dashboard
@@ -107,7 +106,6 @@ type Config struct {
 	Core              CoreConfig              `mapstructure:"core" yaml:"core" validate:"required"`
 	Security          SecurityConfig          `mapstructure:"security" yaml:"security" validate:"required"`
 	LLM               LLMConfig               `mapstructure:"llm" yaml:"llm"`
-	Prompt            prompt.PromptConfig     `mapstructure:"prompt" yaml:"prompt"`
 	Logging           LoggingConfig           `mapstructure:"logging" yaml:"logging"`
 	Tracing           TracingConfig           `mapstructure:"tracing" yaml:"tracing"`
 	Metrics           MetricsConfig           `mapstructure:"metrics" yaml:"metrics"`

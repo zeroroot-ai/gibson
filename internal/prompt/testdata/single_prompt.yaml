@@ -1,8 +1,0 @@
-id: "test-single-prompt"
-name: "Single Test Prompt"
-position: "system"
-priority: 10
-content: |
-  This is a single test prompt.
-  It demonstrates basic YAML loading.
-description: "A simple test prompt for integration testing"
