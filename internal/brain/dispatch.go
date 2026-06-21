@@ -95,10 +95,14 @@ func ResumeFailInFlight(w *World) []Event {
 // MissionCompletionSystem so a retryable failure does not prematurely fail a
 // no-goal mission.
 func RetrySystem(w *World) []Event {
+	halted := pausedMissions(w)
 	var out []Event
 	for _, wi := range w.WorkSnapshot() {
 		if wi.Kind == "condition" {
 			continue // conditions are evaluated, not dispatched — never retried
+		}
+		if wi.MissionID != "" && halted[wi.MissionID] {
+			continue // mission paused/terminal — do not re-arm its work
 		}
 		if wi.State == WorkFailed && wi.Attempts <= wi.MaxRetries {
 			out = append(out, WorkRetried{ID: wi.ID})

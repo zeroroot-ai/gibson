@@ -13,6 +13,12 @@ const (
 	MissionRunning   MissionStatus = "running"
 	MissionCompleted MissionStatus = "completed"
 	MissionFailed    MissionStatus = "failed"
+	// MissionPaused: a running mission halted by an operator (gibson#851,
+	// brain-native pause). The executor Systems stop dispatching/deciding for it
+	// until it is resumed; its World state is untouched, so resume continues
+	// exactly where it left off (the Timeline is the durable record — no separate
+	// checkpoint store, ADR-0001).
+	MissionPaused MissionStatus = "paused"
 )
 
 // Budget is the per-mission resource ceiling carried from CUE MissionConstraints
@@ -90,11 +96,38 @@ func applyMissionStarted(w *World, e MissionStarted) {
 	w.missions.NewEntity(&Mission{ID: e.ID, Goal: e.Goal, Status: MissionRunning, DecisionCursor: -1})
 }
 
+// MissionPauseRequested halts a running mission (operator pause). The executor
+// Systems skip a paused mission until MissionResumed.
+type MissionPauseRequested struct{ ID string }
+
+func (MissionPauseRequested) Kind() string { return "mission.pause" }
+
+// MissionResumed returns a paused mission to running.
+type MissionResumed struct{ ID string }
+
+func (MissionResumed) Kind() string { return "mission.resume" }
+
+func applyMissionPauseRequested(w *World, e MissionPauseRequested) {
+	if ent, ok := findMission(w, e.ID); ok {
+		if m := w.missions.Get(ent); m.Status == MissionRunning {
+			m.Status = MissionPaused
+		}
+	}
+}
+
+func applyMissionResumed(w *World, e MissionResumed) {
+	if ent, ok := findMission(w, e.ID); ok {
+		if m := w.missions.Get(ent); m.Status == MissionPaused {
+			m.Status = MissionRunning
+		}
+	}
+}
+
 func applyMissionDone(w *World, e MissionDone) {
 	if ent, ok := findMission(w, e.ID); ok {
 		m := w.missions.Get(ent)
-		if m.Status != MissionRunning {
-			return // already terminal — idempotent
+		if m.Status == MissionCompleted || m.Status == MissionFailed {
+			return // already terminal — idempotent (paused/running can still finish)
 		}
 		outcome := e.Outcome
 		if outcome == "" {
