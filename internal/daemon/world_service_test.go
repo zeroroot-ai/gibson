@@ -43,6 +43,44 @@ func TestWorldService_TenantScopedRead(t *testing.T) {
 	}
 }
 
+// TestWorldService_ListLlmCalls: the World's LLM-call provenance (gibson#755) is
+// readable, tenant-scoped, with token data surfaced; no tenant -> PermissionDenied.
+func TestWorldService_ListLlmCalls(t *testing.T) {
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+	reg := brain.NewRegistry(ctx)
+	srv := NewWorldServer(reg, nil)
+
+	reg.For("acme").Submit(brain.LlmCallObserved{
+		CallID: "c1", Model: "claude-haiku-4-5", PromptTokens: 100, CompletionTokens: 40,
+	})
+
+	tctx := auth.WithTenant(context.Background(), auth.MustNewTenantID("acme"))
+	var resp *worldpb.ListLlmCallsResponse
+	deadline := time.Now().Add(2 * time.Second)
+	for time.Now().Before(deadline) {
+		var err error
+		if resp, err = srv.ListLlmCalls(tctx, &worldpb.ListLlmCallsRequest{}); err != nil {
+			t.Fatalf("ListLlmCalls: %v", err)
+		}
+		if len(resp.LlmCalls) == 1 {
+			break
+		}
+		time.Sleep(10 * time.Millisecond)
+	}
+	if len(resp.GetLlmCalls()) != 1 {
+		t.Fatalf("ListLlmCalls = %+v, want one call", resp.GetLlmCalls())
+	}
+	c := resp.LlmCalls[0]
+	if c.Model != "claude-haiku-4-5" || c.PromptTokens != 100 || c.CompletionTokens != 40 {
+		t.Fatalf("unexpected call view: %+v", c)
+	}
+
+	if _, err := srv.ListLlmCalls(context.Background(), &worldpb.ListLlmCallsRequest{}); err == nil {
+		t.Fatal("expected an error when no tenant is in context")
+	}
+}
+
 // TestWorldService_GetFrameAt: a replay frame is a server-side fold of the log to
 // a point (ADR-0001). Scrubbing to an earlier seq reproduces the World as it was;
 // seq == total reproduces the live World; isolation holds.

@@ -3093,6 +3093,16 @@ var Registry = map[string]Entry{
 		Unauthenticated:   false,
 		Self:              false,
 	},
+	"/gibson.world.v1.WorldService/ListLlmCalls": {
+		Method:            "/gibson.world.v1.WorldService/ListLlmCalls",
+		Service:           "gibson.world.v1.WorldService",
+		Relation:          "member",
+		ObjectType:        "tenant",
+		ObjectDeriver:     "tenant_from_identity",
+		AllowedIdentities: IdentityUser | IdentityService,
+		Unauthenticated:   false,
+		Self:              false,
+	},
 	"/gibson.world.v1.WorldService/ListMissions": {
 		Method:            "/gibson.world.v1.WorldService/ListMissions",
 		Service:           "gibson.world.v1.WorldService",

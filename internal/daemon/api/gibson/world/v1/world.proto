@@ -44,6 +44,18 @@ service WorldService {
     };
   }
 
+  // ListLlmCalls returns the tenant's LLM-call provenance (gibson#755): per-call
+  // model + token data folded into the World, the replacement for the retired
+  // Langfuse trace/cost views.
+  rpc ListLlmCalls(ListLlmCallsRequest) returns (ListLlmCallsResponse) {
+    option (gibson.auth.v1.authz) = {
+      relation: "member",
+      object_type: "tenant",
+      object_deriver: "tenant_from_identity",
+      allowed_identities: 3
+    };
+  }
+
   // GetTimeline returns the tenant's domain-event Timeline — the Scroller scrubs
   // this. Optional mission_id filters to one mission's events.
   rpc GetTimeline(GetTimelineRequest) returns (GetTimelineResponse) {
@@ -99,6 +111,17 @@ message TimelineEvent {
   string summary = 3; // human-readable one-line summary
 }
 
+// LlmCallView is a single LLM completion's metadata (gibson#755): model + token
+// counts + provenance ids. No transcript — the World holds call metadata only.
+message LlmCallView {
+  string call_id = 1;
+  string run_id = 2; // the AgentRun that issued the call ("" for mission-level)
+  string model = 3;
+  string scope_id = 4;
+  int32 prompt_tokens = 5;
+  int32 completion_tokens = 6;
+}
+
 message ListMissionsRequest {}
 message ListMissionsResponse { repeated MissionView missions = 1; }
 
@@ -107,6 +130,9 @@ message ListHostsResponse { repeated HostView hosts = 1; }
 
 message ListFindingsRequest {}
 message ListFindingsResponse { repeated FindingView findings = 1; }
+
+message ListLlmCallsRequest {}
+message ListLlmCallsResponse { repeated LlmCallView llm_calls = 1; }
 
 message GetTimelineRequest { string mission_id = 1; }
 message GetTimelineResponse { repeated TimelineEvent events = 1; }

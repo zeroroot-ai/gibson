@@ -22,6 +22,7 @@ const (
 	WorldService_ListMissions_FullMethodName = "/gibson.world.v1.WorldService/ListMissions"
 	WorldService_ListHosts_FullMethodName    = "/gibson.world.v1.WorldService/ListHosts"
 	WorldService_ListFindings_FullMethodName = "/gibson.world.v1.WorldService/ListFindings"
+	WorldService_ListLlmCalls_FullMethodName = "/gibson.world.v1.WorldService/ListLlmCalls"
 	WorldService_GetTimeline_FullMethodName  = "/gibson.world.v1.WorldService/GetTimeline"
 	WorldService_GetFrameAt_FullMethodName   = "/gibson.world.v1.WorldService/GetFrameAt"
 )
@@ -44,6 +45,10 @@ type WorldServiceClient interface {
 	ListHosts(ctx context.Context, in *ListHostsRequest, opts ...grpc.CallOption) (*ListHostsResponse, error)
 	// ListFindings returns the tenant's confirmed findings.
 	ListFindings(ctx context.Context, in *ListFindingsRequest, opts ...grpc.CallOption) (*ListFindingsResponse, error)
+	// ListLlmCalls returns the tenant's LLM-call provenance (gibson#755): per-call
+	// model + token data folded into the World, the replacement for the retired
+	// Langfuse trace/cost views.
+	ListLlmCalls(ctx context.Context, in *ListLlmCallsRequest, opts ...grpc.CallOption) (*ListLlmCallsResponse, error)
 	// GetTimeline returns the tenant's domain-event Timeline — the Scroller scrubs
 	// this. Optional mission_id filters to one mission's events.
 	GetTimeline(ctx context.Context, in *GetTimelineRequest, opts ...grpc.CallOption) (*GetTimelineResponse, error)
@@ -92,6 +97,16 @@ func (c *worldServiceClient) ListFindings(ctx context.Context, in *ListFindingsR
 	return out, nil
 }
 
+func (c *worldServiceClient) ListLlmCalls(ctx context.Context, in *ListLlmCallsRequest, opts ...grpc.CallOption) (*ListLlmCallsResponse, error) {
+	cOpts := append([]grpc.CallOption{grpc.StaticMethod()}, opts...)
+	out := new(ListLlmCallsResponse)
+	err := c.cc.Invoke(ctx, WorldService_ListLlmCalls_FullMethodName, in, out, cOpts...)
+	if err != nil {
+		return nil, err
+	}
+	return out, nil
+}
+
 func (c *worldServiceClient) GetTimeline(ctx context.Context, in *GetTimelineRequest, opts ...grpc.CallOption) (*GetTimelineResponse, error) {
 	cOpts := append([]grpc.CallOption{grpc.StaticMethod()}, opts...)
 	out := new(GetTimelineResponse)
@@ -130,6 +145,10 @@ type WorldServiceServer interface {
 	ListHosts(context.Context, *ListHostsRequest) (*ListHostsResponse, error)
 	// ListFindings returns the tenant's confirmed findings.
 	ListFindings(context.Context, *ListFindingsRequest) (*ListFindingsResponse, error)
+	// ListLlmCalls returns the tenant's LLM-call provenance (gibson#755): per-call
+	// model + token data folded into the World, the replacement for the retired
+	// Langfuse trace/cost views.
+	ListLlmCalls(context.Context, *ListLlmCallsRequest) (*ListLlmCallsResponse, error)
 	// GetTimeline returns the tenant's domain-event Timeline — the Scroller scrubs
 	// this. Optional mission_id filters to one mission's events.
 	GetTimeline(context.Context, *GetTimelineRequest) (*GetTimelineResponse, error)
@@ -156,6 +175,9 @@ func (UnimplementedWorldServiceServer) ListHosts(context.Context, *ListHostsRequ
 }
 func (UnimplementedWorldServiceServer) ListFindings(context.Context, *ListFindingsRequest) (*ListFindingsResponse, error) {
 	return nil, status.Error(codes.Unimplemented, "method ListFindings not implemented")
+}
+func (UnimplementedWorldServiceServer) ListLlmCalls(context.Context, *ListLlmCallsRequest) (*ListLlmCallsResponse, error) {
+	return nil, status.Error(codes.Unimplemented, "method ListLlmCalls not implemented")
 }
 func (UnimplementedWorldServiceServer) GetTimeline(context.Context, *GetTimelineRequest) (*GetTimelineResponse, error) {
 	return nil, status.Error(codes.Unimplemented, "method GetTimeline not implemented")
@@ -238,6 +260,24 @@ func _WorldService_ListFindings_Handler(srv interface{}, ctx context.Context, de
 	return interceptor(ctx, in, info, handler)
 }
 
+func _WorldService_ListLlmCalls_Handler(srv interface{}, ctx context.Context, dec func(interface{}) error, interceptor grpc.UnaryServerInterceptor) (interface{}, error) {
+	in := new(ListLlmCallsRequest)
+	if err := dec(in); err != nil {
+		return nil, err
+	}
+	if interceptor == nil {
+		return srv.(WorldServiceServer).ListLlmCalls(ctx, in)
+	}
+	info := &grpc.UnaryServerInfo{
+		Server:     srv,
+		FullMethod: WorldService_ListLlmCalls_FullMethodName,
+	}
+	handler := func(ctx context.Context, req interface{}) (interface{}, error) {
+		return srv.(WorldServiceServer).ListLlmCalls(ctx, req.(*ListLlmCallsRequest))
+	}
+	return interceptor(ctx, in, info, handler)
+}
+
 func _WorldService_GetTimeline_Handler(srv interface{}, ctx context.Context, dec func(interface{}) error, interceptor grpc.UnaryServerInterceptor) (interface{}, error) {
 	in := new(GetTimelineRequest)
 	if err := dec(in); err != nil {
@@ -292,6 +332,10 @@ var WorldService_ServiceDesc = grpc.ServiceDesc{
 		{
 			MethodName: "ListFindings",
 			Handler:    _WorldService_ListFindings_Handler,
+		},
+		{
+			MethodName: "ListLlmCalls",
+			Handler:    _WorldService_ListLlmCalls_Handler,
 		},
 		{
 			MethodName: "GetTimeline",

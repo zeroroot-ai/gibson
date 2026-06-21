@@ -305,4 +305,5 @@ rpc,relation,object_type,deriver,identities,source_proto_file,mode
 /gibson.world.v1.WorldService/GetTimeline,member,tenant,tenant_from_identity,USER|SERVICE,gibson/world/v1/world.proto,rule
 /gibson.world.v1.WorldService/ListFindings,member,tenant,tenant_from_identity,USER|SERVICE,gibson/world/v1/world.proto,rule
 /gibson.world.v1.WorldService/ListHosts,member,tenant,tenant_from_identity,USER|SERVICE,gibson/world/v1/world.proto,rule
+/gibson.world.v1.WorldService/ListLlmCalls,member,tenant,tenant_from_identity,USER|SERVICE,gibson/world/v1/world.proto,rule
 /gibson.world.v1.WorldService/ListMissions,member,tenant,tenant_from_identity,USER|SERVICE,gibson/world/v1/world.proto,rule

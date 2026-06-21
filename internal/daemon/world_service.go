@@ -104,6 +104,25 @@ func (s *worldServer) ListFindings(ctx context.Context, _ *worldpb.ListFindingsR
 	return resp, nil
 }
 
+func (s *worldServer) ListLlmCalls(ctx context.Context, _ *worldpb.ListLlmCallsRequest) (*worldpb.ListLlmCallsResponse, error) {
+	e, err := s.engine(ctx)
+	if err != nil {
+		return nil, err
+	}
+	resp := &worldpb.ListLlmCallsResponse{}
+	for _, c := range e.LlmCalls() {
+		resp.LlmCalls = append(resp.LlmCalls, &worldpb.LlmCallView{
+			CallId:           c.CallID,
+			RunId:            c.RunID,
+			Model:            c.Model,
+			ScopeId:          c.ScopeID,
+			PromptTokens:     int32(c.PromptTokens),
+			CompletionTokens: int32(c.CompletionTokens),
+		})
+	}
+	return resp, nil
+}
+
 func (s *worldServer) GetTimeline(ctx context.Context, _ *worldpb.GetTimelineRequest) (*worldpb.GetTimelineResponse, error) {
 	e, err := s.engine(ctx)
 	if err != nil {
