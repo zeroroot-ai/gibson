@@ -892,6 +892,10 @@ func (m *missionManager) executeMission(ctx context.Context, missionID string, d
 
 // Pause pauses a running mission at the next clean checkpoint.
 // Only the calling tenant's missions may be paused (C9 closure).
+// Pause halts a running mission. Brain-native (gibson#851): the engine stops
+// dispatching/deciding for the mission until Resume; the mission goroutine stays
+// alive and the World holds its state (the Timeline is the durable record — no
+// checkpoint store). force is accepted for API compatibility.
 func (m *missionManager) Pause(ctx context.Context, missionID string, force bool) error {
 	m.logger.Info("pausing mission", "mission_id", missionID, "force", force)
 
@@ -901,190 +905,58 @@ func (m *missionManager) Pause(ctx context.Context, missionID string, force bool
 		return fmt.Errorf("mission %s not found or not running", missionID)
 	}
 
-	// If force is true, immediately cancel the mission context
-	// Otherwise, we let the mission detect the pause request gracefully
-	if force {
-		active.cancel()
-	} else {
-		// Cancel the mission context to signal pause request
-		// The orchestrator should detect this and save a checkpoint before transitioning to paused
-		active.cancel()
-	}
+	m.brainRegistry.For(active.tenantID.String()).Submit(brain.MissionPauseRequested{ID: missionID})
 
-	// Emit pause event
-	m.emitEvent(active.eventChan, api.MissionEventData{
-		EventType: "mission.pausing",
-		Timestamp: time.Now(),
-		MissionID: missionID,
-		Message:   "Mission pause requested",
-	})
-
-	// Wait for mission to transition to paused state (with timeout)
-	timeoutCtx, cancel := context.WithTimeout(ctx, 30*time.Second)
-	defer cancel()
-
-	ticker := time.NewTicker(500 * time.Millisecond)
-	defer ticker.Stop()
-
-	for {
-		select {
-		case <-timeoutCtx.Done():
-			m.logger.Warn("timeout waiting for mission to pause", "mission_id", missionID)
-			// Update status to paused anyway
-			active.mission.Status = mission.MissionStatusPaused
-			active.mission.CompletedAt = mission.NewUnixTimePtrNow()
-			if mStore, release, storeErr := m.missionStoreFor(ctx, active.tenantID); storeErr == nil && mStore != nil {
-				defer release()
-				if err := mStore.Update(ctx, active.mission); err != nil {
-					m.logger.Warn("failed to update mission status to paused", "error", err)
-				}
-			}
-			return fmt.Errorf("timeout waiting for mission to pause")
-
-		case <-ticker.C:
-			// Check if mission is still active (scoped to tenant — C9 closure)
-			_, stillActive := m.getActive(active.tenantID, missionID)
-
-			// If mission is no longer active, it has completed or failed
-			if !stillActive {
-				// Fetch mission from store to get final status
-				if mStore, release, storeErr := m.missionStoreFor(ctx, active.tenantID); storeErr == nil && mStore != nil {
-					defer release()
-					finalMission, err := mStore.Get(ctx, types.ID(missionID))
-					if err == nil {
-						if finalMission.Status == mission.MissionStatusPaused {
-							m.logger.Info("mission paused successfully", "mission_id", missionID)
-							return nil
-						}
-						return fmt.Errorf("mission transitioned to unexpected status: %s", finalMission.Status)
-					}
-				}
-				// If we can't get the mission, assume it's paused
-				return nil
-			}
+	active.mission.Status = mission.MissionStatusPaused
+	if mStore, release, storeErr := m.missionStoreFor(ctx, active.tenantID); storeErr == nil && mStore != nil {
+		defer release()
+		if err := mStore.Update(ctx, active.mission); err != nil {
+			m.logger.Warn("failed to persist paused status", "error", err, "mission_id", missionID)
 		}
 	}
+
+	m.emitEvent(active.eventChan, api.MissionEventData{
+		EventType: "mission.paused",
+		Timestamp: time.Now(),
+		MissionID: missionID,
+		Message:   "Mission paused",
+	})
+	return nil
 }
 
-// Resume resumes a paused mission from its last checkpoint.
-// Resume resumes a paused mission. Only the calling tenant's missions may
-// be resumed (C9 closure — audit finding closure).
+// Resume resumes a paused mission. Brain-native: the mission goroutine is still
+// alive (paused in the engine), so Resume un-halts it in the World and returns the
+// existing event stream. Cross-restart resume is not yet supported — the brain
+// Timeline is in-memory (durable Timeline persistence is a follow-up).
 func (m *missionManager) Resume(ctx context.Context, missionID string) (<-chan api.MissionEventData, error) {
 	m.logger.Info("resuming mission", "mission_id", missionID)
 
 	tenant := tenantFromCtxOrSystem(ctx)
-	// Check if mission is already running under this tenant (C9 closure).
-	if _, exists := m.getActive(tenant, missionID); exists {
-		return nil, fmt.Errorf("mission %s is already running", missionID)
+	active, exists := m.getActive(tenant, missionID)
+	if !exists {
+		return nil, fmt.Errorf("mission %s is not active (resume requires a paused, in-memory mission)", missionID)
+	}
+	if active.mission.Status != mission.MissionStatusPaused {
+		return nil, fmt.Errorf("cannot resume mission %s: status is %s (expected paused)", missionID, active.mission.Status)
 	}
 
-	// Get mission from the per-tenant store.
-	mStore, mStoreRelease, mStoreErr := m.missionStoreFor(ctx, tenant)
-	if mStoreErr != nil {
-		return nil, fmt.Errorf("resume: acquire mission store: %w", mStoreErr)
-	}
-	defer mStoreRelease()
-	if mStore == nil {
-		return nil, fmt.Errorf("mission store not available (pool not configured)")
-	}
+	m.brainRegistry.For(active.tenantID.String()).Submit(brain.MissionResumed{ID: missionID})
 
-	missionRecord, err := mStore.Get(ctx, types.ID(missionID))
-	if err != nil {
-		m.logger.Error("failed to get mission", "error", err, "mission_id", missionID)
-		return nil, fmt.Errorf("failed to get mission %s: %w", missionID, err)
-	}
-
-	// Validate mission can be resumed
-	if missionRecord.Status != mission.MissionStatusPaused {
-		return nil, fmt.Errorf("cannot resume mission %s: status is %s (expected paused)", missionID, missionRecord.Status)
-	}
-
-	// Parse mission definition from stored JSON. UnmarshalDefinitionJSON
-	// is the dual-shape reader (proto-shape from PR2+ writers, legacy
-	// flat-mirror via the in-package fallback). executeMission consumes
-	// proto, so we read directly into proto.
-	var def *missionpb.MissionDefinition
-	if missionRecord.MissionDefinitionJSON != "" {
-		def, err = mission.UnmarshalDefinitionJSON([]byte(missionRecord.MissionDefinitionJSON))
-		if err != nil {
-			m.logger.Error("failed to parse mission definition", "error", err)
-			return nil, fmt.Errorf("failed to parse mission definition: %w", err)
+	active.mission.Status = mission.MissionStatusRunning
+	if mStore, release, storeErr := m.missionStoreFor(ctx, active.tenantID); storeErr == nil && mStore != nil {
+		defer release()
+		if err := mStore.Update(ctx, active.mission); err != nil {
+			m.logger.Warn("failed to persist running status on resume", "error", err, "mission_id", missionID)
 		}
-	} else {
-		return nil, fmt.Errorf("mission %s has no definition", missionID)
 	}
 
-	// Create event channel for mission updates
-	eventChan := make(chan api.MissionEventData, 100)
-
-	// Update mission status to running
-	missionRecord.Status = mission.MissionStatusRunning
-	missionRecord.StartedAt = mission.NewUnixTimePtrNow()
-
-	if err := mStore.Update(ctx, missionRecord); err != nil {
-		m.logger.Warn("failed to update mission status", "error", err)
-	}
-
-	// Create new MissionRun for resumed execution
-	var missionRun *mission.MissionRun
-	rStore, rStoreRelease, rStoreErr := m.runStoreFor(ctx, tenant)
-	defer rStoreRelease()
-	if rStoreErr != nil {
-		m.logger.Warn("failed to acquire run store for resume; using ephemeral run", "error", rStoreErr)
-	}
-	if rStore != nil {
-		runNumber, err := rStore.GetNextRunNumber(ctx, missionRecord.ID)
-		if err != nil {
-			m.logger.Error("failed to get next run number", "error", err)
-			return nil, fmt.Errorf("failed to get next run number: %w", err)
-		}
-
-		missionRun = mission.NewMissionRun(missionRecord.ID, runNumber)
-		missionRun.MarkStarted()
-
-		if err := rStore.Save(ctx, missionRun); err != nil {
-			m.logger.Error("failed to save mission run", "error", err)
-			return nil, fmt.Errorf("failed to save mission run: %w", err)
-		}
-	} else {
-		// Fallback: create ephemeral run
-		missionRun = mission.NewMissionRun(missionRecord.ID, 1)
-		missionRun.MarkStarted()
-	}
-
-	// Create mission context with cancellation. Constructed here rather than
-	// earlier so the two `GetNextRunNumber` / `Save` error paths above can
-	// return without leaking a cancel func (go vet: lostcancel).
-	missionCtx, cancel := context.WithCancel(context.Background())
-
-	// Create active mission entry
-	active := &activeMission{
-		mission:    missionRecord,
-		missionRun: missionRun,
-		ctx:        missionCtx,
-		cancel:     cancel,
-		eventChan:  eventChan,
-		startTime:  time.Now(),
-		tenantID:   tenant,
-	}
-
-	// Register active mission under tenant partition (C9 closure).
-	m.setActive(tenant, missionID, active)
-
-	// Emit mission resumed event
-	m.emitEvent(eventChan, api.MissionEventData{
+	m.emitEvent(active.eventChan, api.MissionEventData{
 		EventType: "mission.resumed",
 		Timestamp: time.Now(),
 		MissionID: missionID,
-		Message:   fmt.Sprintf("Mission %s run #%d resumed from checkpoint", missionRecord.Name, missionRun.RunNumber),
+		Message:   "Mission resumed",
 	})
-
-	// Launch mission executor in goroutine
-	// Note: This will execute from the beginning - checkpoint restoration would be handled
-	// by the orchestrator if ExecuteFromCheckpoint were implemented
-	go m.executeMission(missionCtx, missionID, def, eventChan)
-
-	return eventChan, nil
+	return active.eventChan, nil
 }
 
 // Stop stops a running mission with optional force flag.
@@ -1098,7 +970,13 @@ func (m *missionManager) Stop(ctx context.Context, missionID string, force bool)
 		return fmt.Errorf("mission %s not found or not running", missionID)
 	}
 
-	// Cancel the mission context
+	// Tell the brain the mission is terminal (so the World/projector reflect it),
+	// then cancel the mission context (awaitBrainMission returns).
+	m.brainRegistry.For(active.tenantID.String()).Submit(brain.MissionDone{
+		ID:      missionID,
+		Outcome: brain.MissionFailed,
+		Reason:  "stopped by user",
+	})
 	active.cancel()
 
 	// Emit stop event

@@ -11,10 +11,23 @@ package brain
 //     no further progress is possible (nothing running, nothing dispatchable).
 //     Goal missions complete via the Decider (gibson#847), not here.
 
+// pausedMissions returns the set of mission ids that are not currently RUNNING
+// (paused or terminal) — the executor must not dispatch/retry their work.
+func pausedMissions(w *World) map[string]bool {
+	notRunning := map[string]bool{}
+	for _, m := range w.MissionSnapshot() {
+		if m.Status != MissionRunning {
+			notRunning[m.ID] = true
+		}
+	}
+	return notRunning
+}
+
 // SchedulerSystem dispatches pending work whose dependencies are satisfied.
 func SchedulerSystem(w *World) []Event {
 	work := w.WorkSnapshot()
 	state := workStateIndex(work)
+	halted := pausedMissions(w)
 	var out []Event
 	for _, wi := range work {
 		if wi.State != WorkPending {
@@ -22,6 +35,9 @@ func SchedulerSystem(w *World) []Event {
 		}
 		if wi.Kind == "condition" {
 			continue // resolved by ConditionSystem, not dispatched to infra
+		}
+		if wi.MissionID != "" && halted[wi.MissionID] {
+			continue // mission paused/terminal — do not dispatch its work
 		}
 		if depsAllDone(wi.DependsOn, state) {
 			out = append(out, WorkDispatched{
