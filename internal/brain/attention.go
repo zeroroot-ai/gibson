@@ -1,6 +1,7 @@
 package brain
 
 import (
+	"fmt"
 	"sort"
 
 	"github.com/mlange-42/ark/ecs"
@@ -67,6 +68,44 @@ type FindingSnapshot struct {
 	ScopeID     string
 	Address     string
 	Severity    string
+}
+
+// surpriseFindingID is the stable finding id for a host's identity anomaly, so the
+// surprise→Finding promotion is idempotent (one anomaly finding per surprised host).
+func surpriseFindingID(hostID uint64) string {
+	return fmt.Sprintf("anomaly-host-%d", hostID)
+}
+
+// SurpriseFindingSystem promotes a host's Surprise — an identity-contradiction
+// anomaly from scope-relative resolution (ADR-0002/0006) — into a Finding. This is
+// the surprise→Finding pipeline: a strong-signal contradiction (an address reused
+// by a different host) is a real security signal, so it surfaces as a reportable
+// Finding, not just an attention boost. Idempotent + quiescent: one finding per
+// surprised host, keyed by surpriseFindingID.
+func SurpriseFindingSystem(w *World) []Event {
+	existing := map[string]bool{}
+	for _, f := range w.FindingSnapshot() {
+		existing[f.ID] = true
+	}
+	var out []Event
+	for _, h := range w.Snapshot() {
+		if h.Surprise == "" {
+			continue
+		}
+		fid := surpriseFindingID(h.ID)
+		if existing[fid] {
+			continue
+		}
+		out = append(out, FindingRaised{
+			ID:          fid,
+			Title:       "Identity anomaly at " + h.Address,
+			Description: h.Surprise,
+			ScopeID:     h.ScopeID,
+			Address:     h.Address,
+			Severity:    "medium",
+		})
+	}
+	return out
 }
 
 // FindingSnapshot returns the current findings in deterministic (ID) order.
