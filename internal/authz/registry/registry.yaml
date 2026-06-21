@@ -1978,6 +1978,13 @@ entries:
     allowed_identities:
       - USER
       - SERVICE
+  "/gibson.world.v1.WorldService/ListLlmCalls":
+    relation: "member"
+    object_type: "tenant"
+    object_deriver: "tenant_from_identity"
+    allowed_identities:
+      - USER
+      - SERVICE
   "/gibson.world.v1.WorldService/ListMissions":
     relation: "member"
     object_type: "tenant"
