@@ -40,7 +40,6 @@ import (
 	"github.com/zeroroot-ai/gibson/internal/audit"
 	"github.com/zeroroot-ai/gibson/internal/authz"
 	"github.com/zeroroot-ai/gibson/internal/checkpoint"
-	"github.com/zeroroot-ai/gibson/internal/orchestrator"
 	daemonpb "github.com/zeroroot-ai/sdk/api/gen/gibson/daemon/v1"
 	manifestpb "github.com/zeroroot-ai/sdk/api/gen/gibson/manifest/v1"
 	"github.com/zeroroot-ai/sdk/auth"
@@ -1029,26 +1028,26 @@ func (s *DaemonServer) applyRewindIdempotency(ctx context.Context, missionID, ta
 		// Nothing was in flight at the target; resume cleanly.
 		return nil
 	}
-	dispatcher := orchestrator.NewRewindDispatcher(&serverRewindEmitter{server: s, ctx: ctx})
-	tool := orchestrator.InFlightTool{
+	dispatcher := NewRewindDispatcher(&serverRewindEmitter{server: s, ctx: ctx})
+	tool := InFlightTool{
 		NodeID:          payload.InFlightNodeID,
 		ResumptionToken: payload.ResumptionToken,
-		Idempotency:     orchestrator.ResolveIdempotencyFromString(payload.InFlightIdempotency),
+		Idempotency:     ResolveIdempotencyFromString(payload.InFlightIdempotency),
 	}
-	if rerr := dispatcher.Rewind(ctx, missionID, []orchestrator.InFlightTool{tool}); rerr != nil {
+	if rerr := dispatcher.Rewind(ctx, missionID, []InFlightTool{tool}); rerr != nil {
 		return status_grpc.Errorf(codes.FailedPrecondition, "rewind blocked by idempotency contract: %v", rerr)
 	}
 	return nil
 }
 
-// serverRewindEmitter implements orchestrator.RewindEmitter against
+// serverRewindEmitter implements RewindEmitter against
 // the DaemonServer's audit writer + structured logger.
 type serverRewindEmitter struct {
 	server *DaemonServer
 	ctx    context.Context
 }
 
-func (e *serverRewindEmitter) OnToolDispatch(_ context.Context, missionID, nodeID string, mode manifestpb.ToolIdempotency, action orchestrator.IdempotencyAction) {
+func (e *serverRewindEmitter) OnToolDispatch(_ context.Context, missionID, nodeID string, mode manifestpb.ToolIdempotency, action IdempotencyAction) {
 	tenantID := auth.TenantStringFromContext(e.ctx)
 	subject := ""
 	if id, err := auth.IdentityFromContext(e.ctx); err == nil {

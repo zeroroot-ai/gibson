@@ -1,4 +1,4 @@
-// Package orchestrator — rewind.go
+// rewind.go — relocated from internal/orchestrator (retired, gibson#851).
 //
 // Implements the orchestrator-side rewind dispatcher that the daemon's
 // Mission.Resume(target_checkpoint_id) flow drives into. Spec 4 R16.4 +
@@ -14,7 +14,7 @@
 // `mission.rewind.tool_cancelled` audit hint via its emitter callback.
 //
 // Spec: mission-checkpointing R6.3-R6.6, R16.4.
-package orchestrator
+package api
 
 import (
 	"context"

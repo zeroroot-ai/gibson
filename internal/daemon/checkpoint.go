@@ -10,13 +10,32 @@ import (
 	"github.com/zeroroot-ai/gibson/internal/datapool"
 	"github.com/zeroroot-ai/gibson/internal/mission"
 	"github.com/zeroroot-ai/gibson/internal/observability"
-	"github.com/zeroroot-ai/gibson/internal/orchestrator"
 	"github.com/zeroroot-ai/gibson/internal/types"
 	"github.com/zeroroot-ai/sdk/auth"
 )
 
 // checkpointKeyPrefix is the Redis key prefix for mission checkpoints
 const checkpointKeyPrefix = "gibson:checkpoint:"
+
+// Checkpoint is a point-in-time snapshot of a mission's node states, persisted to
+// Redis for graceful-shutdown resume. (Relocated from internal/orchestrator as
+// that package is retired, gibson#851; the brain's Timeline is the live record.)
+type Checkpoint struct {
+	ID         string                         `json:"id"`
+	MissionID  string                         `json:"mission_id"`
+	Label      string                         `json:"label"`
+	CreatedAt  time.Time                      `json:"created_at"`
+	NodeStates map[string]NodeCheckpointState `json:"node_states"`
+	IsImplicit bool                           `json:"is_implicit"`
+}
+
+// NodeCheckpointState captures one mission node's state at checkpoint time.
+type NodeCheckpointState struct {
+	NodeID     string                 `json:"node_id"`
+	Status     string                 `json:"status"`
+	TaskConfig map[string]interface{} `json:"task_config"`
+	Attempt    int                    `json:"attempt"`
+}
 
 // DaemonMissionCheckpointer implements MissionCheckpointer for the daemon.
 // It checkpoints running missions to Redis during graceful shutdown so they can
@@ -158,12 +177,12 @@ func (c *DaemonMissionCheckpointer) CheckpointMissionForTenant(ctx context.Conte
 	}
 
 	// Create checkpoint struct
-	checkpoint := orchestrator.Checkpoint{
+	checkpoint := Checkpoint{
 		ID:         fmt.Sprintf("%s-shutdown-%d", missionID.String(), time.Now().Unix()),
 		MissionID:  missionID.String(),
 		Label:      "graceful_shutdown",
 		CreatedAt:  time.Now(),
-		NodeStates: make(map[string]orchestrator.NodeCheckpointState),
+		NodeStates: make(map[string]NodeCheckpointState),
 		IsImplicit: true, // Auto-created during shutdown
 	}
 
@@ -191,7 +210,7 @@ func (c *DaemonMissionCheckpointer) CheckpointMissionForTenant(ctx context.Conte
 }
 
 // GetCheckpoint retrieves a checkpoint for a specific mission from Redis.
-func (c *DaemonMissionCheckpointer) GetCheckpoint(ctx context.Context, missionID types.ID) (*orchestrator.Checkpoint, error) {
+func (c *DaemonMissionCheckpointer) GetCheckpoint(ctx context.Context, missionID types.ID) (*Checkpoint, error) {
 	if c.redisClient == nil {
 		return nil, fmt.Errorf("redis client not available")
 	}
@@ -205,7 +224,7 @@ func (c *DaemonMissionCheckpointer) GetCheckpoint(ctx context.Context, missionID
 		return nil, fmt.Errorf("failed to retrieve checkpoint from Redis: %w", err)
 	}
 
-	var checkpoint orchestrator.Checkpoint
+	var checkpoint Checkpoint
 	if err := json.Unmarshal([]byte(checkpointJSON), &checkpoint); err != nil {
 		return nil, fmt.Errorf("failed to unmarshal checkpoint: %w", err)
 	}
