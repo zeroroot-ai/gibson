@@ -8,7 +8,6 @@ import (
 	"github.com/stretchr/testify/require"
 	"github.com/zeroroot-ai/gibson/internal/component"
 	"github.com/zeroroot-ai/gibson/internal/llm"
-	"github.com/zeroroot-ai/gibson/internal/memory"
 	"github.com/zeroroot-ai/gibson/internal/types"
 	sdktypes "github.com/zeroroot-ai/sdk/types"
 )
@@ -102,51 +101,6 @@ func TestHarness_GetAllToolCapabilities_EmptyRegistry(t *testing.T) {
 	assert.NoError(t, err)
 	assert.NotNil(t, allCaps)
 	assert.Empty(t, allCaps)
-}
-
-// TestHarnessFactory_ToolCapabilities_WorkingMemoryIntegration verifies that
-// tool capabilities are stored in working memory during harness creation
-// when both memory store and tools with capabilities are available.
-func TestHarnessFactory_ToolCapabilities_WorkingMemoryIntegration(t *testing.T) {
-	// Create working memory to track stored values
-	workingMem := memory.NewWorkingMemory(10000)
-	memoryStore := &MockMemoryStore{
-		WorkingFn: func() memory.WorkingMemory {
-			return workingMem
-		},
-	}
-
-	// Create factory config with memory store (no tools registered)
-	config := HarnessConfig{
-		SlotManager:   llm.NewSlotManager(llm.NewLLMRegistry()),
-		MemoryManager: memoryStore,
-	}
-
-	factory, err := NewHarnessFactory(config)
-	require.NoError(t, err)
-
-	// Create harness
-	missionCtx := NewMissionContext(types.NewID(), "test-mission", "test-agent")
-	targetInfo := NewTargetInfo(types.NewID(), "test-target", "https://example.com", "web")
-
-	harness, err := factory.Create("test-agent", missionCtx, targetInfo)
-	require.NoError(t, err)
-	require.NotNil(t, harness)
-
-	// Check working memory for capabilities
-	// With no tools registered, the key may not be set or may be empty
-	storedCaps, ok := workingMem.Get("tool_capabilities")
-	if ok {
-		// If key exists, it should be a valid capabilities map
-		capsMap, isMap := storedCaps.(map[string]*sdktypes.Capabilities)
-		assert.True(t, isMap, "tool_capabilities should be map[string]*sdktypes.Capabilities")
-		// With no tools, map should be empty
-		assert.Empty(t, capsMap)
-	} else {
-		// If no tools have capabilities, the key may not be set at all
-		// This is acceptable behavior
-		t.Log("tool_capabilities key not set (no tools with capabilities)")
-	}
 }
 
 // TestHarness_GetToolCapabilities_NoRegistryAdapter verifies that

@@ -11,9 +11,9 @@ import (
 
 // fakeGraphWriter records UpsertHost calls per tenant for assertion.
 type fakeGraphWriter struct {
-	mu         sync.Mutex
-	hosts      map[string][]brain.HostSnapshot
-	findings   map[string][]brain.FindingSnapshot
+	mu          sync.Mutex
+	hosts       map[string][]brain.HostSnapshot
+	findings    map[string][]brain.FindingSnapshot
 	domains     map[string][]brain.DomainSnapshot
 	subdomains  map[string][]brain.SubdomainSnapshot
 	credentials map[string][]brain.CredentialSnapshot

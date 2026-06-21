@@ -11,7 +11,6 @@ import (
 	gibsonAgent "github.com/zeroroot-ai/gibson/internal/agent"
 	gibsonHarness "github.com/zeroroot-ai/gibson/internal/harness"
 	gibsonLLM "github.com/zeroroot-ai/gibson/internal/llm"
-	gibsonMemory "github.com/zeroroot-ai/gibson/internal/memory"
 	gibsonTypes "github.com/zeroroot-ai/gibson/internal/types"
 	sdkAgent "github.com/zeroroot-ai/sdk/agent"
 	"github.com/zeroroot-ai/sdk/codegen/workspace"
@@ -147,10 +146,6 @@ func (m *mockInnerHarness) GetFindings(ctx context.Context, filter gibsonHarness
 	return m.getFindingsResult, nil
 }
 
-func (m *mockInnerHarness) Memory() gibsonMemory.MemoryStore {
-	return &mockGibsonMemoryStore{}
-}
-
 func (m *mockInnerHarness) MissionID() gibsonTypes.ID {
 	return gibsonTypes.NewID()
 }
@@ -213,21 +208,6 @@ func (m *mockInnerHarness) Workspace() workspace.Workspace {
 
 func (m *mockInnerHarness) Workspaces() map[string]workspace.Workspace {
 	return map[string]workspace.Workspace{}
-}
-
-// mockGibsonMemoryStore is a minimal implementation of gibsonMemory.MemoryStore for tests.
-type mockGibsonMemoryStore struct{}
-
-func (s *mockGibsonMemoryStore) Working() gibsonMemory.WorkingMemory {
-	return gibsonMemory.NewWorkingMemory(100000)
-}
-
-func (s *mockGibsonMemoryStore) Mission() gibsonMemory.MissionMemory {
-	return nil
-}
-
-func (s *mockGibsonMemoryStore) LongTerm() gibsonMemory.LongTermMemory {
-	return nil
 }
 
 // TestNewGibsonHarnessAdapter verifies the adapter is created correctly.

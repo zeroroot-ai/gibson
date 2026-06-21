@@ -151,17 +151,6 @@ func TestResourceResolver_LLMCall_LegacyStringRequest(t *testing.T) {
 	}
 }
 
-func TestResourceResolver_MemoryOp(t *testing.T) {
-	r := NewResourceResolver(nil, nil)
-	res := r.Resolve(context.Background(), MethodMemorySet, MemoryTarget{Tier: "working", Key: "scan_results"})
-	if res.ResourceType != "memory:working" {
-		t.Errorf("ResourceType = %q", res.ResourceType)
-	}
-	if res.ResourceURI != "scan_results" {
-		t.Errorf("ResourceURI = %q", res.ResourceURI)
-	}
-}
-
 func TestResourceResolver_QueryPlugin(t *testing.T) {
 	r := NewResourceResolver(nil, nil)
 	res := r.Resolve(context.Background(), MethodQueryPlugin, "gitlab")

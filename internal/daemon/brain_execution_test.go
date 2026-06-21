@@ -109,8 +109,10 @@ type fakeDiscovery struct {
 
 func (f *fakeDiscovery) DiscoverAgent(context.Context, string) (agent.Agent, error) { return nil, nil }
 func (f *fakeDiscovery) DiscoverTool(context.Context, string) (tool.Tool, error)    { return nil, nil }
-func (f *fakeDiscovery) ListAgents(context.Context) ([]component.AgentInfo, error)  { return f.agents, nil }
-func (f *fakeDiscovery) ListTools(context.Context) ([]component.ToolInfo, error)    { return f.tools, nil }
+func (f *fakeDiscovery) ListAgents(context.Context) ([]component.AgentInfo, error) {
+	return f.agents, nil
+}
+func (f *fakeDiscovery) ListTools(context.Context) ([]component.ToolInfo, error) { return f.tools, nil }
 func (f *fakeDiscovery) ListPlugins(context.Context) ([]component.PluginInfo, error) {
 	return f.plugins, nil
 }

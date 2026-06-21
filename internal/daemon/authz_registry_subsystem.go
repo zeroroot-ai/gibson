@@ -34,8 +34,8 @@ import (
 // only serves to an explicit reader allow-list. The registry holds no secrets
 // (authz schema only), but its integrity is critical.
 const (
-	envAuthzRegistryPort    = "GIBSON_AUTHZ_REGISTRY_PORT"
-	envAuthzRegistryReaders = "GIBSON_AUTHZ_REGISTRY_READER_SVIDS"
+	envAuthzRegistryPort     = "GIBSON_AUTHZ_REGISTRY_PORT"
+	envAuthzRegistryReaders  = "GIBSON_AUTHZ_REGISTRY_READER_SVIDS"
 	defaultAuthzRegistryPort = "8086"
 	authzRegistryPath        = "/authz/registry.yaml"
 )

@@ -13,7 +13,6 @@ import (
 	"github.com/zeroroot-ai/gibson/internal/llm"
 	"github.com/zeroroot-ai/gibson/internal/llm/providers"
 	"github.com/zeroroot-ai/gibson/internal/llm/providers/catalogue"
-	"github.com/zeroroot-ai/gibson/internal/memory"
 	"github.com/zeroroot-ai/gibson/internal/mission"
 	"github.com/zeroroot-ai/gibson/internal/observability"
 	"github.com/zeroroot-ai/gibson/internal/plan"
@@ -40,9 +39,6 @@ type Infrastructure struct {
 
 	// slotManager resolves slot names to provider configurations
 	slotManager llm.SlotManager
-
-	// memoryManagerFactory creates mission-scoped memory managers
-	memoryManagerFactory *MemoryManagerFactory
 
 	// harnessFactory creates configured AgentHarness instances
 	harnessFactory harness.HarnessFactoryInterface
@@ -153,22 +149,6 @@ func (d *daemonImpl) newInfrastructure(ctx context.Context) (*Infrastructure, er
 	}
 	d.logger.Info(ctx, "initialized slot manager")
 
-	// Create memory manager factory with StateClient and config
-	// Use memory config from daemon config, or nil to use defaults
-	var memConfig *memory.MemoryConfig
-	if d.config != nil {
-		// Config.Memory is a struct, not a pointer, so take its address
-		memConfig = &d.config.Memory
-	}
-
-	// Pass StateClient for Redis-backed memory (required)
-	memoryFactory, err := NewMemoryManagerFactory(d.stateClient, memConfig)
-	if err != nil {
-		return nil, fmt.Errorf("failed to create memory manager factory: %w", err)
-	}
-
-	d.logger.Info(ctx, "initialized memory manager factory with Redis support")
-
 	// Initialize TaxonomyRegistry with core taxonomy
 	// This provides the canonical node/relationship types and parent relationship rules
 	// Must be initialized before GraphRAG so relationship builders can use it
@@ -234,7 +214,6 @@ func (d *daemonImpl) newInfrastructure(ctx context.Context) (*Infrastructure, er
 		findingStore:           nil, // migrated to pool-backed per-tenant path
 		llmRegistry:            llmRegistry,
 		slotManager:            slotManager,
-		memoryManagerFactory:   memoryFactory,
 		otelStack:              otelStack,
 		taxonomyRegistry:       taxonomyRegistry,
 		redisClient:            redisClient,

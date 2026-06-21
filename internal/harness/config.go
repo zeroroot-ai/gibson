@@ -11,7 +11,6 @@ import (
 	"github.com/zeroroot-ai/gibson/internal/harness/middleware"
 	"github.com/zeroroot-ai/gibson/internal/harness/sandboxed"
 	"github.com/zeroroot-ai/gibson/internal/llm"
-	"github.com/zeroroot-ai/gibson/internal/memory"
 	"github.com/zeroroot-ai/gibson/internal/types"
 	"github.com/zeroroot-ai/sdk/protoresolver"
 	"go.opentelemetry.io/otel/trace"
@@ -63,21 +62,6 @@ type HarnessConfig struct {
 	// When set, this is used for agent delegation operations (DelegateToAgent, ListAgents).
 	// Optional: if nil, agent delegation will not be available.
 	RegistryAdapter component.ComponentDiscovery
-
-	// MemoryManager provides memory store creation and lifecycle management.
-	// Used for accessing working, mission, and long-term memory tiers.
-	// The memory manager is expected to be pre-configured for the mission scope.
-	// Optional: if nil, the harness will have limited memory capabilities.
-	// Note: Prefer using MemoryFactory for per-mission memory creation.
-	MemoryManager memory.MemoryManager
-
-	// MemoryFactory creates mission-scoped MemoryManager instances on demand.
-	// When set, this factory is called during harness creation to create a
-	// memory manager scoped to the mission ID and tenant ID from the MissionContext.
-	// The tenantID parameter enables defense-in-depth tenant isolation in the memory layer.
-	// If both MemoryFactory and MemoryManager are set, MemoryFactory takes precedence.
-	// Optional: if nil, MemoryManager is used directly (which may also be nil).
-	MemoryFactory func(missionID types.ID, tenantID string) (memory.MemoryManager, error)
 
 	// Tracer for distributed tracing (OpenTelemetry).
 	// Used for creating spans around LLM operations, tool execution, etc.
@@ -136,15 +120,6 @@ type HarnessConfig struct {
 	// Signature: func(tracer any, log any) middleware.Middleware
 	// Optional: defaults to nil (no Langfuse middleware).
 	LangfuseMiddlewareFactory func(tracer any, log any) middleware.Middleware
-
-	// MemoryWrapper is an optional function that wraps MemoryManager instances.
-	// This enables composition patterns like adding observability (TracedMemoryManager)
-	// or other cross-cutting concerns to memory operations.
-	// The wrapper is applied when a MemoryManager is created or obtained, either from
-	// MemoryFactory or MemoryManager field.
-	// If nil, no wrapping is performed and the memory manager is used as-is.
-	// Optional: defaults to nil (no wrapping).
-	MemoryWrapper func(memory.MemoryManager) memory.MemoryManager
 
 	// MissionClient provides mission lifecycle operations for agent-driven mission creation.
 	// When set, agents can create, run, and monitor child missions through the harness.

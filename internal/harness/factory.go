@@ -134,29 +134,6 @@ func (f *DefaultHarnessFactory) Create(agentName string, missionCtx MissionConte
 		slog.String("mission_name", missionCtx.Name),
 	)
 
-	// Get memory store - either from factory (per-mission) or static config
-	memoryStore := f.config.MemoryManager
-	if f.config.MemoryFactory != nil {
-		// Create mission-scoped memory manager using the factory.
-		// Pass tenantID alongside missionID for defense-in-depth tenant isolation.
-		mm, err := f.config.MemoryFactory(missionCtx.ID, missionCtx.TenantID)
-		if err != nil {
-			logger.Warn("failed to create memory manager via factory, using nil",
-				slog.String("error", err.Error()),
-				slog.String("mission_id", missionCtx.ID.String()),
-				slog.String("tenant_id", missionCtx.TenantID),
-			)
-			// Continue with nil memory - harness will have limited memory capabilities
-		} else {
-			memoryStore = mm
-		}
-	}
-
-	// Apply optional memory wrapper (e.g., TracedMemoryManager)
-	if memoryStore != nil && f.config.MemoryWrapper != nil {
-		memoryStore = f.config.MemoryWrapper(memoryStore)
-	}
-
 	// Create self-referential factory for child harness creation during delegation
 	selfFactory := func(ctx context.Context, childMissionCtx MissionContext, childTarget TargetInfo) (AgentHarness, error) {
 		childAgentName := childMissionCtx.CurrentAgent
@@ -242,33 +219,32 @@ func (f *DefaultHarnessFactory) Create(agentName string, missionCtx MissionConte
 
 	// Create and return DefaultAgentHarness
 	var harness AgentHarness = &DefaultAgentHarness{
-		slotManager:         slotManager,
-		llmRegistry:         llmRegistry,
-		registryAdapter:     f.config.RegistryAdapter,
-		memoryStore:         memoryStore,
-		findingStore:        f.config.FindingStore,
-		factory:             selfFactory,
-		missionCtx:          updatedMissionCtx,
-		targetInfo:          target,
-		tracer:              f.config.Tracer,
-		logger:              logger,
-		metrics:             f.config.Metrics,
-		tokenUsage:          tokenTracker,
-		delegationSink:      f.config.DelegationSink,
-		missionClient:       f.config.MissionClient,
-		spawnLimits:         f.config.SpawnLimits,
-		eventLogger:         f.config.EventLogger,
-		resolver:            resolver,
-		checkpointAccess:    checkpointAccess,
-		categoryClassifier:  categoryClassifier,
-		componentRegistry:   f.config.ComponentRegistry,
-		workQueue:           f.config.WorkQueue,
-		workQueueTimeout:    f.config.WorkQueueTimeout,
-		componentAccess:        f.config.ComponentAccess,
-		maxDelegationDepth:  f.config.MaxDelegationDepth,
-		sandboxedExecutor:   f.config.SandboxedExecutor,
-		toolRunnerEnabled:   f.config.ToolRunnerEnabled,
-		quotaCounter:        f.config.QuotaCounter,
+		slotManager:        slotManager,
+		llmRegistry:        llmRegistry,
+		registryAdapter:    f.config.RegistryAdapter,
+		findingStore:       f.config.FindingStore,
+		factory:            selfFactory,
+		missionCtx:         updatedMissionCtx,
+		targetInfo:         target,
+		tracer:             f.config.Tracer,
+		logger:             logger,
+		metrics:            f.config.Metrics,
+		tokenUsage:         tokenTracker,
+		delegationSink:     f.config.DelegationSink,
+		missionClient:      f.config.MissionClient,
+		spawnLimits:        f.config.SpawnLimits,
+		eventLogger:        f.config.EventLogger,
+		resolver:           resolver,
+		checkpointAccess:   checkpointAccess,
+		categoryClassifier: categoryClassifier,
+		componentRegistry:  f.config.ComponentRegistry,
+		workQueue:          f.config.WorkQueue,
+		workQueueTimeout:   f.config.WorkQueueTimeout,
+		componentAccess:    f.config.ComponentAccess,
+		maxDelegationDepth: f.config.MaxDelegationDepth,
+		sandboxedExecutor:  f.config.SandboxedExecutor,
+		toolRunnerEnabled:  f.config.ToolRunnerEnabled,
+		quotaCounter:       f.config.QuotaCounter,
 		// Per-node slot overrides: lifted from MissionContext so every
 		// ResolveSlot call within this agent execution sees the node's
 		// declared llm_slots bindings. Child harnesses created by
@@ -338,30 +314,6 @@ func (f *DefaultHarnessFactory) Create(agentName string, missionCtx MissionConte
 		)
 	} else {
 		logger.Debug("mission management disabled for harness (no mission client configured)")
-	}
-
-	// Store tool capabilities in working memory for agent access
-	// This allows agents to check tool privilege requirements before execution
-	if memoryStore != nil {
-		ctx := context.Background()
-		caps, err := harness.GetAllToolCapabilities(ctx)
-		if err != nil {
-			logger.Warn("failed to retrieve tool capabilities for working memory",
-				slog.String("error", err.Error()),
-			)
-		} else if len(caps) > 0 {
-			// Store capabilities in working memory under "tool_capabilities" key
-			err = memoryStore.Working().Set("tool_capabilities", caps)
-			if err != nil {
-				logger.Warn("failed to store tool capabilities in working memory",
-					slog.String("error", err.Error()),
-				)
-			} else {
-				logger.Info("stored tool capabilities in working memory",
-					slog.Int("tools_with_capabilities", len(caps)),
-				)
-			}
-		}
 	}
 
 	return harness, nil

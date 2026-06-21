@@ -16,7 +16,6 @@ import (
 	"github.com/zeroroot-ai/gibson/internal/contextkeys"
 	"github.com/zeroroot-ai/gibson/internal/harness/sandboxed"
 	"github.com/zeroroot-ai/gibson/internal/llm"
-	"github.com/zeroroot-ai/gibson/internal/memory"
 	sdkqueue "github.com/zeroroot-ai/gibson/internal/queue"
 	"github.com/zeroroot-ai/gibson/internal/tool"
 	"github.com/zeroroot-ai/gibson/internal/types"
@@ -68,7 +67,6 @@ type DefaultAgentHarness struct {
 	registryAdapter component.ComponentDiscovery
 
 	// Memory and storage
-	memoryStore  memory.MemoryManager
 	findingStore FindingStore
 
 	// Factory for creating child harnesses during delegation
@@ -2116,11 +2114,6 @@ func (h *DefaultAgentHarness) GetFindings(ctx context.Context, filter FindingFil
 // ────────────────────────────────────────────────────────────────────────────
 // Memory Access Methods
 // ────────────────────────────────────────────────────────────────────────────
-
-// Memory provides access to the unified memory store.
-func (h *DefaultAgentHarness) Memory() memory.MemoryStore {
-	return h.memoryStore
-}
 
 // Checkpoint provides access to the checkpointing system for state management.
 // Returns a no-op implementation if checkpointing is not configured.

@@ -11,7 +11,6 @@ import (
 	"github.com/zeroroot-ai/gibson/internal/agent"
 	"github.com/zeroroot-ai/gibson/internal/harness"
 	"github.com/zeroroot-ai/gibson/internal/llm"
-	"github.com/zeroroot-ai/gibson/internal/memory"
 	"github.com/zeroroot-ai/gibson/internal/types"
 	sdkagent "github.com/zeroroot-ai/sdk/agent"
 	"github.com/zeroroot-ai/sdk/codegen/workspace"
@@ -133,9 +132,6 @@ func (m *mockAgentHarness) SubmitFinding(ctx context.Context, finding agent.Find
 }
 func (m *mockAgentHarness) GetFindings(ctx context.Context, filter harness.FindingFilter) ([]agent.Finding, error) {
 	return []agent.Finding{}, nil
-}
-func (m *mockAgentHarness) Memory() memory.MemoryStore {
-	return nil
 }
 func (m *mockAgentHarness) Tracer() trace.Tracer {
 	return nil

@@ -12,10 +12,8 @@ import (
 	"github.com/zeroroot-ai/gibson/internal/llm"
 	"github.com/zeroroot-ai/gibson/internal/llm/modelgate"
 	"github.com/zeroroot-ai/gibson/internal/llm/providers"
-	"github.com/zeroroot-ai/gibson/internal/memory"
 	"github.com/zeroroot-ai/gibson/internal/providerconfig"
 	"github.com/zeroroot-ai/gibson/internal/tenantprovider"
-	"github.com/zeroroot-ai/gibson/internal/types"
 	"go.opentelemetry.io/otel/trace"
 )
 
@@ -45,15 +43,6 @@ func (d *daemonImpl) newHarnessFactory(ctx context.Context) (harness.HarnessFact
 		middlewareChain = nil // Configured per-harness in agent execution context
 	} else {
 		d.logger.Info(ctx, "no tracing middleware configured (OTel disabled)")
-	}
-
-	// Create memory wrapper for tracing if OTel is available
-	var memoryWrapper func(memory.MemoryManager) memory.MemoryManager
-	if d.infrastructure != nil && d.infrastructure.otelStack != nil {
-		tracer := d.infrastructure.otelStack.TracerProvider.Tracer("gibson.memory")
-		memoryWrapper = func(mm memory.MemoryManager) memory.MemoryManager {
-			return memory.NewTracedMemoryManager(mm, tracer)
-		}
 	}
 
 	// Build a Redis-backed WorkQueue for remote component dispatch.
@@ -128,13 +117,6 @@ func (d *daemonImpl) newHarnessFactory(ctx context.Context) (harness.HarnessFact
 		// Finding storage (in-memory for agent execution)
 		FindingStore: harness.NewInMemoryFindingStore(),
 
-		// MemoryFactory creates mission-scoped memory managers on demand.
-		// tenantID is forwarded for defense-in-depth tenant isolation in the memory layer.
-		MemoryManager: nil,
-		MemoryFactory: func(missionID types.ID, tenantID string) (memory.MemoryManager, error) {
-			return d.infrastructure.memoryManagerFactory.CreateForMission(context.Background(), missionID, tenantID)
-		},
-
 		// Observability
 		Logger: d.logger.WithComponent("harness").Slog(),
 		Tracer: func() trace.Tracer {
@@ -149,7 +131,6 @@ func (d *daemonImpl) newHarnessFactory(ctx context.Context) (harness.HarnessFact
 		Middleware: middlewareChain,
 
 		// Memory wrapper for tracing
-		MemoryWrapper: memoryWrapper,
 
 		// Run-provenance: agent delegations fold into the World; the graph
 		// projector (sole writer, ADR-0007) materializes :AgentRun + DELEGATED_TO.

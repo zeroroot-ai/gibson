@@ -65,11 +65,7 @@ func TestActionTableHasNoStaleEntries(t *testing.T) {
 
 	// Memory tier ops are virtual keys — they are not methods on
 	// AgentHarness but on the memory store returned by Memory().
-	exempt := map[HarnessMethod]bool{
-		MethodMemoryGet:    true,
-		MethodMemorySet:    true,
-		MethodMemoryDelete: true,
-	}
+	exempt := map[HarnessMethod]bool{}
 
 	stale := []HarnessMethod{}
 	for m := range DefaultActionTable() {
@@ -95,8 +91,6 @@ func TestActionTableEntriesUseClosedVocabulary(t *testing.T) {
 	validActions := map[string]bool{
 		ActionToolCall:         true,
 		ActionLLMCall:          true,
-		ActionMemoryRead:       true,
-		ActionMemoryWrite:      true,
 		ActionGraphRead:        true,
 		ActionGraphWrite:       true,
 		ActionPluginQuery:      true,

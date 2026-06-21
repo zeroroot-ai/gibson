@@ -89,9 +89,6 @@ func (r *ResourceResolver) Resolve(ctx context.Context, method HarnessMethod, re
 		MethodCompleteStructuredAny, MethodCompleteStructuredAnyWithUsage:
 		return r.resolveLLMCall(request)
 
-	case MethodMemoryGet, MethodMemorySet, MethodMemoryDelete:
-		return r.resolveMemoryOp(request)
-
 	case MethodQueryPlugin:
 		return r.resolvePluginQuery(request)
 
@@ -305,26 +302,6 @@ func (r *ResourceResolver) ResolveLLMResponse(provider, modelID string) Resource
 	return ResourceResolution{
 		ResourceType: "llm:" + provider,
 		ResourceURI:  modelID,
-	}
-}
-
-// MemoryTarget is the resource shape for memory tier operations. The
-// middleware packages (tier, key) in this struct before calling Resolve so
-// the resolver can stamp them onto the signal uniformly.
-type MemoryTarget struct {
-	Tier string // "working", "mission", "long_term"
-	Key  string
-}
-
-// resolveMemoryOp stamps resource_type and resource_uri for memory ops.
-func (r *ResourceResolver) resolveMemoryOp(request any) ResourceResolution {
-	mt, ok := request.(MemoryTarget)
-	if !ok {
-		return ResourceResolution{ResourceType: "memory"}
-	}
-	return ResourceResolution{
-		ResourceType: "memory:" + mt.Tier,
-		ResourceURI:  mt.Key,
 	}
 }
 

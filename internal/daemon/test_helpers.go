@@ -9,7 +9,6 @@ import (
 	"github.com/zeroroot-ai/gibson/internal/component"
 	"github.com/zeroroot-ai/gibson/internal/harness"
 	"github.com/zeroroot-ai/gibson/internal/llm"
-	"github.com/zeroroot-ai/gibson/internal/memory"
 	"github.com/zeroroot-ai/gibson/internal/mission"
 	"github.com/zeroroot-ai/gibson/internal/tool"
 	"github.com/zeroroot-ai/gibson/internal/types"
@@ -345,10 +344,6 @@ func (m *mockAgentHarness) GetFindings(ctx context.Context, filter harness.Findi
 	return nil, fmt.Errorf("not implemented in mock")
 }
 
-func (m *mockAgentHarness) Memory() memory.MemoryStore {
-	return &mockMemoryStore{}
-}
-
 func (m *mockAgentHarness) Mission() harness.MissionContext {
 	return harness.MissionContext{}
 }
@@ -403,95 +398,6 @@ func (m *mockAgentHarness) GetAllRunFindings(ctx context.Context, filter harness
 
 func (m *mockAgentHarness) Checkpoint() harness.CheckpointAccess {
 	return harness.NewHarnessCheckpointMethods(nil, "", "", 0)
-}
-
-// mockMemoryStore is a minimal mock implementation of memory.MemoryStore for testing.
-type mockMemoryStore struct{}
-
-func (m *mockMemoryStore) Working() memory.WorkingMemory {
-	return memory.NewWorkingMemory(100000)
-}
-
-func (m *mockMemoryStore) Mission() memory.MissionMemory {
-	return &mockMissionMemory{}
-}
-
-func (m *mockMemoryStore) LongTerm() memory.LongTermMemory {
-	return &mockLongTermMemory{}
-}
-
-// mockMissionMemory is a minimal mock implementation for testing.
-type mockMissionMemory struct{}
-
-func (m *mockMissionMemory) Store(ctx context.Context, key string, value any, metadata map[string]any) error {
-	return nil
-}
-
-func (m *mockMissionMemory) Retrieve(ctx context.Context, key string) (*memory.MemoryItem, error) {
-	return nil, fmt.Errorf("not found")
-}
-
-func (m *mockMissionMemory) Delete(ctx context.Context, key string) error {
-	return nil
-}
-
-func (m *mockMissionMemory) Search(ctx context.Context, query string, limit int) ([]memory.MemoryResult, error) {
-	return nil, nil
-}
-
-func (m *mockMissionMemory) History(ctx context.Context, limit int) ([]memory.MemoryItem, error) {
-	return nil, nil
-}
-
-func (m *mockMissionMemory) Keys(ctx context.Context) ([]string, error) {
-	return nil, nil
-}
-
-func (m *mockMissionMemory) MissionID() types.ID {
-	return types.NewID()
-}
-
-func (m *mockMissionMemory) GetPreviousRunValue(ctx context.Context, key string) (any, error) {
-	return nil, fmt.Errorf("not found")
-}
-
-func (m *mockMissionMemory) GetValueHistory(ctx context.Context, key string) ([]memory.HistoricalValue, error) {
-	return nil, nil
-}
-
-func (m *mockMissionMemory) ContinuityMode() memory.MemoryContinuityMode {
-	return memory.MemoryIsolated
-}
-
-func (m *mockMissionMemory) GetAll(_ context.Context) (map[string]any, error) {
-	return make(map[string]any), nil
-}
-
-// mockLongTermMemory is a minimal mock implementation for testing.
-type mockLongTermMemory struct{}
-
-func (m *mockLongTermMemory) Store(ctx context.Context, id string, content string, metadata map[string]any) error {
-	return nil
-}
-
-func (m *mockLongTermMemory) Search(ctx context.Context, query string, topK int, filters map[string]any) ([]memory.MemoryResult, error) {
-	return nil, nil
-}
-
-func (m *mockLongTermMemory) SimilarFindings(ctx context.Context, content string, topK int) ([]memory.MemoryResult, error) {
-	return nil, nil
-}
-
-func (m *mockLongTermMemory) SimilarPatterns(ctx context.Context, pattern string, topK int) ([]memory.MemoryResult, error) {
-	return nil, nil
-}
-
-func (m *mockLongTermMemory) Delete(ctx context.Context, id string) error {
-	return nil
-}
-
-func (m *mockLongTermMemory) Health(ctx context.Context) types.HealthStatus {
-	return types.Healthy("mock")
 }
 
 // mockMetricsRecorder is a minimal mock implementation for testing.

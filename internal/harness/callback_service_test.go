@@ -13,7 +13,6 @@ import (
 	"github.com/stretchr/testify/require"
 	"github.com/zeroroot-ai/gibson/internal/agent"
 	"github.com/zeroroot-ai/gibson/internal/llm"
-	"github.com/zeroroot-ai/gibson/internal/memory"
 	"github.com/zeroroot-ai/gibson/internal/types"
 	sdkagent "github.com/zeroroot-ai/sdk/agent"
 	harnesspb "github.com/zeroroot-ai/sdk/api/gen/gibson/harness/v1"
@@ -598,10 +597,6 @@ func (m *mockHarnessWithResolver) GetToolCapabilities(ctx context.Context, toolN
 
 func (m *mockHarnessWithResolver) Target() TargetInfo {
 	return TargetInfo{}
-}
-
-func (m *mockHarnessWithResolver) Memory() memory.MemoryStore {
-	return nil
 }
 
 func (m *mockHarnessWithResolver) Logger() *slog.Logger {

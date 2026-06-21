@@ -37,7 +37,6 @@ import (
 	"github.com/zeroroot-ai/gibson/internal/identity"
 	"github.com/zeroroot-ai/gibson/internal/llm/modelgate"
 	"github.com/zeroroot-ai/gibson/internal/mailer"
-	"github.com/zeroroot-ai/gibson/internal/memory"
 	"github.com/zeroroot-ai/gibson/internal/providerconfig"
 	"github.com/zeroroot-ai/gibson/internal/ratelimit"
 	"github.com/zeroroot-ai/gibson/internal/reconciler"
@@ -74,8 +73,6 @@ import (
 	"google.golang.org/protobuf/types/known/timestamppb"
 )
 
-// daemonMemoryStore wraps a single DefaultWorkingMemory so ComponentServiceServer
-// can satisfy the memory.MemoryStore interface with a daemon-wide shared instance.
 // Mission-tier and long-term-tier operations are handled by the per-mission
 // MemoryResolver wired separately (compSvc.WithMemoryResolver); only Working() is
 // used from this shared store.
@@ -121,14 +118,6 @@ func loadImpersonationKey(name string) []byte {
 	}
 	return nil
 }
-
-type daemonMemoryStore struct {
-	working memory.WorkingMemory
-}
-
-func (s *daemonMemoryStore) Working() memory.WorkingMemory   { return s.working }
-func (s *daemonMemoryStore) Mission() memory.MissionMemory   { return nil }
-func (s *daemonMemoryStore) LongTerm() memory.LongTermMemory { return nil }
 
 // grpcSubsystem owns the lifecycle of the gRPC server. It is constructed by
 // buildGRPCServer and exposes a Serve(ctx) error method that can be launched
@@ -1324,7 +1313,7 @@ func (d *daemonImpl) buildGRPCServer(ctx context.Context) (*grpcSubsystem, error
 			if d.brainRegistry != nil {
 				findingSubmitter = component.NewGraphRAGFindingSubmitter(
 					ingestComponentFinding(d.brainRegistry), // findings → World → projector (ADR-0007)
-					d.pool, // per-tenant Pool: nil when security.key_provider not configured
+					d.pool,                                  // per-tenant Pool: nil when security.key_provider not configured
 					d.stateClient,
 					d.logger.WithComponent("finding-submitter").Slog(),
 				)
