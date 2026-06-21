@@ -56,7 +56,6 @@ func newTestServiceWithReasoner(or OntologyReasoner) *ComponentServiceServer {
 		&noopWorkQueue{},
 		nil, // logger — defaults to slog.Default()
 		nil, // llmCompleter
-		nil, // memStore
 		nil, // findingSubmitter
 		nil, // componentAccess
 		nil, // auditLog

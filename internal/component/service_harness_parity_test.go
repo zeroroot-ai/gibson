@@ -23,7 +23,6 @@ import (
 	"google.golang.org/grpc/codes"
 	"google.golang.org/grpc/status"
 
-	"github.com/zeroroot-ai/gibson/internal/memory"
 	componentpb "github.com/zeroroot-ai/sdk/api/gen/gibson/component/v1"
 	graphragpb "github.com/zeroroot-ai/sdk/api/gen/gibson/graphrag/v1"
 	"github.com/zeroroot-ai/sdk/auth"
@@ -86,7 +85,7 @@ func newParityServer() *ComponentServiceServer {
 		&noopRegistry{},
 		&noopWorkQueue{},
 		testLogger(),
-		nil, nil, nil, nil, nil,
+		nil, nil, nil, nil,
 	)
 }
 
@@ -204,28 +203,6 @@ func (m *mockCredentialStore) GetCredential(_ context.Context, _, _ string) ([]b
 	return m.credJSON, m.err
 }
 
-// mockWorkingMemory implements memory.WorkingMemory.
-type mockWorkingMemory struct {
-	deleted []string
-}
-
-func (m *mockWorkingMemory) Get(_ string) (interface{}, bool)  { return nil, false }
-func (m *mockWorkingMemory) Set(_ string, _ interface{}) error { return nil }
-func (m *mockWorkingMemory) Delete(key string) bool            { m.deleted = append(m.deleted, key); return true }
-func (m *mockWorkingMemory) Clear()                            {}
-func (m *mockWorkingMemory) List() []string                    { return nil }
-func (m *mockWorkingMemory) GetAll() (map[string]any, error)   { return map[string]any{}, nil }
-func (m *mockWorkingMemory) TokenCount() int                   { return 0 }
-func (m *mockWorkingMemory) MaxTokens() int                    { return 0 }
-
-// mockMemoryStore wraps mockWorkingMemory to satisfy memory.MemoryStore.
-type mockMemoryStore struct {
-	working *mockWorkingMemory
-}
-
-func (s *mockMemoryStore) Working() memory.WorkingMemory   { return s.working }
-func (s *mockMemoryStore) Mission() memory.MissionMemory   { return nil }
-func (s *mockMemoryStore) LongTerm() memory.LongTermMemory { return nil }
 
 // ---------------------------------------------------------------------------
 // 1. QueryNodes — happy path
@@ -403,46 +380,6 @@ func TestServiceHarnessParity_GetCredential_NilStore(t *testing.T) {
 	svc := newParityServer()
 
 	_, err := svc.GetCredential(tenantCtx(), &componentpb.GetCredentialRequest{Name: "any"})
-
-	require.Error(t, err)
-	assert.Equal(t, codes.Unimplemented, status.Code(err))
-}
-
-// ---------------------------------------------------------------------------
-// 12. MemoryDelete (working tier) — happy path
-// ---------------------------------------------------------------------------
-
-func TestServiceHarnessParity_MemoryDelete_WorkingTier_HappyPath(t *testing.T) {
-	wm := &mockWorkingMemory{}
-	store := &mockMemoryStore{working: wm}
-	svc := NewComponentServiceServer(
-		&noopRegistry{},
-		&noopWorkQueue{},
-		testLogger(),
-		nil, store, nil, nil, nil,
-	)
-
-	resp, err := svc.MemoryDelete(tenantCtx(), &componentpb.MemoryDeleteRequest{
-		Tier: memTierWorking,
-		Key:  "scratch-key",
-	})
-
-	require.NoError(t, err)
-	require.NotNil(t, resp)
-	assert.Contains(t, wm.deleted, "scratch-key")
-}
-
-// ---------------------------------------------------------------------------
-// 13. MemoryDelete — nil memory returns Unimplemented for working tier
-// ---------------------------------------------------------------------------
-
-func TestServiceHarnessParity_MemoryDelete_NilMemory(t *testing.T) {
-	svc := newParityServer() // memory not wired
-
-	_, err := svc.MemoryDelete(tenantCtx(), &componentpb.MemoryDeleteRequest{
-		Tier: memTierWorking,
-		Key:  "k",
-	})
 
 	require.Error(t, err)
 	assert.Equal(t, codes.Unimplemented, status.Code(err))

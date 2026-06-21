@@ -34,15 +34,6 @@ rpc,relation,object_type,deriver,identities,source_proto_file,mode
 /gibson.component.v1.ComponentService/ListMissions,can_execute,component,system_tenant,COMPONENT,gibson/component/v1/component.proto,rule
 /gibson.component.v1.ComponentService/ListTenantPlugins,can_execute,component,system_tenant,COMPONENT,gibson/component/v1/component.proto,rule
 /gibson.component.v1.ComponentService/ListTools,can_execute,component,system_tenant,COMPONENT,gibson/component/v1/component.proto,rule
-/gibson.component.v1.ComponentService/MemoryClear,can_execute,component,system_tenant,COMPONENT,gibson/component/v1/component.proto,rule
-/gibson.component.v1.ComponentService/MemoryDelete,can_execute,component,system_tenant,COMPONENT,gibson/component/v1/component.proto,rule
-/gibson.component.v1.ComponentService/MemoryGet,can_execute,component,system_tenant,COMPONENT,gibson/component/v1/component.proto,rule
-/gibson.component.v1.ComponentService/MemoryGetPreviousRunValue,can_execute,component,system_tenant,COMPONENT,gibson/component/v1/component.proto,rule
-/gibson.component.v1.ComponentService/MemoryGetValueHistory,can_execute,component,system_tenant,COMPONENT,gibson/component/v1/component.proto,rule
-/gibson.component.v1.ComponentService/MemoryHistory,can_execute,component,system_tenant,COMPONENT,gibson/component/v1/component.proto,rule
-/gibson.component.v1.ComponentService/MemoryKeys,can_execute,component,system_tenant,COMPONENT,gibson/component/v1/component.proto,rule
-/gibson.component.v1.ComponentService/MemorySearch,can_execute,component,system_tenant,COMPONENT,gibson/component/v1/component.proto,rule
-/gibson.component.v1.ComponentService/MemorySet,can_execute,component,system_tenant,COMPONENT,gibson/component/v1/component.proto,rule
 /gibson.component.v1.ComponentService/PollWork,can_execute,component,system_tenant,COMPONENT,gibson/component/v1/component.proto,rule
 /gibson.component.v1.ComponentService/QueryNodes,can_execute,component,system_tenant,COMPONENT,gibson/component/v1/component.proto,rule
 /gibson.component.v1.ComponentService/QueryPlugin,can_execute,component,system_tenant,COMPONENT,gibson/component/v1/component.proto,rule
