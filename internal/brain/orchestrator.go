@@ -54,6 +54,11 @@ type Mission struct {
 	// DeciderSlot is the mission-level LLM the Decider runs on (gibson#850); empty
 	// → tenant dashboard default.
 	DeciderSlot DeciderSlot
+	// BeliefModel pins the belief-model version this mission ran under (ADR-0005
+	// §5). Recorded at launch from the provider's current artifact so replay
+	// re-loads the exact model and reproduces the field; empty → no pinned model
+	// (placeholder / OSS-without-base-model). Read-only after launch.
+	BeliefModel string
 }
 
 // MissionStarted launches a mission. (CUE-mission projection lands later; this is
@@ -61,6 +66,8 @@ type Mission struct {
 type MissionStarted struct {
 	ID   string
 	Goal string
+	// BeliefModel pins the belief-model version (ADR-0005 §5); empty → unpinned.
+	BeliefModel string
 }
 
 func (MissionStarted) Kind() string { return "mission.started" }
@@ -93,7 +100,7 @@ func applyMissionStarted(w *World, e MissionStarted) {
 	if _, ok := findMission(w, e.ID); ok {
 		return
 	}
-	w.missions.NewEntity(&Mission{ID: e.ID, Goal: e.Goal, Status: MissionRunning, DecisionCursor: -1})
+	w.missions.NewEntity(&Mission{ID: e.ID, Goal: e.Goal, Status: MissionRunning, DecisionCursor: -1, BeliefModel: e.BeliefModel})
 }
 
 // MissionPauseRequested halts a running mission (operator pause). The executor
@@ -201,6 +208,7 @@ type MissionSnapshot struct {
 	DecisionCursor   int
 	TokensUsed       int64
 	DeciderSlot      DeciderSlot
+	BeliefModel      string // pinned belief-model version (ADR-0005 §5)
 }
 
 // MissionSnapshot returns the current missions in deterministic (ID) order.
@@ -219,6 +227,7 @@ func (w *World) MissionSnapshot() []MissionSnapshot {
 			DecisionCursor:   m.DecisionCursor,
 			TokensUsed:       m.TokensUsed,
 			DeciderSlot:      m.DeciderSlot,
+			BeliefModel:      m.BeliefModel,
 		})
 	}
 	sort.Slice(out, func(i, j int) bool { return out[i].ID < out[j].ID })

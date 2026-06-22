@@ -22,6 +22,11 @@ type Belief struct {
 // belief now — it is replaced by the pgmpy-backed provider in a later slice.
 type BeliefProvider interface {
 	Score(h Host) Belief
+	// Version is the model artifact the provider currently scores against, so a
+	// mission can pin it at launch (ADR-0005 §5) and replay reproduces. The
+	// pgmpy provider returns its pinned/served version; the placeholder returns
+	// its static stand-in id.
+	Version() string
 }
 
 // BeliefScored records a (re)computed belief for a host (by stable id — a
@@ -82,6 +87,9 @@ func (placeholderBelief) Score(h Host) Belief {
 		Model:       "placeholder-v0",
 	}
 }
+
+// Version is the placeholder's static stand-in id.
+func (placeholderBelief) Version() string { return "placeholder-v0" }
 
 // PlaceholderBeliefProvider returns the deterministic stand-in provider.
 func PlaceholderBeliefProvider() BeliefProvider { return placeholderBelief{} }

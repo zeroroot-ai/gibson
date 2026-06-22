@@ -107,6 +107,10 @@ type daemonImpl struct {
 	// WorldService read path reads through it. Lazily created at gRPC registration.
 	brainRegistry *brain.Registry
 	brainExecutor *brainExecutor
+	// beliefProvider scores the belief field (ADR-0005). The pgmpy sidecar when
+	// GIBSON_BELIEF_SIDECAR_URL is set, else the deterministic placeholder. Held
+	// here so the mission launch path can pin its model version (ADR-0005 §5).
+	beliefProvider brain.BeliefProvider
 
 	// registryTenant is the tenant scope used for component registry discovery
 	registryTenant string
@@ -779,11 +783,12 @@ func (d *daemonImpl) Start(ctx context.Context) error {
 	// Initialize the per-tenant ECS brain registry (epic ecs-brain). Engines run
 	// for the daemon's lifetime; the orchestrator event-bus adapter feeds each
 	// tenant's World from its live mission event stream (ADR-0001 capture path).
+	d.beliefProvider = resolveBeliefProvider()
 	d.brainRegistry = brain.NewRegistry(ctx, append(
-		[]brain.System{brain.BeliefSystem(brain.PlaceholderBeliefProvider())},
+		[]brain.System{brain.BeliefSystem(d.beliefProvider)},
 		brain.ExecutorSystems()..., // scheduler/condition/decider-gate/budget/retry/completion (gibson#851)
 	)...)
-	d.logger.Info(ctx, "ECS brain registry initialized")
+	d.logger.Info(ctx, "ECS brain registry initialized", "belief_model", d.beliefProvider.Version())
 
 	// Project each tenant's World into its Neo4j knowledge graph (ADR-0007): the
 	// graph is a read-model of the World, written only by this projector. Runs
