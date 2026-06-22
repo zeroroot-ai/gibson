@@ -11,7 +11,7 @@
 # ============================================================================
 # Stage 1: Builder - Pure Go compilation (no CGO)
 # ============================================================================
-FROM golang:1.25-alpine AS builder
+FROM golang:1.26.4-alpine AS builder
 
 # Install git for private repo access
 RUN apk add --no-cache git ca-certificates

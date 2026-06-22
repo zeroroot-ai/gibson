@@ -1,4 +1,4 @@
-ARG GOLANG_VERSION=1.25
+ARG GOLANG_VERSION=1.26.4
 # Sourced from the ghcr.io/zeroroot-ai/mirror copy populated by
 # zeroroot-ai/.github :: mirror-images.yml. Mirror tags are immutable by
 # workflow policy; no SHA pin needed. Bump GOLANG_VERSION + add the matching
