@@ -2,7 +2,7 @@ syntax = "proto3";
 
 package gibson.session.v1;
 
-option go_package = "github.com/zeroroot-ai/gibson/internal/daemon/api/gibson/session/v1;sessionv1";
+option go_package = "github.com/zeroroot-ai/gibson/internal/server/daemon/api/gibson/session/v1;sessionv1";
 
 import "gibson/auth/v1/options.proto";
 import "google/protobuf/timestamp.proto";

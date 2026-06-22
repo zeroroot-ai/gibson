@@ -2,7 +2,7 @@ syntax = "proto3";
 
 package gibson.daemon.operator.v1;
 
-option go_package = "github.com/zeroroot-ai/gibson/internal/daemon/api/gibson/daemon/operator/v1;daemonoperatorv1";
+option go_package = "github.com/zeroroot-ai/gibson/internal/server/daemon/api/gibson/daemon/operator/v1;daemonoperatorv1";
 
 import "gibson/auth/v1/options.proto";
 
