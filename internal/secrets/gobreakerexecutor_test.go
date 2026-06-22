@@ -6,7 +6,7 @@ import (
 
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
-	"github.com/zeroroot-ai/platform-clients/resilience"
+	"github.com/zeroroot-ai/gibson/internal/infra/resilience"
 )
 
 const (

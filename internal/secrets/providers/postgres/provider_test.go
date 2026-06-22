@@ -8,7 +8,7 @@ import (
 
 	dbpostgres "github.com/zeroroot-ai/gibson/internal/database/postgres"
 	"github.com/zeroroot-ai/gibson/internal/datapool"
-	"github.com/zeroroot-ai/platform-clients/secrets"
+	"github.com/zeroroot-ai/gibson/internal/infra/secrets"
 	"github.com/zeroroot-ai/sdk/auth"
 )
 

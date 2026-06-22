@@ -12,7 +12,7 @@ import (
 	"fmt"
 	"log/slog"
 
-	"github.com/zeroroot-ai/platform-clients/secrets"
+	"github.com/zeroroot-ai/gibson/internal/infra/secrets"
 )
 
 // legitimateHMAC computes an HMAC of a message using the secret as the key.

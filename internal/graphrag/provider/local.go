@@ -17,7 +17,7 @@ import (
 	"github.com/zeroroot-ai/gibson/internal/graphrag/graph"
 	"github.com/zeroroot-ai/gibson/internal/memory/vector"
 	"github.com/zeroroot-ai/gibson/internal/types"
-	"github.com/zeroroot-ai/platform-clients/resilience"
+	"github.com/zeroroot-ai/gibson/internal/infra/resilience"
 	"github.com/zeroroot-ai/sdk/auth"
 )
 

@@ -9,7 +9,7 @@ import (
 	"github.com/sony/gobreaker"
 	"github.com/zeroroot-ai/gibson/internal/llm"
 	"github.com/zeroroot-ai/gibson/internal/types"
-	"github.com/zeroroot-ai/platform-clients/resilience"
+	"github.com/zeroroot-ai/gibson/internal/infra/resilience"
 )
 
 // llmCircuitConfig returns the circuit-breaker configuration tuned for LLM

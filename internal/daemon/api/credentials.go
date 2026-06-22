@@ -8,7 +8,7 @@ import (
 
 	"github.com/zeroroot-ai/gibson/internal/secrets"
 	"github.com/zeroroot-ai/gibson/internal/types"
-	sdksecrets "github.com/zeroroot-ai/platform-clients/secrets"
+	sdksecrets "github.com/zeroroot-ai/gibson/internal/infra/secrets"
 	"google.golang.org/grpc/codes"
 	"google.golang.org/grpc/status"
 )

@@ -13,7 +13,7 @@ import (
 func TestSecretsNoLog_Violation(t *testing.T) {
 	testdata := analysistest.TestData()
 	analysistest.Run(t, testdata, checks.SecretsNoLogAnalyzer,
-		"github.com/zeroroot-ai/platform-clients/secrets/secretslogviolation")
+		"github.com/zeroroot-ai/gibson/internal/infra/secrets/secretslogviolation")
 }
 
 // TestSecretsNoLog_Clean verifies that a secrets-package function that uses
@@ -23,5 +23,5 @@ func TestSecretsNoLog_Clean(t *testing.T) {
 	testdata := analysistest.TestData()
 	// No // want comments in the clean fixture — zero diagnostics expected.
 	analysistest.Run(t, testdata, checks.SecretsNoLogAnalyzer,
-		"github.com/zeroroot-ai/platform-clients/secrets/secretslogclean")
+		"github.com/zeroroot-ai/gibson/internal/infra/secrets/secretslogclean")
 }

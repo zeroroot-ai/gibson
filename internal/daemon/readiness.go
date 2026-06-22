@@ -25,7 +25,7 @@ import (
 	"fmt"
 
 	"github.com/zeroroot-ai/gibson/internal/authz"
-	pcreadiness "github.com/zeroroot-ai/platform-clients/readiness"
+	pcreadiness "github.com/zeroroot-ai/gibson/internal/infra/readiness"
 )
 
 // platformReadinessProbe wraps a named function as a pcreadiness.Probe.
