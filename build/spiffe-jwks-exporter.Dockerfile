@@ -10,6 +10,14 @@ FROM ghcr.io/zeroroot-ai/mirror/golang:${GOLANG_VERSION}-alpine AS build
 RUN apk add --no-cache git ca-certificates
 
 WORKDIR /src
+# Defensive complement to the pinned base image (#914 bumped it to
+# golang:1.26.4 to match go.mod). The mirror golang image bakes
+# GOTOOLCHAIN=local, so if a future go.mod toolchain bump ever outpaces the
+# mirror tag the build would fail with "go.mod requires go >= 1.X.Y (running
+# go 1.X.Z; GOTOOLCHAIN=local)". GOTOOLCHAIN=auto lets the toolchain
+# self-fetch in that window. Matches the daemon Dockerfile pattern after the
+# E4 fold (gibson#913).
+ENV GOTOOLCHAIN=auto
 COPY go.mod go.sum ./
 # --mount=type=secret,id=ghtoken provides the GitHub token for fetching private
 # zeroroot-ai modules. The credential is scoped to this single RUN layer and

@@ -40,10 +40,26 @@ var forbidden = []string{
 // permitted to import forbidden packages (CG-JWT minting needs jwt
 // libs; the existing authz package wraps the FGA SDK during the
 // migration).
+//
+// The guard's intent is "keep openfga/zitadel out of the *daemon's*
+// import chain" — the daemon does not call OpenFGA or validate Zitadel
+// tokens directly (those decisions belong to ext-authz/Envoy, see
+// unified-identity-and-authorization Requirement 8.1). After the E4
+// monorepo fold (gibson#913), ext-authz and its FGA-wrapping packages
+// are in-module: per ADR-0056 these folded packages MAY use openfga —
+// they ARE the legitimate FGA/Envoy upstream consumer. They simply may
+// not import internal/daemon. So they are allowlisted here by package
+// path, while the daemon's own packages (internal/server/daemon, …)
+// remain subject to the guard.
 var allowlistPaths = []string{
 	"/internal/platform/authz",
 	"/internal/platform/capabilitygrant",
-	"/cmd/", // standalone binaries may need OIDC/FGA for diagnostic tooling
+	// Folded-in ext-authz (gibson#913 / ADR-0056): the in-module
+	// ext-authz server packages and the shared internal authz client
+	// surface (FGAClient wrapper) are the legitimate OpenFGA consumers.
+	"/internal/server/extauthz",
+	"/internal/infra/authz",
+	"/cmd/", // standalone binaries (incl. cmd/ext-authz) may need OIDC/FGA
 }
 
 func runForbiddenImports(pass *analysis.Pass) (any, error) {
