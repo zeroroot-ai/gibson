@@ -11,44 +11,33 @@ import (
 type EmbedderType string
 
 const (
-	// EmbedderTypeNative uses all-MiniLM-L6-v2 for local offline embedding generation.
-	// No API keys required, runs via GoMLX with XLA/PJRT backend.
-	// Produces 384-dimensional embeddings.
-	EmbedderTypeNative EmbedderType = "native"
+	// EmbedderTypeProvider resolves a provider-backed embedder from the tenant's
+	// configured embedding provider (mirrors the LLM ProviderService — see
+	// docs ADR-0059). It is the only supported embedder type: gibson no longer
+	// bundles a local model.
+	EmbedderTypeProvider EmbedderType = "provider"
 )
 
-// CreateEmbedder creates an embedder based on the provided configuration.
+// CreateEmbedder resolves an Embedder for the given configuration.
 //
-// Supported provider types:
-//   - "native": all-MiniLM-L6-v2 (384 dims, offline, no API key) - DEFAULT
-//   - "" (empty): defaults to native
-//
-// Returns an error if embedder initialization fails. The daemon should fail fast
-// if the embedder cannot be created - vector search is a core feature.
+// Per docs ADR-0059 the bundled ONNX embedder has been removed. Embedding is a
+// BYO provider: the concrete impl is resolved from the tenant's configured
+// embedding provider (OpenAI / Bedrock / Cohere / Voyage / generic
+// OpenAI-compatible-or-TEI endpoint). The provider-backed factory and the
+// per-tenant re-embed migration are a follow-up build; until they land, gibson
+// has no in-process fallback. There is deliberately NO bundled soft-degrade:
+// vector recall / GraphRAG / belief-RAG / finding vector classification are
+// gated until an embedding provider is configured, exactly as the LLM-provider
+// requirement gates chat (ADR-0059 §4).
 func CreateEmbedder(config EmbedderConfig, logger *slog.Logger) (Embedder, error) {
-	switch EmbedderType(config.Provider) {
-	case EmbedderTypeNative, "":
-		return CreateNativeEmbedder(logger)
-
-	default:
-		return nil, types.NewError(ErrCodeInvalidConfig,
-			fmt.Sprintf("unknown embedder provider '%s' - must be 'native'",
-				config.Provider))
-	}
+	return nil, types.NewError(ErrCodeEmbedderUnavailable,
+		fmt.Sprintf("no embedding provider configured (provider=%q): gibson no longer "+
+			"bundles a local embedder — configure a BYO embedding provider (docs ADR-0059)",
+			config.Provider))
 }
 
 // ValidateEmbedderConfig validates an embedder configuration.
 // Returns an error if the configuration is invalid or incomplete.
 func ValidateEmbedderConfig(config EmbedderConfig) error {
-	switch EmbedderType(config.Provider) {
-	case EmbedderTypeNative, "":
-		// Native embedder has no additional config requirements
-		// Empty provider defaults to native
-		return nil
-
-	default:
-		return types.NewError(ErrCodeInvalidConfig,
-			fmt.Sprintf("unknown embedder provider '%s' - must be 'native'",
-				config.Provider))
-	}
+	return config.Validate()
 }

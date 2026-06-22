@@ -46,10 +46,6 @@ jobs:
     # stub) variant. The empty variant must still build and pass tests because
     # the SDK and unit-test paths still depend on the disabled stub at
     # `internal/server/daemon/sandboxed_setec_disabled.go`.
-    #
-    # NOTE: embedder tests are CI-deferred (gated by `//go:build embedder_tests`)
-    # — do NOT add `-tags=embedder_tests` here. Local `make test` / `make test-race`
-    # already skip them by default (CLAUDE.md operational guardrails).
     name: Test (build_tags=${{ matrix.build_tags || 'empty' }})
     runs-on: ubuntu-latest
     services:
