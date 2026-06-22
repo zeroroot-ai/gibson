@@ -36,7 +36,6 @@ func newEnsureZitadelOrgStep(deps ProvisionDeps) *ensureZitadelOrgStep {
 		StepBase: saga.StepBase{
 			N:     "EnsureZitadelOrg",
 			C:     gibsonv1alpha1.ConditionZitadelOrgReady,
-			Req:   []string{"WaitForBillingConfirmation"},
 			Caps:  []saga.ClientCapability{saga.CapabilityZitadelAdmin},
 			Owner: "zitadel-integration",
 			P99:   10 * time.Second,

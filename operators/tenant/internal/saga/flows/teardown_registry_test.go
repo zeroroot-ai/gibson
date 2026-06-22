@@ -99,8 +99,6 @@ func TestTeardownSteps_NamesStableContract(t *testing.T) {
 		"FinalNeo4jBackup",
 		"DeprovisionDataPlane",
 		"DeleteTenantFGATuples",
-		"CancelStripeSubscription",
-		"DeleteStripeCustomer",
 		"RemoveZitadelOrg",
 		"DeleteTenantName",
 		"DeleteRedisKeyspace",

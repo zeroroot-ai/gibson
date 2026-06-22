@@ -79,12 +79,13 @@ func stripeKeyMode(key string) (string, error) {
 
 // validateStripeEnvKey is the one-code-path (tenant-operator#95) startup
 // contract for the Stripe billing client. The operator refuses to boot when
-// STRIPE_API_KEY is absent. The previous behaviour (silently nil Stripe client
-// → billing saga steps skipped for non-enterprise-deploy tenants) masked
-// operator misconfiguration as phantom billing success.
+// STRIPE_API_KEY is absent. The previous behaviour (silently nil Stripe client)
+// masked operator misconfiguration as phantom billing success.
 //
-// Enterprise-deploy tenants are excluded at the saga.Skip() level via
-// skipUnbilledTier; every other tier requires a live Stripe client.
+// The provisioning saga no longer uses Stripe (the payment gate was removed in
+// E7/gibson#799); the live client now backs only the BillingReconciler. This
+// guard, the client, and the reconciler all exit OSS when billing moves to the
+// closed Entitlements layer (E7/gibson#798+#800).
 //
 // The function is pure (takes a getenv functor) so the contract is testable
 // without mutating process environment. main() wires it via os.Getenv.
@@ -92,9 +93,8 @@ func validateStripeEnvKey(getenv func(string) string) error {
 	if getenv("STRIPE_API_KEY") == "" {
 		return fmt.Errorf(
 			"STRIPE_API_KEY is required (one-code-path / tenant-operator#95): " +
-				"billing saga steps (CreateStripeCustomer, CancelStripeSubscription, " +
-				"DeleteStripeCustomer) require a live Stripe client; " +
-				"enterprise-deploy tenants are already excluded at the saga Skip() level",
+				"the BillingReconciler requires a live Stripe client " +
+				"(removed from OSS once billing moves to the closed layer, gibson#798/#800)",
 		)
 	}
 	return nil

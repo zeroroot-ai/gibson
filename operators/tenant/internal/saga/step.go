@@ -126,8 +126,8 @@ type StepBase struct {
 
 	// P99 is the expected p99 duration of a successful Provision call,
 	// used by alerting to flag steps that have drifted slow. Zero means
-	// "no expected SLA" (some steps wait on external billing webhooks
-	// for up to an hour; see WaitForBillingConfirmation).
+	// "no expected SLA" (some steps block on external controllers — e.g.
+	// RemoveZitadelOrg waits on TenantMember CRDs being cleaned up).
 	P99 time.Duration
 }
 

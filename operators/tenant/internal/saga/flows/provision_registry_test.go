@@ -119,8 +119,6 @@ func TestProvisionSteps_NamesStableContract(t *testing.T) {
 		got = append(got, s.Name())
 	}
 	want := []string{
-		"CreateStripeCustomer",
-		"WaitForBillingConfirmation",
 		"EnsureZitadelOrg",
 		"ProvisionSecretsBackend",
 		// ConfigureSecretsJWTAuth was added in tenant-operator#189 to
