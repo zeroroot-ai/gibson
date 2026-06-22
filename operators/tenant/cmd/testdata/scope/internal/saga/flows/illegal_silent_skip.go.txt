@@ -1,0 +1,40 @@
+// Fixture for TestNoGracefulNilInRequestPaths.
+//
+// This file is .go.txt (not .go) so `go test` and `go build` don't compile
+// it. The walker parses it from disk as raw source.
+//
+// ILLEGAL: a saga step's request-path body silently returns success when
+// its dependency is nil. This is the one-code-path anti-pattern the test
+// exists to prevent. The walker MUST flag it.
+
+package flows
+
+import "context"
+
+type fakeDeps struct {
+	Stripe *struct{}
+	FGA    *struct{}
+}
+
+type illegalStep struct {
+	deps fakeDeps
+}
+
+// Provision should always run when the step is registered. A nil dep
+// must fail startup, never silently skip at request time.
+func (s *illegalStep) Provision(ctx context.Context) (bool, error) {
+	if s.deps.Stripe == nil {
+		// ANTI-PATTERN: silent skip. Walker must flag THIS line.
+		return true, nil
+	}
+	return true, nil
+}
+
+// Deprovision has the same anti-pattern in a different shape.
+func (s *illegalStep) Deprovision(ctx context.Context) error {
+	if s.deps.FGA == nil {
+		// ANTI-PATTERN: silent skip. Walker must flag THIS line too.
+		return nil
+	}
+	return nil
+}
