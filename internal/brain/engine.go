@@ -189,6 +189,23 @@ func (e *Engine) Findings() []FindingSnapshot {
 	return e.World.FindingSnapshot()
 }
 
+// Labels returns the tenant's pooled review labels (ADR-0006) in deterministic
+// order — the HITL training signal the offline trainer consumes.
+func (e *Engine) Labels() []LabelSnapshot {
+	e.mu.RLock()
+	defer e.mu.RUnlock()
+	return e.World.LabelSnapshot()
+}
+
+// ReviewQueue returns the tenant's review queue — surfaced surprises + Findings
+// with any applied label — for the async HITL labelling UI. Read-only; building
+// it never gates a mission.
+func (e *Engine) ReviewQueue() []ReviewItem {
+	e.mu.RLock()
+	defer e.mu.RUnlock()
+	return e.World.ReviewQueue()
+}
+
 // Domains returns the current domain snapshots.
 func (e *Engine) Domains() []DomainSnapshot {
 	e.mu.RLock()

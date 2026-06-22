@@ -49,6 +49,7 @@ type World struct {
 	work        *ecs.Map1[WorkItem]
 	missions    *ecs.Map1[Mission]
 	findings    *ecs.Map1[Finding]
+	labels      *ecs.Map1[Label]
 	domains     *ecs.Map1[Domain]
 	subdomains  *ecs.Map1[Subdomain]
 	credentials *ecs.Map1[Credential]
@@ -104,6 +105,7 @@ func NewWorld(tenant string) *World {
 		work:        ecs.NewMap1[WorkItem](w),
 		missions:    ecs.NewMap1[Mission](w),
 		findings:    ecs.NewMap1[Finding](w),
+		labels:      ecs.NewMap1[Label](w),
 		domains:     ecs.NewMap1[Domain](w),
 		subdomains:  ecs.NewMap1[Subdomain](w),
 		credentials: ecs.NewMap1[Credential](w),
@@ -273,6 +275,8 @@ func Reduce(w *World, ev Event) {
 		applyBeliefScored(w, e)
 	case FindingRaised:
 		applyFindingRaised(w, e)
+	case LabelApplied:
+		applyLabelApplied(w, e)
 	case AgentRunObserved:
 		applyAgentRunObserved(w, e)
 	case LlmCallObserved:

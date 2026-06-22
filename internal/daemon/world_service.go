@@ -210,3 +210,84 @@ func (s *worldServer) GetFrameAt(ctx context.Context, req *worldpb.GetFrameAtReq
 	}
 	return resp, nil
 }
+
+// ListReviewQueue returns the tenant's HITL review queue — surfaced surprises +
+// Findings with any applied label (ADR-0006). Read-only projection; never gates
+// a mission.
+func (s *worldServer) ListReviewQueue(ctx context.Context, _ *worldpb.ListReviewQueueRequest) (*worldpb.ListReviewQueueResponse, error) {
+	e, err := s.engine(ctx)
+	if err != nil {
+		return nil, err
+	}
+	resp := &worldpb.ListReviewQueueResponse{}
+	for _, it := range e.ReviewQueue() {
+		item := &worldpb.ReviewItem{
+			TargetId: it.TargetID,
+			Kind:     it.Kind,
+			Title:    it.Title,
+			ScopeId:  it.ScopeID,
+			Address:  it.Address,
+			Severity: it.Severity,
+			Labelled: it.Labelled,
+		}
+		if it.Labelled {
+			item.Label = labelView(it.Label)
+		}
+		resp.Items = append(resp.Items, item)
+	}
+	return resp, nil
+}
+
+// SubmitLabel records a human review judgement as a tenant-scoped LabelApplied
+// event (ADR-0006). It is async: the event is submitted to the tenant's engine
+// and the call returns — the mission never waits on it (no runtime gate). The
+// labelling user is taken from the caller's context server-side, so a caller can
+// never attribute a label to another user; and because the event lands in the
+// caller's tenant World only, labels pool tenant-wide and never cross tenants.
+func (s *worldServer) SubmitLabel(ctx context.Context, req *worldpb.SubmitLabelRequest) (*worldpb.SubmitLabelResponse, error) {
+	e, err := s.engine(ctx)
+	if err != nil {
+		return nil, err
+	}
+	if req.GetTargetId() == "" {
+		return nil, status.Error(codes.InvalidArgument, "target_id is required")
+	}
+	verdict := brain.LabelVerdict(req.GetVerdict())
+	if !brain.ValidVerdict(verdict) {
+		return nil, status.Errorf(codes.InvalidArgument, "unknown verdict %q (want true_positive|false_positive|dismiss)", req.GetVerdict())
+	}
+	userID, _ := auth.ActingUserFromContext(ctx) // provenance only; "" if absent
+	e.Submit(brain.LabelApplied{
+		TargetID: req.GetTargetId(),
+		Verdict:  verdict,
+		Severity: req.GetSeverity(),
+		Category: req.GetCategory(),
+		UserID:   userID,
+	})
+	return &worldpb.SubmitLabelResponse{}, nil
+}
+
+// ListLabels returns the tenant's pooled review labels (ADR-0006) — the HITL
+// training signal the offline trainer consumes alongside auto-outcomes.
+func (s *worldServer) ListLabels(ctx context.Context, _ *worldpb.ListLabelsRequest) (*worldpb.ListLabelsResponse, error) {
+	e, err := s.engine(ctx)
+	if err != nil {
+		return nil, err
+	}
+	resp := &worldpb.ListLabelsResponse{}
+	for _, l := range e.Labels() {
+		resp.Labels = append(resp.Labels, labelView(l))
+	}
+	return resp, nil
+}
+
+// labelView maps a brain label snapshot to its proto view.
+func labelView(l brain.LabelSnapshot) *worldpb.LabelView {
+	return &worldpb.LabelView{
+		TargetId: l.TargetID,
+		Verdict:  string(l.Verdict),
+		Severity: l.Severity,
+		Category: l.Category,
+		UserId:   l.UserID,
+	}
+}

@@ -19,13 +19,16 @@ import (
 const _ = grpc.SupportPackageIsVersion9
 
 const (
-	WorldService_ListMissions_FullMethodName = "/gibson.world.v1.WorldService/ListMissions"
-	WorldService_ListHosts_FullMethodName    = "/gibson.world.v1.WorldService/ListHosts"
-	WorldService_ListFindings_FullMethodName = "/gibson.world.v1.WorldService/ListFindings"
-	WorldService_ListLlmCalls_FullMethodName = "/gibson.world.v1.WorldService/ListLlmCalls"
-	WorldService_GetLlmCall_FullMethodName   = "/gibson.world.v1.WorldService/GetLlmCall"
-	WorldService_GetTimeline_FullMethodName  = "/gibson.world.v1.WorldService/GetTimeline"
-	WorldService_GetFrameAt_FullMethodName   = "/gibson.world.v1.WorldService/GetFrameAt"
+	WorldService_ListMissions_FullMethodName    = "/gibson.world.v1.WorldService/ListMissions"
+	WorldService_ListHosts_FullMethodName       = "/gibson.world.v1.WorldService/ListHosts"
+	WorldService_ListFindings_FullMethodName    = "/gibson.world.v1.WorldService/ListFindings"
+	WorldService_ListLlmCalls_FullMethodName    = "/gibson.world.v1.WorldService/ListLlmCalls"
+	WorldService_GetLlmCall_FullMethodName      = "/gibson.world.v1.WorldService/GetLlmCall"
+	WorldService_GetTimeline_FullMethodName     = "/gibson.world.v1.WorldService/GetTimeline"
+	WorldService_GetFrameAt_FullMethodName      = "/gibson.world.v1.WorldService/GetFrameAt"
+	WorldService_ListReviewQueue_FullMethodName = "/gibson.world.v1.WorldService/ListReviewQueue"
+	WorldService_SubmitLabel_FullMethodName     = "/gibson.world.v1.WorldService/SubmitLabel"
+	WorldService_ListLabels_FullMethodName      = "/gibson.world.v1.WorldService/ListLabels"
 )
 
 // WorldServiceClient is the client API for WorldService service.
@@ -62,6 +65,20 @@ type WorldServiceClient interface {
 	// scrubs to: a server-side fold of the log to a point, not a stored snapshot.
 	// `seq` is clamped to [0, total]; seq == total is the live World.
 	GetFrameAt(ctx context.Context, in *GetFrameAtRequest, opts ...grpc.CallOption) (*GetFrameAtResponse, error)
+	// ListReviewQueue returns the tenant's HITL review queue — surfaced surprises +
+	// Findings, each with any label already applied (ADR-0006). The async labelling
+	// UI reads this; it is a read-only projection and NEVER gates a mission.
+	ListReviewQueue(ctx context.Context, in *ListReviewQueueRequest, opts ...grpc.CallOption) (*ListReviewQueueResponse, error)
+	// SubmitLabel records a human review judgement (true/false-positive, severity,
+	// category, dismiss) on a surfaced item, as a tenant-scoped LabelApplied event
+	// (ADR-0006). Labels POOL across the tenant's users and NEVER cross tenants. It
+	// is async: the call appends the event and returns; the mission never waits on
+	// it. Any tenant member may label (the pool is shared), so the relation is
+	// member, not admin.
+	SubmitLabel(ctx context.Context, in *SubmitLabelRequest, opts ...grpc.CallOption) (*SubmitLabelResponse, error)
+	// ListLabels returns the tenant's pooled review labels (ADR-0006) — the HITL
+	// training signal the offline trainer consumes alongside auto-outcomes.
+	ListLabels(ctx context.Context, in *ListLabelsRequest, opts ...grpc.CallOption) (*ListLabelsResponse, error)
 }
 
 type worldServiceClient struct {
@@ -142,6 +159,36 @@ func (c *worldServiceClient) GetFrameAt(ctx context.Context, in *GetFrameAtReque
 	return out, nil
 }
 
+func (c *worldServiceClient) ListReviewQueue(ctx context.Context, in *ListReviewQueueRequest, opts ...grpc.CallOption) (*ListReviewQueueResponse, error) {
+	cOpts := append([]grpc.CallOption{grpc.StaticMethod()}, opts...)
+	out := new(ListReviewQueueResponse)
+	err := c.cc.Invoke(ctx, WorldService_ListReviewQueue_FullMethodName, in, out, cOpts...)
+	if err != nil {
+		return nil, err
+	}
+	return out, nil
+}
+
+func (c *worldServiceClient) SubmitLabel(ctx context.Context, in *SubmitLabelRequest, opts ...grpc.CallOption) (*SubmitLabelResponse, error) {
+	cOpts := append([]grpc.CallOption{grpc.StaticMethod()}, opts...)
+	out := new(SubmitLabelResponse)
+	err := c.cc.Invoke(ctx, WorldService_SubmitLabel_FullMethodName, in, out, cOpts...)
+	if err != nil {
+		return nil, err
+	}
+	return out, nil
+}
+
+func (c *worldServiceClient) ListLabels(ctx context.Context, in *ListLabelsRequest, opts ...grpc.CallOption) (*ListLabelsResponse, error) {
+	cOpts := append([]grpc.CallOption{grpc.StaticMethod()}, opts...)
+	out := new(ListLabelsResponse)
+	err := c.cc.Invoke(ctx, WorldService_ListLabels_FullMethodName, in, out, cOpts...)
+	if err != nil {
+		return nil, err
+	}
+	return out, nil
+}
+
 // WorldServiceServer is the server API for WorldService service.
 // All implementations must embed UnimplementedWorldServiceServer
 // for forward compatibility.
@@ -176,6 +223,20 @@ type WorldServiceServer interface {
 	// scrubs to: a server-side fold of the log to a point, not a stored snapshot.
 	// `seq` is clamped to [0, total]; seq == total is the live World.
 	GetFrameAt(context.Context, *GetFrameAtRequest) (*GetFrameAtResponse, error)
+	// ListReviewQueue returns the tenant's HITL review queue — surfaced surprises +
+	// Findings, each with any label already applied (ADR-0006). The async labelling
+	// UI reads this; it is a read-only projection and NEVER gates a mission.
+	ListReviewQueue(context.Context, *ListReviewQueueRequest) (*ListReviewQueueResponse, error)
+	// SubmitLabel records a human review judgement (true/false-positive, severity,
+	// category, dismiss) on a surfaced item, as a tenant-scoped LabelApplied event
+	// (ADR-0006). Labels POOL across the tenant's users and NEVER cross tenants. It
+	// is async: the call appends the event and returns; the mission never waits on
+	// it. Any tenant member may label (the pool is shared), so the relation is
+	// member, not admin.
+	SubmitLabel(context.Context, *SubmitLabelRequest) (*SubmitLabelResponse, error)
+	// ListLabels returns the tenant's pooled review labels (ADR-0006) — the HITL
+	// training signal the offline trainer consumes alongside auto-outcomes.
+	ListLabels(context.Context, *ListLabelsRequest) (*ListLabelsResponse, error)
 	mustEmbedUnimplementedWorldServiceServer()
 }
 
@@ -206,6 +267,15 @@ func (UnimplementedWorldServiceServer) GetTimeline(context.Context, *GetTimeline
 }
 func (UnimplementedWorldServiceServer) GetFrameAt(context.Context, *GetFrameAtRequest) (*GetFrameAtResponse, error) {
 	return nil, status.Error(codes.Unimplemented, "method GetFrameAt not implemented")
+}
+func (UnimplementedWorldServiceServer) ListReviewQueue(context.Context, *ListReviewQueueRequest) (*ListReviewQueueResponse, error) {
+	return nil, status.Error(codes.Unimplemented, "method ListReviewQueue not implemented")
+}
+func (UnimplementedWorldServiceServer) SubmitLabel(context.Context, *SubmitLabelRequest) (*SubmitLabelResponse, error) {
+	return nil, status.Error(codes.Unimplemented, "method SubmitLabel not implemented")
+}
+func (UnimplementedWorldServiceServer) ListLabels(context.Context, *ListLabelsRequest) (*ListLabelsResponse, error) {
+	return nil, status.Error(codes.Unimplemented, "method ListLabels not implemented")
 }
 func (UnimplementedWorldServiceServer) mustEmbedUnimplementedWorldServiceServer() {}
 func (UnimplementedWorldServiceServer) testEmbeddedByValue()                      {}
@@ -354,6 +424,60 @@ func _WorldService_GetFrameAt_Handler(srv interface{}, ctx context.Context, dec 
 	return interceptor(ctx, in, info, handler)
 }
 
+func _WorldService_ListReviewQueue_Handler(srv interface{}, ctx context.Context, dec func(interface{}) error, interceptor grpc.UnaryServerInterceptor) (interface{}, error) {
+	in := new(ListReviewQueueRequest)
+	if err := dec(in); err != nil {
+		return nil, err
+	}
+	if interceptor == nil {
+		return srv.(WorldServiceServer).ListReviewQueue(ctx, in)
+	}
+	info := &grpc.UnaryServerInfo{
+		Server:     srv,
+		FullMethod: WorldService_ListReviewQueue_FullMethodName,
+	}
+	handler := func(ctx context.Context, req interface{}) (interface{}, error) {
+		return srv.(WorldServiceServer).ListReviewQueue(ctx, req.(*ListReviewQueueRequest))
+	}
+	return interceptor(ctx, in, info, handler)
+}
+
+func _WorldService_SubmitLabel_Handler(srv interface{}, ctx context.Context, dec func(interface{}) error, interceptor grpc.UnaryServerInterceptor) (interface{}, error) {
+	in := new(SubmitLabelRequest)
+	if err := dec(in); err != nil {
+		return nil, err
+	}
+	if interceptor == nil {
+		return srv.(WorldServiceServer).SubmitLabel(ctx, in)
+	}
+	info := &grpc.UnaryServerInfo{
+		Server:     srv,
+		FullMethod: WorldService_SubmitLabel_FullMethodName,
+	}
+	handler := func(ctx context.Context, req interface{}) (interface{}, error) {
+		return srv.(WorldServiceServer).SubmitLabel(ctx, req.(*SubmitLabelRequest))
+	}
+	return interceptor(ctx, in, info, handler)
+}
+
+func _WorldService_ListLabels_Handler(srv interface{}, ctx context.Context, dec func(interface{}) error, interceptor grpc.UnaryServerInterceptor) (interface{}, error) {
+	in := new(ListLabelsRequest)
+	if err := dec(in); err != nil {
+		return nil, err
+	}
+	if interceptor == nil {
+		return srv.(WorldServiceServer).ListLabels(ctx, in)
+	}
+	info := &grpc.UnaryServerInfo{
+		Server:     srv,
+		FullMethod: WorldService_ListLabels_FullMethodName,
+	}
+	handler := func(ctx context.Context, req interface{}) (interface{}, error) {
+		return srv.(WorldServiceServer).ListLabels(ctx, req.(*ListLabelsRequest))
+	}
+	return interceptor(ctx, in, info, handler)
+}
+
 // WorldService_ServiceDesc is the grpc.ServiceDesc for WorldService service.
 // It's only intended for direct use with grpc.RegisterService,
 // and not to be introspected or modified (even as a copy)
@@ -388,6 +512,18 @@ var WorldService_ServiceDesc = grpc.ServiceDesc{
 		{
 			MethodName: "GetFrameAt",
 			Handler:    _WorldService_GetFrameAt_Handler,
+		},
+		{
+			MethodName: "ListReviewQueue",
+			Handler:    _WorldService_ListReviewQueue_Handler,
+		},
+		{
+			MethodName: "SubmitLabel",
+			Handler:    _WorldService_SubmitLabel_Handler,
+		},
+		{
+			MethodName: "ListLabels",
+			Handler:    _WorldService_ListLabels_Handler,
 		},
 	},
 	Streams:  []grpc.StreamDesc{},
