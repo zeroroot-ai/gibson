@@ -10,6 +10,7 @@ import (
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 
+	"github.com/zeroroot-ai/gibson/internal/entitlements"
 	"github.com/zeroroot-ai/sdk/auth"
 )
 
@@ -25,7 +26,7 @@ func newEnforcer(t *testing.T, tenantID, userID string) (Enforcer, context.Conte
 	rdb := redis.NewClient(&redis.Options{Addr: mr.Addr()})
 
 	// All assertions use the default clock (time.Now) unless noted.
-	e := NewEnforcer(rdb, nil, nil, nil)
+	e := NewEnforcer(rdb, nil, nil, nil, nil)
 
 	ctx := auth.ContextWithTenantString(context.Background(), tenantID)
 	ctx = auth.ContextWithActingUser(ctx, userID)
@@ -160,7 +161,7 @@ func TestEnforcer_TeamResolver_EnforcesTeamBudget(t *testing.T) {
 	resolver := func(ctx context.Context, tenantID, userID string) ([]string, error) {
 		return []string{"team-a"}, nil
 	}
-	e := NewEnforcer(rdb, nil, resolver, nil)
+	e := NewEnforcer(rdb, nil, resolver, nil, nil)
 
 	ctx := auth.ContextWithTenantString(context.Background(), "acme")
 	ctx = auth.ContextWithActingUser(ctx, "user-1")
@@ -191,7 +192,7 @@ func TestEnforcer_PeriodRollover_ResetsCounters(t *testing.T) {
 	rdb := redis.NewClient(&redis.Options{Addr: mr.Addr()})
 
 	march31 := time.Date(2026, 3, 31, 23, 0, 0, 0, time.UTC)
-	e := NewEnforcer(rdb, nil, nil, fixedClock(march31))
+	e := NewEnforcer(rdb, nil, nil, fixedClock(march31), nil)
 
 	ctx := auth.ContextWithTenantString(context.Background(), "acme")
 	ctx = auth.ContextWithActingUser(ctx, "user-1")
@@ -207,7 +208,7 @@ func TestEnforcer_PeriodRollover_ResetsCounters(t *testing.T) {
 	// Roll the clock forward to April 1 — period ID changes, counter
 	// is fresh (no usage recorded in April).
 	april1 := time.Date(2026, 4, 1, 0, 30, 0, 0, time.UTC)
-	e = NewEnforcer(rdb, nil, nil, fixedClock(april1))
+	e = NewEnforcer(rdb, nil, nil, fixedClock(april1), nil)
 	ctx = auth.ContextWithTenantString(context.Background(), "acme")
 	ctx = auth.ContextWithActingUser(ctx, "user-1")
 
@@ -240,7 +241,7 @@ func TestEnforcer_ListStatusByScope_ReturnsConfiguredUsers(t *testing.T) {
 func TestEnforcer_Check_WithoutUserContext_FallsBackToTenantOnly(t *testing.T) {
 	mr := miniredis.RunT(t)
 	rdb := redis.NewClient(&redis.Options{Addr: mr.Addr()})
-	e := NewEnforcer(rdb, nil, nil, nil)
+	e := NewEnforcer(rdb, nil, nil, nil, nil)
 
 	// Tenant-only context — no ActingUser / InitiatorUser.
 	ctx := auth.ContextWithTenantString(context.Background(), "acme")
@@ -253,6 +254,49 @@ func TestEnforcer_Check_WithoutUserContext_FallsBackToTenantOnly(t *testing.T) {
 	require.NoError(t, err)
 	// Fell back to tenant-scoped status since no user is available.
 	assert.Equal(t, ScopeTenant, status.Scope)
+}
+
+// stubProvider is a fixed-Limits entitlements.Provider for the seam tests.
+type stubProvider struct{ lim entitlements.Limits }
+
+func (s stubProvider) Limits(context.Context, string) (entitlements.Limits, error) {
+	return s.lim, nil
+}
+
+// When no explicit tenant budget is configured, the enforcer must take the
+// tenant-scope ceiling from the entitlements provider (ADR-0003 seam).
+func TestEnforcer_Check_ProviderSuppliesTenantDefault(t *testing.T) {
+	mr := miniredis.RunT(t)
+	rdb := redis.NewClient(&redis.Options{Addr: mr.Addr()})
+	e := NewEnforcer(rdb, nil, nil, nil, stubProvider{lim: entitlements.Limits{MonthlyTokens: 1000}})
+
+	ctx := auth.ContextWithTenantString(context.Background(), "acme")
+	ctx = auth.ContextWithActingUser(ctx, "user-1")
+
+	// Projected 1500 > provider ceiling 1000 → denied at tenant scope.
+	_, err := e.Check(ctx, 1500)
+	require.Error(t, err, "provider-supplied tenant ceiling must be enforced")
+	d, ok := DetailFromError(err)
+	require.True(t, ok)
+	assert.Equal(t, ScopeTenant, d.Scope)
+	assert.Equal(t, int64(1000), d.Limit)
+}
+
+// An explicit admin-set tenant budget overrides the provider default.
+func TestEnforcer_Check_ExplicitTenantBudgetWinsOverProvider(t *testing.T) {
+	mr := miniredis.RunT(t)
+	rdb := redis.NewClient(&redis.Options{Addr: mr.Addr()})
+	e := NewEnforcer(rdb, nil, nil, nil, stubProvider{lim: entitlements.Limits{MonthlyTokens: 100}})
+
+	ctx := auth.ContextWithTenantString(context.Background(), "acme")
+	ctx = auth.ContextWithActingUser(ctx, "user-1")
+
+	// Admin sets a generous explicit tenant budget; the small provider
+	// ceiling must NOT apply.
+	require.NoError(t, e.SetBudget(ctx, &Budget{Scope: ScopeTenant, MonthlyTokens: 1_000_000}))
+
+	_, err := e.Check(ctx, 500)
+	require.NoError(t, err, "explicit admin budget must win over the provider default")
 }
 
 func TestEnforcer_Concurrent_Records_DontLose(t *testing.T) {

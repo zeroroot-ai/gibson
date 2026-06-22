@@ -676,7 +676,11 @@ func (d *daemonImpl) buildGRPCServer(ctx context.Context) (*grpcSubsystem, error
 				return ids, nil
 			}
 		}
-		budgetEnforcer := budget.NewEnforcer(d.stateClient.Client(), d.logger.Slog(), teamResolver, nil)
+		// The budget enforcer consumes tenant-default ceilings through the
+		// entitlements seam (ADR-0003): explicit admin budgets win, else the
+		// provider supplies the tenant default. OSS = config/unlimited. A nil
+		// provider is resolved to UnlimitedProvider inside NewEnforcer.
+		budgetEnforcer := budget.NewEnforcer(d.stateClient.Client(), d.logger.Slog(), teamResolver, nil, d.entitlementsProvider)
 		daemonSvc.WithBudgetEnforcer(budgetEnforcer)
 		d.budgetEnforcer = budgetEnforcer
 		d.logger.Info(ctx, "budget enforcer wired into DaemonServer (spec: llm-user-attribution-governance)")

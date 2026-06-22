@@ -29,6 +29,7 @@ import (
 	"github.com/zeroroot-ai/gibson/internal/daemon/api"
 	dbredis "github.com/zeroroot-ai/gibson/internal/database/redis"
 	"github.com/zeroroot-ai/gibson/internal/datapool"
+	"github.com/zeroroot-ai/gibson/internal/entitlements"
 	"github.com/zeroroot-ai/gibson/internal/graphrag/graph"
 	"github.com/zeroroot-ai/gibson/internal/harness"
 	"github.com/zeroroot-ai/gibson/internal/idempotency"
@@ -309,6 +310,12 @@ type daemonImpl struct {
 	// Initialized after stateClient is available. May be nil until then; quota
 	// enforcement is a no-op while nil.
 	quotaManager *component.QuotaManager
+
+	// entitlementsProvider is the ADR-0003 seam: it answers "what are this
+	// tenant's limits?" for the OSS enforcers (QuotaManager, budget). The OSS
+	// build wires the config-driven default; the commercial layer swaps in a
+	// plan/subscription provider behind the same interface (gibson#798).
+	entitlementsProvider entitlements.Provider
 
 	// redisEventStream bridges the in-process EventBus to per-tenant Redis Streams.
 	// It is initialised after stateClient is available. May be nil before that;
@@ -887,8 +894,15 @@ func (d *daemonImpl) Start(ctx context.Context) error {
 		tenantStore := state.NewTenantScopedStore(d.stateClient, tenantStoreCfg)
 		// platformDB is guaranteed non-nil here: initPlatformPostgres ran
 		// earlier in Start() and is fatal on failure (gibson#246).
-		d.quotaManager = component.NewQuotaManager(tenantStore, d.platformDB, d.logger.Slog())
-		d.logger.Info(ctx, "quota manager initialized")
+		//
+		// Limits flow through the entitlements seam (ADR-0003): the OSS
+		// default provider derives per-tenant limits from admin-set quota
+		// config; the QuotaManager never reads plans/Stripe directly. The
+		// commercial layer swaps in a plan/subscription provider behind the
+		// same interface (gibson#798).
+		d.entitlementsProvider = entitlements.NewConfigProvider(d.platformDB)
+		d.quotaManager = component.NewQuotaManager(tenantStore, d.entitlementsProvider, d.logger.Slog())
+		d.logger.Info(ctx, "quota manager initialized (entitlements provider: oss config-driven)")
 
 		// Single-use sweep of legacy quota Redis keys deleted by spec
 		// plans-and-quotas-simplification (quota:config / quota:memory /
