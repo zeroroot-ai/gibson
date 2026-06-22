@@ -11,7 +11,7 @@ import (
 	"google.golang.org/grpc/codes"
 	"google.golang.org/grpc/status"
 
-	"github.com/zeroroot-ai/gibson/internal/billing/entitlements"
+	"github.com/zeroroot-ai/gibson/pkg/billing/entitlements"
 	"github.com/zeroroot-ai/gibson/internal/engine/state"
 	"github.com/zeroroot-ai/sdk/auth"
 )

@@ -10,7 +10,7 @@ import (
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 
-	"github.com/zeroroot-ai/gibson/internal/billing/entitlements"
+	"github.com/zeroroot-ai/gibson/pkg/billing/entitlements"
 	"github.com/zeroroot-ai/sdk/auth"
 )
 
