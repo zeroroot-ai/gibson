@@ -77,6 +77,12 @@ func (d *daemonImpl) ensureMissionManager() error {
 			d.brainRegistry,     // ECS brain engine (gibson#851)
 			d.brainExecutor,     // concrete Dispatcher + DeciderLLM bindings (gibson#851)
 		)
+		// Pin the active belief-model version so each mission records the model it
+		// ran under (ADR-0005 §5, gibson#750). Resolved here (after the provider is
+		// chosen at brain-registry init) rather than threaded through the ctor.
+		if d.beliefProvider != nil {
+			missionManagerInstance.mgr.beliefVersion = d.beliefProvider.Version()
+		}
 
 		d.logger.Info(context.Background(), "mission manager initialized")
 	})

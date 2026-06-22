@@ -224,7 +224,7 @@ _Avoid_: event-driven cascade (rejected), per-tick frame storage, tying display 
   own mission subgraph (work-graph nodes + states + results, findings, discovered
   hosts/assets) plus the **capability catalog** (enrolled `Agent`/`Tool`/`Plugin` entities
   + their input schemas — what it may dispatch and how to shape inputs), rendered as a
-  bounded structured serialization. **No dependency on the belief field (#750, parked) or
+  bounded structured serialization. **No dependency on the belief field (#750) or
   ambient projection (#749)**; those swap in later by replacing the context-rendering step
   without changing the Decider contract. **Sibling-mission context is out for v1** — cross-
   mission reuse arrives properly via the belief field at any distance, not an ad-hoc prompt

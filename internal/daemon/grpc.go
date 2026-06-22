@@ -1248,10 +1248,13 @@ func (d *daemonImpl) buildGRPCServer(ctx context.Context) (*grpcSubsystem, error
 
 	// Register gibson.world.v1.WorldService — the daemon-mediated read path into
 	// the ECS brain (epic ecs-brain, gibson#752). Per-tenant, tenant-isolated; the
-	// registry is created lazily here with the placeholder belief system (the pgmpy
-	// provider + orchestrator Decider wire in later).
+	// registry is created lazily here with the resolved belief provider (the pgmpy
+	// sidecar when GIBSON_BELIEF_SIDECAR_URL is set, else the placeholder).
 	if d.brainRegistry == nil {
-		d.brainRegistry = brain.NewRegistry(ctx, brain.BeliefSystem(brain.PlaceholderBeliefProvider()))
+		if d.beliefProvider == nil {
+			d.beliefProvider = resolveBeliefProvider()
+		}
+		d.brainRegistry = brain.NewRegistry(ctx, brain.BeliefSystem(d.beliefProvider))
 	}
 	worldpb.RegisterWorldServiceServer(srv, NewWorldServer(d.brainRegistry, d.logger.WithComponent("world-service").Slog()))
 	d.logger.Info(ctx, "registered WorldService gRPC endpoint")

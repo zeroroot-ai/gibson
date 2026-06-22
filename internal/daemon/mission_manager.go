@@ -89,6 +89,10 @@ type missionManager struct {
 	// tenant's World and the brain (scheduler + Decider) drives it.
 	brainRegistry *brain.Registry
 	brainExecutor *brainExecutor
+	// beliefVersion is the belief-model version the brain currently scores against
+	// (ADR-0005 §5). Stamped onto each mission at projection so the mission records
+	// the model it ran under and replay reproduces. Empty → no pinned model.
+	beliefVersion string
 
 	// authzStore records the owning user per run so that HarnessCallbackService.Authorize
 	// can resolve run_id → (user_id, tenant_id) during component callbacks.
@@ -796,6 +800,9 @@ func (m *missionManager) executeMission(ctx context.Context, missionID string, d
 	// Project the mission. A goal (if any) drives the Decider; absent → the scripted
 	// graph runs deterministically and the mission completes mechanically.
 	proj, projErr := missionDefinitionToProjected(def, missionGoal(active.mission))
+	// Pin the belief-model version onto the mission (ADR-0005 §5): the mission
+	// records the model it ran under so replay re-loads the exact artifact.
+	proj.BeliefModel = m.beliefVersion
 	if projErr != nil {
 		finalStatus = mission.MissionStatusFailed
 		errorMsg = fmt.Sprintf("failed to project mission into the World: %v", projErr)

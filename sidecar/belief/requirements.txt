@@ -1,0 +1,5 @@
+# Belief-field pgmpy sidecar (gibson#750, ADR-0005).
+# Exact, read-only Bayesian inference only — no training deps at runtime.
+pgmpy==0.1.26
+networkx>=3.0
+numpy>=1.24
