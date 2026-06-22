@@ -1,0 +1,410 @@
+---
+apiVersion: apiextensions.k8s.io/v1
+kind: CustomResourceDefinition
+metadata:
+  annotations:
+    controller-gen.kubebuilder.io/version: v0.20.1
+  name: tenants.gibson.zeroroot.ai
+spec:
+  group: gibson.zeroroot.ai
+  names:
+    kind: Tenant
+    listKind: TenantList
+    plural: tenants
+    shortNames:
+    - tn
+    singular: tenant
+  scope: Cluster
+  versions:
+  - additionalPrinterColumns:
+    - jsonPath: .spec.tier
+      name: Tier
+      type: string
+    - jsonPath: .status.phase
+      name: Phase
+      type: string
+    - jsonPath: .status.namespace
+      name: Namespace
+      type: string
+    - jsonPath: .metadata.creationTimestamp
+      name: Age
+      type: date
+    name: v1alpha1
+    schema:
+      openAPIV3Schema:
+        description: |-
+          Tenant is the Schema for the tenants API. Represents a single Gibson
+          customer's declarative state across all identity and data subsystems.
+        properties:
+          apiVersion:
+            description: |-
+              APIVersion defines the versioned schema of this representation of an object.
+              Servers should convert recognized schemas to the latest internal value, and
+              may reject unrecognized values.
+              More info: https://git.k8s.io/community/contributors/devel/sig-architecture/api-conventions.md#resources
+            type: string
+          kind:
+            description: |-
+              Kind is a string value representing the REST resource this object represents.
+              Servers may infer this from the endpoint the client submits requests to.
+              Cannot be updated.
+              In CamelCase.
+              More info: https://git.k8s.io/community/contributors/devel/sig-architecture/api-conventions.md#types-kinds
+            type: string
+          metadata:
+            type: object
+          spec:
+            description: spec defines the desired state of Tenant.
+            properties:
+              displayName:
+                description: DisplayName is the human-readable name for this tenant.
+                maxLength: 100
+                minLength: 1
+                type: string
+              owner:
+                description: |-
+                  Owner is the email address of the tenant owner. Used as the admin user
+                  in Zitadel (via Auth.js) and as billing contact in Stripe.
+                format: email
+                type: string
+              resources:
+                description: |-
+                  Resources allows overriding per-tenant data-plane resource limits. When
+                  absent, operator Helm-chart defaults apply. See TenantDataPlaneResources.
+                properties:
+                  postgresConnectionLimit:
+                    description: |-
+                      PostgresConnectionLimit overrides the default per-role Postgres connection
+                      limit (ALTER ROLE ... CONNECTION LIMIT N). 0 = use operator default (50).
+                    minimum: 0
+                    type: integer
+                  redisMaxMemoryBytes:
+                    description: |-
+                      RedisMaxMemoryBytes overrides the per-DB MAXMEMORY value in bytes for
+                      Redis >= 7.4 that supports per-DB CONFIG SET. 0 = no explicit limit.
+                    format: int64
+                    minimum: 0
+                    type: integer
+                type: object
+              tier:
+                description: |-
+                  Tier sets the tenant's plan id. Drives daemon quota enforcement
+                  (concurrent_missions, concurrent_agents) and Stripe product binding.
+                  The enum is generated from plans.yaml; the migration Job at chart
+                  upgrade time rewrites legacy values per spec
+                  plans-and-quotas-simplification.
+                enum:
+                - team
+                - org
+                - enterprise
+                - enterprise-deploy
+                type: string
+            required:
+            - displayName
+            - owner
+            - tier
+            type: object
+          status:
+            description: status defines the observed state of Tenant.
+            properties:
+              billing:
+                description: |-
+                  Billing holds the Stripe subscription state for this tenant.
+                  Written by the dashboard webhook handlers and read by the operator's
+                  billing reconciler and entitlements gating logic.
+                properties:
+                  currentPeriodEnd:
+                    description: CurrentPeriodEnd is the ISO 8601 UTC timestamp for
+                      end of billing period.
+                    type: string
+                  customerId:
+                    description: CustomerID is the Stripe customer ID (cus_...).
+                    type: string
+                  lastUpdated:
+                    description: LastUpdated is the ISO 8601 UTC timestamp of the
+                      last status write.
+                    type: string
+                  lastWebhookEventId:
+                    description: |-
+                      LastWebhookEventID is the Stripe event ID of the last webhook that
+                      mutated this status. Used for debugging and drift detection.
+                    type: string
+                  pastDueSince:
+                    description: |-
+                      PastDueSince is the ISO 8601 UTC timestamp when the subscription first
+                      entered past_due state. Only written on first transition; preserved on
+                      retries. The operator uses this to enforce the 7-day dunning window.
+                    type: string
+                  priceId:
+                    description: PriceID is the Stripe price ID currently active on
+                      the subscription.
+                    type: string
+                  status:
+                    description: Status mirrors Stripe's subscription status field.
+                    enum:
+                    - trialing
+                    - active
+                    - past_due
+                    - cancelled
+                    - incomplete
+                    - incomplete_expired
+                    type: string
+                  subscriptionId:
+                    description: SubscriptionID is the Stripe subscription ID (sub_...).
+                    type: string
+                  trialEnd:
+                    description: TrialEnd is the ISO 8601 UTC timestamp when the trial
+                      period ends.
+                    type: string
+                  trialEndsSoon:
+                    description: |-
+                      TrialEndsSoon is true when the customer.subscription.trial_will_end
+                      event fires (3 days before trialEnd). Reset to false on invoice.paid.
+                    type: boolean
+                type: object
+              conditions:
+                description: |-
+                  Conditions represent the current state of the Tenant resource.
+                  Standard condition types: Ready, NamespaceProvisioned, ZitadelOrgReady,
+                  StripeReady, FGAReady, RedisReady, Terminating.
+                items:
+                  description: Condition contains details for one aspect of the current
+                    state of this API Resource.
+                  properties:
+                    lastTransitionTime:
+                      description: |-
+                        lastTransitionTime is the last time the condition transitioned from one status to another.
+                        This should be when the underlying condition changed.  If that is not known, then using the time when the API field changed is acceptable.
+                      format: date-time
+                      type: string
+                    message:
+                      description: |-
+                        message is a human readable message indicating details about the transition.
+                        This may be an empty string.
+                      maxLength: 32768
+                      type: string
+                    observedGeneration:
+                      description: |-
+                        observedGeneration represents the .metadata.generation that the condition was set based upon.
+                        For instance, if .metadata.generation is currently 12, but the .status.conditions[x].observedGeneration is 9, the condition is out of date
+                        with respect to the current state of the instance.
+                      format: int64
+                      minimum: 0
+                      type: integer
+                    reason:
+                      description: |-
+                        reason contains a programmatic identifier indicating the reason for the condition's last transition.
+                        Producers of specific condition types may define expected values and meanings for this field,
+                        and whether the values are considered a guaranteed API.
+                        The value should be a CamelCase string.
+                        This field may not be empty.
+                      maxLength: 1024
+                      minLength: 1
+                      pattern: ^[A-Za-z]([A-Za-z0-9_,:]*[A-Za-z0-9_])?$
+                      type: string
+                    status:
+                      description: status of the condition, one of True, False, Unknown.
+                      enum:
+                      - "True"
+                      - "False"
+                      - Unknown
+                      type: string
+                    type:
+                      description: type of condition in CamelCase or in foo.example.com/CamelCase.
+                      maxLength: 316
+                      pattern: ^([a-z0-9]([-a-z0-9]*[a-z0-9])?(\.[a-z0-9]([-a-z0-9]*[a-z0-9])?)*/)?(([A-Za-z0-9][-A-Za-z0-9_.]*)?[A-Za-z0-9])$
+                      type: string
+                  required:
+                  - lastTransitionTime
+                  - message
+                  - reason
+                  - status
+                  - type
+                  type: object
+                type: array
+                x-kubernetes-list-map-keys:
+                - type
+                x-kubernetes-list-type: map
+              dataPlane:
+                description: |-
+                  DataPlane reports the per-store provisioning state managed by the
+                  database-per-tenant-data-plane pipeline. The daemon polls
+                  status.dataPlane.ready before opening data connections for a tenant.
+                properties:
+                  kekInitialized:
+                    description: |-
+                      KEKInitialized is true after the per-tenant KEK derivation has been
+                      validated (Postgres role password was set with the derived KEK).
+                    type: boolean
+                  lastError:
+                    description: |-
+                      LastError contains the most recent error message from the provisioning
+                      pipeline. Cleared on successful completion.
+                    type: string
+                  neo4jProvisioned:
+                    description: |-
+                      Neo4jProvisioned is true after the per-tenant Neo4j database and schema
+                      migrations have been applied.
+                    type: boolean
+                  observedGeneration:
+                    description: |-
+                      ObservedGeneration is the Tenant.metadata.generation that was current
+                      when the dataPlane status was last updated.
+                    format: int64
+                    type: integer
+                  phase:
+                    description: Phase describes the current provisioning phase.
+                    enum:
+                    - Pending
+                    - Provisioning
+                    - Active
+                    - Failed
+                    - Deprovisioning
+                    type: string
+                  postgresProvisioned:
+                    description: |-
+                      PostgresProvisioned is true after the per-tenant Postgres database,
+                      migrations, and role have been created successfully.
+                    type: boolean
+                  ready:
+                    description: |-
+                      Ready is true when all data-plane stores are provisioned and the tenant
+                      KEK has been initialised. The daemon uses this field to gate data access.
+                    type: boolean
+                  redisProvisioned:
+                    description: |-
+                      RedisProvisioned is true after a logical DB index has been allocated for
+                      the tenant in the master Redis index.
+                    type: boolean
+                  stores:
+                    description: |-
+                      Stores provides per-store granular provisioning state for the
+                      onboarding UX (spec per-tenant-data-plane-completion D8). Added by
+                      Task 21; optional, zero-value is backward compatible with existing
+                      CRD consumers that only read the scalar bool fields above.
+                    properties:
+                      neo4j:
+                        description: |-
+                          Neo4j reports the provisioning state of the per-tenant Neo4j
+                          StatefulSet instance.
+                        properties:
+                          lastUpdated:
+                            description: LastUpdated is the time this store's status
+                              was last written.
+                            format: date-time
+                            type: string
+                          reason:
+                            description: |-
+                              Reason contains a human-readable description of the current state,
+                              especially useful when State is "failed".
+                            type: string
+                          state:
+                            description: State is the current provisioning state.
+                            enum:
+                            - provisioning
+                            - ready
+                            - failed
+                            type: string
+                        type: object
+                      postgres:
+                        description: |-
+                          Postgres reports the provisioning state of the per-tenant Postgres
+                          database and role.
+                        properties:
+                          lastUpdated:
+                            description: LastUpdated is the time this store's status
+                              was last written.
+                            format: date-time
+                            type: string
+                          reason:
+                            description: |-
+                              Reason contains a human-readable description of the current state,
+                              especially useful when State is "failed".
+                            type: string
+                          state:
+                            description: State is the current provisioning state.
+                            enum:
+                            - provisioning
+                            - ready
+                            - failed
+                            type: string
+                        type: object
+                      redis:
+                        description: |-
+                          Redis reports the provisioning state of the per-tenant Redis logical
+                          database index.
+                        properties:
+                          lastUpdated:
+                            description: LastUpdated is the time this store's status
+                              was last written.
+                            format: date-time
+                            type: string
+                          reason:
+                            description: |-
+                              Reason contains a human-readable description of the current state,
+                              especially useful when State is "failed".
+                            type: string
+                          state:
+                            description: State is the current provisioning state.
+                            enum:
+                            - provisioning
+                            - ready
+                            - failed
+                            type: string
+                        type: object
+                    type: object
+                  vectorProvisioned:
+                    description: |-
+                      VectorProvisioned is true after the per-tenant RediSearch index has been
+                      created.
+                    type: boolean
+                type: object
+              namespace:
+                description: Namespace is the Kubernetes namespace provisioned for
+                  this tenant.
+                type: string
+              observedGeneration:
+                description: ObservedGeneration reflects the generation most recently
+                  reconciled.
+                format: int64
+                type: integer
+              phase:
+                description: Phase is the current lifecycle phase.
+                enum:
+                - Pending
+                - Provisioning
+                - Ready
+                - Failed
+                - Terminating
+                - Terminated
+                type: string
+              stripeCustomerId:
+                description: |-
+                  StripeCustomerID is the Stripe customer created for this tenant by the
+                  CreateStripeCustomer saga step. Lives in status (controller-populated,
+                  persisted by the reconciler's Status().Patch) — it was previously a
+                  spec field whose mid-saga write was silently discarded, so every
+                  reconcile created a fresh Stripe customer (tenant-operator#354).
+                type: string
+              tierObserved:
+                description: TierObserved is the tier last reconciled. Used to detect
+                  tier changes.
+                type: string
+              zitadelOrgID:
+                description: |-
+                  ZitadelOrgID is the Zitadel organization ID provisioned for this tenant.
+                  Populated by the EnsureZitadelOrg saga step.
+                type: string
+              zitadelOrgSlug:
+                description: |-
+                  ZitadelOrgSlug is the Zitadel primary domain / slug for this tenant's
+                  organization. Mirrors the Tenant name by convention.
+                type: string
+            type: object
+        required:
+        - spec
+        type: object
+    served: true
+    storage: true
+    subresources:
+      status: {}

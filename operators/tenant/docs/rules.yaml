@@ -1,0 +1,282 @@
+# rules.yaml — tenant-operator
+#
+# Specs:
+#   - database-per-tenant-data-plane    (legacy `dp-op-*` rules below — version 1
+#                                        shape, predates the shared schema)
+#   - unified-identity-and-authorization (`tenant-operator-auth-*` rules below)
+#
+# Schema: ../../../core/sdk/docs/rules-schema.yaml v1.0.0.
+# The legacy `dp-op-*` rules use the older `version: 1` shape (hyphenated
+# pattern.kind values, `pattern.target` as inline object). They will be
+# migrated to the shared schema in a follow-up alignment commit; the new
+# `tenant-operator-auth-*` rules below use the schema directly.
+
+version: 1
+
+rules:
+  - id: dp-op-001
+    description: |
+      Every Provisioner method (Provision and Deprovision) must be
+      idempotent. Calling Provision N times on a tenant that is already
+      provisioned must not fail. Calling Deprovision N times on a tenant
+      that has already been torn down must not fail. The reconciler
+      retries on transient errors and re-runs the full pipeline on
+      restart; non-idempotent steps cause infinite loops.
+    scope:
+      - "internal/dataplane/postgres.go"
+      - "internal/dataplane/neo4j.go"
+      - "internal/dataplane/redis.go"
+      - "internal/dataplane/vector.go"
+      - "internal/dataplane/kek.go"
+    pattern: manual-review
+    target:
+      requires: "CREATE … IF NOT EXISTS or pre-check + skip; DROP … IF EXISTS or ignore-not-found"
+    severity: error
+    message: |
+      Make the operation idempotent. Pre-check existence and skip on
+      Provision; ignore not-found on Deprovision. See pgProvisioner.Provision
+      (postgres.go:91) for the catalog-check pattern.
+    enforced_by:
+      - "manual review (pipeline_test.go exercises idempotence — extend it)"
+
+  - id: dp-op-002
+    description: |
+      Tenant identifiers used in SQL identifiers (database names, role
+      names, schema names) MUST be sanitized via the helpers in
+      sanitize.go. Raw concatenation into a CREATE DATABASE / CREATE ROLE
+      string is a SQL-injection footgun even in admin-only code.
+    scope:
+      - "internal/dataplane/**/*.go"
+    exempt:
+      - "internal/dataplane/sanitize.go"
+      - "**/*_test.go"
+    pattern: required-call
+    target:
+      after: "tenant ID is interpolated into SQL"
+      requires: "tenantDBName(tenantID) or sanitizeTenantID(tenantID); then pgx.Identifier{...}.Sanitize()"
+    severity: error
+    message: |
+      Use tenantDBName / sanitizeTenantID from internal/dataplane/sanitize.go,
+      then wrap with pgx.Identifier{name}.Sanitize() before interpolating
+      into SQL. Bare fmt.Sprintf("CREATE DATABASE %s", tenantID) is forbidden.
+    enforced_by:
+      - "manual review (pgProvisioner uses pgx.Identifier consistently — replicate)"
+
+  - id: dp-op-003
+    description: |
+      The master KEK and any per-tenant KEK derived from it MUST NOT be
+      logged, written to a CRD field, returned in an error message, or
+      placed in a Kubernetes Secret. The Postgres role password is
+      derived from the KEK and is similarly sensitive.
+    scope:
+      - "internal/dataplane/**/*.go"
+      - "cmd/gibson-backup/**/*.go"
+    pattern: forbidden-call
+    target:
+      regex_list:
+        - "log\\.\\w+\\(.*KEK"
+        - "log\\.\\w+\\(.*[Pp]assword"
+        - "fmt\\.Errorf\\(.*%[sv].*password"
+        - "fmt\\.Errorf\\(.*%[sv].*KEK"
+        - "Status\\.\\w+\\s*=\\s*.*password"
+    severity: error
+    message: |
+      Never log or surface the KEK or the derived role password. Zero KEK
+      bytes via `defer func() { for i := range kek { kek[i] = 0 } }()`
+      immediately after extracting the password (kek.go:72 pattern).
+    enforced_by:
+      - "manual review"
+
+  - id: dp-op-004
+    description: |
+      Each storage backend lives in its own file under internal/dataplane/
+      named after the backend (postgres.go, neo4j.go, redis.go, vector.go).
+      The pipeline orchestrator wires them via the Step list in
+      pipeline.go. Adding a new backend means: one new <store>.go file
+      implementing the backend's Provision/Deprovision, plus a new Step
+      entry in buildSteps().
+    scope:
+      - "internal/dataplane/**"
+    pattern: manual-review
+    target:
+      structure: "one provisioner per backend; pipeline orchestrates"
+    severity: warning
+    message: |
+      Keep one backend per file. Do not lump multiple stores into a single
+      provisioner. The pipeline's Step abstraction depends on the 1:1 mapping
+      so per-step rollback works.
+    enforced_by:
+      - "manual review (CODEOWNERS for internal/dataplane/)"
+
+  - id: dp-op-005
+    description: |
+      The HKDF info string for tenant KEK derivation is "gibson/v1/tenant-kek"
+      and MUST match the daemon's value. Changing it on either side without
+      a coordinated re-encryption procedure invalidates every wrapped DEK
+      in storage.
+    scope:
+      - "internal/dataplane/kek.go"
+    pattern: forbidden-literal
+    target:
+      regex: "hkdfInfo\\s*=\\s*\"(?!gibson/v1/tenant-kek\")"
+    severity: error
+    message: |
+      Do not change the hkdfInfo constant. The daemon's matching constant
+      lives at core/gibson/internal/datapool/kek.go:18 — they MUST agree.
+    enforced_by:
+      - "manual review (cross-repo consistency — both files diff'd in CI ideally)"
+
+  - id: dp-op-006
+    description: |
+      CRD status writes must go through the status subresource patch
+      (Status().Update), not a regular Update. Mixing the two causes
+      lost-update races between the reconciler and other status writers.
+    scope:
+      - "internal/controller/**/*.go"
+      - "internal/dataplane/**/*.go"
+    pattern: required-call
+    target:
+      after: "tenant.Status. assignment"
+      requires: "K8sClient.Status().Update(ctx, tenant)"
+    severity: warning
+    message: |
+      Use K8sClient.Status().Update(ctx, tenant), not K8sClient.Update.
+      See pipelineProvisioner.patchStatus (pipeline.go:319).
+    enforced_by:
+      - "manual review"
+
+  # ===========================================================================
+  # Auth rules — unified-identity-and-authorization Phase J
+  # New rules below use the shared schema (sdk/docs/rules-schema.yaml v1.0.0):
+  # pattern.kind = forbidden_import | forbidden_call | forbidden_string |
+  #                required_call    | required_annotation
+  # enforced_by  = gibsoncheck:<analyzer> | script:<path> | helm:<validator>
+  #              | ci:<job> | manual
+  # ===========================================================================
+
+  - id: tenant-operator-auth-001
+    description: |
+      The operator authenticates to the daemon with its OWN Zitadel
+      service account (ZITADEL_TENANT_OPERATOR_CLIENT_ID/_SECRET). It
+      must NOT reuse the dashboard's credentials and must NOT mint
+      gsk_-style API keys (the legacy issuance path was deleted —
+      Register Agent UI in the dashboard does it now).
+    scope:
+      - "internal/**/*.go"
+      - "cmd/**/*.go"
+    exempt:
+      - "**/*_test.go"
+    pattern:
+      kind: forbidden_string
+      target: "(gsk_|ZITADEL_DASHBOARD_CLIENT_(ID|SECRET))"
+    severity: error
+    message: |
+      Use ZITADEL_TENANT_OPERATOR_CLIENT_ID / _SECRET. The dashboard's
+      credentials grant a different role; reusing them silently widens
+      the operator's effective privileges.
+    enforced_by:
+      - "manual"
+
+  - id: tenant-operator-auth-002
+    description: |
+      Service-account credentials must be loaded from env, never from a
+      local file or baked into the image. The Helm Secret
+      gibson-zitadel-tenant-operator materialises them at pod start.
+    scope:
+      - "**/*.go"
+    exempt:
+      - "**/*_test.go"
+    pattern:
+      kind: forbidden_string
+      target: "(/etc/.*client[_-]?secret|client_secret\\s*:\\s*[a-zA-Z0-9])"
+    severity: error
+    message: |
+      Read os.Getenv("ZITADEL_TENANT_OPERATOR_CLIENT_SECRET"). The chart
+      mounts the Secret as env; do not parse a local credential file.
+    enforced_by:
+      - "manual"
+
+  - id: tenant-operator-auth-003
+    description: |
+      The Zitadel admin PAT (mounted from the
+      <release>-zitadel-iam-admin-pat Secret) is the highest-privilege
+      credential in the polyrepo. It must never appear in a log line, a
+      metric label, or a CRD status field.
+    scope:
+      - "**/*.go"
+    exempt:
+      - "**/*_test.go"
+    pattern:
+      kind: forbidden_call
+      target: "(fmt\\.Print[fl]?n?|log\\.|slog\\.).*([Pp]at|PAT)"
+    severity: error
+    message: |
+      Sanitize the log line. The PAT enters via env, lands in the
+      Zitadel client's transport, and is never echoed.
+    enforced_by:
+      - "manual"
+
+  - id: tenant-operator-auth-004
+    description: |
+      Saga steps must be idempotent on auth-side resources. Re-running
+      EnsureZitadelOrg on an already-provisioned tenant must succeed
+      without creating a second org; the same applies to FGA tuple
+      writes (which are inherently idempotent at the FGA layer).
+    scope:
+      - "internal/saga/flows/provision_zitadel.go"
+      - "internal/saga/flows/teardown_zitadel.go"
+      - "internal/clients/zitadel/**/*.go"
+    pattern:
+      kind: required_call
+      target: "(IsAlreadyExists|StatusCode == 409|errors\\.Is\\(.*ErrConflict)"
+    severity: error
+    message: |
+      Treat 409/already-exists as success. Treat 404/not-found as success
+      on teardown. The reconciler retries on transient errors and
+      re-runs the full pipeline on restart.
+    enforced_by:
+      - "manual"
+
+  - id: tenant-operator-auth-005
+    description: |
+      The legacy gsk_ API key issuance path that lived here has been
+      deleted. Reintroducing any code that hashes / stores / issues the
+      prefix is forbidden — agent credentials are minted by the
+      dashboard's Register Agent UI directly via Zitadel admin API.
+    scope:
+      - "**/*.go"
+    exempt:
+      - "**/*_test.go"
+      - "docs/auth.md"
+      - "docs/forbidden-patterns.md"
+      - "docs/rules.yaml"
+    pattern:
+      kind: forbidden_string
+      target: "gsk_"
+    severity: error
+    message: |
+      Tenant onboarding flows do not mint credentials. The owner email
+      (Tenant CRD spec) becomes a Zitadel user invitation; the user
+      then signs in via Auth.js and creates agents through the
+      dashboard.
+    enforced_by:
+      - "manual"
+
+  - id: tenant-operator-auth-006
+    description: |
+      Outbound calls to the Gibson daemon MUST go through Envoy. Direct
+      dials to the daemon's gRPC ports bypass the entire authz chain
+      (the operator's Zitadel JWT would never be validated).
+    scope:
+      - "**/*.go"
+    exempt:
+      - "**/*_test.go"
+    pattern:
+      kind: forbidden_string
+      target: "(gibson(\\.[a-z0-9-]+)*:5005[012]|GIBSON_DAEMON_ADDRESS)"
+    severity: error
+    message: |
+      Use the gibson Service / Ingress URL (Envoy edge). The operator's
+      grpc.NewConn helper takes the Envoy address from chart values.
+    enforced_by:
+      - "manual"

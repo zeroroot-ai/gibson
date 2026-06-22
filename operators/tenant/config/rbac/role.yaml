@@ -1,0 +1,58 @@
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: ClusterRole
+metadata:
+  name: manager-role
+rules:
+- apiGroups:
+  - ""
+  resources:
+  - namespaces
+  verbs:
+  - create
+  - delete
+  - get
+  - list
+  - patch
+  - update
+  - watch
+- apiGroups:
+  - ""
+  - events.k8s.io
+  resources:
+  - events
+  verbs:
+  - create
+  - patch
+- apiGroups:
+  - gibson.zeroroot.ai
+  resources:
+  - agentenrollments
+  - tenantmembers
+  - tenants
+  verbs:
+  - create
+  - delete
+  - get
+  - list
+  - patch
+  - update
+  - watch
+- apiGroups:
+  - gibson.zeroroot.ai
+  resources:
+  - agentenrollments/finalizers
+  - tenantmembers/finalizers
+  - tenants/finalizers
+  verbs:
+  - update
+- apiGroups:
+  - gibson.zeroroot.ai
+  resources:
+  - agentenrollments/status
+  - tenantmembers/status
+  - tenants/status
+  verbs:
+  - get
+  - patch
+  - update

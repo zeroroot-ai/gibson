@@ -1,0 +1,420 @@
+# Lightweight in-cluster stubs for the operator's hard-required services.
+# These run only in the kind-based E2E job — no PVCs, no TLS, no auth.
+# Created by `make deploy-e2e`; torn down by `make undeploy-e2e`.
+#
+# All resources carry app.kubernetes.io/part-of=e2e-deps so the BeforeAll
+# wait step can target them with a single label selector.
+---
+# Postgres stub: the operator runs platform-db migrations against this
+# instance at startup (platformmigrations.Run). Using emptyDir so the pod
+# starts without a PVC; data loss on pod restart is fine in E2E.
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: e2e-postgres
+  namespace: tenant-operator-system
+  labels:
+    app.kubernetes.io/part-of: e2e-deps
+    app.kubernetes.io/component: postgres
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      app.kubernetes.io/component: postgres
+      app.kubernetes.io/part-of: e2e-deps
+  template:
+    metadata:
+      labels:
+        app.kubernetes.io/component: postgres
+        app.kubernetes.io/part-of: e2e-deps
+    spec:
+      securityContext:
+        runAsNonRoot: true
+        seccompProfile:
+          type: RuntimeDefault
+      containers:
+      - name: postgres
+        image: postgres:15
+        ports:
+        - containerPort: 5432
+        env:
+        - name: POSTGRES_USER
+          value: postgres
+        - name: POSTGRES_PASSWORD
+          value: postgres
+        - name: POSTGRES_DB
+          value: postgres
+        - name: PGDATA
+          value: /var/lib/postgresql/data/pgdata
+        securityContext:
+          allowPrivilegeEscalation: false
+          capabilities:
+            drop: ["ALL"]
+          # postgres writes to /var/lib/postgresql; not readonly root.
+          readOnlyRootFilesystem: false
+          runAsUser: 999
+        volumeMounts:
+        - name: pgdata
+          mountPath: /var/lib/postgresql/data
+        - name: tmp
+          mountPath: /tmp
+        - name: run
+          mountPath: /var/run/postgresql
+        resources:
+          requests:
+            cpu: 50m
+            memory: 128Mi
+          limits:
+            cpu: 500m
+            memory: 256Mi
+        readinessProbe:
+          exec:
+            command: ["pg_isready", "-U", "postgres"]
+          initialDelaySeconds: 5
+          periodSeconds: 5
+      volumes:
+      - name: pgdata
+        emptyDir: {}
+      - name: tmp
+        emptyDir: {}
+      - name: run
+        emptyDir: {}
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: e2e-postgres
+  namespace: tenant-operator-system
+  labels:
+    app.kubernetes.io/part-of: e2e-deps
+    app.kubernetes.io/component: postgres
+spec:
+  selector:
+    app.kubernetes.io/component: postgres
+    app.kubernetes.io/part-of: e2e-deps
+  ports:
+  - port: 5432
+    targetPort: 5432
+---
+# Redis stub: the operator builds a lazy Redis client against this address.
+# No auth required.
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: e2e-redis
+  namespace: tenant-operator-system
+  labels:
+    app.kubernetes.io/part-of: e2e-deps
+    app.kubernetes.io/component: redis
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      app.kubernetes.io/component: redis
+      app.kubernetes.io/part-of: e2e-deps
+  template:
+    metadata:
+      labels:
+        app.kubernetes.io/component: redis
+        app.kubernetes.io/part-of: e2e-deps
+    spec:
+      securityContext:
+        runAsNonRoot: true
+        seccompProfile:
+          type: RuntimeDefault
+      containers:
+      - name: redis
+        image: redis:7
+        ports:
+        - containerPort: 6379
+        securityContext:
+          allowPrivilegeEscalation: false
+          capabilities:
+            drop: ["ALL"]
+          readOnlyRootFilesystem: true
+          runAsUser: 999
+        volumeMounts:
+        - name: tmp
+          mountPath: /tmp
+        resources:
+          requests:
+            cpu: 10m
+            memory: 32Mi
+          limits:
+            cpu: 200m
+            memory: 64Mi
+        readinessProbe:
+          exec:
+            command: ["redis-cli", "ping"]
+          initialDelaySeconds: 3
+          periodSeconds: 3
+      volumes:
+      - name: tmp
+        emptyDir: {}
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: e2e-redis
+  namespace: tenant-operator-system
+  labels:
+    app.kubernetes.io/part-of: e2e-deps
+    app.kubernetes.io/component: redis
+spec:
+  selector:
+    app.kubernetes.io/component: redis
+    app.kubernetes.io/part-of: e2e-deps
+  ports:
+  - port: 6379
+    targetPort: 6379
+---
+# Mock Vault: nginx returning HTTP 403 on all requests.
+# VerifyJWTAuthMounted maps 403 → ErrUnauthorized → startup continues.
+# Any attempt to actually USE Vault (e.g. at reconcile time) will also
+# get 403, which saga steps surface as a permanent error — acceptable
+# for the metrics-only E2E gate.
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: e2e-vault-nginx-conf
+  namespace: tenant-operator-system
+  labels:
+    app.kubernetes.io/part-of: e2e-deps
+    app.kubernetes.io/component: vault-mock
+data:
+  nginx.conf: |
+    events {}
+    http {
+      server {
+        listen 8200;
+        # Vault admin Ping calls GET /v1/auth/token/lookup-self; return 200
+        # so the readyz probe passes. No JSON body needed (out=nil in do()).
+        location = /v1/auth/token/lookup-self {
+          return 200 '{}';
+        }
+        # All other paths (including /v1/sys/auth/jwt for VerifyJWTAuthMounted)
+        # return 403 so the ErrUnauthorized allow-path fires at startup.
+        location / {
+          return 403;
+        }
+      }
+    }
+---
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: e2e-vault
+  namespace: tenant-operator-system
+  labels:
+    app.kubernetes.io/part-of: e2e-deps
+    app.kubernetes.io/component: vault-mock
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      app.kubernetes.io/component: vault-mock
+      app.kubernetes.io/part-of: e2e-deps
+  template:
+    metadata:
+      labels:
+        app.kubernetes.io/component: vault-mock
+        app.kubernetes.io/part-of: e2e-deps
+    spec:
+      securityContext:
+        runAsNonRoot: true
+        seccompProfile:
+          type: RuntimeDefault
+      containers:
+      - name: nginx
+        image: nginx:alpine
+        ports:
+        - containerPort: 8200
+        securityContext:
+          allowPrivilegeEscalation: false
+          capabilities:
+            drop: ["ALL"]
+          readOnlyRootFilesystem: true
+          runAsUser: 101
+        volumeMounts:
+        - name: nginx-conf
+          mountPath: /etc/nginx/nginx.conf
+          subPath: nginx.conf
+          readOnly: true
+        - name: tmp
+          mountPath: /tmp
+        - name: var-cache
+          mountPath: /var/cache/nginx
+        - name: var-run
+          mountPath: /var/run
+        resources:
+          requests:
+            cpu: 5m
+            memory: 16Mi
+          limits:
+            cpu: 100m
+            memory: 32Mi
+        readinessProbe:
+          tcpSocket:
+            port: 8200
+          initialDelaySeconds: 2
+          periodSeconds: 2
+      volumes:
+      - name: nginx-conf
+        configMap:
+          name: e2e-vault-nginx-conf
+      - name: tmp
+        emptyDir: {}
+      - name: var-cache
+        emptyDir: {}
+      - name: var-run
+        emptyDir: {}
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: e2e-vault
+  namespace: tenant-operator-system
+  labels:
+    app.kubernetes.io/part-of: e2e-deps
+    app.kubernetes.io/component: vault-mock
+spec:
+  selector:
+    app.kubernetes.io/component: vault-mock
+    app.kubernetes.io/part-of: e2e-deps
+  ports:
+  - port: 8200
+    targetPort: 8200
+---
+---
+# HTTP ping stub: a single nginx pod that serves the health/ping endpoints
+# used by the manager's readyz probes for FGA and Stripe.
+# Each client is pointed at this stub via environment variables:
+#   FGA_URL           → http://e2e-http-stub:8080 (HTTPClient.Ping → GET /healthz)
+#   STRIPE_API_BASE_URL → http://e2e-http-stub:8080 (Stripe Ping → GET /v1/balance)
+# All responses are minimal valid JSON; the clients only check HTTP 2xx.
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: e2e-http-stub-nginx-conf
+  namespace: tenant-operator-system
+  labels:
+    app.kubernetes.io/part-of: e2e-deps
+    app.kubernetes.io/component: http-stub
+data:
+  nginx.conf: |
+    events {}
+    http {
+      server {
+        listen 8080;
+        # FGA: HTTPClient.Ping checks GET /healthz → 2xx
+        location /healthz {
+          default_type application/json;
+          return 200 '{"status":"SERVING"}';
+        }
+        # Stripe: balance.Get calls GET /v1/balance
+        location /v1/balance {
+          default_type application/json;
+          return 200 '{"object":"balance","available":[],"livemode":false,"pending":[]}';
+        }
+      }
+    }
+---
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: e2e-http-stub
+  namespace: tenant-operator-system
+  labels:
+    app.kubernetes.io/part-of: e2e-deps
+    app.kubernetes.io/component: http-stub
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      app.kubernetes.io/component: http-stub
+      app.kubernetes.io/part-of: e2e-deps
+  template:
+    metadata:
+      labels:
+        app.kubernetes.io/component: http-stub
+        app.kubernetes.io/part-of: e2e-deps
+    spec:
+      securityContext:
+        runAsNonRoot: true
+        seccompProfile:
+          type: RuntimeDefault
+      containers:
+      - name: nginx
+        image: nginx:alpine
+        ports:
+        - containerPort: 8080
+        securityContext:
+          allowPrivilegeEscalation: false
+          capabilities:
+            drop: ["ALL"]
+          readOnlyRootFilesystem: true
+          runAsUser: 101
+        volumeMounts:
+        - name: nginx-conf
+          mountPath: /etc/nginx/nginx.conf
+          subPath: nginx.conf
+          readOnly: true
+        - name: tmp
+          mountPath: /tmp
+        - name: var-cache
+          mountPath: /var/cache/nginx
+        - name: var-run
+          mountPath: /var/run
+        resources:
+          requests:
+            cpu: 5m
+            memory: 16Mi
+          limits:
+            cpu: 50m
+            memory: 32Mi
+        readinessProbe:
+          httpGet:
+            path: /healthz
+            port: 8080
+          initialDelaySeconds: 2
+          periodSeconds: 2
+      volumes:
+      - name: nginx-conf
+        configMap:
+          name: e2e-http-stub-nginx-conf
+      - name: tmp
+        emptyDir: {}
+      - name: var-cache
+        emptyDir: {}
+      - name: var-run
+        emptyDir: {}
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: e2e-http-stub
+  namespace: tenant-operator-system
+  labels:
+    app.kubernetes.io/part-of: e2e-deps
+    app.kubernetes.io/component: http-stub
+spec:
+  selector:
+    app.kubernetes.io/component: http-stub
+    app.kubernetes.io/part-of: e2e-deps
+  ports:
+  - port: 8080
+    targetPort: 8080
+---
+# Zitadel PAT file: mounted at /etc/zitadel/pat in the manager container.
+# Any non-empty value satisfies os.ReadFile(zitadelPATPath).
+apiVersion: v1
+kind: Secret
+metadata:
+  name: e2e-zitadel-pat
+  namespace: tenant-operator-system
+  labels:
+    app.kubernetes.io/part-of: e2e-deps
+    app.kubernetes.io/component: zitadel-pat
+type: Opaque
+stringData:
+  pat: e2e-fake-zitadel-pat-for-testing-only

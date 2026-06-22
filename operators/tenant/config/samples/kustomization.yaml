@@ -1,0 +1,6 @@
+## Append samples of your project ##
+resources:
+- gibson_v1alpha1_tenant.yaml
+- gibson_v1alpha1_tenantmember.yaml
+- gibson_v1alpha1_agentenrollment.yaml
+# +kubebuilder:scaffold:manifestskustomizesamples

@@ -1,0 +1,118 @@
+# Strategic merge patch: injects stub env vars + Zitadel PAT volume into the
+# manager Deployment for the E2E kind environment. All values are fake/local
+# stubs — no real services are contacted. The operator starts up cleanly
+# because every hard startup gate only checks env var presence (not
+# reachability), except:
+#   - platform-db migrations → real Postgres (e2e-postgres pod)
+#   - VerifyJWTAuthMounted   → mock-Vault returns 403 → ErrUnauthorized →
+#                              startup continues per the tenant-operator#134
+#                              allow path
+# Applied only when building from config/e2e (make deploy-e2e).
+#
+# leader-election-namespace: the default is gibson-platform (a cross-namespace
+# lock used by production where the SA has platform-wide RBAC). In the E2E
+# kind cluster only tenant-operator-system RBAC is provisioned via
+# leader_election_role.yaml + leader_election_role_binding.yaml, so we
+# redirect leader election into the same namespace where the SA has rights.
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: placeholder
+spec:
+  template:
+    spec:
+      containers:
+      - name: manager
+        args:
+        - --metrics-bind-address=:8443
+        - --leader-elect
+        - --health-probe-bind-address=:8081
+        - --leader-election-namespace=tenant-operator-system
+        env:
+        # --- Postgres (required: requirePlatformPostgres + platform-db migrations + WriteTenantBrokerConfig) ---
+        - name: DATAPLANE_PG_ADMIN_DSN
+          value: "postgres://postgres:postgres@e2e-postgres.tenant-operator-system.svc.cluster.local:5432/postgres?sslmode=disable"
+        # PLATFORM_PG_DSN: operator-shared platform DB for tenant_secrets_broker_config.
+        # In E2E we reuse the same postgres stub (one-code-path requires this to be non-empty).
+        - name: PLATFORM_PG_DSN
+          value: "postgres://postgres:postgres@e2e-postgres.tenant-operator-system.svc.cluster.local:5432/postgres?sslmode=disable"
+        # --- Vault admin (required: buildVaultAdminClient; 403 response allows startup) ---
+        - name: GIBSON_VAULT_ADDR
+          value: "http://e2e-vault.tenant-operator-system.svc.cluster.local:8200"
+        - name: GIBSON_VAULT_ADMIN_TOKEN
+          value: "invalid-e2e-admin-token"
+        # --- Vault transit (required: buildKEKDeriver → psagaDeps.Transit != nil) ---
+        - name: GIBSON_VAULT_AUTH_TOKEN
+          value: "invalid-e2e-transit-token"
+        # --- Vault broker config (required: buildWriteTenantBrokerConfigDeps; one-code-path) ---
+        - name: GIBSON_VAULT_NAMESPACE_TEMPLATE
+          value: "tenant-{tenant_id}"
+        - name: GIBSON_VAULT_AUTH_METHOD
+          value: "jwt"
+        - name: GIBSON_VAULT_MOUNT_PATH
+          value: "secret"
+        # GIBSON_VAULT_JWT_BOUND_AUDIENCE: required by ADR-0009; any non-empty string
+        # is acceptable in E2E since no real plugin JWTs are verified.
+        - name: GIBSON_VAULT_JWT_BOUND_AUDIENCE
+          value: "e2e-audience"
+        # GIBSON_SYSTEM_TENANT_KEK: 32 null bytes base64-encoded (44 chars).
+        # The WriteTenantBrokerConfig step requires a non-empty KEK. This fake
+        # value lets the controller start; actual key material is not used
+        # because no real tenants are provisioned in the metrics E2E test.
+        - name: GIBSON_SYSTEM_TENANT_KEK
+          value: "AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA="
+        # --- Redis (required: REDIS_ADDR non-empty; lazy connect) ---
+        - name: REDIS_ADDR
+          value: "e2e-redis.tenant-operator-system.svc.cluster.local:6379"
+        # --- Zitadel outbound OAuth2 (required: env vars present; lazy connect) ---
+        - name: ZITADEL_TENANT_OPERATOR_CLIENT_ID
+          value: "e2e-client-id"
+        - name: ZITADEL_TENANT_OPERATOR_CLIENT_SECRET
+          value: "e2e-client-secret"
+        - name: ZITADEL_ISSUER
+          value: "https://e2e-zitadel.invalid"
+        # --- Zitadel admin PAT (required: ZITADEL_URL + file at ZITADEL_PAT_PATH) ---
+        - name: ZITADEL_URL
+          value: "https://e2e-zitadel.invalid"
+        # ZITADEL_PAT_PATH defaults to /etc/zitadel/pat; the volume mount below
+        # satisfies os.ReadFile at startup.
+        # --- FGA (required: FGA_URL + FGA_STORE_ID non-empty; readyz probe calls /healthz) ---
+        # Points at the e2e-http-stub nginx that returns 200 {"status":"SERVING"} on /healthz.
+        - name: FGA_URL
+          value: "http://e2e-http-stub.tenant-operator-system.svc.cluster.local:8080"
+        - name: FGA_STORE_ID
+          value: "e2e-store-id"
+        # --- Stripe (required: STRIPE_API_KEY non-empty; readyz probe calls GET /v1/balance) ---
+        # STRIPE_API_BASE_URL redirects the stripe-go backend to the e2e-http-stub instead of
+        # api.stripe.com. The stub returns a minimal valid Balance JSON on /v1/balance.
+        - name: STRIPE_API_KEY
+          value: "sk_test_e2e_fake_placeholder_key_not_real"
+        - name: STRIPE_API_BASE_URL
+          value: "http://e2e-http-stub.tenant-operator-system.svc.cluster.local:8080"
+        # --- SMTP (required: SMTP_HOST + SMTP_FROM non-empty; no connect at startup) ---
+        - name: SMTP_HOST
+          value: "e2e-smtp.invalid"
+        - name: SMTP_FROM
+          value: "e2e@test.invalid"
+        volumeMounts:
+        - name: e2e-zitadel-pat
+          mountPath: /etc/zitadel/pat
+          subPath: pat
+          readOnly: true
+        - name: e2e-plans
+          mountPath: /etc/gibson/plans
+          readOnly: true
+        # readOnlyRootFilesystem=true blocks controller-runtime's auto-generated
+        # self-signed cert for the metrics TLS server (it writes to /tmp).
+        # Mount a writable emptyDir so cert generation succeeds.
+        - name: tmp-metrics-certs
+          mountPath: /tmp
+      volumes:
+      - name: e2e-zitadel-pat
+        secret:
+          secretName: e2e-zitadel-pat
+      - name: e2e-plans
+        configMap:
+          name: e2e-plans
+      - name: tmp-metrics-certs
+        emptyDir: {}
