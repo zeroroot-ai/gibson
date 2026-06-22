@@ -91,6 +91,44 @@ service WorldService {
       allowed_identities: 3  // USER | SERVICE
     };
   }
+
+  // ListReviewQueue returns the tenant's HITL review queue — surfaced surprises +
+  // Findings, each with any label already applied (ADR-0006). The async labelling
+  // UI reads this; it is a read-only projection and NEVER gates a mission.
+  rpc ListReviewQueue(ListReviewQueueRequest) returns (ListReviewQueueResponse) {
+    option (gibson.auth.v1.authz) = {
+      relation: "member",
+      object_type: "tenant",
+      object_deriver: "tenant_from_identity",
+      allowed_identities: 3  // USER | SERVICE
+    };
+  }
+
+  // SubmitLabel records a human review judgement (true/false-positive, severity,
+  // category, dismiss) on a surfaced item, as a tenant-scoped LabelApplied event
+  // (ADR-0006). Labels POOL across the tenant's users and NEVER cross tenants. It
+  // is async: the call appends the event and returns; the mission never waits on
+  // it. Any tenant member may label (the pool is shared), so the relation is
+  // member, not admin.
+  rpc SubmitLabel(SubmitLabelRequest) returns (SubmitLabelResponse) {
+    option (gibson.auth.v1.authz) = {
+      relation: "member",
+      object_type: "tenant",
+      object_deriver: "tenant_from_identity",
+      allowed_identities: 3  // USER | SERVICE
+    };
+  }
+
+  // ListLabels returns the tenant's pooled review labels (ADR-0006) — the HITL
+  // training signal the offline trainer consumes alongside auto-outcomes.
+  rpc ListLabels(ListLabelsRequest) returns (ListLabelsResponse) {
+    option (gibson.auth.v1.authz) = {
+      relation: "member",
+      object_type: "tenant",
+      object_deriver: "tenant_from_identity",
+      allowed_identities: 3  // USER | SERVICE
+    };
+  }
 }
 
 message MissionView {
@@ -182,3 +220,44 @@ message GetFrameAtResponse {
   repeated HostView hosts = 4;
   repeated FindingView findings = 5;
 }
+
+// LabelView is one applied review label (a gibson.world.v1 view of a brain
+// Label): the verdict, optional corrected severity/category, and the user who
+// applied it (provenance only — labels pool tenant-wide; ADR-0006).
+message LabelView {
+  string target_id = 1; // the labelled item (a finding id or surprise host id)
+  string verdict = 2;   // "true_positive" | "false_positive" | "dismiss"
+  string severity = 3;  // corrected severity ("" = leave as-is)
+  string category = 4;  // free-form taxonomy tag ("" = none)
+  string user_id = 5;   // who applied it (provenance; not a partition key)
+}
+
+// ReviewItem is one entry in the HITL review queue: a surfaced surprise or a
+// Finding awaiting (or carrying) a label.
+message ReviewItem {
+  string target_id = 1;   // the label target (finding id or surprise host id)
+  string kind = 2;        // "finding" | "surprise"
+  string title = 3;
+  string scope_id = 4;
+  string address = 5;
+  string severity = 6;
+  bool labelled = 7;      // true if a label has been applied
+  LabelView label = 8;    // the applied label (set iff labelled)
+}
+
+message ListReviewQueueRequest {}
+message ListReviewQueueResponse { repeated ReviewItem items = 1; }
+
+// SubmitLabelRequest applies a label to a surfaced item. The daemon stamps the
+// caller's user id server-side from context — the client does not supply it, so a
+// caller can never attribute a label to another user.
+message SubmitLabelRequest {
+  string target_id = 1; // required: the finding id / surprise host id to label
+  string verdict = 2;   // required: "true_positive" | "false_positive" | "dismiss"
+  string severity = 3;  // optional corrected severity
+  string category = 4;  // optional taxonomy tag
+}
+message SubmitLabelResponse {}
+
+message ListLabelsRequest {}
+message ListLabelsResponse { repeated LabelView labels = 1; }
