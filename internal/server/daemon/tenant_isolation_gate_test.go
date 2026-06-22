@@ -28,7 +28,6 @@ package daemon
 
 import (
 	"context"
-	"database/sql"
 	"testing"
 	"time"
 
@@ -39,7 +38,6 @@ import (
 
 	"github.com/zeroroot-ai/gibson/internal/infra/datapool"
 	"github.com/zeroroot-ai/gibson/internal/platform/authz/registry"
-	billingpb "github.com/zeroroot-ai/gibson/internal/server/daemon/api/gibson/billing/v1"
 	graphpb "github.com/zeroroot-ai/sdk/api/gen/gibson/graph/v1"
 	"github.com/zeroroot-ai/sdk/auth"
 )
@@ -392,100 +390,6 @@ func TestRedis_AuthzRegistry(t *testing.T) {
 }
 
 // ============================================================================
-// POSTGRES — BillingService
-//
-// AUDIT NOTE:
-//   The webhook_idempotency table is a PLATFORM-LEVEL Stripe event dedup table.
-//   It is intentionally NOT per-tenant:
-//     - Stripe webhooks arrive at the platform level before a tenant context
-//       is established.
-//     - RecordWebhookEvent / DeleteWebhookEvent do NOT read per-tenant data
-//       back to the caller; they perform INSERT … ON CONFLICT DO NOTHING and
-//       DELETE. The only "read" is the conflict check keyed by event_id (a
-//       Stripe-global UUID) — it cannot expose one tenant's data to another.
-//     - tenant_id is an observability column only.
-//
-//   DOCUMENTED EXCEPTION: platform dedup table, not a per-tenant data store.
-//   No per-tenant data is read or cross-served via these RPCs.
-//
-//   Result: PASS (documented exception).
-// ============================================================================
-
-// TestPostgres_FailClosed_NilDB verifies that BillingService RPCs fail closed
-// with Unavailable when the platform DB is not yet initialised.
-func TestPostgres_FailClosed_NilDB(t *testing.T) {
-	t.Parallel()
-	srv := NewBillingServer(func() *sql.DB { return nil }, nil)
-	ctx := isoTenantCtx("tenant-a")
-
-	t.Run("RecordWebhookEvent", func(t *testing.T) {
-		t.Parallel()
-		_, err := srv.RecordWebhookEvent(ctx, &billingpb.RecordWebhookEventRequest{
-			EventId:   "evt_test123",
-			EventType: "checkout.session.completed",
-		})
-		assert.Equal(t, codes.Unavailable, isoGRPCCode(err),
-			"BillingService must fail closed (Unavailable) when platform DB is nil")
-	})
-
-	t.Run("DeleteWebhookEvent", func(t *testing.T) {
-		t.Parallel()
-		_, err := srv.DeleteWebhookEvent(ctx, &billingpb.DeleteWebhookEventRequest{
-			EventId: "evt_test123",
-		})
-		assert.Equal(t, codes.Unavailable, isoGRPCCode(err),
-			"BillingService must fail closed (Unavailable) when platform DB is nil")
-	})
-}
-
-// TestPostgres_PlatformLevelTable_DocumentedException is a named canary that
-// asserts the audit-documented properties of the billing table. Any future
-// refactoring that introduces per-tenant data reads MUST update this test and
-// the AUDIT NOTE above.
-func TestPostgres_PlatformLevelTable_DocumentedException(t *testing.T) {
-	t.Parallel()
-
-	// Table name must match platform migration 015_webhook_idempotency.
-	assert.Equal(t, "webhook_idempotency", webhookTableName,
-		"table name must match platform migration 015_webhook_idempotency")
-
-	// Billing timeout must be short enough not to hold Stripe retry windows.
-	assert.LessOrEqual(t, billingQueryTimeout.Seconds(), 10.0,
-		"billing query timeout must be ≤ 10s")
-}
-
-// TestPostgres_AuthzRegistry verifies that the BillingService webhook RPCs
-// authorize as PLATFORM infrastructure, not tenant membership. The Stripe
-// webhook call is pre-auth and frequently tenant-less (the dashboard's
-// platform service identity records into a single cross-tenant idempotency
-// ledger), so a member/tenant_from_identity rule default-denies (dashboard#780).
-// They use the system_tenant/platform_operator pattern instead.
-func TestPostgres_AuthzRegistry(t *testing.T) {
-	t.Parallel()
-
-	methods := []string{
-		"/gibson.billing.v1.BillingService/RecordWebhookEvent",
-		"/gibson.billing.v1.BillingService/DeleteWebhookEvent",
-	}
-	for _, m := range methods {
-		m := m
-		t.Run(m, func(t *testing.T) {
-			t.Parallel()
-			entry, ok := registry.Registry[m]
-			require.True(t, ok, "method %s must be in authz registry", m)
-			assert.Equal(t, "platform_operator", entry.Relation,
-				"BillingService webhook RPCs must require platform_operator relation: %s", m)
-			assert.Equal(t, "system_tenant", entry.ObjectType,
-				"BillingService webhook RPCs must be scoped to system_tenant: %s", m)
-			assert.Equal(t, "system_tenant", entry.ObjectDeriver,
-				"BillingService webhook RPCs must use the system_tenant deriver (not tenant_from_identity): %s", m)
-			assert.False(t, entry.Unauthenticated,
-				"BillingService RPCs must be authenticated: %s", m)
-		})
-	}
-}
-
-// ============================================================================
 // CROSS-STORE FAIL-CLOSED SUMMARY
 //
 // Canonical gate: "unresolved/zero tenant → refusal, not default data."
@@ -524,20 +428,6 @@ func TestAllStores_FailClosed_UnresolvedTenant(t *testing.T) {
 		_, err := srv.GetFindings(emptyCtx, &graphpb.GetFindingsRequest{})
 		assert.Equal(t, codes.PermissionDenied, isoGRPCCode(err),
 			"GraphService/GetFindings must refuse zero tenant")
-	})
-
-	t.Run("Postgres_RecordWebhookEvent_NilDB", func(t *testing.T) {
-		t.Parallel()
-		// BillingService is platform-level and does not gate on tenant context.
-		// It does gate on DB presence — Unavailable with nil DB is the correct
-		// fail-closed response.
-		srv := NewBillingServer(func() *sql.DB { return nil }, nil)
-		_, err := srv.RecordWebhookEvent(emptyCtx, &billingpb.RecordWebhookEventRequest{
-			EventId:   "evt_z",
-			EventType: "checkout.session.completed",
-		})
-		assert.Equal(t, codes.Unavailable, isoGRPCCode(err),
-			"BillingService must fail closed (Unavailable) when DB is nil")
 	})
 }
 

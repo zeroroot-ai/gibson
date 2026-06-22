@@ -38,7 +38,6 @@ import (
 	"github.com/go-logr/logr"
 	"golang.org/x/oauth2/clientcredentials"
 	"k8s.io/apimachinery/pkg/runtime"
-	"k8s.io/apimachinery/pkg/types"
 	utilruntime "k8s.io/apimachinery/pkg/util/runtime"
 	clientgoscheme "k8s.io/client-go/kubernetes/scheme"
 	ctrl "sigs.k8s.io/controller-runtime"
@@ -60,7 +59,6 @@ import (
 	"github.com/zeroroot-ai/gibson/operators/tenant/internal/clients/fga"
 	"github.com/zeroroot-ai/gibson/operators/tenant/internal/clients/redisstate"
 	"github.com/zeroroot-ai/gibson/operators/tenant/internal/clients/signupprogress"
-	"github.com/zeroroot-ai/gibson/operators/tenant/internal/clients/stripe"
 	vaultadmin "github.com/zeroroot-ai/gibson/operators/tenant/internal/clients/vault"
 	"github.com/zeroroot-ai/gibson/operators/tenant/internal/clients/zitadel"
 	"github.com/zeroroot-ai/gibson/operators/tenant/internal/controller"
@@ -74,7 +72,6 @@ import (
 	"github.com/zeroroot-ai/gibson/operators/tenant/internal/saga/flows"
 	"github.com/zeroroot-ai/gibson/operators/tenant/internal/startup"
 	gibsonwebhook "github.com/zeroroot-ai/gibson/operators/tenant/internal/webhook"
-	"github.com/zeroroot-ai/gibson/operators/tenant/plans"
 	// +kubebuilder:scaffold:imports
 )
 
@@ -139,9 +136,6 @@ func main() {
 	flag.StringVar(&metricsCertKey, "metrics-cert-key", "tls.key", "The name of the metrics server key file.")
 	flag.BoolVar(&enableHTTP2, "enable-http2", false,
 		"If set, HTTP/2 will be enabled for the metrics and webhook servers")
-	var plansFile string
-	flag.StringVar(&plansFile, "plans-file", "/etc/gibson/plans/plans.yaml",
-		"Path to the canonical plan registry YAML. Mounted from the Helm ConfigMap gibson-tenant-operator-plans by default.")
 	// The --dev-mode flag was deleted as part of the one-code-path epic
 	// (deploy#205): the operator binary boots identically in every
 	// environment. ValidateAtStartup always fails fast on missing client
@@ -417,33 +411,11 @@ func main() {
 			"REDIS_ADDR empty — fga pubsub publisher disabled " +
 				"(dashboard membership cache will not invalidate on operator FGA writes)")
 	}
-	// Stripe is required infrastructure (one-code-path epic / tenant-operator#95).
-	// `STRIPE_API_KEY` must be set; missing → exit 1. The provisioning saga no
-	// longer touches Stripe (the payment gate was removed in E7/gibson#799); the
-	// live client now powers only the BillingReconciler (trial expiry, past-due
-	// → entitlements revocation). Both the client and this guard exit OSS when
-	// billing moves to the closed Entitlements layer (E7/gibson#798+#800), after
-	// which on-prem provisions with no Stripe at all. A nil Stripe client used
-	// to mask operator misconfiguration as phantom billing "success".
-	stripeKey := os.Getenv("STRIPE_API_KEY")
-	if stripeKey == "" {
-		setupLog.Error(nil, "STRIPE_API_KEY is required (one-code-path / tenant-operator#95): "+
-			"the BillingReconciler cannot run without a Stripe client; "+
-			"set STRIPE_API_KEY (removed from OSS once billing moves to the closed layer, gibson#798/#800)")
-		os.Exit(1)
-	}
-	// Card-first-signup mode guard (dashboard#767): staging must run Stripe
-	// test mode, prod must run live mode. Fail-closed before constructing the
-	// client so a mis-mounted key can never process the wrong cards.
-	if err := validateStripeMode(os.Getenv); err != nil {
-		setupLog.Error(err, "stripe mode guard")
-		os.Exit(1)
-	}
-	stripeClient, err := stripe.NewAPIClient(stripe.Config{APIKey: stripeKey, APIVersion: "2024-12-18.acacia"})
-	if err != nil {
-		setupLog.Error(err, "stripe client init")
-		os.Exit(1)
-	}
+	// Billing (Stripe + plans) moved to the closed commercial tier
+	// (E7/gibson#798): the hosted billing-webhook owns subscription state and
+	// the closed Entitlements provider owns plan→quota. OSS gibson's operator
+	// carries no Stripe client, plan registry, or billing reconcilers.
+	//
 	// Redis is required infrastructure (one-code-path epic / deploy#199).
 	// `REDIS_ADDR` must be set; missing → exit 1. There is no NoopClient
 	// fallback — the saga steps that write the tenant keyspace, publish
@@ -642,7 +614,6 @@ func main() {
 	psagaDeps := &saga.Deps{
 		K8s:     mgr.GetClient(),
 		FGA:     fgaClient,
-		Stripe:  stripeClient,
 		Redis:   redisClient,
 		Zitadel: zitadelClient,
 		Vault:   vaultAdminClient,
@@ -670,25 +641,15 @@ func main() {
 	// reuses the Redis client declared above, so no separate capability
 	// binding is needed. psagaDeps.Qdrant is intentionally left nil.
 
-	// Load the canonical plan registry + build the entitlements reconciler.
-	// The HTTP client for the dashboard's provisioning routes is built
-	// against the operator's existing SPIFFE JWT-SVID workload API source
-	// and the DASHBOARD_URL env var.
-	planRegistry, err := plans.Load(plansFile)
-	if err != nil {
-		setupLog.Error(err, "failed to load plans registry; refusing to start", "path", plansFile)
-		os.Exit(1)
-	}
-	// Phase 5.1 of spec tenant-provisioning-unification-phase2 + ADR-0002:
-	// prefer the direct SPIFFE-mTLS gRPC path against the daemon when
-	// GIBSON_DAEMON_GRPC_ADDRESS is set; fall back to the legacy HTTP-to-
-	// dashboard fan-out so a staged rollout (chart shipped before the
-	// daemon side is rolled out) does not break entitlements reconciliation.
-	// The gRPC client uses workload-API-sourced SVIDs via
-	// pkg/transport/daemon; the daemon's expected SVID is read from
-	// GIBSON_DAEMON_SPIFFE_ID (defaults to spiffe://zeroroot.ai/platform/daemon).
-	dashboardBaseURL := os.Getenv("DASHBOARD_URL")
-	var entitlementsProvisioner controller.EntitlementsProvisioner
+	// Build the daemon gRPC client (SPIFFE mTLS, ADR-0002) and bind it as the
+	// DaemonGRPC saga capability so steps that call DaemonOperatorService
+	// (SetTenantZitadelOrg, FGA tuple writes, catalog seeding, …) are
+	// satisfied. The daemon's expected SVID is read from GIBSON_DAEMON_SPIFFE_ID
+	// (defaults to spiffe://zeroroot.ai/platform/daemon).
+	//
+	// Plan→quota and Stripe subscription reconciliation moved to the closed
+	// billing tier (E7/gibson#798): the operator no longer loads a plan
+	// registry or runs an entitlements/billing reconciler.
 	if grpcAddr := os.Getenv("GIBSON_DAEMON_GRPC_ADDRESS"); grpcAddr != "" {
 		daemonSVID := os.Getenv("GIBSON_DAEMON_SPIFFE_ID")
 		if daemonSVID == "" {
@@ -697,29 +658,16 @@ func main() {
 		grpcClient, gerr := provision.NewEntitlementsGRPCClient(
 			context.Background(), grpcAddr, daemonSVID, operatorTokenSource)
 		if gerr != nil {
-			setupLog.Error(gerr, "entitlements gRPC client init failed; falling back to HTTP-to-dashboard", "addr", grpcAddr)
-			entitlementsProvisioner = provision.NewEntitlementsHTTPClient(dashboardBaseURL, operatorTokenSource)
-		} else {
-			setupLog.Info("entitlements provisioner: gRPC (SPIFFE mTLS)", "addr", grpcAddr, "daemon_svid", daemonSVID)
-			entitlementsProvisioner = grpcClient
-			// Bind the same client into the unified deps bag so
-			// saga.ValidateAtStartup sees CapabilityDaemonGRPC as
-			// satisfied. Spec tenant-operator-saga-capabilities
-			// Requirement 3.1.
-			psagaDeps.DaemonGRPC = grpcClient
+			setupLog.Error(gerr, "daemon gRPC client init failed", "addr", grpcAddr)
+			os.Exit(1)
 		}
+		setupLog.Info("daemon provisioner: gRPC (SPIFFE mTLS)", "addr", grpcAddr, "daemon_svid", daemonSVID)
+		psagaDeps.DaemonGRPC = grpcClient
 	} else {
-		setupLog.Info("entitlements provisioner: HTTP-to-dashboard", "url", dashboardBaseURL)
-		entitlementsProvisioner = provision.NewEntitlementsHTTPClient(dashboardBaseURL, operatorTokenSource)
-	}
-	entitlementsReconciler := &controller.EntitlementsReconciler{
-		Plans:       planRegistry,
-		Provisioner: entitlementsProvisioner,
-		Logger:      slog.Default(),
+		setupLog.Info("GIBSON_DAEMON_GRPC_ADDRESS unset; DaemonGRPC saga capability unbound")
 	}
 
 	provisionSteps := flows.ProvisionSteps(deps)
-	provisionSteps = append(provisionSteps, entitlementsReconciler.AsSagaStep())
 	teardownSteps := flows.TeardownSteps(deps)
 
 	// Spec tenant-provisioning-unification-phase2 Requirement 5.3:
@@ -811,33 +759,9 @@ func main() {
 		os.Exit(1)
 	}
 
-	// BillingReconciler: polls every 5 minutes and enforces the billing state
-	// machine (trial expiry, past-due revocation, teardown-after enforcement).
-	// The TeardownQueue is consumed by the goroutine below, which deletes the
-	// Tenant CR — setting DeletionTimestamp triggers the TenantReconciler's
-	// finalizer-driven teardown saga. tenant-operator#181.
-	teardownQueue := make(chan string, 32)
-	if err := (&controller.BillingReconciler{
-		Client:        mgr.GetClient(),
-		StripeClient:  stripeClient,
-		Entitlements:  entitlementsReconciler,
-		TeardownQueue: teardownQueue,
-	}).SetupWithManager(mgr); err != nil {
-		setupLog.Error(err, "Failed to create controller", "controller", "Billing")
-		os.Exit(1)
-	}
-	go func() {
-		for tenantName := range teardownQueue {
-			t := &gibsonv1alpha1.Tenant{}
-			if err := mgr.GetClient().Get(context.Background(), types.NamespacedName{Name: tenantName}, t); err != nil {
-				setupLog.Error(err, "billing: teardown consumer tenant lookup failed", "tenant", tenantName)
-				continue
-			}
-			if err := mgr.GetClient().Delete(context.Background(), t); err != nil {
-				setupLog.Error(err, "billing: teardown consumer tenant delete failed", "tenant", tenantName)
-			}
-		}
-	}()
+	// Billing state-machine reconciliation (trial expiry, past-due revocation,
+	// teardown-after enforcement) moved to the closed billing tier
+	// (E7/gibson#798). OSS gibson's operator runs no billing reconciler.
 
 	// Owner-ref mutating webhook — stamps ownerReferences on CREATE for
 	// AgentEnrollment/TenantMember when the namespace has
@@ -895,7 +819,7 @@ func main() {
 	readyzAgg := buildReadyzAggregator(
 		setupLog,
 		fgaClient, redisClient,
-		stripeClient, vaultAdminClient, zitadelClient,
+		vaultAdminClient, zitadelClient,
 	)
 	if err := mgr.AddReadyzCheck("readyz", func(req *http.Request) error {
 		// Capture the aggregator's HTTP response status to determine readiness.
@@ -1184,7 +1108,6 @@ func buildReadyzAggregator(
 	log logr.Logger,
 	fgaC fga.Client,
 	redisC redisstate.Client,
-	stripeC stripe.Client,
 	vaultC vaultadmin.AdminClient,
 	_ zitadel.Client, // reserved for when zitadel.Client grows a Ping method
 ) *readiness.Aggregator {
@@ -1195,9 +1118,6 @@ func buildReadyzAggregator(
 	}
 	if redisC != nil {
 		agg.Register(pingAdapter{"redis", redisC.Ping, log})
-	}
-	if stripeC != nil {
-		agg.Register(pingAdapter{"stripe", stripeC.Ping, log})
 	}
 	if vaultC != nil {
 		agg.Register(pingAdapter{"vault", vaultC.Ping, log})
