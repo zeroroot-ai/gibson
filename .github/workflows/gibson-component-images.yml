@@ -1,0 +1,61 @@
+name: gibson-component-images
+
+# Builds the non-daemon component images that were folded into the gibson
+# monorepo (ADR-0056, gibson#786): ext-authz, tenant-operator,
+# platform-operator, spiffe-jwks-exporter. Their standalone repos were deleted,
+# so gibson is now their sole build source. Image names are preserved
+# (ghcr.io/zeroroot-ai/<component>) so the umbrella chart keeps pulling the same
+# references, now produced from the monorepo and tagged with the single gibson
+# release version (one number = what's in prod). The daemon image itself is
+# built by gibson-daemon.yml.
+
+on:
+  push:
+    branches: [main]
+    tags:
+      - 'v*'
+  pull_request:
+    paths-ignore:
+      - 'docs/**'
+      - '*.md'
+      - 'CLAUDE.md'
+
+jobs:
+  build:
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - component: ext-authz
+            dockerfile: build/ext-authz.Dockerfile
+            image: ghcr.io/zeroroot-ai/ext-authz
+          - component: tenant-operator
+            dockerfile: build/tenant-operator.Dockerfile
+            image: ghcr.io/zeroroot-ai/tenant-operator
+          - component: platform-operator
+            dockerfile: build/platform-operator.Dockerfile
+            image: ghcr.io/zeroroot-ai/platform-operator
+          - component: spiffe-jwks-exporter
+            dockerfile: build/spiffe-jwks-exporter.Dockerfile
+            image: ghcr.io/zeroroot-ai/spiffe-jwks-exporter
+    uses: zeroroot-ai/.github/.github/workflows/reusable-image-build.yml@main
+    permissions:
+      contents: write
+      packages: write
+      id-token: write
+      attestations: write
+      security-events: write
+      actions: read
+    with:
+      component_name: ${{ matrix.component }}
+      # Build context is the module root; the component Dockerfiles COPY the
+      # whole tree and `go build ./operators/...` (or ./cmd/...) from it.
+      component_path: .
+      dockerfile_path: ${{ matrix.dockerfile }}
+      image_name: ${{ matrix.image }}
+      tag_pattern: (v.*)
+    secrets:
+      # Same private-module fetch token the daemon image uses; the Dockerfiles
+      # mount it as BuildKit secret id=ghtoken so `go mod download` can reach the
+      # private zeroroot-ai modules (e.g. platform-sdk).
+      ghtoken: ${{ secrets.GH_PAT_GIBSON_RO }}
