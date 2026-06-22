@@ -3,9 +3,9 @@ name: checkpoint-chaos
 #
 # Runs the SIGKILL recovery harness on every PR that touches:
 #   - core/gibson/internal/orchestrator/**
-#   - core/gibson/internal/checkpoint/**
-#   - core/gibson/internal/mission/**
-#   - core/gibson/internal/memory/**
+#   - core/gibson/internal/engine/checkpoint/**
+#   - core/gibson/internal/engine/mission/**
+#   - core/gibson/internal/engine/memory/**
 #
 # The harness lives at enterprise/deploy/tests/checkpoint/sigkill_recovery_test.sh.
 # This is a workspace-spanning path; CI runners must have read access to the
@@ -16,9 +16,9 @@ on:
   pull_request:
     paths:
       - "core/gibson/internal/orchestrator/**"
-      - "core/gibson/internal/checkpoint/**"
-      - "core/gibson/internal/mission/**"
-      - "core/gibson/internal/memory/**"
+      - "core/gibson/internal/engine/checkpoint/**"
+      - "core/gibson/internal/engine/mission/**"
+      - "core/gibson/internal/engine/memory/**"
       - "enterprise/deploy/tests/checkpoint/**"
       - "enterprise/deploy/helm/gibson/**"
 

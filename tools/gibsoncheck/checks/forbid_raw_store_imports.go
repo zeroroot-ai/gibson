@@ -23,7 +23,7 @@ import (
 // Spec: database-per-tenant-data-plane Requirement 16.1, Requirement 5.9.
 var ForbidRawStoreImportsAnalyzer = &analysis.Analyzer{
 	Name: "forbidrawstoreimports",
-	Doc:  "fail on raw store client imports (pgx/go-redis/neo4j/qdrant/miniredis) outside internal/datapool/ and internal/admin/ (database-per-tenant-data-plane Req 16.1)",
+	Doc:  "fail on raw store client imports (pgx/go-redis/neo4j/qdrant/miniredis) outside internal/infra/datapool/ and internal/server/admin/ (database-per-tenant-data-plane Req 16.1)",
 	Run:  runForbidRawStoreImports,
 }
 
@@ -58,38 +58,38 @@ var testOnlyImports = []string{
 // be caught by this analyzer, which is the primary goal.
 var allowedStorePackages = []string{
 	// Permanent allowlist — spec-approved locations for raw store client access.
-	"/internal/datapool",
-	"/internal/admin",
+	"/internal/infra/datapool",
+	"/internal/server/admin",
 	"/internal/migrate",
 	"/cmd/gibson-migrate",
-	"/cmd/daemon",      // cmd/daemon binary entry point (bootstrap wiring)
-	"/internal/daemon", // daemon bootstrap and subsystems (wires raw clients into Conn factory)
+	"/cmd/daemon",             // cmd/daemon binary entry point (bootstrap wiring)
+	"/internal/server/daemon", // daemon bootstrap and subsystems (wires raw clients into Conn factory)
 	"/tools/gibsoncheck",
 	"/cmd/mission-storage-migrate", // one-off offline mission-storage migrator; peer of cmd/gibson-migrate (spec: mirror-delete-and-offline-migrator).
 
 	// Transitional allowlist — Phase D migration in progress.
 	// These packages are targeted for refactor/deletion; remove entries here
 	// once the corresponding packages are cleaned up.
-	"/internal/state",               // Phase D/4.7: TenantScopedStore pending deletion
-	"/internal/database",            // Phase D/4.2: DAO refactor in progress
-	"/internal/authz",               // Phase E/5.2: cross-tenant code relocation
-	"/internal/audit",               // Phase E/5.2: audit stream on shared Redis
-	"/internal/finding",             // Phase D/4.2: finding store _conn.go uses raw redis via Conn
-	"/internal/graphrag",            // Phase D/4.4: Neo4j session via Conn
-	"/internal/memory",              // Phase D/4.3: mission memory via Conn
-	"/internal/component",           // Phase E/5.2: component quota counters (shared Redis)
-	"/internal/budget",              // Phase D/4.x: budget enforcer pending Conn-bound refactor
-	"/internal/checkpoint",          // Phase D/4.x: checkpoint store pending Conn-bound refactor
-	"/internal/manifest",            // Phase D/4.x: manifest invalidator pending refactor
-	"/internal/mission",             // Phase D/4.1,4.5: Conn-bound wrappers still import raw redis
-	"/internal/missiondraft",        // Phase D/4.x: draft store pending Conn-bound refactor
-	"/internal/onboarding",          // Phase D/4.x: onboarding store pending Conn-bound refactor
-	"/internal/neo4j",               // Phase D/4.4: Neo4j client wrapper
-	"/internal/ratelimit",           // Phase D/4.x: rate limiter on shared Redis
-	"/internal/providerconfig",      // Phase C/3.3: provider config store pending Conn-bound
-	"/internal/apikeys",             // Phase D/4.x: API key store pending Conn-bound refactor
-	"/internal/orchestrator",        // Phase D/4.4: Neo4j graph querier pending Conn-bound refactor
-	"/internal/secrets/configstore", // sub-package that owns raw pgx access for the secrets broker stack against the operator-shared Postgres; the parent internal/secrets/ stays free of raw store imports.
+	"/internal/engine/state",                 // Phase D/4.7: TenantScopedStore pending deletion
+	"/internal/infra/database",               // Phase D/4.2: DAO refactor in progress
+	"/internal/platform/authz",               // Phase E/5.2: cross-tenant code relocation
+	"/internal/platform/audit",               // Phase E/5.2: audit stream on shared Redis
+	"/internal/engine/finding",               // Phase D/4.2: finding store _conn.go uses raw redis via Conn
+	"/internal/engine/graphrag",              // Phase D/4.4: Neo4j session via Conn
+	"/internal/engine/memory",                // Phase D/4.3: mission memory via Conn
+	"/internal/platform/component",           // Phase E/5.2: component quota counters (shared Redis)
+	"/internal/platform/budget",              // Phase D/4.x: budget enforcer pending Conn-bound refactor
+	"/internal/engine/checkpoint",            // Phase D/4.x: checkpoint store pending Conn-bound refactor
+	"/internal/platform/manifest",            // Phase D/4.x: manifest invalidator pending refactor
+	"/internal/engine/mission",               // Phase D/4.1,4.5: Conn-bound wrappers still import raw redis
+	"/internal/engine/missiondraft",          // Phase D/4.x: draft store pending Conn-bound refactor
+	"/internal/platform/onboarding",          // Phase D/4.x: onboarding store pending Conn-bound refactor
+	"/internal/infra/neo4j",                  // Phase D/4.4: Neo4j client wrapper
+	"/internal/platform/ratelimit",           // Phase D/4.x: rate limiter on shared Redis
+	"/internal/platform/providerconfig",      // Phase C/3.3: provider config store pending Conn-bound
+	"/internal/apikeys",                      // Phase D/4.x: API key store pending Conn-bound refactor
+	"/internal/orchestrator",                 // Phase D/4.4: Neo4j graph querier pending Conn-bound refactor
+	"/internal/platform/secrets/configstore", // sub-package that owns raw pgx access for the secrets broker stack against the operator-shared Postgres; the parent internal/platform/secrets/ stays free of raw store imports.
 }
 
 func runForbidRawStoreImports(pass *analysis.Pass) (any, error) {
@@ -125,7 +125,7 @@ func runForbidRawStoreImports(pass *analysis.Pass) (any, error) {
 				}
 
 				pass.Reportf(imp.Pos(),
-					"forbidden import %q in %q — raw store clients must be accessed via internal/datapool/Conn (see docs/data-plane.md); only internal/datapool/, internal/admin/, internal/migrate/, cmd/gibson-migrate/, and cmd/daemon/ may import raw store libraries directly",
+					"forbidden import %q in %q — raw store clients must be accessed via internal/infra/datapool/Conn (see docs/data-plane.md); only internal/infra/datapool/, internal/server/admin/, internal/migrate/, cmd/gibson-migrate/, and cmd/daemon/ may import raw store libraries directly",
 					path, pkgPath)
 			}
 		}

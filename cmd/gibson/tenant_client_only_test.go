@@ -13,7 +13,7 @@ import (
 	astchecks "github.com/zeroroot-ai/ast-checks"
 )
 
-// TestTenantClientOnly asserts that no handler in internal/daemon/api/
+// TestTenantClientOnly asserts that no handler in internal/server/daemon/api/
 // calls pgxpool.Pool.QueryContext / .Exec / .Query directly. Per-tenant
 // isolation requires routing every DB operation through the per-tenant
 // client wrapper (which scopes the connection to the tenant's schema).
@@ -33,7 +33,7 @@ func TestTenantClientOnly(t *testing.T) {
 	}
 
 	opts := astchecks.WalkOpts{
-		ScopeDirs:     []string{filepath.Join(repoRoot, "internal", "daemon", "api")},
+		ScopeDirs:     []string{filepath.Join(repoRoot, "internal", "server", "daemon", "api")},
 		RepoRoot:      repoRoot,
 		Matchers:      matchers,
 		SkipTestFiles: true,
@@ -46,7 +46,7 @@ func TestTenantClientOnly(t *testing.T) {
 	}
 
 	if len(findings) > 0 {
-		t.Errorf("direct pgxpool access in internal/daemon/api (%d sites):\n%s\n\n"+
+		t.Errorf("direct pgxpool access in internal/server/daemon/api (%d sites):\n%s\n\n"+
 			"Handlers must use the per-tenant client wrapper (state.NewTenantClient or similar)\n"+
 			"to scope DB operations to the inbound tenant. Direct pgxpool calls bypass that scoping.\n",
 			len(findings), astchecks.RenderFindings(findings))

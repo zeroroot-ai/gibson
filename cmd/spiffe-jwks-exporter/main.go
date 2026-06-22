@@ -39,7 +39,7 @@ import (
 	"github.com/spiffe/go-spiffe/v2/bundle/jwtbundle"
 	"github.com/spiffe/go-spiffe/v2/spiffeid"
 	"github.com/spiffe/go-spiffe/v2/workloadapi"
-	"github.com/zeroroot-ai/gibson/internal/infra/observability"
+	"github.com/zeroroot-ai/gibson/internal/infra/otelinit"
 	"github.com/zeroroot-ai/gibson/internal/infra/readiness"
 )
 
@@ -53,7 +53,7 @@ func main() {
 	)
 	flag.Parse()
 
-	obs, err := observability.Init(context.Background(), serviceName)
+	obs, err := otelinit.Init(context.Background(), serviceName)
 	if err != nil {
 		fmt.Fprintf(os.Stderr, "observability init failed: %v\n", err)
 		os.Exit(1)
@@ -63,7 +63,7 @@ func main() {
 	trustDomain, err := spiffeid.TrustDomainFromString(*td)
 	if err != nil {
 		log.Error("invalid trust domain",
-			observability.TenantIDField, "",
+			otelinit.TenantIDField, "",
 			"trust_domain", *td,
 			"err", err,
 		)

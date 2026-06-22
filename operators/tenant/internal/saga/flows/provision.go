@@ -25,7 +25,6 @@ import (
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"sigs.k8s.io/controller-runtime/pkg/client"
 
-
 	gibsonv1alpha1 "github.com/zeroroot-ai/gibson/operators/tenant/api/v1alpha1"
 	"github.com/zeroroot-ai/gibson/operators/tenant/internal/clients"
 	"github.com/zeroroot-ai/gibson/operators/tenant/internal/clients/fga"
@@ -48,8 +47,8 @@ type ProvisionDeps struct {
 	K8sClient client.Client
 	FGA       fga.Client
 	Stripe    stripe.Client
-	Redis    redisstate.Client
-	Zitadel  zitadel.Client
+	Redis     redisstate.Client
+	Zitadel   zitadel.Client
 	// DataPlane provisions per-tenant data-plane resources (Postgres, Neo4j,
 	// Redis, etc.) as per-tenant K8s StatefulSets. Always non-nil:
 	// buildDataPlaneProvisioner in cmd/main.go always returns dataplane.New(cfg).

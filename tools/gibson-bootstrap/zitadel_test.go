@@ -10,7 +10,7 @@ import (
 )
 
 // ---------------------------------------------------------------------------
-// Test server helpers — mirrors admin_test.go style in internal/idp/zitadel/
+// Test server helpers — mirrors admin_test.go style in internal/platform/idp/zitadel/
 // ---------------------------------------------------------------------------
 
 // setupBootstrapServer returns an httptest.Server that handles the Zitadel

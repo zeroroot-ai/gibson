@@ -13,9 +13,9 @@ import (
 	"github.com/testcontainers/testcontainers-go"
 	"github.com/testcontainers/testcontainers-go/wait"
 
-	"github.com/zeroroot-ai/gibson/internal/checkpoint"
-	"github.com/zeroroot-ai/gibson/internal/state"
-	"github.com/zeroroot-ai/gibson/internal/types"
+	"github.com/zeroroot-ai/gibson/internal/engine/checkpoint"
+	"github.com/zeroroot-ai/gibson/internal/engine/state"
+	"github.com/zeroroot-ai/gibson/internal/infra/types"
 )
 
 const (

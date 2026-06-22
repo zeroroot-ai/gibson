@@ -15,7 +15,7 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/zeroroot-ai/gibson/internal/authz/registry"
+	"github.com/zeroroot-ai/gibson/internal/platform/authz/registry"
 )
 
 // TestAuthzAnnotationCompleteness asserts that every Entry in the
@@ -26,7 +26,7 @@ import (
 // would dispatch against an empty relation (FGA returns deny-all, every
 // request fails with cryptic permission_denied).
 //
-// Cross-checking against `internal/authz/model.fga` (the OpenFGA model)
+// Cross-checking against `internal/platform/authz/model.fga` (the OpenFGA model)
 // would catch a related but deeper drift: a Relation referenced by an
 // annotation but not declared in the FGA model. That cross-check is the
 // next-iteration version of this test (deferred — the FGA model parser
@@ -49,7 +49,7 @@ func TestAuthzAnnotationCompleteness(t *testing.T) {
 	_, thisFile, _, _ := runtime.Caller(0)
 	repoRoot := filepath.Join(filepath.Dir(thisFile), "..", "..")
 	// Verify the registry source file exists (sanity)
-	if _, err := os.Stat(filepath.Join(repoRoot, "internal", "authz", "registry", "registry.go")); err != nil {
+	if _, err := os.Stat(filepath.Join(repoRoot, "internal", "platform", "authz", "registry", "registry.go")); err != nil {
 		t.Fatalf("registry.go not found: %v", err)
 	}
 
@@ -103,7 +103,7 @@ func TestAuthzAnnotationCompleteness(t *testing.T) {
 	if len(missing) > 0 {
 		t.Errorf("authz annotation completeness failures (%d):\n  %s\n\n"+
 			"Each row is a registry entry with an empty required field. The fix:\n"+
-			"  (1) Find the proto RPC at internal/daemon/api/gibson/*/v1/*.proto\n"+
+			"  (1) Find the proto RPC at internal/server/daemon/api/gibson/*/v1/*.proto\n"+
 			"      whose name appears in the failure list.\n"+
 			"  (2) Edit the `option (gibson.auth.v1.authz) = {...};` block to fill\n"+
 			"      the missing field (typically relation, object_type, or object_deriver).\n"+

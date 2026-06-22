@@ -29,7 +29,7 @@ func TestNoGibsonImport(t *testing.T) {
 	matchers := []astchecks.Matcher{
 		astchecks.NewImportBoundary(
 			"ext-authz must not import the gibson daemon (internal/daemon) — it is an independent authorization service (ADR-0056, gibson#782)",
-			"github.com/zeroroot-ai/gibson/internal/daemon",
+			"github.com/zeroroot-ai/gibson/internal/server/daemon",
 		),
 	}
 

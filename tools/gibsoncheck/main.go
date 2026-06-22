@@ -17,16 +17,16 @@
 //   - notrustlocalhost: rejects any reference to the deleted
 //     TrustLocalhost option.
 //
-//   - adminpoolacquire: only internal/admin/ and internal/datapool/admin/
+//   - adminpoolacquire: only internal/server/admin/ and internal/infra/datapool/admin/
 //     may import the admin pool package. Any other package importing
-//     internal/datapool/admin is a cross-tenant policy violation per
+//     internal/infra/datapool/admin is a cross-tenant policy violation per
 //     database-per-tenant-data-plane Requirement 11.5.
 //
-//   - forbidrawstoreimports: any package outside internal/datapool/,
-//     internal/admin/, internal/migrate/, cmd/gibson-migrate/, and
+//   - forbidrawstoreimports: any package outside internal/infra/datapool/,
+//     internal/server/admin/, internal/migrate/, cmd/gibson-migrate/, and
 //     cmd/daemon/ may not import raw store client libraries (pgx,
 //     go-redis, neo4j-go-driver, qdrant, miniredis). All store access
-//     must go through internal/datapool/Conn which is already
+//     must go through internal/infra/datapool/Conn which is already
 //     tenant-bound by construction. Test files may import miniredis.
 //
 //   - forbidrediskeyprefix: flags string literals that look like per-tenant
@@ -35,7 +35,7 @@
 //     database-per-tenant model, Conn.Redis is already scoped to the
 //     tenant's logical DB and plain keys are sufficient.
 //
-//   - secretsnolog: in core/sdk/secrets/, core/gibson/internal/secrets/,
+//   - secretsnolog: in core/sdk/secrets/, core/gibson/internal/platform/secrets/,
 //     and provider packages, flags any []byte value returned from a
 //     Get/Resolve secrets source method being passed (directly or through
 //     a single rename) to a logging-shaped sink (slog/log/fmt.Print*/zap).

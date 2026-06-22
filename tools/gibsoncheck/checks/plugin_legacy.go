@@ -128,7 +128,7 @@ func runPluginLegacy(pass *analysis.Pass) (any, error) {
 
 				if !strings.HasSuffix(fname, "_test.go") {
 					pass.Reportf(imp.Pos(),
-						"forbidden import %q in %q: the pre-release daemon plugin registry was deleted by the plugin-runtime spec (Spec 2, Phase 3); the new registry lives in internal/component/ (Phase 7) — do not re-expand the stub (plugin-runtime Req 11.6)",
+						"forbidden import %q in %q: the pre-release daemon plugin registry was deleted by the plugin-runtime spec (Spec 2, Phase 3); the new registry lives in internal/platform/component/ (Phase 7) — do not re-expand the stub (plugin-runtime Req 11.6)",
 						path, pkgPath)
 				}
 

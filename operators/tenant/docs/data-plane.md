@@ -99,7 +99,7 @@ KEK_tenant = HKDF-SHA256(masterKEK,
 
 Source of truth: [`internal/dataplane/kek.go:50`](../internal/dataplane/kek.go).
 The daemon's matching implementation is at
-[`../../../core/gibson/internal/datapool/kek.go:41`](../../../core/gibson/internal/datapool/kek.go).
+[`../../../core/gibson/internal/infra/datapool/kek.go:41`](../../../core/gibson/internal/infra/datapool/kek.go).
 The shared `info` string is the contract — changing it on either side
 without coordinated KEK rotation breaks every encrypted record.
 

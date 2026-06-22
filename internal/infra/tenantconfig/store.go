@@ -5,7 +5,7 @@
 // KEK with AAD "tenant_secrets_broker_config:<tenant_id>".
 //
 // This package is the shared implementation consumed by both the gibson
-// daemon (internal/secrets/configstore) and the tenant-operator saga
+// daemon (internal/platform/secrets/configstore) and the tenant-operator saga
 // (internal/saga/flows/write_broker_config). The daemon's configstore
 // package wraps this; the operator imports it directly.
 package tenantconfig

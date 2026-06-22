@@ -35,7 +35,7 @@ if err != nil {
 }
 ```
 
-The narrow exception is `internal/capabilitygrant/` (mints CG-JWTs with
+The narrow exception is `internal/platform/capabilitygrant/` (mints CG-JWTs with
 Ed25519 + KMS-derived keys) and the residual FGA bridge in the same
 package. Both are explicitly allowlisted in the
 `forbiddenimports` analyzer ([`forbidden_imports.go:20`](../tools/gibsoncheck/checks/forbidden_imports.go)).
@@ -62,7 +62,7 @@ fails CI on any reintroduction of the symbol.
 
 ## GIBSON-AUTH-003: reading tenant from the request body
 
-Wrong (audit C11 — pre-refactor `internal/harness/callback_service.go:380`):
+Wrong (audit C11 — pre-refactor `internal/engine/harness/callback_service.go:380`):
 
 ```go
 func (s *Server) GetCredential(ctx context.Context, req *pb.GetCredentialRequest) (*pb.GetCredentialResponse, error) {
@@ -90,7 +90,7 @@ flags request-body tenant reads in handler bodies.
 Wrong (pre-refactor — three listeners on `:50001`, `:50002`, `:50100`):
 
 ```go
-// internal/harness/callback_server.go (pre-refactor)
+// internal/engine/harness/callback_server.go (pre-refactor)
 lis, err := net.Listen("tcp", ":50001")     // forbidden — second ingress
 srv := grpc.NewServer( /* no auth interceptor */ )
 pb.RegisterHarnessCallbackServiceServer(srv, h)
@@ -100,7 +100,7 @@ go srv.Serve(lis)
 Right — single multiplexed listener built by the daemon factory:
 
 ```go
-// internal/harness/callback_server.go:86
+// internal/engine/harness/callback_server.go:86
 srv := grpc.NewServer(
     grpc.UnaryInterceptor(auth.UnaryServerInterceptor()),
     grpc.StreamInterceptor(auth.StreamServerInterceptor()),
@@ -121,7 +121,7 @@ srv := buildGRPCServer(...)
 go srv.Serve(lis)            // no coverage check; stale registry slips in
 ```
 
-Right ([`internal/daemon/grpc.go:762`](../internal/daemon/grpc.go)):
+Right ([`internal/server/daemon/grpc.go:762`](../internal/server/daemon/grpc.go)):
 
 ```go
 if err := assertRegistryCoverage(srv); err != nil {
@@ -151,7 +151,7 @@ gibson:
 key := []byte(cfg.CapabilityGrant.SigningKey)   // forbidden — env / Secret read
 ```
 
-Right ([`internal/capabilitygrant/mint.go`](../internal/capabilitygrant/mint.go)):
+Right ([`internal/platform/capabilitygrant/mint.go`](../internal/platform/capabilitygrant/mint.go)):
 
 ```go
 master, err := keyProvider.Get(ctx, "gibson/cg-master")   // KMS / Vault / k8s
@@ -171,7 +171,7 @@ derivation; `KeyProvider` already abstracts the provider choice.
 Pre-refactor, every package that talked to Redis imported `go-redis`
 directly. After the spec, only the allowlisted data-plane packages may.
 
-Wrong (pre-refactor `internal/database/credential_dao.go`):
+Wrong (pre-refactor `internal/infra/database/credential_dao.go`):
 
 ```go
 package database
@@ -255,7 +255,7 @@ Wrong:
 ```go
 package server   // tenant-handler package
 
-import "github.com/zeroroot-ai/gibson/internal/datapool/admin"
+import "github.com/zeroroot-ai/gibson/internal/infra/datapool/admin"
 
 func (s *server) ListAllMissions(ctx context.Context, req *pb.Req) (*pb.Resp, error) {
     ap, _ := admin.New(...)            // forbidden
@@ -263,10 +263,10 @@ func (s *server) ListAllMissions(ctx context.Context, req *pb.Req) (*pb.Resp, er
 }
 ```
 
-Correct — the cross-tenant query lives in `internal/admin/`:
+Correct — the cross-tenant query lives in `internal/server/admin/`:
 
 ```go
-// internal/admin/billing.go
+// internal/server/admin/billing.go
 func (b *BillingService) ListAllMissions(ctx context.Context) (*Report, error) {
     conn, err := b.pool.Admin(ctx)     // FGA-checked, audit-emitted
     if err != nil { return nil, err }
@@ -304,7 +304,7 @@ Spec: `daemon-mission-finding-per-tenant-cutover` Requirement 5.3.
 Wrong — constructing a process-wide Redis client outside the datapool:
 
 ```go
-package mypackage   // outside internal/datapool/ and internal/admin/
+package mypackage   // outside internal/infra/datapool/ and internal/server/admin/
 
 import goredis "github.com/redis/go-redis/v9"
 
@@ -331,8 +331,8 @@ err = conn.Redis.Set(ctx, "gibson:mission:"+id.String(), data, 0).Err()
 
 The `forbidredisclientconstruction` analyzer
 ([`tools/gibsoncheck/checks/forbid_redis_client_construction.go`](../tools/gibsoncheck/checks/forbid_redis_client_construction.go))
-fails CI on any `redis.NewClient(...)` call outside `internal/datapool/`
-and `internal/admin/`. Test files (`*_test.go`) are exempt.
+fails CI on any `redis.NewClient(...)` call outside `internal/infra/datapool/`
+and `internal/server/admin/`. Test files (`*_test.go`) are exempt.
 
 ## GIBSON-DP-007: `WHERE n.tenant_id` Cypher patterns
 

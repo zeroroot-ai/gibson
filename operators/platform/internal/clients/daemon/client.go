@@ -25,7 +25,7 @@ package daemon
 import (
 	"google.golang.org/grpc"
 
-	operatorv1 "github.com/zeroroot-ai/gibson/internal/daemon/api/gibson/daemon/operator/v1"
+	operatorv1 "github.com/zeroroot-ai/gibson/internal/server/daemon/api/gibson/daemon/operator/v1"
 )
 
 // NewDaemonOperatorClient wraps conn in a DaemonOperatorServiceClient.

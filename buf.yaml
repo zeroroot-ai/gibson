@@ -1,6 +1,6 @@
 version: v2
 modules:
-  - path: internal/daemon/api
+  - path: internal/server/daemon/api
 lint:
   use:
     - STANDARD

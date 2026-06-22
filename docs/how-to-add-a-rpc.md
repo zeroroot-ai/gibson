@@ -5,7 +5,7 @@ Step-by-step for adding a new RPC handler to the daemon. Worked example:
 
 The proto for SDK-owned services lives in `zeroroot-ai/sdk`; the proto
 for `DaemonAdminService` lives in this repo at
-[`internal/daemon/api/gibson/daemon/admin/v1/daemon_admin.proto`](../internal/daemon/api/gibson/daemon/admin/v1/daemon_admin.proto).
+[`internal/server/daemon/api/gibson/daemon/admin/v1/daemon_admin.proto`](../internal/server/daemon/api/gibson/daemon/admin/v1/daemon_admin.proto).
 This guide covers both halves; pick the matching path.
 
 Spec: `unified-identity-and-authorization`. Read [`auth.md`](./auth.md)
@@ -28,7 +28,7 @@ For `ListMyMissions` the right place is `DaemonService` (SDK).
 If the RPC is on a SDK-owned service, do this work in `core/sdk/` and
 follow `core/sdk/docs/how-to-add-a-rpc.md`. If it is on
 `DaemonAdminService`, edit
-[`internal/daemon/api/gibson/daemon/admin/v1/daemon_admin.proto`](../internal/daemon/api/gibson/daemon/admin/v1/daemon_admin.proto)
+[`internal/server/daemon/api/gibson/daemon/admin/v1/daemon_admin.proto`](../internal/server/daemon/api/gibson/daemon/admin/v1/daemon_admin.proto)
 in this repo:
 
 ```proto
@@ -61,12 +61,12 @@ daemon picks up the new types after the SDK pin is bumped.
 
 ## Step 4 — Implement the handler
 
-Add the method in [`internal/daemon/api/server.go`](../internal/daemon/api/server.go)
+Add the method in [`internal/server/daemon/api/server.go`](../internal/server/daemon/api/server.go)
 or in a `server_<area>.go` split file (current splits:
 `server_capabilitygrant.go`, `server_audit.go`, `server_chat.go`, …).
 
 ```go
-// internal/daemon/api/server_missions.go (or wherever fits)
+// internal/server/daemon/api/server_missions.go (or wherever fits)
 
 func (s *Server) ListMyMissions(ctx context.Context, req *adminpb.ListMyMissionsRequest) (*adminpb.ListMyMissionsResponse, error) {
     // 1. Identity is on the context — placed there by the SDK auth
@@ -107,7 +107,7 @@ func (s *Server) ListMyMissions(ctx context.Context, req *adminpb.ListMyMissions
 }
 ```
 
-Real examples in [`internal/daemon/api/server.go`](../internal/daemon/api/server.go)
+Real examples in [`internal/server/daemon/api/server.go`](../internal/server/daemon/api/server.go)
 at lines 2364, 2472, 2519, 2607, 2668 — all five follow the
 identity → tenant → pool → release pattern.
 
@@ -115,7 +115,7 @@ identity → tenant → pool → release pattern.
 
 Most handlers are auto-wired because `Server` is the registered gRPC
 service implementer (`pb.RegisterDaemonServiceServer(srv, s)` in
-`internal/daemon/grpc.go`). Adding a method to the `Server` struct is
+`internal/server/daemon/grpc.go`). Adding a method to the `Server` struct is
 enough — gRPC-Go's generated `RegisterFooServiceServer` enforces
 interface satisfaction at compile time.
 
@@ -125,7 +125,7 @@ add globals.
 
 ## Step 6 — Verify the startup self-check passes
 
-Boot the daemon (or `go test ./internal/daemon/...`); if the SDK
+Boot the daemon (or `go test ./internal/server/daemon/...`); if the SDK
 registry is missing an entry for the new method, the daemon panics with:
 
 ```
@@ -177,7 +177,7 @@ enforcement point.
 ## Step 9 — End-to-end validation
 
 For non-trivial RPCs, ship an integration test under `tests/` or
-`internal/daemon/api/*_integration_test.go` that exercises the full
+`internal/server/daemon/api/*_integration_test.go` that exercises the full
 chain (Envoy → ext-authz → daemon) against `make deploy-local` per the
 E2E rules in this repo's `CLAUDE.md`. Don't mark the task `[x]` until
 the test exits 0 with evidence.

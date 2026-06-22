@@ -3,9 +3,9 @@ package redisprefixallowed
 // redisClient is a local stub for the allowed-package fixture.
 type redisClient struct{}
 
-func (r *redisClient) Set(key, val string)  {}
-func (r *redisClient) Get(key string)       {}
-func (r *redisClient) Del(keys ...string)   {}
+func (r *redisClient) Set(key, val string) {}
+func (r *redisClient) Get(key string)      {}
+func (r *redisClient) Del(keys ...string)  {}
 
 // goodStore uses plain keys — no tenant prefix — because Conn.Redis is
 // already scoped to the tenant's logical DB.

@@ -24,7 +24,7 @@ import (
 	"os"
 	"testing"
 
-	daemonoperatorv1 "github.com/zeroroot-ai/gibson/internal/daemon/api/gibson/daemon/operator/v1"
+	daemonoperatorv1 "github.com/zeroroot-ai/gibson/internal/server/daemon/api/gibson/daemon/operator/v1"
 	daemonpb "github.com/zeroroot-ai/sdk/api/gen/gibson/daemon/v1"
 	sdktenantv1 "github.com/zeroroot-ai/sdk/api/gen/gibson/tenant/v1"
 	"google.golang.org/grpc"

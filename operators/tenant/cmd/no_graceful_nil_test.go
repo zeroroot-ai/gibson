@@ -161,7 +161,7 @@ func TestNoGracefulNilInRequestPaths(t *testing.T) {
 		"internal/controller/tenant_namespace.go:298": applyShim,
 
 		// Audit emitter + health probes
-		"internal/audit/emitter.go:210":     emitterOpt,
+		"internal/audit/emitter.go:210":    emitterOpt,
 		"internal/health/downstream.go:90": healthShim,
 
 		// Saga runner — k8s API may return nil maps from a freshly created object

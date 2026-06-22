@@ -13,7 +13,7 @@ The **only** commercial coupling is the **payment gate**, decoupled behind a plu
 - **OSS** ships a permissive/config-driven provider (admin-set quotas; no payment).
 - **Commercial** ships the plan + subscription (Stripe) provider.
 - `BillingService`, Stripe, and `plans.yaml` live **entirely** in the commercial layer —
-  never in OSS gibson. Today `internal/daemon/billing_service.go` is in the brain; it moves
+  never in OSS gibson. Today `internal/server/daemon/billing_service.go` is in the brain; it moves
   out.
 - The **curated belief base model** ([ADR-0005](0005-belief-field-pgm.md)) is also a commercial
   asset (trained only on vendor red-team + public data; **never tenant data**). OSS ships

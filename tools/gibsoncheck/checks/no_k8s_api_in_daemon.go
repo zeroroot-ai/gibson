@@ -32,7 +32,7 @@ import (
 //     the sandbox-eviction-handler sidecar binary; per ADR-0023 §Allow-list)
 //   - github.com/zeroroot-ai/gibson/tests/**     (e2e test fixtures)
 //   - github.com/zeroroot-ai/gibson/tools/**     (build tools; including this analyzer)
-//   - github.com/zeroroot-ai/gibson/internal/datapool/admin/**
+//   - github.com/zeroroot-ai/gibson/internal/infra/datapool/admin/**
 //     (gated by adminpoolacquire — legitimate enumeration)
 //   - github.com/zeroroot-ai/gibson/pkg/platform/saga/**
 //     (operator-shared library; tenant-operator imports it)
@@ -75,7 +75,7 @@ var gibsonDaemonScopePrefixes = []string{
 var noK8sAPIInDaemonExemptSubstrings = []string{
 	// Admin gate already enforces import restriction; admin code
 	// legitimately enumerates tenants for CLI/migration paths.
-	"/internal/datapool/admin",
+	"/internal/infra/datapool/admin",
 
 	// Operator-shared saga library used by tenant-operator. The daemon
 	// binary's build graph does not reach it; it's in pkg/ only because

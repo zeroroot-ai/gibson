@@ -124,7 +124,7 @@ jobs:
           CGO_ENABLED: "0"
         run: |
           make authz-registry
-          git diff --exit-code internal/authz/registry/ || {
+          git diff --exit-code internal/platform/authz/registry/ || {
             echo "ERROR: authz registry drifted from SDK protos." >&2
             echo "Run 'make authz-registry' in zeroroot-ai/gibson and commit the result." >&2
             exit 1
@@ -138,12 +138,12 @@ jobs:
         # init container only needs registry.yaml; the others are pushed for
         # completeness and future consumers (dashboard-authz-ui-gating for
         # permissions.ts). The OpenFGA model is hand-maintained at
-        # internal/authz/model.fga and embedded in the chart by gibson-fga-init,
+        # internal/platform/authz/model.fga and embedded in the chart by gibson-fga-init,
         # so it is intentionally NOT shipped here.
         # Uses application/yaml for text files; application/octet-stream for
         # the binary-ish .go file (still text, but no dedicated MIME).
         run: |
-          cd internal/authz/registry
+          cd internal/platform/authz/registry
           oras push \
             "${IMAGE}:${{ steps.tag.outputs.tag }}" \
             --artifact-type "application/vnd.zeroroot-ai.authz-registry+yaml" \
@@ -167,4 +167,4 @@ jobs:
           cd /tmp/verify
           oras pull "${IMAGE}:${{ steps.tag.outputs.tag }}"
           test -s registry.yaml
-          diff registry.yaml "${GITHUB_WORKSPACE}/internal/authz/registry/registry.yaml" && echo "round-trip OK"
+          diff registry.yaml "${GITHUB_WORKSPACE}/internal/platform/authz/registry/registry.yaml" && echo "round-trip OK"

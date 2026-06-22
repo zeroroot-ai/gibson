@@ -42,9 +42,9 @@ const allowTenantFromRequestDirective = "gibsoncheck:allow tenant-from-request"
 func runTenantFromContext(pass *analysis.Pass) (any, error) {
 	pkgPath := pass.Pkg.Path()
 	// Limit to handler-bearing packages.
-	if !strings.Contains(pkgPath, "/internal/daemon/api") &&
-		!strings.Contains(pkgPath, "/internal/harness") &&
-		!strings.Contains(pkgPath, "/internal/component") {
+	if !strings.Contains(pkgPath, "/internal/server/daemon/api") &&
+		!strings.Contains(pkgPath, "/internal/engine/harness") &&
+		!strings.Contains(pkgPath, "/internal/platform/component") {
 		return nil, nil
 	}
 	for _, file := range pass.Files {

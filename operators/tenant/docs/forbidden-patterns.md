@@ -132,7 +132,7 @@ Step definitions.
 ## DP-OP-005: drifting the HKDF info string
 
 The constant `hkdfInfo = "gibson/v1/tenant-kek"` MUST match the daemon's
-value at `core/gibson/internal/datapool/kek.go:18`. Any change invalidates
+value at `core/gibson/internal/infra/datapool/kek.go:18`. Any change invalidates
 every wrapped DEK in tenant storage.
 
 Wrong:

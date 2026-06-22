@@ -17,7 +17,7 @@ import (
 	"testing"
 )
 
-// TestTenantIDSource asserts that no handler in internal/daemon/api/
+// TestTenantIDSource asserts that no handler in internal/server/daemon/api/
 // reads `req.TenantId` directly from a request body. The canonical
 // tenant-ID source is the x-gibson-identity-tenant header (forwarded
 // by ext-authz with HMAC signature, parsed by internal/identity).
@@ -25,7 +25,7 @@ import (
 // Slice 3.5 of the production-readiness epic (gibson#180 → gibson#173).
 //
 // Detection: any `<ident>.TenantId` access pattern in code under
-// internal/daemon/api/ that doesn't have a comment marker
+// internal/server/daemon/api/ that doesn't have a comment marker
 // // tenant-id-source: header-auth-context (the explicit opt-out for
 // audit-record types that legitimately carry tenant-id in payload).
 //
@@ -34,7 +34,7 @@ import (
 func TestTenantIDSource(t *testing.T) {
 	_, thisFile, _, _ := runtime.Caller(0)
 	repoRoot := filepath.Join(filepath.Dir(thisFile), "..", "..")
-	scope := filepath.Join(repoRoot, "internal", "daemon", "api")
+	scope := filepath.Join(repoRoot, "internal", "server", "daemon", "api")
 
 	// file:line coords where TenantId-from-payload is a known-legitimate
 	// pattern. Tagged + reasoned, same shape as the graceful-nil allowlist.
@@ -43,21 +43,21 @@ func TestTenantIDSource(t *testing.T) {
 		// tenant being acted upon), not the authz SUBJECT. The authz
 		// subject comes from the x-gibson-identity-tenant header on the
 		// caller's identity (typically platform-operator for these).
-		"internal/daemon/api/platform_operator_impersonate.go:31":  "platform-operator action; req.TenantId is the object being acted upon, not the authz subject",
-		"internal/daemon/api/platform_operator_impersonate.go:43":  "platform-operator action; req.TenantId is the object being acted upon, not the authz subject",
-		"internal/daemon/api/platform_operator_impersonate.go:48":  "platform-operator action; req.TenantId is the object being acted upon, not the authz subject",
-		"internal/daemon/api/platform_operator_impersonate.go:58":  "platform-operator action; req.TenantId is the object being acted upon, not the authz subject",
-		"internal/daemon/api/platform_operator_impersonate.go:61":  "platform-operator action; req.TenantId is the object being acted upon, not the authz subject",
-		"internal/daemon/api/server_model_access.go:257":           "platform-operator action; req.TenantId is the object being acted upon, not the authz subject",
-		"internal/daemon/api/tenant_admin_onboarding_get.go:29":    "platform-operator action; req.TenantId is the object being acted upon, not the authz subject",
-		"internal/daemon/api/tenant_admin_onboarding_get.go:34":    "platform-operator action; req.TenantId is the object being acted upon, not the authz subject",
-		"internal/daemon/api/tenant_admin_onboarding_get.go:42":    "platform-operator action; req.TenantId is the object being acted upon, not the authz subject",
-		"internal/daemon/api/tenant_admin_onboarding_get.go:44":    "platform-operator action; req.TenantId is the object being acted upon, not the authz subject",
-		"internal/daemon/api/tenant_admin_onboarding_update.go:29": "platform-operator action; req.TenantId is the object being acted upon, not the authz subject",
-		"internal/daemon/api/tenant_admin_onboarding_update.go:34": "platform-operator action; req.TenantId is the object being acted upon, not the authz subject",
-		"internal/daemon/api/tenant_admin_onboarding_update.go:42": "platform-operator action; req.TenantId is the object being acted upon, not the authz subject",
-		"internal/daemon/api/tenant_admin_onboarding_update.go:43": "platform-operator action; req.TenantId is the object being acted upon, not the authz subject",
-		"internal/daemon/api/tenant_admin_onboarding_update.go:47": "platform-operator action; req.TenantId is the object being acted upon, not the authz subject",
+		"internal/server/daemon/api/platform_operator_impersonate.go:31":  "platform-operator action; req.TenantId is the object being acted upon, not the authz subject",
+		"internal/server/daemon/api/platform_operator_impersonate.go:43":  "platform-operator action; req.TenantId is the object being acted upon, not the authz subject",
+		"internal/server/daemon/api/platform_operator_impersonate.go:48":  "platform-operator action; req.TenantId is the object being acted upon, not the authz subject",
+		"internal/server/daemon/api/platform_operator_impersonate.go:58":  "platform-operator action; req.TenantId is the object being acted upon, not the authz subject",
+		"internal/server/daemon/api/platform_operator_impersonate.go:61":  "platform-operator action; req.TenantId is the object being acted upon, not the authz subject",
+		"internal/server/daemon/api/server_model_access.go:257":           "platform-operator action; req.TenantId is the object being acted upon, not the authz subject",
+		"internal/server/daemon/api/tenant_admin_onboarding_get.go:29":    "platform-operator action; req.TenantId is the object being acted upon, not the authz subject",
+		"internal/server/daemon/api/tenant_admin_onboarding_get.go:34":    "platform-operator action; req.TenantId is the object being acted upon, not the authz subject",
+		"internal/server/daemon/api/tenant_admin_onboarding_get.go:42":    "platform-operator action; req.TenantId is the object being acted upon, not the authz subject",
+		"internal/server/daemon/api/tenant_admin_onboarding_get.go:44":    "platform-operator action; req.TenantId is the object being acted upon, not the authz subject",
+		"internal/server/daemon/api/tenant_admin_onboarding_update.go:29": "platform-operator action; req.TenantId is the object being acted upon, not the authz subject",
+		"internal/server/daemon/api/tenant_admin_onboarding_update.go:34": "platform-operator action; req.TenantId is the object being acted upon, not the authz subject",
+		"internal/server/daemon/api/tenant_admin_onboarding_update.go:42": "platform-operator action; req.TenantId is the object being acted upon, not the authz subject",
+		"internal/server/daemon/api/tenant_admin_onboarding_update.go:43": "platform-operator action; req.TenantId is the object being acted upon, not the authz subject",
+		"internal/server/daemon/api/tenant_admin_onboarding_update.go:47": "platform-operator action; req.TenantId is the object being acted upon, not the authz subject",
 	}
 
 	var findings []string
@@ -115,7 +115,7 @@ func TestTenantIDSource(t *testing.T) {
 
 	sort.Strings(findings)
 	if len(findings) > 0 {
-		t.Errorf("tenant-id-from-payload found in internal/daemon/api (%d sites):\n  %s\n\n"+
+		t.Errorf("tenant-id-from-payload found in internal/server/daemon/api (%d sites):\n  %s\n\n"+
 			"Handlers must source tenant ID from the x-gibson-identity-tenant header (extracted by\n"+
 			"internal/identity from the ext-authz-signed headers), NOT from request body fields.\n"+
 			"If a TenantId field on a payload struct is legitimately needed (audit-record types,\n"+

@@ -29,7 +29,7 @@ import (
 	"fmt"
 	"os"
 
-	"github.com/zeroroot-ai/gibson/internal/braintrain"
+	"github.com/zeroroot-ai/gibson/internal/engine/braintrain"
 )
 
 func main() {

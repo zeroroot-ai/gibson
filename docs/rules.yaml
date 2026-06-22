@@ -36,8 +36,8 @@ rules:
     scope:
       - "**/*.go"
     exempt:
-      - "internal/capabilitygrant/**"   # mints CG-JWTs (Ed25519, KMS-derived)
-      - "internal/authz/**"              # narrow FGA bridge for capability grants
+      - "internal/platform/capabilitygrant/**"   # mints CG-JWTs (Ed25519, KMS-derived)
+      - "internal/platform/authz/**"              # narrow FGA bridge for capability grants
       - "tools/**"
       - "**/*_test.go"
     pattern:
@@ -84,8 +84,8 @@ rules:
       authoritative; tenant comes from the verified identity headers
       ext-authz emits.
     scope:
-      - "internal/daemon/api/**/*.go"
-      - "internal/harness/**/*.go"
+      - "internal/server/daemon/api/**/*.go"
+      - "internal/engine/harness/**/*.go"
     exempt:
       - "**/*_test.go"
     pattern:
@@ -106,15 +106,15 @@ rules:
       eliminated; reintroducing a parallel listener creates a path that
       bypasses Envoy + ext-authz.
     scope:
-      - "internal/daemon/**/*.go"
-      - "internal/harness/**/*.go"
+      - "internal/server/daemon/**/*.go"
+      - "internal/engine/harness/**/*.go"
       - "cmd/gibson/**/*.go"
     pattern:
       kind: forbidden_string
       target: ":(50001|50100)\\b"
     severity: error
     message: |
-      Use the single daemon.NewServer factory (internal/daemon/grpc.go).
+      Use the single daemon.NewServer factory (internal/server/daemon/grpc.go).
       Callback and registration RPCs share the same listener; the
       multiplexed port is the only path Envoy is configured to reach.
     enforced_by:
@@ -122,12 +122,12 @@ rules:
 
   - id: gibson-auth-005
     description: |
-      The startup self-check in internal/daemon/grpc.go must walk every
+      The startup self-check in internal/server/daemon/grpc.go must walk every
       registered service+method and verify a matching SDK registry entry.
       Removing the check lets a stale registry ship and silently misses
       authz decisions for new RPCs.
     scope:
-      - "internal/daemon/grpc.go"
+      - "internal/server/daemon/grpc.go"
     pattern:
       kind: required_call
       target: "assertRegistryCoverage"
@@ -145,7 +145,7 @@ rules:
       key must never be loaded from a Kubernetes Secret in plaintext or
       hardcoded in config.
     scope:
-      - "internal/capabilitygrant/**/*.go"
+      - "internal/platform/capabilitygrant/**/*.go"
     exempt:
       - "**/*_test.go"
     pattern:
@@ -154,7 +154,7 @@ rules:
     severity: error
     message: |
       Use crypto.KeyProvider to fetch the master KEK and derive the
-      Ed25519 keypair via HKDF (internal/capabilitygrant/mint.go). No
+      Ed25519 keypair via HKDF (internal/platform/capabilitygrant/mint.go). No
       plaintext key bytes in YAML/Secret/code.
     enforced_by:
       - "manual"
@@ -172,12 +172,12 @@ rules:
     scope:
       - "**/*.go"
     exempt:
-      - "internal/datapool/**"
-      - "internal/admin/**"
+      - "internal/infra/datapool/**"
+      - "internal/server/admin/**"
       - "internal/migrate/**"
       - "cmd/gibson-migrate/**"
       - "cmd/daemon/**"
-      - "internal/daemon/**"
+      - "internal/server/daemon/**"
       - "tools/gibsoncheck/**"
       - "**/*_test.go"
     pattern:
@@ -190,7 +190,7 @@ rules:
         - "github.com/alicebob/miniredis/v2"
     severity: error
     message: |
-      Use internal/datapool/Conn (already tenant-bound) instead of
+      Use internal/infra/datapool/Conn (already tenant-bound) instead of
       importing raw store clients. See docs/data-plane.md "The Conn
       pattern".
     enforced_by:
@@ -205,7 +205,7 @@ rules:
     scope:
       - "**/*.go"
     exempt:
-      - "internal/datapool/**"
+      - "internal/infra/datapool/**"
       - "**/*_test.go"
     pattern:
       kind: required_call
@@ -244,11 +244,11 @@ rules:
     scope:
       - "**/*.go"
     exempt:
-      - "internal/datapool/admin/**"
-      - "internal/datapool/**"
-      - "internal/daemon/**"
-      - "internal/audit/**"
-      - "internal/component/**"
+      - "internal/infra/datapool/admin/**"
+      - "internal/infra/datapool/**"
+      - "internal/server/daemon/**"
+      - "internal/platform/audit/**"
+      - "internal/platform/component/**"
       - "internal/migrate/**"
       - "cmd/gibson-migrate/**"
       - "tools/gibsoncheck/**"
@@ -270,8 +270,8 @@ rules:
     scope:
       - "**/*.go"
     exempt:
-      - "internal/datapool/admin/**"
-      - "internal/admin/**"
+      - "internal/infra/datapool/admin/**"
+      - "internal/server/admin/**"
       - "internal/migrate/**"
       - "cmd/gibson-migrate/**"
       - "tools/gibsoncheck/**"
@@ -279,11 +279,11 @@ rules:
     pattern:
       kind: forbidden_import
       target:
-        - "github.com/zeroroot-ai/gibson/internal/datapool/admin"
+        - "github.com/zeroroot-ai/gibson/internal/infra/datapool/admin"
     severity: error
     message: |
       Cross-tenant access requires CODEOWNERS review. Move the call
-      into internal/admin/ or use Pool.For(tenant) for per-tenant
+      into internal/server/admin/ or use Pool.For(tenant) for per-tenant
       access.
     enforced_by:
       - "gibsoncheck:adminpoolacquire"
@@ -295,9 +295,9 @@ rules:
       bind the record to its context (record_type + identifier).
     scope:
       - "internal/credentials/**"
-      - "internal/providerconfig/**"
-      - "internal/database/**"
-      - "internal/datapool/conn_credentials.go"
+      - "internal/platform/providerconfig/**"
+      - "internal/infra/database/**"
+      - "internal/infra/datapool/conn_credentials.go"
     pattern:
       kind: required_call
       target: "envelope.Encrypt"
@@ -313,7 +313,7 @@ rules:
       Cypher queries must not include tenant_id filters. Conn.Neo4j is
       bound to the tenant's dedicated database.
     scope:
-      - "internal/graphrag/**/*.go"
+      - "internal/engine/graphrag/**/*.go"
       - "internal/orchestrator/**/*.go"
       - "migrations/neo4j/**/*.cypher"
     pattern:
@@ -336,8 +336,8 @@ rules:
     scope:
       - "**/*.go"
     exempt:
-      - "internal/datapool/**"
-      - "internal/admin/**"
+      - "internal/infra/datapool/**"
+      - "internal/server/admin/**"
       - "**/*_test.go"
     pattern:
       kind: forbidden_call

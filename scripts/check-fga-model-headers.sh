@@ -4,9 +4,9 @@
 # Spec: cross-repo-cohesion-fixes Requirement 5.4.
 #
 # Asserts that the authoritative FGA model file carries its required marker:
-#   - internal/authz/model.fga must start with AUTHORITATIVE-FGA-MODEL
+#   - internal/platform/authz/model.fga must start with AUTHORITATIVE-FGA-MODEL
 #
-# (The historical generated registry stub at internal/authz/registry/fga_model.fga
+# (The historical generated registry stub at internal/platform/authz/registry/fga_model.fga
 # was retired alongside SDK v0.98.x; only the authoritative model remains.)
 #
 # Exit codes:
@@ -17,7 +17,7 @@ set -euo pipefail
 
 REPO_ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 
-AUTHORITATIVE_MODEL="${REPO_ROOT}/internal/authz/model.fga"
+AUTHORITATIVE_MODEL="${REPO_ROOT}/internal/platform/authz/model.fga"
 
 if ! grep -q "AUTHORITATIVE-FGA-MODEL" "${AUTHORITATIVE_MODEL}"; then
     echo "[check-fga-model-headers] ERROR: ${AUTHORITATIVE_MODEL} is missing the AUTHORITATIVE-FGA-MODEL marker." >&2

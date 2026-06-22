@@ -53,8 +53,8 @@ var SecretsNoLogAnalyzer = &analysis.Analyzer{
 var secretsPackagePrefixes = []string{
 	"github.com/zeroroot-ai/sdk/secrets",
 	"github.com/zeroroot-ai/gibson/internal/infra/secrets",
-	"github.com/zeroroot-ai/gibson/internal/secrets",
-	"github.com/zeroroot-ai/gibson/internal/database/postgres",
+	"github.com/zeroroot-ai/gibson/internal/platform/secrets",
+	"github.com/zeroroot-ai/gibson/internal/infra/database/postgres",
 }
 
 // sourceMethodNames are the method / function names whose []byte return

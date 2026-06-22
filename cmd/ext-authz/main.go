@@ -84,15 +84,15 @@ import (
 	"github.com/spiffe/go-spiffe/v2/spiffetls/tlsconfig"
 	"github.com/spiffe/go-spiffe/v2/workloadapi"
 	"github.com/zeroroot-ai/gibson/internal/infra/authz"
-	"github.com/zeroroot-ai/gibson/internal/infra/observability"
+	"github.com/zeroroot-ai/gibson/internal/infra/otelinit"
 	"github.com/zeroroot-ai/gibson/internal/infra/readiness"
 	"google.golang.org/grpc"
 	"google.golang.org/grpc/credentials"
 	"google.golang.org/grpc/reflection"
 
-	"github.com/zeroroot-ai/gibson/internal/extauthz/cgjwt"
-	"github.com/zeroroot-ai/gibson/internal/extauthz/fga"
-	"github.com/zeroroot-ai/gibson/internal/extauthz/server"
+	"github.com/zeroroot-ai/gibson/internal/server/extauthz/cgjwt"
+	"github.com/zeroroot-ai/gibson/internal/server/extauthz/fga"
+	"github.com/zeroroot-ai/gibson/internal/server/extauthz/server"
 )
 
 // spiffeStartupGrace is the maximum time we wait at startup for SPIRE to
@@ -105,18 +105,18 @@ func main() {
 		level = slog.LevelDebug
 	}
 
-	// observability.Init wires OTel traces + metrics + a structured
+	// otelinit.Init wires OTel traces + metrics + a structured
 	// slog.Logger. Endpoint resolves via OTEL_EXPORTER_OTLP_ENDPOINT;
 	// when unset the providers are no-op so unit tests / loopback runs
 	// don't require a collector. Each call returns an independent instance
 	// (no global state mutation; call SetGlobal to opt into global providers).
-	obsProvider, obsErr := observability.Init(context.Background(), "ext-authz",
-		observability.WithLogLevel(level),
+	obsProvider, obsErr := otelinit.Init(context.Background(), "ext-authz",
+		otelinit.WithLogLevel(level),
 	)
 	var log *slog.Logger
 	if obsErr != nil {
 		log = slog.New(slog.NewJSONHandler(os.Stdout, &slog.HandlerOptions{Level: level}))
-		log.Warn("observability.Init failed; falling back to local slog", "err", obsErr)
+		log.Warn("otelinit.Init failed; falling back to local slog", "err", obsErr)
 	} else {
 		log = obsProvider.Logger
 		// Set global OTel providers so auto-instrumented libraries (including

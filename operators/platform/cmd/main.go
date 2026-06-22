@@ -48,7 +48,7 @@ import (
 	"sigs.k8s.io/controller-runtime/pkg/log/zap"
 	metricsserver "sigs.k8s.io/controller-runtime/pkg/metrics/server"
 
-	"github.com/zeroroot-ai/gibson/internal/infra/observability"
+	"github.com/zeroroot-ai/gibson/internal/infra/otelinit"
 	"github.com/zeroroot-ai/gibson/internal/infra/readiness"
 
 	gibsonv1alpha1 "github.com/zeroroot-ai/gibson/operators/platform/api/v1alpha1"
@@ -133,7 +133,7 @@ func run(cfg runConfig) error {
 	// OTel TracerProvider + MeterProvider + propagator for auto-instrumented
 	// libraries. Falls back to a no-op exporter when
 	// OTEL_EXPORTER_OTLP_ENDPOINT is not set (e.g. local dev, kind).
-	obs, err := observability.Init(context.Background(), "platform-operator")
+	obs, err := otelinit.Init(context.Background(), "platform-operator")
 	if err != nil {
 		// Non-fatal: telemetry is optional infrastructure. Log and proceed.
 		setupLog.Error(err, "observability init failed; telemetry disabled")

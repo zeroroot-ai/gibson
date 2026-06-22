@@ -6,15 +6,15 @@
 # Steps (in order, fail-fast):
 #   1. make check-noun-contract — every NodeType has its four
 #      pieces (config, handler, e2e fixture, unit tests).
-#   2. go vet ./internal/orchestrator/... ./internal/mission/...
-#      ./internal/harness/... ./internal/daemon/api/...
+#   2. go vet ./internal/engine/mission/...
+#      ./internal/engine/harness/... ./internal/server/daemon/api/...
 #   3. go build ./... — daemon compiles cleanly.
 #   4. go test -count=1 ./internal/orchestrator/nodes/...
 #      ./internal/orchestrator/ -run TestSpawnCycle\|TestEscalateAck
 #      \|TestRegister\|TestAssertExhaustive
-#      ./internal/mission/definitionutil/...
-#      ./internal/harness/ -run TestEffectivePerCallCap
-#      ./internal/daemon/ -run TestProtovalidate
+#      ./internal/engine/mission/definitionutil/...
+#      ./internal/engine/harness/ -run TestEffectivePerCallCap
+#      ./internal/server/daemon/ -run TestProtovalidate
 #      — exercises every test added under specs 1 + 2.
 #   5. greps for forbidden state:
 #      - mission.MissionDefinition outside generated code:
@@ -33,7 +33,7 @@ echo "[1/4] check-noun-contract"
 make check-noun-contract
 
 echo "[2/4] go vet"
-go vet ./internal/orchestrator/... ./internal/mission/... ./internal/harness/... ./internal/daemon/api/...
+go vet ./internal/engine/mission/... ./internal/engine/harness/... ./internal/server/daemon/api/...
 
 echo "[3/4] go build"
 go build ./...
@@ -41,13 +41,13 @@ go build ./...
 echo "[4/4] focused test suite"
 go test -count=1 -timeout=60s \
   ./internal/orchestrator/nodes/... \
-  ./internal/mission/definitionutil/... \
+  ./internal/engine/mission/definitionutil/... \
   -run '.*'
 go test -count=1 -timeout=60s ./internal/orchestrator/ \
   -run 'TestSpawnCycle|TestEscalateAck|TestRegister|TestAssertExhaustive|TestStateRestorer'
-go test -count=1 -timeout=60s ./internal/harness/ \
+go test -count=1 -timeout=60s ./internal/engine/harness/ \
   -run 'TestEffectivePerCallCap'
-go test -count=1 -timeout=60s ./internal/daemon/ \
+go test -count=1 -timeout=60s ./internal/server/daemon/ \
   -run 'TestProtovalidate'
 
 echo ""

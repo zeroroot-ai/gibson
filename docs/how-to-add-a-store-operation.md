@@ -10,7 +10,7 @@ first if you have not.
 ## Step 1 — Find the right ops file
 
 Operations group by entity. Mission ops live on `*MissionOps`, defined in
-[`internal/datapool/conn_ops_mission.go`](../internal/datapool/conn_ops_mission.go).
+[`internal/infra/datapool/conn_ops_mission.go`](../internal/infra/datapool/conn_ops_mission.go).
 Findings live on `*FindingOps` in `conn_ops_finding.go`. Memory in
 `conn_ops_memory.go`. Add a new file `conn_ops_<entity>.go` only when the
 entity has no existing ops bundle.
@@ -28,7 +28,7 @@ not as part of the operation addition.
 ## Step 3 — Write the method on the ops receiver
 
 ```go
-// In internal/datapool/conn_ops_mission.go
+// In internal/infra/datapool/conn_ops_mission.go
 
 // ListOlderThan returns the IDs of mission runs whose JSON document carries
 // a created_at timestamp earlier than t. Tenant-scoped automatically because
@@ -57,7 +57,7 @@ directly — they are already tenant-bound. No tenant filter, no key prefix.
 ## Step 4 — If the operation reads or writes a secret, use envelope encryption
 
 When the value is secret-shaped (BYOK key, customer credential), wrap it via
-`internal/datapool/envelope`:
+`internal/infra/datapool/envelope`:
 
 ```go
 aad := []byte("missions:older-than-payload:" + id.String())
@@ -101,7 +101,7 @@ destructive cases; destructive migrations require
 ## Step 6 — Write a table-driven test
 
 Tests for `MissionOps` live in
-[`internal/datapool/conn_test.go`](../internal/datapool/conn_test.go) (and
+[`internal/infra/datapool/conn_test.go`](../internal/infra/datapool/conn_test.go) (and
 sibling `*_test.go` files). For Redis ops, prefer `miniredis`; for Postgres,
 prefer `pgxmock` for unit and a testcontainer for integration. The
 `forbid_raw_store_imports` analyzer permits `miniredis` in `_test.go` files
@@ -140,7 +140,7 @@ func (s *server) PurgeOldRuns(ctx context.Context, req *pb.PurgeReq) (*pb.PurgeR
 ```
 
 If the operation legitimately spans tenants (analytics, billing) it does NOT
-go through `pool.For`. Move the code to `internal/admin/` and use
+go through `pool.For`. Move the code to `internal/server/admin/` and use
 `pool.Admin(ctx)` — see [`data-plane.md` § "Admin pool"](./data-plane.md#admin-pool).
 The `adminpoolacquire` analyzer enforces this boundary.
 

@@ -19,13 +19,13 @@ import (
 // and confusing.  The only legitimate users of raw tenant-scoped prefix
 // construction are:
 //
-//   - internal/datapool/admin/ — the master index DB lookup that maps
+//   - internal/infra/datapool/admin/ — the master index DB lookup that maps
 //     tenant IDs to logical DB indices.
-//   - internal/daemon/   — the event-stream Redis files and a few
+//   - internal/server/daemon/   — the event-stream Redis files and a few
 //     specific daemon-internal coordinator keys.
-//   - internal/component/ — component-quota counters keyed by component
+//   - internal/platform/component/ — component-quota counters keyed by component
 //     name, not tenant ID.
-//   - internal/audit/     — audit stream keys.
+//   - internal/platform/audit/     — audit stream keys.
 //
 // All other packages must hold a Conn.Redis (which is already DB-scoped)
 // and use plain keys without prefix.
@@ -118,11 +118,11 @@ var redisMethods = map[string]bool{
 // subsystems that legitimately hold shared-Redis keys for cross-tenant
 // accounting, event streams, and audit logs — NOT per-tenant data.
 var allowedRedisPrefixPackages = []string{
-	"/internal/datapool/admin",
-	"/internal/datapool",
-	"/internal/daemon",
-	"/internal/audit",
-	"/internal/component",
+	"/internal/infra/datapool/admin",
+	"/internal/infra/datapool",
+	"/internal/server/daemon",
+	"/internal/platform/audit",
+	"/internal/platform/component",
 	"/internal/migrate",
 	"/cmd/gibson-migrate",
 	"/tools/gibsoncheck",

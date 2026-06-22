@@ -6,14 +6,14 @@ Read this before editing the daemon. The daemon module is rooted at the repo top
 
 ## Authz registry pipeline
 
-The authorization rule book lives at `internal/authz/registry/`:
-- `registry.go` — Go map `Registry` (import path `github.com/zeroroot-ai/gibson/internal/authz/registry`)
+The authorization rule book lives at `internal/platform/authz/registry/`:
+- `registry.go` — Go map `Registry` (import path `github.com/zeroroot-ai/gibson/internal/platform/authz/registry`)
 - `registry.yaml` — runtime YAML; `embed.go` embeds it and the daemon serves it to ext-authz over mTLS (see below). `YAML()` returns the bytes.
 - `permissions.ts` — TypeScript map for the dashboard sister spec
 - `audit.csv` — auditor-friendly flat table (rpc, relation, object_type, deriver, identities, source_proto_file)
 
 **Runtime delivery to ext-authz (deploy#852).** The daemon serves the embedded
-`registry.yaml` from an mTLS listener (`internal/daemon/authz_registry_subsystem.go`,
+`registry.yaml` from an mTLS listener (`internal/server/daemon/authz_registry_subsystem.go`,
 `GET /authz/registry.yaml` on `GIBSON_AUTHZ_REGISTRY_PORT`, default `:8086`),
 authorized to an explicit SPIFFE reader allow-list
 (`GIBSON_AUTHZ_REGISTRY_READER_SVIDS`, e.g. the ext-authz SVID). ext-authz
@@ -25,7 +25,7 @@ The old separately-versioned OCI artifact (`internal-authz-registry:<tag>` + cha
 `sdk.version` pin) is retired — it silently default-denied any RPC added after the
 last manual publish (e.g. `SetSignupProgress`).
 
-The OpenFGA model itself is hand-maintained at `internal/authz/model.fga`
+The OpenFGA model itself is hand-maintained at `internal/platform/authz/model.fga`
 (compiled to the JSON `gibson-fga-init` loads by `cmd/gen-fga-model-json`,
 which the Helm chart runs to produce the init ConfigMap); the registry
 generator no longer emits an FGA stub.
@@ -36,7 +36,7 @@ The annotations come from **three** proto sources after the two-surface refactor
 
 - **OSS SDK** at the pinned `github.com/zeroroot-ai/sdk` module (`gibson.daemon.v1.*` — customer-callable `DaemonService` RPCs only; admin protos no longer live here per sdk#105).
 - **platform-sdk** at the pinned `github.com/zeroroot-ai/platform-sdk` module. After ADR-0039 (admin-surface recategorization, 2026-06-01) this module hosts only the genuinely-private platform protos: `gibson.daemon.operator.v1.*` (`DaemonOperatorService`), `gibson.billing.v1.*` (`BillingService`), and `gibson.daemon.discovery.v1.*` (`DiscoveryService`). The former tenant-admin surface (`gibson.tenant.v1.*`, user, usage) is now **customer-facing** and lives in the OSS SDK. Cross-module proto sharing flows through BSR (`buf.build/zeroroot-ai-platform/platform-sdk`); no local proto includes (docs ADR-0028 Clause 6).
-- **daemon-local** protos at `internal/daemon/api/gibson/<pkg>/v1/**` — anything no other repo consumes. If another repo needs a type from here, promote it to `platform-sdk` and consume via BSR. Do not vendor.
+- **daemon-local** protos at `internal/server/daemon/api/gibson/<pkg>/v1/**` — anything no other repo consumes. If another repo needs a type from here, promote it to `platform-sdk` and consume via BSR. Do not vendor.
 
 All three sets must carry `option (gibson.auth.v1.authz) = {…};` on every authenticated RPC. The codegen tool fails closed on any unannotated method.
 
@@ -59,7 +59,7 @@ This will:
 
 After regen, verify with:
 ```bash
-git diff --exit-code internal/authz/registry/
+git diff --exit-code internal/platform/authz/registry/
 ```
 CI runs the same check (`authz-registry-drift` step). A clean PR means no drift.
 
@@ -67,15 +67,15 @@ CI runs the same check (`authz-registry-drift` step). A clean PR means no drift.
 
 - After bumping the OSS SDK version (`github.com/zeroroot-ai/sdk`) in `go.mod` (mandatory — new customer-callable RPCs may have been added).
 - After bumping the platform-sdk version (`github.com/zeroroot-ai/platform-sdk`) in `go.mod` (mandatory — new admin RPCs may have been added).
-- After adding or modifying a daemon-local RPC under `internal/daemon/api/`.
+- After adding or modifying a daemon-local RPC under `internal/server/daemon/api/`.
 - After CI fails the drift gate.
 
 ### When you add a daemon-local RPC
 
-1. Add the `rpc` to the relevant `.proto` under `internal/daemon/api/gibson/<pkg>/v1/`.
+1. Add the `rpc` to the relevant `.proto` under `internal/server/daemon/api/gibson/<pkg>/v1/`.
 2. In the same `rpc` block, add an `option (gibson.auth.v1.authz) = {…};` matching the rule you want enforced. If the file has no other authz-annotated RPCs yet, add `import "gibson/auth/v1/options.proto";` at the top.
 3. Run `make authz-registry` and `make proto`.
-4. Commit both the proto edit and the regenerated `internal/authz/registry/*` artifacts in the same change.
+4. Commit both the proto edit and the regenerated `internal/platform/authz/registry/*` artifacts in the same change.
 
 There is no manual restoration step. Anything that previously had to be hand-merged into `registry.yaml` or `registry.go` is now driven entirely from proto annotations. Spec: `unified-authz-regen`.
 
@@ -84,7 +84,7 @@ There is no manual restoration step. Anything that previously had to be hand-mer
 If you suspect the committed registry doesn't match the current SDK protos:
 ```bash
 make authz-registry
-git diff internal/authz/registry/
+git diff internal/platform/authz/registry/
 ```
 Non-empty diff = genuine drift. Commit the regen output.
 
@@ -102,7 +102,7 @@ Spec: `private-authz-registry`.
 
 ## Proto regeneration
 
-The daemon-local protos live at `internal/daemon/api/gibson/<pkg>/v1/*.proto`. Their `.pb.go` + `_grpc.pb.go` bindings are checked into the same directory; CI does not regenerate them, so committing-the-output-of-`make proto` alongside any `.proto` change is mandatory.
+The daemon-local protos live at `internal/server/daemon/api/gibson/<pkg>/v1/*.proto`. Their `.pb.go` + `_grpc.pb.go` bindings are checked into the same directory; CI does not regenerate them, so committing-the-output-of-`make proto` alongside any `.proto` change is mandatory.
 
 ```bash
 make proto
@@ -119,16 +119,16 @@ Codegen settings worth knowing:
 After regen, verify with:
 
 ```bash
-git diff --exit-code internal/daemon/api/
+git diff --exit-code internal/server/daemon/api/
 ```
 
 CI does not run `make proto` itself, but the `authz-registry-drift` gate exercises the same workspace setup; if your `make proto` output drifts you'll see the breakage when downstream code fails to compile.
 
 ### When you add a daemon-local RPC
 
-1. Add the `rpc` to the relevant `.proto` under `internal/daemon/api/gibson/<pkg>/v1/`.
+1. Add the `rpc` to the relevant `.proto` under `internal/server/daemon/api/gibson/<pkg>/v1/`.
 2. In the same `rpc` block, add `option (gibson.auth.v1.authz) = {…};`. If the file has no other authz-annotated RPCs yet, add `import "gibson/auth/v1/options.proto";` at the top.
-3. Run `make proto` (which depends on `proto-deps` + `authz-registry`). This regenerates both the `.pb.go` / `_grpc.pb.go` and the four `internal/authz/registry/*` artifacts in one pass.
+3. Run `make proto` (which depends on `proto-deps` + `authz-registry`). This regenerates both the `.pb.go` / `_grpc.pb.go` and the four `internal/platform/authz/registry/*` artifacts in one pass.
 4. Commit the `.proto` edit, the regenerated bindings, and the regenerated authz-registry files in the same change.
 
 ## Two-surface platform contract (post-2026-05 refactor)
@@ -160,7 +160,7 @@ import (
 
 The daemon's FGA Check uses the canonical Zitadel **numeric `sub`** forwarded from ext-authz as `X-Gibson-Identity-Subject`. The fga-init Helm Job seeds platform_operator tuples keyed by that numeric form, sourced from the chart-managed `gibson-sa-identity-map` ConfigMap. No translation in the daemon hot path.
 
-The package `internal/auth/identityresolver` provides a numeric→readable lookup. It is for **log enrichment only** — never call it from a code path that reaches an allow/deny decision. The mounted source path is `/etc/gibson/sa-identity-map` (one file per SA, kubelet's native ConfigMap projection); the resolver also accepts a single JSON file for compatibility with the dashboard's init-container output.
+The package `internal/platform/auth/identityresolver` provides a numeric→readable lookup. It is for **log enrichment only** — never call it from a code path that reaches an allow/deny decision. The mounted source path is `/etc/gibson/sa-identity-map` (one file per SA, kubelet's native ConfigMap projection); the resolver also accepts a single JSON file for compatibility with the dashboard's init-container output.
 
 Spec: `canonical-service-identity`.
 
