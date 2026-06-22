@@ -23,8 +23,6 @@ import (
 	"golang.org/x/oauth2"
 
 	"github.com/zeroroot-ai/gibson/operators/tenant/internal/clients"
-	"github.com/zeroroot-ai/gibson/operators/tenant/internal/controller"
-	"github.com/zeroroot-ai/gibson/operators/tenant/plans"
 )
 
 // TokenSource provides a Bearer token for outbound HTTP requests to the
@@ -79,22 +77,6 @@ func NewEntitlementsHTTPClient(baseURL string, tokens TokenSource) *Entitlements
 
 // --- Provisioner interface implementation
 
-func (c *EntitlementsHTTPClient) UpsertTenantQuota(ctx context.Context, tenantID string, q plans.Quotas) error {
-	// NOTE: legacy HTTP fallback. Phase 3 of spec
-	// plans-and-quotas-simplification rewrites the daemon's RPC schema and
-	// the dashboard's Server-Action wire format. Until then this client only
-	// transmits the fields the new plan registry carries.
-	body := map[string]any{
-		"tenant_id":             tenantID,
-		"concurrent_missions":   q.ConcurrentMissions,
-		"concurrent_agents":     q.ConcurrentAgents,
-		"concurrent_connectors": q.ConcurrentConnectors,
-		"plan_id":               q.PlanID,
-	}
-	_, err := c.post(ctx, "/api/admin/provisioning/entitlements/upsert-quota", body)
-	return err
-}
-
 // SetTenantZitadelOrg seeds the daemon's tenant -> Zitadel-org mapping
 // (gibson#621). Legacy HTTP fallback; the primary path is the gRPC client
 // calling DaemonOperatorService.SetTenantZitadelOrg directly. Idempotent.
@@ -135,18 +117,6 @@ func (c *EntitlementsHTTPClient) WriteAccessTuples(ctx context.Context, add, del
 func (c *EntitlementsHTTPClient) SeedCatalogTenantEnabled(ctx context.Context, tenantID string) error {
 	body := map[string]any{"tenant_id": tenantID}
 	_, err := c.post(ctx, "/api/admin/provisioning/entitlements/seed-catalog-tenant-enabled", body)
-	return err
-}
-
-func (c *EntitlementsHTTPClient) EmitReconcileSummary(ctx context.Context, s controller.ReconcileSummary) error {
-	body := map[string]any{
-		"tenant_id":   s.TenantID,
-		"plan":        s.Plan,
-		"quota_delta": s.QuotaDelta,
-		"duration_ms": s.DurationMs,
-		"trigger":     s.Trigger,
-	}
-	_, err := c.post(ctx, "/api/admin/provisioning/entitlements/emit-summary", body)
 	return err
 }
 

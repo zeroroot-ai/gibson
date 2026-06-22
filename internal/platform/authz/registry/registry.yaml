@@ -25,20 +25,6 @@ entries:
     object_deriver: "tenant_from_identity"
     allowed_identities:
       - COMPONENT
-  "/gibson.billing.v1.BillingService/DeleteWebhookEvent":
-    relation: "platform_operator"
-    object_type: "system_tenant"
-    object_deriver: "system_tenant"
-    allowed_identities:
-      - USER
-      - SERVICE
-  "/gibson.billing.v1.BillingService/RecordWebhookEvent":
-    relation: "platform_operator"
-    object_type: "system_tenant"
-    object_deriver: "system_tenant"
-    allowed_identities:
-      - USER
-      - SERVICE
   "/gibson.component.v1.ComponentService/CallTool":
     relation: "can_execute"
     object_type: "component"

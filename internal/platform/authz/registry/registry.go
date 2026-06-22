@@ -9,10 +9,10 @@ package registry
 type IdentityClass uint8
 
 const (
-	IdentityUser             IdentityClass = 1
-	IdentityService          IdentityClass = 2
-	IdentityComponent        IdentityClass = 4
-	IdentityPlatformOperator IdentityClass = 8
+	IdentityUser              IdentityClass = 1
+	IdentityService           IdentityClass = 2
+	IdentityComponent         IdentityClass = 4
+	IdentityPlatformOperator  IdentityClass = 8
 )
 
 // Has reports whether c contains every bit set in want.
@@ -70,26 +70,6 @@ var Registry = map[string]Entry{
 		ObjectType:        "tenant",
 		ObjectDeriver:     "tenant_from_identity",
 		AllowedIdentities: IdentityComponent,
-		Unauthenticated:   false,
-		Self:              false,
-	},
-	"/gibson.billing.v1.BillingService/DeleteWebhookEvent": {
-		Method:            "/gibson.billing.v1.BillingService/DeleteWebhookEvent",
-		Service:           "gibson.billing.v1.BillingService",
-		Relation:          "platform_operator",
-		ObjectType:        "system_tenant",
-		ObjectDeriver:     "system_tenant",
-		AllowedIdentities: IdentityUser | IdentityService,
-		Unauthenticated:   false,
-		Self:              false,
-	},
-	"/gibson.billing.v1.BillingService/RecordWebhookEvent": {
-		Method:            "/gibson.billing.v1.BillingService/RecordWebhookEvent",
-		Service:           "gibson.billing.v1.BillingService",
-		Relation:          "platform_operator",
-		ObjectType:        "system_tenant",
-		ObjectDeriver:     "system_tenant",
-		AllowedIdentities: IdentityUser | IdentityService,
 		Unauthenticated:   false,
 		Self:              false,
 	},

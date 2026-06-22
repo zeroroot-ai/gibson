@@ -25,7 +25,6 @@ import (
 	"context"
 	"fmt"
 	"strings"
-	"time"
 
 	"google.golang.org/grpc/codes"
 	"google.golang.org/grpc/metadata"
@@ -33,9 +32,7 @@ import (
 
 	operatorv1 "github.com/zeroroot-ai/gibson/internal/server/daemon/api/gibson/daemon/operator/v1"
 	"github.com/zeroroot-ai/gibson/operators/tenant/internal/clients"
-	"github.com/zeroroot-ai/gibson/operators/tenant/internal/controller"
 	daemontransport "github.com/zeroroot-ai/gibson/operators/tenant/pkg/transport/daemon"
-	"github.com/zeroroot-ai/gibson/operators/tenant/plans"
 )
 
 // EntitlementsGRPCClient implements controller.EntitlementsProvisioner by
@@ -133,21 +130,6 @@ func translateGRPCError(op string, err error) error {
 
 // --- Provisioner interface implementation ---
 
-func (c *EntitlementsGRPCClient) UpsertTenantQuota(ctx context.Context, tenantID string, q plans.Quotas) error {
-	authedCtx, err := c.authCtx(ctx)
-	if err != nil {
-		return err
-	}
-	_, err = c.client.UpsertTenantQuota(authedCtx, &operatorv1.UpsertTenantQuotaRequest{
-		TenantId:             tenantID,
-		ConcurrentAgents:     int32(q.ConcurrentAgents),
-		ConcurrentMissions:   int32(q.ConcurrentMissions),
-		ConcurrentConnectors: int32(q.ConcurrentConnectors),
-		PlanId:               q.PlanID,
-	})
-	return translateGRPCError("upsert-quota", err)
-}
-
 // SetTenantZitadelOrg seeds the daemon's tenant -> Zitadel-org mapping via
 // DaemonOperatorService.SetTenantZitadelOrg (gibson#621). Idempotent.
 func (c *EntitlementsGRPCClient) SetTenantZitadelOrg(ctx context.Context, tenantID, zitadelOrgID string) error {
@@ -203,31 +185,6 @@ func (c *EntitlementsGRPCClient) SeedCatalogTenantEnabled(ctx context.Context, t
 // EmitReconcileSummary maps the controller's strongly-typed summary onto
 // the daemon's generic AuditEventMessage. The daemon's audit emitter
 // stores the event in the platform Postgres + Redis stream.
-func (c *EntitlementsGRPCClient) EmitReconcileSummary(ctx context.Context, s controller.ReconcileSummary) error {
-	authedCtx, err := c.authCtx(ctx)
-	if err != nil {
-		return err
-	}
-	fields := map[string]string{
-		"plan":        s.Plan,
-		"quota_delta": itoa(s.QuotaDelta),
-		"duration_ms": itoaInt64(s.DurationMs),
-		"trigger":     s.Trigger,
-	}
-	_, err = c.client.EmitAuditEvent(authedCtx, &operatorv1.EmitAuditEventRequest{
-		Event: &operatorv1.AuditEventMessage{
-			Type:        "entitlements_reconcile",
-			ActorSource: "tenant-operator",
-			ScopeType:   "tenant",
-			Operation:   "reconcile",
-			Reason:      s.Trigger,
-			Timestamp:   time.Now().UTC().Format(time.RFC3339Nano),
-			Fields:      fields,
-		},
-	})
-	return translateGRPCError("emit-summary", err)
-}
-
 // parseAccessTuples splits "user#relation@object" into the gRPC
 // AccessTuple message. Mirrors EntitlementsHTTPClient's tuplesFromStrings
 // so the operator's caller surface is unchanged.
