@@ -10,7 +10,7 @@ import (
 
 	"github.com/redis/go-redis/v9"
 
-	"github.com/zeroroot-ai/gibson/internal/billing/entitlements"
+	"github.com/zeroroot-ai/gibson/pkg/billing/entitlements"
 	"github.com/zeroroot-ai/sdk/auth"
 )
 

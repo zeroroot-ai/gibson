@@ -2,12 +2,16 @@
 // gating from the OSS brain (docs ADR-0003, CONTEXT.md "Entitlements
 // provider").
 //
-// The budget enforcer (internal/budget) and the concurrency rate limiter
-// (internal/component QuotaManager) consume "what are this tenant's limits
-// / what's enabled?" exclusively through the Provider interface. They never
-// read plans or Stripe directly. This package therefore holds NO plan
-// model, NO Stripe types, and NO billing knowledge — it is part of OSS
-// gibson.
+// The budget enforcer (internal/platform/budget) and the concurrency rate
+// limiter (internal/platform/component QuotaManager) consume "what are this
+// tenant's limits / what's enabled?" exclusively through the Provider
+// interface. They never read plans or Stripe directly. This package therefore
+// holds NO plan model, NO Stripe types, and NO billing knowledge — it is part
+// of OSS gibson.
+//
+// It lives under pkg/ (not internal/) so the closed commercial billing repo
+// can import the Provider interface + Register to inject its Stripe-backed
+// impl into a hosted daemon build (open-core Option A; ADR-0003/0054).
 //
 //   - OSS (this package, DefaultProvider) ships a permissive/config-driven
 //     provider: limits come from admin-set quota config (the platform
