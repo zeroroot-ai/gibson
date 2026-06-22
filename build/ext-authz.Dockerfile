@@ -11,7 +11,7 @@
 # ============================================================================
 # Stage 1: Builder — Pure Go compilation (no CGO)
 # ============================================================================
-FROM ghcr.io/zeroroot-ai/mirror/golang:1.25.11-alpine AS builder
+FROM ghcr.io/zeroroot-ai/mirror/golang:1.26.4-alpine AS builder
 
 RUN apk add --no-cache git ca-certificates
 
