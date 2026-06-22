@@ -16,10 +16,10 @@ import (
 	goredis "github.com/redis/go-redis/v9"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
-	"github.com/zeroroot-ai/gibson/internal/agent"
-	"github.com/zeroroot-ai/gibson/internal/datapool"
-	"github.com/zeroroot-ai/gibson/internal/finding"
-	"github.com/zeroroot-ai/gibson/internal/types"
+	"github.com/zeroroot-ai/gibson/internal/engine/agent"
+	"github.com/zeroroot-ai/gibson/internal/infra/datapool"
+	"github.com/zeroroot-ai/gibson/internal/engine/finding"
+	"github.com/zeroroot-ai/gibson/internal/infra/types"
 	"github.com/zeroroot-ai/sdk/auth"
 )
 

@@ -14,29 +14,29 @@ import (
 //
 // The two authorised locations are:
 //
-//	internal/datapool/admin/   — the pool implementation itself
-//	internal/admin/            — platform-operator business logic
+//	internal/infra/datapool/admin/   — the pool implementation itself
+//	internal/server/admin/            — platform-operator business logic
 //
-// Any other package importing internal/datapool/admin is a policy violation
+// Any other package importing internal/infra/datapool/admin is a policy violation
 // per database-per-tenant-data-plane Requirement 11.5 and the design's
 // "narrow-waist" CODEOWNERS policy.
 //
 // Spec: database-per-tenant-data-plane, Phase E, task 5.2.
 var AdminPoolAcquireAnalyzer = &analysis.Analyzer{
 	Name: "adminpoolacquire",
-	Doc:  "fail when a package outside internal/admin/ or internal/datapool/admin/ imports the admin pool package (database-per-tenant-data-plane Requirement 11.5)",
+	Doc:  "fail when a package outside internal/server/admin/ or internal/infra/datapool/admin/ imports the admin pool package (database-per-tenant-data-plane Requirement 11.5)",
 	Run:  runAdminPoolAcquire,
 }
 
 // adminPoolImportPath is the Go import path of the admin pool package.
-const adminPoolImportPath = "github.com/zeroroot-ai/gibson/internal/datapool/admin"
+const adminPoolImportPath = "github.com/zeroroot-ai/gibson/internal/infra/datapool/admin"
 
 // allowedAdminPackages lists package path substrings that are permitted to
 // import the admin pool. The check uses substring matching so sub-packages
-// of internal/admin/ are also allowed.
+// of internal/server/admin/ are also allowed.
 var allowedAdminPackages = []string{
-	"/internal/datapool/admin",
-	"/internal/admin",
+	"/internal/infra/datapool/admin",
+	"/internal/server/admin",
 	"/internal/migrate",   // migration runner uses admin pool for tenant enumeration
 	"/cmd/gibson-migrate", // migration CLI entry point
 	"/tools/gibsoncheck",  // the analyzer itself during test runs
@@ -67,7 +67,7 @@ func runAdminPoolAcquire(pass *analysis.Pass) (any, error) {
 			}
 			if path == adminPoolImportPath {
 				pass.Reportf(imp.Pos(),
-					"forbidden import %q in %q: only internal/admin/ and internal/datapool/admin/ may import the admin pool (database-per-tenant-data-plane Requirement 11.5). Cross-tenant access requires CODEOWNERS review.",
+					"forbidden import %q in %q: only internal/server/admin/ and internal/infra/datapool/admin/ may import the admin pool (database-per-tenant-data-plane Requirement 11.5). Cross-tenant access requires CODEOWNERS review.",
 					path, pkgPath)
 			}
 		}

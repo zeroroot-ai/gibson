@@ -18,11 +18,11 @@ What the daemon **does** own:
 
 | Concern | File |
 |---|---|
-| Capability-grant minting (Ed25519, KMS-derived) | [`internal/capabilitygrant/mint.go`](../internal/capabilitygrant/mint.go) |
-| JWKS publication for CG-JWT verifiers | [`internal/capabilitygrant/jwks.go`](../internal/capabilitygrant/jwks.go) |
-| Single multiplexed gRPC listener with SDK auth interceptor | [`internal/daemon/grpc.go`](../internal/daemon/grpc.go) |
-| Inbound SPIFFE peer pin (Envoy SVID only) | [`internal/daemon/grpc.go:179`](../internal/daemon/grpc.go) |
-| Startup self-check: every registered method has a registry entry | [`internal/daemon/grpc.go:762`](../internal/daemon/grpc.go) |
+| Capability-grant minting (Ed25519, KMS-derived) | [`internal/platform/capabilitygrant/mint.go`](../internal/platform/capabilitygrant/mint.go) |
+| JWKS publication for CG-JWT verifiers | [`internal/platform/capabilitygrant/jwks.go`](../internal/platform/capabilitygrant/jwks.go) |
+| Single multiplexed gRPC listener with SDK auth interceptor | [`internal/server/daemon/grpc.go`](../internal/server/daemon/grpc.go) |
+| Inbound SPIFFE peer pin (Envoy SVID only) | [`internal/server/daemon/grpc.go:179`](../internal/server/daemon/grpc.go) |
+| Startup self-check: every registered method has a registry entry | [`internal/server/daemon/grpc.go:762`](../internal/server/daemon/grpc.go) |
 | Forbidden-imports + tenant-from-context analyzers (`gibsoncheck`) | [`tools/gibsoncheck/checks/`](../tools/gibsoncheck/checks/) |
 
 ## The trust chain that ends at the daemon
@@ -39,7 +39,7 @@ caller --(Zitadel JWT)--> Envoy --(SPIFFE mTLS)--> daemon
                             +-- SVID belongs to spiffe://zeroroot.ai/platform/envoy
                                                        |
                                                        v
-              daemon TLS listener (internal/daemon/grpc.go:183)
+              daemon TLS listener (internal/server/daemon/grpc.go:183)
                             |
                             | tls.RequestClientCert + go-spiffe verifier
                             | rejects any peer SVID != Envoy's
@@ -63,7 +63,7 @@ The headers are not HMAC-signed. Channel security is the SPIFFE-pinned
 mTLS hop — only Envoy can connect, so the daemon trusts whatever Envoy
 sends. HMAC was the defense-in-depth against a man-in-the-middle on the
 Envoy↔daemon hop that does not exist with mTLS-pinned ingress; removing
-it deleted a whole secret-loading dance ([`grpc.go:163`](../internal/daemon/grpc.go)).
+it deleted a whole secret-loading dance ([`grpc.go:163`](../internal/server/daemon/grpc.go)).
 
 ## RPC handler pattern
 
@@ -101,7 +101,7 @@ func (s *Server) ListMissions(ctx context.Context, req *pb.ListMissionsRequest) 
 }
 ```
 
-Real examples in [`internal/daemon/api/server.go`](../internal/daemon/api/server.go):
+Real examples in [`internal/server/daemon/api/server.go`](../internal/server/daemon/api/server.go):
 the `auth.IdentityFromContext` calls at lines 2364, 2472, 2519, 2607, 2668
 all follow this pattern.
 
@@ -112,7 +112,7 @@ ext-authz says it is; trusting the request body is audit C11 reopened.
 
 ## Capability-grant minting (KMS-derived Ed25519)
 
-`internal/capabilitygrant/mint.go` is the daemon's single auth-related
+`internal/platform/capabilitygrant/mint.go` is the daemon's single auth-related
 piece of crypto. The orchestrator calls `Minter.Mint(ctx, ...)` at task
 dispatch:
 
@@ -138,13 +138,13 @@ Ed25519 keypair = HKDF-SHA256(
 )
 ```
 
-`KeyProvider` is the existing interface ([`internal/crypto/`](../internal/crypto/))
+`KeyProvider` is the existing interface ([`internal/platform/crypto/`](../internal/platform/crypto/))
 that already supports k8s/Vault/AWS-KMS/Azure-KV/GCP-KMS. The
 domain-separation `info` string keeps the signing key disjoint from the
 encryption KEKs the data-plane uses.
 
 JWKS is served at `/.well-known/jwks.json`
-([`internal/capabilitygrant/jwks.go`](../internal/capabilitygrant/jwks.go)),
+([`internal/platform/capabilitygrant/jwks.go`](../internal/platform/capabilitygrant/jwks.go)),
 through Envoy externally. ext-authz fetches and caches it for 1 hour.
 
 The daemon **only mints**. It does not verify its own CG-JWTs — that is
@@ -154,7 +154,7 @@ ext-authz's job ([`core/ext-authz/internal/cgjwt/verifier.go`](../../ext-authz/i
 
 Daemon startup walks every registered gRPC method and verifies it has a
 matching entry in the SDK's generated registry
-([`internal/daemon/grpc.go:762`](../internal/daemon/grpc.go)):
+([`internal/server/daemon/grpc.go:762`](../internal/server/daemon/grpc.go)):
 
 ```go
 for svcName, info := range srv.GetServiceInfo() {
@@ -172,14 +172,14 @@ The daemon refuses to start in either case — **fail-closed**.
 
 ## Inbound SPIFFE peer pin
 
-The TLS listener ([`internal/daemon/grpc.go:183`](../internal/daemon/grpc.go))
+The TLS listener ([`internal/server/daemon/grpc.go:183`](../internal/server/daemon/grpc.go))
 uses `tls.RequestClientCert` with a go-spiffe `MTLSServerConfig`
 verifier. The verifier accepts only `spiffe://zeroroot.ai/platform/envoy`
 (the Envoy SDS-resolved upstream SVID). Any other peer SVID is rejected
 at the TLS handshake before headers are read.
 
 Why `RequestClientCert` rather than `VerifyClientCertIfGiven` or
-`RequireAnyClientCert` is documented inline at [`grpc.go:197-211`](../internal/daemon/grpc.go) —
+`RequireAnyClientCert` is documented inline at [`grpc.go:197-211`](../internal/server/daemon/grpc.go) —
 it is the only setting that lets go-spiffe's `VerifyPeerCertificate`
 callback run while preserving Bearer-only fallback for non-mTLS
 callers (which never reach a handler because they fail the
@@ -195,12 +195,12 @@ and run as part of `make check` / `make lint`.
 | `forbiddenimports` | [`forbidden_imports.go`](../tools/gibsoncheck/checks/forbidden_imports.go) | `github.com/zitadel/*`, `github.com/openfga/*` outside the narrow allowlist (capabilitygrant FGA bridge for now). |
 | `notrustlocalhost` | [`no_trust_localhost.go`](../tools/gibsoncheck/checks/no_trust_localhost.go) | Any reintroduction of the deleted `TrustLocalhost` interceptor option (audit C17). |
 | `tenantfromcontext` | [`tenant_from_context.go`](../tools/gibsoncheck/checks/tenant_from_context.go) | Handler bodies that read `req.Tenant` / `req.TenantId` / `req.TenantID` (audit C11). |
-| `adminpoolacquire` | [`admin_pool_acquire.go`](../tools/gibsoncheck/checks/admin_pool_acquire.go) | Importing `internal/datapool/admin` outside `internal/admin/`, `internal/migrate/`, `cmd/gibson-migrate/`. (Data-plane spec; cross-listed because admin ops still need a verified identity.) |
+| `adminpoolacquire` | [`admin_pool_acquire.go`](../tools/gibsoncheck/checks/admin_pool_acquire.go) | Importing `internal/infra/datapool/admin` outside `internal/server/admin/`, `internal/migrate/`, `cmd/gibson-migrate/`. (Data-plane spec; cross-listed because admin ops still need a verified identity.) |
 | `forbidrawstoreimports` | [`forbid_raw_store_imports.go`](../tools/gibsoncheck/checks/forbid_raw_store_imports.go) | `pgx`, `go-redis`, `neo4j-go-driver` outside the data-plane allowlist. |
 | `forbidrediskeyprefix` | [`forbid_redis_key_prefix.go`](../tools/gibsoncheck/checks/forbid_redis_key_prefix.go) | `tenant:` / `gibson:tenant:` prefixes on per-tenant Redis keys. |
 
 The auth-specific allowlists are narrow: the FGA bridge in
-`internal/capabilitygrant/fga_bridge.go` is allowlisted because the
+`internal/platform/capabilitygrant/fga_bridge.go` is allowlisted because the
 capability-grant feature still has a residual FGA call that spec Phase 3
 plans to remove; until then the analyzer permits it explicitly.
 
@@ -208,7 +208,7 @@ plans to remove; until then the analyzer permits it explicitly.
 
 The daemon mints platform-operator impersonation JWTs from
 `PlatformOperatorService.ImpersonateTenant`. The minter
-([`internal/impersonation/issuer.go`](../internal/impersonation/issuer.go))
+([`internal/platform/impersonation/issuer.go`](../internal/platform/impersonation/issuer.go))
 HMAC-SHA256-signs short-lived (≤ 1 h) tokens whose `sub` claim is the
 target tenant and whose `impersonator` claim is the operator's subject.
 
@@ -243,14 +243,14 @@ not yet implemented.
 
 | Removed | Why |
 |---|---|
-| `internal/identity/` | Moved to `sdk/auth/` so consumers share the same types. |
+| `internal/platform/identity/` | Moved to `sdk/auth/` so consumers share the same types. |
 | `internal/apikeys/` | `gsk_` keys replaced by Zitadel service accounts. |
-| `internal/extauthz/` (client) | Daemon does not talk to ext-authz; ext-authz is upstream. |
+| `internal/server/extauthz/` (client) | Daemon does not talk to ext-authz; ext-authz is upstream. |
 | HMAC header signing/verifying | Channel is SPIFFE-pinned mTLS; HMAC was redundant. |
 | `TrustLocalhost` interceptor option | Audit C17. No bypass path remains. |
 | `_system` fallback in `TenantFromContext` | Audit C11/C12. Empty tenant → PermissionDenied. |
 | Three separate gRPC listeners (`:50001`, `:50002`, `:50100`) | Single multiplexed port behind Envoy. |
-| `internal/capabilitygrant/` inline-secret implementation | Replaced by KMS-derived Ed25519 minting. |
+| `internal/platform/capabilitygrant/` inline-secret implementation | Replaced by KMS-derived Ed25519 minting. |
 
 ## Cross-link
 

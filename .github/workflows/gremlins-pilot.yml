@@ -1,7 +1,7 @@
 # Mutation-testing pilot using gremlins.
 #
 # Slice 5.12 of the production-readiness epic (zeroroot-ai/gibson#175 →
-# board #16). Pilot scope: internal/authz/registry/. That package is the
+# board #16). Pilot scope: internal/platform/authz/registry/. That package is the
 # highest-stakes Go code in the daemon — its tests are the only thing
 # between "we ship the right authz model" and "we ship a broken one".
 #
@@ -23,7 +23,7 @@
 #
 # Acceptance per slice 5.12:
 #   - [x] Weekly schedule on gibson
-#   - [x] Scoped to internal/authz/registry/ only
+#   - [x] Scoped to internal/platform/authz/registry/ only
 #   - [x] Mutation score threshold 80% (configurable via env)
 #   - [x] Below-threshold auto-files an issue with surviving mutants
 #   - [ ] First mutant-killing PR lands — deferred follow-up, not gated
@@ -66,7 +66,7 @@ jobs:
     runs-on: ubuntu-latest
     timeout-minutes: 30
     env:
-      TARGET_PACKAGE: ./internal/authz/registry/...
+      TARGET_PACKAGE: ./internal/platform/authz/registry/...
       THRESHOLD: ${{ inputs.threshold || '0.80' }}
     steps:
       - uses: actions/checkout@v4
@@ -167,7 +167,7 @@ jobs:
               "| `\($f):\(.line)` | \(.type) | \(.status) |"]
             | sort | .[0:50] | join("\n")' "$REPORT")
 
-          TITLE="ci(gremlins): mutation score $SCORE below threshold $THRESHOLD on internal/authz/registry"
+          TITLE="ci(gremlins): mutation score $SCORE below threshold $THRESHOLD on internal/platform/authz/registry"
           BODY=$(cat <<MARKDOWN
           ## Weekly gremlins pilot run — below threshold
 
@@ -190,13 +190,13 @@ jobs:
 
           ## Why this matters
 
-          Mutation testing measures TEST QUALITY, not coverage. A surviving mutant means: a wrong behavior produced the same test outcome. For \`internal/authz/registry/\` — the daemon's authz model + identity-deriver pipeline — every surviving mutant is a way the wrong authz decision could ship without any test failing.
+          Mutation testing measures TEST QUALITY, not coverage. A surviving mutant means: a wrong behavior produced the same test outcome. For \`internal/platform/authz/registry/\` — the daemon's authz model + identity-deriver pipeline — every surviving mutant is a way the wrong authz decision could ship without any test failing.
 
           ## How to act on this
 
           Each row in the table is a candidate test gap. For each:
           1. Open the source file at the listed line.
-          2. Identify the mutation (operator swap, condition negation, etc.) by re-running gremlins locally: \`gremlins unleash ./internal/authz/registry/...\`
+          2. Identify the mutation (operator swap, condition negation, etc.) by re-running gremlins locally: \`gremlins unleash ./internal/platform/authz/registry/...\`
           3. Add a test that DIES on the mutated code.
           4. Re-run gremlins; the mutant should now be KILLED.
 

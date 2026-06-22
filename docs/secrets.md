@@ -7,7 +7,7 @@ This doc maps **every credential** in the Gibson control plane to where it lives
 For any new **per-tenant runtime credential**:
 
 1. **Operator writes** to the per-tenant Vault namespace at provisioning time, using the existing admin Vault client (`enterprise/platform/tenant-operator/internal/clients/vault/`).
-2. **Daemon reads** via the existing secrets broker (`internal/secrets/service.go`). The broker handles per-tenant routing, caching, circuit breaking, and audit.
+2. **Daemon reads** via the existing secrets broker (`internal/platform/secrets/service.go`). The broker handles per-tenant routing, caching, circuit breaking, and audit.
 3. **Path convention**: `infra/<store>` for operator-written infra creds (read-only to daemon); `user/cred:<name>` and `user/provider_config:<provider>:<field>` for user-supplied secrets written via `SetSecret`.
 
 If you find yourself writing K8s-Secret aggregation, projected-volume mounts, or sidecar reflectors for a per-tenant runtime cred, **stop** — Vault + broker is the answer. The only exceptions are documented below.
@@ -18,13 +18,13 @@ If you find yourself writing K8s-Secret aggregation, projected-volume mounts, or
 
 | Credential | Vault path | Read by | Notes |
 |---|---|---|---|
-| **LLM provider keys** (OpenAI, Anthropic, etc.) | `user/provider_config:<provider>:<field>` in per-tenant Vault namespace | Daemon via `internal/secrets/Service.Resolve` | User-supplied via `SetSecret` RPC. Daemon ACL grants CRUD on `user/*`. |
+| **LLM provider keys** (OpenAI, Anthropic, etc.) | `user/provider_config:<provider>:<field>` in per-tenant Vault namespace | Daemon via `internal/platform/secrets/Service.Resolve` | User-supplied via `SetSecret` RPC. Daemon ACL grants CRUD on `user/*`. |
 | **Agent runtime credentials** | `user/cred:<name>` in per-tenant Vault namespace | Same | User-supplied via `SetSecret`. Same `user/*` ACL. |
 | **Plugin-bound credentials** | `user/cred:<name>` in per-tenant Vault namespace | Daemon via `HarnessCallbackService.GetCredential` | Written at plugin registration. FGA `can_resolve` tuple gates resolution. |
 | **Per-tenant Neo4j infra creds** | `infra/neo4j` in per-tenant Vault namespace | Daemon's `instanceResolver` via the broker | Operator writes at provisioning; deletes on Deprovision. Daemon ACL is read-only on `infra/*`. |
 | Future per-tenant infra creds | `infra/<store>` in per-tenant Vault namespace | Daemon via broker | Pattern: `infra/<store>`. Daemon read-only. |
 
-**The broker stack** (`internal/secrets/`):
+**The broker stack** (`internal/platform/secrets/`):
 
 ```
 TenantConfigStore  — raw DB row I/O for tenant_secrets_broker_config
@@ -40,7 +40,7 @@ AuditWriter        — compliance_signal events via Redis Streams
 Service            — single entry point for gRPC handlers
 ```
 
-Provider factories registered (`internal/secrets/registry.go`):
+Provider factories registered (`internal/platform/secrets/registry.go`):
 - `vault` — the only supported provider; per-tenant Vault namespace. All provisioned tenants use this.
 - `awssm`, `gcpsm`, `azurekv` — BYO cloud secret managers; factory hooks compiled in, activated via `SetBrokerConfig` RPC.
 
@@ -61,7 +61,7 @@ The operator's admin token has unrestricted access to both `user/*` and `infra/*
 
 | Credential | Source | Read by | Notes |
 |---|---|---|---|
-| **Per-tenant Postgres role password** | KEK-derived: `derivePostgresPassword(masterKEK, tenantID)` at `internal/datapool/pgxpool_per_tenant.go` | Daemon's `pgxpool_per_tenant.ForTenant` derives independently per request | **Not stored anywhere.** Operator creates the per-tenant role with this exact derived password; daemon derives the same password to connect. Deterministic — same KEK + tenant always yields same password. Rotation = master KEK rotation. |
+| **Per-tenant Postgres role password** | KEK-derived: `derivePostgresPassword(masterKEK, tenantID)` at `internal/infra/datapool/pgxpool_per_tenant.go` | Daemon's `pgxpool_per_tenant.ForTenant` derives independently per request | **Not stored anywhere.** Operator creates the per-tenant role with this exact derived password; daemon derives the same password to connect. Deterministic — same KEK + tenant always yields same password. Rotation = master KEK rotation. |
 
 This is the cleanest "credential" of all: no storage means no leak surface. Other per-tenant infra creds could in principle follow this pattern, but Neo4j's password format restrictions and the operator/daemon needing to share the credential plane independently of the master KEK make Vault a better fit for new stores.
 
@@ -89,7 +89,7 @@ These all share a single property: **the consumer cannot reach Vault yet**, so a
 
 | Credential | Source | Notes |
 |---|---|---|
-| Master KEK | `KeyProvider` abstraction at `internal/crypto/providers/`. In kind: `kubernetes` provider (reads K8s Secret `gibson-master-kek`). In production: `vault` provider (reads from Vault root namespace) is also supported. | The master KEK derives every per-tenant KEK and every Layer 2 (computed) credential. **Root of trust for Vault itself**, so cannot live in Vault for the kubernetes provider. The vault-provider variant moves the KEK into Vault's root namespace; the operator pre-provisions a Vault client token via the standard `VAULT_TOKEN` env var (the daemon does NOT initiate any Vault `auth/kubernetes` login — see ADR-0009 / jwt-spiffe-everywhere). |
+| Master KEK | `KeyProvider` abstraction at `internal/platform/crypto/providers/`. In kind: `kubernetes` provider (reads K8s Secret `gibson-master-kek`). In production: `vault` provider (reads from Vault root namespace) is also supported. | The master KEK derives every per-tenant KEK and every Layer 2 (computed) credential. **Root of trust for Vault itself**, so cannot live in Vault for the kubernetes provider. The vault-provider variant moves the KEK into Vault's root namespace; the operator pre-provisions a Vault client token via the standard `VAULT_TOKEN` env var (the daemon does NOT initiate any Vault `auth/kubernetes` login — see ADR-0009 / jwt-spiffe-everywhere). |
 
 ### Layer 6 — Workload identity (not credentials)
 
@@ -121,13 +121,13 @@ If none of the above fits, you've found a sixth pattern — **stop and discuss**
 
 | Concern | File |
 |---|---|
-| Broker entry point | `internal/secrets/service.go` |
-| Provider registry + factory map | `internal/secrets/registry.go` |
-| User secret stored-name and category helpers | `internal/admin/secrets_admin.go` (`storedName`, `categoryPrefix`, `parseCategory`) |
-| Plugin credential resolution | `internal/daemon/credential_store.go` (`GetCredential`) |
-| Master KEK provider abstraction | `internal/crypto/providers/` |
-| Per-tenant Postgres password derivation | `internal/datapool/pgxpool_per_tenant.go` (`derivePostgresPassword`) |
-| Per-tenant Neo4j credential resolver | `internal/datapool/neo4j_endpoint_resolver_instance.go` |
+| Broker entry point | `internal/platform/secrets/service.go` |
+| Provider registry + factory map | `internal/platform/secrets/registry.go` |
+| User secret stored-name and category helpers | `internal/server/admin/secrets_admin.go` (`storedName`, `categoryPrefix`, `parseCategory`) |
+| Plugin credential resolution | `internal/server/daemon/credential_store.go` (`GetCredential`) |
+| Master KEK provider abstraction | `internal/platform/crypto/providers/` |
+| Per-tenant Postgres password derivation | `internal/infra/datapool/pgxpool_per_tenant.go` (`derivePostgresPassword`) |
+| Per-tenant Neo4j credential resolver | `internal/infra/datapool/neo4j_endpoint_resolver_instance.go` |
 | Vault / cloud provider impls | `enterprise/platform/platform-clients/secrets/` |
 | Operator Vault client | `enterprise/platform/tenant-operator/internal/clients/vault/` |
 | Operator Vault ACL policy | `enterprise/platform/tenant-operator/internal/clients/vault/namespace.go` (`tenantPolicyHCL`) |

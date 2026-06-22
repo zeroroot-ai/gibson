@@ -31,11 +31,11 @@ import (
 	"google.golang.org/grpc/metadata"
 	grpcstatus "google.golang.org/grpc/status"
 
+	operatorv1 "github.com/zeroroot-ai/gibson/internal/server/daemon/api/gibson/daemon/operator/v1"
 	"github.com/zeroroot-ai/gibson/operators/tenant/internal/clients"
 	"github.com/zeroroot-ai/gibson/operators/tenant/internal/controller"
 	daemontransport "github.com/zeroroot-ai/gibson/operators/tenant/pkg/transport/daemon"
 	"github.com/zeroroot-ai/gibson/operators/tenant/plans"
-	operatorv1 "github.com/zeroroot-ai/gibson/internal/daemon/api/gibson/daemon/operator/v1"
 )
 
 // EntitlementsGRPCClient implements controller.EntitlementsProvisioner by

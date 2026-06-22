@@ -13,9 +13,9 @@
 #   core/sdk/eval/feedback_integration_test.go    — GOEVALS=1 gate
 #   core/sdk/eval/example_realtime_export_test.go — LANGFUSE_PUBLIC_KEY gate
 #   core/sdk/agent/connect_test.go                — Windows OS gate
-#   core/gibson/internal/daemon/harness_init_test.go    — GIBSON_INTEGRATION_TESTS gate
-#   core/gibson/internal/daemon/infrastructure_test.go  — GIBSON_INTEGRATION_TESTS gate
-#   core/gibson/internal/component/process_test.go      — Linux OS gate
+#   core/gibson/internal/server/daemon/harness_init_test.go    — GIBSON_INTEGRATION_TESTS gate
+#   core/gibson/internal/server/daemon/infrastructure_test.go  — GIBSON_INTEGRATION_TESTS gate
+#   core/gibson/internal/platform/component/process_test.go      — Linux OS gate
 #
 # Exit codes:
 #   0  No violations found.
@@ -49,27 +49,27 @@ ALLOWLIST=(
     "core/sdk/eval/feedback_integration_test.go"
     "core/sdk/eval/example_realtime_export_test.go"
     "core/sdk/eval/integration_test.go"
-    "core/gibson/internal/daemon/harness_init_test.go"
-    "core/gibson/internal/daemon/infrastructure_test.go"
+    "core/gibson/internal/server/daemon/harness_init_test.go"
+    "core/gibson/internal/server/daemon/infrastructure_test.go"
 
     # OS / toolchain gates
     "core/sdk/agent/connect_test.go"
-    "core/gibson/internal/component/process_test.go"
-    "core/gibson/internal/component/git/git_test.go"
+    "core/gibson/internal/platform/component/process_test.go"
+    "core/gibson/internal/platform/component/git/git_test.go"
     "core/sdk/codegen/git/git_test.go"
     "core/sdk/codegen/git/operations_test.go"
 
     # Docker/container not available gates
-    "core/gibson/internal/checkpoint/blob_store_test.go"
-    "core/gibson/internal/database/redis/targets_test.go"
-    "core/gibson/internal/memory/mission_redis_test.go"
-    "core/gibson/internal/mission/checkpoint_store_test.go"
+    "core/gibson/internal/engine/checkpoint/blob_store_test.go"
+    "core/gibson/internal/infra/database/redis/targets_test.go"
+    "core/gibson/internal/engine/memory/mission_redis_test.go"
+    "core/gibson/internal/engine/mission/checkpoint_store_test.go"
     "core/gibson/internal/prompt/redis_store_test.go"
 
     # Short-mode gates (standard Go testing.Short() pattern)
-    "core/gibson/internal/component/build/build_test.go"
-    "core/gibson/internal/component/log_parser_integration_test.go"
-    "core/gibson/internal/memory/vector/redis_test.go"
+    "core/gibson/internal/platform/component/build/build_test.go"
+    "core/gibson/internal/platform/component/log_parser_integration_test.go"
+    "core/gibson/internal/engine/memory/vector/redis_test.go"
     "core/sdk/codegen/lsp/manager_test.go"
     "core/sdk/tool/worker/worker_test.go"
     "core/gibson/tests/integration/checkpoint/blob_store_test.go"
@@ -77,35 +77,35 @@ ALLOWLIST=(
     "core/gibson/tests/integration/checkpoint/retention_test.go"
 
     # State package — Redis not available probes
-    "core/gibson/internal/state/client_test.go"
-    "core/gibson/internal/state/indexes_test.go"
-    "core/gibson/internal/state/scripts_test.go"
-    "core/gibson/internal/state/streams_test.go"
-    "core/gibson/internal/state/tenant_store_test.go"
+    "core/gibson/internal/engine/state/client_test.go"
+    "core/gibson/internal/engine/state/indexes_test.go"
+    "core/gibson/internal/engine/state/scripts_test.go"
+    "core/gibson/internal/engine/state/streams_test.go"
+    "core/gibson/internal/engine/state/tenant_store_test.go"
 
     # Path-probe / fixture-not-found gates
     "core/sdk/plugin/scaffold/templates_test.go"
     "core/sdk/plugin/health/server_test.go"
     "core/sdk/tool/capabilities_test.go"
     "core/gibson/internal/eval/config_integration_test.go"
-    "core/gibson/internal/harness/compliance_evaluator_test.go"
-    "core/gibson/internal/tlsaudit/no_fallback_audit_test.go"
-    "core/gibson/internal/component/grpc_pool_test.go"
+    "core/gibson/internal/engine/harness/compliance_evaluator_test.go"
+    "core/gibson/internal/platform/tlsaudit/no_fallback_audit_test.go"
+    "core/gibson/internal/platform/component/grpc_pool_test.go"
 
     # TLS/cert environment gates
     "core/sdk/daemonclient/credentials_test.go"
 
     # API key (live LLM) gates
-    "core/gibson/internal/llm/providers/anthropic_direct_test.go"
+    "core/gibson/internal/engine/llm/providers/anthropic_direct_test.go"
 
     # Phase-D pending stubs (deferred work)
-    "core/gibson/internal/daemon/startup_migration_check_test.go"
+    "core/gibson/internal/server/daemon/startup_migration_check_test.go"
 
     # Timing-sensitive / event-driven gates
-    "core/gibson/internal/daemon/log_watcher_test.go"
+    "core/gibson/internal/server/daemon/log_watcher_test.go"
 
     # Mission orchestrator stubs (requires real orchestrator)
-    "core/gibson/internal/mission/orchestrator_events_test.go"
+    "core/gibson/internal/engine/mission/orchestrator_events_test.go"
 
     # ADK CLI path-probe gate
     "opensource/adk/cli/cmd/gibson-cli/cmd/plugin/init_test.go"

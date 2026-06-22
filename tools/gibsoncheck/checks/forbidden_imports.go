@@ -41,8 +41,8 @@ var forbidden = []string{
 // libs; the existing authz package wraps the FGA SDK during the
 // migration).
 var allowlistPaths = []string{
-	"/internal/authz",
-	"/internal/capabilitygrant",
+	"/internal/platform/authz",
+	"/internal/platform/capabilitygrant",
 	"/cmd/", // standalone binaries may need OIDC/FGA for diagnostic tooling
 }
 

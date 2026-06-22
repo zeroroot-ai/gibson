@@ -13,4 +13,4 @@ plugins:
     opt:
       - module=github.com/zeroroot-ai/gibson
 inputs:
-  - directory: internal/daemon/api
+  - directory: internal/server/daemon/api

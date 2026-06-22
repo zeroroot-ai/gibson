@@ -4,7 +4,7 @@
  *
  * Spec: cross-repo-cohesion-fixes Requirement 4.3, 4.4, D3.
  *
- * Walks every *.proto under core/gibson/internal/daemon/api/, finds every
+ * Walks every *.proto under core/gibson/internal/server/daemon/api/, finds every
  * service method whose name starts with "List", inspects the request message
  * for fields named "limit" or "offset", and fails (exit 1) when any such
  * method is NOT in the grandfathered allow-list below.
@@ -26,7 +26,7 @@ import { fileURLToPath } from 'node:url';
 
 const __dirname = dirname(fileURLToPath(import.meta.url));
 const REPO_ROOT = resolve(__dirname, '..');
-const PROTO_ROOT = join(REPO_ROOT, 'internal/daemon/api');
+const PROTO_ROOT = join(REPO_ROOT, 'internal/server/daemon/api');
 
 // ---------------------------------------------------------------------------
 // Grandfathered (proto-root-relative-path, method-name) pairs.

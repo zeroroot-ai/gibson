@@ -36,7 +36,7 @@ import (
 	neo4j "github.com/neo4j/neo4j-go-driver/v5/neo4j"
 
 	"github.com/zeroroot-ai/gibson/cmd/gibson-migrate/internal/runner"
-	"github.com/zeroroot-ai/gibson/internal/datapool/admin"
+	"github.com/zeroroot-ai/gibson/internal/infra/datapool/admin"
 
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/runtime/schema"

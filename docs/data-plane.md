@@ -9,8 +9,8 @@ The daemon's data plane is **physically isolated per tenant** across four
 storage backends: a Postgres database, a dedicated Neo4j instance, a Redis logical
 DB, and a vector-store collection — one of each per tenant. The chokepoint API is
 `Pool.For(ctx, tenant) → *Conn` defined in
-[`internal/datapool/pool.go:102`](../internal/datapool/pool.go) and
-[`internal/datapool/conn.go:28`](../internal/datapool/conn.go). Every
+[`internal/infra/datapool/pool.go:102`](../internal/infra/datapool/pool.go) and
+[`internal/infra/datapool/conn.go:28`](../internal/infra/datapool/conn.go). Every
 storage operation in the daemon goes through a `Conn`. Forgetting to scope a
 query is structurally impossible because the connection itself is the tenant
 boundary — there is no `tenant_id` column, no `WHERE tenant_id = ?` clause,
@@ -24,12 +24,12 @@ and no `tenant:` key prefix anywhere in normal handler code.
    (tenant on ctx)     │              │                             │
                        │              ▼                             │
                        │    pool.For(ctx, tenant)                   │
-                       │   internal/datapool/pool_impl.go           │
+                       │   internal/infra/datapool/pool_impl.go           │
                        └──────────────┬─────────────────────────────┘
                                       │ (lazy init + KEK derivation)
                                       ▼
                        ┌────────────────────────────────────────────┐
-                       │   *Conn (internal/datapool/conn.go)        │
+                       │   *Conn (internal/infra/datapool/conn.go)        │
                        │     .Tenant   auth.TenantID                │
                        │     .Postgres *pgxpool.Pool   ──▶ tenant_<id> DB
                        │     .Redis    *redis.Client   ──▶ logical DB N
@@ -49,7 +49,7 @@ and no `tenant:` key prefix anywhere in normal handler code.
 
 Cross-tenant access (billing, fleet metrics) does NOT go through `Pool.For`.
 It goes through `Pool.Admin(ctx) → *AdminConn`, which is delegated to
-`internal/datapool/admin/AdminPool.Acquire`. See [Admin pool](#admin-pool).
+`internal/infra/datapool/admin/AdminPool.Acquire`. See [Admin pool](#admin-pool).
 
 ## The Conn pattern
 
@@ -84,7 +84,7 @@ out. Always `defer conn.Release()` — the release path zeros the KEK; skipping
 it is a security regression.
 
 Method receivers on `Conn` (e.g. `*MissionOps`) live in
-[`internal/datapool/conn_ops_*.go`](../internal/datapool/). Add new operations
+[`internal/infra/datapool/conn_ops_*.go`](../internal/infra/datapool/). Add new operations
 there — see [`how-to-add-a-store-operation.md`](./how-to-add-a-store-operation.md).
 
 ## Per-tenant KEK
@@ -100,12 +100,12 @@ KEK_tenant = HKDF-SHA256(masterKEK,
                          L    = 32 bytes)
 ```
 
-Implementation: [`internal/datapool/kek.go:41`](../internal/datapool/kek.go),
+Implementation: [`internal/infra/datapool/kek.go:41`](../internal/infra/datapool/kek.go),
 constants `kekInfo` and `kekLen` are versioned via the `info` string —
 changing them invalidates every wrapped DEK in storage. Don't.
 
 The KEK is **ephemeral**: it lives only for the lifetime of one `Conn` and is
-zeroed in [`internal/datapool/conn_release.go:25`](../internal/datapool/conn_release.go).
+zeroed in [`internal/infra/datapool/conn_release.go:25`](../internal/infra/datapool/conn_release.go).
 It is never written to disk, never logged, and never forwarded outside the
 daemon process. `slog.LogValue` redaction is not enough — the byte slice is
 wiped at the source.
@@ -119,7 +119,7 @@ to set the per-tenant Postgres role password. The shared `info` string
 
 Anything secret-shaped (BYOK LLM keys, customer credentials, mission outputs
 flagged sensitive) is stored as an envelope, never as plaintext. The envelope
-package is [`internal/datapool/envelope/envelope.go`](../internal/datapool/envelope/envelope.go):
+package is [`internal/infra/datapool/envelope/envelope.go`](../internal/infra/datapool/envelope/envelope.go):
 
 ```go
 ciphertext, err := envelope.Encrypt(conn.KEK, plaintext, aad)
@@ -149,10 +149,10 @@ internal error to the caller. Page on the metric.
 
 Cross-tenant access (billing aggregation, fleet metrics, capacity planning,
 the migration runner) uses the admin pool. Code lives **exclusively** in
-`internal/admin/` and `internal/datapool/admin/`. The
+`internal/server/admin/` and `internal/infra/datapool/admin/`. The
 [`admin_pool_acquire`](../tools/gibsoncheck/checks/admin_pool_acquire.go) gibsoncheck
 analyzer fails the build if any other package imports
-`github.com/zeroroot-ai/gibson/internal/datapool/admin`.
+`github.com/zeroroot-ai/gibson/internal/infra/datapool/admin`.
 
 ```go
 adminConn, err := pool.Admin(ctx)  // delegates to admin.AdminPool.Acquire
@@ -168,7 +168,7 @@ err = admin.ForEachTenant(ctx, adminConn, lister, tenantPool,
 ```
 
 Acquisition does three things in
-[`internal/datapool/admin/admin_pool.go:195`](../internal/datapool/admin/admin_pool.go):
+[`internal/infra/datapool/admin/admin_pool.go:195`](../internal/infra/datapool/admin/admin_pool.go):
 
 1. Resolves the calling identity via `auth.IdentityFromContext`.
 2. Calls `fgaClient.Check(user:<subject>, platform_operator, system_tenant:_system)` — denial returns `ErrUnauthorizedAdmin`.
@@ -192,7 +192,7 @@ exclusively via `Pool.For(tenant).Neo4j()`. See
 
 The daemon is a **read-consumer of provisioning state**. Before returning a
 `Conn`, `pool.For` calls
-[`provisioningChecker.isProvisioned`](../internal/datapool/provisioning_check.go)
+[`provisioningChecker.isProvisioned`](../internal/infra/datapool/provisioning_check.go)
 which queries the `Tenant` CRD's `status.dataPlane.ready` field via a
 Kubernetes dynamic client. The result is cached for 30 s (configurable). If
 the tenant CRD is missing, the field is absent, or the API call fails, the
@@ -201,7 +201,7 @@ gRPC `codes.NotFound`.
 
 The check uses unstructured access (GVR `gibson.zeroroot.ai/v1alpha1/tenants`) rather
 than importing the tenant-operator's typed API to avoid a cyclic dependency
-([`provisioning_check.go:22`](../internal/datapool/provisioning_check.go)).
+([`provisioning_check.go:22`](../internal/infra/datapool/provisioning_check.go)).
 
 ## Migration runner
 
@@ -243,12 +243,12 @@ points after `graphrag-tenant-scope`).
 
 Three cross-mission consumers route through `pool.For(tenant).Neo4j()` rather
 than a shared cluster: the IntelligenceService gRPC handlers
-([`internal/daemon/intelligence_service.go`](../internal/daemon/intelligence_service.go),
+([`internal/server/daemon/intelligence_service.go`](../internal/server/daemon/intelligence_service.go),
 five RPCs — `GetRecurringVulnerabilities`, `GetRemediationMetrics`,
 `GetAssetRiskScore`, `GetAttackPatterns`, `GetSimilarTargets` — each
 constructs a per-tenant `*graph.SessionGraphClient` per call); the startup
 migration drift gate
-([`internal/daemon/startup_migration_check.go`](../internal/daemon/startup_migration_check.go),
+([`internal/server/daemon/startup_migration_check.go`](../internal/server/daemon/startup_migration_check.go),
 which iterates tenants via the Tenant CRD list with a worker-pool of
 configurable concurrency, default 4, max 16, total deadline 30 s, surfacing
 drift as `gibson_tenant_neo4j_migration_drift{tenant}`); and the orchestrator
@@ -291,10 +291,10 @@ violation to a PR fails CI.
 
 | Guard | File | What it forbids |
 |---|---|---|
-| `forbidrawstoreimports` | [`forbid_raw_store_imports.go`](../tools/gibsoncheck/checks/forbid_raw_store_imports.go) | `pgx`, `go-redis`, `neo4j-go-driver`, `qdrant`, `miniredis` imports outside `internal/datapool/`, `internal/admin/`, `internal/migrate/`, `cmd/gibson-migrate/`, `cmd/daemon/`, `internal/daemon/`, `tools/gibsoncheck/`. Test files may import miniredis. |
+| `forbidrawstoreimports` | [`forbid_raw_store_imports.go`](../tools/gibsoncheck/checks/forbid_raw_store_imports.go) | `pgx`, `go-redis`, `neo4j-go-driver`, `qdrant`, `miniredis` imports outside `internal/infra/datapool/`, `internal/server/admin/`, `internal/migrate/`, `cmd/gibson-migrate/`, `cmd/daemon/`, `internal/server/daemon/`, `tools/gibsoncheck/`. Test files may import miniredis. |
 | `forbidrediskeyprefix` | [`forbid_redis_key_prefix.go`](../tools/gibsoncheck/checks/forbid_redis_key_prefix.go) | String literals starting with `tenant:`, `gibson:tenant:`, or `<word>:tenant:` passed to `*redis.Client` methods. The per-tenant client is already DB-scoped; prefixes are dead. |
-| `forbidredisclientconstruction` | [`forbid_redis_client_construction.go`](../tools/gibsoncheck/checks/forbid_redis_client_construction.go) | `redis.NewClient(...)` calls outside `internal/datapool/` and `internal/admin/`. All Redis access must go through `Conn.Redis`. Test files exempt. Spec: daemon-mission-finding-per-tenant-cutover Req 5.3. |
-| `adminpoolacquire` | [`admin_pool_acquire.go`](../tools/gibsoncheck/checks/admin_pool_acquire.go) | Importing `internal/datapool/admin` from anywhere outside `internal/admin/`, `internal/datapool/admin/`, `internal/migrate/`, `cmd/gibson-migrate/`. CODEOWNERS narrow waist. |
+| `forbidredisclientconstruction` | [`forbid_redis_client_construction.go`](../tools/gibsoncheck/checks/forbid_redis_client_construction.go) | `redis.NewClient(...)` calls outside `internal/infra/datapool/` and `internal/server/admin/`. All Redis access must go through `Conn.Redis`. Test files exempt. Spec: daemon-mission-finding-per-tenant-cutover Req 5.3. |
+| `adminpoolacquire` | [`admin_pool_acquire.go`](../tools/gibsoncheck/checks/admin_pool_acquire.go) | Importing `internal/infra/datapool/admin` from anywhere outside `internal/server/admin/`, `internal/infra/datapool/admin/`, `internal/migrate/`, `cmd/gibson-migrate/`. CODEOWNERS narrow waist. |
 | `forbiddenimports` | [`forbidden_imports.go`](../tools/gibsoncheck/checks/forbidden_imports.go) | (auth-spec) `github.com/zitadel/*`, `github.com/openfga/*` outside the narrow allowlist. |
 | check-no-tenant-id-column | [`scripts/check-no-tenant-id-column.sh`](../scripts/check-no-tenant-id-column.sh) | `tenant_id` references in `migrations/postgres/`, `migrations/neo4j/`, and embedded Cypher in Go. |
 | check-no-redis-prefix | [`scripts/check-no-redis-prefix.sh`](../scripts/check-no-redis-prefix.sh) | Same as `forbidrediskeyprefix` but as a CI script for environments where the Go analyzer doesn't run. |

@@ -29,7 +29,7 @@ import { execSync } from 'node:child_process';
 
 const __dirname = dirname(fileURLToPath(import.meta.url));
 const REPO_ROOT = resolve(__dirname, '..');
-const PROTO_ROOT = join(REPO_ROOT, 'internal/daemon/api');
+const PROTO_ROOT = join(REPO_ROOT, 'internal/server/daemon/api');
 
 // Resolve the SDK's options.proto via go list so we don't hard-code a path.
 function resolveOptionsProto() {

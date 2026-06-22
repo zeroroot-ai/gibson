@@ -42,11 +42,11 @@ while IFS= read -r f; do
     # Skip allowlisted packages.
     case "${f}" in
         # Allowlisted data-plane packages (use shared/admin Redis legitimately).
-        */internal/datapool/*|\
-        */internal/admin/*|\
-        */internal/daemon/*|\
-        */internal/component/*|\
-        */internal/audit/*|\
+        */internal/infra/datapool/*|\
+        */internal/server/admin/*|\
+        */internal/server/daemon/*|\
+        */internal/platform/component/*|\
+        */internal/platform/audit/*|\
         */internal/migrate/*|\
         */cmd/gibson-migrate/*|\
         */tools/*)
@@ -56,10 +56,10 @@ while IFS= read -r f; do
         # model; they are marked for deletion under Phase D (database-per-tenant-
         # data-plane tasks 4.7, 4.8).  Exclude them from this guard until the
         # Phase D cleanup commits land.  Once deleted, these globs become no-ops.
-        */internal/state/*|\
-        */internal/budget/*|\
-        */internal/manifest/*|\
-        */internal/authz/*)
+        */internal/engine/state/*|\
+        */internal/platform/budget/*|\
+        */internal/platform/manifest/*|\
+        */internal/platform/authz/*)
             continue
             ;;
     esac

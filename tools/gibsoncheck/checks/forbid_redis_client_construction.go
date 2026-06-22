@@ -16,7 +16,7 @@ import (
 //
 // This catches the construction-site escape hatch where a package is on the
 // raw-store-import allowlist but still mints a process-wide *redis.Client
-// directly rather than going through internal/datapool/Conn.
+// directly rather than going through internal/infra/datapool/Conn.
 //
 // Test files (*_test.go) are exempt: unit-test fixtures may construct their
 // own Redis clients against miniredis.
@@ -24,27 +24,27 @@ import (
 // Spec: daemon-mission-finding-per-tenant-cutover Requirement 5.3, 5.4.
 var ForbidRedisClientConstructionAnalyzer = &analysis.Analyzer{
 	Name:     "forbidredisclientconstruction",
-	Doc:      "fail on redis.NewClient() calls outside internal/datapool/ and internal/admin/ (daemon-mission-finding-per-tenant-cutover Req 5.3)",
+	Doc:      "fail on redis.NewClient() calls outside internal/infra/datapool/ and internal/server/admin/ (daemon-mission-finding-per-tenant-cutover Req 5.3)",
 	Requires: []*analysis.Analyzer{inspect.Analyzer},
 	Run:      runForbidRedisClientConstruction,
 }
 
 // redisClientConstructionAllowlist contains package import-path prefixes
 // that are permitted to call redis.NewClient directly. All other packages
-// must access Redis through internal/datapool/Conn.Redis.
+// must access Redis through internal/infra/datapool/Conn.Redis.
 //
 // The allowlist is deliberately narrow:
-//   - internal/datapool/ — constructs per-tenant Conn.Redis and the index client.
-//   - internal/datapool/admin/ — constructs the cross-tenant admin Redis client.
-//   - internal/admin/ — admin-plane-only operations.
-//   - internal/state/ — foundational StateClient wrapper (global shared Redis).
+//   - internal/infra/datapool/ — constructs per-tenant Conn.Redis and the index client.
+//   - internal/infra/datapool/admin/ — constructs the cross-tenant admin Redis client.
+//   - internal/server/admin/ — admin-plane-only operations.
+//   - internal/engine/state/ — foundational StateClient wrapper (global shared Redis).
 //     Higher-level packages must go through StateClient, not bypass it.
 //   - tools/gibsoncheck/ — the analyzer itself (imports go-redis for type info).
 var redisClientConstructionAllowlist = []string{
-	"github.com/zeroroot-ai/gibson/internal/datapool",
-	"github.com/zeroroot-ai/gibson/internal/datapool/admin",
-	"github.com/zeroroot-ai/gibson/internal/admin",
-	"github.com/zeroroot-ai/gibson/internal/state",
+	"github.com/zeroroot-ai/gibson/internal/infra/datapool",
+	"github.com/zeroroot-ai/gibson/internal/infra/datapool/admin",
+	"github.com/zeroroot-ai/gibson/internal/server/admin",
+	"github.com/zeroroot-ai/gibson/internal/engine/state",
 	"github.com/zeroroot-ai/gibson/tools/gibsoncheck",
 }
 
@@ -102,7 +102,7 @@ func runForbidRedisClientConstruction(pass *analysis.Pass) (any, error) {
 		}
 
 		pass.Reportf(call.Pos(),
-			"forbidden call to redis.NewClient in %q — all per-tenant Redis access must go through internal/datapool/Conn.Redis; see docs/data-plane.md for the correct pattern (daemon-mission-finding-per-tenant-cutover Req 5.3)",
+			"forbidden call to redis.NewClient in %q — all per-tenant Redis access must go through internal/infra/datapool/Conn.Redis; see docs/data-plane.md for the correct pattern (daemon-mission-finding-per-tenant-cutover Req 5.3)",
 			pkgPath)
 	})
 

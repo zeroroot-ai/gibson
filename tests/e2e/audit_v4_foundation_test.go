@@ -45,7 +45,7 @@ import (
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 
-	"github.com/zeroroot-ai/gibson/internal/graphrag/graph"
+	"github.com/zeroroot-ai/gibson/internal/engine/graphrag/graph"
 )
 
 // ------------------------------------------------------------------

@@ -29,7 +29,7 @@ import (
 	"time"
 
 	goredis "github.com/redis/go-redis/v9"
-	"github.com/zeroroot-ai/gibson/internal/mission"
+	"github.com/zeroroot-ai/gibson/internal/engine/mission"
 	commonpb "github.com/zeroroot-ai/sdk/api/gen/gibson/common/v1"
 	missionv1 "github.com/zeroroot-ai/sdk/api/gen/gibson/mission/v1"
 	typespb "github.com/zeroroot-ai/sdk/api/gen/gibson/types/v1"

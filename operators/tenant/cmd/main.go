@@ -51,7 +51,7 @@ import (
 
 	"log/slog"
 
-	"github.com/zeroroot-ai/gibson/internal/infra/observability"
+	"github.com/zeroroot-ai/gibson/internal/infra/otelinit"
 	"github.com/zeroroot-ai/gibson/internal/infra/pools"
 	"github.com/zeroroot-ai/gibson/internal/infra/readiness"
 
@@ -155,17 +155,17 @@ func main() {
 
 	ctrl.SetLogger(zap.New(zap.UseFlagOptions(&opts)))
 
-	// Initialise OpenTelemetry (traces + metrics) via platform-clients/observability.
+	// Initialise OpenTelemetry (traces + metrics) via platform-clients/otelinit.
 	// Each Init call returns an independent *Observability (no global state mutation).
 	// SetGlobal wires the global OTel TracerProvider + MeterProvider + propagator so
 	// auto-instrumented libraries pick them up. The OTLP endpoint is read from
 	// OTEL_EXPORTER_OTLP_ENDPOINT; absent → no-op providers.
 	// controller-runtime uses the zap logger set above; non-controller code uses
 	// the OTel-wired slog default.
-	otelProvider, otelErr := observability.Init(context.Background(), "tenant-operator")
+	otelProvider, otelErr := otelinit.Init(context.Background(), "tenant-operator")
 	if otelErr != nil {
 		// Non-fatal: observability is best-effort; missing OTLP must not block startup.
-		setupLog.Error(otelErr, "observability.Init failed — telemetry disabled")
+		setupLog.Error(otelErr, "otelinit.Init failed — telemetry disabled")
 	} else {
 		slog.SetDefault(otelProvider.Logger)
 		// Wire the global OTel providers so auto-instrumented libraries pick them up.
@@ -641,12 +641,12 @@ func main() {
 	// Field types in psaga.Deps are interface aliases (any-shaped) — we
 	// bind concrete clients here.
 	psagaDeps := &saga.Deps{
-		K8s:      mgr.GetClient(),
-		FGA:      fgaClient,
-		Stripe:   stripeClient,
-		Redis:    redisClient,
-		Zitadel:  zitadelClient,
-		Vault:    vaultAdminClient,
+		K8s:     mgr.GetClient(),
+		FGA:     fgaClient,
+		Stripe:  stripeClient,
+		Redis:   redisClient,
+		Zitadel: zitadelClient,
+		Vault:   vaultAdminClient,
 	}
 	if pgDSN := os.Getenv("DATAPLANE_PG_ADMIN_DSN"); pgDSN != "" {
 		// Postgres admin client is satisfied by DATAPLANE_PG_ADMIN_DSN;

@@ -36,10 +36,10 @@ import (
 	"github.com/testcontainers/testcontainers-go"
 	"github.com/testcontainers/testcontainers-go/wait"
 
-	"github.com/zeroroot-ai/gibson/internal/agent"
-	"github.com/zeroroot-ai/gibson/internal/checkpoint"
-	"github.com/zeroroot-ai/gibson/internal/mission"
-	"github.com/zeroroot-ai/gibson/internal/types"
+	"github.com/zeroroot-ai/gibson/internal/engine/agent"
+	"github.com/zeroroot-ai/gibson/internal/engine/checkpoint"
+	"github.com/zeroroot-ai/gibson/internal/engine/mission"
+	"github.com/zeroroot-ai/gibson/internal/infra/types"
 	missionpb "github.com/zeroroot-ai/sdk/api/gen/gibson/mission/v1"
 )
 

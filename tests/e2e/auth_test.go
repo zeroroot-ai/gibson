@@ -10,7 +10,7 @@ import (
 
 	"github.com/stretchr/testify/assert"
 
-	"github.com/zeroroot-ai/gibson/internal/config"
+	"github.com/zeroroot-ai/gibson/internal/infra/config"
 	"github.com/zeroroot-ai/sdk/auth"
 )
 

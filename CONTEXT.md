@@ -313,8 +313,8 @@ _Avoid_: event-driven cascade (rejected), per-tick frame storage, tying display 
 - "highly coupled to the ECS" was resolved to the **ubiquitous model** (every subsystem
   expresses state as components in a shared world; systems hold all behavior) — *not*
   literal compile-time coupling of every package to `ark` types.
-- The four existing memory paths — SDK `memory/` (public), gibson `internal/memory/`
-  (working/mission/long-term + vector/Redis), gibson `internal/graphrag/` recall+ingest
+- The four existing memory paths — SDK `memory/` (public), gibson `internal/engine/memory/`
+  (working/mission/long-term + vector/Redis), gibson `internal/engine/graphrag/` recall+ingest
   API, and orchestrator `recall.go` — are **ripped into one path**: emit event → Timeline
   (truth) → reducer → World (working) → projector → Knowledge graph (long-term) → hydrator
   faults slices back. `graphrag` narrows to the projection/query backend. Removing SDK

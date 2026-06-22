@@ -22,8 +22,8 @@ import (
 	"sync/atomic"
 
 	"github.com/google/uuid"
-	"github.com/zeroroot-ai/gibson/internal/llm"
-	"github.com/zeroroot-ai/gibson/internal/types"
+	"github.com/zeroroot-ai/gibson/internal/engine/llm"
+	"github.com/zeroroot-ai/gibson/internal/infra/types"
 )
 
 // DeterministicResponse is the canonical canned response the probe agent

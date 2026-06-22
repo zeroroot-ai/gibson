@@ -55,7 +55,7 @@ jobs:
           import json, os, subprocess, sys
           import yaml
 
-          CATALOGUE = "internal/llm/providers/catalogue/provider-catalogue.yaml"
+          CATALOGUE = "internal/engine/llm/providers/catalogue/provider-catalogue.yaml"
           TODAY = subprocess.check_output(["date", "+%Y-%m-%d"]).decode().strip()
 
           api_key = os.environ["API_KEY"]
@@ -109,7 +109,7 @@ jobs:
           print(f"OpenAI: wrote {len(fetched)} models to {CATALOGUE}")
           PYEOF
 
-          if git diff --quiet internal/llm/providers/catalogue/provider-catalogue.yaml; then
+          if git diff --quiet internal/engine/llm/providers/catalogue/provider-catalogue.yaml; then
             echo "changed=false" >> "$GITHUB_OUTPUT"
           else
             echo "changed=true" >> "$GITHUB_OUTPUT"
@@ -120,7 +120,7 @@ jobs:
         uses: actions/upload-artifact@v7
         with:
           name: catalogue-openai
-          path: internal/llm/providers/catalogue/provider-catalogue.yaml
+          path: internal/engine/llm/providers/catalogue/provider-catalogue.yaml
           retention-days: 1
 
   update-google:
@@ -146,7 +146,7 @@ jobs:
           import json, os, subprocess
           import yaml
 
-          CATALOGUE = "internal/llm/providers/catalogue/provider-catalogue.yaml"
+          CATALOGUE = "internal/engine/llm/providers/catalogue/provider-catalogue.yaml"
           TODAY = subprocess.check_output(["date", "+%Y-%m-%d"]).decode().strip()
 
           api_key = os.environ["API_KEY"]
@@ -192,7 +192,7 @@ jobs:
           print(f"Google: wrote {len(fetched)} models to {CATALOGUE}")
           PYEOF
 
-          if git diff --quiet internal/llm/providers/catalogue/provider-catalogue.yaml; then
+          if git diff --quiet internal/engine/llm/providers/catalogue/provider-catalogue.yaml; then
             echo "changed=false" >> "$GITHUB_OUTPUT"
           else
             echo "changed=true" >> "$GITHUB_OUTPUT"
@@ -203,7 +203,7 @@ jobs:
         uses: actions/upload-artifact@v7
         with:
           name: catalogue-google
-          path: internal/llm/providers/catalogue/provider-catalogue.yaml
+          path: internal/engine/llm/providers/catalogue/provider-catalogue.yaml
           retention-days: 1
 
   update-mistral:
@@ -229,7 +229,7 @@ jobs:
           import json, os, subprocess
           import yaml
 
-          CATALOGUE = "internal/llm/providers/catalogue/provider-catalogue.yaml"
+          CATALOGUE = "internal/engine/llm/providers/catalogue/provider-catalogue.yaml"
           TODAY = subprocess.check_output(["date", "+%Y-%m-%d"]).decode().strip()
 
           api_key = os.environ["API_KEY"]
@@ -278,7 +278,7 @@ jobs:
           print(f"Mistral: wrote {len(fetched)} models to {CATALOGUE}")
           PYEOF
 
-          if git diff --quiet internal/llm/providers/catalogue/provider-catalogue.yaml; then
+          if git diff --quiet internal/engine/llm/providers/catalogue/provider-catalogue.yaml; then
             echo "changed=false" >> "$GITHUB_OUTPUT"
           else
             echo "changed=true" >> "$GITHUB_OUTPUT"
@@ -289,7 +289,7 @@ jobs:
         uses: actions/upload-artifact@v7
         with:
           name: catalogue-mistral
-          path: internal/llm/providers/catalogue/provider-catalogue.yaml
+          path: internal/engine/llm/providers/catalogue/provider-catalogue.yaml
           retention-days: 1
 
   update-cohere:
@@ -315,7 +315,7 @@ jobs:
           import json, os, subprocess
           import yaml
 
-          CATALOGUE = "internal/llm/providers/catalogue/provider-catalogue.yaml"
+          CATALOGUE = "internal/engine/llm/providers/catalogue/provider-catalogue.yaml"
           TODAY = subprocess.check_output(["date", "+%Y-%m-%d"]).decode().strip()
 
           api_key = os.environ["API_KEY"]
@@ -365,7 +365,7 @@ jobs:
           print(f"Cohere: wrote {len(fetched)} models to {CATALOGUE}")
           PYEOF
 
-          if git diff --quiet internal/llm/providers/catalogue/provider-catalogue.yaml; then
+          if git diff --quiet internal/engine/llm/providers/catalogue/provider-catalogue.yaml; then
             echo "changed=false" >> "$GITHUB_OUTPUT"
           else
             echo "changed=true" >> "$GITHUB_OUTPUT"
@@ -376,7 +376,7 @@ jobs:
         uses: actions/upload-artifact@v7
         with:
           name: catalogue-cohere
-          path: internal/llm/providers/catalogue/provider-catalogue.yaml
+          path: internal/engine/llm/providers/catalogue/provider-catalogue.yaml
           retention-days: 1
 
   update-cloudflare:
@@ -394,7 +394,7 @@ jobs:
           import json, os, subprocess
           import yaml
 
-          CATALOGUE = "internal/llm/providers/catalogue/provider-catalogue.yaml"
+          CATALOGUE = "internal/engine/llm/providers/catalogue/provider-catalogue.yaml"
           TODAY = subprocess.check_output(["date", "+%Y-%m-%d"]).decode().strip()
 
           # Cloudflare Workers AI model catalog is public — no auth required.
@@ -442,7 +442,7 @@ jobs:
           print(f"Cloudflare: wrote {len(fetched)} models to {CATALOGUE}")
           PYEOF
 
-          if git diff --quiet internal/llm/providers/catalogue/provider-catalogue.yaml; then
+          if git diff --quiet internal/engine/llm/providers/catalogue/provider-catalogue.yaml; then
             echo "changed=false" >> "$GITHUB_OUTPUT"
           else
             echo "changed=true" >> "$GITHUB_OUTPUT"
@@ -453,7 +453,7 @@ jobs:
         uses: actions/upload-artifact@v7
         with:
           name: catalogue-cloudflare
-          path: internal/llm/providers/catalogue/provider-catalogue.yaml
+          path: internal/engine/llm/providers/catalogue/provider-catalogue.yaml
           retention-days: 1
 
   update-huggingface:
@@ -471,7 +471,7 @@ jobs:
           import json, os, subprocess
           import yaml
 
-          CATALOGUE = "internal/llm/providers/catalogue/provider-catalogue.yaml"
+          CATALOGUE = "internal/engine/llm/providers/catalogue/provider-catalogue.yaml"
           TODAY = subprocess.check_output(["date", "+%Y-%m-%d"]).decode().strip()
 
           # HuggingFace Hub Inference API — fetch top text-generation models
@@ -520,7 +520,7 @@ jobs:
             print("HuggingFace: no changes detected")
           PYEOF
 
-          if git diff --quiet internal/llm/providers/catalogue/provider-catalogue.yaml; then
+          if git diff --quiet internal/engine/llm/providers/catalogue/provider-catalogue.yaml; then
             echo "changed=false" >> "$GITHUB_OUTPUT"
           else
             echo "changed=true" >> "$GITHUB_OUTPUT"
@@ -531,7 +531,7 @@ jobs:
         uses: actions/upload-artifact@v7
         with:
           name: catalogue-huggingface
-          path: internal/llm/providers/catalogue/provider-catalogue.yaml
+          path: internal/engine/llm/providers/catalogue/provider-catalogue.yaml
           retention-days: 1
 
   update-bedrock:
@@ -568,7 +568,7 @@ jobs:
           import json, os, subprocess
           import yaml
 
-          CATALOGUE = "internal/llm/providers/catalogue/provider-catalogue.yaml"
+          CATALOGUE = "internal/engine/llm/providers/catalogue/provider-catalogue.yaml"
           TODAY = subprocess.check_output(["date", "+%Y-%m-%d"]).decode().strip()
 
           resp = subprocess.check_output([
@@ -619,7 +619,7 @@ jobs:
           print(f"Bedrock: wrote {len(fetched)} models to {CATALOGUE}")
           PYEOF
 
-          if git diff --quiet internal/llm/providers/catalogue/provider-catalogue.yaml; then
+          if git diff --quiet internal/engine/llm/providers/catalogue/provider-catalogue.yaml; then
             echo "changed=false" >> "$GITHUB_OUTPUT"
           else
             echo "changed=true" >> "$GITHUB_OUTPUT"
@@ -630,7 +630,7 @@ jobs:
         uses: actions/upload-artifact@v7
         with:
           name: catalogue-bedrock
-          path: internal/llm/providers/catalogue/provider-catalogue.yaml
+          path: internal/engine/llm/providers/catalogue/provider-catalogue.yaml
           retention-days: 1
 
   anthropic-reminder:
@@ -651,7 +651,7 @@ jobs:
 
           To update manually:
           1. Visit https://docs.anthropic.com/en/docs/about-claude/models/all-models
-          2. Compare against the current \`anthropic\` entry in [\`internal/llm/providers/catalogue/provider-catalogue.yaml\`](https://github.com/zeroroot-ai/gibson/blob/main/internal/llm/providers/catalogue/provider-catalogue.yaml)
+          2. Compare against the current \`anthropic\` entry in [\`internal/engine/llm/providers/catalogue/provider-catalogue.yaml\`](https://github.com/zeroroot-ai/gibson/blob/main/internal/engine/llm/providers/catalogue/provider-catalogue.yaml)
           3. If new models are listed, open a PR updating that section and bump \`catalogue_updated\` to today's date.
 
           *Posted automatically by the provider-catalogue update workflow.*
@@ -691,7 +691,7 @@ jobs:
       - name: Merge provider updates into single catalogue
         id: merge
         run: |
-          CATALOGUE="internal/llm/providers/catalogue/provider-catalogue.yaml"
+          CATALOGUE="internal/engine/llm/providers/catalogue/provider-catalogue.yaml"
 
           # Re-apply each provider's update in a deterministic order.
           # Each artifact directory contains the catalogue as modified by
@@ -702,7 +702,7 @@ jobs:
           python3 - <<'PYEOF'
           import os, glob, yaml, sys
 
-          CATALOGUE = "internal/llm/providers/catalogue/provider-catalogue.yaml"
+          CATALOGUE = "internal/engine/llm/providers/catalogue/provider-catalogue.yaml"
           ARTIFACTS_DIR = "/tmp/catalogues"
 
           with open(CATALOGUE) as f:
@@ -766,7 +766,7 @@ jobs:
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         run: |
-          CATALOGUE="internal/llm/providers/catalogue/provider-catalogue.yaml"
+          CATALOGUE="internal/engine/llm/providers/catalogue/provider-catalogue.yaml"
           TODAY="$(date +%Y-%m-%d)"
           BRANCH="chore/provider-catalogue-${TODAY}"
 

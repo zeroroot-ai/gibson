@@ -5,7 +5,7 @@ name: gibsoncheck
 # notrustlocalhost + tenantfromcontext) on every PR.
 #
 # Also runs the authz-registry drift gate (spec: private-authz-registry NFR Reliability):
-# regenerates internal/authz/registry/ from the pinned SDK protos and fails if the
+# regenerates internal/platform/authz/registry/ from the pinned SDK protos and fails if the
 # result differs from what is committed. Catches hand-edits and missed regen after
 # an SDK bump.
 
@@ -17,7 +17,7 @@ on:
       - 'go.mod'
       - 'go.sum'
       - 'tools/gibsoncheck/**'
-      - 'internal/authz/registry/**'
+      - 'internal/platform/authz/registry/**'
       - '.github/workflows/gibsoncheck.yml'
   pull_request:
     paths:
@@ -25,7 +25,7 @@ on:
       - 'go.mod'
       - 'go.sum'
       - 'tools/gibsoncheck/**'
-      - 'internal/authz/registry/**'
+      - 'internal/platform/authz/registry/**'
       - '.github/workflows/gibsoncheck.yml'
 
 concurrency:
@@ -110,7 +110,7 @@ jobs:
     runs-on: ubuntu-latest
     name: authz-registry drift gate
     # Spec: private-authz-registry NFR Reliability.
-    # Regenerates internal/authz/registry/ from the SDK protos pinned in go.mod
+    # Regenerates internal/platform/authz/registry/ from the SDK protos pinned in go.mod
     # and fails if the result differs from committed content. Catches:
     #   - Hand-edits to registry.go instead of running regen.
     #   - SDK version bumps where `make authz-registry` was not re-run.
@@ -146,9 +146,9 @@ jobs:
 
       - name: Check for drift
         run: |
-          if ! git diff --exit-code internal/authz/registry/; then
+          if ! git diff --exit-code internal/platform/authz/registry/; then
             echo ""
-            echo "registry.go (or another artifact in internal/authz/registry/) has drifted"
+            echo "registry.go (or another artifact in internal/platform/authz/registry/) has drifted"
             echo "from the SDK protos pinned in go.mod."
             echo ""
             echo "Remediation: run \`make authz-registry\` and commit the result."

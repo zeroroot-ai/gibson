@@ -14,7 +14,7 @@ import (
 // badUsage references the deleted Plugin interface symbol names via the
 // plugin package qualifier. Each should produce a diagnostic.
 func badUsage(ctx context.Context) {
-	_ = plugin.New        // want `reference to deleted symbol "plugin.New"`
-	_ = plugin.NewConfig  // want `reference to deleted symbol "plugin.NewConfig"`
+	_ = plugin.New          // want `reference to deleted symbol "plugin.New"`
+	_ = plugin.NewConfig    // want `reference to deleted symbol "plugin.NewConfig"`
 	_ = plugin.ToDescriptor // want `reference to deleted symbol "plugin.ToDescriptor"`
 }

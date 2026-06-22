@@ -13,10 +13,10 @@ import (
 
 	"golang.org/x/term"
 
-	"github.com/zeroroot-ai/gibson/internal/config"
-	"github.com/zeroroot-ai/gibson/internal/daemon"
-	"github.com/zeroroot-ai/gibson/internal/sandbox/health"
-	"github.com/zeroroot-ai/gibson/internal/secrets/jwtsource"
+	"github.com/zeroroot-ai/gibson/internal/engine/sandbox/health"
+	"github.com/zeroroot-ai/gibson/internal/infra/config"
+	"github.com/zeroroot-ai/gibson/internal/platform/secrets/jwtsource"
+	"github.com/zeroroot-ai/gibson/internal/server/daemon"
 	"github.com/zeroroot-ai/gibson/pkg/version"
 )
 

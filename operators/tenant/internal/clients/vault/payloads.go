@@ -126,4 +126,3 @@ func (c *httpClient) DeleteInfraVector(ctx context.Context, tenantID string) err
 func (c *httpClient) WriteInfraNeo4jCredentials(ctx context.Context, tenantID string, creds pdataplane.Neo4jCredentials) error {
 	return c.writeInfraSecret(ctx, tenantID, pdataplane.VaultPathInfraNeo4j, creds)
 }
-

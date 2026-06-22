@@ -153,7 +153,7 @@ deps:
 # Other daemon packages have widely varying coverage; only gate on the new auth-critical package.
 check-coverage:
 	@echo "Checking coverage for auth-critical daemon packages..."
-	@$(GOTEST) -coverprofile=/tmp/daemon_identity_cover.out -covermode=atomic ./internal/identity/... -count=1 > /dev/null 2>&1
+	@$(GOTEST) -coverprofile=/tmp/daemon_identity_cover.out -covermode=atomic ./internal/platform/identity/... -count=1 > /dev/null 2>&1
 	@ID_COV=$$(go tool cover -func=/tmp/daemon_identity_cover.out | grep total | awk '{print $$3}' | sed 's/%//'); \
 	echo "  internal/identity: $${ID_COV}%"; \
 	RESULT=$$(echo "$${ID_COV} >= 95" | bc -l); \
@@ -207,14 +207,14 @@ check: fmt vet lint test-race check-no-tenant-id check-fga-headers check-no-gibs
 #   make check-authz INTEGRATION=1  # unit + integration tests (requires Docker)
 check-authz:
 	@echo "Running authz package vet..."
-	$(GOCMD) vet ./internal/authz/... ./internal/daemon/authz_init.go
+	$(GOCMD) vet ./internal/platform/authz/... ./internal/server/daemon/authz_init.go
 	@echo "Running authz unit tests (race detector)..."
-	$(GOTEST) -race -count=1 -timeout=2m ./internal/authz/... ./internal/daemon/...
+	$(GOTEST) -race -count=1 -timeout=2m ./internal/platform/authz/... ./internal/server/daemon/...
 	@echo "Running RPC registry drift gate (audit build tag)..."
-	$(GOTEST) -tags audit -count=1 -timeout=1m ./internal/auth/... ./internal/daemon/api/...
+	$(GOTEST) -tags audit -count=1 -timeout=1m ./internal/platform/auth/... ./internal/server/daemon/api/...
 	@if [ "$(INTEGRATION)" = "1" ]; then \
 		echo "Running authz integration tests (requires Docker for testcontainers)..."; \
-		$(GOTEST) -v -tags integration -count=1 -timeout=5m ./internal/authz/...; \
+		$(GOTEST) -v -tags integration -count=1 -timeout=5m ./internal/platform/authz/...; \
 	else \
 		echo "Skipping integration tests. Run 'make check-authz INTEGRATION=1' to include them (requires Docker)."; \
 	fi
@@ -236,7 +236,7 @@ check-authz:
 # Requirements: R3.2, B15.
 test-daemon-identity-roundtrip:
 	@echo "Running daemon identity HMAC roundtrip test (B15)..."
-	$(GOTEST) -v -count=1 -run 'TestRoundtrip' ./internal/identity/...
+	$(GOTEST) -v -count=1 -run 'TestRoundtrip' ./internal/platform/identity/...
 	@echo "PASS: daemon identity roundtrip (B15)"
 
 # Proto generation
@@ -260,22 +260,22 @@ proto: proto-deps authz-registry
 	@SDK_DIR=$$($(GOCMD) list -m -f '{{.Dir}}' github.com/zeroroot-ai/sdk); \
 	  if [ -z "$$SDK_DIR" ]; then echo "ERROR: could not resolve github.com/zeroroot-ai/sdk module dir" && exit 1; fi; \
 	  rm -rf .tmp/proto-ws && mkdir -p .tmp/proto-ws/out && \
-	  ln -sfn $(CURDIR)/internal/daemon/api .tmp/proto-ws/gibson-local && \
+	  ln -sfn $(CURDIR)/internal/server/daemon/api .tmp/proto-ws/gibson-local && \
 	  ln -sfn $$SDK_DIR/api/proto .tmp/proto-ws/sdk-proto && \
 	  printf 'version: v2\nmodules:\n  - path: gibson-local\n  - path: sdk-proto\n    excludes:\n      - sdk-proto/google\nlint:\n  use:\n    - STANDARD\n  ignore:\n    - gibson-local/gibson/daemon/admin/v1/daemon_admin.proto\n' > .tmp/proto-ws/buf.yaml && \
 	  printf 'version: v2\nmanaged:\n  enabled: true\n  disable:\n    - file_option: go_package\nplugins:\n  - local: protoc-gen-go\n    out: out\n    opt:\n      - module=github.com/zeroroot-ai/gibson\n      - Mgoogle/protobuf/descriptor.proto=google.golang.org/protobuf/types/descriptorpb\n  - local: protoc-gen-go-grpc\n    out: out\n    opt:\n      - module=github.com/zeroroot-ai/gibson\n      - Mgoogle/protobuf/descriptor.proto=google.golang.org/protobuf/types/descriptorpb\ninputs:\n  - directory: gibson-local\n' > .tmp/proto-ws/buf.gen.yaml && \
 	  cd .tmp/proto-ws && $(BUF) generate
 	@# rsync the generated *.pb.go files back into the daemon tree. buf's
 	@# `module=` opt emits paths rooted at the Go module, so the layout
-	@# under .tmp/proto-ws/out/ matches internal/daemon/api/... already.
+	@# under .tmp/proto-ws/out/ matches internal/server/daemon/api/... already.
 	@rsync -a --include='*/' --include='*.pb.go' --exclude='*' \
-	  .tmp/proto-ws/out/internal/daemon/api/ internal/daemon/api/
+	  .tmp/proto-ws/out/internal/server/daemon/api/ internal/server/daemon/api/
 	@rm -rf .tmp/proto-ws
 	@echo "Proto generation complete"
 
 # authz-registry: regenerate the three authz artifacts (registry.go, registry.yaml,
 # permissions.ts) plus audit.csv from the pinned SDK version's proto annotations.
-# Writes to internal/authz/registry/. Run this target when the SDK version is bumped
+# Writes to internal/platform/authz/registry/. Run this target when the SDK version is bumped
 # or to verify the committed files are not drifted.
 #
 # Spec: private-authz-registry Component 2.
@@ -302,7 +302,7 @@ authz-registry:
 	@echo "Building FDS from gibson daemon-local protos (via temp workspace so gibson/auth/v1/options.proto resolves from the pinned SDK)..."
 	@SDK_DIR=$$($(GOCMD) list -m -f '{{.Dir}}' github.com/zeroroot-ai/sdk); \
 	  rm -rf .tmp/ws && mkdir -p .tmp/ws && \
-	  ln -sfn $(CURDIR)/internal/daemon/api .tmp/ws/gibson-local && \
+	  ln -sfn $(CURDIR)/internal/server/daemon/api .tmp/ws/gibson-local && \
 	  ln -sfn $$SDK_DIR/api/proto .tmp/ws/sdk-proto && \
 	  printf 'version: v2\nmodules:\n  - path: gibson-local\n  - path: sdk-proto\nlint:\n  use:\n    - STANDARD\n  ignore:\n    - sdk-proto/google\n    - gibson-local/gibson/daemon/admin/v1/daemon_admin.proto\n' > .tmp/ws/buf.yaml && \
 	  cd .tmp/ws && $(BUF) build gibson-local -o $(CURDIR)/.tmp/gibson-fds.binpb
@@ -310,11 +310,11 @@ authz-registry:
 	@echo "Merging FDSes (SDK + daemon-local)..."
 	@$(BINARY_DIR)/fds-merge -input .tmp/sdk-fds.binpb -input .tmp/gibson-fds.binpb -output .tmp/combined-fds.binpb
 	@echo "Generating registry artifacts..."
-	@$(BINARY_DIR)/authz-registry-gen -input .tmp/combined-fds.binpb -output internal/authz/registry
+	@$(BINARY_DIR)/authz-registry-gen -input .tmp/combined-fds.binpb -output internal/platform/authz/registry
 	@echo "Generating audit CSV (Spec unified-authz-regen Req 1.4)..."
-	@$(BINARY_DIR)/audit-csv-gen -input .tmp/combined-fds.binpb -output internal/authz/registry/audit.csv
+	@$(BINARY_DIR)/audit-csv-gen -input .tmp/combined-fds.binpb -output internal/platform/authz/registry/audit.csv
 	@rm -f .tmp/sdk-fds.binpb .tmp/gibson-fds.binpb .tmp/combined-fds.binpb
-	@echo "Registry artifacts written to internal/authz/registry/"
+	@echo "Registry artifacts written to internal/platform/authz/registry/"
 
 proto-clean:
 	@echo "Cleaning generated proto files..."
@@ -339,7 +339,7 @@ help:
 	@echo "  make deps          - Download dependencies"
 	@echo "  make check         - Run all checks (fmt, vet, lint, test-race)"
 	@echo "  make check-authz   - Run authz package checks (unit tests + vet)"
-	@echo "  make check-coverage - Enforce ≥95% coverage on internal/identity"
+	@echo "  make check-coverage - Enforce ≥95% coverage on internal/platform/identity"
 	@echo "  make check-authz INTEGRATION=1 - Include FGA integration tests (requires Docker)"
 	@echo "  make check-no-tenant-id - Fail if any migration defines a tenant_id column"
 	@echo "  make proto         - Generate Go code from proto files (includes authz-registry)"

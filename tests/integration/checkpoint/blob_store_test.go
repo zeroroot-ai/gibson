@@ -9,8 +9,8 @@ import (
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 
-	"github.com/zeroroot-ai/gibson/internal/checkpoint"
-	"github.com/zeroroot-ai/gibson/internal/state"
+	"github.com/zeroroot-ai/gibson/internal/engine/checkpoint"
+	"github.com/zeroroot-ai/gibson/internal/engine/state"
 )
 
 // createTestBlobStore creates a RedisBlobStore for testing.

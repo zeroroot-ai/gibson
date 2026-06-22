@@ -22,8 +22,8 @@ import (
 
 	"sigs.k8s.io/controller-runtime/pkg/client"
 
-	gtenant "github.com/zeroroot-ai/gibson/pkg/platform/tenant"
 	gibsonv1alpha1 "github.com/zeroroot-ai/gibson/operators/tenant/api/v1alpha1"
+	gtenant "github.com/zeroroot-ai/gibson/pkg/platform/tenant"
 	"github.com/zeroroot-ai/sdk/auth"
 )
 

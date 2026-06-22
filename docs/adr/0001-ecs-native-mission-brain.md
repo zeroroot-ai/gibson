@@ -1,7 +1,7 @@
 # ECS-native mission brain
 
 The mission-execution brain (today: the ReAct loop in `internal/orchestrator/`,
-mission state split across Neo4j, an in-memory loop, the tiered `internal/memory/`
+mission state split across Neo4j, an in-memory loop, the tiered `internal/engine/memory/`
 store, and the checkpoint store) is rebuilt as an **Entity-Component-System** using
 **ark** (Go). Every in-flight concern is expressed as components in a shared, **per-tenant
 Tenant World**; **Systems** hold all mechanical behavior. See
@@ -40,7 +40,7 @@ The spine — all of these are coupled and decided together:
    event (the write); the log keeps everything, so there is **no per-component durability
    registry**. The **Knowledge graph** (Neo4j) is a durable cross-mission *projection*;
    the World is a transparent cache over it (virtual-memory model: write-through +
-   fault-in). The four existing memory paths (SDK `memory/`, gibson `internal/memory/`,
+   fault-in). The four existing memory paths (SDK `memory/`, gibson `internal/engine/memory/`,
    `graphrag` recall/ingest, orchestrator `recall.go`) collapse into this one path.
    Removing SDK `memory/` is a **breaking, major-version SDK change**.
 8. **One belief field.** The Bayesian attack-path belief over the World

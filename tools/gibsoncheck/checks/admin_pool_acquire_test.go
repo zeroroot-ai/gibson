@@ -9,7 +9,7 @@ import (
 )
 
 // TestAdminPoolAcquire_Violation verifies that a package outside the allowed
-// list that imports internal/datapool/admin triggers a diagnostic.
+// list that imports internal/infra/datapool/admin triggers a diagnostic.
 //
 // The fixture is placed inside the gibson module namespace (internal/handlers)
 // to satisfy Go's internal package visibility rules within the testdata GOPATH.
