@@ -58,4 +58,4 @@ jobs:
       component_path: sidecar/belief
       dockerfile_path: sidecar/belief/Dockerfile
       image_name: ghcr.io/zeroroot-ai/gibson-belief-sidecar
-      tag_pattern: gibson-belief-sidecar-v(.*)
+      tag_pattern: gibson-belief-sidecar-(v.*)
