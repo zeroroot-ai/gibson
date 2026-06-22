@@ -30,7 +30,7 @@ import (
 )
 
 // Attribute keys applied by EnrichSpan. Flat (no "gibson." prefix) so they
-// map cleanly into Langfuse's trace metadata surface, which treats
+// map cleanly into the trace metadata surface, which treats
 // dotted OTel semantic-convention keys specially. These are deliberately
 // separate from the gibson.* attributes defined in attributes.go — the
 // gibson.* set is the internal-dashboard attribute vocabulary; these are
@@ -72,22 +72,6 @@ const (
 
 	// AttrSlotName carries the LLM slot name the agent requested.
 	AttrSlotName = "slot_name"
-
-	// AttrLangfuseUserID is the Langfuse-specific magic key that populates the
-	// trace's first-class `userId` field (filterable via the trace-list API's
-	// ?userId= query). The flat AttrUserID above only lands in trace metadata,
-	// so this is set in ADDITION to it. Verified empirically against a live
-	// Langfuse OTLP endpoint (dashboard#482): flat `user_id` → metadata only;
-	// `langfuse.user.id` → trace.userId.
-	AttrLangfuseUserID = "langfuse.user.id"
-
-	// AttrLangfuseTraceTags is the Langfuse-specific magic key that populates
-	// the trace's first-class `tags` field (filterable via ?tags=). It is a
-	// string slice; Langfuse UNIONS the values across every span in a trace,
-	// so each span contributes whatever agent/mission tags its context carries
-	// and the trace ends up with the full set. Gibson tags are namespaced:
-	// "agent:<name>" and "mission:<id>".
-	AttrLangfuseTraceTags = "langfuse.trace.tags"
 
 	// unknownUserSentinel is the value emitted when user identity cannot
 	// be resolved from any context key. Paired with a counter increment.
@@ -142,14 +126,11 @@ func EnrichSpan(ctx context.Context, span trace.Span) {
 	attrs = append(attrs,
 		attribute.String(AttrTenantID, tenantID),
 		attribute.String(AttrUserID, effectiveUser),
-		// langfuse.user.id is what Langfuse maps to the filterable trace.userId
-		// field; the flat user_id above only reaches trace metadata.
-		attribute.String(AttrLangfuseUserID, effectiveUser),
 	)
 
-	// Initiator / Executor — set only when present so Langfuse filters
-	// don't see "" or "unknown" noise for spans that legitimately have no
-	// initiator (e.g., health probes).
+	// Initiator / Executor — set only when present so filters don't see ""
+	// or "unknown" noise for spans that legitimately have no initiator
+	// (e.g., health probes).
 	if v, ok := auth.InitiatorUserFromContext(ctx); ok {
 		attrs = append(attrs, attribute.String(AttrInitiatorUserID, v))
 	}
@@ -164,33 +145,20 @@ func EnrichSpan(ctx context.Context, span trace.Span) {
 
 	// Mission / Run / Agent — read from the shared contextkeys package
 	// (populated by the mission and harness layers). Each is optional.
-	//
-	// The mission/agent identifiers also become namespaced Langfuse trace tags
-	// ("mission:<id>", "agent:<name>"). Because Langfuse unions trace tags
-	// across every span, each span contributes whatever its context carries —
-	// the root mission span supplies the mission tag, agent spans supply the
-	// agent tag (and still the mission tag), and the trace ends up with both.
-	var traceTags []string
 	if v := contextkeys.GetMissionRunID(ctx); v != "" {
 		attrs = append(attrs, attribute.String(AttrRunID, v))
 	}
 	if v, ok := ctx.Value(contextkeys.MissionID).(string); ok && v != "" {
 		attrs = append(attrs, attribute.String(AttrMissionID, v))
-		traceTags = append(traceTags, "mission:"+v)
 	}
 	if v, ok := ctx.Value(contextkeys.AgentName).(string); ok && v != "" {
 		attrs = append(attrs, attribute.String(AttrAgentID, v))
-		traceTags = append(traceTags, "agent:"+v)
 	}
 	if v := contextkeys.GetAgentRunID(ctx); v != "" {
 		attrs = append(attrs, attribute.String(AttrAgentRunID, v))
 	}
 	if v, ok := slotNameFromContext(ctx); ok {
 		attrs = append(attrs, attribute.String(AttrSlotName, v))
-	}
-
-	if len(traceTags) > 0 {
-		attrs = append(attrs, attribute.StringSlice(AttrLangfuseTraceTags, traceTags))
 	}
 
 	span.SetAttributes(attrs...)

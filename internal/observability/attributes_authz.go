@@ -11,7 +11,7 @@ import (
 //
 // Set by the RPC authz interceptor (internal/auth/rpc_authz_interceptor.go)
 // on the active gRPC request span, making every authorization decision
-// visible in Langfuse and Jaeger alongside every other span attribute,
+// visible in Jaeger alongside every other span attribute,
 // with no configuration changes required.
 //
 // Added by the declarative-rbac-framework spec (Requirement 9.4).
@@ -45,7 +45,7 @@ const (
 
 // SetAuthzAttributes sets Gibson-canonical authz attributes on the active
 // span for a gRPC request. Attribute names follow the gibson.authz.*
-// namespace so Langfuse and Jaeger can filter on them.
+// namespace so Jaeger can filter on them.
 //
 // Called from the RPC authz interceptor after the allow/deny decision is
 // made, BEFORE the handler runs (for allow) or before the error is returned

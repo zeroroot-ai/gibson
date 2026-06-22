@@ -111,9 +111,6 @@ type AgentExecution struct {
 	// RecoveryHints stores recovery suggestions as JSON-compatible structures
 	RecoveryHints []map[string]any `json:"recovery_hints,omitempty"`
 
-	// LangfuseSpanID correlates this execution to Langfuse observability
-	LangfuseSpanID string `json:"langfuse_span_id,omitempty"`
-
 	// CreatedAt is the timestamp when this node was created
 	CreatedAt time.Time `json:"created_at"`
 
@@ -175,14 +172,6 @@ func (ae *AgentExecution) WithResult(result map[string]any) *AgentExecution {
 // Returns the execution for method chaining.
 func (ae *AgentExecution) WithError(err string) *AgentExecution {
 	ae.Error = err
-	ae.UpdatedAt = time.Now()
-	return ae
-}
-
-// WithLangfuseSpanID sets the Langfuse span ID for observability correlation.
-// Returns the execution for method chaining.
-func (ae *AgentExecution) WithLangfuseSpanID(spanID string) *AgentExecution {
-	ae.LangfuseSpanID = spanID
 	ae.UpdatedAt = time.Now()
 	return ae
 }
@@ -330,9 +319,6 @@ type Decision struct {
 	// Model is the LLM model used for this decision
 	Model string `json:"model,omitempty"`
 
-	// LangfuseSpanID correlates this decision to Langfuse observability
-	LangfuseSpanID string `json:"langfuse_span_id,omitempty"`
-
 	// CreatedAt is the timestamp when this node was created
 	CreatedAt time.Time `json:"created_at"`
 
@@ -422,14 +408,6 @@ func (d *Decision) WithLatency(latencyMs int) *Decision {
 	return d
 }
 
-// WithLangfuseSpanID sets the Langfuse span ID for observability correlation.
-// Returns the decision for method chaining.
-func (d *Decision) WithLangfuseSpanID(spanID string) *Decision {
-	d.LangfuseSpanID = spanID
-	d.UpdatedAt = time.Now()
-	return d
-}
-
 // Validate checks that all required fields are set correctly.
 func (d *Decision) Validate() error {
 	if err := d.ID.Validate(); err != nil {
@@ -487,9 +465,6 @@ type ToolExecution struct {
 
 	// Error stores the error message if execution failed
 	Error string `json:"error,omitempty"`
-
-	// LangfuseSpanID correlates this execution to Langfuse observability
-	LangfuseSpanID string `json:"langfuse_span_id,omitempty"`
 
 	// CreatedAt is the timestamp when this node was created
 	CreatedAt time.Time `json:"created_at"`
@@ -551,14 +526,6 @@ func (te *ToolExecution) WithStatus(status ExecutionStatus) *ToolExecution {
 // Returns the execution for method chaining.
 func (te *ToolExecution) WithError(err string) *ToolExecution {
 	te.Error = err
-	te.UpdatedAt = time.Now()
-	return te
-}
-
-// WithLangfuseSpanID sets the Langfuse span ID for observability correlation.
-// Returns the execution for method chaining.
-func (te *ToolExecution) WithLangfuseSpanID(spanID string) *ToolExecution {
-	te.LangfuseSpanID = spanID
 	te.UpdatedAt = time.Now()
 	return te
 }

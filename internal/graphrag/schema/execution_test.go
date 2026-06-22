@@ -77,13 +77,11 @@ func TestAgentExecution_MethodChaining(t *testing.T) {
 	exec := NewAgentExecution("agent_1", missionID).
 		WithConfig(config).
 		WithResult(result).
-		WithAttempt(2).
-		WithLangfuseSpanID("span_123")
+		WithAttempt(2)
 
 	assert.Equal(t, config, exec.ConfigUsed)
 	assert.Equal(t, result, exec.Result)
 	assert.Equal(t, 2, exec.Attempt)
-	assert.Equal(t, "span_123", exec.LangfuseSpanID)
 }
 
 func TestAgentExecution_MarkCompleted(t *testing.T) {
@@ -257,8 +255,7 @@ func TestAgentExecution_Validate(t *testing.T) {
 func TestAgentExecution_JSON(t *testing.T) {
 	original := NewAgentExecution("agent_1", types.NewID()).
 		WithConfig(map[string]any{"timeout": 30}).
-		WithResult(map[string]any{"status": "success"}).
-		WithLangfuseSpanID("span_123")
+		WithResult(map[string]any{"status": "success"})
 
 	// Marshal to JSON
 	data, err := json.Marshal(original)
@@ -274,7 +271,6 @@ func TestAgentExecution_JSON(t *testing.T) {
 	assert.Equal(t, original.MissionNodeID, decoded.MissionNodeID)
 	assert.Equal(t, original.MissionID, decoded.MissionID)
 	assert.Equal(t, original.Status, decoded.Status)
-	assert.Equal(t, original.LangfuseSpanID, decoded.LangfuseSpanID)
 }
 
 func TestNewDecision(t *testing.T) {
@@ -306,8 +302,7 @@ func TestDecision_MethodChaining(t *testing.T) {
 		WithModifications(mods).
 		WithGraphStateSummary("5 nodes, 3 edges").
 		WithTokenUsage(500, 150).
-		WithLatency(1234).
-		WithLangfuseSpanID("span_456")
+		WithLatency(1234)
 
 	assert.Equal(t, "agent_2", decision.TargetNodeID)
 	assert.Equal(t, "Need to scan the target deeply", decision.Reasoning)
@@ -317,7 +312,6 @@ func TestDecision_MethodChaining(t *testing.T) {
 	assert.Equal(t, 500, decision.PromptTokens)
 	assert.Equal(t, 150, decision.CompletionTokens)
 	assert.Equal(t, 1234, decision.LatencyMs)
-	assert.Equal(t, "span_456", decision.LangfuseSpanID)
 }
 
 func TestDecision_TotalTokens(t *testing.T) {
@@ -401,8 +395,7 @@ func TestDecision_JSON(t *testing.T) {
 		WithTargetNode("agent_1").
 		WithReasoning("Need to adjust parameters").
 		WithConfidence(0.9).
-		WithTokenUsage(400, 100).
-		WithLangfuseSpanID("span_789")
+		WithTokenUsage(400, 100)
 
 	// Marshal to JSON
 	data, err := json.Marshal(original)
@@ -419,7 +412,6 @@ func TestDecision_JSON(t *testing.T) {
 	assert.Equal(t, original.Iteration, decoded.Iteration)
 	assert.Equal(t, original.Action, decoded.Action)
 	assert.Equal(t, original.Confidence, decoded.Confidence)
-	assert.Equal(t, original.LangfuseSpanID, decoded.LangfuseSpanID)
 }
 
 func TestNewToolExecution(t *testing.T) {
@@ -447,12 +439,10 @@ func TestToolExecution_MethodChaining(t *testing.T) {
 
 	toolExec := NewToolExecution(agentExecID, "nmap_scan").
 		WithInput(input).
-		WithOutput(output).
-		WithLangfuseSpanID("span_abc")
+		WithOutput(output)
 
 	assert.Equal(t, input, toolExec.Input)
 	assert.Equal(t, output, toolExec.Output)
-	assert.Equal(t, "span_abc", toolExec.LangfuseSpanID)
 }
 
 func TestToolExecution_MarkCompleted(t *testing.T) {
@@ -554,8 +544,7 @@ func TestToolExecution_Validate(t *testing.T) {
 func TestToolExecution_JSON(t *testing.T) {
 	original := NewToolExecution(types.NewID(), "nmap_scan").
 		WithInput(map[string]any{"target": "192.168.1.1"}).
-		WithOutput(map[string]any{"ports": []int{22, 80}}).
-		WithLangfuseSpanID("span_xyz")
+		WithOutput(map[string]any{"ports": []int{22, 80}})
 
 	// Marshal to JSON
 	data, err := json.Marshal(original)
@@ -571,7 +560,6 @@ func TestToolExecution_JSON(t *testing.T) {
 	assert.Equal(t, original.AgentExecutionID, decoded.AgentExecutionID)
 	assert.Equal(t, original.ToolName, decoded.ToolName)
 	assert.Equal(t, original.Status, decoded.Status)
-	assert.Equal(t, original.LangfuseSpanID, decoded.LangfuseSpanID)
 }
 
 // Benchmark tests

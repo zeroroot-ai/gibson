@@ -139,10 +139,9 @@ func TestSignup_FullChain_HappyPath(t *testing.T) {
 		require.NoError(t, err, "LatestConditions: failed to read Tenant CR %q conditions", env.slug)
 	}
 
-	// The 10 required conditions (R1.4).
+	// The required conditions (R1.4).
 	requiredConditions := []string{
 		"NamespaceProvisioned",
-		"LangfuseReady",
 		"StripeReady",
 		"BillingPending",
 		"ZitadelOrgReady",

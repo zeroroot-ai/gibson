@@ -134,8 +134,7 @@ func (t *OTelMissionTracer) WithServiceName(name string) *OTelMissionTracer {
 }
 
 // Note: DecisionLog, AgentExecutionLog, ToolExecutionLog, and MissionTraceSummary
-// are defined in langfuse_tracer.go and reused here for consistency.
-// These types are shared between Langfuse and OpenTelemetry tracers.
+// are defined alongside the OpenTelemetry mission tracer.
 
 // OTelToolExecutionLog extends ToolExecutionLog with additional fields needed for OpenTelemetry tracing.
 // This structure provides more detailed metadata than the base ToolExecutionLog.
@@ -348,7 +347,7 @@ func (t *OTelMissionTracer) LogDecision(ctx context.Context, missionSpan *Missio
 
 	span.SetAttributes(attrs...)
 	// Apply canonical identity + mission attribute set to the LLM-decision
-	// span so per-user cost attribution works in Langfuse.
+	// span so per-user cost attribution works downstream.
 	// Spec: llm-user-attribution-governance Requirement 1.1, 1.7, 1.8.
 	EnrichSpan(ctx, span)
 

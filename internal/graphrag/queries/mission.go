@@ -668,9 +668,6 @@ func recordToDecision(data any) (*schema.Decision, error) {
 	if graphStateSummary, ok := d["graph_state_summary"].(string); ok {
 		decision.GraphStateSummary = graphStateSummary
 	}
-	if langfuseSpanID, ok := d["langfuse_span_id"].(string); ok {
-		decision.LangfuseSpanID = langfuseSpanID
-	}
 	if promptTokens, ok := toInt64(d["prompt_tokens"]); ok {
 		decision.PromptTokens = int(promptTokens)
 	}
@@ -847,9 +844,6 @@ func recordToAgentExecution(data any) (*schema.AgentExecution, error) {
 	}
 	if errorMsg, ok := e["error"].(string); ok {
 		exec.Error = errorMsg
-	}
-	if langfuseSpanID, ok := e["langfuse_span_id"].(string); ok {
-		exec.LangfuseSpanID = langfuseSpanID
 	}
 	if createdAt, ok := e["created_at"].(time.Time); ok {
 		exec.CreatedAt = createdAt

@@ -16,7 +16,7 @@ import (
 )
 
 // OTelTracingMiddleware creates middleware that traces LLM and tool calls to OpenTelemetry.
-// It follows the existing middleware pattern from langfuse_middleware.go but uses OTel spans
+// It follows the standard middleware pattern but uses OTel spans
 // for distributed tracing with semantic conventions for GenAI observability.
 //
 // The middleware handles two key operation types:

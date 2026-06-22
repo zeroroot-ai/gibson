@@ -12,8 +12,6 @@ import (
 // tenant_provisioning table. It is the same PostgreSQL instance that the
 // dashboard's Better Auth server uses for user/session/organisation data.
 //
-// This is a separate instance from the Langfuse PostgreSQL instance.
-//
 // Environment variable overrides (all GIBSON_DASHBOARD_POSTGRES_* prefix):
 //
 //	GIBSON_DASHBOARD_POSTGRES_HOST       — server hostname (default: dashboard-postgresql)
@@ -501,7 +499,7 @@ func (c *ObservabilityConfig) ApplyDefaults() {
 }
 
 // OTelObservabilityConfig contains configuration for unified OpenTelemetry observability.
-// This replaces the Langfuse-specific configuration for a standard OTel approach that works
+// This provides a standard OTel approach that works
 // with any OTLP-compatible backend (Jaeger, Tempo, Honeycomb, Datadog, etc.).
 //
 // OTel observability is optional and gracefully degrades - daemon startup will not fail
@@ -560,7 +558,7 @@ type OTelObservabilityConfig struct {
 	Retry RetryExportConfig `mapstructure:"retry" yaml:"retry"`
 
 	// Metrics independently controls the metric exporter. Some OTLP backends
-	// (notably Langfuse) ingest traces only — sending metrics there yields
+	// (trace-only backends) ingest traces only — sending metrics there yields
 	// 404s on every export interval. Disable metrics in those cases; the
 	// daemon still runs traces normally.
 	Metrics MetricsExportConfig `mapstructure:"metrics" yaml:"metrics"`
@@ -569,7 +567,7 @@ type OTelObservabilityConfig struct {
 // MetricsExportConfig controls whether the OTel metric exporter is created.
 // When Enabled is false, the daemon installs a no-op MeterProvider — every
 // metric instrument keeps working in code but nothing is pushed over the
-// wire. Use this when the OTLP endpoint is a trace-only backend (Langfuse,
+// wire. Use this when the OTLP endpoint is a trace-only backend (
 // some Honeycomb tiers) or when metrics are scraped via Prometheus/pull
 // instead of pushed via OTLP.
 type MetricsExportConfig struct {
@@ -696,7 +694,7 @@ func (c *OTelObservabilityConfig) ApplyDefaults() {
 
 	// Metrics export defaults to enabled. Operators flip it off via
 	// otel_observability.metrics.enabled: false (or env GIBSON_OTEL_OBSERVABILITY_METRICS_ENABLED=false)
-	// when the OTLP target is trace-only (e.g. Langfuse).
+	// when the OTLP target is trace-only.
 	if c.Metrics.Enabled == nil {
 		t := true
 		c.Metrics.Enabled = &t

@@ -21,8 +21,8 @@
 #                        .graph_queries parent span exists with
 #                        non-zero child query spans.
 #   5 Prompt verify    — capture mission #2's first decision-step LLM
-#                        prompt (Langfuse port-forward + API, or daemon
-#                        log inspection); assert it contains the literal
+#                        prompt (via daemon log inspection or the brain
+#                        World LLM-call log); assert it contains the literal
 #                        substring "## Graph Intelligence (Prior Knowledge)"
 #                        — note: Observer.FormatForPrompt emits
 #                        "=== GRAPH INTELLIGENCE (Prior Knowledge) ==="
@@ -33,7 +33,7 @@
 #   7 Summary          — print [OK]/[FAIL] checklist.
 #
 # Several stages are stubbed with TODO markers because they require operator
-# secrets / Langfuse / specific mission YAML inputs that vary by deployment.
+# secrets / specific mission YAML inputs that vary by deployment.
 # The script verifies the wiring assumptions (cluster context, daemon up,
 # IntelligenceService responsive) and points the operator at the manual
 # inspection steps for the rest. Wiring per spec
@@ -110,7 +110,7 @@ log_stage "Stages 3-5: mission orchestration (operator must verify manually)"
 
 cat >&2 <<'EOF'
 
-  Manual verification steps (require a real mission YAML and Langfuse access):
+  Manual verification steps (require a real mission YAML):
 
   3a. Run the first mission:   gibson-cli mission run <your-mission.yaml>
   3b. Wait for completion:     gibson-cli mission status <run-id>
@@ -130,9 +130,9 @@ cat >&2 <<'EOF'
       span with non-zero children. Failure here indicates Path A wiring
       regression (productionize-graph-intelligence Task 1).
 
-  5.  Capture mission #2's first decision-step LLM prompt from Langfuse
-      (or via daemon log if LANGFUSE_HOST is not configured). Search the
-      prompt body for the literal string:
+  5.  Capture mission #2's first decision-step LLM prompt from the daemon
+      log (or the brain World LLM-call log). Search the prompt body for
+      the literal string:
         === GRAPH INTELLIGENCE (Prior Knowledge) ===
       Failure here indicates the FormatForPrompt rendering regressed.
 
