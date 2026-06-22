@@ -36,9 +36,6 @@ const (
 	// EventMissionFinding indicates a new finding was discovered.
 	EventMissionFinding MissionEventType = "mission.finding"
 
-	// EventMissionApprovalRequired indicates approval is required to continue.
-	EventMissionApprovalRequired MissionEventType = "mission.approval_required"
-
 	// EventMissionCheckpoint indicates a checkpoint was created.
 	EventMissionCheckpoint MissionEventType = "mission.checkpoint"
 
@@ -98,21 +95,6 @@ type FindingPayload struct {
 
 	// AgentName is the name of the agent that discovered the finding.
 	AgentName string `json:"agent_name"`
-}
-
-// ApprovalPayload contains approval request information.
-type ApprovalPayload struct {
-	// ApprovalID is the unique ID for this approval request.
-	ApprovalID types.ID `json:"approval_id"`
-
-	// Reason is why approval is required.
-	Reason string `json:"reason"`
-
-	// ActionType describes what action requires approval.
-	ActionType string `json:"action_type"`
-
-	// Context provides additional approval context.
-	Context map[string]any `json:"context,omitempty"`
 }
 
 // CheckpointPayload contains checkpoint event information.
@@ -384,16 +366,6 @@ func NewFindingEvent(missionID, findingID types.ID, title, severity, agentName s
 		Title:     title,
 		Severity:  severity,
 		AgentName: agentName,
-	})
-}
-
-// NewApprovalRequiredEvent creates an approval required event.
-func NewApprovalRequiredEvent(missionID, approvalID types.ID, reason, actionType string, context map[string]any) MissionEvent {
-	return NewMissionEvent(EventMissionApprovalRequired, missionID, &ApprovalPayload{
-		ApprovalID: approvalID,
-		Reason:     reason,
-		ActionType: actionType,
-		Context:    context,
 	})
 }
 

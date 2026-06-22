@@ -464,7 +464,6 @@ func TestRetention_ShouldCheckpoint(t *testing.T) {
 
 	// Critical events should always checkpoint
 	criticalEvents := []checkpoint.CheckpointEventType{
-		checkpoint.CheckpointEventApproval,
 		checkpoint.CheckpointEventShutdown,
 		checkpoint.CheckpointEventError,
 		checkpoint.CheckpointEventBranch,

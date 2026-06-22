@@ -30,7 +30,7 @@ service WorldService {
       relation: "member",
       object_type: "tenant",
       object_deriver: "tenant_from_identity",
-      allowed_identities: 3
+      allowed_identities: 3  // USER | SERVICE
     };
   }
 
@@ -40,7 +40,7 @@ service WorldService {
       relation: "member",
       object_type: "tenant",
       object_deriver: "tenant_from_identity",
-      allowed_identities: 3
+      allowed_identities: 3  // USER | SERVICE
     };
   }
 
@@ -52,7 +52,7 @@ service WorldService {
       relation: "member",
       object_type: "tenant",
       object_deriver: "tenant_from_identity",
-      allowed_identities: 3
+      allowed_identities: 3  // USER | SERVICE
     };
   }
 
@@ -64,7 +64,7 @@ service WorldService {
       relation: "member",
       object_type: "tenant",
       object_deriver: "tenant_from_identity",
-      allowed_identities: 3
+      allowed_identities: 3  // USER | SERVICE
     };
   }
 
@@ -75,7 +75,7 @@ service WorldService {
       relation: "member",
       object_type: "tenant",
       object_deriver: "tenant_from_identity",
-      allowed_identities: 3
+      allowed_identities: 3  // USER | SERVICE
     };
   }
 
@@ -88,7 +88,7 @@ service WorldService {
       relation: "member",
       object_type: "tenant",
       object_deriver: "tenant_from_identity",
-      allowed_identities: 3
+      allowed_identities: 3  // USER | SERVICE
     };
   }
 }

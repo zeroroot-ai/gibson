@@ -330,13 +330,11 @@ func TestCheckpoint_CloneWithNilFields(t *testing.T) {
 	checkpoint := NewCheckpoint(types.NewID(), "thread-test")
 	checkpoint.DAGState = nil
 	checkpoint.InProgressNode = nil
-	checkpoint.ApprovalState = nil
 
 	clone := checkpoint.Clone()
 
 	assert.Nil(t, clone.DAGState)
 	assert.Nil(t, clone.InProgressNode)
-	assert.Nil(t, clone.ApprovalState)
 }
 
 func TestCheckpoint_CloneWithInProgressNode(t *testing.T) {

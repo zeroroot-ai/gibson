@@ -19,7 +19,6 @@ import (
 // Thread branching is useful for:
 //   - Trying different agent parameters or tool selections
 //   - Exploring alternative decision paths (e.g., different exploit strategies)
-//   - Implementing approval rejection with retry
 //   - A/B testing different mission approaches
 //   - Parallel hypothesis exploration
 type Thread struct {
@@ -90,7 +89,7 @@ const (
 	// ThreadStatusActive indicates the thread is actively executing.
 	ThreadStatusActive ThreadStatus = "active"
 
-	// ThreadStatusPaused indicates the thread is paused (e.g., waiting for approval).
+	// ThreadStatusPaused indicates the thread is paused (e.g., during graceful shutdown).
 	ThreadStatusPaused ThreadStatus = "paused"
 
 	// ThreadStatusCompleted indicates the thread completed successfully.

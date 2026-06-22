@@ -65,10 +65,6 @@ type ExecutionState struct {
 	// Full finding data is stored separately in the findings store.
 	Findings []types.ID `json:"findings,omitempty" msgpack:"findings,omitempty"`
 
-	// ApprovalState captures approval mission state if waiting for approval.
-	// Nil if not awaiting approval.
-	ApprovalState *ApprovalState `json:"approval_state,omitempty" msgpack:"approval_state,omitempty"`
-
 	// Metadata provides arbitrary key-value storage for state-specific information.
 	Metadata map[string]any `json:"metadata,omitempty" msgpack:"metadata,omitempty"`
 }
@@ -127,11 +123,6 @@ func (s *ExecutionState) ToCheckpoint(checkpointID string, _ int) (*Checkpoint, 
 	checkpoint.DAGState = s.DAGState
 	checkpoint.Findings = s.Findings
 
-	// Copy approval state
-	if s.ApprovalState != nil {
-		checkpoint.ApprovalState = s.ApprovalState
-	}
-
 	return checkpoint, nil
 }
 
@@ -180,7 +171,6 @@ func FromCheckpoint(checkpoint *Checkpoint) (*ExecutionState, error) {
 		ConversationHistory: conversation,
 		DAGState:            checkpoint.DAGState,
 		Findings:            checkpoint.Findings,
-		ApprovalState:       checkpoint.ApprovalState,
 		Metadata:            make(map[string]any),
 	}
 
@@ -200,11 +190,6 @@ func (s *ExecutionState) IsComplete() bool {
 // HasPendingNodes returns true if there are nodes waiting to be executed.
 func (s *ExecutionState) HasPendingNodes() bool {
 	return len(s.PendingQueue) > 0
-}
-
-// IsAwaitingApproval returns true if execution is paused for approval.
-func (s *ExecutionState) IsAwaitingApproval() bool {
-	return s.ApprovalState != nil && !s.ApprovalState.IsResolved()
 }
 
 // SerializeMemory serializes a memory map to JSON bytes.
@@ -354,11 +339,6 @@ func (s *ExecutionState) Clone() *ExecutionState {
 		for k, v := range s.InProgress.PartialOutput {
 			clone.InProgress.PartialOutput[k] = v
 		}
-	}
-
-	// Copy approval state
-	if s.ApprovalState != nil {
-		clone.ApprovalState = s.ApprovalState.Clone()
 	}
 
 	return clone

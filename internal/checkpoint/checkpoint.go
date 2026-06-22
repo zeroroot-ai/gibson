@@ -87,10 +87,6 @@ type Checkpoint struct {
 	// This is typically msgpack or JSON-encoded []llm.Message for context reconstruction.
 	ConversationHistory []byte `json:"conversation_history,omitempty" msgpack:"conversation_history,omitempty"`
 
-	// ApprovalState captures human-in-the-loop approval mission state.
-	// Non-nil when execution is paused waiting for human approval.
-	ApprovalState *ApprovalState `json:"approval_state,omitempty" msgpack:"approval_state,omitempty"`
-
 	// Checksum is a SHA256 hash of critical checkpoint data for integrity verification.
 	// Computed over all state fields before persistence.
 	Checksum string `json:"checksum" msgpack:"checksum"`
@@ -461,11 +457,6 @@ func (c *Checkpoint) Clone() *Checkpoint {
 		for k, v := range c.InProgressNode.PartialOutput {
 			clone.InProgressNode.PartialOutput[k] = v
 		}
-	}
-
-	// Copy approval state
-	if c.ApprovalState != nil {
-		clone.ApprovalState = c.ApprovalState.Clone()
 	}
 
 	return clone

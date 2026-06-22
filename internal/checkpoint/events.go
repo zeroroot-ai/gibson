@@ -119,25 +119,6 @@ const (
 	// EventThreadDeleted is emitted when a thread is deleted.
 	EventThreadDeleted LifecycleEventType = "thread.deleted"
 
-	// Approval lifecycle events
-	// EventApprovalRequested is emitted when approval is requested.
-	EventApprovalRequested LifecycleEventType = "approval.requested"
-
-	// EventApprovalApproved is emitted when approval is granted.
-	EventApprovalApproved LifecycleEventType = "approval.approved"
-
-	// EventApprovalRejected is emitted when approval is denied.
-	EventApprovalRejected LifecycleEventType = "approval.rejected"
-
-	// EventApprovalModified is emitted when approval is granted with modifications.
-	EventApprovalModified LifecycleEventType = "approval.modified"
-
-	// EventApprovalTimeout is emitted when approval request times out.
-	EventApprovalTimeout LifecycleEventType = "approval.timeout"
-
-	// EventApprovalCancelled is emitted when approval request is cancelled.
-	EventApprovalCancelled LifecycleEventType = "approval.cancelled"
-
 	// Replay events
 	// EventReplayStarted is emitted when replay begins from a checkpoint.
 	EventReplayStarted LifecycleEventType = "replay.started"
@@ -523,53 +504,6 @@ func NewThreadDeletedEvent(missionID, threadID, reason string) *CheckpointLifecy
 		Timestamp: time.Now(),
 		Data: map[string]any{
 			"reason": reason,
-		},
-		CorrelationID: ulid.Make().String(),
-	}
-}
-
-// NewApprovalRequestedEvent creates an event for approval request.
-func NewApprovalRequestedEvent(missionID, threadID, checkpointID, nodeID string, timeoutAt time.Time) *CheckpointLifecycleEvent {
-	return &CheckpointLifecycleEvent{
-		Type:         EventApprovalRequested,
-		MissionID:    missionID,
-		ThreadID:     threadID,
-		CheckpointID: checkpointID,
-		NodeID:       nodeID,
-		Timestamp:    time.Now(),
-		Data: map[string]any{
-			"timeout_at": timeoutAt.Format(time.RFC3339Nano),
-		},
-		CorrelationID: ulid.Make().String(),
-	}
-}
-
-// NewApprovalReceivedEvent creates an event for approval decision.
-func NewApprovalReceivedEvent(missionID, threadID, checkpointID string, status ApprovalStatus) *CheckpointLifecycleEvent {
-	var eventType LifecycleEventType
-	switch status {
-	case ApprovalStatusApproved:
-		eventType = EventApprovalApproved
-	case ApprovalStatusRejected:
-		eventType = EventApprovalRejected
-	case ApprovalStatusModified:
-		eventType = EventApprovalModified
-	case ApprovalStatusTimedOut:
-		eventType = EventApprovalTimeout
-	case ApprovalStatusCancelled:
-		eventType = EventApprovalCancelled
-	default:
-		eventType = EventApprovalApproved
-	}
-
-	return &CheckpointLifecycleEvent{
-		Type:         eventType,
-		MissionID:    missionID,
-		ThreadID:     threadID,
-		CheckpointID: checkpointID,
-		Timestamp:    time.Now(),
-		Data: map[string]any{
-			"status": status.String(),
 		},
 		CorrelationID: ulid.Make().String(),
 	}

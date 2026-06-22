@@ -444,15 +444,6 @@ func convertToAPIEventData(event interface{}) api.EventData {
 			WillRetry: payload.Retryable,
 		}
 
-	// Orchestrator events
-	// NOTE: Orchestrator payload types (OrchestratorDecisionPayload, OrchestratorApprovalPayload)
-	// have not been defined in internal/events/types.go yet. When they are added, add conversion
-	// cases here to populate OrchestratorEventData with:
-	// - EventType: "orchestrator.decision" or "orchestrator.approval_required"
-	// - Iteration, Action, TargetNodeID, TargetAgentName, Confidence
-	// - Reasoning (truncated to 500 chars), TokensUsed, Latency
-	// - For approval events: ApprovalID, Risk, Timeout
-
 	default:
 		// For unknown payload types, preserve the event but mark it as unstructured
 		// This maintains backward compatibility and prevents event loss

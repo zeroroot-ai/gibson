@@ -26,11 +26,6 @@ func TestLifecycleEventType_String(t *testing.T) {
 			eventType: EventThreadBranched,
 			want:      "thread.branched",
 		},
-		{
-			name:      "approval approved",
-			eventType: EventApprovalApproved,
-			want:      "approval.approved",
-		},
 	}
 
 	for _, tt := range tests {
@@ -179,52 +174,6 @@ func TestNewThreadCompletedEvent(t *testing.T) {
 	assert.Equal(t, int64(50000), event.Data["tokens_used"])
 	assert.Equal(t, 2.50, event.Data["cost"])
 	assert.Equal(t, 95.5, event.Data["score"])
-}
-
-func TestNewApprovalReceivedEvent(t *testing.T) {
-	tests := []struct {
-		name         string
-		status       ApprovalStatus
-		expectedType LifecycleEventType
-	}{
-		{
-			name:         "approved",
-			status:       ApprovalStatusApproved,
-			expectedType: EventApprovalApproved,
-		},
-		{
-			name:         "rejected",
-			status:       ApprovalStatusRejected,
-			expectedType: EventApprovalRejected,
-		},
-		{
-			name:         "modified",
-			status:       ApprovalStatusModified,
-			expectedType: EventApprovalModified,
-		},
-		{
-			name:         "timed out",
-			status:       ApprovalStatusTimedOut,
-			expectedType: EventApprovalTimeout,
-		},
-		{
-			name:         "cancelled",
-			status:       ApprovalStatusCancelled,
-			expectedType: EventApprovalCancelled,
-		},
-	}
-
-	for _, tt := range tests {
-		t.Run(tt.name, func(t *testing.T) {
-			event := NewApprovalReceivedEvent("mission-123", "thread-456", "checkpoint-789", tt.status)
-
-			assert.Equal(t, tt.expectedType, event.Type)
-			assert.Equal(t, "mission-123", event.MissionID)
-			assert.Equal(t, "thread-456", event.ThreadID)
-			assert.Equal(t, "checkpoint-789", event.CheckpointID)
-			assert.Equal(t, tt.status.String(), event.Data["status"])
-		})
-	}
 }
 
 func TestNewReplayStartedEvent(t *testing.T) {

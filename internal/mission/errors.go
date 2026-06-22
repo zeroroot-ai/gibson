@@ -30,9 +30,6 @@ const (
 	// ErrMissionConstraint indicates a constraint was violated.
 	ErrMissionConstraint MissionErrorCode = "constraint_violated"
 
-	// ErrMissionApprovalDenied indicates an approval was denied.
-	ErrMissionApprovalDenied MissionErrorCode = "approval_denied"
-
 	// ErrMissionTimeout indicates the mission timed out.
 	ErrMissionTimeout MissionErrorCode = "mission_timeout"
 
@@ -166,14 +163,6 @@ func NewConstraintViolationError(violation *ConstraintViolation) *MissionError {
 		WithContext("action", violation.Action).
 		WithContext("current_value", violation.CurrentValue).
 		WithContext("threshold_value", violation.ThresholdValue)
-}
-
-// NewApprovalDeniedError creates an approval denied error.
-func NewApprovalDeniedError(reason string) *MissionError {
-	return NewMissionError(
-		ErrMissionApprovalDenied,
-		fmt.Sprintf("approval denied: %s", reason),
-	).WithContext("reason", reason)
 }
 
 // NewTimeoutError creates a mission timeout error.
