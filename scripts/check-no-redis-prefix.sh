@@ -40,8 +40,17 @@ log_info "Finding Go files that import go-redis..."
 REDIS_FILES=()
 while IFS= read -r f; do
     # Skip allowlisted packages.
+    #
+    # Folded-in operators (gibson#913 / E4 monorepo fold): the tenant/platform
+    # operators are NOT the daemon and do NOT use the daemon's
+    # database-per-tenant model. They legitimately address tenants with
+    # "tenant:<slug>" keys against the shared control-plane Redis
+    # (provisioning-state, FGA pub/sub object IDs, VSS index names). This
+    # database-per-tenant guard is daemon-scoped; operators/ is out of scope by
+    # design — hence the leading */operators/* exclusion below.
     case "${f}" in
         # Allowlisted data-plane packages (use shared/admin Redis legitimately).
+        */operators/*|\
         */internal/infra/datapool/*|\
         */internal/server/admin/*|\
         */internal/server/daemon/*|\

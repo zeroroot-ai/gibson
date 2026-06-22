@@ -67,6 +67,14 @@ var allowedStorePackages = []string{
 	"/tools/gibsoncheck",
 	"/cmd/mission-storage-migrate", // one-off offline mission-storage migrator; peer of cmd/gibson-migrate (spec: mirror-delete-and-offline-migrator).
 
+	// Folded platform-clients / shared infra (gibson#913, E4 monorepo fold,
+	// ADR-0026/0056). These ARE the pool-construction / shared-store
+	// primitives every internal service consumes — constructing raw store
+	// clients is their entire purpose, so they are permanent peers of
+	// internal/infra/datapool, not daemon business logic.
+	"/internal/infra/pools",       // platform-clients pool constructors (NewPgxPool/NewRedis/NewNeo4j)
+	"/internal/infra/tenantconfig", // operator-shared Postgres broker-config store; wrapped by the already-allowed internal/platform/secrets/configstore
+
 	// Transitional allowlist — Phase D migration in progress.
 	// These packages are targeted for refactor/deletion; remove entries here
 	// once the corresponding packages are cleaned up.

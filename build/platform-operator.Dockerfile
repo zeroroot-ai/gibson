@@ -18,6 +18,14 @@ RUN apt-get update && apt-get install -y --no-install-recommends git ca-certific
 # PAT or `gh auth token` output). When the secret is absent the build
 # fails fast with a missing-auth error.
 ENV GOPRIVATE=github.com/zeroroot-ai
+# Defensive complement to the pinned base image (#914 bumped it to
+# golang:1.26.4 to match go.mod). The mirror golang image bakes
+# GOTOOLCHAIN=local, so if a future go.mod toolchain bump ever outpaces the
+# mirror tag the build would fail with "go.mod requires go >= 1.X.Y (running
+# go 1.X.Z; GOTOOLCHAIN=local)". GOTOOLCHAIN=auto lets the toolchain
+# self-fetch in that window. Matches the daemon Dockerfile pattern after the
+# E4 fold (gibson#913).
+ENV GOTOOLCHAIN=auto
 RUN --mount=type=secret,id=ghtoken,target=/run/secrets/ghtoken,required=false \
     if [ -s /run/secrets/ghtoken ]; then \
       git config --global url."https://x-access-token:$(cat /run/secrets/ghtoken)@github.com/".insteadOf "https://github.com/"; \
