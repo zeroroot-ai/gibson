@@ -10,7 +10,7 @@ import (
 	// Blank imports pull the generated Go proto packages into the test
 	// binary so their init() funcs register their service/method descriptors
 	// with protoregistry.GlobalFiles.
-	_ "github.com/zeroroot-ai/platform-sdk/gen/gibson/daemon/operator/v1"
+	_ "github.com/zeroroot-ai/gibson/internal/daemon/api/gibson/daemon/operator/v1"
 	_ "github.com/zeroroot-ai/sdk/api/gen/gibson/component/v1"
 	_ "github.com/zeroroot-ai/sdk/api/gen/gibson/daemon/v1"
 	_ "github.com/zeroroot-ai/sdk/api/gen/gibson/tenant/v1"

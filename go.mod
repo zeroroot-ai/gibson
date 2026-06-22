@@ -55,7 +55,6 @@ require (
 	github.com/testcontainers/testcontainers-go v0.42.0
 	github.com/vmihailenco/msgpack/v5 v5.4.1
 	github.com/zeroroot-ai/ast-checks v0.1.2
-	github.com/zeroroot-ai/platform-sdk v0.16.0
 	github.com/zeroroot-ai/sdk v0.153.1-0.20260621125548-5268430ef6fb
 	github.com/zeroroot-ai/setec v0.104.3
 	github.com/zeroroot-ai/testfixtures v0.1.1

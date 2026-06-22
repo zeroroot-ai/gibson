@@ -1,0 +1,349 @@
+syntax = "proto3";
+
+package gibson.daemon.operator.v1;
+
+option go_package = "github.com/zeroroot-ai/gibson/internal/daemon/api/gibson/daemon/operator/v1;daemonoperatorv1";
+
+import "gibson/auth/v1/options.proto";
+
+// DaemonOperatorService provides strictly ZD-internal operator operations on
+// the Gibson daemon. It is the post-ADR-0037 successor to the deleted
+// PlatformOperatorService, carrying only the operator-only RPCs that have no
+// customer surface. Customer-callable RPCs from the former admin services were
+// promoted to DaemonService / TenantService in the OSS SDK (sdk#205).
+//
+// Every RPC is protected at the transport layer by SPIFFE mTLS and restricted
+// to callers holding the "platform_operator" FGA relation on
+// system_tenant:_system.
+service DaemonOperatorService {
+  // Shutdown requests graceful shutdown of the daemon.
+  // Only works for local daemons (not when GIBSON_DAEMON_ADDRESS is set to remote).
+  rpc Shutdown(ShutdownRequest) returns (ShutdownResponse) {
+    option (gibson.auth.v1.authz) = {
+      relation: "platform_operator",
+      object_type: "system_tenant",
+      object_deriver: "system_tenant",
+      allowed_identities: 3  // USER | SERVICE
+    };
+  }
+  // ImpersonateTenant requests a time-limited context token for the given tenant.
+  // Requires the "platform-operator" role.
+  rpc ImpersonateTenant(ImpersonateTenantRequest) returns (ImpersonateTenantResponse) {
+    option (gibson.auth.v1.authz) = {
+      relation: "platform_operator",
+      object_type: "system_tenant",
+      object_deriver: "system_tenant",
+      allowed_identities: 3  // USER | SERVICE
+    };
+  }
+  // RefreshToolCatalog triggers an immediate refresh of the sandboxed-tool
+  // catalog. Bypasses the scheduled interval — useful for CI to publish a
+  // new tool-runner image and immediately surface its parsers to the
+  // orchestrator. Only works on the replica currently holding the refresh
+  // leader lease; followers accept the call but defer to the leader's
+  // next scheduled tick. Requires the platform-operator FGA role.
+  rpc RefreshToolCatalog(RefreshToolCatalogRequest) returns (RefreshToolCatalogResponse) {
+    option (gibson.auth.v1.authz) = {
+      relation: "platform_operator",
+      object_type: "system_tenant",
+      object_deriver: "system_tenant",
+      allowed_identities: 3  // USER | SERVICE
+    };
+  }
+  // ---------------------------------------------------------------------------
+  // Entitlements — operator RPCs called by the tenant-operator reconciler
+  // ---------------------------------------------------------------------------
+
+  // WriteAccessTuples atomically adds and/or deletes FGA tuples on behalf of
+  // an authenticated caller.
+  rpc WriteAccessTuples(WriteAccessTuplesRequest) returns (WriteAccessTuplesResponse) {
+    option (gibson.auth.v1.authz) = {
+      relation: "platform_operator",
+      object_type: "system_tenant",
+      object_deriver: "system_tenant",
+      allowed_identities: 3  // USER | SERVICE
+    };
+  }
+  // UpsertTenantQuota writes the tenant's runtime quota record to Postgres.
+  // Called by the operator's reconcile loop after resolving the plan.
+  rpc UpsertTenantQuota(UpsertTenantQuotaRequest) returns (UpsertTenantQuotaResponse) {
+    option (gibson.auth.v1.authz) = {
+      relation: "platform_operator",
+      object_type: "system_tenant",
+      object_deriver: "system_tenant",
+      allowed_identities: 3  // USER | SERVICE
+    };
+  }
+  // ListFeatureTuples enumerates the tenant feature tuples currently set.
+  rpc ListFeatureTuples(ListFeatureTuplesRequest) returns (ListFeatureTuplesResponse) {
+    option (gibson.auth.v1.authz) = {
+      relation: "platform_operator",
+      object_type: "system_tenant",
+      object_deriver: "system_tenant",
+      allowed_identities: 3  // USER | SERVICE
+    };
+  }
+  // SeedCatalogTenantEnabled writes tenant_enabled tuples for all platform-enabled items.
+  rpc SeedCatalogTenantEnabled(SeedCatalogTenantEnabledRequest) returns (SeedCatalogTenantEnabledResponse) {
+    option (gibson.auth.v1.authz) = {
+      relation: "platform_operator",
+      object_type: "system_tenant",
+      object_deriver: "system_tenant",
+      allowed_identities: 3  // USER | SERVICE
+    };
+  }
+
+  // SetPlatformEnabled writes or deletes the FGA platform_enabled tuple for a
+  // component from system_tenant:_system — the shared-catalog publish path
+  // (gibson#682). Only the platform operator may publish a curated connector
+  // to the shared catalog; the catalog fan-out then seeds tenant_enabled per
+  // tenant. published=false unpublishes (removes it from the shared catalog).
+  rpc SetPlatformEnabled(SetPlatformEnabledRequest) returns (SetPlatformEnabledResponse) {
+    option (gibson.auth.v1.authz) = {
+      relation: "platform_operator",
+      object_type: "system_tenant",
+      object_deriver: "system_tenant",
+      allowed_identities: 3  // USER | SERVICE
+    };
+  }
+  // EmitAuditEvent lets an operator/platform workload forward a structured
+  // audit event onto the daemon's emitter.
+  rpc EmitAuditEvent(EmitAuditEventRequest) returns (EmitAuditEventResponse) {
+    option (gibson.auth.v1.authz) = {
+      relation: "platform_operator",
+      object_type: "system_tenant",
+      object_deriver: "system_tenant",
+      allowed_identities: 3  // USER | SERVICE
+    };
+  }
+
+  // SetTenantZitadelOrg seeds the daemon's tenant -> Zitadel-organization-id
+  // mapping. Called by the tenant-operator (the lifecycle coordinator) when it
+  // provisions a tenant's per-tenant Zitadel org during standup, and on
+  // backfill/reconcile.
+  //
+  // The daemon cannot read Kubernetes (ADR-0023), so it cannot resolve a
+  // tenant's per-tenant Zitadel org id from Tenant.Status.ZitadelOrgID itself.
+  // The operator owns that org id and hands it to the daemon here. The daemon
+  // persists it so that gibson.tenant.v1.MembershipService can write the
+  // Zitadel half of human membership (add/remove org member) for granular
+  // member operations, without a K8s read or a token-claim dependency
+  // (ADR-0043: FGA is the principal tree; Zitadel is the per-org human-auth +
+  // tenant boundary).
+  //
+  // Idempotent: re-seeding the same (tenant_id, zitadel_org_id) is a no-op;
+  // a changed org id overwrites the prior mapping.
+  rpc SetTenantZitadelOrg(SetTenantZitadelOrgRequest) returns (SetTenantZitadelOrgResponse) {
+    option (gibson.auth.v1.authz) = {
+      relation: "platform_operator",
+      object_type: "system_tenant",
+      object_deriver: "system_tenant",
+      allowed_identities: 3  // USER | SERVICE
+    };
+  }
+
+}
+
+// ---------------------------------------------------------------------------
+// Shutdown — request/response messages
+// ---------------------------------------------------------------------------
+
+// ShutdownRequest requests graceful shutdown of the daemon.
+message ShutdownRequest {
+  // force indicates whether to force immediate shutdown (skip graceful drain)
+  bool force = 1;
+
+  // timeout_seconds is the maximum time to wait for graceful shutdown (0 = default 30s)
+  int32 timeout_seconds = 2;
+}
+
+// ShutdownResponse confirms the shutdown request was accepted.
+message ShutdownResponse {
+  // success indicates if the shutdown request was accepted
+  bool success = 1;
+
+  // message provides additional context about the shutdown
+  string message = 2;
+}
+
+// ---------------------------------------------------------------------------
+// ImpersonateTenant — request/response messages
+// ---------------------------------------------------------------------------
+
+// ImpersonateTenantRequest requests a time-limited context token for the given tenant.
+// Requires the "platform-operator" role.
+message ImpersonateTenantRequest {
+  // tenant_id is the identifier of the tenant to impersonate
+  string tenant_id = 1;
+}
+
+// ImpersonateTenantResponse returns a short-lived context token scoped to the
+// target tenant. The token behaves like a normal auth token for its lifetime.
+message ImpersonateTenantResponse {
+  // token is the time-limited context token granting access to the target tenant
+  string token = 1;
+}
+
+// ---------------------------------------------------------------------------
+// RefreshToolCatalog — request/response messages
+// ---------------------------------------------------------------------------
+
+// RefreshToolCatalogRequest carries optional knobs for forced catalog refresh.
+message RefreshToolCatalogRequest {
+  // force, when true, triggers a refresh even if one was completed very
+  // recently. Currently advisory — the daemon always queues the signal
+  // and the refresher coalesces back-to-back calls into a single tick.
+  bool force = 1;
+}
+
+// RefreshToolCatalogResponse carries the refresh outcome.
+message RefreshToolCatalogResponse {
+  // queued is true when the refresh signal was accepted by the leader
+  // replica. False when this replica is not the leader (the next leader
+  // tick will refresh) or when the refresher is not running.
+  bool queued = 1;
+
+  // message is a human-readable explanation of the outcome.
+  string message = 2;
+}
+
+// ---------------------------------------------------------------------------
+// Entitlements — request/response messages
+// ---------------------------------------------------------------------------
+
+// AccessTuple is a single FGA relationship tuple.
+message AccessTuple {
+  string user = 1;
+  string relation = 2;
+  string object = 3;
+}
+
+// WriteAccessTuplesRequest atomically adds and/or deletes FGA tuples.
+message WriteAccessTuplesRequest {
+  repeated AccessTuple add = 1;
+  repeated AccessTuple delete = 2;
+  string reason = 3;
+}
+
+// WriteAccessTuplesResponse reports how many tuples were written/deleted.
+message WriteAccessTuplesResponse {
+  int32 added = 1;
+  int32 deleted = 2;
+}
+
+// UpsertTenantQuotaRequest writes the tenant's runtime quota record. The
+// schema is governed by spec plans-and-quotas-simplification — only
+// concurrent_missions and concurrent_agents are enforced; 0 means
+// "unlimited" on either dimension.
+message UpsertTenantQuotaRequest {
+  string tenant_id = 1;
+  // concurrent_missions is the cap on missions in non-terminal execution
+  // state at any moment. 0 = unlimited.
+  int32 concurrent_missions = 7;
+  // concurrent_agents is the cap on agents bound to in-flight mission
+  // tasks at any moment (idle agents do NOT count). 0 = unlimited.
+  int32 concurrent_agents = 3;
+  // plan_id is the canonical plan identifier for this tenant
+  // ("team", "org", "enterprise", "enterprise-deploy").
+  // Written to the tenant_quotas.plan_id column.
+  string plan_id = 8;
+  // concurrent_connectors is the cap on hosted MCP connector instances a
+  // tenant may have running at any moment. 0 = unlimited. Per ADR-0047
+  // facet 3 (plan-tier connector-instance budget).
+  int32 concurrent_connectors = 9;
+  // Field tags 2 (seats), 4 (storage_gb), 5 (retention_days), 6
+  // (sandbox_launches_per_month) are reserved against accidental reuse;
+  // they were the legacy unenforced quotas dropped by the spec.
+  reserved 2, 4, 5, 6;
+  reserved "seats", "storage_gb", "retention_days", "sandbox_launches_per_month";
+}
+
+// UpsertTenantQuotaResponse confirms the upsert.
+message UpsertTenantQuotaResponse {
+  string updated_at = 1;
+}
+
+// ListFeatureTuplesRequest queries the feature tuples for a tenant.
+message ListFeatureTuplesRequest {
+  string tenant_id = 1;
+}
+
+// ListFeatureTuplesResponse returns the set of has_* feature tuples present.
+message ListFeatureTuplesResponse {
+  repeated string relations = 1;
+}
+
+// SeedCatalogTenantEnabledRequest triggers seeding of tenant_enabled tuples.
+message SeedCatalogTenantEnabledRequest {
+  string tenant_id = 1;
+}
+
+// SeedCatalogTenantEnabledResponse reports how many tuples were written.
+message SeedCatalogTenantEnabledResponse {
+  int32 tuples_written = 1;
+}
+
+message SetPlatformEnabledRequest {
+  // component_ref is the component identifier without the "component:" type
+  // prefix — e.g. "connector-gitlab".
+  string component_ref = 1;
+  // published: true writes platform_enabled (adds to the shared catalog);
+  // false deletes it (unpublishes). Idempotent in both directions.
+  bool published = 2;
+  // manifest_yaml is the connector's definition, persisted at publish so the
+  // on-enable sandbox reconciler (gibson#721) can launch a per-tenant sandbox
+  // from the shared definition — a connector published to the catalog by an
+  // operator is never tenant-registered, so this is its only manifest source.
+  // Stored as pure data under the system tenant (no principal, no install, no
+  // sandbox — `_system` is a definition marker, never an execution identity)
+  // and cleared on unpublish. Optional and ignored for non-connector
+  // components; empty on publish leaves any existing stored manifest untouched.
+  bytes manifest_yaml = 3;
+}
+message SetPlatformEnabledResponse {
+  // written is true when a tuple was actually added (published=true, was absent).
+  bool written = 1;
+  // deleted is true when a tuple was actually removed (published=false, was present).
+  bool deleted = 2;
+}
+
+// AuditEventMessage is the wire shape for EmitAuditEvent.
+message AuditEventMessage {
+  string type = 1;
+  string actor_subject = 2;
+  string actor_source = 3;
+  string tuple = 4;
+  string action_class = 5;
+  string scope_type = 6;
+  string operation = 7;
+  string reason = 8;
+  string timestamp = 9;
+  map<string, string> fields = 10;
+}
+
+// EmitAuditEventRequest carries the audit event to emit.
+message EmitAuditEventRequest {
+  AuditEventMessage event = 1;
+}
+
+// EmitAuditEventResponse confirms the event was emitted.
+message EmitAuditEventResponse {}
+
+// ---------------------------------------------------------------------------
+// SetTenantZitadelOrg — request/response messages
+// ---------------------------------------------------------------------------
+
+// SetTenantZitadelOrgRequest seeds the daemon's tenant -> Zitadel org mapping.
+message SetTenantZitadelOrgRequest {
+  // tenant_id is the tenant slug (the FGA tenant id without the "tenant:"
+  // prefix, e.g. "acme"). Required.
+  string tenant_id = 1;
+  // zitadel_org_id is the Zitadel organization id provisioned for this tenant
+  // (Tenant.Status.ZitadelOrgID). Required and non-empty — the daemon rejects
+  // an empty value rather than persisting a half-mapping.
+  string zitadel_org_id = 2;
+}
+
+// SetTenantZitadelOrgResponse confirms the mapping was persisted.
+message SetTenantZitadelOrgResponse {}
+

@@ -35,7 +35,7 @@ import (
 	"github.com/zeroroot-ai/gibson/operators/tenant/internal/controller"
 	daemontransport "github.com/zeroroot-ai/gibson/operators/tenant/pkg/transport/daemon"
 	"github.com/zeroroot-ai/gibson/operators/tenant/plans"
-	operatorv1 "github.com/zeroroot-ai/platform-sdk/gen/gibson/daemon/operator/v1"
+	operatorv1 "github.com/zeroroot-ai/gibson/internal/daemon/api/gibson/daemon/operator/v1"
 )
 
 // EntitlementsGRPCClient implements controller.EntitlementsProvisioner by
