@@ -1,7 +1,7 @@
 # Gibson Framework Makefile
 # Stage 1 - Foundation
 
-.PHONY: all build bin gibson-migrate sandbox-eviction-handler test test-coverage test-race lint clean install help proto proto-deps proto-clean check-authz check-coverage test-daemon-identity-roundtrip check-no-tenant-id check-fga-headers authz-registry
+.PHONY: all build bin gibson-migrate sandbox-eviction-handler test test-coverage test-race lint lint-all lint-deadcode lint-deadcode-baseline clean install help proto proto-deps proto-clean check-authz check-coverage test-daemon-identity-roundtrip check-no-tenant-id check-fga-headers authz-registry
 
 # Go parameters
 GOCMD=go
@@ -102,17 +102,78 @@ coverage-html: test-coverage
 	@$(GOCMD) tool cover -html=$(COVERAGE_FILE) -o coverage.html
 	@echo "Coverage HTML report: coverage.html"
 
-# Run linter (requires golangci-lint)
-lint:
-	@echo "Running linter..."
-	@if command -v golangci-lint > /dev/null; then \
-		golangci-lint run ./... || (echo "WARNING: golangci-lint failed (version mismatch or config issue) — skipping"; true); \
-	else \
-		echo "golangci-lint not installed. Run: go install github.com/golangci/golangci-lint/cmd/golangci-lint@latest"; \
-	fi
+# golangci-lint version — pinned for reproducible lint output (gibson#778).
+# v2 schema (.golangci.yml `version: "2"`). Built from source with the repo's
+# own Go toolchain (GOTOOLCHAIN below) so its embedded Go version is never lower
+# than go.mod's `go 1.26.4` target — golangci v2 refuses to load a newer target,
+# the known v2 trap that bit sdk#355 / adk#154.
+GOLANGCI_LINT_VERSION := v2.4.0
+
+# Pin the toolchain used to BUILD golangci-lint to this repo's Go. golangci's
+# own go.mod declares an older `go` directive, so with GOTOOLCHAIN=auto Go may
+# download and build it with that older compiler (→ embedded go < 1.26.4 → load
+# refusal). GOTOOLCHAIN=go1.26.4 forces the host compiler. Keep in lockstep with
+# go.mod's `go` directive.
+GOLANGCI_BUILD_TOOLCHAIN := go1.26.4
+
+# golangci-lint binary, pinned + repo-local (under bin/tools/, gitignored).
+GOLANGCI_LINT := bin/tools/golangci-lint
+
+$(GOLANGCI_LINT):
+	@echo "Installing golangci-lint $(GOLANGCI_LINT_VERSION) to $(CURDIR)/bin/tools (toolchain $(GOLANGCI_BUILD_TOOLCHAIN))..."
+	@mkdir -p $(CURDIR)/bin/tools
+	@GOTOOLCHAIN=$(GOLANGCI_BUILD_TOOLCHAIN) GOBIN=$(CURDIR)/bin/tools GOFLAGS=-mod=mod \
+		$(GOCMD) install github.com/golangci/golangci-lint/v2/cmd/golangci-lint@$(GOLANGCI_LINT_VERSION)
+
+# x/tools whole-program deadcode binary (separate from golangci; used by the
+# blocking dead-code gate, which golangci's `unused` does not cover — `unused`
+# is per-package, `deadcode` is whole-program reachability from the cmd mains).
+DEADCODE := bin/tools/deadcode
+
+$(DEADCODE):
+	@echo "Installing deadcode to $(CURDIR)/bin/tools (toolchain $(GOLANGCI_BUILD_TOOLCHAIN))..."
+	@mkdir -p $(CURDIR)/bin/tools
+	@GOTOOLCHAIN=$(GOLANGCI_BUILD_TOOLCHAIN) GOBIN=$(CURDIR)/bin/tools GOFLAGS=-mod=mod \
+		$(GOCMD) install golang.org/x/tools/cmd/deadcode@v0.44.0
+
+# Baseline revision for the incremental lint gate. PRs lint against the
+# merge-base with origin/main; override for local branches as needed.
+LINT_BASE ?= origin/main
+
+# lint — the BLOCKING gate (gibson#778, QUALITY-BARS §3). NO `|| true` swallow.
+# Runs the full golangci-lint suite (incl. `unused` + `depguard`) but reports
+# only NEW issues since LINT_BASE, so the pre-existing backlog (burndown tracked
+# in gibson#918) is baselined while any NEW violation fails. This is the same
+# invocation the CI `lint` job uses.
+lint: $(GOLANGCI_LINT)
+	@echo "Running linter (blocking; new since $(LINT_BASE))..."
+	$(GOLANGCI_LINT) run --new-from-merge-base=$(LINT_BASE) ./...
 	@bash scripts/check-fga-model-headers.sh
 	@node scripts/lint-pagination.mjs
 	@node scripts/lint-allowed-identities.mjs
+
+# lint-all — full-tree, non-baselined. Surfaces the entire backlog for the
+# gibson#918 burndown. Not wired into `check` until the backlog is cleared.
+.PHONY: lint-all
+lint-all: $(GOLANGCI_LINT)
+	@echo "Running linter (full tree; informational — surfaces the gibson#918 backlog)..."
+	$(GOLANGCI_LINT) run ./...
+
+# lint-deadcode — BLOCKING whole-program dead-code gate (gibson#778). Fails on
+# NEW unreachable code vs .deadcode-baseline (deadcode has no diff-scoping).
+.PHONY: lint-deadcode
+lint-deadcode: $(DEADCODE)
+	@bash scripts/check-deadcode.sh
+
+# lint-deadcode-baseline — regenerate .deadcode-baseline (run after a deliberate
+# keep, or after burning down dead code in gibson#918).
+.PHONY: lint-deadcode-baseline
+lint-deadcode-baseline: $(DEADCODE)
+	@echo "Regenerating .deadcode-baseline..."
+	@$(DEADCODE) -test=false ./cmd/... 2>/dev/null \
+		| sed -E 's/^([^:]+):[0-9]+:[0-9]+: unreachable func: (.+)$$/\1\t\2/' \
+		| sort -u > .deadcode-baseline
+	@echo "Wrote .deadcode-baseline ($$(wc -l < .deadcode-baseline | tr -d ' ') entries)"
 
 # Format code
 fmt:
@@ -198,7 +259,7 @@ check-noun-contract:
 	@bash scripts/check-noun-contract.sh
 
 # Run all checks before commit
-check: fmt vet lint test-race check-no-tenant-id check-fga-headers check-no-gibson-io check-no-skipped-tests check-noun-contract
+check: fmt vet lint lint-deadcode test-race check-no-tenant-id check-fga-headers check-no-gibson-io check-no-skipped-tests check-noun-contract
 	@echo "All checks passed!"
 
 # Run authorization-specific checks: vet + unit tests + integration tests (requires Docker)

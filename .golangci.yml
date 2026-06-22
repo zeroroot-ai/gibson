@@ -29,9 +29,15 @@ linters:
     - fatcontext
 
     # --- boundary enforcement ---
-    # depguard disabled — requires per-repo rules config to avoid blocking
-    # all third-party imports; see zeroroot-ai/.github#93 for the org-level
-    # fix. TODO: configure deny-rules for gibson's module boundary needs.
+    # depguard ENABLED (gibson#778): encodes the open-core import boundaries.
+    # Rules in `settings.depguard` below. This mirrors the gibsoncheck
+    # `forbiddenimports` analyzer (tools/gibsoncheck/checks/forbidden_imports.go)
+    # and the ADR-0056 / gibson#906 reconciliation: the daemon's import chain
+    # must not pull in OpenFGA or Zitadel directly (those decisions belong to
+    # ext-authz / Envoy, unified-identity-and-authorization R8.1), while the
+    # folded-in ext-authz packages ARE the legitimate FGA/OIDC consumers and
+    # are allowlisted by path.
+    - depguard
 
     # --- style + idiom ---
     - gocritic
@@ -51,6 +57,37 @@ linters:
     - whitespace
 
   settings:
+    # depguard — open-core import boundaries (gibson#778, ADR-0056).
+    # The `daemon-no-fga-zitadel` rule keeps OpenFGA / Zitadel out of the
+    # daemon's import chain. It applies to $all files EXCEPT the paths that
+    # are the legitimate upstream consumers (mirrors the gibsoncheck
+    # `forbiddenimports` allowlist):
+    #   - internal/platform/authz, internal/infra/authz — the FGAClient wrapper
+    #     surface (CG-JWT / CanInvokeTool path).
+    #   - internal/platform/capabilitygrant — capability-grant JWT minting.
+    #   - internal/server/extauthz/** — the folded-in ext-authz server; it IS
+    #     ext-authz, so it legitimately calls OpenFGA (ADR-0056, gibson#913).
+    #   - cmd/** — standalone binaries (incl. cmd/ext-authz, cmd/gen-fga-model-json)
+    #     may need OIDC/FGA.
+    #   - operators/** — the operators are a distinct binary chain, not the daemon.
+    # Test files are exempt (fakes / fixtures may stub these libs).
+    depguard:
+      rules:
+        daemon-no-fga-zitadel:
+          files:
+            - '$all'
+            - '!**/internal/platform/authz/**'
+            - '!**/internal/infra/authz/**'
+            - '!**/internal/platform/capabilitygrant/**'
+            - '!**/internal/server/extauthz/**'
+            - '!**/cmd/**'
+            - '!**/operators/**'
+            - '!**/*_test.go'
+          deny:
+            - pkg: github.com/openfga
+              desc: "FGA decisions belong to ext-authz; the daemon must not call OpenFGA directly (ADR-0056, unified-identity-and-authorization R8.1). Folded ext-authz packages are allowlisted by path above."
+            - pkg: github.com/zitadel
+              desc: "JWT validation belongs to Envoy; the daemon must not validate Zitadel tokens (ADR-0056, unified-identity-and-authorization R8.1)."
     staticcheck:
       checks: ["all"]
     gosec:
@@ -80,6 +117,17 @@ issues:
   max-issues-per-linter: 0
   max-same-issues: 0
 
+# Notes:
+# - This config is run BLOCKING and diff-scoped via `make lint`
+#   (`golangci-lint run --new-from-merge-base=$(LINT_BASE)`), so the
+#   pre-existing `unused` / style backlog is baselined (burndown tracked in
+#   gibson#918) while any NEW violation of any enabled linter — including the
+#   `unused` dead-code gate and the `depguard` boundary rules above — fails a
+#   PR. No `|| true` swallow. See QUALITY-BARS §3 / gibson#778.
+# - Whole-program dead-code reachability (`golang.org/x/tools/cmd/deadcode`)
+#   is a SEPARATE blocking gate (`make lint-deadcode`), baselined against
+#   `.deadcode-baseline` because that tool has no native diff-scoping.
+#
 # allowlist:
 # Per-repo opt-outs go here with a TODO referencing a follow-up issue.
 # Format:
