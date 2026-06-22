@@ -21,7 +21,10 @@
 // layer — never behind this seam.
 package entitlements
 
-import "context"
+import (
+	"context"
+	"database/sql"
+)
 
 // Limits is the plan-agnostic set of resource ceilings the runtime enforces
 // for one tenant. A zero value on any field means "unlimited on that
@@ -84,4 +87,32 @@ func Resolve(p Provider) Provider {
 		return UnlimitedProvider{}
 	}
 	return p
+}
+
+// factory, when installed via Register, overrides the OSS default in New.
+// It takes the daemon's platform DB handle so a provider that needs it (the
+// OSS default does) can use it; a provider that needs more (the commercial
+// Stripe-backed one needs a Stripe client + plan registry) captures those in
+// the closure it registers.
+var factory func(db *sql.DB) Provider
+
+// Register installs the Provider factory the commercial billing layer supplies
+// (gibson#798/#800). The closed module calls it once at startup — typically
+// from an init() that a hosted daemon build imports for its side effect — so
+// that New returns the Stripe-backed provider instead of the OSS default. OSS
+// gibson never calls Register, so the seam stays open-core: the default path
+// has zero knowledge of plans or Stripe. Last call wins; not safe for
+// concurrent use with New (call it during single-threaded startup wiring).
+func Register(f func(db *sql.DB) Provider) { factory = f }
+
+// New is the single Entitlements injection point. It returns the registered
+// commercial provider when one was installed via Register, else the OSS
+// config-driven default (NewConfigProvider). Daemon wiring calls New — never
+// NewConfigProvider directly — so the commercial provider drops in with no
+// daemon change.
+func New(db *sql.DB) Provider {
+	if factory != nil {
+		return factory(db)
+	}
+	return NewConfigProvider(db)
 }

@@ -900,14 +900,14 @@ func (d *daemonImpl) Start(ctx context.Context) error {
 		// platformDB is guaranteed non-nil here: initPlatformPostgres ran
 		// earlier in Start() and is fatal on failure (gibson#246).
 		//
-		// Limits flow through the entitlements seam (ADR-0003): the OSS
-		// default provider derives per-tenant limits from admin-set quota
-		// config; the QuotaManager never reads plans/Stripe directly. The
-		// commercial layer swaps in a plan/subscription provider behind the
-		// same interface (gibson#798).
-		d.entitlementsProvider = entitlements.NewConfigProvider(d.platformDB)
+		// Limits flow through the entitlements seam (ADR-0003): entitlements.New
+		// returns the commercial Stripe-backed provider when the closed billing
+		// module registered one (gibson#798/#800), else the OSS config-driven
+		// default that derives per-tenant limits from admin-set quota config.
+		// Either way the QuotaManager never reads plans/Stripe directly.
+		d.entitlementsProvider = entitlements.New(d.platformDB)
 		d.quotaManager = component.NewQuotaManager(tenantStore, d.entitlementsProvider, d.logger.Slog())
-		d.logger.Info(ctx, "quota manager initialized (entitlements provider: oss config-driven)")
+		d.logger.Info(ctx, "quota manager initialized via entitlements seam")
 
 		// Single-use sweep of legacy quota Redis keys deleted by spec
 		// plans-and-quotas-simplification (quota:config / quota:memory /
