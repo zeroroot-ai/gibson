@@ -544,3 +544,14 @@ func TestRemoveZitadelOrg_Idempotent(t *testing.T) {
 		t.Errorf("DeleteOrganization call count: want 1, got %d (called twice would indicate non-idempotent behavior)", fz.DeleteCalled)
 	}
 }
+
+// findConditionByType returns the Tenant status condition of the given type, or
+// nil if absent.
+func findConditionByType(t *gibsonv1alpha1.Tenant, condType string) *metav1.Condition {
+	for i := range t.Status.Conditions {
+		if t.Status.Conditions[i].Type == condType {
+			return &t.Status.Conditions[i]
+		}
+	}
+	return nil
+}

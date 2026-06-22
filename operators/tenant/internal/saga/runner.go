@@ -60,7 +60,7 @@ func (t *timeoutStep) Deprovision(ctx context.Context, obj ConditionedObject, de
 // wrapWithTimeouts returns a new []Step slice where each step that implements
 // p99Provider (i.e. embeds StepBase with a non-zero P99) is wrapped in a
 // timeoutStep. Steps with zero P99 are returned unwrapped — they have no
-// expected SLA (e.g. WaitForBillingConfirmation waits up to an hour).
+// expected SLA (e.g. RemoveZitadelOrg blocks on TenantMember CRD cleanup).
 func wrapWithTimeouts(steps []Step) []Step {
 	out := make([]Step, len(steps))
 	for i, s := range steps {

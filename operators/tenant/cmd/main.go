@@ -418,18 +418,18 @@ func main() {
 				"(dashboard membership cache will not invalidate on operator FGA writes)")
 	}
 	// Stripe is required infrastructure (one-code-path epic / tenant-operator#95).
-	// `STRIPE_API_KEY` must be set; missing → exit 1. The saga steps for
-	// CreateStripeCustomer, CancelStripeSubscription, and DeleteStripeCustomer
-	// all require a live Stripe client. Enterprise-deploy tenants are already
-	// excluded at the saga.Skip() level via skipUnbilledTier; every other tier
-	// requires Stripe. A nil Stripe client silently skipped billing for non-
-	// enterprise-deploy tenants and masked operator misconfiguration as a
-	// phantom "success" — removed in M7 (tenant-operator#95).
+	// `STRIPE_API_KEY` must be set; missing → exit 1. The provisioning saga no
+	// longer touches Stripe (the payment gate was removed in E7/gibson#799); the
+	// live client now powers only the BillingReconciler (trial expiry, past-due
+	// → entitlements revocation). Both the client and this guard exit OSS when
+	// billing moves to the closed Entitlements layer (E7/gibson#798+#800), after
+	// which on-prem provisions with no Stripe at all. A nil Stripe client used
+	// to mask operator misconfiguration as phantom billing "success".
 	stripeKey := os.Getenv("STRIPE_API_KEY")
 	if stripeKey == "" {
 		setupLog.Error(nil, "STRIPE_API_KEY is required (one-code-path / tenant-operator#95): "+
-			"billing steps cannot run without a Stripe client; "+
-			"set STRIPE_API_KEY or use enterprise-deploy tier (which skips billing at the saga level)")
+			"the BillingReconciler cannot run without a Stripe client; "+
+			"set STRIPE_API_KEY (removed from OSS once billing moves to the closed layer, gibson#798/#800)")
 		os.Exit(1)
 	}
 	// Card-first-signup mode guard (dashboard#767): staging must run Stripe
@@ -626,7 +626,6 @@ func main() {
 	deps := flows.ProvisionDeps{
 		K8sClient:               mgr.GetClient(),
 		FGA:                     fgaClient,
-		Stripe:                  stripeClient,
 		Redis:                   redisClient,
 		Zitadel:                 zitadelClient,
 		DataPlane:               dataPlaneProvisioner,

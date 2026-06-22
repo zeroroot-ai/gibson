@@ -19,7 +19,6 @@ import (
 	gibsonv1alpha1 "github.com/zeroroot-ai/gibson/operators/tenant/api/v1alpha1"
 	"github.com/zeroroot-ai/gibson/operators/tenant/internal/clients"
 	"github.com/zeroroot-ai/gibson/operators/tenant/internal/clients/fga"
-	"github.com/zeroroot-ai/gibson/operators/tenant/internal/clients/stripe"
 	"github.com/zeroroot-ai/gibson/operators/tenant/internal/saga"
 )
 
@@ -28,14 +27,12 @@ import (
 // Order matters: final backup first (safety net before any data deletion),
 // then data plane (revoke data-layer access), then FGA (remove
 // authorization tuples), then Zitadel org (remove identity), then the
-// remaining billing/observability resources.
+// remaining tenant-name/Redis/secrets-backend resources.
 func TeardownSteps(deps ProvisionDeps) []saga.Step {
 	return []saga.Step{
 		newFinalBackupStep(deps.FinalBackup),
 		newDeprovisionDataPlaneStep(deps),
 		newDeleteTenantFGAStep(deps),
-		newCancelStripeStep(deps),
-		newDeleteStripeCustomerStep(deps),
 		newRemoveZitadelOrgStep(deps),
 		newDeleteTenantNameStep(deps),
 		newDeleteRedisKeyspaceStep(deps),
@@ -144,92 +141,6 @@ func (s *deleteTenantFGAStep) Provision(ctx context.Context, obj saga.Conditione
 		}
 	}
 	return true, nil
-}
-
-// ---------------------------------------------------------------------------
-// CancelStripeSubscription
-// ---------------------------------------------------------------------------
-
-type cancelStripeStep struct {
-	saga.StepBase
-	deps ProvisionDeps
-}
-
-func newCancelStripeStep(deps ProvisionDeps) *cancelStripeStep {
-	return &cancelStripeStep{
-		StepBase: saga.StepBase{
-			N:     "CancelStripeSubscription",
-			C:     "StripeCanceled",
-			Req:   []string{"DeleteTenantFGATuples"},
-			Owner: "stripe-billing",
-			P99:   5 * time.Second,
-		},
-		deps: deps,
-	}
-}
-
-func (s *cancelStripeStep) Skip(obj saga.ConditionedObject) bool { return skipUnbilledTier(obj) }
-
-func (s *cancelStripeStep) Provision(ctx context.Context, obj saga.ConditionedObject, _ *saga.Deps) (bool, error) {
-	t, err := tenantOf(obj)
-	if err != nil {
-		return false, err
-	}
-	if s.deps.Stripe == nil {
-		return false, fmt.Errorf("stripe client unset (operator misconfigured): %w", clients.ErrInvalidInput)
-	}
-	if t.Status.StripeCustomerID == "" {
-		return true, nil
-	}
-	err = s.deps.Stripe.CancelSubscription(ctx, stripe.CustomerID(t.Status.StripeCustomerID))
-	if err == nil || errors.Is(err, clients.ErrNotFound) {
-		return true, nil
-	}
-	return false, err
-}
-
-// ---------------------------------------------------------------------------
-// DeleteStripeCustomer
-// ---------------------------------------------------------------------------
-
-type deleteStripeCustomerStep struct {
-	saga.StepBase
-	deps ProvisionDeps
-}
-
-func newDeleteStripeCustomerStep(deps ProvisionDeps) *deleteStripeCustomerStep {
-	return &deleteStripeCustomerStep{
-		StepBase: saga.StepBase{
-			N:     "DeleteStripeCustomer",
-			C:     "StripeDeleted",
-			Req:   []string{"CancelStripeSubscription"},
-			Owner: "stripe-billing",
-			P99:   5 * time.Second,
-		},
-		deps: deps,
-	}
-}
-
-func (s *deleteStripeCustomerStep) Skip(obj saga.ConditionedObject) bool {
-	return skipUnbilledTier(obj)
-}
-
-func (s *deleteStripeCustomerStep) Provision(ctx context.Context, obj saga.ConditionedObject, _ *saga.Deps) (bool, error) {
-	t, err := tenantOf(obj)
-	if err != nil {
-		return false, err
-	}
-	if s.deps.Stripe == nil {
-		return false, fmt.Errorf("stripe client unset (operator misconfigured): %w", clients.ErrInvalidInput)
-	}
-	if t.Status.StripeCustomerID == "" {
-		return true, nil
-	}
-	err = s.deps.Stripe.DeleteCustomer(ctx, stripe.CustomerID(t.Status.StripeCustomerID))
-	if err == nil || errors.Is(err, clients.ErrNotFound) {
-		return true, nil
-	}
-	return false, err
 }
 
 // ---------------------------------------------------------------------------

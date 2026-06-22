@@ -39,11 +39,9 @@ type removeZitadelOrgStep struct {
 func newRemoveZitadelOrgStep(deps ProvisionDeps) *removeZitadelOrgStep {
 	return &removeZitadelOrgStep{
 		StepBase: saga.StepBase{
-			N: "RemoveZitadelOrg",
-			C: "ZitadelOrgDeleted",
-			// Stripe wind-down runs before identity teardown so the billing
-			// system never sees a customer whose org just vanished.
-			Req:   []string{"DeleteStripeCustomer"},
+			N:     "RemoveZitadelOrg",
+			C:     "ZitadelOrgDeleted",
+			Req:   []string{"DeleteTenantFGATuples"},
 			Caps:  []saga.ClientCapability{saga.CapabilityZitadelAdmin, saga.CapabilityKubernetes},
 			Owner: "zitadel-integration",
 			// P99 intentionally zero — this step blocks on TenantMember

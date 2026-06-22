@@ -18,11 +18,8 @@ import (
 	"context"
 	"errors"
 	"fmt"
-	"os"
 	"time"
 
-	"k8s.io/apimachinery/pkg/api/meta"
-	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"sigs.k8s.io/controller-runtime/pkg/client"
 
 	gibsonv1alpha1 "github.com/zeroroot-ai/gibson/operators/tenant/api/v1alpha1"
@@ -30,7 +27,6 @@ import (
 	"github.com/zeroroot-ai/gibson/operators/tenant/internal/clients/fga"
 	"github.com/zeroroot-ai/gibson/operators/tenant/internal/clients/redisstate"
 	"github.com/zeroroot-ai/gibson/operators/tenant/internal/clients/signupprogress"
-	"github.com/zeroroot-ai/gibson/operators/tenant/internal/clients/stripe"
 	vaultadmin "github.com/zeroroot-ai/gibson/operators/tenant/internal/clients/vault"
 	"github.com/zeroroot-ai/gibson/operators/tenant/internal/clients/zitadel"
 	"github.com/zeroroot-ai/gibson/operators/tenant/internal/dataplane"
@@ -46,7 +42,6 @@ const AnnotationSignupAttemptID = "gibson.zeroroot.ai/signup-attempt-id"
 type ProvisionDeps struct {
 	K8sClient client.Client
 	FGA       fga.Client
-	Stripe    stripe.Client
 	Redis     redisstate.Client
 	Zitadel   zitadel.Client
 	// DataPlane provisions per-tenant data-plane resources (Postgres, Neo4j,
@@ -78,31 +73,10 @@ type ProvisionDeps struct {
 	WriteTenantBrokerConfig WriteTenantBrokerConfigDeps
 }
 
-const (
-	// annotationBillingActive is written by the dashboard webhook handler
-	// when Stripe confirms checkout.session.completed. The
-	// WaitForBillingConfirmation step polls for this annotation.
-	annotationBillingActive = "gibson.zeroroot.ai/billing-active"
-
-	// annotationStripeCustomerID carries the Stripe customer id the dashboard
-	// created BEFORE applying the Tenant CR (card-first signup, dashboard#785).
-	// CreateStripeCustomer adopts it deterministically instead of searching
-	// Stripe (whose search is eventually consistent and would race into a
-	// duplicate customer).
-	annotationStripeCustomerID = "gibson.zeroroot.ai/stripe-customer-id"
-)
-
-// billingConfirmationWindow is how long the WaitForBillingConfirmation step
-// waits for the dashboard webhook to stamp billing-active=true on the
-// Tenant CR before declaring billing abandoned.
-const billingConfirmationWindow = time.Hour
-
 // ProvisionSteps returns the ordered saga steps for provisioning a Tenant.
 // These run after the foundation NamespaceProvisioner step.
 func ProvisionSteps(deps ProvisionDeps) []saga.Step {
 	return []saga.Step{
-		newCreateStripeCustomerStep(deps),
-		newWaitForBillingConfirmationStep(deps),
 		newEnsureZitadelOrgStep(deps),
 		newProvisionSecretsBackendStep(deps),
 		// ConfigureSecretsJWTAuth closes the gap left by EnsureTenantNamespace
@@ -141,148 +115,6 @@ func tenantOf(obj saga.ConditionedObject) (*gibsonv1alpha1.Tenant, error) {
 		return nil, fmt.Errorf("expected *Tenant, got %T", obj)
 	}
 	return t, nil
-}
-
-// skipUnbilledTier is the shared Skip predicate used by Stripe-related steps.
-// Returns true for tenants on the enterprise-deploy plan (customer-owned
-// cluster, no Stripe subscription) — every other plan carries a monthly or
-// annual charge. For Kind dev the WaitForBillingConfirmation step honours
-// BILLING_DEV_AUTOCONFIRM=true instead.
-func skipUnbilledTier(obj saga.ConditionedObject) bool {
-	t, ok := obj.(*gibsonv1alpha1.Tenant)
-	if !ok {
-		return false
-	}
-	return t.Spec.Tier == gibsonv1alpha1.TenantPlanEnterpriseDeploy
-}
-
-// ---------------------------------------------------------------------------
-// CreateStripeCustomer
-// ---------------------------------------------------------------------------
-
-type createStripeCustomerStep struct {
-	saga.StepBase
-	deps ProvisionDeps
-}
-
-func newCreateStripeCustomerStep(deps ProvisionDeps) *createStripeCustomerStep {
-	return &createStripeCustomerStep{
-		StepBase: saga.StepBase{
-			N:     "CreateStripeCustomer",
-			C:     gibsonv1alpha1.ConditionStripeReady,
-			Owner: "stripe-billing",
-			P99:   5 * time.Second,
-		},
-		deps: deps,
-	}
-}
-
-func (s *createStripeCustomerStep) Skip(obj saga.ConditionedObject) bool {
-	return skipUnbilledTier(obj)
-}
-
-func (s *createStripeCustomerStep) Provision(ctx context.Context, obj saga.ConditionedObject, _ *saga.Deps) (bool, error) {
-	t, err := tenantOf(obj)
-	if err != nil {
-		return false, err
-	}
-	if s.deps.Stripe == nil {
-		return false, fmt.Errorf("stripe client unset (operator misconfigured): %w", clients.ErrInvalidInput)
-	}
-	if t.Status.StripeCustomerID != "" {
-		return true, nil
-	}
-	// Card-first signup (dashboard#785): the dashboard creates the Stripe
-	// customer + trialing subscription BEFORE applying the Tenant CR, and pins
-	// the customer id on this annotation. Adopt it deterministically — this is
-	// authoritative and race-free, unlike FindCustomerByTenant (Stripe search
-	// is eventually consistent, so searching here could miss the just-created
-	// customer and mint a DUPLICATE: the orphan-dupe / 21k-leak class, to#354).
-	if pinned := t.Annotations[annotationStripeCustomerID]; pinned != "" {
-		t.Status.StripeCustomerID = pinned
-		return true, nil
-	}
-	// Adopt an existing customer tagged with this tenant before creating:
-	// psaga re-runs Provision every reconcile and the status write is the
-	// only durable idempotency key — if it was ever lost (or the tenant
-	// predates #354), creating again would duplicate the customer. A
-	// search failure (stripe-mock has no /v1/customers/search) falls
-	// through to creation.
-	if existing, ferr := s.deps.Stripe.FindCustomerByTenant(ctx, t.Name); ferr == nil && existing != "" {
-		t.Status.StripeCustomerID = string(existing)
-		return true, nil
-	}
-	id, err := s.deps.Stripe.CreateCustomer(ctx, stripe.CustomerSpec{
-		Email: t.Spec.Owner,
-		Name:  t.Spec.DisplayName,
-		Metadata: map[string]string{
-			"tenant_id": t.Name,
-			"tier":      string(t.Spec.Tier),
-		},
-	})
-	if err != nil {
-		return false, err
-	}
-	t.Status.StripeCustomerID = string(id)
-	return true, nil
-}
-
-// ---------------------------------------------------------------------------
-// WaitForBillingConfirmation
-// ---------------------------------------------------------------------------
-
-type waitForBillingConfirmationStep struct {
-	saga.StepBase
-	deps ProvisionDeps
-}
-
-func newWaitForBillingConfirmationStep(deps ProvisionDeps) *waitForBillingConfirmationStep {
-	return &waitForBillingConfirmationStep{
-		StepBase: saga.StepBase{
-			N:     "WaitForBillingConfirmation",
-			C:     gibsonv1alpha1.ConditionBillingPending,
-			Req:   []string{"CreateStripeCustomer"},
-			Owner: "stripe-billing",
-			// P99 intentionally zero — this step blocks on the dashboard
-			// Stripe webhook stamping billing-active=true on the Tenant CR,
-			// which can legitimately take up to billingConfirmationWindow.
-		},
-		deps: deps,
-	}
-}
-
-func (s *waitForBillingConfirmationStep) Skip(obj saga.ConditionedObject) bool {
-	return skipUnbilledTier(obj)
-}
-
-func (s *waitForBillingConfirmationStep) Provision(_ context.Context, obj saga.ConditionedObject, _ *saga.Deps) (bool, error) {
-	t, err := tenantOf(obj)
-	if err != nil {
-		return false, err
-	}
-	// Dev-only autoconfirm — bypasses the Stripe webhook entirely so Kind
-	// clusters without a real Stripe tunnel can complete signups.
-	if os.Getenv("BILLING_DEV_AUTOCONFIRM") == "true" {
-		return true, nil
-	}
-	if t.Annotations[annotationBillingActive] == "true" {
-		return true, nil
-	}
-	age := time.Since(t.CreationTimestamp.Time)
-	if age < billingConfirmationWindow {
-		// Still within the window — signal in-progress.
-		return false, nil
-	}
-	// Window expired with no confirmation — declare billing abandoned.
-	meta.SetStatusCondition(&t.Status.Conditions, metav1.Condition{
-		Type:    gibsonv1alpha1.ConditionBillingAbandoned,
-		Status:  metav1.ConditionTrue,
-		Reason:  "ConfirmationTimeout",
-		Message: fmt.Sprintf("No billing confirmation received within %s of tenant creation. Card-first signup abandoned (no trialing subscription).", billingConfirmationWindow),
-	})
-	return false, saga.WrapPermanent(
-		fmt.Errorf("billing confirmation window elapsed for tenant %q (%s): no gibson.zeroroot.ai/billing-active annotation", t.Name, billingConfirmationWindow),
-	)
 }
 
 // ---------------------------------------------------------------------------
