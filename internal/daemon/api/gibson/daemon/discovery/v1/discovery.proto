@@ -1,0 +1,436 @@
+// DiscoveryService — read-only introspection surface for the Gibson daemon.
+//
+// This service answers "what can the authenticated caller currently use?" and
+// is the backing for:
+//
+//   * opensource/adk/cmd/gibson-mcp (MCP tools driven by Claude Code)
+//   * the dashboard's existing permissions-bridge migration
+//     (app/api/components/permissions/route.ts, which currently fail-opens
+//     to enabled=true for every visible catalog item; replaced by these RPCs
+//     once the SDK v0.74.0 bump lands)
+//   * any future Gibson CLI / third-party client
+//
+// Every RPC here is read-only. Mutations (toggle denies, install agents,
+// register components, create missions) remain on DaemonService and
+// DaemonAdminService; this file never writes.
+//
+// Tenant isolation is enforced by the standard FgaAuthzInterceptor — every
+// RPC below registers a check of `member` against `tenant:<caller-tenant>`
+// in fga_rpc_registry.go. Tenant_published items from other tenants are
+// invisible by construction of the FGA model (model.fga v2 component type),
+// not by filter logic in these handlers.
+//
+// Spec: agent-authoring-and-tenant-entitlements R1, R6.
+
+syntax = "proto3";
+
+package gibson.daemon.discovery.v1;
+
+import "gibson/auth/v1/options.proto";
+
+
+option go_package = "github.com/zeroroot-ai/gibson/internal/daemon/api/gibson/daemon/discovery/v1;discoverypb";
+option java_multiple_files = true;
+option csharp_namespace = "Gibson.Daemon.Discovery";
+
+// Scope controls which view of the catalog a list RPC returns. The same
+// caller sees different sets depending on which scope they request — e.g.,
+// a tenant admin uses TENANT_AVAILABLE to populate a kill-switch matrix,
+// while the same admin uses USER_ENABLED for their own "can I use this
+// right now?" view.
+enum Scope {
+  SCOPE_UNSPECIFIED = 0;
+  // Every item with platform_enabled@system_tenant:_system. Used by the
+  // platform-admin marketplace UI (operated by us, not tenant admins).
+  SCOPE_SYSTEM_CATALOG = 1;
+  // Items whose (platform_enabled OR tenant_published) AND tenant_enabled
+  // hold for the caller's tenant, ignoring deny layers. Used by the
+  // tenant-admin Security Policy matrix to show items that CAN be toggled.
+  SCOPE_TENANT_AVAILABLE = 2;
+  // Items where the caller currently has the requested action under full
+  // deny-wins composition. Default scope for gibson-mcp discovery.
+  SCOPE_USER_ENABLED = 3;
+  // Items the caller's component (identified by component_scope in the
+  // agent+jwt) has been granted. Requires the call to come from the
+  // agent-auth path. Used for installed-agent self-introspection.
+  SCOPE_COMPONENT_ENABLED = 4;
+  // Effective state evaluated for an explicit team_id. Requires the caller
+  // to hold tenant admin. Used by the Per-team scope view in the Security
+  // Policy matrix.
+  SCOPE_TEAM_VIEW = 5;
+  // Effective state evaluated for an explicit user_id in the caller's
+  // tenant. Requires tenant admin (or the user themselves). Used by the
+  // Per-user scope view.
+  SCOPE_USER_VIEW = 6;
+}
+
+// Action filters the list by an action class. Specifying an action narrows
+// the "did the caller pass the gate" check to just that class; leaving it
+// unspecified returns items where ANY action is allowed and exposes the
+// full capability vector.
+enum Action {
+  ACTION_UNSPECIFIED = 0;
+  ACTION_READ = 1;
+  ACTION_WRITE = 2;
+  ACTION_EXECUTE = 3;
+}
+
+// ActionCapabilities is the per-action effective state for a single catalog
+// item against the request's scope. For USER_ENABLED this reflects the
+// caller's current rights under deny-wins; for TENANT_AVAILABLE it reflects
+// the tenant-level state with denies ignored; etc.
+message ActionCapabilities {
+  bool read = 1;
+  bool write = 2;
+  bool execute = 3;
+}
+
+// CatalogItem is a single entry returned by ListPlugins / ListTools /
+// ListAgents. The `name` field is the fully-qualified identifier used by
+// agent permissions.yaml and DescribePlugin / DescribeTool / DescribeAgent.
+message CatalogItem {
+  string name = 1;                  // e.g. "gitlab", "nmap", "recon-agent"
+  string display_name = 2;
+  string description = 3;
+  string kind = 4;                  // "plugin" | "tool" | "agent"
+  ActionCapabilities rwx = 5;
+  // denying_gates lists FGA tuples whose presence would flip a currently-
+  // false capability to true if removed. Surfaces "why is this disabled"
+  // reason-tooltips in the dashboard without another round-trip.
+  // Examples: "tenant_execute_disabled@tenant:acme",
+  //           "team_read_disabled@team:red-team".
+  repeated string denying_gates = 6;
+  // version is the semver of the registered component (plugin / tool /
+  // agent). Empty for items that don't carry a version.
+  string version = 7;
+}
+
+message WhoAmIRequest {}
+
+// WhoAmIResponse mirrors the dashboard's existing /api/auth/me + FGA lookup
+// into a single RPC so gibson-mcp doesn't have to reimplement the join.
+message WhoAmIResponse {
+  string user_id = 1;
+  string active_tenant = 2;
+  repeated string tenants = 3;
+  repeated string teams = 4;        // team:<id> format
+  // relations is a flat list of (object, relation) pairs the caller holds.
+  // Each entry is formatted "<object>:<id>#<relation>" (e.g.
+  // "tenant:acme#admin").
+  repeated string relations = 5;
+  // is_agent_auth indicates whether the RPC came in on the capability-grant path.
+  // When true, component_scope is populated.
+  bool is_agent_auth = 6;
+  string component_scope = 7;
+}
+
+// ListQuery is the shared shape for list-filter parameters. Each RPC's
+// Request message embeds a single ListQuery field rather than duplicating
+// fields inline, so later additions (e.g., a kind filter) update one type.
+message ListQuery {
+  Scope scope = 1;
+  Action action = 2;
+  // target_id is required for SCOPE_TEAM_VIEW (team:<id>) and
+  // SCOPE_USER_VIEW (user:<id>). Ignored for other scopes.
+  string target_id = 3;
+  string cursor = 4;                // empty = first page
+  int32 page_size = 5;              // default 100, max 1000
+}
+
+// Per-RPC List request/response wrappers. Buf STANDARD requires distinct
+// message types per RPC; the wrappers are tiny so duplication is cheap and
+// leaves room for kind-specific fields later without another rename round.
+message ListPluginsRequest { ListQuery query = 1; }
+message ListPluginsResponse {
+  repeated CatalogItem items = 1;
+  string next_cursor = 2;
+}
+message ListToolsRequest { ListQuery query = 1; }
+message ListToolsResponse {
+  repeated CatalogItem items = 1;
+  string next_cursor = 2;
+}
+message ListAgentsRequest { ListQuery query = 1; }
+message ListAgentsResponse {
+  repeated CatalogItem items = 1;
+  string next_cursor = 2;
+}
+message ListLLMSlotsRequest { ListQuery query = 1; }
+message ListReportSurfacesRequest { ListQuery query = 1; }
+
+message DescribePluginRequest {
+  string name = 1;                  // fully-qualified, e.g. "gitlab"
+}
+message DescribeToolRequest {
+  string name = 1;
+}
+message DescribeAgentRequest {
+  string name = 1;
+}
+
+// DescribePluginResponse returns the plugin's method set with per-method
+// JSON Schemas and action-class classification so Claude Code can generate
+// well-formed harness.QueryPlugin call sites.
+message DescribePluginResponse {
+  string name = 1;
+  string display_name = 2;
+  string description = 3;
+  string version = 4;
+  repeated MethodDescriptor methods = 5;
+  ActionCapabilities rwx = 6;
+  repeated string denying_gates = 7;
+}
+
+message MethodDescriptor {
+  string name = 1;                  // e.g. "list_mrs"
+  string description = 2;
+  // action_class classifies the method so the interceptor knows which
+  // action's deny layer applies. "read" | "write" | "execute".
+  string action_class = 3;
+  // JSON Schema for the method's params map — surfaces field names, types,
+  // and required-ness to Claude without a separate fetch.
+  string input_schema_json = 4;
+  string output_schema_json = 5;
+}
+
+message DescribeToolResponse {
+  string name = 1;
+  string display_name = 2;
+  string description = 3;
+  string version = 4;
+  // Fully-qualified proto input/output types. Tool message types are
+  // resolved at runtime via FileDescriptorSet metadata; callers generate
+  // code against these string references, not Go types.
+  string input_proto_type = 5;
+  string output_proto_type = 6;
+  // reserves_field_100_discovery_result reflects whether the tool's response
+  // proto honours the gibson.graphrag.DiscoveryResult field-100 convention
+  // (it should; callers MUST NOT repurpose the field).
+  bool reserves_field_100_discovery_result = 7;
+  string action_class = 8;          // "read" | "write" | "execute"
+  ActionCapabilities rwx = 9;
+  repeated string denying_gates = 10;
+}
+
+message DescribeAgentResponse {
+  string name = 1;
+  string display_name = 2;
+  string description = 3;
+  string version = 4;
+  // Required LLM slots this agent declares via its component.yaml
+  // llm_slots block. Each entry is a compact "<slot>:<min_ctx>/<features>"
+  // string; full structured detail is retrievable via ListLLMSlots with a
+  // filter on this agent.
+  repeated string llm_slots = 5;
+  // requested_permissions lists entries from the agent's permissions.yaml
+  // so the install flow can pre-populate its approval checklist.
+  repeated PermissionRequest requested_permissions = 6;
+  ActionCapabilities rwx = 7;
+  repeated string denying_gates = 8;
+}
+
+message PermissionRequest {
+  string target_name = 1;           // e.g., "gitlab", "nmap"
+  string target_kind = 2;           // "plugin" | "tool" | "agent"
+  string action = 3;                // "read" | "write" | "execute"
+  bool required = 4;
+  string justification = 5;
+}
+
+message ValidateComponentRequest {
+  // component_yaml and permissions_yaml are raw YAML bytes. The daemon
+  // parses them server-side to avoid schema-version drift between clients.
+  bytes component_yaml = 1;
+  bytes permissions_yaml = 2;
+}
+
+message ValidateComponentResponse {
+  repeated ValidationError schema_errors = 1;
+  repeated AccessError access_errors = 2;
+  repeated string slot_errors = 3;
+  repeated string proto_violations = 4;
+  // ok is true iff all four error lists are empty. Included for quick
+  // branching in MCP tools.
+  bool ok = 5;
+}
+
+message ValidationError {
+  string path = 1;                  // JSON-pointer-style path in the YAML
+  string message = 2;
+}
+
+message AccessError {
+  string target_ref = 1;            // "plugin:gitlab", "tool:nmap", etc.
+  string requested_action = 2;      // "read" | "write" | "execute"
+  repeated string failing_gates = 3; // tuple identifiers for the UI to display
+}
+
+message SlotInfo {
+  string name = 1;
+  string description = 2;
+  int32 min_context_window = 3;
+  repeated string required_features = 4;
+  repeated string preferred_models = 5;
+  // satisfied_by lists the provider/model pairs currently available to the
+  // caller's tenant that meet the constraints. Empty means "licensed
+  // providers cannot satisfy this slot" — surfacing a slot_error at
+  // ValidateComponent time.
+  repeated string satisfied_by = 6;
+}
+
+message ListLLMSlotsResponse {
+  repeated SlotInfo slots = 1;
+}
+
+message ReportSurface {
+  // kind identifies the surface; known values are "finding", "workspace",
+  // and (future) "report". Agents consume this to decide which API the
+  // harness exposes for their scenario.
+  string kind = 1;
+  string description = 2;
+  // schema_json is the JSON Schema for the surface's payload.
+  string schema_json = 3;
+}
+
+message ListReportSurfacesResponse {
+  repeated ReportSurface surfaces = 1;
+}
+
+message SuggestMissingCapabilityRequest {
+  // needed_target is the fully-qualified catalog reference the caller (or
+  // Claude) has determined they need (e.g., "plugin:servicenow"). The
+  // daemon returns install hints or marketplace links.
+  string needed_target = 1;
+  string action = 2;                // "read" | "write" | "execute"
+}
+
+message SuggestMissingCapabilityResponse {
+  // Human-readable suggestion. Example:
+  //   "plugin:servicenow is not installed in tenant:acme. The org plan
+  //    includes it — request your tenant admin enable it from Security
+  //    Policy, or install it from the platform catalog."
+  string message = 1;
+  // actionable_paths enumerates machine-readable next steps (dashboard
+  // URLs, marketplace SKUs). Empty for this version; reserved for later.
+  repeated string actionable_paths = 2;
+}
+
+service DiscoveryService {
+  // WhoAmI returns the authenticated caller's identity with their full FGA
+  // relation set resolved server-side. The dashboard's permissions-bridge
+  // migration (app/api/components/permissions/route.ts) calls this first.
+  // Tenant member discovery: USER+SERVICE+COMPONENT (spec discovery-bitfield-coherence)
+  rpc WhoAmI(WhoAmIRequest) returns (WhoAmIResponse) {
+      option (gibson.auth.v1.authz) = {
+        relation: "member"
+        object_type: "tenant"
+        object_deriver: "tenant_from_identity"
+        allowed_identities: 7  // USER | SERVICE | COMPONENT
+      };
+    }
+
+  // List* RPCs return catalog items filtered by scope + action.
+  // Tenant member discovery: USER+SERVICE+COMPONENT (spec discovery-bitfield-coherence)
+  rpc ListPlugins(ListPluginsRequest) returns (ListPluginsResponse) {
+      option (gibson.auth.v1.authz) = {
+        relation: "member"
+        object_type: "tenant"
+        object_deriver: "tenant_from_identity"
+        allowed_identities: 7  // USER | SERVICE | COMPONENT
+      };
+    }
+  // Tenant member discovery: USER+SERVICE+COMPONENT (spec discovery-bitfield-coherence)
+  rpc DescribePlugin(DescribePluginRequest) returns (DescribePluginResponse) {
+      option (gibson.auth.v1.authz) = {
+        relation: "member"
+        object_type: "tenant"
+        object_deriver: "tenant_from_identity"
+        allowed_identities: 7  // USER | SERVICE | COMPONENT
+      };
+    }
+  // Tenant member discovery: USER+SERVICE+COMPONENT (spec discovery-bitfield-coherence)
+  rpc ListTools(ListToolsRequest) returns (ListToolsResponse) {
+      option (gibson.auth.v1.authz) = {
+        relation: "member"
+        object_type: "tenant"
+        object_deriver: "tenant_from_identity"
+        allowed_identities: 7  // USER | SERVICE | COMPONENT
+      };
+    }
+  // Tenant member discovery: USER+SERVICE+COMPONENT (spec discovery-bitfield-coherence)
+  rpc DescribeTool(DescribeToolRequest) returns (DescribeToolResponse) {
+      option (gibson.auth.v1.authz) = {
+        relation: "member"
+        object_type: "tenant"
+        object_deriver: "tenant_from_identity"
+        allowed_identities: 7  // USER | SERVICE | COMPONENT
+      };
+    }
+  // Tenant member discovery: USER+SERVICE+COMPONENT (spec discovery-bitfield-coherence)
+  rpc ListAgents(ListAgentsRequest) returns (ListAgentsResponse) {
+      option (gibson.auth.v1.authz) = {
+        relation: "member"
+        object_type: "tenant"
+        object_deriver: "tenant_from_identity"
+        allowed_identities: 7  // USER | SERVICE | COMPONENT
+      };
+    }
+  // Tenant member discovery: USER+SERVICE+COMPONENT (spec discovery-bitfield-coherence)
+  rpc DescribeAgent(DescribeAgentRequest) returns (DescribeAgentResponse) {
+      option (gibson.auth.v1.authz) = {
+        relation: "member"
+        object_type: "tenant"
+        object_deriver: "tenant_from_identity"
+        allowed_identities: 7  // USER | SERVICE | COMPONENT
+      };
+    }
+
+  // LLM slot inventory: what slot shapes can the caller's tenant currently
+  // satisfy given its licensed BYOK providers.
+  // Tenant member discovery: USER+SERVICE+COMPONENT (spec discovery-bitfield-coherence)
+  rpc ListLLMSlots(ListLLMSlotsRequest) returns (ListLLMSlotsResponse) {
+      option (gibson.auth.v1.authz) = {
+        relation: "member"
+        object_type: "tenant"
+        object_deriver: "tenant_from_identity"
+        allowed_identities: 7  // USER | SERVICE | COMPONENT
+      };
+    }
+
+  // ListReportSurfaces advertises the output conventions (Finding,
+  // Workspace, future Report) an agent can emit.
+  // Tenant member discovery: USER+SERVICE+COMPONENT (spec discovery-bitfield-coherence)
+  rpc ListReportSurfaces(ListReportSurfacesRequest) returns (ListReportSurfacesResponse) {
+      option (gibson.auth.v1.authz) = {
+        relation: "member"
+        object_type: "tenant"
+        object_deriver: "tenant_from_identity"
+        allowed_identities: 7  // USER | SERVICE | COMPONENT
+      };
+    }
+
+  // ValidateComponent dry-runs a draft component.yaml + permissions.yaml
+  // against the caller's current access. Never mutates state.
+  // Tenant member discovery: USER+SERVICE+COMPONENT (spec discovery-bitfield-coherence)
+  rpc ValidateComponent(ValidateComponentRequest) returns (ValidateComponentResponse) {
+      option (gibson.auth.v1.authz) = {
+        relation: "member"
+        object_type: "tenant"
+        object_deriver: "tenant_from_identity"
+        allowed_identities: 7  // USER | SERVICE | COMPONENT
+      };
+    }
+
+  // SuggestMissingCapability is the bridge Claude uses when
+  // ValidateComponent reports an access error — returns human-readable
+  // next-step hints for the missing plugin / tool / agent.
+  // Tenant member discovery: USER+SERVICE+COMPONENT (spec discovery-bitfield-coherence)
+  rpc SuggestMissingCapability(SuggestMissingCapabilityRequest) returns (SuggestMissingCapabilityResponse) {
+      option (gibson.auth.v1.authz) = {
+        relation: "member"
+        object_type: "tenant"
+        object_deriver: "tenant_from_identity"
+        allowed_identities: 7  // USER | SERVICE | COMPONENT
+      };
+    }
+}

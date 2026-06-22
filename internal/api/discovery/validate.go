@@ -7,7 +7,7 @@ import (
 
 	"gopkg.in/yaml.v3"
 
-	discoverypb "github.com/zeroroot-ai/platform-sdk/gen/gibson/daemon/discovery/v1"
+	discoverypb "github.com/zeroroot-ai/gibson/internal/daemon/api/gibson/daemon/discovery/v1"
 
 	"github.com/zeroroot-ai/gibson/internal/authz"
 )

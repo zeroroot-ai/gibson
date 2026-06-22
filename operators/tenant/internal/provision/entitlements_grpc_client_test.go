@@ -17,7 +17,7 @@ import (
 	"google.golang.org/grpc/test/bufconn"
 
 	"github.com/zeroroot-ai/gibson/operators/tenant/plans"
-	operatorv1 "github.com/zeroroot-ai/platform-sdk/gen/gibson/daemon/operator/v1"
+	operatorv1 "github.com/zeroroot-ai/gibson/internal/daemon/api/gibson/daemon/operator/v1"
 )
 
 // captureQuotaServer records the last UpsertTenantQuotaRequest it received so
