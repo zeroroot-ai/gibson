@@ -189,7 +189,7 @@ while IFS= read -r -d '' file; do
         continue
     fi
 
-    # Skip build-tag-gated files (//go:build integration, embedder_tests, etc.)
+    # Skip build-tag-gated files (//go:build integration, setec_integration, etc.)
     if is_build_tag_gated "${file}"; then
         continue
     fi

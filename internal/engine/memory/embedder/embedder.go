@@ -25,10 +25,15 @@ type Embedder interface {
 	Health(ctx context.Context) types.HealthStatus
 }
 
-// EmbedderConfig holds configuration for the native embedding provider.
+// EmbedderConfig holds transport-level configuration for the embedding
+// provider. Per docs ADR-0059 embedding is a BYO provider: the concrete model
+// and credentials are resolved from the tenant's configured embedding provider
+// (mirroring the LLM ProviderService), not from this struct. gibson no longer
+// bundles a local embedder.
 type EmbedderConfig struct {
-	// Provider specifies which embedder implementation to use.
-	// Only "native" is supported for offline embedding generation.
+	// Provider names the embedding provider backend. Empty means "not
+	// configured" — vector recall stays gated until a provider is set
+	// (ADR-0059 §4). There is no bundled default.
 	Provider string `yaml:"provider" json:"provider" mapstructure:"provider"`
 
 	// MaxRetries is the maximum number of retry attempts for transient failures.
@@ -40,11 +45,6 @@ type EmbedderConfig struct {
 
 // Validate checks if the EmbedderConfig is valid.
 func (c *EmbedderConfig) Validate() error {
-	// Provider must be "native" or empty (defaults to native)
-	if c.Provider != "" && c.Provider != "native" {
-		return types.NewError(ErrCodeInvalidConfig, "only 'native' provider is supported")
-	}
-
 	if c.MaxRetries < 0 {
 		return types.NewError(ErrCodeInvalidConfig, "max_retries must be non-negative")
 	}
@@ -56,12 +56,12 @@ func (c *EmbedderConfig) Validate() error {
 	return nil
 }
 
-// DefaultEmbedderConfig returns a default configuration for the native embedder.
-// The native embedder (all-MiniLM-L6-v2) runs offline without requiring API keys
-// and provides predictable latency.
+// DefaultEmbedderConfig returns the default embedder transport configuration.
+// Provider is intentionally empty: there is no bundled embedder, so vector
+// recall is gated until a BYO embedding provider is configured (ADR-0059).
 func DefaultEmbedderConfig() EmbedderConfig {
 	return EmbedderConfig{
-		Provider:   "native",
+		Provider:   "",
 		MaxRetries: 3,
 		Timeout:    30,
 	}

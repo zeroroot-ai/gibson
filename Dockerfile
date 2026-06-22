@@ -120,13 +120,12 @@ COPY --from=builder /out/tenant-owner-backfill /usr/local/bin/tenant-owner-backf
 COPY --from=builder /out/gibson-migrate /usr/local/bin/gibson-migrate
 COPY --from=builder /out/sandbox-eviction-handler /usr/local/bin/sandbox-eviction-handler
 
-# Create gibson home directory and HF model-cache mount point.
-# In production, /root/.cache/huggingface/ is mounted from EFS via the
-# gibson.hfModelCache values path and seeded by a pre-install Job that
-# syncs from s3://<artifacts>/huggingface/. In Kind / local dev without
-# EFS, the daemon downloads models from HuggingFace on first use.
-RUN mkdir -p /root/.gibson /root/.cache/huggingface \
-    && chmod -R 755 /root/.gibson /root/.cache/huggingface
+# Create gibson home directory.
+# The bundled ONNX embedder (and its HuggingFace model cache) was removed in
+# docs ADR-0059 — embedding is now a BYO provider, so no model artifacts ship
+# in the image and no HF cache mount is needed.
+RUN mkdir -p /root/.gibson \
+    && chmod -R 755 /root/.gibson
 
 # Set environment variables
 ENV GIBSON_CONFIG=/etc/gibson/gibson.yaml
