@@ -140,18 +140,11 @@
 //   - completed: Execution finished successfully
 //   - failed: Execution failed with an error
 //
-// # Observability Integration
-//
-// All execution types include LangfuseSpanID fields for correlation with Langfuse
-// observability traces. This enables end-to-end tracing from orchestrator decisions
-// through agent executions to individual tool invocations.
-//
 // Example usage:
 //
 //	// Track agent execution
 //	exec := schema.NewAgentExecution("recon_agent", missionID).
-//	    WithConfig(map[string]any{"depth": 3}).
-//	    WithLangfuseSpanID("span_123")
+//	    WithConfig(map[string]any{"depth": 3})
 //	exec.MarkCompleted()
 //
 //	// Record orchestrator decision

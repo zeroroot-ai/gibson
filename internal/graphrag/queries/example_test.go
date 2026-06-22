@@ -42,8 +42,7 @@ func Example_executionTracking() {
 	decision := schema.NewDecision(missionID, 1, schema.DecisionActionExecuteAgent).
 		WithTargetNode("vuln-scan-node").
 		WithReasoning("Initial vulnerability scan required based on target analysis").
-		WithConfidence(0.95).
-		WithLangfuseSpanID("span-123")
+		WithConfidence(0.95)
 
 	if err := execQueries.CreateDecision(ctx, decision); err != nil {
 		log.Fatal(err)
@@ -54,8 +53,7 @@ func Example_executionTracking() {
 		WithConfig(map[string]any{
 			"target": "192.168.1.1",
 			"ports":  "1-1000",
-		}).
-		WithLangfuseSpanID("execution-span-456")
+		})
 
 	if err := execQueries.CreateAgentExecution(ctx, execution); err != nil {
 		log.Fatal(err)
@@ -66,8 +64,7 @@ func Example_executionTracking() {
 		WithInput(map[string]any{
 			"target": "192.168.1.1",
 			"flags":  "-sV -sC",
-		}).
-		WithLangfuseSpanID("tool-span-789")
+		})
 
 	if err := execQueries.CreateToolExecution(ctx, tool); err != nil {
 		log.Fatal(err)

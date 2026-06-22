@@ -39,7 +39,6 @@
 // Supported tracing providers:
 //
 //   - "otlp": OpenTelemetry Protocol (gRPC) - production standard
-//   - "langfuse": Langfuse LLM observability platform - AI-specific features
 //   - "noop": No-op provider for testing - zero overhead
 //
 // # GenAI Semantic Conventions
@@ -170,7 +169,7 @@
 //
 //	type TracingConfig struct {
 //	    Enabled     bool    // Enable/disable tracing
-//	    Provider    string  // "otlp", "langfuse", "noop"
+//	    Provider    string  // "otlp", "zipkin", "noop"
 //	    Endpoint    string  // Exporter endpoint (e.g., "localhost:4317")
 //	    ServiceName string  // Service name in traces
 //	    SampleRate  float64 // Sampling rate (0.0-1.0)
@@ -190,14 +189,6 @@
 //	    Level  string // "debug", "info", "warn", "error", "fatal"
 //	    Format string // "json" or "text"
 //	    Output string // "stdout", "stderr", or file path
-//	}
-//
-// LangfuseConfig configures Langfuse LLM observability:
-//
-//	type LangfuseConfig struct {
-//	    PublicKey string // Langfuse public key
-//	    SecretKey string // Langfuse secret key
-//	    Host      string // Langfuse API host
 //	}
 //
 // # Harness Middleware
@@ -387,7 +378,6 @@
 // - Disable prompt capture in production (contains sensitive data)
 // - Use redaction for sensitive log fields
 // - Secure exporter endpoints with TLS
-// - Rotate Langfuse API keys regularly
 // - Limit trace retention in storage backends
 // - Sanitize URLs before logging (remove credentials)
 // - Use separate exporters for PII and non-PII data
@@ -422,6 +412,5 @@
 //
 //   - OpenTelemetry GenAI Semantic Conventions: https://opentelemetry.io/docs/specs/semconv/gen-ai/
 //   - OpenTelemetry Go SDK: https://github.com/open-telemetry/opentelemetry-go
-//   - Langfuse Documentation: https://langfuse.com/docs
 //   - Prometheus Best Practices: https://prometheus.io/docs/practices/naming/
 package observability

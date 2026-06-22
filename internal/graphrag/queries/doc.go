@@ -90,14 +90,4 @@
 //   - Atomic operations: CreateAgentExecution creates node and relationship atomically
 //   - Indexed queries: All queries use indexed fields (id, mission_node_id) for fast lookups
 //   - Read vs Write: Query method automatically selects appropriate transaction type
-//
-// # Observability Integration
-//
-// Execution tracking integrates with Langfuse for distributed tracing:
-//
-//   - AgentExecution.LangfuseSpanID: Correlates execution to agent span
-//   - Decision.LangfuseSpanID: Correlates decision to orchestrator LLM call
-//   - ToolExecution.LangfuseSpanID: Correlates tool call to trace
-//
-// This enables complete observability from high-level decisions down to individual tool calls.
 package queries

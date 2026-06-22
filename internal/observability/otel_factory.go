@@ -108,7 +108,7 @@ type OTelConfig struct {
 
 	// MetricsEnabled controls the OTel metric exporter independently of
 	// traces. Default: true. Set to false when the OTLP target is a
-	// trace-only backend (Langfuse, etc.) — the daemon installs a no-op
+	// trace-only backend — the daemon installs a no-op
 	// MeterProvider and emits no /v1/metrics requests, leaving traces
 	// fully functional.
 	MetricsEnabled bool
@@ -221,7 +221,7 @@ func InitOTelObservability(ctx context.Context, cfg OTelConfig) (*OTelObservabil
 		"batch_timeout", cfg.BatchTimeout)
 
 	// Initialize metric exporter based on protocol — but only if metrics
-	// export is enabled. When disabled (e.g. against Langfuse, which is
+	// export is enabled. When disabled (e.g. against a trace-only backend, which is
 	// trace-only), skip the exporter entirely so we don't spam /v1/metrics
 	// 404s or 500s every export interval. The MeterProvider below falls
 	// back to its no-op shape when metricExporter is nil.
@@ -278,7 +278,7 @@ func InitOTelObservability(ctx context.Context, cfg OTelConfig) (*OTelObservabil
 	// pick them up. We do NOT call pcotel.Init here because:
 	//
 	//   pcotel.Init always creates gRPC exporters (otlptracegrpc /
-	//   otlpmetricgrpc). When cfg.Endpoint is an HTTP endpoint (e.g. Langfuse
+	//   otlpmetricgrpc). When cfg.Endpoint is an HTTP endpoint (e.g. a trace-only collector
 	//   on :3000), the gRPC exporter connects to a server that speaks HTTP/1.1
 	//   and produces a continuous stream of:
 	//

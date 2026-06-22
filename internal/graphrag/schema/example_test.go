@@ -17,8 +17,7 @@ func ExampleAgentExecution() {
 			"timeout": 300,
 			"depth":   3,
 		}).
-		WithAttempt(1).
-		WithLangfuseSpanID("span_12345")
+		WithAttempt(1)
 
 	fmt.Println("Status:", exec.Status)
 	fmt.Println("Attempt:", exec.Attempt)
@@ -76,8 +75,7 @@ func ExampleDecision() {
 		WithReasoning("Initial reconnaissance completed successfully. Target has web services exposed. Need to scan for vulnerabilities.").
 		WithConfidence(0.92).
 		WithTokenUsage(450, 120).
-		WithLatency(850).
-		WithLangfuseSpanID("decision_span_789")
+		WithLatency(850)
 
 	fmt.Println("Action:", decision.Action)
 	fmt.Println("Target:", decision.TargetNodeID)
@@ -127,8 +125,7 @@ func ExampleToolExecution() {
 			"target": "192.168.1.1",
 			"ports":  "1-1000",
 			"flags":  "-sV",
-		}).
-		WithLangfuseSpanID("tool_span_abc")
+		})
 
 	fmt.Println("Tool:", toolExec.ToolName)
 	fmt.Println("Status:", toolExec.Status)

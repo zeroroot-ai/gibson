@@ -394,7 +394,7 @@ func (c *DefaultMissionController) Start(ctx context.Context, missionID types.ID
 	// orchestrator's harness can use it for ComponentRegistry lookups.
 	// Also propagate the InitiatorUser so every descendant span and LLM
 	// call on this mission carries the stable initiator identity through
-	// Langfuse (spec: llm-user-attribution-governance, Requirement 1.2,
+	// OTel spans (spec: llm-user-attribution-governance, Requirement 1.2,
 	// 1.4, 1.5). The caller's synchronous ActingUser is deliberately NOT
 	// propagated — this is an autonomous goroutine, there is no longer
 	// a synchronous caller.

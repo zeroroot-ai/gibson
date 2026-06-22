@@ -33,7 +33,7 @@ import (
 // Type, Status, Reason, Message.
 type TenantCondition struct {
 	Type    string `json:"type"`
-	Status  string `json:"status"`  // "True" | "False" | "Unknown"
+	Status  string `json:"status"` // "True" | "False" | "Unknown"
 	Reason  string `json:"reason"`
 	Message string `json:"message"`
 }
@@ -128,7 +128,7 @@ func WaitForTenantPhase(ctx context.Context, client dynamic.Interface, slug, wan
 	var lastConds []TenantCondition
 	var lastPhase string
 
-	err := wait.PollUntilContextTimeout(pollCtx, 2*time.Second, deadline, true /* immediate first poll */,
+	err := wait.PollUntilContextTimeout(pollCtx, 2*time.Second, deadline, true, /* immediate first poll */
 		func(ctx context.Context) (done bool, err error) {
 			phase, pErr := LatestPhase(ctx, client, slug)
 			if pErr != nil {
@@ -165,10 +165,9 @@ func WaitForTenantPhase(ctx context.Context, client dynamic.Interface, slug, wan
 // AssertConditionTrue checks that the named condition in the Tenant CR has
 // status "True".  If not, it returns a catalog-mapped error.
 //
-// condName is one of the 10 required conditions from R1.4:
-// NamespaceProvisioned, LangfuseReady, StripeReady, BillingPending,
-// ZitadelOrgReady, FGAReady, RedisReady, Neo4jReady, EntitlementsReconciled,
-// Ready.
+// condName is one of the required conditions from R1.4:
+// NamespaceProvisioned, StripeReady, BillingPending, ZitadelOrgReady,
+// FGAReady, RedisReady, Neo4jReady, EntitlementsReconciled, Ready.
 func AssertConditionTrue(t interface{ Fatalf(string, ...interface{}) },
 	conds []TenantCondition, condName string) {
 
@@ -221,7 +220,6 @@ func condNames(conds []TenantCondition) string {
 func condCatalogHint(condName string) string {
 	hints := map[string]string{
 		"NamespaceProvisioned":   "B10 (Envoy daemon cluster name → no healthy upstream → operator can't call daemon)",
-		"LangfuseReady":          "general: Langfuse pod availability",
 		"StripeReady":            "general: Stripe API credentials",
 		"BillingPending":         "general: billing saga step",
 		"ZitadelOrgReady":        "B4 (jwt_issuer missing → Zitadel rejects token), B6 (SPIFFE prefix in user ID)",
