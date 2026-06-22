@@ -211,8 +211,8 @@ func TestNoGracefulNilInRequestPaths(t *testing.T) {
 		"internal/mission/constraints.go:91":                   astchecks.Entry{Category: astchecks.CategoryDefensiveGuard, Reason: "nil constraints/metrics means no eval"},
 		"internal/mission/constraints.go:199":                  astchecks.Entry{Category: astchecks.CategoryDefensiveGuard, Reason: "nil constraints means no validation (sdk#64 M2 canonical_constraints helper)"},
 		"internal/mission/controller.go:239":                   astchecks.Entry{Category: astchecks.CategoryReceiverNilGuard, Reason: "composite nil-receiver shim for controller"},
-		"internal/mission/controller_checkpoint.go:533":        astchecks.Entry{Category: astchecks.CategoryLegacyOptional, Reason: "event bus optional in non-streaming deployments"},
-		"internal/mission/controller_checkpoint.go:559":        astchecks.Entry{Category: astchecks.CategoryLegacyOptional, Reason: "event bus optional in non-streaming deployments"},
+		"internal/mission/controller_checkpoint.go:530":        astchecks.Entry{Category: astchecks.CategoryLegacyOptional, Reason: "event bus optional in non-streaming deployments"},
+		"internal/mission/controller_checkpoint.go:556":        astchecks.Entry{Category: astchecks.CategoryLegacyOptional, Reason: "event bus optional in non-streaming deployments"},
 		"internal/mission/definitionutil/definitionutil.go:18": astchecks.Entry{Category: astchecks.CategoryDefensiveGuard, Reason: "nil definition means empty traverse"},
 		"internal/mission/state.go:504":                        astchecks.Entry{Category: astchecks.CategoryDefensiveGuard, Reason: "nil Definition means no-op"},
 
@@ -231,9 +231,8 @@ func TestNoGracefulNilInRequestPaths(t *testing.T) {
 		"internal/budget/enforcer.go:191": astchecks.Entry{Category: astchecks.CategoryLegacyOptional, Reason: "teams dep optional in budget enforcer; reassert via budget-required follow-up"},
 
 		// internal/checkpoint
-		"internal/checkpoint/approval.go:235": astchecks.Entry{Category: astchecks.CategoryDefensiveGuard, Reason: "proto Decision.ExpiresAt field, legitimately nil-able"},
-		"internal/checkpoint/state.go:401":    astchecks.Entry{Category: astchecks.CategoryDefensiveGuard, Reason: "proto WorkingMemory field, legitimately nil-able"},
-		"internal/checkpoint/state.go:418":    astchecks.Entry{Category: astchecks.CategoryDefensiveGuard, Reason: "proto MissionMemory field, legitimately nil-able"},
+		"internal/checkpoint/state.go:381": astchecks.Entry{Category: astchecks.CategoryDefensiveGuard, Reason: "proto WorkingMemory field, legitimately nil-able"},
+		"internal/checkpoint/state.go:398": astchecks.Entry{Category: astchecks.CategoryDefensiveGuard, Reason: "proto MissionMemory field, legitimately nil-able"},
 
 		// internal/component
 		"internal/component/installer.go:1702": astchecks.Entry{Category: astchecks.CategoryDefensiveGuard, Reason: "manifest.Dependencies value-shape field"},

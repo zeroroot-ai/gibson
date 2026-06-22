@@ -22,8 +22,6 @@ type CheckpointMetrics struct {
 	checkpointsCreated  *prometheus.CounterVec
 	checkpointsRestored *prometheus.CounterVec
 	checkpointsDeleted  *prometheus.CounterVec
-	approvalsRequested  prometheus.Counter
-	approvalsReceived   *prometheus.CounterVec
 
 	// Histograms
 	checkpointSize    *prometheus.HistogramVec
@@ -32,8 +30,7 @@ type CheckpointMetrics struct {
 	serializeDuration *prometheus.HistogramVec
 
 	// Gauges
-	activeThreads    *prometheus.GaugeVec
-	pendingApprovals prometheus.Gauge
+	activeThreads *prometheus.GaugeVec
 
 	// Spec 4 R7.1 series — orchestrator-driven write/restore observability.
 	// These intentionally have no per-mission labels (cardinality control).
@@ -74,23 +71,6 @@ func NewCheckpointMetrics() *CheckpointMetrics {
 				Help: "Total number of checkpoints deleted",
 			},
 			[]string{"mission_id", "reason"},
-		),
-
-		// Counter: approval requests
-		approvalsRequested: prometheus.NewCounter(
-			prometheus.CounterOpts{
-				Name: "gibson_approval_requested_total",
-				Help: "Total number of approval requests made",
-			},
-		),
-
-		// Counter: approval outcomes
-		approvalsReceived: prometheus.NewCounterVec(
-			prometheus.CounterOpts{
-				Name: "gibson_approval_received_total",
-				Help: "Total number of approval decisions received",
-			},
-			[]string{"mission_id", "outcome"},
 		),
 
 		// Histogram: checkpoint size distribution
@@ -140,14 +120,6 @@ func NewCheckpointMetrics() *CheckpointMetrics {
 				Help: "Current number of active threads per mission",
 			},
 			[]string{"mission_id"},
-		),
-
-		// Gauge: pending approval count
-		pendingApprovals: prometheus.NewGauge(
-			prometheus.GaugeOpts{
-				Name: "gibson_pending_approvals_total",
-				Help: "Current number of pending approval requests",
-			},
 		),
 
 		// Spec 4 R7.1 — orchestrator-driven write/restore observability.
@@ -206,14 +178,11 @@ func (m *CheckpointMetrics) collectors() []prometheus.Collector {
 		m.checkpointsCreated,
 		m.checkpointsRestored,
 		m.checkpointsDeleted,
-		m.approvalsRequested,
-		m.approvalsReceived,
 		m.checkpointSize,
 		m.createDuration,
 		m.restoreDuration,
 		m.serializeDuration,
 		m.activeThreads,
-		m.pendingApprovals,
 		m.writeDurationMs,
 		m.writeSizeBytes,
 		m.writeFailureTotal,
@@ -272,16 +241,6 @@ func (m *CheckpointMetrics) RecordCheckpointDeleted(missionID string, reason str
 	m.checkpointsDeleted.WithLabelValues(missionID, reason).Inc()
 }
 
-// RecordApprovalRequested records that an approval request was made
-func (m *CheckpointMetrics) RecordApprovalRequested(missionID string) {
-	m.approvalsRequested.Inc()
-}
-
-// RecordApprovalReceived records an approval decision with its outcome
-func (m *CheckpointMetrics) RecordApprovalReceived(missionID string, outcome string) {
-	m.approvalsReceived.WithLabelValues(missionID, outcome).Inc()
-}
-
 // RecordSerializeDuration records the time taken to serialize checkpoint data
 func (m *CheckpointMetrics) RecordSerializeDuration(format string, duration time.Duration) {
 	m.serializeDuration.WithLabelValues(format).Observe(duration.Seconds())
@@ -290,11 +249,6 @@ func (m *CheckpointMetrics) RecordSerializeDuration(format string, duration time
 // SetActiveThreads sets the current number of active threads for a mission
 func (m *CheckpointMetrics) SetActiveThreads(missionID string, count int) {
 	m.activeThreads.WithLabelValues(missionID).Set(float64(count))
-}
-
-// SetPendingApprovals sets the current number of pending approval requests
-func (m *CheckpointMetrics) SetPendingApprovals(count int) {
-	m.pendingApprovals.Set(float64(count))
 }
 
 // RecordWriteOutcome records a single checkpoint write outcome for Spec 4 R7.1.

@@ -3,8 +3,8 @@
 
 package e2e
 
-// checkpoint_e2e_test.go verifies the mission pause/resume and approval
-// checkpoint workflows end-to-end.
+// checkpoint_e2e_test.go verifies the mission pause/resume checkpoint
+// workflows end-to-end.
 //
 // Status: tests compile and skip unconditionally. Full wiring requires a
 // complete mission orchestrator + Redis testcontainer setup that is deferred
@@ -50,7 +50,6 @@ type E2ETestEnv struct {
 	Checkpointer    checkpoint.ThreadedCheckpointer
 	Restorer        checkpoint.StateRestorer
 	ThreadManager   checkpoint.ThreadManager
-	ApprovalManager checkpoint.ApprovalManager
 	MissionStore    mission.MissionStore
 	Controller      mission.MissionController
 	TrackingAgent   *trackingAgent
@@ -238,28 +237,6 @@ func createTestMissionDef() *missionpb.MissionDefinition {
 	}
 }
 
-// createApprovalMissionDef creates a mission definition with an approval-required node.
-func createApprovalMissionDef() *missionpb.MissionDefinition {
-	approvalNode := agentNode("approval", "Approval Node", "tracking-agent")
-	approvalNode.Metadata = map[string]string{"requires_approval": "true"}
-	return &missionpb.MissionDefinition{
-		Id:          types.NewID().String(),
-		Name:        "Approval Test Mission",
-		Description: "Mission with approval workflow",
-		Nodes: map[string]*missionpb.MissionNode{
-			"node1":    agentNode("node1", "Pre-Approval Node", "tracking-agent"),
-			"approval": approvalNode,
-			"node2":    agentNode("node2", "Post-Approval Node", "tracking-agent"),
-		},
-		Edges: []*missionpb.MissionEdge{
-			{From: "node1", To: "approval"},
-			{From: "approval", To: "node2"},
-		},
-		EntryPoints: []string{"node1"},
-		ExitPoints:  []string{"node2"},
-	}
-}
-
 // createParallelMissionDef creates a mission definition with parallel nodes.
 func createParallelMissionDef() *missionpb.MissionDefinition {
 	return &missionpb.MissionDefinition{
@@ -406,139 +383,6 @@ func TestE2E_CrashRecovery(t *testing.T) {
 
 	t.Logf("Executed before crash: %v", executedBeforeCrash)
 	t.Logf("Executed after recovery: %v", env.TrackingAgent.GetExecutedNodes())
-}
-
-// TestE2E_ApprovalWorkflow tests human-in-the-loop approval.
-func TestE2E_ApprovalWorkflow(t *testing.T) {
-	env, cleanup := setupE2EEnv(t)
-	defer cleanup()
-
-	ctx := context.Background()
-	testDef := createApprovalMissionDef()
-
-	missionRecord, err := env.Controller.CreateByReference(ctx, mission.CreateMissionByReferenceRequest{
-		MissionDefinitionID: testDef.ID,
-		TargetID:            types.NewID(),
-	})
-	require.NoError(t, err)
-
-	err = env.Controller.Start(ctx, missionRecord.ID)
-	require.NoError(t, err)
-
-	time.Sleep(2 * time.Second)
-
-	missionRecord, err = env.Controller.Get(ctx, missionRecord.ID)
-	require.NoError(t, err)
-	assert.Equal(t, mission.MissionStatusPaused, missionRecord.Status)
-
-	require.NotNil(t, missionRecord.Checkpoint)
-
-	// Submit approval via ApprovalManager.ProcessDecision.
-	// MissionCheckpoint does not carry ThreadID; resolve it via ThreadManager.
-	missionThreads, err := env.ThreadManager.ListThreads(ctx, missionRecord.ID)
-	require.NoError(t, err)
-	require.NotEmpty(t, missionThreads, "Expected at least one thread for the mission")
-	threadID := missionThreads[0].ID
-	decision := checkpoint.ApprovalDecision{
-		Status:     checkpoint.ApprovalStatusApproved,
-		ApprovedBy: "e2e-test",
-		ApprovedAt: time.Now(),
-	}
-
-	err = env.ApprovalManager.ProcessDecision(ctx, threadID, decision)
-	require.NoError(t, err)
-
-	start := time.Now()
-	time.Sleep(1 * time.Second)
-	resumeDuration := time.Since(start)
-	assert.Less(t, resumeDuration, 600*time.Millisecond, "Should resume within 500ms of approval")
-
-	time.Sleep(2 * time.Second)
-	missionRecord, err = env.Controller.Get(ctx, missionRecord.ID)
-	require.NoError(t, err)
-	assert.Equal(t, mission.MissionStatusCompleted, missionRecord.Status)
-
-	assert.True(t, env.TrackingAgent.WasNodeExecuted("node1"))
-	assert.True(t, env.TrackingAgent.WasNodeExecuted("approval"))
-	assert.True(t, env.TrackingAgent.WasNodeExecuted("node2"))
-}
-
-// TestE2E_ApprovalTimeout tests approval timeout behavior.
-func TestE2E_ApprovalTimeout(t *testing.T) {
-	env, cleanup := setupE2EEnv(t)
-	defer cleanup()
-
-	ctx := context.Background()
-	testDef := createApprovalMissionDef()
-	testDef.Nodes["approval"].Timeout = 2 * time.Second
-
-	missionRecord, err := env.Controller.CreateByReference(ctx, mission.CreateMissionByReferenceRequest{
-		MissionDefinitionID: testDef.ID,
-		TargetID:            types.NewID(),
-	})
-	require.NoError(t, err)
-
-	err = env.Controller.Start(ctx, missionRecord.ID)
-	require.NoError(t, err)
-
-	time.Sleep(4 * time.Second)
-
-	missionRecord, err = env.Controller.Get(ctx, missionRecord.ID)
-	require.NoError(t, err)
-	assert.Equal(t, mission.MissionStatusPaused, missionRecord.Status)
-	if missionRecord.Metadata != nil {
-		timeout, ok := missionRecord.Metadata["approval_timeout"]
-		assert.True(t, ok, "Should have approval_timeout metadata")
-		assert.True(t, timeout.(bool))
-	}
-
-	assert.NotNil(t, missionRecord.Checkpoint)
-	t.Logf("Approval timeout handled correctly. Mission status: %s", missionRecord.Status)
-}
-
-// TestE2E_ApprovalWithModification tests approval with state modification.
-func TestE2E_ApprovalWithModification(t *testing.T) {
-	env, cleanup := setupE2EEnv(t)
-	defer cleanup()
-
-	ctx := context.Background()
-	testDef := createApprovalMissionDef()
-
-	missionRecord, err := env.Controller.CreateByReference(ctx, mission.CreateMissionByReferenceRequest{
-		MissionDefinitionID: testDef.ID,
-		TargetID:            types.NewID(),
-	})
-	require.NoError(t, err)
-
-	err = env.Controller.Start(ctx, missionRecord.ID)
-	require.NoError(t, err)
-
-	time.Sleep(2 * time.Second)
-
-	missionRecord, err = env.Controller.Get(ctx, missionRecord.ID)
-	require.NoError(t, err)
-	require.NotNil(t, missionRecord.Checkpoint)
-
-	// MissionCheckpoint does not carry ThreadID; resolve it via ThreadManager.
-	timeoutThreads, err := env.ThreadManager.ListThreads(ctx, missionRecord.ID)
-	require.NoError(t, err)
-	require.NotEmpty(t, timeoutThreads, "Expected at least one thread for the mission")
-	threadID := timeoutThreads[0].ID
-
-	decision := checkpoint.ApprovalDecision{
-		Status:     checkpoint.ApprovalStatusApproved,
-		ApprovedBy: "e2e-test",
-		ApprovedAt: time.Now(),
-	}
-
-	err = env.ApprovalManager.ProcessDecision(ctx, threadID, decision)
-	require.NoError(t, err)
-
-	time.Sleep(3 * time.Second)
-
-	missionRecord, err = env.Controller.Get(ctx, missionRecord.ID)
-	require.NoError(t, err)
-	assert.Equal(t, mission.MissionStatusCompleted, missionRecord.Status)
 }
 
 // TestE2E_TimeTravel tests replaying from a historical checkpoint.

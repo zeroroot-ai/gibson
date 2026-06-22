@@ -29,7 +29,7 @@ type CheckpointPolicy interface {
 
 // CheckpointEvent represents an event that may trigger checkpoint creation.
 // Events can be super-steps (LLM interactions), explicit checkpoint requests,
-// approval requests, or system shutdowns.
+// or system shutdowns.
 type CheckpointEvent struct {
 	// Type indicates the kind of event triggering checkpoint consideration.
 	Type CheckpointEventType
@@ -55,10 +55,6 @@ const (
 	// CheckpointEventExplicit is triggered by an explicit checkpoint request.
 	// Agents or operators can request checkpoints at important milestones.
 	CheckpointEventExplicit CheckpointEventType = "explicit"
-
-	// CheckpointEventApproval is triggered when requesting human approval.
-	// Always creates a checkpoint to enable resumption after approval.
-	CheckpointEventApproval CheckpointEventType = "approval"
 
 	// CheckpointEventShutdown is triggered during graceful shutdown.
 	// Creates a checkpoint to enable resumption after restart.
@@ -151,7 +147,7 @@ const (
 	// May apply different retention rules than failed missions.
 	MissionStatusCancelled MissionStatus = "cancelled"
 
-	// MissionStatusPaused indicates the mission is paused (e.g., waiting for approval).
+	// MissionStatusPaused indicates the mission is paused (e.g., during graceful shutdown).
 	// Treated similarly to running for retention purposes.
 	MissionStatusPaused MissionStatus = "paused"
 )
@@ -278,7 +274,7 @@ func NewCheckpointPolicy(store CheckpointStore, config PolicyConfig) *DefaultChe
 // ShouldCheckpoint determines if a checkpoint should be created for the given event.
 func (p *DefaultCheckpointPolicy) ShouldCheckpoint(ctx context.Context, event CheckpointEvent) bool {
 	switch event.Type {
-	case CheckpointEventApproval, CheckpointEventShutdown, CheckpointEventError, CheckpointEventBranch:
+	case CheckpointEventShutdown, CheckpointEventError, CheckpointEventBranch:
 		// Always checkpoint for critical events
 		return true
 

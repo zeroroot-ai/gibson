@@ -20,7 +20,8 @@ import (
 type ConstraintAction string
 
 const (
-	// ConstraintActionPause suspends mission execution until manual intervention.
+	// ConstraintActionPause suspends mission execution (e.g. pending a budget top-up
+	// by the budget System) until the constraint clears.
 	ConstraintActionPause ConstraintAction = "pause"
 
 	// ConstraintActionFail immediately fails the mission with constraint violation error.
@@ -97,7 +98,7 @@ func (c *DefaultConstraintChecker) Check(ctx context.Context, constraints *missi
 		return &ConstraintViolation{
 			Constraint:     "max_cost",
 			Message:        fmt.Sprintf("Mission cost %.2f exceeds maximum allowed cost %.2f", metrics.TotalCost, constraints.GetMaxCost()),
-			Action:         ConstraintActionPause, // Cost violations always pause for approval
+			Action:         ConstraintActionPause, // Cost violations pause until budget clears
 			CurrentValue:   metrics.TotalCost,
 			ThresholdValue: constraints.GetMaxCost(),
 		}, nil
@@ -108,7 +109,7 @@ func (c *DefaultConstraintChecker) Check(ctx context.Context, constraints *missi
 		return &ConstraintViolation{
 			Constraint:     "max_tokens",
 			Message:        fmt.Sprintf("Mission tokens %d exceeds maximum allowed tokens %d", metrics.TotalTokens, constraints.GetMaxTokens()),
-			Action:         ConstraintActionPause, // Token violations always pause for approval
+			Action:         ConstraintActionPause, // Token violations pause until budget clears
 			CurrentValue:   metrics.TotalTokens,
 			ThresholdValue: constraints.GetMaxTokens(),
 		}, nil

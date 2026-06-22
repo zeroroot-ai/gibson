@@ -113,27 +113,11 @@ const (
 	EventSystemDaemonStarted       EventType = "system.daemon_started"
 )
 
-// Approval Events
-// These events track human approval requests for sensitive operations.
-const (
-	EventApprovalRequested EventType = "approval.requested"
-	EventApprovalGranted   EventType = "approval.granted"
-	EventApprovalRejected  EventType = "approval.rejected"
-	EventApprovalTimeout   EventType = "approval.timeout"
-)
-
 // Abort Events
 // These events track mission abort and cleanup operations.
 const (
 	EventMissionAborted  EventType = "mission.aborted"
 	EventCleanupRequired EventType = "mission.cleanup_required"
-)
-
-// Escalation Events
-// These events track escalations to humans or specialist agents.
-const (
-	EventEscalationCreated      EventType = "escalation.created"
-	EventEscalationAcknowledged EventType = "escalation.acknowledged"
 )
 
 // Rollback Events

@@ -175,37 +175,6 @@ func (m *mockThreadManager) GenerateSubgraphThreadID(parentThread string, nodeID
 	return parentThread + ":" + nodeID + ":test"
 }
 
-// mockApprovalManager implements checkpoint.ApprovalManager for testing.
-// Signatures refreshed against the current interface (see
-// internal/checkpoint/approval_manager.go) — earlier revisions used
-// ProposedAction/ApprovalDetails arguments that have since been folded
-// into ApprovalRequest/ApprovalDecision structs.
-type mockApprovalManager struct{}
-
-func (m *mockApprovalManager) RequestApproval(ctx context.Context, threadID string, checkpointID string, request checkpoint.ApprovalRequest) (*checkpoint.ApprovalState, error) {
-	return nil, nil
-}
-
-func (m *mockApprovalManager) GetPendingApproval(ctx context.Context, threadID string) (*checkpoint.ApprovalState, error) {
-	return nil, nil
-}
-
-func (m *mockApprovalManager) ProcessDecision(ctx context.Context, threadID string, decision checkpoint.ApprovalDecision) error {
-	return nil
-}
-
-func (m *mockApprovalManager) CheckTimeout(ctx context.Context, threadID string) (bool, error) {
-	return false, nil
-}
-
-func (m *mockApprovalManager) CancelApproval(ctx context.Context, threadID string) error {
-	return nil
-}
-
-func (m *mockApprovalManager) ListPendingApprovals(ctx context.Context) ([]*checkpoint.PendingApproval, error) {
-	return nil, nil
-}
-
 // mockMissionStore implements MissionStore for testing
 type mockMissionStore struct {
 	missions map[types.ID]*Mission
@@ -345,11 +314,10 @@ func TestPauseWithCheckpoint(t *testing.T) {
 	checkpointer := newMockCheckpointer()
 	restorer := &mockRestorer{checkpointer: checkpointer}
 	threadManager := &mockThreadManager{checkpointer: checkpointer}
-	approvalMgr := &mockApprovalManager{}
 	store := newMockMissionStore()
 
 	// Create controller checkpoint methods
-	ccm := NewControllerCheckpointMethods(checkpointer, restorer, store, threadManager, approvalMgr, nil)
+	ccm := NewControllerCheckpointMethods(checkpointer, restorer, store, threadManager, nil)
 
 	// Create a test mission
 	missionID := types.NewID()
@@ -393,11 +361,10 @@ func TestResumeFromCheckpoint(t *testing.T) {
 	checkpointer := newMockCheckpointer()
 	restorer := &mockRestorer{checkpointer: checkpointer}
 	threadManager := &mockThreadManager{checkpointer: checkpointer}
-	approvalMgr := &mockApprovalManager{}
 	store := newMockMissionStore()
 
 	// Create controller checkpoint methods
-	ccm := NewControllerCheckpointMethods(checkpointer, restorer, store, threadManager, approvalMgr, nil)
+	ccm := NewControllerCheckpointMethods(checkpointer, restorer, store, threadManager, nil)
 
 	// Create a test mission
 	missionID := types.NewID()
@@ -445,11 +412,10 @@ func TestDiscoverIncompleteMissions(t *testing.T) {
 	checkpointer := newMockCheckpointer()
 	restorer := &mockRestorer{checkpointer: checkpointer}
 	threadManager := &mockThreadManager{checkpointer: checkpointer}
-	approvalMgr := &mockApprovalManager{}
 	store := newMockMissionStore()
 
 	// Create controller checkpoint methods
-	ccm := NewControllerCheckpointMethods(checkpointer, restorer, store, threadManager, approvalMgr, nil)
+	ccm := NewControllerCheckpointMethods(checkpointer, restorer, store, threadManager, nil)
 
 	// Create incomplete missions
 	for i := 0; i < 3; i++ {
@@ -500,11 +466,10 @@ func TestAcquireLock(t *testing.T) {
 	checkpointer := newMockCheckpointer()
 	restorer := &mockRestorer{checkpointer: checkpointer}
 	threadManager := &mockThreadManager{checkpointer: checkpointer}
-	approvalMgr := &mockApprovalManager{}
 	store := newMockMissionStore()
 
 	// Create controller checkpoint methods
-	ccm := NewControllerCheckpointMethods(checkpointer, restorer, store, threadManager, approvalMgr, nil)
+	ccm := NewControllerCheckpointMethods(checkpointer, restorer, store, threadManager, nil)
 
 	missionID := types.NewID()
 

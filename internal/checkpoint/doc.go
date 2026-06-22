@@ -3,8 +3,8 @@
 //
 // The checkpoint package enables Gibson missions to be paused, resumed, and recovered
 // from failures by capturing complete execution state at strategic points during mission
-// execution. This includes DAG traversal position, node states, memory contents, findings,
-// and approval states.
+// execution. This includes DAG traversal position, node states, memory contents, and
+// findings.
 //
 // # Architecture
 //
@@ -13,7 +13,6 @@
 //   - Checkpoints: Immutable snapshots of complete mission state at a point in time
 //   - Threads: Branching execution paths enabling parallel exploration and what-if scenarios
 //   - ExecutionState: Serializable state representation for persistence and recovery
-//   - ApprovalState: Human-in-the-loop approval mission state
 //
 // # Checkpoint Structure
 //
@@ -25,7 +24,6 @@
 //   - Working and mission memory snapshots
 //   - Conversation history for LLM context reconstruction
 //   - Findings discovered up to this point
-//   - Approval mission state if waiting for human input
 //   - Integrity checksums and encryption metadata
 //
 // # Threading Model
@@ -35,7 +33,6 @@
 //
 //   - Trying different agent parameters or tools
 //   - Exploring alternative decision paths
-//   - Implementing approval rejection with retry
 //   - A/B testing different mission strategies
 //
 // # Storage Optimization
@@ -112,7 +109,6 @@
 //   - ErrDecryptionFailed: Unable to decrypt checkpoint data
 //   - ErrSerializationFailed: Unable to serialize/deserialize state
 //   - ErrThreadNotFound: Thread ID does not exist
-//   - ErrApprovalTimeout: Approval request exceeded timeout
 //
 // # Concurrency
 //

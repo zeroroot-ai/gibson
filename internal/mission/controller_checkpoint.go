@@ -20,7 +20,6 @@ type ControllerCheckpointMethods struct {
 	restorer      checkpoint.StateRestorer
 	store         MissionStore
 	threadManager checkpoint.ThreadManager
-	approvalMgr   checkpoint.ApprovalManager
 	eventBus      events.EventBus // optional; nil means no-op event emission
 
 	// locksMu protects access to the operationLocks map
@@ -37,7 +36,6 @@ func NewControllerCheckpointMethods(
 	restorer checkpoint.StateRestorer,
 	store MissionStore,
 	threadManager checkpoint.ThreadManager,
-	approvalMgr checkpoint.ApprovalManager,
 	eventBus events.EventBus,
 ) *ControllerCheckpointMethods {
 	return &ControllerCheckpointMethods{
@@ -45,7 +43,6 @@ func NewControllerCheckpointMethods(
 		restorer:       restorer,
 		store:          store,
 		threadManager:  threadManager,
-		approvalMgr:    approvalMgr,
 		eventBus:       eventBus,
 		operationLocks: make(map[types.ID]*sync.Mutex),
 	}

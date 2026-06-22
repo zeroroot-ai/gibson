@@ -26,7 +26,6 @@ func TestMissionEventType_String(t *testing.T) {
 		{"cancelled", EventMissionCancelled, "mission.cancelled"},
 		{"progress", EventMissionProgress, "mission.progress"},
 		{"finding", EventMissionFinding, "mission.finding"},
-		{"approval required", EventMissionApprovalRequired, "mission.approval_required"},
 	}
 
 	for _, tt := range tests {
@@ -118,19 +117,6 @@ func TestEventHelpers(t *testing.T) {
 		assert.Equal(t, "SQL Injection", payload.Title)
 		assert.Equal(t, "high", payload.Severity)
 		assert.Equal(t, "agent-1", payload.AgentName)
-	})
-
-	t.Run("NewApprovalRequiredEvent", func(t *testing.T) {
-		approvalID := types.NewID()
-		ctx := map[string]any{"plan": "delete users"}
-		event := NewApprovalRequiredEvent(missionID, approvalID, "high risk", "destructive", ctx)
-		assert.Equal(t, EventMissionApprovalRequired, event.Type)
-		payload, ok := event.Payload.(*ApprovalPayload)
-		require.True(t, ok)
-		assert.Equal(t, approvalID, payload.ApprovalID)
-		assert.Equal(t, "high risk", payload.Reason)
-		assert.Equal(t, "destructive", payload.ActionType)
-		assert.Equal(t, ctx, payload.Context)
 	})
 
 	t.Run("NewCheckpointEvent", func(t *testing.T) {

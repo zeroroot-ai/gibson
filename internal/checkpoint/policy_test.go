@@ -93,16 +93,6 @@ func TestCheckpointPolicy_ShouldCheckpoint(t *testing.T) {
 		expected bool
 	}{
 		{
-			name:   "approval event always checkpoints",
-			config: DefaultPolicyConfig(),
-			event: CheckpointEvent{
-				Type:      CheckpointEventApproval,
-				NodeID:    "node1",
-				Timestamp: time.Now(),
-			},
-			expected: true,
-		},
-		{
 			name:   "shutdown event always checkpoints",
 			config: DefaultPolicyConfig(),
 			event: CheckpointEvent{

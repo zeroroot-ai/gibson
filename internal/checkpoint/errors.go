@@ -37,9 +37,6 @@ var (
 	// ErrThreadNotFound is returned when a thread doesn't exist.
 	ErrThreadNotFound = errors.New("thread not found")
 
-	// ErrApprovalTimeout is returned when an approval request times out.
-	ErrApprovalTimeout = errors.New("approval request timeout")
-
 	// ErrBlobNotFound is returned when a requested blob doesn't exist.
 	ErrBlobNotFound = errors.New("blob not found")
 
