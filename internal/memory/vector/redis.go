@@ -155,14 +155,20 @@ func (s *RedisVectorStore) StoreBatch(ctx context.Context, records []VectorRecor
 //  1. Pure vector search: Finds top-K most similar vectors by cosine similarity
 //  2. Hybrid search: Combines full-text query on content with KNN vector search
 //
-// The implementation uses RediSearch DIALECT 2 for KNN query syntax:
+// The implementation uses RediSearch DIALECT 2 for KNN query syntax. The KNN
+// clause carries a pre-filter: `*` for a pure vector search, or the full-text
+// predicate for a hybrid search. The pre-filter and the KNN clause are a single
+// expression joined by `=>`:
 //
+//	// pure vector
 //	FT.SEARCH gibson:idx:vectors
 //	  "*=>[KNN {topK} @embedding $query_vec AS score]"
-//	  PARAMS 2 query_vec <binary_blob>
-//	  SORTBY score
-//	  RETURN 3 content metadata score
-//	  DIALECT 2
+//	  PARAMS 2 query_vec <binary_blob> SORTBY score RETURN 3 $ score __score DIALECT 2
+//
+//	// hybrid (full-text pre-filter replaces the wildcard)
+//	FT.SEARCH gibson:idx:vectors
+//	  "(@content:({text}))=>[KNN {topK} @embedding $query_vec AS score]"
+//	  PARAMS 2 query_vec <binary_blob> SORTBY score RETURN 3 $ score __score DIALECT 2
 //
 // Returns results sorted by cosine similarity (higher scores = more similar).
 func (s *RedisVectorStore) Search(ctx context.Context, query VectorQuery) ([]VectorResult, error) {
@@ -194,16 +200,24 @@ func (s *RedisVectorStore) Search(ctx context.Context, query VectorQuery) ([]Vec
 	// Convert embedding to binary blob (FLOAT32 encoding for RediSearch)
 	vectorBlob := embeddingToFloat32Bytes(query.Embedding)
 
-	// Build KNN query string
-	// Format: "*=>[KNN {topK} @embedding $query_vec AS score]"
-	knnQuery := fmt.Sprintf("*=>[KNN %d @embedding $query_vec AS score]", query.TopK)
-
-	// If hybrid search with text query on content, combine queries
+	// Build the KNN query string in RediSearch DIALECT 2 form:
+	//
+	//	<prefilter>=>[KNN {topK} @embedding $query_vec AS score]
+	//
+	// The `<prefilter>` is the subset of the index the KNN runs over. For a
+	// pure vector search that is the match-all wildcard `*`; for a hybrid
+	// search it is the full-text predicate on @content. The prefilter and the
+	// KNN clause are a SINGLE expression joined by `=>` — emitting them as two
+	// space-separated tokens (`@content:(x) *=>[KNN ...]`) is a syntax error
+	// (the parser rejects the trailing `*=>[...]` after a completed predicate;
+	// RediSearch reports "Syntax error at offset N near <text>").
+	prefilter := "*"
 	if query.Text != "" {
-		// Escape special characters in text query
-		escapedText := state.EscapeQuery(query.Text)
-		knnQuery = fmt.Sprintf("@content:(%s) %s", escapedText, knnQuery)
+		// Escape special characters in the text query so they are treated as
+		// literal content, then scope the predicate to the @content field.
+		prefilter = fmt.Sprintf("(@content:(%s))", state.EscapeQuery(query.Text))
 	}
+	knnQuery := fmt.Sprintf("%s=>[KNN %d @embedding $query_vec AS score]", prefilter, query.TopK)
 
 	// Build FT.SEARCH command with KNN parameters
 	args := []interface{}{
