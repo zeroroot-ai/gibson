@@ -2,17 +2,16 @@ package component
 
 import (
 	"context"
-	"database/sql"
 	"errors"
 	"fmt"
 	"log/slog"
 	"strconv"
 	"sync"
-	"time"
 
 	"google.golang.org/grpc/codes"
 	"google.golang.org/grpc/status"
 
+	"github.com/zeroroot-ai/gibson/internal/entitlements"
 	"github.com/zeroroot-ai/gibson/internal/state"
 	"github.com/zeroroot-ai/sdk/auth"
 )
@@ -46,9 +45,13 @@ const (
 
 // QuotaManager enforces per-tenant resource quotas.
 //
-// Architecture (post spec plans-and-quotas-simplification):
-//   - Limits (config) live in the platform Postgres `tenant_quotas` row.
-//     Written exclusively by the operator's UpsertTenantQuota RPC.
+// Architecture (post ADR-0003 entitlements seam):
+//   - Limits (config) come exclusively from the entitlements.Provider. The
+//     QuotaManager never reads plans, Stripe, or the tenant_quotas row
+//     directly — it asks the Provider "what are this tenant's limits?" The
+//     OSS default provider (entitlements.NewConfigProvider) derives those
+//     limits from admin-set quota config; the commercial layer swaps in a
+//     plan/subscription-driven provider behind the same interface.
 //   - Active counters (runtime state) live in Redis. Written by the daemon
 //     on mission state transitions and agent task lifecycle.
 //
@@ -56,125 +59,77 @@ const (
 // deleted. Memory enforcement (CheckMemoryQuota / quota:memory:used_mb) is
 // likewise deleted — if it ever returns it ships in its own spec.
 type QuotaManager struct {
-	store  *state.TenantScopedStore
-	db     *sql.DB
-	logger *slog.Logger
+	store    *state.TenantScopedStore
+	provider entitlements.Provider
+	logger   *slog.Logger
 
-	cacheTTL time.Duration
-	cacheMu  sync.RWMutex
-	cache    map[string]quotaCacheEntry
-	flight   sync.Map // tenantID → *flightToken
+	cacheMu sync.RWMutex
+	cache   map[string]quotaCacheEntry // test-priming / direct seeding only
 }
 
 type quotaCacheEntry struct {
-	q        TenantQuota
-	expireAt time.Time
-}
-
-type flightToken struct {
-	once sync.Once
-	q    TenantQuota
-	err  error
+	q TenantQuota
 }
 
 // NewQuotaManager creates a QuotaManager backed by the given TenantScopedStore
-// (Redis active counters) and platform Postgres pool (limits). The store must
-// be non-nil; db may be nil in dev/kind setups, in which case GetQuota
-// returns nil (unlimited) for every tenant.
-func NewQuotaManager(store *state.TenantScopedStore, db *sql.DB, logger *slog.Logger) *QuotaManager {
+// (Redis active counters) and entitlements Provider (limits). The store must
+// be non-nil; provider may be nil, in which case every tenant is unlimited
+// (entitlements.Resolve degrades a nil Provider to UnlimitedProvider).
+func NewQuotaManager(store *state.TenantScopedStore, provider entitlements.Provider, logger *slog.Logger) *QuotaManager {
 	return &QuotaManager{
 		store:    store,
-		db:       db,
+		provider: entitlements.Resolve(provider),
 		logger:   logger.With("component", "quota_manager"),
-		cacheTTL: 60 * time.Second,
 		cache:    make(map[string]quotaCacheEntry),
 	}
 }
 
-// GetQuota retrieves the configured limits for a tenant from the platform
-// Postgres `tenant_quotas` row, with a 60s in-process LRU cache. Returns nil
-// (and no error) when:
-//   - the daemon was started without a platform Postgres pool, or
-//   - no row exists for the tenant.
+// GetQuota retrieves the configured limits for a tenant from the entitlements
+// Provider. Returns nil (and no error) when the provider reports no limits
+// (every dimension unlimited). Callers interpret nil as "unlimited on all
+// dimensions".
 //
-// Callers interpret nil as "unlimited on all dimensions".
+// A directly-seeded cache entry (tests, future push sources) takes
+// precedence over the provider.
 func (q *QuotaManager) GetQuota(ctx context.Context, tenant string) (*TenantQuota, error) {
 	if tenant == "" {
 		return nil, fmt.Errorf("tenant must not be empty")
 	}
 
-	// Fast path: cache hit. Honoured even when db == nil so tests (and
-	// future operator-driven write paths) can prime the cache directly.
+	// Test/seed override: an explicitly-primed cache entry wins.
 	q.cacheMu.RLock()
-	if entry, ok := q.cache[tenant]; ok && time.Now().Before(entry.expireAt) {
+	if entry, ok := q.cache[tenant]; ok {
 		out := entry.q
 		q.cacheMu.RUnlock()
 		return &out, nil
 	}
 	q.cacheMu.RUnlock()
 
-	if q.db == nil {
-		return nil, nil
-	}
-
-	// Slow path: singleflight DB read so concurrent callers share one query.
-	tokenIface, _ := q.flight.LoadOrStore(tenant, &flightToken{})
-	tok := tokenIface.(*flightToken)
-	tok.once.Do(func() {
-		defer q.flight.Delete(tenant)
-		quota, err := q.readQuotaRow(ctx, tenant)
-		if err != nil {
-			tok.err = err
-			return
-		}
-		if quota != nil {
-			tok.q = *quota
-			q.cacheMu.Lock()
-			q.cache[tenant] = quotaCacheEntry{q: *quota, expireAt: time.Now().Add(q.cacheTTL)}
-			q.cacheMu.Unlock()
-		}
-	})
-	if tok.err != nil {
-		return nil, tok.err
-	}
-	if tok.q.TenantID == "" {
-		return nil, nil
-	}
-	out := tok.q
-	return &out, nil
-}
-
-// readQuotaRow performs the SELECT against tenant_quotas. Returns nil + nil
-// when the row is absent.
-func (q *QuotaManager) readQuotaRow(ctx context.Context, tenant string) (*TenantQuota, error) {
-	const sqlQuery = `
-		SELECT concurrent_missions, concurrent_agents, concurrent_connectors
-		FROM tenant_quotas
-		WHERE tenant_id = $1
-	`
-	var quota TenantQuota
-	quota.TenantID = tenant
-	err := q.db.QueryRowContext(ctx, sqlQuery, tenant).Scan(
-		&quota.ConcurrentMissions,
-		&quota.ConcurrentAgents,
-		&quota.ConcurrentConnectors,
-	)
-	if errors.Is(err, sql.ErrNoRows) {
-		return nil, nil
-	}
+	lim, err := q.provider.Limits(ctx, tenant)
 	if err != nil {
-		return nil, fmt.Errorf("read tenant_quotas for %s: %w", tenant, err)
+		return nil, err
 	}
-	return &quota, nil
+	if lim == (entitlements.Limits{}) {
+		return nil, nil
+	}
+	return &TenantQuota{
+		TenantID:             tenant,
+		ConcurrentMissions:   lim.ConcurrentMissions,
+		ConcurrentAgents:     lim.ConcurrentAgents,
+		ConcurrentConnectors: lim.ConcurrentConnectors,
+	}, nil
 }
 
-// InvalidateCache drops the cached quota entry for one tenant. Intended for
-// callers that have just written a new quota record and want subsequent reads
-// to reflect the change immediately.
+// InvalidateCache drops any seeded quota entry for one tenant and, when the
+// Provider supports it, invalidates the Provider's own cache so a subsequent
+// read reflects a just-written quota change immediately.
 func (q *QuotaManager) InvalidateCache(tenant string) {
 	q.cacheMu.Lock()
 	delete(q.cache, tenant)
 	q.cacheMu.Unlock()
+	if inv, ok := q.provider.(entitlements.Invalidator); ok {
+		inv.Invalidate(tenant)
+	}
 }
 
 // CheckMissionQuota verifies that the tenant in ctx has not exceeded its

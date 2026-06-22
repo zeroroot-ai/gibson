@@ -5,7 +5,6 @@ import (
 	"log/slog"
 	"os"
 	"testing"
-	"time"
 
 	"github.com/alicebob/miniredis/v2"
 	"github.com/stretchr/testify/assert"
@@ -68,11 +67,8 @@ func setLimits(qm *QuotaManager, tenant string, missions, agents int) {
 			ConcurrentMissions: missions,
 			ConcurrentAgents:   agents,
 		},
-		expireAt: timeFarFuture(),
 	}
 }
-
-func timeFarFuture() time.Time { return time.Now().Add(24 * time.Hour) }
 
 // isResourceExhausted returns true if err is a gRPC ResourceExhausted status.
 func isResourceExhausted(err error) bool {
@@ -138,8 +134,7 @@ func setConnectorLimit(qm *QuotaManager, tenant string, connectors int) {
 		qm.cache = make(map[string]quotaCacheEntry)
 	}
 	qm.cache[tenant] = quotaCacheEntry{
-		q:        TenantQuota{TenantID: tenant, ConcurrentConnectors: connectors},
-		expireAt: timeFarFuture(),
+		q: TenantQuota{TenantID: tenant, ConcurrentConnectors: connectors},
 	}
 }
 

@@ -228,7 +228,7 @@ func TestNoGracefulNilInRequestPaths(t *testing.T) {
 		// for composite nil-receiver shims (typically `r == nil || r.X == nil`).
 
 		// internal/budget
-		"internal/budget/enforcer.go:191": astchecks.Entry{Category: astchecks.CategoryLegacyOptional, Reason: "teams dep optional in budget enforcer; reassert via budget-required follow-up"},
+		"internal/budget/enforcer.go:202": astchecks.Entry{Category: astchecks.CategoryLegacyOptional, Reason: "teams dep optional in budget enforcer; reassert via budget-required follow-up"},
 
 		// internal/checkpoint
 		"internal/checkpoint/state.go:381": astchecks.Entry{Category: astchecks.CategoryDefensiveGuard, Reason: "proto WorkingMemory field, legitimately nil-able"},
@@ -237,7 +237,9 @@ func TestNoGracefulNilInRequestPaths(t *testing.T) {
 		// internal/component
 		"internal/component/installer.go:1702": astchecks.Entry{Category: astchecks.CategoryDefensiveGuard, Reason: "manifest.Dependencies value-shape field"},
 		"internal/component/installer.go:2393": astchecks.Entry{Category: astchecks.CategoryLegacyOptional, Reason: "taxonomy registry conditionally wired; reassert with taxonomy-required follow-up"},
-		"internal/component/quota.go:110":      astchecks.Entry{Category: astchecks.CategoryLegacyOptional, Reason: "quota DB optional; reassert with platform-Postgres-required follow-up"},
+		// (quota.go DB nil-guard removed: limits now flow through the
+		// entitlements provider, which resolves nil to UnlimitedProvider —
+		// no in-method nil-guard remains. ADR-0003 / gibson#754.)
 
 		// internal/finding — Metadata proto field is legitimately nil-able
 		"internal/finding/export/sarif_exporter.go:414": astchecks.Entry{Category: astchecks.CategoryDefensiveGuard, Reason: "proto Metadata field on Finding, legitimately nil-able"},
