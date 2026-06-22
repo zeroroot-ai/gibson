@@ -491,26 +491,48 @@ func TestPipeline_ShortCircuitOnBlock(t *testing.T) {
 	}
 }
 
-// TestPipeline_ConcurrentUsage tests concurrent pipeline usage from multiple agents
+// TestPipeline_ConcurrentUsage tests concurrent pipeline usage from multiple agents.
+//
+// The rate-limiting subtests use a frozen, injected clock (builtin.WithClock) so
+// the token bucket never refills mid-test. This makes the allow/block split a
+// deterministic function of burst capacity (= MaxRequests) rather than of
+// wall-clock elapsed time and scheduler behavior, which previously made the test
+// flake under full-suite CPU contention (#894). The goroutines still run
+// concurrently against the shared limiter, so the thread-safety coverage is
+// preserved — only the timing nondeterminism is removed.
 func TestPipeline_ConcurrentUsage(t *testing.T) {
-	// Create a pipeline with rate limiting per target
-	pipeline := guardrail.NewGuardrailPipeline(
-		builtin.NewScopeValidator(builtin.ScopeValidatorConfig{
-			AllowedDomains: []string{"*.example.com"},
-		}),
-		builtin.NewRateLimiter(builtin.RateLimiterConfig{
-			MaxRequests: 5,
-			Window:      100 * time.Millisecond,
-			PerTarget:   true, // Separate limits per target
-		}),
-		mustNewPIIDetector(t, builtin.PIIDetectorConfig{
-			Action:          guardrail.GuardrailActionRedact,
-			EnabledPatterns: []string{"email"},
-		}),
+	const (
+		maxRequests = 5
+		window      = 100 * time.Millisecond
 	)
+
+	// frozenClock returns a fixed time source; with no advance the token bucket
+	// starts full (burst = maxRequests) and never refills during a subtest.
+	frozenClock := func() func() time.Time {
+		t0 := time.Now()
+		return func() time.Time { return t0 }
+	}
+
+	newPipeline := func(clock func() time.Time) *guardrail.GuardrailPipeline {
+		return guardrail.NewGuardrailPipeline(
+			builtin.NewScopeValidator(builtin.ScopeValidatorConfig{
+				AllowedDomains: []string{"*.example.com"},
+			}),
+			builtin.NewRateLimiter(builtin.RateLimiterConfig{
+				MaxRequests: maxRequests,
+				Window:      window,
+				PerTarget:   true, // Separate limits per target
+			}, builtin.WithClock(clock)),
+			mustNewPIIDetector(t, builtin.PIIDetectorConfig{
+				Action:          guardrail.GuardrailActionRedact,
+				EnabledPatterns: []string{"email"},
+			}),
+		)
+	}
 
 	// Test concurrent requests from multiple agents
 	t.Run("concurrent agents with different targets", func(t *testing.T) {
+		pipeline := newPipeline(frozenClock())
 		ctx := context.Background()
 		numAgents := 3
 		requestsPerAgent := 10
@@ -540,16 +562,15 @@ func TestPipeline_ConcurrentUsage(t *testing.T) {
 
 					_, err := pipeline.ProcessInput(ctx, input)
 					results[idx][reqIdx] = err
-
-					// Small delay between requests
-					time.Sleep(10 * time.Millisecond)
 				}
 			}(agentIdx)
 		}
 
 		wg.Wait()
 
-		// Verify results
+		// Verify results. Each agent has its own per-target bucket; with the clock
+		// frozen, exactly maxRequests requests are allowed (the burst) and the rest
+		// are blocked — independent of CPU contention.
 		for agentIdx, agentResults := range results {
 			t.Logf("Agent %d results:", agentIdx)
 			allowedCount := 0
@@ -572,13 +593,16 @@ func TestPipeline_ConcurrentUsage(t *testing.T) {
 
 			t.Logf("  Allowed: %d, Blocked: %d", allowedCount, blockedCount)
 
-			// Each agent should have some allowed and some blocked due to rate limiting
-			assert.Greater(t, allowedCount, 0, "Agent %d should have some allowed requests", agentIdx)
-			assert.Greater(t, blockedCount, 0, "Agent %d should have some blocked requests", agentIdx)
+			// Deterministic split: burst allows exactly maxRequests, rest blocked.
+			assert.Equal(t, maxRequests, allowedCount,
+				"Agent %d should have exactly the burst allowed", agentIdx)
+			assert.Equal(t, requestsPerAgent-maxRequests, blockedCount,
+				"Agent %d should have the remainder blocked", agentIdx)
 		}
 	})
 
 	t.Run("concurrent agents with same target", func(t *testing.T) {
+		pipeline := newPipeline(frozenClock())
 		ctx := context.Background()
 		numAgents := 5
 		requestsPerAgent := 3
@@ -627,12 +651,17 @@ func TestPipeline_ConcurrentUsage(t *testing.T) {
 		t.Logf("Concurrent same-target results: Allowed: %d, Blocked: %d",
 			totalAllowed, totalBlocked)
 
-		// With same target and rate limiting, some should be blocked
-		assert.Greater(t, totalAllowed, 0, "Should have some allowed requests")
-		assert.Greater(t, totalBlocked, 0, "Should have some blocked requests due to shared rate limit")
+		// All agents share one bucket. numAgents*requestsPerAgent (15) requests
+		// against a frozen clock: exactly maxRequests allowed, the rest blocked.
+		totalRequests := numAgents * requestsPerAgent
+		assert.Equal(t, maxRequests, totalAllowed,
+			"Shared bucket should allow exactly the burst")
+		assert.Equal(t, totalRequests-maxRequests, totalBlocked,
+			"Shared bucket should block the remainder")
 	})
 
 	t.Run("concurrent PII redaction", func(t *testing.T) {
+		pipeline := newPipeline(frozenClock())
 		ctx := context.Background()
 		numGoroutines := 10
 
@@ -646,6 +675,8 @@ func TestPipeline_ConcurrentUsage(t *testing.T) {
 			go func(idx int) {
 				defer wg.Done()
 
+				// Each goroutine targets a distinct domain, so the per-target
+				// rate limiter (1 request per target) never blocks here.
 				input := guardrail.GuardrailInput{
 					Content:   fmt.Sprintf("Email for agent %d: agent%d@example.com", idx, idx),
 					AgentName: fmt.Sprintf("agent-%d", idx),
@@ -797,11 +828,26 @@ func TestPipeline_RedactionThroughMultipleGuardrails(t *testing.T) {
 // TestPipeline_RateLimitingBehavior tests rate limiting edge cases
 func TestPipeline_RateLimitingBehavior(t *testing.T) {
 	t.Run("rate limit recovery after window", func(t *testing.T) {
+		// Drive a virtual clock so window recovery is exercised by advancing time
+		// explicitly rather than sleeping on the wall clock (deterministic, #894).
+		var mu sync.Mutex
+		now := time.Now()
+		clock := func() time.Time {
+			mu.Lock()
+			defer mu.Unlock()
+			return now
+		}
+		advance := func(d time.Duration) {
+			mu.Lock()
+			defer mu.Unlock()
+			now = now.Add(d)
+		}
+
 		pipeline := guardrail.NewGuardrailPipeline(
 			builtin.NewRateLimiter(builtin.RateLimiterConfig{
 				MaxRequests: 2,
 				Window:      100 * time.Millisecond,
-			}),
+			}, builtin.WithClock(clock)),
 		)
 
 		ctx := context.Background()
@@ -823,8 +869,8 @@ func TestPipeline_RateLimitingBehavior(t *testing.T) {
 		require.True(t, errors.As(err, &blockedErr))
 		assert.Equal(t, guardrail.GuardrailTypeRate, blockedErr.GuardrailType)
 
-		// Wait for window to reset
-		time.Sleep(150 * time.Millisecond)
+		// Advance past the window so the bucket refills.
+		advance(150 * time.Millisecond)
 
 		// Should be able to make requests again
 		_, err = pipeline.ProcessInput(ctx, input)

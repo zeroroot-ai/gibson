@@ -25,6 +25,11 @@ type RateLimiter struct {
 	config RateLimiterConfig
 	name   string
 
+	// now supplies the current time. It defaults to time.Now in production;
+	// tests inject a controllable clock via WithClock so token-bucket refill
+	// is driven by virtual time instead of wall-clock + scheduler behavior.
+	now func() time.Time
+
 	// Global limiter (when PerTarget is false)
 	global *rate.Limiter
 
@@ -33,8 +38,22 @@ type RateLimiter struct {
 	mu       sync.RWMutex
 }
 
+// RateLimiterOption customizes a RateLimiter at construction time.
+type RateLimiterOption func(*RateLimiter)
+
+// WithClock injects a custom time source for the rate limiter's token bucket.
+// It is a test seam for deterministic, virtual-time tests; production code never
+// sets it, so the default time.Now behavior is unchanged. A nil clock is ignored.
+func WithClock(now func() time.Time) RateLimiterOption {
+	return func(r *RateLimiter) {
+		if now != nil {
+			r.now = now
+		}
+	}
+}
+
 // NewRateLimiter creates a new rate limiter
-func NewRateLimiter(config RateLimiterConfig) *RateLimiter {
+func NewRateLimiter(config RateLimiterConfig, opts ...RateLimiterOption) *RateLimiter {
 	// Default burst size to MaxRequests if not set
 	if config.BurstSize == 0 {
 		config.BurstSize = config.MaxRequests
@@ -46,7 +65,12 @@ func NewRateLimiter(config RateLimiterConfig) *RateLimiter {
 	rl := &RateLimiter{
 		config:   config,
 		name:     "rate-limiter",
+		now:      time.Now,
 		limiters: make(map[string]*rate.Limiter),
+	}
+
+	for _, opt := range opts {
+		opt(rl)
 	}
 
 	// Create global limiter if not per-target
@@ -85,11 +109,14 @@ func (r *RateLimiter) CheckInput(ctx context.Context, input guardrail.GuardrailI
 		limiter = r.global
 	}
 
-	// Check if we can allow this request
-	if !limiter.Allow() {
+	// Check if we can allow this request. AllowN/ReserveN take an explicit
+	// timestamp so token-bucket refill is driven by r.now (time.Now in
+	// production, a virtual clock under test) rather than an implicit wall clock.
+	now := r.now()
+	if !limiter.AllowN(now, 1) {
 		// Calculate retry-after duration
-		reservation := limiter.Reserve()
-		delay := reservation.Delay()
+		reservation := limiter.ReserveN(now, 1)
+		delay := reservation.DelayFrom(now)
 		reservation.Cancel() // Cancel the reservation since we're blocking
 
 		result := guardrail.NewBlockResult(
