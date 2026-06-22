@@ -15,7 +15,7 @@ import (
 
 	"github.com/zeroroot-ai/gibson/internal/llm"
 	"github.com/zeroroot-ai/gibson/internal/state"
-	sdksecrets "github.com/zeroroot-ai/platform-clients/secrets"
+	sdksecrets "github.com/zeroroot-ai/gibson/internal/infra/secrets"
 	"github.com/zeroroot-ai/sdk/auth"
 )
 

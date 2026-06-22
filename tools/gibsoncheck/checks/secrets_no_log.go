@@ -52,7 +52,7 @@ var SecretsNoLogAnalyzer = &analysis.Analyzer{
 // common method names like "Get".
 var secretsPackagePrefixes = []string{
 	"github.com/zeroroot-ai/sdk/secrets",
-	"github.com/zeroroot-ai/platform-clients/secrets",
+	"github.com/zeroroot-ai/gibson/internal/infra/secrets",
 	"github.com/zeroroot-ai/gibson/internal/secrets",
 	"github.com/zeroroot-ai/gibson/internal/database/postgres",
 }

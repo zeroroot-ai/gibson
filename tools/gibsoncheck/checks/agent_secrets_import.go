@@ -61,7 +61,7 @@ var agentSecretsImportExemptSubstrings = []string{
 // equally forbidden from agent/tool packages.
 var brokerImportPrefixes = []string{
 	"github.com/zeroroot-ai/sdk/secrets",
-	"github.com/zeroroot-ai/platform-clients/secrets",
+	"github.com/zeroroot-ai/gibson/internal/infra/secrets",
 }
 
 func runAgentSecretsImport(pass *analysis.Pass) (any, error) {

@@ -10,7 +10,7 @@ import (
 	"time"
 
 	"github.com/jackc/pgx/v5/pgxpool"
-	pcpools "github.com/zeroroot-ai/platform-clients/pools"
+	pcpools "github.com/zeroroot-ai/gibson/internal/infra/pools"
 	"github.com/zeroroot-ai/sdk/auth"
 )
 

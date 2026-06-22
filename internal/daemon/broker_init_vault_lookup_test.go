@@ -23,7 +23,7 @@ import (
 	"time"
 
 	"github.com/zeroroot-ai/gibson/internal/secrets"
-	sdkvault "github.com/zeroroot-ai/platform-clients/secrets/vault"
+	sdkvault "github.com/zeroroot-ai/gibson/internal/infra/secrets/vault"
 )
 
 // TestVaultRefreshLookup_KeyByBlobHashIsolatesDistinctConfigs verifies

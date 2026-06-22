@@ -7,7 +7,7 @@ import (
 	"fmt"
 	"strings"
 
-	sdksecrets "github.com/zeroroot-ai/platform-clients/secrets"
+	sdksecrets "github.com/zeroroot-ai/gibson/internal/infra/secrets"
 	"github.com/zeroroot-ai/sdk/auth"
 
 	"github.com/zeroroot-ai/gibson/internal/datapool"

@@ -26,7 +26,7 @@ import (
 	"github.com/zeroroot-ai/gibson/internal/providerconfig"
 	"github.com/zeroroot-ai/gibson/tests/testhelpers"
 
-	sdksecrets "github.com/zeroroot-ai/platform-clients/secrets"
+	sdksecrets "github.com/zeroroot-ai/gibson/internal/infra/secrets"
 	"github.com/zeroroot-ai/sdk/auth"
 )
 

@@ -14,7 +14,7 @@ import (
 	"fmt"
 
 	"github.com/zeroroot-ai/gibson/internal/secrets"
-	sdksecrets "github.com/zeroroot-ai/platform-clients/secrets"
+	sdksecrets "github.com/zeroroot-ai/gibson/internal/infra/secrets"
 )
 
 // MapProbeFactory implements ProviderProbeFactory by looking up the

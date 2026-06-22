@@ -8,7 +8,7 @@ import (
 	"time"
 
 	redis "github.com/redis/go-redis/v9"
-	pcpools "github.com/zeroroot-ai/platform-clients/pools"
+	pcpools "github.com/zeroroot-ai/gibson/internal/infra/pools"
 	"github.com/zeroroot-ai/sdk/auth"
 
 	pdataplane "github.com/zeroroot-ai/gibson/pkg/platform/dataplane"

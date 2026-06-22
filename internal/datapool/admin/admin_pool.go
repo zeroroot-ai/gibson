@@ -39,7 +39,7 @@ import (
 	neo4j "github.com/neo4j/neo4j-go-driver/v5/neo4j"
 	neo4jconfig "github.com/neo4j/neo4j-go-driver/v5/neo4j/config"
 	redis "github.com/redis/go-redis/v9"
-	pcpools "github.com/zeroroot-ai/platform-clients/pools"
+	pcpools "github.com/zeroroot-ai/gibson/internal/infra/pools"
 	"google.golang.org/grpc"
 
 	"github.com/zeroroot-ai/gibson/internal/authz"

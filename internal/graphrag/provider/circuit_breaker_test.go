@@ -22,7 +22,7 @@ import (
 	"github.com/zeroroot-ai/gibson/internal/graphrag"
 	"github.com/zeroroot-ai/gibson/internal/graphrag/graph"
 	"github.com/zeroroot-ai/gibson/internal/types"
-	"github.com/zeroroot-ai/platform-clients/resilience"
+	"github.com/zeroroot-ai/gibson/internal/infra/resilience"
 )
 
 // newTestProviderWithMock creates a LocalGraphRAGProvider wired with a connected

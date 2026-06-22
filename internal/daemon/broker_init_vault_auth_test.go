@@ -5,7 +5,7 @@ import (
 	"strings"
 	"testing"
 
-	sdkvault "github.com/zeroroot-ai/platform-clients/secrets/vault"
+	sdkvault "github.com/zeroroot-ai/gibson/internal/infra/secrets/vault"
 )
 
 // TestVaultAuthLogin_KubernetesIsDenied is the daemon-side mirror of the SDK's

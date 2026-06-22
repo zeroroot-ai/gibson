@@ -9,7 +9,7 @@ import (
 
 	neo4j "github.com/neo4j/neo4j-go-driver/v5/neo4j"
 	neo4jconfig "github.com/neo4j/neo4j-go-driver/v5/neo4j/config"
-	pcpools "github.com/zeroroot-ai/platform-clients/pools"
+	pcpools "github.com/zeroroot-ai/gibson/internal/infra/pools"
 	"github.com/zeroroot-ai/sdk/auth"
 )
 

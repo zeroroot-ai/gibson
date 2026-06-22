@@ -16,12 +16,12 @@ import (
 	"github.com/zeroroot-ai/gibson/internal/secrets"
 	"github.com/zeroroot-ai/gibson/internal/secrets/configstore"
 	"github.com/zeroroot-ai/gibson/internal/secrets/jwtsource"
-	"github.com/zeroroot-ai/platform-clients/resilience"
-	sdksecrets "github.com/zeroroot-ai/platform-clients/secrets"
-	sdkawssm "github.com/zeroroot-ai/platform-clients/secrets/awssm"
-	sdkazurekv "github.com/zeroroot-ai/platform-clients/secrets/azurekv"
-	sdkgcpsm "github.com/zeroroot-ai/platform-clients/secrets/gcpsm"
-	sdkvault "github.com/zeroroot-ai/platform-clients/secrets/vault"
+	"github.com/zeroroot-ai/gibson/internal/infra/resilience"
+	sdksecrets "github.com/zeroroot-ai/gibson/internal/infra/secrets"
+	sdkawssm "github.com/zeroroot-ai/gibson/internal/infra/secrets/awssm"
+	sdkazurekv "github.com/zeroroot-ai/gibson/internal/infra/secrets/azurekv"
+	sdkgcpsm "github.com/zeroroot-ai/gibson/internal/infra/secrets/gcpsm"
+	sdkvault "github.com/zeroroot-ai/gibson/internal/infra/secrets/vault"
 	"github.com/zeroroot-ai/sdk/auth"
 )
 

@@ -31,8 +31,8 @@ import (
 	"github.com/zeroroot-ai/gibson/internal/datapool"
 	"github.com/zeroroot-ai/gibson/internal/datapool/envelope"
 	"github.com/zeroroot-ai/gibson/tests/testhelpers"
-	"github.com/zeroroot-ai/platform-clients/secrets"
-	"github.com/zeroroot-ai/platform-clients/secrets/contract"
+	"github.com/zeroroot-ai/gibson/internal/infra/secrets"
+	"github.com/zeroroot-ai/gibson/internal/infra/secrets/contract"
 	"github.com/zeroroot-ai/sdk/auth"
 )
 
