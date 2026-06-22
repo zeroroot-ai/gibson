@@ -631,8 +631,12 @@ func TargetIndex() *IndexDefinition {
 //	FT.SEARCH gibson:idx:vectors "*=>[KNN 10 @embedding $vector]" \
 //	  PARAMS 2 vector <binary-vector-blob> DIALECT 2
 //
-//	// Hybrid search (vector + full-text)
-//	FT.SEARCH gibson:idx:vectors "@content:security *=>[KNN 10 @embedding $vector]" \
+//	// Hybrid search (vector + full-text). In DIALECT 2 the full-text
+//	// predicate is the KNN PRE-FILTER and replaces the `*` wildcard — the
+//	// filter and the KNN clause are one expression joined by `=>`. Writing
+//	// them as two space-separated tokens (`@content:security *=>[KNN ...]`)
+//	// is a syntax error.
+//	FT.SEARCH gibson:idx:vectors "(@content:security)=>[KNN 10 @embedding $vector]" \
 //	  PARAMS 2 vector <binary-vector-blob> DIALECT 2
 //
 //	// Vector search sorted by timestamp
