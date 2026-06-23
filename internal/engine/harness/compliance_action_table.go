@@ -84,7 +84,6 @@ const (
 	MethodMissionExecutionContext HarnessMethod = "MissionExecutionContext"
 	MethodGetMissionRunHistory    HarnessMethod = "GetMissionRunHistory"
 	MethodTarget                  HarnessMethod = "Target"
-	MethodCheckpoint              HarnessMethod = "Checkpoint"
 	MethodWorkspace               HarnessMethod = "Workspace"
 	MethodWorkspaces              HarnessMethod = "Workspaces"
 
@@ -159,7 +158,6 @@ var actionTable = ActionTable{
 	MethodMissionExecutionContext: {Action: ActionMissionLifecycle, DefaultEffect: EffectNone, Emit: false},
 	MethodGetMissionRunHistory:    {Action: ActionMissionLifecycle, DefaultEffect: EffectRead, Emit: false},
 	MethodTarget:                  {Action: ActionMissionLifecycle, DefaultEffect: EffectNone, Emit: false},
-	MethodCheckpoint:              {Action: ActionMissionLifecycle, DefaultEffect: EffectNone, Emit: false},
 	// Workspace getters return the agent's workspace handle; pure non-emitting accessors.
 	MethodWorkspace:  {Action: ActionMissionLifecycle, DefaultEffect: EffectNone, Emit: false},
 	MethodWorkspaces: {Action: ActionMissionLifecycle, DefaultEffect: EffectNone, Emit: false},

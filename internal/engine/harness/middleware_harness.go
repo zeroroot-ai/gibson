@@ -254,16 +254,6 @@ var _ AgentHarness = (*MiddlewareHarness)(nil)
 //
 // var _ sdkagent.Harness = (*MiddlewareHarness)(nil)
 
-// Checkpoint returns the checkpoint access interface from the inner harness.
-func (h *MiddlewareHarness) Checkpoint() CheckpointAccess {
-	if inner, ok := h.inner.(interface {
-		Checkpoint() CheckpointAccess
-	}); ok {
-		return inner.Checkpoint()
-	}
-	// Return a disabled checkpoint implementation
-	return NewHarnessCheckpointMethods(nil, "", "", 0)
-}
 
 // Workspace returns the primary workspace from the inner harness.
 // Returns nil if workspaces are not configured.

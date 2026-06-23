@@ -5,7 +5,6 @@ import (
 	"log/slog"
 	"time"
 
-	"github.com/zeroroot-ai/gibson/internal/engine/checkpoint"
 	"github.com/zeroroot-ai/gibson/internal/engine/events"
 	"github.com/zeroroot-ai/gibson/internal/engine/harness/middleware"
 	"github.com/zeroroot-ai/gibson/internal/engine/harness/sandboxed"
@@ -126,20 +125,6 @@ type HarnessConfig struct {
 	// Type: events.EventBus
 	// Optional: if nil, plugin events will not be published.
 	EventBus events.EventBus
-
-	// Checkpointer provides checkpointing capabilities for state management.
-	// When set, agents can access checkpoint operations through harness.Checkpoint().
-	// When nil, checkpoint operations will return ErrCheckpointingDisabled.
-	// Optional: defaults to nil (checkpointing disabled).
-	Checkpointer checkpoint.ThreadedCheckpointer
-
-	// ThreadID identifies the current execution thread for checkpoint operations.
-	// Required when Checkpointer is set. Ignored if Checkpointer is nil.
-	ThreadID string
-
-	// RunNumber is the current mission run number (1-indexed).
-	// Required when Checkpointer is set. Ignored if Checkpointer is nil.
-	RunNumber int
 
 	// ClassifierConfig provides configuration for the category classifier.
 	// When set, the harness will use semantic classification to normalize

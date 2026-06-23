@@ -284,14 +284,6 @@ func (m *ComplianceMiddleware) GetAllRunFindings(ctx context.Context, filter Fin
 }
 
 // ────────────────────────────────────────────────────────────────────────────
-// Checkpoint (pure pass-through)
-// ────────────────────────────────────────────────────────────────────────────
-
-func (m *ComplianceMiddleware) Checkpoint() CheckpointAccess {
-	return m.inner.Checkpoint()
-}
-
-// ────────────────────────────────────────────────────────────────────────────
 // Plugin access (task 8)
 // ────────────────────────────────────────────────────────────────────────────
 

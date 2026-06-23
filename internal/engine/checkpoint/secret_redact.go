@@ -59,18 +59,6 @@ func RedactSecretsInJSONBytes(data []byte) []byte {
 	return out
 }
 
-// RedactSecretsInMap is the in-place variant for callers that already hold
-// a parsed map[string]any. Returns the same map for convenience.
-func RedactSecretsInMap(m map[string]any) map[string]any {
-	if m == nil {
-		return nil
-	}
-	for k, v := range m {
-		m[k] = redactValue(v, k)
-	}
-	return m
-}
-
 // IsSecretKey reports whether a field name matches the secret-bearing
 // pattern set. Exported so that callers can pre-filter delta keys.
 func IsSecretKey(key string) bool {

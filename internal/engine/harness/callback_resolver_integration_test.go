@@ -267,10 +267,6 @@ func (m *mockHarnessForResolver) TokenUsage() *llm.TokenTracker {
 	return nil
 }
 
-func (m *mockHarnessForResolver) Checkpoint() CheckpointAccess {
-	return nil
-}
-
 func (m *mockHarnessForResolver) Workspace() workspace.Workspace {
 	return nil
 }
