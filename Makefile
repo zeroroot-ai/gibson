@@ -314,12 +314,14 @@ check-critical-paths:
 #   - operators/...                   tenant-provision saga + operator envtest
 #   - internal/platform/audit/...     audit Writer/Query against real Postgres (gibson#953)
 #   - internal/infra/secrets/gcpsm/... GCP Secret Manager provider contract (gibson#953)
+#   - internal/engine/graphrag/ingest/... DiscoveryProcessor → Neo4j hierarchy (gibson#953)
+#   - internal/engine/graphrag/loader/... GraphLoader → Neo4j nodes/edges (gibson#953)
 # It still excludes the packages whose integration-tagged tests remain bit-rotted
 # against current APIs (engine/harness, engine/mission, server/daemon,
-# server/daemon/api, graphrag/{ingest,loader}). Un-rotting those is tracked in
-# gibson#953; widen INTEGRATION_PKG as each is fixed. Run everything once fixed:
+# server/daemon/api). Un-rotting those is tracked in gibson#953; widen
+# INTEGRATION_PKG as each is fixed. Run everything once fixed:
 # make test-integration INTEGRATION_PKG=./...
-INTEGRATION_PKG ?= ./tests/integration/... ./internal/platform/authz/... ./internal/server/extauthz/... ./operators/... ./internal/platform/audit/... ./internal/infra/secrets/gcpsm/...
+INTEGRATION_PKG ?= ./tests/integration/... ./internal/platform/authz/... ./internal/server/extauthz/... ./operators/... ./internal/platform/audit/... ./internal/infra/secrets/gcpsm/... ./internal/engine/graphrag/ingest/... ./internal/engine/graphrag/loader/...
 INTEGRATION_TIMEOUT ?= 30m
 test-integration:
 	@echo "Running integration lane (-tags integration) over $(INTEGRATION_PKG)..."
