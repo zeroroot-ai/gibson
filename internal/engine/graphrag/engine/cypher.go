@@ -2,9 +2,25 @@ package engine
 
 import (
 	"fmt"
+	"sort"
 	"strings"
 	"time"
 )
+
+// sortedKeys returns the keys of m in deterministic (lexical) order. Cypher
+// clauses (SET / WHERE fragments) are built by iterating a property/filter
+// map and joining the pieces; ranging a Go map directly leaks its randomized
+// iteration order into the generated query string, which produces unstable
+// output (and flaky assertions). Always iterate via this helper when the map
+// order would be observable in the result.
+func sortedKeys(m map[string]any) []string {
+	keys := make([]string, 0, len(m))
+	for k := range m {
+		keys = append(keys, k)
+	}
+	sort.Strings(keys)
+	return keys
+}
 
 // CypherBuilder generates Cypher queries from taxonomy specifications.
 // It provides a safe, parameterized approach to building Neo4j queries
@@ -58,9 +74,9 @@ func (b *CypherBuilder) BuildNodeMerge(nodeType string, nodeID string, propertie
 		query.WriteString("SET ")
 		setClauses := make([]string, 0, len(properties)+1)
 
-		for key, value := range properties {
+		for _, key := range sortedKeys(properties) {
 			paramKey := sanitizeParamKey(key)
-			params[paramKey] = normalizeValue(value)
+			params[paramKey] = normalizeValue(properties[key])
 			setClauses = append(setClauses, fmt.Sprintf("n.%s = $%s", sanitizeProperty(key), paramKey))
 		}
 
@@ -112,9 +128,9 @@ func (b *CypherBuilder) BuildRelationshipMerge(relType string, fromID string, to
 		query.WriteString("SET ")
 		setClauses := make([]string, 0, len(properties)+1)
 
-		for key, value := range properties {
+		for _, key := range sortedKeys(properties) {
 			paramKey := sanitizeParamKey(key)
-			params[paramKey] = normalizeValue(value)
+			params[paramKey] = normalizeValue(properties[key])
 			setClauses = append(setClauses, fmt.Sprintf("r.%s = $%s", sanitizeProperty(key), paramKey))
 		}
 
@@ -357,9 +373,9 @@ func (b *CypherBuilder) BuildNodeQuery(nodeType string, filters map[string]any) 
 		query.WriteString("WHERE ")
 		whereClauses := make([]string, 0, len(filters))
 
-		for key, value := range filters {
+		for _, key := range sortedKeys(filters) {
 			paramKey := sanitizeParamKey(key)
-			params[paramKey] = normalizeValue(value)
+			params[paramKey] = normalizeValue(filters[key])
 			whereClauses = append(whereClauses, fmt.Sprintf("n.%s = $%s", sanitizeProperty(key), paramKey))
 		}
 
@@ -395,23 +411,23 @@ func (b *CypherBuilder) BuildRelationshipQuery(relType string, fromFilters map[s
 	whereClauses := make([]string, 0)
 
 	// Add from node filters
-	for key, value := range fromFilters {
+	for _, key := range sortedKeys(fromFilters) {
 		paramKey := "from_" + sanitizeParamKey(key)
-		params[paramKey] = normalizeValue(value)
+		params[paramKey] = normalizeValue(fromFilters[key])
 		whereClauses = append(whereClauses, fmt.Sprintf("a.%s = $%s", sanitizeProperty(key), paramKey))
 	}
 
 	// Add to node filters
-	for key, value := range toFilters {
+	for _, key := range sortedKeys(toFilters) {
 		paramKey := "to_" + sanitizeParamKey(key)
-		params[paramKey] = normalizeValue(value)
+		params[paramKey] = normalizeValue(toFilters[key])
 		whereClauses = append(whereClauses, fmt.Sprintf("b.%s = $%s", sanitizeProperty(key), paramKey))
 	}
 
 	// Add relationship filters
-	for key, value := range relFilters {
+	for _, key := range sortedKeys(relFilters) {
 		paramKey := "rel_" + sanitizeParamKey(key)
-		params[paramKey] = normalizeValue(value)
+		params[paramKey] = normalizeValue(relFilters[key])
 		whereClauses = append(whereClauses, fmt.Sprintf("r.%s = $%s", sanitizeProperty(key), paramKey))
 	}
 
