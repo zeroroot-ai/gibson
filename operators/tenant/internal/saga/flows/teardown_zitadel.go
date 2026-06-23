@@ -12,7 +12,6 @@ package flows
 
 import (
 	"context"
-	"errors"
 	"fmt"
 
 	"k8s.io/apimachinery/pkg/api/meta"
@@ -20,7 +19,7 @@ import (
 	"sigs.k8s.io/controller-runtime/pkg/client"
 
 	gibsonv1alpha1 "github.com/zeroroot-ai/gibson/operators/tenant/api/v1alpha1"
-	"github.com/zeroroot-ai/gibson/operators/tenant/internal/clients"
+	"github.com/zeroroot-ai/gibson/operators/tenant/internal/identity"
 	"github.com/zeroroot-ai/gibson/operators/tenant/internal/saga"
 )
 
@@ -83,10 +82,12 @@ func (s *removeZitadelOrgStep) Provision(ctx context.Context, obj saga.Condition
 		}
 	}
 
-	if err := s.deps.Zitadel.DeleteOrganization(ctx, t.Status.ZitadelOrgID); err != nil {
-		if !errors.Is(err, clients.ErrNotFound) {
-			return false, fmt.Errorf("removeZitadelOrg: DeleteOrganization: %w", err)
-		}
+	// Delegate the org delete to the shared org-teardown core (identity.RemoveOrg)
+	// so the saga step and the TenantIdentity controller (E8/gibson#803) are two
+	// callers of ONE Zitadel-org codepath (ADR-0027). The TenantMember
+	// precondition above is saga-specific (K8s-list coupling) and stays here.
+	if err := identity.RemoveOrg(ctx, s.deps.Zitadel, t.Status.ZitadelOrgID); err != nil {
+		return false, fmt.Errorf("removeZitadelOrg: %w", err)
 	}
 
 	t.Status.ZitadelOrgID = ""

@@ -52,4 +52,13 @@ resources:
   kind: TenantSecretsBackend
   path: github.com/zeroroot-ai/gibson/tenant-operator/api/v1alpha1
   version: v1alpha1
+- api:
+    crdVersion: v1
+    namespaced: true
+  controller: true
+  domain: gibson.zeroroot.ai
+  group: gibson
+  kind: TenantIdentity
+  path: github.com/zeroroot-ai/gibson/tenant-operator/api/v1alpha1
+  version: v1alpha1
 version: "3"

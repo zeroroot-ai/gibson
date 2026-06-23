@@ -29,6 +29,7 @@ rules:
   resources:
   - agentenrollments
   - tenantdataplanes
+  - tenantidentities
   - tenantmembers
   - tenants
   - tenantsecretsbackends
@@ -45,6 +46,7 @@ rules:
   resources:
   - agentenrollments/finalizers
   - tenantdataplanes/finalizers
+  - tenantidentities/finalizers
   - tenantmembers/finalizers
   - tenants/finalizers
   - tenantsecretsbackends/finalizers
@@ -55,6 +57,7 @@ rules:
   resources:
   - agentenrollments/status
   - tenantdataplanes/status
+  - tenantidentities/status
   - tenantmembers/status
   - tenants/status
   - tenantsecretsbackends/status

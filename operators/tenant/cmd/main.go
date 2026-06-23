@@ -64,6 +64,7 @@ import (
 	"github.com/zeroroot-ai/gibson/operators/tenant/internal/controller"
 	"github.com/zeroroot-ai/gibson/operators/tenant/internal/dataplane"
 	dataplaneclient "github.com/zeroroot-ai/gibson/operators/tenant/internal/dataplane/client"
+	"github.com/zeroroot-ai/gibson/operators/tenant/internal/identity"
 	"github.com/zeroroot-ai/gibson/operators/tenant/internal/mail"
 	gibsonmetrics "github.com/zeroroot-ai/gibson/operators/tenant/internal/metrics"
 	platformmigrations "github.com/zeroroot-ai/gibson/operators/tenant/internal/migrations"
@@ -620,6 +621,13 @@ func main() {
 		func(err error) bool { return errors.Is(err, clients.ErrNotFound) },
 	)
 
+	// Build the declarative identity provisioner (E8/gibson#803). It wraps the
+	// SAME zitadelClient the Tenant saga's EnsureZitadelOrg / RemoveZitadelOrg
+	// steps use (and both call the shared identity.EnsureOrg / identity.RemoveOrg
+	// core), so there is one provisioning codepath (ADR-0027). The TenantIdentity
+	// controller delegates to it.
+	identityProvisioner := identity.New(zitadelClient)
+
 	// Phase 4 of spec tenant-provisioning-unification-phase2: build the
 	// unified psaga.Deps bag so saga.ValidateAtStartup can verify each
 	// step's RequiredClients() declarations against the live wiring.
@@ -778,6 +786,20 @@ func main() {
 		Provisioner: secretsProvisioner,
 	}).SetupWithManager(mgr); err != nil {
 		setupLog.Error(err, "Failed to create controller", "controller", "TenantSecretsBackend")
+		os.Exit(1)
+	}
+
+	// TenantIdentity — declarative per-tenant identity (Zitadel org + requested
+	// OIDC clients) reconciler. Delegates to the SAME identityProvisioner (which
+	// wraps the zitadelClient the Tenant saga uses, both via the shared
+	// identity.EnsureOrg / identity.RemoveOrg core), so there is one provisioning
+	// codepath (ADR-0027). E8/gibson#803.
+	if err := (&controller.TenantIdentityReconciler{
+		Client:      mgr.GetClient(),
+		Scheme:      mgr.GetScheme(),
+		Provisioner: identityProvisioner,
+	}).SetupWithManager(mgr); err != nil {
+		setupLog.Error(err, "Failed to create controller", "controller", "TenantIdentity")
 		os.Exit(1)
 	}
 

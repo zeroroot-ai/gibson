@@ -1,0 +1,15 @@
+apiVersion: gibson.zeroroot.ai/v1alpha1
+kind: TenantIdentity
+metadata:
+  name: acme-identity
+  namespace: tenant-acme
+spec:
+  tenantID: acme
+  # displayName is the human-readable Zitadel org name; when omitted the
+  # operator falls back to tenantID (matching the saga's EnsureZitadelOrg step).
+  displayName: Acme Corp
+  # oidcClients is a declarative request recorded on the CR for the
+  # daemon/dashboard surface. NOTE (gibson#803): the operator provisions the
+  # Zitadel org only; per-tenant OIDC applications are minted daemon-side
+  # (MembershipService / native-cli-login), not by this controller.
+  oidcClients: []
