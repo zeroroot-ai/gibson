@@ -676,6 +676,31 @@ func getToolMetadata(t tool.Tool) map[string]string {
 //
 // All dispatch paths route to out-of-process tool implementations. Tools are
 // never compiled into the Gibson daemon.
+
+// mergeToolResponse copies the tool's output message into the caller-supplied
+// response message. proto.Merge requires dst and src to share the same message
+// descriptor *instance*. A tool adapter cannot guarantee that: a
+// dynamicpb.Message rebuilt from a re-parsed FileDescriptorSet is name-equal to
+// the response type (so the type-name check upstream passes) but is a distinct
+// descriptor instance, and proto.Merge then panics with "descriptor mismatch".
+// When the descriptors differ, the two messages are still wire-compatible by
+// construction (identical field numbers/types), so bridge them through the wire
+// format instead of panicking. Spec: gibson#963.
+func mergeToolResponse(response, outputMsg proto.Message) error {
+	if response.ProtoReflect().Descriptor() == outputMsg.ProtoReflect().Descriptor() {
+		proto.Merge(response, outputMsg)
+		return nil
+	}
+	wire, err := proto.Marshal(outputMsg)
+	if err != nil {
+		return fmt.Errorf("marshal tool output: %w", err)
+	}
+	if err := proto.Unmarshal(wire, response); err != nil {
+		return fmt.Errorf("unmarshal into response: %w", err)
+	}
+	return nil
+}
+
 func (h *DefaultAgentHarness) CallToolProto(ctx context.Context, name string, request proto.Message, response proto.Message) error {
 	callStart := time.Now()
 	ctx, span := h.tracer.Start(ctx, "harness.CallToolProto")
@@ -1049,8 +1074,14 @@ executeProto:
 		)
 	}
 
-	// Merge the output message into the response parameter
-	proto.Merge(response, outputMsg)
+	// Merge the tool output into the caller-supplied response message.
+	if err := mergeToolResponse(response, outputMsg); err != nil {
+		return types.WrapError(
+			ErrHarnessToolExecutionFailed,
+			fmt.Sprintf("failed to merge tool output %s into response: %v", expectedOutputType, err),
+			nil,
+		)
+	}
 
 metricsSuccess:
 
