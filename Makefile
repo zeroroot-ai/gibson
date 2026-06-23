@@ -316,12 +316,15 @@ check-critical-paths:
 #   - internal/infra/secrets/gcpsm/... GCP Secret Manager provider contract (gibson#953)
 #   - internal/engine/graphrag/ingest/... DiscoveryProcessor → Neo4j hierarchy (gibson#953)
 #   - internal/engine/graphrag/loader/... GraphLoader → Neo4j nodes/edges (gibson#953)
-# It still excludes the packages whose integration-tagged tests remain bit-rotted
-# against current APIs (engine/harness, engine/mission, server/daemon,
-# server/daemon/api). Un-rotting those is tracked in gibson#953; widen
-# INTEGRATION_PKG as each is fixed. Run everything once fixed:
-# make test-integration INTEGRATION_PKG=./...
-INTEGRATION_PKG ?= ./tests/integration/... ./internal/platform/authz/... ./internal/server/extauthz/... ./operators/... ./internal/platform/audit/... ./internal/infra/secrets/gcpsm/... ./internal/engine/graphrag/ingest/... ./internal/engine/graphrag/loader/...
+#   - internal/engine/mission/...     checkpoint capture/restore via miniredis (gibson#953)
+# It still excludes server/daemon{,/api} (integration tests bit-rotted against
+# current APIs) and engine/harness — the latter now COMPILES under -tags
+# integration but two of its integration tests fail at RUNTIME and are NOT yet
+# gated: TestCallbackServiceWithProtoResolver_Integration (missing tenant in
+# context) and TestE2ERemoteToolExecution (proto "descriptor mismatch" panic in
+# CallToolProto). Tracked in gibson#953; widen INTEGRATION_PKG as each is fixed.
+# Run everything once fixed: make test-integration INTEGRATION_PKG=./...
+INTEGRATION_PKG ?= ./tests/integration/... ./internal/platform/authz/... ./internal/server/extauthz/... ./operators/... ./internal/platform/audit/... ./internal/infra/secrets/gcpsm/... ./internal/engine/graphrag/ingest/... ./internal/engine/graphrag/loader/... ./internal/engine/mission/...
 INTEGRATION_TIMEOUT ?= 30m
 test-integration:
 	@echo "Running integration lane (-tags integration) over $(INTEGRATION_PKG)..."
