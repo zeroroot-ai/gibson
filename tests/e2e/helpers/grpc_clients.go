@@ -5,7 +5,7 @@
 //
 // Builds the gRPC client connections needed by the mission e2e test suite:
 //   - DaemonServiceClient (public mission + component control plane)
-//   - TenantServiceClient (tenant RPCs: CreateProvider, etc.)
+//   - ProviderServiceClient (provider RPCs: CreateProvider, etc.)
 //   - DaemonOperatorServiceClient (operator RPCs: Shutdown, etc.)
 //
 // Reads DAEMON_GRPC_ADDR env var for the daemon's gRPC endpoint.
@@ -37,7 +37,7 @@ import (
 type GRPCClientSet struct {
 	conn           *grpc.ClientConn
 	Daemon         daemonpb.DaemonServiceClient
-	Tenant         sdktenantv1.TenantServiceClient
+	Provider       sdktenantv1.ProviderServiceClient
 	DaemonOperator daemonoperatorv1.DaemonOperatorServiceClient
 }
 
@@ -74,7 +74,7 @@ func NewGRPCClients() (*GRPCClientSet, error) {
 	return &GRPCClientSet{
 		conn:           conn,
 		Daemon:         daemonpb.NewDaemonServiceClient(conn),
-		Tenant:         sdktenantv1.NewTenantServiceClient(conn),
+		Provider:       sdktenantv1.NewProviderServiceClient(conn),
 		DaemonOperator: daemonoperatorv1.NewDaemonOperatorServiceClient(conn),
 	}, nil
 }

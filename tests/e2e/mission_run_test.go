@@ -177,7 +177,7 @@ func TestMission_Run_HappyPath(t *testing.T) {
 	// R3.1, R3.2.
 	// -------------------------------------------------------------------------
 	t.Run("register mock-llm provider", func(t *testing.T) {
-		if err := helpers.RegisterMockProvider(ctx, grpcClients.DaemonAdmin); err != nil {
+		if err := helpers.RegisterMockProvider(ctx, grpcClients.Provider); err != nil {
 			t.Fatalf(
 				"RegisterMockProvider: %v "+
 					"(verify daemon was built with -tags=test_fixtures AND "+
@@ -191,7 +191,7 @@ func TestMission_Run_HappyPath(t *testing.T) {
 		t.Cleanup(func() {
 			cleanCtx, cleanCancel := context.WithTimeout(context.Background(), 30*time.Second)
 			defer cleanCancel()
-			if err := helpers.UnregisterMockProvider(cleanCtx, grpcClients.DaemonAdmin); err != nil {
+			if err := helpers.UnregisterMockProvider(cleanCtx, grpcClients.Provider); err != nil {
 				t.Logf("UnregisterMockProvider cleanup: %v (non-fatal)", err)
 			}
 		})
@@ -661,15 +661,15 @@ func TestMission_Run_NegativeLLMError(t *testing.T) {
 	// -------------------------------------------------------------------------
 	t.Run("LLM error triggers orchestrator recovery and mission fails cleanly", func(t *testing.T) {
 		// Step 1: Register mock provider in normal mode, then inject error.
-		require.NoError(t, helpers.RegisterMockProvider(ctx, grpcClients.DaemonAdmin),
+		require.NoError(t, helpers.RegisterMockProvider(ctx, grpcClients.Provider),
 			"R4.3: RegisterMockProvider setup")
 		t.Cleanup(func() {
 			cleanCtx, cleanCancel := context.WithTimeout(context.Background(), 30*time.Second)
 			defer cleanCancel()
-			_ = helpers.UnregisterMockProvider(cleanCtx, grpcClients.DaemonAdmin)
+			_ = helpers.UnregisterMockProvider(cleanCtx, grpcClients.Provider)
 		})
 
-		require.NoError(t, helpers.InjectErrorMode(ctx, grpcClients.DaemonAdmin),
+		require.NoError(t, helpers.InjectErrorMode(ctx, grpcClients.Provider),
 			"R4.3: InjectErrorMode setup")
 		t.Logf("R4.3: mock-LLM error mode injected")
 
@@ -743,15 +743,15 @@ func TestMission_Run_NegativeDeadlineExceeded(t *testing.T) {
 	// -------------------------------------------------------------------------
 	t.Run("mission deadline exceeded terminates as failed with deadline_exceeded reason", func(t *testing.T) {
 		// Step 1: Register mock provider in slow mode.
-		require.NoError(t, helpers.RegisterMockProvider(ctx, grpcClients.DaemonAdmin),
+		require.NoError(t, helpers.RegisterMockProvider(ctx, grpcClients.Provider),
 			"R4.4: RegisterMockProvider setup")
 		t.Cleanup(func() {
 			cleanCtx, cleanCancel := context.WithTimeout(context.Background(), 30*time.Second)
 			defer cleanCancel()
-			_ = helpers.UnregisterMockProvider(cleanCtx, grpcClients.DaemonAdmin)
+			_ = helpers.UnregisterMockProvider(cleanCtx, grpcClients.Provider)
 		})
 
-		require.NoError(t, helpers.InjectSlowMode(ctx, grpcClients.DaemonAdmin),
+		require.NoError(t, helpers.InjectSlowMode(ctx, grpcClients.Provider),
 			"R4.4: InjectSlowMode — mock-LLM response blocked until context deadline")
 
 		// Step 2: Register target, create mission def + mission with 5s deadline.
