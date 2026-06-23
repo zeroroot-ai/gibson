@@ -6,4 +6,5 @@ resources:
 - gibson_v1alpha1_tenantdataplane.yaml
 - gibson_v1alpha1_tenantsecretsbackend.yaml
 - gibson_v1alpha1_tenantidentity.yaml
+- gibson_v1alpha1_tenantgrants.yaml
 # +kubebuilder:scaffold:manifestskustomizesamples

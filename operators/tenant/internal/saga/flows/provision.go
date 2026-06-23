@@ -30,6 +30,7 @@ import (
 	vaultadmin "github.com/zeroroot-ai/gibson/operators/tenant/internal/clients/vault"
 	"github.com/zeroroot-ai/gibson/operators/tenant/internal/clients/zitadel"
 	"github.com/zeroroot-ai/gibson/operators/tenant/internal/dataplane"
+	"github.com/zeroroot-ai/gibson/operators/tenant/internal/grants"
 	"github.com/zeroroot-ai/gibson/operators/tenant/internal/saga"
 )
 
@@ -229,12 +230,12 @@ func newRegisterTenantWithPlatformStep(deps ProvisionDeps) *registerTenantWithPl
 	}
 }
 
+// parentTuple delegates to grants.PlatformRegistrationTuple so the saga step and
+// the declarative TenantGrants controller (E8/gibson#804) share ONE definition
+// of the tenant→platform registration tuple (ADR-0027). Do not inline the shape
+// here — change it in the grants package so both callers stay in lockstep.
 func (s *registerTenantWithPlatformStep) parentTuple(name string) fga.Tuple {
-	return fga.Tuple{
-		User:     fmt.Sprintf("tenant:%s", name),
-		Relation: "parent",
-		Object:   "system_tenant:_system",
-	}
+	return grants.PlatformRegistrationTuple(name)
 }
 
 func (s *registerTenantWithPlatformStep) Provision(ctx context.Context, obj saga.ConditionedObject, _ *saga.Deps) (bool, error) {

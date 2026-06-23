@@ -1,0 +1,16 @@
+apiVersion: gibson.zeroroot.ai/v1alpha1
+kind: TenantGrants
+metadata:
+  name: acme-grants
+  namespace: tenant-acme
+spec:
+  tenantID: acme
+  # platformRegistration requests the canonical tenant->platform registration
+  # tuple (tenant:acme, parent, system_tenant:_system) the Tenant saga's
+  # RegisterTenantWithPlatform step writes. Defaults to true; reconciled
+  # write-if-absent and drift-corrected on every reconcile (gibson#804).
+  platformRegistration: true
+  # extraTuples declares additional tenant-level FGA tuples to reconcile
+  # alongside the registration tuple. Empty in the common case; each entry must
+  # name a relation that exists in internal/platform/authz/model.fga.
+  extraTuples: []

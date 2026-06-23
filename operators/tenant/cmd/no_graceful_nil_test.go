@@ -162,7 +162,7 @@ func TestNoGracefulNilInRequestPaths(t *testing.T) {
 		"internal/controller/tenant_namespace.go:298": applyShim,
 
 		// E8 declarative reconcilers (TenantDataPlane #801 / TenantSecretsBackend
-		// #802 / TenantIdentity #803) — each emit*/event helper guards
+		// #802 / TenantIdentity #803 / TenantGrants #804) — each emit*/event helper guards
 		// `if r.Recorder == nil { return }`. The Recorder is ALWAYS set in
 		// production by SetupWithManager (which defaults it from the manager);
 		// the nil branch exists only so unit tests can construct the reconciler
@@ -171,6 +171,7 @@ func TestNoGracefulNilInRequestPaths(t *testing.T) {
 		"internal/controller/tenantdataplane_controller.go:209":      recorderOpt,
 		"internal/controller/tenantsecretsbackend_controller.go:210": recorderOpt,
 		"internal/controller/tenantidentity_controller.go:221":       recorderOpt,
+		"internal/controller/tenantgrants_controller.go:228":         recorderOpt,
 
 		// Audit emitter + health probes
 		"internal/audit/emitter.go:210":    emitterOpt,
