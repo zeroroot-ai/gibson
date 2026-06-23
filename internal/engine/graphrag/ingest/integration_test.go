@@ -138,9 +138,15 @@ func TestIntegration_EndToEnd(t *testing.T) {
 	execCtx := testIntegrationExecContext()
 
 	// Create a complete discovery result with hierarchy
+	// The discovery hierarchy is linked by agent-generated UUIDs (ADR-0045
+	// model): a Port references its Host via host_id, a Service its Port via
+	// port_id, an Endpoint its Service via service_id. The loader keys nodes on
+	// the proto id field and the taxonomy turns those refs into HAS_PORT /
+	// RUNS_SERVICE / HAS_ENDPOINT edges.
 	discovery := &graphragpb.DiscoveryResult{
 		Hosts: []*graphragpb.Host{
 			{
+				Id:       strPtr("host-1"),
 				Ip:       "192.168.1.100",
 				Hostname: strPtr("web-server.example.com"),
 				State:    strPtr("up"),
@@ -149,7 +155,8 @@ func TestIntegration_EndToEnd(t *testing.T) {
 		},
 		Ports: []*graphragpb.Port{
 			{
-				HostIp:   "192.168.1.100",
+				Id:       strPtr("port-1"),
+				HostId:   "host-1",
 				Number:   443,
 				Protocol: "tcp",
 				State:    strPtr("open"),
@@ -157,22 +164,20 @@ func TestIntegration_EndToEnd(t *testing.T) {
 		},
 		Services: []*graphragpb.Service{
 			{
-				HostIp:       "192.168.1.100",
-				PortNumber:   443,
-				PortProtocol: "tcp",
-				Name:         "https",
-				Version:      strPtr("nginx/1.18.0"),
-				Banner:       strPtr("nginx"),
+				Id:      strPtr("svc-1"),
+				PortId:  "port-1",
+				Name:    "https",
+				Version: strPtr("nginx/1.18.0"),
+				Banner:  strPtr("nginx"),
 			},
 		},
 		Endpoints: []*graphragpb.Endpoint{
 			{
-				ServiceHostIp:       "192.168.1.100",
-				ServicePortNumber:   443,
-				ServicePortProtocol: "tcp",
-				Url:                 "/api/v1/users",
-				Method:              strPtr("GET"),
-				StatusCode:          int32Ptr(200),
+				Id:         strPtr("ep-1"),
+				ServiceId:  "svc-1",
+				Url:        "/api/v1/users",
+				Method:     strPtr("GET"),
+				StatusCode: int32Ptr(200),
 			},
 		},
 	}
@@ -244,21 +249,21 @@ func TestIntegration_ComplexHierarchy(t *testing.T) {
 	// Create discovery with multiple hosts, ports, and services
 	discovery := &graphragpb.DiscoveryResult{
 		Hosts: []*graphragpb.Host{
-			{Ip: "10.0.0.1", Hostname: strPtr("web-1"), State: strPtr("up")},
-			{Ip: "10.0.0.2", Hostname: strPtr("db-1"), State: strPtr("up")},
-			{Ip: "10.0.0.3", Hostname: strPtr("cache-1"), State: strPtr("up")},
+			{Id: strPtr("h-1"), Ip: "10.0.0.1", Hostname: strPtr("web-1"), State: strPtr("up")},
+			{Id: strPtr("h-2"), Ip: "10.0.0.2", Hostname: strPtr("db-1"), State: strPtr("up")},
+			{Id: strPtr("h-3"), Ip: "10.0.0.3", Hostname: strPtr("cache-1"), State: strPtr("up")},
 		},
 		Ports: []*graphragpb.Port{
-			{HostIp: "10.0.0.1", Number: 80, Protocol: "tcp", State: strPtr("open")},
-			{HostIp: "10.0.0.1", Number: 443, Protocol: "tcp", State: strPtr("open")},
-			{HostIp: "10.0.0.2", Number: 3306, Protocol: "tcp", State: strPtr("open")},
-			{HostIp: "10.0.0.3", Number: 6379, Protocol: "tcp", State: strPtr("open")},
+			{Id: strPtr("p-1"), HostId: "h-1", Number: 80, Protocol: "tcp", State: strPtr("open")},
+			{Id: strPtr("p-2"), HostId: "h-1", Number: 443, Protocol: "tcp", State: strPtr("open")},
+			{Id: strPtr("p-3"), HostId: "h-2", Number: 3306, Protocol: "tcp", State: strPtr("open")},
+			{Id: strPtr("p-4"), HostId: "h-3", Number: 6379, Protocol: "tcp", State: strPtr("open")},
 		},
 		Services: []*graphragpb.Service{
-			{HostIp: "10.0.0.1", PortNumber: 80, PortProtocol: "tcp", Name: "http", Version: strPtr("Apache/2.4")},
-			{HostIp: "10.0.0.1", PortNumber: 443, PortProtocol: "tcp", Name: "https", Version: strPtr("Apache/2.4")},
-			{HostIp: "10.0.0.2", PortNumber: 3306, PortProtocol: "tcp", Name: "mysql", Version: strPtr("8.0.32")},
-			{HostIp: "10.0.0.3", PortNumber: 6379, PortProtocol: "tcp", Name: "redis", Version: strPtr("7.0.11")},
+			{Id: strPtr("s-1"), PortId: "p-1", Name: "http", Version: strPtr("Apache/2.4")},
+			{Id: strPtr("s-2"), PortId: "p-2", Name: "https", Version: strPtr("Apache/2.4")},
+			{Id: strPtr("s-3"), PortId: "p-3", Name: "mysql", Version: strPtr("8.0.32")},
+			{Id: strPtr("s-4"), PortId: "p-4", Name: "redis", Version: strPtr("7.0.11")},
 		},
 	}
 
@@ -306,10 +311,10 @@ func verifyParentRelationships(t *testing.T, ctx context.Context, client graph.G
 	require.Len(t, result.Records, 1)
 	assert.GreaterOrEqual(t, result.Records[0]["count"].(int64), int64(1), "Should have at least 1 HAS_PORT relationship")
 
-	// Verify RUNS_SERVICE relationship
+	// Verify RUNS_SERVICE relationship. Nodes are linked by UUID, not by a
+	// host_ip property, so we anchor on the host's ip and traverse the edges.
 	runsServiceQuery := `
-		MATCH (p:port)-[r:RUNS_SERVICE]->(s:service)
-		WHERE p.host_ip = $ip
+		MATCH (h:host {ip: $ip})-[:HAS_PORT]->(p:port)-[r:RUNS_SERVICE]->(s:service)
 		RETURN count(r) as count
 	`
 	result, err = client.Query(ctx, runsServiceQuery, map[string]any{"ip": hostIP})
@@ -317,10 +322,9 @@ func verifyParentRelationships(t *testing.T, ctx context.Context, client graph.G
 	require.Len(t, result.Records, 1)
 	assert.GreaterOrEqual(t, result.Records[0]["count"].(int64), int64(1), "Should have at least 1 RUNS_SERVICE relationship")
 
-	// Verify HAS_ENDPOINT relationship
+	// Verify HAS_ENDPOINT relationship (traverse host → port → service → endpoint).
 	hasEndpointQuery := `
-		MATCH (s:service)-[r:HAS_ENDPOINT]->(e:endpoint)
-		WHERE s.host_ip = $ip
+		MATCH (h:host {ip: $ip})-[:HAS_PORT]->(:port)-[:RUNS_SERVICE]->(s:service)-[r:HAS_ENDPOINT]->(e:endpoint)
 		RETURN count(r) as count
 	`
 	result, err = client.Query(ctx, hasEndpointQuery, map[string]any{"ip": hostIP})

@@ -177,6 +177,7 @@ func TestIntegration_HostWithPortsAndServices(t *testing.T) {
 	discovery := &graphragpb.DiscoveryResult{
 		Hosts: []*graphragpb.Host{
 			{
+				Id:       strPtr("host-1"),
 				Ip:       "192.168.1.1",
 				Hostname: strPtr("web-server"),
 				State:    strPtr("up"),
@@ -184,13 +185,15 @@ func TestIntegration_HostWithPortsAndServices(t *testing.T) {
 		},
 		Ports: []*graphragpb.Port{
 			{
-				HostIp:   "192.168.1.1",
+				Id:       strPtr("port-22"),
+				HostId:   "host-1",
 				Number:   22,
 				Protocol: "tcp",
 				State:    strPtr("open"),
 			},
 			{
-				HostIp:   "192.168.1.1",
+				Id:       strPtr("port-80"),
+				HostId:   "host-1",
 				Number:   80,
 				Protocol: "tcp",
 				State:    strPtr("open"),
@@ -198,19 +201,17 @@ func TestIntegration_HostWithPortsAndServices(t *testing.T) {
 		},
 		Services: []*graphragpb.Service{
 			{
-				HostIp:       "192.168.1.1",
-				PortNumber:   22,
-				PortProtocol: "tcp",
-				Name:         "ssh",
-				Version:      strPtr("OpenSSH 8.2"),
-				Banner:       strPtr("SSH-2.0-OpenSSH_8.2p1"),
+				Id:      strPtr("svc-ssh"),
+				PortId:  "port-22",
+				Name:    "ssh",
+				Version: strPtr("OpenSSH 8.2"),
+				Banner:  strPtr("SSH-2.0-OpenSSH_8.2p1"),
 			},
 			{
-				HostIp:       "192.168.1.1",
-				PortNumber:   80,
-				PortProtocol: "tcp",
-				Name:         "http",
-				Version:      strPtr("nginx/1.18.0"),
+				Id:      strPtr("svc-http"),
+				PortId:  "port-80",
+				Name:    "http",
+				Version: strPtr("nginx/1.18.0"),
 			},
 		},
 	}
@@ -250,10 +251,10 @@ func TestIntegration_HostWithPortsAndServices(t *testing.T) {
 	require.Len(t, queryResult.Records, 1)
 	assert.Equal(t, int64(2), queryResult.Records[0]["rel_count"], "Should have 2 HAS_PORT relationships")
 
-	// Verify RUNS_SERVICE relationships from Ports to Services
+	// Verify RUNS_SERVICE relationships from Ports to Services. Nodes link by
+	// UUID, not a host_ip property, so anchor on the host and traverse.
 	queryResult, err = client.Query(ctx, `
-		MATCH (p:port)-[r:RUNS_SERVICE]->(s:service)
-		WHERE p.host_ip = $ip
+		MATCH (h:host {ip: $ip})-[:HAS_PORT]->(p:port)-[r:RUNS_SERVICE]->(s:service)
 		RETURN count(r) as rel_count
 	`, map[string]any{"ip": "192.168.1.1"})
 	require.NoError(t, err)
@@ -387,23 +388,23 @@ func TestIntegration_BatchLoadingWithRelationships(t *testing.T) {
 	// Create a discovery result with hosts, ports, and services
 	discovery := &graphragpb.DiscoveryResult{
 		Hosts: []*graphragpb.Host{
-			{Ip: "10.0.0.1", Hostname: strPtr("server-1"), State: strPtr("up")},
-			{Ip: "10.0.0.2", Hostname: strPtr("server-2"), State: strPtr("up")},
-			{Ip: "10.0.0.3", Hostname: strPtr("server-3"), State: strPtr("up")},
+			{Id: strPtr("h-1"), Ip: "10.0.0.1", Hostname: strPtr("server-1"), State: strPtr("up")},
+			{Id: strPtr("h-2"), Ip: "10.0.0.2", Hostname: strPtr("server-2"), State: strPtr("up")},
+			{Id: strPtr("h-3"), Ip: "10.0.0.3", Hostname: strPtr("server-3"), State: strPtr("up")},
 		},
 		Ports: []*graphragpb.Port{
-			{HostIp: "10.0.0.1", Number: 80, Protocol: "tcp", State: strPtr("open")},
-			{HostIp: "10.0.0.1", Number: 443, Protocol: "tcp", State: strPtr("open")},
-			{HostIp: "10.0.0.2", Number: 22, Protocol: "tcp", State: strPtr("open")},
-			{HostIp: "10.0.0.2", Number: 3306, Protocol: "tcp", State: strPtr("open")},
-			{HostIp: "10.0.0.3", Number: 5432, Protocol: "tcp", State: strPtr("open")},
+			{Id: strPtr("p-1"), HostId: "h-1", Number: 80, Protocol: "tcp", State: strPtr("open")},
+			{Id: strPtr("p-2"), HostId: "h-1", Number: 443, Protocol: "tcp", State: strPtr("open")},
+			{Id: strPtr("p-3"), HostId: "h-2", Number: 22, Protocol: "tcp", State: strPtr("open")},
+			{Id: strPtr("p-4"), HostId: "h-2", Number: 3306, Protocol: "tcp", State: strPtr("open")},
+			{Id: strPtr("p-5"), HostId: "h-3", Number: 5432, Protocol: "tcp", State: strPtr("open")},
 		},
 		Services: []*graphragpb.Service{
-			{HostIp: "10.0.0.1", PortNumber: 80, PortProtocol: "tcp", Name: "http", Version: strPtr("Apache/2.4")},
-			{HostIp: "10.0.0.1", PortNumber: 443, PortProtocol: "tcp", Name: "https", Version: strPtr("Apache/2.4")},
-			{HostIp: "10.0.0.2", PortNumber: 22, PortProtocol: "tcp", Name: "ssh", Version: strPtr("OpenSSH 7.9")},
-			{HostIp: "10.0.0.2", PortNumber: 3306, PortProtocol: "tcp", Name: "mysql", Version: strPtr("5.7.33")},
-			{HostIp: "10.0.0.3", PortNumber: 5432, PortProtocol: "tcp", Name: "postgresql", Version: strPtr("13.2")},
+			{Id: strPtr("s-1"), PortId: "p-1", Name: "http", Version: strPtr("Apache/2.4")},
+			{Id: strPtr("s-2"), PortId: "p-2", Name: "https", Version: strPtr("Apache/2.4")},
+			{Id: strPtr("s-3"), PortId: "p-3", Name: "ssh", Version: strPtr("OpenSSH 7.9")},
+			{Id: strPtr("s-4"), PortId: "p-4", Name: "mysql", Version: strPtr("5.7.33")},
+			{Id: strPtr("s-5"), PortId: "p-5", Name: "postgresql", Version: strPtr("13.2")},
 		},
 	}
 
@@ -472,9 +473,4 @@ func TestIntegration_BatchLoadingWithRelationships(t *testing.T) {
 	assert.Equal(t, "server-1", queryResult.Records[1]["host"])
 	assert.Equal(t, int64(443), queryResult.Records[1]["port"])
 	assert.Equal(t, "https", queryResult.Records[1]["service"])
-}
-
-// strPtr is a helper to create a pointer to a string
-func strPtr(s string) *string {
-	return &s
 }

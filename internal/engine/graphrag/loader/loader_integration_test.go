@@ -105,25 +105,28 @@ func TestIntegration_ParentRelationshipScoping(t *testing.T) {
 	err := client.Connect(context.Background())
 	require.NoError(t, err)
 
-	// Configure mock results for node creation and relationship creation
-	// Host creation
-	client.AddQueryResult(graph.QueryResult{
-		Records: []map[string]any{
-			{"element_id": "host-node-1", "idx": float64(0)},
-		},
-	})
-	// Port creation
-	client.AddQueryResult(graph.QueryResult{
-		Records: []map[string]any{
-			{"element_id": "port-node-1", "idx": float64(0)},
-		},
-	})
-	// HAS_PORT relationship
-	client.AddQueryResult(graph.QueryResult{
-		Records: []map[string]any{
-			{"rel_count": int64(1)},
-		},
-	})
+	// The mock returns canned results FIFO, so they must match the exact query
+	// sequence LoadDiscovery issues for one host + one child port (UUID-linked
+	// model). Each node-CREATE must return an element_id (counted as a node);
+	// the relationship queries return rel_count. The sequence is:
+	//   Q0 host  CREATE        → element_id
+	//   Q1 host  BELONGS_TO    → rel_count   (root → mission_run)
+	//   Q2 host  DISCOVERED    → rel_count   (agent_run → node)
+	//   Q3 port  CREATE        → element_id
+	//   Q4 port  HAS_PORT      → rel_count   (taxonomy parent: host_id → host)
+	//   Q5 port  DISCOVERED    → rel_count
+	elementID := func(id string) graph.QueryResult {
+		return graph.QueryResult{Records: []map[string]any{{"element_id": id, "idx": float64(0)}}}
+	}
+	relCount := func() graph.QueryResult {
+		return graph.QueryResult{Records: []map[string]any{{"rel_count": int64(1)}}}
+	}
+	client.AddQueryResult(elementID("host-node-1")) // Q0
+	client.AddQueryResult(relCount())               // Q1
+	client.AddQueryResult(relCount())               // Q2
+	client.AddQueryResult(elementID("port-node-1")) // Q3
+	client.AddQueryResult(relCount())               // Q4
+	client.AddQueryResult(relCount())               // Q5
 
 	loader := NewGraphLoader(client)
 	ctx := context.Background()
@@ -138,11 +141,12 @@ func TestIntegration_ParentRelationshipScoping(t *testing.T) {
 	// Create host and port together (simulating discovery result)
 	discovery := &graphragpb.DiscoveryResult{
 		Hosts: []*graphragpb.Host{
-			{Ip: "10.0.0.1"},
+			{Id: strPtr("host-1"), Ip: "10.0.0.1"},
 		},
 		Ports: []*graphragpb.Port{
 			{
-				HostIp:   "10.0.0.1",
+				Id:       strPtr("port-1"),
+				HostId:   "host-1",
 				Number:   443,
 				Protocol: "tcp",
 			},
