@@ -39,6 +39,7 @@ import (
 	"github.com/zeroroot-ai/gibson/internal/platform/crypto/providers"
 	"github.com/zeroroot-ai/gibson/internal/platform/secrets"
 	"github.com/zeroroot-ai/gibson/internal/platform/secrets/jwtsource"
+	"github.com/zeroroot-ai/gibson/internal/platform/tenantembedder"
 	"github.com/zeroroot-ai/gibson/internal/server/daemon/api"
 	"github.com/zeroroot-ai/gibson/pkg/billing/entitlements"
 	pdataplane "github.com/zeroroot-ai/gibson/pkg/platform/dataplane"
@@ -241,6 +242,14 @@ type daemonImpl struct {
 	// secretsService is the secrets.Service; held so LLM provider re-registration
 	// on config reload can pass it to NewProviderWithContext.
 	secretsService *secrets.Service
+
+	// embedderResolver resolves a tenant's configured embedding provider into a
+	// per-tenant embedder (E11 BYO-embedder, gibson#810). Held on the daemon so
+	// the harness factory and any future GraphRAG/vector-recall bridge can
+	// resolve the tenant's embedder (and surface the onboarding gate when none
+	// is configured) without rebuilding the resolver. nil until grpc.go wires it
+	// (requires pool + secretsService).
+	embedderResolver *tenantembedder.Resolver
 
 	// configStore is the per-tenant broker configuration store. Held on the
 	// daemon so grpc.go can construct the SDK admin v1 TenantAdminService

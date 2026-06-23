@@ -119,17 +119,20 @@ func (p *fakePool) Close() error                                         { retur
 // ---------------------------------------------------------------------------
 
 // providerConfigsDDL mirrors pkg/platform/migrations/postgres/tenant/
-// 007_provider_configs_split.up.sql (the schema the DAO targets).
+// 007_provider_configs_split.up.sql + 008_provider_embedding_capability.up.sql
+// (the schema the DAO targets).
 const providerConfigsDDL = `
 CREATE TABLE IF NOT EXISTS provider_configs (
-    id            TEXT        NOT NULL DEFAULT gen_random_uuid()::TEXT,
-    name          TEXT        PRIMARY KEY,
-    type          TEXT        NOT NULL,
-    default_model TEXT        NOT NULL DEFAULT '',
-    is_default    BOOLEAN     NOT NULL DEFAULT FALSE,
-    enabled       BOOLEAN     NOT NULL DEFAULT TRUE,
-    created_at    TIMESTAMPTZ NOT NULL DEFAULT now(),
-    updated_at    TIMESTAMPTZ NOT NULL DEFAULT now()
+    id                      TEXT        NOT NULL DEFAULT gen_random_uuid()::TEXT,
+    name                    TEXT        PRIMARY KEY,
+    type                    TEXT        NOT NULL,
+    default_model           TEXT        NOT NULL DEFAULT '',
+    is_default              BOOLEAN     NOT NULL DEFAULT FALSE,
+    enabled                 BOOLEAN     NOT NULL DEFAULT TRUE,
+    capabilities            TEXT[]      NOT NULL DEFAULT '{}',
+    default_embedding_model TEXT        NOT NULL DEFAULT '',
+    created_at              TIMESTAMPTZ NOT NULL DEFAULT now(),
+    updated_at              TIMESTAMPTZ NOT NULL DEFAULT now()
 );
 CREATE TABLE IF NOT EXISTS provider_config_meta (
     key   TEXT PRIMARY KEY,

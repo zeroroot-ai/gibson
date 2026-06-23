@@ -43,12 +43,44 @@ type ProviderConfig struct {
 	DefaultModel string
 	IsDefault    bool
 	Enabled      bool
+	// Capabilities declares which services this provider fulfils — "chat"
+	// and/or "embedding" (E11 BYO-embedder, gibson#810). Empty implies the
+	// legacy chat-only default. Values are the lower-cased capability strings
+	// that mirror gibson.tenant.v1.Capability (CAPABILITY_CHAT → "chat",
+	// CAPABILITY_EMBEDDING → "embedding").
+	Capabilities []string
+	// DefaultEmbeddingModel is the default model used for embedding requests,
+	// independent of DefaultModel (the chat model). Empty when the provider does
+	// not serve embeddings. The per-tenant embedder resolver feeds this to
+	// embedder.NewFromProvider, which both selects the upstream model and sizes
+	// the vector index.
+	DefaultEmbeddingModel string
 	// CredentialsMasked is the credential map with values masked as "****<last4>"
 	// (or "****" for values shorter than 8 characters). Computed at read time,
 	// never stored. Empty string values are passed through as empty strings.
 	CredentialsMasked map[string]string
 	CreatedAt         time.Time
 	UpdatedAt         time.Time
+}
+
+// Capability string constants mirroring gibson.tenant.v1.Capability. Stored
+// lower-cased in provider_configs.capabilities (text[]) and surfaced verbatim.
+const (
+	CapabilityChat      = "chat"
+	CapabilityEmbedding = "embedding"
+)
+
+// ServesEmbedding reports whether this provider is declared as an embedding
+// provider — i.e. it carries the "embedding" capability. The per-tenant embedder
+// resolver uses this to pick the tenant's embedding provider and to drive the
+// onboarding gate (no embedding-capable provider ⇒ vector features gated).
+func (c *ProviderConfig) ServesEmbedding() bool {
+	for _, cap := range c.Capabilities {
+		if cap == CapabilityEmbedding {
+			return true
+		}
+	}
+	return false
 }
 
 // DecryptedConfig embeds ProviderConfig and adds the plaintext credential map.
@@ -69,9 +101,15 @@ type ProviderConfigInput struct {
 	Name         string
 	Type         llm.ProviderType
 	DefaultModel string
-	Credentials  map[string]string // plaintext — encrypted before storage
-	SetAsDefault bool
-	Enabled      bool
+	// Capabilities declares which services this provider fulfils — "chat"
+	// and/or "embedding". Empty implies the legacy chat-only default.
+	Capabilities []string
+	// DefaultEmbeddingModel is the default embedding model. Required (and
+	// validated) when Capabilities includes "embedding".
+	DefaultEmbeddingModel string
+	Credentials           map[string]string // plaintext — encrypted before storage
+	SetAsDefault          bool
+	Enabled               bool
 }
 
 // AsRecord computes the masked credential map for cfg and returns a copy of cfg
