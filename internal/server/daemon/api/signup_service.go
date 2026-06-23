@@ -30,6 +30,7 @@ import (
 	"google.golang.org/grpc/status"
 
 	"github.com/zeroroot-ai/gibson/internal/platform/idp"
+	daemonoperatorv1 "github.com/zeroroot-ai/gibson/internal/server/daemon/api/gibson/daemon/operator/v1"
 	tenantv1 "github.com/zeroroot-ai/gibson/internal/server/daemon/api/gibson/tenant/v1"
 )
 
@@ -138,6 +139,36 @@ func (s *DaemonServer) Signup(ctx context.Context, req *tenantv1.SignupRequest) 
 		s.logger.InfoContext(ctx, "Signup: verification email not sent (non-fatal)",
 			"attempt_id", req.GetAttemptId(),
 			"error", verr.Error(),
+		)
+	}
+
+	// ---- enqueue the tenant for operator-pull provisioning ----
+	// Operator-pull tenant provisioning (E9, gibson#948, enables dashboard#813):
+	// instead of the dashboard creating the Tenant CR, the daemon records the
+	// tenant in its pending-provisioning queue (platform Postgres). The
+	// tenant-operator drains the queue and creates the Tenant CR — the daemon
+	// never touches Kubernetes (ADR-0023). Idempotent on tenant_id (the slug),
+	// matching the owner-provisioning resume above. Failure to enqueue is
+	// non-fatal to the owner-provisioning response but is logged loudly: an
+	// enqueue miss strands the tenant un-provisioned, so it must be visible.
+	if enqueued, eerr := s.enqueuePendingTenantProvisioning(ctx, &daemonoperatorv1.PendingTenant{
+		TenantId:         slug,
+		OwnerUserId:      result.UserID,
+		OwnerEmail:       req.GetOwnerEmail(),
+		WorkspaceName:    req.GetWorkspaceName(),
+		Tier:             req.GetTier(),
+		StripeCustomerId: req.GetStripeCustomerId(),
+	}); eerr != nil {
+		s.logger.ErrorContext(ctx, "Signup: enqueue pending tenant provisioning failed",
+			"attempt_id", req.GetAttemptId(),
+			"tenant_id", slug,
+			"error", eerr.Error(),
+		)
+	} else {
+		s.logger.InfoContext(ctx, "Signup: tenant enqueued for operator-pull provisioning",
+			"attempt_id", req.GetAttemptId(),
+			"tenant_id", slug,
+			"newly_enqueued", enqueued,
 		)
 	}
 

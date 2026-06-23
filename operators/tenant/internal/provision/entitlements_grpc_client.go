@@ -182,6 +182,57 @@ func (c *EntitlementsGRPCClient) SeedCatalogTenantEnabled(ctx context.Context, t
 	return translateGRPCError("seed-catalog", err)
 }
 
+// PendingTenant mirrors operatorv1.PendingTenant in the operator's own
+// vocabulary so the pending-provisioning reconciler does not depend on the
+// generated proto type directly. Carries exactly the Tenant-CR spec inputs.
+type PendingTenant struct {
+	TenantID         string
+	OwnerUserID      string
+	OwnerEmail       string
+	WorkspaceName    string
+	Tier             string
+	StripeCustomerID string
+}
+
+// ListPendingTenantProvisioning returns the daemon's queue of tenants awaiting
+// Tenant-CR creation (operator-pull provisioning, gibson#948). Each record
+// carries the spec the operator stamps onto the Tenant CR.
+func (c *EntitlementsGRPCClient) ListPendingTenantProvisioning(ctx context.Context) ([]PendingTenant, error) {
+	authedCtx, err := c.authCtx(ctx)
+	if err != nil {
+		return nil, err
+	}
+	resp, err := c.client.ListPendingTenantProvisioning(authedCtx,
+		&operatorv1.ListPendingTenantProvisioningRequest{})
+	if err := translateGRPCError("list-pending-tenant-provisioning", err); err != nil {
+		return nil, err
+	}
+	out := make([]PendingTenant, 0, len(resp.GetPending()))
+	for _, p := range resp.GetPending() {
+		out = append(out, PendingTenant{
+			TenantID:         p.GetTenantId(),
+			OwnerUserID:      p.GetOwnerUserId(),
+			OwnerEmail:       p.GetOwnerEmail(),
+			WorkspaceName:    p.GetWorkspaceName(),
+			Tier:             p.GetTier(),
+			StripeCustomerID: p.GetStripeCustomerId(),
+		})
+	}
+	return out, nil
+}
+
+// AckTenantProvisioned marks a pending record done after the operator has
+// ensured the Tenant CR exists (gibson#948). Idempotent.
+func (c *EntitlementsGRPCClient) AckTenantProvisioned(ctx context.Context, tenantID string) error {
+	authedCtx, err := c.authCtx(ctx)
+	if err != nil {
+		return err
+	}
+	_, err = c.client.AckTenantProvisioned(authedCtx,
+		&operatorv1.AckTenantProvisionedRequest{TenantId: tenantID})
+	return translateGRPCError("ack-tenant-provisioned", err)
+}
+
 // EmitReconcileSummary maps the controller's strongly-typed summary onto
 // the daemon's generic AuditEventMessage. The daemon's audit emitter
 // stores the event in the platform Postgres + Redis stream.
