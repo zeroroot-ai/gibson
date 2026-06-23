@@ -144,18 +144,3 @@ func prefixAll(typ string, ids []string) []string {
 func objectForComponent(kind, name string) string {
 	return fmt.Sprintf("component:%s/%s", kind, name)
 }
-
-// splitKindName inverts objectForComponent. Returns ("", "") for malformed
-// ids so callers can skip silently.
-func splitKindName(obj string) (kind, name string) {
-	const prefix = "component:"
-	if !strings.HasPrefix(obj, prefix) {
-		return "", ""
-	}
-	rest := strings.TrimPrefix(obj, prefix)
-	slash := strings.IndexByte(rest, '/')
-	if slash < 0 {
-		return "", ""
-	}
-	return rest[:slash], rest[slash+1:]
-}

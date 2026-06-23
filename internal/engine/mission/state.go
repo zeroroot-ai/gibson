@@ -112,32 +112,6 @@ type MissionState struct {
 	mu sync.RWMutex
 }
 
-// NewMissionState creates a new MissionState instance initialized with all nodes
-// in pending status. This prepares the state for mission execution.
-//
-// Note: The nodes parameter will change to use MissionDefinition.Nodes once definition.go
-// is created in task 1.1. For now, it accepts a generic map.
-func NewMissionState(missionID types.ID, nodes map[string]any) *MissionState {
-	nodeStates := make(map[string]*NodeState, len(nodes))
-
-	// Initialize all nodes to pending status
-	for nodeID := range nodes {
-		nodeStates[nodeID] = &NodeState{
-			NodeID:     nodeID,
-			Status:     NodeStatusPending,
-			RetryCount: 0,
-		}
-	}
-
-	return &MissionState{
-		MissionID:  missionID,
-		Status:     MissionStatusPending,
-		NodeStates: nodeStates,
-		Results:    make(map[string]*NodeResult),
-		StartedAt:  time.Now(),
-	}
-}
-
 // GetReadyNodes returns all nodes that are ready to be executed.
 // A node is ready if:
 //   - Its status is pending

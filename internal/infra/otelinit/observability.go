@@ -126,14 +126,6 @@ func WithLogLevel(level slog.Level) Option {
 	return func(c *config) { c.logLevel = level }
 }
 
-// WithResourceAttribute adds an arbitrary OTel resource attribute key/value
-// pair (e.g. "k8s.namespace.name", "gibson").
-func WithResourceAttribute(key, value string) Option {
-	return func(c *config) {
-		c.resourceAttributes = append(c.resourceAttributes, attribute{key, value})
-	}
-}
-
 // Init initialises OTLP exporters for traces and metrics, wires up slog with a
 // structured JSON handler, and returns a ready-to-use *Observability.
 //

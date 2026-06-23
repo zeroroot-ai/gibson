@@ -121,19 +121,3 @@ func SerializeMemory(memory map[string]any) ([]byte, error) {
 
 	return data, nil
 }
-
-// DeserializeMemory deserializes JSON bytes to a memory map.
-// This is used to restore memory state from checkpoints.
-// Returns an empty map for nil/empty bytes (not an error).
-func DeserializeMemory(data []byte) (map[string]any, error) {
-	if len(data) == 0 {
-		return make(map[string]any), nil
-	}
-
-	var memory map[string]any
-	if err := json.Unmarshal(data, &memory); err != nil {
-		return nil, fmt.Errorf("failed to deserialize memory: %w", err)
-	}
-
-	return memory, nil
-}

@@ -419,17 +419,3 @@ type CompletionResult struct {
 
 // CtxCompletionResult is the context key for the completion result
 const CtxCompletionResult ctxKey = "completion_result"
-
-// WithCompletionResult returns a new context with the completion result set.
-func WithCompletionResult(ctx context.Context, result *CompletionResult) context.Context {
-	return context.WithValue(ctx, CtxCompletionResult, result)
-}
-
-// GetCompletionResult retrieves the completion result from the context.
-// Returns nil if not set.
-func GetCompletionResult(ctx context.Context) *CompletionResult {
-	if result, ok := ctx.Value(CtxCompletionResult).(*CompletionResult); ok {
-		return result
-	}
-	return nil
-}

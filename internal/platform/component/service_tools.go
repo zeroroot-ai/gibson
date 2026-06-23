@@ -2,8 +2,6 @@ package component
 
 import (
 	"context"
-	"encoding/json"
-	"fmt"
 	"sync"
 
 	"github.com/google/uuid"
@@ -172,24 +170,4 @@ type toolJobResult struct {
 	index      int32
 	outputJSON string
 	err        *componentpb.ComponentError
-}
-
-// formatToolError creates a ComponentError from a Go error.
-func formatToolError(err error) *componentpb.ComponentError {
-	if err == nil {
-		return nil
-	}
-	return &componentpb.ComponentError{
-		Code:    "TOOL_EXECUTION_FAILED",
-		Message: fmt.Sprintf("%v", err),
-	}
-}
-
-// marshalToolResult marshals a tool result for streaming.
-func marshalToolResult(result any) string {
-	data, err := json.Marshal(result)
-	if err != nil {
-		return "{}"
-	}
-	return string(data)
 }

@@ -23,14 +23,6 @@ type ComponentAuthzMetrics interface {
 	RecordComponentAuthz(ctx context.Context, action, decision string)
 }
 
-// WithComponentAuthzMetrics wires metrics emission into the Authorize handler.
-// When not set, the handler operates without emitting authz counters.
-func WithComponentAuthzMetrics(m ComponentAuthzMetrics) CallbackServiceOption {
-	return func(s *HarnessCallbackService) {
-		s.componentAuthzMetrics = m
-	}
-}
-
 // RunAuthzState holds the authz context for a mission run.
 // It mirrors mission.MissionAuthzState but lives in this package to avoid
 // the harness→mission→eval→harness import cycle.

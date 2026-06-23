@@ -404,51 +404,6 @@ func NewCheckpointRestoredEvent(missionID, threadID, checkpointID string, nodesS
 	}
 }
 
-// NewCheckpointDeletedEvent creates an event for checkpoint deletion.
-func NewCheckpointDeletedEvent(missionID, threadID, checkpointID string, reason string) *CheckpointLifecycleEvent {
-	return &CheckpointLifecycleEvent{
-		Type:         EventCheckpointDeleted,
-		MissionID:    missionID,
-		ThreadID:     threadID,
-		CheckpointID: checkpointID,
-		Timestamp:    time.Now(),
-		Data: map[string]any{
-			"reason": reason,
-		},
-		CorrelationID: ulid.Make().String(),
-	}
-}
-
-// NewCheckpointFailedEvent creates an event for checkpoint operation failure.
-func NewCheckpointFailedEvent(missionID, threadID, checkpointID, operation, errMsg string) *CheckpointLifecycleEvent {
-	return &CheckpointLifecycleEvent{
-		Type:         EventCheckpointFailed,
-		MissionID:    missionID,
-		ThreadID:     threadID,
-		CheckpointID: checkpointID,
-		Timestamp:    time.Now(),
-		Data: map[string]any{
-			"operation": operation,
-			"error":     errMsg,
-		},
-		CorrelationID: ulid.Make().String(),
-	}
-}
-
-// NewThreadCreatedEvent creates an event for thread creation.
-func NewThreadCreatedEvent(missionID, threadID string, isPrimary bool) *CheckpointLifecycleEvent {
-	return &CheckpointLifecycleEvent{
-		Type:      EventThreadCreated,
-		MissionID: missionID,
-		ThreadID:  threadID,
-		Timestamp: time.Now(),
-		Data: map[string]any{
-			"is_primary": isPrimary,
-		},
-		CorrelationID: ulid.Make().String(),
-	}
-}
-
 // NewThreadBranchedEvent creates an event for thread branching.
 func NewThreadBranchedEvent(missionID, parentThreadID, newThreadID, sourceCheckpointID string) *CheckpointLifecycleEvent {
 	return &CheckpointLifecycleEvent{
@@ -493,20 +448,6 @@ func NewThreadCompletedEvent(missionID, threadID string, result *ThreadResult) *
 	}
 
 	return event
-}
-
-// NewThreadDeletedEvent creates an event for thread deletion.
-func NewThreadDeletedEvent(missionID, threadID, reason string) *CheckpointLifecycleEvent {
-	return &CheckpointLifecycleEvent{
-		Type:      EventThreadDeleted,
-		MissionID: missionID,
-		ThreadID:  threadID,
-		Timestamp: time.Now(),
-		Data: map[string]any{
-			"reason": reason,
-		},
-		CorrelationID: ulid.Make().String(),
-	}
 }
 
 // NewReplayStartedEvent creates an event for replay start.

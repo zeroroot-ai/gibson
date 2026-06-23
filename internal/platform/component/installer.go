@@ -2414,11 +2414,6 @@ type taxonomyRegistryAdapter struct {
 	registry sdkGraphrag.TaxonomyRegistry
 }
 
-// NewTaxonomyRegistryAdapter creates a new adapter for the sdkGraphrag TaxonomyRegistry.
-func NewTaxonomyRegistryAdapter(registry sdkGraphrag.TaxonomyRegistry) TaxonomyRegistry {
-	return &taxonomyRegistryAdapter{registry: registry}
-}
-
 // RegisterExtension converts component.TaxonomyExtension to sdkGraphrag.TaxonomyExtension and registers it.
 func (a *taxonomyRegistryAdapter) RegisterExtension(agentName string, ext *TaxonomyExtension) error {
 	if ext == nil {

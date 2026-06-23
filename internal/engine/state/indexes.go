@@ -855,21 +855,6 @@ func (m *IndexManager) EnsureAllIndexes(ctx context.Context) error {
 	return nil
 }
 
-// parseIndexInfoValue parses a value from FT.INFO response.
-// Values can be strings, integers, or floats.
-func parseIndexInfoValue(val interface{}) (string, error) {
-	switch v := val.(type) {
-	case string:
-		return v, nil
-	case int64:
-		return strconv.FormatInt(v, 10), nil
-	case float64:
-		return strconv.FormatFloat(v, 'f', -1, 64), nil
-	default:
-		return "", fmt.Errorf("unexpected type: %T", val)
-	}
-}
-
 // parseInteger parses an integer value from Redis response.
 // Redis can return integers as int64, string, or other types.
 func parseInteger(val interface{}) (int64, error) {

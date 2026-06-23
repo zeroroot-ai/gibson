@@ -108,14 +108,6 @@ type StoreConfig struct {
 	DefaultTTL time.Duration
 }
 
-// DefaultStoreConfig returns sensible defaults for store configuration.
-func DefaultStoreConfig() StoreConfig {
-	return StoreConfig{
-		KeyPrefix:  "gibson",
-		DefaultTTL: 7 * 24 * time.Hour, // 7 days
-	}
-}
-
 // RedisCheckpointStore implements both CheckpointStore and ThreadStore using Redis.
 // It uses RedisJSON for document storage and sorted sets for time-ordered indexes.
 //

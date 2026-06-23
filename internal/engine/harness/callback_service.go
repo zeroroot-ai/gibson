@@ -2610,26 +2610,6 @@ func agentSeverityToProtoSeverity(severity agent.FindingSeverity) typespb.Findin
 	}
 }
 
-// protoFilterToFindingFilter converts a proto FindingFilter to internal FindingFilter.
-func protoFilterToFindingFilter(pf *harnesspb.FindingFilter) FindingFilter {
-	if pf == nil {
-		return FindingFilter{}
-	}
-
-	filter := FindingFilter{}
-
-	// Convert optional fields that exist in proto
-	if pf.Severity != typespb.FindingSeverity_FINDING_SEVERITY_UNSPECIFIED {
-		severity := protoSeverityToAgentSeverity(pf.Severity)
-		filter.Severity = &severity
-	}
-
-	// Note: proto FindingFilter has tags, mission_id, agent_name, status fields
-	// but internal FindingFilter may not have all of them
-
-	return filter
-}
-
 // Observe forwards a typed agent observation to the brain via the observation
 // sink (ADR-0007). The brain resolves identity and topology; the daemon-wired
 // sink derives the scope from mission context. No-op when the sink is unwired.

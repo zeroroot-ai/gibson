@@ -38,7 +38,6 @@ import (
 	"github.com/zeroroot-ai/gibson/cmd/gibson-migrate/internal/runner"
 	"github.com/zeroroot-ai/gibson/internal/infra/datapool/admin"
 
-	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/runtime/schema"
 	"k8s.io/client-go/dynamic"
 	"k8s.io/client-go/rest"
@@ -589,26 +588,6 @@ var tenantGVR = schema.GroupVersionResource{
 	Group:    "gibson.zeroroot.ai",
 	Version:  "v1alpha1",
 	Resource: "tenants",
-}
-
-// listAllTenants is a fallback for environments without the admin package.
-func listAllTenants(ctx context.Context, dynClient dynamic.Interface) ([]string, error) {
-	list, err := dynClient.Resource(tenantGVR).List(ctx, metav1.ListOptions{})
-	if err != nil {
-		return nil, err
-	}
-	var tenants []string
-	for _, item := range list.Items {
-		meta, ok := item.Object["metadata"].(map[string]any)
-		if !ok {
-			continue
-		}
-		name, _ := meta["name"].(string)
-		if name != "" {
-			tenants = append(tenants, name)
-		}
-	}
-	return tenants, nil
 }
 
 // buildPostgresDSN constructs a per-tenant Postgres DSN from the admin DSN by

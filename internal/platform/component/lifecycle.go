@@ -11,7 +11,6 @@ import (
 	"syscall"
 	"time"
 
-	"go.opentelemetry.io/otel"
 	"go.opentelemetry.io/otel/attribute"
 	"go.opentelemetry.io/otel/codes"
 	"go.opentelemetry.io/otel/trace"
@@ -66,41 +65,6 @@ type DefaultLifecycleManager struct {
 	logWriter       LogWriter              // optional, for capturing process output to log files
 	processes       map[string]*os.Process // component name -> process
 	tracer          trace.Tracer
-}
-
-// NewLifecycleManager creates a new DefaultLifecycleManager with default timeouts.
-// The store and logWriter parameters are optional; pass nil if not needed.
-func NewLifecycleManager(store ComponentStore, logWriter LogWriter) *DefaultLifecycleManager {
-	return &DefaultLifecycleManager{
-		startupTimeout:  DefaultStartupTimeout,
-		shutdownTimeout: DefaultShutdownTimeout,
-		portRangeStart:  DefaultPortRangeStart,
-		portRangeEnd:    DefaultPortRangeEnd,
-		store:           store,
-		logWriter:       logWriter,
-		processes:       make(map[string]*os.Process),
-		tracer:          otel.GetTracerProvider().Tracer("gibson.component"),
-	}
-}
-
-// NewLifecycleManagerWithTimeouts creates a new DefaultLifecycleManager with custom timeouts.
-// The store and logWriter parameters are optional; pass nil if not needed.
-func NewLifecycleManagerWithTimeouts(
-	store ComponentStore,
-	logWriter LogWriter,
-	startupTimeout, shutdownTimeout time.Duration,
-	portRangeStart, portRangeEnd int,
-) *DefaultLifecycleManager {
-	return &DefaultLifecycleManager{
-		startupTimeout:  startupTimeout,
-		shutdownTimeout: shutdownTimeout,
-		portRangeStart:  portRangeStart,
-		portRangeEnd:    portRangeEnd,
-		store:           store,
-		logWriter:       logWriter,
-		processes:       make(map[string]*os.Process),
-		tracer:          otel.GetTracerProvider().Tracer("gibson.component"),
-	}
 }
 
 // StartComponent starts a component and waits for it to become healthy.

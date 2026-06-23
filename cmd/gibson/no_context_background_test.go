@@ -49,7 +49,7 @@ func TestNoContextBackgroundInRPCHandlers(t *testing.T) {
 	// Existing-debt allowlist for legitimate sites that must not be
 	// removed without thought.
 	allowlist := astchecks.Allowlist{
-		"internal/server/daemon/api/platform_operator_shutdown.go:46": astchecks.Entry{
+		"internal/server/daemon/api/platform_operator_shutdown.go:43": astchecks.Entry{
 			Category: astchecks.CategoryDefensiveGuard,
 			Reason:   "shutdown cleanup must outlive the inbound RPC ctx; bounded by WithTimeout",
 		},

@@ -136,8 +136,6 @@ func counterKey(tenantID string, scope Scope, subjectID, period string) string {
 	return ""
 }
 
-func warnKey(counter string) string { return counter + ":warn" }
-
 // luaCheck runs a single-read check: for a counter key, returns the
 // current tokens + cost. Atomicity against concurrent Record calls is
 // delivered by the Record Lua script's INCR, not by Check — Check is

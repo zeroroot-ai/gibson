@@ -163,17 +163,6 @@ func NewRegistryAdapter(reg ComponentRegistry, tenant string) *RegistryAdapter {
 	}
 }
 
-// NewRegistryAdapterWithPool creates a new adapter with a custom GRPCPool.
-func NewRegistryAdapterWithPool(reg ComponentRegistry, tenant string, pool *GRPCPool) *RegistryAdapter {
-	return &RegistryAdapter{
-		registry:     reg,
-		tenant:       tenant,
-		loadBalancer: NewLoadBalancer(reg, StrategyRoundRobin),
-		pool:         pool,
-		resolver:     protoresolver.NewDefaultProtoResolver(protoresolver.DefaultConfig()),
-	}
-}
-
 // SetCallbackManager configures the callback manager for this adapter.
 func (a *RegistryAdapter) SetCallbackManager(cm CallbackManager) {
 	a.callbackManager = cm

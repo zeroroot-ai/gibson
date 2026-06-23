@@ -448,22 +448,6 @@ func sanitizeURL(urlStr string) string {
 	return parsed.String()
 }
 
-// OrchestratorAttributes creates OpenTelemetry attributes for an orchestrator decision.
-// It captures the iteration number, action taken, confidence level, and target node ID.
-func OrchestratorAttributes(iteration int, action string, confidence float64, targetNodeID string) []attribute.KeyValue {
-	attrs := []attribute.KeyValue{
-		attribute.Int(GibsonOrchestratorIteration, iteration),
-		attribute.String(GibsonOrchestratorAction, action),
-		attribute.Float64(GibsonOrchestratorConfidence, confidence),
-	}
-
-	if targetNodeID != "" {
-		attrs = append(attrs, attribute.String(GibsonOrchestratorTargetNodeID, targetNodeID))
-	}
-
-	return attrs
-}
-
 // MissionSummaryAttributes creates OpenTelemetry attributes from mission statistics.
 // It captures all mission-level metrics including decisions, executions, tool calls,
 // LLM usage, costs, findings, and duration.
@@ -478,77 +462,6 @@ func MissionSummaryAttributes(stats MissionStatistics) []attribute.KeyValue {
 		attribute.Int(GibsonMissionTotalFindings, stats.TotalFindings),
 		attribute.Int64(GibsonMissionDurationMs, stats.Duration.Milliseconds()),
 	}
-}
-
-// ToolExecutionAttributes creates OpenTelemetry attributes for a tool execution.
-// It captures the tool name, category, status, duration, and output size.
-func ToolExecutionAttributes(name, category, status string, durationMs int64, outputSize int) []attribute.KeyValue {
-	attrs := []attribute.KeyValue{
-		attribute.String(GibsonToolName, name),
-		attribute.String(GibsonToolStatus, status),
-		attribute.Int64(GibsonToolDurationMs, durationMs),
-		attribute.Int(GibsonToolOutputSizeBytes, outputSize),
-	}
-
-	if category != "" {
-		attrs = append(attrs, attribute.String(GibsonToolCategory, category))
-	}
-
-	return attrs
-}
-
-// MemoryOpAttributes creates OpenTelemetry attributes for a memory operation.
-// It captures the memory tier, operation type, key, hit status, size, and result count.
-func MemoryOpAttributes(tier, operation, key string, hit bool, sizeBytes int, resultCount int) []attribute.KeyValue {
-	attrs := []attribute.KeyValue{
-		attribute.String(GibsonMemoryTier, tier),
-		attribute.String(GibsonMemoryOperation, operation),
-		attribute.Bool(GibsonMemoryHit, hit),
-		attribute.Int(GibsonMemorySizeBytes, sizeBytes),
-	}
-
-	if key != "" {
-		attrs = append(attrs, attribute.String(GibsonMemoryKey, key))
-	}
-
-	if resultCount > 0 {
-		attrs = append(attrs, attribute.Int(GibsonMemorySearchResultsCount, resultCount))
-	}
-
-	return attrs
-}
-
-// GraphOpAttributes creates OpenTelemetry attributes for a graph operation.
-// It captures the operation type, nodes and relationships created, and node labels.
-func GraphOpAttributes(operation string, nodesCreated, relsCreated int, nodeLabels []string) []attribute.KeyValue {
-	attrs := []attribute.KeyValue{
-		attribute.String(GibsonGraphOperation, operation),
-		attribute.Int(GibsonGraphNodesCreated, nodesCreated),
-		attribute.Int(GibsonGraphRelationshipsCreated, relsCreated),
-	}
-
-	if len(nodeLabels) > 0 {
-		attrs = append(attrs, attribute.StringSlice(GibsonGraphNodeLabels, nodeLabels))
-	}
-
-	return attrs
-}
-
-// AgentExecutionAttributes creates OpenTelemetry attributes for an agent execution.
-// It captures the agent name, mission node ID, status, attempt number, and duration.
-func AgentExecutionAttributes(name, missionNodeID, status string, attempt int, durationMs int64) []attribute.KeyValue {
-	attrs := []attribute.KeyValue{
-		attribute.String(GibsonAgentName, name),
-		attribute.String(GibsonAgentStatus, status),
-		attribute.Int(GibsonAgentAttempt, attempt),
-		attribute.Int64(GibsonAgentDurationMs, durationMs),
-	}
-
-	if missionNodeID != "" {
-		attrs = append(attrs, attribute.String(GibsonAgentMissionNodeID, missionNodeID))
-	}
-
-	return attrs
 }
 
 // CombineAttributes merges multiple attribute slices into one.

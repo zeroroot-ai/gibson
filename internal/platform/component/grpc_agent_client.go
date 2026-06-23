@@ -345,49 +345,6 @@ func (c *GRPCAgentClient) ExecuteWithCallback(ctx context.Context, task agent.Ta
 	return result, nil
 }
 
-// unmarshalAgentResult unmarshals the agent result JSON with flexible Output handling.
-// The SDK's Result.Output field can be any type (string, map, etc.) while Gibson's
-// internal Result expects map[string]any. This function handles the conversion.
-func unmarshalAgentResult(resultJSON string, taskID types.ID) (agent.Result, error) {
-	// Use flexible struct to handle SDK's Output field which can be any type
-	var rawResult struct {
-		TaskID      string             `json:"task_id"`
-		Status      string             `json:"status"`
-		Output      any                `json:"output,omitempty"`
-		Findings    []string           `json:"findings,omitempty"`
-		Metadata    map[string]any     `json:"metadata,omitempty"`
-		Error       *agent.ResultError `json:"error,omitempty"`
-		StartedAt   string             `json:"started_at,omitempty"`
-		CompletedAt string             `json:"completed_at,omitempty"`
-	}
-	if err := json.Unmarshal([]byte(resultJSON), &rawResult); err != nil {
-		return agent.Result{}, fmt.Errorf("failed to unmarshal result: %w", err)
-	}
-
-	// Convert to Gibson Result, wrapping Output in a map if it's a string
-	result := agent.NewResult(taskID)
-	result.Status = agent.ResultStatus(rawResult.Status)
-
-	// Handle Output - wrap non-map values in a map
-	switch v := rawResult.Output.(type) {
-	case map[string]any:
-		result.Output = v
-	case string:
-		result.Output = map[string]any{"result": v}
-	case nil:
-		result.Output = make(map[string]any)
-	default:
-		result.Output = map[string]any{"data": v}
-	}
-
-	// Reconstruct error from serialized ResultError
-	if rawResult.Error != nil {
-		result.Error = rawResult.Error
-	}
-
-	return result, nil
-}
-
 // Shutdown cleanly terminates the agent and releases resources.
 //
 // This closes the underlying gRPC connection. After shutdown, the client

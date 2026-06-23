@@ -144,18 +144,6 @@ func NewAuditWriter(logger *audit.AuditLogger, sl *slog.Logger) *AuditWriter {
 	}
 }
 
-// newAuditWriterWithClock is the test constructor that accepts a clock
-// override for deterministic timestamp tests.
-func newAuditWriterWithClock(
-	logger *audit.AuditLogger,
-	sl *slog.Logger,
-	clock func() time.Time,
-) *AuditWriter {
-	w := NewAuditWriter(logger, sl)
-	w.clock = clock
-	return w
-}
-
 // Audit emits event to the Redis Streams audit pipeline. It never returns an
 // error. The underlying AuditLogger.LogWithResult is fire-and-forget — it
 // enqueues the write asynchronously and handles drop counting internally.

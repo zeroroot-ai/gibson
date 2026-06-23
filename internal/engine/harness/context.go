@@ -250,13 +250,6 @@ func ToolExecutionIDFromContext(ctx context.Context) string {
 	return contextkeys.GetToolExecutionID(ctx)
 }
 
-// ContextWithMissionRunID returns a new context with the mission run ID set.
-// The mission run ID is used for GraphRAG mission-scoped storage, allowing agents
-// to automatically associate stored nodes with the current mission run.
-func ContextWithMissionRunID(ctx context.Context, missionRunID string) context.Context {
-	return contextkeys.WithMissionRunID(ctx, missionRunID)
-}
-
 // MissionRunIDFromContext retrieves the mission run ID from context.
 // Returns empty string if not set.
 func MissionRunIDFromContext(ctx context.Context) string {

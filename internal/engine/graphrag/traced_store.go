@@ -32,13 +32,6 @@ type TracedGraphRAGProvider struct {
 // TracedProviderOption is a functional option for configuring TracedGraphRAGProvider.
 type TracedProviderOption func(*TracedGraphRAGProvider)
 
-// WithProviderType sets the provider type for tracing attributes.
-func WithProviderType(providerType ProviderType) TracedProviderOption {
-	return func(p *TracedGraphRAGProvider) {
-		p.providerType = providerType
-	}
-}
-
 // NewTracedGraphRAGProvider creates a new traced GraphRAG provider.
 // Wraps the inner provider with OpenTelemetry tracing for observability.
 //

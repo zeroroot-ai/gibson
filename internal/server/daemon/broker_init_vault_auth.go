@@ -4,16 +4,13 @@ import (
 	"context"
 	"crypto/sha256"
 	"encoding/hex"
-	"encoding/json"
 	"fmt"
 	"strings"
 	"sync"
 	"time"
 
 	"github.com/hashicorp/vault/api"
-	sdksecrets "github.com/zeroroot-ai/gibson/internal/infra/secrets"
 	sdkvault "github.com/zeroroot-ai/gibson/internal/infra/secrets/vault"
-	"github.com/zeroroot-ai/gibson/internal/platform/secrets"
 	"github.com/zeroroot-ai/gibson/internal/platform/secrets/jwtsource"
 )
 
@@ -268,71 +265,4 @@ func (l *vaultRefreshLookup) get(key string) (sdkvault.Config, bool) {
 	defer l.mu.RUnlock()
 	c, ok := l.configs[key]
 	return c, ok
-}
-
-// makeVaultRefreshFn returns an AuthRefreshFn that dispatches by cache key
-// through the supplied vaultRefreshLookup. The returned closure has no
-// dependency on RegistryConfigGetter; it is purely driven by the configs
-// the VaultFactory deposits before each call.
-func makeVaultRefreshFn(lookup *vaultRefreshLookup) secrets.AuthRefreshFn {
-	return func(ctx context.Context, key, _ string) (string, time.Duration, error) {
-		cfg, ok := lookup.get(key)
-		if !ok {
-			return "", 0, fmt.Errorf("vault auth refresh: no config registered for cache key %s", key)
-		}
-		return vaultAuthLogin(ctx, cfg)
-	}
-}
-
-// makeVaultFactory returns a Vault ProviderConstructor that consults the
-// AuthCache before constructing each sdkvault.Provider. The flow is:
-//
-//  1. Unmarshal the per-tenant config blob into sdkvault.Config.
-//  2. Compute a stable cache key from the blob; register the config so the
-//     refresh closure can find it.
-//  3. Call vaultAuthCache.GetOrRefresh; under concurrent factory invocations
-//     for the same tenant (e.g. Registry.Reload), all goroutines collapse
-//     onto one auth round-trip via singleflight.
-//  4. Inject the cached token into cfg.Auth.{Method,Token} and call
-//     sdkvault.New, which now skips its own auth round-trip and only runs
-//     the KV-mount detection probe.
-//
-// On AuthCache failure the factory falls back to plain sdkvault.New so that
-// providers without a registered config (e.g. tenants with malformed blobs
-// or static-token-only configs) still construct successfully.
-//
-// lookup is the registry shared with makeVaultRefreshFn — when the factory
-// inserts a config into it, the AuthCache's refresh closure can find that
-// config and run the corresponding login flow. Both arguments must come
-// from the same broker_init call site so the wiring matches.
-//
-// Spec: headline-feature-completion R3 (VaultFactory consults AuthCache).
-func makeVaultFactory(ctx context.Context, vaultAuthCache *secrets.AuthCache, lookup *vaultRefreshLookup) func(blob []byte) (sdksecrets.Broker, error) {
-	return func(blob []byte) (sdksecrets.Broker, error) {
-		var cfg sdkvault.Config
-		if err := json.Unmarshal(blob, &cfg); err != nil {
-			return nil, fmt.Errorf("vault: unmarshal config: %w", err)
-		}
-
-		if vaultAuthCache == nil || lookup == nil {
-			return sdkvault.New(ctx, cfg)
-		}
-
-		key := vaultConfigCacheKey(blob)
-		lookup.put(key, cfg)
-
-		token, err := vaultAuthCache.GetOrRefresh(ctx, key, "vault")
-		if err != nil {
-			// Fall back to direct construction; sdkvault.New will run its
-			// own auth round-trip. This preserves availability when the
-			// cache cannot reach Vault for some transient reason.
-			return sdkvault.New(ctx, cfg)
-		}
-
-		// Inject the cached token. AuthMethodToken short-circuits sdkvault's
-		// internal authenticate() to a single SetToken call — no round-trip.
-		cfg.Auth.Method = sdkvault.AuthMethodToken
-		cfg.Auth.Token = token
-		return sdkvault.New(ctx, cfg)
-	}
 }

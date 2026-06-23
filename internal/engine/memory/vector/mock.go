@@ -29,16 +29,6 @@ type MockVectorStore struct {
 	deleteError   error
 }
 
-// NewMockVectorStore creates a new mock vector store for testing.
-func NewMockVectorStore() *MockVectorStore {
-	return &MockVectorStore{
-		records:       make(map[string]VectorRecord),
-		searchResults: make([]VectorResult, 0),
-		calls:         make([]MockCall, 0),
-		healthStatus:  types.NewHealthStatus(types.HealthStateHealthy, "mock vector store"),
-	}
-}
-
 // Store records the call and stores the record if no error is configured.
 func (m *MockVectorStore) Store(ctx context.Context, record VectorRecord) error {
 	m.mu.Lock()

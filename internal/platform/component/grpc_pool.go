@@ -91,40 +91,6 @@ func NewGRPCPool(opts ...grpc.DialOption) *GRPCPool {
 	}
 }
 
-// NewGRPCPoolWithCircuitBreaker creates a new gRPC connection pool with custom circuit breaker config.
-//
-// This allows fine-tuning of circuit breaker behavior (failure threshold, timeout, etc.).
-func NewGRPCPoolWithCircuitBreaker(config CircuitBreakerConfig, opts ...grpc.DialOption) *GRPCPool {
-	return &GRPCPool{
-		conns:          make(map[string]*grpc.ClientConn),
-		opts:           opts,
-		circuitBreaker: NewCircuitBreaker(config),
-	}
-}
-
-// NewGRPCPoolWithTLS creates a new gRPC connection pool with TLS configuration.
-//
-// This enables secure connections to gRPC services with optional mTLS support.
-// The pool will automatically apply TLS credentials to all connections.
-//
-// Example usage:
-//
-//	tlsConfig := &TLSConfig{
-//	    Enabled: true,
-//	    CAFile: "/etc/ssl/ca.crt",
-//	    ServerName: "grpc.example.com",
-//	}
-//	pool := NewGRPCPoolWithTLS(tlsConfig)
-//	defer pool.Close()
-func NewGRPCPoolWithTLS(tlsConfig *TLSConfig, opts ...grpc.DialOption) *GRPCPool {
-	return &GRPCPool{
-		conns:          make(map[string]*grpc.ClientConn),
-		opts:           opts,
-		circuitBreaker: NewCircuitBreaker(DefaultCircuitBreakerConfig()),
-		tlsConfig:      tlsConfig,
-	}
-}
-
 // Get retrieves or creates a gRPC client connection to the specified endpoint.
 //
 // This method first checks the circuit breaker to ensure the endpoint is healthy.

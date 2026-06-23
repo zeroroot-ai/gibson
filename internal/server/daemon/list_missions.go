@@ -8,7 +8,6 @@ import (
 
 	"github.com/zeroroot-ai/gibson/internal/engine/mission"
 	"github.com/zeroroot-ai/gibson/internal/infra/datapool"
-	"github.com/zeroroot-ai/gibson/internal/infra/types"
 	"github.com/zeroroot-ai/gibson/internal/server/daemon/api"
 )
 
@@ -218,18 +217,4 @@ func containsSubstring(s, substr string) bool {
 	s = strings.ToLower(s)
 	substr = strings.ToLower(substr)
 	return strings.Contains(s, substr)
-}
-
-// parseMissionID is a helper to parse and validate mission IDs.
-func parseMissionID(missionIDStr string) (types.ID, error) {
-	if missionIDStr == "" {
-		return types.ID(""), fmt.Errorf("mission ID cannot be empty")
-	}
-
-	missionID, err := types.ParseID(missionIDStr)
-	if err != nil {
-		return types.ID(""), fmt.Errorf("invalid mission ID format: %w", err)
-	}
-
-	return missionID, nil
 }

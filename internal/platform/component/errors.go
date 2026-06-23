@@ -509,19 +509,6 @@ func NewProtocolDetectError(component string, cause error) *ComponentError {
 	}
 }
 
-// NewInvalidProtocolError creates an invalid protocol error.
-// This is non-retryable as the protocol configuration needs to be fixed.
-func NewInvalidProtocolError(protocol string) *ComponentError {
-	return &ComponentError{
-		Code:    ErrCodeInvalidProtocol,
-		Message: fmt.Sprintf("invalid health check protocol: %s (must be 'http', 'grpc', or 'auto')", protocol),
-		Context: map[string]any{
-			"protocol": protocol,
-		},
-		Retryable: false,
-	}
-}
-
 // NewLogWriteError creates an error for failed log write operations.
 // This may be retryable depending on the cause (e.g., disk space, permissions).
 func NewLogWriteError(componentName string, err error) *ComponentError {
