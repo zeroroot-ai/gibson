@@ -18,6 +18,7 @@ import (
 	"github.com/zeroroot-ai/gibson/internal/infra/types"
 	sdkagent "github.com/zeroroot-ai/sdk/agent"
 	harnesspb "github.com/zeroroot-ai/sdk/api/gen/gibson/harness/v1"
+	"github.com/zeroroot-ai/sdk/codegen/workspace"
 	sdktypes "github.com/zeroroot-ai/sdk/types"
 	"go.opentelemetry.io/otel/trace"
 	"go.opentelemetry.io/otel/trace/noop"
@@ -253,6 +254,18 @@ func (m *mockHarnessForResolver) Metrics() MetricsRecorder {
 }
 
 func (m *mockHarnessForResolver) TokenUsage() *llm.TokenTracker {
+	return nil
+}
+
+func (m *mockHarnessForResolver) Checkpoint() CheckpointAccess {
+	return nil
+}
+
+func (m *mockHarnessForResolver) Workspace() workspace.Workspace {
+	return nil
+}
+
+func (m *mockHarnessForResolver) Workspaces() map[string]workspace.Workspace {
 	return nil
 }
 

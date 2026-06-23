@@ -334,8 +334,8 @@ func newPersistedMission(t *testing.T, store *redisMissionStore) *Mission {
 		ID:                  types.NewID(),
 		MissionDefinitionID: types.NewID(),
 		Status:              MissionStatusRunning,
-		CreatedAt:           now,
-		UpdatedAt:           now,
+		CreatedAt:           NewUnixTime(now),
+		UpdatedAt:           NewUnixTime(now),
 		Metrics:             &MissionMetrics{StartedAt: now},
 	}
 	require.NoError(t, store.Save(context.Background(), m))
@@ -364,7 +364,7 @@ func newThreeNodeMissionState(missionID types.ID) *MissionState {
 				Status: NodeStatusPending,
 			},
 		},
-		Results: map[string]any{},
+		Results: map[string]*NodeResult{},
 	}
 }
 
