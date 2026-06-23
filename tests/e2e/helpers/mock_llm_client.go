@@ -3,7 +3,7 @@
 
 // Package helpers — mock_llm_client.go
 //
-// Configures the mock-LLM provider via the daemon's admin gRPC RPC surface
+// Configures the mock-LLM provider via the daemon's ProviderService gRPC RPC surface
 // (CreateProvider / SetDefaultProvider / DeleteProvider). The daemon-side mock
 // provider lives in tests/e2e/fixtures/providers/mock-llm/provider.go (Task 10)
 // and is only compiled into the daemon binary when built with -tags=test_fixtures
@@ -64,7 +64,7 @@ const (
 // Security: the mock token is a fixed test-only string — never log it.
 //
 // Requirements: R3.1, R3.2.
-func RegisterMockProvider(ctx context.Context, adminClient tenantv1.TenantServiceClient) error {
+func RegisterMockProvider(ctx context.Context, adminClient tenantv1.ProviderServiceClient) error {
 	resp, err := adminClient.CreateProvider(ctx, &tenantv1.CreateProviderRequest{
 		Input: &tenantv1.ProviderConfigInput{
 			Name:         MockProviderName,
@@ -98,7 +98,7 @@ func RegisterMockProvider(ctx context.Context, adminClient tenantv1.TenantServic
 // Updates the provider via UpdateProvider RPC with the "inject_error" credential.
 //
 // Requirements: R4.3.
-func InjectErrorMode(ctx context.Context, adminClient tenantv1.TenantServiceClient) error {
+func InjectErrorMode(ctx context.Context, adminClient tenantv1.ProviderServiceClient) error {
 	_, err := adminClient.UpdateProvider(ctx, &tenantv1.UpdateProviderRequest{
 		Name: MockProviderName,
 		Input: &tenantv1.ProviderConfigInput{
@@ -122,7 +122,7 @@ func InjectErrorMode(ctx context.Context, adminClient tenantv1.TenantServiceClie
 // LLM call. Used by the R4.4 deadline-exceeded negative test.
 //
 // Requirements: R4.4.
-func InjectSlowMode(ctx context.Context, adminClient tenantv1.TenantServiceClient) error {
+func InjectSlowMode(ctx context.Context, adminClient tenantv1.ProviderServiceClient) error {
 	_, err := adminClient.UpdateProvider(ctx, &tenantv1.UpdateProviderRequest{
 		Name: MockProviderName,
 		Input: &tenantv1.ProviderConfigInput{
@@ -146,7 +146,7 @@ func InjectSlowMode(ctx context.Context, adminClient tenantv1.TenantServiceClien
 // Removes any error or slow-mode injection. Idempotent.
 //
 // Requirements: R3.2 (deterministic responses).
-func ResetMockProvider(ctx context.Context, adminClient tenantv1.TenantServiceClient) error {
+func ResetMockProvider(ctx context.Context, adminClient tenantv1.ProviderServiceClient) error {
 	_, err := adminClient.UpdateProvider(ctx, &tenantv1.UpdateProviderRequest{
 		Name: MockProviderName,
 		Input: &tenantv1.ProviderConfigInput{
@@ -174,7 +174,7 @@ func ResetMockProvider(ctx context.Context, adminClient tenantv1.TenantServiceCl
 // returned (tolerates NotFound).
 //
 // Requirements: R3.1.
-func UnregisterMockProvider(ctx context.Context, adminClient tenantv1.TenantServiceClient) error {
+func UnregisterMockProvider(ctx context.Context, adminClient tenantv1.ProviderServiceClient) error {
 	_, err := adminClient.DeleteProvider(ctx, &tenantv1.DeleteProviderRequest{
 		Name: MockProviderName,
 	})
