@@ -36,10 +36,25 @@ const PROTO_ROOT = join(REPO_ROOT, 'internal/server/daemon/api');
 //
 // Spec: cross-repo-cohesion-fixes Requirement 4.2; design.md "Out of scope".
 // ---------------------------------------------------------------------------
+// NOTE: the E6 narrow-SDK flip (ADR-0058 amendment, gibson#921) re-homed the 9
+// tenant-admin services out of the OSS SDK and into this gibson daemon-local
+// tree at gibson/tenant/v1/. The `limit`/`offset` RPCs below pre-date AIP-158
+// and were grandfathered in the SDK; the move re-keys them to their new
+// daemon-local paths (e.g. the old gibson/user/v1/user.proto is now
+// gibson/tenant/v1/user.proto, and ListAuditEvents moved from tenant_admin.proto
+// to tenant.proto). These are MOVED-not-new RPCs with unchanged wire shape —
+// not new pagination violations. ListActiveGrants/ListSecrets were grandfathered
+// upstream in the SDK and carry the same legacy shape.
 const GRANDFATHER_LIST = [
-  { file: 'gibson/tenant/v1/tenant_admin.proto', method: 'ListAuditEvents' },
-  { file: 'gibson/user/v1/user.proto',           method: 'ListAlerts' },
-  { file: 'gibson/user/v1/user.proto',           method: 'ListConversations' },
+  // Pre-existing daemon-local user service (unchanged by E6).
+  { file: 'gibson/user/v1/user.proto',      method: 'ListAlerts' },
+  { file: 'gibson/user/v1/user.proto',      method: 'ListConversations' },
+  // E6-rehomed tenant-admin services (new daemon-local paths).
+  { file: 'gibson/tenant/v1/tenant.proto',  method: 'ListAuditEvents' },
+  { file: 'gibson/tenant/v1/grants.proto',  method: 'ListActiveGrants' },
+  { file: 'gibson/tenant/v1/secrets.proto', method: 'ListSecrets' },
+  { file: 'gibson/tenant/v1/user.proto',    method: 'ListAlerts' },
+  { file: 'gibson/tenant/v1/user.proto',    method: 'ListConversations' },
 ];
 
 function isGrandfathered(relPath, methodName) {
