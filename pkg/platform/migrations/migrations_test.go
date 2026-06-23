@@ -9,11 +9,11 @@ import (
 func TestEmbed_TenantHasExpectedFiles(t *testing.T) {
 	t.Parallel()
 	upCount, downCount := countSQL(t, Tenant, tenantDir)
-	if upCount != 7 {
-		t.Errorf("tenant: expected 7 up.sql files, got %d", upCount)
+	if upCount != 8 {
+		t.Errorf("tenant: expected 8 up.sql files, got %d", upCount)
 	}
-	if downCount != 7 {
-		t.Errorf("tenant: expected 7 down.sql files, got %d", downCount)
+	if downCount != 8 {
+		t.Errorf("tenant: expected 8 down.sql files, got %d", downCount)
 	}
 }
 
@@ -65,14 +65,20 @@ func TestEmbed_UpDownPairing(t *testing.T) {
 	}
 }
 
+// TenantMaxVersion must match the highest NNN in postgres/tenant/*.up.sql.
+// Bump alongside any added tenant migration:
+//
+//	...
+//	007 — (prior tenant baseline)
+//	008 — provider_embedding_capability (BYO-embedder columns, gibson#937)
 func TestTenantMaxVersion(t *testing.T) {
 	t.Parallel()
 	v, err := TenantMaxVersion()
 	if err != nil {
 		t.Fatalf("TenantMaxVersion: %v", err)
 	}
-	if v != 7 {
-		t.Errorf("TenantMaxVersion: got %d, want 7", v)
+	if v != 8 {
+		t.Errorf("TenantMaxVersion: got %d, want 8", v)
 	}
 }
 
