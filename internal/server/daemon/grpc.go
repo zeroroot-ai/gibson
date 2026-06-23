@@ -363,6 +363,18 @@ func (d *daemonImpl) buildGRPCServer(ctx context.Context) (*grpcSubsystem, error
 			// tenant provisioning blocked at Entitlements.
 			"/gibson.daemon.operator.v1.DaemonOperatorService/SetTenantZitadelOrg": true,
 			"/gibson.daemon.operator.v1.DaemonOperatorService/EmitAuditEvent":      true,
+			// Operator-pull tenant provisioning (E9). The pull loop and the
+			// status report-back all dial over this SPIFFE direct-path, so each
+			// method must be allowlisted here. NOTE: gibson#949 added the
+			// ListPendingTenantProvisioning / AckTenantProvisioned RPCs (and the
+			// operator runnable that calls them) but did NOT update this
+			// allowlist, so operator-pull was denied at the daemon — the same
+			// omission the SetTenantZitadelOrg comment above documents. Added
+			// here together with ReportTenantStatus (gibson#948 follow-up,
+			// dashboard#813).
+			"/gibson.daemon.operator.v1.DaemonOperatorService/ListPendingTenantProvisioning": true,
+			"/gibson.daemon.operator.v1.DaemonOperatorService/AckTenantProvisioned":          true,
+			"/gibson.daemon.operator.v1.DaemonOperatorService/ReportTenantStatus":            true,
 		},
 	}
 	spiffePlatformBypass := func(ctx context.Context, method string) (context.Context, bool, error) {
@@ -1002,6 +1014,16 @@ func (d *daemonImpl) buildGRPCServer(ctx context.Context) (*grpcSubsystem, error
 	// Tenant CR. Signup is annotated unauthenticated in the registry (like
 	// SetSignupProgress), so ext-authz lets it through pre-tenant.
 	tenantv1.RegisterSignupServiceServer(srv, daemonSvc)
+
+	// Register TenantProvisioningService — the dashboard-facing read side of
+	// operator-pull tenant provisioning (E9, gibson#948, dashboard#813). Serves
+	// the operator-reported tenant_status snapshot back to the dashboard
+	// (GetTenantProvisioningStatus) and records billing-active from the Stripe
+	// webhook (SetTenantBillingActive), replacing the dashboard's direct
+	// Tenant-CR reads + billing-annotation patch. Both RPCs are annotated
+	// unauthenticated in the registry (pre-membership / Stripe-webhook paths),
+	// so ext-authz lets them through; Envoy gates the daemon to the dashboard.
+	tenantv1.RegisterTenantProvisioningServiceServer(srv, daemonSvc)
 
 	// Register TenantService — the OSS SDK tenant-management surface (ADR-0037).
 	// Replaces gibson.tenant.v1.TenantAdminService (platform-sdk). Customer-

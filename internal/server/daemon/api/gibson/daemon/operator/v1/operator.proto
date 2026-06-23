@@ -180,6 +180,26 @@ service DaemonOperatorService {
     };
   }
 
+  // ReportTenantStatus upserts the operator-observed Tenant CR status into the
+  // daemon's platform Postgres (tenant_status table) so the dashboard can read
+  // provisioning status via gibson.tenant.v1.TenantProvisioningService instead
+  // of the Kubernetes API (ADR-0023, dashboard#813). The operator's Tenant
+  // reconciler calls this best-effort after each status patch; the daemon
+  // cannot read the CR itself, so the operator is the sole source of this
+  // snapshot. Idempotent: re-reporting the same status is a no-op upsert.
+  //
+  // Note: billing_active is NOT carried here — it is owned by the dashboard
+  // billing webhook via TenantProvisioningService.SetTenantBillingActive and
+  // must not be clobbered by an operator status report.
+  rpc ReportTenantStatus(ReportTenantStatusRequest) returns (ReportTenantStatusResponse) {
+    option (gibson.auth.v1.authz) = {
+      relation: "platform_operator",
+      object_type: "system_tenant",
+      object_deriver: "system_tenant",
+      allowed_identities: 3  // USER | SERVICE
+    };
+  }
+
 }
 
 // ---------------------------------------------------------------------------
@@ -435,5 +455,39 @@ message AckTenantProvisionedResponse {
   // acked is true when a pending row transitioned to done; false when the row
   // was unknown or already done (both are idempotent successes).
   bool acked = 1;
+}
+
+// ReportTenantStatusRequest carries the operator-observed Tenant CR status the
+// daemon persists in tenant_status for the dashboard to read back. Field shape
+// mirrors the subset of Tenant.Status the dashboard's getTenant reads consumed.
+message ReportTenantStatusRequest {
+  // tenant_id is the tenant slug (Tenant CR name). Required.
+  string tenant_id = 1;
+  // phase is status.phase (Pending/Provisioning/Ready/Failed/...).
+  string phase = 2;
+  // data_plane_ready mirrors status.dataPlane.ready.
+  bool data_plane_ready = 3;
+  // store_postgres / store_redis / store_neo4j are the per-store state strings
+  // from status.dataPlane.stores (the onboarding-progress summary).
+  string store_postgres = 4;
+  string store_redis = 5;
+  string store_neo4j = 6;
+  // zitadel_org_slug mirrors status.zitadelOrgSlug.
+  string zitadel_org_slug = 7;
+  // stripe_customer_id mirrors status.billing.customerId.
+  string stripe_customer_id = 8;
+}
+
+// ReportTenantStatusResponse confirms the snapshot was persisted and echoes the
+// dashboard-owned billing_active flag back so the operator can stamp the
+// gibson.zeroroot.ai/billing-active CR annotation the saga waits on — without a
+// second round trip and without the operator ever owning that flag.
+message ReportTenantStatusResponse {
+  // updated is true when the row was inserted or any reported field changed.
+  bool updated = 1;
+  // billing_active is the current dashboard-recorded billing-active state
+  // (set via TenantProvisioningService.SetTenantBillingActive). The operator
+  // stamps the CR annotation when this is true.
+  bool billing_active = 2;
 }
 

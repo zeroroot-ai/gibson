@@ -233,6 +233,46 @@ func (c *EntitlementsGRPCClient) AckTenantProvisioned(ctx context.Context, tenan
 	return translateGRPCError("ack-tenant-provisioned", err)
 }
 
+// TenantStatusReport is the operator's view of the subset of Tenant CR status
+// it reports back to the daemon so the dashboard can read provisioning status
+// without Kubernetes access (gibson#948, dashboard#813).
+type TenantStatusReport struct {
+	TenantID         string
+	Phase            string
+	DataPlaneReady   bool
+	StorePostgres    string
+	StoreRedis       string
+	StoreNeo4j       string
+	ZitadelOrgSlug   string
+	StripeCustomerID string
+}
+
+// ReportTenantStatus upserts the operator-observed Tenant CR status into the
+// daemon's tenant_status table and returns the dashboard-recorded
+// billing-active flag so the operator can stamp the billing-active CR
+// annotation the saga waits on. Best-effort: callers log failures and never
+// fail the reconcile on a daemon blip.
+func (c *EntitlementsGRPCClient) ReportTenantStatus(ctx context.Context, r TenantStatusReport) (bool, error) {
+	authedCtx, err := c.authCtx(ctx)
+	if err != nil {
+		return false, err
+	}
+	resp, err := c.client.ReportTenantStatus(authedCtx, &operatorv1.ReportTenantStatusRequest{
+		TenantId:         r.TenantID,
+		Phase:            r.Phase,
+		DataPlaneReady:   r.DataPlaneReady,
+		StorePostgres:    r.StorePostgres,
+		StoreRedis:       r.StoreRedis,
+		StoreNeo4J:       r.StoreNeo4j,
+		ZitadelOrgSlug:   r.ZitadelOrgSlug,
+		StripeCustomerId: r.StripeCustomerID,
+	})
+	if err := translateGRPCError("report-tenant-status", err); err != nil {
+		return false, err
+	}
+	return resp.GetBillingActive(), nil
+}
+
 // EmitReconcileSummary maps the controller's strongly-typed summary onto
 // the daemon's generic AuditEventMessage. The daemon's audit emitter
 // stores the event in the platform Postgres + Redis stream.

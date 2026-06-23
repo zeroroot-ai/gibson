@@ -448,6 +448,13 @@ entries:
     allowed_identities:
       - USER
       - SERVICE
+  "/gibson.daemon.operator.v1.DaemonOperatorService/ReportTenantStatus":
+    relation: "platform_operator"
+    object_type: "system_tenant"
+    object_deriver: "system_tenant"
+    allowed_identities:
+      - USER
+      - SERVICE
   "/gibson.daemon.operator.v1.DaemonOperatorService/SeedCatalogTenantEnabled":
     relation: "platform_operator"
     object_type: "system_tenant"
@@ -1502,6 +1509,10 @@ entries:
     allowed_identities:
       - USER
   "/gibson.tenant.v1.SignupService/Signup":
+    unauthenticated: true
+  "/gibson.tenant.v1.TenantProvisioningService/GetTenantProvisioningStatus":
+    unauthenticated: true
+  "/gibson.tenant.v1.TenantProvisioningService/SetTenantBillingActive":
     unauthenticated: true
   "/gibson.tenant.v1.TenantService/DeleteMissionDraft":
     relation: "writer"

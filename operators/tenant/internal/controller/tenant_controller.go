@@ -79,6 +79,14 @@ type TenantReconciler struct {
 	// startup migration check (ADR-0023, gibson#208 S6). May be nil in
 	// tests — emission is a no-op when unset.
 	MigrationEmitter *dataplane.MigrationMetricEmitter
+
+	// StatusReporter pushes observed Tenant status to the daemon so the
+	// dashboard can read provisioning status without Kubernetes access
+	// (gibson#948, dashboard#813), and echoes back the dashboard-recorded
+	// billing-active flag the operator stamps onto the CR. Always non-nil on the
+	// reconcile path: main.go injects NoopTenantStatusReporter when the operator
+	// boots without GIBSON_DAEMON_GRPC_ADDRESS (report-back disabled).
+	StatusReporter TenantStatusReporter
 }
 
 // kubebuilder:rbac markers — Spec secrets-blast-radius-reduction
@@ -213,6 +221,17 @@ func (r *TenantReconciler) Reconcile(ctx context.Context, req ctrl.Request) (ctr
 		if err == nil {
 			return result, updateErr
 		}
+	}
+
+	// Report the observed status to the daemon so the dashboard can read it
+	// without Kubernetes access (gibson#948, dashboard#813), and stamp the
+	// billing-active annotation from the daemon-recorded flag. Best-effort: a
+	// daemon blip logs and never fails the reconcile. Production always injects a
+	// reporter (NoopTenantStatusReporter when report-back is disabled); the
+	// positive guard keeps unit tests that omit it from dereferencing nil,
+	// matching the operator's other optional-collaborator gates (r.Provisioner).
+	if r.StatusReporter != nil {
+		r.reportStatusToDaemon(ctx, &tenant)
 	}
 
 	// Requeue until the children converge so the Tenant flips to Ready without

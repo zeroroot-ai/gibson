@@ -1,0 +1,141 @@
+syntax = "proto3";
+
+// Package gibson.tenant.v1 — TenantProvisioningService: the dashboard-facing
+// read side of operator-pull tenant provisioning (E9, gibson#948/#949, enables
+// dashboard#813).
+//
+// Once the dashboard stops touching Kubernetes, it can no longer read the
+// Tenant CR's status (data-plane provisioning progress, billing state) to drive
+// the onboarding / signup-status / billing surfaces, nor patch the
+// billing-active annotation from the Stripe webhook. ADR-0023 forbids the
+// daemon from reading Kubernetes, so the daemon cannot read the CR either.
+//
+// Instead the tenant-operator — the one component that already watches Tenant
+// CRs — REPORTS the observed status into the daemon's platform Postgres
+// (tenant_status table) via DaemonOperatorService.ReportTenantStatus. This
+// service serves that operator-reported snapshot back to the dashboard:
+//
+//   - GetTenantProvisioningStatus replaces the dashboard's getTenant() reads
+//     (onboarding data-plane progress, signup-status polling, tenant-available
+//     existence check, billing customer-id lookup).
+//   - SetTenantBillingActive replaces the dashboard billing webhook's
+//     patchTenant() that stamped the gibson.zeroroot.ai/billing-active
+//     annotation. The webhook records billing-active here; the operator reads
+//     it back and stamps the CR annotation, so the saga's
+//     WaitForBillingConfirmation step is unchanged.
+//
+// Authorization: both RPCs are UNAUTHENTICATED, exactly like SignupService and
+// UserService.SetSignupProgress. GetTenantProvisioningStatus runs pre-membership
+// (signup polling, slug-availability) so there is no principal to FGA-check, and
+// it returns only coarse provisioning status keyed by the public tenant slug —
+// no tenant data. SetTenantBillingActive is the Stripe webhook path: the
+// dashboard validates the Stripe signature before calling, and Envoy gates the
+// daemon so only the dashboard workload can reach it — the same trust model the
+// prior dashboard-SA patchTenant write relied on.
+package gibson.tenant.v1;
+
+option go_package = "github.com/zeroroot-ai/gibson/internal/server/daemon/api/gibson/tenant/v1;tenantv1";
+
+import "gibson/auth/v1/options.proto";
+
+// TenantProvisioningService is the dashboard-facing read side of operator-pull
+// tenant provisioning. The write side (enqueue on Signup, operator drain) lives
+// in SignupService + DaemonOperatorService; this service serves the
+// operator-reported tenant_status snapshot back to the dashboard so it never
+// reads the Tenant CR directly (dashboard#813).
+service TenantProvisioningService {
+  // GetTenantProvisioningStatus returns the operator-reported provisioning
+  // status for a tenant slug, replacing the dashboard's direct Tenant-CR reads.
+  //
+  // found=false (rather than NOT_FOUND) is returned for an unknown slug so the
+  // dashboard can use it as a slug-availability check without distinguishing
+  // "never provisioned" from a transport error. Status fields are the
+  // operator's last ReportTenantStatus snapshot; before the operator has
+  // reported (the brief window between enqueue and first reconcile) found=true
+  // with phase empty / data_plane_ready=false.
+  //
+  // UNAUTHENTICATED: runs pre-membership (signup polling, slug availability).
+  // Returns only coarse provisioning status keyed by the public slug.
+  rpc GetTenantProvisioningStatus(GetTenantProvisioningStatusRequest) returns (GetTenantProvisioningStatusResponse) {
+    option (gibson.auth.v1.authz) = {
+      unauthenticated: true
+    };
+  }
+
+  // SetTenantBillingActive records the tenant's billing-active state, replacing
+  // the dashboard billing webhook's patchTenant of the
+  // gibson.zeroroot.ai/billing-active annotation. The daemon persists the flag
+  // in tenant_status; the tenant-operator reads it back on its next reconcile
+  // and stamps the CR annotation the saga's WaitForBillingConfirmation step
+  // waits on. Idempotent.
+  //
+  // UNAUTHENTICATED: the Stripe webhook path. The dashboard validates the
+  // Stripe signature before calling and Envoy gates the daemon to the dashboard
+  // workload — the same trust boundary the prior dashboard-SA CR patch had.
+  rpc SetTenantBillingActive(SetTenantBillingActiveRequest) returns (SetTenantBillingActiveResponse) {
+    option (gibson.auth.v1.authz) = {
+      unauthenticated: true
+    };
+  }
+}
+
+// TenantDataPlaneStoreStatus mirrors the Tenant CR's
+// status.dataPlane.stores summary (DataPlaneSummary): the per-store state
+// string the onboarding surface renders ("", "Provisioning", "Ready", ...).
+message TenantDataPlaneStoreStatus {
+  string postgres = 1;
+  string redis = 2;
+  string neo4j = 3;
+}
+
+// GetTenantProvisioningStatusRequest queries one tenant's provisioning status.
+message GetTenantProvisioningStatusRequest {
+  // tenant_id is the deterministic tenant slug (Tenant CR name).
+  string tenant_id = 1;
+}
+
+// GetTenantProvisioningStatusResponse carries the operator-reported snapshot.
+message GetTenantProvisioningStatusResponse {
+  // found is false when no provisioning record exists for the slug — the
+  // dashboard treats this as "slug available / not provisioned".
+  bool found = 1;
+
+  // phase is the Tenant CR's status.phase
+  // (Pending/Provisioning/Ready/Failed/Terminating/Terminated). Empty until the
+  // operator first reports.
+  string phase = 2;
+
+  // data_plane_ready mirrors status.dataPlane.ready — the gate the daemon uses
+  // before serving tenant data, and the signal onboarding polls to advance.
+  bool data_plane_ready = 3;
+
+  // stores carries the per-store provisioning state for the onboarding UI.
+  TenantDataPlaneStoreStatus stores = 4;
+
+  // zitadel_org_slug mirrors status.zitadelOrgSlug (the per-tenant org login
+  // slug), used by the dashboard to route the owner to their org login.
+  string zitadel_org_slug = 5;
+
+  // stripe_customer_id mirrors status.billing.customerId, used by the billing
+  // portal surface to open the Stripe customer portal.
+  string stripe_customer_id = 6;
+
+  // billing_active is the billing-active state last recorded via
+  // SetTenantBillingActive.
+  bool billing_active = 7;
+}
+
+// SetTenantBillingActiveRequest records a tenant's billing-active state.
+message SetTenantBillingActiveRequest {
+  // tenant_id is the tenant slug whose billing state is being recorded.
+  string tenant_id = 1;
+
+  // active is the billing-active state (true once a subscription/trial is live).
+  bool active = 2;
+}
+
+// SetTenantBillingActiveResponse confirms the record was written.
+message SetTenantBillingActiveResponse {
+  // updated is true when the row was inserted or its billing_active changed.
+  bool updated = 1;
+}

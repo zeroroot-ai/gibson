@@ -684,6 +684,12 @@ func main() {
 	// Plan→quota and Stripe subscription reconciliation moved to the closed
 	// billing tier (E7/gibson#798): the operator no longer loads a plan
 	// registry or runs an entitlements/billing reconciler.
+	// tenantStatusReporter is bound to the daemon gRPC client when the operator
+	// has a daemon address, so the TenantReconciler reports status back to the
+	// daemon (gibson#948, dashboard#813). Defaults to a no-op (report-back
+	// disabled) rather than nil, so the reconcile path never nil-guards an
+	// injected dependency (production-readiness no-graceful-nil gate).
+	var tenantStatusReporter controller.TenantStatusReporter = controller.NoopTenantStatusReporter{}
 	if grpcAddr := os.Getenv("GIBSON_DAEMON_GRPC_ADDRESS"); grpcAddr != "" {
 		daemonSVID := os.Getenv("GIBSON_DAEMON_SPIFFE_ID")
 		if daemonSVID == "" {
@@ -697,6 +703,7 @@ func main() {
 		}
 		setupLog.Info("daemon provisioner: gRPC (SPIFFE mTLS)", "addr", grpcAddr, "daemon_svid", daemonSVID)
 		psagaDeps.DaemonGRPC = grpcClient
+		tenantStatusReporter = grpcClient
 
 		// Operator-pull tenant provisioning (E9, gibson#948, enables
 		// dashboard#813): drain the daemon's pending-provisioning queue and
@@ -752,6 +759,7 @@ func main() {
 		TeardownSteps:     teardownSteps,
 		Deps:              psagaDeps,
 		MigrationEmitter:  migrationEmitter,
+		StatusReporter:    tenantStatusReporter,
 	}).SetupWithManager(mgr); err != nil {
 		setupLog.Error(err, "Failed to create controller", "controller", "Tenant")
 		os.Exit(1)

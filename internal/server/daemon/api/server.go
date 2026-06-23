@@ -69,6 +69,7 @@ type DaemonServer struct {
 	tenantv1.UnimplementedUsageServiceServer
 	tenantv1.UnimplementedUserServiceServer
 	tenantv1.UnimplementedSignupServiceServer
+	tenantv1.UnimplementedTenantProvisioningServiceServer
 	sessionv1.UnimplementedSessionServiceServer
 	daemonoperatorv1.UnimplementedDaemonOperatorServiceServer
 

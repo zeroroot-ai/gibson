@@ -68,6 +68,7 @@ rpc,relation,object_type,deriver,identities,source_proto_file,mode
 /gibson.daemon.operator.v1.DaemonOperatorService/ListFeatureTuples,platform_operator,system_tenant,system_tenant,USER|SERVICE,gibson/daemon/operator/v1/operator.proto,rule
 /gibson.daemon.operator.v1.DaemonOperatorService/ListPendingTenantProvisioning,platform_operator,system_tenant,system_tenant,USER|SERVICE,gibson/daemon/operator/v1/operator.proto,rule
 /gibson.daemon.operator.v1.DaemonOperatorService/RefreshToolCatalog,platform_operator,system_tenant,system_tenant,USER|SERVICE,gibson/daemon/operator/v1/operator.proto,rule
+/gibson.daemon.operator.v1.DaemonOperatorService/ReportTenantStatus,platform_operator,system_tenant,system_tenant,USER|SERVICE,gibson/daemon/operator/v1/operator.proto,rule
 /gibson.daemon.operator.v1.DaemonOperatorService/SeedCatalogTenantEnabled,platform_operator,system_tenant,system_tenant,USER|SERVICE,gibson/daemon/operator/v1/operator.proto,rule
 /gibson.daemon.operator.v1.DaemonOperatorService/SetPlatformEnabled,platform_operator,system_tenant,system_tenant,USER|SERVICE,gibson/daemon/operator/v1/operator.proto,rule
 /gibson.daemon.operator.v1.DaemonOperatorService/SetTenantZitadelOrg,platform_operator,system_tenant,system_tenant,USER|SERVICE,gibson/daemon/operator/v1/operator.proto,rule
@@ -235,6 +236,8 @@ rpc,relation,object_type,deriver,identities,source_proto_file,mode
 /gibson.tenant.v1.SecretsService/SetBrokerConfig,admin,tenant,tenant_from_identity,USER,gibson/tenant/v1/secrets.proto,rule
 /gibson.tenant.v1.SecretsService/SetSecret,admin,tenant,tenant_from_identity,USER,gibson/tenant/v1/secrets.proto,rule
 /gibson.tenant.v1.SignupService/Signup,,,,,gibson/tenant/v1/signup.proto,unauthenticated
+/gibson.tenant.v1.TenantProvisioningService/GetTenantProvisioningStatus,,,,,gibson/tenant/v1/provisioning.proto,unauthenticated
+/gibson.tenant.v1.TenantProvisioningService/SetTenantBillingActive,,,,,gibson/tenant/v1/provisioning.proto,unauthenticated
 /gibson.tenant.v1.TenantService/DeleteMissionDraft,writer,tenant,tenant_from_identity,USER|SERVICE,gibson/tenant/v1/tenant.proto,rule
 /gibson.tenant.v1.TenantService/ExportFindings,writer,tenant,tenant_from_identity,USER|SERVICE,gibson/tenant/v1/tenant.proto,rule
 /gibson.tenant.v1.TenantService/GetMissionDraft,writer,tenant,tenant_from_identity,USER|SERVICE,gibson/tenant/v1/tenant.proto,rule

@@ -77,6 +77,21 @@ var allowedUnauthenticated = map[string]bool{
 	// validates the attempt_id and rate-limits the request.
 	// Spec: E9 signup-rpc-zitadel-move (gibson#812, ADR-0043/0044).
 	"/gibson.tenant.v1.SignupService/Signup": true,
+
+	// TenantProvisioningService is the dashboard-facing read side of
+	// operator-pull tenant provisioning (E9, gibson#948, dashboard#813). Both
+	// RPCs are intentionally unauthenticated, matching SignupService above:
+	//   - GetTenantProvisioningStatus runs pre-membership (signup-status
+	//     polling, slug-availability) so there is no principal to FGA-check; it
+	//     returns only coarse provisioning status keyed by the public slug, no
+	//     tenant data.
+	//   - SetTenantBillingActive is the Stripe-webhook path; the dashboard
+	//     validates the Stripe signature before calling and Envoy gates the
+	//     daemon to the dashboard workload — the same trust boundary the prior
+	//     dashboard-SA Tenant-CR patch relied on.
+	// Spec: E9 dashboard-zero-kubeconfig (dashboard#813).
+	"/gibson.tenant.v1.TenantProvisioningService/GetTenantProvisioningStatus": true,
+	"/gibson.tenant.v1.TenantProvisioningService/SetTenantBillingActive":      true,
 }
 
 // TestOnlyConnectAndPingAreUnauthenticated walks the generated Registry map
