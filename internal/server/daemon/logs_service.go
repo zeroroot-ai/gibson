@@ -65,7 +65,7 @@ type logsServer struct {
 }
 
 // NewLogsServer constructs the LogsService backed by a Loki log querier.
-func NewLogsServer(querier lokilogs.Querier, logger *slog.Logger) *logsServer {
+func NewLogsServer(querier lokilogs.Querier, logger *slog.Logger) logspb.LogsServiceServer {
 	if querier == nil {
 		panic("logs server: querier cannot be nil")
 	}
@@ -81,7 +81,7 @@ func NewLogsServer(querier lokilogs.Querier, logger *slog.Logger) *logsServer {
 func (s *logsServer) tenant(ctx context.Context) (string, error) {
 	t, ok := auth.TenantFromContext(ctx)
 	if !ok {
-		return "", status.Error(codes.PermissionDenied, "no tenant in context")
+		return "", status.Errorf(codes.PermissionDenied, "no tenant in context")
 	}
 	return t.String(), nil
 }
@@ -92,7 +92,7 @@ func (s *logsServer) QueryMissionLogs(ctx context.Context, req *logspb.QueryMiss
 		return nil, err
 	}
 	if req.GetMissionId() == "" {
-		return nil, status.Error(codes.InvalidArgument, "mission_id is required")
+		return nil, status.Errorf(codes.InvalidArgument, "mission_id is required")
 	}
 	entries, err := s.querier.QueryMissionLogs(ctx, lokilogs.MissionQuery{
 		TenantID:  tenant,
@@ -147,6 +147,8 @@ func levelString(l logspb.LogLevel) string {
 		return "WARN"
 	case logspb.LogLevel_LOG_LEVEL_ERROR:
 		return "ERROR"
+	case logspb.LogLevel_LOG_LEVEL_UNSPECIFIED:
+		return ""
 	default:
 		return ""
 	}
@@ -168,7 +170,7 @@ func toProto(entries []lokilogs.Entry) []*logspb.LogEntry {
 // can degrade gracefully; anything else stays Internal.
 func lokiErr(err error) error {
 	if errors.Is(err, lokilogs.ErrLokiUnavailable) {
-		return status.Error(codes.Unavailable, "logs backend unavailable")
+		return status.Errorf(codes.Unavailable, "logs backend unavailable")
 	}
-	return status.Error(codes.Internal, err.Error())
+	return status.Errorf(codes.Internal, "query logs: %v", err)
 }

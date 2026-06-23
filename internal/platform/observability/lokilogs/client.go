@@ -100,7 +100,7 @@ type Config struct {
 // NewClient constructs a Client. Returns an error if BaseURL is empty.
 func NewClient(cfg Config, logger *slog.Logger) (*Client, error) {
 	if cfg.BaseURL == "" {
-		return nil, fmt.Errorf("lokilogs: BaseURL is required")
+		return nil, errors.New("lokilogs: BaseURL is required")
 	}
 	timeout := cfg.Timeout
 	if timeout <= 0 {
@@ -139,7 +139,10 @@ func (c *Client) QueryDaemonLogs(ctx context.Context, q DaemonQuery) ([]Entry, e
 	if q.Level != "" {
 		lvl := strings.ToUpper(q.Level)
 		// Match the structured ("level":"ERROR") and logfmt (level=ERROR) shapes.
-		fmt.Fprintf(&sb, ` |~ %q`, fmt.Sprintf(`level.*%s|level=%s|"level":"%s"`, lvl, lvl, lvl))
+		// Built by concatenation rather than a single format string so the
+		// JSON-quoted alternative ("level":"X") is not mistaken for a %q target.
+		levelRe := `level.*` + lvl + `|level=` + lvl + `|"level":"` + lvl + `"`
+		fmt.Fprintf(&sb, ` |~ %q`, levelRe)
 	}
 	if q.MissionID != "" {
 		fmt.Fprintf(&sb, ` |~ %q`, q.MissionID)
@@ -173,9 +176,9 @@ func (c *Client) query(ctx context.Context, logql, tenantID string, start, end t
 	params.Set("direction", "backward")
 
 	reqURL := fmt.Sprintf("%s/loki/api/v1/query_range?%s", c.baseURL, params.Encode())
-	req, err := http.NewRequestWithContext(ctx, http.MethodGet, reqURL, nil)
+	req, err := http.NewRequestWithContext(ctx, http.MethodGet, reqURL, http.NoBody)
 	if err != nil {
-		return nil, fmt.Errorf("%w: build request: %v", ErrLokiUnavailable, err)
+		return nil, fmt.Errorf("%w: build request: %w", ErrLokiUnavailable, err)
 	}
 	req.Header.Set("Accept", "application/json")
 	// Daemon-owned tenant scoping: the org header is the fixed "gibson" org.
@@ -185,9 +188,9 @@ func (c *Client) query(ctx context.Context, logql, tenantID string, start, end t
 	if err != nil {
 		c.logger.WarnContext(ctx, "loki log query failed",
 			slog.String("error", err.Error()), slog.String("tenant_id", tenantID))
-		return nil, fmt.Errorf("%w: HTTP request failed: %v", ErrLokiUnavailable, err)
+		return nil, fmt.Errorf("%w: HTTP request failed: %w", ErrLokiUnavailable, err)
 	}
-	defer resp.Body.Close()
+	defer func() { _ = resp.Body.Close() }()
 
 	if resp.StatusCode != http.StatusOK {
 		body, _ := io.ReadAll(io.LimitReader(resp.Body, 512))
@@ -198,7 +201,7 @@ func (c *Client) query(ctx context.Context, logql, tenantID string, start, end t
 
 	var lr queryRangeResponse
 	if err := json.NewDecoder(resp.Body).Decode(&lr); err != nil {
-		return nil, fmt.Errorf("%w: decode response: %v", ErrLokiUnavailable, err)
+		return nil, fmt.Errorf("%w: decode response: %w", ErrLokiUnavailable, err)
 	}
 	if lr.Status != "success" {
 		return nil, fmt.Errorf("%w: Loki status=%q error=%q", ErrLokiUnavailable, lr.Status, lr.Error)

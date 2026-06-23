@@ -68,7 +68,7 @@ func TestClient_DaemonQuery_LevelFilter(t *testing.T) {
 
 // TestClient_Unavailable maps a non-200 to ErrLokiUnavailable.
 func TestClient_Unavailable(t *testing.T) {
-	ts := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+	ts := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
 		w.WriteHeader(http.StatusServiceUnavailable)
 	}))
 	defer ts.Close()
