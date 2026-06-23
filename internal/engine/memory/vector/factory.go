@@ -10,7 +10,7 @@ import (
 type VectorStoreConfig struct {
 	Backend     string // "embedded" or "redis"
 	StoragePath string // Deprecated: no longer used
-	Dimensions  int    // Embedding dimensions (e.g., 384 for all-MiniLM-L6-v2)
+	Dimensions  int    // Embedding dimensions, derived from the configured embedding model (embedder.DimensionForModel); not hardcoded
 }
 
 // Note: For Redis backend, use NewRedisVectorStore(client, dims) directly

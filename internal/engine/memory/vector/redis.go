@@ -35,7 +35,9 @@ type RedisVectorStore struct {
 //
 // Parameters:
 //   - client: StateClient with RediSearch and RedisJSON modules enabled
-//   - dims: Embedding dimensions (must match index definition, e.g., 384 for all-minilm-l6-v2)
+//   - dims: Embedding dimensions; must match the index definition and the
+//     configured embedding model's output (embedder.DimensionForModel). Derived
+//     from the model, never hardcoded — a mismatch silently fails indexing.
 //
 // The store uses the following key naming convention:
 //   - Vector documents: "gibson:vector:{id}"

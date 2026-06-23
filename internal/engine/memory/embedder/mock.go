@@ -19,10 +19,18 @@ type MockEmbedder struct {
 	mu           sync.RWMutex
 }
 
-// NewMockEmbedder creates a new mock embedder with 384 dimensions (same as all-MiniLM-L6-v2).
+// mockModel is the embedding model the mock reports. Its dimension is derived
+// from the model→dimension source of truth (DefaultEmbeddingModel resolves to
+// 384, matching all-MiniLM-L6-v2) rather than hardcoded.
+const mockModel = DefaultEmbeddingModel
+
+// NewMockEmbedder creates a new mock embedder whose dimension is derived from
+// the default embedding model (all-MiniLM-L6-v2 → 384). The dimension is not
+// hardcoded: it flows from DimensionForModel so the mock tracks the same source
+// of truth the vector index uses.
 func NewMockEmbedder() *MockEmbedder {
 	return &MockEmbedder{
-		dimensions:   384,
+		dimensions:   DefaultEmbeddingDimension,
 		healthStatus: types.NewHealthStatus(types.HealthStateHealthy, "mock embedder always healthy"),
 		calls:        []string{},
 	}
@@ -109,9 +117,11 @@ func (m *MockEmbedder) Dimensions() int {
 	return m.dimensions
 }
 
-// Model returns the mock model name.
+// Model returns the embedding model the mock reports. It returns the default
+// embedding model name so that DimensionForModel(m.Model()) yields m.Dimensions(),
+// keeping the model→dimension derivation consistent end-to-end.
 func (m *MockEmbedder) Model() string {
-	return "mock-embedder"
+	return mockModel
 }
 
 // Health returns the configured health status for the mock embedder.
