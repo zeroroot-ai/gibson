@@ -1487,6 +1487,8 @@ entries:
     object_deriver: "tenant_from_identity"
     allowed_identities:
       - USER
+  "/gibson.tenant.v1.SignupService/Signup":
+    unauthenticated: true
   "/gibson.tenant.v1.TenantService/DeleteMissionDraft":
     relation: "writer"
     object_type: "tenant"

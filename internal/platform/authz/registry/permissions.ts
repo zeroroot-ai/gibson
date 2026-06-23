@@ -2350,6 +2350,16 @@ export const AuthRegistry: Record<string, AuthEntry> = {
     unauthenticated: false,
     self: false,
   },
+  "/gibson.tenant.v1.SignupService/Signup": {
+    method: "/gibson.tenant.v1.SignupService/Signup",
+    service: "gibson.tenant.v1.SignupService",
+    relation: "",
+    objectType: "",
+    objectDeriver: "",
+    allowedIdentities: 0,
+    unauthenticated: true,
+    self: false,
+  },
   "/gibson.tenant.v1.TenantService/DeleteMissionDraft": {
     method: "/gibson.tenant.v1.TenantService/DeleteMissionDraft",
     service: "gibson.tenant.v1.TenantService",

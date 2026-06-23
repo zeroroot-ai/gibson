@@ -1,0 +1,111 @@
+syntax = "proto3";
+
+// Package gibson.tenant.v1 — SignupService: server-side tenant provisioning for
+// self-serve signup (E9, gibson#812, ADR-0043/0044).
+//
+// Before E9 the dashboard provisioned a tenant during signup by (a) holding a
+// privileged Zitadel "signup-bot" IAM PAT to create the Zitadel org/user and
+// (b) writing the Tenant / TenantMember Kubernetes CRs directly with its
+// in-cluster ServiceAccount. That gave the web tier two broad, standing
+// privileges (IdP admin + cluster write) purely to bootstrap a tenant.
+//
+// SignupService.Signup collapses that privilege: the dashboard makes ONE
+// unauthenticated RPC carrying the founding-owner email, workspace name, and
+// plan tier, and the DAEMON performs the provisioning. The daemon does NOT add
+// a parallel Zitadel-admin write codepath — it provisions by creating and
+// owning the Tenant custom resource, which the gibson-tenant-operator already
+// reconciles into the per-tenant Zitadel org (TenantIdentity, gibson#803),
+// secrets backend, FGA grants, and data plane via its ordered sub-CRD chain
+// (gibson#805). One provisioning path (ADR-0027), operator-owned.
+//
+// Once a customer is on this RPC the dashboard no longer needs the signup-bot
+// IAM PAT or cluster write access — that removal is dashboard#812 / dashboard#813.
+//
+// Authorization: Signup is UNAUTHENTICATED. It runs before any tenant or
+// membership exists, so there is no principal to FGA-check (exactly like
+// SetSignupProgress on UserService). The opaque attempt_id UUID is the
+// correlation capability; the daemon validates and rate-limits the request and
+// is the sole holder of the cluster-write privilege.
+package gibson.tenant.v1;
+
+option go_package = "github.com/zeroroot-ai/gibson/internal/server/daemon/api/gibson/tenant/v1;tenantv1";
+
+import "gibson/auth/v1/options.proto";
+
+// SignupService provisions a new tenant from a self-serve signup request.
+//
+// It is the server-side replacement for the dashboard's privileged signup
+// path: the dashboard calls Signup instead of holding a Zitadel admin PAT and
+// writing Tenant/TenantMember CRs itself.
+service SignupService {
+  // Signup provisions a tenant for a self-serve signup attempt.
+  //
+  // The daemon creates (and owns) the Tenant CR with the supplied owner email,
+  // workspace display name, and plan tier; the gibson-tenant-operator then
+  // reconciles it into the Zitadel org + secrets + grants + data plane. The RPC
+  // returns as soon as the Tenant CR is accepted (create-and-return); the
+  // caller polls provisioning progress via UserService.GetSignupProgress
+  // (keyed by the same attempt_id) and/or the tenant's readiness signals.
+  //
+  // Idempotent on attempt_id + tenant slug: re-issuing the same signup (e.g. a
+  // client retry) returns the existing tenant rather than failing, so a dropped
+  // response does not strand a half-provisioned tenant.
+  //
+  // UNAUTHENTICATED: runs before any tenant/membership exists. The attempt_id
+  // UUID is the capability; the daemon is the sole holder of the provisioning
+  // privilege (no IdP PAT or cluster write in the caller).
+  rpc Signup(SignupRequest) returns (SignupResponse) {
+    option (gibson.auth.v1.authz) = {
+      unauthenticated: true
+    };
+  }
+}
+
+// SignupRequest carries everything the daemon needs to provision a tenant.
+// It deliberately carries NO password and NO IdP-admin credential: the daemon
+// holds the provisioning privilege, and the human owner's credential lifecycle
+// is handled by the IdP login flow (native-cli-login / Zitadel), not minted
+// here.
+message SignupRequest {
+  // attempt_id is the opaque single-use signup-attempt UUID. It correlates this
+  // request with the UserService signup-progress stream and guards retries.
+  // Required; must be a valid UUID.
+  string attempt_id = 1;
+
+  // owner_email is the founding owner's email address. It becomes the Tenant
+  // CR's spec.owner — the operator uses it as the Zitadel org admin / billing
+  // contact and seeds the founding owner membership from it. Required.
+  string owner_email = 2;
+
+  // workspace_name is the human-readable workspace / company name. It becomes
+  // the Tenant CR's spec.displayName (and the Zitadel org name). Required.
+  string workspace_name = 3;
+
+  // tier is the canonical plan id ("team", "org", "enterprise"). It becomes the
+  // Tenant CR's spec.tier. Required; validated against the known self-serve
+  // tiers.
+  string tier = 4;
+
+  // owner_first_name / owner_last_name are the founding owner's profile name.
+  // Optional — carried so the IdP-side user provisioning can populate the
+  // profile; the daemon does not create the human user itself.
+  string owner_first_name = 5;
+  string owner_last_name = 6;
+
+  // stripe_customer_id pins a pre-created Stripe customer to the tenant for
+  // deterministic billing adoption on the card-first signup path. Optional;
+  // when set it is recorded on the Tenant CR so the billing reconciler adopts
+  // the existing customer rather than creating a new one.
+  string stripe_customer_id = 7;
+}
+
+// SignupResponse reports the outcome of provisioning.
+message SignupResponse {
+  // tenant_id is the provisioned tenant's id (the Tenant CR name / slug derived
+  // from the workspace name). The caller uses it to scope subsequent reads.
+  string tenant_id = 1;
+
+  // already_existed is true when the tenant was already provisioned for this
+  // signup (idempotent retry) rather than created by this call.
+  bool already_existed = 2;
+}
