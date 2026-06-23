@@ -118,6 +118,52 @@ func TestReportOwnerMemberReady_OwnerActive_ReportsTrue(t *testing.T) {
 	}
 }
 
+func TestReportOwnerMemberReady_ReporterError_DoesNotPanic(t *testing.T) {
+	scheme := setupScheme(t)
+	tenant := &gibsonv1alpha1.Tenant{ObjectMeta: metav1.ObjectMeta{Name: "acme"}}
+	tenant.Status.Phase = gibsonv1alpha1.TenantPhaseReady
+	c := fake.NewClientBuilder().WithScheme(scheme).WithObjects(tenant).Build()
+
+	rep := &stubStatusReporter{err: errors.New("daemon unreachable")}
+	r := &TenantMemberReconciler{Client: c, StatusReporter: rep}
+	tm := &gibsonv1alpha1.TenantMember{
+		ObjectMeta: metav1.ObjectMeta{Name: "owner-acme-test-owner", Namespace: "tenant-acme"},
+		Spec: gibsonv1alpha1.TenantMemberSpec{
+			Email: "owner@acme.test", Role: gibsonv1alpha1.MemberRoleOwner,
+			TenantRef: corev1.LocalObjectReference{Name: "acme"},
+		},
+	}
+	// Best-effort: a report error is logged, never propagated.
+	r.reportOwnerMemberReady(context.Background(), tm)
+	if len(rep.reports) != 1 {
+		t.Errorf("expected the report to have been attempted")
+	}
+}
+
+// TestReportOwnerMemberReady_TenantMissing_ReportsReadinessOnly: when the live
+// Tenant CR cannot be read, the report still carries owner_member_ready=true
+// (the enrich step is skipped, not fatal).
+func TestReportOwnerMemberReady_TenantMissing_ReportsReadinessOnly(t *testing.T) {
+	scheme := setupScheme(t)
+	c := fake.NewClientBuilder().WithScheme(scheme).Build() // no Tenant CR
+	rep := &stubStatusReporter{}
+	r := &TenantMemberReconciler{Client: c, StatusReporter: rep}
+	tm := &gibsonv1alpha1.TenantMember{
+		ObjectMeta: metav1.ObjectMeta{Name: "owner-acme-test-owner", Namespace: "tenant-acme"},
+		Spec: gibsonv1alpha1.TenantMemberSpec{
+			Email: "owner@acme.test", Role: gibsonv1alpha1.MemberRoleOwner,
+			TenantRef: corev1.LocalObjectReference{Name: "acme"},
+		},
+	}
+	r.reportOwnerMemberReady(context.Background(), tm)
+	if len(rep.reports) != 1 || !rep.reports[0].OwnerMemberReady {
+		t.Fatalf("expected owner_member_ready=true even with Tenant CR missing, got %+v", rep.reports)
+	}
+	if rep.reports[0].Phase != "" {
+		t.Errorf("expected empty phase when Tenant CR unreadable, got %q", rep.reports[0].Phase)
+	}
+}
+
 func TestReportOwnerMemberReady_NonOwner_NoReport(t *testing.T) {
 	scheme := setupScheme(t)
 	c := fake.NewClientBuilder().WithScheme(scheme).Build()

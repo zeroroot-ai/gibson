@@ -6,6 +6,7 @@ package api
 import (
 	"context"
 	"database/sql"
+	"errors"
 	"log/slog"
 	"os"
 	"testing"
@@ -28,6 +29,8 @@ func expectEnsureStatusTable(mock sqlmock.Sqlmock) {
 	mock.ExpectExec("CREATE TABLE IF NOT EXISTS tenant_status").
 		WillReturnResult(sqlmock.NewResult(0, 0))
 }
+
+func errBoom() error { return errors.New("boom") }
 
 // --- ReportTenantStatus ---
 
@@ -78,6 +81,35 @@ func TestReportTenantStatus_Upserts(t *testing.T) {
 	if err := mock.ExpectationsWereMet(); err != nil {
 		t.Errorf("expectations: %v", err)
 	}
+}
+
+func TestReportTenantStatus_EnsureTableError_Internal(t *testing.T) {
+	db, mock, err := sqlmock.New()
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer db.Close()
+	srv := newStatusServer()
+	srv.platformDB = db
+	mock.ExpectExec("CREATE TABLE IF NOT EXISTS tenant_status").WillReturnError(errBoom())
+	_, err = srv.ReportTenantStatus(context.Background(), &daemonoperatorv1.ReportTenantStatusRequest{TenantId: "acme"})
+	requireGRPCStatus(t, err, codes.Internal)
+}
+
+func TestReportTenantStatus_UpsertError_Internal(t *testing.T) {
+	db, mock, err := sqlmock.New()
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer db.Close()
+	srv := newStatusServer()
+	srv.platformDB = db
+	expectEnsureStatusTable(mock)
+	mock.ExpectExec("INSERT INTO tenant_status").WillReturnError(errBoom())
+	_, err = srv.ReportTenantStatus(context.Background(), &daemonoperatorv1.ReportTenantStatusRequest{
+		TenantId: "acme", Phase: "Ready",
+	})
+	requireGRPCStatus(t, err, codes.Internal)
 }
 
 // --- GetTenantProvisioningStatus ---
@@ -183,7 +215,71 @@ func TestGetTenantProvisioningStatus_TenantScoped_CannotReadOther(t *testing.T) 
 	}
 }
 
+func TestGetTenantProvisioningStatus_NilDB_Unavailable(t *testing.T) {
+	srv := newStatusServer()
+	srv.platformDB = nil
+	ctx := auth.WithTenant(context.Background(), auth.MustNewTenantID("acme"))
+	_, err := srv.GetTenantProvisioningStatus(ctx, &tenantv1.GetTenantProvisioningStatusRequest{})
+	requireGRPCStatus(t, err, codes.Unavailable)
+}
+
+func TestGetTenantProvisioningStatus_QueryError_Internal(t *testing.T) {
+	db, mock, err := sqlmock.New()
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer db.Close()
+	srv := newStatusServer()
+	srv.platformDB = db
+	expectEnsureStatusTable(mock)
+	mock.ExpectQuery("SELECT phase, ready, zitadel_org_id, data_plane_ready, owner_member_ready").
+		WithArgs("acme").WillReturnError(errBoom())
+	ctx := auth.WithTenant(context.Background(), auth.MustNewTenantID("acme"))
+	_, err = srv.GetTenantProvisioningStatus(ctx, &tenantv1.GetTenantProvisioningStatusRequest{})
+	requireGRPCStatus(t, err, codes.Internal)
+}
+
 // --- CheckTenantSlugAvailable ---
+
+func TestCheckTenantSlugAvailable_NilDB_Unavailable(t *testing.T) {
+	srv := newStatusServer()
+	srv.platformDB = nil
+	_, err := srv.CheckTenantSlugAvailable(context.Background(), &tenantv1.CheckTenantSlugAvailableRequest{Slug: "acme"})
+	requireGRPCStatus(t, err, codes.Unavailable)
+}
+
+func TestCheckTenantSlugAvailable_PendingQueryError_Internal(t *testing.T) {
+	db, mock, err := sqlmock.New()
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer db.Close()
+	srv := newStatusServer()
+	srv.platformDB = db
+	expectEnsureTable(mock)
+	mock.ExpectQuery("SELECT EXISTS \\(SELECT 1 FROM pending_tenant_provisioning WHERE tenant_id = \\$1\\)").
+		WithArgs("acme").WillReturnError(errBoom())
+	_, err = srv.CheckTenantSlugAvailable(context.Background(), &tenantv1.CheckTenantSlugAvailableRequest{Slug: "acme"})
+	requireGRPCStatus(t, err, codes.Internal)
+}
+
+func TestCheckTenantSlugAvailable_StatusQueryError_Internal(t *testing.T) {
+	db, mock, err := sqlmock.New()
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer db.Close()
+	srv := newStatusServer()
+	srv.platformDB = db
+	expectEnsureTable(mock)
+	mock.ExpectQuery("SELECT EXISTS \\(SELECT 1 FROM pending_tenant_provisioning WHERE tenant_id = \\$1\\)").
+		WithArgs("acme").WillReturnRows(sqlmock.NewRows([]string{"exists"}).AddRow(false))
+	expectEnsureStatusTable(mock)
+	mock.ExpectQuery("SELECT EXISTS \\(SELECT 1 FROM tenant_status WHERE tenant_id = \\$1\\)").
+		WithArgs("acme").WillReturnError(errBoom())
+	_, err = srv.CheckTenantSlugAvailable(context.Background(), &tenantv1.CheckTenantSlugAvailableRequest{Slug: "acme"})
+	requireGRPCStatus(t, err, codes.Internal)
+}
 
 func TestCheckTenantSlugAvailable_MissingSlug_InvalidArgument(t *testing.T) {
 	db, _, err := sqlmock.New()
