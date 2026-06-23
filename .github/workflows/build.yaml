@@ -85,6 +85,22 @@ jobs:
         with:
           go-version-file: go.mod
 
+      # The in-module operator controller suites under operators/{tenant,platform}
+      # are envtest suites (controller-runtime) that need the kubebuilder
+      # control-plane binaries (etcd + kube-apiserver). The flat `go test ./...`
+      # below runs them, so provide the assets and export KUBEBUILDER_ASSETS
+      # (gibson#920). Without this they hard-fail at BeforeSuite with
+      # "fork/exec .../etcd: no such file or directory". The suites self-skip
+      # when KUBEBUILDER_ASSETS is unset (e.g. bare local runs), so this step is
+      # what makes them actually execute in CI rather than silently skip.
+      - name: Set up envtest binaries
+        run: |
+          go install sigs.k8s.io/controller-runtime/tools/setup-envtest@latest
+          ENVTEST_K8S_VERSION="$(go list -m -f '{{.Version}}' k8s.io/api | sed -E 's/^v0\.([0-9]+)\..*/1.\1/')"
+          echo "Using envtest k8s version ${ENVTEST_K8S_VERSION}"
+          ASSETS="$(setup-envtest use "${ENVTEST_K8S_VERSION}" -p path)"
+          echo "KUBEBUILDER_ASSETS=${ASSETS}" >> "$GITHUB_ENV"
+
       - run: go vet ${{ matrix.build_tags && format('-tags={0}', matrix.build_tags) || '' }} ./...
 
       - run: go test -race ${{ matrix.build_tags && format('-tags={0}', matrix.build_tags) || '' }} ./...

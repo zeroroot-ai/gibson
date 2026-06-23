@@ -49,9 +49,32 @@ var (
 )
 
 func TestControllers(t *testing.T) {
+	// envtest suites require the kubebuilder control-plane binaries
+	// (etcd + kube-apiserver). The unit-test CI lane (build.yaml's flat
+	// `go test ./...`) and bare local runs do not provide them, so the
+	// suite must skip rather than hard-fail at BeforeSuite when the assets
+	// are genuinely absent (gibson#920). CI's integration lane runs
+	// `setup-envtest` first, which exports KUBEBUILDER_ASSETS, so the suite
+	// still runs for real there — this skip never hides a regression in a
+	// lane that has the binaries.
+	if !envtestAssetsAvailable() {
+		t.Skip("skipping envtest controller suite: kubebuilder assets absent " +
+			"(set KUBEBUILDER_ASSETS or run `make test`, which invokes setup-envtest)")
+	}
+
 	RegisterFailHandler(Fail)
 
 	RunSpecs(t, "Controller Suite")
+}
+
+// envtestAssetsAvailable reports whether the kubebuilder control-plane
+// binaries can be located — either via KUBEBUILDER_ASSETS (set by
+// setup-envtest) or the locally-downloaded `bin/k8s/<ver>` directory.
+func envtestAssetsAvailable() bool {
+	if os.Getenv("KUBEBUILDER_ASSETS") != "" {
+		return true
+	}
+	return getFirstFoundEnvTestBinaryDir() != ""
 }
 
 var _ = BeforeSuite(func() {
