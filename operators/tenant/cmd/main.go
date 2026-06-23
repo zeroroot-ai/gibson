@@ -740,6 +740,19 @@ func main() {
 		os.Exit(1)
 	}
 
+	// TenantDataPlane — declarative per-tenant data-plane (Postgres/Neo4j/
+	// Redis) reconciler. Delegates to the SAME dataPlaneProvisioner the
+	// Tenant saga's DataPlaneProvisioned step uses, so there is one
+	// provisioning codepath (ADR-0027). E8/gibson#801.
+	if err := (&controller.TenantDataPlaneReconciler{
+		Client:      mgr.GetClient(),
+		Scheme:      mgr.GetScheme(),
+		Provisioner: dataPlaneProvisioner,
+	}).SetupWithManager(mgr); err != nil {
+		setupLog.Error(err, "Failed to create controller", "controller", "TenantDataPlane")
+		os.Exit(1)
+	}
+
 	// Orphan reaper — safety net for Terminating tenant namespaces with
 	// orphan child CRs. Disabled via ORPHAN_REAPER_ENABLED=false.
 	reaperEnabled := os.Getenv("ORPHAN_REAPER_ENABLED") != envFalse

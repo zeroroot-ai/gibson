@@ -3,4 +3,5 @@ resources:
 - gibson_v1alpha1_tenant.yaml
 - gibson_v1alpha1_tenantmember.yaml
 - gibson_v1alpha1_agentenrollment.yaml
+- gibson_v1alpha1_tenantdataplane.yaml
 # +kubebuilder:scaffold:manifestskustomizesamples
