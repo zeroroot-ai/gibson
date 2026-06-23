@@ -262,8 +262,8 @@ func TestNoGracefulNilInRequestPaths(t *testing.T) {
 		"internal/engine/graphrag/graph/neo4j.go:390":       astchecks.Entry{Category: astchecks.CategoryLegacyOptional, Reason: "Neo4j driver nil-guard; driver optional in non-graphrag deployments"},
 		"internal/engine/graphrag/graph/neo4j.go:406":       astchecks.Entry{Category: astchecks.CategoryLegacyOptional, Reason: "Neo4j driver nil-guard; driver optional in non-graphrag deployments"},
 		"internal/engine/graphrag/intelligence/risk.go:450": astchecks.Entry{Category: astchecks.CategoryLegacyOptional, Reason: "Neo4j driver optional in non-graphrag deployments"},
-		"internal/engine/graphrag/provider/local.go:164":    astchecks.Entry{Category: astchecks.CategoryLegacyOptional, Reason: "vector store optional in non-graphrag deployments"},
-		"internal/engine/graphrag/provider/local.go:227":    astchecks.Entry{Category: astchecks.CategoryLegacyOptional, Reason: "vector store nil-guard in getVectorStore; optional in non-graphrag deployments"},
+		// internal/engine/graphrag/provider — package deleted by gibson#918
+		// (dead orphan LocalGraphRAGProvider, unimported); entries removed.
 
 		// internal/llm — pricing/config/ratelimit values that legitimately accept nil
 		"internal/engine/llm/config.go:268":    astchecks.Entry{Category: astchecks.CategoryDefensiveGuard, Reason: "Features field on llm config, legitimately nil-able"},
