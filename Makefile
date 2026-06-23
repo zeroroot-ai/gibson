@@ -1,7 +1,7 @@
 # Gibson Framework Makefile
 # Stage 1 - Foundation
 
-.PHONY: all build bin gibson-migrate sandbox-eviction-handler test test-coverage test-race lint lint-all lint-deadcode lint-deadcode-baseline clean install help proto proto-deps proto-clean check-authz check-coverage test-daemon-identity-roundtrip check-no-tenant-id check-fga-headers authz-registry
+.PHONY: all build bin gibson-migrate sandbox-eviction-handler test test-coverage test-race lint lint-all lint-deadcode lint-deadcode-baseline clean install help proto proto-deps proto-clean check-authz check-coverage test-daemon-identity-roundtrip check-no-tenant-id check-fga-headers check-rpc-test-walker authz-registry
 
 # Go parameters
 GOCMD=go
@@ -258,8 +258,16 @@ check-no-skipped-tests:
 check-noun-contract:
 	@bash scripts/check-noun-contract.sh
 
+# check-rpc-test-walker: per-RPC test gate (gibson#793, E3 / QUALITY-BARS §4).
+# Fails if any registered gRPC RPC is not authz-enforceable, or lacks a handler
+# test and is not in the shrinking baseline. Pure unit test — no infra needed.
+check-rpc-test-walker:
+	@echo "Running per-RPC test walker (authz-deny + handler-test coverage)..."
+	$(GOTEST) -count=1 -run 'TestEveryRegisteredRPC' ./internal/platform/authz/registry/
+	@echo "check-rpc-test-walker PASSED"
+
 # Run all checks before commit
-check: fmt vet lint lint-deadcode test-race check-no-tenant-id check-fga-headers check-no-gibson-io check-no-skipped-tests check-noun-contract
+check: fmt vet lint lint-deadcode test-race check-no-tenant-id check-fga-headers check-no-gibson-io check-no-skipped-tests check-noun-contract check-rpc-test-walker
 	@echo "All checks passed!"
 
 # Run authorization-specific checks: vet + unit tests + integration tests (requires Docker)

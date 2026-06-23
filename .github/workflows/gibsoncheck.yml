@@ -106,6 +106,37 @@ jobs:
       - name: Check no Redis tenant-prefix patterns
         run: bash scripts/check-no-redis-prefix.sh
 
+  rpc-test-walker:
+    runs-on: ubuntu-latest
+    name: per-RPC test walker
+    # Spec: gibson#793 (E3 / QUALITY-BARS §4). Fails if any registered gRPC RPC
+    # is not authz-enforceable, or lacks a handler test and is not in the
+    # shrinking baseline (rpc_handler_coverage_baseline.txt). The walker is a
+    # pure unit test — only stdlib + the in-module registry package — so it
+    # needs no Docker. It does compile the registry package (which transitively
+    # pulls private modules), hence the GOPRIVATE + git-credential setup mirrors
+    # the analyze job.
+    env:
+      GOPRIVATE: github.com/zeroroot-ai
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Configure git for private modules
+        run: |
+          git config --global \
+            url."https://x-access-token:${{ secrets.GH_PAT_GIBSON_RO }}@github.com/".insteadOf \
+            "https://github.com/"
+
+      - uses: actions/setup-go@v6
+        with:
+          go-version-file: go.mod
+
+      - name: Download Go modules
+        run: go mod download
+
+      - name: Run per-RPC test walker
+        run: make check-rpc-test-walker
+
   authz-registry-drift:
     runs-on: ubuntu-latest
     name: authz-registry drift gate
