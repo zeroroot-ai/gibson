@@ -118,26 +118,17 @@ func TestProvisionSteps_NamesStableContract(t *testing.T) {
 	for _, s := range steps {
 		got = append(got, s.Name())
 	}
+	// E8/gibson#805 cutover: the identity / secrets-backend / grants /
+	// data-plane domains are now provisioned by the four owned sub-CRDs
+	// (TenantIdentity #803, TenantSecretsBackend #802, TenantGrants #804,
+	// TenantDataPlane #801). The corresponding inline saga steps
+	// (EnsureZitadelOrg, ProvisionSecretsBackend, ConfigureSecretsJWTAuth,
+	// RegisterTenantWithPlatform, DataPlaneProvisioned, TenantBrokerConfigWritten)
+	// were removed. The retained provision saga owns only the foundation
+	// steps with no owning sub-CRD.
 	want := []string{
-		"EnsureZitadelOrg",
-		"ProvisionSecretsBackend",
-		// ConfigureSecretsJWTAuth was added in tenant-operator#189 to
-		// close the per-tenant `auth/jwt/config` gap left by
-		// EnsureTenantNamespace (mounted jwt + wrote the role, never
-		// wrote the config). Owns ConditionSecretsJWTAuthConfigured —
-		// existing Ready tenants where ConditionSecretsBackendReady is
-		// already True still pick this step up on next reconcile.
-		"ConfigureSecretsJWTAuth",
 		"InitRedisKeyspace",
 		"PublishTenantName",
-		// RegisterTenantWithPlatform writes the
-		// (tenant:<name>, parent, system_tenant:_system) tuple the daemon's
-		// catalog fan-out enumerates (deploy#782 / gibson#715). Idempotent
-		// read-before-write, so it also backfills pre-existing Ready tenants
-		// on the next reconcile.
-		"RegisterTenantWithPlatform",
-		"DataPlaneProvisioned",
-		"TenantBrokerConfigWritten",
 	}
 	if !reflect.DeepEqual(got, want) {
 		t.Errorf(

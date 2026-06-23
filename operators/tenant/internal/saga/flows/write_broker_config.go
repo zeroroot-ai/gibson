@@ -14,14 +14,11 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
-	"time"
 
 	"github.com/jackc/pgx/v5/pgxpool"
 	"github.com/zeroroot-ai/sdk/auth"
 
 	"github.com/zeroroot-ai/gibson/internal/infra/tenantconfig"
-
-	"github.com/zeroroot-ai/gibson/operators/tenant/internal/saga"
 )
 
 // WriteTenantBrokerConfigDeps is the dependency bundle consumed by the
@@ -132,57 +129,6 @@ type VaultAuthConfig struct {
 	Audience string `json:"-"`
 }
 
-// writeTenantBrokerConfigStep is the 11th step in the provisioning saga.
-// Runs after DataPlaneProvisioned (Postgres + Neo4j + Redis + Vault
-// namespace are all live) and before the saga terminates.
-type writeTenantBrokerConfigStep struct {
-	saga.StepBase
-	deps WriteTenantBrokerConfigDeps
-}
-
-// newWriteTenantBrokerConfigStep returns the saga step. nil-deps still
-// builds a step that is a no-op so the validation gate's "all required
-// capabilities present" check can run in dev mode without panicking.
-func newWriteTenantBrokerConfigStep(deps WriteTenantBrokerConfigDeps) *writeTenantBrokerConfigStep {
-	return &writeTenantBrokerConfigStep{
-		StepBase: saga.StepBase{
-			N: "TenantBrokerConfigWritten",
-			C: "TenantBrokerConfigWritten",
-			// Depends on BOTH ProvisionSecretsBackend (Vault namespace must
-			// exist so the daemon can dial it) AND DataPlaneProvisioned
-			// (Postgres is up so the operator can write to the
-			// tenant_secrets_broker_config table). See the comment in
-			// ProvisionSteps and tenant-operator#45.
-			Req: []string{"ProvisionSecretsBackend", "DataPlaneProvisioned"},
-			Caps: []saga.ClientCapability{
-				saga.CapabilityPostgresAdmin,
-			},
-			Owner: "tenant-operator",
-			P99:   5 * time.Second,
-		},
-		deps: deps,
-	}
-}
-
-// Skip is INTENTIONALLY ABSENT — one-code-path (deploy#194). The
-// previous Skip() inspected operator-side deps (PlatformPG, KEK) and
-// silently no-op'd the step when those weren't wired, which is the
-// exact bug class behind every "signed-up user sees nothing" report.
-// Step preconditions are enforced at operator boot (cmd/main.go
-// buildWriteTenantBrokerConfigDeps); by the time this step runs, the
-// deps are guaranteed present.
-
-func (s *writeTenantBrokerConfigStep) Provision(ctx context.Context, obj saga.ConditionedObject, _ *saga.Deps) (bool, error) {
-	t, err := tenantOf(obj)
-	if err != nil {
-		return false, err
-	}
-	if err := s.deps.WriteBrokerConfig(ctx, t.Name); err != nil {
-		return false, err
-	}
-	return true, nil
-}
-
 // WriteBrokerConfig renders and upserts the per-tenant broker-config row. It is
 // the single codepath shared by the saga's TenantBrokerConfigWritten step and
 // the declarative TenantSecretsBackend controller (via secrets.Provisioner), so
@@ -220,18 +166,6 @@ func (d WriteTenantBrokerConfigDeps) WriteBrokerConfig(ctx context.Context, tena
 		return fmt.Errorf("writeTenantBrokerConfig: upsert: %w", err)
 	}
 	return nil
-}
-
-// Deprovision removes the broker config row when the tenant teardown
-// saga runs. The Vault namespace itself is dropped by
-// DeprovisionSecretsBackend; this step deletes the platform-side
-// pointer to it.
-func (s *writeTenantBrokerConfigStep) Deprovision(ctx context.Context, obj saga.ConditionedObject, _ *saga.Deps) error {
-	t, err := tenantOf(obj)
-	if err != nil {
-		return err
-	}
-	return s.deps.DeleteBrokerConfig(ctx, t.Name)
 }
 
 // DeleteBrokerConfig removes the per-tenant broker-config row. Shared by the

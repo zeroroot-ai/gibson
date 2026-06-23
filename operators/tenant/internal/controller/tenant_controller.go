@@ -12,6 +12,7 @@ package controller
 
 import (
 	"context"
+	"time"
 
 	"github.com/google/uuid"
 	apierrors "k8s.io/apimachinery/pkg/api/errors"
@@ -31,6 +32,13 @@ import (
 // ctxKeyCorrelationID is the typed context key for storing the correlation ID
 // threaded from the dashboard annotation through to runner log fields and audit.
 type ctxKeyCorrelationID struct{}
+
+// childRequeueInterval is how soon the Tenant reconciler comes back to advance
+// dependency-ordered child creation/teardown (E8/gibson#805) when no watch event
+// would otherwise wake it. The sub-CRD controllers reconcile independently; this
+// short requeue lets the Tenant observe each child flipping Ready (or gone)
+// without waiting for the long resync window.
+const childRequeueInterval = 5 * time.Second
 
 // TenantReconciler reconciles a Tenant object. Owns the full lifecycle
 // saga: provisioning steps on create/update, finalizer-driven teardown on
@@ -147,6 +155,15 @@ func (r *TenantReconciler) Reconcile(ctx context.Context, req ctrl.Request) (ctr
 		return ctrl.Result{Requeue: true}, nil
 	}
 
+	// Capture status base from the SERVER state BEFORE any in-memory mutation,
+	// so the closing merge-patch carries every status field this reconcile
+	// changes — including a phase that the child-readiness gate resets back to
+	// Provisioning (which would otherwise diff to nothing against a base that
+	// already held Provisioning). Using Patch instead of Update avoids
+	// conflicts on resourceVersion, which the dataplane pipeline bumps via its
+	// own Status().Patch during the DataPlaneProvisioned step.
+	statusBase := tenant.DeepCopy()
+
 	// Normal provisioning.
 	if tenant.Status.Phase == "" {
 		tenant.Status.Phase = gibsonv1alpha1.TenantPhasePending
@@ -156,18 +173,52 @@ func (r *TenantReconciler) Reconcile(ctx context.Context, req ctrl.Request) (ctr
 	}
 
 	steps := r.provisioningSteps()
-	// Capture status base BEFORE the saga so we can compute a merge-patch of
-	// just the saga's mutations. Using Patch instead of Update avoids
-	// conflicts on resourceVersion, which the dataplane pipeline bumps via
-	// its own Status().Patch during the DataPlaneProvisioned step.
-	statusBase := tenant.DeepCopy()
+	// The retained saga now owns only the foundation steps that are NOT
+	// modelled as owned sub-CRDs: the per-tenant namespace, the Redis
+	// keyspace + tenant-name publish. The identity / secrets-backend / grants
+	// / data-plane domains are owned by the four sub-CRDs the Tenant creates
+	// in dependency order (E8/gibson#805). Running the saga to its terminal
+	// phase here is fine: the runner stamps a Ready phase when its (now
+	// shorter) step set completes, but the TENANT's Ready gate below is the
+	// AND of (saga complete) AND (all four children Ready).
 	result, err := r.Runner.Run(ctx, &tenant, steps, string(gibsonv1alpha1.TenantPhaseReady))
+
+	// Dependency-ordered child orchestration (E8/gibson#805). Each child is
+	// created with an ownerReference to this Tenant, in dependency order, only
+	// once its predecessor reports Ready. The Tenant is Ready only when the
+	// retained saga is done AND every child reports Status.Ready.
+	childrenReady := false
+	if err == nil {
+		var childErr error
+		childrenReady, childErr = r.reconcileChildren(ctx, &tenant)
+		if childErr != nil {
+			log.Error(childErr, "child orchestration failed")
+			err = childErr
+		}
+	}
+
+	// Compute the Tenant's effective phase: Ready only when the saga reached
+	// its terminal phase AND all four children are Ready. Otherwise keep it in
+	// Provisioning so the daemon/dashboard do not treat a half-provisioned
+	// tenant as usable.
+	if err == nil {
+		if tenant.Status.Phase == gibsonv1alpha1.TenantPhaseReady && !childrenReady {
+			tenant.Status.Phase = gibsonv1alpha1.TenantPhaseProvisioning
+		}
+	}
+
 	// Always persist status, even on partial progress.
 	if updateErr := r.Status().Patch(ctx, &tenant, client.MergeFrom(statusBase)); updateErr != nil {
 		log.Error(updateErr, "status patch failed")
 		if err == nil {
 			return result, updateErr
 		}
+	}
+
+	// Requeue until the children converge so the Tenant flips to Ready without
+	// waiting for an unrelated watch event.
+	if err == nil && !childrenReady && result.RequeueAfter == 0 && !result.Requeue {
+		return ctrl.Result{RequeueAfter: childRequeueInterval}, nil
 	}
 
 	// Emit gibson_tenant_migration_pending after a successful Ready
@@ -202,6 +253,33 @@ func (r *TenantReconciler) reconcileDelete(ctx context.Context, tenant *gibsonv1
 	log := logf.FromContext(ctx).WithValues("tenant", tenant.Name, "phase", "delete")
 
 	tenant.Status.Phase = gibsonv1alpha1.TenantPhaseTerminating
+
+	// Dependency-ordered child teardown (E8/gibson#805). Delete the owned
+	// sub-CRDs in REVERSE dependency order, waiting for each child's own
+	// finalizer to complete before deleting the next. This runs BEFORE the
+	// retained teardown saga (which deletes the per-tenant namespace), so the
+	// children are never force-removed out of order by a namespace cascade.
+	//
+	// A child cascade in progress requeues the Tenant (finalizer retained)
+	// without ever entering the saga teardown — the namespace must outlive the
+	// namespaced children.
+	childrenGone, childErr := r.deleteChildrenInReverse(ctx, tenant)
+	if childErr != nil {
+		log.Error(childErr, "child teardown failed; keeping finalizer for retry")
+		// Persist the Terminating phase before returning the error.
+		base := tenant.DeepCopy()
+		base.Status.Phase = gibsonv1alpha1.TenantPhaseProvisioning
+		if perr := r.Status().Patch(ctx, tenant, client.MergeFrom(base)); perr != nil {
+			log.Error(perr, "status patch failed during child teardown")
+		}
+		return ctrl.Result{}, childErr
+	}
+	if !childrenGone {
+		// Child cascade still running. Requeue and keep the finalizer; do not
+		// proceed to the namespace-deleting teardown saga yet.
+		log.Info("child teardown in progress; waiting before namespace teardown")
+		return ctrl.Result{RequeueAfter: childRequeueInterval}, nil
+	}
 
 	steps := r.teardownSteps()
 	statusBase := tenant.DeepCopy()

@@ -311,22 +311,20 @@ func TestPublishTenantNameStep_RedisError(t *testing.T) {
 }
 
 // TestRedisSteps_OrderInProvisionSteps locks the ordering invariant between
-// the two Redis steps and their neighbours. The contract:
+// the two retained Redis steps. The contract:
 //
-//   - InitRedisKeyspace comes AFTER ProvisionSecretsBackend (the Vault
-//     namespace must exist first so the daemon can find credentials for the
-//     keyspace).
 //   - PublishTenantName comes AFTER InitRedisKeyspace (the name is published
 //     only after the keyspace is initialised, so readers can't see a name
 //     without a keyspace).
-//   - Both steps come BEFORE DataPlaneProvisioned (the data-plane pipeline,
-//     which provisions per-tenant Postgres/Neo4j/Redis, runs after the
-//     tenant name is published).
 //
-// This is complementary to TestProvisionSteps_RegistryContract (which
-// checks the graph is acyclic and Requires() references are valid) and
-// TestProvisionStepsOrdering (which pins ProvisionSecretsBackend's neighbourhood);
-// this test focuses on the Redis-specific ordering invariants.
+// E8/gibson#805 cutover: the ProvisionSecretsBackend and DataPlaneProvisioned
+// neighbours were removed (those domains moved to the TenantSecretsBackend /
+// TenantDataPlane sub-CRDs), so the only remaining provision-saga ordering
+// invariant is between the two Redis steps.
+//
+// This is complementary to TestProvisionSteps_RegistryContract (which checks
+// the graph is acyclic and Requires() references are valid); this test focuses
+// on the Redis-specific ordering invariant.
 func TestRedisSteps_OrderInProvisionSteps(t *testing.T) {
 	t.Parallel()
 	_, rc := newRedisTestHarness(t)
@@ -359,7 +357,5 @@ func TestRedisSteps_OrderInProvisionSteps(t *testing.T) {
 		}
 	}
 
-	require("ProvisionSecretsBackend", "InitRedisKeyspace")
 	require("InitRedisKeyspace", "PublishTenantName")
-	require("PublishTenantName", "DataPlaneProvisioned")
 }

@@ -16,21 +16,18 @@ package flows
 
 import (
 	"context"
-	"errors"
 	"fmt"
 	"time"
 
 	"sigs.k8s.io/controller-runtime/pkg/client"
 
 	gibsonv1alpha1 "github.com/zeroroot-ai/gibson/operators/tenant/api/v1alpha1"
-	"github.com/zeroroot-ai/gibson/operators/tenant/internal/clients"
 	"github.com/zeroroot-ai/gibson/operators/tenant/internal/clients/fga"
 	"github.com/zeroroot-ai/gibson/operators/tenant/internal/clients/redisstate"
 	"github.com/zeroroot-ai/gibson/operators/tenant/internal/clients/signupprogress"
 	vaultadmin "github.com/zeroroot-ai/gibson/operators/tenant/internal/clients/vault"
 	"github.com/zeroroot-ai/gibson/operators/tenant/internal/clients/zitadel"
 	"github.com/zeroroot-ai/gibson/operators/tenant/internal/dataplane"
-	"github.com/zeroroot-ai/gibson/operators/tenant/internal/grants"
 	"github.com/zeroroot-ai/gibson/operators/tenant/internal/saga"
 )
 
@@ -76,33 +73,25 @@ type ProvisionDeps struct {
 
 // ProvisionSteps returns the ordered saga steps for provisioning a Tenant.
 // These run after the foundation NamespaceProvisioner step.
+//
+// E8/gibson#805 cutover: the identity / secrets-backend / grants / data-plane
+// domains are now provisioned declaratively by the four owned sub-CRDs
+// (TenantIdentity #803, TenantSecretsBackend #802, TenantGrants #804,
+// TenantDataPlane #801) that the Tenant reconciler creates in dependency order.
+// The corresponding inline saga steps (EnsureZitadelOrg, ProvisionSecretsBackend,
+// ConfigureSecretsJWTAuth, RegisterTenantWithPlatform, DataPlaneProvisioned,
+// TenantBrokerConfigWritten) were removed here to avoid double-provisioning
+// (ADR-0027: no parallel saga + CRD provisioning). The sub-CRD controllers
+// delegate to the SAME provisioners those steps used, so behaviour is preserved.
+//
+// The retained saga owns only the foundation steps that have no owning sub-CRD:
+// the per-tenant Redis keyspace (InitRedisKeyspace) and the tenant-name publish
+// (PublishTenantName). The per-tenant namespace is contributed by the
+// NamespaceProvisioner ahead of these (see TenantReconciler.provisioningSteps).
 func ProvisionSteps(deps ProvisionDeps) []saga.Step {
 	return []saga.Step{
-		newEnsureZitadelOrgStep(deps),
-		newProvisionSecretsBackendStep(deps),
-		// ConfigureSecretsJWTAuth closes the gap left by EnsureTenantNamespace
-		// (mounts auth/jwt + writes the role, but NEVER writes the mount's
-		// config). Without it the daemon's per-tenant auth/jwt/login fails
-		// with 400 "could not load configuration" and the dashboard 412s on
-		// every API call. Owns its own condition
-		// (ConditionSecretsJWTAuthConfigured) so existing Ready tenants
-		// where ConditionSecretsBackendReady is already True still pick
-		// this step up on the next reconcile. tenant-operator#189.
-		newConfigureSecretsJWTAuthStep(deps),
 		newInitRedisStep(deps),
 		newPublishTenantNameStep(deps),
-		// Register the tenant under the platform system tenant so the daemon's
-		// catalog fan-out can enumerate it (deploy#782 / gibson#715). Needs only
-		// the FGA client; placed here with the other lightweight publish steps.
-		newRegisterTenantWithPlatformStep(deps),
-		newProvisionDataPlaneStep(deps),
-		// 11th step (#45): publish the per-tenant broker config row so
-		// the daemon's secrets.Registry can route credential lookups
-		// after the data plane is up. Must come AFTER
-		// ProvisionDataPlane (Vault namespace + Postgres are live) and
-		// AFTER ProvisionSecretsBackend (the Vault namespace itself
-		// must exist before the daemon tries to dial it).
-		newWriteTenantBrokerConfigStep(deps.WriteTenantBrokerConfig),
 	}
 }
 
@@ -130,9 +119,13 @@ type initRedisStep struct {
 func newInitRedisStep(deps ProvisionDeps) *initRedisStep {
 	return &initRedisStep{
 		StepBase: saga.StepBase{
-			N:     "InitRedisKeyspace",
-			C:     gibsonv1alpha1.ConditionRedisReady,
-			Req:   []string{"ProvisionSecretsBackend"},
+			N: "InitRedisKeyspace",
+			C: gibsonv1alpha1.ConditionRedisReady,
+			// E8/gibson#805: previously Req'd ProvisionSecretsBackend, a saga
+			// step that has moved to the TenantSecretsBackend sub-CRD. Redis
+			// keyspace init has no functional dependency on the Vault namespace
+			// (the Req encoded only sequencing), so the edge is dropped — the
+			// retained saga now starts at the Redis keyspace.
 			Caps:  []saga.ClientCapability{saga.CapabilityRedisAdmin},
 			Owner: "platform-redis",
 			P99:   5 * time.Second,
@@ -190,161 +183,4 @@ func (s *publishTenantNameStep) Provision(ctx context.Context, obj saga.Conditio
 		name = t.Name
 	}
 	return true, s.deps.Redis.PublishTenantName(ctx, t.Name, name)
-}
-
-// ---------------------------------------------------------------------------
-// RegisterTenantWithPlatform
-// ---------------------------------------------------------------------------
-
-// registerTenantWithPlatformStep writes the
-// `(tenant:<name>, parent, system_tenant:_system)` FGA tuple that registers
-// the tenant under the platform's system tenant. The daemon's catalog fan-out
-// reconciler enumerates `system_tenant:_system#parent@tenant:X` to seed the
-// ADR-0046 `component:_system` baseline plus the platform catalog onto every
-// tenant; without this tuple the tenant is invisible to the fan-out
-// (deploy#782 / gibson#715).
-//
-// Idempotent via read-before-write, so the provision saga re-running this step
-// on the next reconcile also backfills tenants provisioned before it existed.
-//
-// NOTE: this is NOT the removed WriteInitialFGATuples step (tenant-operator
-// #215). That wrote a malformed *member* tuple keyed by base64(email);
-// TenantMember.acceptInvitation owns member tuples. This writes a
-// tenant→platform *registration* tuple, a distinct concern with a distinct
-// step name (so the #215 absence contract is unaffected).
-type registerTenantWithPlatformStep struct {
-	saga.StepBase
-	deps ProvisionDeps
-}
-
-func newRegisterTenantWithPlatformStep(deps ProvisionDeps) *registerTenantWithPlatformStep {
-	return &registerTenantWithPlatformStep{
-		StepBase: saga.StepBase{
-			N:     "RegisterTenantWithPlatform",
-			C:     "TenantRegisteredWithPlatform",
-			Caps:  []saga.ClientCapability{saga.CapabilityFGA},
-			Owner: "fga-integration",
-			P99:   5 * time.Second,
-		},
-		deps: deps,
-	}
-}
-
-// parentTuple delegates to grants.PlatformRegistrationTuple so the saga step and
-// the declarative TenantGrants controller (E8/gibson#804) share ONE definition
-// of the tenant→platform registration tuple (ADR-0027). Do not inline the shape
-// here — change it in the grants package so both callers stay in lockstep.
-func (s *registerTenantWithPlatformStep) parentTuple(name string) fga.Tuple {
-	return grants.PlatformRegistrationTuple(name)
-}
-
-func (s *registerTenantWithPlatformStep) Provision(ctx context.Context, obj saga.ConditionedObject, _ *saga.Deps) (bool, error) {
-	t, err := tenantOf(obj)
-	if err != nil {
-		return false, err
-	}
-	// s.deps.FGA is guaranteed non-nil (cmd/main.go exits 1 when FGA_URL /
-	// FGA_STORE_ID are unset, one-code-path epic deploy#186); guard anyway.
-	if s.deps.FGA == nil {
-		return false, fmt.Errorf("fga client unset (operator misconfigured): %w", clients.ErrInvalidInput)
-	}
-	tuple := s.parentTuple(t.Name)
-	// Read-before-write: OpenFGA rejects a duplicate write, so check existence
-	// to keep the step idempotent across reconciles.
-	existing, err := s.deps.FGA.Read(ctx, tuple)
-	if err != nil && !errors.Is(err, clients.ErrNotFound) {
-		return false, err
-	}
-	if len(existing) > 0 {
-		return true, nil
-	}
-	if err := s.deps.FGA.Write(ctx, []fga.Tuple{tuple}); err != nil {
-		return false, err
-	}
-	return true, nil
-}
-
-func (s *registerTenantWithPlatformStep) Deprovision(ctx context.Context, obj saga.ConditionedObject, _ *saga.Deps) error {
-	t, err := tenantOf(obj)
-	if err != nil {
-		return err
-	}
-	// FGA is structurally required (cmd/main.go exits 1 if it can't construct
-	// the client), so a nil here is operator misconfiguration — fail loud
-	// rather than silently skipping the rollback cleanup (one-code-path).
-	if s.deps.FGA == nil {
-		return fmt.Errorf("fga client unset (operator misconfigured): %w", clients.ErrInvalidInput)
-	}
-	// FGA.Delete is idempotent (treats a missing tuple as success). The
-	// teardown DeleteTenantFGATuples step only removes tuples whose OBJECT is
-	// tenant:<name>; this tuple has the tenant as the USER, so it must clean
-	// itself up here.
-	if err := s.deps.FGA.Delete(ctx, []fga.Tuple{s.parentTuple(t.Name)}); err != nil {
-		return err
-	}
-	return nil
-}
-
-// ---------------------------------------------------------------------------
-// DataPlaneProvisioned
-// ---------------------------------------------------------------------------
-
-type provisionDataPlaneStep struct {
-	saga.StepBase
-	deps ProvisionDeps
-}
-
-func newProvisionDataPlaneStep(deps ProvisionDeps) *provisionDataPlaneStep {
-	return &provisionDataPlaneStep{
-		StepBase: saga.StepBase{
-			N:   "DataPlaneProvisioned",
-			C:   "DataPlaneProvisioned",
-			Req: []string{"PublishTenantName"},
-			Caps: []saga.ClientCapability{
-				saga.CapabilityPostgresAdmin,
-				saga.CapabilityVaultTransit,
-				// Neo4j is provisioned as a per-tenant K8s StatefulSet by the
-				// data-plane pipeline (formerly the deleted InitNeo4jScope step).
-				saga.CapabilityKubernetes,
-			},
-			Owner: "platform-postgres",
-			P99:   2 * time.Minute,
-		},
-		deps: deps,
-	}
-}
-
-func (s *provisionDataPlaneStep) Provision(ctx context.Context, obj saga.ConditionedObject, _ *saga.Deps) (bool, error) {
-	t, err := tenantOf(obj)
-	if err != nil {
-		return false, err
-	}
-	// s.deps.DataPlane is always non-nil: buildDataPlaneProvisioner (cmd/main.go)
-	// always returns dataplane.New(cfg) which is never nil. A nil here means
-	// operator wiring code passed nil explicitly — that is a programming error.
-	if s.deps.DataPlane == nil {
-		return false, fmt.Errorf("data-plane provisioner unset (operator misconfigured): %w", clients.ErrInvalidInput)
-	}
-	if err := s.deps.DataPlane.Provision(ctx, t.Name); err != nil {
-		return false, fmt.Errorf("provisionDataPlane: %w", err)
-	}
-	return true, nil
-}
-
-func (s *provisionDataPlaneStep) Deprovision(ctx context.Context, obj saga.ConditionedObject, _ *saga.Deps) error {
-	t, err := tenantOf(obj)
-	if err != nil {
-		return err
-	}
-	// s.deps.DataPlane is always non-nil (see Provision above).
-	if s.deps.DataPlane == nil {
-		return fmt.Errorf("data-plane provisioner unset (operator misconfigured): %w", clients.ErrInvalidInput)
-	}
-	if err := s.deps.DataPlane.Deprovision(ctx, t.Name); err != nil {
-		if errors.Is(err, clients.ErrNotFound) {
-			return nil
-		}
-		return err
-	}
-	return nil
 }
