@@ -2117,35 +2117,3 @@ func (d *daemonImpl) RefreshToolCatalog(ctx context.Context) (bool, string, erro
 func (d *daemonImpl) LLMConfigHandler() *api.LLMConfigHandler {
 	return d.llmConfigHandler
 }
-
-// buildTenantPostgresDSN constructs a pgxpool-compatible DSN for the admin
-// Postgres pool used by the Neo4j instanceResolver's endpoint registry.
-//
-// Returns an empty string when TenantPostgres.Host is not set.
-// Spec: per-tenant-data-plane-completion Task 16.
-func buildTenantPostgresDSN(cfg *config.Config) string {
-	if cfg.TenantPostgres.Host == "" {
-		return ""
-	}
-	port := cfg.TenantPostgres.Port
-	if port == 0 {
-		port = 5432
-	}
-	db := cfg.TenantPostgres.AdminDatabase
-	if db == "" {
-		db = "postgres"
-	}
-	sslMode := cfg.TenantPostgres.SSLMode
-	if sslMode == "" {
-		sslMode = "disable"
-	}
-	return fmt.Sprintf(
-		"postgres://%s:%s@%s:%d/%s?sslmode=%s",
-		cfg.TenantPostgres.AdminUsername,
-		cfg.TenantPostgres.AdminPassword,
-		cfg.TenantPostgres.Host,
-		port,
-		db,
-		sslMode,
-	)
-}

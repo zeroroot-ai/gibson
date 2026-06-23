@@ -363,18 +363,6 @@ type QueryPipelineOptions struct {
 	IncludeMetadata bool
 }
 
-// DefaultPipelineOptions returns sensible defaults for query processing.
-func DefaultPipelineOptions() QueryPipelineOptions {
-	return QueryPipelineOptions{
-		SkipEmbedding:             false,
-		SkipGraph:                 false,
-		MaxGraphStartPoints:       5,
-		EnableGracefulDegradation: true,
-		FetchFullNodes:            true,
-		IncludeMetadata:           false,
-	}
-}
-
 // WithOptions creates a new processor with custom pipeline options.
 // This allows per-query customization of the processing pipeline.
 func (p *DefaultQueryPipeline) WithOptions(opts QueryPipelineOptions) *DefaultQueryPipeline {

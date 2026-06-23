@@ -91,14 +91,6 @@ func newInvalidArgumentError(msg string) error {
 	}
 }
 
-// newModelNotFoundError creates an FgaError wrapping ErrModelNotFound.
-func newModelNotFoundError(modelID string) error {
-	return &FgaError{
-		Sentinel: ErrModelNotFound,
-		Message:  fmt.Sprintf("model ID %q not found in store", modelID),
-	}
-}
-
 // IsUnavailable reports whether err is an FGA unavailability error.
 func IsUnavailable(err error) bool {
 	return errors.Is(err, ErrFgaUnavailable)
@@ -112,14 +104,4 @@ func IsTimeout(err error) bool {
 // IsInvalidArgument reports whether err is an invalid argument error.
 func IsInvalidArgument(err error) bool {
 	return errors.Is(err, ErrInvalidArgument)
-}
-
-// IsPermissionDenied reports whether err is a permission denied error.
-func IsPermissionDenied(err error) bool {
-	return errors.Is(err, ErrPermissionDenied)
-}
-
-// IsModelNotFound reports whether err is a model not found error.
-func IsModelNotFound(err error) bool {
-	return errors.Is(err, ErrModelNotFound)
 }

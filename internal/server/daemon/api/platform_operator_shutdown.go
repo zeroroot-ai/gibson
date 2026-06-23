@@ -11,9 +11,6 @@ import (
 	"os"
 	"time"
 
-	"google.golang.org/grpc/codes"
-	status_grpc "google.golang.org/grpc/status"
-
 	daemonoperatorv1 "github.com/zeroroot-ai/gibson/internal/server/daemon/api/gibson/daemon/operator/v1"
 )
 
@@ -55,10 +52,4 @@ func (s *DaemonServer) Shutdown(ctx context.Context, req *daemonoperatorv1.Shutd
 		Success: true,
 		Message: "Shutdown request accepted, daemon will stop shortly",
 	}, nil
-}
-
-// shutdownUnavailableError is a helper that returns the correct error when
-// the daemon is not in a state to accept a shutdown request.
-func shutdownUnavailableError(msg string) error {
-	return status_grpc.Errorf(codes.Unavailable, "shutdown unavailable: %s", msg)
 }

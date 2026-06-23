@@ -13,15 +13,6 @@ type VectorResult struct {
 	Metadata   map[string]any `json:"metadata,omitempty"`
 }
 
-// NewVectorResult creates a new VectorResult.
-func NewVectorResult(nodeID types.ID, similarity float64) *VectorResult {
-	return &VectorResult{
-		NodeID:     nodeID,
-		Similarity: similarity,
-		Metadata:   make(map[string]any),
-	}
-}
-
 // WithEmbedding sets the embedding vector.
 func (vr *VectorResult) WithEmbedding(embedding []float64) *VectorResult {
 	vr.Embedding = embedding

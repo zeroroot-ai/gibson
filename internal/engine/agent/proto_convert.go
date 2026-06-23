@@ -44,53 +44,6 @@ func TaskToProto(task Task) *typespb.Task {
 	return protoTask
 }
 
-// ResultToProto converts a Gibson internal Result to a proto Result message.
-func ResultToProto(r Result) *typespb.Result {
-	protoResult := &typespb.Result{
-		Status: resultStatusToProto(r.Status),
-		Output: anyToTypedValue(r.Output),
-	}
-
-	// Convert error if present
-	if r.Error != nil {
-		details := make(map[string]string)
-		for k, v := range r.Error.Details {
-			details[k] = fmt.Sprintf("%v", v)
-		}
-		protoResult.Error = &typespb.ResultError{
-			Message: r.Error.Message,
-			Code:    commonpb.ErrorCode(commonpb.ErrorCode_value[r.Error.Code]),
-			Details: details,
-		}
-	}
-
-	// Convert findings to finding IDs
-	if len(r.Findings) > 0 {
-		protoResult.FindingIds = make([]string, len(r.Findings))
-		for i, f := range r.Findings {
-			protoResult.FindingIds[i] = string(f.ID)
-		}
-	}
-
-	return protoResult
-}
-
-// resultStatusToProto converts an internal ResultStatus to a proto ResultStatus.
-func resultStatusToProto(status ResultStatus) typespb.ResultStatus {
-	switch status {
-	case ResultStatusPending:
-		return typespb.ResultStatus_RESULT_STATUS_UNSPECIFIED
-	case ResultStatusCompleted:
-		return typespb.ResultStatus_RESULT_STATUS_SUCCESS
-	case ResultStatusFailed:
-		return typespb.ResultStatus_RESULT_STATUS_FAILED
-	case ResultStatusCancelled:
-		return typespb.ResultStatus_RESULT_STATUS_CANCELLED
-	default:
-		return typespb.ResultStatus_RESULT_STATUS_UNSPECIFIED
-	}
-}
-
 // ProtoToResult converts a proto Result to a Gibson internal Result.
 func ProtoToResult(pr *typespb.Result) Result {
 	if pr == nil {

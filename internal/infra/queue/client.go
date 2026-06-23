@@ -5,7 +5,6 @@ import (
 	"encoding/json"
 	"fmt"
 	"strconv"
-	"strings"
 	"time"
 )
 
@@ -307,9 +306,4 @@ func (c *RedisClient) DecrementWorkerCount(ctx context.Context, toolName string)
 // Close closes the Redis connection.
 func (c *RedisClient) Close() error {
 	return c.backend.Close()
-}
-
-// formatKeyName ensures consistent key naming with tool:<name>:* pattern.
-func formatKeyName(parts ...string) string {
-	return strings.Join(parts, ":")
 }

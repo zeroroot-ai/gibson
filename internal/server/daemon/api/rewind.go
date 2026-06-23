@@ -174,16 +174,3 @@ func ResolveIdempotencyFromString(s string) manifestpb.ToolIdempotency {
 	}
 	return manifestpb.ToolIdempotency_TOOL_IDEMPOTENCY_UNSPECIFIED
 }
-
-// NormalizeIdempotency returns AT_LEAST_ONCE when given UNSPECIFIED,
-// otherwise returns the input unchanged. This is the chart-side
-// load-time normalization that runs at manifest registration to apply
-// the safest correctness default for tools that omit the field.
-//
-// Spec: mission-checkpointing R6.6.
-func NormalizeIdempotency(in manifestpb.ToolIdempotency) manifestpb.ToolIdempotency {
-	if in == manifestpb.ToolIdempotency_TOOL_IDEMPOTENCY_UNSPECIFIED {
-		return manifestpb.ToolIdempotency_TOOL_IDEMPOTENCY_AT_LEAST_ONCE
-	}
-	return in
-}

@@ -12,7 +12,6 @@ import (
 
 	"google.golang.org/grpc"
 	"google.golang.org/grpc/codes"
-	grpcmeta "google.golang.org/grpc/metadata"
 	status_grpc "google.golang.org/grpc/status"
 
 	goredis "github.com/redis/go-redis/v9"
@@ -2873,20 +2872,4 @@ func pickHighestRole(isOwner, isAdmin bool) string {
 		return "admin"
 	}
 	return "member"
-}
-
-// traceSpanFromContext extracts the trace ID string using the grpc metadata
-// or OTel context.  We keep this local to avoid importing the full OTel trace
-// package just for this one helper.
-func traceSpanFromContext(ctx context.Context) string {
-	if md, ok := grpcmeta.FromIncomingContext(ctx); ok {
-		if vals := md.Get("traceparent"); len(vals) > 0 {
-			// W3C traceparent format: 00-<trace-id>-<span-id>-<flags>
-			parts := strings.SplitN(vals[0], "-", 4)
-			if len(parts) >= 2 {
-				return parts[1]
-			}
-		}
-	}
-	return ""
 }

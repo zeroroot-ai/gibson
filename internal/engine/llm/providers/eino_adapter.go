@@ -152,34 +152,6 @@ func toEinoToolInfo(tool llm.ToolDef) (*einoschema.ToolInfo, error) {
 	}, nil
 }
 
-// accumulateStreamChunks reads all chunks from an Eino StreamReader and
-// concatenates content into a single CompletionResponse. Used by providers
-// that need a blocking Complete() on top of a streaming Eino client.
-func accumulateStreamChunks(sr *einoschema.StreamReader[*einoschema.Message], model string) (*llm.CompletionResponse, error) {
-	defer sr.Close()
-
-	var combined einoschema.Message
-	for {
-		chunk, err := sr.Recv()
-		if err != nil {
-			// io.EOF signals normal end-of-stream; return what we have.
-			if isEOF(err) {
-				break
-			}
-			return nil, err
-		}
-		if chunk == nil {
-			continue
-		}
-		combined.Content += chunk.Content
-		combined.ToolCalls = append(combined.ToolCalls, chunk.ToolCalls...)
-		if chunk.ResponseMeta != nil {
-			combined.ResponseMeta = chunk.ResponseMeta
-		}
-	}
-	return fromEinoMessage(&combined, model), nil
-}
-
 func isEOF(err error) bool {
 	if err == nil {
 		return false

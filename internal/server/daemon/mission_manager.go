@@ -211,19 +211,6 @@ func (m *missionManager) runStoreFor(ctx context.Context, tenant auth.TenantID) 
 	return store, func() { conn.Release() }, nil
 }
 
-// activeMissionTenant returns the auth.TenantID for a mission's tenant.
-// Falls back to auth.SystemTenant when the mission has no tenant (admin ops).
-func activeMissionTenant(m *mission.Mission) auth.TenantID {
-	if m.TenantID == "" {
-		return auth.SystemTenant
-	}
-	t, err := auth.NewTenantID(m.TenantID)
-	if err != nil {
-		return auth.SystemTenant
-	}
-	return t
-}
-
 // tenantFromCtxOrSystem extracts the tenant from the context; returns SystemTenant
 // when none is present (e.g., admin or unauthed internal callers).
 func tenantFromCtxOrSystem(ctx context.Context) auth.TenantID {
@@ -1162,19 +1149,6 @@ func (m *missionManager) GetTotalMissionCount() int {
 	m.mu.RLock()
 	defer m.mu.RUnlock()
 	return len(m.activeMissions) + m.completedCount
-}
-
-// containsStr checks if a string contains a substring (case-sensitive).
-func containsStr(s, substr string) bool {
-	return len(s) >= len(substr) && (s == substr || len(substr) == 0 ||
-		func() bool {
-			for i := 0; i <= len(s)-len(substr); i++ {
-				if s[i:i+len(substr)] == substr {
-					return true
-				}
-			}
-			return false
-		}())
 }
 
 // storeMissionInGraphRAG stored a mission definition in the shared Neo4j knowledge graph.

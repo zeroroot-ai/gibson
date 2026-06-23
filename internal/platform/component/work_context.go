@@ -38,12 +38,6 @@ func workContextKey(workID string) string { return workContextKeyPrefix + workID
 // expired or was never written.
 const ErrCodeWorkContextNotFound types.ErrorCode = "WORK_CONTEXT_NOT_FOUND"
 
-// NewWorkContextNotFoundError creates a typed error for missing work context.
-func NewWorkContextNotFoundError(workID string) *types.GibsonError {
-	return types.NewError(ErrCodeWorkContextNotFound,
-		fmt.Sprintf("no mission context found for work item %q; mapping may have expired", workID))
-}
-
 // WorkContextRegistry records the work-item → mission/tenant mapping. PollWork
 // registers it after claiming a work item; finding/mission-context paths read it.
 type WorkContextRegistry interface {

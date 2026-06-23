@@ -46,15 +46,6 @@ func (e *FindingError) Is(target error) bool {
 	return e.Code == t.Code
 }
 
-// NewFindingError creates a new finding error with the given code and message
-func NewFindingError(code FindingErrorCode, message string, cause error) *FindingError {
-	return &FindingError{
-		Code:    code,
-		Message: message,
-		Cause:   cause,
-	}
-}
-
 // NewClassificationError creates an error for classification failures
 func NewClassificationError(message string, cause error) *FindingError {
 	return &FindingError{

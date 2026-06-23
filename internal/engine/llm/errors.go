@@ -299,18 +299,6 @@ func NewProviderAuthErrorWithHint(providerName string, statusCode int, envVar st
 	}
 }
 
-// NewProviderUnavailableWithHint creates an error for when a slot resolves to a
-// provider that has no API key configured.
-func NewProviderUnavailableWithHint(slotName, providerName, envHint string) *types.GibsonError {
-	return &types.GibsonError{
-		Code: ErrProviderUnavailable,
-		Message: fmt.Sprintf(
-			"LLM slot %q resolved to provider %q which has no API key configured. Set %q or configure an alternative provider",
-			slotName, providerName, envHint,
-		),
-	}
-}
-
 // TranslateErrorWithEnvHint translates generic errors into Gibson errors, adding
 // environment variable context to authentication errors so operators know which
 // env var to check.

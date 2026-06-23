@@ -44,8 +44,3 @@ type MissionRunStore interface {
 	// CountByMission returns the number of runs for a mission
 	CountByMission(ctx context.Context, missionID types.ID) (int, error)
 }
-
-// timePtr converts a *time.Time to an interface{} suitable for SQL null handling.
-func timePtr(t interface{}) interface{} {
-	return t
-}

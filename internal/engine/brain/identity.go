@@ -62,20 +62,6 @@ func findHostByID(w *World, id uint64) (ecs.Entity, bool) {
 	return ecs.Entity{}, false
 }
 
-// findHostByCoord returns the host entity at (scope, address), if present.
-func findHostByCoord(w *World, scope, addr string) (ecs.Entity, bool) {
-	q := ecs.NewFilter1[Host](w.ecs).Query()
-	for q.Next() {
-		h := q.Get()
-		if h.ScopeID == scope && h.Address == addr {
-			e := q.Entity()
-			q.Close()
-			return e, true
-		}
-	}
-	return ecs.Entity{}, false
-}
-
 // applyHostObserved resolves an observed host to an existing entity (or creates
 // one) and folds the observation in. This is the scope-relative identity model
 // (ADR-0002): resolution is a scope-partitioned loop-compare over strong signals,

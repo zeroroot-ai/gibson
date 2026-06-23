@@ -39,11 +39,6 @@ type OrchestratorEventBusAdapter struct {
 	brainReg    *brain.Registry   // optional; nil means ECS-brain ingest disabled
 }
 
-// NewOrchestratorEventBusAdapter creates a new adapter for the orchestrator.
-func NewOrchestratorEventBusAdapter(eventBus *EventBus) *OrchestratorEventBusAdapter {
-	return &OrchestratorEventBusAdapter{eventBus: eventBus}
-}
-
 // NewOrchestratorEventBusAdapterWithRedis creates an adapter that bridges events
 // to both the in-process EventBus and a tenant-scoped Redis Stream.
 func NewOrchestratorEventBusAdapterWithRedis(

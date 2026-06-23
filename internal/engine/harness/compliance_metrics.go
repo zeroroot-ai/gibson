@@ -174,17 +174,6 @@ var (
 	globalComplianceMetricsOnce sync.Once
 )
 
-// GetComplianceMetrics returns the global ComplianceMetrics singleton,
-// constructing and registering it on first call. Subsequent calls return
-// the same instance.
-func GetComplianceMetrics() *ComplianceMetrics {
-	globalComplianceMetricsOnce.Do(func() {
-		globalComplianceMetrics = NewComplianceMetrics()
-		globalComplianceMetrics.MustRegister()
-	})
-	return globalComplianceMetrics
-}
-
 // --- Convenience recording helpers (thin wrappers that document intent) ---
 
 // RecordEmitted increments SignalsEmitted with the canonical labels.

@@ -101,16 +101,6 @@ type tenantCacheEntry struct {
 // PerTenantKeyProviderOption configures PerTenantKeyProvider behaviour.
 type PerTenantKeyProviderOption func(*PerTenantKeyProvider)
 
-// WithCapacity sets the LRU capacity (max number of cached tenant keys).
-// Default: 256.
-func WithCapacity(n int) PerTenantKeyProviderOption {
-	return func(p *PerTenantKeyProvider) {
-		if n > 0 {
-			p.cap = n
-		}
-	}
-}
-
 // WithTTL sets the cache entry TTL (how long a resolved key is reused before
 // re-resolution). Default: 5 minutes.
 func WithTTL(ttl time.Duration) PerTenantKeyProviderOption {

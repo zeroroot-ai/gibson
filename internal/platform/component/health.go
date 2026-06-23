@@ -6,7 +6,6 @@ package component
 
 import (
 	"strings"
-	"time"
 )
 
 // Health status constants for ComponentInfo metadata.
@@ -38,23 +37,6 @@ func GetHealthStatus(info ComponentInfo) string {
 		return HealthStatusHealthy
 	}
 	return status
-}
-
-// GetLastHealthCheck extracts last health check timestamp from ComponentInfo metadata.
-// Returns zero time if not set or unparseable.
-func GetLastHealthCheck(info ComponentInfo) time.Time {
-	if info.Metadata == nil {
-		return time.Time{}
-	}
-	timestampStr, exists := info.Metadata[MetadataKeyLastHealthCheck]
-	if !exists {
-		return time.Time{}
-	}
-	timestamp, err := time.Parse(time.RFC3339, timestampStr)
-	if err != nil {
-		return time.Time{}
-	}
-	return timestamp
 }
 
 // aggregateHealth computes the overall health status from healthy/unhealthy counts.

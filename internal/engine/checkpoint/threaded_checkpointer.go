@@ -152,30 +152,6 @@ type DefaultThreadedCheckpointer struct {
 	encryption  EncryptionService
 }
 
-// NewThreadedCheckpointer creates a new DefaultThreadedCheckpointer with the provided configuration.
-//
-// If config.Encryption.Enabled is true the constructor REQUIRES a non-nil
-// KeyProvider — Spec 4 design "encrypted-or-nothing": passing
-// Enabled=true with a nil provider returns nil so callers fail fast at boot
-// rather than silently writing plaintext. Use NewThreadedCheckpointerOrError
-// when you need the explicit error for surfaced diagnostics.
-func NewThreadedCheckpointer(
-	store CheckpointStore,
-	threadStore ThreadStore,
-	blobStore BlobStore,
-	config CheckpointerConfig,
-) *DefaultThreadedCheckpointer {
-	c, err := NewThreadedCheckpointerOrError(store, threadStore, blobStore, config)
-	if err != nil {
-		// Log via panic? No — keep this constructor non-panicking; surface
-		// the misconfiguration via nil so the daemon's own boot path
-		// (which checks for nil) refuses to launch. The error-returning
-		// variant is preferred for new call sites.
-		return nil
-	}
-	return c
-}
-
 // NewThreadedCheckpointerOrError is the error-returning constructor variant.
 // Spec 4 R11.5: encrypted-or-nothing — refuse to construct when Encryption.Enabled
 // is true without a non-nil KeyProvider.

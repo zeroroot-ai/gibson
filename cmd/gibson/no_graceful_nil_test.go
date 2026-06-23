@@ -217,7 +217,7 @@ func TestNoGracefulNilInRequestPaths(t *testing.T) {
 		"internal/engine/mission/controller_checkpoint.go:530":        astchecks.Entry{Category: astchecks.CategoryLegacyOptional, Reason: "event bus optional in non-streaming deployments"},
 		"internal/engine/mission/controller_checkpoint.go:556":        astchecks.Entry{Category: astchecks.CategoryLegacyOptional, Reason: "event bus optional in non-streaming deployments"},
 		"internal/engine/mission/definitionutil/definitionutil.go:18": astchecks.Entry{Category: astchecks.CategoryDefensiveGuard, Reason: "nil definition means empty traverse"},
-		"internal/engine/mission/state.go:504":                        astchecks.Entry{Category: astchecks.CategoryDefensiveGuard, Reason: "nil Definition means no-op"},
+		"internal/engine/mission/state.go:478":                        astchecks.Entry{Category: astchecks.CategoryDefensiveGuard, Reason: "nil Definition means no-op"},
 
 		// internal/state
 		"internal/engine/state/client.go:254":      astchecks.Entry{Category: astchecks.CategoryReceiverNilGuard, Reason: "nil-client shim for tests"},
@@ -231,7 +231,7 @@ func TestNoGracefulNilInRequestPaths(t *testing.T) {
 		// for composite nil-receiver shims (typically `r == nil || r.X == nil`).
 
 		// internal/budget
-		"internal/platform/budget/enforcer.go:202": astchecks.Entry{Category: astchecks.CategoryLegacyOptional, Reason: "teams dep optional in budget enforcer; reassert via budget-required follow-up"},
+		"internal/platform/budget/enforcer.go:200": astchecks.Entry{Category: astchecks.CategoryLegacyOptional, Reason: "teams dep optional in budget enforcer; reassert via budget-required follow-up"},
 
 		// internal/checkpoint
 		"internal/engine/checkpoint/state.go:381": astchecks.Entry{Category: astchecks.CategoryDefensiveGuard, Reason: "proto WorkingMemory field, legitimately nil-able"},
