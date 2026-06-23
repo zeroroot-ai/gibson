@@ -308,16 +308,18 @@ check-critical-paths:
 #
 # INTEGRATION_PKG is scoped to the packages that carry the five Tier-3 critical
 # paths and currently COMPILE under -tags integration:
-#   - tests/integration/...        per-tenant isolation, mission-run, handler authz
-#   - internal/platform/authz/...  FGA model (auth-chain decision)
-#   - internal/server/extauthz/... ext-authz check (auth-chain)
-#   - operators/...                tenant-provision saga + operator envtest
-# It deliberately excludes ~8 packages whose integration-tagged tests have
-# bit-rotted against current APIs (engine/harness, engine/mission, platform/audit,
-# server/daemon, server/daemon/api, graphrag/{ingest,loader}, infra/secrets/gcpsm).
-# Un-rotting those is tracked separately; widen INTEGRATION_PKG as they are fixed.
-# Override to run everything once fixed: make test-integration INTEGRATION_PKG=./...
-INTEGRATION_PKG ?= ./tests/integration/... ./internal/platform/authz/... ./internal/server/extauthz/... ./operators/...
+#   - tests/integration/...           per-tenant isolation, mission-run, handler authz
+#   - internal/platform/authz/...     FGA model (auth-chain decision)
+#   - internal/server/extauthz/...    ext-authz check (auth-chain)
+#   - operators/...                   tenant-provision saga + operator envtest
+#   - internal/platform/audit/...     audit Writer/Query against real Postgres (gibson#953)
+#   - internal/infra/secrets/gcpsm/... GCP Secret Manager provider contract (gibson#953)
+# It still excludes the packages whose integration-tagged tests remain bit-rotted
+# against current APIs (engine/harness, engine/mission, server/daemon,
+# server/daemon/api, graphrag/{ingest,loader}). Un-rotting those is tracked in
+# gibson#953; widen INTEGRATION_PKG as each is fixed. Run everything once fixed:
+# make test-integration INTEGRATION_PKG=./...
+INTEGRATION_PKG ?= ./tests/integration/... ./internal/platform/authz/... ./internal/server/extauthz/... ./operators/... ./internal/platform/audit/... ./internal/infra/secrets/gcpsm/...
 INTEGRATION_TIMEOUT ?= 30m
 test-integration:
 	@echo "Running integration lane (-tags integration) over $(INTEGRATION_PKG)..."
