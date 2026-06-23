@@ -520,39 +520,6 @@ func (s *DaemonServer) GetConversation(ctx context.Context, req *tenantv1.GetCon
 }
 
 // ---------------------------------------------------------------------------
-// saveConversation — internal helper for post-stream persistence
-// ---------------------------------------------------------------------------
-
-// saveConversation persists a completed conversation to the store.
-//
-// This is called after a stream finishes to record the full exchange.  It is a
-// thin wrapper around conversationStore.Save that handles a nil store
-// gracefully (skipping the write) so the caller does not need to nil-check.
-//
-// TODO(#496): Wire this call from the StreamLLM completion path once StreamLLM
-// is implemented.  The call site should be at the end of the streaming loop,
-// after the final response chunk is sent, passing the accumulated request and
-// response messages as the messages slice.  Example:
-//
-//	if saveErr := s.saveConversation(ctx, tenantID, userID, conversationID,
-//	    title, agentID, messages); saveErr != nil {
-//	    s.logger.WarnContext(ctx, "StreamLLM: failed to save conversation",
-//	        slog.String("error", saveErr.Error()))
-//	    // Non-fatal: do not abort the response.
-//	}
-func (s *DaemonServer) saveConversation(
-	ctx context.Context,
-	tenantID, userID, conversationID, title, agentID string,
-	messages []storedMessage,
-) error {
-	if s.conversationStore == nil {
-		// Store must always be wired at bootstrap (dashboard#549).
-		return fmt.Errorf("conversationStore is nil (bootstrap defect)")
-	}
-	return s.conversationStore.Save(ctx, tenantID, userID, conversationID, title, agentID, messages)
-}
-
-// ---------------------------------------------------------------------------
 // SaveConversation handler
 // ---------------------------------------------------------------------------
 

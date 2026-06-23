@@ -286,24 +286,6 @@ func isUnsupported(err error) bool {
 	return errors.Is(err, sdksecrets.ErrUnsupported)
 }
 
-// toResponse converts a Credential to a CredentialResponse.
-func (h *CredentialHandler) toResponse(cred *types.Credential, plainKey string) *CredentialResponse {
-	return &CredentialResponse{
-		ID:            cred.ID,
-		Name:          cred.Name,
-		Type:          cred.Type,
-		Provider:      cred.Provider,
-		Status:        cred.Status,
-		Description:   cred.Description,
-		MaskedKey:     maskAPIKey(plainKey),
-		Tags:          cred.Tags,
-		NeedsRotation: needsRotation(cred),
-		CreatedAt:     cred.CreatedAt,
-		UpdatedAt:     cred.UpdatedAt,
-		LastUsed:      cred.LastUsed,
-	}
-}
-
 // maskAPIKey masks an API key for display, showing only prefix and suffix.
 func maskAPIKey(key string) string {
 	if key == "" {
@@ -321,8 +303,3 @@ func maskAPIKey(key string) string {
 	return prefix + "****" + suffix
 }
 
-// needsRotation checks if a credential needs rotation (older than 90 days).
-func needsRotation(cred *types.Credential) bool {
-	rotationThreshold := 90 * 24 * time.Hour
-	return time.Since(cred.CreatedAt) > rotationThreshold
-}

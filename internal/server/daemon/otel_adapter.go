@@ -1,8 +1,6 @@
 package daemon
 
 import (
-	"context"
-
 	"github.com/zeroroot-ai/gibson/internal/infra/observability"
 )
 
@@ -68,35 +66,3 @@ func (d *daemonImpl) GetOTelContentLoggingConfig() *observability.ContentLogging
 	return d.infrastructure.otelStack.ContentConfig
 }
 
-// shutdownOTelObservability gracefully shuts down the OTel observability stack.
-// This method is called during daemon shutdown to flush any buffered spans and metrics.
-// It should be called with a context that has a reasonable timeout (5-10 seconds).
-//
-// The method logs warnings for shutdown failures but does not propagate errors,
-// following the daemon shutdown pattern where observability cleanup errors
-// should not prevent the daemon from shutting down.
-//
-// Parameters:
-//   - ctx: Context with timeout for shutdown (recommended: 5-10s)
-//
-// Example:
-//
-//	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
-//	defer cancel()
-//	d.shutdownOTelObservability(ctx)
-func (d *daemonImpl) shutdownOTelObservability(ctx context.Context) {
-	if d.infrastructure == nil || d.infrastructure.otelStack == nil {
-		d.logger.Debug(ctx, "no otel stack to shutdown")
-		return
-	}
-
-	d.logger.Info(ctx, "shutting down opentelemetry observability stack")
-
-	if err := d.infrastructure.otelStack.Close(ctx); err != nil {
-		d.logger.Warn(ctx, "failed to shutdown otel observability stack",
-			"error", err)
-		// Don't propagate error - continue shutdown
-	} else {
-		d.logger.Info(ctx, "opentelemetry observability stack shutdown complete")
-	}
-}

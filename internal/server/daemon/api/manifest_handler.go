@@ -2,7 +2,6 @@ package api
 
 import (
 	"context"
-	"log/slog"
 	"strings"
 	"time"
 
@@ -131,15 +130,6 @@ func translateBuildError(err error) error {
 		return status.Error(codes.Unavailable, msg)
 	}
 	return status.Error(codes.Internal, msg)
-}
-
-// manifestLoggerOrDefault returns s.logger or slog.Default to keep the
-// handler safe if it is ever invoked before the daemon logger is wired.
-func (s *DaemonServer) manifestLoggerOrDefault() *slog.Logger {
-	if s.logger != nil {
-		return s.logger
-	}
-	return slog.Default()
 }
 
 var _ = daemonpb.UnimplementedDaemonServiceServer{} // force use of daemonpb import if absent above

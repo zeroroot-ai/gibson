@@ -2,7 +2,6 @@ package daemon
 
 import (
 	"context"
-	"encoding/json"
 	"errors"
 	"fmt"
 	"log/slog"
@@ -254,21 +253,6 @@ func (mm *missionManager) deleteActive(tenant auth.TenantID, missionID string) {
 		}
 	}
 	mm.completedCount++
-}
-
-// allActive returns a flat list of all active missions across all tenants.
-// Used only for global operations (shutdown, status queries) that legitimately
-// span tenants under operator authority.
-func (mm *missionManager) allActive() []*activeMission {
-	mm.mu.RLock()
-	defer mm.mu.RUnlock()
-	var result []*activeMission
-	for _, sub := range mm.activeMissions {
-		for _, am := range sub {
-			result = append(result, am)
-		}
-	}
-	return result
 }
 
 // tenantActive returns all active missions for a specific tenant (C9 closure).
@@ -1086,25 +1070,6 @@ func (m *missionManager) Get(ctx context.Context, missionID string) (*api.Missio
 	return nil, fmt.Errorf("mission %s not found", missionID)
 }
 
-// cleanupMission is retained for callers that still reference it. It searches
-// for the mission across all tenants and removes it. Prefer deleteActive when
-// the tenant is known.
-func (m *missionManager) cleanupMission(missionID string) {
-	m.mu.Lock()
-	defer m.mu.Unlock()
-	for tenant, sub := range m.activeMissions {
-		if _, ok := sub[missionID]; ok {
-			delete(sub, missionID)
-			if len(sub) == 0 {
-				delete(m.activeMissions, tenant)
-			}
-			m.completedCount++
-			m.logger.Debug("mission cleaned up", "mission_id", missionID)
-			return
-		}
-	}
-}
-
 // emitEvent safely sends an event to the event channel without blocking.
 func (m *missionManager) emitEvent(eventChan chan api.MissionEventData, event api.MissionEventData) {
 	select {
@@ -1149,125 +1114,6 @@ func (m *missionManager) GetTotalMissionCount() int {
 	m.mu.RLock()
 	defer m.mu.RUnlock()
 	return len(m.activeMissions) + m.completedCount
-}
-
-// storeMissionInGraphRAG stored a mission definition in the shared Neo4j knowledge graph.
-// The shared-Neo4j client has been removed (spec graphrag-tenant-scope). This stub
-// remains until per-tenant mission graph storage is implemented in a follow-up spec.
-func (m *missionManager) storeMissionInGraphRAG(_ context.Context, _ *missionpb.MissionDefinition) error {
-	m.logger.Debug("storeMissionInGraphRAG: shared-Neo4j client removed; skipping (spec graphrag-tenant-scope)")
-	return nil
-}
-
-// graphNode represents a node to be stored in Neo4j
-type graphNode struct {
-	Label      string
-	Properties map[string]any
-}
-
-// graphEdge represents an edge to be stored in Neo4j
-type graphEdge struct {
-	FromNode   string
-	ToNode     string
-	RelType    string
-	Properties map[string]any
-}
-
-// convertToGraphNodes converts a mission definition to graph nodes.
-// This creates nodes for the mission itself, steps, agents, and tools.
-func (m *missionManager) convertToGraphNodes(def *missionpb.MissionDefinition) []graphNode {
-	var nodes []graphNode
-
-	missionID := def.GetId()
-
-	// Create mission node
-	missionProps := map[string]any{
-		"id":          missionID,
-		"name":        def.GetName(),
-		"description": def.GetDescription(),
-		"version":     def.GetVersion(),
-		"target_ref":  def.GetTargetRef(),
-	}
-	if ts := def.GetCreatedAt(); ts != nil {
-		missionProps["created_at"] = ts.AsTime().Unix()
-	}
-	nodes = append(nodes, graphNode{Label: "Mission", Properties: missionProps})
-
-	// Create nodes for each mission node (steps)
-	for nodeID, node := range def.GetNodes() {
-		stepNode := graphNode{
-			Label: "MissionStep",
-			Properties: map[string]any{
-				"id":          nodeID,
-				"mission_id":  missionID,
-				"type":        nodeTypeName(node.GetType()),
-				"description": node.GetDescription(),
-			},
-		}
-
-		switch node.GetType() {
-		case missionpb.NodeType_NODE_TYPE_AGENT:
-			if name := node.GetAgentConfig().GetAgentName(); name != "" {
-				stepNode.Properties["agent_name"] = name
-				if t := node.GetAgentConfig().GetTask(); t != nil {
-					stepNode.Properties["agent_goal"] = t.GetGoal()
-				}
-			}
-		case missionpb.NodeType_NODE_TYPE_TOOL:
-			if tname := node.GetToolConfig().GetToolName(); tname != "" {
-				stepNode.Properties["tool_name"] = tname
-				if input := node.GetToolConfig().GetInput(); len(input) > 0 {
-					if inputJSON, err := json.Marshal(input); err == nil {
-						stepNode.Properties["tool_input"] = string(inputJSON)
-					}
-				}
-			}
-		}
-
-		nodes = append(nodes, stepNode)
-	}
-
-	return nodes
-}
-
-// convertToGraphEdges converts a mission definition to graph edges.
-// This creates relationships for dependencies and usage patterns.
-func (m *missionManager) convertToGraphEdges(def *missionpb.MissionDefinition) []graphEdge {
-	var edges []graphEdge
-
-	missionID := def.GetId()
-
-	// Create edges for mission -> step relationships
-	for nodeID := range def.GetNodes() {
-		edges = append(edges, graphEdge{
-			FromNode: missionID,
-			ToNode:   nodeID,
-			RelType:  "HAS_STEP",
-			Properties: map[string]any{
-				"mission_id": missionID,
-			},
-		})
-	}
-
-	// Create edges for step dependencies (mission edges)
-	for _, missionEdge := range def.GetEdges() {
-		edge := graphEdge{
-			FromNode: missionEdge.GetFrom(),
-			ToNode:   missionEdge.GetTo(),
-			RelType:  "DEPENDS_ON",
-			Properties: map[string]any{
-				"mission_id": missionID,
-			},
-		}
-
-		if cond := missionEdge.GetCondition(); cond != "" {
-			edge.Properties["condition"] = cond
-		}
-
-		edges = append(edges, edge)
-	}
-
-	return edges
 }
 
 // missionGoal returns the mission's Decider goal. A mission carries it in
