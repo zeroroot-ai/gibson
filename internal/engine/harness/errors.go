@@ -1,8 +1,6 @@
 package harness
 
 import (
-	"errors"
-
 	"github.com/zeroroot-ai/gibson/internal/infra/types"
 )
 
@@ -45,10 +43,4 @@ const (
 
 	// ErrConcurrentMissionLimitExceeded indicates the system-wide concurrent mission limit has been reached
 	ErrConcurrentMissionLimitExceeded types.ErrorCode = "HARNESS_CONCURRENT_MISSION_LIMIT_EXCEEDED"
-)
-
-// Sentinel errors for harness operations
-var (
-	// ErrCheckpointingDisabled indicates checkpointing is not enabled for this mission
-	ErrCheckpointingDisabled = errors.New("checkpointing is disabled for this mission")
 )

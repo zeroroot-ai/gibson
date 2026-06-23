@@ -87,7 +87,6 @@ var allowedStorePackages = []string{
 	"/internal/engine/memory",                // Phase D/4.3: mission memory via Conn
 	"/internal/platform/component",           // Phase E/5.2: component quota counters (shared Redis)
 	"/internal/platform/budget",              // Phase D/4.x: budget enforcer pending Conn-bound refactor
-	"/internal/engine/checkpoint",            // Phase D/4.x: checkpoint store pending Conn-bound refactor
 	"/internal/platform/manifest",            // Phase D/4.x: manifest invalidator pending refactor
 	"/internal/engine/mission",               // Phase D/4.1,4.5: Conn-bound wrappers still import raw redis
 	"/internal/engine/missiondraft",          // Phase D/4.x: draft store pending Conn-bound refactor

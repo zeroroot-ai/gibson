@@ -129,7 +129,6 @@ func (*noopInnerHarness) GetAllRunFindings(context.Context, FindingFilter) ([]ag
 	return nil, nil
 }
 func (*noopInnerHarness) Target() TargetInfo            { return TargetInfo{} }
-func (*noopInnerHarness) Checkpoint() CheckpointAccess  { return nil }
 func (*noopInnerHarness) Tracer() trace.Tracer          { return nil }
 func (*noopInnerHarness) Logger() *slog.Logger          { return slog.Default() }
 func (*noopInnerHarness) Metrics() MetricsRecorder      { return nil }

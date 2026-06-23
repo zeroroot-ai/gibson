@@ -96,9 +96,6 @@ type DefaultAgentHarness struct {
 	// resolver provides dynamic proto type resolution for tool execution
 	resolver protoresolver.ProtoResolver
 
-	// checkpointAccess provides checkpoint operations (nil if checkpointing disabled)
-	checkpointAccess CheckpointAccess
-
 	// workspaceManager provides access to Git repository workspaces (nil if not configured)
 	workspaceManager workspace.WorkspaceManager
 
@@ -2145,16 +2142,6 @@ func (h *DefaultAgentHarness) GetFindings(ctx context.Context, filter FindingFil
 // ────────────────────────────────────────────────────────────────────────────
 // Memory Access Methods
 // ────────────────────────────────────────────────────────────────────────────
-
-// Checkpoint provides access to the checkpointing system for state management.
-// Returns a no-op implementation if checkpointing is not configured.
-func (h *DefaultAgentHarness) Checkpoint() CheckpointAccess {
-	if h.checkpointAccess == nil {
-		// Return a disabled checkpoint access implementation
-		return NewHarnessCheckpointMethods(nil, "", "", 0)
-	}
-	return h.checkpointAccess
-}
 
 // ────────────────────────────────────────────────────────────────────────────
 // Workspace Access Methods

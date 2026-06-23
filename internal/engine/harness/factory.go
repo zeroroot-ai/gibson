@@ -171,17 +171,6 @@ func (f *DefaultHarnessFactory) Create(agentName string, missionCtx MissionConte
 		logger.Debug("created new proto resolver (no registry adapter)")
 	}
 
-	// Initialize checkpoint access if checkpointer is configured
-	var checkpointAccess CheckpointAccess
-	if f.config.Checkpointer != nil {
-		checkpointAccess = NewHarnessCheckpointMethods(
-			f.config.Checkpointer,
-			f.config.ThreadID,
-			missionCtx.ID,
-			f.config.RunNumber,
-		)
-	}
-
 	// Determine if category classifier should be enabled
 	var categoryClassifier CategoryClassifier
 	if f.config.ClassifierConfig != nil && f.config.ClassifierConfig.Enabled {
@@ -234,7 +223,6 @@ func (f *DefaultHarnessFactory) Create(agentName string, missionCtx MissionConte
 		spawnLimits:        f.config.SpawnLimits,
 		eventLogger:        f.config.EventLogger,
 		resolver:           resolver,
-		checkpointAccess:   checkpointAccess,
 		categoryClassifier: categoryClassifier,
 		componentRegistry:  f.config.ComponentRegistry,
 		workQueue:          f.config.WorkQueue,

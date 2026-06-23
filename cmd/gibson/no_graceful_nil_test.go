@@ -190,7 +190,7 @@ func TestNoGracefulNilInRequestPaths(t *testing.T) {
 		"internal/engine/harness/filter.go:110":                        astchecks.Entry{Category: astchecks.CategoryDefensiveGuard, Reason: "nil CVSS means no min-score match"},
 		"internal/engine/harness/filter.go:117":                        astchecks.Entry{Category: astchecks.CategoryDefensiveGuard, Reason: "nil CVSS means no max-score match"},
 		"internal/engine/harness/graphrag_query_bridge.go:1095":        astchecks.Entry{Category: astchecks.CategoryDefensiveGuard, Reason: "nil props passthrough"},
-		"internal/engine/harness/implementation.go:217":                astchecks.Entry{Category: astchecks.CategoryDefensiveGuard, Reason: "nodeSlotOverrides nil-guard in slotOverride helper; nil means no override (spec: per-node-slot-override)"},
+		"internal/engine/harness/implementation.go:214":                astchecks.Entry{Category: astchecks.CategoryDefensiveGuard, Reason: "nodeSlotOverrides nil-guard in slotOverride helper; nil means no override (spec: per-node-slot-override)"},
 		"internal/engine/harness/implementation.go:2426":               astchecks.Entry{Category: astchecks.CategoryDefensiveGuard, Reason: "nil-input → nil-output converter"},
 		"internal/engine/harness/implementation.go:3046":               astchecks.Entry{Category: astchecks.CategoryDefensiveGuard, Reason: "nil-input → nil-output converter"},
 		"internal/engine/harness/middleware/events.go:170":             astchecks.Entry{Category: astchecks.CategoryDefensiveGuard, Reason: "nil result means middleware drops event"},
@@ -228,10 +228,6 @@ func TestNoGracefulNilInRequestPaths(t *testing.T) {
 
 		// internal/budget
 		"internal/platform/budget/enforcer.go:200": astchecks.Entry{Category: astchecks.CategoryLegacyOptional, Reason: "teams dep optional in budget enforcer; reassert via budget-required follow-up"},
-
-		// internal/checkpoint
-		"internal/engine/checkpoint/state.go:381": astchecks.Entry{Category: astchecks.CategoryDefensiveGuard, Reason: "proto WorkingMemory field, legitimately nil-able"},
-		"internal/engine/checkpoint/state.go:398": astchecks.Entry{Category: astchecks.CategoryDefensiveGuard, Reason: "proto MissionMemory field, legitimately nil-able"},
 
 		// internal/component
 		"internal/platform/component/installer.go:1702": astchecks.Entry{Category: astchecks.CategoryDefensiveGuard, Reason: "manifest.Dependencies value-shape field"},

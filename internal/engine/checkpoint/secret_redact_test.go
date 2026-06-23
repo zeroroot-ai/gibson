@@ -137,17 +137,3 @@ func TestRedactSecretsInJSONBytes_Empty(t *testing.T) {
 		t.Errorf("empty input should return empty, got %v", got)
 	}
 }
-
-func TestRedactSecretsInMap(t *testing.T) {
-	m := map[string]any{
-		"password": "x",
-		"safe":     "y",
-	}
-	RedactSecretsInMap(m)
-	if m["password"] != RedactedPlaceholder {
-		t.Errorf("password not redacted in-place: %v", m["password"])
-	}
-	if m["safe"] != "y" {
-		t.Errorf("safe should be untouched: %v", m["safe"])
-	}
-}

@@ -2,8 +2,6 @@ package mission
 
 import (
 	"context"
-	"encoding/json"
-	"fmt"
 	"time"
 
 	"github.com/zeroroot-ai/gibson/internal/infra/types"
@@ -103,21 +101,4 @@ type CheckpointStore interface {
 
 	// Exists checks if a checkpoint exists for the given mission
 	Exists(ctx context.Context, missionID types.ID) (bool, error)
-}
-
-// SerializeMemory serializes a memory map to JSON bytes.
-// This is used to persist memory state in checkpoints.
-// Returns nil bytes for nil memory (not an error).
-func SerializeMemory(memory map[string]any) ([]byte, error) {
-	if memory == nil {
-		return nil, nil
-	}
-
-	// Use json.Marshal for consistent serialization
-	data, err := json.Marshal(memory)
-	if err != nil {
-		return nil, fmt.Errorf("failed to serialize memory: %w", err)
-	}
-
-	return data, nil
 }
