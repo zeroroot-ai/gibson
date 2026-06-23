@@ -60,6 +60,8 @@ rpc,relation,object_type,deriver,identities,source_proto_file,mode
 /gibson.daemon.discovery.v1.DiscoveryService/SuggestMissingCapability,member,tenant,tenant_from_identity,USER|SERVICE|COMPONENT,gibson/daemon/discovery/v1/discovery.proto,rule
 /gibson.daemon.discovery.v1.DiscoveryService/ValidateComponent,member,tenant,tenant_from_identity,USER|SERVICE|COMPONENT,gibson/daemon/discovery/v1/discovery.proto,rule
 /gibson.daemon.discovery.v1.DiscoveryService/WhoAmI,member,tenant,tenant_from_identity,USER|SERVICE|COMPONENT,gibson/daemon/discovery/v1/discovery.proto,rule
+/gibson.daemon.logs.v1.LogsService/QueryDaemonLogs,member,tenant,tenant_from_identity,USER|SERVICE,gibson/daemon/logs/v1/logs.proto,rule
+/gibson.daemon.logs.v1.LogsService/QueryMissionLogs,member,tenant,tenant_from_identity,USER|SERVICE,gibson/daemon/logs/v1/logs.proto,rule
 /gibson.daemon.operator.v1.DaemonOperatorService/EmitAuditEvent,platform_operator,system_tenant,system_tenant,USER|SERVICE,gibson/daemon/operator/v1/operator.proto,rule
 /gibson.daemon.operator.v1.DaemonOperatorService/ImpersonateTenant,platform_operator,system_tenant,system_tenant,USER|SERVICE,gibson/daemon/operator/v1/operator.proto,rule
 /gibson.daemon.operator.v1.DaemonOperatorService/ListFeatureTuples,platform_operator,system_tenant,system_tenant,USER|SERVICE,gibson/daemon/operator/v1/operator.proto,rule

@@ -392,6 +392,20 @@ entries:
       - USER
       - SERVICE
       - COMPONENT
+  "/gibson.daemon.logs.v1.LogsService/QueryDaemonLogs":
+    relation: "member"
+    object_type: "tenant"
+    object_deriver: "tenant_from_identity"
+    allowed_identities:
+      - USER
+      - SERVICE
+  "/gibson.daemon.logs.v1.LogsService/QueryMissionLogs":
+    relation: "member"
+    object_type: "tenant"
+    object_deriver: "tenant_from_identity"
+    allowed_identities:
+      - USER
+      - SERVICE
   "/gibson.daemon.operator.v1.DaemonOperatorService/EmitAuditEvent":
     relation: "platform_operator"
     object_type: "system_tenant"

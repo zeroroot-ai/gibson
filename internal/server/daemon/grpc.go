@@ -38,6 +38,7 @@ import (
 	discoverysvc "github.com/zeroroot-ai/gibson/internal/server/api/discovery"
 	"github.com/zeroroot-ai/gibson/internal/server/daemon/api"
 	discoverypb "github.com/zeroroot-ai/gibson/internal/server/daemon/api/gibson/daemon/discovery/v1"
+	logspb "github.com/zeroroot-ai/gibson/internal/server/daemon/api/gibson/daemon/logs/v1"
 	daemonoperatorv1 "github.com/zeroroot-ai/gibson/internal/server/daemon/api/gibson/daemon/operator/v1"
 	sessionpb "github.com/zeroroot-ai/gibson/internal/server/daemon/api/gibson/session/v1"
 	tenantv1 "github.com/zeroroot-ai/gibson/internal/server/daemon/api/gibson/tenant/v1"
@@ -1279,6 +1280,19 @@ func (d *daemonImpl) buildGRPCServer(ctx context.Context) (*grpcSubsystem, error
 	}
 	worldpb.RegisterWorldServiceServer(srv, NewWorldServer(d.brainRegistry, d.logger.WithComponent("world-service").Slog()))
 	d.logger.Info(ctx, "registered WorldService gRPC endpoint")
+
+	// Register gibson.daemon.logs.v1.LogsService — the daemon-mediated read path
+	// into tenant-scoped mission/daemon logs stored in Loki (E9, gibson#811). The
+	// daemon derives the tenant from the authenticated identity and folds it into
+	// the Loki query server-side; the dashboard never fetches Loki directly nor
+	// supplies a tenant scope (the tenant-isolation fix). Same treatment as
+	// WorldService — tenant-user-facing, NOT admin-gated by Envoy. Loki is optional
+	// infrastructure: when GIBSON_LOKI_URL is unset the service is still registered
+	// (so the registry-coverage and dashboard contract hold) but every call returns
+	// codes.Unavailable.
+	logsQuerier := resolveLogsQuerier(d.logger.WithComponent("logs-service").Slog())
+	logspb.RegisterLogsServiceServer(srv, NewLogsServer(logsQuerier, d.logger.WithComponent("logs-service").Slog()))
+	d.logger.Info(ctx, "registered LogsService gRPC endpoint")
 
 	// Register gibson.session.v1.SessionService — the self-service view of a
 	// user's own login sessions, backing the dashboard's Settings → CLI
