@@ -757,6 +757,7 @@ internal/engine/llm/tools.go	NewToolResult
 internal/engine/llm/tools.go	ToolResult.Validate
 internal/engine/llm/types.go	NewAssistantMessage
 internal/engine/llm/types.go	NewToolResultMessage
+internal/engine/memory/embedder/dimensions.go	SameModel
 internal/engine/memory/embedder/mock.go	MockEmbedder.ClearCalls
 internal/engine/memory/embedder/mock.go	MockEmbedder.Dimensions
 internal/engine/memory/embedder/mock.go	MockEmbedder.Embed
