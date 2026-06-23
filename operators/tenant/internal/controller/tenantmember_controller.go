@@ -302,7 +302,7 @@ func (r *TenantMemberReconciler) acceptInvitation(ctx context.Context, tm *gibso
 	tm.Status.InvitationTokenHash = ""
 	tm.Status.ObservedGeneration = tm.Generation
 	if err := r.Status().Update(ctx, tm); err != nil {
-		return ctrl.Result{}, err
+		return ctrl.Result{}, fmt.Errorf("set tenantmember active: %w", err)
 	}
 	r.reportOwnerMemberReady(ctx, tm)
 	return ctrl.Result{}, nil

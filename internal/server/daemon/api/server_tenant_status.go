@@ -43,10 +43,10 @@ type tenantStatusRow struct {
 func (s *DaemonServer) ReportTenantStatus(ctx context.Context, req *daemonoperatorv1.ReportTenantStatusRequest) (*daemonoperatorv1.ReportTenantStatusResponse, error) {
 	db := s.entitlementsDB()
 	if db == nil {
-		return nil, status.Error(codes.Unavailable, "platform Postgres not configured")
+		return nil, status.Errorf(codes.Unavailable, "platform Postgres not configured")
 	}
 	if req.GetTenantId() == "" {
-		return nil, status.Error(codes.InvalidArgument, "tenant_id required")
+		return nil, status.Errorf(codes.InvalidArgument, "tenant_id required")
 	}
 	if err := ensureTenantStatusTable(ctx, db); err != nil {
 		return nil, status.Errorf(codes.Internal, "ensure table: %v", err)

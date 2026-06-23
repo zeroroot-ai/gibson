@@ -29,12 +29,12 @@ import (
 func (s *DaemonServer) GetTenantProvisioningStatus(ctx context.Context, _ *tenantv1.GetTenantProvisioningStatusRequest) (*tenantv1.GetTenantProvisioningStatusResponse, error) {
 	tenantID := auth.TenantStringFromContext(ctx)
 	if tenantID == "" {
-		return nil, status_grpc.Error(codes.Unauthenticated, "no tenant in caller context")
+		return nil, status_grpc.Errorf(codes.Unauthenticated, "no tenant in caller context")
 	}
 
 	db := s.entitlementsDB()
 	if db == nil {
-		return nil, status_grpc.Error(codes.Unavailable, "platform Postgres not configured")
+		return nil, status_grpc.Errorf(codes.Unavailable, "platform Postgres not configured")
 	}
 
 	row, err := s.getTenantStatus(ctx, db, tenantID)
@@ -62,12 +62,12 @@ func (s *DaemonServer) GetTenantProvisioningStatus(ctx context.Context, _ *tenan
 // Signup; returns only a boolean availability bit.
 func (s *DaemonServer) CheckTenantSlugAvailable(ctx context.Context, req *tenantv1.CheckTenantSlugAvailableRequest) (*tenantv1.CheckTenantSlugAvailableResponse, error) {
 	if req.GetSlug() == "" {
-		return nil, status_grpc.Error(codes.InvalidArgument, "slug required")
+		return nil, status_grpc.Errorf(codes.InvalidArgument, "slug required")
 	}
 
 	db := s.entitlementsDB()
 	if db == nil {
-		return nil, status_grpc.Error(codes.Unavailable, "platform Postgres not configured")
+		return nil, status_grpc.Errorf(codes.Unavailable, "platform Postgres not configured")
 	}
 
 	// A pending/claimed/done provisioning row means a self-serve signup already

@@ -46,7 +46,7 @@ func TestReportTenantStatus_MissingTenantID_InvalidArgument(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	defer db.Close()
+	defer func() { _ = db.Close() }()
 	srv := newStatusServer()
 	srv.platformDB = db
 	_, err = srv.ReportTenantStatus(context.Background(), &daemonoperatorv1.ReportTenantStatusRequest{TenantId: ""})
@@ -58,7 +58,7 @@ func TestReportTenantStatus_Upserts(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	defer db.Close()
+	defer func() { _ = db.Close() }()
 
 	srv := newStatusServer()
 	srv.platformDB = db
@@ -88,7 +88,7 @@ func TestReportTenantStatus_EnsureTableError_Internal(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	defer db.Close()
+	defer func() { _ = db.Close() }()
 	srv := newStatusServer()
 	srv.platformDB = db
 	mock.ExpectExec("CREATE TABLE IF NOT EXISTS tenant_status").WillReturnError(errBoom())
@@ -101,7 +101,7 @@ func TestReportTenantStatus_UpsertError_Internal(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	defer db.Close()
+	defer func() { _ = db.Close() }()
 	srv := newStatusServer()
 	srv.platformDB = db
 	expectEnsureStatusTable(mock)
@@ -119,7 +119,7 @@ func TestGetTenantProvisioningStatus_NoTenantContext_Unauthenticated(t *testing.
 	if err != nil {
 		t.Fatal(err)
 	}
-	defer db.Close()
+	defer func() { _ = db.Close() }()
 	srv := newStatusServer()
 	srv.platformDB = db
 	_, err = srv.GetTenantProvisioningStatus(context.Background(), &tenantv1.GetTenantProvisioningStatusRequest{})
@@ -131,7 +131,7 @@ func TestGetTenantProvisioningStatus_ReturnsRow(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	defer db.Close()
+	defer func() { _ = db.Close() }()
 
 	srv := newStatusServer()
 	srv.platformDB = db
@@ -165,7 +165,7 @@ func TestGetTenantProvisioningStatus_NotReported_FoundFalse(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	defer db.Close()
+	defer func() { _ = db.Close() }()
 
 	srv := newStatusServer()
 	srv.platformDB = db
@@ -194,7 +194,7 @@ func TestGetTenantProvisioningStatus_TenantScoped_CannotReadOther(t *testing.T) 
 	if err != nil {
 		t.Fatal(err)
 	}
-	defer db.Close()
+	defer func() { _ = db.Close() }()
 
 	srv := newStatusServer()
 	srv.platformDB = db
@@ -228,7 +228,7 @@ func TestGetTenantProvisioningStatus_QueryError_Internal(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	defer db.Close()
+	defer func() { _ = db.Close() }()
 	srv := newStatusServer()
 	srv.platformDB = db
 	expectEnsureStatusTable(mock)
@@ -253,7 +253,7 @@ func TestCheckTenantSlugAvailable_PendingQueryError_Internal(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	defer db.Close()
+	defer func() { _ = db.Close() }()
 	srv := newStatusServer()
 	srv.platformDB = db
 	expectEnsureTable(mock)
@@ -268,7 +268,7 @@ func TestCheckTenantSlugAvailable_StatusQueryError_Internal(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	defer db.Close()
+	defer func() { _ = db.Close() }()
 	srv := newStatusServer()
 	srv.platformDB = db
 	expectEnsureTable(mock)
@@ -286,7 +286,7 @@ func TestCheckTenantSlugAvailable_MissingSlug_InvalidArgument(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	defer db.Close()
+	defer func() { _ = db.Close() }()
 	srv := newStatusServer()
 	srv.platformDB = db
 	_, err = srv.CheckTenantSlugAvailable(context.Background(), &tenantv1.CheckTenantSlugAvailableRequest{Slug: ""})
@@ -298,7 +298,7 @@ func TestCheckTenantSlugAvailable_Taken_WhenPending(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	defer db.Close()
+	defer func() { _ = db.Close() }()
 
 	srv := newStatusServer()
 	srv.platformDB = db
@@ -325,7 +325,7 @@ func TestCheckTenantSlugAvailable_Available_WhenNeitherExists(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	defer db.Close()
+	defer func() { _ = db.Close() }()
 
 	srv := newStatusServer()
 	srv.platformDB = db
@@ -356,7 +356,7 @@ func TestCheckTenantSlugAvailable_Taken_WhenProvisioned(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	defer db.Close()
+	defer func() { _ = db.Close() }()
 
 	srv := newStatusServer()
 	srv.platformDB = db

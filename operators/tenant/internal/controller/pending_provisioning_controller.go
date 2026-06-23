@@ -187,7 +187,7 @@ func (r *PendingProvisioningRunnable) reconcileOne(ctx context.Context, p provis
 //   - namespace: tenant-<slug>
 //   - name:      <slugify(owner_email)>-owner
 //   - spec:      { Email, Role: owner, TenantRef: {Name: slug},
-//                  AcceptedByUserID: owner_user_id }   (no InvitedByEmail)
+//     AcceptedByUserID: owner_user_id }   (no InvitedByEmail)
 //
 // AcceptedByUserID pre-accepts the membership so the operator promotes the
 // founding owner Invited→Active without an emailed invitation (self-signup).
@@ -288,7 +288,7 @@ func collapseDashes(s string) string {
 	var b strings.Builder
 	b.Grow(len(s))
 	prevDash := false
-	for i := 0; i < len(s); i++ {
+	for i := range len(s) {
 		if s[i] == '-' {
 			if !prevDash {
 				b.WriteByte('-')

@@ -60,7 +60,7 @@ func TestReportTenantStatus_MirrorsTenantCRStatus(t *testing.T) {
 	}
 }
 
-func TestReportTenantStatus_NoopReporter_NoOp(t *testing.T) {
+func TestReportTenantStatus_NoopReporter_NoOp(_ *testing.T) {
 	// SetupWithManager defaults StatusReporter to the noop when no daemon client
 	// is wired; the helper carries no `== nil` branch, so it must run cleanly
 	// against the null object.
