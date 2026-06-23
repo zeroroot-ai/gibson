@@ -18,6 +18,7 @@ import (
 	"github.com/zeroroot-ai/gibson/internal/infra/types"
 	sdkagent "github.com/zeroroot-ai/sdk/agent"
 	harnesspb "github.com/zeroroot-ai/sdk/api/gen/gibson/harness/v1"
+	"github.com/zeroroot-ai/sdk/auth"
 	"github.com/zeroroot-ai/sdk/codegen/workspace"
 	sdktypes "github.com/zeroroot-ai/sdk/types"
 	"go.opentelemetry.io/otel/trace"
@@ -26,6 +27,7 @@ import (
 	"google.golang.org/protobuf/reflect/protoreflect"
 	"google.golang.org/protobuf/types/descriptorpb"
 	"google.golang.org/protobuf/types/known/anypb"
+	"google.golang.org/protobuf/types/known/wrapperspb"
 )
 
 // createTestFDSForIntegration creates a FileDescriptorSet for integration testing
@@ -123,6 +125,11 @@ func createTestFDSForIntegration() string {
 	return base64.StdEncoding.EncodeToString(fdsBytes)
 }
 
+// resolverTestTenant is the tenant the resolver integration test asserts as the
+// context tenant; mockHarnessForResolver.Mission() returns it so getHarness's
+// tenant-isolation check passes.
+const resolverTestTenant = "test-tenant"
+
 // mockHarnessForResolver is a minimal mock for testing CallToolProto with resolver
 type mockHarnessForResolver struct {
 	toolDescriptors map[string]*ToolDescriptor
@@ -218,7 +225,10 @@ func (m *mockHarnessForResolver) GetPreviousRunFindings(ctx context.Context, fil
 }
 
 func (m *mockHarnessForResolver) Mission() MissionContext {
-	return MissionContext{}
+	// getHarness enforces tenant isolation: the context tenant must match the
+	// harness mission tenant. The integration test calls with a context
+	// carrying the same tenant (resolverTestTenant).
+	return MissionContext{TenantID: resolverTestTenant}
 }
 
 func (m *mockHarnessForResolver) MissionID() types.ID {
@@ -310,14 +320,15 @@ func TestCallbackServiceWithProtoResolver_Integration(t *testing.T) {
 			outputRefl.Set(outputRefl.Descriptor().Fields().ByName("result"), protoreflect.ValueOfString("processed: "+query))
 			outputRefl.Set(outputRefl.Descriptor().Fields().ByName("count"), protoreflect.ValueOfInt32(limit*2))
 
-			// Set discovery field (field 100)
+			// Set discovery field (field 100). The Any must wrap a registered
+			// type so the service's protojson marshal of the response can
+			// resolve it — a fabricated type URL fails with
+			// "unable to resolve ...: not found".
 			discoveryField := outputRefl.Descriptor().Fields().ByNumber(100)
 			if discoveryField != nil {
-				anyMsg := &anypb.Any{
-					TypeUrl: "type.googleapis.com/test.Discovery",
-					Value:   []byte("discovery data"),
+				if anyMsg, anyErr := anypb.New(wrapperspb.String("discovery data")); anyErr == nil {
+					outputRefl.Set(discoveryField, protoreflect.ValueOfMessage(anyMsg.ProtoReflect()))
 				}
-				outputRefl.Set(discoveryField, protoreflect.ValueOfMessage(anyMsg.ProtoReflect()))
 			}
 
 			return nil
@@ -346,8 +357,9 @@ func TestCallbackServiceWithProtoResolver_Integration(t *testing.T) {
 		OutputType: "testtool.ToolOutput",
 	}
 
-	// Execute
-	ctx := context.Background()
+	// Execute — getHarness requires a tenant in context matching the mission
+	// tenant (mockHarnessForResolver.Mission().TenantID == resolverTestTenant).
+	ctx := auth.ContextWithTenantString(context.Background(), resolverTestTenant)
 	resp, err := service.CallToolProto(ctx, req)
 
 	// Verify
