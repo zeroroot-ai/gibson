@@ -8,6 +8,7 @@ resources:
 - bases/gibson.zeroroot.ai_tenantdataplanes.yaml
 - bases/gibson.zeroroot.ai_tenantsecretsbackends.yaml
 - bases/gibson.zeroroot.ai_tenantidentities.yaml
+- bases/gibson.zeroroot.ai_tenantgrants.yaml
 # +kubebuilder:scaffold:crdkustomizeresource
 
 patches:

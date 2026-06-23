@@ -64,6 +64,7 @@ import (
 	"github.com/zeroroot-ai/gibson/operators/tenant/internal/controller"
 	"github.com/zeroroot-ai/gibson/operators/tenant/internal/dataplane"
 	dataplaneclient "github.com/zeroroot-ai/gibson/operators/tenant/internal/dataplane/client"
+	"github.com/zeroroot-ai/gibson/operators/tenant/internal/grants"
 	"github.com/zeroroot-ai/gibson/operators/tenant/internal/identity"
 	"github.com/zeroroot-ai/gibson/operators/tenant/internal/mail"
 	gibsonmetrics "github.com/zeroroot-ai/gibson/operators/tenant/internal/metrics"
@@ -628,6 +629,17 @@ func main() {
 	// controller delegates to it.
 	identityProvisioner := identity.New(zitadelClient)
 
+	// Build the declarative tenant-grants provisioner (E8/gibson#804). It wraps
+	// the SAME fgaClient the Tenant saga's RegisterTenantWithPlatform step uses
+	// (and that step now delegates to grants.PlatformRegistrationTuple), so there
+	// is one tuple-writing codepath (ADR-0027). The TenantGrants controller
+	// delegates to it; writes are idempotent (write-if-absent) and
+	// drift-correcting.
+	grantsProvisioner := grants.New(
+		fgaClient,
+		func(err error) bool { return errors.Is(err, clients.ErrNotFound) },
+	)
+
 	// Phase 4 of spec tenant-provisioning-unification-phase2: build the
 	// unified psaga.Deps bag so saga.ValidateAtStartup can verify each
 	// step's RequiredClients() declarations against the live wiring.
@@ -800,6 +812,21 @@ func main() {
 		Provisioner: identityProvisioner,
 	}).SetupWithManager(mgr); err != nil {
 		setupLog.Error(err, "Failed to create controller", "controller", "TenantIdentity")
+		os.Exit(1)
+	}
+
+	// TenantGrants — declarative per-tenant platform FGA tuples reconciler. It
+	// writes the tenant→platform registration tuple (tenant:<id>, parent,
+	// system_tenant:_system) and drift-corrects it on every reconcile, delegating
+	// to the SAME grantsProvisioner (which wraps the fgaClient the Tenant saga's
+	// RegisterTenantWithPlatform step uses), so there is one tuple-writing
+	// codepath (ADR-0027). E8/gibson#804.
+	if err := (&controller.TenantGrantsReconciler{
+		Client:      mgr.GetClient(),
+		Scheme:      mgr.GetScheme(),
+		Provisioner: grantsProvisioner,
+	}).SetupWithManager(mgr); err != nil {
+		setupLog.Error(err, "Failed to create controller", "controller", "TenantGrants")
 		os.Exit(1)
 	}
 
