@@ -27,7 +27,7 @@ import (
 	"strings"
 
 	"google.golang.org/grpc/codes"
-	status_grpc "google.golang.org/grpc/status"
+	"google.golang.org/grpc/status"
 
 	"github.com/zeroroot-ai/gibson/internal/platform/idp"
 	tenantv1 "github.com/zeroroot-ai/gibson/internal/server/daemon/api/gibson/tenant/v1"
@@ -69,31 +69,31 @@ func signupSlugify(s string) string {
 func (s *DaemonServer) Signup(ctx context.Context, req *tenantv1.SignupRequest) (*tenantv1.SignupResponse, error) {
 	// ---- validate ----
 	if req.GetAttemptId() == "" {
-		return nil, status_grpc.Error(codes.InvalidArgument, "attempt_id is required")
+		return nil, status.Errorf(codes.InvalidArgument, "attempt_id is required")
 	}
 	if !isUUID(req.GetAttemptId()) {
-		return nil, status_grpc.Error(codes.InvalidArgument, "attempt_id must be a valid UUID")
+		return nil, status.Errorf(codes.InvalidArgument, "attempt_id must be a valid UUID")
 	}
 	if req.GetOwnerEmail() == "" {
-		return nil, status_grpc.Error(codes.InvalidArgument, "owner_email is required")
+		return nil, status.Errorf(codes.InvalidArgument, "owner_email is required")
 	}
 	if req.GetWorkspaceName() == "" {
-		return nil, status_grpc.Error(codes.InvalidArgument, "workspace_name is required")
+		return nil, status.Errorf(codes.InvalidArgument, "workspace_name is required")
 	}
 	if req.GetTier() == "" {
-		return nil, status_grpc.Error(codes.InvalidArgument, "tier is required")
+		return nil, status.Errorf(codes.InvalidArgument, "tier is required")
 	}
 	if req.GetPassword() == "" {
-		return nil, status_grpc.Error(codes.InvalidArgument, "password is required")
+		return nil, status.Errorf(codes.InvalidArgument, "password is required")
 	}
 
 	slug := signupSlugify(req.GetWorkspaceName())
 	if slug == "" {
-		return nil, status_grpc.Error(codes.InvalidArgument, "workspace_name does not yield a valid tenant slug")
+		return nil, status.Errorf(codes.InvalidArgument, "workspace_name does not yield a valid tenant slug")
 	}
 
 	if s.idpAdminClient == nil {
-		return nil, status_grpc.Error(codes.Unavailable, "identity provider not configured")
+		return nil, status.Errorf(codes.Unavailable, "identity provider not configured")
 	}
 
 	// ---- provision the founding-owner Zitadel user ----
@@ -119,16 +119,13 @@ func (s *DaemonServer) Signup(ctx context.Context, req *tenantv1.SignupRequest) 
 			"attempt_id", req.GetAttemptId(),
 			"error", err.Error(),
 		)
-		switch {
-		case errors.Is(err, idp.ErrUnreachable):
-			return nil, status_grpc.Error(codes.Unavailable, "identity provider unreachable")
-		case errors.Is(err, idp.ErrPermission):
-			// The daemon's admin credential lacks the rights to create the
-			// owner user — an operator misconfiguration, not a caller error.
-			return nil, status_grpc.Error(codes.Internal, "failed to provision owner user")
-		default:
-			return nil, status_grpc.Error(codes.Internal, "failed to provision owner user")
+		if errors.Is(err, idp.ErrUnreachable) {
+			return nil, status.Errorf(codes.Unavailable, "identity provider unreachable")
 		}
+		// All other failures — including idp.ErrPermission (the daemon's admin
+		// credential lacks the rights, an operator misconfiguration, not a
+		// caller error) — map to Internal with a sanitized message.
+		return nil, status.Errorf(codes.Internal, "failed to provision owner user")
 	}
 
 	// ---- best-effort verification email ----

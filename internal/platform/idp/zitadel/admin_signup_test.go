@@ -14,32 +14,55 @@ import (
 )
 
 // setupV2Server stands up an httptest server that serves OIDC discovery + the
-// OAuth2 token endpoint (so zitadel.New succeeds) and routes the Zitadel v2
-// user API calls (/v2/users...) to the provided handler. Mirrors
-// setupSessionServer but for the signup/human-user endpoints.
+// OAuth2 token endpoint (via writeOIDCBootstrap) so zitadel.New succeeds, and
+// routes the Zitadel v2 user API calls (/v2/users...) to the provided handler.
 func setupV2Server(t *testing.T, v2Handler http.HandlerFunc) zitadel.Config {
 	t.Helper()
 	var srvURL string
 	handler := http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		switch {
-		case r.URL.Path == "/.well-known/openid-configuration":
-			w.Header().Set("Content-Type", "application/json")
-			_ = json.NewEncoder(w).Encode(map[string]string{"token_endpoint": srvURL + "/oauth/v2/token"})
-		case r.URL.Path == "/oauth/v2/token":
-			w.Header().Set("Content-Type", "application/json")
-			_ = json.NewEncoder(w).Encode(map[string]interface{}{
-				"access_token": "test-admin-token", "token_type": "Bearer", "expires_in": 3600,
-			})
-		case strings.HasPrefix(r.URL.Path, "/v2/users"):
-			v2Handler(w, r)
-		default:
-			http.NotFound(w, r)
+		if writeOIDCBootstrap(w, r, func() string { return srvURL }) {
+			return
 		}
+		if strings.HasPrefix(r.URL.Path, "/v2/users") {
+			v2Handler(w, r)
+			return
+		}
+		http.NotFound(w, r)
 	})
 	srv := httptest.NewServer(handler)
 	srvURL = srv.URL
 	t.Cleanup(srv.Close)
 	return zitadel.Config{Issuer: srv.URL, ClientID: "admin-client", ClientSecret: "admin-secret", OrgID: "org-123"}
+}
+
+// writeOIDCBootstrap answers the OIDC discovery and OAuth2 token requests that
+// zitadel.New's startup probe makes. It returns true when it handled the
+// request so the caller can stop routing. baseURL is a thunk because the
+// httptest server URL is only known after the server starts.
+func writeOIDCBootstrap(w http.ResponseWriter, r *http.Request, baseURL func() string) bool {
+	switch r.URL.Path {
+	case "/.well-known/openid-configuration":
+		w.Header().Set("Content-Type", "application/json")
+		_ = json.NewEncoder(w).Encode(map[string]string{"token_endpoint": baseURL() + "/oauth/v2/token"})
+		return true
+	case "/oauth/v2/token":
+		w.Header().Set("Content-Type", "application/json")
+		_ = json.NewEncoder(w).Encode(map[string]interface{}{
+			"access_token": "test-admin-token", "token_type": "Bearer", "expires_in": 3600,
+		})
+		return true
+	default:
+		return false
+	}
+}
+
+// closeClient closes the client, satisfying errcheck without a per-call
+// boilerplate closure.
+func closeClient(t *testing.T, c interface{ Close() error }) {
+	t.Helper()
+	if err := c.Close(); err != nil {
+		t.Errorf("client.Close: %v", err)
+	}
 }
 
 func TestCreateHumanUser_HappyPath(t *testing.T) {
@@ -57,7 +80,7 @@ func TestCreateHumanUser_HappyPath(t *testing.T) {
 	if err != nil {
 		t.Fatalf("New: %v", err)
 	}
-	defer client.Close()
+	defer closeClient(t, client)
 
 	res, err := client.CreateHumanUser(context.Background(), idp.CreateHumanUserRequest{
 		Email:         "owner@example.com",
@@ -120,7 +143,7 @@ func TestCreateHumanUser_ResumeOn409(t *testing.T) {
 	if err != nil {
 		t.Fatalf("New: %v", err)
 	}
-	defer client.Close()
+	defer closeClient(t, client)
 
 	res, err := client.CreateHumanUser(context.Background(), idp.CreateHumanUserRequest{
 		Email:    "owner@example.com",
@@ -149,7 +172,7 @@ func TestCreateHumanUser_RequiresEmailAndPassword(t *testing.T) {
 	if err != nil {
 		t.Fatalf("New: %v", err)
 	}
-	defer client.Close()
+	defer closeClient(t, client)
 
 	if _, err := client.CreateHumanUser(context.Background(), idp.CreateHumanUserRequest{Password: "x"}); err == nil {
 		t.Errorf("expected error when email is empty")
@@ -176,7 +199,7 @@ func TestSetUserPassword_PostsToPasswordEndpoint(t *testing.T) {
 	if err != nil {
 		t.Fatalf("New: %v", err)
 	}
-	defer client.Close()
+	defer closeClient(t, client)
 
 	if err := client.SetUserPassword(context.Background(), "user-7", "p@ssw0rd"); err != nil {
 		t.Fatalf("SetUserPassword: %v", err)
@@ -193,7 +216,7 @@ func TestSetUserPassword_PostsToPasswordEndpoint(t *testing.T) {
 func TestSetUserPassword_RequiresArgs(t *testing.T) {
 	cfg := setupV2Server(t, func(w http.ResponseWriter, r *http.Request) { http.NotFound(w, r) })
 	client, _ := zitadel.New(context.Background(), cfg)
-	defer client.Close()
+	defer closeClient(t, client)
 
 	if err := client.SetUserPassword(context.Background(), "", "p"); err == nil {
 		t.Errorf("expected error on empty userID")
@@ -217,7 +240,7 @@ func TestSendVerificationEmail_PostsResend(t *testing.T) {
 	if err != nil {
 		t.Fatalf("New: %v", err)
 	}
-	defer client.Close()
+	defer closeClient(t, client)
 
 	if err := client.SendVerificationEmail(context.Background(), "user-9"); err != nil {
 		t.Fatalf("SendVerificationEmail: %v", err)
@@ -231,11 +254,11 @@ func TestSendVerificationEmail_ErrorIsReturned(t *testing.T) {
 	// A user created already-verified has no pending code; Zitadel returns 400.
 	// The method returns the (mapped) error so the caller can log it; the
 	// caller — SignupService.Signup — treats it as non-fatal.
-	cfg := setupV2Server(t, func(w http.ResponseWriter, r *http.Request) {
+	cfg := setupV2Server(t, func(w http.ResponseWriter, _ *http.Request) {
 		errorResp(w, http.StatusBadRequest, "EMAIL-5w5ilin4yt", "Code is empty")
 	})
 	client, _ := zitadel.New(context.Background(), cfg)
-	defer client.Close()
+	defer closeClient(t, client)
 
 	if err := client.SendVerificationEmail(context.Background(), "user-9"); err == nil {
 		t.Errorf("expected an error from a 400 resend")
