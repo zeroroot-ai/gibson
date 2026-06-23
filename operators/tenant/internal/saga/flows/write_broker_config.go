@@ -177,39 +177,49 @@ func (s *writeTenantBrokerConfigStep) Provision(ctx context.Context, obj saga.Co
 	if err != nil {
 		return false, err
 	}
-	tenantID, err := auth.NewTenantID(t.Name)
+	if err := s.deps.WriteBrokerConfig(ctx, t.Name); err != nil {
+		return false, err
+	}
+	return true, nil
+}
+
+// WriteBrokerConfig renders and upserts the per-tenant broker-config row. It is
+// the single codepath shared by the saga's TenantBrokerConfigWritten step and
+// the declarative TenantSecretsBackend controller (via secrets.Provisioner), so
+// both callers write byte-identical rows (ADR-0027). tenantName is the Tenant
+// CR name.
+//
+// one-code-path (deploy#194): VaultConfig completeness is enforced at boot in
+// cmd/main.go buildWriteTenantBrokerConfigDeps. By the time this runs,
+// NamespaceTemplate / AuthMethod / MountPath are all guaranteed non-empty.
+func (d WriteTenantBrokerConfigDeps) WriteBrokerConfig(ctx context.Context, tenantName string) error {
+	tenantID, err := auth.NewTenantID(tenantName)
 	if err != nil {
-		return false, fmt.Errorf("writeTenantBrokerConfig: invalid tenant id %q: %w", t.Name, err)
+		return fmt.Errorf("writeTenantBrokerConfig: invalid tenant id %q: %w", tenantName, err)
 	}
 
-	// one-code-path (deploy#194): VaultConfig completeness is enforced
-	// at boot in cmd/main.go buildWriteTenantBrokerConfigDeps. By the
-	// time this step runs, NamespaceTemplate / AuthMethod / MountPath
-	// are all guaranteed non-empty.
-	cfg := s.deps.VaultConfig
-
-	// Resolve the per-tenant namespace from the template. The daemon's
-	// vault broker re-resolves the same template; keep them in sync.
-	rendered := renderVaultConfig(cfg, tenantID)
+	// Resolve the per-tenant namespace from the template. The daemon's vault
+	// broker re-resolves the same template; keep them in sync.
+	rendered := renderVaultConfig(d.VaultConfig, tenantID)
 
 	configJSON, err := json.Marshal(rendered)
 	if err != nil {
-		return false, fmt.Errorf("writeTenantBrokerConfig: marshal config: %w", err)
+		return fmt.Errorf("writeTenantBrokerConfig: marshal config: %w", err)
 	}
 
-	store, err := tenantconfig.NewStore(s.deps.PlatformPG, s.deps.SystemTenantKEK)
+	store, err := tenantconfig.NewStore(d.PlatformPG, d.SystemTenantKEK)
 	if err != nil {
-		return false, fmt.Errorf("writeTenantBrokerConfig: build config store: %w", err)
+		return fmt.Errorf("writeTenantBrokerConfig: build config store: %w", err)
 	}
 
-	// SetRaw is an upsert (ON CONFLICT (tenant_id) DO UPDATE) per the
-	// daemon's schema, so retries / re-reconciles converge on the
-	// latest config without manual cleanup.
+	// SetRaw is an upsert (ON CONFLICT (tenant_id) DO UPDATE) per the daemon's
+	// schema, so retries / re-reconciles converge on the latest config without
+	// manual cleanup.
 	const actor = "tenant-operator-saga"
 	if err := store.SetRaw(ctx, tenantID, "vault", configJSON, actor); err != nil {
-		return false, fmt.Errorf("writeTenantBrokerConfig: upsert: %w", err)
+		return fmt.Errorf("writeTenantBrokerConfig: upsert: %w", err)
 	}
-	return true, nil
+	return nil
 }
 
 // Deprovision removes the broker config row when the tenant teardown
@@ -221,13 +231,20 @@ func (s *writeTenantBrokerConfigStep) Deprovision(ctx context.Context, obj saga.
 	if err != nil {
 		return err
 	}
-	tenantID, err := auth.NewTenantID(t.Name)
+	return s.deps.DeleteBrokerConfig(ctx, t.Name)
+}
+
+// DeleteBrokerConfig removes the per-tenant broker-config row. Shared by the
+// saga's TenantBrokerConfigWritten teardown step and the TenantSecretsBackend
+// controller's Deprovision path (ADR-0027). tenantName is the Tenant CR name.
+func (d WriteTenantBrokerConfigDeps) DeleteBrokerConfig(ctx context.Context, tenantName string) error {
+	tenantID, err := auth.NewTenantID(tenantName)
 	if err != nil {
-		// Best-effort on teardown: a malformed tenant ID at this stage
-		// is unusual; surface but don't block teardown.
-		return fmt.Errorf("writeTenantBrokerConfig: invalid tenant id %q: %w", t.Name, err)
+		// Best-effort on teardown: a malformed tenant ID at this stage is
+		// unusual; surface but don't block teardown.
+		return fmt.Errorf("writeTenantBrokerConfig: invalid tenant id %q: %w", tenantName, err)
 	}
-	store, err := tenantconfig.NewStore(s.deps.PlatformPG, s.deps.SystemTenantKEK)
+	store, err := tenantconfig.NewStore(d.PlatformPG, d.SystemTenantKEK)
 	if err != nil {
 		return fmt.Errorf("writeTenantBrokerConfig: build config store on teardown: %w", err)
 	}
