@@ -40,8 +40,10 @@ package controller
 import (
 	"context"
 	"fmt"
+	"strings"
 	"time"
 
+	corev1 "k8s.io/api/core/v1"
 	apierrors "k8s.io/apimachinery/pkg/api/errors"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"sigs.k8s.io/controller-runtime/pkg/client"
@@ -156,8 +158,22 @@ func (r *PendingProvisioningRunnable) reconcileOne(ctx context.Context, p provis
 		return fmt.Errorf("get Tenant CR %q: %w", p.TenantID, getErr)
 	}
 
-	// Ack AFTER the CR is ensured present. If this ack fails, the record stays
-	// pending and is retried; the existence check above makes the retry a no-op.
+	// Ensure the founding-owner TenantMember exists too (dashboard#813). The
+	// dashboard used to write this CR (applyTenantMember) after waiting for the
+	// tenant namespace; with the web tier holding zero cluster creds the
+	// operator owns it. TenantMember is namespaced (tenant-<slug>), so this can
+	// fail with "namespace not found" until the Tenant reconciler provisions the
+	// namespace — in that case we return the error WITHOUT acking, so the next
+	// drain pass retries (the Tenant-CR existence check above makes the retry a
+	// no-op for the CR). Only once both the Tenant CR and the founding-owner
+	// member exist do we ack.
+	if err := r.ensureFoundingOwnerMember(ctx, p); err != nil {
+		return fmt.Errorf("ensure founding-owner member for %q: %w", p.TenantID, err)
+	}
+
+	// Ack AFTER the CR + founding-owner member are ensured present. If this ack
+	// fails, the record stays pending and is retried; the existence checks above
+	// make the retry a no-op.
 	if err := r.Daemon.AckTenantProvisioned(ctx, p.TenantID); err != nil {
 		return fmt.Errorf("ack tenant provisioned %q: %w", p.TenantID, err)
 	}
@@ -192,6 +208,93 @@ func (r *PendingProvisioningRunnable) createTenant(ctx context.Context, p provis
 		return err
 	}
 	return nil
+}
+
+// ensureFoundingOwnerMember creates the founding-owner TenantMember for a
+// pending record if it does not yet exist. It mirrors exactly what the
+// dashboard's applyTenantMember wrote at signup (app/actions/signup.ts): a
+// TenantMember in the tenant's namespace, role=owner, pre-accepted with the
+// founding owner's Zitadel user id (self-signup: the signup user IS the owner,
+// so the operator promotes Invited → Active without an emailed invitation).
+//
+// TenantMember is namespaced (tenant-<slug>); the namespace is provisioned
+// asynchronously by the Tenant reconciler. If it does not exist yet the Create
+// returns NotFound — surfaced to the caller so the drain loop retries on a later
+// pass (the dashboard's old flow likewise waited for the namespace before
+// writing the member). Idempotent: an existing member (or an AlreadyExists race)
+// is a no-op success.
+func (r *PendingProvisioningRunnable) ensureFoundingOwnerMember(ctx context.Context, p provision.PendingTenant) error {
+	if p.OwnerEmail == "" {
+		return fmt.Errorf("pending record %q has empty owner_email", p.TenantID)
+	}
+	namespace := tenantNamespaceName(p.TenantID)
+	name := foundingOwnerMemberName(p.OwnerEmail)
+
+	var existing gibsonv1alpha1.TenantMember
+	getErr := r.Client.Get(ctx, client.ObjectKey{Namespace: namespace, Name: name}, &existing)
+	switch {
+	case getErr == nil:
+		return nil // already present
+	case apierrors.IsNotFound(getErr):
+		// fall through to create
+	default:
+		return fmt.Errorf("get founding-owner member: %w", getErr)
+	}
+
+	member := &gibsonv1alpha1.TenantMember{
+		ObjectMeta: metav1.ObjectMeta{
+			Name:      name,
+			Namespace: namespace,
+		},
+		Spec: gibsonv1alpha1.TenantMemberSpec{
+			Email:     p.OwnerEmail,
+			Role:      gibsonv1alpha1.MemberRoleOwner,
+			TenantRef: corev1.LocalObjectReference{Name: p.TenantID},
+			// Self-signup: the signup user IS the workspace owner, so pre-accept
+			// the membership (the TenantMember reconciler promotes Invited →
+			// Active without requiring an emailed invitation-link click).
+			AcceptedByUserID: p.OwnerUserID,
+		},
+	}
+	if err := r.Client.Create(ctx, member); err != nil {
+		if apierrors.IsAlreadyExists(err) {
+			return nil
+		}
+		return fmt.Errorf("create founding-owner member: %w", err)
+	}
+	return nil
+}
+
+// tenantNamespaceName mirrors the dashboard's tenantNamespace() (src/lib/k8s/
+// tenants.ts): the per-tenant namespace is "tenant-<slug>".
+func tenantNamespaceName(tenantID string) string {
+	return "tenant-" + tenantID
+}
+
+// foundingOwnerMemberName derives a deterministic, RFC-1123 TenantMember name
+// from the owner email, mirroring the dashboard's `${slugify(email)}-owner`
+// (app/actions/signup.ts). Determinism is what makes the create idempotent.
+func foundingOwnerMemberName(email string) string {
+	var b strings.Builder
+	prevDash := false
+	for _, r := range strings.ToLower(email) {
+		if (r >= 'a' && r <= 'z') || (r >= '0' && r <= '9') {
+			b.WriteRune(r)
+			prevDash = false
+		} else if !prevDash {
+			b.WriteByte('-')
+			prevDash = true
+		}
+	}
+	slug := strings.Trim(b.String(), "-")
+	if slug == "" {
+		slug = "owner"
+	}
+	// RFC-1123 names are ≤253 chars; keep headroom for the "-owner" suffix.
+	if len(slug) > 200 {
+		slug = strings.Trim(slug[:200], "-")
+	}
+	return slug + "-owner"
 }
 
 // SetupWithManager registers the runnable with the manager. The daemon client

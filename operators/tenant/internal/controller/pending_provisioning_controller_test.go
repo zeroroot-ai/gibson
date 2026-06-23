@@ -12,9 +12,12 @@ import (
 	"errors"
 	"testing"
 
+	apierrors "k8s.io/apimachinery/pkg/api/errors"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
+	"k8s.io/apimachinery/pkg/runtime/schema"
 	"sigs.k8s.io/controller-runtime/pkg/client"
 	"sigs.k8s.io/controller-runtime/pkg/client/fake"
+	"sigs.k8s.io/controller-runtime/pkg/client/interceptor"
 
 	gibsonv1alpha1 "github.com/zeroroot-ai/gibson/operators/tenant/api/v1alpha1"
 	"github.com/zeroroot-ai/gibson/operators/tenant/internal/provision"
@@ -214,5 +217,111 @@ func TestDrain_OneBadRecordDoesNotAbortOthers(t *testing.T) {
 	}
 	if len(d.acked) != 1 || d.acked[0] != "globex" {
 		t.Errorf("expected only globex acked, got %v", d.acked)
+	}
+}
+
+func TestDrain_CreatesFoundingOwnerMember(t *testing.T) {
+	scheme := setupScheme(t)
+	c := fake.NewClientBuilder().WithScheme(scheme).Build()
+	d := &stubDaemon{pending: []provision.PendingTenant{{
+		TenantID:    "acme",
+		OwnerUserID: "u-1",
+		OwnerEmail:  "owner@acme.test",
+		Tier:        "team",
+	}}}
+
+	if err := newRunnable(t, c, d).drain(context.Background()); err != nil {
+		t.Fatalf("drain: %v", err)
+	}
+
+	var member gibsonv1alpha1.TenantMember
+	key := client.ObjectKey{Namespace: "tenant-acme", Name: "owner-acme-test-owner"}
+	if err := c.Get(context.Background(), key, &member); err != nil {
+		t.Fatalf("expected founding-owner TenantMember created: %v", err)
+	}
+	if member.Spec.Email != "owner@acme.test" {
+		t.Errorf("email: got %q", member.Spec.Email)
+	}
+	if member.Spec.Role != gibsonv1alpha1.MemberRoleOwner {
+		t.Errorf("role: got %q, want owner", member.Spec.Role)
+	}
+	if member.Spec.TenantRef.Name != "acme" {
+		t.Errorf("tenantRef: got %q", member.Spec.TenantRef.Name)
+	}
+	if member.Spec.AcceptedByUserID != "u-1" {
+		t.Errorf("acceptedByUserId: got %q (founding owner must be pre-accepted)", member.Spec.AcceptedByUserID)
+	}
+	if len(d.acked) != 1 {
+		t.Errorf("expected ack after both CR + member created, got %v", d.acked)
+	}
+}
+
+func TestEnsureFoundingOwnerMember_Idempotent(t *testing.T) {
+	scheme := setupScheme(t)
+	existing := &gibsonv1alpha1.TenantMember{
+		ObjectMeta: metav1.ObjectMeta{Name: "owner-acme-test-owner", Namespace: "tenant-acme"},
+		Spec: gibsonv1alpha1.TenantMemberSpec{
+			Email: "owner@acme.test", Role: gibsonv1alpha1.MemberRoleOwner,
+		},
+	}
+	c := fake.NewClientBuilder().WithScheme(scheme).WithObjects(existing).Build()
+	r := newRunnable(t, c, &stubDaemon{})
+	err := r.ensureFoundingOwnerMember(context.Background(), provision.PendingTenant{
+		TenantID: "acme", OwnerEmail: "owner@acme.test", OwnerUserID: "u-1",
+	})
+	if err != nil {
+		t.Fatalf("expected no-op for existing member, got %v", err)
+	}
+}
+
+func TestFoundingOwnerMemberName_Deterministic(t *testing.T) {
+	cases := map[string]string{
+		"owner@acme.test":       "owner-acme-test-owner",
+		"Jane.Doe+x@Globex.COM": "jane-doe-x-globex-com-owner",
+		"@@@":                   "owner-owner",
+	}
+	for in, want := range cases {
+		if got := foundingOwnerMemberName(in); got != want {
+			t.Errorf("foundingOwnerMemberName(%q) = %q, want %q", in, got, want)
+		}
+	}
+}
+
+func TestReconcileOne_MemberCreateFails_NoAck(t *testing.T) {
+	scheme := setupScheme(t)
+	// Simulate the tenant namespace not existing yet: Create on the TenantMember
+	// fails, so the record must NOT be acked (it retries next drain pass).
+	c := fake.NewClientBuilder().WithScheme(scheme).
+		WithInterceptorFuncs(interceptor.Funcs{
+			Create: func(ctx context.Context, cl client.WithWatch, obj client.Object, opts ...client.CreateOption) error {
+				if _, ok := obj.(*gibsonv1alpha1.TenantMember); ok {
+					return apierrors.NewNotFound(schema.GroupResource{Resource: "namespaces"}, "tenant-acme")
+				}
+				return cl.Create(ctx, obj, opts...)
+			},
+		}).Build()
+	d := &stubDaemon{}
+	err := newRunnable(t, c, d).reconcileOne(context.Background(), provision.PendingTenant{
+		TenantID: "acme", OwnerEmail: "owner@acme.test", OwnerUserID: "u-1", Tier: "team",
+	})
+	if err == nil {
+		t.Fatal("expected error when founding-owner member create fails (namespace not ready)")
+	}
+	if d.ackCalls != 0 {
+		t.Errorf("must NOT ack when the founding-owner member could not be created, got %d acks", d.ackCalls)
+	}
+	// The Tenant CR was still created (idempotent on retry).
+	var tn gibsonv1alpha1.Tenant
+	if getErr := c.Get(context.Background(), client.ObjectKey{Name: "acme"}, &tn); getErr != nil {
+		t.Errorf("expected Tenant CR created even though member create failed: %v", getErr)
+	}
+}
+
+func TestEnsureFoundingOwnerMember_EmptyEmail_Errors(t *testing.T) {
+	scheme := setupScheme(t)
+	c := fake.NewClientBuilder().WithScheme(scheme).Build()
+	r := newRunnable(t, c, &stubDaemon{})
+	if err := r.ensureFoundingOwnerMember(context.Background(), provision.PendingTenant{TenantID: "acme"}); err == nil {
+		t.Fatal("expected error for empty owner_email")
 	}
 }
