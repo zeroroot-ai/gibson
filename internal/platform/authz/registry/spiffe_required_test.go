@@ -67,6 +67,16 @@ var allowedUnauthenticated = map[string]bool{
 	// shipped in the SDK proto (gibson/tenant/v1/membership.proto, ADR-0039
 	// decomposed MembershipService); this guard list lagged it.
 	"/gibson.tenant.v1.MembershipService/AcceptInvitation": true,
+
+	// Signup is intentionally unauthenticated, matching SetSignupProgress
+	// above: it provisions a tenant during self-serve signup, BEFORE any
+	// tenant or membership exists, so there is no principal to FGA-check. The
+	// attempt_id UUID is the single-use capability; the daemon holds the
+	// provisioning privilege so the caller no longer needs the Zitadel
+	// signup-bot IAM PAT or cluster write (dashboard#812/#813). The handler
+	// validates the attempt_id and rate-limits the request.
+	// Spec: E9 signup-rpc-zitadel-move (gibson#812, ADR-0043/0044).
+	"/gibson.tenant.v1.SignupService/Signup": true,
 }
 
 // TestOnlyConnectAndPingAreUnauthenticated walks the generated Registry map

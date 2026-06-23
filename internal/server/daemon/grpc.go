@@ -957,6 +957,14 @@ func (d *daemonImpl) buildGRPCServer(ctx context.Context) (*grpcSubsystem, error
 	// service name is what the authz registry and ext-authz expect.
 	tenantv1.RegisterUserServiceServer(srv, daemonSvc)
 
+	// Register SignupService — the unauthenticated, pre-tenant self-serve signup
+	// RPC (E9, gibson#812). Same DaemonServer instance: the handler uses the IdP
+	// admin client wired below to provision the founding-owner Zitadel user. The
+	// daemon performs NO Kubernetes write (ADR-0023); the dashboard keeps the
+	// Tenant CR. Signup is annotated unauthenticated in the registry (like
+	// SetSignupProgress), so ext-authz lets it through pre-tenant.
+	tenantv1.RegisterSignupServiceServer(srv, daemonSvc)
+
 	// Register TenantService — the OSS SDK tenant-management surface (ADR-0037).
 	// Replaces gibson.tenant.v1.TenantAdminService (platform-sdk). Customer-
 	// callable: FGA enforces the tenant member relation. Initialise the IdP admin

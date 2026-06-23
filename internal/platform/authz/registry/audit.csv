@@ -232,6 +232,7 @@ rpc,relation,object_type,deriver,identities,source_proto_file,mode
 /gibson.tenant.v1.SecretsService/RotateSecret,admin,tenant,tenant_from_identity,USER,gibson/tenant/v1/secrets.proto,rule
 /gibson.tenant.v1.SecretsService/SetBrokerConfig,admin,tenant,tenant_from_identity,USER,gibson/tenant/v1/secrets.proto,rule
 /gibson.tenant.v1.SecretsService/SetSecret,admin,tenant,tenant_from_identity,USER,gibson/tenant/v1/secrets.proto,rule
+/gibson.tenant.v1.SignupService/Signup,,,,,gibson/tenant/v1/signup.proto,unauthenticated
 /gibson.tenant.v1.TenantService/DeleteMissionDraft,writer,tenant,tenant_from_identity,USER|SERVICE,gibson/tenant/v1/tenant.proto,rule
 /gibson.tenant.v1.TenantService/ExportFindings,writer,tenant,tenant_from_identity,USER|SERVICE,gibson/tenant/v1/tenant.proto,rule
 /gibson.tenant.v1.TenantService/GetMissionDraft,writer,tenant,tenant_from_identity,USER|SERVICE,gibson/tenant/v1/tenant.proto,rule

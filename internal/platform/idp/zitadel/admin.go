@@ -464,6 +464,132 @@ func (c *Client) EnsureHumanUser(ctx context.Context, req idp.EnsureHumanUserReq
 	return searchResp.Result[0].UserID, nil
 }
 
+// CreateHumanUser provisions a password-bearing human user for self-serve
+// signup. It ports the dashboard signup-bot's createOrResumeZitadelUser request
+// shapes (admin-client.ts: createHumanUser / findUserByEmail / setUserPassword)
+// onto the Zitadel v2 user API:
+//
+//	POST /v2/users/human        (create with profile + email + password)
+//	POST /v2/users              (search by email on 409)
+//	POST /v2/users/{id}/password (reset password on the resume path)
+//
+// SECURITY: req.Password is placed in the request body only; it is never
+// logged and never appears in returned errors (the Zitadel error envelope
+// carries no password echo, and mapError keeps only the operation name).
+//
+// NOTE: the exact v2 user create/search shapes must be confirmed against the
+// deployed Zitadel version in the deploy auth-e2e smoke (no live Zitadel in
+// unit tests).
+func (c *Client) CreateHumanUser(ctx context.Context, req idp.CreateHumanUserRequest) (idp.CreateHumanUserResult, error) {
+	if req.Email == "" {
+		return idp.CreateHumanUserResult{}, fmt.Errorf("%w: CreateHumanUser requires email", idp.ErrUpstream)
+	}
+	if req.Password == "" {
+		return idp.CreateHumanUserResult{}, fmt.Errorf("%w: CreateHumanUser requires password", idp.ErrUpstream)
+	}
+
+	createBody := map[string]interface{}{
+		"username": req.Email,
+		"profile": map[string]interface{}{
+			"givenName":  req.GivenName,
+			"familyName": req.FamilyName,
+		},
+		"email": map[string]interface{}{
+			"email":      req.Email,
+			"isVerified": req.EmailVerified,
+		},
+		"password": map[string]interface{}{
+			"password":       req.Password,
+			"changeRequired": false,
+		},
+	}
+	if req.OrgID != "" {
+		createBody["organization"] = map[string]interface{}{"orgId": req.OrgID}
+	}
+
+	var createResp struct {
+		UserID string `json:"userId"`
+	}
+	err := c.doRequest(ctx, http.MethodPost, "/v2/users/human", createBody, req.OrgID, &createResp)
+	if err == nil {
+		if createResp.UserID == "" {
+			return idp.CreateHumanUserResult{}, fmt.Errorf("%w: CreateHumanUser: response missing userId", idp.ErrUpstream)
+		}
+		return idp.CreateHumanUserResult{UserID: createResp.UserID, AlreadyExisted: false}, nil
+	}
+
+	mapped := mapError(err, "CreateHumanUser:create")
+	if !errors.Is(mapped, idp.ErrAlreadyExists) {
+		return idp.CreateHumanUserResult{}, mapped
+	}
+
+	// Resume path: the user already exists. Look it up by email and reset the
+	// password to the value the user just typed so a retry after a partial
+	// first attempt doesn't strand them with a stale credential.
+	searchBody := map[string]interface{}{
+		"queries": []map[string]interface{}{
+			{"emailQuery": map[string]interface{}{"emailAddress": req.Email}},
+		},
+	}
+	var searchResp struct {
+		Result []struct {
+			UserID string `json:"userId"`
+		} `json:"result"`
+	}
+	if serr := c.doRequest(ctx, http.MethodPost, "/v2/users", searchBody, req.OrgID, &searchResp); serr != nil {
+		return idp.CreateHumanUserResult{}, mapError(serr, "CreateHumanUser:search")
+	}
+	if len(searchResp.Result) == 0 || searchResp.Result[0].UserID == "" {
+		return idp.CreateHumanUserResult{}, fmt.Errorf("%w: CreateHumanUser: user %q not found after conflict", idp.ErrUpstream, req.Email)
+	}
+	userID := searchResp.Result[0].UserID
+	if perr := c.SetUserPassword(ctx, userID, req.Password); perr != nil {
+		return idp.CreateHumanUserResult{}, perr
+	}
+	return idp.CreateHumanUserResult{UserID: userID, AlreadyExisted: true}, nil
+}
+
+// SetUserPassword sets a human user's password as an admin, without requiring
+// the current password. Maps to POST /v2/users/{userId}/password.
+//
+// SECURITY: the password lives in the request body only; never logged.
+func (c *Client) SetUserPassword(ctx context.Context, userID, password string) error {
+	if userID == "" {
+		return fmt.Errorf("%w: SetUserPassword requires userID", idp.ErrUpstream)
+	}
+	if password == "" {
+		return fmt.Errorf("%w: SetUserPassword requires password", idp.ErrUpstream)
+	}
+	body := map[string]interface{}{
+		"newPassword": map[string]interface{}{
+			"password":       password,
+			"changeRequired": false,
+		},
+	}
+	path := "/v2/users/" + url.PathEscape(userID) + "/password"
+	if err := c.doRequest(ctx, http.MethodPost, path, body, c.cfg.OrgID, nil); err != nil {
+		return mapError(err, "SetUserPassword")
+	}
+	return nil
+}
+
+// SendVerificationEmail (re-)triggers Zitadel's email-verification flow for a
+// human user. Maps to POST /v2/users/{userId}/email/resend with an empty body.
+//
+// Best-effort by contract: callers treat any error as non-fatal (a user
+// created already-verified has no pending code, and dev clusters without SMTP
+// reject the resend). The error is still returned so the caller can log it.
+func (c *Client) SendVerificationEmail(ctx context.Context, userID string) error {
+	if userID == "" {
+		return fmt.Errorf("%w: SendVerificationEmail requires userID", idp.ErrUpstream)
+	}
+	path := "/v2/users/" + url.PathEscape(userID) + "/email/resend"
+	if err := c.doRequest(ctx, http.MethodPost, path, map[string]interface{}{}, c.cfg.OrgID, nil); err != nil {
+		return mapError(err, "SendVerificationEmail")
+	}
+	return nil
+}
+
 // RevokeUserSessions terminates the user's active Zitadel sessions, which also
 // invalidates the refresh tokens bound to those sessions (so no new access
 // token can be minted from them). Maps to the Zitadel Session v2 API:

@@ -76,6 +76,15 @@ type fakeIDPClient struct {
 	sessionsByUser    map[string][]idp.SessionInfo
 	listSessionsErr   error
 	revokedSessionIDs []string
+
+	// Signup recording (gibson#812). createHumanFn, when set, drives
+	// CreateHumanUser; otherwise it returns a default created user.
+	// createHumanReqs records the requests for assertion;
+	// sentVerificationFor records SendVerificationEmail calls.
+	createHumanFn       func(ctx context.Context, req idp.CreateHumanUserRequest) (idp.CreateHumanUserResult, error)
+	createHumanReqs     []idp.CreateHumanUserRequest
+	sentVerificationFor []string
+	sendVerificationErr error
 }
 
 func (f *fakeIDPClient) CreateServiceAccount(ctx context.Context, req idp.CreateServiceAccountRequest) (*idp.ServiceAccount, error) {
@@ -133,6 +142,18 @@ func (f *fakeIDPClient) RevokeSession(_ context.Context, sessionID string) error
 }
 func (f *fakeIDPClient) EnsureHumanUser(_ context.Context, _ idp.EnsureHumanUserRequest) (string, error) {
 	return "user-1", nil
+}
+func (f *fakeIDPClient) CreateHumanUser(ctx context.Context, req idp.CreateHumanUserRequest) (idp.CreateHumanUserResult, error) {
+	f.createHumanReqs = append(f.createHumanReqs, req)
+	if f.createHumanFn != nil {
+		return f.createHumanFn(ctx, req)
+	}
+	return idp.CreateHumanUserResult{UserID: "user-1"}, nil
+}
+func (f *fakeIDPClient) SetUserPassword(_ context.Context, _, _ string) error { return nil }
+func (f *fakeIDPClient) SendVerificationEmail(_ context.Context, userID string) error {
+	f.sentVerificationFor = append(f.sentVerificationFor, userID)
+	return f.sendVerificationErr
 }
 func (f *fakeIDPClient) Close() error { return nil }
 

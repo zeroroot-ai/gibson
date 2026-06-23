@@ -217,7 +217,12 @@ func (f *fakeUserIdPClient) RevokeSession(_ context.Context, _ string) error { r
 func (f *fakeUserIdPClient) EnsureHumanUser(_ context.Context, _ idp.EnsureHumanUserRequest) (string, error) {
 	return "user-1", nil
 }
-func (f *fakeUserIdPClient) Close() error { return nil }
+func (f *fakeUserIdPClient) CreateHumanUser(_ context.Context, _ idp.CreateHumanUserRequest) (idp.CreateHumanUserResult, error) {
+	return idp.CreateHumanUserResult{UserID: "user-1"}, nil
+}
+func (f *fakeUserIdPClient) SetUserPassword(_ context.Context, _, _ string) error    { return nil }
+func (f *fakeUserIdPClient) SendVerificationEmail(_ context.Context, _ string) error { return nil }
+func (f *fakeUserIdPClient) Close() error                                            { return nil }
 
 // Verify fakeUserIdPClient implements idp.AdminClient.
 var _ idp.AdminClient = (*fakeUserIdPClient)(nil)

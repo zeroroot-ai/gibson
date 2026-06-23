@@ -70,6 +70,11 @@ func (s *stubIDP) RemoveTenantMember(_ context.Context, _ idp.TenantMembershipRe
 func (s *stubIDP) EnsureHumanUser(_ context.Context, _ idp.EnsureHumanUserRequest) (string, error) {
 	return "", nil
 }
+func (s *stubIDP) CreateHumanUser(_ context.Context, _ idp.CreateHumanUserRequest) (idp.CreateHumanUserResult, error) {
+	return idp.CreateHumanUserResult{}, nil
+}
+func (s *stubIDP) SetUserPassword(_ context.Context, _, _ string) error    { return nil }
+func (s *stubIDP) SendVerificationEmail(_ context.Context, _ string) error { return nil }
 func (s *stubIDP) RevokeUserSessions(_ context.Context, _ string) (idp.RevokeUserSessionsResult, error) {
 	return idp.RevokeUserSessionsResult{}, nil
 }

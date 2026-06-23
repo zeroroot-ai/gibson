@@ -84,6 +84,47 @@ type EnsureHumanUserRequest struct {
 	Email string
 }
 
+// CreateHumanUserRequest carries parameters for provisioning a password-bearing
+// human user during self-serve signup. It mirrors the request the dashboard
+// signup-bot previously sent (createHumanUser): a profile, a verified-at-create
+// email, and a password the user just typed.
+//
+// SECURITY: Password is forwarded to the IdP request body only and is NEVER
+// logged or included in error messages.
+type CreateHumanUserRequest struct {
+	// OrgID is the IdP organization id the user is created in. Empty selects
+	// the admin client's default (platform) org — the founding-owner user is
+	// provisioned in the platform org; per-tenant org membership is added later
+	// by the operator once the tenant's org exists.
+	OrgID string
+
+	// Email is the user's email address (also the login name). Required.
+	Email string
+
+	// GivenName / FamilyName populate the human profile. May be empty.
+	GivenName  string
+	FamilyName string
+
+	// Password is the initial password. Required. NEVER logged.
+	Password string
+
+	// EmailVerified marks the email verified at create-time. When true the IdP
+	// keeps the user in an active (sign-in-capable) state and mints no
+	// verification code; when false the user is left pending a verification
+	// email. Mirrors the dashboard's emailVerified=true signup default.
+	EmailVerified bool
+}
+
+// CreateHumanUserResult reports the outcome of CreateHumanUser.
+type CreateHumanUserResult struct {
+	// UserID is the IdP-assigned id of the (created or resumed) human user.
+	UserID string
+
+	// AlreadyExisted is true when a user with the email already existed and was
+	// resumed (its password reset to the supplied value) rather than created.
+	AlreadyExisted bool
+}
+
 // RevokeUserSessionsResult reports what RevokeUserSessions did. Counts are
 // best-effort observability; callers must not treat zero as failure.
 type RevokeUserSessionsResult struct {

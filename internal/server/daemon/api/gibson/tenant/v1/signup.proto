@@ -1,0 +1,150 @@
+syntax = "proto3";
+
+// Package gibson.tenant.v1 — SignupService: server-side tenant provisioning for
+// self-serve signup (E9, gibson#812, ADR-0043/0044).
+//
+// Before E9 the dashboard provisioned a tenant during signup by (a) holding a
+// privileged Zitadel "signup-bot" IAM PAT to create the Zitadel org/user and
+// (b) writing the Tenant / TenantMember Kubernetes CRs directly with its
+// in-cluster ServiceAccount. That gave the web tier two broad, standing
+// privileges (IdP admin + cluster write) purely to bootstrap a tenant.
+//
+// SignupService.Signup moves the IdP-admin half of that privilege off the web
+// tier: the dashboard makes ONE unauthenticated RPC carrying the founding-owner
+// email, profile, password, workspace name, and plan tier, and the DAEMON
+// performs the Zitadel human-owner provisioning (create-or-resume user, set
+// password, send verification email) using its EXISTING Zitadel admin
+// credential. The dashboard signup-bot Zitadel PAT is thereby retired
+// (dashboard#812).
+//
+// The daemon does NOT touch Kubernetes and does NOT create the Tenant CR:
+// ADR-0023 forbids daemon-side K8s API access. The dashboard keeps creating the
+// Tenant CR (ADR-0044 sanctions tenant-provisioning K8s writes) — moving that
+// write off the dashboard is dashboard#813's job, not this slice. Once the
+// Tenant CR exists the gibson-tenant-operator provisions the per-tenant Zitadel
+// org via TenantIdentity (gibson#803) and the rest of its ordered sub-CRD chain
+// (gibson#805). So the cutover here is narrow and reversible: human-owner-user
+// provisioning is the only thing that moves daemon-side in #812.
+//
+// Authorization: Signup is UNAUTHENTICATED. It runs before any tenant or
+// membership exists, so there is no principal to FGA-check (exactly like
+// SetSignupProgress on UserService). The opaque attempt_id UUID is the
+// correlation capability; the daemon validates the request and is the sole
+// holder of the IdP-admin provisioning privilege.
+package gibson.tenant.v1;
+
+option go_package = "github.com/zeroroot-ai/gibson/internal/server/daemon/api/gibson/tenant/v1;tenantv1";
+
+import "gibson/auth/v1/options.proto";
+
+// SignupService provisions the founding-owner identity for a self-serve signup
+// request.
+//
+// It is the server-side replacement for the IdP-admin half of the dashboard's
+// privileged signup path: the dashboard calls Signup instead of holding a
+// Zitadel admin PAT to create/credential the owner user. (The Tenant CR write
+// stays on the dashboard for now — dashboard#813.)
+service SignupService {
+  // Signup provisions the founding-owner identity for a self-serve signup
+  // attempt.
+  //
+  // The daemon creates (or resumes) the Zitadel human-owner user with the
+  // supplied email + profile, sets the supplied password, and best-effort
+  // sends the verification email — the exact Zitadel admin operations the
+  // dashboard signup-bot performed with its privileged PAT, now performed
+  // daemon-side with the daemon's existing Zitadel admin credential. The RPC
+  // returns the derived tenant slug and the owner user id.
+  //
+  // The daemon does NOT touch Kubernetes and does NOT create the Tenant CR:
+  // ADR-0023 forbids daemon-side K8s API access. The dashboard keeps creating
+  // the Tenant CR (ADR-0044 sanctions that tenant-provisioning write) using the
+  // returned slug; the gibson-tenant-operator then reconciles that CR into the
+  // per-tenant Zitadel org (TenantIdentity, gibson#803), secrets, grants, and
+  // data plane (gibson#805). Net effect of this RPC: the dashboard drops its
+  // signup-bot Zitadel PAT.
+  //
+  // Idempotent on owner email: re-issuing the same signup (a client retry)
+  // resumes the existing owner user — resetting its password to the supplied
+  // value and returning already_existed=true — rather than failing, so a
+  // dropped response does not strand the owner with a stale credential.
+  //
+  // UNAUTHENTICATED: runs before any tenant/membership exists. The attempt_id
+  // UUID is the capability; the daemon is the sole holder of the IdP-admin
+  // provisioning privilege (no IdP PAT in the caller).
+  rpc Signup(SignupRequest) returns (SignupResponse) {
+    option (gibson.auth.v1.authz) = {
+      unauthenticated: true
+    };
+  }
+}
+
+// SignupRequest carries everything the daemon needs to provision the
+// founding-owner Zitadel user. It carries the owner password (write-only; see
+// the field doc) because the daemon now performs the exact create-user +
+// set-password the dashboard signup-bot used to perform — the password the user
+// typed must reach the daemon for it to set credentials. It carries NO
+// IdP-admin credential: the daemon holds the provisioning privilege via its own
+// Zitadel admin client.
+message SignupRequest {
+  // attempt_id is the opaque single-use signup-attempt UUID. It correlates this
+  // request with the UserService signup-progress stream and guards retries.
+  // Required; must be a valid UUID.
+  string attempt_id = 1;
+
+  // owner_email is the founding owner's email address. The daemon provisions
+  // the Zitadel human-owner user under this email (login name) and the
+  // dashboard records it as the Tenant CR's spec.owner. Required.
+  string owner_email = 2;
+
+  // workspace_name is the human-readable workspace / company name. The daemon
+  // derives the tenant slug from it (returned as tenant_id); the dashboard uses
+  // it as the Tenant CR's spec.displayName. Required.
+  string workspace_name = 3;
+
+  // tier is the canonical plan id ("team", "org", "enterprise"). The dashboard
+  // records it as the Tenant CR's spec.tier. Required; validated against the
+  // known self-serve tiers.
+  string tier = 4;
+
+  // owner_first_name / owner_last_name are the founding owner's profile name.
+  // Optional — used to populate the Zitadel human-user profile the daemon
+  // creates.
+  string owner_first_name = 5;
+  string owner_last_name = 6;
+
+  // stripe_customer_id pins a pre-created Stripe customer to the tenant for
+  // deterministic billing adoption on the card-first signup path. Optional;
+  // recorded by the dashboard on the Tenant CR so the billing reconciler adopts
+  // the existing customer rather than creating a new one.
+  string stripe_customer_id = 7;
+
+  // password is the founding owner's initial password (the value the user typed
+  // at signup). The daemon sets it on the Zitadel human-owner user so the owner
+  // can sign in immediately — replacing the privileged dashboard signup-bot
+  // setUserPassword call. Required.
+  //
+  // SECURITY: write-only. The daemon forwards it to the IdP request body only;
+  // it is never logged, persisted, or returned. The RPC is unauthenticated but
+  // pre-tenant and attempt_id-keyed, exactly as the prior dashboard signup-bot
+  // path was unauthenticated from the browser's perspective.
+  string password = 8;
+}
+
+// SignupResponse reports the outcome of owner provisioning.
+message SignupResponse {
+  // tenant_id is the deterministic tenant slug the daemon derived from the
+  // workspace name (the same slugify the dashboard computes). The dashboard
+  // uses it as the Tenant CR name when it applies the Tenant CR.
+  string tenant_id = 1;
+
+  // already_existed is true when the founding-owner user already existed for
+  // this email (idempotent retry / resume) rather than being created by this
+  // call. Its password was reset to the supplied value either way.
+  bool already_existed = 2;
+
+  // owner_user_id is the Zitadel id of the provisioned founding-owner human
+  // user. The dashboard does not currently need it (the Tenant CR's owner is
+  // the email), but it is returned for correlation / future direct owner
+  // references.
+  string owner_user_id = 3;
+}
