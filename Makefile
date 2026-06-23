@@ -1,7 +1,7 @@
 # Gibson Framework Makefile
 # Stage 1 - Foundation
 
-.PHONY: all build bin gibson-migrate sandbox-eviction-handler test test-coverage test-race lint lint-all lint-deadcode lint-deadcode-baseline clean install help proto proto-deps proto-clean check-authz check-coverage test-daemon-identity-roundtrip check-no-tenant-id check-fga-headers check-rpc-test-walker coverage-profile check-coverage-floor check-diff-coverage check-coverage-gates authz-registry
+.PHONY: all build bin gibson-migrate sandbox-eviction-handler test test-coverage test-race lint lint-all lint-deadcode lint-deadcode-baseline clean install help proto proto-deps proto-clean check-authz check-coverage test-daemon-identity-roundtrip check-no-tenant-id check-fga-headers check-rpc-test-walker coverage-profile check-coverage-floor check-diff-coverage check-coverage-gates check-critical-paths test-integration authz-registry
 
 # Go parameters
 GOCMD=go
@@ -291,8 +291,40 @@ check-rpc-test-walker:
 	$(GOTEST) -count=1 -run 'TestEveryRegisteredRPC' ./internal/platform/authz/registry/
 	@echo "check-rpc-test-walker PASSED"
 
+# check-critical-paths: pure-unit guard that every named Tier-3 critical-path
+# test (gibson#795) still exists. No Docker/infra. Runs in the fast lane so a
+# deleted critical-path test fails CI even when the container-backed integration
+# lane does not run.
+check-critical-paths:
+	@echo "Running critical-path manifest guard..."
+	$(GOTEST) -count=1 ./tests/criticalpath/
+	@echo "check-critical-paths PASSED"
+
+# test-integration: the integration lane (gibson#795, E3 / QUALITY-BARS §4
+# Tier 3). Runs the `integration`-tagged suite — testcontainers spins up
+# Postgres/Neo4j/Redis/OpenFGA per test, and operator envtest suites run when
+# KUBEBUILDER_ASSETS is set. Requires Docker; CI provides it
+# (.github/workflows/integration.yml).
+#
+# INTEGRATION_PKG is scoped to the packages that carry the five Tier-3 critical
+# paths and currently COMPILE under -tags integration:
+#   - tests/integration/...        per-tenant isolation, mission-run, handler authz
+#   - internal/platform/authz/...  FGA model (auth-chain decision)
+#   - internal/server/extauthz/... ext-authz check (auth-chain)
+#   - operators/...                tenant-provision saga + operator envtest
+# It deliberately excludes ~8 packages whose integration-tagged tests have
+# bit-rotted against current APIs (engine/harness, engine/mission, platform/audit,
+# server/daemon, server/daemon/api, graphrag/{ingest,loader}, infra/secrets/gcpsm).
+# Un-rotting those is tracked separately; widen INTEGRATION_PKG as they are fixed.
+# Override to run everything once fixed: make test-integration INTEGRATION_PKG=./...
+INTEGRATION_PKG ?= ./tests/integration/... ./internal/platform/authz/... ./internal/server/extauthz/... ./operators/...
+INTEGRATION_TIMEOUT ?= 30m
+test-integration:
+	@echo "Running integration lane (-tags integration) over $(INTEGRATION_PKG)..."
+	$(GOTEST) -tags integration -count=1 -timeout=$(INTEGRATION_TIMEOUT) $(INTEGRATION_PKG)
+
 # Run all checks before commit
-check: fmt vet lint lint-deadcode test-race check-no-tenant-id check-fga-headers check-no-gibson-io check-no-skipped-tests check-noun-contract check-rpc-test-walker
+check: fmt vet lint lint-deadcode test-race check-no-tenant-id check-fga-headers check-no-gibson-io check-no-skipped-tests check-noun-contract check-rpc-test-walker check-critical-paths
 	@echo "All checks passed!"
 
 # Run authorization-specific checks: vet + unit tests + integration tests (requires Docker)

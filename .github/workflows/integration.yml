@@ -1,0 +1,93 @@
+name: integration
+
+# The integration lane (gibson#795, E3 / QUALITY-BARS §4 Tier 3).
+#
+# Two jobs:
+#   - critical-paths: the pure-unit manifest guard (no Docker). Fast; asserts
+#     every named Tier-3 critical-path test still exists so the suite below can
+#     never silently lose a path.
+#   - integration: the container-backed `integration`-tagged suite.
+#     testcontainers starts Postgres / Neo4j / Redis / OpenFGA per test, and the
+#     operator envtest suites run with the kubebuilder control-plane binaries.
+#
+# Why separate from build.yaml's `go test -race ./...`: that correctness pass
+# runs default tags only, so integration tests are excluded. This lane turns
+# them on and provides Docker + envtest.
+
+on:
+  push:
+    branches: [main]
+    paths:
+      - '**/*.go'
+      - 'go.mod'
+      - 'go.sum'
+      - 'tests/criticalpath/**'
+      - '.github/workflows/integration.yml'
+  pull_request:
+    paths:
+      - '**/*.go'
+      - 'go.mod'
+      - 'go.sum'
+      - 'tests/criticalpath/**'
+      - '.github/workflows/integration.yml'
+
+concurrency:
+  group: integration-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  critical-paths:
+    runs-on: ubuntu-latest
+    name: critical-path manifest guard
+    env:
+      GOPRIVATE: github.com/zeroroot-ai/*
+      GONOSUMDB: github.com/zeroroot-ai/*
+    steps:
+      - uses: actions/checkout@v4
+      - name: Configure git for private modules
+        run: |
+          git config --global \
+            url."https://x-access-token:${{ secrets.GH_PAT_GIBSON_RO }}@github.com/".insteadOf \
+            "https://github.com/"
+      - uses: actions/setup-go@v6
+        with:
+          go-version-file: go.mod
+      - name: Guard named critical-path tests
+        run: make check-critical-paths
+
+  integration:
+    runs-on: ubuntu-latest
+    name: integration suite (testcontainers + envtest)
+    # Docker is available on ubuntu-latest; testcontainers starts the backing
+    # stores in-process per test (same pattern as fga-smoke-test.yml).
+    env:
+      GOPRIVATE: github.com/zeroroot-ai/*
+      GONOSUMDB: github.com/zeroroot-ai/*
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Configure git for private modules
+        run: |
+          git config --global \
+            url."https://x-access-token:${{ secrets.GH_PAT_GIBSON_RO }}@github.com/".insteadOf \
+            "https://github.com/"
+
+      - uses: actions/setup-go@v6
+        with:
+          go-version-file: go.mod
+          cache: true
+
+      # Operator controller suites are envtest (controller-runtime) and need the
+      # kubebuilder control-plane binaries (etcd + kube-apiserver). Same setup as
+      # build.yaml; without it they hard-fail at BeforeSuite. The suites self-skip
+      # when KUBEBUILDER_ASSETS is unset, so this is what makes them run in CI.
+      - name: Set up envtest binaries
+        run: |
+          go install sigs.k8s.io/controller-runtime/tools/setup-envtest@latest
+          ENVTEST_K8S_VERSION="$(go list -m -f '{{.Version}}' k8s.io/api | sed -E 's/^v0\.([0-9]+)\..*/1.\1/')"
+          echo "Using envtest k8s version ${ENVTEST_K8S_VERSION}"
+          ASSETS="$(setup-envtest use "${ENVTEST_K8S_VERSION}" -p path)"
+          echo "KUBEBUILDER_ASSETS=${ASSETS}" >> "$GITHUB_ENV"
+
+      - name: Run integration lane
+        run: make test-integration

@@ -166,3 +166,34 @@ These issues are in Phase 2 store implementations that are still in progress. Th
 - Performance tests respect `-short` flag
 - All tests include cleanup to prevent state leakage
 - Logging with `t.Logf()` for debugging
+
+---
+
+## Critical-path contract (gibson#795)
+
+QUALITY-BARS §4 Tier 3 names five critical paths that must each keep a present,
+green integration test. They are pinned in [`tests/criticalpath/manifest.go`](../criticalpath/manifest.go):
+
+| Critical path | Covered by |
+|---------------|------------|
+| auth-chain (JWT→ext-authz→FGA→handler) | `internal/server/extauthz/fga` `TestCheck_*`, `tests/integration` `TestGetUserProfile_CrossUser_Denied` |
+| per-tenant isolation (predicate-leak guard) | `TestPerTenantMissionIsolation_*`, `TestPerTenantFindingIDOR_*` |
+| tenant-provision saga (idempotency + rollback) | `operators/tenant/.../saga/flows` `Test*Idempotent*`, `TestEnrollmentRevocationSteps_*` |
+| mission-run | `TestRecoverRunningMissions_PerTenantFanOut` |
+| entitlements / billing-bypass | `internal/server/daemon/api` `TestClassifyRelationAction`, `TestGetCheckpoint_OperatorBypassesRedaction` |
+
+`tests/criticalpath/manifest_test.go` is a **pure-unit guard** (no Docker): it
+fails CI if any pinned test is deleted or renamed. Run it with
+`make check-critical-paths` (also part of `make check`).
+
+## Running the lane
+
+```bash
+make test-integration          # scoped, container-backed; needs Docker
+make test-integration INTEGRATION_PKG=./tests/integration/...   # narrower
+```
+
+CI runs it as `.github/workflows/integration.yml` (Docker + envtest). The lane is
+scoped to packages that currently compile under `-tags integration`; several
+older integration-tagged tests have bit-rotted and are excluded pending repair
+(see the `INTEGRATION_PKG` comment in the Makefile).
