@@ -63,6 +63,14 @@ func normalizeModel(model string) string {
 	return strings.ToLower(strings.TrimSpace(model))
 }
 
+// SameModel reports whether two embedding-model names refer to the same model,
+// applying the same normalisation (lower-case, trim) used for the dimension
+// table lookup. Used by the re-embed job (gibson#809) to detect a model change
+// without being fooled by casing or surrounding whitespace.
+func SameModel(a, b string) bool {
+	return normalizeModel(a) == normalizeModel(b)
+}
+
 // DimensionForModel returns the output vector dimension for an embedding model
 // and whether the model is known. An unknown model returns (0, false): the
 // caller must fail closed rather than guess a dimension, because a wrong VECTOR
