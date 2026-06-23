@@ -913,6 +913,10 @@ func NewDaemonServer(daemon DaemonInterface, credentialHandler *CredentialHandle
 		sessionCounter:    0,
 		providerFactory:   providerFactoryFunc,
 		gibsonPublicURL:   os.Getenv("GIBSON_PUBLIC_URL"),
+		// Always-non-nil default so provider-config handlers never need a
+		// request-path nil-guard ([[0003]]). WithReembedTrigger swaps in the
+		// production trigger at startup; nil there restores this no-op.
+		reembedTrigger: noopReembedTrigger{},
 	}
 }
 

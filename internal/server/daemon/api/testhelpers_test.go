@@ -12,9 +12,14 @@ var testSlogLogger = slog.New(slog.NewTextHandler(os.Stderr, &slog.HandlerOption
 
 // blankServer returns a DaemonServer with no external dependencies wired.
 // Only suitable for input-validation and nil-store branch tests.
+//
+// reembedTrigger is defaulted to the no-op (mirroring NewDaemonServer) so the
+// field is never nil at request time — the provider-config handlers call
+// s.reembedTrigger.Trigger unconditionally ([[0003]]: no request-path nil-guard).
 func blankServer() *DaemonServer {
 	return &DaemonServer{
-		logger: testSlogLogger,
+		logger:         testSlogLogger,
+		reembedTrigger: noopReembedTrigger{},
 	}
 }
 

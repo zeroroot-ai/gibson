@@ -112,13 +112,13 @@ func TestSetDefaultProvider_FiresReembedUnconditionally(t *testing.T) {
 	assert.Equal(t, []string{"acme"}, trigger.calls())
 }
 
-func TestCreateProvider_NilTrigger_NoPanic(t *testing.T) {
+func TestCreateProvider_DefaultNoopTrigger_NoPanic(t *testing.T) {
 	store := &mockProviderStore{createOut: fakeProviderRecord("openai")}
-	s := serverWithStore(store) // no trigger wired
+	s := serverWithStore(store) // no trigger wired — defaults to the no-op
 	_, err := s.CreateProvider(tenantCtx("acme"), &tenantv1.CreateProviderRequest{
 		Input: embeddingInput("openai"),
 	})
-	require.NoError(t, err, "a nil trigger must degrade gracefully, not panic")
+	require.NoError(t, err, "the default no-op trigger must let provider writes succeed, not panic")
 }
 
 // ---------------------------------------------------------------------------
@@ -211,10 +211,19 @@ func TestReembedJobTrigger_DifferentTenantsRunConcurrently(t *testing.T) {
 }
 
 func TestReembedJobTrigger_NilSafe(t *testing.T) {
+	// A zero-value (nil) trigger is a defensive shim — Trigger is a no-op, never panics.
 	var tr *ReembedJobTrigger
 	assert.NotPanics(t, func() { tr.Trigger("acme") })
 
-	tr2 := NewReembedJobTrigger(nil, nil, 0)
-	assert.NotPanics(t, func() { tr2.Trigger("acme") })
+	// A trigger built with a real runner skips the empty-tenant case in the request
+	// path (no nil-dep guard — the runner is validated at construction).
+	noop := func(context.Context, string) error { return nil }
+	tr2 := NewReembedJobTrigger(noop, nil, 0)
 	assert.NotPanics(t, func() { tr2.Trigger("") })
+}
+
+func TestNewReembedJobTrigger_NilRunnerPanics(t *testing.T) {
+	// A nil runner is a wiring bug — validate-at-construction ([[0003]]), so it
+	// panics rather than silently no-op'ing in the request path.
+	assert.Panics(t, func() { NewReembedJobTrigger(nil, nil, 0) })
 }
