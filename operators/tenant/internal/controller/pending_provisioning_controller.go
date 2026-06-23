@@ -40,8 +40,10 @@ package controller
 import (
 	"context"
 	"fmt"
+	"strings"
 	"time"
 
+	corev1 "k8s.io/api/core/v1"
 	apierrors "k8s.io/apimachinery/pkg/api/errors"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"sigs.k8s.io/controller-runtime/pkg/client"
@@ -156,12 +158,148 @@ func (r *PendingProvisioningRunnable) reconcileOne(ctx context.Context, p provis
 		return fmt.Errorf("get Tenant CR %q: %w", p.TenantID, getErr)
 	}
 
+	// Ensure the founding-owner TenantMember CR exists (dashboard#855). This
+	// lets the dashboard drop its applyTenantMember write at signup. The member
+	// is Namespaced in the tenant's `tenant-<slug>` namespace, which the Tenant
+	// reconcile's NamespaceProvisioner creates asynchronously — so on the first
+	// drain the namespace may not exist yet. In that case ensureFoundingMember
+	// returns an error and we skip the ack: the record stays pending and the
+	// next drain retries (the Tenant existence-check above makes the re-create a
+	// no-op), so the member is created once the namespace appears. Once both the
+	// Tenant CR and the founding member exist, we ack.
+	if err := r.ensureFoundingMember(ctx, p); err != nil {
+		return fmt.Errorf("ensure founding member for %q: %w", p.TenantID, err)
+	}
+
 	// Ack AFTER the CR is ensured present. If this ack fails, the record stays
 	// pending and is retried; the existence check above makes the retry a no-op.
 	if err := r.Daemon.AckTenantProvisioned(ctx, p.TenantID); err != nil {
 		return fmt.Errorf("ack tenant provisioned %q: %w", p.TenantID, err)
 	}
 	return nil
+}
+
+// ensureFoundingMember creates the founding-owner TenantMember CR for a pending
+// record, idempotently. Byte-identical to the TenantMember the dashboard's
+// applyTenantMember used to write at signup (dashboard#855), so the existing
+// TenantMember reconciler wires the founding owner into the Zitadel org exactly
+// as before:
+//   - namespace: tenant-<slug>
+//   - name:      <slugify(owner_email)>-owner
+//   - spec:      { Email, Role: owner, TenantRef: {Name: slug},
+//                  AcceptedByUserID: owner_user_id }   (no InvitedByEmail)
+//
+// AcceptedByUserID pre-accepts the membership so the operator promotes the
+// founding owner Invited→Active without an emailed invitation (self-signup).
+//
+// Idempotent: an existing member CR (by name) is a no-op; AlreadyExists on
+// create is success. A namespace-not-found error is returned (NOT swallowed) so
+// reconcileOne skips the ack and retries once the Tenant reconcile has created
+// the per-tenant namespace.
+func (r *PendingProvisioningRunnable) ensureFoundingMember(ctx context.Context, p provision.PendingTenant) error {
+	logger := log.FromContext(ctx).WithName("pending-provisioning")
+	if p.OwnerEmail == "" {
+		// No owner email → cannot build the founding member. Log and proceed to
+		// ack: the tenant is still provisioned; a member can be added later.
+		logger.Info("pending record has empty owner_email; skipping founding-member create", "tenant_id", p.TenantID)
+		return nil
+	}
+
+	namespace := tenantNamespace(p.TenantID)
+	name := foundingMemberName(p.OwnerEmail)
+
+	var existing gibsonv1alpha1.TenantMember
+	getErr := r.Client.Get(ctx, client.ObjectKey{Namespace: namespace, Name: name}, &existing)
+	switch {
+	case getErr == nil:
+		logger.Info("founding-owner TenantMember already exists; skipping create", "tenant_id", p.TenantID, "member", name)
+		return nil
+	case apierrors.IsNotFound(getErr):
+		// fall through to create
+	default:
+		return fmt.Errorf("get TenantMember %s/%s: %w", namespace, name, getErr)
+	}
+
+	member := &gibsonv1alpha1.TenantMember{
+		ObjectMeta: metav1.ObjectMeta{
+			Name:      name,
+			Namespace: namespace,
+		},
+		Spec: gibsonv1alpha1.TenantMemberSpec{
+			Email:            p.OwnerEmail,
+			Role:             gibsonv1alpha1.MemberRoleOwner,
+			TenantRef:        corev1.LocalObjectReference{Name: p.TenantID},
+			AcceptedByUserID: p.OwnerUserID,
+		},
+	}
+	if err := r.Client.Create(ctx, member); err != nil {
+		if apierrors.IsAlreadyExists(err) {
+			return nil
+		}
+		// Namespace-not-found (the Tenant reconcile has not provisioned
+		// tenant-<slug> yet) surfaces as an error so reconcileOne skips the ack
+		// and retries on the next drain. Same for any transient create error.
+		return fmt.Errorf("create TenantMember %s/%s: %w", namespace, name, err)
+	}
+	logger.Info("created founding-owner TenantMember from pending-provisioning record", "tenant_id", p.TenantID, "member", name)
+	return nil
+}
+
+// tenantNamespace returns the per-tenant namespace name for a slug. Mirrors the
+// dashboard's tenantNamespace (src/lib/k8s/tenants.ts) and the operator's
+// `tenant-` namespace convention.
+func tenantNamespace(slug string) string {
+	return "tenant-" + slug
+}
+
+// foundingMemberName builds the founding-owner TenantMember CR name from the
+// owner email, byte-identical to the dashboard's `${slugify(email)}-owner`
+// (app/actions/signup.ts) so the operator-created member is indistinguishable
+// from the dashboard-created one.
+func foundingMemberName(email string) string {
+	return slugifyEmail(email) + "-owner"
+}
+
+// slugifyEmail mirrors the dashboard's slugify (app/actions/signup.ts):
+// lowercase, replace every non [a-z0-9-] rune with '-', collapse runs of '-',
+// strip leading/trailing '-', truncate to 63 chars.
+func slugifyEmail(s string) string {
+	s = strings.ToLower(s)
+	var b strings.Builder
+	b.Grow(len(s))
+	for _, r := range s {
+		if (r >= 'a' && r <= 'z') || (r >= '0' && r <= '9') || r == '-' {
+			b.WriteRune(r)
+		} else {
+			b.WriteByte('-')
+		}
+	}
+	// collapse runs of '-'
+	collapsed := collapseDashes(b.String())
+	collapsed = strings.Trim(collapsed, "-")
+	if len(collapsed) > 63 {
+		collapsed = collapsed[:63]
+	}
+	return collapsed
+}
+
+// collapseDashes replaces every run of consecutive '-' with a single '-'.
+func collapseDashes(s string) string {
+	var b strings.Builder
+	b.Grow(len(s))
+	prevDash := false
+	for i := 0; i < len(s); i++ {
+		if s[i] == '-' {
+			if !prevDash {
+				b.WriteByte('-')
+			}
+			prevDash = true
+			continue
+		}
+		b.WriteByte(s[i])
+		prevDash = false
+	}
+	return b.String()
 }
 
 // createTenant builds and creates the Tenant CR from a pending record. The spec

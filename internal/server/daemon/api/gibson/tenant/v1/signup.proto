@@ -76,6 +76,44 @@ service SignupService {
       unauthenticated: true
     };
   }
+
+  // CheckTenantSlugAvailable answers whether a workspace slug is still free to
+  // claim, served entirely from the daemon's own state — the
+  // pending-provisioning queue (in-flight self-serve signups, migration 016)
+  // UNION the tenant-status mirror (provisioned tenants, migration 017). The
+  // daemon does NOT read Kubernetes (ADR-0023): this replaces the dashboard's
+  // pre-signup `getTenant(slug)` existence probe (dashboard#855,
+  // /api/auth/tenant-available) so the web tier stops opening a K8s channel to
+  // answer a uniqueness check.
+  //
+  // A slug is unavailable when either a pending/claimed/done provisioning row
+  // OR a tenant_status row exists for it. Best-effort + advisory: the operator's
+  // Tenant-CR admission webhook remains the authoritative TOCTOU gate at create
+  // time, so a brief window where a freshly-enqueued slug is not yet visible is
+  // acceptable — exactly the contract the dashboard probe had.
+  //
+  // UNAUTHENTICATED: runs pre-tenant, before any membership exists, identical to
+  // Signup. It returns only a boolean availability bit (no tenant data), so it
+  // leaks nothing beyond "is this name taken".
+  rpc CheckTenantSlugAvailable(CheckTenantSlugAvailableRequest) returns (CheckTenantSlugAvailableResponse) {
+    option (gibson.auth.v1.authz) = {
+      unauthenticated: true
+    };
+  }
+}
+
+// CheckTenantSlugAvailableRequest carries the candidate workspace slug.
+message CheckTenantSlugAvailableRequest {
+  // slug is the candidate tenant slug (already slugified by the caller, the
+  // same slugify the dashboard and Signup derive). Required.
+  string slug = 1;
+}
+
+// CheckTenantSlugAvailableResponse reports whether the slug is free to claim.
+message CheckTenantSlugAvailableResponse {
+  // available is true when no pending-provisioning row and no tenant_status row
+  // exist for the slug — i.e. it is free to claim.
+  bool available = 1;
 }
 
 // SignupRequest carries everything the daemon needs to provision the

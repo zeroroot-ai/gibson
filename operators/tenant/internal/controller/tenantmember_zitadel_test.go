@@ -149,10 +149,11 @@ func buildMemberReconciler(
 		t.Fatalf("seed tenant status: %v", err)
 	}
 	r := &TenantMemberReconciler{
-		Client:   fc,
-		Scheme:   s,
-		Recorder: events.NewFakeRecorder(20),
-		Zitadel:  fz,
+		Client:         fc,
+		Scheme:         s,
+		Recorder:       events.NewFakeRecorder(20),
+		Zitadel:        fz,
+		StatusReporter: noopTenantStatusReporter{},
 	}
 	return r, fc
 }

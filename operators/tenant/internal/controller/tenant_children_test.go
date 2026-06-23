@@ -73,6 +73,9 @@ func newChildOrchestrationReconciler(t *testing.T, tenant *gibsonv1alpha1.Tenant
 		Scheme:               scheme,
 		Runner:               runner,
 		NamespaceProvisioner: NewNamespaceProvisioner(fakeClient, "gibson-platform", nil),
+		// Production wires this via SetupWithManager (noop when no daemon client);
+		// these tests drive Reconcile directly, so default it here too.
+		StatusReporter: noopTenantStatusReporter{},
 	}
 	return r, fakeClient
 }

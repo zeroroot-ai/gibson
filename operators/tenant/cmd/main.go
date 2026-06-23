@@ -684,6 +684,11 @@ func main() {
 	// Plan→quota and Stripe subscription reconciliation moved to the closed
 	// billing tier (E7/gibson#798): the operator no longer loads a plan
 	// registry or runs an entitlements/billing reconciler.
+	// tenantStatusReporter mirrors Tenant-CR / founding-owner-member status into
+	// the daemon (dashboard#855). It stays a nil interface (NOT a non-nil
+	// interface wrapping a nil pointer) when no daemon client is wired, so the
+	// reconcilers' `if StatusReporter == nil` no-op holds.
+	var tenantStatusReporter controller.TenantStatusReporter
 	if grpcAddr := os.Getenv("GIBSON_DAEMON_GRPC_ADDRESS"); grpcAddr != "" {
 		daemonSVID := os.Getenv("GIBSON_DAEMON_SPIFFE_ID")
 		if daemonSVID == "" {
@@ -697,6 +702,7 @@ func main() {
 		}
 		setupLog.Info("daemon provisioner: gRPC (SPIFFE mTLS)", "addr", grpcAddr, "daemon_svid", daemonSVID)
 		psagaDeps.DaemonGRPC = grpcClient
+		tenantStatusReporter = grpcClient
 
 		// Operator-pull tenant provisioning (E9, gibson#948, enables
 		// dashboard#813): drain the daemon's pending-provisioning queue and
@@ -752,17 +758,19 @@ func main() {
 		TeardownSteps:     teardownSteps,
 		Deps:              psagaDeps,
 		MigrationEmitter:  migrationEmitter,
+		StatusReporter:    tenantStatusReporter,
 	}).SetupWithManager(mgr); err != nil {
 		setupLog.Error(err, "Failed to create controller", "controller", "Tenant")
 		os.Exit(1)
 	}
 
 	if err := (&controller.TenantMemberReconciler{
-		Client:        mgr.GetClient(),
-		Scheme:        mgr.GetScheme(),
-		FGA:           fgaClient,
-		Mail:          mailer,
-		BaseAcceptURL: os.Getenv("DASHBOARD_URL"),
+		Client:         mgr.GetClient(),
+		Scheme:         mgr.GetScheme(),
+		FGA:            fgaClient,
+		Mail:           mailer,
+		BaseAcceptURL:  os.Getenv("DASHBOARD_URL"),
+		StatusReporter: tenantStatusReporter,
 	}).SetupWithManager(mgr); err != nil {
 		setupLog.Error(err, "Failed to create controller", "controller", "TenantMember")
 		os.Exit(1)

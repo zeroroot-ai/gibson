@@ -180,6 +180,35 @@ service DaemonOperatorService {
     };
   }
 
+  // ---------------------------------------------------------------------------
+  // Tenant-status mirror (dashboard#855, zero-kubeconfig)
+  // ---------------------------------------------------------------------------
+
+  // ReportTenantStatus upserts the daemon's mirror of a Tenant CR's aggregate
+  // provisioning status (tenant_status, migration 017). The tenant-operator's
+  // Tenant reconcile calls this whenever the Tenant CR's observable status
+  // changes (phase, Ready, ZitadelOrgID, DataPlane.Ready) and the
+  // founding-owner-member status path calls it when the owner TenantMember goes
+  // Active.
+  //
+  // The daemon cannot read Kubernetes (ADR-0023) so it cannot resolve a tenant's
+  // provisioning status from the Tenant CR itself — the operator owns that and
+  // pushes it here. The dashboard then reads it via
+  // gibson.tenant.v1.TenantService.GetTenantProvisioningStatus instead of opening
+  // a K8s channel.
+  //
+  // Idempotent upsert keyed on tenant_id: re-reporting the same status is a
+  // no-op; a changed field overwrites. Operator-only (platform_operator on
+  // system_tenant), enforced by ext-authz.
+  rpc ReportTenantStatus(ReportTenantStatusRequest) returns (ReportTenantStatusResponse) {
+    option (gibson.auth.v1.authz) = {
+      relation: "platform_operator",
+      object_type: "system_tenant",
+      object_deriver: "system_tenant",
+      allowed_identities: 3  // USER | SERVICE
+    };
+  }
+
 }
 
 // ---------------------------------------------------------------------------
@@ -436,4 +465,32 @@ message AckTenantProvisionedResponse {
   // was unknown or already done (both are idempotent successes).
   bool acked = 1;
 }
+
+// ---------------------------------------------------------------------------
+// ReportTenantStatus — request/response messages (dashboard#855)
+// ---------------------------------------------------------------------------
+
+// ReportTenantStatusRequest carries the Tenant CR's aggregate provisioning
+// status the operator mirrors into the daemon. Fields map 1:1 to the
+// tenant_status row the dashboard's signup/status surfaces read.
+message ReportTenantStatusRequest {
+  // tenant_id is the tenant slug (Tenant CR metadata.name). Required.
+  string tenant_id = 1;
+  // phase mirrors Tenant.Status.Phase. Empty is allowed (Pending observed).
+  string phase = 2;
+  // ready mirrors phase == Ready (saga complete AND all child CRDs Ready).
+  bool ready = 3;
+  // zitadel_org_id mirrors Tenant.Status.ZitadelOrgID. Empty until the
+  // per-tenant Zitadel org is provisioned.
+  string zitadel_org_id = 4;
+  // data_plane_ready mirrors Tenant.Status.DataPlane.Ready.
+  bool data_plane_ready = 5;
+  // owner_member_ready is true once the founding-owner TenantMember reached
+  // phase Active. The Tenant reconcile leaves this false; the owner-member
+  // status path reports it true.
+  bool owner_member_ready = 6;
+}
+
+// ReportTenantStatusResponse confirms the upsert.
+message ReportTenantStatusResponse {}
 

@@ -26,6 +26,7 @@ import (
 	gibsonv1alpha1 "github.com/zeroroot-ai/gibson/operators/tenant/api/v1alpha1"
 	"github.com/zeroroot-ai/gibson/operators/tenant/internal/audit"
 	"github.com/zeroroot-ai/gibson/operators/tenant/internal/dataplane"
+	"github.com/zeroroot-ai/gibson/operators/tenant/internal/provision"
 	"github.com/zeroroot-ai/gibson/operators/tenant/internal/saga"
 )
 
@@ -79,6 +80,32 @@ type TenantReconciler struct {
 	// startup migration check (ADR-0023, gibson#208 S6). May be nil in
 	// tests — emission is a no-op when unset.
 	MigrationEmitter *dataplane.MigrationMetricEmitter
+
+	// StatusReporter mirrors the Tenant CR's aggregate provisioning status
+	// into the daemon (dashboard#855), so the dashboard's signup/status
+	// surfaces can read it without a K8s channel (ADR-0023: the daemon never
+	// reads Kubernetes; the operator pushes status in). Best-effort: a report
+	// failure logs and never fails the reconcile. May be nil (operator booted
+	// without GIBSON_DAEMON_GRPC_ADDRESS, or in tests) — then reporting is a
+	// no-op.
+	StatusReporter TenantStatusReporter
+}
+
+// TenantStatusReporter mirrors a Tenant CR's aggregate provisioning status into
+// the daemon. provision.EntitlementsGRPCClient satisfies it; tests pass a stub.
+type TenantStatusReporter interface {
+	ReportTenantStatus(ctx context.Context, r provision.TenantStatusReport) error
+}
+
+// noopTenantStatusReporter is the null-object default wired by SetupWithManager
+// when no daemon client is configured (operator booted without
+// GIBSON_DAEMON_GRPC_ADDRESS). It keeps StatusReporter non-nil so the request
+// paths carry no `if reporter == nil` degraded-mode branch (one-code-path PRD,
+// deploy#186): status mirroring is simply a no-op in that deployment shape.
+type noopTenantStatusReporter struct{}
+
+func (noopTenantStatusReporter) ReportTenantStatus(context.Context, provision.TenantStatusReport) error {
+	return nil
 }
 
 // kubebuilder:rbac markers — Spec secrets-blast-radius-reduction
@@ -215,6 +242,14 @@ func (r *TenantReconciler) Reconcile(ctx context.Context, req ctrl.Request) (ctr
 		}
 	}
 
+	// Mirror the Tenant CR's aggregate status into the daemon (dashboard#855),
+	// so the dashboard's signup/status surfaces read it from the daemon instead
+	// of K8s (ADR-0023). Best-effort: a report failure logs and never fails the
+	// reconcile — the next reconcile re-reports. owner_member_ready is owned by
+	// the TenantMember status path, not this Tenant reconcile, so it is left
+	// false here (the upsert only advances it to true via that path).
+	r.reportTenantStatus(ctx, &tenant)
+
 	// Requeue until the children converge so the Tenant flips to Ready without
 	// waiting for an unrelated watch event.
 	if err == nil && !childrenReady && result.RequeueAfter == 0 && !result.Requeue {
@@ -232,6 +267,30 @@ func (r *TenantReconciler) Reconcile(ctx context.Context, req ctrl.Request) (ctr
 	}
 
 	return result, err
+}
+
+// reportTenantStatus mirrors the Tenant CR's aggregate status into the daemon
+// (dashboard#855). Best-effort: a nil reporter is a no-op and any error is
+// logged but never propagated — losing a status mirror must not fail the
+// reconcile (the next reconcile re-reports). The daemon never reads K8s
+// (ADR-0023); this push is the only way it learns the Tenant CR's status.
+func (r *TenantReconciler) reportTenantStatus(ctx context.Context, tenant *gibsonv1alpha1.Tenant) {
+	// StatusReporter is never nil in a running operator — SetupWithManager
+	// defaults it to noopTenantStatusReporter when no daemon client is wired
+	// (one-code-path: no `== nil` degraded branch here).
+	log := logf.FromContext(ctx).WithValues("tenant", tenant.Name)
+	if err := r.StatusReporter.ReportTenantStatus(ctx, provision.TenantStatusReport{
+		TenantID:       tenant.Name,
+		Phase:          string(tenant.Status.Phase),
+		Ready:          tenant.Status.Phase == gibsonv1alpha1.TenantPhaseReady,
+		ZitadelOrgID:   tenant.Status.ZitadelOrgID,
+		DataPlaneReady: tenant.Status.DataPlane.Ready,
+		// owner_member_ready is reported by the TenantMember status path; the
+		// daemon upsert OR-preserves it so this false does not regress it.
+		OwnerMemberReady: false,
+	}); err != nil {
+		log.Info("failed to mirror tenant status to daemon (will retry next reconcile)", "err", err)
+	}
 }
 
 // reconcileDelete handles teardown of a Tenant with DeletionTimestamp set.
@@ -397,6 +456,9 @@ func (r *TenantReconciler) SetupWithManager(mgr ctrl.Manager) error {
 	}
 	if r.NamespaceProvisioner == nil {
 		r.NamespaceProvisioner = NewNamespaceProvisioner(r.Client, r.PlatformNamespace, nil)
+	}
+	if r.StatusReporter == nil {
+		r.StatusReporter = noopTenantStatusReporter{}
 	}
 	return ctrl.NewControllerManagedBy(mgr).
 		For(&gibsonv1alpha1.Tenant{}).

@@ -52,6 +52,25 @@ service TenantService {
     };
   }
 
+  // GetTenantProvisioningStatus returns the daemon's mirror of the caller
+  // tenant's Tenant-CR provisioning status (phase, ready, zitadelOrgID,
+  // dataPlaneReady, owner-member-ready). The operator reports the Tenant CR's
+  // aggregate status into platform Postgres (tenant_status, migration 017) via
+  // DaemonOperatorService.ReportTenantStatus; this read serves the dashboard's
+  // signup + tenant-status surfaces (dashboard#855: /api/signup/status,
+  // /api/onboarding/data-plane, waitForTenantReady) WITHOUT a K8s read.
+  //
+  // Tenant-scoped: the deriver resolves the tenant from the caller identity, so
+  // a tenant can only read its own status row (no cross-tenant read).
+  rpc GetTenantProvisioningStatus(GetTenantProvisioningStatusRequest) returns (GetTenantProvisioningStatusResponse) {
+    option (gibson.auth.v1.authz) = {
+      relation: "member"
+      object_type: "tenant"
+      object_deriver: "tenant_from_identity"
+      allowed_identities: 3  // USER | SERVICE
+    };
+  }
+
   // ---------------------------------------------------------------------------
   // Quota / usage
   // ---------------------------------------------------------------------------
@@ -171,6 +190,41 @@ message UpdateOnboardingStateRequest {
 
 // UpdateOnboardingStateResponse confirms the update was applied.
 message UpdateOnboardingStateResponse {}
+
+// ---------------------------------------------------------------------------
+// Provisioning status — request/response messages (dashboard#855)
+// ---------------------------------------------------------------------------
+
+// GetTenantProvisioningStatusRequest queries the daemon's mirror of a tenant's
+// Tenant-CR provisioning status. The tenant is resolved from the caller
+// identity by the authz deriver; no tenant_id is taken in the body.
+message GetTenantProvisioningStatusRequest {}
+
+// GetTenantProvisioningStatusResponse carries the mirrored Tenant-CR status the
+// dashboard's signup + tenant-status surfaces consume. Empty/zero values are
+// returned (found=false) when the operator has not yet reported a status —
+// i.e. the Tenant CR has not been created/observed yet — so the caller treats
+// the tenant as still provisioning, matching the dashboard's K8sNotFound branch.
+message GetTenantProvisioningStatusResponse {
+  // found is false when no status row exists yet for the tenant (operator has
+  // not reported). All other fields are zero in that case.
+  bool found = 1;
+  // phase mirrors Tenant.Status.Phase ("Pending"/"Provisioning"/"Ready"/
+  // "Failed"/"Terminating"/"Terminated"). Empty when not yet reported.
+  string phase = 2;
+  // ready is true once the Tenant CR reached the Ready phase (saga complete AND
+  // all child CRDs Ready). The dashboard's primary "tenant usable" gate.
+  bool ready = 3;
+  // zitadel_org_id mirrors Tenant.Status.ZitadelOrgID — the waitForTenantReady
+  // gate. Non-empty once the per-tenant Zitadel org is provisioned.
+  string zitadel_org_id = 4;
+  // data_plane_ready mirrors Tenant.Status.DataPlane.Ready (postgres/redis/
+  // neo4j/vector + KEK converged).
+  bool data_plane_ready = 5;
+  // owner_member_ready is true once the founding-owner TenantMember reached
+  // phase Active (waitForMemberReady). Reported by the member-status path.
+  bool owner_member_ready = 6;
+}
 
 // ---------------------------------------------------------------------------
 // Quota — request/response messages

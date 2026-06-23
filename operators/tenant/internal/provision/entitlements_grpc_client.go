@@ -233,6 +233,38 @@ func (c *EntitlementsGRPCClient) AckTenantProvisioned(ctx context.Context, tenan
 	return translateGRPCError("ack-tenant-provisioned", err)
 }
 
+// TenantStatusReport is the operator-vocabulary view of a Tenant CR's aggregate
+// provisioning status, mirrored into the daemon (dashboard#855) so the daemon
+// can serve the dashboard's signup/status surfaces without a K8s read.
+type TenantStatusReport struct {
+	TenantID         string
+	Phase            string
+	Ready            bool
+	ZitadelOrgID     string
+	DataPlaneReady   bool
+	OwnerMemberReady bool
+}
+
+// ReportTenantStatus upserts the daemon's mirror of a Tenant CR's aggregate
+// provisioning status via DaemonOperatorService.ReportTenantStatus
+// (dashboard#855). Called by the Tenant reconcile when the Tenant CR's
+// observable status changes. Idempotent.
+func (c *EntitlementsGRPCClient) ReportTenantStatus(ctx context.Context, r TenantStatusReport) error {
+	authedCtx, err := c.authCtx(ctx)
+	if err != nil {
+		return err
+	}
+	_, err = c.client.ReportTenantStatus(authedCtx, &operatorv1.ReportTenantStatusRequest{
+		TenantId:         r.TenantID,
+		Phase:            r.Phase,
+		Ready:            r.Ready,
+		ZitadelOrgId:     r.ZitadelOrgID,
+		DataPlaneReady:   r.DataPlaneReady,
+		OwnerMemberReady: r.OwnerMemberReady,
+	})
+	return translateGRPCError("report-tenant-status", err)
+}
+
 // EmitReconcileSummary maps the controller's strongly-typed summary onto
 // the daemon's generic AuditEventMessage. The daemon's audit emitter
 // stores the event in the platform Postgres + Redis stream.

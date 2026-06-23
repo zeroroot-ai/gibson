@@ -71,6 +71,9 @@ func newFakeReconciler(t *testing.T, tenant *gibsonv1alpha1.Tenant) (*TenantReco
 		Scheme:               scheme,
 		Runner:               runner,
 		NamespaceProvisioner: NewNamespaceProvisioner(fakeClient, "gibson-platform", nil),
+		// Production wires this via SetupWithManager (noop when no daemon client);
+		// these tests drive Reconcile directly, so default it here too.
+		StatusReporter: noopTenantStatusReporter{},
 	}
 	return r, fakeClient
 }
@@ -318,6 +321,7 @@ func TestReconcile_CorrelationID_FromAnnotation(t *testing.T) {
 		Scheme:               scheme,
 		Runner:               runner,
 		NamespaceProvisioner: NewNamespaceProvisioner(fakeClient, "gibson-platform", nil),
+		StatusReporter:       noopTenantStatusReporter{},
 	}
 
 	_, err := r.Reconcile(context.Background(), reconcile.Request{
@@ -370,6 +374,7 @@ func TestReconcile_CorrelationID_GeneratedWhenMissing(t *testing.T) {
 		Scheme:               scheme,
 		Runner:               runner,
 		NamespaceProvisioner: NewNamespaceProvisioner(fakeClient, "gibson-platform", nil),
+		StatusReporter:       noopTenantStatusReporter{},
 	}
 
 	_, err := r.Reconcile(context.Background(), reconcile.Request{

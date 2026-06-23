@@ -125,7 +125,7 @@ func TestTenantMember_OwnerRefBackfill(t *testing.T) {
 		WithObjects(tenantNamespaceWithAnnot(t), seededTenant(t), tm).
 		Build()
 
-	r := &TenantMemberReconciler{Client: c, Scheme: scheme, Recorder: events.NewFakeRecorder(100)}
+	r := &TenantMemberReconciler{Client: c, Scheme: scheme, Recorder: events.NewFakeRecorder(100), StatusReporter: noopTenantStatusReporter{}}
 	_, err := r.Reconcile(context.Background(), ctrl.Request{
 		NamespacedName: types.NamespacedName{Namespace: "tenant-acme", Name: "invite-abc123"},
 	})

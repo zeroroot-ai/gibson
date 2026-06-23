@@ -38,16 +38,17 @@ import (
 const _ = grpc.SupportPackageIsVersion9
 
 const (
-	TenantService_GetOnboardingState_FullMethodName    = "/gibson.tenant.v1.TenantService/GetOnboardingState"
-	TenantService_UpdateOnboardingState_FullMethodName = "/gibson.tenant.v1.TenantService/UpdateOnboardingState"
-	TenantService_GetTenantQuota_FullMethodName        = "/gibson.tenant.v1.TenantService/GetTenantQuota"
-	TenantService_GetTenantQuotaUsage_FullMethodName   = "/gibson.tenant.v1.TenantService/GetTenantQuotaUsage"
-	TenantService_ListAuditEvents_FullMethodName       = "/gibson.tenant.v1.TenantService/ListAuditEvents"
-	TenantService_ExportFindings_FullMethodName        = "/gibson.tenant.v1.TenantService/ExportFindings"
-	TenantService_SaveMissionDraft_FullMethodName      = "/gibson.tenant.v1.TenantService/SaveMissionDraft"
-	TenantService_ListMissionDrafts_FullMethodName     = "/gibson.tenant.v1.TenantService/ListMissionDrafts"
-	TenantService_GetMissionDraft_FullMethodName       = "/gibson.tenant.v1.TenantService/GetMissionDraft"
-	TenantService_DeleteMissionDraft_FullMethodName    = "/gibson.tenant.v1.TenantService/DeleteMissionDraft"
+	TenantService_GetOnboardingState_FullMethodName          = "/gibson.tenant.v1.TenantService/GetOnboardingState"
+	TenantService_UpdateOnboardingState_FullMethodName       = "/gibson.tenant.v1.TenantService/UpdateOnboardingState"
+	TenantService_GetTenantProvisioningStatus_FullMethodName = "/gibson.tenant.v1.TenantService/GetTenantProvisioningStatus"
+	TenantService_GetTenantQuota_FullMethodName              = "/gibson.tenant.v1.TenantService/GetTenantQuota"
+	TenantService_GetTenantQuotaUsage_FullMethodName         = "/gibson.tenant.v1.TenantService/GetTenantQuotaUsage"
+	TenantService_ListAuditEvents_FullMethodName             = "/gibson.tenant.v1.TenantService/ListAuditEvents"
+	TenantService_ExportFindings_FullMethodName              = "/gibson.tenant.v1.TenantService/ExportFindings"
+	TenantService_SaveMissionDraft_FullMethodName            = "/gibson.tenant.v1.TenantService/SaveMissionDraft"
+	TenantService_ListMissionDrafts_FullMethodName           = "/gibson.tenant.v1.TenantService/ListMissionDrafts"
+	TenantService_GetMissionDraft_FullMethodName             = "/gibson.tenant.v1.TenantService/GetMissionDraft"
+	TenantService_DeleteMissionDraft_FullMethodName          = "/gibson.tenant.v1.TenantService/DeleteMissionDraft"
 )
 
 // TenantServiceClient is the client API for TenantService service.
@@ -61,6 +62,17 @@ type TenantServiceClient interface {
 	GetOnboardingState(ctx context.Context, in *GetOnboardingStateRequest, opts ...grpc.CallOption) (*GetOnboardingStateResponse, error)
 	// UpdateOnboardingState advances or modifies the onboarding state.
 	UpdateOnboardingState(ctx context.Context, in *UpdateOnboardingStateRequest, opts ...grpc.CallOption) (*UpdateOnboardingStateResponse, error)
+	// GetTenantProvisioningStatus returns the daemon's mirror of the caller
+	// tenant's Tenant-CR provisioning status (phase, ready, zitadelOrgID,
+	// dataPlaneReady, owner-member-ready). The operator reports the Tenant CR's
+	// aggregate status into platform Postgres (tenant_status, migration 017) via
+	// DaemonOperatorService.ReportTenantStatus; this read serves the dashboard's
+	// signup + tenant-status surfaces (dashboard#855: /api/signup/status,
+	// /api/onboarding/data-plane, waitForTenantReady) WITHOUT a K8s read.
+	//
+	// Tenant-scoped: the deriver resolves the tenant from the caller identity, so
+	// a tenant can only read its own status row (no cross-tenant read).
+	GetTenantProvisioningStatus(ctx context.Context, in *GetTenantProvisioningStatusRequest, opts ...grpc.CallOption) (*GetTenantProvisioningStatusResponse, error)
 	// GetTenantQuota retrieves the configured resource quotas (limits) for a
 	// tenant. Returns zero values for any quota not explicitly set.
 	GetTenantQuota(ctx context.Context, in *GetTenantQuotaRequest, opts ...grpc.CallOption) (*GetTenantQuotaResponse, error)
@@ -105,6 +117,16 @@ func (c *tenantServiceClient) UpdateOnboardingState(ctx context.Context, in *Upd
 	cOpts := append([]grpc.CallOption{grpc.StaticMethod()}, opts...)
 	out := new(UpdateOnboardingStateResponse)
 	err := c.cc.Invoke(ctx, TenantService_UpdateOnboardingState_FullMethodName, in, out, cOpts...)
+	if err != nil {
+		return nil, err
+	}
+	return out, nil
+}
+
+func (c *tenantServiceClient) GetTenantProvisioningStatus(ctx context.Context, in *GetTenantProvisioningStatusRequest, opts ...grpc.CallOption) (*GetTenantProvisioningStatusResponse, error) {
+	cOpts := append([]grpc.CallOption{grpc.StaticMethod()}, opts...)
+	out := new(GetTenantProvisioningStatusResponse)
+	err := c.cc.Invoke(ctx, TenantService_GetTenantProvisioningStatus_FullMethodName, in, out, cOpts...)
 	if err != nil {
 		return nil, err
 	}
@@ -202,6 +224,17 @@ type TenantServiceServer interface {
 	GetOnboardingState(context.Context, *GetOnboardingStateRequest) (*GetOnboardingStateResponse, error)
 	// UpdateOnboardingState advances or modifies the onboarding state.
 	UpdateOnboardingState(context.Context, *UpdateOnboardingStateRequest) (*UpdateOnboardingStateResponse, error)
+	// GetTenantProvisioningStatus returns the daemon's mirror of the caller
+	// tenant's Tenant-CR provisioning status (phase, ready, zitadelOrgID,
+	// dataPlaneReady, owner-member-ready). The operator reports the Tenant CR's
+	// aggregate status into platform Postgres (tenant_status, migration 017) via
+	// DaemonOperatorService.ReportTenantStatus; this read serves the dashboard's
+	// signup + tenant-status surfaces (dashboard#855: /api/signup/status,
+	// /api/onboarding/data-plane, waitForTenantReady) WITHOUT a K8s read.
+	//
+	// Tenant-scoped: the deriver resolves the tenant from the caller identity, so
+	// a tenant can only read its own status row (no cross-tenant read).
+	GetTenantProvisioningStatus(context.Context, *GetTenantProvisioningStatusRequest) (*GetTenantProvisioningStatusResponse, error)
 	// GetTenantQuota retrieves the configured resource quotas (limits) for a
 	// tenant. Returns zero values for any quota not explicitly set.
 	GetTenantQuota(context.Context, *GetTenantQuotaRequest) (*GetTenantQuotaResponse, error)
@@ -237,6 +270,9 @@ func (UnimplementedTenantServiceServer) GetOnboardingState(context.Context, *Get
 }
 func (UnimplementedTenantServiceServer) UpdateOnboardingState(context.Context, *UpdateOnboardingStateRequest) (*UpdateOnboardingStateResponse, error) {
 	return nil, status.Error(codes.Unimplemented, "method UpdateOnboardingState not implemented")
+}
+func (UnimplementedTenantServiceServer) GetTenantProvisioningStatus(context.Context, *GetTenantProvisioningStatusRequest) (*GetTenantProvisioningStatusResponse, error) {
+	return nil, status.Error(codes.Unimplemented, "method GetTenantProvisioningStatus not implemented")
 }
 func (UnimplementedTenantServiceServer) GetTenantQuota(context.Context, *GetTenantQuotaRequest) (*GetTenantQuotaResponse, error) {
 	return nil, status.Error(codes.Unimplemented, "method GetTenantQuota not implemented")
@@ -315,6 +351,24 @@ func _TenantService_UpdateOnboardingState_Handler(srv interface{}, ctx context.C
 	}
 	handler := func(ctx context.Context, req interface{}) (interface{}, error) {
 		return srv.(TenantServiceServer).UpdateOnboardingState(ctx, req.(*UpdateOnboardingStateRequest))
+	}
+	return interceptor(ctx, in, info, handler)
+}
+
+func _TenantService_GetTenantProvisioningStatus_Handler(srv interface{}, ctx context.Context, dec func(interface{}) error, interceptor grpc.UnaryServerInterceptor) (interface{}, error) {
+	in := new(GetTenantProvisioningStatusRequest)
+	if err := dec(in); err != nil {
+		return nil, err
+	}
+	if interceptor == nil {
+		return srv.(TenantServiceServer).GetTenantProvisioningStatus(ctx, in)
+	}
+	info := &grpc.UnaryServerInfo{
+		Server:     srv,
+		FullMethod: TenantService_GetTenantProvisioningStatus_FullMethodName,
+	}
+	handler := func(ctx context.Context, req interface{}) (interface{}, error) {
+		return srv.(TenantServiceServer).GetTenantProvisioningStatus(ctx, req.(*GetTenantProvisioningStatusRequest))
 	}
 	return interceptor(ctx, in, info, handler)
 }
@@ -477,6 +531,10 @@ var TenantService_ServiceDesc = grpc.ServiceDesc{
 		{
 			MethodName: "UpdateOnboardingState",
 			Handler:    _TenantService_UpdateOnboardingState_Handler,
+		},
+		{
+			MethodName: "GetTenantProvisioningStatus",
+			Handler:    _TenantService_GetTenantProvisioningStatus_Handler,
 		},
 		{
 			MethodName: "GetTenantQuota",

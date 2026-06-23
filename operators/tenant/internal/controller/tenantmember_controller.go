@@ -35,6 +35,7 @@ import (
 	"github.com/zeroroot-ai/gibson/operators/tenant/internal/clients/fga"
 	"github.com/zeroroot-ai/gibson/operators/tenant/internal/clients/zitadel"
 	"github.com/zeroroot-ai/gibson/operators/tenant/internal/mail"
+	"github.com/zeroroot-ai/gibson/operators/tenant/internal/provision"
 )
 
 const invitationTTL = 7 * 24 * time.Hour
@@ -79,6 +80,13 @@ type TenantMemberReconciler struct {
 	// BaseAcceptURL is the dashboard base URL for invitation accept links
 	// (e.g. "https://app.zeroroot.ai").
 	BaseAcceptURL string
+
+	// StatusReporter mirrors the founding-owner member's readiness into the
+	// daemon's tenant_status row (dashboard#855) once an owner-role member
+	// reaches Active, so the dashboard's waitForMemberReady can read it from
+	// the daemon instead of K8s (ADR-0023). Best-effort; nil = no-op (tests /
+	// operator booted without a daemon client).
+	StatusReporter TenantStatusReporter
 }
 
 // +kubebuilder:rbac:groups=gibson.zeroroot.ai,resources=tenantmembers,verbs=get;list;watch;create;update;patch;delete
@@ -140,6 +148,11 @@ func (r *TenantMemberReconciler) Reconcile(ctx context.Context, req ctrl.Request
 		// member is past invited (kept here as the documented behavior:
 		// there is nothing to resend). Future work might surface the
 		// resend-after-active case as an explicit Tenant condition.
+		//
+		// Re-report owner-member readiness (idempotent, daemon OR-preserves it):
+		// covers a member that was already Active before the reporter was wired
+		// or whose prior report was lost (dashboard#855).
+		r.reportOwnerMemberReady(ctx, &tm)
 		return ctrl.Result{}, nil
 	case tm.Status.Phase == "" || tm.Status.Phase == gibsonv1alpha1.TenantMemberPhasePending:
 		return r.issueInvitation(ctx, &tm)
@@ -288,7 +301,49 @@ func (r *TenantMemberReconciler) acceptInvitation(ctx context.Context, tm *gibso
 	tm.Status.InvitationSecretRef = ""
 	tm.Status.InvitationTokenHash = ""
 	tm.Status.ObservedGeneration = tm.Generation
-	return ctrl.Result{}, r.Status().Update(ctx, tm)
+	if err := r.Status().Update(ctx, tm); err != nil {
+		return ctrl.Result{}, err
+	}
+	r.reportOwnerMemberReady(ctx, tm)
+	return ctrl.Result{}, nil
+}
+
+// reportOwnerMemberReady mirrors owner-member readiness into the daemon's
+// tenant_status row when an owner-role member is Active (dashboard#855). It is a
+// no-op for non-owner members and when no reporter is wired. It reads the live
+// Tenant CR (the operator CAN read K8s; the daemon cannot — ADR-0023) so the
+// upsert carries the full, accurate status alongside owner_member_ready=true,
+// rather than clobbering phase/ready/zitadel/dataPlane with empty values.
+// Best-effort: any failure logs and never fails the reconcile.
+func (r *TenantMemberReconciler) reportOwnerMemberReady(ctx context.Context, tm *gibsonv1alpha1.TenantMember) {
+	// owner-only domain gate (NOT a dep-nil guard): only the founding owner's
+	// readiness feeds the daemon's tenant_status. StatusReporter is never nil in
+	// a running operator (SetupWithManager defaults it to the noop).
+	if tm.Spec.Role != gibsonv1alpha1.MemberRoleOwner {
+		return
+	}
+	log := logf.FromContext(ctx).WithValues("tenantmember", tm.Name, "tenant", tm.Spec.TenantRef.Name)
+
+	report := provision.TenantStatusReport{
+		TenantID:         tm.Spec.TenantRef.Name,
+		OwnerMemberReady: true,
+	}
+	// Enrich with the live Tenant CR status so the upsert does not regress
+	// phase/ready/zitadel/dataPlane (the daemon overwrites those columns with
+	// whatever this report carries; owner_member_ready alone is OR-preserved).
+	var tenant gibsonv1alpha1.Tenant
+	if err := r.Get(ctx, types.NamespacedName{Name: tm.Spec.TenantRef.Name}, &tenant); err == nil {
+		report.Phase = string(tenant.Status.Phase)
+		report.Ready = tenant.Status.Phase == gibsonv1alpha1.TenantPhaseReady
+		report.ZitadelOrgID = tenant.Status.ZitadelOrgID
+		report.DataPlaneReady = tenant.Status.DataPlane.Ready
+	} else {
+		log.Info("could not read Tenant CR to enrich owner-member-ready report; reporting readiness only", "err", err)
+	}
+
+	if err := r.StatusReporter.ReportTenantStatus(ctx, report); err != nil {
+		log.Info("failed to mirror owner-member readiness to daemon (will retry next reconcile)", "err", err)
+	}
 }
 
 func (r *TenantMemberReconciler) expireInvitation(ctx context.Context, tm *gibsonv1alpha1.TenantMember) (ctrl.Result, error) {
@@ -435,6 +490,9 @@ func (r *TenantMemberReconciler) zitadelOrgID(ctx context.Context, tm *gibsonv1a
 func (r *TenantMemberReconciler) SetupWithManager(mgr ctrl.Manager) error {
 	if r.Recorder == nil {
 		r.Recorder = mgr.GetEventRecorder("tenant-member-controller")
+	}
+	if r.StatusReporter == nil {
+		r.StatusReporter = noopTenantStatusReporter{}
 	}
 	return ctrl.NewControllerManagedBy(mgr).
 		For(&gibsonv1alpha1.TenantMember{}).

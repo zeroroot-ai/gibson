@@ -77,6 +77,15 @@ var allowedUnauthenticated = map[string]bool{
 	// validates the attempt_id and rate-limits the request.
 	// Spec: E9 signup-rpc-zitadel-move (gibson#812, ADR-0043/0044).
 	"/gibson.tenant.v1.SignupService/Signup": true,
+
+	// CheckTenantSlugAvailable is intentionally unauthenticated, matching Signup
+	// above: it answers a pre-tenant workspace-slug uniqueness check during
+	// self-serve signup, BEFORE any tenant or membership exists, so there is no
+	// principal to FGA-check. It returns only a boolean availability bit (no
+	// tenant data) served from the daemon's own pending-provisioning queue +
+	// tenant-status mirror — never a K8s read (ADR-0023). It replaces the
+	// dashboard's pre-signup getTenant existence probe (dashboard#855).
+	"/gibson.tenant.v1.SignupService/CheckTenantSlugAvailable": true,
 }
 
 // TestOnlyConnectAndPingAreUnauthenticated walks the generated Registry map

@@ -51,7 +51,8 @@ import (
 const _ = grpc.SupportPackageIsVersion9
 
 const (
-	SignupService_Signup_FullMethodName = "/gibson.tenant.v1.SignupService/Signup"
+	SignupService_Signup_FullMethodName                   = "/gibson.tenant.v1.SignupService/Signup"
+	SignupService_CheckTenantSlugAvailable_FullMethodName = "/gibson.tenant.v1.SignupService/CheckTenantSlugAvailable"
 )
 
 // SignupServiceClient is the client API for SignupService service.
@@ -93,6 +94,25 @@ type SignupServiceClient interface {
 	// UUID is the capability; the daemon is the sole holder of the IdP-admin
 	// provisioning privilege (no IdP PAT in the caller).
 	Signup(ctx context.Context, in *SignupRequest, opts ...grpc.CallOption) (*SignupResponse, error)
+	// CheckTenantSlugAvailable answers whether a workspace slug is still free to
+	// claim, served entirely from the daemon's own state — the
+	// pending-provisioning queue (in-flight self-serve signups, migration 016)
+	// UNION the tenant-status mirror (provisioned tenants, migration 017). The
+	// daemon does NOT read Kubernetes (ADR-0023): this replaces the dashboard's
+	// pre-signup `getTenant(slug)` existence probe (dashboard#855,
+	// /api/auth/tenant-available) so the web tier stops opening a K8s channel to
+	// answer a uniqueness check.
+	//
+	// A slug is unavailable when either a pending/claimed/done provisioning row
+	// OR a tenant_status row exists for it. Best-effort + advisory: the operator's
+	// Tenant-CR admission webhook remains the authoritative TOCTOU gate at create
+	// time, so a brief window where a freshly-enqueued slug is not yet visible is
+	// acceptable — exactly the contract the dashboard probe had.
+	//
+	// UNAUTHENTICATED: runs pre-tenant, before any membership exists, identical to
+	// Signup. It returns only a boolean availability bit (no tenant data), so it
+	// leaks nothing beyond "is this name taken".
+	CheckTenantSlugAvailable(ctx context.Context, in *CheckTenantSlugAvailableRequest, opts ...grpc.CallOption) (*CheckTenantSlugAvailableResponse, error)
 }
 
 type signupServiceClient struct {
@@ -107,6 +127,16 @@ func (c *signupServiceClient) Signup(ctx context.Context, in *SignupRequest, opt
 	cOpts := append([]grpc.CallOption{grpc.StaticMethod()}, opts...)
 	out := new(SignupResponse)
 	err := c.cc.Invoke(ctx, SignupService_Signup_FullMethodName, in, out, cOpts...)
+	if err != nil {
+		return nil, err
+	}
+	return out, nil
+}
+
+func (c *signupServiceClient) CheckTenantSlugAvailable(ctx context.Context, in *CheckTenantSlugAvailableRequest, opts ...grpc.CallOption) (*CheckTenantSlugAvailableResponse, error) {
+	cOpts := append([]grpc.CallOption{grpc.StaticMethod()}, opts...)
+	out := new(CheckTenantSlugAvailableResponse)
+	err := c.cc.Invoke(ctx, SignupService_CheckTenantSlugAvailable_FullMethodName, in, out, cOpts...)
 	if err != nil {
 		return nil, err
 	}
@@ -152,6 +182,25 @@ type SignupServiceServer interface {
 	// UUID is the capability; the daemon is the sole holder of the IdP-admin
 	// provisioning privilege (no IdP PAT in the caller).
 	Signup(context.Context, *SignupRequest) (*SignupResponse, error)
+	// CheckTenantSlugAvailable answers whether a workspace slug is still free to
+	// claim, served entirely from the daemon's own state — the
+	// pending-provisioning queue (in-flight self-serve signups, migration 016)
+	// UNION the tenant-status mirror (provisioned tenants, migration 017). The
+	// daemon does NOT read Kubernetes (ADR-0023): this replaces the dashboard's
+	// pre-signup `getTenant(slug)` existence probe (dashboard#855,
+	// /api/auth/tenant-available) so the web tier stops opening a K8s channel to
+	// answer a uniqueness check.
+	//
+	// A slug is unavailable when either a pending/claimed/done provisioning row
+	// OR a tenant_status row exists for it. Best-effort + advisory: the operator's
+	// Tenant-CR admission webhook remains the authoritative TOCTOU gate at create
+	// time, so a brief window where a freshly-enqueued slug is not yet visible is
+	// acceptable — exactly the contract the dashboard probe had.
+	//
+	// UNAUTHENTICATED: runs pre-tenant, before any membership exists, identical to
+	// Signup. It returns only a boolean availability bit (no tenant data), so it
+	// leaks nothing beyond "is this name taken".
+	CheckTenantSlugAvailable(context.Context, *CheckTenantSlugAvailableRequest) (*CheckTenantSlugAvailableResponse, error)
 	mustEmbedUnimplementedSignupServiceServer()
 }
 
@@ -164,6 +213,9 @@ type UnimplementedSignupServiceServer struct{}
 
 func (UnimplementedSignupServiceServer) Signup(context.Context, *SignupRequest) (*SignupResponse, error) {
 	return nil, status.Error(codes.Unimplemented, "method Signup not implemented")
+}
+func (UnimplementedSignupServiceServer) CheckTenantSlugAvailable(context.Context, *CheckTenantSlugAvailableRequest) (*CheckTenantSlugAvailableResponse, error) {
+	return nil, status.Error(codes.Unimplemented, "method CheckTenantSlugAvailable not implemented")
 }
 func (UnimplementedSignupServiceServer) mustEmbedUnimplementedSignupServiceServer() {}
 func (UnimplementedSignupServiceServer) testEmbeddedByValue()                       {}
@@ -204,6 +256,24 @@ func _SignupService_Signup_Handler(srv interface{}, ctx context.Context, dec fun
 	return interceptor(ctx, in, info, handler)
 }
 
+func _SignupService_CheckTenantSlugAvailable_Handler(srv interface{}, ctx context.Context, dec func(interface{}) error, interceptor grpc.UnaryServerInterceptor) (interface{}, error) {
+	in := new(CheckTenantSlugAvailableRequest)
+	if err := dec(in); err != nil {
+		return nil, err
+	}
+	if interceptor == nil {
+		return srv.(SignupServiceServer).CheckTenantSlugAvailable(ctx, in)
+	}
+	info := &grpc.UnaryServerInfo{
+		Server:     srv,
+		FullMethod: SignupService_CheckTenantSlugAvailable_FullMethodName,
+	}
+	handler := func(ctx context.Context, req interface{}) (interface{}, error) {
+		return srv.(SignupServiceServer).CheckTenantSlugAvailable(ctx, req.(*CheckTenantSlugAvailableRequest))
+	}
+	return interceptor(ctx, in, info, handler)
+}
+
 // SignupService_ServiceDesc is the grpc.ServiceDesc for SignupService service.
 // It's only intended for direct use with grpc.RegisterService,
 // and not to be introspected or modified (even as a copy)
@@ -214,6 +284,10 @@ var SignupService_ServiceDesc = grpc.ServiceDesc{
 		{
 			MethodName: "Signup",
 			Handler:    _SignupService_Signup_Handler,
+		},
+		{
+			MethodName: "CheckTenantSlugAvailable",
+			Handler:    _SignupService_CheckTenantSlugAvailable_Handler,
 		},
 	},
 	Streams:  []grpc.StreamDesc{},

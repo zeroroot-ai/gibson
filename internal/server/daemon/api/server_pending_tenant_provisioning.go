@@ -129,6 +129,23 @@ func (s *DaemonServer) AckTenantProvisioned(ctx context.Context, req *daemonoper
 	return &daemonoperatorv1.AckTenantProvisionedResponse{Acked: n > 0}, nil
 }
 
+// pendingTenantExists reports whether a pending_tenant_provisioning row exists
+// for a slug, in ANY status (pending/claimed/done) — all three mean a self-serve
+// signup has claimed the slug. The in-flight half of CheckTenantSlugAvailable
+// (dashboard#855), so a slug is unavailable the moment Signup enqueues it, even
+// before the operator creates the Tenant CR or reports tenant_status.
+func (s *DaemonServer) pendingTenantExists(ctx context.Context, db *sql.DB, tenantID string) (bool, error) {
+	if err := ensurePendingTenantProvisioningTable(ctx, db); err != nil {
+		return false, fmt.Errorf("ensure table: %w", err)
+	}
+	const q = `SELECT EXISTS (SELECT 1 FROM pending_tenant_provisioning WHERE tenant_id = $1)`
+	var exists bool
+	if err := db.QueryRowContext(ctx, q, tenantID).Scan(&exists); err != nil {
+		return false, fmt.Errorf("query pending_tenant_provisioning exists: %w", err)
+	}
+	return exists, nil
+}
+
 // ensurePendingTenantProvisioningTable creates pending_tenant_provisioning if it
 // does not yet exist. Mirrors ensureTenantZitadelOrgsTable: migration 016 is
 // authoritative, but this keeps the RPC working on a freshly-pointed DB before
