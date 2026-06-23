@@ -32,6 +32,8 @@ const (
 	DaemonOperatorService_ListPendingTenantProvisioning_FullMethodName = "/gibson.daemon.operator.v1.DaemonOperatorService/ListPendingTenantProvisioning"
 	DaemonOperatorService_AckTenantProvisioned_FullMethodName          = "/gibson.daemon.operator.v1.DaemonOperatorService/AckTenantProvisioned"
 	DaemonOperatorService_ReportTenantStatus_FullMethodName            = "/gibson.daemon.operator.v1.DaemonOperatorService/ReportTenantStatus"
+	DaemonOperatorService_ListPendingTenantOps_FullMethodName          = "/gibson.daemon.operator.v1.DaemonOperatorService/ListPendingTenantOps"
+	DaemonOperatorService_AckTenantOp_FullMethodName                   = "/gibson.daemon.operator.v1.DaemonOperatorService/AckTenantOp"
 )
 
 // DaemonOperatorServiceClient is the client API for DaemonOperatorService service.
@@ -127,6 +129,24 @@ type DaemonOperatorServiceClient interface {
 	// billing webhook via TenantProvisioningService.SetTenantBillingActive and
 	// must not be clobbered by an operator status report.
 	ReportTenantStatus(ctx context.Context, in *ReportTenantStatusRequest, opts ...grpc.CallOption) (*ReportTenantStatusResponse, error)
+	// ListPendingTenantOps returns the daemon-owned queue of admin tenant CRUD
+	// operations (provision/update/delete) awaiting application to the Tenant CR.
+	// The dashboard's AdminTenantService enqueues one row per platform-admin CRUD
+	// action; the tenant-operator's reconcile loop drains the queue by applying
+	// each op to the Tenant CR (create / patch spec / delete), then AckTenantOp.
+	//
+	// ADR-0023: the daemon never touches Kubernetes — it only reads its Postgres
+	// queue here. The operator (which holds `tenants` create/update/delete RBAC)
+	// applies the op. Idempotent and safe to poll: returns only rows still
+	// status=pending, in created_at order so a tenant's ops apply in sequence.
+	ListPendingTenantOps(ctx context.Context, in *ListPendingTenantOpsRequest, opts ...grpc.CallOption) (*ListPendingTenantOpsResponse, error)
+	// AckTenantOp marks a pending admin-op record done so it is not re-applied on
+	// the next reconcile pass. The operator calls this AFTER it has applied the op
+	// to the Tenant CR (create/patch/delete, all idempotent), so a crash between
+	// apply and ack simply re-lists the row and the operator's idempotent apply
+	// makes the re-apply a no-op. Idempotent: acking an already-done or unknown
+	// op_id is a no-op success.
+	AckTenantOp(ctx context.Context, in *AckTenantOpRequest, opts ...grpc.CallOption) (*AckTenantOpResponse, error)
 }
 
 type daemonOperatorServiceClient struct {
@@ -267,6 +287,26 @@ func (c *daemonOperatorServiceClient) ReportTenantStatus(ctx context.Context, in
 	return out, nil
 }
 
+func (c *daemonOperatorServiceClient) ListPendingTenantOps(ctx context.Context, in *ListPendingTenantOpsRequest, opts ...grpc.CallOption) (*ListPendingTenantOpsResponse, error) {
+	cOpts := append([]grpc.CallOption{grpc.StaticMethod()}, opts...)
+	out := new(ListPendingTenantOpsResponse)
+	err := c.cc.Invoke(ctx, DaemonOperatorService_ListPendingTenantOps_FullMethodName, in, out, cOpts...)
+	if err != nil {
+		return nil, err
+	}
+	return out, nil
+}
+
+func (c *daemonOperatorServiceClient) AckTenantOp(ctx context.Context, in *AckTenantOpRequest, opts ...grpc.CallOption) (*AckTenantOpResponse, error) {
+	cOpts := append([]grpc.CallOption{grpc.StaticMethod()}, opts...)
+	out := new(AckTenantOpResponse)
+	err := c.cc.Invoke(ctx, DaemonOperatorService_AckTenantOp_FullMethodName, in, out, cOpts...)
+	if err != nil {
+		return nil, err
+	}
+	return out, nil
+}
+
 // DaemonOperatorServiceServer is the server API for DaemonOperatorService service.
 // All implementations must embed UnimplementedDaemonOperatorServiceServer
 // for forward compatibility.
@@ -360,6 +400,24 @@ type DaemonOperatorServiceServer interface {
 	// billing webhook via TenantProvisioningService.SetTenantBillingActive and
 	// must not be clobbered by an operator status report.
 	ReportTenantStatus(context.Context, *ReportTenantStatusRequest) (*ReportTenantStatusResponse, error)
+	// ListPendingTenantOps returns the daemon-owned queue of admin tenant CRUD
+	// operations (provision/update/delete) awaiting application to the Tenant CR.
+	// The dashboard's AdminTenantService enqueues one row per platform-admin CRUD
+	// action; the tenant-operator's reconcile loop drains the queue by applying
+	// each op to the Tenant CR (create / patch spec / delete), then AckTenantOp.
+	//
+	// ADR-0023: the daemon never touches Kubernetes — it only reads its Postgres
+	// queue here. The operator (which holds `tenants` create/update/delete RBAC)
+	// applies the op. Idempotent and safe to poll: returns only rows still
+	// status=pending, in created_at order so a tenant's ops apply in sequence.
+	ListPendingTenantOps(context.Context, *ListPendingTenantOpsRequest) (*ListPendingTenantOpsResponse, error)
+	// AckTenantOp marks a pending admin-op record done so it is not re-applied on
+	// the next reconcile pass. The operator calls this AFTER it has applied the op
+	// to the Tenant CR (create/patch/delete, all idempotent), so a crash between
+	// apply and ack simply re-lists the row and the operator's idempotent apply
+	// makes the re-apply a no-op. Idempotent: acking an already-done or unknown
+	// op_id is a no-op success.
+	AckTenantOp(context.Context, *AckTenantOpRequest) (*AckTenantOpResponse, error)
 	mustEmbedUnimplementedDaemonOperatorServiceServer()
 }
 
@@ -408,6 +466,12 @@ func (UnimplementedDaemonOperatorServiceServer) AckTenantProvisioned(context.Con
 }
 func (UnimplementedDaemonOperatorServiceServer) ReportTenantStatus(context.Context, *ReportTenantStatusRequest) (*ReportTenantStatusResponse, error) {
 	return nil, status.Error(codes.Unimplemented, "method ReportTenantStatus not implemented")
+}
+func (UnimplementedDaemonOperatorServiceServer) ListPendingTenantOps(context.Context, *ListPendingTenantOpsRequest) (*ListPendingTenantOpsResponse, error) {
+	return nil, status.Error(codes.Unimplemented, "method ListPendingTenantOps not implemented")
+}
+func (UnimplementedDaemonOperatorServiceServer) AckTenantOp(context.Context, *AckTenantOpRequest) (*AckTenantOpResponse, error) {
+	return nil, status.Error(codes.Unimplemented, "method AckTenantOp not implemented")
 }
 func (UnimplementedDaemonOperatorServiceServer) mustEmbedUnimplementedDaemonOperatorServiceServer() {}
 func (UnimplementedDaemonOperatorServiceServer) testEmbeddedByValue()                               {}
@@ -664,6 +728,42 @@ func _DaemonOperatorService_ReportTenantStatus_Handler(srv interface{}, ctx cont
 	return interceptor(ctx, in, info, handler)
 }
 
+func _DaemonOperatorService_ListPendingTenantOps_Handler(srv interface{}, ctx context.Context, dec func(interface{}) error, interceptor grpc.UnaryServerInterceptor) (interface{}, error) {
+	in := new(ListPendingTenantOpsRequest)
+	if err := dec(in); err != nil {
+		return nil, err
+	}
+	if interceptor == nil {
+		return srv.(DaemonOperatorServiceServer).ListPendingTenantOps(ctx, in)
+	}
+	info := &grpc.UnaryServerInfo{
+		Server:     srv,
+		FullMethod: DaemonOperatorService_ListPendingTenantOps_FullMethodName,
+	}
+	handler := func(ctx context.Context, req interface{}) (interface{}, error) {
+		return srv.(DaemonOperatorServiceServer).ListPendingTenantOps(ctx, req.(*ListPendingTenantOpsRequest))
+	}
+	return interceptor(ctx, in, info, handler)
+}
+
+func _DaemonOperatorService_AckTenantOp_Handler(srv interface{}, ctx context.Context, dec func(interface{}) error, interceptor grpc.UnaryServerInterceptor) (interface{}, error) {
+	in := new(AckTenantOpRequest)
+	if err := dec(in); err != nil {
+		return nil, err
+	}
+	if interceptor == nil {
+		return srv.(DaemonOperatorServiceServer).AckTenantOp(ctx, in)
+	}
+	info := &grpc.UnaryServerInfo{
+		Server:     srv,
+		FullMethod: DaemonOperatorService_AckTenantOp_FullMethodName,
+	}
+	handler := func(ctx context.Context, req interface{}) (interface{}, error) {
+		return srv.(DaemonOperatorServiceServer).AckTenantOp(ctx, req.(*AckTenantOpRequest))
+	}
+	return interceptor(ctx, in, info, handler)
+}
+
 // DaemonOperatorService_ServiceDesc is the grpc.ServiceDesc for DaemonOperatorService service.
 // It's only intended for direct use with grpc.RegisterService,
 // and not to be introspected or modified (even as a copy)
@@ -722,6 +822,14 @@ var DaemonOperatorService_ServiceDesc = grpc.ServiceDesc{
 		{
 			MethodName: "ReportTenantStatus",
 			Handler:    _DaemonOperatorService_ReportTenantStatus_Handler,
+		},
+		{
+			MethodName: "ListPendingTenantOps",
+			Handler:    _DaemonOperatorService_ListPendingTenantOps_Handler,
+		},
+		{
+			MethodName: "AckTenantOp",
+			Handler:    _DaemonOperatorService_AckTenantOp_Handler,
 		},
 	},
 	Streams:  []grpc.StreamDesc{},

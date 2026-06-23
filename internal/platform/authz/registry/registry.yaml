@@ -406,6 +406,13 @@ entries:
     allowed_identities:
       - USER
       - SERVICE
+  "/gibson.daemon.operator.v1.DaemonOperatorService/AckTenantOp":
+    relation: "platform_operator"
+    object_type: "system_tenant"
+    object_deriver: "system_tenant"
+    allowed_identities:
+      - USER
+      - SERVICE
   "/gibson.daemon.operator.v1.DaemonOperatorService/AckTenantProvisioned":
     relation: "platform_operator"
     object_type: "system_tenant"
@@ -428,6 +435,13 @@ entries:
       - USER
       - SERVICE
   "/gibson.daemon.operator.v1.DaemonOperatorService/ListFeatureTuples":
+    relation: "platform_operator"
+    object_type: "system_tenant"
+    object_deriver: "system_tenant"
+    allowed_identities:
+      - USER
+      - SERVICE
+  "/gibson.daemon.operator.v1.DaemonOperatorService/ListPendingTenantOps":
     relation: "platform_operator"
     object_type: "system_tenant"
     object_deriver: "system_tenant"
@@ -1162,6 +1176,24 @@ entries:
     relation: "member"
     object_type: "tenant"
     object_deriver: "tenant_from_identity"
+    allowed_identities:
+      - USER
+  "/gibson.tenant.v1.AdminTenantService/AdminDeleteTenant":
+    relation: "platform_operator"
+    object_type: "system_tenant"
+    object_deriver: "system_tenant"
+    allowed_identities:
+      - USER
+  "/gibson.tenant.v1.AdminTenantService/AdminProvisionTenant":
+    relation: "platform_operator"
+    object_type: "system_tenant"
+    object_deriver: "system_tenant"
+    allowed_identities:
+      - USER
+  "/gibson.tenant.v1.AdminTenantService/AdminUpdateTenant":
+    relation: "platform_operator"
+    object_type: "system_tenant"
+    object_deriver: "system_tenant"
     allowed_identities:
       - USER
   "/gibson.tenant.v1.BudgetService/GetBudget":

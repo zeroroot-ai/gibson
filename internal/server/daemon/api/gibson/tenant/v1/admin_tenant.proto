@@ -1,0 +1,146 @@
+syntax = "proto3";
+
+// Package gibson.tenant.v1 — AdminTenantService: the dashboard-facing write side
+// of operator-pull admin tenant CRUD (gibson#964, enables dashboard#855).
+//
+// dashboard#855 removes the dashboard's last Kubernetes consumer — the admin
+// CRD tool app/actions/crd/tenant.ts, which let a platform admin
+// provision/update/delete a tenant by writing the Tenant CR directly from the
+// web tier. That standing cluster-write privilege on the dashboard is the last
+// thing keeping the dashboard coupled to the Kubernetes API.
+//
+// This service replaces those three direct CR writes with admin RPCs that RECORD
+// the admin's intent in the daemon's platform Postgres (tenant_admin_ops queue,
+// migration 018). The tenant-operator — the sole Kubernetes actor (ADR-0023) —
+// drains the queue (DaemonOperatorService.ListPendingTenantOps) and applies each
+// op to the Tenant CR (create / patch spec / delete), then acks
+// (AckTenantOp). The daemon NEVER touches Kubernetes; it only writes its queue.
+//
+// This mirrors the self-serve operator-pull path (pending_tenant_provisioning,
+// gibson#948/#949): same enqueue-in-Postgres / operator-drains-and-applies
+// shape, but for the cross-tenant admin CRUD operations rather than signup.
+//
+// Authorization: every RPC is restricted to the cross-tenant platform-admin
+// principal — a USER holding platform_operator on system_tenant:_system — the
+// FGA relation that models "operator with cross-tenant elevated privilege"
+// (model.fga). This matches the dashboard's pre-existing requireCrdSession
+// cross-tenant-role gate. ext-authz enforces it via the (gibson.auth.v1.authz)
+// annotation; Envoy routes the /gibson. prefix to the daemon with the
+// jwt_authn + ext_authz chain (no admin-prefix chart change needed — the
+// catch-all route already gates every gibson.* method by its registry rule).
+package gibson.tenant.v1;
+
+option go_package = "github.com/zeroroot-ai/gibson/internal/server/daemon/api/gibson/tenant/v1;tenantv1";
+
+import "gibson/auth/v1/options.proto";
+
+// AdminTenantService is the dashboard-facing write side of admin tenant CRUD.
+// Each RPC records a tenant_admin_ops row (the admin's intent) and returns the
+// generated op_id; the tenant-operator drains the queue and applies the op to
+// the Tenant CR. Cross-tenant platform-admin only (platform_operator USER).
+service AdminTenantService {
+  // AdminProvisionTenant records intent to create a new tenant. Replaces
+  // provisionTenantAction's applyTenant() Tenant-CR create. The operator creates
+  // a Tenant CR with spec {displayName, owner, tier}. Idempotent on tenant_id:
+  // re-recording a provision for a slug whose Tenant CR the operator already
+  // created is a no-op at apply time (the operator's existence check), so a
+  // double-submit cannot double-provision.
+  rpc AdminProvisionTenant(AdminProvisionTenantRequest) returns (AdminProvisionTenantResponse) {
+    option (gibson.auth.v1.authz) = {
+      relation: "platform_operator",
+      object_type: "system_tenant",
+      object_deriver: "system_tenant",
+      allowed_identities: 1  // USER
+    };
+  }
+
+  // AdminUpdateTenant records intent to patch a tenant's tier and/or display
+  // name. Replaces updateTenantAction's patchTenant({spec}). The operator
+  // patches Tenant.spec.tier / spec.displayName for the fields the request marks
+  // set; unset fields are left untouched. Idempotent: applying the same patch
+  // twice converges.
+  rpc AdminUpdateTenant(AdminUpdateTenantRequest) returns (AdminUpdateTenantResponse) {
+    option (gibson.auth.v1.authz) = {
+      relation: "platform_operator",
+      object_type: "system_tenant",
+      object_deriver: "system_tenant",
+      allowed_identities: 1  // USER
+    };
+  }
+
+  // AdminDeleteTenant records intent to delete a tenant. Replaces
+  // deleteTenantAction's deleteTenant() Tenant-CR delete. The operator deletes
+  // the Tenant CR, which triggers the existing finalizer's 4-phase teardown — the
+  // daemon does NOT delete any tenant data itself. Idempotent: deleting an
+  // already-absent Tenant CR is a no-op success at apply time.
+  rpc AdminDeleteTenant(AdminDeleteTenantRequest) returns (AdminDeleteTenantResponse) {
+    option (gibson.auth.v1.authz) = {
+      relation: "platform_operator",
+      object_type: "system_tenant",
+      object_deriver: "system_tenant",
+      allowed_identities: 1  // USER
+    };
+  }
+}
+
+// AdminProvisionTenantRequest carries the spec inputs for a new tenant. Mirrors
+// provisionTenantInput in the dashboard (app/actions/crd/schemas.ts) and
+// applyTenant's TenantSpec.
+message AdminProvisionTenantRequest {
+  // tenant_id is the Tenant CR name. The dashboard derives it by slugifying the
+  // display name (the same slug applyTenant used as metadata.name). Required.
+  string tenant_id = 1;
+  // display_name becomes Tenant.spec.displayName. Required.
+  string display_name = 2;
+  // owner_email becomes Tenant.spec.owner. Required.
+  string owner_email = 3;
+  // tier becomes Tenant.spec.tier ("team"/"org"/"enterprise"/...). Empty
+  // defaults to "team" (matching provisionTenantAction's `?? 'team'`).
+  string tier = 4;
+}
+
+// AdminProvisionTenantResponse confirms the op was recorded.
+message AdminProvisionTenantResponse {
+  // op_id is the recorded tenant_admin_ops row id. Empty when a provision op was
+  // already pending for this tenant (idempotent de-dup).
+  string op_id = 1;
+}
+
+// AdminUpdateTenantRequest patches a tenant's tier and/or display name. At least
+// one of the *_set flags must be true. Mirrors updateTenantInput's optional
+// {tier?, displayName?}.
+message AdminUpdateTenantRequest {
+  // tenant_id is the Tenant CR name to patch. Required.
+  string tenant_id = 1;
+  // tier is the new Tenant.spec.tier; applied only when tier_set is true.
+  string tier = 2;
+  // tier_set marks tier for application (distinguishes "set tier" from "leave
+  // tier untouched").
+  bool tier_set = 3;
+  // display_name is the new Tenant.spec.displayName; applied only when
+  // display_name_set is true.
+  string display_name = 4;
+  // display_name_set marks display_name for application.
+  bool display_name_set = 5;
+}
+
+// AdminUpdateTenantResponse confirms the op was recorded.
+message AdminUpdateTenantResponse {
+  // op_id is the recorded tenant_admin_ops row id.
+  string op_id = 1;
+}
+
+// AdminDeleteTenantRequest deletes a tenant. Mirrors deleteTenantInput (the
+// confirmation-text gate stays dashboard-side; only the validated name reaches
+// here).
+message AdminDeleteTenantRequest {
+  // tenant_id is the Tenant CR name to delete. Required.
+  string tenant_id = 1;
+}
+
+// AdminDeleteTenantResponse confirms the op was recorded.
+message AdminDeleteTenantResponse {
+  // op_id is the recorded tenant_admin_ops row id. Empty when a delete op was
+  // already pending for this tenant (idempotent de-dup).
+  string op_id = 1;
+}

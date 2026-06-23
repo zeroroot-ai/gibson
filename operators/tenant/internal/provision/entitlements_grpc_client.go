@@ -273,6 +273,62 @@ func (c *EntitlementsGRPCClient) ReportTenantStatus(ctx context.Context, r Tenan
 	return resp.GetBillingActive(), nil
 }
 
+// TenantAdminOp is the operator's view of one admin tenant CRUD op the daemon
+// has queued for application to a Tenant CR (gibson#964, dashboard#855). It
+// mirrors operatorv1.TenantOp in the operator's own vocabulary so the
+// admin-ops reconciler does not depend on the generated proto type directly.
+type TenantAdminOp struct {
+	OpID           string
+	TenantID       string
+	OpType         string // "provision" | "update" | "delete"
+	DisplayName    string
+	DisplayNameSet bool
+	OwnerEmail     string
+	Tier           string
+	TierSet        bool
+}
+
+// ListPendingTenantOps returns the daemon's queue of admin tenant CRUD ops
+// awaiting application to a Tenant CR (operator-pull admin CRUD, gibson#964).
+// Each record carries the op type plus the spec inputs the operator applies.
+func (c *EntitlementsGRPCClient) ListPendingTenantOps(ctx context.Context) ([]TenantAdminOp, error) {
+	authedCtx, err := c.authCtx(ctx)
+	if err != nil {
+		return nil, err
+	}
+	resp, err := c.client.ListPendingTenantOps(authedCtx,
+		&operatorv1.ListPendingTenantOpsRequest{})
+	if err := translateGRPCError("list-pending-tenant-ops", err); err != nil {
+		return nil, err
+	}
+	out := make([]TenantAdminOp, 0, len(resp.GetOps()))
+	for _, op := range resp.GetOps() {
+		out = append(out, TenantAdminOp{
+			OpID:           op.GetOpId(),
+			TenantID:       op.GetTenantId(),
+			OpType:         op.GetOpType(),
+			DisplayName:    op.GetDisplayName(),
+			DisplayNameSet: op.GetDisplayNameSet(),
+			OwnerEmail:     op.GetOwnerEmail(),
+			Tier:           op.GetTier(),
+			TierSet:        op.GetTierSet(),
+		})
+	}
+	return out, nil
+}
+
+// AckTenantOp marks an admin-op record done after the operator has applied it to
+// the Tenant CR (gibson#964). Idempotent.
+func (c *EntitlementsGRPCClient) AckTenantOp(ctx context.Context, opID string) error {
+	authedCtx, err := c.authCtx(ctx)
+	if err != nil {
+		return err
+	}
+	_, err = c.client.AckTenantOp(authedCtx,
+		&operatorv1.AckTenantOpRequest{OpId: opID})
+	return translateGRPCError("ack-tenant-op", err)
+}
+
 // EmitReconcileSummary maps the controller's strongly-typed summary onto
 // the daemon's generic AuditEventMessage. The daemon's audit emitter
 // stores the event in the platform Postgres + Redis stream.
