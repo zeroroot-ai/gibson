@@ -1547,7 +1547,7 @@ func (s *DaemonServer) QueryPlugin(ctx context.Context, req *daemonpb.QueryPlugi
 	// Convert result to TypedValue
 	s.logger.Debug("plugin query completed", "plugin", req.Name, "method", req.Method, "duration_ms", duration.Milliseconds())
 	return &daemonpb.QueryPluginResponse{
-		Result:     anyToTypedValue(result),
+		Result:     AnyToTypedValue(result),
 		DurationMs: duration.Milliseconds(),
 	}, nil
 }

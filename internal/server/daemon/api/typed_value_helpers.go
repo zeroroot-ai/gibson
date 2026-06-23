@@ -17,7 +17,7 @@ func StringToTypedMap(jsonStr string) *commonpb.TypedMap {
 	if err := json.Unmarshal([]byte(jsonStr), &data); err != nil {
 		return nil
 	}
-	return mapToTypedMap(data)
+	return MapToTypedMap(data)
 }
 
 // MapToTypedMap converts map[string]any to *TypedMap.
@@ -30,11 +30,6 @@ func MapToTypedMap(m map[string]any) *commonpb.TypedMap {
 		entries[k] = AnyToTypedValue(v)
 	}
 	return &commonpb.TypedMap{Entries: entries}
-}
-
-// mapToTypedMap is the internal unexported version for backward compatibility.
-func mapToTypedMap(m map[string]any) *commonpb.TypedMap {
-	return MapToTypedMap(m)
 }
 
 // AnyToTypedValue converts any Go value to TypedValue.
@@ -65,11 +60,6 @@ func AnyToTypedValue(v any) *commonpb.TypedValue {
 		// Fallback: convert to string
 		return &commonpb.TypedValue{Kind: &commonpb.TypedValue_StringValue{StringValue: fmt.Sprintf("%v", v)}}
 	}
-}
-
-// anyToTypedValue is the internal unexported version for backward compatibility.
-func anyToTypedValue(v any) *commonpb.TypedValue {
-	return AnyToTypedValue(v)
 }
 
 // TypedMapToMap converts TypedMap back to map[string]any.
