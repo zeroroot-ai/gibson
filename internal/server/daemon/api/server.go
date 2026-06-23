@@ -201,6 +201,13 @@ type DaemonServer struct {
 	// than panicking or falling back to a bundled mock.
 	embedderResolver embedderResolverIface
 
+	// reembedTrigger reconciles a tenant's vector index against its CURRENT
+	// embedding configuration after a provider-config write changes the tenant's
+	// embedding provider/model (gibson#940). Fires asynchronously and is a cheap
+	// idempotent no-op when the index already matches. May be nil; when nil,
+	// provider-config writes do not eagerly reconcile the vector index.
+	reembedTrigger reembedTrigger
+
 	// execLimiter enforces per-(tenant, RPC) request rates for ExecuteLLM,
 	// StreamLLM, and TestProvider. May be nil; when nil rate limiting is skipped.
 	// Added by spec 25-daemon-driven-provider-config task 4.
