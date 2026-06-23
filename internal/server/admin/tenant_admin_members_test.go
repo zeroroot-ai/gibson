@@ -134,7 +134,12 @@ func (c *membersIdPClient) EnsureHumanUser(_ context.Context, req idp.EnsureHuma
 	}
 	return c.ensureUserID, nil
 }
-func (c *membersIdPClient) Close() error { return nil }
+func (c *membersIdPClient) CreateHumanUser(_ context.Context, _ idp.CreateHumanUserRequest) (idp.CreateHumanUserResult, error) {
+	return idp.CreateHumanUserResult{}, nil
+}
+func (c *membersIdPClient) SetUserPassword(_ context.Context, _, _ string) error    { return nil }
+func (c *membersIdPClient) SendVerificationEmail(_ context.Context, _ string) error { return nil }
+func (c *membersIdPClient) Close() error                                            { return nil }
 
 // staticOrgResolver is a fixed tenant->org resolver for tests.
 type staticOrgResolver struct {

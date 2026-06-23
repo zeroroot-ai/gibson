@@ -13,23 +13,28 @@
 // in-cluster ServiceAccount. That gave the web tier two broad, standing
 // privileges (IdP admin + cluster write) purely to bootstrap a tenant.
 //
-// SignupService.Signup collapses that privilege: the dashboard makes ONE
-// unauthenticated RPC carrying the founding-owner email, workspace name, and
-// plan tier, and the DAEMON performs the provisioning. The daemon does NOT add
-// a parallel Zitadel-admin write codepath — it provisions by creating and
-// owning the Tenant custom resource, which the gibson-tenant-operator already
-// reconciles into the per-tenant Zitadel org (TenantIdentity, gibson#803),
-// secrets backend, FGA grants, and data plane via its ordered sub-CRD chain
-// (gibson#805). One provisioning path (ADR-0027), operator-owned.
+// SignupService.Signup moves the IdP-admin half of that privilege off the web
+// tier: the dashboard makes ONE unauthenticated RPC carrying the founding-owner
+// email, profile, password, workspace name, and plan tier, and the DAEMON
+// performs the Zitadel human-owner provisioning (create-or-resume user, set
+// password, send verification email) using its EXISTING Zitadel admin
+// credential. The dashboard signup-bot Zitadel PAT is thereby retired
+// (dashboard#812).
 //
-// Once a customer is on this RPC the dashboard no longer needs the signup-bot
-// IAM PAT or cluster write access — that removal is dashboard#812 / dashboard#813.
+// The daemon does NOT touch Kubernetes and does NOT create the Tenant CR:
+// ADR-0023 forbids daemon-side K8s API access. The dashboard keeps creating the
+// Tenant CR (ADR-0044 sanctions tenant-provisioning K8s writes) — moving that
+// write off the dashboard is dashboard#813's job, not this slice. Once the
+// Tenant CR exists the gibson-tenant-operator provisions the per-tenant Zitadel
+// org via TenantIdentity (gibson#803) and the rest of its ordered sub-CRD chain
+// (gibson#805). So the cutover here is narrow and reversible: human-owner-user
+// provisioning is the only thing that moves daemon-side in #812.
 //
 // Authorization: Signup is UNAUTHENTICATED. It runs before any tenant or
 // membership exists, so there is no principal to FGA-check (exactly like
 // SetSignupProgress on UserService). The opaque attempt_id UUID is the
-// correlation capability; the daemon validates and rate-limits the request and
-// is the sole holder of the cluster-write privilege.
+// correlation capability; the daemon validates the request and is the sole
+// holder of the IdP-admin provisioning privilege.
 
 package tenantv1
 
@@ -53,28 +58,40 @@ const (
 //
 // For semantics around ctx use and closing/ending streaming RPCs, please refer to https://pkg.go.dev/google.golang.org/grpc/?tab=doc#ClientConn.NewStream.
 //
-// SignupService provisions a new tenant from a self-serve signup request.
+// SignupService provisions the founding-owner identity for a self-serve signup
+// request.
 //
-// It is the server-side replacement for the dashboard's privileged signup
-// path: the dashboard calls Signup instead of holding a Zitadel admin PAT and
-// writing Tenant/TenantMember CRs itself.
+// It is the server-side replacement for the IdP-admin half of the dashboard's
+// privileged signup path: the dashboard calls Signup instead of holding a
+// Zitadel admin PAT to create/credential the owner user. (The Tenant CR write
+// stays on the dashboard for now — dashboard#813.)
 type SignupServiceClient interface {
-	// Signup provisions a tenant for a self-serve signup attempt.
+	// Signup provisions the founding-owner identity for a self-serve signup
+	// attempt.
 	//
-	// The daemon creates (and owns) the Tenant CR with the supplied owner email,
-	// workspace display name, and plan tier; the gibson-tenant-operator then
-	// reconciles it into the Zitadel org + secrets + grants + data plane. The RPC
-	// returns as soon as the Tenant CR is accepted (create-and-return); the
-	// caller polls provisioning progress via UserService.GetSignupProgress
-	// (keyed by the same attempt_id) and/or the tenant's readiness signals.
+	// The daemon creates (or resumes) the Zitadel human-owner user with the
+	// supplied email + profile, sets the supplied password, and best-effort
+	// sends the verification email — the exact Zitadel admin operations the
+	// dashboard signup-bot performed with its privileged PAT, now performed
+	// daemon-side with the daemon's existing Zitadel admin credential. The RPC
+	// returns the derived tenant slug and the owner user id.
 	//
-	// Idempotent on attempt_id + tenant slug: re-issuing the same signup (e.g. a
-	// client retry) returns the existing tenant rather than failing, so a dropped
-	// response does not strand a half-provisioned tenant.
+	// The daemon does NOT touch Kubernetes and does NOT create the Tenant CR:
+	// ADR-0023 forbids daemon-side K8s API access. The dashboard keeps creating
+	// the Tenant CR (ADR-0044 sanctions that tenant-provisioning write) using the
+	// returned slug; the gibson-tenant-operator then reconciles that CR into the
+	// per-tenant Zitadel org (TenantIdentity, gibson#803), secrets, grants, and
+	// data plane (gibson#805). Net effect of this RPC: the dashboard drops its
+	// signup-bot Zitadel PAT.
+	//
+	// Idempotent on owner email: re-issuing the same signup (a client retry)
+	// resumes the existing owner user — resetting its password to the supplied
+	// value and returning already_existed=true — rather than failing, so a
+	// dropped response does not strand the owner with a stale credential.
 	//
 	// UNAUTHENTICATED: runs before any tenant/membership exists. The attempt_id
-	// UUID is the capability; the daemon is the sole holder of the provisioning
-	// privilege (no IdP PAT or cluster write in the caller).
+	// UUID is the capability; the daemon is the sole holder of the IdP-admin
+	// provisioning privilege (no IdP PAT in the caller).
 	Signup(ctx context.Context, in *SignupRequest, opts ...grpc.CallOption) (*SignupResponse, error)
 }
 
@@ -100,28 +117,40 @@ func (c *signupServiceClient) Signup(ctx context.Context, in *SignupRequest, opt
 // All implementations must embed UnimplementedSignupServiceServer
 // for forward compatibility.
 //
-// SignupService provisions a new tenant from a self-serve signup request.
+// SignupService provisions the founding-owner identity for a self-serve signup
+// request.
 //
-// It is the server-side replacement for the dashboard's privileged signup
-// path: the dashboard calls Signup instead of holding a Zitadel admin PAT and
-// writing Tenant/TenantMember CRs itself.
+// It is the server-side replacement for the IdP-admin half of the dashboard's
+// privileged signup path: the dashboard calls Signup instead of holding a
+// Zitadel admin PAT to create/credential the owner user. (The Tenant CR write
+// stays on the dashboard for now — dashboard#813.)
 type SignupServiceServer interface {
-	// Signup provisions a tenant for a self-serve signup attempt.
+	// Signup provisions the founding-owner identity for a self-serve signup
+	// attempt.
 	//
-	// The daemon creates (and owns) the Tenant CR with the supplied owner email,
-	// workspace display name, and plan tier; the gibson-tenant-operator then
-	// reconciles it into the Zitadel org + secrets + grants + data plane. The RPC
-	// returns as soon as the Tenant CR is accepted (create-and-return); the
-	// caller polls provisioning progress via UserService.GetSignupProgress
-	// (keyed by the same attempt_id) and/or the tenant's readiness signals.
+	// The daemon creates (or resumes) the Zitadel human-owner user with the
+	// supplied email + profile, sets the supplied password, and best-effort
+	// sends the verification email — the exact Zitadel admin operations the
+	// dashboard signup-bot performed with its privileged PAT, now performed
+	// daemon-side with the daemon's existing Zitadel admin credential. The RPC
+	// returns the derived tenant slug and the owner user id.
 	//
-	// Idempotent on attempt_id + tenant slug: re-issuing the same signup (e.g. a
-	// client retry) returns the existing tenant rather than failing, so a dropped
-	// response does not strand a half-provisioned tenant.
+	// The daemon does NOT touch Kubernetes and does NOT create the Tenant CR:
+	// ADR-0023 forbids daemon-side K8s API access. The dashboard keeps creating
+	// the Tenant CR (ADR-0044 sanctions that tenant-provisioning write) using the
+	// returned slug; the gibson-tenant-operator then reconciles that CR into the
+	// per-tenant Zitadel org (TenantIdentity, gibson#803), secrets, grants, and
+	// data plane (gibson#805). Net effect of this RPC: the dashboard drops its
+	// signup-bot Zitadel PAT.
+	//
+	// Idempotent on owner email: re-issuing the same signup (a client retry)
+	// resumes the existing owner user — resetting its password to the supplied
+	// value and returning already_existed=true — rather than failing, so a
+	// dropped response does not strand the owner with a stale credential.
 	//
 	// UNAUTHENTICATED: runs before any tenant/membership exists. The attempt_id
-	// UUID is the capability; the daemon is the sole holder of the provisioning
-	// privilege (no IdP PAT or cluster write in the caller).
+	// UUID is the capability; the daemon is the sole holder of the IdP-admin
+	// provisioning privilege (no IdP PAT in the caller).
 	Signup(context.Context, *SignupRequest) (*SignupResponse, error)
 	mustEmbedUnimplementedSignupServiceServer()
 }

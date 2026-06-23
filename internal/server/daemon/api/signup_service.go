@@ -1,0 +1,152 @@
+// Package api — signup_service.go implements SignupService.Signup.
+//
+// Signup is the daemon-side replacement for the IdP-admin half of the
+// dashboard's self-serve signup path (E9, gibson#812, ADR-0043/0044). It
+// provisions the founding-owner Zitadel human user — create-or-resume the user,
+// set the password the customer typed, best-effort send the verification email
+// — using the daemon's EXISTING Zitadel admin credential, exactly the ops the
+// dashboard signup-bot performed with its privileged PAT
+// (enterprise/platform/dashboard/app/actions/signup.ts:createOrResumeZitadelUser).
+//
+// The handler deliberately does NOT touch Kubernetes and does NOT create the
+// Tenant CR: ADR-0023 forbids daemon-side K8s API access. The dashboard keeps
+// applying the Tenant CR (ADR-0044), keyed by the slug this handler returns;
+// the gibson-tenant-operator then reconciles it into the per-tenant Zitadel org
+// and the rest of the provisioning chain (gibson#803/#805). Moving the Tenant
+// CR write off the dashboard is dashboard#813, not this slice.
+//
+// Authorization: Signup is UNAUTHENTICATED (pre-tenant, attempt_id-keyed) per
+// the proto annotation — there is no principal to FGA-check, exactly like
+// UserService.SetSignupProgress.
+package api
+
+import (
+	"context"
+	"errors"
+	"regexp"
+	"strings"
+
+	"google.golang.org/grpc/codes"
+	status_grpc "google.golang.org/grpc/status"
+
+	"github.com/zeroroot-ai/gibson/internal/platform/idp"
+	tenantv1 "github.com/zeroroot-ai/gibson/internal/server/daemon/api/gibson/tenant/v1"
+)
+
+// slugNonAllowed matches every run of characters that are not lowercase
+// alphanumerics or hyphens; runs collapse to a single hyphen. This mirrors the
+// dashboard's slugify (src/lib/signup/slug.ts) so the slug the daemon returns
+// is byte-identical to the one the dashboard computes and stamps on the Tenant
+// CR. Keep these two in sync.
+var slugNonAllowed = regexp.MustCompile(`[^a-z0-9-]+`)
+
+// signupSlugify derives a tenant slug from a workspace display name, mirroring
+// the dashboard's slugify exactly:
+//
+//	lowercase → replace non [a-z0-9-] with "-" → collapse runs of "-" →
+//	trim leading/trailing "-" → cap at 63 chars.
+func signupSlugify(s string) string {
+	s = strings.ToLower(s)
+	s = slugNonAllowed.ReplaceAllString(s, "-")
+	// Collapse any remaining multi-hyphen runs (the regex already collapses
+	// non-allowed runs, but pre-existing hyphens in the input can still
+	// adjoin).
+	for strings.Contains(s, "--") {
+		s = strings.ReplaceAll(s, "--", "-")
+	}
+	s = strings.Trim(s, "-")
+	if len(s) > 63 {
+		s = s[:63]
+		s = strings.TrimRight(s, "-")
+	}
+	return s
+}
+
+// Signup implements SignupServiceServer.
+//
+// It is unauthenticated and idempotent on owner email: a retry resumes the
+// existing owner user (resetting its password) rather than failing.
+func (s *DaemonServer) Signup(ctx context.Context, req *tenantv1.SignupRequest) (*tenantv1.SignupResponse, error) {
+	// ---- validate ----
+	if req.GetAttemptId() == "" {
+		return nil, status_grpc.Error(codes.InvalidArgument, "attempt_id is required")
+	}
+	if !isUUID(req.GetAttemptId()) {
+		return nil, status_grpc.Error(codes.InvalidArgument, "attempt_id must be a valid UUID")
+	}
+	if req.GetOwnerEmail() == "" {
+		return nil, status_grpc.Error(codes.InvalidArgument, "owner_email is required")
+	}
+	if req.GetWorkspaceName() == "" {
+		return nil, status_grpc.Error(codes.InvalidArgument, "workspace_name is required")
+	}
+	if req.GetTier() == "" {
+		return nil, status_grpc.Error(codes.InvalidArgument, "tier is required")
+	}
+	if req.GetPassword() == "" {
+		return nil, status_grpc.Error(codes.InvalidArgument, "password is required")
+	}
+
+	slug := signupSlugify(req.GetWorkspaceName())
+	if slug == "" {
+		return nil, status_grpc.Error(codes.InvalidArgument, "workspace_name does not yield a valid tenant slug")
+	}
+
+	if s.idpAdminClient == nil {
+		return nil, status_grpc.Error(codes.Unavailable, "identity provider not configured")
+	}
+
+	// ---- provision the founding-owner Zitadel user ----
+	// OrgID is left empty: the owner user is provisioned in the admin client's
+	// default (platform) org. Per-tenant org membership is added later by the
+	// operator once the tenant's org exists (TenantIdentity, gibson#803).
+	result, err := s.idpAdminClient.CreateHumanUser(ctx, idp.CreateHumanUserRequest{
+		Email:      req.GetOwnerEmail(),
+		GivenName:  req.GetOwnerFirstName(),
+		FamilyName: req.GetOwnerLastName(),
+		Password:   req.GetPassword(),
+		// Mark verified at create-time, mirroring the dashboard signup default:
+		// Zitadel keeps unverified users in STATE_INITIAL which blocks
+		// password sign-in. The user just typed the password and submitted; a
+		// best-effort verification email below handles real ownership
+		// confirmation without gating login on it.
+		EmailVerified: true,
+	})
+	if err != nil {
+		// NEVER log req.Password. Log only the attempt id and the sanitized
+		// idp error (the idp layer already strips credential-bearing detail).
+		s.logger.ErrorContext(ctx, "Signup: provision owner user failed",
+			"attempt_id", req.GetAttemptId(),
+			"error", err.Error(),
+		)
+		switch {
+		case errors.Is(err, idp.ErrUnreachable):
+			return nil, status_grpc.Error(codes.Unavailable, "identity provider unreachable")
+		case errors.Is(err, idp.ErrPermission):
+			// The daemon's admin credential lacks the rights to create the
+			// owner user — an operator misconfiguration, not a caller error.
+			return nil, status_grpc.Error(codes.Internal, "failed to provision owner user")
+		default:
+			return nil, status_grpc.Error(codes.Internal, "failed to provision owner user")
+		}
+	}
+
+	// ---- best-effort verification email ----
+	// Skipped implicitly when the user was created already-verified: Zitadel has
+	// no pending code and the resend returns an error, which we treat as
+	// non-fatal (matches the dashboard's conditional skip). We still call it so
+	// that a future SMTP-enabled / unverified-at-create flow re-enables the mail
+	// automatically; any error is logged and swallowed.
+	if verr := s.idpAdminClient.SendVerificationEmail(ctx, result.UserID); verr != nil {
+		s.logger.InfoContext(ctx, "Signup: verification email not sent (non-fatal)",
+			"attempt_id", req.GetAttemptId(),
+			"error", verr.Error(),
+		)
+	}
+
+	return &tenantv1.SignupResponse{
+		TenantId:       slug,
+		AlreadyExisted: result.AlreadyExisted,
+		OwnerUserId:    result.UserID,
+	}, nil
+}

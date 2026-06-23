@@ -13,23 +13,28 @@
 // in-cluster ServiceAccount. That gave the web tier two broad, standing
 // privileges (IdP admin + cluster write) purely to bootstrap a tenant.
 //
-// SignupService.Signup collapses that privilege: the dashboard makes ONE
-// unauthenticated RPC carrying the founding-owner email, workspace name, and
-// plan tier, and the DAEMON performs the provisioning. The daemon does NOT add
-// a parallel Zitadel-admin write codepath — it provisions by creating and
-// owning the Tenant custom resource, which the gibson-tenant-operator already
-// reconciles into the per-tenant Zitadel org (TenantIdentity, gibson#803),
-// secrets backend, FGA grants, and data plane via its ordered sub-CRD chain
-// (gibson#805). One provisioning path (ADR-0027), operator-owned.
+// SignupService.Signup moves the IdP-admin half of that privilege off the web
+// tier: the dashboard makes ONE unauthenticated RPC carrying the founding-owner
+// email, profile, password, workspace name, and plan tier, and the DAEMON
+// performs the Zitadel human-owner provisioning (create-or-resume user, set
+// password, send verification email) using its EXISTING Zitadel admin
+// credential. The dashboard signup-bot Zitadel PAT is thereby retired
+// (dashboard#812).
 //
-// Once a customer is on this RPC the dashboard no longer needs the signup-bot
-// IAM PAT or cluster write access — that removal is dashboard#812 / dashboard#813.
+// The daemon does NOT touch Kubernetes and does NOT create the Tenant CR:
+// ADR-0023 forbids daemon-side K8s API access. The dashboard keeps creating the
+// Tenant CR (ADR-0044 sanctions tenant-provisioning K8s writes) — moving that
+// write off the dashboard is dashboard#813's job, not this slice. Once the
+// Tenant CR exists the gibson-tenant-operator provisions the per-tenant Zitadel
+// org via TenantIdentity (gibson#803) and the rest of its ordered sub-CRD chain
+// (gibson#805). So the cutover here is narrow and reversible: human-owner-user
+// provisioning is the only thing that moves daemon-side in #812.
 //
 // Authorization: Signup is UNAUTHENTICATED. It runs before any tenant or
 // membership exists, so there is no principal to FGA-check (exactly like
 // SetSignupProgress on UserService). The opaque attempt_id UUID is the
-// correlation capability; the daemon validates and rate-limits the request and
-// is the sole holder of the cluster-write privilege.
+// correlation capability; the daemon validates the request and is the sole
+// holder of the IdP-admin provisioning privilege.
 
 package tenantv1
 
@@ -48,11 +53,13 @@ const (
 	_ = protoimpl.EnforceVersion(protoimpl.MaxVersion - 20)
 )
 
-// SignupRequest carries everything the daemon needs to provision a tenant.
-// It deliberately carries NO password and NO IdP-admin credential: the daemon
-// holds the provisioning privilege, and the human owner's credential lifecycle
-// is handled by the IdP login flow (native-cli-login / Zitadel), not minted
-// here.
+// SignupRequest carries everything the daemon needs to provision the
+// founding-owner Zitadel user. It carries the owner password (write-only; see
+// the field doc) because the daemon now performs the exact create-user +
+// set-password the dashboard signup-bot used to perform — the password the user
+// typed must reach the daemon for it to set credentials. It carries NO
+// IdP-admin credential: the daemon holds the provisioning privilege via its own
+// Zitadel admin client.
 type SignupRequest struct {
 	state         protoimpl.MessageState
 	sizeCache     protoimpl.SizeCache
@@ -62,27 +69,38 @@ type SignupRequest struct {
 	// request with the UserService signup-progress stream and guards retries.
 	// Required; must be a valid UUID.
 	AttemptId string `protobuf:"bytes,1,opt,name=attempt_id,json=attemptId,proto3" json:"attempt_id,omitempty"`
-	// owner_email is the founding owner's email address. It becomes the Tenant
-	// CR's spec.owner — the operator uses it as the Zitadel org admin / billing
-	// contact and seeds the founding owner membership from it. Required.
+	// owner_email is the founding owner's email address. The daemon provisions
+	// the Zitadel human-owner user under this email (login name) and the
+	// dashboard records it as the Tenant CR's spec.owner. Required.
 	OwnerEmail string `protobuf:"bytes,2,opt,name=owner_email,json=ownerEmail,proto3" json:"owner_email,omitempty"`
-	// workspace_name is the human-readable workspace / company name. It becomes
-	// the Tenant CR's spec.displayName (and the Zitadel org name). Required.
+	// workspace_name is the human-readable workspace / company name. The daemon
+	// derives the tenant slug from it (returned as tenant_id); the dashboard uses
+	// it as the Tenant CR's spec.displayName. Required.
 	WorkspaceName string `protobuf:"bytes,3,opt,name=workspace_name,json=workspaceName,proto3" json:"workspace_name,omitempty"`
-	// tier is the canonical plan id ("team", "org", "enterprise"). It becomes the
-	// Tenant CR's spec.tier. Required; validated against the known self-serve
-	// tiers.
+	// tier is the canonical plan id ("team", "org", "enterprise"). The dashboard
+	// records it as the Tenant CR's spec.tier. Required; validated against the
+	// known self-serve tiers.
 	Tier string `protobuf:"bytes,4,opt,name=tier,proto3" json:"tier,omitempty"`
 	// owner_first_name / owner_last_name are the founding owner's profile name.
-	// Optional — carried so the IdP-side user provisioning can populate the
-	// profile; the daemon does not create the human user itself.
+	// Optional — used to populate the Zitadel human-user profile the daemon
+	// creates.
 	OwnerFirstName string `protobuf:"bytes,5,opt,name=owner_first_name,json=ownerFirstName,proto3" json:"owner_first_name,omitempty"`
 	OwnerLastName  string `protobuf:"bytes,6,opt,name=owner_last_name,json=ownerLastName,proto3" json:"owner_last_name,omitempty"`
 	// stripe_customer_id pins a pre-created Stripe customer to the tenant for
 	// deterministic billing adoption on the card-first signup path. Optional;
-	// when set it is recorded on the Tenant CR so the billing reconciler adopts
+	// recorded by the dashboard on the Tenant CR so the billing reconciler adopts
 	// the existing customer rather than creating a new one.
 	StripeCustomerId string `protobuf:"bytes,7,opt,name=stripe_customer_id,json=stripeCustomerId,proto3" json:"stripe_customer_id,omitempty"`
+	// password is the founding owner's initial password (the value the user typed
+	// at signup). The daemon sets it on the Zitadel human-owner user so the owner
+	// can sign in immediately — replacing the privileged dashboard signup-bot
+	// setUserPassword call. Required.
+	//
+	// SECURITY: write-only. The daemon forwards it to the IdP request body only;
+	// it is never logged, persisted, or returned. The RPC is unauthenticated but
+	// pre-tenant and attempt_id-keyed, exactly as the prior dashboard signup-bot
+	// path was unauthenticated from the browser's perspective.
+	Password string `protobuf:"bytes,8,opt,name=password,proto3" json:"password,omitempty"`
 }
 
 func (x *SignupRequest) Reset() {
@@ -166,18 +184,32 @@ func (x *SignupRequest) GetStripeCustomerId() string {
 	return ""
 }
 
-// SignupResponse reports the outcome of provisioning.
+func (x *SignupRequest) GetPassword() string {
+	if x != nil {
+		return x.Password
+	}
+	return ""
+}
+
+// SignupResponse reports the outcome of owner provisioning.
 type SignupResponse struct {
 	state         protoimpl.MessageState
 	sizeCache     protoimpl.SizeCache
 	unknownFields protoimpl.UnknownFields
 
-	// tenant_id is the provisioned tenant's id (the Tenant CR name / slug derived
-	// from the workspace name). The caller uses it to scope subsequent reads.
+	// tenant_id is the deterministic tenant slug the daemon derived from the
+	// workspace name (the same slugify the dashboard computes). The dashboard
+	// uses it as the Tenant CR name when it applies the Tenant CR.
 	TenantId string `protobuf:"bytes,1,opt,name=tenant_id,json=tenantId,proto3" json:"tenant_id,omitempty"`
-	// already_existed is true when the tenant was already provisioned for this
-	// signup (idempotent retry) rather than created by this call.
+	// already_existed is true when the founding-owner user already existed for
+	// this email (idempotent retry / resume) rather than being created by this
+	// call. Its password was reset to the supplied value either way.
 	AlreadyExisted bool `protobuf:"varint,2,opt,name=already_existed,json=alreadyExisted,proto3" json:"already_existed,omitempty"`
+	// owner_user_id is the Zitadel id of the provisioned founding-owner human
+	// user. The dashboard does not currently need it (the Tenant CR's owner is
+	// the email), but it is returned for correlation / future direct owner
+	// references.
+	OwnerUserId string `protobuf:"bytes,3,opt,name=owner_user_id,json=ownerUserId,proto3" json:"owner_user_id,omitempty"`
 }
 
 func (x *SignupResponse) Reset() {
@@ -226,6 +258,13 @@ func (x *SignupResponse) GetAlreadyExisted() bool {
 	return false
 }
 
+func (x *SignupResponse) GetOwnerUserId() string {
+	if x != nil {
+		return x.OwnerUserId
+	}
+	return ""
+}
+
 var File_gibson_tenant_v1_signup_proto protoreflect.FileDescriptor
 
 var file_gibson_tenant_v1_signup_proto_rawDesc = []byte{
@@ -234,7 +273,7 @@ var file_gibson_tenant_v1_signup_proto_rawDesc = []byte{
 	0x10, 0x67, 0x69, 0x62, 0x73, 0x6f, 0x6e, 0x2e, 0x74, 0x65, 0x6e, 0x61, 0x6e, 0x74, 0x2e, 0x76,
 	0x31, 0x1a, 0x1c, 0x67, 0x69, 0x62, 0x73, 0x6f, 0x6e, 0x2f, 0x61, 0x75, 0x74, 0x68, 0x2f, 0x76,
 	0x31, 0x2f, 0x6f, 0x70, 0x74, 0x69, 0x6f, 0x6e, 0x73, 0x2e, 0x70, 0x72, 0x6f, 0x74, 0x6f, 0x22,
-	0x8a, 0x02, 0x0a, 0x0d, 0x53, 0x69, 0x67, 0x6e, 0x75, 0x70, 0x52, 0x65, 0x71, 0x75, 0x65, 0x73,
+	0xa6, 0x02, 0x0a, 0x0d, 0x53, 0x69, 0x67, 0x6e, 0x75, 0x70, 0x52, 0x65, 0x71, 0x75, 0x65, 0x73,
 	0x74, 0x12, 0x1d, 0x0a, 0x0a, 0x61, 0x74, 0x74, 0x65, 0x6d, 0x70, 0x74, 0x5f, 0x69, 0x64, 0x18,
 	0x01, 0x20, 0x01, 0x28, 0x09, 0x52, 0x09, 0x61, 0x74, 0x74, 0x65, 0x6d, 0x70, 0x74, 0x49, 0x64,
 	0x12, 0x1f, 0x0a, 0x0b, 0x6f, 0x77, 0x6e, 0x65, 0x72, 0x5f, 0x65, 0x6d, 0x61, 0x69, 0x6c, 0x18,
@@ -250,13 +289,17 @@ var file_gibson_tenant_v1_signup_proto_rawDesc = []byte{
 	0x0d, 0x6f, 0x77, 0x6e, 0x65, 0x72, 0x4c, 0x61, 0x73, 0x74, 0x4e, 0x61, 0x6d, 0x65, 0x12, 0x2c,
 	0x0a, 0x12, 0x73, 0x74, 0x72, 0x69, 0x70, 0x65, 0x5f, 0x63, 0x75, 0x73, 0x74, 0x6f, 0x6d, 0x65,
 	0x72, 0x5f, 0x69, 0x64, 0x18, 0x07, 0x20, 0x01, 0x28, 0x09, 0x52, 0x10, 0x73, 0x74, 0x72, 0x69,
-	0x70, 0x65, 0x43, 0x75, 0x73, 0x74, 0x6f, 0x6d, 0x65, 0x72, 0x49, 0x64, 0x22, 0x56, 0x0a, 0x0e,
-	0x53, 0x69, 0x67, 0x6e, 0x75, 0x70, 0x52, 0x65, 0x73, 0x70, 0x6f, 0x6e, 0x73, 0x65, 0x12, 0x1b,
-	0x0a, 0x09, 0x74, 0x65, 0x6e, 0x61, 0x6e, 0x74, 0x5f, 0x69, 0x64, 0x18, 0x01, 0x20, 0x01, 0x28,
-	0x09, 0x52, 0x08, 0x74, 0x65, 0x6e, 0x61, 0x6e, 0x74, 0x49, 0x64, 0x12, 0x27, 0x0a, 0x0f, 0x61,
-	0x6c, 0x72, 0x65, 0x61, 0x64, 0x79, 0x5f, 0x65, 0x78, 0x69, 0x73, 0x74, 0x65, 0x64, 0x18, 0x02,
-	0x20, 0x01, 0x28, 0x08, 0x52, 0x0e, 0x61, 0x6c, 0x72, 0x65, 0x61, 0x64, 0x79, 0x45, 0x78, 0x69,
-	0x73, 0x74, 0x65, 0x64, 0x32, 0x64, 0x0a, 0x0d, 0x53, 0x69, 0x67, 0x6e, 0x75, 0x70, 0x53, 0x65,
+	0x70, 0x65, 0x43, 0x75, 0x73, 0x74, 0x6f, 0x6d, 0x65, 0x72, 0x49, 0x64, 0x12, 0x1a, 0x0a, 0x08,
+	0x70, 0x61, 0x73, 0x73, 0x77, 0x6f, 0x72, 0x64, 0x18, 0x08, 0x20, 0x01, 0x28, 0x09, 0x52, 0x08,
+	0x70, 0x61, 0x73, 0x73, 0x77, 0x6f, 0x72, 0x64, 0x22, 0x7a, 0x0a, 0x0e, 0x53, 0x69, 0x67, 0x6e,
+	0x75, 0x70, 0x52, 0x65, 0x73, 0x70, 0x6f, 0x6e, 0x73, 0x65, 0x12, 0x1b, 0x0a, 0x09, 0x74, 0x65,
+	0x6e, 0x61, 0x6e, 0x74, 0x5f, 0x69, 0x64, 0x18, 0x01, 0x20, 0x01, 0x28, 0x09, 0x52, 0x08, 0x74,
+	0x65, 0x6e, 0x61, 0x6e, 0x74, 0x49, 0x64, 0x12, 0x27, 0x0a, 0x0f, 0x61, 0x6c, 0x72, 0x65, 0x61,
+	0x64, 0x79, 0x5f, 0x65, 0x78, 0x69, 0x73, 0x74, 0x65, 0x64, 0x18, 0x02, 0x20, 0x01, 0x28, 0x08,
+	0x52, 0x0e, 0x61, 0x6c, 0x72, 0x65, 0x61, 0x64, 0x79, 0x45, 0x78, 0x69, 0x73, 0x74, 0x65, 0x64,
+	0x12, 0x22, 0x0a, 0x0d, 0x6f, 0x77, 0x6e, 0x65, 0x72, 0x5f, 0x75, 0x73, 0x65, 0x72, 0x5f, 0x69,
+	0x64, 0x18, 0x03, 0x20, 0x01, 0x28, 0x09, 0x52, 0x0b, 0x6f, 0x77, 0x6e, 0x65, 0x72, 0x55, 0x73,
+	0x65, 0x72, 0x49, 0x64, 0x32, 0x64, 0x0a, 0x0d, 0x53, 0x69, 0x67, 0x6e, 0x75, 0x70, 0x53, 0x65,
 	0x72, 0x76, 0x69, 0x63, 0x65, 0x12, 0x53, 0x0a, 0x06, 0x53, 0x69, 0x67, 0x6e, 0x75, 0x70, 0x12,
 	0x1f, 0x2e, 0x67, 0x69, 0x62, 0x73, 0x6f, 0x6e, 0x2e, 0x74, 0x65, 0x6e, 0x61, 0x6e, 0x74, 0x2e,
 	0x76, 0x31, 0x2e, 0x53, 0x69, 0x67, 0x6e, 0x75, 0x70, 0x52, 0x65, 0x71, 0x75, 0x65, 0x73, 0x74,
