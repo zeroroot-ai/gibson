@@ -55,11 +55,26 @@ type reembedTrigger interface {
 	Trigger(tenantID string)
 }
 
-// WithReembedTrigger wires the per-tenant re-embed trigger (gibson#940). When
-// nil, provider-config writes do not reconcile the vector index — the feature
-// degrades to "configure your embedder, then a vector op rebuilds lazily" rather
-// than panicking. Returns the server for chaining.
+// noopReembedTrigger is the always-non-nil default reembedTrigger. It does
+// nothing, so provider-config writes are safe before the production trigger is
+// wired (in tests, or when the re-embed feature is not configured). It exists so
+// s.reembedTrigger is NEVER nil at request time — the handlers call
+// s.reembedTrigger.Trigger unconditionally instead of guarding against a missing
+// dependency in the request path ([[0003]]: validate-at-construction, no
+// graceful-nil in request paths).
+type noopReembedTrigger struct{}
+
+func (noopReembedTrigger) Trigger(string) {}
+
+// WithReembedTrigger wires the per-tenant re-embed trigger (gibson#940). Passing
+// nil restores the no-op default, so provider-config writes do not reconcile the
+// vector index — the feature degrades to "configure your embedder, then a vector
+// op rebuilds lazily" rather than panicking. The field is never left nil.
+// Returns the server for chaining.
 func (s *DaemonServer) WithReembedTrigger(t reembedTrigger) *DaemonServer {
+	if t == nil {
+		t = noopReembedTrigger{}
+	}
 	s.reembedTrigger = t
 	return s
 }
@@ -70,8 +85,11 @@ func (s *DaemonServer) WithReembedTrigger(t reembedTrigger) *DaemonServer {
 // is invalidated; SetDefaultProvider calls triggerReembed directly (the default
 // flip can change which embedder is resolved even without an embedding-input on
 // this RPC). The call is non-blocking: the trigger owns the goroutine.
+//
+// s.reembedTrigger is never nil (defaulted to the no-op at construction), so the
+// only branch here is on the input shape, not on a missing dependency.
 func (s *DaemonServer) maybeTriggerReembed(tenantID string, input *tenantv1.ProviderConfigInput) {
-	if s.reembedTrigger == nil || tenantID == "" || !inputServesEmbedding(input) {
+	if tenantID == "" || !inputServesEmbedding(input) {
 		return
 	}
 	s.reembedTrigger.Trigger(tenantID)
@@ -79,8 +97,9 @@ func (s *DaemonServer) maybeTriggerReembed(tenantID string, input *tenantv1.Prov
 
 // triggerReembed fires the reconcile unconditionally (used by SetDefaultProvider,
 // where the default provider may have flipped to/from an embedding provider).
+// s.reembedTrigger is never nil (defaulted to the no-op at construction).
 func (s *DaemonServer) triggerReembed(tenantID string) {
-	if s.reembedTrigger == nil || tenantID == "" {
+	if tenantID == "" {
 		return
 	}
 	s.reembedTrigger.Trigger(tenantID)
@@ -125,11 +144,16 @@ type ReembedJobTrigger struct {
 }
 
 // NewReembedJobTrigger builds the production trigger. run executes one tenant's
-// re-embed pass (resolve StateClient + embedder, call reembed.RunForTenant).
-// logger may be nil (falls back to slog.Default()). timeout bounds a single
-// re-embed pass; <= 0 uses a default. The returned value satisfies the
-// reembedTrigger seam consumed by WithReembedTrigger.
+// re-embed pass (resolve StateClient + embedder, call reembed.RunForTenant) and
+// MUST be non-nil — a nil runner is a wiring bug, so it panics at construction
+// rather than silently no-op'ing in the request path ([[0003]]). logger may be
+// nil (falls back to slog.Default()). timeout bounds a single re-embed pass;
+// <= 0 uses a default. The returned value satisfies the reembedTrigger seam
+// consumed by WithReembedTrigger.
 func NewReembedJobTrigger(run ReembedRunner, logger *slog.Logger, timeout time.Duration) *ReembedJobTrigger {
+	if run == nil {
+		panic("api.NewReembedJobTrigger: run must be non-nil")
+	}
 	if logger == nil {
 		logger = slog.Default()
 	}
@@ -149,7 +173,10 @@ func NewReembedJobTrigger(run ReembedRunner, logger *slog.Logger, timeout time.D
 // run, or the next Trigger, converges on the latest config via the idempotent
 // index marker. Non-blocking — the work runs in a detached goroutine.
 func (t *ReembedJobTrigger) Trigger(tenantID string) {
-	if t == nil || t.run == nil || tenantID == "" {
+	// t.run is guaranteed non-nil by NewReembedJobTrigger (validate-at-construction,
+	// [[0003]]); the only request-path skip is an empty tenant id. The bare nil-receiver
+	// check is a defensive shim for a zero-value trigger.
+	if t == nil || tenantID == "" {
 		return
 	}
 

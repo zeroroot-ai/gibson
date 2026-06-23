@@ -57,6 +57,10 @@ func TestNoContextBackgroundInRPCHandlers(t *testing.T) {
 			Category: astchecks.CategoryDefensiveGuard,
 			Reason:   "saga rollback context must outlive the failed-RPC ctx; bounded by WithTimeout(10s)",
 		},
+		"internal/server/daemon/api/server_reembed_trigger.go:202": astchecks.Entry{
+			Category: astchecks.CategoryDefensiveGuard,
+			Reason:   "detached async re-embed goroutine must outlive the inbound RPC ctx; bounded by WithTimeout(t.timeout)",
+		},
 	}
 
 	opts := astchecks.WalkOpts{
