@@ -179,17 +179,36 @@ service ProviderService {
 // Provider record types
 // ---------------------------------------------------------------------------
 
+// Capability declares a service a provider can fulfil. A provider may serve
+// chat completions, embeddings, or both — letting an operator run e.g.
+// Anthropic for chat and OpenAI/Bedrock for embeddings (E11 BYO-embedder).
+enum Capability {
+  CAPABILITY_UNSPECIFIED = 0;
+  // CAPABILITY_CHAT: the provider serves chat / completion requests.
+  CAPABILITY_CHAT        = 1;
+  // CAPABILITY_EMBEDDING: the provider serves text-embedding requests.
+  CAPABILITY_EMBEDDING   = 2;
+}
+
 // ProviderRecord is the read-side representation of a stored provider config.
 message ProviderRecord {
   string id = 1;
   string name = 2;
   string type = 3;
+  // default_model is the default CHAT model for this provider.
   string default_model = 4;
   bool is_default = 5;
   bool enabled = 6;
   map<string, string> credentials_masked = 7;
   string created_at = 8;
   string updated_at = 9;
+  // capabilities declares which services this provider fulfils (chat and/or
+  // embedding). Empty implies the legacy chat-only default.
+  repeated Capability capabilities = 10;
+  // default_embedding_model is the default model used for embedding requests,
+  // independent of default_model (the chat model). Empty when the provider
+  // does not serve embeddings.
+  string default_embedding_model = 11;
 }
 
 // ProviderConfigInput is the write-side shape for CreateProvider and
@@ -197,9 +216,17 @@ message ProviderRecord {
 message ProviderConfigInput {
   string name = 1;
   string type = 2;
+  // default_model is the default CHAT model for this provider.
   string default_model = 3;
   map<string, string> credentials = 4;
   bool set_as_default = 5;
+  // capabilities declares which services this provider fulfils (chat and/or
+  // embedding). Empty implies the legacy chat-only default.
+  repeated Capability capabilities = 6;
+  // default_embedding_model is the default model used for embedding requests,
+  // independent of default_model (the chat model). Empty when the provider
+  // does not serve embeddings.
+  string default_embedding_model = 7;
 }
 
 // CredentialFieldType classifies the UI widget and validation semantics for a
