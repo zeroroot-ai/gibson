@@ -50,7 +50,7 @@ require (
 	github.com/testcontainers/testcontainers-go v0.42.0
 	github.com/vmihailenco/msgpack/v5 v5.4.1
 	github.com/zeroroot-ai/ast-checks v0.1.2
-	github.com/zeroroot-ai/sdk v0.154.1-0.20260623004658-7e46de06c1be
+	github.com/zeroroot-ai/sdk v0.155.0
 	github.com/zeroroot-ai/setec v0.104.3
 	github.com/zeroroot-ai/testfixtures v0.1.1
 	go.opentelemetry.io/contrib/instrumentation/google.golang.org/grpc/otelgrpc v0.68.0
