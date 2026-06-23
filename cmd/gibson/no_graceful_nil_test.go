@@ -155,9 +155,9 @@ func TestNoGracefulNilInRequestPaths(t *testing.T) {
 		// internal/daemon — core
 		"internal/server/daemon/compliance_sink_adapter.go:32": astchecks.Entry{Category: astchecks.CategoryLegacyOptional, Reason: "compliance sink registered conditionally; remove with compliance-required slice"},
 		"internal/server/daemon/daemon.go:481":                 astchecks.Entry{Category: astchecks.CategoryLegacyOptional, Reason: "SPIFFE wiring optional in non-SPIFFE deployments; reassert when SPIFFE-everywhere lands"},
-		"internal/server/daemon/grpc.go:2401":                  astchecks.Entry{Category: astchecks.CategoryLegacyOptional, Reason: "pool nil-guard in populateCheckpointPayload; pool-required follow-up (one-code-path#195)"},
-		"internal/server/daemon/grpc.go:2411":                  astchecks.Entry{Category: astchecks.CategoryDefensiveGuard, Reason: "compound nil-check on mission store Get result + Checkpoint proto field in populateCheckpointPayload"},
-		"internal/server/daemon/grpc.go:2886":                  astchecks.Entry{Category: astchecks.CategoryLegacyOptional, Reason: "Neo4j connection nil-guard; Neo4j not configured for this tenant — skip silently"},
+		"internal/server/daemon/grpc.go:2423":                  astchecks.Entry{Category: astchecks.CategoryLegacyOptional, Reason: "pool nil-guard in populateCheckpointPayload; pool-required follow-up (one-code-path#195)"},
+		"internal/server/daemon/grpc.go:2433":                  astchecks.Entry{Category: astchecks.CategoryDefensiveGuard, Reason: "compound nil-check on mission store Get result + Checkpoint proto field in populateCheckpointPayload"},
+		"internal/server/daemon/grpc.go:2908":                  astchecks.Entry{Category: astchecks.CategoryLegacyOptional, Reason: "Neo4j connection nil-guard; Neo4j not configured for this tenant — skip silently"},
 		"internal/server/daemon/graph_bootstrap.go:411":        astchecks.Entry{Category: astchecks.CategoryDefensiveGuard, Reason: "tenant-value lookup helper, nil means no scoping"},
 		"internal/server/daemon/graph_projector.go:54":         astchecks.Entry{Category: astchecks.CategoryReceiverNilGuard, Reason: "composite reg/writer nil-guard in background projection loop (ADR-0007); both wired by NewGraphProjector in production — nil-safe for zero-value test construction"},
 		"internal/server/daemon/infrastructure.go:77":          astchecks.Entry{Category: astchecks.CategoryLegacyOptional, Reason: "semantic querier factory optional in non-graphrag deployments"},

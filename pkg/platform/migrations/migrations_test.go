@@ -20,11 +20,11 @@ func TestEmbed_TenantHasExpectedFiles(t *testing.T) {
 func TestEmbed_PlatformHasExpectedFiles(t *testing.T) {
 	t.Parallel()
 	upCount, downCount := countSQL(t, Platform, platformDir)
-	if upCount != 16 {
-		t.Errorf("platform: expected 16 up.sql files, got %d", upCount)
+	if upCount != 17 {
+		t.Errorf("platform: expected 17 up.sql files, got %d", upCount)
 	}
-	if downCount != 16 {
-		t.Errorf("platform: expected 16 down.sql files, got %d", downCount)
+	if downCount != 17 {
+		t.Errorf("platform: expected 17 down.sql files, got %d", downCount)
 	}
 }
 
@@ -102,8 +102,8 @@ func TestPlatformMaxVersion(t *testing.T) {
 	if err != nil {
 		t.Fatalf("PlatformMaxVersion: %v", err)
 	}
-	if v != 16 {
-		t.Errorf("PlatformMaxVersion: got %d, want 16", v)
+	if v != 17 {
+		t.Errorf("PlatformMaxVersion: got %d, want 17", v)
 	}
 }
 

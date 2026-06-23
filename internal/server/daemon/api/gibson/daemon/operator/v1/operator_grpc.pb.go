@@ -31,6 +31,7 @@ const (
 	DaemonOperatorService_SetTenantZitadelOrg_FullMethodName           = "/gibson.daemon.operator.v1.DaemonOperatorService/SetTenantZitadelOrg"
 	DaemonOperatorService_ListPendingTenantProvisioning_FullMethodName = "/gibson.daemon.operator.v1.DaemonOperatorService/ListPendingTenantProvisioning"
 	DaemonOperatorService_AckTenantProvisioned_FullMethodName          = "/gibson.daemon.operator.v1.DaemonOperatorService/AckTenantProvisioned"
+	DaemonOperatorService_ReportTenantStatus_FullMethodName            = "/gibson.daemon.operator.v1.DaemonOperatorService/ReportTenantStatus"
 )
 
 // DaemonOperatorServiceClient is the client API for DaemonOperatorService service.
@@ -114,6 +115,18 @@ type DaemonOperatorServiceClient interface {
 	// existence-check makes the re-create a no-op. Idempotent: acking an
 	// already-done or unknown tenant_id is a no-op success.
 	AckTenantProvisioned(ctx context.Context, in *AckTenantProvisionedRequest, opts ...grpc.CallOption) (*AckTenantProvisionedResponse, error)
+	// ReportTenantStatus upserts the operator-observed Tenant CR status into the
+	// daemon's platform Postgres (tenant_status table) so the dashboard can read
+	// provisioning status via gibson.tenant.v1.TenantProvisioningService instead
+	// of the Kubernetes API (ADR-0023, dashboard#813). The operator's Tenant
+	// reconciler calls this best-effort after each status patch; the daemon
+	// cannot read the CR itself, so the operator is the sole source of this
+	// snapshot. Idempotent: re-reporting the same status is a no-op upsert.
+	//
+	// Note: billing_active is NOT carried here — it is owned by the dashboard
+	// billing webhook via TenantProvisioningService.SetTenantBillingActive and
+	// must not be clobbered by an operator status report.
+	ReportTenantStatus(ctx context.Context, in *ReportTenantStatusRequest, opts ...grpc.CallOption) (*ReportTenantStatusResponse, error)
 }
 
 type daemonOperatorServiceClient struct {
@@ -244,6 +257,16 @@ func (c *daemonOperatorServiceClient) AckTenantProvisioned(ctx context.Context, 
 	return out, nil
 }
 
+func (c *daemonOperatorServiceClient) ReportTenantStatus(ctx context.Context, in *ReportTenantStatusRequest, opts ...grpc.CallOption) (*ReportTenantStatusResponse, error) {
+	cOpts := append([]grpc.CallOption{grpc.StaticMethod()}, opts...)
+	out := new(ReportTenantStatusResponse)
+	err := c.cc.Invoke(ctx, DaemonOperatorService_ReportTenantStatus_FullMethodName, in, out, cOpts...)
+	if err != nil {
+		return nil, err
+	}
+	return out, nil
+}
+
 // DaemonOperatorServiceServer is the server API for DaemonOperatorService service.
 // All implementations must embed UnimplementedDaemonOperatorServiceServer
 // for forward compatibility.
@@ -325,6 +348,18 @@ type DaemonOperatorServiceServer interface {
 	// existence-check makes the re-create a no-op. Idempotent: acking an
 	// already-done or unknown tenant_id is a no-op success.
 	AckTenantProvisioned(context.Context, *AckTenantProvisionedRequest) (*AckTenantProvisionedResponse, error)
+	// ReportTenantStatus upserts the operator-observed Tenant CR status into the
+	// daemon's platform Postgres (tenant_status table) so the dashboard can read
+	// provisioning status via gibson.tenant.v1.TenantProvisioningService instead
+	// of the Kubernetes API (ADR-0023, dashboard#813). The operator's Tenant
+	// reconciler calls this best-effort after each status patch; the daemon
+	// cannot read the CR itself, so the operator is the sole source of this
+	// snapshot. Idempotent: re-reporting the same status is a no-op upsert.
+	//
+	// Note: billing_active is NOT carried here — it is owned by the dashboard
+	// billing webhook via TenantProvisioningService.SetTenantBillingActive and
+	// must not be clobbered by an operator status report.
+	ReportTenantStatus(context.Context, *ReportTenantStatusRequest) (*ReportTenantStatusResponse, error)
 	mustEmbedUnimplementedDaemonOperatorServiceServer()
 }
 
@@ -370,6 +405,9 @@ func (UnimplementedDaemonOperatorServiceServer) ListPendingTenantProvisioning(co
 }
 func (UnimplementedDaemonOperatorServiceServer) AckTenantProvisioned(context.Context, *AckTenantProvisionedRequest) (*AckTenantProvisionedResponse, error) {
 	return nil, status.Error(codes.Unimplemented, "method AckTenantProvisioned not implemented")
+}
+func (UnimplementedDaemonOperatorServiceServer) ReportTenantStatus(context.Context, *ReportTenantStatusRequest) (*ReportTenantStatusResponse, error) {
+	return nil, status.Error(codes.Unimplemented, "method ReportTenantStatus not implemented")
 }
 func (UnimplementedDaemonOperatorServiceServer) mustEmbedUnimplementedDaemonOperatorServiceServer() {}
 func (UnimplementedDaemonOperatorServiceServer) testEmbeddedByValue()                               {}
@@ -608,6 +646,24 @@ func _DaemonOperatorService_AckTenantProvisioned_Handler(srv interface{}, ctx co
 	return interceptor(ctx, in, info, handler)
 }
 
+func _DaemonOperatorService_ReportTenantStatus_Handler(srv interface{}, ctx context.Context, dec func(interface{}) error, interceptor grpc.UnaryServerInterceptor) (interface{}, error) {
+	in := new(ReportTenantStatusRequest)
+	if err := dec(in); err != nil {
+		return nil, err
+	}
+	if interceptor == nil {
+		return srv.(DaemonOperatorServiceServer).ReportTenantStatus(ctx, in)
+	}
+	info := &grpc.UnaryServerInfo{
+		Server:     srv,
+		FullMethod: DaemonOperatorService_ReportTenantStatus_FullMethodName,
+	}
+	handler := func(ctx context.Context, req interface{}) (interface{}, error) {
+		return srv.(DaemonOperatorServiceServer).ReportTenantStatus(ctx, req.(*ReportTenantStatusRequest))
+	}
+	return interceptor(ctx, in, info, handler)
+}
+
 // DaemonOperatorService_ServiceDesc is the grpc.ServiceDesc for DaemonOperatorService service.
 // It's only intended for direct use with grpc.RegisterService,
 // and not to be introspected or modified (even as a copy)
@@ -662,6 +718,10 @@ var DaemonOperatorService_ServiceDesc = grpc.ServiceDesc{
 		{
 			MethodName: "AckTenantProvisioned",
 			Handler:    _DaemonOperatorService_AckTenantProvisioned_Handler,
+		},
+		{
+			MethodName: "ReportTenantStatus",
+			Handler:    _DaemonOperatorService_ReportTenantStatus_Handler,
 		},
 	},
 	Streams:  []grpc.StreamDesc{},
