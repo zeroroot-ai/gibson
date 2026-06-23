@@ -10,21 +10,21 @@
 // This is a narrowly-focused companion test to fga_enforcement_test.go.
 // It provisions three workload identities for a single tenant:
 //
-//   agent_principal  — PRINCIPAL_KIND_AGENT
-//   tool_principal   — PRINCIPAL_KIND_TOOL
-//   plugin_principal — PRINCIPAL_KIND_PLUGIN
+//	agent_principal  — PRINCIPAL_KIND_AGENT
+//	tool_principal   — PRINCIPAL_KIND_TOOL
+//	plugin_principal — PRINCIPAL_KIND_PLUGIN
 //
 // Each calls both HarnessCallbackService.GetCredential and
 // ComponentService.GetCredential.  The test asserts:
 //
-//   agent_principal  → PERMISSION_DENIED on both services; audit rows
-//                       carry decision_reason=fga_no_can_resolve and
-//                       actor_workload_class=agent.
-//   tool_principal   → PERMISSION_DENIED on both services; audit rows
-//                       carry decision_reason=fga_no_can_resolve and
-//                       actor_workload_class=tool.
-//   plugin_principal → OK (or NotFound when seed failed) on both
-//                       services; no fga_no_can_resolve in audit rows.
+//	agent_principal  → PERMISSION_DENIED on both services; audit rows
+//	                    carry decision_reason=fga_no_can_resolve and
+//	                    actor_workload_class=agent.
+//	tool_principal   → PERMISSION_DENIED on both services; audit rows
+//	                    carry decision_reason=fga_no_can_resolve and
+//	                    actor_workload_class=tool.
+//	plugin_principal → OK (or NotFound when seed failed) on both
+//	                    services; no fga_no_can_resolve in audit rows.
 //
 // The assertions deliberately separate workload-class labelling from the
 // broader FGA enforcement already verified in fga_enforcement_test.go.
@@ -76,7 +76,7 @@ import (
 	"google.golang.org/grpc/metadata"
 	"google.golang.org/grpc/status"
 
-	tenantv1 "github.com/zeroroot-ai/sdk/api/gen/gibson/tenant/v1"
+	tenantv1 "github.com/zeroroot-ai/sdk/api/gen/gibson/agentidentity/v1"
 	componentpb "github.com/zeroroot-ai/sdk/api/gen/gibson/component/v1"
 	harnesspb "github.com/zeroroot-ai/sdk/api/gen/gibson/harness/v1"
 )

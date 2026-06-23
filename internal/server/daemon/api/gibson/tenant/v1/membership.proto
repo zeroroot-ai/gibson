@@ -1,0 +1,609 @@
+syntax = "proto3";
+
+// Package gibson.tenant.v1 — MembershipService: customer-callable tenant
+// membership and team management surface. Moved from the PRIVATE
+// gibson.admin.v1.TenantAdminService (platform-sdk) into the OSS SDK
+// as part of the admin-surface-recategorization (ADR-0039 implementation).
+//
+// These RPCs are customer-callable because tenant owners and admins
+// regularly manage their team memberships and access controls via the
+// dashboard and ADK CLI. They are gated by the FGA "admin" relation —
+// meaning the calling user must be a tenant admin — which is a
+// per-resource permission level, not an operator privilege.
+//
+// Authorization: every RPC carries a (gibson.auth.v1.authz) annotation.
+// Broker-config RPCs (GetBrokerConfig, ProbeBrokerConfig, SetBrokerConfig,
+// CountSecrets) remain in gibson.admin.v1.TenantAdminService (platform-sdk)
+// as they are genuinely internal-only operations.
+package gibson.tenant.v1;
+
+option go_package = "github.com/zeroroot-ai/gibson/internal/server/daemon/api/gibson/tenant/v1;tenantv1";
+
+import "google/protobuf/timestamp.proto";
+import "gibson/auth/v1/options.proto";
+
+// MembershipService manages tenant members, teams, roles, and component access
+// controls.
+service MembershipService {
+  // ---------------------------------------------------------------------------
+  // Member enumeration
+  // ---------------------------------------------------------------------------
+
+  // ListMembers enumerates the members of the caller's tenant with
+  // human-readable names and email addresses.
+  rpc ListMembers(ListMembersRequest) returns (ListMembersResponse) {
+    option (gibson.auth.v1.authz) = {
+      relation: "admin"
+      object_type: "tenant"
+      object_deriver: "tenant_from_identity"
+      allowed_identities: 1  // USER
+    };
+  }
+
+  // ---------------------------------------------------------------------------
+  // Role management
+  // ---------------------------------------------------------------------------
+
+  // SetTenantRole writes or removes admin / member / writer FGA tuples on
+  // the tenant for a given user. The role field must be one of "admin",
+  // "member", or "writer". Atomically removes any conflicting prior role
+  // tuple before writing the new one.
+  rpc SetTenantRole(SetTenantRoleRequest) returns (SetTenantRoleResponse) {
+    option (gibson.auth.v1.authz) = {
+      relation: "admin"
+      object_type: "tenant"
+      object_deriver: "tenant_from_identity"
+      allowed_identities: 1  // USER
+    };
+  }
+
+  // TransferOwnership atomically swaps the owner FGA tuple on the tenant
+  // from the current owner to new_owner_user_id. Fails if the caller is
+  // not the current owner.
+  rpc TransferOwnership(TransferOwnershipRequest) returns (TransferOwnershipResponse) {
+    option (gibson.auth.v1.authz) = {
+      relation: "admin"
+      object_type: "tenant"
+      object_deriver: "tenant_from_identity"
+      allowed_identities: 1  // USER
+    };
+  }
+
+  // ---------------------------------------------------------------------------
+  // Invitations (gibson#626 — invitation lifecycle owned by the daemon)
+  // ---------------------------------------------------------------------------
+
+  // InviteMember creates a pending invitation for an email address with the
+  // given tenant role and emails the invitee an accept link. The invitee
+  // appears in ListMembers with status "invited" until they accept. Idempotent:
+  // re-inviting the same email refreshes the pending invitation.
+  rpc InviteMember(InviteMemberRequest) returns (InviteMemberResponse) {
+    option (gibson.auth.v1.authz) = {
+      relation: "admin"
+      object_type: "tenant"
+      object_deriver: "tenant_from_identity"
+      allowed_identities: 1  // USER
+    };
+  }
+
+  // AcceptInvitation redeems an invitation token: it provisions the IdP user
+  // (if new) and projects full membership (FGA tuple + per-tenant org
+  // membership), transitioning the member to "active". The token is the
+  // capability, so this RPC is unauthenticated (the invitee is not yet a
+  // member of any tenant) — exactly like GetSignupProgress.
+  rpc AcceptInvitation(AcceptInvitationRequest) returns (AcceptInvitationResponse) {
+    option (gibson.auth.v1.authz) = {
+      unauthenticated: true
+    };
+  }
+
+  // ResendInvitation re-sends the invitation email for a pending invitation
+  // without creating a duplicate.
+  rpc ResendInvitation(ResendInvitationRequest) returns (ResendInvitationResponse) {
+    option (gibson.auth.v1.authz) = {
+      relation: "admin"
+      object_type: "tenant"
+      object_deriver: "tenant_from_identity"
+      allowed_identities: 1  // USER
+    };
+  }
+
+  // CancelInvitation cancels a pending invitation so it can no longer be
+  // accepted.
+  rpc CancelInvitation(CancelInvitationRequest) returns (CancelInvitationResponse) {
+    option (gibson.auth.v1.authz) = {
+      relation: "admin"
+      object_type: "tenant"
+      object_deriver: "tenant_from_identity"
+      allowed_identities: 1  // USER
+    };
+  }
+
+  // ---------------------------------------------------------------------------
+  // Team lifecycle
+  // ---------------------------------------------------------------------------
+
+  // ListTeams enumerates the teams in the caller's tenant. Backed by FGA
+  // ListObjects(tenant:X, parent, team). Each Team carries its display name
+  // and current member count.
+  rpc ListTeams(ListTeamsRequest) returns (ListTeamsResponse) {
+    option (gibson.auth.v1.authz) = {
+      relation: "admin"
+      object_type: "tenant"
+      object_deriver: "tenant_from_identity"
+      allowed_identities: 1  // USER
+    };
+  }
+  // CreateTeam creates a new team under the caller's tenant and writes the
+  // (tenant:X, parent, team:Y) FGA tuple.
+  rpc CreateTeam(CreateTeamRequest) returns (CreateTeamResponse) {
+    option (gibson.auth.v1.authz) = {
+      relation: "admin"
+      object_type: "tenant"
+      object_deriver: "tenant_from_identity"
+      allowed_identities: 1  // USER
+    };
+  }
+  // DeleteTeam removes a team and all its member/admin FGA tuples.
+  rpc DeleteTeam(DeleteTeamRequest) returns (DeleteTeamResponse) {
+    option (gibson.auth.v1.authz) = {
+      relation: "admin"
+      object_type: "tenant"
+      object_deriver: "tenant_from_identity"
+      allowed_identities: 1  // USER
+    };
+  }
+
+  // ---------------------------------------------------------------------------
+  // Team membership
+  // ---------------------------------------------------------------------------
+
+  // ListTeamMembers enumerates the members of a single team. is_admin
+  // reflects whether the user holds the team's admin relation.
+  rpc ListTeamMembers(ListTeamMembersRequest) returns (ListTeamMembersResponse) {
+    option (gibson.auth.v1.authz) = {
+      relation: "admin"
+      object_type: "tenant"
+      object_deriver: "tenant_from_identity"
+      allowed_identities: 1  // USER
+    };
+  }
+  // AddTeamMember adds a user to a team with the member relation.
+  rpc AddTeamMember(AddTeamMemberRequest) returns (AddTeamMemberResponse) {
+    option (gibson.auth.v1.authz) = {
+      relation: "admin"
+      object_type: "tenant"
+      object_deriver: "tenant_from_identity"
+      allowed_identities: 1  // USER
+    };
+  }
+  // RemoveTeamMember removes a user from a team, deleting both member and
+  // admin FGA tuples for that user on the team.
+  rpc RemoveTeamMember(RemoveTeamMemberRequest) returns (RemoveTeamMemberResponse) {
+    option (gibson.auth.v1.authz) = {
+      relation: "admin"
+      object_type: "tenant"
+      object_deriver: "tenant_from_identity"
+      allowed_identities: 1  // USER
+    };
+  }
+  // SetTeamAdmin promotes or demotes a team member's admin status. When
+  // is_admin is true, the admin relation is added (member relation kept for
+  // backward compat); when false, the admin relation is removed.
+  rpc SetTeamAdmin(SetTeamAdminRequest) returns (SetTeamAdminResponse) {
+    option (gibson.auth.v1.authz) = {
+      relation: "admin"
+      object_type: "tenant"
+      object_deriver: "tenant_from_identity"
+      allowed_identities: 1  // USER
+    };
+  }
+
+  // ---------------------------------------------------------------------------
+  // Component access control
+  // ---------------------------------------------------------------------------
+
+  // SetComponentAccess writes team_read_disabled / team_write_disabled /
+  // team_execute_disabled FGA tuples for a component. Replaces the current
+  // tuple-set atomically; any existing access tuples for the component are
+  // deleted before the new set is written.
+  rpc SetComponentAccess(SetComponentAccessRequest) returns (SetComponentAccessResponse) {
+    option (gibson.auth.v1.authz) = {
+      relation: "admin"
+      object_type: "tenant"
+      object_deriver: "tenant_from_identity"
+      allowed_identities: 1  // USER
+    };
+  }
+  // GrantComponentPermissions records the agent installation's approved
+  // component capabilities. The server enforces caller-access intersection:
+  // only capabilities the caller already holds (component_read/write/execute_enabled)
+  // may be granted. Writes component_*_enabled FGA tuples for the agent
+  // installation principal.
+  rpc GrantComponentPermissions(GrantComponentPermissionsRequest) returns (GrantComponentPermissionsResponse) {
+    option (gibson.auth.v1.authz) = {
+      relation: "member"
+      object_type: "tenant"
+      object_deriver: "tenant_from_identity"
+      allowed_identities: 1  // USER
+    };
+  }
+
+  // ---------------------------------------------------------------------------
+  // Utility
+  // ---------------------------------------------------------------------------
+
+  // SetCatalogEnabled adds or removes a component from the calling tenant's
+  // catalog by writing or deleting the FGA tenant_enabled tuple for the
+  // (tenant, component) pair. This is the daemon-side replacement for the
+  // dashboard's previous direct ComponentGrant CRD write (ADR-0041 remaining
+  // gap — catalog-enablement routing through the daemon).
+  //
+  // When enabled is true the relation is written (idempotent if already
+  // present). When enabled is false the relation is deleted (idempotent if
+  // already absent).
+  //
+  // The component_ref must be a fully-qualified component object key of the
+  // form "<kind>-<name>" (e.g. "tool-nmap", "agent-recon"). The daemon
+  // normalises to "component:<component_ref>" before writing to FGA.
+  //
+  // Authorization: tenant admin. Only a tenant admin may modify which
+  // components are available in their tenant's catalog.
+  rpc SetCatalogEnabled(SetCatalogEnabledRequest) returns (SetCatalogEnabledResponse) {
+    option (gibson.auth.v1.authz) = {
+      relation: "admin"
+      object_type: "tenant"
+      object_deriver: "tenant_from_identity"
+      allowed_identities: 1  // USER
+    };
+  }
+
+  // SetCatalogPublished writes or deletes the FGA tenant_published tuple for a
+  // component owned by the caller's tenant — the bring-your-own (BYO)
+  // connector path (gibson#683). Publishing makes the tenant's own connector
+  // available to enable within that tenant (org+ plans only); it never exposes
+  // the component to other tenants. tenant_published ("this tenant owns/offers
+  // it") is distinct from tenant_enabled ("this tenant has it switched on").
+  rpc SetCatalogPublished(SetCatalogPublishedRequest) returns (SetCatalogPublishedResponse) {
+    option (gibson.auth.v1.authz) = {
+      relation: "admin"
+      object_type: "tenant"
+      object_deriver: "tenant_from_identity"
+      allowed_identities: 1  // USER
+    };
+  }
+
+  // GetReservedNames returns the chart-managed reserved-names denylist
+  // (exact + prefix matches) used by the Tenant CRD admission webhook and
+  // the dashboard signup form. Callable without authentication — the list is
+  // public and contains no tenant data.
+  rpc GetReservedNames(GetReservedNamesRequest) returns (GetReservedNamesResponse) {
+    option (gibson.auth.v1.authz) = {
+      unauthenticated: true
+    };
+  }
+}
+
+// ---------------------------------------------------------------------------
+// Member messages
+// ---------------------------------------------------------------------------
+
+// TenantMember is the dashboard-safe representation of a single tenant
+// member. Carries only identity fields suitable for display in the UI.
+message TenantMember {
+  // user_id is the platform-internal user identifier.
+  string user_id = 1;
+  // display_name is the human-readable name sourced from the IdP.
+  string display_name = 2;
+  // email is the user's email address sourced from the IdP.
+  string email = 3;
+  // role is the user's role within the tenant (e.g. "admin", "member").
+  string role = 4;
+  // joined_at is when the user was added to the tenant.
+  google.protobuf.Timestamp joined_at = 5;
+  // status is the membership status: "active" for an accepted member, or
+  // "invited" for a pending invitation that hasn't been accepted yet
+  // (gibson#626). Empty is treated as "active" for backward compatibility.
+  string status = 6;
+}
+
+message ListMembersRequest {
+  // tenant_id scopes the query to a specific tenant. Must match the
+  // authenticated caller's tenant.
+  string tenant_id = 1;
+  // page_token is the pagination cursor returned by a previous
+  // ListMembersResponse.next_page_token. Empty for the first page.
+  string page_token = 2;
+  // page_size is the maximum number of members to return. 0 means server default.
+  int32 page_size = 3;
+  // name_filter is an optional case-insensitive substring applied to
+  // display_name and email. Empty means no filter.
+  string name_filter = 4;
+}
+
+message ListMembersResponse {
+  repeated TenantMember members = 1;
+  string next_page_token = 2;
+}
+
+// ---------------------------------------------------------------------------
+// Role messages
+// ---------------------------------------------------------------------------
+
+message SetTenantRoleRequest {
+  // tenant_id is the FGA id of the tenant (e.g. "tenant:acme").
+  string tenant_id = 1;
+  // user_id is the FGA user id without the type prefix.
+  string user_id = 2;
+  // role is the FGA relation to grant. Must be one of "admin", "member", or
+  // "writer". Use remove = true to remove the user's role entirely.
+  string role = 3;
+  // remove: when true, all role tuples for the user on this tenant are
+  // deleted and role is ignored. When false, the specified role is written.
+  bool remove = 4;
+}
+
+message SetTenantRoleResponse {}
+
+message TransferOwnershipRequest {
+  // tenant_id is the FGA id of the tenant (e.g. "tenant:acme").
+  string tenant_id = 1;
+  // new_owner_user_id is the FGA user id (without type prefix) of the new owner.
+  string new_owner_user_id = 2;
+}
+
+message TransferOwnershipResponse {}
+
+// ---------------------------------------------------------------------------
+// Invitation messages (gibson#626)
+// ---------------------------------------------------------------------------
+
+message InviteMemberRequest {
+  // tenant_id is the FGA id of the tenant (e.g. "tenant:acme"). When empty the
+  // daemon derives it from the caller's identity.
+  string tenant_id = 1;
+  // email is the invitee's email address. Required.
+  string email = 2;
+  // role is the tenant role to grant on acceptance: "admin", "member", or
+  // "writer". Defaults to "member" when empty.
+  string role = 3;
+}
+
+message InviteMemberResponse {
+  // invitation_id is the server-assigned id of the pending invitation.
+  string invitation_id = 1;
+  // expires_at is when the invitation token expires.
+  google.protobuf.Timestamp expires_at = 2;
+}
+
+message AcceptInvitationRequest {
+  // token is the raw invitation token from the accept link. Required; it is
+  // the sole capability for this unauthenticated RPC.
+  string token = 1;
+}
+
+message AcceptInvitationResponse {
+  // tenant_id is the tenant the invitee has joined.
+  string tenant_id = 1;
+  // user_id is the (possibly newly-provisioned) IdP user id of the member.
+  string user_id = 2;
+}
+
+message ResendInvitationRequest {
+  string tenant_id = 1;
+  // invitation_id identifies the pending invitation to resend. Either this or
+  // email must be set.
+  string invitation_id = 2;
+  string email = 3;
+}
+
+message ResendInvitationResponse {}
+
+message CancelInvitationRequest {
+  string tenant_id = 1;
+  string invitation_id = 2;
+  string email = 3;
+}
+
+message CancelInvitationResponse {}
+
+// ---------------------------------------------------------------------------
+// Team messages
+// ---------------------------------------------------------------------------
+
+// Team is a single team row returned by ListTeams.
+message Team {
+  // id is the FGA team id without the type prefix (e.g. "red-team").
+  // Stable across renames.
+  string id = 1;
+  // display_name is the human-readable label.
+  string display_name = 2;
+  // member_count is the sum of member + admin relations on the team.
+  int32 member_count = 3;
+}
+
+// TeamMember is a single member row returned by ListTeamMembers.
+message TeamMember {
+  // user_id is the FGA user id without the type prefix.
+  string user_id = 1;
+  // email and display_name come from the identity-resolver lookup.
+  string email = 2;
+  string display_name = 3;
+  // is_admin is true when the user holds the team's admin relation.
+  bool is_admin = 4;
+}
+
+message ListTeamsRequest {
+  // tenant_id is the FGA id of the parent tenant (e.g. "tenant:acme").
+  string tenant_id = 1;
+  string page_token = 2;
+  // page_size caps the response. 0 → server default (50). Maximum 200.
+  int32 page_size = 3;
+}
+
+message ListTeamsResponse {
+  repeated Team teams = 1;
+  string next_page_token = 2;
+}
+
+message CreateTeamRequest {
+  // tenant_id is the FGA id of the parent tenant (e.g. "tenant:acme").
+  string tenant_id = 1;
+  // team_id is the desired FGA team id (without the type prefix). Must be
+  // unique within the tenant.
+  string team_id = 2;
+  // display_name is the human-readable label for the team.
+  string display_name = 3;
+}
+
+message CreateTeamResponse {
+  // team is the newly created team record.
+  Team team = 1;
+}
+
+message DeleteTeamRequest {
+  string tenant_id = 1;
+  string team_id = 2;
+}
+
+message DeleteTeamResponse {}
+
+message ListTeamMembersRequest {
+  string tenant_id = 1;
+  string team_id = 2;
+  string page_token = 3;
+  int32 page_size = 4;
+}
+
+message ListTeamMembersResponse {
+  repeated TeamMember members = 1;
+  string next_page_token = 2;
+}
+
+message AddTeamMemberRequest {
+  string tenant_id = 1;
+  string team_id = 2;
+  // user_id is the FGA user id without the type prefix (the Zitadel numeric sub).
+  string user_id = 3;
+}
+
+message AddTeamMemberResponse {}
+
+message RemoveTeamMemberRequest {
+  string tenant_id = 1;
+  string team_id = 2;
+  string user_id = 3;
+}
+
+message RemoveTeamMemberResponse {}
+
+message SetTeamAdminRequest {
+  string tenant_id = 1;
+  string team_id = 2;
+  string user_id = 3;
+  // is_admin: when true, the admin relation is added; when false, it is removed.
+  bool is_admin = 4;
+}
+
+message SetTeamAdminResponse {}
+
+// ---------------------------------------------------------------------------
+// Component access messages
+// ---------------------------------------------------------------------------
+
+// ComponentAccessEntry specifies the access control state for a single
+// component relation (read, write, or execute).
+message ComponentAccessEntry {
+  // relation is one of "team_read_disabled", "team_write_disabled", or
+  // "team_execute_disabled".
+  string relation = 1;
+  // team_id is the FGA team id without the type prefix. Empty means the
+  // restriction applies globally (tenant-level).
+  string team_id = 2;
+  // disabled: when true, the restriction tuple is written; when false, it is deleted.
+  bool disabled = 3;
+}
+
+message SetComponentAccessRequest {
+  string tenant_id = 1;
+  // component is the FGA component reference (e.g. "component:plugin/gitlab").
+  string component = 2;
+  repeated ComponentAccessEntry entries = 3;
+}
+
+message SetComponentAccessResponse {
+  int32 tuples_written = 1;
+  int32 tuples_deleted = 2;
+}
+
+// ComponentApproval records the caller's approval for a single capability on a component.
+message ComponentApproval {
+  // target is the FGA component reference (e.g. "component:plugin/gitlab").
+  string target = 1;
+  // action is one of "read", "write", or "execute".
+  string action = 2;
+}
+
+message GrantComponentPermissionsRequest {
+  // agent_installation_id is the FGA agent installation principal id
+  // (without type prefix) that the approved capabilities are granted to.
+  string agent_installation_id = 1;
+  repeated ComponentApproval approvals = 2;
+  // reason is a human-readable audit note for why these capabilities were granted.
+  string reason = 3;
+}
+
+message GrantComponentPermissionsResponse {
+  string agent_installation_id = 1;
+}
+
+// ---------------------------------------------------------------------------
+// SetCatalogEnabled messages (ADR-0041 catalog-enablement)
+// ---------------------------------------------------------------------------
+
+message SetCatalogEnabledRequest {
+  // component_ref is the component identifier without the "component:" type
+  // prefix — e.g. "tool-nmap" or "agent-recon". The daemon normalises it
+  // before writing to FGA.
+  string component_ref = 1;
+  // enabled: true writes the tenant_enabled tuple (adds to catalog); false
+  // deletes it (removes from catalog). Idempotent in both directions.
+  bool enabled = 2;
+}
+
+message SetCatalogEnabledResponse {
+  // written is true when a tuple was actually added (enabled=true and was absent).
+  bool written = 1;
+  // deleted is true when a tuple was actually removed (enabled=false and was present).
+  bool deleted = 2;
+}
+
+message SetCatalogPublishedRequest {
+  // component_ref is the component identifier without the "component:" type
+  // prefix — e.g. "connector-gitlab". The daemon normalises it before writing.
+  string component_ref = 1;
+  // published: true writes the tenant_published tuple (offers the BYO
+  // component in the tenant's private registry); false deletes it. Idempotent
+  // in both directions.
+  bool published = 2;
+}
+
+message SetCatalogPublishedResponse {
+  // written is true when a tuple was actually added (published=true and was absent).
+  bool written = 1;
+  // deleted is true when a tuple was actually removed (published=false and was present).
+  bool deleted = 2;
+}
+
+// ---------------------------------------------------------------------------
+// Reserved names messages
+// ---------------------------------------------------------------------------
+
+message GetReservedNamesRequest {}
+
+message GetReservedNamesResponse {
+  // exact is the list of exact tenant-name matches the admission webhook rejects.
+  repeated string exact = 1;
+  // prefix is the list of tenant-name prefixes the admission webhook rejects.
+  repeated string prefix = 2;
+}

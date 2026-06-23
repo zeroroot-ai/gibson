@@ -25,6 +25,27 @@ entries:
     object_deriver: "tenant_from_identity"
     allowed_identities:
       - COMPONENT
+  "/gibson.agentidentity.v1.AgentIdentityService/CreateAgentIdentity":
+    relation: "writer"
+    object_type: "tenant"
+    object_deriver: "tenant_from_identity"
+    allowed_identities:
+      - USER
+      - SERVICE
+  "/gibson.agentidentity.v1.AgentIdentityService/ListAgentIdentities":
+    relation: "writer"
+    object_type: "tenant"
+    object_deriver: "tenant_from_identity"
+    allowed_identities:
+      - USER
+      - SERVICE
+  "/gibson.agentidentity.v1.AgentIdentityService/RevokeAgentIdentity":
+    relation: "writer"
+    object_type: "tenant"
+    object_deriver: "tenant_from_identity"
+    allowed_identities:
+      - USER
+      - SERVICE
   "/gibson.component.v1.ComponentService/CallTool":
     relation: "can_execute"
     object_type: "component"
@@ -1066,6 +1087,36 @@ entries:
     object_deriver: "tenant_and_field('PluginName')"
     allowed_identities:
       - COMPONENT
+  "/gibson.pluginadmin.v1.PluginAdminService/EditPluginSecretBinding":
+    relation: "admin"
+    object_type: "tenant"
+    object_deriver: "tenant_from_identity"
+    allowed_identities:
+      - USER
+  "/gibson.pluginadmin.v1.PluginAdminService/GetPluginInstall":
+    relation: "member"
+    object_type: "tenant"
+    object_deriver: "tenant_from_identity"
+    allowed_identities:
+      - USER
+  "/gibson.pluginadmin.v1.PluginAdminService/ListPluginInstalls":
+    relation: "member"
+    object_type: "tenant"
+    object_deriver: "tenant_from_identity"
+    allowed_identities:
+      - USER
+  "/gibson.pluginadmin.v1.PluginAdminService/RegisterPlugin":
+    relation: "admin"
+    object_type: "tenant"
+    object_deriver: "tenant_from_identity"
+    allowed_identities:
+      - USER
+  "/gibson.pluginadmin.v1.PluginAdminService/RevokePluginSecretBinding":
+    relation: "admin"
+    object_type: "tenant"
+    object_deriver: "tenant_from_identity"
+    allowed_identities:
+      - USER
   "/gibson.session.v1.SessionService/ListMySessions":
     relation: "member"
     object_type: "tenant"
@@ -1078,27 +1129,6 @@ entries:
     object_deriver: "tenant_from_identity"
     allowed_identities:
       - USER
-  "/gibson.tenant.v1.AgentIdentityService/CreateAgentIdentity":
-    relation: "writer"
-    object_type: "tenant"
-    object_deriver: "tenant_from_identity"
-    allowed_identities:
-      - USER
-      - SERVICE
-  "/gibson.tenant.v1.AgentIdentityService/ListAgentIdentities":
-    relation: "writer"
-    object_type: "tenant"
-    object_deriver: "tenant_from_identity"
-    allowed_identities:
-      - USER
-      - SERVICE
-  "/gibson.tenant.v1.AgentIdentityService/RevokeAgentIdentity":
-    relation: "writer"
-    object_type: "tenant"
-    object_deriver: "tenant_from_identity"
-    allowed_identities:
-      - USER
-      - SERVICE
   "/gibson.tenant.v1.BudgetService/GetBudget":
     relation: "member"
     object_type: "tenant"
@@ -1293,36 +1323,6 @@ entries:
     allowed_identities:
       - USER
       - SERVICE
-  "/gibson.tenant.v1.PluginAdminService/EditPluginSecretBinding":
-    relation: "admin"
-    object_type: "tenant"
-    object_deriver: "tenant_from_identity"
-    allowed_identities:
-      - USER
-  "/gibson.tenant.v1.PluginAdminService/GetPluginInstall":
-    relation: "member"
-    object_type: "tenant"
-    object_deriver: "tenant_from_identity"
-    allowed_identities:
-      - USER
-  "/gibson.tenant.v1.PluginAdminService/ListPluginInstalls":
-    relation: "member"
-    object_type: "tenant"
-    object_deriver: "tenant_from_identity"
-    allowed_identities:
-      - USER
-  "/gibson.tenant.v1.PluginAdminService/RegisterPlugin":
-    relation: "admin"
-    object_type: "tenant"
-    object_deriver: "tenant_from_identity"
-    allowed_identities:
-      - USER
-  "/gibson.tenant.v1.PluginAdminService/RevokePluginSecretBinding":
-    relation: "admin"
-    object_type: "tenant"
-    object_deriver: "tenant_from_identity"
-    allowed_identities:
-      - USER
   "/gibson.tenant.v1.ProviderService/CreateProvider":
     relation: "writer"
     object_type: "tenant"
@@ -1332,13 +1332,6 @@ entries:
       - SERVICE
   "/gibson.tenant.v1.ProviderService/DeleteProvider":
     relation: "writer"
-    object_type: "tenant"
-    object_deriver: "tenant_from_identity"
-    allowed_identities:
-      - USER
-      - SERVICE
-  "/gibson.tenant.v1.ProviderService/DeleteTenantLangfuseCredentials":
-    relation: "owner"
     object_type: "tenant"
     object_deriver: "tenant_from_identity"
     allowed_identities:
@@ -1379,13 +1372,6 @@ entries:
     allowed_identities:
       - USER
       - SERVICE
-  "/gibson.tenant.v1.ProviderService/GetTenantLangfuseCredentials":
-    relation: "owner"
-    object_type: "tenant"
-    object_deriver: "tenant_from_identity"
-    allowed_identities:
-      - USER
-      - SERVICE
   "/gibson.tenant.v1.ProviderService/ListProviderModels":
     relation: "member"
     object_type: "tenant"
@@ -1408,13 +1394,6 @@ entries:
       - USER
   "/gibson.tenant.v1.ProviderService/SetDefaultProvider":
     relation: "writer"
-    object_type: "tenant"
-    object_deriver: "tenant_from_identity"
-    allowed_identities:
-      - USER
-      - SERVICE
-  "/gibson.tenant.v1.ProviderService/SetTenantLangfuseCredentials":
-    relation: "owner"
     object_type: "tenant"
     object_deriver: "tenant_from_identity"
     allowed_identities:

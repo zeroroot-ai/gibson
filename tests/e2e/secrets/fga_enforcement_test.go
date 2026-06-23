@@ -7,21 +7,21 @@
 //
 // WHAT THIS TEST DOES
 // -------------------
-// 1. Provisions three principal identities in one test tenant:
-//      agent_principal  — PRINCIPAL_KIND_AGENT
-//      tool_principal   — PRINCIPAL_KIND_TOOL
-//      plugin_principal — PRINCIPAL_KIND_PLUGIN
-// 2. Seeds one test credential via the admin broker path.
-// 3. Calls HarnessCallbackService.GetCredential and ComponentService.GetCredential
-//    from each principal (using the issued client credentials to obtain a JWT,
-//    then forwarding it as the gRPC Authorization header).
-// 4. Asserts:
-//      agent_principal  → PERMISSION_DENIED on both services
-//      tool_principal   → PERMISSION_DENIED on both services
-//      plugin_principal → OK with the credential value present
-// 5. Asserts that audit rows written for the DENIED calls carry
-//      decision_reason=fga_no_can_resolve.
-// 6. Cleans up all three principals and the test credential after the test.
+//  1. Provisions three principal identities in one test tenant:
+//     agent_principal  — PRINCIPAL_KIND_AGENT
+//     tool_principal   — PRINCIPAL_KIND_TOOL
+//     plugin_principal — PRINCIPAL_KIND_PLUGIN
+//  2. Seeds one test credential via the admin broker path.
+//  3. Calls HarnessCallbackService.GetCredential and ComponentService.GetCredential
+//     from each principal (using the issued client credentials to obtain a JWT,
+//     then forwarding it as the gRPC Authorization header).
+//  4. Asserts:
+//     agent_principal  → PERMISSION_DENIED on both services
+//     tool_principal   → PERMISSION_DENIED on both services
+//     plugin_principal → OK with the credential value present
+//  5. Asserts that audit rows written for the DENIED calls carry
+//     decision_reason=fga_no_can_resolve.
+//  6. Cleans up all three principals and the test credential after the test.
 //
 // DETERMINISM / TIMING ASSUMPTIONS
 // ---------------------------------
@@ -70,7 +70,7 @@ import (
 	"google.golang.org/grpc/metadata"
 	"google.golang.org/grpc/status"
 
-	tenantv1 "github.com/zeroroot-ai/sdk/api/gen/gibson/tenant/v1"
+	tenantv1 "github.com/zeroroot-ai/sdk/api/gen/gibson/agentidentity/v1"
 	componentpb "github.com/zeroroot-ai/sdk/api/gen/gibson/component/v1"
 	harnesspb "github.com/zeroroot-ai/sdk/api/gen/gibson/harness/v1"
 )

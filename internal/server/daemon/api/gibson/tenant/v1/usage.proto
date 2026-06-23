@@ -1,0 +1,76 @@
+syntax = "proto3";
+
+// Package gibson.tenant.v1 — UsageService: customer-callable LLM cost and
+// token usage aggregation surface. Moved from gibson.usage.v1.UsageService
+// (platform-sdk) into the OSS SDK under the gibson.tenant.v1 package as part
+// of the admin-surface-recategorization (ADR-0039 implementation).
+//
+// Only tenant-scoped RPCs are included here. The daemon queries Langfuse's
+// ClickHouse grouped by the attribute dimensions EnrichSpan stamps onto every
+// LLM span; the dashboard consumes aggregated rows without holding ClickHouse
+// credentials itself.
+//
+// Authorization: every RPC carries a (gibson.auth.v1.authz) annotation.
+package gibson.tenant.v1;
+
+option go_package = "github.com/zeroroot-ai/gibson/internal/server/daemon/api/gibson/tenant/v1;tenantv1";
+
+import "gibson/auth/v1/options.proto";
+
+// UsageService provides cost and token usage aggregation for a tenant.
+// Admin callers can query any subject; non-admins are narrowed server-side
+// to their own data.
+service UsageService {
+  rpc ListUsage(ListUsageRequest) returns (ListUsageResponse) {
+    option (gibson.auth.v1.authz) = {
+      relation: "member"
+      object_type: "tenant"
+      object_deriver: "tenant_from_identity"
+      allowed_identities: 3  // USER | SERVICE
+    };
+  }
+}
+
+// ---------------------------------------------------------------------------
+// UsageService types
+// ---------------------------------------------------------------------------
+
+// UsageScope selects the aggregation dimension.
+enum UsageScope {
+  USAGE_SCOPE_UNSPECIFIED = 0;
+  USAGE_SCOPE_USER = 1;
+  USAGE_SCOPE_TEAM = 2;
+  USAGE_SCOPE_AGENT = 3;
+  USAGE_SCOPE_MISSION = 4;
+}
+
+// UsageRow is one aggregated bucket: totals for a single (subject, window) pair.
+message UsageRow {
+  string subject_id = 1;
+  string display_name = 2;
+  int64 input_tokens = 3;
+  int64 output_tokens = 4;
+  // cost_usd_cents avoids float arithmetic at the wire level.
+  int64 cost_usd_cents = 5;
+  int64 trace_count = 6;
+}
+
+// ---------------------------------------------------------------------------
+// UsageService request/response messages
+// ---------------------------------------------------------------------------
+
+message ListUsageRequest {
+  UsageScope scope = 1;
+  int64 start_time_unix = 2;
+  int64 end_time_unix = 3;
+  // Optional filter: narrow to a single subject. Non-admins are narrowed
+  // to themselves regardless of this field.
+  string subject_filter = 4;
+}
+
+message ListUsageResponse {
+  repeated UsageRow rows = 1;
+  // stale_as_of_unix is non-zero when the response was served from a cached
+  // snapshot because Langfuse was unavailable.
+  int64 stale_as_of_unix = 2;
+}

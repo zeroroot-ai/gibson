@@ -16,7 +16,9 @@ func requiredTenantServices() map[string]struct{} {
 	for _, e := range registry.Registry {
 		isTenant := strings.HasPrefix(e.Service, "gibson.tenant.v1.")
 		isAdmin := strings.HasPrefix(e.Service, "gibson.admin.v1.")
-		if !isTenant && !isAdmin {
+		isEnrollment := strings.HasPrefix(e.Service, "gibson.agentidentity.v1.") ||
+			strings.HasPrefix(e.Service, "gibson.pluginadmin.v1.")
+		if !isTenant && !isAdmin && !isEnrollment {
 			continue
 		}
 		if _, gap := knownUnregisteredTenantServices[e.Service]; gap {

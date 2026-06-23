@@ -4,7 +4,7 @@ import (
 	"errors"
 	"testing"
 
-	tenantv1 "github.com/zeroroot-ai/sdk/api/gen/gibson/tenant/v1"
+	tenantv1 "github.com/zeroroot-ai/gibson/internal/server/daemon/api/gibson/tenant/v1"
 )
 
 // gibson#621: SetTenantRole must project human membership to BOTH FGA (the

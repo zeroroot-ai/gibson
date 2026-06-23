@@ -10,11 +10,11 @@ import (
 	status_grpc "google.golang.org/grpc/status"
 
 	"github.com/zeroroot-ai/gibson/internal/platform/budget"
-	// ADR-0039: BudgetService moved from platform-sdk/gen/gibson/budget/v1 to
-	// sdk/api/gen/gibson/tenant/v1. BudgetScope is still from budget_status/v1
+	// BudgetService is a gibson-local gibson.tenant.v1 service (re-homed from the
+	// OSS SDK in E6, ADR-0058). BudgetScope is still from budget_status/v1 (SDK)
 	// (the OSS enum used by both Budget messages and the budget-exceeded error).
+	tenantv1 "github.com/zeroroot-ai/gibson/internal/server/daemon/api/gibson/tenant/v1"
 	budgetstatuspb "github.com/zeroroot-ai/sdk/api/gen/gibson/budget_status/v1"
-	tenantv1 "github.com/zeroroot-ai/sdk/api/gen/gibson/tenant/v1"
 	"github.com/zeroroot-ai/sdk/auth"
 )
 

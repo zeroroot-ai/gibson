@@ -47,11 +47,10 @@ require (
 	github.com/spf13/viper v1.21.0
 	github.com/spiffe/go-spiffe/v2 v2.6.0
 	github.com/stretchr/testify v1.11.1
-	github.com/stripe/stripe-go/v82 v82.5.1
 	github.com/testcontainers/testcontainers-go v0.42.0
 	github.com/vmihailenco/msgpack/v5 v5.4.1
 	github.com/zeroroot-ai/ast-checks v0.1.2
-	github.com/zeroroot-ai/sdk v0.153.1-0.20260621125548-5268430ef6fb
+	github.com/zeroroot-ai/sdk v0.154.1-0.20260623004658-7e46de06c1be
 	github.com/zeroroot-ai/setec v0.104.3
 	github.com/zeroroot-ai/testfixtures v0.1.1
 	go.opentelemetry.io/contrib/instrumentation/google.golang.org/grpc/otelgrpc v0.68.0

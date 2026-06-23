@@ -24,11 +24,12 @@ import (
 	"os"
 	"testing"
 
-	daemonoperatorv1 "github.com/zeroroot-ai/gibson/internal/server/daemon/api/gibson/daemon/operator/v1"
-	daemonpb "github.com/zeroroot-ai/sdk/api/gen/gibson/daemon/v1"
-	sdktenantv1 "github.com/zeroroot-ai/sdk/api/gen/gibson/tenant/v1"
 	"google.golang.org/grpc"
 	"google.golang.org/grpc/credentials/insecure"
+
+	daemonoperatorv1 "github.com/zeroroot-ai/gibson/internal/server/daemon/api/gibson/daemon/operator/v1"
+	sdktenantv1 "github.com/zeroroot-ai/gibson/internal/server/daemon/api/gibson/tenant/v1"
+	daemonpb "github.com/zeroroot-ai/sdk/api/gen/gibson/daemon/v1"
 )
 
 // GRPCClientSet holds all gRPC clients needed by the mission e2e test.

@@ -7,7 +7,7 @@ import (
 	"github.com/zeroroot-ai/gibson/internal/platform/authz"
 	"github.com/zeroroot-ai/gibson/internal/platform/idp"
 
-	adminv1 "github.com/zeroroot-ai/sdk/api/gen/gibson/tenant/v1"
+	adminv1 "github.com/zeroroot-ai/gibson/internal/server/daemon/api/gibson/tenant/v1"
 )
 
 // rosterAuthorizer is a minimal authz.Authorizer for ListTeamMembers tests:
