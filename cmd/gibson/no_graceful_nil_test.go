@@ -148,9 +148,9 @@ func TestNoGracefulNilInRequestPaths(t *testing.T) {
 		"internal/server/daemon/api/server_provider_config.go:246":    astchecks.Entry{Category: astchecks.CategoryLegacyOptional, Reason: "audit logger conditionally wired"},
 		"internal/server/daemon/api/server_provider_exec.go:112":      astchecks.Entry{Category: astchecks.CategoryLegacyOptional, Reason: "budget enforcer conditionally wired; remove with budget-required slice"},
 		"internal/server/daemon/api/typed_value_helpers.go:25":        astchecks.Entry{Category: astchecks.CategoryDefensiveGuard, Reason: "typed-value converter, nil input → nil output"},
-		"internal/server/daemon/api/typed_value_helpers.go:77":        astchecks.Entry{Category: astchecks.CategoryDefensiveGuard, Reason: "typed-value converter, nil input → nil output"},
-		"internal/server/daemon/api/typed_value_helpers.go:89":        astchecks.Entry{Category: astchecks.CategoryDefensiveGuard, Reason: "typed-value converter, nil input → nil output"},
-		"internal/server/daemon/api/typed_value_helpers.go:106":       astchecks.Entry{Category: astchecks.CategoryDefensiveGuard, Reason: "typed-value converter, nil input → nil output"},
+		"internal/server/daemon/api/typed_value_helpers.go:67":        astchecks.Entry{Category: astchecks.CategoryDefensiveGuard, Reason: "typed-value converter, nil input → nil output"},
+		"internal/server/daemon/api/typed_value_helpers.go:79":        astchecks.Entry{Category: astchecks.CategoryDefensiveGuard, Reason: "typed-value converter, nil input → nil output"},
+		"internal/server/daemon/api/typed_value_helpers.go:96":        astchecks.Entry{Category: astchecks.CategoryDefensiveGuard, Reason: "typed-value converter, nil input → nil output"},
 
 		// internal/daemon — core
 		"internal/server/daemon/compliance_sink_adapter.go:32": astchecks.Entry{Category: astchecks.CategoryLegacyOptional, Reason: "compliance sink registered conditionally; remove with compliance-required slice"},
