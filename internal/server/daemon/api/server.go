@@ -19,6 +19,7 @@ import (
 
 	"github.com/zeroroot-ai/gibson/internal/engine/finding"
 	"github.com/zeroroot-ai/gibson/internal/engine/llm"
+	"github.com/zeroroot-ai/gibson/internal/engine/memory/embedder"
 	"github.com/zeroroot-ai/gibson/internal/engine/missiondraft"
 	"github.com/zeroroot-ai/gibson/internal/engine/target"
 	"github.com/zeroroot-ai/gibson/internal/infra/datapool"
@@ -190,6 +191,14 @@ type DaemonServer struct {
 	// May be nil; when nil, all provider CRUD RPCs return codes.FailedPrecondition
 	// with a message pointing at security.key_provider.
 	providerConfig providerConfigStoreIface
+
+	// embedderResolver resolves a tenant's configured embedding provider into a
+	// live, per-tenant embedder (E11 BYO-embedder, ADR-0059, gibson#810). It is
+	// the embedding analogue of the per-tenant LLM provider resolver. May be
+	// nil; when nil, ResolveTenantEmbedder returns the onboarding gate error so
+	// vector features prompt the user to configure an embedding provider rather
+	// than panicking or falling back to a bundled mock.
+	embedderResolver embedderResolverIface
 
 	// execLimiter enforces per-(tenant, RPC) request rates for ExecuteLLM,
 	// StreamLLM, and TestProvider. May be nil; when nil rate limiting is skipped.
@@ -1056,6 +1065,37 @@ func (s *DaemonServer) WithPoolGetter(getter func() datapool.Pool) *DaemonServer
 func (s *DaemonServer) WithProviderConfigStore(store providerConfigStoreIface) *DaemonServer {
 	s.providerConfig = store
 	return s
+}
+
+// embedderResolverIface is the narrow per-tenant embedder-resolution surface the
+// server uses, satisfied by tenantembedder.Resolver. Resolve returns the
+// tenant's embedder, or embedder.ErrNoEmbeddingProvider when no embedding
+// provider is configured (the onboarding gate, ADR-0059, gibson#810).
+type embedderResolverIface interface {
+	Resolve(ctx context.Context, tenantID string) (embedder.Embedder, error)
+	Invalidate(tenantID string)
+}
+
+// WithEmbedderResolver wires the per-tenant embedder resolver (E11 BYO-embedder,
+// gibson#810). When nil, ResolveTenantEmbedder returns the onboarding gate error
+// so vector features (vector recall, GraphRAG, belief-RAG, finding
+// classification) surface a "configure an embedding provider" prompt.
+func (s *DaemonServer) WithEmbedderResolver(r embedderResolverIface) *DaemonServer {
+	s.embedderResolver = r
+	return s
+}
+
+// ResolveTenantEmbedder returns the tenant's configured embedder, or the
+// onboarding gate error (embedder.ErrNoEmbeddingProvider) when none is
+// configured. It is the single chokepoint vector features call before embedding:
+// a graceful error (never a panic), mirroring the LLM-provider gate. A nil
+// resolver is treated as "not configured" so a daemon booted without the
+// resolver still gates gracefully rather than NPE-ing.
+func (s *DaemonServer) ResolveTenantEmbedder(ctx context.Context, tenantID string) (embedder.Embedder, error) {
+	if s.embedderResolver == nil {
+		return nil, embedder.ErrNoEmbeddingProvider()
+	}
+	return s.embedderResolver.Resolve(ctx, tenantID)
 }
 
 // WithIdPAdminClient wires the vendor-neutral IdP admin client into the server.

@@ -33,6 +33,7 @@ import (
 	"github.com/zeroroot-ai/gibson/internal/platform/mailer"
 	"github.com/zeroroot-ai/gibson/internal/platform/providerconfig"
 	"github.com/zeroroot-ai/gibson/internal/platform/ratelimit"
+	"github.com/zeroroot-ai/gibson/internal/platform/tenantembedder"
 	"github.com/zeroroot-ai/gibson/internal/server/admin"
 	discoverysvc "github.com/zeroroot-ai/gibson/internal/server/api/discovery"
 	"github.com/zeroroot-ai/gibson/internal/server/daemon/api"
@@ -618,8 +619,22 @@ func (d *daemonImpl) buildGRPCServer(ctx context.Context) (*grpcSubsystem, error
 	}
 
 	if d.pool != nil && d.secretsService != nil {
-		daemonSvc.WithProviderConfigStore(providerconfig.NewBrokerBackedStore(d.pool, d.secretsService))
+		providerStore := providerconfig.NewBrokerBackedStore(d.pool, d.secretsService)
+		daemonSvc.WithProviderConfigStore(providerStore)
 		d.logger.Info(ctx, "provider-config store wired (broker-backed: metadata in Postgres, credentials in secrets broker)")
+
+		// Per-tenant embedder resolution (E11 BYO-embedder, ADR-0059,
+		// gibson#810): vector recall / GraphRAG / belief-RAG / finding
+		// classification resolve their embedder from the tenant's configured
+		// embedding provider via embedder.NewFromProvider, sized to that model's
+		// vector dimension. A tenant with no embedding provider hits the
+		// onboarding gate. allowPrivate is false (the secure default); operators
+		// running an in-cluster/air-gapped embedder endpoint opt in via the SSRF
+		// allow-list when that knob lands.
+		embedderResolver := tenantembedder.NewResolver(providerStore, false)
+		daemonSvc.WithEmbedderResolver(embedderResolver)
+		d.embedderResolver = embedderResolver
+		d.logger.Info(ctx, "per-tenant embedder resolver wired (BYO-embedder; vector features gated until an embedding provider is configured)")
 	} else {
 		d.logger.Error(ctx, "provider-config store NOT wired — pool or secretsService is nil; provider config RPCs will fail",
 			"pool_nil", d.pool == nil,

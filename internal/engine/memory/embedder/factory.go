@@ -17,11 +17,12 @@ import (
 type Kind string
 
 const (
-	// KindBundled is the no-provider default: the bundled mock embedder
-	// (all-MiniLM-L6-v2 → 384). Selected when Config.Kind is empty, preserving
-	// current behaviour for tenants with no embedding provider configured
-	// (ADR-0059 §4 keeps the gate to a separate slice, gibson#810).
-	KindBundled Kind = ""
+	// KindUnset is the zero value: no embedding provider configured. The live
+	// path treats it as the onboarding gate (ADR-0059 §4, gibson#810):
+	// NewFromProvider returns ErrNoEmbeddingProvider rather than a bundled mock
+	// fallback. The bundled MockEmbedder is retained for tests/fixtures only and
+	// must be injected explicitly via NewMockEmbedder().
+	KindUnset Kind = ""
 
 	// KindOpenAI is OpenAI's /v1/embeddings endpoint.
 	KindOpenAI Kind = "openai"
@@ -104,7 +105,6 @@ type builder func(Config) (Embedder, error)
 // registry maps a provider Kind to its Embedder builder. It is the single
 // dispatch table the factory keys on; adding a backend means adding one entry.
 var registry = map[Kind]builder{
-	KindBundled:          func(Config) (Embedder, error) { return NewMockEmbedder(), nil },
 	KindOpenAI:           newOpenAIEmbedder,
 	KindOpenAICompatible: newOpenAICompatibleEmbedder,
 	KindTEI:              newTEIEmbedder,
@@ -115,16 +115,24 @@ var registry = map[Kind]builder{
 
 // NewFromProvider constructs the Embedder for a tenant's configured embedding
 // provider. It is THE way an embedder is built (ADR-0027 wholesale): there is no
-// parallel "old vs new" path. An empty Kind yields the bundled mock default so
-// tenants with no embedding provider keep working until the onboarding gate
-// (gibson#810) removes the fallback.
+// parallel "old vs new" path.
 //
-// For every non-bundled backend the returned Embedder has already registered its
+// An empty Kind is the onboarding gate (ADR-0059 §4, gibson#810): the live path
+// no longer silently falls back to a bundled embedder. NewFromProvider returns
+// ErrNoEmbeddingProvider so the caller can surface the "configure an embedding
+// provider" prompt to the user, exactly like the LLM-provider gate. Tests that
+// need a deterministic offline embedder inject NewMockEmbedder() directly rather
+// than relying on an empty-Kind fallback.
+//
+// For every backend the returned Embedder has already registered its
 // model→dimension mapping (RegisterModelDimension), so the vector index sized
 // from DimensionForModel(cfg.Model) matches what the embedder emits. A wrong
 // dimension would silently fail RediSearch indexing of the whole document, so
 // unknown models fail closed here rather than guessing.
 func NewFromProvider(cfg Config) (Embedder, error) {
+	if normalizeKind(cfg.Kind) == KindUnset {
+		return nil, ErrNoEmbeddingProvider()
+	}
 	build, ok := registry[normalizeKind(cfg.Kind)]
 	if !ok {
 		return nil, types.NewError(ErrCodeInvalidConfig,

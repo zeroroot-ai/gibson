@@ -21,6 +21,7 @@ import (
 
 	"github.com/zeroroot-ai/gibson/internal/engine/llm"
 	"github.com/zeroroot-ai/gibson/internal/engine/llm/providers"
+	"github.com/zeroroot-ai/gibson/internal/engine/memory/embedder"
 	"github.com/zeroroot-ai/gibson/internal/platform/providerconfig"
 	tenantv1 "github.com/zeroroot-ai/gibson/internal/server/daemon/api/gibson/tenant/v1"
 	"github.com/zeroroot-ai/sdk/auth"
@@ -76,16 +77,74 @@ func toProtoProviderRecord(cfg *providerconfig.ProviderConfig) *tenantv1.Provide
 		return nil
 	}
 	return &tenantv1.ProviderRecord{
-		Id:                cfg.ID.String(),
-		Name:              cfg.Name,
-		Type:              string(cfg.Type),
-		DefaultModel:      cfg.DefaultModel,
-		IsDefault:         cfg.IsDefault,
-		Enabled:           cfg.Enabled,
-		CredentialsMasked: cfg.CredentialsMasked,
-		CreatedAt:         cfg.CreatedAt.UTC().Format(time.RFC3339),
-		UpdatedAt:         cfg.UpdatedAt.UTC().Format(time.RFC3339),
+		Id:                    cfg.ID.String(),
+		Name:                  cfg.Name,
+		Type:                  string(cfg.Type),
+		DefaultModel:          cfg.DefaultModel,
+		IsDefault:             cfg.IsDefault,
+		Enabled:               cfg.Enabled,
+		Capabilities:          capabilitiesToProto(cfg.Capabilities),
+		DefaultEmbeddingModel: cfg.DefaultEmbeddingModel,
+		CredentialsMasked:     cfg.CredentialsMasked,
+		CreatedAt:             cfg.CreatedAt.UTC().Format(time.RFC3339),
+		UpdatedAt:             cfg.UpdatedAt.UTC().Format(time.RFC3339),
 	}
+}
+
+// capabilityToString maps a proto Capability enum to the lower-cased string the
+// providerconfig model stores. CAPABILITY_UNSPECIFIED and unknown values are
+// dropped.
+func capabilityToString(c tenantv1.Capability) (string, bool) {
+	switch c {
+	case tenantv1.Capability_CAPABILITY_CHAT:
+		return providerconfig.CapabilityChat, true
+	case tenantv1.Capability_CAPABILITY_EMBEDDING:
+		return providerconfig.CapabilityEmbedding, true
+	default:
+		return "", false
+	}
+}
+
+// stringToCapability maps a stored capability string back to its proto enum.
+func stringToCapability(s string) (tenantv1.Capability, bool) {
+	switch s {
+	case providerconfig.CapabilityChat:
+		return tenantv1.Capability_CAPABILITY_CHAT, true
+	case providerconfig.CapabilityEmbedding:
+		return tenantv1.Capability_CAPABILITY_EMBEDDING, true
+	default:
+		return tenantv1.Capability_CAPABILITY_UNSPECIFIED, false
+	}
+}
+
+// capabilitiesFromProto converts a proto capability slice to the model's
+// lower-cased string slice, dropping unspecified/unknown values.
+func capabilitiesFromProto(caps []tenantv1.Capability) []string {
+	if len(caps) == 0 {
+		return nil
+	}
+	out := make([]string, 0, len(caps))
+	for _, c := range caps {
+		if s, ok := capabilityToString(c); ok {
+			out = append(out, s)
+		}
+	}
+	return out
+}
+
+// capabilitiesToProto converts the model's capability strings to proto enums,
+// dropping unknown values.
+func capabilitiesToProto(caps []string) []tenantv1.Capability {
+	if len(caps) == 0 {
+		return nil
+	}
+	out := make([]tenantv1.Capability, 0, len(caps))
+	for _, s := range caps {
+		if c, ok := stringToCapability(s); ok {
+			out = append(out, c)
+		}
+	}
+	return out
 }
 
 // toProtoProviderRecords converts a slice of ProviderConfig to proto records.
@@ -107,17 +166,20 @@ func fromProtoInput(in *tenantv1.ProviderConfigInput) *providerconfig.ProviderCo
 		creds[k] = v
 	}
 	return &providerconfig.ProviderConfigInput{
-		Name:         in.Name,
-		Type:         llm.ProviderType(in.Type),
-		DefaultModel: in.DefaultModel,
-		Credentials:  creds,
-		SetAsDefault: in.SetAsDefault,
-		Enabled:      true, // new providers default to enabled
+		Name:                  in.Name,
+		Type:                  llm.ProviderType(in.Type),
+		DefaultModel:          in.DefaultModel,
+		Capabilities:          capabilitiesFromProto(in.Capabilities),
+		DefaultEmbeddingModel: in.DefaultEmbeddingModel,
+		Credentials:           creds,
+		SetAsDefault:          in.SetAsDefault,
+		Enabled:               true, // new providers default to enabled
 	}
 }
 
 // validateProviderInput checks that the provider type is in the supported set
-// and is not "custom" (operator-only, not dashboard-configurable).
+// and is not "custom" (operator-only, not dashboard-configurable), and that an
+// embedding-capable provider declares a model whose vector dimension is known.
 func validateProviderInput(input *tenantv1.ProviderConfigInput) error {
 	if input == nil {
 		return fmt.Errorf("input is required")
@@ -125,12 +187,44 @@ func validateProviderInput(input *tenantv1.ProviderConfigInput) error {
 	if input.Type == string(llm.ProviderCustom) {
 		return fmt.Errorf("provider type %q is operator-only and cannot be configured via the dashboard", input.Type)
 	}
+	supported := false
 	for _, t := range llm.SupportedProviderTypes() {
 		if string(t) == input.Type {
-			return nil
+			supported = true
+			break
 		}
 	}
-	return fmt.Errorf("unsupported provider type %q", input.Type)
+	if !supported {
+		return fmt.Errorf("unsupported provider type %q", input.Type)
+	}
+	return validateEmbeddingCapability(input)
+}
+
+// validateEmbeddingCapability fails closed when a provider declares the
+// embedding capability but does not carry a default_embedding_model whose vector
+// dimension is known (E11 BYO-embedder, gibson#810). A wrong/unknown dimension
+// would silently fail RediSearch indexing of the whole document
+// ([[project_redisearch_json_indexing_type_mismatch]]), so the unknown-model
+// case is rejected at write time rather than discovered at index time.
+func validateEmbeddingCapability(input *tenantv1.ProviderConfigInput) error {
+	servesEmbedding := false
+	for _, c := range input.Capabilities {
+		if c == tenantv1.Capability_CAPABILITY_EMBEDDING {
+			servesEmbedding = true
+			break
+		}
+	}
+	if !servesEmbedding {
+		return nil
+	}
+	model := strings.TrimSpace(input.DefaultEmbeddingModel)
+	if model == "" {
+		return fmt.Errorf("provider declares the embedding capability but has no default_embedding_model")
+	}
+	if _, ok := embedder.DimensionForModel(model); !ok {
+		return fmt.Errorf("embedding model %q has no known vector dimension — the index dimension cannot be derived; configure a supported embedding model", model)
+	}
+	return nil
 }
 
 // providerAuditAction returns the audit action string for a provider mutation.
@@ -222,8 +316,20 @@ func (s *DaemonServer) CreateProvider(ctx context.Context, req *tenantv1.CreateP
 	if err != nil {
 		return nil, toGRPCProviderError("create provider", err)
 	}
+	s.invalidateEmbedderCache(tenantID)
 	s.emitProviderAudit(ctx, tenantID, auditProviderCreated, cfg.Name)
 	return &tenantv1.CreateProviderResponse{Provider: toProtoProviderRecord(cfg)}, nil
+}
+
+// invalidateEmbedderCache drops the per-tenant embedder cache after a
+// provider-config mutation so the next vector operation resolves the tenant's
+// current embedding provider (e.g. a tenant that just configured one clears the
+// onboarding gate; a tenant that switched embedding models picks up the new
+// dimension). nil-safe when no resolver is wired.
+func (s *DaemonServer) invalidateEmbedderCache(tenantID string) {
+	if s.embedderResolver != nil {
+		s.embedderResolver.Invalidate(tenantID)
+	}
 }
 
 // ---------------------------------------------------------------------------
@@ -248,6 +354,7 @@ func (s *DaemonServer) UpdateProvider(ctx context.Context, req *tenantv1.UpdateP
 	if err != nil {
 		return nil, toGRPCProviderError("update provider", err)
 	}
+	s.invalidateEmbedderCache(tenantID)
 	s.emitProviderAudit(ctx, tenantID, auditProviderUpdated, cfg.Name)
 	return &tenantv1.UpdateProviderResponse{Provider: toProtoProviderRecord(cfg)}, nil
 }
@@ -270,6 +377,7 @@ func (s *DaemonServer) DeleteProvider(ctx context.Context, req *tenantv1.DeleteP
 	if err := s.providerConfig.Delete(ctx, tenantID, name); err != nil {
 		return nil, toGRPCProviderError("delete provider", err)
 	}
+	s.invalidateEmbedderCache(tenantID)
 	s.emitProviderAudit(ctx, tenantID, auditProviderDeleted, name)
 	return &tenantv1.DeleteProviderResponse{}, nil
 }
@@ -518,6 +626,7 @@ func (s *DaemonServer) SetDefaultProvider(ctx context.Context, req *tenantv1.Set
 	if err := s.providerConfig.SetDefault(ctx, tenantID, name); err != nil {
 		return nil, toGRPCProviderError("set default provider", err)
 	}
+	s.invalidateEmbedderCache(tenantID)
 	s.emitProviderAudit(ctx, tenantID, auditProviderDefaultChanged, name)
 	// Return the updated provider record.
 	cfg, err := s.providerConfig.Get(ctx, tenantID, name)

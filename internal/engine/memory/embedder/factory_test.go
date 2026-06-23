@@ -1,19 +1,33 @@
 package embedder
 
 import (
+	"errors"
 	"testing"
 
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
+
+	"github.com/zeroroot-ai/gibson/internal/infra/types"
 )
 
-// TestNewFromProvider_BundledDefault verifies that an empty Kind selects the
-// bundled mock embedder so tenants with no embedding provider keep working.
-func TestNewFromProvider_BundledDefault(t *testing.T) {
+// TestNewFromProvider_UnsetKindGates verifies that an empty Kind no longer
+// silently yields a bundled embedder (ADR-0059 §4, gibson#810). The live path
+// must hit the onboarding gate so vector features prompt the user to configure
+// an embedding provider instead of producing mock embeddings.
+func TestNewFromProvider_UnsetKindGates(t *testing.T) {
 	emb, err := NewFromProvider(Config{})
-	require.NoError(t, err)
-	_, isMock := emb.(*MockEmbedder)
-	assert.True(t, isMock, "empty Kind must yield the bundled MockEmbedder")
+	require.Error(t, err, "empty Kind must gate, not fall back to the bundled mock")
+	assert.Nil(t, emb)
+	var gerr *types.GibsonError
+	require.True(t, errors.As(err, &gerr))
+	assert.Equal(t, ErrCodeNoEmbeddingProvider, gerr.Code)
+}
+
+// TestNewMockEmbedder_ForTests confirms the bundled mock is still constructible
+// directly — it is retained strictly for tests/fixtures that need a
+// deterministic offline embedder.
+func TestNewMockEmbedder_ForTests(t *testing.T) {
+	emb := NewMockEmbedder()
 	assert.Equal(t, 384, emb.Dimensions())
 	assert.Equal(t, DefaultEmbeddingModel, emb.Model())
 }
