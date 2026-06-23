@@ -1,7 +1,6 @@
 package ontology
 
 import (
-	"fmt"
 	"io/fs"
 	"log/slog"
 	"strings"
@@ -32,14 +31,6 @@ func NewLoader(r *Reasoner, logger *slog.Logger) *Loader {
 func (l *Loader) LoadCore() error {
 	fsys := taxonomy.EmbeddedOntology()
 	return l.loadFromFS(fsys, "core")
-}
-
-// LoadFromFS reads all *.yaml files from the given FS rooted at "ontology/"
-// and registers them. The namePrefix is prepended to each file's base name to
-// form the extension registration key, ensuring vendor-supplied ontologies
-// don't collide with the core vocab.
-func (l *Loader) LoadFromFS(fsys fs.FS, namePrefix string) error {
-	return l.loadFromFS(fsys, namePrefix)
 }
 
 func (l *Loader) loadFromFS(fsys fs.FS, namePrefix string) error {
@@ -163,14 +154,3 @@ func ontologyToExtension(o taxonomy.Ontology) sdkgraphrag.OntologyExtension {
 	}
 }
 
-// RegisterExtensionFromYAML parses raw YAML bytes and registers the resulting
-// extension under name. Convenience helper for runtime-supplied extensions
-// (e.g., from a plugin or a tenant config upload).
-func (l *Loader) RegisterExtensionFromYAML(name string, data []byte) error {
-	o, err := taxonomy.Parse(data)
-	if err != nil {
-		return fmt.Errorf("ontology: parse extension YAML: %w", err)
-	}
-	ext := ontologyToExtension(o)
-	return l.reasoner.RegisterExtension(name, ext)
-}

@@ -77,13 +77,3 @@ func (d *daemonImpl) newPlatformReadinessProbes() []pcreadiness.Probe {
 	return probes
 }
 
-// newPlatformReadinessAggregator constructs a platform-clients Aggregator
-// with the daemon's infrastructure probes registered. Its ReadyHandler can
-// be mounted on any http.ServeMux for a dedicated /readyz/platform path.
-func (d *daemonImpl) newPlatformReadinessAggregator() *pcreadiness.Aggregator {
-	agg := pcreadiness.NewAggregator()
-	for _, p := range d.newPlatformReadinessProbes() {
-		agg.Register(p)
-	}
-	return agg
-}

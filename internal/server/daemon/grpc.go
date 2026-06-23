@@ -1691,56 +1691,6 @@ func rejectNonLoopbackWithoutSPIFFE(addr string) error {
 // Implementation of api.DaemonInterface for delegation from gRPC server.
 // These methods delegate to the daemon's internal services.
 
-// updateAgentHeartbeat updates the last heartbeat time for an agent.
-// This should be called whenever an agent communicates with the daemon.
-//
-// Integration points (to be implemented in future):
-//   - During mission execution when agents send task results
-//   - During attack execution when agents report findings
-//   - When agents register or re-register with the registry
-//   - When agents respond to health checks
-func (d *daemonImpl) updateAgentHeartbeat(agentName string) {
-	d.agentStateMu.Lock()
-	defer d.agentStateMu.Unlock()
-
-	state, exists := d.agentState[agentName]
-	if !exists {
-		state = &AgentRuntimeState{}
-		d.agentState[agentName] = state
-	}
-	state.LastHeartbeat = time.Now()
-}
-
-// setAgentCurrentTask updates the current task for an agent.
-// This should be called when a task is assigned to or completed by an agent.
-//
-// Integration points (to be implemented in future):
-//   - In orchestrator when assigning mission nodes to agents
-//   - In attack runner when starting agent operations
-//   - When tasks complete (set to empty string to clear)
-func (d *daemonImpl) setAgentCurrentTask(agentName string, taskID string) {
-	d.agentStateMu.Lock()
-	defer d.agentStateMu.Unlock()
-
-	state, exists := d.agentState[agentName]
-	if !exists {
-		state = &AgentRuntimeState{
-			LastHeartbeat: time.Now(),
-		}
-		d.agentState[agentName] = state
-	}
-
-	// If setting a new task (non-empty), update start time
-	if taskID != "" {
-		state.CurrentTask = taskID
-		state.TaskStartTime = time.Now()
-	} else {
-		// Clearing the task
-		state.CurrentTask = ""
-		state.TaskStartTime = time.Time{}
-	}
-}
-
 // getAgentState retrieves the runtime state for an agent.
 // Returns nil if no state exists for the agent.
 func (d *daemonImpl) getAgentState(agentName string) *AgentRuntimeState {

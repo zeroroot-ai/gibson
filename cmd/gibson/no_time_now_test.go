@@ -103,7 +103,7 @@ func TestNoTimeNowInRPCHandlers(t *testing.T) {
 
 		// server_chat.go — conversation store save timestamps
 		"internal/server/daemon/api/server_chat.go:191": astchecks.Entry{Category: astchecks.CategoryDefensiveGuard, Reason: "conversation save `createdAt`/`updatedAt` Redis hash fields; wall-clock Unix"},
-		"internal/server/daemon/api/server_chat.go:652": astchecks.Entry{Category: astchecks.CategoryDefensiveGuard, Reason: "conversation save `updatedAt` refresh; wall-clock Unix"},
+		"internal/server/daemon/api/server_chat.go:619": astchecks.Entry{Category: astchecks.CategoryDefensiveGuard, Reason: "conversation save `updatedAt` refresh; wall-clock Unix"},
 
 		// user_state.go — per-user state record timestamps + activity last-active marker
 		// (Module 2: Redis-read RPCs, dashboard-no-backing-store-clients).

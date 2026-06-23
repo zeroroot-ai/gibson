@@ -392,67 +392,6 @@ func (d *daemonImpl) registerLLMProviders(ctx context.Context, registry llm.LLMR
 	return nil
 }
 
-// checkInfrastructureHealth checks the health of all infrastructure components.
-//
-// This method is called during health checks to verify that all infrastructure
-// components are operational. It checks:
-//  1. Database connectivity (via finding store)
-//  2. LLM provider health
-//  3. Registry health
-//  4. Redis/StateClient health (if enabled)
-//
-// Returns a map of component names to health status strings.
-func (d *daemonImpl) checkInfrastructureHealth(ctx context.Context, infra *Infrastructure) map[string]string {
-	health := make(map[string]string)
-
-	// Finding store check: findings are now per-tenant via Pool; pool health is
-	// checked separately via the /readyz probe. Skip here to avoid cross-tenant access.
-	if infra.findingStore != nil {
-		_, err := infra.findingStore.Count(ctx, "health-check-mission-id")
-		if err != nil {
-			health["finding_store"] = fmt.Sprintf("unhealthy: %v", err)
-		} else {
-			health["finding_store"] = "healthy"
-		}
-	} else {
-		health["finding_store"] = "per-tenant (pool-backed)"
-	}
-
-	// Check LLM registry
-	llmHealth := infra.llmRegistry.Health(ctx)
-	if llmHealth.IsHealthy() {
-		health["llm_registry"] = llmHealth.Message
-	} else {
-		health["llm_registry"] = fmt.Sprintf("unhealthy: %s", llmHealth.Message)
-	}
-
-	// Check component registry via registry adapter
-	if d.registryAdapter != nil {
-		// Try to list agents to verify registry is accessible
-		_, err := d.registryAdapter.ListAgents(ctx)
-		if err != nil {
-			health["component_registry"] = fmt.Sprintf("unhealthy: %v", err)
-		} else {
-			health["component_registry"] = "healthy"
-		}
-	} else {
-		health["component_registry"] = "not initialized"
-	}
-
-	// Check Redis StateClient health (required for Gibson operation)
-	if d.stateClient != nil {
-		if err := d.stateClient.Health(ctx); err != nil {
-			health["redis_state_client"] = fmt.Sprintf("unhealthy: %v", err)
-		} else {
-			health["redis_state_client"] = "healthy"
-		}
-	} else {
-		health["redis_state_client"] = "not initialized (critical error)"
-	}
-
-	return health
-}
-
 // initOTelObservability initializes the OpenTelemetry observability stack if enabled.
 // Returns the initialized stack or nil if OTel is disabled or initialization fails.
 // Errors are logged as warnings - tracing failures should not prevent daemon startup.

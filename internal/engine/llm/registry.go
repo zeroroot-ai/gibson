@@ -51,11 +51,6 @@ func NewLLMRegistry() *DefaultLLMRegistry {
 	}
 }
 
-// NewRegistry is an alias for NewLLMRegistry for backward compatibility
-func NewRegistry() LLMRegistry {
-	return NewLLMRegistry()
-}
-
 // RegisterProvider registers an LLM provider with the registry.
 // Returns ErrLLMProviderAlreadyExists if a provider with the same name is already registered.
 // Returns ErrLLMProviderInvalidInput if the provider is nil or has an empty name.
