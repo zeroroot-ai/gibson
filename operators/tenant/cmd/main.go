@@ -697,8 +697,21 @@ func main() {
 		}
 		setupLog.Info("daemon provisioner: gRPC (SPIFFE mTLS)", "addr", grpcAddr, "daemon_svid", daemonSVID)
 		psagaDeps.DaemonGRPC = grpcClient
+
+		// Operator-pull tenant provisioning (E9, gibson#948, enables
+		// dashboard#813): drain the daemon's pending-provisioning queue and
+		// create Tenant CRs. Reuses the same SPIFFE-mTLS daemon client; the
+		// daemon never touches Kubernetes (ADR-0023).
+		if err := (&controller.PendingProvisioningRunnable{
+			Client: mgr.GetClient(),
+			Daemon: grpcClient,
+		}).SetupWithManager(mgr); err != nil {
+			setupLog.Error(err, "Failed to register pending-provisioning runnable")
+			os.Exit(1)
+		}
+		setupLog.Info("operator-pull tenant provisioning enabled (drains daemon pending queue)")
 	} else {
-		setupLog.Info("GIBSON_DAEMON_GRPC_ADDRESS unset; DaemonGRPC saga capability unbound")
+		setupLog.Info("GIBSON_DAEMON_GRPC_ADDRESS unset; DaemonGRPC saga capability unbound; operator-pull tenant provisioning disabled")
 	}
 
 	provisionSteps := flows.ProvisionSteps(deps)

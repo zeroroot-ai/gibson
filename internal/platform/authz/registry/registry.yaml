@@ -406,6 +406,13 @@ entries:
     allowed_identities:
       - USER
       - SERVICE
+  "/gibson.daemon.operator.v1.DaemonOperatorService/AckTenantProvisioned":
+    relation: "platform_operator"
+    object_type: "system_tenant"
+    object_deriver: "system_tenant"
+    allowed_identities:
+      - USER
+      - SERVICE
   "/gibson.daemon.operator.v1.DaemonOperatorService/EmitAuditEvent":
     relation: "platform_operator"
     object_type: "system_tenant"
@@ -421,6 +428,13 @@ entries:
       - USER
       - SERVICE
   "/gibson.daemon.operator.v1.DaemonOperatorService/ListFeatureTuples":
+    relation: "platform_operator"
+    object_type: "system_tenant"
+    object_deriver: "system_tenant"
+    allowed_identities:
+      - USER
+      - SERVICE
+  "/gibson.daemon.operator.v1.DaemonOperatorService/ListPendingTenantProvisioning":
     relation: "platform_operator"
     object_type: "system_tenant"
     object_deriver: "system_tenant"

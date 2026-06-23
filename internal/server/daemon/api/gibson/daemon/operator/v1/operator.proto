@@ -142,6 +142,44 @@ service DaemonOperatorService {
     };
   }
 
+  // ---------------------------------------------------------------------------
+  // Operator-pull tenant provisioning (E9, gibson#948, enables dashboard#813)
+  // ---------------------------------------------------------------------------
+
+  // ListPendingTenantProvisioning returns the daemon-owned queue of tenants
+  // awaiting Tenant-CR creation. The daemon's Signup handler enqueues one row
+  // per self-serve signup once it has provisioned the founding-owner Zitadel
+  // user (gibson#812); the tenant-operator's reconcile loop drains the queue by
+  // creating the Tenant CR for each pending record, then AckTenantProvisioned.
+  //
+  // ADR-0023: the daemon never touches Kubernetes — it only reads its Postgres
+  // queue here. The operator (which holds `tenants` create RBAC) creates the
+  // Tenant CR. Idempotent and safe to poll: returns only rows still in
+  // status=pending.
+  rpc ListPendingTenantProvisioning(ListPendingTenantProvisioningRequest) returns (ListPendingTenantProvisioningResponse) {
+    option (gibson.auth.v1.authz) = {
+      relation: "platform_operator",
+      object_type: "system_tenant",
+      object_deriver: "system_tenant",
+      allowed_identities: 3  // USER | SERVICE
+    };
+  }
+
+  // AckTenantProvisioned marks a pending-provisioning record done so it is not
+  // re-created on the next reconcile pass. The operator calls this AFTER it has
+  // ensured the Tenant CR exists (create or already-present), so a crash
+  // between create and ack simply re-lists the row and the operator's
+  // existence-check makes the re-create a no-op. Idempotent: acking an
+  // already-done or unknown tenant_id is a no-op success.
+  rpc AckTenantProvisioned(AckTenantProvisionedRequest) returns (AckTenantProvisionedResponse) {
+    option (gibson.auth.v1.authz) = {
+      relation: "platform_operator",
+      object_type: "system_tenant",
+      object_deriver: "system_tenant",
+      allowed_identities: 3  // USER | SERVICE
+    };
+  }
+
 }
 
 // ---------------------------------------------------------------------------
@@ -346,4 +384,56 @@ message SetTenantZitadelOrgRequest {
 
 // SetTenantZitadelOrgResponse confirms the mapping was persisted.
 message SetTenantZitadelOrgResponse {}
+
+// ---------------------------------------------------------------------------
+// Operator-pull tenant provisioning — request/response messages
+// ---------------------------------------------------------------------------
+
+// PendingTenant is one row of the daemon's pending-provisioning queue: a
+// self-serve signup whose founding-owner Zitadel user the daemon has already
+// provisioned, awaiting Tenant-CR creation by the operator. It carries exactly
+// what the operator needs to build the Tenant CR spec (the same shape the
+// dashboard used to write directly): tenant_id (CR name), workspace_name
+// (displayName), owner_email (spec.owner), tier (spec.tier), and the optional
+// stripe_customer_id (annotation).
+message PendingTenant {
+  // tenant_id is the deterministic tenant slug (SignupResponse.tenant_id) —
+  // becomes the Tenant CR's metadata.name.
+  string tenant_id = 1;
+  // owner_user_id is the Zitadel id of the provisioned founding-owner user.
+  // Carried for correlation; the Tenant CR's owner is the email.
+  string owner_user_id = 2;
+  // owner_email becomes Tenant.spec.owner.
+  string owner_email = 3;
+  // workspace_name becomes Tenant.spec.displayName.
+  string workspace_name = 4;
+  // tier becomes Tenant.spec.tier ("team"/"org"/"enterprise").
+  string tier = 5;
+  // stripe_customer_id, when non-empty, is stamped on the Tenant CR as the
+  // gibson.zeroroot.ai/stripe-customer-id annotation for billing adoption.
+  string stripe_customer_id = 6;
+}
+
+// ListPendingTenantProvisioningRequest queries the pending queue. No filters
+// today — the daemon returns every row still in status=pending.
+message ListPendingTenantProvisioningRequest {}
+
+// ListPendingTenantProvisioningResponse carries the pending records.
+message ListPendingTenantProvisioningResponse {
+  repeated PendingTenant pending = 1;
+}
+
+// AckTenantProvisionedRequest marks a tenant's pending record done after the
+// operator has ensured its Tenant CR exists.
+message AckTenantProvisionedRequest {
+  // tenant_id identifies the pending record to mark done. Required.
+  string tenant_id = 1;
+}
+
+// AckTenantProvisionedResponse confirms the ack.
+message AckTenantProvisionedResponse {
+  // acked is true when a pending row transitioned to done; false when the row
+  // was unknown or already done (both are idempotent successes).
+  bool acked = 1;
+}
 
