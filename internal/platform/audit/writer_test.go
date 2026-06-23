@@ -67,18 +67,50 @@ func setupAuditPostgres(t *testing.T) *sql.DB {
 		return db.PingContext(ctx) == nil
 	}, 30*time.Second, 200*time.Millisecond, "Postgres did not become ready in time")
 
-	require.NoError(t, RunAuditMigrations(ctx, db), "RunAuditMigrations must succeed")
+	require.NoError(t, createAuditSchema(ctx, db), "create audit_log schema")
 
 	return db
+}
+
+// createAuditSchema creates the audit_log table the Writer/Query operate on.
+// The production schema is provisioned out-of-band (the platform Postgres
+// migration set, not this repo), and the former in-package RunAuditMigrations
+// helper was removed; this ephemeral test owns its container DB, so it defines
+// the table itself. The column set and nullability mirror the contract the
+// production code assumes: Writer's INSERT
+//
+//	(tenant_id, actor_id, actor_type, action, target_type, target_id, decision, metadata)
+//
+// with id/created_at server-defaulted, decision NULLable (empty Decision is
+// stored as NULL — see writer.go), and metadata as BYTEA because the Writer
+// passes a []byte parameter via lib/pq (which would be rejected by a JSONB
+// column without a cast). Query.List reads id, ..., decision (COALESCE'd),
+// metadata, created_at and orders by created_at DESC.
+func createAuditSchema(ctx context.Context, db *sql.DB) error {
+	const ddl = `
+CREATE TABLE IF NOT EXISTS audit_log (
+    id          BIGSERIAL   PRIMARY KEY,
+    tenant_id   TEXT        NOT NULL,
+    actor_id    TEXT        NOT NULL,
+    actor_type  TEXT        NOT NULL,
+    action      TEXT        NOT NULL,
+    target_type TEXT,
+    target_id   TEXT,
+    decision    TEXT,
+    metadata    BYTEA       NOT NULL,
+    created_at  TIMESTAMPTZ NOT NULL DEFAULT clock_timestamp()
+);`
+	_, err := db.ExecContext(ctx, ddl)
+	return err
 }
 
 // ---------------------------------------------------------------------------
 // Test helpers
 // ---------------------------------------------------------------------------
 
-// silentLogger returns an slog.Logger that only emits ERROR-level messages to
+// auditSilentLogger returns an slog.Logger that only emits ERROR-level messages to
 // stderr (keeps test output clean).
-func silentLogger() *slog.Logger {
+func auditSilentLogger() *slog.Logger {
 	return slog.New(slog.NewTextHandler(os.Stderr, &slog.HandlerOptions{Level: slog.LevelError}))
 }
 
@@ -92,8 +124,8 @@ func countRows(t *testing.T, db *sql.DB, tenantID string) int {
 	return n
 }
 
-// testEvent returns a minimal valid Event for the given tenant and action.
-func testEvent(tenant, action string) Event {
+// auditTestEvent returns a minimal valid Event for the given tenant and action.
+func auditTestEvent(tenant, action string) Event {
 	return Event{
 		TenantID:   tenant,
 		ActorID:    "actor-1",
@@ -127,11 +159,11 @@ func TestWriter_Log_IsNonBlocking(t *testing.T) {
 	require.NoError(t, err)
 	defer db.Close()
 
-	w := NewWriter(db, silentLogger())
+	w := NewWriter(db, auditSilentLogger())
 	// Do NOT call w.Start() — the background goroutine is not running.
 
 	// Fill the buffer directly to avoid Prometheus counter side-effects.
-	ev := testEvent("acme", "test.action")
+	ev := auditTestEvent("acme", "test.action")
 	for i := 0; i < writerBufferSize; i++ {
 		w.buffer <- ev
 	}
@@ -158,9 +190,9 @@ func TestWriter_Log_BufferOverflow_DropsGracefully(t *testing.T) {
 	require.NoError(t, err)
 	defer db.Close()
 
-	w := NewWriter(db, silentLogger())
+	w := NewWriter(db, auditSilentLogger())
 
-	ev := testEvent("acme", "overflow.action")
+	ev := auditTestEvent("acme", "overflow.action")
 	for i := 0; i < writerBufferSize; i++ {
 		w.buffer <- ev
 	}
@@ -178,14 +210,14 @@ func TestWriter_Log_BufferOverflow_DropsGracefully(t *testing.T) {
 func TestWriter_FlushOnCount(t *testing.T) {
 	db := setupAuditPostgres(t)
 
-	w := NewWriter(db, silentLogger())
+	w := NewWriter(db, auditSilentLogger())
 	ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
 	defer cancel()
 
 	w.Start(ctx)
 
 	for i := 0; i < batchSize; i++ {
-		w.Log(testEvent("tenant-count", fmt.Sprintf("action.%d", i)))
+		w.Log(auditTestEvent("tenant-count", fmt.Sprintf("action.%d", i)))
 	}
 
 	stopWriter(t, w)
@@ -199,7 +231,7 @@ func TestWriter_FlushOnCount(t *testing.T) {
 func TestWriter_FlushOnTicker(t *testing.T) {
 	db := setupAuditPostgres(t)
 
-	w := NewWriter(db, silentLogger())
+	w := NewWriter(db, auditSilentLogger())
 	ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
 	defer cancel()
 
@@ -207,7 +239,7 @@ func TestWriter_FlushOnTicker(t *testing.T) {
 
 	const nEvents = 5
 	for i := 0; i < nEvents; i++ {
-		w.Log(testEvent("tenant-ticker", "action.tick"))
+		w.Log(auditTestEvent("tenant-ticker", "action.tick"))
 	}
 
 	// Wait longer than the flush interval so the ticker fires.
@@ -224,7 +256,7 @@ func TestWriter_FlushOnTicker(t *testing.T) {
 func TestWriter_Stop_FlushesRemaining(t *testing.T) {
 	db := setupAuditPostgres(t)
 
-	w := NewWriter(db, silentLogger())
+	w := NewWriter(db, auditSilentLogger())
 	ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
 	defer cancel()
 
@@ -232,7 +264,7 @@ func TestWriter_Stop_FlushesRemaining(t *testing.T) {
 
 	const nEvents = 42
 	for i := 0; i < nEvents; i++ {
-		w.Log(testEvent("tenant-stop", fmt.Sprintf("action.%d", i)))
+		w.Log(auditTestEvent("tenant-stop", fmt.Sprintf("action.%d", i)))
 	}
 
 	stopWriter(t, w)
@@ -246,7 +278,7 @@ func TestWriter_Stop_FlushesRemaining(t *testing.T) {
 func TestWriter_NilMetadata_DefaultsToEmptyObject(t *testing.T) {
 	db := setupAuditPostgres(t)
 
-	w := NewWriter(db, silentLogger())
+	w := NewWriter(db, auditSilentLogger())
 	ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
 	defer cancel()
 
@@ -277,7 +309,7 @@ func TestWriter_NilMetadata_DefaultsToEmptyObject(t *testing.T) {
 func TestWriter_EmptyDecision_StoredAsNull(t *testing.T) {
 	db := setupAuditPostgres(t)
 
-	w := NewWriter(db, silentLogger())
+	w := NewWriter(db, auditSilentLogger())
 	ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
 	defer cancel()
 
@@ -316,12 +348,12 @@ func TestQuery_List_TenantScoping(t *testing.T) {
 	ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
 	defer cancel()
 
-	w := NewWriter(db, silentLogger())
+	w := NewWriter(db, auditSilentLogger())
 	w.Start(ctx)
 
-	w.Log(testEvent("tenant-a", "event.a"))
-	w.Log(testEvent("tenant-b", "event.b"))
-	w.Log(testEvent("tenant-a", "event.c"))
+	w.Log(auditTestEvent("tenant-a", "event.a"))
+	w.Log(auditTestEvent("tenant-b", "event.b"))
+	w.Log(auditTestEvent("tenant-a", "event.c"))
 
 	stopWriter(t, w)
 
@@ -342,12 +374,12 @@ func TestQuery_List_FilterByAction(t *testing.T) {
 	ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
 	defer cancel()
 
-	w := NewWriter(db, silentLogger())
+	w := NewWriter(db, auditSilentLogger())
 	w.Start(ctx)
 
-	w.Log(testEvent("tenant-filter-action", "grant_created"))
-	w.Log(testEvent("tenant-filter-action", "agent_registered"))
-	w.Log(testEvent("tenant-filter-action", "grant_created"))
+	w.Log(auditTestEvent("tenant-filter-action", "grant_created"))
+	w.Log(auditTestEvent("tenant-filter-action", "agent_registered"))
+	w.Log(auditTestEvent("tenant-filter-action", "grant_created"))
 
 	stopWriter(t, w)
 
@@ -368,12 +400,12 @@ func TestQuery_List_FilterByActorID(t *testing.T) {
 	ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
 	defer cancel()
 
-	w := NewWriter(db, silentLogger())
+	w := NewWriter(db, auditSilentLogger())
 	w.Start(ctx)
 
-	ev1 := testEvent("tenant-actor", "action.x")
+	ev1 := auditTestEvent("tenant-actor", "action.x")
 	ev1.ActorID = "alice"
-	ev2 := testEvent("tenant-actor", "action.y")
+	ev2 := auditTestEvent("tenant-actor", "action.y")
 	ev2.ActorID = "bob"
 	w.Log(ev1)
 	w.Log(ev2)
@@ -395,13 +427,13 @@ func TestQuery_List_FilterByTargetTypeAndID(t *testing.T) {
 	ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
 	defer cancel()
 
-	w := NewWriter(db, silentLogger())
+	w := NewWriter(db, auditSilentLogger())
 	w.Start(ctx)
 
-	ev1 := testEvent("tenant-target", "check")
+	ev1 := auditTestEvent("tenant-target", "check")
 	ev1.TargetType = "agent"
 	ev1.TargetID = "agent-42"
-	ev2 := testEvent("tenant-target", "check")
+	ev2 := auditTestEvent("tenant-target", "check")
 	ev2.TargetType = "component"
 	ev2.TargetID = "comp-99"
 	w.Log(ev1)
@@ -427,9 +459,9 @@ func TestQuery_List_SinceFilter(t *testing.T) {
 	defer cancel()
 
 	// Write the early event.
-	w1 := NewWriter(db, silentLogger())
+	w1 := NewWriter(db, auditSilentLogger())
 	w1.Start(ctx)
-	w1.Log(testEvent("tenant-since", "event.early"))
+	w1.Log(auditTestEvent("tenant-since", "event.early"))
 	stopWriter(t, w1)
 
 	// Record boundary time after the early event is written.
@@ -438,9 +470,9 @@ func TestQuery_List_SinceFilter(t *testing.T) {
 	time.Sleep(50 * time.Millisecond)
 
 	// Write the late event.
-	w2 := NewWriter(db, silentLogger())
+	w2 := NewWriter(db, auditSilentLogger())
 	w2.Start(ctx)
-	w2.Log(testEvent("tenant-since", "event.late"))
+	w2.Log(auditTestEvent("tenant-since", "event.late"))
 	stopWriter(t, w2)
 
 	entries, total, err := q.List(ctx, "tenant-since", Filters{Since: &boundary}, 100, 0)
@@ -458,12 +490,12 @@ func TestQuery_List_Pagination(t *testing.T) {
 	ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
 	defer cancel()
 
-	w := NewWriter(db, silentLogger())
+	w := NewWriter(db, auditSilentLogger())
 	w.Start(ctx)
 
 	const nTotal = 25
 	for i := 0; i < nTotal; i++ {
-		w.Log(testEvent("tenant-page", fmt.Sprintf("action.%d", i)))
+		w.Log(auditTestEvent("tenant-page", fmt.Sprintf("action.%d", i)))
 	}
 	stopWriter(t, w)
 
@@ -510,7 +542,7 @@ func TestQuery_List_NoResults(t *testing.T) {
 func TestWriter_ConcurrentLog_NoDataRace(t *testing.T) {
 	db := setupAuditPostgres(t)
 
-	w := NewWriter(db, silentLogger())
+	w := NewWriter(db, auditSilentLogger())
 	ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
 	defer cancel()
 
@@ -526,7 +558,7 @@ func TestWriter_ConcurrentLog_NoDataRace(t *testing.T) {
 	for g := 0; g < numGoroutines; g++ {
 		go func(id int) {
 			for i := 0; i < eventsEach; i++ {
-				w.Log(testEvent("tenant-race", fmt.Sprintf("action.%d.%d", id, i)))
+				w.Log(auditTestEvent("tenant-race", fmt.Sprintf("action.%d.%d", id, i)))
 			}
 			if remaining.Add(-1) == 0 {
 				close(allDone)
