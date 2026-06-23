@@ -146,7 +146,7 @@ func TestNoGracefulNilInRequestPaths(t *testing.T) {
 		"internal/server/daemon/api/server.go:1578":                   astchecks.Entry{Category: astchecks.CategoryDefensiveGuard, Reason: "response helper, nil data means empty response"},
 		"internal/server/daemon/api/server_provider_config.go:75":     astchecks.Entry{Category: astchecks.CategoryDefensiveGuard, Reason: "nil cfg means no provider overlay"},
 		"internal/server/daemon/api/server_provider_config.go:152":    astchecks.Entry{Category: astchecks.CategoryLegacyOptional, Reason: "audit logger conditionally wired"},
-		"internal/server/daemon/api/server_provider_exec.go:111":      astchecks.Entry{Category: astchecks.CategoryLegacyOptional, Reason: "budget enforcer conditionally wired; remove with budget-required slice"},
+		"internal/server/daemon/api/server_provider_exec.go:112":      astchecks.Entry{Category: astchecks.CategoryLegacyOptional, Reason: "budget enforcer conditionally wired; remove with budget-required slice"},
 		"internal/server/daemon/api/typed_value_helpers.go:25":        astchecks.Entry{Category: astchecks.CategoryDefensiveGuard, Reason: "typed-value converter, nil input → nil output"},
 		"internal/server/daemon/api/typed_value_helpers.go:77":        astchecks.Entry{Category: astchecks.CategoryDefensiveGuard, Reason: "typed-value converter, nil input → nil output"},
 		"internal/server/daemon/api/typed_value_helpers.go:89":        astchecks.Entry{Category: astchecks.CategoryDefensiveGuard, Reason: "typed-value converter, nil input → nil output"},
@@ -155,12 +155,9 @@ func TestNoGracefulNilInRequestPaths(t *testing.T) {
 		// internal/daemon — core
 		"internal/server/daemon/compliance_sink_adapter.go:32": astchecks.Entry{Category: astchecks.CategoryLegacyOptional, Reason: "compliance sink registered conditionally; remove with compliance-required slice"},
 		"internal/server/daemon/daemon.go:481":                 astchecks.Entry{Category: astchecks.CategoryLegacyOptional, Reason: "SPIFFE wiring optional in non-SPIFFE deployments; reassert when SPIFFE-everywhere lands"},
-		"internal/server/daemon/grpc.go:1905":                  astchecks.Entry{Category: astchecks.CategoryLegacyOptional, Reason: "pool nil-guard; pool-required follow-up (one-code-path#195)"},
-		"internal/server/daemon/grpc.go:2002":                  astchecks.Entry{Category: astchecks.CategoryLegacyOptional, Reason: "pool nil-guard; pool-required follow-up (one-code-path#195)"},
-		"internal/server/daemon/grpc.go:2332":                  astchecks.Entry{Category: astchecks.CategoryLegacyOptional, Reason: "pool nil-guard in populateCheckpointPayload; pool-required follow-up"},
-		"internal/server/daemon/grpc.go:2342":                  astchecks.Entry{Category: astchecks.CategoryDefensiveGuard, Reason: "compound nil-check on mission store Get result + Checkpoint proto field in populateCheckpointPayload"},
-		"internal/server/daemon/grpc.go:2405":                  astchecks.Entry{Category: astchecks.CategoryLegacyOptional, Reason: "pool nil-guard; pool-required follow-up (one-code-path#195)"},
-		"internal/server/daemon/grpc.go:2817":                  astchecks.Entry{Category: astchecks.CategoryLegacyOptional, Reason: "Neo4j connection nil-guard; Neo4j not configured for this tenant — skip silently"},
+		"internal/server/daemon/grpc.go:2326":                  astchecks.Entry{Category: astchecks.CategoryLegacyOptional, Reason: "pool nil-guard in populateCheckpointPayload; pool-required follow-up (one-code-path#195)"},
+		"internal/server/daemon/grpc.go:2336":                  astchecks.Entry{Category: astchecks.CategoryDefensiveGuard, Reason: "compound nil-check on mission store Get result + Checkpoint proto field in populateCheckpointPayload"},
+		"internal/server/daemon/grpc.go:2811":                  astchecks.Entry{Category: astchecks.CategoryLegacyOptional, Reason: "Neo4j connection nil-guard; Neo4j not configured for this tenant — skip silently"},
 		"internal/server/daemon/graph_bootstrap.go:411":        astchecks.Entry{Category: astchecks.CategoryDefensiveGuard, Reason: "tenant-value lookup helper, nil means no scoping"},
 		"internal/server/daemon/graph_projector.go:54":         astchecks.Entry{Category: astchecks.CategoryReceiverNilGuard, Reason: "composite reg/writer nil-guard in background projection loop (ADR-0007); both wired by NewGraphProjector in production — nil-safe for zero-value test construction"},
 		"internal/server/daemon/infrastructure.go:77":          astchecks.Entry{Category: astchecks.CategoryLegacyOptional, Reason: "semantic querier factory optional in non-graphrag deployments"},
@@ -299,13 +296,8 @@ func TestNoGracefulNilInRequestPaths(t *testing.T) {
 		"internal/infra/observability/otel_metrics.go:825": astchecks.Entry{Category: astchecks.CategoryReceiverNilGuard, Reason: "composite nil-receiver shim"},
 		"internal/infra/observability/otel_metrics.go:838": astchecks.Entry{Category: astchecks.CategoryReceiverNilGuard, Reason: "composite nil-receiver shim"},
 
-		// internal/orchestrator
-		"internal/orchestrator/checkpoint_loop_hook.go:62": astchecks.Entry{Category: astchecks.CategoryDefensiveGuard, Reason: "composite action+metadata proto-shape guard"},
-		"internal/orchestrator/inventory_validator.go:45":  astchecks.Entry{Category: astchecks.CategoryLegacyOptional, Reason: "inventory dep conditionally wired"},
-		"internal/orchestrator/inventory_validator.go:91":  astchecks.Entry{Category: astchecks.CategoryLegacyOptional, Reason: "inventory dep conditionally wired"},
-		"internal/orchestrator/observe.go:506":             astchecks.Entry{Category: astchecks.CategoryLegacyOptional, Reason: "graphQueries dep optional in non-graphrag deployments"},
-		"internal/orchestrator/orchestrator.go:955":        astchecks.Entry{Category: astchecks.CategoryLegacyOptional, Reason: "metrics dep optional; reassert with otel-required follow-up"},
-		"internal/orchestrator/orchestrator.go:973":        astchecks.Entry{Category: astchecks.CategoryLegacyOptional, Reason: "metrics dep optional; reassert with otel-required follow-up"},
+		// internal/orchestrator — package deleted by #851; entries removed
+		// (the orchestrator was folded into the engine; see gibson#902).
 
 		// internal/plan
 		"internal/plan/step_executor.go:253": astchecks.Entry{Category: astchecks.CategoryLegacyOptional, Reason: "guardrails dep optional; reassert with guardrails-required follow-up"},
@@ -320,6 +312,25 @@ func TestNoGracefulNilInRequestPaths(t *testing.T) {
 
 		// internal/secrets — composite nil-receiver shim for the SPIRE JWT source
 		"internal/platform/secrets/jwtsource/spire.go:136": astchecks.Entry{Category: astchecks.CategoryReceiverNilGuard, Reason: "composite nil-receiver shim for SPIRE JWT source"},
+
+		// internal/infra/secrets/vault — Vault KV LIST response shape (folded
+		// from platform-clients secrets, gibson#780). `secret == nil ||
+		// secret.Data == nil` is the Vault API's "no secrets exist for this
+		// path" shape, not a dependency-skip — an empty list is the correct
+		// result. Mirrors the goredis.Nil/empty-result guards in datapool.
+		"internal/infra/secrets/vault/provider.go:349": astchecks.Entry{Category: astchecks.CategoryDefensiveGuard, Reason: "Vault KV LIST response-shape guard; nil/nil-Data means no secrets exist for the tenant path — empty list is the correct result"},
+
+		// internal/server/extauthz — folded from the ext-authz repo (gibson#782).
+		// fga/check.go: resp.Allowed is the OpenFGA client's `*bool` response
+		// field — nil means "no decision returned", which is correctly mapped
+		// to a fail-closed DENY (false, nil). Value-shape proto field, not a dep.
+		"internal/server/extauthz/fga/check.go:280": astchecks.Entry{Category: astchecks.CategoryDefensiveGuard, Reason: "OpenFGA *bool Allowed response field, legitimately nil-able; nil maps to fail-closed DENY in CanInvokeTool"},
+		"internal/server/extauthz/fga/check.go:307": astchecks.Entry{Category: astchecks.CategoryDefensiveGuard, Reason: "OpenFGA *bool Allowed response field, legitimately nil-able; nil maps to fail-closed DENY in CheckPlatformOperator"},
+		// envoy_extauthz.go: the component CG-JWT verifier is wired conditionally
+		// (ADR-0045 / gibson#648); a nil verifier returns (nil, false) so the
+		// caller falls through to the unauthenticated DENY — fail-closed, not a
+		// silent success.
+		"internal/server/extauthz/server/envoy_extauthz.go:352": astchecks.Entry{Category: astchecks.CategoryLegacyOptional, Reason: "component CG-JWT verifier conditionally wired; nil falls through to unauthenticated DENY (fail-closed) — reassert with component-auth-required follow-up"},
 
 		// internal/types — proto Capabilities field
 		"internal/infra/types/target.go:338": astchecks.Entry{Category: astchecks.CategoryDefensiveGuard, Reason: "proto Capabilities field on Target, legitimately nil-able"},

@@ -155,7 +155,7 @@ func TestNoGracefulNilInRequestPaths(t *testing.T) {
 		"internal/clients/vault/client.go:389":              httpDiscard,
 		"internal/clients/vault/transit.go:270":             httpDiscard,
 		"internal/clients/signupprogress/redis.go:95":       ctorGuard,
-		"internal/provision/entitlements_grpc_client.go:88": ctorGuard,
+		"internal/provision/entitlements_grpc_client.go:85": ctorGuard,
 
 		// Controller-runtime patterns
 		"internal/controller/tenant_namespace.go:298": applyShim,
