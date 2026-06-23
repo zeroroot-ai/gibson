@@ -1,7 +1,7 @@
 # Gibson Framework Makefile
 # Stage 1 - Foundation
 
-.PHONY: all build bin gibson-migrate sandbox-eviction-handler test test-coverage test-race lint lint-all lint-deadcode lint-deadcode-baseline clean install help proto proto-deps proto-clean check-authz check-coverage test-daemon-identity-roundtrip check-no-tenant-id check-fga-headers check-rpc-test-walker authz-registry
+.PHONY: all build bin gibson-migrate sandbox-eviction-handler test test-coverage test-race lint lint-all lint-deadcode lint-deadcode-baseline clean install help proto proto-deps proto-clean check-authz check-coverage test-daemon-identity-roundtrip check-no-tenant-id check-fga-headers check-rpc-test-walker coverage-profile check-coverage-floor check-diff-coverage check-coverage-gates authz-registry
 
 # Go parameters
 GOCMD=go
@@ -220,6 +220,31 @@ check-coverage:
 	RESULT=$$(echo "$${ID_COV} >= 95" | bc -l); \
 	if [ "$$RESULT" -ne 1 ]; then echo "FAIL: internal/identity coverage $${ID_COV}% is below 95% threshold"; exit 1; fi
 	@echo "Coverage check PASSED"
+
+# coverage-profile generates the repo-wide atomic coverage profile the two
+# quality gates (floor + diff) consume. CI runs this once with the envtest
+# binaries on PATH (see .github/workflows/coverage.yml) so operator suites
+# count. Spec: gibson#794 (E3 / QUALITY-BARS §4).
+coverage-profile:
+	@echo "Generating repo-wide coverage profile -> $(COVERAGE_FILE)..."
+	$(GOTEST) $(BUILD_TAGS) -coverprofile=$(COVERAGE_FILE) -covermode=atomic ./...
+
+# check-coverage-floor enforces the absolute total-coverage floor (ratcheting
+# toward 80%). Reads .coverage-floor. Requires an existing profile.
+check-coverage-floor:
+	@bash scripts/check-coverage-floor.sh $(COVERAGE_FILE) .coverage-floor
+
+# check-diff-coverage enforces 85% coverage on lines changed vs the base ref.
+# Override the base with DIFF_COVERAGE_BASE (default origin/main).
+DIFF_COVERAGE_BASE ?= origin/main
+check-diff-coverage:
+	@echo "Checking diff coverage (>=85% of changed statement lines) vs $(DIFF_COVERAGE_BASE)..."
+	@$(GOBUILD) -o $(BINARY_DIR)/diff-coverage ./cmd/diff-coverage
+	@$(BINARY_DIR)/diff-coverage -profile $(COVERAGE_FILE) -base $(DIFF_COVERAGE_BASE) -threshold 85
+
+# check-coverage-gates runs both #794 gates against an existing profile.
+check-coverage-gates: check-coverage-floor check-diff-coverage
+	@echo "Coverage gates PASSED"
 
 # check-no-tenant-id enforces the database-per-tenant invariant:
 # no migration file may define a tenant_id column or property.
