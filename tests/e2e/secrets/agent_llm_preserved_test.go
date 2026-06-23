@@ -17,11 +17,11 @@
 //     harness.Complete(ctx, "primary", messages).
 //  4. Asserts:
 //     a. The RPC returns a successful response (or a known non-auth error
-//        such as NotFound/Unavailable when the fake provider is not wired)
-//        — critically, it must NOT return PERMISSION_DENIED.
+//     such as NotFound/Unavailable when the fake provider is not wired)
+//     — critically, it must NOT return PERMISSION_DENIED.
 //     b. Daemon-side logs captured via kubectl logs do NOT contain the
-//        sentinel BYOK test key string.  The key must never propagate out
-//        of the daemon's broker resolution path to an agent process.
+//     sentinel BYOK test key string.  The key must never propagate out
+//     of the daemon's broker resolution path to an agent process.
 //
 // The test uses a fake/test BYOK key value: "e2e-test-llm-api-key-SENTINEL".
 // This value is deliberately chosen to be lexicographically distinct and
@@ -70,7 +70,7 @@ import (
 	"google.golang.org/grpc/metadata"
 	"google.golang.org/grpc/status"
 
-	tenantv1 "github.com/zeroroot-ai/sdk/api/gen/gibson/tenant/v1"
+	tenantv1 "github.com/zeroroot-ai/sdk/api/gen/gibson/agentidentity/v1"
 	harnesspb "github.com/zeroroot-ai/sdk/api/gen/gibson/harness/v1"
 )
 

@@ -13,48 +13,48 @@
 //
 // The attack scenario:
 //
-//   An adversary constructs a CG-JWT signed with a valid Ed25519 key and
-//   carries RecipientClass=agent with AllowedRPCs containing the
-//   GetCredential RPC. In a real attack, the adversary would use the daemon's
-//   actual minting key. In this test we use a fresh test-only Ed25519
-//   keypair ("the KMS test signing key") which is distinct from the daemon's
-//   real signing key and therefore not present in ext-authz's JWKS cache.
+//	An adversary constructs a CG-JWT signed with a valid Ed25519 key and
+//	carries RecipientClass=agent with AllowedRPCs containing the
+//	GetCredential RPC. In a real attack, the adversary would use the daemon's
+//	actual minting key. In this test we use a fresh test-only Ed25519
+//	keypair ("the KMS test signing key") which is distinct from the daemon's
+//	real signing key and therefore not present in ext-authz's JWKS cache.
 //
 // Why the test still demonstrates Layer 4 independence:
 //
-//   When ext-authz receives a CG-JWT whose kid is unknown (our test key),
-//   it cannot verify the signature → it falls through to the FGA check.
-//   If the test used the daemon's real key, ext-authz WOULD short-circuit
-//   on the CG-JWT path and allow the call (bypassing FGA entirely). This
-//   is the known behavior documented in the spec: "Layer 3 refuses at
-//   issuance; Layer 4 refuses at validation via FGA tuple absence." The
-//   short-circuit is intentional for legitimate uses; this test validates
-//   that the FGA layer alone is sufficient to deny the GetCredential call
-//   when the agent has no can_resolve tuple — regardless of how the
-//   request arrived (with or without a CG-JWT header).
+//	When ext-authz receives a CG-JWT whose kid is unknown (our test key),
+//	it cannot verify the signature → it falls through to the FGA check.
+//	If the test used the daemon's real key, ext-authz WOULD short-circuit
+//	on the CG-JWT path and allow the call (bypassing FGA entirely). This
+//	is the known behavior documented in the spec: "Layer 3 refuses at
+//	issuance; Layer 4 refuses at validation via FGA tuple absence." The
+//	short-circuit is intentional for legitimate uses; this test validates
+//	that the FGA layer alone is sufficient to deny the GetCredential call
+//	when the agent has no can_resolve tuple — regardless of how the
+//	request arrived (with or without a CG-JWT header).
 //
-//   The "validly signed" requirement (spec Task 16) means the JWT is
-//   structurally correct and has a valid Ed25519 signature over its
-//   payload — it is not malformed, it is not corrupted, it is not
-//   replayed. The attack fails because of FGA, not because of a
-//   signature error.
+//	The "validly signed" requirement (spec Task 16) means the JWT is
+//	structurally correct and has a valid Ed25519 signature over its
+//	payload — it is not malformed, it is not corrupted, it is not
+//	replayed. The attack fails because of FGA, not because of a
+//	signature error.
 //
 // Test flow:
 //
 //  1. Generate a fresh test Ed25519 keypair (the "forged" signing key).
 //  2. Construct a well-formed CG-JWT with:
-//       kid         = "e2e-forged-test-key-<runID>"
-//       RecipientClass = "agent"  (in the claims body)
-//       AllowedRPCs    = ["/gibson.harness.v1.HarnessCallbackService/GetCredential"]
+//     kid         = "e2e-forged-test-key-<runID>"
+//     RecipientClass = "agent"  (in the claims body)
+//     AllowedRPCs    = ["/gibson.harness.v1.HarnessCallbackService/GetCredential"]
 //     Signed correctly with the test private key.
 //  3. Provision an agent_principal and obtain its OIDC token.
 //  4. Present the forged CG-JWT in the x-capability-grant header on a
 //     GetCredential call from the agent principal.
 //  5. Assert:
-//       a. The call returns PERMISSION_DENIED.
-//       b. Audit rows carry decision_reason=fga_no_can_resolve (NOT a
-//          JWT signature failure — the JWT is correctly signed, just with
-//          an untrusted key, so ext-authz falls through to FGA).
+//     a. The call returns PERMISSION_DENIED.
+//     b. Audit rows carry decision_reason=fga_no_can_resolve (NOT a
+//     JWT signature failure — the JWT is correctly signed, just with
+//     an untrusted key, so ext-authz falls through to FGA).
 //  6. Assert a baseline: the same call WITHOUT the forged CG-JWT header
 //     also returns PERMISSION_DENIED with the same FGA reason, confirming
 //     the denial is structural and not an artefact of the header.
@@ -108,7 +108,7 @@ import (
 	"google.golang.org/grpc/metadata"
 	"google.golang.org/grpc/status"
 
-	tenantv1 "github.com/zeroroot-ai/sdk/api/gen/gibson/tenant/v1"
+	tenantv1 "github.com/zeroroot-ai/sdk/api/gen/gibson/agentidentity/v1"
 	harnesspb "github.com/zeroroot-ai/sdk/api/gen/gibson/harness/v1"
 )
 

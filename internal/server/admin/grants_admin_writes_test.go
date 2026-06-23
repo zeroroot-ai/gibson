@@ -5,11 +5,12 @@ import (
 	"errors"
 	"testing"
 
-	identitypb "github.com/zeroroot-ai/sdk/api/gen/gibson/identity/v1"
-	tenantv1 "github.com/zeroroot-ai/sdk/api/gen/gibson/tenant/v1"
-	"github.com/zeroroot-ai/sdk/auth"
 	"google.golang.org/grpc/codes"
 	"google.golang.org/grpc/status"
+
+	tenantv1 "github.com/zeroroot-ai/gibson/internal/server/daemon/api/gibson/tenant/v1"
+	identitypb "github.com/zeroroot-ai/sdk/api/gen/gibson/identity/v1"
+	"github.com/zeroroot-ai/sdk/auth"
 
 	"github.com/zeroroot-ai/gibson/internal/platform/authz"
 	"github.com/zeroroot-ai/gibson/internal/platform/identity"

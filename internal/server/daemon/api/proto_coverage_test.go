@@ -11,9 +11,11 @@ import (
 	// binary so their init() funcs register their service/method descriptors
 	// with protoregistry.GlobalFiles.
 	_ "github.com/zeroroot-ai/gibson/internal/server/daemon/api/gibson/daemon/operator/v1"
+	_ "github.com/zeroroot-ai/gibson/internal/server/daemon/api/gibson/tenant/v1"
+	_ "github.com/zeroroot-ai/sdk/api/gen/gibson/agentidentity/v1"
 	_ "github.com/zeroroot-ai/sdk/api/gen/gibson/component/v1"
 	_ "github.com/zeroroot-ai/sdk/api/gen/gibson/daemon/v1"
-	_ "github.com/zeroroot-ai/sdk/api/gen/gibson/tenant/v1"
+	_ "github.com/zeroroot-ai/sdk/api/gen/gibson/pluginadmin/v1"
 )
 
 // Note: FGA registry coverage tests have been removed. FGA enforcement has
@@ -42,6 +44,8 @@ var coveredProtoPackages = map[string]struct{}{
 	"gibson.daemon.v1":          {},
 	"gibson.component.v1":       {},
 	"gibson.tenant.v1":          {},
+	"gibson.agentidentity.v1":   {},
+	"gibson.pluginadmin.v1":     {},
 	"gibson.daemon.operator.v1": {},
 	"gibson.user.v1":            {},
 }

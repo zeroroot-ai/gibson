@@ -24,7 +24,7 @@ import (
 	"context"
 	"fmt"
 
-	tenantv1 "github.com/zeroroot-ai/sdk/api/gen/gibson/tenant/v1"
+	tenantv1 "github.com/zeroroot-ai/gibson/internal/server/daemon/api/gibson/tenant/v1"
 )
 
 const (
@@ -130,7 +130,7 @@ func InjectSlowMode(ctx context.Context, adminClient tenantv1.TenantServiceClien
 			Type:         MockProviderType,
 			DefaultModel: MockProviderDefaultModel,
 			Credentials: map[string]string{
-				"api_key":      "mock-test-token-e2e-only",
+				"api_key":            "mock-test-token-e2e-only",
 				MockProviderSlowMode: "10000", // 10s delay in milliseconds
 			},
 			SetAsDefault: true,

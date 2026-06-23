@@ -16,6 +16,7 @@ import (
 	status_grpc "google.golang.org/grpc/status"
 
 	goredis "github.com/redis/go-redis/v9"
+
 	"github.com/zeroroot-ai/gibson/internal/engine/finding"
 	"github.com/zeroroot-ai/gibson/internal/engine/llm"
 	"github.com/zeroroot-ai/gibson/internal/engine/missiondraft"
@@ -32,10 +33,11 @@ import (
 	"github.com/zeroroot-ai/gibson/internal/platform/onboarding"
 	daemonoperatorv1 "github.com/zeroroot-ai/gibson/internal/server/daemon/api/gibson/daemon/operator/v1"
 	sessionv1 "github.com/zeroroot-ai/gibson/internal/server/daemon/api/gibson/session/v1"
+	tenantv1 "github.com/zeroroot-ai/gibson/internal/server/daemon/api/gibson/tenant/v1"
 	"github.com/zeroroot-ai/gibson/pkg/version"
+	agentidentityv1 "github.com/zeroroot-ai/sdk/api/gen/gibson/agentidentity/v1"
 	daemonpb "github.com/zeroroot-ai/sdk/api/gen/gibson/daemon/v1"
 	missionpb "github.com/zeroroot-ai/sdk/api/gen/gibson/mission/v1"
-	tenantv1 "github.com/zeroroot-ai/sdk/api/gen/gibson/tenant/v1"
 	"github.com/zeroroot-ai/sdk/auth"
 )
 
@@ -59,7 +61,7 @@ type authzIface interface {
 type DaemonServer struct {
 	daemonpb.UnimplementedDaemonServiceServer
 	tenantv1.UnimplementedTenantServiceServer
-	tenantv1.UnimplementedAgentIdentityServiceServer
+	agentidentityv1.UnimplementedAgentIdentityServiceServer
 	tenantv1.UnimplementedProviderServiceServer
 	tenantv1.UnimplementedModelAccessServiceServer
 	tenantv1.UnimplementedBudgetServiceServer

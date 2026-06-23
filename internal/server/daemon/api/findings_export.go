@@ -18,7 +18,7 @@ import (
 	"github.com/zeroroot-ai/gibson/internal/engine/finding"
 	findingexport "github.com/zeroroot-ai/gibson/internal/engine/finding/export"
 	"github.com/zeroroot-ai/gibson/internal/infra/types"
-	tenantv1 "github.com/zeroroot-ai/sdk/api/gen/gibson/tenant/v1"
+	tenantv1 "github.com/zeroroot-ai/gibson/internal/server/daemon/api/gibson/tenant/v1"
 )
 
 // exportFindingsData queries the finding store and serialises results to the

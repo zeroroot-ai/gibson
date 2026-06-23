@@ -20,7 +20,7 @@ package admin
 import (
 	"context"
 
-	tenantv1 "github.com/zeroroot-ai/sdk/api/gen/gibson/tenant/v1"
+	tenantv1 "github.com/zeroroot-ai/gibson/internal/server/daemon/api/gibson/tenant/v1"
 )
 
 // CombinedSecretsServer is the single server registered for

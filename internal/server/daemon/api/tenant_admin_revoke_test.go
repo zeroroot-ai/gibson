@@ -4,10 +4,11 @@ import (
 	"context"
 	"testing"
 
-	"github.com/zeroroot-ai/gibson/internal/platform/idp"
-	tenantpb "github.com/zeroroot-ai/sdk/api/gen/gibson/tenant/v1"
 	"google.golang.org/grpc/codes"
 	"google.golang.org/grpc/status"
+
+	"github.com/zeroroot-ai/gibson/internal/platform/idp"
+	tenantpb "github.com/zeroroot-ai/sdk/api/gen/gibson/agentidentity/v1"
 )
 
 func TestRevokeAgentIdentity_HappyPath(t *testing.T) {

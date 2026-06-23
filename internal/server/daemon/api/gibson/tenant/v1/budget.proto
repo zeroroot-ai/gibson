@@ -1,0 +1,177 @@
+syntax = "proto3";
+
+// Package gibson.tenant.v1 — BudgetService: customer-callable LLM budget
+// configuration surface. Moved from gibson.budget.v1.BudgetService
+// (platform-sdk) into the OSS SDK under the gibson.tenant.v1 package as
+// part of the admin-surface-recategorization (ADR-0039 implementation).
+//
+// The public customer-visible wire shapes BudgetScope and BudgetExceeded
+// remain in the public gibson.budget_status.v1 package (OSS SDK) and are
+// imported here for the service's request/response messages.
+//
+// Authorization: every RPC carries a (gibson.auth.v1.authz) annotation.
+// Mutations further require tenant-admin entitlement enforced inside the
+// daemon handler.
+package gibson.tenant.v1;
+
+option go_package = "github.com/zeroroot-ai/gibson/internal/server/daemon/api/gibson/tenant/v1;tenantv1";
+
+import "gibson/auth/v1/options.proto";
+import "gibson/budget_status/v1/budget_status.proto";
+
+// BudgetService is the customer-callable API for configuring budgets and
+// reading current usage. Admin callers can query any subject; non-admins are
+// narrowed server-side to their own data.
+service BudgetService {
+  rpc GetBudget(GetBudgetRequest) returns (GetBudgetResponse) {
+    option (gibson.auth.v1.authz) = {
+      relation: "member"
+      object_type: "tenant"
+      object_deriver: "tenant_from_identity"
+      allowed_identities: 3  // USER | SERVICE
+    };
+  }
+  rpc SetBudget(SetBudgetRequest) returns (SetBudgetResponse) {
+    option (gibson.auth.v1.authz) = {
+      relation: "member"
+      object_type: "tenant"
+      object_deriver: "tenant_from_identity"
+      allowed_identities: 3  // USER | SERVICE
+    };
+  }
+  rpc ListBudgets(ListBudgetsRequest) returns (ListBudgetsResponse) {
+    option (gibson.auth.v1.authz) = {
+      relation: "member"
+      object_type: "tenant"
+      object_deriver: "tenant_from_identity"
+      allowed_identities: 3  // USER | SERVICE
+    };
+  }
+  rpc ListBudgetStatus(ListBudgetStatusRequest) returns (ListBudgetStatusResponse) {
+    option (gibson.auth.v1.authz) = {
+      relation: "member"
+      object_type: "tenant"
+      object_deriver: "tenant_from_identity"
+      allowed_identities: 3  // USER | SERVICE
+    };
+  }
+  rpc GetTenantBudgetDefaults(GetTenantBudgetDefaultsRequest) returns (GetTenantBudgetDefaultsResponse) {
+    option (gibson.auth.v1.authz) = {
+      relation: "member"
+      object_type: "tenant"
+      object_deriver: "tenant_from_identity"
+      allowed_identities: 3  // USER | SERVICE
+    };
+  }
+  rpc SetTenantBudgetDefaults(SetTenantBudgetDefaultsRequest) returns (SetTenantBudgetDefaultsResponse) {
+    option (gibson.auth.v1.authz) = {
+      relation: "member"
+      object_type: "tenant"
+      object_deriver: "tenant_from_identity"
+      allowed_identities: 3  // USER | SERVICE
+    };
+  }
+}
+
+// ---------------------------------------------------------------------------
+// BudgetService types
+// ---------------------------------------------------------------------------
+
+// Budget describes the token + spend ceilings for a single subject in a
+// single tenant.
+message Budget {
+  string tenant_id = 1;
+  gibson.budget_status.v1.BudgetScope scope = 2;
+  // subject_id is the user or team ID. Empty when scope is TENANT.
+  string subject_id = 3;
+  // monthly_tokens is the hard ceiling on tokens consumed per billing period.
+  // 0 means unlimited.
+  int64 monthly_tokens = 4;
+  // monthly_spend_usd_cents is the hard ceiling on LLM spend per billing
+  // period, in USD cents. 0 means unlimited.
+  int64 monthly_spend_usd_cents = 5;
+  // override_deny, when true on a user-scope budget, causes limit exceedance
+  // to be logged and audited but NOT denied.
+  bool override_deny = 6;
+  // warning_threshold is the fraction (0.0–1.0) at which a warning fires.
+  // Default 0.80 if zero.
+  double warning_threshold = 7;
+}
+
+// BudgetStatus reports current usage for a single subject.
+message BudgetStatus {
+  gibson.budget_status.v1.BudgetScope scope = 1;
+  string subject_id = 2;
+  int64 current_tokens = 3;
+  int64 current_spend_usd_cents = 4;
+  int64 token_limit = 5;
+  int64 spend_limit_usd_cents = 6;
+  // period_reset_at_unix is the Unix timestamp when the current period rolls
+  // over and counters reset.
+  int64 period_reset_at_unix = 7;
+  // warning_crossed is true when current usage has crossed the warning
+  // threshold on at least one dimension in the current period.
+  bool warning_crossed = 8;
+}
+
+// ---------------------------------------------------------------------------
+// BudgetService request/response messages
+// ---------------------------------------------------------------------------
+
+message GetBudgetRequest {
+  gibson.budget_status.v1.BudgetScope scope = 1;
+  string subject_id = 2;
+}
+
+message GetBudgetResponse {
+  Budget budget = 1;
+  // found is false when the subject has no explicit budget and is governed by
+  // the tenant default.
+  bool found = 2;
+}
+
+message SetBudgetRequest {
+  Budget budget = 1;
+}
+
+message SetBudgetResponse {
+  Budget budget = 1;
+}
+
+message ListBudgetsRequest {
+  gibson.budget_status.v1.BudgetScope scope = 1;
+}
+
+message ListBudgetsResponse {
+  repeated Budget budgets = 1;
+}
+
+message ListBudgetStatusRequest {
+  gibson.budget_status.v1.BudgetScope scope = 1;
+}
+
+message ListBudgetStatusResponse {
+  repeated BudgetStatus status = 1;
+}
+
+message GetTenantBudgetDefaultsRequest {}
+
+message GetTenantBudgetDefaultsResponse {
+  int64 default_user_monthly_tokens = 1;
+  int64 default_user_monthly_spend_usd_cents = 2;
+  int64 default_team_monthly_tokens = 3;
+  int64 default_team_monthly_spend_usd_cents = 4;
+  double default_warning_threshold = 5;
+}
+
+message SetTenantBudgetDefaultsRequest {
+  int64 default_user_monthly_tokens = 1;
+  int64 default_user_monthly_spend_usd_cents = 2;
+  int64 default_team_monthly_tokens = 3;
+  int64 default_team_monthly_spend_usd_cents = 4;
+  double default_warning_threshold = 5;
+}
+
+message SetTenantBudgetDefaultsResponse {
+  int64 applied_at_unix = 1;
+}

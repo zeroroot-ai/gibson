@@ -25,8 +25,10 @@ var knownUnregisteredTenantServices = map[string]string{}
 // assertAdminServicesRegistered is the reverse of assertRegistryCoverage. The
 // latter checks registered -> registry (every served method has an authz rule).
 // This checks registry -> registered for tenant-admin services: every
-// gibson.tenant.v1.* service declared in the authz registry must actually be
-// registered on the daemon gRPC server, or be an acknowledged known gap. It
+// gibson.tenant.v1.* (plus the re-homed gibson.agentidentity.v1.* /
+// gibson.pluginadmin.v1.* enrollment services, E6/ADR-0058) declared in the
+// authz registry must actually be registered on the daemon gRPC server, or be
+// an acknowledged known gap. It
 // catches a service that is fully declared + authz-gated but never served —
 // which boots cleanly and only fails (Unimplemented) when a client calls it
 // (see gibson#564, where SecretsAdminService had been unregistered since inception).
@@ -42,7 +44,12 @@ func assertAdminServicesRegistered(registered map[string]struct{}) error {
 		svc := e.Service
 		isTenant := strings.HasPrefix(svc, "gibson.tenant.v1.")
 		isAdmin := strings.HasPrefix(svc, "gibson.admin.v1.")
-		if (!isTenant && !isAdmin) || seen[svc] {
+		// E6 (ADR-0058): the two component-enrollment services were re-homed
+		// out of gibson.tenant.v1 into their own wire packages but stay served
+		// on the same daemon — keep them under this registry->registered guard.
+		isEnrollment := strings.HasPrefix(svc, "gibson.agentidentity.v1.") ||
+			strings.HasPrefix(svc, "gibson.pluginadmin.v1.")
+		if (!isTenant && !isAdmin && !isEnrollment) || seen[svc] {
 			continue
 		}
 		seen[svc] = true

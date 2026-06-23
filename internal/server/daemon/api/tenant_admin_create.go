@@ -35,14 +35,15 @@ import (
 	"strings"
 	"time"
 
+	"google.golang.org/grpc/codes"
+	status_grpc "google.golang.org/grpc/status"
+
 	"github.com/zeroroot-ai/gibson/internal/platform/audit"
 	"github.com/zeroroot-ai/gibson/internal/platform/authz"
 	"github.com/zeroroot-ai/gibson/internal/platform/capabilitygrant"
 	"github.com/zeroroot-ai/gibson/internal/platform/idp"
-	tenantpb "github.com/zeroroot-ai/sdk/api/gen/gibson/tenant/v1"
+	tenantpb "github.com/zeroroot-ai/sdk/api/gen/gibson/agentidentity/v1"
 	"github.com/zeroroot-ai/sdk/auth"
-	"google.golang.org/grpc/codes"
-	status_grpc "google.golang.org/grpc/status"
 )
 
 // nameRegex is the validation pattern for agent identity names.

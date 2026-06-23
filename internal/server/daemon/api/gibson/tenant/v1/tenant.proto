@@ -1,0 +1,344 @@
+syntax = "proto3";
+
+// Package gibson.tenant.v1 defines TenantService — the slimmed core
+// tenant-management surface covering onboarding, quota, audit events,
+// findings export, and mission drafts.
+//
+// The following surfaces have been extracted into focused services in this
+// same package as part of ADR-0039 (admin-surface-recategorization):
+//   - Agent identity → AgentIdentityService (agent_identity.proto)
+//   - LLM providers + execution → ProviderService (provider.proto)
+//   - Membership, teams, roles → MembershipService (membership.proto)
+//   - Plugin installs → PluginAdminService (plugin_admin.proto)
+//   - Capability grants → GrantsService (grants.proto)
+//   - Secrets + broker config → SecretsService (secrets.proto)
+//   - LLM budgets → BudgetService (budget.proto)
+//   - Model/provider access grants → ModelAccessService (model_access.proto)
+//   - User self-service → UserService (user.proto)
+//   - Usage aggregation → UsageService (usage.proto)
+//
+// Authorization: every RPC carries a (gibson.auth.v1.authz) annotation.
+package gibson.tenant.v1;
+
+option go_package = "github.com/zeroroot-ai/gibson/internal/server/daemon/api/gibson/tenant/v1;tenantv1";
+
+import "google/protobuf/timestamp.proto";
+
+import "gibson/auth/v1/options.proto";
+
+// TenantService provides the core tenant-management operations: onboarding
+// state, quota, audit events, findings export, and mission drafts.
+service TenantService {
+  // ---------------------------------------------------------------------------
+  // Onboarding
+  // ---------------------------------------------------------------------------
+
+  // GetOnboardingState queries the onboarding progress for a tenant.
+  rpc GetOnboardingState(GetOnboardingStateRequest) returns (GetOnboardingStateResponse) {
+    option (gibson.auth.v1.authz) = {
+      relation: "member"
+      object_type: "tenant"
+      object_deriver: "tenant_from_identity"
+      allowed_identities: 3  // USER | SERVICE
+    };
+  }
+  // UpdateOnboardingState advances or modifies the onboarding state.
+  rpc UpdateOnboardingState(UpdateOnboardingStateRequest) returns (UpdateOnboardingStateResponse) {
+    option (gibson.auth.v1.authz) = {
+      relation: "writer"
+      object_type: "tenant"
+      object_deriver: "tenant_from_identity"
+      allowed_identities: 3  // USER | SERVICE
+    };
+  }
+
+  // ---------------------------------------------------------------------------
+  // Quota / usage
+  // ---------------------------------------------------------------------------
+
+  // GetTenantQuota retrieves the configured resource quotas (limits) for a
+  // tenant. Returns zero values for any quota not explicitly set.
+  rpc GetTenantQuota(GetTenantQuotaRequest) returns (GetTenantQuotaResponse) {
+    option (gibson.auth.v1.authz) = {
+      relation: "admin"
+      object_type: "tenant"
+      object_deriver: "tenant_from_identity"
+      allowed_identities: 3  // USER | SERVICE
+    };
+  }
+  // GetTenantQuotaUsage returns the live counter values (current usage) from
+  // Redis. Cheap (single MGET); does not consult Postgres.
+  rpc GetTenantQuotaUsage(GetTenantQuotaUsageRequest) returns (GetTenantQuotaUsageResponse) {
+    option (gibson.auth.v1.authz) = {
+      relation: "member"
+      object_type: "tenant"
+      object_deriver: "tenant_from_identity"
+      allowed_identities: 3  // USER | SERVICE
+    };
+  }
+
+  // ---------------------------------------------------------------------------
+  // Audit + findings
+  // ---------------------------------------------------------------------------
+
+  // ListAuditEvents returns audit events for a tenant.
+  rpc ListAuditEvents(ListAuditEventsRequest) returns (ListAuditEventsResponse) {
+    option (gibson.auth.v1.authz) = {
+      relation: "writer"
+      object_type: "tenant"
+      object_deriver: "tenant_from_identity"
+      allowed_identities: 3  // USER | SERVICE
+    };
+  }
+  // ExportFindings exports findings to the requested format (json, csv, sarif).
+  rpc ExportFindings(ExportFindingsRequest) returns (ExportFindingsResponse) {
+    option (gibson.auth.v1.authz) = {
+      relation: "writer"
+      object_type: "tenant"
+      object_deriver: "tenant_from_identity"
+      allowed_identities: 3  // USER | SERVICE
+    };
+  }
+
+  // ---------------------------------------------------------------------------
+  // Mission drafts
+  // ---------------------------------------------------------------------------
+
+  // SaveMissionDraft persists a mission CUE draft for later use.
+  rpc SaveMissionDraft(SaveMissionDraftRequest) returns (SaveMissionDraftResponse) {
+    option (gibson.auth.v1.authz) = {
+      relation: "writer"
+      object_type: "tenant"
+      object_deriver: "tenant_from_identity"
+      allowed_identities: 3  // USER | SERVICE
+    };
+  }
+  // ListMissionDrafts returns all saved mission drafts for a tenant.
+  rpc ListMissionDrafts(ListMissionDraftsRequest) returns (ListMissionDraftsResponse) {
+    option (gibson.auth.v1.authz) = {
+      relation: "writer"
+      object_type: "tenant"
+      object_deriver: "tenant_from_identity"
+      allowed_identities: 3  // USER | SERVICE
+    };
+  }
+  // GetMissionDraft retrieves a single saved draft, including its CUE source
+  // content (which ListMissionDrafts deliberately omits).
+  rpc GetMissionDraft(GetMissionDraftRequest) returns (GetMissionDraftResponse) {
+    option (gibson.auth.v1.authz) = {
+      relation: "writer"
+      object_type: "tenant"
+      object_deriver: "tenant_from_identity"
+      allowed_identities: 3  // USER | SERVICE
+    };
+  }
+  // DeleteMissionDraft removes a saved draft. Idempotent: deleting a missing
+  // draft returns OK.
+  rpc DeleteMissionDraft(DeleteMissionDraftRequest) returns (DeleteMissionDraftResponse) {
+    option (gibson.auth.v1.authz) = {
+      relation: "writer"
+      object_type: "tenant"
+      object_deriver: "tenant_from_identity"
+      allowed_identities: 3  // USER | SERVICE
+    };
+  }
+}
+
+// ---------------------------------------------------------------------------
+// Onboarding — request/response messages
+// ---------------------------------------------------------------------------
+
+// GetOnboardingStateRequest queries the onboarding progress for a tenant.
+message GetOnboardingStateRequest {
+  string tenant_id = 1;
+}
+
+// GetOnboardingStateResponse returns the current onboarding state.
+message GetOnboardingStateResponse {
+  string current_step = 1;
+  repeated string completed_steps = 2;
+  map<string, string> setup_tasks = 3;
+  string completed_at = 4;
+}
+
+// UpdateOnboardingStateRequest advances or modifies the onboarding state.
+message UpdateOnboardingStateRequest {
+  string tenant_id = 1;
+  string current_step = 2;
+  repeated string completed_steps = 3;
+  map<string, string> setup_tasks = 4;
+}
+
+// UpdateOnboardingStateResponse confirms the update was applied.
+message UpdateOnboardingStateResponse {}
+
+// ---------------------------------------------------------------------------
+// Quota — request/response messages
+// ---------------------------------------------------------------------------
+
+// GetTenantQuotaRequest requests the quota configuration (limits) for a tenant.
+message GetTenantQuotaRequest {
+  string tenant_id = 1;
+}
+
+// GetTenantQuotaResponse carries the tenant quota limits.
+message GetTenantQuotaResponse {
+  int32 concurrent_missions = 12;
+  int32 concurrent_agents = 3;
+  string updated_at = 7;
+  string plan_id = 13;
+
+  // Field tags reserved against accidental reuse from the legacy schema.
+  reserved 1, 2, 4, 5, 6, 8, 9, 10, 11;
+  reserved "quota", "seats", "storage_gb", "retention_days",
+           "sandbox_launches_per_month", "current_seats",
+           "current_concurrent_agents", "current_storage_gb",
+           "current_sandbox_launches_this_month";
+}
+
+// GetTenantQuotaUsageRequest requests the live counter snapshot.
+message GetTenantQuotaUsageRequest {
+  string tenant_id = 1;
+}
+
+// GetTenantQuotaUsageResponse carries the live counter values.
+message GetTenantQuotaUsageResponse {
+  int64 missions_active = 1;
+  int64 agents_active = 2;
+}
+
+// ---------------------------------------------------------------------------
+// Audit events — request/response messages
+// ---------------------------------------------------------------------------
+
+// AuditEvent represents a single audit log entry.
+message AuditEvent {
+  string event_type = 1;
+  string timestamp = 2;
+  string actor_user_id = 3;
+  string actor_email = 4;
+  string tenant_id = 5;
+  string target_user_id = 6;
+  string target_resource = 7;
+  map<string, string> details = 8;
+  string trace_id = 9;
+}
+
+// ListAuditEventsRequest queries audit events for a tenant.
+message ListAuditEventsRequest {
+  string tenant_id = 1;
+  repeated string event_types = 2;
+  string actor_user_id = 3;
+  string target_match = 4;
+  string from_time = 5;
+  string to_time = 6;
+  int32 limit = 7;
+  string cursor = 8;
+}
+
+// ListAuditEventsResponse returns a page of audit events.
+message ListAuditEventsResponse {
+  repeated AuditEvent events = 1;
+  string next_cursor = 2;
+}
+
+// ---------------------------------------------------------------------------
+// Findings export — request/response messages
+// ---------------------------------------------------------------------------
+
+// FindingFilters allows filtering the findings included in an export.
+message FindingFilters {
+  repeated string severity = 1;
+  repeated string type = 2;
+  string mission_id = 3;
+  string search = 4;
+}
+
+// ExportFindingsRequest specifies the format and scope of a findings export.
+message ExportFindingsRequest {
+  string tenant_id = 1;
+  string format = 2;
+  repeated string finding_ids = 3;
+  FindingFilters filters = 4;
+  bool include_remediation = 5;
+  bool include_evidence = 6;
+}
+
+// ExportFindingsResponse carries the serialized export content.
+message ExportFindingsResponse {
+  bytes data = 1;
+  string format = 2;
+  string filename = 3;
+  int32 count = 4;
+}
+
+// ---------------------------------------------------------------------------
+// Mission drafts — request/response messages
+// ---------------------------------------------------------------------------
+
+// SaveMissionDraftRequest persists a mission CUE draft.
+message SaveMissionDraftRequest {
+  string tenant_id = 1;
+  string name = 2;
+  string cue_source = 3;
+  string draft_id = 4;
+  string mission_definition_id = 5;
+
+  reserved "yaml";
+}
+
+// SaveMissionDraftResponse returns the ID of the saved or updated draft.
+message SaveMissionDraftResponse {
+  string draft_id = 1;
+}
+
+// ListMissionDraftsRequest queries the saved drafts for a tenant.
+message ListMissionDraftsRequest {
+  string tenant_id = 1;
+}
+
+// MissionDraft carries the metadata for a saved mission draft.
+message MissionDraft {
+  string id = 1;
+  string name = 2;
+  string created_at = 3;
+  string updated_at = 4;
+  string mission_definition_id = 5;
+}
+
+// ListMissionDraftsResponse carries the list of mission drafts for a tenant.
+message ListMissionDraftsResponse {
+  repeated MissionDraft drafts = 1;
+}
+
+// GetMissionDraftRequest fetches a single draft's full content.
+message GetMissionDraftRequest {
+  string tenant_id = 1;
+  string draft_id = 2;
+}
+
+// GetMissionDraftResponse returns a single draft including its CUE content.
+message GetMissionDraftResponse {
+  MissionDraftFull draft = 1;
+}
+
+// MissionDraftFull is MissionDraft plus the CUE source content.
+message MissionDraftFull {
+  string id = 1;
+  string name = 2;
+  string created_at = 3;
+  string updated_at = 4;
+  string cue_source = 5;
+  string mission_definition_id = 6;
+
+  reserved "yaml";
+}
+
+// DeleteMissionDraftRequest removes a saved draft.
+message DeleteMissionDraftRequest {
+  string tenant_id = 1;
+  string draft_id = 2;
+}
+
+// DeleteMissionDraftResponse is empty — Delete is idempotent.
+message DeleteMissionDraftResponse {}

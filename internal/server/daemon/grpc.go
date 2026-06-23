@@ -20,6 +20,7 @@ import (
 	"github.com/spiffe/go-spiffe/v2/spiffeid"
 	"github.com/spiffe/go-spiffe/v2/spiffetls/tlsconfig"
 	"github.com/spiffe/go-spiffe/v2/workloadapi"
+
 	"github.com/zeroroot-ai/gibson/internal/engine/brain"
 	"github.com/zeroroot-ai/gibson/internal/engine/llm/modelgate"
 	"github.com/zeroroot-ai/gibson/internal/infra/idempotency"
@@ -38,15 +39,27 @@ import (
 	discoverypb "github.com/zeroroot-ai/gibson/internal/server/daemon/api/gibson/daemon/discovery/v1"
 	daemonoperatorv1 "github.com/zeroroot-ai/gibson/internal/server/daemon/api/gibson/daemon/operator/v1"
 	sessionpb "github.com/zeroroot-ai/gibson/internal/server/daemon/api/gibson/session/v1"
+	tenantv1 "github.com/zeroroot-ai/gibson/internal/server/daemon/api/gibson/tenant/v1"
 	worldpb "github.com/zeroroot-ai/gibson/internal/server/daemon/api/gibson/world/v1"
+	agentidentityv1 "github.com/zeroroot-ai/sdk/api/gen/gibson/agentidentity/v1"
 	componentpb "github.com/zeroroot-ai/sdk/api/gen/gibson/component/v1"
 	daemonpb "github.com/zeroroot-ai/sdk/api/gen/gibson/daemon/v1"
 	graphpb "github.com/zeroroot-ai/sdk/api/gen/gibson/graph/v1"
 	identitypb "github.com/zeroroot-ai/sdk/api/gen/gibson/identity/v1"
 	missionpb "github.com/zeroroot-ai/sdk/api/gen/gibson/mission/v1"
 	pluginpb "github.com/zeroroot-ai/sdk/api/gen/gibson/plugin/v1"
-	tenantv1 "github.com/zeroroot-ai/sdk/api/gen/gibson/tenant/v1"
+	pluginadminv1 "github.com/zeroroot-ai/sdk/api/gen/gibson/pluginadmin/v1"
 	"github.com/zeroroot-ai/sdk/auth"
+
+	"go.opentelemetry.io/contrib/instrumentation/google.golang.org/grpc/otelgrpc"
+	"go.opentelemetry.io/otel/metric"
+	"google.golang.org/grpc"
+	grpccodes "google.golang.org/grpc/codes"
+	"google.golang.org/grpc/credentials"
+	grpcmetadata "google.golang.org/grpc/metadata"
+	"google.golang.org/grpc/peer"
+	grpcstatus "google.golang.org/grpc/status"
+	"google.golang.org/protobuf/types/known/timestamppb"
 
 	"github.com/zeroroot-ai/gibson/internal/engine/graphrag/graph"
 	"github.com/zeroroot-ai/gibson/internal/engine/mission"
@@ -59,15 +72,6 @@ import (
 	"github.com/zeroroot-ai/gibson/internal/platform/impersonation"
 	"github.com/zeroroot-ai/gibson/internal/platform/onboarding"
 	"github.com/zeroroot-ai/gibson/internal/platform/reservednames"
-	"go.opentelemetry.io/contrib/instrumentation/google.golang.org/grpc/otelgrpc"
-	"go.opentelemetry.io/otel/metric"
-	"google.golang.org/grpc"
-	grpccodes "google.golang.org/grpc/codes"
-	"google.golang.org/grpc/credentials"
-	grpcmetadata "google.golang.org/grpc/metadata"
-	"google.golang.org/grpc/peer"
-	grpcstatus "google.golang.org/grpc/status"
-	"google.golang.org/protobuf/types/known/timestamppb"
 )
 
 // Mission-tier and long-term-tier operations are handled by the per-mission
@@ -1132,9 +1136,9 @@ func (d *daemonImpl) buildGRPCServer(ctx context.Context) (*grpcSubsystem, error
 			if paErr != nil {
 				d.logger.Warn(ctx, "PluginAdminService: constructor failed; registering Unavailable stub",
 					"error", paErr)
-				tenantv1.RegisterPluginAdminServiceServer(srv, admin.NewUnavailablePluginAdminServer())
+				pluginadminv1.RegisterPluginAdminServiceServer(srv, admin.NewUnavailablePluginAdminServer())
 			} else {
-				tenantv1.RegisterPluginAdminServiceServer(srv, pluginAdminSvc)
+				pluginadminv1.RegisterPluginAdminServiceServer(srv, pluginAdminSvc)
 				d.logger.Info(ctx, "registered gibson.tenant.v1.PluginAdminService gRPC endpoint (closes gibson#565)")
 			}
 		} else {
@@ -1143,7 +1147,7 @@ func (d *daemonImpl) buildGRPCServer(ctx context.Context) (*grpcSubsystem, error
 				"idp_client_present", idpClient != nil,
 				"broker_audit_writer_present", d.brokerAuditWriter != nil,
 			)
-			tenantv1.RegisterPluginAdminServiceServer(srv, admin.NewUnavailablePluginAdminServer())
+			pluginadminv1.RegisterPluginAdminServiceServer(srv, admin.NewUnavailablePluginAdminServer())
 		}
 	}
 
@@ -1196,7 +1200,7 @@ func (d *daemonImpl) buildGRPCServer(ctx context.Context) (*grpcSubsystem, error
 	// Register AgentIdentityService (gibson.tenant.v1.AgentIdentityService).
 	// Handlers live in internal/server/daemon/api/tenant_admin_create.go,
 	// tenant_admin_list.go, tenant_admin_revoke.go (ADR-0039).
-	tenantv1.RegisterAgentIdentityServiceServer(srv, daemonSvc)
+	agentidentityv1.RegisterAgentIdentityServiceServer(srv, daemonSvc)
 	d.logger.Info(ctx, "registered gibson.tenant.v1.AgentIdentityService gRPC endpoint")
 
 	// Register ProviderService (gibson.tenant.v1.ProviderService).

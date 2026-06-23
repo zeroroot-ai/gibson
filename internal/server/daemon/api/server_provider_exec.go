@@ -16,7 +16,8 @@ import (
 	"github.com/zeroroot-ai/gibson/internal/platform/budget"
 	"github.com/zeroroot-ai/gibson/internal/platform/providerconfig"
 	"github.com/zeroroot-ai/gibson/internal/platform/ratelimit"
-	tenantv1 "github.com/zeroroot-ai/sdk/api/gen/gibson/tenant/v1"
+	tenantv1 "github.com/zeroroot-ai/gibson/internal/server/daemon/api/gibson/tenant/v1"
+
 	// As of sdk#106 the budget surface is split: customer-visible value
 	// types (`BudgetExceeded` + `BudgetScope`) live in the OSS SDK at
 	// `gibson.budget_status.v1`; the admin `BudgetService` lives in
