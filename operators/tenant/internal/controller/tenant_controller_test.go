@@ -160,16 +160,33 @@ func TestReconcile_ProvisionsNamespaceAndPolicy(t *testing.T) {
 		t.Errorf("unexpected error checking ResourceQuota: %v", err)
 	}
 
-	// Tenant status should have Phase=Ready (foundation has only namespace step).
+	// E8/gibson#805: the Tenant now stays Provisioning until its four owned
+	// sub-CRDs report Ready. The sub-CRD controllers are not running in this
+	// fake harness, so the children never flip Ready — the Tenant must NOT be
+	// Ready yet. (See TestReconcile_ChildOrchestration_* for the ready path.)
 	var got gibsonv1alpha1.Tenant
 	if err := c.Get(context.Background(), types.NamespacedName{Name: "acme"}, &got); err != nil {
 		t.Fatal(err)
 	}
-	if got.Status.Phase != gibsonv1alpha1.TenantPhaseReady {
-		t.Errorf("phase got %q, want Ready", got.Status.Phase)
+	if got.Status.Phase != gibsonv1alpha1.TenantPhaseProvisioning {
+		t.Errorf("phase got %q, want Provisioning (children not yet Ready)", got.Status.Phase)
 	}
 	if got.Status.Namespace != "tenant-acme" {
 		t.Errorf("status.namespace got %q, want tenant-acme", got.Status.Namespace)
+	}
+
+	// Child creation is dependency-ordered and gates on the predecessor's
+	// Status.Ready. With no controller flipping Identity ready, only the FIRST
+	// child (TenantIdentity) exists; later children must NOT exist yet.
+	var ti gibsonv1alpha1.TenantIdentity
+	if err := c.Get(context.Background(), types.NamespacedName{Namespace: "tenant-acme", Name: "acme"}, &ti); err != nil {
+		t.Fatalf("TenantIdentity child should be created first: %v", err)
+	}
+	var tdp gibsonv1alpha1.TenantDataPlane
+	if err := c.Get(context.Background(), types.NamespacedName{Namespace: "tenant-acme", Name: "acme"}, &tdp); err == nil {
+		t.Errorf("TenantDataPlane should NOT exist before predecessors are Ready")
+	} else if !apierrors.IsNotFound(err) {
+		t.Errorf("unexpected error checking TenantDataPlane: %v", err)
 	}
 }
 

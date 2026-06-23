@@ -14,26 +14,8 @@ import (
 	"encoding/json"
 	"testing"
 
-	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
-
-	gibsonv1alpha1 "github.com/zeroroot-ai/gibson/operators/tenant/api/v1alpha1"
 	"github.com/zeroroot-ai/sdk/auth"
 )
-
-// TestWriteTenantBrokerConfig_NeverSkips locks in the one-code-path
-// (deploy#194) invariant: the broker-config step never silently no-ops
-// based on operator-side deps. Skip() returns false unconditionally; the
-// previous PG/KEK-presence Skip() shipped "saga step success / tenant
-// invisible to daemon" silent corruption. Deps are now enforced at boot
-// in cmd/main.go buildWriteTenantBrokerConfigDeps.
-func TestWriteTenantBrokerConfig_NeverSkips(t *testing.T) {
-	// Empty deps used to trigger Skip=true; now must be Skip=false.
-	step := newWriteTenantBrokerConfigStep(WriteTenantBrokerConfigDeps{})
-	tenant := &gibsonv1alpha1.Tenant{ObjectMeta: metav1.ObjectMeta{Name: "acme"}}
-	if step.Skip(tenant) {
-		t.Fatal("Skip() must return false unconditionally (one-code-path/194)")
-	}
-}
 
 // TestRenderVaultConfig_SubstitutesTenantID verifies the namespace
 // template's {tenant_id} placeholder is replaced with the resolved

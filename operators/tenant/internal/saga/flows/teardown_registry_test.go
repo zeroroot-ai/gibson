@@ -95,14 +95,17 @@ func TestTeardownSteps_NamesStableContract(t *testing.T) {
 	for _, s := range steps {
 		got = append(got, s.Name())
 	}
+	// E8/gibson#805 cutover: the imperative compensation steps that tore
+	// down the identity / secrets-backend / grants / data-plane domains
+	// (DeprovisionDataPlane, DeleteTenantFGATuples, RemoveZitadelOrg,
+	// DeprovisionSecretsBackend) were removed. Those domains are now owned
+	// by the four sub-CRDs, whose own finalizers tear them down. The
+	// retained teardown saga owns only the foundation cleanup with no
+	// owning sub-CRD.
 	want := []string{
 		"FinalNeo4jBackup",
-		"DeprovisionDataPlane",
-		"DeleteTenantFGATuples",
-		"RemoveZitadelOrg",
 		"DeleteTenantName",
 		"DeleteRedisKeyspace",
-		"DeprovisionSecretsBackend",
 	}
 	if !reflect.DeepEqual(got, want) {
 		t.Errorf(

@@ -80,7 +80,7 @@ func TestFinalBackupSteps_RegistryContract(t *testing.T) {
 // TestFinalBackupSteps_NamesStableContract captures the FinalNeo4jBackup
 // step name so a rename without an accompanying migration causes a loud
 // test failure. The step name is also referenced from teardown.go as the
-// Req for DeprovisionDataPlane; renaming requires updating both sites.
+// Req for DeleteTenantName; renaming requires updating both sites.
 func TestFinalBackupSteps_NamesStableContract(t *testing.T) {
 	step := ExportedFinalBackupStep(FinalBackupDeps{})
 	if got, want := step.Name(), "FinalNeo4jBackup"; got != want {
