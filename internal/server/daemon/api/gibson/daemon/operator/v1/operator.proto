@@ -200,6 +200,44 @@ service DaemonOperatorService {
     };
   }
 
+  // ---------------------------------------------------------------------------
+  // Operator-pull admin tenant CRUD (gibson#964, enables dashboard#855)
+  // ---------------------------------------------------------------------------
+
+  // ListPendingTenantOps returns the daemon-owned queue of admin tenant CRUD
+  // operations (provision/update/delete) awaiting application to the Tenant CR.
+  // The dashboard's AdminTenantService enqueues one row per platform-admin CRUD
+  // action; the tenant-operator's reconcile loop drains the queue by applying
+  // each op to the Tenant CR (create / patch spec / delete), then AckTenantOp.
+  //
+  // ADR-0023: the daemon never touches Kubernetes — it only reads its Postgres
+  // queue here. The operator (which holds `tenants` create/update/delete RBAC)
+  // applies the op. Idempotent and safe to poll: returns only rows still
+  // status=pending, in created_at order so a tenant's ops apply in sequence.
+  rpc ListPendingTenantOps(ListPendingTenantOpsRequest) returns (ListPendingTenantOpsResponse) {
+    option (gibson.auth.v1.authz) = {
+      relation: "platform_operator",
+      object_type: "system_tenant",
+      object_deriver: "system_tenant",
+      allowed_identities: 3  // USER | SERVICE
+    };
+  }
+
+  // AckTenantOp marks a pending admin-op record done so it is not re-applied on
+  // the next reconcile pass. The operator calls this AFTER it has applied the op
+  // to the Tenant CR (create/patch/delete, all idempotent), so a crash between
+  // apply and ack simply re-lists the row and the operator's idempotent apply
+  // makes the re-apply a no-op. Idempotent: acking an already-done or unknown
+  // op_id is a no-op success.
+  rpc AckTenantOp(AckTenantOpRequest) returns (AckTenantOpResponse) {
+    option (gibson.auth.v1.authz) = {
+      relation: "platform_operator",
+      object_type: "system_tenant",
+      object_deriver: "system_tenant",
+      allowed_identities: 3  // USER | SERVICE
+    };
+  }
+
 }
 
 // ---------------------------------------------------------------------------
@@ -491,3 +529,55 @@ message ReportTenantStatusResponse {
   bool billing_active = 2;
 }
 
+// ---------------------------------------------------------------------------
+// Operator-pull admin tenant CRUD — request/response messages
+// ---------------------------------------------------------------------------
+
+// TenantOp is one row of the daemon's admin tenant-op queue: a platform-admin
+// CRUD operation the operator must apply to a Tenant CR. The carried fields are
+// the union needed across the three op types; which apply depends on op_type.
+message TenantOp {
+  // op_id is the daemon-generated queue id — the ack key. Required.
+  string op_id = 1;
+  // tenant_id is the Tenant CR name the op targets. Required.
+  string tenant_id = 2;
+  // op_type is "provision", "update", or "delete".
+  string op_type = 3;
+  // display_name is Tenant.spec.displayName. Set on provision; on update applied
+  // only when display_name_set is true. Ignored for delete.
+  string display_name = 4;
+  // display_name_set marks display_name for application on an update op
+  // (always true for provision).
+  bool display_name_set = 5;
+  // owner_email is Tenant.spec.owner. Set on provision; unused for update/delete.
+  string owner_email = 6;
+  // tier is Tenant.spec.tier. Set on provision; on update applied only when
+  // tier_set is true. Ignored for delete.
+  string tier = 7;
+  // tier_set marks tier for application on an update op (always true for
+  // provision).
+  bool tier_set = 8;
+}
+
+// ListPendingTenantOpsRequest queries the pending admin-op queue. No filters
+// today — the daemon returns every row still in status=pending.
+message ListPendingTenantOpsRequest {}
+
+// ListPendingTenantOpsResponse carries the pending admin-op records in
+// created_at order.
+message ListPendingTenantOpsResponse {
+  repeated TenantOp ops = 1;
+}
+
+// AckTenantOpRequest marks an admin-op record done after the operator applied it.
+message AckTenantOpRequest {
+  // op_id identifies the pending record to mark done. Required.
+  string op_id = 1;
+}
+
+// AckTenantOpResponse confirms the ack.
+message AckTenantOpResponse {
+  // acked is true when a pending row transitioned to done; false when the row
+  // was unknown or already done (both are idempotent successes).
+  bool acked = 1;
+}

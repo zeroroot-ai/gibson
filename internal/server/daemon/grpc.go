@@ -1025,6 +1025,17 @@ func (d *daemonImpl) buildGRPCServer(ctx context.Context) (*grpcSubsystem, error
 	// so ext-authz lets them through; Envoy gates the daemon to the dashboard.
 	tenantv1.RegisterTenantProvisioningServiceServer(srv, daemonSvc)
 
+	// Register AdminTenantService — the dashboard-facing write side of
+	// operator-pull admin tenant CRUD (gibson#964, enables dashboard#855).
+	// Records platform-admin provision/update/delete intent in the
+	// tenant_admin_ops queue (migration 018); the tenant-operator drains it and
+	// applies each op to the Tenant CR (DaemonOperatorService.ListPendingTenantOps
+	// / AckTenantOp). Replaces the dashboard's last direct Tenant-CR writes
+	// (app/actions/crd/tenant.ts). Cross-tenant platform-admin only:
+	// ext-authz enforces platform_operator (USER) on system_tenant per the
+	// registry annotation; ADR-0023 preserved (the daemon never touches K8s).
+	tenantv1.RegisterAdminTenantServiceServer(srv, daemonSvc)
+
 	// Register TenantService — the OSS SDK tenant-management surface (ADR-0037).
 	// Replaces gibson.tenant.v1.TenantAdminService (platform-sdk). Customer-
 	// callable: FGA enforces the tenant member relation. Initialise the IdP admin

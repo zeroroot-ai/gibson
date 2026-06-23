@@ -62,10 +62,12 @@ rpc,relation,object_type,deriver,identities,source_proto_file,mode
 /gibson.daemon.discovery.v1.DiscoveryService/WhoAmI,member,tenant,tenant_from_identity,USER|SERVICE|COMPONENT,gibson/daemon/discovery/v1/discovery.proto,rule
 /gibson.daemon.logs.v1.LogsService/QueryDaemonLogs,member,tenant,tenant_from_identity,USER|SERVICE,gibson/daemon/logs/v1/logs.proto,rule
 /gibson.daemon.logs.v1.LogsService/QueryMissionLogs,member,tenant,tenant_from_identity,USER|SERVICE,gibson/daemon/logs/v1/logs.proto,rule
+/gibson.daemon.operator.v1.DaemonOperatorService/AckTenantOp,platform_operator,system_tenant,system_tenant,USER|SERVICE,gibson/daemon/operator/v1/operator.proto,rule
 /gibson.daemon.operator.v1.DaemonOperatorService/AckTenantProvisioned,platform_operator,system_tenant,system_tenant,USER|SERVICE,gibson/daemon/operator/v1/operator.proto,rule
 /gibson.daemon.operator.v1.DaemonOperatorService/EmitAuditEvent,platform_operator,system_tenant,system_tenant,USER|SERVICE,gibson/daemon/operator/v1/operator.proto,rule
 /gibson.daemon.operator.v1.DaemonOperatorService/ImpersonateTenant,platform_operator,system_tenant,system_tenant,USER|SERVICE,gibson/daemon/operator/v1/operator.proto,rule
 /gibson.daemon.operator.v1.DaemonOperatorService/ListFeatureTuples,platform_operator,system_tenant,system_tenant,USER|SERVICE,gibson/daemon/operator/v1/operator.proto,rule
+/gibson.daemon.operator.v1.DaemonOperatorService/ListPendingTenantOps,platform_operator,system_tenant,system_tenant,USER|SERVICE,gibson/daemon/operator/v1/operator.proto,rule
 /gibson.daemon.operator.v1.DaemonOperatorService/ListPendingTenantProvisioning,platform_operator,system_tenant,system_tenant,USER|SERVICE,gibson/daemon/operator/v1/operator.proto,rule
 /gibson.daemon.operator.v1.DaemonOperatorService/RefreshToolCatalog,platform_operator,system_tenant,system_tenant,USER|SERVICE,gibson/daemon/operator/v1/operator.proto,rule
 /gibson.daemon.operator.v1.DaemonOperatorService/ReportTenantStatus,platform_operator,system_tenant,system_tenant,USER|SERVICE,gibson/daemon/operator/v1/operator.proto,rule
@@ -180,6 +182,9 @@ rpc,relation,object_type,deriver,identities,source_proto_file,mode
 /gibson.pluginadmin.v1.PluginAdminService/RevokePluginSecretBinding,admin,tenant,tenant_from_identity,USER,gibson/pluginadmin/v1/plugin_admin.proto,rule
 /gibson.session.v1.SessionService/ListMySessions,member,tenant,tenant_from_identity,USER,gibson/session/v1/session.proto,rule
 /gibson.session.v1.SessionService/RevokeMySession,member,tenant,tenant_from_identity,USER,gibson/session/v1/session.proto,rule
+/gibson.tenant.v1.AdminTenantService/AdminDeleteTenant,platform_operator,system_tenant,system_tenant,USER,gibson/tenant/v1/admin_tenant.proto,rule
+/gibson.tenant.v1.AdminTenantService/AdminProvisionTenant,platform_operator,system_tenant,system_tenant,USER,gibson/tenant/v1/admin_tenant.proto,rule
+/gibson.tenant.v1.AdminTenantService/AdminUpdateTenant,platform_operator,system_tenant,system_tenant,USER,gibson/tenant/v1/admin_tenant.proto,rule
 /gibson.tenant.v1.BudgetService/GetBudget,member,tenant,tenant_from_identity,USER|SERVICE,gibson/tenant/v1/budget.proto,rule
 /gibson.tenant.v1.BudgetService/GetTenantBudgetDefaults,member,tenant,tenant_from_identity,USER|SERVICE,gibson/tenant/v1/budget.proto,rule
 /gibson.tenant.v1.BudgetService/ListBudgetStatus,member,tenant,tenant_from_identity,USER|SERVICE,gibson/tenant/v1/budget.proto,rule
