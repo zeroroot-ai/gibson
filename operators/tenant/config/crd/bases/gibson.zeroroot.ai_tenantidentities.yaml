@@ -1,0 +1,284 @@
+---
+apiVersion: apiextensions.k8s.io/v1
+kind: CustomResourceDefinition
+metadata:
+  annotations:
+    controller-gen.kubebuilder.io/version: v0.20.1
+  name: tenantidentities.gibson.zeroroot.ai
+spec:
+  group: gibson.zeroroot.ai
+  names:
+    kind: TenantIdentity
+    listKind: TenantIdentityList
+    plural: tenantidentities
+    shortNames:
+    - tid
+    singular: tenantidentity
+  scope: Namespaced
+  versions:
+  - additionalPrinterColumns:
+    - jsonPath: .spec.tenantID
+      name: Tenant
+      type: string
+    - jsonPath: .status.zitadelOrgID
+      name: OrgID
+      type: string
+    - jsonPath: .status.phase
+      name: Phase
+      type: string
+    - jsonPath: .status.ready
+      name: Ready
+      type: boolean
+    - jsonPath: .metadata.creationTimestamp
+      name: Age
+      type: date
+    name: v1alpha1
+    schema:
+      openAPIV3Schema:
+        description: |-
+          TenantIdentity is the Schema for the tenantidentities API. It declaratively
+          composes the per-tenant identity — the Zitadel organization (and any requested
+          OIDC client) — for a single tenant. The controller reconciles the identity by
+          delegating to the shared identity.Provisioner (which wraps the same
+          zitadel.Client the Tenant saga uses), drift-corrects on every reconcile, and
+          tears the identity down on delete via a finalizer.
+        properties:
+          apiVersion:
+            description: |-
+              APIVersion defines the versioned schema of this representation of an object.
+              Servers should convert recognized schemas to the latest internal value, and
+              may reject unrecognized values.
+              More info: https://git.k8s.io/community/contributors/devel/sig-architecture/api-conventions.md#resources
+            type: string
+          kind:
+            description: |-
+              Kind is a string value representing the REST resource this object represents.
+              Servers may infer this from the endpoint the client submits requests to.
+              Cannot be updated.
+              In CamelCase.
+              More info: https://git.k8s.io/community/contributors/devel/sig-architecture/api-conventions.md#types-kinds
+            type: string
+          metadata:
+            type: object
+          spec:
+            description: |-
+              TenantIdentitySpec defines the desired state of a TenantIdentity.
+
+              The CRD is a thin declarative wrapper over the existing identity-provisioning
+              code: the controller reconciles the tenant identity by delegating to the same
+              zitadel.Client the Tenant saga's EnsureZitadelOrg / RemoveZitadelOrg steps use
+              (via the shared identity.Provisioner — one codepath, ADR-0027). The Zitadel
+              org name/slug are derived from the tenant the same way the saga derives them
+              (display name + tenant id slug); the spec carries the tenant id plus the
+              display name used as the org name and an optional OIDC-client request.
+            properties:
+              displayName:
+                description: |-
+                  DisplayName is the human-readable org name created in Zitadel. The saga's
+                  EnsureZitadelOrg passes Tenant.Spec.DisplayName as the org name; when empty
+                  the operator falls back to the tenant id (matching the saga's behaviour for
+                  tenants without a display name).
+                type: string
+              oidcClients:
+                description: |-
+                  OIDCClients declares the OIDC clients the tenant identity should carry.
+                  Recorded on the CR for the daemon/dashboard surface and reflected in the
+                  oidc-client component condition. See TenantIdentityOIDCClient for the
+                  gibson#803 scope note on operator-side OIDC provisioning.
+                items:
+                  description: |-
+                    TenantIdentityOIDCClient declares an OIDC client the tenant identity should
+                    carry. It mirrors the shape the dashboard's "Register Agent" / login flows
+                    expect of a Zitadel OIDC application.
+
+                    NOTE (E8/gibson#803): the Tenant provisioning saga today provisions the
+                    per-tenant Zitadel *organization* only — there is no OIDC-application saga
+                    step, and the operator's zitadel.Client exposes organization + service-
+                    account methods, not OIDC-app methods (per-tenant OIDC clients are minted
+                    daemon-side by the MembershipService / native-cli-login work, not by this
+                    operator). This field is therefore a declarative request recorded on the CR
+                    for the daemon/dashboard surface and reflected in the oidc-client component
+                    condition; the operator does not itself create the Zitadel OIDC application
+                    in this slice. See the gibson#803 overlap note.
+                  properties:
+                    name:
+                      description: Name is the OIDC client's application name within
+                        the tenant org.
+                      minLength: 1
+                      type: string
+                    redirectURIs:
+                      description: RedirectURIs are the allowed redirect URIs for
+                        the OIDC client.
+                      items:
+                        type: string
+                      type: array
+                  required:
+                  - name
+                  type: object
+                type: array
+              tenantID:
+                description: |-
+                  TenantID is the canonical tenant identifier (the Tenant CR name). The
+                  Zitadel org slug is keyed on this value, matching the saga
+                  (CreateOrganization(displayName, tenantID)). Immutable once set.
+                maxLength: 253
+                minLength: 1
+                type: string
+                x-kubernetes-validations:
+                - message: tenantID is immutable
+                  rule: self == oldSelf
+            required:
+            - tenantID
+            type: object
+          status:
+            description: |-
+              TenantIdentityStatus defines the observed state of a TenantIdentity. It
+              carries a readiness condition per component plus an overall Ready condition,
+              mirroring the scalar progress the Tenant saga records across its identity step.
+            properties:
+              components:
+                description: Components carries the per-component provisioning state.
+                items:
+                  description: |-
+                    TenantIdentityComponentCondition reports the provisioning state of a single
+                    identity component. The aggregate Ready condition (and the scalar Ready field)
+                    is True only when every participating component has reached state=ready.
+                  properties:
+                    lastUpdated:
+                      description: LastUpdated is the time this component's state
+                        was last written.
+                      format: date-time
+                      type: string
+                    name:
+                      description: |-
+                        Name identifies the component: zitadel-org (the per-tenant Zitadel
+                        organization) or oidc-client (the per-tenant OIDC application request).
+                      enum:
+                      - zitadel-org
+                      - oidc-client
+                      type: string
+                    reason:
+                      description: Reason carries a human-readable description, especially
+                        when state=failed.
+                      type: string
+                    state:
+                      description: State is the current provisioning state of the
+                        component.
+                      enum:
+                      - provisioning
+                      - ready
+                      - failed
+                      type: string
+                  required:
+                  - name
+                  - state
+                  type: object
+                type: array
+                x-kubernetes-list-map-keys:
+                - name
+                x-kubernetes-list-type: map
+              conditions:
+                description: |-
+                  Conditions represent the current state of the TenantIdentity resource.
+                  Standard condition type: Ready.
+                items:
+                  description: Condition contains details for one aspect of the current
+                    state of this API Resource.
+                  properties:
+                    lastTransitionTime:
+                      description: |-
+                        lastTransitionTime is the last time the condition transitioned from one status to another.
+                        This should be when the underlying condition changed.  If that is not known, then using the time when the API field changed is acceptable.
+                      format: date-time
+                      type: string
+                    message:
+                      description: |-
+                        message is a human readable message indicating details about the transition.
+                        This may be an empty string.
+                      maxLength: 32768
+                      type: string
+                    observedGeneration:
+                      description: |-
+                        observedGeneration represents the .metadata.generation that the condition was set based upon.
+                        For instance, if .metadata.generation is currently 12, but the .status.conditions[x].observedGeneration is 9, the condition is out of date
+                        with respect to the current state of the instance.
+                      format: int64
+                      minimum: 0
+                      type: integer
+                    reason:
+                      description: |-
+                        reason contains a programmatic identifier indicating the reason for the condition's last transition.
+                        Producers of specific condition types may define expected values and meanings for this field,
+                        and whether the values are considered a guaranteed API.
+                        The value should be a CamelCase string.
+                        This field may not be empty.
+                      maxLength: 1024
+                      minLength: 1
+                      pattern: ^[A-Za-z]([A-Za-z0-9_,:]*[A-Za-z0-9_])?$
+                      type: string
+                    status:
+                      description: status of the condition, one of True, False, Unknown.
+                      enum:
+                      - "True"
+                      - "False"
+                      - Unknown
+                      type: string
+                    type:
+                      description: type of condition in CamelCase or in foo.example.com/CamelCase.
+                      maxLength: 316
+                      pattern: ^([a-z0-9]([-a-z0-9]*[a-z0-9])?(\.[a-z0-9]([-a-z0-9]*[a-z0-9])?)*/)?(([A-Za-z0-9][-A-Za-z0-9_.]*)?[A-Za-z0-9])$
+                      type: string
+                  required:
+                  - lastTransitionTime
+                  - message
+                  - reason
+                  - status
+                  - type
+                  type: object
+                type: array
+                x-kubernetes-list-map-keys:
+                - type
+                x-kubernetes-list-type: map
+              lastError:
+                description: |-
+                  LastError contains the most recent error message from the provisioning
+                  pipeline. Cleared on a successful reconcile.
+                type: string
+              observedGeneration:
+                description: ObservedGeneration reflects the generation most recently
+                  reconciled.
+                format: int64
+                type: integer
+              phase:
+                description: Phase is the overall lifecycle phase of the tenant identity.
+                enum:
+                - Pending
+                - Provisioning
+                - Ready
+                - Failed
+                - Deprovisioning
+                type: string
+              ready:
+                description: Ready is true when the Zitadel org (and any requested
+                  OIDC client) exists.
+                type: boolean
+              zitadelOrgID:
+                description: |-
+                  ZitadelOrgID is the Zitadel organization ID provisioned for this tenant.
+                  Written the SAME way the saga's EnsureZitadelOrg step writes
+                  Tenant.Status.ZitadelOrgID, so the daemon/dashboard read identical data
+                  regardless of which codepath provisioned it.
+                type: string
+              zitadelOrgSlug:
+                description: |-
+                  ZitadelOrgSlug is the Zitadel primary domain / slug for this tenant's
+                  organization (the tenant id), mirroring Tenant.Status.ZitadelOrgSlug.
+                type: string
+            type: object
+        required:
+        - spec
+        type: object
+    served: true
+    storage: true
+    subresources:
+      status: {}

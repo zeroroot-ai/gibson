@@ -12,12 +12,10 @@ package flows
 
 import (
 	"context"
-	"errors"
-	"fmt"
 	"time"
 
 	gibsonv1alpha1 "github.com/zeroroot-ai/gibson/operators/tenant/api/v1alpha1"
-	"github.com/zeroroot-ai/gibson/operators/tenant/internal/clients"
+	"github.com/zeroroot-ai/gibson/operators/tenant/internal/identity"
 	"github.com/zeroroot-ai/gibson/operators/tenant/internal/saga"
 )
 
@@ -50,33 +48,22 @@ func (s *ensureZitadelOrgStep) Provision(ctx context.Context, obj saga.Condition
 		return false, err
 	}
 
-	// Fast path: org already provisioned — verify it still exists in Zitadel.
-	if t.Status.ZitadelOrgID != "" {
-		_, err := s.deps.Zitadel.GetOrganization(ctx, t.Status.ZitadelOrgID)
-		if err == nil {
-			return true, nil
-		}
-		if !errors.Is(err, clients.ErrNotFound) {
-			if clients.IsPermanent(err) {
-				return false, err
-			}
-			return false, fmt.Errorf("ensureZitadelOrg: GetOrganization: %w", err)
-		}
-		// Org is gone — fall through to re-create.
-		t.Status.ZitadelOrgID = ""
-		t.Status.ZitadelOrgSlug = ""
-	}
-
-	orgID, err := s.deps.Zitadel.CreateOrganization(ctx, t.Spec.DisplayName, t.Name)
+	// Delegate to the shared org-ensure core (identity.EnsureOrg) so the saga
+	// step and the declarative TenantIdentity controller (E8/gibson#803) are two
+	// callers of ONE Zitadel-org codepath (ADR-0027). The saga passes
+	// DisplayName as the org name and t.Name as the slug, exactly as before; the
+	// fast-path / drift re-create logic now lives in identity.EnsureOrg.
+	res, err := identity.EnsureOrg(ctx, s.deps.Zitadel, identity.Request{
+		TenantID:    t.Name,
+		DisplayName: t.Spec.DisplayName,
+		KnownOrgID:  t.Status.ZitadelOrgID,
+	})
 	if err != nil {
-		if clients.IsPermanent(err) {
-			return false, err
-		}
-		return false, fmt.Errorf("ensureZitadelOrg: CreateOrganization: %w", err)
+		return false, err
 	}
 
-	t.Status.ZitadelOrgID = orgID
-	t.Status.ZitadelOrgSlug = t.Name
+	t.Status.ZitadelOrgID = res.OrgID
+	t.Status.ZitadelOrgSlug = res.Slug
 	return true, nil
 }
 
