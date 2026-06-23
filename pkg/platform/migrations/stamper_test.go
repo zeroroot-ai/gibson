@@ -71,7 +71,11 @@ func TestStamp_FreshDB_NoFingerprint_NoOp(t *testing.T) {
 	}
 }
 
-func TestStamp_LegacyTenantState_StampsVersion7(t *testing.T) {
+// TestStamp_LegacyTenantState_StampsCurrentVersion verifies the legacy-state
+// stamper inserts the *current* TenantMaxVersion() row (not a hardcoded
+// constant) — mirroring the platform sibling below. The expected value tracks
+// TenantMaxVersion(); bump alongside any new tenant migration.
+func TestStamp_LegacyTenantState_StampsCurrentVersion(t *testing.T) {
 	t.Parallel()
 	db, mock, err := sqlmock.New()
 	if err != nil {
@@ -90,7 +94,7 @@ func TestStamp_LegacyTenantState_StampsVersion7(t *testing.T) {
 	mock.ExpectExec("CREATE TABLE IF NOT EXISTS schema_migrations").
 		WillReturnResult(sqlmock.NewResult(0, 0))
 	mock.ExpectExec("INSERT INTO schema_migrations").
-		WithArgs(uint(7)).
+		WithArgs(uint(8)).
 		WillReturnResult(sqlmock.NewResult(0, 1))
 	mock.ExpectCommit()
 
