@@ -376,10 +376,11 @@ func TestCypherBuilder_BuildNodeQuery(t *testing.T) {
 				"status": "running",
 				"name":   "Test",
 			},
+			// Filter keys are emitted in deterministic (lexical) order, so the
+			// WHERE clause is asserted exactly rather than as loose substrings.
 			wantQuery: []string{
 				"MATCH (n:mission)",
-				"WHERE n.status = $status",
-				"n.name = $name",
+				"WHERE n.name = $name AND n.status = $status",
 				"RETURN n",
 			},
 			wantParams: []string{"status", "name"},
