@@ -70,6 +70,7 @@ import (
 	"github.com/zeroroot-ai/gibson/operators/tenant/internal/provision"
 	"github.com/zeroroot-ai/gibson/operators/tenant/internal/saga"
 	"github.com/zeroroot-ai/gibson/operators/tenant/internal/saga/flows"
+	"github.com/zeroroot-ai/gibson/operators/tenant/internal/secrets"
 	"github.com/zeroroot-ai/gibson/operators/tenant/internal/startup"
 	gibsonwebhook "github.com/zeroroot-ai/gibson/operators/tenant/internal/webhook"
 	// +kubebuilder:scaffold:imports
@@ -595,6 +596,8 @@ func main() {
 	// store and logs a warning. In production all four stores must be configured.
 	dataPlaneProvisioner, transitClient := buildDataPlaneProvisioner(mgr, setupLog, vaultAdminClient)
 
+	brokerConfigDeps := buildWriteTenantBrokerConfigDeps(setupLog)
+
 	deps := flows.ProvisionDeps{
 		K8sClient:               mgr.GetClient(),
 		FGA:                     fgaClient,
@@ -603,8 +606,19 @@ func main() {
 		DataPlane:               dataPlaneProvisioner,
 		Vault:                   vaultAdminClient,
 		SignupProgress:          signupProgressClient,
-		WriteTenantBrokerConfig: buildWriteTenantBrokerConfigDeps(setupLog),
+		WriteTenantBrokerConfig: brokerConfigDeps,
 	}
+
+	// Build the declarative secrets-backend provisioner (E8/gibson#802). It
+	// composes the SAME vault admin client + broker-config writer the Tenant
+	// saga's ProvisionSecretsBackend / ConfigureSecretsJWTAuth /
+	// TenantBrokerConfigWritten steps use, so there is one provisioning
+	// codepath (ADR-0027). The TenantSecretsBackend controller delegates to it.
+	secretsProvisioner := secrets.New(
+		secretsVaultAdapter{vaultAdminClient},
+		brokerConfigDeps,
+		func(err error) bool { return errors.Is(err, clients.ErrNotFound) },
+	)
 
 	// Phase 4 of spec tenant-provisioning-unification-phase2: build the
 	// unified psaga.Deps bag so saga.ValidateAtStartup can verify each
@@ -750,6 +764,20 @@ func main() {
 		Provisioner: dataPlaneProvisioner,
 	}).SetupWithManager(mgr); err != nil {
 		setupLog.Error(err, "Failed to create controller", "controller", "TenantDataPlane")
+		os.Exit(1)
+	}
+
+	// TenantSecretsBackend — declarative per-tenant secrets backend (Vault
+	// namespace + JWT-auth role, auth/jwt/config, broker-config row)
+	// reconciler. Delegates to the SAME secretsProvisioner (which wraps the
+	// vault admin client + broker-config writer the Tenant saga uses), so there
+	// is one provisioning codepath (ADR-0027). E8/gibson#802.
+	if err := (&controller.TenantSecretsBackendReconciler{
+		Client:      mgr.GetClient(),
+		Scheme:      mgr.GetScheme(),
+		Provisioner: secretsProvisioner,
+	}).SetupWithManager(mgr); err != nil {
+		setupLog.Error(err, "Failed to create controller", "controller", "TenantSecretsBackend")
 		os.Exit(1)
 	}
 
@@ -1229,6 +1257,28 @@ func buildVaultAdminClient(log logr.Logger) vaultadmin.AdminClient {
 		os.Exit(1)
 	}
 	return c
+}
+
+// secretsVaultAdapter adapts the operator's vault.AdminClient to the
+// secrets.VaultAdmin interface. The only impedance mismatch is
+// EnsureTenantNamespace's (Edition, error) return — the Edition is saga
+// record-keeping only, so the adapter discards it. All methods stay
+// idempotent (the underlying client guarantees it).
+type secretsVaultAdapter struct {
+	c vaultadmin.AdminClient
+}
+
+func (a secretsVaultAdapter) EnsureTenantNamespace(ctx context.Context, tenantID string) error {
+	_, err := a.c.EnsureTenantNamespace(ctx, tenantID)
+	return err
+}
+
+func (a secretsVaultAdapter) ConfigureTenantJWTAuth(ctx context.Context, tenantID string) error {
+	return a.c.ConfigureTenantJWTAuth(ctx, tenantID)
+}
+
+func (a secretsVaultAdapter) DeleteTenantNamespace(ctx context.Context, tenantID string) error {
+	return a.c.DeleteTenantNamespace(ctx, tenantID)
 }
 
 // buildWriteTenantBrokerConfigDeps assembles the dependency bundle for
