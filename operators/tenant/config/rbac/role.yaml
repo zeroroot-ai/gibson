@@ -28,6 +28,7 @@ rules:
   - gibson.zeroroot.ai
   resources:
   - agentenrollments
+  - tenantdataplanes
   - tenantmembers
   - tenants
   verbs:
@@ -42,6 +43,7 @@ rules:
   - gibson.zeroroot.ai
   resources:
   - agentenrollments/finalizers
+  - tenantdataplanes/finalizers
   - tenantmembers/finalizers
   - tenants/finalizers
   verbs:
@@ -50,6 +52,7 @@ rules:
   - gibson.zeroroot.ai
   resources:
   - agentenrollments/status
+  - tenantdataplanes/status
   - tenantmembers/status
   - tenants/status
   verbs:
