@@ -1,5 +1,7 @@
 package state
 
+import "github.com/zeroroot-ai/gibson/internal/engine/memory/embedder"
+
 // AllIndexDefinitions returns all predefined Gibson RediSearch indexes.
 // These indexes provide full-text search, filtering, and sorting capabilities
 // for all major Gibson entities.
@@ -12,7 +14,11 @@ func AllIndexDefinitions() []*IndexDefinition {
 		CredentialIndex(),
 		SessionIndex(),
 		TargetIndex(),
-		VectorIndex(),
+		// The vector index dimension is derived from the default embedding
+		// model's output dimension (all-MiniLM-L6-v2 → 384), never hardcoded
+		// (gibson#807). gibson#808's per-tenant provider factory threads a
+		// model-derived dimension through VectorIndex for BYO embedders.
+		VectorIndex(embedder.DefaultEmbeddingDimension),
 	}
 }
 
@@ -611,12 +617,14 @@ func TargetIndex() *IndexDefinition {
 //
 // Indexed Fields:
 //   - content: Full-text searchable content
-//   - embedding: 384-dimensional FLOAT32 vector with COSINE similarity
+//   - embedding: FLOAT32 vector with COSINE similarity; the dimension is
+//     derived from the configured embedding model, not hardcoded (gibson#807)
 //   - created_at: Sortable timestamp (Unix milliseconds)
 //
 // Vector Configuration:
 //   - Algorithm: HNSW (Hierarchical Navigable Small World for scalability)
-//   - Dimensions: 384 (all-minilm-l6-v2 embedding model)
+//   - Dimensions: derived from the embedding model via
+//     embedder.DimensionForModel (default all-MiniLM-L6-v2 → 384)
 //   - Distance Metric: COSINE (normalized dot product)
 //   - Data Type: FLOAT32 (4 bytes per dimension)
 //   - M: 16 (bi-directional links per node, balances recall and memory)
@@ -642,7 +650,14 @@ func TargetIndex() *IndexDefinition {
 //	// Vector search sorted by timestamp
 //	FT.SEARCH gibson:idx:vectors "*=>[KNN 10 @embedding $vector]" \
 //	  PARAMS 2 vector <binary-vector-blob> SORTBY created_at DESC DIALECT 2
-func VectorIndex() *IndexDefinition {
+//
+// The dim parameter is the embedding vector dimension and MUST equal the
+// configured embedding model's output dimension (see
+// embedder.DimensionForModel). A mismatch between this VECTOR field dimension
+// and the embeddings written into "$.embedding" silently fails RediSearch
+// indexing of the whole document, so the dimension is always derived from the
+// model rather than hardcoded (gibson#807).
+func VectorIndex(dim int) *IndexDefinition {
 	return &IndexDefinition{
 		Name:   "gibson:idx:vectors",
 		Prefix: "gibson:vector:",
@@ -666,7 +681,7 @@ func VectorIndex() *IndexDefinition {
 				VectorOpts: &VectorOptions{
 					Algorithm:      VectorAlgorithmHNSW,
 					Type:           VectorDataTypeFloat32,
-					Dim:            384,
+					Dim:            dim,
 					DistanceMetric: VectorDistanceMetricCosine,
 					M:              16,
 					EfConstruction: 200,

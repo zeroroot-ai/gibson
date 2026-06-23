@@ -690,7 +690,7 @@ func TestTargetIndex(t *testing.T) {
 
 func TestVectorIndex(t *testing.T) {
 	t.Run("has correct definition with HNSW", func(t *testing.T) {
-		idx := VectorIndex()
+		idx := VectorIndex(384)
 
 		assert.Equal(t, "gibson:idx:vectors", idx.Name)
 		assert.Equal(t, "gibson:vector:", idx.Prefix)
@@ -717,6 +717,41 @@ func TestVectorIndex(t *testing.T) {
 		assert.Equal(t, VectorDistanceMetricCosine, embeddingField.VectorOpts.DistanceMetric)
 		assert.Equal(t, 16, embeddingField.VectorOpts.M)
 		assert.Equal(t, 200, embeddingField.VectorOpts.EfConstruction)
+	})
+
+	t.Run("dimension is parameterized, not hardcoded", func(t *testing.T) {
+		// A non-384 model dimension (e.g. OpenAI text-embedding-3-small=1536)
+		// must flow into the VECTOR field, proving the dim is derived not fixed.
+		idx := VectorIndex(1536)
+		var embeddingField *FieldDefinition
+		for i := range idx.Schema {
+			if idx.Schema[i].Alias == "embedding" {
+				embeddingField = &idx.Schema[i]
+				break
+			}
+		}
+		require.NotNil(t, embeddingField, "embedding field not found")
+		require.NotNil(t, embeddingField.VectorOpts)
+		assert.Equal(t, 1536, embeddingField.VectorOpts.Dim)
+	})
+
+	t.Run("AllIndexDefinitions derives vector dim from default embedding model", func(t *testing.T) {
+		var embeddingField *FieldDefinition
+		for _, idx := range AllIndexDefinitions() {
+			if idx.Name != "gibson:idx:vectors" {
+				continue
+			}
+			for i := range idx.Schema {
+				if idx.Schema[i].Alias == "embedding" {
+					embeddingField = &idx.Schema[i]
+					break
+				}
+			}
+		}
+		require.NotNil(t, embeddingField, "vector index embedding field not found")
+		require.NotNil(t, embeddingField.VectorOpts)
+		// Default embedding model (all-MiniLM-L6-v2) must still resolve to 384.
+		assert.Equal(t, 384, embeddingField.VectorOpts.Dim)
 	})
 }
 
