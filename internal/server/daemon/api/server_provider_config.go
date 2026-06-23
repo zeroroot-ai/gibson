@@ -317,6 +317,10 @@ func (s *DaemonServer) CreateProvider(ctx context.Context, req *tenantv1.CreateP
 		return nil, toGRPCProviderError("create provider", err)
 	}
 	s.invalidateEmbedderCache(tenantID)
+	// Reconcile the tenant's vector index against its new embedding config when
+	// this provider serves embeddings (gibson#940). Async + idempotent: a no-op
+	// when the index marker already matches.
+	s.maybeTriggerReembed(tenantID, req.GetInput())
 	s.emitProviderAudit(ctx, tenantID, auditProviderCreated, cfg.Name)
 	return &tenantv1.CreateProviderResponse{Provider: toProtoProviderRecord(cfg)}, nil
 }
@@ -355,6 +359,9 @@ func (s *DaemonServer) UpdateProvider(ctx context.Context, req *tenantv1.UpdateP
 		return nil, toGRPCProviderError("update provider", err)
 	}
 	s.invalidateEmbedderCache(tenantID)
+	// Reconcile the tenant's vector index against its (possibly changed) embedding
+	// config when this provider serves embeddings (gibson#940). Async + idempotent.
+	s.maybeTriggerReembed(tenantID, req.GetInput())
 	s.emitProviderAudit(ctx, tenantID, auditProviderUpdated, cfg.Name)
 	return &tenantv1.UpdateProviderResponse{Provider: toProtoProviderRecord(cfg)}, nil
 }
@@ -627,6 +634,10 @@ func (s *DaemonServer) SetDefaultProvider(ctx context.Context, req *tenantv1.Set
 		return nil, toGRPCProviderError("set default provider", err)
 	}
 	s.invalidateEmbedderCache(tenantID)
+	// Flipping the default provider can change which embedder the tenant resolves
+	// (and thus the index dimension), so reconcile unconditionally (gibson#940).
+	// Async + idempotent: a no-op when the resolved embedder still matches the marker.
+	s.triggerReembed(tenantID)
 	s.emitProviderAudit(ctx, tenantID, auditProviderDefaultChanged, name)
 	// Return the updated provider record.
 	cfg, err := s.providerConfig.Get(ctx, tenantID, name)

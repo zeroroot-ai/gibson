@@ -23,6 +23,8 @@ import (
 
 	"github.com/zeroroot-ai/gibson/internal/engine/brain"
 	"github.com/zeroroot-ai/gibson/internal/engine/llm/modelgate"
+	"github.com/zeroroot-ai/gibson/internal/engine/memory/reembed"
+	"github.com/zeroroot-ai/gibson/internal/engine/state"
 	"github.com/zeroroot-ai/gibson/internal/infra/idempotency"
 	"github.com/zeroroot-ai/gibson/internal/infra/reconciler"
 	"github.com/zeroroot-ai/gibson/internal/platform/audit"
@@ -636,6 +638,42 @@ func (d *daemonImpl) buildGRPCServer(ctx context.Context) (*grpcSubsystem, error
 		daemonSvc.WithEmbedderResolver(embedderResolver)
 		d.embedderResolver = embedderResolver
 		d.logger.Info(ctx, "per-tenant embedder resolver wired (BYO-embedder; vector features gated until an embedding provider is configured)")
+
+		// Per-tenant re-embed trigger (gibson#940): when a tenant changes its
+		// embedding provider/model via the provider-config RPCs, reconcile that
+		// tenant's RediSearch vector index to the new model's dimension and
+		// re-embed stored content. The runner resolves the tenant's OWN
+		// database-per-tenant StateClient (from the datapool's per-tenant Redis
+		// client) and the tenant's CURRENT embedder (from the resolver), then runs
+		// the idempotent reembed.RunForTenant pass. The trigger fires it async +
+		// per-tenant-serialised (see api.NewReembedJobTrigger).
+		pool := d.pool
+		reembedLog := d.logger.Slog()
+		runner := func(runCtx context.Context, tenantID string) error {
+			tenant, terr := auth.NewTenantID(tenantID)
+			if terr != nil {
+				return fmt.Errorf("reembed: invalid tenant id %q: %w", tenantID, terr)
+			}
+			conn, cerr := pool.For(runCtx, tenant)
+			if cerr != nil {
+				return fmt.Errorf("reembed: acquire tenant data-plane: %w", cerr)
+			}
+			defer conn.Release()
+
+			emb, eerr := embedderResolver.Resolve(runCtx, tenantID)
+			if eerr != nil {
+				return fmt.Errorf("reembed: resolve tenant embedder: %w", eerr)
+			}
+
+			// Wrap the tenant's per-tenant Redis client as a StateClient WITHOUT
+			// opening a new connection; the datapool owns the lifecycle, so we must
+			// not Close it.
+			sc := state.NewStateClientFromRedis(conn.Redis, nil)
+			_, rerr := reembed.RunForTenant(runCtx, sc, emb, reembed.WithLogger(reembedLog), reembed.WithTenant(tenantID))
+			return rerr
+		}
+		daemonSvc.WithReembedTrigger(api.NewReembedJobTrigger(runner, reembedLog, 0))
+		d.logger.Info(ctx, "per-tenant re-embed trigger wired (vector index reconciles on embedding-provider/model change)")
 	} else {
 		d.logger.Error(ctx, "provider-config store NOT wired — pool or secretsService is nil; provider config RPCs will fail",
 			"pool_nil", d.pool == nil,

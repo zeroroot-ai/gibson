@@ -132,6 +132,31 @@ func NewStateClient(cfg *Config) (*StateClient, error) {
 	return sc, nil
 }
 
+// NewStateClientFromRedis wraps an already-established redis.UniversalClient in a
+// StateClient without opening a new connection or running the connectivity /
+// module-availability probe NewStateClient performs.
+//
+// It exists for the per-tenant data-plane: the datapool hands out a
+// *redis.Client bound to a tenant's dedicated logical DB (Conn.Redis), and code
+// that needs the StateClient JSON / index helpers against THAT tenant's keyspace
+// (e.g. the re-embed job, gibson#809/#940) wraps it here. The returned client
+// borrows the underlying connection — it does NOT own it, so Close() on the
+// wrapper would close the shared pool; callers that wrap a pooled client must
+// NOT call Close on the wrapper (the pool owns the lifecycle).
+//
+// client must be non-nil and already connected. config may be nil; a nil config
+// yields DefaultConfig() so Config() never returns a zero value.
+func NewStateClientFromRedis(client redis.UniversalClient, config *Config) *StateClient {
+	if config == nil {
+		config = DefaultConfig()
+		config.ApplyDefaults()
+	}
+	return &StateClient{
+		client: client,
+		config: config,
+	}
+}
+
 // Health checks the Redis connection and verifies required modules are loaded.
 // It performs the following checks:
 //  1. Ping to ensure connectivity
