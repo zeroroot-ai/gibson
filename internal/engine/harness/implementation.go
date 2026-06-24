@@ -1777,6 +1777,18 @@ func (h *DefaultAgentHarness) DelegateToAgent(ctx context.Context, name string, 
 		)
 	}
 
+	// ── Dispatch-policy gate (ADR-0010 / gibson#996) ─────────────────────────
+	// Sub-agent delegation runs the delegated agent's own code. There is no
+	// sandboxed agent dispatch, so an untrusted agent must not run in-process
+	// under setec-only — deny it. Agents whose content trust is unknown /
+	// unspecified are treated as trusted, so delegation of first-party agents
+	// is unchanged. (Every tool the delegated agent calls is independently
+	// gated by CallToolProto.)
+	if dispatchpolicy.Decide(h.resolveAgentContentTrust(ctx, name), false, h.deploymentShape) == dispatchpolicy.Deny {
+		return agent.Result{}, types.WrapError(types.SANDBOX_POLICY_DENIED,
+			fmt.Sprintf("agent %q is untrusted but has no sandboxed dispatch; GIBSON_UNTRUSTED_EXEC=setec-only forbids in-process delegation", name), nil)
+	}
+
 	// ── Parent-chain push ────────────────────────────────────────────────────
 	// Capture the current agent's run ID *before* building the child context so
 	// that the caller chain reflects the delegation path A→B→C correctly.
@@ -2553,6 +2565,34 @@ func (h *DefaultAgentHarness) lookupSandboxedToolSpec(ctx context.Context, name 
 		return spec, info.ContentTrust, true, nil
 	}
 	return sandboxed.ToolSpec{}, componentpb.ContentTrust_CONTENT_TRUST_UNSPECIFIED, false, nil
+}
+
+// resolveAgentContentTrust returns the strictest content-trust classification
+// registered for an agent in the component registry (UNTRUSTED if any live
+// instance is untrusted), or CONTENT_TRUST_UNSPECIFIED (treated as trusted by
+// the gate) when the registry is unavailable, the tenant is unknown, the
+// lookup errors, or the agent has no registry entry. This mirrors
+// CallToolProto's behaviour of only denying on a *confirmed* untrusted
+// instance, never on a registry blip. Used by the DelegateToAgent
+// dispatch-policy gate (ADR-0010 / gibson#996).
+func (h *DefaultAgentHarness) resolveAgentContentTrust(ctx context.Context, name string) componentpb.ContentTrust {
+	if h.componentRegistry == nil {
+		return componentpb.ContentTrust_CONTENT_TRUST_UNSPECIFIED
+	}
+	tenant := auth.TenantStringFromContext(ctx)
+	if tenant == "" {
+		return componentpb.ContentTrust_CONTENT_TRUST_UNSPECIFIED
+	}
+	instances, err := h.componentRegistry.Discover(ctx, tenant, "agent", name)
+	if err != nil {
+		return componentpb.ContentTrust_CONTENT_TRUST_UNSPECIFIED
+	}
+	for _, info := range instances {
+		if info.ContentTrust == componentpb.ContentTrust_CONTENT_TRUST_UNTRUSTED {
+			return componentpb.ContentTrust_CONTENT_TRUST_UNTRUSTED
+		}
+	}
+	return componentpb.ContentTrust_CONTENT_TRUST_UNSPECIFIED
 }
 
 // copyStringMap returns a defensive copy of a string-to-string map so the

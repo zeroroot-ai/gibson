@@ -6,6 +6,7 @@ import (
 	"log/slog"
 	"testing"
 
+	"github.com/zeroroot-ai/gibson/internal/engine/agent"
 	"github.com/zeroroot-ai/gibson/internal/engine/harness/dispatchpolicy"
 	"github.com/zeroroot-ai/gibson/internal/infra/types"
 	"github.com/zeroroot-ai/gibson/internal/platform/component"
@@ -143,5 +144,42 @@ func TestDispatchGateStream_TrustedSetecOnly_NotDenied(t *testing.T) {
 	err := h.CallToolProtoStream(ctx, "httpx", wrapperspb.String("in"), &wrapperspb.StringValue{}, nil)
 	if code := gibsonCode(t, err); code == types.SANDBOX_POLICY_DENIED {
 		t.Fatal("trusted streaming tool must not be policy-denied")
+	}
+}
+
+// TestDispatchGateDelegate_UntrustedSetecOnly_Denied: sub-agent delegation of
+// an untrusted agent is denied under setec-only — there is no sandboxed agent
+// dispatch (gibson#996).
+func TestDispatchGateDelegate_UntrustedSetecOnly_Denied(t *testing.T) {
+	h := newGateHarness(t, componentpb.ContentTrust_CONTENT_TRUST_UNTRUSTED, dispatchpolicy.ShapeSetecOnly)
+	ctx := auth.ContextWithTenantString(context.Background(), "acme")
+	_, err := h.DelegateToAgent(ctx, "scanner", agent.Task{})
+	if err == nil {
+		t.Fatal("expected a deny error, got nil")
+	}
+	if code := gibsonCode(t, err); code != types.SANDBOX_POLICY_DENIED {
+		t.Fatalf("code = %q; want SANDBOX_POLICY_DENIED", code)
+	}
+}
+
+// TestResolveAgentContentTrust feeds the DelegateToAgent gate. A trusted /
+// unspecified agent resolves to a trust level that Decide does NOT deny (so
+// delegation proceeds), while an untrusted agent resolves to UNTRUSTED (which,
+// with no sandboxed dispatch under setec-only, Decide denies). The full
+// allow-path is exercised end-to-end by the E3 round-trip (gibson#999); a unit
+// delegation would require standing up the whole child-harness machinery.
+func TestResolveAgentContentTrust(t *testing.T) {
+	ctx := auth.ContextWithTenantString(context.Background(), "acme")
+
+	trustedH := newGateHarness(t, componentpb.ContentTrust_CONTENT_TRUST_TRUSTED, dispatchpolicy.ShapeSetecOnly)
+	if got := trustedH.resolveAgentContentTrust(ctx, "scanner"); got == componentpb.ContentTrust_CONTENT_TRUST_UNTRUSTED {
+		t.Fatalf("trusted agent resolved as UNTRUSTED")
+	} else if dispatchpolicy.Decide(got, false, dispatchpolicy.ShapeSetecOnly) == dispatchpolicy.Deny {
+		t.Fatalf("trusted agent would be denied; want allowed")
+	}
+
+	untrustedH := newGateHarness(t, componentpb.ContentTrust_CONTENT_TRUST_UNTRUSTED, dispatchpolicy.ShapeSetecOnly)
+	if got := untrustedH.resolveAgentContentTrust(ctx, "scanner"); got != componentpb.ContentTrust_CONTENT_TRUST_UNTRUSTED {
+		t.Fatalf("untrusted agent resolved as %v; want UNTRUSTED", got)
 	}
 }
