@@ -70,7 +70,10 @@ func TestNew_MissingToken(t *testing.T) {
 	}
 }
 
-// TestNew_EmptyTokenFile verifies that an all-whitespace token file is rejected.
+// TestNew_EmptyTokenFile verifies that an all-whitespace token file is
+// TOLERATED at startup (deploy#971): New succeeds and Token() returns a
+// transient error until a real token appears, so the reconciler requeues
+// instead of the pod crash-looping and deadlocking the bringup.
 func TestNew_EmptyTokenFile(t *testing.T) {
 	t.Parallel()
 	dir := t.TempDir()
@@ -78,9 +81,54 @@ func TestNew_EmptyTokenFile(t *testing.T) {
 	if err := os.WriteFile(path, []byte("  \n  \n"), 0o600); err != nil {
 		t.Fatal(err)
 	}
-	_, err := New(context.Background(), "http://127.0.0.1:19999", "", path)
-	if err == nil {
-		t.Fatal("expected error for empty token file")
+	r, err := New(context.Background(), "http://127.0.0.1:19999", "", path)
+	if err != nil {
+		t.Fatalf("New should tolerate an empty token file, got: %v", err)
+	}
+	defer func() { _ = r.Close() }()
+	if _, err := r.Token(); err == nil {
+		t.Fatal("Token() should error while the token is not yet available")
+	}
+}
+
+// TestNew_TolerateAbsentThenAcquire verifies the from-zero path (deploy#971):
+// New with a tokenPath whose file does not exist yet succeeds; Token() errors
+// until the file is written, then returns the token without a pod restart.
+func TestNew_TolerateAbsentThenAcquire(t *testing.T) {
+	old := acquirePollInterval
+	acquirePollInterval = 20 * time.Millisecond
+	defer func() { acquirePollInterval = old }()
+
+	dir := t.TempDir()
+	path := filepath.Join(dir, "vault-token") // does not exist yet
+
+	r, err := New(context.Background(), "http://127.0.0.1:19999", "", path)
+	if err != nil {
+		t.Fatalf("New should tolerate an absent token file, got: %v", err)
+	}
+	defer func() { _ = r.Close() }()
+
+	if _, err := r.Token(); err == nil {
+		t.Fatal("Token() should error before the token file exists")
+	}
+
+	if err := os.WriteFile(path, []byte("late-token\n"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+
+	deadline := time.After(2 * time.Second)
+	for {
+		if tok, err := r.Token(); err == nil {
+			if tok != "late-token" {
+				t.Fatalf("Token() = %q, want %q", tok, "late-token")
+			}
+			return
+		}
+		select {
+		case <-deadline:
+			t.Fatal("Token() never became available after the file was written")
+		case <-time.After(10 * time.Millisecond):
+		}
 	}
 }
 
@@ -118,9 +166,12 @@ func TestRenewLoop_NonRenewable(t *testing.T) {
 	}
 	ctx, cancel := context.WithCancel(context.Background())
 	defer cancel()
-	go r.renewLoop(ctx, nil, 0)
+	// renewLoop no longer closes r.done (its caller run() owns that); assert it
+	// simply returns for a non-renewable (interval==0) token.
+	finished := make(chan struct{})
+	go func() { r.renewLoop(ctx, nil, 0); close(finished) }()
 	select {
-	case <-r.done:
+	case <-finished:
 	case <-time.After(time.Second):
 		t.Fatal("renewLoop did not exit for interval==0")
 	}
