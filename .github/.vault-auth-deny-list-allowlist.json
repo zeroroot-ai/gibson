@@ -1,104 +1,92 @@
 [
   {
     "file": "docs/secrets.md",
-    "line": 81,
+    "content": "does NOT initiate any Vault `auth/kubernetes` login",
     "token": "auth/kubernetes",
-    "reason": "pre-ADR-0009 cross-reference"
-  },
-  {
-    "file": "go.mod",
-    "line": 168,
-    "token": "auth/kubernetes",
-    "reason": "pre-ADR-0009 cross-reference"
-  },
-  {
-    "file": "go.mod",
-    "line": 168,
-    "token": "hashicorp/vault/api/auth/kubernetes",
-    "reason": "pre-ADR-0009 cross-reference"
-  },
-  {
-    "file": "go.mod",
-    "line": 168,
-    "token": "vault/api/auth/kubernetes",
-    "reason": "pre-ADR-0009 cross-reference"
+    "reason": "negative cross-reference documenting that the daemon does NOT use Vault auth/kubernetes (ADR-0009)"
   },
   {
     "file": "internal/platform/crypto/keyprovider.go",
-    "line": 48,
+    "content": "not initiate a Vault `auth/kubernetes` login, and the previous",
     "token": "auth/kubernetes",
-    "reason": "pre-ADR-0009 cross-reference"
+    "reason": "comment stating the key provider does not perform a Vault auth/kubernetes login (ADR-0009)"
   },
   {
     "file": "internal/platform/crypto/providers/vault.go",
-    "line": 17,
+    "content": "NOT initiate a Vault `auth/kubernetes` login. The hashicorp",
     "token": "auth/kubernetes",
-    "reason": "pre-ADR-0009 cross-reference"
+    "reason": "comment stating the vault provider does not perform a Vault auth/kubernetes login (ADR-0009)"
   },
   {
     "file": "internal/platform/crypto/providers/vault.go",
-    "line": 18,
-    "token": "auth/kubernetes",
-    "reason": "pre-ADR-0009 cross-reference"
-  },
-  {
-    "file": "internal/platform/crypto/providers/vault.go",
-    "line": 18,
+    "content": "`vault/api/auth/kubernetes` helper has been removed entirely",
     "token": "vault/api/auth/kubernetes",
-    "reason": "pre-ADR-0009 cross-reference"
+    "reason": "comment recording that the hashicorp vault/api/auth/kubernetes helper was removed (ADR-0009)"
   },
   {
     "file": "internal/platform/crypto/providers/vault.go",
-    "line": 37,
+    "content": "`vault/api/auth/kubernetes` helper has been removed entirely",
     "token": "auth/kubernetes",
-    "reason": "pre-ADR-0009 cross-reference"
+    "reason": "same comment also contains the auth/kubernetes substring; negative reference (ADR-0009)"
   },
   {
-    "file": "internal/server/daemon/broker_init_vault_auth.go",
-    "line": 94,
+    "file": "internal/platform/crypto/providers/vault.go",
+    "content": "No auth/kubernetes login is performed",
     "token": "auth/kubernetes",
-    "reason": "pre-ADR-0009 cross-reference"
-  },
-  {
-    "file": "internal/server/daemon/broker_init_vault_auth.go",
-    "line": 98,
-    "token": "AuthMethodKubernetes",
-    "reason": "pre-ADR-0009 cross-reference"
-  },
-  {
-    "file": "internal/server/daemon/broker_init_vault_auth_test.go",
-    "line": 13,
-    "token": "auth/kubernetes",
-    "reason": "pre-ADR-0009 cross-reference"
-  },
-  {
-    "file": "internal/server/daemon/broker_init_vault_auth_test.go",
-    "line": 18,
-    "token": "AuthMethodKubernetes",
-    "reason": "pre-ADR-0009 cross-reference"
-  },
-  {
-    "file": "internal/server/daemon/broker_init_vault_auth_test.go",
-    "line": 18,
-    "token": "auth/kubernetes",
-    "reason": "pre-ADR-0009 cross-reference"
-  },
-  {
-    "file": "internal/server/daemon/broker_init_vault_auth_test.go",
-    "line": 51,
-    "token": "AuthMethodKubernetes",
-    "reason": "pre-ADR-0009 cross-reference"
+    "reason": "comment stating no auth/kubernetes login is performed (ADR-0009)"
   },
   {
     "file": "internal/platform/secrets/jwtsource/source.go",
-    "line": 8,
+    "content": "auth/kubernetes (TokenReview-based auth was forbidden",
     "token": "auth/kubernetes",
-    "reason": "pre-ADR-0009 cross-reference"
+    "reason": "comment documenting that TokenReview-based auth/kubernetes was forbidden by ADR-0009"
   },
   {
     "file": "internal/platform/secrets/jwtsource/source.go",
-    "line": 9,
+    "content": "the SDK constant AuthMethodKubernetes was",
     "token": "AuthMethodKubernetes",
-    "reason": "pre-ADR-0009 cross-reference"
+    "reason": "comment noting the removed SDK constant AuthMethodKubernetes (ADR-0009 / sdk#81)"
+  },
+  {
+    "file": "internal/server/daemon/broker_init_vault_auth.go",
+    "content": "Vault `auth/kubernetes` is intentionally NOT supported",
+    "token": "auth/kubernetes",
+    "reason": "comment stating Vault auth/kubernetes is intentionally not supported (ADR-0009)"
+  },
+  {
+    "file": "internal/server/daemon/broker_init_vault_auth.go",
+    "content": "AuthMethodKubernetes constant was removed in sdk#81",
+    "token": "AuthMethodKubernetes",
+    "reason": "comment noting the removed SDK constant AuthMethodKubernetes (sdk#81)"
+  },
+  {
+    "file": "internal/server/daemon/broker_init_vault_auth_test.go",
+    "content": "re-introduction of Vault `auth/kubernetes` in the daemon's wrapper",
+    "token": "auth/kubernetes",
+    "reason": "test guarding against re-introduction of Vault auth/kubernetes (ADR-0009)"
+  },
+  {
+    "file": "internal/server/daemon/broker_init_vault_auth_test.go",
+    "content": "`auth/kubernetes`. The SDK constant",
+    "token": "auth/kubernetes",
+    "reason": "test comment referencing the forbidden auth/kubernetes token (ADR-0009)"
+  },
+  {
+    "file": "internal/server/daemon/broker_init_vault_auth_test.go",
+    "content": "SDK constant `AuthMethodKubernetes` was removed",
+    "token": "AuthMethodKubernetes",
+    "reason": "test comment noting the removed SDK constant AuthMethodKubernetes (sdk#81)"
+  },
+  {
+    "file": "internal/server/daemon/broker_init_vault_auth_test.go",
+    "content": "once the SDK's AuthMethodKubernetes constant is gone",
+    "token": "AuthMethodKubernetes",
+    "reason": "test comment referencing the removed SDK constant AuthMethodKubernetes (sdk#81)"
+  },
+  {
+    "file": "internal/infra/secrets/vault/provider_test.go",
+    "content": "AuthMethodKubernetes exists in this package",
+    "token": "AuthMethodKubernetes",
+    "reason": "test comment referencing the forbidden AuthMethodKubernetes token (ADR-0009)"
   }
 ]
