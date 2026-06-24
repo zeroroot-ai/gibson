@@ -39,7 +39,8 @@
 //   - GIBSON_TEST_TENANT_ADMIN_TOKEN — a valid admin JWT for the test tenant
 //   - GIBSON_TEST_TENANT_ID — the tenant slug / ID
 //   - DAEMON_GRPC_ADDR (optional, default: localhost:50002)
-//   - GIBSON_ZITADEL_TOKEN_URL (optional, default: http://localhost:30443/oauth/v2/token)
+//   - GIBSON_PLATFORM_URL (daemon pre-auth listener base URL serving the
+//     capability-grant /.well-known/agent-configuration + /capabilitygrant/v1/register)
 //
 // INVOCATION
 // ----------
@@ -86,13 +87,14 @@ const fgaTupleWaitTimeout = 30 * time.Second
 // fgaTupleWaitPoll is the polling interval while waiting for FGA propagation.
 const fgaTupleWaitPoll = 2 * time.Second
 
-// e2ePrincipal holds a provisioned principal's identifiers and credentials.
+// e2ePrincipal holds a provisioned principal's identifiers and its checked-in
+// capability-grant component (the gRPC conn that authenticates as this
+// principal via a self-signed per-RPC CG-JWT).
 type e2ePrincipal struct {
-	kind         tenantv1.PrincipalKind
-	label        string
-	principalID  string
-	clientID     string
-	clientSecret string
+	kind        tenantv1.PrincipalKind
+	label       string
+	principalID string
+	comp        *enrolledComponent
 }
 
 // TestFGAEnforcement_Secrets is the full-stack FGA enforcement validation.
@@ -138,9 +140,7 @@ func TestFGAEnforcement_Secrets(t *testing.T) {
 	require.NoError(t, dialErr, "grpc.NewClient should succeed")
 	t.Cleanup(func() { _ = conn.Close() })
 
-	tenantAdminClient := tenantv1.NewTenantServiceClient(conn)
-	harnessClient := harnesspb.NewHarnessCallbackServiceClient(conn)
-	componentClient := componentpb.NewComponentServiceClient(conn)
+	tenantAdminClient := tenantv1.NewAgentIdentityServiceClient(conn)
 
 	adminCtx := metadata.AppendToOutgoingContext(ctx,
 		"authorization", "Bearer "+adminToken,
@@ -167,21 +167,30 @@ func TestFGAEnforcement_Secrets(t *testing.T) {
 	provisioned := make([]e2ePrincipal, 0, len(wantPrincipals))
 
 	for _, p := range wantPrincipals {
+		name := fmt.Sprintf("fga-e2e-%s-%s", p.label, runID)
 		resp, provErr := tenantAdminClient.CreateAgentIdentity(adminCtx,
 			&tenantv1.CreateAgentIdentityRequest{
-				Name:        fmt.Sprintf("fga-e2e-%s-%s", p.label, runID),
+				Name:        name,
 				Kind:        p.kind,
 				Description: "Ephemeral principal for FGA enforcement E2E test",
 			})
 		require.NoError(t, provErr, "CreateAgentIdentity(%s) should succeed", p.label)
+		// Check the component in (capability-grant register) so it can
+		// authenticate as this principal via a self-signed CG-JWT.
+		comp := enrollComponent(ctx, t, resp.GetBootstrapToken(), name)
 		provisioned = append(provisioned, e2ePrincipal{
-			kind:         p.kind,
-			label:        p.label,
-			principalID:  resp.GetPrincipalId(),
-			clientID:     resp.GetClientId(),
-			clientSecret: resp.GetClientSecret(),
+			kind:        p.kind,
+			label:       p.label,
+			principalID: resp.GetPrincipalId(),
+			comp:        comp,
 		})
-		t.Logf("[FGA E2E step 2] provisioned %s: principal_id=%s", p.label, resp.GetPrincipalId())
+		t.Logf("[FGA E2E step 2] provisioned + checked in %s: principal_id=%s", p.label, resp.GetPrincipalId())
+	}
+
+	// Look up a principal's checked-in component by label.
+	compByLabel := make(map[string]*enrolledComponent, len(provisioned))
+	for _, p := range provisioned {
+		compByLabel[p.label] = p.comp
 	}
 
 	// Cleanup: revoke all principals after the test.
@@ -228,23 +237,11 @@ func TestFGAEnforcement_Secrets(t *testing.T) {
 	})
 
 	// ----------------------------------------------------------------
-	// Step 4: Obtain tokens for all principals.
-	// ----------------------------------------------------------------
-	t.Log("[FGA E2E step 4] obtaining tokens for all principals")
-	tokenMap := make(map[string]string, len(provisioned))
-	for _, p := range provisioned {
-		tok, tokErr := exchangeClientCredentials(ctx, p.clientID, p.clientSecret)
-		if tokErr != nil {
-			t.Logf("[FGA E2E step 4] WARN: token exchange for %s: %v; using clientID as placeholder", p.label, tokErr)
-			// In Kind test environments without a reachable OIDC endpoint,
-			// the daemon's test-fixture mode accepts the client_id as the bearer token.
-			tok = p.clientID
-		}
-		tokenMap[p.label] = tok
-	}
-
-	// ----------------------------------------------------------------
 	// Step 5: Wait for FGA tuple propagation.
+	//
+	// (The former Step 4 — per-principal token exchange — is gone: every
+	// principal is already checked in via capability-grant register and
+	// authenticates with its own self-signed CG-JWT conn.)
 	//
 	// Timing assumption: CreateAgentIdentity triggers the tenant-operator
 	// to write the can_resolve FGA tuple for plugin_principal. The ext-authz
@@ -253,16 +250,13 @@ func TestFGAEnforcement_Secrets(t *testing.T) {
 	// GetCredential from the agent principal.
 	// ----------------------------------------------------------------
 	t.Log("[FGA E2E step 5] waiting for FGA tuple propagation (timeout=30s)")
-	agentToken := tokenMap["agent_principal"]
-	agentCallCtx := metadata.AppendToOutgoingContext(ctx,
-		"authorization", "Bearer "+agentToken,
-		"x-tenant-id", tenantID,
-	)
+	agentHarness := harnesspb.NewHarnessCallbackServiceClient(compByLabel["agent_principal"].Conn)
+	agentCallCtx := cgCtx(ctx, tenantID)
 
 	var fgaReady bool
 	waitDeadline := time.Now().Add(fgaTupleWaitTimeout)
 	for !time.Now().After(waitDeadline) {
-		_, probeErr := harnessClient.GetCredential(agentCallCtx,
+		_, probeErr := agentHarness.GetCredential(agentCallCtx,
 			&harnesspb.GetCredentialRequest{Name: credName})
 		if probeErr != nil {
 			st, _ := status.FromError(probeErr)
@@ -292,24 +286,16 @@ func TestFGAEnforcement_Secrets(t *testing.T) {
 	t.Log("[FGA E2E step 6] asserting HarnessCallbackService.GetCredential enforcement")
 
 	for _, label := range []string{"agent_principal", "tool_principal"} {
-		tok := tokenMap[label]
-		callCtx := metadata.AppendToOutgoingContext(ctx,
-			"authorization", "Bearer "+tok,
-			"x-tenant-id", tenantID,
-		)
-		_, callErr := harnessClient.GetCredential(callCtx,
+		hc := harnesspb.NewHarnessCallbackServiceClient(compByLabel[label].Conn)
+		_, callErr := hc.GetCredential(cgCtx(ctx, tenantID),
 			&harnesspb.GetCredentialRequest{Name: credName})
 		assertDeniedFGA(t, fmt.Sprintf("HarnessCallbackService.GetCredential(%s)", label), callErr)
 		t.Logf("[FGA E2E step 6] PASS: %s denied by HarnessCallbackService.GetCredential", label)
 	}
 
 	// plugin_principal must be allowed (or receive NotFound when seed failed).
-	pluginToken := tokenMap["plugin_principal"]
-	pluginCtx := metadata.AppendToOutgoingContext(ctx,
-		"authorization", "Bearer "+pluginToken,
-		"x-tenant-id", tenantID,
-	)
-	_, pluginHarnessErr := harnessClient.GetCredential(pluginCtx,
+	pluginHarness := harnesspb.NewHarnessCallbackServiceClient(compByLabel["plugin_principal"].Conn)
+	_, pluginHarnessErr := pluginHarness.GetCredential(cgCtx(ctx, tenantID),
 		&harnesspb.GetCredentialRequest{Name: credName})
 	assertPluginAllowed(t, "HarnessCallbackService.GetCredential(plugin_principal)", pluginHarnessErr, seedErr)
 	t.Log("[FGA E2E step 6] PASS: plugin_principal not denied by HarnessCallbackService.GetCredential")
@@ -320,18 +306,15 @@ func TestFGAEnforcement_Secrets(t *testing.T) {
 	t.Log("[FGA E2E step 7] asserting ComponentService.GetCredential enforcement")
 
 	for _, label := range []string{"agent_principal", "tool_principal"} {
-		tok := tokenMap[label]
-		callCtx := metadata.AppendToOutgoingContext(ctx,
-			"authorization", "Bearer "+tok,
-			"x-tenant-id", tenantID,
-		)
-		_, callErr := componentClient.GetCredential(callCtx,
+		cc := componentpb.NewComponentServiceClient(compByLabel[label].Conn)
+		_, callErr := cc.GetCredential(cgCtx(ctx, tenantID),
 			&componentpb.GetCredentialRequest{Name: credName})
 		assertDeniedFGA(t, fmt.Sprintf("ComponentService.GetCredential(%s)", label), callErr)
 		t.Logf("[FGA E2E step 7] PASS: %s denied by ComponentService.GetCredential", label)
 	}
 
-	_, pluginCompErr := componentClient.GetCredential(pluginCtx,
+	pluginComponent := componentpb.NewComponentServiceClient(compByLabel["plugin_principal"].Conn)
+	_, pluginCompErr := pluginComponent.GetCredential(cgCtx(ctx, tenantID),
 		&componentpb.GetCredentialRequest{Name: credName})
 	assertPluginAllowed(t, "ComponentService.GetCredential(plugin_principal)", pluginCompErr, seedErr)
 	t.Log("[FGA E2E step 7] PASS: plugin_principal not denied by ComponentService.GetCredential")
@@ -441,49 +424,6 @@ func deleteTestCredential(ctx context.Context, name string) error {
 		return fmt.Errorf("delete: %w (grpcurl output: %s)", err, strings.TrimSpace(string(out)))
 	}
 	return nil
-}
-
-// exchangeClientCredentials performs a client_credentials OIDC grant against
-// the Zitadel token endpoint and returns the access token. On failure an error
-// is returned and the test continues with the raw client_id as a placeholder.
-//
-// Timing assumption: the token endpoint responds within 10 seconds. The issued
-// JWT is assumed valid for at least the remaining test duration.
-func exchangeClientCredentials(ctx context.Context, clientID, clientSecret string) (string, error) {
-	tokenURL := os.Getenv("GIBSON_ZITADEL_TOKEN_URL")
-	if tokenURL == "" {
-		tokenURL = "http://localhost:30443/oauth/v2/token"
-	}
-
-	exchCtx, cancel := context.WithTimeout(ctx, 10*time.Second)
-	defer cancel()
-
-	out, err := exec.CommandContext(exchCtx,
-		"curl", "-sf",
-		"-X", "POST",
-		"-H", "Content-Type: application/x-www-form-urlencoded",
-		"-d", fmt.Sprintf(
-			"grant_type=client_credentials&client_id=%s&client_secret=%s&scope=openid",
-			clientID, clientSecret),
-		tokenURL,
-	).Output()
-	if err != nil {
-		return "", fmt.Errorf("exchangeClientCredentials: curl: %w", err)
-	}
-
-	// Parse access_token from the JSON response body.
-	resp := string(out)
-	const marker = `"access_token":"`
-	idx := strings.Index(resp, marker)
-	if idx < 0 {
-		return "", fmt.Errorf("exchangeClientCredentials: no access_token in: %s", resp)
-	}
-	tail := resp[idx+len(marker):]
-	end := strings.Index(tail, `"`)
-	if end < 0 {
-		return "", fmt.Errorf("exchangeClientCredentials: malformed token in: %s", resp)
-	}
-	return tail[:end], nil
 }
 
 // assertAuditRows queries compliance_signals for DENIED calls to GetCredential

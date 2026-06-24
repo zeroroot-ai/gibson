@@ -40,7 +40,8 @@
 //   - GIBSON_TEST_TENANT_ADMIN_TOKEN — valid admin JWT
 //   - GIBSON_TEST_TENANT_ID — tenant slug / ID
 //   - DAEMON_GRPC_ADDR (optional, default: localhost:50002)
-//   - GIBSON_ZITADEL_TOKEN_URL (optional, default: http://localhost:30443/oauth/v2/token)
+//   - GIBSON_PLATFORM_URL (daemon pre-auth listener base URL serving the
+//     capability-grant /.well-known/agent-configuration + /capabilitygrant/v1/register)
 //
 // INVOCATION
 // ----------
@@ -123,8 +124,7 @@ func TestAgentLLMPreserved(t *testing.T) {
 	require.NoError(t, err, "grpc.NewClient should succeed")
 	t.Cleanup(func() { _ = conn.Close() })
 
-	tenantAdminClient := tenantv1.NewTenantServiceClient(conn)
-	harnessClient := harnesspb.NewHarnessCallbackServiceClient(conn)
+	tenantAdminClient := tenantv1.NewAgentIdentityServiceClient(conn)
 
 	adminCtx := metadata.AppendToOutgoingContext(ctx,
 		"authorization", "Bearer "+adminToken,
@@ -146,8 +146,7 @@ func TestAgentLLMPreserved(t *testing.T) {
 		})
 	require.NoError(t, provErr, "CreateAgentIdentity(agent) should succeed")
 	principalID := identResp.GetPrincipalId()
-	clientID := identResp.GetClientId()
-	clientSecret := identResp.GetClientSecret()
+	bootstrapToken := identResp.GetBootstrapToken()
 	t.Logf("[LLM preserved step 2] agent provisioned: principal_id=%s", principalID)
 
 	t.Cleanup(func() {
@@ -194,19 +193,14 @@ func TestAgentLLMPreserved(t *testing.T) {
 	})
 
 	// ----------------------------------------------------------------
-	// Step 4: obtain a token for the agent.
+	// Step 4: check the agent in (capability-grant register), then dial a
+	// CG-authenticated conn. The agent's identity is its self-signed per-RPC
+	// CG-JWT (x-capability-grant) — no Zitadel Bearer (gibson#670 / #972).
 	// ----------------------------------------------------------------
-	t.Log("[LLM preserved step 4] obtaining token for agent")
-	agentToken, tokErr := exchangeClientCredentials(ctx, clientID, clientSecret)
-	if tokErr != nil {
-		t.Logf("[LLM preserved step 4] WARN: token exchange: %v; using clientID placeholder", tokErr)
-		agentToken = clientID
-	}
-
-	agentCallCtx := metadata.AppendToOutgoingContext(ctx,
-		"authorization", "Bearer "+agentToken,
-		"x-tenant-id", tenantID,
-	)
+	t.Log("[LLM preserved step 4] checking the agent in via capability-grant register")
+	agent := enrollComponent(ctx, t, bootstrapToken, agentName)
+	agentHarnessClient := harnesspb.NewHarnessCallbackServiceClient(agent.Conn)
+	agentCallCtx := cgCtx(ctx, tenantID)
 
 	// ----------------------------------------------------------------
 	// Step 5: Issue LLMComplete from the agent.
@@ -227,7 +221,7 @@ func TestAgentLLMPreserved(t *testing.T) {
 	// ----------------------------------------------------------------
 	t.Log("[LLM preserved step 5] issuing LLMComplete from agent_principal")
 
-	llmResp, llmErr := harnessClient.LLMComplete(agentCallCtx,
+	llmResp, llmErr := agentHarnessClient.LLMComplete(agentCallCtx,
 		&harnesspb.LLMCompleteRequest{
 			Slot: llmTestSlot,
 			Messages: []*harnesspb.LLMMessage{

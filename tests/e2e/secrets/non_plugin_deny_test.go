@@ -45,7 +45,8 @@
 //   - GIBSON_TEST_TENANT_ADMIN_TOKEN — valid admin JWT
 //   - GIBSON_TEST_TENANT_ID — tenant slug / ID
 //   - DAEMON_GRPC_ADDR (optional, default: localhost:50002)
-//   - GIBSON_ZITADEL_TOKEN_URL (optional, default: http://localhost:30443/oauth/v2/token)
+//   - GIBSON_PLATFORM_URL (daemon pre-auth listener base URL serving the
+//     capability-grant /.well-known/agent-configuration + /capabilitygrant/v1/register)
 //
 // INVOCATION
 // ----------
@@ -121,9 +122,7 @@ func TestNonPluginDeny_HarnessAndComponent(t *testing.T) {
 	require.NoError(t, err, "grpc.NewClient should succeed")
 	t.Cleanup(func() { _ = conn.Close() })
 
-	tenantAdminClient := tenantv1.NewTenantServiceClient(conn)
-	harnessClient := harnesspb.NewHarnessCallbackServiceClient(conn)
-	componentClient := componentpb.NewComponentServiceClient(conn)
+	tenantAdminClient := tenantv1.NewAgentIdentityServiceClient(conn)
 
 	adminCtx := metadata.AppendToOutgoingContext(ctx,
 		"authorization", "Bearer "+adminToken,
@@ -149,28 +148,30 @@ func TestNonPluginDeny_HarnessAndComponent(t *testing.T) {
 
 	type provisionedPrincipal struct {
 		principalSpec
-		principalID  string
-		clientID     string
-		clientSecret string
+		principalID string
+		comp        *enrolledComponent
 	}
 	provisioned := make([]provisionedPrincipal, 0, len(principals))
 
 	t.Log("[NPI deny step 2] provisioning three principals")
 	for _, ps := range principals {
+		name := fmt.Sprintf("%s-%s", ps.label, runID)
 		resp, provErr := tenantAdminClient.CreateAgentIdentity(adminCtx,
 			&tenantv1.CreateAgentIdentityRequest{
-				Name:        fmt.Sprintf("%s-%s", ps.label, runID),
+				Name:        name,
 				Kind:        ps.kind,
 				Description: "Ephemeral principal for non-plugin-isolation deny E2E",
 			})
 		require.NoError(t, provErr, "CreateAgentIdentity(%s) should succeed", ps.label)
+		// Check the component in so it authenticates as this principal via a
+		// self-signed CG-JWT (replaces the removed client_credentials path).
+		comp := enrollComponent(ctx, t, resp.GetBootstrapToken(), name)
 		provisioned = append(provisioned, provisionedPrincipal{
 			principalSpec: ps,
 			principalID:   resp.GetPrincipalId(),
-			clientID:      resp.GetClientId(),
-			clientSecret:  resp.GetClientSecret(),
+			comp:          comp,
 		})
-		t.Logf("[NPI deny step 2] provisioned %s: principal_id=%s", ps.label, resp.GetPrincipalId())
+		t.Logf("[NPI deny step 2] provisioned + checked in %s: principal_id=%s", ps.label, resp.GetPrincipalId())
 	}
 
 	// Cleanup: revoke all principals.
@@ -216,31 +217,22 @@ func TestNonPluginDeny_HarnessAndComponent(t *testing.T) {
 		}
 	})
 
-	// ----------------------------------------------------------------
-	// Step 4: obtain tokens for all principals.
-	// ----------------------------------------------------------------
-	t.Log("[NPI deny step 4] obtaining tokens for all principals")
-	tokenMap := make(map[string]string, len(provisioned))
+	// Look up a principal's checked-in component by label.
+	compByLabel := make(map[string]*enrolledComponent, len(provisioned))
 	for _, p := range provisioned {
-		tok, tokErr := exchangeClientCredentials(ctx, p.clientID, p.clientSecret)
-		if tokErr != nil {
-			// In Kind test-fixture mode the daemon accepts clientID as bearer.
-			t.Logf("[NPI deny step 4] WARN: token exchange for %s: %v; using clientID placeholder", p.label, tokErr)
-			tok = p.clientID
-		}
-		tokenMap[p.label] = tok
+		compByLabel[p.label] = p.comp
 	}
 
 	// ----------------------------------------------------------------
 	// Step 5: wait for FGA tuple propagation.
+	//
+	// (The former Step 4 — per-principal token exchange — is gone: each
+	// principal is already checked in and authenticates via its own
+	// self-signed CG-JWT conn.)
 	// ----------------------------------------------------------------
 	t.Log("[NPI deny step 5] waiting for FGA deny path to become active (probe from agent)")
-	agentToken := tokenMap["npi-agent"]
-	agentProbeCtx := metadata.AppendToOutgoingContext(ctx,
-		"authorization", "Bearer "+agentToken,
-		"x-tenant-id", tenantID,
-	)
-	npiWaitForFGADenyPath(t, ctx, harnessClient, agentProbeCtx, credName)
+	agentHarness := harnesspb.NewHarnessCallbackServiceClient(compByLabel["npi-agent"].Conn)
+	npiWaitForFGADenyPath(t, ctx, agentHarness, cgCtx(ctx, tenantID), credName)
 
 	// ----------------------------------------------------------------
 	// Step 6: assert HarnessCallbackService.GetCredential.
@@ -252,12 +244,8 @@ func TestNonPluginDeny_HarnessAndComponent(t *testing.T) {
 		if p.workloadClass == "plugin" {
 			continue
 		}
-		tok := tokenMap[p.label]
-		callCtx := metadata.AppendToOutgoingContext(ctx,
-			"authorization", "Bearer "+tok,
-			"x-tenant-id", tenantID,
-		)
-		_, callErr := harnessClient.GetCredential(callCtx,
+		hc := harnesspb.NewHarnessCallbackServiceClient(p.comp.Conn)
+		_, callErr := hc.GetCredential(cgCtx(ctx, tenantID),
 			&harnesspb.GetCredentialRequest{Name: credName})
 		npiAssertDenied(t,
 			fmt.Sprintf("HarnessCallbackService.GetCredential(%s)", p.label),
@@ -270,12 +258,8 @@ func TestNonPluginDeny_HarnessAndComponent(t *testing.T) {
 		if p.workloadClass != "plugin" {
 			continue
 		}
-		tok := tokenMap[p.label]
-		pluginCtx := metadata.AppendToOutgoingContext(ctx,
-			"authorization", "Bearer "+tok,
-			"x-tenant-id", tenantID,
-		)
-		_, pluginErr := harnessClient.GetCredential(pluginCtx,
+		hc := harnesspb.NewHarnessCallbackServiceClient(p.comp.Conn)
+		_, pluginErr := hc.GetCredential(cgCtx(ctx, tenantID),
 			&harnesspb.GetCredentialRequest{Name: credName})
 		npiAssertPluginAllowed(t,
 			"HarnessCallbackService.GetCredential(npi-plugin)", pluginErr, seedErr)
@@ -291,12 +275,8 @@ func TestNonPluginDeny_HarnessAndComponent(t *testing.T) {
 		if p.workloadClass == "plugin" {
 			continue
 		}
-		tok := tokenMap[p.label]
-		callCtx := metadata.AppendToOutgoingContext(ctx,
-			"authorization", "Bearer "+tok,
-			"x-tenant-id", tenantID,
-		)
-		_, callErr := componentClient.GetCredential(callCtx,
+		cc := componentpb.NewComponentServiceClient(p.comp.Conn)
+		_, callErr := cc.GetCredential(cgCtx(ctx, tenantID),
 			&componentpb.GetCredentialRequest{Name: credName})
 		npiAssertDenied(t,
 			fmt.Sprintf("ComponentService.GetCredential(%s)", p.label),
@@ -308,12 +288,8 @@ func TestNonPluginDeny_HarnessAndComponent(t *testing.T) {
 		if p.workloadClass != "plugin" {
 			continue
 		}
-		tok := tokenMap[p.label]
-		pluginCtx := metadata.AppendToOutgoingContext(ctx,
-			"authorization", "Bearer "+tok,
-			"x-tenant-id", tenantID,
-		)
-		_, pluginErr := componentClient.GetCredential(pluginCtx,
+		cc := componentpb.NewComponentServiceClient(p.comp.Conn)
+		_, pluginErr := cc.GetCredential(cgCtx(ctx, tenantID),
 			&componentpb.GetCredentialRequest{Name: credName})
 		npiAssertPluginAllowed(t,
 			"ComponentService.GetCredential(npi-plugin)", pluginErr, seedErr)
@@ -331,8 +307,8 @@ func TestNonPluginDeny_HarnessAndComponent(t *testing.T) {
 
 // ---------------------------------------------------------------------------
 // Helpers specific to this test file. Shared helpers (seedTestCredential,
-// deleteTestCredential, exchangeClientCredentials, daemonGRPCAddr) are
-// defined in fga_enforcement_test.go.
+// deleteTestCredential, daemonGRPCAddr) are defined in fga_enforcement_test.go;
+// the capability-grant check-in helper (enrollComponent) is in cg_checkin_test.go.
 // ---------------------------------------------------------------------------
 
 // requireKindGibsonContext fails the test if the current kubectl context is
