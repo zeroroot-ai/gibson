@@ -23,7 +23,11 @@ jobs:
     permissions:
       actions: read
       contents: read
-      security-events: write
+      # No security-events:write — gibson is a private repo, so uploading SARIF
+      # to the code-scanning Security tab requires paid GitHub Advanced Security.
+      # We run the analysis and publish the SARIF as a workflow artifact instead
+      # (gibson#974). Restore the upload (and this permission) when the repo goes
+      # public, where code scanning is free.
     env:
       # GOPRIVATE tells the Go toolchain to skip the public proxy and
       # checksum database for private zeroroot-ai modules. Mirrors
@@ -60,4 +64,16 @@ jobs:
 
       - uses: github/codeql-action/analyze@v3
         with:
-          wait-for-processing: true
+          # Run the analysis but do NOT upload to the code-scanning API — that
+          # upload needs paid GHAS on a private repo (gibson#974). Write the
+          # SARIF locally and publish it as an artifact below.
+          upload: never
+          output: codeql-results
+
+      - name: Upload CodeQL SARIF artifact
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: codeql-sarif-go
+          path: codeql-results
+          if-no-files-found: warn
