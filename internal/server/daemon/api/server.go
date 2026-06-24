@@ -16,13 +16,11 @@ import (
 
 	goredis "github.com/redis/go-redis/v9"
 
-	"github.com/zeroroot-ai/gibson/internal/engine/finding"
 	"github.com/zeroroot-ai/gibson/internal/engine/llm"
 	"github.com/zeroroot-ai/gibson/internal/engine/memory/embedder"
 	"github.com/zeroroot-ai/gibson/internal/engine/missiondraft"
 	"github.com/zeroroot-ai/gibson/internal/engine/target"
 	"github.com/zeroroot-ai/gibson/internal/infra/datapool"
-	"github.com/zeroroot-ai/gibson/internal/infra/types"
 	"github.com/zeroroot-ai/gibson/internal/platform/audit"
 	"github.com/zeroroot-ai/gibson/internal/platform/authz"
 	"github.com/zeroroot-ai/gibson/internal/platform/budget"
@@ -141,11 +139,6 @@ type DaemonServer struct {
 	// missionDraftStore persists mission YAML drafts per tenant.
 	// May be nil; when nil, SaveMissionDraft/ListMissionDrafts return codes.Unavailable.
 	missionDraftStore missionDraftStoreIface
-
-	// findingStore provides access to findings for export operations.
-	// May be nil; when nil, ExportFindings returns codes.Unavailable.
-	// Added by prod-unimplemented-apis spec.
-	findingStore findingStoreIface
 
 	// poolGetter returns the live per-tenant data-plane pool.
 	// Used by ExportFindings (Neo4j Cypher path).
@@ -301,14 +294,6 @@ type missionDraftStoreIface interface {
 	List(ctx context.Context, tenantID string) ([]*missiondraft.MissionDraft, error)
 	Get(ctx context.Context, tenantID, draftID string) (*missiondraft.MissionDraft, error)
 	Delete(ctx context.Context, tenantID, draftID string) error
-}
-
-// findingStoreIface is the narrow subset of finding.FindingStore used by ExportFindings.
-// Using an interface avoids importing the finding package in tests that do not exercise it.
-type findingStoreIface interface {
-	// List retrieves findings scoped by mission and optional filter.
-	// Pass a zero-value types.ID to list all findings for the filter.
-	List(ctx context.Context, missionID types.ID, filter *finding.FindingFilter) ([]finding.EnhancedFinding, error)
 }
 
 // MissionQuotaChecker is the narrow interface the DaemonServer uses to enforce
@@ -994,15 +979,6 @@ func (s *DaemonServer) WithImpersonationIssuer(issuer *impersonation.Issuer) *Da
 // Call this immediately after NewDaemonServer and before registering the server.
 func (s *DaemonServer) WithMissionDraftStore(store missionDraftStoreIface) *DaemonServer {
 	s.missionDraftStore = store
-	return s
-}
-
-// WithFindingStore wires the finding store so that the ExportFindings RPC can
-// query and serialize tenant-scoped findings. Call this immediately after
-// NewDaemonServer and before registering the server.
-// Added by prod-unimplemented-apis spec.
-func (s *DaemonServer) WithFindingStore(store findingStoreIface) *DaemonServer {
-	s.findingStore = store
 	return s
 }
 
