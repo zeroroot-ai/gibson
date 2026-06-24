@@ -45,4 +45,11 @@ jobs:
         run: go install golang.org/x/vuln/cmd/govulncheck@latest
 
       - name: run govulncheck
+        # govulncheck fetches the vuln DB from https://vuln.go.dev. Under the
+        # Go 1.26.4 toolchain its HTTP/2 client read-loop panics mid-fetch
+        # (h2_bundle.go ReadFrame goroutine crash → exit 2, a tooling error,
+        # not a vuln finding) — gibson#758. Force the DB fetch over HTTP/1.1 so
+        # the panicking http2 read loop is never entered.
+        env:
+          GODEBUG: http2client=0
         run: govulncheck ./...
