@@ -2,6 +2,12 @@
 # See zeroroot-ai/.github/.github/workflows/vault-auth-method-deny-list.yml
 # for the scanner logic and ADR-0009 (zeroroot-ai/docs) for the deny-list itself.
 #
+# The reusable workflow scans against a vendored deny-list snapshot
+# (org-github/data/adr-0009-deny-list.md) and checks out repos with the job's
+# default token — its workflow_call interface declares no `secrets:`. Passing
+# the now-undeclared DOCS_REPO_READ_TOKEN made every call a `startup_failure`
+# (invalid secret mapping), silently disabling the required check (gibson#710).
+#
 # Required check name: vault-auth-method-deny-list
 
 name: vault-auth-method-deny-list
@@ -13,5 +19,3 @@ on:
 jobs:
   vault-auth-method-deny-list:
     uses: zeroroot-ai/.github/.github/workflows/vault-auth-method-deny-list.yml@main
-    secrets:
-      DOCS_REPO_READ_TOKEN: ${{ secrets.DOCS_REPO_READ_TOKEN }}
