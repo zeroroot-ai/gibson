@@ -319,12 +319,14 @@ check-critical-paths:
 #   - internal/engine/mission/...     checkpoint capture/restore via miniredis (gibson#953)
 #   - internal/server/daemon/         event-streaming + daemon handlers, miniredis (gibson#953)
 #   - internal/server/daemon/api/     tenant RPC smoke + entitlements-audit (gibson#953)
-# It still excludes engine/harness — that package COMPILES under -tags
-# integration but one of its integration tests fails at RUNTIME and is NOT yet
-# gated: TestE2ERemoteToolExecution (proto "descriptor mismatch" panic in
-# CallToolProto, split out to gibson#963). Widen INTEGRATION_PKG as it is fixed.
-# Run everything once fixed: make test-integration INTEGRATION_PKG=./...
-INTEGRATION_PKG ?= ./tests/integration/... ./internal/platform/authz/... ./internal/server/extauthz/... ./operators/... ./internal/platform/audit/... ./internal/infra/secrets/gcpsm/... ./internal/engine/graphrag/ingest/... ./internal/engine/graphrag/loader/... ./internal/engine/mission/... ./internal/server/daemon/ ./internal/server/daemon/api/
+#   - internal/engine/harness/...     proto-resolver + remote-tool round trip (gibson#963)
+# All packages that previously failed to compile under -tags integration are now
+# fixed (gibson#953/#963); the rotted set is empty. The default is NOT yet ./...
+# because other integration-tagged packages need live cloud/infra that does not
+# run-or-skip cleanly in the lane yet (e.g. internal/infra/secrets/azurekv,
+# internal/infra/reconciler, internal/platform/secrets/providers/postgres).
+# Confirm those skip-or-pass before flipping the default to ./....
+INTEGRATION_PKG ?= ./tests/integration/... ./internal/platform/authz/... ./internal/server/extauthz/... ./operators/... ./internal/platform/audit/... ./internal/infra/secrets/gcpsm/... ./internal/engine/graphrag/ingest/... ./internal/engine/graphrag/loader/... ./internal/engine/mission/... ./internal/server/daemon/ ./internal/server/daemon/api/ ./internal/engine/harness/...
 INTEGRATION_TIMEOUT ?= 30m
 test-integration:
 	@echo "Running integration lane (-tags integration) over $(INTEGRATION_PKG)..."

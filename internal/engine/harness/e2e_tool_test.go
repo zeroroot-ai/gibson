@@ -16,7 +16,6 @@ import (
 	"github.com/zeroroot-ai/gibson/internal/engine/tool"
 	"github.com/zeroroot-ai/gibson/internal/infra/types"
 	"github.com/zeroroot-ai/gibson/internal/platform/component"
-	graphragpb "github.com/zeroroot-ai/sdk/api/gen/gibson/graphrag/v1"
 	"github.com/zeroroot-ai/sdk/graphrag"
 	"github.com/zeroroot-ai/sdk/protoresolver"
 	sdktypes "github.com/zeroroot-ai/sdk/types"
@@ -25,7 +24,6 @@ import (
 	"google.golang.org/protobuf/reflect/protoreflect"
 	"google.golang.org/protobuf/types/descriptorpb"
 	"google.golang.org/protobuf/types/dynamicpb"
-	"google.golang.org/protobuf/types/known/anypb"
 )
 
 // TestE2ERemoteToolExecution tests the complete flow of executing a remote tool
@@ -113,7 +111,7 @@ func TestE2ERemoteToolExecution(t *testing.T) {
 		statusField := outputFields.ByName("status_code")
 		require.NotNil(t, statusField, "status_code field should exist")
 		assert.True(t, outputRefl.Has(statusField), "status_code should be set")
-		assert.Equal(t, int32(200), outputRefl.Get(statusField).Int(), "status_code should be 200")
+		assert.Equal(t, int64(200), outputRefl.Get(statusField).Int(), "status_code should be 200")
 
 		bodyField := outputFields.ByName("body")
 		require.NotNil(t, bodyField, "body field should exist")
@@ -159,48 +157,26 @@ func TestE2ERemoteToolExecution(t *testing.T) {
 func createMockToolFileDescriptorSet(t *testing.T) (string, string, string) {
 	t.Helper()
 
-	// Define google.protobuf.Any dependency
-	googleProtobufAnyFile := &descriptorpb.FileDescriptorProto{
-		Name:    proto.String("google/protobuf/any.proto"),
-		Package: proto.String("google.protobuf"),
-		MessageType: []*descriptorpb.DescriptorProto{
-			{
-				Name: proto.String("Any"),
-				Field: []*descriptorpb.FieldDescriptorProto{
-					{
-						Name:   proto.String("type_url"),
-						Number: proto.Int32(1),
-						Type:   descriptorpb.FieldDescriptorProto_TYPE_STRING.Enum(),
-						Label:  descriptorpb.FieldDescriptorProto_LABEL_OPTIONAL.Enum(),
-					},
-					{
-						Name:   proto.String("value"),
-						Number: proto.Int32(2),
-						Type:   descriptorpb.FieldDescriptorProto_TYPE_BYTES.Enum(),
-						Label:  descriptorpb.FieldDescriptorProto_LABEL_OPTIONAL.Enum(),
-					},
-				},
-			},
-		},
-	}
-
 	// Define graphragpb.DiscoveryResult dependency (simplified)
 	graphragFile := &descriptorpb.FileDescriptorProto{
 		Name:    proto.String("graphrag/discovery.proto"),
 		Package: proto.String("graphrag"),
 		MessageType: []*descriptorpb.DescriptorProto{
 			{
+				// Field numbers must match the real graphragpb.Host so the
+				// dynamic message round-trips through graphrag.ExtractDiscovery's
+				// marshal/unmarshal: id=1, ip=2, hostname=3.
 				Name: proto.String("Host"),
 				Field: []*descriptorpb.FieldDescriptorProto{
 					{
-						Name:   proto.String("hostname"),
-						Number: proto.Int32(1),
+						Name:   proto.String("ip"),
+						Number: proto.Int32(2),
 						Type:   descriptorpb.FieldDescriptorProto_TYPE_STRING.Enum(),
 						Label:  descriptorpb.FieldDescriptorProto_LABEL_OPTIONAL.Enum(),
 					},
 					{
-						Name:   proto.String("ip_address"),
-						Number: proto.Int32(2),
+						Name:   proto.String("hostname"),
+						Number: proto.Int32(3),
 						Type:   descriptorpb.FieldDescriptorProto_TYPE_STRING.Enum(),
 						Label:  descriptorpb.FieldDescriptorProto_LABEL_OPTIONAL.Enum(),
 					},
@@ -226,7 +202,6 @@ func createMockToolFileDescriptorSet(t *testing.T) (string, string, string) {
 		Name:    proto.String("tools/httpx.proto"),
 		Package: proto.String("toolspb"),
 		Dependency: []string{
-			"google/protobuf/any.proto",
 			"graphrag/discovery.proto",
 		},
 		MessageType: []*descriptorpb.DescriptorProto{
@@ -263,10 +238,14 @@ func createMockToolFileDescriptorSet(t *testing.T) (string, string, string) {
 						Label:  descriptorpb.FieldDescriptorProto_LABEL_OPTIONAL.Enum(),
 					},
 					{
+						// Field 100 is the platform-reserved DiscoveryResult slot.
+						// ExtractDiscovery reads field 100 and marshal/unmarshals it
+						// directly into graphragpb.DiscoveryResult (no Any wrapper),
+						// so it is typed as the (wire-compatible) DiscoveryResult here.
 						Name:     proto.String("discovery_result"),
 						Number:   proto.Int32(100),
 						Type:     descriptorpb.FieldDescriptorProto_TYPE_MESSAGE.Enum(),
-						TypeName: proto.String(".google.protobuf.Any"),
+						TypeName: proto.String(".graphrag.DiscoveryResult"),
 						Label:    descriptorpb.FieldDescriptorProto_LABEL_OPTIONAL.Enum(),
 					},
 				},
@@ -277,7 +256,6 @@ func createMockToolFileDescriptorSet(t *testing.T) (string, string, string) {
 	// Create FileDescriptorSet
 	fds := &descriptorpb.FileDescriptorSet{
 		File: []*descriptorpb.FileDescriptorProto{
-			googleProtobufAnyFile,
 			graphragFile,
 			httpxToolFile,
 		},
@@ -428,26 +406,30 @@ func createMockToolHandler(t *testing.T, inputTypeName, outputTypeName string) f
 			outputRefl.Set(bodyField, protoreflect.ValueOfString("response body"))
 		}
 
-		// Create and set DiscoveryResult in field 100
+		// Create and set the DiscoveryResult in field 100. Build it from field
+		// 100's own (local, dynamic) descriptor so the value shares descriptor
+		// identity with the field — packing a globally-registered message into a
+		// dynamicpb field panics ("descriptor does not belong to this message").
+		// The local descriptor is wire-compatible with graphragpb.DiscoveryResult
+		// (hosts=1, Host.hostname=3), so graphrag.ExtractDiscovery round-trips it.
 		discoveryField := outputRefl.Descriptor().Fields().ByNumber(100)
 		if discoveryField != nil {
-			// Create a DiscoveryResult
 			hostname := extractHostFromURL(url)
-			discovery := &graphragpb.DiscoveryResult{
-				Hosts: []*graphragpb.Host{
-					{
-						Hostname: &hostname,
-					},
-				},
-			}
 
-			// Wrap in google.protobuf.Any
-			anyMsg, err := anypb.New(discovery)
-			if err != nil {
-				return nil, fmt.Errorf("failed to create Any message: %w", err)
-			}
+			discoveryDesc := discoveryField.Message()
+			discoveryMsg := dynamicpb.NewMessage(discoveryDesc).ProtoReflect()
 
-			outputRefl.Set(discoveryField, protoreflect.ValueOfMessage(anyMsg.ProtoReflect()))
+			hostsField := discoveryDesc.Fields().ByName("hosts")
+			hostMsg := dynamicpb.NewMessage(hostsField.Message()).ProtoReflect()
+			hostMsg.Set(
+				hostsField.Message().Fields().ByName("hostname"),
+				protoreflect.ValueOfString(hostname),
+			)
+
+			hosts := discoveryMsg.Mutable(hostsField).List()
+			hosts.Append(protoreflect.ValueOfMessage(hostMsg))
+
+			outputRefl.Set(discoveryField, protoreflect.ValueOfMessage(discoveryMsg))
 		}
 
 		return outputMsg, nil
