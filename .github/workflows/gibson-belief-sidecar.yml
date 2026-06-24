@@ -44,7 +44,29 @@ concurrency:
   cancel-in-progress: true
 
 jobs:
+  # Run the sidecar's Python tests WITH the pinned deps installed, so the pgmpy
+  # inference path actually executes. test_model.py uses pytest.importorskip,
+  # so a CI without pgmpy would silently skip the very tests that construct a
+  # BeliefModel — which is exactly how the gibson#982 startup ImportError
+  # shipped (the image build never runs the container; the import is lazy).
+  # Gating `build` on this makes a runtime-broken sidecar un-publishable.
+  test:
+    name: python tests (pinned pgmpy)
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v5
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+      - name: Install pinned deps + pytest
+        working-directory: sidecar/belief
+        run: pip install -r requirements.txt pytest
+      - name: Unit + pgmpy exact-inference tests
+        working-directory: sidecar/belief
+        run: python -m pytest test_model.py -q
+
   build:
+    needs: test
     uses: zeroroot-ai/.github/.github/workflows/reusable-image-build.yml@main
     permissions:
       contents: write
