@@ -317,14 +317,14 @@ check-critical-paths:
 #   - internal/engine/graphrag/ingest/... DiscoveryProcessor → Neo4j hierarchy (gibson#953)
 #   - internal/engine/graphrag/loader/... GraphLoader → Neo4j nodes/edges (gibson#953)
 #   - internal/engine/mission/...     checkpoint capture/restore via miniredis (gibson#953)
-# It still excludes server/daemon{,/api} (integration tests bit-rotted against
-# current APIs) and engine/harness — the latter now COMPILES under -tags
-# integration but two of its integration tests fail at RUNTIME and are NOT yet
-# gated: TestCallbackServiceWithProtoResolver_Integration (missing tenant in
-# context) and TestE2ERemoteToolExecution (proto "descriptor mismatch" panic in
-# CallToolProto). Tracked in gibson#953; widen INTEGRATION_PKG as each is fixed.
+#   - internal/server/daemon/         event-streaming + daemon handlers, miniredis (gibson#953)
+#   - internal/server/daemon/api/     tenant RPC smoke + entitlements-audit (gibson#953)
+# It still excludes engine/harness — that package COMPILES under -tags
+# integration but one of its integration tests fails at RUNTIME and is NOT yet
+# gated: TestE2ERemoteToolExecution (proto "descriptor mismatch" panic in
+# CallToolProto, split out to gibson#963). Widen INTEGRATION_PKG as it is fixed.
 # Run everything once fixed: make test-integration INTEGRATION_PKG=./...
-INTEGRATION_PKG ?= ./tests/integration/... ./internal/platform/authz/... ./internal/server/extauthz/... ./operators/... ./internal/platform/audit/... ./internal/infra/secrets/gcpsm/... ./internal/engine/graphrag/ingest/... ./internal/engine/graphrag/loader/... ./internal/engine/mission/...
+INTEGRATION_PKG ?= ./tests/integration/... ./internal/platform/authz/... ./internal/server/extauthz/... ./operators/... ./internal/platform/audit/... ./internal/infra/secrets/gcpsm/... ./internal/engine/graphrag/ingest/... ./internal/engine/graphrag/loader/... ./internal/engine/mission/... ./internal/server/daemon/ ./internal/server/daemon/api/
 INTEGRATION_TIMEOUT ?= 30m
 test-integration:
 	@echo "Running integration lane (-tags integration) over $(INTEGRATION_PKG)..."

@@ -506,10 +506,17 @@ func TestEventStreamingCancellation(t *testing.T) {
 
 	cancel()
 
+	// The subscriber only re-checks ctx between blocking XREADs (BLOCK
+	// xreadBlockTimeout = 5s). With a real Redis, go-redis ties that blocking
+	// read's deadline to ctx, so cancellation returns promptly; miniredis
+	// emulates BLOCK but does not abort the read on ctx cancellation, so the
+	// channel closes only after the block timeout elapses. Wait past it — the
+	// invariant under test is that the goroutine *does* exit and close the
+	// channel (no leak), not that it does so instantly.
 	select {
 	case _, ok := <-ch:
 		assert.False(t, ok, "channel must be closed after cancellation")
-	case <-time.After(2 * time.Second):
+	case <-time.After(8 * time.Second):
 		t.Fatal("channel not closed after context cancellation")
 	}
 
