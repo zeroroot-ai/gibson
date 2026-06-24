@@ -7,6 +7,7 @@ import (
 
 	"github.com/zeroroot-ai/gibson/internal/engine/graphrag/ingest"
 	"github.com/zeroroot-ai/gibson/internal/engine/harness"
+	"github.com/zeroroot-ai/gibson/internal/engine/harness/dispatchpolicy"
 	"github.com/zeroroot-ai/gibson/internal/engine/harness/middleware"
 	"github.com/zeroroot-ai/gibson/internal/engine/llm"
 	"github.com/zeroroot-ai/gibson/internal/engine/llm/modelgate"
@@ -153,6 +154,13 @@ func (d *daemonImpl) newHarnessFactory(ctx context.Context) (harness.HarnessFact
 		// DelegateToAgent. nil-safe in dev (no quota manager wired).
 		// Spec plans-and-quotas-simplification.
 		QuotaCounter: d.quotaManager,
+	}
+
+	// DeploymentShape is the untrusted-execution isolation policy
+	// (GIBSON_UNTRUSTED_EXEC). nil config or an unset value fail-closes to
+	// ShapeSetecOnly (the zero value). See ADR-0010 / gibson#994.
+	if d.config != nil {
+		config.DeploymentShape = dispatchpolicy.ParseShape(d.config.UntrustedExecMode())
 	}
 
 	// Sandboxed tool executor (Setec microVM dispatch) — constructed only

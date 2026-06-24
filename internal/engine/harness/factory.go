@@ -230,6 +230,7 @@ func (f *DefaultHarnessFactory) Create(agentName string, missionCtx MissionConte
 		componentAccess:    f.config.ComponentAccess,
 		maxDelegationDepth: f.config.MaxDelegationDepth,
 		sandboxedExecutor:  f.config.SandboxedExecutor,
+		deploymentShape:    f.config.DeploymentShape,
 		toolRunnerEnabled:  f.config.ToolRunnerEnabled,
 		quotaCounter:       f.config.QuotaCounter,
 		// Per-node slot overrides: lifted from MissionContext so every

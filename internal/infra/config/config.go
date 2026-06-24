@@ -133,12 +133,29 @@ type Config struct {
 	// StrictTenant(). Not sourced from YAML — env-var only.
 	// Default: false in Phase 1; Phase 5 flips this default and removes the flag.
 	strictTenant bool
+
+	// untrustedExec controls the untrusted-execution isolation policy
+	// ("setec-only" | "customer-isolation"), sourced from GIBSON_UNTRUSTED_EXEC.
+	// Read via UntrustedExecMode(). Not sourced from YAML — env-var only.
+	// Empty (unwired) reads as "setec-only" (fail-closed). See ADR-0010.
+	untrustedExec string
 }
 
 // StrictTenant returns true when strict tenant-context enforcement is enabled
 // (GIBSON_STRICT_TENANT=1/true/yes). False in Phase 1 default.
 func (c *Config) StrictTenant() bool {
 	return c.strictTenant
+}
+
+// UntrustedExecMode returns the untrusted-execution isolation policy
+// ("setec-only" or "customer-isolation"), from GIBSON_UNTRUSTED_EXEC.
+// Fail-closed: an unset value reads as "setec-only". The harness translates
+// this to a dispatchpolicy.DeploymentShape. See ADR-0010.
+func (c *Config) UntrustedExecMode() string {
+	if c.untrustedExec == "" {
+		return "setec-only"
+	}
+	return c.untrustedExec
 }
 
 // ToolRunnerConfig governs the daemon's catalog refresher: which

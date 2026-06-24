@@ -6,6 +6,7 @@ import (
 	"time"
 
 	"github.com/zeroroot-ai/gibson/internal/engine/events"
+	"github.com/zeroroot-ai/gibson/internal/engine/harness/dispatchpolicy"
 	"github.com/zeroroot-ai/gibson/internal/engine/harness/middleware"
 	"github.com/zeroroot-ai/gibson/internal/engine/harness/sandboxed"
 	"github.com/zeroroot-ai/gibson/internal/engine/llm"
@@ -192,6 +193,13 @@ type HarnessConfig struct {
 	// existing deployments).
 	// Optional.
 	SandboxedExecutor *sandboxed.Executor
+
+	// DeploymentShape is the untrusted-execution isolation policy the harness
+	// enforces in CallToolProto (and the other execution paths). Sourced from
+	// the daemon's GIBSON_UNTRUSTED_EXEC config. The zero value
+	// (ShapeSetecOnly) is fail-closed: an unwired harness denies untrusted
+	// in-process execution. See ADR-0010 / gibson#994.
+	DeploymentShape dispatchpolicy.DeploymentShape
 
 	// ToolRunnerEnabled routes tool dispatch through a single
 	// ComponentRegistry lookup keyed by DispatchMode. When true, the
