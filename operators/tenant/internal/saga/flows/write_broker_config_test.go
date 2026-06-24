@@ -223,3 +223,38 @@ func TestSubstituteTenantID(t *testing.T) {
 // the saga step. By the time Provision runs in any environment, the
 // VaultConfig fields are guaranteed non-empty (or the process exited 1
 // at startup). See ADR-0003 (one-code-path).
+
+// TestResolveKEK_LazyProvider verifies the deploy#971 resilience contract:
+// a nil provider or an empty KEK is a retryable error (so the saga requeues
+// instead of the operator crash-looping), and a populated provider returns the
+// KEK read at call time.
+func TestResolveKEK_LazyProvider(t *testing.T) {
+	t.Parallel()
+
+	// nil provider → error
+	if _, err := (WriteTenantBrokerConfigDeps{}).resolveKEK(); err == nil {
+		t.Error("resolveKEK with nil provider: expected error, got nil")
+	}
+
+	// provider returns empty (KEK not yet written) → retryable error
+	empty := WriteTenantBrokerConfigDeps{SystemTenantKEK: func() []byte { return nil }}
+	if _, err := empty.resolveKEK(); err == nil {
+		t.Error("resolveKEK with empty KEK: expected retryable error, got nil")
+	}
+
+	// provider returns the KEK (read at call time) → success, and a value that
+	// appears only after construction is picked up (no startup capture).
+	var live []byte
+	d := WriteTenantBrokerConfigDeps{SystemTenantKEK: func() []byte { return live }}
+	if _, err := d.resolveKEK(); err == nil {
+		t.Error("resolveKEK before KEK is written: expected error, got nil")
+	}
+	live = make([]byte, 32)
+	got, err := d.resolveKEK()
+	if err != nil {
+		t.Fatalf("resolveKEK after KEK written: unexpected error: %v", err)
+	}
+	if len(got) != 32 {
+		t.Errorf("resolveKEK len = %d, want 32", len(got))
+	}
+}
