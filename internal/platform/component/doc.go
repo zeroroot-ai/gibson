@@ -231,49 +231,6 @@
 //
 // # Usage Examples
 //
-// ## Managing Component Lifecycle
-//
-// Start, monitor, and stop a component:
-//
-//	func manageComponent() {
-//	    // Create lifecycle manager
-//	    lifecycleManager := component.NewLifecycleManager(nil, nil)
-//
-//	    ctx := context.Background()
-//
-//	    // Get component from Redis store
-//	    store := component.NewRedisComponentStore(redisClient, "gibson")
-//	    comp, err := store.GetByName(ctx, component.ComponentKindAgent, "scanner")
-//	    if err != nil || comp == nil {
-//	        log.Fatal("Component not found")
-//	    }
-//
-//	    // Start component
-//	    port, err := lifecycleManager.StartComponent(ctx, comp)
-//	    if err != nil {
-//	        log.Fatalf("Failed to start component: %v", err)
-//	    }
-//	    fmt.Printf("Component started on port %d with PID %d\n", port, comp.PID)
-//
-//	    // Register for health monitoring
-//	    healthURL := fmt.Sprintf("http://localhost:%d/health", port)
-//	    healthMonitor.RegisterComponent(comp.Name, healthURL)
-//
-//	    // Monitor status changes
-//	    healthMonitor.OnStatusChange(func(name string, oldStatus, newStatus component.HealthStatus) {
-//	        fmt.Printf("Component %s status changed: %s -> %s\n", name, oldStatus, newStatus)
-//	    })
-//
-//	    // Do work...
-//	    time.Sleep(5 * time.Minute)
-//
-//	    // Stop component
-//	    if err := lifecycleManager.StopComponent(ctx, comp); err != nil {
-//	        log.Fatalf("Failed to stop component: %v", err)
-//	    }
-//	    fmt.Println("Component stopped successfully")
-//	}
-//
 // ## Using the Component Store
 //
 // Register, query, and persist components in Redis:

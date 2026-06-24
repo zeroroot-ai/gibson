@@ -915,15 +915,6 @@ internal/platform/component/errors.go	NewTimeoutError
 internal/platform/component/errors.go	NewUnsupportedOperationError
 internal/platform/component/errors.go	NewValidationFailedError
 internal/platform/component/errors.go	WrapComponentError
-internal/platform/component/lifecycle.go	DefaultLifecycleManager.findAvailablePort
-internal/platform/component/lifecycle.go	DefaultLifecycleManager.GetStatus
-internal/platform/component/lifecycle.go	DefaultLifecycleManager.isPortAvailable
-internal/platform/component/lifecycle.go	DefaultLifecycleManager.isProcessAlive
-internal/platform/component/lifecycle.go	DefaultLifecycleManager.killProcess
-internal/platform/component/lifecycle.go	DefaultLifecycleManager.RestartComponent
-internal/platform/component/lifecycle.go	DefaultLifecycleManager.StartComponent
-internal/platform/component/lifecycle.go	DefaultLifecycleManager.StopComponent
-internal/platform/component/lifecycle.go	DefaultLifecycleManager.waitForPort
 internal/platform/component/log_parser.go	isErrorLevel
 internal/platform/component/log_parser.go	parseJSONLogLine
 internal/platform/component/log_parser.go	parseKeyValueLogLine
