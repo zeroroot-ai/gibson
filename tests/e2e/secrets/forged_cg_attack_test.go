@@ -20,24 +20,28 @@
 //	keypair ("the KMS test signing key") which is distinct from the daemon's
 //	real signing key and therefore not present in ext-authz's JWKS cache.
 //
-// Why the test still demonstrates Layer 4 independence:
+// What the test demonstrates under the unified capability-grant model:
 //
-//	When ext-authz receives a CG-JWT whose kid is unknown (our test key),
-//	it cannot verify the signature → it falls through to the FGA check.
-//	If the test used the daemon's real key, ext-authz WOULD short-circuit
-//	on the CG-JWT path and allow the call (bypassing FGA entirely). This
-//	is the known behavior documented in the spec: "Layer 3 refuses at
-//	issuance; Layer 4 refuses at validation via FGA tuple absence." The
-//	short-circuit is intentional for legitimate uses; this test validates
-//	that the FGA layer alone is sufficient to deny the GetCredential call
-//	when the agent has no can_resolve tuple — regardless of how the
-//	request arrived (with or without a CG-JWT header).
+//	In the unified model (ADR-0045) the x-capability-grant header IS the
+//	component's identity — there is no separate Bearer identity. The test
+//	exercises both independent denial properties:
 //
-//	The "validly signed" requirement (spec Task 16) means the JWT is
-//	structurally correct and has a valid Ed25519 signature over its
-//	payload — it is not malformed, it is not corrupted, it is not
-//	replayed. The attack fails because of FGA, not because of a
-//	signature error.
+//	  (a) Forged token → no access. A CG-JWT signed by an untrusted key
+//	      (unknown kid, not in ext-authz's JWKS) fails signature
+//	      verification. Presented as the sole identity it authenticates as
+//	      nothing, so the call is denied. A validly-FORMED but untrusted
+//	      grant cannot self-authenticate into secret access.
+//
+//	  (b) Valid agent identity → still denied by FGA. The agent's REAL,
+//	      daemon-trusted CG-JWT authenticates it correctly, yet GetCredential
+//	      is denied because the agent has no can_resolve tuple
+//	      (decision_reason=fga_no_can_resolve) — proving FGA denies
+//	      independently of the JWT signature layer.
+//
+//	The "validly signed" requirement (spec Task 16) means the forged JWT is
+//	structurally correct and carries a valid Ed25519 signature over its
+//	payload — it is not malformed, corrupted, or replayed; it simply is not
+//	signed by a key the daemon trusts.
 //
 // Test flow:
 //
@@ -47,17 +51,19 @@
 //     RecipientClass = "agent"  (in the claims body)
 //     AllowedRPCs    = ["/gibson.harness.v1.HarnessCallbackService/GetCredential"]
 //     Signed correctly with the test private key.
-//  3. Provision an agent_principal and obtain its OIDC token.
-//  4. Present the forged CG-JWT in the x-capability-grant header on a
-//     GetCredential call from the agent principal.
-//  5. Assert:
-//     a. The call returns PERMISSION_DENIED.
-//     b. Audit rows carry decision_reason=fga_no_can_resolve (NOT a
-//     JWT signature failure — the JWT is correctly signed, just with
-//     an untrusted key, so ext-authz falls through to FGA).
-//  6. Assert a baseline: the same call WITHOUT the forged CG-JWT header
-//     also returns PERMISSION_DENIED with the same FGA reason, confirming
-//     the denial is structural and not an artefact of the header.
+//  3. Provision an agent_principal and check it in via capability-grant
+//     register (it self-signs a real CG-JWT — there is no OIDC token for a
+//     component).
+//  4. Present the forged CG-JWT as the SOLE identity (no real CG conn) on a
+//     GetCredential call.
+//  5. Assert the forged-CG call returns PERMISSION_DENIED / UNAUTHENTICATED:
+//     under the unified model (ADR-0045) the x-capability-grant header IS the
+//     identity, so a CG-JWT signed by an untrusted key cannot self-authenticate
+//     into secret access.
+//  6. Assert the baseline: the same call with the agent's REAL, valid CG-JWT
+//     also returns PERMISSION_DENIED, with audit decision_reason=
+//     fga_no_can_resolve — proving FGA denies even a legitimately-authenticated
+//     agent, independent of the JWT signature layer.
 //
 // Spec: non-plugin-secret-isolation Requirements 4.3 and NFR Security,
 // Task 16.
@@ -69,7 +75,8 @@
 //   - GIBSON_TEST_TENANT_ADMIN_TOKEN — valid admin JWT
 //   - GIBSON_TEST_TENANT_ID — tenant slug / ID
 //   - DAEMON_GRPC_ADDR (optional, default: localhost:50002)
-//   - GIBSON_ZITADEL_TOKEN_URL (optional, default: http://localhost:30443/oauth/v2/token)
+//   - GIBSON_PLATFORM_URL (daemon pre-auth listener base URL serving the
+//     capability-grant /.well-known/agent-configuration + /capabilitygrant/v1/register)
 //
 // INVOCATION
 // ----------
@@ -199,8 +206,10 @@ func TestForgedCGJWT_AgentDeniedByFGA(t *testing.T) {
 	require.NoError(t, connErr, "grpc.NewClient should succeed")
 	t.Cleanup(func() { _ = conn.Close() })
 
-	tenantAdminClient := tenantv1.NewTenantServiceClient(conn)
-	harnessClient := harnesspb.NewHarnessCallbackServiceClient(conn)
+	tenantAdminClient := tenantv1.NewAgentIdentityServiceClient(conn)
+	// plainHarnessClient dials with no per-RPC credentials. It is used ONLY to
+	// present the FORGED CG-JWT by hand in the x-capability-grant header.
+	plainHarnessClient := harnesspb.NewHarnessCallbackServiceClient(conn)
 
 	adminCtx := metadata.AppendToOutgoingContext(ctx,
 		"authorization", "Bearer "+adminToken,
@@ -217,8 +226,7 @@ func TestForgedCGJWT_AgentDeniedByFGA(t *testing.T) {
 		})
 	require.NoError(t, provErr, "CreateAgentIdentity(agent) should succeed")
 	principalID := identResp.GetPrincipalId()
-	clientID := identResp.GetClientId()
-	clientSecret := identResp.GetClientSecret()
+	bootstrapToken := identResp.GetBootstrapToken()
 	t.Logf("[Forged CG step 3] agent provisioned: principal_id=%s", principalID)
 
 	t.Cleanup(func() {
@@ -238,14 +246,15 @@ func TestForgedCGJWT_AgentDeniedByFGA(t *testing.T) {
 	})
 
 	// ----------------------------------------------------------------
-	// Step 4: obtain token for the agent.
+	// Step 4: check the agent in (capability-grant register). The agent's
+	// real identity is its self-signed CG-JWT conn; a component has no
+	// Zitadel Bearer (gibson#670 / #972). agentBaseCtx carries only the
+	// tenant header — the conn injects the real CG-JWT per call.
 	// ----------------------------------------------------------------
-	t.Log("[Forged CG step 4] obtaining token for agent")
-	agentToken, tokErr := exchangeClientCredentials(ctx, clientID, clientSecret)
-	if tokErr != nil {
-		t.Logf("[Forged CG step 4] WARN: token exchange: %v; using clientID placeholder", tokErr)
-		agentToken = clientID
-	}
+	t.Log("[Forged CG step 4] checking the agent in via capability-grant register")
+	agent := enrollComponent(ctx, t, bootstrapToken, agentName)
+	agentHarness := harnesspb.NewHarnessCallbackServiceClient(agent.Conn)
+	agentBaseCtx := cgCtx(ctx, tenantID)
 
 	// ----------------------------------------------------------------
 	// Step 5: seed a credential for the call target.
@@ -269,53 +278,57 @@ func TestForgedCGJWT_AgentDeniedByFGA(t *testing.T) {
 	})
 
 	// ----------------------------------------------------------------
-	// Step 6: wait for FGA deny path to become active.
+	// Step 6: wait for FGA deny path to become active. The probe uses the
+	// agent's REAL, valid CG-JWT: it authenticates as the agent principal,
+	// which has no can_resolve tuple, so GetCredential is denied by FGA.
 	// ----------------------------------------------------------------
-	t.Log("[Forged CG step 6] waiting for FGA deny path (probe without CG-JWT)")
-	agentBaseCtx := metadata.AppendToOutgoingContext(ctx,
-		"authorization", "Bearer "+agentToken,
-		"x-tenant-id", tenantID,
-	)
-	npiWaitForFGADenyPath(t, ctx, harnessClient, agentBaseCtx, credName)
+	t.Log("[Forged CG step 6] waiting for FGA deny path (probe with the agent's real CG-JWT)")
+	npiWaitForFGADenyPath(t, ctx, agentHarness, agentBaseCtx, credName)
 
 	// ----------------------------------------------------------------
-	// Step 7: present the forged CG-JWT on a GetCredential call.
+	// Step 7: present the forged CG-JWT as the SOLE identity.
 	//
-	// The forged CG-JWT is placed in the x-capability-grant header.
-	// ext-authz will attempt to verify it:
-	//   - It will find kid=e2e-forged-test-key-<runID> in the JWT header.
-	//   - It will not find this kid in its JWKS cache (the test key is
-	//     not the daemon's real signing key).
-	//   - Verification will fail with ErrUnknownKey or ErrSignature.
-	//   - ext-authz falls through to FGA.
-	//   - FGA has no (agent_principal, can_resolve, secret:*) tuple.
-	//   - ext-authz returns PERMISSION_DENIED.
+	// Under the unified capability-grant model (ADR-0045) the
+	// x-capability-grant header IS the component's identity — there is no
+	// separate Bearer identity to fall back on. So we present the forged
+	// CG-JWT alone, on a conn with no per-RPC credentials:
+	//   - ext-authz finds kid=e2e-forged-test-key-<runID> in the header.
+	//   - That kid is not in its JWKS cache (the test key is not the
+	//     daemon's real signing key), so signature verification fails.
+	//   - A forged identity token that cannot be verified grants nothing:
+	//     the call is denied (PERMISSION_DENIED / UNAUTHENTICATED).
 	//
-	// This proves FGA alone is sufficient to deny the call — Layer 4
-	// is independent of Layer 3 (the mint deny in mint.go).
+	// This proves a validly-formed but untrusted CG-JWT cannot
+	// self-authenticate into secret access. (The complementary property —
+	// that even a LEGITIMATELY-authenticated agent is denied by FGA — is
+	// asserted in the step 8 baseline below.)
 	// ----------------------------------------------------------------
-	t.Log("[Forged CG step 7] issuing GetCredential with forged CG-JWT header")
+	t.Log("[Forged CG step 7] issuing GetCredential with the forged CG-JWT as sole identity")
 	forgedCtx := metadata.AppendToOutgoingContext(ctx,
-		"authorization", "Bearer "+agentToken,
 		"x-tenant-id", tenantID,
-		"x-capability-grant", forgedToken, // the forged CG-JWT
+		"x-capability-grant", forgedToken, // the forged CG-JWT, by hand
 	)
 
-	_, forgedCallErr := harnessClient.GetCredential(forgedCtx,
+	_, forgedCallErr := plainHarnessClient.GetCredential(forgedCtx,
 		&harnesspb.GetCredentialRequest{Name: credName})
 
 	cgAssertDeniedByFGA(t,
 		"HarnessCallbackService.GetCredential (with forged CG-JWT)", forgedCallErr)
-	t.Log("[Forged CG step 7] PASS: forged CG-JWT did not grant access — denied by FGA")
+	t.Log("[Forged CG step 7] PASS: forged CG-JWT did not grant access — denied")
 
 	// ----------------------------------------------------------------
-	// Step 8: baseline — same call without CG-JWT also denied by FGA.
+	// Step 8: baseline — the agent's REAL CG-JWT is denied by FGA.
+	//
+	// This is the Layer-4 (FGA) independence evidence in the unified model:
+	// the agent is correctly authenticated (valid CG-JWT), yet GetCredential
+	// is denied because it has no can_resolve tuple — not because of any
+	// signature failure.
 	// ----------------------------------------------------------------
-	t.Log("[Forged CG step 8] baseline: GetCredential without CG-JWT (pure FGA path)")
-	_, baselineErr := harnessClient.GetCredential(agentBaseCtx,
+	t.Log("[Forged CG step 8] baseline: GetCredential with the agent's real CG-JWT (pure FGA path)")
+	_, baselineErr := agentHarness.GetCredential(agentBaseCtx,
 		&harnesspb.GetCredentialRequest{Name: credName})
 	cgAssertDeniedByFGA(t,
-		"HarnessCallbackService.GetCredential (baseline, no CG-JWT)", baselineErr)
+		"HarnessCallbackService.GetCredential (baseline, real agent CG-JWT)", baselineErr)
 	t.Log("[Forged CG step 8] PASS: baseline FGA denial confirmed")
 
 	// ----------------------------------------------------------------
