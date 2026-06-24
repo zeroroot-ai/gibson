@@ -76,6 +76,10 @@ while IFS= read -r f; do
 done < <(grep --recursive --files-with-matches \
              --include='*.go' \
              --exclude='*_test.go' \
+             --exclude-dir='.git' \
+             --exclude-dir='.claude' \
+             --exclude-dir='.worktrees' \
+             --exclude-dir='node_modules' \
              '"github.com/redis/go-redis' \
              "${REPO_ROOT}" 2>/dev/null || true)
 
