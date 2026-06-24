@@ -63,6 +63,10 @@ const (
 	SANDBOX_OUTPUT_MALFORMED    ErrorCode = "SANDBOX_OUTPUT_MALFORMED"
 	SANDBOX_INPUT_TOO_LARGE     ErrorCode = "SANDBOX_INPUT_TOO_LARGE"
 	SANDBOX_STREAM_LOGS_FAILED  ErrorCode = "SANDBOX_STREAM_LOGS_FAILED"
+	// SANDBOX_POLICY_DENIED — the dispatch-policy gate refused execution: an
+	// untrusted component with no sandboxed dispatch under the setec-only
+	// deployment shape. See ADR-0010 / gibson#994.
+	SANDBOX_POLICY_DENIED ErrorCode = "SANDBOX_POLICY_DENIED"
 )
 
 // GibsonError represents a structured error with error code, message, and optional cause.

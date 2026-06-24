@@ -31,6 +31,28 @@ func loadStrictTenant() (bool, error) {
 	}
 }
 
+// loadUntrustedExec reads GIBSON_UNTRUSTED_EXEC and returns the resolved
+// deployment-shape mode string ("setec-only" or "customer-isolation").
+//
+// Default (unset / empty) is "setec-only" — fail-closed: in the hosted
+// deployment untrusted execution must go through setec or be denied
+// (ADR-0010). On-prem / self-hosted operators that own their own isolation set
+// "customer-isolation" explicitly. Any other value is a config load error.
+func loadUntrustedExec() (string, error) {
+	raw := strings.ToLower(strings.TrimSpace(os.Getenv("GIBSON_UNTRUSTED_EXEC")))
+	switch raw {
+	case "", "setec-only":
+		return "setec-only", nil
+	case "customer-isolation":
+		return "customer-isolation", nil
+	default:
+		return "", fmt.Errorf(
+			"config: invalid GIBSON_UNTRUSTED_EXEC value %q; accepted values are setec-only (default, hosted) or customer-isolation (on-prem)",
+			os.Getenv("GIBSON_UNTRUSTED_EXEC"),
+		)
+	}
+}
+
 // ConfigLoader handles loading configuration from files.
 type ConfigLoader interface {
 	Load(path string) (*Config, error)
@@ -180,6 +202,12 @@ func applyRuntimeEnvOverrides(cfg *Config) error {
 		return err
 	}
 	cfg.strictTenant = strict
+
+	untrustedExec, err := loadUntrustedExec()
+	if err != nil {
+		return err
+	}
+	cfg.untrustedExec = untrustedExec
 
 	return nil
 }

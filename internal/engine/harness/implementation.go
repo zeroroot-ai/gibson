@@ -10,6 +10,7 @@ import (
 	"time"
 
 	"github.com/zeroroot-ai/gibson/internal/engine/agent"
+	"github.com/zeroroot-ai/gibson/internal/engine/harness/dispatchpolicy"
 	"github.com/zeroroot-ai/gibson/internal/engine/harness/sandboxed"
 	"github.com/zeroroot-ai/gibson/internal/engine/llm"
 	"github.com/zeroroot-ai/gibson/internal/engine/tool"
@@ -145,6 +146,11 @@ type DefaultAgentHarness struct {
 	// via gRPC. Consulted BEFORE any local/component-registry path in
 	// CallToolProto; nil disables sandboxed dispatch entirely.
 	sandboxedExecutor *sandboxed.Executor
+
+	// deploymentShape is the untrusted-execution isolation policy enforced by
+	// the dispatch-policy gate. Zero value (ShapeSetecOnly) is fail-closed.
+	// See ADR-0010 / gibson#994.
+	deploymentShape dispatchpolicy.DeploymentShape
 
 	// toolRunnerEnabled gates the unified ComponentRegistry-driven
 	// dispatch path. When true, CallToolProto looks up the tool in
@@ -749,6 +755,16 @@ func (h *DefaultAgentHarness) CallToolProto(ctx context.Context, name string, re
 					"error", discErr)
 			} else if len(instances) > 0 {
 				info := instances[0] // Use first live instance; load-balancing is a future concern.
+
+				// Dispatch-policy gate (ADR-0010 / gibson#994). We reach here
+				// only when the tool has no SANDBOXED entry (the top block
+				// returned !found), so there is no sandboxed dispatch available.
+				// An UNTRUSTED component must not take a direct-gRPC or
+				// work-queue path under setec-only — deny before selecting one.
+				if dispatchpolicy.Decide(info.ContentTrust, false, h.deploymentShape) == dispatchpolicy.Deny {
+					return types.WrapError(types.SANDBOX_POLICY_DENIED,
+						fmt.Sprintf("tool %q is untrusted but has no sandboxed dispatch; GIBSON_UNTRUSTED_EXEC=setec-only forbids in-process execution", name), nil)
+				}
 
 				// Determine routing: does this instance expose a direct gRPC endpoint?
 				grpcEndpoint := info.Metadata["grpc_endpoint"]
