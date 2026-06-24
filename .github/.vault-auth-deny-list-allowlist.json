@@ -79,9 +79,9 @@
   },
   {
     "file": "internal/server/daemon/broker_init_vault_auth_test.go",
-    "content": "once the SDK's AuthMethodKubernetes constant is gone",
+    "line": 51,
     "token": "AuthMethodKubernetes",
-    "reason": "test comment referencing the removed SDK constant AuthMethodKubernetes (sdk#81)"
+    "reason": "removed SDK constant AuthMethodKubernetes (sdk#81); this occurrence is tab-indented and the org scanner's content matcher cannot key tab-indented lines (its rest-field re-split drops them), so this single entry stays line-based"
   },
   {
     "file": "internal/infra/secrets/vault/provider_test.go",
