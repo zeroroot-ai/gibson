@@ -47,7 +47,7 @@ func TestAuditEmission_AccessTupleChange_EndToEnd(t *testing.T) {
 	al := audit.NewAuditLogger(drainCtx, stateClient, logger)
 
 	// Identity: tenant admin via API key → classifyActorSource → "tenant_admin".
-	ident := auth.Identity{Subject: "gsk_test", Issuer: "apikey", Tenant: "acme"}
+	ident := auth.Identity{Subject: "gsk_test", Issuer: "apikey", Tenant: auth.MustNewTenantID("acme")}
 	ctx := auth.WithIdentity(context.Background(), ident)
 	ctx = auth.ContextWithTenantString(ctx, "acme")
 
