@@ -106,19 +106,25 @@ class ModelArtifact:
 class BeliefModel:
     """pgmpy-backed exact-inference wrapper around a :class:`ModelArtifact`.
 
-    Builds a ``DiscreteBayesianNetwork`` once at load time, then answers posteriors
+    Builds a ``BayesianNetwork`` once at load time, then answers posteriors
     with ``VariableElimination`` (exact). Read-only: no ``fit`` / structure learning
     is ever called at runtime.
+
+    Note: the discrete-network class is ``BayesianNetwork`` in the pinned
+    ``pgmpy==0.1.26`` (requirements.txt, pinned for replay determinism per
+    ADR-0005). pgmpy 1.0 renamed it to ``DiscreteBayesianNetwork``; importing
+    that name against 0.1.26 raises ``ImportError`` and crashed the sidecar at
+    startup (gibson#982 / deploy#826). Keep this name in lockstep with the pin.
     """
 
     def __init__(self, artifact: ModelArtifact):
         # Imported lazily so the pure helpers above stay importable without pgmpy.
-        from pgmpy.models import DiscreteBayesianNetwork
+        from pgmpy.models import BayesianNetwork
         from pgmpy.factors.discrete import TabularCPD
         from pgmpy.inference import VariableElimination
 
         self.artifact = artifact
-        net = DiscreteBayesianNetwork(artifact.edges)
+        net = BayesianNetwork(artifact.edges)
         net.add_nodes_from(artifact.variables)
 
         for var, spec in artifact.cpds.items():
