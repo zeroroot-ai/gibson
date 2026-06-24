@@ -2,14 +2,14 @@
 //
 // # Overview
 //
-// The component package enables Gibson to discover, install, manage, and monitor
-// external components (agents, tools, and plugins). It provides a complete lifecycle
-// management system including installation from git repositories, building, starting,
-// health monitoring, and graceful shutdown.
+// The component package enables Gibson to discover, manage, and monitor
+// external components (agents, tools, and plugins). It provides lifecycle
+// management for registered components including starting, health monitoring,
+// and graceful shutdown.
 //
 // # Main Interfaces
 //
-// The package defines three primary interfaces for component management:
+// The package defines two primary interfaces for component management:
 //
 // ## ComponentStore
 //
@@ -25,26 +25,10 @@
 //	    ListInstances(ctx context.Context, kind ComponentKind, name string) ([]ServiceInfo, error)
 //	}
 //
-// The store is used by the Installer and LifecycleManager to persist component metadata.
+// The store is used by the LifecycleManager to persist component metadata.
 // Components are organized by kind (agent, tool, plugin) and name, with unique constraints
 // enforced by Redis atomic operations. Component metadata is stored persistently, while running
 // instances are stored with leases (ephemeral) for automatic cleanup.
-//
-// ## Installer
-//
-// Installer handles component installation, updates, and removal:
-//
-//	type Installer interface {
-//	    Install(ctx context.Context, repoURL string, kind ComponentKind, opts InstallOptions) (*InstallResult, error)
-//	    Update(ctx context.Context, kind ComponentKind, name string, opts UpdateOptions) (*UpdateResult, error)
-//	    UpdateAll(ctx context.Context, kind ComponentKind, opts UpdateOptions) ([]UpdateResult, error)
-//	    Uninstall(ctx context.Context, kind ComponentKind, name string) (*UninstallResult, error)
-//	}
-//
-// The installer clones git repositories, validates manifests, checks dependencies,
-// builds components, and registers them in the component registry. The component kind
-// is provided by the command context (e.g., 'gibson agent install' vs 'gibson tool install'),
-// rather than being embedded in the manifest file.
 //
 // ## LifecycleManager
 //
@@ -110,15 +94,12 @@
 //
 // # Component Lifecycle
 //
-// Components follow a well-defined lifecycle from installation to removal:
+// Components follow a well-defined lifecycle from registration to removal:
 //
-//  1. Install: Clone git repository, validate manifest, check dependencies, build component
-//  2. Register: Add component to registry and persist to disk
-//  3. Start: Launch component process, assign port, wait for health check
-//  4. Monitor: Periodic health checks, status change notifications
-//  5. Stop: Graceful shutdown (SIGTERM) with timeout, force kill (SIGKILL) if needed
-//  6. Update: Pull latest changes, rebuild, optionally restart
-//  7. Uninstall: Stop component, unregister, remove files
+//  1. Register: Add component to registry and persist to disk
+//  2. Start: Launch component process, assign port, wait for health check
+//  3. Monitor: Periodic health checks, status change notifications
+//  4. Stop: Graceful shutdown (SIGTERM) with timeout, force kill (SIGKILL) if needed
 //
 // # Component Kinds
 //
@@ -249,48 +230,6 @@
 //   - Volumes: Docker volume mounts (for container runtime)
 //
 // # Usage Examples
-//
-// ## Installing a Component
-//
-// Install a component from a git repository:
-//
-//	import (
-//	    "context"
-//	    "github.com/zeroroot-ai/gibson/internal/platform/component"
-//	    "github.com/zeroroot-ai/gibson/internal/platform/component/git"
-//	    "github.com/zeroroot-ai/gibson/internal/platform/component/build"
-//	)
-//
-//	func main() {
-//	    // Create dependencies
-//	    gitOps := git.NewDefaultGitOperations()
-//	    builder := build.NewDefaultBuildExecutor()
-//	    store := component.NewRedisComponentStore(redisClient, "gibson")
-//
-//	    // Create installer
-//	    installer := component.NewDefaultInstaller(gitOps, builder, store, lifecycleMgr)
-//
-//	    // Install component
-//	    ctx := context.Background()
-//	    repoURL := "https://github.com/org/gibson-agent-scanner"
-//	    kind := component.ComponentKindAgent  // Kind determined by command context
-//	    opts := component.InstallOptions{
-//	        Force:        false,
-//	        SkipBuild:    false,
-//	        SkipRegister: false,
-//	        Timeout:      5 * time.Minute,
-//	    }
-//
-//	    result, err := installer.Install(ctx, repoURL, kind, opts)
-//	    if err != nil {
-//	        log.Fatalf("Installation failed: %v", err)
-//	    }
-//
-//	    fmt.Printf("Installed %s v%s in %s\n",
-//	        result.Component.Name,
-//	        result.Component.Version,
-//	        result.Duration)
-//	}
 //
 // ## Managing Component Lifecycle
 //
@@ -587,51 +526,6 @@
 //	                    fmt.Println("Operation timed out, retrying...")
 //	                }
 //	            }
-//	        }
-//	    }
-//	}
-//
-// ## Updating Components
-//
-// Update installed components to their latest versions:
-//
-//	func updateComponents() {
-//	    gitOps := git.NewDefaultGitOperations()
-//	    builder := build.NewDefaultBuildExecutor()
-//	    store := component.NewRedisComponentStore(redisClient, "gibson")
-//	    installer := component.NewDefaultInstaller(gitOps, builder, store, lifecycleMgr)
-//
-//	    ctx := context.Background()
-//	    opts := component.UpdateOptions{
-//	        Restart:   true,
-//	        SkipBuild: false,
-//	        Timeout:   5 * time.Minute,
-//	    }
-//
-//	    // Update single component
-//	    result, err := installer.Update(ctx, component.ComponentKindAgent, "scanner", opts)
-//	    if err != nil {
-//	        log.Fatalf("Update failed: %v", err)
-//	    }
-//
-//	    if result.Updated {
-//	        fmt.Printf("Updated %s: %s -> %s\n",
-//	            result.Component.Name,
-//	            result.OldVersion,
-//	            result.NewVersion)
-//	    } else {
-//	        fmt.Println("Component is already up to date")
-//	    }
-//
-//	    // Update all agents
-//	    results, err := installer.UpdateAll(ctx, component.ComponentKindAgent, opts)
-//	    if err != nil {
-//	        log.Fatalf("Batch update failed: %v", err)
-//	    }
-//
-//	    for _, result := range results {
-//	        if result.Updated {
-//	            fmt.Printf("Updated %s\n", result.Component.Name)
 //	        }
 //	    }
 //	}
