@@ -42,21 +42,25 @@ jobs:
           cache: true
 
       - name: install govulncheck
-        # The latest RELEASE (v1.4.0) crashes under the Go 1.26.4 toolchain with
-        # a nil-pointer deref in internal/vulncheck.vulnFuncs (source.go:281) —
-        # a second, distinct incompatibility beyond the DB-fetch http2 panic
-        # below (gibson#758). go.mod pins `go 1.26.4`, so the scanner cannot run
-        # under an older toolchain. Build from @master, which carries the
-        # unreleased Go 1.26 analysis fixes; revert to @latest once an x/vuln
-        # release ships Go 1.26.4 support.
-        run: go install golang.org/x/vuln/cmd/govulncheck@master
+        run: go install golang.org/x/vuln/cmd/govulncheck@latest
+
+      - name: build daemon binary for govulncheck
+        # govulncheck's SOURCE mode does go/ssa static analysis, which crashes
+        # under the Go 1.26.4 toolchain on this codebase — two distinct upstream
+        # panics (gibson#758): v1.4.0 nil-derefs in internal/vulncheck.vulnFuncs,
+        # and @master panics "ForEachElement called on type containing
+        # *types.TypeParam" on our generics. go.mod pins `go 1.26.4`, so we can't
+        # downgrade the toolchain. BINARY mode reads the compiled binary's symbol
+        # table instead of re-analyzing source, sidestepping the crash entirely.
+        # Restore source mode (`govulncheck ./...`) once an x/vuln release
+        # supports Go 1.26.4 source analysis.
+        run: go build -o "${RUNNER_TEMP}/gibson" ./cmd/gibson
 
       - name: run govulncheck
-        # govulncheck fetches the vuln DB from https://vuln.go.dev. Under the
-        # Go 1.26.4 toolchain net/http's HTTP/2 client read-loop panics mid-fetch
-        # (h2_bundle.go ReadFrame goroutine crash → exit 2, a tooling error,
-        # not a vuln finding) — gibson#758. Force the DB fetch over HTTP/1.1 so
-        # the panicking http2 read loop is never entered.
+        # Binary mode still fetches the vuln DB from https://vuln.go.dev; under
+        # Go 1.26.4 net/http's HTTP/2 client read-loop panics mid-fetch
+        # (h2_bundle.go ReadFrame). Force the DB fetch over HTTP/1.1 so the
+        # panicking http2 read loop is never entered.
         env:
           GODEBUG: http2client=0
-        run: govulncheck ./...
+        run: govulncheck -mode=binary "${RUNNER_TEMP}/gibson"
