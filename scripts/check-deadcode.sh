@@ -1,9 +1,12 @@
 #!/usr/bin/env bash
 # check-deadcode.sh — BLOCKING whole-program dead-code gate (gibson#778, QUALITY-BARS §3).
 #
-# Runs golang.org/x/tools/cmd/deadcode reachability from ALL cmd/* mains over
-# the whole tree (cmd + internal + pkg + operators are reachable from the
-# binaries). Because `deadcode` has no native diff-scoping, the pre-existing
+# Runs golang.org/x/tools/cmd/deadcode reachability from ALL binary mains —
+# the top-level `cmd/*` (daemon, ext-authz, spiffe-jwks-exporter, migrators)
+# AND the operator mains under `operators/*/cmd/*` (tenant + platform
+# operators), which are separate binaries not imported by the daemon. Passing
+# only `./cmd/...` left operator-reachable code unanalyzed (gibson#789/#918).
+# Because `deadcode` has no native diff-scoping, the pre-existing
 # backlog is baselined in `.deadcode-baseline` (file<TAB>func, sorted). The gate
 # fails when a function becomes unreachable that is NOT already in the baseline —
 # i.e. NEW dead code. It does NOT fail on the existing backlog (burndown tracked
@@ -38,7 +41,7 @@ fi
 # Normalise current deadcode to the same `file<TAB>func` shape as the baseline.
 CURRENT="$(mktemp)"
 trap 'rm -f "$CURRENT"' EXIT
-"$DEADCODE_BIN" -test=false ./cmd/... 2>/dev/null \
+"$DEADCODE_BIN" -test=false ./cmd/... ./operators/... 2>/dev/null \
   | sed -E 's/^([^:]+):[0-9]+:[0-9]+: unreachable func: (.+)$/\1\t\2/' \
   | sort -u > "$CURRENT"
 
