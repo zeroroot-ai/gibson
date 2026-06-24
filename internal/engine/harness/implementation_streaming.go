@@ -14,6 +14,7 @@ import (
 	"fmt"
 	"io"
 
+	"github.com/zeroroot-ai/gibson/internal/engine/harness/dispatchpolicy"
 	"github.com/zeroroot-ai/gibson/internal/engine/tool"
 	"github.com/zeroroot-ai/gibson/internal/infra/types"
 	"github.com/zeroroot-ai/gibson/internal/platform/component"
@@ -261,6 +262,16 @@ func (h *DefaultAgentHarness) resolveToolForStreaming(ctx context.Context, name 
 		if tenant != "" {
 			instances, discErr := h.componentRegistry.Discover(ctx, tenant, "tool", name)
 			if discErr == nil && len(instances) > 0 {
+				// Dispatch-policy gate (ADR-0010 / gibson#995). A streaming
+				// tool is dispatched over its own gRPC connection — a bypass
+				// of the setec sandbox. An untrusted component must not take
+				// that path under setec-only; deny before resolving it.
+				// (Sandboxed tools have no persistent gRPC conn and degrade to
+				// the gated CallToolProto path instead.)
+				if dispatchpolicy.Decide(instances[0].ContentTrust, false, h.deploymentShape) == dispatchpolicy.Deny {
+					return nil, types.WrapError(types.SANDBOX_POLICY_DENIED,
+						fmt.Sprintf("tool %q is untrusted but has no sandboxed dispatch; GIBSON_UNTRUSTED_EXEC=setec-only forbids streaming in-process execution", name), nil)
+				}
 				if endpoint := instances[0].Metadata["grpc_endpoint"]; endpoint != "" && h.registryAdapter != nil {
 					if remoteTool, adapterErr := h.registryAdapter.DiscoverTool(ctx, name); adapterErr == nil {
 						return remoteTool, nil

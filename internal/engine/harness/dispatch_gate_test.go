@@ -118,3 +118,30 @@ func TestDispatchGate_TrustedSetecOnly_NotDenied(t *testing.T) {
 		t.Fatal("trusted tool must not be policy-denied")
 	}
 }
+
+// TestDispatchGateStream_UntrustedSetecOnly_Denied: the streaming path
+// (CallToolProtoStream → resolveToolForStreaming) is gated too — an untrusted
+// tool dispatched over its own gRPC connection is denied under setec-only
+// before the stream is opened (gibson#995).
+func TestDispatchGateStream_UntrustedSetecOnly_Denied(t *testing.T) {
+	h := newGateHarness(t, componentpb.ContentTrust_CONTENT_TRUST_UNTRUSTED, dispatchpolicy.ShapeSetecOnly)
+	ctx := auth.ContextWithTenantString(context.Background(), "acme")
+	err := h.CallToolProtoStream(ctx, "httpx", wrapperspb.String("in"), &wrapperspb.StringValue{}, nil)
+	if err == nil {
+		t.Fatal("expected a deny error, got nil")
+	}
+	if code := gibsonCode(t, err); code != types.SANDBOX_POLICY_DENIED {
+		t.Fatalf("code = %q; want SANDBOX_POLICY_DENIED", code)
+	}
+}
+
+// TestDispatchGateStream_TrustedSetecOnly_NotDenied: a trusted streaming tool
+// is not policy-denied (it proceeds and fails later for an unrelated reason).
+func TestDispatchGateStream_TrustedSetecOnly_NotDenied(t *testing.T) {
+	h := newGateHarness(t, componentpb.ContentTrust_CONTENT_TRUST_TRUSTED, dispatchpolicy.ShapeSetecOnly)
+	ctx := auth.ContextWithTenantString(context.Background(), "acme")
+	err := h.CallToolProtoStream(ctx, "httpx", wrapperspb.String("in"), &wrapperspb.StringValue{}, nil)
+	if code := gibsonCode(t, err); code == types.SANDBOX_POLICY_DENIED {
+		t.Fatal("trusted streaming tool must not be policy-denied")
+	}
+}
