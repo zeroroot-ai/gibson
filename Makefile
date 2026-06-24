@@ -170,7 +170,7 @@ lint-deadcode: $(DEADCODE)
 .PHONY: lint-deadcode-baseline
 lint-deadcode-baseline: $(DEADCODE)
 	@echo "Regenerating .deadcode-baseline..."
-	@$(DEADCODE) -test=false ./cmd/... 2>/dev/null \
+	@$(DEADCODE) -test=false ./cmd/... ./operators/... 2>/dev/null \
 		| sed -E 's/^([^:]+):[0-9]+:[0-9]+: unreachable func: (.+)$$/\1\t\2/' \
 		| sort -u > .deadcode-baseline
 	@echo "Wrote .deadcode-baseline ($$(wc -l < .deadcode-baseline | tr -d ' ') entries)"
