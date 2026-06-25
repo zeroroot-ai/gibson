@@ -187,6 +187,7 @@ func TestNoGracefulNilInRequestPaths(t *testing.T) {
 		"internal/engine/harness/compliance_middleware_methods.go:101": astchecks.Entry{Category: astchecks.CategoryDefensiveGuard, Reason: "nil resp passthrough in middleware"},
 		"internal/engine/harness/compliance_rule_registry.go:79":       astchecks.Entry{Category: astchecks.CategoryLegacyOptional, Reason: "rule loader optional in unit-test boot path"},
 		"internal/engine/harness/filter.go:77":                         astchecks.Entry{Category: astchecks.CategoryDefensiveGuard, Reason: "nil target ID means no filter match"},
+		"internal/engine/harness/implementation.go:220":                astchecks.Entry{Category: astchecks.CategoryDefensiveGuard, Reason: "per-node slot-override map may be unset; nil → no override (documented fall-through, gibson#539)"},
 		"internal/engine/harness/filter.go:110":                        astchecks.Entry{Category: astchecks.CategoryDefensiveGuard, Reason: "nil CVSS means no min-score match"},
 		"internal/engine/harness/filter.go:117":                        astchecks.Entry{Category: astchecks.CategoryDefensiveGuard, Reason: "nil CVSS means no max-score match"},
 		"internal/engine/harness/graphrag_query_bridge.go:1095":        astchecks.Entry{Category: astchecks.CategoryDefensiveGuard, Reason: "nil props passthrough"},
