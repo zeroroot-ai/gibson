@@ -38,7 +38,7 @@ import (
 	"google.golang.org/grpc/credentials"
 
 	graphragpb "github.com/zeroroot-ai/sdk/api/gen/gibson/graphrag/v1"
-	setecv1 "github.com/zeroroot-ai/setec/api/grpc/v1alpha1"
+	setecv1 "github.com/zeroroot-ai/setec/api/grpc/v1"
 
 	"github.com/zeroroot-ai/gibson/internal/engine/graphrag/ingest"
 	"github.com/zeroroot-ai/gibson/internal/engine/graphrag/loader"
