@@ -1,0 +1,132 @@
+# E10 / gibson#999 — setec execution round-trip (E3).
+#
+# Proves the untrusted-execution-isolation boundary (ADR-0010) end-to-end: an
+# UNTRUSTED tool dispatched through the harness executes ONLY via a real setec
+# microVM round-trip, and is denied (typed error, no in-process fallback) when no
+# sandboxed dispatch is available under GIBSON_UNTRUSTED_EXEC=setec-only.
+#
+# Hardware: requires KVM + a reachable setec frontend with a kata-qemu-capable
+# SandboxClass. GitHub-hosted runners cannot satisfy that, so the job targets the
+# self-hosted `setec-bare-metal` KVM runner. When no matching runner exists the
+# job stays queued and expires WITHOUT failing the commit status (same contract
+# as setec's e2e.yml), so this never blocks PRs on environments without bare
+# metal.
+#
+# Triggers:
+#   - pull_request labeled `e2e-setec`: opt-in per PR.
+#   - push to main: catches regressions once merged.
+#
+# Activation prerequisites (documented in gibson#999):
+#   1. The `setec-bare-metal` runner must be registered to this repo (or an org
+#      runner group visible to it). It is currently registered to zeroroot-ai/setec.
+#   2. gibson's pinned setec module must speak the deployed frontend's
+#      SandboxService API. Until the setec `api/grpc/v1` graduation (setec#70) is
+#      released and gibson's setec dep is bumped + the adapter migrated, the
+#      success test SKIPS on the version skew (the round-trip itself is verified
+#      working against setec.v1). The deny test runs unconditionally.
+
+name: e2e-setec-roundtrip
+
+on:
+  pull_request:
+    types: [opened, synchronize, reopened, labeled]
+  push:
+    branches: [main]
+
+permissions:
+  contents: read
+
+env:
+  GOPRIVATE: github.com/zeroroot-ai/*
+  GONOSUMDB: github.com/zeroroot-ai/*
+
+jobs:
+  roundtrip:
+    # Run on PRs explicitly labeled `e2e-setec`, or on push-to-main (no PR
+    # context ⇒ passes the guard).
+    if: >-
+      github.event_name == 'push' ||
+      (github.event_name == 'pull_request' &&
+       contains(github.event.pull_request.labels.*.name, 'e2e-setec'))
+
+    runs-on: [self-hosted, setec-bare-metal]
+    timeout-minutes: 30
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Configure git for private modules
+        run: |
+          git config --global \
+            url."https://x-access-token:${{ secrets.GH_PAT_GIBSON_RO }}@github.com/".insteadOf \
+            "https://github.com/"
+
+      - uses: actions/setup-go@v6
+        with:
+          go-version-file: go.mod
+          cache: true
+
+      - name: Verify KVM is available
+        run: |
+          if [ ! -e /dev/kvm ]; then
+            echo "::error::/dev/kvm is not present; this runner cannot execute microVMs."
+            exit 1
+          fi
+          ls -l /dev/kvm
+
+      # The gibson-executor image is the marker-emitting tool runner the sandbox
+      # launches. Pull the published image and import it into the runner's k3s
+      # containerd store so the kata microVM resolves it locally (k3s ≠ docker
+      # store). Tag is overridable via the GIBSON_EXECUTOR_IMAGE repo variable.
+      - name: Stage gibson-executor image into k3s
+        env:
+          GIBSON_EXECUTOR_IMAGE: ${{ vars.GIBSON_EXECUTOR_IMAGE || 'ghcr.io/zeroroot-ai/gibson-executor:main' }}
+        run: |
+          set -euo pipefail
+          docker pull "${GIBSON_EXECUTOR_IMAGE}"
+          docker save "${GIBSON_EXECUTOR_IMAGE}" | sudo k3s ctr -n k8s.io images import -
+          sudo k3s ctr -n k8s.io images ls | grep -F "${GIBSON_EXECUTOR_IMAGE%@*}" || {
+            echo "::error::gibson-executor image not present in k3s store after import"; exit 1; }
+
+      # Ensure a kata-qemu SandboxClass exists (overlayfs; no devmapper). The dev
+      # cluster's only stock class is firecracker (kata-fc), whose dev-loopback
+      # devmapper snapshotter is flaky under load (setec#86); kata-qemu is the
+      # reliable round-trip backend.
+      - name: Ensure kata-qemu SandboxClass
+        run: |
+          set -euo pipefail
+          cat <<'EOF' | sudo k3s kubectl apply -f -
+          apiVersion: setec.zeroroot.ai/v1alpha1
+          kind: SandboxClass
+          metadata:
+            name: gibson-roundtrip-qemu
+          spec:
+            vmm: qemu
+            runtime:
+              backend: kata-qemu
+            maxResources:
+              memory: 1Gi
+              vcpu: 2
+          EOF
+
+      # Materialise the mTLS client certs the frontend demands. The dev PKI ships
+      # a client cert (CN gibson-dev) signed by the frontend's client CA under the
+      # setec checkout; the runner exposes its path via SETEC_PKI_DIR.
+      - name: Run setec round-trip suite
+        env:
+          SETEC_PKI_DIR: ${{ vars.SETEC_PKI_DIR }}
+          SETEC_ROUNDTRIP_ADDR: ${{ vars.SETEC_ROUNDTRIP_ADDR || '127.0.0.1:30051' }}
+          SETEC_ROUNDTRIP_SERVER_NAME: ${{ vars.SETEC_ROUNDTRIP_SERVER_NAME || 'setec-frontend.setec-system.svc' }}
+          GIBSON_EXECUTOR_IMAGE: ${{ vars.GIBSON_EXECUTOR_IMAGE || 'ghcr.io/zeroroot-ai/gibson-executor:main' }}
+          GIBSON_ROUNDTRIP_SANDBOX_CLASS: gibson-roundtrip-qemu
+          GIBSON_ROUNDTRIP_MEMORY: 512Mi
+        run: |
+          set -euo pipefail
+          if [ -z "${SETEC_PKI_DIR:-}" ]; then
+            echo "SETEC_PKI_DIR not set; the suite will self-skip (no frontend creds)."
+          else
+            export SETEC_ROUNDTRIP_CERT="${SETEC_PKI_DIR}/client.crt"
+            export SETEC_ROUNDTRIP_KEY="${SETEC_PKI_DIR}/client.key"
+            export SETEC_ROUNDTRIP_CA="${SETEC_PKI_DIR}/ca.crt"
+          fi
+          make test-setec-roundtrip
