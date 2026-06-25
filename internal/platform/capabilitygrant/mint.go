@@ -69,7 +69,9 @@ import (
 	"github.com/google/uuid"
 	"golang.org/x/crypto/hkdf"
 
+	"github.com/zeroroot-ai/gibson/internal/engine/harness/dispatchpolicy"
 	"github.com/zeroroot-ai/gibson/internal/platform/crypto"
+	capabilitypb "github.com/zeroroot-ai/sdk/api/gen/gibson/capability/v1"
 )
 
 // MaxLifetime is the upper bound enforced by Mint on the requested
@@ -97,6 +99,12 @@ type Config struct {
 	// caches JWKS for 1 hour by default so a brief overlap is
 	// expected.
 	KeyID string
+
+	// Shape is the daemon's untrusted-execution deployment shape
+	// (GIBSON_UNTRUSTED_EXEC). The zero value ShapeSetecOnly fail-closes:
+	// an unwired Minter rejects every non-hosted isolation mode at issuance
+	// (ADR-0010 / gibson#998).
+	Shape dispatchpolicy.DeploymentShape
 }
 
 // Minter mints capability-grant JWTs.
@@ -111,6 +119,7 @@ type Minter struct {
 	keyID    string
 	priv     ed25519.PrivateKey
 	pub      ed25519.PublicKey
+	shape    dispatchpolicy.DeploymentShape
 }
 
 // NewMinter constructs a Minter from cfg. It synchronously fetches
@@ -146,6 +155,7 @@ func NewMinter(ctx context.Context, cfg Config) (*Minter, error) {
 		keyID:    cfg.KeyID,
 		priv:     priv,
 		pub:      pub,
+		shape:    cfg.Shape,
 	}, nil
 }
 
@@ -182,6 +192,13 @@ type MintRequest struct {
 	// RPC. See spec non-plugin-secret-isolation Requirement 4 and the
 	// layered-defense block at the top of this file.
 	RecipientClass string
+
+	// Isolation is where this grant's untrusted-execution boundary lives
+	// (ADR-0010). The zero value (ISOLATION_MODE_UNSPECIFIED) is treated as
+	// HOSTED_SANDBOX, so grants minted without setting it pass under every
+	// shape. Under ShapeSetecOnly, Mint rejects any non-hosted mode at
+	// issuance (gibson#998).
+	Isolation capabilitypb.IsolationMode
 }
 
 // secretResolutionRPCs is the hardcoded set of gRPC methods through
@@ -230,6 +247,26 @@ func (e *CGMintDeniedByRecipientClassError) Error() string {
 	)
 }
 
+// CGMintDeniedByIsolationError is returned by Mint when the requested
+// MintRequest.Isolation is not permitted under the daemon's deployment shape
+// (ADR-0010 / gibson#998) — e.g. a customer-isolation mode requested under the
+// hosted setec-only shape. Fails CLOSED.
+type CGMintDeniedByIsolationError struct {
+	Isolation capabilitypb.IsolationMode
+	Shape     dispatchpolicy.DeploymentShape
+}
+
+func (e *CGMintDeniedByIsolationError) Error() string {
+	shape := "setec-only"
+	if e.Shape == dispatchpolicy.ShapeCustomerIsolation {
+		shape = "customer-isolation"
+	}
+	return fmt.Sprintf(
+		"capabilitygrant: CG_MINT_DENIED_BY_ISOLATION: isolation mode %q is not permitted under deployment shape %q (hosted setec-only permits only ISOLATION_MODE_HOSTED_SANDBOX)",
+		e.Isolation.String(), shape,
+	)
+}
+
 // Mint produces a signed CG-JWT for the given request. Returns the
 // compact-serialized JWT string suitable for placing in the X-
 // Capability-Grant header on agent callbacks.
@@ -259,6 +296,14 @@ func (m *Minter) Mint(req MintRequest) (string, error) {
 		}
 	}
 
+	// Layer (ADR-0010 / gibson#998): refuse to issue a CG-JWT whose isolation
+	// boundary is not permitted under the deployment shape. Fails CLOSED — under
+	// the hosted setec-only shape only HOSTED_SANDBOX (and UNSPECIFIED, treated
+	// as HOSTED_SANDBOX) is allowed; every customer-operated mode is rejected.
+	if !dispatchpolicy.IsolationAllowed(req.Isolation, m.shape) {
+		return "", &CGMintDeniedByIsolationError{Isolation: req.Isolation, Shape: m.shape}
+	}
+
 	ttl := req.TTL
 	if ttl <= 0 || ttl > MaxLifetime {
 		ttl = MaxLifetime
@@ -277,6 +322,13 @@ func (m *Minter) Mint(req MintRequest) (string, error) {
 		"iat":          now.Unix(),
 		"exp":          now.Add(ttl).Unix(),
 		"jti":          jti,
+	}
+	// Carry the isolation boundary as a claim so the read-side projection
+	// (CapabilityGrantInfo.isolation) and ext-authz can surface it. Omitted when
+	// UNSPECIFIED to keep legacy grants byte-identical (consumers default a
+	// missing claim to HOSTED_SANDBOX).
+	if req.Isolation != capabilitypb.IsolationMode_ISOLATION_MODE_UNSPECIFIED {
+		claims["isolation"] = int32(req.Isolation)
 	}
 
 	tok := jwt.NewWithClaims(jwt.SigningMethodEdDSA, claims)

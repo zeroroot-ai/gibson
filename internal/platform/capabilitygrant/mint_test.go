@@ -12,7 +12,9 @@ import (
 
 	"github.com/golang-jwt/jwt/v5"
 
+	"github.com/zeroroot-ai/gibson/internal/engine/harness/dispatchpolicy"
 	"github.com/zeroroot-ai/gibson/internal/infra/types"
+	capabilitypb "github.com/zeroroot-ai/sdk/api/gen/gibson/capability/v1"
 	"github.com/zeroroot-ai/sdk/capabilitygrant"
 )
 
@@ -358,4 +360,91 @@ func (f staticFetcher) Fetch(_ context.Context, kid string) (any, error) {
 		return f.pub, nil
 	}
 	return nil, errors.New("not found")
+}
+
+// TestMinter_IsolationGating covers the ADR-0010 / gibson#998 mint-time gate:
+// under the hosted setec-only shape only HOSTED_SANDBOX (and UNSPECIFIED) may be
+// minted; every customer mode is rejected with the typed
+// CGMintDeniedByIsolationError. Under customer-isolation every mode mints.
+func TestMinter_IsolationGating(t *testing.T) {
+	master := strings.Repeat("k", 32)
+	mk := func(shape dispatchpolicy.DeploymentShape) *Minter {
+		m, err := NewMinter(context.Background(), Config{
+			Issuer:      "https://test.daemon",
+			Audience:    "test-daemon",
+			KeyProvider: kpAdapter{[]byte(master)},
+			KeyID:       "k1",
+			Shape:       shape,
+		})
+		if err != nil {
+			t.Fatal(err)
+		}
+		return m
+	}
+	base := MintRequest{Subject: "agent-1", Tenant: "acme", MissionID: "m", TaskID: "t", AllowedRPCs: []string{"/x.S/Y"}}
+
+	all := []capabilitypb.IsolationMode{
+		capabilitypb.IsolationMode_ISOLATION_MODE_UNSPECIFIED,
+		capabilitypb.IsolationMode_ISOLATION_MODE_HOSTED_SANDBOX,
+		capabilitypb.IsolationMode_ISOLATION_MODE_CUSTOMER_CLUSTER_ATTESTED,
+		capabilitypb.IsolationMode_ISOLATION_MODE_CUSTOMER_SELF_SANDBOX,
+		capabilitypb.IsolationMode_ISOLATION_MODE_ON_PREM_SANDBOX_ENDPOINT,
+	}
+	deniedUnderSetecOnly := map[capabilitypb.IsolationMode]bool{
+		capabilitypb.IsolationMode_ISOLATION_MODE_CUSTOMER_CLUSTER_ATTESTED: true,
+		capabilitypb.IsolationMode_ISOLATION_MODE_CUSTOMER_SELF_SANDBOX:     true,
+		capabilitypb.IsolationMode_ISOLATION_MODE_ON_PREM_SANDBOX_ENDPOINT:  true,
+	}
+
+	setecOnly := mk(dispatchpolicy.ShapeSetecOnly)
+	customer := mk(dispatchpolicy.ShapeCustomerIsolation)
+	for _, iso := range all {
+		req := base
+		req.Isolation = iso
+
+		_, err := setecOnly.Mint(req)
+		if deniedUnderSetecOnly[iso] {
+			var isoErr *CGMintDeniedByIsolationError
+			if !errors.As(err, &isoErr) {
+				t.Errorf("setec-only Mint(isolation=%v): err = %v; want CGMintDeniedByIsolationError", iso, err)
+			}
+		} else if err != nil {
+			t.Errorf("setec-only Mint(isolation=%v) = %v; want success", iso, err)
+		}
+
+		// customer-isolation permits every mode.
+		if _, err := customer.Mint(req); err != nil {
+			t.Errorf("customer-isolation Mint(isolation=%v) = %v; want success", iso, err)
+		}
+	}
+}
+
+// TestMinter_IsolationClaimRoundTrips asserts a non-hosted isolation mode minted
+// under customer-isolation is carried as a JWT claim.
+func TestMinter_IsolationClaimRoundTrips(t *testing.T) {
+	master := strings.Repeat("k", 32)
+	m, err := NewMinter(context.Background(), Config{
+		Issuer: "https://test.daemon", Audience: "test-daemon",
+		KeyProvider: kpAdapter{[]byte(master)}, KeyID: "k1",
+		Shape: dispatchpolicy.ShapeCustomerIsolation,
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	tok, err := m.Mint(MintRequest{
+		Subject: "agent-1", Tenant: "acme", MissionID: "m", TaskID: "t",
+		AllowedRPCs: []string{"/x.S/Y"},
+		Isolation:   capabilitypb.IsolationMode_ISOLATION_MODE_ON_PREM_SANDBOX_ENDPOINT,
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	claims := jwt.MapClaims{}
+	if _, _, perr := jwt.NewParser().ParseUnverified(tok, claims); perr != nil {
+		t.Fatal(perr)
+	}
+	got, ok := claims["isolation"].(float64) // JSON numbers decode as float64
+	if !ok || int32(got) != int32(capabilitypb.IsolationMode_ISOLATION_MODE_ON_PREM_SANDBOX_ENDPOINT) {
+		t.Errorf("isolation claim = %v (ok=%v); want %d", claims["isolation"], ok, capabilitypb.IsolationMode_ISOLATION_MODE_ON_PREM_SANDBOX_ENDPOINT)
+	}
 }

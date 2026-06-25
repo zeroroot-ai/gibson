@@ -603,6 +603,8 @@ github.com/zeroroot-ai/ast-checks v0.1.2 h1:Y8AAHGRvtRS5ys2FmIZO7XyraaV921IHq440
 github.com/zeroroot-ai/ast-checks v0.1.2/go.mod h1:XO8hx6xKXUh9lHfNJA32cptXsHcwT1JNbrUH4NZMwdM=
 github.com/zeroroot-ai/sdk v0.155.0 h1:G2z0Vz/orH7HcyMOyic5ksnKJFm6A+67e09gX81BsRs=
 github.com/zeroroot-ai/sdk v0.155.0/go.mod h1:Zoh2lxNVhtfQ3DXGIGc68zWqNMQ++J8vu4/kOaCXYeY=
+github.com/zeroroot-ai/sdk v0.156.0 h1:m1p2cZ6ojXaYKIy9w6fRS4Wnd1tLGgONSN3w4Z82juM=
+github.com/zeroroot-ai/sdk v0.156.0/go.mod h1:Zoh2lxNVhtfQ3DXGIGc68zWqNMQ++J8vu4/kOaCXYeY=
 github.com/zeroroot-ai/setec v0.104.3 h1:gbciYg69S0w7Al7f3Tgp2tCU9G5lZmfJA8NyBof0r+M=
 github.com/zeroroot-ai/setec v0.104.3/go.mod h1:KIVWE1Y3t2eqQPehNqKtHGugSeteor36vQCoEv1jWmg=
 github.com/zeroroot-ai/setec v0.105.0 h1:RZ32gY0yZkoghg+gQ9HN7H1RM69moQPaZrNH9X0Frn0=
