@@ -1,7 +1,7 @@
 # Gibson Framework Makefile
 # Stage 1 - Foundation
 
-.PHONY: all build bin gibson-migrate sandbox-eviction-handler test test-coverage test-race lint lint-all lint-deadcode lint-deadcode-baseline clean install help proto proto-deps proto-clean check-authz check-coverage test-daemon-identity-roundtrip check-no-tenant-id check-fga-headers check-rpc-test-walker coverage-profile check-coverage-floor check-diff-coverage check-coverage-gates check-critical-paths test-integration authz-registry
+.PHONY: all build bin gibson-migrate sandbox-eviction-handler test test-coverage test-race lint lint-all lint-deadcode lint-deadcode-baseline clean install help proto proto-deps proto-clean check-authz check-coverage test-daemon-identity-roundtrip check-no-tenant-id check-fga-headers check-rpc-test-walker coverage-profile check-coverage-floor check-diff-coverage check-coverage-gates check-critical-paths test-integration test-setec-roundtrip authz-registry
 
 # Go parameters
 GOCMD=go
@@ -331,6 +331,18 @@ INTEGRATION_TIMEOUT ?= 30m
 test-integration:
 	@echo "Running integration lane (-tags integration) over $(INTEGRATION_PKG)..."
 	$(GOTEST) -tags integration -count=1 -timeout=$(INTEGRATION_TIMEOUT) $(INTEGRATION_PKG)
+
+# test-setec-roundtrip: the E10 / gibson#999 execution round-trip (E3). Runs the
+# `setec_integration`-tagged harness suite that proves an UNTRUSTED tool executes
+# ONLY via a real setec microVM round-trip and is denied (typed error, no
+# in-process fallback) otherwise. Hardware-gated: requires KVM + a reachable
+# setec frontend. The tests self-skip unless SETEC_ROUNDTRIP_ADDR (+ mTLS cert
+# paths) is set, so this target is a safe no-op off the KVM runner. CI wiring:
+# .github/workflows/e2e-setec-roundtrip.yml (self-hosted `setec-bare-metal`).
+SETEC_ROUNDTRIP_TIMEOUT ?= 15m
+test-setec-roundtrip:
+	@echo "Running setec execution round-trip (-tags setec_integration)..."
+	$(GOTEST) -tags setec_integration -count=1 -timeout=$(SETEC_ROUNDTRIP_TIMEOUT) -run TestSetecRoundTrip ./internal/engine/harness/...
 
 # Run all checks before commit
 check: fmt vet lint lint-deadcode test-race check-no-tenant-id check-fga-headers check-no-gibson-io check-no-skipped-tests check-noun-contract check-rpc-test-walker check-critical-paths
