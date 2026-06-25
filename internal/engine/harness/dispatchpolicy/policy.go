@@ -7,7 +7,10 @@
 // (docs/adr/0010-untrusted-execution-isolation-boundary.md) and gibson#994.
 package dispatchpolicy
 
-import componentpb "github.com/zeroroot-ai/sdk/api/gen/gibson/component/v1"
+import (
+	capabilitypb "github.com/zeroroot-ai/sdk/api/gen/gibson/capability/v1"
+	componentpb "github.com/zeroroot-ai/sdk/api/gen/gibson/component/v1"
+)
 
 // DeploymentShape is how the daemon is deployed, which determines the isolation
 // policy for untrusted execution. Sourced from GIBSON_UNTRUSTED_EXEC and
@@ -80,4 +83,33 @@ func Decide(trust componentpb.ContentTrust, hasSandboxedDispatch bool, shape Dep
 		return Deny
 	}
 	return AllowInProcess
+}
+
+// IsolationAllowed reports whether a capability grant's isolation mode is
+// permitted under the deployment shape (ADR-0010 / gibson#998). It is the
+// fail-closed gate for WHERE untrusted execution may be isolated:
+//
+//   - ShapeSetecOnly (hosted SaaS): only ISOLATION_MODE_HOSTED_SANDBOX is
+//     permitted — untrusted execution must run in the platform-operated setec
+//     fleet. ISOLATION_MODE_UNSPECIFIED is treated as HOSTED_SANDBOX (back-compat
+//     for grants minted before the field shipped), so it is also permitted.
+//     Every customer-operated mode is rejected.
+//   - ShapeCustomerIsolation (on-prem / self-hosted): the customer owns the
+//     isolation boundary, so every mode is permitted. ON_PREM_SANDBOX_ENDPOINT
+//     additionally requires a configured customer-pointed setec endpoint, which
+//     the caller resolves separately.
+//
+// It is pure and total: an unrecognised mode under ShapeSetecOnly is rejected
+// (fail-closed), and any mode under ShapeCustomerIsolation is allowed.
+func IsolationAllowed(isolation capabilitypb.IsolationMode, shape DeploymentShape) bool {
+	if shape == ShapeCustomerIsolation {
+		return true
+	}
+	switch isolation {
+	case capabilitypb.IsolationMode_ISOLATION_MODE_UNSPECIFIED,
+		capabilitypb.IsolationMode_ISOLATION_MODE_HOSTED_SANDBOX:
+		return true
+	default:
+		return false
+	}
 }
