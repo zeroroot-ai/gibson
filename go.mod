@@ -51,7 +51,7 @@ require (
 	github.com/vmihailenco/msgpack/v5 v5.4.1
 	github.com/zeroroot-ai/ast-checks v0.1.2
 	github.com/zeroroot-ai/sdk v0.155.0
-	github.com/zeroroot-ai/setec v0.104.3
+	github.com/zeroroot-ai/setec v0.105.0
 	github.com/zeroroot-ai/testfixtures v0.1.1
 	go.opentelemetry.io/contrib/instrumentation/google.golang.org/grpc/otelgrpc v0.68.0
 	go.opentelemetry.io/otel v1.44.0
@@ -76,9 +76,9 @@ require (
 	google.golang.org/grpc v1.81.1
 	google.golang.org/protobuf v1.36.12-0.20260120151049-f2248ac996af
 	gopkg.in/yaml.v3 v3.0.1
-	k8s.io/api v0.36.0
-	k8s.io/apimachinery v0.36.0
-	k8s.io/client-go v0.36.0
+	k8s.io/api v0.36.1
+	k8s.io/apimachinery v0.36.1
+	k8s.io/client-go v0.36.1
 	sigs.k8s.io/controller-runtime v0.24.1
 	sigs.k8s.io/yaml v1.6.0
 )
@@ -108,7 +108,7 @@ require (
 	k8s.io/apiextensions-apiserver v0.36.0 // indirect
 	k8s.io/apiserver v0.36.0 // indirect
 	k8s.io/component-base v0.36.0 // indirect
-	k8s.io/streaming v0.36.0 // indirect
+	k8s.io/streaming v0.36.1 // indirect
 	sigs.k8s.io/apiserver-network-proxy/konnectivity-client v0.34.0 // indirect
 )
 

@@ -34,7 +34,6 @@ import (
 	"log/slog"
 	"os"
 	"strconv"
-	"strings"
 	"testing"
 	"time"
 
@@ -44,7 +43,7 @@ import (
 	"github.com/zeroroot-ai/gibson/internal/platform/component"
 	componentpb "github.com/zeroroot-ai/sdk/api/gen/gibson/component/v1"
 	"github.com/zeroroot-ai/sdk/auth"
-	setecv1 "github.com/zeroroot-ai/setec/api/grpc/v1alpha1"
+	setecv1 "github.com/zeroroot-ai/setec/api/grpc/v1"
 	"go.opentelemetry.io/otel/trace/noop"
 	"google.golang.org/grpc"
 	"google.golang.org/grpc/credentials"
@@ -113,25 +112,6 @@ func loadRoundtripEnv(t *testing.T) roundtripEnv {
 	return e
 }
 
-// skipOnSetecVersionSkew turns a wire-incompatibility between gibson's pinned
-// setec proto (this module's `api/grpc/v1alpha1`, package `setec.v1alpha1`) and
-// the deployed setec frontend into a SKIP rather than a FAIL. The setec API
-// graduated v1alpha1→v1 (setec#70, `api/grpc/v1`, package `setec.v1`) and that
-// rename is not yet in a gibson-consumable release, so a frontend built from
-// setec main answers Launch with `Unimplemented: unknown service
-// setec.v1alpha1.SandboxService`. The round-trip itself is verified working
-// against `setec.v1`; the only blocker is the coordinated setec release + gibson
-// dep bump tracked for E10. Once that lands, this skip stops firing and the lane
-// verifies the real round-trip.
-func skipOnSetecVersionSkew(t *testing.T, err error) {
-	t.Helper()
-	msg := err.Error()
-	if strings.Contains(msg, "Unimplemented") && strings.Contains(msg, "SandboxService") {
-		t.Skipf("setec frontend speaks a newer SandboxService API than gibson's pinned setec module "+
-			"(v1alpha1); blocked on the setec api/grpc/v1 release + gibson dep bump. Underlying: %v", err)
-	}
-}
-
 func getenvDefault(key, def string) string {
 	if v := os.Getenv(key); v != "" {
 		return v
@@ -175,7 +155,6 @@ func TestSetecRoundTrip_UntrustedToolExecutesViaSandbox(t *testing.T) {
 	req := &componentpb.CallToolRequest{ToolName: env.tool, InputJson: env.inputJSON}
 	var resp componentpb.CallToolResponse
 	if err := h.CallToolProto(ctx, env.tool, req, &resp); err != nil {
-		skipOnSetecVersionSkew(t, err)
 		t.Fatalf("CallToolProto via setec round-trip failed: %v", err)
 	}
 
