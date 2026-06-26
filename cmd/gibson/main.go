@@ -21,8 +21,9 @@ func main() {
 		select {}
 	}()
 
-	// OSS gibson registers no closed providers, so the daemon boots with the
-	// config-driven Entitlements default. A hosted build (the closed billing
-	// repo, open-core Option A) calls entitlements.Register before gibsond.Run.
+	// OSS gibson sets no ENTITLEMENTS_ENDPOINT, so the daemon boots with the
+	// config-driven Entitlements default. A hosted build activates the closed
+	// billing service by setting the ENTITLEMENTS_ENDPOINT env var in the Helm
+	// chart (Option B runtime seam, gibson#1028).
 	os.Exit(gibsond.Run(ctx, os.Args[1:], os.Stdout, os.Stderr))
 }

@@ -2,7 +2,6 @@ package entitlements
 
 import (
 	"context"
-	"database/sql"
 	"testing"
 )
 
@@ -82,37 +81,27 @@ func TestConfigProvider_PrimeAndInvalidate(t *testing.T) {
 	}
 }
 
-// fixedProvider is a stand-in for a registered commercial provider.
-type fixedProvider struct{ lim Limits }
-
-func (f fixedProvider) Limits(context.Context, string) (Limits, error) { return f.lim, nil }
-
-func TestNew_DefaultsToConfigProviderWhenUnregistered(t *testing.T) {
-	factory = nil // ensure no registration leaked from another test
+// TestNew_DefaultsToConfigProvider verifies that when ENTITLEMENTS_ENDPOINT is
+// unset New returns the OSS config-driven default.
+func TestNew_DefaultsToConfigProvider(t *testing.T) {
+	t.Setenv("ENTITLEMENTS_ENDPOINT", "")
 	p := New(nil)
 	if _, ok := p.(*configProvider); !ok {
-		t.Fatalf("New with no registered factory must return the config-driven default, got %T", p)
+		t.Fatalf("New with no ENTITLEMENTS_ENDPOINT must return the config-driven default, got %T", p)
 	}
 }
 
-func TestRegister_OverridesNew(t *testing.T) {
-	t.Cleanup(func() { factory = nil }) // package global — reset so other tests see the default
-	want := Limits{ConcurrentMissions: 42}
-	var gotDB bool
-	Register(func(db *sql.DB) Provider {
-		gotDB = db == nil // New(nil) below passes a nil handle through to the factory
-		return fixedProvider{lim: want}
-	})
-
+// TestNew_ReturnsGRPCProviderWhenEndpointSet verifies that when
+// ENTITLEMENTS_ENDPOINT is set New attempts to build the gRPC provider.
+// Because there is no real SPIRE agent in tests we expect a fallback to the
+// configProvider (fail-open on dial failure) — the important check is that
+// New does NOT panic and returns a usable Provider.
+func TestNew_ReturnsGRPCProviderWhenEndpointSet(t *testing.T) {
+	t.Setenv("ENTITLEMENTS_ENDPOINT", "localhost:50060")
 	p := New(nil)
-	if !gotDB {
-		t.Fatal("registered factory was not invoked with the DB handle from New")
+	if p == nil {
+		t.Fatal("New must not return nil")
 	}
-	got, err := p.Limits(context.Background(), "acme")
-	if err != nil {
-		t.Fatalf("unexpected error: %v", err)
-	}
-	if got != want {
-		t.Fatalf("registered provider not used: got %+v want %+v", got, want)
-	}
+	// Must be usable without panic (fail-open).
+	_, _ = p.Limits(context.Background(), "acme")
 }

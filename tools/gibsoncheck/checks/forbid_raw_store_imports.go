@@ -72,7 +72,7 @@ var allowedStorePackages = []string{
 	// primitives every internal service consumes — constructing raw store
 	// clients is their entire purpose, so they are permanent peers of
 	// internal/infra/datapool, not daemon business logic.
-	"/internal/infra/pools",       // platform-clients pool constructors (NewPgxPool/NewRedis/NewNeo4j)
+	"/internal/infra/pools",        // platform-clients pool constructors (NewPgxPool/NewRedis/NewNeo4j)
 	"/internal/infra/tenantconfig", // operator-shared Postgres broker-config store; wrapped by the already-allowed internal/platform/secrets/configstore
 
 	// Transitional allowlist — Phase D migration in progress.

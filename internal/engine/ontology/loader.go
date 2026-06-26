@@ -153,4 +153,3 @@ func ontologyToExtension(o taxonomy.Ontology) sdkgraphrag.OntologyExtension {
 		IFPs:         ifps,
 	}
 }
-

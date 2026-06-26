@@ -10,16 +10,20 @@
 // of OSS gibson.
 //
 // It lives under pkg/ (not internal/) so the closed commercial billing repo
-// can import the Provider interface + Register to inject its Stripe-backed
-// impl into a hosted daemon build (open-core Option A; ADR-0003/0054).
+// can import the Provider interface and the generated gRPC stubs at
+// pkg/billing/entitlements/v1 to implement the server side without violating
+// Go's internal/ import restriction.
 //
-//   - OSS (this package, DefaultProvider) ships a permissive/config-driven
-//     provider: limits come from admin-set quota config (the platform
-//     tenant_quotas row), and absence means unlimited. No payment.
-//   - Commercial layer (out-of-repo, lands via gibson#798 once the E4
-//     monorepo exists) ships a provider that derives Limits from the plan +
-//     subscription (Stripe) state. It satisfies this same interface, so the
-//     OSS runtime never changes when the commercial provider is swapped in.
+// Runtime seam (ADR-0003 / ADR-0054 / gibson#1026 / gibson#1028):
+//
+//   - When ENTITLEMENTS_ENDPOINT is set (hosted daemon build), New returns a
+//     caching gRPC client that calls the closed billing service's
+//     EntitlementsService over SPIFFE mTLS. The billing service derives limits
+//     from the tenant's plan + subscription state.
+//   - When ENTITLEMENTS_ENDPOINT is unset (OSS / self-hosted), New returns the
+//     OSS config-driven default (ConfigProvider): limits come from admin-set
+//     quota config (the platform tenant_quotas row), and absence means
+//     unlimited. No payment.
 //
 // BillingService, Stripe, and plans.yaml live entirely in the commercial
 // layer — never behind this seam.
@@ -28,6 +32,9 @@ package entitlements
 import (
 	"context"
 	"database/sql"
+	"log/slog"
+	"os"
+	"strings"
 )
 
 // Limits is the plan-agnostic set of resource ceilings the runtime enforces
@@ -93,30 +100,46 @@ func Resolve(p Provider) Provider {
 	return p
 }
 
-// factory, when installed via Register, overrides the OSS default in New.
-// It takes the daemon's platform DB handle so a provider that needs it (the
-// OSS default does) can use it; a provider that needs more (the commercial
-// Stripe-backed one needs a Stripe client + plan registry) captures those in
-// the closure it registers.
-var factory func(db *sql.DB) Provider
-
-// Register installs the Provider factory the commercial billing layer supplies
-// (gibson#798/#800). The closed module calls it once at startup — typically
-// from an init() that a hosted daemon build imports for its side effect — so
-// that New returns the Stripe-backed provider instead of the OSS default. OSS
-// gibson never calls Register, so the seam stays open-core: the default path
-// has zero knowledge of plans or Stripe. Last call wins; not safe for
-// concurrent use with New (call it during single-threaded startup wiring).
-func Register(f func(db *sql.DB) Provider) { factory = f }
-
-// New is the single Entitlements injection point. It returns the registered
-// commercial provider when one was installed via Register, else the OSS
-// config-driven default (NewConfigProvider). Daemon wiring calls New — never
-// NewConfigProvider directly — so the commercial provider drops in with no
-// daemon change.
+// New is the single Entitlements injection point.
+//
+// When ENTITLEMENTS_ENDPOINT is set it returns a caching gRPC-client Provider
+// that calls the commercial EntitlementsService over SPIFFE mTLS (Option B,
+// gibson#1028). The billing service's SPIFFE ID is read from
+// ENTITLEMENTS_BILLING_SVID (defaults to permissive AuthorizeAny when unset —
+// tighten in production by setting the full "spiffe://…" SVID). The SPIRE
+// Workload API socket is read from SPIFFE_ENDPOINT_SOCKET (the go-spiffe
+// conventional env var; the chart mounts it via CSI).
+//
+// When ENTITLEMENTS_ENDPOINT is unset it returns the OSS config-driven default
+// (NewConfigProvider). Daemon wiring calls New — never NewConfigProvider
+// directly — so the gRPC backend activates with a single env var change and
+// no daemon code change.
 func New(db *sql.DB) Provider {
-	if factory != nil {
-		return factory(db)
+	endpoint := strings.TrimSpace(os.Getenv("ENTITLEMENTS_ENDPOINT"))
+	if endpoint == "" {
+		return NewConfigProvider(db)
 	}
-	return NewConfigProvider(db)
+
+	p, err := NewGRPCProvider(GRPCProviderOptions{
+		Endpoint:           endpoint,
+		BillingServiceSVID: strings.TrimSpace(os.Getenv("ENTITLEMENTS_BILLING_SVID")),
+		// WorkloadAPISocket defaults to "" → go-spiffe reads SPIFFE_ENDPOINT_SOCKET.
+	})
+	if err != nil {
+		// Fail-open: if we can't dial the billing service at startup
+		// (e.g. SPIRE agent not yet ready), log loudly and fall back to the
+		// OSS config provider so the daemon can still start. This matches
+		// the sandboxed_setec_adapter pattern (Req 5.4).
+		//
+		// We use slog.Default() directly here because New is called during
+		// daemon startup before the daemon's own logger is wired; slog is
+		// always initialised by the time daemon.Start() runs.
+		slog.Default().Warn(
+			"entitlements: failed to construct gRPC provider; falling back to config provider (fail-open)",
+			"endpoint", endpoint,
+			"error", err,
+		)
+		return NewConfigProvider(db)
+	}
+	return p
 }

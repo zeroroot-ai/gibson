@@ -47,9 +47,9 @@ func TestAdminProvisionTenant_MissingFields_InvalidArgument(t *testing.T) {
 	srv.platformDB = db
 
 	for _, req := range []*tenantv1.AdminProvisionTenantRequest{
-		{DisplayName: "Acme", OwnerEmail: "o@acme.test"},   // no tenant_id
-		{TenantId: "acme", OwnerEmail: "o@acme.test"},      // no display_name
-		{TenantId: "acme", DisplayName: "Acme"},            // no owner_email
+		{DisplayName: "Acme", OwnerEmail: "o@acme.test"}, // no tenant_id
+		{TenantId: "acme", OwnerEmail: "o@acme.test"},    // no display_name
+		{TenantId: "acme", DisplayName: "Acme"},          // no owner_email
 	} {
 		_, err := srv.AdminProvisionTenant(context.Background(), req)
 		requireGRPCStatus(t, err, codes.InvalidArgument)

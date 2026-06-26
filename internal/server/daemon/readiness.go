@@ -76,4 +76,3 @@ func (d *daemonImpl) newPlatformReadinessProbes() []pcreadiness.Probe {
 
 	return probes
 }
-
