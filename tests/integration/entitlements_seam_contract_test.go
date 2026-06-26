@@ -293,7 +293,7 @@ func TestEntitlementsSeam_BudgetEnforcerObservesProviderLimits(t *testing.T) {
 
 	// A call within the provider ceiling must be allowed.
 	_, err := enf.Check(ctx, tokenCeiling/2)
-	assert.NoError(t, err,
+	require.NoError(t, err,
 		"a call within the provider's MonthlyTokens ceiling must not be denied")
 
 	// A call that projects beyond the ceiling must be denied.
@@ -354,7 +354,7 @@ func TestEntitlementsSeam_FailOpenOnServerStop(t *testing.T) {
 
 	// Fail-open assertion: nil error + zero Limits (= unlimited on every dimension).
 	lim, err = p.Limits(ctx, tenant)
-	assert.NoError(t, err,
+	require.NoError(t, err,
 		"fail-open: provider must return nil error when the billing server is unreachable")
 	assert.Equal(t, entitlements.Limits{}, lim,
 		"fail-open: provider must return zero (unlimited) Limits when the billing server is unreachable")
