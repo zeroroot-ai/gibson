@@ -312,7 +312,3 @@ require (
 	sigs.k8s.io/structured-merge-diff/v6 v6.3.2 // indirect
 )
 
-// TEMPORARY: replace directive for development only — must be removed before merge.
-// This PR is blocked on sdk PR#63 (feat: add GetMissionDefinition RPC) merging
-// and the fan-out bump reaching this repo. The no-monorepo-shortcuts CI gate will
-// correctly block merge while this replace is present.

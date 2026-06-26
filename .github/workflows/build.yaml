@@ -76,6 +76,7 @@ jobs:
       # zeroroot-ai org's private Go modules (platform-sdk, platform-clients,
       # etc.). Same pattern as tenant-operator#176 / ext-authz#56.
       - name: Configure git for private modules
+        if: github.event.pull_request.head.repo.fork != true
         run: |
           git config --global \
             url."https://x-access-token:${{ secrets.GH_PAT_GIBSON_RO }}@github.com/".insteadOf \
