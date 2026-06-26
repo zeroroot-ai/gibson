@@ -7,7 +7,7 @@
 //
 //  1. auth-chain          — JWT → ext-authz → FGA → handler
 //  2. per-tenant isolation — write as tenant A, assert tenant B sees nothing
-//                            (guards the predicate-leak / IDOR class)
+//     (guards the predicate-leak / IDOR class)
 //  3. tenant-provision saga — step idempotency + rollback/teardown
 //  4. mission-run          — a mission is driven through the engine
 //  5. entitlements/billing-bypass — on-prem entitlement bypass + operator bypass

@@ -239,7 +239,7 @@ func TestRemoteToolDispatch_SystemToolAccessibleFromAnyTenant(t *testing.T) {
 		WorkID:   workID,
 		WorkType: "tool",
 		Payload:  mustMarshalJSON(t, httpxPayload{Target: "https://example.com"}),
-		Context: map[string]string{"tenant": "tenant-a"},
+		Context:  map[string]string{"tenant": "tenant-a"},
 		// Work is enqueued to the CALLER's tenant stream (work:tenant-a:tool:httpx),
 		// where the shared _system httpx worker claims it cross-tenant. httpx is
 		// registered under _system but work never lands on the _system stream —

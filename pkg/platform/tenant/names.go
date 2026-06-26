@@ -193,4 +193,3 @@ func (n Names) FGAObject() string {
 func (n Names) ZitadelOrgSlug() string {
 	return n.Slug()
 }
-

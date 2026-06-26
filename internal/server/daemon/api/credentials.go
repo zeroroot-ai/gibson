@@ -302,4 +302,3 @@ func maskAPIKey(key string) string {
 	suffix := key[len(key)-4:]
 	return prefix + "****" + suffix
 }
-

@@ -1,17 +1,17 @@
 // Package gibsond is the gibson daemon bootstrap, exported so both the OSS
-// entrypoint (cmd/gibson) and a hosted build that injects closed components
-// (the commercial billing repo, open-core Option A; ADR-0003/0054) can drive
-// the same daemon startup.
+// entrypoint (cmd/gibson) and hosted builds can drive the same daemon startup.
 //
-// A hosted build registers its closed providers before calling Run, e.g.:
+// The entitlements seam (ADR-0003/0054/gibson#1026/gibson#1028) is now a
+// runtime gRPC selection (Option B): when ENTITLEMENTS_ENDPOINT is set the
+// daemon calls the closed billing service's EntitlementsService over SPIFFE
+// mTLS; when unset it falls back to the OSS config-driven default. No
+// compile-time injection or Register call is needed — just set the env var in
+// the hosted Helm chart.
 //
-//	entitlements.Register(func(db *sql.DB) entitlements.Provider {
-//		return stripebilling.NewProvider(db, stripeClient, plans)
-//	})
 //	os.Exit(gibsond.Run(ctx, os.Args[1:], os.Stdout, os.Stderr))
 //
-// OSS gibson never registers anything, so Run starts the daemon with the
-// config-driven Entitlements default and zero plan/Stripe knowledge.
+// OSS gibson never sets ENTITLEMENTS_ENDPOINT, so Run starts the daemon with
+// the config-driven Entitlements default and zero plan/Stripe knowledge.
 package gibsond
 
 import (

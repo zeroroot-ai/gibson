@@ -718,20 +718,20 @@ func main() {
 		}
 		setupLog.Info("operator-pull tenant provisioning enabled (drains daemon pending queue)")
 
-			// Operator-pull admin tenant CRUD (gibson#964, enables dashboard#855):
-			// drain the daemon's admin tenant-op queue and apply each op
-			// (provision/update/delete) to the Tenant CR. Reuses the same
-			// SPIFFE-mTLS daemon client; the daemon never touches Kubernetes
-			// (ADR-0023). This replaces the dashboard's last direct Tenant-CR
-			// writes (app/actions/crd/tenant.ts).
-			if err := (&controller.TenantAdminOpsRunnable{
-				Client: mgr.GetClient(),
-				Daemon: grpcClient,
-			}).SetupWithManager(mgr); err != nil {
-				setupLog.Error(err, "Failed to register tenant-admin-ops runnable")
-				os.Exit(1)
-			}
-			setupLog.Info("operator-pull admin tenant CRUD enabled (drains daemon admin-op queue)")
+		// Operator-pull admin tenant CRUD (gibson#964, enables dashboard#855):
+		// drain the daemon's admin tenant-op queue and apply each op
+		// (provision/update/delete) to the Tenant CR. Reuses the same
+		// SPIFFE-mTLS daemon client; the daemon never touches Kubernetes
+		// (ADR-0023). This replaces the dashboard's last direct Tenant-CR
+		// writes (app/actions/crd/tenant.ts).
+		if err := (&controller.TenantAdminOpsRunnable{
+			Client: mgr.GetClient(),
+			Daemon: grpcClient,
+		}).SetupWithManager(mgr); err != nil {
+			setupLog.Error(err, "Failed to register tenant-admin-ops runnable")
+			os.Exit(1)
+		}
+		setupLog.Info("operator-pull admin tenant CRUD enabled (drains daemon admin-op queue)")
 	} else {
 		setupLog.Info("GIBSON_DAEMON_GRPC_ADDRESS unset; DaemonGRPC saga capability unbound; operator-pull tenant provisioning disabled")
 	}

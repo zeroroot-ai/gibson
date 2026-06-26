@@ -254,7 +254,6 @@ var _ AgentHarness = (*MiddlewareHarness)(nil)
 //
 // var _ sdkagent.Harness = (*MiddlewareHarness)(nil)
 
-
 // Workspace returns the primary workspace from the inner harness.
 // Returns nil if workspaces are not configured.
 func (h *MiddlewareHarness) Workspace() workspace.Workspace {

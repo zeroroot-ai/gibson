@@ -65,4 +65,3 @@ func (d *daemonImpl) GetOTelContentLoggingConfig() *observability.ContentLogging
 	}
 	return d.infrastructure.otelStack.ContentConfig
 }
-
