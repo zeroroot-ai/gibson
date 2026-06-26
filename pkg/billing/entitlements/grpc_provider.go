@@ -47,9 +47,11 @@ type GRPCProviderOptions struct {
 	// slog.Default() when nil.
 	Logger *slog.Logger
 
-	// dialConn is a pre-dialed connection for tests. When non-nil, the
+	// DialConn is a pre-dialed connection for tests. When non-nil, the
 	// X509Source / SPIFFE dial path is skipped entirely.
-	dialConn grpc.ClientConnInterface
+	// Use this in tests to inject an insecure loopback connection; leave
+	// it nil in production — the SPIFFE mTLS path is used instead.
+	DialConn grpc.ClientConnInterface
 }
 
 // grpcProvider is a caching Provider that calls EntitlementsService/GetLimits
@@ -103,8 +105,8 @@ func NewGRPCProvider(opts GRPCProviderOptions) (Provider, error) {
 	}
 
 	// Tests may inject a pre-dialed connection to avoid the SPIRE path.
-	if opts.dialConn != nil {
-		p.client = entitlementsv1.NewEntitlementsServiceClient(opts.dialConn)
+	if opts.DialConn != nil {
+		p.client = entitlementsv1.NewEntitlementsServiceClient(opts.DialConn)
 		return p, nil
 	}
 
