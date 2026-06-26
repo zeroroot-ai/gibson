@@ -1,9 +1,6 @@
-/*
-Copyright 2026 Zero Day AI.
-
-Licensed under the Apache License, Version 2.0 (the "License");
-you may not use this file except in compliance with the License.
-*/
+// Copyright 2026 Zero Day AI, Inc.
+// Use of this source code is governed by the Elastic License 2.0
+// that can be found in the LICENSE file in the repo root.
 
 // Package rbac implements the per-tenant RBAC backfill that previously
 // ran as a standalone CLI (cmd/backfill-rbac/) under a Helm pre-upgrade
