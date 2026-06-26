@@ -418,6 +418,21 @@ proto: proto-deps authz-registry
 	@rsync -a --include='*/' --include='*.pb.go' --exclude='*' \
 	  .tmp/proto-ws/out/internal/server/daemon/api/ internal/server/daemon/api/
 	@rm -rf .tmp/proto-ws
+	@echo "Generating Go code from pkg/billing/entitlements/v1 proto files via Buf..."
+	@# The entitlements proto has no cross-tree imports (it does NOT import
+	@# gibson/auth/v1/options.proto — this RPC is daemon→billing SPIFFE mTLS,
+	@# not Envoy-routed, so no authz annotation is needed). A standalone
+	@# workspace suffices; no SDK symlink is required. The generated stubs
+	@# land under pkg/ so the external billing module can import them without
+	@# violating Go's internal/ restriction (gibson#1027).
+	@rm -rf .tmp/ent-ws && mkdir -p .tmp/ent-ws/out && \
+	  ln -sfn $(CURDIR)/pkg/billing/entitlements/v1 .tmp/ent-ws/entitlements-proto && \
+	  printf 'version: v2\nmodules:\n  - path: entitlements-proto\nlint:\n  use:\n    - STANDARD\n' > .tmp/ent-ws/buf.yaml && \
+	  printf 'version: v2\nmanaged:\n  enabled: true\n  disable:\n    - file_option: go_package\nplugins:\n  - local: protoc-gen-go\n    out: out\n    opt:\n      - module=github.com/zeroroot-ai/gibson\n  - local: protoc-gen-go-grpc\n    out: out\n    opt:\n      - module=github.com/zeroroot-ai/gibson\ninputs:\n  - directory: entitlements-proto\n' > .tmp/ent-ws/buf.gen.yaml && \
+	  cd .tmp/ent-ws && $(BUF) generate
+	@rsync -a --include='*/' --include='*.pb.go' --exclude='*' \
+	  .tmp/ent-ws/out/pkg/billing/entitlements/v1/ pkg/billing/entitlements/v1/
+	@rm -rf .tmp/ent-ws
 	@echo "Proto generation complete"
 
 # authz-registry: regenerate the three authz artifacts (registry.go, registry.yaml,
