@@ -124,7 +124,7 @@ func TestRemoteToolDispatch_AgentCallsToolViaWorkQueue(t *testing.T) {
 		WorkID:    workID,
 		WorkType:  "tool",
 		Payload:   mustMarshalJSON(t, nmapRequest{Targets: []string{"192.168.1.1"}}),
-		Context:   map[string]string{"tenant": "_system"},
+		Context:   map[string]string{"tenant": "acme"},
 		TimeoutMs: 5000,
 	}
 
@@ -139,7 +139,13 @@ func TestRemoteToolDispatch_AgentCallsToolViaWorkQueue(t *testing.T) {
 	go func() {
 		defer wg.Done()
 
-		msgID, enqErr := queue.Enqueue(ctx, "_system", "tool", "nmap", workItem)
+		// A caller in tenant "acme" invokes the _system-registered nmap tool. Work
+		// is enqueued to the CALLER's tenant stream (work:acme:tool:nmap), exactly
+		// as the harness does (callToolViaWorkQueue uses the caller's tenant). The
+		// shared _system nmap worker claims it cross-tenant below. Enqueuing to the
+		// _system stream itself would never be claimed — claimCrossTenant scans
+		// tenant streams and excludes _system (gibson#1016).
+		msgID, enqErr := queue.Enqueue(ctx, "acme", "tool", "nmap", workItem)
 		if enqErr != nil {
 			harnessErr = fmt.Errorf("enqueue: %w", enqErr)
 			return
@@ -233,9 +239,11 @@ func TestRemoteToolDispatch_SystemToolAccessibleFromAnyTenant(t *testing.T) {
 		WorkID:   workID,
 		WorkType: "tool",
 		Payload:  mustMarshalJSON(t, httpxPayload{Target: "https://example.com"}),
-		Context:  map[string]string{"tenant": "tenant-a"},
-		// Work is enqueued against _system stream because that is where httpx is
-		// registered; the context carries the originating tenant for audit purposes.
+		Context: map[string]string{"tenant": "tenant-a"},
+		// Work is enqueued to the CALLER's tenant stream (work:tenant-a:tool:httpx),
+		// where the shared _system httpx worker claims it cross-tenant. httpx is
+		// registered under _system but work never lands on the _system stream —
+		// claimCrossTenant scans tenant streams and excludes _system (gibson#1016).
 		TimeoutMs: 5000,
 	}
 
@@ -250,7 +258,7 @@ func TestRemoteToolDispatch_SystemToolAccessibleFromAnyTenant(t *testing.T) {
 	go func() {
 		defer wg.Done()
 
-		msgID, enqErr := queue.Enqueue(tenantCtx, "_system", "tool", "httpx", workItem)
+		msgID, enqErr := queue.Enqueue(tenantCtx, "tenant-a", "tool", "httpx", workItem)
 		if enqErr != nil {
 			harnessErr = fmt.Errorf("enqueue: %w", enqErr)
 			return

@@ -34,8 +34,20 @@ func setupFGAContainer(t *testing.T, ctx context.Context) (testcontainers.Contai
 	}
 
 	// OpenFGA with SQLite memory store (no external Postgres needed in CI).
+	//
+	// Pinned to the version the platform actually deploys
+	// (enterprise/deploy/helm/gibson-workloads/values.yaml: openfga tag), NOT
+	// `:latest`. A floating `:latest` silently broke the suite (gibson#1016):
+	// newer OpenFGA tightened object-id validation and rejected the colon-
+	// delimited secret ids the model uses (`secret:tenant-<id>:<name>`), so
+	// every can_resolve write failed for an "invalid object format" reason —
+	// making the type-restriction assertions pass spuriously and the
+	// plugin_principal-allowed write fail. Pinning to the deployed version keeps
+	// the test validating against the real OpenFGA behaviour. Bump in lockstep
+	// with the Helm chart's openfga image tag.
+	const openFGAImage = "openfga/openfga:v1.8.4"
 	req := testcontainers.ContainerRequest{
-		Image:        "openfga/openfga:latest",
+		Image:        openFGAImage,
 		Cmd:          []string{"run", "--datastore-engine", "memory"},
 		ExposedPorts: []string{"8080/tcp"},
 		WaitingFor: wait.ForAll(

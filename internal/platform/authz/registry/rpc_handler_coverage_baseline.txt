@@ -93,7 +93,6 @@
 /gibson.harness.v1.HarnessCallbackService/WorkspacePush
 /gibson.harness.v1.HarnessCallbackService/WorkspaceReadFile
 /gibson.harness.v1.HarnessCallbackService/WorkspaceWriteFile
-/gibson.plugin.v1.PluginInvokeService/PluginInvoke
 /gibson.tenant.v1.BudgetService/GetTenantBudgetDefaults
 /gibson.tenant.v1.BudgetService/ListBudgetStatus
 /gibson.tenant.v1.BudgetService/ListBudgets
