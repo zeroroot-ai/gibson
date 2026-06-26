@@ -1,0 +1,77 @@
+syntax = "proto3";
+
+// Package gibson.billing.entitlements.v1 defines the EntitlementsService —
+// the gRPC network seam between the OSS gibson daemon and the closed
+// commercial billing service.
+//
+// Architecture context (ADR-0003 / ADR-0054 / gibson#1026 / gibson#1027):
+// The entitlements seam converts from compile-time injection (Option A,
+// billing repo imports gibson's pkg/billing/entitlements.Provider) to a
+// runtime gRPC call (Option B). The OSS daemon ships a config-gated caching
+// gRPC client (EntitlementsServiceClient); the closed billing repo ships a
+// small server (EntitlementsServiceServer) that derives limits from the plan
+// + Stripe subscription state.
+//
+// Boundary rules:
+//   - This proto lives under pkg/ (not internal/) so the external
+//     github.com/zeroroot-ai/billing module can import the generated stubs
+//     to implement the server side without violating Go's internal/ import
+//     restriction.
+//   - gibson NEVER imports github.com/zeroroot-ai/billing. The boundary is
+//     strictly one-way: billing → gibson/pkg/billing/entitlements/v1.
+//   - This RPC is daemon→billing over SPIFFE mTLS. It is NOT routed through
+//     Envoy / ext-authz, so no (gibson.auth.v1.authz) annotation is needed
+//     and this file is NOT included in the authz-registry codegen pipeline.
+package gibson.billing.entitlements.v1;
+
+option go_package = "github.com/zeroroot-ai/gibson/pkg/billing/entitlements/v1;entitlementsv1";
+
+// EntitlementsService answers "what are this tenant's resource limits?" for
+// the OSS daemon. The daemon calls GetLimits on each enforcement decision;
+// the billing service derives the answer from the tenant's plan + subscription
+// state. A missing or unreachable billing service causes the daemon to fall
+// back to the UnlimitedProvider (fail-open, matching OSS behaviour).
+service EntitlementsService {
+  // GetLimits returns the resource ceilings for the given tenant. The billing
+  // service derives these from the tenant's active plan + subscription. A
+  // tenant with no active subscription or on a free plan returns zero on every
+  // field (unlimited). The daemon caches the result with a configurable TTL
+  // (default 60 s) to minimise round-trips on high-frequency enforcement
+  // points (concurrency checks, budget checks).
+  rpc GetLimits(GetLimitsRequest) returns (Limits);
+}
+
+// GetLimitsRequest identifies the tenant whose limits are being queried.
+message GetLimitsRequest {
+  // tenant_id is the canonical tenant slug / identifier used throughout gibson
+  // (matches the Tenant CR name, FGA object, and the x-gibson-tenant header).
+  string tenant_id = 1;
+}
+
+// Limits is the plan-agnostic set of resource ceilings the OSS runtime
+// enforces for one tenant. Field semantics match pkg/billing/entitlements.Limits
+// exactly: a zero value on any field means "unlimited on that dimension" —
+// callers interpret absence as no enforcement.
+//
+// The struct carries no plan name, tier, or payment state; the billing
+// service has already reduced whatever policy applies to bare numbers.
+message Limits {
+  // concurrent_missions caps simultaneously-running missions. 0 = unlimited.
+  int32 concurrent_missions = 1;
+
+  // concurrent_agents caps agents bound to in-flight tasks. 0 = unlimited.
+  int32 concurrent_agents = 2;
+
+  // concurrent_connectors caps running hosted MCP connector instances.
+  // 0 = unlimited.
+  int32 concurrent_connectors = 3;
+
+  // monthly_tokens is the per-tenant default token ceiling per billing
+  // period, consumed by the budget enforcer as the tenant-scope default
+  // when no explicit admin-set tenant budget exists. 0 = unlimited.
+  int64 monthly_tokens = 4;
+
+  // monthly_spend_usd_cents is the per-tenant default LLM-spend ceiling per
+  // billing period, in USD cents. 0 = unlimited.
+  int64 monthly_spend_usd_cents = 5;
+}
