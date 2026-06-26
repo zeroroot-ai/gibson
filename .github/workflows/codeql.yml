@@ -43,6 +43,7 @@ jobs:
       # insteadOf rule is more robust than .netrc because it rewrites
       # URLs at the git layer regardless of which subprocess invokes git.
       - name: Configure git for private modules
+        if: github.event.pull_request.head.repo.fork != true
         run: |
           git config --global \
             url."https://x-access-token:${{ secrets.GH_PAT_GIBSON_RO }}@github.com/".insteadOf \

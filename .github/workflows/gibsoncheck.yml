@@ -54,6 +54,7 @@ jobs:
       # authz-registry`) all pick it up uniformly — the .netrc /
       # credential-helper approach previously used here was intermittent.
       - name: Configure git for private modules
+        if: github.event.pull_request.head.repo.fork != true
         run: |
           git config --global \
             url."https://x-access-token:${{ secrets.GH_PAT_GIBSON_RO }}@github.com/".insteadOf \
@@ -122,6 +123,7 @@ jobs:
       - uses: actions/checkout@v4
 
       - name: Configure git for private modules
+        if: github.event.pull_request.head.repo.fork != true
         run: |
           git config --global \
             url."https://x-access-token:${{ secrets.GH_PAT_GIBSON_RO }}@github.com/".insteadOf \
@@ -154,6 +156,7 @@ jobs:
       - uses: actions/checkout@v4
 
       - name: Configure git for private modules
+        if: github.event.pull_request.head.repo.fork != true
         run: |
           git config --global \
             url."https://x-access-token:${{ secrets.GH_PAT_GIBSON_RO }}@github.com/".insteadOf \

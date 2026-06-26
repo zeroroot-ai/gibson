@@ -57,6 +57,7 @@ jobs:
       # Configure git credentials BEFORE setup-go so private module download
       # works (same pattern as build.yaml / gibsoncheck.yml).
       - name: Configure git for private modules
+        if: github.event.pull_request.head.repo.fork != true
         run: |
           git config --global \
             url."https://x-access-token:${{ secrets.GH_PAT_GIBSON_RO }}@github.com/".insteadOf \
