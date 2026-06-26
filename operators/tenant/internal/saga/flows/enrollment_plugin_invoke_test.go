@@ -116,7 +116,7 @@ func TestPluginCanInvokeStep_Plugin_WritesExactlyOneTuple(t *testing.T) {
 	}
 	got := stub.written[0]
 	wantUser := "tenant:tenant-acme#member"
-	wantObj := fmt.Sprintf("plugin:tenant-acme/%s", ae.Spec.AgentName)
+	wantObj := "plugin:tenant-acme/" + ae.Spec.AgentName
 	if got.User != wantUser {
 		t.Errorf("tuple User = %q, want %q", got.User, wantUser)
 	}
