@@ -376,6 +376,18 @@ func (d *daemonImpl) buildGRPCServer(ctx context.Context) (*grpcSubsystem, error
 			"/gibson.daemon.operator.v1.DaemonOperatorService/ListPendingTenantProvisioning": true,
 			"/gibson.daemon.operator.v1.DaemonOperatorService/AckTenantProvisioned":          true,
 			"/gibson.daemon.operator.v1.DaemonOperatorService/ReportTenantStatus":            true,
+			// tenant_admin_ops queue drain (migration 018). The operator's
+			// admin-ops runnable (operators/tenant tenant_admin_ops_controller)
+			// drains the queue via ListPendingTenantOps and acks each via
+			// AckTenantOp over this same SPIFFE direct-path. Both RPCs were added
+			// but — once again — this allowlist was not updated (the identical
+			// omission documented for SetTenantZitadelOrg and the operator-pull
+			// RPCs above), so the drain pass failed "unauthorized" every tick and
+			// the founding-owner membership op never applied, leaving signup stuck
+			// at "Still setting up your workspace, we'll email you" while the
+			// Tenant CR was otherwise Ready.
+			"/gibson.daemon.operator.v1.DaemonOperatorService/ListPendingTenantOps": true,
+			"/gibson.daemon.operator.v1.DaemonOperatorService/AckTenantOp":          true,
 		},
 	}
 	spiffePlatformBypass := func(ctx context.Context, method string) (context.Context, bool, error) {
