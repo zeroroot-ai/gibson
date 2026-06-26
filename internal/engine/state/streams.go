@@ -823,16 +823,21 @@ func (c *StateClient) StreamSubscribe(ctx context.Context, stream, lastID string
 
 	entryChan := make(chan StreamEntry, 10) // Buffer to prevent blocking
 
+	// readResult carries the outcome of one blocking StreamRead so the
+	// subscription goroutine can select on it against ctx.Done().
+	type readResult struct {
+		entries map[string][]StreamEntry
+		err     error
+	}
+
 	go func() {
 		defer close(entryChan)
 
 		currentID := lastID
 
 		for {
-			select {
-			case <-ctx.Done():
+			if ctx.Err() != nil {
 				return
-			default:
 			}
 
 			// Read new entries with blocking
@@ -842,13 +847,30 @@ func (c *StateClient) StreamSubscribe(ctx context.Context, stream, lastID string
 				Count:  100,             // Read up to 100 entries at once
 			}
 
-			entries, err := c.StreamRead(ctx, []string{stream}, opts)
-			if err != nil {
+			// Run the blocking read in a child goroutine and select on its
+			// result against ctx.Done(), so a cancelled subscription closes
+			// entryChan PROMPTLY instead of waiting up to Block for the read to
+			// return (gibson#924 — go-redis v9's blocking commands do not
+			// reliably honour mid-block context cancellation, hence the inline
+			// deadline in StreamRead). The child always returns within
+			// Block+deadline and resCh is buffered, so it never leaks or blocks.
+			resCh := make(chan readResult, 1)
+			go func() {
+				entries, err := c.StreamRead(ctx, []string{stream}, opts)
+				resCh <- readResult{entries: entries, err: err}
+			}()
+
+			var res readResult
+			select {
+			case <-ctx.Done():
+				return
+			case res = <-resCh:
+			}
+
+			if res.err != nil {
 				// Check if context was cancelled
-				select {
-				case <-ctx.Done():
+				if ctx.Err() != nil {
 					return
-				default:
 				}
 
 				// Log and continue to next iteration. Per-command retries are
@@ -858,7 +880,7 @@ func (c *StateClient) StreamSubscribe(ctx context.Context, stream, lastID string
 			}
 
 			// Process entries
-			streamEntries, ok := entries[stream]
+			streamEntries, ok := res.entries[stream]
 			if !ok || len(streamEntries) == 0 {
 				// No new entries, continue blocking read
 				continue
