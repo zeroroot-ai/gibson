@@ -36,7 +36,7 @@ concurrency:
 
 jobs:
   coverage:
-    runs-on: ubuntu-latest
+    runs-on: [self-hosted, gibson]
     name: coverage gates (floor + diff)
     services:
       redis:

@@ -47,7 +47,7 @@ jobs:
     # the SDK and unit-test paths still depend on the disabled stub at
     # `internal/server/daemon/sandboxed_setec_disabled.go`.
     name: Test (build_tags=${{ matrix.build_tags || 'empty' }})
-    runs-on: ubuntu-latest
+    runs-on: [self-hosted, gibson]
     services:
       redis:
         image: redis/redis-stack-server:7.4.0-v1
@@ -110,6 +110,7 @@ jobs:
     # Gate the image build on passing tests. The reusable workflow handles
     # build → push → cosign sign → SBOM attest → Trivy scan.
     needs: [test]
+    if: github.event_name != 'pull_request'  # gibson#1024-cost: build images on merge only
     uses: zeroroot-ai/.github/.github/workflows/reusable-image-build.yml@main
     permissions:
       contents: write

@@ -19,7 +19,7 @@ permissions:
 jobs:
   govulncheck:
     name: govulncheck
-    runs-on: ubuntu-latest
+    runs-on: [self-hosted, gibson]
     timeout-minutes: 15
     env:
       # govulncheck walks the full transitive go.mod graph; private

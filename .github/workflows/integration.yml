@@ -37,7 +37,7 @@ concurrency:
 
 jobs:
   critical-paths:
-    runs-on: ubuntu-latest
+    runs-on: [self-hosted, gibson]
     name: critical-path manifest guard
     env:
       GOPRIVATE: github.com/zeroroot-ai/*
@@ -57,7 +57,7 @@ jobs:
         run: make check-critical-paths
 
   integration:
-    runs-on: ubuntu-latest
+    runs-on: [self-hosted, gibson]
     name: integration suite (testcontainers + envtest)
     # Docker is available on ubuntu-latest; testcontainers starts the backing
     # stores in-process per test (same pattern as fga-smoke-test.yml).

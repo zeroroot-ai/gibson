@@ -34,7 +34,7 @@ concurrency:
 
 jobs:
   analyze:
-    runs-on: ubuntu-latest
+    runs-on: [self-hosted, gibson]
     env:
       # GOPRIVATE tells the Go toolchain to skip the public proxy and
       # checksum database for private zeroroot-ai modules and fetch them
@@ -92,7 +92,7 @@ jobs:
           ./bin/gibsoncheck -forbidrawstoreimports ./internal/... ./cmd/...
 
   migration-guards:
-    runs-on: ubuntu-latest
+    runs-on: [self-hosted, gibson]
     name: Migration build guards
     steps:
       - uses: actions/checkout@v4
@@ -108,7 +108,7 @@ jobs:
         run: bash scripts/check-no-redis-prefix.sh
 
   rpc-test-walker:
-    runs-on: ubuntu-latest
+    runs-on: [self-hosted, gibson]
     name: per-RPC test walker
     # Spec: gibson#793 (E3 / QUALITY-BARS §4). Fails if any registered gRPC RPC
     # is not authz-enforceable, or lacks a handler test and is not in the
@@ -140,7 +140,7 @@ jobs:
         run: make check-rpc-test-walker
 
   authz-registry-drift:
-    runs-on: ubuntu-latest
+    runs-on: [self-hosted, gibson]
     name: authz-registry drift gate
     # Spec: private-authz-registry NFR Reliability.
     # Regenerates internal/platform/authz/registry/ from the SDK protos pinned in go.mod

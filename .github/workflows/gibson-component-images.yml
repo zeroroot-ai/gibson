@@ -38,6 +38,7 @@ jobs:
           - component: spiffe-jwks-exporter
             dockerfile: build/spiffe-jwks-exporter.Dockerfile
             image: ghcr.io/zeroroot-ai/spiffe-jwks-exporter
+    if: github.event_name != 'pull_request'  # gibson#1024-cost: build images on merge only
     uses: zeroroot-ai/.github/.github/workflows/reusable-image-build.yml@main
     permissions:
       contents: write
