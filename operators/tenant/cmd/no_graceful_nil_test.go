@@ -148,11 +148,11 @@ func TestNoGracefulNilInRequestPaths(t *testing.T) {
 		"internal/dataplane/pipeline.go:393": dpReq,
 
 		// internal/clients/* — HTTP unmarshal helpers (caller passes out=nil to discard body)
-		"internal/clients/fga/http.go:238":                  httpDiscard,
-		"internal/clients/zitadel/client.go:506":            httpDiscard,
-		"internal/clients/vault/client.go:389":              httpDiscard,
-		"internal/clients/vault/transit.go:270":             httpDiscard,
-		"internal/clients/signupprogress/redis.go:95":       ctorGuard,
+		"internal/clients/fga/http.go:232":                  httpDiscard,
+		"internal/clients/zitadel/client.go:494":            httpDiscard,
+		"internal/clients/vault/client.go:383":              httpDiscard,
+		"internal/clients/vault/transit.go:264":             httpDiscard,
+		"internal/clients/signupprogress/redis.go:89":       ctorGuard,
 		"internal/provision/entitlements_grpc_client.go:85": ctorGuard,
 
 		// Controller-runtime patterns
@@ -171,7 +171,7 @@ func TestNoGracefulNilInRequestPaths(t *testing.T) {
 		"internal/controller/tenantgrants_controller.go:228":         recorderOpt,
 
 		// Audit emitter + health probes
-		"internal/audit/emitter.go:210":    emitterOpt,
+		"internal/audit/emitter.go:204":    emitterOpt,
 		"internal/health/downstream.go:90": healthShim,
 
 		// Saga runner — k8s API may return nil maps from a freshly created object
