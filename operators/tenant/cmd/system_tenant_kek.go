@@ -1,9 +1,6 @@
-/*
-Copyright 2026 Zero Day AI.
-
-Licensed under the Apache License, Version 2.0 (the "License");
-you may not use this file except in compliance with the License.
-*/
+// Copyright 2026 Zero Day AI, Inc.
+// Use of this source code is governed by the Elastic License 2.0
+// that can be found in the LICENSE file in the repo root.
 
 // system_tenant_kek.go — load the system-tenant KEK from either a file
 // (preferred — works for both base64-text and raw-bytes Secret values)
