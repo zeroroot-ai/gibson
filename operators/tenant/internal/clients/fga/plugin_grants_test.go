@@ -68,8 +68,8 @@ func TestPluginCanInvokeTuple_Shape(t *testing.T) {
 	}
 	// Object format must match `tenant_and_field('PluginName')` deriver
 	// output: <object_type>:<tenant>:<field_value>
-	if got.Object != "plugin:acme:gitlab" {
-		t.Errorf("Object = %q, want %q", got.Object, "plugin:acme:gitlab")
+	if got.Object != "plugin:acme/gitlab" {
+		t.Errorf("Object = %q, want %q", got.Object, "plugin:acme/gitlab")
 	}
 }
 

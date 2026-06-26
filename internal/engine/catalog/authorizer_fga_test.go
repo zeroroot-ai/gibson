@@ -53,8 +53,8 @@ func TestFGAAuthorizerMCPMapsToPluginCanInvoke(t *testing.T) {
 	}
 	// The exact triple is the contract: the same check that gates the
 	// PluginInvoke dispatch, on the tenant-qualified plugin object.
-	if fga.user != "user:alice" || fga.relation != "can_invoke" || fga.object != "plugin:acme:gitlab" {
-		t.Fatalf("Check(%q, %q, %q), want (user:alice, can_invoke, plugin:acme:gitlab)",
+	if fga.user != "user:alice" || fga.relation != "can_invoke" || fga.object != "plugin:acme/gitlab" {
+		t.Fatalf("Check(%q, %q, %q), want (user:alice, can_invoke, plugin:acme/gitlab)",
 			fga.user, fga.relation, fga.object)
 	}
 }

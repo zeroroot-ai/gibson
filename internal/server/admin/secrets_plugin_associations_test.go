@@ -47,7 +47,7 @@ func TestFGASecretsPluginAssociations_PluginsBoundTo(t *testing.T) {
 	if err != nil {
 		t.Fatalf("PluginsBoundTo: %v", err)
 	}
-	wantObj := fmt.Sprintf("secret:tenant-%s:%s", tenant, "cred:openai-prod")
+	wantObj := fmt.Sprintf("secret:tenant-%s/%s", tenant, "cred:openai-prod")
 	if rec.gotObjectType != "secret" || rec.gotRelation != "can_resolve" {
 		t.Errorf("objectType/relation = %q/%q, want secret/can_resolve", rec.gotObjectType, rec.gotRelation)
 	}

@@ -42,7 +42,7 @@ func (f *FGASecretsPluginAssociations) PluginsBoundTo(ctx context.Context, tenan
 		return nil, nil
 	}
 	ref := callerName(secretName)
-	object := fmt.Sprintf("secret:tenant-%s:%s", tenant, ref)
+	object := fmt.Sprintf("secret:tenant-%s/%s", tenant, ref)
 	users, err := f.authorizer.ListUsers(ctx, "secret", object, "can_resolve")
 	if err != nil {
 		return nil, fmt.Errorf("secrets admin: list can_resolve users for %q: %w", object, err)

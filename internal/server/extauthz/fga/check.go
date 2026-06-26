@@ -378,7 +378,12 @@ func resolveObject(entry Entry, identity headers.Identity, meta map[string]strin
 		field := strings.Trim(strings.TrimPrefix(strings.TrimPrefix(entry.ObjectDeriver, "tenant_and_field"), "from_field"), "()'\"")
 		if v := meta[field]; v != "" {
 			if strings.HasPrefix(entry.ObjectDeriver, "tenant_and_field") {
-				return entry.ObjectType + ":" + tenant + ":" + v, nil
+				// Join tenant and field with "/" — NOT ":". OpenFGA rejects an
+				// object id that contains a colon ("invalid 'object' field
+				// format") on both Write and Check, so "type:tenant:field" is
+				// invalid. Must match authz.PluginObject and the daemon/operator
+				// writers (authz.TenantQualifiedSep). See gibson#1024.
+				return entry.ObjectType + ":" + tenant + "/" + v, nil
 			}
 			return entry.ObjectType + ":" + v, nil
 		}

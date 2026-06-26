@@ -9,7 +9,7 @@ func TestComponentObject(t *testing.T) {
 }
 
 func TestPluginObject(t *testing.T) {
-	if got := PluginObject("acme", "gitlab"); got != "plugin:acme:gitlab" {
+	if got := PluginObject("acme", "gitlab"); got != "plugin:acme/gitlab" {
 		t.Fatalf("PluginObject(acme, gitlab) = %q", got)
 	}
 }
@@ -27,7 +27,8 @@ func TestCanonicalComponentResource(t *testing.T) {
 		{"already canonical", "component:nmap", "component:nmap"},
 		{"legacy kind-qualified object", "component:tool:nmap", "component:nmap"},
 		{"legacy kind-qualified object plugin", "component:plugin:gitlab", "component:gitlab"},
-		{"typed plugin object untouched", "plugin:acme:gitlab", "plugin:acme:gitlab"},
+		{"typed plugin object (colon-free) untouched", "plugin:acme/gitlab", "plugin:acme/gitlab"},
+		{"legacy colon typed plugin object untouched", "plugin:acme:gitlab", "plugin:acme:gitlab"},
 		{"other typed ref untouched", "mission:abc-123", "mission:abc-123"},
 		{"hyphenated name", "nmap-agent", "component:nmap-agent"},
 		{"component name with hyphen and kind", "tool:web-scanner", "component:web-scanner"},
