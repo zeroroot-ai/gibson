@@ -33,6 +33,7 @@ import (
 	"google.golang.org/grpc/status"
 	"google.golang.org/protobuf/proto"
 
+	"github.com/zeroroot-ai/gibson/internal/engine/harness/dispatchpolicy"
 	pluginpb "github.com/zeroroot-ai/sdk/api/gen/gibson/plugin/v1"
 	"github.com/zeroroot-ai/sdk/auth"
 )
@@ -64,17 +65,24 @@ type PluginInvokeService struct {
 
 	// logger is the structured logger for handler operations.
 	logger *slog.Logger
+
+	// deploymentShape is the untrusted-execution isolation policy (ADR-0010 /
+	// gibson#997), from GIBSON_UNTRUSTED_EXEC. The zero value (ShapeSetecOnly)
+	// fail-closes: an unwired service denies untrusted plugin invocation.
+	deploymentShape dispatchpolicy.DeploymentShape
 }
 
 // NewPluginInvokeService constructs a PluginInvokeService.
-// registry must not be nil.
-func NewPluginInvokeService(registry ComponentInstallRegistry, logger *slog.Logger) *PluginInvokeService {
+// registry must not be nil. shape is the daemon's untrusted-execution
+// deployment shape; the zero value (ShapeSetecOnly) fail-closes.
+func NewPluginInvokeService(registry ComponentInstallRegistry, shape dispatchpolicy.DeploymentShape, logger *slog.Logger) *PluginInvokeService {
 	if logger == nil {
 		logger = slog.Default()
 	}
 	return &PluginInvokeService{
-		registry: registry,
-		logger:   logger.With("service", "PluginInvokeService"),
+		registry:        registry,
+		logger:          logger.With("service", "PluginInvokeService"),
+		deploymentShape: shape,
 	}
 }
 
@@ -170,6 +178,24 @@ func (s *PluginInvokeService) PluginInvoke(
 		return pluginErrorResponse(
 			pluginpb.PluginError_PLUGIN_ERROR_KIND_METHOD_NOT_FOUND,
 			fmt.Sprintf("method %q not declared by plugin %s", method, componentName),
+		), nil
+	}
+
+	// 5b. Dispatch-policy gate (ADR-0010 / gibson#997). PluginInvoke dispatches
+	//     in-process via the work queue; there is no sandboxed plugin dispatch.
+	//     An UNTRUSTED plugin therefore must not execute under the hosted
+	//     setec-only shape — deny before dispatch, no in-process fallback. All
+	//     installs of one plugin_name share a manifest within a deployment, so
+	//     the first install's trust classification is authoritative. Mirrors
+	//     harness.CallToolProto's gate.
+	if dispatchpolicy.Decide(installs[0].ContentTrust, false, s.deploymentShape) == dispatchpolicy.Deny {
+		s.logger.WarnContext(ctx, "PluginInvoke: denied untrusted plugin with no sandboxed dispatch",
+			slog.String("tenant", tenantStr),
+			slog.String("plugin", componentName),
+		)
+		return pluginErrorResponse(
+			pluginpb.PluginError_PLUGIN_ERROR_KIND_UNAUTHORIZED,
+			fmt.Sprintf("plugin %s is untrusted but has no sandboxed dispatch; GIBSON_UNTRUSTED_EXEC=setec-only forbids in-process execution", componentName),
 		), nil
 	}
 

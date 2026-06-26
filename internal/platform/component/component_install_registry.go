@@ -30,6 +30,7 @@ import (
 	"github.com/google/uuid"
 	"github.com/redis/go-redis/v9"
 
+	componentpb "github.com/zeroroot-ai/sdk/api/gen/gibson/component/v1"
 	"github.com/zeroroot-ai/sdk/auth"
 )
 
@@ -85,6 +86,29 @@ type ComponentInstall struct {
 	RuntimeMode string
 	// SetecRequired is true when the manifest declares spec.policy.setec_required.
 	SetecRequired bool
+	// ContentTrust classifies the trust level of input this component processes
+	// at call time (ADR-0010 / gibson#997). Sourced from the plugin:content_trust
+	// registration metadata key. Consumed by the PluginInvoke dispatch-policy
+	// gate. Zero value (UNSPECIFIED) is treated as trusted.
+	ContentTrust componentpb.ContentTrust
+}
+
+// contentTrustToDB renders a ContentTrust as the canonical enum name stored in
+// the component_install.content_trust column.
+func contentTrustToDB(ct componentpb.ContentTrust) string {
+	if name, ok := componentpb.ContentTrust_name[int32(ct)]; ok {
+		return name
+	}
+	return componentpb.ContentTrust_name[int32(componentpb.ContentTrust_CONTENT_TRUST_UNSPECIFIED)]
+}
+
+// contentTrustFromDB parses the canonical enum name back into a ContentTrust,
+// defaulting to UNSPECIFIED (treated as trusted) for empty or unknown values.
+func contentTrustFromDB(s string) componentpb.ContentTrust {
+	if v, ok := componentpb.ContentTrust_value[s]; ok {
+		return componentpb.ContentTrust(v)
+	}
+	return componentpb.ContentTrust_CONTENT_TRUST_UNSPECIFIED
 }
 
 // pluginStatusPayload is the JSON shape stored in Redis under
@@ -114,6 +138,10 @@ type InstallInfo struct {
 	LastHeartbeatAt time.Time
 	// Status is the transient status (from Redis): "serving" or "unreachable".
 	Status ComponentInstallStatus
+	// ContentTrust is the component's trust classification (ADR-0010 / gibson#997),
+	// read from the persistent install row. Zero value (UNSPECIFIED) is treated
+	// as trusted by the dispatch-policy gate.
+	ContentTrust componentpb.ContentTrust
 }
 
 // RegistryStatus is a summary of all installs of a named plugin, used for
@@ -244,8 +272,8 @@ func (r *postgresComponentInstallRegistry) Register(ctx context.Context, install
 INSERT INTO component_install (
     id, tenant_id, kind, component_name, version, manifest_hash,
     declared_methods, proto_descriptor_set, host_id,
-    runtime_mode, setec_required, created_at, created_by
-) VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,now(),$12)
+    runtime_mode, setec_required, content_trust, created_at, created_by
+) VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,now(),$13)
 ON CONFLICT (tenant_id, kind, component_name, host_id)
 DO UPDATE SET
     id                   = EXCLUDED.id,
@@ -254,7 +282,8 @@ DO UPDATE SET
     declared_methods     = EXCLUDED.declared_methods,
     proto_descriptor_set = EXCLUDED.proto_descriptor_set,
     runtime_mode         = EXCLUDED.runtime_mode,
-    setec_required       = EXCLUDED.setec_required
+    setec_required       = EXCLUDED.setec_required,
+    content_trust        = EXCLUDED.content_trust
 RETURNING id`
 
 	var assignedID string
@@ -270,6 +299,7 @@ RETURNING id`
 		install.HostID,
 		install.RuntimeMode,
 		install.SetecRequired,
+		contentTrustToDB(install.ContentTrust),
 		install.HostID, // created_by = host_id
 	).Scan(&assignedID)
 	if err != nil {
@@ -458,7 +488,7 @@ func (r *postgresComponentInstallRegistry) Status(ctx context.Context, tenant au
 // not populated (the caller enriches it from Redis).
 func (r *postgresComponentInstallRegistry) queryInstalls(ctx context.Context, tenant auth.TenantID, name string) ([]InstallInfo, error) {
 	const q = `
-SELECT id, tenant_id, component_name, version, declared_methods
+SELECT id, tenant_id, component_name, version, declared_methods, content_trust
 FROM   component_install
 WHERE  tenant_id      = $1
 AND    component_name = $2
@@ -475,9 +505,11 @@ ORDER BY created_at`
 		var info InstallInfo
 		var methodsJSON []byte
 		var tenantIDStr string
-		if err := rows.Scan(&info.InstallID, &tenantIDStr, &info.Name, &info.Version, &methodsJSON); err != nil {
+		var contentTrustStr string
+		if err := rows.Scan(&info.InstallID, &tenantIDStr, &info.Name, &info.Version, &methodsJSON, &contentTrustStr); err != nil {
 			return nil, fmt.Errorf("plugin registry: scan install row: %w", err)
 		}
+		info.ContentTrust = contentTrustFromDB(contentTrustStr)
 		tid, tidErr := auth.NewTenantID(tenantIDStr)
 		if tidErr != nil {
 			// Malformed row — skip rather than halting all installs.

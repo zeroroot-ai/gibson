@@ -10,6 +10,8 @@ import (
 
 	"google.golang.org/protobuf/proto"
 
+	"github.com/zeroroot-ai/gibson/internal/engine/harness/dispatchpolicy"
+	componentpb "github.com/zeroroot-ai/sdk/api/gen/gibson/component/v1"
 	pluginpb "github.com/zeroroot-ai/sdk/api/gen/gibson/plugin/v1"
 	"github.com/zeroroot-ai/sdk/auth"
 	pluginmanifest "github.com/zeroroot-ai/sdk/plugin/manifest"
@@ -101,7 +103,7 @@ func TestPluginInvokeService_HappyPath(t *testing.T) {
 		return proto.Marshal(resp)
 	}
 
-	svc := NewPluginInvokeService(reg, nil)
+	svc := NewPluginInvokeService(reg, dispatchpolicy.ShapeSetecOnly, nil)
 	ctx := buildPluginInvokeCtx("tenant-abc")
 
 	resp, err := svc.PluginInvoke(ctx, &pluginpb.PluginInvokeRequest{
@@ -120,7 +122,7 @@ func TestPluginInvokeService_HappyPath(t *testing.T) {
 
 func TestPluginInvokeService_UNAVAILABLE_NoInstalls(t *testing.T) {
 	reg := newFakeComponentInstallRegistry() // no installs registered
-	svc := NewPluginInvokeService(reg, nil)
+	svc := NewPluginInvokeService(reg, dispatchpolicy.ShapeSetecOnly, nil)
 	ctx := buildPluginInvokeCtx("tenant-abc")
 
 	resp, err := svc.PluginInvoke(ctx, &pluginpb.PluginInvokeRequest{
@@ -143,7 +145,7 @@ func TestPluginInvokeService_METHOD_NOT_FOUND(t *testing.T) {
 	reg := newFakeComponentInstallRegistry()
 	reg.addInstall(tenant, "shodan", []string{"search"}) // only "search" declared
 
-	svc := NewPluginInvokeService(reg, nil)
+	svc := NewPluginInvokeService(reg, dispatchpolicy.ShapeSetecOnly, nil)
 	ctx := buildPluginInvokeCtx("tenant-abc")
 
 	resp, err := svc.PluginInvoke(ctx, &pluginpb.PluginInvokeRequest{
@@ -167,7 +169,7 @@ func TestPluginInvokeService_DEADLINE_EXCEEDED(t *testing.T) {
 		return nil, fmt.Errorf("timeout waiting for work abc: %w", context.DeadlineExceeded)
 	}
 
-	svc := NewPluginInvokeService(reg, nil)
+	svc := NewPluginInvokeService(reg, dispatchpolicy.ShapeSetecOnly, nil)
 	ctx := buildPluginInvokeCtx("tenant-abc")
 
 	resp, err := svc.PluginInvoke(ctx, &pluginpb.PluginInvokeRequest{
@@ -192,7 +194,7 @@ func TestPluginInvokeService_HANDLER_FAILED(t *testing.T) {
 		return nil, &PluginWorkError{Code: "HANDLER_FAILED", Message: "handler panicked"}
 	}
 
-	svc := NewPluginInvokeService(reg, nil)
+	svc := NewPluginInvokeService(reg, dispatchpolicy.ShapeSetecOnly, nil)
 	ctx := buildPluginInvokeCtx("tenant-abc")
 
 	resp, err := svc.PluginInvoke(ctx, &pluginpb.PluginInvokeRequest{
@@ -216,7 +218,7 @@ func TestPluginInvokeService_UNAVAILABLE_RegistryError(t *testing.T) {
 		return nil, ErrComponentUnavailable
 	}
 
-	svc := NewPluginInvokeService(reg, nil)
+	svc := NewPluginInvokeService(reg, dispatchpolicy.ShapeSetecOnly, nil)
 	ctx := buildPluginInvokeCtx("tenant-abc")
 
 	resp, err := svc.PluginInvoke(ctx, &pluginpb.PluginInvokeRequest{
@@ -233,7 +235,7 @@ func TestPluginInvokeService_UNAVAILABLE_RegistryError(t *testing.T) {
 
 func TestPluginInvokeService_InvalidArgument_EmptyPluginName(t *testing.T) {
 	reg := newFakeComponentInstallRegistry()
-	svc := NewPluginInvokeService(reg, nil)
+	svc := NewPluginInvokeService(reg, dispatchpolicy.ShapeSetecOnly, nil)
 	ctx := buildPluginInvokeCtx("tenant-abc")
 
 	_, err := svc.PluginInvoke(ctx, &pluginpb.PluginInvokeRequest{
@@ -261,7 +263,7 @@ func TestPluginInvokeService_ConcurrencyLimit(t *testing.T) {
 		return b, nil
 	}
 
-	svc := NewPluginInvokeService(reg, nil)
+	svc := NewPluginInvokeService(reg, dispatchpolicy.ShapeSetecOnly, nil)
 
 	// Fill the semaphore with pluginConcurrencyDefault goroutines.
 	done := make(chan struct{}, int(pluginConcurrencyDefault))
@@ -309,7 +311,7 @@ func TestPluginInvokeService_ConcurrencyLimit(t *testing.T) {
 
 func TestPluginInvokeService_MissingIdentity(t *testing.T) {
 	reg := newFakeComponentInstallRegistry()
-	svc := NewPluginInvokeService(reg, nil)
+	svc := NewPluginInvokeService(reg, dispatchpolicy.ShapeSetecOnly, nil)
 
 	// Context with no identity.
 	resp, err := svc.PluginInvoke(context.Background(), &pluginpb.PluginInvokeRequest{
@@ -353,7 +355,7 @@ func TestPluginErrorResponse(t *testing.T) {
 }
 
 func TestPluginInvokeService_ClassifyDispatchError_PluginWorkError(t *testing.T) {
-	svc := NewPluginInvokeService(newFakeComponentInstallRegistry(), nil)
+	svc := NewPluginInvokeService(newFakeComponentInstallRegistry(), dispatchpolicy.ShapeSetecOnly, nil)
 	ctx := context.Background()
 
 	cases := []struct {
@@ -430,7 +432,7 @@ func TestDispatchEcho_ManifestDerived(t *testing.T) {
 		return proto.Marshal(resp)
 	}
 
-	svc := NewPluginInvokeService(reg, nil)
+	svc := NewPluginInvokeService(reg, dispatchpolicy.ShapeSetecOnly, nil)
 	ctx := buildPluginInvokeCtx("tenant-abc")
 
 	resp, err := svc.PluginInvoke(ctx, &pluginpb.PluginInvokeRequest{
@@ -456,7 +458,7 @@ func TestDispatchOne_MethodDeclaredCheck(t *testing.T) {
 	// Register debug-plugin with only "Echo" declared.
 	reg.addInstall(tenant, "debug-plugin", []string{"Echo"})
 
-	svc := NewPluginInvokeService(reg, nil)
+	svc := NewPluginInvokeService(reg, dispatchpolicy.ShapeSetecOnly, nil)
 	ctx := buildPluginInvokeCtx("tenant-abc")
 
 	resp, err := svc.PluginInvoke(ctx, &pluginpb.PluginInvokeRequest{
@@ -476,3 +478,85 @@ func TestDispatchOne_MethodDeclaredCheck(t *testing.T) {
 }
 
 var _ = json.Marshal
+
+// addInstallWithTrust seeds one serving install carrying a content-trust
+// classification, for the dispatch-policy gate tests (gibson#997).
+func (f *fakeComponentInstallRegistry) addInstallWithTrust(tenant auth.TenantID, name string, methods []string, trust componentpb.ContentTrust) {
+	key := tenant.String() + "/" + name
+	f.installs[key] = append(f.installs[key], InstallInfo{
+		InstallID:       fmt.Sprintf("install-%s-%s-%d", tenant.String(), name, len(f.installs[key])),
+		TenantID:        tenant,
+		Name:            name,
+		DeclaredMethods: methods,
+		Status:          ComponentInstallStatusServing,
+		ContentTrust:    trust,
+	})
+}
+
+// TestPluginInvoke_UntrustedDeniedUnderSetecOnly is the gibson#997 invariant: an
+// UNTRUSTED plugin under the hosted setec-only shape is denied with a typed
+// UNAUTHORIZED error AND never dispatched in-process (the spy dispatchFunc is
+// not called).
+func TestPluginInvoke_UntrustedDeniedUnderSetecOnly(t *testing.T) {
+	tenant := auth.MustNewTenantID("tenant-abc")
+	reg := newFakeComponentInstallRegistry()
+	reg.addInstallWithTrust(tenant, "scanner", []string{"run"}, componentpb.ContentTrust_CONTENT_TRUST_UNTRUSTED)
+
+	dispatched := false
+	reg.dispatchFunc = func(_ context.Context, _ auth.TenantID, _, _ string, _ []byte, _ time.Duration) ([]byte, error) {
+		dispatched = true
+		return proto.Marshal(&pluginpb.PluginInvokeResponse{})
+	}
+
+	svc := NewPluginInvokeService(reg, dispatchpolicy.ShapeSetecOnly, nil)
+	ctx := buildPluginInvokeCtx("tenant-abc")
+
+	resp, err := svc.PluginInvoke(ctx, &pluginpb.PluginInvokeRequest{PluginName: "scanner", Method: "run"})
+	if err != nil {
+		t.Fatalf("unexpected gRPC error: %v", err)
+	}
+	if resp.GetError() == nil || resp.GetError().GetKind() != pluginpb.PluginError_PLUGIN_ERROR_KIND_UNAUTHORIZED {
+		t.Fatalf("expected UNAUTHORIZED deny, got %v", resp.GetError())
+	}
+	if dispatched {
+		t.Fatal("untrusted plugin was dispatched in-process; the gate must deny before dispatch")
+	}
+}
+
+// TestPluginInvoke_UntrustedAllowedUnderCustomerIsolation: on-prem the customer
+// owns isolation, so an untrusted plugin is NOT denied (it dispatches).
+func TestPluginInvoke_UntrustedAllowedUnderCustomerIsolation(t *testing.T) {
+	tenant := auth.MustNewTenantID("tenant-abc")
+	reg := newFakeComponentInstallRegistry()
+	reg.addInstallWithTrust(tenant, "scanner", []string{"run"}, componentpb.ContentTrust_CONTENT_TRUST_UNTRUSTED)
+
+	svc := NewPluginInvokeService(reg, dispatchpolicy.ShapeCustomerIsolation, nil)
+	ctx := buildPluginInvokeCtx("tenant-abc")
+
+	resp, err := svc.PluginInvoke(ctx, &pluginpb.PluginInvokeRequest{PluginName: "scanner", Method: "run"})
+	if err != nil {
+		t.Fatalf("unexpected gRPC error: %v", err)
+	}
+	if e := resp.GetError(); e != nil && e.GetKind() == pluginpb.PluginError_PLUGIN_ERROR_KIND_UNAUTHORIZED {
+		t.Fatal("customer-isolation must not deny untrusted plugin invocation")
+	}
+}
+
+// TestPluginInvoke_TrustedAllowedUnderSetecOnly: a trusted plugin proceeds even
+// under setec-only.
+func TestPluginInvoke_TrustedAllowedUnderSetecOnly(t *testing.T) {
+	tenant := auth.MustNewTenantID("tenant-abc")
+	reg := newFakeComponentInstallRegistry()
+	reg.addInstallWithTrust(tenant, "scanner", []string{"run"}, componentpb.ContentTrust_CONTENT_TRUST_TRUSTED)
+
+	svc := NewPluginInvokeService(reg, dispatchpolicy.ShapeSetecOnly, nil)
+	ctx := buildPluginInvokeCtx("tenant-abc")
+
+	resp, err := svc.PluginInvoke(ctx, &pluginpb.PluginInvokeRequest{PluginName: "scanner", Method: "run"})
+	if err != nil {
+		t.Fatalf("unexpected gRPC error: %v", err)
+	}
+	if e := resp.GetError(); e != nil && e.GetKind() == pluginpb.PluginError_PLUGIN_ERROR_KIND_UNAUTHORIZED {
+		t.Fatal("trusted plugin must not be policy-denied")
+	}
+}
