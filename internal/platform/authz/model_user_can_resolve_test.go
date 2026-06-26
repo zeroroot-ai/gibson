@@ -65,17 +65,17 @@ func TestModel_RejectsUserCanResolve(t *testing.T) {
 		{
 			name:   "user-typed",
 			user:   "user:daemon-service-id-test",
-			object: "secret:tenant-acme:llm-anthropic-api-key",
+			object: "secret:tenant-acme-llm-anthropic-api-key",
 		},
 		{
 			name:   "agent_principal-typed",
 			user:   "agent_principal:enrollment-test",
-			object: "secret:tenant-acme:integration-token",
+			object: "secret:tenant-acme-integration-token",
 		},
 		{
 			name:   "tool_principal-typed",
 			user:   "tool_principal:enrollment-test",
-			object: "secret:tenant-acme:any-secret",
+			object: "secret:tenant-acme-any-secret",
 		},
 	}
 
@@ -107,7 +107,7 @@ func TestModel_RejectsUserCanResolve(t *testing.T) {
 			Writes: []fgaclient.ClientTupleKey{{
 				User:     "plugin_principal:enrollment-test",
 				Relation: "can_resolve",
-				Object:   "secret:tenant-acme:llm-anthropic-api-key",
+				Object:   "secret:tenant-acme-llm-anthropic-api-key",
 			}},
 		}).Execute()
 		require.NoError(t, err, "plugin_principal can_resolve write must succeed")
