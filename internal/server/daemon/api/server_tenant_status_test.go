@@ -1,11 +1,13 @@
 // server_tenant_status_test.go — tests for the operator-reported tenant status
 // read-back handlers (E9, gibson#948, dashboard#813).
+// S5 (billing#3): SetTenantBillingActive invalidates the entitlements cache.
 package api
 
 import (
 	"context"
 	"database/sql"
 	"errors"
+	"sync/atomic"
 	"testing"
 
 	sqlmock "github.com/DATA-DOG/go-sqlmock"
@@ -14,6 +16,21 @@ import (
 	daemonoperatorv1 "github.com/zeroroot-ai/gibson/internal/server/daemon/api/gibson/daemon/operator/v1"
 	tenantv1 "github.com/zeroroot-ai/gibson/internal/server/daemon/api/gibson/tenant/v1"
 )
+
+// fakeInvalidatingQuotaManager satisfies MissionQuotaChecker and records
+// InvalidateCache calls so tests can assert the tenant was invalidated.
+type fakeInvalidatingQuotaManager struct {
+	invalidated atomic.Int64 // count of InvalidateCache calls
+	lastTenant  atomic.Value // last tenant string passed to InvalidateCache
+}
+
+func (f *fakeInvalidatingQuotaManager) CheckMissionQuota(_ context.Context) error     { return nil }
+func (f *fakeInvalidatingQuotaManager) CheckAgentQuota(_ context.Context) error       { return nil }
+func (f *fakeInvalidatingQuotaManager) IncrementMissionCount(_ context.Context) error { return nil }
+func (f *fakeInvalidatingQuotaManager) InvalidateCache(tenantID string) {
+	f.lastTenant.Store(tenantID)
+	f.invalidated.Add(1)
+}
 
 var errBoom = errors.New("boom")
 
@@ -250,5 +267,74 @@ func TestSetTenantBillingActive_Upserts(t *testing.T) {
 	}
 	if err := mock.ExpectationsWereMet(); err != nil {
 		t.Errorf("expectations: %v", err)
+	}
+}
+
+// TestSetTenantBillingActive_InvalidatesEntitlementsCache verifies that a
+// successful SetTenantBillingActive call triggers InvalidateCache on the
+// wired quota manager (billing#3 / gibson#1028 entitlements-seam S5).
+// This ensures the grpcProvider's 60 s TTL is bypassed on subscription changes.
+func TestSetTenantBillingActive_InvalidatesEntitlementsCache(t *testing.T) {
+	db, mock, err := sqlmock.New()
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer func() { _ = db.Close() }()
+
+	qm := &fakeInvalidatingQuotaManager{}
+	srv := newPendingServer()
+	srv.platformDB = db
+	srv.quotaManager = qm
+
+	expectEnsureTenantStatusTable(mock)
+	mock.ExpectExec("INSERT INTO tenant_status").
+		WithArgs("acme", true).
+		WillReturnResult(sqlmock.NewResult(1, 1))
+
+	if _, err = srv.SetTenantBillingActive(context.Background(),
+		&tenantv1.SetTenantBillingActiveRequest{TenantId: "acme", Active: true}); err != nil {
+		t.Fatalf("set billing: %v", err)
+	}
+
+	if got := qm.invalidated.Load(); got != 1 {
+		t.Errorf("InvalidateCache called %d times, want 1", got)
+	}
+	if got, _ := qm.lastTenant.Load().(string); got != "acme" {
+		t.Errorf("InvalidateCache tenant = %q, want %q", got, "acme")
+	}
+	if err := mock.ExpectationsWereMet(); err != nil {
+		t.Errorf("sql expectations: %v", err)
+	}
+}
+
+// TestSetTenantBillingActive_NilQuotaManager_NoError verifies that
+// SetTenantBillingActive does not panic or error when no quota manager is
+// wired (OSS / dev deployments that boot without one).  This covers the
+// OSS configProvider no-op path: even when a manager is wired, its
+// InvalidateCache degrades to delete(cache, tenant) on the configProvider,
+// which is always a harmless no-op.
+func TestSetTenantBillingActive_NilQuotaManager_NoError(t *testing.T) {
+	db, mock, err := sqlmock.New()
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer func() { _ = db.Close() }()
+
+	srv := newPendingServer()
+	srv.platformDB = db
+	// quotaManager deliberately left nil — the billing-active handler must
+	// guard the InvalidateCache call and not panic.
+
+	expectEnsureTenantStatusTable(mock)
+	mock.ExpectExec("INSERT INTO tenant_status").
+		WithArgs("tenant-x", false).
+		WillReturnResult(sqlmock.NewResult(1, 1))
+
+	if _, err = srv.SetTenantBillingActive(context.Background(),
+		&tenantv1.SetTenantBillingActiveRequest{TenantId: "tenant-x", Active: false}); err != nil {
+		t.Fatalf("unexpected error with nil quota manager: %v", err)
+	}
+	if err := mock.ExpectationsWereMet(); err != nil {
+		t.Errorf("sql expectations: %v", err)
 	}
 }

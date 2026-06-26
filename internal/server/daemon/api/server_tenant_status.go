@@ -183,6 +183,19 @@ func (s *DaemonServer) SetTenantBillingActive(ctx context.Context, req *tenantv1
 		return nil, status.Errorf(codes.Internal, "upsert tenant_status billing_active: %v", err)
 	}
 	n, _ := res.RowsAffected()
+
+	// Invalidate the entitlements cache for this tenant immediately so the
+	// next quota check reflects the updated subscription state rather than
+	// waiting up to 60 s for the TTL to expire naturally. The call is safe to
+	// make even when active did not change (n == 0): cache invalidation is
+	// always idempotent and never errors. When quotaManager is nil (tests or
+	// a daemon wired without one) the call is skipped; when the underlying
+	// provider has no per-tenant cache (UnlimitedProvider) the call is a
+	// harmless no-op inside QuotaManager.InvalidateCache.
+	if s.quotaManager != nil {
+		s.quotaManager.InvalidateCache(req.GetTenantId())
+	}
+
 	return &tenantv1.SetTenantBillingActiveResponse{Updated: n > 0}, nil
 }
 

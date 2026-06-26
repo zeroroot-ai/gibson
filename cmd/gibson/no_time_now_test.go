@@ -87,12 +87,13 @@ func TestNoTimeNowInRPCHandlers(t *testing.T) {
 		"internal/server/daemon/api/server_model_access.go:291": astchecks.Entry{Category: astchecks.CategoryDefensiveGuard, Reason: "named helper wrapping wall-clock Unix timestamp"},
 
 		// server.go — session IDs + response timestamps + latency
-		"internal/server/daemon/api/server.go:1146": astchecks.Entry{Category: astchecks.CategoryDefensiveGuard, Reason: "session ID generation uses wall-clock Unix epoch"},
-		"internal/server/daemon/api/server.go:1165": astchecks.Entry{Category: astchecks.CategoryDefensiveGuard, Reason: "Ping response `Timestamp` field; wall-clock Unix"},
-		"internal/server/daemon/api/server.go:1170": astchecks.Entry{Category: astchecks.CategoryDefensiveGuard, Reason: "session ID generation uses wall-clock Unix epoch"},
-		"internal/server/daemon/api/server.go:1189": astchecks.Entry{Category: astchecks.CategoryDefensiveGuard, Reason: "response `Timestamp` field; wall-clock Unix"},
-		"internal/server/daemon/api/server.go:1511": astchecks.Entry{Category: astchecks.CategoryDefensiveGuard, Reason: "latency-measurement start (QueryPlugin)"},
-		"internal/server/daemon/api/server.go:1535": astchecks.Entry{Category: astchecks.CategoryDefensiveGuard, Reason: "latency-measurement start"},
+		// Line numbers shifted +9 by InvalidateCache addition to MissionQuotaChecker (gibson#1028).
+		"internal/server/daemon/api/server.go:1155": astchecks.Entry{Category: astchecks.CategoryDefensiveGuard, Reason: "session ID generation uses wall-clock Unix epoch"},
+		"internal/server/daemon/api/server.go:1174": astchecks.Entry{Category: astchecks.CategoryDefensiveGuard, Reason: "Ping response `Timestamp` field; wall-clock Unix"},
+		"internal/server/daemon/api/server.go:1179": astchecks.Entry{Category: astchecks.CategoryDefensiveGuard, Reason: "session ID generation uses wall-clock Unix epoch"},
+		"internal/server/daemon/api/server.go:1198": astchecks.Entry{Category: astchecks.CategoryDefensiveGuard, Reason: "response `Timestamp` field; wall-clock Unix"},
+		"internal/server/daemon/api/server.go:1520": astchecks.Entry{Category: astchecks.CategoryDefensiveGuard, Reason: "latency-measurement start (QueryPlugin)"},
+		"internal/server/daemon/api/server.go:1544": astchecks.Entry{Category: astchecks.CategoryDefensiveGuard, Reason: "latency-measurement start"},
 
 		// server_usage.go — staleness markers on usage responses
 		"internal/server/daemon/api/server_usage.go:77":  astchecks.Entry{Category: astchecks.CategoryDefensiveGuard, Reason: "`StaleAsOfUnix` response field; wall-clock"},
