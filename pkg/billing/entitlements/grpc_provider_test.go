@@ -65,7 +65,7 @@ func newTestGRPCProvider(t *testing.T, srv *fakeEntitlementsServer, ttl time.Dur
 	p, err := NewGRPCProvider(GRPCProviderOptions{
 		Endpoint: lis.Addr().String(),
 		CacheTTL: ttl,
-		dialConn: conn,
+		DialConn: conn,
 	})
 	if err != nil {
 		grpcSrv.Stop()
