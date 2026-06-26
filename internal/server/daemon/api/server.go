@@ -304,11 +304,11 @@ type missionDraftStoreIface interface {
 // concurrent_agents are enforced going forward.
 type MissionQuotaChecker interface {
 	// CheckMissionQuota returns a codes.ResourceExhausted error when the tenant
-	// in ctx has met or exceeded its configured concurrent_missions limit.
+	// in ctx has met or exceeded its concurrent_missions limit.
 	CheckMissionQuota(ctx context.Context) error
 
 	// CheckAgentQuota returns a codes.ResourceExhausted error when the tenant
-	// in ctx has met or exceeded its configured concurrent_agents limit
+	// in ctx has met or exceeded its concurrent_agents limit
 	// (counted only while bound to an in-flight task — idle agents do not
 	// count).
 	CheckAgentQuota(ctx context.Context) error
@@ -316,6 +316,15 @@ type MissionQuotaChecker interface {
 	// IncrementMissionCount increments the active-mission counter for the
 	// tenant in ctx. Called when a mission transitions queued → running.
 	IncrementMissionCount(ctx context.Context) error
+
+	// InvalidateCache drops any in-process cached limits for tenant so the
+	// next Limits call fetches a fresh value. Called by SetTenantBillingActive
+	// when a subscription-status change is recorded, allowing the 60 s TTL to
+	// be bypassed without waiting for natural expiry.
+	// Implementations must be safe to call concurrently and must be a no-op
+	// when the underlying provider has no cache (OSS configProvider path:
+	// delete(cache, tenant) on an empty map is always harmless).
+	InvalidateCache(tenantID string)
 }
 
 // DaemonInterface defines the interface that the daemon must implement

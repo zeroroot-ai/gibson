@@ -64,6 +64,7 @@ func (f *fakeQuotaUsageReader) ReadActiveCounters(_ context.Context, _ string) (
 func (f *fakeQuotaUsageReader) CheckMissionQuota(_ context.Context) error     { return nil }
 func (f *fakeQuotaUsageReader) CheckAgentQuota(_ context.Context) error       { return nil }
 func (f *fakeQuotaUsageReader) IncrementMissionCount(_ context.Context) error { return nil }
+func (f *fakeQuotaUsageReader) InvalidateCache(_ string)                      {}
 
 func TestGetTenantQuotaUsage_ReturnsCounterValues(t *testing.T) {
 	srv := newQuotaTestServer()
