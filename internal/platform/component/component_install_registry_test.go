@@ -10,6 +10,7 @@ import (
 
 	"github.com/alicebob/miniredis/v2"
 	"github.com/redis/go-redis/v9"
+	componentpb "github.com/zeroroot-ai/sdk/api/gen/gibson/component/v1"
 	"github.com/zeroroot-ai/sdk/auth"
 )
 
@@ -431,5 +432,21 @@ func TestPluginWorkError_Error(t *testing.T) {
 	want := "plugin work error [UNAVAILABLE]: no installs"
 	if got != want {
 		t.Errorf("PluginWorkError.Error: want %q got %q", want, got)
+	}
+}
+
+func TestContentTrustDBRoundTrip(t *testing.T) {
+	for _, ct := range []componentpb.ContentTrust{
+		componentpb.ContentTrust_CONTENT_TRUST_UNSPECIFIED,
+		componentpb.ContentTrust_CONTENT_TRUST_TRUSTED,
+		componentpb.ContentTrust_CONTENT_TRUST_UNTRUSTED,
+	} {
+		if got := contentTrustFromDB(contentTrustToDB(ct)); got != ct {
+			t.Errorf("round-trip %v -> %q -> %v", ct, contentTrustToDB(ct), got)
+		}
+	}
+	// Unknown/empty DB value defaults to UNSPECIFIED (gate treats as trusted).
+	if got := contentTrustFromDB("garbage"); got != componentpb.ContentTrust_CONTENT_TRUST_UNSPECIFIED {
+		t.Errorf("contentTrustFromDB(garbage) = %v; want UNSPECIFIED", got)
 	}
 }

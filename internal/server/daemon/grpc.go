@@ -22,6 +22,7 @@ import (
 	"github.com/spiffe/go-spiffe/v2/workloadapi"
 
 	"github.com/zeroroot-ai/gibson/internal/engine/brain"
+	"github.com/zeroroot-ai/gibson/internal/engine/harness/dispatchpolicy"
 	"github.com/zeroroot-ai/gibson/internal/engine/llm/modelgate"
 	"github.com/zeroroot-ai/gibson/internal/engine/memory/reembed"
 	"github.com/zeroroot-ai/gibson/internal/engine/state"
@@ -1545,8 +1546,13 @@ func (d *daemonImpl) buildGRPCServer(ctx context.Context) (*grpcSubsystem, error
 			compSvc.WithComponentInstallRegistry(componentInstallRegistry)
 			d.logger.Info(ctx, "ComponentInstallRegistry wired into ComponentService (Postgres + Redis transient state)")
 
-			// Register PluginInvokeService on the same gRPC port.
-			pluginInvokeSvc := component.NewPluginInvokeService(componentInstallRegistry, d.logger.WithComponent("plugin-invoke").Slog())
+			// Register PluginInvokeService on the same gRPC port. The deployment
+			// shape gates untrusted plugin invocation (ADR-0010 / gibson#997).
+			pluginInvokeSvc := component.NewPluginInvokeService(
+				componentInstallRegistry,
+				dispatchpolicy.ParseShape(d.config.UntrustedExecMode()),
+				d.logger.WithComponent("plugin-invoke").Slog(),
+			)
 			pluginpb.RegisterPluginInvokeServiceServer(srv, pluginInvokeSvc)
 			d.logger.Info(ctx, "PluginInvokeService gRPC endpoint registered")
 		} else {
