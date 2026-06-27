@@ -54,24 +54,24 @@ func assertGRPCCode(t *testing.T, err error, want codes.Code) {
 
 // --- Stub servers --- //
 
-// DaemonOperatorService: Shutdown(force=false) → ok, Shutdown(force=true) →
-// PermissionDenied. RefreshToolCatalog(force=false) → ok, force=true → NotFound.
+// DaemonOperatorService: AckTenantProvisioned(tenant_id="deny") →
+// PermissionDenied, else ok. AckTenantOp(op_id="missing") → NotFound, else ok.
 type stubDaemonOperator struct {
 	operatorv1.UnimplementedDaemonOperatorServiceServer
 }
 
-func (s *stubDaemonOperator) Shutdown(_ context.Context, req *operatorv1.ShutdownRequest) (*operatorv1.ShutdownResponse, error) {
-	if req.GetForce() {
-		return nil, status.Error(codes.PermissionDenied, "forced shutdown denied")
+func (s *stubDaemonOperator) AckTenantProvisioned(_ context.Context, req *operatorv1.AckTenantProvisionedRequest) (*operatorv1.AckTenantProvisionedResponse, error) {
+	if req.GetTenantId() == "deny" {
+		return nil, status.Error(codes.PermissionDenied, "ack denied")
 	}
-	return &operatorv1.ShutdownResponse{}, nil
+	return &operatorv1.AckTenantProvisionedResponse{Acked: true}, nil
 }
 
-func (s *stubDaemonOperator) RefreshToolCatalog(_ context.Context, req *operatorv1.RefreshToolCatalogRequest) (*operatorv1.RefreshToolCatalogResponse, error) {
-	if req.GetForce() {
-		return nil, status.Error(codes.NotFound, "catalog refresh target not found")
+func (s *stubDaemonOperator) AckTenantOp(_ context.Context, req *operatorv1.AckTenantOpRequest) (*operatorv1.AckTenantOpResponse, error) {
+	if req.GetOpId() == "missing" {
+		return nil, status.Error(codes.NotFound, "tenant op not found")
 	}
-	return &operatorv1.RefreshToolCatalogResponse{}, nil
+	return &operatorv1.AckTenantOpResponse{Acked: true}, nil
 }
 
 // DiscoveryService: ListAgents(query=nil) → ok, ListAgents(query.PageSize=999) →
@@ -113,21 +113,21 @@ func TestPlatformContractSuite(t *testing.T) {
 	}
 	t.Cleanup(func() { _ = conn.Close() })
 
-	t.Run("DaemonOperatorService/Shutdown", func(t *testing.T) {
+	t.Run("DaemonOperatorService/AckTenantProvisioned", func(t *testing.T) {
 		c := operatorv1.NewDaemonOperatorServiceClient(conn)
-		if _, err := c.Shutdown(context.Background(), &operatorv1.ShutdownRequest{Force: false}); err != nil {
+		if _, err := c.AckTenantProvisioned(context.Background(), &operatorv1.AckTenantProvisionedRequest{TenantId: "ok"}); err != nil {
 			t.Errorf("happy path: %v", err)
 		}
-		_, err := c.Shutdown(context.Background(), &operatorv1.ShutdownRequest{Force: true})
+		_, err := c.AckTenantProvisioned(context.Background(), &operatorv1.AckTenantProvisionedRequest{TenantId: "deny"})
 		assertGRPCCode(t, err, codes.PermissionDenied)
 	})
 
-	t.Run("DaemonOperatorService/RefreshToolCatalog", func(t *testing.T) {
+	t.Run("DaemonOperatorService/AckTenantOp", func(t *testing.T) {
 		c := operatorv1.NewDaemonOperatorServiceClient(conn)
-		if _, err := c.RefreshToolCatalog(context.Background(), &operatorv1.RefreshToolCatalogRequest{Force: false}); err != nil {
+		if _, err := c.AckTenantOp(context.Background(), &operatorv1.AckTenantOpRequest{OpId: "ok"}); err != nil {
 			t.Errorf("happy path: %v", err)
 		}
-		_, err := c.RefreshToolCatalog(context.Background(), &operatorv1.RefreshToolCatalogRequest{Force: true})
+		_, err := c.AckTenantOp(context.Background(), &operatorv1.AckTenantOpRequest{OpId: "missing"})
 		assertGRPCCode(t, err, codes.NotFound)
 	})
 

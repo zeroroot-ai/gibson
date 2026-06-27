@@ -19,14 +19,10 @@ import (
 const _ = grpc.SupportPackageIsVersion9
 
 const (
-	DaemonOperatorService_Shutdown_FullMethodName                      = "/gibson.daemon.operator.v1.DaemonOperatorService/Shutdown"
-	DaemonOperatorService_ImpersonateTenant_FullMethodName             = "/gibson.daemon.operator.v1.DaemonOperatorService/ImpersonateTenant"
-	DaemonOperatorService_RefreshToolCatalog_FullMethodName            = "/gibson.daemon.operator.v1.DaemonOperatorService/RefreshToolCatalog"
 	DaemonOperatorService_WriteAccessTuples_FullMethodName             = "/gibson.daemon.operator.v1.DaemonOperatorService/WriteAccessTuples"
 	DaemonOperatorService_UpsertTenantQuota_FullMethodName             = "/gibson.daemon.operator.v1.DaemonOperatorService/UpsertTenantQuota"
 	DaemonOperatorService_ListFeatureTuples_FullMethodName             = "/gibson.daemon.operator.v1.DaemonOperatorService/ListFeatureTuples"
 	DaemonOperatorService_SeedCatalogTenantEnabled_FullMethodName      = "/gibson.daemon.operator.v1.DaemonOperatorService/SeedCatalogTenantEnabled"
-	DaemonOperatorService_SetPlatformEnabled_FullMethodName            = "/gibson.daemon.operator.v1.DaemonOperatorService/SetPlatformEnabled"
 	DaemonOperatorService_EmitAuditEvent_FullMethodName                = "/gibson.daemon.operator.v1.DaemonOperatorService/EmitAuditEvent"
 	DaemonOperatorService_SetTenantZitadelOrg_FullMethodName           = "/gibson.daemon.operator.v1.DaemonOperatorService/SetTenantZitadelOrg"
 	DaemonOperatorService_ListPendingTenantProvisioning_FullMethodName = "/gibson.daemon.operator.v1.DaemonOperatorService/ListPendingTenantProvisioning"
@@ -50,19 +46,6 @@ const (
 // to callers holding the "platform_operator" FGA relation on
 // system_tenant:_system.
 type DaemonOperatorServiceClient interface {
-	// Shutdown requests graceful shutdown of the daemon.
-	// Only works for local daemons (not when GIBSON_DAEMON_ADDRESS is set to remote).
-	Shutdown(ctx context.Context, in *ShutdownRequest, opts ...grpc.CallOption) (*ShutdownResponse, error)
-	// ImpersonateTenant requests a time-limited context token for the given tenant.
-	// Requires the "platform-operator" role.
-	ImpersonateTenant(ctx context.Context, in *ImpersonateTenantRequest, opts ...grpc.CallOption) (*ImpersonateTenantResponse, error)
-	// RefreshToolCatalog triggers an immediate refresh of the sandboxed-tool
-	// catalog. Bypasses the scheduled interval — useful for CI to publish a
-	// new tool-runner image and immediately surface its parsers to the
-	// orchestrator. Only works on the replica currently holding the refresh
-	// leader lease; followers accept the call but defer to the leader's
-	// next scheduled tick. Requires the platform-operator FGA role.
-	RefreshToolCatalog(ctx context.Context, in *RefreshToolCatalogRequest, opts ...grpc.CallOption) (*RefreshToolCatalogResponse, error)
 	// WriteAccessTuples atomically adds and/or deletes FGA tuples on behalf of
 	// an authenticated caller.
 	WriteAccessTuples(ctx context.Context, in *WriteAccessTuplesRequest, opts ...grpc.CallOption) (*WriteAccessTuplesResponse, error)
@@ -73,12 +56,6 @@ type DaemonOperatorServiceClient interface {
 	ListFeatureTuples(ctx context.Context, in *ListFeatureTuplesRequest, opts ...grpc.CallOption) (*ListFeatureTuplesResponse, error)
 	// SeedCatalogTenantEnabled writes tenant_enabled tuples for all platform-enabled items.
 	SeedCatalogTenantEnabled(ctx context.Context, in *SeedCatalogTenantEnabledRequest, opts ...grpc.CallOption) (*SeedCatalogTenantEnabledResponse, error)
-	// SetPlatformEnabled writes or deletes the FGA platform_enabled tuple for a
-	// component from system_tenant:_system — the shared-catalog publish path
-	// (gibson#682). Only the platform operator may publish a curated connector
-	// to the shared catalog; the catalog fan-out then seeds tenant_enabled per
-	// tenant. published=false unpublishes (removes it from the shared catalog).
-	SetPlatformEnabled(ctx context.Context, in *SetPlatformEnabledRequest, opts ...grpc.CallOption) (*SetPlatformEnabledResponse, error)
 	// EmitAuditEvent lets an operator/platform workload forward a structured
 	// audit event onto the daemon's emitter.
 	EmitAuditEvent(ctx context.Context, in *EmitAuditEventRequest, opts ...grpc.CallOption) (*EmitAuditEventResponse, error)
@@ -157,36 +134,6 @@ func NewDaemonOperatorServiceClient(cc grpc.ClientConnInterface) DaemonOperatorS
 	return &daemonOperatorServiceClient{cc}
 }
 
-func (c *daemonOperatorServiceClient) Shutdown(ctx context.Context, in *ShutdownRequest, opts ...grpc.CallOption) (*ShutdownResponse, error) {
-	cOpts := append([]grpc.CallOption{grpc.StaticMethod()}, opts...)
-	out := new(ShutdownResponse)
-	err := c.cc.Invoke(ctx, DaemonOperatorService_Shutdown_FullMethodName, in, out, cOpts...)
-	if err != nil {
-		return nil, err
-	}
-	return out, nil
-}
-
-func (c *daemonOperatorServiceClient) ImpersonateTenant(ctx context.Context, in *ImpersonateTenantRequest, opts ...grpc.CallOption) (*ImpersonateTenantResponse, error) {
-	cOpts := append([]grpc.CallOption{grpc.StaticMethod()}, opts...)
-	out := new(ImpersonateTenantResponse)
-	err := c.cc.Invoke(ctx, DaemonOperatorService_ImpersonateTenant_FullMethodName, in, out, cOpts...)
-	if err != nil {
-		return nil, err
-	}
-	return out, nil
-}
-
-func (c *daemonOperatorServiceClient) RefreshToolCatalog(ctx context.Context, in *RefreshToolCatalogRequest, opts ...grpc.CallOption) (*RefreshToolCatalogResponse, error) {
-	cOpts := append([]grpc.CallOption{grpc.StaticMethod()}, opts...)
-	out := new(RefreshToolCatalogResponse)
-	err := c.cc.Invoke(ctx, DaemonOperatorService_RefreshToolCatalog_FullMethodName, in, out, cOpts...)
-	if err != nil {
-		return nil, err
-	}
-	return out, nil
-}
-
 func (c *daemonOperatorServiceClient) WriteAccessTuples(ctx context.Context, in *WriteAccessTuplesRequest, opts ...grpc.CallOption) (*WriteAccessTuplesResponse, error) {
 	cOpts := append([]grpc.CallOption{grpc.StaticMethod()}, opts...)
 	out := new(WriteAccessTuplesResponse)
@@ -221,16 +168,6 @@ func (c *daemonOperatorServiceClient) SeedCatalogTenantEnabled(ctx context.Conte
 	cOpts := append([]grpc.CallOption{grpc.StaticMethod()}, opts...)
 	out := new(SeedCatalogTenantEnabledResponse)
 	err := c.cc.Invoke(ctx, DaemonOperatorService_SeedCatalogTenantEnabled_FullMethodName, in, out, cOpts...)
-	if err != nil {
-		return nil, err
-	}
-	return out, nil
-}
-
-func (c *daemonOperatorServiceClient) SetPlatformEnabled(ctx context.Context, in *SetPlatformEnabledRequest, opts ...grpc.CallOption) (*SetPlatformEnabledResponse, error) {
-	cOpts := append([]grpc.CallOption{grpc.StaticMethod()}, opts...)
-	out := new(SetPlatformEnabledResponse)
-	err := c.cc.Invoke(ctx, DaemonOperatorService_SetPlatformEnabled_FullMethodName, in, out, cOpts...)
 	if err != nil {
 		return nil, err
 	}
@@ -321,19 +258,6 @@ func (c *daemonOperatorServiceClient) AckTenantOp(ctx context.Context, in *AckTe
 // to callers holding the "platform_operator" FGA relation on
 // system_tenant:_system.
 type DaemonOperatorServiceServer interface {
-	// Shutdown requests graceful shutdown of the daemon.
-	// Only works for local daemons (not when GIBSON_DAEMON_ADDRESS is set to remote).
-	Shutdown(context.Context, *ShutdownRequest) (*ShutdownResponse, error)
-	// ImpersonateTenant requests a time-limited context token for the given tenant.
-	// Requires the "platform-operator" role.
-	ImpersonateTenant(context.Context, *ImpersonateTenantRequest) (*ImpersonateTenantResponse, error)
-	// RefreshToolCatalog triggers an immediate refresh of the sandboxed-tool
-	// catalog. Bypasses the scheduled interval — useful for CI to publish a
-	// new tool-runner image and immediately surface its parsers to the
-	// orchestrator. Only works on the replica currently holding the refresh
-	// leader lease; followers accept the call but defer to the leader's
-	// next scheduled tick. Requires the platform-operator FGA role.
-	RefreshToolCatalog(context.Context, *RefreshToolCatalogRequest) (*RefreshToolCatalogResponse, error)
 	// WriteAccessTuples atomically adds and/or deletes FGA tuples on behalf of
 	// an authenticated caller.
 	WriteAccessTuples(context.Context, *WriteAccessTuplesRequest) (*WriteAccessTuplesResponse, error)
@@ -344,12 +268,6 @@ type DaemonOperatorServiceServer interface {
 	ListFeatureTuples(context.Context, *ListFeatureTuplesRequest) (*ListFeatureTuplesResponse, error)
 	// SeedCatalogTenantEnabled writes tenant_enabled tuples for all platform-enabled items.
 	SeedCatalogTenantEnabled(context.Context, *SeedCatalogTenantEnabledRequest) (*SeedCatalogTenantEnabledResponse, error)
-	// SetPlatformEnabled writes or deletes the FGA platform_enabled tuple for a
-	// component from system_tenant:_system — the shared-catalog publish path
-	// (gibson#682). Only the platform operator may publish a curated connector
-	// to the shared catalog; the catalog fan-out then seeds tenant_enabled per
-	// tenant. published=false unpublishes (removes it from the shared catalog).
-	SetPlatformEnabled(context.Context, *SetPlatformEnabledRequest) (*SetPlatformEnabledResponse, error)
 	// EmitAuditEvent lets an operator/platform workload forward a structured
 	// audit event onto the daemon's emitter.
 	EmitAuditEvent(context.Context, *EmitAuditEventRequest) (*EmitAuditEventResponse, error)
@@ -428,15 +346,6 @@ type DaemonOperatorServiceServer interface {
 // pointer dereference when methods are called.
 type UnimplementedDaemonOperatorServiceServer struct{}
 
-func (UnimplementedDaemonOperatorServiceServer) Shutdown(context.Context, *ShutdownRequest) (*ShutdownResponse, error) {
-	return nil, status.Error(codes.Unimplemented, "method Shutdown not implemented")
-}
-func (UnimplementedDaemonOperatorServiceServer) ImpersonateTenant(context.Context, *ImpersonateTenantRequest) (*ImpersonateTenantResponse, error) {
-	return nil, status.Error(codes.Unimplemented, "method ImpersonateTenant not implemented")
-}
-func (UnimplementedDaemonOperatorServiceServer) RefreshToolCatalog(context.Context, *RefreshToolCatalogRequest) (*RefreshToolCatalogResponse, error) {
-	return nil, status.Error(codes.Unimplemented, "method RefreshToolCatalog not implemented")
-}
 func (UnimplementedDaemonOperatorServiceServer) WriteAccessTuples(context.Context, *WriteAccessTuplesRequest) (*WriteAccessTuplesResponse, error) {
 	return nil, status.Error(codes.Unimplemented, "method WriteAccessTuples not implemented")
 }
@@ -448,9 +357,6 @@ func (UnimplementedDaemonOperatorServiceServer) ListFeatureTuples(context.Contex
 }
 func (UnimplementedDaemonOperatorServiceServer) SeedCatalogTenantEnabled(context.Context, *SeedCatalogTenantEnabledRequest) (*SeedCatalogTenantEnabledResponse, error) {
 	return nil, status.Error(codes.Unimplemented, "method SeedCatalogTenantEnabled not implemented")
-}
-func (UnimplementedDaemonOperatorServiceServer) SetPlatformEnabled(context.Context, *SetPlatformEnabledRequest) (*SetPlatformEnabledResponse, error) {
-	return nil, status.Error(codes.Unimplemented, "method SetPlatformEnabled not implemented")
 }
 func (UnimplementedDaemonOperatorServiceServer) EmitAuditEvent(context.Context, *EmitAuditEventRequest) (*EmitAuditEventResponse, error) {
 	return nil, status.Error(codes.Unimplemented, "method EmitAuditEvent not implemented")
@@ -492,60 +398,6 @@ func RegisterDaemonOperatorServiceServer(s grpc.ServiceRegistrar, srv DaemonOper
 		t.testEmbeddedByValue()
 	}
 	s.RegisterService(&DaemonOperatorService_ServiceDesc, srv)
-}
-
-func _DaemonOperatorService_Shutdown_Handler(srv interface{}, ctx context.Context, dec func(interface{}) error, interceptor grpc.UnaryServerInterceptor) (interface{}, error) {
-	in := new(ShutdownRequest)
-	if err := dec(in); err != nil {
-		return nil, err
-	}
-	if interceptor == nil {
-		return srv.(DaemonOperatorServiceServer).Shutdown(ctx, in)
-	}
-	info := &grpc.UnaryServerInfo{
-		Server:     srv,
-		FullMethod: DaemonOperatorService_Shutdown_FullMethodName,
-	}
-	handler := func(ctx context.Context, req interface{}) (interface{}, error) {
-		return srv.(DaemonOperatorServiceServer).Shutdown(ctx, req.(*ShutdownRequest))
-	}
-	return interceptor(ctx, in, info, handler)
-}
-
-func _DaemonOperatorService_ImpersonateTenant_Handler(srv interface{}, ctx context.Context, dec func(interface{}) error, interceptor grpc.UnaryServerInterceptor) (interface{}, error) {
-	in := new(ImpersonateTenantRequest)
-	if err := dec(in); err != nil {
-		return nil, err
-	}
-	if interceptor == nil {
-		return srv.(DaemonOperatorServiceServer).ImpersonateTenant(ctx, in)
-	}
-	info := &grpc.UnaryServerInfo{
-		Server:     srv,
-		FullMethod: DaemonOperatorService_ImpersonateTenant_FullMethodName,
-	}
-	handler := func(ctx context.Context, req interface{}) (interface{}, error) {
-		return srv.(DaemonOperatorServiceServer).ImpersonateTenant(ctx, req.(*ImpersonateTenantRequest))
-	}
-	return interceptor(ctx, in, info, handler)
-}
-
-func _DaemonOperatorService_RefreshToolCatalog_Handler(srv interface{}, ctx context.Context, dec func(interface{}) error, interceptor grpc.UnaryServerInterceptor) (interface{}, error) {
-	in := new(RefreshToolCatalogRequest)
-	if err := dec(in); err != nil {
-		return nil, err
-	}
-	if interceptor == nil {
-		return srv.(DaemonOperatorServiceServer).RefreshToolCatalog(ctx, in)
-	}
-	info := &grpc.UnaryServerInfo{
-		Server:     srv,
-		FullMethod: DaemonOperatorService_RefreshToolCatalog_FullMethodName,
-	}
-	handler := func(ctx context.Context, req interface{}) (interface{}, error) {
-		return srv.(DaemonOperatorServiceServer).RefreshToolCatalog(ctx, req.(*RefreshToolCatalogRequest))
-	}
-	return interceptor(ctx, in, info, handler)
 }
 
 func _DaemonOperatorService_WriteAccessTuples_Handler(srv interface{}, ctx context.Context, dec func(interface{}) error, interceptor grpc.UnaryServerInterceptor) (interface{}, error) {
@@ -616,24 +468,6 @@ func _DaemonOperatorService_SeedCatalogTenantEnabled_Handler(srv interface{}, ct
 	}
 	handler := func(ctx context.Context, req interface{}) (interface{}, error) {
 		return srv.(DaemonOperatorServiceServer).SeedCatalogTenantEnabled(ctx, req.(*SeedCatalogTenantEnabledRequest))
-	}
-	return interceptor(ctx, in, info, handler)
-}
-
-func _DaemonOperatorService_SetPlatformEnabled_Handler(srv interface{}, ctx context.Context, dec func(interface{}) error, interceptor grpc.UnaryServerInterceptor) (interface{}, error) {
-	in := new(SetPlatformEnabledRequest)
-	if err := dec(in); err != nil {
-		return nil, err
-	}
-	if interceptor == nil {
-		return srv.(DaemonOperatorServiceServer).SetPlatformEnabled(ctx, in)
-	}
-	info := &grpc.UnaryServerInfo{
-		Server:     srv,
-		FullMethod: DaemonOperatorService_SetPlatformEnabled_FullMethodName,
-	}
-	handler := func(ctx context.Context, req interface{}) (interface{}, error) {
-		return srv.(DaemonOperatorServiceServer).SetPlatformEnabled(ctx, req.(*SetPlatformEnabledRequest))
 	}
 	return interceptor(ctx, in, info, handler)
 }
@@ -772,18 +606,6 @@ var DaemonOperatorService_ServiceDesc = grpc.ServiceDesc{
 	HandlerType: (*DaemonOperatorServiceServer)(nil),
 	Methods: []grpc.MethodDesc{
 		{
-			MethodName: "Shutdown",
-			Handler:    _DaemonOperatorService_Shutdown_Handler,
-		},
-		{
-			MethodName: "ImpersonateTenant",
-			Handler:    _DaemonOperatorService_ImpersonateTenant_Handler,
-		},
-		{
-			MethodName: "RefreshToolCatalog",
-			Handler:    _DaemonOperatorService_RefreshToolCatalog_Handler,
-		},
-		{
 			MethodName: "WriteAccessTuples",
 			Handler:    _DaemonOperatorService_WriteAccessTuples_Handler,
 		},
@@ -798,10 +620,6 @@ var DaemonOperatorService_ServiceDesc = grpc.ServiceDesc{
 		{
 			MethodName: "SeedCatalogTenantEnabled",
 			Handler:    _DaemonOperatorService_SeedCatalogTenantEnabled_Handler,
-		},
-		{
-			MethodName: "SetPlatformEnabled",
-			Handler:    _DaemonOperatorService_SetPlatformEnabled_Handler,
 		},
 		{
 			MethodName: "EmitAuditEvent",

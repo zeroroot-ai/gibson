@@ -26,7 +26,6 @@ import (
 	"github.com/zeroroot-ai/gibson/internal/platform/budget"
 	"github.com/zeroroot-ai/gibson/internal/platform/capabilitygrant"
 	"github.com/zeroroot-ai/gibson/internal/platform/idp"
-	"github.com/zeroroot-ai/gibson/internal/platform/impersonation"
 	"github.com/zeroroot-ai/gibson/internal/platform/manifest"
 	"github.com/zeroroot-ai/gibson/internal/platform/onboarding"
 	daemonoperatorv1 "github.com/zeroroot-ai/gibson/internal/server/daemon/api/gibson/daemon/operator/v1"
@@ -102,13 +101,6 @@ type DaemonServer struct {
 	onboardingStore interface {
 		GetState(ctx context.Context, tenantID string) (currentStep string, completedSteps []string, setupTasks map[string]string, completedAt string, err error)
 		UpdateState(ctx context.Context, tenantID, currentStep string, completedSteps []string, setupTasks map[string]string) error
-	}
-
-	// impersonationIssuer issues short-lived impersonation tokens.
-	// May be nil; wired when the impersonation service is available.
-	// TODO: replace with concrete type once impersonation package is introduced.
-	impersonationIssuer interface {
-		IssueToken(ctx context.Context, tenantID string) (token string, err error)
 	}
 
 	// authorizer is the FGA Authorizer used by admin handlers that need direct FGA access.
@@ -432,14 +424,6 @@ type DaemonInterface interface {
 	// mission.ErrDefinitionNotFound when the name is not registered.
 	UpdateMissionDefinition(ctx context.Context, req UpdateMissionDefinitionData) (UpdateMissionDefinitionResultData, error)
 
-	// RequestShutdown requests graceful shutdown of the daemon
-	RequestShutdown(ctx context.Context, force bool, timeoutSeconds int32) error
-
-	// RefreshToolCatalog signals the catalog refresher to immediately
-	// poll runner images. Returns (queued, message, error): queued is
-	// true if the signal was accepted by this replica's refresher;
-	// false if the refresher is not running on this replica.
-	RefreshToolCatalog(ctx context.Context) (queued bool, message string, err error)
 }
 
 // DaemonStatus represents daemon status information.
@@ -972,14 +956,6 @@ func (s *DaemonServer) WithTargetService(svc *target.Service) *DaemonServer {
 // Call this immediately after NewDaemonServer and before registering the server.
 func (s *DaemonServer) WithOnboardingStore(store *onboarding.RedisOnboardingStore) *DaemonServer {
 	s.onboardingStore = store
-	return s
-}
-
-// WithImpersonationIssuer wires the HMAC-SHA256 JWT issuer so that
-// ImpersonateTenant returns a real signed token instead of an empty string.
-// Call this immediately after NewDaemonServer and before registering the server.
-func (s *DaemonServer) WithImpersonationIssuer(issuer *impersonation.Issuer) *DaemonServer {
-	s.impersonationIssuer = issuer
 	return s
 }
 
@@ -2590,9 +2566,8 @@ func (s *DaemonServer) CreateMissionDefinition(ctx context.Context, req *daemonp
 	}, nil
 }
 
-// Shutdown, ImpersonateTenant, and RefreshToolCatalog have been relocated
-// to platform_operator_shutdown.go, platform_operator_impersonate.go, and
-// platform_operator_refresh_tool_catalog.go as PlatformOperatorService handlers.
+// Shutdown, ImpersonateTenant, RefreshToolCatalog, and SetPlatformEnabled were
+// deleted from DaemonOperatorService as dead, uncalled admin RPCs (gibson#1049).
 // Langfuse per-tenant credential handlers and the langfuseCredential* helpers
 // were removed with the Langfuse retirement (gibson#755).
 
@@ -2603,10 +2578,6 @@ func (s *DaemonServer) CreateMissionDefinition(ctx context.Context, req *daemonp
 // removed. Tenant lifecycle is now the sole responsibility of the standalone
 // gibson-tenant-operator (see core/tenant-operator/).
 // ---------------------------------------------------------------------------
-
-// RefreshToolCatalog, ImpersonateTenant, GetOnboardingState, and
-// UpdateOnboardingState have been relocated to PlatformOperatorService and
-// TenantAdminService handler files respectively.
 
 // ---------------------------------------------------------------------------
 // API Key RPCs — deleted.
