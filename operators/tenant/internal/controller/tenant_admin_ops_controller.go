@@ -87,8 +87,13 @@ func (r *TenantAdminOpsRunnable) Start(ctx context.Context) error {
 			if err := r.drain(ctx); err != nil {
 				// Transient daemon-unreachable / DB errors: log and retry next
 				// tick. Never fail the manager — a daemon blip must not crash
-				// the operator.
-				logger.Error(err, "admin-tenant-ops drain pass failed; retrying next tick")
+				// the operator. Emitted at error-level with a stable
+				// `event=operator_daemon_drain_failed` key so "drain failing
+				// repeatedly" is queryable in logs, complementing the
+				// gibson_tenant_operator_daemon_call_errors_total metric the
+				// daemon client bumps on the underlying RPC failure (gibson#1043).
+				logger.Error(err, "admin-tenant-ops drain pass failed; retrying next tick",
+					"event", "operator_daemon_drain_failed")
 			}
 		}
 	}
