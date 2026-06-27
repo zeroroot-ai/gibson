@@ -1,7 +1,7 @@
 //go:build e2e
 // +build e2e
 
-// Copyright 2026 Zero Day AI, Inc.
+// Copyright 2026 Hack the Planet LLC
 // Use of this source code is governed by the Elastic License 2.0
 // that can be found in the LICENSE file in the repo root.
 

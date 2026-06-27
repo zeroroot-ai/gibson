@@ -1,5 +1,5 @@
 /*
-Copyright 2026 Zero Day AI.
+Copyright 2026 Hack the Planet LLC
 Licensed under the Apache License, Version 2.0 (the "License").
 */
 
