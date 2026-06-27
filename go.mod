@@ -49,7 +49,7 @@ require (
 	github.com/stretchr/testify v1.11.1
 	github.com/testcontainers/testcontainers-go v0.42.0
 	github.com/vmihailenco/msgpack/v5 v5.4.1
-	github.com/zeroroot-ai/ast-checks v0.1.2
+	github.com/zeroroot-ai/ast-checks v0.2.0
 	github.com/zeroroot-ai/sdk v0.156.0
 	github.com/zeroroot-ai/setec v0.105.0
 	github.com/zeroroot-ai/testfixtures v0.1.1
@@ -311,4 +311,3 @@ require (
 	sigs.k8s.io/randfill v1.0.0 // indirect
 	sigs.k8s.io/structured-merge-diff/v6 v6.3.2 // indirect
 )
-
