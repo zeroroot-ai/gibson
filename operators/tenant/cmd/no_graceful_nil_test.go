@@ -116,73 +116,63 @@ func TestNoGracefulNilInRequestPaths(t *testing.T) {
 		recorderOpt = "event recorder always set by SetupWithManager; nil only in unit tests (best-effort obs)"
 	)
 
+	// CONTENT-KEYED (not line-keyed). Each key is "<relpath> :: <snippet>" —
+	// the file path plus the rendered guard expression, NOT a line number.
+	// This is deliberate: a line-keyed allowlist breaks every time anything
+	// shifts line numbers (a license-header swap, an added import, a comment),
+	// which has repeatedly reddened main for no real reason (gibson#1025/#1043/
+	// #1044, the ELv2-header merge gibson#1041). Keying on the guard text makes
+	// the allowlist immune to line shifts and file-internal moves.
+	//
+	// Trade-off: one entry tolerates that exact guard ANYWHERE in the file
+	// (multiple identical guards in one file collapse to a single key). For a
+	// "known-tolerated defensive guards" list that is acceptable — arguably
+	// better, since you stop re-litigating the same pattern per occurrence.
 	requestPathAllowlist := map[string]string{
-		// Neo4j legacy shared-cluster path DELETED (#350): per-tenant Neo4j is
-		// provisioned solely by the data-plane pipeline (DataPlaneProvisioned /
-		// DeprovisionDataPlane), so InitNeo4jScope + DeleteNeo4jSubgraph and
-		// their nil-guards are gone — no allowlist entry needed.
-
 		// FinalBackup — VeleroEnabled is a spec/cluster-topology flag, not a
-		// dep-nil. K8sClient is always set from mgr; the nil branch is dead
-		// code but the linter flags it because K8sClient is a pointer type.
-		// Delete after Velero-always-on (veleroOpt follow-up).
-		"internal/saga/flows/final_backup.go:129": veleroOpt,
+		// dep-nil. K8sClient is always set from mgr. Delete after Velero-always-on.
+		"internal/saga/flows/final_backup.go :: if s.deps.K8sClient == nil || !s.deps.VeleroEnabled { ... }": veleroOpt,
 
 		// internal/dataplane/pipeline.go — sub-client optionality within the
 		// pipeline provisioner; each sub-client (Postgres, Neo4j, Redis, Vector,
-		// KEK) is optional by design — the pipeline runs whichever sub-clients
-		// are wired. Follow-up: make each sub-client required after the
+		// KEK) is optional by design. Follow-up: make each required after the
 		// dataplane-required hardening spec ships.
-		// Line numbers reflect the AlreadyProvisioned field added in #279 fix.
-		"internal/dataplane/pipeline.go:111": dpReq,
-		"internal/dataplane/pipeline.go:117": dpReq,
-		"internal/dataplane/pipeline.go:132": dpReq,
-		"internal/dataplane/pipeline.go:138": dpReq,
-		"internal/dataplane/pipeline.go:153": dpReq,
-		"internal/dataplane/pipeline.go:159": dpReq,
-		"internal/dataplane/pipeline.go:174": dpReq,
-		"internal/dataplane/pipeline.go:180": dpReq,
-		"internal/dataplane/pipeline.go:195": dpReq,
-		"internal/dataplane/pipeline.go:355": dpReq,
-		"internal/dataplane/pipeline.go:376": dpReq,
-		"internal/dataplane/pipeline.go:393": dpReq,
+		"internal/dataplane/pipeline.go :: if p.cfg.Postgres == nil { ... }":                   dpReq,
+		"internal/dataplane/pipeline.go :: if p.cfg.Neo4j == nil { ... }":                      dpReq,
+		"internal/dataplane/pipeline.go :: if p.cfg.Redis == nil { ... }":                      dpReq,
+		"internal/dataplane/pipeline.go :: if p.cfg.Vector == nil { ... }":                     dpReq,
+		"internal/dataplane/pipeline.go :: if p.cfg.KEK == nil { ... }":                        dpReq,
+		"internal/dataplane/pipeline.go :: if p.cfg.K8sClient == nil { ... }":                  dpReq,
+		"internal/dataplane/pipeline.go :: if tenant == nil || p.cfg.K8sClient == nil { ... }": dpReq,
+		"internal/dataplane/pipeline.go :: if p.cfg.Recorder == nil || tenant == nil { ... }":  dpReq,
 
 		// internal/clients/* — HTTP unmarshal helpers (caller passes out=nil to discard body)
-		"internal/clients/fga/http.go:238":                  httpDiscard,
-		"internal/clients/zitadel/client.go:506":            httpDiscard,
-		"internal/clients/vault/client.go:389":              httpDiscard,
-		"internal/clients/vault/transit.go:270":             httpDiscard,
-		"internal/clients/signupprogress/redis.go:95":       ctorGuard,
-		"internal/provision/entitlements_grpc_client.go:85": ctorGuard,
+		"internal/clients/fga/http.go :: if out == nil || len(raw) == 0 { ... }":                      httpDiscard,
+		"internal/clients/zitadel/client.go :: if out == nil || len(raw) == 0 { ... }":                httpDiscard,
+		"internal/clients/vault/client.go :: if out == nil { ... }":                                   httpDiscard,
+		"internal/clients/vault/transit.go :: if out == nil { ... }":                                  httpDiscard,
+		"internal/clients/signupprogress/redis.go :: if c == nil || c.rdb == nil { ... }":             ctorGuard,
+		"internal/provision/entitlements_grpc_client.go :: if c == nil || c.transport == nil { ... }": ctorGuard,
 
 		// Controller-runtime patterns
-		"internal/controller/tenant_namespace.go:298": applyShim,
+		"internal/controller/tenant_namespace.go :: if dst == nil { ... }": applyShim,
 
-		// E8 declarative reconcilers (TenantDataPlane #801 / TenantSecretsBackend
-		// #802 / TenantIdentity #803 / TenantGrants #804) — each emit*/event helper guards
-		// `if r.Recorder == nil { return }`. The Recorder is ALWAYS set in
-		// production by SetupWithManager (which defaults it from the manager);
-		// the nil branch exists only so unit tests can construct the reconciler
-		// without a manager-backed recorder. Event emission is best-effort
-		// observability, never a request-path dependency.
-		"internal/controller/tenantdataplane_controller.go:209":      recorderOpt,
-		"internal/controller/tenantsecretsbackend_controller.go:210": recorderOpt,
-		"internal/controller/tenantidentity_controller.go:221":       recorderOpt,
-		"internal/controller/tenantgrants_controller.go:228":         recorderOpt,
+		// E8 declarative reconcilers — each emit*/event helper guards
+		// `if r.Recorder == nil { return }`. Recorder is ALWAYS set in production
+		// by SetupWithManager; the nil branch exists only for unit tests.
+		"internal/controller/tenantdataplane_controller.go :: if r.Recorder == nil { ... }":      recorderOpt,
+		"internal/controller/tenantsecretsbackend_controller.go :: if r.Recorder == nil { ... }": recorderOpt,
+		"internal/controller/tenantidentity_controller.go :: if r.Recorder == nil { ... }":       recorderOpt,
+		"internal/controller/tenantgrants_controller.go :: if r.Recorder == nil { ... }":         recorderOpt,
 
 		// Audit emitter + health probes
-		"internal/audit/emitter.go:210":    emitterOpt,
-		"internal/health/downstream.go:90": healthShim,
+		"internal/audit/emitter.go :: if e.cfg.RedisClient == nil { ... }": emitterOpt,
+		"internal/health/downstream.go :: if c == nil { ... }":             healthShim,
 
-		// Saga runner — k8s API may return nil maps from a freshly created object
-		// Line numbers shifted +58/+70 from the bestEffortStep+wrapBestEffort
-		// additions for teardown step-isolation (tenant-operator#184).
-		// runner.go:526 + emitter shift: clearBlockedOnSuccess helper added for #141.
-		"internal/saga/runner.go:235": k8sShape,
-		"internal/saga/runner.go:266": k8sShape,
-		// clearBlockedOnSuccess param: GetConditions() returns nil on a freshly created object.
-		"internal/saga/runner.go:531": k8sShape,
-		"internal/saga/runner.go:584": emitterOpt,
+		// Saga runner — k8s API may return nil maps/conditions from a freshly created object.
+		"internal/saga/runner.go :: if conditions == nil { ... }":            k8sShape,
+		"internal/saga/runner.go :: if annotations == nil { ... }":           k8sShape,
+		"internal/saga/runner.go :: if a == nil || a.emitter == nil { ... }": emitterOpt,
 	}
 
 	// Real-code subtest: walk internal/ and fail on any new finding.
@@ -192,8 +182,7 @@ func TestNoGracefulNilInRequestPaths(t *testing.T) {
 
 		var newFindings []string
 		for _, f := range allFindings {
-			coord := repoRelCoord(f, repoRoot)
-			if _, ok := requestPathAllowlist[coord]; !ok {
+			if _, ok := requestPathAllowlist[contentKey(f, repoRoot)]; !ok {
 				newFindings = append(newFindings, f)
 			}
 		}
@@ -477,4 +466,20 @@ func repoRelCoord(finding, repoRoot string) string {
 		return rel + ":" + line
 	}
 	return pathLine
+}
+
+// contentKey turns a finding ("<abs>:<line>: <snippet>") into the
+// line-independent allowlist key "<relpath> :: <snippet>". Keying on the guard
+// text instead of the line number makes the allowlist immune to line shifts
+// (license headers, added imports/comments) and to file-internal moves.
+func contentKey(finding, repoRoot string) string {
+	relpath := repoRelCoord(finding, repoRoot) // "<relpath>:<line>"
+	if i := strings.LastIndex(relpath, ":"); i >= 0 {
+		relpath = relpath[:i]
+	}
+	var snippet string
+	if parts := strings.SplitN(finding, ": ", 2); len(parts) == 2 {
+		snippet = parts[1]
+	}
+	return relpath + " :: " + snippet
 }
