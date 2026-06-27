@@ -2063,57 +2063,10 @@ func (d *daemonImpl) GetSuspendedMissions(ctx context.Context) ([]types.ID, erro
 	return d.checkpointer.ListCheckpoints(ctx)
 }
 
-// RequestShutdown initiates graceful shutdown of the daemon.
-// This is called by the gRPC Shutdown endpoint to allow remote shutdown requests.
-//
-// Parameters:
-//   - ctx: Context with timeout for shutdown operations
-//   - force: If true, skip graceful drain and shutdown immediately
-//   - timeoutSeconds: Maximum time to wait for graceful shutdown
-//
-// Returns:
-//   - error: Non-nil if shutdown fails
-func (d *daemonImpl) RequestShutdown(ctx context.Context, force bool, timeoutSeconds int32) error {
-	d.logger.Info(ctx, "shutdown requested",
-		"force", force,
-		"timeout_seconds", timeoutSeconds,
-	)
-
-	// Send SIGTERM to ourselves to trigger graceful shutdown
-	// This uses the same signal handling path as Ctrl+C
-	process, err := os.FindProcess(os.Getpid())
-	if err != nil {
-		return fmt.Errorf("failed to find own process: %w", err)
-	}
-
-	// Send SIGTERM to trigger graceful shutdown
-	if err := process.Signal(os.Interrupt); err != nil {
-		return fmt.Errorf("failed to send interrupt signal: %w", err)
-	}
-
-	return nil
-}
-
 // CredentialHandler returns the credential handler for dashboard API operations.
 // Returns nil if the credential handler was not initialized (missing key provider).
 func (d *daemonImpl) CredentialHandler() *api.CredentialHandler {
 	return d.credentialHandler
-}
-
-// RefreshToolCatalog signals the catalog refresher on this replica to
-// immediately poll every configured gibson-tool-runner image for --list-tools
-// output. When the refresher is not running (feature flag off, or this
-// replica is not the refresh leader), returns queued=false with a
-// human-readable message rather than an error — the admin caller always
-// wants to know the outcome without interpreting gRPC status codes.
-func (d *daemonImpl) RefreshToolCatalog(ctx context.Context) (bool, string, error) {
-	if d.toolCatalogRefresher == nil {
-		return false, "tool catalog refresher is not running on this replica (tool_runner.enabled=false or follower)", nil
-	}
-	if err := d.toolCatalogRefresher.RefreshNow(ctx); err != nil {
-		return false, err.Error(), nil
-	}
-	return true, "refresh signal queued; next tick will ingest the latest --list-tools output from every configured runner image", nil
 }
 
 // LLMConfigHandler returns the LLM config handler for dashboard API operations.

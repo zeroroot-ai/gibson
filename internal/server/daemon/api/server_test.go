@@ -225,14 +225,6 @@ func (m *mockDaemon) UpdateMissionDefinition(ctx context.Context, req UpdateMiss
 	return UpdateMissionDefinitionResultData{}, nil
 }
 
-func (m *mockDaemon) RequestShutdown(ctx context.Context, force bool, timeoutSeconds int32) error {
-	return nil
-}
-
-func (m *mockDaemon) RefreshToolCatalog(ctx context.Context) (bool, string, error) {
-	return false, "mock daemon does not run a catalog refresher", nil
-}
-
 // mockServerStream implements grpc.ServerStreamingServer[MissionEvent] for testing
 type mockServerStream struct {
 	ctx       context.Context

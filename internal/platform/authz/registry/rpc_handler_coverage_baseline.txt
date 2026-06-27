@@ -42,9 +42,7 @@
 /gibson.daemon.logs.v1.LogsService/QueryDaemonLogs
 /gibson.daemon.logs.v1.LogsService/QueryMissionLogs
 /gibson.daemon.operator.v1.DaemonOperatorService/EmitAuditEvent
-/gibson.daemon.operator.v1.DaemonOperatorService/ImpersonateTenant
 /gibson.daemon.operator.v1.DaemonOperatorService/ListFeatureTuples
-/gibson.daemon.operator.v1.DaemonOperatorService/RefreshToolCatalog
 /gibson.daemon.operator.v1.DaemonOperatorService/SeedCatalogTenantEnabled
 /gibson.daemon.operator.v1.DaemonOperatorService/WriteAccessTuples
 /gibson.daemon.v1.DaemonService/BuildComponent

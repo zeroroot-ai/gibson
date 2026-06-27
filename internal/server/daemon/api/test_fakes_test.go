@@ -174,11 +174,6 @@ func (f *fakeDaemon) CreateMissionDefinition(_ context.Context, _ CreateMissionD
 func (f *fakeDaemon) UpdateMissionDefinition(_ context.Context, _ UpdateMissionDefinitionData) (UpdateMissionDefinitionResultData, error) {
 	return UpdateMissionDefinitionResultData{}, nil
 }
-func (f *fakeDaemon) RequestShutdown(_ context.Context, _ bool, _ int32) error { return nil }
-func (f *fakeDaemon) RefreshToolCatalog(_ context.Context) (bool, string, error) {
-	return false, "", nil
-}
-
 func fakePayloadKey(missionID, checkpointID string) string {
 	return missionID + "|" + checkpointID
 }
