@@ -1,4 +1,4 @@
-// Copyright 2026 Zero Day AI.
+// Copyright 2026 Hack the Planet LLC
 
 package daemon
 

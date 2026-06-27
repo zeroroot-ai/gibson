@@ -1,4 +1,4 @@
-// Copyright 2026 Zero Day AI, Inc.
+// Copyright 2026 Hack the Planet LLC
 //
 // Platform wire-contract test — in-module home after the platform-sdk
 // retirement (gibson#909, decision A).
