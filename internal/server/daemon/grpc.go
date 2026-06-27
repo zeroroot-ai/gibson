@@ -318,43 +318,17 @@ func (d *daemonImpl) buildGRPCServer(ctx context.Context) (*grpcSubsystem, error
 	// method is rejected with PermissionDenied rather than falling through
 	// to sdkAuthUnary (which would fail with Unauthenticated since no
 	// ext-authz headers are present on direct-dial connections).
+	// Per-peer method allowlist (#245), derived from the descriptor-validated
+	// operatorMethodPolicy (operator_method_policy.go) — the single source of
+	// truth that classifies EVERY DaemonOperatorService method as
+	// operator-allowed XOR operator-denied. A guard test enumerates the methods
+	// from the generated service descriptor and fails CI if any method is
+	// unclassified, so this allowlist can no longer silently drift behind the
+	// RPC surface (the recurring gibson#621/#949/#1043 omission bug). A
+	// reconciliation test pins the allowed set to exactly the operator's actual
+	// call set (least privilege).
 	spiffeMethodAllowlist := map[string]map[string]bool{
-		"spiffe://zeroroot.ai/platform/tenant-operator": {
-			"/gibson.daemon.operator.v1.DaemonOperatorService/UpsertTenantQuota":        true,
-			"/gibson.daemon.operator.v1.DaemonOperatorService/ListFeatureTuples":        true,
-			"/gibson.daemon.operator.v1.DaemonOperatorService/WriteAccessTuples":        true,
-			"/gibson.daemon.operator.v1.DaemonOperatorService/SeedCatalogTenantEnabled": true,
-			// SetTenantZitadelOrg seeds the tenant -> Zitadel-org mapping in the saga's
-			// Entitlements step (gibson#621); the RPC was added but this per-peer SPIFFE
-			// allowlist was never updated, so the operator was denied and every
-			// tenant provisioning blocked at Entitlements.
-			"/gibson.daemon.operator.v1.DaemonOperatorService/SetTenantZitadelOrg": true,
-			"/gibson.daemon.operator.v1.DaemonOperatorService/EmitAuditEvent":      true,
-			// Operator-pull tenant provisioning (E9). The pull loop and the
-			// status report-back all dial over this SPIFFE direct-path, so each
-			// method must be allowlisted here. NOTE: gibson#949 added the
-			// ListPendingTenantProvisioning / AckTenantProvisioned RPCs (and the
-			// operator runnable that calls them) but did NOT update this
-			// allowlist, so operator-pull was denied at the daemon — the same
-			// omission the SetTenantZitadelOrg comment above documents. Added
-			// here together with ReportTenantStatus (gibson#948 follow-up,
-			// dashboard#813).
-			"/gibson.daemon.operator.v1.DaemonOperatorService/ListPendingTenantProvisioning": true,
-			"/gibson.daemon.operator.v1.DaemonOperatorService/AckTenantProvisioned":          true,
-			"/gibson.daemon.operator.v1.DaemonOperatorService/ReportTenantStatus":            true,
-			// tenant_admin_ops queue drain (migration 018). The operator's
-			// admin-ops runnable (operators/tenant tenant_admin_ops_controller)
-			// drains the queue via ListPendingTenantOps and acks each via
-			// AckTenantOp over this same SPIFFE direct-path. Both RPCs were added
-			// but — once again — this allowlist was not updated (the identical
-			// omission documented for SetTenantZitadelOrg and the operator-pull
-			// RPCs above), so the drain pass failed "unauthorized" every tick and
-			// the founding-owner membership op never applied, leaving signup stuck
-			// at "Still setting up your workspace, we'll email you" while the
-			// Tenant CR was otherwise Ready.
-			"/gibson.daemon.operator.v1.DaemonOperatorService/ListPendingTenantOps": true,
-			"/gibson.daemon.operator.v1.DaemonOperatorService/AckTenantOp":          true,
-		},
+		tenantOperatorSVID: operatorAllowedMethods(),
 	}
 	spiffePlatformBypass := func(ctx context.Context, method string) (context.Context, bool, error) {
 		p, ok := peer.FromContext(ctx)
