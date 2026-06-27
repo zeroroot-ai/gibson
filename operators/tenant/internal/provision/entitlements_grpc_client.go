@@ -29,6 +29,7 @@ import (
 
 	operatorv1 "github.com/zeroroot-ai/gibson/internal/server/daemon/api/gibson/daemon/operator/v1"
 	"github.com/zeroroot-ai/gibson/operators/tenant/internal/clients"
+	"github.com/zeroroot-ai/gibson/operators/tenant/internal/metrics"
 	daemontransport "github.com/zeroroot-ai/gibson/operators/tenant/pkg/transport/daemon"
 )
 
@@ -104,10 +105,19 @@ func (c *EntitlementsGRPCClient) authCtx(ctx context.Context) (context.Context, 
 // retry taxonomy (clients.ErrUnreachable / ErrUnauthorized / ErrInvalidInput),
 // matching the HTTP client's behaviour so the saga runner sees the same
 // classification regardless of transport.
+//
+// Every operator->daemon RPC funnels its error through here, so this is also
+// the single chokepoint where we record the failure metric
+// (gibson_tenant_operator_daemon_call_errors_total). gibson#1043 (a
+// SPIFFE-allowlist omission that silently denied the admin-ops drain) is the
+// regression this makes observable: it surfaces as outcome="permission_denied".
 func translateGRPCError(op string, err error) error {
 	if err == nil {
 		return nil
 	}
+	// Record the raw gRPC error before any sentinel wrapping so the status code
+	// is still recoverable for the outcome label.
+	metrics.ObserveDaemonCallError(op, err)
 	st, ok := grpcstatus.FromError(err)
 	if !ok {
 		return fmt.Errorf("entitlements: %s: %w: %w", op, clients.ErrUnreachable, err)
