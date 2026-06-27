@@ -6,6 +6,8 @@ import (
 
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
+	grpccodes "google.golang.org/grpc/codes"
+	grpcstatus "google.golang.org/grpc/status"
 
 	daemonoperatorv1 "github.com/zeroroot-ai/gibson/internal/server/daemon/api/gibson/daemon/operator/v1"
 )
@@ -114,4 +116,114 @@ func TestOperatorMethodPolicy_AllowedSetEqualsActualCallSet(t *testing.T) {
 	assert.ElementsMatch(t, want, got,
 		"operator-allowed set must equal the operator's actual call set exactly "+
 			"(missing grant => provisioning breaks; surplus grant => over-grant)")
+}
+
+// allowedMethod returns one FQN the tenant-operator is allowed to call, for use
+// in the bypass tests below.
+func allowedMethod() string {
+	return daemonoperatorv1.DaemonOperatorService_WriteAccessTuples_FullMethodName
+}
+
+// deniedMethod returns one operator-DENIED DaemonOperatorService FQN (no caller
+// wired), for use in the bypass tests below.
+func deniedMethod() string {
+	return daemonoperatorv1.DaemonOperatorService_UpsertTenantQuota_FullMethodName
+}
+
+// TestSpiffePeerMethodPolicies_OnlyTenantOperatorIsPoliced asserts the policed
+// peer set is exactly the tenant-operator: EnvoyID and any browser-path SVID
+// are deliberately absent (they transit Envoy + ext-authz, never this bypass).
+func TestSpiffePeerMethodPolicies_OnlyTenantOperatorIsPoliced(t *testing.T) {
+	policies := spiffePeerMethodPolicies()
+	require.Len(t, policies, 1, "exactly one direct-dial peer should be policed today")
+	methods, ok := policies[tenantOperatorSVID]
+	require.True(t, ok, "tenant-operator must have an explicit method policy")
+	assert.True(t, methods[allowedMethod()], "tenant-operator policy must permit its allowed methods")
+	assert.False(t, methods[deniedMethod()], "tenant-operator policy must not permit operator-denied methods")
+}
+
+// TestValidateAllowedPeerPolicies covers the fail-loud-at-startup contract
+// (gibson#1052): a configured AllowedPeerIDs entry with no method policy makes
+// the daemon refuse to start, while a policed peer (tenant-operator) and an
+// empty list pass.
+func TestValidateAllowedPeerPolicies(t *testing.T) {
+	policies := spiffePeerMethodPolicies()
+
+	t.Run("empty allow-list passes", func(t *testing.T) {
+		assert.NoError(t, validateAllowedPeerPolicies(nil, policies))
+		assert.NoError(t, validateAllowedPeerPolicies([]string{}, policies))
+	})
+
+	t.Run("policed tenant-operator passes", func(t *testing.T) {
+		assert.NoError(t, validateAllowedPeerPolicies([]string{tenantOperatorSVID}, policies))
+	})
+
+	t.Run("unpoliced peer fails loud", func(t *testing.T) {
+		err := validateAllowedPeerPolicies(
+			[]string{"spiffe://zeroroot.ai/platform/dashboard"}, policies)
+		require.Error(t, err, "an allowed peer with no method policy must fail startup")
+		assert.Contains(t, err.Error(), "spiffe://zeroroot.ai/platform/dashboard")
+		assert.Contains(t, err.Error(), "gibson#1052")
+	})
+
+	t.Run("policed + unpoliced mix fails and names the unpoliced peer", func(t *testing.T) {
+		err := validateAllowedPeerPolicies(
+			[]string{tenantOperatorSVID, "spiffe://zeroroot.ai/platform/daemon"}, policies)
+		require.Error(t, err)
+		assert.Contains(t, err.Error(), "spiffe://zeroroot.ai/platform/daemon")
+		assert.NotContains(t, err.Error(), tenantOperatorSVID,
+			"only the unpoliced peer should be reported")
+	})
+}
+
+// TestSpiffeBypassDecision covers the fail-closed request-time contract
+// (gibson#1052 + #245):
+//   - an unpoliced allowed peer is DENIED (not granted);
+//   - the tenant-operator is allowed only for its classified methods;
+//   - a non-allow-listed SVID (EnvoyID / browser path) falls through to the
+//     ext-authz header path (matched=false, no error).
+func TestSpiffeBypassDecision(t *testing.T) {
+	policies := spiffePeerMethodPolicies()
+	allowed := []string{tenantOperatorSVID}
+
+	t.Run("tenant-operator allowed method is authorised", func(t *testing.T) {
+		ok, err := spiffeBypassDecision(tenantOperatorSVID, allowedMethod(), allowed, policies)
+		require.NoError(t, err)
+		assert.True(t, ok, "policed peer calling an allowed method must be authorised")
+	})
+
+	t.Run("tenant-operator denied method is PermissionDenied", func(t *testing.T) {
+		ok, err := spiffeBypassDecision(tenantOperatorSVID, deniedMethod(), allowed, policies)
+		assert.False(t, ok)
+		require.Error(t, err)
+		assert.Equal(t, grpccodes.PermissionDenied, grpcstatus.Code(err))
+	})
+
+	t.Run("tenant-operator unknown method is PermissionDenied", func(t *testing.T) {
+		ok, err := spiffeBypassDecision(tenantOperatorSVID,
+			"/gibson.daemon.operator.v1.DaemonOperatorService/NoSuchMethod", allowed, policies)
+		assert.False(t, ok)
+		require.Error(t, err)
+		assert.Equal(t, grpccodes.PermissionDenied, grpcstatus.Code(err))
+	})
+
+	t.Run("allow-listed peer with no method policy is DENIED (fail-closed)", func(t *testing.T) {
+		unpoliced := "spiffe://zeroroot.ai/platform/dashboard"
+		// The peer is allow-listed at the TLS layer but has NO method policy —
+		// the gibson#1052 fail-open gap. It must be denied, not granted.
+		ok, err := spiffeBypassDecision(unpoliced, allowedMethod(),
+			[]string{tenantOperatorSVID, unpoliced}, policies)
+		assert.False(t, ok, "an unpoliced allowed peer must NOT be granted bypass access")
+		require.Error(t, err, "an unpoliced allowed peer must be denied")
+		assert.Equal(t, grpccodes.PermissionDenied, grpcstatus.Code(err))
+		assert.Contains(t, grpcstatus.Convert(err).Message(), "gibson#1052")
+	})
+
+	t.Run("non-allow-listed SVID falls through to ext-authz path", func(t *testing.T) {
+		// EnvoyID is never in AllowedPeerIDs — it must fall through, not deny.
+		ok, err := spiffeBypassDecision("spiffe://zeroroot.ai/platform/envoy",
+			allowedMethod(), allowed, policies)
+		assert.False(t, ok, "a non-allow-listed peer is not bypassed")
+		assert.NoError(t, err, "a non-allow-listed peer must fall through, NOT be denied")
+	})
 }

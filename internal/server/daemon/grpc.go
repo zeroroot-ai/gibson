@@ -59,11 +59,9 @@ import (
 	"go.opentelemetry.io/contrib/instrumentation/google.golang.org/grpc/otelgrpc"
 	"go.opentelemetry.io/otel/metric"
 	"google.golang.org/grpc"
-	grpccodes "google.golang.org/grpc/codes"
 	"google.golang.org/grpc/credentials"
 	grpcmetadata "google.golang.org/grpc/metadata"
 	"google.golang.org/grpc/peer"
-	grpcstatus "google.golang.org/grpc/status"
 	"google.golang.org/protobuf/types/known/timestamppb"
 
 	"github.com/zeroroot-ai/gibson/internal/engine/graphrag/graph"
@@ -327,8 +325,18 @@ func (d *daemonImpl) buildGRPCServer(ctx context.Context) (*grpcSubsystem, error
 	// RPC surface (the recurring gibson#621/#949/#1043 omission bug). A
 	// reconciliation test pins the allowed set to exactly the operator's actual
 	// call set (least privilege).
-	spiffeMethodAllowlist := map[string]map[string]bool{
-		tenantOperatorSVID: operatorAllowedMethods(),
+	spiffeMethodAllowlist := spiffePeerMethodPolicies()
+	// Fail loud at startup (gibson#1052): every configured direct-dial peer in
+	// AllowedPeerIDs MUST have an explicit method policy. An allow-listed peer
+	// with no policy previously fell through to UNRESTRICTED method access
+	// (fail-open). The dashboard and other browser-path callers must transit
+	// Envoy + ext-authz and must NOT appear in AllowedPeerIDs. AllowedPeerIDs is
+	// fully populated by initSPIFFEX509Source (called from Start before
+	// buildGRPCServer), so the complete set is known here.
+	if d.config.Auth.SPIFFE != nil {
+		if err := validateAllowedPeerPolicies(d.config.Auth.SPIFFE.AllowedPeerIDs, spiffeMethodAllowlist); err != nil {
+			return nil, err
+		}
 	}
 	spiffePlatformBypass := func(ctx context.Context, method string) (context.Context, bool, error) {
 		p, ok := peer.FromContext(ctx)
@@ -349,25 +357,24 @@ func (d *daemonImpl) buildGRPCServer(ctx context.Context) (*grpcSubsystem, error
 		if svid == "" {
 			return ctx, false, nil
 		}
-		// Trust only SVIDs the daemon already explicitly allow-listed at
-		// the TLS layer via AllowedPeerIDs. EnvoyID is not bypassed —
-		// browser-path traffic always carries the ext-authz headers and
-		// must continue to do so.
-		for _, allowed := range d.config.Auth.SPIFFE.AllowedPeerIDs {
-			if svid == allowed {
-				// Enforce per-peer method allowlist (#245).
-				if methods, listed := spiffeMethodAllowlist[svid]; listed && !methods[method] {
-					return ctx, false, grpcstatus.Errorf(grpccodes.PermissionDenied,
-						"SPIFFE peer %q is not authorised to call %q", svid, method)
-				}
-				return auth.WithIdentity(ctx, auth.Identity{
-					Subject:        svid,
-					Issuer:         auth.Issuer("spiffe"),
-					CredentialType: auth.CredentialType("spiffe"),
-				}), true, nil
-			}
+		// Trust only SVIDs the daemon already explicitly allow-listed at the TLS
+		// layer via AllowedPeerIDs, AND only for the methods their explicit
+		// method policy permits. A peer with no policy is DENIED, not granted
+		// unrestricted access (fail-closed, gibson#1052). EnvoyID is not bypassed
+		// — browser-path traffic always carries the ext-authz headers and must
+		// continue to do so (spiffeBypassDecision returns matched=false for it).
+		allow, err := spiffeBypassDecision(svid, method, d.config.Auth.SPIFFE.AllowedPeerIDs, spiffeMethodAllowlist)
+		if err != nil {
+			return ctx, false, err
 		}
-		return ctx, false, nil
+		if !allow {
+			return ctx, false, nil
+		}
+		return auth.WithIdentity(ctx, auth.Identity{
+			Subject:        svid,
+			Issuer:         auth.Issuer("spiffe"),
+			CredentialType: auth.CredentialType("spiffe"),
+		}), true, nil
 	}
 
 	registryAwareUnary := func(ctx context.Context, req any, info *grpc.UnaryServerInfo, handler grpc.UnaryHandler) (any, error) {
