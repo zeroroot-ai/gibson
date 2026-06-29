@@ -188,3 +188,130 @@ func TestWorldService_GetFrameAt(t *testing.T) {
 		t.Fatal("expected an error when no tenant is in context")
 	}
 }
+
+// TestWorldService_GetFrameAt_MissionScoped: a mission-scoped frame folds only that
+// mission's slice of the Timeline (gibson#1060). At seq 0 / mid / total it
+// materializes exactly that mission's World; another mission's events never bleed
+// in; the no-mission call still returns the tenant-wide fold; isolation holds.
+func TestWorldService_GetFrameAt_MissionScoped(t *testing.T) {
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+	reg := brain.NewRegistry(ctx)
+	srv := NewWorldServer(reg, nil)
+
+	// Two interleaved missions plus one tenant-ambient host observation (an
+	// observation carries no mission linkage, so it belongs to neither slice).
+	e := reg.For("acme")
+	e.Submit(brain.MissionStarted{ID: "A", Goal: "goal A"})                                   // A slice: 1
+	e.Submit(brain.MissionStarted{ID: "B", Goal: "goal B"})                                   // B slice: 1
+	e.Submit(brain.WorkDispatched{ID: "wa1", MissionID: "A", ItemKind: "tool", Target: "nmap"}) // A slice: 2
+	e.Submit(brain.WorkDispatched{ID: "wb1", MissionID: "B", ItemKind: "tool", Target: "nmap"}) // B slice: 2
+	e.Submit(brain.HostObserved{ScopeID: "s", Address: "10.0.0.5", OpenPorts: []int{22}})     // ambient
+	e.Submit(brain.WorkCompleted{ID: "wa1", Result: "ok"})                                    // A slice: 3
+	e.Submit(brain.WorkCompleted{ID: "wb1", Result: "ok"})                                    // B slice: 3
+
+	tctx := auth.WithTenant(context.Background(), auth.MustNewTenantID("acme"))
+
+	// Wait until all seven events have folded into the live World.
+	deadline := time.Now().Add(2 * time.Second)
+	for time.Now().Before(deadline) {
+		if len(reg.For("acme").Events()) == 7 {
+			break
+		}
+		time.Sleep(10 * time.Millisecond)
+	}
+	if got := len(reg.For("acme").Events()); got != 7 {
+		t.Fatalf("timeline has %d events, want 7", got)
+	}
+
+	missionIDs := func(r *worldpb.GetFrameAtResponse) []string {
+		var ids []string
+		for _, m := range r.GetMissions() {
+			ids = append(ids, m.Id)
+		}
+		return ids
+	}
+
+	// --- Mission A: scoped slice is exactly its 3 events. ---
+	// seq 0: nothing folded yet.
+	a0, err := srv.GetFrameAt(tctx, &worldpb.GetFrameAtRequest{Seq: 0, MissionId: "A"})
+	if err != nil {
+		t.Fatalf("GetFrameAt(0,A): %v", err)
+	}
+	if a0.Seq != 0 || a0.Total != 3 {
+		t.Fatalf("frame@0/A meta = %d/%d, want 0/3", a0.Seq, a0.Total)
+	}
+	if len(a0.Missions) != 0 || len(a0.Hosts) != 0 || len(a0.Findings) != 0 {
+		t.Fatalf("frame@0/A = %d missions %d hosts %d findings, want 0/0/0", len(a0.Missions), len(a0.Hosts), len(a0.Findings))
+	}
+
+	// mid (seq 1): mission A started; B must not appear.
+	a1, err := srv.GetFrameAt(tctx, &worldpb.GetFrameAtRequest{Seq: 1, MissionId: "A"})
+	if err != nil {
+		t.Fatalf("GetFrameAt(1,A): %v", err)
+	}
+	if ids := missionIDs(a1); len(ids) != 1 || ids[0] != "A" {
+		t.Fatalf("frame@1/A missions = %v, want [A]", ids)
+	}
+
+	// total (clamped past end): A's full slice; only mission A, no ambient host.
+	aEnd, err := srv.GetFrameAt(tctx, &worldpb.GetFrameAtRequest{Seq: 99, MissionId: "A"})
+	if err != nil {
+		t.Fatalf("GetFrameAt(99,A): %v", err)
+	}
+	if aEnd.Seq != 3 || aEnd.Total != 3 {
+		t.Fatalf("frame@end/A meta = %d/%d, want 3/3", aEnd.Seq, aEnd.Total)
+	}
+	if ids := missionIDs(aEnd); len(ids) != 1 || ids[0] != "A" {
+		t.Fatalf("frame@end/A missions = %v, want [A] (B bled in?)", ids)
+	}
+	if len(aEnd.Hosts) != 0 {
+		t.Fatalf("frame@end/A = %d hosts, want 0 (ambient observation bled in?)", len(aEnd.Hosts))
+	}
+
+	// --- Mission B: symmetric isolation — only mission B. ---
+	bEnd, err := srv.GetFrameAt(tctx, &worldpb.GetFrameAtRequest{Seq: 99, MissionId: "B"})
+	if err != nil {
+		t.Fatalf("GetFrameAt(99,B): %v", err)
+	}
+	if ids := missionIDs(bEnd); len(ids) != 1 || ids[0] != "B" {
+		t.Fatalf("frame@end/B missions = %v, want [B] (A bled in?)", ids)
+	}
+
+	// --- No mission: the tenant-wide fold is unchanged (both missions + ambient host). ---
+	all, err := srv.GetFrameAt(tctx, &worldpb.GetFrameAtRequest{Seq: 99})
+	if err != nil {
+		t.Fatalf("GetFrameAt(99): %v", err)
+	}
+	if all.Seq != 7 || all.Total != 7 {
+		t.Fatalf("frame@end meta = %d/%d, want 7/7", all.Seq, all.Total)
+	}
+	if ids := missionIDs(all); len(ids) != 2 || ids[0] != "A" || ids[1] != "B" {
+		t.Fatalf("tenant-wide frame missions = %v, want [A B]", ids)
+	}
+	if len(all.Hosts) != 1 {
+		t.Fatalf("tenant-wide frame = %d hosts, want 1 (the ambient host)", len(all.Hosts))
+	}
+
+	// GetTimeline mirrors the scoping so the Scroller's timeline length matches the
+	// frame total: mission A sees 3 events, the tenant sees all 7.
+	atl, err := srv.GetTimeline(tctx, &worldpb.GetTimelineRequest{MissionId: "A"})
+	if err != nil {
+		t.Fatalf("GetTimeline(A): %v", err)
+	}
+	if len(atl.GetEvents()) != 3 {
+		t.Fatalf("GetTimeline(A) = %d events, want 3", len(atl.GetEvents()))
+	}
+	fulltl, err := srv.GetTimeline(tctx, &worldpb.GetTimelineRequest{})
+	if err != nil {
+		t.Fatalf("GetTimeline(): %v", err)
+	}
+	if len(fulltl.GetEvents()) != 7 {
+		t.Fatalf("GetTimeline() = %d events, want 7", len(fulltl.GetEvents()))
+	}
+
+	// Isolation: no tenant in context -> denied, even with a mission set.
+	if _, err := srv.GetFrameAt(context.Background(), &worldpb.GetFrameAtRequest{Seq: 1, MissionId: "A"}); err == nil {
+		t.Fatal("expected an error when no tenant is in context")
+	}
+}

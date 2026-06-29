@@ -280,3 +280,40 @@ func (e *Engine) FrameAt(n int) *World {
 	}
 	return Replay(tenant, tl)
 }
+
+// MissionEvents returns the mission's slice of the tenant Timeline (gibson#1060) —
+// the sub-sequence of events attributable to missionID, in Timeline order and
+// re-indexed from 0 by their position in the slice. An empty missionID returns the
+// whole Timeline (the tenant-wide view, unchanged). Read-locked; safe to call
+// concurrently with the tick.
+func (e *Engine) MissionEvents(missionID string) []Event {
+	e.mu.RLock()
+	defer e.mu.RUnlock()
+	return MissionSlice(e.Timeline.Events(), missionID)
+}
+
+// MissionFrameAt returns the World as of folding the first n events of the
+// mission's slice (gibson#1060) — a mission-scoped replay frame. It is the same
+// pure events→world fold as FrameAt, but over the mission's slice of the Timeline
+// rather than the whole tenant Timeline, so another mission's events never bleed
+// in. It never touches the live World and is safe to call concurrently with the
+// tick. n is clamped to [0, len(slice)]; an empty missionID folds the whole
+// Timeline (equivalent to FrameAt).
+func (e *Engine) MissionFrameAt(missionID string, n int) *World {
+	e.mu.RLock()
+	slice := MissionSlice(e.Timeline.Events(), missionID)
+	tenant := e.World.Tenant
+	e.mu.RUnlock()
+
+	if n < 0 {
+		n = 0
+	}
+	if n > len(slice) {
+		n = len(slice)
+	}
+	tl := &Timeline{}
+	for _, ev := range slice[:n] {
+		tl.Append(ev)
+	}
+	return Replay(tenant, tl)
+}

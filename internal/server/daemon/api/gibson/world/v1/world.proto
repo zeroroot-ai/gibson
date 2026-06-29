@@ -210,12 +210,20 @@ message GetTimelineRequest { string mission_id = 1; }
 message GetTimelineResponse { repeated TimelineEvent events = 1; }
 
 // GetFrameAtRequest scrubs to a Timeline position: fold the first `seq` events.
-message GetFrameAtRequest { uint64 seq = 1; }
+// Optional mission_id scopes the fold to one mission's slice of the Timeline
+// (mirrors GetTimelineRequest): the frame then materializes only that mission's
+// World and `seq`/`total` index the mission's slice, so the Scroller's timeline
+// and its frames share one indexing. Empty folds the whole tenant Timeline
+// (tenant-wide behavior unchanged).
+message GetFrameAtRequest {
+  uint64 seq = 1;
+  string mission_id = 2;
+}
 
 // GetFrameAtResponse is the World materialized at frame `seq` (a server-side fold).
 message GetFrameAtResponse {
   uint64 seq = 1;                       // the position actually folded (clamped to [0,total])
-  uint64 total = 2;                     // total events in the tenant Timeline
+  uint64 total = 2;                     // total events folded over: the tenant Timeline, or the mission's slice when mission_id is set
   repeated MissionView missions = 3;
   repeated HostView hosts = 4;
   repeated FindingView findings = 5;
