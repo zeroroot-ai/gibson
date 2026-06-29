@@ -270,6 +270,17 @@ type StreamChunk struct {
 	Delta        StreamDelta  `json:"delta"`
 	FinishReason FinishReason `json:"finish_reason,omitempty"`
 	Error        error        `json:"error,omitempty"`
+
+	// Model is the resolved model that produced the stream. It is set on the
+	// terminal chunk (the one carrying FinishReason) so consumers can attribute
+	// the completed stream without re-resolving the slot. Empty on delta chunks.
+	Model string `json:"model,omitempty"`
+
+	// Usage carries the aggregated token usage for the whole stream. Providers
+	// surface it on the terminal chunk (when the upstream reports it); it is nil
+	// on delta chunks and may be nil at end-of-stream if the provider does not
+	// report streaming usage.
+	Usage *CompletionTokenUsage `json:"usage,omitempty"`
 }
 
 // StreamDelta represents the incremental changes in a stream chunk

@@ -76,7 +76,7 @@ func (p *LlamafileProvider) Stream(ctx context.Context, req llm.CompletionReques
 	if err != nil {
 		return nil, llm.TranslateError("llamafile", err)
 	}
-	return streamToChannel(sr, func(e error) error { return llm.TranslateError("llamafile", e) }), nil
+	return streamToChannel(sr, req.Model, func(e error) error { return llm.TranslateError("llamafile", e) }), nil
 }
 
 func (p *LlamafileProvider) Health(_ context.Context) types.HealthStatus {

@@ -196,8 +196,19 @@ func buildEinoOptionsWithTools(req llm.CompletionRequest, tools []llm.ToolDef) (
 // streamToChannel drains an Eino StreamReader[*schema.Message] into a
 // StreamChunk channel. translateErr maps raw Eino errors to Gibson errors;
 // pass nil to use the identity function.
+// streamToChannel drains an Eino StreamReader into a StreamChunk channel.
+// Content deltas are forwarded as they arrive. Token usage and finish reason
+// ride on the upstream chunks' ResponseMeta (Eino reports usage on the final
+// chunk, which carries no content); streamToChannel accumulates them and emits
+// a single terminal chunk carrying the aggregated Usage + FinishReason + model.
+// This is what lets the harness callback path fold streaming completions into
+// the mission World as LlmCallObserved with token metadata (gibson#1085).
+//
+// model is the resolved model name (req.Model), surfaced on the terminal chunk
+// so consumers can attribute the completed stream without re-resolving the slot.
 func streamToChannel(
 	sr *einoschema.StreamReader[*einoschema.Message],
+	model string,
 	translateErr func(error) error,
 ) <-chan llm.StreamChunk {
 	if translateErr == nil {
@@ -207,19 +218,43 @@ func streamToChannel(
 	go func() {
 		defer close(ch)
 		defer sr.Close()
+		var finishReason llm.FinishReason
+		var usage *llm.CompletionTokenUsage
 		for {
 			chunk, err := sr.Recv()
 			if isEOF(err) {
-				return
+				break
 			}
 			if err != nil {
 				ch <- llm.StreamChunk{Error: translateErr(err)}
 				return
 			}
-			if chunk != nil && chunk.Content != "" {
+			if chunk == nil {
+				continue
+			}
+			if meta := chunk.ResponseMeta; meta != nil {
+				if fr := finishReasonFromEino(meta.FinishReason, ""); fr != "" {
+					finishReason = fr
+				}
+				if meta.Usage != nil {
+					usage = &llm.CompletionTokenUsage{
+						PromptTokens:     meta.Usage.PromptTokens,
+						CompletionTokens: meta.Usage.CompletionTokens,
+						TotalTokens:      meta.Usage.TotalTokens,
+					}
+				}
+			}
+			if chunk.Content != "" {
 				ch <- llm.StreamChunk{Delta: llm.StreamDelta{Content: chunk.Content}}
 			}
 		}
+		// Terminal chunk: carries the aggregated usage + model so the callback
+		// path can capture the completed stream (success only). The default stop
+		// reason mirrors fromEinoMessage when the upstream omits one.
+		if finishReason == "" {
+			finishReason = llm.FinishReasonStop
+		}
+		ch <- llm.StreamChunk{FinishReason: finishReason, Model: model, Usage: usage}
 	}()
 	return ch
 }

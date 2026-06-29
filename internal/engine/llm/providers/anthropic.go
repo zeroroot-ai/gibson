@@ -116,7 +116,7 @@ func (p *AnthropicProvider) Stream(ctx context.Context, req llm.CompletionReques
 	if err != nil {
 		return nil, llm.TranslateError("anthropic", err)
 	}
-	return streamToChannel(sr, func(e error) error { return llm.TranslateError("anthropic", e) }), nil
+	return streamToChannel(sr, req.Model, func(e error) error { return llm.TranslateError("anthropic", e) }), nil
 }
 
 // Health checks the provider health

@@ -100,7 +100,7 @@ func (p *OllamaProvider) Stream(ctx context.Context, req llm.CompletionRequest) 
 		return nil, llm.TranslateError("ollama", err)
 	}
 
-	return streamToChannel(sr, func(e error) error { return llm.TranslateError("ollama", e) }), nil
+	return streamToChannel(sr, req.Model, func(e error) error { return llm.TranslateError("ollama", e) }), nil
 }
 
 // Health checks the provider health

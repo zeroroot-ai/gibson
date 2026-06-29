@@ -165,16 +165,27 @@ func (p *BedrockProvider) Stream(ctx context.Context, req llm.CompletionRequest)
 		return nil, translateBedrockError(err)
 	}
 
+	model := firstNonEmpty(req.Model, p.modelID)
 	chunkChan := make(chan llm.StreamChunk, 10)
 	go func() {
 		defer close(chunkChan)
 		stream := out.GetStream()
 		defer stream.Close()
+		var usage *llm.CompletionTokenUsage
 		for event := range stream.Events() {
 			switch v := event.(type) {
 			case *bedrocktypes.ConverseStreamOutputMemberContentBlockDelta:
 				if delta, ok := v.Value.Delta.(*bedrocktypes.ContentBlockDeltaMemberText); ok {
 					chunkChan <- llm.StreamChunk{Delta: llm.StreamDelta{Content: delta.Value}}
+				}
+			case *bedrocktypes.ConverseStreamOutputMemberMetadata:
+				// Bedrock reports token usage in the trailing metadata event.
+				if u := v.Value.Usage; u != nil {
+					usage = &llm.CompletionTokenUsage{
+						PromptTokens:     int(aws.ToInt32(u.InputTokens)),
+						CompletionTokens: int(aws.ToInt32(u.OutputTokens)),
+						TotalTokens:      int(aws.ToInt32(u.TotalTokens)),
+					}
 				}
 			case *bedrocktypes.ConverseStreamOutputMemberMessageStop:
 				// stream ended normally
@@ -182,7 +193,11 @@ func (p *BedrockProvider) Stream(ctx context.Context, req llm.CompletionRequest)
 		}
 		if err := stream.Err(); err != nil {
 			chunkChan <- llm.StreamChunk{Error: translateBedrockError(err)}
+			return
 		}
+		// Terminal chunk: aggregated usage + model so the harness World capture
+		// path can fold the completed stream (gibson#1085).
+		chunkChan <- llm.StreamChunk{FinishReason: llm.FinishReasonStop, Model: model, Usage: usage}
 	}()
 	return chunkChan, nil
 }

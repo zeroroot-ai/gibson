@@ -87,7 +87,7 @@ func (p *HuggingFaceProvider) Stream(ctx context.Context, req llm.CompletionRequ
 	if err != nil {
 		return nil, translateHuggingFaceError(err)
 	}
-	return streamToChannel(sr, translateHuggingFaceError), nil
+	return streamToChannel(sr, req.Model, translateHuggingFaceError), nil
 }
 
 func (p *HuggingFaceProvider) Health(_ context.Context) types.HealthStatus {

@@ -126,7 +126,7 @@ func (p *GoogleProvider) Stream(ctx context.Context, req llm.CompletionRequest) 
 		return nil, llm.TranslateError("google", err)
 	}
 
-	return streamToChannel(sr, func(e error) error { return llm.TranslateError("google", e) }), nil
+	return streamToChannel(sr, req.Model, func(e error) error { return llm.TranslateError("google", e) }), nil
 }
 
 // Health checks the provider health

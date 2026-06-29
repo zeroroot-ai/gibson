@@ -96,7 +96,7 @@ func (p *MistralProvider) Stream(ctx context.Context, req llm.CompletionRequest)
 	if err != nil {
 		return nil, translateMistralError(err)
 	}
-	return streamToChannel(sr, translateMistralError), nil
+	return streamToChannel(sr, req.Model, translateMistralError), nil
 }
 
 func (p *MistralProvider) Health(_ context.Context) types.HealthStatus {
