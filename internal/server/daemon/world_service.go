@@ -150,13 +150,21 @@ func (s *worldServer) GetLlmCall(ctx context.Context, req *worldpb.GetLlmCallReq
 	return nil, status.Errorf(codes.NotFound, "llm call %q not found", req.GetCallId())
 }
 
-func (s *worldServer) GetTimeline(ctx context.Context, _ *worldpb.GetTimelineRequest) (*worldpb.GetTimelineResponse, error) {
+func (s *worldServer) GetTimeline(ctx context.Context, req *worldpb.GetTimelineRequest) (*worldpb.GetTimelineResponse, error) {
 	e, err := s.engine(ctx)
 	if err != nil {
 		return nil, err
 	}
+	// Optional mission_id scopes the Timeline to that mission's slice (gibson#1060);
+	// empty returns the whole tenant Timeline. Either way events are re-indexed from
+	// 0 by their position in the (possibly filtered) sequence, so the Scroller's
+	// timeline and its GetFrameAt frames share one indexing.
+	events := e.Events()
+	if mid := req.GetMissionId(); mid != "" {
+		events = e.MissionEvents(mid)
+	}
 	resp := &worldpb.GetTimelineResponse{}
-	for i, ev := range e.Events() {
+	for i, ev := range events {
 		resp.Events = append(resp.Events, &worldpb.TimelineEvent{
 			Seq:     uint64(i),
 			Kind:    ev.Kind(),
@@ -170,18 +178,33 @@ func (s *worldServer) GetTimeline(ctx context.Context, _ *worldpb.GetTimelineReq
 // of that frame (ADR-0001: World == fold(Timeline)). This is the Scroller's scrub
 // primitive — a server-side fold, not a stored snapshot. seq is clamped to
 // [0, total]; seq == total reproduces the live World.
+//
+// Optional mission_id scopes the fold to that mission's slice of the Timeline
+// (gibson#1060): the frame materializes only that mission's World and seq/total
+// index the mission's slice, so another mission's events never bleed in. Empty
+// folds the whole tenant Timeline (tenant-wide behavior unchanged).
 func (s *worldServer) GetFrameAt(ctx context.Context, req *worldpb.GetFrameAtRequest) (*worldpb.GetFrameAtResponse, error) {
 	e, err := s.engine(ctx)
 	if err != nil {
 		return nil, err
 	}
-	total := len(e.Events())
-	n := int(req.GetSeq())
-	if n > total {
-		n = total
-	}
 
-	w := e.FrameAt(n)
+	var w *brain.World
+	n := int(req.GetSeq())
+	var total int
+	if mid := req.GetMissionId(); mid != "" {
+		total = len(e.MissionEvents(mid))
+		if n > total {
+			n = total
+		}
+		w = e.MissionFrameAt(mid, n)
+	} else {
+		total = len(e.Events())
+		if n > total {
+			n = total
+		}
+		w = e.FrameAt(n)
+	}
 
 	resp := &worldpb.GetFrameAtResponse{Seq: uint64(n), Total: uint64(total)}
 	for _, m := range w.MissionSnapshot() {
