@@ -14,7 +14,7 @@
 // pkg/billing/entitlements/v1 to implement the server side without violating
 // Go's internal/ import restriction.
 //
-// Runtime seam (ADR-0003 / ADR-0054 / gibson#1026 / gibson#1028):
+// Runtime seam (ADR-0003 / ADR-0054 / gibson#1026 / gibson#1028 / gibson#1087):
 //
 //   - When ENTITLEMENTS_ENDPOINT is set (hosted daemon build), New returns a
 //     caching gRPC client that calls the closed billing service's
@@ -27,6 +27,10 @@
 //
 // BillingService, Stripe, and plans.yaml live entirely in the commercial
 // layer — never behind this seam.
+//
+// The resolution logic is implemented using the reusable [pkg/seam] primitive
+// (deploy ADR-0006, gibson#1087) so the knob-set/fail-safe semantics and the
+// observable degradation signals are consistent across all seams.
 package entitlements
 
 import (
@@ -35,6 +39,8 @@ import (
 	"log/slog"
 	"os"
 	"strings"
+
+	"github.com/zeroroot-ai/gibson/pkg/seam"
 )
 
 // Limits is the plan-agnostic set of resource ceilings the runtime enforces
@@ -100,6 +106,22 @@ func Resolve(p Provider) Provider {
 	return p
 }
 
+// SeamName is the canonical seam identifier for entitlements. It is used
+// when registering the seam in the process-wide seam registry so the startup
+// seam-state log can reference it by name.
+const SeamName = "entitlements"
+
+// SeamKnob is the env-var name whose non-empty value activates the remote
+// billing/entitlements-svc implementation.
+const SeamKnob = "ENTITLEMENTS_ENDPOINT"
+
+func init() {
+	// Register the entitlements seam in the process-wide seam registry so it
+	// appears in the daemon's startup seam-state log (deploy ADR-0006,
+	// gibson#1087).
+	seam.Register(SeamName, SeamKnob, "billing/entitlements-svc")
+}
+
 // New is the single Entitlements injection point.
 //
 // When ENTITLEMENTS_ENDPOINT is set it returns a caching gRPC-client Provider
@@ -114,32 +136,39 @@ func Resolve(p Provider) Provider {
 // (NewConfigProvider). Daemon wiring calls New — never NewConfigProvider
 // directly — so the gRPC backend activates with a single env var change and
 // no daemon code change.
+//
+// The resolution is implemented on top of the reusable [pkg/seam] primitive
+// (deploy ADR-0006, gibson#1087) — the same knob-set→remote / knob-absent→
+// fail-safe / fail-safe-emits-observable semantics apply to all seams.
 func New(db *sql.DB) Provider {
-	endpoint := strings.TrimSpace(os.Getenv("ENTITLEMENTS_ENDPOINT"))
-	if endpoint == "" {
-		return NewConfigProvider(db)
-	}
-
-	p, err := NewGRPCProvider(GRPCProviderOptions{
-		Endpoint:           endpoint,
-		BillingServiceSVID: strings.TrimSpace(os.Getenv("ENTITLEMENTS_BILLING_SVID")),
-		// WorkloadAPISocket defaults to "" → go-spiffe reads SPIFFE_ENDPOINT_SOCKET.
+	s := seam.New(seam.Spec[Provider]{
+		Name:       SeamName,
+		ConfigKnob: SeamKnob,
+		FailSafe: func() (Provider, error) {
+			return NewConfigProvider(db), nil
+		},
+		Remote: func(endpoint string) (Provider, error) {
+			return NewGRPCProvider(GRPCProviderOptions{
+				Endpoint:           endpoint,
+				BillingServiceSVID: strings.TrimSpace(os.Getenv("ENTITLEMENTS_BILLING_SVID")),
+				// WorkloadAPISocket defaults to "" → go-spiffe reads SPIFFE_ENDPOINT_SOCKET.
+			})
+		},
 	})
+
+	// We use slog.Default() directly here because New is called during daemon
+	// startup before the daemon's own logger is wired; slog is always initialised
+	// by the time daemon.Start() runs.
+	res, err := s.Resolve(context.Background(), slog.Default())
 	if err != nil {
-		// Fail-open: if we can't dial the billing service at startup
-		// (e.g. SPIRE agent not yet ready), log loudly and fall back to the
-		// OSS config provider so the daemon can still start. This matches
-		// the sandboxed_setec_adapter pattern (Req 5.4).
-		//
-		// We use slog.Default() directly here because New is called during
-		// daemon startup before the daemon's own logger is wired; slog is
-		// always initialised by the time daemon.Start() runs.
-		slog.Default().Warn(
-			"entitlements: failed to construct gRPC provider; falling back to config provider (fail-open)",
-			"endpoint", endpoint,
+		// FailSafe returned an error — this should not happen for entitlements
+		// (NewConfigProvider never fails). Fall back to unlimited to keep the
+		// daemon bootable.
+		slog.Default().Error(
+			"entitlements: fail-safe construction failed; using UnlimitedProvider",
 			"error", err,
 		)
-		return NewConfigProvider(db)
+		return UnlimitedProvider{}
 	}
-	return p
+	return res.Impl
 }
