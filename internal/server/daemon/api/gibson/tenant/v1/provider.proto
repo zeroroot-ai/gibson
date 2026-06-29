@@ -268,6 +268,13 @@ message ModelDescriptor {
   string name = 1;
   string family = 2;
   int32 context_window = 3;
+  // dimensions is the output vector dimension for an EMBEDDING model (e.g.
+  // 1536 for text-embedding-3-small). Zero for chat models, which have no
+  // embedding dimension. The dashboard uses this to pin the tenant's vector
+  // index dimension when an embedding model is selected (E11 BYO-embedder);
+  // it mirrors embedder.DimensionForModel — a wrong value silently breaks
+  // RediSearch indexing, so the two MUST stay in sync.
+  int32 dimensions = 4;
 }
 
 // SupportedProvider describes one LLM provider type the daemon supports.
@@ -279,8 +286,18 @@ message SupportedProvider {
   repeated CredentialField credentials = 5;
   // Static catalogue surfaced when the daemon can enumerate models without
   // calling the provider's API. Empty for providers that require a live
-  // test+probe to discover models.
+  // test+probe to discover models. These are CHAT models.
   repeated ModelDescriptor default_models = 6;
+  // capabilities declares which services this provider type can fulfil (chat
+  // and/or embedding). Every supported provider serves CHAT; CAPABILITY_EMBEDDING
+  // is present only for provider types the daemon has an embedder backend for
+  // (E11 BYO-embedder: openai, bedrock, cohere). The dashboard uses this to
+  // decide whether to offer the provider as an embedding source (dashboard#870).
+  repeated Capability capabilities = 7;
+  // embedding_models is the static catalogue of EMBEDDING models this provider
+  // type offers, each carrying its output dimension. Empty unless capabilities
+  // includes CAPABILITY_EMBEDDING.
+  repeated ModelDescriptor embedding_models = 8;
 }
 
 // ---------------------------------------------------------------------------

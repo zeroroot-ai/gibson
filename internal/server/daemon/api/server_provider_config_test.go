@@ -723,3 +723,41 @@ func TestEmitProviderAudit_NilLogger_DoesNotPanic(t *testing.T) {
 		s.emitProviderAudit(context.Background(), "acme", auditProviderCreated, "my-provider")
 	})
 }
+
+// TestGetSupportedProviders_AdvertisesEmbeddingCapability verifies #1012:
+// GetSupportedProviders surfaces per-provider capabilities and an embedding
+// catalogue with dimensions, so the dashboard (dashboard#870) can offer
+// embedding providers without a live probe.
+func TestGetSupportedProviders_AdvertisesEmbeddingCapability(t *testing.T) {
+	s := blankServer()
+	resp, err := s.GetSupportedProviders(tenantCtx("acme"), &tenantv1.GetSupportedProvidersRequest{})
+	require.NoError(t, err)
+
+	byType := make(map[string]*tenantv1.SupportedProvider)
+	for _, p := range resp.GetProviders() {
+		byType[p.GetType()] = p
+	}
+
+	// OpenAI serves both chat and embeddings, with a dimensioned catalogue.
+	openai := byType["openai"]
+	require.NotNil(t, openai, "openai must be advertised")
+	assert.Contains(t, openai.GetCapabilities(), tenantv1.Capability_CAPABILITY_CHAT)
+	assert.Contains(t, openai.GetCapabilities(), tenantv1.Capability_CAPABILITY_EMBEDDING)
+	require.NotEmpty(t, openai.GetEmbeddingModels(), "openai must list embedding models")
+	for _, m := range openai.GetEmbeddingModels() {
+		assert.Positivef(t, m.GetDimensions(), "embedding model %q must carry a positive dimension", m.GetName())
+	}
+
+	// Anthropic is chat-only — no embedder backend.
+	anthropic := byType["anthropic"]
+	require.NotNil(t, anthropic, "anthropic must be advertised")
+	assert.Equal(t, []tenantv1.Capability{tenantv1.Capability_CAPABILITY_CHAT}, anthropic.GetCapabilities())
+	assert.Empty(t, anthropic.GetEmbeddingModels(), "anthropic must not advertise embedding models")
+}
+
+// TestGetSupportedProviders_RequiresTenant — fails closed without tenant ctx.
+func TestGetSupportedProviders_RequiresTenant(t *testing.T) {
+	s := blankServer()
+	_, err := s.GetSupportedProviders(context.Background(), &tenantv1.GetSupportedProvidersRequest{})
+	require.Error(t, err)
+}

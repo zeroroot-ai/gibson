@@ -6,6 +6,7 @@ import (
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 	"github.com/zeroroot-ai/gibson/internal/engine/llm"
+	"github.com/zeroroot-ai/gibson/internal/engine/memory/embedder"
 )
 
 func TestSupportedProviderDescriptors_Coverage(t *testing.T) {
@@ -42,6 +43,49 @@ func TestSupportedProviderDescriptors_SelfHostedFlag(t *testing.T) {
 	}
 	for _, t_ := range hosted {
 		assert.False(t, byType[t_].SelfHosted, "%s should have SelfHosted=false", t_)
+	}
+}
+
+// TestEmbeddingModelCatalogue_DimensionsKnown is the drift guard for #1012:
+// every model advertised in the embedding catalogue MUST resolve to a known,
+// non-zero dimension via embedder.DimensionForModel. A model that drifts out
+// of the dimension table would surface a 0-dimension to the dashboard and
+// silently break RediSearch indexing of the whole document — fail loud here.
+func TestEmbeddingModelCatalogue_DimensionsKnown(t *testing.T) {
+	for providerType, models := range embeddingModelCatalogue {
+		require.NotEmpty(t, models, "embedding catalogue entry for %q must not be empty", providerType)
+		for _, m := range models {
+			dim, ok := embedder.DimensionForModel(m)
+			assert.Truef(t, ok, "embedding model %q (provider %q) is not in embedder.DimensionForModel — add it to the dimension table", m, providerType)
+			assert.Positivef(t, dim, "embedding model %q (provider %q) resolved to a non-positive dimension %d", m, providerType, dim)
+		}
+	}
+}
+
+// TestSupportedProviderDescriptors_EmbeddingCapability verifies #1012: the
+// provider types with an embedder backend (openai/bedrock/cohere) carry an
+// embedding catalogue with resolved dimensions, and every other supported
+// provider advertises none.
+func TestSupportedProviderDescriptors_EmbeddingCapability(t *testing.T) {
+	byType := make(map[llm.ProviderType]ProviderDescriptor)
+	for _, d := range SupportedProviderDescriptors() {
+		byType[d.Type] = d
+	}
+
+	embedders := map[llm.ProviderType]bool{
+		llm.ProviderOpenAI:  true,
+		llm.ProviderBedrock: true,
+		llm.ProviderCohere:  true,
+	}
+	for typ, d := range byType {
+		if embedders[typ] {
+			require.NotEmptyf(t, d.EmbeddingModels, "%s should advertise embedding models", typ)
+			for _, m := range d.EmbeddingModels {
+				assert.Positivef(t, m.Dimensions, "%s embedding model %q must carry a positive dimension", typ, m.Name)
+			}
+		} else {
+			assert.Emptyf(t, d.EmbeddingModels, "%s has no embedder backend and must not advertise embedding models", typ)
+		}
 	}
 }
 

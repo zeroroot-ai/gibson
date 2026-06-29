@@ -3,6 +3,7 @@ package providers
 import (
 	"github.com/zeroroot-ai/gibson/internal/engine/llm"
 	"github.com/zeroroot-ai/gibson/internal/engine/llm/providers/catalogue"
+	"github.com/zeroroot-ai/gibson/internal/engine/memory/embedder"
 )
 
 // ProviderDescriptor is the Go-side, proto-free form of what the daemon's
@@ -35,6 +36,53 @@ type ProviderDescriptor struct {
 	// populated here so the dashboard can render a model picker without
 	// constructing the provider.
 	DefaultModels []llm.ModelInfo
+
+	// EmbeddingModels is the static catalogue of EMBEDDING models this provider
+	// type offers (E11 BYO-embedder). Empty for provider types the daemon has
+	// no embedder backend for. A non-empty list is what makes a provider
+	// advertise CAPABILITY_EMBEDDING.
+	EmbeddingModels []EmbeddingModelInfo
+}
+
+// EmbeddingModelInfo describes one embedding model a provider offers, carrying
+// the output vector dimension the dashboard needs to pin the tenant's vector
+// index. Dimensions are resolved from embedder.DimensionForModel (the single
+// source of truth) so this table never drifts from the indexer.
+type EmbeddingModelInfo struct {
+	Name       string
+	Dimensions int
+}
+
+// embeddingModelCatalogue lists the embedding models each provider type offers.
+// Only provider types with an embedder backend appear here (E11 BYO-embedder:
+// the embedder.Kind* set — openai, bedrock, cohere — mapped back to their chat
+// ProviderType). Embedding-only backends with no chat provider (voyage, TEI,
+// generic openai-compatible) are intentionally absent: GetSupportedProviders
+// enumerates chat provider types, so surfacing those needs a separate surface
+// (tracked as a #1012 follow-up). Dimensions are NOT listed here — they are
+// resolved from embedder.DimensionForModel so the two cannot diverge.
+var embeddingModelCatalogue = map[llm.ProviderType][]string{
+	llm.ProviderOpenAI:  {"text-embedding-3-small", "text-embedding-3-large", "text-embedding-ada-002"},
+	llm.ProviderBedrock: {"amazon.titan-embed-text-v1", "amazon.titan-embed-text-v2:0"},
+	llm.ProviderCohere:  {"embed-english-v3.0", "embed-multilingual-v3.0"},
+}
+
+// embeddingModelsFor returns the embedding-model catalogue for a provider type,
+// resolving each model's output dimension from embedder.DimensionForModel.
+// A model absent from the dimension table yields a zero dimension; the
+// descriptors test asserts every catalogued model is known, failing loud on
+// drift rather than letting a 0-dimension reach the index.
+func embeddingModelsFor(t llm.ProviderType) []EmbeddingModelInfo {
+	names := embeddingModelCatalogue[t]
+	if len(names) == 0 {
+		return nil
+	}
+	out := make([]EmbeddingModelInfo, 0, len(names))
+	for _, name := range names {
+		dim, _ := embedder.DimensionForModel(name)
+		out = append(out, EmbeddingModelInfo{Name: name, Dimensions: dim})
+	}
+	return out
 }
 
 // catalogueModels converts the catalogue's Model entries for a given provider
@@ -64,6 +112,9 @@ func SupportedProviderDescriptors() []ProviderDescriptor {
 	out := make([]ProviderDescriptor, 0, len(llm.SupportedProviderTypes()))
 	for _, t := range llm.SupportedProviderTypes() {
 		if d, ok := providerDescriptor(t); ok {
+			// Inject the embedding catalogue centrally so each provider case
+			// stays focused on its credential/chat shape.
+			d.EmbeddingModels = embeddingModelsFor(d.Type)
 			out = append(out, d)
 		}
 	}

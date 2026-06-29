@@ -741,14 +741,36 @@ func descriptorToProto(d providers.ProviderDescriptor) *tenantv1.SupportedProvid
 			Help:        c.Help,
 		})
 	}
-	return &tenantv1.SupportedProvider{
-		Type:          string(d.Type),
-		DisplayName:   d.DisplayName,
-		DocsUrl:       d.DocsURL,
-		SelfHosted:    d.SelfHosted,
-		Credentials:   creds,
-		DefaultModels: modelsToProto(d.DefaultModels),
+	// Every supported provider serves chat; embedding is advertised only when
+	// the descriptor carries an embedding catalogue (a provider type the daemon
+	// has an embedder backend for — E11 BYO-embedder).
+	capabilities := []tenantv1.Capability{tenantv1.Capability_CAPABILITY_CHAT}
+	if len(d.EmbeddingModels) > 0 {
+		capabilities = append(capabilities, tenantv1.Capability_CAPABILITY_EMBEDDING)
 	}
+	return &tenantv1.SupportedProvider{
+		Type:            string(d.Type),
+		DisplayName:     d.DisplayName,
+		DocsUrl:         d.DocsURL,
+		SelfHosted:      d.SelfHosted,
+		Credentials:     creds,
+		DefaultModels:   modelsToProto(d.DefaultModels),
+		Capabilities:    capabilities,
+		EmbeddingModels: embeddingModelsToProto(d.EmbeddingModels),
+	}
+}
+
+// embeddingModelsToProto translates the embedding-model catalogue into the
+// proto ModelDescriptor shape, carrying each model's output vector dimension.
+func embeddingModelsToProto(models []providers.EmbeddingModelInfo) []*tenantv1.ModelDescriptor {
+	out := make([]*tenantv1.ModelDescriptor, 0, len(models))
+	for _, m := range models {
+		out = append(out, &tenantv1.ModelDescriptor{
+			Name:       m.Name,
+			Dimensions: int32(m.Dimensions), //nolint:gosec // embedding dimensions are at most a few thousand
+		})
+	}
+	return out
 }
 
 // modelsToProto translates llm.ModelInfo entries into the proto shape used
