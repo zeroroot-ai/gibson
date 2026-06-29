@@ -373,13 +373,6 @@ const (
 	// configuration" and the dashboard 412s on every API call.
 	// tenant-operator#189.
 	ConditionSecretsJWTAuthConfigured = "SecretsJWTAuthConfigured"
-
-	// ConditionNeo4jUpgrading is set True while the rolling-upgrade
-	// controller (spec per-tenant-data-plane-completion Task 30) is
-	// updating this tenant's Neo4j StatefulSet to a new image tag. Set
-	// False (Reason=UpgradeComplete) once readyReplicas reaches the
-	// desired count, or False (Reason=UpgradeFailed) on error.
-	ConditionNeo4jUpgrading = "Neo4jUpgrading"
 )
 
 func init() {
