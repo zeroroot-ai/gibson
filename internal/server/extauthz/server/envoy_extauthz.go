@@ -436,6 +436,13 @@ func identityFromJWTPayload(httpHeaders map[string]string) (id headers.Identity,
 		// (The previous wire value was "zitadel"; the field name is IdP-specific.)
 		GibsonTenant string `json:"gibson:tenant"`
 		Tenant       string `json:"tenant"`
+		// Iat is the standard JWT issued-at claim (Unix seconds). Carried
+		// for the ext-authz-local instant-revocation condition
+		// (token_iat > revoked_at; gibson#627), NOT for the downstream
+		// freshness header. OIDC and client-credentials tokens from the
+		// configured IdP always include it; absence ⇒ zero ⇒ treated as
+		// the oldest possible token (fail-closed once a revocation lands).
+		Iat int64 `json:"iat"`
 	}
 	if jerr := json.Unmarshal(data, &claims); jerr != nil {
 		return headers.Identity{}, "", "", fmt.Errorf("x-jwt-payload JSON: %w", jerr)
@@ -483,6 +490,12 @@ func identityFromJWTPayload(httpHeaders map[string]string) (id headers.Identity,
 		Issuer:         headers.IssuerOIDC,
 		CredentialType: credType,
 		Tenant:         tenant,
+	}
+	// Carry the token's iat for the instant-revocation condition
+	// (gibson#627). Left as the zero time when the token has no iat, which
+	// the condition treats as the oldest possible token (fail-closed).
+	if claims.Iat > 0 {
+		id.TokenIssuedAt = time.Unix(claims.Iat, 0).UTC()
 	}
 	verifiedIss = claims.Iss
 	return id, subjectSource, verifiedIss, nil

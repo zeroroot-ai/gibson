@@ -5,6 +5,7 @@ import (
 	"encoding/base64"
 	"encoding/json"
 	"testing"
+	"time"
 
 	authv3 "github.com/envoyproxy/go-control-plane/envoy/service/auth/v3"
 	"google.golang.org/grpc/codes"
@@ -117,6 +118,60 @@ func TestIdentityFromJWTPayload_UserTokenUsesSub(t *testing.T) {
 	}
 	if id.CredentialType != "oidc-user" {
 		t.Errorf("CredentialType = %q, want %q", id.CredentialType, "oidc-user")
+	}
+}
+
+// TestIdentityFromJWTPayload_ParsesIat — the token's iat claim is parsed into
+// TokenIssuedAt (consumed ext-authz-locally for the instant-revocation
+// condition, gibson#627), and is kept distinct from the freshness IssuedAt
+// stamp (which is set later, at allow time, and emitted as HeaderIssuedAt).
+func TestIdentityFromJWTPayload_ParsesIat(t *testing.T) {
+	t.Parallel()
+	const iat int64 = 1_700_000_000
+
+	hdrs := map[string]string{
+		headerJWTPayload: encodePayload(t, map[string]any{
+			"iss": "https://zitadel.example",
+			"sub": "user-uuid-abc",
+			"iat": iat,
+		}),
+	}
+
+	id, _, _, err := identityFromJWTPayload(hdrs)
+	if err != nil {
+		t.Fatalf("identityFromJWTPayload: %v", err)
+	}
+	if got := id.TokenIssuedAt.Unix(); got != iat {
+		t.Errorf("TokenIssuedAt = %d, want token iat %d", got, iat)
+	}
+	if id.TokenIssuedAt.Location() != time.UTC {
+		t.Errorf("TokenIssuedAt location = %v, want UTC", id.TokenIssuedAt.Location())
+	}
+	// The freshness IssuedAt must NOT be populated from the token iat — it is
+	// stamped to allow-time later in the request path, not here.
+	if !id.IssuedAt.IsZero() {
+		t.Errorf("IssuedAt = %v, want zero (freshness stamp is set at allow time, not from iat)", id.IssuedAt)
+	}
+}
+
+// TestIdentityFromJWTPayload_NoIat — a token without an iat claim leaves
+// TokenIssuedAt at the zero time (the revocation condition treats the zero
+// time as the oldest possible token, i.e. fail-closed once a revocation lands).
+func TestIdentityFromJWTPayload_NoIat(t *testing.T) {
+	t.Parallel()
+	hdrs := map[string]string{
+		headerJWTPayload: encodePayload(t, map[string]any{
+			"iss": "https://zitadel.example",
+			"sub": "user-uuid-abc",
+		}),
+	}
+
+	id, _, _, err := identityFromJWTPayload(hdrs)
+	if err != nil {
+		t.Fatalf("identityFromJWTPayload: %v", err)
+	}
+	if !id.TokenIssuedAt.IsZero() {
+		t.Errorf("TokenIssuedAt = %v, want zero time when iat absent", id.TokenIssuedAt)
 	}
 }
 
