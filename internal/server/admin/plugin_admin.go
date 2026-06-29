@@ -471,7 +471,7 @@ func (s *PluginsAdminServer) RegisterPlugin(ctx context.Context, req *tenantv1.R
 			// plugin's runtime CG-JWT carries.
 			User:     principalID,
 			Relation: "can_resolve",
-			Object:   fmt.Sprintf("secret:tenant-%s:%s", tenant, ref),
+			Object:   fmt.Sprintf("secret:tenant-%s/%s", tenant, ref),
 		})
 	}
 	if len(tuples) > 0 {
@@ -581,12 +581,12 @@ func (s *PluginsAdminServer) EditPluginSecretBinding(ctx context.Context, req *t
 	oldTuple := authz.Tuple{
 		User:     "user:" + principal,
 		Relation: "can_resolve",
-		Object:   fmt.Sprintf("secret:tenant-%s:%s", tenant, req.GetDeclaredName()),
+		Object:   fmt.Sprintf("secret:tenant-%s/%s", tenant, req.GetDeclaredName()),
 	}
 	newTuple := authz.Tuple{
 		User:     "user:" + principal,
 		Relation: "can_resolve",
-		Object:   fmt.Sprintf("secret:tenant-%s:%s", tenant, req.GetNewExistingRef()),
+		Object:   fmt.Sprintf("secret:tenant-%s/%s", tenant, req.GetNewExistingRef()),
 	}
 	if err := s.authzr.Delete(ctx, []authz.Tuple{oldTuple}); err != nil {
 		return nil, status.Errorf(codes.Internal, "delete old tuple: %v", err)
@@ -612,7 +612,7 @@ func (s *PluginsAdminServer) RevokePluginSecretBinding(ctx context.Context, req 
 	tuple := authz.Tuple{
 		User:     "user:" + principal,
 		Relation: "can_resolve",
-		Object:   fmt.Sprintf("secret:tenant-%s:%s", tenant, req.GetDeclaredName()),
+		Object:   fmt.Sprintf("secret:tenant-%s/%s", tenant, req.GetDeclaredName()),
 	}
 	if err := s.authzr.Delete(ctx, []authz.Tuple{tuple}); err != nil {
 		return nil, status.Errorf(codes.Internal, "delete tuple: %v", err)

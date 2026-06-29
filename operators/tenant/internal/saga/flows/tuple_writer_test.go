@@ -190,7 +190,7 @@ func TestProvisioning_NonPluginNeverWritesCanResolveTuple(t *testing.T) {
 
 			if tc.wantPluginTuple {
 				wantUser := fmt.Sprintf("plugin_principal:enrollment-%s", tc.uid)
-				wantObject := fmt.Sprintf("secret:tenant-%s:*", tc.tenantID)
+				wantObject := fmt.Sprintf("secret:tenant-%s/*", tc.tenantID)
 				match := got[0]
 				if match.User != wantUser {
 					t.Errorf("can_resolve tuple User = %q, want %q", match.User, wantUser)

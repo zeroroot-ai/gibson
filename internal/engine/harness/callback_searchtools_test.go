@@ -48,8 +48,8 @@ func (f fakeSearchAuthzStore) Get(context.Context, string) (*RunAuthzState, erro
 // id + description.
 func TestSearchTools_FiltersByCanInvokeAndMaps(t *testing.T) {
 	authzer := &fakeSearchAuthz{allow: map[string]bool{
-		"plugin:acme:gitlab": true,  // allowed
-		"plugin:acme:github": false, // denied
+		"plugin:acme/gitlab": true,  // allowed
+		"plugin:acme/github": false, // denied
 	}}
 	svc := &HarnessCallbackService{
 		logger:     slog.Default(),

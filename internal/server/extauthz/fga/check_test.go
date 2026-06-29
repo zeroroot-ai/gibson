@@ -2,6 +2,7 @@ package fga
 
 import (
 	"context"
+	"strings"
 	"sync/atomic"
 	"testing"
 
@@ -344,4 +345,91 @@ func TestCachedChecker_SelfMode_ZeroFGACalls(t *testing.T) {
 	if got := atomic.LoadInt32(&stub.calls); got != 0 {
 		t.Fatalf("CachedChecker: FGA called %d times for self-mode; expected 0", got)
 	}
+}
+
+// TestResolveObject covers every object_deriver branch, with emphasis on the
+// colon-free tenant_and_field join (gibson#1024): tenant and field must be
+// joined with "/", never ":", because OpenFGA rejects a colon inside an
+// object id ("invalid 'object' field format") on both Write and Check.
+func TestResolveObject(t *testing.T) {
+	t.Parallel()
+	id := headers.Identity{Subject: "u-1", Tenant: "acme"}
+	cases := []struct {
+		name    string
+		entry   Entry
+		meta    map[string]string
+		want    string
+		wantErr bool
+	}{
+		{
+			name:  "tenant_from_identity uses identity tenant",
+			entry: Entry{ObjectType: "tenant", ObjectDeriver: "tenant_from_identity"},
+			want:  "tenant:acme",
+		},
+		{
+			name:  "tenant_from_identity de-prefixes double-prefixed tenant",
+			entry: Entry{ObjectType: "tenant", ObjectDeriver: "tenant_from_identity"},
+			meta:  map[string]string{"tenant": "tenant:acme"},
+			want:  "tenant:acme",
+		},
+		{
+			name:  "system_tenant is the _system literal",
+			entry: Entry{ObjectType: "system_tenant", ObjectDeriver: "system_tenant"},
+			want:  "system_tenant:_system",
+		},
+		{
+			name:  "from_field uses bare field value",
+			entry: Entry{ObjectType: "plugin", ObjectDeriver: "from_field('plugin_id')"},
+			meta:  map[string]string{"plugin_id": "p-7"},
+			want:  "plugin:p-7",
+		},
+		{
+			name:  "tenant_and_field joins tenant and field with slash not colon",
+			entry: Entry{ObjectType: "plugin", ObjectDeriver: "tenant_and_field('plugin_id')"},
+			meta:  map[string]string{"plugin_id": "p-7"},
+			want:  "plugin:acme/p-7",
+		},
+		{
+			name:  "tenant_and_field degrades to tenant-only when field absent",
+			entry: Entry{ObjectType: "plugin", ObjectDeriver: "tenant_and_field('plugin_id')"},
+			meta:  map[string]string{},
+			want:  "plugin:acme",
+		},
+	}
+	for _, tc := range cases {
+		tc := tc
+		t.Run(tc.name, func(t *testing.T) {
+			t.Parallel()
+			got, err := resolveObject(tc.entry, id, tc.meta)
+			if tc.wantErr {
+				if err == nil {
+					t.Fatalf("resolveObject(%q) want error, got %q", tc.entry.ObjectDeriver, got)
+				}
+				return
+			}
+			if err != nil {
+				t.Fatalf("resolveObject(%q) unexpected error: %v", tc.entry.ObjectDeriver, err)
+			}
+			if got != tc.want {
+				t.Fatalf("resolveObject(%q) = %q, want %q", tc.entry.ObjectDeriver, got, tc.want)
+			}
+			if strings.Count(got, ":") > 1 {
+				t.Fatalf("resolveObject(%q) = %q contains a colon inside the object id (OpenFGA rejects this; gibson#1024)", tc.entry.ObjectDeriver, got)
+			}
+		})
+	}
+
+	// With neither metadata nor identity tenant, tenant-scoped derivers must
+	// fail closed rather than emit a malformed object id.
+	t.Run("empty tenant fails closed", func(t *testing.T) {
+		t.Parallel()
+		_, err := resolveObject(
+			Entry{ObjectType: "tenant", ObjectDeriver: "tenant_from_identity", Method: "/x.S/M"},
+			headers.Identity{Subject: "u-1"}, // no Tenant
+			map[string]string{},
+		)
+		if err == nil {
+			t.Fatal("resolveObject with empty tenant: want error, got nil")
+		}
+	})
 }

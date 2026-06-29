@@ -43,12 +43,25 @@ func ComponentObject(name string) string {
 	return "component:" + name
 }
 
+// TenantQualifiedSep joins the tenant and field segments of a tenant-qualified
+// FGA object id (e.g. plugin:<tenant><sep><name>). It MUST NOT be a colon:
+// OpenFGA splits an object on its first colon into <type>:<id> and rejects any
+// id that itself contains a colon ("invalid 'object' field format") on BOTH
+// Write and Check (verified against openfga v1.8.4). A 3-part "type:tenant:name"
+// object is therefore invalid; we join tenant and name with "/" instead, which
+// OpenFGA accepts and which cannot appear in a tenant slug or component name
+// ([a-z0-9-]). See gibson#1024. Every producer of a tenant-qualified object —
+// the daemon (PluginObject + the secret writers), ext-authz's tenant_and_field
+// deriver, and the tenant-operator FGA clients — MUST use this same separator
+// or Check will never match Write.
+const TenantQualifiedSep = "/"
+
 // PluginObject returns the canonical FGA object reference for plugin
-// invocation: "plugin:<tenant>:<name>". The tenant-qualified id must match
+// invocation: "plugin:<tenant>/<name>". The tenant-qualified id must match
 // what the PluginInvoke RPC's tenant_and_field('PluginName') deriver produces
 // at check time and what the tenant-operator seeds at enrollment.
 func PluginObject(tenant, name string) string {
-	return "plugin:" + tenant + ":" + name
+	return "plugin:" + tenant + TenantQualifiedSep + name
 }
 
 // componentKinds are the component-kind qualifiers that callers historically
@@ -81,6 +94,12 @@ func CanonicalComponentResource(resource string) string {
 		// Bare component name.
 		return ComponentObject(resource)
 	case 2:
+		if parts[0] == "plugin" && strings.Contains(parts[1], TenantQualifiedSep) {
+			// "plugin:<tenant>/<name>" — a typed, tenant-qualified plugin object
+			// (the colon-free form, gibson#1024). The "/" distinguishes it from
+			// the kind-qualified "plugin:<name>" below; never rewritten.
+			return resource
+		}
 		if parts[0] == "component" || componentKinds[parts[0]] {
 			// "component:<name>" (canonical) or "<kind>:<name>".
 			return ComponentObject(parts[1])
@@ -91,9 +110,9 @@ func CanonicalComponentResource(resource string) string {
 			// Legacy "component:<kind>:<name>".
 			return ComponentObject(parts[2])
 		}
-		// Includes "plugin:<tenant>:<name>" — a valid typed plugin object,
-		// never rewritten ("plugin" only acts as a kind qualifier in the
-		// two-segment form).
+		// A 3-segment typed object (e.g. the legacy colon "plugin:<tenant>:<name>"
+		// form) is returned unchanged; current producers emit the colon-free
+		// "plugin:<tenant>/<name>" handled in the two-segment case above.
 		return resource
 	}
 }

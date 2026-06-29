@@ -125,8 +125,8 @@ func TestSecretGrantStep_Plugin_WritesExactlyOneTuple(t *testing.T) {
 	if stub.written[0].User != want {
 		t.Errorf("tuple User = %q, want %q", stub.written[0].User, want)
 	}
-	if stub.written[0].Object != "secret:tenant-tenant-acme:*" {
-		t.Errorf("tuple Object = %q, want %q", stub.written[0].Object, "secret:tenant-tenant-acme:*")
+	if stub.written[0].Object != "secret:tenant-tenant-acme/*" {
+		t.Errorf("tuple Object = %q, want %q", stub.written[0].Object, "secret:tenant-tenant-acme/*")
 	}
 }
 

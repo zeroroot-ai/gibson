@@ -58,8 +58,8 @@ func TestSecretCanResolveTuple_Shape(t *testing.T) {
 	if got.Relation != "can_resolve" {
 		t.Errorf("Relation = %q, want %q", got.Relation, "can_resolve")
 	}
-	if got.Object != "secret:tenant-acme:*" {
-		t.Errorf("Object = %q, want %q", got.Object, "secret:tenant-acme:*")
+	if got.Object != "secret:tenant-acme/*" {
+		t.Errorf("Object = %q, want %q", got.Object, "secret:tenant-acme/*")
 	}
 }
 

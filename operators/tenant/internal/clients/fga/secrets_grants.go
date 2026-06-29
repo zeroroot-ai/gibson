@@ -38,7 +38,7 @@ func SecretCanResolveTuple(enrollmentUID, tenantID string) Tuple {
 	return Tuple{
 		User:     fmt.Sprintf("plugin_principal:%s", enrollmentUID),
 		Relation: "can_resolve",
-		Object:   fmt.Sprintf("secret:tenant-%s:*", tenantID),
+		Object:   fmt.Sprintf("secret:tenant-%s/*", tenantID),
 	}
 }
 

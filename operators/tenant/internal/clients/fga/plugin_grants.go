@@ -54,7 +54,7 @@ func PluginCanInvokeTuple(pluginName, tenantID string) Tuple {
 	return Tuple{
 		User:     fmt.Sprintf("tenant:%s#member", tenantID),
 		Relation: "can_invoke",
-		Object:   fmt.Sprintf("plugin:%s:%s", tenantID, pluginName),
+		Object:   fmt.Sprintf("plugin:%s/%s", tenantID, pluginName),
 	}
 }
 

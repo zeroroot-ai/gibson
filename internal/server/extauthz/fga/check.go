@@ -324,7 +324,9 @@ func (c *CachedChecker) CheckPlatformOperator(ctx context.Context, subject strin
 //   - "system_tenant"          — "<object_type>:_system"  (object_type
 //     is typically "system_tenant" or "component")
 //   - "from_field('<name>')"   — "<object_type>:" + req.<name>
-//   - "tenant_and_field('<name>')" — "<object_type>:" + tenant + ":" + req.<name>
+//   - "tenant_and_field('<name>')" — "<object_type>:" + tenant + "/" + req.<name>
+//     (tenant and field are joined with "/", never ":" — OpenFGA rejects a
+//     colon inside an object id; see gibson#1024 and authz.TenantQualifiedSep)
 //
 // Spec: unified-identity-and-authorization Component B (object_deriver
 // grammar) and Requirement 4.4.
@@ -378,7 +380,12 @@ func resolveObject(entry Entry, identity headers.Identity, meta map[string]strin
 		field := strings.Trim(strings.TrimPrefix(strings.TrimPrefix(entry.ObjectDeriver, "tenant_and_field"), "from_field"), "()'\"")
 		if v := meta[field]; v != "" {
 			if strings.HasPrefix(entry.ObjectDeriver, "tenant_and_field") {
-				return entry.ObjectType + ":" + tenant + ":" + v, nil
+				// Join tenant and field with "/" — NOT ":". OpenFGA rejects an
+				// object id that contains a colon ("invalid 'object' field
+				// format") on both Write and Check, so "type:tenant:field" is
+				// invalid. Must match authz.PluginObject and the daemon/operator
+				// writers (authz.TenantQualifiedSep). See gibson#1024.
+				return entry.ObjectType + ":" + tenant + "/" + v, nil
 			}
 			return entry.ObjectType + ":" + v, nil
 		}
