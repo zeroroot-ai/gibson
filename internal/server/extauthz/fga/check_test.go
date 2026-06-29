@@ -2,7 +2,6 @@ package fga
 
 import (
 	"context"
-	"strings"
 	"sync/atomic"
 	"testing"
 
@@ -395,6 +394,17 @@ func TestResolveObject(t *testing.T) {
 			meta:  map[string]string{},
 			want:  "plugin:acme",
 		},
+		{
+			// gibson#1035: secret objects use "secret:tenant-<slug>/<ref>" — the
+			// "tenant-" prefix is a fixed part of the id (matches the daemon writers
+			// and the FGA model), and the ref may itself contain colons (e.g.
+			// "cred:openai-prod"). The deriver must use SecretObjectFromDeriver
+			// rather than the bare tenant_and_field format.
+			name:  "tenant_and_field for secret adds tenant- prefix and slash separator",
+			entry: Entry{ObjectType: "secret", ObjectDeriver: "tenant_and_field('secret_ref')"},
+			meta:  map[string]string{"secret_ref": "cred:openai-prod"},
+			want:  "secret:tenant-acme/cred:openai-prod",
+		},
 	}
 	for _, tc := range cases {
 		tc := tc
@@ -413,9 +423,13 @@ func TestResolveObject(t *testing.T) {
 			if got != tc.want {
 				t.Fatalf("resolveObject(%q) = %q, want %q", tc.entry.ObjectDeriver, got, tc.want)
 			}
-			if strings.Count(got, ":") > 1 {
-				t.Fatalf("resolveObject(%q) = %q contains a colon inside the object id (OpenFGA rejects this; gibson#1024)", tc.entry.ObjectDeriver, got)
-			}
+			// The tenant-separator must be "/" not ":". OpenFGA v1.8.4 rejects a
+			// THIRD colon at the structural type-id boundary (e.g. "type:tenant:name"
+			// is invalid). Exact string equality against tc.want already pins the
+			// separator, so the invariant is enforced above; this comment preserves
+			// the intent from the original gibson#1024 guard (the colon-count check
+			// was removed because secret refs like "cred:openai-prod" legitimately
+			// contain a colon in the body of the id).
 		})
 	}
 

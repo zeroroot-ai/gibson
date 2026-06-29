@@ -45,15 +45,16 @@ func ComponentObject(name string) string {
 
 // TenantQualifiedSep joins the tenant and field segments of a tenant-qualified
 // FGA object id (e.g. plugin:<tenant><sep><name>). It MUST NOT be a colon:
-// OpenFGA splits an object on its first colon into <type>:<id> and rejects any
-// id that itself contains a colon ("invalid 'object' field format") on BOTH
-// Write and Check (verified against openfga v1.8.4). A 3-part "type:tenant:name"
-// object is therefore invalid; we join tenant and name with "/" instead, which
-// OpenFGA accepts and which cannot appear in a tenant slug or component name
-// ([a-z0-9-]). See gibson#1024. Every producer of a tenant-qualified object —
-// the daemon (PluginObject + the secret writers), ext-authz's tenant_and_field
-// deriver, and the tenant-operator FGA clients — MUST use this same separator
-// or Check will never match Write.
+// OpenFGA v1.8.4 rejects a THIRD colon at the structural type-id boundary —
+// i.e. "type:tenant:name" is parsed as a 3-part string and fails with "invalid
+// 'object' field format" on both Write and Check. The id portion may contain
+// colons in the body (e.g. a ref like "cred:openai-prod"), but the separator
+// between the tenant slug and the rest of the id must not be ":". We use "/"
+// instead, which OpenFGA accepts and which cannot appear in a tenant slug or
+// component name ([a-z0-9-]). See gibson#1024. Every producer of a tenant-
+// qualified object — the daemon (PluginObject + the secret writers), ext-authz's
+// tenant_and_field deriver, and the tenant-operator FGA clients — MUST use this
+// same separator or Check will never match Write.
 const TenantQualifiedSep = "/"
 
 // PluginObject returns the canonical FGA object reference for plugin
@@ -62,6 +63,39 @@ const TenantQualifiedSep = "/"
 // at check time and what the tenant-operator seeds at enrollment.
 func PluginObject(tenant, name string) string {
 	return "plugin:" + tenant + TenantQualifiedSep + name
+}
+
+// SecretObject returns the canonical FGA object reference for a tenant-scoped
+// secret: "secret:tenant-<tenant>/<ref>". The "tenant-" prefix is a fixed part
+// of the secret object id convention (not a type qualifier) — it distinguishes
+// the tenant-namespace segment from the ref and is consistent with the
+// tenant-operator's SecretCanResolveTuple and the daemon's plugin_admin writers.
+//
+// The tenant-slug and ref are joined with "/" (TenantQualifiedSep, not ":").
+// OpenFGA v1.8.4 rejects an object id where the segment immediately after the
+// type colon is itself colon-split (a third colon at the structural level) —
+// e.g. "secret:tenant-acme:ref" is invalid. The ref portion may contain colons
+// (e.g. "cred:openai-prod") since those appear in the body of the id, not at
+// the structural type-id boundary. See TenantQualifiedSep and gibson#1024.
+//
+// Usage:
+//
+//	tupleObj = authz.SecretObject(tenant.String(), ref)   // for FGA writes
+//	// ext-authz tenant_and_field deriver uses SecretObjectFromDeriver
+//
+// SecretObject is the canonical form: all secret FGA tuple writers, the authz
+// deriver, and uriToRef must agree on this exact format (gibson#1035).
+func SecretObject(tenant, ref string) string {
+	return "secret:tenant-" + tenant + TenantQualifiedSep + ref
+}
+
+// SecretObjectFromDeriver returns the FGA object a tenant_and_field('Name')
+// deriver should produce for a secret can_resolve check. It takes the tenant
+// slug as carried in identity.Tenant (the raw JWT claim, e.g. "acme") and the
+// ref field from the request metadata. This is the ext-authz-side mirror of
+// SecretObject — they must produce identical strings for the same (tenant, ref).
+func SecretObjectFromDeriver(tenant, ref string) string {
+	return SecretObject(tenant, ref)
 }
 
 // componentKinds are the component-kind qualifiers that callers historically

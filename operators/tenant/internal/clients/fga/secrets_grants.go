@@ -21,16 +21,20 @@ import (
 //
 // Tuple shape:
 //
-//	(plugin_principal:<enrollmentUID>, can_resolve, secret:tenant-<tenantID>:*)
+//	(plugin_principal:<enrollmentUID>, can_resolve, secret:tenant-<tenantID>/*)
 //
 // OpenFGA does not support object wildcards in the tuple store directly (the
 // "*" is not a native FGA wildcard). Instead we use the per-tenant secret
-// object ID convention `secret:tenant-<tenantID>:*` which the daemon writes
+// object ID convention `secret:tenant-<tenantID>/*` which the daemon writes
 // as a literal object ID representing the tenant-wide grant. The ext-authz
 // sidecar and the daemon's authz interceptor both query `can_resolve` against
 // this object ID for every GetCredential request, so writing this single tuple
 // at plugin provisioning time grants the plugin access to all current and
 // future secrets in the tenant without per-secret tuples.
+//
+// The "/" separator is authz.TenantQualifiedSep — OpenFGA rejects a colon
+// inside an object id (see gibson#1024); the "/" is the canonical separator
+// shared by all secret object writers and the ext-authz deriver.
 //
 // agent_principal and tool_principal callers are never passed to this function;
 // they receive no can_resolve tuples to any secret:* object.

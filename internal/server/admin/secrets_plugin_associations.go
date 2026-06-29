@@ -20,10 +20,12 @@ import (
 //
 //	User:     "user:<principal>"
 //	Relation: "can_resolve"
-//	Object:   "secret:tenant-<tenant>:<callerName>"
+//	Object:   "secret:tenant-<tenant>/<callerName>"
+//
+// (tenant-id and ref joined with "/", never ":" — gibson#1024, authz.TenantQualifiedSep)
 //
 // so the reverse lookup is ListUsers(objectType="secret",
-// object="secret:tenant-<tenant>:<callerName>", relation="can_resolve").
+// object="secret:tenant-<tenant>/<callerName>", relation="can_resolve").
 type FGASecretsPluginAssociations struct {
 	authorizer authz.Authorizer
 }
