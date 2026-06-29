@@ -269,6 +269,23 @@ func (s *worldServer) GetFrameAt(ctx context.Context, req *worldpb.GetFrameAtReq
 		}
 		resp.Decisions = append(resp.Decisions, dv)
 	}
+	// The mission's LLM calls reconstructed as-of the fold (PRD #1059 M2,
+	// gibson#1063). An LlmCall entity exists only once its observation event has
+	// folded, so a mission-scoped frame surfaces exactly the calls issued by `seq`,
+	// with their token/cost/provenance metadata — moving the LLM panel with the
+	// Scroller instead of the tenant-wide tail-only list. A call is attributed to
+	// the mission via the run_id→WorkItem→mission linkage (MissionSlice), so no
+	// other mission's calls bleed in. Transcripts stay behind GetLlmCall.
+	for _, c := range w.LlmCallSnapshot() {
+		resp.LlmCalls = append(resp.LlmCalls, &worldpb.LlmCallView{
+			CallId:           c.CallID,
+			RunId:            c.RunID,
+			Model:            c.Model,
+			ScopeId:          c.ScopeID,
+			PromptTokens:     int32(c.PromptTokens),
+			CompletionTokens: int32(c.CompletionTokens),
+		})
+	}
 	return resp, nil
 }
 
