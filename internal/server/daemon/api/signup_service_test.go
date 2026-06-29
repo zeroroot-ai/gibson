@@ -9,15 +9,23 @@ import (
 	"google.golang.org/grpc/status"
 
 	"github.com/zeroroot-ai/gibson/internal/platform/idp"
+	"github.com/zeroroot-ai/gibson/internal/platform/signup"
 	tenantv1 "github.com/zeroroot-ai/gibson/internal/server/daemon/api/gibson/tenant/v1"
 )
 
 const testAttemptID = "11111111-2222-4333-8444-555555555555"
 
+// newSignupServer creates a DaemonServer wired for the SaaS self-serve signup
+// path (PolicySelfServe). All existing tests in this file exercise the
+// self-serve flow and need the gate open. Tests that verify the gate itself
+// (self-hosted fail-safe) live in signup_seam_gate_test.go and configure
+// the policy explicitly.
 func newSignupServer(t *testing.T, idpc *fakeIDPClient) *DaemonServer {
 	t.Helper()
 	s := &DaemonServer{logger: testSlogLogger}
 	s.idpAdminClient = idpc
+	// Enable self-serve so existing tests are not gated (SaaS profile).
+	s.signupPolicy = signup.PolicySelfServe
 	return s
 }
 
@@ -135,7 +143,13 @@ func TestSignup_Validation(t *testing.T) {
 }
 
 func TestSignup_IdPNotConfigured(t *testing.T) {
-	s := &DaemonServer{logger: testSlogLogger} // no idpAdminClient
+	// Set PolicySelfServe so the seam gate passes; we're testing the
+	// idpAdminClient-nil code path that runs AFTER the gate check.
+	s := &DaemonServer{
+		logger:       testSlogLogger,
+		signupPolicy: signup.PolicySelfServe, // gate open — testing past-gate behavior
+		// idpAdminClient is nil — the handler should return Unavailable.
+	}
 	_, err := s.Signup(context.Background(), validSignupReq())
 	if status.Code(err) != codes.Unavailable {
 		t.Errorf("want Unavailable, got %v", err)

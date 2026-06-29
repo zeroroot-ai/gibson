@@ -15,6 +15,7 @@ package main
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"os"
 	"os/signal"
@@ -36,7 +37,7 @@ func main() {
 // run dispatches to the appropriate subcommand handler.
 func run(ctx context.Context, args []string) error {
 	if len(args) == 0 {
-		return fmt.Errorf("usage: gibson-bootstrap <subcommand> [args...]\n\nSubcommands:\n  zitadel-ensure-org <name>\n  zitadel-ensure-project <name>\n  zitadel-mint-oidc-client <client-name>\n  zitadel-mint-user-pat <username> [--rotate] [--roles=<list>]")
+		return errors.New("usage: gibson-bootstrap <subcommand> [args...]\n\nSubcommands:\n  zitadel-ensure-org <name>\n  zitadel-ensure-project <name>\n  zitadel-mint-oidc-client <client-name>\n  zitadel-mint-user-pat <username> [--rotate] [--roles=<list>]\n  seed-first-admin")
 	}
 
 	subcommand := args[0]
@@ -51,8 +52,10 @@ func run(ctx context.Context, args []string) error {
 		return cmdMintOIDCClient(ctx, rest)
 	case "zitadel-mint-user-pat":
 		return cmdMintUserPAT(ctx, rest)
+	case "seed-first-admin":
+		return cmdSeedFirstAdmin(ctx, rest)
 	default:
-		return fmt.Errorf("unknown subcommand %q; valid subcommands: zitadel-ensure-org, zitadel-ensure-project, zitadel-mint-oidc-client, zitadel-mint-user-pat", subcommand)
+		return fmt.Errorf("unknown subcommand %q; valid subcommands: zitadel-ensure-org, zitadel-ensure-project, zitadel-mint-oidc-client, zitadel-mint-user-pat, seed-first-admin", subcommand)
 	}
 }
 
