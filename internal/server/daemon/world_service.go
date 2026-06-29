@@ -231,6 +231,20 @@ func (s *worldServer) GetFrameAt(ctx context.Context, req *worldpb.GetFrameAtReq
 			Id: f.ID, Title: f.Title, ScopeId: f.ScopeID, Address: f.Address, Severity: f.Severity,
 		})
 	}
+	// In-flight (and terminal) work reconstructed as-of the fold (PRD #1059 M2,
+	// gibson#1061). A WorkItem entity exists only after its WorkDispatched event
+	// has folded, so a mission-scoped frame surfaces exactly the work dispatched by
+	// `seq` with its status at that tick: "running" == in-flight, terminal == done/
+	// failed/skipped. No other mission's work bleeds in (the slice is mission-scoped).
+	for _, wi := range w.WorkSnapshot() {
+		resp.Work = append(resp.Work, &worldpb.WorkItemView{
+			Id:        wi.ID,
+			MissionId: wi.MissionID,
+			Kind:      wi.Kind,
+			Target:    wi.Target,
+			Status:    string(wi.State),
+		})
+	}
 	return resp, nil
 }
 

@@ -155,6 +155,24 @@ message FindingView {
   string severity = 5;
 }
 
+// WorkItemView is one unit of work in a mission's frame (PRD #1059 M2,
+// gibson#1061): an agent run, tool execution, or plugin invocation, reconstructed
+// with its status as-of the folded tick. A WorkItem entity exists only once its
+// WorkDispatched event has folded, so an item first appears at its dispatch tick
+// with status "running" (in-flight) and reaches a terminal status (done / failed
+// / skipped) at its completion tick. The in-flight set at a tick is the items
+// with status "running"; terminal items are carried with their final status so
+// the panel can show what the run already finished. Mission-scoped: only the
+// mission's work appears in a mission-scoped frame (empty mission_id folds the
+// whole tenant Timeline, so all tenant work appears).
+message WorkItemView {
+  string id = 1;
+  string mission_id = 2; // owning mission ("" for free-standing work)
+  string kind = 3;       // "tool" | "agent" | "plugin"
+  string target = 4;     // the capability being executed
+  string status = 5;     // "pending" | "running" | "done" | "failed" | "skipped"
+}
+
 message TimelineEvent {
   uint64 seq = 1;     // 0-based position in the tenant Timeline
   string kind = 2;    // event Kind(), e.g. "host.observed"
@@ -227,6 +245,10 @@ message GetFrameAtResponse {
   repeated MissionView missions = 3;
   repeated HostView hosts = 4;
   repeated FindingView findings = 5;
+  // The mission's WorkItems reconstructed as-of `seq` (PRD #1059 M2, gibson#1061):
+  // in-flight work (status "running") plus terminal work with its final status.
+  // Mission-scoped when mission_id is set; all tenant work when it is empty.
+  repeated WorkItemView work = 6;
 }
 
 // LabelView is one applied review label (a gibson.world.v1 view of a brain
