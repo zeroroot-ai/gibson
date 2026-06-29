@@ -1,6 +1,9 @@
 package brain
 
-import "testing"
+import (
+	"sort"
+	"testing"
+)
 
 // MissionSlice is the pure events→mission-slice attribution that the mission-scoped
 // fold is built on (gibson#1060). It must attribute work-id-only events (completion)
@@ -58,5 +61,79 @@ func TestMissionSlice_AttributesAndIsolates(t *testing.T) {
 	// Clamping: seq 0 folds nothing.
 	if ms := e.MissionFrameAt("A", 0).MissionSnapshot(); len(ms) != 0 {
 		t.Fatalf("mission A frame@0 = %+v, want empty", ms)
+	}
+}
+
+// The rich frame (PRD #1059 M2, gibson#1061) surfaces a mission's in-flight Work
+// reconstructed as-of the scrubbed tick: a WorkItem appears at its dispatch tick
+// (status "running" = in-flight) and leaves the in-flight set at its completion
+// tick (status "done"/"failed"). The fold is mission-scoped, so no other mission's
+// work bleeds in. This asserts the in-flight set at seq 0 / mid / total.
+func TestMissionFrameAt_InFlightWork(t *testing.T) {
+	e := NewEngine("t1")
+	e.Submit(MissionStarted{ID: "A", Goal: "ga"})                                           // A slice idx 0
+	e.Submit(WorkDispatched{ID: "wa1", MissionID: "A", ItemKind: "tool", Target: "nmap"})   // idx 1: wa1 running
+	e.Submit(WorkDispatched{ID: "wa2", MissionID: "A", ItemKind: "agent", Target: "recon"}) // idx 2: wa2 running
+	e.Submit(WorkDispatched{ID: "wb1", MissionID: "B", ItemKind: "tool", Target: "nmap"})   // mission B (excluded)
+	e.Submit(WorkCompleted{ID: "wa1", Result: "ok"})                                        // idx 3: wa1 done
+	e.Tick()
+
+	// The mission-scoped slice for A is its 4 events (B's dispatch excluded).
+	slice := e.MissionEvents("A")
+	if len(slice) != 4 {
+		t.Fatalf("mission A slice = %d events, want 4 (%v)", len(slice), slice)
+	}
+
+	// inflight returns the ids of WorkItems still running in the folded frame.
+	inflight := func(w *World) []string {
+		var ids []string
+		for _, wi := range w.WorkSnapshot() {
+			if wi.State == WorkRunning {
+				ids = append(ids, wi.ID)
+			}
+		}
+		sort.Strings(ids)
+		return ids
+	}
+	eq := func(got, want []string) bool {
+		if len(got) != len(want) {
+			return false
+		}
+		for i := range got {
+			if got[i] != want[i] {
+				return false
+			}
+		}
+		return true
+	}
+
+	// seq 0: nothing dispatched yet — no work at all.
+	if wk := e.MissionFrameAt("A", 0).WorkSnapshot(); len(wk) != 0 {
+		t.Fatalf("frame@0 work = %+v, want none", wk)
+	}
+
+	// seq 2 folds the first 2 events (MissionStarted + wa1 dispatch): only wa1 in flight.
+	if got := inflight(e.MissionFrameAt("A", 2)); !eq(got, []string{"wa1"}) {
+		t.Fatalf("frame@2 in-flight = %v, want [wa1]", got)
+	}
+
+	// seq 3 folds wa2's dispatch too: both wa1 and wa2 in flight.
+	if got := inflight(e.MissionFrameAt("A", 3)); !eq(got, []string{"wa1", "wa2"}) {
+		t.Fatalf("frame@3 in-flight = %v, want [wa1 wa2]", got)
+	}
+
+	// seq 4 (total): wa1 completed (idx 3) — it clears the in-flight set; wa2 stays.
+	end := e.MissionFrameAt("A", 4)
+	if got := inflight(end); !eq(got, []string{"wa2"}) {
+		t.Fatalf("frame@end in-flight = %v, want [wa2] (wa1 should have cleared)", got)
+	}
+	// wa1 is still carried with its terminal status; mission B's work never appears.
+	for _, wi := range end.WorkSnapshot() {
+		if wi.ID == "wb1" {
+			t.Fatal("mission B work bled into mission A frame")
+		}
+		if wi.ID == "wa1" && wi.State != WorkDone {
+			t.Fatalf("wa1 status = %q, want done", wi.State)
+		}
 	}
 }
