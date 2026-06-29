@@ -507,13 +507,12 @@ func TestWorldService_GetFrameAt_Decisions(t *testing.T) {
 	}
 }
 
-// TestWorldService_GetFrameAt_LlmCalls: the rich frame (PRD #1059 M2, gibson#1063)
-// surfaces a mission's LLM calls reconstructed as-of the folded tick. A call has no
-// mission id but carries the run_id of the AgentRun (a WorkItem) that issued it, so
-// it is mission-scoped via the run_id→WorkItem→mission linkage; a mission-level call
-// (empty run_id) attaches to the mission directly. Each call appears at its own
-// observation tick (the set folds in cumulatively), token/cost metadata rides along,
-// and a call issued by another mission's work never bleeds into a scoped frame.
+// TestWorldService_GetFrameAt_LlmCalls: the rich frame (PRD #1059 M2, gibson#1075)
+// surfaces a mission's LLM calls reconstructed as-of the folded tick. A call is
+// mission-scoped by the mission-evidence edge — its MissionID — the same edge hosts
+// and findings use. Each call appears at its own observation tick (the set folds in
+// cumulatively), token/cost metadata rides along, and a call made under another
+// mission never bleeds into a scoped frame.
 func TestWorldService_GetFrameAt_LlmCalls(t *testing.T) {
 	ctx, cancel := context.WithCancel(context.Background())
 	defer cancel()
@@ -521,18 +520,19 @@ func TestWorldService_GetFrameAt_LlmCalls(t *testing.T) {
 	srv := NewWorldServer(reg, nil)
 
 	e := reg.For("acme")
-	e.Submit(brain.MissionStarted{ID: "A", Goal: "goal A"})                                                         // A idx 0
-	e.Submit(brain.WorkDispatched{ID: "wa1", MissionID: "A", ItemKind: "agent", Target: "recon"})                   // A idx 1
-	e.Submit(brain.LlmCallObserved{CallID: "ca1", RunID: "wa1", Model: "m", PromptTokens: 10, CompletionTokens: 5}) // A idx 2: run-linked
-	e.Submit(brain.LlmCallObserved{CallID: "cam", RunID: "", Model: "m", PromptTokens: 3, CompletionTokens: 1})     // A idx 3: mission-level
-	e.Submit(brain.WorkDispatched{ID: "wb1", MissionID: "B", ItemKind: "agent", Target: "recon"})                   // mission B
-	e.Submit(brain.LlmCallObserved{CallID: "cb1", RunID: "wb1", Model: "m", PromptTokens: 7, CompletionTokens: 2})  // mission B call
+	e.Submit(brain.MissionStarted{ID: "A", Goal: "goal A"})                                                               // A idx 0
+	e.Submit(brain.WorkDispatched{ID: "wa1", MissionID: "A", ItemKind: "agent", Target: "recon"})                         // A idx 1
+	e.Submit(brain.LlmCallObserved{CallID: "ca1", MissionID: "A", Model: "m", PromptTokens: 10, CompletionTokens: 5})     // A idx 2
+	e.Submit(brain.LlmCallObserved{CallID: "cam", MissionID: "A", Model: "m", PromptTokens: 3, CompletionTokens: 1})      // A idx 3
+	e.Submit(brain.WorkDispatched{ID: "wb1", MissionID: "B", ItemKind: "agent", Target: "recon"})                         // mission B
+	e.Submit(brain.LlmCallObserved{CallID: "cb1", MissionID: "B", Model: "m", PromptTokens: 7, CompletionTokens: 2})      // mission B call
+	e.Submit(brain.LlmCallObserved{CallID: "camb", MissionID: "", Model: "m", PromptTokens: 1, CompletionTokens: 1})      // tenant-ambient (no mission)
 
 	tctx := auth.WithTenant(context.Background(), auth.MustNewTenantID("acme"))
 
 	deadline := time.Now().Add(2 * time.Second)
 	for time.Now().Before(deadline) {
-		if len(reg.For("acme").Events()) == 6 {
+		if len(reg.For("acme").Events()) == 7 {
 			break
 		}
 		time.Sleep(10 * time.Millisecond)
@@ -597,13 +597,68 @@ func TestWorldService_GetFrameAt_LlmCalls(t *testing.T) {
 		if c.GetCallId() == "cb1" {
 			t.Fatal("mission B LLM call bled into mission A frame")
 		}
+		if c.GetCallId() == "camb" {
+			t.Fatal("tenant-ambient LLM call (no mission) bled into mission A frame")
+		}
 		if c.GetCallId() == "ca1" {
-			if c.GetRunId() != "wa1" {
-				t.Fatalf("ca1 run_id = %q, want wa1", c.GetRunId())
-			}
 			if c.GetPromptTokens() != 10 || c.GetCompletionTokens() != 5 {
 				t.Fatalf("ca1 tokens = %d/%d, want 10/5", c.GetPromptTokens(), c.GetCompletionTokens())
 			}
 		}
+	}
+}
+
+// TestWorldService_GetFrameAt_HostsAndFindings: a mission-scoped frame surfaces the
+// hosts and findings the mission's work discovered (the mission-evidence edge,
+// gibson#1075) in the view the dashboard hosts/findings panels bind to, with no
+// cross-mission or tenant-ambient bleed.
+func TestWorldService_GetFrameAt_HostsAndFindings(t *testing.T) {
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+	reg := brain.NewRegistry(ctx)
+	srv := NewWorldServer(reg, nil)
+
+	e := reg.For("acme")
+	e.Submit(brain.MissionStarted{ID: "A", Goal: "goal A"})
+	e.Submit(brain.HostObserved{MissionID: "A", ScopeID: "sA", Address: "10.0.0.5", SSHHostKey: "AAAA"})
+	e.Submit(brain.FindingRaised{ID: "f-a", Title: "A finding", ScopeID: "sA", Address: "10.0.0.5", Severity: "high", MissionID: "A"})
+	e.Submit(brain.MissionStarted{ID: "B", Goal: "goal B"})
+	e.Submit(brain.HostObserved{MissionID: "B", ScopeID: "sB", Address: "10.0.1.9", SSHHostKey: "CCCC"})
+	e.Submit(brain.FindingRaised{ID: "f-b", Title: "B finding", ScopeID: "sB", Address: "10.0.1.9", Severity: "low", MissionID: "B"})
+	e.Submit(brain.HostObserved{ScopeID: "sX", Address: "10.0.2.2", SSHHostKey: "DDDD"}) // tenant-ambient
+
+	tctx := auth.WithTenant(context.Background(), auth.MustNewTenantID("acme"))
+
+	deadline := time.Now().Add(2 * time.Second)
+	for time.Now().Before(deadline) {
+		if len(reg.For("acme").Events()) == 7 {
+			break
+		}
+		time.Sleep(10 * time.Millisecond)
+	}
+
+	a, err := srv.GetFrameAt(tctx, &worldpb.GetFrameAtRequest{Seq: 99, MissionId: "A"})
+	if err != nil {
+		t.Fatalf("GetFrameAt(99,A): %v", err)
+	}
+	addrs := map[string]bool{}
+	for _, h := range a.GetHosts() {
+		addrs[h.GetAddress()] = true
+	}
+	if !addrs["10.0.0.5"] {
+		t.Fatalf("mission A frame missing its host; hosts=%v", addrs)
+	}
+	if addrs["10.0.1.9"] || addrs["10.0.2.2"] {
+		t.Fatalf("foreign/ambient host bled into mission A frame; hosts=%v", addrs)
+	}
+	titles := map[string]bool{}
+	for _, f := range a.GetFindings() {
+		titles[f.GetTitle()] = true
+	}
+	if !titles["A finding"] {
+		t.Fatalf("mission A frame missing its finding; findings=%v", titles)
+	}
+	if titles["B finding"] {
+		t.Fatal("mission B finding bled into mission A frame")
 	}
 }

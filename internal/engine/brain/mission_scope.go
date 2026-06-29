@@ -13,20 +13,28 @@ package brain
 // (mission-lifecycle, dispatch, decision and token events all carry the mission
 // id) or references a WorkItem the mission owns (retry / completion / condition
 // events carry only a work id, resolved to the owning mission via the mission's
-// dispatched/projected work). LLM-call observations carry no mission id either,
-// but they do carry the run_id of the AgentRun that issued the call, and that
-// AgentRun is a WorkItem the mission dispatched — so an llm-call is attributed to
-// a mission when its run_id names a WorkItem the mission owns (the
-// run_id→WorkItem→mission linkage, gibson#1063). A mission-level call with an
-// empty run_id (e.g. the Decider's own completion) has no owning agent run and
-// attaches to the mission directly. The remaining observation events (host /
-// domain / credential / finding / belief / agent-run) carry no mission linkage in
-// the event model — they are scope-relative and tenant-ambient — so they are NOT
-// part of any single mission's slice. Surfacing a mission's discoveries (the hosts
-// and findings it produced) needs a mission→evidence edge the event model does not
-// yet record; that is a later rich-frame projection layer (PRD #1059 M2), tracked
-// separately. S1 (this file) delivers the isolation guarantee: one mission's
-// frame never bleeds another mission's events in.
+// dispatched/projected work).
+//
+// Evidence (host / finding / llm-call). Discovered evidence is attributed by the
+// mission-evidence edge: each such observation now carries the MissionID of the
+// mission whose work produced it (gibson#1075), stamped at ingest from the agent
+// callback / mission-event context (and, for a surprise→Finding promotion,
+// inherited from the source host). So a host, finding or llm-call is in the
+// mission's slice when its MissionID names the mission — one consistent, working
+// edge across all three. This replaces the earlier run_id→WorkItem→mission attempt
+// for llm-calls (gibson#1063), which never connected in practice: the production
+// ExecuteLLM path left run_id empty, so the old `run_id==""` fallback attached
+// every call to *every* mission (cross-mission bleed). Direct MissionID matching
+// fixes that; an evidence event with no mission context (empty MissionID — e.g. a
+// component-path finding or an ExecuteLLM call that carries none) attaches to no
+// mission and stays tenant-ambient (propagation of that context is follow-up
+// gibson#1078). The remaining observation events (domain / credential / account /
+// subdomain / belief / agent-run) still carry no mission linkage and remain
+// tenant-ambient.
+//
+// Folding a slice is still a pure events→world fold over a filtered log; an empty
+// MissionID match-by-equality never bleeds into a named mission, and the
+// tenant-wide fold (empty missionID) is unchanged.
 
 // MissionSlice returns the sub-sequence of events attributable to missionID, in
 // Timeline order. An empty missionID returns a copy of the whole slice (the
@@ -93,13 +101,24 @@ func eventInMission(ev Event, missionID string, owned map[string]bool) bool {
 		return e.MissionID == missionID
 	case TokenUsed:
 		return e.MissionID == missionID
+	case HostObserved:
+		// Mission-evidence edge (gibson#1075): the host is in the slice when the
+		// mission whose work discovered it is this mission. Empty MissionID =
+		// tenant-ambient (no bleed into a named mission).
+		return e.MissionID != "" && e.MissionID == missionID
+	case FindingRaised:
+		// Mission-evidence edge (gibson#1075): agent/decider findings carry the
+		// mission id at ingest; a surprise→Finding promotion inherits it from the
+		// source host. Empty MissionID = tenant-ambient.
+		return e.MissionID != "" && e.MissionID == missionID
 	case LlmCallObserved:
-		// run_id→WorkItem→mission linkage (gibson#1063): the call belongs to this
-		// mission when the AgentRun that issued it is a WorkItem the mission owns. A
-		// mission-level call (empty run_id, e.g. the Decider) attaches directly.
-		return e.RunID == "" || owned[e.RunID]
+		// Mission-evidence edge (gibson#1075): one consistent edge with hosts and
+		// findings. Empty MissionID (e.g. an ExecuteLLM call with no mission context)
+		// = tenant-ambient — never attaches to a mission frame, fixing the prior
+		// run_id-based cross-mission bleed (gibson#1063).
+		return e.MissionID != "" && e.MissionID == missionID
 	default:
-		// Observation and any other unattributable events are tenant-ambient.
+		// Any other unattributable observation is tenant-ambient.
 		return false
 	}
 }

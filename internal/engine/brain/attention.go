@@ -45,6 +45,13 @@ type FindingRaised struct {
 	ScopeID     string
 	Address     string
 	Severity    string
+	// MissionID links the finding to the mission whose work raised it — the
+	// mission-evidence edge (gibson#1075). Carried from the mission-event ingest
+	// context for agent/decider findings, and inherited from the source host for a
+	// surprise→Finding promotion. Empty when no mission linkage is available (e.g. a
+	// finding submitted over the component path, which carries no mission context —
+	// follow-up gibson#1078); such findings stay tenant-ambient.
+	MissionID string
 }
 
 func (FindingRaised) Kind() string { return "finding.raised" }
@@ -103,6 +110,7 @@ func SurpriseFindingSystem(w *World) []Event {
 			ScopeID:     h.ScopeID,
 			Address:     h.Address,
 			Severity:    "medium",
+			MissionID:   h.MissionID, // inherit the source host's mission attribution
 		})
 	}
 	return out

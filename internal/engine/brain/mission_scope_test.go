@@ -232,28 +232,27 @@ func TestMissionFrameAt_Decisions(t *testing.T) {
 	}
 }
 
-// The rich frame (PRD #1059 M2, gibson#1063) surfaces a mission's LLM calls
-// reconstructed as-of the scrubbed tick. An LLM-call observation carries no
-// mission id but does carry the run_id of the AgentRun (a WorkItem) that issued
-// it, so it is attributed to the mission via the run_id→WorkItem→mission linkage;
-// a mission-level call (empty run_id) attaches to the mission directly. A call
-// appears at its own observation tick and the set folds in cumulatively, and a
-// call whose run_id names another mission's work never bleeds in. This asserts the
-// folded call set at seq 0 / mid / total.
+// The rich frame (PRD #1059, gibson#1075) surfaces a mission's LLM calls
+// reconstructed as-of the scrubbed tick. An LLM-call observation is attributed by
+// the mission-evidence edge — its MissionID — the same edge hosts and findings use.
+// A call appears at its own observation tick and the set folds in cumulatively; a
+// call made under another mission, or one with no mission context at all, never
+// bleeds in. This asserts the folded call set at seq 0 / mid / total.
 func TestMissionFrameAt_LlmCalls(t *testing.T) {
 	e := NewEngine("t1")
-	e.Submit(MissionStarted{ID: "A", Goal: "ga"})                                                             // A idx 0
-	e.Submit(WorkDispatched{ID: "wa1", MissionID: "A", ItemKind: "agent", Target: "recon"})                   // A idx 1: A owns wa1
-	e.Submit(LlmCallObserved{CallID: "ca1", RunID: "wa1", Model: "m", PromptTokens: 10, CompletionTokens: 5}) // A idx 2: run-linked
-	e.Submit(LlmCallObserved{CallID: "cam", RunID: "", Model: "m", PromptTokens: 3, CompletionTokens: 1})     // A idx 3: mission-level
-	// mission B — its work + the call that work issued must never bleed into A.
+	e.Submit(MissionStarted{ID: "A", Goal: "ga"})                                                               // A idx 0
+	e.Submit(WorkDispatched{ID: "wa1", MissionID: "A", ItemKind: "agent", Target: "recon"})                     // A idx 1
+	e.Submit(LlmCallObserved{CallID: "ca1", MissionID: "A", Model: "m", PromptTokens: 10, CompletionTokens: 5}) // A idx 2
+	e.Submit(LlmCallObserved{CallID: "cam", MissionID: "A", Model: "m", PromptTokens: 3, CompletionTokens: 1})  // A idx 3
+	// mission B — its work + the call it made must never bleed into A.
 	e.Submit(WorkDispatched{ID: "wb1", MissionID: "B", ItemKind: "agent", Target: "recon"})
-	e.Submit(LlmCallObserved{CallID: "cb1", RunID: "wb1", Model: "m", PromptTokens: 7, CompletionTokens: 2})
+	e.Submit(LlmCallObserved{CallID: "cb1", MissionID: "B", Model: "m", PromptTokens: 7, CompletionTokens: 2})
+	// a call with no mission context — tenant-ambient, attaches to no mission frame.
+	e.Submit(LlmCallObserved{CallID: "camb", MissionID: "", Model: "m", PromptTokens: 1, CompletionTokens: 1})
 	e.Tick()
 
-	// A's slice is its 4 events: the mission start, wa1's dispatch, the run-linked
-	// call (run_id wa1), and the mission-level call (empty run_id). B's dispatch and
-	// B's call (run_id wb1) are excluded.
+	// A's slice is its 4 events: the mission start, wa1's dispatch, and A's two
+	// mission-stamped calls. B's dispatch, B's call, and the ambient call are excluded.
 	slice := e.MissionEvents("A")
 	if len(slice) != 4 {
 		t.Fatalf("mission A slice = %d events, want 4 (%v)", len(slice), slice)
@@ -289,12 +288,12 @@ func TestMissionFrameAt_LlmCalls(t *testing.T) {
 		t.Fatalf("frame@2 calls = %v, want none", got)
 	}
 
-	// seq 3 folds the run-linked call: ca1 appears at its tick.
+	// seq 3 folds the first mission-stamped call: ca1 appears at its tick.
 	if got := calls(e.MissionFrameAt("A", 3)); !eq(got, []string{"ca1"}) {
 		t.Fatalf("frame@3 calls = %v, want [ca1]", got)
 	}
 
-	// seq total (4): both A's calls present; B's call (run_id wb1) never appears.
+	// seq total (4): both A's calls present; B's call and the ambient call never appear.
 	end := e.MissionFrameAt("A", 4)
 	if got := calls(end); !eq(got, []string{"ca1", "cam"}) {
 		t.Fatalf("frame@end calls = %v, want [ca1 cam]", got)
@@ -303,8 +302,92 @@ func TestMissionFrameAt_LlmCalls(t *testing.T) {
 		if c.CallID == "cb1" {
 			t.Fatal("mission B LLM call bled into mission A frame")
 		}
+		if c.CallID == "camb" {
+			t.Fatal("tenant-ambient LLM call (no mission) bled into mission A frame")
+		}
 		if c.CallID == "ca1" && c.TotalTokens() != 15 {
 			t.Fatalf("ca1 total tokens = %d, want 15", c.TotalTokens())
 		}
+	}
+}
+
+// The mission-evidence edge (gibson#1075) surfaces the hosts and findings a
+// mission's work discovered in that mission's frame: a host carries the MissionID
+// of the mission that observed it, a directly-raised finding carries the mission's
+// id, and a surprise→Finding promotion inherits the mission from its source host.
+// Evidence with no mission context stays tenant-ambient, and one mission's evidence
+// never bleeds into another's frame, while the tenant-wide fold still sees it all.
+func TestMissionFrameAt_HostsAndFindings(t *testing.T) {
+	e := NewEngine("t1")
+	e.AddSystem(SurpriseFindingSystem)
+
+	e.Submit(MissionStarted{ID: "A", Goal: "ga"})
+	e.Submit(MissionStarted{ID: "B", Goal: "gb"})
+	// Mission A discovers a host, then a contradiction at the same coordinate raises
+	// a Surprise → an anomaly Finding (which must inherit mission A from the host).
+	e.Submit(HostObserved{MissionID: "A", ScopeID: "sA", Address: "10.0.0.5", SSHHostKey: "AAAA"})
+	e.Submit(HostObserved{MissionID: "A", ScopeID: "sA", Address: "10.0.0.5", SSHHostKey: "BBBB"})
+	// Mission A also raises a finding directly (agent/decider path).
+	e.Submit(FindingRaised{ID: "f-a", Title: "A finding", ScopeID: "sA", Address: "10.0.0.5", Severity: "high", MissionID: "A"})
+	// Mission B discovers its own host (must never bleed into A).
+	e.Submit(HostObserved{MissionID: "B", ScopeID: "sB", Address: "10.0.1.9", SSHHostKey: "CCCC"})
+	// A tenant-ambient host with no mission context — belongs to no mission frame.
+	e.Submit(HostObserved{ScopeID: "sX", Address: "10.0.2.2", SSHHostKey: "DDDD"})
+	e.Tick()
+
+	hostAddrs := func(w *World) map[string]bool {
+		m := map[string]bool{}
+		for _, h := range w.Snapshot() {
+			m[h.Address] = true
+		}
+		return m
+	}
+	findingTitles := func(w *World) map[string]bool {
+		m := map[string]bool{}
+		for _, f := range w.FindingSnapshot() {
+			m[f.Title] = true
+		}
+		return m
+	}
+
+	// Mission A's frame: both A hosts (same coordinate, the original + the
+	// contradicting one) plus its direct finding and the inherited anomaly finding.
+	a := e.MissionFrameAt("A", len(e.MissionEvents("A")))
+	ah := hostAddrs(a)
+	if !ah["10.0.0.5"] {
+		t.Fatalf("mission A frame missing its discovered host; hosts=%v", ah)
+	}
+	if ah["10.0.1.9"] || ah["10.0.2.2"] {
+		t.Fatalf("foreign/ambient host bled into mission A frame; hosts=%v", ah)
+	}
+	af := findingTitles(a)
+	if !af["A finding"] {
+		t.Fatalf("mission A frame missing its direct finding; findings=%v", af)
+	}
+	if !af["Identity anomaly at 10.0.0.5"] {
+		t.Fatalf("mission A frame missing the inherited surprise finding; findings=%v", af)
+	}
+
+	// Mission B's frame: only B's host, none of A's findings.
+	b := e.MissionFrameAt("B", len(e.MissionEvents("B")))
+	bh := hostAddrs(b)
+	if !bh["10.0.1.9"] || bh["10.0.0.5"] || bh["10.0.2.2"] {
+		t.Fatalf("mission B frame hosts wrong; hosts=%v", bh)
+	}
+	if len(b.FindingSnapshot()) != 0 {
+		t.Fatalf("mission B frame should have no findings, got %+v", b.FindingSnapshot())
+	}
+
+	// Tenant-wide fold (empty mission id) is unchanged: every host (incl. ambient)
+	// and every finding is present.
+	all := e.FrameAt(len(e.Events()))
+	allHosts := hostAddrs(all)
+	for _, addr := range []string{"10.0.0.5", "10.0.1.9", "10.0.2.2"} {
+		if !allHosts[addr] {
+			t.Fatalf("tenant-wide fold missing host %s; hosts=%v", addr, allHosts)
+		}
+	}
+	if n := len(all.FindingSnapshot()); n != 2 {
+		t.Fatalf("tenant-wide fold findings = %d, want 2 (direct + anomaly)", n)
 	}
 }
