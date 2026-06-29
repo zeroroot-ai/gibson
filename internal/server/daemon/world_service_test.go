@@ -409,3 +409,100 @@ func TestWorldService_GetFrameAt_Work(t *testing.T) {
 		}
 	}
 }
+
+// TestWorldService_GetFrameAt_Decisions: the rich frame (PRD #1059 M2, gibson#1062)
+// surfaces a mission's Decider decisions reconstructed as-of the folded tick. A
+// decision appears at its request tick (status "pending" = in flight), gains the
+// work it chose to dispatch, and reaches "completed" at its completion tick —
+// carrying the mission completion as rationale where it ended the mission. No other
+// mission's decisions bleed into a mission-scoped frame.
+func TestWorldService_GetFrameAt_Decisions(t *testing.T) {
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+	reg := brain.NewRegistry(ctx)
+	srv := NewWorldServer(reg, nil)
+
+	e := reg.For("acme")
+	e.Submit(brain.MissionStarted{ID: "A", Goal: "goal A"})                                        // A idx 0
+	e.Submit(brain.DecisionRequested{MissionID: "A", Cursor: 0})                                   // A idx 1: open A#d1
+	e.Submit(brain.WorkDispatched{ID: "wa1", MissionID: "A", ItemKind: "tool", Target: "nmap"})    // A idx 2: A#d1 chose wa1
+	e.Submit(brain.DecisionCompleted{MissionID: "A"})                                              // A idx 3: A#d1 completed
+	e.Submit(brain.DecisionRequested{MissionID: "A", Cursor: 1})                                   // A idx 4: open A#d2
+	e.Submit(brain.MissionDone{ID: "A", Outcome: brain.MissionCompleted, Reason: "goal resolved"}) // A idx 5
+	e.Submit(brain.DecisionCompleted{MissionID: "A"})                                              // A idx 6: A#d2 completed
+	e.Submit(brain.DecisionRequested{MissionID: "B", Cursor: 0})                                   // mission B (excluded)
+
+	tctx := auth.WithTenant(context.Background(), auth.MustNewTenantID("acme"))
+
+	deadline := time.Now().Add(2 * time.Second)
+	for time.Now().Before(deadline) {
+		if len(reg.For("acme").Events()) == 8 {
+			break
+		}
+		time.Sleep(10 * time.Millisecond)
+	}
+
+	ids := func(r *worldpb.GetFrameAtResponse) []string {
+		var out []string
+		for _, d := range r.GetDecisions() {
+			out = append(out, d.GetId()+"/"+d.GetStatus())
+		}
+		sort.Strings(out)
+		return out
+	}
+	eq := func(got, want []string) bool {
+		if len(got) != len(want) {
+			return false
+		}
+		for i := range got {
+			if got[i] != want[i] {
+				return false
+			}
+		}
+		return true
+	}
+
+	// seq 0: no decision requested yet.
+	f0, err := srv.GetFrameAt(tctx, &worldpb.GetFrameAtRequest{Seq: 0, MissionId: "A"})
+	if err != nil {
+		t.Fatalf("GetFrameAt(0,A): %v", err)
+	}
+	if len(f0.GetDecisions()) != 0 {
+		t.Fatalf("frame@0/A decisions = %+v, want none", f0.GetDecisions())
+	}
+
+	// seq 3: A#d1 requested (idx 1) and wa1 dispatched (idx 2) — pending with one chosen work.
+	f3, err := srv.GetFrameAt(tctx, &worldpb.GetFrameAtRequest{Seq: 3, MissionId: "A"})
+	if err != nil {
+		t.Fatalf("GetFrameAt(3,A): %v", err)
+	}
+	if got := ids(f3); !eq(got, []string{"A#d1/pending"}) {
+		t.Fatalf("frame@3/A decisions = %v, want [A#d1/pending]", got)
+	}
+	if d := f3.GetDecisions(); len(d) != 1 || len(d[0].GetDispatches()) != 1 || d[0].GetDispatches()[0].GetWorkId() != "wa1" {
+		t.Fatalf("frame@3/A A#d1 = %+v, want one dispatch of wa1", f3.GetDecisions())
+	}
+
+	// total: both A decisions completed; A#d2 carries the completion rationale;
+	// mission B's decision never appears.
+	fEnd, err := srv.GetFrameAt(tctx, &worldpb.GetFrameAtRequest{Seq: 99, MissionId: "A"})
+	if err != nil {
+		t.Fatalf("GetFrameAt(99,A): %v", err)
+	}
+	if got := ids(fEnd); !eq(got, []string{"A#d1/completed", "A#d2/completed"}) {
+		t.Fatalf("frame@end/A decisions = %v, want [A#d1/completed A#d2/completed]", got)
+	}
+	for _, d := range fEnd.GetDecisions() {
+		if d.GetMissionId() != "A" {
+			t.Fatalf("frame@end/A decision %q has mission_id %q, want A", d.GetId(), d.GetMissionId())
+		}
+		if d.GetId() == "A#d2" {
+			if d.GetOutcome() != string(brain.MissionCompleted) {
+				t.Fatalf("A#d2 outcome = %q, want %q", d.GetOutcome(), brain.MissionCompleted)
+			}
+			if d.GetRationale() != "goal resolved" {
+				t.Fatalf("A#d2 rationale = %q, want %q", d.GetRationale(), "goal resolved")
+			}
+		}
+	}
+}

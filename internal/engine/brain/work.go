@@ -113,6 +113,10 @@ func applyWorkDispatched(w *World, e WorkDispatched) {
 		State:     WorkRunning,
 		Attempts:  1,
 	})
+	// A fresh dispatch under an open Decider decision is one of that decision's
+	// chosen actions (gibson#1062). Only first dispatches link — a retry re-arms an
+	// existing WorkItem and reaches the idempotent branch above.
+	recordDecisionDispatch(w, e.MissionID, DecisionDispatch{WorkID: e.ID, Kind: e.ItemKind, Target: e.Target})
 }
 
 func applyWorkRetried(w *World, e WorkRetried) {

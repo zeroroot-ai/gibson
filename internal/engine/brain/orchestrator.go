@@ -143,6 +143,19 @@ func applyMissionDone(w *World, e MissionDone) {
 		m.Status = outcome
 		m.Reason = e.Reason
 	}
+	// A Decider decision that ends the mission carries the completion reason as its
+	// rationale (gibson#1062). The worker emits MissionDone before DecisionCompleted,
+	// so the decision is still open here. A mechanical (CUE/scheduler) completion with
+	// no decision in flight is a no-op.
+	if ent, ok := findOpenDecision(w, e.ID); ok {
+		dec := w.decisions.Get(ent)
+		outcome := e.Outcome
+		if outcome == "" {
+			outcome = MissionCompleted
+		}
+		dec.Outcome = string(outcome)
+		dec.Rationale = e.Reason
+	}
 }
 
 // DecisionAction is what the Decider chose to do.

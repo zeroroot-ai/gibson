@@ -173,6 +173,35 @@ message WorkItemView {
   string status = 5;     // "pending" | "running" | "done" | "failed" | "skipped"
 }
 
+// DecisionDispatchView is one action the Decider chose in a decision episode: the
+// WorkItem it dispatched (gibson#1062). The work's own lifecycle is the matching
+// WorkItemView; this is the decision→work linkage (what the Decider chose).
+message DecisionDispatchView {
+  string work_id = 1; // the dispatched WorkItem's id
+  string kind = 2;    // "tool" | "agent" | "plugin"
+  string target = 3;  // the capability the Decider chose to invoke
+}
+
+// DecisionView is one Decider decision episode reconstructed as-of the folded tick
+// (PRD #1059 M2, gibson#1062): what the brain chose to do next, and why. A
+// decision is opened by a DecisionRequested event (the brain asked itself what to
+// do given the evidence so far) and closed by a DecisionCompleted event once the
+// off-tick Decider worker has submitted its choices. A decision first appears at
+// its request tick with status "pending" (in flight) and reaches "completed" at
+// its completion tick, so it folds in cumulatively like the timeline. The chosen
+// actions (the work the Decider dispatched) and, where the decision ended the
+// mission, the completion reason as `rationale`, are carried as they fold in.
+// Mission-scoped: only this mission's decisions appear in a mission-scoped frame.
+message DecisionView {
+  string id = 1;                              // stable per-mission id ("<mission_id>#d<n>")
+  string mission_id = 2;                      // the goal mission this decision drives
+  int64 cursor = 3;                           // evidence cursor at request time (its position in the run)
+  string status = 4;                          // "pending" (in flight) | "completed"
+  repeated DecisionDispatchView dispatches = 5; // the work the Decider chose to dispatch
+  string outcome = 6;                         // mission outcome if the decision ended the mission ("" otherwise)
+  string rationale = 7;                       // the completion reason, where present
+}
+
 message TimelineEvent {
   uint64 seq = 1;     // 0-based position in the tenant Timeline
   string kind = 2;    // event Kind(), e.g. "host.observed"
@@ -249,6 +278,12 @@ message GetFrameAtResponse {
   // in-flight work (status "running") plus terminal work with its final status.
   // Mission-scoped when mission_id is set; all tenant work when it is empty.
   repeated WorkItemView work = 6;
+  // The mission's Decider decisions reconstructed as-of `seq` (PRD #1059 M2,
+  // gibson#1062): what the brain chose to do next at each decision point and why.
+  // A decision appears at its request tick ("pending") and reaches "completed" at
+  // its completion tick, so the set folds in cumulatively. Mission-scoped when
+  // mission_id is set; all tenant decisions when it is empty.
+  repeated DecisionView decisions = 7;
 }
 
 // LabelView is one applied review label (a gibson.world.v1 view of a brain

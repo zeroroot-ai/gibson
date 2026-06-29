@@ -47,6 +47,7 @@ type World struct {
 	hosts       *ecs.Map1[Host]
 	surprises   *ecs.Map1[Surprise]
 	work        *ecs.Map1[WorkItem]
+	decisions   *ecs.Map1[DecisionRecord]
 	missions    *ecs.Map1[Mission]
 	findings    *ecs.Map1[Finding]
 	labels      *ecs.Map1[Label]
@@ -103,6 +104,7 @@ func NewWorld(tenant string) *World {
 		hosts:       ecs.NewMap1[Host](w),
 		surprises:   ecs.NewMap1[Surprise](w),
 		work:        ecs.NewMap1[WorkItem](w),
+		decisions:   ecs.NewMap1[DecisionRecord](w),
 		missions:    ecs.NewMap1[Mission](w),
 		findings:    ecs.NewMap1[Finding](w),
 		labels:      ecs.NewMap1[Label](w),

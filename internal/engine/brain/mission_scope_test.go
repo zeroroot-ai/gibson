@@ -137,3 +137,97 @@ func TestMissionFrameAt_InFlightWork(t *testing.T) {
 		}
 	}
 }
+
+// The rich frame (PRD #1059 M2, gibson#1062) surfaces a mission's Decider decisions
+// reconstructed as-of the scrubbed tick: a decision appears at its DecisionRequested
+// tick (status "pending" = in flight), gains the work it chose to dispatch, and
+// reaches "completed" at its DecisionCompleted tick — carrying the completion reason
+// as rationale where the decision ended the mission. The fold is mission-scoped, so
+// another mission's decisions never bleed in. This asserts the decision set at seq
+// 0 / mid / total.
+func TestMissionFrameAt_Decisions(t *testing.T) {
+	e := NewEngine("t1")
+	e.Submit(MissionStarted{ID: "A", Goal: "ga"})                                         // A idx 0
+	e.Submit(DecisionRequested{MissionID: "A", Cursor: 0})                                 // A idx 1: open A#d1
+	e.Submit(WorkDispatched{ID: "wa1", MissionID: "A", ItemKind: "tool", Target: "nmap"})  // A idx 2: A#d1 chose wa1
+	e.Submit(DecisionCompleted{MissionID: "A"})                                            // A idx 3: A#d1 completed
+	e.Submit(DecisionRequested{MissionID: "A", Cursor: 1})                                 // A idx 4: open A#d2
+	e.Submit(MissionDone{ID: "A", Outcome: MissionCompleted, Reason: "goal resolved"})     // A idx 5: A#d2 rationale
+	e.Submit(DecisionCompleted{MissionID: "A"})                                            // A idx 6: A#d2 completed
+	// mission B — a separate decision that must never bleed into A's slice.
+	e.Submit(DecisionRequested{MissionID: "B", Cursor: 0})
+	e.Submit(WorkDispatched{ID: "wb1", MissionID: "B", ItemKind: "tool", Target: "nmap"})
+	e.Tick()
+
+	// A's slice is its 7 events (B's decision + dispatch excluded).
+	slice := e.MissionEvents("A")
+	if len(slice) != 7 {
+		t.Fatalf("mission A slice = %d events, want 7 (%v)", len(slice), slice)
+	}
+
+	ids := func(w *World) []string {
+		var out []string
+		for _, d := range w.DecisionSnapshot() {
+			out = append(out, d.ID+"/"+d.Status)
+		}
+		sort.Strings(out)
+		return out
+	}
+	eq := func(got, want []string) bool {
+		if len(got) != len(want) {
+			return false
+		}
+		for i := range got {
+			if got[i] != want[i] {
+				return false
+			}
+		}
+		return true
+	}
+
+	// seq 0: no decision requested yet.
+	if d := e.MissionFrameAt("A", 0).DecisionSnapshot(); len(d) != 0 {
+		t.Fatalf("frame@0 decisions = %+v, want none", d)
+	}
+
+	// seq 2 folds MissionStarted + the first DecisionRequested: A#d1 pending, no
+	// dispatch yet (wa1 is idx 2, not folded).
+	f2 := e.MissionFrameAt("A", 2)
+	if got := ids(f2); !eq(got, []string{"A#d1/pending"}) {
+		t.Fatalf("frame@2 decisions = %v, want [A#d1/pending]", got)
+	}
+	if d := f2.DecisionSnapshot(); len(d[0].Dispatches) != 0 {
+		t.Fatalf("frame@2 A#d1 dispatches = %+v, want none", d[0].Dispatches)
+	}
+
+	// seq 3 folds wa1's dispatch: A#d1 still pending but now carries the chosen work.
+	f3 := e.MissionFrameAt("A", 3).DecisionSnapshot()
+	if len(f3) != 1 || len(f3[0].Dispatches) != 1 || f3[0].Dispatches[0].WorkID != "wa1" {
+		t.Fatalf("frame@3 A#d1 = %+v, want one dispatch of wa1", f3)
+	}
+
+	// seq 4 folds DecisionCompleted: A#d1 completed.
+	if got := ids(e.MissionFrameAt("A", 4)); !eq(got, []string{"A#d1/completed"}) {
+		t.Fatalf("frame@4 decisions = %v, want [A#d1/completed]", got)
+	}
+
+	// seq total (7): both decisions present; A#d2 completed and carries the mission
+	// completion as its rationale; mission B's decision never appears.
+	end := e.MissionFrameAt("A", 7).DecisionSnapshot()
+	if got := ids(e.MissionFrameAt("A", 7)); !eq(got, []string{"A#d1/completed", "A#d2/completed"}) {
+		t.Fatalf("frame@end decisions = %v, want [A#d1/completed A#d2/completed]", got)
+	}
+	for _, d := range end {
+		if d.MissionID == "B" {
+			t.Fatal("mission B decision bled into mission A frame")
+		}
+		if d.ID == "A#d2" {
+			if d.Outcome != string(MissionCompleted) {
+				t.Fatalf("A#d2 outcome = %q, want %q", d.Outcome, MissionCompleted)
+			}
+			if d.Rationale != "goal resolved" {
+				t.Fatalf("A#d2 rationale = %q, want %q", d.Rationale, "goal resolved")
+			}
+		}
+	}
+}
