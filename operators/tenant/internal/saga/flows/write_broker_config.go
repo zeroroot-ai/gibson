@@ -7,6 +7,7 @@ package flows
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
 
 	"github.com/jackc/pgx/v5/pgxpool"
@@ -34,11 +35,18 @@ type WriteTenantBrokerConfigDeps struct {
 	// startup in saas/selfhost modes via ValidateAtStartup).
 	PlatformPG *pgxpool.Pool
 
-	// SystemTenantKEK is the 32-byte system-tenant KEK used to envelope-
-	// encrypt the broker config JSON. Must match what the daemon's
-	// configstore.NewStore was constructed with so the daemon can
-	// decrypt the row this step writes.
-	SystemTenantKEK []byte
+	// SystemTenantKEK lazily provides the 32-byte system-tenant KEK used to
+	// envelope-encrypt the broker config JSON. Must match what the daemon's
+	// configstore.NewStore was constructed with so the daemon can decrypt the
+	// row this step writes.
+	//
+	// It is a provider (read at reconcile time), NOT a value captured once at
+	// startup: on a from-zero bringup the backing Secret (gibson-master-key) is
+	// produced later by PlatformBootstrap, so the operator must start without it
+	// and this step requeues until it's available — mirroring the daemon's
+	// runtime key_provider read of the same Secret (deploy#971). May be nil or
+	// return empty; resolveKEK turns that into a retryable error.
+	SystemTenantKEK func() []byte
 
 	// VaultConfig is the JSON config blob the step writes for every new
 	// tenant. It points the daemon's vault broker at the tenant's Vault
@@ -147,7 +155,11 @@ func (d WriteTenantBrokerConfigDeps) WriteBrokerConfig(ctx context.Context, tena
 		return fmt.Errorf("writeTenantBrokerConfig: marshal config: %w", err)
 	}
 
-	store, err := tenantconfig.NewStore(d.PlatformPG, d.SystemTenantKEK)
+	kek, err := d.resolveKEK()
+	if err != nil {
+		return fmt.Errorf("writeTenantBrokerConfig: %w", err)
+	}
+	store, err := tenantconfig.NewStore(d.PlatformPG, kek)
 	if err != nil {
 		return fmt.Errorf("writeTenantBrokerConfig: build config store: %w", err)
 	}
@@ -172,7 +184,11 @@ func (d WriteTenantBrokerConfigDeps) DeleteBrokerConfig(ctx context.Context, ten
 		// unusual; surface but don't block teardown.
 		return fmt.Errorf("writeTenantBrokerConfig: invalid tenant id %q: %w", tenantName, err)
 	}
-	store, err := tenantconfig.NewStore(d.PlatformPG, d.SystemTenantKEK)
+	kek, err := d.resolveKEK()
+	if err != nil {
+		return fmt.Errorf("writeTenantBrokerConfig: %w", err)
+	}
+	store, err := tenantconfig.NewStore(d.PlatformPG, kek)
 	if err != nil {
 		return fmt.Errorf("writeTenantBrokerConfig: build config store on teardown: %w", err)
 	}
@@ -180,6 +196,21 @@ func (d WriteTenantBrokerConfigDeps) DeleteBrokerConfig(ctx context.Context, ten
 		return fmt.Errorf("writeTenantBrokerConfig: delete: %w", err)
 	}
 	return nil
+}
+
+// resolveKEK reads the system-tenant KEK via the lazy provider at call time. A
+// nil provider or an empty KEK becomes a retryable error so the saga requeues
+// until gibson-master-key is populated (deploy#971) — rather than the operator
+// crash-looping at startup and deadlocking the from-zero bringup.
+func (d WriteTenantBrokerConfigDeps) resolveKEK() ([]byte, error) {
+	if d.SystemTenantKEK == nil {
+		return nil, errors.New("system-tenant KEK provider not configured")
+	}
+	kek := d.SystemTenantKEK()
+	if len(kek) == 0 {
+		return nil, errors.New("system-tenant KEK not yet available (gibson-master-key Secret not populated); requeue")
+	}
+	return kek, nil
 }
 
 // renderVaultConfig substitutes the literal "{tenant_id}" placeholder in

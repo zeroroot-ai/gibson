@@ -1401,11 +1401,20 @@ func buildWriteTenantBrokerConfigDeps(log logr.Logger) flows.WriteTenantBrokerCo
 	// File-mount-only KEK loader (env-injection path deleted in
 	// deploy#194 because raw 32-byte values crash env-var injection
 	// with nul bytes). Same Secret the daemon's k8s key_provider reads.
-	kek := loadSystemTenantKEK(log)
-	if len(kek) == 0 {
-		log.Error(nil, "system-tenant KEK could not be loaded — confirm "+
-			"GIBSON_SYSTEM_TENANT_KEK_PATH points at the mounted Secret file")
-		os.Exit(1)
+	//
+	// deploy#971: the KEK is provided LAZILY (read at reconcile time), not
+	// captured once here, so the operator does NOT crash-loop when
+	// gibson-master-key is absent at startup. On a from-zero bringup that Secret
+	// is produced later by PlatformBootstrap; if the operator exited here it
+	// would never become Ready, gibson-operators would stay Degraded, and Argo
+	// would never advance to the wave that brings PlatformBootstrap/OpenBao up —
+	// a deadlock. The WriteTenantBrokerConfig saga step calls this provider and
+	// requeues until the KEK is available (mirrors the daemon's runtime read).
+	systemTenantKEK := func() []byte { return loadSystemTenantKEK(log) }
+	if len(systemTenantKEK()) == 0 {
+		log.Info("system-tenant KEK not yet available at startup — the " +
+			"WriteTenantBrokerConfig step will requeue until gibson-master-key " +
+			"is populated (GIBSON_SYSTEM_TENANT_KEK_PATH)")
 	}
 
 	// GIBSON_VAULT_JWT_BOUND_AUDIENCE is the load-bearing audience claim
@@ -1445,7 +1454,7 @@ func buildWriteTenantBrokerConfigDeps(log logr.Logger) flows.WriteTenantBrokerCo
 
 	return flows.WriteTenantBrokerConfigDeps{
 		PlatformPG:      pool,
-		SystemTenantKEK: kek,
+		SystemTenantKEK: systemTenantKEK,
 		VaultConfig:     vaultCfg,
 	}
 }
