@@ -211,6 +211,54 @@ func TestExecuteLLM_RoundTrip(t *testing.T) {
 	assert.Equal(t, "hello", capturedReq.Messages[0].Content)
 }
 
+// TestExecuteLLM_MissionIDFlowsToWorldSink verifies the mission-evidence edge
+// plumbing (gibson#1078): a mission-aware caller's mission_id on the request is
+// carried onto the captured LLMCallRecord so the World can stamp
+// LlmCallObserved.MissionID, while a request that omits it (e.g. dashboard chat)
+// captures an empty MissionID and stays tenant-ambient.
+func TestExecuteLLM_MissionIDFlowsToWorldSink(t *testing.T) {
+	store := &stubProviderConfigStore{
+		resolveFunc: func(_ context.Context, _, _ string) (*providerconfig.DecryptedConfig, error) {
+			return knownDecryptedConfig(), nil
+		},
+	}
+	prov := &stubMockProvider{
+		completeFunc: func(_ context.Context, _ llm.CompletionRequest) (*llm.CompletionResponse, error) {
+			return &llm.CompletionResponse{
+				Message:      llm.Message{Role: llm.RoleAssistant, Content: "ok"},
+				FinishReason: llm.FinishReasonStop,
+				Usage:        llm.CompletionTokenUsage{PromptTokens: 1, CompletionTokens: 1, TotalTokens: 2},
+			}, nil
+		},
+	}
+	s := newExecServer(store, func(_ llm.ProviderConfig) (llm.LLMProvider, error) { return prov, nil })
+
+	var captured []LLMCallRecord
+	s.SetLLMCallSink(func(_ context.Context, _ string, call LLMCallRecord) {
+		captured = append(captured, call)
+	})
+
+	ctx := tenantCtx("tenant-a")
+	missionID := "mission-42"
+
+	_, err := s.ExecuteLLM(ctx, &tenantv1.ExecuteLLMRequest{
+		ProviderName: "p",
+		Messages:     []*tenantv1.LLMMessageContent{{Role: "user", Content: "scan"}},
+		MissionId:    &missionID,
+	})
+	require.NoError(t, err)
+
+	_, err = s.ExecuteLLM(ctx, &tenantv1.ExecuteLLMRequest{
+		ProviderName: "p",
+		Messages:     []*tenantv1.LLMMessageContent{{Role: "user", Content: "chat"}},
+	})
+	require.NoError(t, err)
+
+	require.Len(t, captured, 2)
+	assert.Equal(t, "mission-42", captured[0].MissionID, "mission-aware call carries mission_id")
+	assert.Empty(t, captured[1].MissionID, "non-mission call (chat) stays tenant-ambient")
+}
+
 // TestExecuteLLM_DefaultsMaxTokens verifies that a request which omits
 // max_tokens reaches the provider with the default floor applied, rather than
 // 0. A zero max_tokens makes Anthropic return an empty completion with

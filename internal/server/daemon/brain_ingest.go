@@ -28,7 +28,7 @@ import (
 // tenant World as a Finding so the graph projector — the sole writer of finding
 // nodes — materializes it. Replaces the old direct StoreAsync graph write.
 func ingestComponentFinding(reg *brain.Registry) component.WorldFindingSink {
-	return func(_ context.Context, tenant string, f gibsonagent.Finding) {
+	return func(_ context.Context, tenant, missionID string, f gibsonagent.Finding) {
 		if reg == nil {
 			return
 		}
@@ -37,6 +37,10 @@ func ingestComponentFinding(reg *brain.Registry) component.WorldFindingSink {
 			Title:       f.Title,
 			Description: f.Description,
 			Severity:    string(f.Severity),
+			// Mission-evidence edge (gibson#1078): the submitter resolves the mission
+			// id from the work-item context and passes it through, so a component-path
+			// finding attaches to the mission that produced it. Empty = tenant-ambient.
+			MissionID: missionID,
 		})
 	}
 }
@@ -234,10 +238,15 @@ func ingestLLMCall(reg *brain.Registry) api.LLMCallSink {
 			msgs = append(msgs, brain.LlmMessage{Role: m.Role, Content: m.Content})
 		}
 		reg.For(tenant).Submit(brain.LlmCallObserved{
-			CallID:           call.CallID,
-			RunID:            call.RunID,
-			Model:            call.Model,
-			ScopeID:          call.ScopeID,
+			CallID:  call.CallID,
+			RunID:   call.RunID,
+			Model:   call.Model,
+			ScopeID: call.ScopeID,
+			// Mission-evidence edge (gibson#1078): a mission-aware ExecuteLLM caller
+			// stamps mission_id on the request; the handler carries it onto the record
+			// so the call attaches to its mission's frame. Empty = tenant-ambient (e.g.
+			// dashboard chat), which never attaches to a mission frame.
+			MissionID:        call.MissionID,
 			PromptTokens:     call.PromptTokens,
 			CompletionTokens: call.CompletionTokens,
 			Messages:         msgs,

@@ -497,6 +497,12 @@ message ExecuteLLMRequest {
   optional int32 max_tokens = 7;
   optional double top_p = 8;
   repeated string stop = 9;
+  // mission_id, when set, attributes this call to a mission run so the brain
+  // World surfaces it in that mission's frame (the mission-evidence edge,
+  // gibson#1075/#1078). Mission-aware callers (an agent harness / Decider issuing
+  // LLM calls during a mission run) populate it; non-mission callers (e.g. the
+  // dashboard chat client) leave it unset and the call stays tenant-ambient.
+  optional string mission_id = 10;
 }
 
 message ExecuteLLMResponse {

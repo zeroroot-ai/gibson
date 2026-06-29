@@ -127,7 +127,7 @@ func TestIngestComponentFinding(t *testing.T) {
 	reg := brain.NewRegistry(ctx)
 
 	sink := ingestComponentFinding(reg)
-	sink(ctx, "acme", gibsonagent.Finding{ID: types.NewID(), Title: "RCE", Description: "unauth RCE", Severity: gibsonagent.SeverityCritical})
+	sink(ctx, "acme", "", gibsonagent.Finding{ID: types.NewID(), Title: "RCE", Description: "unauth RCE", Severity: gibsonagent.SeverityCritical})
 
 	deadline := time.Now().Add(2 * time.Second)
 	for time.Now().Before(deadline) {
@@ -141,6 +141,78 @@ func TestIngestComponentFinding(t *testing.T) {
 		time.Sleep(10 * time.Millisecond)
 	}
 	t.Fatalf("component finding not folded into the World: %+v", reg.For("acme").Findings())
+}
+
+// TestIngestComponentFinding_MissionStamped: a component finding submitted within
+// a mission carries the mission id through the sink (gibson#1078) so it attaches
+// to that mission's frame — the mission-evidence edge — while a finding with no
+// mission context stays tenant-ambient (attaches to no mission frame).
+func TestIngestComponentFinding_MissionStamped(t *testing.T) {
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+	reg := brain.NewRegistry(ctx)
+
+	sink := ingestComponentFinding(reg)
+	sink(ctx, "acme", "m-7", gibsonagent.Finding{ID: types.NewID(), Title: "SQLi", Description: "auth bypass", Severity: gibsonagent.SeverityHigh})
+	sink(ctx, "acme", "", gibsonagent.Finding{ID: types.NewID(), Title: "ambient", Description: "no mission", Severity: gibsonagent.SeverityLow})
+
+	deadline := time.Now().Add(2 * time.Second)
+	for time.Now().Before(deadline) {
+		if len(reg.For("acme").Findings()) == 2 {
+			// Mission m-7's slice contains only the mission-stamped finding; the
+			// ambient finding (empty MissionID) stays tenant-ambient (no bleed).
+			var titles []string
+			for _, ev := range reg.For("acme").MissionEvents("m-7") {
+				if fr, ok := ev.(brain.FindingRaised); ok {
+					if fr.MissionID != "m-7" {
+						t.Fatalf("finding in m-7 slice has MissionID %q, want m-7", fr.MissionID)
+					}
+					titles = append(titles, fr.Title)
+				}
+			}
+			if len(titles) != 1 || titles[0] != "SQLi" {
+				t.Fatalf("mission m-7 findings = %v, want [SQLi]", titles)
+			}
+			return
+		}
+		time.Sleep(10 * time.Millisecond)
+	}
+	t.Fatalf("findings not folded into the World: %+v", reg.For("acme").Findings())
+}
+
+// TestIngestLLMCall_MissionStamped: an ExecuteLLM call carrying mission context
+// (gibson#1078) is folded with its MissionID so it attaches to that mission's
+// frame, while a call with no mission context (e.g. dashboard chat) stays
+// tenant-ambient and attaches to no mission frame.
+func TestIngestLLMCall_MissionStamped(t *testing.T) {
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+	reg := brain.NewRegistry(ctx)
+	sink := ingestLLMCall(reg)
+
+	sink(ctx, "acme", api.LLMCallRecord{CallID: "c-mission", MissionID: "m-9", Model: "m", PromptTokens: 10, CompletionTokens: 5})
+	sink(ctx, "acme", api.LLMCallRecord{CallID: "c-ambient", Model: "m", PromptTokens: 1, CompletionTokens: 1})
+
+	deadline := time.Now().Add(2 * time.Second)
+	for time.Now().Before(deadline) {
+		if len(reg.For("acme").LlmCalls()) == 2 {
+			var ids []string
+			for _, ev := range reg.For("acme").MissionEvents("m-9") {
+				if lc, ok := ev.(brain.LlmCallObserved); ok {
+					if lc.MissionID != "m-9" {
+						t.Fatalf("llm call in m-9 slice has MissionID %q, want m-9", lc.MissionID)
+					}
+					ids = append(ids, lc.CallID)
+				}
+			}
+			if len(ids) != 1 || ids[0] != "c-mission" {
+				t.Fatalf("mission m-9 llm calls = %v, want [c-mission]", ids)
+			}
+			return
+		}
+		time.Sleep(10 * time.Millisecond)
+	}
+	t.Fatalf("llm calls not folded into the World: %+v", reg.For("acme").LlmCalls())
 }
 
 // TestIngestDelegation: an agent delegation folds both the parent and child run
