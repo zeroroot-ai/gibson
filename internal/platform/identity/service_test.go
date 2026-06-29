@@ -15,9 +15,16 @@ import (
 // ListObjects is exercised by IdentityServer.WhoAmI.
 type fakeAuthorizer struct {
 	listObjectsFn func(user, relation, objectType string) ([]string, error)
+	// checkFn, when set, backs Check — used by the can_revoke_sessions
+	// capability tests (gibson#628). When nil, Check returns the legacy
+	// "not implemented" error so existing tests keep their behaviour.
+	checkFn func(user, relation, object string) (bool, error)
 }
 
-func (f *fakeAuthorizer) Check(_ context.Context, _, _, _ string) (bool, error) {
+func (f *fakeAuthorizer) Check(_ context.Context, user, relation, object string) (bool, error) {
+	if f.checkFn != nil {
+		return f.checkFn(user, relation, object)
+	}
 	return false, errors.New("not implemented")
 }
 func (f *fakeAuthorizer) BatchCheck(_ context.Context, _ []authz.CheckRequest) ([]bool, error) {
@@ -115,6 +122,93 @@ func TestWhoAmI_SelfQueryAggregatesGrants(t *testing.T) {
 	}
 	if len(resp.GetPluginGrants()) != 0 {
 		t.Errorf("agent should have no plugin grants; got %v", resp.GetPluginGrants())
+	}
+}
+
+// emptyGrantsList returns empty for the component/plugin grant lookups so a
+// can_revoke_sessions test can focus on the admin/team relations. It defers
+// the ("admin","team") lookup to teamFn.
+func emptyGrantsList(teamFn func() []string) func(user, relation, objectType string) ([]string, error) {
+	return func(_, relation, objectType string) ([]string, error) {
+		if objectType == "team" && relation == "admin" {
+			return teamFn(), nil
+		}
+		return nil, nil
+	}
+}
+
+// TestWhoAmI_CanRevokeSessions covers the coarse capability flag (gibson#628):
+// a tenant admin or a team admin gets true; everyone else gets false; and a
+// typed component principal short-circuits to false without any FGA Check.
+func TestWhoAmI_CanRevokeSessions(t *testing.T) {
+	const tenant = "zeroroot-ai"
+
+	cases := []struct {
+		name        string
+		subject     string
+		tenantAdmin bool
+		adminTeams  []string
+		wantRevoke  bool
+		wantNoCheck bool // Check must not be called (component principal)
+	}{
+		{name: "tenant admin", subject: "u-1", tenantAdmin: true, wantRevoke: true},
+		{name: "team admin only", subject: "u-2", tenantAdmin: false, adminTeams: []string{"team:eng"}, wantRevoke: true},
+		{name: "plain member", subject: "u-3", tenantAdmin: false, adminTeams: nil, wantRevoke: false},
+		{name: "component principal short-circuits", subject: "agent_principal:a-1", wantRevoke: false, wantNoCheck: true},
+	}
+
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			authzr := &fakeAuthorizer{
+				listObjectsFn: emptyGrantsList(func() []string { return tc.adminTeams }),
+				checkFn: func(user, relation, object string) (bool, error) {
+					if tc.wantNoCheck {
+						t.Fatalf("Check must not be called for a component principal (got %q %q %q)", user, relation, object)
+					}
+					if user == "user:"+tc.subject && relation == "admin" && object == "tenant:"+tenant {
+						return tc.tenantAdmin, nil
+					}
+					return false, nil
+				},
+			}
+			srv, err := NewServer(Config{Authorizer: authzr, Lookup: &fakeLookup{}})
+			if err != nil {
+				t.Fatalf("NewServer: %v", err)
+			}
+			resp, err := srv.WhoAmI(ctxWithIdentity(t, tc.subject, tenant), &identitypb.WhoAmIRequest{})
+			if err != nil {
+				t.Fatalf("WhoAmI: %v", err)
+			}
+			if got := resp.GetCanRevokeSessions(); got != tc.wantRevoke {
+				t.Errorf("CanRevokeSessions = %v, want %v", got, tc.wantRevoke)
+			}
+		})
+	}
+}
+
+// TestWhoAmI_CanRevokeSessions_FGAErrorNonFatal verifies the capability check
+// is non-fatal: an FGA failure leaves the flag false but WhoAmI still returns
+// the core identity payload (gibson#628).
+func TestWhoAmI_CanRevokeSessions_FGAErrorNonFatal(t *testing.T) {
+	authzr := &fakeAuthorizer{
+		listObjectsFn: emptyGrantsList(func() []string { return nil }),
+		checkFn: func(_, _, _ string) (bool, error) {
+			return false, errors.New("fga unavailable")
+		},
+	}
+	srv, err := NewServer(Config{Authorizer: authzr, Lookup: &fakeLookup{}})
+	if err != nil {
+		t.Fatalf("NewServer: %v", err)
+	}
+	resp, err := srv.WhoAmI(ctxWithIdentity(t, "u-err", "zeroroot-ai"), &identitypb.WhoAmIRequest{})
+	if err != nil {
+		t.Fatalf("WhoAmI must succeed despite a capability-check FGA error: %v", err)
+	}
+	if resp.GetCanRevokeSessions() {
+		t.Error("CanRevokeSessions must be false when the FGA check errors (fail-closed)")
+	}
+	if resp.GetPrincipalId() != "u-err" {
+		t.Errorf("core identity must still be returned; principal_id = %q", resp.GetPrincipalId())
 	}
 }
 
