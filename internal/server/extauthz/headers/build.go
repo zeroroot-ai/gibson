@@ -23,7 +23,20 @@ type Identity struct {
 	Issuer         string // "oidc" (previously "zitadel" before the wire-format rename)
 	CredentialType string // "oidc-user" | "client-credentials"
 	Tenant         string
-	IssuedAt       time.Time
+	// IssuedAt is the ext-authz allow-time stamp emitted as
+	// HeaderIssuedAt. It is the Envoy→daemon hop's anti-replay/freshness
+	// value (the SDK's auth.IdentityFromMetadata rejects requests whose
+	// issued-at deviates from now by more than its skew). It is NOT the
+	// JWT's iat — do not conflate the two.
+	IssuedAt time.Time
+	// TokenIssuedAt is the access token's `iat` claim (zero when the
+	// token carries no iat). It is consumed ext-authz-locally — folded
+	// into the per-request FGA Check context for the instant-revocation
+	// condition (token_iat > revoked_at; gibson#627). It is deliberately
+	// NOT emitted downstream: the revocation decision is made here, and
+	// emitting the real (older) iat as HeaderIssuedAt would trip the
+	// daemon-side freshness check above.
+	TokenIssuedAt time.Time
 }
 
 // Header names emitted on every allowed request. They mirror the
