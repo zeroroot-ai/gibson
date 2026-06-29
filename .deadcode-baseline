@@ -401,6 +401,7 @@ internal/engine/harness/callback_service.go	WithCredentialStore
 internal/engine/harness/callback_service.go	WithDiscoveryProcessor
 internal/engine/harness/callback_service.go	WithEventBus
 internal/engine/harness/callback_service.go	WithGraphLoader
+internal/engine/harness/callback_service.go	WithLLMCallSink
 internal/engine/harness/callback_service.go	WithMissionManager
 internal/engine/harness/callback_service.go	WithObservationSink
 internal/engine/harness/callback_service.go	WithProtoResolver
@@ -1073,6 +1074,7 @@ internal/platform/manifest/wellknown.go	ManifestKeysHandler
 internal/platform/manifest/wellknown.go	MergeManifestKeys
 internal/platform/secrets/jwtsource/stub.go	AudienceCapturingJWTSource.Token
 internal/platform/secrets/jwtsource/stub.go	StaticJWTSource.Token
+internal/platform/signup/seam.go	Resolve
 internal/platform/tenantprovider/resolver.go	Resolver.Invalidate
 internal/server/daemon/api/llm_config.go	NewLLMConfigHandler
 internal/server/daemon/api/llm_config.go	NewLLMConfigHandlerWithStore

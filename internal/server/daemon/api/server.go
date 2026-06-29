@@ -28,6 +28,7 @@ import (
 	"github.com/zeroroot-ai/gibson/internal/platform/idp"
 	"github.com/zeroroot-ai/gibson/internal/platform/manifest"
 	"github.com/zeroroot-ai/gibson/internal/platform/onboarding"
+	"github.com/zeroroot-ai/gibson/internal/platform/signup"
 	daemonoperatorv1 "github.com/zeroroot-ai/gibson/internal/server/daemon/api/gibson/daemon/operator/v1"
 	sessionv1 "github.com/zeroroot-ai/gibson/internal/server/daemon/api/gibson/session/v1"
 	tenantv1 "github.com/zeroroot-ai/gibson/internal/server/daemon/api/gibson/tenant/v1"
@@ -253,6 +254,13 @@ type DaemonServer struct {
 	// responses as the gibson_url and in the enroll_command field.
 	// Populated from GIBSON_PUBLIC_URL env var at server construction time.
 	gibsonPublicURL string
+
+	// signupPolicy is the resolved signup seam policy for this deployment.
+	// It is set via WithSignupPolicy during daemon startup after Resolve() is
+	// called on the signup seam. The zero value ("") is treated as
+	// PolicyAdminOnly (self-hosted fail-safe: no public self-serve signup).
+	// Spec: seam-signup-saas-only (gibson#1088, deploy ADR-0006).
+	signupPolicy signup.Policy
 }
 
 // auditWriterIface is the narrow surface TenantAdminService uses from
@@ -1100,6 +1108,21 @@ func (s *DaemonServer) WithIdPAdminClient(c idp.AdminClient) *DaemonServer {
 // still succeed (non-fatal degradation). Spec: agent-service-credentials.
 func (s *DaemonServer) WithTenantAdminAuditWriter(w auditWriterIface) *DaemonServer {
 	s.tenantAdminAuditWriter = w
+	return s
+}
+
+// WithSignupPolicy sets the resolved signup policy for this deployment.
+// Call this during daemon startup after calling signup.Resolve() to wire the
+// seam-resolved policy into the server.
+//
+// When unset (zero value ""), the server defaults to PolicyAdminOnly (the
+// self-hosted fail-safe): SignupService.Signup returns codes.PermissionDenied.
+// The explicit default-to-denied ensures a misconfigured SaaS deploy fails
+// closed rather than accidentally opening self-serve on a self-hosted install.
+//
+// Spec: seam-signup-saas-only (gibson#1088, deploy ADR-0006).
+func (s *DaemonServer) WithSignupPolicy(p signup.Policy) *DaemonServer {
+	s.signupPolicy = p
 	return s
 }
 

@@ -30,6 +30,7 @@ import (
 	"google.golang.org/grpc/status"
 
 	"github.com/zeroroot-ai/gibson/internal/platform/idp"
+	"github.com/zeroroot-ai/gibson/internal/platform/signup"
 	daemonoperatorv1 "github.com/zeroroot-ai/gibson/internal/server/daemon/api/gibson/daemon/operator/v1"
 	tenantv1 "github.com/zeroroot-ai/gibson/internal/server/daemon/api/gibson/tenant/v1"
 )
@@ -67,7 +68,23 @@ func signupSlugify(s string) string {
 //
 // It is unauthenticated and idempotent on owner email: a retry resumes the
 // existing owner user (resetting its password) rather than failing.
+//
+// The handler is gated on the signup seam policy (SIGNUP_SELF_SERVE knob,
+// deploy ADR-0006, gibson#1088). When the policy is not PolicySelfServe (knob
+// absent = self-hosted fail-safe = admin-only), it returns codes.PermissionDenied
+// with a clear message directing the caller to use AdminProvisionTenant instead.
+// The default zero-value policy fails closed (same as PolicyAdminOnly), so a
+// misconfigured SaaS deployment cannot accidentally open self-serve on a
+// self-hosted install.
 func (s *DaemonServer) Signup(ctx context.Context, req *tenantv1.SignupRequest) (*tenantv1.SignupResponse, error) {
+	// ---- signup seam gate (deploy ADR-0006) ----
+	// Only proceed when the self-serve profile is explicitly active.
+	// The zero value "" is treated as PolicyAdminOnly (fail-closed).
+	if s.signupPolicy != signup.PolicySelfServe {
+		return nil, status.Errorf(codes.PermissionDenied,
+			"self-serve signup is not available on this deployment; contact your administrator to provision a tenant via AdminProvisionTenant")
+	}
+
 	// ---- validate ----
 	if req.GetAttemptId() == "" {
 		return nil, status.Errorf(codes.InvalidArgument, "attempt_id is required")
