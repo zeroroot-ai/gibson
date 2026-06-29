@@ -44,6 +44,7 @@ import (
 	"github.com/zeroroot-ai/gibson/internal/server/daemon/api"
 	"github.com/zeroroot-ai/gibson/pkg/billing/entitlements"
 	pdataplane "github.com/zeroroot-ai/gibson/pkg/platform/dataplane"
+	"github.com/zeroroot-ai/gibson/pkg/seam"
 	"github.com/zeroroot-ai/gibson/pkg/version"
 	"github.com/zeroroot-ai/sdk/auth"
 	healthhttp "github.com/zeroroot-ai/sdk/health/http"
@@ -918,6 +919,11 @@ func (d *daemonImpl) Start(ctx context.Context) error {
 		d.entitlementsProvider = entitlements.New(d.platformDB)
 		d.quotaManager = component.NewQuotaManager(tenantStore, d.entitlementsProvider, d.logger.Slog())
 		d.logger.Info(ctx, "quota manager initialized via entitlements seam")
+		// Emit the startup seam-state table (deploy ADR-0006, gibson#1087):
+		// logs each registered seam as wired (remote SaaS component active) or
+		// fail-safe (self-hosted/OSS default). Any seam registered via
+		// seam.Register — including entitlements above — appears in the table.
+		seam.LogStartupState(ctx, d.logger.Slog())
 
 		// Single-use sweep of legacy quota Redis keys deleted by spec
 		// plans-and-quotas-simplification (quota:config / quota:memory /

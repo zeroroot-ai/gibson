@@ -520,13 +520,13 @@ func TestWorldService_GetFrameAt_LlmCalls(t *testing.T) {
 	srv := NewWorldServer(reg, nil)
 
 	e := reg.For("acme")
-	e.Submit(brain.MissionStarted{ID: "A", Goal: "goal A"})                                                               // A idx 0
-	e.Submit(brain.WorkDispatched{ID: "wa1", MissionID: "A", ItemKind: "agent", Target: "recon"})                         // A idx 1
-	e.Submit(brain.LlmCallObserved{CallID: "ca1", MissionID: "A", Model: "m", PromptTokens: 10, CompletionTokens: 5})     // A idx 2
-	e.Submit(brain.LlmCallObserved{CallID: "cam", MissionID: "A", Model: "m", PromptTokens: 3, CompletionTokens: 1})      // A idx 3
-	e.Submit(brain.WorkDispatched{ID: "wb1", MissionID: "B", ItemKind: "agent", Target: "recon"})                         // mission B
-	e.Submit(brain.LlmCallObserved{CallID: "cb1", MissionID: "B", Model: "m", PromptTokens: 7, CompletionTokens: 2})      // mission B call
-	e.Submit(brain.LlmCallObserved{CallID: "camb", MissionID: "", Model: "m", PromptTokens: 1, CompletionTokens: 1})      // tenant-ambient (no mission)
+	e.Submit(brain.MissionStarted{ID: "A", Goal: "goal A"})                                                           // A idx 0
+	e.Submit(brain.WorkDispatched{ID: "wa1", MissionID: "A", ItemKind: "agent", Target: "recon"})                     // A idx 1
+	e.Submit(brain.LlmCallObserved{CallID: "ca1", MissionID: "A", Model: "m", PromptTokens: 10, CompletionTokens: 5}) // A idx 2
+	e.Submit(brain.LlmCallObserved{CallID: "cam", MissionID: "A", Model: "m", PromptTokens: 3, CompletionTokens: 1})  // A idx 3
+	e.Submit(brain.WorkDispatched{ID: "wb1", MissionID: "B", ItemKind: "agent", Target: "recon"})                     // mission B
+	e.Submit(brain.LlmCallObserved{CallID: "cb1", MissionID: "B", Model: "m", PromptTokens: 7, CompletionTokens: 2})  // mission B call
+	e.Submit(brain.LlmCallObserved{CallID: "camb", MissionID: "", Model: "m", PromptTokens: 1, CompletionTokens: 1})  // tenant-ambient (no mission)
 
 	tctx := auth.WithTenant(context.Background(), auth.MustNewTenantID("acme"))
 
