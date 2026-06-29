@@ -30,6 +30,11 @@ type Host struct {
 	CloudID    string // strong identity signal
 	Ports      []PortObservation
 	Belief     Belief // attack-path belief (derived; ADR-0005)
+	// MissionID is the mission that discovered this host — the mission-evidence edge
+	// (gibson#1075). Carried from the observation's ingest context so a mission-scoped
+	// frame surfaces the hosts that mission found, and so a surprise→Finding promotion
+	// inherits the mission attribution. Empty for a host seen without mission context.
+	MissionID string
 }
 
 // Surprise marks an entity the model did not expect — here, an identity
@@ -133,6 +138,7 @@ type HostSnapshot struct {
 	Surprise     string  // non-empty if the entity carries a Surprise
 	Belief       Belief  // attack-path belief (zero until a BeliefSystem scores it)
 	Attention    float64 // derived: belief.Juicy + surprise boost (ADR-0005/0006)
+	MissionID    string  // the mission that discovered this host (gibson#1075); empty if none
 }
 
 // Snapshot returns the current hosts in deterministic order — the materialized
@@ -198,6 +204,7 @@ func (w *World) Snapshot() []HostSnapshot {
 			Surprise:     surprised[q.Entity()],
 			Belief:       h.Belief,
 			Attention:    attentionScore(h.Belief.Juicy, surprised[q.Entity()] != ""),
+			MissionID:    h.MissionID,
 		})
 	}
 	sort.Slice(out, func(i, j int) bool {
@@ -221,6 +228,11 @@ type Event interface{ Kind() string }
 // appear in OpenPorts without a Services entry (a bare open port) — service detail
 // is enriched progressively across observations (ADR-0007).
 type HostObserved struct {
+	// MissionID links the sighting to the mission whose work produced it — the
+	// mission-evidence edge (gibson#1075), carried from the ingest ContextInfo so a
+	// mission-scoped slice surfaces the hosts that mission discovered. Empty when the
+	// observation has no mission context (tenant-ambient).
+	MissionID  string
 	ScopeID    string
 	Address    string
 	SSHHostKey string

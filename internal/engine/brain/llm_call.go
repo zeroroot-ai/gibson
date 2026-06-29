@@ -41,7 +41,13 @@ type LlmMessage struct {
 // brain via the daemon EventBus like the other mission lifecycle events — NOT
 // via the agent Observe surface, which is for target sightings.
 type LlmCallObserved struct {
-	CallID           string
+	CallID string
+	// MissionID links the call to the mission it ran under — the mission-evidence
+	// edge (gibson#1075), the same edge hosts and findings use, so a mission-scoped
+	// frame surfaces the calls that mission made. Empty when the caller (e.g.
+	// ExecuteLLM) carries no mission context, in which case the call is
+	// tenant-ambient and never attaches to a mission frame (follow-up gibson#1078).
+	MissionID        string
 	RunID            string
 	Model            string
 	ScopeID          string

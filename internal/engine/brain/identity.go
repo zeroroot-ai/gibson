@@ -69,7 +69,7 @@ func findHostByID(w *World, id uint64) (ecs.Entity, bool) {
 func applyHostObserved(w *World, e HostObserved) {
 	ent, matched, contradiction := resolveHost(w, e)
 	if !matched {
-		h := &Host{ID: w.newHostID(), ScopeID: e.ScopeID, Address: e.Address, SSHHostKey: e.SSHHostKey, CloudID: e.CloudID}
+		h := &Host{ID: w.newHostID(), ScopeID: e.ScopeID, Address: e.Address, SSHHostKey: e.SSHHostKey, CloudID: e.CloudID, MissionID: e.MissionID}
 		reconcilePorts(h, e)
 		ne := w.hosts.NewEntity(h)
 		if contradiction {
@@ -89,6 +89,9 @@ func applyHostObserved(w *World, e HostObserved) {
 	}
 	if h.CloudID == "" {
 		h.CloudID = e.CloudID
+	}
+	if h.MissionID == "" {
+		h.MissionID = e.MissionID // first mission to discover it keeps attribution
 	}
 	reconcilePorts(h, e)
 }

@@ -79,8 +79,14 @@ func ingestObservation(reg *brain.Registry, tenant string) harness.ObservationSi
 			return nil
 		}
 		scope := ""
+		missionID := ""
 		if req.Context != nil {
 			scope = req.Context.MissionId
+			// Mission-evidence edge (gibson#1075): carry the mission id so the brain
+			// can attribute the discovered host to the mission that found it. This is
+			// the same value scope uses today (each mission is a World partition for
+			// now), captured separately so the two concepts don't stay conflated.
+			missionID = req.Context.MissionId
 		}
 		switch o := req.Observation.(type) {
 		case *harnesspb.ObserveRequest_Host:
@@ -120,6 +126,7 @@ func ingestObservation(reg *brain.Registry, tenant string) harness.ObservationSi
 				}
 			}
 			reg.For(tenant).Submit(brain.HostObserved{
+				MissionID:    missionID,
 				ScopeID:      scope,
 				Address:      h.Address,
 				SSHHostKey:   h.SshHostKey,
@@ -204,6 +211,9 @@ func ingestToBrain(reg *brain.Registry, tenant string, ed api.EventData) {
 				Title:       fe.Finding.Title,
 				Description: fe.Finding.Description,
 				Severity:    fe.Finding.Severity,
+				// Mission-evidence edge (gibson#1075): the mission-event carries the
+				// mission id, so the finding attaches to the mission that raised it.
+				MissionID: fe.MissionID,
 			})
 		}
 	}
