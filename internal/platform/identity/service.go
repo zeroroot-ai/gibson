@@ -151,6 +151,20 @@ func (s *IdentityServer) WhoAmI(ctx context.Context, req *identitypb.WhoAmIReque
 		return nil, status.Errorf(codes.Internal, "list plugin grants: %v", err)
 	}
 
+	// Coarse session-revocation capability (gibson#628). This gates the
+	// dashboard's "revoke sessions" admin UI (dashboard#717). A capability
+	// check failure is NON-fatal: the rest of WhoAmI is core identity data
+	// the UI always needs, so we log and leave the flag false (fail-closed —
+	// the button stays hidden) rather than fail the whole call.
+	canRevoke, capErr := s.canRevokeSomeSessions(ctx, target.PrincipalID, target.TenantID)
+	if capErr != nil {
+		s.logger.WarnContext(ctx, "identity: can_revoke_sessions check failed; defaulting to false",
+			slog.String("principal_id", target.PrincipalID),
+			slog.String("error", capErr.Error()),
+		)
+		canRevoke = false
+	}
+
 	resp := &identitypb.WhoAmIResponse{
 		PrincipalId:     target.PrincipalID,
 		Kind:            target.Kind,
@@ -163,8 +177,46 @@ func (s *IdentityServer) WhoAmI(ctx context.Context, req *identitypb.WhoAmIReque
 		// follow-up task in component-bootstrap-e2e Phase 2.
 		ActiveCapabilityGrants: nil,
 		Truncated:              truncatedComp || truncatedPlug,
+		CanRevokeSessions:      canRevoke,
 	}
 	return resp, nil
+}
+
+// canRevokeSomeSessions computes the COARSE can_revoke_sessions capability for
+// a principal: true when it holds a tenant-admin role OR administers at least
+// one team — i.e. it can revoke the sessions of at least some members. This is
+// the caller-side half of DaemonServer.canRevokeSessions (gibson#622) without
+// a specific target; the authoritative per-(caller,target) decision still runs
+// inside RevokeUserSessions, which fails closed.
+//
+// Only human users hold tenant/team admin; typed component principals
+// (agent_/tool_/plugin_principal:) never can, so they short-circuit to false
+// without an FGA round-trip. Returns a non-nil error only on FGA failure; a
+// clean "no" is (false, nil).
+func (s *IdentityServer) canRevokeSomeSessions(ctx context.Context, principalID, tenantID string) (bool, error) {
+	if s.authorizer == nil || tenantID == "" {
+		return false, nil
+	}
+	// Component principals carry a typed prefix containing ':'; a bare
+	// subject is a human user. Only users can hold admin roles.
+	if strings.ContainsRune(principalID, ':') {
+		return false, nil
+	}
+	userRef := "user:" + principalID
+
+	isTenantAdmin, err := s.authorizer.Check(ctx, userRef, "admin", "tenant:"+tenantID)
+	if err != nil {
+		return false, err
+	}
+	if isTenantAdmin {
+		return true, nil
+	}
+
+	adminTeams, err := s.authorizer.ListObjects(ctx, userRef, "admin", "team")
+	if err != nil {
+		return false, err
+	}
+	return len(adminTeams) > 0, nil
 }
 
 // collectComponentGrants enumerates the principal's per-action grants
