@@ -113,7 +113,7 @@ func (p *OpenAIProvider) Stream(ctx context.Context, req llm.CompletionRequest) 
 	if err != nil {
 		return nil, llm.TranslateError("openai", err)
 	}
-	return streamToChannel(sr, func(e error) error { return llm.TranslateError("openai", e) }), nil
+	return streamToChannel(sr, req.Model, func(e error) error { return llm.TranslateError("openai", e) }), nil
 }
 
 // Health checks the provider health

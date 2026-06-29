@@ -84,7 +84,7 @@ func (p *CohereProvider) Stream(ctx context.Context, req llm.CompletionRequest) 
 	if err != nil {
 		return nil, translateCohereError(err)
 	}
-	return streamToChannel(sr, translateCohereError), nil
+	return streamToChannel(sr, req.Model, translateCohereError), nil
 }
 
 func (p *CohereProvider) Health(_ context.Context) types.HealthStatus {

@@ -100,7 +100,7 @@ func (p *CloudflareProvider) Stream(ctx context.Context, req llm.CompletionReque
 	if err != nil {
 		return nil, translateCloudflareError(err)
 	}
-	return streamToChannel(sr, translateCloudflareError), nil
+	return streamToChannel(sr, req.Model, translateCloudflareError), nil
 }
 
 func (p *CloudflareProvider) Health(_ context.Context) types.HealthStatus {

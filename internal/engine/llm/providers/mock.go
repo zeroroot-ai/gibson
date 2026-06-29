@@ -129,11 +129,19 @@ func (p *MockProvider) Stream(ctx context.Context, req llm.CompletionRequest) (<
 			}
 		}
 
-		// Send final chunk
+		// Send final chunk carrying model + aggregated usage so streaming
+		// completions surface token metadata to the harness World capture path
+		// (gibson#1085), mirroring the unary Complete usage above.
 		select {
 		case <-ctx.Done():
 		case chunkChan <- llm.StreamChunk{
 			FinishReason: llm.FinishReasonStop,
+			Model:        req.Model,
+			Usage: &llm.CompletionTokenUsage{
+				PromptTokens:     10,
+				CompletionTokens: len(response) / 4,
+				TotalTokens:      10 + len(response)/4,
+			},
 		}:
 		}
 	}()

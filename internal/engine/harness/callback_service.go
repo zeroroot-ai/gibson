@@ -691,9 +691,17 @@ func (s *HarnessCallbackService) LLMStream(req *harnesspb.LLMStreamRequest, stre
 		return status.Errorf(codes.Internal, "stream failed: %v", err)
 	}
 
-	// Forward chunks to client
+	// Forward chunks to client while aggregating the completion for World
+	// capture (gibson#1085): streaming has no single terminal usage event on the
+	// wire, so we accumulate the text deltas and read the aggregated token usage
+	// + model off the terminal chunk emitted by the provider stream.
+	var transcript strings.Builder
+	var streamUsage *llm.CompletionTokenUsage
+	var streamModel string
+	var streamFinish llm.FinishReason
 	for chunk := range chunkChan {
-		// Check for error in chunk
+		// Check for error in chunk. Capture is success-only: a failed/aborted
+		// stream is not folded into the mission frame.
 		if chunk.Error != nil {
 			protoChunk := &harnesspb.LLMStreamResponse{
 				Error: &harnesspb.HarnessError{
@@ -705,9 +713,27 @@ func (s *HarnessCallbackService) LLMStream(req *harnesspb.LLMStreamRequest, stre
 			return nil
 		}
 
+		transcript.WriteString(chunk.Delta.Content)
+		if chunk.Usage != nil {
+			streamUsage = chunk.Usage
+		}
+		if chunk.Model != "" {
+			streamModel = chunk.Model
+		}
+		if chunk.FinishReason != "" {
+			streamFinish = chunk.FinishReason
+		}
+
 		protoChunk := &harnesspb.LLMStreamResponse{
 			Delta:        chunk.Delta.Content,
 			FinishReason: string(chunk.FinishReason),
+		}
+		if chunk.Usage != nil {
+			protoChunk.Usage = &harnesspb.TokenUsage{
+				InputTokens:  int32(chunk.Usage.PromptTokens),
+				OutputTokens: int32(chunk.Usage.CompletionTokens),
+				TotalTokens:  int32(chunk.Usage.TotalTokens),
+			}
 		}
 
 		if err := stream.Send(protoChunk); err != nil {
@@ -715,6 +741,20 @@ func (s *HarnessCallbackService) LLMStream(req *harnesspb.LLMStreamRequest, stre
 			return status.Errorf(codes.Internal, "stream send failed: %v", err)
 		}
 	}
+
+	// World capture (gibson#1085): the stream completed successfully — fold it
+	// into the mission frame as an LlmCallObserved, stamped with the aggregated
+	// usage. Reuses the same sink as the unary path; the two are disjoint RPCs so
+	// there is no double-capture.
+	resp := &llm.CompletionResponse{
+		Model:        streamModel,
+		Message:      llm.Message{Role: llm.RoleAssistant, Content: transcript.String()},
+		FinishReason: streamFinish,
+	}
+	if streamUsage != nil {
+		resp.Usage = *streamUsage
+	}
+	s.captureLLMCall(stream.Context(), req.Context, messages, resp)
 
 	return nil
 }
@@ -743,10 +783,12 @@ func (s *HarnessCallbackService) LLMCompleteStructured(ctx context.Context, req 
 		}, nil
 	}
 
-	// Execute structured completion
-	// The harness.CompleteStructured method takes a schema type instance
-	// For callback mode, we pass the parsed map which will be used to build the response format
-	result, err := harness.CompleteStructuredAny(ctx, req.Slot, messages, schemaData)
+	// Execute structured completion. Use the *WithUsage variant so token usage
+	// surfaces back here (gibson#1085): the brain Decider issues its decisions
+	// through this structured path, so capturing it makes the brain's own
+	// decision LLM calls appear in mission frames. For callback mode, we pass the
+	// parsed map which will be used to build the response format.
+	structured, err := harness.CompleteStructuredAnyWithUsage(ctx, req.Slot, messages, schemaData)
 	if err != nil {
 		s.logger.Error("LLM structured completion failed", "error", err, "task_id", req.Context.TaskId)
 		return &harnesspb.LLMCompleteStructuredResponse{
@@ -756,6 +798,22 @@ func (s *HarnessCallbackService) LLMCompleteStructured(ctx context.Context, req 
 			},
 		}, nil
 	}
+	result := structured.Result
+
+	// World capture (gibson#1085): fold the structured completion (incl. the
+	// Decider's decisions) into the mission frame as an LlmCallObserved, stamped
+	// with the surfaced usage. Reuses the same sink as the unary path; the RPCs
+	// are disjoint so there is no double-capture. Success-only.
+	s.captureLLMCall(ctx, req.Context, messages, &llm.CompletionResponse{
+		Model:        structured.Model,
+		Message:      llm.Message{Role: llm.RoleAssistant, Content: structured.RawJSON},
+		FinishReason: llm.FinishReasonStop,
+		Usage: llm.CompletionTokenUsage{
+			PromptTokens:     structured.PromptTokens,
+			CompletionTokens: structured.CompletionTokens,
+			TotalTokens:      structured.TotalTokens,
+		},
+	})
 
 	// Serialize result to JSON
 	resultJSON, err := json.Marshal(result)
@@ -782,8 +840,11 @@ func (s *HarnessCallbackService) LLMCompleteStructured(ctx context.Context, req 
 
 	return &harnesspb.LLMCompleteStructuredResponse{
 		Result: anyToTypedValue(resultData),
-		// Note: Token usage would need to be extracted from the completion response
-		// For now we return nil usage since we don't have access to it from CompleteStructuredAny
+		Usage: &harnesspb.TokenUsage{
+			InputTokens:  int32(structured.PromptTokens),
+			OutputTokens: int32(structured.CompletionTokens),
+			TotalTokens:  int32(structured.TotalTokens),
+		},
 	}, nil
 }
 
