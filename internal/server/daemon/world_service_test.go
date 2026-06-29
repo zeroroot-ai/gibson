@@ -317,6 +317,97 @@ func TestWorldService_GetFrameAt_MissionScoped(t *testing.T) {
 	}
 }
 
+// TestWorldService_GetFrameAt_MissionScoped_FindingsAndLlmCalls: a mission-scoped
+// frame surfaces the component findings and ExecuteLLM-issued LLM calls a mission
+// produced, at the tick they occurred (gibson#1078, the mission-evidence edge). A
+// finding or call carrying no mission context (component finding outside a mission,
+// dashboard chat) stays tenant-ambient — present in the tenant-wide fold but never
+// in a mission frame — and one mission's evidence never bleeds into another's.
+func TestWorldService_GetFrameAt_MissionScoped_FindingsAndLlmCalls(t *testing.T) {
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+	reg := brain.NewRegistry(ctx)
+	srv := NewWorldServer(reg, nil)
+
+	e := reg.For("acme")
+	e.Submit(brain.MissionStarted{ID: "A", Goal: "goal A"})                                                          // A idx 0
+	e.Submit(brain.FindingRaised{ID: "fa", Title: "RCE", Severity: "critical", MissionID: "A"})                      // A idx 1 (component path)
+	e.Submit(brain.LlmCallObserved{CallID: "la", MissionID: "A", Model: "m", PromptTokens: 10, CompletionTokens: 5}) // A idx 2 (ExecuteLLM)
+	// Mission B's evidence — must never bleed into A.
+	e.Submit(brain.MissionStarted{ID: "B", Goal: "goal B"})
+	e.Submit(brain.FindingRaised{ID: "fb", Title: "B finding", Severity: "high", MissionID: "B"})
+	e.Submit(brain.LlmCallObserved{CallID: "lb", MissionID: "B", Model: "m", PromptTokens: 1, CompletionTokens: 1})
+	// Tenant-ambient evidence — no mission context (component finding outside a
+	// mission, dashboard chat) — belongs to no mission frame.
+	e.Submit(brain.FindingRaised{ID: "fx", Title: "ambient finding", Severity: "low"})
+	e.Submit(brain.LlmCallObserved{CallID: "lx", Model: "m", PromptTokens: 2, CompletionTokens: 2})
+
+	tctx := auth.WithTenant(context.Background(), auth.MustNewTenantID("acme"))
+
+	deadline := time.Now().Add(2 * time.Second)
+	for time.Now().Before(deadline) {
+		if len(reg.For("acme").Events()) == 8 {
+			break
+		}
+		time.Sleep(10 * time.Millisecond)
+	}
+	if got := len(reg.For("acme").Events()); got != 8 {
+		t.Fatalf("timeline has %d events, want 8", got)
+	}
+
+	findingIDs := func(r *worldpb.GetFrameAtResponse) []string {
+		var ids []string
+		for _, f := range r.GetFindings() {
+			ids = append(ids, f.GetId())
+		}
+		return ids
+	}
+	callIDs := func(r *worldpb.GetFrameAtResponse) []string {
+		var ids []string
+		for _, c := range r.GetLlmCalls() {
+			ids = append(ids, c.GetCallId())
+		}
+		return ids
+	}
+
+	// seq 2 (mission A) folds A's slice [MissionStarted, FindingRaised fa]: the
+	// finding has folded; the call (slice index 2) has not folded yet.
+	a2, err := srv.GetFrameAt(tctx, &worldpb.GetFrameAtRequest{Seq: 2, MissionId: "A"})
+	if err != nil {
+		t.Fatalf("GetFrameAt(2,A): %v", err)
+	}
+	if ids := findingIDs(a2); len(ids) != 1 || ids[0] != "fa" {
+		t.Fatalf("frame@2/A findings = %v, want [fa]", ids)
+	}
+	if ids := callIDs(a2); len(ids) != 0 {
+		t.Fatalf("frame@2/A calls = %v, want none (call not folded yet)", ids)
+	}
+
+	// end (mission A): both A's finding and call; no B or ambient evidence.
+	aEnd, err := srv.GetFrameAt(tctx, &worldpb.GetFrameAtRequest{Seq: 99, MissionId: "A"})
+	if err != nil {
+		t.Fatalf("GetFrameAt(99,A): %v", err)
+	}
+	if ids := findingIDs(aEnd); len(ids) != 1 || ids[0] != "fa" {
+		t.Fatalf("frame@end/A findings = %v, want [fa] (B/ambient bled in?)", ids)
+	}
+	if ids := callIDs(aEnd); len(ids) != 1 || ids[0] != "la" {
+		t.Fatalf("frame@end/A calls = %v, want [la] (B/ambient bled in?)", ids)
+	}
+
+	// Tenant-wide fold (no mission): every finding and call, incl. the ambient ones.
+	all, err := srv.GetFrameAt(tctx, &worldpb.GetFrameAtRequest{Seq: 99})
+	if err != nil {
+		t.Fatalf("GetFrameAt(99): %v", err)
+	}
+	if got := len(all.GetFindings()); got != 3 {
+		t.Fatalf("tenant-wide findings = %d, want 3", got)
+	}
+	if got := len(all.GetLlmCalls()); got != 3 {
+		t.Fatalf("tenant-wide calls = %d, want 3", got)
+	}
+}
+
 // TestWorldService_GetFrameAt_Work: the rich frame (PRD #1059 M2, gibson#1061)
 // surfaces a mission's WorkItems reconstructed as-of the folded tick. A work item
 // appears at its dispatch tick (status "running" = in-flight) and clears the
@@ -520,13 +611,13 @@ func TestWorldService_GetFrameAt_LlmCalls(t *testing.T) {
 	srv := NewWorldServer(reg, nil)
 
 	e := reg.For("acme")
-	e.Submit(brain.MissionStarted{ID: "A", Goal: "goal A"})                                                               // A idx 0
-	e.Submit(brain.WorkDispatched{ID: "wa1", MissionID: "A", ItemKind: "agent", Target: "recon"})                         // A idx 1
-	e.Submit(brain.LlmCallObserved{CallID: "ca1", MissionID: "A", Model: "m", PromptTokens: 10, CompletionTokens: 5})     // A idx 2
-	e.Submit(brain.LlmCallObserved{CallID: "cam", MissionID: "A", Model: "m", PromptTokens: 3, CompletionTokens: 1})      // A idx 3
-	e.Submit(brain.WorkDispatched{ID: "wb1", MissionID: "B", ItemKind: "agent", Target: "recon"})                         // mission B
-	e.Submit(brain.LlmCallObserved{CallID: "cb1", MissionID: "B", Model: "m", PromptTokens: 7, CompletionTokens: 2})      // mission B call
-	e.Submit(brain.LlmCallObserved{CallID: "camb", MissionID: "", Model: "m", PromptTokens: 1, CompletionTokens: 1})      // tenant-ambient (no mission)
+	e.Submit(brain.MissionStarted{ID: "A", Goal: "goal A"})                                                           // A idx 0
+	e.Submit(brain.WorkDispatched{ID: "wa1", MissionID: "A", ItemKind: "agent", Target: "recon"})                     // A idx 1
+	e.Submit(brain.LlmCallObserved{CallID: "ca1", MissionID: "A", Model: "m", PromptTokens: 10, CompletionTokens: 5}) // A idx 2
+	e.Submit(brain.LlmCallObserved{CallID: "cam", MissionID: "A", Model: "m", PromptTokens: 3, CompletionTokens: 1})  // A idx 3
+	e.Submit(brain.WorkDispatched{ID: "wb1", MissionID: "B", ItemKind: "agent", Target: "recon"})                     // mission B
+	e.Submit(brain.LlmCallObserved{CallID: "cb1", MissionID: "B", Model: "m", PromptTokens: 7, CompletionTokens: 2})  // mission B call
+	e.Submit(brain.LlmCallObserved{CallID: "camb", MissionID: "", Model: "m", PromptTokens: 1, CompletionTokens: 1})  // tenant-ambient (no mission)
 
 	tctx := auth.WithTenant(context.Background(), auth.MustNewTenantID("acme"))
 

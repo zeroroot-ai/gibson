@@ -371,8 +371,10 @@ func (s *DaemonServer) ExecuteLLM(ctx context.Context, req *tenantv1.ExecuteLLMR
 	// World as an LlmCall entity (gibson#755), the replacement for the Langfuse
 	// trace/cost views. Best-effort + metadata-only (resolved model + token
 	// counts); a fresh CallID gives each call a stable World/graph identity.
-	// Scope/run linkage is left empty here (not carried on ExecuteLLM) — a
-	// mission-level call until a richer request context supplies them.
+	// mission_id is carried from the request (gibson#1078): a mission-aware caller
+	// sets it so the call attaches to its mission's frame; a non-mission caller
+	// (e.g. dashboard chat) leaves it unset and the call stays tenant-ambient.
+	// Scope/run linkage is still not carried on ExecuteLLM.
 	if s.llmCallSink != nil && resp != nil {
 		msgs := make([]LLMMessage, 0, len(completionReq.Messages))
 		for _, m := range completionReq.Messages {
@@ -380,6 +382,7 @@ func (s *DaemonServer) ExecuteLLM(ctx context.Context, req *tenantv1.ExecuteLLMR
 		}
 		s.llmCallSink(ctx, tenantID, LLMCallRecord{
 			CallID:           uuid.NewString(),
+			MissionID:        req.GetMissionId(),
 			Model:            completionReq.Model,
 			PromptTokens:     resp.Usage.PromptTokens,
 			CompletionTokens: resp.Usage.CompletionTokens,

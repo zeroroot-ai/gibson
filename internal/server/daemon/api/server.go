@@ -909,8 +909,14 @@ func NewDaemonServer(daemon DaemonInterface, credentialHandler *CredentialHandle
 // carries call metadata only — model + token counts + provenance ids — never the
 // prompt/completion transcript, so the brain Timeline stays lean.
 type LLMCallRecord struct {
-	CallID           string
-	Model            string
+	CallID string
+	Model  string
+	// MissionID is the mission whose work issued the call — the mission-evidence
+	// edge (gibson#1078). A mission-aware caller stamps mission_id on the
+	// ExecuteLLM request; the handler copies it here so the call attaches to its
+	// mission's frame. Empty for non-mission callers (e.g. dashboard chat), which
+	// stay tenant-ambient.
+	MissionID        string
 	ScopeID          string
 	RunID            string
 	PromptTokens     int

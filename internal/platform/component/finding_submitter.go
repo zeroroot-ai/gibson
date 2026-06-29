@@ -23,7 +23,14 @@ import (
 // (ADR-0007): the daemon wires this to fold the finding as a Timeline event so the
 // graph projector — the sole writer of finding nodes — materializes it. Kept as a
 // plain callback so component stays decoupled from the brain package.
-type WorldFindingSink func(ctx context.Context, tenant string, finding agent.Finding)
+//
+// missionID is the mission whose work produced the finding — the mission-evidence
+// edge (gibson#1075/#1078). The submitter resolves it from the work-item context
+// (PollWork → Redis) before invoking the sink, so the brain FindingRaised can be
+// stamped and the finding attaches to its mission's frame. Empty when the finding
+// was submitted outside a formal mission (the context expired or never existed),
+// in which case the finding stays tenant-ambient (no cross-mission bleed).
+type WorldFindingSink func(ctx context.Context, tenant, missionID string, finding agent.Finding)
 
 // GraphRAGFindingSubmitter implements FindingSubmitter by routing findings to:
 //  1. The per-tenant finding store (via the data-plane Pool), for tenant-scoped writes.
@@ -117,9 +124,12 @@ func (s *GraphRAGFindingSubmitter) Submit(
 	s.persistFinding(ctx, tenant, workID, findingID, baseFinding, missionID)
 
 	// Step 5: route the finding into the World; the graph projector (sole writer)
-	// materializes the :Finding node from it (ADR-0007, gibson#837).
+	// materializes the :Finding node from it (ADR-0007, gibson#837). The mission id
+	// resolved in step 3 is carried so the brain can stamp FindingRaised.MissionID
+	// and the finding attaches to its mission's frame (gibson#1078); empty when the
+	// finding was submitted outside a formal mission (tenant-ambient).
 	if s.worldSink != nil {
-		s.worldSink(ctx, tenant, baseFinding)
+		s.worldSink(ctx, tenant, missionID.String(), baseFinding)
 	}
 
 	s.logger.InfoContext(ctx, "finding submitter: finding queued for GraphRAG storage",

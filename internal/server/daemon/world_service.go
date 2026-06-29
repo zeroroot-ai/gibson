@@ -274,8 +274,9 @@ func (s *worldServer) GetFrameAt(ctx context.Context, req *worldpb.GetFrameAtReq
 	// folded, so a mission-scoped frame surfaces exactly the calls issued by `seq`,
 	// with their token/cost/provenance metadata — moving the LLM panel with the
 	// Scroller instead of the tenant-wide tail-only list. A call is attributed to
-	// the mission via the run_id→WorkItem→mission linkage (MissionSlice), so no
-	// other mission's calls bleed in. Transcripts stay behind GetLlmCall.
+	// the mission via the mission-evidence edge — its MissionID, stamped at ingest
+	// from a mission-aware ExecuteLLM caller (gibson#1075/#1078, MissionSlice) — so
+	// no other mission's calls bleed in. Transcripts stay behind GetLlmCall.
 	for _, c := range w.LlmCallSnapshot() {
 		resp.LlmCalls = append(resp.LlmCalls, &worldpb.LlmCallView{
 			CallId:           c.CallID,
