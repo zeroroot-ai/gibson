@@ -245,6 +245,30 @@ func (s *worldServer) GetFrameAt(ctx context.Context, req *worldpb.GetFrameAtReq
 			Status:    string(wi.State),
 		})
 	}
+	// The Decider's decisions reconstructed as-of the fold (PRD #1059 M2,
+	// gibson#1062). A decision is folded once its DecisionRequested event has landed
+	// (status "pending" == in flight) and reaches "completed" at its DecisionCompleted
+	// tick, so a mission-scoped frame surfaces exactly the decisions made by `seq`,
+	// with the work each chose to dispatch and any completion rationale. No other
+	// mission's decisions bleed in (the slice is mission-scoped).
+	for _, d := range w.DecisionSnapshot() {
+		dv := &worldpb.DecisionView{
+			Id:        d.ID,
+			MissionId: d.MissionID,
+			Cursor:    int64(d.Cursor),
+			Status:    d.Status,
+			Outcome:   d.Outcome,
+			Rationale: d.Rationale,
+		}
+		for _, dd := range d.Dispatches {
+			dv.Dispatches = append(dv.Dispatches, &worldpb.DecisionDispatchView{
+				WorkId: dd.WorkID,
+				Kind:   dd.Kind,
+				Target: dd.Target,
+			})
+		}
+		resp.Decisions = append(resp.Decisions, dv)
+	}
 	return resp, nil
 }
 

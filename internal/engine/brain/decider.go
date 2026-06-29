@@ -4,7 +4,10 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
+	"sort"
 	"sync"
+
+	"github.com/mlange-42/ark/ecs"
 )
 
 // decider.go is the LLM decision loop (ADR-0001/0004, CONTEXT.md). It fits a slow
@@ -107,18 +110,137 @@ type DecisionCompleted struct {
 
 func (DecisionCompleted) Kind() string { return "decision.completed" }
 
+// Decision is a folded record of one Decider decision episode for a goal mission
+// (gibson#1062) — the read-only projection the mission-run World frame surfaces as
+// "what the brain chose to do next, and why" (PRD #1059 M2, user story #8). It is
+// opened by a DecisionRequested event (the gate asked for a decision given the
+// evidence so far) and closed by a DecisionCompleted event once the off-tick
+// Decider worker has Submitted its choices. Between the two, the work the Decider
+// dispatched is recorded as Dispatches, and a decision that ends the mission
+// carries the completion reason as Rationale. It introduces no new event kind —
+// it is a projection over the existing decision / dispatch / mission-done events,
+// so the read-only-projection invariant (ADR-0001) holds.
+type DecisionRecord struct {
+	ID         string // deterministic per mission: "<MissionID>#d<ordinal>"
+	MissionID  string
+	Cursor     int                // evidence cursor at request time (its position in the run)
+	Status     string             // "pending" (in flight) | "completed"
+	Dispatches []DecisionDispatch // the work the Decider chose to dispatch in this episode
+	Outcome    string             // mission outcome if the decision ended the mission ("" otherwise)
+	Rationale  string             // the completion reason, where present
+}
+
+// DecisionDispatch is one action a Decider decision chose: the WorkItem it
+// dispatched. The matching WorkItem carries its own lifecycle; this is the
+// decision→work linkage.
+type DecisionDispatch struct {
+	WorkID string
+	Kind   string
+	Target string
+}
+
+const (
+	decisionPending   = "pending"
+	decisionCompleted = "completed"
+)
+
+// findOpenDecision returns the mission's currently-open (pending) decision, if any.
+// The gate enforces one in-flight decision per mission, so there is at most one.
+func findOpenDecision(w *World, missionID string) (ecs.Entity, bool) {
+	q := ecs.NewFilter1[DecisionRecord](w.ecs).Query()
+	for q.Next() {
+		d := q.Get()
+		if d.MissionID == missionID && d.Status == decisionPending {
+			e := q.Entity()
+			q.Close()
+			return e, true
+		}
+	}
+	return ecs.Entity{}, false
+}
+
+// countMissionDecisions returns how many decisions the mission already has folded,
+// so a new episode gets a stable, replay-deterministic ordinal in its id.
+func countMissionDecisions(w *World, missionID string) int {
+	n := 0
+	q := ecs.NewFilter1[DecisionRecord](w.ecs).Query()
+	for q.Next() {
+		if q.Get().MissionID == missionID {
+			n++
+		}
+	}
+	return n
+}
+
+// recordDecisionDispatch links a dispatched WorkItem to the mission's open
+// decision, if one is in flight (gibson#1062) — the Decider's chosen action. A
+// CUE/scheduler dispatch with no decision in flight is a no-op.
+func recordDecisionDispatch(w *World, missionID string, d DecisionDispatch) {
+	if missionID == "" {
+		return
+	}
+	if ent, ok := findOpenDecision(w, missionID); ok {
+		dec := w.decisions.Get(ent)
+		dec.Dispatches = append(dec.Dispatches, d)
+	}
+}
+
 func applyDecisionRequested(w *World, e DecisionRequested) {
 	if ent, ok := findMission(w, e.MissionID); ok {
 		m := w.missions.Get(ent)
 		m.DecisionInFlight = true
 		m.DecisionCursor = e.Cursor
 	}
+	// Open a decision episode (gibson#1062). The gate guarantees no decision is
+	// already in flight for this mission, so this always starts a fresh one.
+	ordinal := countMissionDecisions(w, e.MissionID) + 1
+	w.decisions.NewEntity(&DecisionRecord{
+		ID:        fmt.Sprintf("%s#d%d", e.MissionID, ordinal),
+		MissionID: e.MissionID,
+		Cursor:    e.Cursor,
+		Status:    decisionPending,
+	})
 }
 
 func applyDecisionCompleted(w *World, e DecisionCompleted) {
 	if ent, ok := findMission(w, e.MissionID); ok {
 		w.missions.Get(ent).DecisionInFlight = false
 	}
+	if ent, ok := findOpenDecision(w, e.MissionID); ok {
+		w.decisions.Get(ent).Status = decisionCompleted
+	}
+}
+
+// DecisionSnapshot is a stable, comparable view of a Decision.
+type DecisionSnapshot struct {
+	ID         string
+	MissionID  string
+	Cursor     int
+	Status     string
+	Dispatches []DecisionDispatch
+	Outcome    string
+	Rationale  string
+}
+
+// DecisionSnapshot returns the folded Decider decisions in deterministic (id)
+// order (gibson#1062).
+func (w *World) DecisionSnapshot() []DecisionSnapshot {
+	var out []DecisionSnapshot
+	q := ecs.NewFilter1[DecisionRecord](w.ecs).Query()
+	for q.Next() {
+		d := q.Get()
+		out = append(out, DecisionSnapshot{
+			ID:         d.ID,
+			MissionID:  d.MissionID,
+			Cursor:     d.Cursor,
+			Status:     d.Status,
+			Dispatches: append([]DecisionDispatch(nil), d.Dispatches...),
+			Outcome:    d.Outcome,
+			Rationale:  d.Rationale,
+		})
+	}
+	sort.Slice(out, func(i, j int) bool { return out[i].ID < out[j].ID })
+	return out
 }
 
 // terminalWorkCount returns the number of terminal (done/failed/skipped) work
