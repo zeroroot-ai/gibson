@@ -198,6 +198,15 @@ type SecurityConfig struct {
 	SSLValidation       bool                      `mapstructure:"ssl_validation" yaml:"ssl_validation"`
 	AuditLogging        bool                      `mapstructure:"audit_logging" yaml:"audit_logging"`
 	KeyProvider         *crypto.KeyProviderConfig `mapstructure:"key_provider" yaml:"key_provider,omitempty"`
+
+	// AllowPrivateLLMEndpoints disables the SSRF guard on self-hosted LLM and
+	// embedding endpoints whose host resolves to a private/link-local/metadata
+	// address. Off by default (the secure default): tenant-supplied endpoints
+	// pointing at internal addresses are rejected. Operators running an
+	// in-cluster or air-gapped model server opt in by setting this true. It is
+	// forwarded to the per-tenant embedder resolver (tenantembedder.NewResolver)
+	// and the LLM provider SSRF guard.
+	AllowPrivateLLMEndpoints bool `mapstructure:"allow_private_llm_endpoints" yaml:"allow_private_llm_endpoints"`
 }
 
 // LLMConfig contains LLM provider configuration.

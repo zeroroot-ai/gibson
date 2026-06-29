@@ -10,12 +10,11 @@ import (
 // Supports multiple graph providers (Neo4j, AWS Neptune, etc.) with vector search
 // and embeddings for hybrid retrieval combining graph traversal and semantic search.
 type GraphRAGConfig struct {
-	Provider string         `yaml:"provider" json:"provider" mapstructure:"provider"` // neo4j, neptune, memgraph (required)
-	Neo4j    Neo4jConfig    `yaml:"neo4j" json:"neo4j" mapstructure:"neo4j"`
-	Vector   VectorConfig   `yaml:"vector" json:"vector" mapstructure:"vector"`
-	Embedder EmbedderConfig `yaml:"embedder" json:"embedder" mapstructure:"embedder"`
-	Cloud    CloudConfig    `yaml:"cloud" json:"cloud" mapstructure:"cloud"`
-	Query    QueryConfig    `yaml:"query" json:"query" mapstructure:"query"`
+	Provider string       `yaml:"provider" json:"provider" mapstructure:"provider"` // neo4j, neptune, memgraph (required)
+	Neo4j    Neo4jConfig  `yaml:"neo4j" json:"neo4j" mapstructure:"neo4j"`
+	Vector   VectorConfig `yaml:"vector" json:"vector" mapstructure:"vector"`
+	Cloud    CloudConfig  `yaml:"cloud" json:"cloud" mapstructure:"cloud"`
+	Query    QueryConfig  `yaml:"query" json:"query" mapstructure:"query"`
 }
 
 // Neo4jConfig contains Neo4j graph database configuration.
@@ -31,20 +30,13 @@ type Neo4jConfig struct {
 // VectorConfig contains vector search configuration.
 // Vector search is always enabled as part of GraphRAG's hybrid retrieval.
 // Used for combining graph structure and semantic similarity.
+//
+// The vector index dimension is NOT configured here: it is derived per tenant
+// from the resolved BYO embedding model (embedder.DimensionForModel) and the
+// index is created lazily at that dimension (see internal/engine/memory/reembed).
 type VectorConfig struct {
-	IndexType  string `yaml:"index_type" json:"index_type" mapstructure:"index_type"` // hnsw, ivfflat
-	Dimensions int    `yaml:"dimensions" json:"dimensions" mapstructure:"dimensions"` // Embedding dimensions
-	Metric     string `yaml:"metric" json:"metric" mapstructure:"metric"`             // cosine, euclidean, dot
-}
-
-// EmbedderConfig contains embeddings configuration for vector search.
-// Supports multiple embedding providers (OpenAI, HuggingFace, local models).
-type EmbedderConfig struct {
-	Provider   string `yaml:"provider" json:"provider" mapstructure:"provider"`       // openai, huggingface, local
-	Model      string `yaml:"model" json:"model" mapstructure:"model"`                // text-embedding-ada-002, etc.
-	Dimensions int    `yaml:"dimensions" json:"dimensions" mapstructure:"dimensions"` // Must match VectorConfig.Dimensions
-	APIKey     string `yaml:"api_key" json:"api_key" mapstructure:"api_key"`
-	Endpoint   string `yaml:"endpoint" json:"endpoint" mapstructure:"endpoint"` // For custom/local embedders
+	IndexType string `yaml:"index_type" json:"index_type" mapstructure:"index_type"` // hnsw, ivfflat
+	Metric    string `yaml:"metric" json:"metric" mapstructure:"metric"`             // cosine, euclidean, dot
 }
 
 // CloudConfig contains cloud provider-specific configuration.
@@ -113,14 +105,6 @@ func (c *GraphRAGConfig) Validate() error {
 	if err := c.Vector.Validate(); err != nil {
 		return fmt.Errorf("vector config validation failed: %w", err)
 	}
-	if err := c.Embedder.Validate(); err != nil {
-		return fmt.Errorf("embedder config validation failed: %w", err)
-	}
-	// Ensure dimensions match
-	if c.Vector.Dimensions != c.Embedder.Dimensions {
-		return fmt.Errorf("vector dimensions (%d) must match embedder dimensions (%d)",
-			c.Vector.Dimensions, c.Embedder.Dimensions)
-	}
 
 	// Validate query config
 	if err := c.Query.Validate(); err != nil {
@@ -139,7 +123,6 @@ func (c *GraphRAGConfig) ApplyDefaults() {
 
 	c.Neo4j.ApplyDefaults()
 	c.Vector.ApplyDefaults()
-	c.Embedder.ApplyDefaults()
 	c.Query.ApplyDefaults()
 }
 
@@ -189,11 +172,6 @@ func (v *VectorConfig) Validate() error {
 		return fmt.Errorf("invalid vector index_type: %s (must be one of: %s)", v.IndexType, strings.Join(validIndexTypes, ", "))
 	}
 
-	// Validate dimensions
-	if v.Dimensions < 1 || v.Dimensions > 4096 {
-		return fmt.Errorf("vector dimensions must be between 1 and 4096, got %d", v.Dimensions)
-	}
-
 	// Validate metric
 	validMetrics := []string{"cosine", "euclidean", "dot"}
 	metric := strings.ToLower(v.Metric)
@@ -216,78 +194,8 @@ func (v *VectorConfig) ApplyDefaults() {
 	if v.IndexType == "" {
 		v.IndexType = "hnsw"
 	}
-	if v.Dimensions == 0 {
-		v.Dimensions = 384 // Native embedder (all-MiniLM-L6-v2) default
-	}
 	if v.Metric == "" {
 		v.Metric = "cosine"
-	}
-}
-
-// Validate validates the EmbedderConfig fields.
-// Returns an error if provider is invalid or required fields are missing.
-func (e *EmbedderConfig) Validate() error {
-	// Validate provider
-	validProviders := []string{"native", "openai", "huggingface", "local"}
-	provider := strings.ToLower(e.Provider)
-	isValid := false
-	for _, valid := range validProviders {
-		if provider == valid {
-			isValid = true
-			break
-		}
-	}
-	if !isValid {
-		return fmt.Errorf("invalid embedder provider: %s (must be one of: %s)", e.Provider, strings.Join(validProviders, ", "))
-	}
-
-	// Native embedder doesn't require model or API key - it's embedded
-	if provider == "native" {
-		// Native embedder (all-MiniLM-L6-v2) has fixed 384 dimensions
-		if e.Dimensions != 0 && e.Dimensions != 384 {
-			return fmt.Errorf("native embedder produces 384 dimensions, got %d", e.Dimensions)
-		}
-		return nil
-	}
-
-	// Validate model for non-native providers
-	if e.Model == "" {
-		return fmt.Errorf("embedder model is required")
-	}
-
-	// Validate dimensions
-	if e.Dimensions < 1 || e.Dimensions > 4096 {
-		return fmt.Errorf("embedder dimensions must be between 1 and 4096, got %d", e.Dimensions)
-	}
-
-	// Provider-specific validation
-	switch provider {
-	case "openai":
-		if e.APIKey == "" {
-			return fmt.Errorf("openai embedder requires api_key")
-		}
-	case "local":
-		if e.Endpoint == "" {
-			return fmt.Errorf("local embedder requires endpoint")
-		}
-	}
-
-	return nil
-}
-
-// ApplyDefaults applies default values to the EmbedderConfig.
-func (e *EmbedderConfig) ApplyDefaults() {
-	if e.Provider == "" {
-		e.Provider = "native" // Use offline native embedder by default (all-MiniLM-L6-v2)
-	}
-	if e.Provider == "native" {
-		e.Dimensions = 384 // Native embedder produces 384-dimensional vectors
-		e.Model = "all-MiniLM-L6-v2"
-	} else if e.Model == "" && e.Provider == "openai" {
-		e.Model = "text-embedding-ada-002"
-		if e.Dimensions == 0 {
-			e.Dimensions = 1536 // OpenAI ada-002 default
-		}
 	}
 }
 

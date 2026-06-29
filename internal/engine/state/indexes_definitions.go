@@ -1,10 +1,17 @@
 package state
 
-import "github.com/zeroroot-ai/gibson/internal/engine/memory/embedder"
-
 // AllIndexDefinitions returns all predefined Gibson RediSearch indexes.
 // These indexes provide full-text search, filtering, and sorting capabilities
 // for all major Gibson entities.
+//
+// The vector index (VectorIndex) is deliberately NOT included here. Its
+// dimension depends on the tenant's resolved BYO embedding model, which is not
+// known cluster-wide at startup, so it cannot be created eagerly at a fixed
+// dimension. It is created lazily per tenant at the resolved model's dimension
+// by the re-embed path (internal/engine/memory/reembed.RunForTenant), which
+// fires when a tenant configures or changes its embedding provider — exactly
+// when an embedding-capable provider (and therefore a known dimension) exists
+// (ADR-0059 BYO-embedder, gibson#1011).
 func AllIndexDefinitions() []*IndexDefinition {
 	return []*IndexDefinition{
 		MissionIndex(),
@@ -14,11 +21,6 @@ func AllIndexDefinitions() []*IndexDefinition {
 		CredentialIndex(),
 		SessionIndex(),
 		TargetIndex(),
-		// The vector index dimension is derived from the default embedding
-		// model's output dimension (all-MiniLM-L6-v2 → 384), never hardcoded
-		// (gibson#807). gibson#808's per-tenant provider factory threads a
-		// model-derived dimension through VectorIndex for BYO embedders.
-		VectorIndex(embedder.DefaultEmbeddingDimension),
 	}
 }
 
@@ -623,8 +625,8 @@ func TargetIndex() *IndexDefinition {
 //
 // Vector Configuration:
 //   - Algorithm: HNSW (Hierarchical Navigable Small World for scalability)
-//   - Dimensions: derived from the embedding model via
-//     embedder.DimensionForModel (default all-MiniLM-L6-v2 → 384)
+//   - Dimensions: the dim parameter, derived per tenant from the resolved BYO
+//     embedding model via embedder.DimensionForModel
 //   - Distance Metric: COSINE (normalized dot product)
 //   - Data Type: FLOAT32 (4 bytes per dimension)
 //   - M: 16 (bi-directional links per node, balances recall and memory)
