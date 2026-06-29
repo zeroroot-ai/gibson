@@ -268,6 +268,11 @@ message ModelDescriptor {
   string name = 1;
   string family = 2;
   int32 context_window = 3;
+  // capabilities declares what this model can do (chat, embedding, …).
+  // Empty implies legacy chat-only behaviour. The dashboard uses this field to
+  // populate the chat-model picker (CAPABILITY_CHAT) or the embedding-model
+  // picker (CAPABILITY_EMBEDDING) — a model may appear in both.
+  repeated Capability capabilities = 4;
 }
 
 // SupportedProvider describes one LLM provider type the daemon supports.
@@ -277,10 +282,15 @@ message SupportedProvider {
   string docs_url = 3;
   bool self_hosted = 4;
   repeated CredentialField credentials = 5;
-  // Static catalogue surfaced when the daemon can enumerate models without
-  // calling the provider's API. Empty for providers that require a live
-  // test+probe to discover models.
+  // default_models is the static catalogue of CHAT models this provider
+  // exposes when the daemon can enumerate them without a live API call.
+  // Empty for providers where the model list requires a live probe.
   repeated ModelDescriptor default_models = 6;
+  // embedding_models is the static catalogue of EMBEDDING models this
+  // provider supports. Empty for providers that serve chat only (e.g.
+  // Anthropic, Google). The dashboard uses this list to populate the
+  // embedding-model picker in Settings > Providers.
+  repeated ModelDescriptor embedding_models = 7;
 }
 
 // ---------------------------------------------------------------------------
@@ -385,6 +395,16 @@ message TestProviderResponse {
   // Live model catalogue returned by the provider's API for these credentials.
   // Empty when ok=false.
   repeated ModelDescriptor models = 5;
+  // embedding_ok is true when an embedding probe was attempted and succeeded.
+  // False when no embedding probe was run (provider is chat-only or
+  // default_embedding_model was empty) or when the probe failed.
+  bool embedding_ok = 6;
+  // embedding_dimension is the vector dimension returned by the embedding
+  // probe. 0 when embedding_ok=false or no embedding probe was run.
+  int32 embedding_dimension = 7;
+  // embedding_error is the human-readable error from the embedding probe
+  // when embedding_ok=false and a probe was attempted.
+  string embedding_error = 8;
 }
 
 message GetSupportedProvidersRequest {}
@@ -403,23 +423,32 @@ message ProbeProviderRequest {
   // Credential map. Keys come from the provider's CredentialField.key entries;
   // values are plaintext (used once, discarded).
   map<string, string> credentials = 2;
+  // default_embedding_model is the embedding model to use in the probe.
+  // Required when the provider type serves embeddings and the caller wants an
+  // embedding probe (e.g. voyage, openai-compatible, tei). Optional for
+  // chat-only providers — if supplied, an embedding probe is also run.
+  string default_embedding_model = 3;
 }
 
 // ProbeProviderResponse carries the structured probe outcome.
 // Source: previously ProbeProviderResponse in gibson.admin.v1 (platform-sdk).
 message ProbeProviderResponse {
   // True when the provider accepted the credentials and a model list was
-  // retrieved. False otherwise — error_message describes the reason.
+  // retrieved (or the embedding probe succeeded). False otherwise —
+  // error_message describes the reason.
   bool ok = 1;
   // Human-readable error message when ok=false.
   string error_message = 2;
   // Stable error class for programmatic dispatch when ok=false.
   string error_class = 3;
-  // Live model catalogue the provider's API returned for these credentials.
-  // Empty when ok=false.
+  // Live chat-model catalogue the provider's API returned for these
+  // credentials. Empty when ok=false or the provider is embedding-only.
   repeated ModelDescriptor models = 4;
   // Round-trip latency to the upstream provider, in milliseconds.
   int64 latency_ms = 5;
+  // embedding_dimension is the vector dimension returned by the embedding
+  // probe. 0 when no embedding probe was run or it failed.
+  int32 embedding_dimension = 6;
 }
 
 message ListProviderModelsRequest {

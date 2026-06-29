@@ -202,13 +202,13 @@ func TestWorldService_GetFrameAt_MissionScoped(t *testing.T) {
 	// Two interleaved missions plus one tenant-ambient host observation (an
 	// observation carries no mission linkage, so it belongs to neither slice).
 	e := reg.For("acme")
-	e.Submit(brain.MissionStarted{ID: "A", Goal: "goal A"})                                   // A slice: 1
-	e.Submit(brain.MissionStarted{ID: "B", Goal: "goal B"})                                   // B slice: 1
+	e.Submit(brain.MissionStarted{ID: "A", Goal: "goal A"})                                     // A slice: 1
+	e.Submit(brain.MissionStarted{ID: "B", Goal: "goal B"})                                     // B slice: 1
 	e.Submit(brain.WorkDispatched{ID: "wa1", MissionID: "A", ItemKind: "tool", Target: "nmap"}) // A slice: 2
 	e.Submit(brain.WorkDispatched{ID: "wb1", MissionID: "B", ItemKind: "tool", Target: "nmap"}) // B slice: 2
-	e.Submit(brain.HostObserved{ScopeID: "s", Address: "10.0.0.5", OpenPorts: []int{22}})     // ambient
-	e.Submit(brain.WorkCompleted{ID: "wa1", Result: "ok"})                                    // A slice: 3
-	e.Submit(brain.WorkCompleted{ID: "wb1", Result: "ok"})                                    // B slice: 3
+	e.Submit(brain.HostObserved{ScopeID: "s", Address: "10.0.0.5", OpenPorts: []int{22}})       // ambient
+	e.Submit(brain.WorkCompleted{ID: "wa1", Result: "ok"})                                      // A slice: 3
+	e.Submit(brain.WorkCompleted{ID: "wb1", Result: "ok"})                                      // B slice: 3
 
 	tctx := auth.WithTenant(context.Background(), auth.MustNewTenantID("acme"))
 

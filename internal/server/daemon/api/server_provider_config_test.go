@@ -664,7 +664,17 @@ func TestValidateProviderInput_KnownTypes_NoError(t *testing.T) {
 			continue
 		}
 		t.Run(string(typ), func(t *testing.T) {
-			err := validateProviderInput(&tenantv1.ProviderConfigInput{Type: string(typ)})
+			// Embedding-only providers (voyage, openai-compatible, tei) must
+			// declare CAPABILITY_EMBEDDING and a known default_embedding_model.
+			isEmbeddingOnly := typ == llm.ProviderVoyage ||
+				typ == llm.ProviderOpenAICompatible ||
+				typ == llm.ProviderTEI
+			input := &tenantv1.ProviderConfigInput{Type: string(typ)}
+			if isEmbeddingOnly {
+				input.Capabilities = []tenantv1.Capability{tenantv1.Capability_CAPABILITY_EMBEDDING}
+				input.DefaultEmbeddingModel = "text-embedding-3-small"
+			}
+			err := validateProviderInput(input)
 			assert.NoError(t, err, "supported type %q must validate successfully", typ)
 		})
 	}

@@ -23,11 +23,31 @@ const (
 	ProviderLlamafile   ProviderType = "llamafile"
 	ProviderMistral     ProviderType = "mistral"
 	ProviderCustom      ProviderType = "custom"
+
+	// Embedding-only provider types (E11 BYO-embedder, ADR-0059).
+	// These types are valid for ProviderConfigInput when the CAPABILITY_EMBEDDING
+	// capability is declared; they cannot serve chat completions and
+	// providers.NewProvider returns ErrEmbeddingOnlyProvider for them.
+
+	// ProviderVoyage is the Voyage AI embeddings API.
+	ProviderVoyage ProviderType = "voyage"
+	// ProviderOpenAICompatible is a generic OpenAI-compatible /v1/embeddings
+	// endpoint — e.g. a self-hosted TEI server in OpenAI-compat mode.
+	ProviderOpenAICompatible ProviderType = "openai-compatible"
+	// ProviderTEI is HuggingFace Text-Embeddings-Inference's native /embed
+	// endpoint (non-OpenAI-compatible mode).
+	ProviderTEI ProviderType = "tei"
 )
 
-// SupportedProviderTypes returns every ProviderType the platform can construct,
+// SupportedProviderTypes returns every ProviderType the platform supports,
 // in a deterministic order. This is the single source of truth for the factory
 // switch, config validator, and the GetSupportedProviders introspection RPC.
+//
+// Chat-capable providers (anthropic, openai, google, …) can be constructed via
+// providers.NewProvider. Embedding-only providers (voyage, openai-compatible,
+// tei) are valid in ProviderConfigInput when CAPABILITY_EMBEDDING is declared
+// but return ErrEmbeddingOnlyProvider from providers.NewProvider — they are
+// consumed via the embedder.NewFromProvider path instead.
 func SupportedProviderTypes() []ProviderType {
 	return []ProviderType{
 		ProviderAnthropic,
@@ -41,14 +61,20 @@ func SupportedProviderTypes() []ProviderType {
 		ProviderLlamafile,
 		ProviderMistral,
 		ProviderCustom,
+		// Embedding-only (E11 BYO-embedder):
+		ProviderVoyage,
+		ProviderOpenAICompatible,
+		ProviderTEI,
 	}
 }
 
 // selfHostedProviderTypes lists providers that do not require an API key at
 // construction time (the endpoint is operator-controlled).
 var selfHostedProviderTypes = map[ProviderType]bool{
-	ProviderOllama:    true,
-	ProviderLlamafile: true,
+	ProviderOllama:           true,
+	ProviderLlamafile:        true,
+	ProviderOpenAICompatible: true,
+	ProviderTEI:              true,
 }
 
 // IsSelfHosted reports whether the provider runs on operator-controlled
@@ -103,7 +129,7 @@ func (c *LLMConfig) Validate() error {
 // It includes authentication credentials, API endpoints, available models,
 // and provider-specific options.
 type ProviderConfig struct {
-	Type         ProviderType           `mapstructure:"type" yaml:"type" validate:"required,oneof=anthropic openai google ollama bedrock cloudflare cohere huggingface llamafile mistral custom"`
+	Type         ProviderType           `mapstructure:"type" yaml:"type" validate:"required,oneof=anthropic openai google ollama bedrock cloudflare cohere huggingface llamafile mistral custom voyage openai-compatible tei"`
 	APIKey       string                 `mapstructure:"api_key" yaml:"api_key"`
 	BaseURL      string                 `mapstructure:"base_url" yaml:"base_url"`
 	DefaultModel string                 `mapstructure:"default_model" yaml:"default_model" validate:"required"`

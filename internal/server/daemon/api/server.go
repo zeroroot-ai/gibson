@@ -205,6 +205,12 @@ type DaemonServer struct {
 	// Added by spec 25-daemon-driven-provider-config task 4.
 	providerFactory func(cfg llm.ProviderConfig) (llm.LLMProvider, error)
 
+	// embedderFactory constructs an embedder.Embedder from a transient
+	// embedder.Config for the TestProvider / ProbeProvider embedding probe
+	// (gibson#1013). Defaults to embedder.NewFromProvider; overridden in tests via
+	// WithEmbedderFactory. Must never be nil after NewDaemonServer.
+	embedderFactory func(cfg embedder.Config) (embedder.Embedder, error)
+
 	// budgetEnforcer enforces per-user/team/tenant token and spend
 	// budgets around ExecuteLLM / StreamLLM. May be nil; when nil budget
 	// enforcement is skipped (absent-budget = unlimited, so this
@@ -423,7 +429,6 @@ type DaemonInterface interface {
 	// The name field of req.Definition is the lookup key. Returns an error wrapping
 	// mission.ErrDefinitionNotFound when the name is not registered.
 	UpdateMissionDefinition(ctx context.Context, req UpdateMissionDefinitionData) (UpdateMissionDefinitionResultData, error)
-
 }
 
 // DaemonStatus represents daemon status information.
@@ -891,6 +896,7 @@ func NewDaemonServer(daemon DaemonInterface, credentialHandler *CredentialHandle
 		logger:            logger.With("component", "daemon-grpc"),
 		sessionCounter:    0,
 		providerFactory:   providerFactoryFunc,
+		embedderFactory:   embedder.NewFromProvider,
 		gibsonPublicURL:   os.Getenv("GIBSON_PUBLIC_URL"),
 		// Always-non-nil default so provider-config handlers never need a
 		// request-path nil-guard ([[0003]]). WithReembedTrigger swaps in the

@@ -11,6 +11,7 @@ import (
 
 	"github.com/zeroroot-ai/gibson/internal/engine/llm"
 	"github.com/zeroroot-ai/gibson/internal/engine/llm/providers"
+	"github.com/zeroroot-ai/gibson/internal/engine/memory/embedder"
 	"github.com/zeroroot-ai/gibson/internal/infra/contextkeys"
 	"github.com/zeroroot-ai/gibson/internal/infra/types"
 	"github.com/zeroroot-ai/gibson/internal/platform/budget"
@@ -69,6 +70,14 @@ func (s *DaemonServer) WithExecLimiter(l execLimiterIface) *DaemonServer {
 // Added by spec 25-daemon-driven-provider-config task 4.
 func (s *DaemonServer) WithProviderFactory(f func(cfg llm.ProviderConfig) (llm.LLMProvider, error)) *DaemonServer {
 	s.providerFactory = f
+	return s
+}
+
+// WithEmbedderFactory replaces the default embedder.NewFromProvider factory
+// with the given function. Intended for tests that need to inject a mock
+// embedder without hitting real upstream embedding APIs (gibson#1013).
+func (s *DaemonServer) WithEmbedderFactory(f func(cfg embedder.Config) (embedder.Embedder, error)) *DaemonServer {
+	s.embedderFactory = f
 	return s
 }
 

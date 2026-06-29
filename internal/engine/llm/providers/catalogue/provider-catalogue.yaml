@@ -19,65 +19,138 @@ providers:
   - type: openai
     update_strategy: api
     models:
-      - { id: gpt-4o, context_window: 128000, deprecated: false }
-      - { id: gpt-4o-mini, context_window: 128000, deprecated: false }
-      - { id: gpt-4-turbo, context_window: 128000, deprecated: false }
-      - { id: gpt-4, context_window: 8192, deprecated: false }
-      - { id: o1, context_window: 200000, deprecated: false }
-      - { id: o1-mini, context_window: 128000, deprecated: false }
-      - { id: o3, context_window: 200000, deprecated: false }
-      - { id: o3-mini, context_window: 200000, deprecated: false }
-      - { id: o4-mini, context_window: 200000, deprecated: false }
+      - { id: gpt-4o, context_window: 128000, capabilities: [chat, streaming, tools, vision], deprecated: false }
+      - { id: gpt-4o-mini, context_window: 128000, capabilities: [chat, streaming, tools], deprecated: false }
+      - { id: gpt-4-turbo, context_window: 128000, capabilities: [chat, streaming, tools], deprecated: false }
+      - { id: gpt-4, context_window: 8192, capabilities: [chat, tools], deprecated: false }
+      - { id: o1, context_window: 200000, capabilities: [chat], deprecated: false }
+      - { id: o1-mini, context_window: 128000, capabilities: [chat], deprecated: false }
+      - { id: o3, context_window: 200000, capabilities: [chat], deprecated: false }
+      - { id: o3-mini, context_window: 200000, capabilities: [chat], deprecated: false }
+      - { id: o4-mini, context_window: 200000, capabilities: [chat], deprecated: false }
+      # Embedding models
+      - id: text-embedding-3-small
+        context_window: 8191
+        capabilities: [embedding]
+        deprecated: false
+      - id: text-embedding-3-large
+        context_window: 8191
+        capabilities: [embedding]
+        deprecated: false
+      - id: text-embedding-ada-002
+        context_window: 8191
+        capabilities: [embedding]
+        deprecated: true
   - type: bedrock
     update_strategy: aws
     models:
-      - { id: anthropic.claude-opus-4-7-v1, context_window: 200000, deprecated: false }
-      - { id: anthropic.claude-sonnet-4-6-v1:0, context_window: 200000, deprecated: false }
-      - { id: anthropic.claude-haiku-4-5-20251001-v1:0, context_window: 200000, deprecated: false }
-      - { id: anthropic.claude-3-5-sonnet-20241022-v2:0, context_window: 200000, deprecated: false }
-      - { id: anthropic.claude-3-5-haiku-20241022-v1:0, context_window: 200000, deprecated: false }
-      - { id: amazon.titan-text-premier-v1:0, context_window: 32000, deprecated: false }
-      - { id: amazon.nova-pro-v1:0, context_window: 300000, deprecated: false }
-      - { id: amazon.nova-lite-v1:0, context_window: 300000, deprecated: false }
-      - { id: amazon.nova-micro-v1:0, context_window: 128000, deprecated: false }
-      - { id: meta.llama3-3-70b-instruct-v1:0, context_window: 128000, deprecated: false }
-      - { id: meta.llama3-2-90b-instruct-v1:0, context_window: 128000, deprecated: false }
-      - { id: mistral.mistral-large-2402-v1:0, context_window: 32000, deprecated: false }
+      - { id: anthropic.claude-opus-4-7-v1, context_window: 200000, capabilities: [chat, streaming, tools, vision], deprecated: false }
+      - { id: anthropic.claude-sonnet-4-6-v1:0, context_window: 200000, capabilities: [chat, streaming, tools, vision], deprecated: false }
+      - { id: anthropic.claude-haiku-4-5-20251001-v1:0, context_window: 200000, capabilities: [chat, streaming, tools, vision], deprecated: false }
+      - { id: anthropic.claude-3-5-sonnet-20241022-v2:0, context_window: 200000, capabilities: [chat, streaming, tools, vision], deprecated: false }
+      - { id: anthropic.claude-3-5-haiku-20241022-v1:0, context_window: 200000, capabilities: [chat, streaming, tools], deprecated: false }
+      - { id: amazon.titan-text-premier-v1:0, context_window: 32000, capabilities: [chat], deprecated: false }
+      - { id: amazon.nova-pro-v1:0, context_window: 300000, capabilities: [chat, streaming, tools, vision], deprecated: false }
+      - { id: amazon.nova-lite-v1:0, context_window: 300000, capabilities: [chat, streaming, tools, vision], deprecated: false }
+      - { id: amazon.nova-micro-v1:0, context_window: 128000, capabilities: [chat, streaming, tools], deprecated: false }
+      - { id: meta.llama3-3-70b-instruct-v1:0, context_window: 128000, capabilities: [chat, streaming, tools], deprecated: false }
+      - { id: meta.llama3-2-90b-instruct-v1:0, context_window: 128000, capabilities: [chat, streaming, tools], deprecated: false }
+      - { id: mistral.mistral-large-2402-v1:0, context_window: 32000, capabilities: [chat, streaming, tools], deprecated: false }
+      # Embedding models
+      - id: amazon.titan-embed-text-v1
+        context_window: 8192
+        capabilities: [embedding]
+        deprecated: false
+      - id: amazon.titan-embed-text-v2:0
+        context_window: 8192
+        capabilities: [embedding]
+        deprecated: false
+      - id: cohere.embed-english-v3
+        context_window: 512
+        capabilities: [embedding]
+        deprecated: false
+      - id: cohere.embed-multilingual-v3
+        context_window: 512
+        capabilities: [embedding]
+        deprecated: false
   - type: google
     update_strategy: api
     models:
-      - { id: gemini-2.0-flash, context_window: 1048576, deprecated: false }
-      - { id: gemini-2.0-flash-lite, context_window: 1048576, deprecated: false }
-      - { id: gemini-1.5-pro, context_window: 2097152, deprecated: false }
-      - { id: gemini-1.5-flash, context_window: 1048576, deprecated: false }
-      - { id: gemini-1.5-flash-8b, context_window: 1048576, deprecated: false }
+      - { id: gemini-2.0-flash, context_window: 1048576, capabilities: [chat, streaming, tools, vision], deprecated: false }
+      - { id: gemini-2.0-flash-lite, context_window: 1048576, capabilities: [chat, streaming, tools, vision], deprecated: false }
+      - { id: gemini-1.5-pro, context_window: 2097152, capabilities: [chat, streaming, tools, vision], deprecated: false }
+      - { id: gemini-1.5-flash, context_window: 1048576, capabilities: [chat, streaming, tools, vision], deprecated: false }
+      - { id: gemini-1.5-flash-8b, context_window: 1048576, capabilities: [chat, streaming, tools], deprecated: false }
   - type: mistral
     update_strategy: api
     models:
-      - { id: mistral-large-latest, context_window: 131000, deprecated: false }
-      - { id: mistral-small-latest, context_window: 131000, deprecated: false }
-      - { id: codestral-latest, context_window: 262000, deprecated: false }
-      - { id: open-mistral-nemo, context_window: 131000, deprecated: false }
+      - { id: mistral-large-latest, context_window: 131000, capabilities: [chat, streaming, tools], deprecated: false }
+      - { id: mistral-small-latest, context_window: 131000, capabilities: [chat, streaming, tools], deprecated: false }
+      - { id: codestral-latest, context_window: 262000, capabilities: [chat, streaming], deprecated: false }
+      - { id: open-mistral-nemo, context_window: 131000, capabilities: [chat, streaming, tools], deprecated: false }
   - type: cohere
     update_strategy: api
     models:
-      - { id: command-r-plus-08-2024, context_window: 128000, deprecated: false }
-      - { id: command-r-08-2024, context_window: 128000, deprecated: false }
-      - { id: command-a-03-2025, context_window: 256000, deprecated: false }
+      - { id: command-r-plus-08-2024, context_window: 128000, capabilities: [chat, streaming, tools], deprecated: false }
+      - { id: command-r-08-2024, context_window: 128000, capabilities: [chat, streaming, tools], deprecated: false }
+      - { id: command-a-03-2025, context_window: 256000, capabilities: [chat, streaming, tools], deprecated: false }
+      # Embedding models
+      - id: embed-english-v3.0
+        context_window: 512
+        capabilities: [embedding]
+        deprecated: false
+      - id: embed-multilingual-v3.0
+        context_window: 512
+        capabilities: [embedding]
+        deprecated: false
   - type: cloudflare
     update_strategy: api
     models:
-      - { id: "@cf/meta/llama-3.3-70b-instruct-fp8-fast", context_window: 128000, deprecated: false }
-      - { id: "@cf/meta/llama-3.1-70b-instruct", context_window: 128000, deprecated: false }
-      - { id: "@cf/google/gemma-7b-it", context_window: 8192, deprecated: false }
+      - { id: "@cf/meta/llama-3.3-70b-instruct-fp8-fast", context_window: 128000, capabilities: [chat, streaming], deprecated: false }
+      - { id: "@cf/meta/llama-3.1-70b-instruct", context_window: 128000, capabilities: [chat, streaming], deprecated: false }
+      - { id: "@cf/google/gemma-7b-it", context_window: 8192, capabilities: [chat], deprecated: false }
   - type: huggingface
     update_strategy: api
     models:
-      - { id: "meta-llama/Meta-Llama-3-8B-Instruct", context_window: 8192, deprecated: false }
-      - { id: "mistralai/Mistral-7B-Instruct-v0.3", context_window: 32768, deprecated: false }
+      - { id: "meta-llama/Meta-Llama-3-8B-Instruct", context_window: 8192, capabilities: [chat, streaming], deprecated: false }
+      - { id: "mistralai/Mistral-7B-Instruct-v0.3", context_window: 32768, capabilities: [chat, streaming], deprecated: false }
   - type: ollama
     update_strategy: dynamic
     models: []
   - type: llamafile
     update_strategy: dynamic
     models: []
+  # Embedding-only providers (E11 BYO-embedder, ADR-0059).
+  - type: voyage
+    update_strategy: manual
+    models:
+      - id: voyage-3
+        context_window: 32000
+        capabilities: [embedding]
+        deprecated: false
+      - id: voyage-3-lite
+        context_window: 32000
+        capabilities: [embedding]
+        deprecated: false
+      - id: voyage-large-2
+        context_window: 16000
+        capabilities: [embedding]
+        deprecated: false
+  # openai-compatible: self-hosted OpenAI-compatible embedder (e.g. TEI in OpenAI mode).
+  # Models are operator-defined; no static catalogue.
+  - type: openai-compatible
+    update_strategy: dynamic
+    models: []
+  # tei: HuggingFace Text-Embeddings-Inference native /embed endpoint.
+  # Models are operator-defined; no static catalogue. Common models:
+  - type: tei
+    update_strategy: dynamic
+    models:
+      - id: all-MiniLM-L6-v2
+        context_window: 512
+        capabilities: [embedding]
+        deprecated: false
+      - id: all-MiniLM-L12-v2
+        context_window: 512
+        capabilities: [embedding]
+        deprecated: false
