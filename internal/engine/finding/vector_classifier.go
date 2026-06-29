@@ -15,8 +15,9 @@ import (
 )
 
 // VectorClassifier implements the SDK CategoryClassifier interface using vector embeddings
-// for semantic category matching. It uses the daemon's NativeEmbedder (all-MiniLM-L6-v2)
-// for generating embeddings and a VectorStore for similarity search.
+// for semantic category matching. It uses the tenant's resolved BYO embedder
+// (embedder.Embedder, ADR-0059) for generating embeddings and a VectorStore for
+// similarity search.
 //
 // The classifier embeds category names and descriptions as "category: description" strings,
 // searches for similar existing categories, and either returns a match (if similarity >= threshold)

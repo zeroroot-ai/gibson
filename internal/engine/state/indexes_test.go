@@ -422,9 +422,9 @@ func TestIndexManager_EnsureAllIndexes(t *testing.T) {
 }
 
 func TestAllIndexDefinitions(t *testing.T) {
-	t.Run("returns all 8 index definitions", func(t *testing.T) {
+	t.Run("returns the 7 cluster-wide index definitions", func(t *testing.T) {
 		indexes := AllIndexDefinitions()
-		require.Len(t, indexes, 8)
+		require.Len(t, indexes, 7)
 
 		// Verify each index is present
 		indexNames := make(map[string]bool)
@@ -439,7 +439,13 @@ func TestAllIndexDefinitions(t *testing.T) {
 		assert.True(t, indexNames["gibson:idx:credentials"])
 		assert.True(t, indexNames["gibson:idx:sessions"])
 		assert.True(t, indexNames["gibson:idx:targets"])
-		assert.True(t, indexNames["gibson:idx:vectors"])
+
+		// The vector index is NOT created eagerly cluster-wide: its dimension is
+		// the tenant's resolved BYO embedding model dimension, created lazily by
+		// the re-embed path (reembed.RunForTenant) when a tenant configures an
+		// embedding provider (ADR-0059 BYO-embedder, gibson#1011).
+		assert.False(t, indexNames["gibson:idx:vectors"],
+			"vector index must not be in the cluster-wide eager set; it is sized per-tenant lazily")
 	})
 }
 
@@ -735,23 +741,30 @@ func TestVectorIndex(t *testing.T) {
 		assert.Equal(t, 1536, embeddingField.VectorOpts.Dim)
 	})
 
-	t.Run("AllIndexDefinitions derives vector dim from default embedding model", func(t *testing.T) {
-		var embeddingField *FieldDefinition
+	t.Run("AllIndexDefinitions does not eagerly include the per-tenant vector index", func(t *testing.T) {
+		// The vector index dimension depends on the tenant's resolved BYO
+		// embedding model, unknown cluster-wide at startup, so AllIndexDefinitions
+		// must not include a fixed-dimension vector index. It is created lazily at
+		// the resolved dimension by reembed.RunForTenant (ADR-0059, gibson#1011).
 		for _, idx := range AllIndexDefinitions() {
-			if idx.Name != "gibson:idx:vectors" {
-				continue
-			}
-			for i := range idx.Schema {
-				if idx.Schema[i].Alias == "embedding" {
-					embeddingField = &idx.Schema[i]
-					break
-				}
+			assert.NotEqual(t, "gibson:idx:vectors", idx.Name,
+				"vector index must be created lazily per tenant, not eagerly cluster-wide")
+		}
+	})
+
+	t.Run("VectorIndex sizes the embedding field from the supplied model dimension", func(t *testing.T) {
+		// The per-tenant path passes the resolved model dimension into VectorIndex.
+		idx := VectorIndex(1024)
+		var embeddingField *FieldDefinition
+		for i := range idx.Schema {
+			if idx.Schema[i].Alias == "embedding" {
+				embeddingField = &idx.Schema[i]
+				break
 			}
 		}
 		require.NotNil(t, embeddingField, "vector index embedding field not found")
 		require.NotNil(t, embeddingField.VectorOpts)
-		// Default embedding model (all-MiniLM-L6-v2) must still resolve to 384.
-		assert.Equal(t, 384, embeddingField.VectorOpts.Dim)
+		assert.Equal(t, 1024, embeddingField.VectorOpts.Dim)
 	})
 }
 

@@ -13,14 +13,16 @@ import "strings"
 // derived here. The provider-backed embedder factory (gibson#808) extends this
 // table — it does not introduce a second mapping.
 
-// DefaultEmbeddingModel is the model the bundled/default embedder reports. It
-// resolves to 384 through DimensionForModel, preserving the historical
-// all-MiniLM-L6-v2 behaviour without hardcoding the number.
+// DefaultEmbeddingModel names a known model from the dimension table used as the
+// test-fixture default (e.g. by MockEmbedder). gibson ships NO bundled/default
+// embedder — embeddings are bring-your-own per tenant (ADR-0059), so this is not
+// a live default; it merely gives the test fixtures a real model→dimension entry
+// to derive from rather than hardcoding a number.
 const DefaultEmbeddingModel = "all-MiniLM-L6-v2"
 
-// DefaultEmbeddingDimension is the dimension of the default embedding model.
-// It is derived from DefaultEmbeddingModel, not written as a literal, so the
-// model table stays the only place a dimension is declared.
+// DefaultEmbeddingDimension is the dimension of DefaultEmbeddingModel, used by
+// the test-fixture mock. It is derived from the model table, not written as a
+// literal, so the table stays the only place a dimension is declared.
 var DefaultEmbeddingDimension = mustDimensionForModel(DefaultEmbeddingModel)
 
 // modelDimensions maps a normalised embedding-model name to its output
@@ -32,7 +34,8 @@ var DefaultEmbeddingDimension = mustDimensionForModel(DefaultEmbeddingModel)
 // time, or extends this literal table directly — either way this remains the
 // single source of truth.
 var modelDimensions = map[string]int{
-	// Bundled / default sentence-transformer (all-MiniLM-L6-v2).
+	// Sentence-transformers (e.g. served via a self-hosted TEI / OpenAI-compatible
+	// endpoint). Also the test-fixture default (DefaultEmbeddingModel).
 	"all-minilm-l6-v2":  384,
 	"all-minilm-l12-v2": 384,
 

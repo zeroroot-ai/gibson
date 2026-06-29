@@ -603,10 +603,10 @@ func (d *daemonImpl) buildGRPCServer(ctx context.Context) (*grpcSubsystem, error
 		// classification resolve their embedder from the tenant's configured
 		// embedding provider via embedder.NewFromProvider, sized to that model's
 		// vector dimension. A tenant with no embedding provider hits the
-		// onboarding gate. allowPrivate is false (the secure default); operators
-		// running an in-cluster/air-gapped embedder endpoint opt in via the SSRF
-		// allow-list when that knob lands.
-		embedderResolver := tenantembedder.NewResolver(providerStore, false)
+		// onboarding gate. allowPrivate honours security.allow_private_llm_endpoints:
+		// off by default (the secure SSRF default); operators running an
+		// in-cluster/air-gapped embedder endpoint opt in via that knob.
+		embedderResolver := tenantembedder.NewResolver(providerStore, d.config.Security.AllowPrivateLLMEndpoints)
 		daemonSvc.WithEmbedderResolver(embedderResolver)
 		d.embedderResolver = embedderResolver
 		d.logger.Info(ctx, "per-tenant embedder resolver wired (BYO-embedder; vector features gated until an embedding provider is configured)")

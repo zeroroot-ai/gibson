@@ -19,15 +19,16 @@ type MockEmbedder struct {
 	mu           sync.RWMutex
 }
 
-// mockModel is the embedding model the mock reports. Its dimension is derived
-// from the model→dimension source of truth (DefaultEmbeddingModel resolves to
-// 384, matching all-MiniLM-L6-v2) rather than hardcoded.
+// mockModel is the embedding model the test-fixture mock reports. gibson ships
+// no bundled/default embedder (embeddings are BYO per tenant, ADR-0059); the
+// mock simply picks a known model from the dimension table so its dimension is
+// derived from the model→dimension source of truth rather than hardcoded.
 const mockModel = DefaultEmbeddingModel
 
-// NewMockEmbedder creates a new mock embedder whose dimension is derived from
-// the default embedding model (all-MiniLM-L6-v2 → 384). The dimension is not
-// hardcoded: it flows from DimensionForModel so the mock tracks the same source
-// of truth the vector index uses.
+// NewMockEmbedder creates a new mock embedder whose dimension is derived from a
+// known model in the dimension table (DefaultEmbeddingDimension), not hardcoded:
+// it flows from DimensionForModel so the mock tracks the same source of truth
+// the vector index uses. For tests/fixtures only — never a live fallback.
 func NewMockEmbedder() *MockEmbedder {
 	return &MockEmbedder{
 		dimensions:   DefaultEmbeddingDimension,
