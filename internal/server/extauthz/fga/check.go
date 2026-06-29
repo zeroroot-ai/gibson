@@ -324,7 +324,9 @@ func (c *CachedChecker) CheckPlatformOperator(ctx context.Context, subject strin
 //   - "system_tenant"          — "<object_type>:_system"  (object_type
 //     is typically "system_tenant" or "component")
 //   - "from_field('<name>')"   — "<object_type>:" + req.<name>
-//   - "tenant_and_field('<name>')" — "<object_type>:" + tenant + ":" + req.<name>
+//   - "tenant_and_field('<name>')" — "<object_type>:" + tenant + "/" + req.<name>
+//     (tenant and field are joined with "/", never ":" — OpenFGA rejects a
+//     colon inside an object id; see gibson#1024 and authz.TenantQualifiedSep)
 //
 // Spec: unified-identity-and-authorization Component B (object_deriver
 // grammar) and Requirement 4.4.
