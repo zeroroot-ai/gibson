@@ -1489,45 +1489,6 @@ func (s *HarnessCallbackService) protoToToolDefs(protoTools []*harnesspb.ToolDef
 	return tools
 }
 
-func (s *HarnessCallbackService) graphNodeToProto(node sdkgraphrag.GraphNode) *harnesspb.GraphNode {
-	typedMapProps := mapToTypedMap(node.Properties)
-	return &harnesspb.GraphNode{
-		Id:         node.ID,
-		Type:       node.Type,
-		Properties: typedMapProps.Entries,
-		Content:    node.Content,
-		MissionId:  node.MissionID,
-		AgentName:  node.AgentName,
-		CreatedAt:  node.CreatedAt.Unix(),
-		UpdatedAt:  node.UpdatedAt.Unix(),
-	}
-}
-
-func (s *HarnessCallbackService) protoToGraphNode(protoNode *harnesspb.GraphNode) sdkgraphrag.GraphNode {
-	props := typedValueMapToMap(protoNode.Properties)
-
-	return sdkgraphrag.GraphNode{
-		ID:         protoNode.Id,
-		Type:       protoNode.Type,
-		Properties: props,
-		Content:    protoNode.Content,
-		MissionID:  protoNode.MissionId,
-		AgentName:  protoNode.AgentName,
-	}
-}
-
-func (s *HarnessCallbackService) protoToRelationship(protoRel *harnesspb.Relationship) sdkgraphrag.Relationship {
-	props := typedValueMapToMap(protoRel.Properties)
-
-	return sdkgraphrag.Relationship{
-		FromID:        protoRel.FromId,
-		ToID:          protoRel.ToId,
-		Type:          protoRel.Type,
-		Properties:    props,
-		Bidirectional: protoRel.Bidirectional,
-	}
-}
-
 // protoToSpanData converts a proto Span to a proxySpanData container.
 // Since sdktrace.ReadOnlySpan has an unexported method, we can't implement it directly.
 // Instead, we extract the data and export it directly via the OTLP exporter.
@@ -1813,28 +1774,6 @@ func (s *HarnessCallbackService) GetCredential(ctx context.Context, req *harness
 // ============================================================================
 // Helper Methods for Taxonomy Engine Integration
 // ============================================================================
-
-// extractAgentRunID extracts the agent run ID from context.
-// Tries multiple sources: trace span ID, mission ID, task ID, or generates a fallback.
-func (s *HarnessCallbackService) extractAgentRunID(ctx context.Context, contextInfo *harnesspb.ContextInfo) string {
-	// Priority 1: Use trace span ID if available (most specific)
-	if span := trace.SpanFromContext(ctx); span.SpanContext().IsValid() {
-		return span.SpanContext().SpanID().String()
-	}
-
-	// Priority 2: Use task ID if available (unique per execution)
-	if contextInfo != nil && contextInfo.TaskId != "" {
-		return contextInfo.TaskId
-	}
-
-	// Priority 3: Use mission ID (less specific but still useful)
-	if contextInfo != nil && contextInfo.MissionId != "" {
-		return contextInfo.MissionId
-	}
-
-	// Fallback: Generate a unique ID
-	return uuid.New().String()
-}
 
 // publishEvent publishes an event to the event bus if configured.
 // This is a helper method that safely publishes events without blocking
@@ -2418,24 +2357,6 @@ func protoEvidenceTypeToString(evidenceType typespb.EvidenceType) string {
 	}
 }
 
-// stringToProtoEvidenceType converts a string to a proto EvidenceType.
-func stringToProtoEvidenceType(typeStr string) typespb.EvidenceType {
-	switch typeStr {
-	case "request":
-		return typespb.EvidenceType_EVIDENCE_TYPE_REQUEST
-	case "response":
-		return typespb.EvidenceType_EVIDENCE_TYPE_RESPONSE
-	case "screenshot":
-		return typespb.EvidenceType_EVIDENCE_TYPE_SCREENSHOT
-	case "log":
-		return typespb.EvidenceType_EVIDENCE_TYPE_LOG
-	case "code":
-		return typespb.EvidenceType_EVIDENCE_TYPE_CODE
-	default:
-		return typespb.EvidenceType_EVIDENCE_TYPE_OTHER
-	}
-}
-
 // protoFindingToFinding converts a proto Finding to an internal agent.Finding.
 func protoFindingToFinding(pf *typespb.Finding) agent.Finding {
 	if pf == nil {
@@ -2505,75 +2426,6 @@ func protoFindingToFinding(pf *typespb.Finding) agent.Finding {
 	return finding
 }
 
-// findingToProtoFinding converts an internal agent.Finding to a proto Finding.
-func findingToProtoFinding(f agent.Finding) *typespb.Finding {
-	finding := &typespb.Finding{
-		Id:          f.ID.String(),
-		Title:       f.Title,
-		Description: f.Description,
-		Severity:    agentSeverityToProtoSeverity(f.Severity),
-		Confidence:  f.Confidence,
-		Category:    f.Category,
-		CreatedAt:   f.CreatedAt.UnixMilli(),
-	}
-
-	// Convert CVSS score if present
-	if f.CVSS != nil {
-		finding.CvssScore = f.CVSS.Score
-	}
-
-	if f.TargetID != nil {
-		finding.TargetId = f.TargetID.String()
-	}
-
-	// Convert Evidence
-	if len(f.Evidence) > 0 {
-		finding.Evidence = make([]*typespb.Evidence, len(f.Evidence))
-		for i, ev := range f.Evidence {
-			// Extract content from Data map if present
-			content := ""
-			if contentVal, ok := ev.Data["content"]; ok {
-				if contentStr, ok := contentVal.(string); ok {
-					content = contentStr
-				}
-			}
-
-			// Convert metadata
-			metadata := make(map[string]string)
-			for k, v := range ev.Data {
-				if k != "content" { // Skip content field
-					if strVal, ok := v.(string); ok {
-						metadata[k] = strVal
-					} else {
-						metadata[k] = fmt.Sprintf("%v", v)
-					}
-				}
-			}
-
-			finding.Evidence[i] = &typespb.Evidence{
-				Type:     stringToProtoEvidenceType(ev.Type),
-				Title:    ev.Description,
-				Content:  content,
-				Metadata: metadata,
-			}
-		}
-	}
-
-	return finding
-}
-
-// mapToTypedMap converts map[string]any to *commonpb.TypedMap.
-func mapToTypedMap(m map[string]any) *commonpb.TypedMap {
-	if m == nil {
-		return nil
-	}
-	entries := make(map[string]*commonpb.TypedValue)
-	for k, v := range m {
-		entries[k] = anyToTypedValue(v)
-	}
-	return &commonpb.TypedMap{Entries: entries}
-}
-
 // protoSeverityToAgentSeverity converts proto FindingSeverity to agent.FindingSeverity.
 func protoSeverityToAgentSeverity(severity typespb.FindingSeverity) agent.FindingSeverity {
 	switch severity {
@@ -2589,24 +2441,6 @@ func protoSeverityToAgentSeverity(severity typespb.FindingSeverity) agent.Findin
 		return agent.SeverityInfo
 	default:
 		return agent.SeverityInfo
-	}
-}
-
-// agentSeverityToProtoSeverity converts agent.FindingSeverity to proto FindingSeverity.
-func agentSeverityToProtoSeverity(severity agent.FindingSeverity) typespb.FindingSeverity {
-	switch severity {
-	case agent.SeverityCritical:
-		return typespb.FindingSeverity_FINDING_SEVERITY_CRITICAL
-	case agent.SeverityHigh:
-		return typespb.FindingSeverity_FINDING_SEVERITY_HIGH
-	case agent.SeverityMedium:
-		return typespb.FindingSeverity_FINDING_SEVERITY_MEDIUM
-	case agent.SeverityLow:
-		return typespb.FindingSeverity_FINDING_SEVERITY_LOW
-	case agent.SeverityInfo:
-		return typespb.FindingSeverity_FINDING_SEVERITY_INFO
-	default:
-		return typespb.FindingSeverity_FINDING_SEVERITY_INFO
 	}
 }
 
@@ -2629,95 +2463,6 @@ func (s *HarnessCallbackService) Observe(ctx context.Context, req *harnesspb.Obs
 		}, nil
 	}
 	return &harnesspb.ObserveResponse{}, nil
-}
-
-// graphragpbNodeToSDKNode converts a graphragpb.GraphNode to an SDK sdkgraphrag.GraphNode.
-// It also injects parent relationship information from proto fields into underscore-prefixed
-// properties (_parent_id, _parent_type, _parent_relationship) for use by the RelationshipResolver.
-func (s *HarnessCallbackService) graphragpbNodeToSDKNode(pn *graphragpb.GraphNode) sdkgraphrag.GraphNode {
-	if pn == nil {
-		return sdkgraphrag.GraphNode{}
-	}
-
-	// Type is now a string field
-	nodeType := pn.Type
-
-	// Convert Value properties to map[string]any
-	props := make(map[string]any, len(pn.Properties))
-	for k, v := range pn.Properties {
-		props[k] = s.graphragpbValueToAny(v)
-	}
-
-	// Inject parent relationship info from proto fields as underscore-prefixed properties.
-	// These are used by the RelationshipResolver to create parent relationships.
-	// The underscore prefix indicates these are internal transport properties that
-	// should be stripped before Neo4j storage.
-	if parentID := pn.GetParentId(); parentID != "" {
-		props["_parent_id"] = parentID
-	}
-	if parentType := pn.GetParentType(); parentType != "" {
-		// Normalize to lowercase for consistency with node types
-		props["_parent_type"] = strings.ToLower(parentType)
-	}
-	if parentRel := pn.GetParentRelationship(); parentRel != "" {
-		props["_parent_relationship"] = parentRel
-	}
-
-	return sdkgraphrag.GraphNode{
-		Type:       nodeType,
-		Content:    pn.Content,
-		Properties: props,
-	}
-}
-
-// graphragpbValueToAny converts a graphragpb.Value to any.
-func (s *HarnessCallbackService) graphragpbValueToAny(v *graphragpb.Value) any {
-	if v == nil {
-		return nil
-	}
-	switch k := v.Kind.(type) {
-	case *graphragpb.Value_StringValue:
-		return k.StringValue
-	case *graphragpb.Value_IntValue:
-		return k.IntValue
-	case *graphragpb.Value_DoubleValue:
-		return k.DoubleValue
-	case *graphragpb.Value_BoolValue:
-		return k.BoolValue
-	case *graphragpb.Value_BytesValue:
-		return k.BytesValue
-	case *graphragpb.Value_TimestampValue:
-		return k.TimestampValue
-	default:
-		return nil
-	}
-}
-
-// anyToGraphragpbValue converts any to a graphragpb.Value.
-func (s *HarnessCallbackService) anyToGraphragpbValue(v any) *graphragpb.Value {
-	if v == nil {
-		return nil
-	}
-	switch val := v.(type) {
-	case string:
-		return &graphragpb.Value{Kind: &graphragpb.Value_StringValue{StringValue: val}}
-	case int:
-		return &graphragpb.Value{Kind: &graphragpb.Value_IntValue{IntValue: int64(val)}}
-	case int32:
-		return &graphragpb.Value{Kind: &graphragpb.Value_IntValue{IntValue: int64(val)}}
-	case int64:
-		return &graphragpb.Value{Kind: &graphragpb.Value_IntValue{IntValue: val}}
-	case float32:
-		return &graphragpb.Value{Kind: &graphragpb.Value_DoubleValue{DoubleValue: float64(val)}}
-	case float64:
-		return &graphragpb.Value{Kind: &graphragpb.Value_DoubleValue{DoubleValue: val}}
-	case bool:
-		return &graphragpb.Value{Kind: &graphragpb.Value_BoolValue{BoolValue: val}}
-	case []byte:
-		return &graphragpb.Value{Kind: &graphragpb.Value_BytesValue{BytesValue: val}}
-	default:
-		return &graphragpb.Value{Kind: &graphragpb.Value_StringValue{StringValue: fmt.Sprintf("%v", val)}}
-	}
 }
 
 // ============================================================================

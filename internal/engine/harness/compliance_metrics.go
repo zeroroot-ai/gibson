@@ -1,8 +1,6 @@
 package harness
 
 import (
-	"sync"
-
 	"github.com/prometheus/client_golang/prometheus"
 )
 
@@ -164,15 +162,6 @@ func (m *ComplianceMetrics) Register(r prometheus.Registerer) error {
 func (m *ComplianceMetrics) MustRegister() {
 	prometheus.MustRegister(m.collectors()...)
 }
-
-// Global singleton for the compliance metrics, initialised on first use.
-// The middleware should accept a *ComplianceMetrics via constructor injection
-// in production; tests construct their own to avoid collector re-registration
-// panics.
-var (
-	globalComplianceMetrics     *ComplianceMetrics
-	globalComplianceMetricsOnce sync.Once
-)
 
 // --- Convenience recording helpers (thin wrappers that document intent) ---
 
