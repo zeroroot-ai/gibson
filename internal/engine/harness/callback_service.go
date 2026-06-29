@@ -106,6 +106,12 @@ type HarnessCallbackService struct {
 	// wires it to the per-tenant brain. nil means observation ingest is disabled.
 	observationSink ObservationSink
 
+	// llmCallSink receives completed mission/agent LLM calls observed on the
+	// callback completion path (gibson#1083); the daemon wires it to the
+	// per-tenant World's LlmCall capture (gibson#755/#1078) so a mission-scoped
+	// frame surfaces the mission's LLM activity. nil means capture is disabled.
+	llmCallSink LLMCallSink
+
 	// spanProcessors receives spans exported from remote agents for tracing integration
 	spanProcessors []sdktrace.SpanProcessor
 
@@ -225,6 +231,49 @@ type ObservationSink func(ctx context.Context, req *harnesspb.ObserveRequest) er
 func WithObservationSink(sink ObservationSink) CallbackServiceOption {
 	return func(s *HarnessCallbackService) {
 		s.observationSink = sink
+	}
+}
+
+// LLMCallRecord captures a completed mission/agent LLM call observed on the
+// callback completion path (gibson#1083). It mirrors the daemon's
+// api.LLMCallRecord but lives here so the harness package stays decoupled from
+// the brain/api packages — the daemon supplies a closure that maps it onto the
+// per-tenant World's LlmCall capture sink (gibson#755/#1078).
+type LLMCallRecord struct {
+	// CallID is a fresh per-call identity giving the call a stable World/graph node.
+	CallID string
+	// MissionID attributes the call to its mission's frame (gibson#1075/#1078);
+	// it is the mission_id carried on the callback request context.
+	MissionID string
+	// RunID is the mission run (or agent run) the call ran under, for provenance.
+	RunID string
+	// Model is the resolved model that produced the completion.
+	Model            string
+	PromptTokens     int
+	CompletionTokens int
+	// Messages + Completion are the optional transcript, surfaced only behind
+	// GetLlmCall; the folded frame metadata uses model + token counts.
+	Messages   []LLMCallMessage
+	Completion string
+}
+
+// LLMCallMessage is one prompt message in an LLMCallRecord transcript.
+type LLMCallMessage struct {
+	Role    string
+	Content string
+}
+
+// LLMCallSink consumes a completed LLM call observed on the callback completion
+// path. The daemon wires this to the per-tenant World; tenant is the call's
+// tenant (already validated equal to the mission tenant by getHarness). When
+// unset, callback LLM-call capture is a no-op.
+type LLMCallSink func(ctx context.Context, tenant string, call LLMCallRecord)
+
+// WithLLMCallSink sets the sink the LLM completion RPCs forward completed calls
+// to for World capture (gibson#1083). When unset, capture is disabled.
+func WithLLMCallSink(sink LLMCallSink) CallbackServiceOption {
+	return func(s *HarnessCallbackService) {
+		s.llmCallSink = sink
 	}
 }
 
@@ -441,6 +490,48 @@ func (s *HarnessCallbackService) getHarness(ctx context.Context, contextInfo *ha
 // LLM Operations
 // ============================================================================
 
+// captureLLMCall folds a completed callback LLM completion into the per-tenant
+// World via the wired llmCallSink (gibson#1083), stamped with the mission
+// context already carried on the callback request. This is the mission/agent
+// counterpart to the daemon's ExecuteLLM World capture (gibson#1078): mission
+// agents reach the LLM through this callback path (slot → local provider), never
+// through ExecuteLLM, so without this they never become LlmCallObserved events.
+//
+// Best-effort and metadata-first: a fresh CallID gives each call a stable World
+// identity; mission_id attaches it to the mission frame; model + token counts
+// back the LlmCallView. The tenant is read from the request context, which
+// getHarness has already validated equal to the mission's tenant — so there is
+// no cross-tenant or cross-mission bleed. No double-capture: this path and
+// ExecuteLLM are disjoint (mission vs. dashboard chat), and ingestLLMCall is the
+// sole producer of LlmCallObserved.
+func (s *HarnessCallbackService) captureLLMCall(ctx context.Context, contextInfo *harnesspb.ContextInfo, promptMsgs []llm.Message, resp *llm.CompletionResponse) {
+	if s.llmCallSink == nil || resp == nil || contextInfo == nil {
+		return
+	}
+	tenant := auth.TenantStringFromContext(ctx)
+	if tenant == "" {
+		return
+	}
+	runID := contextInfo.GetMissionRunId()
+	if runID == "" {
+		runID = contextInfo.GetAgentRunId()
+	}
+	msgs := make([]LLMCallMessage, 0, len(promptMsgs))
+	for _, m := range promptMsgs {
+		msgs = append(msgs, LLMCallMessage{Role: string(m.Role), Content: m.Content})
+	}
+	s.llmCallSink(ctx, tenant, LLMCallRecord{
+		CallID:           uuid.NewString(),
+		MissionID:        contextInfo.GetMissionId(),
+		RunID:            runID,
+		Model:            resp.Model,
+		PromptTokens:     resp.Usage.PromptTokens,
+		CompletionTokens: resp.Usage.CompletionTokens,
+		Messages:         msgs,
+		Completion:       resp.Message.Content,
+	})
+}
+
 // LLMComplete implements the LLM completion RPC.
 func (s *HarnessCallbackService) LLMComplete(ctx context.Context, req *harnesspb.LLMCompleteRequest) (*harnesspb.LLMCompleteResponse, error) {
 	harness, err := s.getHarness(ctx, req.Context)
@@ -513,6 +604,9 @@ func (s *HarnessCallbackService) LLMComplete(ctx context.Context, req *harnesspb
 		"parent_span_id":    req.Context.SpanId,
 	})
 
+	// World capture (gibson#1083): fold the call into the mission's frame.
+	s.captureLLMCall(ctx, req.Context, messages, resp)
+
 	// Convert response
 	return &harnesspb.LLMCompleteResponse{
 		Content:      resp.Message.Content,
@@ -548,6 +642,9 @@ func (s *HarnessCallbackService) LLMCompleteWithTools(ctx context.Context, req *
 			},
 		}, nil
 	}
+
+	// World capture (gibson#1083): fold the call into the mission's frame.
+	s.captureLLMCall(ctx, req.Context, messages, resp)
 
 	// Convert response
 	return &harnesspb.LLMCompleteWithToolsResponse{

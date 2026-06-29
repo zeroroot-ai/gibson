@@ -489,6 +489,18 @@ func (m *CallbackManager) SetObservationSink(sink ObservationSink) {
 	}
 }
 
+// SetLLMCallSink sets the LLM-call sink on the callback service, wiring the LLM
+// completion RPCs to the per-tenant World's LlmCall capture (gibson#1083). Call
+// after NewCallbackManager, before Start(). Thread-safe.
+func (m *CallbackManager) SetLLMCallSink(sink LLMCallSink) {
+	if m.server != nil && m.server.service != nil {
+		m.server.service.mu.Lock()
+		defer m.server.service.mu.Unlock()
+		m.server.service.llmCallSink = sink
+		m.logger.Debug("set llm-call sink on callback service")
+	}
+}
+
 // SetGraphLoader sets the GraphLoader on the callback service.
 // This enables tool outputs containing DiscoveryResult to be persisted
 // to the Neo4j knowledge graph automatically.

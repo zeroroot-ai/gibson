@@ -1167,6 +1167,33 @@ func (d *daemonImpl) Start(ctx context.Context) error {
 	if d.brainRegistry != nil {
 		d.callback.SetObservationSink(ingestObservation(d.brainRegistry, d.registryTenant))
 		d.logger.Info(ctx, "wired callback Observe RPC to the ECS brain")
+
+		// Wire the LLM completion RPCs to the per-tenant World's LlmCall capture
+		// (gibson#1083): mission/agent LLM calls reach the model through this
+		// callback path (slot → local provider), never through ExecuteLLM, so
+		// without this they never become LlmCallObserved events and a
+		// mission-scoped frame's LLM panel stays empty. Reuses the #1078 ingest
+		// sink (the sole LlmCallObserved producer) — no parallel capture, no
+		// double-capture. The harness record carries the mission context already
+		// on the callback request; we map it onto the daemon's api record.
+		llmSink := ingestLLMCall(d.brainRegistry)
+		d.callback.SetLLMCallSink(func(ctx context.Context, tenant string, call harness.LLMCallRecord) {
+			msgs := make([]api.LLMMessage, 0, len(call.Messages))
+			for _, m := range call.Messages {
+				msgs = append(msgs, api.LLMMessage{Role: m.Role, Content: m.Content})
+			}
+			llmSink(ctx, tenant, api.LLMCallRecord{
+				CallID:           call.CallID,
+				MissionID:        call.MissionID,
+				RunID:            call.RunID,
+				Model:            call.Model,
+				PromptTokens:     call.PromptTokens,
+				CompletionTokens: call.CompletionTokens,
+				Messages:         msgs,
+				Completion:       call.Completion,
+			})
+		})
+		d.logger.Info(ctx, "wired callback LLM completion RPCs to the ECS brain World")
 	}
 
 	// GraphLoader is no longer wired at startup. Domain node persistence via the
