@@ -250,7 +250,7 @@ func (s *Service) emitAuditWithReason(
 		Action:         action,
 		Effect:         effect,
 		ResourceType:   "secret",
-		ResourceURI:    fmt.Sprintf("secret:tenant-%s:%s", tenant, name),
+		ResourceURI:    fmt.Sprintf("secret:tenant-%s/%s", tenant, name),
 		Decision:       decision,
 		DecisionReason: decisionReason,
 		Success:        success,

@@ -10,6 +10,7 @@ import (
 	"github.com/prometheus/client_golang/prometheus"
 	"github.com/prometheus/client_golang/prometheus/promauto"
 
+	"github.com/zeroroot-ai/gibson/internal/platform/authz"
 	"github.com/zeroroot-ai/gibson/internal/server/extauthz/headers"
 )
 
@@ -380,12 +381,22 @@ func resolveObject(entry Entry, identity headers.Identity, meta map[string]strin
 		field := strings.Trim(strings.TrimPrefix(strings.TrimPrefix(entry.ObjectDeriver, "tenant_and_field"), "from_field"), "()'\"")
 		if v := meta[field]; v != "" {
 			if strings.HasPrefix(entry.ObjectDeriver, "tenant_and_field") {
-				// Join tenant and field with "/" — NOT ":". OpenFGA rejects an
-				// object id that contains a colon ("invalid 'object' field
-				// format") on both Write and Check, so "type:tenant:field" is
-				// invalid. Must match authz.PluginObject and the daemon/operator
-				// writers (authz.TenantQualifiedSep). See gibson#1024.
-				return entry.ObjectType + ":" + tenant + "/" + v, nil
+				// Join tenant and field using authz.TenantQualifiedSep — NOT ":".
+				// OpenFGA rejects an object id that contains a colon ("invalid
+				// 'object' field format") on both Write and Check, so
+				// "type:tenant:field" is invalid. TenantQualifiedSep is the
+				// single canonical separator shared by all writers and derivers
+				// (gibson#1024). Using the canonical helpers here ensures deriver
+				// and writers always agree.
+				//
+				// Secret objects use the "tenant-<slug>" convention (the "tenant-"
+				// prefix is a fixed part of the object id, matching
+				// authz.SecretObject and the daemon/operator writers — gibson#1035).
+				// Plugin objects use the bare slug directly (authz.PluginObject).
+				if entry.ObjectType == "secret" {
+					return authz.SecretObjectFromDeriver(tenant, v), nil
+				}
+				return entry.ObjectType + ":" + tenant + authz.TenantQualifiedSep + v, nil
 			}
 			return entry.ObjectType + ":" + v, nil
 		}

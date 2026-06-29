@@ -12,6 +12,7 @@ import (
 	"google.golang.org/grpc/status"
 
 	"github.com/zeroroot-ai/gibson/internal/platform/audit"
+	"github.com/zeroroot-ai/gibson/internal/platform/authz"
 	"github.com/zeroroot-ai/gibson/internal/platform/secrets"
 
 	sdksecrets "github.com/zeroroot-ai/gibson/internal/infra/secrets"
@@ -425,12 +426,23 @@ func TestParseCategory(t *testing.T) {
 }
 
 func TestUriToRef(t *testing.T) {
+	// The canonical secret object format is "secret:tenant-<id>/<ref>" —
+	// tenant-id and ref joined with "/" (NOT ":"). See gibson#1024 and
+	// authz.TenantQualifiedSep: OpenFGA rejects a colon inside an object id.
+	//
+	// uriToRef also accepts the legacy colon form for backward compat with
+	// pre-gibson#1024 audit log entries in the database.
 	tests := []struct {
 		uri  string
 		want string
 	}{
+		// Canonical slash-separated format (gibson#1024 / authz.TenantQualifiedSep).
+		{"secret:tenant-acme/cred:db", "cred:db"},
+		{"secret:tenant-acme/provider_config:openai:default", "provider_config:openai:default"},
+		// Legacy colon form (pre-gibson#1024) — accepted for audit-log backward compat.
 		{"secret:tenant-acme:cred:db", "cred:db"},
 		{"secret:tenant-acme:provider_config:openai:default", "provider_config:openai:default"},
+		// Non-matching inputs.
 		{"not-a-secret-uri", ""},
 		{"secret:tenant-acme", ""},
 	}
@@ -445,6 +457,53 @@ func TestNewSecretsAdminServer_RequiresService(t *testing.T) {
 	_, err := NewSecretsAdminServer(SecretsAdminConfig{})
 	if err == nil || !strings.Contains(err.Error(), "Service is required") {
 		t.Errorf("want Service required error, got %v", err)
+	}
+}
+
+// TestSecretObjectID_WriterDeriverAgreement asserts that the daemon-side WRITER
+// (plugin_admin.go: fmt.Sprintf("secret:tenant-%s/%s", tenant, ref)) and the
+// ext-authz DERIVER (tenant_and_field — uses authz.TenantQualifiedSep) produce
+// exactly the same FGA object id for the same (tenant, ref) pair.
+//
+// This is the gibson#1035 regression guard: before the fix the deriver joined
+// tenant and field with ":" (the old pre-#1024 form) while the writer used "/",
+// so ext-authz's can_resolve Check never matched the tuple the operator wrote,
+// causing plugin secret resolution to always deny.
+//
+// The test is self-contained in the admin package: both sides are expressed via
+// the shared authz.TenantQualifiedSep constant.
+func TestSecretObjectID_WriterDeriverAgreement(t *testing.T) {
+	const tenant = "acme"
+	const ref = "cred:openai-prod"
+
+	// Writer form: what plugin_admin.go puts in the FGA tuple's Object field.
+	// Uses authz.SecretObject — the canonical helper for all secret writers.
+	writerObj := authz.SecretObject(tenant, ref)
+
+	// Deriver form: what ext-authz's tenant_and_field deriver produces when the
+	// caller provides a secret ref (objectType="secret", tenant=acme, field=ref).
+	// Uses authz.SecretObjectFromDeriver — the ext-authz mirror of SecretObject.
+	// Both helpers must produce exactly the same string (gibson#1035).
+	deriverObj := authz.SecretObjectFromDeriver(tenant, ref)
+
+	if writerObj != deriverObj {
+		t.Fatalf("writer object id %q != deriver object id %q — can_resolve Check will never match the written tuple (gibson#1035)", writerObj, deriverObj)
+	}
+
+	// Assert the tenant-qualifier separator is "/" (not ":").
+	// The fix in gibson#1024 changed "secret:tenant-acme:ref" (3-part colon split,
+	// rejected by OpenFGA v1.8.4) to "secret:tenant-acme/ref" (single-colon type
+	// prefix, slash-delimited id). The ref portion may itself contain colons
+	// (e.g. "cred:openai-prod") — OpenFGA tolerates colons in the id body; what
+	// it rejects is a THIRD colon at the type-id boundary.
+	// We verify the canonical separator "/" appears between "tenant-acme" and ref.
+	if !strings.Contains(writerObj, "tenant-"+tenant+"/") {
+		t.Fatalf("secret object id %q does not use '/' as the tenant separator (should be 'secret:tenant-<slug>/<ref>'; gibson#1024)", writerObj)
+	}
+
+	// uriToRef must recover ref from the writer object (round-trip check).
+	if got := uriToRef(writerObj); got != ref {
+		t.Fatalf("uriToRef(%q) = %q, want %q", writerObj, got, ref)
 	}
 }
 

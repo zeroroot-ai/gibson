@@ -389,7 +389,8 @@ type model
 #   can_delete   — dashboard / admin delete (user direct or via tenant#admin)
 #
 # Tuple shape written by tenant-operator at plugin_principal provisioning:
-#   (plugin_principal:<install_id>, can_resolve, secret:tenant-<tenant_id>:*)
+#   (plugin_principal:<install_id>, can_resolve, secret:tenant-<tenant_id>/*)
+# (tenant-id and ref joined with "/", never ":" — gibson#1024, authz.TenantQualifiedSep)
 #
 # Per spec non-plugin-secret-isolation, the model definition below restricts
 # can_resolve to [plugin_principal] ONLY. user-typed, agent_principal-typed,

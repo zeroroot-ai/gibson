@@ -610,19 +610,30 @@ func toStoredName(name string) string {
 	return name
 }
 
-// uriToRef parses a "secret:tenant-${id}:${ref}" URI and returns the ref
-// portion. Empty string when the URI doesn't match.
+// uriToRef parses a "secret:tenant-${id}/${ref}" URI and returns the ref
+// portion. The canonical separator between tenant-id and ref is "/" (NOT ":"
+// — OpenFGA rejects a colon inside an object id; see gibson#1024 and
+// authz.TenantQualifiedSep).
+//
+// uriToRef also accepts the legacy "secret:tenant-${id}:${ref}" form (colon
+// separator) for backward compatibility with audit log entries written before
+// gibson#1024; newly written FGA objects and audit events use the slash form.
+// Empty string when the URI doesn't match either form.
 func uriToRef(uri string) string {
 	const prefix = "secret:tenant-"
 	if !strings.HasPrefix(uri, prefix) {
 		return ""
 	}
 	rest := uri[len(prefix):]
-	colon := strings.IndexByte(rest, ':')
-	if colon < 0 {
-		return ""
+	// Try the canonical slash separator first (gibson#1024).
+	if slash := strings.IndexByte(rest, '/'); slash >= 0 {
+		return rest[slash+1:]
 	}
-	return rest[colon+1:]
+	// Fall back to legacy colon separator for pre-#1024 audit log data.
+	if colon := strings.IndexByte(rest, ':'); colon >= 0 {
+		return rest[colon+1:]
+	}
+	return ""
 }
 
 // parseAuditMetadata parses the JSONB metadata column into a flat
