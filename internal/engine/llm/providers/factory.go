@@ -64,6 +64,13 @@ func NewProviderWithContext(ctx context.Context, service *secrets.Service, cfg l
 		p, err = NewLlamafileProvider(cfg)
 	case llm.ProviderMistral:
 		p, err = newMistralProviderWithContext(ctx, service, cfg)
+	case llm.ProviderVoyage, llm.ProviderOpenAICompatible, llm.ProviderTEI:
+		// Embedding-only providers (E11 BYO-embedder, ADR-0059): these types are
+		// valid in ProviderConfigInput when CAPABILITY_EMBEDDING is declared, but
+		// they cannot serve chat completions. Use embedder.NewFromProvider instead.
+		return nil, fmt.Errorf("%w",
+			llm.NewInvalidInputError("factory",
+				fmt.Sprintf("provider type %q is embedding-only and cannot be used for chat completions; use the embedder API instead", cfg.Type)))
 	case llm.ProviderCustom:
 		// Custom is a deliberate escape hatch for operators wiring a provider
 		// the daemon doesn't know about. Construction is their responsibility;

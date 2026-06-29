@@ -629,11 +629,15 @@ func TestSupportedProviderTypes(t *testing.T) {
 		seen[p] = true
 	}
 	// Anchor the full enum so adding/removing a provider must update this test.
+	// Embedding-only providers (ProviderVoyage, ProviderOpenAICompatible,
+	// ProviderTEI) are included since they appear in SupportedProviderTypes()
+	// for catalogue + validation purposes (gibson#1012).
 	expected := []ProviderType{
 		ProviderAnthropic, ProviderOpenAI, ProviderGoogle, ProviderOllama,
 		ProviderBedrock, ProviderCloudflare, ProviderCohere,
 		ProviderHuggingFace, ProviderLlamafile,
 		ProviderMistral, ProviderCustom,
+		ProviderVoyage, ProviderOpenAICompatible, ProviderTEI,
 	}
 	assert.ElementsMatch(t, expected, got, "SupportedProviderTypes drift")
 }

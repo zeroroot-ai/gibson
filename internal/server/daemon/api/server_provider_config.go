@@ -177,9 +177,11 @@ func fromProtoInput(in *tenantv1.ProviderConfigInput) *providerconfig.ProviderCo
 	}
 }
 
-// validateProviderInput checks that the provider type is in the supported set
-// and is not "custom" (operator-only, not dashboard-configurable), and that an
-// embedding-capable provider declares a model whose vector dimension is known.
+// validateProviderInput checks that the provider type is in the supported set,
+// is not "custom" (operator-only, not dashboard-configurable), and that
+// embedding-capable providers declare a model with a known vector dimension.
+// Embedding-only types (voyage, openai-compatible, tei) must declare
+// CAPABILITY_EMBEDDING and cannot be used as chat-only providers.
 func validateProviderInput(input *tenantv1.ProviderConfigInput) error {
 	if input == nil {
 		return fmt.Errorf("input is required")
@@ -196,6 +198,22 @@ func validateProviderInput(input *tenantv1.ProviderConfigInput) error {
 	}
 	if !supported {
 		return fmt.Errorf("unsupported provider type %q", input.Type)
+	}
+	// Embedding-only provider types cannot serve chat completions. They must
+	// declare CAPABILITY_EMBEDDING (and may not declare CAPABILITY_CHAT).
+	embeddingOnly := input.Type == string(llm.ProviderVoyage) ||
+		input.Type == string(llm.ProviderOpenAICompatible) ||
+		input.Type == string(llm.ProviderTEI)
+	if embeddingOnly {
+		hasEmbedding := false
+		for _, c := range input.Capabilities {
+			if c == tenantv1.Capability_CAPABILITY_EMBEDDING {
+				hasEmbedding = true
+			}
+		}
+		if !hasEmbedding {
+			return fmt.Errorf("provider type %q is embedding-only and must declare the embedding capability", input.Type)
+		}
 	}
 	return validateEmbeddingCapability(input)
 }
@@ -400,11 +418,18 @@ func (s *DaemonServer) DeleteProvider(ctx context.Context, req *tenantv1.DeleteP
 //
 // Flow:
 //  1. Build a temporary llm.ProviderConfig from the proposed input.
-//  2. Construct a provider via providers.NewProvider (fails fast for unknown types).
-//  3. Call provider.Health under a 5s deadline.
+//  2. For embedding-only providers (voyage, openai-compatible, tei): skip the
+//     chat probe and run only the embedding probe (step 5).
+//  3. For chat-capable providers: construct a provider via providers.NewProvider
+//     and call provider.Health under a 5s deadline.
 //  4. If Health is a pass-through noop (unconditionally healthy), fall back to
 //     a minimal Complete call under a 15s deadline.
-//  5. Return TestProviderResponse {ok, latency_ms, model, error}.
+//  5. If the input declares CAPABILITY_EMBEDDING and default_embedding_model is
+//     set, call embedder.NewFromProvider and EmbedBatch(["ping"]) under a 10s
+//     deadline. The embedding result (ok + dimension + error) is attached to the
+//     response; a failure does not negate a successful chat probe.
+//  6. Return TestProviderResponse {ok, latency_ms, model, error, embedding_ok,
+//     embedding_dimension, embedding_error}.
 //     Timeout → {ok: false, error: "timeout"} — never a gRPC-level error.
 func (s *DaemonServer) TestProvider(ctx context.Context, req *tenantv1.TestProviderRequest) (*tenantv1.TestProviderResponse, error) {
 	tenantID := auth.TenantStringFromContext(ctx)
@@ -416,133 +441,218 @@ func (s *DaemonServer) TestProvider(ctx context.Context, req *tenantv1.TestProvi
 		return nil, status_grpc.Errorf(codes.InvalidArgument, "%s", err.Error())
 	}
 
-	// Build ephemeral llm.ProviderConfig from the proposed input.
-	// Credential material stays in this stack frame only.
 	creds := input.GetCredentials()
-	provCfg := llm.ProviderConfig{
-		Type:         llm.ProviderType(input.GetType()),
-		DefaultModel: input.GetDefaultModel(),
-		APIKey:       creds["api_key"],
-		BaseURL:      creds["base_url"],
-	}
-	// Forward remaining credential keys as Extra so provider-specific fields
-	// (e.g. aws_access_key_id, cloudflare_account_id) are available.
-	extra := make(map[string]string, len(creds))
-	for k, v := range creds {
-		if k != "api_key" && k != "base_url" {
-			extra[k] = v
-		}
-	}
-	if len(extra) > 0 {
-		provCfg.Extra = extra
-	}
-
-	// Construct the provider. This validates type and config without network.
-	prov, err := providers.NewProvider(provCfg)
-	if err != nil {
-		return &tenantv1.TestProviderResponse{
-			Ok:    false,
-			Error: fmt.Sprintf("invalid provider configuration: %v", err),
-		}, nil
-	}
+	provType := llm.ProviderType(input.GetType())
+	embeddingOnly := provType == llm.ProviderVoyage ||
+		provType == llm.ProviderOpenAICompatible ||
+		provType == llm.ProviderTEI
 
 	start := time.Now()
 
-	// Step 1: Health check under 5s deadline.
-	healthCtx, healthCancel := context.WithTimeout(ctx, 5*time.Second)
-	defer healthCancel()
+	var (
+		chatOK    bool
+		modelList []llm.ModelInfo
+		latencyMS int64
+	)
 
-	healthStatus := prov.Health(healthCtx)
-	latencyMS := time.Since(start).Milliseconds()
+	if !embeddingOnly {
+		// Build ephemeral llm.ProviderConfig from the proposed input.
+		// Credential material stays in this stack frame only.
+		provCfg := llm.ProviderConfig{
+			Type:         provType,
+			DefaultModel: input.GetDefaultModel(),
+			APIKey:       creds["api_key"],
+			BaseURL:      creds["base_url"],
+		}
+		// Forward remaining credential keys as Extra so provider-specific fields
+		// (e.g. aws_access_key_id, cloudflare_account_id) are available.
+		extra := make(map[string]string, len(creds))
+		for k, v := range creds {
+			if k != "api_key" && k != "base_url" {
+				extra[k] = v
+			}
+		}
+		if len(extra) > 0 {
+			provCfg.Extra = extra
+		}
 
-	// Check if the deadline was exceeded.
-	if healthCtx.Err() == context.DeadlineExceeded {
-		s.emitProviderAudit(ctx, tenantID, auditProviderTested, input.GetName())
-		return &tenantv1.TestProviderResponse{
-			Ok:        false,
-			LatencyMs: latencyMS,
-			Error:     "timeout",
-		}, nil
+		// Construct the provider. This validates type and config without network.
+		// Route through s.providerFactory so tests can inject a stub without
+		// hitting the real network.
+		chatFactory := s.providerFactory
+		if chatFactory == nil {
+			chatFactory = providers.NewProvider
+		}
+		prov, err := chatFactory(provCfg)
+		if err != nil {
+			return &tenantv1.TestProviderResponse{
+				Ok:    false,
+				Error: fmt.Sprintf("invalid provider configuration: %v", err),
+			}, nil
+		}
+
+		// Step 1: Health check under 5s deadline.
+		healthCtx, healthCancel := context.WithTimeout(ctx, 5*time.Second)
+		healthStatus := prov.Health(healthCtx)
+		healthCancel()
+		latencyMS = time.Since(start).Milliseconds()
+
+		// Check if the deadline was exceeded.
+		if healthCtx.Err() == context.DeadlineExceeded {
+			s.emitProviderAudit(ctx, tenantID, auditProviderTested, input.GetName())
+			return &tenantv1.TestProviderResponse{
+				Ok:        false,
+				LatencyMs: latencyMS,
+				Error:     "timeout",
+			}, nil
+		}
+
+		switch {
+		case healthStatus.IsHealthy():
+			chatOK = true
+			// Best-effort live model fetch.
+			modelsCtx, modelsCancel := context.WithTimeout(ctx, 10*time.Second)
+			modelList, _ = prov.Models(modelsCtx)
+			modelsCancel()
+		case latencyMS >= 10:
+			// Non-trivial latency + unhealthy = genuine failure from upstream.
+			s.emitProviderAudit(ctx, tenantID, auditProviderTested, input.GetName())
+			return &tenantv1.TestProviderResponse{
+				Ok:        false,
+				LatencyMs: latencyMS,
+				Error:     healthStatus.Message,
+			}, nil
+		default:
+			// Health noop: fall back to a minimal Complete call under a 15s deadline.
+			completeCtx, completeCancel := context.WithTimeout(ctx, 15*time.Second)
+			_, completeErr := prov.Complete(completeCtx, llm.CompletionRequest{
+				Model: input.GetDefaultModel(),
+				Messages: []llm.Message{
+					{Role: llm.RoleUser, Content: "Hello"},
+				},
+				MaxTokens: 1,
+			})
+			completeCancel()
+			latencyMS = time.Since(start).Milliseconds()
+
+			if completeCtx.Err() == context.DeadlineExceeded {
+				s.emitProviderAudit(ctx, tenantID, auditProviderTested, input.GetName())
+				return &tenantv1.TestProviderResponse{
+					Ok:        false,
+					LatencyMs: latencyMS,
+					Error:     "timeout",
+				}, nil
+			}
+			if completeErr != nil {
+				s.emitProviderAudit(ctx, tenantID, auditProviderTested, input.GetName())
+				return &tenantv1.TestProviderResponse{ //nolint:nilerr // complete errors are surfaced in the response body, not as a gRPC error
+					Ok:        false,
+					LatencyMs: latencyMS,
+					Error:     completeErr.Error(),
+				}, nil
+			}
+			chatOK = true
+			// Best-effort live model fetch on the Complete-fallback success path.
+			modelsCtx, modelsCancel := context.WithTimeout(ctx, 10*time.Second)
+			modelList, _ = prov.Models(modelsCtx)
+			modelsCancel()
+		}
 	}
 
-	// If health is explicitly healthy, return success — and try to surface the
-	// live model catalogue so the dashboard's wizard can populate its model
-	// picker without a second round-trip. Spec: providers-wizard. Models() is
-	// best-effort: providers that don't expose a list endpoint return an empty
-	// slice or an error; the test still passes either way.
-	if healthStatus.IsHealthy() {
-		s.emitProviderAudit(ctx, tenantID, auditProviderTested, input.GetName())
-		var modelList []llm.ModelInfo
-		modelsCtx, modelsCancel := context.WithTimeout(ctx, 10*time.Second)
-		modelList, _ = prov.Models(modelsCtx)
-		modelsCancel()
-		return &tenantv1.TestProviderResponse{
-			Ok:        true,
-			LatencyMs: latencyMS,
-			Model:     input.GetDefaultModel(),
-			Models:    modelsToProto(modelList),
-		}, nil
-	}
-
-	// Health returned non-healthy AND no timeout: some providers return
-	// unconditionally healthy without a network call (noop Health).
-	// For those providers the health result is not meaningful — fall back
-	// to a short Complete call so we actually hit the upstream.
-	//
-	// Heuristic: if Health returned healthy without any network activity
-	// (latency < 10ms), treat it as a noop and do the Complete fallback.
-	// If it returned unhealthy, trust the result.
-	if !healthStatus.IsHealthy() && latencyMS >= 10 {
-		// Non-trivial latency + unhealthy = genuine failure from upstream.
-		s.emitProviderAudit(ctx, tenantID, auditProviderTested, input.GetName())
-		return &tenantv1.TestProviderResponse{
-			Ok:        false,
-			LatencyMs: latencyMS,
-			Error:     healthStatus.Message,
-		}, nil
-	}
-
-	// Fall back to a minimal Complete call under a 15s deadline.
-	completeCtx, completeCancel := context.WithTimeout(ctx, 15*time.Second)
-	defer completeCancel()
-
-	_, completeErr := prov.Complete(completeCtx, llm.CompletionRequest{
-		Model: input.GetDefaultModel(),
-		Messages: []llm.Message{
-			{Role: llm.RoleUser, Content: "Hello"},
-		},
-		MaxTokens: 1,
-	})
+	// Embedding probe: run when the provider declares CAPABILITY_EMBEDDING and
+	// default_embedding_model is set, OR when it is an embedding-only provider.
+	embeddingOK, embeddingDim, embeddingErr := s.probeEmbedding(ctx, input)
 	latencyMS = time.Since(start).Milliseconds()
 
 	s.emitProviderAudit(ctx, tenantID, auditProviderTested, input.GetName())
 
-	if completeCtx.Err() == context.DeadlineExceeded {
-		return &tenantv1.TestProviderResponse{
-			Ok:        false,
-			LatencyMs: latencyMS,
-			Error:     "timeout",
-		}, nil
+	// For embedding-only providers: ok=true iff the embedding probe passed.
+	// For dual-capability or chat-only providers: ok=true iff chat passed.
+	finalOK := chatOK
+	if embeddingOnly {
+		finalOK = embeddingOK
 	}
-	if completeErr != nil {
-		return &tenantv1.TestProviderResponse{
-			Ok:        false,
-			LatencyMs: latencyMS,
-			Error:     completeErr.Error(),
-		}, nil
-	}
-	// Best-effort live model fetch on the Complete-fallback success path —
-	// same rationale as the Health-success branch above.
-	var modelList []llm.ModelInfo
-	modelsCtx, modelsCancel := context.WithTimeout(ctx, 10*time.Second)
-	modelList, _ = prov.Models(modelsCtx)
-	modelsCancel()
+
 	return &tenantv1.TestProviderResponse{
-		Ok:        true,
-		LatencyMs: latencyMS,
-		Model:     input.GetDefaultModel(),
-		Models:    modelsToProto(modelList),
+		Ok:                 finalOK,
+		LatencyMs:          latencyMS,
+		Model:              input.GetDefaultModel(),
+		Models:             modelsToProto(modelList),
+		EmbeddingOk:        embeddingOK,
+		EmbeddingDimension: int32(embeddingDim), //nolint:gosec // dimension is always small positive int
+		EmbeddingError:     embeddingErr,
 	}, nil
+}
+
+// probeEmbedding runs a minimal embedding probe for the given input when it
+// declares CAPABILITY_EMBEDDING and has a default_embedding_model set. It
+// returns (ok, dimension, errorMessage). When no embedding probe is needed it
+// returns (false, 0, "").
+func (s *DaemonServer) probeEmbedding(ctx context.Context, input *tenantv1.ProviderConfigInput) (ok bool, dim int, errMsg string) {
+	// Check if the provider declares the embedding capability.
+	hasEmbedding := false
+	for _, c := range input.GetCapabilities() {
+		if c == tenantv1.Capability_CAPABILITY_EMBEDDING {
+			hasEmbedding = true
+			break
+		}
+	}
+	// Also run for embedding-only provider types (voyage/openai-compatible/tei)
+	// even if capabilities is empty (they are embedding-only by definition).
+	provType := llm.ProviderType(input.GetType())
+	embeddingOnly := provType == llm.ProviderVoyage ||
+		provType == llm.ProviderOpenAICompatible ||
+		provType == llm.ProviderTEI
+	if !hasEmbedding && !embeddingOnly {
+		return false, 0, ""
+	}
+
+	embModel := strings.TrimSpace(input.GetDefaultEmbeddingModel())
+	if embModel == "" {
+		return false, 0, ""
+	}
+
+	creds := input.GetCredentials()
+	extra := make(map[string]string)
+	for k, v := range creds {
+		switch k {
+		case "api_key", "base_url", "region":
+		default:
+			extra[k] = v
+		}
+	}
+	embCfg := embedder.Config{
+		Kind:    embedder.Kind(string(provType)),
+		Model:   embModel,
+		APIKey:  creds["api_key"],
+		BaseURL: creds["base_url"],
+		Region:  creds["region"],
+		Extra:   extra,
+	}
+
+	factory := s.embedderFactory
+	if factory == nil {
+		factory = embedder.NewFromProvider
+	}
+	emb, err := factory(embCfg)
+	if err != nil {
+		return false, 0, fmt.Sprintf("failed to build embedder: %v", err)
+	}
+
+	embedCtx, cancel := context.WithTimeout(ctx, 10*time.Second)
+	defer cancel()
+
+	vecs, err := emb.EmbedBatch(embedCtx, []string{"ping"})
+	if err != nil {
+		if embedCtx.Err() == context.DeadlineExceeded {
+			return false, 0, "embedding probe: timeout"
+		}
+		return false, 0, fmt.Sprintf("embedding probe failed: %v", err)
+	}
+	if len(vecs) == 0 || len(vecs[0]) == 0 {
+		return false, 0, "embedding probe: empty vector returned"
+	}
+	return true, len(vecs[0]), ""
 }
 
 // ---------------------------------------------------------------------------
@@ -669,6 +779,230 @@ func (s *DaemonServer) GetSupportedProviders(ctx context.Context, _ *tenantv1.Ge
 	return &tenantv1.GetSupportedProvidersResponse{Providers: out}, nil
 }
 
+// ---------------------------------------------------------------------------
+// ProbeProvider
+// ---------------------------------------------------------------------------
+
+// ProbeProvider validates candidate provider credentials WITHOUT persisting them
+// and returns the live model catalogue + (when requested) an embedding probe
+// result. Used by the wizard's "Test connection" step.
+//
+// SECURITY: credentials transit memory only — they are passed to the transient
+// provider client and embedding client, the calls are made, and the values are
+// dropped when the request returns. They are never logged, never persisted, and
+// never returned to the caller.
+//
+// Flow:
+//  1. Build ephemeral configs from type + credentials.
+//  2. For embedding-only providers (voyage, openai-compatible, tei): only run
+//     the embedding probe (if default_embedding_model is set).
+//  3. For chat-capable providers: attempt a minimal Complete call under a 15s
+//     deadline; on success, fetch the live model catalogue.
+//  4. If default_embedding_model is set (on any provider type): also run the
+//     embedding probe and attach embedding_dimension to the response.
+//  5. Return ProbeProviderResponse {ok, error_message, error_class, models,
+//     latency_ms, embedding_dimension}.
+func (s *DaemonServer) ProbeProvider(ctx context.Context, req *tenantv1.ProbeProviderRequest) (*tenantv1.ProbeProviderResponse, error) {
+	tenantID := auth.TenantStringFromContext(ctx)
+	if tenantID == "" {
+		return nil, status_grpc.Errorf(codes.Unauthenticated, "tenant context required")
+	}
+
+	provType := req.GetType()
+	if provType == "" {
+		return nil, status_grpc.Errorf(codes.InvalidArgument, "type is required")
+	}
+
+	// Validate against the known type list (reuse logic without a full input struct).
+	supported := false
+	for _, t := range llm.SupportedProviderTypes() {
+		if string(t) == provType {
+			supported = true
+			break
+		}
+	}
+	if !supported {
+		return nil, status_grpc.Errorf(codes.InvalidArgument, "unsupported provider type %q", provType)
+	}
+	if provType == string(llm.ProviderCustom) {
+		return nil, status_grpc.Errorf(codes.InvalidArgument, "provider type %q is operator-only", provType)
+	}
+
+	creds := req.GetCredentials()
+	embModel := strings.TrimSpace(req.GetDefaultEmbeddingModel())
+	pt := llm.ProviderType(provType)
+	embeddingOnly := pt == llm.ProviderVoyage ||
+		pt == llm.ProviderOpenAICompatible ||
+		pt == llm.ProviderTEI
+
+	start := time.Now()
+
+	if embeddingOnly {
+		// Embedding-only provider: run embedding probe if a model is given.
+		if embModel == "" {
+			return &tenantv1.ProbeProviderResponse{
+				Ok:           false,
+				ErrorMessage: "default_embedding_model is required for embedding-only providers",
+				ErrorClass:   "invalid_argument",
+			}, nil
+		}
+		ok, dim, errMsg := s.probeEmbeddingFromCreds(ctx, pt, embModel, creds)
+		latencyMS := time.Since(start).Milliseconds()
+		if !ok {
+			return &tenantv1.ProbeProviderResponse{
+				Ok:           false,
+				ErrorMessage: errMsg,
+				ErrorClass:   classifyProviderError(errors.New(errMsg)),
+				LatencyMs:    latencyMS,
+			}, nil
+		}
+		return &tenantv1.ProbeProviderResponse{
+			Ok:                 true,
+			LatencyMs:          latencyMS,
+			EmbeddingDimension: int32(dim), //nolint:gosec // dimension is always small positive int
+		}, nil
+	}
+
+	// Chat-capable provider: delegate to probeChatProvider which handles
+	// health + fallback Complete under appropriate deadlines.
+	chatOK, chatErr, modelList, latencyMS := s.probeChatProvider(ctx, pt, creds, start)
+	if !chatOK {
+		return &tenantv1.ProbeProviderResponse{
+			Ok:           false,
+			ErrorMessage: chatErr,
+			ErrorClass:   classifyProviderError(errors.New(chatErr)),
+			LatencyMs:    latencyMS,
+		}, nil
+	}
+
+	// Embedding probe (best-effort, does not affect ok when chat succeeded).
+	var embeddingDim int
+	if embModel != "" {
+		_, embeddingDim, _ = s.probeEmbeddingFromCreds(ctx, pt, embModel, creds)
+	}
+
+	latencyMS = time.Since(start).Milliseconds()
+	return &tenantv1.ProbeProviderResponse{
+		Ok:                 true,
+		Models:             modelsToProto(modelList),
+		LatencyMs:          latencyMS,
+		EmbeddingDimension: int32(embeddingDim), //nolint:gosec // dimension is always small positive int
+	}, nil
+}
+
+// probeChatProvider constructs a chat provider from credentials and probes it
+// with a health check and, if needed, a minimal Complete call. Returns
+// (ok, errMsg, modelList, latencyMs). A non-empty errMsg implies ok=false.
+func (s *DaemonServer) probeChatProvider(ctx context.Context, pt llm.ProviderType, creds map[string]string, start time.Time) (ok bool, errMsg string, modelList []llm.ModelInfo, latencyMS int64) {
+	provCfg := llm.ProviderConfig{
+		Type:    pt,
+		APIKey:  creds["api_key"],
+		BaseURL: creds["base_url"],
+	}
+	extra := make(map[string]string)
+	for k, v := range creds {
+		if k != "api_key" && k != "base_url" {
+			extra[k] = v
+		}
+	}
+	if len(extra) > 0 {
+		provCfg.Extra = extra
+	}
+
+	chatFactory := s.providerFactory
+	if chatFactory == nil {
+		chatFactory = providers.NewProvider
+	}
+	prov, err := chatFactory(provCfg)
+	if err != nil {
+		return false, fmt.Sprintf("invalid provider configuration: %v", err), nil, time.Since(start).Milliseconds()
+	}
+
+	healthCtx, healthCancel := context.WithTimeout(ctx, 5*time.Second)
+	healthStatus := prov.Health(healthCtx)
+	healthCancel()
+	latencyMS = time.Since(start).Milliseconds()
+
+	if healthCtx.Err() == context.DeadlineExceeded {
+		return false, "timeout", nil, latencyMS
+	}
+
+	switch {
+	case healthStatus.IsHealthy():
+		modelsCtx, modelsCancel := context.WithTimeout(ctx, 10*time.Second)
+		modelList, _ = prov.Models(modelsCtx)
+		modelsCancel()
+		return true, "", modelList, time.Since(start).Milliseconds()
+	case latencyMS >= 10:
+		return false, healthStatus.Message, nil, latencyMS
+	default:
+		// Health noop: fall back to minimal Complete.
+		completeCtx, completeCancel := context.WithTimeout(ctx, 15*time.Second)
+		_, completeErr := prov.Complete(completeCtx, llm.CompletionRequest{
+			Messages:  []llm.Message{{Role: llm.RoleUser, Content: "Hello"}},
+			MaxTokens: 1,
+		})
+		completeCancel()
+		latencyMS = time.Since(start).Milliseconds()
+		if completeCtx.Err() == context.DeadlineExceeded {
+			return false, "timeout", nil, latencyMS
+		}
+		if completeErr != nil {
+			return false, completeErr.Error(), nil, latencyMS
+		}
+		modelsCtx, modelsCancel := context.WithTimeout(ctx, 10*time.Second)
+		modelList, _ = prov.Models(modelsCtx)
+		modelsCancel()
+		return true, "", modelList, time.Since(start).Milliseconds()
+	}
+}
+
+// probeEmbeddingFromCreds builds an embedder from raw credentials and probes
+// it with a single-element batch. Returns (ok, dimension, errorMessage).
+func (s *DaemonServer) probeEmbeddingFromCreds(ctx context.Context, pt llm.ProviderType, embModel string, creds map[string]string) (ok bool, dim int, errMsg string) {
+	extra := make(map[string]string)
+	for k, v := range creds {
+		switch k {
+		case "api_key", "base_url", "region":
+		default:
+			extra[k] = v
+		}
+	}
+	embCfg := embedder.Config{
+		Kind:    embedder.Kind(string(pt)),
+		Model:   embModel,
+		APIKey:  creds["api_key"],
+		BaseURL: creds["base_url"],
+		Region:  creds["region"],
+		Extra:   extra,
+	}
+	factory := s.embedderFactory
+	if factory == nil {
+		factory = embedder.NewFromProvider
+	}
+	emb, err := factory(embCfg)
+	if err != nil {
+		return false, 0, fmt.Sprintf("failed to build embedder: %v", err)
+	}
+	embedCtx, cancel := context.WithTimeout(ctx, 10*time.Second)
+	defer cancel()
+	vecs, err := emb.EmbedBatch(embedCtx, []string{"ping"})
+	if err != nil {
+		if embedCtx.Err() == context.DeadlineExceeded {
+			return false, 0, "embedding probe: timeout"
+		}
+		return false, 0, fmt.Sprintf("embedding probe failed: %v", err)
+	}
+	if len(vecs) == 0 || len(vecs[0]) == 0 {
+		return false, 0, "embedding probe: empty vector returned"
+	}
+	return true, len(vecs[0]), ""
+}
+
+// ---------------------------------------------------------------------------
+// ListProviderModels
+// ---------------------------------------------------------------------------
+
 // ListProviderModels fetches the live model catalogue for an already-stored
 // provider config — credentials are read from the encrypted store; the caller
 // does not pass them. Mirrors TestProvider's "construct + call" pattern but
@@ -727,8 +1061,10 @@ func (s *DaemonServer) ListProviderModels(ctx context.Context, req *tenantv1.Lis
 }
 
 // descriptorToProto translates the in-Go ProviderDescriptor to its proto
-// equivalent. Kept narrow on purpose: this is the only place the two shapes
-// touch each other.
+// equivalent. Chat models go to default_models; embedding models (those whose
+// Features contain "embedding") go to embedding_models. A model may appear in
+// only one list — the capabilities field on ModelDescriptor lets the dashboard
+// filter further if needed.
 func descriptorToProto(d providers.ProviderDescriptor) *tenantv1.SupportedProvider {
 	creds := make([]*tenantv1.CredentialField, 0, len(d.Credentials))
 	for _, c := range d.Credentials {
@@ -741,13 +1077,42 @@ func descriptorToProto(d providers.ProviderDescriptor) *tenantv1.SupportedProvid
 			Help:        c.Help,
 		})
 	}
+
+	var chatModels, embModels []*tenantv1.ModelDescriptor
+	for _, m := range d.DefaultModels {
+		md := modelToProto(m)
+		isEmb := false
+		for _, f := range m.Features {
+			if f == "embedding" {
+				isEmb = true
+				break
+			}
+		}
+		if isEmb {
+			embModels = append(embModels, md)
+		} else {
+			chatModels = append(chatModels, md)
+		}
+	}
+
 	return &tenantv1.SupportedProvider{
-		Type:          string(d.Type),
-		DisplayName:   d.DisplayName,
-		DocsUrl:       d.DocsURL,
-		SelfHosted:    d.SelfHosted,
-		Credentials:   creds,
-		DefaultModels: modelsToProto(d.DefaultModels),
+		Type:            string(d.Type),
+		DisplayName:     d.DisplayName,
+		DocsUrl:         d.DocsURL,
+		SelfHosted:      d.SelfHosted,
+		Credentials:     creds,
+		DefaultModels:   chatModels,
+		EmbeddingModels: embModels,
+	}
+}
+
+// modelToProto converts a single llm.ModelInfo to its proto ModelDescriptor,
+// forwarding the capabilities from ModelInfo.Features.
+func modelToProto(m llm.ModelInfo) *tenantv1.ModelDescriptor {
+	return &tenantv1.ModelDescriptor{
+		Name:          m.Name,
+		ContextWindow: int32(m.ContextWindow), //nolint:gosec // model context windows are at most ~10M
+		Capabilities:  capabilitiesToProto(m.Features),
 	}
 }
 
@@ -756,10 +1121,7 @@ func descriptorToProto(d providers.ProviderDescriptor) *tenantv1.SupportedProvid
 func modelsToProto(models []llm.ModelInfo) []*tenantv1.ModelDescriptor {
 	out := make([]*tenantv1.ModelDescriptor, 0, len(models))
 	for _, m := range models {
-		out = append(out, &tenantv1.ModelDescriptor{
-			Name:          m.Name,
-			ContextWindow: int32(m.ContextWindow), //nolint:gosec // model context windows are at most ~10M
-		})
+		out = append(out, modelToProto(m))
 	}
 	return out
 }

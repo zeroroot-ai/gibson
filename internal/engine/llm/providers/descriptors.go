@@ -166,6 +166,39 @@ func providerDescriptor(t llm.ProviderType) (ProviderDescriptor, bool) {
 			Credentials:   MistralCredentialSchema(),
 			DefaultModels: catalogueModels("mistral"),
 		}, true
+	case llm.ProviderVoyage:
+		return ProviderDescriptor{
+			Type:        t,
+			DisplayName: "Voyage AI",
+			DocsURL:     "https://docs.voyageai.com/",
+			Credentials: []llm.CredentialField{
+				{Key: "api_key", Label: "Voyage API Key", Required: true, Secret: true},
+			},
+			DefaultModels: catalogueModels("voyage"),
+		}, true
+	case llm.ProviderOpenAICompatible:
+		return ProviderDescriptor{
+			Type:        t,
+			DisplayName: "OpenAI-compatible endpoint",
+			DocsURL:     "https://platform.openai.com/docs/api-reference/embeddings",
+			SelfHosted:  true,
+			Credentials: []llm.CredentialField{
+				{Key: "base_url", Label: "Endpoint URL", Required: true, Placeholder: "http://embedder:8080", Help: "URL of the OpenAI-compatible /v1/embeddings endpoint."},
+				{Key: "api_key", Label: "API Key (optional)", Secret: true, Help: "Leave empty if the endpoint does not require authentication."},
+			},
+			DefaultModels: catalogueModels("openai-compatible"),
+		}, true
+	case llm.ProviderTEI:
+		return ProviderDescriptor{
+			Type:        t,
+			DisplayName: "HuggingFace TEI (native)",
+			DocsURL:     "https://huggingface.co/docs/text-embeddings-inference",
+			SelfHosted:  true,
+			Credentials: []llm.CredentialField{
+				{Key: "base_url", Label: "TEI URL", Required: true, Placeholder: "http://tei:8080", Help: "Base URL of the HuggingFace Text-Embeddings-Inference server."},
+			},
+			DefaultModels: catalogueModels("tei"),
+		}, true
 	case llm.ProviderCustom:
 		// Custom is intentionally excluded — the descriptor surface is for
 		// known providers the dashboard can render a form for.
