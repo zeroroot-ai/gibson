@@ -13,12 +13,18 @@ package brain
 // (mission-lifecycle, dispatch, decision and token events all carry the mission
 // id) or references a WorkItem the mission owns (retry / completion / condition
 // events carry only a work id, resolved to the owning mission via the mission's
-// dispatched/projected work). Observation events (host / domain / credential /
-// finding / belief / agent-run / llm-call) carry no mission linkage in the event
-// model — they are scope-relative and tenant-ambient — so they are NOT part of
-// any single mission's slice. Surfacing a mission's discoveries (the hosts and
-// findings it produced) needs a mission→evidence edge the event model does not
-// yet record; that is the rich-frame projection layer (PRD #1059 M2), tracked
+// dispatched/projected work). LLM-call observations carry no mission id either,
+// but they do carry the run_id of the AgentRun that issued the call, and that
+// AgentRun is a WorkItem the mission dispatched — so an llm-call is attributed to
+// a mission when its run_id names a WorkItem the mission owns (the
+// run_id→WorkItem→mission linkage, gibson#1063). A mission-level call with an
+// empty run_id (e.g. the Decider's own completion) has no owning agent run and
+// attaches to the mission directly. The remaining observation events (host /
+// domain / credential / finding / belief / agent-run) carry no mission linkage in
+// the event model — they are scope-relative and tenant-ambient — so they are NOT
+// part of any single mission's slice. Surfacing a mission's discoveries (the hosts
+// and findings it produced) needs a mission→evidence edge the event model does not
+// yet record; that is a later rich-frame projection layer (PRD #1059 M2), tracked
 // separately. S1 (this file) delivers the isolation guarantee: one mission's
 // frame never bleeds another mission's events in.
 
@@ -87,6 +93,11 @@ func eventInMission(ev Event, missionID string, owned map[string]bool) bool {
 		return e.MissionID == missionID
 	case TokenUsed:
 		return e.MissionID == missionID
+	case LlmCallObserved:
+		// run_id→WorkItem→mission linkage (gibson#1063): the call belongs to this
+		// mission when the AgentRun that issued it is a WorkItem the mission owns. A
+		// mission-level call (empty run_id, e.g. the Decider) attaches directly.
+		return e.RunID == "" || owned[e.RunID]
 	default:
 		// Observation and any other unattributable events are tenant-ambient.
 		return false

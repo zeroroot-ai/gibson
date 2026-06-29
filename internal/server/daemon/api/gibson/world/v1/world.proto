@@ -284,6 +284,15 @@ message GetFrameAtResponse {
   // its completion tick, so the set folds in cumulatively. Mission-scoped when
   // mission_id is set; all tenant decisions when it is empty.
   repeated DecisionView decisions = 7;
+  // The mission's LLM calls reconstructed as-of `seq` (PRD #1059 M2, gibson#1063):
+  // the call metadata (model + token counts + provenance) for every completion
+  // issued up to this tick, so token/cost/provenance line up with what's on screen.
+  // A call appears at its own observation tick, so the set folds in cumulatively.
+  // Mission-scoped via the run_id -> WorkItem -> mission linkage: a call belongs to
+  // the mission when its run_id names a WorkItem the mission dispatched (a
+  // mission-level call with empty run_id attaches to the mission directly). Empty
+  // mission_id folds all tenant calls. Transcripts stay behind GetLlmCall.
+  repeated LlmCallView llm_calls = 8;
 }
 
 // LabelView is one applied review label (a gibson.world.v1 view of a brain

@@ -506,3 +506,104 @@ func TestWorldService_GetFrameAt_Decisions(t *testing.T) {
 		}
 	}
 }
+
+// TestWorldService_GetFrameAt_LlmCalls: the rich frame (PRD #1059 M2, gibson#1063)
+// surfaces a mission's LLM calls reconstructed as-of the folded tick. A call has no
+// mission id but carries the run_id of the AgentRun (a WorkItem) that issued it, so
+// it is mission-scoped via the run_id→WorkItem→mission linkage; a mission-level call
+// (empty run_id) attaches to the mission directly. Each call appears at its own
+// observation tick (the set folds in cumulatively), token/cost metadata rides along,
+// and a call issued by another mission's work never bleeds into a scoped frame.
+func TestWorldService_GetFrameAt_LlmCalls(t *testing.T) {
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+	reg := brain.NewRegistry(ctx)
+	srv := NewWorldServer(reg, nil)
+
+	e := reg.For("acme")
+	e.Submit(brain.MissionStarted{ID: "A", Goal: "goal A"})                                                         // A idx 0
+	e.Submit(brain.WorkDispatched{ID: "wa1", MissionID: "A", ItemKind: "agent", Target: "recon"})                   // A idx 1
+	e.Submit(brain.LlmCallObserved{CallID: "ca1", RunID: "wa1", Model: "m", PromptTokens: 10, CompletionTokens: 5}) // A idx 2: run-linked
+	e.Submit(brain.LlmCallObserved{CallID: "cam", RunID: "", Model: "m", PromptTokens: 3, CompletionTokens: 1})     // A idx 3: mission-level
+	e.Submit(brain.WorkDispatched{ID: "wb1", MissionID: "B", ItemKind: "agent", Target: "recon"})                   // mission B
+	e.Submit(brain.LlmCallObserved{CallID: "cb1", RunID: "wb1", Model: "m", PromptTokens: 7, CompletionTokens: 2})  // mission B call
+
+	tctx := auth.WithTenant(context.Background(), auth.MustNewTenantID("acme"))
+
+	deadline := time.Now().Add(2 * time.Second)
+	for time.Now().Before(deadline) {
+		if len(reg.For("acme").Events()) == 6 {
+			break
+		}
+		time.Sleep(10 * time.Millisecond)
+	}
+
+	calls := func(r *worldpb.GetFrameAtResponse) []string {
+		var out []string
+		for _, c := range r.GetLlmCalls() {
+			out = append(out, c.GetCallId())
+		}
+		sort.Strings(out)
+		return out
+	}
+	eq := func(got, want []string) bool {
+		if len(got) != len(want) {
+			return false
+		}
+		for i := range got {
+			if got[i] != want[i] {
+				return false
+			}
+		}
+		return true
+	}
+
+	// seq 0: nothing folded — no calls.
+	f0, err := srv.GetFrameAt(tctx, &worldpb.GetFrameAtRequest{Seq: 0, MissionId: "A"})
+	if err != nil {
+		t.Fatalf("GetFrameAt(0,A): %v", err)
+	}
+	if len(f0.GetLlmCalls()) != 0 {
+		t.Fatalf("frame@0/A calls = %+v, want none", f0.GetLlmCalls())
+	}
+
+	// seq 2 folds MissionStarted + wa1 dispatch — ca1 (idx 2) not folded yet.
+	f2, err := srv.GetFrameAt(tctx, &worldpb.GetFrameAtRequest{Seq: 2, MissionId: "A"})
+	if err != nil {
+		t.Fatalf("GetFrameAt(2,A): %v", err)
+	}
+	if got := calls(f2); !eq(got, nil) {
+		t.Fatalf("frame@2/A calls = %v, want none", got)
+	}
+
+	// seq 3 folds the run-linked call: ca1 appears at its tick.
+	f3, err := srv.GetFrameAt(tctx, &worldpb.GetFrameAtRequest{Seq: 3, MissionId: "A"})
+	if err != nil {
+		t.Fatalf("GetFrameAt(3,A): %v", err)
+	}
+	if got := calls(f3); !eq(got, []string{"ca1"}) {
+		t.Fatalf("frame@3/A calls = %v, want [ca1]", got)
+	}
+
+	// total: both A's calls present with token metadata; mission B's call never appears.
+	fEnd, err := srv.GetFrameAt(tctx, &worldpb.GetFrameAtRequest{Seq: 99, MissionId: "A"})
+	if err != nil {
+		t.Fatalf("GetFrameAt(99,A): %v", err)
+	}
+	if got := calls(fEnd); !eq(got, []string{"ca1", "cam"}) {
+		t.Fatalf("frame@end/A calls = %v, want [ca1 cam]", got)
+	}
+	for _, c := range fEnd.GetLlmCalls() {
+		if c.GetCallId() == "cb1" {
+			t.Fatal("mission B LLM call bled into mission A frame")
+		}
+		if c.GetCallId() == "ca1" {
+			if c.GetRunId() != "wa1" {
+				t.Fatalf("ca1 run_id = %q, want wa1", c.GetRunId())
+			}
+			if c.GetPromptTokens() != 10 || c.GetCompletionTokens() != 5 {
+				t.Fatalf("ca1 tokens = %d/%d, want 10/5", c.GetPromptTokens(), c.GetCompletionTokens())
+			}
+		}
+	}
+}
