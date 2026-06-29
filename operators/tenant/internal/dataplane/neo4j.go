@@ -74,9 +74,6 @@ type Neo4jConfig struct {
 // Neo4jProvisioner provisions per-tenant Neo4j instances as K8s resources
 // (StatefulSet + Service + PVC + Secret). It replaces the old CREATE DATABASE
 // pattern which required a Neo4j Enterprise shared cluster.
-//
-// The type is exported so cmd/main.go can pass it directly to the
-// Neo4jUpgradeReconciler which requires the Neo4jUpgradeProvisioner interface.
 type Neo4jProvisioner struct {
 	cfg Neo4jConfig
 }
