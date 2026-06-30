@@ -43,8 +43,7 @@ type GRPCProviderOptions struct {
 	// is selected.
 	CacheTTL time.Duration
 
-	// Logger is used for fail-open error reporting. Defaults to
-	// slog.Default() when nil.
+	// Logger is used for error reporting. Defaults to slog.Default() when nil.
 	Logger *slog.Logger
 
 	// DialConn is a pre-dialed connection for tests. When non-nil, the
@@ -52,17 +51,32 @@ type GRPCProviderOptions struct {
 	// Use this in tests to inject an insecure loopback connection; leave
 	// it nil in production — the SPIFFE mTLS path is used instead.
 	DialConn grpc.ClientConnInterface
+
+	// Required mirrors the GIBSON_ENTITLEMENTS_REQUIRED knob. When true, any
+	// GetLimits RPC error causes Limits to return [ErrEntitlementsRequired]
+	// (fail-closed / deny) rather than the zero unlimited Limits value.
+	// Enforcement callers check [IsRequired] and deny the request.
+	//
+	// When false (OSS / self-hosted default), the existing fail-open behaviour
+	// is preserved: RPC errors yield unlimited Limits with no error, so a
+	// billing-service blip never blocks a self-hosted install.
+	Required bool
 }
 
 // grpcProvider is a caching Provider that calls EntitlementsService/GetLimits
 // over SPIFFE mTLS gRPC. It satisfies Invalidator so
 // component.QuotaManager.InvalidateCache can drop a stale cached entry.
 //
-// Fail-open contract: any transport error or non-OK gRPC status causes
-// Limits to return the zero value (unlimited) — matching the pre-seam
-// UnlimitedProvider / configProvider fail-open behaviour.
+// Error semantics:
+//   - Required=false (OSS): any transport error or non-OK gRPC status causes
+//     Limits to return the zero value (unlimited) — matching the pre-seam
+//     UnlimitedProvider / configProvider fail-open behaviour.
+//   - Required=true (SaaS): any RPC error returns [ErrEntitlementsRequired]
+//     so the enforcement layer denies the request rather than failing open.
 type grpcProvider struct {
-	client entitlementsv1.EntitlementsServiceClient
+	client   entitlementsv1.EntitlementsServiceClient
+	required bool
+
 	// conn and source are owned by this provider and closed on Close.
 	conn   *grpc.ClientConn
 	source *workloadapi.X509Source
@@ -99,6 +113,7 @@ func NewGRPCProvider(opts GRPCProviderOptions) (Provider, error) {
 	}
 
 	p := &grpcProvider{
+		required: opts.Required,
 		cacheTTL: ttl,
 		logger:   logger,
 		cache:    make(map[string]limitsCacheEntry),
@@ -151,8 +166,13 @@ func NewGRPCProvider(opts GRPCProviderOptions) (Provider, error) {
 }
 
 // Limits implements Provider. It serves a cached value when fresh, else calls
-// GetLimits. Any RPC error causes a fail-open return of the zero (unlimited)
-// Limits value.
+// GetLimits.
+//
+// Error handling follows the Required flag:
+//   - Required=false (OSS / self-hosted): any RPC error yields the zero
+//     (unlimited) Limits value with nil error — fail-open.
+//   - Required=true (SaaS): any RPC error returns [ErrEntitlementsRequired]
+//     so the enforcement layer denies the request — fail-closed.
 func (p *grpcProvider) Limits(ctx context.Context, tenantID string) (Limits, error) {
 	if tenantID == "" {
 		return Limits{}, errors.New("entitlements: tenant must not be empty")
@@ -169,8 +189,18 @@ func (p *grpcProvider) Limits(ctx context.Context, tenantID string) (Limits, err
 		TenantId: tenantID,
 	})
 	if err != nil {
-		// Fail-open: log the error but return unlimited so enforcement never
-		// blocks on a billing service blip.
+		if p.required {
+			// SaaS mode: a billing-service error must never yield unlimited.
+			// Return the sentinel error so the enforcement layer denies the
+			// request (Invariant 3 + 4, gibson#1097).
+			p.logger.Error("entitlements: GetLimits RPC failed; denying (SaaS fail-closed)",
+				"tenant", tenantID,
+				"error", err,
+			)
+			return Limits{}, ErrEntitlementsRequired
+		}
+		// OSS / self-hosted: log the error but return unlimited so enforcement
+		// never blocks on a billing service blip.
 		p.logger.Warn("entitlements: GetLimits RPC failed; using unlimited (fail-open)",
 			"tenant", tenantID,
 			"error", err,

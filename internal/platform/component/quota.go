@@ -136,10 +136,23 @@ func (q *QuotaManager) InvalidateCache(tenant string) {
 // configured concurrent-mission limit. Returns nil when no quota is set,
 // ConcurrentMissions == 0, or the active count is below the limit.
 // Returns codes.ResourceExhausted otherwise.
+//
+// SaaS fail-closed: when GetQuota returns an error wrapping
+// [entitlements.ErrEntitlementsRequired], the entitlements provider is
+// unavailable in a SaaS deploy. The request is denied with ResourceExhausted
+// rather than failing open to unlimited (Invariants 3 and 4, gibson#1097).
 func (q *QuotaManager) CheckMissionQuota(ctx context.Context) error {
 	tenant := auth.TenantStringFromContext(ctx)
 	quota, err := q.GetQuota(ctx, tenant)
-	if err != nil || quota == nil || quota.ConcurrentMissions == 0 {
+	if err != nil {
+		if entitlements.IsRequired(err) {
+			return status.Errorf(codes.ResourceExhausted,
+				"tenant %s mission quota check denied: entitlements unavailable (SaaS fail-closed)",
+				tenant)
+		}
+		return nil // OSS / transient error: fail-open
+	}
+	if quota == nil || quota.ConcurrentMissions == 0 {
 		return nil
 	}
 	count, _ := q.store.Get(ctx, quotaMissionsActiveKey)
@@ -156,10 +169,21 @@ func (q *QuotaManager) CheckMissionQuota(ctx context.Context) error {
 // configured concurrent-agent limit. The "agent" counter only includes
 // agents currently bound to an in-flight mission task — idle-but-connected
 // agents do NOT count.
+//
+// SaaS fail-closed: same as [CheckMissionQuota] — an [entitlements.ErrEntitlementsRequired]
+// error from the provider yields ResourceExhausted rather than unlimited.
 func (q *QuotaManager) CheckAgentQuota(ctx context.Context) error {
 	tenant := auth.TenantStringFromContext(ctx)
 	quota, err := q.GetQuota(ctx, tenant)
-	if err != nil || quota == nil || quota.ConcurrentAgents == 0 {
+	if err != nil {
+		if entitlements.IsRequired(err) {
+			return status.Errorf(codes.ResourceExhausted,
+				"tenant %s agent quota check denied: entitlements unavailable (SaaS fail-closed)",
+				tenant)
+		}
+		return nil // OSS / transient error: fail-open
+	}
+	if quota == nil || quota.ConcurrentAgents == 0 {
 		return nil
 	}
 	count, _ := q.store.Get(ctx, quotaAgentsActiveKey)
@@ -180,10 +204,21 @@ func (q *QuotaManager) CheckAgentQuota(ctx context.Context) error {
 // registry entry expires. Returns nil when no quota is set, the limit is 0
 // (unlimited), or the count is below the limit; codes.ResourceExhausted
 // otherwise.
+//
+// SaaS fail-closed: same as [CheckMissionQuota] — an [entitlements.ErrEntitlementsRequired]
+// error from the provider yields ResourceExhausted rather than unlimited.
 func (q *QuotaManager) CheckConnectorQuota(ctx context.Context, currentInstances int) error {
 	tenant := auth.TenantStringFromContext(ctx)
 	quota, err := q.GetQuota(ctx, tenant)
-	if err != nil || quota == nil || quota.ConcurrentConnectors == 0 {
+	if err != nil {
+		if entitlements.IsRequired(err) {
+			return status.Errorf(codes.ResourceExhausted,
+				"tenant %s connector quota check denied: entitlements unavailable (SaaS fail-closed)",
+				tenant)
+		}
+		return nil // OSS / transient error: fail-open
+	}
+	if quota == nil || quota.ConcurrentConnectors == 0 {
 		return nil
 	}
 	if currentInstances >= quota.ConcurrentConnectors {
