@@ -197,7 +197,8 @@ func (d *daemonImpl) buildGRPCServer(ctx context.Context) (*grpcSubsystem, error
 	//
 	// Audit P0 finding (zeroroot-ai/.github#101): otelgrpc server instrumentation
 	// was missing; the daemon initialised OTel providers but never installed the
-	// gRPC server-side instrumentation, so no daemon RPC spans appeared in Langfuse.
+	// gRPC server-side instrumentation, so no daemon RPC spans were exported to the
+	// trace backend.
 	//
 	// NOTE: otelgrpc.UnaryServerInterceptor / StreamServerInterceptor were removed
 	// in v0.68.0 (they were deprecated in v0.47). The stats.Handler replacement

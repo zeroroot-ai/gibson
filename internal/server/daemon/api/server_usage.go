@@ -23,7 +23,7 @@ import (
 // Current implementation reads from the budget enforcer's per-period
 // counters for user / team / tenant scopes (those are already a reliable
 // source of truth for token attribution). Agent / mission scopes require
-// ClickHouse queries against Langfuse that are not yet wired; those
+// brain World LlmCall rollups that are not yet wired; those
 // scopes return an empty-row response with a logged warning so dashboard
 // callers render "no data yet" rather than an error.
 
@@ -131,7 +131,7 @@ func (s *DaemonServer) listUsageByTeam(ctx context.Context, req *tenantv1.ListUs
 }
 
 // listUsageByAgent returns an empty response for now — agent-level
-// rollups require a ClickHouse query against Langfuse grouped by
+// rollups require a brain World LlmCall query grouped by
 // agent_id which is not yet wired. Dashboard renders "no data" when
 // Rows is empty rather than erroring.
 func (s *DaemonServer) listUsageByAgent(_ context.Context, _ *tenantv1.ListUsageRequest) (*tenantv1.ListUsageResponse, error) {

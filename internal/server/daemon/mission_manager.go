@@ -601,7 +601,7 @@ func (m *missionManager) executeMission(ctx context.Context, missionID string, d
 		span.SetAttributes(attribute.String(observability.GibsonMissionName, active.mission.Name))
 	}
 
-	// Persist the OTel trace ID into mission metadata for Langfuse lookup
+	// Persist the OTel trace ID into mission metadata for distributed-trace lookup
 	activeSpan := trace.SpanFromContext(ctx)
 	if activeSpan.SpanContext().HasTraceID() {
 		if active.mission.Metadata == nil {

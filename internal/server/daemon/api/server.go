@@ -688,7 +688,7 @@ type MissionRunData struct {
 	FindingsCount int
 	Error         string
 	PreviousRunID string // ID of the previous run (for linking run history)
-	TraceID       string // OTel trace ID for Langfuse lookup
+	TraceID       string // OTel trace ID for distributed-trace lookup
 }
 
 // CheckpointData provides metadata about a mission checkpoint.

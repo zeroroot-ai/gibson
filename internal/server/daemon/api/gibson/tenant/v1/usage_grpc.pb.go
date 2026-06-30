@@ -9,10 +9,10 @@
 // (platform-sdk) into the OSS SDK under the gibson.tenant.v1 package as part
 // of the admin-surface-recategorization (ADR-0039 implementation).
 //
-// Only tenant-scoped RPCs are included here. The daemon queries Langfuse's
-// ClickHouse grouped by the attribute dimensions EnrichSpan stamps onto every
-// LLM span; the dashboard consumes aggregated rows without holding ClickHouse
-// credentials itself.
+// Only tenant-scoped RPCs are included here. The daemon aggregates token
+// usage from the budget enforcer's per-period counters (and, for agent /
+// mission scopes, from the brain World's LlmCall provenance); the dashboard
+// consumes aggregated rows without holding any backing-store credentials itself.
 //
 // Authorization: every RPC carries a (gibson.auth.v1.authz) annotation.
 

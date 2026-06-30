@@ -83,7 +83,6 @@ Common step names (provision flow):
 | `TenantBrokerConfigWritten` | DataPlaneProvisioning | Writes the broker config Vault secret |
 | `InitRedisKeyspace` | DataPlaneProvisioning | Allocates the per-tenant Redis logical DB |
 | `InitNeo4jScope` | DataPlaneProvisioning (legacy) | Creates the Neo4j subgraph (pre-DataPlane cutover) |
-| `CreateLangfuseProject` | Initializing | Creates the Langfuse observability project |
 | `CreateStripeCustomer` | Initializing | Creates the Stripe billing customer |
 | `WriteInitialFGA` | Initializing | Writes initial FGA member/owner tuples |
 
