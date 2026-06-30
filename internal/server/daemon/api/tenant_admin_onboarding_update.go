@@ -19,7 +19,7 @@ import (
 // Returns codes.Unimplemented if the onboarding store is not configured.
 //
 // Cross-tenant guard: request tenant_id must match context tenant (matches
-// the TenantAdminService pattern used by the langfuse handlers).
+// the TenantAdminService pattern used by the other tenant-admin handlers).
 //
 // gibsoncheck:allow tenant-from-request — TenantAdminService RPCs take the
 // target tenant in the request body; the inline `auth.TenantStringFromContext(ctx)

@@ -115,7 +115,7 @@ func DispatchInFlightTool(t InFlightTool) IdempotencyAction {
 type RewindEmitter interface {
 	// OnToolDispatch is called once per in-flight tool with the
 	// resolved action. Implementations should NOT block — they may
-	// fan out to async pipelines (Langfuse, postgres audit) but the
+	// fan out to async pipelines (postgres audit) but the
 	// orchestrator continues regardless.
 	OnToolDispatch(ctx context.Context, missionID, toolNodeID string, mode manifestpb.ToolIdempotency, action IdempotencyAction)
 }
