@@ -145,6 +145,76 @@ func TestSignup_SeamGate_ErrorMessageMentionsAdminProvision(t *testing.T) {
 	}
 }
 
+// TestSignup_PolicyImmutableToRequestInput proves that the resolved signup
+// policy (set once at daemon boot via WithSignupPolicy) cannot be altered by
+// any content in the incoming request. Multiple calls with different request
+// payloads must all observe the same policy that was set at startup.
+//
+// This is the negative-test guarantee for the signup seam (gibson#1094,
+// deploy ADR-0006): only the environment drives the policy; request data is
+// inert.
+func TestSignup_PolicyImmutableToRequestInput(t *testing.T) {
+	// Set up a server that starts with PolicyAdminOnly — simulates a self-hosted
+	// deployment where SIGNUP_SELF_SERVE was absent at boot.
+	s := &DaemonServer{
+		logger: testSlogLogger,
+		// signupPolicy zero value = "" treated as PolicyAdminOnly.
+	}
+
+	variants := []*tenantv1.SignupRequest{
+		// Normal request
+		{
+			AttemptId:     testAttemptID,
+			OwnerEmail:    "owner@example.com",
+			WorkspaceName: "Corp A",
+			Tier:          "team",
+			Password:      "p@ssw0rd!",
+		},
+		// Request carrying a different attempt_id — still no policy override.
+		{
+			AttemptId:     "11111111-2222-3333-4444-555555555555",
+			OwnerEmail:    "attacker@evil.example",
+			WorkspaceName: "Bypass Attempt",
+			Tier:          "enterprise",
+			Password:      "hax0r!",
+		},
+		// Empty body — still denied, not a panic or Unimplemented.
+		{},
+	}
+
+	for i, req := range variants {
+		_, err := s.Signup(context.Background(), req)
+		if err == nil {
+			t.Errorf("variant %d: expected PermissionDenied, got nil (policy must be env-only)", i)
+			continue
+		}
+		if got := status.Code(err); got != codes.PermissionDenied {
+			t.Errorf("variant %d: status = %v, want PermissionDenied (request cannot change boot-time policy)", i, got)
+		}
+	}
+
+	// Flip the server to SelfServe (simulates what WithSignupPolicy does at boot
+	// when SIGNUP_SELF_SERVE is set). The policy comes from env alone; no request
+	// field can reproduce this transition at call time.
+	s.signupPolicy = signup.PolicySelfServe
+
+	// All subsequent calls must now pass the gate — the policy is now self-serve
+	// because the env was set at boot, not because of anything in the request.
+	proceedReq := &tenantv1.SignupRequest{
+		AttemptId:     testAttemptID,
+		OwnerEmail:    "owner@saas.example",
+		WorkspaceName: "SaaS Corp",
+		Tier:          "team",
+		Password:      "p@ssw0rd!",
+	}
+	// No IDP client is wired here, so the call will fail after the gate — but
+	// the gate itself must not return PermissionDenied (the gate passed).
+	_, err := s.Signup(context.Background(), proceedReq)
+	if status.Code(err) == codes.PermissionDenied {
+		t.Errorf("after policy set to SelfServe, Signup still returned PermissionDenied; request must not be able to override the env-set policy")
+	}
+}
+
 // containsSubstring is a local helper to avoid importing strings in this test file.
 func containsSubstring(s, sub string) bool {
 	return len(s) >= len(sub) && (s == sub || s != "" && findSub(s, sub))

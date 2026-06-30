@@ -36,6 +36,7 @@ import (
 	"github.com/zeroroot-ai/gibson/internal/platform/mailer"
 	"github.com/zeroroot-ai/gibson/internal/platform/providerconfig"
 	"github.com/zeroroot-ai/gibson/internal/platform/ratelimit"
+	"github.com/zeroroot-ai/gibson/internal/platform/signup"
 	"github.com/zeroroot-ai/gibson/internal/platform/tenantembedder"
 	"github.com/zeroroot-ai/gibson/internal/server/admin"
 	discoverysvc "github.com/zeroroot-ai/gibson/internal/server/api/discovery"
@@ -947,6 +948,33 @@ func (d *daemonImpl) buildGRPCServer(ctx context.Context) (*grpcSubsystem, error
 	// Tenant CR. Signup is annotated unauthenticated in the registry (like
 	// SetSignupProgress), so ext-authz lets it through pre-tenant.
 	tenantv1.RegisterSignupServiceServer(srv, daemonSvc)
+
+	// Resolve and wire the signup seam policy (deploy ADR-0006, gibson#1094).
+	// signup.Resolve reads SIGNUP_SELF_SERVE from the environment: any non-empty
+	// value activates PolicySelfServe (SaaS profile); absent → PolicyAdminOnly
+	// (self-hosted fail-safe, fail-closed). The seam.LogStartupState call below
+	// will already include the "signup" entry because seam.Register is called in
+	// the signup package init(). This call makes the knob actually take effect;
+	// without it signupPolicy is the zero value "" which behaves as PolicyAdminOnly.
+	{
+		signupPolicy, signupWired, signupErr := signup.Resolve(ctx, d.logger.Slog())
+		if signupErr != nil {
+			// Resolve only errors on an unexpected seam failure — log and continue
+			// with the fail-safe policy so a misconfigured env does not crash the
+			// daemon (the gate will still deny self-serve signup).
+			d.logger.Warn(ctx, "signup seam resolve failed; defaulting to admin-only policy",
+				slog.String("error", signupErr.Error()))
+		} else {
+			daemonSvc.WithSignupPolicy(signupPolicy)
+			if signupWired {
+				d.logger.Info(ctx, "signup seam: self-serve signup active (SIGNUP_SELF_SERVE set)",
+					slog.String("policy", string(signupPolicy)))
+			} else {
+				d.logger.Info(ctx, "signup seam: admin-only signup active (SIGNUP_SELF_SERVE absent)",
+					slog.String("policy", string(signupPolicy)))
+			}
+		}
+	}
 
 	// Register TenantProvisioningService — the dashboard-facing read side of
 	// operator-pull tenant provisioning (E9, gibson#948, dashboard#813). Serves
