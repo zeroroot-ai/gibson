@@ -31,6 +31,15 @@
 // The resolution logic is implemented using the reusable [pkg/seam] primitive
 // (deploy ADR-0006, gibson#1087) so the knob-set/fail-safe semantics and the
 // observable degradation signals are consistent across all seams.
+//
+// # SaaS fail-closed (Invariants 3 and 4, gibson#1097 + gibson#1098)
+//
+// When GIBSON_ENTITLEMENTS_REQUIRED=true the daemon operates in SaaS mode.
+// Any failure to obtain entitlements — a missing endpoint, a failed remote
+// construction, or a per-call RPC error — resolves to [BlockedProvider] (or
+// [ErrEntitlementsRequired] from the gRPC provider), which the enforcement
+// layer treats as "deny" rather than "unlimited." OSS / self-hosted leaves the
+// knob unset and retains the fail-open unlimited posture.
 package entitlements
 
 import (
@@ -80,9 +89,15 @@ type Limits struct {
 // reserved for genuine backend failures the caller may choose to log; even
 // then callers treat the result as unlimited (fail-open), matching the
 // pre-seam QuotaManager behaviour.
+//
+// Exception (SaaS mode): when GIBSON_ENTITLEMENTS_REQUIRED=true, a provider
+// returns [ErrEntitlementsRequired] to signal "deny, not unlimited." The
+// enforcement layer (quota.go) checks [IsRequired] and denies rather than
+// failing open. See [BlockedProvider] and the SaaS-mode path in [New].
 type Provider interface {
 	// Limits returns the resource ceilings for tenantID. The zero Limits
-	// value means unlimited on every dimension.
+	// value means unlimited on every dimension. An error wrapping
+	// [ErrEntitlementsRequired] means "deny" (SaaS fail-closed).
 	Limits(ctx context.Context, tenantID string) (Limits, error)
 }
 
@@ -137,20 +152,55 @@ func init() {
 // directly — so the gRPC backend activates with a single env var change and
 // no daemon code change.
 //
+// # SaaS fail-closed (gibson#1097 + gibson#1098)
+//
+// When GIBSON_ENTITLEMENTS_REQUIRED=true the seam is in SaaS mode. In that
+// mode:
+//
+//   - If the seam resolves to fail-safe (endpoint absent or remote construction
+//     failed), New returns a [BlockedProvider] instead of [ConfigProvider].
+//     The boot log emits an ERROR so operators see the misconfiguration
+//     immediately. The daemon starts but every entitlements check is denied
+//     until the wiring is fixed.
+//
+//   - The gRPC provider's per-call error path also returns
+//     [ErrEntitlementsRequired] rather than unlimited. The enforcement layer
+//     (quota.go) checks [IsRequired] and denies the request.
+//
+// OSS / self-hosted: GIBSON_ENTITLEMENTS_REQUIRED unset → fail-open unlimited
+// (unchanged). Usage is still metered; nothing is enforced.
+//
 // The resolution is implemented on top of the reusable [pkg/seam] primitive
 // (deploy ADR-0006, gibson#1087) — the same knob-set→remote / knob-absent→
 // fail-safe / fail-safe-emits-observable semantics apply to all seams.
 func New(db *sql.DB) Provider {
+	required := Required()
+	logger := slog.Default()
+
 	s := seam.New(seam.Spec[Provider]{
 		Name:       SeamName,
 		ConfigKnob: SeamKnob,
 		FailSafe: func() (Provider, error) {
+			if required {
+				// SaaS mode: the fail-safe (OSS ConfigProvider / unlimited) is
+				// not acceptable. Install the BlockedProvider so every
+				// entitlements check is denied until wiring is fixed.
+				//
+				// The boot log ERROR below (in the Resolve block) announces the
+				// misconfiguration. This satisfies the boot guard requirement
+				// from Invariant 4 (gibson#1098): we do not panic or crash the
+				// daemon (operators need logs to diagnose the issue), but we
+				// make it operationally impossible to serve unlimited — every
+				// request is blocked.
+				return NewBlockedProvider(logger), nil
+			}
 			return NewConfigProvider(db), nil
 		},
 		Remote: func(endpoint string) (Provider, error) {
 			return NewGRPCProvider(GRPCProviderOptions{
 				Endpoint:           endpoint,
 				BillingServiceSVID: strings.TrimSpace(os.Getenv("ENTITLEMENTS_BILLING_SVID")),
+				Required:           required,
 				// WorkloadAPISocket defaults to "" → go-spiffe reads SPIFFE_ENDPOINT_SOCKET.
 			})
 		},
@@ -159,16 +209,31 @@ func New(db *sql.DB) Provider {
 	// We use slog.Default() directly here because New is called during daemon
 	// startup before the daemon's own logger is wired; slog is always initialised
 	// by the time daemon.Start() runs.
-	res, err := s.Resolve(context.Background(), slog.Default())
+	res, err := s.Resolve(context.Background(), logger)
 	if err != nil {
-		// FailSafe returned an error — this should not happen for entitlements
-		// (NewConfigProvider never fails). Fall back to unlimited to keep the
-		// daemon bootable.
-		slog.Default().Error(
+		// FailSafe returned an error — should not happen (BlockedProvider and
+		// ConfigProvider never fail). Fall back to unlimited to keep the daemon
+		// bootable, but log as error so it is visible.
+		logger.Error(
 			"entitlements: fail-safe construction failed; using UnlimitedProvider",
 			"error", err,
 		)
 		return UnlimitedProvider{}
 	}
+
+	// Boot guard: when SaaS mode is enabled but the seam resolved to fail-safe
+	// (not wired), log an ERROR so operators see the misconfiguration.
+	// The BlockedProvider (installed by FailSafe above) will deny every request
+	// until ENTITLEMENTS_ENDPOINT is correctly wired.
+	if required && !res.Wired {
+		logger.Error(
+			"entitlements: GIBSON_ENTITLEMENTS_REQUIRED=true but entitlements seam is unwired; "+
+				"daemon will DENY all entitlement checks until ENTITLEMENTS_ENDPOINT is set and reachable. "+
+				"This is the SaaS fail-closed boot guard (gibson#1098).",
+			"knob", SeamKnob,
+			"required_knob", RequiredKnob,
+		)
+	}
+
 	return res.Impl
 }
