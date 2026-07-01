@@ -15,12 +15,14 @@ name: gibson-images
 #   - gibson-bootstrap-runner-image.yml
 #   - gibson-belief-sidecar.yml
 #
-# Trigger discipline (decision #8): push:main only (+ workflow_dispatch for
-# manual backfill/force-rebuild, and for (re)publishing a specific semver tag
-# by dispatching with `--ref <tag>`, e.g.
-# `gh workflow run gibson-images.yml --ref v1.2.3` -- the same escape hatch
-# gibson-bootstrap-image.yml / gibson-bootstrap-runner-image.yml /
-# gibson-belief-sidecar.yml already documented, now extended uniformly). NO
+# Trigger discipline (decision #8): push:main + push:v*.*.* tags (release-please
+# cuts vX.Y.Z tags; reusable-image-build's `type=match,pattern=v(.*)` metadata
+# rule derives the semver image tag from that tag push) + workflow_dispatch for
+# manual backfill/force-rebuild, and for (re)publishing a specific tag that
+# doesn't match `v*.*.*` (e.g. `gibson-bootstrap-v1.0.0`) by dispatching with
+# `--ref <tag>`, e.g. `gh workflow run gibson-images.yml --ref v1.2.3` -- the
+# same escape hatch gibson-bootstrap-image.yml / gibson-bootstrap-runner-image.yml
+# / gibson-belief-sidecar.yml already documented, now extended uniformly. NO
 # `pull_request` trigger -- image builds no longer run on every PR push.
 #
 # All images build on every push to main (no per-component path filter): this
@@ -42,6 +44,7 @@ name: gibson-images
 on:
   push:
     branches: [main]
+    tags: ['v*.*.*']
   workflow_dispatch:
     inputs:
       ref:
