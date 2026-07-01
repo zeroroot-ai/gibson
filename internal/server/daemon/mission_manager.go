@@ -523,15 +523,9 @@ func (m *missionManager) Run(ctx context.Context, missionDefinitionID string, ta
 	// Register active mission under the calling tenant's partition (C9 closure).
 	m.setActive(callingTenant, missionRecord.ID.String(), active)
 
-	// Emit mission started event
-	m.emitEvent(eventChan, api.MissionEventData{
-		EventType: "mission.started",
-		Timestamp: time.Now(),
-		MissionID: missionRecord.ID.String(),
-		Message:   fmt.Sprintf("Mission %s run #%d started", missionRecord.Name, missionRun.RunNumber),
-	})
-
-	// Launch mission executor in goroutine - pass mission ID (stable)
+	// Launch mission executor in goroutine - pass mission ID (stable).
+	// The brain will emit MissionStarted → projector → status:running on the
+	// Subscribe stream (ADR-0011 decision 4, gibson#1116). No emitEvent here.
 	go m.executeMission(missionCtx, missionRecord.ID.String(), def, eventChan)
 
 	return eventChan, nil
@@ -791,9 +785,16 @@ func (m *missionManager) executeMission(ctx context.Context, missionID string, d
 		// terminal-state wait. Unify on missionID so execution actually resolves.
 		proj.ID = missionID
 		eng.Submit(proj)
-		m.emitEvent(eventChan, api.MissionEventData{EventType: "mission.started", Timestamp: time.Now(), MissionID: missionID, Message: fmt.Sprintf("Brain executing mission %s", missionID)})
+
+		// Emit MissionStarted into the brain Timeline so the lifecycle projector
+		// derives "status:running" on the Subscribe stream (ADR-0011 decision 4,
+		// gibson#1116). The projector is a pure subscriber on the same engine, so
+		// this event reaches it via engine.Subscribe on the next tick.
+		eng.Submit(brain.MissionStarted{ID: missionID})
 
 		// Block until the brain reaches a terminal mission state (or ctx is cancelled).
+		// The projector derives status:completed/failed from brain.MissionDone —
+		// no emitEvent calls here (ADR-0011 decision 4, gibson#1116).
 		finalStatus, errorMsg = m.awaitBrainMission(ctx, eng, missionID)
 		missionDuration = time.Since(active.startTime)
 
@@ -805,13 +806,11 @@ func (m *missionManager) executeMission(ctx context.Context, missionID string, d
 				span.SetStatus(codes.Ok, "mission completed")
 				span.SetAttributes(attribute.Int("gibson.mission.duration_ms", int(missionDuration.Milliseconds())))
 			}
-			m.emitEvent(eventChan, api.MissionEventData{EventType: "mission.completed", Timestamp: time.Now(), MissionID: missionID, Message: fmt.Sprintf("Mission completed with status: %s", finalStatus)})
 		} else {
 			if span != nil {
 				span.SetStatus(codes.Error, errorMsg)
 				span.SetAttributes(attribute.Int("gibson.mission.duration_ms", int(missionDuration.Milliseconds())))
 			}
-			m.emitEvent(eventChan, api.MissionEventData{EventType: "mission.failed", Timestamp: time.Now(), MissionID: missionID, Error: errorMsg})
 		}
 	}
 	_ = missionDuration
