@@ -783,6 +783,13 @@ func (m *missionManager) executeMission(ctx context.Context, missionID string, d
 		}
 		m.emitEvent(eventChan, api.MissionEventData{EventType: "mission.failed", Timestamp: time.Now(), MissionID: missionID, Error: errorMsg})
 	} else {
+		// Key the projected mission by the RUN id (missionID) — the same id the
+		// per-mission binding, awaitBrainMission, and the Decider lookup all use.
+		// missionDefinitionToProjected defaults ID to the mission DEFINITION id,
+		// which made the engine dispatch/decide under an id no binding is
+		// registered for ("brain dispatch for unknown mission") and stranded the
+		// terminal-state wait. Unify on missionID so execution actually resolves.
+		proj.ID = missionID
 		eng.Submit(proj)
 		m.emitEvent(eventChan, api.MissionEventData{EventType: "mission.started", Timestamp: time.Now(), MissionID: missionID, Message: fmt.Sprintf("Brain executing mission %s", missionID)})
 
