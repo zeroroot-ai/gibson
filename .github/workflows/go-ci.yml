@@ -28,12 +28,27 @@ name: go-ci
 # `skip-lint: true` avoids double-running golangci-lint under two different
 # pins.
 #
+# Slice S4 (gibson#1129) update: build.yaml's embedded `test` job (matrix over
+# setec_integration/empty build tags, `go vet` + `go test -race` on every
+# `pull_request`) has been REMOVED now that build.yaml itself is deleted (image
+# build collapsed into .github/workflows/gibson-images.yml, push:main only).
+# Its two halves now live here, both merge_group-only:
+#   - `go test -race` per build-tag variant: already covered by the `heavy`
+#     job below (added in S2, matrix over build_tags).
+#   - `go vet` per build-tag variant: added as the `vet-tags` job below (S2's
+#     `heavy` only vets the untagged default via the reusable's fast tier on
+#     pull_request; the reusable's heavy tier does not vet at all).
+# Known residual gap: unlike build.yaml's old `test` job, neither `heavy` nor
+# `vet-tags` provisions a Redis service container or envtest binaries, so
+# Redis-backed suites (e.g. internal/engine/state) self-skip under both
+# build-tag variants here (they fail-open to a clean skip by design, see
+# internal/engine/state/main_test.go) rather than actually exercising Redis.
+# Real Redis/envtest execution for the untagged variant still happens via the
+# `coverage` job (has a Redis service + envtest) and via `integration`
+# (-tags integration, envtest); nothing currently exercises Redis/envtest
+# under -tags setec_integration specifically. Flagged, not fixed, by this slice.
+#
 # NOT migrated here (explicitly out of scope for this slice):
-#   - build.yaml's image-build job and its embedded `test` job (matrix over
-#     setec_integration/empty build tags) -- image-build collapse is slice S4.
-#     That job currently still runs `go vet` + `go test -race` on every
-#     `pull_request`, which duplicates part of this workflow's heavy tier.
-#     Known parity/efficiency gap, tracked for S4 to resolve by removing it.
 #   - gibsoncheck.yml (custom analyzer + authz-registry drift gate) and
 #     fga-smoke-test.yml -- neither is a generic go build/test/lint/coverage
 #     suite and both are required status checks; left untouched.
@@ -78,8 +93,9 @@ jobs:
       gh-pat: ${{ secrets.GH_PAT_GIBSON_RO }}
 
   # ---- heavy tier (merge_group): reusable race + govulncheck ----
-  # Matrix mirrors build.yaml's setec_integration/empty variant so the
-  # authoritative gate exercises both build-tag configurations the daemon ships.
+  # Matrix mirrors the setec_integration/empty build-tag variants the daemon
+  # ships (formerly build.yaml's `test` job, now deleted -- S4, gibson#1129)
+  # so the authoritative gate exercises both configurations.
   heavy:
     if: github.event_name == 'merge_group'
     strategy:
@@ -93,6 +109,35 @@ jobs:
       build-tags: ${{ matrix.build_tags }}
     secrets:
       gh-pat: ${{ secrets.GH_PAT_GIBSON_RO }}
+
+  # ---- go vet across build-tag variants (merge_group) ----
+  # S4 (gibson#1129): build.yaml's deleted `test` job also ran `go vet` per
+  # build-tag variant; the reusable's heavy tier only runs `go test -race` +
+  # govulncheck (no vet), and its fast tier only vets the untagged default on
+  # pull_request. Kept native and separate from `heavy` (rather than folded
+  # into the reusable) because vet is pure static analysis -- no services, no
+  # Docker, cheap enough to not need the reusable's machinery.
+  vet-tags:
+    if: github.event_name == 'merge_group'
+    runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        build_tags: ["", "setec_integration"]
+    env:
+      GOPRIVATE: github.com/zeroroot-ai/*
+      GONOSUMDB: github.com/zeroroot-ai/*
+    steps:
+      - uses: actions/checkout@v4
+      - name: Configure git for private modules
+        run: |
+          git config --global \
+            url."https://x-access-token:${{ secrets.GH_PAT_GIBSON_RO }}@github.com/".insteadOf \
+            "https://github.com/"
+      - uses: actions/setup-go@v6
+        with:
+          go-version-file: go.mod
+      - run: go vet ${{ matrix.build_tags && format('-tags={0}', matrix.build_tags) || '' }} ./...
 
   # ---- gibson-specific lint (fast tier / pull_request) ----
   # Kept native (not delegated to the reusable's golangci-lint step) so the
