@@ -31,6 +31,13 @@ type MissionProjected struct {
 	// §5): the daemon stamps the provider's current artifact at launch so replay
 	// re-loads the exact model. Empty → no pinned model (placeholder / OSS).
 	BeliefModel string
+
+	// Display metadata (ADR-0011/gibson#1118): carried from the CUE definition and
+	// target so the World is the single source of truth — no secondary store.
+	Name        string
+	Description string
+	TargetID    string
+	TenantID    string
 }
 
 func (MissionProjected) Kind() string { return "mission.projected" }
@@ -39,7 +46,19 @@ func applyMissionProjected(w *World, e MissionProjected) {
 	if _, ok := findMission(w, e.ID); ok {
 		return // idempotent: already projected
 	}
-	w.missions.NewEntity(&Mission{ID: e.ID, Goal: e.Goal, Status: MissionRunning, Budget: e.Budget, DecisionCursor: -1, DeciderSlot: e.DeciderSlot, BeliefModel: e.BeliefModel})
+	w.missions.NewEntity(&Mission{
+		ID:          e.ID,
+		Goal:        e.Goal,
+		Status:      MissionRunning,
+		Budget:      e.Budget,
+		DecisionCursor: -1,
+		DeciderSlot: e.DeciderSlot,
+		BeliefModel: e.BeliefModel,
+		Name:        e.Name,
+		Description: e.Description,
+		TargetID:    e.TargetID,
+		TenantID:    e.TenantID,
+	})
 	for _, n := range e.Nodes {
 		if _, ok := findWork(w, n.ID); ok {
 			continue // idempotent

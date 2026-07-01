@@ -608,17 +608,8 @@ func (m *missionManager) executeMission(ctx context.Context, missionID string, d
 	// Set StartedAt timestamp now that execution is beginning
 	active.mission.StartedAt = mission.NewUnixTimePtrNow()
 
-	// Update mission status to Running in the per-tenant store.
-	active.mission.Status = mission.MissionStatusRunning
-	if mStore, release, storeErr := m.missionStoreFor(ctx, active.tenantID); storeErr == nil && mStore != nil {
-		defer release()
-		if err := mStore.Update(ctx, active.mission); err != nil {
-			m.logger.Warn("failed to update mission status in store", "error", err, "mission_id", missionID)
-			// Continue execution - not critical
-		}
-	} else if storeErr != nil {
-		m.logger.Warn("failed to acquire store for status update", "error", storeErr, "mission_id", missionID)
-	}
+	// Status is now World-derived (ADR-0011/gibson#1118): the brain's MissionStarted
+	// event sets status=running in the World. No store write here.
 
 	// Increment the concurrent_missions counter on dispatch (queued → running).
 	// DECR fires from the terminal-state block below. Failure is non-fatal:
@@ -765,6 +756,12 @@ func (m *missionManager) executeMission(ctx context.Context, missionID string, d
 	// Pin the belief-model version onto the mission (ADR-0005 §5): the mission
 	// records the model it ran under so replay re-loads the exact artifact.
 	proj.BeliefModel = m.beliefVersion
+	// Carry display metadata so the World is the single source of truth for
+	// mission status + identity (ADR-0011/gibson#1118).
+	proj.Name = active.mission.Name
+	proj.Description = active.mission.Description
+	proj.TargetID = active.mission.TargetID.String()
+	proj.TenantID = active.mission.TenantID
 	if projErr != nil {
 		finalStatus = mission.MissionStatusFailed
 		errorMsg = fmt.Sprintf("failed to project mission into the World: %v", projErr)
@@ -785,9 +782,16 @@ func (m *missionManager) executeMission(ctx context.Context, missionID string, d
 
 		// Emit MissionStarted into the brain Timeline so the lifecycle projector
 		// derives "status:running" on the Subscribe stream (ADR-0011 decision 4,
-		// gibson#1116). The projector is a pure subscriber on the same engine, so
-		// this event reaches it via engine.Subscribe on the next tick.
-		eng.Submit(brain.MissionStarted{ID: missionID})
+		// gibson#1116). Carry display metadata so that even the minimal-launch
+		// path has the full mission identity in the World (gibson#1118).
+		eng.Submit(brain.MissionStarted{
+			ID:          missionID,
+			BeliefModel: m.beliefVersion,
+			Name:        active.mission.Name,
+			Description: active.mission.Description,
+			TargetID:    active.mission.TargetID.String(),
+			TenantID:    active.mission.TenantID,
+		})
 
 		// Block until the brain reaches a terminal mission state (or ctx is cancelled).
 		// The projector derives status:completed/failed from brain.MissionDone —
@@ -847,19 +851,10 @@ func (m *missionManager) executeMission(ctx context.Context, missionID string, d
 		}
 	}
 
-	// Update mission in the per-tenant store.
-	active.mission.Status = finalStatus
+	// Status is World-derived (ADR-0011/gibson#1118): the brain's MissionDone event
+	// already set the terminal status in the World via Reduce. No store write.
 	active.mission.Error = errorMsg
 	active.mission.CompletedAt = mission.NewUnixTimePtrNow()
-
-	if mStore, release, storeErr := m.missionStoreFor(ctx, active.tenantID); storeErr == nil && mStore != nil {
-		defer release()
-		if saveErr := mStore.Update(ctx, active.mission); saveErr != nil {
-			m.logger.Warn("failed to update mission in store", "error", saveErr)
-		}
-	} else if storeErr != nil {
-		m.logger.Warn("failed to acquire store to save final mission status", "error", storeErr)
-	}
 
 	m.logger.Info("mission execution completed",
 		"mission_id", missionID,
@@ -884,14 +879,8 @@ func (m *missionManager) Pause(ctx context.Context, missionID string, force bool
 	}
 
 	m.brainRegistry.For(active.tenantID.String()).Submit(brain.MissionPauseRequested{ID: missionID})
-
-	active.mission.Status = mission.MissionStatusPaused
-	if mStore, release, storeErr := m.missionStoreFor(ctx, active.tenantID); storeErr == nil && mStore != nil {
-		defer release()
-		if err := mStore.Update(ctx, active.mission); err != nil {
-			m.logger.Warn("failed to persist paused status", "error", err, "mission_id", missionID)
-		}
-	}
+	// Status is World-derived (ADR-0011/gibson#1118): MissionPauseRequested sets
+	// status=paused in the World via Reduce. No store write.
 
 	m.emitEvent(active.eventChan, api.MissionEventData{
 		EventType: "mission.paused",
@@ -914,19 +903,16 @@ func (m *missionManager) Resume(ctx context.Context, missionID string) (<-chan a
 	if !exists {
 		return nil, fmt.Errorf("mission %s is not active (resume requires a paused, in-memory mission)", missionID)
 	}
-	if active.mission.Status != mission.MissionStatusPaused {
-		return nil, fmt.Errorf("cannot resume mission %s: status is %s (expected paused)", missionID, active.mission.Status)
+	// Read mission status from the folded World (ADR-0011/gibson#1118).
+	eng := m.brainRegistry.For(active.tenantID.String())
+	worldStatus := worldMissionStatus(eng, missionID)
+	if worldStatus != string(brain.MissionPaused) {
+		return nil, fmt.Errorf("cannot resume mission %s: status is %s (expected paused)", missionID, worldStatus)
 	}
 
-	m.brainRegistry.For(active.tenantID.String()).Submit(brain.MissionResumed{ID: missionID})
-
-	active.mission.Status = mission.MissionStatusRunning
-	if mStore, release, storeErr := m.missionStoreFor(ctx, active.tenantID); storeErr == nil && mStore != nil {
-		defer release()
-		if err := mStore.Update(ctx, active.mission); err != nil {
-			m.logger.Warn("failed to persist running status on resume", "error", err, "mission_id", missionID)
-		}
-	}
+	eng.Submit(brain.MissionResumed{ID: missionID})
+	// Status is World-derived (ADR-0011/gibson#1118): MissionResumed sets
+	// status=running in the World via Reduce. No store write.
 
 	m.emitEvent(active.eventChan, api.MissionEventData{
 		EventType: "mission.resumed",
@@ -965,69 +951,34 @@ func (m *missionManager) Stop(ctx context.Context, missionID string, force bool)
 		Message:   "Mission stopped by user",
 	})
 
-	// Update mission status in the per-tenant store.
-	active.mission.Status = mission.MissionStatusCancelled
+	// Status is World-derived (ADR-0011/gibson#1118): MissionDone above set
+	// status=failed in the World via Reduce. No store write.
 	active.mission.CompletedAt = mission.NewUnixTimePtrNow()
-
-	if mStore, release, storeErr := m.missionStoreFor(ctx, active.tenantID); storeErr == nil && mStore != nil {
-		defer release()
-		if err := mStore.Update(ctx, active.mission); err != nil {
-			m.logger.Warn("failed to update mission in store", "error", err)
-		}
-	} else if storeErr != nil {
-		m.logger.Warn("failed to acquire store to stop mission", "error", storeErr)
-	}
 
 	m.logger.Info("mission stopped", "mission_id", missionID)
 	return nil
 }
 
 // List returns a list of missions with optional filtering.
+// Status and progress are World-derived (ADR-0011/gibson#1118): the brain's
+// folded World is the authoritative source — no Redis store reads for status.
 func (m *missionManager) List(ctx context.Context, activeOnly bool, limit, offset int) ([]api.MissionData, int, error) {
 	m.logger.Debug("listing missions", "active_only", activeOnly, "limit", limit, "offset", offset)
 
-	var result []api.MissionData
-
-	// Get active missions scoped to the calling tenant (C9 closure).
 	tenant := tenantFromCtxOrSystem(ctx)
-	tenantActives := m.tenantActive(tenant)
-	activeMissions := make([]*mission.Mission, 0, len(tenantActives))
-	for _, am := range tenantActives {
-		activeMissions = append(activeMissions, am.mission)
-	}
+	eng := m.brainRegistry.For(tenant.String())
+	snapshots := eng.Missions()
 
-	// Add active missions to result
-	for _, m := range activeMissions {
-		result = append(result, missionToData(m))
-	}
-
-	// If not active-only, also fetch from the per-tenant store.
-	if !activeOnly {
-		if mStore, release, storeErr := m.missionStoreFor(ctx, tenant); storeErr == nil && mStore != nil {
-			defer release()
-			filter := mission.NewMissionFilter()
-			filter.Limit = 1000 // Get a reasonable number
-			filter.Offset = 0
-
-			stored, listErr := mStore.List(ctx, filter)
-			if listErr != nil {
-				m.logger.Warn("failed to list missions from store", "error", listErr)
-			} else {
-				// Add completed missions that aren't already in active list
-				for _, storedMission := range stored {
-					isActive := false
-					for _, active := range activeMissions {
-						if active.ID == storedMission.ID {
-							isActive = true
-							break
-						}
-					}
-					if !isActive && storedMission.Status.IsTerminal() {
-						result = append(result, missionToData(storedMission))
-					}
-				}
-			}
+	var result []api.MissionData
+	for _, ms := range snapshots {
+		// C9 closure: only return missions belonging to the calling tenant.
+		if ms.TenantID != "" && ms.TenantID != tenant.String() {
+			continue
 		}
+		if activeOnly && ms.Status != brain.MissionRunning && ms.Status != brain.MissionPaused {
+			continue
+		}
+		result = append(result, missionSnapshotToData(ms))
 	}
 
 	total := len(result)
@@ -1040,7 +991,6 @@ func (m *missionManager) List(ctx context.Context, activeOnly bool, limit, offse
 			result = result[offset:]
 		}
 	}
-
 	if limit > 0 && len(result) > limit {
 		result = result[:limit]
 	}
@@ -1050,26 +1000,23 @@ func (m *missionManager) List(ctx context.Context, activeOnly bool, limit, offse
 }
 
 // Get returns a specific mission by ID, scoped to the calling tenant.
+// Status is World-derived (ADR-0011/gibson#1118).
 func (m *missionManager) Get(ctx context.Context, missionID string) (*api.MissionData, error) {
 	m.logger.Debug("getting mission", "mission_id", missionID)
 
 	tenant := tenantFromCtxOrSystem(ctx)
-	// Check active missions for the calling tenant first (C9 closure).
-	if active, exists := m.getActive(tenant, missionID); exists {
-		data := missionToData(active.mission)
+	eng := m.brainRegistry.For(tenant.String())
+	for _, ms := range eng.Missions() {
+		if ms.ID != missionID {
+			continue
+		}
+		// C9 closure: a caller cannot read another tenant's mission.
+		if ms.TenantID != "" && ms.TenantID != tenant.String() {
+			break
+		}
+		data := missionSnapshotToData(ms)
 		return &data, nil
 	}
-
-	// Check the per-tenant store.
-	if mStore, release, storeErr := m.missionStoreFor(ctx, tenant); storeErr == nil && mStore != nil {
-		defer release()
-		missionRecord, err := mStore.Get(ctx, types.ID(missionID))
-		if err == nil {
-			data := missionToData(missionRecord)
-			return &data, nil
-		}
-	}
-
 	return nil, fmt.Errorf("mission %s not found", missionID)
 }
 
@@ -1088,6 +1035,8 @@ func (m *missionManager) emitEvent(eventChan chan api.MissionEventData, event ap
 }
 
 // missionToData converts a mission.Mission to api.MissionData.
+// Kept for backward-compatibility with internal callers that still hold a
+// mission.Mission reference (e.g. the Run() event emission path).
 func missionToData(m *mission.Mission) api.MissionData {
 	data := api.MissionData{
 		ID:                  m.ID.String(),
@@ -1103,6 +1052,34 @@ func missionToData(m *mission.Mission) api.MissionData {
 	}
 
 	return data
+}
+
+// missionSnapshotToData converts a brain.MissionSnapshot (World-derived, ADR-0011)
+// to api.MissionData. Status and progress are authoritative — they come from the
+// folded World, not a secondary store.
+func missionSnapshotToData(ms brain.MissionSnapshot) api.MissionData {
+	return api.MissionData{
+		ID:           ms.ID,
+		TenantID:     ms.TenantID,
+		Name:         ms.Name,
+		Description:  ms.Description,
+		TargetID:     ms.TargetID,
+		Status:       string(ms.Status),
+		Progress:     ms.Progress,
+		FindingCount: ms.FindingsCount,
+	}
+}
+
+// worldMissionStatus returns the current status string for missionID from the
+// brain's folded World (ADR-0011/gibson#1118). Returns "" if the mission is not
+// in the World yet (it may still be initialising on the intake queue).
+func worldMissionStatus(eng *brain.Engine, missionID string) string {
+	for _, ms := range eng.Missions() {
+		if ms.ID == missionID {
+			return string(ms.Status)
+		}
+	}
+	return ""
 }
 
 // GetActiveMissionCount returns the number of currently active missions.
