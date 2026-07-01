@@ -10,6 +10,8 @@ import (
 	"github.com/zeroroot-ai/gibson/internal/platform/secrets"
 
 	sdksecrets "github.com/zeroroot-ai/gibson/internal/infra/secrets"
+	"github.com/zeroroot-ai/gibson/internal/infra/secrets/vault"
+	"github.com/zeroroot-ai/gibson/internal/infra/secrets/vault/brokercodec"
 	tenantv1 "github.com/zeroroot-ai/gibson/internal/server/daemon/api/gibson/tenant/v1"
 	"github.com/zeroroot-ai/sdk/auth"
 )
@@ -277,6 +279,99 @@ func TestSetBrokerConfig_PersistFailure_NoReload_FullPath(t *testing.T) {
 	// have fired.
 	if got, _ := reg.For(ctx, tenant); got != initialFake {
 		t.Fatalf("post-failure: cache should still be initial, got %v", got)
+	}
+}
+
+// TestGetBrokerConfig_ReflectsActiveBackend is the read-side active-backend
+// guard for gibson#1107. It asserts the three states GetBrokerConfig must
+// distinguish:
+//
+//  1. a genuinely-unprovisioned tenant (no row) → configured:false;
+//  2. a provisioned tenant carrying the operator's Hosted seed row →
+//     configured:true + VAULT_HOSTED, with NO explicit SetBrokerConfig call
+//     (the fix for the "configure backend" deadlock);
+//  3. after the tenant switches to BYO via SetBrokerConfig → the same read
+//     flips to VAULT_BYO.
+//
+// The active enum is derived from the persisted blob shape (namespace vs
+// path_prefix) via brokercodec.Redact, so this exercises the exact bytes the
+// operator seed and the daemon Set path write.
+func TestGetBrokerConfig_ReflectsActiveBackend(t *testing.T) {
+	getter := &inMemoryConfigGetter{rows: map[auth.TenantID]secrets.BrokerConfig{}}
+	srv, err := NewTenantAdminServer(TenantAdminConfig{
+		Reader:         getter,
+		Writer:         &memoryWriter{getter: getter},
+		ProbeFactory:   &fakeProbeFactory{}, // probe always succeeds
+		Auditor:        &fakeAuditor{},
+		Reloader:       &fakeReloader{},
+		SecretsService: &fakeSecretsLister{},
+		Now:            func() time.Time { return time.Unix(1700000000, 0).UTC() },
+	})
+	if err != nil {
+		t.Fatalf("NewTenantAdminServer: %v", err)
+	}
+
+	tenant := mustTenant(t, "acme")
+	ctx := withTenant(t, "acme")
+
+	// (1) Genuinely-unprovisioned tenant: no row → configured:false.
+	resp, err := srv.GetBrokerConfig(ctx, &tenantv1.GetBrokerConfigRequest{})
+	if err != nil {
+		t.Fatalf("GetBrokerConfig(unprovisioned): %v", err)
+	}
+	if resp.GetConfigured() {
+		t.Fatalf("unprovisioned tenant must report configured:false, got %+v", resp)
+	}
+
+	// (2) Provisioned tenant: seed the Hosted row exactly as the operator saga
+	// does (namespace mode via brokercodec.Encode with Hosted:true).
+	provider, blob, err := brokercodec.Encode(brokercodec.Fields{
+		Hosted:          true,
+		Address:         "https://vault.internal:8200",
+		NamespaceOrPath: "tenant/acme",
+		KVMount:         "secret",
+		Auth:            vault.AuthConfig{Method: vault.AuthMethod("jwt"), Role: "gibson-plugin-acme"},
+		Tenant:          tenant,
+	})
+	if err != nil {
+		t.Fatalf("seed Encode: %v", err)
+	}
+	getter.rows[tenant] = secrets.BrokerConfig{Provider: provider, ConfigBlob: blob}
+
+	resp, err = srv.GetBrokerConfig(ctx, &tenantv1.GetBrokerConfigRequest{})
+	if err != nil {
+		t.Fatalf("GetBrokerConfig(seeded): %v", err)
+	}
+	if !resp.GetConfigured() {
+		t.Fatalf("seeded tenant must report configured:true, got %+v", resp)
+	}
+	if got := resp.GetConfig().GetProvider(); got != tenantv1.BrokerProvider_BROKER_PROVIDER_VAULT_HOSTED {
+		t.Fatalf("seeded active backend: got %v, want VAULT_HOSTED", got)
+	}
+
+	// (3) Tenant switches to BYO via SetBrokerConfig; the write lands in the
+	// same store the reader sees, so the next read flips to VAULT_BYO.
+	if _, err := srv.SetBrokerConfig(ctx, &tenantv1.SetBrokerConfigRequest{
+		Candidate: &tenantv1.CandidateConfig{
+			Provider:        tenantv1.BrokerProvider_BROKER_PROVIDER_VAULT_BYO,
+			Address:         "https://byo-vault.example:8200",
+			NamespaceOrPath: "tenant/acme",
+			AuthMethod:      "token",
+			VaultToken:      []byte("hvs.byo"),
+		},
+	}); err != nil {
+		t.Fatalf("SetBrokerConfig(BYO): %v", err)
+	}
+
+	resp, err = srv.GetBrokerConfig(ctx, &tenantv1.GetBrokerConfigRequest{})
+	if err != nil {
+		t.Fatalf("GetBrokerConfig(after BYO): %v", err)
+	}
+	if !resp.GetConfigured() {
+		t.Fatalf("BYO tenant must report configured:true, got %+v", resp)
+	}
+	if got := resp.GetConfig().GetProvider(); got != tenantv1.BrokerProvider_BROKER_PROVIDER_VAULT_BYO {
+		t.Fatalf("after BYO set: got %v, want VAULT_BYO", got)
 	}
 }
 

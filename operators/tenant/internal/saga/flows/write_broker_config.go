@@ -139,25 +139,13 @@ func (d WriteTenantBrokerConfigDeps) WriteBrokerConfig(ctx context.Context, tena
 		return fmt.Errorf("writeTenantBrokerConfig: invalid tenant id %q: %w", tenantName, err)
 	}
 
-	// Resolve the per-tenant namespace from the template. The daemon's vault
-	// broker re-resolves the same template; keep them in sync.
-	rendered := renderVaultConfig(d.VaultConfig, tenantID)
-
-	// Encode through the shared broker-config codec so the operator and the
-	// daemon's SetBrokerConfig emit byte-identical vault.Config blobs for the
-	// same logical config — no hand-rolled JSON keys (gibson#1108). The
-	// operator writes the platform-managed Hosted broker (namespace mode).
-	providerName, configJSON, err := brokercodec.Encode(brokercodec.Fields{
-		Hosted:          true,
-		Address:         rendered.Address,
-		NamespaceOrPath: rendered.Namespace,
-		KVMount:         rendered.KVMount,
-		Auth: vault.AuthConfig{
-			Method: vault.AuthMethod(rendered.Auth.Method),
-			Role:   rendered.Auth.Role,
-		},
-		Tenant: tenantID,
-	})
+	// Encode the seed row through the shared broker-config codec so the
+	// operator and the daemon's SetBrokerConfig emit byte-identical
+	// vault.Config blobs for the same logical config — no hand-rolled JSON
+	// keys (gibson#1108). Every newly-provisioned tenant is seeded with the
+	// platform-managed Hosted broker (namespace mode), so GetBrokerConfig
+	// reports VAULT_HOSTED + configured:true from day one (gibson#1107).
+	providerName, configJSON, err := encodeHostedBrokerConfig(d.VaultConfig, tenantID)
 	if err != nil {
 		return fmt.Errorf("writeTenantBrokerConfig: encode config: %w", err)
 	}
@@ -175,6 +163,33 @@ func (d WriteTenantBrokerConfigDeps) WriteBrokerConfig(ctx context.Context, tena
 		return fmt.Errorf("writeTenantBrokerConfig: upsert: %w", err)
 	}
 	return nil
+}
+
+// encodeHostedBrokerConfig renders the operator's per-tenant VaultBrokerConfig
+// and encodes it, through the shared codec, as the Hosted (namespace-mode)
+// seed row every newly-provisioned tenant receives. It is the single mapping
+// from the operator's configuration onto the canonical vault.Config blob, and
+// is deterministic for a given (config, tenant): the same inputs always yield
+// the same provider name and byte-identical blob, which is what makes the
+// SetRaw upsert (ON CONFLICT DO UPDATE) converge on re-reconcile (idempotent
+// seed, gibson#1107). Splitting it out of WriteBrokerConfig keeps the seed
+// encoding unit-testable without a live platform Postgres.
+func encodeHostedBrokerConfig(vc VaultBrokerConfig, tenantID auth.TenantID) (provider string, blob []byte, err error) {
+	// Resolve the per-tenant namespace from the template. The daemon's vault
+	// broker re-resolves the same template; keep them in sync.
+	rendered := renderVaultConfig(vc, tenantID)
+
+	return brokercodec.Encode(brokercodec.Fields{
+		Hosted:          true,
+		Address:         rendered.Address,
+		NamespaceOrPath: rendered.Namespace,
+		KVMount:         rendered.KVMount,
+		Auth: vault.AuthConfig{
+			Method: vault.AuthMethod(rendered.Auth.Method),
+			Role:   rendered.Auth.Role,
+		},
+		Tenant: tenantID,
+	})
 }
 
 // DeleteBrokerConfig removes the per-tenant broker-config row. Shared by the

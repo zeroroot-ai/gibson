@@ -5,9 +5,12 @@
 package flows
 
 import (
+	"bytes"
 	"encoding/json"
 	"testing"
 
+	"github.com/zeroroot-ai/gibson/internal/infra/secrets/vault/brokercodec"
+	tenantv1 "github.com/zeroroot-ai/gibson/internal/server/daemon/api/gibson/tenant/v1"
 	"github.com/zeroroot-ai/sdk/auth"
 )
 
@@ -185,6 +188,77 @@ func TestRenderVaultConfig_NonJWTAuthRolePassThrough(t *testing.T) {
 			t.Errorf("approle method must pass Role through; got %q", rendered.Auth.Role)
 		}
 	})
+}
+
+// TestEncodeHostedBrokerConfig_SeedsVaultHosted asserts that the operator's
+// provisioning seed encodes a Hosted (namespace-mode) broker-config row that
+// the daemon's read side reports as VAULT_HOSTED (gibson#1107). This is the
+// seed that keeps a freshly-provisioned tenant off the "configure backend"
+// deadlock: GetBrokerConfig sees this row and returns configured:true +
+// VAULT_HOSTED with no explicit SetBrokerConfig call.
+func TestEncodeHostedBrokerConfig_SeedsVaultHosted(t *testing.T) {
+	id, err := auth.NewTenantID("acme")
+	if err != nil {
+		t.Fatalf("NewTenantID: %v", err)
+	}
+	vc := VaultBrokerConfig{
+		Address:           "https://vault.example:8200",
+		NamespaceTemplate: "tenant/{tenant_id}",
+		KVMount:           "secret",
+		Auth:              VaultAuthConfig{Method: "jwt"},
+	}
+
+	provider, blob, err := encodeHostedBrokerConfig(vc, id)
+	if err != nil {
+		t.Fatalf("encodeHostedBrokerConfig: %v", err)
+	}
+	if provider != brokercodec.ProviderName {
+		t.Errorf("provider: got %q, want %q", provider, brokercodec.ProviderName)
+	}
+
+	// The daemon reads this exact blob back through brokercodec.Redact; the
+	// active-backend enum it derives MUST be VAULT_HOSTED (namespace mode).
+	redacted, err := brokercodec.Redact(blob)
+	if err != nil {
+		t.Fatalf("Redact: %v", err)
+	}
+	if redacted.GetProvider() != tenantv1.BrokerProvider_BROKER_PROVIDER_VAULT_HOSTED {
+		t.Errorf("seed provider enum: got %v, want VAULT_HOSTED", redacted.GetProvider())
+	}
+	// Namespace mode: the tenant-scoped namespace is carried, not a path prefix.
+	if got := redacted.GetNamespaceOrPath(); got != "tenant/acme" {
+		t.Errorf("seed namespace: got %q, want %q", got, "tenant/acme")
+	}
+}
+
+// TestEncodeHostedBrokerConfig_Idempotent asserts the seed encoding is
+// deterministic: re-encoding the same (config, tenant) yields the identical
+// provider name and byte-identical blob. This is what makes the saga's SetRaw
+// upsert (ON CONFLICT DO UPDATE) converge on re-reconcile without churn — the
+// idempotency the provisioning seed relies on (gibson#1107).
+func TestEncodeHostedBrokerConfig_Idempotent(t *testing.T) {
+	id, _ := auth.NewTenantID("acme")
+	vc := VaultBrokerConfig{
+		Address:           "https://vault.example:8200",
+		NamespaceTemplate: "tenant/{tenant_id}",
+		KVMount:           "secret",
+		Auth:              VaultAuthConfig{Method: "jwt"},
+	}
+
+	p1, b1, err := encodeHostedBrokerConfig(vc, id)
+	if err != nil {
+		t.Fatalf("encode #1: %v", err)
+	}
+	p2, b2, err := encodeHostedBrokerConfig(vc, id)
+	if err != nil {
+		t.Fatalf("encode #2: %v", err)
+	}
+	if p1 != p2 {
+		t.Errorf("provider not stable: %q vs %q", p1, p2)
+	}
+	if !bytes.Equal(b1, b2) {
+		t.Errorf("blob not byte-identical across re-encode:\n #1 %s\n #2 %s", b1, b2)
+	}
 }
 
 // TestSubstituteTenantID covers the helper directly, including edge
