@@ -5,6 +5,7 @@ package brain_test
 import (
 	"context"
 	"testing"
+	"time"
 
 	miniredis "github.com/alicebob/miniredis/v2"
 	goredis "github.com/redis/go-redis/v9"
@@ -13,6 +14,20 @@ import (
 
 	"github.com/zeroroot-ai/gibson/internal/engine/brain"
 )
+
+// waitForCondition polls cond until true or 2 s (used by hydration tests to
+// wait for the async tick loop to apply replay-submitted events).
+func waitForCondition(t *testing.T, cond func() bool) {
+	t.Helper()
+	deadline := time.Now().Add(2 * time.Second)
+	for time.Now().Before(deadline) {
+		if cond() {
+			return
+		}
+		time.Sleep(10 * time.Millisecond)
+	}
+	t.Fatal("condition not met within deadline")
+}
 
 // newTestRedis starts an in-memory Redis server and returns a connected client.
 // The caller is responsible for calling mr.Close() and rdb.Close() when done.
@@ -170,4 +185,170 @@ func TestEngine_WithStore_NilSafe(t *testing.T) {
 	require.NotPanics(t, func() {
 		eng.Tick()
 	}, "Tick should not panic without a store")
+}
+
+// TestHydrate_EquivalenceAfterRestart is the primary correctness test for
+// ADR-0011 slice #1114: a fresh Engine hydrated from the persisted Timeline must
+// reproduce the same World state as the original engine (fold-determinism).
+//
+// Scenario:
+//  1. Engine "pre" appends a fixed event sequence directly to the store (no
+//     Systems, so no cascaded events — the set of persisted events is exactly
+//     what we submitted). This isolates fold-determinism from system behavior.
+//  2. A fresh Registry is built with the same store. Registry.For(tenant)
+//     creates a new Engine, calls Hydrate internally, and starts the tick loop.
+//  3. The rehydrated World snapshots must equal the original fold over the same
+//     events.
+//
+// ADR-0009 guarantee: the subscriber installed via OnEngine must NOT fire during
+// Hydrate (replay is a pure fold; no side effects).
+func TestHydrate_EquivalenceAfterRestart(t *testing.T) {
+	const tenant = "tenant-hydrate"
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+
+	_, rdb := newTestRedis(t)
+	store := brain.NewRedisTimelineStore(rdb)
+
+	// --- Phase 1: persist a deterministic event sequence ---
+	// We persist events directly to the store (rather than through an Engine)
+	// so the set of stored events is exactly the submitted set — no cascades.
+	events := []brain.Event{
+		brain.MissionStarted{ID: "m1", Goal: "scan hosts", BeliefModel: "test"},
+		brain.HostObserved{ScopeID: "scope", Address: "10.0.0.1", OpenPorts: []int{22, 443}, MissionID: "m1"},
+		brain.HostObserved{ScopeID: "scope", Address: "10.0.0.2", OpenPorts: []int{80}, MissionID: "m1"},
+		brain.WorkDispatched{ID: "work-a", MissionID: "m1", ItemKind: "tool", Target: "port-scan", Input: `{"target":"10.0.0.1"}`},
+		brain.WorkCompleted{ID: "work-a", Result: `{"open":[22,443]}`},
+	}
+	for _, ev := range events {
+		_, err := store.Append(context.Background(), tenant, ev)
+		require.NoError(t, err)
+	}
+
+	// Compute the "expected" World by folding the same events into a fresh engine.
+	expected := brain.NewEngine(tenant)
+	for _, ev := range events {
+		expected.Submit(ev)
+	}
+	expected.Tick()
+	expMissions := expected.Missions()
+	expHosts := expected.Hosts()
+	expWork := expected.Work()
+
+	require.Len(t, expMissions, 1, "expected: one mission")
+	require.Len(t, expHosts, 2, "expected: two hosts")
+	require.Len(t, expWork, 1, "expected: one work item")
+
+	// --- Phase 2: simulate restart via a fresh Registry ---
+	// Count subscribers fired during Hydrate (must be 0 — ADR-0009).
+	replayDispatchCount := 0
+	r := brain.NewRegistry(ctx)
+	r.WithStoreFactory(func(_ context.Context, _ string) brain.TimelineStore {
+		return store
+	})
+	// Subscribe BEFORE For() so the hook is installed before hydration.
+	r.OnEngine(func(e *brain.Engine) {
+		e.Subscribe(func(ev brain.Event) {
+			if _, ok := ev.(brain.WorkDispatched); ok {
+				replayDispatchCount++
+			}
+		})
+	})
+
+	post := r.For(tenant) // hydrates synchronously before returning
+
+	// Snapshots must reproduce the expected fold.
+	postMissions := post.Missions()
+	postHosts := post.Hosts()
+	postWork := post.Work()
+
+	require.Len(t, postMissions, len(expMissions), "post: mission count must match expected")
+	assert.Equal(t, expMissions[0].ID, postMissions[0].ID, "post: mission ID")
+	assert.Equal(t, expMissions[0].Status, postMissions[0].Status, "post: mission status")
+
+	require.Len(t, postHosts, len(expHosts), "post: host count must match expected")
+	for i := range expHosts {
+		assert.Equal(t, expHosts[i].Address, postHosts[i].Address, "post: host[%d] address", i)
+		assert.Equal(t, expHosts[i].OpenPorts, postHosts[i].OpenPorts, "post: host[%d] open ports", i)
+	}
+
+	require.Len(t, postWork, len(expWork), "post: work count must match expected")
+	for i := range expWork {
+		assert.Equal(t, expWork[i].ID, postWork[i].ID, "post: work[%d] ID", i)
+		assert.Equal(t, expWork[i].State, postWork[i].State, "post: work[%d] state", i)
+	}
+
+	// ADR-0009: no subscribers may fire during Hydrate (replay is a pure fold).
+	// The subscriber was installed by OnEngine before Hydrate ran, so if it had
+	// fired during the fold, replayDispatchCount would be > 0 here.
+	assert.Equal(t, 0, replayDispatchCount,
+		"no WorkDispatched subscribers may fire during Hydrate (ADR-0009: replay has no effects)")
+}
+
+// TestHydrate_InFlightWorkFailedOnRestart verifies that work still `running`
+// in the persisted Timeline is transitioned to WorkFailed on hydration
+// (ADR-0011 decision 5: a crash IS a failure).
+func TestHydrate_InFlightWorkFailedOnRestart(t *testing.T) {
+	const tenant = "tenant-inflight"
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+
+	_, rdb := newTestRedis(t)
+	store := brain.NewRedisTimelineStore(rdb)
+
+	// Append raw events so we can craft an exact "running but never completed"
+	// scenario without running systems.
+	events := []brain.Event{
+		brain.MissionStarted{ID: "m1", Goal: "find open ports", BeliefModel: "test"},
+		brain.WorkDispatched{ID: "work-orphan", MissionID: "m1", ItemKind: "tool", Target: "scan", Input: `{}`},
+		// No WorkCompleted — simulates daemon crash mid-flight.
+	}
+	for _, ev := range events {
+		_, err := store.Append(context.Background(), tenant, ev)
+		require.NoError(t, err)
+	}
+
+	// Hydrate: Registry.For creates a fresh engine, calls Hydrate which replays
+	// the timeline and submits ResumeFailInFlight events to the intake queue.
+	r := brain.NewRegistry(ctx)
+	r.WithStoreFactory(func(_ context.Context, _ string) brain.TimelineStore {
+		return store
+	})
+	eng := r.For(tenant) // hydrates; intake queue now has a WorkCompleted{Err:"interrupted:..."}
+
+	// After one tick the RetrySystem / MissionCompletion see the failed work.
+	// We must tick once to drain the intake (ResumeFailInFlight was submitted to
+	// the intake, not applied directly during Hydrate).
+	waitForCondition(t, func() bool {
+		work := eng.Work()
+		for _, wi := range work {
+			if wi.ID == "work-orphan" && wi.State != brain.WorkRunning {
+				return true
+			}
+		}
+		return false
+	})
+
+	// Confirm the orphaned work is no longer running.
+	for _, wi := range eng.Work() {
+		if wi.ID == "work-orphan" {
+			require.NotEqual(t, brain.WorkRunning, wi.State,
+				"orphaned in-flight work must not remain Running after hydration + tick")
+		}
+	}
+}
+
+// TestRegistry_WithStoreFactory_NoopWhenFactoryNil verifies that a Registry
+// without a StoreFactory creates engines that operate in-memory only (no panic,
+// backward-compatible with pre-#1113 behavior).
+func TestRegistry_WithStoreFactory_NoopWhenFactoryNil(t *testing.T) {
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+
+	r := brain.NewRegistry(ctx)
+	// No WithStoreFactory call — should be safe.
+	eng := r.For("tenant-noop")
+	eng.Submit(brain.HostObserved{ScopeID: "s", Address: "10.0.0.1"})
+	require.NotPanics(t, func() { eng.Tick() }, "in-memory engine must not panic without a store factory")
+	require.Len(t, eng.Hosts(), 1, "event should still be processed in-memory")
 }
