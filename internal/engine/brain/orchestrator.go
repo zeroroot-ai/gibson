@@ -59,15 +59,33 @@ type Mission struct {
 	// re-loads the exact model and reproduces the field; empty → no pinned model
 	// (placeholder / OSS-without-base-model). Read-only after launch.
 	BeliefModel string
+
+	// Metadata carried at launch so the World is the single source of truth for
+	// mission status + display data (ADR-0011/ADR-0027, gibson#1118).
+	// These fields are populated by MissionStarted and never mutated.
+	Name        string // human-readable mission name (from the definition)
+	Description string // mission description (from the definition)
+	TargetID    string // UUID of the target this mission runs against
+	TenantID    string // tenant this mission belongs to (for ListMissions scoping)
 }
 
 // MissionStarted launches a mission. (CUE-mission projection lands later; this is
 // the minimal launch event.)
+// As of ADR-0011 (gibson#1118) this event also carries display metadata
+// (Name/Description/TargetID/TenantID) so the World is the single source of
+// truth for mission status and identity — no parallel Redis store needed.
 type MissionStarted struct {
 	ID   string
 	Goal string
 	// BeliefModel pins the belief-model version (ADR-0005 §5); empty → unpinned.
 	BeliefModel string
+
+	// Display metadata (ADR-0011/gibson#1118): carried from the CUE definition and
+	// target at launch so ListMissions can fold the World without a secondary store.
+	Name        string
+	Description string
+	TargetID    string
+	TenantID    string
 }
 
 func (MissionStarted) Kind() string { return "mission.started" }
@@ -100,7 +118,17 @@ func applyMissionStarted(w *World, e MissionStarted) {
 	if _, ok := findMission(w, e.ID); ok {
 		return
 	}
-	w.missions.NewEntity(&Mission{ID: e.ID, Goal: e.Goal, Status: MissionRunning, DecisionCursor: -1, BeliefModel: e.BeliefModel})
+	w.missions.NewEntity(&Mission{
+		ID:          e.ID,
+		Goal:        e.Goal,
+		Status:      MissionRunning,
+		DecisionCursor: -1,
+		BeliefModel: e.BeliefModel,
+		Name:        e.Name,
+		Description: e.Description,
+		TargetID:    e.TargetID,
+		TenantID:    e.TenantID,
+	})
 }
 
 // MissionPauseRequested halts a running mission (operator pause). The executor
@@ -222,14 +250,66 @@ type MissionSnapshot struct {
 	TokensUsed       int64
 	DeciderSlot      DeciderSlot
 	BeliefModel      string // pinned belief-model version (ADR-0005 §5)
+
+	// Display metadata (ADR-0011/gibson#1118): folded from MissionStarted so
+	// ListMissions can serve all mission data from the World without a secondary store.
+	Name        string
+	Description string
+	TargetID    string
+	TenantID    string
+
+	// Progress is the ratio of completed work nodes to total work nodes for the
+	// mission (0.0–1.0), derived from the World's WorkItem entities at snapshot time
+	// (ADR-0011/gibson#1118). Zero when no work nodes are projected yet.
+	Progress float64
+	// FindingsCount is the number of Finding entities in the World attributed to
+	// this mission, derived at snapshot time.
+	FindingsCount int32
 }
 
-// MissionSnapshot returns the current missions in deterministic (ID) order.
+// missionProgress computes (completed, total) work-node counts for a given
+// missionID, scanning the World's WorkItem entities (same-package access).
+// Called once per mission from MissionSnapshot so the scan is amortised.
+func missionProgress(w *World, missionID string) (completed, total int) {
+	q := ecs.NewFilter1[WorkItem](w.ecs).Query()
+	defer q.Close()
+	for q.Next() {
+		wi := q.Get()
+		if wi.MissionID != missionID {
+			continue
+		}
+		total++
+		if wi.State == WorkDone || wi.State == WorkSkipped {
+			completed++
+		}
+	}
+	return
+}
+
+// missionFindingsCount counts Finding entities attributed to missionID.
+// Currently all Findings are tenant-scoped (no MissionID on the Finding entity);
+// this returns 0 until a MissionID field is added to Finding (a follow-up slice).
+// The interface is in place so callers already read from the World.
+func missionFindingsCount(w *World, missionID string) int32 {
+	// Findings do not currently carry a MissionID — return 0 (tracked in
+	// gibson#1078). The World is still the correct source; this function is the
+	// hook where the count will be wired once findings carry mission attribution.
+	_ = missionID
+	return 0
+}
+
+// MissionSnapshot returns the current missions in deterministic (ID) order,
+// including real progress (completed work nodes / total) derived from the World.
 func (w *World) MissionSnapshot() []MissionSnapshot {
 	var out []MissionSnapshot
 	q := ecs.NewFilter1[Mission](w.ecs).Query()
 	for q.Next() {
 		m := q.Get()
+		completed, total := missionProgress(w, m.ID)
+		var progress float64
+		if total > 0 {
+			progress = float64(completed) / float64(total)
+		}
 		out = append(out, MissionSnapshot{
 			ID:               m.ID,
 			Goal:             m.Goal,
@@ -241,6 +321,12 @@ func (w *World) MissionSnapshot() []MissionSnapshot {
 			TokensUsed:       m.TokensUsed,
 			DeciderSlot:      m.DeciderSlot,
 			BeliefModel:      m.BeliefModel,
+			Name:             m.Name,
+			Description:      m.Description,
+			TargetID:         m.TargetID,
+			TenantID:         m.TenantID,
+			Progress:         progress,
+			FindingsCount:    missionFindingsCount(w, m.ID),
 		})
 	}
 	sort.Slice(out, func(i, j int) bool { return out[i].ID < out[j].ID })
