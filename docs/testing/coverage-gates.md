@@ -8,9 +8,10 @@ QUALITY-BARS §4). Together they supersede the former flat 60% bar (ADR-0021).
 | Absolute floor | repo-wide total coverage ≥ the committed floor, ratcheting toward **80%** | `scripts/check-coverage-floor.sh` + `.coverage-floor` | yes |
 | Diff coverage | **≥85%** of the statement lines a PR changes are covered | `cmd/diff-coverage` | yes |
 
-Both run in `.github/workflows/coverage.yml`, which generates one repo-wide
-profile (`make coverage-profile`, with the same redis + envtest setup as the
-correctness pass) and feeds it to both gates.
+Both run in the `coverage` job of `.github/workflows/go-ci.yml` (merge_group
+tier — the authoritative gate, not a per-PR check), which generates one
+repo-wide profile (`make coverage-profile`, with the same redis + envtest
+setup as the correctness pass) and feeds it to both gates.
 
 ## Why a ratchet, not a hard 80%
 

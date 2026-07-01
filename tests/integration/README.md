@@ -193,7 +193,8 @@ make test-integration          # scoped, container-backed; needs Docker
 make test-integration INTEGRATION_PKG=./tests/integration/...   # narrower
 ```
 
-CI runs it as `.github/workflows/integration.yml` (Docker + envtest). The lane is
+CI runs it as the `integration` job in `.github/workflows/go-ci.yml` (merge_group
+tier; Docker + envtest). The lane is
 scoped to packages that currently compile under `-tags integration`; several
 older integration-tagged tests have bit-rotted and are excluded pending repair
 (see the `INTEGRATION_PKG` comment in the Makefile).

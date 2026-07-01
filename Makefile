@@ -223,7 +223,8 @@ check-coverage:
 
 # coverage-profile generates the repo-wide atomic coverage profile the two
 # quality gates (floor + diff) consume. CI runs this once with the envtest
-# binaries on PATH (see .github/workflows/coverage.yml) so operator suites
+# binaries on PATH (see the `coverage` job in .github/workflows/go-ci.yml) so
+# operator suites
 # count. Spec: gibson#794 (E3 / QUALITY-BARS §4).
 coverage-profile:
 	@echo "Generating repo-wide coverage profile -> $(COVERAGE_FILE)..."
@@ -303,8 +304,8 @@ check-critical-paths:
 # test-integration: the integration lane (gibson#795, E3 / QUALITY-BARS §4
 # Tier 3). Runs the `integration`-tagged suite — testcontainers spins up
 # Postgres/Neo4j/Redis/OpenFGA per test, and operator envtest suites run when
-# KUBEBUILDER_ASSETS is set. Requires Docker; CI provides it
-# (.github/workflows/integration.yml).
+# KUBEBUILDER_ASSETS is set. Requires Docker; CI provides it via the
+# `integration` job in .github/workflows/go-ci.yml (merge_group tier).
 #
 # INTEGRATION_PKG is scoped to the packages that carry the five Tier-3 critical
 # paths and currently COMPILE under -tags integration:

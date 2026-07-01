@@ -17,7 +17,8 @@
 // (manifest_test.go) is a pure-unit AST check — no Docker, no infra — that
 // fails CI if any pinned test is deleted or renamed. So the critical-path suite
 // can never silently regress, and the integration lane that runs these tests
-// (.github/workflows/integration.yml) has a stable, enumerable contract.
+// (the `integration` job in .github/workflows/go-ci.yml) has a stable,
+// enumerable contract.
 package criticalpath
 
 // CoveringTest pins one test function, located by the repo-relative directory

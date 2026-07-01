@@ -1,0 +1,244 @@
+name: go-ci
+
+# Thin caller for the canonical three-tier Go CI (Epic: cicd-efficiency, board #44,
+# slice S2, gibson#1128). See docs/architecture/CICD-CONTEXT.md and
+# docs/adr/0060-ci-runner-split-hosted-default-ephemeral-metal.md.
+#
+# Replaces the standalone lint.yml / coverage.yml / integration.yml workflows,
+# which each double-fired their full suite on both `pull_request` and
+# `push:main`. This file follows the org-wide trigger split instead:
+#
+#   pull_request -> fast tier:   quick contributor signal (vet/build/test/lint,
+#                                critical-path manifest guard). No race, no
+#                                Docker-backed integration suite.
+#   merge_group  -> heavy tier:  authoritative gate (race + govulncheck via the
+#                                reusable, plus gibson's coverage floor/diff and
+#                                the testcontainers-backed integration suite).
+#
+# merge_group is inert until the merge queue is enabled on gibson (slice S3,
+# .github#202) -- wiring it now is intentionally a no-op until then.
+#
+# gibson's own `make lint` (golangci-lint built from source, pinned to
+# GOLANGCI_LINT_VERSION in the Makefile) is kept as a separate job instead of
+# delegating to the reusable's built-in golangci-lint-action step: the
+# reusable pins golangci-lint-action to a fixed version (v2.0.2) which can
+# silently diverge from the repo's Makefile-pinned version and its embedded Go
+# version can trail go.mod's toolchain target -- exactly the "v2 trap" gibson
+# was already bitten by once (sdk#355/adk#154, see lint.yml history). Passing
+# `skip-lint: true` avoids double-running golangci-lint under two different
+# pins.
+#
+# NOT migrated here (explicitly out of scope for this slice):
+#   - build.yaml's image-build job and its embedded `test` job (matrix over
+#     setec_integration/empty build tags) -- image-build collapse is slice S4.
+#     That job currently still runs `go vet` + `go test -race` on every
+#     `pull_request`, which duplicates part of this workflow's heavy tier.
+#     Known parity/efficiency gap, tracked for S4 to resolve by removing it.
+#   - gibsoncheck.yml (custom analyzer + authz-registry drift gate) and
+#     fga-smoke-test.yml -- neither is a generic go build/test/lint/coverage
+#     suite and both are required status checks; left untouched.
+#   - CodeQL / Trivy scanner cadence -- separate scanner-cadence slice.
+
+on:
+  pull_request:
+    paths:
+      - '**/*.go'
+      - 'go.mod'
+      - 'go.sum'
+      - '.golangci.yml'
+      - '.deadcode-baseline'
+      - '.coverage-floor'
+      - 'scripts/check-deadcode.sh'
+      - 'scripts/check-coverage-floor.sh'
+      - 'scripts/check-fga-model-headers.sh'
+      - 'scripts/lint-*.mjs'
+      - 'cmd/diff-coverage/**'
+      - 'tests/criticalpath/**'
+      - 'Makefile'
+      - '.github/workflows/go-ci.yml'
+  merge_group:
+
+concurrency:
+  group: go-ci-${{ github.event.pull_request.number || github.ref }}
+  cancel-in-progress: true
+
+permissions:
+  contents: read
+
+jobs:
+  # ---- fast tier (pull_request): reusable vet/build/test + mod-tidy drift ----
+  fast:
+    if: github.event_name == 'pull_request'
+    uses: zeroroot-ai/.github/.github/workflows/reusable-go-ci.yml@v2
+    with:
+      tier: fast
+      private-modules: true
+      skip-lint: true # gibson runs its own pinned golangci-lint below (make lint)
+    secrets:
+      gh-pat: ${{ secrets.GH_PAT_GIBSON_RO }}
+
+  # ---- heavy tier (merge_group): reusable race + govulncheck ----
+  # Matrix mirrors build.yaml's setec_integration/empty variant so the
+  # authoritative gate exercises both build-tag configurations the daemon ships.
+  heavy:
+    if: github.event_name == 'merge_group'
+    strategy:
+      fail-fast: false
+      matrix:
+        build_tags: ["", "setec_integration"]
+    uses: zeroroot-ai/.github/.github/workflows/reusable-go-ci.yml@v2
+    with:
+      tier: heavy
+      private-modules: true
+      build-tags: ${{ matrix.build_tags }}
+    secrets:
+      gh-pat: ${{ secrets.GH_PAT_GIBSON_RO }}
+
+  # ---- gibson-specific lint (fast tier / pull_request) ----
+  # Kept native (not delegated to the reusable's golangci-lint step) so the
+  # Makefile-pinned golangci-lint version and toolchain stay the single
+  # source of truth. Includes the deadcode gate and the extra pagination /
+  # allowed-identities / FGA-header script gates make lint already runs.
+  lint:
+    if: github.event_name == 'pull_request'
+    runs-on: ubuntu-latest
+    env:
+      GOPRIVATE: github.com/zeroroot-ai/*
+      GONOSUMDB: github.com/zeroroot-ai/*
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0 # merge-base needs full history
+
+      - name: Configure git for private modules
+        if: github.event.pull_request.head.repo.fork != true
+        run: |
+          git config --global \
+            url."https://x-access-token:${{ secrets.GH_PAT_GIBSON_RO }}@github.com/".insteadOf \
+            "https://github.com/"
+
+      - uses: actions/setup-go@v6
+        with:
+          go-version-file: go.mod
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+
+      - name: Lint (blocking, new-from-merge-base)
+        run: make lint LINT_BASE=origin/${{ github.base_ref || 'main' }}
+
+      - name: Dead-code gate (blocking, baselined)
+        run: make lint-deadcode
+
+  # ---- gibson-specific coverage gates (heavy tier / merge_group) ----
+  # Design intent (CICD-CONTEXT.md decision 8): coverage is part of the
+  # merge_group-only authoritative suite, not a per-PR gate.
+  coverage:
+    if: github.event_name == 'merge_group'
+    runs-on: ubuntu-latest
+    name: coverage gates (floor + diff)
+    services:
+      redis:
+        image: redis/redis-stack-server:7.4.0-v1
+        ports:
+          - 6379:6379
+        options: >-
+          --health-cmd "redis-cli ping"
+          --health-interval 5s
+          --health-timeout 3s
+          --health-retries 5
+    env:
+      GOPRIVATE: github.com/zeroroot-ai/*
+      GONOSUMDB: github.com/zeroroot-ai/*
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Configure git for private modules
+        run: |
+          git config --global \
+            url."https://x-access-token:${{ secrets.GH_PAT_GIBSON_RO }}@github.com/".insteadOf \
+            "https://github.com/"
+
+      - uses: actions/setup-go@v6
+        with:
+          go-version-file: go.mod
+
+      - name: Fetch base branch
+        run: git fetch --no-tags origin "${{ github.base_ref || 'main' }}"
+
+      - name: Set up envtest binaries
+        run: |
+          go install sigs.k8s.io/controller-runtime/tools/setup-envtest@latest
+          ENVTEST_K8S_VERSION="$(go list -m -f '{{.Version}}' k8s.io/api | sed -E 's/^v0\.([0-9]+)\..*/1.\1/')"
+          echo "Using envtest k8s version ${ENVTEST_K8S_VERSION}"
+          ASSETS="$(setup-envtest use "${ENVTEST_K8S_VERSION}" -p path)"
+          echo "KUBEBUILDER_ASSETS=${ASSETS}" >> "$GITHUB_ENV"
+
+      - name: Generate coverage profile
+        run: make coverage-profile
+
+      - name: Absolute coverage floor (ratchet toward 80%)
+        run: make check-coverage-floor
+
+      - name: Diff coverage (>=85% of changed lines)
+        run: make check-diff-coverage DIFF_COVERAGE_BASE=origin/${{ github.base_ref || 'main' }}
+
+  # ---- critical-path manifest guard (fast tier / pull_request) ----
+  # Pure-unit, no Docker; cheap enough to run on every PR so the integration
+  # suite below can never silently lose a named Tier-3 path.
+  critical-paths:
+    if: github.event_name == 'pull_request'
+    runs-on: ubuntu-latest
+    name: critical-path manifest guard
+    env:
+      GOPRIVATE: github.com/zeroroot-ai/*
+      GONOSUMDB: github.com/zeroroot-ai/*
+    steps:
+      - uses: actions/checkout@v4
+      - name: Configure git for private modules
+        if: github.event.pull_request.head.repo.fork != true
+        run: |
+          git config --global \
+            url."https://x-access-token:${{ secrets.GH_PAT_GIBSON_RO }}@github.com/".insteadOf \
+            "https://github.com/"
+      - uses: actions/setup-go@v6
+        with:
+          go-version-file: go.mod
+      - name: Guard named critical-path tests
+        run: make check-critical-paths
+
+  # ---- container-backed integration suite (heavy tier / merge_group) ----
+  integration:
+    if: github.event_name == 'merge_group'
+    runs-on: ubuntu-latest
+    name: integration suite (testcontainers + envtest)
+    env:
+      GOPRIVATE: github.com/zeroroot-ai/*
+      GONOSUMDB: github.com/zeroroot-ai/*
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Configure git for private modules
+        run: |
+          git config --global \
+            url."https://x-access-token:${{ secrets.GH_PAT_GIBSON_RO }}@github.com/".insteadOf \
+            "https://github.com/"
+
+      - uses: actions/setup-go@v6
+        with:
+          go-version-file: go.mod
+          cache: true
+
+      - name: Set up envtest binaries
+        run: |
+          go install sigs.k8s.io/controller-runtime/tools/setup-envtest@latest
+          ENVTEST_K8S_VERSION="$(go list -m -f '{{.Version}}' k8s.io/api | sed -E 's/^v0\.([0-9]+)\..*/1.\1/')"
+          echo "Using envtest k8s version ${ENVTEST_K8S_VERSION}"
+          ASSETS="$(setup-envtest use "${ENVTEST_K8S_VERSION}" -p path)"
+          echo "KUBEBUILDER_ASSETS=${ASSETS}" >> "$GITHUB_ENV"
+
+      - name: Run integration lane
+        run: make test-integration
