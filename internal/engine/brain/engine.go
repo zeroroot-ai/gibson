@@ -2,6 +2,7 @@ package brain
 
 import (
 	"context"
+	"log/slog"
 	"sync"
 	"time"
 )
@@ -35,6 +36,10 @@ type Engine struct {
 	systems     []System
 	subscribers []func(Event) // live-only event taps (ADR-0009); never fire on Replay
 
+	// store is the durable-log seam (ADR-0011). Nil when no durable store is
+	// configured (in-memory only, backward-compatible). Set via WithStore.
+	store TimelineStore
+
 	// mu guards World + Timeline. The tick (single writer) takes the write lock;
 	// external readers (e.g. the read-path gRPC handlers) take the read lock so
 	// they never race the reducer. Submit does not touch the World, so it is
@@ -49,6 +54,14 @@ func NewEngine(tenant string) *Engine {
 		Timeline: &Timeline{},
 		intake:   make(chan Event, intakeBuffer),
 	}
+}
+
+// WithStore wires a TimelineStore for durable event persistence (ADR-0011).
+// Returns the receiver for chaining. Call before the first Submit or Run.
+// A nil store (the default) is safe — the engine operates in-memory only.
+func (e *Engine) WithStore(s TimelineStore) *Engine {
+	e.store = s
+	return e
 }
 
 // AddSystem registers a system to run every tick (e.g., the Orchestrator).
@@ -66,6 +79,20 @@ func (e *Engine) Subscribe(fn func(Event)) { e.subscribers = append(e.subscriber
 func (e *Engine) Submit(ev Event) { e.intake <- ev }
 
 func (e *Engine) apply(ev Event) {
+	// Persist to the durable log before folding into the in-memory World.
+	// Errors are logged and do not abort the tick — a transient store failure
+	// must not crash the live engine. The caller (tick goroutine) holds the
+	// write lock; context.Background() is used because no caller context is
+	// available inside the single-writer tick.
+	if e.store != nil {
+		if _, err := e.store.Append(context.Background(), e.World.Tenant, ev); err != nil {
+			slog.Error("brain/engine: durable append failed",
+				"tenant", e.World.Tenant,
+				"kind", ev.Kind(),
+				"err", err,
+			)
+		}
+	}
 	e.Timeline.Append(ev)
 	Reduce(e.World, ev)
 	for _, fn := range e.subscribers {
