@@ -138,6 +138,14 @@ func applyWorkCompleted(w *World, e WorkCompleted) {
 		return // completion for unknown work: ignore (out-of-order/duplicate)
 	}
 	wi := w.work.Get(ent)
+	// Idempotent: a late WorkCompleted arriving for work that is already in a
+	// terminal state (failed, done, skipped — including one already failed by
+	// ResumeFailInFlight) is a no-op. This prevents a worker that outlived the
+	// daemon from corrupting the World after a restart (ADR-0011 decision 5).
+	switch wi.State {
+	case WorkFailed, WorkDone, WorkSkipped:
+		return
+	}
 	if e.Err != "" {
 		wi.State, wi.Err = WorkFailed, e.Err
 		return
