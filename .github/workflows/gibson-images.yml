@@ -1,0 +1,180 @@
+name: gibson-images
+
+# Collapses gibson's six independent image-build workflows into ONE matrix
+# workflow (Epic: cicd-efficiency, board #44, slice S4, gibson#1129). See
+# docs/architecture/CICD-CONTEXT.md decision #8 and
+# docs/adr/0060-ci-runner-split-hosted-default-ephemeral-metal.md.
+#
+# Superseded workflows (deleted by this change):
+#   - build.yaml                        (its image-build portion; the
+#                                        embedded `test` job moved to
+#                                        go-ci.yml's merge_group tier)
+#   - gibson-daemon.yml
+#   - gibson-component-images.yml
+#   - gibson-bootstrap-image.yml
+#   - gibson-bootstrap-runner-image.yml
+#   - gibson-belief-sidecar.yml
+#
+# Trigger discipline (decision #8): push:main only (+ workflow_dispatch for
+# manual backfill/force-rebuild, and for (re)publishing a specific semver tag
+# by dispatching with `--ref <tag>`, e.g.
+# `gh workflow run gibson-images.yml --ref v1.2.3` -- the same escape hatch
+# gibson-bootstrap-image.yml / gibson-bootstrap-runner-image.yml /
+# gibson-belief-sidecar.yml already documented, now extended uniformly). NO
+# `pull_request` trigger -- image builds no longer run on every PR push.
+#
+# All images build on every push to main (no per-component path filter): this
+# keeps parity simple and correct regardless of which component's files
+# changed, and slice S3's merge queue already bounds push:main frequency to
+# one push per landed PR, so the matrix no longer fires per-push-per-workflow
+# six times over.
+#
+# One checkout/buildx bootstrap per image job (the reusable's own steps), but
+# ONE workflow definition/trigger surface and ONE `type=gha` cache backend
+# call-site instead of six independently-triggered workflows -- this is what
+# "one coherent cache scope" means here; the reusable
+# (zeroroot-ai/.github/reusable-image-build.yml) does not expose a
+# configurable `scope=` cache key, so per-image cache partitioning is
+# unchanged, but the six duplicate trigger surfaces (and their independent
+# checkout/free-disk-space/buildx-bootstrap overhead firing on every push) are
+# gone.
+
+on:
+  push:
+    branches: [main]
+  workflow_dispatch:
+    inputs:
+      ref:
+        description: >-
+          Optional tag to (re)publish -- select it via the branch/tag dropdown
+          or pass `--ref <tag>` to `gh workflow run` (e.g. v1.2.3,
+          gibson-bootstrap-v1.0.0, gibson-bootstrap-runner-v1.0.0,
+          gibson-belief-sidecar-v1.0.0). Informational: the actual ref built is
+          whatever ref the dispatch runs against, not this input.
+        required: false
+        type: string
+
+concurrency:
+  group: gibson-images-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  # ---- the seven interchangeable images: one matrix, one reusable call site ----
+  images:
+    name: ${{ matrix.component }}
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - component: gibson
+            dockerfile: Dockerfile
+            path: .
+            image: ghcr.io/zeroroot-ai/gibson
+            tag_pattern: (v.*)
+            # spec setec-sandbox-prod-default R1.1: production GHCR images
+            # compile in the Setec gRPC adapter by default. COMMIT + BUILD_TIME
+            # populate pkg/version.GitCommit / BuildTime via ldflags (gibson#251).
+            build_args: |
+              BUILD_TAGS=setec_integration
+              COMMIT=${{ github.sha }}
+              BUILD_TIME=${{ github.event.head_commit.timestamp }}
+          - component: ext-authz
+            dockerfile: build/ext-authz.Dockerfile
+            path: .
+            image: ghcr.io/zeroroot-ai/ext-authz
+            tag_pattern: (v.*)
+            build_args: ""
+          - component: tenant-operator
+            dockerfile: build/tenant-operator.Dockerfile
+            path: .
+            image: ghcr.io/zeroroot-ai/tenant-operator
+            tag_pattern: (v.*)
+            build_args: ""
+          - component: platform-operator
+            dockerfile: build/platform-operator.Dockerfile
+            path: .
+            image: ghcr.io/zeroroot-ai/platform-operator
+            tag_pattern: (v.*)
+            build_args: ""
+          - component: spiffe-jwks-exporter
+            dockerfile: build/spiffe-jwks-exporter.Dockerfile
+            path: .
+            image: ghcr.io/zeroroot-ai/spiffe-jwks-exporter
+            tag_pattern: (v.*)
+            build_args: ""
+          - component: gibson-bootstrap
+            dockerfile: tools/gibson-bootstrap/Dockerfile
+            path: .
+            image: ghcr.io/zeroroot-ai/gibson-bootstrap
+            tag_pattern: gibson-bootstrap-v(.*)
+            build_args: ""
+          - component: gibson-bootstrap-runner
+            dockerfile: tools/gibson-bootstrap/Dockerfile.runner
+            path: .
+            image: ghcr.io/zeroroot-ai/gibson-bootstrap-runner
+            tag_pattern: gibson-bootstrap-runner-v(.*)
+            build_args: ""
+    uses: zeroroot-ai/.github/.github/workflows/reusable-image-build.yml@main
+    permissions:
+      contents: write
+      packages: write
+      id-token: write
+      attestations: write
+      security-events: write
+      actions: read
+    with:
+      component_name: ${{ matrix.component }}
+      component_path: ${{ matrix.path }}
+      dockerfile_path: ${{ matrix.dockerfile }}
+      image_name: ${{ matrix.image }}
+      tag_pattern: ${{ matrix.tag_pattern }}
+      build_args: ${{ matrix.build_args }}
+    secrets:
+      # GH_PAT_GIBSON_RO is passed uniformly (harmless for Dockerfiles that
+      # don't mount it) so `go mod download` can fetch private zeroroot-ai
+      # modules (platform-sdk, platform-clients, etc.) for whichever images
+      # need it -- same PAT the previous six workflows used.
+      ghtoken: ${{ secrets.GH_PAT_GIBSON_RO }}
+
+  # ---- gibson-belief-sidecar: kept as its own job (distinct pytest gate) ----
+  # test_model.py uses pytest.importorskip, so a CI without the pinned pgmpy
+  # deps installed would silently skip the very tests that construct a
+  # BeliefModel -- which is exactly how the gibson#982 startup ImportError
+  # shipped (the image build never runs the container; the import is lazy).
+  # Gating the image build on this makes a runtime-broken sidecar
+  # un-publishable. Kept out of the `images` matrix so a sidecar test failure
+  # never blocks the other seven (unrelated) images from publishing.
+  belief-sidecar-test:
+    name: gibson-belief-sidecar python tests (pinned pgmpy)
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v5
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+      - name: Install pinned deps + pytest
+        working-directory: sidecar/belief
+        run: pip install -r requirements.txt pytest
+      - name: Unit + pgmpy exact-inference tests
+        working-directory: sidecar/belief
+        run: python -m pytest test_model.py -q
+
+  belief-sidecar-image:
+    name: gibson-belief-sidecar
+    needs: belief-sidecar-test
+    uses: zeroroot-ai/.github/.github/workflows/reusable-image-build.yml@main
+    permissions:
+      contents: write
+      packages: write
+      id-token: write
+      attestations: write
+      security-events: write
+      actions: read
+    with:
+      component_name: gibson-belief-sidecar
+      component_path: sidecar/belief
+      dockerfile_path: sidecar/belief/Dockerfile
+      image_name: ghcr.io/zeroroot-ai/gibson-belief-sidecar
+      tag_pattern: gibson-belief-sidecar-(v.*)
+    # No ghtoken secret: self-contained Python (pinned public deps in
+    # requirements.txt), no private zeroroot-ai Go modules.
