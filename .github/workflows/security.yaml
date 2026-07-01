@@ -1,13 +1,19 @@
 # Spec: security-hardening Requirement 5 (Go-CVE policy).
-# Runs govulncheck against the daemon on every PR and on every push to main.
+# Runs govulncheck against the daemon build.
 # Local invocation is forbidden per CLAUDE.md (CPU thrash); this workflow
 # is the canonical place to surface CVE failures.
+#
+# Epic: cicd-efficiency (board #44), slice S5, gibson#1130. Scanner cadence per
+# docs/architecture/CICD-CONTEXT.md decision #9: this is the authoritative
+# pre-merge gate on merge_group instead of the previous double-fire on both
+# `pull_request` and `push:main`, plus a weekly deep scan so a CVE published
+# between merges is still caught within a week.
 name: security
 
 on:
-  pull_request:
-  push:
-    branches: [main]
+  merge_group:
+  schedule:
+    - cron: "0 9 * * 3"
 
 concurrency:
   group: security-${{ github.ref }}

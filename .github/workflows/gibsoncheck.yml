@@ -27,6 +27,14 @@ on:
       - 'tools/gibsoncheck/**'
       - 'internal/platform/authz/registry/**'
       - '.github/workflows/gibsoncheck.yml'
+  # Epic: cicd-efficiency (board #44), slice S5, gibson#1130 (added scope per
+  # issue comment): gibsoncheck is an authoritative gate that S3 needs available
+  # in the merge_group context before the merge queue can require it -- without
+  # this, enabling the queue with gibsoncheck required would freeze merges.
+  # merge_group does not support a `paths` filter (actionlint [events]), so this
+  # runs unconditionally in the queue -- consistent with it being an
+  # authoritative, not a per-diff, gate.
+  merge_group:
 
 concurrency:
   group: gibsoncheck-${{ github.ref }}
