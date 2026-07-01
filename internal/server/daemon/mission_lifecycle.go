@@ -63,7 +63,6 @@ func (d *daemonImpl) ensureMissionManager() error {
 			d.logger.Slog(),
 			d.registryAdapter,
 			d.pool,
-			d.checkpointStore,
 			llmReg,
 			d.callback,
 			harnessFactory,

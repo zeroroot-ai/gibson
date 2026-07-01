@@ -19,7 +19,6 @@ import (
 	"google.golang.org/grpc/codes"
 	"google.golang.org/grpc/metadata"
 
-	"github.com/zeroroot-ai/gibson/internal/engine/checkpoint"
 	daemonpb "github.com/zeroroot-ai/sdk/api/gen/gibson/daemon/v1"
 	"github.com/zeroroot-ai/sdk/auth"
 )
@@ -190,7 +189,7 @@ func TestGetCheckpoint_RedactsSecretsForNonOperator(t *testing.T) {
 	if err := json.Unmarshal(resp.Checkpoint.WorkingMemory, &parsed); err != nil {
 		t.Fatalf("decoded WorkingMemory should parse: %v (raw: %s)", err, resp.Checkpoint.WorkingMemory)
 	}
-	if parsed["password"] != checkpoint.RedactedPlaceholder {
+	if parsed["password"] != redactedPlaceholder {
 		t.Errorf("password not redacted: %v", parsed["password"])
 	}
 	if parsed["username"] != "alice" {
@@ -231,7 +230,7 @@ func TestGetCheckpoint_OperatorBypassesRedaction(t *testing.T) {
 	if parsed["password"] != "p@ssw0rd" {
 		t.Errorf("operator should see plaintext password, got %v", parsed["password"])
 	}
-	if parsed["password"] == checkpoint.RedactedPlaceholder {
+	if parsed["password"] == redactedPlaceholder {
 		t.Errorf("operator should NOT see redaction placeholder")
 	}
 }
@@ -367,10 +366,10 @@ func TestDiffCheckpoints_RedactsSecretKeys(t *testing.T) {
 	if err := json.Unmarshal(d0.After, &afterVal); err != nil {
 		t.Fatalf("delta.After should parse as JSON string: %v", err)
 	}
-	if beforeVal != checkpoint.RedactedPlaceholder {
+	if beforeVal != redactedPlaceholder {
 		t.Errorf("before not redacted: %q", beforeVal)
 	}
-	if afterVal != checkpoint.RedactedPlaceholder {
+	if afterVal != redactedPlaceholder {
 		t.Errorf("after not redacted: %q", afterVal)
 	}
 }

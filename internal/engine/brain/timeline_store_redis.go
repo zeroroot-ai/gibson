@@ -4,7 +4,10 @@ package brain
 
 import (
 	"context"
+	"encoding/json"
 	"fmt"
+	"strconv"
+	"strings"
 
 	redis "github.com/redis/go-redis/v9"
 )
@@ -94,20 +97,64 @@ func (s *RedisTimelineStore) LoadForReplay(ctx context.Context, tenant string, a
 	return out, nil
 }
 
-// WriteSnapshot is a stub; implemented in slice #1117.
-func (s *RedisTimelineStore) WriteSnapshot(_ context.Context, _ string, _ WorldSnapshot) (string, error) {
-	// TODO(#1117): implement snapshot persistence.
-	return "", ErrNotImplemented
+// WriteSnapshot persists a JSON-serialized WorldSnapshot to Redis.
+// Key: "gibson:snapshot:<tenant>"
+// Returns snap.AtSeq as the handle.
+func (s *RedisTimelineStore) WriteSnapshot(ctx context.Context, tenant string, snap WorldSnapshot) (string, error) {
+	key := "gibson:snapshot:" + tenant
+	data, err := json.Marshal(snap)
+	if err != nil {
+		return "", fmt.Errorf("brain/redis-timeline: marshal snapshot for tenant %q: %w", tenant, err)
+	}
+	if err := s.client.Set(ctx, key, data, 0).Err(); err != nil {
+		return "", fmt.Errorf("brain/redis-timeline: SET snapshot for tenant %q: %w", tenant, err)
+	}
+	return snap.AtSeq, nil
 }
 
-// LoadSnapshot is a stub; implemented in slice #1117.
-func (s *RedisTimelineStore) LoadSnapshot(_ context.Context, _ string) (*WorldSnapshot, error) {
-	// TODO(#1117): implement snapshot load.
-	return nil, nil
+// LoadSnapshot loads the snapshot for tenant. Returns (nil, nil) if none exists.
+func (s *RedisTimelineStore) LoadSnapshot(ctx context.Context, tenant string) (*WorldSnapshot, error) {
+	key := "gibson:snapshot:" + tenant
+	data, err := s.client.Get(ctx, key).Bytes()
+	if err != nil {
+		if err == redis.Nil {
+			return nil, nil
+		}
+		return nil, fmt.Errorf("brain/redis-timeline: GET snapshot for tenant %q: %w", tenant, err)
+	}
+	var snap WorldSnapshot
+	if err := json.Unmarshal(data, &snap); err != nil {
+		return nil, fmt.Errorf("brain/redis-timeline: unmarshal snapshot for tenant %q: %w", tenant, err)
+	}
+	return &snap, nil
 }
 
-// TrimTo is a stub; implemented in slice #1117.
-func (s *RedisTimelineStore) TrimTo(_ context.Context, _ string, _ string) error {
-	// TODO(#1117): implement snapshot-driven trim.
-	return ErrNotImplemented
+// TrimTo removes stream entries up to and including handle using XTRIM MINID.
+// XTrimMinID keeps entries with ID >= minid, so we compute handle+1 to exclude
+// the snapshot entry itself — tail replay begins with the event after the snapshot.
+func (s *RedisTimelineStore) TrimTo(ctx context.Context, tenant, handle string) error {
+	key := s.streamKey(tenant)
+	minid := streamIDNext(handle)
+	if err := s.client.XTrimMinID(ctx, key, minid).Err(); err != nil {
+		return fmt.Errorf("brain/redis-timeline: XTRIM MINID tenant %q handle %q: %w", tenant, handle, err)
+	}
+	return nil
+}
+
+// streamIDNext returns the smallest Redis stream ID greater than id.
+// Redis stream IDs have the form "<ms>-<seq>". We increment the seq component;
+// if the seq component is missing we treat it as 0 and return "<ms>-1".
+func streamIDNext(id string) string {
+	parts := strings.SplitN(id, "-", 2)
+	if len(parts) != 2 {
+		// No sequence component; return ms-1 which is > ms-0 (the implicit default).
+		return id + "-1"
+	}
+	ms := parts[0]
+	seq, err := strconv.ParseUint(parts[1], 10, 64)
+	if err != nil {
+		// Malformed seq — fall back to a suffix that sorts after any normal seq.
+		return id + "z"
+	}
+	return ms + "-" + strconv.FormatUint(seq+1, 10)
 }

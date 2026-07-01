@@ -143,9 +143,6 @@ type daemonImpl struct {
 	// Redis init phase of Start().
 	missionAuthzStore mission.MissionAuthzStore
 
-	// checkpointStore provides checkpoint persistence for pause/resume
-	checkpointStore mission.CheckpointStore
-
 	// missionService provides mission business logic operations
 	missionService mission.MissionService
 
@@ -205,8 +202,6 @@ type daemonImpl struct {
 	// Spec: security-hardening R20.
 	metricsSrv *observability.MetricsServer
 
-	// checkpointer manages mission checkpointing during graceful shutdown
-	checkpointer *DaemonMissionCheckpointer
 
 	// logTailer manages component log tailing with fsnotify
 	logTailer *LogTailer
@@ -815,12 +810,10 @@ func (d *daemonImpl) Start(ctx context.Context) error {
 
 	// Initialize Redis stores (mission/run stores have been migrated to the
 	// per-tenant Pool path; only non-mission stores are initialized here).
-	d.checkpointStore = mission.NewRedisCheckpointStore(stateClient)
 	d.missionAuthzStore = mission.NewRedisMissionAuthzStore(stateClient.Client())
 	d.targetStore = dbredis.NewRedisTargetDAO(stateClient)
 
 	d.logger.Info(ctx, "Redis stores initialized successfully",
-		"checkpoint_store", "RedisCheckpointStore",
 		"mission_authz_store", "RedisMissionAuthzStore",
 		"target_store", "RedisTargetDAO",
 	)
@@ -1310,32 +1303,6 @@ func (d *daemonImpl) Start(ctx context.Context) error {
 	// enumeration of Tenant CRDs that crashed the daemon on 2026-05-19
 	// (testa123 incident). See ADR-0023 and gibson#207.
 	d.logger.Info(ctx, "lazy mission recovery armed; will fire per-tenant on first Pool.For dial")
-
-	// Initialize mission checkpointer for graceful shutdown.
-	// The checkpointer uses the pool to acquire per-tenant connections for mission updates.
-	if d.stateClient != nil && d.stateClient.Client() != nil {
-		d.checkpointer = NewDaemonMissionCheckpointer(
-			d.stateClient.Client(),
-			func() map[string]context.CancelFunc {
-				d.missionsMu.RLock()
-				defer d.missionsMu.RUnlock()
-				// Return a copy to avoid holding the lock
-				missions := make(map[string]context.CancelFunc)
-				for k, v := range d.activeMissions {
-					missions[k] = v
-				}
-				return missions
-			},
-			d.pool,
-			d.logger,
-		)
-		d.logger.Info(ctx, "mission checkpointer initialized")
-
-		// Discover checkpoints from previous shutdown
-		d.discoverCheckpoints(ctx)
-	} else {
-		d.logger.Warn(ctx, "mission checkpointer not initialized - state client not available")
-	}
 
 	// Start callback server via Serve (blocking lifecycle in goroutine).
 	if d.config.Callback.Enabled {
@@ -1832,12 +1799,7 @@ func (d *daemonImpl) stopServices(ctx context.Context) {
 		}
 	}
 
-	// Phase 3: Checkpoint running missions (already stopped above, but maintain phase)
-	if d.checkpointer != nil {
-		coordinator.RegisterPhase(NewCheckpointPhase(d.checkpointer, d.config.Shutdown.CheckpointTimeout, d.logger, coordinator.metrics))
-	}
-
-	// Phase 4: Notify and disconnect agents
+	// Phase 3: Notify and disconnect agents
 	if d.callback != nil {
 		agentNotifier := NewDaemonAgentNotifier(d.callback, d.config.Shutdown.AgentTimeout, d.logger)
 		coordinator.RegisterPhase(NewAgentPhase(agentNotifier, d.config.Shutdown.AgentTimeout, d.logger, coordinator.metrics))
@@ -2096,61 +2058,6 @@ func formatDuration(d time.Duration) string {
 		return fmt.Sprintf("%dm %ds", m, s)
 	}
 	return fmt.Sprintf("%ds", s)
-}
-
-// discoverCheckpoints scans Redis for mission checkpoints from a previous shutdown.
-// It logs discovered checkpoints but does not automatically resume them.
-// This allows operators to inspect and manually resume missions as needed.
-func (d *daemonImpl) discoverCheckpoints(ctx context.Context) {
-	if d.checkpointer == nil {
-		d.logger.Debug(ctx, "checkpointer not available, skipping checkpoint discovery")
-		return
-	}
-
-	checkpoints, err := d.checkpointer.ListCheckpoints(ctx)
-	if err != nil {
-		d.logger.Warn(ctx, "failed to discover checkpoints", "error", err)
-		return
-	}
-
-	if len(checkpoints) == 0 {
-		d.logger.Info(ctx, "no suspended missions found")
-		return
-	}
-
-	d.logger.Info(ctx, "discovered suspended missions from previous shutdown",
-		"count", len(checkpoints))
-
-	// Log each checkpoint for operator visibility
-	for _, missionID := range checkpoints {
-		checkpoint, err := d.checkpointer.GetCheckpoint(ctx, missionID)
-		if err != nil {
-			d.logger.Warn(ctx, "failed to load checkpoint details",
-				"mission_id", missionID,
-				"error", err)
-			continue
-		}
-
-		d.logger.Info(ctx, "suspended mission available for resumption",
-			"mission_id", missionID,
-			"checkpoint_id", checkpoint.ID,
-			"created_at", checkpoint.CreatedAt,
-			"label", checkpoint.Label)
-	}
-}
-
-// GetSuspendedMissions returns a list of mission IDs that have checkpoints from a previous shutdown.
-// These missions can be resumed using the appropriate API or CLI commands.
-//
-// Returns:
-//   - []types.ID: List of mission IDs with available checkpoints
-//   - error: Non-nil if checkpoint discovery fails
-func (d *daemonImpl) GetSuspendedMissions(ctx context.Context) ([]types.ID, error) {
-	if d.checkpointer == nil {
-		return nil, fmt.Errorf("checkpointer not available")
-	}
-
-	return d.checkpointer.ListCheckpoints(ctx)
 }
 
 // CredentialHandler returns the credential handler for dashboard API operations.

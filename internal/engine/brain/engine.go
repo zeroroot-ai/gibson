@@ -11,6 +11,12 @@ import (
 // fastest an external result can arrive. Ticking faster polls for nothing.
 const TickInterval = 50 * time.Millisecond
 
+// defaultSnapshotCadence is the number of persisted events between automatic
+// snapshot-and-trim cycles (ADR-0011). After every N appended events the Engine
+// writes a snapshot and trims the Timeline prefix it covers, bounding the replay
+// cost on restart to at most N events plus the restore overhead.
+const defaultSnapshotCadence = 100
+
 // intakeBuffer bounds the number of un-applied events Submit can queue between
 // ticks before it blocks (back-pressure).
 const intakeBuffer = 4096
@@ -40,6 +46,14 @@ type Engine struct {
 	// configured (in-memory only, backward-compatible). Set via WithStore.
 	store TimelineStore
 
+	// Snapshot-cadence bookkeeping (ADR-0011 decision 3b). After every
+	// snapshotCadence persisted events the engine writes a snapshot and trims
+	// the Timeline prefix it covers.
+	snapshotCadence    int    // 0 = disabled; defaultSnapshotCadence at construction
+	snapshotEventCount int    // events appended since last snapshot
+	lastSnapshotSeq    string // AtSeq of the last successfully written snapshot
+	lastAppendedSeq    string // seq returned by the most recent successful Append
+
 	// mu guards World + Timeline. The tick (single writer) takes the write lock;
 	// external readers (e.g. the read-path gRPC handlers) take the read lock so
 	// they never race the reducer. Submit does not touch the World, so it is
@@ -50,10 +64,19 @@ type Engine struct {
 // NewEngine creates an Engine with an empty Tenant World and Timeline.
 func NewEngine(tenant string) *Engine {
 	return &Engine{
-		World:    NewWorld(tenant),
-		Timeline: &Timeline{},
-		intake:   make(chan Event, intakeBuffer),
+		World:           NewWorld(tenant),
+		Timeline:        &Timeline{},
+		intake:          make(chan Event, intakeBuffer),
+		snapshotCadence: defaultSnapshotCadence,
 	}
+}
+
+// WithSnapshotCadence overrides the automatic snapshot-and-trim cadence (number
+// of persisted events between snapshots). Set to 0 to disable automatic
+// snapshots. Returns the receiver for chaining. Call before Run.
+func (e *Engine) WithSnapshotCadence(n int) *Engine {
+	e.snapshotCadence = n
+	return e
 }
 
 // WithStore wires a TimelineStore for durable event persistence (ADR-0011).
@@ -84,20 +107,58 @@ func (e *Engine) apply(ev Event) {
 	// must not crash the live engine. The caller (tick goroutine) holds the
 	// write lock; context.Background() is used because no caller context is
 	// available inside the single-writer tick.
+	snapshotDue := false
 	if e.store != nil {
-		if _, err := e.store.Append(context.Background(), e.World.Tenant, ev); err != nil {
+		if seq, err := e.store.Append(context.Background(), e.World.Tenant, ev); err != nil {
 			slog.Error("brain/engine: durable append failed",
 				"tenant", e.World.Tenant,
 				"kind", ev.Kind(),
 				"err", err,
 			)
+		} else {
+			e.lastAppendedSeq = seq
+			if e.snapshotCadence > 0 {
+				e.snapshotEventCount++
+				if e.snapshotEventCount >= e.snapshotCadence {
+					e.snapshotEventCount = 0
+					snapshotDue = true
+				}
+			}
 		}
 	}
 	e.Timeline.Append(ev)
 	Reduce(e.World, ev)
+	// Snapshot AFTER folding ev so the snapshot's World reflects ev (whose seq is
+	// lastAppendedSeq / AtSeq). Snapshotting before the fold would exclude ev from
+	// both the snapshot and the exclusive-after-AtSeq tail — losing it on hydrate.
+	if snapshotDue {
+		e.maybeSnapshot()
+	}
 	for _, fn := range e.subscribers {
 		fn(ev)
 	}
+}
+
+// maybeSnapshot writes a snapshot of the current World and trims the Timeline
+// prefix it covers. Errors are logged but do not abort the engine.
+// Called from apply() under the write lock, so no additional locking is needed.
+func (e *Engine) maybeSnapshot() {
+	snap := SnapshotWorld(e.World, e.lastAppendedSeq)
+	handle, err := e.store.WriteSnapshot(context.Background(), e.World.Tenant, snap)
+	if err != nil {
+		slog.Error("brain/engine: snapshot write failed",
+			"tenant", e.World.Tenant,
+			"err", err,
+		)
+		return
+	}
+	if err := e.store.TrimTo(context.Background(), e.World.Tenant, handle); err != nil {
+		slog.Error("brain/engine: stream trim failed",
+			"tenant", e.World.Tenant,
+			"err", err,
+		)
+	}
+	e.lastSnapshotSeq = handle
 }
 
 func (e *Engine) drainIntake() int {
@@ -178,7 +239,38 @@ func (e *Engine) Hydrate(ctx context.Context) {
 		return
 	}
 
-	evs, err := e.store.LoadForReplay(ctx, e.World.Tenant, "")
+	// Try loading a snapshot first. A snapshot covers events up to its AtSeq;
+	// we then replay only the tail (events after the snapshot) rather than the
+	// full Timeline — bounding replay cost to at most snapshotCadence events.
+	afterSeq := ""
+	snap, snapErr := e.store.LoadSnapshot(ctx, e.World.Tenant)
+	if snapErr != nil {
+		slog.Error("brain/engine: hydrate: failed to load snapshot",
+			"tenant", e.World.Tenant,
+			"err", snapErr,
+		)
+		// Fall through to full replay (afterSeq stays "").
+	}
+
+	e.mu.Lock()
+	defer e.mu.Unlock()
+
+	if snap != nil {
+		w, restoreErr := RestoreWorld(*snap, e.World.Tenant)
+		if restoreErr != nil {
+			slog.Error("brain/engine: hydrate: failed to restore snapshot; falling back to full replay",
+				"tenant", e.World.Tenant,
+				"err", restoreErr,
+			)
+			// Fall through to full replay (afterSeq stays "").
+		} else {
+			e.World = w
+			afterSeq = snap.AtSeq
+			e.lastSnapshotSeq = snap.AtSeq
+		}
+	}
+
+	evs, err := e.store.LoadForReplay(ctx, e.World.Tenant, afterSeq)
 	if err != nil {
 		slog.Error("brain/engine: hydrate: failed to load Timeline from store",
 			"tenant", e.World.Tenant,
@@ -186,20 +278,20 @@ func (e *Engine) Hydrate(ctx context.Context) {
 		)
 		return
 	}
-	if len(evs) == 0 {
-		return // no history to replay — fresh tenant
+
+	if afterSeq == "" && len(evs) == 0 {
+		return // no history and no snapshot — fresh tenant
 	}
 
-	e.mu.Lock()
-	defer e.mu.Unlock()
-
-	// Replay the full persisted sequence into a fresh World (pure fold, no effects).
+	// Fold the tail events into the (possibly snapshot-restored) World.
+	// Only the tail (events after the snapshot) goes into the in-memory Timeline
+	// so the in-memory Timeline stays bounded.
 	tl := &Timeline{}
 	for _, ev := range evs {
 		tl.Append(ev)
+		Reduce(e.World, ev)
 	}
 	e.Timeline = tl
-	e.World = Replay(e.World.Tenant, tl)
 
 	// Fail any work that was `running` when the daemon crashed — a crash IS a
 	// failure (ADR-0011 decision 5). Submit them to the live intake queue so the
@@ -212,9 +304,10 @@ func (e *Engine) Hydrate(ctx context.Context) {
 		e.intake <- failEv
 	}
 
-	slog.Info("brain/engine: hydrated World from persisted Timeline",
+	slog.Info("brain/engine: hydrated World from persisted store",
 		"tenant", e.World.Tenant,
-		"events", len(evs),
+		"snapshot_seq", afterSeq,
+		"tail_events", len(evs),
 	)
 }
 
