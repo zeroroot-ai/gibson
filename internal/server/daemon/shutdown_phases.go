@@ -92,52 +92,6 @@ func (p *DrainPhase) Execute(ctx context.Context) error {
 	}
 }
 
-// CheckpointPhase checkpoints running missions to Redis for resumption.
-type CheckpointPhase struct {
-	checkpointer MissionCheckpointer
-	timeout      time.Duration
-	logger       *observability.Logger
-	metrics      *ShutdownMetrics
-}
-
-// NewCheckpointPhase creates a new CheckpointPhase.
-func NewCheckpointPhase(checkpointer MissionCheckpointer, timeout time.Duration, logger *observability.Logger, metrics *ShutdownMetrics) *CheckpointPhase {
-	return &CheckpointPhase{
-		checkpointer: checkpointer,
-		timeout:      timeout,
-		logger:       logger,
-		metrics:      metrics,
-	}
-}
-
-// Name returns the phase name.
-func (p *CheckpointPhase) Name() string {
-	return "checkpoint_missions"
-}
-
-// Timeout returns the phase timeout.
-func (p *CheckpointPhase) Timeout() time.Duration {
-	return p.timeout
-}
-
-// Execute checkpoints all running missions.
-func (p *CheckpointPhase) Execute(ctx context.Context) error {
-	if p.checkpointer == nil {
-		p.logger.Debug(ctx, "no checkpointer configured, skipping mission checkpointing")
-		return nil
-	}
-
-	count, err := p.checkpointer.CheckpointAll(ctx)
-	if err != nil {
-		p.logger.Warn(ctx, "failed to checkpoint all missions", "error", err)
-		return err
-	}
-
-	p.metrics.MissionsCheckpointed = count
-	p.logger.Info(ctx, "missions checkpointed", "count", count)
-	return nil
-}
-
 // AgentPhase notifies connected agents of shutdown and waits for disconnection.
 type AgentPhase struct {
 	notifier AgentNotifier
@@ -307,12 +261,6 @@ func (p *ConnectionPhase) Execute(ctx context.Context) error {
 
 	p.logger.Info(ctx, "all connections closed")
 	return firstErr
-}
-
-// MissionCheckpointer is the interface for checkpointing missions during shutdown.
-// The actual implementation will be created in task 6.1.
-type MissionCheckpointer interface {
-	CheckpointAll(ctx context.Context) (int, error)
 }
 
 // AgentNotifier is the interface for notifying agents of daemon shutdown.

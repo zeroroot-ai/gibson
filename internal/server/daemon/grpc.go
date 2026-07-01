@@ -4,7 +4,6 @@ import (
 	"bufio"
 	"context"
 	"crypto/x509"
-	"encoding/json"
 	"fmt"
 	"io"
 	"log/slog"
@@ -2239,226 +2238,31 @@ func (d *daemonImpl) GetMissionHistory(ctx context.Context, name string, limit i
 }
 
 // GetMissionCheckpoints returns all checkpoints for a mission.
+// Legacy checkpoint store removed (gibson#1117); returns empty list.
 func (d *daemonImpl) GetMissionCheckpoints(ctx context.Context, missionID string) ([]api.CheckpointData, error) {
-	d.logger.Debug(ctx, "GetMissionCheckpoints called", "mission_id", missionID)
-
-	// Validate mission ID
-	if missionID == "" {
-		return nil, fmt.Errorf("mission ID cannot be empty")
-	}
-
-	// Acquire per-tenant store via pool.
-	tenantForCheckpoints := tenantFromCtxOrSystem(ctx)
-	if d.pool == nil {
-		return []api.CheckpointData{}, nil
-	}
-	connForCheckpoints, connCheckpointsErr := d.pool.For(ctx, tenantForCheckpoints)
-	if connCheckpointsErr != nil {
-		return nil, datapool.MapPoolError(connCheckpointsErr)
-	}
-	defer connForCheckpoints.Release()
-	mStoreForCheckpoints := mission.NewConnBoundMissionStore(connForCheckpoints.Redis)
-
-	// Get the mission from the per-tenant store.
-	m, err := mStoreForCheckpoints.Get(ctx, types.ID(missionID))
-	if err != nil {
-		d.logger.Error(ctx, "failed to get mission", "error", err, "mission_id", missionID)
-		return nil, fmt.Errorf("failed to get mission: %w", err)
-	}
-
-	// Check if mission has a checkpoint
-	if m.Checkpoint == nil {
-		d.logger.Debug(ctx, "no checkpoints found for mission", "mission_id", missionID)
-		return []api.CheckpointData{}, nil
-	}
-
-	// Convert checkpoint to CheckpointData
-	// Calculate total nodes from metrics if available
-	totalNodes := 0
-	findingsCount := 0
-	if m.Metrics != nil {
-		totalNodes = m.Metrics.TotalNodes
-		findingsCount = m.Metrics.TotalFindings
-	}
-
-	checkpoint := api.CheckpointData{
-		CheckpointID:   m.Checkpoint.ID.String(),
-		CreatedAt:      m.Checkpoint.CheckpointedAt.Unix(),
-		CompletedNodes: len(m.Checkpoint.CompletedNodes),
-		TotalNodes:     totalNodes,
-		FindingsCount:  findingsCount,
-		Version:        m.Checkpoint.Version,
-	}
-
-	d.logger.Debug(ctx, "mission checkpoints retrieved", "mission_id", missionID, "count", 1)
-	return []api.CheckpointData{checkpoint}, nil
+	d.logger.Debug(ctx, "GetMissionCheckpoints called (legacy checkpoint store removed)", "mission_id", missionID)
+	return []api.CheckpointData{}, nil
 }
 
-// GetMissionCheckpointPayload returns the rich, per-super-step
-// checkpoint payload for the (mission, checkpoint) pair. The current
-// daemon backend persists only the legacy mission-level checkpoint, so
-// this method synthesises a payload from that metadata when the
-// per-super-step ThreadedCheckpointer store is not yet wired through
-// for this mission. The richer fields on the returned CheckpointData
-// remain nil/empty in that case — the mission handlers degrade
-// gracefully and only emit metadata-shaped deltas / responses.
-//
-// Spec: mission-checkpointing R14.1-R14.3 (rich payload exposure).
+// GetMissionCheckpointPayload returns the checkpoint payload for the given (mission, checkpoint) pair.
+// Legacy checkpoint store removed (gibson#1117); returns not-found.
 func (d *daemonImpl) GetMissionCheckpointPayload(ctx context.Context, missionID, checkpointID string) (*api.CheckpointData, error) {
-	d.logger.Debug(ctx, "GetMissionCheckpointPayload called",
+	d.logger.Debug(ctx, "GetMissionCheckpointPayload called (legacy checkpoint store removed)",
 		"mission_id", missionID,
 		"checkpoint_id", checkpointID,
 	)
-
-	if missionID == "" {
-		return nil, fmt.Errorf("mission ID cannot be empty")
-	}
-	if checkpointID == "" {
-		return nil, fmt.Errorf("checkpoint ID cannot be empty")
-	}
-
-	// Pull the legacy view first; this gives us metadata + tenant scoping.
-	checkpoints, err := d.GetMissionCheckpoints(ctx, missionID)
-	if err != nil {
-		return nil, err
-	}
-	for _, cp := range checkpoints {
-		if cp.CheckpointID == checkpointID {
-			out := cp
-			// Mark the source as super-step so the proto enum maps
-			// CHECKPOINT_SOURCE_SUPER_STEP. The per-super-step store
-			// (Phase 2A) will overwrite this with the actual cadence.
-			if out.Source == "" {
-				out.Source = "super_step"
-			}
-			// Pull the persisted mission-level checkpoint for the
-			// memory payloads + DAG step snapshots.
-			d.populateCheckpointPayload(ctx, missionID, &out)
-			return &out, nil
-		}
-	}
 	return nil, fmt.Errorf("checkpoint %s not found for mission %s: not found", checkpointID, missionID)
 }
 
-// populateCheckpointPayload fills in the rich working/mission memory
-// bytes + DAG step + finding rows from the legacy mission-level
-// checkpoint when the per-super-step store hasn't been threaded
-// through for the mission. Best effort — no error is returned to keep
-// the metadata path serviceable when the rich payload is absent.
-func (d *daemonImpl) populateCheckpointPayload(ctx context.Context, missionID string, out *api.CheckpointData) {
-	tenant := tenantFromCtxOrSystem(ctx)
-	if d.pool == nil {
-		return
-	}
-	conn, err := d.pool.For(ctx, tenant)
-	if err != nil {
-		return
-	}
-	defer conn.Release()
-	store := mission.NewConnBoundMissionStore(conn.Redis)
-	m, err := store.Get(ctx, types.ID(missionID))
-	if err != nil || m == nil || m.Checkpoint == nil {
-		return
-	}
-	cp := m.Checkpoint
-	// Working / mission memory — both are JSON-encoded map[string]any
-	// in the legacy checkpoint. They are already plaintext at the
-	// mission-store layer (Spec 4 Phase 2A's Redis encryption-at-rest
-	// is on the per-super-step store, not this legacy path).
-	if data, mErr := json.Marshal(cp.MissionState); mErr == nil && len(data) > 2 {
-		out.MissionMemory = data
-	}
-	if cp.NodeResults != nil {
-		if data, mErr := json.Marshal(cp.NodeResults); mErr == nil {
-			out.WorkingMemory = data
-		}
-	}
-	// DAG step snapshots: derive from CompletedNodes (status=completed)
-	// and PendingNodes (status=pending). The legacy checkpoint does not
-	// carry per-step inputs/outputs, so those bytes remain nil — the
-	// per-super-step store will populate them.
-	for _, nodeID := range cp.CompletedNodes {
-		out.DagSteps = append(out.DagSteps, api.DagStepData{
-			NodeID: nodeID,
-			State:  "completed",
-		})
-	}
-	for _, nodeID := range cp.PendingNodes {
-		out.DagSteps = append(out.DagSteps, api.DagStepData{
-			NodeID: nodeID,
-			State:  "pending",
-		})
-	}
-	if cp.LastNodeID != "" {
-		// Last running node, marked in_progress for visibility.
-		out.DagSteps = append(out.DagSteps, api.DagStepData{
-			NodeID: cp.LastNodeID,
-			State:  "running",
-		})
-	}
-	// Finding snapshots — IDs only, no payload bytes (the per-super-step
-	// store carries the canonical Finding bytes).
-	for _, fid := range cp.FindingIDs {
-		out.FindingSnapshots = append(out.FindingSnapshots, api.FindingSnapshotData{
-			FindingID: fid.String(),
-		})
-	}
-}
-
 // RewindMission rewinds the mission's state to the target checkpoint.
-// The current backend writes a marker checkpoint and clears any
-// in-flight node from the mission record, then defers the actual
-// orchestrator-side state cleanup + tool cancellation to the
-// orchestrator's rewind dispatcher (when wired). When the orchestrator
-// path is not yet wired, this method still writes the marker
-// checkpoint so the mission timeline reflects the user-initiated
-// rewind, and returns the marker ID. Callers reach this through the
-// mission handler's ResumeMission(target_checkpoint_id) flow.
-//
-// Spec: mission-checkpointing R16.4 (rewind core).
+// Legacy checkpoint store removed (gibson#1117); returns not-found.
 func (d *daemonImpl) RewindMission(ctx context.Context, missionID, targetCheckpointID string) (string, error) {
-	d.logger.Info(ctx, "RewindMission called",
+	d.logger.Info(ctx, "RewindMission called (legacy checkpoint store removed)",
 		"mission_id", missionID,
 		"target_checkpoint_id", targetCheckpointID,
 	)
-	if missionID == "" {
-		return "", fmt.Errorf("mission ID cannot be empty")
-	}
-	if targetCheckpointID == "" {
-		return "", fmt.Errorf("target checkpoint ID cannot be empty")
-	}
-
-	// Validate the target checkpoint exists for this mission.
-	checkpoints, err := d.GetMissionCheckpoints(ctx, missionID)
-	if err != nil {
-		return "", fmt.Errorf("failed to load mission checkpoints: %w", err)
-	}
-	found := false
-	for _, cp := range checkpoints {
-		if cp.CheckpointID == targetCheckpointID {
-			found = true
-			break
-		}
-	}
-	if !found {
-		return "", fmt.Errorf("target checkpoint %s not found for mission %s: not found",
-			targetCheckpointID, missionID)
-	}
-
-	// Write a marker checkpoint via the mission store. The marker is
-	// observable through the standard ListCheckpoints path.
-	markerID := fmt.Sprintf("manual-%s-%d", targetCheckpointID, time.Now().Unix())
-
-	// The orchestrator-side cancel + state-discard happens in the
-	// rewind dispatcher (orchestrator/rewind.go). Here we record the
-	// audit-trail marker. Best-effort — failures don't unwind the
-	// audit emission, which fires on intent.
-	d.logger.Info(ctx, "RewindMission: marker checkpoint synthesised",
-		"mission_id", missionID,
-		"target_checkpoint_id", targetCheckpointID,
-		"marker_id", markerID,
-	)
-	return markerID, nil
+	return "", fmt.Errorf("target checkpoint %s not found for mission %s: not found",
+		targetCheckpointID, missionID)
 }
 
 // BuildComponent is not supported; component store has been removed.

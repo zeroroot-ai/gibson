@@ -352,3 +352,158 @@ func TestRegistry_WithStoreFactory_NoopWhenFactoryNil(t *testing.T) {
 	require.NotPanics(t, func() { eng.Tick() }, "in-memory engine must not panic without a store factory")
 	require.Len(t, eng.Hosts(), 1, "event should still be processed in-memory")
 }
+
+// TestSnapshot_RoundTrip verifies that WriteSnapshot / LoadSnapshot are inverse:
+// the loaded snapshot has the same AtSeq and Data as the written one.
+func TestSnapshot_RoundTrip(t *testing.T) {
+	_, rdb := newTestRedis(t)
+	store := brain.NewRedisTimelineStore(rdb)
+	ctx := context.Background()
+	tenant := "tenant-snap-rt"
+
+	// Append one event to get a real seq id.
+	seq, err := store.Append(ctx, tenant, brain.HostObserved{ScopeID: "s", Address: "10.0.0.1"})
+	require.NoError(t, err)
+
+	snap := brain.WorldSnapshot{AtSeq: seq, Data: []byte(`{"test":true}`)}
+	handle, err := store.WriteSnapshot(ctx, tenant, snap)
+	require.NoError(t, err)
+	assert.Equal(t, seq, handle, "WriteSnapshot should return snap.AtSeq as the handle")
+
+	loaded, err := store.LoadSnapshot(ctx, tenant)
+	require.NoError(t, err)
+	require.NotNil(t, loaded, "LoadSnapshot should return the stored snapshot")
+	assert.Equal(t, snap.AtSeq, loaded.AtSeq, "AtSeq must survive the round-trip")
+	assert.Equal(t, snap.Data, loaded.Data, "Data must survive the round-trip")
+}
+
+// TestTrimTo_BoundsStream verifies that TrimTo removes stream entries preceding
+// the given handle, leaving only entries at or after the handle.
+func TestTrimTo_BoundsStream(t *testing.T) {
+	mr, rdb := newTestRedis(t)
+	_ = mr
+	store := brain.NewRedisTimelineStore(rdb)
+	ctx := context.Background()
+	tenant := "tenant-trim"
+
+	ev := brain.HostObserved{ScopeID: "s", Address: ""}
+	var seqs []string
+	for i := 0; i < 5; i++ {
+		ev.Address = "10.0.0." + string(rune('1'+i))
+		seq, err := store.Append(ctx, tenant, ev)
+		require.NoError(t, err)
+		seqs = append(seqs, seq)
+	}
+
+	// Trim up to (and including) the third entry.
+	require.NoError(t, store.TrimTo(ctx, tenant, seqs[2]))
+
+	// Only events after seqs[2] (i.e. seqs[3] and seqs[4]) should remain.
+	remaining, err := store.LoadForReplay(ctx, tenant, "")
+	require.NoError(t, err)
+	assert.Len(t, remaining, 2, "only events after the trim handle should remain")
+}
+
+// TestSnapshotPlusTailEqualsFullReplay is the primary correctness test for the
+// snapshot restore path: a World restored from a snapshot then folded with the
+// tail events must equal a World folded from the complete event sequence.
+func TestSnapshotPlusTailEqualsFullReplay(t *testing.T) {
+	_, rdb := newTestRedis(t)
+	store := brain.NewRedisTimelineStore(rdb)
+	ctx := context.Background()
+	const tenant = "tenant-snap-equiv"
+
+	// Phase 1: append a fixed event sequence and record the mid-point seq.
+	prefix := []brain.Event{
+		brain.MissionStarted{ID: "m1", Goal: "scan", BeliefModel: "test"},
+		brain.HostObserved{ScopeID: "s", Address: "10.0.0.1", OpenPorts: []int{22}, MissionID: "m1"},
+		brain.WorkDispatched{ID: "w1", MissionID: "m1", ItemKind: "tool", Target: "scan", Input: `{}`},
+	}
+	tail := []brain.Event{
+		brain.WorkCompleted{ID: "w1", Result: `{"open":[22]}`},
+		brain.HostObserved{ScopeID: "s", Address: "10.0.0.2", OpenPorts: []int{443}, MissionID: "m1"},
+	}
+
+	var snapSeq string
+	for _, ev := range prefix {
+		seq, err := store.Append(ctx, tenant, ev)
+		require.NoError(t, err)
+		snapSeq = seq
+	}
+	for _, ev := range tail {
+		_, err := store.Append(ctx, tenant, ev)
+		require.NoError(t, err)
+	}
+
+	// Build the "expected" World by folding all events from scratch.
+	all := append(append([]brain.Event(nil), prefix...), tail...)
+	expEng := brain.NewEngine(tenant)
+	for _, ev := range all {
+		expEng.Submit(ev)
+	}
+	expEng.Tick()
+
+	// Write a snapshot at snapSeq (after the prefix).
+	snap := brain.SnapshotWorld(expEng.World, snapSeq)
+	_, err := store.WriteSnapshot(ctx, tenant, snap)
+	require.NoError(t, err)
+
+	// Phase 2: restore via snapshot + tail replay.
+	restored, err := brain.RestoreWorld(snap, tenant)
+	require.NoError(t, err)
+	tailEvs, err := store.LoadForReplay(ctx, tenant, snapSeq)
+	require.NoError(t, err)
+	for _, ev := range tailEvs {
+		brain.Reduce(restored, ev)
+	}
+
+	// Both Worlds should have the same Hosts, Missions, and Work.
+	assert.Equal(t, expEng.Hosts(), restored.Snapshot(),
+		"hosts must match after snapshot restore + tail replay")
+	assert.Equal(t, expEng.Work(), restored.WorkSnapshot(),
+		"work must match after snapshot restore + tail replay")
+	assert.Equal(t, expEng.Missions(), restored.MissionSnapshot(),
+		"missions must match after snapshot restore + tail replay")
+}
+
+// TestLiveCadenceSnapshot_HydrateEquivalence exercises the live apply() +
+// maybeSnapshot() cadence path end-to-end: it drives events through an engine
+// with a small snapshot cadence (so a mid-stream snapshot+trim fires
+// automatically), then hydrates a fresh engine and asserts the rehydrated World
+// equals the original. This guards the AtSeq off-by-one: the snapshot must be
+// taken AFTER the triggering event is folded, so that event is neither lost from
+// the snapshot nor skipped by the exclusive-after-AtSeq tail replay.
+func TestLiveCadenceSnapshot_HydrateEquivalence(t *testing.T) {
+	_, rdb := newTestRedis(t)
+	store := brain.NewRedisTimelineStore(rdb)
+	const tenant = "tenant-live-cadence"
+
+	// Cadence of 2 means a snapshot fires after every 2 persisted events, so with
+	// 5 events at least two snapshots fire and the boundary event (the one that
+	// triggers the snapshot) is exercised.
+	live := brain.NewEngine(tenant)
+	live.WithStore(store).WithSnapshotCadence(2)
+
+	events := []brain.Event{
+		brain.MissionStarted{ID: "m1", Goal: "scan", BeliefModel: "test"},
+		brain.HostObserved{ScopeID: "s", Address: "10.0.0.1", OpenPorts: []int{22}, MissionID: "m1"},
+		brain.WorkDispatched{ID: "w1", MissionID: "m1", ItemKind: "tool", Target: "scan", Input: `{}`},
+		brain.WorkCompleted{ID: "w1", Result: `{"open":[22]}`},
+		brain.HostObserved{ScopeID: "s", Address: "10.0.0.2", OpenPorts: []int{443}, MissionID: "m1"},
+	}
+	for _, ev := range events {
+		live.Submit(ev)
+	}
+	live.Tick() // drains all events through apply(); snapshots fire at the cadence
+
+	// Hydrate a fresh engine from the same store (snapshot + tail).
+	fresh := brain.NewEngine(tenant)
+	fresh.WithStore(store)
+	fresh.Hydrate(context.Background())
+
+	// The rehydrated World must equal the live World — no event lost at the
+	// snapshot boundary.
+	assert.Equal(t, live.Hosts(), fresh.Hosts(), "hosts must match after live-cadence snapshot + hydrate")
+	assert.Equal(t, live.Work(), fresh.Work(), "work must match after live-cadence snapshot + hydrate")
+	assert.Equal(t, live.Missions(), fresh.Missions(), "missions must match after live-cadence snapshot + hydrate")
+}

@@ -37,7 +37,6 @@ import (
 	"google.golang.org/protobuf/proto"
 	"google.golang.org/protobuf/types/known/timestamppb"
 
-	"github.com/zeroroot-ai/gibson/internal/engine/checkpoint"
 	"github.com/zeroroot-ai/gibson/internal/platform/audit"
 	"github.com/zeroroot-ai/gibson/internal/platform/authz"
 	daemonpb "github.com/zeroroot-ai/sdk/api/gen/gibson/daemon/v1"
@@ -494,8 +493,8 @@ func buildCheckpointProto(v CheckpointData, missionID string, redactSecrets, inc
 		Summary: buildSingleCheckpointSummary(v, missionID),
 	}
 	if redactSecrets {
-		out.WorkingMemory = checkpoint.RedactSecretsInJSONBytes(v.WorkingMemory)
-		out.MissionMemory = checkpoint.RedactSecretsInJSONBytes(v.MissionMemory)
+		out.WorkingMemory = redactSecretsInJSONBytes(v.WorkingMemory)
+		out.MissionMemory = redactSecretsInJSONBytes(v.MissionMemory)
 	} else {
 		out.WorkingMemory = v.WorkingMemory
 		out.MissionMemory = v.MissionMemory
@@ -510,8 +509,8 @@ func buildCheckpointProto(v CheckpointData, missionID string, redactSecrets, inc
 		}
 		if includeBlobs {
 			if redactSecrets {
-				ds.Inputs = checkpoint.RedactSecretsInJSONBytes(step.Inputs)
-				ds.Outputs = checkpoint.RedactSecretsInJSONBytes(step.Outputs)
+				ds.Inputs = redactSecretsInJSONBytes(step.Inputs)
+				ds.Outputs = redactSecretsInJSONBytes(step.Outputs)
 			} else {
 				ds.Inputs = step.Inputs
 				ds.Outputs = step.Outputs
@@ -527,7 +526,7 @@ func buildCheckpointProto(v CheckpointData, missionID string, redactSecrets, inc
 			Payload:   f.Payload,
 		}
 		if redactSecrets {
-			fs.Payload = checkpoint.RedactSecretsInJSONBytes(fs.Payload)
+			fs.Payload = redactSecretsInJSONBytes(fs.Payload)
 		}
 		out.Findings = append(out.Findings, fs)
 	}
@@ -649,8 +648,8 @@ func diffMemoryBytes(a, b []byte, redactSecrets bool) []*daemonpb.MemoryKeyDelta
 		}
 		before, after := a, b
 		if redactSecrets {
-			before = checkpoint.RedactSecretsInJSONBytes(before)
-			after = checkpoint.RedactSecretsInJSONBytes(after)
+			before = redactSecretsInJSONBytes(before)
+			after = redactSecretsInJSONBytes(after)
 		}
 		return []*daemonpb.MemoryKeyDelta{{
 			Key:    "bytes:opaque",
@@ -669,14 +668,14 @@ func diffMemoryBytes(a, b []byte, redactSecrets bool) []*daemonpb.MemoryKeyDelta
 		keys[k] = struct{}{}
 	}
 	out := make([]*daemonpb.MemoryKeyDelta, 0, len(keys))
-	placeholder := []byte(`"` + checkpoint.RedactedPlaceholder + `"`)
+	placeholder := []byte(`"` + redactedPlaceholder + `"`)
 	for k := range keys {
 		av, aHas := aMap[k]
 		bv, bHas := bMap[k]
 		switch {
 		case !aHas && bHas:
 			afterBytes := jsonBytesOf(bv)
-			if redactSecrets && checkpoint.IsSecretKey(k) {
+			if redactSecrets && isSecretKey(k) {
 				afterBytes = placeholder
 			}
 			out = append(out, &daemonpb.MemoryKeyDelta{
@@ -686,7 +685,7 @@ func diffMemoryBytes(a, b []byte, redactSecrets bool) []*daemonpb.MemoryKeyDelta
 			})
 		case aHas && !bHas:
 			beforeBytes := jsonBytesOf(av)
-			if redactSecrets && checkpoint.IsSecretKey(k) {
+			if redactSecrets && isSecretKey(k) {
 				beforeBytes = placeholder
 			}
 			out = append(out, &daemonpb.MemoryKeyDelta{
@@ -700,7 +699,7 @@ func diffMemoryBytes(a, b []byte, redactSecrets bool) []*daemonpb.MemoryKeyDelta
 			if equalBytes(ab, bb) {
 				continue
 			}
-			if redactSecrets && checkpoint.IsSecretKey(k) {
+			if redactSecrets && isSecretKey(k) {
 				ab = placeholder
 				bb = placeholder
 			}
@@ -1090,4 +1089,88 @@ func formatListOffsetToken(offset int) string {
 		offset /= 10
 	}
 	return "offset:" + string(digits)
+}
+
+// redactedPlaceholder is the literal string substituted for secret-bearing field values.
+const redactedPlaceholder = "<redacted:secret>"
+
+// redactSecretsInJSONBytes walks JSON-encoded data and replaces secret-bearing
+// field values with redactedPlaceholder, then re-marshals. Returns the original
+// bytes if data is empty or fails to parse — non-JSON payloads pass through.
+// Moved inline from internal/engine/checkpoint (retired in #1117).
+func redactSecretsInJSONBytes(data []byte) []byte {
+	if len(data) == 0 {
+		return data
+	}
+	var v any
+	if err := json.Unmarshal(data, &v); err != nil {
+		return data
+	}
+	walked := redactValue(v, "")
+	out, err := json.Marshal(walked)
+	if err != nil {
+		return data
+	}
+	return out
+}
+
+// isSecretKey reports whether a field name matches the secret-bearing pattern set.
+func isSecretKey(key string) bool {
+	if key == "" {
+		return false
+	}
+	low := strings.ToLower(key)
+	switch {
+	case strings.Contains(low, "password"):
+		return true
+	case strings.Contains(low, "token"):
+		return true
+	case strings.Contains(low, "secret"):
+		return true
+	case strings.Contains(low, "credential"):
+		return true
+	case strings.Contains(low, "apikey"):
+		return true
+	case strings.Contains(low, "api_key"):
+		return true
+	case strings.Contains(low, "private_key"):
+		return true
+	case strings.Contains(low, "privatekey"):
+		return true
+	}
+	return false
+}
+
+// redactValue recursively walks an interface{} produced by json.Unmarshal,
+// substituting redactedPlaceholder when the parent key matches the secret pattern
+// or when the value is a vault-resolved hint.
+func redactValue(v any, parentKey string) any {
+	switch x := v.(type) {
+	case map[string]any:
+		if src, ok := x["source"].(string); ok && strings.EqualFold(src, "vault") {
+			return redactedPlaceholder
+		}
+		for k, child := range x {
+			x[k] = redactValue(child, k)
+		}
+		return x
+	case []any:
+		for i, child := range x {
+			x[i] = redactValue(child, parentKey)
+		}
+		return x
+	case string:
+		if isSecretKey(parentKey) {
+			return redactedPlaceholder
+		}
+		if strings.HasPrefix(x, "vault:") {
+			return redactedPlaceholder
+		}
+		return x
+	default:
+		if isSecretKey(parentKey) {
+			return redactedPlaceholder
+		}
+		return v
+	}
 }
