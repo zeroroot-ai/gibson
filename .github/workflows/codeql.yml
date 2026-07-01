@@ -1,10 +1,24 @@
 name: CodeQL
 
+# Epic: cicd-efficiency (board #44), slice S5, gibson#1130. Scanner cadence per
+# docs/architecture/CICD-CONTEXT.md decision #9: authoritative CodeQL analysis
+# runs on merge_group (the pre-merge gate) instead of on every pull_request/push,
+# plus a weekly deep scan. This is a real cut, not a duplicate: `push` here fired
+# on every commit landed to main, and `pull_request` fired on every PR push --
+# together the single largest per-PR minute cost after the image matrix.
+#
+# Fast per-PR signal is still available for security-critical paths (authz,
+# ext-authz, secrets handling) via a path-filtered pull_request trigger, since a
+# week-long lag on those specific diffs is undesirable even though the
+# authoritative gate is merge_group.
 on:
-  push:
-    branches: [main]
+  merge_group:
   pull_request:
     branches: [main]
+    paths:
+      - 'internal/platform/authz/**'
+      - 'cmd/ext-authz/**'
+      - '**/secrets/**'
   schedule:
     - cron: "0 8 * * 2"
 
