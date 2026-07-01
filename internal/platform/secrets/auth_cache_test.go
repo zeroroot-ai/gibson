@@ -141,43 +141,43 @@ func TestAuthCache_Invalidate(t *testing.T) {
 // TestAuthCache_InvalidateAll verifies that InvalidateAll clears all cached
 // tokens for a tenant across all providers.
 func TestAuthCache_InvalidateAll(t *testing.T) {
-	var vaultCalls, awsCalls atomic.Int64
+	var hostedCalls, byoCalls atomic.Int64
 
-	vaultRefresh := func(_ context.Context, _, _ string) (string, time.Duration, error) {
-		n := vaultCalls.Add(1)
-		return fmt.Sprintf("vault-token-%d", n), 60 * time.Second, nil
+	hostedRefresh := func(_ context.Context, _, _ string) (string, time.Duration, error) {
+		n := hostedCalls.Add(1)
+		return fmt.Sprintf("hosted-token-%d", n), 60 * time.Second, nil
 	}
-	awsRefresh := func(_ context.Context, _, _ string) (string, time.Duration, error) {
-		n := awsCalls.Add(1)
-		return fmt.Sprintf("aws-token-%d", n), 60 * time.Second, nil
+	byoRefresh := func(_ context.Context, _, _ string) (string, time.Duration, error) {
+		n := byoCalls.Add(1)
+		return fmt.Sprintf("byo-token-%d", n), 60 * time.Second, nil
 	}
 
 	ctx := context.Background()
 
-	// Cache A: Vault provider for tenant-e
-	cacheVault := NewAuthCache(vaultRefresh, slog.Default(), nil)
-	_, err := cacheVault.GetOrRefresh(ctx, "tenant-e", "vault")
+	// Cache A: Vault Hosted provider for tenant-e
+	cacheHosted := NewAuthCache(hostedRefresh, slog.Default(), nil)
+	_, err := cacheHosted.GetOrRefresh(ctx, "tenant-e", "vault")
 	require.NoError(t, err)
 
-	// Cache B: AWS provider for tenant-e (in production a single AuthCache
-	// services all providers; here we use two for isolation of the per-provider
-	// counter).
-	cacheAWS := NewAuthCache(awsRefresh, slog.Default(), nil)
-	_, err = cacheAWS.GetOrRefresh(ctx, "tenant-e", "awssm")
+	// Cache B: a second provider label for tenant-e (in production a single
+	// AuthCache services all providers; here we use two for isolation of the
+	// per-provider counter).
+	cacheBYO := NewAuthCache(byoRefresh, slog.Default(), nil)
+	_, err = cacheBYO.GetOrRefresh(ctx, "tenant-e", "vault-byo")
 	require.NoError(t, err)
 
 	// Invalidate all tokens for tenant-e in each cache.
-	cacheVault.InvalidateAll("tenant-e")
-	cacheAWS.InvalidateAll("tenant-e")
+	cacheHosted.InvalidateAll("tenant-e")
+	cacheBYO.InvalidateAll("tenant-e")
 
 	// Both caches should trigger a second refresh call.
-	_, err = cacheVault.GetOrRefresh(ctx, "tenant-e", "vault")
+	_, err = cacheHosted.GetOrRefresh(ctx, "tenant-e", "vault")
 	require.NoError(t, err)
-	assert.Equal(t, int64(2), vaultCalls.Load(), "vault refresh should fire again after InvalidateAll")
+	assert.Equal(t, int64(2), hostedCalls.Load(), "hosted refresh should fire again after InvalidateAll")
 
-	_, err = cacheAWS.GetOrRefresh(ctx, "tenant-e", "awssm")
+	_, err = cacheBYO.GetOrRefresh(ctx, "tenant-e", "vault-byo")
 	require.NoError(t, err)
-	assert.Equal(t, int64(2), awsCalls.Load(), "aws refresh should fire again after InvalidateAll")
+	assert.Equal(t, int64(2), byoCalls.Load(), "byo refresh should fire again after InvalidateAll")
 }
 
 // TestAuthCache_DifferentTenantsDontCollide verifies that tokens for separate

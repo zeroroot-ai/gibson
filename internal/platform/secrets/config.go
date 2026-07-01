@@ -20,13 +20,14 @@ import (
 var ErrBrokerConfigNotFound = configstore.ErrNotFound
 
 // BrokerConfig is the decrypted, in-memory representation of a tenant's
-// broker configuration. Provider is the short provider name ("postgres",
-// "vault", "awssm", "gcpsm", "azurekv"). ConfigBlob is the raw JSON bytes
-// of the provider-specific configuration (before encryption). The blob is
-// never persisted in plaintext — configstore.Store.SetRaw encrypts it
+// broker configuration. Provider is the short provider name — "vault" is the
+// only backend (Hosted namespace mode + BYO path-prefix mode); the
+// AWS/GCP/Azure backends were removed in gibson#1109. ConfigBlob is the raw
+// JSON bytes of the provider-specific configuration (before encryption). The
+// blob is never persisted in plaintext — configstore.Store.SetRaw encrypts it
 // before writing.
 type BrokerConfig struct {
-	// Provider is one of: "vault", "awssm", "gcpsm", "azurekv".
+	// Provider is the short provider name; "vault" is the only supported value.
 	Provider string
 
 	// ConfigBlob is the raw JSON of the provider-specific configuration

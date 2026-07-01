@@ -266,9 +266,10 @@ type daemonImpl struct {
 	// Spec: tenant-secrets-broker-completion (Task 10, 11).
 	brokerAuditWriter *secrets.AuditWriter
 
-	// brokerFactories maps each provider name (postgres/vault/awssm/gcpsm/
-	// azurekv) to its ProviderFactory. Held on the daemon so grpc.go can
-	// build the ProviderProbeFactory adapter for admin.NewTenantAdminServer.
+	// brokerFactories maps each provider name to its ProviderFactory. Vault
+	// is the only backend (Hosted + BYO); the AWS/GCP/Azure factories were
+	// removed in gibson#1109. Held on the daemon so grpc.go can build the
+	// ProviderProbeFactory adapter for admin.NewTenantAdminServer.
 	// Spec: tenant-secrets-broker-completion (Task 10, 11).
 	brokerFactories map[string]secrets.ProviderFactory
 

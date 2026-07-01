@@ -42,18 +42,10 @@ type Registry struct {
 // fully-initialized provider or an error.
 type RegistryConfig struct {
 	// VaultFactory constructs a Vault provider from the tenant's JSON config
-	// blob. May be nil if vault is not supported in this deployment (unusual
-	// — all four providers compile into every binary).
+	// blob. Vault is the only broker backend — Hosted (namespace mode) and
+	// BYO (path-prefix mode) are both served by this single factory; the
+	// AWS/GCP/Azure backends were removed in gibson#1109.
 	VaultFactory ProviderConstructor
-
-	// AWSSMFactory constructs an AWS Secrets Manager provider.
-	AWSSMFactory ProviderConstructor
-
-	// GCPSMFactory constructs a GCP Secret Manager provider.
-	GCPSMFactory ProviderConstructor
-
-	// AzureKVFactory constructs an Azure Key Vault provider.
-	AzureKVFactory ProviderConstructor
 }
 
 // NewRegistry constructs a Registry. configStore is used to read per-tenant
@@ -66,15 +58,6 @@ func NewRegistry(configStore RegistryConfigGetter, cfg RegistryConfig) (*Registr
 	constructors := map[string]ProviderConstructor{}
 	if cfg.VaultFactory != nil {
 		constructors["vault"] = cfg.VaultFactory
-	}
-	if cfg.AWSSMFactory != nil {
-		constructors["awssm"] = cfg.AWSSMFactory
-	}
-	if cfg.GCPSMFactory != nil {
-		constructors["gcpsm"] = cfg.GCPSMFactory
-	}
-	if cfg.AzureKVFactory != nil {
-		constructors["azurekv"] = cfg.AzureKVFactory
 	}
 
 	return &Registry{

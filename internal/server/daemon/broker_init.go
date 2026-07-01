@@ -12,9 +12,6 @@ import (
 	"github.com/prometheus/client_golang/prometheus/promauto"
 	"github.com/zeroroot-ai/gibson/internal/infra/resilience"
 	sdksecrets "github.com/zeroroot-ai/gibson/internal/infra/secrets"
-	sdkawssm "github.com/zeroroot-ai/gibson/internal/infra/secrets/awssm"
-	sdkazurekv "github.com/zeroroot-ai/gibson/internal/infra/secrets/azurekv"
-	sdkgcpsm "github.com/zeroroot-ai/gibson/internal/infra/secrets/gcpsm"
 	sdkvault "github.com/zeroroot-ai/gibson/internal/infra/secrets/vault"
 	"github.com/zeroroot-ai/gibson/internal/platform/audit"
 	"github.com/zeroroot-ai/gibson/internal/platform/component"
@@ -40,7 +37,7 @@ var brokerHealthGauge = promauto.NewGaugeVec(
 //  1. Audit writer  — delegates to the Redis Streams AuditLogger.
 //  2. Circuit breaker — per-(tenant, provider) fault isolation.
 //  3. Config store  — TenantConfigStore + ConfigStore backed by dashboard Postgres + system-tenant KEK.
-//  4. Cloud provider factories (Vault, AWS SM, GCP SM, Azure KV).
+//  4. Vault provider factory (Hosted namespace mode + BYO path-prefix mode).
 //  5. Registry — resolves tenant → broker.
 //  6. secrets.Service — the single entry-point for all handlers.
 //
@@ -128,6 +125,9 @@ func (d *daemonImpl) initBrokerStack(ctx context.Context, compSvc *component.Com
 				pgxPool.Close() // best-effort cleanup
 			} else {
 				// Build the provider factories for the config-store probe step.
+				// Vault is the only broker backend (Hosted namespace mode +
+				// BYO path-prefix mode); the AWS/GCP/Azure backends were
+				// removed in gibson#1109.
 				configFactories := map[string]secrets.ProviderFactory{
 					"vault": func(blob []byte) (sdksecrets.Broker, error) {
 						var cfg sdkvault.Config
@@ -135,27 +135,6 @@ func (d *daemonImpl) initBrokerStack(ctx context.Context, compSvc *component.Com
 							return nil, fmt.Errorf("vault: unmarshal config: %w", err)
 						}
 						return sdkvault.New(ctx, cfg)
-					},
-					"awssm": func(blob []byte) (sdksecrets.Broker, error) {
-						var cfg sdkawssm.Config
-						if err := json.Unmarshal(blob, &cfg); err != nil {
-							return nil, fmt.Errorf("awssm: unmarshal config: %w", err)
-						}
-						return sdkawssm.New(ctx, cfg)
-					},
-					"gcpsm": func(blob []byte) (sdksecrets.Broker, error) {
-						var cfg sdkgcpsm.Config
-						if err := json.Unmarshal(blob, &cfg); err != nil {
-							return nil, fmt.Errorf("gcpsm: unmarshal config: %w", err)
-						}
-						return sdkgcpsm.New(ctx, cfg)
-					},
-					"azurekv": func(blob []byte) (sdksecrets.Broker, error) {
-						var cfg sdkazurekv.Config
-						if err := json.Unmarshal(blob, &cfg); err != nil {
-							return nil, fmt.Errorf("azurekv: unmarshal config: %w", err)
-						}
-						return sdkazurekv.New(cfg)
 					},
 				}
 				cs, err := secrets.NewConfigStore(tenantCfgStore, configFactories, auditWriter)
@@ -246,7 +225,10 @@ func (d *daemonImpl) initBrokerStack(ctx context.Context, compSvc *component.Com
 	d.vaultAuthCache = vaultAuthCache
 	d.logger.Info(ctx, "broker stack: Vault auth cache initialized")
 
-	// --- 5. Cloud provider factories for the Registry ---
+	// --- 5. Vault provider factory for the Registry ---
+	// Vault is the only broker backend (Hosted namespace mode + BYO
+	// path-prefix mode); the AWS/GCP/Azure backends were removed in
+	// gibson#1109.
 	registryCfg := secrets.RegistryConfig{
 		VaultFactory: func(blob []byte) (sdksecrets.Broker, error) {
 			var cfg sdkvault.Config
@@ -269,27 +251,6 @@ func (d *daemonImpl) initBrokerStack(ctx context.Context, compSvc *component.Com
 				return vaultAuthCache.GetOrRefresh(rCtx, key, "vault")
 			}
 			return sdkvault.NewWithRefresher(ctx, cfg, refresher)
-		},
-		AWSSMFactory: func(blob []byte) (sdksecrets.Broker, error) {
-			var cfg sdkawssm.Config
-			if err := json.Unmarshal(blob, &cfg); err != nil {
-				return nil, fmt.Errorf("awssm: unmarshal config: %w", err)
-			}
-			return sdkawssm.New(ctx, cfg)
-		},
-		GCPSMFactory: func(blob []byte) (sdksecrets.Broker, error) {
-			var cfg sdkgcpsm.Config
-			if err := json.Unmarshal(blob, &cfg); err != nil {
-				return nil, fmt.Errorf("gcpsm: unmarshal config: %w", err)
-			}
-			return sdkgcpsm.New(ctx, cfg)
-		},
-		AzureKVFactory: func(blob []byte) (sdksecrets.Broker, error) {
-			var cfg sdkazurekv.Config
-			if err := json.Unmarshal(blob, &cfg); err != nil {
-				return nil, fmt.Errorf("azurekv: unmarshal config: %w", err)
-			}
-			return sdkazurekv.New(cfg)
 		},
 	}
 
@@ -359,7 +320,7 @@ func (d *daemonImpl) initBrokerStack(ctx context.Context, compSvc *component.Com
 	// broker-config events. The correct integration point is the future
 	// SetBrokerConfig admin RPC handler which will call both ConfigStore.Set
 	// and registry.Reload in the same transaction.
-	d.logger.Info(ctx, "broker stack: initialized successfully; four cloud provider constructors registered")
+	d.logger.Info(ctx, "broker stack: initialized successfully; vault provider constructor registered")
 	return nil
 }
 

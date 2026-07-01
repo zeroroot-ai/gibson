@@ -3,6 +3,7 @@ package admin
 import (
 	"context"
 	"errors"
+	"strings"
 	"testing"
 	"time"
 
@@ -12,6 +13,21 @@ import (
 	tenantv1 "github.com/zeroroot-ai/gibson/internal/server/daemon/api/gibson/tenant/v1"
 	"github.com/zeroroot-ai/sdk/auth"
 )
+
+// vaultBlobFactory returns a Registry VaultFactory that hands back one of two
+// sentinel brokers depending on the config blob: initialBroker for the bare
+// "{}" blob a freshly-seeded row carries, and configuredBroker once the blob
+// carries an "address" (the shape SetBrokerConfig persists for a Vault
+// candidate). Vault is the only broker backend since gibson#1109, so cache
+// invalidation is exercised across two blob shapes of the same provider.
+func vaultBlobFactory(initialBroker, configuredBroker sdksecrets.Broker) secrets.ProviderConstructor {
+	return func(blob []byte) (sdksecrets.Broker, error) {
+		if strings.Contains(string(blob), "address") {
+			return configuredBroker, nil
+		}
+		return initialBroker, nil
+	}
+}
 
 // This file is the regression-guard for the spec's central bug.
 //
@@ -83,21 +99,16 @@ func (b *labelledBroker) Capabilities() sdksecrets.Capabilities {
 // regresses to a no-op, this test fails before any handler-level test even
 // runs.
 func TestRegistry_ReloadInvalidatesCache(t *testing.T) {
-	awssmFake := &labelledBroker{label: "awssm"}
-	vaultFake := &labelledBroker{label: "vault"}
+	initialFake := &labelledBroker{label: "vault-initial"}
+	configuredFake := &labelledBroker{label: "vault-configured"}
 
 	tenant := mustTenant(t, "acme")
 	// gibson#101: every tenant needs an explicit broker config row.
 	getter := &inMemoryConfigGetter{rows: map[auth.TenantID]secrets.BrokerConfig{
-		tenant: {Provider: "awssm", ConfigBlob: []byte(`{}`)},
+		tenant: {Provider: "vault", ConfigBlob: []byte(`{}`)},
 	}}
 	reg, err := secrets.NewRegistry(getter, secrets.RegistryConfig{
-		AWSSMFactory: func(_ []byte) (sdksecrets.Broker, error) {
-			return awssmFake, nil
-		},
-		VaultFactory: func(_ []byte) (sdksecrets.Broker, error) {
-			return vaultFake, nil
-		},
+		VaultFactory: vaultBlobFactory(initialFake, configuredFake),
 	})
 	if err != nil {
 		t.Fatalf("NewRegistry: %v", err)
@@ -105,26 +116,26 @@ func TestRegistry_ReloadInvalidatesCache(t *testing.T) {
 
 	ctx := context.Background()
 
-	// Initial state: explicit awssm config row → awssm provider.
+	// Initial state: bare "{}" vault config row → initial provider.
 	got, err := reg.For(ctx, tenant)
 	if err != nil {
 		t.Fatalf("For(initial): %v", err)
 	}
-	if got != awssmFake {
-		t.Fatalf("initial: got %v, want awssm fake", got)
+	if got != initialFake {
+		t.Fatalf("initial: got %v, want initial fake", got)
 	}
 
-	// Simulate writer.Set landing a vault row.
+	// Simulate writer.Set landing a configured vault row.
 	getter.rows[tenant] = secrets.BrokerConfig{
 		Provider:   "vault",
 		ConfigBlob: []byte(`{"address":"https://vault"}`),
 	}
 
-	// Without Reload, the Registry still returns the cached awssm provider
+	// Without Reload, the Registry still returns the cached initial provider
 	// (this is the pre-spec bug surface).
 	got, _ = reg.For(ctx, tenant)
-	if got != awssmFake {
-		t.Fatalf("pre-Reload: cache should still be awssm, got %v", got)
+	if got != initialFake {
+		t.Fatalf("pre-Reload: cache should still be initial, got %v", got)
 	}
 
 	// Reload invalidates the cache.
@@ -134,8 +145,8 @@ func TestRegistry_ReloadInvalidatesCache(t *testing.T) {
 	if err != nil {
 		t.Fatalf("For(post-Reload): %v", err)
 	}
-	if got != vaultFake {
-		t.Fatalf("post-Reload: got %v, want vault fake", got)
+	if got != configuredFake {
+		t.Fatalf("post-Reload: got %v, want configured fake", got)
 	}
 }
 
@@ -145,17 +156,12 @@ func TestRegistry_ReloadInvalidatesCache(t *testing.T) {
 // call, this test fails at the post-Set assertion — that is the regression
 // this spec exists to prevent.
 func TestSetBrokerConfig_PersistAndReload_FullPath(t *testing.T) {
-	awssmFake := &labelledBroker{label: "awssm"}
-	vaultFake := &labelledBroker{label: "vault"}
+	initialFake := &labelledBroker{label: "vault-initial"}
+	configuredFake := &labelledBroker{label: "vault-configured"}
 
 	getter := &inMemoryConfigGetter{rows: map[auth.TenantID]secrets.BrokerConfig{}}
 	reg, err := secrets.NewRegistry(getter, secrets.RegistryConfig{
-		AWSSMFactory: func(_ []byte) (sdksecrets.Broker, error) {
-			return awssmFake, nil
-		},
-		VaultFactory: func(_ []byte) (sdksecrets.Broker, error) {
-			return vaultFake, nil
-		},
+		VaultFactory: vaultBlobFactory(initialFake, configuredFake),
 	})
 	if err != nil {
 		t.Fatalf("NewRegistry: %v", err)
@@ -177,15 +183,15 @@ func TestSetBrokerConfig_PersistAndReload_FullPath(t *testing.T) {
 	tenant := mustTenant(t, "acme")
 	ctx := withTenant(t, "acme")
 
-	// gibson#101: seed an explicit awssm row. The "pre-Set" assertion
-	// below remains valid.
+	// gibson#101: seed a bare vault row. The "pre-Set" assertion below
+	// remains valid.
 	getter.rows[tenant] = secrets.BrokerConfig{
-		Provider: "awssm", ConfigBlob: []byte(`{}`),
+		Provider: "vault", ConfigBlob: []byte(`{}`),
 	}
 
-	// Initial: explicit awssm row → awssm provider.
-	if got, _ := reg.For(ctx, tenant); got != awssmFake {
-		t.Fatalf("pre-Set: got %v, want awssm", got)
+	// Initial: bare "{}" vault row → initial provider.
+	if got, _ := reg.For(ctx, tenant); got != initialFake {
+		t.Fatalf("pre-Set: got %v, want initial", got)
 	}
 
 	// Drive SetBrokerConfig with a vault candidate.
@@ -199,15 +205,15 @@ func TestSetBrokerConfig_PersistAndReload_FullPath(t *testing.T) {
 		t.Fatalf("SetBrokerConfig: %v", err)
 	}
 
-	// CRITICAL: post-Set, Registry.For MUST return the vault fake. If
-	// SetBrokerConfig didn't call Reload, the cache still serves awssm
-	// and the test fails.
+	// CRITICAL: post-Set, Registry.For MUST return the configured fake. If
+	// SetBrokerConfig didn't call Reload, the cache still serves the initial
+	// provider and the test fails.
 	got, err := reg.For(ctx, tenant)
 	if err != nil {
 		t.Fatalf("For(post-Set): %v", err)
 	}
-	if got != vaultFake {
-		t.Fatalf("post-Set: cache not invalidated — got %v, want vault fake (the spec's central regression)", got)
+	if got != configuredFake {
+		t.Fatalf("post-Set: cache not invalidated — got %v, want configured fake (the spec's central regression)", got)
 	}
 }
 
@@ -216,17 +222,12 @@ func TestSetBrokerConfig_PersistAndReload_FullPath(t *testing.T) {
 // handler must report the persist failure and leave the cached provider
 // alone — invalidating after a failed write would be lying about state.
 func TestSetBrokerConfig_PersistFailure_NoReload_FullPath(t *testing.T) {
-	awssmFake := &labelledBroker{label: "awssm"}
-	vaultFake := &labelledBroker{label: "vault"}
+	initialFake := &labelledBroker{label: "vault-initial"}
+	configuredFake := &labelledBroker{label: "vault-configured"}
 
 	getter := &inMemoryConfigGetter{rows: map[auth.TenantID]secrets.BrokerConfig{}}
 	reg, err := secrets.NewRegistry(getter, secrets.RegistryConfig{
-		AWSSMFactory: func(_ []byte) (sdksecrets.Broker, error) {
-			return awssmFake, nil
-		},
-		VaultFactory: func(_ []byte) (sdksecrets.Broker, error) {
-			return vaultFake, nil
-		},
+		VaultFactory: vaultBlobFactory(initialFake, configuredFake),
 	})
 	if err != nil {
 		t.Fatalf("NewRegistry: %v", err)
@@ -250,15 +251,14 @@ func TestSetBrokerConfig_PersistFailure_NoReload_FullPath(t *testing.T) {
 	tenant := mustTenant(t, "acme")
 	ctx := withTenant(t, "acme")
 
-	// gibson#101: seed an explicit awssm row so the warm-up path
-	// resolves cleanly.
+	// gibson#101: seed a bare vault row so the warm-up path resolves cleanly.
 	getter.rows[tenant] = secrets.BrokerConfig{
-		Provider: "awssm", ConfigBlob: []byte(`{}`),
+		Provider: "vault", ConfigBlob: []byte(`{}`),
 	}
 
-	// Warm the cache with the configured awssm provider.
-	if got, _ := reg.For(ctx, tenant); got != awssmFake {
-		t.Fatalf("warm-up: got %v, want awssm", got)
+	// Warm the cache with the initial provider.
+	if got, _ := reg.For(ctx, tenant); got != initialFake {
+		t.Fatalf("warm-up: got %v, want initial", got)
 	}
 
 	// Drive SetBrokerConfig — writer fails.
@@ -273,9 +273,10 @@ func TestSetBrokerConfig_PersistFailure_NoReload_FullPath(t *testing.T) {
 		t.Fatal("expected SetBrokerConfig to fail on writer error")
 	}
 
-	// The cache should still serve awssm — Reload must not have fired.
-	if got, _ := reg.For(ctx, tenant); got != awssmFake {
-		t.Fatalf("post-failure: cache should still be awssm, got %v", got)
+	// The cache should still serve the initial provider — Reload must not
+	// have fired.
+	if got, _ := reg.For(ctx, tenant); got != initialFake {
+		t.Fatalf("post-failure: cache should still be initial, got %v", got)
 	}
 }
 
