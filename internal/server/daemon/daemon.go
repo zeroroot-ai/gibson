@@ -1110,6 +1110,45 @@ func (d *daemonImpl) Start(ctx context.Context) error {
 			} else {
 				d.pool = p
 				d.logger.Info(ctx, "data-plane pool initialized (Phase D)")
+
+				// Wire the durable Timeline store into the brain registry (ADR-0011,
+				// gibson#1114). Now that the data-plane pool is available we can resolve
+				// a per-tenant Redis client for each new engine. The factory is
+				// invoked lazily inside Registry.For on first tenant touch — not at
+				// daemon start — so the pool is guaranteed to be set by the time it runs.
+				// If pool.For fails (tenant not provisioned) the engine operates
+				// in-memory only for that tenant, matching the pre-#1113 behavior.
+				if d.brainRegistry != nil {
+					d.brainRegistry.WithStoreFactory(func(storeCtx context.Context, tenant string) brain.TimelineStore {
+						tenantID, idErr := auth.NewTenantID(tenant)
+						if idErr != nil {
+							slog.WarnContext(storeCtx, "brain/registry: store factory: invalid tenant id; engine will run in-memory only",
+								"tenant", tenant,
+								"err", idErr,
+							)
+							return nil
+						}
+						conn, err := d.pool.For(storeCtx, tenantID)
+						if err != nil {
+							slog.WarnContext(storeCtx, "brain/registry: store factory: pool.For failed; engine will run in-memory only",
+								"tenant", tenant,
+								"err", err,
+							)
+							return nil
+						}
+						// Extract the per-tenant *redis.Client before releasing the Conn
+						// so that the eviction tracker (activeConns) is decremented
+						// correctly. The *redis.Client itself is long-lived — it is
+						// managed by the pool's redisPerTenant cache and remains valid
+						// for the life of the pool (closed on Pool.Close / EvictTenant).
+						// Holding the client pointer after Release() is safe; it does not
+						// close or invalidate the underlying connection.
+						redisClient := conn.Redis
+						conn.Release()
+						return brain.NewRedisTimelineStore(redisClient)
+					})
+					d.logger.Info(ctx, "brain registry: durable Timeline store factory wired (ADR-0011, #1114)")
+				}
 			}
 
 			// Phase 11 (secrets-broker, Task 29): initialize the broker stack now

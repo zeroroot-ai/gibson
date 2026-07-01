@@ -157,6 +157,67 @@ func (e *Engine) Run(ctx context.Context) {
 	}
 }
 
+// Hydrate loads the persisted Timeline from the store and folds it into the
+// Engine's live World (ADR-0011 crash-resume: "on resume, work still `running`
+// with no completion is marked WorkFailed"). It is called once per Engine, before
+// the tick loop starts, so the World is fully reconstructed before the first tick
+// applies live events.
+//
+// Hydrate holds the write lock for the fold so concurrent reads (from gRPC
+// handlers that happen to race the hydration) see a consistent World. Effects
+// (subscribers) are intentionally NOT fired during the fold — they are live-only
+// by ADR-0009. In-flight work left `running` in the recovered World is failed
+// via ResumeFailInFlight events, which ARE submitted to the live intake queue so
+// the retry system and mission-completion system run on the next tick.
+//
+// A nil store is a no-op (the Engine operates in-memory only, backward-compatible).
+// Errors are logged and cause Hydrate to return the partially-folded World as-is
+// rather than aborting — a best-effort recovery is better than refusing to start.
+func (e *Engine) Hydrate(ctx context.Context) {
+	if e.store == nil {
+		return
+	}
+
+	evs, err := e.store.LoadForReplay(ctx, e.World.Tenant, "")
+	if err != nil {
+		slog.Error("brain/engine: hydrate: failed to load Timeline from store",
+			"tenant", e.World.Tenant,
+			"err", err,
+		)
+		return
+	}
+	if len(evs) == 0 {
+		return // no history to replay — fresh tenant
+	}
+
+	e.mu.Lock()
+	defer e.mu.Unlock()
+
+	// Replay the full persisted sequence into a fresh World (pure fold, no effects).
+	tl := &Timeline{}
+	for _, ev := range evs {
+		tl.Append(ev)
+	}
+	e.Timeline = tl
+	e.World = Replay(e.World.Tenant, tl)
+
+	// Fail any work that was `running` when the daemon crashed — a crash IS a
+	// failure (ADR-0011 decision 5). Submit them to the live intake queue so the
+	// retry System / Decider re-engage on the next tick without re-firing the
+	// original dispatch (effects are live-only, ADR-0009).
+	for _, failEv := range ResumeFailInFlight(e.World) {
+		// Non-blocking: we are not yet running (called before go e.Run(ctx)), so
+		// the intake channel has no consumer. Use a direct append so these failure
+		// events enter the next tick's drain without blocking.
+		e.intake <- failEv
+	}
+
+	slog.Info("brain/engine: hydrated World from persisted Timeline",
+		"tenant", e.World.Tenant,
+		"events", len(evs),
+	)
+}
+
 // RewindTo makes the frame after folding the first n Timeline events the new live
 // state: it truncates the Timeline to n events and rebuilds the World by replay
 // (ADR-0001: World == fold(Timeline)). Brain-native rewind — the durable record IS
