@@ -48,8 +48,9 @@ type namedProvider struct {
 
 func newNamedProv(name string) *namedProvider { return &namedProvider{name: name} }
 
-// buildTestRegistry constructs a Registry with the given config getter and
-// optional cloud provider factories.
+// buildTestRegistry constructs a Registry with the given config getter and an
+// optional Vault provider factory (Vault is the only broker backend since
+// gibson#1109).
 func buildTestRegistry(
 	t *testing.T,
 	getter RegistryConfigGetter,
@@ -59,15 +60,6 @@ func buildTestRegistry(
 	cfg := RegistryConfig{}
 	if f, ok := extras["vault"]; ok {
 		cfg.VaultFactory = f
-	}
-	if f, ok := extras["awssm"]; ok {
-		cfg.AWSSMFactory = f
-	}
-	if f, ok := extras["gcpsm"]; ok {
-		cfg.GCPSMFactory = f
-	}
-	if f, ok := extras["azurekv"]; ok {
-		cfg.AzureKVFactory = f
 	}
 	reg, err := NewRegistry(getter, cfg)
 	require.NoError(t, err)
@@ -148,26 +140,33 @@ func TestRegistry_ReloadEvictsCache(t *testing.T) {
 }
 
 func TestRegistry_TenantIsolation(t *testing.T) {
-	vaultProvA := newNamedProv("vault-a")
-	awssmProvB := newNamedProv("awssm-b")
+	// Both tenants use the sole "vault" backend but the factory hands out a
+	// distinct provider instance per tenant (keyed by the config blob), so
+	// the registry must not cross-wire one tenant's broker to another.
+	provA := newNamedProv("vault-a")
+	provB := newNamedProv("vault-b")
 
 	getter := newFakeConfigGetter()
-	getter.Set(regTenantA, BrokerConfig{Provider: "vault", ConfigBlob: []byte(`{}`)})
-	getter.Set(regTenantB, BrokerConfig{Provider: "awssm", ConfigBlob: []byte(`{}`)})
+	getter.Set(regTenantA, BrokerConfig{Provider: "vault", ConfigBlob: []byte(`{"t":"a"}`)})
+	getter.Set(regTenantB, BrokerConfig{Provider: "vault", ConfigBlob: []byte(`{"t":"b"}`)})
 
 	extras := map[string]ProviderConstructor{
-		"vault": func(_ []byte) (sdksecrets.Broker, error) { return vaultProvA, nil },
-		"awssm": func(_ []byte) (sdksecrets.Broker, error) { return awssmProvB, nil },
+		"vault": func(blob []byte) (sdksecrets.Broker, error) {
+			if string(blob) == `{"t":"b"}` {
+				return provB, nil
+			}
+			return provA, nil
+		},
 	}
 	reg := buildTestRegistry(t, getter, extras)
 
 	bA, err := reg.For(context.Background(), regTenantA)
 	require.NoError(t, err)
-	assert.Same(t, vaultProvA, bA.(*namedProvider))
+	assert.Same(t, provA, bA.(*namedProvider))
 
 	bB, err := reg.For(context.Background(), regTenantB)
 	require.NoError(t, err)
-	assert.Same(t, awssmProvB, bB.(*namedProvider))
+	assert.Same(t, provB, bB.(*namedProvider))
 }
 
 func TestRegistry_HealthReturnsPerTenant(t *testing.T) {

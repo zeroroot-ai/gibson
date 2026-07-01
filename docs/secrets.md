@@ -41,8 +41,7 @@ Service            — single entry point for gRPC handlers
 ```
 
 Provider factories registered (`internal/platform/secrets/registry.go`):
-- `vault` — the only supported provider; per-tenant Vault namespace. All provisioned tenants use this.
-- `awssm`, `gcpsm`, `azurekv` — BYO cloud secret managers; factory hooks compiled in, activated via `SetBrokerConfig` RPC.
+- `vault` — the only broker backend. Hosted (per-tenant OpenBao namespace) and BYO (customer Vault, path-prefix mode) are both served by this single factory. The AWS/GCP/Azure cloud backends were removed in gibson#1109.
 
 Tenant→provider routing happens in `Registry.For(tenant)`, which reads the tenant's broker config row from `tenant_secrets_broker_config`. A missing row is a hard error (`ErrBrokerConfigNotFound`) — the provisioning saga must have run.
 

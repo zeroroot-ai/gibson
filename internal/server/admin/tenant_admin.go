@@ -22,9 +22,9 @@
 //     case-insensitive prefix match. Pagination is offset-based with a
 //     base64-encoded cursor.
 //
-// SECURITY: sensitive auth fields (Vault token, AWS keys, GCP SA JSON,
-// Azure client secret) are write-only from the dashboard's perspective.
-// They flow inbound on Set/Probe; they NEVER appear in any read response.
+// SECURITY: sensitive auth fields (Vault token, AppRole secret ID) are
+// write-only from the dashboard's perspective. They flow inbound on
+// Set/Probe; they NEVER appear in any read response.
 //
 // Spec: secrets-tenant-lifecycle Requirement 8.1, Requirement 3.
 package admin
@@ -639,21 +639,9 @@ func candidateToBlob(c *tenantv1.CandidateConfig) (string, []byte, error) {
 	if len(c.GetApproleSecretId()) > 0 {
 		dict["approle_secret_id"] = string(c.GetApproleSecretId())
 	}
-	if len(c.GetAwsAccessKeyId()) > 0 {
-		dict["aws_access_key_id"] = string(c.GetAwsAccessKeyId())
-	}
-	if len(c.GetAwsSecretAccessKey()) > 0 {
-		dict["aws_secret_access_key"] = string(c.GetAwsSecretAccessKey())
-	}
-	if len(c.GetAwsExternalId()) > 0 {
-		dict["aws_external_id"] = string(c.GetAwsExternalId())
-	}
-	if len(c.GetGcpServiceAccountJson()) > 0 {
-		dict["gcp_service_account_json"] = string(c.GetGcpServiceAccountJson())
-	}
-	if len(c.GetAzureClientSecret()) > 0 {
-		dict["azure_client_secret"] = string(c.GetAzureClientSecret())
-	}
+	// AWS/GCP/Azure sensitive fields were dropped in gibson#1109 — Vault
+	// (Hosted + BYO) is the only broker backend. Their proto field numbers
+	// (23-27) remain assigned but are no longer consumed here.
 
 	blob, err := json.Marshal(dict)
 	if err != nil {
@@ -704,11 +692,6 @@ func redactConfig(providerName string, blob []byte) (*tenantv1.RedactedConfig, e
 var sensitiveKeys = []string{
 	"vault_token",
 	"approle_secret_id",
-	"aws_access_key_id",
-	"aws_secret_access_key",
-	"aws_external_id",
-	"gcp_service_account_json",
-	"azure_client_secret",
 }
 
 // stringField returns dict[key] as a string, or "" when missing or
