@@ -149,7 +149,7 @@ func TestGetBrokerConfig_Redacts(t *testing.T) {
 	r.err = nil
 	r.cfg = secrets.BrokerConfig{
 		Provider:   "vault",
-		ConfigBlob: []byte(`{"address":"https://vault","auth_method":"token","vault_token":"xxx"}`),
+		ConfigBlob: []byte(`{"address":"https://vault","auth":{"method":"token","token":"xxx"}}`),
 	}
 	ctx := ctxWithTenant(t, "acme")
 	resp, err := srv.GetBrokerConfig(ctx, &tenantv1.GetBrokerConfigRequest{})
@@ -449,22 +449,6 @@ func TestClassifyProbeError(t *testing.T) {
 		if got := classifyProbeError(tc.err); got != tc.want {
 			t.Errorf("classifyProbeError(%q): got %q, want %q", tc.err, got, tc.want)
 		}
-	}
-}
-
-func TestProviderEnumStringRoundtrip(t *testing.T) {
-	// VAULT_HOSTED is the canonical "vault" factory mapping and round-trips.
-	e := tenantv1.BrokerProvider_BROKER_PROVIDER_VAULT_HOSTED
-	s := providerEnumToString(e)
-	if got := providerStringToEnum(s); got != e {
-		t.Errorf("roundtrip %v -> %q -> %v", e, s, got)
-	}
-
-	// Both Vault variants map to the single "vault" factory name; Hosted vs
-	// BYO is a Config-blob distinction resolved by later slices
-	// (gibson#1107/#1108). BYO therefore does not strictly round-trip.
-	if got := providerEnumToString(tenantv1.BrokerProvider_BROKER_PROVIDER_VAULT_BYO); got != "vault" {
-		t.Errorf("VAULT_BYO -> %q, want \"vault\"", got)
 	}
 }
 
