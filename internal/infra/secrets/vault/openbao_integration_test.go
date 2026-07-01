@@ -557,3 +557,117 @@ func TestOpenBao_InternalUIMountsProbe(t *testing.T) {
 	require.Equal(t, "2", parsed.Data.Options["version"],
 		"mount %q KV version: got %q want %q", openbaoTestMount, parsed.Data.Options["version"], "2")
 }
+
+// ---------------------------------------------------------------------------
+// H1 regression guard — colon-flat root keys in Hosted namespace mode
+// (gibson#1106 / PRD gibson#1105)
+// ---------------------------------------------------------------------------
+
+// provisionNamespaceKV creates the hierarchical namespace parent/child and
+// mounts a KV v2 engine (openbaoTestMount) inside it — mirroring the Hosted
+// broker's per-tenant namespace-mode provisioning. Used by the H1 regression
+// guard below. Namespaces must be created level-by-level (OpenBao rejects a
+// "/"-containing name in one shot), the same shape the tenant operator's
+// EnsureTenantNamespace uses.
+func provisionNamespaceKV(t *testing.T, ctx context.Context, addr, parentNS, childNS string) {
+	t.Helper()
+
+	vaultCfg := api.DefaultConfig()
+	vaultCfg.Address = addr
+
+	rootClient, err := api.NewClient(vaultCfg)
+	require.NoError(t, err)
+	rootClient.SetToken(openbaoDevRootToken)
+
+	// Step 1: create the parent namespace at the root.
+	_, err = rootClient.Logical().WriteWithContext(ctx, "sys/namespaces/"+parentNS, nil)
+	require.NoError(t, err, "create parent namespace %q", parentNS)
+
+	// Step 2: create the child namespace from the parent's context.
+	parentClient, err := api.NewClient(vaultCfg)
+	require.NoError(t, err)
+	parentClient.SetToken(openbaoDevRootToken)
+	parentClient.SetNamespace(parentNS)
+	_, err = parentClient.Logical().WriteWithContext(ctx, "sys/namespaces/"+childNS, nil)
+	require.NoError(t, err, "create child namespace %q under %q", childNS, parentNS)
+
+	// Step 3: mount a KV v2 engine inside the full child namespace.
+	nsClient, err := api.NewClient(vaultCfg)
+	require.NoError(t, err)
+	nsClient.SetToken(openbaoDevRootToken)
+	nsClient.SetNamespace(parentNS + "/" + childNS)
+	err = nsClient.Sys().MountWithContext(ctx, openbaoTestMount, &api.MountInput{
+		Type:    "kv",
+		Options: map[string]string{"version": "2"},
+	})
+	require.NoError(t, err, "mount KV v2 inside namespace %q/%q", parentNS, childNS)
+}
+
+// TestOpenBao_TenantSecretColonFlatRoot_NamespaceMode is the H1 regression
+// guard (gibson#1106 / PRD gibson#1105): a tenant secret stored colon-flat at
+// the KV root ("cred:<name>") must be returned by List and found by Get in the
+// Hosted broker's namespace mode.
+//
+// The retired "user/<category>:<name>" layout was invisible to a namespace-mode
+// root LIST — it lands under a Vault pseudo-directory ("user/") that the
+// metadata LIST skips — so a Put succeeded while List/Get returned empty. That
+// is the exact "saves but vanishes" bug this slice fixes; the test asserts both
+// the fix (colon-flat key is listed/gotten) and the signature (a retired-layout
+// key stays invisible to the root LIST).
+func TestOpenBao_TenantSecretColonFlatRoot_NamespaceMode(t *testing.T) {
+	ctx := context.Background()
+	addr := setupOpenBao(t)
+	if addr == "" {
+		return
+	}
+
+	const (
+		parentNS = "tenant"
+		childNS  = "colonflat-h1-test"
+	)
+	fullNS := parentNS + "/" + childNS
+	provisionNamespaceKV(t, ctx, addr, parentNS, childNS)
+
+	tenantID, err := auth.NewTenantID(childNS)
+	require.NoError(t, err, "construct tenant ID")
+
+	cfg := Config{
+		Address:   addr,
+		Namespace: fullNS,
+		KVMount:   openbaoTestMount,
+		Auth: AuthConfig{
+			Method: AuthMethodToken,
+			Token:  openbaoDevRootToken,
+		},
+	}
+	p, err := New(ctx, cfg)
+	require.NoError(t, err, "New() in namespace mode")
+
+	// Put the colon-flat root key that SecretsAdminServer.SetSecret now writes.
+	const key = "cred:openai-prod"
+	want := []byte("super-secret-value")
+	require.NoError(t, p.Put(ctx, tenantID, key, want), "Put colon-flat root key")
+
+	// List must return the key — the H1 regression guard.
+	names, err := p.List(ctx, tenantID, secrets.Filter{})
+	require.NoError(t, err, "List")
+	require.Contains(t, names, key,
+		"colon-flat root key must be listed in namespace mode (H1 fix, gibson#1106)")
+
+	// Get must find it and round-trip the value.
+	got, err := p.Get(ctx, tenantID, key)
+	require.NoError(t, err, "Get after Put")
+	require.Equal(t, want, got, "round-trip value")
+
+	// Signature: the retired "user/<...>" layout is invisible to a root LIST —
+	// it lands under a pseudo-directory the metadata LIST skips. This is the
+	// exact H1 signature the colon-flat layout fixes.
+	const retired = "user/cred:legacy"
+	require.NoError(t, p.Put(ctx, tenantID, retired, []byte("v")), "Put retired-layout key")
+	names, err = p.List(ctx, tenantID, secrets.Filter{})
+	require.NoError(t, err, "List after retired-layout Put")
+	require.NotContains(t, names, retired,
+		"retired user/ layout must stay invisible to a namespace-mode root LIST (H1 signature)")
+	require.Contains(t, names, key,
+		"colon-flat key still listed alongside the retired-layout key")
+}

@@ -169,16 +169,16 @@ func TestSetSecret_NoValueInResponse(t *testing.T) {
 	if err != nil {
 		t.Fatalf("SetSecret: %v", err)
 	}
-	// The caller-facing name strips the "user/" Vault prefix.
+	// The caller-facing name equals the colon-flat root key.
 	if resp.GetMetadata().GetName() != "cred:openai-prod" {
 		t.Errorf("expected caller name cred:openai-prod, got %q", resp.GetMetadata().GetName())
 	}
 	if resp.GetMetadata().GetCategory() != tenantv1.SecretCategory_SECRET_CATEGORY_CRED {
 		t.Errorf("category mismatch")
 	}
-	// Internally the broker stores the secret under the "user/" namespace.
-	if got, ok := broker.store["user/cred:openai-prod"]; !ok || string(got) != "super-secret-value" {
-		t.Errorf("broker did not receive value at user/cred:openai-prod, store=%v (ok=%v)", broker.store, ok)
+	// H1 (gibson#1106): the broker stores the secret colon-flat at the KV root.
+	if got, ok := broker.store["cred:openai-prod"]; !ok || string(got) != "super-secret-value" {
+		t.Errorf("broker did not receive value at cred:openai-prod, store=%v (ok=%v)", broker.store, ok)
 	}
 }
 
@@ -212,15 +212,15 @@ func TestSetSecret_RejectsEmptyValue(t *testing.T) {
 func TestGetSecret_MetadataOnly(t *testing.T) {
 	srv, broker, _, _, _ := newTestServer(t)
 	ctx := ctxWithTenant(t, "acme")
-	// Secrets are stored under "user/" in the broker; callers use the bare name.
-	broker.store["user/cred:openai-prod"] = []byte("v")
+	// Secrets are stored colon-flat at the KV root; callers use the same name.
+	broker.store["cred:openai-prod"] = []byte("v")
 
-	// Caller passes the caller-facing name (no "user/" prefix).
+	// Caller passes the caller-facing name (colon-flat root key).
 	resp, err := srv.GetSecret(ctx, &tenantv1.GetSecretRequest{Name: "cred:openai-prod"})
 	if err != nil {
 		t.Fatalf("GetSecret: %v", err)
 	}
-	// Response name is also caller-facing (no "user/" prefix).
+	// Response name is the same colon-flat root key.
 	if resp.GetMetadata().GetName() != "cred:openai-prod" {
 		t.Errorf("name mismatch: got %q", resp.GetMetadata().GetName())
 	}
@@ -244,10 +244,10 @@ func TestGetSecret_NotFound(t *testing.T) {
 func TestRotateSecret_EmitsRotatedEvent(t *testing.T) {
 	srv, broker, _, rotated, _ := newTestServer(t)
 	ctx := ctxWithTenant(t, "acme")
-	// Secrets are stored under "user/" in the broker.
-	broker.store["user/cred:db"] = []byte("old")
+	// Secrets are stored colon-flat at the KV root.
+	broker.store["cred:db"] = []byte("old")
 
-	// Caller passes the caller-facing name (no "user/" prefix).
+	// Caller passes the caller-facing name (colon-flat root key).
 	resp, err := srv.RotateSecret(ctx, &tenantv1.RotateSecretRequest{
 		Name:  "cred:db",
 		Value: []byte("new"),
@@ -260,8 +260,8 @@ func TestRotateSecret_EmitsRotatedEvent(t *testing.T) {
 		t.Errorf("name mismatch: got %q", resp.GetMetadata().GetName())
 	}
 	// Broker was updated at the stored path.
-	if string(broker.store["user/cred:db"]) != "new" {
-		t.Errorf("broker did not receive new value at user/cred:db, store=%v", broker.store)
+	if string(broker.store["cred:db"]) != "new" {
+		t.Errorf("broker did not receive new value at cred:db, store=%v", broker.store)
 	}
 	if len(rotated.events) != 1 || rotated.events[0].Action != "secret_rotated" {
 		t.Errorf("expected one secret_rotated event, got %+v", rotated.events)
@@ -271,8 +271,7 @@ func TestRotateSecret_EmitsRotatedEvent(t *testing.T) {
 func TestRotateSecret_NotFound(t *testing.T) {
 	srv, _, _, _, _ := newTestServer(t)
 	ctx := ctxWithTenant(t, "acme")
-	// "cred:missing" is a known user-secret name so toStoredName maps it to
-	// "user/cred:missing" — which does not exist → NotFound.
+	// "cred:missing" is the colon-flat root key, which does not exist → NotFound.
 	_, err := srv.RotateSecret(ctx, &tenantv1.RotateSecretRequest{
 		Name:  "cred:missing",
 		Value: []byte("v"),
@@ -285,8 +284,8 @@ func TestRotateSecret_NotFound(t *testing.T) {
 func TestDeleteSecret_EmitsRevokedEvent(t *testing.T) {
 	srv, broker, _, rotated, _ := newTestServer(t)
 	ctx := ctxWithTenant(t, "acme")
-	// Store at the "user/" path as the broker holds it.
-	broker.store["user/cred:db"] = []byte("v")
+	// Store at the colon-flat root key as the broker holds it.
+	broker.store["cred:db"] = []byte("v")
 
 	// Caller passes the caller-facing name.
 	_, err := srv.DeleteSecret(ctx, &tenantv1.DeleteSecretRequest{Name: "cred:db"})
@@ -294,8 +293,8 @@ func TestDeleteSecret_EmitsRevokedEvent(t *testing.T) {
 		t.Fatalf("DeleteSecret: %v", err)
 	}
 	// Deleted from the stored path.
-	if _, ok := broker.store["user/cred:db"]; ok {
-		t.Errorf("broker still has key at user/cred:db")
+	if _, ok := broker.store["cred:db"]; ok {
+		t.Errorf("broker still has key at cred:db")
 	}
 	if len(rotated.events) != 1 || rotated.events[0].Action != "secret_revoked" {
 		t.Errorf("expected one secret_revoked event, got %+v", rotated.events)
@@ -305,10 +304,10 @@ func TestDeleteSecret_EmitsRevokedEvent(t *testing.T) {
 func TestListSecrets_ReturnsMetadataOnly(t *testing.T) {
 	srv, broker, _, _, _ := newTestServer(t)
 	ctx := ctxWithTenant(t, "acme")
-	// Secrets are stored under "user/" in the broker (new namespace layout).
-	broker.store["user/cred:a"] = []byte("av")
-	broker.store["user/cred:b"] = []byte("bv")
-	broker.store["user/provider_config:openai:default"] = []byte("k")
+	// Secrets are stored colon-flat at the KV root (H1 layout, gibson#1106).
+	broker.store["cred:a"] = []byte("av")
+	broker.store["cred:b"] = []byte("bv")
+	broker.store["provider_config:openai:default"] = []byte("k")
 
 	resp, err := srv.ListSecrets(ctx, &tenantv1.ListSecretsRequest{
 		CategoryFilter: tenantv1.SecretCategory_SECRET_CATEGORY_CRED,
@@ -319,10 +318,10 @@ func TestListSecrets_ReturnsMetadataOnly(t *testing.T) {
 	if len(resp.GetSecrets()) != 2 {
 		t.Errorf("expected 2 cred secrets, got %d", len(resp.GetSecrets()))
 	}
-	// The "user/" prefix is stripped before returning to the caller.
+	// Names are the colon-flat root keys returned to the caller.
 	for _, s := range resp.GetSecrets() {
 		if !strings.HasPrefix(s.GetName(), "cred:") {
-			t.Errorf("got non-cred secret %q in cred-filtered list (user/ should be stripped)", s.GetName())
+			t.Errorf("got non-cred secret %q in cred-filtered list", s.GetName())
 		}
 	}
 }
@@ -410,13 +409,10 @@ func TestParseCategory(t *testing.T) {
 		name string
 		want tenantv1.SecretCategory
 	}{
-		// caller-facing form
+		// colon-flat root keys (stored form == caller-facing form)
 		{"cred:openai", tenantv1.SecretCategory_SECRET_CATEGORY_CRED},
 		{"provider_config:anthropic:default", tenantv1.SecretCategory_SECRET_CATEGORY_PROVIDER_CONFIG},
 		{"unknown", tenantv1.SecretCategory_SECRET_CATEGORY_UNSPECIFIED},
-		// stored form (with "user/" prefix) — parseCategory must handle both
-		{"user/cred:openai", tenantv1.SecretCategory_SECRET_CATEGORY_CRED},
-		{"user/provider_config:anthropic:default", tenantv1.SecretCategory_SECRET_CATEGORY_PROVIDER_CONFIG},
 	}
 	for _, tc := range tests {
 		if got := parseCategory(tc.name); got != tc.want {
@@ -517,20 +513,25 @@ func TestNewSecretsAdminServer_RequiresBroker(t *testing.T) {
 }
 
 // ---------------------------------------------------------------------------
-// User-prefix (Vault "user/" namespace) tests — gibson#404
+// Colon-flat root key layout tests — H1 fix (gibson#1106)
+//
+// Tenant secrets are stored colon-flat at the KV root ("cred:<name>" /
+// "provider_config:<name>") so a Hosted namespace-mode root LIST finds them.
+// The retired "user/<category>:<name>" layout was invisible to that LIST. The
+// stored key now equals the caller-facing name.
 // ---------------------------------------------------------------------------
 
-func TestStoredName_PrependUserPrefix(t *testing.T) {
+func TestStoredName_ColonFlatRoot(t *testing.T) {
 	tests := []struct {
 		cat  tenantv1.SecretCategory
 		name string
 		want string
 	}{
-		{tenantv1.SecretCategory_SECRET_CATEGORY_CRED, "openai-prod", "user/cred:openai-prod"},
-		{tenantv1.SecretCategory_SECRET_CATEGORY_CRED, "cred:openai-prod", "user/cred:openai-prod"},      // bare cat prefix stripped first
-		{tenantv1.SecretCategory_SECRET_CATEGORY_CRED, "user/cred:openai-prod", "user/cred:openai-prod"}, // idempotent
-		{tenantv1.SecretCategory_SECRET_CATEGORY_PROVIDER_CONFIG, "openai:default", "user/provider_config:openai:default"},
-		{tenantv1.SecretCategory_SECRET_CATEGORY_UNSPECIFIED, "raw", "raw"}, // unspecified — no prefix added
+		{tenantv1.SecretCategory_SECRET_CATEGORY_CRED, "openai-prod", "cred:openai-prod"},
+		{tenantv1.SecretCategory_SECRET_CATEGORY_CRED, "cred:openai-prod", "cred:openai-prod"}, // idempotent
+		{tenantv1.SecretCategory_SECRET_CATEGORY_PROVIDER_CONFIG, "openai:default", "provider_config:openai:default"},
+		{tenantv1.SecretCategory_SECRET_CATEGORY_PROVIDER_CONFIG, "provider_config:openai:default", "provider_config:openai:default"}, // idempotent
+		{tenantv1.SecretCategory_SECRET_CATEGORY_UNSPECIFIED, "raw", "raw"},                                                           // unspecified — no prefix added
 	}
 	for _, tc := range tests {
 		got := storedName(tc.cat, tc.name)
@@ -540,46 +541,39 @@ func TestStoredName_PrependUserPrefix(t *testing.T) {
 	}
 }
 
-func TestCallerName_StripsUserPrefix(t *testing.T) {
-	tests := []struct {
-		stored string
-		want   string
-	}{
-		{"user/cred:openai-prod", "cred:openai-prod"},
-		{"user/provider_config:openai:default", "provider_config:openai:default"},
-		{"cred:openai-prod", "cred:openai-prod"}, // no prefix — unchanged
-		{"infra/postgres", "infra/postgres"},     // infra path — unchanged
+func TestCallerName_Identity(t *testing.T) {
+	// With the colon-flat root layout the stored key equals the caller name.
+	tests := []string{
+		"cred:openai-prod",
+		"provider_config:openai:default",
+		"infra/postgres",
 	}
 	for _, tc := range tests {
-		got := callerName(tc.stored)
-		if got != tc.want {
-			t.Errorf("callerName(%q) = %q, want %q", tc.stored, got, tc.want)
+		if got := callerName(tc); got != tc {
+			t.Errorf("callerName(%q) = %q, want identity", tc, got)
 		}
 	}
 }
 
-func TestToStoredName_RoundTrip(t *testing.T) {
-	tests := []struct {
-		caller string
-		want   string
-	}{
-		{"cred:openai-prod", "user/cred:openai-prod"},
-		{"provider_config:openai:default", "user/provider_config:openai:default"},
-		{"user/cred:openai-prod", "user/cred:openai-prod"}, // already stored form
-		{"infra/postgres", "infra/postgres"},               // non-user path untouched
-		{"unknown", "unknown"},                             // unrecognised prefix
+func TestToStoredName_Identity(t *testing.T) {
+	// With the colon-flat root layout the caller name is already the stored key.
+	tests := []string{
+		"cred:openai-prod",
+		"provider_config:openai:default",
+		"infra/postgres",
+		"unknown",
 	}
 	for _, tc := range tests {
-		got := toStoredName(tc.caller)
-		if got != tc.want {
-			t.Errorf("toStoredName(%q) = %q, want %q", tc.caller, got, tc.want)
+		if got := toStoredName(tc); got != tc {
+			t.Errorf("toStoredName(%q) = %q, want identity", tc, got)
 		}
 	}
 }
 
-// TestSetSecret_UserPrefixNamespace verifies end-to-end that SetSecret stores
-// under "user/" and returns the caller-facing name (no "user/").
-func TestSetSecret_UserPrefixNamespace(t *testing.T) {
+// TestSetSecret_ColonFlatRoot verifies end-to-end that SetSecret stores the
+// value colon-flat at the KV root and returns that same name (H1 regression
+// guard — the retired "user/" layout is never written).
+func TestSetSecret_ColonFlatRoot(t *testing.T) {
 	srv, broker, _, _, _ := newTestServer(t)
 	ctx := ctxWithTenant(t, "acme")
 
@@ -591,13 +585,13 @@ func TestSetSecret_UserPrefixNamespace(t *testing.T) {
 	if err != nil {
 		t.Fatalf("SetSecret: %v", err)
 	}
-	// Caller-facing name: "cred:my-key" (no user/ prefix).
+	// Caller-facing name equals the colon-flat root key.
 	if resp.GetMetadata().GetName() != "cred:my-key" {
 		t.Errorf("caller name: want cred:my-key, got %q", resp.GetMetadata().GetName())
 	}
-	// Stored in broker under user/ namespace.
-	if _, ok := broker.store["user/cred:my-key"]; !ok {
-		t.Errorf("want broker key user/cred:my-key; store keys: %v", func() []string {
+	// Stored colon-flat at the KV root.
+	if _, ok := broker.store["cred:my-key"]; !ok {
+		t.Errorf("want broker key cred:my-key; store keys: %v", func() []string {
 			ks := make([]string, 0, len(broker.store))
 			for k := range broker.store {
 				ks = append(ks, k)
@@ -605,18 +599,17 @@ func TestSetSecret_UserPrefixNamespace(t *testing.T) {
 			return ks
 		}())
 	}
-	// Infra key (e.g. from before the migration) at bare path not touched.
-	if _, ok := broker.store["cred:my-key"]; ok {
-		t.Errorf("old bare-path key should not be written: cred:my-key")
+	// The retired "user/" layout must never be written.
+	if _, ok := broker.store["user/cred:my-key"]; ok {
+		t.Errorf("retired user/ layout must not be written: user/cred:my-key")
 	}
 }
 
-// TestGetSecret_UserPrefixNamespace verifies that GetSecret translates the
-// caller-facing name to stored form for the broker lookup.
-func TestGetSecret_UserPrefixNamespace(t *testing.T) {
+// TestGetSecret_ColonFlatRoot verifies GetSecret finds a colon-flat root key.
+func TestGetSecret_ColonFlatRoot(t *testing.T) {
 	srv, broker, _, _, _ := newTestServer(t)
 	ctx := ctxWithTenant(t, "acme")
-	broker.store["user/provider_config:openai:key"] = []byte("v")
+	broker.store["provider_config:openai:key"] = []byte("v")
 
 	resp, err := srv.GetSecret(ctx, &tenantv1.GetSecretRequest{Name: "provider_config:openai:key"})
 	if err != nil {

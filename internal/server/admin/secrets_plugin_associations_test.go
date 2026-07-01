@@ -41,9 +41,10 @@ func TestFGASecretsPluginAssociations_PluginsBoundTo(t *testing.T) {
 	a := NewFGASecretsPluginAssociations(rec)
 	tenant := auth.MustNewTenantID("acme")
 
-	// stored form on the way in; the can_resolve object must use the
-	// caller-facing ref (storage prefix stripped) — same format mint.go writes.
-	got, err := a.PluginsBoundTo(context.Background(), tenant, "user/cred:openai-prod")
+	// The stored key is colon-flat at the KV root (H1, gibson#1106) and equals
+	// the caller-facing ref; the can_resolve object uses that ref directly —
+	// same format mint.go writes.
+	got, err := a.PluginsBoundTo(context.Background(), tenant, "cred:openai-prod")
 	if err != nil {
 		t.Fatalf("PluginsBoundTo: %v", err)
 	}
@@ -55,7 +56,7 @@ func TestFGASecretsPluginAssociations_PluginsBoundTo(t *testing.T) {
 		t.Errorf("object = %q, want %q", rec.gotObject, wantObj)
 	}
 	if strings.Contains(rec.gotObject, "user/") {
-		t.Errorf("object must not contain the storage prefix: %q", rec.gotObject)
+		t.Errorf("object must not contain the retired storage prefix: %q", rec.gotObject)
 	}
 	if len(got) != 2 || got[0] != "plugin-abc" || got[1] != "tool-xyz" {
 		t.Errorf("principals = %v, want [plugin-abc tool-xyz] (user: prefix stripped)", got)

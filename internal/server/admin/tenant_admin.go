@@ -724,33 +724,30 @@ func stringField(dict map[string]any, key string) string {
 
 // providerEnumToString maps the proto enum to the registry string name.
 // Returns "" for UNSPECIFIED or any reserved/removed provider.
+//
+// Both Vault variants map to the single "vault" registry factory name —
+// Hosted vs BYO is a Config-blob distinction (namespace mode vs path-prefix
+// mode), not a distinct backend factory. The active-backend disambiguation
+// via GetBrokerConfig is handled by later slices of the secrets-hosted-byo
+// epic (gibson#1107/#1108).
 func providerEnumToString(p tenantv1.BrokerProvider) string {
 	switch p {
-	case tenantv1.BrokerProvider_BROKER_PROVIDER_VAULT:
+	case tenantv1.BrokerProvider_BROKER_PROVIDER_VAULT_HOSTED,
+		tenantv1.BrokerProvider_BROKER_PROVIDER_VAULT_BYO:
 		return "vault"
-	case tenantv1.BrokerProvider_BROKER_PROVIDER_AWSSM:
-		return "awssm"
-	case tenantv1.BrokerProvider_BROKER_PROVIDER_GCPSM:
-		return "gcpsm"
-	case tenantv1.BrokerProvider_BROKER_PROVIDER_AZUREKV:
-		return "azurekv"
 	default:
 		return ""
 	}
 }
 
 // providerStringToEnum maps the registry string name back to the proto
-// enum. Returns UNSPECIFIED for unknown values.
+// enum. Returns UNSPECIFIED for unknown values. The "vault" factory name
+// resolves to the Hosted variant by default; BYO is distinguished by the
+// stored Config blob (mode/address) in later slices.
 func providerStringToEnum(s string) tenantv1.BrokerProvider {
 	switch s {
 	case "vault":
-		return tenantv1.BrokerProvider_BROKER_PROVIDER_VAULT
-	case "awssm":
-		return tenantv1.BrokerProvider_BROKER_PROVIDER_AWSSM
-	case "gcpsm":
-		return tenantv1.BrokerProvider_BROKER_PROVIDER_GCPSM
-	case "azurekv":
-		return tenantv1.BrokerProvider_BROKER_PROVIDER_AZUREKV
+		return tenantv1.BrokerProvider_BROKER_PROVIDER_VAULT_HOSTED
 	default:
 		return tenantv1.BrokerProvider_BROKER_PROVIDER_UNSPECIFIED
 	}

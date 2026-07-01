@@ -36,9 +36,9 @@ func NewFGASecretsPluginAssociations(authorizer authz.Authorizer) *FGASecretsPlu
 }
 
 // PluginsBoundTo returns the principal IDs holding can_resolve on the secret.
-// secretName arrives in stored form (e.g. "user/cred:openai"); the can_resolve
-// object uses the caller-facing ref, so it is normalised via callerName before
-// building the FGA object.
+// secretName arrives in stored form (colon-flat at the KV root, e.g.
+// "cred:openai"); with that layout the stored key equals the caller-facing
+// ref, so callerName is an identity normaliser here.
 func (f *FGASecretsPluginAssociations) PluginsBoundTo(ctx context.Context, tenant auth.TenantID, secretName string) ([]string, error) {
 	if f.authorizer == nil {
 		return nil, nil
