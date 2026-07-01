@@ -191,7 +191,7 @@ func TestSetBrokerConfig_PersistAndReload_FullPath(t *testing.T) {
 	// Drive SetBrokerConfig with a vault candidate.
 	if _, err := srv.SetBrokerConfig(ctx, &tenantv1.SetBrokerConfigRequest{
 		Candidate: &tenantv1.CandidateConfig{
-			Provider:   tenantv1.BrokerProvider_BROKER_PROVIDER_VAULT,
+			Provider:   tenantv1.BrokerProvider_BROKER_PROVIDER_VAULT_HOSTED,
 			Address:    "https://vault",
 			VaultToken: []byte("hvs.xyz"),
 		},
@@ -264,7 +264,7 @@ func TestSetBrokerConfig_PersistFailure_NoReload_FullPath(t *testing.T) {
 	// Drive SetBrokerConfig — writer fails.
 	_, err = srv.SetBrokerConfig(ctx, &tenantv1.SetBrokerConfigRequest{
 		Candidate: &tenantv1.CandidateConfig{
-			Provider:   tenantv1.BrokerProvider_BROKER_PROVIDER_VAULT,
+			Provider:   tenantv1.BrokerProvider_BROKER_PROVIDER_VAULT_HOSTED,
 			Address:    "https://vault",
 			VaultToken: []byte("hvs.xyz"),
 		},

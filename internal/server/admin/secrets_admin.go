@@ -148,21 +148,21 @@ func (s *SecretsAdminServer) ListSecrets(ctx context.Context, req *tenantv1.List
 		offset = 0
 	}
 
-	// Build the broker-side filter prefix. Secrets are stored under "user/"
-	// in Vault (e.g. "user/cred:foo", "user/provider_config:bar:field").
-	// categoryPrefix() already includes the "user/" segment, so the combined
-	// prefix is correct for the broker.
-	// When only a name_prefix is supplied (no category filter), translate any
-	// caller-facing prefix (e.g. "cred:") to stored form ("user/cred:").
+	// Build the broker-side filter prefix. Tenant secrets are stored
+	// colon-flat at the KV root (e.g. "cred:foo",
+	// "provider_config:bar:field") — the same layout as the LLM
+	// provider_cred:… keys that already list correctly. This is the H1 fix
+	// (gibson#1106): the retired "user/<category>:<name>" layout was invisible
+	// to a namespace-mode root LIST, so Put succeeded while List returned empty.
 	callerPrefix := req.GetNamePrefix()
 	var prefix string
 	if cat := req.GetCategoryFilter(); cat != tenantv1.SecretCategory_SECRET_CATEGORY_UNSPECIFIED {
-		// categoryPrefix returns "user/cred:" or "user/provider_config:" —
-		// append the caller-supplied name sub-prefix.
+		// categoryPrefix returns "cred:" or "provider_config:" — append the
+		// caller-supplied name sub-prefix.
 		prefix = categoryPrefix(cat) + callerPrefix
 	} else {
-		// No category filter: translate the raw caller prefix to stored form
-		// so that e.g. "cred:" becomes "user/cred:".
+		// No category filter: the caller prefix is already the stored form
+		// (colon-flat at root).
 		prefix = toStoredName(callerPrefix)
 	}
 
@@ -208,9 +208,9 @@ func (s *SecretsAdminServer) GetSecret(ctx context.Context, req *tenantv1.GetSec
 		return nil, status.Error(codes.InvalidArgument, "name is required")
 	}
 
-	// The caller uses the caller-facing name (e.g. "cred:openai-prod").
-	// Internally secrets are stored under "user/<name>". Translate before
-	// querying the broker.
+	// Tenant secrets are stored colon-flat at the KV root, so the caller name
+	// (e.g. "cred:openai-prod") is already the stored form. toStoredName is
+	// kept as an idempotent normaliser for defensive call-site symmetry.
 	callerReq := req.GetName()
 	storedReq := toStoredName(callerReq)
 
@@ -497,15 +497,15 @@ func (s *SecretsAdminServer) GetMissionAudit(ctx context.Context, req *tenantv1.
 // are best-effort; broker providers don't expose them through the v1
 // SecretsBroker interface, so for v1 we report zero values.
 //
-// The Name field in the returned metadata uses callerName(stored) so that the
-// internal "user/" Vault prefix is never exposed to dashboard callers.
+// Tenant secrets are stored colon-flat at the KV root, so the stored name is
+// already the caller-facing name; callerName is an identity normaliser.
 func (s *SecretsAdminServer) buildMetadata(ctx context.Context, tenant auth.TenantID, stored string) (*tenantv1.SecretMetadata, error) {
 	if stored == "" {
 		return nil, errors.New("name must not be empty")
 	}
 
 	cat := parseCategory(stored)
-	name := callerName(stored) // strip "user/" for caller-facing name
+	name := callerName(stored)
 
 	plugins, err := s.pluginAssocs.PluginsBoundTo(ctx, tenant, stored)
 	if err != nil {
@@ -526,50 +526,49 @@ func (s *SecretsAdminServer) buildMetadata(ctx context.Context, tenant auth.Tena
 	}, nil
 }
 
-// userPrefix is the Vault KV sub-path under which all user-supplied secrets
-// are stored. This separates user secrets from operator-written infra secrets
-// (infra/postgres, infra/neo4j, etc.) which live at the root of the per-tenant
-// mount. The new Vault ACL (tenant-operator#271) enforces this boundary.
+// Tenant secrets are stored colon-flat at the KV root, keyed by
+// "<category>:<name>" (e.g. "cred:openai-prod",
+// "provider_config:openai:default"). This mirrors the LLM provider_cred:…
+// layout that already lists correctly and is the H1 fix (gibson#1106 / PRD
+// gibson#1105): the retired "user/<category>:<name>" layout put secrets under
+// a Vault pseudo-directory that a Hosted namespace-mode root LIST skips, so a
+// Put succeeded while Get/List came back empty.
 //
-// Spec: secrets-blast-radius-reduction / gibson#404.
-const userPrefix = "user/"
+// Because the stored key equals the caller-facing name, callerName /
+// toStoredName are identity normalisers kept for call-site symmetry.
 
 // parseCategory inspects the name's prefix and returns the corresponding
-// SecretCategory enum value. Names may carry the userPrefix ("user/") at the
-// front (stored form) or omit it (caller-facing form); both are handled.
-// Names that don't carry a recognised category prefix are classified as
-// SECRET_CATEGORY_UNSPECIFIED (rendered as "uncategorised" in the dashboard).
+// SecretCategory enum value. Names that don't carry a recognised category
+// prefix are classified as SECRET_CATEGORY_UNSPECIFIED (rendered as
+// "uncategorised" in the dashboard).
 func parseCategory(name string) tenantv1.SecretCategory {
-	n := strings.TrimPrefix(name, userPrefix)
 	switch {
-	case strings.HasPrefix(n, "cred:"):
+	case strings.HasPrefix(name, "cred:"):
 		return tenantv1.SecretCategory_SECRET_CATEGORY_CRED
-	case strings.HasPrefix(n, "provider_config:"):
+	case strings.HasPrefix(name, "provider_config:"):
 		return tenantv1.SecretCategory_SECRET_CATEGORY_PROVIDER_CONFIG
 	default:
 		return tenantv1.SecretCategory_SECRET_CATEGORY_UNSPECIFIED
 	}
 }
 
-// categoryPrefix returns the full broker-namespace prefix for a category enum
-// value, including the userPrefix. Used to convert ListSecrets category_filter
-// into a broker List filter so that only the correct sub-path is scanned.
+// categoryPrefix returns the colon-flat key prefix for a category enum value.
+// Used to convert ListSecrets category_filter into a broker List filter so
+// that only the correct category is scanned.
 func categoryPrefix(cat tenantv1.SecretCategory) string {
 	switch cat {
 	case tenantv1.SecretCategory_SECRET_CATEGORY_CRED:
-		return userPrefix + "cred:"
+		return "cred:"
 	case tenantv1.SecretCategory_SECRET_CATEGORY_PROVIDER_CONFIG:
-		return userPrefix + "provider_config:"
+		return "provider_config:"
 	default:
 		return ""
 	}
 }
 
-// storedName returns the broker-namespaced name for a SetSecret request.
-// User secrets are stored under "user/<category>:<name>" so the Vault ACL can
-// distinguish them from infra secrets at the mount root.
-// If the supplied name already carries the full stored prefix it is returned
-// as-is to preserve idempotency.
+// storedName returns the broker key for a SetSecret request. Tenant secrets
+// are stored colon-flat at the KV root as "<category>:<name>". If the supplied
+// name already carries the category prefix it is returned as-is (idempotent).
 func storedName(cat tenantv1.SecretCategory, name string) string {
 	prefix := categoryPrefix(cat)
 	if prefix == "" {
@@ -578,35 +577,20 @@ func storedName(cat tenantv1.SecretCategory, name string) string {
 	if strings.HasPrefix(name, prefix) {
 		return name
 	}
-	// Strip a bare category prefix if the caller passed "cred:<name>" instead
-	// of the bare name — ensures a double-prefix is never written.
-	barePrefix := strings.TrimPrefix(prefix, userPrefix)
-	name = strings.TrimPrefix(name, barePrefix)
 	return prefix + name
 }
 
-// callerName strips the userPrefix from a stored name so that the name
-// returned to the dashboard caller does not expose the internal Vault layout.
-// "user/cred:openai-prod" → "cred:openai-prod".
-// Names that do not carry userPrefix are returned unchanged.
+// callerName returns the caller-facing name for a stored key. With the
+// colon-flat root layout the stored key already equals the caller-facing
+// name, so this is an identity normaliser retained for call-site symmetry.
 func callerName(stored string) string {
-	return strings.TrimPrefix(stored, userPrefix)
+	return stored
 }
 
-// toStoredName converts a caller-facing name to the stored form by prepending
-// userPrefix when the name does not already start with it.
-// "cred:openai-prod"       → "user/cred:openai-prod"
-// "user/cred:openai-prod"  → "user/cred:openai-prod" (idempotent)
-// Names without a recognised category prefix (unspecified) are returned as-is.
+// toStoredName converts a caller-facing name to the stored key. With the
+// colon-flat root layout the caller name is already the stored key, so this is
+// an identity normaliser retained for call-site symmetry.
 func toStoredName(name string) string {
-	if strings.HasPrefix(name, userPrefix) {
-		return name // already in stored form
-	}
-	// Only namespace known category-prefixed names; leave unrecognised names
-	// (e.g. infra secrets) untouched.
-	if strings.HasPrefix(name, "cred:") || strings.HasPrefix(name, "provider_config:") {
-		return userPrefix + name
-	}
 	return name
 }
 

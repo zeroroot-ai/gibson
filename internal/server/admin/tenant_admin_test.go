@@ -160,7 +160,7 @@ func TestGetBrokerConfig_Redacts(t *testing.T) {
 		t.Errorf("expected configured=true")
 	}
 	cfg := resp.GetConfig()
-	if cfg.GetProvider() != tenantv1.BrokerProvider_BROKER_PROVIDER_VAULT {
+	if cfg.GetProvider() != tenantv1.BrokerProvider_BROKER_PROVIDER_VAULT_HOSTED {
 		t.Errorf("provider mismatch: %v", cfg.GetProvider())
 	}
 	if cfg.GetAddress() != "https://vault" {
@@ -198,7 +198,7 @@ func TestProbeBrokerConfig_Success(t *testing.T) {
 
 	resp, err := srv.ProbeBrokerConfig(ctx, &tenantv1.ProbeBrokerConfigRequest{
 		Candidate: &tenantv1.CandidateConfig{
-			Provider:   tenantv1.BrokerProvider_BROKER_PROVIDER_VAULT,
+			Provider:   tenantv1.BrokerProvider_BROKER_PROVIDER_VAULT_HOSTED,
 			Address:    "https://vault",
 			VaultToken: []byte("hvs.xyz"),
 		},
@@ -217,7 +217,7 @@ func TestProbeBrokerConfig_Failure(t *testing.T) {
 	ctx := ctxWithTenant(t, "acme")
 
 	resp, err := srv.ProbeBrokerConfig(ctx, &tenantv1.ProbeBrokerConfigRequest{
-		Candidate: &tenantv1.CandidateConfig{Provider: tenantv1.BrokerProvider_BROKER_PROVIDER_VAULT},
+		Candidate: &tenantv1.CandidateConfig{Provider: tenantv1.BrokerProvider_BROKER_PROVIDER_VAULT_HOSTED},
 	})
 	if err != nil {
 		t.Fatalf("ProbeBrokerConfig should not return gRPC error on probe failure: %v", err)
@@ -249,7 +249,7 @@ func TestSetBrokerConfig_ProbeSuccess_PersistsAndAudits(t *testing.T) {
 
 	resp, err := srv.SetBrokerConfig(ctx, &tenantv1.SetBrokerConfigRequest{
 		Candidate: &tenantv1.CandidateConfig{
-			Provider:   tenantv1.BrokerProvider_BROKER_PROVIDER_VAULT,
+			Provider:   tenantv1.BrokerProvider_BROKER_PROVIDER_VAULT_HOSTED,
 			Address:    "https://vault",
 			VaultToken: []byte("hvs.xyz"),
 		},
@@ -278,7 +278,7 @@ func TestSetBrokerConfig_ProbeFailure_NoPersist(t *testing.T) {
 
 	resp, err := srv.SetBrokerConfig(ctx, &tenantv1.SetBrokerConfigRequest{
 		Candidate: &tenantv1.CandidateConfig{
-			Provider: tenantv1.BrokerProvider_BROKER_PROVIDER_VAULT,
+			Provider: tenantv1.BrokerProvider_BROKER_PROVIDER_VAULT_HOSTED,
 		},
 	})
 	if status.Code(err) != codes.FailedPrecondition {
@@ -319,7 +319,7 @@ func TestSetBrokerConfig_CallsReloadOnSuccess(t *testing.T) {
 
 	if _, err := srv.SetBrokerConfig(ctx, &tenantv1.SetBrokerConfigRequest{
 		Candidate: &tenantv1.CandidateConfig{
-			Provider:   tenantv1.BrokerProvider_BROKER_PROVIDER_VAULT,
+			Provider:   tenantv1.BrokerProvider_BROKER_PROVIDER_VAULT_HOSTED,
 			Address:    "https://vault",
 			VaultToken: []byte("hvs.xyz"),
 		},
@@ -342,7 +342,7 @@ func TestSetBrokerConfig_NoReloadOnProbeFailure(t *testing.T) {
 	ctx := ctxWithTenant(t, "acme")
 
 	_, _ = srv.SetBrokerConfig(ctx, &tenantv1.SetBrokerConfigRequest{
-		Candidate: &tenantv1.CandidateConfig{Provider: tenantv1.BrokerProvider_BROKER_PROVIDER_VAULT},
+		Candidate: &tenantv1.CandidateConfig{Provider: tenantv1.BrokerProvider_BROKER_PROVIDER_VAULT_HOSTED},
 	})
 	if len(rl.calls) != 0 {
 		t.Errorf("expected no Reload call on probe failure, got %d", len(rl.calls))
@@ -358,7 +358,7 @@ func TestSetBrokerConfig_NoReloadOnPersistFailure(t *testing.T) {
 
 	_, err := srv.SetBrokerConfig(ctx, &tenantv1.SetBrokerConfigRequest{
 		Candidate: &tenantv1.CandidateConfig{
-			Provider:   tenantv1.BrokerProvider_BROKER_PROVIDER_VAULT,
+			Provider:   tenantv1.BrokerProvider_BROKER_PROVIDER_VAULT_HOSTED,
 			Address:    "https://vault",
 			VaultToken: []byte("hvs.xyz"),
 		},
@@ -453,17 +453,18 @@ func TestClassifyProbeError(t *testing.T) {
 }
 
 func TestProviderEnumStringRoundtrip(t *testing.T) {
-	enums := []tenantv1.BrokerProvider{
-		tenantv1.BrokerProvider_BROKER_PROVIDER_VAULT,
-		tenantv1.BrokerProvider_BROKER_PROVIDER_AWSSM,
-		tenantv1.BrokerProvider_BROKER_PROVIDER_GCPSM,
-		tenantv1.BrokerProvider_BROKER_PROVIDER_AZUREKV,
+	// VAULT_HOSTED is the canonical "vault" factory mapping and round-trips.
+	e := tenantv1.BrokerProvider_BROKER_PROVIDER_VAULT_HOSTED
+	s := providerEnumToString(e)
+	if got := providerStringToEnum(s); got != e {
+		t.Errorf("roundtrip %v -> %q -> %v", e, s, got)
 	}
-	for _, e := range enums {
-		s := providerEnumToString(e)
-		if got := providerStringToEnum(s); got != e {
-			t.Errorf("roundtrip %v -> %q -> %v", e, s, got)
-		}
+
+	// Both Vault variants map to the single "vault" factory name; Hosted vs
+	// BYO is a Config-blob distinction resolved by later slices
+	// (gibson#1107/#1108). BYO therefore does not strictly round-trip.
+	if got := providerEnumToString(tenantv1.BrokerProvider_BROKER_PROVIDER_VAULT_BYO); got != "vault" {
+		t.Errorf("VAULT_BYO -> %q, want \"vault\"", got)
 	}
 }
 
