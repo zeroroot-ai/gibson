@@ -875,6 +875,23 @@ func (d *daemonImpl) Start(ctx context.Context) error {
 			})
 		})
 		d.logger.Info(ctx, "ECS brain executor wired (brain is the mission engine)")
+
+		// Install the Timeline→lifecycle projector on every per-tenant engine
+		// (ADR-0011 decision 4, gibson#1116). The projector converts brain.Events
+		// to the coarse dashboard vocabulary (status + node.*) and publishes them
+		// to the in-process EventBus and the tenant's Redis stream. This replaces
+		// the scattered emitEvent calls that previously emitted these events from
+		// mission_manager.executeMission.
+		d.brainRegistry.OnEngine(func(e *brain.Engine) {
+			InstallLifecycleProjector(
+				e.World.Tenant,
+				e,
+				d.eventBus,
+				d.redisEventStream,
+				d.logger.WithComponent("lifecycle-projector").Slog(),
+			)
+		})
+		d.logger.Info(ctx, "Timeline→lifecycle projector installed on brain registry")
 	}
 
 	// Wire callback manager to registry adapter for external agent callback support
