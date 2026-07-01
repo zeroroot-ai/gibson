@@ -32,7 +32,6 @@ package admin
 import (
 	"context"
 	"encoding/base64"
-	"encoding/json"
 	"errors"
 	"fmt"
 	"log/slog"
@@ -50,6 +49,7 @@ import (
 	"github.com/zeroroot-ai/gibson/internal/platform/secrets"
 
 	sdksecrets "github.com/zeroroot-ai/gibson/internal/infra/secrets"
+	"github.com/zeroroot-ai/gibson/internal/infra/secrets/vault/brokercodec"
 	tenantv1 "github.com/zeroroot-ai/gibson/internal/server/daemon/api/gibson/tenant/v1"
 	"github.com/zeroroot-ai/sdk/auth"
 )
@@ -245,7 +245,7 @@ func (s *TenantAdminServer) GetBrokerConfig(ctx context.Context, _ *tenantv1.Get
 		return nil, status.Errorf(codes.Internal, "read broker config: %v", err)
 	}
 
-	redacted, err := redactConfig(cfg.Provider, cfg.ConfigBlob)
+	redacted, err := brokercodec.Redact(cfg.ConfigBlob)
 	if err != nil {
 		return nil, status.Errorf(codes.Internal, "redact: %v", err)
 	}
@@ -257,14 +257,15 @@ func (s *TenantAdminServer) GetBrokerConfig(ctx context.Context, _ *tenantv1.Get
 
 // ProbeBrokerConfig tests a candidate config without persisting.
 func (s *TenantAdminServer) ProbeBrokerConfig(ctx context.Context, req *tenantv1.ProbeBrokerConfigRequest) (*tenantv1.ProbeBrokerConfigResponse, error) {
-	if _, ok := auth.TenantFromContext(ctx); !ok {
+	tenant, ok := auth.TenantFromContext(ctx)
+	if !ok {
 		return nil, status.Error(codes.PermissionDenied, "no tenant in context")
 	}
 	if req.GetCandidate() == nil {
 		return nil, status.Error(codes.InvalidArgument, "candidate is required")
 	}
 
-	providerName, blob, err := candidateToBlob(req.GetCandidate())
+	providerName, blob, err := brokercodec.EncodeCandidate(req.GetCandidate(), tenant)
 	if err != nil {
 		return nil, status.Errorf(codes.InvalidArgument, "encode candidate: %v", err)
 	}
@@ -286,7 +287,7 @@ func (s *TenantAdminServer) SetBrokerConfig(ctx context.Context, req *tenantv1.S
 	}
 	identity, _ := auth.IdentityFromContext(ctx)
 
-	providerName, blob, err := candidateToBlob(req.GetCandidate())
+	providerName, blob, err := brokercodec.EncodeCandidate(req.GetCandidate(), tenant)
 	if err != nil {
 		return nil, status.Errorf(codes.InvalidArgument, "encode candidate: %v", err)
 	}
@@ -329,7 +330,7 @@ func (s *TenantAdminServer) SetBrokerConfig(ctx context.Context, req *tenantv1.S
 	})
 
 	// Build the redacted view of what was saved.
-	redacted, err := redactConfig(providerName, blob)
+	redacted, err := brokercodec.Redact(blob)
 	if err != nil {
 		// Persistence succeeded; redaction read-back failed. Return
 		// success with a minimal redacted view.
@@ -586,154 +587,6 @@ func candidateProvider(c *tenantv1.CandidateConfig) tenantv1.BrokerProvider {
 		return tenantv1.BrokerProvider_BROKER_PROVIDER_UNSPECIFIED
 	}
 	return c.GetProvider()
-}
-
-// candidateToBlob converts a CandidateConfig into the (provider_name,
-// configBlob) shape the secrets package expects. configBlob is JSON. The
-// shape is provider-specific; we use a generic dictionary the production
-// factories also accept (the same blob shape Spec 1 task 19 documents).
-func candidateToBlob(c *tenantv1.CandidateConfig) (string, []byte, error) {
-	providerName := providerEnumToString(c.GetProvider())
-	if providerName == "" {
-		return "", nil, errors.New("unknown provider")
-	}
-
-	// Build a generic dict carrying every non-zero field. Provider
-	// factories pluck the keys they care about.
-	dict := map[string]any{
-		"provider": providerName,
-	}
-	if c.GetAddress() != "" {
-		dict["address"] = c.GetAddress()
-	}
-	if c.GetNamespaceOrPath() != "" {
-		dict["namespace_or_path"] = c.GetNamespaceOrPath()
-	}
-	if c.GetMount() != "" {
-		dict["mount"] = c.GetMount()
-	}
-	if c.GetAuthMethod() != "" {
-		dict["auth_method"] = c.GetAuthMethod()
-	}
-	if c.GetRegion() != "" {
-		dict["region"] = c.GetRegion()
-	}
-	if c.GetProject() != "" {
-		dict["project"] = c.GetProject()
-	}
-	if c.GetTenantIdExternal() != "" {
-		dict["tenant_id_external"] = c.GetTenantIdExternal()
-	}
-	if c.GetClientId() != "" {
-		dict["client_id"] = c.GetClientId()
-	}
-	if c.GetRoleArn() != "" {
-		dict["role_arn"] = c.GetRoleArn()
-	}
-	if len(c.GetVaultToken()) > 0 {
-		dict["vault_token"] = string(c.GetVaultToken())
-	}
-	if c.GetApproleRoleId() != "" {
-		dict["approle_role_id"] = c.GetApproleRoleId()
-	}
-	if len(c.GetApproleSecretId()) > 0 {
-		dict["approle_secret_id"] = string(c.GetApproleSecretId())
-	}
-	// AWS/GCP/Azure sensitive fields were dropped in gibson#1109 — Vault
-	// (Hosted + BYO) is the only broker backend. Their proto field numbers
-	// (23-27) remain assigned but are no longer consumed here.
-
-	blob, err := json.Marshal(dict)
-	if err != nil {
-		return "", nil, err
-	}
-	return providerName, blob, nil
-}
-
-// redactConfig parses a stored config blob and emits a RedactedConfig with
-// every sensitive field stripped. The sensitive_fields_set list records
-// which sensitive fields were present so the dashboard can render
-// "(configured)" placeholders.
-func redactConfig(providerName string, blob []byte) (*tenantv1.RedactedConfig, error) {
-	dict := map[string]any{}
-	if len(blob) > 0 {
-		if err := json.Unmarshal(blob, &dict); err != nil {
-			return nil, fmt.Errorf("config blob not valid JSON: %w", err)
-		}
-	}
-
-	out := &tenantv1.RedactedConfig{
-		Provider:         providerStringToEnum(providerName),
-		Address:          stringField(dict, "address"),
-		NamespaceOrPath:  stringField(dict, "namespace_or_path"),
-		Mount:            stringField(dict, "mount"),
-		AuthMethod:       stringField(dict, "auth_method"),
-		Region:           stringField(dict, "region"),
-		Project:          stringField(dict, "project"),
-		TenantIdExternal: stringField(dict, "tenant_id_external"),
-		ClientId:         stringField(dict, "client_id"),
-		RoleArn:          stringField(dict, "role_arn"),
-	}
-
-	for _, sk := range sensitiveKeys {
-		if v, ok := dict[sk]; ok {
-			if s, isStr := v.(string); isStr && s == "" {
-				continue
-			}
-			out.SensitiveFieldsSet = append(out.SensitiveFieldsSet, sk)
-		}
-	}
-
-	return out, nil
-}
-
-// sensitiveKeys is the set of config keys whose values must never appear in
-// a redacted response.
-var sensitiveKeys = []string{
-	"vault_token",
-	"approle_secret_id",
-}
-
-// stringField returns dict[key] as a string, or "" when missing or
-// not-a-string.
-func stringField(dict map[string]any, key string) string {
-	v, ok := dict[key]
-	if !ok {
-		return ""
-	}
-	s, _ := v.(string)
-	return s
-}
-
-// providerEnumToString maps the proto enum to the registry string name.
-// Returns "" for UNSPECIFIED or any reserved/removed provider.
-//
-// Both Vault variants map to the single "vault" registry factory name —
-// Hosted vs BYO is a Config-blob distinction (namespace mode vs path-prefix
-// mode), not a distinct backend factory. The active-backend disambiguation
-// via GetBrokerConfig is handled by later slices of the secrets-hosted-byo
-// epic (gibson#1107/#1108).
-func providerEnumToString(p tenantv1.BrokerProvider) string {
-	switch p {
-	case tenantv1.BrokerProvider_BROKER_PROVIDER_VAULT_HOSTED,
-		tenantv1.BrokerProvider_BROKER_PROVIDER_VAULT_BYO:
-		return "vault"
-	default:
-		return ""
-	}
-}
-
-// providerStringToEnum maps the registry string name back to the proto
-// enum. Returns UNSPECIFIED for unknown values. The "vault" factory name
-// resolves to the Hosted variant by default; BYO is distinguished by the
-// stored Config blob (mode/address) in later slices.
-func providerStringToEnum(s string) tenantv1.BrokerProvider {
-	switch s {
-	case "vault":
-		return tenantv1.BrokerProvider_BROKER_PROVIDER_VAULT_HOSTED
-	default:
-		return tenantv1.BrokerProvider_BROKER_PROVIDER_UNSPECIFIED
-	}
 }
 
 // classifyProbeError maps a probe error to a structured class for the

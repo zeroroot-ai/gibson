@@ -6,12 +6,13 @@ package flows
 
 import (
 	"context"
-	"encoding/json"
 	"fmt"
 
 	"github.com/jackc/pgx/v5/pgxpool"
 	"github.com/zeroroot-ai/sdk/auth"
 
+	"github.com/zeroroot-ai/gibson/internal/infra/secrets/vault"
+	"github.com/zeroroot-ai/gibson/internal/infra/secrets/vault/brokercodec"
 	"github.com/zeroroot-ai/gibson/internal/infra/tenantconfig"
 )
 
@@ -142,9 +143,23 @@ func (d WriteTenantBrokerConfigDeps) WriteBrokerConfig(ctx context.Context, tena
 	// broker re-resolves the same template; keep them in sync.
 	rendered := renderVaultConfig(d.VaultConfig, tenantID)
 
-	configJSON, err := json.Marshal(rendered)
+	// Encode through the shared broker-config codec so the operator and the
+	// daemon's SetBrokerConfig emit byte-identical vault.Config blobs for the
+	// same logical config — no hand-rolled JSON keys (gibson#1108). The
+	// operator writes the platform-managed Hosted broker (namespace mode).
+	providerName, configJSON, err := brokercodec.Encode(brokercodec.Fields{
+		Hosted:          true,
+		Address:         rendered.Address,
+		NamespaceOrPath: rendered.Namespace,
+		KVMount:         rendered.KVMount,
+		Auth: vault.AuthConfig{
+			Method: vault.AuthMethod(rendered.Auth.Method),
+			Role:   rendered.Auth.Role,
+		},
+		Tenant: tenantID,
+	})
 	if err != nil {
-		return fmt.Errorf("writeTenantBrokerConfig: marshal config: %w", err)
+		return fmt.Errorf("writeTenantBrokerConfig: encode config: %w", err)
 	}
 
 	store, err := tenantconfig.NewStore(d.PlatformPG, d.SystemTenantKEK)
@@ -156,7 +171,7 @@ func (d WriteTenantBrokerConfigDeps) WriteBrokerConfig(ctx context.Context, tena
 	// schema, so retries / re-reconciles converge on the latest config without
 	// manual cleanup.
 	const actor = "tenant-operator-saga"
-	if err := store.SetRaw(ctx, tenantID, "vault", configJSON, actor); err != nil {
+	if err := store.SetRaw(ctx, tenantID, providerName, configJSON, actor); err != nil {
 		return fmt.Errorf("writeTenantBrokerConfig: upsert: %w", err)
 	}
 	return nil
