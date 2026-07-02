@@ -13,6 +13,7 @@ import (
 	"github.com/go-logr/logr"
 	corev1 "k8s.io/api/core/v1"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
+	"k8s.io/apimachinery/pkg/types"
 	"k8s.io/client-go/tools/record"
 	"sigs.k8s.io/controller-runtime/pkg/client/fake"
 
@@ -162,6 +163,48 @@ func TestReconcilePostgresBundle_ClusterUnreachable(t *testing.T) {
 	c := findCondition(pb.Status.Conditions, gibsonv1alpha1.ConditionPostgresBundleReady)
 	if c == nil || c.Status != metav1.ConditionUnknown || c.Reason != "ClusterUnreachable" {
 		t.Fatalf("expected ClusterUnreachable/Unknown, got %+v", c)
+	}
+}
+
+// TestReconcilePostgresBundle_InvalidPassword_TriggersReload verifies the
+// deploy#1043 self-heal: on 28P01 (role password diverged from the CNPG
+// Secret), the operator bumps a reload annotation on the superuser Secret so
+// CNPG re-applies the password to the role, sets SuperuserPasswordReconciling,
+// and requeues.
+func TestReconcilePostgresBundle_InvalidPassword_TriggersReload(t *testing.T) {
+	s := mustScheme(t)
+	suSec := &corev1.Secret{
+		ObjectMeta: metav1.ObjectMeta{Namespace: "gibson", Name: "platform-postgres-superuser"},
+		Type:       corev1.SecretTypeOpaque,
+		Data:       map[string][]byte{"username": []byte("postgres"), "password": []byte("pw")},
+	}
+	cli := fake.NewClientBuilder().WithScheme(s).WithObjects(suSec).Build()
+	r := &PlatformBootstrapReconciler{
+		Client: cli, Scheme: s, Recorder: record.NewFakeRecorder(8),
+		PostgresFactory: func(ctx context.Context, cfg pg.Config) (pg.Client, error) {
+			return nil, fmt.Errorf("ping: %w", pg.ErrInvalidPassword)
+		},
+	}
+	pb := postgresBundleFixture()
+
+	result, err := r.reconcilePostgresBundle(context.Background(), pb, logr.Discard())
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if result.RequeueAfter == 0 {
+		t.Fatalf("expected requeue, got %+v", result)
+	}
+	c := findCondition(pb.Status.Conditions, gibsonv1alpha1.ConditionPostgresBundleReady)
+	if c == nil || c.Status != metav1.ConditionUnknown || c.Reason != "SuperuserPasswordReconciling" {
+		t.Fatalf("expected SuperuserPasswordReconciling/Unknown, got %+v", c)
+	}
+	// The Secret must have been nudged (reload annotation added) so CNPG realigns.
+	var got corev1.Secret
+	if err := cli.Get(context.Background(), types.NamespacedName{Namespace: "gibson", Name: "platform-postgres-superuser"}, &got); err != nil {
+		t.Fatalf("get secret: %v", err)
+	}
+	if got.Annotations["gibson.zeroroot.ai/superuser-password-reload"] == "" {
+		t.Fatalf("expected reload annotation on the superuser Secret, got %v", got.Annotations)
 	}
 }
 

@@ -9,6 +9,7 @@ import (
 	"errors"
 	"fmt"
 	"strings"
+	"time"
 
 	"github.com/go-logr/logr"
 	corev1 "k8s.io/api/core/v1"
@@ -16,6 +17,7 @@ import (
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/types"
 	ctrl "sigs.k8s.io/controller-runtime"
+	"sigs.k8s.io/controller-runtime/pkg/client"
 
 	gibsonv1alpha1 "github.com/zeroroot-ai/gibson/operators/platform/api/v1alpha1"
 	pg "github.com/zeroroot-ai/gibson/operators/platform/internal/clients/postgres"
@@ -82,6 +84,24 @@ func (r *PlatformBootstrapReconciler) reconcilePostgresBundle(ctx context.Contex
 		}
 	}
 	if err != nil {
+		// deploy#1043: CNPG can leave the postgres role password diverged from
+		// the superuser Secret at bootstrap. CNPG re-applies secret->role only
+		// on a Secret change (cnpg.io/reload), not on role drift — so it never
+		// self-corrects. On 28P01, nudge the Secret to trigger that reload; CNPG
+		// realigns the role and the next requeue connects.
+		if errors.Is(err, pg.ErrInvalidPassword) {
+			if rerr := r.triggerSuperuserReload(ctx, suSec); rerr != nil {
+				logger.Error(rerr, "failed to trigger CNPG superuser Secret reload",
+					"secret", suSec.Namespace+"/"+suSec.Name)
+			} else {
+				logger.Info("postgres superuser password diverged from Secret; triggered CNPG reload to realign",
+					"secret", suSec.Namespace+"/"+suSec.Name)
+			}
+			setBootstrapCond(pb, gibsonv1alpha1.ConditionPostgresBundleReady, metav1.ConditionUnknown,
+				"SuperuserPasswordReconciling",
+				"postgres role password diverged from the CNPG superuser Secret; triggered a Secret reload so CNPG realigns the role, retrying")
+			return ctrl.Result{RequeueAfter: requeueShort}, nil
+		}
 		setBootstrapCond(pb, gibsonv1alpha1.ConditionPostgresBundleReady, metav1.ConditionUnknown,
 			"ClusterUnreachable", err.Error())
 		return ctrl.Result{RequeueAfter: requeueMedium}, nil
@@ -142,6 +162,19 @@ func (r *PlatformBootstrapReconciler) readSuperuserSecret(ctx context.Context, r
 		return nil, err
 	}
 	return &sec, nil
+}
+
+// triggerSuperuserReload bumps an annotation on the CNPG superuser Secret so
+// CNPG's cnpg.io/reload watch fires and re-applies the Secret's password to the
+// postgres role. This is how CNPG realigns role<->Secret; it does not do so on
+// role drift alone. The annotation value must change each call. deploy#1043.
+func (r *PlatformBootstrapReconciler) triggerSuperuserReload(ctx context.Context, sec *corev1.Secret) error {
+	patch := client.MergeFrom(sec.DeepCopy())
+	if sec.Annotations == nil {
+		sec.Annotations = map[string]string{}
+	}
+	sec.Annotations["gibson.zeroroot.ai/superuser-password-reload"] = time.Now().UTC().Format(time.RFC3339Nano)
+	return r.Patch(ctx, sec, patch)
 }
 
 // DefaultPostgresClientFactory wires the real lib/pq client.
