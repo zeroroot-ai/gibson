@@ -23,17 +23,23 @@ import (
 // that raw store client imports stay confined to the data-plane allowlist
 // (docs/data-plane.md, gibson#1145) — the brain package depends only on the
 // brain.TimelineStore interface, no Redis types leak into internal/engine/brain.
+//
+// acquire is called once per Timeline operation and must return the per-tenant
+// *redis.Client plus a release function that returns the connection to the
+// pool. This per-op acquire pattern prevents the "client is closed" error that
+// occurs when a long-lived *redis.Client is closed by the idle evictor between
+// operations (gibson#1114, ADR-0011).
 type RedisTimelineStore struct {
-	// client is the per-tenant Redis client. The caller (typically via
-	// redisPerTenant.ForTenant) must hand a client already bound to the
-	// correct tenant DB.
-	client *redis.Client
+	acquire func(ctx context.Context) (*redis.Client, func(), error)
 }
 
-// NewRedisTimelineStore creates a RedisTimelineStore backed by client.
-// client must be bound to the tenant's dedicated Redis DB (never db 0).
-func NewRedisTimelineStore(client *redis.Client) *RedisTimelineStore {
-	return &RedisTimelineStore{client: client}
+// NewRedisTimelineStore creates a RedisTimelineStore backed by acquire.
+// acquire must return a *redis.Client bound to the tenant's dedicated Redis DB
+// (never db 0) and a release function that returns the connection to the pool.
+// acquire is called once per Timeline operation so the evictor can never hand
+// back a closed client.
+func NewRedisTimelineStore(acquire func(ctx context.Context) (*redis.Client, func(), error)) *RedisTimelineStore {
+	return &RedisTimelineStore{acquire: acquire}
 }
 
 func (s *RedisTimelineStore) streamKey(tenant string) string {
@@ -43,11 +49,17 @@ func (s *RedisTimelineStore) streamKey(tenant string) string {
 // Append durably persists ev to the tenant's Redis Stream. MaxLen 0 means no
 // cap — the stream grows unbounded until TrimTo prunes it (ADR-0011).
 func (s *RedisTimelineStore) Append(ctx context.Context, tenant string, ev brain.Event) (string, error) {
+	client, release, err := s.acquire(ctx)
+	if err != nil {
+		return "", fmt.Errorf("datapool/redis-timeline: acquire conn for XADD tenant %q: %w", tenant, err)
+	}
+	defer release()
+
 	encoded, err := brain.EncodeEvent(ev)
 	if err != nil {
 		return "", fmt.Errorf("datapool/redis-timeline: encode event kind %q: %w", ev.Kind(), err)
 	}
-	seq, err := s.client.XAdd(ctx, &redis.XAddArgs{
+	seq, err := client.XAdd(ctx, &redis.XAddArgs{
 		Stream: s.streamKey(tenant),
 		MaxLen: 0, // no cap — ADR-0011 no blind trim
 		ID:     "*",
@@ -65,6 +77,12 @@ const replayBatchSize = 1000
 // LoadForReplay returns all events after afterSeq (exclusive). Pass "" to
 // load from the beginning. Events are returned in Timeline order.
 func (s *RedisTimelineStore) LoadForReplay(ctx context.Context, tenant string, afterSeq string) ([]brain.Event, error) {
+	client, release, err := s.acquire(ctx)
+	if err != nil {
+		return nil, fmt.Errorf("datapool/redis-timeline: acquire conn for XRANGE tenant %q: %w", tenant, err)
+	}
+	defer release()
+
 	key := s.streamKey(tenant)
 	start := "-"
 	if afterSeq != "" {
@@ -77,7 +95,7 @@ func (s *RedisTimelineStore) LoadForReplay(ctx context.Context, tenant string, a
 	var out []brain.Event
 	cursor := start
 	for {
-		msgs, err := s.client.XRangeN(ctx, key, cursor, "+", replayBatchSize).Result()
+		msgs, err := client.XRangeN(ctx, key, cursor, "+", replayBatchSize).Result()
 		if err != nil {
 			return nil, fmt.Errorf("datapool/redis-timeline: XRANGE for tenant %q: %w", tenant, err)
 		}
@@ -109,12 +127,18 @@ func (s *RedisTimelineStore) LoadForReplay(ctx context.Context, tenant string, a
 // Key: "gibson:snapshot:<tenant>"
 // Returns snap.AtSeq as the handle.
 func (s *RedisTimelineStore) WriteSnapshot(ctx context.Context, tenant string, snap brain.WorldSnapshot) (string, error) {
+	client, release, err := s.acquire(ctx)
+	if err != nil {
+		return "", fmt.Errorf("datapool/redis-timeline: acquire conn for SET snapshot tenant %q: %w", tenant, err)
+	}
+	defer release()
+
 	key := "gibson:snapshot:" + tenant
 	data, err := json.Marshal(snap)
 	if err != nil {
 		return "", fmt.Errorf("datapool/redis-timeline: marshal snapshot for tenant %q: %w", tenant, err)
 	}
-	if err := s.client.Set(ctx, key, data, 0).Err(); err != nil {
+	if err := client.Set(ctx, key, data, 0).Err(); err != nil {
 		return "", fmt.Errorf("datapool/redis-timeline: SET snapshot for tenant %q: %w", tenant, err)
 	}
 	return snap.AtSeq, nil
@@ -122,8 +146,14 @@ func (s *RedisTimelineStore) WriteSnapshot(ctx context.Context, tenant string, s
 
 // LoadSnapshot loads the snapshot for tenant. Returns (nil, nil) if none exists.
 func (s *RedisTimelineStore) LoadSnapshot(ctx context.Context, tenant string) (*brain.WorldSnapshot, error) {
+	client, release, err := s.acquire(ctx)
+	if err != nil {
+		return nil, fmt.Errorf("datapool/redis-timeline: acquire conn for GET snapshot tenant %q: %w", tenant, err)
+	}
+	defer release()
+
 	key := "gibson:snapshot:" + tenant
-	data, err := s.client.Get(ctx, key).Bytes()
+	data, err := client.Get(ctx, key).Bytes()
 	if err != nil {
 		if err == redis.Nil {
 			return nil, nil
@@ -141,9 +171,15 @@ func (s *RedisTimelineStore) LoadSnapshot(ctx context.Context, tenant string) (*
 // XTrimMinID keeps entries with ID >= minid, so we compute handle+1 to exclude
 // the snapshot entry itself — tail replay begins with the event after the snapshot.
 func (s *RedisTimelineStore) TrimTo(ctx context.Context, tenant, handle string) error {
+	client, release, err := s.acquire(ctx)
+	if err != nil {
+		return fmt.Errorf("datapool/redis-timeline: acquire conn for XTRIM tenant %q: %w", tenant, err)
+	}
+	defer release()
+
 	key := s.streamKey(tenant)
 	minid := streamIDNext(handle)
-	if err := s.client.XTrimMinID(ctx, key, minid).Err(); err != nil {
+	if err := client.XTrimMinID(ctx, key, minid).Err(); err != nil {
 		return fmt.Errorf("datapool/redis-timeline: XTRIM MINID tenant %q handle %q: %w", tenant, handle, err)
 	}
 	return nil

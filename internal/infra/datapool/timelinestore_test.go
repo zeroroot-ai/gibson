@@ -4,6 +4,7 @@ package datapool
 
 import (
 	"context"
+	"errors"
 	"testing"
 	"time"
 
@@ -41,6 +42,15 @@ func newTestRedis(t *testing.T) (*miniredis.Miniredis, *goredis.Client) {
 		mr.Close()
 	})
 	return mr, rdb
+}
+
+// staticAcquire returns an acquire closure that always hands out the same
+// pre-created client with a no-op release. This mirrors the "single live
+// client" scenario used by tests that do not need to exercise pool eviction.
+func staticAcquire(rdb *goredis.Client) func(ctx context.Context) (*goredis.Client, func(), error) {
+	return func(_ context.Context) (*goredis.Client, func(), error) {
+		return rdb, func() {}, nil
+	}
 }
 
 // TestCodecRoundTrip verifies that EncodeEvent / DecodeEvent are inverse for
@@ -97,7 +107,7 @@ func TestCodecRoundTrip(t *testing.T) {
 // by LoadForReplay in the correct order.
 func TestRedisTimelineStore_AppendLoad(t *testing.T) {
 	_, rdb := newTestRedis(t)
-	store := NewRedisTimelineStore(rdb)
+	store := NewRedisTimelineStore(staticAcquire(rdb))
 	ctx := context.Background()
 	tenant := "tenant-a"
 
@@ -128,8 +138,8 @@ func TestRedisTimelineStore_PerTenantIsolation(t *testing.T) {
 	_, rdbA := newTestRedis(t)
 	_, rdbB := newTestRedis(t)
 
-	storeA := NewRedisTimelineStore(rdbA)
-	storeB := NewRedisTimelineStore(rdbB)
+	storeA := NewRedisTimelineStore(staticAcquire(rdbA))
+	storeB := NewRedisTimelineStore(staticAcquire(rdbB))
 	ctx := context.Background()
 	tenant := "shared-tenant-name"
 
@@ -156,7 +166,7 @@ func TestRedisTimelineStore_PerTenantIsolation(t *testing.T) {
 // Engine are written to the store and can be replayed.
 func TestEngine_WithStore_PersistsEvents(t *testing.T) {
 	_, rdb := newTestRedis(t)
-	store := NewRedisTimelineStore(rdb)
+	store := NewRedisTimelineStore(staticAcquire(rdb))
 
 	eng := brain.NewEngine("t1")
 	eng.WithStore(store)
@@ -208,7 +218,7 @@ func TestHydrate_EquivalenceAfterRestart(t *testing.T) {
 	defer cancel()
 
 	_, rdb := newTestRedis(t)
-	store := NewRedisTimelineStore(rdb)
+	store := NewRedisTimelineStore(staticAcquire(rdb))
 
 	// --- Phase 1: persist a deterministic event sequence ---
 	// We persist events directly to the store (rather than through an Engine)
@@ -294,7 +304,7 @@ func TestHydrate_InFlightWorkFailedOnRestart(t *testing.T) {
 	defer cancel()
 
 	_, rdb := newTestRedis(t)
-	store := NewRedisTimelineStore(rdb)
+	store := NewRedisTimelineStore(staticAcquire(rdb))
 
 	// Append raw events so we can craft an exact "running but never completed"
 	// scenario without running systems.
@@ -357,7 +367,7 @@ func TestRegistry_WithStoreFactory_NoopWhenFactoryNil(t *testing.T) {
 // the loaded snapshot has the same AtSeq and Data as the written one.
 func TestSnapshot_RoundTrip(t *testing.T) {
 	_, rdb := newTestRedis(t)
-	store := NewRedisTimelineStore(rdb)
+	store := NewRedisTimelineStore(staticAcquire(rdb))
 	ctx := context.Background()
 	tenant := "tenant-snap-rt"
 
@@ -382,7 +392,7 @@ func TestSnapshot_RoundTrip(t *testing.T) {
 func TestTrimTo_BoundsStream(t *testing.T) {
 	mr, rdb := newTestRedis(t)
 	_ = mr
-	store := NewRedisTimelineStore(rdb)
+	store := NewRedisTimelineStore(staticAcquire(rdb))
 	ctx := context.Background()
 	tenant := "tenant-trim"
 
@@ -409,7 +419,7 @@ func TestTrimTo_BoundsStream(t *testing.T) {
 // tail events must equal a World folded from the complete event sequence.
 func TestSnapshotPlusTailEqualsFullReplay(t *testing.T) {
 	_, rdb := newTestRedis(t)
-	store := NewRedisTimelineStore(rdb)
+	store := NewRedisTimelineStore(staticAcquire(rdb))
 	ctx := context.Background()
 	const tenant = "tenant-snap-equiv"
 
@@ -475,7 +485,7 @@ func TestSnapshotPlusTailEqualsFullReplay(t *testing.T) {
 // the snapshot nor skipped by the exclusive-after-AtSeq tail replay.
 func TestLiveCadenceSnapshot_HydrateEquivalence(t *testing.T) {
 	_, rdb := newTestRedis(t)
-	store := NewRedisTimelineStore(rdb)
+	store := NewRedisTimelineStore(staticAcquire(rdb))
 	const tenant = "tenant-live-cadence"
 
 	// Cadence of 2 means a snapshot fires after every 2 persisted events, so with
@@ -506,4 +516,124 @@ func TestLiveCadenceSnapshot_HydrateEquivalence(t *testing.T) {
 	assert.Equal(t, live.Hosts(), fresh.Hosts(), "hosts must match after live-cadence snapshot + hydrate")
 	assert.Equal(t, live.Work(), fresh.Work(), "work must match after live-cadence snapshot + hydrate")
 	assert.Equal(t, live.Missions(), fresh.Missions(), "missions must match after live-cadence snapshot + hydrate")
+}
+
+// errAcquire returns an acquire closure that always returns the given error.
+// Used by TestTimelineStore_AcquireError to cover the error branches in each
+// RedisTimelineStore method (lines 54-55, 82-83, 132-133, 151-152, 176-177).
+func errAcquire(err error) func(ctx context.Context) (*goredis.Client, func(), error) {
+	return func(_ context.Context) (*goredis.Client, func(), error) {
+		return nil, nil, err
+	}
+}
+
+// TestTimelineStore_AcquireError covers the acquire-error early-return branches
+// in all five RedisTimelineStore methods (Append, LoadForReplay, WriteSnapshot,
+// LoadSnapshot, TrimTo). Each method must propagate the acquire error wrapped
+// in a descriptive message — none should panic or return a nil error.
+func TestTimelineStore_AcquireError(t *testing.T) {
+	t.Parallel()
+	sentinel := errors.New("pool evicted")
+	store := NewRedisTimelineStore(errAcquire(sentinel))
+	ctx := context.Background()
+	tenant := "tenant-err"
+
+	t.Run("Append", func(t *testing.T) {
+		_, err := store.Append(ctx, tenant, brain.HostObserved{ScopeID: "s", Address: "10.0.0.1"})
+		require.Error(t, err, "Append must return an error when acquire fails")
+		require.ErrorIs(t, err, sentinel, "Append must wrap the acquire error")
+	})
+
+	t.Run("LoadForReplay", func(t *testing.T) {
+		_, err := store.LoadForReplay(ctx, tenant, "")
+		require.Error(t, err, "LoadForReplay must return an error when acquire fails")
+		require.ErrorIs(t, err, sentinel, "LoadForReplay must wrap the acquire error")
+	})
+
+	t.Run("WriteSnapshot", func(t *testing.T) {
+		snap := brain.WorldSnapshot{AtSeq: "0-1", Data: []byte(`{}`)}
+		_, err := store.WriteSnapshot(ctx, tenant, snap)
+		require.Error(t, err, "WriteSnapshot must return an error when acquire fails")
+		require.ErrorIs(t, err, sentinel, "WriteSnapshot must wrap the acquire error")
+	})
+
+	t.Run("LoadSnapshot", func(t *testing.T) {
+		_, err := store.LoadSnapshot(ctx, tenant)
+		require.Error(t, err, "LoadSnapshot must return an error when acquire fails")
+		require.ErrorIs(t, err, sentinel, "LoadSnapshot must wrap the acquire error")
+	})
+
+	t.Run("TrimTo", func(t *testing.T) {
+		err := store.TrimTo(ctx, tenant, "0-1")
+		require.Error(t, err, "TrimTo must return an error when acquire fails")
+		require.ErrorIs(t, err, sentinel, "TrimTo must wrap the acquire error")
+	})
+}
+
+// TestAcquirePerOp_EvictionRobustness is the regression test for gibson#1114
+// (ADR-0011): after one Timeline operation releases its connection and the
+// underlying *redis.Client is closed (simulating idle eviction), a subsequent
+// operation via a fresh acquire still succeeds.
+//
+// The test wires a "rotating" acquire that alternates between two independent
+// miniredis servers so we can close server A between operations and verify
+// that operation B routes through server B without any "client is closed" error.
+// The rotating acquire is the minimal simulation of the pool's per-op Conn
+// acquisition: each call may legitimately return a different (but valid) client.
+func TestAcquirePerOp_EvictionRobustness(t *testing.T) {
+	ctx := context.Background()
+	const tenant = "tenant-eviction"
+
+	// Spin up two independent miniredis servers to simulate "old evicted client"
+	// vs "new client from pool after eviction".
+	mrA, err := miniredis.Run()
+	require.NoError(t, err)
+	defer mrA.Close()
+	rdbA := goredis.NewClient(&goredis.Options{Addr: mrA.Addr()})
+	defer func() { _ = rdbA.Close() }()
+
+	mrB, err := miniredis.Run()
+	require.NoError(t, err)
+	defer mrB.Close()
+	rdbB := goredis.NewClient(&goredis.Options{Addr: mrB.Addr()})
+	defer func() { _ = rdbB.Close() }()
+
+	// callCount tracks how many times acquire has been called so we can switch
+	// clients between operations.
+	callCount := 0
+	acquire := func(_ context.Context) (*goredis.Client, func(), error) {
+		callCount++
+		if callCount == 1 {
+			// First op uses rdbA (will be "closed" by eviction after this).
+			return rdbA, func() {}, nil
+		}
+		// Subsequent ops use rdbB (fresh client from pool after eviction).
+		return rdbB, func() {}, nil
+	}
+
+	store := NewRedisTimelineStore(acquire)
+
+	// Operation 1: Append via rdbA.
+	ev1 := brain.HostObserved{ScopeID: "s", Address: "10.0.0.1"}
+	seq1, err := store.Append(ctx, tenant, ev1)
+	require.NoError(t, err, "first Append (via rdbA) must succeed")
+	require.NotEmpty(t, seq1)
+
+	// Simulate idle eviction: close rdbA and stop mrA.
+	// Any future use of rdbA would produce "redis: client is closed".
+	_ = rdbA.Close()
+	mrA.Close()
+
+	// Operation 2: Append via rdbB (fresh acquire after eviction).
+	// This must NOT fail — the per-op acquire pattern guarantees a live client.
+	ev2 := brain.HostObserved{ScopeID: "s", Address: "10.0.0.2"}
+	seq2, err := store.Append(ctx, tenant, ev2)
+	require.NoError(t, err, "second Append must succeed after eviction (per-op acquire, not stale client)")
+	require.NotEmpty(t, seq2)
+
+	// Operation 3: LoadForReplay via rdbB — only ev2 is on rdbB (rdbA is gone).
+	loaded, err := store.LoadForReplay(ctx, tenant, "")
+	require.NoError(t, err, "LoadForReplay must succeed on the live client")
+	require.Len(t, loaded, 1, "only the event written to rdbB should be visible")
+	assert.Equal(t, ev2, loaded[0], "the event on rdbB must be ev2")
 }

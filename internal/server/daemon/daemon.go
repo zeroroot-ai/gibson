@@ -1129,34 +1129,7 @@ func (d *daemonImpl) Start(ctx context.Context) error {
 				// If pool.For fails (tenant not provisioned) the engine operates
 				// in-memory only for that tenant, matching the pre-#1113 behavior.
 				if d.brainRegistry != nil {
-					d.brainRegistry.WithStoreFactory(func(storeCtx context.Context, tenant string) brain.TimelineStore {
-						tenantID, idErr := auth.NewTenantID(tenant)
-						if idErr != nil {
-							slog.WarnContext(storeCtx, "brain/registry: store factory: invalid tenant id; engine will run in-memory only",
-								"tenant", tenant,
-								"err", idErr,
-							)
-							return nil
-						}
-						conn, err := d.pool.For(storeCtx, tenantID)
-						if err != nil {
-							slog.WarnContext(storeCtx, "brain/registry: store factory: pool.For failed; engine will run in-memory only",
-								"tenant", tenant,
-								"err", err,
-							)
-							return nil
-						}
-						// Extract the per-tenant *redis.Client before releasing the Conn
-						// so that the eviction tracker (activeConns) is decremented
-						// correctly. The *redis.Client itself is long-lived — it is
-						// managed by the pool's redisPerTenant cache and remains valid
-						// for the life of the pool (closed on Pool.Close / EvictTenant).
-						// Holding the client pointer after Release() is safe; it does not
-						// close or invalidate the underlying connection.
-						redisClient := conn.Redis
-						conn.Release()
-						return datapool.NewRedisTimelineStore(redisClient)
-					})
+					d.brainRegistry.WithStoreFactory(timelineStoreFactory(d.pool, d.logger.Slog()))
 					d.logger.Info(ctx, "brain registry: durable Timeline store factory wired (ADR-0011, #1114)")
 				}
 			}
