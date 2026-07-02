@@ -27,6 +27,10 @@ var (
 	ErrUnreachable    = errors.New("postgres: unreachable")
 	ErrInvalidIdent   = errors.New("postgres: invalid identifier")
 	ErrPermissionDeny = errors.New("postgres: permission denied")
+	// ErrInvalidPassword is 28P01 — the role password does not match. Distinct
+	// from ErrUnreachable so callers can react (e.g. trigger a CNPG secret
+	// reload to realign the role). deploy#1043.
+	ErrInvalidPassword = errors.New("postgres: invalid password")
 )
 
 // identRegex restricts identifiers to a-zA-Z0-9_, leading non-digit.
@@ -103,6 +107,9 @@ type pqClient struct {
 
 func (c *pqClient) Ping(ctx context.Context) error {
 	if err := c.db.PingContext(ctx); err != nil {
+		if errSQLState(err) == "28P01" {
+			return fmt.Errorf("postgres: ping: %v: %w", err, ErrInvalidPassword)
+		}
 		return fmt.Errorf("postgres: ping: %v: %w", err, ErrUnreachable)
 	}
 	return nil
@@ -211,7 +218,8 @@ func wrapExecErr(err error, stmt string) error {
 // We do a substring scan to avoid a hard dep on the pq package surface.
 func errSQLState(err error) string {
 	type sqlStater interface{ SQLState() string }
-	if s, ok := err.(sqlStater); ok {
+	var s sqlStater
+	if errors.As(err, &s) {
 		return s.SQLState()
 	}
 	return ""
