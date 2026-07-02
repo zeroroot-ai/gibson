@@ -204,6 +204,72 @@ func TestTenantDataPlane_TeardownNotFoundIsSuccess(t *testing.T) {
 	}
 }
 
+// A second reconcile of an already-Ready CR (same generation) must not flip
+// phase back to Provisioning and must produce no additional status changes.
+// This verifies the fix for the status-patch self-triggering churn
+// (gibson#1140): the alreadyReady guard skips markProvisioning on
+// drift-correction resyncs and GenerationChangedPredicate prevents status
+// patches from re-enqueueing the controller.
+func TestTenantDataPlane_SteadyStateNoPhaseFlip(t *testing.T) {
+	scheme := setupScheme(t)
+	tdp := newTenantDataPlane("acme-dp", "acme")
+	// Seed the CR as already-Ready at generation 1 so the controller starts in
+	// the steady-state path.
+	tdp.Generation = 1
+	tdp.Status.Phase = gibsonv1alpha1.TenantDataPlanePhaseReady
+	tdp.Status.Ready = true
+	tdp.Status.ObservedGeneration = 1
+	tdp.Status.Stores = []gibsonv1alpha1.TenantDataPlaneStoreCondition{
+		{Name: "postgres", State: "ready"},
+		{Name: "neo4j", State: "ready"},
+		{Name: "redis", State: "ready"},
+		{Name: "vector", State: "ready"},
+		{Name: "kek", State: "ready"},
+	}
+	controllerutil.AddFinalizer(tdp, gibsonv1alpha1.TenantDataPlaneFinalizer)
+	c := fake.NewClientBuilder().
+		WithScheme(scheme).
+		WithStatusSubresource(&gibsonv1alpha1.TenantDataPlane{}).
+		WithObjects(tdp).
+		Build()
+
+	stub := &stubProvisioner{}
+	r := &TenantDataPlaneReconciler{Client: c, Scheme: scheme, Recorder: events.NewFakeRecorder(100), Provisioner: stub}
+
+	// First steady-state resync: Provision still runs (drift-correction) but
+	// phase must NOT flip to Provisioning.
+	if _, err := reconcileTDP(t, r, "acme-dp"); err != nil {
+		t.Fatalf("steady-state reconcile: %v", err)
+	}
+	if len(stub.provisioned) != 1 {
+		t.Fatalf("want Provision called once for drift-correction, got %d", len(stub.provisioned))
+	}
+	var got gibsonv1alpha1.TenantDataPlane
+	if err := c.Get(context.Background(), types.NamespacedName{Namespace: "tenant-acme", Name: "acme-dp"}, &got); err != nil {
+		t.Fatalf("get: %v", err)
+	}
+	if got.Status.Phase != gibsonv1alpha1.TenantDataPlanePhaseReady {
+		t.Fatalf("want phase to remain Ready, got %q", got.Status.Phase)
+	}
+	if !got.Status.Ready {
+		t.Fatalf("want Ready=true to remain, got false")
+	}
+
+	// Second steady-state resync: same assertions — phase stays Ready.
+	if _, err := reconcileTDP(t, r, "acme-dp"); err != nil {
+		t.Fatalf("second steady-state reconcile: %v", err)
+	}
+	if len(stub.provisioned) != 2 {
+		t.Fatalf("want Provision called twice total, got %d", len(stub.provisioned))
+	}
+	if err := c.Get(context.Background(), types.NamespacedName{Namespace: "tenant-acme", Name: "acme-dp"}, &got); err != nil {
+		t.Fatalf("get: %v", err)
+	}
+	if got.Status.Phase != gibsonv1alpha1.TenantDataPlanePhaseReady {
+		t.Fatalf("want phase Ready on second resync, got %q", got.Status.Phase)
+	}
+}
+
 func findCond(conds []metav1.Condition, t string) *metav1.Condition {
 	for i := range conds {
 		if conds[i].Type == t {

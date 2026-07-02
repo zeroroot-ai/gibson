@@ -13,9 +13,11 @@ import (
 	"k8s.io/apimachinery/pkg/runtime"
 	"k8s.io/client-go/tools/events"
 	ctrl "sigs.k8s.io/controller-runtime"
+	"sigs.k8s.io/controller-runtime/pkg/builder"
 	"sigs.k8s.io/controller-runtime/pkg/client"
 	"sigs.k8s.io/controller-runtime/pkg/controller/controllerutil"
 	logf "sigs.k8s.io/controller-runtime/pkg/log"
+	"sigs.k8s.io/controller-runtime/pkg/predicate"
 
 	gibsonv1alpha1 "github.com/zeroroot-ai/gibson/operators/tenant/api/v1alpha1"
 	"github.com/zeroroot-ai/gibson/operators/tenant/internal/clients"
@@ -96,9 +98,18 @@ func (r *TenantIdentityReconciler) Reconcile(ctx context.Context, req ctrl.Reque
 		return ctrl.Result{Requeue: true}, nil
 	}
 
-	// Provision (idempotent + drift-correcting). Mark Provisioning before the
-	// call so observers see progress.
-	r.markIdentityProvisioning(ctx, &ti)
+	// Provision (idempotent + drift-correcting). On a steady-state drift-check
+	// resync (already Ready for this generation) skip the Provisioning flip so
+	// status stays Ready and status-patch self-triggering stops the churn.
+	// First provision and spec changes (generation bump) still flip to
+	// Provisioning → Ready correctly.
+	alreadyReady := ti.Status.Phase == gibsonv1alpha1.TenantIdentityPhaseReady &&
+		ti.Status.ObservedGeneration == ti.Generation
+	if !alreadyReady {
+		if err := r.markIdentityProvisioning(ctx, &ti); err != nil {
+			return ctrl.Result{}, err
+		}
+	}
 
 	res, err := r.Provisioner.Provision(ctx, identity.Request{
 		TenantID:    ti.Spec.TenantID,
@@ -137,7 +148,7 @@ func (r *TenantIdentityReconciler) reconcileIdentityDelete(ctx context.Context, 
 	base := ti.DeepCopy()
 	ti.Status.Phase = gibsonv1alpha1.TenantIdentityPhaseDeprovisioning
 	ti.Status.Ready = false
-	r.patchIdentityStatus(ctx, ti, base)
+	_ = r.patchIdentityStatus(ctx, ti, base)
 
 	if r.Provisioner != nil {
 		if err := r.Provisioner.Deprovision(ctx, ti.Status.ZitadelOrgID); err != nil && !errors.Is(err, clients.ErrNotFound) {
@@ -157,12 +168,15 @@ func (r *TenantIdentityReconciler) reconcileIdentityDelete(ctx context.Context, 
 	return ctrl.Result{}, nil
 }
 
-// markIdentityProvisioning records the in-flight phase via Status().Patch.
-func (r *TenantIdentityReconciler) markIdentityProvisioning(ctx context.Context, ti *gibsonv1alpha1.TenantIdentity) {
+// markIdentityProvisioning records the in-flight phase via Status().Patch. It
+// returns an error only when the patch itself fails — callers that guard on
+// alreadyReady propagate it so the reconcile retries rather than continuing
+// with stale in-cluster state.
+func (r *TenantIdentityReconciler) markIdentityProvisioning(ctx context.Context, ti *gibsonv1alpha1.TenantIdentity) error {
 	base := ti.DeepCopy()
 	ti.Status.Phase = gibsonv1alpha1.TenantIdentityPhaseProvisioning
 	ti.Status.LastError = ""
-	r.patchIdentityStatus(ctx, ti, base)
+	return r.patchIdentityStatus(ctx, ti, base)
 }
 
 // markIdentityReady records the ready state: org id/slug recorded, aggregate
@@ -179,7 +193,7 @@ func (r *TenantIdentityReconciler) markIdentityReady(ctx context.Context, ti *gi
 	ti.Status.ObservedGeneration = ti.Generation
 	ti.Status.Components = readyIdentityComponents(ti)
 	setIdentityReadyCondition(ti, metav1.ConditionTrue, "Provisioned", "tenant identity is ready")
-	r.patchIdentityStatus(ctx, ti, base)
+	_ = r.patchIdentityStatus(ctx, ti, base)
 }
 
 // failIdentity records a failed reconcile in status without mutating spec.
@@ -189,18 +203,22 @@ func (r *TenantIdentityReconciler) failIdentity(ctx context.Context, ti *gibsonv
 	ti.Status.Ready = false
 	ti.Status.LastError = msg
 	setIdentityReadyCondition(ti, metav1.ConditionFalse, "ProvisionFailed", msg)
-	r.patchIdentityStatus(ctx, ti, base)
+	_ = r.patchIdentityStatus(ctx, ti, base)
 	return ctrl.Result{}, nil
 }
 
 // patchIdentityStatus persists status via a merge-patch off the captured base.
 // Using Patch (not Update) avoids resourceVersion conflicts with the Tenant
-// saga, which patches Tenant status concurrently. Errors are logged, not
-// propagated — a lost status write must not strand the reconcile.
-func (r *TenantIdentityReconciler) patchIdentityStatus(ctx context.Context, ti, base *gibsonv1alpha1.TenantIdentity) {
+// saga, which patches Tenant status concurrently. The error is returned so
+// that callers which guard on observed phase (e.g. markIdentityProvisioning in
+// the alreadyReady guard) can propagate it; callers that write terminal state
+// (markIdentityReady, failIdentity) log and continue as before.
+func (r *TenantIdentityReconciler) patchIdentityStatus(ctx context.Context, ti, base *gibsonv1alpha1.TenantIdentity) error {
 	if err := r.Status().Patch(ctx, ti, client.MergeFrom(base)); err != nil {
 		logf.FromContext(ctx).Error(err, "tenantidentity status patch failed", "tenant", ti.Spec.TenantID)
+		return err
 	}
+	return nil
 }
 
 // emitIdentity records a Kubernetes event on the TenantIdentity. No-ops when the
@@ -254,12 +272,20 @@ func setIdentityReadyCondition(ti *gibsonv1alpha1.TenantIdentity, status metav1.
 }
 
 // SetupWithManager registers the controller with the manager.
+//
+// GenerationChangedPredicate filters out status-only patch events: status
+// writes do not bump metadata.generation, so they no longer re-trigger a
+// reconcile. This stops the status-patch → re-trigger → markIdentityProvisioning
+// churn that prevented the phase from ever settling on Ready (gibson#1140).
+// Spec changes (generation bump), creates, and deletes still reconcile
+// immediately; the 10-minute RequeueAfter handles drift-correction resyncs.
 func (r *TenantIdentityReconciler) SetupWithManager(mgr ctrl.Manager) error {
 	if r.Recorder == nil {
 		r.Recorder = mgr.GetEventRecorder("tenantidentity-controller")
 	}
 	return ctrl.NewControllerManagedBy(mgr).
-		For(&gibsonv1alpha1.TenantIdentity{}).
+		For(&gibsonv1alpha1.TenantIdentity{},
+			builder.WithPredicates(predicate.GenerationChangedPredicate{})).
 		Named("tenantidentity").
 		Complete(r)
 }

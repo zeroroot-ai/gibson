@@ -13,9 +13,11 @@ import (
 	"k8s.io/apimachinery/pkg/runtime"
 	"k8s.io/client-go/tools/events"
 	ctrl "sigs.k8s.io/controller-runtime"
+	"sigs.k8s.io/controller-runtime/pkg/builder"
 	"sigs.k8s.io/controller-runtime/pkg/client"
 	"sigs.k8s.io/controller-runtime/pkg/controller/controllerutil"
 	logf "sigs.k8s.io/controller-runtime/pkg/log"
+	"sigs.k8s.io/controller-runtime/pkg/predicate"
 
 	gibsonv1alpha1 "github.com/zeroroot-ai/gibson/operators/tenant/api/v1alpha1"
 	"github.com/zeroroot-ai/gibson/operators/tenant/internal/clients"
@@ -93,10 +95,18 @@ func (r *TenantDataPlaneReconciler) Reconcile(ctx context.Context, req ctrl.Requ
 		return ctrl.Result{Requeue: true}, nil
 	}
 
-	// Provision (idempotent + drift-correcting). Mark Provisioning before the
-	// call so observers see progress; the pipeline itself also patches the
-	// Tenant status for backward compatibility.
-	r.markProvisioning(ctx, &tdp)
+	// Provision (idempotent + drift-correcting). On a steady-state drift-check
+	// resync (already Ready for this generation) skip the Provisioning flip so
+	// status stays Ready and status-patch self-triggering stops the churn.
+	// First provision and spec changes (generation bump) still flip to
+	// Provisioning → Ready correctly.
+	alreadyReady := tdp.Status.Phase == gibsonv1alpha1.TenantDataPlanePhaseReady &&
+		tdp.Status.ObservedGeneration == tdp.Generation
+	if !alreadyReady {
+		if err := r.markProvisioning(ctx, &tdp); err != nil {
+			return ctrl.Result{}, err
+		}
+	}
 
 	if err := r.Provisioner.Provision(ctx, tdp.Spec.TenantID); err != nil {
 		log.Error(err, "data-plane provision failed", "tenant", tdp.Spec.TenantID)
@@ -129,7 +139,7 @@ func (r *TenantDataPlaneReconciler) reconcileDelete(ctx context.Context, tdp *gi
 	base := tdp.DeepCopy()
 	tdp.Status.Phase = gibsonv1alpha1.TenantDataPlanePhaseDeprovisioning
 	tdp.Status.Ready = false
-	r.patchStatus(ctx, tdp, base)
+	_ = r.patchStatus(ctx, tdp, base)
 
 	if r.Provisioner != nil {
 		if err := r.Provisioner.Deprovision(ctx, tdp.Spec.TenantID); err != nil && !errors.Is(err, clients.ErrNotFound) {
@@ -149,12 +159,15 @@ func (r *TenantDataPlaneReconciler) reconcileDelete(ctx context.Context, tdp *gi
 	return ctrl.Result{}, nil
 }
 
-// markProvisioning records the in-flight phase via Status().Patch.
-func (r *TenantDataPlaneReconciler) markProvisioning(ctx context.Context, tdp *gibsonv1alpha1.TenantDataPlane) {
+// markProvisioning records the in-flight phase via Status().Patch. It returns
+// an error only when the patch itself fails — callers that guard on
+// alreadyReady propagate it so the reconcile retries rather than continuing
+// with stale in-cluster state.
+func (r *TenantDataPlaneReconciler) markProvisioning(ctx context.Context, tdp *gibsonv1alpha1.TenantDataPlane) error {
 	base := tdp.DeepCopy()
 	tdp.Status.Phase = gibsonv1alpha1.TenantDataPlanePhaseProvisioning
 	tdp.Status.LastError = ""
-	r.patchStatus(ctx, tdp, base)
+	return r.patchStatus(ctx, tdp, base)
 }
 
 // markReady records the ready state: aggregate Ready true, every requested
@@ -167,7 +180,7 @@ func (r *TenantDataPlaneReconciler) markReady(ctx context.Context, tdp *gibsonv1
 	tdp.Status.ObservedGeneration = tdp.Generation
 	tdp.Status.Stores = readyStores(tdp.Spec.Stores)
 	setReadyCondition(tdp, metav1.ConditionTrue, "Provisioned", "all requested data-plane stores are ready")
-	r.patchStatus(ctx, tdp, base)
+	_ = r.patchStatus(ctx, tdp, base)
 }
 
 // fail records a failed reconcile in status without mutating spec.
@@ -177,18 +190,22 @@ func (r *TenantDataPlaneReconciler) fail(ctx context.Context, tdp *gibsonv1alpha
 	tdp.Status.Ready = false
 	tdp.Status.LastError = msg
 	setReadyCondition(tdp, metav1.ConditionFalse, "ProvisionFailed", msg)
-	r.patchStatus(ctx, tdp, base)
+	_ = r.patchStatus(ctx, tdp, base)
 	return ctrl.Result{}, nil
 }
 
 // patchStatus persists status via a merge-patch off the captured base. Using
 // Patch (not Update) avoids resourceVersion conflicts with the dataplane
-// pipeline, which also patches Tenant status concurrently. Errors are logged,
-// not propagated — a lost status write must not strand the reconcile.
-func (r *TenantDataPlaneReconciler) patchStatus(ctx context.Context, tdp, base *gibsonv1alpha1.TenantDataPlane) {
+// pipeline, which also patches Tenant status concurrently. The error is
+// returned so that callers which guard on observed phase (e.g. markProvisioning
+// in the alreadyReady guard) can propagate it; callers that write terminal
+// state (markReady, fail) log and continue as before.
+func (r *TenantDataPlaneReconciler) patchStatus(ctx context.Context, tdp, base *gibsonv1alpha1.TenantDataPlane) error {
 	if err := r.Status().Patch(ctx, tdp, client.MergeFrom(base)); err != nil {
 		logf.FromContext(ctx).Error(err, "tenantdataplane status patch failed", "tenant", tdp.Spec.TenantID)
+		return err
 	}
+	return nil
 }
 
 // emit records a Kubernetes event on the TenantDataPlane. No-ops when the
@@ -250,12 +267,20 @@ func setReadyCondition(tdp *gibsonv1alpha1.TenantDataPlane, status metav1.Condit
 }
 
 // SetupWithManager registers the controller with the manager.
+//
+// GenerationChangedPredicate filters out status-only patch events: status
+// writes do not bump metadata.generation, so they no longer re-trigger a
+// reconcile. This stops the status-patch → re-trigger → markProvisioning
+// churn that prevented the phase from ever settling on Ready (gibson#1140).
+// Spec changes (generation bump), creates, and deletes still reconcile
+// immediately; the 10-minute RequeueAfter handles drift-correction resyncs.
 func (r *TenantDataPlaneReconciler) SetupWithManager(mgr ctrl.Manager) error {
 	if r.Recorder == nil {
 		r.Recorder = mgr.GetEventRecorder("tenantdataplane-controller")
 	}
 	return ctrl.NewControllerManagedBy(mgr).
-		For(&gibsonv1alpha1.TenantDataPlane{}).
+		For(&gibsonv1alpha1.TenantDataPlane{},
+			builder.WithPredicates(predicate.GenerationChangedPredicate{})).
 		Named("tenantdataplane").
 		Complete(r)
 }
