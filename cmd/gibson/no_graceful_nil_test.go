@@ -131,6 +131,7 @@ func TestNoGracefulNilInRequestPaths(t *testing.T) {
 		// (the brittleness that hit it in gibson#1025/#1043/#1044/#1041). Identical
 		// guards in one file share one key (acceptable coarsening for a tolerated
 		// list). Migrated from the prior 134 line-keyed entries; dedupes to 60.
+		"internal/engine/brain/engine.go :: if e.store == nil { ... }":                                                        astchecks.Entry{Category: astchecks.CategoryLegacyOptional, Reason: "TimelineStore is an intentionally optional dependency (ADR-0011); the store factory (daemon.go WithStoreFactory) falls back to nil (in-memory-only engine) on tenant-id/pool errors instead of crashing the tick loop -- documented backward-compatible fallback, not an unvalidated dependency"},
 		"internal/engine/finding/export/sarif_exporter.go :: if f.Metadata == nil { ... }":                                    astchecks.Entry{Category: astchecks.CategoryDefensiveGuard, Reason: "proto Metadata field on Finding, legitimately nil-able"},
 		"internal/engine/finding/types.go :: if f.Metadata == nil { ... }":                                                    astchecks.Entry{Category: astchecks.CategoryDefensiveGuard, Reason: "proto Metadata field on Finding, legitimately nil-able"},
 		"internal/engine/graphrag/graph/neo4j.go :: if c.driver == nil { ... }":                                               astchecks.Entry{Category: astchecks.CategoryLegacyOptional, Reason: "Neo4j driver optional in non-graphrag deployments (mirrors daemon/grpc.go:2504)"},
