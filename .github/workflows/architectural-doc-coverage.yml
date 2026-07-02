@@ -7,15 +7,27 @@
 # only fires when docs or architecture-relevant code actually changed (this gate
 # has nothing to say about a leaf-package bugfix). merge_group does not support
 # a declarative `paths` filter on the trigger itself (actionlint [events]), so
-# the filter is implemented as a `changes` job that diffs
-# `github.event.merge_group.base_sha`..`github.sha` and gates the reusable-call
-# job on the result.
+# the filter is implemented as a `changes` job that diffs the event's base..head
+# and gates the reusable-call job on the result.
+#
+# Queue-entry compat (epic cicd-efficiency, board #44, merge-queue-entry
+# follow-up): `merge_group` was the ONLY trigger, so this workflow produced no
+# check run at all on an ordinary pull_request -- GitHub blocks queue entry
+# until every required context has reported on the PR itself (`skipped`
+# satisfies that; an absent check does not). Added `pull_request`; the
+# `changes` job now runs unconditionally on both events and branches its diff
+# on `github.event_name` to pick the right base/head pair. The
+# `architectural-doc-coverage` job's existing `needs.changes.outputs.relevant`
+# gate is unchanged -- since `changes` itself is never skipped, no `always()`
+# override is needed (contrast gibson's codeql.yml, where the equivalent
+# `changes` job IS conditionally skipped and does need one).
 #
 # Required check name: architectural-doc-coverage
 
 name: architectural-doc-coverage
 
 on:
+  pull_request:
   merge_group:
 
 jobs:
@@ -29,12 +41,17 @@ jobs:
         with:
           fetch-depth: 0
 
-      - name: Diff against merge-group base
+      - name: Diff against base
         id: diff
         run: |
           set -e
-          BASE="${{ github.event.merge_group.base_sha }}"
-          HEAD="${{ github.sha }}"
+          if [ "${{ github.event_name }}" = "pull_request" ]; then
+            BASE="${{ github.event.pull_request.base.sha }}"
+            HEAD="${{ github.event.pull_request.head.sha }}"
+          else
+            BASE="${{ github.event.merge_group.base_sha }}"
+            HEAD="${{ github.sha }}"
+          fi
           CHANGED="$(git diff --name-only "$BASE" "$HEAD")"
           echo "$CHANGED"
           if echo "$CHANGED" | grep -E '^(docs/|CONTEXT\.md$|.*/CONTEXT\.md$|internal/engine/|internal/platform/|internal/infra/|\.github/workflows/architectural-doc-coverage\.yml$)' > /dev/null; then
