@@ -181,3 +181,128 @@ jobs:
       tag_pattern: gibson-belief-sidecar-(v.*)
     # No ghtoken secret: self-contained Python (pinned public deps in
     # requirements.txt), no private zeroroot-ai Go modules.
+
+  # ---- staging continuous-deploy: write the just-built sha into gitops ------
+  # Epic: cicd-efficiency (board #44), slice S8, gibson#1131. See
+  # docs/architecture/CICD-CONTEXT.md decision #6 (two-speed deploy, staging
+  # half): "Component CI writes sha-<commit> into envs/staging/values.yaml
+  # (NOT an overlay) on merge; ArgoCD auto-syncs staging."
+  #
+  # Gated on `needs: images` (the matrix job -- fail-fast:false still marks
+  # the job failed if ANY leg fails, so this only runs once every published
+  # image is actually green) AND on `github.event_name == 'push' &&
+  # github.ref == 'refs/heads/main'` -- explicitly NOT on the `v*.*.*` tag
+  # push this same workflow also builds on, and not on a workflow_dispatch
+  # backfill. A release tag is a versioned artifact; it does not itself mean
+  # "deploy this to staging" (that already happened when the commit landed
+  # on main).
+  #
+  # Writes the immutable `sha-<shortsha>` tag -- the exact tag docker/
+  # metadata-action's `type=sha,prefix=sha-` rule just published for this
+  # commit (zeroroot-ai/.github reusable-image-build.yml) -- into the FOUR
+  # gibson-workloads/gibson-operators image keys envs/staging/values.yaml
+  # actually overrides: gibson.image.tag, extAuthz.image.tag,
+  # tenantOperator.image.tag, platformOperator.image.tag. Deliberately
+  # surgical: dashboard.image.tag lives in the same file but is a DIFFERENT
+  # repo's build and must never be touched here. spiffe-jwks-exporter /
+  # gibson-bootstrap(-runner) / gibson-belief-sidecar are also built by this
+  # workflow, but staging does not override their tags (chart-default `main`
+  # still applies there), so there is nothing to bump for them -- adding
+  # unused overrides would defeat "keep it surgical."
+  #
+  # Auth: the default GITHUB_TOKEN cannot push to a different repo. Uses
+  # secrets.GITOPS_TOKEN (see the PR body for the current status of that
+  # secret on this repo).
+  #
+  # Flow: bump on a branch -> open a PR -> merge it immediately (gitops has
+  # no required review; org policy is "PR always, never a bare push to
+  # main" -- see zeroroot-ai/.github AGENTS.md -- so this still goes through
+  # a PR, just without a human/agent pause in between) -> fire a
+  # repository_dispatch so gitops's staging-smoke workflow runs against the
+  # freshly-synced env within minutes, not just on its 6h schedule.
+  #
+  # Rollback: revert the one-line values.yaml bump (the squashed gitops
+  # commit this job produces) -- ArgoCD self-heals staging back to the prior
+  # sha on the next reconcile.
+  bump-staging:
+    name: bump staging sha (gitops)
+    needs: images
+    if: github.event_name == 'push' && github.ref == 'refs/heads/main'
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+    steps:
+      - name: Verify GITOPS_TOKEN is configured
+        env:
+          TOKEN: ${{ secrets.GITOPS_TOKEN }}
+        run: |
+          set -euo pipefail
+          if [ -z "$TOKEN" ]; then
+            echo "::error::GITOPS_TOKEN secret is not set on zeroroot-ai/gibson. A secret of this exact name already exists on zeroroot-ai/deploy (used by cross-chart-check.yml) -- either add the SAME token value as a repo secret here, or promote it to an org-level secret shared by both repos. It needs contents:write + pull-requests:write on zeroroot-ai/gitops (fine-grained PAT or a GitHub App installation token). This job cannot write the staging sha bump until that secret exists -- see the PR body."
+            exit 1
+          fi
+          echo "GITOPS_TOKEN is configured."
+
+      - name: Checkout gitops
+        uses: actions/checkout@v5
+        with:
+          repository: zeroroot-ai/gitops
+          token: ${{ secrets.GITOPS_TOKEN }}
+          path: gitops
+
+      - name: Compute immutable sha tag
+        id: sha
+        run: |
+          set -euo pipefail
+          short="$(echo "${GITHUB_SHA}" | cut -c1-7)"
+          echo "tag=sha-${short}" >> "$GITHUB_OUTPUT"
+          echo "short=${short}" >> "$GITHUB_OUTPUT"
+
+      # Surgical, single-line-per-component bump -- NOT `yq -i` (yq's writer
+      # re-serializes the whole document: reflows inline-comment alignment,
+      # drops blank lines -- verified against this exact file while building
+      # this job). scripts/bump-staging-images.sh in the gitops repo does the
+      # narrow sed/awk-style edit instead, mirroring its existing
+      # scripts/bump-chart-version.sh pattern, and is itself re-runnable by a
+      # human operator, not just this job.
+      - name: Bump the four gibson-built image tags (surgical)
+        working-directory: gitops
+        run: |
+          set -euo pipefail
+          bash scripts/bump-staging-images.sh "${{ steps.sha.outputs.tag }}"
+          echo "--- diff ---"
+          git --no-pager diff -- envs/staging/values.yaml
+
+      - name: Open + merge the staging bump PR
+        working-directory: gitops
+        env:
+          GH_TOKEN: ${{ secrets.GITOPS_TOKEN }}
+          NEWTAG: ${{ steps.sha.outputs.tag }}
+        run: |
+          set -euo pipefail
+          if git diff --quiet -- envs/staging/values.yaml; then
+            echo "staging is already on ${NEWTAG} -- nothing to bump"
+            exit 0
+          fi
+          branch="ci/staging-${NEWTAG}"
+          git config user.name "github-actions[bot]"
+          git config user.email "github-actions[bot]@users.noreply.github.com"
+          git checkout -b "$branch"
+          git add envs/staging/values.yaml
+          git commit -m "chore(staging): gibson images -> ${NEWTAG}"
+          git push -u origin "$branch"
+          gh pr create --repo zeroroot-ai/gitops \
+            --base main --head "$branch" \
+            --title "chore(staging): gibson images -> ${NEWTAG}" \
+            --body "Post-merge staging continuous-deploy (Epic: cicd-efficiency, board #44, slice S8, gibson#1131). Source commit zeroroot-ai/gibson@${GITHUB_SHA}. Bumps ONLY the four gibson-built image tags in \`envs/staging/values.yaml\` (gibson-workloads.gibson, gibson-workloads.extAuthz, gibson-operators.tenantOperator, gibson-operators.platformOperator) to \`${NEWTAG}\` -- dashboard's tag is a different repo's build and is untouched. ArgoCD auto-syncs staging (envs/staging/gibson.yaml syncPolicy.automated.selfHeal=true). Rollback = revert this commit; ArgoCD self-heals staging back to the prior sha on the next reconcile."
+          gh pr merge --repo zeroroot-ai/gitops "$branch" --squash --delete-branch
+
+      - name: Notify staging-smoke (repository_dispatch)
+        env:
+          GH_TOKEN: ${{ secrets.GITOPS_TOKEN }}
+          NEWTAG: ${{ steps.sha.outputs.tag }}
+        run: |
+          set -euo pipefail
+          gh api repos/zeroroot-ai/gitops/dispatches --input - <<JSON
+          {"event_type":"staging-updated","client_payload":{"tag":"${NEWTAG}","sha":"${GITHUB_SHA}"}}
+          JSON
