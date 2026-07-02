@@ -25,6 +25,7 @@ package reembed
 
 import (
 	"context"
+	"errors"
 
 	"github.com/zeroroot-ai/gibson/internal/engine/state"
 )
@@ -59,7 +60,7 @@ type IndexMarker struct {
 func readMarker(ctx context.Context, sc *state.StateClient) (*IndexMarker, error) {
 	var m IndexMarker
 	if err := sc.JSONGet(ctx, markerKey, "$", &m); err != nil {
-		if state.IsNotFound(err) {
+		if errors.Is(err, state.ErrNotFound) {
 			return nil, nil
 		}
 		return nil, err
