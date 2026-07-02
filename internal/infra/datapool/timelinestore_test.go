@@ -537,13 +537,13 @@ func TestAcquirePerOp_EvictionRobustness(t *testing.T) {
 	require.NoError(t, err)
 	defer mrA.Close()
 	rdbA := goredis.NewClient(&goredis.Options{Addr: mrA.Addr()})
-	defer rdbA.Close()
+	defer func() { _ = rdbA.Close() }()
 
 	mrB, err := miniredis.Run()
 	require.NoError(t, err)
 	defer mrB.Close()
 	rdbB := goredis.NewClient(&goredis.Options{Addr: mrB.Addr()})
-	defer rdbB.Close()
+	defer func() { _ = rdbB.Close() }()
 
 	// callCount tracks how many times acquire has been called so we can switch
 	// clients between operations.
@@ -568,7 +568,7 @@ func TestAcquirePerOp_EvictionRobustness(t *testing.T) {
 
 	// Simulate idle eviction: close rdbA and stop mrA.
 	// Any future use of rdbA would produce "redis: client is closed".
-	rdbA.Close()
+	_ = rdbA.Close()
 	mrA.Close()
 
 	// Operation 2: Append via rdbB (fresh acquire after eviction).
