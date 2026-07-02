@@ -4,6 +4,7 @@ package datapool
 
 import (
 	"context"
+	"fmt"
 	"testing"
 	"time"
 
@@ -515,6 +516,58 @@ func TestLiveCadenceSnapshot_HydrateEquivalence(t *testing.T) {
 	assert.Equal(t, live.Hosts(), fresh.Hosts(), "hosts must match after live-cadence snapshot + hydrate")
 	assert.Equal(t, live.Work(), fresh.Work(), "work must match after live-cadence snapshot + hydrate")
 	assert.Equal(t, live.Missions(), fresh.Missions(), "missions must match after live-cadence snapshot + hydrate")
+}
+
+// errAcquire returns an acquire closure that always returns the given error.
+// Used by TestTimelineStore_AcquireError to cover the error branches in each
+// RedisTimelineStore method (lines 54-55, 82-83, 132-133, 151-152, 176-177).
+func errAcquire(err error) func(ctx context.Context) (*goredis.Client, func(), error) {
+	return func(_ context.Context) (*goredis.Client, func(), error) {
+		return nil, nil, err
+	}
+}
+
+// TestTimelineStore_AcquireError covers the acquire-error early-return branches
+// in all five RedisTimelineStore methods (Append, LoadForReplay, WriteSnapshot,
+// LoadSnapshot, TrimTo). Each method must propagate the acquire error wrapped
+// in a descriptive message — none should panic or return a nil error.
+func TestTimelineStore_AcquireError(t *testing.T) {
+	t.Parallel()
+	sentinel := fmt.Errorf("pool evicted")
+	store := NewRedisTimelineStore(errAcquire(sentinel))
+	ctx := context.Background()
+	tenant := "tenant-err"
+
+	t.Run("Append", func(t *testing.T) {
+		_, err := store.Append(ctx, tenant, brain.HostObserved{ScopeID: "s", Address: "10.0.0.1"})
+		require.Error(t, err, "Append must return an error when acquire fails")
+		require.ErrorIs(t, err, sentinel, "Append must wrap the acquire error")
+	})
+
+	t.Run("LoadForReplay", func(t *testing.T) {
+		_, err := store.LoadForReplay(ctx, tenant, "")
+		require.Error(t, err, "LoadForReplay must return an error when acquire fails")
+		require.ErrorIs(t, err, sentinel, "LoadForReplay must wrap the acquire error")
+	})
+
+	t.Run("WriteSnapshot", func(t *testing.T) {
+		snap := brain.WorldSnapshot{AtSeq: "0-1", Data: []byte(`{}`)}
+		_, err := store.WriteSnapshot(ctx, tenant, snap)
+		require.Error(t, err, "WriteSnapshot must return an error when acquire fails")
+		require.ErrorIs(t, err, sentinel, "WriteSnapshot must wrap the acquire error")
+	})
+
+	t.Run("LoadSnapshot", func(t *testing.T) {
+		_, err := store.LoadSnapshot(ctx, tenant)
+		require.Error(t, err, "LoadSnapshot must return an error when acquire fails")
+		require.ErrorIs(t, err, sentinel, "LoadSnapshot must wrap the acquire error")
+	})
+
+	t.Run("TrimTo", func(t *testing.T) {
+		err := store.TrimTo(ctx, tenant, "0-1")
+		require.Error(t, err, "TrimTo must return an error when acquire fails")
+		require.ErrorIs(t, err, sentinel, "TrimTo must wrap the acquire error")
+	})
 }
 
 // TestAcquirePerOp_EvictionRobustness is the regression test for gibson#1114
