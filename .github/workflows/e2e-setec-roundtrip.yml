@@ -64,7 +64,7 @@ jobs:
       SETEC_NAMESPACE: setec-system
       SETEC_FRONTEND_CERT_SECRET: setec-frontend-client-tls
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v7
 
       - name: Configure git for private modules
         run: |

@@ -84,7 +84,7 @@ jobs:
     outputs:
       go: ${{ steps.filter.outputs.go }}
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v7
         with:
           fetch-depth: 0
 
@@ -151,7 +151,7 @@ jobs:
       GOPRIVATE: github.com/zeroroot-ai/*
       GONOSUMDB: github.com/zeroroot-ai/*
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v7
       - name: Configure git for private modules
         run: |
           git config --global \
@@ -174,7 +174,7 @@ jobs:
       GOPRIVATE: github.com/zeroroot-ai/*
       GONOSUMDB: github.com/zeroroot-ai/*
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v7
         with:
           fetch-depth: 0 # merge-base needs full history
 
@@ -220,7 +220,7 @@ jobs:
       GOPRIVATE: github.com/zeroroot-ai/*
       GONOSUMDB: github.com/zeroroot-ai/*
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v7
         with:
           fetch-depth: 0
 
@@ -265,7 +265,7 @@ jobs:
       GOPRIVATE: github.com/zeroroot-ai/*
       GONOSUMDB: github.com/zeroroot-ai/*
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v7
       - name: Configure git for private modules
         if: github.event.pull_request.head.repo.fork != true
         run: |
@@ -287,7 +287,7 @@ jobs:
       GOPRIVATE: github.com/zeroroot-ai/*
       GONOSUMDB: github.com/zeroroot-ai/*
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v7
 
       - name: Configure git for private modules
         run: |

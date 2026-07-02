@@ -53,7 +53,7 @@ jobs:
     outputs:
       relevant: ${{ steps.filter.outputs.relevant }}
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v7
         with:
           fetch-depth: 0
 
@@ -83,7 +83,7 @@ jobs:
       # go mod download).
       GOPRIVATE: github.com/zeroroot-ai
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v7
 
       # Configure git credentials BEFORE setup-go so module download works.
       # GH_PAT_GIBSON_RO is the same PAT the gibson-daemon Docker build
@@ -138,7 +138,7 @@ jobs:
     runs-on: ubuntu-latest
     name: Migration build guards
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v7
 
       - name: Check no tenant_id in migrations
         run: |
@@ -165,7 +165,7 @@ jobs:
     env:
       GOPRIVATE: github.com/zeroroot-ai
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v7
 
       - name: Configure git for private modules
         if: github.event.pull_request.head.repo.fork != true
@@ -200,7 +200,7 @@ jobs:
       # as the `analyze` job above.
       GOPRIVATE: github.com/zeroroot-ai
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v7
 
       - name: Configure git for private modules
         if: github.event.pull_request.head.repo.fork != true

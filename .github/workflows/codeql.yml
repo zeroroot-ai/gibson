@@ -47,7 +47,7 @@ jobs:
     outputs:
       security_paths: ${{ steps.diff.outputs.security_paths }}
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v7
         with:
           fetch-depth: 0
 
@@ -90,7 +90,7 @@ jobs:
       # gibsoncheck.yml `analyze` + tenant-operator codeql.yml.
       GOPRIVATE: github.com/zeroroot-ai
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v7
 
       # Configure git credentials BEFORE setup-go so module download works
       # against private platform-clients / platform-sdk repos. Uses
