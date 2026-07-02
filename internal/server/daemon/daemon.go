@@ -1138,24 +1138,35 @@ func (d *daemonImpl) Start(ctx context.Context) error {
 							)
 							return nil
 						}
-						conn, err := d.pool.For(storeCtx, tenantID)
-						if err != nil {
-							slog.WarnContext(storeCtx, "brain/registry: store factory: pool.For failed; engine will run in-memory only",
+						// Validate that the tenant's data-plane is provisioned by
+						// doing a probe acquire now; if pool.For fails we surface the
+						// error immediately and fall back to in-memory mode for this
+						// tenant (matching the pre-#1113 behavior).
+						probeConn, probeErr := d.pool.For(storeCtx, tenantID)
+						if probeErr != nil {
+							slog.WarnContext(storeCtx, "brain/registry: store factory: pool.For probe failed; engine will run in-memory only",
 								"tenant", tenant,
-								"err", err,
+								"err", probeErr,
 							)
 							return nil
 						}
-						// Extract the per-tenant *redis.Client before releasing the Conn
-						// so that the eviction tracker (activeConns) is decremented
-						// correctly. The *redis.Client itself is long-lived — it is
-						// managed by the pool's redisPerTenant cache and remains valid
-						// for the life of the pool (closed on Pool.Close / EvictTenant).
-						// Holding the client pointer after Release() is safe; it does not
-						// close or invalidate the underlying connection.
-						redisClient := conn.Redis
-						conn.Release()
-						return datapool.NewRedisTimelineStore(redisClient)
+						probeConn.Release()
+
+						// Build a per-op acquire closure. Each Timeline operation
+						// (Append, LoadForReplay, WriteSnapshot, LoadSnapshot, TrimTo)
+						// calls this closure to obtain a fresh Conn and releases it
+						// when the operation completes. This ensures the idle evictor
+						// can never close the client underneath a long-lived reference
+						// (gibson#1114, ADR-0011).
+						pool := d.pool // capture pool; tenantID already captured above
+						acquire := func(opCtx context.Context) (*goredis.Client, func(), error) {
+							conn, err := pool.For(opCtx, tenantID)
+							if err != nil {
+								return nil, nil, fmt.Errorf("brain/timeline: pool.For tenant %q: %w", tenant, err)
+							}
+							return conn.Redis, conn.Release, nil
+						}
+						return datapool.NewRedisTimelineStore(acquire)
 					})
 					d.logger.Info(ctx, "brain registry: durable Timeline store factory wired (ADR-0011, #1114)")
 				}
