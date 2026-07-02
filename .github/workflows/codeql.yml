@@ -11,14 +11,21 @@ name: CodeQL
 # ext-authz, secrets handling) via a path-filtered pull_request trigger, since a
 # week-long lag on those specific diffs is undesirable even though the
 # authoritative gate is merge_group.
+#
+# Queue-entry compat (epic cicd-efficiency, board #44, merge-queue-entry
+# follow-up): the old `pull_request.paths` filter on the *trigger* meant this
+# workflow produced NO check run at all on a PR that didn't touch those
+# paths -- GitHub blocks queue entry until every required context has
+# reported on the PR (a `skipped` conclusion satisfies that; an absent
+# check does not). Trigger on every pull_request now; a cheap `changes` job
+# does the same path detection natively (git diff, no third-party action)
+# and the `analyze` job's job-level `if:` decides real-scan-vs-skip. Typical
+# PRs get a fast `skipped` conclusion; authz/ext-authz/secrets-touching PRs
+# still get the real scan; merge_group and the weekly schedule always get
+# the real scan regardless of paths.
 on:
-  merge_group:
   pull_request:
-    branches: [main]
-    paths:
-      - 'internal/platform/authz/**'
-      - 'cmd/ext-authz/**'
-      - '**/secrets/**'
+  merge_group:
   schedule:
     - cron: "0 8 * * 2"
 
@@ -30,8 +37,43 @@ concurrency:
   cancel-in-progress: true
 
 jobs:
+  # ---- cheap path-detection (pull_request only) ----
+  # merge_group and schedule always get the real scan, so this only needs to
+  # run -- and only needs to gate anything -- on pull_request.
+  changes:
+    name: detect security-critical path changes
+    if: github.event_name == 'pull_request'
+    runs-on: ubuntu-latest
+    outputs:
+      security_paths: ${{ steps.diff.outputs.security_paths }}
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Diff against PR base
+        id: diff
+        run: |
+          set -e
+          BASE="${{ github.event.pull_request.base.sha }}"
+          HEAD="${{ github.event.pull_request.head.sha }}"
+          CHANGED="$(git diff --name-only "$BASE" "$HEAD")"
+          echo "$CHANGED"
+          if echo "$CHANGED" | grep -E '^internal/platform/authz/|^cmd/ext-authz/|(^|/)secrets/' > /dev/null; then
+            echo "security_paths=true" >> "$GITHUB_OUTPUT"
+          else
+            echo "security_paths=false" >> "$GITHUB_OUTPUT"
+          fi
+
   analyze:
     name: Analyze Go
+    needs: changes
+    # always() overrides the implicit success()-on-needs gate: `changes` is
+    # itself skipped on merge_group/schedule, and a skipped dependency would
+    # otherwise force this job to skip too. Real scan on merge_group/schedule
+    # unconditionally; on pull_request, real scan only if the path filter
+    # matched, else `skipped` (cheap, no runner spin-up).
+    if: always() && (github.event_name != 'pull_request' || needs.changes.outputs.security_paths == 'true')
     runs-on: ubuntu-latest
     timeout-minutes: 30
     permissions:
