@@ -1,6 +1,6 @@
 //go:build !embedder_tests
 
-package brain_test
+package datapool
 
 import (
 	"context"
@@ -97,7 +97,7 @@ func TestCodecRoundTrip(t *testing.T) {
 // by LoadForReplay in the correct order.
 func TestRedisTimelineStore_AppendLoad(t *testing.T) {
 	_, rdb := newTestRedis(t)
-	store := brain.NewRedisTimelineStore(rdb)
+	store := NewRedisTimelineStore(rdb)
 	ctx := context.Background()
 	tenant := "tenant-a"
 
@@ -128,8 +128,8 @@ func TestRedisTimelineStore_PerTenantIsolation(t *testing.T) {
 	_, rdbA := newTestRedis(t)
 	_, rdbB := newTestRedis(t)
 
-	storeA := brain.NewRedisTimelineStore(rdbA)
-	storeB := brain.NewRedisTimelineStore(rdbB)
+	storeA := NewRedisTimelineStore(rdbA)
+	storeB := NewRedisTimelineStore(rdbB)
 	ctx := context.Background()
 	tenant := "shared-tenant-name"
 
@@ -156,7 +156,7 @@ func TestRedisTimelineStore_PerTenantIsolation(t *testing.T) {
 // Engine are written to the store and can be replayed.
 func TestEngine_WithStore_PersistsEvents(t *testing.T) {
 	_, rdb := newTestRedis(t)
-	store := brain.NewRedisTimelineStore(rdb)
+	store := NewRedisTimelineStore(rdb)
 
 	eng := brain.NewEngine("t1")
 	eng.WithStore(store)
@@ -208,7 +208,7 @@ func TestHydrate_EquivalenceAfterRestart(t *testing.T) {
 	defer cancel()
 
 	_, rdb := newTestRedis(t)
-	store := brain.NewRedisTimelineStore(rdb)
+	store := NewRedisTimelineStore(rdb)
 
 	// --- Phase 1: persist a deterministic event sequence ---
 	// We persist events directly to the store (rather than through an Engine)
@@ -294,7 +294,7 @@ func TestHydrate_InFlightWorkFailedOnRestart(t *testing.T) {
 	defer cancel()
 
 	_, rdb := newTestRedis(t)
-	store := brain.NewRedisTimelineStore(rdb)
+	store := NewRedisTimelineStore(rdb)
 
 	// Append raw events so we can craft an exact "running but never completed"
 	// scenario without running systems.
@@ -357,7 +357,7 @@ func TestRegistry_WithStoreFactory_NoopWhenFactoryNil(t *testing.T) {
 // the loaded snapshot has the same AtSeq and Data as the written one.
 func TestSnapshot_RoundTrip(t *testing.T) {
 	_, rdb := newTestRedis(t)
-	store := brain.NewRedisTimelineStore(rdb)
+	store := NewRedisTimelineStore(rdb)
 	ctx := context.Background()
 	tenant := "tenant-snap-rt"
 
@@ -382,7 +382,7 @@ func TestSnapshot_RoundTrip(t *testing.T) {
 func TestTrimTo_BoundsStream(t *testing.T) {
 	mr, rdb := newTestRedis(t)
 	_ = mr
-	store := brain.NewRedisTimelineStore(rdb)
+	store := NewRedisTimelineStore(rdb)
 	ctx := context.Background()
 	tenant := "tenant-trim"
 
@@ -409,7 +409,7 @@ func TestTrimTo_BoundsStream(t *testing.T) {
 // tail events must equal a World folded from the complete event sequence.
 func TestSnapshotPlusTailEqualsFullReplay(t *testing.T) {
 	_, rdb := newTestRedis(t)
-	store := brain.NewRedisTimelineStore(rdb)
+	store := NewRedisTimelineStore(rdb)
 	ctx := context.Background()
 	const tenant = "tenant-snap-equiv"
 
@@ -475,7 +475,7 @@ func TestSnapshotPlusTailEqualsFullReplay(t *testing.T) {
 // the snapshot nor skipped by the exclusive-after-AtSeq tail replay.
 func TestLiveCadenceSnapshot_HydrateEquivalence(t *testing.T) {
 	_, rdb := newTestRedis(t)
-	store := brain.NewRedisTimelineStore(rdb)
+	store := NewRedisTimelineStore(rdb)
 	const tenant = "tenant-live-cadence"
 
 	// Cadence of 2 means a snapshot fires after every 2 persisted events, so with

@@ -1,6 +1,6 @@
 //go:build !embedder_tests
 
-package brain
+package datapool
 
 import (
 	"context"
@@ -10,11 +10,19 @@ import (
 	"strings"
 
 	redis "github.com/redis/go-redis/v9"
+
+	"github.com/zeroroot-ai/gibson/internal/engine/brain"
 )
 
-// RedisTimelineStore implements TimelineStore using Redis Streams (XADD/XRANGE).
+// RedisTimelineStore implements brain.TimelineStore using Redis Streams
+// (XADD/XRANGE).
 // Per-tenant stream key: "gibson:timeline:<tenantID>"
 // No blind MAXLEN trim is applied on XADD (ADR-0011 decision 3b).
+//
+// This type lives in internal/infra/datapool (not internal/engine/brain) so
+// that raw store client imports stay confined to the data-plane allowlist
+// (docs/data-plane.md, gibson#1145) — the brain package depends only on the
+// brain.TimelineStore interface, no Redis types leak into internal/engine/brain.
 type RedisTimelineStore struct {
 	// client is the per-tenant Redis client. The caller (typically via
 	// redisPerTenant.ForTenant) must hand a client already bound to the
@@ -34,10 +42,10 @@ func (s *RedisTimelineStore) streamKey(tenant string) string {
 
 // Append durably persists ev to the tenant's Redis Stream. MaxLen 0 means no
 // cap — the stream grows unbounded until TrimTo prunes it (ADR-0011).
-func (s *RedisTimelineStore) Append(ctx context.Context, tenant string, ev Event) (string, error) {
-	encoded, err := EncodeEvent(ev)
+func (s *RedisTimelineStore) Append(ctx context.Context, tenant string, ev brain.Event) (string, error) {
+	encoded, err := brain.EncodeEvent(ev)
 	if err != nil {
-		return "", fmt.Errorf("brain/redis-timeline: encode event kind %q: %w", ev.Kind(), err)
+		return "", fmt.Errorf("datapool/redis-timeline: encode event kind %q: %w", ev.Kind(), err)
 	}
 	seq, err := s.client.XAdd(ctx, &redis.XAddArgs{
 		Stream: s.streamKey(tenant),
@@ -46,7 +54,7 @@ func (s *RedisTimelineStore) Append(ctx context.Context, tenant string, ev Event
 		Values: map[string]any{"ev": string(encoded)},
 	}).Result()
 	if err != nil {
-		return "", fmt.Errorf("brain/redis-timeline: XADD for tenant %q kind %q: %w", tenant, ev.Kind(), err)
+		return "", fmt.Errorf("datapool/redis-timeline: XADD for tenant %q kind %q: %w", tenant, ev.Kind(), err)
 	}
 	return seq, nil
 }
@@ -56,7 +64,7 @@ const replayBatchSize = 1000
 
 // LoadForReplay returns all events after afterSeq (exclusive). Pass "" to
 // load from the beginning. Events are returned in Timeline order.
-func (s *RedisTimelineStore) LoadForReplay(ctx context.Context, tenant string, afterSeq string) ([]Event, error) {
+func (s *RedisTimelineStore) LoadForReplay(ctx context.Context, tenant string, afterSeq string) ([]brain.Event, error) {
 	key := s.streamKey(tenant)
 	start := "-"
 	if afterSeq != "" {
@@ -66,25 +74,25 @@ func (s *RedisTimelineStore) LoadForReplay(ctx context.Context, tenant string, a
 		start = "(" + afterSeq
 	}
 
-	var out []Event
+	var out []brain.Event
 	cursor := start
 	for {
 		msgs, err := s.client.XRangeN(ctx, key, cursor, "+", replayBatchSize).Result()
 		if err != nil {
-			return nil, fmt.Errorf("brain/redis-timeline: XRANGE for tenant %q: %w", tenant, err)
+			return nil, fmt.Errorf("datapool/redis-timeline: XRANGE for tenant %q: %w", tenant, err)
 		}
 		for _, msg := range msgs {
 			raw, ok := msg.Values["ev"]
 			if !ok {
-				return nil, fmt.Errorf("brain/redis-timeline: stream entry %q missing 'ev' field", msg.ID)
+				return nil, fmt.Errorf("datapool/redis-timeline: stream entry %q missing 'ev' field", msg.ID)
 			}
 			rawStr, ok := raw.(string)
 			if !ok {
-				return nil, fmt.Errorf("brain/redis-timeline: stream entry %q 'ev' is not a string", msg.ID)
+				return nil, fmt.Errorf("datapool/redis-timeline: stream entry %q 'ev' is not a string", msg.ID)
 			}
-			ev, err := DecodeEvent([]byte(rawStr))
+			ev, err := brain.DecodeEvent([]byte(rawStr))
 			if err != nil {
-				return nil, fmt.Errorf("brain/redis-timeline: decode entry %q: %w", msg.ID, err)
+				return nil, fmt.Errorf("datapool/redis-timeline: decode entry %q: %w", msg.ID, err)
 			}
 			out = append(out, ev)
 		}
@@ -97,34 +105,34 @@ func (s *RedisTimelineStore) LoadForReplay(ctx context.Context, tenant string, a
 	return out, nil
 }
 
-// WriteSnapshot persists a JSON-serialized WorldSnapshot to Redis.
+// WriteSnapshot persists a JSON-serialized brain.WorldSnapshot to Redis.
 // Key: "gibson:snapshot:<tenant>"
 // Returns snap.AtSeq as the handle.
-func (s *RedisTimelineStore) WriteSnapshot(ctx context.Context, tenant string, snap WorldSnapshot) (string, error) {
+func (s *RedisTimelineStore) WriteSnapshot(ctx context.Context, tenant string, snap brain.WorldSnapshot) (string, error) {
 	key := "gibson:snapshot:" + tenant
 	data, err := json.Marshal(snap)
 	if err != nil {
-		return "", fmt.Errorf("brain/redis-timeline: marshal snapshot for tenant %q: %w", tenant, err)
+		return "", fmt.Errorf("datapool/redis-timeline: marshal snapshot for tenant %q: %w", tenant, err)
 	}
 	if err := s.client.Set(ctx, key, data, 0).Err(); err != nil {
-		return "", fmt.Errorf("brain/redis-timeline: SET snapshot for tenant %q: %w", tenant, err)
+		return "", fmt.Errorf("datapool/redis-timeline: SET snapshot for tenant %q: %w", tenant, err)
 	}
 	return snap.AtSeq, nil
 }
 
 // LoadSnapshot loads the snapshot for tenant. Returns (nil, nil) if none exists.
-func (s *RedisTimelineStore) LoadSnapshot(ctx context.Context, tenant string) (*WorldSnapshot, error) {
+func (s *RedisTimelineStore) LoadSnapshot(ctx context.Context, tenant string) (*brain.WorldSnapshot, error) {
 	key := "gibson:snapshot:" + tenant
 	data, err := s.client.Get(ctx, key).Bytes()
 	if err != nil {
 		if err == redis.Nil {
 			return nil, nil
 		}
-		return nil, fmt.Errorf("brain/redis-timeline: GET snapshot for tenant %q: %w", tenant, err)
+		return nil, fmt.Errorf("datapool/redis-timeline: GET snapshot for tenant %q: %w", tenant, err)
 	}
-	var snap WorldSnapshot
+	var snap brain.WorldSnapshot
 	if err := json.Unmarshal(data, &snap); err != nil {
-		return nil, fmt.Errorf("brain/redis-timeline: unmarshal snapshot for tenant %q: %w", tenant, err)
+		return nil, fmt.Errorf("datapool/redis-timeline: unmarshal snapshot for tenant %q: %w", tenant, err)
 	}
 	return &snap, nil
 }
@@ -136,7 +144,7 @@ func (s *RedisTimelineStore) TrimTo(ctx context.Context, tenant, handle string) 
 	key := s.streamKey(tenant)
 	minid := streamIDNext(handle)
 	if err := s.client.XTrimMinID(ctx, key, minid).Err(); err != nil {
-		return fmt.Errorf("brain/redis-timeline: XTRIM MINID tenant %q handle %q: %w", tenant, handle, err)
+		return fmt.Errorf("datapool/redis-timeline: XTRIM MINID tenant %q handle %q: %w", tenant, handle, err)
 	}
 	return nil
 }
