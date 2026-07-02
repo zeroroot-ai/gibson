@@ -38,7 +38,7 @@ jobs:
     outputs:
       changed: ${{ steps.update.outputs.changed }}
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v7
 
       - name: Fetch and apply OpenAI models
         id: update
@@ -129,7 +129,7 @@ jobs:
     outputs:
       changed: ${{ steps.update.outputs.changed }}
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v7
 
       - name: Fetch and apply Google models
         id: update
@@ -212,7 +212,7 @@ jobs:
     outputs:
       changed: ${{ steps.update.outputs.changed }}
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v7
 
       - name: Fetch and apply Mistral models
         id: update
@@ -298,7 +298,7 @@ jobs:
     outputs:
       changed: ${{ steps.update.outputs.changed }}
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v7
 
       - name: Fetch and apply Cohere models
         id: update
@@ -385,7 +385,7 @@ jobs:
     outputs:
       changed: ${{ steps.update.outputs.changed }}
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v7
 
       - name: Fetch and apply Cloudflare models
         id: update
@@ -462,7 +462,7 @@ jobs:
     outputs:
       changed: ${{ steps.update.outputs.changed }}
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v7
 
       - name: Fetch and apply HuggingFace models
         id: update
@@ -543,7 +543,7 @@ jobs:
       id-token: write
       contents: read
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v7
 
       - name: Configure AWS credentials
         id: aws-creds
@@ -674,7 +674,7 @@ jobs:
       contents: write
       pull-requests: write
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v7
 
       # Download every catalogue artifact that was uploaded (only present when
       # a provider job detected changes). Each job ran against the same base

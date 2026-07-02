@@ -52,7 +52,7 @@ jobs:
       # security.yaml.
       GOPRIVATE: github.com/zeroroot-ai
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v7
 
       - name: Configure git for private modules
         if: github.event.pull_request.head.repo.fork != true

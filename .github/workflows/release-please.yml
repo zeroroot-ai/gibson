@@ -33,7 +33,7 @@ jobs:
       daemon_release_created: ${{ steps.daemon-tag.outputs.daemon_released }}
       daemon_tag_name: ${{ steps.daemon-tag.outputs.tag }}
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v7
 
       - uses: googleapis/release-please-action@v5
         id: release
