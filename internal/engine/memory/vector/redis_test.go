@@ -300,6 +300,7 @@ func TestRedisVectorStore_Search_KNN(t *testing.T) {
 
 	// Ensure indexes are created
 	require.NoError(t, client.EnsureIndexes(ctx), "Failed to create indexes")
+	ensureVectorIndex(t, ctx, client, 384)
 
 	store := NewRedisVectorStore(client, 384)
 	defer store.Close()
@@ -368,6 +369,7 @@ func TestRedisVectorStore_Search_WithFilters(t *testing.T) {
 	defer client.Close()
 
 	require.NoError(t, client.EnsureIndexes(ctx))
+	ensureVectorIndex(t, ctx, client, 384)
 
 	store := NewRedisVectorStore(client, 384)
 	defer store.Close()
@@ -425,6 +427,7 @@ func TestRedisVectorStore_Search_HybridSearch(t *testing.T) {
 	defer client.Close()
 
 	require.NoError(t, client.EnsureIndexes(ctx))
+	ensureVectorIndex(t, ctx, client, 384)
 
 	store := NewRedisVectorStore(client, 384)
 	defer store.Close()
@@ -482,6 +485,7 @@ func TestRedisVectorStore_Search_MinScore(t *testing.T) {
 	defer client.Close()
 
 	require.NoError(t, client.EnsureIndexes(ctx))
+	ensureVectorIndex(t, ctx, client, 384)
 
 	store := NewRedisVectorStore(client, 384)
 	defer store.Close()
@@ -700,6 +704,22 @@ func setupRedisTestClient(t testing.TB) *state.StateClient {
 	}
 
 	return client
+}
+
+// ensureVectorIndex creates the gibson:idx:vectors RediSearch index at the given
+// embedding dimension. This is deliberately separate from client.EnsureIndexes:
+// since ADR-0059 (BYO-embedder, gibson#1011) VectorIndex is excluded from
+// AllIndexDefinitions() -- its dimension is resolved per tenant from the
+// configured embedding model at runtime rather than being a fixed,
+// eagerly-creatable index (see indexes_definitions.go). Production creates it
+// lazily via the re-embed job (internal/engine/memory/reembed.RunForTenant)
+// once a tenant's embedder is known; these tests have no reembed job, so they
+// must create it explicitly at the fixed test dimension (384) used throughout
+// this file.
+func ensureVectorIndex(t testing.TB, ctx context.Context, client *state.StateClient, dim int) {
+	t.Helper()
+	manager := state.NewIndexManager(client.Client())
+	require.NoError(t, manager.EnsureIndex(ctx, state.VectorIndex(dim)), "Failed to create vector index")
 }
 
 // isRedisUnavailableErr returns true when the error indicates Redis is not reachable.
