@@ -50,6 +50,14 @@ env:
 
 jobs:
   roundtrip:
+    # ARC readiness gate (Epic: cicd-efficiency, board #44). The
+    # staging-ephemeral runner scale-set cannot start pods until an operator
+    # seeds the ARC GitHub App secret (gibson/staging/arc-github-app) and
+    # runners come up. Until then this job would sit "queued" forever inside
+    # every merge group, stalling/ejecting queue entries. Flip the repo
+    # variable STAGING_EPHEMERAL_READY to 'true' once the secret is seeded
+    # and runners are confirmed live.
+    if: vars.STAGING_EPHEMERAL_READY == 'true'
     runs-on: staging-ephemeral
     timeout-minutes: 30
     env:
