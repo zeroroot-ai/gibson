@@ -4,7 +4,7 @@ package datapool
 
 import (
 	"context"
-	"fmt"
+	"errors"
 	"testing"
 	"time"
 
@@ -533,7 +533,7 @@ func errAcquire(err error) func(ctx context.Context) (*goredis.Client, func(), e
 // in a descriptive message — none should panic or return a nil error.
 func TestTimelineStore_AcquireError(t *testing.T) {
 	t.Parallel()
-	sentinel := fmt.Errorf("pool evicted")
+	sentinel := errors.New("pool evicted")
 	store := NewRedisTimelineStore(errAcquire(sentinel))
 	ctx := context.Background()
 	tenant := "tenant-err"

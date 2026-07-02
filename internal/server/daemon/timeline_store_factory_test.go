@@ -2,8 +2,7 @@ package daemon
 
 import (
 	"context"
-	"fmt"
-	"io"
+	"errors"
 	"log/slog"
 	"testing"
 
@@ -36,21 +35,22 @@ func (p *fakePool) For(_ context.Context, _ auth.TenantID) (*datapool.Conn, erro
 // The Conn's unexported release field is nil — connRelease handles nil
 // gracefully. The caller owns cleanup of the returned goredis.Client and
 // miniredis.Miniredis via the returned func.
-func newMiniredisConn(t *testing.T) (*datapool.Conn, func()) {
+func newMiniredisConn(t *testing.T) (conn *datapool.Conn, cleanup func()) {
 	t.Helper()
 	mr, err := miniredis.Run()
 	require.NoError(t, err)
 	rdb := goredis.NewClient(&goredis.Options{Addr: mr.Addr()})
-	conn := &datapool.Conn{Redis: rdb}
-	return conn, func() {
+	conn = &datapool.Conn{Redis: rdb}
+	cleanup = func() {
 		_ = rdb.Close()
 		mr.Close()
 	}
+	return conn, cleanup
 }
 
 // discardSlog returns a *slog.Logger that discards all output.
 func discardSlog() *slog.Logger {
-	return slog.New(slog.NewTextHandler(io.Discard, nil))
+	return slog.New(slog.DiscardHandler)
 }
 
 // TestTimelineStoreFactory_ValidTenant verifies that a well-formed tenant
@@ -105,7 +105,7 @@ func TestTimelineStoreFactory_InvalidTenant(t *testing.T) {
 func TestTimelineStoreFactory_PoolForError(t *testing.T) {
 	t.Parallel()
 
-	pool := &fakePool{err: fmt.Errorf("tenant not provisioned")}
+	pool := &fakePool{err: errors.New("tenant not provisioned")}
 	factory := timelineStoreFactory(pool, discardSlog())
 
 	store := factory(context.Background(), "acme")
