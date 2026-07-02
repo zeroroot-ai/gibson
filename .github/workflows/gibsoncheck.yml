@@ -19,14 +19,15 @@ on:
       - 'tools/gibsoncheck/**'
       - 'internal/platform/authz/registry/**'
       - '.github/workflows/gibsoncheck.yml'
+  # No `paths:` filter on pull_request (Epic: cicd-efficiency, board #44,
+  # slice S3, .github#202). A `paths:`-filtered `pull_request` trigger
+  # produces ZERO check runs on non-matching PRs, so this workflow's required
+  # contexts (analyze, Migration build guards, per-RPC test walker,
+  # authz-registry drift gate) would simply be absent and merge-queue entry
+  # would freeze for that PR. Every PR now gets a real-or-skipped check run
+  # for each job instead; the native `changes` job below gates the real work
+  # so irrelevant PRs still skip cheaply.
   pull_request:
-    paths:
-      - '**/*.go'
-      - 'go.mod'
-      - 'go.sum'
-      - 'tools/gibsoncheck/**'
-      - 'internal/platform/authz/registry/**'
-      - '.github/workflows/gibsoncheck.yml'
   # Epic: cicd-efficiency (board #44), slice S5, gibson#1130 (added scope per
   # issue comment): gibsoncheck is an authoritative gate that S3 needs available
   # in the merge_group context before the merge queue can require it -- without
@@ -41,7 +42,39 @@ concurrency:
   cancel-in-progress: true
 
 jobs:
+  # ---- change detection (pull_request only): keeps unrelated PRs cheap ----
+  # Native job so it always reports a stable `changes` check-run name.
+  # merge_group behavior is untouched: every real job below runs
+  # unconditionally in merge_group (this job itself is skipped there), same
+  # as before this workflow carried an `if:` at all.
+  changes:
+    if: github.event_name == 'pull_request'
+    runs-on: ubuntu-latest
+    outputs:
+      relevant: ${{ steps.filter.outputs.relevant }}
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - id: filter
+        name: Detect gibsoncheck-relevant changes
+        run: |
+          BASE="${{ github.event.pull_request.base.sha }}"
+          HEAD="${{ github.event.pull_request.head.sha }}"
+          git fetch --no-tags origin "${BASE}" "${HEAD}" 2>/dev/null || true
+          CHANGED="$(git diff --name-only "${BASE}" "${HEAD}")"
+          echo "Changed files:"
+          echo "${CHANGED}"
+          if echo "${CHANGED}" | grep -Eq '\.go$|(^|/)go\.mod$|(^|/)go\.sum$|^tools/gibsoncheck/|^internal/platform/authz/registry/|^\.github/workflows/gibsoncheck\.yml$'; then
+            echo "relevant=true" >> "$GITHUB_OUTPUT"
+          else
+            echo "relevant=false" >> "$GITHUB_OUTPUT"
+          fi
+
   analyze:
+    needs: changes
+    if: github.event_name == 'merge_group' || needs.changes.outputs.relevant == 'true'
     runs-on: ubuntu-latest
     env:
       # GOPRIVATE tells the Go toolchain to skip the public proxy and
@@ -100,6 +133,8 @@ jobs:
           ./bin/gibsoncheck -forbidrawstoreimports ./internal/... ./cmd/...
 
   migration-guards:
+    needs: changes
+    if: github.event_name == 'merge_group' || needs.changes.outputs.relevant == 'true'
     runs-on: ubuntu-latest
     name: Migration build guards
     steps:
@@ -116,6 +151,8 @@ jobs:
         run: bash scripts/check-no-redis-prefix.sh
 
   rpc-test-walker:
+    needs: changes
+    if: github.event_name == 'merge_group' || needs.changes.outputs.relevant == 'true'
     runs-on: ubuntu-latest
     name: per-RPC test walker
     # Spec: gibson#793 (E3 / QUALITY-BARS §4). Fails if any registered gRPC RPC
@@ -148,6 +185,8 @@ jobs:
         run: make check-rpc-test-walker
 
   authz-registry-drift:
+    needs: changes
+    if: github.event_name == 'merge_group' || needs.changes.outputs.relevant == 'true'
     runs-on: ubuntu-latest
     name: authz-registry drift gate
     # Spec: private-authz-registry NFR Reliability.
