@@ -252,18 +252,6 @@ func (mm *missionManager) deleteActive(tenant auth.TenantID, missionID string) {
 	mm.completedCount++
 }
 
-// tenantActive returns all active missions for a specific tenant (C9 closure).
-func (mm *missionManager) tenantActive(tenant auth.TenantID) []*activeMission {
-	mm.mu.RLock()
-	defer mm.mu.RUnlock()
-	sub := mm.activeMissions[tenant]
-	result := make([]*activeMission, 0, len(sub))
-	for _, am := range sub {
-		result = append(result, am)
-	}
-	return result
-}
-
 // Run starts a mission by reference and returns an event channel for progress
 // updates. Missions are invoked by reference only — the mission definition and
 // target must already be registered. File-path / inline-YAML invocation was
@@ -1032,26 +1020,6 @@ func (m *missionManager) emitEvent(eventChan chan api.MissionEventData, event ap
 			"mission_id", event.MissionID,
 		)
 	}
-}
-
-// missionToData converts a mission.Mission to api.MissionData.
-// Kept for backward-compatibility with internal callers that still hold a
-// mission.Mission reference (e.g. the Run() event emission path).
-func missionToData(m *mission.Mission) api.MissionData {
-	data := api.MissionData{
-		ID:                  m.ID.String(),
-		MissionDefinitionID: m.MissionDefinitionID.String(),
-		TargetID:            m.TargetID.String(),
-		Status:              string(m.Status),
-		StartTime:           m.CreatedAt.Time,
-		FindingCount:        int32(m.FindingsCount),
-	}
-
-	if !m.CompletedAt.IsNil() {
-		data.EndTime = *m.CompletedAt.Time
-	}
-
-	return data
 }
 
 // missionSnapshotToData converts a brain.MissionSnapshot (World-derived, ADR-0011)

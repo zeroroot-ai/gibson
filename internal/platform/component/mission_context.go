@@ -259,7 +259,7 @@ func (r *MissionContextResolver) ResolveMissionForWork(
 	overridesKey := missionSlotOverridesKey(missionID)
 	raw, getErr := r.tenantStore.Get(tenantCtx, overridesKey)
 	if getErr != nil {
-		if errors.Is(getErr, state.ErrNotFound) {
+		if state.IsNotFound(getErr) {
 			// No overrides configured for this mission — normal case.
 			return missionID, nil, nil
 		}
