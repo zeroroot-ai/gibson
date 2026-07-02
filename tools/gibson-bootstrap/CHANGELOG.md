@@ -1,5 +1,12 @@
 # Changelog
 
+## [1.4.0](https://github.com/zeroroot-ai/gibson/compare/gibson-bootstrap-v1.3.0...gibson-bootstrap-v1.4.0) (2026-07-02)
+
+
+### Features
+
+* **seam:** self-serve signup as SaaS-only seam + first-admin bootstrap ([#1090](https://github.com/zeroroot-ai/gibson/issues/1090)) ([b944440](https://github.com/zeroroot-ai/gibson/commit/b944440e60ef0831f5400610025d8c1e616cc52d))
+
 ## [1.3.0](https://github.com/zeroroot-ai/gibson/compare/gibson-bootstrap-v1.2.0...gibson-bootstrap-v1.3.0) (2026-05-20)
 
 
