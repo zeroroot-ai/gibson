@@ -55,22 +55,14 @@ name: go-ci
 #   - CodeQL / Trivy scanner cadence -- separate scanner-cadence slice.
 
 on:
+  # No `paths:` filter here (Epic: cicd-efficiency, board #44, slice S3,
+  # .github#202). A `paths:`-filtered `pull_request` trigger produces ZERO
+  # check runs on non-matching PRs (e.g. docs-only) -- the workflow never
+  # fires at all, so its required contexts are simply absent and merge-queue
+  # entry freezes for that PR. Every PR must get a real-or-skipped check run
+  # for every required context. Cost control for docs-only PRs is handled
+  # in-workflow instead, by the native `changes` job gating the `fast` tier.
   pull_request:
-    paths:
-      - '**/*.go'
-      - 'go.mod'
-      - 'go.sum'
-      - '.golangci.yml'
-      - '.deadcode-baseline'
-      - '.coverage-floor'
-      - 'scripts/check-deadcode.sh'
-      - 'scripts/check-coverage-floor.sh'
-      - 'scripts/check-fga-model-headers.sh'
-      - 'scripts/lint-*.mjs'
-      - 'cmd/diff-coverage/**'
-      - 'tests/criticalpath/**'
-      - 'Makefile'
-      - '.github/workflows/go-ci.yml'
   merge_group:
 
 concurrency:
@@ -81,9 +73,40 @@ permissions:
   contents: read
 
 jobs:
+  # ---- change detection (pull_request only): keeps docs-only PRs cheap ----
+  # Native job, not a reusable caller, so it always reports a stable
+  # `changes` check-run name whether or not the diff touches Go. Now that the
+  # workflow-level `paths:` filter is gone, this is what keeps the `fast`
+  # tier from actually building/testing on PRs that don't touch Go.
+  changes:
+    if: github.event_name == 'pull_request'
+    runs-on: ubuntu-latest
+    outputs:
+      go: ${{ steps.filter.outputs.go }}
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - id: filter
+        name: Detect Go-relevant changes
+        run: |
+          BASE="${{ github.event.pull_request.base.sha }}"
+          HEAD="${{ github.event.pull_request.head.sha }}"
+          git fetch --no-tags origin "${BASE}" "${HEAD}" 2>/dev/null || true
+          CHANGED="$(git diff --name-only "${BASE}" "${HEAD}")"
+          echo "Changed files:"
+          echo "${CHANGED}"
+          if echo "${CHANGED}" | grep -Eq '\.go$|(^|/)go\.mod$|(^|/)go\.sum$|^\.github/workflows/'; then
+            echo "go=true" >> "$GITHUB_OUTPUT"
+          else
+            echo "go=false" >> "$GITHUB_OUTPUT"
+          fi
+
   # ---- fast tier (pull_request): reusable vet/build/test + mod-tidy drift ----
   fast:
-    if: github.event_name == 'pull_request'
+    needs: changes
+    if: needs.changes.outputs.go == 'true'
     uses: zeroroot-ai/.github/.github/workflows/reusable-go-ci.yml@v2
     with:
       tier: fast
@@ -287,3 +310,39 @@ jobs:
 
       - name: Run integration lane
         run: make test-integration
+
+  # ---- native aggregator: THE required context for the whole heavy suite ----
+  # Epic: cicd-efficiency (board #44), slice S3 (.github#202). A caller job
+  # that invokes a reusable workflow reports as `<caller-job>` when skipped
+  # but `<caller-job> / <reusable-job>` when it runs -- no single context
+  # string matches both, so `heavy` itself can't be a merge-queue required
+  # context. This job is native (no reusable call) so its check-run name is
+  # `queue-gate` in both the pull_request (needed jobs self-skip via their
+  # own event-gated `if:`, which counts as pass) and merge_group (needed jobs
+  # actually run) cases.
+  queue-gate:
+    name: queue-gate
+    if: always()
+    needs: [heavy, vet-tags, coverage, integration]
+    runs-on: ubuntu-latest
+    steps:
+      - name: Evaluate heavy-suite results
+        run: |
+          failed=0
+          declare -A results
+          results[heavy]="${{ needs.heavy.result }}"
+          results[vet-tags]="${{ needs.vet-tags.result }}"
+          results[coverage]="${{ needs.coverage.result }}"
+          results[integration]="${{ needs.integration.result }}"
+          for job in "${!results[@]}"; do
+            r="${results[$job]}"
+            echo "${job}: ${r}"
+            if [[ "${r}" == "failure" || "${r}" == "cancelled" ]]; then
+              failed=1
+            fi
+          done
+          if [[ "${failed}" -eq 1 ]]; then
+            echo "One or more heavy-suite jobs failed or was cancelled."
+            exit 1
+          fi
+          echo "All heavy-suite jobs passed or were skipped (skipped counts as pass)."

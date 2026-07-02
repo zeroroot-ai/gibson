@@ -18,11 +18,14 @@ on:
       - 'internal/platform/authz/model.fga'
       - 'internal/platform/authz/**_test.go'
       - '.github/workflows/fga-smoke-test.yml'
+  # No `paths:` filter on pull_request (Epic: cicd-efficiency, board #44,
+  # slice S3, .github#202). A `paths:`-filtered `pull_request` trigger
+  # produces ZERO check runs on non-matching PRs, so the required context
+  # (FGA model smoke test) would simply be absent and merge-queue entry would
+  # freeze for that PR. Every PR now gets a real-or-skipped check run
+  # instead; the native `changes` job below gates the real Docker-backed work
+  # so irrelevant PRs still skip cheaply.
   pull_request:
-    paths:
-      - 'internal/platform/authz/model.fga'
-      - 'internal/platform/authz/**_test.go'
-      - '.github/workflows/fga-smoke-test.yml'
   # Epic: cicd-efficiency (board #44), slice S5, gibson#1130 (added scope per
   # issue comment): fga-smoke-test is an authoritative gate that S3 needs
   # available in the merge_group context before the merge queue can require it
@@ -38,7 +41,39 @@ concurrency:
   cancel-in-progress: true
 
 jobs:
+  # ---- change detection (pull_request only): keeps unrelated PRs cheap ----
+  # Native job so it always reports a stable `changes` check-run name.
+  # merge_group behavior is untouched: `fga-smoke` runs unconditionally in
+  # merge_group (this job itself is skipped there), same as before this
+  # workflow carried an `if:` at all.
+  changes:
+    if: github.event_name == 'pull_request'
+    runs-on: ubuntu-latest
+    outputs:
+      relevant: ${{ steps.filter.outputs.relevant }}
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - id: filter
+        name: Detect FGA-relevant changes
+        run: |
+          BASE="${{ github.event.pull_request.base.sha }}"
+          HEAD="${{ github.event.pull_request.head.sha }}"
+          git fetch --no-tags origin "${BASE}" "${HEAD}" 2>/dev/null || true
+          CHANGED="$(git diff --name-only "${BASE}" "${HEAD}")"
+          echo "Changed files:"
+          echo "${CHANGED}"
+          if echo "${CHANGED}" | grep -Eq '^internal/platform/authz/model\.fga$|^internal/platform/authz/.*_test\.go$|^\.github/workflows/fga-smoke-test\.yml$'; then
+            echo "relevant=true" >> "$GITHUB_OUTPUT"
+          else
+            echo "relevant=false" >> "$GITHUB_OUTPUT"
+          fi
+
   fga-smoke:
+    needs: changes
+    if: github.event_name == 'merge_group' || needs.changes.outputs.relevant == 'true'
     name: FGA model smoke test
     runs-on: ubuntu-latest
 
