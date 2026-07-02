@@ -637,3 +637,78 @@ func TestAcquirePerOp_EvictionRobustness(t *testing.T) {
 	require.Len(t, loaded, 1, "only the event written to rdbB should be visible")
 	assert.Equal(t, ev2, loaded[0], "the event on rdbB must be ev2")
 }
+
+// fakeConfigGetter stubs the redisConfigGetter surface so every AOF-guard
+// path (appendonly=yes / no / missing key / command error) is testable
+// without a real redis-stack — miniredis does not implement CONFIG.
+type fakeConfigGetter struct {
+	vals map[string]string
+	err  error
+}
+
+func (f fakeConfigGetter) ConfigGet(ctx context.Context, parameter string) *goredis.MapStringStringCmd {
+	cmd := goredis.NewMapStringStringCmd(ctx, "config", "get", parameter)
+	if f.err != nil {
+		cmd.SetErr(f.err)
+	} else {
+		cmd.SetVal(f.vals)
+	}
+	return cmd
+}
+
+// TestAssertAOFEnabled_Yes verifies the happy path: appendonly=yes passes the
+// guard (gibson#1119).
+func TestAssertAOFEnabled_Yes(t *testing.T) {
+	t.Parallel()
+
+	err := assertAOFEnabled(context.Background(), fakeConfigGetter{vals: map[string]string{"appendonly": "yes"}})
+	assert.NoError(t, err)
+}
+
+// TestAssertAOFEnabled_No verifies the fail-fast path the boot guard exists
+// for: a Redis with AOF disabled must be rejected loudly, not silently
+// degrade to a Timeline that is lost on restart (gibson#1119, ADR-0011).
+func TestAssertAOFEnabled_No(t *testing.T) {
+	t.Parallel()
+
+	err := assertAOFEnabled(context.Background(), fakeConfigGetter{vals: map[string]string{"appendonly": "no"}})
+	require.Error(t, err)
+	assert.Contains(t, err.Error(), `appendonly="no"`)
+	assert.Contains(t, err.Error(), "durable Timeline")
+}
+
+// TestAssertAOFEnabled_MissingKey verifies the guard fails closed when the
+// CONFIG GET reply does not contain the appendonly parameter at all.
+func TestAssertAOFEnabled_MissingKey(t *testing.T) {
+	t.Parallel()
+
+	err := assertAOFEnabled(context.Background(), fakeConfigGetter{vals: map[string]string{}})
+	require.Error(t, err)
+	assert.Contains(t, err.Error(), "returned no value")
+}
+
+// TestAssertAOFEnabled_CommandError verifies the guard fails closed when
+// CONFIG GET itself errors (e.g. a managed Redis that disables the CONFIG
+// command): durability that cannot be verified is treated as absent.
+func TestAssertAOFEnabled_CommandError(t *testing.T) {
+	t.Parallel()
+
+	err := assertAOFEnabled(context.Background(), fakeConfigGetter{err: errors.New("ERR unknown command 'CONFIG'")})
+	require.Error(t, err)
+	assert.Contains(t, err.Error(), "cannot verify AOF persistence")
+}
+
+// TestAssertTimelineAOF_FailsClosedWithoutConfigSupport exercises the
+// dial-based wrapper against miniredis, which does not implement CONFIG:
+// the guard must fail closed rather than assume durability.
+func TestAssertTimelineAOF_FailsClosedWithoutConfigSupport(t *testing.T) {
+	t.Parallel()
+
+	mr, err := miniredis.Run()
+	require.NoError(t, err)
+	defer mr.Close()
+
+	gErr := AssertTimelineAOF(context.Background(), mr.Addr(), "")
+	require.Error(t, gErr, "miniredis has no CONFIG support; the guard must fail closed")
+	assert.Contains(t, gErr.Error(), "cannot verify AOF persistence")
+}

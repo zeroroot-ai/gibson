@@ -11,6 +11,45 @@ import (
 	"github.com/zeroroot-ai/sdk/auth"
 )
 
+// assertTimelineDurability is the daemon boot guard for the durable Timeline
+// (gibson#1119, ADR-0011, PRD gibson#1112): a Timeline is only durable if the
+// data-plane Redis persists an append-only file, so before the Timeline store
+// factory is wired the daemon asserts CONFIG GET appendonly == "yes" once
+// against the data-plane Redis server (AOF is server-level, so one check
+// covers every per-tenant logical DB).
+//
+// Fail-fast semantics: any non-"yes" answer — including an unreachable server
+// or a Redis that refuses CONFIG — returns an error and the daemon MUST
+// refuse to start. A mis-configured Redis (e.g. a manually-applied override
+// with AOF off) must not silently produce a Timeline that looks durable but
+// is lost on the next Redis restart. deploy#1063 owns the chart side
+// (appendonly=yes on the shared redis-stack).
+//
+// redisAddr == "" is the one tolerated skip: with no data-plane Redis
+// configured there is no Redis-backed Timeline to guard — engines run
+// in-memory only, which is already loud in the store-factory logs.
+//
+// check is the actual AOF probe — production passes
+// datapool.AssertTimelineAOF; tests substitute a stub because miniredis
+// cannot answer CONFIG GET appendonly=yes.
+func assertTimelineDurability(ctx context.Context, redisAddr, redisPassword string, check func(ctx context.Context, addr, password string) error, log *slog.Logger) error {
+	if redisAddr == "" {
+		log.WarnContext(ctx, "timeline durability boot guard skipped: no data-plane redis addr configured; engines will run in-memory only")
+		return nil
+	}
+	if err := check(ctx, redisAddr, redisPassword); err != nil {
+		log.ErrorContext(ctx, "timeline durability boot guard FAILED: cannot confirm Redis AOF persistence; refusing to start rather than serve a Timeline that would be lost on Redis restart (gibson#1119, ADR-0011)",
+			"redis_addr", redisAddr,
+			"err", err,
+		)
+		return fmt.Errorf("timeline durability boot guard (gibson#1119): %w", err)
+	}
+	log.InfoContext(ctx, "timeline durability boot guard: Redis AOF persistence confirmed (appendonly=yes)",
+		"redis_addr", redisAddr,
+	)
+	return nil
+}
+
 // timelinePoolForer is the narrow interface timelineStoreFactory needs from
 // the data-plane pool. It is satisfied by *datapool.pool (pool_impl.go) and
 // can be faked cheaply in tests without constructing a full Pool.

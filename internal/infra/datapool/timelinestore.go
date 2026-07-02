@@ -46,6 +46,59 @@ func (s *RedisTimelineStore) streamKey(tenant string) string {
 	return "gibson:timeline:" + tenant
 }
 
+// redisConfigGetter is the minimal Redis command surface the AOF boot guard
+// needs. *redis.Client satisfies it; tests substitute a stub so the
+// appendonly=no path is exercisable without a real redis-stack (miniredis
+// does not implement CONFIG).
+type redisConfigGetter interface {
+	ConfigGet(ctx context.Context, parameter string) *redis.MapStringStringCmd
+}
+
+// assertAOFEnabled verifies that the Redis server behind client has
+// append-only-file persistence enabled (CONFIG GET appendonly == "yes").
+//
+// The durable Timeline (ADR-0011, PRD gibson#1112) is only durable if the
+// backing Redis persists its log: with AOF off, a Redis restart silently
+// discards every Timeline event while the store keeps LOOKING durable. Any
+// failure to positively confirm appendonly=yes — including a CONFIG GET
+// error (e.g. a managed Redis that disables the CONFIG command) — is
+// returned as an error so the caller fails closed rather than degrade
+// silently (gibson#1119).
+func assertAOFEnabled(ctx context.Context, client redisConfigGetter) error {
+	vals, err := client.ConfigGet(ctx, "appendonly").Result()
+	if err != nil {
+		return fmt.Errorf("datapool/redis-timeline: CONFIG GET appendonly failed — cannot verify AOF persistence for the durable Timeline (ADR-0011): %w", err)
+	}
+	val, ok := vals["appendonly"]
+	if !ok {
+		return fmt.Errorf("datapool/redis-timeline: CONFIG GET appendonly returned no value — cannot verify AOF persistence for the durable Timeline (ADR-0011)")
+	}
+	if val != "yes" {
+		return fmt.Errorf("datapool/redis-timeline: Redis AOF persistence is disabled (appendonly=%q, want \"yes\") — the durable Timeline (ADR-0011, gibson#1112) would silently lose all events on a Redis restart; enable AOF on the data-plane Redis (deploy#1063 sets appendonly=yes on the redis-stack chart) instead of running with a Timeline that only looks durable", val)
+	}
+	return nil
+}
+
+// AssertTimelineAOF dials the data-plane Redis server at addr and verifies
+// that AOF persistence is enabled (CONFIG GET appendonly == "yes"). AOF is a
+// server-level setting, so one boot-time check against DB 0 covers every
+// per-tenant logical DB on that server.
+//
+// The daemon calls this once at startup, before wiring the Timeline store
+// factory, and refuses to start on error (gibson#1119).
+func AssertTimelineAOF(ctx context.Context, addr, password string) error {
+	client := redis.NewClient(&redis.Options{
+		Addr:         addr,
+		Password:     password,
+		DB:           redisDB0,
+		DialTimeout:  redisProductionOpts.DialTimeout,
+		ReadTimeout:  redisProductionOpts.ReadTimeout,
+		WriteTimeout: redisProductionOpts.WriteTimeout,
+	})
+	defer func() { _ = client.Close() }()
+	return assertAOFEnabled(ctx, client)
+}
+
 // Append durably persists ev to the tenant's Redis Stream. MaxLen 0 means no
 // cap — the stream grows unbounded until TrimTo prunes it (ADR-0011).
 func (s *RedisTimelineStore) Append(ctx context.Context, tenant string, ev brain.Event) (string, error) {

@@ -111,3 +111,59 @@ func TestTimelineStoreFactory_PoolForError(t *testing.T) {
 	store := factory(context.Background(), "acme")
 	assert.Nil(t, store, "pool.For probe error must cause the factory to return nil")
 }
+
+// TestAssertTimelineDurability_SkipsWhenNoRedisConfigured verifies the one
+// tolerated skip: with no data-plane Redis addr there is no Redis-backed
+// Timeline to guard, so the boot guard passes (engines run in-memory only).
+func TestAssertTimelineDurability_SkipsWhenNoRedisConfigured(t *testing.T) {
+	t.Parallel()
+
+	err := assertTimelineDurability(context.Background(), "", "", datapool.AssertTimelineAOF, discardSlog())
+	assert.NoError(t, err, "empty redis addr must be a tolerated skip, not a boot failure")
+}
+
+// TestAssertTimelineDurability_FailsClosedWhenAOFUnverifiable verifies the
+// fail-fast contract (gibson#1119): when the data-plane Redis cannot
+// positively confirm appendonly=yes — here miniredis, which does not
+// implement CONFIG — the guard returns an error so daemon Start aborts.
+func TestAssertTimelineDurability_FailsClosedWhenAOFUnverifiable(t *testing.T) {
+	t.Parallel()
+
+	mr, err := miniredis.Run()
+	require.NoError(t, err)
+	defer mr.Close()
+
+	gErr := assertTimelineDurability(context.Background(), mr.Addr(), "", datapool.AssertTimelineAOF, discardSlog())
+	require.Error(t, gErr, "unverifiable AOF must fail the boot guard")
+	assert.Contains(t, gErr.Error(), "gibson#1119", "boot-abort error must name the guard")
+}
+
+// TestAssertTimelineDurability_FailsClosedWhenRedisUnreachable verifies the
+// guard also fails closed when the configured Redis cannot be dialed at all.
+func TestAssertTimelineDurability_FailsClosedWhenRedisUnreachable(t *testing.T) {
+	t.Parallel()
+
+	// Grab a port that is guaranteed dead: start miniredis, note the addr,
+	// stop it.
+	mr, err := miniredis.Run()
+	require.NoError(t, err)
+	addr := mr.Addr()
+	mr.Close()
+
+	gErr := assertTimelineDurability(context.Background(), addr, "", datapool.AssertTimelineAOF, discardSlog())
+	require.Error(t, gErr, "unreachable redis must fail the boot guard")
+	assert.Contains(t, gErr.Error(), "timeline durability boot guard")
+}
+
+// TestAssertTimelineDurability_PassesWhenAOFConfirmed verifies the guard
+// passes (and Start proceeds to wire the Timeline store factory) when the
+// AOF probe confirms appendonly=yes. The probe is stubbed because miniredis
+// cannot answer CONFIG GET; the real probe's yes/no/error decision table is
+// covered by the assertAOFEnabled tests in internal/infra/datapool.
+func TestAssertTimelineDurability_PassesWhenAOFConfirmed(t *testing.T) {
+	t.Parallel()
+
+	confirmed := func(ctx context.Context, addr, password string) error { return nil }
+	err := assertTimelineDurability(context.Background(), "redis:6379", "", confirmed, discardSlog())
+	assert.NoError(t, err, "confirmed AOF must pass the boot guard")
+}
