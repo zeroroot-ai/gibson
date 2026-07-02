@@ -330,4 +330,6 @@ _Avoid_: event-driven cascade (rejected), per-tick frame storage, tying display 
   comes from fully-scripted CUE missions; auditability from the journal + recorded rationale.
 
 <!-- merge-queue canary (Epic: cicd-efficiency, board #44, slice S3): no-op doc touch to
-     capture merge_group check-run context strings before requiring any of them. -->
+     capture merge_group check-run context strings before requiring any of them.
+     canary #2: forces a real merge-group with one verified required check so the
+     other merge_group-triggered workflows fire alongside it. -->
