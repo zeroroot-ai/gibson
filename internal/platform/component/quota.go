@@ -2,7 +2,6 @@ package component
 
 import (
 	"context"
-	"errors"
 	"fmt"
 	"log/slog"
 	"strconv"
@@ -295,7 +294,7 @@ func readInt64(ctx context.Context, store *state.TenantScopedStore, key string) 
 func (q *QuotaManager) decrementCounter(ctx context.Context, key, name string) error {
 	raw, err := q.store.Get(ctx, key)
 	if err != nil {
-		if errors.Is(err, state.ErrNotFound) {
+		if state.IsNotFound(err) {
 			return nil
 		}
 		return fmt.Errorf("read %s count: %w", name, err)
