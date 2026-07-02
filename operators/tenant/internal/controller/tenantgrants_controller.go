@@ -13,9 +13,11 @@ import (
 	"k8s.io/apimachinery/pkg/runtime"
 	"k8s.io/client-go/tools/events"
 	ctrl "sigs.k8s.io/controller-runtime"
+	"sigs.k8s.io/controller-runtime/pkg/builder"
 	"sigs.k8s.io/controller-runtime/pkg/client"
 	"sigs.k8s.io/controller-runtime/pkg/controller/controllerutil"
 	logf "sigs.k8s.io/controller-runtime/pkg/log"
+	"sigs.k8s.io/controller-runtime/pkg/predicate"
 
 	gibsonv1alpha1 "github.com/zeroroot-ai/gibson/operators/tenant/api/v1alpha1"
 	"github.com/zeroroot-ai/gibson/operators/tenant/internal/clients"
@@ -96,9 +98,18 @@ func (r *TenantGrantsReconciler) Reconcile(ctx context.Context, req ctrl.Request
 		return ctrl.Result{Requeue: true}, nil
 	}
 
-	// Provision (idempotent + drift-correcting). Mark Provisioning before the
-	// call so observers see progress.
-	r.markGrantsProvisioning(ctx, &tg)
+	// Provision (idempotent + drift-correcting). On a steady-state drift-check
+	// resync (already Ready for this generation) skip the Provisioning flip so
+	// status stays Ready and status-patch self-triggering stops the churn.
+	// First provision and spec changes (generation bump) still flip to
+	// Provisioning → Ready correctly.
+	alreadyReady := tg.Status.Phase == gibsonv1alpha1.TenantGrantsPhaseReady &&
+		tg.Status.ObservedGeneration == tg.Generation
+	if !alreadyReady {
+		if err := r.markGrantsProvisioning(ctx, &tg); err != nil {
+			return ctrl.Result{}, err
+		}
+	}
 
 	tuples := desiredTuples(&tg)
 	if err := r.Provisioner.Provision(ctx, tuples); err != nil {
@@ -132,7 +143,7 @@ func (r *TenantGrantsReconciler) reconcileGrantsDelete(ctx context.Context, tg *
 	base := tg.DeepCopy()
 	tg.Status.Phase = gibsonv1alpha1.TenantGrantsPhaseDeprovisioning
 	tg.Status.Ready = false
-	r.patchGrantsStatus(ctx, tg, base)
+	_ = r.patchGrantsStatus(ctx, tg, base)
 
 	if r.Provisioner != nil {
 		if err := r.Provisioner.Deprovision(ctx, desiredTuples(tg)); err != nil && !errors.Is(err, clients.ErrNotFound) {
@@ -166,12 +177,15 @@ func desiredTuples(tg *gibsonv1alpha1.TenantGrants) []fga.Tuple {
 	return tuples
 }
 
-// markGrantsProvisioning records the in-flight phase via Status().Patch.
-func (r *TenantGrantsReconciler) markGrantsProvisioning(ctx context.Context, tg *gibsonv1alpha1.TenantGrants) {
+// markGrantsProvisioning records the in-flight phase via Status().Patch. It
+// returns an error only when the patch itself fails — callers that guard on
+// alreadyReady propagate it so the reconcile retries rather than continuing
+// with stale in-cluster state.
+func (r *TenantGrantsReconciler) markGrantsProvisioning(ctx context.Context, tg *gibsonv1alpha1.TenantGrants) error {
 	base := tg.DeepCopy()
 	tg.Status.Phase = gibsonv1alpha1.TenantGrantsPhaseProvisioning
 	tg.Status.LastError = ""
-	r.patchGrantsStatus(ctx, tg, base)
+	return r.patchGrantsStatus(ctx, tg, base)
 }
 
 // markGrantsReady records the ready state: aggregate Ready true, applied-tuple
@@ -186,7 +200,7 @@ func (r *TenantGrantsReconciler) markGrantsReady(ctx context.Context, tg *gibson
 	tg.Status.ObservedGeneration = tg.Generation
 	tg.Status.Components = readyGrantsComponents(tg)
 	setGrantsReadyCondition(tg, metav1.ConditionTrue, "Provisioned", "tenant grants are ready")
-	r.patchGrantsStatus(ctx, tg, base)
+	_ = r.patchGrantsStatus(ctx, tg, base)
 }
 
 // failGrants records a failed reconcile in status without mutating spec.
@@ -196,18 +210,22 @@ func (r *TenantGrantsReconciler) failGrants(ctx context.Context, tg *gibsonv1alp
 	tg.Status.Ready = false
 	tg.Status.LastError = msg
 	setGrantsReadyCondition(tg, metav1.ConditionFalse, "ProvisionFailed", msg)
-	r.patchGrantsStatus(ctx, tg, base)
+	_ = r.patchGrantsStatus(ctx, tg, base)
 	return ctrl.Result{}, nil
 }
 
 // patchGrantsStatus persists status via a merge-patch off the captured base.
 // Using Patch (not Update) avoids resourceVersion conflicts with the Tenant
-// saga, which patches Tenant status concurrently. Errors are logged, not
-// propagated — a lost status write must not strand the reconcile.
-func (r *TenantGrantsReconciler) patchGrantsStatus(ctx context.Context, tg, base *gibsonv1alpha1.TenantGrants) {
+// saga, which patches Tenant status concurrently. The error is returned so
+// that callers which guard on observed phase (e.g. markGrantsProvisioning in
+// the alreadyReady guard) can propagate it; callers that write terminal state
+// (markGrantsReady, failGrants) log and continue as before.
+func (r *TenantGrantsReconciler) patchGrantsStatus(ctx context.Context, tg, base *gibsonv1alpha1.TenantGrants) error {
 	if err := r.Status().Patch(ctx, tg, client.MergeFrom(base)); err != nil {
 		logf.FromContext(ctx).Error(err, "tenantgrants status patch failed", "tenant", tg.Spec.TenantID)
+		return err
 	}
+	return nil
 }
 
 // emitGrants records a Kubernetes event on the TenantGrants. No-ops when the
@@ -261,12 +279,20 @@ func setGrantsReadyCondition(tg *gibsonv1alpha1.TenantGrants, status metav1.Cond
 }
 
 // SetupWithManager registers the controller with the manager.
+//
+// GenerationChangedPredicate filters out status-only patch events: status
+// writes do not bump metadata.generation, so they no longer re-trigger a
+// reconcile. This stops the status-patch → re-trigger → markGrantsProvisioning
+// churn that prevented the phase from ever settling on Ready (gibson#1140).
+// Spec changes (generation bump), creates, and deletes still reconcile
+// immediately; the 10-minute RequeueAfter handles drift-correction resyncs.
 func (r *TenantGrantsReconciler) SetupWithManager(mgr ctrl.Manager) error {
 	if r.Recorder == nil {
 		r.Recorder = mgr.GetEventRecorder("tenantgrants-controller")
 	}
 	return ctrl.NewControllerManagedBy(mgr).
-		For(&gibsonv1alpha1.TenantGrants{}).
+		For(&gibsonv1alpha1.TenantGrants{},
+			builder.WithPredicates(predicate.GenerationChangedPredicate{})).
 		Named("tenantgrants").
 		Complete(r)
 }

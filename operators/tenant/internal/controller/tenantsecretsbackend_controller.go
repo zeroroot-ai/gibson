@@ -13,9 +13,11 @@ import (
 	"k8s.io/apimachinery/pkg/runtime"
 	"k8s.io/client-go/tools/events"
 	ctrl "sigs.k8s.io/controller-runtime"
+	"sigs.k8s.io/controller-runtime/pkg/builder"
 	"sigs.k8s.io/controller-runtime/pkg/client"
 	"sigs.k8s.io/controller-runtime/pkg/controller/controllerutil"
 	logf "sigs.k8s.io/controller-runtime/pkg/log"
+	"sigs.k8s.io/controller-runtime/pkg/predicate"
 
 	gibsonv1alpha1 "github.com/zeroroot-ai/gibson/operators/tenant/api/v1alpha1"
 	"github.com/zeroroot-ai/gibson/operators/tenant/internal/clients"
@@ -95,9 +97,18 @@ func (r *TenantSecretsBackendReconciler) Reconcile(ctx context.Context, req ctrl
 		return ctrl.Result{Requeue: true}, nil
 	}
 
-	// Provision (idempotent + drift-correcting). Mark Provisioning before the
-	// call so observers see progress.
-	r.markProvisioning(ctx, &tsb)
+	// Provision (idempotent + drift-correcting). On a steady-state drift-check
+	// resync (already Ready for this generation) skip the Provisioning flip so
+	// status stays Ready and status-patch self-triggering stops the churn.
+	// First provision and spec changes (generation bump) still flip to
+	// Provisioning → Ready correctly.
+	alreadyReady := tsb.Status.Phase == gibsonv1alpha1.TenantSecretsBackendPhaseReady &&
+		tsb.Status.ObservedGeneration == tsb.Generation
+	if !alreadyReady {
+		if err := r.markProvisioning(ctx, &tsb); err != nil {
+			return ctrl.Result{}, err
+		}
+	}
 
 	if err := r.Provisioner.Provision(ctx, tsb.Spec.TenantID); err != nil {
 		log.Error(err, "secrets-backend provision failed", "tenant", tsb.Spec.TenantID)
@@ -130,7 +141,7 @@ func (r *TenantSecretsBackendReconciler) reconcileDelete(ctx context.Context, ts
 	base := tsb.DeepCopy()
 	tsb.Status.Phase = gibsonv1alpha1.TenantSecretsBackendPhaseDeprovisioning
 	tsb.Status.Ready = false
-	r.patchStatus(ctx, tsb, base)
+	_ = r.patchStatus(ctx, tsb, base)
 
 	if r.Provisioner != nil {
 		if err := r.Provisioner.Deprovision(ctx, tsb.Spec.TenantID); err != nil && !errors.Is(err, clients.ErrNotFound) {
@@ -150,12 +161,15 @@ func (r *TenantSecretsBackendReconciler) reconcileDelete(ctx context.Context, ts
 	return ctrl.Result{}, nil
 }
 
-// markProvisioning records the in-flight phase via Status().Patch.
-func (r *TenantSecretsBackendReconciler) markProvisioning(ctx context.Context, tsb *gibsonv1alpha1.TenantSecretsBackend) {
+// markProvisioning records the in-flight phase via Status().Patch. It returns
+// an error only when the patch itself fails — callers that guard on
+// alreadyReady propagate it so the reconcile retries rather than continuing
+// with stale in-cluster state.
+func (r *TenantSecretsBackendReconciler) markProvisioning(ctx context.Context, tsb *gibsonv1alpha1.TenantSecretsBackend) error {
 	base := tsb.DeepCopy()
 	tsb.Status.Phase = gibsonv1alpha1.TenantSecretsBackendPhaseProvisioning
 	tsb.Status.LastError = ""
-	r.patchStatus(ctx, tsb, base)
+	return r.patchStatus(ctx, tsb, base)
 }
 
 // markReady records the ready state: aggregate Ready true, every component
@@ -168,7 +182,7 @@ func (r *TenantSecretsBackendReconciler) markReady(ctx context.Context, tsb *gib
 	tsb.Status.ObservedGeneration = tsb.Generation
 	tsb.Status.Components = readyComponents()
 	setSecretsBackendReadyCondition(tsb, metav1.ConditionTrue, "Provisioned", "secrets backend is ready")
-	r.patchStatus(ctx, tsb, base)
+	_ = r.patchStatus(ctx, tsb, base)
 }
 
 // fail records a failed reconcile in status without mutating spec.
@@ -178,18 +192,22 @@ func (r *TenantSecretsBackendReconciler) fail(ctx context.Context, tsb *gibsonv1
 	tsb.Status.Ready = false
 	tsb.Status.LastError = msg
 	setSecretsBackendReadyCondition(tsb, metav1.ConditionFalse, "ProvisionFailed", msg)
-	r.patchStatus(ctx, tsb, base)
+	_ = r.patchStatus(ctx, tsb, base)
 	return ctrl.Result{}, nil
 }
 
 // patchStatus persists status via a merge-patch off the captured base. Using
 // Patch (not Update) avoids resourceVersion conflicts with the Tenant saga,
-// which patches Tenant status concurrently. Errors are logged, not propagated —
-// a lost status write must not strand the reconcile.
-func (r *TenantSecretsBackendReconciler) patchStatus(ctx context.Context, tsb, base *gibsonv1alpha1.TenantSecretsBackend) {
+// which patches Tenant status concurrently. The error is returned so that
+// callers which guard on observed phase (e.g. markProvisioning in the
+// alreadyReady guard) can propagate it; callers that write terminal state
+// (markReady, fail) log and continue as before.
+func (r *TenantSecretsBackendReconciler) patchStatus(ctx context.Context, tsb, base *gibsonv1alpha1.TenantSecretsBackend) error {
 	if err := r.Status().Patch(ctx, tsb, client.MergeFrom(base)); err != nil {
 		logf.FromContext(ctx).Error(err, "tenantsecretsbackend status patch failed", "tenant", tsb.Spec.TenantID)
+		return err
 	}
+	return nil
 }
 
 // emit records a Kubernetes event on the TenantSecretsBackend. No-ops when the
@@ -242,12 +260,20 @@ func setSecretsBackendReadyCondition(tsb *gibsonv1alpha1.TenantSecretsBackend, s
 }
 
 // SetupWithManager registers the controller with the manager.
+//
+// GenerationChangedPredicate filters out status-only patch events: status
+// writes do not bump metadata.generation, so they no longer re-trigger a
+// reconcile. This stops the status-patch → re-trigger → markProvisioning
+// churn that prevented the phase from ever settling on Ready (gibson#1140).
+// Spec changes (generation bump), creates, and deletes still reconcile
+// immediately; the 10-minute RequeueAfter handles drift-correction resyncs.
 func (r *TenantSecretsBackendReconciler) SetupWithManager(mgr ctrl.Manager) error {
 	if r.Recorder == nil {
 		r.Recorder = mgr.GetEventRecorder("tenantsecretsbackend-controller")
 	}
 	return ctrl.NewControllerManagedBy(mgr).
-		For(&gibsonv1alpha1.TenantSecretsBackend{}).
+		For(&gibsonv1alpha1.TenantSecretsBackend{},
+			builder.WithPredicates(predicate.GenerationChangedPredicate{})).
 		Named("tenantsecretsbackend").
 		Complete(r)
 }

@@ -176,6 +176,69 @@ func TestTenantSecretsBackend_FinalizerTeardown(t *testing.T) {
 	}
 }
 
+// A second reconcile of an already-Ready CR (same generation) must not flip
+// phase back to Provisioning and must produce no additional status changes.
+// This verifies the fix for the status-patch self-triggering churn
+// (gibson#1140): the alreadyReady guard skips markProvisioning on
+// drift-correction resyncs.
+func TestTenantSecretsBackend_SteadyStateNoPhaseFlip(t *testing.T) {
+	scheme := setupScheme(t)
+	tsb := newTenantSecretsBackend("acme-secrets", "acme")
+	// Seed the CR as already-Ready at generation 1 so the controller starts in
+	// the steady-state path.
+	tsb.Generation = 1
+	tsb.Status.Phase = gibsonv1alpha1.TenantSecretsBackendPhaseReady
+	tsb.Status.Ready = true
+	tsb.Status.ObservedGeneration = 1
+	tsb.Status.Components = []gibsonv1alpha1.TenantSecretsBackendComponentCondition{
+		{Name: "vault-namespace", State: "ready"},
+		{Name: "jwt-auth", State: "ready"},
+		{Name: "broker-config", State: "ready"},
+	}
+	controllerutil.AddFinalizer(tsb, gibsonv1alpha1.TenantSecretsBackendFinalizer)
+	c := fake.NewClientBuilder().
+		WithScheme(scheme).
+		WithStatusSubresource(&gibsonv1alpha1.TenantSecretsBackend{}).
+		WithObjects(tsb).
+		Build()
+
+	stub := &stubSecretsProvisioner{}
+	r := &TenantSecretsBackendReconciler{Client: c, Scheme: scheme, Recorder: events.NewFakeRecorder(100), Provisioner: stub}
+
+	// Steady-state resync: Provision still runs (drift-correction) but phase
+	// must NOT flip to Provisioning.
+	if _, err := reconcileTSB(t, r, "acme-secrets"); err != nil {
+		t.Fatalf("steady-state reconcile: %v", err)
+	}
+	if len(stub.provisioned) != 1 {
+		t.Fatalf("want Provision called once for drift-correction, got %d", len(stub.provisioned))
+	}
+	var got gibsonv1alpha1.TenantSecretsBackend
+	if err := c.Get(context.Background(), types.NamespacedName{Namespace: "tenant-acme", Name: "acme-secrets"}, &got); err != nil {
+		t.Fatalf("get: %v", err)
+	}
+	if got.Status.Phase != gibsonv1alpha1.TenantSecretsBackendPhaseReady {
+		t.Fatalf("want phase to remain Ready, got %q", got.Status.Phase)
+	}
+	if !got.Status.Ready {
+		t.Fatalf("want Ready=true to remain, got false")
+	}
+
+	// Second resync: phase stays Ready.
+	if _, err := reconcileTSB(t, r, "acme-secrets"); err != nil {
+		t.Fatalf("second steady-state reconcile: %v", err)
+	}
+	if len(stub.provisioned) != 2 {
+		t.Fatalf("want Provision called twice total, got %d", len(stub.provisioned))
+	}
+	if err := c.Get(context.Background(), types.NamespacedName{Namespace: "tenant-acme", Name: "acme-secrets"}, &got); err != nil {
+		t.Fatalf("get: %v", err)
+	}
+	if got.Status.Phase != gibsonv1alpha1.TenantSecretsBackendPhaseReady {
+		t.Fatalf("want phase Ready on second resync, got %q", got.Status.Phase)
+	}
+}
+
 // A NotFound from Deprovision (backend already gone) is treated as success.
 func TestTenantSecretsBackend_TeardownNotFoundIsSuccess(t *testing.T) {
 	scheme := setupScheme(t)
