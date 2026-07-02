@@ -1155,7 +1155,7 @@ func (d *daemonImpl) Start(ctx context.Context) error {
 						// close or invalidate the underlying connection.
 						redisClient := conn.Redis
 						conn.Release()
-						return brain.NewRedisTimelineStore(redisClient)
+						return datapool.NewRedisTimelineStore(redisClient)
 					})
 					d.logger.Info(ctx, "brain registry: durable Timeline store factory wired (ADR-0011, #1114)")
 				}
