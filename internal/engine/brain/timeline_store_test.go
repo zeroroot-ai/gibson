@@ -93,11 +93,19 @@ func TestCodecRoundTrip(t *testing.T) {
 	}
 }
 
+// newTestAcquire returns an acquire closure that always returns rdb and a no-op
+// release, matching the NewRedisTimelineStore signature.
+func newTestAcquire(rdb *goredis.Client) func(ctx context.Context) (*goredis.Client, func(), error) {
+	return func(_ context.Context) (*goredis.Client, func(), error) {
+		return rdb, func() {}, nil
+	}
+}
+
 // TestRedisTimelineStore_AppendLoad verifies that appended events are returned
 // by LoadForReplay in the correct order.
 func TestRedisTimelineStore_AppendLoad(t *testing.T) {
 	_, rdb := newTestRedis(t)
-	store := brain.NewRedisTimelineStore(rdb)
+	store := brain.NewRedisTimelineStore(newTestAcquire(rdb))
 	ctx := context.Background()
 	tenant := "tenant-a"
 
@@ -128,8 +136,8 @@ func TestRedisTimelineStore_PerTenantIsolation(t *testing.T) {
 	_, rdbA := newTestRedis(t)
 	_, rdbB := newTestRedis(t)
 
-	storeA := brain.NewRedisTimelineStore(rdbA)
-	storeB := brain.NewRedisTimelineStore(rdbB)
+	storeA := brain.NewRedisTimelineStore(newTestAcquire(rdbA))
+	storeB := brain.NewRedisTimelineStore(newTestAcquire(rdbB))
 	ctx := context.Background()
 	tenant := "shared-tenant-name"
 
@@ -156,7 +164,7 @@ func TestRedisTimelineStore_PerTenantIsolation(t *testing.T) {
 // Engine are written to the store and can be replayed.
 func TestEngine_WithStore_PersistsEvents(t *testing.T) {
 	_, rdb := newTestRedis(t)
-	store := brain.NewRedisTimelineStore(rdb)
+	store := brain.NewRedisTimelineStore(newTestAcquire(rdb))
 
 	eng := brain.NewEngine("t1")
 	eng.WithStore(store)
@@ -208,7 +216,7 @@ func TestHydrate_EquivalenceAfterRestart(t *testing.T) {
 	defer cancel()
 
 	_, rdb := newTestRedis(t)
-	store := brain.NewRedisTimelineStore(rdb)
+	store := brain.NewRedisTimelineStore(newTestAcquire(rdb))
 
 	// --- Phase 1: persist a deterministic event sequence ---
 	// We persist events directly to the store (rather than through an Engine)
@@ -294,7 +302,7 @@ func TestHydrate_InFlightWorkFailedOnRestart(t *testing.T) {
 	defer cancel()
 
 	_, rdb := newTestRedis(t)
-	store := brain.NewRedisTimelineStore(rdb)
+	store := brain.NewRedisTimelineStore(newTestAcquire(rdb))
 
 	// Append raw events so we can craft an exact "running but never completed"
 	// scenario without running systems.
@@ -357,7 +365,7 @@ func TestRegistry_WithStoreFactory_NoopWhenFactoryNil(t *testing.T) {
 // the loaded snapshot has the same AtSeq and Data as the written one.
 func TestSnapshot_RoundTrip(t *testing.T) {
 	_, rdb := newTestRedis(t)
-	store := brain.NewRedisTimelineStore(rdb)
+	store := brain.NewRedisTimelineStore(newTestAcquire(rdb))
 	ctx := context.Background()
 	tenant := "tenant-snap-rt"
 
@@ -382,7 +390,7 @@ func TestSnapshot_RoundTrip(t *testing.T) {
 func TestTrimTo_BoundsStream(t *testing.T) {
 	mr, rdb := newTestRedis(t)
 	_ = mr
-	store := brain.NewRedisTimelineStore(rdb)
+	store := brain.NewRedisTimelineStore(newTestAcquire(rdb))
 	ctx := context.Background()
 	tenant := "tenant-trim"
 
@@ -409,7 +417,7 @@ func TestTrimTo_BoundsStream(t *testing.T) {
 // tail events must equal a World folded from the complete event sequence.
 func TestSnapshotPlusTailEqualsFullReplay(t *testing.T) {
 	_, rdb := newTestRedis(t)
-	store := brain.NewRedisTimelineStore(rdb)
+	store := brain.NewRedisTimelineStore(newTestAcquire(rdb))
 	ctx := context.Background()
 	const tenant = "tenant-snap-equiv"
 
@@ -475,7 +483,7 @@ func TestSnapshotPlusTailEqualsFullReplay(t *testing.T) {
 // the snapshot nor skipped by the exclusive-after-AtSeq tail replay.
 func TestLiveCadenceSnapshot_HydrateEquivalence(t *testing.T) {
 	_, rdb := newTestRedis(t)
-	store := brain.NewRedisTimelineStore(rdb)
+	store := brain.NewRedisTimelineStore(newTestAcquire(rdb))
 	const tenant = "tenant-live-cadence"
 
 	// Cadence of 2 means a snapshot fires after every 2 persisted events, so with
@@ -506,4 +514,65 @@ func TestLiveCadenceSnapshot_HydrateEquivalence(t *testing.T) {
 	assert.Equal(t, live.Hosts(), fresh.Hosts(), "hosts must match after live-cadence snapshot + hydrate")
 	assert.Equal(t, live.Work(), fresh.Work(), "work must match after live-cadence snapshot + hydrate")
 	assert.Equal(t, live.Missions(), fresh.Missions(), "missions must match after live-cadence snapshot + hydrate")
+}
+
+// TestRedisTimelineStore_AcquirePerOp verifies the fix for gibson#1114: the store
+// correctly appends and loads across multiple operations even when the release
+// function from a prior call has been invoked — simulating the idle-eviction
+// scenario where the pool closes the per-tenant client after an idle period.
+//
+// The key guarantee: because NewRedisTimelineStore accepts an acquire closure
+// that is called fresh on every operation, a previous release (or even a
+// closed client from a previous call) cannot affect a subsequent operation.
+func TestRedisTimelineStore_AcquirePerOp(t *testing.T) {
+	ctx := context.Background()
+	tenant := "tenant-acquire-per-op"
+
+	// Two independent miniredis servers simulate "before" and "after" eviction:
+	// after the first operation the pool would close the original client and
+	// vend a new one on the next call.
+	_, rdb1 := newTestRedis(t)
+	_, rdb2 := newTestRedis(t)
+
+	// callCount tracks how many times acquire has been called so we can
+	// switch clients mid-sequence — just like the pool rotates clients on eviction.
+	callCount := 0
+	acquire := func(_ context.Context) (*goredis.Client, func(), error) {
+		callCount++
+		// First operation uses rdb1; subsequent operations use rdb2.
+		// rdb1 is intentionally closed after the first release to simulate
+		// what the idle-evictor does to an evicted client.
+		if callCount == 1 {
+			return rdb1, func() { rdb1.Close() }, nil
+		}
+		return rdb2, func() {}, nil
+	}
+
+	store := brain.NewRedisTimelineStore(acquire)
+
+	// First Append — uses rdb1, which is then closed by the release function.
+	// The event goes into rdb1's stream (which we can't read back via rdb2,
+	// but this mirrors prod where the first client is evicted/closed and a new
+	// tenant-pool entry is created). The important assertion is that the store
+	// does NOT reuse rdb1 for subsequent calls.
+	ev1 := brain.HostObserved{ScopeID: "s", Address: "10.0.0.1"}
+	_, err := store.Append(ctx, tenant, ev1)
+	require.NoError(t, err, "first Append must succeed")
+	require.Equal(t, 1, callCount, "acquire must be called once for Append")
+
+	// Second Append — acquire now returns rdb2 (rdb1 was closed). If the store
+	// held a reference to rdb1 this would produce "redis: client is closed".
+	ev2 := brain.HostObserved{ScopeID: "s", Address: "10.0.0.2"}
+	_, err = store.Append(ctx, tenant, ev2)
+	require.NoError(t, err, "second Append must succeed even after first client was closed")
+	require.Equal(t, 2, callCount, "acquire must be called once per Append")
+
+	// LoadForReplay — also uses rdb2. Only ev2 is visible here because rdb1 and
+	// rdb2 are independent servers (different stream namespaces), which is the
+	// per-tenant isolation guarantee.
+	loaded, err := store.LoadForReplay(ctx, tenant, "")
+	require.NoError(t, err, "LoadForReplay must succeed")
+	require.Len(t, loaded, 1, "only ev2 is in rdb2's stream")
+	assert.Equal(t, ev2, loaded[0])
+	require.GreaterOrEqual(t, callCount, 3, "acquire must be called for LoadForReplay")
 }

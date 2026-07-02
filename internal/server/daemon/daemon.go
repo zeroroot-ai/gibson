@@ -1138,24 +1138,21 @@ func (d *daemonImpl) Start(ctx context.Context) error {
 							)
 							return nil
 						}
-						conn, err := d.pool.For(storeCtx, tenantID)
-						if err != nil {
-							slog.WarnContext(storeCtx, "brain/registry: store factory: pool.For failed; engine will run in-memory only",
-								"tenant", tenant,
-								"err", err,
-							)
-							return nil
-						}
-						// Extract the per-tenant *redis.Client before releasing the Conn
-						// so that the eviction tracker (activeConns) is decremented
-						// correctly. The *redis.Client itself is long-lived — it is
-						// managed by the pool's redisPerTenant cache and remains valid
-						// for the life of the pool (closed on Pool.Close / EvictTenant).
-						// Holding the client pointer after Release() is safe; it does not
-						// close or invalidate the underlying connection.
-						redisClient := conn.Redis
-						conn.Release()
-						return brain.NewRedisTimelineStore(redisClient)
+						// The store acquires a fresh Conn on every Redis operation
+						// (Append/LoadForReplay/WriteSnapshot/LoadSnapshot/TrimTo) and
+						// releases it immediately after the call completes. This avoids
+						// the "redis: client is closed" error that occurred when a stale
+						// *redis.Client held across a pool idle-eviction was reused:
+						// the idle-evictor calls EvictTenant → client.Close(), which
+						// silently invalidates any pointer extracted from a previously
+						// Released Conn (gibson#1114, conn.go:19).
+						return brain.NewRedisTimelineStore(func(opCtx context.Context) (*goredis.Client, func(), error) {
+							opConn, opErr := d.pool.For(opCtx, tenantID)
+							if opErr != nil {
+								return nil, nil, opErr
+							}
+							return opConn.Redis, opConn.Release, nil
+						})
 					})
 					d.logger.Info(ctx, "brain registry: durable Timeline store factory wired (ADR-0011, #1114)")
 				}
