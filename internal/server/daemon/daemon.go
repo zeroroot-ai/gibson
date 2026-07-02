@@ -1129,6 +1129,12 @@ func (d *daemonImpl) Start(ctx context.Context) error {
 				// If pool.For fails (tenant not provisioned) the engine operates
 				// in-memory only for that tenant, matching the pre-#1113 behavior.
 				if d.brainRegistry != nil {
+					// Boot guard (gibson#1119): refuse to start unless the
+					// data-plane Redis positively confirms AOF persistence —
+					// see assertTimelineDurability (timeline_store_factory.go).
+					if aofErr := assertTimelineDurability(ctx, poolCfg.RedisAddr, poolCfg.RedisPassword, datapool.AssertTimelineAOF, d.logger.Slog()); aofErr != nil {
+						return aofErr
+					}
 					d.brainRegistry.WithStoreFactory(timelineStoreFactory(d.pool, d.logger.Slog()))
 					d.logger.Info(ctx, "brain registry: durable Timeline store factory wired (ADR-0011, #1114)")
 				}
