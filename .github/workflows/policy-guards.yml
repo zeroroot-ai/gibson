@@ -10,6 +10,10 @@
 #   - vault-auth-method-deny-list (ADR-0009, org-level reusable workflow;
 #     formerly its own vault-auth-method-deny-list.yml, gibson#710 fixed the
 #     secrets-mapping startup_failure that had silently disabled it)
+#   - no-monorepo-shortcuts + runs-on-lint (board #44 / deploy#1067 / ADR-0060
+#     -- neither had a caller anywhere in the org before this; runs-on-lint
+#     is the new guard rejecting any runs-on label that isn't ubuntu-* or
+#     staging-ephemeral)
 #
 # gibson has no other standalone trivial guard workflows today (no dedicated
 # hostname/tenant-cr guard files) -- the migration-guards job in gibsoncheck.yml
@@ -17,7 +21,7 @@
 # fixtures, not a trivial policy check, so it stays where it is rather than
 # moving here.
 #
-# Required check name: policy-guards
+# Required check name: policy-guards (+ no-monorepo-shortcuts, runs-on-lint)
 
 name: policy-guards
 
@@ -30,3 +34,7 @@ jobs:
   policy-guards:
     name: policy-guards
     uses: zeroroot-ai/.github/.github/workflows/vault-auth-method-deny-list.yml@main
+  no-monorepo-shortcuts:
+    uses: zeroroot-ai/.github/.github/workflows/no-monorepo-shortcuts.yml@main
+  runs-on-lint:
+    uses: zeroroot-ai/.github/.github/workflows/runs-on-lint.yml@main
