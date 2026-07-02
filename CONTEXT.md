@@ -328,3 +328,6 @@ _Avoid_: event-driven cascade (rejected), per-tick frame storage, tying display 
   context; encoded "when X do Y" decision rules are the obsolete expert-system paradigm. The
   LLM decides; deterministic **systems** remain only for mechanical plumbing. Repeatability
   comes from fully-scripted CUE missions; auditability from the journal + recorded rationale.
+
+<!-- merge-queue canary (Epic: cicd-efficiency, board #44, slice S3): no-op doc touch to
+     capture merge_group check-run context strings before requiring any of them. -->
