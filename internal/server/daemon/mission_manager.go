@@ -72,8 +72,8 @@ type missionManager struct {
 	config          *config.Config
 	logger          *slog.Logger
 	registry        component.ComponentDiscovery
-	pool        datapool.Pool // per-tenant data-plane pool (replaces missionStore, missionRunStore, findingStore)
-	llmRegistry llm.LLMRegistry
+	pool            datapool.Pool // per-tenant data-plane pool (replaces missionStore, missionRunStore, findingStore)
+	llmRegistry     llm.LLMRegistry
 	callbackManager *harness.CallbackManager
 	harnessFactory  harness.HarnessFactoryInterface
 	targetStore     targetStoreLookup
@@ -147,11 +147,11 @@ func newMissionManager(
 	brainExecutor *brainExecutor,
 ) *missionManager {
 	return &missionManager{
-		config:      cfg,
-		logger:      logger.With("component", "mission-manager"),
-		registry:    reg,
-		pool:        pool,
-		llmRegistry: llmRegistry,
+		config:          cfg,
+		logger:          logger.With("component", "mission-manager"),
+		registry:        reg,
+		pool:            pool,
+		llmRegistry:     llmRegistry,
 		callbackManager: callbackMgr,
 		harnessFactory:  harnessFactory,
 		targetStore:     targetStore,
