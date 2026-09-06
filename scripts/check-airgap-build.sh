@@ -107,6 +107,29 @@ for repo in "${OSS_REPOS[@]}"; do
       exit 1
     }
 
+    # A tools-only module (gibson-executor/tools/recon) has no package outside
+    # its `tools` build tag, and that file blank-imports `main` packages, which
+    # go refuses to import: `./...` matches nothing and `go test` exits 1 with
+    # "no packages to test". The proof for such a module is the one its
+    # Dockerfile performs: build every program the tools file names, from the
+    # warmed cache alone, inside the module so its floors apply.
+    if [[ -z "$(cd "${mod_dir}" && GOPROXY=off go list ./... 2>/dev/null)" ]]; then
+      mapfile -t tool_pkgs < <(grep -hE '^\s*_\s+"[^"]+"' "${mod_dir}"/*.go 2>/dev/null | sed -E 's/.*"([^"]+)".*/\1/')
+      if [[ "${#tool_pkgs[@]}" -eq 0 ]]; then
+        echo "SETUP FAILURE: ${label} has no buildable package and no tools file" >&2
+        exit 2
+      fi
+      note "== ${label}: phase 2 — air-gapped go build of ${#tool_pkgs[@]} tool programs"
+      for pkg in "${tool_pkgs[@]}"; do
+        airgap_exec "${mod_dir}" go build -o /dev/null "${pkg}" || {
+          echo "AIR-GAP GATE FAILED: ${label} cannot build ${pkg} without a network fetch beyond the warmed module cache (gibson#818)" >&2
+          exit 1
+        }
+      done
+      note "   OK: ${label} builds air-gapped"
+      continue
+    fi
+
     note "== ${label}: phase 2 — air-gapped go build ./..."
     airgap_exec "${mod_dir}" go build ./... || {
       echo "AIR-GAP GATE FAILED: ${label} build needs a network fetch beyond the warmed module cache (gibson#818)" >&2
