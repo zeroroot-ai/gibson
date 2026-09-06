@@ -131,12 +131,6 @@ jobs:
             image: ghcr.io/zeroroot-ai/gibson-bootstrap
             tag_pattern: gibson-bootstrap-v(.*)
             build_args: ""
-          - component: gibson-bootstrap-runner
-            dockerfile: tools/gibson-bootstrap/Dockerfile.runner
-            path: .
-            image: ghcr.io/zeroroot-ai/gibson-bootstrap-runner
-            tag_pattern: gibson-bootstrap-runner-v(.*)
-            build_args: ""
     uses: zeroroot-ai/.github/.github/workflows/reusable-image-build.yml@cf1c48774b57e552ccdd17a2a4bba3f782587dbe # main, .github recreated 2026-09-06
     permissions:
       contents: read
@@ -152,6 +146,32 @@ jobs:
       image_name: ${{ matrix.image }}
       tag_pattern: ${{ matrix.tag_pattern }}
       build_args: ${{ matrix.build_args }}
+
+  # ---- gibson-bootstrap-runner: built AFTER gibson-bootstrap ---------------
+  # Dockerfile.runner starts FROM ghcr.io/zeroroot-ai/gibson-bootstrap:latest,
+  # the image the matrix above publishes. Inside the matrix the two built in
+  # parallel and the runner only ever succeeded because an older :latest
+  # already existed. With the package recreated from nothing (2026-09-06) the
+  # race lost every time: "gibson-bootstrap:latest: not found". The runner is
+  # its own job now and waits for the whole matrix.
+  bootstrap-runner:
+    name: gibson-bootstrap-runner
+    needs: images
+    uses: zeroroot-ai/.github/.github/workflows/reusable-image-build.yml@cf1c48774b57e552ccdd17a2a4bba3f782587dbe # main, .github recreated 2026-09-06
+    permissions:
+      contents: read
+      packages: write
+      id-token: write
+      attestations: write
+      security-events: write
+      actions: read
+    with:
+      component_name: gibson-bootstrap-runner
+      component_path: .
+      dockerfile_path: tools/gibson-bootstrap/Dockerfile.runner
+      image_name: ghcr.io/zeroroot-ai/gibson-bootstrap-runner
+      tag_pattern: gibson-bootstrap-runner-v(.*)
+      build_args: ""
 
   # ---- gibson-belief-sidecar: kept as its own job (distinct pytest gate) ----
   # The image build never runs the container and the inference import is lazy,
