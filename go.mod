@@ -49,7 +49,7 @@ require (
 	github.com/stretchr/testify v1.12.1
 	github.com/testcontainers/testcontainers-go v0.42.0
 	github.com/zeroroot-ai/ast-checks v0.3.0
-	github.com/zeroroot-ai/sdk v0.177.0
+	github.com/zeroroot-ai/sdk v0.177.1
 	github.com/zeroroot-ai/setec v0.114.0
 	github.com/zeroroot-ai/testfixtures v0.2.0
 	go.opentelemetry.io/contrib/instrumentation/google.golang.org/grpc/otelgrpc v0.68.0
@@ -72,7 +72,7 @@ require (
 	golang.org/x/time v0.15.0
 	golang.org/x/tools v0.49.0
 	google.golang.org/grpc v1.83.1
-	google.golang.org/protobuf v1.36.12-0.20260120151049-f2248ac996af
+	google.golang.org/protobuf v1.36.12
 	gopkg.in/yaml.v3 v3.0.1
 	k8s.io/api v0.36.1
 	k8s.io/apimachinery v0.36.1
