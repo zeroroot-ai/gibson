@@ -81,7 +81,7 @@ jobs:
       # migration dropped it. Without this, every kubectl call below fails
       # "command not found" (exit 127).
       - name: Install kubectl
-        uses: azure/setup-kubectl@776406bce94f63e41d621b960d78ee25c8b76ede # v4
+        uses: azure/setup-kubectl@829323503d1be3d00ca8346e5391ca0b07a9ab0d # v5.1.0
 
       # The ARC image ships no make either (same migration gap); the suite
       # entrypoint is `make test-setec-roundtrip`.
