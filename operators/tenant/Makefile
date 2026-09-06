@@ -144,14 +144,7 @@ OPERATOR_DOCKERFILE := $(REPO_ROOT)/build/tenant-operator.Dockerfile
 
 .PHONY: docker-build
 docker-build: ## Build docker image with the manager.
-	# The Dockerfile mounts an optional BuildKit secret `ghtoken` so
-	# private go modules under github.com/zeroroot-ai/* can be fetched
-	# during `go mod download`. Pass GHTOKEN=<pat> to make to wire it.
-	# Empty GHTOKEN is fine — the secret is `required=false` and the
-	# Dockerfile skips the git-credentials step when it's empty (matches
-	# what local-dev builds against public mirrors expect).
 	$(CONTAINER_TOOL) buildx build --progress=plain --load \
-		--secret id=ghtoken,env=GHTOKEN \
 		$(DOCKER_CACHE_ARGS) \
 		-f $(OPERATOR_DOCKERFILE) \
 		-t ${IMG} $(REPO_ROOT)
