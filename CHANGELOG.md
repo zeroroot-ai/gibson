@@ -62,6 +62,17 @@ Completed or cancelled missions are unaffected.
 
 ---
 
+## [0.134.1](https://github.com/zeroroot-ai/gibson/compare/v0.134.0...v0.134.1) (2026-09-06)
+
+
+### Bug Fixes
+
+* **build:** build connector-operator from the mirror and delete the dead build/Dockerfile ([#40](https://github.com/zeroroot-ai/gibson/issues/40)) ([d9b00cb](https://github.com/zeroroot-ai/gibson/commit/d9b00cbf1a3883c540963c54ff854512e2025d0f))
+* **build:** drop GOPRIVATE and the ghtoken mount from the image builds ([#35](https://github.com/zeroroot-ai/gibson/issues/35)) ([4d0e57d](https://github.com/zeroroot-ai/gibson/commit/4d0e57d05d2547b720143be7cb60d2452de52413))
+* **build:** drop the dead ghtoken secret from the tenant-operator docker-build ([#39](https://github.com/zeroroot-ai/gibson/issues/39)) ([af7b935](https://github.com/zeroroot-ai/gibson/commit/af7b935f3aaeed5890b009a2da743928a2238d20))
+* **ci:** air-gap gate covers every public Go repo, not only the four OSS ones ([#38](https://github.com/zeroroot-ai/gibson/issues/38)) ([f2202d5](https://github.com/zeroroot-ai/gibson/commit/f2202d5fdfc271810eb27ea37491af3a7ce836f7))
+* **ci:** build gibson-bootstrap-runner after gibson-bootstrap, not beside it ([#37](https://github.com/zeroroot-ai/gibson/issues/37)) ([d50838a](https://github.com/zeroroot-ai/gibson/commit/d50838a8a597a738ea3c7925624d863650b33496))
+
 ## [0.134.0](https://github.com/zeroroot-ai/gibson/compare/v0.133.0...v0.134.0) (2026-09-02)
 
 
