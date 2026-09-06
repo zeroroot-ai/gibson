@@ -12,12 +12,10 @@ COPY go.sum go.sum
 RUN apt-get update && apt-get install -y --no-install-recommends git ca-certificates && rm -rf /var/lib/apt/lists/*
 # cache deps before building and copying source so that we don't need to re-download as much
 # and so that source changes don't invalidate our downloaded layer
-#
-# Private github.com/zeroroot-ai/* modules require auth — supplied via
-# the optional `ghtoken` BuildKit secret (a file containing a GitHub
-# PAT or `gh auth token` output). When the secret is absent the build
-# fails fast with a missing-auth error.
-ENV GOPRIVATE=github.com/zeroroot-ai
+# Every github.com/zeroroot-ai/* module this build needs (sdk, ast-checks,
+# setec, testfixtures) is public and served by proxy.golang.org, which also
+# holds every version go.sum pins. No GOPRIVATE, no git credential: the build
+# runs the same for a stranger as for CI (ADR-0089, scripts/check-airgap-build.sh).
 # Defensive complement to the pinned base image (#914 bumped it to
 # golang:1.26.4 to match go.mod). The mirror golang image bakes
 # GOTOOLCHAIN=local, so if a future go.mod toolchain bump ever outpaces the
@@ -26,13 +24,7 @@ ENV GOPRIVATE=github.com/zeroroot-ai
 # self-fetch in that window. Matches the daemon Dockerfile pattern after the
 # E4 fold (gibson#913).
 ENV GOTOOLCHAIN=auto
-RUN --mount=type=secret,id=ghtoken,target=/run/secrets/ghtoken,required=false \
-    if [ -s /run/secrets/ghtoken ]; then \
-      git config --global url."https://x-access-token:$(cat /run/secrets/ghtoken)@github.com/".insteadOf "https://github.com/"; \
-    fi && \
-    go mod download; GOMOD_RC=$?; \
-    git config --global --remove-section url."https://x-access-token:$(cat /run/secrets/ghtoken 2>/dev/null || echo invalid)@github.com/" 2>/dev/null || true; \
-    exit $GOMOD_RC
+RUN go mod download
 
 # Copy the Go source (relies on .dockerignore to filter)
 COPY . .

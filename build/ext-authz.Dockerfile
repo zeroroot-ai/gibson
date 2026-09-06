@@ -20,11 +20,10 @@ WORKDIR /workspace
 # Copy dependency manifests first for better layer caching.
 COPY go.mod go.sum ./
 
-# Private github.com/zeroroot-ai/* modules (platform-clients, sdk) require
-# auth — supplied via the optional `ghtoken` BuildKit secret. When the
-# secret is absent the build will fail with a clear auth error rather
-# than silently fall back. Mirror tenant-operator's Dockerfile pattern.
-ENV GOPRIVATE=github.com/zeroroot-ai
+# Every github.com/zeroroot-ai/* module this build needs (sdk, ast-checks,
+# setec, testfixtures) is public and served by proxy.golang.org, which also
+# holds every version go.sum pins. No GOPRIVATE, no git credential: the build
+# runs the same for a stranger as for CI (ADR-0089, scripts/check-airgap-build.sh).
 # Defensive complement to the pinned base image (#914 bumped it to
 # golang:1.26.4 to match go.mod). The mirror golang image bakes
 # GOTOOLCHAIN=local, so if a future go.mod toolchain bump ever outpaces the
@@ -33,12 +32,7 @@ ENV GOPRIVATE=github.com/zeroroot-ai
 # self-fetch in that window. Matches the daemon Dockerfile pattern after the
 # E4 fold (gibson#913).
 ENV GOTOOLCHAIN=auto
-RUN --mount=type=secret,id=ghtoken,target=/run/secrets/ghtoken,required=false \
-    if [ -s /run/secrets/ghtoken ]; then \
-      git config --global url."https://x-access-token:$(cat /run/secrets/ghtoken)@github.com/".insteadOf "https://github.com/"; \
-    fi && \
-    go mod download && \
-    git config --global --remove-section url."https://x-access-token:$(cat /run/secrets/ghtoken 2>/dev/null || echo invalid)@github.com/" 2>/dev/null || true
+RUN go mod download
 
 # Copy source.
 COPY . .
