@@ -1,6 +1,7 @@
 # airgap-build — E14 cutover gate (gibson#818, ADR-0050): a clean-room clone
-# of the OSS stack (sdk, adk, setec, gibson-executor) builds air-gapped with
-# zero external fetch — the self-hostable/defense promise.
+# of every public Go repo (sdk, adk, setec, gibson-executor, cve-triage,
+# integrations, gibson) builds air-gapped with zero external fetch — the
+# self-hostable/defense promise.
 #
 # Per repo the gate: (0) anonymously clones the PUBLIC repo, (1) warms a
 # dedicated empty module cache via the public Go proxy only (no GOPRIVATE,
@@ -8,8 +9,8 @@
 # packages and compiles every test binary inside a no-network user namespace
 # (`unshare -r -n`) with GOPROXY=off. Any build-time reach beyond the warmed
 # mirror fails the gate. Runtime phone-home is excluded structurally: the
-# Apache layer links no ELv2/closed code (oss-boundary gate, gibson#817),
-# and there is no license client in the OSS stack to begin with.
+# permissive floor links no ELv2/closed code (oss-boundary gate, gibson#817),
+# and there is no license client in any public repo to begin with.
 #
 # Triggers (deliberately off the per-PR fast tier — cicd-efficiency
 # ADR-0060: gibson PR content cannot change the OSS repos, so this runs
@@ -37,7 +38,9 @@ jobs:
   airgap-build:
     name: airgap-build
     runs-on: ubuntu-latest
-    timeout-minutes: 30
+    # gibson alone compiles ~340 modules of dependencies plus every test
+    # binary; the four small repos fit in 30 minutes, the full set does not.
+    timeout-minutes: 75
     env:
       # Resolve zeroroot-ai modules exactly like an external customer:
       # public proxy + sumdb, no private-module carve-outs.
