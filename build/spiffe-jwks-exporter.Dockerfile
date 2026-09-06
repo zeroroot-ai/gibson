@@ -19,17 +19,11 @@ WORKDIR /src
 # E4 fold (gibson#913).
 ENV GOTOOLCHAIN=auto
 COPY go.mod go.sum ./
-# --mount=type=secret,id=ghtoken provides the GitHub token for fetching private
-# zeroroot-ai modules. The credential is scoped to this single RUN layer and
-# never baked into the image. On CI the secret is passed by
-# reusable-image-build.yml via secrets.ghtoken; local builds may omit it if the
-# modules are already cached.
-RUN --mount=type=secret,id=ghtoken \
-    if [ -f /run/secrets/ghtoken ]; then \
-      git config --global url."https://x-access-token:$(cat /run/secrets/ghtoken)@github.com/".insteadOf "https://github.com/"; \
-    fi && \
-    go env -w GOPRIVATE=github.com/zeroroot-ai && \
-    go mod download
+# Every github.com/zeroroot-ai/* module this build needs (sdk, ast-checks,
+# setec, testfixtures) is public and served by proxy.golang.org, which also
+# holds every version go.sum pins. No GOPRIVATE, no git credential: the build
+# runs the same for a stranger as for CI (ADR-0089, scripts/check-airgap-build.sh).
+RUN go mod download
 
 # The binary now lives in the gibson module and imports internal/infra, so the
 # full source tree is required (not just cmd/).
