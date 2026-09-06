@@ -1,0 +1,76 @@
+# oss-boundary — E14 cutover invariant (gibson#817, ADR-0050/ADR-0054):
+# the open (Apache-2.0) layer — sdk, adk, setec, gibson-executor — builds
+# with ZERO closed/ELv2 dependency, and gibson (ELv2) never requires the
+# closed billing repo (pkg/billing stays a no-op seam by default).
+#
+# This is the gibson-side cross-repo sweep: it clones the four public
+# Apache repos anonymously at their default branch and asserts their full
+# module graphs are free of gibson/billing/dashboard/deploy/gitops and the
+# private tooling modules. It complements (not replaces) each OSS repo's
+# local guard, e.g. sdk's `make check-no-gibson`.
+#
+# Triggers (kept off the per-PR fast tier deliberately — cicd-efficiency
+# ADR-0060: gibson PR content cannot change the OSS repos' dependency
+# graphs, so running this on every PR would be pure spend):
+#   - pull_request, path-filtered to this workflow + its script + go.mod
+#     (go.mod: the gibson->billing direction IS gibson-content-dependent)
+#   - weekly schedule (drift watch over the OSS repos' default branches)
+#   - workflow_dispatch (run on demand, e.g. from an epic checklist)
+
+name: oss-boundary
+
+on:
+  pull_request:
+    types: [opened, synchronize, reopened, ready_for_review]
+    paths:
+      - .github/workflows/oss-boundary.yml
+      - scripts/check-oss-boundary.sh
+      - go.mod
+  schedule:
+    - cron: "17 6 * * 1" # Mondays 06:17 UTC
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+# Go module fetch resilience.
+#
+# PIPE, not comma. Go's default is `https://proxy.golang.org,direct`, and with
+# a COMMA the fallback engages only on 404/410 — a transport error is FATAL.
+# So one module whose HTTP/2 stream gets reset kills the whole job:
+#
+#   read "https://proxy.golang.org/<mod>/@v/<ver>.zip": stream error:
+#   stream ID 111; INTERNAL_ERROR; received from peer
+#
+# which surfaces as `FAIL <pkg> [setup failed]` and reads like a broken build.
+# On 2026-08-20 that evicted gibson#1493 and its release PR from the merge
+# queue repeatedly, while 274 other modules downloaded fine in the same job
+# off a warm cache, a different single module failing each time.
+#
+# A PIPE falls through on ANY error, so that one module is fetched from its
+# origin instead. No second proxy is added on purpose: `direct` introduces no
+# new trusted party, and GOSUMDB still verifies every module against
+# sum.golang.org either way, so integrity does not depend on who served it.
+env:
+  GOPROXY: https://proxy.golang.org|direct
+
+jobs:
+  oss-boundary:
+    name: oss-boundary
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    env:
+      # The whole point is resolving zeroroot-ai modules the way an external
+      # (customer) build does: public proxy + sumdb, no private-module carve-out.
+      GOPRIVATE: ""
+      GONOPROXY: ""
+      GONOSUMDB: ""
+      GOFLAGS: ""
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
+      - uses: actions/setup-go@924ae3a1cded613372ab5595356fb5720e22ba16 # v6
+        with:
+          go-version-file: go.mod
+          cache: false # nothing here builds gibson; module-graph loads are tiny
+      - name: Check open-core boundary (Apache layer + billing seam)
+        run: ./scripts/check-oss-boundary.sh "${RUNNER_TEMP}/oss-clones"

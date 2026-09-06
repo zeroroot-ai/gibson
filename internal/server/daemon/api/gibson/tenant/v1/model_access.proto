@@ -1,0 +1,151 @@
+syntax = "proto3";
+
+// Package gibson.tenant.v1 — ModelAccessService: customer-callable
+// provider/model access-grant management surface. Moved from
+// gibson.authz.v1.ModelAccessService (platform-sdk) into the OSS SDK under the
+// gibson.tenant.v1 package as part of the admin-surface-recategorization
+// (ADR-0039 implementation).
+//
+// Authorization: every RPC carries a (gibson.auth.v1.authz) annotation.
+package gibson.tenant.v1;
+
+option go_package = "github.com/zeroroot-ai/gibson/internal/server/daemon/api/gibson/tenant/v1;tenantv1";
+
+import "gibson/auth/v1/options.proto";
+
+// ModelAccessService manages provider/model grants and the audit trail of
+// slot resolutions. Admin callers can query any subject; non-admins are
+// narrowed server-side to their own data.
+service ModelAccessService {
+  rpc GrantAccess(GrantAccessRequest) returns (GrantAccessResponse) {
+    option (gibson.auth.v1.authz) = {
+      relation: "member"
+      object_type: "tenant"
+      object_deriver: "tenant_from_identity"
+      allowed_identities: 3  // USER | SERVICE
+    };
+  }
+  rpc RevokeAccess(RevokeAccessRequest) returns (RevokeAccessResponse) {
+    option (gibson.auth.v1.authz) = {
+      relation: "member"
+      object_type: "tenant"
+      object_deriver: "tenant_from_identity"
+      allowed_identities: 3  // USER | SERVICE
+    };
+  }
+  rpc ListAccess(ListAccessRequest) returns (ListAccessResponse) {
+    option (gibson.auth.v1.authz) = {
+      relation: "member"
+      object_type: "tenant"
+      object_deriver: "tenant_from_identity"
+      allowed_identities: 3  // USER | SERVICE
+    };
+  }
+  // ListModelResolutionEvents returns the audit trail of slot resolutions.
+  // Named to avoid collision with the TenantService.ListAuditEvents RPC.
+  rpc ListModelResolutionEvents(ListModelResolutionEventsRequest) returns (ListModelResolutionEventsResponse) {
+    option (gibson.auth.v1.authz) = {
+      relation: "member"
+      object_type: "tenant"
+      object_deriver: "tenant_from_identity"
+      allowed_identities: 3  // USER | SERVICE
+    };
+  }
+}
+
+// ---------------------------------------------------------------------------
+// ModelAccessService types
+// ---------------------------------------------------------------------------
+
+// GrantSubjectKind identifies what kind of FGA subject a grant applies to.
+enum GrantSubjectKind {
+  GRANT_SUBJECT_KIND_UNSPECIFIED = 0;
+  GRANT_SUBJECT_KIND_USER = 1;
+  GRANT_SUBJECT_KIND_TEAM = 2;
+  GRANT_SUBJECT_KIND_TENANT = 3;
+}
+
+// GrantTargetKind identifies whether a grant applies to a whole provider
+// or a specific model on that provider.
+enum GrantTargetKind {
+  GRANT_TARGET_KIND_UNSPECIFIED = 0;
+  GRANT_TARGET_KIND_PROVIDER = 1;
+  GRANT_TARGET_KIND_MODEL = 2;
+}
+
+// AccessGrant names a single (subject, target) permission.
+message AccessGrant {
+  string tenant_id = 1;
+  GrantSubjectKind subject_kind = 2;
+  string subject_id = 3;
+  GrantTargetKind target_kind = 4;
+  string target_id = 5;
+  int64 granted_at_unix = 6;
+  string granted_by_user_id = 7;
+}
+
+// CandidateOutcome captures a single model's permit/deny outcome in a
+// slot-resolution audit event.
+message CandidateOutcome {
+  string provider = 1;
+  string model = 2;
+  bool allowed = 3;
+  string reason = 4;
+}
+
+// ModelResolutionEvent records every slot resolution, regardless of outcome.
+message ModelResolutionEvent {
+  string tenant_id = 1;
+  string user_id = 2;
+  string mission_id = 3;
+  string run_id = 4;
+  string agent_id = 5;
+  string slot_name = 6;
+  string chosen_provider = 7;
+  string chosen_model = 8;
+  repeated CandidateOutcome considered = 9;
+  int64 timestamp_unix = 10;
+}
+
+// ---------------------------------------------------------------------------
+// ModelAccessService request/response messages
+// ---------------------------------------------------------------------------
+
+message GrantAccessRequest {
+  AccessGrant grant = 1;
+}
+
+message GrantAccessResponse {
+  AccessGrant grant = 1;
+}
+
+message RevokeAccessRequest {
+  GrantSubjectKind subject_kind = 1;
+  string subject_id = 2;
+  GrantTargetKind target_kind = 3;
+  string target_id = 4;
+}
+
+message RevokeAccessResponse {
+  int64 revoked_at_unix = 1;
+}
+
+message ListAccessRequest {
+  GrantSubjectKind subject_kind = 1;
+  string subject_id = 2;
+}
+
+message ListAccessResponse {
+  repeated AccessGrant grants = 1;
+}
+
+message ListModelResolutionEventsRequest {
+  int64 start_time_unix = 1;
+  int64 end_time_unix = 2;
+  string user_id = 3;
+  string slot_name = 4;
+}
+
+message ListModelResolutionEventsResponse {
+  repeated ModelResolutionEvent events = 1;
+}

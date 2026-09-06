@@ -1,0 +1,114 @@
+# Spec: security-hardening Requirement 5 (Go-CVE policy).
+# Runs govulncheck against the daemon build.
+# Local invocation is forbidden per CLAUDE.md (CPU thrash); this workflow
+# is the canonical place to surface CVE failures.
+#
+# Epic: cicd-efficiency (board #44), slice S5, gibson#1130. Scanner cadence per
+# docs/architecture/CICD-CONTEXT.md decision #9: this is the authoritative
+# pre-merge gate on merge_group instead of the previous double-fire on both
+# `pull_request` and `push:main`, plus a weekly deep scan so a CVE published
+# between merges is still caught within a week.
+#
+# Queue-entry compat (epic cicd-efficiency, board #44, merge-queue-entry
+# follow-up): GitHub blocks a PR from entering the merge queue until every
+# ruleset-required check context has reported on the PR itself -- a
+# `skipped` conclusion satisfies that, an absent check does not. A workflow
+# that only triggers on `merge_group` produces no check run at all on a
+# typical PR, so this can never be added to required_status_checks without
+# freezing entry. Add `pull_request` to the trigger and skip the expensive
+# job there via job-level `if:` (skipped = free, no runner spin-up); the
+# real scan still only runs on merge_group/schedule. Mirrors dashboard's
+# node-ci / security.yml / codeql.yml (dashboard#941/#942) and gibson's own
+# go-ci.yml heavy-tier pattern.
+name: security
+
+on:
+  pull_request:
+  merge_group:
+  schedule:
+    - cron: "0 9 * * 3"
+
+concurrency:
+  group: security-${{ github.ref }}
+  cancel-in-progress: true
+
+permissions:
+  contents: read
+
+jobs:
+  govulncheck:
+    name: govulncheck
+    # Real scan only outside pull_request (merge_group is the authoritative
+    # gate, schedule is the weekly deep scan). Reports `skipped` on PRs so
+    # this context can be added to required_status_checks without blocking
+    # queue entry.
+    # lane-exception: queue-only by deliberate scanner cadence (epic
+    # cicd-efficiency, CICD-CONTEXT decision #9) -- merge_group is the
+    # authoritative gate, the weekly schedule is the deep scan. This IS the
+    # gibson#1236 shape: a PR can be green and then evicted by a CVE published
+    # since its last run, which running govulncheck on every push would not
+    # prevent either. Made visible rather than silent:
+    # merge-queue-eviction-report.yml comments the failing `govulncheck` job
+    # onto the PR.
+    if: github.event_name != 'pull_request'
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
+
+      - uses: actions/setup-go@924ae3a1cded613372ab5595356fb5720e22ba16 # v6
+        with:
+          go-version-file: go.mod
+          cache: true
+
+      - name: install govulncheck
+        # Pinned, not @latest. The allowlist checker parses govulncheck's JSON
+        # against the schema of a known version (golang/vuln@v1.1.4: Finding.OSV
+        # is `osv`, Trace is `trace`, Frame.Function is `function`). @latest
+        # means a schema change upstream could silently empty the finding set.
+        # Same version the reusable heavy tier installs.
+        run: go install golang.org/x/vuln/cmd/govulncheck@v1.1.4
+
+      - name: build daemon binary for govulncheck
+        # govulncheck's SOURCE mode does go/ssa static analysis, which crashes
+        # under the Go 1.26.4 toolchain on this codebase — two distinct upstream
+        # panics (gibson#758): v1.4.0 nil-derefs in internal/vulncheck.vulnFuncs,
+        # and @master panics "ForEachElement called on type containing
+        # *types.TypeParam" on our generics. go.mod pins `go 1.26.4`, so we can't
+        # downgrade the toolchain. BINARY mode reads the compiled binary's symbol
+        # table instead of re-analyzing source, sidestepping the crash entirely.
+        # Restore source mode (`govulncheck ./...`) once an x/vuln release
+        # supports Go 1.26.4 source analysis.
+        run: go build -o "${RUNNER_TEMP}/gibson" ./cmd/gibson
+
+      - name: run govulncheck
+        # Binary mode still fetches the vuln DB from https://vuln.go.dev; under
+        # Go 1.26.4 net/http's HTTP/2 client read-loop panics mid-fetch
+        # (h2_bundle.go ReadFrame). Force the DB fetch over HTTP/1.1 so the
+        # panicking http2 read loop is never entered.
+        env:
+          GODEBUG: http2client=0
+        # Findings go through the same script the reusable heavy tier's policy
+        # uses. gibson#1483 was evicted because the allowlist was wired into
+        # `heavy` only: that job passed and this one still failed on the
+        # identical seven advisories. Two scanners, one policy, one
+        # implementation — which still holds now that the policy exempts
+        # nothing. The script is called WITHOUT an allowlist, so any reachable
+        # advisory fails here.
+        #
+        # `|| true` is not swallowing the result — govulncheck exits non-zero
+        # merely for HAVING findings, and the checker below is what decides
+        # whether those findings are tolerated. It exits non-zero itself if they
+        # are not, so the step still fails.
+        run: |
+          set -euo pipefail
+          govulncheck -format json -mode=binary "${RUNNER_TEMP}/gibson" > "${RUNNER_TEMP}/vuln.json" || true
+          test -s "${RUNNER_TEMP}/vuln.json" || {
+            echo "govulncheck produced no output at all — treating as a failed scan, not a clean one" >&2
+            exit 1
+          }
+          # The policy implementation is tested immediately before it is
+          # trusted, in the same step, so the test can never drift out of the
+          # lane the checker runs in. It is dependency-free and takes ~1s.
+          python3 scripts/tests/test_check_govulncheck_allowlist.py
+          python3 scripts/check-govulncheck-allowlist.py "${RUNNER_TEMP}/vuln.json"

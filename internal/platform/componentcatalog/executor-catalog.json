@@ -1,0 +1,345 @@
+{
+  "image": "ghcr.io/zeroroot-ai/gibson-executor@sha256:1c923f35d43e63d11300b4c86e79dfe6ee572304124fa8c175bfee32cc1a5cb8",
+  "tools": [
+    {
+      "name": "dnsx",
+      "version": "0.1.0",
+      "description": "DNS resolver + record enumerator (ProjectDiscovery dnsx). Emits Host nodes for resolved A/AAAA records.",
+      "tags": [
+        "recon",
+        "dns"
+      ],
+      "input_schema": {
+        "properties": {
+          "target": {
+            "type": "string"
+          }
+        },
+        "required": [
+          "target"
+        ],
+        "type": "object"
+      },
+      "output_proto_type": "gibson.graphrag.v1.DiscoveryResult",
+      "default_parse_quality": 1,
+      "resources": {
+        "vcpu": 1,
+        "memory": "256Mi"
+      },
+      "default_timeout_seconds": 300
+    },
+    {
+      "name": "httpx",
+      "version": "0.1.0",
+      "description": "HTTP probe + fingerprinter (ProjectDiscovery httpx). Emits typed Endpoint/Service/Technology nodes.",
+      "tags": [
+        "recon",
+        "web",
+        "fingerprint"
+      ],
+      "input_schema": {
+        "properties": {
+          "args": {
+            "description": "Extra httpx flags.",
+            "items": {
+              "type": "string"
+            },
+            "type": "array"
+          },
+          "paths": {
+            "description": "Paths to probe beneath the target (e.g. [\"/\", \"/api\"]).",
+            "items": {
+              "type": "string"
+            },
+            "type": "array"
+          },
+          "target": {
+            "description": "URL, host, or IP. httpx accepts the same inputs via stdin; single value here is probed once.",
+            "type": "string"
+          }
+        },
+        "required": [
+          "target"
+        ],
+        "type": "object"
+      },
+      "output_proto_type": "gibson.graphrag.v1.DiscoveryResult",
+      "default_parse_quality": 1,
+      "resources": {
+        "vcpu": 1,
+        "memory": "256Mi"
+      },
+      "default_timeout_seconds": 180
+    },
+    {
+      "name": "masscan",
+      "version": "0.1.0",
+      "description": "High-throughput port scanner (masscan). Emits Host/Port nodes for open ports across large CIDR ranges.",
+      "tags": [
+        "recon",
+        "network",
+        "scan"
+      ],
+      "input_schema": {
+        "properties": {
+          "ports": {
+            "type": "string"
+          },
+          "rate": {
+            "type": "string"
+          },
+          "target": {
+            "type": "string"
+          }
+        },
+        "required": [
+          "target",
+          "ports"
+        ],
+        "type": "object"
+      },
+      "output_proto_type": "gibson.graphrag.v1.DiscoveryResult",
+      "default_parse_quality": 1,
+      "resources": {
+        "vcpu": 4,
+        "memory": "2Gi"
+      },
+      "default_timeout_seconds": 600
+    },
+    {
+      "name": "naabu",
+      "version": "0.1.0",
+      "description": "Fast port scanner (ProjectDiscovery naabu). Emits Host/Port nodes for each open port.",
+      "tags": [
+        "recon",
+        "network"
+      ],
+      "input_schema": {
+        "properties": {
+          "ports": {
+            "type": "string"
+          },
+          "target": {
+            "type": "string"
+          }
+        },
+        "required": [
+          "target"
+        ],
+        "type": "object"
+      },
+      "output_proto_type": "gibson.graphrag.v1.DiscoveryResult",
+      "default_parse_quality": 1,
+      "resources": {
+        "vcpu": 2,
+        "memory": "512Mi"
+      },
+      "default_timeout_seconds": 300
+    },
+    {
+      "name": "nmap",
+      "version": "0.1.0",
+      "description": "TCP/UDP port scanner with service + OS detection. Returns typed Host/Port/Service nodes for the knowledge graph.",
+      "tags": [
+        "recon",
+        "network",
+        "discovery"
+      ],
+      "input_schema": {
+        "properties": {
+          "args": {
+            "description": "Extra CLI flags, e.g. [\"-sV\", \"-O\"].",
+            "items": {
+              "type": "string"
+            },
+            "type": "array"
+          },
+          "ports": {
+            "description": "Port spec — e.g. \"22,80,443\" or \"1-1024\". Default: top-1000.",
+            "type": "string"
+          },
+          "target": {
+            "description": "IPv4/IPv6 address, CIDR, or hostname.",
+            "type": "string"
+          }
+        },
+        "required": [
+          "target"
+        ],
+        "type": "object"
+      },
+      "output_proto_type": "gibson.graphrag.v1.DiscoveryResult",
+      "default_parse_quality": 1,
+      "resources": {
+        "vcpu": 2,
+        "memory": "512Mi"
+      },
+      "default_timeout_seconds": 300
+    },
+    {
+      "name": "nuclei",
+      "version": "0.1.0",
+      "description": "Template-based vulnerability scanner (ProjectDiscovery nuclei). Emits typed Finding nodes with severity + CVSS + MITRE classification when templates supply it.",
+      "tags": [
+        "scan",
+        "vulnerability",
+        "web"
+      ],
+      "input_schema": {
+        "properties": {
+          "args": {
+            "description": "Extra nuclei flags.",
+            "items": {
+              "type": "string"
+            },
+            "type": "array"
+          },
+          "severity": {
+            "description": "Comma-separated severity filter, e.g. \"critical,high\".",
+            "type": "string"
+          },
+          "target": {
+            "description": "URL or host to scan.",
+            "type": "string"
+          },
+          "templates": {
+            "description": "Template IDs or paths (e.g. cves/2023 or a specific template path). Default: nuclei's built-in default template set.",
+            "items": {
+              "type": "string"
+            },
+            "type": "array"
+          }
+        },
+        "required": [
+          "target"
+        ],
+        "type": "object"
+      },
+      "output_proto_type": "gibson.graphrag.v1.DiscoveryResult",
+      "default_parse_quality": 1,
+      "resources": {
+        "vcpu": 2,
+        "memory": "1Gi"
+      },
+      "default_timeout_seconds": 600
+    },
+    {
+      "name": "subfinder",
+      "version": "0.1.0",
+      "description": "Passive subdomain discovery (ProjectDiscovery subfinder). Emits Domain/Subdomain nodes.",
+      "tags": [
+        "recon",
+        "dns",
+        "discovery"
+      ],
+      "input_schema": {
+        "properties": {
+          "args": {
+            "items": {
+              "type": "string"
+            },
+            "type": "array"
+          },
+          "target": {
+            "description": "Root domain to enumerate subdomains for.",
+            "type": "string"
+          }
+        },
+        "required": [
+          "target"
+        ],
+        "type": "object"
+      },
+      "output_proto_type": "gibson.graphrag.v1.DiscoveryResult",
+      "default_parse_quality": 1,
+      "resources": {
+        "vcpu": 1,
+        "memory": "256Mi"
+      },
+      "default_timeout_seconds": 300
+    },
+    {
+      "name": "tlsx",
+      "version": "0.1.0",
+      "description": "TLS configuration and certificate probe (ProjectDiscovery tlsx). Emits a Finding per weak protocol, weak cipher, or certificate problem.",
+      "tags": [
+        "tls",
+        "certificate",
+        "misconfiguration"
+      ],
+      "input_schema": {
+        "properties": {
+          "args": {
+            "items": {
+              "type": "string"
+            },
+            "type": "array"
+          },
+          "port": {
+            "description": "Port to probe. Defaults to 443.",
+            "type": "string"
+          },
+          "target": {
+            "description": "Host, address or URL to probe.",
+            "type": "string"
+          }
+        },
+        "required": [
+          "target"
+        ],
+        "type": "object"
+      },
+      "output_proto_type": "gibson.graphrag.v1.DiscoveryResult",
+      "default_parse_quality": 1,
+      "resources": {
+        "vcpu": 1,
+        "memory": "256Mi"
+      },
+      "default_timeout_seconds": 120
+    },
+    {
+      "name": "trivy",
+      "version": "0.1.0",
+      "description": "Container image vulnerability scan (Aqua Trivy). Emits Image/Package/Vulnerability nodes and one Finding per affected package.",
+      "tags": [
+        "sca",
+        "vulnerability",
+        "container",
+        "supply-chain"
+      ],
+      "input_schema": {
+        "properties": {
+          "args": {
+            "items": {
+              "type": "string"
+            },
+            "type": "array"
+          },
+          "ignore_unfixed": {
+            "description": "\"true\" to report only vulnerabilities that have a fixed version.",
+            "type": "string"
+          },
+          "severity": {
+            "description": "Comma-separated severities to report: UNKNOWN,LOW,MEDIUM,HIGH,CRITICAL.",
+            "type": "string"
+          },
+          "target": {
+            "description": "Image reference to scan, e.g. ghcr.io/org/app:1.2.3 or app@sha256:\u003chex\u003e.",
+            "type": "string"
+          }
+        },
+        "required": [
+          "target"
+        ],
+        "type": "object"
+      },
+      "output_proto_type": "gibson.graphrag.v1.DiscoveryResult",
+      "default_parse_quality": 1,
+      "resources": {
+        "vcpu": 2,
+        "memory": "1Gi"
+      },
+      "default_timeout_seconds": 600
+    }
+  ]
+}

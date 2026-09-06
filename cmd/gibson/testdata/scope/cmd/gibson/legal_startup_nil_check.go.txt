@@ -1,0 +1,22 @@
+// Fixture for TestNoGracefulNilInRequestPaths.
+//
+// This file is .go.txt (not .go) so `go test` and `go build` don't compile
+// it. The walker parses it from disk as raw source.
+//
+// LEGAL: this nil-check lives in `cmd/` (startup wiring). The walker
+// must NOT flag it. Startup validation is the ONLY legal nil-check site.
+
+package main
+
+type fakeAuthorizer struct{}
+
+func validateStartupDeps(authz *fakeAuthorizer) error {
+	// Legal: startup validation. If a required dep is missing, the
+	// binary must exit 1 — but the *check itself* is the canonical
+	// nil-check pattern. The walker's allowlist permits it because
+	// this file lives under cmd/.
+	if authz == nil {
+		return nil
+	}
+	return nil
+}

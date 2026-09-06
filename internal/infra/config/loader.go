@@ -1,0 +1,505 @@
+// SPDX-License-Identifier: Elastic-2.0
+// Copyright 2026 Zero Root AI
+
+package config
+
+import (
+	"fmt"
+	"os"
+	"regexp"
+	"strings"
+
+	"github.com/spf13/viper"
+)
+
+// loadStrictTenant reads GIBSON_STRICT_TENANT from the environment and returns
+// the resolved bool. Accepts "1", "true", "yes" (case-insensitive) as true;
+// empty string or "0", "false", "no" as false. Any other value is a config
+// load error.
+//
+// Default (unset / empty): false — preserves current (non-strict) behaviour in
+// Phase 1. Phase 5 will flip the default and remove this flag.
+func loadStrictTenant() (bool, error) {
+	raw := strings.ToLower(strings.TrimSpace(os.Getenv("GIBSON_STRICT_TENANT")))
+	switch raw {
+	case "", "0", "false", "no":
+		return false, nil
+	case "1", "true", "yes":
+		return true, nil
+	default:
+		return false, fmt.Errorf(
+			"config: invalid GIBSON_STRICT_TENANT value %q; accepted values are 1/true/yes (enable) or 0/false/no/empty (disable)",
+			os.Getenv("GIBSON_STRICT_TENANT"),
+		)
+	}
+}
+
+// loadUntrustedExec reads GIBSON_UNTRUSTED_EXEC and returns the resolved
+// deployment-shape mode string ("setec-only" or "customer-isolation").
+//
+// Default (unset / empty) is "setec-only" — fail-closed: in the hosted
+// deployment untrusted execution must go through setec or be denied
+// (ADR-0010). On-prem / self-hosted operators that own their own isolation set
+// "customer-isolation" explicitly. Any other value is a config load error.
+func loadUntrustedExec() (string, error) {
+	raw := strings.ToLower(strings.TrimSpace(os.Getenv("GIBSON_UNTRUSTED_EXEC")))
+	switch raw {
+	case "", "setec-only":
+		return "setec-only", nil
+	case "customer-isolation":
+		return "customer-isolation", nil
+	default:
+		return "", fmt.Errorf(
+			"config: invalid GIBSON_UNTRUSTED_EXEC value %q; accepted values are setec-only (default, hosted) or customer-isolation (on-prem)",
+			os.Getenv("GIBSON_UNTRUSTED_EXEC"),
+		)
+	}
+}
+
+// ConfigLoader handles loading configuration from files.
+type ConfigLoader interface {
+	Load(path string) (*Config, error)
+	LoadWithDefaults(path string) (*Config, error)
+}
+
+// viperConfigLoader implements ConfigLoader using Viper.
+type viperConfigLoader struct {
+	validator ConfigValidator
+}
+
+// NewConfigLoader creates a new ConfigLoader instance.
+func NewConfigLoader(validator ConfigValidator) ConfigLoader {
+	return &viperConfigLoader{
+		validator: validator,
+	}
+}
+
+// Load loads configuration from the specified file path.
+// Returns an error if the file doesn't exist or cannot be parsed.
+func (l *viperConfigLoader) Load(path string) (*Config, error) {
+	v := viper.New()
+	v.SetConfigFile(path)
+	v.SetConfigType("yaml")
+
+	if err := v.ReadInConfig(); err != nil {
+		return nil, fmt.Errorf("failed to read config file: %w", err)
+	}
+
+	// Unmarshal into Config struct first
+	var cfg Config
+	if err := v.Unmarshal(&cfg); err != nil {
+		return nil, fmt.Errorf("failed to unmarshal config: %w", err)
+	}
+
+	// Read raw config into map for environment variable interpolation
+	rawConfig := v.AllSettings()
+	interpolatedConfig := interpolateEnvVars(rawConfig)
+
+	// Apply environment variable interpolation to the unmarshaled config
+	if interpolatedMap, ok := interpolatedConfig.(map[string]interface{}); ok {
+		if err := applyInterpolation(&cfg, interpolatedMap); err != nil {
+			return nil, fmt.Errorf("failed to apply environment variable interpolation: %w", err)
+		}
+
+		// Fail if deprecated database section is present
+		if _, hasDatabase := interpolatedMap["database"]; hasDatabase {
+			return nil, fmt.Errorf("configuration error: the top-level 'database' config section is no longer supported; remove it and configure state storage under the 'redis' section instead")
+		}
+	}
+
+	// Apply runtime env-var overrides (GIBSON_STRICT_TENANT).
+	// These are env-only knobs not sourced from YAML.
+	if err := applyRuntimeEnvOverrides(&cfg); err != nil {
+		return nil, fmt.Errorf("configuration error: %w", err)
+	}
+
+	// Validate the loaded configuration
+	if err := l.validator.Validate(&cfg); err != nil {
+		return nil, fmt.Errorf("configuration validation failed: %w", err)
+	}
+
+	return &cfg, nil
+}
+
+// LoadWithDefaults loads configuration from the specified file path.
+// If the file doesn't exist, returns default configuration.
+// If the file exists, it merges file values on top of defaults (missing sections get defaults).
+func (l *viperConfigLoader) LoadWithDefaults(path string) (*Config, error) {
+	// Start with defaults
+	cfg := DefaultConfig()
+
+	// Check if file exists
+	if _, err := os.Stat(path); os.IsNotExist(err) {
+		// No file — apply runtime env overrides on top of defaults, then validate.
+		if err := applyRuntimeEnvOverrides(cfg); err != nil {
+			return nil, fmt.Errorf("configuration error: %w", err)
+		}
+		if err := l.validator.Validate(cfg); err != nil {
+			return nil, fmt.Errorf("default configuration validation failed: %w", err)
+		}
+		return cfg, nil
+	}
+
+	// File exists, load and merge on top of defaults
+	v := viper.New()
+	v.SetConfigFile(path)
+	v.SetConfigType("yaml")
+
+	if err := v.ReadInConfig(); err != nil {
+		return nil, fmt.Errorf("failed to read config file: %w", err)
+	}
+
+	// Unmarshal into the cfg struct (which already has defaults)
+	if err := v.Unmarshal(cfg); err != nil {
+		return nil, fmt.Errorf("failed to unmarshal config: %w", err)
+	}
+
+	// Read raw config into map for environment variable interpolation
+	rawConfig := v.AllSettings()
+	interpolatedConfig := interpolateEnvVars(rawConfig)
+
+	// Apply environment variable interpolation to the unmarshaled config
+	if interpolatedMap, ok := interpolatedConfig.(map[string]interface{}); ok {
+		if err := applyInterpolation(cfg, interpolatedMap); err != nil {
+			return nil, fmt.Errorf("failed to apply environment variable interpolation: %w", err)
+		}
+
+		// Fail if deprecated database section is present
+		if _, hasDatabase := interpolatedMap["database"]; hasDatabase {
+			return nil, fmt.Errorf("configuration error: the top-level 'database' config section is no longer supported; remove it and configure state storage under the 'redis' section instead")
+		}
+	}
+
+	// Apply runtime env-var overrides (GIBSON_STRICT_TENANT).
+	// These are env-only knobs not sourced from YAML.
+	if err := applyRuntimeEnvOverrides(cfg); err != nil {
+		return nil, fmt.Errorf("configuration error: %w", err)
+	}
+
+	// Ensure TenantMode has a valid default when not set in YAML.
+	// Spec: per-tenant-data-plane-completion Task 11 / Req 5.5.
+	if cfg.GraphRAG.Neo4j.TenantMode == "" {
+		cfg.GraphRAG.Neo4j.TenantMode = "instance"
+	}
+
+	// Validate the loaded configuration
+	if err := l.validator.Validate(cfg); err != nil {
+		return nil, fmt.Errorf("configuration validation failed: %w", err)
+	}
+
+	return cfg, nil
+}
+
+// applyRuntimeEnvOverrides reads GIBSON_STRICT_TENANT from the environment and
+// writes the resolved value into the unexported strictTenant field of cfg.
+// This is called after YAML unmarshalling so that env vars always win over
+// file values for this knob, and so that env-var reads are concentrated in
+// the config loader rather than scattered across the daemon codebase.
+//
+// GIBSON_MODE was removed as part of the one-code-path epic (deploy#205):
+// the daemon binary boots identically in every environment; per-environment
+// differences live in helm values (which fail-loud on missing dependencies).
+func applyRuntimeEnvOverrides(cfg *Config) error {
+	strict, err := loadStrictTenant()
+	if err != nil {
+		return err
+	}
+	cfg.strictTenant = strict
+
+	untrustedExec, err := loadUntrustedExec()
+	if err != nil {
+		return err
+	}
+	cfg.untrustedExec = untrustedExec
+
+	return nil
+}
+
+// interpolateEnvVars recursively interpolates environment variables in the config map.
+// Supports ${VAR_NAME} syntax.
+func interpolateEnvVars(data interface{}) interface{} {
+	switch v := data.(type) {
+	case map[string]interface{}:
+		result := make(map[string]interface{})
+		for key, value := range v {
+			result[key] = interpolateEnvVars(value)
+		}
+		return result
+	case []interface{}:
+		result := make([]interface{}, len(v))
+		for i, value := range v {
+			result[i] = interpolateEnvVars(value)
+		}
+		return result
+	case string:
+		return interpolateString(v)
+	default:
+		return v
+	}
+}
+
+// interpolateString replaces ${VAR_NAME} or ${VAR_NAME:-default} with environment variable values.
+func interpolateString(s string) string {
+	// Regular expression to match ${VAR_NAME} or ${VAR_NAME:-default}
+	re := regexp.MustCompile(`\$\{([^}]+)\}`)
+
+	return re.ReplaceAllStringFunc(s, func(match string) string {
+		// Extract content between ${ and }
+		content := strings.TrimSuffix(strings.TrimPrefix(match, "${"), "}")
+
+		// Check for default value syntax: VAR_NAME:-default
+		var varName, defaultValue string
+		if idx := strings.Index(content, ":-"); idx != -1 {
+			varName = content[:idx]
+			defaultValue = content[idx+2:]
+		} else {
+			varName = content
+			defaultValue = ""
+		}
+
+		// Get environment variable value
+		if envValue := os.Getenv(varName); envValue != "" {
+			return envValue
+		}
+
+		// Return default value if provided, otherwise empty string
+		if defaultValue != "" {
+			return defaultValue
+		}
+
+		// If no default and env not set, return the original reference unchanged.
+		// This preserves ${VAR} in the config output so callers can distinguish
+		// "env var unset" from "env var set to empty string".
+		return match
+	})
+}
+
+// applyInterpolation applies the interpolated values back to the Config struct.
+func applyInterpolation(cfg *Config, interpolated map[string]interface{}) error {
+	// Apply Core config interpolation
+	if core, ok := interpolated["core"].(map[string]interface{}); ok {
+		if homeDir, ok := core["home_dir"].(string); ok {
+			cfg.Core.HomeDir = interpolateString(homeDir)
+		}
+		if dataDir, ok := core["data_dir"].(string); ok {
+			cfg.Core.DataDir = interpolateString(dataDir)
+		}
+		if cacheDir, ok := core["cache_dir"].(string); ok {
+			cfg.Core.CacheDir = interpolateString(cacheDir)
+		}
+	}
+
+	// Apply Security config interpolation
+	if security, ok := interpolated["security"].(map[string]interface{}); ok {
+		if algo, ok := security["encryption_algorithm"].(string); ok {
+			cfg.Security.EncryptionAlgorithm = interpolateString(algo)
+		}
+		if kd, ok := security["key_derivation"].(string); ok {
+			cfg.Security.KeyDerivation = interpolateString(kd)
+		}
+	}
+
+	// Apply LLM config interpolation
+	if llm, ok := interpolated["llm"].(map[string]interface{}); ok {
+		if provider, ok := llm["default_provider"].(string); ok {
+			cfg.LLM.DefaultProvider = interpolateString(provider)
+		}
+	}
+
+	// Apply Logging config interpolation
+	if logging, ok := interpolated["logging"].(map[string]interface{}); ok {
+		if level, ok := logging["level"].(string); ok {
+			cfg.Logging.Level = interpolateString(level)
+		}
+		if format, ok := logging["format"].(string); ok {
+			cfg.Logging.Format = interpolateString(format)
+		}
+	}
+
+	// Apply Tracing config interpolation
+	if tracing, ok := interpolated["tracing"].(map[string]interface{}); ok {
+		if endpoint, ok := tracing["endpoint"].(string); ok {
+			cfg.Tracing.Endpoint = interpolateString(endpoint)
+		}
+	}
+
+	// Apply Daemon config interpolation
+	if daemon, ok := interpolated["daemon"].(map[string]interface{}); ok {
+		if grpcAddr, ok := daemon["grpc_address"].(string); ok {
+			cfg.Daemon.GRPCAddress = interpolateString(grpcAddr)
+		}
+	}
+
+	// Apply Plugins config interpolation
+	if plugins, ok := interpolated["plugins"].(map[string]interface{}); ok {
+		if cfg.Plugins == nil {
+			cfg.Plugins = make(PluginsConfig)
+		}
+		for componentName, pluginConfig := range plugins {
+			if pluginMap, ok := pluginConfig.(map[string]interface{}); ok {
+				cfg.Plugins[componentName] = make(map[string]string)
+				for key, value := range pluginMap {
+					if strVal, ok := value.(string); ok {
+						cfg.Plugins[componentName][key] = interpolateString(strVal)
+					}
+				}
+			}
+		}
+	}
+
+	// Apply ActivityLogging config interpolation
+	if activityLogging, ok := interpolated["activity_logging"].(map[string]interface{}); ok {
+		if level, ok := activityLogging["level"].(string); ok {
+			cfg.ActivityLogging.Level = interpolateString(level)
+		}
+		if output, ok := activityLogging["output"].(string); ok {
+			cfg.ActivityLogging.Output = interpolateString(output)
+		}
+		if filePath, ok := activityLogging["file_path"].(string); ok {
+			cfg.ActivityLogging.FilePath = interpolateString(filePath)
+		}
+	}
+
+	// Apply Registry config interpolation
+	if registry, ok := interpolated["registry"].(map[string]interface{}); ok {
+		if namespace, ok := registry["namespace"].(string); ok {
+			cfg.Registry.Namespace = interpolateString(namespace)
+		}
+		if ttl, ok := registry["ttl"].(string); ok {
+			cfg.Registry.TTL = interpolateString(ttl)
+		}
+	}
+
+	// Apply GraphRAG/Neo4j config interpolation (tenant_mode and shared_cluster_uri only;
+	// URI/username/password were removed — the daemon no longer holds a startup-time shared
+	// Neo4j connection; per-tenant URIs are resolved lazily by the Neo4jEndpointResolver).
+	if graphrag, ok := interpolated["graphrag"].(map[string]interface{}); ok {
+		if neo4j, ok := graphrag["neo4j"].(map[string]interface{}); ok {
+			if tenantMode, ok := neo4j["tenant_mode"].(string); ok {
+				cfg.GraphRAG.Neo4j.TenantMode = interpolateString(tenantMode)
+			}
+			if sharedClusterURI, ok := neo4j["shared_cluster_uri"].(string); ok {
+				cfg.GraphRAG.Neo4j.SharedClusterURI = interpolateString(sharedClusterURI)
+			}
+		}
+	}
+
+	// Apply Redis config interpolation
+	if redis, ok := interpolated["redis"].(map[string]interface{}); ok {
+		if url, ok := redis["url"].(string); ok {
+			cfg.Redis.URL = interpolateString(url)
+		}
+		if password, ok := redis["password"].(string); ok {
+			cfg.Redis.Password = interpolateString(password)
+		}
+		if tlsCertFile, ok := redis["tls_cert_file"].(string); ok {
+			cfg.Redis.TLSCertFile = interpolateString(tlsCertFile)
+		}
+		if tlsKeyFile, ok := redis["tls_key_file"].(string); ok {
+			cfg.Redis.TLSKeyFile = interpolateString(tlsKeyFile)
+		}
+		if tlsCAFile, ok := redis["tls_ca_file"].(string); ok {
+			cfg.Redis.TLSCAFile = interpolateString(tlsCAFile)
+		}
+		if sentinelMaster, ok := redis["sentinel_master"].(string); ok {
+			cfg.Redis.SentinelMaster = interpolateString(sentinelMaster)
+		}
+		// Handle string arrays for cluster and sentinel addresses
+		if clusterAddrs, ok := redis["cluster_addrs"].([]interface{}); ok {
+			cfg.Redis.ClusterAddrs = make([]string, len(clusterAddrs))
+			for i, addr := range clusterAddrs {
+				if strAddr, ok := addr.(string); ok {
+					cfg.Redis.ClusterAddrs[i] = interpolateString(strAddr)
+				}
+			}
+		}
+		if sentinelAddrs, ok := redis["sentinel_addrs"].([]interface{}); ok {
+			cfg.Redis.SentinelAddrs = make([]string, len(sentinelAddrs))
+			for i, addr := range sentinelAddrs {
+				if strAddr, ok := addr.(string); ok {
+					cfg.Redis.SentinelAddrs[i] = interpolateString(strAddr)
+				}
+			}
+		}
+	}
+
+	// Apply PlatformPostgres config interpolation. Critical — the chart
+	// ships the password as `${DASHBOARD_DB_PASSWORD}` and relies on this
+	// hook to expand it; without this block the daemon tries to
+	// authenticate with the literal string and every capability-grant +
+	// audit path degrades. Pre-existing gap, surfaced by the
+	// llm-user-attribution-governance spec because the audit stream
+	// depends on this pool being healthy.
+	if dp, ok := interpolated["dashboard_postgres"].(map[string]interface{}); ok {
+		if host, ok := dp["host"].(string); ok {
+			cfg.PlatformPostgres.Host = interpolateString(host)
+		}
+		if database, ok := dp["database"].(string); ok {
+			cfg.PlatformPostgres.Database = interpolateString(database)
+		}
+		if username, ok := dp["username"].(string); ok {
+			cfg.PlatformPostgres.Username = interpolateString(username)
+		}
+		if password, ok := dp["password"].(string); ok {
+			cfg.PlatformPostgres.Password = interpolateString(password)
+		}
+		if sslMode, ok := dp["ssl_mode"].(string); ok {
+			cfg.PlatformPostgres.SSLMode = interpolateString(sslMode)
+		}
+	}
+
+	// Apply TenantPostgres config interpolation. The chart ships the admin
+	// password as `${TENANT_POSTGRES_ADMIN_PASSWORD}` and relies on this
+	// hook to expand it at runtime. Without this block the daemon cannot
+	// connect to the per-tenant admin Postgres and all tenant data-plane
+	// bootstrap paths fail. See spec per-tenant-data-plane-completion Req 1.
+	if tp, ok := interpolated["tenant_postgres"].(map[string]interface{}); ok {
+		if host, ok := tp["host"].(string); ok {
+			cfg.TenantPostgres.Host = interpolateString(host)
+		}
+		if adminDatabase, ok := tp["admin_database"].(string); ok {
+			cfg.TenantPostgres.AdminDatabase = interpolateString(adminDatabase)
+		}
+		if adminUsername, ok := tp["admin_username"].(string); ok {
+			cfg.TenantPostgres.AdminUsername = interpolateString(adminUsername)
+		}
+		if adminPassword, ok := tp["admin_password"].(string); ok {
+			cfg.TenantPostgres.AdminPassword = interpolateString(adminPassword)
+		}
+		if sslMode, ok := tp["ssl_mode"].(string); ok {
+			cfg.TenantPostgres.SSLMode = interpolateString(sslMode)
+		}
+	}
+
+	// Apply Observability config interpolation
+	if observability, ok := interpolated["observability"].(map[string]interface{}); ok {
+		if neo4jBrowserURL, ok := observability["neo4j_browser_url"].(string); ok {
+			cfg.Observability.Neo4jBrowserURL = interpolateString(neo4jBrowserURL)
+		}
+	}
+
+	// Apply Checkpoint config interpolation
+	if checkpoint, ok := interpolated["checkpoint"].(map[string]interface{}); ok {
+		if keyPrefix, ok := checkpoint["key_prefix"].(string); ok {
+			cfg.Checkpoint.KeyPrefix = interpolateString(keyPrefix)
+		}
+		if format, ok := checkpoint["format"].(string); ok {
+			cfg.Checkpoint.Format = interpolateString(format)
+		}
+		if encryption, ok := checkpoint["encryption"].(map[string]interface{}); ok {
+			if keyProvider, ok := encryption["key_provider"].(string); ok {
+				cfg.Checkpoint.Encryption.KeyProvider = interpolateString(keyProvider)
+			}
+			if keySecretName, ok := encryption["key_secret_name"].(string); ok {
+				cfg.Checkpoint.Encryption.KeySecretName = interpolateString(keySecretName)
+			}
+		}
+		if retention, ok := checkpoint["retention"].(map[string]interface{}); ok {
+			if defaultMode, ok := retention["default_mode"].(string); ok {
+				cfg.Checkpoint.Retention.DefaultMode = interpolateString(defaultMode)
+			}
+		}
+	}
+
+	return nil
+}

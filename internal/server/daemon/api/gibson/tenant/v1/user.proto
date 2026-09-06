@@ -1,0 +1,708 @@
+syntax = "proto3";
+
+// Package gibson.tenant.v1 — UserService: customer-callable user self-service
+// operations. Moved from gibson.user.v1.UserService (platform-sdk) into the
+// OSS SDK under the gibson.tenant.v1 package as part of the
+// admin-surface-recategorization (ADR-0039 implementation).
+//
+// Authorization: every RPC carries a (gibson.auth.v1.authz) annotation.
+package gibson.tenant.v1;
+
+option go_package = "github.com/zeroroot-ai/gibson/internal/server/daemon/api/gibson/tenant/v1;tenantv1";
+
+import "gibson/auth/v1/options.proto";
+
+// UserService provides user self-service operations scoped to a tenant member.
+service UserService {
+  // ---------------------------------------------------------------------------
+  // Profile
+  // ---------------------------------------------------------------------------
+
+  rpc GetUserProfile(GetUserProfileRequest) returns (GetUserProfileResponse) {
+    option (gibson.auth.v1.authz) = {
+      relation: "member"
+      object_type: "tenant"
+      object_deriver: "tenant_from_identity"
+      allowed_identities: 3  // USER | SERVICE
+    };
+  }
+  rpc UpdateUserProfile(UpdateUserProfileRequest) returns (UpdateUserProfileResponse) {
+    option (gibson.auth.v1.authz) = {
+      relation: "member"
+      object_type: "tenant"
+      object_deriver: "tenant_from_identity"
+      allowed_identities: 3  // USER | SERVICE
+    };
+  }
+
+  // ---------------------------------------------------------------------------
+  // Alerts
+  // ---------------------------------------------------------------------------
+
+  rpc ListAlerts(ListAlertsRequest) returns (ListAlertsResponse) {
+    option (gibson.auth.v1.authz) = {
+      relation: "member"
+      object_type: "tenant"
+      object_deriver: "tenant_from_identity"
+      allowed_identities: 3  // USER | SERVICE
+    };
+  }
+  rpc MarkAlertRead(MarkAlertReadRequest) returns (MarkAlertReadResponse) {
+    option (gibson.auth.v1.authz) = {
+      relation: "member"
+      object_type: "tenant"
+      object_deriver: "tenant_from_identity"
+      allowed_identities: 3  // USER | SERVICE
+    };
+  }
+  rpc MarkAllAlertsRead(MarkAllAlertsReadRequest) returns (MarkAllAlertsReadResponse) {
+    option (gibson.auth.v1.authz) = {
+      relation: "member"
+      object_type: "tenant"
+      object_deriver: "tenant_from_identity"
+      allowed_identities: 3  // USER | SERVICE
+    };
+  }
+
+  // ---------------------------------------------------------------------------
+  // Conversations
+  // ---------------------------------------------------------------------------
+
+  rpc ListConversations(ListConversationsRequest) returns (ListConversationsResponse) {
+    option (gibson.auth.v1.authz) = {
+      relation: "member"
+      object_type: "tenant"
+      object_deriver: "tenant_from_identity"
+      allowed_identities: 3  // USER | SERVICE
+    };
+  }
+  rpc GetConversation(GetConversationRequest) returns (GetConversationResponse) {
+    option (gibson.auth.v1.authz) = {
+      relation: "member"
+      object_type: "tenant"
+      object_deriver: "tenant_from_identity"
+      allowed_identities: 3  // USER | SERVICE
+    };
+  }
+  rpc SaveConversation(SaveConversationRequest) returns (SaveConversationResponse) {
+    option (gibson.auth.v1.authz) = {
+      relation: "member"
+      object_type: "tenant"
+      object_deriver: "tenant_from_identity"
+      allowed_identities: 3  // USER | SERVICE
+    };
+  }
+  rpc RenameConversation(RenameConversationRequest) returns (RenameConversationResponse) {
+    option (gibson.auth.v1.authz) = {
+      relation: "member"
+      object_type: "tenant"
+      object_deriver: "tenant_from_identity"
+      allowed_identities: 3  // USER | SERVICE
+    };
+  }
+  rpc DeleteConversation(DeleteConversationRequest) returns (DeleteConversationResponse) {
+    option (gibson.auth.v1.authz) = {
+      relation: "member"
+      object_type: "tenant"
+      object_deriver: "tenant_from_identity"
+      allowed_identities: 3  // USER | SERVICE
+    };
+  }
+
+  // ---------------------------------------------------------------------------
+  // User Onboarding State
+  // ---------------------------------------------------------------------------
+
+  rpc GetUserOnboardingState(GetUserOnboardingStateRequest) returns (GetUserOnboardingStateResponse) {
+    option (gibson.auth.v1.authz) = {
+      relation: "member"
+      object_type: "tenant"
+      object_deriver: "tenant_from_identity"
+      allowed_identities: 3  // USER | SERVICE
+    };
+  }
+  rpc UpdateUserOnboardingState(UpdateUserOnboardingStateRequest) returns (UpdateUserOnboardingStateResponse) {
+    option (gibson.auth.v1.authz) = {
+      relation: "member"
+      object_type: "tenant"
+      object_deriver: "tenant_from_identity"
+      allowed_identities: 3  // USER | SERVICE
+    };
+  }
+  rpc ResetUserOnboardingState(ResetUserOnboardingStateRequest) returns (ResetUserOnboardingStateResponse) {
+    option (gibson.auth.v1.authz) = {
+      relation: "member"
+      object_type: "tenant"
+      object_deriver: "tenant_from_identity"
+      allowed_identities: 3  // USER | SERVICE
+    };
+  }
+
+  // ---------------------------------------------------------------------------
+  // User Layout Preferences
+  // ---------------------------------------------------------------------------
+
+  rpc GetUserLayout(GetUserLayoutRequest) returns (GetUserLayoutResponse) {
+    option (gibson.auth.v1.authz) = {
+      relation: "member"
+      object_type: "tenant"
+      object_deriver: "tenant_from_identity"
+      allowed_identities: 3  // USER | SERVICE
+    };
+  }
+  rpc SaveUserLayout(SaveUserLayoutRequest) returns (SaveUserLayoutResponse) {
+    option (gibson.auth.v1.authz) = {
+      relation: "member"
+      object_type: "tenant"
+      object_deriver: "tenant_from_identity"
+      allowed_identities: 3  // USER | SERVICE
+    };
+  }
+  rpc ResetUserLayout(ResetUserLayoutRequest) returns (ResetUserLayoutResponse) {
+    option (gibson.auth.v1.authz) = {
+      relation: "member"
+      object_type: "tenant"
+      object_deriver: "tenant_from_identity"
+      allowed_identities: 3  // USER | SERVICE
+    };
+  }
+
+  // ---------------------------------------------------------------------------
+  // User Activity Feed
+  // ---------------------------------------------------------------------------
+
+  rpc GetUserActivity(GetUserActivityRequest) returns (GetUserActivityResponse) {
+    option (gibson.auth.v1.authz) = {
+      relation: "member"
+      object_type: "tenant"
+      object_deriver: "tenant_from_identity"
+      allowed_identities: 3  // USER | SERVICE
+    };
+  }
+  rpc RecordUserActivity(RecordUserActivityRequest) returns (RecordUserActivityResponse) {
+    option (gibson.auth.v1.authz) = {
+      relation: "member"
+      object_type: "tenant"
+      object_deriver: "tenant_from_identity"
+      allowed_identities: 3  // USER | SERVICE
+    };
+  }
+
+  // ---------------------------------------------------------------------------
+  // Signup Progress
+  // ---------------------------------------------------------------------------
+
+  rpc GetSignupProgress(GetSignupProgressRequest) returns (GetSignupProgressResponse) {
+    option (gibson.auth.v1.authz) = {
+      unauthenticated: true
+    };
+  }
+  // Signup progress is written DURING signup, before any tenant or membership
+  // exists (the founding-user flow keys it by a random attemptId, not a tenant).
+  // It must therefore be unauthenticated — matching GetSignupProgress above.
+  // Previously member/tenant-scoped, which deadlocked every signup once the
+  // tenant-selector became fail-closed (dashboard#646). The attemptId UUID is
+  // the capability; the payload is non-sensitive step labels.
+  rpc SetSignupProgress(SetSignupProgressRequest) returns (SetSignupProgressResponse) {
+    option (gibson.auth.v1.authz) = {
+      unauthenticated: true
+    };
+  }
+
+  // ---------------------------------------------------------------------------
+  // Membership Cache Invalidation
+  // ---------------------------------------------------------------------------
+
+  rpc InvalidateMembershipCache(InvalidateMembershipCacheRequest) returns (InvalidateMembershipCacheResponse) {
+    option (gibson.auth.v1.authz) = {
+      relation: "member"
+      object_type: "tenant"
+      object_deriver: "tenant_from_identity"
+      allowed_identities: 3  // USER | SERVICE
+    };
+  }
+
+  // ---------------------------------------------------------------------------
+  // Chat Attachment Staging
+  // ---------------------------------------------------------------------------
+
+  rpc StageAttachment(StageAttachmentRequest) returns (StageAttachmentResponse) {
+    option (gibson.auth.v1.authz) = {
+      relation: "member"
+      object_type: "tenant"
+      object_deriver: "tenant_from_identity"
+      allowed_identities: 3  // USER | SERVICE
+    };
+  }
+  rpc ConsumeAttachment(ConsumeAttachmentRequest) returns (ConsumeAttachmentResponse) {
+    option (gibson.auth.v1.authz) = {
+      relation: "member"
+      object_type: "tenant"
+      object_deriver: "tenant_from_identity"
+      allowed_identities: 3  // USER | SERVICE
+    };
+  }
+
+  // ---------------------------------------------------------------------------
+  // Session / token revocation
+  // ---------------------------------------------------------------------------
+
+  // RevokeUserSessions terminates the target user's Zitadel sessions and
+  // revokes their refresh-token grants. This is what `gibson logout` calls
+  // (with target_user_id = the caller's own id) and what the dashboard
+  // "revoke sessions" admin UI calls for other members.
+  //
+  // Authorization is two-layered:
+  //
+  //   (1) The (gibson.auth.v1.authz) annotation below is the COARSE ext-authz
+  //       gate: the caller must be an authenticated USER and a member of the
+  //       tenant. ext-authz cannot derive the per-target object from the
+  //       request body today (the from_field deriver requires descriptor-aware
+  //       extraction that has not landed), so it cannot make the fine-grained
+  //       decision here.
+  //
+  //   (2) The daemon handler performs the FINE-grained FGA check
+  //       `can_revoke_sessions(caller, user:<target_user_id>)` — composed in
+  //       model.fga as: self OR admin over a team the target belongs to OR
+  //       tenant admin (deny-wins, ADR-0041). A tenant member with no admin
+  //       relation over the target is rejected by the handler. This mirrors
+  //       the in-handler caller-access intersection that
+  //       MembershipService.GrantComponentPermissions already performs.
+  //
+  // The capability is surfaced through IdentityService.WhoAmI.
+  //
+  // v1 semantics (DECIDED): revoking refresh grants + terminating sessions
+  // blocks all NEW tokens immediately; the target's current stateless access
+  // JWT ages out within the (15-minute) access-token TTL. No per-request
+  // revocation check is added to ext-authz in v1.
+  rpc RevokeUserSessions(RevokeUserSessionsRequest) returns (RevokeUserSessionsResponse) {
+    option (gibson.auth.v1.authz) = {
+      relation: "member"
+      object_type: "tenant"
+      object_deriver: "tenant_from_identity"
+      allowed_identities: 1  // USER
+    };
+  }
+}
+
+// ---------------------------------------------------------------------------
+// Profile messages
+// ---------------------------------------------------------------------------
+
+message GetUserProfileRequest {
+  string tenant_id = 1;
+  string user_id = 2;
+}
+
+message UserProfileData {
+  string id = 1;
+  string email = 2;
+  string display_name = 3;
+  string avatar_url = 4;
+  string status = 5;
+  string created_at = 6;
+  string preferred_locale = 7;
+}
+
+message GetUserProfileResponse {
+  UserProfileData profile = 1;
+}
+
+message UpdateUserProfileRequest {
+  string tenant_id = 1;
+  string user_id = 2;
+  string display_name = 3;
+  string preferred_locale = 4;
+}
+
+message UpdateUserProfileResponse {
+  UserProfileData profile = 1;
+}
+
+// ---------------------------------------------------------------------------
+// Alert messages
+// ---------------------------------------------------------------------------
+
+message Alert {
+  string id = 1;
+  string tenant_id = 2;
+  string user_id = 3;
+  string title = 4;
+  string body = 5;
+  string severity = 6;
+  bool read = 7;
+  int64 created_at_unix = 8;
+  string source = 9;
+  string source_id = 10;
+}
+
+message ListAlertsRequest {
+  string tenant_id = 1;
+  string user_id = 2;
+  bool unread_only = 3;
+  int32 limit = 4;
+}
+
+message ListAlertsResponse {
+  repeated Alert alerts = 1;
+}
+
+message MarkAlertReadRequest {
+  string tenant_id = 1;
+  string alert_id = 2;
+}
+
+message MarkAlertReadResponse {}
+
+message MarkAllAlertsReadRequest {
+  string tenant_id = 1;
+  string user_id = 2;
+}
+
+message MarkAllAlertsReadResponse {
+  int32 count = 1;
+}
+
+// ---------------------------------------------------------------------------
+// Conversation messages (lossless parts-based model)
+// ---------------------------------------------------------------------------
+
+message MessagePartText {
+  string text = 1;
+}
+
+message MessagePartToolCall {
+  string tool_call_id = 1;
+  string name = 2;
+  string arguments = 3;
+}
+
+message MessagePartToolResult {
+  string tool_call_id = 1;
+  string result = 2;
+}
+
+message MessagePartCitation {
+  string citation_id = 1;
+  string label = 2;
+  string url = 3;
+}
+
+message MessagePartAttachmentRef {
+  string attachment_id = 1;
+  string media_type = 2;
+  string name = 3;
+}
+
+message MessagePartReasoning {
+  string text = 1;
+}
+
+message MessagePart {
+  oneof part {
+    MessagePartText text = 1;
+    MessagePartToolCall tool_call = 2;
+    MessagePartToolResult tool_result = 3;
+    MessagePartCitation citation = 4;
+    MessagePartAttachmentRef attachment_ref = 5;
+    MessagePartReasoning reasoning = 6;
+  }
+}
+
+message ConversationSummary {
+  string id = 1;
+  string tenant_id = 2;
+  string user_id = 3;
+  string title = 4;
+  int64 created_at_unix = 5;
+  int64 updated_at_unix = 6;
+  int32 message_count = 7;
+}
+
+message ConversationMessage {
+  string id = 1;
+  string role = 2;
+  repeated MessagePart parts = 3;
+  int64 created_at_unix = 4;
+}
+
+message ListConversationsRequest {
+  string tenant_id = 1;
+  string user_id = 2;
+  int32 limit = 3;
+}
+
+message ListConversationsResponse {
+  repeated ConversationSummary conversations = 1;
+}
+
+message GetConversationRequest {
+  string conversation_id = 1;
+  string tenant_id = 2;
+}
+
+message GetConversationResponse {
+  ConversationSummary conversation = 1;
+  repeated ConversationMessage messages = 2;
+}
+
+message SaveConversationRequest {
+  string tenant_id = 1;
+  string user_id = 2;
+  string conversation_id = 3;
+  string title = 4;
+  string agent_id = 5;
+  repeated ConversationMessage messages = 6;
+}
+
+message SaveConversationResponse {}
+
+message RenameConversationRequest {
+  string tenant_id = 1;
+  string conversation_id = 2;
+  string title = 3;
+}
+
+message RenameConversationResponse {}
+
+message DeleteConversationRequest {
+  string tenant_id = 1;
+  string conversation_id = 2;
+}
+
+message DeleteConversationResponse {}
+
+// ---------------------------------------------------------------------------
+// User Onboarding State messages
+// ---------------------------------------------------------------------------
+
+message OnboardingSetupTask {
+  string id = 1;
+  string status = 2;
+  string completed_at = 3;
+  string category = 4;
+  int32 estimated_minutes = 5;
+}
+
+message UserOnboardingState {
+  string user_id = 1;
+  string tenant_id = 2;
+  bool wizard_completed = 3;
+  bool wizard_skipped = 4;
+  string current_step_id = 5;
+  repeated string completed_steps = 6;
+  repeated string skipped_steps = 7;
+  repeated OnboardingSetupTask setup_tasks = 8;
+  string llm_config_json = 9;
+  string selected_agent_id = 10;
+  string created_mission_id = 11;
+  string started_at = 12;
+  string completed_at = 13;
+  string updated_at = 14;
+  int32 version = 15;
+}
+
+message GetUserOnboardingStateRequest {
+  string tenant_id = 1;
+  string user_id = 2;
+}
+
+message GetUserOnboardingStateResponse {
+  UserOnboardingState state = 1;
+}
+
+message UpdateUserOnboardingStateRequest {
+  string tenant_id = 1;
+  string user_id = 2;
+  UserOnboardingState state = 3;
+}
+
+message UpdateUserOnboardingStateResponse {
+  UserOnboardingState state = 1;
+}
+
+message ResetUserOnboardingStateRequest {
+  string tenant_id = 1;
+  string user_id = 2;
+}
+
+message ResetUserOnboardingStateResponse {
+  UserOnboardingState state = 1;
+}
+
+// ---------------------------------------------------------------------------
+// User Layout Preferences messages
+// ---------------------------------------------------------------------------
+
+message WidgetPosition {
+  int32 x = 1;
+  int32 y = 2;
+  int32 w = 3;
+  int32 h = 4;
+}
+
+message WidgetConfig {
+  string id = 1;
+  string type = 2;
+  WidgetPosition position = 3;
+  bool visible = 4;
+  string settings_json = 5;
+}
+
+message UserLayoutPreferences {
+  repeated WidgetConfig widgets = 1;
+  int32 cols = 2;
+  int32 row_height = 3;
+}
+
+message GetUserLayoutRequest {
+  string tenant_id = 1;
+  string user_id = 2;
+}
+
+message GetUserLayoutResponse {
+  UserLayoutPreferences layout = 1;
+  bool is_default = 2;
+}
+
+message SaveUserLayoutRequest {
+  string tenant_id = 1;
+  string user_id = 2;
+  UserLayoutPreferences layout = 3;
+}
+
+message SaveUserLayoutResponse {
+  UserLayoutPreferences layout = 1;
+}
+
+message ResetUserLayoutRequest {
+  string tenant_id = 1;
+  string user_id = 2;
+}
+
+message ResetUserLayoutResponse {}
+
+// ---------------------------------------------------------------------------
+// User Activity Feed messages
+// ---------------------------------------------------------------------------
+
+message ActivityItem {
+  string id = 1;
+  string label = 2;
+  int64 timestamp_unix = 3;
+}
+
+message UserActivityContext {
+  repeated ActivityItem recent_missions = 1;
+  repeated ActivityItem recent_nodes = 2;
+  repeated ActivityItem recent_findings = 3;
+  int64 last_active_at_unix = 4;
+}
+
+enum ActivityKind {
+  ACTIVITY_KIND_UNSPECIFIED = 0;
+  ACTIVITY_KIND_MISSION = 1;
+  ACTIVITY_KIND_NODE = 2;
+  ACTIVITY_KIND_FINDING = 3;
+}
+
+message GetUserActivityRequest {
+  string tenant_id = 1;
+  string user_id = 2;
+}
+
+message GetUserActivityResponse {
+  UserActivityContext activity = 1;
+}
+
+message RecordUserActivityRequest {
+  string tenant_id = 1;
+  string user_id = 2;
+  ActivityKind kind = 3;
+  ActivityItem item = 4;
+}
+
+message RecordUserActivityResponse {}
+
+// ---------------------------------------------------------------------------
+// Signup Progress messages
+// ---------------------------------------------------------------------------
+
+message SignupProgressState {
+  string step = 1;
+  int64 step_started_at_unix = 2;
+  string terminal_state = 3;
+  string error_code = 4;
+  string error_message = 5;
+}
+
+message GetSignupProgressRequest {
+  string attempt_id = 1;
+}
+
+message GetSignupProgressResponse {
+  SignupProgressState progress = 1;
+  bool found = 2;
+}
+
+message SetSignupProgressRequest {
+  string attempt_id = 1;
+  SignupProgressState progress = 2;
+  int32 ttl_seconds = 3;
+}
+
+message SetSignupProgressResponse {}
+
+// ---------------------------------------------------------------------------
+// Membership Cache Invalidation messages
+// ---------------------------------------------------------------------------
+
+message InvalidateMembershipCacheRequest {
+  string user_id = 1;
+}
+
+message InvalidateMembershipCacheResponse {}
+
+// ---------------------------------------------------------------------------
+// Chat Attachment Staging messages
+// ---------------------------------------------------------------------------
+
+message StageAttachmentRequest {
+  string tenant_id = 1;
+  string text = 2;
+  int32 ttl_seconds = 3;
+}
+
+message StageAttachmentResponse {
+  string attachment_id = 1;
+}
+
+message ConsumeAttachmentRequest {
+  string tenant_id = 1;
+  string attachment_id = 2;
+}
+
+message ConsumeAttachmentResponse {
+  string text = 1;
+}
+
+// ---------------------------------------------------------------------------
+// Session / token revocation messages
+// ---------------------------------------------------------------------------
+
+message RevokeUserSessionsRequest {
+  // target_user_id is the FGA user id (the Zitadel numeric sub, without the
+  // "user:" type prefix) whose sessions and refresh-token grants are revoked.
+  // Pass your own user id to revoke your own sessions (the `gibson logout`
+  // path). Required.
+  string target_user_id = 1;
+}
+
+message RevokeUserSessionsResponse {
+  // sessions_terminated is the number of active Zitadel sessions that were
+  // terminated for the target user.
+  int32 sessions_terminated = 1;
+  // grants_revoked is the number of refresh-token grants that were revoked
+  // for the target user.
+  int32 grants_revoked = 2;
+}

@@ -1,0 +1,16 @@
+# Dev/CI-only dependencies for the belief sidecar. NEVER installed into the
+# published image — see requirements.txt and the Dockerfile.
+#
+# pgmpy is here for exactly one reason: test_parity.py asserts that
+# `infer.query` returns what pgmpy's VariableElimination returned, to 1e-12,
+# over the shipped artifact's full evidence space and over 25 random networks.
+# That assertion is the evidence for dropping pgmpy from the runtime image
+# (gibson#1436), so it has to keep running somewhere — but the thing it drags
+# in (torch, triton, xgboost, scikit-learn, pandas, scipy, statsmodels, sympy)
+# is precisely what must not ship.
+#
+# Pinned to the version the sidecar used to run, because the claim being tested
+# is "the same answers as the implementation we replaced" — not "the same
+# answers as whatever pgmpy does now".
+pgmpy==0.1.26
+pytest>=8.0

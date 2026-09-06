@@ -1,0 +1,17 @@
+# GitLab connector — remote MCP proxied by ToolHive (ADR-0014/0015).
+id: gitlab
+kind: connector
+displayName: GitLab
+description: >-
+  GitLab's built-in MCP server — issues, merge requests, CI, and security
+  findings on the customer's own GitLab.
+egressAllow:
+  - gitlab.com:443
+spec:
+  vendor: gitlab
+  shape: Remote
+  endpoint: https://gitlab.com/api/v4/mcp
+  transport: streamable-http
+  auth: oauth
+  oauthScope: mcp
+  defaultInstanceUrl: https://gitlab.com

@@ -1,0 +1,50 @@
+# connector-operator deployment (ADR-0014). A later slice folds this into the
+# gibson umbrella chart; this manifest is the standalone, kustomize-free form
+# proven on kind-vanilla.
+apiVersion: v1
+kind: Namespace
+metadata: { name: gibson-connector-operator-system }
+---
+apiVersion: v1
+kind: ServiceAccount
+metadata: { name: connector-operator, namespace: gibson-connector-operator-system }
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: ClusterRoleBinding
+metadata: { name: connector-operator-rolebinding }
+roleRef: { apiGroup: rbac.authorization.k8s.io, kind: ClusterRole, name: connector-operator-role }
+subjects:
+  - { kind: ServiceAccount, name: connector-operator, namespace: gibson-connector-operator-system }
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: Role
+metadata: { name: connector-operator-leader, namespace: gibson-connector-operator-system }
+rules:
+  - { apiGroups: ["coordination.k8s.io"], resources: ["leases"], verbs: ["get","list","watch","create","update","patch","delete"] }
+  - { apiGroups: [""], resources: ["events"], verbs: ["create","patch"] }
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: RoleBinding
+metadata: { name: connector-operator-leader, namespace: gibson-connector-operator-system }
+roleRef: { apiGroup: rbac.authorization.k8s.io, kind: Role, name: connector-operator-leader }
+subjects:
+  - { kind: ServiceAccount, name: connector-operator, namespace: gibson-connector-operator-system }
+---
+apiVersion: apps/v1
+kind: Deployment
+metadata: { name: connector-operator, namespace: gibson-connector-operator-system, labels: { app.kubernetes.io/name: gibson-connector-operator } }
+spec:
+  replicas: 1
+  selector: { matchLabels: { app.kubernetes.io/name: gibson-connector-operator } }
+  template:
+    metadata: { labels: { app.kubernetes.io/name: gibson-connector-operator } }
+    spec:
+      serviceAccountName: connector-operator
+      securityContext: { runAsNonRoot: true }
+      containers:
+        - name: manager
+          image: ghcr.io/zeroroot-ai/gibson-connector-operator:dev
+          imagePullPolicy: IfNotPresent
+          args: ["--leader-elect"]
+          securityContext: { allowPrivilegeEscalation: false, readOnlyRootFilesystem: true, capabilities: { drop: ["ALL"] } }
+          resources: { requests: { cpu: 20m, memory: 64Mi }, limits: { cpu: 500m, memory: 256Mi } }

@@ -1,0 +1,32 @@
+# Declared privileged sentinels for the `privilegedfallback` guard.
+#
+# "Privileged" cannot be INFERRED. There is no property of
+# auth.SystemTenant that distinguishes it from auth.TenantID{} other
+# than human knowledge that one is the platform-operator tenant. Name
+# heuristics on System*/Admin*/Root* are exactly where false positives
+# come from. So the privileged set is DECLARED here, once, and the
+# analyzer matches it by TYPE-OBJECT IDENTITY (package path + symbol
+# name) — never by name substring.
+#
+# Adding a new privileged constant is a one-line diff and needs no
+# analyzer change. A new privileged constant that nobody declares here
+# is invisible to the guard; that is the accepted, stated cost of
+# declaration over inference.
+
+# `objects:` — package-qualified symbols, matched via
+# pass.TypesInfo.Uses[ident] on the resolved object's package path and
+# name.
+objects:
+  - symbol: github.com/zeroroot-ai/sdk/auth.SystemTenant
+    reason: the platform-operator tenant; substituting it for an absent tenant grants cross-tenant reach
+  - symbol: github.com/zeroroot-ai/sdk/auth.SystemTenantString
+    reason: string form of the platform-operator tenant, same authority
+
+# `values:` — constant values matched AFTER CONSTANT FOLDING via
+# pass.TypesInfo.Types[expr].Value. This closes the literal-evasion
+# hole: auth.NewTenantID("_sys" + "tem") and a local
+# `const s = "_system"` both match, because the folded constant is
+# compared, not the source text.
+values:
+  - value: "_system"
+    reason: the reserved system-tenant slug (sdk/auth/internal/sysconst.Reserved)

@@ -1,0 +1,247 @@
+# E10 / gibson#999 — setec execution round-trip (E3), migrated onto ephemeral
+# ARC runners driving the ALREADY-DEPLOYED staging setec (Epic:
+# cicd-efficiency, board #44 / zeroroot-ai/deploy#1067 / ADR-0060).
+#
+# One job, one gate:
+#   - roundtrip — E10/#999 plain-tool round-trip (untrusted-exec isolation
+#                 boundary).
+#
+# Proves the untrusted-execution-isolation boundary (ADR-0010) end-to-end: an
+# UNTRUSTED tool dispatched through the harness executes ONLY via a real setec
+# microVM round-trip, and is denied (typed error, no in-process fallback) when
+# no sandboxed dispatch is available under GIBSON_UNTRUSTED_EXEC=setec-only.
+#
+# OLD model: self-hosted `setec-bare-metal` runner with local /dev/kvm,
+# dialing a NodePort on the same host (SETEC_ROUNDTRIP_ADDR=127.0.0.1:30051).
+# NEW model: `runs-on: staging-ephemeral` — a normal ARC pod inside staging
+# EKS, no /dev/kvm on the runner itself. It dials the setec frontend's
+# in-cluster ClusterIP Service directly (setec-frontend.setec-system.svc,
+# port 50051 — the chart's frontend.servicePort default) and fetches its mTLS
+# client cert from a K8s Secret via the namespaced RBAC grant in gitops
+# envs/staging/manifests/arc-runners/rbac.yaml, instead of a PKI directory
+# baked into the runner host (SETEC_PKI_DIR is retired).
+#
+# The Go test itself (internal/engine/harness/setec_roundtrip_setec_test.go,
+# -tags setec_integration) is UNCHANGED — it already self-skips unless
+# SETEC_ROUNDTRIP_ADDR is set and already defaults serverName to
+# setec-frontend.setec-system.svc, so this migration is a CI-plumbing change,
+# not a test-code change. Full assertion parity is preserved (this workflow
+# drives the real production dispatch chain, unlike setec's own e2e.yml —
+# see that file's parity-gap note for why the two jobs are not symmetric).
+#
+# ⚠ PREREQUISITE GAP: staging's gitops overlay currently ships
+# `setec.enabled: false` (deploy repo envs/staging/values.yaml) — setec is
+# not deployed to staging yet. This job's "staging setec healthy" assertion
+# will fail until that is flipped on (tracked follow-up, filed alongside this
+# PR, same as setec's e2e.yml).
+#
+# Triggers: `merge_group` (trusted context only — fork PRs never reach the
+# in-cluster runner) + manual `workflow_dispatch`. The `e2e-setec` PR-label
+# opt-in model is retired along with the runner it depended on.
+
+name: e2e-setec-roundtrip
+
+on:
+  # lane-exception: hardware-gated. The whole workflow runs on the self-hosted
+  # KVM `setec-bare-metal` runner, which is a trusted context fork PRs must
+  # never reach, and the suite needs a live setec frontend. Made visible rather
+  # than silent: merge-queue-eviction-report.yml comments the failing job onto
+  # the PR if this evicts one.
+  merge_group:
+  workflow_dispatch: {}
+
+permissions:
+  contents: read
+
+jobs:
+  roundtrip:
+    # ARC readiness gate (Epic: cicd-efficiency, board #44). The
+    # staging-ephemeral runner scale-set cannot start pods until an operator
+    # seeds the ARC GitHub App secret (gibson/staging/arc-github-app) and
+    # runners come up. Until then this job would sit "queued" forever inside
+    # every merge group, stalling/ejecting queue entries. Flip the repo
+    # variable STAGING_EPHEMERAL_READY to 'true' once the secret is seeded
+    # and runners are confirmed live.
+    if: vars.STAGING_EPHEMERAL_READY == 'true'
+    runs-on: staging-ephemeral
+    timeout-minutes: 30
+    env:
+      SETEC_NAMESPACE: setec-system
+      SETEC_FRONTEND_CERT_SECRET: setec-frontend-client-tls
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
+
+      - uses: actions/setup-go@924ae3a1cded613372ab5595356fb5720e22ba16 # v6
+        with:
+          go-version-file: go.mod
+          cache: true
+
+      # The ephemeral ARC runner image ships no kubectl; the retired
+      # workstation runner had it preinstalled, so the staging-ephemeral
+      # migration dropped it. Without this, every kubectl call below fails
+      # "command not found" (exit 127).
+      - name: Install kubectl
+        uses: azure/setup-kubectl@776406bce94f63e41d621b960d78ee25c8b76ede # v4
+
+      # The ARC image ships no make either (same migration gap); the suite
+      # entrypoint is `make test-setec-roundtrip`.
+      - name: Install make
+        run: sudo apt-get update -qq && sudo apt-get install -y -qq make
+
+      - name: Verify kubectl can reach the cluster with the expected RBAC
+        run: |
+          kubectl version --client=true
+          kubectl auth can-i get pods -n "${SETEC_NAMESPACE}" || {
+            echo "::error::arc-runner-sa lacks the expected setec-system RBAC — check gitops envs/staging/manifests/arc-runners/rbac.yaml"
+            exit 1
+          }
+
+      - name: Assert staging setec operator + frontend are deployed and healthy
+        run: |
+          set -euo pipefail
+          if ! kubectl get deploy -n "${SETEC_NAMESPACE}" -l app.kubernetes.io/name=setec >/dev/null 2>&1; then
+            echo "::error::no setec Deployment found in ${SETEC_NAMESPACE} — staging's setec is not deployed yet (envs/staging/values.yaml setec.enabled must be true; see the tracked follow-up)."
+            exit 1
+          fi
+          kubectl rollout status deploy -n "${SETEC_NAMESPACE}" -l app.kubernetes.io/name=setec --timeout=120s
+          kubectl get svc -n "${SETEC_NAMESPACE}" setec-frontend >/dev/null
+
+      # gibson-executor is the marker-emitting tool runner the sandbox
+      # launches. Published to ghcr already — no local build/import needed
+      # now that the microVM runs in a real cluster with registry pull
+      # access (the old k3s-containerd-import dance is retired).
+      # The setec-metal NodePool is scale-to-zero and the operator hard-fails
+      # NoEligibleNode with no labeled node (setec#230), so pre-warm one and
+      # HOLD it for the suite's whole runtime: a placeholder pod targeting the
+      # NodePool's label+taint makes Karpenter provision the metal node;
+      # kata-deploy then installs kata (3.28 helm chart, deploy#1482). Wait for
+      # BOTH labels — the runtime-agent's capability label can fire before kata
+      # is actually installed (setec#243); katacontainers.io/kata-runtime=true
+      # is written by kata-deploy only after containerd is configured. The
+      # placeholder lives in setec-sandboxes (the fixed sandbox namespace,
+      # setec#158) and is deleted in cleanup; the node consolidates afterwards.
+      - name: Pre-warm a sandbox-host metal node (scale-from-zero)
+        run: |
+          set -euo pipefail
+          cat <<EOF | kubectl apply -f -
+          apiVersion: v1
+          kind: Pod
+          metadata:
+            name: gibson-e2e-warm-${{ github.run_id }}-${{ github.job }}
+            namespace: setec-sandboxes
+          spec:
+            nodeSelector:
+              setec.zeroroot.ai/sandbox-host: "true"
+            tolerations:
+              - key: setec.zeroroot.ai/sandbox-host
+                operator: Equal
+                value: "true"
+                effect: NoSchedule
+            containers:
+              - name: warm
+                image: ghcr.io/zeroroot-ai/mirror/kubectl:1.31.4
+                command: ["sleep", "2700"]
+                resources:
+                  requests:
+                    cpu: 50m
+                    memory: 32Mi
+            restartPolicy: Never
+          EOF
+          echo "waiting for a dual-labeled kata node (metal boot + kata install, up to ~18 min)..."
+          for i in $(seq 1 72); do
+            n="$(kubectl get nodes -l setec.zeroroot.ai/runtime.kata-qemu=true,katacontainers.io/kata-runtime=true -o name 2>/dev/null | head -1)"
+            if [ -n "$n" ]; then echo "eligible node ready after ${i} polls: ${n}"; exit 0; fi
+            sleep 15
+          done
+          echo "::error::no dual-labeled kata node within the wait window"
+          kubectl get nodes -o wide || true
+          kubectl -n setec-sandboxes describe pod "gibson-e2e-warm-${{ github.run_id }}-${{ github.job }}" || true
+          exit 1
+
+      - name: Ensure a kata-qemu SandboxClass exists (throwaway, this run only)
+        # SandboxClass is CLUSTER-scoped (setec api/v1alpha1/
+        # sandboxclass_types.go: +kubebuilder:resource:scope=Cluster) — no
+        # namespace field. kata-fc's dev-loopback devmapper snapshotter is
+        # flaky under load (setec#86); kata-qemu is the reliable round-trip
+        # backend.
+        run: |
+          set -euo pipefail
+          cat <<EOF | kubectl apply -f -
+          apiVersion: setec.zeroroot.ai/v1alpha1
+          kind: SandboxClass
+          metadata:
+            name: gibson-roundtrip-qemu-${{ github.run_id }}
+          spec:
+            vmm: qemu
+            runtime:
+              backend: kata-qemu
+            maxResources:
+              vcpu: 2
+              memory: 1Gi
+            # The staging setec-metal NodePool taints its nodes
+            # setec.zeroroot.ai/sandbox-host=true:NoSchedule; without this
+            # toleration the sandbox pod sits Pending with "untolerated
+            # taint"/FailedScheduling until the suite times out — the exact
+            # bug setec's own e2e fixed in setec#233, never ported here.
+            tolerations:
+              - key: setec.zeroroot.ai/sandbox-host
+                operator: Equal
+                value: "true"
+                effect: NoSchedule
+          EOF
+
+      - name: Fetch the frontend's mTLS client cert from the in-cluster Secret
+        run: |
+          set -euo pipefail
+          mkdir -p "${RUNNER_TEMP}/setec-pki"
+          for key in tls.crt tls.key ca.crt; do
+            out="${RUNNER_TEMP}/setec-pki/${key}"
+            # jsonpath treats '.' as a path separator, so the dot inside the
+            # Secret key name must be escaped ({.data.tls\.crt}); unescaped it
+            # silently resolves nothing and this step can never succeed.
+            jp="{.data.${key//./\\.}}"
+            if ! kubectl get secret -n "${SETEC_NAMESPACE}" "${SETEC_FRONTEND_CERT_SECRET}" \
+                 -o jsonpath="${jp}" | base64 -d > "${out}" 2>/dev/null || [ ! -s "${out}" ]; then
+              echo "::error::could not read key '${key}' from Secret ${SETEC_FRONTEND_CERT_SECRET} in ${SETEC_NAMESPACE} — verify the Secret name/keys match gitops envs/staging/manifests/arc-runners/rbac.yaml's resourceNames (placeholder pending setec-enablement in staging)"
+              exit 1
+            fi
+          done
+          echo "SETEC_PKI_DIR=${RUNNER_TEMP}/setec-pki" >> "$GITHUB_ENV"
+
+      - name: Run setec round-trip suite
+        env:
+          SETEC_ROUNDTRIP_ADDR: ${{ vars.SETEC_ROUNDTRIP_ADDR || 'setec-frontend.setec-system.svc:50051' }}
+          SETEC_ROUNDTRIP_SERVER_NAME: ${{ vars.SETEC_ROUNDTRIP_SERVER_NAME || 'setec-frontend.setec-system.svc' }}
+          GIBSON_EXECUTOR_IMAGE: ${{ vars.GIBSON_EXECUTOR_IMAGE || 'ghcr.io/zeroroot-ai/gibson-executor:main' }}
+          GIBSON_ROUNDTRIP_SANDBOX_CLASS: gibson-roundtrip-qemu-${{ github.run_id }}
+          GIBSON_ROUNDTRIP_MEMORY: 512Mi
+        run: |
+          set -euo pipefail
+          export SETEC_ROUNDTRIP_CERT="${SETEC_PKI_DIR}/tls.crt"
+          export SETEC_ROUNDTRIP_KEY="${SETEC_PKI_DIR}/tls.key"
+          export SETEC_ROUNDTRIP_CA="${SETEC_PKI_DIR}/ca.crt"
+          make test-setec-roundtrip
+
+      - name: Cleanup throwaway SandboxClass (always)
+        if: always()
+        run: |
+          kubectl delete sandboxclass "gibson-roundtrip-qemu-${{ github.run_id }}" --ignore-not-found --wait=false
+          kubectl -n setec-sandboxes delete pod "gibson-e2e-warm-${{ github.run_id }}-${{ github.job }}" --ignore-not-found --wait=false
+
+      - name: Collect diagnostics on failure
+        if: failure()
+        run: |
+          mkdir -p e2e-artifacts
+          kubectl get nodes -o wide                              > e2e-artifacts/nodes.txt       2>&1 || true
+          kubectl get sandboxes -n "${SETEC_NAMESPACE}" -o yaml   > e2e-artifacts/sandboxes.yaml  2>&1 || true
+          kubectl get pods -n "${SETEC_NAMESPACE}" -o wide        > e2e-artifacts/pods.txt        2>&1 || true
+          kubectl get events -n "${SETEC_NAMESPACE}" --sort-by=.lastTimestamp \
+                                                                   > e2e-artifacts/events.txt      2>&1 || true
+
+      - name: Upload diagnostics
+        if: failure()
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7
+        with:
+          name: e2e-diagnostics-${{ github.run_id }}
+          path: e2e-artifacts/
+          if-no-files-found: ignore

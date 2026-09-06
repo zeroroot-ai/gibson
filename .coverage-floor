@@ -1,0 +1,7 @@
+# Absolute total-coverage floor for gibson (gibson#794, E3 / QUALITY-BARS §4).
+# Supersedes the former 60% bar (ADR-0021). The 80% target is reached by
+# RATCHET: this number may only ever rise toward 80. scripts/check-coverage-floor.sh
+# fails any change that drops total coverage below it; cmd/diff-coverage enforces
+# 85% on changed lines per-PR. Seeded at 37 (measured total ~38.5% on the
+# default-tag suite, 2026-06-23); raise as tests land.
+37

@@ -1,0 +1,135 @@
+name: merge-queue-eviction-report
+
+# Spec: gibson#1233 — "a merge-queue eviction is attributable from the PR alone".
+#
+# THE REPORTING GAP THIS CLOSES
+# -----------------------------
+# When a `merge_group` run fails, GitHub removes the PR from the merge queue.
+# The PR itself keeps reporting:
+#
+#     mergeStateStatus: CLEAN
+#     failing checks:   (none)
+#
+# because the failing run belongs to a transient
+# `gh-readonly-queue/<base>/pr-<n>-<sha>` branch, not to the PR. That branch is
+# not linked from the PR and drops out of the default `gh run list` view, so the
+# author sees a green PR that silently refuses to merge and the natural response
+# — re-enqueueing — burns another full merge-group cycle and fails identically.
+# gibson#1233 watched four PRs do exactly that in one evening.
+#
+# This workflow watches every merge_group-capable workflow, and on a failed
+# merge-group run recovers the PR number from the queue branch name and posts
+# the reason onto the PR.
+#
+# WHY `workflow_run` AND NOT A JOB INSIDE EACH WORKFLOW
+# ----------------------------------------------------
+# One reporter covers every gate, including ones this repo does not own the
+# shape of (the reusable-workflow callers) and ones added later. The
+# `check-ci-lane-parity` guard asserts that every workflow with a `merge_group:`
+# trigger is named in the `workflows:` list below, so a new queue gate cannot be
+# added without also being reported on.
+#
+# `workflow_run` runs from the default branch with a token that can write to
+# pull requests, so no other workflow needs its permissions widened.
+#
+# NOTE: `workflow_run` only fires for workflow files that exist on the default
+# branch. This file therefore does nothing until it is merged to main — which is
+# also why it can never affect the CI result of the PR that introduces it.
+
+on:
+  workflow_run:
+    workflows:
+      - go-ci
+      - gibsoncheck
+      - fga-smoke-test
+      - policy-guards
+      - security
+      - CodeQL
+      - architectural-doc-coverage
+      - e2e-setec-roundtrip
+      - pr-title-lint
+    types: [completed]
+
+permissions:
+  contents: read
+
+concurrency:
+  group: merge-queue-eviction-report-${{ github.event.workflow_run.head_branch }}
+  cancel-in-progress: false
+
+jobs:
+  report:
+    # Only merge-group failures evict. A pull_request-triggered failure is
+    # already visible as a red check on the PR and needs no comment.
+    if: >-
+      github.event.workflow_run.event == 'merge_group' &&
+      github.event.workflow_run.conclusion == 'failure'
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      pull-requests: write
+    steps:
+      - name: Recover the PR number from the queue branch
+        id: pr
+        env:
+          HEAD_BRANCH: ${{ github.event.workflow_run.head_branch }}
+        run: |
+          set -euo pipefail
+          # gh-readonly-queue/main/pr-1234-<sha>  ->  1234
+          num="$(printf '%s' "${HEAD_BRANCH}" | sed -nE 's#^.*/pr-([0-9]+)-[0-9a-f]+$#\1#p')"
+          if [[ -z "${num}" ]]; then
+            echo "No PR number in head_branch='${HEAD_BRANCH}'; nothing to report."
+            echo "number=" >> "$GITHUB_OUTPUT"
+            exit 0
+          fi
+          echo "Resolved PR #${num} from '${HEAD_BRANCH}'."
+          echo "number=${num}" >> "$GITHUB_OUTPUT"
+
+      - name: Collect the failing jobs
+        if: steps.pr.outputs.number != ''
+        id: jobs
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          RUN_ID: ${{ github.event.workflow_run.id }}
+        run: |
+          set -euo pipefail
+          # shellcheck disable=SC2016  # the jq filter must stay single-quoted
+          gh api "repos/${GITHUB_REPOSITORY}/actions/runs/${RUN_ID}/jobs?per_page=100" \
+            --jq '.jobs[] | select(.conclusion == "failure" or .conclusion == "cancelled")
+                  | "- `\(.name)` (\(.conclusion)) — \(.html_url)"' > failing-jobs.txt || true
+          if [[ ! -s failing-jobs.txt ]]; then
+            echo "- (the run failed but reported no failing job — see the run log)" > failing-jobs.txt
+          fi
+          cat failing-jobs.txt
+
+      - name: Comment on the evicted PR
+        if: steps.pr.outputs.number != ''
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          PR: ${{ steps.pr.outputs.number }}
+          WF_NAME: ${{ github.event.workflow_run.name }}
+          RUN_URL: ${{ github.event.workflow_run.html_url }}
+          HEAD_BRANCH: ${{ github.event.workflow_run.head_branch }}
+        run: |
+          set -euo pipefail
+          {
+            echo "### Removed from the merge queue — \`${WF_NAME}\` failed"
+            echo
+            echo "This PR was enqueued, the merge-group run failed, and GitHub evicted it."
+            echo "The PR itself will still show \`mergeStateStatus: CLEAN\` with no failing"
+            echo "check — that reporting gap is why this comment exists (gibson#1233)."
+            echo
+            echo "**Failing jobs**"
+            echo
+            cat failing-jobs.txt
+            echo
+            echo "**Run:** ${RUN_URL}"
+            echo "**Queue branch:** \`${HEAD_BRANCH}\` (transient; not linked from this PR)"
+            echo
+            echo "Re-enqueueing without a code change will fail the same way. Almost every"
+            echo "gate now also runs on \`pull_request\` (gibson#1236) — the exception is"
+            echo "\`go-ci / heavy\` (module-wide \`go test -race\` over two build-tag variants"
+            echo "plus govulncheck) and \`security / govulncheck\`. Reproduce the queue-only"
+            echo "lane locally with \`make test-merge-queue\`."
+          } > comment.md
+          gh pr comment "${PR}" --repo "${GITHUB_REPOSITORY}" --body-file comment.md

@@ -1,0 +1,35 @@
+{
+  "version": "base-v1",
+  "description": "Minimal OSS base belief network (gibson#750, ADR-0005). reachable+exposed services -> exploitable -> juicy. Not the curated commercial base model (vendor red-team + CVE/ATT&CK), which the commercial layer ships as additional model artifacts.",
+  "variables": ["reachable", "svc_ssh", "svc_https", "port_22", "port_443", "exploitable", "juicy"],
+  "edges": [
+    ["reachable", "exploitable"],
+    ["svc_ssh", "exploitable"],
+    ["svc_https", "exploitable"],
+    ["reachable", "juicy"],
+    ["exploitable", "juicy"]
+  ],
+  "cpds": {
+    "reachable": {"values": [[0.5], [0.5]]},
+    "svc_ssh": {"values": [[0.7], [0.3]]},
+    "svc_https": {"values": [[0.7], [0.3]]},
+    "port_22": {"values": [[0.7], [0.3]]},
+    "port_443": {"values": [[0.7], [0.3]]},
+    "exploitable": {
+      "evidence": ["reachable", "svc_ssh", "svc_https"],
+      "evidence_card": [2, 2, 2],
+      "values": [
+        [0.98, 0.85, 0.80, 0.65, 0.60, 0.40, 0.35, 0.20],
+        [0.02, 0.15, 0.20, 0.35, 0.40, 0.60, 0.65, 0.80]
+      ]
+    },
+    "juicy": {
+      "evidence": ["reachable", "exploitable"],
+      "evidence_card": [2, 2],
+      "values": [
+        [0.95, 0.55, 0.70, 0.20],
+        [0.05, 0.45, 0.30, 0.80]
+      ]
+    }
+  }
+}

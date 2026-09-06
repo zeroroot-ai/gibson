@@ -1,0 +1,10 @@
+# CODEOWNERS — internal/datapool/admin/
+#
+# This directory contains the cross-tenant admin pool. Changes here require
+# security review because every acquisition bypasses per-tenant isolation.
+# The Acquire path gates on the platform_operator FGA relation; weakening that
+# check is a security regression equivalent to granting all-tenant read access.
+#
+# Per database-per-tenant-data-plane spec, Requirement 11.5.
+#
+internal/datapool/admin/    @platform-architecture @security

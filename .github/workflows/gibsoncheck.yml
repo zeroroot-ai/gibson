@@ -1,0 +1,358 @@
+name: gibsoncheck
+
+# Spec: unified-identity-and-authorization Requirement 14.1.
+# Runs the custom gibsoncheck Go analyzer (forbidden-imports +
+# notrustlocalhost + tenantfromcontext) on every PR.
+#
+# Also runs the authz-registry drift gate (spec: private-authz-registry NFR Reliability):
+# regenerates internal/platform/authz/registry/ from the pinned SDK protos and fails if the
+# result differs from what is committed. Catches hand-edits and missed regen after
+# an SDK bump.
+
+on:
+  push:
+    branches: [main]
+    paths:
+      - '**/*.go'
+      - 'go.mod'
+      - 'go.sum'
+      - 'tools/gibsoncheck/**'
+      - 'internal/platform/authz/registry/**'
+      - '.github/workflows/gibsoncheck.yml'
+  # No `paths:` filter on pull_request (Epic: cicd-efficiency, board #44,
+  # slice S3, .github#202). A `paths:`-filtered `pull_request` trigger
+  # produces ZERO check runs on non-matching PRs, so this workflow's required
+  # contexts (analyze, Migration build guards, per-RPC test walker,
+  # authz-registry drift gate) would simply be absent and merge-queue entry
+  # would freeze for that PR. Every PR now gets a real-or-skipped check run
+  # for each job instead; the native `changes` job below gates the real work
+  # so irrelevant PRs still skip cheaply.
+  pull_request:
+  # Epic: cicd-efficiency (board #44), slice S5, gibson#1130 (added scope per
+  # issue comment): gibsoncheck is an authoritative gate that S3 needs available
+  # in the merge_group context before the merge queue can require it -- without
+  # this, enabling the queue with gibsoncheck required would freeze merges.
+  # merge_group does not support a `paths` filter (actionlint [events]), so this
+  # runs unconditionally in the queue -- consistent with it being an
+  # authoritative, not a per-diff, gate.
+  merge_group:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: gibsoncheck-${{ github.ref }}
+  cancel-in-progress: true
+
+# Go module fetch resilience.
+#
+# PIPE, not comma. Go's default is `https://proxy.golang.org,direct`, and with
+# a COMMA the fallback engages only on 404/410 — a transport error is FATAL.
+# So one module whose HTTP/2 stream gets reset kills the whole job:
+#
+#   read "https://proxy.golang.org/<mod>/@v/<ver>.zip": stream error:
+#   stream ID 111; INTERNAL_ERROR; received from peer
+#
+# which surfaces as `FAIL <pkg> [setup failed]` and reads like a broken build.
+# On 2026-08-20 that evicted gibson#1493 and its release PR from the merge
+# queue repeatedly, while 274 other modules downloaded fine in the same job
+# off a warm cache, a different single module failing each time.
+#
+# A PIPE falls through on ANY error, so that one module is fetched from its
+# origin instead. No second proxy is added on purpose: `direct` introduces no
+# new trusted party, and GOSUMDB still verifies every module against
+# sum.golang.org either way, so integrity does not depend on who served it.
+env:
+  GOPROXY: https://proxy.golang.org|direct
+
+jobs:
+  # ---- change detection (pull_request only): keeps unrelated PRs cheap ----
+  # Native job so it always reports a stable `changes` check-run name.
+  # merge_group behavior is untouched: every real job below runs
+  # unconditionally in merge_group (this job itself is skipped there), same
+  # as before this workflow carried an `if:` at all.
+  changes:
+    # Runs in BOTH lanes. It MUST NOT carry an `if:` restricting it to
+    # pull_request: GitHub propagates a skipped job to everything that `needs:`
+    # it, and the dependent's own `if:` never gets a chance to rescue it. While
+    # this job was pull_request-only, every gibsoncheck analyzer reported
+    # `skipped` in the merge queue — and a skipped required check satisfies the
+    # ruleset, so the guards had never once run against a post-merge result
+    # (gibson#1368). The comment previously here asserted the opposite.
+    #
+    # In the merge queue there is no base/head pair to diff, so the filter
+    # short-circuits to relevant=true and every analyzer runs unconditionally.
+    runs-on: ubuntu-latest
+    outputs:
+      relevant: ${{ steps.filter.outputs.relevant }}
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
+        with:
+          fetch-depth: 0
+
+      - id: filter
+        name: Detect gibsoncheck-relevant changes
+        run: |
+          # merge_group has no base/head pair — run everything.
+          if [ "${{ github.event_name }}" != "pull_request" ]; then
+            echo "relevant=true" >> "$GITHUB_OUTPUT"
+            echo "Non-PR lane (${{ github.event_name }}): running all analyzers."
+            exit 0
+          fi
+          BASE="${{ github.event.pull_request.base.sha }}"
+          HEAD="${{ github.event.pull_request.head.sha }}"
+          git fetch --no-tags origin "${BASE}" "${HEAD}" 2>/dev/null || true
+          CHANGED="$(git diff --name-only "${BASE}" "${HEAD}")"
+          echo "Changed files:"
+          echo "${CHANGED}"
+          if echo "${CHANGED}" | grep -Eq '\.go$|(^|/)go\.mod$|(^|/)go\.sum$|^tools/gibsoncheck/|^internal/platform/authz/registry/|^\.github/workflows/gibsoncheck\.yml$'; then
+            echo "relevant=true" >> "$GITHUB_OUTPUT"
+          else
+            echo "relevant=false" >> "$GITHUB_OUTPUT"
+          fi
+
+  analyze:
+    needs: changes
+    if: github.event_name == 'merge_group' || (github.event_name == 'pull_request' && needs.changes.outputs.relevant == 'true')
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
+
+      - uses: actions/setup-go@924ae3a1cded613372ab5595356fb5720e22ba16 # v6
+        with:
+          go-version-file: go.mod
+
+      # Pre-download all modules so gibsoncheck's go/packages.Load can resolve imports
+      # without network access.  This is a no-op on cache-warm runners.
+      - name: Download Go modules
+        run: go mod download
+
+      - name: Run gibsoncheck against the daemon
+        run: |
+          set -e
+          go build -o bin/gibsoncheck ./tools/gibsoncheck
+          # Run individually so we can see which check (if any) fails.
+          # Each analyzer exits non-zero on diagnostic.
+          ./bin/gibsoncheck -forbiddenimports ./internal/... ./cmd/...
+          ./bin/gibsoncheck -notrustlocalhost ./internal/... ./cmd/...
+          # tenantfromcontext is an enforcing gate. Every handler that
+          # legitimately acts on a caller-supplied tenant carries an explicit
+          # `gibsoncheck:allow tenant-from-request` directive naming the guard
+          # that re-authorizes it, so a new diagnostic is a real finding.
+          ./bin/gibsoncheck -tenantfromcontext ./internal/... ./cmd/...
+          # graphwrite is a blocking gate with NO baseline (ADR-0012): the
+          # knowledge graph has one writer, the projector, and the tree has zero
+          # violations as of gibson#1254. operators/ is in scope so the check
+          # also covers gibson-backup, which it exempts by name rather than by
+          # being out of range.
+          ./bin/gibsoncheck -graphwrite ./internal/... ./cmd/... ./operators/... ./pkg/...
+          # cypheridentifier is a blocking gate with NO baseline (gibson#1440):
+          # in internal/engine/graphrag, caller input may reach read-path
+          # Cypher query text only through the cypherFrag type, and the tree
+          # has zero violations as of the local_provider.go refactor that
+          # introduced it.
+          ./bin/gibsoncheck -cypheridentifier ./internal/...
+
+      # Security-defect-class guards. BLOCKING: each exits non-zero on any
+      # diagnostic and this step is under `set -e`, in a job that is an
+      # existing required context and that runs unconditionally on
+      # merge_group. Adding them here inherits blocking status with no
+      # ruleset change; a separate workflow would be a new required-context
+      # name that must be added by hand, and an unrequired context is not a
+      # gate.
+      #
+      # Scope is wider than the invocations above on purpose: operators/ and
+      # pkg/ are in the same module and carry authorization code that the
+      # existing per-analyzer runs never scan.
+      #
+      # Pre-existing findings are recorded in
+      # tools/gibsoncheck/checks/guard_baseline.txt, which must only ever
+      # shrink. A NEW finding of any of these classes fails here from the
+      # moment the guards landed — there is no regeneration step in any
+      # workflow, so new debt cannot be absorbed.
+      - name: Run security-defect-class guards
+        run: |
+          set -e
+          ./bin/gibsoncheck -failopenauthorizer   ./internal/... ./cmd/... ./operators/... ./pkg/...
+          ./bin/gibsoncheck -privilegedfallback   ./internal/... ./cmd/... ./operators/... ./pkg/...
+          ./bin/gibsoncheck -fgalistusers         ./internal/... ./cmd/... ./operators/... ./pkg/...
+          ./bin/gibsoncheck -constantverdictdouble ./internal/... ./cmd/... ./operators/... ./pkg/...
+
+      # The STALE half of the baseline ratchet. The analyzers above refuse
+      # new findings; this refuses baseline lines whose site is fixed or
+      # gone, so the file is forced monotonically downward and cannot
+      # silently retain dead entries. SELFTEST runs first so a
+      # silently-broken guard cannot pass by finding nothing — same pattern
+      # as the migration-guards job below.
+      - name: Check security-guard baseline is exact
+        run: |
+          set -e
+          SELFTEST=1 bash scripts/check-guard-baselines.sh
+          bash scripts/check-guard-baselines.sh
+
+      - name: Run gibsoncheck self-tests
+        run: go test -race ./tools/gibsoncheck/...
+
+      - name: Run adminpoolacquire guard on full codebase
+        run: |
+          set -e
+          go build -o bin/gibsoncheck ./tools/gibsoncheck
+          ./bin/gibsoncheck -adminpoolacquire ./internal/... ./cmd/...
+          ./bin/gibsoncheck -forbidrawstoreimports ./internal/... ./cmd/...
+
+  migration-guards:
+    needs: changes
+    if: github.event_name == 'merge_group' || (github.event_name == 'pull_request' && needs.changes.outputs.relevant == 'true')
+    runs-on: ubuntu-latest
+    name: Migration build guards
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
+
+      - name: Check no tenant_id in migrations
+        run: |
+          # Self-test first to verify the guard itself works.
+          SELFTEST=1 bash scripts/check-no-tenant-id-column.sh
+          # Then run the real check against the actual migrations.
+          bash scripts/check-no-tenant-id-column.sh
+
+      - name: Check no Redis tenant-prefix patterns
+        run: bash scripts/check-no-redis-prefix.sh
+
+      # attic#15: on 2026-09-05 the tree tracked four ELF executables (92 MB).
+      # Keyed by file magic, so a binary under any new name fails the same way.
+      # Self-test first so a silently-broken guard cannot pass by finding nothing.
+      - name: Check no tracked binaries
+        run: |
+          bash scripts/check-no-tracked-binaries.sh --selftest
+          bash scripts/check-no-tracked-binaries.sh
+
+      # gibson#1294: this guard spent the whole post-monorepo period scanning
+      # two directories that do not exist, and it only ever ran inside `make
+      # check` locally. Run it in CI, self-test first.
+      - name: Check no unconditionally skipped tests
+        run: |
+          # Self-test first to verify the guard itself can fail.
+          bash scripts/check-no-skipped-tests.sh --selftest
+          # Then run the real check against the actual test tree.
+          bash scripts/check-no-skipped-tests.sh
+
+      # gibson#1524 / ADR-0065: the legacy connector-launcher path is removed.
+      # MCP lives only in the connector domain via ToolHive (ADR-0014); the
+      # plugin domain has no MCP. The guard script names the exact tokens it
+      # forbids; it fails if any reappears. Self-test first so a silently-broken
+      # guard cannot pass by finding nothing.
+      - name: Check legacy connector-launcher path stays removed
+        run: |
+          SELFTEST=1 bash scripts/check-no-mcp-bridge.sh
+          bash scripts/check-no-mcp-bridge.sh
+
+  rpc-test-walker:
+    needs: changes
+    if: github.event_name == 'merge_group' || (github.event_name == 'pull_request' && needs.changes.outputs.relevant == 'true')
+    runs-on: ubuntu-latest
+    name: per-RPC test walker
+    # Spec: gibson#793 (E3 / QUALITY-BARS §4). Fails if any registered gRPC RPC
+    # is not authz-enforceable, or lacks a handler test and is not in the
+    # shrinking baseline (rpc_handler_coverage_baseline.txt). The walker is a
+    # pure unit test — only stdlib + the in-module registry package — so it
+    # needs no Docker.
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
+
+      - uses: actions/setup-go@924ae3a1cded613372ab5595356fb5720e22ba16 # v6
+        with:
+          go-version-file: go.mod
+
+      - name: Download Go modules
+        run: go mod download
+
+      - name: Run per-RPC test walker
+        run: make check-rpc-test-walker
+
+  authz-registry-drift:
+    needs: changes
+    if: github.event_name == 'merge_group' || (github.event_name == 'pull_request' && needs.changes.outputs.relevant == 'true')
+    runs-on: ubuntu-latest
+    name: authz-registry drift gate
+    # Spec: private-authz-registry NFR Reliability.
+    # Regenerates internal/platform/authz/registry/ from the SDK protos pinned in go.mod
+    # and fails if the result differs from committed content. Catches:
+    #   - Hand-edits to registry.go instead of running regen.
+    #   - SDK version bumps where `make authz-registry` was not re-run.
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
+
+      - uses: actions/setup-go@924ae3a1cded613372ab5595356fb5720e22ba16 # v6
+        with:
+          go-version-file: go.mod
+
+      - uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # v4
+        with:
+          node-version: '22'
+
+      # Install buf globally so `make authz-registry BUF=buf` works without
+      # needing the dashboard node_modules tree (same pattern as SDK CI).
+      - name: Install buf
+        run: npm install -g @bufbuild/buf
+
+      - name: Regenerate authz registry
+        run: make authz-registry BUF=buf
+
+      - name: Check for drift
+        run: |
+          if ! git diff --exit-code internal/platform/authz/registry/; then
+            echo ""
+            echo "registry.go (or another artifact in internal/platform/authz/registry/) has drifted"
+            echo "from the SDK protos pinned in go.mod."
+            echo ""
+            echo "Remediation: run \`make authz-registry\` and commit the result."
+            exit 1
+          fi
+
+  tool-manifest-drift:
+    needs: changes
+    if: github.event_name == 'merge_group' || (github.event_name == 'pull_request' && needs.changes.outputs.relevant == 'true')
+    runs-on: ubuntu-latest
+    name: tool-manifest drift gate
+    # ADR-0017: a kind:tool manifest is generated from the executor image's own
+    # `--list-tools` output, so a manifest can never disagree with the image it
+    # names. Regeneration is hermetic — it reads the committed
+    # executor-catalog.json, never docker or a registry — so this runs anywhere.
+    # Catches:
+    #   - hand-edits to a generated manifest instead of re-capturing,
+    #   - a captured catalog committed without regenerating the manifests,
+    #   - a tool added to or dropped from the CAPTURED CATALOG with no manifest
+    #     change.
+    #
+    # It does NOT catch a captured catalog that has gone stale against a NEWER
+    # executor release: being hermetic is exactly what stops it looking at one.
+    # That is how trivy and tlsx shipped in the executor and stayed invisible to
+    # the catalog while this gate was green (gibson#1675). The other direction —
+    # is the capture still current — is a question about the outside world, so it
+    # is asked on a schedule by executor-catalog-staleness.yml, never here.
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
+
+      - uses: actions/setup-go@924ae3a1cded613372ab5595356fb5720e22ba16 # v6
+        with:
+          go-version-file: go.mod
+
+      - name: Regenerate tool manifests
+        run: make tool-manifests
+
+      - name: Check for drift
+        run: |
+          if ! git diff --exit-code internal/platform/componentcatalog/manifests/; then
+            echo ""
+            echo "A kind:tool manifest has drifted from the captured executor catalog."
+            echo ""
+            echo "These manifests are generated (ADR-0017). Do not hand-edit them:"
+            echo "  - to change what a tool declares, change it in gibson-executor,"
+            echo "    publish an image, then re-capture:"
+            echo "      make tool-catalog-capture IMAGE=ghcr.io/zeroroot-ai/gibson-executor@sha256:<digest>"
+            echo "  - if you only need to regenerate from the committed catalog:"
+            echo "      make tool-manifests"
+            echo ""
+            echo "Commit the regenerated manifests with the change that caused them."
+            exit 1
+          fi

@@ -1,0 +1,138 @@
+// Use of this source code is governed by the Elastic License 2.0
+// that can be found in the LICENSE file in the repo root.
+
+// ConnectorService is the tenant-facing connector lifecycle (ADR-0014). A
+// person enables a connector from the curated catalog and it becomes a running
+// ConnectorInstance the connector-operator reconciles onto ToolHive. The person
+// does not author YAML. This service is SEPARATE from ConnectorAuthService,
+// which owns the OAuth grant behind an authorized connector.
+//
+// NOTE (Slice 4, not yet wired): the enable/disable RPCs create and delete a
+// ConnectorInstance custom resource in the tenant namespace. The daemon has no
+// direct Kubernetes client today (it uses the operator/enqueue pattern for
+// tenant CRs). Wiring EnableConnector needs an architectural decision — give the
+// daemon a scoped ConnectorInstance client, or route through the operator like
+// tenant provisioning. This proto is the agreed surface; the implementation
+// waits on that decision.
+//
+// Authorization: every RPC carries a (gibson.auth.v1.authz) annotation.
+
+syntax = "proto3";
+
+package gibson.tenant.v1;
+
+option go_package = "github.com/zeroroot-ai/gibson/internal/server/daemon/api/gibson/tenant/v1;tenantv1";
+
+import "gibson/auth/v1/options.proto";
+
+service ConnectorService {
+  // ListCatalog returns the curated connectors this tenant may enable. The set
+  // is the shipped catalog, filtered by the per-tenant FGA catalog gate.
+  rpc ListCatalog(ListCatalogRequest) returns (ListCatalogResponse) {
+    option (gibson.auth.v1.authz) = {
+      relation: "member"
+      object_type: "tenant"
+      object_deriver: "tenant_from_identity"
+      allowed_identities: 3  // USER | SERVICE
+    };
+  }
+
+  // EnableConnector creates a ConnectorInstance for the catalog entry in the
+  // tenant namespace. The connector-operator reconciles it onto ToolHive. For an
+  // OAuth connector the instance comes up AuthorizationRequired until a human
+  // authorizes it (see ConnectorAuthService).
+  // Requires tenant admin (ADR-0067): enable creates a workload and an
+  // outbound OAuth surface, and it is what puts the connector into the
+  // tenant catalog, so no per-connector relation can gate it.
+  rpc EnableConnector(EnableConnectorRequest) returns (EnableConnectorResponse) {
+    option (gibson.auth.v1.authz) = {
+      relation: "admin"
+      object_type: "tenant"
+      object_deriver: "tenant_from_identity"
+      allowed_identities: 3  // USER | SERVICE
+    };
+  }
+
+  // ListConnectors returns the tenant's enabled connectors and their live
+  // status (phase, discovered tool count, last error).
+  rpc ListConnectors(ListConnectorsRequest) returns (ListConnectorsResponse) {
+    option (gibson.auth.v1.authz) = {
+      relation: "member"
+      object_type: "tenant"
+      object_deriver: "tenant_from_identity"
+      allowed_identities: 3  // USER | SERVICE
+    };
+  }
+
+  // DisableConnector deletes the ConnectorInstance. The operator cascade-removes
+  // the ToolHive resource, the NetworkPolicy, and the credential secret.
+  // Requires tenant admin (ADR-0067), matching EnableConnector and the
+  // ConnectorAuthService grant RPCs.
+  rpc DisableConnector(DisableConnectorRequest) returns (DisableConnectorResponse) {
+    option (gibson.auth.v1.authz) = {
+      relation: "admin"
+      object_type: "tenant"
+      object_deriver: "tenant_from_identity"
+      allowed_identities: 3  // USER | SERVICE
+    };
+  }
+}
+
+// CatalogEntry is one curated connector the tenant may enable.
+message CatalogEntry {
+  string id = 1;
+  string display_name = 2;
+  string description = 3;
+  // shape is "Hosted" (a container gibson runs) or "Remote" (a vendor-hosted
+  // MCP server gibson proxies).
+  string shape = 4;
+  // auth is "none", "secret", or "oauth".
+  string auth = 5;
+  // default_instance_url is the vendor base URL the dashboard pre-fills into
+  // the authorize form for an auth="oauth" entry (for example
+  // "https://gitlab.com"). Empty for a self-hostable vendor with no single
+  // default, so the operator enters their own instance URL.
+  string default_instance_url = 6;
+}
+
+message ListCatalogRequest {}
+
+message ListCatalogResponse {
+  repeated CatalogEntry entries = 1;
+}
+
+message EnableConnectorRequest {
+  // catalog_id is the id of the entry to enable (for example "gitlab").
+  string catalog_id = 1;
+}
+
+message EnableConnectorResponse {
+  // connector is the enabled connector's id.
+  string connector = 1;
+  // phase is the ConnectorInstance phase right after creation.
+  string phase = 2;
+}
+
+// Connector is one enabled connector and its live status.
+message Connector {
+  string id = 1;
+  string shape = 2;
+  string runtime = 3;
+  // phase is the ConnectorInstance lifecycle phase (Pending, Provisioning,
+  // AuthorizationRequired, Ready, RefreshFailing, Failed, Deprovisioning).
+  string phase = 4;
+  int32 discovered_tools = 5;
+  string last_error = 6;
+}
+
+message ListConnectorsRequest {}
+
+message ListConnectorsResponse {
+  repeated Connector connectors = 1;
+}
+
+message DisableConnectorRequest {
+  string connector = 1;
+}
+
+message DisableConnectorResponse {}

@@ -1,0 +1,42 @@
+# Fixture authorization model for the fgalistusers guard.
+#
+# It reproduces the structural shapes the real model uses, so the
+# admitsUser fixpoint is exercised on all of them:
+#   - direct [user]                       -> tenant.member
+#   - userset [team#admin]                -> team.member
+#   - non-user direct only                -> secret.can_resolve, team.parent
+#   - computed union                      -> tenant.admin
+#   - tuple-to-userset                    -> component.in_tenant_catalog
+#   - difference over intersection over TTU -> component.can_execute
+model
+  schema 1.1
+
+type user
+
+type plugin_principal
+
+type team
+  relations
+    define parent: [tenant]
+    define admin: [user]
+    define member: [user, team#admin]
+
+type tenant
+  relations
+    define owner: [user]
+    define admin: [user] or owner
+    define member: [user, plugin_principal] or admin
+    define tenant_enabled: [tenant]
+
+type secret
+  relations
+    define can_resolve: [plugin_principal]
+
+type component
+  relations
+    define owner: [tenant]
+    define tenant_enabled: [tenant]
+    define direct_execute: [user, plugin_principal]
+    define any_execute_deny: [user]
+    define in_tenant_catalog: member from tenant_enabled
+    define can_execute: (direct_execute and in_tenant_catalog) but not any_execute_deny

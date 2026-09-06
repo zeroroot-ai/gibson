@@ -1,0 +1,44 @@
+# E2E mission fixture — single JOB node.
+#
+# Spec: mission-verb-noun-registry Requirement 1 (extension contract).
+# Design: ADR-0019, docs/architecture/banks.md, epic gibson#1706.
+#
+# A JOB node drives one unit of work on a bank of always-on coding agents.
+# The executor opens the job on the bank, then runs the verify loop inside
+# the node: it dispatches the acceptance step to the declared verifier, and
+# on failure sends the verifier's report as the next input to the SAME job,
+# so the agent keeps its conversation and its worktrees. When the verifier
+# passes, or Acceptance.max_passes runs out, the executor closes the job with
+# a verdict and a score.
+#
+# The loop is inside the node. The mission graph stays a directed acyclic
+# graph: a job node never adds a loop edge.
+
+name: e2e-job
+description: JOB noun e2e fixture.
+version: "1.0.0"
+target_ref: ""
+
+nodes:
+  fix:
+    id: fix
+    type: NODE_TYPE_JOB
+    job_config:
+      bank_ref: nightly
+      spec:
+        goal: Fix the vulnerability the scan reported and open a merge request.
+        repositories:
+          - name: app
+            connector_ref: connector/gitlab
+            project: group/app
+            base_branch: main
+            deliverable: DELIVERABLE_KIND_MERGE_REQUEST
+        credential_names:
+          - gitlab-token
+        acceptance:
+          verifier_component: agent/verifier
+          passing_score: 0.8
+          max_passes: 2
+
+entry_points: ["fix"]
+exit_points: ["fix"]

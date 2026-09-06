@@ -1,0 +1,67 @@
+# If you prefer the allow list template instead of the deny list, see community template:
+# https://github.com/github/gitignore/blob/main/community/Golang/Go.AllowList.gitignore
+#
+# Binaries for programs and plugins
+*.exe
+*.exe~
+*.dll
+*.so
+*.dylib
+bin/*
+
+
+# Test binary, built with `go test -c`
+*.test
+
+# Code coverage profiles and other test artifacts
+*.out
+coverage.html
+*.coverprofile
+profile.cov
+
+# Dependency directories (remove the comment below to include it)
+# vendor/
+
+# Go workspace file
+go.work
+go.work.sum
+
+# env file
+.env
+build/.env
+
+# Editor/IDE
+# .idea/
+# .vscode/
+
+# Stray binaries built at the repo root.
+# The canonical build output is `bin/gibson` (already covered by `bin/*` above) —
+# produced by `make bin`. Running plain `go build` at the repo root drops a
+# `./gibson` here; this anchored entry stops it from ever being committed.
+# Do NOT replace with the bare path `gibson` — that would shadow any future file
+# named gibson in any subdirectory.
+/gibson
+
+# E2E helper / lint binaries built ad-hoc into the module root
+/route-drift
+/fixtures-lint
+
+# E2E fixture binaries built ad-hoc by `go build` next to their main.go
+tests/e2e/fixtures/agents/probe/probe
+tests/e2e/fixtures/targets/test-target/test-target
+
+# Claude Code internal scheduler state
+.claude/
+
+# Build artifacts and codegen scratch (added 2026-05-10 cleanup)
+/.tmp/
+/audit-csv-gen
+/tenant-owner-backfill
+
+# Compiled outputs that were once committed by accident (attic#15, 2026-09-05).
+# check-no-tracked-binaries fails the build on any tracked ELF/Mach-O/PE file.
+/bootstrap-tenant-owner
+/gen-fga-model-json
+operators/tenant/bin/
+operators/platform/bin/
+operators/connector/bin/

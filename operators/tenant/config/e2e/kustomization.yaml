@@ -1,0 +1,24 @@
+# E2E overlay: extends config/default with lightweight in-cluster stubs for
+# every hard-required service (Postgres, Redis, mock-Vault). The manager
+# Deployment is patched to inject stub env vars so the operator starts up
+# cleanly in the kind-only CI environment without a full platform stack.
+#
+# Used by `make deploy-e2e` in the test-e2e workflow. Not for production.
+namespace: tenant-operator-system
+
+resources:
+- ../default
+- e2e-deps.yaml
+
+configMapGenerator:
+- name: e2e-plans
+  files:
+  - plans.yaml=../../plans/plans.yaml
+  options:
+    disableNameSuffixHash: true
+
+patches:
+- path: manager_e2e_env_patch.yaml
+  target:
+    kind: Deployment
+    labelSelector: "control-plane=controller-manager"

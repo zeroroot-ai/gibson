@@ -1,0 +1,283 @@
+---
+apiVersion: apiextensions.k8s.io/v1
+kind: CustomResourceDefinition
+metadata:
+  annotations:
+    controller-gen.kubebuilder.io/version: v0.20.1
+  name: tenantgrants.gibson.zeroroot.ai
+spec:
+  group: gibson.zeroroot.ai
+  names:
+    kind: TenantGrants
+    listKind: TenantGrantsList
+    plural: tenantgrants
+    shortNames:
+    - tg
+    singular: tenantgrants
+  scope: Namespaced
+  versions:
+  - additionalPrinterColumns:
+    - jsonPath: .spec.tenantID
+      name: Tenant
+      type: string
+    - jsonPath: .status.appliedTuples
+      name: Tuples
+      type: integer
+    - jsonPath: .status.phase
+      name: Phase
+      type: string
+    - jsonPath: .status.ready
+      name: Ready
+      type: boolean
+    - jsonPath: .metadata.creationTimestamp
+      name: Age
+      type: date
+    name: v1alpha1
+    schema:
+      openAPIV3Schema:
+        description: |-
+          TenantGrants is the Schema for the tenantgrants API. It declaratively
+          reconciles a tenant's platform-level FGA tuples — the relationships that
+          register the tenant under the platform's system tenant — for a single tenant.
+          The controller reconciles the tuples by delegating to the shared
+          grants.Provisioner (which wraps the same fga.Client the Tenant saga's
+          RegisterTenantWithPlatform step uses), drift-corrects on every reconcile
+          (re-writing any tuple deleted out-of-band), and deletes the tuples on delete
+          via a finalizer.
+        properties:
+          apiVersion:
+            description: |-
+              APIVersion defines the versioned schema of this representation of an object.
+              Servers should convert recognized schemas to the latest internal value, and
+              may reject unrecognized values.
+              More info: https://git.k8s.io/community/contributors/devel/sig-architecture/api-conventions.md#resources
+            type: string
+          kind:
+            description: |-
+              Kind is a string value representing the REST resource this object represents.
+              Servers may infer this from the endpoint the client submits requests to.
+              Cannot be updated.
+              In CamelCase.
+              More info: https://git.k8s.io/community/contributors/devel/sig-architecture/api-conventions.md#types-kinds
+            type: string
+          metadata:
+            type: object
+          spec:
+            description: |-
+              TenantGrantsSpec defines the desired state of a TenantGrants.
+
+              The CRD is a thin declarative wrapper over the existing tenant-level FGA
+              tuple writes: the controller reconciles the tenant's platform relationships
+              by delegating to the shared grants.Provisioner (which wraps the SAME
+              fga.Client the Tenant saga's RegisterTenantWithPlatform step uses — one
+              codepath, ADR-0027). On every reconcile the controller drift-corrects: any
+              declared tuple deleted out-of-band is re-written.
+
+              By default (PlatformRegistration true, no ExtraTuples) it reconciles exactly
+              the canonical (tenant:<id>, parent, system_tenant:_system) registration tuple
+              the saga writes — replacing the imperative RegisterTenantWithPlatform step
+              with a declarative, drift-correcting resource.
+            properties:
+              extraTuples:
+                description: |-
+                  ExtraTuples declares additional tenant-level FGA tuples to reconcile
+                  alongside (or instead of) the platform-registration tuple. Each is written
+                  write-if-absent and drift-corrected on every reconcile, and deleted on
+                  teardown. Reserved for future tenant-scoped platform relationships; empty
+                  in the common case.
+                items:
+                  description: |-
+                    TenantGrantTuple is a single declarative FGA relationship tuple. It mirrors
+                    the operator fga.Tuple {User, Relation, Object} shape; the controller projects
+                    each entry into a write-if-absent OpenFGA tuple.
+                  properties:
+                    object:
+                      description: Object is the FGA tuple object, e.g. "system_tenant:_system".
+                      minLength: 1
+                      type: string
+                    relation:
+                      description: |-
+                        Relation is the FGA relation name, e.g. "parent". Must name a relation
+                        that exists in the hand-maintained authz model (internal/platform/authz/
+                        model.fga); OpenFGA rejects a write against an unknown or computed
+                        relation.
+                      minLength: 1
+                      type: string
+                    user:
+                      description: User is the FGA tuple subject, e.g. "tenant:acme".
+                      minLength: 1
+                      type: string
+                  required:
+                  - object
+                  - relation
+                  - user
+                  type: object
+                type: array
+                x-kubernetes-list-type: atomic
+              platformRegistration:
+                default: true
+                description: |-
+                  PlatformRegistration requests the canonical tenant→platform registration
+                  tuple (tenant:<id>, parent, system_tenant:_system). Defaults to true: the
+                  registration tuple is the reason this resource exists, so it participates
+                  unless explicitly disabled. Set false only when the registration is owned
+                  elsewhere and this resource carries ExtraTuples only.
+                type: boolean
+              tenantID:
+                description: |-
+                  TenantID is the canonical tenant identifier (the Tenant CR name). The
+                  platform-registration tuple is keyed on this value, matching the saga
+                  (RegisterTenantWithPlatform writes tenant:<TenantID>). Immutable once set.
+                maxLength: 253
+                minLength: 1
+                type: string
+                x-kubernetes-validations:
+                - message: tenantID is immutable
+                  rule: self == oldSelf
+            required:
+            - tenantID
+            type: object
+          status:
+            description: |-
+              TenantGrantsStatus defines the observed state of a TenantGrants. It carries a
+              readiness condition per component plus an overall Ready condition, mirroring
+              the scalar progress the Tenant saga records across its registration step.
+            properties:
+              appliedTuples:
+                description: |-
+                  AppliedTuples is the number of tuples reconciled on the most recent
+                  successful reconcile (platform-registration + ExtraTuples).
+                type: integer
+              components:
+                description: Components carries the per-component reconciliation state.
+                items:
+                  description: |-
+                    TenantGrantsComponentCondition reports the reconciliation state of a single
+                    grant component. The aggregate Ready condition (and the scalar Ready field) is
+                    True only when every participating component has reached state=ready.
+                  properties:
+                    lastUpdated:
+                      description: LastUpdated is the time this component's state
+                        was last written.
+                      format: date-time
+                      type: string
+                    name:
+                      description: |-
+                        Name identifies the component: platform-registration (the canonical
+                        tenant→platform tuple) or extra-tuples (the ExtraTuples batch).
+                      enum:
+                      - platform-registration
+                      - extra-tuples
+                      type: string
+                    reason:
+                      description: Reason carries a human-readable description, especially
+                        when state=failed.
+                      type: string
+                    state:
+                      description: State is the current reconciliation state of the
+                        component.
+                      enum:
+                      - provisioning
+                      - ready
+                      - failed
+                      type: string
+                  required:
+                  - name
+                  - state
+                  type: object
+                type: array
+                x-kubernetes-list-map-keys:
+                - name
+                x-kubernetes-list-type: map
+              conditions:
+                description: |-
+                  Conditions represent the current state of the TenantGrants resource.
+                  Standard condition type: Ready.
+                items:
+                  description: Condition contains details for one aspect of the current
+                    state of this API Resource.
+                  properties:
+                    lastTransitionTime:
+                      description: |-
+                        lastTransitionTime is the last time the condition transitioned from one status to another.
+                        This should be when the underlying condition changed.  If that is not known, then using the time when the API field changed is acceptable.
+                      format: date-time
+                      type: string
+                    message:
+                      description: |-
+                        message is a human readable message indicating details about the transition.
+                        This may be an empty string.
+                      maxLength: 32768
+                      type: string
+                    observedGeneration:
+                      description: |-
+                        observedGeneration represents the .metadata.generation that the condition was set based upon.
+                        For instance, if .metadata.generation is currently 12, but the .status.conditions[x].observedGeneration is 9, the condition is out of date
+                        with respect to the current state of the instance.
+                      format: int64
+                      minimum: 0
+                      type: integer
+                    reason:
+                      description: |-
+                        reason contains a programmatic identifier indicating the reason for the condition's last transition.
+                        Producers of specific condition types may define expected values and meanings for this field,
+                        and whether the values are considered a guaranteed API.
+                        The value should be a CamelCase string.
+                        This field may not be empty.
+                      maxLength: 1024
+                      minLength: 1
+                      pattern: ^[A-Za-z]([A-Za-z0-9_,:]*[A-Za-z0-9_])?$
+                      type: string
+                    status:
+                      description: status of the condition, one of True, False, Unknown.
+                      enum:
+                      - "True"
+                      - "False"
+                      - Unknown
+                      type: string
+                    type:
+                      description: type of condition in CamelCase or in foo.example.com/CamelCase.
+                      maxLength: 316
+                      pattern: ^([a-z0-9]([-a-z0-9]*[a-z0-9])?(\.[a-z0-9]([-a-z0-9]*[a-z0-9])?)*/)?(([A-Za-z0-9][-A-Za-z0-9_.]*)?[A-Za-z0-9])$
+                      type: string
+                  required:
+                  - lastTransitionTime
+                  - message
+                  - reason
+                  - status
+                  - type
+                  type: object
+                type: array
+                x-kubernetes-list-map-keys:
+                - type
+                x-kubernetes-list-type: map
+              lastError:
+                description: |-
+                  LastError contains the most recent error message from the reconcile.
+                  Cleared on a successful reconcile.
+                type: string
+              observedGeneration:
+                description: ObservedGeneration reflects the generation most recently
+                  reconciled.
+                format: int64
+                type: integer
+              phase:
+                description: Phase is the overall lifecycle phase of the tenant grants.
+                enum:
+                - Pending
+                - Provisioning
+                - Ready
+                - Failed
+                - Deprovisioning
+                type: string
+              ready:
+                description: Ready is true when every declared tuple exists in OpenFGA.
+                type: boolean
+            type: object
+        required:
+        - spec
+        type: object
+    served: true
+    storage: true
+    subresources:
+      status: {}

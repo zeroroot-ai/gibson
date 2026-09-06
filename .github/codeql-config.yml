@@ -1,0 +1,16 @@
+# CodeQL configuration. Pin bundle + queries via Renovate (PRD 1.5).
+name: "zeroroot-ai default CodeQL config"
+
+# Default suite for the language. Custom queries from
+# zeroroot-ai/codeql-go-queries / codeql-ts-queries land via slices 4.3-4.5.
+queries:
+  - uses: security-and-quality
+
+# Exclude generated code paths from analysis surface.
+paths-ignore:
+  - "**/zz_generated*.go"
+  - "**/*.pb.go"
+  - "**/*_grpc.pb.go"
+  - "vendor/**"
+  - "**/testdata/**"
+  - "**/.worktrees/**"

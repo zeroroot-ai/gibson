@@ -1,0 +1,89 @@
+syntax = "proto3";
+
+package gibson.daemon.logs.v1;
+
+option go_package = "github.com/zeroroot-ai/gibson/internal/server/daemon/api/gibson/daemon/logs/v1;logsv1";
+
+import "gibson/auth/v1/options.proto";
+
+// LogsService is the daemon-mediated read path into tenant-scoped mission logs
+// and events stored in Loki (E9, gibson#811). The daemon resolves the caller's
+// tenant from the authenticated context and constructs the Loki query's
+// `tenant_id` label + `X-Scope-OrgID` org server-side — the dashboard never
+// fetches Loki directly and never supplies a tenant scope. This is the
+// tenant-isolation fix: previously the dashboard's loki-client.ts built the
+// `X-Scope-OrgID` header and the `tenant_id` LogQL filter from a client-held
+// value; now the daemon owns it, so a caller can never read another tenant's
+// logs. It mirrors WorldService / TracesService exactly: daemon-local,
+// tenant-scoped observability over a backing store, read through Envoy +
+// ext-authz.
+//
+// Every RPC is ext-authz-gated via the tenant member relation.
+service LogsService {
+  // QueryMissionLogs returns the tenant's log lines for a single mission. The
+  // mission_id is matched within the tenant's log stream; the tenant scope is
+  // derived server-side from the authenticated identity, never supplied by the
+  // client.
+  rpc QueryMissionLogs(QueryMissionLogsRequest) returns (QueryMissionLogsResponse) {
+    option (gibson.auth.v1.authz) = {
+      relation: "member",
+      object_type: "tenant",
+      object_deriver: "tenant_from_identity",
+      allowed_identities: 3  // USER | SERVICE
+    };
+  }
+
+  // QueryDaemonLogs returns the tenant's daemon log lines, optionally filtered
+  // by level and/or mission_id. The tenant scope is derived server-side.
+  rpc QueryDaemonLogs(QueryDaemonLogsRequest) returns (QueryDaemonLogsResponse) {
+    option (gibson.auth.v1.authz) = {
+      relation: "member",
+      object_type: "tenant",
+      object_deriver: "tenant_from_identity",
+      allowed_identities: 3  // USER | SERVICE
+    };
+  }
+}
+
+// LogLevel filters daemon log lines by severity. LEVEL_UNSPECIFIED means "no
+// level filter" (return all levels).
+enum LogLevel {
+  LOG_LEVEL_UNSPECIFIED = 0;
+  LOG_LEVEL_DEBUG = 1;
+  LOG_LEVEL_INFO = 2;
+  LOG_LEVEL_WARN = 3;
+  LOG_LEVEL_ERROR = 4;
+}
+
+// LogEntry is a single log line: when it was emitted, the raw line, and any
+// stream labels Loki attached (mirrors the dashboard's LokiLogEntry shape).
+message LogEntry {
+  // unix_nanos is the entry's emit time as Unix nanoseconds.
+  int64 unix_nanos = 1;
+  // line is the raw log line (typically structured slog JSON).
+  string line = 2;
+  // labels are the Loki stream labels for this entry.
+  map<string, string> labels = 3;
+}
+
+// QueryMissionLogsRequest asks for one mission's logs. start_unix_nanos /
+// end_unix_nanos bound the time range (0 means "use the server default
+// window"); limit caps the number of returned entries (0 means server default).
+message QueryMissionLogsRequest {
+  string mission_id = 1;        // required
+  int64 start_unix_nanos = 2;   // optional time-range start
+  int64 end_unix_nanos = 3;     // optional time-range end
+  int32 limit = 4;              // optional cap on entries
+}
+message QueryMissionLogsResponse { repeated LogEntry entries = 1; }
+
+// QueryDaemonLogsRequest asks for the tenant's daemon logs, optionally filtered
+// by level and/or a mission_id substring.
+message QueryDaemonLogsRequest {
+  LogLevel level = 1;           // optional level filter
+  string mission_id = 2;        // optional mission-id substring filter
+  int64 start_unix_nanos = 3;   // optional time-range start
+  int64 end_unix_nanos = 4;     // optional time-range end
+  int32 limit = 5;              // optional cap on entries
+}
+message QueryDaemonLogsResponse { repeated LogEntry entries = 1; }

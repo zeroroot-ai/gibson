@@ -1,0 +1,536 @@
+syntax = "proto3";
+
+package gibson.daemon.operator.v1;
+
+option go_package = "github.com/zeroroot-ai/gibson/internal/server/daemon/api/gibson/daemon/operator/v1;daemonoperatorv1";
+
+import "gibson/auth/v1/options.proto";
+
+// DaemonOperatorService provides strictly ZD-internal operator operations on
+// the Gibson daemon. It is the post-ADR-0037 successor to the deleted
+// PlatformOperatorService, carrying only the operator-only RPCs that have no
+// customer surface. Customer-callable RPCs from the former admin services were
+// promoted to DaemonService / TenantService in the OSS SDK (sdk#205).
+//
+// Every RPC is protected at the transport layer by SPIFFE mTLS and restricted
+// to callers holding the "platform_operator" FGA relation on
+// system_tenant:_system.
+service DaemonOperatorService {
+  // ---------------------------------------------------------------------------
+  // Entitlements — operator RPCs called by the tenant-operator reconciler
+  // ---------------------------------------------------------------------------
+
+  // WriteAccessTuples atomically adds and/or deletes FGA tuples on behalf of
+  // an authenticated caller.
+  rpc WriteAccessTuples(WriteAccessTuplesRequest) returns (WriteAccessTuplesResponse) {
+    option (gibson.auth.v1.authz) = {
+      relation: "platform_operator",
+      object_type: "system_tenant",
+      object_deriver: "system_tenant",
+      allowed_identities: 3  // USER | SERVICE
+    };
+  }
+  // UpsertTenantQuota writes the tenant's runtime quota record to Postgres.
+  // Called by the operator's reconcile loop after resolving the plan.
+  rpc UpsertTenantQuota(UpsertTenantQuotaRequest) returns (UpsertTenantQuotaResponse) {
+    option (gibson.auth.v1.authz) = {
+      relation: "platform_operator",
+      object_type: "system_tenant",
+      object_deriver: "system_tenant",
+      allowed_identities: 3  // USER | SERVICE
+    };
+  }
+  // ListFeatureTuples enumerates the tenant feature tuples currently set.
+  rpc ListFeatureTuples(ListFeatureTuplesRequest) returns (ListFeatureTuplesResponse) {
+    option (gibson.auth.v1.authz) = {
+      relation: "platform_operator",
+      object_type: "system_tenant",
+      object_deriver: "system_tenant",
+      allowed_identities: 3  // USER | SERVICE
+    };
+  }
+  // SeedCatalogTenantEnabled writes tenant_enabled tuples for all platform-enabled items.
+  rpc SeedCatalogTenantEnabled(SeedCatalogTenantEnabledRequest) returns (SeedCatalogTenantEnabledResponse) {
+    option (gibson.auth.v1.authz) = {
+      relation: "platform_operator",
+      object_type: "system_tenant",
+      object_deriver: "system_tenant",
+      allowed_identities: 3  // USER | SERVICE
+    };
+  }
+
+  // EmitAuditEvent lets an operator/platform workload forward a structured
+  // audit event onto the daemon's emitter.
+  rpc EmitAuditEvent(EmitAuditEventRequest) returns (EmitAuditEventResponse) {
+    option (gibson.auth.v1.authz) = {
+      relation: "platform_operator",
+      object_type: "system_tenant",
+      object_deriver: "system_tenant",
+      allowed_identities: 3  // USER | SERVICE
+    };
+  }
+
+  // SetTenantZitadelOrg seeds the daemon's tenant -> Zitadel-organization-id
+  // mapping. Called by the tenant-operator (the lifecycle coordinator) when it
+  // provisions a tenant's per-tenant Zitadel org during standup, and on
+  // backfill/reconcile.
+  //
+  // The daemon cannot read Kubernetes (ADR-0023), so it cannot resolve a
+  // tenant's per-tenant Zitadel org id from Tenant.Status.ZitadelOrgID itself.
+  // The operator owns that org id and hands it to the daemon here. The daemon
+  // persists it so that gibson.tenant.v1.MembershipService can write the
+  // Zitadel half of human membership (add/remove org member) for granular
+  // member operations, without a K8s read or a token-claim dependency
+  // (ADR-0043: FGA is the principal tree; Zitadel is the per-org human-auth +
+  // tenant boundary).
+  //
+  // Idempotent: re-seeding the same (tenant_id, zitadel_org_id) is a no-op;
+  // a changed org id overwrites the prior mapping.
+  rpc SetTenantZitadelOrg(SetTenantZitadelOrgRequest) returns (SetTenantZitadelOrgResponse) {
+    option (gibson.auth.v1.authz) = {
+      relation: "platform_operator",
+      object_type: "system_tenant",
+      object_deriver: "system_tenant",
+      allowed_identities: 3  // USER | SERVICE
+    };
+  }
+
+  // ---------------------------------------------------------------------------
+  // Operator-pull tenant provisioning (E9, gibson#948, enables dashboard#813)
+  // ---------------------------------------------------------------------------
+
+  // ListPendingTenantProvisioning returns the daemon-owned queue of tenants
+  // awaiting Tenant-CR creation. The daemon's Signup handler enqueues one row
+  // per self-serve signup once it has provisioned the founding-owner Zitadel
+  // user (gibson#812); the tenant-operator's reconcile loop drains the queue by
+  // creating the Tenant CR for each pending record, then AckTenantProvisioned.
+  //
+  // ADR-0023: the daemon never touches Kubernetes — it only reads its Postgres
+  // queue here. The operator (which holds `tenants` create RBAC) creates the
+  // Tenant CR. Idempotent and safe to poll: returns only rows still in
+  // status=pending.
+  rpc ListPendingTenantProvisioning(ListPendingTenantProvisioningRequest) returns (ListPendingTenantProvisioningResponse) {
+    option (gibson.auth.v1.authz) = {
+      relation: "platform_operator",
+      object_type: "system_tenant",
+      object_deriver: "system_tenant",
+      allowed_identities: 3  // USER | SERVICE
+    };
+  }
+
+  // EnqueueTenantProvisioning inserts a pending tenant-provisioning op into the
+  // daemon's tenant_admin_ops queue — the same idempotent INSERT that
+  // gibson.tenant.v1.AdminTenantService/AdminProvisionTenant performs, but on
+  // this WORKLOAD-AUTHENTICATED operator surface instead of the human-facing
+  // admin surface (gibson#1496).
+  //
+  // Why this exists: AdminProvisionTenant is gated by a session-revocation
+  // check that only an interactive human login satisfies, so a headless
+  // self-hosted install can never call it. This RPC lets the tenant-operator
+  // seed the FIRST tenant with its own SPIFFE identity — no user, no session —
+  // after which the existing ListPendingTenantProvisioning drain provisions it
+  // exactly as a signup-originated op. Idempotent on tenant_id: an already
+  // pending provision op returns already_existed=true and no new row.
+  rpc EnqueueTenantProvisioning(EnqueueTenantProvisioningRequest) returns (EnqueueTenantProvisioningResponse) {
+    option (gibson.auth.v1.authz) = {
+      relation: "platform_operator",
+      object_type: "system_tenant",
+      object_deriver: "system_tenant",
+      allowed_identities: 3  // USER | SERVICE
+    };
+  }
+
+  // AckTenantProvisioned marks a pending-provisioning record done so it is not
+  // re-created on the next reconcile pass. The operator calls this AFTER it has
+  // ensured the Tenant CR exists (create or already-present), so a crash
+  // between create and ack simply re-lists the row and the operator's
+  // existence-check makes the re-create a no-op. Idempotent: acking an
+  // already-done or unknown tenant_id is a no-op success.
+  rpc AckTenantProvisioned(AckTenantProvisionedRequest) returns (AckTenantProvisionedResponse) {
+    option (gibson.auth.v1.authz) = {
+      relation: "platform_operator",
+      object_type: "system_tenant",
+      object_deriver: "system_tenant",
+      allowed_identities: 3  // USER | SERVICE
+    };
+  }
+
+  // ReportTenantStatus upserts the operator-observed Tenant CR status into the
+  // daemon's platform Postgres (tenant_status table) so the dashboard can read
+  // provisioning status via gibson.tenant.v1.TenantProvisioningService instead
+  // of the Kubernetes API (ADR-0023, dashboard#813). The operator's Tenant
+  // reconciler calls this best-effort after each status patch; the daemon
+  // cannot read the CR itself, so the operator is the sole source of this
+  // snapshot. Idempotent: re-reporting the same status is a no-op upsert.
+  //
+  // Note: billing_active is NOT carried here — it is owned by the dashboard
+  // billing webhook via TenantProvisioningService.SetTenantBillingActive and
+  // must not be clobbered by an operator status report.
+  rpc ReportTenantStatus(ReportTenantStatusRequest) returns (ReportTenantStatusResponse) {
+    option (gibson.auth.v1.authz) = {
+      relation: "platform_operator",
+      object_type: "system_tenant",
+      object_deriver: "system_tenant",
+      allowed_identities: 3  // USER | SERVICE
+    };
+  }
+
+  // ---------------------------------------------------------------------------
+  // Operator-pull admin tenant CRUD (gibson#964, enables dashboard#855)
+  // ---------------------------------------------------------------------------
+
+  // ListPendingTenantOps returns the daemon-owned queue of admin tenant CRUD
+  // operations (provision/update/delete) awaiting application to the Tenant CR.
+  // The dashboard's AdminTenantService enqueues one row per platform-admin CRUD
+  // action; the tenant-operator's reconcile loop drains the queue by applying
+  // each op to the Tenant CR (create / patch spec / delete), then AckTenantOp.
+  //
+  // ADR-0023: the daemon never touches Kubernetes — it only reads its Postgres
+  // queue here. The operator (which holds `tenants` create/update/delete RBAC)
+  // applies the op. Idempotent and safe to poll: returns only rows still
+  // status=pending, in created_at order so a tenant's ops apply in sequence.
+  rpc ListPendingTenantOps(ListPendingTenantOpsRequest) returns (ListPendingTenantOpsResponse) {
+    option (gibson.auth.v1.authz) = {
+      relation: "platform_operator",
+      object_type: "system_tenant",
+      object_deriver: "system_tenant",
+      allowed_identities: 3  // USER | SERVICE
+    };
+  }
+
+  // AckTenantOp marks a pending admin-op record done so it is not re-applied on
+  // the next reconcile pass. The operator calls this AFTER it has applied the op
+  // to the Tenant CR (create/patch/delete, all idempotent), so a crash between
+  // apply and ack simply re-lists the row and the operator's idempotent apply
+  // makes the re-apply a no-op. Idempotent: acking an already-done or unknown
+  // op_id is a no-op success.
+  rpc AckTenantOp(AckTenantOpRequest) returns (AckTenantOpResponse) {
+    option (gibson.auth.v1.authz) = {
+      relation: "platform_operator",
+      object_type: "system_tenant",
+      object_deriver: "system_tenant",
+      allowed_identities: 3  // USER | SERVICE
+    };
+  }
+
+  // ---------------------------------------------------------------------------
+  // Connector lifecycle (ADR-0015 §5, gibson#1566)
+  // ---------------------------------------------------------------------------
+
+  // RevokeConnectorGrant revokes a tenant's connector grant on behalf of the
+  // connector-operator's ConnectorInstance finalizer. Deleting a connector
+  // must revoke the vendor grant and remove the Grant and access-token secrets
+  // from the tenant store; only the daemon holds a secret-store client, so the
+  // operator asks it over the SPIFFE direct-dial path (ADR-0002). Same
+  // semantics as gibson.tenant.v1.ConnectorAuthService.RevokeConnectorGrant,
+  // with the tenant carried explicitly: best-effort vendor revocation, then
+  // local deletion, idempotent.
+  rpc RevokeConnectorGrant(RevokeConnectorGrantRequest) returns (RevokeConnectorGrantResponse) {
+    option (gibson.auth.v1.authz) = {
+      relation: "platform_operator",
+      object_type: "system_tenant",
+      object_deriver: "system_tenant",
+      allowed_identities: 3  // USER | SERVICE
+    };
+  }
+
+}
+
+// ---------------------------------------------------------------------------
+// Entitlements — request/response messages
+// ---------------------------------------------------------------------------
+
+// AccessTuple is a single FGA relationship tuple.
+message AccessTuple {
+  string user = 1;
+  string relation = 2;
+  string object = 3;
+}
+
+// WriteAccessTuplesRequest atomically adds and/or deletes FGA tuples.
+message WriteAccessTuplesRequest {
+  repeated AccessTuple add = 1;
+  repeated AccessTuple delete = 2;
+  string reason = 3;
+}
+
+// WriteAccessTuplesResponse reports how many tuples were written/deleted.
+message WriteAccessTuplesResponse {
+  int32 added = 1;
+  int32 deleted = 2;
+}
+
+// UpsertTenantQuotaRequest writes the tenant's runtime quota record. The
+// schema is governed by spec plans-and-quotas-simplification — only
+// concurrent_missions and concurrent_agents are enforced; 0 means
+// "unlimited" on either dimension.
+message UpsertTenantQuotaRequest {
+  string tenant_id = 1;
+  // concurrent_missions is the cap on missions in non-terminal execution
+  // state at any moment. 0 = unlimited.
+  int32 concurrent_missions = 7;
+  // concurrent_agents is the cap on agents bound to in-flight mission
+  // tasks at any moment (idle agents do NOT count). 0 = unlimited.
+  int32 concurrent_agents = 3;
+  // plan_id is the canonical plan identifier for this tenant
+  // ("team", "org", "enterprise", "enterprise-deploy").
+  // Written to the tenant_quotas.plan_id column.
+  string plan_id = 8;
+  // concurrent_connectors is the cap on hosted MCP connector instances a
+  // tenant may have running at any moment. 0 = unlimited. Per ADR-0047
+  // facet 3 (plan-tier connector-instance budget).
+  int32 concurrent_connectors = 9;
+  // Field tags 2 (seats), 4 (storage_gb), 5 (retention_days), 6
+  // (sandbox_launches_per_month) are reserved against accidental reuse;
+  // they were the legacy unenforced quotas dropped by the spec.
+  reserved 2, 4, 5, 6;
+  reserved "seats", "storage_gb", "retention_days", "sandbox_launches_per_month";
+}
+
+// UpsertTenantQuotaResponse confirms the upsert.
+message UpsertTenantQuotaResponse {
+  string updated_at = 1;
+}
+
+// ListFeatureTuplesRequest queries the feature tuples for a tenant.
+message ListFeatureTuplesRequest {
+  string tenant_id = 1;
+}
+
+// ListFeatureTuplesResponse returns the set of has_* feature tuples present.
+message ListFeatureTuplesResponse {
+  repeated string relations = 1;
+}
+
+// SeedCatalogTenantEnabledRequest triggers seeding of tenant_enabled tuples.
+message SeedCatalogTenantEnabledRequest {
+  string tenant_id = 1;
+}
+
+// SeedCatalogTenantEnabledResponse reports how many tuples were written.
+message SeedCatalogTenantEnabledResponse {
+  int32 tuples_written = 1;
+}
+
+// AuditEventMessage is the wire shape for EmitAuditEvent.
+message AuditEventMessage {
+  string type = 1;
+  string actor_subject = 2;
+  string actor_source = 3;
+  string tuple = 4;
+  string action_class = 5;
+  string scope_type = 6;
+  string operation = 7;
+  string reason = 8;
+  string timestamp = 9;
+  map<string, string> fields = 10;
+}
+
+// EmitAuditEventRequest carries the audit event to emit.
+message EmitAuditEventRequest {
+  AuditEventMessage event = 1;
+}
+
+// EmitAuditEventResponse confirms the event was emitted.
+message EmitAuditEventResponse {}
+
+// ---------------------------------------------------------------------------
+// SetTenantZitadelOrg — request/response messages
+// ---------------------------------------------------------------------------
+
+// SetTenantZitadelOrgRequest seeds the daemon's tenant -> Zitadel org mapping.
+message SetTenantZitadelOrgRequest {
+  // tenant_id is the tenant slug (the FGA tenant id without the "tenant:"
+  // prefix, e.g. "acme"). Required.
+  string tenant_id = 1;
+  // zitadel_org_id is the Zitadel organization id provisioned for this tenant
+  // (Tenant.Status.ZitadelOrgID). Required and non-empty — the daemon rejects
+  // an empty value rather than persisting a half-mapping.
+  string zitadel_org_id = 2;
+}
+
+// SetTenantZitadelOrgResponse confirms the mapping was persisted.
+message SetTenantZitadelOrgResponse {}
+
+// ---------------------------------------------------------------------------
+// Operator-pull tenant provisioning — request/response messages
+// ---------------------------------------------------------------------------
+
+// PendingTenant is one row of the daemon's pending-provisioning queue: a
+// self-serve signup whose founding-owner Zitadel user the daemon has already
+// provisioned, awaiting Tenant-CR creation by the operator. It carries exactly
+// what the operator needs to build the Tenant CR spec (the same shape the
+// dashboard used to write directly): tenant_id (CR name), workspace_name
+// (displayName), owner_email (spec.owner), tier (spec.tier), and the optional
+// stripe_customer_id (annotation).
+message PendingTenant {
+  // tenant_id is the deterministic tenant slug (SignupResponse.tenant_id) —
+  // becomes the Tenant CR's metadata.name.
+  string tenant_id = 1;
+  // owner_user_id is the Zitadel id of the provisioned founding-owner user.
+  // Carried for correlation; the Tenant CR's owner is the email.
+  string owner_user_id = 2;
+  // owner_email becomes Tenant.spec.owner.
+  string owner_email = 3;
+  // workspace_name becomes Tenant.spec.displayName.
+  string workspace_name = 4;
+  // tier becomes Tenant.spec.tier ("team"/"org"/"enterprise").
+  string tier = 5;
+  // stripe_customer_id, when non-empty, is stamped on the Tenant CR as the
+  // gibson.zeroroot.ai/stripe-customer-id annotation for billing adoption.
+  string stripe_customer_id = 6;
+}
+
+// ListPendingTenantProvisioningRequest queries the pending queue. No filters
+// today — the daemon returns every row still in status=pending.
+message ListPendingTenantProvisioningRequest {}
+
+// ListPendingTenantProvisioningResponse carries the pending records.
+message ListPendingTenantProvisioningResponse {
+  repeated PendingTenant pending = 1;
+}
+
+// AckTenantProvisionedRequest marks a tenant's pending record done after the
+// operator has ensured its Tenant CR exists.
+message AckTenantProvisionedRequest {
+  // tenant_id identifies the pending record to mark done. Required.
+  string tenant_id = 1;
+}
+
+// AckTenantProvisionedResponse confirms the ack.
+message AckTenantProvisionedResponse {
+  // acked is true when a pending row transitioned to done; false when the row
+  // was unknown or already done (both are idempotent successes).
+  bool acked = 1;
+}
+
+// EnqueueTenantProvisioningRequest carries the first tenant to seed. Fields
+// mirror AdminProvisionTenantRequest.
+message EnqueueTenantProvisioningRequest {
+  // tenant_id is the deterministic tenant slug — becomes the Tenant CR's
+  // metadata.name. Required.
+  string tenant_id = 1;
+  // display_name becomes Tenant.spec.displayName.
+  string display_name = 2;
+  // owner_email becomes Tenant.spec.owner. Required.
+  string owner_email = 3;
+  // tier becomes Tenant.spec.tier.
+  string tier = 4;
+}
+
+// EnqueueTenantProvisioningResponse reports the enqueue outcome.
+message EnqueueTenantProvisioningResponse {
+  // op_id is the id of the newly inserted op, or empty when already_existed.
+  string op_id = 1;
+  // already_existed is true when a provision op for this tenant was already
+  // pending — the idempotent de-dup, no new row inserted.
+  bool already_existed = 2;
+}
+
+// ReportTenantStatusRequest carries the operator-observed Tenant CR status the
+// daemon persists in tenant_status for the dashboard to read back. Field shape
+// mirrors the subset of Tenant.Status the dashboard's getTenant reads consumed.
+message ReportTenantStatusRequest {
+  // tenant_id is the tenant slug (Tenant CR name). Required.
+  string tenant_id = 1;
+  // phase is status.phase (Pending/Provisioning/Ready/Failed/...).
+  string phase = 2;
+  // data_plane_ready mirrors status.dataPlane.ready.
+  bool data_plane_ready = 3;
+  // store_postgres / store_redis / store_neo4j are the per-store state strings
+  // from status.dataPlane.stores (the onboarding-progress summary).
+  string store_postgres = 4;
+  string store_redis = 5;
+  string store_neo4j = 6;
+  // zitadel_org_slug mirrors status.zitadelOrgSlug.
+  string zitadel_org_slug = 7;
+  // stripe_customer_id mirrors status.billing.customerId.
+  string stripe_customer_id = 8;
+}
+
+// ReportTenantStatusResponse confirms the snapshot was persisted and echoes the
+// dashboard-owned billing_active flag back so the operator can stamp the
+// gibson.zeroroot.ai/billing-active CR annotation the saga waits on — without a
+// second round trip and without the operator ever owning that flag.
+message ReportTenantStatusResponse {
+  // updated is true when the row was inserted or any reported field changed.
+  bool updated = 1;
+  // billing_active is the current dashboard-recorded billing-active state
+  // (set via TenantProvisioningService.SetTenantBillingActive). The operator
+  // stamps the CR annotation when this is true.
+  bool billing_active = 2;
+}
+
+// ---------------------------------------------------------------------------
+// Operator-pull admin tenant CRUD — request/response messages
+// ---------------------------------------------------------------------------
+
+// TenantOp is one row of the daemon's admin tenant-op queue: a platform-admin
+// CRUD operation the operator must apply to a Tenant CR. The carried fields are
+// the union needed across the three op types; which apply depends on op_type.
+message TenantOp {
+  // op_id is the daemon-generated queue id — the ack key. Required.
+  string op_id = 1;
+  // tenant_id is the Tenant CR name the op targets. Required.
+  string tenant_id = 2;
+  // op_type is "provision", "update", or "delete".
+  string op_type = 3;
+  // display_name is Tenant.spec.displayName. Set on provision; on update applied
+  // only when display_name_set is true. Ignored for delete.
+  string display_name = 4;
+  // display_name_set marks display_name for application on an update op
+  // (always true for provision).
+  bool display_name_set = 5;
+  // owner_email is Tenant.spec.owner. Set on provision; unused for update/delete.
+  string owner_email = 6;
+  // tier is Tenant.spec.tier. Set on provision; on update applied only when
+  // tier_set is true. Ignored for delete.
+  string tier = 7;
+  // tier_set marks tier for application on an update op (always true for
+  // provision).
+  bool tier_set = 8;
+}
+
+// ListPendingTenantOpsRequest queries the pending admin-op queue. No filters
+// today — the daemon returns every row still in status=pending.
+message ListPendingTenantOpsRequest {}
+
+// ListPendingTenantOpsResponse carries the pending admin-op records in
+// created_at order.
+message ListPendingTenantOpsResponse {
+  repeated TenantOp ops = 1;
+}
+
+// AckTenantOpRequest marks an admin-op record done after the operator applied it.
+message AckTenantOpRequest {
+  // op_id identifies the pending record to mark done. Required.
+  string op_id = 1;
+}
+
+// AckTenantOpResponse confirms the ack.
+message AckTenantOpResponse {
+  // acked is true when a pending row transitioned to done; false when the row
+  // was unknown or already done (both are idempotent successes).
+  bool acked = 1;
+}
+
+// RevokeConnectorGrantRequest names the tenant and connector whose grant the
+// finalizer is releasing.
+message RevokeConnectorGrantRequest {
+  // tenant_id is the tenant the ConnectorInstance lives in (its namespace is
+  // tenant-<tenant_id>). Required.
+  string tenant_id = 1;
+  // connector is the connector id (Spec.Connector, the grant key). Required.
+  string connector = 2;
+}
+
+// RevokeConnectorGrantResponse reports what the revoke found.
+message RevokeConnectorGrantResponse {
+  // had_grant reports whether a grant existed. Revoking an unauthorized
+  // connector is a successful no-op.
+  bool had_grant = 1;
+  // vendor_revoked reports whether the vendor acknowledged the revocation.
+  // False when the grant recorded no revocation endpoint (a static credential
+  // never does) or the vendor call failed; local deletion happens regardless.
+  bool vendor_revoked = 2;
+}

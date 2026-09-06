@@ -1,0 +1,290 @@
+---
+apiVersion: apiextensions.k8s.io/v1
+kind: CustomResourceDefinition
+metadata:
+  annotations:
+    controller-gen.kubebuilder.io/version: v0.20.1
+  name: oidcclients.gibson.zeroroot.ai
+spec:
+  group: gibson.zeroroot.ai
+  names:
+    kind: OIDCClient
+    listKind: OIDCClientList
+    plural: oidcclients
+    shortNames:
+    - oidc
+    singular: oidcclient
+  scope: Namespaced
+  versions:
+  - additionalPrinterColumns:
+    - jsonPath: .status.conditions[?(@.type=="Ready")].status
+      name: Ready
+      type: string
+    - jsonPath: .status.clientID
+      name: ClientID
+      type: string
+    - jsonPath: .metadata.creationTimestamp
+      name: Age
+      type: date
+    name: v1alpha1
+    schema:
+      openAPIV3Schema:
+        description: |-
+          OIDCClient is one Zitadel OIDC client owned by the platform.
+          Typically created as a child of a PlatformBootstrap CR, but can also
+          be reconciled standalone for ad-hoc clients.
+        properties:
+          apiVersion:
+            description: |-
+              APIVersion defines the versioned schema of this representation of an object.
+              Servers should convert recognized schemas to the latest internal value, and
+              may reject unrecognized values.
+              More info: https://git.k8s.io/community/contributors/devel/sig-architecture/api-conventions.md#resources
+            type: string
+          kind:
+            description: |-
+              Kind is a string value representing the REST resource this object represents.
+              Servers may infer this from the endpoint the client submits requests to.
+              Cannot be updated.
+              In CamelCase.
+              More info: https://git.k8s.io/community/contributors/devel/sig-architecture/api-conventions.md#types-kinds
+            type: string
+          metadata:
+            type: object
+          spec:
+            description: OIDCClientSpec is the desired state of one Zitadel OIDC client.
+            properties:
+              accessTokenLifetimeSeconds:
+                description: |-
+                  AccessTokenLifetimeSeconds overrides the per-application access-token
+                  lifetime (Zitadel OIDC app config `accessTokenLifetime`). 0 / unset
+                  leaves the instance default. Set to 900 (15m) for the gibson CLI
+                  device-grant app so the gibson#622 session-revocation window is bounded:
+                  revoking blocks new tokens immediately and the target's current stateless
+                  access JWT ages out within this lifetime.
+                format: int32
+                minimum: 0
+                type: integer
+              adminTokenRef:
+                description: AdminTokenRef points at the IAM_OWNER PAT Secret.
+                properties:
+                  key:
+                    description: Key is the entry within the Secret's data map.
+                    minLength: 1
+                    type: string
+                  name:
+                    description: Name is the Secret name.
+                    minLength: 1
+                    type: string
+                  namespace:
+                    description: Namespace overrides the default namespace.
+                    type: string
+                required:
+                - key
+                - name
+                type: object
+              applicationType:
+                description: ApplicationType controls the OAuth client class.
+                enum:
+                - WEB
+                - NATIVE
+                - USER_AGENT
+                - SERVICE
+                - MACHINE_USER
+                type: string
+              clientName:
+                description: ClientName is the display name in Zitadel.
+                minLength: 1
+                type: string
+              grantTypes:
+                description: GrantTypes registers OAuth grant types with Zitadel.
+                items:
+                  description: OIDCGrantType enumerates the OAuth grant types Zitadel
+                    supports.
+                  enum:
+                  - AUTHORIZATION_CODE
+                  - IMPLICIT
+                  - REFRESH_TOKEN
+                  - CLIENT_CREDENTIALS
+                  - DEVICE_CODE
+                  type: string
+                type: array
+              postLogoutRedirectURIs:
+                description: PostLogoutRedirectURIs registers OAuth post-logout redirect
+                  URIs.
+                items:
+                  type: string
+                type: array
+              projectRef:
+                description: ProjectRef identifies the Zitadel project to mint the
+                  client in.
+                properties:
+                  name:
+                    description: |-
+                      Name is the Zitadel project name (not the project ID — the
+                      reconciler resolves name → ID via list).
+                    minLength: 1
+                    type: string
+                required:
+                - name
+                type: object
+              redirectURIs:
+                description: |-
+                  RedirectURIs registers OAuth redirect URIs with Zitadel. Required
+                  when ApplicationType is WEB or USER_AGENT; may be empty for SERVICE.
+                items:
+                  type: string
+                type: array
+                x-kubernetes-validations:
+                - message: redirectURIs must use https:// (or http://localhost for
+                    dev)
+                  rule: self.all(u, u.startsWith('https://') || u.startsWith('http://localhost'))
+              responseTypes:
+                description: ResponseTypes registers OAuth response types with Zitadel.
+                items:
+                  description: OIDCResponseType enumerates the OAuth response types.
+                  enum:
+                  - CODE
+                  - ID_TOKEN
+                  - ID_TOKEN_TOKEN
+                  type: string
+                type: array
+              roles:
+                description: |-
+                  Roles is the set of Zitadel role keys granted to the minted machine
+                  user. Only honored for ApplicationType MACHINE_USER. Each entry is
+                  classified by its prefix: IAM_-prefixed roles (e.g. IAM_OWNER,
+                  IAM_USER_MANAGER, IAM_LOGIN_CLIENT) are granted as instance-scoped
+                  IAM members; ORG_-prefixed roles (e.g. ORG_OWNER) are granted as
+                  org-scoped members on the project's owning organization. When empty,
+                  the reconciler defaults to ["IAM_OWNER"] for backward compatibility
+                  with the daemon's IDP admin client. Ignored for OIDC-app types.
+                items:
+                  type: string
+                type: array
+              secretRef:
+                description: |-
+                  SecretRef points at the K8s Secret where the reconciler writes
+                  clientID + clientSecret. The Secret carries an ownerReference back
+                  to this CR for cascade cleanup.
+                properties:
+                  key:
+                    description: Key is the entry within the Secret's data map.
+                    minLength: 1
+                    type: string
+                  name:
+                    description: Name is the Secret name.
+                    minLength: 1
+                    type: string
+                  namespace:
+                    description: Namespace overrides the default namespace.
+                    type: string
+                required:
+                - key
+                - name
+                type: object
+              zitadelIssuer:
+                description: |-
+                  ZitadelIssuer is the OIDC issuer URL. Identical to the parent
+                  PlatformBootstrap's spec.zitadel.issuer.
+                pattern: ^https?://
+                type: string
+            required:
+            - adminTokenRef
+            - applicationType
+            - clientName
+            - projectRef
+            - secretRef
+            - zitadelIssuer
+            type: object
+          status:
+            description: OIDCClientStatus is the observed state.
+            properties:
+              appID:
+                description: |-
+                  AppID is Zitadel's internal application record id, used in
+                  management-API URL paths (rotate-secret, delete, get). NOT the
+                  same value as ClientID — Zitadel separates the OAuth identity
+                  from the management-API identity. Persisted so RotateClientSecret
+                  and DeleteOIDCClient hit the correct URL after a reconcile that
+                  went through findOIDCClientByName.
+                type: string
+              clientID:
+                description: |-
+                  ClientID is the OAuth client_id Zitadel advertises on its
+                  /.well-known/openid-configuration document. The value every
+                  downstream OAuth consumer (browser authorize URL, JWT azp
+                  claim, client_credentials grant) needs. Persisted BEFORE the
+                  corresponding K8s Secret is written, so crash recovery
+                  detects existing clients and avoids duplication.
+                type: string
+              conditions:
+                description: Conditions is the standard metav1.Condition slice.
+                items:
+                  description: Condition contains details for one aspect of the current
+                    state of this API Resource.
+                  properties:
+                    lastTransitionTime:
+                      description: |-
+                        lastTransitionTime is the last time the condition transitioned from one status to another.
+                        This should be when the underlying condition changed.  If that is not known, then using the time when the API field changed is acceptable.
+                      format: date-time
+                      type: string
+                    message:
+                      description: |-
+                        message is a human readable message indicating details about the transition.
+                        This may be an empty string.
+                      maxLength: 32768
+                      type: string
+                    observedGeneration:
+                      description: |-
+                        observedGeneration represents the .metadata.generation that the condition was set based upon.
+                        For instance, if .metadata.generation is currently 12, but the .status.conditions[x].observedGeneration is 9, the condition is out of date
+                        with respect to the current state of the instance.
+                      format: int64
+                      minimum: 0
+                      type: integer
+                    reason:
+                      description: |-
+                        reason contains a programmatic identifier indicating the reason for the condition's last transition.
+                        Producers of specific condition types may define expected values and meanings for this field,
+                        and whether the values are considered a guaranteed API.
+                        The value should be a CamelCase string.
+                        This field may not be empty.
+                      maxLength: 1024
+                      minLength: 1
+                      pattern: ^[A-Za-z]([A-Za-z0-9_,:]*[A-Za-z0-9_])?$
+                      type: string
+                    status:
+                      description: status of the condition, one of True, False, Unknown.
+                      enum:
+                      - "True"
+                      - "False"
+                      - Unknown
+                      type: string
+                    type:
+                      description: type of condition in CamelCase or in foo.example.com/CamelCase.
+                      maxLength: 316
+                      pattern: ^([a-z0-9]([-a-z0-9]*[a-z0-9])?(\.[a-z0-9]([-a-z0-9]*[a-z0-9])?)*/)?(([A-Za-z0-9][-A-Za-z0-9_.]*)?[A-Za-z0-9])$
+                      type: string
+                  required:
+                  - lastTransitionTime
+                  - message
+                  - reason
+                  - status
+                  - type
+                  type: object
+                type: array
+                x-kubernetes-list-map-keys:
+                - type
+                x-kubernetes-list-type: map
+              observedGeneration:
+                description: ObservedGeneration mirrors metadata.generation.
+                format: int64
+                type: integer
+            type: object
+        type: object
+    served: true
+    storage: true
+    subresources:
+      status: {}

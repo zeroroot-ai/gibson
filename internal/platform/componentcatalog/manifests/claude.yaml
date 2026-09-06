@@ -1,0 +1,85 @@
+id: claude
+kind: agent
+displayName: Claude
+description: >-
+  Claude Code headless in an ephemeral sandbox: pursues a mission goal with
+  the Gibson tools, records findings and memories into the tenant World, and
+  runs on the tenant's own Anthropic key.
+# "*" declares no gibson-side confinement, so the sandbox takes its
+# SandboxClass posture instead: the agent class defaults to setec's
+# external-only mode, which permits the public internet and still denies
+# the operator's reserved ranges. A pinned list here was the tighter
+# posture, but it is wrong for a coding agent: the work it is dispatched
+# to do (read a repository, fetch a package index, follow a CVE link)
+# names destinations no manifest can enumerate ahead of the mission.
+# Matches the zerocool agent. Per-tenant egress policy is the follow-up
+# that replaces this with something a tenant can narrow.
+egressAllow:
+  - "*"
+spec:
+  runtime: setec
+  # Tag 0.3.0 from the zerocool-plugins release tag claude-member-v0.3.0
+  # (zeroroot-ai/zerocool-plugins#110): Claude Code 2.1.257, the Gibson MCP
+  # server 0.2.0, uid 65532. Verify with
+  #   cosign verify <image> --certificate-identity-regexp '^https://github.com/zeroroot-ai/' \
+  #     --certificate-oidc-issuer https://token.actions.githubusercontent.com
+  image: ghcr.io/zeroroot-ai/zerocool-claude-agent@sha256:0db3d0bea674c9697baa79b7f1082f1f515c4b0a714073130a9fec35bf9b0824
+  svid: spiffe://zeroroot.ai/agent/claude
+  dispatchMode: sandboxed
+  # The sandbox launch command: the image ENTRYPOINT is not consulted by setec.
+  # This is the ONE-SHOT command: one dispatch, one result, then the process
+  # ends. One image carries both shapes (ADR-0019), so the member shape is a
+  # different command, not a different image.
+  command: "node /app/dist/sandbox.js"
+  # The member shape: a long-lived process that serves many dispatches over its
+  # life as a member of a bank. An agent with no memberCommand cannot join a
+  # bank, which is true of zerocool and is why its manifest declares none.
+  memberCommand: "node /app/dist/member-main.js"
+  # How many jobs one member holds at once. Claude Code is one conversation at
+  # a time, so a second job would be a second process, not a second turn. A
+  # bank that names no cap takes this.
+  maxJobsInFlight: 1
+  resources:
+    vcpu: 2
+    memory: 4Gi
+  # One manifest carries every login shape (ADR-0019 decision 4). A launch names
+  # one shape and the resolver injects only that block, plus the route flag the
+  # shape sets on its own. The subscription shape has no block: the person signs
+  # in inside the sandbox, in the unmodified claude binary, through Anthropic's
+  # own flow, and the platform stores nothing.
+  credentials:
+    - shape: api_key
+      provider: anthropic
+      env: ANTHROPIC_API_KEY
+    - shape: bedrock
+      provider: bedrock
+      envs:
+        - key: aws_access_key_id
+          env: AWS_ACCESS_KEY_ID
+        - key: aws_secret_access_key
+          env: AWS_SECRET_ACCESS_KEY
+        # Only temporary credentials carry a session token, so demanding it
+        # would refuse every launch on a static key pair.
+        - key: aws_session_token
+          env: AWS_SESSION_TOKEN
+          optional: true
+        - key: aws_region
+          env: AWS_REGION
+    - shape: vertex
+      provider: vertex
+      envs:
+        # The driver writes this to a file inside the sandbox and points
+        # GOOGLE_APPLICATION_CREDENTIALS at it. The daemon never writes it.
+        - key: google_application_credentials_json
+          env: GOOGLE_APPLICATION_CREDENTIALS_JSON
+        - key: vertex_region
+          env: CLOUD_ML_REGION
+        - key: vertex_project_id
+          env: ANTHROPIC_VERTEX_PROJECT_ID
+    - shape: foundry
+      provider: foundry
+      envs:
+        - key: foundry_api_key
+          env: ANTHROPIC_FOUNDRY_API_KEY
+        - key: foundry_resource
+          env: ANTHROPIC_FOUNDRY_RESOURCE

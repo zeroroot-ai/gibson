@@ -1,0 +1,63 @@
+# executor-catalog staleness
+#
+# Asks the one question the tool-manifest drift gate cannot: is the captured
+# executor catalog still the executor's actual tool set?
+#
+# That gate (gibsoncheck.yml) regenerates the manifests from the COMMITTED
+# executor-catalog.json and diffs them. It is deliberately hermetic — no docker,
+# no registry — so it proves the manifests match the capture and nothing about
+# whether the capture matches a newer executor release. trivy and tlsx shipped in
+# gibson-executor and stayed invisible to the catalog across two releases while
+# that gate was green (gibson#1675).
+#
+# This runs on a schedule rather than on a pull request, for the same reason the
+# exit tests do (ADR-0012): it measures the outside world, not the diff. A PR
+# cannot be responsible for gibson-executor cutting a release an hour later, and
+# putting a registry call on every PR would buy flakiness for no signal.
+name: executor-catalog staleness
+
+on:
+  schedule:
+    - cron: '30 5 * * *' # daily, before the working day
+  workflow_dispatch:
+
+permissions:
+  contents: read
+  packages: read
+
+jobs:
+  catalog-current:
+    name: captured catalog is the executor's tool set
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
+
+      # The guard proves it can fail before it is trusted to pass. A staleness
+      # check that silently matched nothing would look identical to a current
+      # catalog, which is the failure mode this whole workflow exists to remove.
+      - name: Self-test the comparison
+        run: bash scripts/check-executor-catalog-current.sh --selftest
+
+      - name: Log in to GHCR
+        run: echo "${{ secrets.GITHUB_TOKEN }}" | docker login ghcr.io -u "${{ github.actor }}" --password-stdin
+
+      - name: Read the executor's tool list
+        run: |
+          set -euo pipefail
+          IMAGE="ghcr.io/zeroroot-ai/gibson-executor:latest"
+          docker pull --quiet "$IMAGE"
+          # The digest is recorded for the failure message: whoever re-captures
+          # needs the pinned reference, and a tag is not one.
+          DIGEST=$(docker image inspect "$IMAGE" --format '{{index .RepoDigests 0}}')
+          echo "resolved $IMAGE -> $DIGEST"
+          echo "EXECUTOR_DIGEST=$DIGEST" >> "$GITHUB_ENV"
+          docker run --rm --entrypoint gibson-runner "$IMAGE" --list-tools > /tmp/list-tools.json
+
+      - name: Compare against the captured catalog
+        run: |
+          if ! bash scripts/check-executor-catalog-current.sh /tmp/list-tools.json; then
+            echo ""
+            echo "Re-capture with the digest resolved above:"
+            echo "  make tool-catalog-capture IMAGE=${EXECUTOR_DIGEST}"
+            exit 1
+          fi

@@ -1,0 +1,112 @@
+syntax = "proto3";
+
+// Package gibson.tenant.v1 — GrantsService: customer-callable capability-grant
+// inspection and per-agent FGA-grant management surface. Moved from
+// gibson.admin.v1.GrantsAdminService (platform-sdk) into the OSS SDK as part of
+// the admin-surface-recategorization (ADR-0039 implementation).
+//
+// Authorization: every RPC carries a (gibson.auth.v1.authz) annotation.
+package gibson.tenant.v1;
+
+option go_package = "github.com/zeroroot-ai/gibson/internal/server/daemon/api/gibson/tenant/v1;tenantv1";
+
+import "gibson/auth/v1/options.proto";
+import "gibson/capability/v1/capability.proto";
+
+// GrantsService is the grants surface — both the CG-JWT inspector
+// (ListActiveGrants) and the per-agent FGA-grant editor
+// (WriteAgentGrants / DeleteAgentGrants).
+service GrantsService {
+  // ListActiveGrants returns active capability grants for the tenant
+  // resolved from identity, optionally filtered by recipient class, RPC,
+  // and expiry.
+  rpc ListActiveGrants(ListActiveGrantsRequest) returns (ListActiveGrantsResponse) {
+    option (gibson.auth.v1.authz) = {
+      relation: "admin"
+      object_type: "tenant"
+      object_deriver: "tenant_from_identity"
+      allowed_identities: 1  // USER
+    };
+  }
+  // WriteAgentGrants additively writes per-action FGA tuples for a target
+  // agent / tool principal. Idempotent: requesting an already present tuple
+  // counts as `already_present` rather than failing. Each successful write
+  // emits an `agent_grant_added` audit event.
+  rpc WriteAgentGrants(WriteAgentGrantsRequest) returns (WriteAgentGrantsResponse) {
+    option (gibson.auth.v1.authz) = {
+      relation: "admin"
+      object_type: "tenant"
+      object_deriver: "tenant_from_identity"
+      allowed_identities: 1  // USER
+    };
+  }
+  // DeleteAgentGrants removes per-action FGA tuples. Idempotent: tuples not
+  // present count as `not_present`. Each delete emits an `agent_grant_removed`
+  // audit event.
+  rpc DeleteAgentGrants(DeleteAgentGrantsRequest) returns (DeleteAgentGrantsResponse) {
+    option (gibson.auth.v1.authz) = {
+      relation: "admin"
+      object_type: "tenant"
+      object_deriver: "tenant_from_identity"
+      allowed_identities: 1  // USER
+    };
+  }
+}
+
+// ---------------------------------------------------------------------------
+// GrantsService request/response messages
+// ---------------------------------------------------------------------------
+
+message ListActiveGrantsRequest {
+  // recipient_class_filter restricts to one recipient class.
+  // RECIPIENT_CLASS_UNSPECIFIED means all.
+  gibson.capability.v1.RecipientClass recipient_class_filter = 1;
+  // rpc_filter restricts to grants whose allowed_rpcs includes this method
+  // name. Empty means no filter.
+  string rpc_filter = 2;
+  // include_near_expiry_only, when true, returns only grants that expire
+  // within 5 minutes.
+  bool include_near_expiry_only = 3;
+  int32 limit = 4;
+  int32 offset = 5;
+}
+
+message ListActiveGrantsResponse {
+  repeated gibson.capability.v1.CapabilityGrantInfo grants = 1;
+  int32 total = 2;
+}
+
+// GrantTuple is a single (object, relation) pair to write or delete.
+message GrantTuple {
+  // object is the FGA object identifier, e.g. "component:gitlab" or
+  // "plugin:nmap-runner".
+  string object = 1;
+  // relation is the FGA relation. Must be one of:
+  //   - "can_read"        (component_read_enabled)
+  //   - "can_configure"   (component_write_enabled)
+  //   - "can_execute"     (component_execute_enabled)
+  //   - "can_invoke"      (plugin invocation; tool targets only)
+  string relation = 2;
+}
+
+message WriteAgentGrantsRequest {
+  // target_principal_id is the FGA principal to grant tuples to.
+  // Format: "agent_principal:<uuid>" or "tool_principal:<uuid>".
+  string target_principal_id = 1;
+  repeated GrantTuple grants = 2;
+}
+
+message WriteAgentGrantsResponse {
+  int32 written = 1;
+  int32 already_present = 2;
+}
+
+message DeleteAgentGrantsRequest {
+  string target_principal_id = 1;
+  repeated GrantTuple grants = 2;
+}
+
+message DeleteAgentGrantsResponse {
+  int32 deleted = 1;
+  int32 not_present = 2;
+}

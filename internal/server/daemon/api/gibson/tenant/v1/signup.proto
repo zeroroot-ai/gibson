@@ -1,0 +1,280 @@
+syntax = "proto3";
+
+// Package gibson.tenant.v1 — SignupService: server-side tenant provisioning for
+// self-serve signup.
+//
+// The service holds the IdP-admin privilege that the web tier used to hold: the
+// dashboard makes unauthenticated RPCs and the DAEMON performs every Zitadel
+// operation with its own admin credential. No signup-bot PAT exists in the
+// caller.
+//
+// The daemon does NOT touch Kubernetes and does NOT create the Tenant CR
+// (ADR-0023). It records the tenant in its pending-provisioning queue
+// (migration 016) and the gibson-tenant-operator drains that queue, creates the
+// Tenant CR and reconciles the per-tenant Zitadel org, secrets, grants and data
+// plane. (The dashboard stopped writing the Tenant CR in dashboard#813; the
+// older comment here claiming otherwise was stale.)
+//
+// ORDERING CONTRACT — the reason this file has three RPCs instead of one:
+//
+//   Nothing persistent, billable or tenant-visible is created before the person
+//   signing up has proven they control the address they typed. The flow is
+//
+//     RequestEmailVerification  → one expiring verification row + one email
+//     RedeemEmailVerification   → the emailed token is exchanged for a short
+//                                 completion session
+//     Signup                    → identity, billing and provisioning, all of it
+//                                 strictly after that proof
+//
+//   Signup therefore takes NO owner email, workspace name, tier or profile from
+//   the client. Every one of those is read back from the verification row the
+//   session resolves to. A client that could supply them could point a redeemed
+//   session at a different address, which would defeat the verification it just
+//   passed.
+//
+// Authorization: all three RPCs are UNAUTHENTICATED. They run before any tenant
+// or membership exists, so there is no principal to FGA-check (like
+// UserService.SetSignupProgress). The capability is the emailed token, then the
+// session token derived from it, both held only by whoever received the mail.
+// The handlers enforce rate limits, expiry and single-use themselves.
+package gibson.tenant.v1;
+
+option go_package = "github.com/zeroroot-ai/gibson/internal/server/daemon/api/gibson/tenant/v1;tenantv1";
+
+import "gibson/auth/v1/options.proto";
+
+// SignupService owns the self-serve signup flow: prove the address, then
+// provision.
+service SignupService {
+  // RequestEmailVerification records a signup request and emails the address a
+  // single-use link. It creates NO identity, NO billing object and NO tenant.
+  //
+  // The response is EMPTY, and identical for every accepted request. It does
+  // not report whether the address already has an account, whether a
+  // verification was already pending, or anything else that differs between
+  // two addresses — because the caller is anonymous and an address's
+  // registration status is not theirs to learn. Both branches (new address /
+  // existing account) perform one directory lookup and send one message, so
+  // they are alike in shape as well as in payload.
+  //
+  // The fact that an account already exists IS disclosed — to the mailbox that
+  // owns the address, in the message it receives. That is the one recipient
+  // entitled to it.
+  //
+  // Errors are limited to conditions independent of whether the address
+  // exists: InvalidArgument (malformed input), ResourceExhausted (rate limit),
+  // Unavailable (the message could not be sent, or the store/limiter is down).
+  rpc RequestEmailVerification(RequestEmailVerificationRequest) returns (RequestEmailVerificationResponse) {
+    option (gibson.auth.v1.authz) = {
+      unauthenticated: true
+    };
+  }
+
+  // RedeemEmailVerification exchanges the raw emailed token for a short-lived
+  // completion session token.
+  //
+  // Single-use and atomic: redemption is one compare-and-set against the
+  // token's row, so a second use of the same link matches nothing and fails.
+  //
+  // Every failure — unknown token, expired token, already-redeemed token,
+  // malformed token — returns the SAME PermissionDenied with the SAME message.
+  // Distinguishing them would turn this RPC into a checker for which tokens
+  // and which signups exist.
+  rpc RedeemEmailVerification(RedeemEmailVerificationRequest) returns (RedeemEmailVerificationResponse) {
+    option (gibson.auth.v1.authz) = {
+      unauthenticated: true
+    };
+  }
+
+  // AttachSignupCustomer records the billing customer created for a verified
+  // signup session, so the completion path does not have to trust the client
+  // for the customer id.
+  //
+  // Only reachable with a live verified session, which is what keeps billing
+  // objects from existing for unproven addresses.
+  rpc AttachSignupCustomer(AttachSignupCustomerRequest) returns (AttachSignupCustomerResponse) {
+    option (gibson.auth.v1.authz) = {
+      unauthenticated: true
+    };
+  }
+
+  // Signup completes a verified signup: it creates the founding-owner Zitadel
+  // human user with the supplied password and enqueues the tenant for
+  // operator-pull provisioning.
+  //
+  // It requires a live verified_session_token. Without one it does nothing —
+  // this is the single chokepoint that keeps provisioning behind proof of
+  // mailbox control, and there is no sibling path around it.
+  //
+  // NOT idempotent-by-resume. If the address acquired an account between the
+  // verification email and this call, the RPC returns AlreadyExists and no
+  // credential is written to that account. Signup never sets a password on an
+  // account it did not just create.
+  //
+  // The session is consumed on success, so the completion cookie cannot be
+  // replayed into a second tenant.
+  rpc Signup(SignupRequest) returns (SignupResponse) {
+    option (gibson.auth.v1.authz) = {
+      unauthenticated: true
+    };
+  }
+}
+
+// RequestEmailVerificationRequest carries the signup form's non-secret fields.
+//
+// There is no password field. A password submitted for an address nobody has
+// proven control of would have to be stored across the verification round-trip,
+// and a stored credential for an unproven address is exactly the thing this
+// flow exists to avoid. The password is collected after redemption instead.
+message RequestEmailVerificationRequest {
+  // attempt_id is the opaque signup-attempt UUID; it correlates this request
+  // with the UserService signup-progress stream. Required, must be a UUID.
+  string attempt_id = 1;
+
+  // owner_email is the address to verify. Normalized (trimmed, lowercased)
+  // server-side; the normalized value is what the completion path later reads
+  // back. Required.
+  string owner_email = 2;
+
+  // workspace_name is the human-readable workspace name. Parked on the
+  // verification row and read back at completion. Required.
+  string workspace_name = 3;
+
+  // tier is the canonical plan id ("team", "org", "enterprise"). Required.
+  string tier = 4;
+
+  // owner_first_name / owner_last_name populate the eventual human-user
+  // profile. Optional.
+  string owner_first_name = 5;
+  string owner_last_name = 6;
+
+  // client_ip is the requester's IP as the edge resolved it, used for
+  // abuse limits.
+  //
+  // TRUST ASSUMPTION: the daemon believes this field because the only caller
+  // that can reach the RPC is the dashboard workload, authenticated by its
+  // SPIFFE SVID over mTLS through Envoy. If that ever stops being true — if
+  // this method is exposed to a caller outside the SPIFFE allowlist — the
+  // field becomes attacker-controlled and the per-IP limits become
+  // decorative. Keep the allowlist honest.
+  //
+  // May be empty when the edge could not attribute the request; empty is NOT
+  // folded into the normal per-IP budget, it draws on a much smaller
+  // unattributed bucket.
+  string client_ip = 7;
+}
+
+// RequestEmailVerificationResponse is intentionally EMPTY.
+//
+// Not "empty for now" — empty as the contract. Any field here would have to
+// either be constant (in which case it says nothing) or vary with the address
+// (in which case it tells an anonymous caller which addresses are registered).
+message RequestEmailVerificationResponse {}
+
+// RedeemEmailVerificationRequest carries the raw token from the emailed link.
+message RedeemEmailVerificationRequest {
+  // token is the raw value from the link. The daemon stores only its hash, so
+  // this value cannot be recovered from the database.
+  string token = 1;
+
+  // client_ip — see RequestEmailVerificationRequest.client_ip.
+  string client_ip = 2;
+}
+
+// RedeemEmailVerificationResponse hands back the completion session.
+message RedeemEmailVerificationResponse {
+  // verified_session_token authorizes the completion step. Short-lived
+  // (minutes). The caller stores it as an httpOnly cookie and never renders
+  // it. Only its hash is persisted daemon-side.
+  string verified_session_token = 1;
+
+  // attempt_id lets the caller resume the correct signup-progress stream.
+  string attempt_id = 2;
+
+  // owner_email is echoed so the completion page can show which address was
+  // verified. Safe to return here and nowhere else: the caller has just
+  // demonstrated possession of a token that was only ever sent to it.
+  string owner_email = 3;
+
+  // workspace_name / tier are echoed for display on the completion page.
+  string workspace_name = 4;
+  string tier = 5;
+}
+
+// AttachSignupCustomerRequest pins a billing customer to a verified session.
+message AttachSignupCustomerRequest {
+  string verified_session_token = 1;
+  string stripe_customer_id = 2;
+
+  // client_ip — see RequestEmailVerificationRequest.client_ip. This RPC writes
+  // to Postgres on every call and is unauthenticated, so it draws on a budget
+  // like the other three rather than being the one unmetered door.
+  string client_ip = 3;
+}
+
+// AttachSignupCustomerResponse is empty.
+message AttachSignupCustomerResponse {}
+
+// SignupRequest completes a verified signup.
+//
+// Note what is NOT here: owner_email, workspace_name, tier, owner names,
+// stripe_customer_id. All of them are read from the verification row the
+// session resolves to. Accepting them from the client would let a caller pass
+// verification for one address and provision another.
+//
+// WIRE COMPATIBILITY: fields 2-7 held the removed inputs and are RESERVED, not
+// recycled. attempt_id (1) and password (8) keep the numbers and the meanings
+// they always had. A tag that changes meaning is invisible on the wire — a
+// client built against the old shape would have had its workspace name decoded
+// as the owner's password — so removed tags are retired permanently and new
+// fields take fresh numbers.
+message SignupRequest {
+  reserved 2, 3, 4, 5, 6, 7;
+  reserved "owner_email", "workspace_name", "tier", "owner_first_name", "owner_last_name", "stripe_customer_id";
+
+  // attempt_id correlates with the signup-progress stream. Required, must be a
+  // UUID, and must match the attempt the verification was issued under.
+  string attempt_id = 1;
+
+  // password is the founding owner's chosen password.
+  //
+  // SECURITY: write-only. It reaches the IdP request body and nothing else —
+  // never logged, never persisted by the daemon, never returned. It is only
+  // ever applied to a user this call creates; if the address already has an
+  // account, the RPC fails and the password is discarded.
+  string password = 8;
+
+  // verified_session_token is the value RedeemEmailVerification returned. It
+  // is the capability for this call: no session, no provisioning.
+  string verified_session_token = 9;
+
+  // client_ip — see RequestEmailVerificationRequest.client_ip.
+  string client_ip = 10;
+}
+
+// SignupResponse reports the outcome of a completed signup.
+//
+// WIRE COMPATIBILITY: field 2 was `bool already_existed`, which described the
+// resume behaviour this flow no longer has. It is reserved rather than reused —
+// reusing it for a string would also have changed the wire type under any
+// client still reading it.
+message SignupResponse {
+  reserved 2;
+  reserved "already_existed";
+
+  // tenant_id is the deterministic slug derived from the workspace name on the
+  // verification row.
+  string tenant_id = 1;
+
+  // owner_user_id is the Zitadel id of the founding-owner human user this call
+  // created. Same tag and same meaning it has always had.
+  string owner_user_id = 3;
+
+  // plan_id is the canonical plan the server-side gate resolved and provisioned
+  // against — the same value enqueued for the operator, not the raw
+  // verification-row tier string. Callers must never see an id the gate did not
+  // accept, so this is populated from the resolved plan rather than echoed from
+  // the request. Additive: field 4 is free and no reserved range covers it
+  // (gibson#1325).
+  string plan_id = 4;
+}

@@ -1,0 +1,337 @@
+syntax = "proto3";
+
+package gibson.world.v1;
+
+option go_package = "github.com/zeroroot-ai/gibson/internal/server/daemon/api/gibson/world/v1;worldv1";
+
+import "gibson/auth/v1/options.proto";
+
+// WorldService is the daemon-mediated read path into the ECS brain (epic
+// ecs-brain, gibson#752). The daemon resolves the caller's tenant server-side
+// and reads only that tenant's live brain World + Timeline (one World per tenant,
+// no cross-tenant anything — ADR-0001). The dashboard never touches the brain
+// directly; it reads through here over Envoy + ext-authz, like TracesService.
+//
+// Every RPC is ext-authz-gated via the tenant member relation.
+service WorldService {
+  // ListMissions returns the tenant's missions (the work-graph roots).
+  rpc ListMissions(ListMissionsRequest) returns (ListMissionsResponse) {
+    option (gibson.auth.v1.authz) = {
+      relation: "member",
+      object_type: "tenant",
+      object_deriver: "tenant_from_identity",
+      allowed_identities: 3  // USER | SERVICE
+    };
+  }
+
+  // ListHosts returns the tenant's discovered hosts with belief/attention.
+  rpc ListHosts(ListHostsRequest) returns (ListHostsResponse) {
+    option (gibson.auth.v1.authz) = {
+      relation: "member",
+      object_type: "tenant",
+      object_deriver: "tenant_from_identity",
+      allowed_identities: 3  // USER | SERVICE
+    };
+  }
+
+  // ListFindings returns the tenant's confirmed findings.
+  rpc ListFindings(ListFindingsRequest) returns (ListFindingsResponse) {
+    option (gibson.auth.v1.authz) = {
+      relation: "member",
+      object_type: "tenant",
+      object_deriver: "tenant_from_identity",
+      allowed_identities: 3  // USER | SERVICE
+    };
+  }
+
+  // ListLlmCalls returns the tenant's LLM-call provenance (gibson#755): per-call
+  // model + token data folded into the World, the replacement for the retired
+  // Langfuse trace/cost views.
+  rpc ListLlmCalls(ListLlmCallsRequest) returns (ListLlmCallsResponse) {
+    option (gibson.auth.v1.authz) = {
+      relation: "member",
+      object_type: "tenant",
+      object_deriver: "tenant_from_identity",
+      allowed_identities: 3  // USER | SERVICE
+    };
+  }
+
+  // GetLlmCall returns one call's full detail including its transcript (prompt
+  // messages + completion) — the conversation-view source (gibson#755). ListLlmCalls
+  // stays metadata-only so a busy World's list response is not transcript-heavy.
+  rpc GetLlmCall(GetLlmCallRequest) returns (GetLlmCallResponse) {
+    option (gibson.auth.v1.authz) = {
+      relation: "member",
+      object_type: "tenant",
+      object_deriver: "tenant_from_identity",
+      allowed_identities: 3  // USER | SERVICE
+    };
+  }
+
+  // GetTimeline returns the tenant's domain-event Timeline — the Scroller scrubs
+  // this. Optional mission_id filters to one mission's events.
+  rpc GetTimeline(GetTimelineRequest) returns (GetTimelineResponse) {
+    option (gibson.auth.v1.authz) = {
+      relation: "member",
+      object_type: "tenant",
+      object_deriver: "tenant_from_identity",
+      allowed_identities: 3  // USER | SERVICE
+    };
+  }
+
+  // GetFrameAt returns the World as of folding the first `seq` Timeline events —
+  // a replay frame (ADR-0001: World == fold(Timeline)). This is what the Scroller
+  // scrubs to: a server-side fold of the log to a point, not a stored snapshot.
+  // `seq` is clamped to [0, total]; seq == total is the live World.
+  rpc GetFrameAt(GetFrameAtRequest) returns (GetFrameAtResponse) {
+    option (gibson.auth.v1.authz) = {
+      relation: "member",
+      object_type: "tenant",
+      object_deriver: "tenant_from_identity",
+      allowed_identities: 3  // USER | SERVICE
+    };
+  }
+
+  // ListReviewQueue returns the tenant's HITL review queue — surfaced surprises +
+  // Findings, each with any label already applied (ADR-0006). The async labelling
+  // UI reads this; it is a read-only projection and NEVER gates a mission.
+  rpc ListReviewQueue(ListReviewQueueRequest) returns (ListReviewQueueResponse) {
+    option (gibson.auth.v1.authz) = {
+      relation: "member",
+      object_type: "tenant",
+      object_deriver: "tenant_from_identity",
+      allowed_identities: 3  // USER | SERVICE
+    };
+  }
+
+  // SubmitLabel records a human review judgement (true/false-positive, severity,
+  // category, dismiss) on a surfaced item, as a tenant-scoped LabelApplied event
+  // (ADR-0006). Labels POOL across the tenant's users and NEVER cross tenants. It
+  // is async: the call appends the event and returns; the mission never waits on
+  // it. Any tenant member may label (the pool is shared), so the relation is
+  // member, not admin.
+  rpc SubmitLabel(SubmitLabelRequest) returns (SubmitLabelResponse) {
+    option (gibson.auth.v1.authz) = {
+      relation: "member",
+      object_type: "tenant",
+      object_deriver: "tenant_from_identity",
+      allowed_identities: 3  // USER | SERVICE
+    };
+  }
+
+  // ListLabels returns the tenant's pooled review labels (ADR-0006) — the HITL
+  // training signal the offline trainer consumes alongside auto-outcomes.
+  rpc ListLabels(ListLabelsRequest) returns (ListLabelsResponse) {
+    option (gibson.auth.v1.authz) = {
+      relation: "member",
+      object_type: "tenant",
+      object_deriver: "tenant_from_identity",
+      allowed_identities: 3  // USER | SERVICE
+    };
+  }
+}
+
+message MissionView {
+  string id = 1;
+  string goal = 2;
+  string status = 3;
+  string reason = 4;
+}
+
+message HostView {
+  string scope_id = 1;
+  string address = 2;
+  repeated int32 open_ports = 3;
+  double juicy = 4;
+  double attention = 5;
+  string surprise = 6;
+}
+
+message FindingView {
+  string id = 1;
+  string title = 2;
+  string scope_id = 3;
+  string address = 4;
+  string severity = 5;
+}
+
+// WorkItemView is one unit of work in a mission's frame (PRD #1059 M2,
+// gibson#1061): an agent run, tool execution, or plugin invocation, reconstructed
+// with its status as-of the folded tick. A WorkItem entity exists only once its
+// WorkDispatched event has folded, so an item first appears at its dispatch tick
+// with status "running" (in-flight) and reaches a terminal status (done / failed
+// / skipped) at its completion tick. The in-flight set at a tick is the items
+// with status "running"; terminal items are carried with their final status so
+// the panel can show what the run already finished. Mission-scoped: only the
+// mission's work appears in a mission-scoped frame (empty mission_id folds the
+// whole tenant Timeline, so all tenant work appears).
+message WorkItemView {
+  string id = 1;
+  string mission_id = 2; // owning mission ("" for free-standing work)
+  string kind = 3;       // "tool" | "agent" | "plugin"
+  string target = 4;     // the capability being executed
+  string status = 5;     // "pending" | "running" | "done" | "failed" | "skipped"
+}
+
+// DecisionDispatchView is one action the Decider chose in a decision episode: the
+// WorkItem it dispatched (gibson#1062). The work's own lifecycle is the matching
+// WorkItemView; this is the decision→work linkage (what the Decider chose).
+message DecisionDispatchView {
+  string work_id = 1; // the dispatched WorkItem's id
+  string kind = 2;    // "tool" | "agent" | "plugin"
+  string target = 3;  // the capability the Decider chose to invoke
+}
+
+// DecisionView is one Decider decision episode reconstructed as-of the folded tick
+// (PRD #1059 M2, gibson#1062): what the brain chose to do next, and why. A
+// decision is opened by a DecisionRequested event (the brain asked itself what to
+// do given the evidence so far) and closed by a DecisionCompleted event once the
+// off-tick Decider worker has submitted its choices. A decision first appears at
+// its request tick with status "pending" (in flight) and reaches "completed" at
+// its completion tick, so it folds in cumulatively like the timeline. The chosen
+// actions (the work the Decider dispatched) and, where the decision ended the
+// mission, the completion reason as `rationale`, are carried as they fold in.
+// Mission-scoped: only this mission's decisions appear in a mission-scoped frame.
+message DecisionView {
+  string id = 1;                              // stable per-mission id ("<mission_id>#d<n>")
+  string mission_id = 2;                      // the goal mission this decision drives
+  int64 cursor = 3;                           // evidence cursor at request time (its position in the run)
+  string status = 4;                          // "pending" (in flight) | "completed"
+  repeated DecisionDispatchView dispatches = 5; // the work the Decider chose to dispatch
+  string outcome = 6;                         // mission outcome if the decision ended the mission ("" otherwise)
+  string rationale = 7;                       // the completion reason, where present
+}
+
+message TimelineEvent {
+  uint64 seq = 1;     // 0-based position in the tenant Timeline
+  string kind = 2;    // event Kind(), e.g. "host.observed"
+  string summary = 3; // human-readable one-line summary
+}
+
+// LlmCallView is a single LLM completion's metadata (gibson#755): model + token
+// counts + provenance ids. No transcript — the World holds call metadata only.
+message LlmCallView {
+  string call_id = 1;
+  string run_id = 2; // the AgentRun that issued the call ("" for mission-level)
+  string model = 3;
+  string scope_id = 4;
+  int32 prompt_tokens = 5;
+  int32 completion_tokens = 6;
+}
+
+message ListMissionsRequest {}
+message ListMissionsResponse { repeated MissionView missions = 1; }
+
+message ListHostsRequest {}
+message ListHostsResponse { repeated HostView hosts = 1; }
+
+message ListFindingsRequest {}
+message ListFindingsResponse { repeated FindingView findings = 1; }
+
+message ListLlmCallsRequest {}
+message ListLlmCallsResponse { repeated LlmCallView llm_calls = 1; }
+
+// LlmMessage is one prompt message in an LlmCall transcript.
+message LlmMessage {
+  string role = 1;
+  string content = 2;
+}
+
+// LlmCallDetail is a single call's full record: the LlmCallView metadata plus the
+// transcript (prompt messages + assistant completion).
+message LlmCallDetail {
+  string call_id = 1;
+  string run_id = 2;
+  string model = 3;
+  string scope_id = 4;
+  int32 prompt_tokens = 5;
+  int32 completion_tokens = 6;
+  repeated LlmMessage messages = 7;
+  string completion = 8;
+}
+
+message GetLlmCallRequest { string call_id = 1; }
+message GetLlmCallResponse { LlmCallDetail call = 1; }
+
+message GetTimelineRequest { string mission_id = 1; }
+message GetTimelineResponse { repeated TimelineEvent events = 1; }
+
+// GetFrameAtRequest scrubs to a Timeline position: fold the first `seq` events.
+// Optional mission_id scopes the fold to one mission's slice of the Timeline
+// (mirrors GetTimelineRequest): the frame then materializes only that mission's
+// World and `seq`/`total` index the mission's slice, so the Scroller's timeline
+// and its frames share one indexing. Empty folds the whole tenant Timeline
+// (tenant-wide behavior unchanged).
+message GetFrameAtRequest {
+  uint64 seq = 1;
+  string mission_id = 2;
+}
+
+// GetFrameAtResponse is the World materialized at frame `seq` (a server-side fold).
+message GetFrameAtResponse {
+  uint64 seq = 1;                       // the position actually folded (clamped to [0,total])
+  uint64 total = 2;                     // total events folded over: the tenant Timeline, or the mission's slice when mission_id is set
+  repeated MissionView missions = 3;
+  repeated HostView hosts = 4;
+  repeated FindingView findings = 5;
+  // The mission's WorkItems reconstructed as-of `seq` (PRD #1059 M2, gibson#1061):
+  // in-flight work (status "running") plus terminal work with its final status.
+  // Mission-scoped when mission_id is set; all tenant work when it is empty.
+  repeated WorkItemView work = 6;
+  // The mission's Decider decisions reconstructed as-of `seq` (PRD #1059 M2,
+  // gibson#1062): what the brain chose to do next at each decision point and why.
+  // A decision appears at its request tick ("pending") and reaches "completed" at
+  // its completion tick, so the set folds in cumulatively. Mission-scoped when
+  // mission_id is set; all tenant decisions when it is empty.
+  repeated DecisionView decisions = 7;
+  // The mission's LLM calls reconstructed as-of `seq` (PRD #1059 M2, gibson#1063):
+  // the call metadata (model + token counts + provenance) for every completion
+  // issued up to this tick, so token/cost/provenance line up with what's on screen.
+  // A call appears at its own observation tick, so the set folds in cumulatively.
+  // Mission-scoped via the run_id -> WorkItem -> mission linkage: a call belongs to
+  // the mission when its run_id names a WorkItem the mission dispatched (a
+  // mission-level call with empty run_id attaches to the mission directly). Empty
+  // mission_id folds all tenant calls. Transcripts stay behind GetLlmCall.
+  repeated LlmCallView llm_calls = 8;
+}
+
+// LabelView is one applied review label (a gibson.world.v1 view of a brain
+// Label): the verdict, optional corrected severity/category, and the user who
+// applied it (provenance only — labels pool tenant-wide; ADR-0006).
+message LabelView {
+  string target_id = 1; // the labelled item (a finding id or surprise host id)
+  string verdict = 2;   // "true_positive" | "false_positive" | "dismiss"
+  string severity = 3;  // corrected severity ("" = leave as-is)
+  string category = 4;  // free-form taxonomy tag ("" = none)
+  string user_id = 5;   // who applied it (provenance; not a partition key)
+}
+
+// ReviewItem is one entry in the HITL review queue: a surfaced surprise or a
+// Finding awaiting (or carrying) a label.
+message ReviewItem {
+  string target_id = 1;   // the label target (finding id or surprise host id)
+  string kind = 2;        // "finding" | "surprise"
+  string title = 3;
+  string scope_id = 4;
+  string address = 5;
+  string severity = 6;
+  bool labelled = 7;      // true if a label has been applied
+  LabelView label = 8;    // the applied label (set iff labelled)
+}
+
+message ListReviewQueueRequest {}
+message ListReviewQueueResponse { repeated ReviewItem items = 1; }
+
+// SubmitLabelRequest applies a label to a surfaced item. The daemon stamps the
+// caller's user id server-side from context — the client does not supply it, so a
+// caller can never attribute a label to another user.
+message SubmitLabelRequest {
+  string target_id = 1; // required: the finding id / surprise host id to label
+  string verdict = 2;   // required: "true_positive" | "false_positive" | "dismiss"
+  string severity = 3;  // optional corrected severity
+  string category = 4;  // optional taxonomy tag
+}
+message SubmitLabelResponse {}
+
+message ListLabelsRequest {}
+message ListLabelsResponse { repeated LabelView labels = 1; }

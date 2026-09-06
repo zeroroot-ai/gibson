@@ -1,0 +1,125 @@
+syntax = "proto3";
+
+package gibson.daemon.agentconsole.v1;
+
+option go_package = "github.com/zeroroot-ai/gibson/internal/server/daemon/api/gibson/daemon/agentconsole/v1;agentconsolev1";
+
+import "gibson/auth/v1/options.proto";
+import "gibson/bank/v1/bank.proto";
+
+// AgentConsoleService is the daemon's read-only, tenant-scoped view of the
+// agents running RIGHT NOW and their live structured events (ADR-0016 S11,
+// gibson#1599). While a sandboxed agent runs, the launcher tees the agent's
+// opencode NDJSON output into the daemon's in-memory registry; this service
+// exposes it. It backs the dashboard's live agent console (S12).
+//
+// The daemon resolves the caller's tenant server-side and reads only that
+// tenant's running instances. A subscriber can enumerate EVERY running instance
+// for its tenant and follow EACH one independently. A run id owned by another
+// tenant returns NOT_FOUND, never data — the isolation boundary is enforced
+// server-side, never by the client. There is NO input/write path: this is a
+// pure read surface, and each stream ends when its run reaches a terminal state.
+//
+// It mirrors LogsService / WorldService: daemon-local, tenant-scoped
+// observability, read through Envoy + ext-authz. Every RPC is ext-authz-gated
+// via the tenant member relation.
+service AgentConsoleService {
+  // ListRunningAgents enumerates the caller-tenant's currently running agent
+  // instances. The tenant scope is derived server-side from the authenticated
+  // identity; the client never supplies it, and the result never includes
+  // another tenant's instances.
+  rpc ListRunningAgents(ListRunningAgentsRequest) returns (ListRunningAgentsResponse) {
+    option (gibson.auth.v1.authz) = {
+      relation: "member",
+      object_type: "tenant",
+      object_deriver: "tenant_from_identity",
+      allowed_identities: 3  // USER | SERVICE
+    };
+  }
+
+  // StreamAgentEvents streams one running instance's live structured events by
+  // run id. The run id is resolved within the caller's tenant scope; a run id
+  // the tenant does not own returns NOT_FOUND, indistinguishable from one that
+  // never existed. The stream ends when the run reaches a terminal state.
+  rpc StreamAgentEvents(StreamAgentEventsRequest) returns (stream AgentEvent) {
+    option (gibson.auth.v1.authz) = {
+      relation: "member",
+      object_type: "tenant",
+      object_deriver: "tenant_from_identity",
+      allowed_identities: 3  // USER | SERVICE
+    };
+  }
+}
+
+// RunningAgent is one running agent instance in the caller's tenant. It carries
+// no tenant field: the tenant is the enumeration scope and the caller already
+// knows its own.
+message RunningAgent {
+  // run_id uniquely identifies this running instance within the tenant. It is
+  // the handle StreamAgentEvents subscribes by.
+  string run_id = 1;
+  // agent_name is the dispatched agent's name.
+  string agent_name = 2;
+  // sandbox_id is the setec sandbox backing this run, for operator diagnostics.
+  string sandbox_id = 3;
+  // started_unix_nanos is when the instance started, as Unix nanoseconds.
+  int64 started_unix_nanos = 4;
+  // mission_id and mission_run_id name the mission and the mission run this
+  // instance serves, so a console can link to the mission and stop it through
+  // the mission surface. Empty for a run outside a mission.
+  string mission_id = 5;
+  string mission_run_id = 6;
+  // sandbox_class is the setec SandboxClass the run was launched under
+  // (ADR-0016 decision 4), so a viewer sees the isolation posture.
+  string sandbox_class = 7;
+  // component_kind is what kind of component is running: "agent" or "tool".
+  // Both run in sandboxes and both appear here.
+  string component_kind = 8;
+  // bank_id and member_id name the bank member this instance is, when it is
+  // one (ADR-0019). Empty for a one-shot dispatch. A console joins the row to
+  // the bank surface by these rather than by mission_run_id.
+  string bank_id = 9;
+  string member_id = 10;
+  // member is what the member last reported on its heartbeat: its state, the
+  // jobs it holds and its cap. Absent for a one-shot dispatch, and absent for
+  // a member that has not reported yet.
+  gibson.bank.v1.MemberStatus member = 11;
+}
+
+// ListRunningAgentsRequest has no fields: the tenant scope is the authenticated
+// identity, never a client-supplied value.
+message ListRunningAgentsRequest {}
+
+// ListRunningAgentsResponse carries the tenant's running instances, sorted by
+// start time.
+message ListRunningAgentsResponse {
+  repeated RunningAgent agents = 1;
+}
+
+// StreamAgentEventsRequest names the running instance to follow.
+message StreamAgentEventsRequest {
+  // run_id is the running instance's id, from ListRunningAgents. Required.
+  string run_id = 1;
+  // since_seq is the last event sequence the client saw. The stream starts
+  // with the backlog after it (what the daemon still holds), then follows
+  // live. Zero means the whole backlog.
+  uint64 since_seq = 2;
+  // job_id narrows a member's stream to one job: only the job events the
+  // daemon emits for that job pass (job_opened, job_input, job_state,
+  // job_deliverable, job_closed). The agent's own output lines carry no job
+  // id and are held back. Empty means everything.
+  string job_id = 3;
+}
+
+// AgentEvent is one chunk of a running agent's structured output, streamed
+// unchanged. The daemon does not parse it; the client reassembles the opencode
+// NDJSON.
+message AgentEvent {
+  // unix_nanos is when the daemon relayed this chunk, as Unix nanoseconds.
+  int64 unix_nanos = 1;
+  // data is the raw event bytes as the agent emitted them.
+  bytes data = 2;
+  // seq is the per-run sequence number of this chunk, starting at 1. Pass it
+  // back as since_seq to resume without a gap or a duplicate.
+  uint64 seq = 3;
+}

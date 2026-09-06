@@ -1,0 +1,103 @@
+name: release-please
+
+on:
+  push:
+    branches: [main]
+
+permissions:
+  contents: write
+  pull-requests: write
+  packages: write  # publish-authz-registry pushes to ghcr.io
+
+jobs:
+  release-please:
+    name: release-please
+    runs-on: ubuntu-latest
+    outputs:
+      # Forward release-please's outputs so the publish job can decide
+      # whether to fire and which tag to publish. release-please-config.json
+      # has two packages: root `.` (daemon, tag pattern `v<semver>`) and
+      # `tools/gibson-bootstrap` (separate component, tag pattern
+      # `gibson-bootstrap-v<semver>`). The authz registry only tracks the
+      # daemon, so we gate on whether the root "." package was released.
+      #
+      # NOTE on output key format: `.--release_created` is the documented
+      # multi-package key for the root "." path, but GitHub Actions sanitizes
+      # output variable names — keys starting with "." are silently dropped
+      # and the expression evaluates to "". This caused the publish job to be
+      # skipped for every release from v0.108.0 to v0.117.0 (deploy#504).
+      #
+      # Workaround: a dedicated step checks paths_released (a JSON array set by
+      # release-please-action) for the "." entry, reads the new version from the
+      # manifest, and sets `daemon_released` + `tag` as outputs.
+      daemon_release_created: ${{ steps.daemon-tag.outputs.daemon_released }}
+      daemon_tag_name: ${{ steps.daemon-tag.outputs.tag }}
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
+
+      - name: Mint App token
+        id: app-token
+        uses: actions/create-github-app-token@bcd2ba49218906704ab6c1aa796996da409d3eb1 # v3
+        with:
+          app-id: ${{ secrets.SDK_FANOUT_APP_ID }}
+          private-key: ${{ secrets.SDK_FANOUT_APP_PRIVATE_KEY }}
+          owner: zeroroot-ai
+          repositories: gibson
+
+      - uses: googleapis/release-please-action@45996ed1f6d02564a971a2fa1b5860e934307cf7 # v5
+        id: release
+        with:
+          # Mint a short-lived token from the zeroday-sdk-fanout GitHub App rather
+          # than using GITHUB_TOKEN or a long-lived PAT. GITHUB_TOKEN does not fire
+          # downstream `push: tags:` workflows (GitHub anti-recursion) and its
+          # bot-authored PRs get held at action_required; a PAT avoids both but
+          # expires, which reproduces the same silent stall on a timer. An App token
+          # has neither failure mode. See zeroroot-ai/.github#263.
+          token: ${{ steps.app-token.outputs.token }}
+          config-file: release-please-config.json
+          manifest-file: .release-please-manifest.json
+
+      - name: Extract daemon tag from paths_released
+        id: daemon-tag
+        if: ${{ steps.release.outputs.releases_created == 'true' }}
+        env:
+          PATHS_RELEASED: ${{ steps.release.outputs.paths_released }}
+        run: |
+          # paths_released is a JSON array of package paths, e.g. ["."] or
+          # [".", "tools/gibson-bootstrap"]. Check if the daemon root "." is in
+          # the set before publishing the authz registry OCI artifact.
+          #
+          # release-please-action sets `.--tag_name` but the key is silently
+          # dropped by GitHub Actions (keys starting with "." are sanitized).
+          # Read .release-please-manifest.json directly instead — it is the
+          # authoritative source for the new daemon version. See deploy#504.
+          if echo "${PATHS_RELEASED}" | jq -e 'map(select(. == ".")) | length > 0' > /dev/null 2>&1; then
+            VERSION=$(jq -r '.["."]' .release-please-manifest.json)
+            echo "tag=v${VERSION}" >> "$GITHUB_OUTPUT"
+            echo "daemon_released=true" >> "$GITHUB_OUTPUT"
+          else
+            echo "daemon_released=false" >> "$GITHUB_OUTPUT"
+          fi
+
+  # publish-authz-registry: piggyback on release-please so the OCI artifact
+  # is published in the SAME workflow run that cuts the release.
+  #
+  # Why not let publish-private-authz-registry.yml fire from its own
+  # `on: push: tags: v*` trigger? Because release-please's tag push uses
+  # the default GITHUB_TOKEN, and GitHub deliberately does not fire
+  # downstream workflows from GITHUB_TOKEN pushes (anti-recursion). This
+  # silently broke the publish workflow for v0.36.0 → v0.42.0 — 13 days
+  # of registry artifacts never published. See gibson#96 and the workspace
+  # memory note `project-release-please-tag-trigger-gap`.
+  #
+  # Chaining via job-needs in the same workflow avoids the trigger
+  # problem entirely: this job runs in the same workflow run, on the
+  # same token, with the same checked-out commit.
+  publish-authz-registry:
+    name: publish-authz-registry
+    needs: release-please
+    if: ${{ needs.release-please.outputs.daemon_release_created == 'true' }}
+    uses: ./.github/workflows/publish-private-authz-registry.yml
+    with:
+      tag: ${{ needs.release-please.outputs.daemon_tag_name }}
+    secrets: inherit

@@ -1,0 +1,419 @@
+# ----------------------------------------------------------------------------
+# ADR-0019 banks of always-on agents — the exit test (epic gibson#1706,
+# slice gibson#1718).
+#
+# In plain words: on a real gvisor cluster, a bank of two Claude Code members
+# comes up on a real key, both report idle, one job opens and reaches the
+# member, the job closes with a verdict, a stranger tenant cannot read it,
+# and the bank scales to zero with no sandbox left behind.
+#
+# Runs on main and on a schedule, never on a pull request (ADR-0012). It feeds
+# the scorecard and blocks nothing.
+#
+# Two things a human must set once, and only a human can set them:
+#   1. the repository variable EXIT_TEST_BANK_ENABLED = true
+#   2. the repository secret   EXIT_TEST_ANTHROPIC_API_KEY = a real key
+# The variable is the gate, because GitHub does not allow the secrets context
+# in a job-level `if` (measured on this repository 2026-09-02: the run ends in
+# a startup failure). Only a job-level gate makes the RUN conclusion "skipped",
+# and the scorecard reads the run (.github#318). A step-level gate leaves the
+# run green with nothing tested, which is a guard that cannot fail.
+#
+# So the board reads one of three honest states:
+#   variable unset            -> the job is skipped, the run is skipped, SKIPPED
+#   variable set, key missing -> the first step fails and says so, FAIL
+#   both set                  -> the real test runs, PASS or FAIL
+# ----------------------------------------------------------------------------
+name: exit-test-bank
+
+on:
+  push:
+    branches: [main]
+    paths:
+      - 'internal/engine/harness/**'
+      - 'internal/platform/componentcatalog/**'
+      - 'internal/server/daemon/**'
+      - 'internal/platform/bank/**'
+      - 'internal/platform/job/**'
+      - 'internal/engine/bank/**'
+      - 'tests/e2e/bank_test.go'
+      - 'tests/e2e/helpers/**'
+      - '.github/workflows/exit-test-bank.yml'
+  schedule:
+    # Daily. A dispatch path that isolates today and not tomorrow is the failure
+    # this catches; nothing else exercises it on a real gvisor cluster.
+    - cron: '30 5 * * *'
+  workflow_dispatch: {}
+
+concurrency:
+  group: exit-test-bank-${{ github.ref }}
+  cancel-in-progress: true
+
+permissions:
+  contents: read
+
+env:
+  NS: gibson
+  RELEASE: gibson
+  CLUSTER: vanilla
+  # The kind node the deploy bring-up creates (vanilla-up.sh: <cluster>-control-plane).
+  NODE: vanilla-control-plane
+
+jobs:
+  bank:
+    name: a bank of two members takes a job, closes it and scales to zero
+    runs-on: ubuntu-latest
+    timeout-minutes: 90
+    # The gate. Until a human sets the variable, this job is skipped, the run
+    # conclusion is "skipped", and the scorecard row reads SKIPPED. It never
+    # reads PASS with nothing tested.
+    if: ${{ vars.EXIT_TEST_BANK_ENABLED == 'true' }}
+    env:
+      EXIT_TEST_ANTHROPIC_API_KEY: ${{ secrets.EXIT_TEST_ANTHROPIC_API_KEY }}
+    steps:
+      # The variable says the test is on. If the key is missing, the test
+      # cannot run, and saying so with a failure is the honest report.
+      - name: The key the members sign in with
+        run: |
+          if [ -z "${EXIT_TEST_ANTHROPIC_API_KEY}" ]; then
+            echo "::error title=exit-test-bank cannot run::EXIT_TEST_BANK_ENABLED is true but the repository secret EXIT_TEST_ANTHROPIC_API_KEY is empty. Add the key under Settings > Secrets and variables > Actions, or unset the variable."
+            exit 1
+          fi
+          echo "the key is set"
+      - name: Checkout gibson
+        uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
+        with:
+          path: gibson
+
+      # The kind bring-up + the sanctioned setec+gvisor profile + the gvisor
+      # node-prep all live in the deploy repo. Reuse them rather than
+      # re-implementing the cluster in this file (ONE bring-up path).
+      - name: Checkout deploy
+        uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
+        with:
+          repository: zeroroot-ai/deploy
+          path: deploy
+          # DEPLOY_RO_PAT is not a secret on this repo — the fallback to
+          # github.token then 404s, because a repo-scoped GITHUB_TOKEN cannot
+          # read another PRIVATE repo, and deploy is private. That failed the
+          # checkout before the cluster was ever built, so this exit test
+          # reported "failure" for a reason that had nothing to do with what it
+          # tests.
+          token: ${{ github.token }}
+
+      - name: Set up Go
+        uses: actions/setup-go@0a12ed9d6a96ab950c8f026ed9f722fe0da7ef32 # v5
+        with:
+          go-version-file: gibson/go.mod
+          cache-dependency-path: gibson/go.sum
+
+      - uses: azure/setup-helm@9bc31f4ebc9c6b171d7bfbaa5d006ae7abdb4310 # v5
+        with:
+          version: v3.16.2
+
+      - name: Install kind + kubectl
+        uses: helm/kind-action@a1b0e391336a6ee6713a0583f8c6240d70863de3 # v1.12.0
+        with:
+          install_only: true
+
+      # `make recreate ENV=kind` runs stage 1 through terraform (deploy#1776,
+      # scripts/recreate-kind.sh:203). The deleted `vanilla-fresh` did not, so
+      # nothing here installed it and every exit test died with
+      # "terraform is not on PATH" (run 33675016607). Pinned to deploy's own CI
+      # version; kind/gibson requires >= 1.9.
+      - name: Install terraform
+        uses: hashicorp/setup-terraform@dfe3c3f87815947d99a8997f908cb6525fc44e9e # v4
+        with:
+          terraform_version: "1.9.8"
+          terraform_wrapper: false
+
+      # Stage 0 writes the bringup keyring the install reads (ADR-0015,
+      # deploy#1730, deploy#1732). The registry pull token is the keyring
+      # member GHCR_PULL_TOKEN now; vanilla-up.sh refuses the environment
+      # variable it used to take, so there is one path and no second one. The
+      # state dir is the runner's temp, because nothing here owns /bulk.
+      # GHCR_RO_PAT, not github.token: the first-party images live on packages
+      # owned by other repos, which a repo-scoped token cannot read.
+      - name: Stage 0, the substrate and the bringup keyring
+        working-directory: deploy
+        env:
+          GHCR_PULL_TOKEN: ${{ secrets.GHCR_RO_PAT }}
+        run: |
+          if [ -z "${GHCR_PULL_TOKEN}" ]; then
+            echo "::error::GHCR_RO_PAT is required to pull first-party images (daemon, setec)."
+            exit 1
+          fi
+          SUBSTRATE_DIR="$RUNNER_TEMP/substrate" make substrate ENV=kind
+
+      # Stand up kind with the sanctioned setec+gvisor profile. vanilla-up.sh
+      # --fresh-kind does the gvisor node-prep (runsc install + the containerd
+      # runsc handler) and installs the umbrella with values-vanilla.yaml, which
+      # now carries setec+gvisor+dispatch. The 2-core overlay shrinks REQUESTS so
+      # the whole platform packs onto the runner. deploy's
+      # check-bank-runner-budget.py measures this exact command.
+      - name: Stand up the setec+gvisor cluster
+        working-directory: deploy
+        run: |
+          SUBSTRATE_DIR="$RUNNER_TEMP/substrate" \
+            EXTRA_VALUES=test/vanilla/ci-2core-resources.values.yaml make recreate ENV=kind
+
+      # The node must actually advertise gvisor, or every sandbox stays Pending.
+      # This is the gvisor node-prep assertion, kept explicit so a node-prep
+      # regression fails HERE with a clear message, not as a mystery timeout.
+      - name: Node advertises gvisor
+        run: |
+          set -euo pipefail
+          for _ in $(seq 1 30); do
+            v=$(kubectl get node "$NODE" -o jsonpath='{.metadata.labels.setec\.zeroroot\.ai/runtime\.gvisor}' 2>/dev/null || true)
+            [ "$v" = "true" ] && { echo "node advertises runtime.gvisor=true"; break; }
+            sleep 5
+          done
+          v=$(kubectl get node "$NODE" -o jsonpath='{.metadata.labels.setec\.zeroroot\.ai/runtime\.gvisor}' 2>/dev/null || true)
+          if [ "$v" != "true" ]; then
+            echo "::error::node does not advertise runtime.gvisor=true — gvisor node-prep failed (runsc binary or the containerd io.containerd.cri.v1.runtime handler is missing)"
+            kubectl -n setec-system logs -l app.kubernetes.io/component=runtime-agent --tail=40 || true
+            exit 1
+          fi
+
+      # The overlay below builds FROM the private daemon image on ghcr.io.
+      # The cluster pulls it with the keyring's pull token, but the runner's
+      # own docker has no credential and gets 401 (run 33643826807). Log it in
+      # with the same read-only token, so one token serves both.
+      - name: Log the runner's docker in to ghcr.io
+        env:
+          GHCR_RO_PAT: ${{ secrets.GHCR_RO_PAT }}
+        run: echo "$GHCR_RO_PAT" | docker login ghcr.io -u "${{ github.actor }}" --password-stdin
+
+      # Swap in a TEST-MODE daemon so the e2e suite can dial gRPC directly:
+      # authz disabled (no Envoy/ext-authz in the test), test fixtures on, and
+      # built with setec_integration so DelegateToAgent reaches the real setec
+      # launcher. This is the same test-mode contract mission_run_test.go relies
+      # on; it changes ONLY how the client authenticates, never the setec+gvisor
+      # runtime under test.
+      - name: Build + load the test-mode daemon
+        working-directory: gibson
+        run: |
+          set -euo pipefail
+          # The base image is the daemon image the sanctioned install already
+          # pulled onto the node — overlay the test-tagged binary onto it so all
+          # the daemon's baked-in assets stay in place. Discover that reference
+          # from the running StatefulSet rather than hardcoding a tag.
+          BASE=$(kubectl -n "$NS" get statefulset -l app.kubernetes.io/component=daemon \
+            -o jsonpath='{.items[0].spec.template.spec.containers[?(@.name=="gibson")].image}')
+          echo "overlaying onto base daemon image: ${BASE}"
+          mkdir -p /tmp/dctx
+          CGO_ENABLED=0 GOOS=linux GOARCH=amd64 go build \
+            -tags="setec_integration test_fixtures" \
+            -ldflags="-s -w -X github.com/zeroroot-ai/gibson/pkg/version.GitCommit=$(git rev-parse --short HEAD)" \
+            -o /tmp/dctx/gibson ./cmd/gibson
+          cat > /tmp/dctx/Dockerfile <<EOF
+          FROM ${BASE}
+          COPY gibson /usr/local/bin/gibson
+          EOF
+          docker build -t ghcr.io/zeroroot-ai/gibson:e2e-bank /tmp/dctx
+          kind load docker-image ghcr.io/zeroroot-ai/gibson:e2e-bank --name "$CLUSTER"
+
+      - name: Point the daemon at the test-mode image with authz off + fixtures on
+        working-directory: deploy
+        run: |
+          set -euo pipefail
+          # The platform is an Argo Application now (deploy#1776), not a helm
+          # release, so `helm upgrade` fails with `"gibson" has no deployed
+          # releases`, and syncPolicy.automated.selfHeal would revert a manual
+          # release anyway. The override is a patch to the Application's helm
+          # parameters; Argo is the one that applies it.
+          #
+          # A json `add` to `parameters/-` APPENDS. A merge patch would replace
+          # the whole list and drop the six the bringup set (postgres recovery,
+          # the bucket, the pinned envoy ClusterIP), which would break the
+          # cluster rather than retarget it.
+          # The in-cluster suite needs an attested SVID: the runner's
+          # ClusterSPIFFEID and ServiceAccount, and that SVID allow-listed on
+          # the daemon's gRPC listener. deploy ships those settings as
+          # test/vanilla/e2e-runner.values.yaml, but that path CANNOT go in
+          # valueFiles here: this Application's source is a packaged CHART from
+          # the chart repo, so a valueFiles entry resolves inside the chart, and
+          # a deploy-repo path leaves the app unrenderable — run 33699918935
+          # reported sync status Unknown and the image never moved. Inline the
+          # same settings as `helm.values`, which needs no path.
+          kubectl -n argocd patch application gibson --type json -p '[
+              {"op":"add","path":"/spec/source/helm/values","value":"gibson-workloads:\n  gibson:\n    e2eRunner:\n      enabled: true\n    auth:\n      spiffe:\n        allowedPeerIDs:\n          - spiffe://zeroroot.ai/platform/tenant-operator\n          - spiffe://zeroroot.ai/platform/connector-operator\n          - spiffe://zeroroot.ai/platform/e2e-runner\n"},
+              {"op":"add","path":"/spec/source/helm/parameters/-","value":{"name":"gibson-workloads.gibson.image.repository","value":"ghcr.io/zeroroot-ai/gibson","forceString":true}},
+              {"op":"add","path":"/spec/source/helm/parameters/-","value":{"name":"gibson-workloads.gibson.image.tag","value":"e2e-bank","forceString":true}},
+              {"op":"add","path":"/spec/source/helm/parameters/-","value":{"name":"gibson-workloads.gibson.image.pullPolicy","value":"IfNotPresent","forceString":true}},
+              {"op":"add","path":"/spec/source/helm/parameters/-","value":{"name":"gibson-workloads.gibson.authz.enabled","value":"false"}},
+              {"op":"add","path":"/spec/source/helm/parameters/-","value":{"name":"gibson-workloads.gibson.extraEnv.GIBSON_TEST_FIXTURES_ENABLED","value":"true","forceString":true}}
+            ]'
+
+          # Argo reconciles the spec change; wait for the StatefulSet to carry
+          # the test image before asking for a rollout, so `rollout status`
+          # cannot pass against the pre-patch generation.
+          for i in $(seq 1 60); do
+            img=$(kubectl -n "$NS" get statefulset -l app.kubernetes.io/component=daemon \
+                    -o jsonpath='{.items[0].spec.template.spec.containers[?(@.name=="gibson")].image}' 2>/dev/null || true)
+            case "$img" in *:e2e-bank) echo "daemon image is $img"; break;; esac
+            [ "$i" = 60 ] && { echo "::error::the daemon StatefulSet never took the e2e-bank image (Argo app: $(kubectl -n argocd get app gibson -o jsonpath='{.status.sync.status}/{.status.health.status}'))"; exit 1; }
+            sleep 20
+          done
+          kubectl -n "$NS" rollout status statefulset -l app.kubernetes.io/component=daemon --timeout=20m
+          # Confirm the daemon wired the sandboxed AGENT launcher — the linchpin.
+          #
+          # NEVER `kubectl ... | grep -q` under `set -o pipefail`: grep -q exits
+          # on the first match, kubectl then dies of SIGPIPE, and pipefail
+          # reports the PIPELINE as failed even though the match succeeded. That
+          # is why this check could never pass. Runs 33687066349 and 33691480645
+          # both declared the line missing while the failure dump printed it,
+          # from the same command, microseconds later. Read the log into a
+          # variable and match on the string.
+          #
+          # Poll as well: `rollout status` returns when the Pod is Ready and the
+          # daemon writes this line a few seconds later, while it builds the
+          # harness.
+          for i in $(seq 1 30); do
+            logs=$(kubectl -n "$NS" logs -l app.kubernetes.io/component=daemon -c gibson --tail=400 2>/dev/null || true)
+            case "$logs" in
+              *"sandboxed agent launcher wired"*) echo "daemon wired the sandboxed agent launcher"; break ;;
+            esac
+            if [ "$i" -eq 30 ]; then
+              echo "::error::daemon did not wire the sandboxed agent launcher within 5m (check sandbox.enabled + agent_sandbox_class)"
+              printf '%s\n' "$logs"
+              exit 1
+            fi
+            sleep 10
+          done
+
+      # The suite runs INSIDE the cluster, not over a port-forward.
+      #
+      # The daemon's gRPC listener speaks SPIFFE mTLS and refuses a non-loopback
+      # plaintext listener (zero-trust-hardening Req 1.2), so a port-forward is
+      # closed before the gRPC preface. Run 33695823500 proved it here: every
+      # assertion failed with
+      #   rpc error: code = Unavailable desc = connection error:
+      #   desc = "error reading server preface: EOF"
+      # `authz.enabled=false` does not change this: it disables authorization,
+      # not transport. The suite needs an attested SVID, which means being a pod
+      # in the mesh. This mirrors exit-test-tool-dispatch, which already works.
+      - name: Build the e2e suite into an image
+        working-directory: gibson
+        run: |
+          set -euo pipefail
+          mkdir -p /tmp/ectx
+          # `go test -c` keeps it a test binary, so -test.run and -test.v still
+          # select and report normally.
+          CGO_ENABLED=0 GOOS=linux GOARCH=amd64 go test -tags=e2e -c \
+            -o /tmp/ectx/e2e.test ./tests/e2e/
+          cat > /tmp/ectx/Dockerfile <<'EOF'
+          FROM gcr.io/distroless/static-debian12:nonroot
+          COPY e2e.test /usr/local/bin/e2e.test
+          ENTRYPOINT ["/usr/local/bin/e2e.test"]
+          EOF
+          docker build -t ghcr.io/zeroroot-ai/gibson-e2e-runner:local /tmp/ectx
+          kind load docker-image ghcr.io/zeroroot-ai/gibson-e2e-runner:local --name "$CLUSTER"
+
+      - name: Run the bank exit test in-cluster
+        env:
+          EXIT_TEST_ANTHROPIC_API_KEY: ${{ secrets.EXIT_TEST_ANTHROPIC_API_KEY }}
+        run: |
+          set -euo pipefail
+          pw=$(kubectl -n "$NS" get secret gibson-redis-stack -o jsonpath='{.data.redis-password}' | base64 -d)
+          if [ -z "$pw" ]; then
+            echo "::error::gibson-redis-stack has no redis-password; the fixture helpers cannot authenticate"
+            exit 1
+          fi
+          echo "::add-mask::$pw"
+          kubectl -n "$NS" delete secret gibson-e2e-runner-env --ignore-not-found
+          kubectl -n "$NS" create secret generic gibson-e2e-runner-env \
+            --from-literal=REDIS_PASSWORD="$pw" \
+            --from-literal=EXIT_TEST_ANTHROPIC_API_KEY="$EXIT_TEST_ANTHROPIC_API_KEY"
+
+          kubectl -n "$NS" delete job gibson-e2e-bank --ignore-not-found
+          cat <<EOF | kubectl -n "$NS" apply -f -
+          apiVersion: batch/v1
+          kind: Job
+          metadata:
+            name: gibson-e2e-bank
+          spec:
+            backoffLimit: 0
+            template:
+              metadata:
+                labels:
+                  app.kubernetes.io/component: e2e-runner
+              spec:
+                restartPolicy: Never
+                serviceAccountName: ${RELEASE}-e2e-runner
+                containers:
+                  - name: e2e
+                    image: ghcr.io/zeroroot-ai/gibson-e2e-runner:local
+                    imagePullPolicy: IfNotPresent
+                    args: ["-test.run", "TestBank", "-test.v", "-test.timeout", "40m"]
+                    env:
+                      - name: GIBSON_TEST_FIXTURES_ENABLED
+                        value: "true"
+                      - name: DAEMON_GRPC_ADDR
+                        value: "gibson-gibson-workloads.${NS}.svc.cluster.local:50051"
+                      - name: REDIS_ADDR
+                        value: "gibson-redis-stack.${NS}.svc.cluster.local:6379"
+                      - name: REDIS_PASSWORD
+                        valueFrom:
+                          secretKeyRef:
+                            name: gibson-e2e-runner-env
+                            key: REDIS_PASSWORD
+                      - name: EXIT_TEST_ANTHROPIC_API_KEY
+                        valueFrom:
+                          secretKeyRef:
+                            name: gibson-e2e-runner-env
+                            key: EXIT_TEST_ANTHROPIC_API_KEY
+                    volumeMounts:
+                      - name: spire-agent-socket
+                        mountPath: /run/spire/sockets
+                        readOnly: true
+                volumes:
+                  # The SPIRE Workload API arrives through the csi.spiffe.io
+                  # driver, the same way the daemon's own StatefulSet mounts it
+                  # (gibson-workloads/templates/gibson/statefulset.yaml). A
+                  # hostPath to /run/spire/sockets does NOT exist on the kind
+                  # node: run 33704102743 sat in ContainerCreating for 27
+                  # minutes on exactly that mount and the job hit its limit.
+                  - name: spire-agent-socket
+                    csi:
+                      driver: csi.spiffe.io
+                      readOnly: true
+          EOF
+
+          # Stream the suite's output so a failure is readable here, then read
+          # the Job's own condition as the verdict — `kubectl wait` on Complete
+          # alone hangs the full timeout on a failed run.
+          # If the runner Pod cannot start, SAY WHY. Run 33704102743 sat in
+          # ContainerCreating for 27 minutes and the job then hit the 1h limit
+          # with no explanation anywhere in the log: `kubectl wait` printed only
+          # "timed out waiting for the condition" and the logs command printed
+          # only "waiting to start". A pod that never starts must produce its
+          # own events, not silence.
+          if ! kubectl -n "$NS" wait --for=condition=Ready pod \
+                 -l job-name=gibson-e2e-bank --timeout=5m; then
+            echo "::error::the e2e runner Pod never became Ready; describe + events follow"
+            kubectl -n "$NS" describe pod -l job-name=gibson-e2e-bank || true
+            kubectl -n "$NS" get events --sort-by=.lastTimestamp | tail -40 || true
+            kubectl -n "$NS" get serviceaccount | grep -i e2e || echo "NO e2e-runner ServiceAccount: the gibson Application did not render it (check e2eRunner.enabled reached the release)"
+            kubectl get clusterspiffeids.spire.spiffe.io 2>/dev/null | grep -i e2e || echo "NO e2e-runner ClusterSPIFFEID"
+            exit 1
+          fi
+          kubectl -n "$NS" logs -f job/gibson-e2e-bank --tail=-1 || true
+
+          for _ in $(seq 1 240); do
+            ok=$(kubectl -n "$NS" get job gibson-e2e-bank -o jsonpath='{.status.succeeded}' 2>/dev/null || true)
+            bad=$(kubectl -n "$NS" get job gibson-e2e-bank -o jsonpath='{.status.failed}' 2>/dev/null || true)
+            [ "${ok:-0}" != "0" ] && [ -n "${ok:-}" ] && { echo "bank exit test PASSED"; exit 0; }
+            [ "${bad:-0}" != "0" ] && [ -n "${bad:-}" ] && { echo "::error::the bank exit test FAILED"; exit 1; }
+            sleep 10
+          done
+          echo "::error::the bank exit test did not finish"
+          exit 1
+
+      - name: Diagnostics on failure
+        if: failure()
+        run: |
+          kubectl -n "$NS" get pods || true
+          kubectl -n setec-system get pods,sandboxes,sandboxclasses || true
+          kubectl -n setec-sandboxes get pods || true
+          kubectl -n "$NS" logs -l app.kubernetes.io/component=daemon -c gibson --tail=200 || true

@@ -1,0 +1,347 @@
+# ----------------------------------------------------------------------------
+# ADR-0017 manifest-seeded TOOL dispatch — the exit test (slice gibson#1659).
+#
+# In plain words: a tenant that switched a tool on can run it, a tenant that
+# never did cannot, and nobody can run a tool that is not in the catalog.
+#
+# WHAT THIS PROVES vs. the other exit tests. deploy's exit-test-vanilla-install
+# proves the SANCTIONED PROFILE installs. exit-test-sandboxed-dispatch proves
+# AGENT dispatch isolation. This proves the TOOL half of ADR-0017: the catalog
+# manifest is the single source of truth for a tool's runtime shape, and the
+# per-tenant can_execute gate (gibson#1638) decides every dispatch.
+#
+# It matters because until ADR-0017 a tool could reach dispatch two ways — the
+# manifest path, and a runtime catalog refresher whose `_system` registry
+# entries dispatched with NO per-tenant check. That refresher is deleted
+# (gibson#1641, ADR-0027 hard cutover); this test fails if a second, ungated
+# path ever comes back.
+#
+# Driving the decision needs authenticated gRPC against the daemon, which in the
+# shipped profile only arrives via Envoy + ext-authz. So this brings up the SAME
+# setec+gvisor runtime but with a TEST-MODE daemon (authz disabled,
+# GIBSON_TEST_FIXTURES, built `-tags="setec_integration test_fixtures"`) so the
+# suite can dial the daemon directly — the model tests/e2e/mission_run_test.go
+# and exit-test-sandboxed-dispatch.yml already use. Authentication itself is
+# covered by login_full_chain / auth e2e, not here.
+#
+# ADR-0012: NEVER on pull_request. An exit test measures state on `main` for the
+# launch scorecard; it needs a live cluster, so it cannot gate a PR. The merge
+# gate is the ten-minute set in go-ci.yml.
+# ----------------------------------------------------------------------------
+name: exit-test-tool-dispatch
+
+on:
+  push:
+    branches: [main]
+    paths:
+      - 'internal/engine/harness/**'
+      - 'internal/platform/componentcatalog/**'
+      - 'internal/server/daemon/**'
+      - 'tests/e2e/tool_dispatch_test.go'
+      - 'tests/e2e/helpers/**'
+      - '.github/workflows/exit-test-tool-dispatch.yml'
+  schedule:
+    # Daily. A tool path that is gated today and not tomorrow is the failure
+    # this catches; nothing else exercises it on a real cluster.
+    - cron: '30 5 * * *'
+  workflow_dispatch: {}
+
+concurrency:
+  group: exit-test-tool-dispatch-${{ github.ref }}
+  cancel-in-progress: true
+
+permissions:
+  contents: read
+
+env:
+  NS: gibson
+  RELEASE: gibson
+  CLUSTER: vanilla
+  # The kind node the deploy bring-up creates (vanilla-up.sh: <cluster>-control-plane).
+  NODE: vanilla-control-plane
+
+jobs:
+  tool-dispatch:
+    name: manifest-seeded tools dispatch only for the tenants that enabled them
+    runs-on: ubuntu-latest
+    timeout-minutes: 45
+    steps:
+      - name: Checkout gibson
+        uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
+        with:
+          path: gibson
+
+      # The kind bring-up + the sanctioned setec+gvisor profile + the gvisor
+      # node-prep all live in the deploy repo. Reuse them rather than
+      # re-implementing the cluster in this file (ONE bring-up path).
+      - name: Checkout deploy
+        uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
+        with:
+          repository: zeroroot-ai/deploy
+          path: deploy
+          # DEPLOY_RO_PAT is not a secret on this repo — the fallback to
+          # github.token then 404s, because a repo-scoped GITHUB_TOKEN cannot
+          # read another PRIVATE repo, and deploy is private. That failed the
+          # checkout before the cluster was ever built, so this exit test
+          # reported "failure" for a reason that had nothing to do with what it
+          # tests.
+          token: ${{ github.token }}
+
+      - name: Set up Go
+        uses: actions/setup-go@0a12ed9d6a96ab950c8f026ed9f722fe0da7ef32 # v5
+        with:
+          go-version-file: gibson/go.mod
+          cache-dependency-path: gibson/go.sum
+
+      - uses: azure/setup-helm@9bc31f4ebc9c6b171d7bfbaa5d006ae7abdb4310 # v5
+        with:
+          version: v3.16.2
+
+      - name: Install kind + kubectl
+        uses: helm/kind-action@a1b0e391336a6ee6713a0583f8c6240d70863de3 # v1.12.0
+        with:
+          install_only: true
+
+      # `make recreate ENV=kind` runs stage 1 through terraform (deploy#1776,
+      # scripts/recreate-kind.sh:203). The deleted `vanilla-fresh` did not, so
+      # nothing here installed it and every exit test died with
+      # "terraform is not on PATH" (run 33675016607). Pinned to deploy's own CI
+      # version; kind/gibson requires >= 1.9.
+      - name: Install terraform
+        uses: hashicorp/setup-terraform@dfe3c3f87815947d99a8997f908cb6525fc44e9e # v4
+        with:
+          terraform_version: "1.9.8"
+          terraform_wrapper: false
+
+      # Stage 0 writes the bringup keyring the install reads (ADR-0015,
+      # deploy#1730, deploy#1732). The registry pull token is the keyring
+      # member GHCR_PULL_TOKEN now; vanilla-up.sh refuses the environment
+      # variable it used to take, so there is one path and no second one. The
+      # state dir is the runner's temp, because nothing here owns /bulk.
+      - name: Stage 0, the substrate and the bringup keyring
+        working-directory: deploy
+        env:
+          GHCR_PULL_TOKEN: ${{ secrets.GHCR_RO_PAT }}
+        run: |
+          if [ -z "${GHCR_PULL_TOKEN}" ]; then
+            echo "::error::GHCR_RO_PAT is required to pull first-party images (daemon, setec)."
+            exit 1
+          fi
+          SUBSTRATE_DIR="$RUNNER_TEMP/substrate" make substrate ENV=kind
+
+      # Stand up kind with the sanctioned setec+gvisor profile. vanilla-up.sh
+      # --fresh-kind does the gvisor node-prep (runsc install + the containerd
+      # runsc handler) and installs the umbrella with values-vanilla.yaml. The
+      # 2-core overlay shrinks REQUESTS so the whole platform packs onto the runner.
+      - name: Stand up the setec+gvisor cluster
+        working-directory: deploy
+        run: |
+          SUBSTRATE_DIR="$RUNNER_TEMP/substrate" \
+            EXTRA_VALUES=test/vanilla/ci-2core-resources.values.yaml make recreate ENV=kind
+
+      # The node must actually advertise gvisor, or every sandbox stays Pending.
+      # Kept explicit so a node-prep regression fails HERE with a clear message,
+      # not as a mystery timeout later.
+      - name: Node advertises gvisor
+        run: |
+          set -euo pipefail
+          for _ in $(seq 1 30); do
+            v=$(kubectl get node "$NODE" -o jsonpath='{.metadata.labels.setec\.zeroroot\.ai/runtime\.gvisor}' 2>/dev/null || true)
+            [ "$v" = "true" ] && { echo "node advertises runtime.gvisor=true"; break; }
+            sleep 5
+          done
+          v=$(kubectl get node "$NODE" -o jsonpath='{.metadata.labels.setec\.zeroroot\.ai/runtime\.gvisor}' 2>/dev/null || true)
+          if [ "$v" != "true" ]; then
+            echo "::error::node does not advertise runtime.gvisor=true — gvisor node-prep failed (runsc binary or the containerd io.containerd.cri.v1.runtime handler is missing)"
+            kubectl -n setec-system logs -l app.kubernetes.io/component=runtime-agent --tail=40 || true
+            exit 1
+          fi
+
+      # Swap in a TEST-MODE daemon so the e2e suite can dial gRPC directly:
+      # authz disabled (no Envoy/ext-authz in the test), test fixtures on, and
+      # built with setec_integration so tool dispatch reaches the real setec
+      # executor. This changes ONLY how the client authenticates, never the
+      # setec+gvisor runtime under test.
+      # The overlay below builds FROM the private daemon image on ghcr.io.
+      # The cluster pulls it with the keyring's pull token, but the runner's
+      # own docker has no credential and gets 401 (run 33643826807). Log it in
+      # with the same read-only token, so one token serves both.
+      - name: Log the runner's docker in to ghcr.io
+        env:
+          GHCR_RO_PAT: ${{ secrets.GHCR_RO_PAT }}
+        run: echo "$GHCR_RO_PAT" | docker login ghcr.io -u "${{ github.actor }}" --password-stdin
+
+      - name: Build + load the test-mode daemon
+        working-directory: gibson
+        run: |
+          set -euo pipefail
+          # Overlay the test-tagged binary onto the daemon image the sanctioned
+          # install already pulled, so the daemon's baked-in assets stay in
+          # place. Discover that reference from the running StatefulSet rather
+          # than hardcoding a tag.
+          BASE=$(kubectl -n "$NS" get statefulset -l app.kubernetes.io/component=daemon \
+            -o jsonpath='{.items[0].spec.template.spec.containers[?(@.name=="gibson")].image}')
+          echo "overlaying onto base daemon image: ${BASE}"
+          mkdir -p /tmp/dctx
+          CGO_ENABLED=0 GOOS=linux GOARCH=amd64 go build \
+            -tags="setec_integration test_fixtures" \
+            -ldflags="-s -w -X github.com/zeroroot-ai/gibson/pkg/version.GitCommit=$(git rev-parse --short HEAD)" \
+            -o /tmp/dctx/gibson ./cmd/gibson
+          cat > /tmp/dctx/Dockerfile <<EOF
+          FROM ${BASE}
+          COPY gibson /usr/local/bin/gibson
+          EOF
+          docker build -t ghcr.io/zeroroot-ai/gibson:e2e-tool /tmp/dctx
+          kind load docker-image ghcr.io/zeroroot-ai/gibson:e2e-tool --name "$CLUSTER"
+
+      - name: Point the daemon at the test-mode image with authz off + fixtures on
+        working-directory: deploy
+        run: |
+          set -euo pipefail
+          # -f e2e-runner.values.yaml registers the runner's ClusterSPIFFEID and
+          # allow-lists its SVID on the daemon's gRPC listener. Without it the
+          # runner has no identity and the daemon closes its connection: the
+          # listener speaks SPIFFE mTLS and refuses plaintext outright
+          # (zero-trust-hardening Req 1.2).
+          helm upgrade "$RELEASE" helm/gibson -n "$NS" --reuse-values \
+            -f test/vanilla/e2e-runner.values.yaml \
+            --set gibson-workloads.gibson.image.repository=ghcr.io/zeroroot-ai/gibson \
+            --set gibson-workloads.gibson.image.tag=e2e-tool \
+            --set gibson-workloads.gibson.image.pullPolicy=IfNotPresent \
+            --set gibson-workloads.gibson.authz.enabled=false \
+            --set-string gibson-workloads.gibson.extraEnv.GIBSON_TEST_FIXTURES_ENABLED=true \
+            --wait --timeout 20m
+          kubectl -n "$NS" rollout status statefulset/gibson-gibson-workloads-0 --timeout=5m || \
+            kubectl -n "$NS" rollout status statefulset -l app.kubernetes.io/component=daemon --timeout=5m
+          # Confirm the daemon wired the sandboxed TOOL executor — the linchpin
+          # for this test, the way the agent launcher is for the agent one.
+          #
+          # NEVER `kubectl ... | grep -q` under `set -o pipefail`: grep -q exits
+          # on the first match, kubectl then dies of SIGPIPE, and pipefail
+          # reports the PIPELINE as failed even though the match succeeded, so
+          # the check can never pass. Read into a variable and match the string.
+          # Poll too: the line lands a few seconds after the Pod is Ready.
+          for i in $(seq 1 30); do
+            logs=$(kubectl -n "$NS" logs -l app.kubernetes.io/component=daemon -c gibson --tail=400 2>/dev/null || true)
+            case "$logs" in
+              *"sandboxed tool executor wired"*) echo "daemon wired the sandboxed tool executor"; break ;;
+            esac
+            if [ "$i" -eq 30 ]; then
+              echo "::error::daemon did not wire the sandboxed tool executor within 5m (check sandbox.enabled + sandbox_class)"
+              printf '%s\n' "$logs"
+              exit 1
+            fi
+            sleep 10
+          done
+
+      # The suite runs INSIDE the cluster, not over a port-forward.
+      #
+      # The daemon's gRPC listener speaks SPIFFE mTLS and refuses to bind a
+      # non-loopback plaintext listener at all (zero-trust-hardening Req 1.2),
+      # so a port-forward from this runner is closed before the gRPC preface —
+      # verified live, and authz.enabled=false does not change it because that
+      # disables authorization, not transport. The suite therefore needs an
+      # attested SVID, which means being a pod in the mesh.
+      - name: Build the e2e suite into an image
+        working-directory: gibson
+        run: |
+          set -euo pipefail
+          mkdir -p /tmp/ectx
+          # Compile the suite to a static binary. `go test -c` keeps it a test
+          # binary, so -test.run / -test.v still select and report normally.
+          CGO_ENABLED=0 GOOS=linux GOARCH=amd64 go test -tags=e2e -c \
+            -o /tmp/ectx/e2e.test ./tests/e2e/
+          cat > /tmp/ectx/Dockerfile <<'EOF'
+          FROM gcr.io/distroless/static-debian12:nonroot
+          COPY e2e.test /usr/local/bin/e2e.test
+          ENTRYPOINT ["/usr/local/bin/e2e.test"]
+          EOF
+          docker build -t ghcr.io/zeroroot-ai/gibson-e2e-runner:local /tmp/ectx
+          kind load docker-image ghcr.io/zeroroot-ai/gibson-e2e-runner:local --name "$CLUSTER"
+
+      - name: Run the tool-dispatch exit test in-cluster
+        run: |
+          set -euo pipefail
+          pw=$(kubectl -n "$NS" get secret gibson-redis-stack -o jsonpath='{.data.redis-password}' | base64 -d)
+          if [ -z "$pw" ]; then
+            echo "::error::gibson-redis-stack has no redis-password; the fixture helpers cannot authenticate"
+            exit 1
+          fi
+          echo "::add-mask::$pw"
+          kubectl -n "$NS" delete secret gibson-e2e-runner-env --ignore-not-found
+          kubectl -n "$NS" create secret generic gibson-e2e-runner-env \
+            --from-literal=REDIS_PASSWORD="$pw"
+
+          # In-cluster addresses: no port-forward, and the SVID is minted for
+          # this pod by the ClusterSPIFFEID keyed on its label + ServiceAccount.
+          kubectl -n "$NS" delete job gibson-e2e-tool-dispatch --ignore-not-found
+          cat <<EOF | kubectl -n "$NS" apply -f -
+          apiVersion: batch/v1
+          kind: Job
+          metadata:
+            name: gibson-e2e-tool-dispatch
+          spec:
+            backoffLimit: 0
+            template:
+              metadata:
+                labels:
+                  app.kubernetes.io/component: e2e-runner
+              spec:
+                restartPolicy: Never
+                serviceAccountName: ${RELEASE}-e2e-runner
+                containers:
+                  - name: e2e
+                    image: ghcr.io/zeroroot-ai/gibson-e2e-runner:local
+                    imagePullPolicy: IfNotPresent
+                    args: ["-test.run", "TestToolDispatch", "-test.v", "-test.timeout", "20m"]
+                    env:
+                      - name: GIBSON_TEST_FIXTURES_ENABLED
+                        value: "true"
+                      - name: DAEMON_GRPC_ADDR
+                        value: "gibson-gibson-workloads.${NS}.svc.cluster.local:50051"
+                      - name: REDIS_ADDR
+                        value: "gibson-redis-stack.${NS}.svc.cluster.local:6379"
+                      - name: REDIS_PASSWORD
+                        valueFrom:
+                          secretKeyRef:
+                            name: gibson-e2e-runner-env
+                            key: REDIS_PASSWORD
+                    volumeMounts:
+                      - name: spire-agent-socket
+                        mountPath: /run/spire/sockets
+                        readOnly: true
+                volumes:
+                  # The SPIRE Workload API arrives through the csi.spiffe.io
+                  # driver, as the daemon's own StatefulSet mounts it. A
+                  # hostPath to /run/spire/sockets does not exist on the kind
+                  # node and wedges the Pod in ContainerCreating.
+                  - name: spire-agent-socket
+                    csi:
+                      driver: csi.spiffe.io
+                      readOnly: true
+          EOF
+
+          # Stream the suite's output so a failure is readable here, then use
+          # the Job's own condition as the verdict — `kubectl wait` on Complete
+          # alone would hang the full timeout on a failed run.
+          kubectl -n "$NS" wait --for=condition=Ready pod \
+            -l job-name=gibson-e2e-tool-dispatch --timeout=3m || true
+          kubectl -n "$NS" logs -f job/gibson-e2e-tool-dispatch --tail=-1 || true
+
+          for _ in $(seq 1 120); do
+            ok=$(kubectl -n "$NS" get job gibson-e2e-tool-dispatch -o jsonpath='{.status.succeeded}' 2>/dev/null || true)
+            bad=$(kubectl -n "$NS" get job gibson-e2e-tool-dispatch -o jsonpath='{.status.failed}' 2>/dev/null || true)
+            [ "${ok:-0}" != "0" ] && [ -n "${ok:-}" ] && { echo "exit test PASSED"; exit 0; }
+            [ "${bad:-0}" != "0" ] && [ -n "${bad:-}" ] && { echo "::error::the tool-dispatch exit test FAILED"; exit 1; }
+            sleep 10
+          done
+          echo "::error::the tool-dispatch exit test did not finish"
+          exit 1
+
+      - name: Diagnostics on failure
+        if: failure()
+        run: |
+          kubectl -n "$NS" get pods || true
+          kubectl -n setec-system get pods,sandboxes,sandboxclasses || true
+          kubectl -n setec-sandboxes get pods || true
+          kubectl -n "$NS" logs -l app.kubernetes.io/component=daemon -c gibson --tail=200 || true

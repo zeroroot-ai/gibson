@@ -1,0 +1,502 @@
+name: go-ci
+
+# Thin caller for the canonical three-tier Go CI (Epic: cicd-efficiency, board #44,
+# slice S2, gibson#1128). See docs/testing/ci-lanes.md and
+# docs/adr/0060-ci-runner-split-hosted-default-ephemeral-metal.md.
+#
+# ---------------------------------------------------------------------------
+# LANE PARITY (gibson#1236 / #1233 / #1280) — read this before adding a job.
+# ---------------------------------------------------------------------------
+# The contract: **a green `pull_request` must mean the merge queue will accept
+# it.** A gate that runs only on `merge_group` is a trap — when it fails GitHub
+# evicts the PR from the queue and the PR itself still reports
+# `mergeStateStatus: CLEAN` with no failing check, so the author is left with a
+# green PR that silently refuses to merge (gibson#1233 observed this on four
+# consecutive PRs).
+#
+# So every gate here runs in BOTH lanes unless it is a DECLARED exception.
+# Any job that pins itself to one lane MUST carry a `# lane-exception: <reason>`
+# comment on the line immediately above its `if:`; `make check-ci-lane-parity`
+# (scripts/check-ci-lane-parity.sh) fails the build otherwise. That guard is
+# what keeps this class of defect from silently recurring.
+#
+#   both lanes   vet-tags        go vet across every build-tag variant the repo
+#                                declares, including `e2e` (gibson#1280 — the
+#                                34-file tests/e2e suite was compiled by nothing
+#                                at all before this).
+#   both lanes   coverage        absolute floor + 85% diff coverage. Moved onto
+#                                pull_request by gibson#1233: this is the gate
+#                                that was doing the silent evicting.
+#   both lanes   integration     testcontainers + envtest `-tags integration`
+#                                suite. Moved onto pull_request by gibson#1236.
+#   both lanes   critical-paths  pure-unit Tier-3 manifest guard, ~seconds.
+#   both lanes   queue-gate      native aggregator, the required context.
+#
+#   PR only      changes         change detection; plumbing for the PR lane,
+#                                not a gate. Cannot cause a queue surprise.
+#   PR only      fast            the cheap subset of `heavy`; running it in the
+#                                queue too would duplicate `heavy` for no signal.
+#   PR only      lint            golangci-lint is new-from-merge-base, so it
+#                                only ever has something to say about the lines
+#                                the PR itself changed — re-running it on the
+#                                rebased queue head would re-check the same
+#                                lines at ~3 GB and several minutes. Cannot
+#                                cause a queue surprise: a PR-only gate blocks
+#                                entry, it does not evict.
+#   queue only   heavy           `go test -race ./...` over two build-tag
+#                                variants + govulncheck. The one genuinely
+#                                too-expensive-per-push gate (~4 module-wide
+#                                race passes). Its absence from the PR lane is
+#                                made VISIBLE two ways rather than silent:
+#                                  1. `queue-gate` writes a PR job summary
+#                                     naming what the queue will additionally
+#                                     run.
+#                                  2. merge-queue-eviction-report.yml comments
+#                                     on the PR when ANY merge-group run fails,
+#                                     so an eviction is attributable from the
+#                                     PR alone (gibson#1233 acceptance
+#                                     criterion).
+#
+# ---------------------------------------------------------------------------
+# History
+# ---------------------------------------------------------------------------
+# Replaces the standalone lint.yml / coverage.yml / integration.yml workflows,
+# which each double-fired their full suite on both `pull_request` and
+# `push:main`.
+#
+# gibson's own `make lint` (golangci-lint built from source, pinned to
+# GOLANGCI_LINT_VERSION in the Makefile) is kept as a separate job instead of
+# delegating to the reusable's built-in golangci-lint-action step: the
+# reusable pins golangci-lint-action to a fixed version (v2.0.2) which can
+# silently diverge from the repo's Makefile-pinned version and its embedded Go
+# version can trail go.mod's toolchain target -- exactly the "v2 trap" gibson
+# was already bitten by once (sdk#355/adk#154, see lint.yml history). Passing
+# `skip-lint: true` avoids double-running golangci-lint under two different
+# pins.
+#
+# Slice S4 (gibson#1129): build.yaml's embedded `test` job (matrix over
+# setec_integration/empty build tags, `go vet` + `go test -race` on every
+# `pull_request`) was removed when build.yaml itself was deleted (image build
+# collapsed into .github/workflows/gibson-images.yml, push:main only). Its two
+# halves live here as `heavy` (race) and `vet-tags` (vet).
+# Known residual gap: neither `heavy` nor `vet-tags` provisions a Redis service
+# container or envtest binaries, so Redis-backed suites (e.g.
+# internal/engine/state) self-skip under both build-tag variants there (they
+# fail-open to a clean skip by design, see internal/engine/state/main_test.go)
+# rather than actually exercising Redis. Real Redis/envtest execution for the
+# untagged variant happens via the `coverage` job (has a Redis service +
+# envtest) and via `integration` (-tags integration, envtest); nothing
+# currently exercises Redis/envtest under -tags setec_integration
+# specifically. Flagged, not fixed.
+#
+# NOT migrated here (explicitly out of scope):
+#   - gibsoncheck.yml (custom analyzer + authz-registry drift gate) and
+#     fga-smoke-test.yml -- neither is a generic go build/test/lint/coverage
+#     suite and both are required status checks; they carry their own
+#     lane-parity markers and are covered by the same guard.
+#   - CodeQL / Trivy scanner cadence -- separate scanner-cadence slice.
+
+on:
+  # No `paths:` filter here (Epic: cicd-efficiency, board #44, slice S3,
+  # .github#202). A `paths:`-filtered `pull_request` trigger produces ZERO
+  # check runs on non-matching PRs (e.g. docs-only) -- the workflow never
+  # fires at all, so its required contexts are simply absent and merge-queue
+  # entry freezes for that PR. Every PR must get a real-or-skipped check run
+  # for every required context. Cost control for docs-only PRs is handled
+  # in-workflow instead, by the native `changes` job gating the Go-heavy jobs.
+  pull_request:
+  merge_group:
+
+concurrency:
+  group: go-ci-${{ github.event.pull_request.number || github.ref }}
+  cancel-in-progress: true
+
+permissions:
+  contents: read
+
+# Module fetch. Every first-party module (sdk, ast-checks, setec, testfixtures)
+# is public, so `go` resolves them through the public proxy and checksum
+# database like any other dependency. No GOPRIVATE, no git credential.
+env:
+  GOPROXY: https://proxy.golang.org|direct
+
+jobs:
+  # ---- change detection (pull_request only): keeps docs-only PRs cheap ----
+  # Native job, not a reusable caller, so it always reports a stable
+  # `changes` check-run name whether or not the diff touches Go. Now that the
+  # workflow-level `paths:` filter is gone, this is what keeps the Go-heavy
+  # jobs from actually building/testing on PRs that don't touch Go.
+  changes:
+    # Runs in BOTH lanes. It MUST NOT carry an `if:` restricting it to
+    # pull_request: GitHub propagates a skipped job to everything that `needs:`
+    # it, and the dependent's own `if:` never rescues it. While this job was
+    # pull_request-only, coverage / integration / openbao / vet-tags / lint all
+    # reported `skipped` in the merge queue, and `queue-gate` reported green off
+    # them. A skipped required check satisfies the ruleset, so none of these ran
+    # against a post-merge result (gibson#1368). The comment previously here
+    # claimed the opposite.
+    #
+    # The merge queue has no base/head pair, so the filter short-circuits to
+    # "everything changed" and every gate runs.
+    runs-on: ubuntu-latest
+    outputs:
+      go: ${{ steps.filter.outputs.go }}
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
+        with:
+          fetch-depth: 0
+
+      - id: filter
+        name: Detect Go-relevant changes
+        run: |
+          # merge_group has no base/head pair — treat everything as changed.
+          if [ "${{ github.event_name }}" != "pull_request" ]; then
+            echo "Non-PR lane (${{ github.event_name }}): running every gate."
+            echo "go=true" >> "$GITHUB_OUTPUT"
+            exit 0
+          fi
+          BASE="${{ github.event.pull_request.base.sha }}"
+          HEAD="${{ github.event.pull_request.head.sha }}"
+          git fetch --no-tags origin "${BASE}" "${HEAD}" 2>/dev/null || true
+          CHANGED="$(git diff --name-only "${BASE}" "${HEAD}")"
+          echo "Changed files:"
+          echo "${CHANGED}"
+          if echo "${CHANGED}" | grep -Eq '\.go$|(^|/)go\.mod$|(^|/)go\.sum$|^\.github/workflows/'; then
+            echo "go=true" >> "$GITHUB_OUTPUT"
+          else
+            echo "go=false" >> "$GITHUB_OUTPUT"
+          fi
+
+  # ---- fast tier (pull_request): reusable vet/build/test + mod-tidy drift ----
+  fast:
+    needs: changes
+    # lane-exception: the fast tier is the cheap subset of `heavy`, which runs
+    # in the queue. Running both lanes would run the same vet/build/test twice
+    # in the queue for no added signal.
+    if: github.event_name == 'pull_request' && needs.changes.outputs.go == 'true'
+    uses: zeroroot-ai/.github/.github/workflows/reusable-go-ci.yml@cf1c48774b57e552ccdd17a2a4bba3f782587dbe # main, .github recreated 2026-09-06
+    with:
+      tier: fast
+      skip-lint: true # gibson runs its own pinned golangci-lint below (make lint)
+
+  # ---- heavy tier (merge_group): reusable race + govulncheck ----
+  # Matrix mirrors the setec_integration/empty build-tag variants the daemon
+  # ships so the authoritative gate exercises both configurations.
+  heavy:
+    # lane-exception: `go test -race ./...` module-wide over two build-tag
+    # variants plus govulncheck is the one gate genuinely too expensive to run
+    # on every push (gibson#1236 accepted this explicitly). Its absence from
+    # the PR lane is surfaced by the `queue-gate` job summary, and a failure
+    # here is reported back onto the PR by `queue-eviction-report`, so the
+    # eviction is never silent.
+    if: github.event_name == 'merge_group'
+    strategy:
+      fail-fast: false
+      matrix:
+        build_tags: ["", "setec_integration"]
+    uses: zeroroot-ai/.github/.github/workflows/reusable-go-ci.yml@cf1c48774b57e552ccdd17a2a4bba3f782587dbe # main, .github recreated 2026-09-06
+    with:
+      tier: heavy
+      build-tags: ${{ matrix.build_tags }}
+
+  # ---- go vet across every declared build-tag variant (both lanes) ----
+  # Pure static analysis -- no services, no Docker, ~1 min per leg -- so it runs
+  # on pull_request as well as merge_group.
+  #
+  # The matrix is the repo's authoritative list of selected build tags and is
+  # kept in lockstep with scripts/check-build-tags-selected.sh, which fails the
+  # build if a `//go:build <tag>` file appears under a tag no lane ever selects.
+  # That is the gibson#1280 fix: before it, `e2e` (36 files), `test_fixtures`,
+  # `openbao_integration`, `openbao_smoke`, `llm_integration` and
+  # `integration_spire` were compiled by nothing at all -- they could not even
+  # fail to build, so they rotted invisibly.
+  #
+  # Legs:
+  #   ""                 default build; also the `!setec_integration` /
+  #                      `!test_fixtures` / `!embedder_tests` negative variants.
+  #   setec_integration  microVM round-trip suite (run on the KVM runner).
+  #   integration        testcontainers suite. Vetted module-wide here, which is
+  #                      strictly wider than the `integration` job's scoped
+  #                      INTEGRATION_PKG list -- compile signal for the packages
+  #                      that lane cannot yet execute.
+  #   e2e                tests/e2e/... + operators/tenant/test/e2e (gibson#1280).
+  #   test_fixtures      the fixture-enabled daemon build (Dockerfile build-arg).
+  #   openbao_*,llm_*,   the long-tail infra suites; combined into one leg
+  #   integration_spire  because they are additive and mutually compatible.
+  vet-tags:
+    needs: changes
+    if: github.event_name == 'merge_group' || (github.event_name == 'pull_request' && needs.changes.outputs.go == 'true')
+    runs-on: ubuntu-latest
+    # No `name:` override -- the check-run names stay `vet-tags (<tags>)`, which
+    # is what any existing branch-protection config already references.
+    strategy:
+      fail-fast: false
+      matrix:
+        build_tags:
+          - ""
+          - "setec_integration"
+          - "integration"
+          - "e2e"
+          - "test_fixtures"
+          - "openbao_integration,openbao_smoke,llm_integration,integration_spire"
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
+
+      - uses: actions/setup-go@924ae3a1cded613372ab5595356fb5720e22ba16 # v6
+        with:
+          go-version-file: go.mod
+          cache: true
+      - run: go vet ${{ matrix.build_tags && format('-tags={0}', matrix.build_tags) || '' }} ./...
+
+  # ---- gibson-specific lint (pull_request) ----
+  # Kept native (not delegated to the reusable's golangci-lint step) so the
+  # Makefile-pinned golangci-lint version and toolchain stay the single
+  # source of truth. Includes the deadcode gate and the extra pagination /
+  # allowed-identities / FGA-header script gates make lint already runs.
+  lint:
+    # lane-exception: `make lint` is new-from-merge-base, so in the queue it
+    # would re-analyse exactly the lines the PR lane already cleared, at ~3 GB
+    # and several minutes per run. A PR-only gate blocks queue ENTRY rather
+    # than evicting mid-queue, so it cannot produce the gibson#1233 silent
+    # eviction.
+    if: github.event_name == 'pull_request'
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
+        with:
+          fetch-depth: 0 # merge-base needs full history
+
+      - uses: actions/setup-go@924ae3a1cded613372ab5595356fb5720e22ba16 # v6
+        with:
+          go-version-file: go.mod
+
+      - uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # v4
+        with:
+          node-version: '22'
+
+      - name: Lint (blocking, new-from-merge-base)
+        run: make lint LINT_BASE=origin/${{ github.base_ref || 'main' }}
+
+      - name: Dead-code gate (blocking, baselined)
+        run: make lint-deadcode
+
+  # ---- gibson-specific coverage gates (both lanes) ----
+  # gibson#1233: this job used to be merge_group-only. When `check-diff-coverage`
+  # failed, GitHub evicted the PR from the queue and the PR reported
+  # `mergeStateStatus: CLEAN` / `failing checks: (none)` -- the only evidence
+  # was a run on a transient `gh-readonly-queue/...` branch that is not linked
+  # from the PR. It now runs on pull_request too, so the uncovered lines show up
+  # as a normal red check before a queue slot is ever spent.
+  coverage:
+    needs: changes
+    if: github.event_name == 'merge_group' || (github.event_name == 'pull_request' && needs.changes.outputs.go == 'true')
+    runs-on: ubuntu-latest
+    name: coverage gates (floor + diff)
+    services:
+      redis:
+        image: redis/redis-stack-server:7.4.0-v1
+        ports:
+          - 6379:6379
+        options: >-
+          --health-cmd "redis-cli ping"
+          --health-interval 5s
+          --health-timeout 3s
+          --health-retries 5
+    env:
+      # This is the one lane that guarantees a Redis Stack (the service above),
+      # so it is the lane that must not be allowed to silently lose it.
+      # requireTenantStoreRedis (internal/engine/state) turns an unreachable
+      # Redis into a FAILURE when this is set, instead of a skip. gibson#1297:
+      # the TenantScopedStore isolation tests spent their whole life skipped and
+      # reported green, so a probe that can only skip is not a gate.
+      GIBSON_TEST_REQUIRE_REDIS: "1"
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
+        with:
+          fetch-depth: 0
+
+      - uses: actions/setup-go@924ae3a1cded613372ab5595356fb5720e22ba16 # v6
+        with:
+          go-version-file: go.mod
+
+      - name: Fetch base branch
+        run: git fetch --no-tags origin "${{ github.base_ref || 'main' }}"
+
+      - name: Set up envtest binaries
+        run: |
+          go install sigs.k8s.io/controller-runtime/tools/setup-envtest@latest
+          ENVTEST_K8S_VERSION="$(go list -m -f '{{.Version}}' k8s.io/api | sed -E 's/^v0\.([0-9]+)\..*/1.\1/')"
+          echo "Using envtest k8s version ${ENVTEST_K8S_VERSION}"
+          ASSETS="$(setup-envtest use "${ENVTEST_K8S_VERSION}" -p path)"
+          echo "KUBEBUILDER_ASSETS=${ASSETS}" >> "$GITHUB_ENV"
+
+      - name: Generate coverage profile
+        run: make coverage-profile
+
+      - name: Absolute coverage floor (ratchet toward 80%)
+        run: make check-coverage-floor
+
+      # `diff-coverage` resolves merge-base(base, HEAD) itself, so this is
+      # correct on both lanes: on pull_request HEAD is the PR merge commit and
+      # the merge-base is the base tip; on merge_group HEAD is the queue head.
+      - name: Diff coverage (>=85% of changed lines)
+        run: make check-diff-coverage DIFF_COVERAGE_BASE=origin/${{ github.base_ref || 'main' }}
+
+  # ---- critical-path manifest guard (both lanes) ----
+  # Pure-unit, no Docker, seconds. Runs unconditionally in both lanes so the
+  # integration suite below can never silently lose a named Tier-3 path.
+  critical-paths:
+    runs-on: ubuntu-latest
+    name: critical-path manifest guard
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
+
+      - uses: actions/setup-go@924ae3a1cded613372ab5595356fb5720e22ba16 # v6
+        with:
+          go-version-file: go.mod
+      - name: Guard named critical-path tests
+        run: make check-critical-paths
+      - name: Guard the verb/noun extension contract
+        # gibson#1399: this guard spent its whole life failing (it encoded a
+        # dispatch model that was never built) and ran only in `make check`,
+        # so local aggregates were red and CI never noticed. Now that it can
+        # pass, it runs where it can also fail visibly.
+        run: make check-noun-contract
+      - name: Guard CI lane parity + build-tag selection + queue-gate coverage
+        run: |
+          make check-ci-lane-parity
+          make check-build-tags
+          make check-queue-gate
+      - name: Guard gofmt cleanliness
+        # gibson#1415: no lane ever CHECKED formatting -- `make fmt` rewrites
+        # instead of failing, and .golangci.yml enables no formatter -- so
+        # gofmt drift accumulated on main (2 files when filed, 6 when fixed).
+        run: make check-fmt
+
+  # ---- container-backed integration suite (both lanes) ----
+  # gibson#1236: moved onto pull_request. It was the other merge_group-only
+  # gate, and a `//go:build integration` suite is invisible to a local
+  # `go test ./...` as well, so a failure here used to be undiscoverable until
+  # the queue slot was already spent.
+  integration:
+    needs: changes
+    if: github.event_name == 'merge_group' || (github.event_name == 'pull_request' && needs.changes.outputs.go == 'true')
+    runs-on: ubuntu-latest
+    name: integration suite (testcontainers + envtest)
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
+
+      - uses: actions/setup-go@924ae3a1cded613372ab5595356fb5720e22ba16 # v6
+        with:
+          go-version-file: go.mod
+          cache: true
+
+      - name: Set up envtest binaries
+        run: |
+          go install sigs.k8s.io/controller-runtime/tools/setup-envtest@latest
+          ENVTEST_K8S_VERSION="$(go list -m -f '{{.Version}}' k8s.io/api | sed -E 's/^v0\.([0-9]+)\..*/1.\1/')"
+          echo "Using envtest k8s version ${ENVTEST_K8S_VERSION}"
+          ASSETS="$(setup-envtest use "${ENVTEST_K8S_VERSION}" -p path)"
+          echo "KUBEBUILDER_ASSETS=${ASSETS}" >> "$GITHUB_ENV"
+
+      # Wrapped in the org flake-quarantine action (retry-3x + machine-
+      # readable flake event, uploaded as the flake-log-integration
+      # artifact for the weekly org flake report — .github#241). A pass on
+      # attempt >1 is recorded as a flake instead of silently green; a fail
+      # on all attempts still fails the job. Suspected flakes get tracked
+      # issues (e.g. gibson#1392) instead of blind reruns.
+      - name: Run integration lane (flake-quarantined)
+        uses: zeroroot-ai/.github/actions/flake-quarantine@cf1c48774b57e552ccdd17a2a4bba3f782587dbe # main, .github recreated 2026-09-06
+        with:
+          cmd: make test-integration
+
+  # ---- OpenBao secrets-backend suites (both lanes) ----
+  # gibson#1293: the openbao_smoke + openbao_integration suites compiled under
+  # `vet-tags` but ran nowhere. They are hermetic — each test stands up its own
+  # `openbao/openbao:2.5.3` container via testcontainers-go and fails-skip when
+  # Docker is unavailable — so unlike the `e2e`/`llm_integration`/`integration_spire`
+  # tags they need no live external infra, cluster, secret or credential. That
+  # makes them the one subset of gibson#1293 that runs safely in both lanes on a
+  # stock ubuntu-latest (Docker present). ~45s. Runs `make test-openbao`.
+  openbao:
+    needs: changes
+    if: github.event_name == 'merge_group' || (github.event_name == 'pull_request' && needs.changes.outputs.go == 'true')
+    runs-on: ubuntu-latest
+    name: openbao suites (testcontainers)
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
+
+      - uses: actions/setup-go@924ae3a1cded613372ab5595356fb5720e22ba16 # v6
+        with:
+          go-version-file: go.mod
+          cache: true
+
+      - name: Run OpenBao suites
+        run: make test-openbao
+
+  # ---- native aggregator: THE required context for the whole heavy suite ----
+  # Epic: cicd-efficiency (board #44), slice S3 (.github#202). A caller job
+  # that invokes a reusable workflow reports as `<caller-job>` when skipped
+  # but `<caller-job> / <reusable-job>` when it runs -- no single context
+  # string matches both, so `heavy` itself can't be a merge-queue required
+  # context. This job is native (no reusable call) so its check-run name is
+  # `queue-gate` in both lanes.
+  queue-gate:
+    name: queue-gate
+    if: always()
+    # EVERY gate job in this file. `queue-gate` is the only context from this
+    # workflow that the ruleset requires, so any job missing from this list is
+    # a job that runs, can report red, and cannot block a merge.
+    #
+    # It shipped naming five of nine. `fast`, `lint` and `critical-paths` were
+    # outside it and are in no ruleset either -- so `critical-paths`, the job
+    # that runs `make check-ci-lane-parity` and `make check-build-tags`, could
+    # not enforce anything. The guards guarding this file's own invariants were
+    # themselves unenforced.
+    #
+    # `check-queue-gate-coverage.sh` now fails the build if this list omits a
+    # job, so it cannot silently fall behind again. Add a gate -> add it here,
+    # same PR.
+    needs:
+      - fast
+      - heavy
+      - vet-tags
+      - lint
+      - coverage
+      - critical-paths
+      - integration
+      - openbao
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
+
+      # `${{ toJSON(needs) }}` rather than a hand-written list of
+      # `needs.<job>.result` expressions: restating the job names is what let
+      # the old inline version evaluate a different set from the one it
+      # depended on. Reading the context wholesale makes that impossible.
+      # See scripts/queue-gate-eval.sh for the semantics and its --selftest.
+      - name: Evaluate every gate result
+        env:
+          NEEDS_JSON: ${{ toJSON(needs) }}
+        run: bash scripts/queue-gate-eval.sh --needs-json "$NEEDS_JSON"
+
+      # gibson#1236: make the residual PR/queue asymmetry visible instead of
+      # silent. This is the only place a reader of the PR learns that the queue
+      # will run something the PR did not.
+      - name: Declare what the merge queue will additionally run
+        if: always() && github.event_name == 'pull_request'
+        run: |
+          {
+            echo "### Gates this PR lane did NOT run"
+            echo
+            echo "Everything else in \`go-ci\` runs in both lanes (gibson#1236)."
+            echo "The merge queue will additionally run:"
+            echo
+            echo "| Gate | What it is | Why it is queue-only |"
+            echo "|---|---|---|"
+            echo "| \`heavy\` | \`go test -race ./...\` over build tags \`\"\"\` and \`setec_integration\`, plus \`govulncheck\` | ~4 module-wide race passes; too expensive per push |"
+            echo
+            echo "Run it locally before enqueueing with \`make test-merge-queue\`."
+            echo "If the merge queue evicts this PR, \`merge-queue-eviction-report\` will"
+            echo "comment here naming the workflow and job that failed."
+          } >> "$GITHUB_STEP_SUMMARY"

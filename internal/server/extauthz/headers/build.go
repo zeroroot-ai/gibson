@@ -1,0 +1,112 @@
+// SPDX-License-Identifier: Elastic-2.0
+// Copyright 2026 Zero Root AI
+
+// Package headers carries the Identity type and the helper that emits
+// the canonical x-gibson-identity-* header set ext-authz adds to
+// every authenticated upstream request.
+//
+// Channel security between Envoy and the daemon is provided by
+// SPIFFE-pinned mTLS — the daemon's listener accepts only Envoy's
+// specific peer SVID, so plain identity headers are trustworthy by
+// virtue of the channel. HMAC signing has been removed (Req 8.2,
+// zero-trust-hardening spec).
+package headers
+
+import (
+	"net/http"
+	"strconv"
+	"time"
+)
+
+// Identity carries the verified claims emitted by ext-authz. The
+// Tenant field is empty for non-OIDC-IdP issuers (system services that
+// don't have a tenant scope by themselves).
+type Identity struct {
+	Subject        string
+	Issuer         string // "oidc" (previously "zitadel" before the wire-format rename)
+	CredentialType string // "oidc-user" | "client-credentials"
+	Tenant         string
+	// IssuedAt is the ext-authz allow-time stamp emitted as
+	// HeaderIssuedAt. It is the Envoy→daemon hop's anti-replay/freshness
+	// value (the SDK's auth.IdentityFromMetadata rejects requests whose
+	// issued-at deviates from now by more than its skew). It is NOT the
+	// JWT's iat — do not conflate the two.
+	IssuedAt time.Time
+	// TokenIssuedAt is the access token's `iat` claim (zero when the
+	// token carries no iat). It is consumed ext-authz-locally — folded
+	// into the per-request FGA Check context for the instant-revocation
+	// condition (token_iat > revoked_at; gibson#627). It is deliberately
+	// NOT emitted downstream: the revocation decision is made here, and
+	// emitting the real (older) iat as HeaderIssuedAt would trip the
+	// daemon-side freshness check above.
+	TokenIssuedAt time.Time
+	// ComponentScope is the component this identity IS, in the canonical
+	// "component:<name>" form the daemon mints at Capability-Grant
+	// registration time (ADR-0045). It is populated ONLY from the
+	// signature-verified component_scope claim on the caller's own
+	// Capability-Grant JWT, and is empty for every other credential type.
+	//
+	// It is never read from a request header. A component that could
+	// assert its own scope could assert any component's scope, and the
+	// component_from_identity object deriver (fga.resolveObject) turns
+	// this value into the FGA object the request is authorized against —
+	// so the value must stay as trustworthy as the signature that carried
+	// it.
+	//
+	// Like TokenIssuedAt, this is consumed ext-authz-locally: it feeds the
+	// object derivation and is deliberately NOT emitted downstream. The
+	// daemon has no x-gibson-identity-* header for it, and adding one is a
+	// wire-format change that belongs with the SDK, not here.
+	ComponentScope string
+}
+
+// Header names emitted on every allowed request. They mirror the
+// SDK's auth package constants; the SDK and ext-authz are pinned via
+// SDK go.mod so a name change in the SDK propagates here on bump.
+const (
+	HeaderSubject        = "x-gibson-identity-subject"
+	HeaderIssuer         = "x-gibson-identity-issuer"
+	HeaderCredentialType = "x-gibson-identity-credential-type"
+	HeaderTenant         = "x-gibson-identity-tenant"
+	HeaderIssuedAt       = "x-gibson-identity-issued-at"
+)
+
+// Credential type values emitted in the HeaderCredentialType header.
+// Mirror the SDK's auth.CredentialOIDCUser / auth.CredentialClientCredentials
+// constants — kept as locally-defined strings to avoid widening the SDK
+// import surface across the ext-authz package boundary.
+const (
+	CredentialOIDCUser          = "oidc-user"
+	CredentialClientCredentials = "client-credentials"
+	// CredentialCapabilityGrant is a component (agent/tool/plugin) that
+	// authenticated with its self-signed Capability-Grant JWT (ADR-0045).
+	// Mirrors the SDK's auth.CredentialCapabilityGrant.
+	CredentialCapabilityGrant = "capability-grant"
+)
+
+// Issuer values emitted in the HeaderIssuer header. Mirror the SDK's
+// auth.IssuerOIDC / auth.IssuerCapabilityGrant constants — the SDK's
+// `auth/headers.go` accepts only this closed enum and rejects anything
+// else with `auth: identity header invalid: unknown issuer`. The
+// security-hardening R13 issuer-allowlist check belongs in ext-authz
+// (verifying the JWT iss is on the allowlist BEFORE allowing the
+// request), but the forwarded header value MUST be the canonical
+// wire constant so the daemon SDK accepts it. See ext-authz#26.
+const (
+	IssuerOIDC            = "oidc"
+	IssuerCapabilityGrant = "capability-grant"
+)
+
+// Emit returns the canonical x-gibson-identity-* header set for id.
+// Used by the Envoy ext_authz Check handler to attach identity to the
+// upstream request. Headers are NOT signed — channel trust is provided
+// by SPIFFE mTLS between Envoy and the daemon.
+func Emit(id Identity) http.Header {
+	h := http.Header{}
+	h.Set(HeaderSubject, id.Subject)
+	h.Set(HeaderIssuer, id.Issuer)
+	h.Set(HeaderCredentialType, id.CredentialType)
+	h.Set(HeaderTenant, id.Tenant)
+	h.Set(HeaderIssuedAt, strconv.FormatInt(id.IssuedAt.Unix(), 10))
+	return h
+}

@@ -1,0 +1,20 @@
+# Zerocool agent — the flagship platform agent, launched-on-dispatch into an
+# ephemeral setec sandbox (ADR-0015/0016). Its trust comes from this signed
+# manifest (dispatchMode: sandboxed), not from the registry, because it is not a
+# registered polling worker. Model is resolved newest at dispatch, so no model
+# is pinned; budget is the tenant default, so no budgetLimit is set.
+id: zerocool
+kind: agent
+displayName: Zerocool
+description: >-
+  The flagship agent — plans and runs a security mission end to end in an
+  ephemeral sandbox, calling tools and connectors back through the daemon.
+egressAllow:
+  - "*"
+spec:
+  runtime: setec
+  image: ghcr.io/zeroroot-ai/zerocool-agent@sha256:b2c9b32f0d755b2d05ac753674903c86c86925fc6dcea4891fcd1a1eedd77eff
+  svid: spiffe://zeroroot.ai/agent/zerocool
+  dispatchMode: sandboxed
+  # The sandbox launch command: the image ENTRYPOINT is not consulted by setec.
+  command: "node /app/dist/serve-agent.js"

@@ -1,0 +1,216 @@
+syntax = "proto3";
+
+// Package gibson.tenant.v1 — ConnectorAuthService: the dashboard-facing
+// surface for a connector's OAuth grant lifecycle (ADR-0064).
+//
+// The human authorization round trip runs in the operator's browser against
+// the customer's own vendor instance; what reaches this service is the
+// completed grant. The refresh token crosses this API exactly once, on
+// CompleteConnectorAuthorization, and is never returned by any RPC.
+//
+// Authorization: every RPC carries a (gibson.auth.v1.authz) annotation.
+package gibson.tenant.v1;
+
+option go_package = "github.com/zeroroot-ai/gibson/internal/server/daemon/api/gibson/tenant/v1;tenantv1";
+
+import "gibson/auth/v1/options.proto";
+import "google/protobuf/timestamp.proto";
+
+// ConnectorAuthService manages the OAuth grant behind a connector.
+//
+// A connector is a service account with an audit trail in front of it: the
+// grant records which human authorized it, and that human is surfaced next to
+// the connector in the dashboard. The platform's refresher mints the
+// short-lived access token the connector presents; the connector can never
+// resolve the grant itself.
+service ConnectorAuthService {
+  // GetConnectorAuthStatus reports whether a connector has a usable grant,
+  // who authorized it, and the state of its published access token. It never
+  // returns credential material.
+  rpc GetConnectorAuthStatus(GetConnectorAuthStatusRequest) returns (GetConnectorAuthStatusResponse) {
+    option (gibson.auth.v1.authz) = {
+      relation: "member"
+      object_type: "tenant"
+      object_deriver: "tenant_from_identity"
+      allowed_identities: 1  // USER
+    };
+  }
+  // StartConnectorAuthorization begins an OAuth authorization for a connector
+  // against the customer's own vendor instance. The daemon runs RFC 8414
+  // discovery and RFC 7591 dynamic client registration, mints a PKCE pair and
+  // a random state, holds them in a short-TTL server-side store keyed by
+  // state, and returns the authorize URL the operator opens. The browser round
+  // trip returns to the daemon callback, so no human pastes a URL and no local
+  // listener runs by hand (ADR-0014).
+  rpc StartConnectorAuthorization(StartConnectorAuthorizationRequest) returns (StartConnectorAuthorizationResponse) {
+    option (gibson.auth.v1.authz) = {
+      relation: "admin"
+      object_type: "tenant"
+      object_deriver: "tenant_from_identity"
+      allowed_identities: 1  // USER
+    };
+  }
+  // CompleteConnectorAuthorization finishes the authorization the daemon
+  // started: it takes the authorization code and the state that binds it, does
+  // the code-to-token exchange daemon-side, stores the grant, and immediately
+  // exercises the refresh_token grant against the vendor to prove it works and
+  // publish the first access token. A grant that cannot refresh is not stored:
+  // the operator learns at authorization time, not two hours later. The
+  // refresh token never leaves the daemon.
+  //
+  // Re-authorizing replaces the previous grant in place. The daemon callback
+  // runs the same path, so completing through the browser and completing
+  // through this RPC are one behaviour.
+  rpc CompleteConnectorAuthorization(CompleteConnectorAuthorizationRequest) returns (CompleteConnectorAuthorizationResponse) {
+    option (gibson.auth.v1.authz) = {
+      relation: "admin"
+      object_type: "tenant"
+      object_deriver: "tenant_from_identity"
+      allowed_identities: 1  // USER
+    };
+  }
+  // RevokeConnectorGrant revokes the connector's grant: best-effort
+  // revocation at the vendor, then deletion of the grant and the published
+  // access token. Takes effect for every agent using the connector, because
+  // the platform holds the only credential. Idempotent. A static credential
+  // (SetConnectorSecret) is removed the same way, with no vendor call.
+  rpc RevokeConnectorGrant(RevokeConnectorGrantRequest) returns (RevokeConnectorGrantResponse) {
+    option (gibson.auth.v1.authz) = {
+      relation: "admin"
+      object_type: "tenant"
+      object_deriver: "tenant_from_identity"
+      allowed_identities: 1  // USER
+    };
+  }
+  // SetConnectorSecret stores a customer-supplied static credential (for
+  // example a personal access token) for an `auth: secret` connector
+  // (ADR-0015). The daemon writes it to the tenant's configured secret store
+  // (the hosted OpenBao namespace or the customer's BYO Vault) as the
+  // connector's access secret, and records a static grant that names the
+  // human who supplied it. The materializer then publishes it to the
+  // ToolHive proxy exactly as it does an OAuth access token. The credential
+  // crosses the API once, inbound; no RPC ever returns it. Calling it again
+  // replaces the credential in place.
+  rpc SetConnectorSecret(SetConnectorSecretRequest) returns (SetConnectorSecretResponse) {
+    option (gibson.auth.v1.authz) = {
+      relation: "admin"
+      object_type: "tenant"
+      object_deriver: "tenant_from_identity"
+      allowed_identities: 1  // USER
+    };
+  }
+}
+
+// ---------------------------------------------------------------------------
+// ConnectorAuthService request/response messages
+// ---------------------------------------------------------------------------
+
+// ConnectorAuthState is the coarse authorization state of a connector.
+enum ConnectorAuthState {
+  CONNECTOR_AUTH_STATE_UNSPECIFIED = 0;
+  // No grant is stored. The connector cannot authenticate to its vendor.
+  CONNECTOR_AUTH_STATE_UNAUTHORIZED = 1;
+  // A grant is stored and the last refresh (if any) succeeded.
+  CONNECTOR_AUTH_STATE_AUTHORIZED = 2;
+  // A grant is stored but the most recent refresh failed; the vendor error
+  // is in last_refresh_error. The connector may hold a still-valid access
+  // token, but it will expire without intervention.
+  CONNECTOR_AUTH_STATE_REFRESH_FAILING = 3;
+}
+
+message GetConnectorAuthStatusRequest {
+  // connector is the bare component name, e.g. "connector-gitlab".
+  string connector = 1;
+}
+
+message StartConnectorAuthorizationRequest {
+  // connector is the bare component name the grant belongs to, e.g.
+  // "connector-gitlab".
+  string connector = 1;
+  // instance_url is the base URL of the customer's own vendor instance, e.g.
+  // "https://gitlab.com" or "https://gitlab.example.com". The daemon derives
+  // the OAuth authorization-server metadata from it (RFC 8414), and also tries
+  // the RFC 9728 protected-resource document off it.
+  string instance_url = 2;
+}
+
+message StartConnectorAuthorizationResponse {
+  // authorize_url is the vendor authorization URL the operator opens in a
+  // browser. It already carries response_type, client_id, redirect_uri, scope,
+  // state, code_challenge and code_challenge_method=S256.
+  string authorize_url = 1;
+  // state binds this authorization to its callback. The dashboard passes it
+  // back to CompleteConnectorAuthorization when it drives the flow itself; the
+  // daemon callback reads it from the redirect. It is not a secret, but it is
+  // single-use and expires with the pending record.
+  string state = 2;
+}
+
+message GetConnectorAuthStatusResponse {
+  ConnectorAuthState state = 1;
+  // authorized_by is the FGA user reference of the human who ran the
+  // authorization, e.g. "user:312909193121301". Empty when unauthorized.
+  string authorized_by = 2;
+  google.protobuf.Timestamp authorized_at = 3;
+  // scope is what the authorizing human consented to at the vendor.
+  string scope = 4;
+  // access_token_expires_at is the expiry of the currently published access
+  // token. Unset when no access token is published.
+  google.protobuf.Timestamp access_token_expires_at = 5;
+  // last_refresh_error is the most recent refresh failure, carrying the
+  // vendor's own error code — the only thing that distinguishes a revoked
+  // grant from a misconfigured client. Empty when the last refresh
+  // succeeded. In-memory: a daemon restart clears it until the next
+  // refresher pass repopulates it.
+  string last_refresh_error = 6;
+  google.protobuf.Timestamp last_refresh_at = 7;
+}
+
+message CompleteConnectorAuthorizationRequest {
+  // connector is the bare component name the grant belongs to. It is optional
+  // and cross-checked against the connector recorded when the authorization
+  // was started; the state alone identifies the pending authorization.
+  string connector = 1;
+  // code is the authorization code the vendor returned to the daemon callback.
+  // The daemon exchanges it for the grant, so the refresh token is minted and
+  // kept daemon-side and never transits this API.
+  string code = 2;
+  // state is the value StartConnectorAuthorization returned. It binds the code
+  // to that authorization (the CSRF binding) and selects the stored PKCE
+  // verifier, token endpoint and client id. Single-use and short-lived.
+  string state = 3;
+}
+
+message CompleteConnectorAuthorizationResponse {
+  // status is the connector's state after the proving refresh.
+  GetConnectorAuthStatusResponse status = 1;
+}
+
+message RevokeConnectorGrantRequest {
+  string connector = 1;
+}
+
+message RevokeConnectorGrantResponse {
+  // had_grant reports whether a grant existed. Revoking an unauthorized
+  // connector is a successful no-op.
+  bool had_grant = 1;
+  // vendor_revoked reports whether the vendor acknowledged the revocation.
+  // False when the grant recorded no revocation endpoint or the vendor call
+  // failed; the local deletion happens regardless, so the platform mints no
+  // further tokens either way.
+  bool vendor_revoked = 2;
+}
+
+message SetConnectorSecretRequest {
+  // connector is the bare connector id the credential belongs to, e.g.
+  // "github".
+  string connector = 1;
+  // secret is the static credential the connector presents to the vendor,
+  // verbatim. The proxy sends it as "Authorization: Bearer <secret>". TLS in
+  // transit; never logged; never returned by any RPC.
+  bytes secret = 2;
+}
+
+message SetConnectorSecretResponse {
+  GetConnectorAuthStatusResponse status = 1;
+}

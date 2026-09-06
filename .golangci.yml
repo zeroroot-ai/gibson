@@ -1,0 +1,163 @@
+# Shared golangci-lint v2 baseline — adopted from
+# zeroroot-ai/.github/templates/golangci-base.yml (slice 2.2, gibson#172).
+# Linter set lives in the base; per-repo section below is the only place
+# to add repo-specific exclusions.
+
+version: "2"
+
+linters:
+  default: none
+  enable:
+    # --- existing 6 (previously enabled) ---
+    - staticcheck
+    - govet
+    - errcheck
+    - ineffassign
+    - unused
+    - exhaustive
+
+    # --- security ---
+    - gosec
+
+    # --- error handling ---
+    - errorlint
+    - wrapcheck
+    - nilerr
+
+    # --- context propagation ---
+    - contextcheck
+    - fatcontext
+
+    # --- boundary enforcement ---
+    # depguard ENABLED (gibson#778): encodes the open-core import boundaries.
+    # Rules in `settings.depguard` below. This mirrors the gibsoncheck
+    # `forbiddenimports` analyzer (tools/gibsoncheck/checks/forbidden_imports.go)
+    # and the ADR-0056 / gibson#906 reconciliation: the daemon's import chain
+    # must not pull in OpenFGA or Zitadel directly (those decisions belong to
+    # ext-authz / Envoy, unified-identity-and-authorization R8.1), while the
+    # folded-in ext-authz packages ARE the legitimate FGA/OIDC consumers and
+    # are allowlisted by path.
+    - depguard
+
+    # --- style + idiom ---
+    - gocritic
+    - revive
+    - gocyclo
+    - prealloc
+    - dupl
+    - copyloopvar
+    - gocheckcompilerdirectives
+    - intrange
+    - mirror
+    - perfsprint
+    - sloglint
+    - testifylint
+    - thelper
+    - usestdlibvars
+    - whitespace
+
+  settings:
+    # depguard — open-core import boundaries (gibson#778, ADR-0056).
+    # The `daemon-no-fga-zitadel` rule keeps OpenFGA / Zitadel out of the
+    # daemon's import chain. It applies to $all files EXCEPT the paths that
+    # are the legitimate upstream consumers (mirrors the gibsoncheck
+    # `forbiddenimports` allowlist):
+    #   - internal/platform/authz, internal/infra/authz — the FGAClient wrapper
+    #     surface (CG-JWT / CanInvokeTool path).
+    #   - internal/platform/capabilitygrant — capability-grant JWT minting.
+    #   - internal/server/extauthz/** — the folded-in ext-authz server; it IS
+    #     ext-authz, so it legitimately calls OpenFGA (ADR-0056, gibson#913).
+    #   - cmd/** — standalone binaries (incl. cmd/ext-authz, cmd/gen-fga-model-json)
+    #     may need OIDC/FGA.
+    #   - operators/** — the operators are a distinct binary chain, not the daemon.
+    #   - tools/gibsoncheck/** — the build-time analyzer binary, not runtime.
+    #     Its `fgalistusers` guard PARSES model.fga with the OpenFGA
+    #     transformer to check call sites against the model; it never dials
+    #     FGA. Same use as the already-allowlisted cmd/gen-fga-model-json,
+    #     which reads the same file with the same library. The rule's subject
+    #     is the daemon's runtime import chain, and gibsoncheck is not linked
+    #     into any shipped binary. Scoped to this one tool rather than all of
+    #     tools/, so a future tool does not inherit the exemption silently.
+    # Test files are exempt (fakes / fixtures may stub these libs).
+    depguard:
+      rules:
+        daemon-no-fga-zitadel:
+          files:
+            - '$all'
+            - '!**/internal/platform/authz/**'
+            - '!**/internal/infra/authz/**'
+            - '!**/internal/platform/capabilitygrant/**'
+            - '!**/internal/server/extauthz/**'
+            - '!**/cmd/**'
+            - '!**/operators/**'
+            - '!**/tools/gibsoncheck/**'
+            - '!**/*_test.go'
+          deny:
+            - pkg: github.com/openfga
+              desc: "FGA decisions belong to ext-authz; the daemon must not call OpenFGA directly (ADR-0056, unified-identity-and-authorization R8.1). Folded ext-authz packages are allowlisted by path above."
+            - pkg: github.com/zitadel
+              desc: "JWT validation belongs to Envoy; the daemon must not validate Zitadel tokens (ADR-0056, unified-identity-and-authorization R8.1)."
+    # wrapcheck — gRPC status errors are a deliberate exception, not an
+    # oversight (gibson#1227 CI fixup). `status.Error(codes.X, "...")` /
+    # `status.Errorf(...)` from google.golang.org/grpc/status construct the
+    # error FROM the gRPC status code the handler wants the client to see.
+    # Wrapping it with %w (wrapcheck's default fix) would nest it behind a
+    # generic wrapper, so `status.FromError` on the client side stops
+    # extracting the original code and the caller gets codes.Unknown instead
+    # of e.g. codes.PermissionDenied/InvalidArgument — silently breaking
+    # every caller that branches on the code. Every RPC handler across
+    # internal/server/daemon/api/ and internal/server/admin/ already returns
+    # status.Error(...) unwrapped this way; it was never flagged because
+    # `make lint` is new-from-merge-base-scoped and none of that code was
+    # "new" until now. Ignoring the package here formalizes the repo's
+    # existing, deliberate convention rather than excusing net-new code —
+    # every other external package is still checked.
+    wrapcheck:
+      ignore-package-globs:
+        - google.golang.org/grpc/status
+    staticcheck:
+      checks: ["all"]
+    gosec:
+      severity: medium
+    exhaustive:
+      default-signifies-exhaustive: false
+      check: [switch]
+    gocyclo:
+      min-complexity: 20
+    dupl:
+      threshold: 150
+    gocritic:
+      enabled-tags: [diagnostic, performance, style]
+      disabled-checks: [hugeParam, rangeValCopy] # noise-heavy on small structs
+
+  exclusions:
+    # Generated code is exempt from every linter — we don't author it.
+    paths:
+      - ".*\\.pb\\.go$"
+      - ".*_grpc\\.pb\\.go$"
+      - "zz_generated.*\\.go$"
+      - "api/gen/.*"
+    # Per-rule exclusions go here. New exclusions require a tracked issue per ADR-0013.
+    rules: []
+
+issues:
+  max-issues-per-linter: 0
+  max-same-issues: 0
+
+# Notes:
+# - This config is run BLOCKING and diff-scoped via `make lint`
+#   (`golangci-lint run --new-from-merge-base=$(LINT_BASE)`), so the
+#   pre-existing `unused` / style backlog is baselined (burndown tracked in
+#   gibson#918) while any NEW violation of any enabled linter — including the
+#   `unused` dead-code gate and the `depguard` boundary rules above — fails a
+#   PR. No `|| true` swallow. See QUALITY-BARS §3 / gibson#778.
+# - Whole-program dead-code reachability (`golang.org/x/tools/cmd/deadcode`)
+#   is a SEPARATE blocking gate (`make lint-deadcode`), baselined against
+#   `.deadcode-baseline` because that tool has no native diff-scoping.
+#
+# allowlist:
+# Per-repo opt-outs go here with a TODO referencing a follow-up issue.
+# Format:
+#   linters:
+#     disable:
+#       - <linter-name>  # TODO: zeroroot-ai/gibson#<issue>

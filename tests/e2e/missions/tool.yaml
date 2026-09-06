@@ -1,0 +1,26 @@
+# E2E mission fixture — single TOOL node.
+#
+# Spec: mission-verb-noun-registry Requirement 3 + Task 19.
+#
+# The TOOL executor (internal/orchestrator/nodes/tool) validates
+# the tool_config + tool_name then delegates to the Actor's
+# tool dispatch path which routes through the harness's tool
+# worker queue (Redis BRPOP per tech.md decision-log entry 7).
+
+name: e2e-tool
+description: TOOL noun e2e fixture.
+version: "1.0.0"
+target_ref: ""
+
+nodes:
+  scan:
+    id: scan
+    type: NODE_TYPE_TOOL
+    tool_config:
+      tool_name: nmap
+      input:
+        target: "127.0.0.1"
+        ports: "22,80,443"
+
+entry_points: ["scan"]
+exit_points: ["scan"]

@@ -1,0 +1,98 @@
+// SPDX-License-Identifier: Elastic-2.0
+// Copyright 2026 Zero Root AI
+
+package brain
+
+import "github.com/mlange-42/ark/ecs"
+
+// Belief is the attack-path belief over a target (ADR-0005): the one field with
+// three uses (juicy-target score, prioritization, attention scope). It is derived
+// from evidence by a BeliefProvider and recorded on the entity. Model pins the
+// model version that produced it (replay reproduces; missions pin their version).
+type Belief struct {
+	Juicy       float64
+	Exploitable float64
+	Reachable   float64
+	Model       string
+}
+
+// BeliefProvider scores a host's attack-path beliefs from its evidence.
+//
+// The real implementation is a **pgmpy sidecar** (ADR-0005): a probabilistic
+// graphical model doing exact, read-only, deterministic inference, trained
+// offline and versioned. This interface is the seam; placeholderBelief is a
+// deterministic Go stand-in so attention (#751) and the Decider can consume
+// belief now — it is replaced by the pgmpy-backed provider in a later slice.
+type BeliefProvider interface {
+	Score(h Host) Belief
+	// Version is the model artifact the provider currently scores against, so a
+	// mission can pin it at launch (ADR-0005 §5) and replay reproduces. The
+	// pgmpy provider returns its pinned/served version; the placeholder returns
+	// its static stand-in id.
+	Version() string
+}
+
+// BeliefScored records a (re)computed belief for a host (by stable id — a
+// coordinate is not unique after an identity contradiction). Belief is derived +
+// deterministic, but flows through an event so it is logged and replay-reproducible.
+type BeliefScored struct {
+	HostID uint64
+	Belief Belief
+}
+
+func (BeliefScored) Kind() string { return "belief.scored" }
+
+func applyBeliefScored(w *World, e BeliefScored) {
+	if ent, ok := findHostByID(w, e.HostID); ok {
+		w.hosts.Get(ent).Belief = e.Belief
+	}
+}
+
+// BeliefSystem returns the engine System that keeps the belief field current. It
+// re-scores every host and emits a BeliefScored only when the score changed
+// (so it is quiescent and the log stays lean — belief is recomputed on evidence
+// change, not stored per tick).
+func BeliefSystem(p BeliefProvider) System {
+	return func(w *World) []Event {
+		var out []Event
+		q := ecs.NewFilter1[Host](w.ecs).Query()
+		for q.Next() {
+			h := q.Get()
+			if b := p.Score(*h); b != h.Belief {
+				out = append(out, BeliefScored{HostID: h.ID, Belief: b})
+			}
+		}
+		return out
+	}
+}
+
+// placeholderBelief is a deterministic stand-in for the pgmpy provider (ADR-0005).
+// A reachable host with more open ports scores higher exploitability/juiciness.
+// NOT the real model — swapped for the pgmpy sidecar.
+type placeholderBelief struct{}
+
+func (placeholderBelief) Score(h Host) Belief {
+	open := 0
+	for _, p := range h.Ports {
+		if p.Open {
+			open++
+		}
+	}
+	reachable := 0.0
+	if open > 0 {
+		reachable = 1.0
+	}
+	exploitable := float64(open) / (float64(open) + 1.0) // 0,0.5,0.67,… monotonic in open ports
+	return Belief{
+		Juicy:       reachable * exploitable,
+		Exploitable: exploitable,
+		Reachable:   reachable,
+		Model:       "placeholder-v0",
+	}
+}
+
+// Version is the placeholder's static stand-in id.
+func (placeholderBelief) Version() string { return "placeholder-v0" }
+
+// PlaceholderBeliefProvider returns the deterministic stand-in provider.
+func PlaceholderBeliefProvider() BeliefProvider { return placeholderBelief{} }

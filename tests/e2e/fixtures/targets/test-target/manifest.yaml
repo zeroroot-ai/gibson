@@ -1,0 +1,72 @@
+---
+# Deployment — test-target HTTP fixture.
+# Serves GET / → deterministic body + GET /healthz → {"status":"ok"}.
+# The Service below exposes it at test-target.gibson.svc.cluster.local:8080.
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: test-target
+  namespace: gibson
+  labels:
+    app: test-target
+    e2e: "true"
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      app: test-target
+  template:
+    metadata:
+      labels:
+        app: test-target
+        e2e: "true"
+    spec:
+      # NFR Security: this pod has no service account — no k8s API access needed.
+      automountServiceAccountToken: false
+      containers:
+        - name: test-target
+          image: test-target:dev
+          imagePullPolicy: Never  # loaded into Kind via `make load`
+          ports:
+            - name: http
+              containerPort: 8080
+              protocol: TCP
+          env:
+            - name: PORT
+              value: "8080"
+          readinessProbe:
+            httpGet:
+              path: /healthz
+              port: 8080
+            initialDelaySeconds: 2
+            periodSeconds: 5
+            failureThreshold: 6
+          livenessProbe:
+            httpGet:
+              path: /healthz
+              port: 8080
+            initialDelaySeconds: 5
+            periodSeconds: 10
+            failureThreshold: 3
+          # No resource limits needed for a trivial test fixture.
+
+---
+# Service — exposes test-target at a stable DNS name within the cluster.
+# Accessible from the probe agent as: http://test-target.gibson.svc.cluster.local:8080/
+apiVersion: v1
+kind: Service
+metadata:
+  name: test-target
+  namespace: gibson
+  labels:
+    app: test-target
+    e2e: "true"
+spec:
+  selector:
+    app: test-target
+  ports:
+    - name: http
+      protocol: TCP
+      port: 8080
+      targetPort: 8080
+  type: ClusterIP

@@ -1,0 +1,59 @@
+# airgap-build — E14 cutover gate (gibson#818, ADR-0050): a clean-room clone
+# of the OSS stack (sdk, adk, setec, gibson-executor) builds air-gapped with
+# zero external fetch — the self-hostable/defense promise.
+#
+# Per repo the gate: (0) anonymously clones the PUBLIC repo, (1) warms a
+# dedicated empty module cache via the public Go proxy only (no GOPRIVATE,
+# no credentials — fails on any private/undeclared dep), then (2) builds all
+# packages and compiles every test binary inside a no-network user namespace
+# (`unshare -r -n`) with GOPROXY=off. Any build-time reach beyond the warmed
+# mirror fails the gate. Runtime phone-home is excluded structurally: the
+# Apache layer links no ELv2/closed code (oss-boundary gate, gibson#817),
+# and there is no license client in the OSS stack to begin with.
+#
+# Triggers (deliberately off the per-PR fast tier — cicd-efficiency
+# ADR-0060: gibson PR content cannot change the OSS repos, so this runs
+# path-filtered, weekly, and on demand):
+#   - pull_request, path-filtered to this workflow + its script
+#   - weekly schedule (drift watch over the OSS repos' default branches)
+#   - workflow_dispatch
+
+name: airgap-build
+
+on:
+  pull_request:
+    types: [opened, synchronize, reopened, ready_for_review]
+    paths:
+      - .github/workflows/airgap-build.yml
+      - scripts/check-airgap-build.sh
+  schedule:
+    - cron: "43 6 * * 1" # Mondays 06:43 UTC
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  airgap-build:
+    name: airgap-build
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    env:
+      # Resolve zeroroot-ai modules exactly like an external customer:
+      # public proxy + sumdb, no private-module carve-outs.
+      GOPRIVATE: ""
+      GONOPROXY: ""
+      GONOSUMDB: ""
+      GOFLAGS: ""
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
+      - uses: actions/setup-go@924ae3a1cded613372ab5595356fb5720e22ba16 # v6
+        with:
+          # Latest stable, NOT gibson's go.mod: the script pins
+          # GOTOOLCHAIN=local (a mid-gate toolchain auto-download would be an
+          # external fetch), so the installed go must satisfy every OSS
+          # repo's `go` directive even when one bumps ahead of gibson's.
+          go-version: stable
+          cache: false # the gate builds its own dedicated GOMODCACHE from zero
+      - name: Air-gapped clean-room build of the OSS stack
+        run: ./scripts/check-airgap-build.sh "${RUNNER_TEMP}/airgap"

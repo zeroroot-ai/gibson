@@ -1,0 +1,23 @@
+# Belief-field inference sidecar (gibson#750, ADR-0005).
+# Exact, read-only Bayesian inference only — no training deps at runtime.
+#
+# This file used to read `pgmpy==0.1.26`, `networkx>=3.0`, `numpy>=1.24`. Those
+# three lines resolved to 44 packages including torch, triton, xgboost,
+# scikit-learn, pandas, scipy, statsmodels and sympy — roughly 3 GB of a
+# deep-learning stack, to marginalise a seven-node binary network. The
+# inference now runs on `infer.py` (variable elimination on numpy), with
+# agreement to pgmpy asserted in test_parity.py. See gibson#1436.
+#
+# Hashes are mandatory: the Dockerfile installs with --require-hashes, so pip
+# refuses any artifact that does not match, and refuses to resolve anything
+# that is not pinned here. Regenerate for a new numpy with:
+#
+#   pip download --only-binary=:all: --python-version 3.13 --platform \
+#     manylinux_2_28_x86_64 numpy==<version> && pip hash numpy-*.whl
+#
+# The three hashes below are the cp313 manylinux wheels for x86_64 and aarch64
+# plus the sdist, so the same pin resolves on either build architecture.
+numpy==2.5.2 \
+    --hash=sha256:0aadf13b60048d501e05fa699efaf7734e2494f3498a4c2a5521d822640324f3 \
+    --hash=sha256:29b86ff8a6cc556b47ec6b64b194815cc80e6bf5eedcc6cddfd65318cb0b4eee \
+    --hash=sha256:d482d171c406ae88c5b19cad3b6a1c4c5209f886ab74bc44c2c865c23f52d860

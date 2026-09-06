@@ -1,0 +1,66 @@
+# Security-guard baseline — THIS FILE MUST ONLY EVER SHRINK.
+#
+# Every line is a security-guard finding that predates the guard that
+# reports it. The guards (failopenauthorizer, privilegedfallback,
+# fgalistusers, constantverdictdouble) landed as blocking gates with
+# this inventory recorded, so that NEW occurrences of each class fail
+# the build from the moment the guards shipped, while the existing
+# inventory is burned down separately from the guard that found it.
+#
+# THE RATCHET IS TWO-DIRECTIONAL, and the second half is the half that
+# matters:
+#
+#   1. A finding NOT in this file fails the build. New debt can never be
+#      absorbed — there is no regeneration step in any workflow.
+#   2. A line here whose site is FIXED or GONE also fails the build, via
+#      `bash scripts/check-guard-baselines.sh`. You cannot fix a site and
+#      leave its line behind, so the file is forced monotonically
+#      downward and cannot silently retain dead entries. A baseline
+#      without this half is not a ratchet; it is a rug.
+#
+# ADDING A LINE BY HAND IS A POLICY VIOLATION. The only supported way to
+# change this file is to DELETE a line, in the same commit as the fix
+# that makes it stale. There is deliberately no regeneration flag and no
+# tooling to append: accepting a new violation must cost more than
+# fixing it.
+#
+# KEY FORMAT: <rule>|<package path>|<symbol>
+# Line numbers are deliberately EXCLUDED so that reformatting a file
+# does not churn this list, and so that MOVING a violation does not
+# silently un-baseline it.
+#
+# Suppressing an individual site with a directive is a DIFFERENT
+# mechanism with different rules — see each analyzer's doc comment.
+# Directives are validated (the named compensating guard or test must
+# resolve); a bare opt-out is itself a diagnostic.
+#
+constant-verdict-double|github.com/zeroroot-ai/gibson/internal/engine/harness|fakeSearchAuthz.Check
+constant-verdict-double|github.com/zeroroot-ai/gibson/internal/infra/reconciler|recordingAuthorizer.ListUsersOfType
+constant-verdict-double|github.com/zeroroot-ai/gibson/internal/platform/capabilitygrant|mockAuthorizer.ListUsers
+constant-verdict-double|github.com/zeroroot-ai/gibson/internal/platform/component|mockAuthorizer.Check
+constant-verdict-double|github.com/zeroroot-ai/gibson/internal/server/admin|fakeAuthorizer.Check
+constant-verdict-double|github.com/zeroroot-ai/gibson/internal/server/admin|fakeAuthorizer.ListObjects
+constant-verdict-double|github.com/zeroroot-ai/gibson/internal/server/admin|membersAuthorizer.ListUsers
+constant-verdict-double|github.com/zeroroot-ai/gibson/internal/server/admin|rosterAuthorizer.Check
+constant-verdict-double|github.com/zeroroot-ai/gibson/internal/server/admin|rosterAuthorizer.ListUsers
+constant-verdict-double|github.com/zeroroot-ai/gibson/internal/server/admin|tenantScopeAuthorizer.Check
+fga-list-users|github.com/zeroroot-ai/gibson/internal/server/daemon/api|RevokeAgentIdentity#R3
+privileged-fallback|github.com/zeroroot-ai/gibson/internal/infra/observability|EnrichSpan
+privileged-fallback|github.com/zeroroot-ai/gibson/internal/infra/observability|LogAgentExecution
+privileged-fallback|github.com/zeroroot-ai/gibson/internal/infra/observability|LogAgentExecution->EnrichSpan
+privileged-fallback|github.com/zeroroot-ai/gibson/internal/infra/observability|LogDecision
+privileged-fallback|github.com/zeroroot-ai/gibson/internal/infra/observability|LogDecision->EnrichSpan
+privileged-fallback|github.com/zeroroot-ai/gibson/internal/infra/observability|LogFinding
+privileged-fallback|github.com/zeroroot-ai/gibson/internal/infra/observability|LogFinding->EnrichSpan
+privileged-fallback|github.com/zeroroot-ai/gibson/internal/infra/observability|LogGraphOp
+privileged-fallback|github.com/zeroroot-ai/gibson/internal/infra/observability|LogGraphOp->EnrichSpan
+privileged-fallback|github.com/zeroroot-ai/gibson/internal/infra/observability|LogMemoryOp
+privileged-fallback|github.com/zeroroot-ai/gibson/internal/infra/observability|LogMemoryOp->EnrichSpan
+privileged-fallback|github.com/zeroroot-ai/gibson/internal/infra/observability|LogToolExecution
+privileged-fallback|github.com/zeroroot-ai/gibson/internal/infra/observability|LogToolExecution->EnrichSpan
+privileged-fallback|github.com/zeroroot-ai/gibson/internal/infra/observability|StartMissionTrace
+privileged-fallback|github.com/zeroroot-ai/gibson/internal/infra/observability|StartMissionTrace->EnrichSpan
+privileged-fallback|github.com/zeroroot-ai/gibson/internal/server/admin|emitGrantAudit@IdentityFromContext
+privileged-fallback|github.com/zeroroot-ai/gibson/internal/server/admin|ListMembers@TenantFromContext
+privileged-fallback|github.com/zeroroot-ai/gibson/internal/server/admin|SetBrokerConfig@IdentityFromContext
+privileged-fallback|github.com/zeroroot-ai/gibson/internal/server/daemon|SubmitLabel@ActingUserFromContext

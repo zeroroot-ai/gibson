@@ -1,0 +1,167 @@
+name: CodeQL
+
+# Epic: cicd-efficiency (board #44), slice S5, gibson#1130. Scanner cadence per
+# docs/architecture/CICD-CONTEXT.md decision #9: authoritative CodeQL analysis
+# runs on merge_group (the pre-merge gate) instead of on every pull_request/push,
+# plus a weekly deep scan. This is a real cut, not a duplicate: `push` here fired
+# on every commit landed to main, and `pull_request` fired on every PR push --
+# together the single largest per-PR minute cost after the image matrix.
+#
+# Fast per-PR signal is still available for security-critical paths (authz,
+# ext-authz, secrets handling) via a path-filtered pull_request trigger, since a
+# week-long lag on those specific diffs is undesirable even though the
+# authoritative gate is merge_group.
+#
+# Queue-entry compat (epic cicd-efficiency, board #44, merge-queue-entry
+# follow-up): the old `pull_request.paths` filter on the *trigger* meant this
+# workflow produced NO check run at all on a PR that didn't touch those
+# paths -- GitHub blocks queue entry until every required context has
+# reported on the PR (a `skipped` conclusion satisfies that; an absent
+# check does not). Trigger on every pull_request now; a cheap `changes` job
+# does the same path detection natively (git diff, no third-party action)
+# and the `analyze` job's job-level `if:` decides real-scan-vs-skip. Typical
+# PRs get a fast `skipped` conclusion; authz/ext-authz/secrets-touching PRs
+# still get the real scan; merge_group and the weekly schedule always get
+# the real scan regardless of paths.
+on:
+  pull_request:
+  merge_group:
+  schedule:
+    - cron: "0 8 * * 2"
+  # Lets an authoritative scan be forced onto `refs/heads/main` on demand.
+  # Nothing else analyses main promptly: `merge_group` runs report against the
+  # transient `gh-readonly-queue/...` ref, and the `push` trigger was removed
+  # with the scanner-cadence cut above, so the weekly Tuesday cron is otherwise
+  # the ONLY event that ever produces a `refs/heads/main` analysis. Code
+  # scanning retires an alert only when a newer analysis for the same category
+  # and ref omits it, so without this an alert already fixed in the source sits
+  # open on the Security tab for up to a week. Needed to reconcile the backlog
+  # left by the ~2-month upload outage (gibson#1441, restored in gibson#1442).
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: codeql-${{ github.ref }}
+  cancel-in-progress: true
+
+# Go module fetch resilience.
+#
+# PIPE, not comma. Go's default is `https://proxy.golang.org,direct`, and with
+# a COMMA the fallback engages only on 404/410 — a transport error is FATAL.
+# So one module whose HTTP/2 stream gets reset kills the whole job:
+#
+#   read "https://proxy.golang.org/<mod>/@v/<ver>.zip": stream error:
+#   stream ID 111; INTERNAL_ERROR; received from peer
+#
+# which surfaces as `FAIL <pkg> [setup failed]` and reads like a broken build.
+# On 2026-08-20 that evicted gibson#1493 and its release PR from the merge
+# queue repeatedly, while 274 other modules downloaded fine in the same job
+# off a warm cache, a different single module failing each time.
+#
+# A PIPE falls through on ANY error, so that one module is fetched from its
+# origin instead. No second proxy is added on purpose: `direct` introduces no
+# new trusted party, and GOSUMDB still verifies every module against
+# sum.golang.org either way, so integrity does not depend on who served it.
+env:
+  GOPROXY: https://proxy.golang.org|direct
+
+jobs:
+  # ---- cheap path-detection (pull_request only) ----
+  # merge_group and schedule always get the real scan, so this only needs to
+  # run -- and only needs to gate anything -- on pull_request.
+  changes:
+    name: detect security-critical path changes
+    # lane-exception: change detection, not a gate. merge_group and schedule
+    # always get the real scan, so there is nothing to compute there.
+    if: github.event_name == 'pull_request'
+    runs-on: ubuntu-latest
+    outputs:
+      security_paths: ${{ steps.diff.outputs.security_paths }}
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
+        with:
+          fetch-depth: 0
+
+      - name: Diff against PR base
+        id: diff
+        run: |
+          set -e
+          BASE="${{ github.event.pull_request.base.sha }}"
+          HEAD="${{ github.event.pull_request.head.sha }}"
+          CHANGED="$(git diff --name-only "$BASE" "$HEAD")"
+          echo "$CHANGED"
+          if echo "$CHANGED" | grep -E '^internal/platform/authz/|^cmd/ext-authz/|(^|/)secrets/' > /dev/null; then
+            echo "security_paths=true" >> "$GITHUB_OUTPUT"
+          else
+            echo "security_paths=false" >> "$GITHUB_OUTPUT"
+          fi
+
+  analyze:
+    name: Analyze Go
+    needs: changes
+    # always() overrides the implicit success()-on-needs gate: `changes` is
+    # itself skipped on merge_group/schedule, and a skipped dependency would
+    # otherwise force this job to skip too. Real scan on merge_group/schedule
+    # unconditionally; on pull_request, real scan only if the path filter
+    # matched, else `skipped` (cheap, no runner spin-up).
+    # lane-exception: dual-lane but path-filtered. `!= 'pull_request'` covers
+    # merge_group and schedule, so this DOES run in both lanes -- but on a PR
+    # only when the diff touches internal/platform/authz/, cmd/ext-authz/ or a
+    # secrets/ path. A PR that changes none of those can therefore be evicted by
+    # a CodeQL failure it never ran (gibson#1236, the same class as #1233).
+    # Accepted rather than fixed here: a full CodeQL Go analysis is ~20 minutes
+    # and the path filter is the deliberate scanner-cadence decision. Made
+    # visible instead: merge-queue-eviction-report.yml comments the failing
+    # `Analyze Go` job onto the PR, so the eviction is attributable.
+    if: always() && (github.event_name != 'pull_request' || needs.changes.outputs.security_paths == 'true')
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    permissions:
+      actions: read
+      contents: read
+      # security-events:write restored (scorecard-hygiene sweep, 2026-08):
+      # gibson went public in gibson#1040 (closed 2026-06-26), two days after
+      # gibson#974/PR#979 disabled the code-scanning upload to work around
+      # GHAS requiring a paid plan on a private repo. Code scanning (and the
+      # Security tab) is free on public repos, so the upload is restored per
+      # the plan already recorded in gibson#974. Until this landed, the
+      # default-branch code-scanning alert view was frozen at the last
+      # successful `refs/heads/main` analysis (2026-06-20) — three
+      # `go/allocation-size-overflow` alerts have sat "open" since, even
+      # though the flagged files were moved/deleted by later refactors,
+      # because nothing re-uploaded SARIF for main to reconcile them.
+      security-events: write
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
+
+      - uses: actions/setup-go@924ae3a1cded613372ab5595356fb5720e22ba16 # v6
+        with:
+          go-version-file: go.mod
+          cache: true
+
+      - uses: github/codeql-action/init@f3712979fa5f215279b101dd0a2e3bdfb4353324 # v3
+        with:
+          languages: go
+          queries: security-extended
+          config-file: .github/codeql-config.yml
+
+      - name: Build
+        run: go build ./...
+
+      - uses: github/codeql-action/analyze@f3712979fa5f215279b101dd0a2e3bdfb4353324 # v3
+        with:
+          # Upload restored now that gibson is public (see permissions block
+          # above) — default is `upload: always`, so the Security tab and the
+          # code-scanning alerts API get fresh results again. `output:` is
+          # kept so the artifact step below still has a local copy.
+          output: codeql-results
+
+      - name: Upload CodeQL SARIF artifact
+        if: always()
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
+        with:
+          name: codeql-sarif-go
+          path: codeql-results
+          if-no-files-found: warn

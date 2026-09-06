@@ -1,0 +1,12 @@
+apiVersion: gibson.zeroroot.ai/v1alpha1
+kind: TenantDataPlane
+metadata:
+  name: acme-dataplane
+  namespace: tenant-acme
+spec:
+  tenantID: acme
+  stores:
+    postgres: true
+    neo4j: true
+    redis: true
+    vector: true

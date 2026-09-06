@@ -1,0 +1,9 @@
+apiVersion: gibson.zeroroot.ai/v1alpha1
+kind: AgentEnrollment
+metadata:
+  labels:
+    app.kubernetes.io/name: tenant-operator
+    app.kubernetes.io/managed-by: kustomize
+  name: agentenrollment-sample
+spec:
+  # TODO(user): Add fields here

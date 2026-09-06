@@ -1,0 +1,302 @@
+// SPDX-License-Identifier: Elastic-2.0
+// Copyright 2026 Zero Root AI
+
+package component
+
+// service_harness_parity_test.go tests the handler methods added by the
+// platform-harness-parity spec: GraphRAG, findings, missions, delegation,
+// context, LLM, and extended memory RPCs on ComponentServiceServer.
+//
+// Each test constructs a minimal server via NewComponentServiceServer with stub
+// registry/queue, then wires exactly the mock needed for the handler under
+// test via the corresponding With*() method. Auth context is set with
+// auth.ContextWithTenantString. Tests verify happy-path delegation, nil-dependency
+// returns Unimplemented, and missing tenant returns Unauthenticated.
+
+import (
+	"context"
+	"log/slog"
+	"os"
+	"testing"
+	"time"
+
+	"github.com/stretchr/testify/assert"
+	"github.com/stretchr/testify/require"
+	"google.golang.org/grpc/codes"
+	"google.golang.org/grpc/status"
+
+	componentpb "github.com/zeroroot-ai/sdk/api/gen/gibson/component/v1"
+	graphragpb "github.com/zeroroot-ai/sdk/api/gen/gibson/graphrag/v1"
+	"github.com/zeroroot-ai/sdk/auth"
+)
+
+// ---------------------------------------------------------------------------
+// Test infrastructure
+// ---------------------------------------------------------------------------
+
+// noopWorkQueue is a minimal WorkQueue that satisfies the interface.
+type noopWorkQueue struct{}
+
+func (q *noopWorkQueue) Enqueue(_ context.Context, _, _, _ string, _ WorkItem) (string, error) {
+	return "", nil
+}
+func (q *noopWorkQueue) Claim(_ context.Context, _, _, _, _ string, _ time.Duration) (*WorkItem, error) {
+	return nil, nil
+}
+func (q *noopWorkQueue) DeliverResult(_ context.Context, _ string, _ WorkResult) error { return nil }
+func (q *noopWorkQueue) WaitForResult(_ context.Context, _ string, _ time.Duration) (*WorkResult, error) {
+	return nil, nil
+}
+func (q *noopWorkQueue) Acknowledge(_ context.Context, _, _, _, _ string) error { return nil }
+func (q *noopWorkQueue) ReclaimAbandoned(_ context.Context, _, _, _ string, _ time.Duration) error {
+	return nil
+}
+
+// noopRegistry satisfies ComponentRegistry without touching Redis.
+type noopRegistry struct{}
+
+func (r *noopRegistry) Register(_ context.Context, _, _, _ string, _ ComponentInfo) (string, error) {
+	return "inst-noop", nil
+}
+func (r *noopRegistry) Deregister(_ context.Context, _, _, _, _ string) error { return nil }
+func (r *noopRegistry) RefreshTTL(_ context.Context, _, _, _, _ string) error { return nil }
+func (r *noopRegistry) Discover(_ context.Context, _, _, _ string) ([]ComponentInfo, error) {
+	return nil, nil
+}
+func (r *noopRegistry) DiscoverAll(_ context.Context, _, _ string) ([]ComponentInfo, error) {
+	return nil, nil
+}
+func (r *noopRegistry) ListTenantComponents(_ context.Context, _ string) ([]ComponentInfo, error) {
+	return nil, nil
+}
+func (r *noopRegistry) DiscoverTenantOnly(_ context.Context, _, _, _ string) ([]ComponentInfo, error) {
+	return nil, nil
+}
+func (r *noopRegistry) DiscoverSystemOnly(_ context.Context, _, _ string) ([]ComponentInfo, error) {
+	return nil, nil
+}
+
+// testLogger returns a slog.Logger that discards output below error level.
+func testLogger() *slog.Logger {
+	return slog.New(slog.NewTextHandler(os.Stderr, &slog.HandlerOptions{Level: slog.LevelError}))
+}
+
+// newParityServer builds a ComponentServiceServer with noop registry/queue.
+func newParityServer() *ComponentServiceServer {
+	return NewComponentServiceServer(
+		&noopRegistry{},
+		&noopWorkQueue{},
+		testLogger(),
+		nil, nil, nil, nil,
+	)
+}
+
+// tenantCtx returns a background context stamped with "test-tenant".
+func tenantCtx() context.Context {
+	return auth.ContextWithTenantString(context.Background(), "test-tenant")
+}
+
+// ---------------------------------------------------------------------------
+// Mock implementations
+// ---------------------------------------------------------------------------
+
+// mockGraphRAGQuerier implements GraphRAGQuerier.
+type mockGraphRAGQuerier struct {
+	queryResults []*graphragpb.QueryResult
+	queryErr     error
+	storeID      string
+	storeErr     error
+}
+
+func (m *mockGraphRAGQuerier) QueryNodes(_ context.Context, _ string, _ *graphragpb.GraphQuery) ([]*graphragpb.QueryResult, error) {
+	return m.queryResults, m.queryErr
+}
+func (m *mockGraphRAGQuerier) StoreNode(_ context.Context, _ string, _ *graphragpb.GraphNode) (string, error) {
+	return m.storeID, m.storeErr
+}
+func (m *mockGraphRAGQuerier) FindSimilarAttacks(_ context.Context, _, _ string, _ int) ([]byte, error) {
+	return nil, nil
+}
+func (m *mockGraphRAGQuerier) GetAttackChains(_ context.Context, _, _ string, _ int) ([]byte, error) {
+	return nil, nil
+}
+func (m *mockGraphRAGQuerier) FindSimilarFindings(_ context.Context, _, _ string, _ int) ([]byte, error) {
+	return nil, nil
+}
+func (m *mockGraphRAGQuerier) GetRelatedFindings(_ context.Context, _, _ string) ([]byte, error) {
+	return nil, nil
+}
+
+func (m *mockGraphRAGQuerier) ApplicationFindings(_ context.Context, _, _ string, _ []string, _ int) ([]byte, error) {
+	return nil, nil
+}
+
+// mockFindingQuerier implements FindingQuerier.
+type mockFindingQuerier struct {
+	findingsJSON []byte
+	err          error
+}
+
+func (m *mockFindingQuerier) GetFindings(_ context.Context, _ string, _ []byte) ([]byte, error) {
+	return m.findingsJSON, m.err
+}
+func (m *mockFindingQuerier) GetRunFindings(_ context.Context, _, _, _ string, _ []byte) ([]byte, error) {
+	return m.findingsJSON, m.err
+}
+
+// mockCredentialStore implements CredentialStore.
+type mockCredentialStore struct {
+	credJSON []byte
+	err      error
+}
+
+func (m *mockCredentialStore) GetCredential(_ context.Context, _, _ string) ([]byte, error) {
+	return m.credJSON, m.err
+}
+
+// ---------------------------------------------------------------------------
+// 1. QueryNodes — happy path
+// ---------------------------------------------------------------------------
+
+func TestServiceHarnessParity_QueryNodes_HappyPath(t *testing.T) {
+	want := []*graphragpb.QueryResult{{Score: 0.9}}
+	mock := &mockGraphRAGQuerier{queryResults: want}
+	svc := newParityServer().WithGraphRAG(mock)
+
+	resp, err := svc.QueryNodes(tenantCtx(), &componentpb.QueryNodesRequest{
+		Query: &graphragpb.GraphQuery{},
+	})
+
+	require.NoError(t, err)
+	require.NotNil(t, resp)
+	assert.Len(t, resp.Results, 1)
+	assert.InDelta(t, 0.9, resp.Results[0].Score, 0.001)
+}
+
+// ---------------------------------------------------------------------------
+// 2. QueryNodes — nil graphrag returns Unimplemented
+// ---------------------------------------------------------------------------
+
+func TestServiceHarnessParity_QueryNodes_NilGraphRAG(t *testing.T) {
+	svc := newParityServer() // graphrag not wired
+
+	_, err := svc.QueryNodes(tenantCtx(), &componentpb.QueryNodesRequest{})
+
+	require.Error(t, err)
+	assert.Equal(t, codes.Unimplemented, status.Code(err))
+}
+
+// ---------------------------------------------------------------------------
+// 3. StoreNode — retired (sdk#451 / gibson#1265): the generic graph-write RPC
+// left the ComponentService proto, so there is no handler or request type to
+// exercise. The write-surface unwind continues in gibson#1322.
+// ---------------------------------------------------------------------------
+
+// ---------------------------------------------------------------------------
+// 4. GetFindings — happy path
+// ---------------------------------------------------------------------------
+
+func TestServiceHarnessParity_GetFindings_HappyPath(t *testing.T) {
+	payload := []byte(`[{"id":"f1","title":"SQL Injection"}]`)
+	mock := &mockFindingQuerier{findingsJSON: payload}
+	svc := newParityServer().WithFindingQuerier(mock)
+
+	resp, err := svc.GetFindings(tenantCtx(), &componentpb.GetFindingsRequest{})
+
+	require.NoError(t, err)
+	require.NotNil(t, resp)
+	assert.Equal(t, payload, resp.FindingsJson)
+}
+
+// ---------------------------------------------------------------------------
+// 5. GetFindings — nil findingQuerier returns Unimplemented
+// ---------------------------------------------------------------------------
+
+func TestServiceHarnessParity_GetFindings_NilQuerier(t *testing.T) {
+	svc := newParityServer()
+
+	_, err := svc.GetFindings(tenantCtx(), &componentpb.GetFindingsRequest{})
+
+	require.Error(t, err)
+	assert.Equal(t, codes.Unimplemented, status.Code(err))
+}
+
+// CreateMission and the other seven mission RPCs are now hard-cut wired
+// handlers gated by capname.MissionOriginate, not nil-safe seam stubs — the
+// interim FailedPrecondition answer they returned while the origination
+// decisions were open (gibson#1186 slice C) is gone. Their coverage, including
+// the budget/scope/lineage policy and an over-the-wire call through a real
+// gRPC server, lives in service_missions_test.go (gibson#1358).
+
+// DelegateToAgent is now a hard-cut wired handler, gated by
+// capname.MissionDelegate rather than a nil-safe seam — see
+// service_delegation_test.go for its full coverage (gibson#1186 slice C).
+
+// ---------------------------------------------------------------------------
+// 10. GetCredential — happy path
+// ---------------------------------------------------------------------------
+
+// GetCredential is per-secret authorized (gibson#1245), so these two tests
+// carry a caller that holds can_resolve on the requested secret. The deny paths
+// live in service_credential_authz_test.go.
+func TestServiceHarnessParity_GetCredential_HappyPath(t *testing.T) {
+	credPayload := []byte(`{"username":"admin","password":"s3cr3t"}`)
+	mock := &mockCredentialStore{credJSON: credPayload}
+	svc := newParityServer().
+		WithCredentialStore(mock).
+		WithAuthorizer(&credRecordingAuthorizer{allow: true})
+
+	resp, err := svc.GetCredential(
+		credCallerCtx(t, "plugin_principal:plugin-db-1", "test-tenant"),
+		&componentpb.GetCredentialRequest{Name: "db-creds"},
+	)
+
+	require.NoError(t, err)
+	require.NotNil(t, resp)
+	assert.Equal(t, credPayload, resp.CredentialJson)
+}
+
+// ---------------------------------------------------------------------------
+// 11. GetCredential — nil credentialStore returns Unimplemented
+// ---------------------------------------------------------------------------
+
+func TestServiceHarnessParity_GetCredential_NilStore(t *testing.T) {
+	svc := newParityServer().WithAuthorizer(&credRecordingAuthorizer{allow: true})
+
+	_, err := svc.GetCredential(
+		credCallerCtx(t, "plugin_principal:plugin-db-1", "test-tenant"),
+		&componentpb.GetCredentialRequest{Name: "any"},
+	)
+
+	require.Error(t, err)
+	assert.Equal(t, codes.Unimplemented, status.Code(err))
+}
+
+// ---------------------------------------------------------------------------
+// 14. Unauthenticated — QueryNodes without tenant returns Unauthenticated
+// ---------------------------------------------------------------------------
+
+func TestServiceHarnessParity_Unauthenticated_QueryNodes(t *testing.T) {
+	mock := &mockGraphRAGQuerier{}
+	svc := newParityServer().WithGraphRAG(mock)
+
+	// context without tenant
+	_, err := svc.QueryNodes(context.Background(), &componentpb.QueryNodesRequest{})
+
+	require.Error(t, err)
+	assert.Equal(t, codes.Unauthenticated, status.Code(err))
+}
+
+// ---------------------------------------------------------------------------
+// 15. Unauthenticated — GetFindings without tenant returns Unauthenticated
+// ---------------------------------------------------------------------------
+
+func TestServiceHarnessParity_Unauthenticated_GetFindings(t *testing.T) {
+	mock := &mockFindingQuerier{findingsJSON: []byte(`[]`)}
+	svc := newParityServer().WithFindingQuerier(mock)
+
+	_, err := svc.GetFindings(context.Background(), &componentpb.GetFindingsRequest{})
+
+	require.Error(t, err)
+	assert.Equal(t, codes.Unauthenticated, status.Code(err))
+}

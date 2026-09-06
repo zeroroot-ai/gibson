@@ -1,0 +1,15 @@
+# OSV connector — hosted MCP container, no vendor credential (ADR-0014/0015).
+id: osv
+kind: connector
+displayName: OSV
+description: >-
+  Open Source Vulnerabilities lookup — query CVEs and advisories for packages
+  and commits. Needs no vendor credential.
+egressAllow:
+  - api.osv.dev:443
+spec:
+  vendor: osv
+  shape: Hosted
+  image: ghcr.io/stackloklabs/osv-mcp/server
+  transport: streamable-http
+  auth: none

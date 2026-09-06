@@ -1,0 +1,77 @@
+# Calls the org-level reusable architectural-doc-coverage workflow.
+# See zeroroot-ai/.github/.github/workflows/architectural-doc-coverage.yml
+# for the gate's logic, configuration, and rationale.
+#
+# Epic: cicd-efficiency (board #44), slice S5, gibson#1130. Moved to merge_group
+# per docs/architecture/CICD-CONTEXT.md decision #9, plus a path filter so it
+# only fires when docs or architecture-relevant code actually changed (this gate
+# has nothing to say about a leaf-package bugfix). merge_group does not support
+# a declarative `paths` filter on the trigger itself (actionlint [events]), so
+# the filter is implemented as a `changes` job that diffs the event's base..head
+# and gates the reusable-call job on the result.
+#
+# Queue-entry compat (epic cicd-efficiency, board #44, merge-queue-entry
+# follow-up): `merge_group` was the ONLY trigger, so this workflow produced no
+# check run at all on an ordinary pull_request -- GitHub blocks queue entry
+# until every required context has reported on the PR itself (`skipped`
+# satisfies that; an absent check does not). Added `pull_request`; the
+# `changes` job now runs unconditionally on both events and branches its diff
+# on `github.event_name` to pick the right base/head pair. The
+# `architectural-doc-coverage` job's existing `needs.changes.outputs.relevant`
+# gate is unchanged -- since `changes` itself is never skipped, no `always()`
+# override is needed (contrast gibson's codeql.yml, where the equivalent
+# `changes` job IS conditionally skipped and does need one).
+#
+# Required check name: architectural-doc-coverage
+
+name: architectural-doc-coverage
+
+on:
+  pull_request:
+  merge_group:
+
+permissions:
+  contents: read
+  # The called reusable workflow (zeroroot-ai/.github ->
+  # architectural-doc-coverage.yml) declares its own `pull-requests: read`
+  # (it calls `gh pr view` to resolve merge_group PR context) — the caller
+  # must grant at least that or the token gets capped below what the callee
+  # needs.
+  pull-requests: read
+
+jobs:
+  changes:
+    name: detect docs/architecture-relevant changes
+    runs-on: ubuntu-latest
+    outputs:
+      relevant: ${{ steps.diff.outputs.relevant }}
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
+        with:
+          fetch-depth: 0
+
+      - name: Diff against base
+        id: diff
+        run: |
+          set -e
+          if [ "${{ github.event_name }}" = "pull_request" ]; then
+            BASE="${{ github.event.pull_request.base.sha }}"
+            HEAD="${{ github.event.pull_request.head.sha }}"
+          else
+            BASE="${{ github.event.merge_group.base_sha }}"
+            HEAD="${{ github.sha }}"
+          fi
+          CHANGED="$(git diff --name-only "$BASE" "$HEAD")"
+          echo "$CHANGED"
+          if echo "$CHANGED" | grep -E '^(docs/|CONTEXT\.md$|.*/CONTEXT\.md$|internal/engine/|internal/platform/|internal/infra/|\.github/workflows/architectural-doc-coverage\.yml$)' > /dev/null; then
+            echo "relevant=true" >> "$GITHUB_OUTPUT"
+          else
+            echo "relevant=false" >> "$GITHUB_OUTPUT"
+          fi
+
+  architectural-doc-coverage:
+    needs: changes
+    if: needs.changes.outputs.relevant == 'true'
+    uses: zeroroot-ai/.github/.github/workflows/architectural-doc-coverage.yml@cf1c48774b57e552ccdd17a2a4bba3f782587dbe # main, .github recreated 2026-09-06
+    secrets:
+      DOCS_REPO_READ_TOKEN: ${{ secrets.DOCS_REPO_READ_TOKEN }}

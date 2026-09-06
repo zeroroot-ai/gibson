@@ -1,0 +1,15 @@
+# GitHub connector — remote MCP, PAT-authenticated (ADR-0014/0015).
+id: github
+kind: connector
+displayName: GitHub
+description: >-
+  GitHub's hosted MCP server — repositories, issues, pull requests, and
+  code search, authenticated with a personal access token.
+egressAllow:
+  - api.githubcopilot.com:443
+spec:
+  vendor: github
+  shape: Remote
+  endpoint: https://api.githubcopilot.com/mcp/
+  transport: streamable-http
+  auth: secret

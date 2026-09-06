@@ -1,0 +1,172 @@
+name: publish-private-authz-registry
+
+# Publish the gibson authz registry as a private OCI artifact at
+# ghcr.io/zeroroot-ai/internal-authz-registry:<tag>.
+#
+# Consumed by the deploy chart's ext-authz init container (oras pull) so a
+# fresh `helm install` hydrates /etc/gibson/registry.yaml from a version-pinned
+# private artifact that matches the daemon's compiled-in Go registry map.
+#
+# IMPORTANT — GHCR PACKAGE VISIBILITY:
+# After this workflow runs for the first time, go to:
+#   https://github.com/orgs/zeroroot-ai/packages/container/internal-authz-registry/settings
+# and set the package visibility to PRIVATE (one-time manual step).
+# By default newly-created GHCR packages inherit the repo visibility (private
+# for this repo), but confirm after the first push.
+# Anonymous pulls will 401; the chart's imagePullSecrets (ghcr-credentials)
+# provide authentication.
+#
+# Spec: private-authz-registry Task 11.
+# Related: enterprise/deploy/helm/gibson/values.yaml sdk.registry
+
+on:
+  # Tag-push trigger kept for hand-pushed tags (operator emergencies, manual
+  # restores). NOTE: release-please's tag pushes use the default GITHUB_TOKEN
+  # which does NOT fire this workflow (GitHub anti-recursion behavior). The
+  # automatic path is workflow_call from release-please.yml — see gibson#96.
+  push:
+    tags:
+      - 'v[0-9]+.[0-9]+.[0-9]+'
+      - 'v[0-9]+.[0-9]+.[0-9]+-*'
+  workflow_dispatch:
+    inputs:
+      tag:
+        description: 'Gibson tag to publish the registry artifact for (e.g. v0.45.0)'
+        required: true
+  # Called by release-please.yml in the same workflow run that cuts a
+  # release, sidestepping the GITHUB_TOKEN tag-trigger gap. See gibson#96.
+  workflow_call:
+    inputs:
+      tag:
+        description: 'Gibson tag whose registry artifact to publish'
+        required: true
+        type: string
+permissions:
+  contents: read
+  packages: write
+
+# Go module fetch resilience.
+#
+# PIPE, not comma. Go's default is `https://proxy.golang.org,direct`, and with
+# a COMMA the fallback engages only on 404/410 — a transport error is FATAL.
+# So one module whose HTTP/2 stream gets reset kills the whole job:
+#
+#   read "https://proxy.golang.org/<mod>/@v/<ver>.zip": stream error:
+#   stream ID 111; INTERNAL_ERROR; received from peer
+#
+# which surfaces as `FAIL <pkg> [setup failed]` and reads like a broken build.
+# On 2026-08-20 that evicted gibson#1493 and its release PR from the merge
+# queue repeatedly, while 274 other modules downloaded fine in the same job
+# off a warm cache, a different single module failing each time.
+#
+# A PIPE falls through on ANY error, so that one module is fetched from its
+# origin instead. No second proxy is added on purpose: `direct` introduces no
+# new trusted party, and GOSUMDB still verifies every module against
+# sum.golang.org either way, so integrity does not depend on who served it.
+env:
+  GOPROXY: https://proxy.golang.org|direct
+
+jobs:
+  publish:
+    runs-on: ubuntu-latest
+    env:
+      REGISTRY: ghcr.io
+      IMAGE: ghcr.io/${{ github.repository_owner }}/internal-authz-registry
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
+        with:
+          ref: ${{ inputs.tag || github.ref_name }}
+
+      - uses: actions/setup-go@924ae3a1cded613372ab5595356fb5720e22ba16 # v6
+        with:
+          go-version-file: go.mod
+          cache: true
+
+      - name: Install buf via npm
+        run: npm install -g @bufbuild/buf
+
+      - name: Install oras
+        # Pinned to oras v1.2.x — ABI-stable for the push/manifest commands we use.
+        # Matches the version used in the ext-authz init container (deployment.yaml).
+        run: |
+          ORAS_VERSION=1.2.2
+          curl -sSL "https://github.com/oras-project/oras/releases/download/v${ORAS_VERSION}/oras_${ORAS_VERSION}_linux_amd64.tar.gz" -o oras.tar.gz
+          tar -xzf oras.tar.gz oras
+          sudo mv oras /usr/local/bin/oras
+          oras version
+
+      - name: Resolve and validate tag
+        id: tag
+        run: |
+          TAG="${{ inputs.tag || github.ref_name }}"
+          if [[ ! "$TAG" =~ ^v[0-9]+\.[0-9]+\.[0-9]+(-.*)?$ ]]; then
+            echo "ERROR: tag '$TAG' does not match v<semver>" >&2
+            exit 1
+          fi
+          echo "tag=$TAG" >> "$GITHUB_OUTPUT"
+
+      - name: Hydrate Go module cache for SDK
+        # Pre-download the SDK module so `go list -m -f '{{.Dir}}'`
+        # succeeds deterministically. go.sum is already committed; this
+        # step cannot introduce new dependencies.
+        # platform-sdk was dissolved into this monorepo (gibson#781); its
+        # protos now live under internal/server/daemon/api and no longer
+        # resolve as an external module.
+        # Spec: zero-trust-hardening follow-up / gibson#446.
+        run: |
+          go mod download github.com/zeroroot-ai/sdk
+
+      - name: Regenerate authz registry and assert no drift
+        # Runs `make authz-registry` which builds authz-registry-gen from the
+        # SDK module cache, generates the four artifacts, then checks git diff.
+        # If the committed artifacts drift from what regen would produce, this
+        # step fails the release — the engineer must run `make authz-registry`
+        # locally and commit the result.
+        env:
+          CGO_ENABLED: "0"
+        run: |
+          make authz-registry
+          git diff --exit-code internal/platform/authz/registry/ || {
+            echo "ERROR: authz registry drifted from SDK protos." >&2
+            echo "Run 'make authz-registry' in zeroroot-ai/gibson and commit the result." >&2
+            exit 1
+          }
+
+      - name: Login to GHCR
+        run: echo "${{ secrets.GITHUB_TOKEN }}" | oras login "${REGISTRY}" -u "${{ github.actor }}" --password-stdin
+
+      - name: Push authz registry artifact
+        # Pushes all three artifact files as named layers. The ext-authz chart
+        # init container only needs registry.yaml; the others are pushed for
+        # completeness and future consumers (dashboard-authz-ui-gating for
+        # permissions.ts). The OpenFGA model is hand-maintained at
+        # internal/platform/authz/model.fga and embedded in the chart by gibson-fga-init,
+        # so it is intentionally NOT shipped here.
+        # Uses application/yaml for text files; application/octet-stream for
+        # the binary-ish .go file (still text, but no dedicated MIME).
+        run: |
+          cd internal/platform/authz/registry
+          oras push \
+            "${IMAGE}:${{ steps.tag.outputs.tag }}" \
+            --artifact-type "application/vnd.zeroroot-ai.authz-registry+yaml" \
+            --annotation "org.opencontainers.image.source=https://github.com/${{ github.repository }}" \
+            --annotation "org.opencontainers.image.revision=${{ github.sha }}" \
+            --annotation "org.opencontainers.image.version=${{ steps.tag.outputs.tag }}" \
+            --annotation "org.opencontainers.image.description=Gibson private authz registry generated from SDK proto annotations" \
+            registry.yaml:application/yaml \
+            permissions.ts:application/octet-stream \
+            registry.go:application/octet-stream
+
+      - name: Tag as 'latest'
+        # Mirror to a moving 'latest' so dev clusters that opt out of pinning
+        # can track HEAD. Production helm values always pin the immutable tag.
+        run: |
+          oras tag "${IMAGE}:${{ steps.tag.outputs.tag }}" latest
+
+      - name: Verify round-trip
+        run: |
+          mkdir /tmp/verify
+          cd /tmp/verify
+          oras pull "${IMAGE}:${{ steps.tag.outputs.tag }}"
+          test -s registry.yaml
+          diff registry.yaml "${GITHUB_WORKSPACE}/internal/platform/authz/registry/registry.yaml" && echo "round-trip OK"

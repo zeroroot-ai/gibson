@@ -1,0 +1,17 @@
+# component.yaml — probe test agent metadata.
+# Loaded by the daemon's component registry discovery path.
+# Requirements: R2.1.
+kind: agent
+name: probe
+version: test
+description: >
+  Deterministic e2e test agent. Registers via ComponentService, polls work via
+  PollWork, makes ONE LLM completion call via Complete, emits ONE finding via
+  SubmitFinding, then terminates. Used exclusively by the mission-run-e2e-tdd suite.
+  NEVER deploy to production — gated by GIBSON_TEST_FIXTURES_ENABLED.
+capabilities:
+  - llm_complete
+  - submit_finding
+metadata:
+  e2e_only: "true"
+  safety: "test_fixtures_only"
