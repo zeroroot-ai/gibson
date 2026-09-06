@@ -1,9 +1,11 @@
 #!/usr/bin/env bash
 # check-airgap-build.sh — CI gate (gibson#818, E14 / ADR-0050): a clean-room
-# clone of the OSS stack (sdk, adk, setec, gibson-executor — the Apache
-# layer) builds air-gapped with zero undeclared external fetch. This is the
-# self-hostable/defense promise: mirror the public modules once, build
-# forever offline.
+# clone of every public Go repo (sdk, adk, setec, gibson-executor, cve-triage,
+# integrations, gibson) builds air-gapped with zero undeclared external fetch.
+# This is the self-hostable/defense promise: mirror the public modules once,
+# build forever offline. gibson is in the list because it is public and its
+# image is the product: a stranger who clones it must reach every module
+# through the public proxy, with no zeroroot-ai secret.
 #
 # Three phases per repo:
 #   0. Clean-room clone: anonymous shallow https clone of the PUBLIC repo —
@@ -31,8 +33,19 @@
 
 set -euo pipefail
 
-OSS_REPOS=(sdk adk setec gibson-executor)
-declare -A MODULE_DIR=([sdk]="." [adk]="gibson" [setec]="." [gibson-executor]=".")
+OSS_REPOS=(sdk adk setec gibson-executor cve-triage integrations gibson)
+# Space-separated module directories per repo. A repo with several modules
+# (integrations, gibson-executor's tools/recon) lists each one: every module
+# a shipped image builds from must pass, not only the root.
+declare -A MODULE_DIRS=(
+  [sdk]="."
+  [adk]="gibson"
+  [setec]="."
+  [gibson-executor]=". tools/recon"
+  [cve-triage]="."
+  [integrations]="plugins/github plugins/gitlab plugins/example"
+  [gibson]="."
+)
 
 workdir="${1:-$(mktemp -d)}"
 mkdir -p "${workdir}"
@@ -83,27 +96,30 @@ for repo in "${OSS_REPOS[@]}"; do
       "https://github.com/zeroroot-ai/${repo}.git" "${workdir}/${repo}" \
       || { echo "SETUP FAILURE: cannot anonymously clone public repo zeroroot-ai/${repo}" >&2; exit 2; }
   fi
-  mod_dir="${workdir}/${repo}/${MODULE_DIR[${repo}]}"
-  [[ -f "${mod_dir}/go.mod" ]] || { echo "SETUP FAILURE: no go.mod at ${mod_dir}" >&2; exit 2; }
+  for sub in ${MODULE_DIRS[${repo}]}; do
+    mod_dir="${workdir}/${repo}/${sub}"
+    label="${repo}/${sub}"
+    [[ -f "${mod_dir}/go.mod" ]] || { echo "SETUP FAILURE: no go.mod at ${mod_dir}" >&2; exit 2; }
 
-  note "== ${repo}: phase 1 — go mod download (public proxy, dedicated module cache)"
-  (cd "${mod_dir}" && GOPROXY="https://proxy.golang.org,direct" go mod download) || {
-    echo "AIR-GAP GATE FAILED: ${repo} has a dependency not publicly fetchable or not declared (gibson#818)" >&2
-    exit 1
-  }
+    note "== ${label}: phase 1 — go mod download (public proxy, dedicated module cache)"
+    (cd "${mod_dir}" && GOPROXY="https://proxy.golang.org,direct" go mod download) || {
+      echo "AIR-GAP GATE FAILED: ${label} has a dependency not publicly fetchable or not declared (gibson#818)" >&2
+      exit 1
+    }
 
-  note "== ${repo}: phase 2 — air-gapped go build ./..."
-  airgap_exec "${mod_dir}" go build ./... || {
-    echo "AIR-GAP GATE FAILED: ${repo} build needs a network fetch beyond the warmed module cache (gibson#818)" >&2
-    exit 1
-  }
+    note "== ${label}: phase 2 — air-gapped go build ./..."
+    airgap_exec "${mod_dir}" go build ./... || {
+      echo "AIR-GAP GATE FAILED: ${label} build needs a network fetch beyond the warmed module cache (gibson#818)" >&2
+      exit 1
+    }
 
-  note "== ${repo}: phase 2 — air-gapped test compile (go test -run '^\$' ./...)"
-  airgap_exec "${mod_dir}" go test -run '^$' -count=1 ./... >/dev/null || {
-    echo "AIR-GAP GATE FAILED: ${repo} test build needs a network fetch beyond the warmed module cache (gibson#818)" >&2
-    exit 1
-  }
-  note "   OK: ${repo} builds air-gapped"
+    note "== ${label}: phase 2 — air-gapped test compile (go test -run '^\$' ./...)"
+    airgap_exec "${mod_dir}" go test -run '^$' -count=1 ./... >/dev/null || {
+      echo "AIR-GAP GATE FAILED: ${label} test build needs a network fetch beyond the warmed module cache (gibson#818)" >&2
+      exit 1
+    }
+    note "   OK: ${label} builds air-gapped"
+  done
 done
 
-note "check-airgap-build: OK — clean-room OSS clones build with zero external fetch"
+note "check-airgap-build: OK — clean-room clones of every public Go repo build with zero external fetch"
