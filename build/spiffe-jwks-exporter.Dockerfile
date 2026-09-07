@@ -1,22 +1,21 @@
 # Sourced from the ghcr.io/zeroroot-ai/mirror copy populated by
 # zeroroot-ai/.github :: mirror-images.yml. Pinned by digest; Dependabot
-# (docker ecosystem, /build) bumps the digest. To move the Go version, add
-# the tag to mirror-list.yaml, re-run the mirror workflow, then bump here.
-FROM ghcr.io/zeroroot-ai/mirror/golang:1.26.6-alpine@sha256:af8d6740070b8906d12eae1c3e3ea0957fb63f492051ea05e354c38ef9fe88df AS build
+# (docker ecosystem, /build) bumps the digest. To move the Go version, bump
+# go.mod, add the tag to mirror-list.yaml, then bump every builder here: the
+# org guard (check-go-toolchain.sh, .github#22) keeps them equal.
+FROM ghcr.io/zeroroot-ai/mirror/golang:1.26.8-alpine@sha256:ce864e7223ac17b1775e6fd0b4c0db580c2eb50e7953a427916379e4b92a1628 AS build
 
 # git is required by the --mount=type=secret RUN layer below to configure
 # private-module credentials. Alpine Go images ship without it.
 RUN apk add --no-cache git ca-certificates
 
 WORKDIR /src
-# Defensive complement to the pinned base image (#914 bumped it to
-# golang:1.26.4 to match go.mod). The mirror golang image bakes
-# GOTOOLCHAIN=local, so if a future go.mod toolchain bump ever outpaces the
-# mirror tag the build would fail with "go.mod requires go >= 1.X.Y (running
-# go 1.X.Z; GOTOOLCHAIN=local)". GOTOOLCHAIN=auto lets the toolchain
-# self-fetch in that window. Matches the daemon Dockerfile pattern after the
-# E4 fold (gibson#913).
-ENV GOTOOLCHAIN=auto
+# The builder image carries exactly the Go that go.mod names, and the org
+# guard (check-go-toolchain.sh, .github#22) fails a PR where they differ.
+# GOTOOLCHAIN=local makes a mismatch fail the build instead of downloading a
+# toolchain, so the pinned base is the toolchain that built the binary.
+ARG GOTOOLCHAIN=local
+ENV GOTOOLCHAIN=${GOTOOLCHAIN}
 COPY go.mod go.sum ./
 # Every github.com/zeroroot-ai/* module this build needs (sdk, ast-checks,
 # setec, testfixtures) is public and served by proxy.golang.org, which also

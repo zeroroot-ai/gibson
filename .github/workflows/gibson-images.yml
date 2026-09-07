@@ -131,7 +131,7 @@ jobs:
             image: ghcr.io/zeroroot-ai/gibson-bootstrap
             tag_pattern: gibson-bootstrap-v(.*)
             build_args: ""
-    uses: zeroroot-ai/.github/.github/workflows/reusable-image-build.yml@ff1284a9ffcb2cd1d2437de2b5bd214de24878b3 # main, ignore-unfixed, .github#19
+    uses: zeroroot-ai/.github/.github/workflows/reusable-image-build.yml@f760edb01410e83c4e262218b80f64d939fe80f3 # main, 2026-09-07: .github#22 go toolchain guard
     permissions:
       contents: read
       packages: write
@@ -146,6 +146,9 @@ jobs:
       image_name: ${{ matrix.image }}
       tag_pattern: ${{ matrix.tag_pattern }}
       build_args: ${{ matrix.build_args }}
+      # GOTOOLCHAIN=local as a build-arg (.github#22): every matrix image is a
+      # Go build and fails when go.mod names a Go the pinned base does not carry.
+      go_toolchain_local: true
 
   # ---- gibson-bootstrap-runner: built AFTER gibson-bootstrap ---------------
   # Dockerfile.runner starts FROM ghcr.io/zeroroot-ai/gibson-bootstrap:latest,
@@ -157,7 +160,7 @@ jobs:
   bootstrap-runner:
     name: gibson-bootstrap-runner
     needs: images
-    uses: zeroroot-ai/.github/.github/workflows/reusable-image-build.yml@ff1284a9ffcb2cd1d2437de2b5bd214de24878b3 # main, ignore-unfixed, .github#19
+    uses: zeroroot-ai/.github/.github/workflows/reusable-image-build.yml@f760edb01410e83c4e262218b80f64d939fe80f3 # main, 2026-09-07: .github#22 go toolchain guard
     permissions:
       contents: read
       packages: write
@@ -200,7 +203,7 @@ jobs:
   belief-sidecar-image:
     name: gibson-belief-sidecar
     needs: belief-sidecar-test
-    uses: zeroroot-ai/.github/.github/workflows/reusable-image-build.yml@ff1284a9ffcb2cd1d2437de2b5bd214de24878b3 # main, ignore-unfixed, .github#19
+    uses: zeroroot-ai/.github/.github/workflows/reusable-image-build.yml@f760edb01410e83c4e262218b80f64d939fe80f3 # main, 2026-09-07: .github#22 go toolchain guard
     permissions:
       contents: read
       packages: write

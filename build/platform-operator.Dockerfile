@@ -1,5 +1,5 @@
 # Build the manager binary
-FROM ghcr.io/zeroroot-ai/mirror/golang:1.26.6@sha256:640a234f4bea3e399c056b7b8f9c667c4939befae8db2f14e9785e16eccd4205 AS builder
+FROM ghcr.io/zeroroot-ai/mirror/golang:1.26.8-alpine@sha256:ce864e7223ac17b1775e6fd0b4c0db580c2eb50e7953a427916379e4b92a1628 AS builder
 ARG TARGETOS
 ARG TARGETARCH
 
@@ -9,21 +9,19 @@ COPY go.mod go.mod
 COPY go.sum go.sum
 # Install git (needed for private-module direct fetches when go mod
 # can't reach the proxy; tenant-operator imports github.com/zeroroot-ai/gibson).
-RUN apt-get update && apt-get install -y --no-install-recommends git ca-certificates && rm -rf /var/lib/apt/lists/*
+RUN apk add --no-cache git ca-certificates
 # cache deps before building and copying source so that we don't need to re-download as much
 # and so that source changes don't invalidate our downloaded layer
 # Every github.com/zeroroot-ai/* module this build needs (sdk, ast-checks,
 # setec, testfixtures) is public and served by proxy.golang.org, which also
 # holds every version go.sum pins. No GOPRIVATE, no git credential: the build
 # runs the same for a stranger as for CI (ADR-0089, scripts/check-airgap-build.sh).
-# Defensive complement to the pinned base image (#914 bumped it to
-# golang:1.26.4 to match go.mod). The mirror golang image bakes
-# GOTOOLCHAIN=local, so if a future go.mod toolchain bump ever outpaces the
-# mirror tag the build would fail with "go.mod requires go >= 1.X.Y (running
-# go 1.X.Z; GOTOOLCHAIN=local)". GOTOOLCHAIN=auto lets the toolchain
-# self-fetch in that window. Matches the daemon Dockerfile pattern after the
-# E4 fold (gibson#913).
-ENV GOTOOLCHAIN=auto
+# The builder image carries exactly the Go that go.mod names, and the org
+# guard (check-go-toolchain.sh, .github#22) fails a PR where they differ.
+# GOTOOLCHAIN=local makes a mismatch fail the build instead of downloading a
+# toolchain, so the pinned base is the toolchain that built the binary.
+ARG GOTOOLCHAIN=local
+ENV GOTOOLCHAIN=${GOTOOLCHAIN}
 RUN go mod download
 
 # Copy the Go source (relies on .dockerignore to filter)

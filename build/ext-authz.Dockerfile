@@ -11,7 +11,7 @@
 # ============================================================================
 # Stage 1: Builder — Pure Go compilation (no CGO)
 # ============================================================================
-FROM ghcr.io/zeroroot-ai/mirror/golang:1.26.6-alpine@sha256:af8d6740070b8906d12eae1c3e3ea0957fb63f492051ea05e354c38ef9fe88df AS builder
+FROM ghcr.io/zeroroot-ai/mirror/golang:1.26.8-alpine@sha256:ce864e7223ac17b1775e6fd0b4c0db580c2eb50e7953a427916379e4b92a1628 AS builder
 
 RUN apk add --no-cache git ca-certificates
 
@@ -24,14 +24,12 @@ COPY go.mod go.sum ./
 # setec, testfixtures) is public and served by proxy.golang.org, which also
 # holds every version go.sum pins. No GOPRIVATE, no git credential: the build
 # runs the same for a stranger as for CI (ADR-0089, scripts/check-airgap-build.sh).
-# Defensive complement to the pinned base image (#914 bumped it to
-# golang:1.26.4 to match go.mod). The mirror golang image bakes
-# GOTOOLCHAIN=local, so if a future go.mod toolchain bump ever outpaces the
-# mirror tag the build would fail with "go.mod requires go >= 1.X.Y (running
-# go 1.X.Z; GOTOOLCHAIN=local)". GOTOOLCHAIN=auto lets the toolchain
-# self-fetch in that window. Matches the daemon Dockerfile pattern after the
-# E4 fold (gibson#913).
-ENV GOTOOLCHAIN=auto
+# The builder image carries exactly the Go that go.mod names, and the org
+# guard (check-go-toolchain.sh, .github#22) fails a PR where they differ.
+# GOTOOLCHAIN=local makes a mismatch fail the build instead of downloading a
+# toolchain, so the pinned base is the toolchain that built the binary.
+ARG GOTOOLCHAIN=local
+ENV GOTOOLCHAIN=${GOTOOLCHAIN}
 RUN go mod download
 
 # Copy source.

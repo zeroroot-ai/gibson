@@ -18,14 +18,19 @@
 # ============================================================================
 # Stage 1: Builder
 # ============================================================================
-FROM ghcr.io/zeroroot-ai/mirror/golang:1.25-alpine@sha256:1ae0735f00daffa3aaf1363a5184c0d2dc55c78e3db4ec70241cdac97bf84b59 AS builder
+FROM ghcr.io/zeroroot-ai/mirror/golang:1.26.8-alpine@sha256:ce864e7223ac17b1775e6fd0b4c0db580c2eb50e7953a427916379e4b92a1628 AS builder
 
 # git is required by the Go toolchain for the `direct` proxy fallback.
 RUN apk add --no-cache git ca-certificates
 
 WORKDIR /workspace
 
-ENV GOTOOLCHAIN=auto
+# The builder image carries exactly the Go that go.mod names, and the org
+# guard (check-go-toolchain.sh, .github#22) fails a PR where they differ.
+# GOTOOLCHAIN=local makes a mismatch fail the build instead of downloading a
+# toolchain, so the pinned base is the toolchain that built the binary.
+ARG GOTOOLCHAIN=local
+ENV GOTOOLCHAIN=${GOTOOLCHAIN}
 ENV CGO_ENABLED=0
 
 # Copy module manifests first to maximise layer-cache hits.
