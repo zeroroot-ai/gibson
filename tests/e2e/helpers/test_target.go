@@ -1,6 +1,8 @@
 // SPDX-License-Identifier: Elastic-2.0
 // Copyright 2026 Zero Root AI
 
+//go:build e2e
+
 // Package helpers — test_target.go
 //
 // Test-only target registration for the cluster-bound e2e suites. Gibson has

@@ -33,6 +33,7 @@ import (
 	"io"
 	"os"
 	"os/exec"
+	"path/filepath"
 	"regexp"
 	"sort"
 	"strconv"
@@ -321,7 +322,7 @@ func isExcludedFile(path string) bool {
 // so only the header is read. A file that cannot be read (deleted in the
 // diff) has no constraint.
 func hasBuildTag(path, tag string) bool {
-	f, err := os.Open(path)
+	f, err := os.Open(filepath.Clean(path))
 	if err != nil {
 		return false
 	}
