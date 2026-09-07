@@ -4,7 +4,7 @@
 # In plain words: a tenant that switched a tool on can run it, a tenant that
 # never did cannot, and nobody can run a tool that is not in the catalog.
 #
-# WHAT THIS PROVES vs. the other exit tests. deploy's exit-test-vanilla-install
+# WHAT THIS PROVES vs. the other exit tests. hosted's exit-test-vanilla-install
 # proves the SANCTIONED PROFILE installs. exit-test-sandboxed-dispatch proves
 # AGENT dispatch isolation. This proves the TOOL half of ADR-0017: the catalog
 # manifest is the single source of truth for a tool's runtime shape, and the
@@ -54,10 +54,12 @@ permissions:
   contents: read
 
 env:
+  # hosted's recreate renders the chart from a checkout of zeroroot-ai/charts.
+  CHARTS_ROOT: ${{ github.workspace }}/charts
   NS: gibson
   RELEASE: gibson
   CLUSTER: vanilla
-  # The kind node the deploy bring-up creates (vanilla-up.sh: <cluster>-control-plane).
+  # The kind node the hosted bring-up creates (vanilla-up.sh: <cluster>-control-plane).
   NODE: vanilla-control-plane
 
 jobs:
@@ -71,21 +73,26 @@ jobs:
         with:
           path: gibson
 
-      # The kind bring-up + the sanctioned setec+gvisor profile + the gvisor
-      # node-prep all live in the deploy repo. Reuse them rather than
-      # re-implementing the cluster in this file (ONE bring-up path).
-      - name: Checkout deploy
+      # The kind bring-up (make substrate / make recreate ENV=kind), the
+      # sanctioned setec+gvisor profile and the gvisor node-prep live in the
+      # hosted repo since the 2026-09-04 split (ADR-0086; deploy and gitops
+      # were deleted). Reuse them rather than re-implementing the cluster in
+      # this file (ONE bring-up path). hosted is private, so the checkout
+      # needs the org read PAT; the default GITHUB_TOKEN cannot read it.
+      - name: Checkout hosted
         uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
-          repository: zeroroot-ai/deploy
-          path: deploy
-          # DEPLOY_RO_PAT is not a secret on this repo — the fallback to
-          # github.token then 404s, because a repo-scoped GITHUB_TOKEN cannot
-          # read another PRIVATE repo, and deploy is private. That failed the
-          # checkout before the cluster was ever built, so this exit test
-          # reported "failure" for a reason that had nothing to do with what it
-          # tests.
-          token: ${{ github.token }}
+          repository: zeroroot-ai/hosted
+          path: hosted
+          token: ${{ secrets.GH_PAT_PLATFORM_RO }}
+
+      # The chart source lives in zeroroot-ai/charts (ADR-0086); hosted holds
+      # none and its recreate reads CHARTS_ROOT. charts is public.
+      - name: Checkout charts
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          repository: zeroroot-ai/charts
+          path: charts
 
       - name: Set up Go
         uses: actions/setup-go@b7ad1dad31e06c5925ef5d2fc7ad053ef454303e # v5
@@ -105,7 +112,7 @@ jobs:
       # `make recreate ENV=kind` runs stage 1 through terraform (deploy#1776,
       # scripts/recreate-kind.sh:203). The deleted `vanilla-fresh` did not, so
       # nothing here installed it and every exit test died with
-      # "terraform is not on PATH" (run 33675016607). Pinned to deploy's own CI
+      # "terraform is not on PATH" (run 33675016607). Pinned to hosted's own CI
       # version; kind/gibson requires >= 1.9.
       - name: Install terraform
         uses: hashicorp/setup-terraform@dfe3c3f87815947d99a8997f908cb6525fc44e9e # v4
@@ -119,7 +126,7 @@ jobs:
       # variable it used to take, so there is one path and no second one. The
       # state dir is the runner's temp, because nothing here owns /bulk.
       - name: Stage 0, the substrate and the bringup keyring
-        working-directory: deploy
+        working-directory: hosted
         env:
           GHCR_PULL_TOKEN: ${{ secrets.GHCR_RO_PAT }}
         run: |
@@ -134,7 +141,7 @@ jobs:
       # runsc handler) and installs the umbrella with values-vanilla.yaml. The
       # 2-core overlay shrinks REQUESTS so the whole platform packs onto the runner.
       - name: Stand up the setec+gvisor cluster
-        working-directory: deploy
+        working-directory: hosted
         run: |
           SUBSTRATE_DIR="$RUNNER_TEMP/substrate" \
             EXTRA_VALUES=test/vanilla/ci-2core-resources.values.yaml make recreate ENV=kind
@@ -195,24 +202,31 @@ jobs:
           kind load docker-image ghcr.io/zeroroot-ai/gibson:e2e-tool --name "$CLUSTER"
 
       - name: Point the daemon at the test-mode image with authz off + fixtures on
-        working-directory: deploy
+        working-directory: hosted
         run: |
           set -euo pipefail
-          # -f e2e-runner.values.yaml registers the runner's ClusterSPIFFEID and
-          # allow-lists its SVID on the daemon's gRPC listener. Without it the
+          # The e2eRunner values register the runner's ClusterSPIFFEID and
+          # allow-list its SVID on the daemon's gRPC listener. Without them the
           # runner has no identity and the daemon closes its connection: the
           # listener speaks SPIFFE mTLS and refuses plaintext outright
           # (zero-trust-hardening Req 1.2).
-          helm upgrade "$RELEASE" helm/gibson -n "$NS" --reuse-values \
-            -f test/vanilla/e2e-runner.values.yaml \
-            --set gibson-workloads.gibson.image.repository=ghcr.io/zeroroot-ai/gibson \
-            --set gibson-workloads.gibson.image.tag=e2e-tool \
-            --set gibson-workloads.gibson.image.pullPolicy=IfNotPresent \
-            --set gibson-workloads.gibson.authz.enabled=false \
-            --set-string gibson-workloads.gibson.extraEnv.GIBSON_TEST_FIXTURES_ENABLED=true \
-            --wait --timeout 20m
-          kubectl -n "$NS" rollout status statefulset/gibson-gibson-workloads-0 --timeout=5m || \
-            kubectl -n "$NS" rollout status statefulset -l app.kubernetes.io/component=daemon --timeout=5m
+          kubectl -n argocd patch application gibson --type json -p '[
+              {"op":"add","path":"/spec/source/helm/values","value":"gibson-workloads:\n  gibson:\n    e2eRunner:\n      enabled: true\n    auth:\n      spiffe:\n        allowedPeerIDs:\n          - spiffe://zeroroot.ai/platform/tenant-operator\n          - spiffe://zeroroot.ai/platform/connector-operator\n          - spiffe://zeroroot.ai/platform/e2e-runner\n"},
+              {"op":"add","path":"/spec/source/helm/parameters/-","value":{"name":"gibson-workloads.gibson.image.repository","value":"ghcr.io/zeroroot-ai/gibson","forceString":true}},
+              {"op":"add","path":"/spec/source/helm/parameters/-","value":{"name":"gibson-workloads.gibson.image.tag","value":"e2e-tool","forceString":true}},
+              {"op":"add","path":"/spec/source/helm/parameters/-","value":{"name":"gibson-workloads.gibson.image.pullPolicy","value":"IfNotPresent","forceString":true}},
+              {"op":"add","path":"/spec/source/helm/parameters/-","value":{"name":"gibson-workloads.gibson.authz.enabled","value":"false"}},
+              {"op":"add","path":"/spec/source/helm/parameters/-","value":{"name":"gibson-workloads.gibson.extraEnv.GIBSON_TEST_FIXTURES_ENABLED","value":"true","forceString":true}}
+            ]'
+
+          for i in $(seq 1 60); do
+            img=$(kubectl -n "$NS" get statefulset -l app.kubernetes.io/component=daemon \
+                    -o jsonpath='{.items[0].spec.template.spec.containers[?(@.name=="gibson")].image}' 2>/dev/null || true)
+            case "$img" in *:e2e-tool) echo "daemon image is $img"; break;; esac
+            [ "$i" = 60 ] && { echo "::error::the daemon StatefulSet never took the e2e-tool image (Argo app: $(kubectl -n argocd get app gibson -o jsonpath='{.status.sync.status}/{.status.health.status}'))"; exit 1; }
+            sleep 20
+          done
+          kubectl -n "$NS" rollout status statefulset -l app.kubernetes.io/component=daemon --timeout=20m
           # Confirm the daemon wired the sandboxed TOOL executor — the linchpin
           # for this test, the way the agent launcher is for the agent one.
           #
