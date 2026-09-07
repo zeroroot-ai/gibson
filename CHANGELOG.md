@@ -62,6 +62,15 @@ Completed or cancelled missions are unaffected.
 
 ---
 
+## [0.134.5](https://github.com/zeroroot-ai/gibson/compare/v0.134.4...v0.134.5) (2026-09-07)
+
+
+### Bug Fixes
+
+* **catalog:** re-pin every first-party component image to a build that exists ([#72](https://github.com/zeroroot-ai/gibson/issues/72)) ([ee5cc89](https://github.com/zeroroot-ai/gibson/commit/ee5cc8981259142c155ad62d72f3aa6e7bd8f286))
+* **ci:** the dispatch exit tests bring the cluster up from hosted, not the deleted deploy repo ([#69](https://github.com/zeroroot-ai/gibson/issues/69)) ([90608f9](https://github.com/zeroroot-ai/gibson/commit/90608f9f87b296466de7722f66661d85c7ecb016))
+* **ci:** the sandboxed-dispatch exit test runs in-cluster under the e2e-runner identity ([#71](https://github.com/zeroroot-ai/gibson/issues/71)) ([cbebcb0](https://github.com/zeroroot-ai/gibson/commit/cbebcb02b4b0f0a7ccd6088c439cd8ac4f23ab50))
+
 ## [0.134.4](https://github.com/zeroroot-ai/gibson/compare/v0.134.3...v0.134.4) (2026-09-07)
 
 
