@@ -18,7 +18,7 @@
 # ============================================================================
 # Stage 1: Builder
 # ============================================================================
-FROM ghcr.io/zeroroot-ai/mirror/golang:1.25-alpine AS builder
+FROM ghcr.io/zeroroot-ai/mirror/golang:1.25-alpine@sha256:1ae0735f00daffa3aaf1363a5184c0d2dc55c78e3db4ec70241cdac97bf84b59 AS builder
 
 # git is required by the Go toolchain for the `direct` proxy fallback.
 RUN apk add --no-cache git ca-certificates
@@ -51,7 +51,7 @@ RUN go build -ldflags="-s -w" -o /out/bootstrap-tenant-owner ./cmd/bootstrap-ten
 # ============================================================================
 # Stage 2: Runtime — distroless static (no libc, no shell, no package manager)
 # ============================================================================
-FROM ghcr.io/zeroroot-ai/mirror/distroless-static:nonroot
+FROM ghcr.io/zeroroot-ai/mirror/distroless-static:nonroot@sha256:1c2c046bc09ed40fad370b599a0b1ae7987f55b01e247cf27a7c27cd97e5bbc7
 
 COPY --from=builder /out/gibson-bootstrap /gibson-bootstrap
 COPY --from=builder /out/bootstrap-tenant-owner /bootstrap-tenant-owner

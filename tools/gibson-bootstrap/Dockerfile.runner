@@ -28,7 +28,7 @@ ARG BOOTSTRAP_TAG=latest
 FROM ghcr.io/zeroroot-ai/gibson-bootstrap:${BOOTSTRAP_TAG} AS bootstrap
 
 # Stage 2: alpine runner with the tools the chart's bootstrap.sh needs
-FROM ghcr.io/zeroroot-ai/mirror/alpine:3.21
+FROM ghcr.io/zeroroot-ai/mirror/alpine:3.21@sha256:48b0309ca019d89d40f670aa1bc06e426dc0931948452e8491e3d65087abc07d
 
 # bash         — the chart's bootstrap.sh shebang + helper functions
 # jq           — parse JSON output from `gibson-bootstrap zitadel-ensure-*`

@@ -11,7 +11,7 @@
 # ============================================================================
 # Stage 1: Builder - Pure Go compilation (no CGO)
 # ============================================================================
-FROM ghcr.io/zeroroot-ai/mirror/golang:1.26.6-alpine AS builder
+FROM ghcr.io/zeroroot-ai/mirror/golang:1.26.6-alpine@sha256:af8d6740070b8906d12eae1c3e3ea0957fb63f492051ea05e354c38ef9fe88df AS builder
 
 # Install git and ca-certificates for dependency fetching
 RUN apk add --no-cache git ca-certificates
@@ -116,7 +116,7 @@ RUN go build -ldflags="-s -w" -o /out/bootstrap-tenant-owner ./cmd/bootstrap-ten
 # ============================================================================
 # Stage 2: Runtime - Minimal Alpine
 # ============================================================================
-FROM ghcr.io/zeroroot-ai/mirror/alpine:3.21 AS runtime
+FROM ghcr.io/zeroroot-ai/mirror/alpine:3.21@sha256:48b0309ca019d89d40f670aa1bc06e426dc0931948452e8491e3d65087abc07d AS runtime
 
 # Install ca-certificates for HTTPS connections
 RUN apk add --no-cache ca-certificates

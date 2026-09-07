@@ -1,7 +1,16 @@
 version: 2
 updates:
   - package-ecosystem: "docker"
-    directory: "/"
+    # Every directory that holds a Dockerfile with a digest-pinned FROM.
+    # Scorecard Pinned-Dependencies wants the digest; this entry keeps it
+    # moving when the mirror or upstream refreshes the tag.
+    directories:
+      - "/"
+      - "/build"
+      - "/sidecar/belief"
+      - "/tools/gibson-bootstrap"
+      - "/tests/e2e/fixtures/agents/probe"
+      - "/tests/e2e/fixtures/targets/test-target"
     schedule: { interval: "weekly" }
     labels: ["dependencies", "docker"]
     commit-message: { prefix: "chore(deps)" }

@@ -76,7 +76,7 @@ alone, in about 200 lines. Variable elimination *is* exact inference, so this is
 not an approximation of what pgmpy did; the elimination order changes the cost,
 never the answer. `test_parity.py` asserts agreement with `pgmpy==0.1.26` to
 1e-12 across the shipped artifact's entire evidence space and 25 randomly
-generated networks. It runs in CI (`requirements-dev.txt` installs pgmpy there)
+generated networks. It runs in CI (`requirements-dev.txt`, compiled from `requirements-dev.in` with hashes, installs pgmpy there)
 and skips locally when pgmpy is absent.
 
 The on-disk CPD layout is unchanged — still pgmpy's `TabularCPD` column
@@ -97,10 +97,10 @@ python -m server --models ./models --port 8087
 Tests:
 
 ```bash
-pip install -r requirements.txt pytest
+pip install --require-hashes -r requirements.txt -r requirements-test.txt
 python -m pytest test_model.py test_infer.py -q     # runtime dependency set
 
-pip install -r requirements-dev.txt                 # adds pgmpy — dev only
+pip install --require-hashes -r requirements-dev.txt   # adds pgmpy — dev only
 python -m pytest test_parity.py -q                  # the pgmpy comparison
 ```
 

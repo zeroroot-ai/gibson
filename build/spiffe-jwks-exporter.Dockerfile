@@ -1,9 +1,8 @@
-ARG GOLANG_VERSION=1.26.4
 # Sourced from the ghcr.io/zeroroot-ai/mirror copy populated by
-# zeroroot-ai/.github :: mirror-images.yml. Mirror tags are immutable by
-# workflow policy; no SHA pin needed. Bump GOLANG_VERSION + add the matching
-# tag to mirror-list.yaml + re-run the workflow.
-FROM ghcr.io/zeroroot-ai/mirror/golang:${GOLANG_VERSION}-alpine AS build
+# zeroroot-ai/.github :: mirror-images.yml. Pinned by digest; Dependabot
+# (docker ecosystem, /build) bumps the digest. To move the Go version, add
+# the tag to mirror-list.yaml, re-run the mirror workflow, then bump here.
+FROM ghcr.io/zeroroot-ai/mirror/golang:1.26.4-alpine@sha256:3ad57304ad93bbec8548a0437ad9e06a455660655d9af011d58b993f6f615648 AS build
 
 # git is required by the --mount=type=secret RUN layer below to configure
 # private-module credentials. Alpine Go images ship without it.
@@ -31,7 +30,7 @@ COPY . .
 RUN CGO_ENABLED=0 GOFLAGS=-trimpath go build -ldflags='-s -w' \
     -o /out/spiffe-jwks-exporter ./cmd/spiffe-jwks-exporter
 
-FROM ghcr.io/zeroroot-ai/mirror/distroless-static:nonroot
+FROM ghcr.io/zeroroot-ai/mirror/distroless-static:nonroot@sha256:1c2c046bc09ed40fad370b599a0b1ae7987f55b01e247cf27a7c27cd97e5bbc7
 USER nonroot:nonroot
 COPY --from=build /out/spiffe-jwks-exporter /spiffe-jwks-exporter
 ENTRYPOINT ["/spiffe-jwks-exporter"]

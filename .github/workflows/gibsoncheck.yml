@@ -290,10 +290,17 @@ jobs:
         with:
           node-version: '22'
 
-      # Install buf globally so `make authz-registry BUF=buf` works without
-      # needing the dashboard node_modules tree (same pattern as SDK CI).
+      # Install buf on PATH so `make authz-registry BUF=buf` works without
+      # needing the dashboard node_modules tree.
+      # Pinned action (Scorecard Pinned-Dependencies rejects `npm install -g`
+      # because npm resolves by version, not by hash). Same pattern as sdk's
+      # buf-push.yml. The action ships no annotated v1 tag, only a moving
+      # `v1` branch, so the SHA is the pin.
       - name: Install buf
-        run: npm install -g @bufbuild/buf
+        uses: bufbuild/buf-setup-action@a47c93e0b1648d5651a065437926377d060baa99 # v1
+        with:
+          version: 1.72.0
+          github_token: ${{ secrets.GITHUB_TOKEN }}
 
       - name: Regenerate authz registry
         run: make authz-registry BUF=buf
