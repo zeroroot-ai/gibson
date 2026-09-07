@@ -43,6 +43,11 @@ func testRedisClient() *redis.Client {
 	})
 }
 
+// targetDocKey and targetNameKey mirror the key convention of the daemon's
+// Redis targetStore (internal/infra/database/redis).
+func targetDocKey(targetID string) string { return "gibson:target:" + targetID }
+func targetNameKey(name string) string    { return "gibson:target:by_name:" + name }
+
 // RegisterTestTarget inserts a test target record directly into the daemon's
 // Redis targetStore so that RunMission / CreateMission can reference it by UUID.
 //
@@ -50,7 +55,7 @@ func testRedisClient() *redis.Client {
 // connect. It returns the assigned target UUID string.
 func RegisterTestTarget(ctx context.Context, name, targetURL string) (string, error) {
 	rdb := testRedisClient()
-	defer rdb.Close()
+	defer func() { _ = rdb.Close() }()
 
 	if err := rdb.Ping(ctx).Err(); err != nil {
 		return "", fmt.Errorf("test_target: RegisterTestTarget: ping Redis %s: %w", rdb.Options().Addr, err)
@@ -78,12 +83,12 @@ func RegisterTestTarget(ctx context.Context, name, targetURL string) (string, er
 		return "", fmt.Errorf("test_target: RegisterTestTarget: marshal target doc: %w", err)
 	}
 
-	docKey := fmt.Sprintf("gibson:target:%s", targetID)
+	docKey := targetDocKey(targetID)
 	if err := rdb.Set(ctx, docKey, docJSON, 0).Err(); err != nil {
 		return "", fmt.Errorf("test_target: RegisterTestTarget: write target doc to Redis: %w", err)
 	}
 
-	nameKey := fmt.Sprintf("gibson:target:by_name:%s", name)
+	nameKey := targetNameKey(name)
 	if err := rdb.Set(ctx, nameKey, targetID, 0).Err(); err != nil {
 		return "", fmt.Errorf("test_target: RegisterTestTarget: write target name lookup to Redis: %w", err)
 	}
@@ -95,8 +100,8 @@ func RegisterTestTarget(ctx context.Context, name, targetURL string) (string, er
 // Tolerates missing keys. Idempotent.
 func DeleteTestTarget(ctx context.Context, targetID, name string) {
 	rdb := testRedisClient()
-	defer rdb.Close()
+	defer func() { _ = rdb.Close() }()
 
-	_ = rdb.Del(ctx, fmt.Sprintf("gibson:target:%s", targetID))
-	_ = rdb.Del(ctx, fmt.Sprintf("gibson:target:by_name:%s", name))
+	_ = rdb.Del(ctx, targetDocKey(targetID))
+	_ = rdb.Del(ctx, targetNameKey(name))
 }
