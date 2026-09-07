@@ -2,7 +2,7 @@
 # zeroroot-ai/.github :: mirror-images.yml. Pinned by digest; Dependabot
 # (docker ecosystem, /build) bumps the digest. To move the Go version, add
 # the tag to mirror-list.yaml, re-run the mirror workflow, then bump here.
-FROM ghcr.io/zeroroot-ai/mirror/golang:1.26.4-alpine@sha256:3ad57304ad93bbec8548a0437ad9e06a455660655d9af011d58b993f6f615648 AS build
+FROM ghcr.io/zeroroot-ai/mirror/golang:1.26.6-alpine@sha256:af8d6740070b8906d12eae1c3e3ea0957fb63f492051ea05e354c38ef9fe88df AS build
 
 # git is required by the --mount=type=secret RUN layer below to configure
 # private-module credentials. Alpine Go images ship without it.
