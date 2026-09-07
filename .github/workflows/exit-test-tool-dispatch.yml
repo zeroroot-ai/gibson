@@ -205,15 +205,11 @@ jobs:
         working-directory: hosted
         run: |
           set -euo pipefail
-          # -f e2e-runner.values.yaml registers the runner's ClusterSPIFFEID and
-          # allow-lists its SVID on the daemon's gRPC listener. Without it the
+          # The e2eRunner values register the runner's ClusterSPIFFEID and
+          # allow-list its SVID on the daemon's gRPC listener. Without them the
           # runner has no identity and the daemon closes its connection: the
           # listener speaks SPIFFE mTLS and refuses plaintext outright
           # (zero-trust-hardening Req 1.2).
-          # The platform is an Argo Application (hosted), not a helm release, so
-          # `helm upgrade` has nothing to upgrade. The e2e runner's identity and
-          # the test-mode daemon image go in through the Application's helm
-          # values and parameters, the same way exit-test-bank does it.
           kubectl -n argocd patch application gibson --type json -p '[
               {"op":"add","path":"/spec/source/helm/values","value":"gibson-workloads:\n  gibson:\n    e2eRunner:\n      enabled: true\n    auth:\n      spiffe:\n        allowedPeerIDs:\n          - spiffe://zeroroot.ai/platform/tenant-operator\n          - spiffe://zeroroot.ai/platform/connector-operator\n          - spiffe://zeroroot.ai/platform/e2e-runner\n"},
               {"op":"add","path":"/spec/source/helm/parameters/-","value":{"name":"gibson-workloads.gibson.image.repository","value":"ghcr.io/zeroroot-ai/gibson","forceString":true}},
