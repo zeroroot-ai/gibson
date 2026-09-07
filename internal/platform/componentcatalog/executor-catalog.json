@@ -1,5 +1,5 @@
 {
-  "image": "ghcr.io/zeroroot-ai/gibson-executor@sha256:1c923f35d43e63d11300b4c86e79dfe6ee572304124fa8c175bfee32cc1a5cb8",
+  "image": "ghcr.io/zeroroot-ai/gibson-executor@sha256:f7885d19cb602d44ca0f62c8a7744e0d0529a2f811c2bd361c2996153e0ae470",
   "tools": [
     {
       "name": "dnsx",
