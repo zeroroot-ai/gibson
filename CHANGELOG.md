@@ -62,6 +62,13 @@ Completed or cancelled missions are unaffected.
 
 ---
 
+## [0.134.3](https://github.com/zeroroot-ai/gibson/compare/v0.134.2...v0.134.3) (2026-09-07)
+
+
+### Bug Fixes
+
+* **e2e:** remove the dead mission-run fixture path ([#58](https://github.com/zeroroot-ai/gibson/issues/58)) ([c69d37d](https://github.com/zeroroot-ai/gibson/commit/c69d37d13cd78e412f4fccad66ec7eecff8f7762))
+
 ## [0.134.2](https://github.com/zeroroot-ai/gibson/compare/v0.134.1...v0.134.2) (2026-09-07)
 
 
