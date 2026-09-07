@@ -33,6 +33,7 @@ import (
 	"io"
 	"os"
 	"os/exec"
+	"path/filepath"
 	"regexp"
 	"sort"
 	"strconv"
@@ -308,6 +309,40 @@ func isExcludedFile(path string) bool {
 	// Generated authz-registry Go artifact.
 	if strings.HasSuffix(path, "internal/platform/authz/registry/registry.go") {
 		return true
+	}
+	// Cluster-bound suites. A file behind the e2e build constraint is never
+	// compiled by the unit profile (`go test ./...` without -tags=e2e), so the
+	// gate could only ever count its lines as missed. Keyed by the constraint
+	// in the file, not by its path (gibson#58).
+	return hasBuildTag(path, "e2e")
+}
+
+// hasBuildTag reports whether the file at path carries a `//go:build`
+// constraint that names tag. The constraint block ends at the package clause,
+// so only the header is read. A file that cannot be read (deleted in the
+// diff) has no constraint.
+func hasBuildTag(path, tag string) bool {
+	f, err := os.Open(filepath.Clean(path))
+	if err != nil {
+		return false
+	}
+	defer func() { _ = f.Close() }()
+	sc := bufio.NewScanner(f)
+	for sc.Scan() {
+		line := strings.TrimSpace(sc.Text())
+		if strings.HasPrefix(line, "package ") {
+			return false
+		}
+		if !strings.HasPrefix(line, "//go:build ") {
+			continue
+		}
+		for _, tok := range strings.FieldsFunc(line[len("//go:build "):], func(r rune) bool {
+			return r == ' ' || r == '(' || r == ')' || r == '|' || r == '&' || r == '!'
+		}) {
+			if tok == tag {
+				return true
+			}
+		}
 	}
 	return false
 }

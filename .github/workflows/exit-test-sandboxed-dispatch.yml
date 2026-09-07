@@ -16,7 +16,7 @@
 # arrives via Envoy + ext-authz. So this test brings up the SAME setec+gvisor
 # runtime but with a TEST-MODE daemon (authz disabled, GIBSON_TEST_FIXTURES,
 # built `-tags="setec_integration test_fixtures"`) so the suite can dial the
-# daemon directly — exactly the model tests/e2e/mission_run_test.go uses.
+# daemon directly — the test-mode model every cluster-bound e2e suite uses.
 # Authentication itself is covered by login_full_chain / auth e2e, not here.
 #
 # ADR-0012: NEVER on pull_request. An exit test measures state on `main` for the
@@ -156,7 +156,7 @@ jobs:
       # Swap in a TEST-MODE daemon so the e2e suite can dial gRPC directly:
       # authz disabled (no Envoy/ext-authz in the test), test fixtures on, and
       # built with setec_integration so DelegateToAgent reaches the real setec
-      # launcher. This is the same test-mode contract mission_run_test.go relies
+      # launcher. This is the same test-mode contract the other e2e suites rely
       # on; it changes ONLY how the client authenticates, never the setec+gvisor
       # runtime under test.
       # The overlay below builds FROM the private daemon image on ghcr.io.

@@ -221,6 +221,39 @@ func TestIsExcludedFile(t *testing.T) {
 	}
 }
 
+// TestIsExcludedFileE2EBuildTag pins the exclusion on the e2e build
+// constraint (gibson#58): a helper behind `//go:build e2e` is excluded, the
+// same file without the constraint is not, and an unrelated tag does not
+// count. Files are created on disk because the check reads the header.
+func TestIsExcludedFileE2EBuildTag(t *testing.T) {
+	dir := t.TempDir()
+	write := func(name, body string) string {
+		p := dir + "/" + name
+		if err := os.WriteFile(p, []byte(body), 0o600); err != nil {
+			t.Fatal(err)
+		}
+		return p
+	}
+	tagged := write("tagged.go", "//go:build e2e\n// +build e2e\n\npackage helpers\n\nfunc F() {}\n")
+	combined := write("combined.go", "//go:build (integration || e2e) && !windows\n\npackage helpers\n")
+	plain := write("plain.go", "// Copyright\n\npackage helpers\n\nfunc F() {}\n")
+	other := write("other.go", "//go:build integration\n\npackage helpers\n")
+	late := write("late.go", "package helpers\n\n//go:build e2e\n")
+	for _, p := range []string{tagged, combined} {
+		if !isExcludedFile(p) {
+			t.Errorf("%s carries the e2e constraint and must be excluded", p)
+		}
+	}
+	for _, p := range []string{plain, other, late} {
+		if isExcludedFile(p) {
+			t.Errorf("%s has no e2e constraint and must NOT be excluded", p)
+		}
+	}
+	if isExcludedFile(dir + "/missing.go") {
+		t.Error("a file that cannot be read has no constraint")
+	}
+}
+
 func TestReportStringContainsMissed(t *testing.T) {
 	r := &Report{Threshold: 85, Total: 2, Covered: 1, Missed: []string{"a.go:5"}, Pass: false}
 	if !strings.Contains(r.String(), "a.go:5") {

@@ -16,7 +16,7 @@
 # Neither condition holds in the production Helm chart.
 
 patterns:
-  # Default happy-path response used by the probe agent (R3.3).
+  # Default happy-path response the e2e suites assert against.
   - pattern: "MOCK_LLM_DETERMINISTIC_RESPONSE_v1"
     response: "MOCK_LLM_DETERMINISTIC_RESPONSE_v1"
     mode: happy

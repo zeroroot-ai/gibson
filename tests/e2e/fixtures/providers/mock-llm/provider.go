@@ -26,9 +26,9 @@ import (
 	"github.com/zeroroot-ai/gibson/internal/infra/types"
 )
 
-// DeterministicResponse is the canonical canned response the probe agent
-// asserts against.  Changing this value is a breaking change; update
-// tests/e2e/fixtures/agents/probe/main.go in the same commit.
+// DeterministicResponse is the canonical canned response the e2e suites
+// assert against. It must equal helpers.MockProviderDeterministicResponse;
+// change both in the same commit.
 const DeterministicResponse = "MOCK_LLM_DETERMINISTIC_RESPONSE_v1"
 
 // ProviderName is the registry key used when the mock is registered.
@@ -77,7 +77,7 @@ func newE2EMockProvider() *e2EMockProvider {
 // Name returns the registry key. Matches ProviderName.
 func (p *e2EMockProvider) Name() string { return ProviderName }
 
-// Models returns the single mock model understood by the probe agent.
+// Models returns the single mock model the e2e suites use.
 func (p *e2EMockProvider) Models(_ context.Context) ([]llm.ModelInfo, error) {
 	return []llm.ModelInfo{
 		{
