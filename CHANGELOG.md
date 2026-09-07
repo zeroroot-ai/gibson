@@ -62,6 +62,13 @@ Completed or cancelled missions are unaffected.
 
 ---
 
+## [0.134.6](https://github.com/zeroroot-ai/gibson/compare/v0.134.5...v0.134.6) (2026-09-07)
+
+
+### Bug Fixes
+
+* **ci:** the e2e-runner Job carries the chart selector labels ([#73](https://github.com/zeroroot-ai/gibson/issues/73)) ([7168765](https://github.com/zeroroot-ai/gibson/commit/7168765477d116ae5c49a7188c5e1ae54393eeb9))
+
 ## [0.134.5](https://github.com/zeroroot-ai/gibson/compare/v0.134.4...v0.134.5) (2026-09-07)
 
 
