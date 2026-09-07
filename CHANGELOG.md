@@ -62,6 +62,13 @@ Completed or cancelled missions are unaffected.
 
 ---
 
+## [0.134.2](https://github.com/zeroroot-ai/gibson/compare/v0.134.1...v0.134.2) (2026-09-07)
+
+
+### Bug Fixes
+
+* **security:** scope workflow tokens, pin image bases, clear CodeQL and Go advisories ([#43](https://github.com/zeroroot-ai/gibson/issues/43)) ([6351db4](https://github.com/zeroroot-ai/gibson/commit/6351db4d70093d024da9e10286c76ab929c1250a))
+
 ## [0.134.1](https://github.com/zeroroot-ai/gibson/compare/v0.134.0...v0.134.1) (2026-09-06)
 
 

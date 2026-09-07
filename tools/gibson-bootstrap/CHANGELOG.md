@@ -1,5 +1,12 @@
 # Changelog
 
+## [1.5.1](https://github.com/zeroroot-ai/gibson/compare/gibson-bootstrap-v1.5.0...gibson-bootstrap-v1.5.1) (2026-09-07)
+
+
+### Bug Fixes
+
+* **security:** scope workflow tokens, pin image bases, clear CodeQL and Go advisories ([#43](https://github.com/zeroroot-ai/gibson/issues/43)) ([6351db4](https://github.com/zeroroot-ai/gibson/commit/6351db4d70093d024da9e10286c76ab929c1250a))
+
 ## [1.5.0](https://github.com/zeroroot-ai/gibson/compare/gibson-bootstrap-v1.4.0...gibson-bootstrap-v1.5.0) (2026-08-21)
 
 
