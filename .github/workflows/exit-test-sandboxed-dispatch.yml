@@ -212,7 +212,11 @@ jobs:
           # the whole list and drop the six the bringup set (postgres recovery,
           # the bucket, the pinned envoy ClusterIP), which would break the
           # cluster rather than retarget it.
+          # The e2e runner is a mesh peer: the e2eRunner values mint its SVID and
+          # allow-list it on the daemon's gRPC listener, which refuses plaintext
+          # (zero-trust-hardening Req 1.2). Same shape as exit-test-bank.
           kubectl -n argocd patch application gibson --type json -p '[
+              {"op":"add","path":"/spec/source/helm/values","value":"gibson-workloads:\n  gibson:\n    e2eRunner:\n      enabled: true\n    auth:\n      spiffe:\n        allowedPeerIDs:\n          - spiffe://zeroroot.ai/platform/tenant-operator\n          - spiffe://zeroroot.ai/platform/connector-operator\n          - spiffe://zeroroot.ai/platform/e2e-runner\n"},
               {"op":"add","path":"/spec/source/helm/parameters/-","value":{"name":"gibson-workloads.gibson.image.repository","value":"ghcr.io/zeroroot-ai/gibson","forceString":true}},
               {"op":"add","path":"/spec/source/helm/parameters/-","value":{"name":"gibson-workloads.gibson.image.tag","value":"e2e-dispatch","forceString":true}},
               {"op":"add","path":"/spec/source/helm/parameters/-","value":{"name":"gibson-workloads.gibson.image.pullPolicy","value":"IfNotPresent","forceString":true}},
@@ -257,44 +261,95 @@ jobs:
             sleep 10
           done
 
-      - name: Port-forward the daemon gRPC
+      # The daemon's gRPC listener speaks SPIFFE mTLS and refuses plaintext, so
+      # the suite cannot dial it over a port-forward from the runner (it did:
+      # "error reading server preface: EOF"). It runs in-cluster as a Job under
+      # the e2e-runner ServiceAccount with the SPIRE socket mounted, the same
+      # shape as exit-test-tool-dispatch and exit-test-bank.
+      - name: Build the e2e suite into an image
+        working-directory: gibson
         run: |
-          kubectl -n "$NS" port-forward svc/gibson-gibson-workloads 50002:50051 >/tmp/pf.log 2>&1 &
-          for _ in $(seq 1 30); do
-            (echo > /dev/tcp/127.0.0.1/50002) >/dev/null 2>&1 && break
-            sleep 2
-          done
+          set -euo pipefail
+          mkdir -p /tmp/ectx
+          CGO_ENABLED=0 GOOS=linux GOARCH=amd64 go test -tags=e2e -c \
+            -o /tmp/ectx/e2e.test ./tests/e2e/
+          cat > /tmp/ectx/Dockerfile <<'EOF'
+          FROM gcr.io/distroless/static-debian12:nonroot
+          COPY e2e.test /usr/local/bin/e2e.test
+          ENTRYPOINT ["/usr/local/bin/e2e.test"]
+          EOF
+          docker build -t ghcr.io/zeroroot-ai/gibson-e2e-runner:local /tmp/ectx
+          kind load docker-image ghcr.io/zeroroot-ai/gibson-e2e-runner:local --name "$CLUSTER"
 
-      # The fixture helpers register the mission's synthetic target by writing
-      # directly to the daemon's Redis (there is no public CreateTarget RPC).
-      # The sanctioned profile runs Redis WITH auth, so the address alone is not
-      # enough — without the credential every fixture fails with "NOAUTH
-      # Authentication required" before the assertions begin.
-      - name: Port-forward Redis and read its credential
+      - name: Run the sandboxed-dispatch exit test in-cluster
         run: |
-          kubectl -n "$NS" port-forward svc/gibson-redis-stack 6379:6379 >/tmp/pf-redis.log 2>&1 &
-          for _ in $(seq 1 30); do
-            (echo > /dev/tcp/127.0.0.1/6379) >/dev/null 2>&1 && break
-            sleep 2
-          done
+          set -euo pipefail
           pw=$(kubectl -n "$NS" get secret gibson-redis-stack -o jsonpath='{.data.redis-password}' | base64 -d)
           if [ -z "$pw" ]; then
             echo "::error::gibson-redis-stack has no redis-password; the fixture helpers cannot authenticate"
             exit 1
           fi
           echo "::add-mask::$pw"
-          echo "REDIS_ADDR=127.0.0.1:6379" >> "$GITHUB_ENV"
-          echo "REDIS_PASSWORD=$pw" >> "$GITHUB_ENV"
+          kubectl -n "$NS" delete secret gibson-e2e-runner-env --ignore-not-found
+          kubectl -n "$NS" create secret generic gibson-e2e-runner-env \
+            --from-literal=REDIS_PASSWORD="$pw"
 
-      - name: Run the sandboxed-dispatch exit test
-        working-directory: gibson
-        env:
-          GIBSON_TEST_FIXTURES_ENABLED: "true"
-          DAEMON_GRPC_ADDR: "127.0.0.1:50002"
-          REDIS_ADDR: ${{ env.REDIS_ADDR }}
-          REDIS_PASSWORD: ${{ env.REDIS_PASSWORD }}
-        run: |
-          go test -tags=e2e -run TestSandboxedAgentDispatch ./tests/e2e/... -timeout 20m -v
+          kubectl -n "$NS" delete job gibson-e2e-sandboxed-dispatch --ignore-not-found
+          cat <<EOF | kubectl -n "$NS" apply -f -
+          apiVersion: batch/v1
+          kind: Job
+          metadata:
+            name: gibson-e2e-sandboxed-dispatch
+          spec:
+            backoffLimit: 0
+            template:
+              metadata:
+                labels:
+                  app.kubernetes.io/component: e2e-runner
+              spec:
+                restartPolicy: Never
+                serviceAccountName: ${RELEASE}-e2e-runner
+                containers:
+                  - name: e2e
+                    image: ghcr.io/zeroroot-ai/gibson-e2e-runner:local
+                    imagePullPolicy: IfNotPresent
+                    args: ["-test.run", "TestSandboxedAgentDispatch", "-test.v", "-test.timeout", "20m"]
+                    env:
+                      - name: GIBSON_TEST_FIXTURES_ENABLED
+                        value: "true"
+                      - name: DAEMON_GRPC_ADDR
+                        value: "gibson-gibson-workloads.${NS}.svc.cluster.local:50051"
+                      - name: REDIS_ADDR
+                        value: "gibson-redis-stack.${NS}.svc.cluster.local:6379"
+                      - name: REDIS_PASSWORD
+                        valueFrom:
+                          secretKeyRef:
+                            name: gibson-e2e-runner-env
+                            key: REDIS_PASSWORD
+                    volumeMounts:
+                      - name: spire-agent-socket
+                        mountPath: /run/spire/sockets
+                        readOnly: true
+                volumes:
+                  - name: spire-agent-socket
+                    csi:
+                      driver: csi.spiffe.io
+                      readOnly: true
+          EOF
+
+          kubectl -n "$NS" wait --for=condition=Ready pod \
+            -l job-name=gibson-e2e-sandboxed-dispatch --timeout=3m || true
+          kubectl -n "$NS" logs -f job/gibson-e2e-sandboxed-dispatch --tail=-1 || true
+
+          for _ in $(seq 1 120); do
+            ok=$(kubectl -n "$NS" get job gibson-e2e-sandboxed-dispatch -o jsonpath='{.status.succeeded}' 2>/dev/null || true)
+            bad=$(kubectl -n "$NS" get job gibson-e2e-sandboxed-dispatch -o jsonpath='{.status.failed}' 2>/dev/null || true)
+            [ "${ok:-0}" != "0" ] && [ -n "${ok:-}" ] && { echo "exit test PASSED"; exit 0; }
+            [ "${bad:-0}" != "0" ] && [ -n "${bad:-}" ] && { echo "::error::the sandboxed-dispatch exit test FAILED"; exit 1; }
+            sleep 10
+          done
+          echo "::error::the sandboxed-dispatch exit test did not finish"
+          exit 1
 
       - name: Diagnostics on failure
         if: failure()
