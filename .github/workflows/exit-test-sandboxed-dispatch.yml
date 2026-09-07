@@ -305,6 +305,11 @@ jobs:
             template:
               metadata:
                 labels:
+                  # The daemon's NetworkPolicy admits the runner by the chart's
+                  # selector labels plus the component; the component alone left
+                  # every dial to the daemon in "i/o timeout" (run 34154995591).
+                  app.kubernetes.io/name: gibson-workloads
+                  app.kubernetes.io/instance: ${RELEASE}
                   app.kubernetes.io/component: e2e-runner
               spec:
                 restartPolicy: Never
