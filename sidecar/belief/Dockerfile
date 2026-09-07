@@ -55,7 +55,7 @@
 # below: wheels are built for a specific ABI tag (cp313) and link against the
 # runtime's glibc. python:3.13-slim-trixie and distroless/python3-debian13 are
 # both Debian 13 / CPython 3.13, which is what makes the copy in stage 2 valid.
-FROM ghcr.io/zeroroot-ai/mirror/python:3.13-slim-trixie@sha256:ffb752e139c0a19692a43af8d8523b274222dd68eebad5d583b45c2201c6e30a AS build
+FROM ghcr.io/zeroroot-ai/mirror/python:3.13-slim-trixie@sha256:9d2e5553305c7c7b0097999bb17187c69b921ccd6bc9d40e4bb5ebe652c00285 AS build
 
 ENV PYTHONDONTWRITEBYTECODE=1 \
     PIP_DISABLE_PIP_VERSION_CHECK=1 \
@@ -84,7 +84,7 @@ RUN find /deps -type d -name tests -prune -exec rm -rf {} + \
 # distroless: glibc, CPython 3.13 and its stdlib, ca-certificates, tzdata. No
 # shell, no package manager, no pip, no perl. `nonroot` runs as uid 65532 and
 # owns nothing writable, so there is no `useradd` step and nothing to chown.
-FROM ghcr.io/zeroroot-ai/mirror/distroless-python3-debian13:nonroot@sha256:6bfc400d0a6d89f50f5bbc0a4b4ff57214ae5c01647c3a74c2a0c8d830b4cc00
+FROM ghcr.io/zeroroot-ai/mirror/distroless-python3-debian13:nonroot@sha256:f3d5ddc6c64a019fe520e7f005f2880be21e6afc461b10a3c15ef2e4edc71e33
 
 # Don't write .pyc files; flush stdout/stderr immediately so container logs are
 # live (the server prints startup + listen lines to stderr).
