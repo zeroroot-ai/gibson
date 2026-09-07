@@ -1,10 +1,11 @@
 # Multi-stage build for the gibson connector-operator (ADR-0014).
-# ghcr.io/zeroroot-ai/mirror/golang:1.26.4 — the same mirrored builder as the
-# sibling operator images. go.mod names a newer toolchain than the image
-# ships, so GOTOOLCHAIN=auto lets go fetch it through GOPROXY, the same rule
-# as build/tenant-operator.Dockerfile.
-FROM ghcr.io/zeroroot-ai/mirror/golang:1.26.6@sha256:640a234f4bea3e399c056b7b8f9c667c4939befae8db2f14e9785e16eccd4205 AS build
-ENV GOTOOLCHAIN=auto
+# ghcr.io/zeroroot-ai/mirror/golang:1.26.8-alpine, the one builder every
+# gibson image uses: the Go that go.mod names, kept equal by the org guard
+# (check-go-toolchain.sh, .github#22). GOTOOLCHAIN=local makes a mismatch
+# fail the build instead of downloading a toolchain.
+FROM ghcr.io/zeroroot-ai/mirror/golang:1.26.8-alpine@sha256:ce864e7223ac17b1775e6fd0b4c0db580c2eb50e7953a427916379e4b92a1628 AS build
+ARG GOTOOLCHAIN=local
+ENV GOTOOLCHAIN=${GOTOOLCHAIN}
 WORKDIR /src
 COPY . .
 RUN CGO_ENABLED=0 GOOS=linux go build -trimpath -o /out/connector-operator ./operators/connector/cmd

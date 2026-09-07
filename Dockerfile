@@ -11,7 +11,7 @@
 # ============================================================================
 # Stage 1: Builder - Pure Go compilation (no CGO)
 # ============================================================================
-FROM ghcr.io/zeroroot-ai/mirror/golang:1.26.6-alpine@sha256:af8d6740070b8906d12eae1c3e3ea0957fb63f492051ea05e354c38ef9fe88df AS builder
+FROM ghcr.io/zeroroot-ai/mirror/golang:1.26.8-alpine@sha256:ce864e7223ac17b1775e6fd0b4c0db580c2eb50e7953a427916379e4b92a1628 AS builder
 
 # Install git and ca-certificates for dependency fetching
 RUN apk add --no-cache git ca-certificates
@@ -42,14 +42,12 @@ COPY go.mod go.sum ./
 # Download dependencies. Every first-party module is public and comes from
 # the public Go proxy. No credential is needed to build this image.
 
-# Allow the Go toolchain to auto-fetch the version specified in go.mod when
-# the base image ships an older patch. The base FROM is SHA-pinned to a
-# specific golang:1.26.4-alpine digest; Docker Hub re-tagging that alias for
-# new patch releases lags by hours-to-days, so without GOTOOLCHAIN=auto a
-# fresh go.mod toolchain bump fails the build with "go.mod requires go
-# >= 1.X.Y (running go 1.X.Z; GOTOOLCHAIN=local)". This keeps reproducible
-# base-image pinning while letting go.mod choose the toolchain.
-ENV GOTOOLCHAIN=auto
+# The builder image carries exactly the Go that go.mod names, and the org
+# guard (check-go-toolchain.sh, .github#22) fails a PR where they differ.
+# GOTOOLCHAIN=local makes a mismatch fail the build instead of downloading a
+# toolchain, so the pinned base is the toolchain that built the binary.
+ARG GOTOOLCHAIN=local
+ENV GOTOOLCHAIN=${GOTOOLCHAIN}
 
 RUN go mod download
 
