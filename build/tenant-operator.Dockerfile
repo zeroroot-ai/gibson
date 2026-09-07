@@ -1,5 +1,5 @@
 # Build the manager binary
-FROM ghcr.io/zeroroot-ai/mirror/golang:1.26.6@sha256:640a234f4bea3e399c056b7b8f9c667c4939befae8db2f14e9785e16eccd4205 AS builder
+FROM ghcr.io/zeroroot-ai/mirror/golang:1.26.8@sha256:9d2f36f06329b2a141b9db99ffa32765cf695ee57b813ca29e245e8670bcbfff AS builder
 ARG TARGETOS
 ARG TARGETARCH
 
