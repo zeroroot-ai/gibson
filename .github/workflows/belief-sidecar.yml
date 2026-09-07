@@ -54,7 +54,7 @@ jobs:
         working-directory: sidecar/belief
         run: |
           pip install --require-hashes -r requirements.txt
-          pip install pytest
+          pip install --require-hashes -r requirements-test.txt
 
       # Runs with the runtime dependency set and nothing else, so it also
       # proves the shipped image's dependency closure is sufficient. The
@@ -72,7 +72,7 @@ jobs:
       # not ship.
       - name: Install the pgmpy reference implementation (dev-only, never shipped)
         working-directory: sidecar/belief
-        run: pip install -r requirements-dev.txt
+        run: pip install --require-hashes -r requirements-dev.txt
 
       - name: Parity against pgmpy 0.1.26
         working-directory: sidecar/belief

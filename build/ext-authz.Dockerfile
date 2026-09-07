@@ -11,7 +11,7 @@
 # ============================================================================
 # Stage 1: Builder — Pure Go compilation (no CGO)
 # ============================================================================
-FROM ghcr.io/zeroroot-ai/mirror/golang:1.26.4-alpine AS builder
+FROM ghcr.io/zeroroot-ai/mirror/golang:1.26.4-alpine@sha256:3ad57304ad93bbec8548a0437ad9e06a455660655d9af011d58b993f6f615648 AS builder
 
 RUN apk add --no-cache git ca-certificates
 
@@ -52,14 +52,14 @@ RUN go build -ldflags="-s -w" -o /out/ext-authz ./cmd/ext-authz
 # Pre-creating the empty dirs in a writable builder stage and COPY-ing
 # them into the distroless final image side-steps this entirely.
 # ============================================================================
-FROM ghcr.io/zeroroot-ai/mirror/alpine:3.21 AS rootfs-dirs
+FROM ghcr.io/zeroroot-ai/mirror/alpine:3.21@sha256:48b0309ca019d89d40f670aa1bc06e426dc0931948452e8491e3d65087abc07d AS rootfs-dirs
 RUN mkdir -p /rootfs/etc/gibson/sa-identity-map \
     && mkdir -p /rootfs/etc/oras-auth
 
 # ============================================================================
 # Stage 2: Runtime — Distroless (no shell, minimal attack surface)
 # ============================================================================
-FROM ghcr.io/zeroroot-ai/mirror/distroless-static-debian12:nonroot AS runtime
+FROM ghcr.io/zeroroot-ai/mirror/distroless-static-debian12:nonroot@sha256:afa5c872c891853ca7fcf1f12c3edb23f7eeef36189728842dd51042ff57f7ab AS runtime
 
 # Copy the binary and CA certificates from the builder.
 COPY --from=builder /out/ext-authz /usr/local/bin/ext-authz

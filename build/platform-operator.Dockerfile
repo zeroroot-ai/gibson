@@ -1,5 +1,5 @@
 # Build the manager binary
-FROM ghcr.io/zeroroot-ai/mirror/golang:1.26.4 AS builder
+FROM ghcr.io/zeroroot-ai/mirror/golang:1.26.4@sha256:792443b89f65105abba56b9bd5e97f680a80074ac62fc844a584212f8c8102c3 AS builder
 ARG TARGETOS
 ARG TARGETARCH
 
@@ -36,7 +36,7 @@ RUN CGO_ENABLED=0 GOOS=${TARGETOS:-linux} GOARCH=${TARGETARCH} \
     go build -a -ldflags '-s -w' -o manager operators/platform/cmd/main.go
 
 # Distroless static base — minimal, nonroot, no shell, no package manager.
-FROM ghcr.io/zeroroot-ai/mirror/distroless-static:nonroot
+FROM ghcr.io/zeroroot-ai/mirror/distroless-static:nonroot@sha256:1c2c046bc09ed40fad370b599a0b1ae7987f55b01e247cf27a7c27cd97e5bbc7
 WORKDIR /
 COPY --from=builder /workspace/manager .
 USER 65532:65532

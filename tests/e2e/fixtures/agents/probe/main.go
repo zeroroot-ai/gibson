@@ -39,8 +39,10 @@ package main
 
 import (
 	"context"
+	"encoding/json"
 	"fmt"
 	"log/slog"
+	"math"
 	"os"
 	"strconv"
 	"time"
@@ -84,7 +86,7 @@ func run() error {
 	// Read configuration from env vars.
 	seed := envOrDefault("PROBE_SEED", defaultSeed)
 	maxItems := envIntOrDefault("PROBE_MAX_ITEMS", defaultMaxItems)
-	workTimeoutMS := envIntOrDefault("PROBE_WORK_TIMEOUT_MS", defaultWorkTimeoutMS)
+	workTimeoutMS := envInt32OrDefault("PROBE_WORK_TIMEOUT_MS", defaultWorkTimeoutMS)
 
 	slog.Info("probe: starting", "seed", seed, "max_items", maxItems)
 
@@ -137,7 +139,7 @@ func run() error {
 
 		workResp, pollErr := client.PollWork(pollCtx, &componentpb.PollWorkRequest{
 			InstanceId: instanceID,
-			TimeoutMs:  int32(workTimeoutMS),
+			TimeoutMs:  workTimeoutMS,
 		})
 		pollCancel()
 
@@ -170,10 +172,18 @@ func run() error {
 		}
 
 		// Step 3: Submit result to complete the work item.
+		resultJSON, marshalErr := json.Marshal(struct {
+			Status      string `json:"status"`
+			Seed        string `json:"seed"`
+			LLMResponse string `json:"llm_response"`
+		}{Status: "completed", Seed: seed, LLMResponse: llmResponse})
+		if marshalErr != nil {
+			return fmt.Errorf("probe: encode result: %w", marshalErr)
+		}
 		submitCtx, submitCancel := context.WithTimeout(ctx, 15*time.Second)
 		_, submitErr := client.SubmitResult(submitCtx, &componentpb.SubmitResultRequest{
 			WorkId: workID,
-			Result: []byte(fmt.Sprintf(`{"status":"completed","seed":"%s","llm_response":"%s"}`, seed, llmResponse)),
+			Result: resultJSON,
 		})
 		submitCancel()
 		if submitErr != nil {
@@ -270,6 +280,18 @@ func envIntOrDefault(key string, defaultVal int) int {
 	if v := os.Getenv(key); v != "" {
 		if n, err := strconv.Atoi(v); err == nil {
 			return n
+		}
+	}
+	return defaultVal
+}
+
+// envInt32OrDefault reads a non-negative int32 from the environment. The
+// value goes into a proto int32 field, so anything outside [0, MaxInt32]
+// falls back to the default instead of wrapping.
+func envInt32OrDefault(key string, defaultVal int32) int32 {
+	if v := os.Getenv(key); v != "" {
+		if n, err := strconv.ParseInt(v, 10, 32); err == nil && n >= 0 && n <= math.MaxInt32 {
+			return int32(n)
 		}
 	}
 	return defaultVal

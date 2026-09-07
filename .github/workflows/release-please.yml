@@ -4,15 +4,18 @@ on:
   push:
     branches: [main]
 
+# release-please runs on the App token minted below, so the default token
+# needs nothing beyond checkout. The GHCR write lives on the one job that
+# pushes (Scorecard Token-Permissions).
 permissions:
-  contents: write
-  pull-requests: write
-  packages: write  # publish-authz-registry pushes to ghcr.io
+  contents: read
 
 jobs:
   release-please:
     name: release-please
     runs-on: ubuntu-latest
+    permissions:
+      contents: read
     outputs:
       # Forward release-please's outputs so the publish job can decide
       # whether to fire and which tag to publish. release-please-config.json
@@ -98,6 +101,9 @@ jobs:
     needs: release-please
     if: ${{ needs.release-please.outputs.daemon_release_created == 'true' }}
     uses: ./.github/workflows/publish-private-authz-registry.yml
+    permissions:
+      contents: read
+      packages: write  # publish-authz-registry pushes to ghcr.io
     with:
       tag: ${{ needs.release-please.outputs.daemon_tag_name }}
     secrets: inherit
