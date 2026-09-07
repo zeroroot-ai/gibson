@@ -43,8 +43,8 @@ const (
 	MockProviderDefaultModel = "mock-model"
 
 	// MockProviderDeterministicResponse is the response returned by the mock
-	// provider for normal (non-error-injected) calls. The probe agent embeds
-	// this string in its finding evidence field (R3.3 assertion).
+	// provider for normal (non-error-injected) calls. It must equal the
+	// mock-llm fixture's DeterministicResponse; change both in the same commit.
 	MockProviderDeterministicResponse = "MOCK_LLM_DETERMINISTIC_RESPONSE_v1"
 
 	// MockProviderErrorResponse triggers the error path in the mock provider

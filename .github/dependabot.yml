@@ -9,8 +9,6 @@ updates:
       - "/build"
       - "/sidecar/belief"
       - "/tools/gibson-bootstrap"
-      - "/tests/e2e/fixtures/agents/probe"
-      - "/tests/e2e/fixtures/targets/test-target"
     schedule: { interval: "weekly" }
     labels: ["dependencies", "docker"]
     commit-message: { prefix: "chore(deps)" }

@@ -20,8 +20,8 @@
 # shipped profile only arrives via Envoy + ext-authz. So this brings up the SAME
 # setec+gvisor runtime but with a TEST-MODE daemon (authz disabled,
 # GIBSON_TEST_FIXTURES, built `-tags="setec_integration test_fixtures"`) so the
-# suite can dial the daemon directly — the model tests/e2e/mission_run_test.go
-# and exit-test-sandboxed-dispatch.yml already use. Authentication itself is
+# suite can dial the daemon directly — the model exit-test-sandboxed-dispatch.yml
+# already uses. Authentication itself is
 # covered by login_full_chain / auth e2e, not here.
 #
 # ADR-0012: NEVER on pull_request. An exit test measures state on `main` for the

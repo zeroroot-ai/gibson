@@ -506,7 +506,7 @@ vet-e2e:
 # against a LIVE kind cluster (`make deploy-local` in enterprise/deploy) and
 # requires the env its suite documents; the suites fail loud on missing env,
 # so these targets validate up front only what the suite cannot self-check.
-# The four targets restore what the suite doc-comments have referenced since
+# The three targets restore what the suite doc-comments have referenced since
 # they were written ("run via `make test-login-e2e`", …) — the targets never
 # existed, so the documented invocation path was a 404 (gibson#1394). Where
 # they RUN in CI is gibson#1396 (venue decision pending); locally they run
@@ -537,12 +537,6 @@ test-dashboard-smoke-e2e: ## Run the dashboard smoke e2e suite (two tenants) aga
 	$(call require_env,SIGNUP_SLUG_B,dashboard_smoke_test.go)
 	$(call require_env,SIGNUP_EMAIL_B,dashboard_smoke_test.go)
 	$(GOCMD) test -tags=e2e -run 'TestDashboard' -v -timeout $(E2E_TIMEOUT) ./tests/e2e/...
-
-.PHONY: test-mission-run-e2e
-test-mission-run-e2e: ## Run the mission-run e2e suite against a live kind cluster (fixtures-enabled)
-	$(call require_env,SIGNUP_SLUG,mission_run_test.go)
-	$(call require_env,SIGNUP_EMAIL,mission_run_test.go)
-	GIBSON_TEST_FIXTURES_ENABLED=true $(GOCMD) test -tags=e2e -run 'TestMission_Run' -v -timeout $(E2E_TIMEOUT) ./tests/e2e/...
 
 # vet-tags: the local equivalent of the CI `vet-tags` matrix — type-checks the
 # module once per declared build-tag variant. Roughly a minute per leg.

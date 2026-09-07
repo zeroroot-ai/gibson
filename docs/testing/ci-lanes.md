@@ -166,7 +166,7 @@ The rest of the `e2e` tag genuinely needs infrastructure. Current status:
 | `tests/e2e/secrets/*` (4 files) | kind + `GIBSON_TEST_FIXTURES_ENABLED` + tenant admin JWT | blocked; skips cleanly with a reason |
 | `plugin_e2e_test.go`, `mission_finding_per_tenant_e2e_test.go` | kind + fixtures | blocked; skips cleanly |
 | `audit_v4_foundation_test.go` | live daemon for the `live_*` subtests | partially runs — the mock subtests pass, the live ones skip |
-| `login_full_chain_test.go`, `signup_full_chain_test.go`, `dashboard_smoke_test.go`, `mission_run_test.go` | kind + Zitadel + Envoy + a signed-up tenant | blocked; **fails** rather than skipping, and the `make test-{login,signup,mission-run,dashboard-smoke}-e2e` targets their messages name do not exist in the Makefile |
+| `login_full_chain_test.go`, `signup_full_chain_test.go`, `dashboard_smoke_test.go` | kind + Zitadel + Envoy + a signed-up tenant | blocked; **fails** rather than skipping, and the `make test-{login,signup,dashboard-smoke}-e2e` targets their messages name do not exist in the Makefile |
 | `operators/tenant/test/e2e` | kind + cert-manager | blocked; its `BeforeSuite` runs `make docker-build` in `operators/tenant/`, where there is no `Dockerfile` — so it cannot pass even with a cluster |
 
 ### Redis-backed suites (no build tag)
