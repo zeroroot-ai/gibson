@@ -62,6 +62,13 @@ Completed or cancelled missions are unaffected.
 
 ---
 
+## [0.134.4](https://github.com/zeroroot-ai/gibson/compare/v0.134.3...v0.134.4) (2026-09-07)
+
+
+### Bug Fixes
+
+* **build:** one golang builder for every image, the Go that go.mod names, GOTOOLCHAIN=local ([#63](https://github.com/zeroroot-ai/gibson/issues/63)) ([d179a22](https://github.com/zeroroot-ai/gibson/commit/d179a22b7ca5b709a385d9ce5f85849a01af24b5))
+
 ## [0.134.3](https://github.com/zeroroot-ai/gibson/compare/v0.134.2...v0.134.3) (2026-09-07)
 
 
