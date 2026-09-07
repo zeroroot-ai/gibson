@@ -62,6 +62,13 @@ Completed or cancelled missions are unaffected.
 
 ---
 
+## [0.134.7](https://github.com/zeroroot-ai/gibson/compare/v0.134.6...v0.134.7) (2026-09-07)
+
+
+### Bug Fixes
+
+* **e2e:** dial the daemon with the runner SVID in the mesh ([#75](https://github.com/zeroroot-ai/gibson/issues/75)) ([b87f515](https://github.com/zeroroot-ai/gibson/commit/b87f5153aeff2748e3ab3ed7c15a26655a56dc12))
+
 ## [0.134.6](https://github.com/zeroroot-ai/gibson/compare/v0.134.5...v0.134.6) (2026-09-07)
 
 
