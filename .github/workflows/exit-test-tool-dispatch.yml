@@ -4,7 +4,7 @@
 # In plain words: a tenant that switched a tool on can run it, a tenant that
 # never did cannot, and nobody can run a tool that is not in the catalog.
 #
-# WHAT THIS PROVES vs. the other exit tests. deploy's exit-test-vanilla-install
+# WHAT THIS PROVES vs. the other exit tests. hosted's exit-test-vanilla-install
 # proves the SANCTIONED PROFILE installs. exit-test-sandboxed-dispatch proves
 # AGENT dispatch isolation. This proves the TOOL half of ADR-0017: the catalog
 # manifest is the single source of truth for a tool's runtime shape, and the
@@ -210,16 +210,27 @@ jobs:
           # runner has no identity and the daemon closes its connection: the
           # listener speaks SPIFFE mTLS and refuses plaintext outright
           # (zero-trust-hardening Req 1.2).
-          helm upgrade "$RELEASE" helm/gibson -n "$NS" --reuse-values \
-            -f test/vanilla/e2e-runner.values.yaml \
-            --set gibson-workloads.gibson.image.repository=ghcr.io/zeroroot-ai/gibson \
-            --set gibson-workloads.gibson.image.tag=e2e-tool \
-            --set gibson-workloads.gibson.image.pullPolicy=IfNotPresent \
-            --set gibson-workloads.gibson.authz.enabled=false \
-            --set-string gibson-workloads.gibson.extraEnv.GIBSON_TEST_FIXTURES_ENABLED=true \
-            --wait --timeout 20m
-          kubectl -n "$NS" rollout status statefulset/gibson-gibson-workloads-0 --timeout=5m || \
-            kubectl -n "$NS" rollout status statefulset -l app.kubernetes.io/component=daemon --timeout=5m
+          # The platform is an Argo Application (hosted), not a helm release, so
+          # `helm upgrade` has nothing to upgrade. The e2e runner's identity and
+          # the test-mode daemon image go in through the Application's helm
+          # values and parameters, the same way exit-test-bank does it.
+          kubectl -n argocd patch application gibson --type json -p '[
+              {"op":"add","path":"/spec/source/helm/values","value":"gibson-workloads:\n  gibson:\n    e2eRunner:\n      enabled: true\n    auth:\n      spiffe:\n        allowedPeerIDs:\n          - spiffe://zeroroot.ai/platform/tenant-operator\n          - spiffe://zeroroot.ai/platform/connector-operator\n          - spiffe://zeroroot.ai/platform/e2e-runner\n"},
+              {"op":"add","path":"/spec/source/helm/parameters/-","value":{"name":"gibson-workloads.gibson.image.repository","value":"ghcr.io/zeroroot-ai/gibson","forceString":true}},
+              {"op":"add","path":"/spec/source/helm/parameters/-","value":{"name":"gibson-workloads.gibson.image.tag","value":"e2e-tool","forceString":true}},
+              {"op":"add","path":"/spec/source/helm/parameters/-","value":{"name":"gibson-workloads.gibson.image.pullPolicy","value":"IfNotPresent","forceString":true}},
+              {"op":"add","path":"/spec/source/helm/parameters/-","value":{"name":"gibson-workloads.gibson.authz.enabled","value":"false"}},
+              {"op":"add","path":"/spec/source/helm/parameters/-","value":{"name":"gibson-workloads.gibson.extraEnv.GIBSON_TEST_FIXTURES_ENABLED","value":"true","forceString":true}}
+            ]'
+
+          for i in $(seq 1 60); do
+            img=$(kubectl -n "$NS" get statefulset -l app.kubernetes.io/component=daemon \
+                    -o jsonpath='{.items[0].spec.template.spec.containers[?(@.name=="gibson")].image}' 2>/dev/null || true)
+            case "$img" in *:e2e-tool) echo "daemon image is $img"; break;; esac
+            [ "$i" = 60 ] && { echo "::error::the daemon StatefulSet never took the e2e-tool image (Argo app: $(kubectl -n argocd get app gibson -o jsonpath='{.status.sync.status}/{.status.health.status}'))"; exit 1; }
+            sleep 20
+          done
+          kubectl -n "$NS" rollout status statefulset -l app.kubernetes.io/component=daemon --timeout=20m
           # Confirm the daemon wired the sandboxed TOOL executor — the linchpin
           # for this test, the way the agent launcher is for the agent one.
           #

@@ -7,7 +7,7 @@
 # down afterwards; a tenant that never enabled it is DENIED; and the live
 # console shows a tenant only its OWN running instances.
 #
-# WHAT THIS PROVES vs. the deploy vanilla-install exit test. deploy's
+# WHAT THIS PROVES vs. the hosted vanilla-install exit test. hosted's
 # exit-test-vanilla-install proves the SANCTIONED PROFILE installs (setec +
 # gvisor + the daemon come up on a cloud-free cluster, authz ON). This proves
 # the DISPATCH ISOLATION LOGIC end to end: the enablement gate, the ephemeral
