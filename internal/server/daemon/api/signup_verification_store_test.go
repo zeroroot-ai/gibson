@@ -722,3 +722,55 @@ func TestAttachStripeCustomer_RefusalIsIndistinguishable(t *testing.T) {
 		t.Fatalf("error = %v, want ErrSignupVerificationNotFound", err)
 	}
 }
+
+// TestRegistrationDecisionsAreOneShot pins the predicate that makes an
+// approval a decision rather than a race. Drop `status = 'pending_approval'`
+// from either statement and two administrators can both believe they decided
+// one registration, which is a silent failure at runtime, so it is pinned at
+// build time instead (ADR-0006, gibson#22).
+func TestRegistrationDecisionsAreOneShot(t *testing.T) {
+	assertStatementContains(t, claimApprovalStatement,
+		`status = 'pending_approval'`,
+		`decided_by = `,
+		`decided_at = `,
+	)
+	assertStatementContains(t, rejectRegistrationStatement,
+		`status = 'pending_approval'`,
+		`decided_by = `,
+		`decided_at = `,
+	)
+	// The release is the compensation for a claim whose work failed, so it may
+	// only touch a row that a claim actually took.
+	assertStatementContains(t, releaseApprovalStatement,
+		`status = 'consumed'`,
+		`status = 'pending_approval'`,
+	)
+}
+
+// A malformed registration id is the same answer as an unknown one, and costs
+// no database round trip.
+func TestDecideRegistration_MalformedIDShortCircuits(t *testing.T) {
+	s, mock, _ := newMockStore(t)
+
+	if _, err := s.ClaimApproval(context.Background(), "not-a-uuid", "admin-1"); !errors.Is(err, ErrSignupVerificationNotFound) {
+		t.Fatalf("error = %v, want ErrSignupVerificationNotFound", err)
+	}
+	if _, err := s.RejectRegistration(context.Background(), "not-a-uuid", "admin-1"); !errors.Is(err, ErrSignupVerificationNotFound) {
+		t.Fatalf("error = %v, want ErrSignupVerificationNotFound", err)
+	}
+	if err := mock.ExpectationsWereMet(); err != nil {
+		t.Errorf("a malformed id reached the database: %v", err)
+	}
+}
+
+// A pending registration with no account behind it would be a queue entry
+// naming nothing, so the store refuses to write one.
+func TestIssuePendingApproval_RequiresTheDeactivatedAccount(t *testing.T) {
+	s, mock, _ := newMockStore(t)
+	mock.ExpectExec("CREATE TABLE IF NOT EXISTS signup_verification").
+		WillReturnResult(sqlmock.NewResult(0, 0))
+
+	if _, err := s.IssuePendingApproval(context.Background(), IssueParams{Email: "a@b.com"}, ""); err == nil {
+		t.Fatal("a pending registration with no owner account must be refused")
+	}
+}

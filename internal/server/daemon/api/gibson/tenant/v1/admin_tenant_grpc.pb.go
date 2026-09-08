@@ -48,10 +48,13 @@ import (
 const _ = grpc.SupportPackageIsVersion9
 
 const (
-	AdminTenantService_AdminProvisionTenant_FullMethodName  = "/gibson.tenant.v1.AdminTenantService/AdminProvisionTenant"
-	AdminTenantService_AdminUpdateTenant_FullMethodName     = "/gibson.tenant.v1.AdminTenantService/AdminUpdateTenant"
-	AdminTenantService_AdminDeleteTenant_FullMethodName     = "/gibson.tenant.v1.AdminTenantService/AdminDeleteTenant"
-	AdminTenantService_AdminGetTenantBilling_FullMethodName = "/gibson.tenant.v1.AdminTenantService/AdminGetTenantBilling"
+	AdminTenantService_AdminProvisionTenant_FullMethodName          = "/gibson.tenant.v1.AdminTenantService/AdminProvisionTenant"
+	AdminTenantService_AdminUpdateTenant_FullMethodName             = "/gibson.tenant.v1.AdminTenantService/AdminUpdateTenant"
+	AdminTenantService_AdminDeleteTenant_FullMethodName             = "/gibson.tenant.v1.AdminTenantService/AdminDeleteTenant"
+	AdminTenantService_AdminGetTenantBilling_FullMethodName         = "/gibson.tenant.v1.AdminTenantService/AdminGetTenantBilling"
+	AdminTenantService_AdminListPendingRegistrations_FullMethodName = "/gibson.tenant.v1.AdminTenantService/AdminListPendingRegistrations"
+	AdminTenantService_AdminApproveRegistration_FullMethodName      = "/gibson.tenant.v1.AdminTenantService/AdminApproveRegistration"
+	AdminTenantService_AdminRejectRegistration_FullMethodName       = "/gibson.tenant.v1.AdminTenantService/AdminRejectRegistration"
 )
 
 // AdminTenantServiceClient is the client API for AdminTenantService service.
@@ -95,6 +98,30 @@ type AdminTenantServiceClient interface {
 	// RPCs: ext-authz authorises platform_operator on system_tenant:_system before
 	// the handler trusts the request tenant_id.
 	AdminGetTenantBilling(ctx context.Context, in *AdminGetTenantBillingRequest, opts ...grpc.CallOption) (*AdminGetTenantBillingResponse, error)
+	// AdminListPendingRegistrations returns the registrations awaiting a
+	// decision, oldest first. Each one is a person who registered on the
+	// approval rung and holds a deactivated account until an administrator
+	// decides.
+	//
+	// It returns no credential material and no token. The password never left
+	// the identity provider.
+	AdminListPendingRegistrations(ctx context.Context, in *AdminListPendingRegistrationsRequest, opts ...grpc.CallOption) (*AdminListPendingRegistrationsResponse, error)
+	// AdminApproveRegistration approves one pending registration: it reactivates
+	// the owner's account and enqueues the tenant for operator-pull
+	// provisioning — the same two effects SignupService.Signup produces on the
+	// open rung, from the same code.
+	//
+	// The decision is attributable: the acting administrator is recorded on the
+	// registration row and emitted as an audit event.
+	//
+	// Idempotent on the registration's state, not on the call: a registration
+	// that is no longer pending returns FailedPrecondition, so two
+	// administrators cannot both believe they approved it.
+	AdminApproveRegistration(ctx context.Context, in *AdminApproveRegistrationRequest, opts ...grpc.CallOption) (*AdminApproveRegistrationResponse, error)
+	// AdminRejectRegistration refuses one pending registration. The account
+	// stays deactivated, so the person can never sign in, and no tenant is
+	// created. Attributable in the same way as an approval.
+	AdminRejectRegistration(ctx context.Context, in *AdminRejectRegistrationRequest, opts ...grpc.CallOption) (*AdminRejectRegistrationResponse, error)
 }
 
 type adminTenantServiceClient struct {
@@ -145,6 +172,36 @@ func (c *adminTenantServiceClient) AdminGetTenantBilling(ctx context.Context, in
 	return out, nil
 }
 
+func (c *adminTenantServiceClient) AdminListPendingRegistrations(ctx context.Context, in *AdminListPendingRegistrationsRequest, opts ...grpc.CallOption) (*AdminListPendingRegistrationsResponse, error) {
+	cOpts := append([]grpc.CallOption{grpc.StaticMethod()}, opts...)
+	out := new(AdminListPendingRegistrationsResponse)
+	err := c.cc.Invoke(ctx, AdminTenantService_AdminListPendingRegistrations_FullMethodName, in, out, cOpts...)
+	if err != nil {
+		return nil, err
+	}
+	return out, nil
+}
+
+func (c *adminTenantServiceClient) AdminApproveRegistration(ctx context.Context, in *AdminApproveRegistrationRequest, opts ...grpc.CallOption) (*AdminApproveRegistrationResponse, error) {
+	cOpts := append([]grpc.CallOption{grpc.StaticMethod()}, opts...)
+	out := new(AdminApproveRegistrationResponse)
+	err := c.cc.Invoke(ctx, AdminTenantService_AdminApproveRegistration_FullMethodName, in, out, cOpts...)
+	if err != nil {
+		return nil, err
+	}
+	return out, nil
+}
+
+func (c *adminTenantServiceClient) AdminRejectRegistration(ctx context.Context, in *AdminRejectRegistrationRequest, opts ...grpc.CallOption) (*AdminRejectRegistrationResponse, error) {
+	cOpts := append([]grpc.CallOption{grpc.StaticMethod()}, opts...)
+	out := new(AdminRejectRegistrationResponse)
+	err := c.cc.Invoke(ctx, AdminTenantService_AdminRejectRegistration_FullMethodName, in, out, cOpts...)
+	if err != nil {
+		return nil, err
+	}
+	return out, nil
+}
+
 // AdminTenantServiceServer is the server API for AdminTenantService service.
 // All implementations must embed UnimplementedAdminTenantServiceServer
 // for forward compatibility.
@@ -186,6 +243,30 @@ type AdminTenantServiceServer interface {
 	// RPCs: ext-authz authorises platform_operator on system_tenant:_system before
 	// the handler trusts the request tenant_id.
 	AdminGetTenantBilling(context.Context, *AdminGetTenantBillingRequest) (*AdminGetTenantBillingResponse, error)
+	// AdminListPendingRegistrations returns the registrations awaiting a
+	// decision, oldest first. Each one is a person who registered on the
+	// approval rung and holds a deactivated account until an administrator
+	// decides.
+	//
+	// It returns no credential material and no token. The password never left
+	// the identity provider.
+	AdminListPendingRegistrations(context.Context, *AdminListPendingRegistrationsRequest) (*AdminListPendingRegistrationsResponse, error)
+	// AdminApproveRegistration approves one pending registration: it reactivates
+	// the owner's account and enqueues the tenant for operator-pull
+	// provisioning — the same two effects SignupService.Signup produces on the
+	// open rung, from the same code.
+	//
+	// The decision is attributable: the acting administrator is recorded on the
+	// registration row and emitted as an audit event.
+	//
+	// Idempotent on the registration's state, not on the call: a registration
+	// that is no longer pending returns FailedPrecondition, so two
+	// administrators cannot both believe they approved it.
+	AdminApproveRegistration(context.Context, *AdminApproveRegistrationRequest) (*AdminApproveRegistrationResponse, error)
+	// AdminRejectRegistration refuses one pending registration. The account
+	// stays deactivated, so the person can never sign in, and no tenant is
+	// created. Attributable in the same way as an approval.
+	AdminRejectRegistration(context.Context, *AdminRejectRegistrationRequest) (*AdminRejectRegistrationResponse, error)
 	mustEmbedUnimplementedAdminTenantServiceServer()
 }
 
@@ -207,6 +288,15 @@ func (UnimplementedAdminTenantServiceServer) AdminDeleteTenant(context.Context, 
 }
 func (UnimplementedAdminTenantServiceServer) AdminGetTenantBilling(context.Context, *AdminGetTenantBillingRequest) (*AdminGetTenantBillingResponse, error) {
 	return nil, status.Error(codes.Unimplemented, "method AdminGetTenantBilling not implemented")
+}
+func (UnimplementedAdminTenantServiceServer) AdminListPendingRegistrations(context.Context, *AdminListPendingRegistrationsRequest) (*AdminListPendingRegistrationsResponse, error) {
+	return nil, status.Error(codes.Unimplemented, "method AdminListPendingRegistrations not implemented")
+}
+func (UnimplementedAdminTenantServiceServer) AdminApproveRegistration(context.Context, *AdminApproveRegistrationRequest) (*AdminApproveRegistrationResponse, error) {
+	return nil, status.Error(codes.Unimplemented, "method AdminApproveRegistration not implemented")
+}
+func (UnimplementedAdminTenantServiceServer) AdminRejectRegistration(context.Context, *AdminRejectRegistrationRequest) (*AdminRejectRegistrationResponse, error) {
+	return nil, status.Error(codes.Unimplemented, "method AdminRejectRegistration not implemented")
 }
 func (UnimplementedAdminTenantServiceServer) mustEmbedUnimplementedAdminTenantServiceServer() {}
 func (UnimplementedAdminTenantServiceServer) testEmbeddedByValue()                            {}
@@ -301,6 +391,60 @@ func _AdminTenantService_AdminGetTenantBilling_Handler(srv interface{}, ctx cont
 	return interceptor(ctx, in, info, handler)
 }
 
+func _AdminTenantService_AdminListPendingRegistrations_Handler(srv interface{}, ctx context.Context, dec func(interface{}) error, interceptor grpc.UnaryServerInterceptor) (interface{}, error) {
+	in := new(AdminListPendingRegistrationsRequest)
+	if err := dec(in); err != nil {
+		return nil, err
+	}
+	if interceptor == nil {
+		return srv.(AdminTenantServiceServer).AdminListPendingRegistrations(ctx, in)
+	}
+	info := &grpc.UnaryServerInfo{
+		Server:     srv,
+		FullMethod: AdminTenantService_AdminListPendingRegistrations_FullMethodName,
+	}
+	handler := func(ctx context.Context, req interface{}) (interface{}, error) {
+		return srv.(AdminTenantServiceServer).AdminListPendingRegistrations(ctx, req.(*AdminListPendingRegistrationsRequest))
+	}
+	return interceptor(ctx, in, info, handler)
+}
+
+func _AdminTenantService_AdminApproveRegistration_Handler(srv interface{}, ctx context.Context, dec func(interface{}) error, interceptor grpc.UnaryServerInterceptor) (interface{}, error) {
+	in := new(AdminApproveRegistrationRequest)
+	if err := dec(in); err != nil {
+		return nil, err
+	}
+	if interceptor == nil {
+		return srv.(AdminTenantServiceServer).AdminApproveRegistration(ctx, in)
+	}
+	info := &grpc.UnaryServerInfo{
+		Server:     srv,
+		FullMethod: AdminTenantService_AdminApproveRegistration_FullMethodName,
+	}
+	handler := func(ctx context.Context, req interface{}) (interface{}, error) {
+		return srv.(AdminTenantServiceServer).AdminApproveRegistration(ctx, req.(*AdminApproveRegistrationRequest))
+	}
+	return interceptor(ctx, in, info, handler)
+}
+
+func _AdminTenantService_AdminRejectRegistration_Handler(srv interface{}, ctx context.Context, dec func(interface{}) error, interceptor grpc.UnaryServerInterceptor) (interface{}, error) {
+	in := new(AdminRejectRegistrationRequest)
+	if err := dec(in); err != nil {
+		return nil, err
+	}
+	if interceptor == nil {
+		return srv.(AdminTenantServiceServer).AdminRejectRegistration(ctx, in)
+	}
+	info := &grpc.UnaryServerInfo{
+		Server:     srv,
+		FullMethod: AdminTenantService_AdminRejectRegistration_FullMethodName,
+	}
+	handler := func(ctx context.Context, req interface{}) (interface{}, error) {
+		return srv.(AdminTenantServiceServer).AdminRejectRegistration(ctx, req.(*AdminRejectRegistrationRequest))
+	}
+	return interceptor(ctx, in, info, handler)
+}
+
 // AdminTenantService_ServiceDesc is the grpc.ServiceDesc for AdminTenantService service.
 // It's only intended for direct use with grpc.RegisterService,
 // and not to be introspected or modified (even as a copy)
@@ -323,6 +467,18 @@ var AdminTenantService_ServiceDesc = grpc.ServiceDesc{
 		{
 			MethodName: "AdminGetTenantBilling",
 			Handler:    _AdminTenantService_AdminGetTenantBilling_Handler,
+		},
+		{
+			MethodName: "AdminListPendingRegistrations",
+			Handler:    _AdminTenantService_AdminListPendingRegistrations_Handler,
+		},
+		{
+			MethodName: "AdminApproveRegistration",
+			Handler:    _AdminTenantService_AdminApproveRegistration_Handler,
+		},
+		{
+			MethodName: "AdminRejectRegistration",
+			Handler:    _AdminTenantService_AdminRejectRegistration_Handler,
 		},
 	},
 	Streams:  []grpc.StreamDesc{},

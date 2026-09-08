@@ -30,6 +30,11 @@
 //     Signup                    → identity, billing and provisioning, all of it
 //                                 strictly after that proof
 //
+//   The APPROVAL rung (ADR-0006, gibson#22) replaces that round trip with one
+//   Register call and an administrator's decision. It is a different proof of
+//   the same thing, not a second completion path: approval runs exactly the
+//   work Signup runs.
+//
 //   Signup therefore takes NO owner email, workspace name, tier or profile from
 //   the client. Every one of those is read back from the verification row the
 //   session resolves to. A client that could supply them could point a redeemed
@@ -61,6 +66,7 @@ const (
 	SignupService_RedeemEmailVerification_FullMethodName  = "/gibson.tenant.v1.SignupService/RedeemEmailVerification"
 	SignupService_AttachSignupCustomer_FullMethodName     = "/gibson.tenant.v1.SignupService/AttachSignupCustomer"
 	SignupService_Signup_FullMethodName                   = "/gibson.tenant.v1.SignupService/Signup"
+	SignupService_Register_FullMethodName                 = "/gibson.tenant.v1.SignupService/Register"
 )
 
 // SignupServiceClient is the client API for SignupService service.
@@ -123,6 +129,32 @@ type SignupServiceClient interface {
 	// The session is consumed on success, so the completion cookie cannot be
 	// replayed into a second tenant.
 	Signup(ctx context.Context, in *SignupRequest, opts ...grpc.CallOption) (*SignupResponse, error)
+	// Register is the APPROVAL rung's single registration call (ADR-0006,
+	// gibson#22). It is served only when the deployment selects that rung, and
+	// the four RPCs above are refused on it; on every other rung Register is
+	// refused instead. One rung is live at a time.
+	//
+	// WHAT IT CREATES: one signup_verification row in status pending_approval,
+	// and one DEACTIVATED identity-provider user holding the password the
+	// registrant chose. Nothing else. No tenant, no billing object, no
+	// provisioning-queue row — those wait for an administrator's approval, which
+	// runs exactly the work Signup runs on the open rung.
+	//
+	// WHY IT NEEDS NO MAIL: email verification proves mailbox control on a
+	// PUBLIC signup surface. A self-hosted instance sits behind the customer's
+	// perimeter, where the operator already controls who can reach it, and an
+	// administrator approves every account by hand. The human in that path is
+	// the proof. This is what lets a self-hosted install with no SMTP have a
+	// working front door, where today it has none.
+	//
+	// The password reaches the identity provider and nothing else. The daemon
+	// never stores it: a credential parked in the platform database across an
+	// approval that may take days is exactly what this shape avoids.
+	//
+	// Errors: InvalidArgument (malformed input), AlreadyExists (the address
+	// already has an account), ResourceExhausted (rate limit), PermissionDenied
+	// (not the approval rung), Unavailable (store or identity provider down).
+	Register(ctx context.Context, in *RegisterRequest, opts ...grpc.CallOption) (*RegisterResponse, error)
 }
 
 type signupServiceClient struct {
@@ -167,6 +199,16 @@ func (c *signupServiceClient) Signup(ctx context.Context, in *SignupRequest, opt
 	cOpts := append([]grpc.CallOption{grpc.StaticMethod()}, opts...)
 	out := new(SignupResponse)
 	err := c.cc.Invoke(ctx, SignupService_Signup_FullMethodName, in, out, cOpts...)
+	if err != nil {
+		return nil, err
+	}
+	return out, nil
+}
+
+func (c *signupServiceClient) Register(ctx context.Context, in *RegisterRequest, opts ...grpc.CallOption) (*RegisterResponse, error) {
+	cOpts := append([]grpc.CallOption{grpc.StaticMethod()}, opts...)
+	out := new(RegisterResponse)
+	err := c.cc.Invoke(ctx, SignupService_Register_FullMethodName, in, out, cOpts...)
 	if err != nil {
 		return nil, err
 	}
@@ -233,6 +275,32 @@ type SignupServiceServer interface {
 	// The session is consumed on success, so the completion cookie cannot be
 	// replayed into a second tenant.
 	Signup(context.Context, *SignupRequest) (*SignupResponse, error)
+	// Register is the APPROVAL rung's single registration call (ADR-0006,
+	// gibson#22). It is served only when the deployment selects that rung, and
+	// the four RPCs above are refused on it; on every other rung Register is
+	// refused instead. One rung is live at a time.
+	//
+	// WHAT IT CREATES: one signup_verification row in status pending_approval,
+	// and one DEACTIVATED identity-provider user holding the password the
+	// registrant chose. Nothing else. No tenant, no billing object, no
+	// provisioning-queue row — those wait for an administrator's approval, which
+	// runs exactly the work Signup runs on the open rung.
+	//
+	// WHY IT NEEDS NO MAIL: email verification proves mailbox control on a
+	// PUBLIC signup surface. A self-hosted instance sits behind the customer's
+	// perimeter, where the operator already controls who can reach it, and an
+	// administrator approves every account by hand. The human in that path is
+	// the proof. This is what lets a self-hosted install with no SMTP have a
+	// working front door, where today it has none.
+	//
+	// The password reaches the identity provider and nothing else. The daemon
+	// never stores it: a credential parked in the platform database across an
+	// approval that may take days is exactly what this shape avoids.
+	//
+	// Errors: InvalidArgument (malformed input), AlreadyExists (the address
+	// already has an account), ResourceExhausted (rate limit), PermissionDenied
+	// (not the approval rung), Unavailable (store or identity provider down).
+	Register(context.Context, *RegisterRequest) (*RegisterResponse, error)
 	mustEmbedUnimplementedSignupServiceServer()
 }
 
@@ -254,6 +322,9 @@ func (UnimplementedSignupServiceServer) AttachSignupCustomer(context.Context, *A
 }
 func (UnimplementedSignupServiceServer) Signup(context.Context, *SignupRequest) (*SignupResponse, error) {
 	return nil, status.Error(codes.Unimplemented, "method Signup not implemented")
+}
+func (UnimplementedSignupServiceServer) Register(context.Context, *RegisterRequest) (*RegisterResponse, error) {
+	return nil, status.Error(codes.Unimplemented, "method Register not implemented")
 }
 func (UnimplementedSignupServiceServer) mustEmbedUnimplementedSignupServiceServer() {}
 func (UnimplementedSignupServiceServer) testEmbeddedByValue()                       {}
@@ -348,6 +419,24 @@ func _SignupService_Signup_Handler(srv interface{}, ctx context.Context, dec fun
 	return interceptor(ctx, in, info, handler)
 }
 
+func _SignupService_Register_Handler(srv interface{}, ctx context.Context, dec func(interface{}) error, interceptor grpc.UnaryServerInterceptor) (interface{}, error) {
+	in := new(RegisterRequest)
+	if err := dec(in); err != nil {
+		return nil, err
+	}
+	if interceptor == nil {
+		return srv.(SignupServiceServer).Register(ctx, in)
+	}
+	info := &grpc.UnaryServerInfo{
+		Server:     srv,
+		FullMethod: SignupService_Register_FullMethodName,
+	}
+	handler := func(ctx context.Context, req interface{}) (interface{}, error) {
+		return srv.(SignupServiceServer).Register(ctx, req.(*RegisterRequest))
+	}
+	return interceptor(ctx, in, info, handler)
+}
+
 // SignupService_ServiceDesc is the grpc.ServiceDesc for SignupService service.
 // It's only intended for direct use with grpc.RegisterService,
 // and not to be introspected or modified (even as a copy)
@@ -370,6 +459,10 @@ var SignupService_ServiceDesc = grpc.ServiceDesc{
 		{
 			MethodName: "Signup",
 			Handler:    _SignupService_Signup_Handler,
+		},
+		{
+			MethodName: "Register",
+			Handler:    _SignupService_Register_Handler,
 		},
 	},
 	Streams:  []grpc.StreamDesc{},

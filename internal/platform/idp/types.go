@@ -136,6 +136,17 @@ type SetHumanPasswordRequest struct {
 	Password string
 }
 
+// HumanUserStateRequest names one human user whose sign-in state changes.
+//
+// OrgID selects the IdP organization the user lives in; empty means the admin
+// client's configured org. A founding owner created during registration lives
+// in the daemon's admin org until the tenant-operator provisions the tenant's
+// own org, so the caller passes what it knows.
+type HumanUserStateRequest struct {
+	OrgID  string
+	UserID string
+}
+
 // CreateHumanUserResult reports the outcome of CreateHumanUser.
 //
 // There is no AlreadyExisted field: CreateHumanUser is create-only, so an

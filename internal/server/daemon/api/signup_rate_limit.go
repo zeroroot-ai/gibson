@@ -110,6 +110,20 @@ var (
 	signupRedeemGlobalHour   = ratelimit.Window{Max: 300, Period: hour}
 	signupAttachGlobalHour   = ratelimit.Window{Max: 300, Period: hour}
 	signupCompleteGlobalHour = ratelimit.Window{Max: 300, Period: hour}
+
+	// Registration on the approval rung (ADR-0006, gibson#22). One call does
+	// the work the open rung's three do, so it carries the per-address budget
+	// of the first and the global breaker of the last.
+	//
+	// The per-address budget is what matters here. This rung sends no mail, so
+	// there is no sending quota to protect; what a flood costs instead is an
+	// administrator's attention and a directory full of deactivated accounts.
+	// Both are per-address problems.
+	signupRegisterPerEmailHour = ratelimit.Window{Max: 3, Period: hour}
+	signupRegisterPerEmailDay  = ratelimit.Window{Max: 5, Period: day}
+	signupRegisterPerIPHour    = ratelimit.Window{Max: 10, Period: hour}
+	signupRegisterPerIPDay     = ratelimit.Window{Max: 30, Period: day}
+	signupRegisterGlobalHour   = ratelimit.Window{Max: 300, Period: hour}
 )
 
 const (
@@ -272,6 +286,19 @@ func completeLimits(clientIP string) []signupLimit {
 	return []signupLimit{
 		ipLimitFor("sc", clientIP, signupCompletePerIPHour),
 		{signupGlobalKey("sc"), signupCompleteGlobalHour},
+	}
+}
+
+// registerLimits is the budget set for Register, the approval rung's one
+// unauthenticated door. Narrowest scope first and the shared bucket last, as
+// everywhere else on this surface.
+func registerLimits(email, clientIP string) []signupLimit {
+	return []signupLimit{
+		{signupEmailKey("rg", email) + ":h", signupRegisterPerEmailHour},
+		{signupEmailKey("rg", email) + ":d", signupRegisterPerEmailDay},
+		ipLimitFor("rg", clientIP, signupRegisterPerIPHour),
+		{signupIPKey("rg", clientIP) + ":d", signupRegisterPerIPDay},
+		{signupGlobalKey("rg"), signupRegisterGlobalHour},
 	}
 }
 

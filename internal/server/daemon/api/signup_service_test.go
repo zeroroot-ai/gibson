@@ -17,8 +17,10 @@ import (
 	"bytes"
 	"context"
 	"errors"
+	"fmt"
 	"log/slog"
 	"net/url"
+	"sort"
 	"strings"
 	"testing"
 	"time"
@@ -120,6 +122,13 @@ type memVerificationStore struct {
 	attachErr       error
 	claimErr        error
 	markConsumedErr error
+
+	// Approval-rung failure injection (ADR-0006, gibson#22).
+	issuePendingErr   error
+	listPendingErr    error
+	claimApprovalErr  error
+	releaseCalls      []string
+	nextRegistrationN int
 }
 
 type memRow struct {
@@ -128,6 +137,7 @@ type memRow struct {
 	sessionExpires time.Time
 	lastSent       time.Time
 	sentOnce       bool
+	decidedBy      string
 }
 
 func newMemStore() *memVerificationStore {
@@ -279,6 +289,74 @@ func (m *memVerificationStore) MarkConsumed(_ context.Context, raw string) error
 		return ErrSignupVerificationNotFound
 	}
 	r.status = signupStatusConsumed
+	return nil
+}
+
+func (m *memVerificationStore) IssuePendingApproval(_ context.Context, p IssueParams, ownerUserID string) (SignupVerification, error) {
+	if m.issuePendingErr != nil {
+		return SignupVerification{}, m.issuePendingErr
+	}
+	m.nextRegistrationN++
+	id := fmt.Sprintf("reg-%d", m.nextRegistrationN)
+	m.rows[id] = &memRow{
+		SignupVerification: SignupVerification{
+			ID: id, AttemptID: p.AttemptID, Email: p.Email,
+			WorkspaceName: p.WorkspaceName, Tier: p.Tier,
+			OwnerFirstName: p.OwnerFirstName, OwnerLastName: p.OwnerLastName,
+			ExpiresAt: m.now().Add(SignupRegistrationTTL),
+			CreatedAt: m.now(), OwnerUserID: ownerUserID,
+		},
+		status: signupStatusPendingApproval,
+	}
+	return m.rows[id].SignupVerification, nil
+}
+
+func (m *memVerificationStore) ListPendingApprovals(_ context.Context, limit int) ([]SignupVerification, error) {
+	if m.listPendingErr != nil {
+		return nil, m.listPendingErr
+	}
+	var out []SignupVerification
+	for _, r := range m.rows {
+		if r.status == signupStatusPendingApproval {
+			out = append(out, r.SignupVerification)
+		}
+	}
+	sort.Slice(out, func(i, j int) bool { return out[i].ID < out[j].ID })
+	if limit > 0 && len(out) > limit {
+		out = out[:limit]
+	}
+	return out, nil
+}
+
+func (m *memVerificationStore) ClaimApproval(_ context.Context, id, decidedBy string) (SignupVerification, error) {
+	if m.claimApprovalErr != nil {
+		return SignupVerification{}, m.claimApprovalErr
+	}
+	return m.decide(id, decidedBy, signupStatusConsumed)
+}
+
+func (m *memVerificationStore) RejectRegistration(_ context.Context, id, decidedBy string) (SignupVerification, error) {
+	return m.decide(id, decidedBy, signupStatusRejected)
+}
+
+func (m *memVerificationStore) decide(id, decidedBy, next string) (SignupVerification, error) {
+	r, ok := m.rows[id]
+	if !ok || r.status != signupStatusPendingApproval {
+		return SignupVerification{}, ErrSignupVerificationNotFound
+	}
+	r.status = next
+	r.decidedBy = decidedBy
+	out := r.SignupVerification
+	out.Status = next
+	return out, nil
+}
+
+func (m *memVerificationStore) ReleaseApproval(_ context.Context, id string) error {
+	m.releaseCalls = append(m.releaseCalls, id)
+	if r, ok := m.rows[id]; ok && r.status == signupStatusConsumed {
+		r.status = signupStatusPendingApproval
+		r.decidedBy = ""
+	}
 	return nil
 }
 

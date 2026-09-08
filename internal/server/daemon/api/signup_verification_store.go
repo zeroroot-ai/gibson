@@ -56,6 +56,17 @@ const (
 	// SignupRowRetention is how long a terminal row is kept for forensics
 	// before the janitor deletes it.
 	SignupRowRetention = 7 * 24 * time.Hour
+
+	// SignupRegistrationTTL is how long a registration awaiting an
+	// administrator's decision is considered current.
+	//
+	// It is generous because the thing it waits for is a person, and people
+	// take days. The janitor does NOT sweep on it: a registration that aged
+	// out would take a decision away from an administrator who had not made
+	// one, and would strand the deactivated account it names. Clearing the
+	// queue is a rejection, which is exactly the human decision this rung is
+	// built around.
+	SignupRegistrationTTL = 30 * 24 * time.Hour
 )
 
 // Status values for signup_verification.status.
@@ -65,6 +76,15 @@ const (
 	signupStatusConsumed   = "consumed"
 	signupStatusExpired    = "expired"
 	signupStatusSendFailed = "send_failed"
+
+	// signupStatusPendingApproval is the approval rung's waiting state
+	// (ADR-0006, gibson#22): the registrant holds a deactivated account and an
+	// administrator has not decided yet.
+	signupStatusPendingApproval = "pending_approval"
+
+	// signupStatusRejected is an administrator's refusal. The account stays
+	// deactivated for good; there is no path from here back to pending.
+	signupStatusRejected = "rejected"
 )
 
 // The four statements that carry the flow's safety predicates.
@@ -122,6 +142,42 @@ const (
 		   SET status = 'consumed', consumed_at = $2, updated_at = $2
 		 WHERE verified_session_hash = $1 AND status = 'verified'
 	`
+
+	// claimApprovalStatement is the approval rung's single-decision
+	// compare-and-set. Two administrators looking at the same queue cannot
+	// both approve one registration: the second UPDATE fails the status
+	// predicate and matches zero rows.
+	claimApprovalStatement = `
+		UPDATE signup_verification
+		   SET status = 'consumed', consumed_at = $3, updated_at = $3,
+		       decided_by = $2, decided_at = $3
+		 WHERE id = $1 AND status = 'pending_approval'
+		RETURNING id, attempt_id, email, workspace_name, tier,
+		          owner_first_name, owner_last_name, expires_at,
+		          stripe_customer_id, completion_attempts, owner_user_id
+	`
+
+	// rejectRegistrationStatement is the refusal, with the same
+	// one-decision-only predicate.
+	rejectRegistrationStatement = `
+		UPDATE signup_verification
+		   SET status = 'rejected', updated_at = $3,
+		       decided_by = $2, decided_at = $3
+		 WHERE id = $1 AND status = 'pending_approval'
+		RETURNING id, attempt_id, email, workspace_name, tier,
+		          owner_first_name, owner_last_name, expires_at,
+		          stripe_customer_id, completion_attempts, owner_user_id
+	`
+
+	// releaseApprovalStatement puts a claimed registration back in the queue
+	// when the work the approval authorized could not be completed. Without it
+	// a transient failure would consume a decision nobody can retry.
+	releaseApprovalStatement = `
+		UPDATE signup_verification
+		   SET status = 'pending_approval', consumed_at = NULL, updated_at = $2,
+		       decided_by = '', decided_at = NULL
+		 WHERE id = $1 AND status = 'consumed'
+	`
 )
 
 // ErrSignupVerificationNotFound is returned whenever a presented token or
@@ -154,6 +210,12 @@ type SignupVerification struct {
 	CompletionCount  int
 	SendCount        int
 	LastSentAt       time.Time
+	CreatedAt        time.Time
+
+	// OwnerUserID is the identity-provider user created at registration time
+	// on the approval rung. Empty on the open rung, where the user is created
+	// at completion instead.
+	OwnerUserID string
 }
 
 // SignupVerificationStore persists signup verifications in platform Postgres.
@@ -554,6 +616,10 @@ func (s *SignupVerificationStore) PurgeExpired(ctx context.Context) (expired, de
 	}
 	now := s.clock()
 
+	// pending_approval is deliberately absent from this sweep. A registration
+	// waits for a person to decide it, and a clock that decided it instead
+	// would both take that decision away and strand the deactivated account
+	// the row names (ADR-0006, gibson#22).
 	const expireQ = `
 		UPDATE signup_verification
 		   SET status = 'expired', updated_at = $1
@@ -567,7 +633,7 @@ func (s *SignupVerificationStore) PurgeExpired(ctx context.Context) (expired, de
 
 	const deleteQ = `
 		DELETE FROM signup_verification
-		 WHERE status IN ('consumed', 'expired', 'send_failed')
+		 WHERE status IN ('consumed', 'expired', 'send_failed', 'rejected')
 		   AND updated_at <= $1
 	`
 	res, err = db.ExecContext(ctx, deleteQ, now.Add(-SignupRowRetention))
@@ -598,7 +664,8 @@ func (s *SignupVerificationStore) ensureTable(ctx context.Context) error {
 			token_hash                  TEXT NOT NULL UNIQUE,
 			status                      TEXT NOT NULL DEFAULT 'pending'
 				CONSTRAINT signup_verification_status_check
-				CHECK (status IN ('pending', 'verified', 'consumed', 'expired', 'send_failed')),
+				CHECK (status IN ('pending', 'verified', 'consumed', 'expired', 'send_failed',
+			                  'pending_approval', 'rejected')),
 			expires_at                  TIMESTAMPTZ NOT NULL,
 			verified_session_hash       TEXT UNIQUE,
 			verified_session_expires_at TIMESTAMPTZ,
@@ -607,6 +674,9 @@ func (s *SignupVerificationStore) ensureTable(ctx context.Context) error {
 			send_count                  INT NOT NULL DEFAULT 0,
 			last_sent_at                TIMESTAMPTZ,
 			client_ip_hash              TEXT NOT NULL DEFAULT '',
+			owner_user_id               TEXT NOT NULL DEFAULT '',
+			decided_by                  TEXT NOT NULL DEFAULT '',
+			decided_at                  TIMESTAMPTZ,
 			created_at                  TIMESTAMPTZ NOT NULL DEFAULT NOW(),
 			updated_at                  TIMESTAMPTZ NOT NULL DEFAULT NOW(),
 			consumed_at                 TIMESTAMPTZ
@@ -614,6 +684,180 @@ func (s *SignupVerificationStore) ensureTable(ctx context.Context) error {
 	`
 	if _, err := db.ExecContext(ctx, create); err != nil {
 		return fmt.Errorf("create signup_verification: %w", err)
+	}
+	return nil
+}
+
+// ---------------------------------------------------------------------------
+// Admin-approval registration rung (ADR-0006, gibson#22)
+// ---------------------------------------------------------------------------
+
+// SignupApprovalPageSize is the default and the maximum number of pending
+// registrations one list call returns. It is a cap, not a preference: an
+// unbounded queue read is a full-table scan over rows anonymous callers create.
+const SignupApprovalPageSize = 100
+
+// IssuePendingApproval writes a registration awaiting an administrator's
+// decision, and returns the row.
+//
+// It takes the identity-provider user id the caller has ALREADY created and
+// deactivated. The order matters: the account must be beyond use before a row
+// says an administrator may approve it, or a crash between the two would leave
+// a queue entry pointing at an account that can already sign in.
+//
+// A token is minted and its hash stored, exactly as on the open rung, because
+// the column is unique and not null. The raw value is discarded here and never
+// leaves this function: the approval rung sends no mail, so there is no link
+// for it to appear in, and a token nobody holds is not a capability.
+func (s *SignupVerificationStore) IssuePendingApproval(ctx context.Context, p IssueParams, ownerUserID string) (SignupVerification, error) {
+	db, err := s.handle()
+	if err != nil {
+		return SignupVerification{}, err
+	}
+	if err := s.ensureTable(ctx); err != nil {
+		return SignupVerification{}, err
+	}
+	if ownerUserID == "" {
+		return SignupVerification{}, errors.New("pending registration requires the deactivated owner user id")
+	}
+
+	_, hash, err := platformtoken.Generate()
+	if err != nil {
+		return SignupVerification{}, fmt.Errorf("generate registration token: %w", err)
+	}
+
+	now := s.clock()
+	id := uuid.NewString()
+	expires := now.Add(SignupRegistrationTTL)
+
+	const q = `
+		INSERT INTO signup_verification
+			(id, attempt_id, email, workspace_name, tier, owner_first_name, owner_last_name,
+			 token_hash, status, expires_at, client_ip_hash, owner_user_id, created_at, updated_at)
+		VALUES ($1, $2, $3, $4, $5, $6, $7, $8, 'pending_approval', $9, $10, $11, $12, $12)
+	`
+	if _, err := db.ExecContext(ctx, q,
+		id, p.AttemptID, p.Email, p.WorkspaceName, p.Tier,
+		p.OwnerFirstName, p.OwnerLastName, hash, expires, p.ClientIPHash, ownerUserID, now,
+	); err != nil {
+		return SignupVerification{}, fmt.Errorf("insert pending registration: %w", err)
+	}
+
+	return SignupVerification{
+		ID:             id,
+		AttemptID:      p.AttemptID,
+		Email:          p.Email,
+		WorkspaceName:  p.WorkspaceName,
+		Tier:           p.Tier,
+		OwnerFirstName: p.OwnerFirstName,
+		OwnerLastName:  p.OwnerLastName,
+		Status:         signupStatusPendingApproval,
+		ExpiresAt:      expires,
+		OwnerUserID:    ownerUserID,
+		CreatedAt:      now,
+	}, nil
+}
+
+// ListPendingApprovals returns registrations awaiting a decision, oldest
+// first, capped at SignupApprovalPageSize.
+func (s *SignupVerificationStore) ListPendingApprovals(ctx context.Context, limit int) ([]SignupVerification, error) {
+	db, err := s.handle()
+	if err != nil {
+		return nil, err
+	}
+	if limit <= 0 || limit > SignupApprovalPageSize {
+		limit = SignupApprovalPageSize
+	}
+	const q = `
+		SELECT id, attempt_id, email, workspace_name, tier,
+		       owner_first_name, owner_last_name, owner_user_id, created_at
+		  FROM signup_verification
+		 WHERE status = 'pending_approval'
+		 ORDER BY created_at ASC
+		 LIMIT $1
+	`
+	rows, err := db.QueryContext(ctx, q, limit)
+	if err != nil {
+		return nil, fmt.Errorf("list pending registrations: %w", err)
+	}
+	defer func() { _ = rows.Close() }()
+
+	var out []SignupVerification
+	for rows.Next() {
+		var r SignupVerification
+		if err := rows.Scan(&r.ID, &r.AttemptID, &r.Email, &r.WorkspaceName, &r.Tier,
+			&r.OwnerFirstName, &r.OwnerLastName, &r.OwnerUserID, &r.CreatedAt); err != nil {
+			return nil, fmt.Errorf("scan pending registration: %w", err)
+		}
+		r.Status = signupStatusPendingApproval
+		out = append(out, r)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, fmt.Errorf("read pending registrations: %w", err)
+	}
+	return out, nil
+}
+
+// ClaimApproval marks one pending registration decided by decidedBy and
+// returns it. Exactly one caller can win: the statement's status predicate
+// makes a second approval match zero rows, which is ErrSignupVerificationNotFound.
+//
+// The claim happens BEFORE the work it authorizes, so two administrators
+// cannot both provision the same workspace. ReleaseApproval puts it back when
+// that work fails.
+func (s *SignupVerificationStore) ClaimApproval(ctx context.Context, id, decidedBy string) (SignupVerification, error) {
+	return s.decideRegistration(ctx, claimApprovalStatement, id, decidedBy, signupStatusConsumed)
+}
+
+// RejectRegistration refuses one pending registration. The deactivated account
+// it names is left as it is, so the person can never sign in.
+func (s *SignupVerificationStore) RejectRegistration(ctx context.Context, id, decidedBy string) (SignupVerification, error) {
+	return s.decideRegistration(ctx, rejectRegistrationStatement, id, decidedBy, signupStatusRejected)
+}
+
+// decideRegistration runs one of the two decision statements. They differ only
+// in the status they write, so the scan and the not-found mapping live once.
+func (s *SignupVerificationStore) decideRegistration(
+	ctx context.Context, stmt, id, decidedBy, resultStatus string,
+) (SignupVerification, error) {
+	db, err := s.handle()
+	if err != nil {
+		return SignupVerification{}, err
+	}
+	if _, err := uuid.Parse(id); err != nil {
+		// A malformed id is not a different answer from an unknown one: both
+		// mean "there is no such pending registration".
+		return SignupVerification{}, ErrSignupVerificationNotFound
+	}
+	var r SignupVerification
+	err = db.QueryRowContext(ctx, stmt, id, decidedBy, s.clock()).Scan(
+		&r.ID, &r.AttemptID, &r.Email, &r.WorkspaceName, &r.Tier,
+		&r.OwnerFirstName, &r.OwnerLastName, &r.ExpiresAt,
+		&r.StripeCustomerID, &r.CompletionCount, &r.OwnerUserID,
+	)
+	switch {
+	case errors.Is(err, sql.ErrNoRows):
+		return SignupVerification{}, ErrSignupVerificationNotFound
+	case err != nil:
+		return SignupVerification{}, fmt.Errorf("decide registration: %w", err)
+	}
+	r.Status = resultStatus
+	return r, nil
+}
+
+// ReleaseApproval returns a claimed registration to the queue.
+//
+// It is the compensation for a claim whose work failed — the identity provider
+// refused the reactivation, or the provisioning row could not be written.
+// Without it one transient failure would spend a decision no administrator can
+// make again.
+func (s *SignupVerificationStore) ReleaseApproval(ctx context.Context, id string) error {
+	db, err := s.handle()
+	if err != nil {
+		return err
+	}
+	if _, err := db.ExecContext(ctx, releaseApprovalStatement, id, s.clock()); err != nil {
+		return fmt.Errorf("release claimed registration: %w", err)
 	}
 	return nil
 }

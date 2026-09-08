@@ -294,3 +294,16 @@ var errNotImplemented = errors.New("not implemented in test fake")
 func (a *allowAdminAuthorizer) ListUsersOfType(context.Context, string, string, string, string) ([]string, error) {
 	return nil, nil
 }
+
+// Approval-rung sign-in-state changes (ADR-0006, gibson#22). This stub does not
+// exercise them; the registration and approval paths are covered in
+// internal/server/daemon/api.
+func (*fakeUserIdPClient) DeactivateHumanUser(context.Context, idp.HumanUserStateRequest) error {
+	return nil
+}
+func (*fakeUserIdPClient) ReactivateHumanUser(context.Context, idp.HumanUserStateRequest) error {
+	return nil
+}
+func (*fakeUserIdPClient) DeleteHumanUser(context.Context, idp.HumanUserStateRequest) error {
+	return nil
+}

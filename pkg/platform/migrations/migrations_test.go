@@ -26,18 +26,19 @@ func TestEmbed_TenantHasExpectedFiles(t *testing.T) {
 
 func TestEmbed_PlatformHasExpectedFiles(t *testing.T) {
 	t.Parallel()
-	// 23: 020 is bootstrap-token-consumption, 021 is signup-verification
+	// 24: 020 is bootstrap-token-consumption, 021 is signup-verification
 	// (gibson#1228, merged), 022 is audit_log hash chain, 023 indexes
 	// capability_grant_agents(tenant_id, principal_ref) for the mission:delegate
-	// / mission:originate capability check (gibson#1186 slice C).
+	// / mission:originate capability check (gibson#1186 slice C), 024 adds the
+	// admin-approval registration rung's state (ADR-0006, gibson#22).
 	// golang-migrate tracks a single integer and only moves forward, so
 	// leaving a gap would let a later-landing migration be skipped forever.
 	upCount, downCount := countSQL(t, Platform, platformDir)
-	if upCount != 23 {
-		t.Errorf("platform: expected 23 up.sql files, got %d", upCount)
+	if upCount != 24 {
+		t.Errorf("platform: expected 24 up.sql files, got %d", upCount)
 	}
-	if downCount != 23 {
-		t.Errorf("platform: expected 23 down.sql files, got %d", downCount)
+	if downCount != 24 {
+		t.Errorf("platform: expected 24 down.sql files, got %d", downCount)
 	}
 }
 
@@ -120,6 +121,8 @@ func TestTenantMaxVersion(t *testing.T) {
 //	023 — capability_grant_principal_index (indexes capability_grant_agents on
 //	      (tenant_id, principal_ref) for the mission:delegate / mission:originate
 //	      capability check, gibson#1186 slice C)
+//	024 — signup_admin_approval (the ADR-0006 approval registration rung: a
+//	      deactivated owner account plus an attributable decision, gibson#22)
 //
 // The sequence must stay CONTIGUOUS. golang-migrate records a single integer
 // version, and `up` only ever moves forward from it — so a migration that lands
@@ -133,8 +136,8 @@ func TestPlatformMaxVersion(t *testing.T) {
 	if err != nil {
 		t.Fatalf("PlatformMaxVersion: %v", err)
 	}
-	if v != 23 {
-		t.Errorf("PlatformMaxVersion: got %d, want 23", v)
+	if v != 24 {
+		t.Errorf("PlatformMaxVersion: got %d, want 24", v)
 	}
 }
 

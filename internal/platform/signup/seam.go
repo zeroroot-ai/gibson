@@ -11,20 +11,36 @@
 // present and the self-serve card-first signup surface is active"; leaving it
 // unset means "self-hosted fail-safe — admin-provision only, no public signup".
 //
-// The seam resolves a [Policy] value:
+// The seam resolves a [Policy] value. The three values are the three
+// registration rungs of ADR-0006, which match what a GitLab self-managed
+// operator already knows:
 //
-//   - [PolicyAdminOnly] (fail-safe, knob absent): tenants are provisioned by a
-//     platform admin via AdminTenantService.AdminProvisionTenant. The
-//     SignupService.Signup RPC returns codes.PermissionDenied when called.
+//   - [PolicyAdminOnly] — the CLOSED rung, and the fail-safe when the knob is
+//     absent. Tenants are provisioned by a platform admin via
+//     AdminTenantService.AdminProvisionTenant. Every SignupService RPC returns
+//     codes.PermissionDenied.
 //
-//   - [PolicySelfServe] (wired, knob set): the full card-first self-serve
-//     signup flow is active (SaaS profile). SignupService.Signup is served
-//     normally.
+//   - [PolicyApproval] — the APPROVAL rung. Anyone may register, nobody is
+//     active until an administrator approves them. Registration needs NO mail
+//     transport: a self-hosted instance sits behind the customer's perimeter,
+//     where the operator already controls who can reach it, so the human in
+//     the approval path is the proof that email verification is on a public
+//     surface. Verification RPCs stay refused on this rung.
+//
+//   - [PolicySelfServe] — the OPEN rung (SaaS profile). The full card-first
+//     flow: prove the mailbox, then provision. Unchanged.
 //
 // # Knob
 //
-// The config knob is SIGNUP_SELF_SERVE. Any non-empty value activates
-// PolicySelfServe. The value itself is ignored (it is not an endpoint).
+// The config knob is SIGNUP_SELF_SERVE, and its VALUE selects the rung:
+//
+//	unset or empty  → PolicyAdminOnly   (closed)
+//	"approval"      → PolicyApproval    (approval)
+//	anything else   → PolicySelfServe   (open)
+//
+// One knob rather than two, because the rungs are exclusive: a deployment is
+// on exactly one of them, and two booleans could describe a state that is not
+// a rung. The value is compared case-insensitively after trimming.
 //
 // # Registration
 //
@@ -37,6 +53,7 @@ import (
 	"context"
 	"fmt"
 	"log/slog"
+	"strings"
 
 	"github.com/zeroroot-ai/gibson/pkg/seam"
 )
@@ -45,15 +62,27 @@ import (
 type Policy string
 
 const (
-	// PolicySelfServe means the self-serve card-first signup path is active
-	// (SaaS profile). SignupService.Signup is served normally.
+	// PolicySelfServe is the OPEN rung: the self-serve card-first signup path
+	// is active (SaaS profile). SignupService.Signup is served normally.
 	PolicySelfServe Policy = "self-serve"
 
-	// PolicyAdminOnly means the self-hosted fail-safe is active: tenants are
-	// provisioned by a platform admin via AdminTenantService.AdminProvisionTenant.
-	// SignupService.Signup returns codes.PermissionDenied when called.
+	// PolicyApproval is the APPROVAL rung: anyone may register, an
+	// administrator approves each account before it becomes usable, and no
+	// mail transport is required. SignupService.Register is served; the three
+	// verification RPCs are refused, because there is nothing to verify by
+	// mail on this rung.
+	PolicyApproval Policy = "approval"
+
+	// PolicyAdminOnly is the CLOSED rung, and the self-hosted fail-safe:
+	// tenants are provisioned by a platform admin via
+	// AdminTenantService.AdminProvisionTenant. Every SignupService RPC returns
+	// codes.PermissionDenied.
 	PolicyAdminOnly Policy = "admin-only"
 )
+
+// KnobValueApproval is the SIGNUP_SELF_SERVE value that selects the approval
+// rung. Every other non-empty value selects the open rung.
+const KnobValueApproval = "approval"
 
 // ConfigKnob is the environment variable that activates self-serve signup.
 // Any non-empty value enables PolicySelfServe; absent means PolicyAdminOnly.
@@ -64,10 +93,15 @@ var signupSeam = seam.New(seam.Spec[Policy]{
 	Name:       "signup",
 	ConfigKnob: ConfigKnob,
 	FailSafe:   func() (Policy, error) { return PolicyAdminOnly, nil },
-	// Remote ignores the endpoint value: any non-empty knob means SaaS is
-	// active and self-serve is enabled. The "endpoint" is just the knob
-	// presence signal, not an address.
-	Remote: func(_ string) (Policy, error) { return PolicySelfServe, nil },
+	// Remote reads the knob VALUE as the rung selector rather than as an
+	// address: "approval" is the approval rung, anything else non-empty is the
+	// open rung. Knob absence is handled by FailSafe above.
+	Remote: func(value string) (Policy, error) {
+		if strings.EqualFold(strings.TrimSpace(value), KnobValueApproval) {
+			return PolicyApproval, nil
+		}
+		return PolicySelfServe, nil
+	},
 })
 
 func init() {
@@ -81,7 +115,7 @@ func init() {
 // pkg/seam when the knob is absent (self-hosted profile, expected) or when a
 // misconfiguration is detected.
 //
-// wired is true when PolicySelfServe was resolved (knob was set).
+// wired is true when the knob was set, whichever rung its value selected.
 func Resolve(ctx context.Context, logger *slog.Logger) (Policy, bool, error) {
 	res, err := signupSeam.Resolve(ctx, logger)
 	if err != nil {

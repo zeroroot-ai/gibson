@@ -551,6 +551,69 @@ func (c *Client) CreateHumanUser(ctx context.Context, req idp.CreateHumanUserReq
 	return idp.CreateHumanUserResult{}, mapError(err, "CreateHumanUser:create")
 }
 
+// DeactivateHumanUser blocks a human user from signing in (Zitadel Management
+// POST /management/v1/users/{userId}/_deactivate). The account and its
+// credential survive; only sign-in stops.
+//
+// Idempotent by intent: Zitadel answers a deactivate on an already-inactive
+// user with a precondition failure, which is the state the caller asked for,
+// so it reads as success. Any other failure is returned.
+func (c *Client) DeactivateHumanUser(ctx context.Context, req idp.HumanUserStateRequest) error {
+	return c.setHumanUserState(ctx, req, "_deactivate", "DeactivateHumanUser")
+}
+
+// ReactivateHumanUser lets a deactivated human user sign in again (Zitadel
+// Management POST /management/v1/users/{userId}/_reactivate).
+func (c *Client) ReactivateHumanUser(ctx context.Context, req idp.HumanUserStateRequest) error {
+	return c.setHumanUserState(ctx, req, "_reactivate", "ReactivateHumanUser")
+}
+
+// setHumanUserState is the shared body of the two state changes. They differ
+// only in the verb in the path and the name in the error.
+func (c *Client) setHumanUserState(ctx context.Context, req idp.HumanUserStateRequest, verb, operation string) error {
+	if req.UserID == "" {
+		return fmt.Errorf("%w: %s requires userId", idp.ErrUpstream, operation)
+	}
+	orgID := req.OrgID
+	if orgID == "" {
+		orgID = c.cfg.OrgID
+	}
+	path := "/management/v1/users/" + req.UserID + "/" + verb
+	err := c.doRequest(ctx, http.MethodPost, path, map[string]interface{}{}, orgID, nil)
+	if err == nil {
+		return nil
+	}
+	var httpErr *httpStatusError
+	if errors.As(err, &httpErr) && httpErr.status == http.StatusPreconditionFailed {
+		// The user is already in the requested state. That is the outcome the
+		// caller wanted, so it is not a failure.
+		return nil
+	}
+	return mapError(err, operation)
+}
+
+// DeleteHumanUser permanently removes a human user (Zitadel Management
+// DELETE /management/v1/users/{userId}). Deleting an absent user is success,
+// because the caller's intent — that this account cannot be used — holds.
+func (c *Client) DeleteHumanUser(ctx context.Context, req idp.HumanUserStateRequest) error {
+	if req.UserID == "" {
+		return fmt.Errorf("%w: DeleteHumanUser requires userId", idp.ErrUpstream)
+	}
+	orgID := req.OrgID
+	if orgID == "" {
+		orgID = c.cfg.OrgID
+	}
+	err := c.doRequest(ctx, http.MethodDelete, "/management/v1/users/"+req.UserID, nil, orgID, nil)
+	if err == nil {
+		return nil
+	}
+	mapped := mapError(err, "DeleteHumanUser")
+	if errors.Is(mapped, idp.ErrNotFound) {
+		return nil
+	}
+	return mapped
+}
+
 // SetHumanPassword sets a known password on an existing human user (Zitadel
 // Management POST /management/v1/users/{userId}/password). noChangeRequired is
 // true: the self-hosted operator sets this credential for their OWN account and

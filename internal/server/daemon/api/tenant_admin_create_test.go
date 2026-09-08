@@ -95,6 +95,32 @@ type fakeIDPClient struct {
 	// findUserCalls records the addresses looked up.
 	findUserFn    func(ctx context.Context, email string) (string, error)
 	findUserCalls []string
+
+	// Approval-rung recording (ADR-0006, gibson#22). deactivated,
+	// reactivated and deletedUsers record the sign-in-state changes the
+	// registration and approval paths make; the *Err fields drive the failure
+	// branches that must never leave a usable unapproved account.
+	deactivated   []string
+	deactivateErr error
+	reactivated   []string
+	reactivateErr error
+	deletedUsers  []string
+	deleteUserErr error
+}
+
+func (f *fakeIDPClient) DeactivateHumanUser(_ context.Context, req idp.HumanUserStateRequest) error {
+	f.deactivated = append(f.deactivated, req.UserID)
+	return f.deactivateErr
+}
+
+func (f *fakeIDPClient) ReactivateHumanUser(_ context.Context, req idp.HumanUserStateRequest) error {
+	f.reactivated = append(f.reactivated, req.UserID)
+	return f.reactivateErr
+}
+
+func (f *fakeIDPClient) DeleteHumanUser(_ context.Context, req idp.HumanUserStateRequest) error {
+	f.deletedUsers = append(f.deletedUsers, req.UserID)
+	return f.deleteUserErr
 }
 
 func (f *fakeIDPClient) CreateServiceAccount(ctx context.Context, req idp.CreateServiceAccountRequest) (*idp.ServiceAccount, error) {

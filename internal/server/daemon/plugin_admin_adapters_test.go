@@ -186,3 +186,10 @@ func TestPluginPrincipalAdapter_DeleteStripsPrefix(t *testing.T) {
 		t.Errorf("DeleteServiceAccount called with %v, want [acct-1]", fake.deleted)
 	}
 }
+
+// Approval-rung sign-in-state changes (ADR-0006, gibson#22). This stub does not
+// exercise them; the registration and approval paths are covered in
+// internal/server/daemon/api.
+func (*stubIDP) DeactivateHumanUser(context.Context, idp.HumanUserStateRequest) error { return nil }
+func (*stubIDP) ReactivateHumanUser(context.Context, idp.HumanUserStateRequest) error { return nil }
+func (*stubIDP) DeleteHumanUser(context.Context, idp.HumanUserStateRequest) error     { return nil }

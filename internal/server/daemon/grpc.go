@@ -1051,6 +1051,7 @@ func (d *daemonImpl) buildGRPCServer(ctx context.Context) (*grpcSubsystem, error
 	// the signup package init(). This call makes the knob actually take effect;
 	// without it signupPolicy is the zero value "" which behaves as PolicyAdminOnly.
 	selfServeSignup := false
+	approvalSignup := false
 	{
 		signupPolicy, signupWired, signupErr := signup.Resolve(ctx, d.logger.Slog())
 		if signupErr != nil {
@@ -1062,11 +1063,18 @@ func (d *daemonImpl) buildGRPCServer(ctx context.Context) (*grpcSubsystem, error
 		} else {
 			daemonSvc.WithSignupPolicy(signupPolicy)
 			selfServeSignup = signupPolicy == signup.PolicySelfServe
-			if signupWired {
-				d.logger.Info(ctx, "signup seam: self-serve signup active (SIGNUP_SELF_SERVE set)",
+			approvalSignup = signupPolicy == signup.PolicyApproval
+			switch {
+			case !signupWired:
+				d.logger.Info(ctx, "signup seam: admin-only registration active (SIGNUP_SELF_SERVE absent)",
 					slog.String("policy", string(signupPolicy)))
-			} else {
-				d.logger.Info(ctx, "signup seam: admin-only signup active (SIGNUP_SELF_SERVE absent)",
+			case approvalSignup:
+				d.logger.Info(ctx, "signup seam: admin-approval registration active "+
+					"(SIGNUP_SELF_SERVE=approval); no mail transport is required and every "+
+					"account waits for an administrator",
+					slog.String("policy", string(signupPolicy)))
+			default:
+				d.logger.Info(ctx, "signup seam: open self-serve signup active (SIGNUP_SELF_SERVE set)",
 					slog.String("policy", string(signupPolicy)))
 			}
 		}
@@ -1099,6 +1107,9 @@ func (d *daemonImpl) buildGRPCServer(ctx context.Context) (*grpcSubsystem, error
 	// instead, so the blast radius of a broken mail transport is "self-serve
 	// signup is unavailable," not "the platform is unavailable."
 	{
+		// requireSelfServe is fatal only on the OPEN rung, where the missing
+		// piece is what the flow runs on. requireRegistration is fatal on the
+		// open rung AND the approval rung, for the pieces both need.
 		requireSelfServe := func(what string, err error) error {
 			if !selfServeSignup {
 				d.logger.Warn(ctx, "self-serve signup unavailable: "+what,
@@ -1107,10 +1118,25 @@ func (d *daemonImpl) buildGRPCServer(ctx context.Context) (*grpcSubsystem, error
 			}
 			return fmt.Errorf("%s is set but %s: %w", signup.ConfigKnob, what, err)
 		}
+		requireRegistration := func(what string, err error) error {
+			if !selfServeSignup && !approvalSignup {
+				d.logger.Warn(ctx, "registration unavailable: "+what,
+					slog.String("error", err.Error()))
+				return nil
+			}
+			return fmt.Errorf("%s is set but %s: %w", signup.ConfigKnob, what, err)
+		}
 
+		// The store and the limiter are required by BOTH rungs: one records
+		// what was registered, the other bounds who may register. The mail
+		// transport and the product-surface origin are required only by the
+		// open rung, because they exist to deliver and land a verification
+		// link, and the approval rung sends none. That difference is the whole
+		// point of the rung: a self-hosted install with no SMTP gets a working
+		// front door instead of a form that can never complete.
 		if d.platformDB != nil {
 			daemonSvc.WithSignupVerificationStore(api.NewSignupVerificationStore(d.platformDB))
-		} else if err := requireSelfServe("no platform Postgres for signup verification",
+		} else if err := requireRegistration("no platform Postgres for registration",
 			errors.New("platform database not configured")); err != nil {
 			return nil, err
 		}
@@ -1123,8 +1149,12 @@ func (d *daemonImpl) buildGRPCServer(ctx context.Context) (*grpcSubsystem, error
 		// Never fatal (gibson#1228 / PR #1228): resolveSignupMailer warns and
 		// leaves the mailer unwired rather than stopping the daemon from
 		// booting. RequestEmailVerification fails closed at call time instead.
-		if sender := resolveSignupMailer(ctx, d.logger, selfServeSignup); sender != nil {
-			daemonSvc.WithSignupMailer(sender)
+		// On the approval rung there is nothing to send, so the transport is
+		// not asked for at all.
+		if !approvalSignup {
+			if sender := resolveSignupMailer(ctx, d.logger, selfServeSignup); sender != nil {
+				daemonSvc.WithSignupMailer(sender)
+			}
 		}
 
 		// The emailed link must land on the product surface, not the API plane.
@@ -1141,7 +1171,7 @@ func (d *daemonImpl) buildGRPCServer(ctx context.Context) (*grpcSubsystem, error
 
 		if d.stateClient != nil && d.stateClient.Client() != nil {
 			daemonSvc.WithSignupLimiter(ratelimit.NewWindowLimiter(d.stateClient.Client()))
-		} else if err := requireSelfServe("no Redis for signup rate limiting",
+		} else if err := requireRegistration("no Redis for registration rate limiting",
 			errors.New("state client not configured")); err != nil {
 			return nil, err
 		}
