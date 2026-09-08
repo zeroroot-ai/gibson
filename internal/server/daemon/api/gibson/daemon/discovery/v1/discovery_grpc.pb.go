@@ -3,7 +3,7 @@
 // This service answers "what can the authenticated caller currently use?" and
 // is the backing for:
 //
-//   * opensource/adk/cmd/gibson-mcp (MCP tools driven by Claude Code)
+//   * zeroroot-ai/adk cmd/gibson-mcp (MCP tools driven by Claude Code)
 //   * the dashboard's existing permissions-bridge migration
 //     (app/api/components/permissions/route.ts, which currently fail-opens
 //     to enabled=true for every visible catalog item; replaced by these RPCs

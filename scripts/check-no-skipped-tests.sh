@@ -2,8 +2,8 @@
 # check-no-skipped-tests.sh — CI guard: no unconditionally skipped tests.
 #
 # Spec: naming-and-config-standardization Requirement 3.5.
-# History: gibson#1294 — this guard scanned `core/` and `opensource/`, two
-# pre-polyrepo-split directories that do not exist in this module. The `find`
+# History: gibson#1294 — this guard scanned two pre-split workspace
+# directories that do not exist in this module. The `find`
 # error was swallowed, the loop ran zero times, and the guard reported PASSED
 # on every run since the monorepo layout changed. Same class as gibson#1280.
 #
@@ -38,8 +38,8 @@
 # `t.Run` closure still disables that subtest unconditionally.
 #
 # There is deliberately NO path allowlist. The previous version carried 38
-# allowlisted paths, all of them written against the dead `core/` +
-# `opensource/` layout. A path allowlist grows every time the guard is
+# allowlisted paths, all of them written against that dead pre-split
+# layout. A path allowlist grows every time the guard is
 # inconvenient and ends up absorbing exactly the violations it exists to
 # report — the failure mode this guard was already in. The rule here is
 # structural, so there is nothing to exempt: fix the code or the guard fails.

@@ -4,7 +4,7 @@
 // Package daemon constructs the operator's SPIFFE-mTLS gRPC client to the
 // daemon's DaemonOperatorService.
 //
-// Phase 2 of ADR-0002 (zeroroot-ai/docs adr/0002-operator-to-daemon-transport.md):
+// Phase 2 of ADR-0002, operator-to-daemon transport:
 // the operator dials the daemon directly over SPIFFE mTLS using the SPIRE
 // agent's Workload API socket. The daemon's gRPC server validates the
 // operator's SVID against its inbound peer allow-list (gibson#107) before

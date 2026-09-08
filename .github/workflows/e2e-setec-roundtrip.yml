@@ -1,6 +1,6 @@
 # E10 / gibson#999 — setec execution round-trip (E3), migrated onto ephemeral
 # ARC runners driving the ALREADY-DEPLOYED staging setec (Epic:
-# cicd-efficiency, board #44 / zeroroot-ai/deploy#1067 / ADR-0060).
+# cicd-efficiency).
 #
 # One job, one gate:
 #   - roundtrip — E10/#999 plain-tool round-trip (untrusted-exec isolation

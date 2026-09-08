@@ -15,7 +15,7 @@ import (
 // External components (agent / tool / plugin) bootstrap their Capability Grant
 // by fetching this document, then POSTing an Ed25519 host registration to the
 // advertised register endpoint. The SDK's capabilitygrant.Discover reads exactly
-// these fields (opensource/sdk/capabilitygrant/discovery.go). The document is
+// these fields (zeroroot-ai/sdk capabilitygrant/discovery.go). The document is
 // non-secret and unauthenticated by design: a component holds no Capability
 // Grant yet at discovery time. It is served on the same pre-auth listener as the
 // native-login bootstrap and published through Envoy on an allow_missing route.
@@ -59,7 +59,7 @@ type agentConfigEndpoints struct {
 }
 
 // agentConfigDocument is the JSON body served at /.well-known/agent-configuration.
-// Field names and shape must match opensource/sdk/capabilitygrant.DiscoveryDocument.
+// Field names and shape must match zeroroot-ai/sdk capabilitygrant.DiscoveryDocument.
 type agentConfigDocument struct {
 	ProtocolVersion string               `json:"protocol_version"`
 	ProviderName    string               `json:"provider_name"`

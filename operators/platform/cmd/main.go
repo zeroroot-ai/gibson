@@ -9,7 +9,7 @@
 //
 // Spec: .spec-workflow/specs/deploy-architecture-refactor (Phase 2).
 //
-// Sibling of tenant-operator (enterprise/platform/tenant-operator/);
+// Sibling of the tenant-operator (operators/tenant/);
 // same kubebuilder v4 layout, same conventions. CRDs land here in
 // Phase 2.2 (PlatformBootstrap) and 2.3 (OIDCClient); reconcilers in
 // Phase 3.

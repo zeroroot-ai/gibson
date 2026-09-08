@@ -4,7 +4,7 @@
 // Package helpers — console_filter.go implements browser console message
 // filtering against a YAML allowlist per design Component 5.
 //
-// The allowlist (enterprise/platform/dashboard/e2e/console-allowlist.yaml)
+// The allowlist (zeroroot-ai/dashboard e2e/console-allowlist.yaml)
 // defines known-benign console messages by regex pattern + level. Messages
 // matching an allowlist entry are stripped from the smoke test's failure
 // report. Messages NOT matching the allowlist are returned as potential

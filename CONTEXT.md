@@ -532,7 +532,7 @@ _Avoid_: loop node, retry edge, agent node (that one launches an ephemeral sandb
   resolved 2026-08-24: the UI says **Write** everywhere; docs state that Write maps
   to `can_configure`.
 - **Contributor-doc home** — resolved 2026-08-24: the docs site
-  (`opensource/docs-site`) is canonical for every contributor-facing procedure
+  (`zeroroot-ai/docs-site`) is canonical for every contributor-facing procedure
   (Contributing section: add a component kind, change the FGA model, add an RPC).
   The gibson how-tos migrate there; `gibson/docs/` keeps ADRs (internal), a pointer
   file, and machine-facing material (`rules.yaml`, `forbidden-patterns.md`, regen

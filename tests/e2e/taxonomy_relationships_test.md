@@ -49,8 +49,7 @@ docker logs -f neo4j-test
 ### 2. Build Gibson
 
 ```bash
-# Navigate to Gibson repository
-cd /home/anthony/Code/zeroroot.ai/opensource/gibson
+# From the repository root
 
 # Build Gibson CLI
 make build
@@ -93,7 +92,7 @@ export ANTHROPIC_API_KEY="your-api-key-here"
 **Option A: From local development**
 ```bash
 # If you have the agent locally
-cd /home/anthony/Code/zeroroot.ai/enterprise/agents/network-recon
+cd <your network-recon checkout>
 make build
 ```
 
@@ -507,10 +506,10 @@ For automated testing, see the companion script: `taxonomy_relationships_test.sh
 
 ## References
 
-- Gibson Framework: `/home/anthony/Code/zeroroot.ai/opensource/gibson/`
-- Network-Recon Agent: `/home/anthony/Code/zeroroot.ai/enterprise/agents/network-recon/`
-- Neo4j Adapter: `/home/anthony/Code/zeroroot.ai/opensource/sdk/memory/neo4j_adapter.go`
-- Taxonomy Spec: `/home/anthony/Code/zeroroot.ai/.spec-workflow/specs/entity-taxonomy/`
+- Gibson: this repository.
+- Network-recon agent: your own checkout.
+- Neo4j adapter: `zeroroot-ai/sdk` `memory/neo4j_adapter.go`.
+- Entity taxonomy: `zeroroot-ai/sdk` `taxonomy/core.yaml`.
 
 ## Next Steps
 

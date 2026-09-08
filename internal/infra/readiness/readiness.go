@@ -2,8 +2,8 @@
 // Copyright 2026 Zero Root AI
 
 // Package readiness provides an HTTP readiness/liveness probe aggregator for
-// platform services. It is NOT customer-facing; do not import it from any
-// package under opensource/.
+// platform services. It is NOT customer-facing. Never import it from the
+// public sdk or adk repositories.
 package readiness
 
 import (

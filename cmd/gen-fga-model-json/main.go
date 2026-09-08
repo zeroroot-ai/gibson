@@ -3,10 +3,10 @@
 
 // gen-fga-model-json converts internal/platform/authz/model.fga (OpenFGA DSL) into
 // the JSON form expected by OpenFGA's /authorization-models HTTP API. It is
-// invoked by the Helm chart's `make sync-fga-model` target to regenerate
-// enterprise/deploy/helm/gibson/files/fga-model.json from the DSL source of
-// truth, eliminating the drift between model.fga and the hand-written JSON
-// that previously lived inline in the fga-init-job.yaml template.
+// invoked by the umbrella chart in zeroroot-ai/charts to build the
+// gibson-fga-init ConfigMap from the DSL source of truth, eliminating the
+// drift between model.fga and the hand-written JSON that previously lived
+// inline in the fga-init Job template.
 //
 // Usage:
 //

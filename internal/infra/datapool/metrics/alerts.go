@@ -6,7 +6,7 @@ package metrics
 // DataPlaneAlertRules contains Prometheus alerting rules for the data-plane
 // metrics defined in this package. These rules are exported as Go constants so
 // they can be embedded into Helm chart ConfigMaps or Kubernetes PrometheusRule
-// resources via the GitOps deploy pipeline at enterprise/deploy/.
+// resources via the Argo tree in zeroroot-ai/hosted (gitops/).
 //
 // Threshold rationale is documented inline. Alerts are grouped by severity:
 //

@@ -6,7 +6,7 @@ This doc maps **every credential** in the Gibson control plane to where it lives
 
 For any new **per-tenant runtime credential**:
 
-1. **Operator writes** to the per-tenant Vault namespace at provisioning time, using the existing admin Vault client (`enterprise/platform/tenant-operator/internal/clients/vault/`).
+1. **Operator writes** to the per-tenant Vault namespace at provisioning time, using the existing admin Vault client (`operators/tenant/internal/clients/vault/`).
 2. **Daemon reads** via the existing secrets broker (`internal/platform/secrets/service.go`). The broker handles per-tenant routing, caching, circuit breaking, and audit.
 3. **Path convention**: `infra/<store>` for operator-written infra creds (read-only to daemon); `user/cred:<name>` and `user/provider_config:<provider>:<field>` for user-supplied secrets written via `SetSecret`.
 
@@ -127,10 +127,10 @@ If none of the above fits, you've found a sixth pattern — **stop and discuss**
 | Master KEK provider abstraction | `internal/platform/crypto/providers/` |
 | Per-tenant Postgres password derivation | `internal/infra/datapool/pgxpool_per_tenant.go` (`derivePostgresPassword`) |
 | Per-tenant Neo4j credential resolver | `internal/infra/datapool/neo4j_endpoint_resolver_instance.go` |
-| Vault / cloud provider impls | `enterprise/platform/platform-clients/secrets/` |
-| Operator Vault client | `enterprise/platform/tenant-operator/internal/clients/vault/` |
-| Operator Vault ACL policy | `enterprise/platform/tenant-operator/internal/clients/vault/namespace.go` (`tenantPolicyHCL`) |
-| Operator provisioning saga | `enterprise/platform/tenant-operator/internal/saga/flows/provision.go` |
+| Vault provider impls | `internal/infra/secrets/` |
+| Operator Vault client | `operators/tenant/internal/clients/vault/` |
+| Operator Vault ACL policy | `operators/tenant/internal/clients/vault/namespace.go` (`tenantPolicyHCL`) |
+| Operator provisioning saga | `operators/tenant/internal/saga/flows/provision.go` |
 
 ## Related docs
 

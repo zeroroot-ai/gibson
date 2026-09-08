@@ -186,9 +186,9 @@ When adding new E2E tests:
 
 ## References
 
-- Gibson Framework: `/home/anthony/Code/zeroroot.ai/opensource/gibson/`
-- SDK Documentation: `/home/anthony/Code/zeroroot.ai/opensource/sdk/README.md`
-- Entity Taxonomy Spec: `/home/anthony/Code/zeroroot.ai/.spec-workflow/specs/entity-taxonomy/`
+- Gibson: this repository.
+- SDK: `zeroroot-ai/sdk` `README.md`.
+- Entity taxonomy: `zeroroot-ai/sdk` `taxonomy/core.yaml`.
 
 ## Future Tests
 

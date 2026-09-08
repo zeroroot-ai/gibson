@@ -15,7 +15,7 @@ import (
 	"github.com/zeroroot-ai/gibson/internal/platform/authz"
 )
 
-// permissionsFile mirrors the shape of opensource/adk/schemas/permissions.yaml.json.
+// permissionsFile mirrors the shape of zeroroot-ai/adk schemas/permissions.yaml.json.
 // Keeping the parser close to the handler avoids a cross-package dependency and
 // keeps the schema updatable in lockstep with the JSON schema that ships in the
 // ADK. Stricter schema validation happens in the dashboard's install flow

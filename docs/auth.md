@@ -294,4 +294,4 @@ not yet implemented.
 - Per-tenant data plane: [`data-plane.md`](./data-plane.md).
 - SDK identity types: `core/sdk/docs/auth.md`.
 - ext-authz internals (the half upstream of this daemon): `core/ext-authz/docs/auth.md`.
-- Helm wiring (Envoy, SPIRE, Vault, validators): `enterprise/deploy/docs/auth.md`.
+- Helm wiring (Envoy, SPIRE, Vault, validators): the umbrella chart in `zeroroot-ai/charts`.

@@ -4,31 +4,40 @@
 // Package tlsaudit hosts the TLS no-fallback CI guard test for spec
 // critical-tls-no-fallbacks (Component 6).
 //
-// This test walks the workspace at HEAD and asserts three invariants:
+// The test walks THIS repository at HEAD and asserts three invariants:
 //
 //  1. Zero matches of `tls.RequestClientCert`, `tls.NoClientCert`,
 //     `tls.VerifyClientCertIfGiven`, `tls.RequireAnyClientCert` outside
-//     `*_test.go` files in core/, enterprise/, and opensource/.
+//     `*_test.go` files.
 //
-//  2. The harness callback listener at
-//     core/gibson/internal/engine/harness/callback_server.go contains both
+//  2. The harness callback listener
+//     (internal/engine/harness/callback_server.go) contains both
 //     `grpc.Creds(` and `tlsconfig.MTLSServerConfig(` — the listener is
 //     SPIFFE-mTLS-wrapped (Component 1).
 //
-//  3. Every `reflection.Register(` call site in
-//     core/gibson/internal/engine/harness/callback_server.go and
-//     core/gibson/internal/server/daemon/grpc.go is preceded within 5 source
-//     lines by `os.Getenv("GIBSON_GRPC_REFLECTION")` (Component 3 /
-//     Requirement 4).
+//  3. Every `reflection.Register(` call site in production code is preceded
+//     within 5 source lines by an `os.Getenv("..._GRPC_REFLECTION")` gate
+//     (Component 3 / Requirement 4).
+//
+// Until this change the guard could not fail. It ascended from cwd looking for
+// the three pre-split workspace directories together, and skipped when it found
+// none, which is every checkout of this repository and every CI runner. Its two
+// file assertions named paths this module has not used since the monorepo
+// layout landed, and assertion 3 treated a missing file as a pass. Three dead
+// assertions reported green on every run.
+//
+// The rule in assertion 3 is now structural rather than a file list: any
+// production file that gains a `reflection.Register(` call must gate it, so a
+// new listener cannot escape the guard by living somewhere the list does not
+// name.
 //
 // The test runs under `make test` and `make test-race`. It uses pure-Go
 // filepath.WalkDir + os.ReadFile + simple substring/regexp matching — no
 // shell-out, no path-skip lists for "known-safe" production files.
 //
-// This test lives in a dedicated leaf package (internal/tlsaudit) — NOT
-// internal/daemon — so it has no transitive build dependency on the daemon
-// production package. That keeps the audit runnable even when transient
-// sibling-spec WIP breaks the daemon's import graph.
+// This test lives in a dedicated leaf package so it has no transitive build
+// dependency on the daemon production package. That keeps the audit runnable
+// even when transient sibling-spec WIP breaks the daemon's import graph.
 package tlsaudit
 
 import (
@@ -51,23 +60,26 @@ var bannedClientAuthLiterals = []string{
 	"tls.RequireAnyClientCert",
 }
 
-// findWorkspaceRoot ascends from cwd until it finds a directory that contains
-// every one of {core, enterprise, opensource}. Returns "" if none found —
-// caller must handle that as a skip (the test cannot run outside the polyrepo
-// workspace, e.g. when only the daemon tarball is unpacked in CI).
-func findWorkspaceRoot() string {
+// callbackServerPath is the harness callback listener, relative to the module
+// root. Assertion 2 reads it directly, so a rename fails the test loudly
+// instead of skipping it.
+const callbackServerPath = "internal/engine/harness/callback_server.go"
+
+// findRepoRoot ascends from cwd until it finds the directory that holds both a
+// go.mod and this test's own package. The second condition pins it to THIS
+// module: a go.mod alone would also match a nested module. It returns "" only
+// when the test runs outside the module, which the caller treats as a failure
+// rather than a skip.
+func findRepoRoot(t *testing.T) string {
+	t.Helper()
 	dir, err := os.Getwd()
 	if err != nil {
 		return ""
 	}
 	for {
-		hits := 0
-		for _, sub := range []string{"core", "enterprise", "opensource"} {
-			if info, err := os.Stat(filepath.Join(dir, sub)); err == nil && info.IsDir() {
-				hits++
-			}
-		}
-		if hits == 3 {
+		_, modErr := os.Stat(filepath.Join(dir, "go.mod"))
+		_, selfErr := os.Stat(filepath.Join(dir, filepath.FromSlash("internal/platform/tlsaudit")))
+		if modErr == nil && selfErr == nil {
 			return dir
 		}
 		parent := filepath.Dir(dir)
@@ -91,10 +103,10 @@ func walkProductionGoFiles(t *testing.T, roots []string, fn func(path string, co
 			if d.IsDir() {
 				name := d.Name()
 				// Skip vendored / VCS / build / agent-worktree dirs. The
-				// .claude directory holds concurrent agent worktrees with
+				// .worktrees directory holds concurrent agent worktrees with
 				// snapshots of source — auditing them would double-count
 				// findings that the parent tree already covers.
-				if name == "vendor" || name == ".git" || name == "node_modules" || name == ".tmp" || name == "dist" || name == ".claude" {
+				if name == "vendor" || name == ".git" || name == "node_modules" || name == ".tmp" || name == "dist" || name == ".claude" || name == ".worktrees" {
 					return filepath.SkipDir
 				}
 				return nil
@@ -118,21 +130,16 @@ func walkProductionGoFiles(t *testing.T, roots []string, fn func(path string, co
 	}
 }
 
-// TestNoFallbackAudit is the workspace-wide CI guard for spec
+// TestNoFallbackAudit is the repository-wide CI guard for spec
 // critical-tls-no-fallbacks. See package doc.
 func TestNoFallbackAudit(t *testing.T) {
-	wsRoot := findWorkspaceRoot()
-	if wsRoot == "" {
-		t.Skip("workspace root (core/+enterprise/+opensource/) not found from cwd; " +
-			"this test must run from within the polyrepo workspace tree")
+	repoRoot := findRepoRoot(t)
+	if repoRoot == "" {
+		t.Fatal("module root (the directory holding this module's go.mod) not found from cwd")
 	}
-	t.Logf("workspace root: %s", wsRoot)
+	t.Logf("repository root: %s", repoRoot)
 
-	roots := []string{
-		filepath.Join(wsRoot, "core"),
-		filepath.Join(wsRoot, "enterprise"),
-		filepath.Join(wsRoot, "opensource"),
-	}
+	roots := []string{repoRoot}
 
 	t.Run("no_banned_clientauth_literals", func(t *testing.T) {
 		var violations []string
@@ -140,7 +147,7 @@ func TestNoFallbackAudit(t *testing.T) {
 			body := string(contents)
 			for _, banned := range bannedClientAuthLiterals {
 				if strings.Contains(body, banned) {
-					rel, err := filepath.Rel(wsRoot, path)
+					rel, err := filepath.Rel(repoRoot, path)
 					if err != nil {
 						rel = path
 					}
@@ -160,40 +167,31 @@ func TestNoFallbackAudit(t *testing.T) {
 	})
 
 	t.Run("callback_server_is_spiffe_wrapped", func(t *testing.T) {
-		path := filepath.Join(wsRoot, "core", "gibson", "internal", "harness", "callback_server.go")
+		path := filepath.Join(repoRoot, filepath.FromSlash(callbackServerPath))
 		data, err := os.ReadFile(path)
 		if err != nil {
-			t.Fatalf("read %s: %v", path, err)
+			t.Fatalf("read %s: %v", callbackServerPath, err)
 		}
 		body := string(data)
 		for _, needle := range []string{"grpc.Creds(", "tlsconfig.MTLSServerConfig("} {
 			if !strings.Contains(body, needle) {
 				t.Errorf("spec critical-tls-no-fallbacks Component 1: "+
-					"callback_server.go must contain %q (the SPIFFE-mTLS wrap)", needle)
+					"%s must contain %q (the SPIFFE-mTLS wrap)", callbackServerPath, needle)
 			}
 		}
 	})
 
 	t.Run("reflection_register_is_gated", func(t *testing.T) {
-		gatedFiles := []string{
-			filepath.Join(wsRoot, "core", "gibson", "internal", "harness", "callback_server.go"),
-			filepath.Join(wsRoot, "core", "gibson", "internal", "daemon", "grpc.go"),
-		}
 		reflectionLine := regexp.MustCompile(`reflection\.Register\(`)
-		gateLine := regexp.MustCompile(`os\.Getenv\("GIBSON_GRPC_REFLECTION"\)`)
-		for _, path := range gatedFiles {
-			data, err := os.ReadFile(path)
-			if err != nil {
-				if errors.Is(err, os.ErrNotExist) {
-					continue // file may not exist (e.g. running from a stripped tarball)
-				}
-				t.Fatalf("read %s: %v", path, err)
-			}
-			lines := strings.Split(string(data), "\n")
+		gateLine := regexp.MustCompile(`os\.Getenv\("[A-Z_]*GRPC_REFLECTION"\)`)
+		sites := 0
+		walkProductionGoFiles(t, roots, func(path string, contents []byte) {
+			lines := strings.Split(string(contents), "\n")
 			for i, line := range lines {
 				if !reflectionLine.MatchString(line) {
 					continue
 				}
+				sites++
 				start := i - 5
 				if start < 0 {
 					start = 0
@@ -205,17 +203,24 @@ func TestNoFallbackAudit(t *testing.T) {
 						break
 					}
 				}
-				if !gated {
-					rel, err := filepath.Rel(wsRoot, path)
-					if err != nil {
-						rel = path
-					}
-					t.Errorf("spec critical-tls-no-fallbacks Component 3 / Requirement 4.1: "+
-						"%s line %d has reflection.Register( without an "+
-						"os.Getenv(\"GIBSON_GRPC_REFLECTION\") gate within 5 preceding lines",
-						rel, i+1)
+				if gated {
+					continue
 				}
+				rel, err := filepath.Rel(repoRoot, path)
+				if err != nil {
+					rel = path
+				}
+				t.Errorf("spec critical-tls-no-fallbacks Component 3 / Requirement 4.1: "+
+					"%s line %d has reflection.Register( without an "+
+					"os.Getenv(\"..._GRPC_REFLECTION\") gate within 5 preceding lines",
+					rel, i+1)
 			}
+		})
+		// A guard that finds nothing to check is a guard that cannot fail.
+		if sites == 0 {
+			t.Fatal("no reflection.Register( call site found in production code; " +
+				"the walk is broken or every listener moved, so this assertion checks nothing")
 		}
+		t.Logf("gated reflection.Register call sites checked: %d", sites)
 	})
 }

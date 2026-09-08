@@ -17,9 +17,9 @@
 //
 // Prerequisites:
 //   - GIBSON_TEST_FIXTURES_ENABLED=true
-//   - A live Kind cluster with Gibson deployed (make deploy-local in
-//     enterprise/deploy/helm/gibson/)
-//   - The debug-plugin image loaded into the kind cluster (make deploy-local
+//   - A live kind cluster with Gibson deployed (make recreate ENV=kind in
+//     zeroroot-ai/hosted)
+//   - The debug-plugin image loaded into the kind cluster (the bring-up
 //     builds and loads it via the values.yaml debugPlugin.image block)
 //   - GIBSON_URL pointing at the kind cluster Gibson ingress
 //   - GIBSON_BOOTSTRAP_TOKEN set to a valid token for the test tenant
@@ -84,8 +84,8 @@ func TestPlugin_E2E(t *testing.T) {
 	//
 	// The debug-plugin binary is expected to be in PATH or at the path set by
 	// GIBSON_DEBUG_PLUGIN_BIN. In CI the kind make target builds and loads the
-	// image; for local runs the operator builds it from
-	// enterprise/plugins/debug-plugin/.
+	// image; for local runs the operator builds it from their own
+	// debug-plugin checkout.
 	debugPluginBin := os.Getenv("GIBSON_DEBUG_PLUGIN_BIN")
 	if debugPluginBin == "" {
 		// Default: expect it on PATH after `go install` or `go build`.

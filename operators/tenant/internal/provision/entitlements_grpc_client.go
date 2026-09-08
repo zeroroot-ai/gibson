@@ -60,7 +60,7 @@ type EntitlementsGRPCClient struct {
 // not checked. SPIFFE mTLS peer-SVID verification (tlsconfig.AuthorizeOneOf)
 // is the sole trust anchor. See gibson#245 and tenant-operator#253.
 //
-// ADR: zeroroot-ai/docs adr/0002-operator-to-daemon-transport.md.
+// Decided by ADR-0002, operator-to-daemon transport.
 func NewEntitlementsGRPCClient(ctx context.Context, addr, daemonSVID string, tokens TokenSource) (*EntitlementsGRPCClient, error) {
 	transport, err := daemontransport.NewClient(ctx, daemontransport.Options{
 		Addr:       addr,

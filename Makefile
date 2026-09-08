@@ -505,7 +505,7 @@ vet-e2e:
 
 # ---------------------------------------------------------------------------
 # Cluster-bound e2e suites (gibson#1394). Each target runs one tests/e2e suite
-# against a LIVE kind cluster (`make deploy-local` in enterprise/deploy) and
+# against a LIVE kind cluster (`make recreate ENV=kind` in zeroroot-ai/hosted) and
 # requires the env its suite documents; the suites fail loud on missing env,
 # so these targets validate up front only what the suite cannot self-check.
 # The three targets restore what the suite doc-comments have referenced since
