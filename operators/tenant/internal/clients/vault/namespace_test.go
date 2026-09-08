@@ -280,12 +280,12 @@ func TestPing_OKAndUnauthorized(t *testing.T) {
 	srv := httptest.NewServer(fv.handler())
 	defer srv.Close()
 
-	good, _ := New(Config{Address: srv.URL, AdminToken: "good-token"})
+	good, _ := New(Config{Address: srv.URL, AdminToken: "good-token", HTTPClient: srv.Client()})
 	if err := good.Ping(context.Background()); err != nil {
 		t.Fatalf("Ping with good token: %v", err)
 	}
 
-	bad, _ := New(Config{Address: srv.URL, AdminToken: "bad-token"})
+	bad, _ := New(Config{Address: srv.URL, AdminToken: "bad-token", HTTPClient: srv.Client()})
 	err := bad.Ping(context.Background())
 	if err == nil {
 		t.Fatal("expected unauthorized error")
@@ -305,7 +305,7 @@ func TestVerifyJWTAuthMounted(t *testing.T) {
 		srv := httptest.NewServer(fv.handler())
 		defer srv.Close()
 
-		c, _ := New(Config{Address: srv.URL, AdminToken: "x"})
+		c, _ := New(Config{Address: srv.URL, AdminToken: "x", HTTPClient: srv.Client()})
 		if err := c.VerifyJWTAuthMounted(context.Background()); err != nil {
 			t.Fatalf("expected nil when mounted, got %v", err)
 		}
@@ -318,7 +318,7 @@ func TestVerifyJWTAuthMounted(t *testing.T) {
 		srv := httptest.NewServer(fv.handler())
 		defer srv.Close()
 
-		c, _ := New(Config{Address: srv.URL, AdminToken: "x"})
+		c, _ := New(Config{Address: srv.URL, AdminToken: "x", HTTPClient: srv.Client()})
 		err := c.VerifyJWTAuthMounted(context.Background())
 		if err == nil {
 			t.Fatal("expected error when jwt auth backend absent")
@@ -343,6 +343,7 @@ func TestEnsureTenantNamespace(t *testing.T) {
 		AdminToken:       "tok",
 		JWTAuthMountPath: "auth/jwt",
 		JWTBoundAudience: "gibson-saas",
+		HTTPClient:       srv.Client(),
 	})
 	if err != nil {
 		t.Fatal(err)
@@ -412,7 +413,7 @@ func TestEnsureTenantNamespace_RequiresJWTBoundAudience(t *testing.T) {
 	defer srv.Close()
 
 	// JWTBoundAudience intentionally left empty.
-	c, _ := New(Config{Address: srv.URL, AdminToken: "tok"})
+	c, _ := New(Config{Address: srv.URL, AdminToken: "tok", HTTPClient: srv.Client()})
 	_, err := c.EnsureTenantNamespace(context.Background(), "tenant-noaud")
 	if err == nil {
 		t.Fatal("expected error from EnsureTenantNamespace with empty JWTBoundAudience")
@@ -435,7 +436,7 @@ func TestEnsureTenantNamespace_RejectsInvalidID(t *testing.T) {
 	srv := httptest.NewServer(fv.handler())
 	defer srv.Close()
 
-	c, _ := New(Config{Address: srv.URL, AdminToken: "tok"})
+	c, _ := New(Config{Address: srv.URL, AdminToken: "tok", HTTPClient: srv.Client()})
 	for _, bad := range []string{"", "Has-Capital", "has/slash", "has space", "has_underscore"} {
 		t.Run(bad, func(t *testing.T) {
 			_, err := c.EnsureTenantNamespace(context.Background(), bad)
@@ -459,6 +460,7 @@ func TestDeleteTenantNamespace_Idempotent(t *testing.T) {
 		Address:          srv.URL,
 		AdminToken:       "tok",
 		JWTBoundAudience: "gibson-saas",
+		HTTPClient:       srv.Client(),
 	})
 	if _, err := c.EnsureTenantNamespace(context.Background(), "ent"); err != nil {
 		t.Fatal(err)
@@ -556,6 +558,7 @@ func TestTenantNamespaceHeader(t *testing.T) {
 		Address:          srv.URL,
 		AdminToken:       "tok",
 		JWTBoundAudience: "gibson-saas",
+		HTTPClient:       srv.Client(),
 	})
 	if _, err := c.EnsureTenantNamespace(context.Background(), "hdr"); err != nil {
 		t.Fatal(err)
@@ -614,7 +617,7 @@ func TestMountKVv2_SkipsEnableWhenAlreadyMounted(t *testing.T) {
 			}))
 			defer srv.Close()
 
-			ac, err := New(Config{Address: srv.URL, AdminToken: "x"})
+			ac, err := New(Config{Address: srv.URL, AdminToken: "x", HTTPClient: srv.Client()})
 			if err != nil {
 				t.Fatalf("New: %v", err)
 			}
@@ -660,7 +663,7 @@ func TestMountJWTAuth_SkipsEnableWhenAlreadyMounted(t *testing.T) {
 			}))
 			defer srv.Close()
 
-			ac, err := New(Config{Address: srv.URL, AdminToken: "x", JWTAuthMountPath: "jwt"})
+			ac, err := New(Config{Address: srv.URL, AdminToken: "x", JWTAuthMountPath: "jwt", HTTPClient: srv.Client()})
 			if err != nil {
 				t.Fatalf("New: %v", err)
 			}

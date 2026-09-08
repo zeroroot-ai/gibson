@@ -24,7 +24,7 @@ func TestVerifyJWTAuthMounted_OK(t *testing.T) {
 	}))
 	defer srv.Close()
 
-	c, err := New(Config{Address: srv.URL, AdminToken: "t"})
+	c, err := New(Config{Address: srv.URL, AdminToken: "t", HTTPClient: srv.Client()})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -45,7 +45,7 @@ func TestVerifyJWTAuthMounted_NotFound(t *testing.T) {
 	}))
 	defer srv.Close()
 
-	c, err := New(Config{Address: srv.URL, AdminToken: "t"})
+	c, err := New(Config{Address: srv.URL, AdminToken: "t", HTTPClient: srv.Client()})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -75,7 +75,7 @@ func TestVerifyJWTAuthMounted_Forbidden(t *testing.T) {
 	}))
 	defer srv.Close()
 
-	c, err := New(Config{Address: srv.URL, AdminToken: "t"})
+	c, err := New(Config{Address: srv.URL, AdminToken: "t", HTTPClient: srv.Client()})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -127,7 +127,7 @@ func TestForbidden_TokenExpiry_IsTransient(t *testing.T) {
 			}))
 			defer srv.Close()
 
-			c, err := New(Config{Address: srv.URL, AdminToken: "t"})
+			c, err := New(Config{Address: srv.URL, AdminToken: "t", HTTPClient: srv.Client()})
 			if err != nil {
 				t.Fatal(err)
 			}
