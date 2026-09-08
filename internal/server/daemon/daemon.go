@@ -1010,9 +1010,16 @@ func (d *daemonImpl) Start(ctx context.Context) error {
 	// tenant's World from its live mission event stream (ADR-0001 capture path).
 	d.beliefProvider = resolveBeliefProvider()
 	d.brainRegistry = brain.NewRegistry(ctx, append(
-		[]brain.System{brain.BeliefSystem(d.beliefProvider)},
+		[]brain.System{brain.BeliefSystem},
 		brain.ExecutorSystems()..., // scheduler/condition/decider-gate/budget/retry/completion (gibson#851)
 	)...)
+	// Belief inference is an HTTP call to the pgmpy sidecar, so it runs off the
+	// tick: BeliefSystem asks for a score when a host's evidence changes, and the
+	// worker WireBelief installs answers with a BeliefScored event (gibson#25).
+	// Registered here because engines fault in lazily on the first event.
+	d.brainRegistry.OnEngine(func(e *brain.Engine) {
+		brain.WireBelief(ctx, e, d.beliefProvider, 0)
+	})
 	d.logger.Info(ctx, "ECS brain registry initialized", "belief_model", d.beliefProvider.Version())
 
 	// Project each tenant's World into its Neo4j knowledge graph (ADR-0007): the

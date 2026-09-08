@@ -33,6 +33,12 @@ type Host struct {
 	CloudID    string // strong identity signal
 	Ports      []PortObservation
 	Belief     Belief // attack-path belief (derived; ADR-0005)
+	// EvidenceDigest fingerprints the evidence the outstanding belief score was
+	// requested for (belief.go). The gate re-requests a score only when the
+	// host's current evidence digest differs from this one, and the reducer
+	// drops a BeliefScored whose digest no longer matches — the result of a
+	// score the evidence has already moved past.
+	EvidenceDigest string
 	// MissionID is the mission that discovered this host — the mission-evidence edge
 	// (gibson#1075). Carried from the observation's ingest context so a mission-scoped
 	// frame surfaces the hosts that mission found, and so a surprise→Finding promotion
@@ -310,6 +316,8 @@ func Reduce(w *World, ev Event) {
 		applyMissionResumed(w, e)
 	case MissionDone:
 		applyMissionDone(w, e)
+	case BeliefScoreRequested:
+		applyBeliefScoreRequested(w, e)
 	case BeliefScored:
 		applyBeliefScored(w, e)
 	case FindingRaised:

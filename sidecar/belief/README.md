@@ -8,9 +8,11 @@ network and returns the three belief-field components for a host —
 The Go daemon never does probability math itself (ADR-0005 §1: "LLMs are bad
 probability calculators; a Bayes net is calibrated, fast, free"). The daemon's
 `brain.PgmpyBeliefProvider` POSTs host evidence here on **evidence change**
-(never per clock tick — `internal/brain/belief.go::BeliefSystem` only re-scores
-when the score moves), and records the returned model **version** on the host so
-replay reproduces.
+(never per clock tick). `internal/engine/brain/belief.go::BeliefSystem` fingerprints
+each host's evidence and asks for a score only when that fingerprint moves, and
+`BeliefWorker` makes the POST off the engine tick, so inference never blocks the
+tick loop. The daemon records the returned model **version** on the host so replay
+reproduces.
 
 ## Invariants (ADR-0005)
 

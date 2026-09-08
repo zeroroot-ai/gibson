@@ -54,14 +54,14 @@ func TestPgmpyBelief_ScoresFromSidecar(t *testing.T) {
 		},
 	}
 
-	got := p.Score(h)
+	got := p.Score(evidenceOf(h))
 	want := Belief{Juicy: 0.7, Exploitable: 0.8, Reachable: 1.0, Model: "base-v1"}
 	if got != want {
 		t.Fatalf("belief = %+v, want %+v", got, want)
 	}
 
 	// Evidence is derived deterministically: only open ports, services sorted.
-	wantEv := beliefEvidence{
+	wantEv := BeliefEvidence{
 		OpenPorts: []int{22, 443},
 		Services:  []string{"22/ssh", "443/https"},
 		Reachable: true,
@@ -75,15 +75,15 @@ func TestPgmpyBelief_ScoresFromSidecar(t *testing.T) {
 }
 
 // TestPgmpyBelief_FailQuiet proves a sidecar error yields a zero Belief (no
-// score) rather than a bogus one — so the field stays quiescent and the System
-// retries on the next evidence change.
+// score) rather than a bogus one — so the field stays quiescent and the gate
+// asks again on the next evidence change.
 func TestPgmpyBelief_FailQuiet(t *testing.T) {
 	fake := &fakeSidecar{status: http.StatusInternalServerError}
 	srv := httptest.NewServer(fake.handler())
 	defer srv.Close()
 
 	p := PgmpyBeliefProvider(srv.URL, "", nil)
-	if got := p.Score(Host{ID: 1, Ports: []PortObservation{{Number: 22, Open: true}}}); got != (Belief{}) {
+	if got := p.Score(evidenceOf(Host{ID: 1, Ports: []PortObservation{{Number: 22, Open: true}}})); got != (Belief{}) {
 		t.Fatalf("expected zero Belief on sidecar error, got %+v", got)
 	}
 }
@@ -118,7 +118,7 @@ func TestPgmpyBelief_NovelNodeFeedsPrior(t *testing.T) {
 
 	prior := &stubPrior{}
 	p := PgmpyBeliefProvider(srv.URL, "base-v1", prior)
-	got := p.Score(Host{ID: 1, Address: "10.0.0.5", Ports: []PortObservation{{Number: 9999, Open: true}}})
+	got := p.Score(evidenceOf(Host{ID: 1, Address: "10.0.0.5", Ports: []PortObservation{{Number: 9999, Open: true}}}))
 
 	if prior.called != 1 {
 		t.Fatalf("PriorProvider called %d times, want 1", prior.called)
@@ -136,25 +136,25 @@ func TestPgmpyBelief_NovelNodeFeedsPrior(t *testing.T) {
 }
 
 // TestPgmpyBelief_IntegratesAsSystem proves the pgmpy provider drops into the
-// existing BeliefSystem seam: scored on evidence, quiescent once current, and
+// belief seam: scored once per evidence change, quiescent once current, and
 // replay-reproducible (the BeliefScored event carries the version).
 func TestPgmpyBelief_IntegratesAsSystem(t *testing.T) {
 	fake := &fakeSidecar{resp: scoreResponse{Version: "base-v1", Juicy: 0.7, Exploitable: 0.8, Reachable: 1.0}}
 	srv := httptest.NewServer(fake.handler())
 	defer srv.Close()
 
-	e := NewEngine("t")
-	e.AddSystem(BeliefSystem(PgmpyBeliefProvider(srv.URL, "base-v1", nil)))
+	e, bw := beliefEngine(PgmpyBeliefProvider(srv.URL, "base-v1", nil))
 	e.Submit(HostObserved{ScopeID: "s", Address: "10.0.0.5", OpenPorts: []int{22, 443}})
-	e.Tick()
+	settle(e, bw, 1)
 
 	snap := e.World.Snapshot()
 	if len(snap) != 1 || snap[0].Belief.Model != "base-v1" || snap[0].Belief.Juicy != 0.7 {
 		t.Fatalf("belief not scored from sidecar: %+v", snap)
 	}
-	// Quiescent: same evidence -> same score -> no new event.
-	if n := e.Tick(); n != 0 {
-		t.Fatalf("belief not quiescent: extra tick applied %d events", n)
+	// Quiescent: unchanged evidence -> no request -> the sidecar is not called again.
+	settle(e, bw, 3)
+	if fake.calls != 1 {
+		t.Fatalf("sidecar called %d times, want 1 (once per evidence change)", fake.calls)
 	}
 	// Replay reproduces (BeliefScored logged with the pinned version).
 	if r := Replay("t", e.Timeline); !reflect.DeepEqual(r.Snapshot(), e.World.Snapshot()) {
