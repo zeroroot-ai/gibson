@@ -61,6 +61,23 @@ DASHBOARD_DIR := $(abspath $(dir $(lastword $(MAKEFILE_LIST)))../../enterprise/p
 # in CI where only this repo is checked out).
 BUF := $(if $(wildcard $(DASHBOARD_DIR)/node_modules/.bin/buf),npx --prefix $(DASHBOARD_DIR) buf,buf)
 
+# ---------------------------------------------------------------------------
+# ORG MAKEFILE CONTRACT (.github#52, production-readiness slice 1.4)
+#
+# Every repo in the workspace exposes the same three entry points, so a person
+# or a tool can drive any repo without reading its Makefile first:
+#
+#   build  — compile everything this repo ships
+#   test   — the unit tier, the same command the merge gate runs
+#   check  — the full local gate (formatting, vet, race tests, the guards)
+#
+# They are defined once each, below. `test` runs `go test ./...` because that
+# is exactly what the merge gate's unit tier runs
+# (zeroroot-ai/.github/.github/workflows/reusable-go-ci.yml, the "go test
+# (unit, no race)" step). Local and CI must not be two definitions of the same
+# thing.
+# ---------------------------------------------------------------------------
+
 # Default target
 all: test build
 
@@ -94,10 +111,15 @@ sandbox-eviction-handler:
 	$(GOBUILD) $(BUILD_TAGS) $(LDFLAGS) -o $(BINARY_DIR)/sandbox-eviction-handler ./cmd/sandbox-eviction-handler
 	@echo "Build complete: $(BINARY_DIR)/sandbox-eviction-handler"
 
-# Run tests
+# Run the unit tier — the org contract's `test` target.
+#
+# The command is the merge gate's, verbatim: `go test ./...`. It used to add
+# -v, which made a local run print several hundred thousand lines that CI
+# never prints, so the two read as different tests when they are the same one.
+# Use `make test-coverage` or `go test -v ./<pkg>` when you want the detail.
 test:
-	@echo "Running tests..."
-	$(GOTEST) $(BUILD_TAGS) -v ./...
+	@echo "Running unit tests (the merge gate's unit tier)..."
+	$(GOTEST) $(BUILD_TAGS) ./...
 
 # Run tests with race detection
 #
