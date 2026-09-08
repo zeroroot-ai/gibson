@@ -432,3 +432,207 @@ func TestRungsAreExclusive(t *testing.T) {
 		}
 	})
 }
+
+// ---------------------------------------------------------------------------
+// Failure branches: every one of them must leave nothing usable behind
+// ---------------------------------------------------------------------------
+
+// A limiter that refuses stops the request before any account exists.
+func TestRegister_RateLimitedBeforeAnyAccountExists(t *testing.T) {
+	h, _ := newApprovalHarness(t)
+	h.srv.WithSignupLimiter(denyLimiter{})
+
+	if _, err := h.srv.Register(context.Background(), registerRequest()); status.Code(err) != codes.ResourceExhausted {
+		t.Fatalf("code = %v, want ResourceExhausted", status.Code(err))
+	}
+	if len(h.idp.createHumanReqs) != 0 {
+		t.Error("a rate-limited request must create no account")
+	}
+}
+
+// No store and no identity provider are both Unavailable, and both refuse
+// before anything is created. A daemon that cannot record a registration must
+// not make one.
+func TestRegister_MissingDependenciesRefuse(t *testing.T) {
+	t.Run("no store", func(t *testing.T) {
+		h, _ := newApprovalHarness(t)
+		h.srv.signupVerifications = nil
+		if _, err := h.srv.Register(context.Background(), registerRequest()); status.Code(err) != codes.Unavailable {
+			t.Fatalf("code = %v, want Unavailable", status.Code(err))
+		}
+		if len(h.idp.createHumanReqs) != 0 {
+			t.Error("no account may be created with nowhere to record it")
+		}
+	})
+	t.Run("no identity provider", func(t *testing.T) {
+		h, _ := newApprovalHarness(t)
+		h.srv.idpAdminClient = nil
+		if _, err := h.srv.Register(context.Background(), registerRequest()); status.Code(err) != codes.Unavailable {
+			t.Fatalf("code = %v, want Unavailable", status.Code(err))
+		}
+	})
+}
+
+// An identity provider that cannot be reached is Unavailable, not Internal:
+// the registrant may usefully try again.
+func TestRegister_UnreachableIdentityProviderIsUnavailable(t *testing.T) {
+	h, _ := newApprovalHarness(t)
+	h.idp.createHumanFn = func(context.Context, idp.CreateHumanUserRequest) (idp.CreateHumanUserResult, error) {
+		return idp.CreateHumanUserResult{}, idp.ErrUnreachable
+	}
+
+	if _, err := h.srv.Register(context.Background(), registerRequest()); status.Code(err) != codes.Unavailable {
+		t.Fatalf("code = %v, want Unavailable", status.Code(err))
+	}
+}
+
+// Any other identity-provider failure is Internal, and the message is
+// sanitized.
+func TestRegister_OtherIdentityProviderFailuresAreInternal(t *testing.T) {
+	h, _ := newApprovalHarness(t)
+	h.idp.createHumanFn = func(context.Context, idp.CreateHumanUserRequest) (idp.CreateHumanUserResult, error) {
+		return idp.CreateHumanUserResult{}, errors.New("bad request")
+	}
+
+	_, err := h.srv.Register(context.Background(), registerRequest())
+	if status.Code(err) != codes.Internal {
+		t.Fatalf("code = %v, want Internal", status.Code(err))
+	}
+	if strings.Contains(status.Convert(err).Message(), "bad request") {
+		t.Error("the identity provider's own message must not reach the caller")
+	}
+}
+
+// A rollback that itself fails is still a refusal. The account is named in the
+// log for an operator to remove; the caller is told the registration failed.
+func TestRegister_RollbackFailureStillRefuses(t *testing.T) {
+	t.Run("deactivate then delete both fail", func(t *testing.T) {
+		h, _ := newApprovalHarness(t)
+		h.idp.deactivateErr = errors.New("refused")
+		h.idp.deleteUserErr = errors.New("refused too")
+
+		if _, err := h.srv.Register(context.Background(), registerRequest()); status.Code(err) != codes.Internal {
+			t.Fatalf("code = %v, want Internal", status.Code(err))
+		}
+	})
+	t.Run("record fails and delete fails", func(t *testing.T) {
+		h, _ := newApprovalHarness(t)
+		h.store.issuePendingErr = errors.New("postgres down")
+		h.idp.deleteUserErr = errors.New("refused")
+
+		if _, err := h.srv.Register(context.Background(), registerRequest()); status.Code(err) != codes.Unavailable {
+			t.Fatalf("code = %v, want Unavailable", status.Code(err))
+		}
+	})
+}
+
+// The admin RPCs refuse without their dependencies rather than answering with
+// an empty queue or a half-done approval.
+func TestAdminRegistrationRPCs_MissingDependenciesRefuse(t *testing.T) {
+	t.Run("list with no store", func(t *testing.T) {
+		h, _ := newApprovalHarness(t)
+		h.srv.signupVerifications = nil
+		if _, err := h.srv.AdminListPendingRegistrations(adminCtx("admin-1"),
+			&tenantv1.AdminListPendingRegistrationsRequest{}); status.Code(err) != codes.Unavailable {
+			t.Fatalf("code = %v, want Unavailable", status.Code(err))
+		}
+	})
+	t.Run("approve with no store", func(t *testing.T) {
+		h, _ := newApprovalHarness(t)
+		h.srv.signupVerifications = nil
+		if _, err := h.srv.AdminApproveRegistration(adminCtx("admin-1"),
+			&tenantv1.AdminApproveRegistrationRequest{RegistrationId: "reg-1"}); status.Code(err) != codes.Unavailable {
+			t.Fatalf("code = %v, want Unavailable", status.Code(err))
+		}
+	})
+	t.Run("approve with no identity provider", func(t *testing.T) {
+		h, _ := newApprovalHarness(t)
+		h.srv.idpAdminClient = nil
+		if _, err := h.srv.AdminApproveRegistration(adminCtx("admin-1"),
+			&tenantv1.AdminApproveRegistrationRequest{RegistrationId: "reg-1"}); status.Code(err) != codes.Unavailable {
+			t.Fatalf("code = %v, want Unavailable", status.Code(err))
+		}
+	})
+	t.Run("reject with no store", func(t *testing.T) {
+		h, _ := newApprovalHarness(t)
+		h.srv.signupVerifications = nil
+		if _, err := h.srv.AdminRejectRegistration(adminCtx("admin-1"),
+			&tenantv1.AdminRejectRegistrationRequest{RegistrationId: "reg-1"}); status.Code(err) != codes.Unavailable {
+			t.Fatalf("code = %v, want Unavailable", status.Code(err))
+		}
+	})
+}
+
+// A store failure on a decision is Internal, and it is not "no such
+// registration": an administrator must not be told their decision was already
+// made when the database simply could not answer.
+func TestAdminRegistrationDecisions_StoreFailureIsInternal(t *testing.T) {
+	h, _ := newApprovalHarness(t)
+	reg, _ := h.srv.Register(context.Background(), registerRequest())
+	h.store.claimApprovalErr = errors.New("postgres down")
+
+	if _, err := h.srv.AdminApproveRegistration(adminCtx("admin-1"),
+		&tenantv1.AdminApproveRegistrationRequest{RegistrationId: reg.GetRegistrationId()}); status.Code(err) != codes.Internal {
+		t.Fatalf("code = %v, want Internal", status.Code(err))
+	}
+}
+
+// An identity provider that cannot be reached during approval is Unavailable,
+// and the registration returns to the queue.
+func TestAdminApproveRegistration_UnreachableIdentityProviderReleasesTheClaim(t *testing.T) {
+	h, _ := newApprovalHarness(t)
+	reg, _ := h.srv.Register(context.Background(), registerRequest())
+	h.idp.reactivateErr = idp.ErrUnreachable
+
+	_, err := h.srv.AdminApproveRegistration(adminCtx("admin-1"),
+		&tenantv1.AdminApproveRegistrationRequest{RegistrationId: reg.GetRegistrationId()})
+	if status.Code(err) != codes.Unavailable {
+		t.Fatalf("code = %v, want Unavailable", status.Code(err))
+	}
+	if len(h.store.releaseCalls) != 1 {
+		t.Errorf("release calls = %v, want the claim returned", h.store.releaseCalls)
+	}
+}
+
+// A workspace name that no longer yields a slug means the row is corrupt, not
+// that the administrator is wrong.
+func TestAdminApproveRegistration_CorruptRowIsInternal(t *testing.T) {
+	h, _ := newApprovalHarness(t)
+	reg, _ := h.srv.Register(context.Background(), registerRequest())
+	h.store.rows[reg.GetRegistrationId()].WorkspaceName = "///"
+
+	if _, err := h.srv.AdminApproveRegistration(adminCtx("admin-1"),
+		&tenantv1.AdminApproveRegistrationRequest{RegistrationId: reg.GetRegistrationId()}); status.Code(err) != codes.Internal {
+		t.Fatalf("code = %v, want Internal", status.Code(err))
+	}
+}
+
+// The plan gate runs again at approval time, against the row rather than the
+// request, so a tier that stopped being self-serve between registration and
+// decision is refused rather than provisioned.
+func TestAdminApproveRegistration_PlanGateRunsOnTheRow(t *testing.T) {
+	h, _ := newApprovalHarness(t)
+	reg, _ := h.srv.Register(context.Background(), registerRequest())
+	h.store.rows[reg.GetRegistrationId()].Tier = "enterprise-deploy"
+
+	if _, err := h.srv.AdminApproveRegistration(adminCtx("admin-1"),
+		&tenantv1.AdminApproveRegistrationRequest{RegistrationId: reg.GetRegistrationId()}); status.Code(err) != codes.PermissionDenied {
+		t.Fatalf("code = %v, want PermissionDenied", status.Code(err))
+	}
+	if len(h.idp.reactivated) != 0 {
+		t.Error("a refused plan must not let the owner sign in")
+	}
+}
+
+// A decision made with no audit writer wired still lands: the row carries the
+// decision, and the audit write is best-effort.
+func TestAdminRegistrationDecisions_SurviveAMissingAuditWriter(t *testing.T) {
+	h, _ := newApprovalHarness(t)
+	h.srv.tenantAdminAuditWriter = nil
+	reg, _ := h.srv.Register(context.Background(), registerRequest())
+
+	if _, err := h.srv.AdminApproveRegistration(adminCtx("admin-1"),
+		&tenantv1.AdminApproveRegistrationRequest{RegistrationId: reg.GetRegistrationId()}); err != nil {
+		t.Fatalf("AdminApproveRegistration: %v", err)
+	}
+}
