@@ -1520,7 +1520,10 @@ func (d *daemonImpl) buildGRPCServer(ctx context.Context) (*grpcSubsystem, error
 		if d.beliefProvider == nil {
 			d.beliefProvider = resolveBeliefProvider()
 		}
-		d.brainRegistry = brain.NewRegistry(ctx, brain.BeliefSystem(d.beliefProvider))
+		d.brainRegistry = brain.NewRegistry(ctx, brain.BeliefSystem)
+		d.brainRegistry.OnEngine(func(e *brain.Engine) {
+			brain.WireBelief(ctx, e, d.beliefProvider, 0)
+		})
 	}
 	worldpb.RegisterWorldServiceServer(srv, NewWorldServer(d.brainRegistry, d.logger.WithComponent("world-service").Slog()))
 	d.logger.Info(ctx, "registered WorldService gRPC endpoint")

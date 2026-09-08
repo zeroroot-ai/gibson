@@ -62,7 +62,8 @@ func TestRegistry_PerTenantIsolation(t *testing.T) {
 func TestRegistry_LiveSystemsRun(t *testing.T) {
 	ctx, cancel := context.WithCancel(context.Background())
 	defer cancel()
-	r := NewRegistry(ctx, BeliefSystem(PlaceholderBeliefProvider()))
+	r := NewRegistry(ctx, BeliefSystem)
+	r.OnEngine(func(e *Engine) { WireBelief(ctx, e, PlaceholderBeliefProvider(), 0) })
 
 	r.For("a").Submit(HostObserved{ScopeID: "s", Address: "10.0.0.1", OpenPorts: []int{22, 80}})
 	waitFor(t, func() bool {

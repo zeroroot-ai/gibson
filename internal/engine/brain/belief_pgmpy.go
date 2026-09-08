@@ -9,7 +9,6 @@ import (
 	"encoding/json"
 	"fmt"
 	"net/http"
-	"sort"
 	"strings"
 	"sync/atomic"
 	"time"
@@ -58,7 +57,7 @@ type PriorProvider interface {
 type NovelNode struct {
 	HostID   uint64
 	Address  string
-	Evidence beliefEvidence
+	Evidence BeliefEvidence
 	Reason   string // sidecar-supplied note (e.g. "unknown service: foo/9999")
 }
 
@@ -69,20 +68,11 @@ type NodePrior struct {
 	Reachable   float64
 }
 
-// beliefEvidence is the deterministic, order-stable evidence the provider sends
-// to the sidecar for one host. It is derived purely from the Host component, so
-// the same Host always yields the same request body (and thus the same posterior).
-type beliefEvidence struct {
-	OpenPorts []int    `json:"open_ports"`
-	Services  []string `json:"services"`  // "<port>/<name>", sorted
-	Reachable bool     `json:"reachable"` // any open port observed
-}
-
 // scoreRequest is the sidecar wire request. Version pins the model so replay
 // re-runs against the exact artifact ("" → sidecar's current default).
 type scoreRequest struct {
 	Version  string         `json:"version,omitempty"`
-	Evidence beliefEvidence `json:"evidence"`
+	Evidence BeliefEvidence `json:"evidence"`
 	// Priors lets the caller inject LLM-estimated priors for nodes the model had
 	// no table for on a previous pass (keyed by node label). Empty on first pass.
 	Priors map[string]NodePrior `json:"priors,omitempty"`
@@ -108,8 +98,9 @@ func PgmpyBeliefProvider(endpoint, version string, priors PriorProvider) BeliefP
 		versionURL: deriveVersionURL(endpoint),
 		version:    version,
 		priors:     priors,
-		// Bounded: inference fires only on evidence change, never per tick, so a
-		// short timeout is safe and keeps a wedged sidecar from stalling a sweep.
+		// Bounded: BeliefSystem asks for a score only when a host's evidence
+		// changed, and the BeliefWorker calls this off the tick, so a short
+		// timeout is safe and a wedged sidecar never stalls a sweep.
 		client: &http.Client{Timeout: 2 * time.Second},
 	}
 }
@@ -163,11 +154,11 @@ func (p *pgmpyBelief) fetchDefaultVersion() string {
 	return out.Default
 }
 
-// Score asks the sidecar for the host's posteriors. On any error the host keeps
-// its zero Belief (the field stays quiescent rather than emitting a bogus score);
-// the caller's System will retry on the next evidence change.
-func (p *pgmpyBelief) Score(h Host) Belief {
-	ev := evidenceOf(h)
+// Score asks the sidecar for the posteriors of one host's evidence. On any error
+// it returns a zero Belief (no score rather than a wrong score); the belief gate
+// asks again on the next evidence change. It runs in the BeliefWorker, off the
+// tick, so blocking here never stalls the engine.
+func (p *pgmpyBelief) Score(ev BeliefEvidence) Belief {
 	req := scoreRequest{Version: p.version, Evidence: ev}
 
 	resp, err := p.call(req)
@@ -222,30 +213,6 @@ func (p *pgmpyBelief) call(req scoreRequest) (scoreResponse, error) {
 		return scoreResponse{}, err
 	}
 	return out, nil
-}
-
-// evidenceOf derives the deterministic, order-stable belief evidence from a Host.
-// Identical Hosts yield identical evidence, so the sidecar's exact inference is
-// reproducible across replays.
-func evidenceOf(h Host) beliefEvidence {
-	var ports []int
-	var svcs []string
-	for _, port := range h.Ports {
-		if !port.Open {
-			continue
-		}
-		ports = append(ports, port.Number)
-		if port.Service.Name != "" {
-			svcs = append(svcs, fmt.Sprintf("%d/%s", port.Number, port.Service.Name))
-		}
-	}
-	sort.Ints(ports)
-	sort.Strings(svcs)
-	return beliefEvidence{
-		OpenPorts: ports,
-		Services:  svcs,
-		Reachable: len(ports) > 0,
-	}
 }
 
 // novelKey is the stable label a novel node is addressed by in the priors map.

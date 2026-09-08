@@ -12,14 +12,13 @@ import (
 // belief as its non-surprised twin but a higher attention — the surprise input
 // boosts it (ADR-0005/0006: attention = belief field + surprise).
 func TestAttention_SurpriseBoost(t *testing.T) {
-	e := NewEngine("t")
-	e.AddSystem(BeliefSystem(PlaceholderBeliefProvider()))
+	e, bw := beliefEngine(PlaceholderBeliefProvider())
 
 	// Same coordinate, different strong signals -> a contradiction -> the newcomer
 	// carries a Surprise. Same ports -> identical belief.
 	e.Submit(HostObserved{ScopeID: "s", Address: "10.0.0.5", SSHHostKey: "KEY-A", OpenPorts: []int{22}})
 	e.Submit(HostObserved{ScopeID: "s", Address: "10.0.0.5", SSHHostKey: "KEY-B", OpenPorts: []int{22}})
-	e.Tick()
+	settle(e, bw, 1)
 
 	snap := e.World.Snapshot()
 	if len(snap) != 2 {
