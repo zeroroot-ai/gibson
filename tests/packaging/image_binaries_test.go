@@ -68,9 +68,10 @@ func readDockerfile(t *testing.T) string {
 // dockerfileScript returns the Dockerfile as shell text: comment lines removed
 // and line continuations joined, so a command split across lines reads as one.
 func dockerfileScript(dockerfile string) string {
-	var lines []string
+	raw := strings.Split(dockerfile, "\n")
+	lines := make([]string, 0, len(raw))
 	cur := ""
-	for _, line := range strings.Split(dockerfile, "\n") {
+	for _, line := range raw {
 		if strings.HasPrefix(strings.TrimSpace(line), "#") {
 			continue
 		}
@@ -102,8 +103,9 @@ func goBuildArgs(dockerfile string) [][]string {
 				break
 			}
 			rest = rest[i+len(marker):]
-			var args []string
-			for _, tok := range strings.Fields(rest) {
+			fields := strings.Fields(rest)
+			args := make([]string, 0, len(fields))
+			for _, tok := range fields {
 				if tok == "then" || tok == "else" || tok == "fi" {
 					break
 				}
@@ -130,7 +132,7 @@ func builderOutputs(dockerfile string) map[string]string {
 	out := map[string]string{}
 	for _, args := range goBuildArgs(dockerfile) {
 		dest := ""
-		var pkgs []string
+		pkgs := make([]string, 0, len(args))
 		for i, a := range args {
 			switch {
 			case a == "-o" && i+1 < len(args):
@@ -161,7 +163,7 @@ func builderOutputs(dockerfile string) map[string]string {
 // order given. It is the assertion itself, so a fixture can exercise it.
 func missingBuilds(dockerfile string, tools []string) []string {
 	outputs := builderOutputs(dockerfile)
-	var missing []string
+	missing := make([]string, 0, len(tools))
 	for _, tool := range tools {
 		if pkg, ok := outputs["/out/"+tool]; !ok || pkg != "./cmd/"+tool {
 			missing = append(missing, tool)
