@@ -30,14 +30,25 @@ COPY go.mod go.sum ./
 # toolchain, so the pinned base is the toolchain that built the binary.
 ARG GOTOOLCHAIN=local
 ENV GOTOOLCHAIN=${GOTOOLCHAIN}
-RUN go mod download
+# Go cache mounts. The builder image keeps its build cache at
+# /root/.cache/go-build and its module cache at /go/pkg/mod. Without a cache
+# mount every RUN starts from an empty cache, so each build step recompiles the
+# whole dependency graph and `go mod download` re-fetches every module on any
+# change to the build context. Both caches are BuildKit cache mounts, so they
+# survive across builds and are shared by every step below — a step that builds
+# Go and omits them pays the full cold cost again.
+RUN --mount=type=cache,target=/root/.cache/go-build \
+    --mount=type=cache,target=/go/pkg/mod \
+    go mod download
 
 # Copy source.
 COPY . .
 
 # Build a fully static binary.
 ENV CGO_ENABLED=0
-RUN go build -ldflags="-s -w" -o /out/ext-authz ./cmd/ext-authz
+RUN --mount=type=cache,target=/root/.cache/go-build \
+    --mount=type=cache,target=/go/pkg/mod \
+    go build -ldflags="-s -w" -o /out/ext-authz ./cmd/ext-authz
 
 # ============================================================================
 # Stage 1.5: Pre-create empty mount-point directories the chart bind-mounts

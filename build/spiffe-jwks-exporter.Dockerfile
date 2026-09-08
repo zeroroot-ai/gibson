@@ -21,12 +21,23 @@ COPY go.mod go.sum ./
 # setec, testfixtures) is public and served by proxy.golang.org, which also
 # holds every version go.sum pins. No GOPRIVATE, no git credential: the build
 # runs the same for a stranger as for CI (ADR-0089, scripts/check-airgap-build.sh).
-RUN go mod download
+# Go cache mounts. The builder image keeps its build cache at
+# /root/.cache/go-build and its module cache at /go/pkg/mod. Without a cache
+# mount every RUN starts from an empty cache, so each build step recompiles the
+# whole dependency graph and `go mod download` re-fetches every module on any
+# change to the build context. Both caches are BuildKit cache mounts, so they
+# survive across builds and are shared by every step below — a step that builds
+# Go and omits them pays the full cold cost again.
+RUN --mount=type=cache,target=/root/.cache/go-build \
+    --mount=type=cache,target=/go/pkg/mod \
+    go mod download
 
 # The binary now lives in the gibson module and imports internal/infra, so the
 # full source tree is required (not just cmd/).
 COPY . .
-RUN CGO_ENABLED=0 GOFLAGS=-trimpath go build -ldflags='-s -w' \
+RUN --mount=type=cache,target=/root/.cache/go-build \
+    --mount=type=cache,target=/go/pkg/mod \
+    CGO_ENABLED=0 GOFLAGS=-trimpath go build -ldflags='-s -w' \
     -o /out/spiffe-jwks-exporter ./cmd/spiffe-jwks-exporter
 
 FROM ghcr.io/zeroroot-ai/mirror/distroless-static:nonroot@sha256:1c2c046bc09ed40fad370b599a0b1ae7987f55b01e247cf27a7c27cd97e5bbc7

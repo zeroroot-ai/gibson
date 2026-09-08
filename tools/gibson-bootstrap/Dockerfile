@@ -37,21 +37,35 @@ ENV CGO_ENABLED=0
 COPY go.mod go.sum ./
 
 # Fetch dependencies from the public Go proxy. Every first-party module is public.
-RUN go mod download
+# Go cache mounts. The builder image keeps its build cache at
+# /root/.cache/go-build and its module cache at /go/pkg/mod. Without a cache
+# mount every RUN starts from an empty cache, so each build step recompiles the
+# whole dependency graph and `go mod download` re-fetches every module on any
+# change to the build context. Both caches are BuildKit cache mounts, so they
+# survive across builds and are shared by every step below — a step that builds
+# Go and omits them pays the full cold cost again.
+RUN --mount=type=cache,target=/root/.cache/go-build \
+    --mount=type=cache,target=/go/pkg/mod \
+    go mod download
 
 # Copy full source tree (needed for the ./tools/gibson-bootstrap package).
 COPY . .
 
-# Build a static binary. -s -w strips debug symbols for a smaller image.
-RUN go build -ldflags="-s -w" -o /out/gibson-bootstrap ./tools/gibson-bootstrap
-
-# bootstrap-tenant-owner ships alongside it because the two halves of a
-# first-admin bootstrap are useless apart: seed-first-admin enqueues the
+# Build both static binaries. -s -w strips debug symbols for a smaller image.
+# They take identical flags, so one `go build` compiles the packages they share
+# once; `-o /out/` names each binary after its command directory.
+#
+# bootstrap-tenant-owner ships alongside gibson-bootstrap because the two halves
+# of a first-admin bootstrap are useless apart: seed-first-admin enqueues the
 # provisioning op that builds the tenant and its Zitadel org, and
 # bootstrap-tenant-owner creates the owner's user in that org and grants it.
 # Shipping only the first left deploy#1631 with no way to run the second, so a
 # vanilla install produced a tenant nobody could sign into.
-RUN go build -ldflags="-s -w" -o /out/bootstrap-tenant-owner ./cmd/bootstrap-tenant-owner
+RUN --mount=type=cache,target=/root/.cache/go-build \
+    --mount=type=cache,target=/go/pkg/mod \
+    go build -ldflags="-s -w" -o /out/ \
+        ./tools/gibson-bootstrap \
+        ./cmd/bootstrap-tenant-owner
 
 # ============================================================================
 # Stage 2: Runtime — distroless static (no libc, no shell, no package manager)

@@ -22,7 +22,16 @@ RUN apk add --no-cache git ca-certificates
 # toolchain, so the pinned base is the toolchain that built the binary.
 ARG GOTOOLCHAIN=local
 ENV GOTOOLCHAIN=${GOTOOLCHAIN}
-RUN go mod download
+# Go cache mounts. The builder image keeps its build cache at
+# /root/.cache/go-build and its module cache at /go/pkg/mod. Without a cache
+# mount every RUN starts from an empty cache, so each build step recompiles the
+# whole dependency graph and `go mod download` re-fetches every module on any
+# change to the build context. Both caches are BuildKit cache mounts, so they
+# survive across builds and are shared by every step below — a step that builds
+# Go and omits them pays the full cold cost again.
+RUN --mount=type=cache,target=/root/.cache/go-build \
+    --mount=type=cache,target=/go/pkg/mod \
+    go mod download
 
 # Copy the Go source (relies on .dockerignore to filter)
 COPY . .
@@ -30,7 +39,9 @@ COPY . .
 # Build the manager binary statically — distroless static requires a
 # Go binary with CGO disabled and no dynamic linker references.
 # -ldflags '-s -w' strips symbols + debug info for ~30% size reduction.
-RUN CGO_ENABLED=0 GOOS=${TARGETOS:-linux} GOARCH=${TARGETARCH} \
+RUN --mount=type=cache,target=/root/.cache/go-build \
+    --mount=type=cache,target=/go/pkg/mod \
+    CGO_ENABLED=0 GOOS=${TARGETOS:-linux} GOARCH=${TARGETARCH} \
     go build -a -ldflags '-s -w' -o manager operators/platform/cmd/main.go
 
 # Distroless static base — minimal, nonroot, no shell, no package manager.

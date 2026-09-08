@@ -161,7 +161,12 @@ jobs:
           CHANGED="$(git diff --name-only "${BASE}" "${HEAD}")"
           echo "Changed files:"
           echo "${CHANGED}"
-          if echo "${CHANGED}" | grep -Eq '\.go$|(^|/)go\.mod$|(^|/)go\.sum$|^\.github/workflows/'; then
+          # Dockerfiles are Go-relevant: tests/packaging asserts that the
+          # daemon image's builder stage builds every shipped tool and copies it
+          # into the runtime stage. Leaving them out let a Dockerfile-only PR
+          # skip every Go gate and then fail that test in the merge queue, which
+          # evicted it after it reported CLEAN (gibson#16).
+          if echo "${CHANGED}" | grep -Eq '\.go$|(^|/)go\.mod$|(^|/)go\.sum$|^\.github/workflows/|(^|/)Dockerfile$|\.Dockerfile$'; then
             echo "go=true" >> "$GITHUB_OUTPUT"
           else
             echo "go=false" >> "$GITHUB_OUTPUT"
