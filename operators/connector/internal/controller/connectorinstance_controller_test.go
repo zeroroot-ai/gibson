@@ -1085,3 +1085,20 @@ func TestCheckCredential_RefreshFailingWithoutAVendorError(t *testing.T) {
 		t.Fatalf("verdict = %+v, want a degraded verdict carrying a message", got)
 	}
 }
+
+// A daemon that answers with a state this operator does not know is degraded,
+// not healthy. The two are versioned separately, so an older operator against a
+// newer daemon must fail closed rather than guess.
+func TestCheckCredential_UnknownStateIsDegraded(t *testing.T) {
+	r := newReconcilerWithAuth(t, &fakeAuthReader{state: tenantv1.ConnectorAuthState(99)})
+	ci := remoteInstance("gitlab", "tenant-primary")
+
+	got := r.checkCredential(context.Background(), ci)
+
+	if !got.degraded || got.reason != "AuthStateUnknown" {
+		t.Fatalf("verdict = %+v, want degraded/AuthStateUnknown", got)
+	}
+	if got.phase != connectorv1alpha1.ConnectorInstancePhaseFailed {
+		t.Errorf("phase = %q, want Failed", got.phase)
+	}
+}

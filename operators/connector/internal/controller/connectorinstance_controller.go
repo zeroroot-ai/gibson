@@ -309,12 +309,22 @@ func (r *ConnectorInstanceReconciler) checkCredential(
 			reason:   "RefreshFailing",
 			message:  msg,
 		}
-	default:
+	case tenantv1.ConnectorAuthState_CONNECTOR_AUTH_STATE_UNAUTHORIZED,
+		tenantv1.ConnectorAuthState_CONNECTOR_AUTH_STATE_UNSPECIFIED:
+		// An unspecified state is treated as no usable grant, not as health: a
+		// daemon that answers with nothing has not said the connector works.
 		return credentialVerdict{
 			degraded: true,
 			phase:    connectorv1alpha1.ConnectorInstancePhaseAuthorizationRequired,
 			reason:   "Unauthorized",
 			message:  "no usable grant is stored; authorize the connector again",
+		}
+	default:
+		return credentialVerdict{
+			degraded: true,
+			phase:    connectorv1alpha1.ConnectorInstancePhaseFailed,
+			reason:   "AuthStateUnknown",
+			message:  fmt.Sprintf("the daemon reported an unrecognized credential state %q", st.GetState()),
 		}
 	}
 }
