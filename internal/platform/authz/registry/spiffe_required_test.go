@@ -81,6 +81,17 @@ var allowedUnauthenticated = map[string]bool{
 	// Spec: E9 signup-rpc-zitadel-move (gibson#812, ADR-0043/0044).
 	"/gibson.tenant.v1.SignupService/Signup": true,
 
+	// Register is intentionally unauthenticated for the same reason Signup is:
+	// it is the admin-approval registration rung's one door (ADR-0006,
+	// gibson#22), and it runs before any tenant, membership or session exists,
+	// so there is no principal to FGA-check. It creates a DEACTIVATED account
+	// and a pending row and nothing else; what turns that into a tenant is
+	// AdminTenantService.AdminApproveRegistration, which is platform_operator
+	// only. The unauthenticated half can therefore create nothing usable on
+	// its own. The handler validates its input, refuses unless the deployment
+	// selects the approval rung, and rate-limits per address and globally.
+	"/gibson.tenant.v1.SignupService/Register": true,
+
 	// The remaining three SignupService RPCs are unauthenticated for the same
 	// reason as Signup: they run before any tenant or membership exists, so
 	// there is no principal to FGA-check.

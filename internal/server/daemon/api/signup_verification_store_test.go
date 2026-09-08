@@ -722,3 +722,290 @@ func TestAttachStripeCustomer_RefusalIsIndistinguishable(t *testing.T) {
 		t.Fatalf("error = %v, want ErrSignupVerificationNotFound", err)
 	}
 }
+
+// TestRegistrationDecisionsAreOneShot pins the predicate that makes an
+// approval a decision rather than a race. Drop `status = 'pending_approval'`
+// from either statement and two administrators can both believe they decided
+// one registration, which is a silent failure at runtime, so it is pinned at
+// build time instead (ADR-0006, gibson#22).
+func TestRegistrationDecisionsAreOneShot(t *testing.T) {
+	assertStatementContains(t, claimApprovalStatement,
+		`status = 'pending_approval'`,
+		`decided_by = `,
+		`decided_at = `,
+	)
+	assertStatementContains(t, rejectRegistrationStatement,
+		`status = 'pending_approval'`,
+		`decided_by = `,
+		`decided_at = `,
+	)
+	// The release is the compensation for a claim whose work failed, so it may
+	// only touch a row that a claim actually took.
+	assertStatementContains(t, releaseApprovalStatement,
+		`status = 'consumed'`,
+		`status = 'pending_approval'`,
+	)
+}
+
+// A malformed registration id is the same answer as an unknown one, and costs
+// no database round trip.
+func TestDecideRegistration_MalformedIDShortCircuits(t *testing.T) {
+	s, mock, _ := newMockStore(t)
+
+	if _, err := s.ClaimApproval(context.Background(), "not-a-uuid", "admin-1"); !errors.Is(err, ErrSignupVerificationNotFound) {
+		t.Fatalf("error = %v, want ErrSignupVerificationNotFound", err)
+	}
+	if _, err := s.RejectRegistration(context.Background(), "not-a-uuid", "admin-1"); !errors.Is(err, ErrSignupVerificationNotFound) {
+		t.Fatalf("error = %v, want ErrSignupVerificationNotFound", err)
+	}
+	if err := mock.ExpectationsWereMet(); err != nil {
+		t.Errorf("a malformed id reached the database: %v", err)
+	}
+}
+
+// A pending registration with no account behind it would be a queue entry
+// naming nothing, so the store refuses to write one.
+func TestIssuePendingApproval_RequiresTheDeactivatedAccount(t *testing.T) {
+	s, mock, _ := newMockStore(t)
+	mock.ExpectExec("CREATE TABLE IF NOT EXISTS signup_verification").
+		WillReturnResult(sqlmock.NewResult(0, 0))
+
+	if _, err := s.IssuePendingApproval(context.Background(), IssueParams{Email: "a@b.com"}, ""); err == nil {
+		t.Fatal("a pending registration with no owner account must be refused")
+	}
+}
+
+// ---------------------------------------------------------------------------
+// Admin-approval registration rung (ADR-0006, gibson#22)
+// ---------------------------------------------------------------------------
+
+// A pending registration is written with the owner account already created and
+// deactivated, in status pending_approval, and with a long horizon: it waits
+// for a person, not a clock.
+func TestIssuePendingApproval_WritesThePendingRow(t *testing.T) {
+	s, mock, now := newMockStore(t)
+
+	mock.ExpectExec("CREATE TABLE IF NOT EXISTS signup_verification").
+		WillReturnResult(sqlmock.NewResult(0, 0))
+	mock.ExpectExec(`INSERT INTO signup_verification`).
+		WithArgs(sqlmock.AnyArg(), "attempt-1", "owner@example.com", "Acme", "team",
+			"Ada", "Lovelace", sqlmock.AnyArg(), now.Add(SignupRegistrationTTL),
+			"ip-hash", "user-1", now).
+		WillReturnResult(sqlmock.NewResult(1, 1))
+
+	row, err := s.IssuePendingApproval(context.Background(), IssueParams{
+		AttemptID: "attempt-1", Email: "owner@example.com", WorkspaceName: "Acme",
+		Tier: "team", OwnerFirstName: "Ada", OwnerLastName: "Lovelace",
+		ClientIPHash: "ip-hash",
+	}, "user-1")
+	if err != nil {
+		t.Fatalf("IssuePendingApproval: %v", err)
+	}
+	if row.Status != signupStatusPendingApproval {
+		t.Errorf("status = %q, want pending_approval", row.Status)
+	}
+	if row.OwnerUserID != "user-1" {
+		t.Errorf("owner_user_id = %q, want the deactivated account", row.OwnerUserID)
+	}
+	if err := mock.ExpectationsWereMet(); err != nil {
+		t.Errorf("unmet expectations: %v", err)
+	}
+}
+
+func TestIssuePendingApproval_InsertFailureIsReported(t *testing.T) {
+	s, mock, _ := newMockStore(t)
+	mock.ExpectExec("CREATE TABLE IF NOT EXISTS signup_verification").
+		WillReturnResult(sqlmock.NewResult(0, 0))
+	mock.ExpectExec(`INSERT INTO signup_verification`).WillReturnError(errors.New("write failed"))
+
+	if _, err := s.IssuePendingApproval(context.Background(),
+		IssueParams{Email: "a@b.com"}, "user-1"); err == nil {
+		t.Fatal("an insert failure must be reported")
+	}
+}
+
+// The queue is oldest first and capped, because an unbounded read of a table
+// anonymous callers grow is a full-table scan.
+func TestListPendingApprovals_ReadsTheQueueOldestFirst(t *testing.T) {
+	s, mock, now := newMockStore(t)
+
+	mock.ExpectQuery(`SELECT .* FROM signup_verification`).
+		WithArgs(SignupApprovalPageSize).
+		WillReturnRows(sqlmock.NewRows([]string{
+			"id", "attempt_id", "email", "workspace_name", "tier",
+			"owner_first_name", "owner_last_name", "owner_user_id", "created_at",
+		}).
+			AddRow("reg-1", "attempt-1", "a@example.com", "Acme", "team", "Ada", "L", "user-1", now).
+			AddRow("reg-2", "attempt-2", "b@example.com", "Beta", "team", "Bob", "M", "user-2", now))
+
+	rows, err := s.ListPendingApprovals(context.Background(), 0)
+	if err != nil {
+		t.Fatalf("ListPendingApprovals: %v", err)
+	}
+	if len(rows) != 2 || rows[0].ID != "reg-1" {
+		t.Fatalf("rows = %+v, want reg-1 then reg-2", rows)
+	}
+	if rows[0].Status != signupStatusPendingApproval {
+		t.Errorf("status = %q, want pending_approval", rows[0].Status)
+	}
+	if err := mock.ExpectationsWereMet(); err != nil {
+		t.Errorf("unmet expectations: %v", err)
+	}
+}
+
+// An oversized limit is capped rather than honored.
+func TestListPendingApprovals_CapsTheLimit(t *testing.T) {
+	s, mock, _ := newMockStore(t)
+	mock.ExpectQuery(`SELECT .* FROM signup_verification`).
+		WithArgs(SignupApprovalPageSize).
+		WillReturnRows(sqlmock.NewRows([]string{
+			"id", "attempt_id", "email", "workspace_name", "tier",
+			"owner_first_name", "owner_last_name", "owner_user_id", "created_at",
+		}))
+
+	if _, err := s.ListPendingApprovals(context.Background(), 10_000); err != nil {
+		t.Fatalf("ListPendingApprovals: %v", err)
+	}
+	if err := mock.ExpectationsWereMet(); err != nil {
+		t.Errorf("unmet expectations: %v", err)
+	}
+}
+
+func TestListPendingApprovals_QueryFailureIsReported(t *testing.T) {
+	s, mock, _ := newMockStore(t)
+	mock.ExpectQuery(`SELECT .* FROM signup_verification`).WillReturnError(errors.New("read failed"))
+
+	if _, err := s.ListPendingApprovals(context.Background(), 0); err == nil {
+		t.Fatal("a query failure must be reported")
+	}
+}
+
+func TestListPendingApprovals_ScanFailureIsReported(t *testing.T) {
+	s, mock, _ := newMockStore(t)
+	mock.ExpectQuery(`SELECT .* FROM signup_verification`).
+		WillReturnRows(sqlmock.NewRows([]string{"id"}).AddRow("reg-1"))
+
+	if _, err := s.ListPendingApprovals(context.Background(), 0); err == nil {
+		t.Fatal("a row this store cannot read must be reported, not silently dropped")
+	}
+}
+
+// The decision returns the registration it decided, so the caller has the
+// owner account id and the workspace without a second read.
+func TestClaimApproval_ReturnsTheDecidedRegistration(t *testing.T) {
+	s, mock, now := newMockStore(t)
+	id := "3f2504e0-4f89-41d3-9a0c-0305e82c3301"
+
+	mock.ExpectQuery(`UPDATE signup_verification`).
+		WithArgs(id, "admin-1", now).
+		WillReturnRows(sqlmock.NewRows([]string{
+			"id", "attempt_id", "email", "workspace_name", "tier",
+			"owner_first_name", "owner_last_name", "expires_at",
+			"stripe_customer_id", "completion_attempts", "owner_user_id",
+		}).AddRow(id, "attempt-1", "owner@example.com", "Acme", "team",
+			"Ada", "Lovelace", now.Add(time.Hour), "", 0, "user-1"))
+
+	row, err := s.ClaimApproval(context.Background(), id, "admin-1")
+	if err != nil {
+		t.Fatalf("ClaimApproval: %v", err)
+	}
+	if row.OwnerUserID != "user-1" || row.Status != signupStatusConsumed {
+		t.Errorf("row = %+v, want the owner account and a consumed status", row)
+	}
+	if err := mock.ExpectationsWereMet(); err != nil {
+		t.Errorf("unmet expectations: %v", err)
+	}
+}
+
+// A registration that is no longer pending matches nothing, which is what
+// makes a second decision impossible.
+func TestClaimApproval_ZeroRowsIsNotDecidable(t *testing.T) {
+	s, mock, _ := newMockStore(t)
+	id := "3f2504e0-4f89-41d3-9a0c-0305e82c3301"
+	mock.ExpectQuery(`UPDATE signup_verification`).WillReturnError(sql.ErrNoRows)
+
+	if _, err := s.ClaimApproval(context.Background(), id, "admin-1"); !errors.Is(err, ErrSignupVerificationNotFound) {
+		t.Fatalf("error = %v, want ErrSignupVerificationNotFound", err)
+	}
+}
+
+func TestClaimApproval_DatabaseFailureIsNotAMissingRegistration(t *testing.T) {
+	s, mock, _ := newMockStore(t)
+	id := "3f2504e0-4f89-41d3-9a0c-0305e82c3301"
+	mock.ExpectQuery(`UPDATE signup_verification`).WillReturnError(errors.New("connection reset"))
+
+	_, err := s.ClaimApproval(context.Background(), id, "admin-1")
+	if err == nil {
+		t.Fatal("a database failure must be reported")
+	}
+	if errors.Is(err, ErrSignupVerificationNotFound) {
+		t.Error("a database failure must not read as 'no such registration'")
+	}
+}
+
+func TestRejectRegistration_ReturnsTheRefusedRegistration(t *testing.T) {
+	s, mock, now := newMockStore(t)
+	id := "3f2504e0-4f89-41d3-9a0c-0305e82c3302"
+
+	mock.ExpectQuery(`UPDATE signup_verification`).
+		WithArgs(id, "admin-1", now).
+		WillReturnRows(sqlmock.NewRows([]string{
+			"id", "attempt_id", "email", "workspace_name", "tier",
+			"owner_first_name", "owner_last_name", "expires_at",
+			"stripe_customer_id", "completion_attempts", "owner_user_id",
+		}).AddRow(id, "attempt-1", "owner@example.com", "Acme", "team",
+			"Ada", "Lovelace", now.Add(time.Hour), "", 0, "user-1"))
+
+	row, err := s.RejectRegistration(context.Background(), id, "admin-1")
+	if err != nil {
+		t.Fatalf("RejectRegistration: %v", err)
+	}
+	if row.Status != signupStatusRejected {
+		t.Errorf("status = %q, want rejected", row.Status)
+	}
+}
+
+func TestReleaseApproval_ReturnsTheRegistrationToTheQueue(t *testing.T) {
+	s, mock, now := newMockStore(t)
+	mock.ExpectExec(`UPDATE signup_verification`).
+		WithArgs("reg-1", now).
+		WillReturnResult(sqlmock.NewResult(0, 1))
+
+	if err := s.ReleaseApproval(context.Background(), "reg-1"); err != nil {
+		t.Fatalf("ReleaseApproval: %v", err)
+	}
+	if err := mock.ExpectationsWereMet(); err != nil {
+		t.Errorf("unmet expectations: %v", err)
+	}
+}
+
+func TestReleaseApproval_FailureIsReported(t *testing.T) {
+	s, mock, _ := newMockStore(t)
+	mock.ExpectExec(`UPDATE signup_verification`).WillReturnError(errors.New("write failed"))
+
+	if err := s.ReleaseApproval(context.Background(), "reg-1"); err == nil {
+		t.Fatal("a release that did not land must be reported, so the caller can log it")
+	}
+}
+
+// Without a platform database every approval-rung method refuses, exactly as
+// the open rung's methods do: there is nowhere to record a decision.
+func TestApprovalStoreFailsClosedWithoutADatabase(t *testing.T) {
+	var s *SignupVerificationStore
+
+	if _, err := s.IssuePendingApproval(context.Background(), IssueParams{}, "user-1"); !errors.Is(err, ErrSignupStoreUnavailable) {
+		t.Errorf("IssuePendingApproval error = %v, want ErrSignupStoreUnavailable", err)
+	}
+	if _, err := s.ListPendingApprovals(context.Background(), 0); !errors.Is(err, ErrSignupStoreUnavailable) {
+		t.Errorf("ListPendingApprovals error = %v, want ErrSignupStoreUnavailable", err)
+	}
+	if _, err := s.ClaimApproval(context.Background(), "x", "admin-1"); !errors.Is(err, ErrSignupStoreUnavailable) {
+		t.Errorf("ClaimApproval error = %v, want ErrSignupStoreUnavailable", err)
+	}
+	if _, err := s.RejectRegistration(context.Background(), "x", "admin-1"); !errors.Is(err, ErrSignupStoreUnavailable) {
+		t.Errorf("RejectRegistration error = %v, want ErrSignupStoreUnavailable", err)
+	}
+	if err := s.ReleaseApproval(context.Background(), "x"); !errors.Is(err, ErrSignupStoreUnavailable) {
+		t.Errorf("ReleaseApproval error = %v, want ErrSignupStoreUnavailable", err)
+	}
+}

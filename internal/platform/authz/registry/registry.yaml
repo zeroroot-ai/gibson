@@ -1390,6 +1390,12 @@ entries:
     object_deriver: "tenant_from_identity"
     allowed_identities:
       - USER
+  "/gibson.tenant.v1.AdminTenantService/AdminApproveRegistration":
+    relation: "platform_operator"
+    object_type: "system_tenant"
+    object_deriver: "system_tenant"
+    allowed_identities:
+      - USER
   "/gibson.tenant.v1.AdminTenantService/AdminDeleteTenant":
     relation: "platform_operator"
     object_type: "system_tenant"
@@ -1402,7 +1408,19 @@ entries:
     object_deriver: "system_tenant"
     allowed_identities:
       - USER
+  "/gibson.tenant.v1.AdminTenantService/AdminListPendingRegistrations":
+    relation: "platform_operator"
+    object_type: "system_tenant"
+    object_deriver: "system_tenant"
+    allowed_identities:
+      - USER
   "/gibson.tenant.v1.AdminTenantService/AdminProvisionTenant":
+    relation: "platform_operator"
+    object_type: "system_tenant"
+    object_deriver: "system_tenant"
+    allowed_identities:
+      - USER
+  "/gibson.tenant.v1.AdminTenantService/AdminRejectRegistration":
     relation: "platform_operator"
     object_type: "system_tenant"
     object_deriver: "system_tenant"
@@ -1819,6 +1837,8 @@ entries:
   "/gibson.tenant.v1.SignupService/AttachSignupCustomer":
     unauthenticated: true
   "/gibson.tenant.v1.SignupService/RedeemEmailVerification":
+    unauthenticated: true
+  "/gibson.tenant.v1.SignupService/Register":
     unauthenticated: true
   "/gibson.tenant.v1.SignupService/RequestEmailVerification":
     unauthenticated: true

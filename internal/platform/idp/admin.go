@@ -79,6 +79,33 @@ type AdminClient interface {
 	// address has been verified.
 	CreateHumanUser(ctx context.Context, req CreateHumanUserRequest) (CreateHumanUserResult, error)
 
+	// DeactivateHumanUser blocks a human user from signing in, without
+	// deleting them or their credential. It is what "registered but not yet
+	// approved" means on the admin-approval registration rung (ADR-0006): the
+	// person chose a password at registration, the credential went straight to
+	// the IdP where credentials belong, and the account cannot be used until
+	// an administrator approves it.
+	//
+	// Idempotent: deactivating an already-deactivated user is success.
+	// Returns ErrNotFound when the user does not exist.
+	DeactivateHumanUser(ctx context.Context, req HumanUserStateRequest) error
+
+	// ReactivateHumanUser lets a deactivated human user sign in again. It is
+	// the approval half of DeactivateHumanUser.
+	//
+	// Idempotent: reactivating an active user is success. Returns ErrNotFound
+	// when the user does not exist.
+	ReactivateHumanUser(ctx context.Context, req HumanUserStateRequest) error
+
+	// DeleteHumanUser permanently removes a human user. Used to roll back a
+	// registration whose account could not be put beyond use: an account that
+	// was created but could not be deactivated must not be left able to sign
+	// in, and the registrant has lost nothing, because they were never
+	// approved.
+	//
+	// Idempotent: deleting an absent user is success.
+	DeleteHumanUser(ctx context.Context, req HumanUserStateRequest) error
+
 	// SetHumanPassword sets a known password on an existing human user. Used by
 	// the self-hosted first-admin bootstrap to activate the founding-owner
 	// account the invitation flow created without a usable credential. Idempotence

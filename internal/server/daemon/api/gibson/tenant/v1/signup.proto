@@ -26,6 +26,11 @@ syntax = "proto3";
 //     Signup                    → identity, billing and provisioning, all of it
 //                                 strictly after that proof
 //
+//   The APPROVAL rung (ADR-0006, gibson#22) replaces that round trip with one
+//   Register call and an administrator's decision. It is a different proof of
+//   the same thing, not a second completion path: approval runs exactly the
+//   work Signup runs.
+//
 //   Signup therefore takes NO owner email, workspace name, tier or profile from
 //   the client. Every one of those is read back from the verification row the
 //   session resolves to. A client that could supply them could point a redeemed
@@ -118,6 +123,85 @@ service SignupService {
       unauthenticated: true
     };
   }
+
+  // Register is the APPROVAL rung's single registration call (ADR-0006,
+  // gibson#22). It is served only when the deployment selects that rung, and
+  // the four RPCs above are refused on it; on every other rung Register is
+  // refused instead. One rung is live at a time.
+  //
+  // WHAT IT CREATES: one signup_verification row in status pending_approval,
+  // and one DEACTIVATED identity-provider user holding the password the
+  // registrant chose. Nothing else. No tenant, no billing object, no
+  // provisioning-queue row — those wait for an administrator's approval, which
+  // runs exactly the work Signup runs on the open rung.
+  //
+  // WHY IT NEEDS NO MAIL: email verification proves mailbox control on a
+  // PUBLIC signup surface. A self-hosted instance sits behind the customer's
+  // perimeter, where the operator already controls who can reach it, and an
+  // administrator approves every account by hand. The human in that path is
+  // the proof. This is what lets a self-hosted install with no SMTP have a
+  // working front door, where today it has none.
+  //
+  // The password reaches the identity provider and nothing else. The daemon
+  // never stores it: a credential parked in the platform database across an
+  // approval that may take days is exactly what this shape avoids.
+  //
+  // Errors: InvalidArgument (malformed input), AlreadyExists (the address
+  // already has an account), ResourceExhausted (rate limit), PermissionDenied
+  // (not the approval rung), Unavailable (store or identity provider down).
+  rpc Register(RegisterRequest) returns (RegisterResponse) {
+    option (gibson.auth.v1.authz) = {
+      unauthenticated: true
+    };
+  }
+}
+
+// RegisterRequest carries the whole registration on the approval rung. There
+// is no round trip to split it across, so unlike the open rung's three-step
+// flow every field arrives at once.
+message RegisterRequest {
+  // attempt_id correlates with the signup-progress stream. Required, must be a
+  // UUID.
+  string attempt_id = 1;
+
+  // owner_email is the address that will own the workspace. Normalized
+  // (trimmed, lowercased) server-side. Required.
+  string owner_email = 2;
+
+  // workspace_name is the human-readable workspace name. Required; it must
+  // yield a valid tenant slug.
+  string workspace_name = 3;
+
+  // tier is the canonical plan id. Required, and resolved against the same
+  // server-side plan gate the open rung uses.
+  string tier = 4;
+
+  // owner_first_name / owner_last_name populate the human-user profile.
+  // Optional.
+  string owner_first_name = 5;
+  string owner_last_name = 6;
+
+  // password is the owner's chosen password.
+  //
+  // SECURITY: write-only. It reaches the identity provider's request body and
+  // nothing else — never logged, never persisted by the daemon, never
+  // returned. The account it lands on is created deactivated, so the password
+  // cannot be used until an administrator approves the registration.
+  string password = 7;
+
+  // client_ip — see RequestEmailVerificationRequest.client_ip.
+  string client_ip = 8;
+}
+
+// RegisterResponse tells the registrant what happens next, and nothing else.
+//
+// It carries no tenant id and no user id. Neither exists yet, and a
+// registration that has not been approved is not entitled to learn what it
+// would be called.
+message RegisterResponse {
+  // registration_id identifies the pending registration to an administrator.
+  // It is the id an approval or a rejection names.
+  string registration_id = 1;
 }
 
 // RequestEmailVerificationRequest carries the signup form's non-secret fields.

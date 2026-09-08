@@ -508,3 +508,16 @@ func TestListMembers_IdPProfileFailureIsNonFatal(t *testing.T) {
 		t.Error("bob-id not found in response despite IdP failure being non-fatal")
 	}
 }
+
+// Approval-rung sign-in-state changes (ADR-0006, gibson#22). This stub does not
+// exercise them; the registration and approval paths are covered in
+// internal/server/daemon/api.
+func (*membersIdPClient) DeactivateHumanUser(context.Context, idp.HumanUserStateRequest) error {
+	return nil
+}
+func (*membersIdPClient) ReactivateHumanUser(context.Context, idp.HumanUserStateRequest) error {
+	return nil
+}
+func (*membersIdPClient) DeleteHumanUser(context.Context, idp.HumanUserStateRequest) error {
+	return nil
+}

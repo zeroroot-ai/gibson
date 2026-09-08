@@ -102,7 +102,123 @@ service AdminTenantService {
       allowed_identities: 1  // USER
     };
   }
+
+  // ---------------------------------------------------------------------------
+  // Admin-approval registration rung (ADR-0006, gibson#22)
+  // ---------------------------------------------------------------------------
+
+  // AdminListPendingRegistrations returns the registrations awaiting a
+  // decision, oldest first. Each one is a person who registered on the
+  // approval rung and holds a deactivated account until an administrator
+  // decides.
+  //
+  // It returns no credential material and no token. The password never left
+  // the identity provider.
+  rpc AdminListPendingRegistrations(AdminListPendingRegistrationsRequest) returns (AdminListPendingRegistrationsResponse) {
+    option (gibson.auth.v1.authz) = {
+      relation: "platform_operator",
+      object_type: "system_tenant",
+      object_deriver: "system_tenant",
+      allowed_identities: 1  // USER
+    };
+  }
+
+  // AdminApproveRegistration approves one pending registration: it reactivates
+  // the owner's account and enqueues the tenant for operator-pull
+  // provisioning — the same two effects SignupService.Signup produces on the
+  // open rung, from the same code.
+  //
+  // The decision is attributable: the acting administrator is recorded on the
+  // registration row and emitted as an audit event.
+  //
+  // Idempotent on the registration's state, not on the call: a registration
+  // that is no longer pending returns FailedPrecondition, so two
+  // administrators cannot both believe they approved it.
+  rpc AdminApproveRegistration(AdminApproveRegistrationRequest) returns (AdminApproveRegistrationResponse) {
+    option (gibson.auth.v1.authz) = {
+      relation: "platform_operator",
+      object_type: "system_tenant",
+      object_deriver: "system_tenant",
+      allowed_identities: 1  // USER
+    };
+  }
+
+  // AdminRejectRegistration refuses one pending registration. The account
+  // stays deactivated, so the person can never sign in, and no tenant is
+  // created. Attributable in the same way as an approval.
+  rpc AdminRejectRegistration(AdminRejectRegistrationRequest) returns (AdminRejectRegistrationResponse) {
+    option (gibson.auth.v1.authz) = {
+      relation: "platform_operator",
+      object_type: "system_tenant",
+      object_deriver: "system_tenant",
+      allowed_identities: 1  // USER
+    };
+  }
 }
+
+// PendingRegistration is one registration awaiting an administrator's
+// decision. It carries what a person needs to decide and nothing more.
+message PendingRegistration {
+  // registration_id names this registration in an approve or reject call.
+  string registration_id = 1;
+  // owner_email is the address that registered.
+  string owner_email = 2;
+  // workspace_name is the workspace they asked for.
+  string workspace_name = 3;
+  // tier is the plan they asked for, as they typed it. The plan gate runs at
+  // approval time, so an unknown tier is refused then rather than hidden here.
+  string tier = 4;
+  // owner_first_name / owner_last_name are the profile fields they supplied.
+  string owner_first_name = 5;
+  string owner_last_name = 6;
+  // registered_at is when the registration arrived, RFC 3339.
+  string registered_at = 7;
+}
+
+// AdminListPendingRegistrationsRequest asks for the queue.
+message AdminListPendingRegistrationsRequest {
+  // limit caps the page. Zero means the server default; the server also caps
+  // it, so a large value cannot turn this into a full-table read.
+  int32 limit = 1;
+}
+
+// AdminListPendingRegistrationsResponse carries the queue, oldest first.
+message AdminListPendingRegistrationsResponse {
+  repeated PendingRegistration registrations = 1;
+}
+
+// AdminApproveRegistrationRequest names the registration to approve.
+message AdminApproveRegistrationRequest {
+  // registration_id is the id AdminListPendingRegistrations returned.
+  // Required.
+  string registration_id = 1;
+}
+
+// AdminApproveRegistrationResponse reports what the approval provisioned.
+message AdminApproveRegistrationResponse {
+  // tenant_id is the deterministic slug derived from the workspace name.
+  string tenant_id = 1;
+  // owner_user_id is the identity-provider id of the now-active owner.
+  string owner_user_id = 2;
+  // plan_id is the canonical plan the server-side gate resolved, the same
+  // value enqueued for the operator.
+  string plan_id = 3;
+}
+
+// AdminRejectRegistrationRequest names the registration to refuse.
+message AdminRejectRegistrationRequest {
+  // registration_id is the id AdminListPendingRegistrations returned.
+  // Required.
+  string registration_id = 1;
+  // reason is the administrator's own note, recorded on the audit event. It is
+  // never shown to the registrant, who is told nothing: an anonymous
+  // registration surface that explained its refusals would explain them to
+  // whoever probed it.
+  string reason = 2;
+}
+
+// AdminRejectRegistrationResponse confirms the refusal.
+message AdminRejectRegistrationResponse {}
 
 // AdminProvisionTenantRequest carries the spec inputs for a new tenant. Mirrors
 // provisionTenantInput in the dashboard (app/actions/crd/schemas.ts) and
