@@ -1013,3 +1013,75 @@ func TestReconcile_AuthNoneNeverAsks(t *testing.T) {
 		t.Errorf("auth status calls = %v, want none for an auth-none connector", reader.calls)
 	}
 }
+
+// TestCheckCredential_TenantUnknown: a ConnectorInstance outside a tenant
+// namespace names no tenant store, so there is nothing to ask about and the
+// connector cannot be called healthy.
+func TestCheckCredential_TenantUnknown(t *testing.T) {
+	r := newReconcilerWithAuth(t, &fakeAuthReader{})
+	ci := remoteInstance("gitlab", "default")
+
+	got := r.checkCredential(context.Background(), ci)
+
+	if !got.degraded || got.reason != "TenantUnknown" {
+		t.Fatalf("verdict = %+v, want degraded/TenantUnknown", got)
+	}
+	if got.phase != connectorv1alpha1.ConnectorInstancePhaseFailed {
+		t.Errorf("phase = %q, want Failed", got.phase)
+	}
+}
+
+// TestCheckCredential_FallsBackToCRName: the grant key is spec.connector, and
+// an instance that leaves it empty is keyed by its CR name — the same fallback
+// the finalizer's revoke uses, so the two never ask about different grants.
+func TestCheckCredential_FallsBackToCRName(t *testing.T) {
+	reader := &fakeAuthReader{}
+	r := newReconcilerWithAuth(t, reader)
+	ci := remoteInstance("gitlab", "tenant-primary")
+	ci.Spec.Connector = ""
+
+	r.checkCredential(context.Background(), ci)
+
+	if len(reader.calls) != 1 || reader.calls[0] != "primary/gitlab" {
+		t.Fatalf("auth status calls = %v, want primary/gitlab from the CR name", reader.calls)
+	}
+}
+
+// An unspecified state is treated as no usable grant, not as health: a daemon
+// that answers with nothing has not said the connector works.
+func TestCheckCredential_UnspecifiedStateIsUnauthorized(t *testing.T) {
+	r := newReconcilerWithAuth(t, &unspecifiedAuthReader{})
+	ci := remoteInstance("gitlab", "tenant-primary")
+
+	got := r.checkCredential(context.Background(), ci)
+
+	if !got.degraded || got.reason != "Unauthorized" {
+		t.Fatalf("verdict = %+v, want degraded/Unauthorized", got)
+	}
+	if got.phase != connectorv1alpha1.ConnectorInstancePhaseAuthorizationRequired {
+		t.Errorf("phase = %q, want AuthorizationRequired", got.phase)
+	}
+}
+
+// unspecifiedAuthReader answers with the zero state, which fakeAuthReader
+// deliberately rewrites to AUTHORIZED for the healthy-path tests.
+type unspecifiedAuthReader struct{}
+
+func (unspecifiedAuthReader) AuthStatus(context.Context, string, string) (*tenantv1.GetConnectorAuthStatusResponse, error) {
+	return &tenantv1.GetConnectorAuthStatusResponse{}, nil
+}
+
+// A refresh failure with no recorded vendor error still says something an
+// operator can act on, rather than an empty condition message.
+func TestCheckCredential_RefreshFailingWithoutAVendorError(t *testing.T) {
+	r := newReconcilerWithAuth(t, &fakeAuthReader{
+		state: tenantv1.ConnectorAuthState_CONNECTOR_AUTH_STATE_REFRESH_FAILING,
+	})
+	ci := remoteInstance("gitlab", "tenant-primary")
+
+	got := r.checkCredential(context.Background(), ci)
+
+	if !got.degraded || got.message == "" {
+		t.Fatalf("verdict = %+v, want a degraded verdict carrying a message", got)
+	}
+}

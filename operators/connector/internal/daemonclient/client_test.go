@@ -7,6 +7,7 @@ import (
 	"context"
 	"errors"
 	"net"
+	"strings"
 	"testing"
 
 	"google.golang.org/grpc"
@@ -16,13 +17,24 @@ import (
 	"google.golang.org/grpc/test/bufconn"
 
 	daemonoperatorv1 "github.com/zeroroot-ai/gibson/internal/server/daemon/api/gibson/daemon/operator/v1"
+	tenantv1 "github.com/zeroroot-ai/gibson/internal/server/daemon/api/gibson/tenant/v1"
 )
 
-// fakeOperatorService records the revoke it receives and answers as told.
+// fakeOperatorService records the calls it receives and answers as told.
 type fakeOperatorService struct {
 	daemonoperatorv1.UnimplementedDaemonOperatorServiceServer
-	got *daemonoperatorv1.RevokeConnectorGrantRequest
-	err error
+	got        *daemonoperatorv1.RevokeConnectorGrantRequest
+	gotStatus  *daemonoperatorv1.GetConnectorAuthStatusRequest
+	statusResp *tenantv1.GetConnectorAuthStatusResponse
+	err        error
+}
+
+func (f *fakeOperatorService) GetConnectorAuthStatus(_ context.Context, req *daemonoperatorv1.GetConnectorAuthStatusRequest) (*daemonoperatorv1.GetConnectorAuthStatusResponse, error) {
+	f.gotStatus = req
+	if f.err != nil {
+		return nil, f.err
+	}
+	return &daemonoperatorv1.GetConnectorAuthStatusResponse{Status: f.statusResp}, nil
 }
 
 func (f *fakeOperatorService) RevokeConnectorGrant(_ context.Context, req *daemonoperatorv1.RevokeConnectorGrantRequest) (*daemonoperatorv1.RevokeConnectorGrantResponse, error) {
@@ -88,5 +100,48 @@ func TestClose_IsSafeWithoutTransport(t *testing.T) {
 	var nilClient *Client
 	if err := errors.Join(nilClient.Close(), NewWithConn(nil).Close()); err != nil {
 		t.Fatalf("Close without a transport must be a no-op: %v", err)
+	}
+}
+
+// AuthStatus carries the tenant and connector to the daemon and returns the
+// credential state the controller records as the Degraded condition
+// (ADR-0015 decision 4).
+func TestAuthStatus_CarriesTenantAndConnector(t *testing.T) {
+	svc := &fakeOperatorService{statusResp: &tenantv1.GetConnectorAuthStatusResponse{
+		State:            tenantv1.ConnectorAuthState_CONNECTOR_AUTH_STATE_REFRESH_FAILING,
+		LastRefreshError: "invalid_grant",
+	}}
+	c := dialFake(t, svc)
+
+	got, err := c.AuthStatus(context.Background(), "acme", "github")
+	if err != nil {
+		t.Fatalf("AuthStatus: %v", err)
+	}
+	if svc.gotStatus.GetTenantId() != "acme" || svc.gotStatus.GetConnector() != "github" {
+		t.Errorf("request = %+v, want tenant acme connector github", svc.gotStatus)
+	}
+	if got.GetState() != tenantv1.ConnectorAuthState_CONNECTOR_AUTH_STATE_REFRESH_FAILING {
+		t.Errorf("state = %v, want REFRESH_FAILING", got.GetState())
+	}
+	if got.GetLastRefreshError() != "invalid_grant" {
+		t.Errorf("last_refresh_error = %q, want the vendor error code", got.GetLastRefreshError())
+	}
+}
+
+// A daemon that cannot answer is an error the controller degrades on, and the
+// message names the tenant and connector it asked about.
+func TestAuthStatus_WrapsTheDaemonError(t *testing.T) {
+	svc := &fakeOperatorService{err: status.Error(codes.Unavailable, "secrets stack down")}
+	c := dialFake(t, svc)
+
+	_, err := c.AuthStatus(context.Background(), "acme", "github")
+	if err == nil {
+		t.Fatal("an unavailable daemon must surface as an error")
+	}
+	if status.Code(err) != codes.Unavailable {
+		t.Errorf("code = %v, want Unavailable", status.Code(err))
+	}
+	if !strings.Contains(err.Error(), "acme/github") {
+		t.Errorf("error = %q, want the tenant and connector named", err.Error())
 	}
 }

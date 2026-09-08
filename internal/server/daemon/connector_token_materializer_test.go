@@ -9,6 +9,7 @@ package daemon
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"strings"
 	"testing"
 	"time"
@@ -267,5 +268,65 @@ func TestConnectorTokenMaterializer_CorruptMetadataIsAnError(t *testing.T) {
 	}
 	if got := err.Error(); !strings.Contains(got, "connector-gitlab") || strings.Contains(got, "tok-abc") {
 		t.Errorf("error = %q, want the connector named and no token bytes", got)
+	}
+}
+
+// A tenant store that fails for any reason other than "not found" is loud: a
+// BYO Vault outage must not read as "nothing minted yet".
+func TestConnectorTokenMaterializer_StoreFailureIsNotAMissingToken(t *testing.T) {
+	kube := materializerKube(t)
+	store := errorAccessStore{err: status.Error(codes.Unavailable, "byo vault unreachable")}
+	m := &connectorTokenMaterializer{kube: kube, secrets: store, now: func() time.Time { return materializerNow }}
+
+	err := m.Materialize(context.Background(), gitlabSandbox())
+	if err == nil {
+		t.Fatal("an unreachable tenant store must fail loud")
+	}
+	if !strings.Contains(err.Error(), "connector-gitlab") {
+		t.Errorf("error = %q, want the connector named", err.Error())
+	}
+}
+
+// errorAccessStore fails every Resolve, standing in for a tenant secret store
+// the daemon cannot reach.
+type errorAccessStore struct{ err error }
+
+func (s errorAccessStore) Resolve(context.Context, string) ([]byte, error) { return nil, s.err }
+
+// A withdrawal the API server refuses is reported, so a credential that could
+// not be taken out of service is visible instead of silently assumed gone.
+func TestConnectorTokenMaterializer_WithdrawFailureIsReported(t *testing.T) {
+	kube := &deleteFailingClient{Client: materializerKube(t), err: errors.New("secret delete denied")}
+	store := fakeAccessStore{data: map[string][]byte{
+		connectorauth.AccessSecretName("connector-gitlab"):     []byte("tok-dead"),
+		connectorauth.AccessMetaSecretName("connector-gitlab"): accessMeta(t, -time.Minute),
+	}}
+	m := &connectorTokenMaterializer{kube: kube, secrets: store, now: func() time.Time { return materializerNow }}
+
+	err := m.Materialize(context.Background(), gitlabSandbox())
+	if err == nil {
+		t.Fatal("a refused withdrawal must be reported")
+	}
+	if !strings.Contains(err.Error(), "connector-gitlab-connector-cred") {
+		t.Errorf("error = %q, want the Secret named", err.Error())
+	}
+}
+
+// deleteFailingClient fails every Delete and passes everything else through.
+type deleteFailingClient struct {
+	client.Client
+	err error
+}
+
+func (c *deleteFailingClient) Delete(context.Context, client.Object, ...client.DeleteOption) error {
+	return c.err
+}
+
+// The default clock is time.Now: a materializer built without one still
+// enforces expiry rather than treating every token as live.
+func TestConnectorTokenMaterializer_DefaultClockIsNow(t *testing.T) {
+	m := &connectorTokenMaterializer{}
+	if got := m.clock(); got.IsZero() {
+		t.Fatal("the default clock must return a real time")
 	}
 }
