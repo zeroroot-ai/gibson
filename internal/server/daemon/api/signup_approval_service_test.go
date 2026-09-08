@@ -241,10 +241,10 @@ func TestAdminApproveRegistration_ActivatesTheOwnerAndProvisions(t *testing.T) {
 	}
 
 	// The decision is attributable.
-	var decision *audit_event
+	var decision *auditDecision
 	for i := range auditWriter.events {
 		if auditWriter.events[i].Action == "signup_registration.approved" {
-			decision = &audit_event{auditWriter.events[i].ActorID, auditWriter.events[i].TargetID}
+			decision = &auditDecision{auditWriter.events[i].ActorID, auditWriter.events[i].TargetID}
 		}
 	}
 	if decision == nil {
@@ -262,9 +262,9 @@ func TestAdminApproveRegistration_ActivatesTheOwnerAndProvisions(t *testing.T) {
 	}
 }
 
-// audit_event is the pair the approval test asserts on, kept small so the
+// auditDecision is the pair the approval test asserts on, kept small so the
 // assertion reads as the claim rather than as field plumbing.
-type audit_event struct {
+type auditDecision struct {
 	actor  string
 	target string
 }
