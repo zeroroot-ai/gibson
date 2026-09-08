@@ -62,6 +62,16 @@ Completed or cancelled missions are unaffected.
 
 ---
 
+## [0.134.10](https://github.com/zeroroot-ai/gibson/compare/v0.134.9...v0.134.10) (2026-09-08)
+
+
+### Bug Fixes
+
+* **docs:** drop CODEOWNERS, dead repo links and workstation paths ([#84](https://github.com/zeroroot-ai/gibson/issues/84)) ([5394cde](https://github.com/zeroroot-ai/gibson/commit/5394cde5f92cbb769de977621c56c482f7d07d47))
+* **guards:** diff-coverage must not charge a comment as a statement ([#86](https://github.com/zeroroot-ai/gibson/issues/86)) ([fe75e1e](https://github.com/zeroroot-ai/gibson/commit/fe75e1e9ce5b58fc499f01cb0126bdc3f604948b))
+* **guards:** one brand guard, and sweep the old brand and personal data ([#82](https://github.com/zeroroot-ai/gibson/issues/82)) ([c8a3ffc](https://github.com/zeroroot-ai/gibson/commit/c8a3ffc06ce6272a377ce4f47879d9769b98afdb))
+* **test:** give every vault test server its own transport ([#87](https://github.com/zeroroot-ai/gibson/issues/87)) ([1fe1b86](https://github.com/zeroroot-ai/gibson/commit/1fe1b8634272ec1637ebc6c7ba7dfcbbf6a09c5b))
+
 ## [0.134.9](https://github.com/zeroroot-ai/gibson/compare/v0.134.8...v0.134.9) (2026-09-08)
 
 
