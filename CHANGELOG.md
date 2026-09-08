@@ -62,6 +62,19 @@ Completed or cancelled missions are unaffected.
 
 ---
 
+## [0.135.0](https://github.com/zeroroot-ai/gibson/compare/v0.134.10...v0.135.0) (2026-09-08)
+
+
+### Features
+
+* **signup:** admin-approval registration rung for self-hosted ([#91](https://github.com/zeroroot-ai/gibson/issues/91)) ([2ba4ba9](https://github.com/zeroroot-ai/gibson/commit/2ba4ba9a115328ec687f41aa57916bf059607f32))
+* **world:** carry a mission's pinned belief-model version on MissionView ([#89](https://github.com/zeroroot-ai/gibson/issues/89)) ([9244608](https://github.com/zeroroot-ai/gibson/commit/9244608ef535b70b738c981803ab70882f137ebd))
+
+
+### Bug Fixes
+
+* **connector:** fail closed on a dead credential, with write-safe token rotation ([#88](https://github.com/zeroroot-ai/gibson/issues/88)) ([4018871](https://github.com/zeroroot-ai/gibson/commit/4018871bf322bc28d5ffbccd3816a3ae5c9cd5ff))
+
 ## [0.134.10](https://github.com/zeroroot-ai/gibson/compare/v0.134.9...v0.134.10) (2026-09-08)
 
 
