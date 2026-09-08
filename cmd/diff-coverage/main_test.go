@@ -332,3 +332,123 @@ func TestRun_BadBaseRefReturns2(t *testing.T) {
 		t.Fatalf("want exit 2 on bad base ref, got %d; stderr=%s", code, errb.String())
 	}
 }
+
+// withSource points readSource at an in-memory table for one test, so the
+// scanner can run against a path that does not exist on disk.
+func withSource(t *testing.T, files map[string]string) {
+	t.Helper()
+	prev := readSource
+	readSource = func(path string) ([]byte, error) {
+		src, ok := files[path]
+		if !ok {
+			return nil, os.ErrNotExist
+		}
+		return []byte(src), nil
+	}
+	t.Cleanup(func() { readSource = prev })
+}
+
+// The fixture that this guard failed on. A Go coverage block spans from its
+// first statement to the closing brace, so a comment INSIDE an uncovered
+// function sits inside an uncovered block. Before the codeLines filter, a PR
+// that rewrote only that comment was charged one uncovered "statement" line
+// and the gate failed at 1/2 while the PR added no code.
+func TestEvaluate_CommentInsideUncoveredBlockIsNotAStatement(t *testing.T) {
+	withSource(t, map[string]string{
+		"internal/x/file.go": "package x\n" + // 1
+			"\n" + // 2
+			"func f() {\n" + // 3
+			"\tif cond {\n" + // 4
+			"\t\t// prose only\n" + // 5
+			"\t\tdo()\n" + // 6
+			"\t}\n" + // 7
+			"}\n", // 8
+	})
+	// One block, lines 4..7, never executed. Line 5 is the comment.
+	profile := `mode: atomic
+github.com/zeroroot-ai/gibson/internal/x/file.go:4.12,7.3 1 0
+`
+	diff := `+++ b/internal/x/file.go
+@@ -4,0 +5 @@
++		// prose only
+`
+	r := evaluate([]byte(profile), []byte(diff), mod, 85)
+	if r.Total != 0 {
+		t.Fatalf("a comment-only change must count zero statement lines, got total=%d missed=%v", r.Total, r.Missed)
+	}
+	if !r.Pass {
+		t.Fatal("expected PASS: the change adds no code")
+	}
+}
+
+// The complement: a real statement on the same uncovered block still fails, so
+// the filter cannot be used to smuggle untested code past the gate.
+func TestEvaluate_StatementInsideUncoveredBlockStillCounts(t *testing.T) {
+	withSource(t, map[string]string{
+		"internal/x/file.go": "package x\n" +
+			"\n" +
+			"func f() {\n" +
+			"\tif cond {\n" +
+			"\t\tdo()\n" +
+			"\t}\n" +
+			"}\n",
+	})
+	profile := `mode: atomic
+github.com/zeroroot-ai/gibson/internal/x/file.go:4.12,6.3 1 0
+`
+	diff := `+++ b/internal/x/file.go
+@@ -4,0 +5 @@
++		do()
+`
+	r := evaluate([]byte(profile), []byte(diff), mod, 85)
+	if r.Total != 1 || r.Covered != 0 {
+		t.Fatalf("want total=1 covered=0, got total=%d covered=%d", r.Total, r.Covered)
+	}
+	if r.Pass {
+		t.Fatal("expected FAIL: an uncovered statement was added")
+	}
+}
+
+// A block comment's interior lines carry no token either.
+func TestCodeLines_BlockCommentInteriorIsNotCode(t *testing.T) {
+	withSource(t, map[string]string{
+		"internal/x/file.go": "package x\n" + // 1
+			"\n" + // 2
+			"func f() {\n" + // 3
+			"\t/* one\n" + // 4
+			"\t   two */\n" + // 5
+			"\tdo()\n" + // 6
+			"}\n", // 7
+	})
+	code := codeLines("internal/x/file.go")
+	for _, line := range []int{2, 4, 5} {
+		if code[line] {
+			t.Errorf("line %d carries no code, but codeLines marked it as code", line)
+		}
+	}
+	for _, line := range []int{1, 3, 6, 7} {
+		if !code[line] {
+			t.Errorf("line %d carries code, but codeLines did not mark it", line)
+		}
+	}
+}
+
+// An unreadable source must make the gate stricter, not weaker: every added
+// line is kept and classified exactly as it was before this filter existed.
+func TestCodeLines_UnreadableSourceKeepsEveryAddedLine(t *testing.T) {
+	withSource(t, map[string]string{}) // every read fails
+	if got := codeLines("internal/x/file.go"); got != nil {
+		t.Fatalf("an unreadable source must yield nil, got %v", got)
+	}
+	profile := `mode: atomic
+github.com/zeroroot-ai/gibson/internal/x/file.go:4.12,7.3 1 0
+`
+	diff := `+++ b/internal/x/file.go
+@@ -4,0 +5 @@
++		// prose only
+`
+	r := evaluate([]byte(profile), []byte(diff), mod, 85)
+	if r.Total != 1 {
+		t.Fatalf("with no source to read the line must still count, got total=%d", r.Total)
+	}
+}
