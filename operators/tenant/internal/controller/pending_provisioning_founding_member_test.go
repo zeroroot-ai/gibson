@@ -26,9 +26,9 @@ import (
 // byte-identical to the one the dashboard used to write.
 func TestSlugifyEmail_MatchesDashboard(t *testing.T) {
 	cases := map[string]string{
-		"anthony@zeroroot.ai": "anthony-zeroroot-ai",
-		// Keeps hyphen-preservation covered: the old fixture domain carried a
-		// hyphen, and zeroroot.ai does not.
+		"owner@example.com": "owner-example-com",
+		// Keeps hyphen-preservation covered: example.com carries no hyphen, so
+		// a fixture that does must stay in the table.
 		"first-last@sub.example.test": "first-last-sub-example-test",
 		"OWNER@Acme.test":             "owner-acme-test",
 		"a..b@c":                      "a-b-c",
@@ -39,7 +39,7 @@ func TestSlugifyEmail_MatchesDashboard(t *testing.T) {
 			t.Errorf("SlugifyEmail(%q) = %q, want %q", in, got, want)
 		}
 	}
-	if got := tenantnames.FoundingMemberName("anthony@zeroroot.ai"); got != "anthony-zeroroot-ai-owner" {
+	if got := tenantnames.FoundingMemberName("owner@example.com"); got != "owner-example-com-owner" {
 		t.Errorf("FoundingMemberName: got %q", got)
 	}
 	if got := tenantNamespace("acme"); got != "tenant-acme" {

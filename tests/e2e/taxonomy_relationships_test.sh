@@ -17,6 +17,10 @@
 
 set -e
 
+# Repository root, derived from this script (tests/e2e/ is two levels down), so
+# the test runs from any checkout instead of one workstation path.
+REPO_ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/../.." && pwd)"
+
 # Colors for output
 RED='\033[0;31m'
 GREEN='\033[0;32m'
@@ -157,13 +161,12 @@ build_gibson() {
 
     log_step "Building Gibson"
 
-    local gibson_dir="/home/anthony/Code/zero-day.ai/opensource/gibson"
-    if [ ! -d "$gibson_dir" ]; then
-        log_error "Gibson directory not found: $gibson_dir"
+    if [ ! -d "$REPO_ROOT" ]; then
+        log_error "Gibson repository root not found: $REPO_ROOT"
         exit 1
     fi
 
-    cd "$gibson_dir"
+    cd "$REPO_ROOT"
 
     if [ "$VERBOSE" = true ]; then
         make build
@@ -210,7 +213,7 @@ create_mission() {
     log_step "Creating Test Mission"
 
     cat > "$MISSION_FILE" <<EOF
-apiVersion: gibson.zero-day.ai/v1
+apiVersion: gibson.zeroroot.ai/v1
 kind: Mission
 metadata:
   name: taxonomy-relationship-test
@@ -254,7 +257,7 @@ EOF
 run_mission() {
     log_step "Running Gibson Mission"
 
-    local gibson_bin="/home/anthony/Code/zero-day.ai/opensource/gibson/bin/gibson"
+    local gibson_bin="$REPO_ROOT/bin/gibson"
 
     if [ "$VERBOSE" = true ]; then
         "$gibson_bin" mission run \
