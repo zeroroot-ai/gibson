@@ -21,9 +21,10 @@ import (
 const tenantOperatorSVID = "spiffe://zeroroot.ai/platform/tenant-operator"
 
 // connectorOperatorSVID is the connector-operator's SPIFFE workload identity.
-// It is the second direct-dial peer (ADR-0015 §5, gibson#1566): its
-// ConnectorInstance finalizer calls exactly one RPC, RevokeConnectorGrant, so
-// its policy is exactly that one method (least privilege).
+// It is the second direct-dial peer (ADR-0015 §5, gibson#1566): it calls
+// RevokeConnectorGrant from the ConnectorInstance finalizer and
+// GetConnectorAuthStatus from the ConnectorInstance controller, so its policy
+// is exactly those two methods (least privilege).
 const connectorOperatorSVID = "spiffe://zeroroot.ai/platform/connector-operator"
 
 // operatorMethodDecision classifies a single DaemonOperatorService method for
@@ -128,6 +129,10 @@ var operatorMethodPolicy = map[string]operatorMethodDecision{
 		allowed: false,
 		reason:  "the connector-operator's finalizer RPC (connectorOperatorMethodPolicy); the tenant-operator never calls it",
 	},
+	daemonoperatorv1.DaemonOperatorService_GetConnectorAuthStatus_FullMethodName: {
+		allowed: false,
+		reason:  "the connector-operator's status RPC (connectorOperatorMethodPolicy); the tenant-operator never calls it",
+	},
 }
 
 // connectorOperatorMethodPolicy classifies EVERY DaemonOperatorService method
@@ -137,7 +142,8 @@ var operatorMethodPolicy = map[string]operatorMethodDecision{
 // table is derived from operatorMethodPolicy's key set so the two peers can
 // never drift on which methods exist.
 var connectorOperatorMethodPolicy = denyAllExcept(operatorMethodPolicy, map[string]string{
-	daemonoperatorv1.DaemonOperatorService_RevokeConnectorGrant_FullMethodName: "the ConnectorInstance finalizer revokes the connector grant on delete (ADR-0015 §5, gibson#1566)",
+	daemonoperatorv1.DaemonOperatorService_RevokeConnectorGrant_FullMethodName:   "the ConnectorInstance finalizer revokes the connector grant on delete (ADR-0015 §5, gibson#1566)",
+	daemonoperatorv1.DaemonOperatorService_GetConnectorAuthStatus_FullMethodName: "the ConnectorInstance controller reads the credential state so the CR reports Degraded, never a silent Active (ADR-0015 decision 4)",
 }, "tenant-operator surface; not a connector concern")
 
 // denyAllExcept builds a policy table over the same method set as base:

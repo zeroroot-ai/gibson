@@ -1356,9 +1356,13 @@ func (d *daemonImpl) buildGRPCServer(ctx context.Context) (*grpcSubsystem, error
 	d.registerConnectorAuth(ctx, srv)
 	// The ConnectorInstance finalizer revokes the grant on delete through the
 	// operator-scoped DaemonOperatorService.RevokeConnectorGrant (ADR-0015 §5),
-	// which delegates to the same revoke the tenant-scoped RPC runs.
+	// which delegates to the same revoke the tenant-scoped RPC runs. The
+	// ConnectorInstance controller reads the credential state through
+	// GetConnectorAuthStatus on the same server, so the CR reports Degraded
+	// rather than a silent Active (ADR-0015 decision 4).
 	if d.connectorAuthSrv != nil {
 		daemonSvc.WithConnectorGrantRevoker(d.connectorAuthSrv)
+		daemonSvc.WithConnectorAuthStatusReader(d.connectorAuthSrv)
 	}
 
 	// Register ConnectorService — the connector lifecycle (catalog, enable,

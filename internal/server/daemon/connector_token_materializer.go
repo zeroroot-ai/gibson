@@ -13,13 +13,21 @@
 // there is no ESO step (ADR-0015). The Secret VALUE is the full header
 // "Bearer <token>"; its ownerReference points at the ConnectorInstance CR so
 // Kubernetes garbage-collects it on connector delete.
+//
+// There is no fallback cache (ADR-0015 decision 4). The platform's own expiry
+// bookkeeping decides whether a token may be published at all: past expiry the
+// adapter withdraws the Secret instead of leaving a dead bearer token mounted,
+// so a revoked grant or an unreachable tenant store fails closed. Recovery is
+// re-authorization, never a cached credential.
 package daemon
 
 import (
 	"context"
 	"fmt"
+	"time"
 
 	corev1 "k8s.io/api/core/v1"
+	apierrors "k8s.io/apimachinery/pkg/api/errors"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"sigs.k8s.io/controller-runtime/pkg/client"
 	"sigs.k8s.io/controller-runtime/pkg/controller/controllerutil"
@@ -58,12 +66,28 @@ type connectorSecretResolver interface {
 type connectorTokenMaterializer struct {
 	kube    client.Client
 	secrets connectorSecretResolver
+	// now is the clock the published token's expiry is measured on. Nil means
+	// time.Now.
+	now func() time.Time
 }
 
-// Materialize resolves the connector's fresh access token from the tenant
-// secret store and writes it into the <connector>-connector-cred Secret in the
-// tenant namespace, create-or-update, with an ownerReference to the
-// ConnectorInstance CR.
+func (m *connectorTokenMaterializer) clock() time.Time {
+	if m.now != nil {
+		return m.now()
+	}
+	return time.Now()
+}
+
+// Materialize publishes the connector's live access token into the
+// <connector>-connector-cred Secret in the tenant namespace, create-or-update,
+// with an ownerReference to the ConnectorInstance CR — or withdraws that
+// Secret when the stored token is past expiry.
+//
+// The expiry check comes first and it is the fail-closed rule (ADR-0015
+// decision 4): a token the refresher can no longer renew must stop being
+// served, not linger in the Secret as a cache. So the adapter publishes a live
+// token, withdraws a dead one, and waits when the platform has no bookkeeping
+// to prove either.
 //
 // A connector that has no access token yet (authorized-but-not-minted, or the
 // grant is gone) is a quiet no-op, not an error: there is nothing to publish,
@@ -72,6 +96,28 @@ type connectorTokenMaterializer struct {
 // never travel in it.
 func (m *connectorTokenMaterializer) Materialize(ctx context.Context, d reconciler.ConnectorSandbox) error {
 	tctx := auth.WithTenant(ctx, d.Tenant)
+
+	meta, err := m.secrets.Resolve(tctx, connectorauth.AccessMetaSecretName(d.Connector))
+	if err != nil {
+		if status.Code(err) == codes.NotFound {
+			return nil // nothing minted yet; nothing to publish or withdraw
+		}
+		return fmt.Errorf("resolve access metadata for connector %q: %w", d.Connector, err)
+	}
+	if len(meta) == 0 {
+		return nil
+	}
+	tok, err := connectorauth.UnmarshalAccessToken(meta)
+	if err != nil {
+		// Unreadable bookkeeping proves neither freshness nor death, so the
+		// adapter publishes nothing and says why. The refresher rewrites both
+		// secrets on its next pass, because it reads unreadable metadata as
+		// "needs refresh" too.
+		return fmt.Errorf("connector %q: %w", d.Connector, err)
+	}
+	if tok.Expired(m.clock()) {
+		return m.withdraw(ctx, d)
+	}
 
 	raw, err := m.secrets.Resolve(tctx, connectorauth.AccessSecretName(d.Connector))
 	if err != nil {
@@ -111,6 +157,27 @@ func (m *connectorTokenMaterializer) Materialize(ctx context.Context, d reconcil
 		return nil
 	}); err != nil {
 		return fmt.Errorf("apply connector-cred Secret %s/%s: %w",
+			d.Namespace, connectorCredSecretName(d.InstanceName), err)
+	}
+	return nil
+}
+
+// withdraw removes a connector's credential Secret, so an access token the
+// platform can no longer renew stops being served the moment it expires
+// (ADR-0015 decision 4, "no fallback cache"). The connector's proxy loses its
+// credential and the ConnectorInstance reports Degraded, which is the honest
+// state: the vendor would reject the expired token anyway, and leaving it
+// mounted only hides that from the operator. Deleting an absent Secret is a
+// success, so the withdrawal is idempotent across passes.
+func (m *connectorTokenMaterializer) withdraw(ctx context.Context, d reconciler.ConnectorSandbox) error {
+	sec := &corev1.Secret{
+		ObjectMeta: metav1.ObjectMeta{
+			Name:      connectorCredSecretName(d.InstanceName),
+			Namespace: d.Namespace,
+		},
+	}
+	if err := m.kube.Delete(ctx, sec); err != nil && !apierrors.IsNotFound(err) {
+		return fmt.Errorf("withdraw connector-cred Secret %s/%s: %w",
 			d.Namespace, connectorCredSecretName(d.InstanceName), err)
 	}
 	return nil

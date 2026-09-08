@@ -2,14 +2,16 @@
 // Copyright 2026 Zero Root AI
 
 // Package daemonclient is the connector-operator's client to the daemon's
-// DaemonOperatorService, used by the ConnectorInstance finalizer to revoke a
-// connector's grant on delete (ADR-0015 §5, gibson#1566).
+// DaemonOperatorService. The ConnectorInstance finalizer revokes a connector's
+// grant on delete (ADR-0015 §5, gibson#1566), and the ConnectorInstance
+// controller reads the connector's credential state so the CR reports Degraded
+// instead of a silent Active (ADR-0015 decision 4).
 //
 // The operator has no secret-store client by design: the daemon owns the
 // Grant and the access pair, so the operator only carries the (tenant,
 // connector) pair to it. The dial is SPIFFE mTLS over the SPIRE Workload API
 // (ADR-0002); the daemon authorizes the connector-operator SVID for exactly
-// this one RPC (internal/server/daemon/operator_method_policy.go).
+// these two RPCs (internal/server/daemon/operator_method_policy.go).
 package daemonclient
 
 import (
@@ -19,10 +21,11 @@ import (
 	"google.golang.org/grpc"
 
 	daemonoperatorv1 "github.com/zeroroot-ai/gibson/internal/server/daemon/api/gibson/daemon/operator/v1"
+	tenantv1 "github.com/zeroroot-ai/gibson/internal/server/daemon/api/gibson/tenant/v1"
 	daemontransport "github.com/zeroroot-ai/gibson/operators/tenant/pkg/transport/daemon"
 )
 
-// Client revokes connector grants through the daemon. Construct exactly one
+// Client reads and revokes connector grants through the daemon. Construct exactly one
 // per operator process and reuse it: the underlying X509Source streams SVID
 // rotations for the life of the connection.
 type Client struct {
@@ -63,6 +66,21 @@ func (c *Client) Revoke(ctx context.Context, tenantID, connector string) error {
 		return fmt.Errorf("revoke connector grant %s/%s: %w", tenantID, connector, err)
 	}
 	return nil
+}
+
+// AuthStatus reports the tenant connector's credential state: whether a grant
+// is stored, whether the last refresh failed, and the vendor's own error when
+// it did. It returns no credential material, so the controller can put the
+// reason straight on the ConnectorInstance condition.
+func (c *Client) AuthStatus(ctx context.Context, tenantID, connector string) (*tenantv1.GetConnectorAuthStatusResponse, error) {
+	resp, err := c.operator.GetConnectorAuthStatus(ctx, &daemonoperatorv1.GetConnectorAuthStatusRequest{
+		TenantId:  tenantID,
+		Connector: connector,
+	})
+	if err != nil {
+		return nil, fmt.Errorf("connector auth status %s/%s: %w", tenantID, connector, err)
+	}
+	return resp.GetStatus(), nil
 }
 
 // Close releases the connection and the SPIRE X509Source. Idempotent; a

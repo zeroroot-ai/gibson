@@ -5,6 +5,7 @@ package gibson.daemon.operator.v1;
 option go_package = "github.com/zeroroot-ai/gibson/internal/server/daemon/api/gibson/daemon/operator/v1;daemonoperatorv1";
 
 import "gibson/auth/v1/options.proto";
+import "gibson/tenant/v1/connector_auth.proto";
 
 // DaemonOperatorService provides strictly ZD-internal operator operations on
 // the Gibson daemon. It is the post-ADR-0037 successor to the deleted
@@ -226,6 +227,27 @@ service DaemonOperatorService {
   // with the tenant carried explicitly: best-effort vendor revocation, then
   // local deletion, idempotent.
   rpc RevokeConnectorGrant(RevokeConnectorGrantRequest) returns (RevokeConnectorGrantResponse) {
+    option (gibson.auth.v1.authz) = {
+      relation: "platform_operator",
+      object_type: "system_tenant",
+      object_deriver: "system_tenant",
+      allowed_identities: 3  // USER | SERVICE
+    };
+  }
+
+  // GetConnectorAuthStatus reports one tenant connector's grant and token
+  // state to the connector-operator, so the ConnectorInstance carries a
+  // Degraded condition instead of a silent Active when the credential is
+  // dead (ADR-0015 decision 4).
+  //
+  // Only the daemon holds a secret-store client, so only the daemon knows
+  // whether a grant still refreshes. The operator owns the CR status and
+  // cannot read the store, so it pulls the reason from here on every
+  // reconcile pass, exactly as the finalizer pulls the revoke. The response
+  // is the same view the dashboard reads through
+  // gibson.tenant.v1.ConnectorAuthService, with the tenant carried
+  // explicitly. It never returns credential material.
+  rpc GetConnectorAuthStatus(GetConnectorAuthStatusRequest) returns (GetConnectorAuthStatusResponse) {
     option (gibson.auth.v1.authz) = {
       relation: "platform_operator",
       object_type: "system_tenant",
@@ -522,6 +544,23 @@ message RevokeConnectorGrantRequest {
   string tenant_id = 1;
   // connector is the connector id (Spec.Connector, the grant key). Required.
   string connector = 2;
+}
+
+// GetConnectorAuthStatusRequest names the tenant connector whose credential
+// state the operator is reporting on the ConnectorInstance.
+message GetConnectorAuthStatusRequest {
+  // tenant_id is the tenant the ConnectorInstance lives in (its namespace is
+  // tenant-<tenant_id>). Required.
+  string tenant_id = 1;
+  // connector is the connector id (Spec.Connector, the grant key). Required.
+  string connector = 2;
+}
+
+// GetConnectorAuthStatusResponse carries the connector's credential state.
+message GetConnectorAuthStatusResponse {
+  // status is the same view the dashboard reads, reused rather than copied so
+  // the two surfaces can never disagree about what a connector's state is.
+  gibson.tenant.v1.GetConnectorAuthStatusResponse status = 1;
 }
 
 // RevokeConnectorGrantResponse reports what the revoke found.
