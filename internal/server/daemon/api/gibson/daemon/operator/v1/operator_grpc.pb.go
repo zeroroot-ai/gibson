@@ -32,6 +32,7 @@ const (
 	DaemonOperatorService_ListPendingTenantOps_FullMethodName          = "/gibson.daemon.operator.v1.DaemonOperatorService/ListPendingTenantOps"
 	DaemonOperatorService_AckTenantOp_FullMethodName                   = "/gibson.daemon.operator.v1.DaemonOperatorService/AckTenantOp"
 	DaemonOperatorService_RevokeConnectorGrant_FullMethodName          = "/gibson.daemon.operator.v1.DaemonOperatorService/RevokeConnectorGrant"
+	DaemonOperatorService_GetConnectorAuthStatus_FullMethodName        = "/gibson.daemon.operator.v1.DaemonOperatorService/GetConnectorAuthStatus"
 )
 
 // DaemonOperatorServiceClient is the client API for DaemonOperatorService service.
@@ -149,6 +150,19 @@ type DaemonOperatorServiceClient interface {
 	// with the tenant carried explicitly: best-effort vendor revocation, then
 	// local deletion, idempotent.
 	RevokeConnectorGrant(ctx context.Context, in *RevokeConnectorGrantRequest, opts ...grpc.CallOption) (*RevokeConnectorGrantResponse, error)
+	// GetConnectorAuthStatus reports one tenant connector's grant and token
+	// state to the connector-operator, so the ConnectorInstance carries a
+	// Degraded condition instead of a silent Active when the credential is
+	// dead (ADR-0015 decision 4).
+	//
+	// Only the daemon holds a secret-store client, so only the daemon knows
+	// whether a grant still refreshes. The operator owns the CR status and
+	// cannot read the store, so it pulls the reason from here on every
+	// reconcile pass, exactly as the finalizer pulls the revoke. The response
+	// is the same view the dashboard reads through
+	// gibson.tenant.v1.ConnectorAuthService, with the tenant carried
+	// explicitly. It never returns credential material.
+	GetConnectorAuthStatus(ctx context.Context, in *GetConnectorAuthStatusRequest, opts ...grpc.CallOption) (*GetConnectorAuthStatusResponse, error)
 }
 
 type daemonOperatorServiceClient struct {
@@ -289,6 +303,16 @@ func (c *daemonOperatorServiceClient) RevokeConnectorGrant(ctx context.Context, 
 	return out, nil
 }
 
+func (c *daemonOperatorServiceClient) GetConnectorAuthStatus(ctx context.Context, in *GetConnectorAuthStatusRequest, opts ...grpc.CallOption) (*GetConnectorAuthStatusResponse, error) {
+	cOpts := append([]grpc.CallOption{grpc.StaticMethod()}, opts...)
+	out := new(GetConnectorAuthStatusResponse)
+	err := c.cc.Invoke(ctx, DaemonOperatorService_GetConnectorAuthStatus_FullMethodName, in, out, cOpts...)
+	if err != nil {
+		return nil, err
+	}
+	return out, nil
+}
+
 // DaemonOperatorServiceServer is the server API for DaemonOperatorService service.
 // All implementations must embed UnimplementedDaemonOperatorServiceServer
 // for forward compatibility.
@@ -404,6 +428,19 @@ type DaemonOperatorServiceServer interface {
 	// with the tenant carried explicitly: best-effort vendor revocation, then
 	// local deletion, idempotent.
 	RevokeConnectorGrant(context.Context, *RevokeConnectorGrantRequest) (*RevokeConnectorGrantResponse, error)
+	// GetConnectorAuthStatus reports one tenant connector's grant and token
+	// state to the connector-operator, so the ConnectorInstance carries a
+	// Degraded condition instead of a silent Active when the credential is
+	// dead (ADR-0015 decision 4).
+	//
+	// Only the daemon holds a secret-store client, so only the daemon knows
+	// whether a grant still refreshes. The operator owns the CR status and
+	// cannot read the store, so it pulls the reason from here on every
+	// reconcile pass, exactly as the finalizer pulls the revoke. The response
+	// is the same view the dashboard reads through
+	// gibson.tenant.v1.ConnectorAuthService, with the tenant carried
+	// explicitly. It never returns credential material.
+	GetConnectorAuthStatus(context.Context, *GetConnectorAuthStatusRequest) (*GetConnectorAuthStatusResponse, error)
 	mustEmbedUnimplementedDaemonOperatorServiceServer()
 }
 
@@ -452,6 +489,9 @@ func (UnimplementedDaemonOperatorServiceServer) AckTenantOp(context.Context, *Ac
 }
 func (UnimplementedDaemonOperatorServiceServer) RevokeConnectorGrant(context.Context, *RevokeConnectorGrantRequest) (*RevokeConnectorGrantResponse, error) {
 	return nil, status.Error(codes.Unimplemented, "method RevokeConnectorGrant not implemented")
+}
+func (UnimplementedDaemonOperatorServiceServer) GetConnectorAuthStatus(context.Context, *GetConnectorAuthStatusRequest) (*GetConnectorAuthStatusResponse, error) {
+	return nil, status.Error(codes.Unimplemented, "method GetConnectorAuthStatus not implemented")
 }
 func (UnimplementedDaemonOperatorServiceServer) mustEmbedUnimplementedDaemonOperatorServiceServer() {}
 func (UnimplementedDaemonOperatorServiceServer) testEmbeddedByValue()                               {}
@@ -708,6 +748,24 @@ func _DaemonOperatorService_RevokeConnectorGrant_Handler(srv interface{}, ctx co
 	return interceptor(ctx, in, info, handler)
 }
 
+func _DaemonOperatorService_GetConnectorAuthStatus_Handler(srv interface{}, ctx context.Context, dec func(interface{}) error, interceptor grpc.UnaryServerInterceptor) (interface{}, error) {
+	in := new(GetConnectorAuthStatusRequest)
+	if err := dec(in); err != nil {
+		return nil, err
+	}
+	if interceptor == nil {
+		return srv.(DaemonOperatorServiceServer).GetConnectorAuthStatus(ctx, in)
+	}
+	info := &grpc.UnaryServerInfo{
+		Server:     srv,
+		FullMethod: DaemonOperatorService_GetConnectorAuthStatus_FullMethodName,
+	}
+	handler := func(ctx context.Context, req interface{}) (interface{}, error) {
+		return srv.(DaemonOperatorServiceServer).GetConnectorAuthStatus(ctx, req.(*GetConnectorAuthStatusRequest))
+	}
+	return interceptor(ctx, in, info, handler)
+}
+
 // DaemonOperatorService_ServiceDesc is the grpc.ServiceDesc for DaemonOperatorService service.
 // It's only intended for direct use with grpc.RegisterService,
 // and not to be introspected or modified (even as a copy)
@@ -766,6 +824,10 @@ var DaemonOperatorService_ServiceDesc = grpc.ServiceDesc{
 		{
 			MethodName: "RevokeConnectorGrant",
 			Handler:    _DaemonOperatorService_RevokeConnectorGrant_Handler,
+		},
+		{
+			MethodName: "GetConnectorAuthStatus",
+			Handler:    _DaemonOperatorService_GetConnectorAuthStatus_Handler,
 		},
 	},
 	Streams:  []grpc.StreamDesc{},

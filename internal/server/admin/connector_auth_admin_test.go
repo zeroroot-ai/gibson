@@ -36,6 +36,9 @@ var fixedNow = time.Unix(1_700_000_000, 0).UTC()
 type fakeConnectorSecrets struct {
 	mu   sync.Mutex
 	data map[string][]byte
+	// resolveErr, when set, fails every Resolve — a tenant store the daemon
+	// cannot reach (a BYO Vault that is down).
+	resolveErr error
 }
 
 func newFakeConnectorSecrets() *fakeConnectorSecrets {
@@ -45,6 +48,9 @@ func newFakeConnectorSecrets() *fakeConnectorSecrets {
 func (f *fakeConnectorSecrets) Resolve(_ context.Context, name string) ([]byte, error) {
 	f.mu.Lock()
 	defer f.mu.Unlock()
+	if f.resolveErr != nil {
+		return nil, f.resolveErr
+	}
 	v, ok := f.data[name]
 	if !ok {
 		return nil, status.Errorf(codes.NotFound, "secret %q not found", name)
@@ -1142,4 +1148,56 @@ type failingResolveStore struct{ *fakeConnectorSecrets }
 
 func (f *failingResolveStore) Resolve(_ context.Context, _ string) ([]byte, error) {
 	return nil, errors.New("broker unavailable")
+}
+
+// --- ADR-0015 decision 4: the operator reads the same view as the dashboard
+
+// AuthStatus is the tenant-explicit half the connector-operator calls. It must
+// answer exactly what the tenant-scoped RPC answers, because two surfaces that
+// disagree about whether a connector works is the failure the ADR is about.
+func TestAuthStatus_MatchesTheTenantScopedRPC(t *testing.T) {
+	store := newFakeConnectorSecrets()
+	prover := &fakeProver{store: store}
+	srv := newConnectorAuthServer(t, store, prover)
+	ctx := ctxWithTenant(t, "acme")
+
+	seedGrant(ctx, t, store, prover, "connector-gitlab", nil)
+	srv.book.Record("acme", "connector-gitlab",
+		errors.New("token refresh refused (401): invalid_grant"), fixedNow)
+
+	fromRPC, err := srv.GetConnectorAuthStatus(ctx,
+		&tenantv1.GetConnectorAuthStatusRequest{Connector: "connector-gitlab"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	// The operator path carries no tenant in its context, exactly as the
+	// finalizer's revoke does not.
+	fromOperator := srv.AuthStatus(context.Background(),
+		auth.MustNewTenantID("acme"), "connector-gitlab")
+
+	if fromOperator.GetState() != fromRPC.GetState() {
+		t.Errorf("operator state = %v, dashboard state = %v; the two surfaces must agree",
+			fromOperator.GetState(), fromRPC.GetState())
+	}
+	if fromOperator.GetState() != tenantv1.ConnectorAuthState_CONNECTOR_AUTH_STATE_REFRESH_FAILING {
+		t.Errorf("state = %v, want REFRESH_FAILING for a revoked grant", fromOperator.GetState())
+	}
+	if !strings.Contains(fromOperator.GetLastRefreshError(), "invalid_grant") {
+		t.Errorf("last_refresh_error = %q, want the vendor's error code", fromOperator.GetLastRefreshError())
+	}
+}
+
+// A tenant store the daemon cannot read reports UNAUTHORIZED, never a silent
+// AUTHORIZED: the operator degrades the connector either way, and a credential
+// nobody can resolve is not a working credential.
+func TestAuthStatus_UnreachableStoreIsNeverAuthorized(t *testing.T) {
+	store := newFakeConnectorSecrets()
+	store.resolveErr = errors.New("byo vault unreachable")
+	srv := newConnectorAuthServer(t, store, &fakeProver{store: store})
+
+	got := srv.AuthStatus(context.Background(), auth.MustNewTenantID("acme"), "connector-gitlab")
+
+	if got.GetState() == tenantv1.ConnectorAuthState_CONNECTOR_AUTH_STATE_AUTHORIZED {
+		t.Fatal("an unreadable tenant store must never read as AUTHORIZED")
+	}
 }

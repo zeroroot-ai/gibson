@@ -31,12 +31,16 @@ import (
 const defaultDaemonSVID = "spiffe://zeroroot.ai/platform/daemon"
 
 // wireReconciler registers the ConnectorInstance controller on the manager
-// with the grant revoker its finalizer needs (ADR-0015 §5).
-func wireReconciler(mgr ctrl.Manager, revoker controller.GrantRevoker) error {
+// with the daemon client it needs: the finalizer revokes the grant on delete
+// (ADR-0015 §5) and the controller reads the credential state so the CR
+// reports Degraded rather than a silent Active (ADR-0015 decision 4). One
+// client serves both, because both are the same SPIFFE-mTLS dial.
+func wireReconciler(mgr ctrl.Manager, daemon *daemonclient.Client) error {
 	if err := (&controller.ConnectorInstanceReconciler{
-		Client:  mgr.GetClient(),
-		Scheme:  mgr.GetScheme(),
-		Revoker: revoker,
+		Client:     mgr.GetClient(),
+		Scheme:     mgr.GetScheme(),
+		Revoker:    daemon,
+		AuthReader: daemon,
 	}).SetupWithManager(mgr); err != nil {
 		return fmt.Errorf("connectorinstance controller: %w", err)
 	}
@@ -44,8 +48,9 @@ func wireReconciler(mgr ctrl.Manager, revoker controller.GrantRevoker) error {
 }
 
 // daemonSettings reads the daemon dial settings from the environment. The
-// address is required: an operator that cannot reach the daemon cannot revoke
-// a grant (ADR-0015 §5), so it fails at boot rather than silently leaving
+// address is required: an operator that cannot reach the daemon can neither
+// revoke a grant (ADR-0015 §5) nor tell whether a credential is still alive
+// (ADR-0015 decision 4), so it fails at boot rather than silently leaving
 // grants alive after every delete. The SVID defaults to the platform daemon.
 func daemonSettings(getenv func(string) string) (addr, svid string, err error) {
 	addr = getenv("GIBSON_DAEMON_GRPC_ADDRESS")
@@ -59,21 +64,22 @@ func daemonSettings(getenv func(string) string) (addr, svid string, err error) {
 	return addr, svid, nil
 }
 
-// buildRevoker reads the dial settings and opens the SPIFFE-mTLS daemon
-// client the finalizer revokes grants through (ADR-0002, ADR-0015 §5). Both
-// failure modes — missing address, unreachable SPIRE Workload API — fail the
-// boot, so a misconfigured operator never runs with grants it cannot revoke.
-func buildRevoker(ctx context.Context, getenv func(string) string) (*daemonclient.Client, error) {
+// buildDaemonClient reads the dial settings and opens the SPIFFE-mTLS daemon
+// client the operator revokes grants through and reads credential state from
+// (ADR-0002, ADR-0015). Both failure modes — missing address, unreachable
+// SPIRE Workload API — fail the boot, so a misconfigured operator never runs
+// with grants it cannot revoke.
+func buildDaemonClient(ctx context.Context, getenv func(string) string) (*daemonclient.Client, error) {
 	addr, svid, err := daemonSettings(getenv)
 	if err != nil {
 		return nil, err
 	}
-	revoker, err := daemonclient.New(ctx, addr, svid)
+	daemon, err := daemonclient.New(ctx, addr, svid)
 	if err != nil {
 		return nil, fmt.Errorf("daemon gRPC client init failed (addr %s): %w", addr, err)
 	}
-	setupLog.Info("daemon grant revoker: gRPC (SPIFFE mTLS)", "addr", addr, "daemon_svid", svid)
-	return revoker, nil
+	setupLog.Info("daemon client: gRPC (SPIFFE mTLS)", "addr", addr, "daemon_svid", svid)
+	return daemon, nil
 }
 
 var (
@@ -111,16 +117,17 @@ func main() {
 	}
 
 	// The ConnectorInstance finalizer revokes the connector's grant through
-	// the daemon on delete (ADR-0015 §5). The dial is SPIFFE mTLS over the
-	// SPIRE Workload API socket (ADR-0002).
-	revoker, err := buildRevoker(context.Background(), os.Getenv)
+	// the daemon on delete (ADR-0015 §5), and the controller reads the
+	// credential state from it every pass (ADR-0015 decision 4). The dial is
+	// SPIFFE mTLS over the SPIRE Workload API socket (ADR-0002).
+	daemon, err := buildDaemonClient(context.Background(), os.Getenv)
 	if err != nil {
-		setupLog.Error(err, "daemon grant revoker")
+		setupLog.Error(err, "daemon client")
 		os.Exit(1)
 	}
-	defer func() { _ = revoker.Close() }()
+	defer func() { _ = daemon.Close() }()
 
-	if err := wireReconciler(mgr, revoker); err != nil {
+	if err := wireReconciler(mgr, daemon); err != nil {
 		setupLog.Error(err, "unable to create controller", "controller", "ConnectorInstance")
 		os.Exit(1)
 	}

@@ -29,6 +29,23 @@
 // secret, a compromise would mean standing access to the customer's system
 // rather than a credential that expires.
 //
+// FAIL CLOSED, AND NO FALLBACK CACHE (ADR-0015 decision 4). A refresh the
+// vendor refuses, or a tenant store the daemon cannot read, ends with the
+// connector Degraded and its credential withdrawn — never a silent Active on a
+// token nobody can renew. Two rules make that hold:
+//
+//   - Rotation is write-safe. A rotated refresh token counts as consumed only
+//     once the write-back to the tenant store succeeds, so a failed write
+//     leaves the OLD grant stored and the next pass retries it. Publishing an
+//     access token against a grant the vendor has already invalidated would
+//     strand the connector on a token nobody holds.
+//   - Expiry is enforced where the token is served. The daemon publishes a
+//     live access token into the connector's Secret and withdraws an expired
+//     one, because a ToolHive proxy presents whatever it mounted and learns
+//     nothing from the vendor's 401.
+//
+// Recovery is re-authorization. Nothing here heals a grant on its own.
+//
 // The isolation is structural rather than conventional. The FGA model permits
 // can_resolve on a secret only for a plugin_principal, so a secret with no
 // such tuple is unresolvable by every component. This package therefore keeps
@@ -161,6 +178,30 @@ func UnmarshalGrant(b []byte) (*Grant, error) {
 type AccessToken struct {
 	Token     string    `json:"access_token"`
 	ExpiresAt time.Time `json:"expires_at"`
+}
+
+// Expired reports whether the token is at or past its expiry at now. A token
+// with no recorded expiry is never expired: the refresher gives every minted
+// token a bounded lifetime, so a zero expiry means "the platform has no
+// bookkeeping for this one", not "it lives forever".
+func (t *AccessToken) Expired(now time.Time) bool {
+	if t == nil || t.ExpiresAt.IsZero() {
+		return false
+	}
+	return !now.Before(t.ExpiresAt)
+}
+
+// UnmarshalAccessToken parses the platform's access-token bookkeeping blob.
+//
+// Named without content, like UnmarshalGrant: the blob is platform metadata
+// rather than a credential, but the habit of never echoing broker bytes into
+// an error string stays uniform.
+func UnmarshalAccessToken(b []byte) (*AccessToken, error) {
+	var tok AccessToken
+	if err := json.Unmarshal(b, &tok); err != nil {
+		return nil, errors.New("connector access metadata is not valid JSON")
+	}
+	return &tok, nil
 }
 
 // GrantSecretName is the broker name of a connector's grant.

@@ -96,20 +96,25 @@ func assertPolicyClassifiesDescriptor(t *testing.T, name string, policy map[stri
 		"%s must classify exactly the descriptor's method set", name)
 }
 
-// TestConnectorOperatorMethodPolicy_AllowedSetIsExactlyTheFinalizerRPC pins the
-// connector-operator's grant to the one RPC its ConnectorInstance finalizer
-// dials (ADR-0015 §5). A surplus grant is an over-grant; a missing one wedges
-// every connector delete behind a PermissionDenied.
-func TestConnectorOperatorMethodPolicy_AllowedSetIsExactlyTheFinalizerRPC(t *testing.T) {
-	got := make([]string, 0, 1)
+// TestConnectorOperatorMethodPolicy_AllowedSetIsExactlyTheConnectorRPCs pins the
+// connector-operator's grant to the two RPCs it dials: the finalizer's revoke
+// (ADR-0015 §5) and the controller's credential read (ADR-0015 decision 4). A
+// surplus grant is an over-grant; a missing revoke wedges every connector
+// delete behind a PermissionDenied, and a missing status read leaves every
+// ConnectorInstance reporting a health nobody checked.
+func TestConnectorOperatorMethodPolicy_AllowedSetIsExactlyTheConnectorRPCs(t *testing.T) {
+	got := make([]string, 0, 2)
 	for method := range connectorOperatorAllowedMethods() {
 		got = append(got, method)
 	}
-	assert.ElementsMatch(t,
-		[]string{daemonoperatorv1.DaemonOperatorService_RevokeConnectorGrant_FullMethodName}, got,
-		"connector-operator may call exactly RevokeConnectorGrant")
+	assert.ElementsMatch(t, []string{
+		daemonoperatorv1.DaemonOperatorService_RevokeConnectorGrant_FullMethodName,
+		daemonoperatorv1.DaemonOperatorService_GetConnectorAuthStatus_FullMethodName,
+	}, got, "connector-operator may call exactly its revoke and its status read")
 	assert.False(t, operatorAllowedMethods()[daemonoperatorv1.DaemonOperatorService_RevokeConnectorGrant_FullMethodName],
 		"the tenant-operator must not inherit the connector-operator's finalizer RPC")
+	assert.False(t, operatorAllowedMethods()[daemonoperatorv1.DaemonOperatorService_GetConnectorAuthStatus_FullMethodName],
+		"the tenant-operator must not inherit the connector-operator's status RPC")
 }
 
 // TestOperatorMethodPolicy_AllowedSetEqualsActualCallSet is the least-privilege

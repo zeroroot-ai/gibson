@@ -78,9 +78,12 @@ func TestConnectorTokenReconcile_IsolatesAFailingMaterialize(t *testing.T) {
 	}
 }
 
-// A refresh failure short-circuits the connector before materialize: a token
-// that could not be minted must not be published.
-func TestConnectorTokenReconcile_SkipsMaterializeWhenRefreshFails(t *testing.T) {
+// A refresh failure still runs materialize, and that is the point of ADR-0015
+// decision 4. Materialize publishes only a live token and withdraws an expired
+// one, so the pass that cannot renew a credential is exactly the pass that must
+// take the dead one out of the Secret. Skipping it would leave the expired
+// token mounted, which is the fallback cache the ADR refuses.
+func TestConnectorTokenReconcile_MaterializesAfterARefreshFailure(t *testing.T) {
 	tenant := auth.MustNewTenantID("tenant-a")
 	cat := &fakeCatalog{desired: []ConnectorSandbox{
 		{Tenant: tenant, Connector: "connector-broken", InstanceName: "connector-broken"},
@@ -94,8 +97,11 @@ func TestConnectorTokenReconcile_SkipsMaterializeWhenRefreshFails(t *testing.T) 
 
 	r.reconcile(context.Background())
 
-	if len(mat.calls) != 1 || mat.calls[0].Connector != "connector-gitlab" {
-		t.Fatalf("only the refreshed connector may be materialized; calls=%v", mat.calls)
+	if len(mat.calls) != 2 {
+		t.Fatalf("every desired connector must be materialized, the failed one included; calls=%v", mat.calls)
+	}
+	if mat.calls[0].Connector != "connector-broken" {
+		t.Errorf("the connector whose refresh failed must reach the materializer; calls=%v", mat.calls)
 	}
 }
 

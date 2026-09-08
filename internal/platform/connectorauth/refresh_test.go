@@ -361,3 +361,103 @@ type failingTransport struct{}
 func (failingTransport) RoundTrip(*http.Request) (*http.Response, error) {
 	return nil, errors.New("unexpected vendor call")
 }
+
+// --- ADR-0015 decision 4: write-safe rotation, fail closed
+
+// A rotated refresh token counts as consumed only once the write-back lands.
+// When the tenant store rejects that write, the refresh aborts and the STORED
+// grant must still be the old one, so the next pass retries it rather than
+// stranding the connector on a token nobody holds.
+func TestRefresh_FailedRotationWriteLeavesTheOldGrantForTheNextPass(t *testing.T) {
+	s := newStore()
+	srv := tokenServer(t, true)
+	defer srv.Close()
+	seedGrant(t, s, "gitlab", srv.URL, "rt-old")
+	s.putErr[GrantSecretName("gitlab")] = errors.New("byo vault unreachable")
+
+	r, _ := NewRefresher(s, srv.Client(), nil)
+	if _, err := r.Refresh(context.Background(), "gitlab"); err == nil {
+		t.Fatal("a failed rotation write must fail the refresh")
+	}
+
+	g, err := UnmarshalGrant(s.get(GrantSecretName("gitlab")))
+	if err != nil {
+		t.Fatalf("grant after the failed write: %v", err)
+	}
+	if g.RefreshToken != "rt-old" {
+		t.Fatalf("stored refresh token = %q, want the old rt-old kept for the retry", g.RefreshToken)
+	}
+
+	// The store recovers; the next pass uses the old grant and succeeds.
+	delete(s.putErr, GrantSecretName("gitlab"))
+	if _, err := r.Refresh(context.Background(), "gitlab"); err != nil {
+		t.Fatalf("the retry with the old grant must succeed: %v", err)
+	}
+	g, err = UnmarshalGrant(s.get(GrantSecretName("gitlab")))
+	if err != nil {
+		t.Fatalf("grant after the retry: %v", err)
+	}
+	if g.RefreshToken != "rt-rotated" {
+		t.Errorf("refresh token = %q, want the rotated rt-rotated once the write lands", g.RefreshToken)
+	}
+}
+
+// A tenant store that cannot be read is not "no grant": treating a broker
+// failure as an absent grant would report UNAUTHORIZED and hide an outage.
+func TestRefresh_StoreUnreachableIsNotAMissingGrant(t *testing.T) {
+	s := newStore() // empty: every Resolve fails
+	r, _ := NewRefresher(s, nil, nil)
+
+	_, err := r.Refresh(context.Background(), "gitlab")
+	if err == nil {
+		t.Fatal("an unreadable store must fail the refresh")
+	}
+	if errors.Is(err, ErrNoGrant) {
+		t.Error("a store failure must not read as ErrNoGrant")
+	}
+}
+
+// Expired is the fail-closed rule the materializer applies: at or past the
+// recorded expiry a token is not a credential any more. A token with no
+// recorded expiry is never expired, because a zero value means the platform
+// has no bookkeeping for it, not that it lives forever.
+func TestAccessToken_Expired(t *testing.T) {
+	now := time.Date(2026, 9, 8, 12, 0, 0, 0, time.UTC)
+	cases := []struct {
+		name string
+		tok  *AccessToken
+		want bool
+	}{
+		{"live", &AccessToken{ExpiresAt: now.Add(time.Second)}, false},
+		{"at expiry", &AccessToken{ExpiresAt: now}, true},
+		{"past expiry", &AccessToken{ExpiresAt: now.Add(-time.Second)}, true},
+		{"no bookkeeping", &AccessToken{}, false},
+		{"nil", nil, false},
+	}
+	for _, c := range cases {
+		t.Run(c.name, func(t *testing.T) {
+			if got := c.tok.Expired(now); got != c.want {
+				t.Errorf("Expired = %v, want %v", got, c.want)
+			}
+		})
+	}
+}
+
+// UnmarshalAccessToken names the secret and never echoes its bytes, the same
+// habit UnmarshalGrant keeps.
+func TestUnmarshalAccessToken(t *testing.T) {
+	tok, err := UnmarshalAccessToken([]byte(`{"access_token":"at-1","expires_at":"2026-09-08T12:00:00Z"}`))
+	if err != nil {
+		t.Fatalf("UnmarshalAccessToken: %v", err)
+	}
+	if tok.Token != "at-1" || tok.ExpiresAt.IsZero() {
+		t.Fatalf("token = %+v, want the token and its expiry", tok)
+	}
+	_, err = UnmarshalAccessToken([]byte(`{"access_token":"at-secret"`))
+	if err == nil {
+		t.Fatal("malformed metadata must be refused")
+	}
+	if strings.Contains(err.Error(), "at-secret") {
+		t.Errorf("error = %q, want no broker bytes in it", err.Error())
+	}
+}

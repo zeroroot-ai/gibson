@@ -30,7 +30,9 @@ type TokenFreshener interface {
 // Materialize is idempotent and safe to call every pass: it creates the Secret
 // or updates it in place, self-healing a Secret that was deleted or never
 // written. It reports "no token stored yet" as a quiet success (nil), so an
-// authorized-but-not-yet-minted connector produces no log noise.
+// authorized-but-not-yet-minted connector produces no log noise. It also owns
+// the fail-closed half: a token past its expiry is withdrawn rather than left
+// mounted as a cache (ADR-0015 decision 4).
 type Materializer interface {
 	Materialize(ctx context.Context, desired ConnectorSandbox) error
 }
@@ -102,15 +104,16 @@ func (r *ConnectorTokenReconciler) reconcile(ctx context.Context) {
 	}
 	for _, d := range desired {
 		refreshed, err := r.cfg.Freshener.EnsureFresh(ctx, d.Tenant, d.Connector)
-		if err != nil {
+		switch {
+		case err != nil:
 			// The error carries the vendor's error code and never credential
 			// material (connectorauth's contract), so logging it is what makes
-			// a dying grant visible to whoever reads the logs.
+			// a dying grant visible to whoever reads the logs. The freshener
+			// has already recorded the reason for GetConnectorAuthStatus, so
+			// the ConnectorInstance reports Degraded within one pass.
 			r.cfg.Logger.Warn("connector-token: refresh failed",
 				"tenant", d.Tenant.String(), "connector", d.Connector, "err", err)
-			continue
-		}
-		if refreshed {
+		case refreshed:
 			r.cfg.Logger.Info("connector-token: refreshed access token",
 				"tenant", d.Tenant.String(), "connector", d.Connector)
 		}
@@ -118,8 +121,15 @@ func (r *ConnectorTokenReconciler) reconcile(ctx context.Context) {
 		// on a refresh: the token may be fresh in the store while the Secret is
 		// missing (a fresh restart, a deleted Secret, a proxy pod that never
 		// started). Materialize is idempotent, so a healthy connector is a
-		// cheap no-op. A failure here is logged and isolated, exactly like a
-		// refresh failure, so one connector never stalls the others.
+		// cheap no-op.
+		//
+		// A FAILED refresh runs it too, and that is the point of ADR-0015
+		// decision 4. Materialize publishes only a live token and withdraws an
+		// expired one, so the pass that cannot renew a credential is exactly
+		// the pass that must take the dead one out of the Secret. Skipping it
+		// here would leave the expired token mounted, which is the fallback
+		// cache the ADR refuses. A failure is logged and isolated, exactly
+		// like a refresh failure, so one connector never stalls the others.
 		if r.cfg.Materializer == nil {
 			continue
 		}

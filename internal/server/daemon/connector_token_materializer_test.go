@@ -8,7 +8,10 @@ package daemon
 
 import (
 	"context"
+	"encoding/json"
+	"strings"
 	"testing"
+	"time"
 
 	corev1 "k8s.io/api/core/v1"
 	apierrors "k8s.io/apimachinery/pkg/api/errors"
@@ -55,6 +58,22 @@ func materializerKube(t *testing.T, objs ...client.Object) client.Client {
 	return fake.NewClientBuilder().WithScheme(scheme).WithObjects(objs...).Build()
 }
 
+// materializerNow is the fixed clock every materializer test measures the
+// published token's expiry against.
+var materializerNow = time.Date(2026, 9, 8, 12, 0, 0, 0, time.UTC)
+
+// accessMeta renders the platform's access-token bookkeeping blob with an
+// expiry offset from materializerNow. It is what proves a token may still be
+// served (ADR-0015 decision 4).
+func accessMeta(t *testing.T, offset time.Duration) []byte {
+	t.Helper()
+	b, err := json.Marshal(connectorauth.AccessToken{ExpiresAt: materializerNow.Add(offset)})
+	if err != nil {
+		t.Fatalf("marshal access metadata: %v", err)
+	}
+	return b
+}
+
 func gitlabSandbox() reconciler.ConnectorSandbox {
 	return reconciler.ConnectorSandbox{
 		Tenant:       auth.MustNewTenantID("tenant-acme"),
@@ -71,9 +90,10 @@ func gitlabSandbox() reconciler.ConnectorSandbox {
 func TestConnectorTokenMaterializer_WritesBearerSecretWithOwnerRef(t *testing.T) {
 	kube := materializerKube(t)
 	store := fakeAccessStore{data: map[string][]byte{
-		connectorauth.AccessSecretName("connector-gitlab"): []byte("tok-abc"),
+		connectorauth.AccessSecretName("connector-gitlab"):     []byte("tok-abc"),
+		connectorauth.AccessMetaSecretName("connector-gitlab"): accessMeta(t, time.Hour),
 	}}
-	m := &connectorTokenMaterializer{kube: kube, secrets: store}
+	m := &connectorTokenMaterializer{kube: kube, secrets: store, now: func() time.Time { return materializerNow }}
 
 	if err := m.Materialize(context.Background(), gitlabSandbox()); err != nil {
 		t.Fatalf("Materialize: %v", err)
@@ -137,9 +157,10 @@ func TestConnectorTokenMaterializer_UpdatesInPlace(t *testing.T) {
 	}
 	kube := materializerKube(t, existing)
 	store := fakeAccessStore{data: map[string][]byte{
-		connectorauth.AccessSecretName("connector-gitlab"): []byte("tok-new"),
+		connectorauth.AccessSecretName("connector-gitlab"):     []byte("tok-new"),
+		connectorauth.AccessMetaSecretName("connector-gitlab"): accessMeta(t, time.Hour),
 	}}
-	m := &connectorTokenMaterializer{kube: kube, secrets: store}
+	m := &connectorTokenMaterializer{kube: kube, secrets: store, now: func() time.Time { return materializerNow }}
 
 	if err := m.Materialize(context.Background(), gitlabSandbox()); err != nil {
 		t.Fatalf("Materialize: %v", err)
@@ -154,5 +175,97 @@ func TestConnectorTokenMaterializer_UpdatesInPlace(t *testing.T) {
 	}
 	if got := string(list.Items[0].Data["authorization"]); got != "Bearer tok-new" {
 		t.Fatalf("authorization = %q, want the refreshed %q", got, "Bearer tok-new")
+	}
+}
+
+// --- ADR-0015 decision 4: no fallback cache
+
+// TestConnectorTokenMaterializer_WithdrawsAnExpiredToken is the no-fallback-cache
+// regression. The grant is revoked, the refresh fails, and the published access
+// token passes its expiry. The credential Secret must go, because the ToolHive
+// proxy presents whatever it mounts and would otherwise keep offering a dead
+// token to the vendor for as long as the pod lives. Recovery is
+// re-authorization, never a cached credential.
+func TestConnectorTokenMaterializer_WithdrawsAnExpiredToken(t *testing.T) {
+	existing := &corev1.Secret{
+		ObjectMeta: metav1.ObjectMeta{Name: "connector-gitlab-connector-cred", Namespace: "tenant-acme"},
+		Type:       corev1.SecretTypeOpaque,
+		Data:       map[string][]byte{"authorization": []byte("Bearer tok-dead")},
+	}
+	kube := materializerKube(t, existing)
+	store := fakeAccessStore{data: map[string][]byte{
+		connectorauth.AccessSecretName("connector-gitlab"):     []byte("tok-dead"),
+		connectorauth.AccessMetaSecretName("connector-gitlab"): accessMeta(t, -time.Second),
+	}}
+	m := &connectorTokenMaterializer{kube: kube, secrets: store, now: func() time.Time { return materializerNow }}
+
+	if err := m.Materialize(context.Background(), gitlabSandbox()); err != nil {
+		t.Fatalf("Materialize: %v", err)
+	}
+
+	var sec corev1.Secret
+	key := client.ObjectKey{Namespace: "tenant-acme", Name: "connector-gitlab-connector-cred"}
+	if err := kube.Get(context.Background(), key, &sec); !apierrors.IsNotFound(err) {
+		t.Fatalf("an expired token must be withdrawn; get err = %v, secret = %v", err, sec.Data)
+	}
+}
+
+// The withdrawal is idempotent: the next pass finds no Secret and succeeds, so
+// a dead connector does not fill the log with the same failure every five
+// minutes.
+func TestConnectorTokenMaterializer_WithdrawIsIdempotent(t *testing.T) {
+	kube := materializerKube(t)
+	store := fakeAccessStore{data: map[string][]byte{
+		connectorauth.AccessSecretName("connector-gitlab"):     []byte("tok-dead"),
+		connectorauth.AccessMetaSecretName("connector-gitlab"): accessMeta(t, -time.Hour),
+	}}
+	m := &connectorTokenMaterializer{kube: kube, secrets: store, now: func() time.Time { return materializerNow }}
+
+	for pass := 1; pass <= 2; pass++ {
+		if err := m.Materialize(context.Background(), gitlabSandbox()); err != nil {
+			t.Fatalf("pass %d: %v", pass, err)
+		}
+	}
+}
+
+// A token with no expiry bookkeeping is neither published nor withdrawn: the
+// platform cannot prove it is live, and destroying a credential on a missing
+// record would break a healthy connector. The refresher rewrites both secrets
+// on its next pass, because it reads absent metadata as "needs refresh".
+func TestConnectorTokenMaterializer_NoMetadataPublishesNothing(t *testing.T) {
+	kube := materializerKube(t)
+	store := fakeAccessStore{data: map[string][]byte{
+		connectorauth.AccessSecretName("connector-gitlab"): []byte("tok-abc"),
+	}}
+	m := &connectorTokenMaterializer{kube: kube, secrets: store, now: func() time.Time { return materializerNow }}
+
+	if err := m.Materialize(context.Background(), gitlabSandbox()); err != nil {
+		t.Fatalf("Materialize: %v", err)
+	}
+
+	var sec corev1.Secret
+	key := client.ObjectKey{Namespace: "tenant-acme", Name: "connector-gitlab-connector-cred"}
+	if err := kube.Get(context.Background(), key, &sec); !apierrors.IsNotFound(err) {
+		t.Fatalf("an unproven token must not be published; get err = %v", err)
+	}
+}
+
+// Unreadable bookkeeping is loud, not silent: it proves neither freshness nor
+// death, so the adapter publishes nothing and names the connector. The error
+// never carries the broker bytes.
+func TestConnectorTokenMaterializer_CorruptMetadataIsAnError(t *testing.T) {
+	kube := materializerKube(t)
+	store := fakeAccessStore{data: map[string][]byte{
+		connectorauth.AccessSecretName("connector-gitlab"):     []byte("tok-abc"),
+		connectorauth.AccessMetaSecretName("connector-gitlab"): []byte("{not json"),
+	}}
+	m := &connectorTokenMaterializer{kube: kube, secrets: store, now: func() time.Time { return materializerNow }}
+
+	err := m.Materialize(context.Background(), gitlabSandbox())
+	if err == nil {
+		t.Fatal("corrupt access metadata must fail loud")
+	}
+	if got := err.Error(); !strings.Contains(got, "connector-gitlab") || strings.Contains(got, "tok-abc") {
+		t.Errorf("error = %q, want the connector named and no token bytes", got)
 	}
 }

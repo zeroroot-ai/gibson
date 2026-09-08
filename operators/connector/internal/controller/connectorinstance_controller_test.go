@@ -27,6 +27,7 @@ import (
 	"sigs.k8s.io/controller-runtime/pkg/manager"
 	metricsserver "sigs.k8s.io/controller-runtime/pkg/metrics/server"
 
+	tenantv1 "github.com/zeroroot-ai/gibson/internal/server/daemon/api/gibson/tenant/v1"
 	connectorv1alpha1 "github.com/zeroroot-ai/gibson/operators/connector/api/v1alpha1"
 )
 
@@ -64,7 +65,34 @@ func (f *fakeRevoker) Revoke(_ context.Context, tenantID, connector string) erro
 	return f.err
 }
 
+// fakeAuthReader answers the controller's credential question. The zero value
+// reports an authorized connector, which is the state every pre-existing
+// reconcile test assumes.
+type fakeAuthReader struct {
+	calls []string // "<tenant>/<connector>"
+	state tenantv1.ConnectorAuthState
+	last  string
+	err   error
+}
+
+func (f *fakeAuthReader) AuthStatus(_ context.Context, tenantID, connector string) (*tenantv1.GetConnectorAuthStatusResponse, error) {
+	f.calls = append(f.calls, tenantID+"/"+connector)
+	if f.err != nil {
+		return nil, f.err
+	}
+	state := f.state
+	if state == tenantv1.ConnectorAuthState_CONNECTOR_AUTH_STATE_UNSPECIFIED {
+		state = tenantv1.ConnectorAuthState_CONNECTOR_AUTH_STATE_AUTHORIZED
+	}
+	return &tenantv1.GetConnectorAuthStatusResponse{State: state, LastRefreshError: f.last}, nil
+}
+
 func newReconciler(t *testing.T, seed ...client.Object) *ConnectorInstanceReconciler {
+	t.Helper()
+	return newReconcilerWithAuth(t, &fakeAuthReader{}, seed...)
+}
+
+func newReconcilerWithAuth(t *testing.T, reader ConnectorAuthReader, seed ...client.Object) *ConnectorInstanceReconciler {
 	t.Helper()
 	s := testScheme(t)
 	cl := fake.NewClientBuilder().
@@ -72,7 +100,48 @@ func newReconciler(t *testing.T, seed ...client.Object) *ConnectorInstanceReconc
 		WithStatusSubresource(&connectorv1alpha1.ConnectorInstance{}).
 		WithObjects(seed...).
 		Build()
-	return &ConnectorInstanceReconciler{Client: cl, Scheme: s, Revoker: &fakeRevoker{}}
+	return &ConnectorInstanceReconciler{Client: cl, Scheme: s, Revoker: &fakeRevoker{}, AuthReader: reader}
+}
+
+// conditionOf returns the named condition, or nil.
+func conditionOf(ci *connectorv1alpha1.ConnectorInstance, condType string) *metav1.Condition {
+	for i := range ci.Status.Conditions {
+		if ci.Status.Conditions[i].Type == condType {
+			return &ci.Status.Conditions[i]
+		}
+	}
+	return nil
+}
+
+// reconcileToServing runs the two passes that take a connector from created to
+// its ToolHive serving phase, and returns the CR as the controller left it.
+func reconcileToServing(
+	t *testing.T,
+	r *ConnectorInstanceReconciler,
+	key types.NamespacedName,
+	toolHiveKind, servingPhase string,
+) connectorv1alpha1.ConnectorInstance {
+	t.Helper()
+	ctx := context.Background()
+	if _, err := r.Reconcile(ctx, ctrl.Request{NamespacedName: key}); err != nil {
+		t.Fatalf("first reconcile: %v", err)
+	}
+	th := newToolHive(toolHiveKind)
+	if err := r.Get(ctx, key, th); err != nil {
+		t.Fatalf("get toolhive: %v", err)
+	}
+	_ = unstructured.SetNestedField(th.Object, servingPhase, "status", "phase")
+	if err := r.Update(ctx, th); err != nil {
+		t.Fatalf("update toolhive status: %v", err)
+	}
+	if _, err := r.Reconcile(ctx, ctrl.Request{NamespacedName: key}); err != nil {
+		t.Fatalf("second reconcile: %v", err)
+	}
+	var got connectorv1alpha1.ConnectorInstance
+	if err := r.Get(ctx, key, &got); err != nil {
+		t.Fatalf("get instance: %v", err)
+	}
+	return got
 }
 
 func hostedInstance(name, namespace string) *connectorv1alpha1.ConnectorInstance {
@@ -812,5 +881,135 @@ func TestReconcile_DeletionRemoveFinalizerErrorIsWrapped(t *testing.T) {
 	_, err := r.Reconcile(context.Background(), ctrl.Request{NamespacedName: types.NamespacedName{Namespace: "tenant-acme", Name: "osv"}})
 	if err == nil || !strings.Contains(err.Error(), "remove finalizer") {
 		t.Fatalf("err = %v, want a wrapped remove-finalizer error", err)
+	}
+}
+
+// --- ADR-0015 decision 4: a dead credential is Degraded, never a silent Active
+
+// TestReconcile_RevokedGrantIsDegradedNotReady is the fail-closed regression.
+// The vendor revokes the grant, the daemon's refresh starts failing, and
+// ToolHive keeps serving because the proxy presents bytes it mounted and never
+// learns the vendor said no. The connector must NOT read Ready.
+func TestReconcile_RevokedGrantIsDegradedNotReady(t *testing.T) {
+	reader := &fakeAuthReader{
+		state: tenantv1.ConnectorAuthState_CONNECTOR_AUTH_STATE_REFRESH_FAILING,
+		last:  "connectorauth: connector \"gitlab\" token refresh refused (401): invalid_grant",
+	}
+	r := newReconcilerWithAuth(t, reader, remoteInstance("gitlab", "tenant-primary"))
+	key := types.NamespacedName{Namespace: "tenant-primary", Name: "gitlab"}
+
+	got := reconcileToServing(t, r, key, kindMCPRemoteProxy, "Ready")
+
+	if got.Status.Phase != connectorv1alpha1.ConnectorInstancePhaseRefreshFailing {
+		t.Errorf("phase = %q, want RefreshFailing", got.Status.Phase)
+	}
+	degraded := conditionOf(&got, condDegraded)
+	if degraded == nil || degraded.Status != metav1.ConditionTrue {
+		t.Fatalf("Degraded condition = %+v, want True", degraded)
+	}
+	if degraded.Reason != "RefreshFailing" {
+		t.Errorf("Degraded reason = %q, want RefreshFailing", degraded.Reason)
+	}
+	if !strings.Contains(degraded.Message, "invalid_grant") {
+		t.Errorf("Degraded message = %q, want the vendor error code", degraded.Message)
+	}
+	if ready := conditionOf(&got, condReady); ready == nil || ready.Status != metav1.ConditionFalse {
+		t.Errorf("Ready condition = %+v, want False", ready)
+	}
+	if len(reader.calls) == 0 || reader.calls[len(reader.calls)-1] != "primary/gitlab" {
+		t.Errorf("auth status calls = %v, want the tenant recovered from the namespace", reader.calls)
+	}
+}
+
+// TestReconcile_UnauthorizedGrantAsksForReauthorization: recovery is a human
+// re-authorizing, so the connector says so rather than reporting a transient
+// failure the operator could wait out.
+func TestReconcile_UnauthorizedGrantAsksForReauthorization(t *testing.T) {
+	reader := &fakeAuthReader{state: tenantv1.ConnectorAuthState_CONNECTOR_AUTH_STATE_UNAUTHORIZED}
+	r := newReconcilerWithAuth(t, reader, remoteInstance("gitlab", "tenant-primary"))
+	key := types.NamespacedName{Namespace: "tenant-primary", Name: "gitlab"}
+
+	got := reconcileToServing(t, r, key, kindMCPRemoteProxy, "Ready")
+
+	if got.Status.Phase != connectorv1alpha1.ConnectorInstancePhaseAuthorizationRequired {
+		t.Errorf("phase = %q, want AuthorizationRequired", got.Status.Phase)
+	}
+	degraded := conditionOf(&got, condDegraded)
+	if degraded == nil || degraded.Status != metav1.ConditionTrue || degraded.Reason != "Unauthorized" {
+		t.Fatalf("Degraded condition = %+v, want True/Unauthorized", degraded)
+	}
+}
+
+// TestReconcile_StoreUnreachableIsDegraded: the tenant's secret store is down,
+// so the daemon cannot answer. An unanswered question is not proof of health.
+func TestReconcile_StoreUnreachableIsDegraded(t *testing.T) {
+	reader := &fakeAuthReader{err: errors.New("connector auth status primary/gitlab: rpc error: code = Unavailable")}
+	r := newReconcilerWithAuth(t, reader, remoteInstance("gitlab", "tenant-primary"))
+	key := types.NamespacedName{Namespace: "tenant-primary", Name: "gitlab"}
+
+	got := reconcileToServing(t, r, key, kindMCPRemoteProxy, "Ready")
+
+	if got.Status.Phase != connectorv1alpha1.ConnectorInstancePhaseFailed {
+		t.Errorf("phase = %q, want Failed", got.Status.Phase)
+	}
+	degraded := conditionOf(&got, condDegraded)
+	if degraded == nil || degraded.Status != metav1.ConditionTrue || degraded.Reason != "AuthStatusUnavailable" {
+		t.Fatalf("Degraded condition = %+v, want True/AuthStatusUnavailable", degraded)
+	}
+}
+
+// TestReconcile_NoAuthReaderIsDegraded: an operator with no daemon client
+// cannot check anything, so it must not report health it cannot prove.
+func TestReconcile_NoAuthReaderIsDegraded(t *testing.T) {
+	r := newReconcilerWithAuth(t, nil, remoteInstance("gitlab", "tenant-primary"))
+	key := types.NamespacedName{Namespace: "tenant-primary", Name: "gitlab"}
+
+	got := reconcileToServing(t, r, key, kindMCPRemoteProxy, "Ready")
+
+	if degraded := conditionOf(&got, condDegraded); degraded == nil ||
+		degraded.Status != metav1.ConditionTrue || degraded.Reason != "AuthReaderUnwired" {
+		t.Fatalf("Degraded condition = %+v, want True/AuthReaderUnwired", degraded)
+	}
+}
+
+// TestReconcile_HealthyCredentialClearsDegraded proves the condition is a live
+// signal in both directions, and that a Ready connector keeps asking: nothing
+// in Kubernetes changes when a vendor revokes a grant.
+func TestReconcile_HealthyCredentialClearsDegraded(t *testing.T) {
+	reader := &fakeAuthReader{}
+	r := newReconcilerWithAuth(t, reader, remoteInstance("gitlab", "tenant-primary"))
+	key := types.NamespacedName{Namespace: "tenant-primary", Name: "gitlab"}
+
+	got := reconcileToServing(t, r, key, kindMCPRemoteProxy, "Ready")
+
+	if got.Status.Phase != connectorv1alpha1.ConnectorInstancePhaseReady {
+		t.Errorf("phase = %q, want Ready", got.Status.Phase)
+	}
+	if degraded := conditionOf(&got, condDegraded); degraded == nil || degraded.Status != metav1.ConditionFalse {
+		t.Fatalf("Degraded condition = %+v, want False", degraded)
+	}
+	res, err := r.Reconcile(context.Background(), ctrl.Request{NamespacedName: key})
+	if err != nil {
+		t.Fatalf("third reconcile: %v", err)
+	}
+	if res.RequeueAfter != credentialRecheck {
+		t.Errorf("RequeueAfter = %v, want %v so a revoked grant is found", res.RequeueAfter, credentialRecheck)
+	}
+}
+
+// TestReconcile_AuthNoneNeverAsks: a connector with no vendor credential has no
+// grant to judge, so the controller does not call the daemon at all.
+func TestReconcile_AuthNoneNeverAsks(t *testing.T) {
+	reader := &fakeAuthReader{}
+	r := newReconcilerWithAuth(t, reader, hostedInstance("osv", "tenant-acme"))
+	key := types.NamespacedName{Namespace: "tenant-acme", Name: "osv"}
+
+	got := reconcileToServing(t, r, key, kindMCPServer, "Running")
+
+	if got.Status.Phase != connectorv1alpha1.ConnectorInstancePhaseReady {
+		t.Errorf("phase = %q, want Ready", got.Status.Phase)
+	}
+	if len(reader.calls) != 0 {
+		t.Errorf("auth status calls = %v, want none for an auth-none connector", reader.calls)
 	}
 }

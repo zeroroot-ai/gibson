@@ -59,18 +59,18 @@ func TestWireReconciler(t *testing.T) {
 	}
 }
 
-// TestBuildRevoker_FailsLoud covers both boot failures: no address, and an
+// TestBuildDaemonClient_FailsLoud covers both boot failures: no address, and an
 // address with no SPIRE Workload API socket to open the X509Source on.
-func TestBuildRevoker_FailsLoud(t *testing.T) {
+func TestBuildDaemonClient_FailsLoud(t *testing.T) {
 	t.Setenv("SPIFFE_ENDPOINT_SOCKET", "unix:///nonexistent/spire/api.sock")
 	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
 	defer cancel()
 	env := func(m map[string]string) func(string) string { return func(k string) string { return m[k] } }
 
-	if _, err := buildRevoker(ctx, env(map[string]string{})); err == nil {
+	if _, err := buildDaemonClient(ctx, env(map[string]string{})); err == nil {
 		t.Error("a missing address must fail the boot")
 	}
-	if _, err := buildRevoker(ctx, env(map[string]string{"GIBSON_DAEMON_GRPC_ADDRESS": "gibson-workloads:50051"})); err == nil {
+	if _, err := buildDaemonClient(ctx, env(map[string]string{"GIBSON_DAEMON_GRPC_ADDRESS": "gibson-workloads:50051"})); err == nil {
 		t.Error("an unreachable SPIRE Workload API must fail the boot")
 	}
 }

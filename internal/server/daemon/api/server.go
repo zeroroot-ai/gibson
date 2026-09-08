@@ -99,6 +99,11 @@ type DaemonServer struct {
 	// Unavailable.
 	connectorGrantRevoker ConnectorGrantRevoker
 
+	// connectorAuthStatusReader backs the operator-scoped
+	// GetConnectorAuthStatus (ADR-0015 decision 4). Wired via
+	// WithConnectorAuthStatusReader; nil answers Unavailable.
+	connectorAuthStatusReader ConnectorAuthStatusReader
+
 	// cgMinter / cgVerifier back the RenewCapabilityGrant RPC.
 	// liveMissions gates CG renewal on the mission run still executing
 	// (gibson#1602). Wired via WithLiveMissionLookup; nil refuses renewal

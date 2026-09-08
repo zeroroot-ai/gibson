@@ -19,9 +19,7 @@ package admin
 
 import (
 	"context"
-	"encoding/json"
 	"errors"
-	"fmt"
 	"io"
 	"net/http"
 	"net/url"
@@ -160,7 +158,7 @@ func (s *ConnectorAuthAdminServer) buildStatus(ctx context.Context, tenant auth.
 	}
 
 	if meta, err := s.secrets.Resolve(ctx, connectorauth.AccessMetaSecretName(connector)); err == nil {
-		if tok, err := unmarshalAccessMeta(meta); err == nil && !tok.ExpiresAt.IsZero() {
+		if tok, err := connectorauth.UnmarshalAccessToken(meta); err == nil && !tok.ExpiresAt.IsZero() {
 			resp.AccessTokenExpiresAt = timestamppb.New(tok.ExpiresAt)
 		}
 	}
@@ -373,6 +371,16 @@ func (s *ConnectorAuthAdminServer) RevokeConnectorGrant(ctx context.Context, req
 	return &tenantv1.RevokeConnectorGrantResponse{HadGrant: hadGrant, VendorRevoked: vendorRevoked}, nil
 }
 
+// AuthStatus is the status view itself, shared by the tenant-scoped RPC above
+// and the operator-scoped DaemonOperatorService.GetConnectorAuthStatus the
+// ConnectorInstance controller calls on every reconcile pass (ADR-0015
+// decision 4). The tenant is explicit because the operator path carries no
+// tenant in its context; the store is scoped to it here. It never returns
+// credential material.
+func (s *ConnectorAuthAdminServer) AuthStatus(ctx context.Context, tenant auth.TenantID, connector string) *tenantv1.GetConnectorAuthStatusResponse {
+	return s.buildStatus(auth.WithTenant(ctx, tenant), tenant, connector)
+}
+
 // Revoke is the revocation itself, shared by the tenant-scoped RPC above and
 // the operator-scoped DaemonOperatorService.RevokeConnectorGrant the
 // ConnectorInstance finalizer calls on delete (ADR-0015 §5). The tenant is
@@ -499,15 +507,4 @@ func (s *ConnectorAuthAdminServer) revokeAtVendor(ctx context.Context, grant *co
 	defer func() { _ = resp.Body.Close() }()
 	_, _ = io.Copy(io.Discard, io.LimitReader(resp.Body, 1<<16))
 	return resp.StatusCode >= 200 && resp.StatusCode < 300
-}
-
-// unmarshalAccessMeta parses the platform-only access metadata blob.
-func unmarshalAccessMeta(b []byte) (*connectorauth.AccessToken, error) {
-	var tok connectorauth.AccessToken
-	if err := json.Unmarshal(b, &tok); err != nil {
-		// Named without content: the blob is platform bookkeeping, but the
-		// habit of never echoing broker bytes into errors stays uniform.
-		return nil, fmt.Errorf("connector access metadata is not valid JSON: %w", err)
-	}
-	return &tok, nil
 }

@@ -28,6 +28,7 @@ import (
 	"sigs.k8s.io/controller-runtime/pkg/controller/controllerutil"
 	"sigs.k8s.io/controller-runtime/pkg/log"
 
+	tenantv1 "github.com/zeroroot-ai/gibson/internal/server/daemon/api/gibson/tenant/v1"
 	connectorv1alpha1 "github.com/zeroroot-ai/gibson/operators/connector/api/v1alpha1"
 )
 
@@ -64,6 +65,21 @@ const (
 
 	condProvisioned = "Provisioned"
 	condReady       = "Ready"
+
+	// condDegraded reports that the connector's vendor credential is not
+	// usable: no grant, a refresh the daemon cannot complete, or a daemon that
+	// cannot answer. ADR-0015 decision 4 requires this to be visible on the
+	// CR, because a ToolHive proxy keeps serving a dead credential and would
+	// otherwise leave the connector reading Ready. Recovery is
+	// re-authorization; the operator never heals a grant by itself.
+	condDegraded = "Degraded"
+
+	// credentialRecheck is how long the controller waits before asking the
+	// daemon about a connector's credential again. Nothing in Kubernetes
+	// changes when a vendor revokes a grant, so the CR only learns of it by
+	// asking. It is shorter than the daemon's five-minute refresh pass, so a
+	// credential that dies is reported within one pass plus one recheck.
+	credentialRecheck = 2 * time.Minute
 )
 
 // GrantRevoker revokes a tenant's connector grant through the daemon. The
@@ -73,12 +89,24 @@ type GrantRevoker interface {
 	Revoke(ctx context.Context, tenantID, connector string) error
 }
 
+// ConnectorAuthReader reports one tenant connector's credential state. The
+// production implementation is daemonclient.Client over SPIFFE mTLS
+// (ADR-0002) — the same client the finalizer revokes through. Only the daemon
+// holds a secret-store client, so only the daemon can answer.
+type ConnectorAuthReader interface {
+	AuthStatus(ctx context.Context, tenantID, connector string) (*tenantv1.GetConnectorAuthStatusResponse, error)
+}
+
 // ConnectorInstanceReconciler reconciles a ConnectorInstance.
 type ConnectorInstanceReconciler struct {
 	client.Client
 	Scheme *runtime.Scheme
 	// Revoker runs the finalizer's grant revoke on delete (ADR-0015 §5).
 	Revoker GrantRevoker
+	// AuthReader reads the connector's credential state so the CR reports
+	// Degraded rather than a silent Active (ADR-0015 decision 4). Required
+	// for a connector that presents a vendor credential.
+	AuthReader ConnectorAuthReader
 	// Now is the clock the revoke deadline is measured on. Nil means time.Now.
 	Now func() time.Time
 }
@@ -163,11 +191,38 @@ func (r *ConnectorInstanceReconciler) Reconcile(ctx context.Context, req ctrl.Re
 	setCondition(&ci, condProvisioned, metav1.ConditionTrue, "Applied",
 		fmt.Sprintf("ToolHive %s %s applied", th.GetKind(), th.GetName()))
 
+	// A serving proxy is not a working connector. The credential behind it can
+	// be revoked, expired or held in a store the daemon cannot reach, and
+	// ToolHive keeps serving either way — it presents the bytes it mounted and
+	// learns nothing from the vendor's 401. Only the daemon knows, so ask it,
+	// and let a dead credential outrank the ToolHive phase. Reporting Ready
+	// over a credential nobody can renew is the silent Active ADR-0015
+	// decision 4 refuses.
+	verdict := r.checkCredential(ctx, &ci)
+	if verdict.degraded {
+		ci.Status.Phase = verdict.phase
+		ci.Status.LastError = fmt.Sprintf("%s: %s", verdict.reason, verdict.message)
+		setCondition(&ci, condDegraded, metav1.ConditionTrue, verdict.reason, verdict.message)
+		setCondition(&ci, condReady, metav1.ConditionFalse, verdict.reason, verdict.message)
+		if err := r.Status().Update(ctx, &ci); err != nil {
+			return ctrl.Result{}, fmt.Errorf("status update: %w", err)
+		}
+		logger.Info("connector credential is not usable", "reason", verdict.reason, "phase", verdict.phase)
+		return ctrl.Result{RequeueAfter: credentialRecheck}, nil
+	}
+	setCondition(&ci, condDegraded, metav1.ConditionFalse, verdict.reason, verdict.message)
+
 	if phase == toolHiveServingPhase(th.GetKind()) {
 		ci.Status.Phase = connectorv1alpha1.ConnectorInstancePhaseReady
 		setCondition(&ci, condReady, metav1.ConditionTrue, "Serving", "the MCP server is serving")
 		if err := r.Status().Update(ctx, &ci); err != nil {
 			return ctrl.Result{}, fmt.Errorf("status update: %w", err)
+		}
+		// Ask again on a clock: a grant revoked at the vendor changes nothing
+		// in Kubernetes, so a Ready connector that goes dead is only found by
+		// looking.
+		if ci.Spec.Auth != connectorv1alpha1.ConnectorAuthNone {
+			return ctrl.Result{RequeueAfter: credentialRecheck}, nil
 		}
 		return ctrl.Result{}, nil
 	}
@@ -181,6 +236,87 @@ func (r *ConnectorInstanceReconciler) Reconcile(ctx context.Context, req ctrl.Re
 	}
 	logger.Info("waiting for ToolHive to run", "phase", phase)
 	return ctrl.Result{Requeue: true}, nil
+}
+
+// credentialVerdict is what the daemon says about a connector's vendor
+// credential, in the terms the CR status records. reason and message are set
+// in every case, so the healthy branch has a condition reason too.
+type credentialVerdict struct {
+	degraded bool
+	phase    connectorv1alpha1.ConnectorInstancePhase
+	reason   string
+	message  string
+}
+
+// checkCredential asks the daemon whether the connector's credential is
+// usable (ADR-0015 decision 4). A connector with no vendor credential
+// (auth none) has no grant to judge and is never degraded.
+//
+// Every failure is degraded, including a daemon that cannot answer: an
+// unanswered question is not proof of health, and the whole point of this
+// check is that a dead credential must never read as Active. Recovery is
+// re-authorization, so the controller reports and stops rather than retrying
+// a grant only a human can replace.
+func (r *ConnectorInstanceReconciler) checkCredential(
+	ctx context.Context, ci *connectorv1alpha1.ConnectorInstance,
+) credentialVerdict {
+	if ci.Spec.Auth == connectorv1alpha1.ConnectorAuthNone {
+		return credentialVerdict{reason: "NoCredential", message: "the connector presents no vendor credential"}
+	}
+	if r.AuthReader == nil {
+		return credentialVerdict{
+			degraded: true,
+			phase:    connectorv1alpha1.ConnectorInstancePhaseFailed,
+			reason:   "AuthReaderUnwired",
+			message:  "no daemon client is wired, so the connector credential cannot be checked",
+		}
+	}
+	if !strings.HasPrefix(ci.Namespace, tenantNamespacePrefix) {
+		return credentialVerdict{
+			degraded: true,
+			phase:    connectorv1alpha1.ConnectorInstancePhaseFailed,
+			reason:   "TenantUnknown",
+			message:  fmt.Sprintf("namespace %q is not a tenant namespace", ci.Namespace),
+		}
+	}
+	connector := ci.Spec.Connector
+	if connector == "" {
+		connector = ci.Name
+	}
+	st, err := r.AuthReader.AuthStatus(ctx, strings.TrimPrefix(ci.Namespace, tenantNamespacePrefix), connector)
+	if err != nil {
+		return credentialVerdict{
+			degraded: true,
+			phase:    connectorv1alpha1.ConnectorInstancePhaseFailed,
+			reason:   "AuthStatusUnavailable",
+			message:  err.Error(),
+		}
+	}
+	switch st.GetState() {
+	case tenantv1.ConnectorAuthState_CONNECTOR_AUTH_STATE_AUTHORIZED:
+		return credentialVerdict{reason: "Authorized", message: "the connector credential is live"}
+	case tenantv1.ConnectorAuthState_CONNECTOR_AUTH_STATE_REFRESH_FAILING:
+		// The message is the vendor's own error code, which is the only thing
+		// that tells a revoked grant from a misconfigured client. The daemon
+		// never puts credential material in it.
+		msg := st.GetLastRefreshError()
+		if msg == "" {
+			msg = "the last credential refresh failed"
+		}
+		return credentialVerdict{
+			degraded: true,
+			phase:    connectorv1alpha1.ConnectorInstancePhaseRefreshFailing,
+			reason:   "RefreshFailing",
+			message:  msg,
+		}
+	default:
+		return credentialVerdict{
+			degraded: true,
+			phase:    connectorv1alpha1.ConnectorInstancePhaseAuthorizationRequired,
+			reason:   "Unauthorized",
+			message:  "no usable grant is stored; authorize the connector again",
+		}
+	}
 }
 
 // finalize revokes the connector's grant through the daemon and releases the
