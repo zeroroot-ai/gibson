@@ -58,8 +58,11 @@ type BeliefEvidence struct {
 // evidenceOf derives the belief evidence from a Host. Only open ports count;
 // ports and services are sorted, so identical Hosts yield identical evidence.
 func evidenceOf(h Host) BeliefEvidence {
-	var ports []int
-	var svcs []string
+	// Both slices are preallocated, so a host with no open ports sends `[]`
+	// rather than `null`. The sidecar reads them with
+	// `evidence.get("open_ports", [])`, which a JSON null defeats.
+	ports := make([]int, 0, len(h.Ports))
+	svcs := make([]string, 0, len(h.Ports))
 	for _, port := range h.Ports {
 		if !port.Open {
 			continue
@@ -83,12 +86,9 @@ func evidenceOf(h Host) BeliefEvidence {
 // it, so it must be stable across processes and across a replay of the same
 // Timeline. BeliefEvidence holds only ordered, JSON-native fields, so it is.
 func evidenceDigest(ev BeliefEvidence) string {
-	b, err := json.Marshal(ev)
-	if err != nil {
-		// Unreachable: BeliefEvidence holds only JSON-native types. An empty
-		// digest never matches a recorded one, so the host is simply re-requested.
-		return ""
-	}
+	// BeliefEvidence holds only ordered, JSON-native fields, so Marshal cannot
+	// fail and its encoding is canonical.
+	b, _ := json.Marshal(ev)
 	sum := sha256.Sum256(b)
 	return hex.EncodeToString(sum[:])
 }
@@ -120,6 +120,7 @@ type BeliefScoreRequested struct {
 	Evidence BeliefEvidence
 }
 
+// Kind is the event's Timeline kind.
 func (BeliefScoreRequested) Kind() string { return "belief.requested" }
 
 func applyBeliefScoreRequested(w *World, e BeliefScoreRequested) {
@@ -138,6 +139,7 @@ type BeliefScored struct {
 	EvidenceDigest string
 }
 
+// Kind is the event's Timeline kind.
 func (BeliefScored) Kind() string { return "belief.scored" }
 
 func applyBeliefScored(w *World, e BeliefScored) {

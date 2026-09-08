@@ -60,7 +60,7 @@ func beliefEngine(p BeliefProvider) (*Engine, *BeliefWorker) {
 // settle runs rounds of tick → drain → tick. The first tick asks for the scores,
 // the drain runs the inference off the tick, the second tick folds the results.
 func settle(e *Engine, bw *BeliefWorker, rounds int) {
-	for i := 0; i < rounds; i++ {
+	for range rounds {
 		e.Tick()
 		bw.Drain()
 		e.Tick()
@@ -250,7 +250,7 @@ func TestBeliefWorker_SlowProviderDoesNotStallTick(t *testing.T) {
 	waitFor(t, func() bool { return p.count() == 1 }) // the model is now sleeping
 
 	start := time.Now()
-	for i := 0; i < ticks; i++ {
+	for range ticks {
 		e.Tick()
 	}
 	elapsed := time.Since(start)
@@ -313,5 +313,70 @@ func TestBelief_ScoredQuiescentReplay(t *testing.T) {
 	// Replay reproduces belief (BeliefScored was logged).
 	if r := Replay("t", e.Timeline); !reflect.DeepEqual(r.Snapshot(), e.World.Snapshot()) {
 		t.Fatalf("replay diverged:\n got %+v\nwant %+v", r.Snapshot(), e.World.Snapshot())
+	}
+}
+
+// TestBeliefEvents_CodecRoundTrip proves both belief events survive the durable
+// log: the Timeline persists them by kind, and a decoded event folds into the
+// World exactly as the original did.
+func TestBeliefEvents_CodecRoundTrip(t *testing.T) {
+	ev := BeliefEvidence{OpenPorts: []int{22, 443}, Services: []string{"22/ssh"}, Reachable: true}
+
+	tests := []struct {
+		name     string
+		event    Event
+		wantKind string
+	}{
+		{
+			name:     "a score request round-trips with its evidence",
+			event:    BeliefScoreRequested{HostID: 7, Evidence: ev},
+			wantKind: "belief.requested",
+		},
+		{
+			name:     "a score round-trips with its evidence digest",
+			event:    BeliefScored{HostID: 7, Belief: Belief{Juicy: 0.5, Model: "m"}, EvidenceDigest: evidenceDigest(ev)},
+			wantKind: "belief.scored",
+		},
+	}
+
+	for _, tc := range tests {
+		t.Run(tc.name, func(t *testing.T) {
+			if got := tc.event.Kind(); got != tc.wantKind {
+				t.Fatalf("kind = %q, want %q", got, tc.wantKind)
+			}
+			b, err := EncodeEvent(tc.event)
+			if err != nil {
+				t.Fatalf("encode: %v", err)
+			}
+			got, err := DecodeEvent(b)
+			if err != nil {
+				t.Fatalf("decode: %v", err)
+			}
+			if !reflect.DeepEqual(got, tc.event) {
+				t.Fatalf("round trip:\n got %+v\nwant %+v", got, tc.event)
+			}
+		})
+	}
+}
+
+// TestBeliefEvents_UnknownHostIsIgnored proves both reducers ignore an event for
+// a host the World does not hold, rather than creating one or panicking.
+func TestBeliefEvents_UnknownHostIsIgnored(t *testing.T) {
+	tests := []struct {
+		name  string
+		event Event
+	}{
+		{name: "a score request for an unknown host", event: BeliefScoreRequested{HostID: 404}},
+		{name: "a score for an unknown host", event: BeliefScored{HostID: 404, Belief: Belief{Juicy: 1}}},
+	}
+
+	for _, tc := range tests {
+		t.Run(tc.name, func(t *testing.T) {
+			w := NewWorld("t")
+			Reduce(w, tc.event)
+			if got := w.Snapshot(); len(got) != 0 {
+				t.Fatalf("an event for an unknown host changed the World: %+v", got)
+			}
+		})
 	}
 }
