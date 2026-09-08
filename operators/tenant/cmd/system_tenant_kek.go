@@ -43,8 +43,16 @@ func loadSystemTenantKEK(log logr.Logger) []byte {
 			return nil
 		}
 		// Files written via Kubernetes Secret volumes don't carry trailing
-		// newlines, but ConfigMaps occasionally do — trim defensively.
-		data = trimTrailingNewline(data)
+		// newlines, but ConfigMaps occasionally do — trim defensively, but
+		// ONLY when the payload is not already a whole key. A raw 32-byte
+		// key ends in 0x0A one time in 256, and trimming it produced a
+		// 31-byte "key" that this function then refused, so every tenant on
+		// that install sat in Provisioning forever ("system-tenant KEK not
+		// yet available", got_bytes 31). Measured 2026-09-08 on a kind
+		// bringup whose gibson-master-key happened to end in a newline.
+		if len(data) != 32 && len(data) != 44 {
+			data = trimTrailingNewline(data)
+		}
 		switch len(data) {
 		case 32:
 			return data

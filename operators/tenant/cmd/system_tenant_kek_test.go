@@ -52,6 +52,46 @@ func TestLoadSystemTenantKEK_FileMount_RawBytesWithNewline(t *testing.T) {
 
 // File contains 44 base64-encoded chars (32 raw bytes + 1 '=' pad).
 // Should decode and return the underlying 32 bytes.
+// A raw 32-byte key ends in 0x0A one time in 256. Before the fix the
+// defensive newline trim turned it into a 31-byte file that the loader then
+// refused, and every tenant on that install sat in Provisioning forever
+// (measured 2026-09-08 on a kind bringup). A whole key is never trimmed.
+func TestLoadSystemTenantKEK_FileMount_RawBytesEndingInNewlineByte(t *testing.T) {
+	for _, last := range []byte{'\n', '\r'} {
+		dir := t.TempDir()
+		path := filepath.Join(dir, "master-key")
+		want := append(bytes.Repeat([]byte{0xCD}, 31), last)
+		if err := os.WriteFile(path, want, 0o600); err != nil {
+			t.Fatal(err)
+		}
+		t.Setenv("GIBSON_SYSTEM_TENANT_KEK_PATH", path)
+		t.Setenv("GIBSON_SYSTEM_TENANT_KEK", "")
+
+		got := loadSystemTenantKEK(testr.New(t))
+		if !bytes.Equal(got, want) {
+			t.Errorf("a 32-byte key whose last byte is %#x was altered: got %d bytes % x, want % x", last, len(got), got, want)
+		}
+	}
+}
+
+// 44 base64 characters whose last character is followed by a newline is the
+// ConfigMap shape the trim exists for; it must still decode.
+func TestLoadSystemTenantKEK_FileMount_Base64WithNewline(t *testing.T) {
+	dir := t.TempDir()
+	path := filepath.Join(dir, "master-key")
+	want := bytes.Repeat([]byte{0xAB}, 32)
+	if err := os.WriteFile(path, []byte(base64.StdEncoding.EncodeToString(want)+"\n"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	t.Setenv("GIBSON_SYSTEM_TENANT_KEK_PATH", path)
+	t.Setenv("GIBSON_SYSTEM_TENANT_KEK", "")
+
+	got := loadSystemTenantKEK(testr.New(t))
+	if !bytes.Equal(got, want) {
+		t.Errorf("base64 key with a trailing newline: got % x want % x", got, want)
+	}
+}
+
 func TestLoadSystemTenantKEK_FileMount_Base64(t *testing.T) {
 	dir := t.TempDir()
 	path := filepath.Join(dir, "master-key")
