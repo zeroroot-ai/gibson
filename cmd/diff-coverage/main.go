@@ -19,8 +19,15 @@
 //   - a Go coverage profile (go test -coverprofile=...; -covermode=atomic)
 //   - the git diff between the merge-base of -base and HEAD
 //
-// A changed line "counts" only if the profile places it inside a statement
-// block. Blank lines, comments, imports, and bare declarations are ignored.
+// A changed line "counts" only if it carries Go code AND the profile places it
+// inside a statement block. Both halves are needed. A Go coverage block spans
+// from its first statement to the closing brace, so a comment or a blank line
+// in the middle of a function sits inside a block: the profile alone cannot
+// tell code from prose. The scanner in codeLines answers that half, so a
+// comment-only edit inside an uncovered function no longer demands a test
+// (gibson: a docs PR that rewrote one comment in an unexercised branch failed
+// this gate at 1/2 while adding no code at all).
+//
 // Generated and test files are excluded from the diff. If the change adds no
 // measurable statements, the gate passes (nothing to cover).
 package main
@@ -30,6 +37,8 @@ import (
 	"bytes"
 	"flag"
 	"fmt"
+	"go/scanner"
+	"go/token"
 	"io"
 	"os"
 	"os/exec"
@@ -104,7 +113,15 @@ func evaluate(profile, diff []byte, module string, threshold float64) *Report {
 			// it, or it has no statements). Cannot attribute coverage; skip.
 			continue
 		}
+		code := codeLines(file)
 		for _, line := range added[file] {
+			// A line the scanner did not see a token on is a comment or a
+			// blank. It cannot be executed, so it cannot be covered.
+			// A nil set means the source was unreadable, and an unreadable
+			// source is not a licence to skip the file.
+			if code != nil && !code[line] {
+				continue
+			}
 			covered, isStmt := classify(fileBlocks, line)
 			if !isStmt {
 				continue
@@ -194,6 +211,51 @@ func parseProfile(profile []byte, module string) map[string][]block {
 // classify reports, for a line, whether it sits inside any statement block and
 // whether that block was covered. A line may fall in multiple blocks (rare,
 // nested); covered wins so we never over-penalize.
+// readSource reads a working-tree file. Indirected so the tests can supply
+// synthetic sources for paths that do not exist on disk.
+var readSource = os.ReadFile
+
+// codeLines returns the set of 1-based line numbers of a Go file that carry a
+// token other than a comment. Blank lines and comment-only lines are absent
+// from it, including the interior lines of a block comment.
+//
+// It returns nil when the file cannot be read or holds no tokens at all. The
+// caller treats nil as "cannot tell" and keeps every added line, so a missing
+// working tree makes the gate stricter, never weaker.
+func codeLines(path string) map[int]bool {
+	src, err := readSource(path)
+	if err != nil {
+		return nil
+	}
+	fset := token.NewFileSet()
+	f := fset.AddFile(path, fset.Base(), len(src))
+	var s scanner.Scanner
+	// A nil error handler collects nothing and does not stop the scan, so a
+	// file that does not parse still yields the tokens it does have.
+	s.Init(f, src, nil, scanner.ScanComments)
+	out := map[int]bool{}
+	for {
+		pos, tok, lit := s.Scan()
+		if tok == token.EOF {
+			break
+		}
+		if tok == token.COMMENT {
+			continue
+		}
+		// The scanner inserts a SEMICOLON carrying a newline literal at the
+		// end of a line that needs one. That token is synthetic, so it must
+		// not mark an otherwise empty line as code.
+		if tok == token.SEMICOLON && lit == "\n" {
+			continue
+		}
+		out[f.Position(pos).Line] = true
+	}
+	if len(out) == 0 {
+		return nil
+	}
+	return out
+}
+
 func classify(blocks []block, line int) (covered, isStmt bool) {
 	for _, b := range blocks {
 		if line >= b.start && line <= b.end {
