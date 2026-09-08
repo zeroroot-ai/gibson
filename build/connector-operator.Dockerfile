@@ -8,7 +8,14 @@ ARG GOTOOLCHAIN=local
 ENV GOTOOLCHAIN=${GOTOOLCHAIN}
 WORKDIR /src
 COPY . .
-RUN CGO_ENABLED=0 GOOS=linux go build -trimpath -o /out/connector-operator ./operators/connector/cmd
+# Go cache mounts. The builder image keeps its build cache at
+# /root/.cache/go-build and its module cache at /go/pkg/mod. Without a cache
+# mount this RUN starts from an empty cache, so any change to the build context
+# recompiles and re-downloads the whole dependency graph. A Go step added below
+# needs the same two mounts.
+RUN --mount=type=cache,target=/root/.cache/go-build \
+    --mount=type=cache,target=/go/pkg/mod \
+    CGO_ENABLED=0 GOOS=linux go build -trimpath -o /out/connector-operator ./operators/connector/cmd
 
 FROM ghcr.io/zeroroot-ai/mirror/distroless-static:nonroot@sha256:1c2c046bc09ed40fad370b599a0b1ae7987f55b01e247cf27a7c27cd97e5bbc7
 WORKDIR /

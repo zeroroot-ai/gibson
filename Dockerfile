@@ -49,7 +49,16 @@ COPY go.mod go.sum ./
 ARG GOTOOLCHAIN=local
 ENV GOTOOLCHAIN=${GOTOOLCHAIN}
 
-RUN go mod download
+# Go cache mounts. The builder image keeps its build cache at
+# /root/.cache/go-build and its module cache at /go/pkg/mod. Without a cache
+# mount every RUN starts from an empty cache, so each build step recompiles the
+# whole dependency graph and `go mod download` re-fetches every module on any
+# change to the build context. Both caches are BuildKit cache mounts, so they
+# survive across builds and are shared by every step below — a step that builds
+# Go and omits them pays the full cold cost again.
+RUN --mount=type=cache,target=/root/.cache/go-build \
+    --mount=type=cache,target=/go/pkg/mod \
+    go mod download
 
 # Copy source code
 COPY . .
@@ -57,7 +66,9 @@ COPY . .
 # Build static binary with CGO disabled
 ENV CGO_ENABLED=0
 
-RUN LDFLAGS="-s -w \
+RUN --mount=type=cache,target=/root/.cache/go-build \
+    --mount=type=cache,target=/go/pkg/mod \
+    LDFLAGS="-s -w \
       -X github.com/zeroroot-ai/gibson/pkg/version.GitCommit=${COMMIT} \
       -X github.com/zeroroot-ai/gibson/pkg/version.BuildTime=${BUILD_TIME}"; \
     if [ -n "$BUILD_TAGS" ]; then \
@@ -66,50 +77,52 @@ RUN LDFLAGS="-s -w \
         go build -ldflags="$LDFLAGS" -o /out/gibson ./cmd/gibson; \
     fi
 
-# Build the auxiliary one-shot tools shipped alongside the daemon.
-# Spec auth-resolution-hardening (R4): lowercase-tenant-owner runs as a
-# Helm post-install/post-upgrade Hook Job to lowercase any pre-existing
-# Tenant.spec.owner values. Idempotent.
-RUN go build -ldflags="-s -w" -o /out/lowercase-tenant-owner ./cmd/lowercase-tenant-owner
-
-# Spec tenant-role-taxonomy (Req 5.1–5.4): tenant-owner-backfill seeds the
-# FGA owner tuple for the founding user of each existing tenant. Runs as a
-# regular Kubernetes Job (no Helm hook) on helm upgrade to v0.27.0+. Idempotent.
-RUN go build -ldflags="-s -w" -o /out/tenant-owner-backfill ./cmd/tenant-owner-backfill
-
-# Spec instant-session-revocation (gibson#627 Slice 2 / gibson#1302): the
-# chart's pre-upgrade active-session-backfill Job seeds the FGA active_session
-# conditional tuple for every existing human tenant member. Without it, every
-# user already signed in is locked out at the active_session cutover, because
-# ext-authz starts requiring a tuple nobody has. Env-driven
-# (EXT_AUTHZ_FGA_ADDR / _STORE_ID / _MODEL_ID), idempotent, exits zero. Same
-# image as the daemon; the binary is invoked via explicit Job command override.
-RUN go build -ldflags="-s -w" -o /out/active-session-backfill ./cmd/active-session-backfill
-
-# Spec gibson-postgres-migrations (Req 4): the chart's pre-upgrade
-# platform-db-migrate Job runs `gibson-migrate platform up` from this
-# image to apply embedded dashboard-DB migrations before the daemon
-# StatefulSet rolls. Same image as the daemon — the binary is invoked
-# via explicit Job command override.
-RUN go build -ldflags="-s -w" -o /out/gibson-migrate ./cmd/gibson-migrate
-
-# Spec setec-sandbox-prod-default §C7 / ADR-0023 / gibson#211: the chart's
-# sandbox-host DaemonSet runs `sandbox-eviction-handler` as a sidecar/peer
-# pod on each sandbox-host node. The binary watches the
-# aws-node-termination-handler notice file (/var/run/aws/spot-interruption-notice)
-# and cordons its own Kubernetes node on appearance. Daemon never imports
-# this binary's code — they share only the image. Same image as the daemon;
-# the binary is invoked via explicit DaemonSet command override.
-RUN go build -ldflags="-s -w" -o /out/sandbox-eviction-handler ./cmd/sandbox-eviction-handler
-
-# Spec first-admin-bootstrap (gibson#1103): a one-time, operator-credentialed
-# one-shot that creates the owner's Zitadel human user, grants tenant Zitadel
-# org membership, and seeds the FGA owner tuple for a closed-registration
-# self-hosted install's first tenant. Invoked ad hoc by the operator (no Helm
-# hook, no session) after AdminProvisionTenant has been drained. Same image as
-# the daemon; the binary is invoked via explicit command override
-# (`kubectl exec` / a one-off Job), never wired into the standard rollout.
-RUN go build -ldflags="-s -w" -o /out/bootstrap-tenant-owner ./cmd/bootstrap-tenant-owner
+# Build the auxiliary one-shot tools shipped alongside the daemon. They take
+# identical flags, so one `go build` produces all six: the packages they share
+# with each other compile once instead of six times. `-o /out/` names each
+# binary after its command directory, which is the name the runtime stage and
+# every chart Job already use.
+#
+# - lowercase-tenant-owner (spec auth-resolution-hardening R4) runs as a Helm
+#   post-install/post-upgrade Hook Job to lowercase any pre-existing
+#   Tenant.spec.owner values. Idempotent.
+# - tenant-owner-backfill (spec tenant-role-taxonomy, Req 5.1–5.4) seeds the FGA
+#   owner tuple for the founding user of each existing tenant. Runs as a regular
+#   Kubernetes Job (no Helm hook) on helm upgrade to v0.27.0+. Idempotent.
+# - active-session-backfill (spec instant-session-revocation, gibson#627 Slice 2
+#   / gibson#1302) is the chart's pre-upgrade Job that seeds the FGA
+#   active_session conditional tuple for every existing human tenant member.
+#   Without it, every user already signed in is locked out at the active_session
+#   cutover, because ext-authz starts requiring a tuple nobody has. Env-driven
+#   (EXT_AUTHZ_FGA_ADDR / _STORE_ID / _MODEL_ID), idempotent, exits zero.
+# - gibson-migrate (spec gibson-postgres-migrations, Req 4) is run as
+#   `gibson-migrate platform up` by the chart's pre-upgrade platform-db-migrate
+#   Job, applying embedded dashboard-DB migrations before the daemon
+#   StatefulSet rolls.
+# - sandbox-eviction-handler (spec setec-sandbox-prod-default §C7 / ADR-0023 /
+#   gibson#211) runs as a sidecar/peer pod of the sandbox-host DaemonSet on each
+#   sandbox-host node. It watches the aws-node-termination-handler notice file
+#   (/var/run/aws/spot-interruption-notice) and cordons its own Kubernetes node
+#   on appearance. The daemon never imports this binary's code — they share only
+#   the image.
+# - bootstrap-tenant-owner (spec first-admin-bootstrap, gibson#1103) is a
+#   one-time, operator-credentialed one-shot that creates the owner's Zitadel
+#   human user, grants tenant Zitadel org membership, and seeds the FGA owner
+#   tuple for a closed-registration self-hosted install's first tenant. Invoked
+#   ad hoc by the operator (no Helm hook, no session) after
+#   AdminProvisionTenant has been drained, never wired into the rollout.
+#
+# Every one of them is invoked by an explicit command override on its Job,
+# DaemonSet or `kubectl exec`, so they ship in the daemon image unchanged.
+RUN --mount=type=cache,target=/root/.cache/go-build \
+    --mount=type=cache,target=/go/pkg/mod \
+    go build -ldflags="-s -w" -o /out/ \
+        ./cmd/lowercase-tenant-owner \
+        ./cmd/tenant-owner-backfill \
+        ./cmd/active-session-backfill \
+        ./cmd/gibson-migrate \
+        ./cmd/sandbox-eviction-handler \
+        ./cmd/bootstrap-tenant-owner
 
 # ============================================================================
 # Stage 2: Runtime - Minimal Alpine
