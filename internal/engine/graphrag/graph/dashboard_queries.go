@@ -16,9 +16,9 @@
 // once the data plane moved to dedicated per-tenant databases.
 //
 // Cypher bodies are ported from
-// enterprise/platform/dashboard/src/lib/neo4j-client.ts (lines 324–439),
-// enterprise/platform/dashboard/src/lib/graph/summary.ts, and
-// enterprise/platform/dashboard/src/lib/graph/context.ts.
+// zeroroot-ai/dashboard src/lib/neo4j-client.ts (lines 324–439),
+// zeroroot-ai/dashboard src/lib/graph/summary.ts, and
+// zeroroot-ai/dashboard src/lib/graph/context.ts.
 // Those TypeScript files are deleted in Phase 3; this Go file is the canonical
 // source of graph query logic after that point.
 package graph
@@ -593,10 +593,10 @@ func applyDepthCap(depth uint32) uint32 {
 // Analytics query methods (Task 4 — dashboard-neo4j-client-removal)
 //
 // Each method is ported from the corresponding TypeScript in:
-//   enterprise/platform/dashboard/src/lib/gibson-client.ts   (FindingCounts, TimeSeries)
-//   enterprise/platform/dashboard/src/lib/graph/summary.ts   (GraphSummary)
-//   enterprise/platform/dashboard/src/lib/graph/context.ts   (GraphContext)
-//   enterprise/platform/dashboard/app/api/findings/counts/route.ts (severity histogram)
+//   zeroroot-ai/dashboard src/lib/gibson-client.ts   (FindingCounts, TimeSeries)
+//   zeroroot-ai/dashboard src/lib/graph/summary.ts   (GraphSummary)
+//   zeroroot-ai/dashboard src/lib/graph/context.ts   (GraphContext)
+//   zeroroot-ai/dashboard app/api/findings/counts/route.ts (severity histogram)
 // ---------------------------------------------------------------------------
 
 const (
@@ -667,9 +667,9 @@ type GraphContext struct {
 // FindingCounts returns finding counts grouped by severity or category.
 //
 // Ported from:
-//   - enterprise/platform/dashboard/src/lib/gibson-client.ts (getFindingsBySeverity,
+//   - zeroroot-ai/dashboard src/lib/gibson-client.ts (getFindingsBySeverity,
 //     getFindingsByCategory) and
-//   - enterprise/platform/dashboard/app/api/findings/counts/route.ts (SEVERITY path
+//   - zeroroot-ai/dashboard app/api/findings/counts/route.ts (SEVERITY path
 //     includes both :Finding and :Vulnerability nodes).
 //
 // windowSeconds applies an optional recency filter (skip when 0).
@@ -745,7 +745,7 @@ RETURN %s AS label, count(f) AS cnt`, groupExpr)
 // padded so the response always contains exactly `days` points (zero for
 // days with no findings). days=0 → DefaultTimeSeriesDays; clamped to [1, MaxTimeSeriesDays].
 //
-// Ported from enterprise/platform/dashboard/src/lib/gibson-client.ts
+// Ported from zeroroot-ai/dashboard src/lib/gibson-client.ts
 // (getFindingsTimeSeries) — same Cypher, same day-bucketing logic.
 func (q *DashboardQueries) FindingTimeSeries(
 	ctx context.Context,
@@ -837,7 +837,7 @@ func neoDateString(v any) string {
 // GraphStats returns aggregate graph statistics for a tenant:
 // per-label node counts, total nodes, total edges, and the max last_write_at timestamp.
 //
-// Ported from enterprise/platform/dashboard/src/lib/neo4j-client.ts (getGraphStats).
+// Ported from zeroroot-ai/dashboard src/lib/neo4j-client.ts (getGraphStats).
 func (q *DashboardQueries) GraphStats(
 	ctx context.Context,
 	tenantID auth.TenantID,
@@ -957,7 +957,7 @@ RETURN max(n.last_write_at) AS m
 // GraphSummary returns a structured stats block plus an LLM-friendly text summary
 // of the tenant's knowledge graph.
 //
-// Ported verbatim from enterprise/platform/dashboard/src/lib/graph/summary.ts.
+// Ported verbatim from zeroroot-ai/dashboard src/lib/graph/summary.ts.
 // Same three Cypher queries, same template text — consumers may pattern-match the output.
 func (q *DashboardQueries) GraphSummary(
 	ctx context.Context,
@@ -1181,7 +1181,7 @@ func buildGraphTextSummary(
 // (nil FocusNode, empty neighbors, empty summary, nil error). Callers must never
 // surface a gRPC error for this case.
 //
-// Ported from enterprise/platform/dashboard/src/lib/graph/context.ts.
+// Ported from zeroroot-ai/dashboard src/lib/graph/context.ts.
 func (q *DashboardQueries) GraphContext(
 	ctx context.Context,
 	tenantID auth.TenantID,
@@ -1536,7 +1536,7 @@ const (
 // the page and one for the total count (same WHERE clause, no SKIP/LIMIT).
 //
 // Cypher ported byte-for-byte from
-// enterprise/platform/dashboard/app/api/findings/route.ts.
+// zeroroot-ai/dashboard app/api/findings/route.ts.
 func (q *DashboardQueries) Findings(
 	ctx context.Context,
 	tenantID auth.TenantID,

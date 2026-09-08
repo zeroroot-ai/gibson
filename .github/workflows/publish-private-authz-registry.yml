@@ -17,7 +17,7 @@ name: publish-private-authz-registry
 # provide authentication.
 #
 # Spec: private-authz-registry Task 11.
-# Related: enterprise/deploy/helm/gibson/values.yaml sdk.registry
+# Related: zeroroot-ai/charts helm/gibson/values.yaml sdk.registry
 
 on:
   # Tag-push trigger kept for hand-pushed tags (operator emergencies, manual

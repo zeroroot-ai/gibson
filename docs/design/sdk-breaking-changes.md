@@ -1,11 +1,11 @@
 # SDK breaking-change inventory
 
 The ECS rebuild is a **major-version SDK break** (no cutover — it's a clean build, not
-released). This inventories what rips and what the new surface is. Touches `opensource/sdk`
+released). This inventories what rips and what the new surface is. Touches `zeroroot-ai/sdk`
 (+ consumers: `adk`, examples, `debug-plugin`, `gibson-tool-runner`).
 
 ## Removed entirely
-- **`opensource/sdk/memory/`** — the whole package. `Store`, `WorkingMemory`, `MissionMemory`,
+- **`zeroroot-ai/sdk` `memory/`** — the whole package. `Store`, `WorkingMemory`, `MissionMemory`,
   `LongTermMemory`, `Item`, `Result`. (Memory is now the World; nobody calls read/write —
   [ADR-0001](../adr/0001-ecs-native-mission-brain.md).)
 - **Harness recall methods** — `GetFindings`, `FindSimilarFindings`, `GetRelatedFindings`,

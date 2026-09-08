@@ -7,7 +7,7 @@
 // It fetches findings from per-tenant Neo4j via DashboardQueries.Findings
 // (same Cypher path as GraphService.GetFindings) and serialises them to
 // CSV, JSON, or SARIF format, ported byte-for-byte from the dashboard route at
-// enterprise/platform/dashboard/app/api/findings/export/route.ts.
+// zeroroot-ai/dashboard app/api/findings/export/route.ts.
 //
 // Spec: dashboard-neo4j-crud-removal (Phase 2, Task 6).
 package api
@@ -152,7 +152,7 @@ func tenantv1FindingFiltersToGraph(f *tenantv1.FindingFilters) graph.FindingsFil
 
 // ---------------------------------------------------------------------------
 // Format serialisers — ported byte-for-byte from
-// enterprise/platform/dashboard/app/api/findings/export/route.ts
+// zeroroot-ai/dashboard app/api/findings/export/route.ts
 // ---------------------------------------------------------------------------
 
 // findingExportRow is the common intermediate representation used by all three

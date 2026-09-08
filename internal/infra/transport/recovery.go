@@ -6,8 +6,8 @@
 // ID propagation, identity validation hook, SPIFFE TLS credentials (server),
 // and retry+backoff (client).
 //
-// It is NOT customer-facing; do not import it from any package under
-// opensource/.
+// It is NOT customer-facing. Never import it from the public sdk or adk
+// repositories.
 package transport
 
 import (

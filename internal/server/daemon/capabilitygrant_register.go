@@ -69,7 +69,7 @@ func cgSigningKeyDir() string {
 // same host use a host+JWT (handled where the host key already exists; not yet
 // served here — first-registration bootstrap is the unblocking path).
 //
-// Request/response shapes mirror opensource/sdk/capabilitygrant exactly.
+// Request/response shapes mirror zeroroot-ai/sdk capabilitygrant exactly.
 
 // bootstrapVerifier verifies a bootstrap token (the daemon Minter).
 type bootstrapVerifier interface {

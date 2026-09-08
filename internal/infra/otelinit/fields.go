@@ -2,8 +2,8 @@
 // Copyright 2026 Zero Root AI
 
 // Package observability provides shared OTel + slog initialisation for
-// internal platform services. It is NOT customer-facing; do not import it
-// from any package under opensource/.
+// internal platform services. It is NOT customer-facing. Never import it
+// from the public sdk or adk repositories.
 package otelinit
 
 // Structured-log and span-attribute field name constants.

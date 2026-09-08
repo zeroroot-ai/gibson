@@ -558,7 +558,7 @@ func (d *daemonImpl) buildGRPCServer(ctx context.Context) (*grpcSubsystem, error
 		// SPIFFE SVIDs. The Envoy edge gateway is always accepted; additional
 		// control-plane callers (today: the tenant-operator) are added via
 		// GIBSON_SPIFFE_ALLOWED_PEER_IDS so they can dial the daemon directly
-		// without an Envoy hairpin. ADR-0002 (zeroroot-ai/docs).
+		// without an Envoy hairpin. ADR-0002, operator-to-daemon transport.
 		envoyID := d.config.Auth.SPIFFE.EnvoyID
 		if envoyID == "" {
 			envoyID = os.Getenv("GIBSON_SPIFFE_ENVOY_ID")
@@ -1480,7 +1480,7 @@ func (d *daemonImpl) buildGRPCServer(ctx context.Context) (*grpcSubsystem, error
 	d.logger.Info(ctx, "registered gibson.tenant.v1.UsageService gRPC endpoint")
 
 	// Register DiscoveryService — the read-only introspection surface
-	// consumed by opensource/adk/cmd/gibson-mcp and the dashboard's
+	// consumed by zeroroot-ai/adk cmd/gibson-mcp and the dashboard's
 	// permissions-bridge migration. Wiring only depends on the authorizer
 	// and component registry, so it comes up even when state/runtime
 	// services are still bootstrapping.

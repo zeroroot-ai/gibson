@@ -387,8 +387,7 @@ func TestBackwardCompatibility_ExistingJSONPayload(t *testing.T) {
 // TestBackwardCompatibility_AgentPattern_CreateFinding verifies the exact
 // pattern used in api-discovery agent (CreateFindingFromEndpoint).
 func TestBackwardCompatibility_AgentPattern_CreateFinding(t *testing.T) {
-	// This mimics the pattern in enterprise/agents/api-discovery/risk.go
-	// function CreateFindingFromEndpoint
+	// This mimics the api-discovery agent's CreateFindingFromEndpoint.
 
 	// Create finding using NewFinding with string category
 	category := finding.CategoryInformationDisclosure // Type is Category (string alias)

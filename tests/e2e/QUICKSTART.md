@@ -19,8 +19,8 @@ If any are missing, see [Prerequisites](#prerequisites) below.
 ## Run Your First Test (30 seconds)
 
 ```bash
-# Navigate to tests directory
-cd /home/anthony/Code/zeroroot.ai/opensource/gibson/tests/e2e
+# Navigate to tests directory, from the repository root
+cd tests/e2e
 
 # Run automated test with cleanup
 ./taxonomy_relationships_test.sh --cleanup
@@ -339,7 +339,7 @@ docker stop neo4j-test-* && docker rm neo4j-test-*
 - **Test Documentation:** `taxonomy_relationships_test.md`
 - **Query Reference:** `cypher_queries_reference.md`
 - **E2E Test Overview:** `README.md`
-- **Gibson Documentation:** `/home/anthony/Code/zeroroot.ai/opensource/gibson/README.md`
+- **Gibson Documentation:** the repository `README.md`
 - **Discord:** https://discord.gg/mkqd6mU3
 - **Issues:** https://github.com/zeroroot-ai/gibson/issues
 

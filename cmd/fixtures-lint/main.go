@@ -4,10 +4,11 @@
 // fixtures-lint — CI lint tool that asserts GIBSON_TEST_FIXTURES_ENABLED is
 // NEVER set to "true" in any production overlay file.
 //
-// Checked paths (relative to repo root, can be overridden via --root):
-//   - enterprise/deploy/helm/gibson/values*.yaml
-//   - enterprise/deploy/helm/gibson/templates/**/*.yaml
-//   - any *.yaml / *.yml file under enterprise/deploy/ containing a ConfigMap kind
+// Checked paths (relative to the root given by --root, which points at a
+// chart checkout — the umbrella chart lives in zeroroot-ai/charts):
+//   - helm/gibson/values*.yaml
+//   - helm/gibson/templates/**/*.yaml
+//   - any *.yaml / *.yml file under the root containing a ConfigMap kind
 //
 // Exit 0 = clean; exit 1 = violation found (CI blocks merge).
 //

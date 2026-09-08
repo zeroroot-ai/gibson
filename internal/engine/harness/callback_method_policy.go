@@ -15,9 +15,9 @@ import (
 // The three SPIFFE peers the chart configures in
 // gibson.config.callback.spiffe.peerSvids (rendered as
 // GIBSON_CALLBACK_PEER_SVIDS). Verified identical in every environment:
-// enterprise/deploy helm/gibson/values.yaml and helm/gibson-workloads/
-// values-kind.yaml, enterprise/gitops envs/dev (staging and prod inherit the
-// umbrella default).
+// zeroroot-ai/charts helm/gibson/values.yaml and
+// helm/gibson-workloads/values.yaml, and the dev overlay in zeroroot-ai/hosted
+// gitops/envs (staging and prod inherit the umbrella default).
 //
 // These are constants for the same reason tenantOperatorSVID is a constant in
 // internal/server/daemon/operator_method_policy.go: what a peer may call is a
@@ -83,7 +83,7 @@ type callbackMethodDecision struct {
 
 // reasonAgentCallbackSurface is the allow reason for the RPCs that make up the
 // in-mission agent callback surface: dialed by the SDK's CallbackHarness
-// (opensource/sdk serve/callback_harness.go + serve/callback_client.go — the
+// (zeroroot-ai/sdk serve/callback_harness.go + serve/callback_client.go — the
 // ONLY HarnessCallbackService client in the workspace; gibson-executor does not
 // use this service at all) AND served by a handler in this package. The set was
 // derived from those two facts, not guessed.

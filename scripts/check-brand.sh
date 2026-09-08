@@ -13,7 +13,7 @@
 #
 # This replaces check-no-gibson-io.sh, which matched only the fourth string,
 # told the reader to "use zero-day.ai instead" (itself a violation), and
-# computed its scan root as the workspace directory `enterprise/`, three levels
+# computed its scan root as the pre-split workspace directory three levels
 # above scripts/. That directory does not exist in a single-repo checkout, so
 # the guard scanned the gibson tree by accident and its eight allowlist entries
 # (deploy/helm/..., platform/dashboard/...) named files in repos that no longer

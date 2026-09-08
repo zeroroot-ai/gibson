@@ -39,7 +39,7 @@ func setupFGAContainer(t *testing.T, ctx context.Context) (testcontainers.Contai
 	// OpenFGA with SQLite memory store (no external Postgres needed in CI).
 	//
 	// Pinned to the version the platform actually deploys
-	// (enterprise/deploy/helm/gibson-workloads/values.yaml: openfga tag), NOT
+	// (zeroroot-ai/charts helm/gibson-workloads/values.yaml: openfga tag), NOT
 	// `:latest`. A floating `:latest` silently broke the suite (gibson#1016):
 	// newer OpenFGA tightened object-id validation and rejected the colon-
 	// delimited secret ids the model uses (`secret:tenant-<id>:<name>`), so

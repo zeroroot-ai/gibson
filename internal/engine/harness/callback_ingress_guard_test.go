@@ -6,7 +6,7 @@
 // HarnessCallbackService is served on exactly ONE listener — the callback
 // listener that CallbackServer.Start opens — and Envoy's edge route for
 // /gibson.harness.v1.HarnessCallbackService/ targets that listener via the
-// gibson_daemon_callback cluster (zeroroot-ai/deploy
+// gibson_daemon_callback cluster (zeroroot-ai/charts,
 // helm/gibson-workloads/files/envoy/envoy.yaml).
 //
 // Before gibson#1450 that route pointed at the daemon's main :50051 listener,

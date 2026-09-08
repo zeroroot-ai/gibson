@@ -1,6 +1,6 @@
 # Entity ↔ graph mapping (ECS World ⇄ knowledge graph)
 
-The decision table for how each taxonomy node type ([`opensource/sdk/taxonomy/core.yaml`])
+The decision table for how each taxonomy node type (`zeroroot-ai/sdk` `taxonomy/core.yaml`)
 is represented in the Tenant World and projected to the per-tenant Neo4j graph.
 Grounds [ADR-0007](../adr/0007-world-sourced-graph-projection.md) (graph = projection of
 the World) and [ADR-0002](../adr/0002-scope-relative-entity-identity.md) (scope-relative
@@ -60,4 +60,3 @@ re-scan never erases it), exposed on `HostSnapshot.Services`, and replay-determi
 Remaining rows are added as their observation events + reducers land (tracked under the
 S1 follow-ups of the ADR-0007 epic).
 
-[`opensource/sdk/taxonomy/core.yaml`]: ../../../../opensource/sdk/taxonomy/core.yaml

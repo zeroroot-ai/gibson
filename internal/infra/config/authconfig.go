@@ -43,7 +43,7 @@ type SPIFFEConfig struct {
 	// is EnvoyID ∪ AllowedPeerIDs; all entries are validated against
 	// TrustDomain. Populated from env var GIBSON_SPIFFE_ALLOWED_PEER_IDS
 	// (comma-separated).
-	// ADR: zeroroot-ai/docs adr/0002-operator-to-daemon-transport.md.
+	// Decided by ADR-0002, operator-to-daemon transport.
 	AllowedPeerIDs []string `mapstructure:"allowed_peer_ids" yaml:"allowed_peer_ids,omitempty"`
 }
 

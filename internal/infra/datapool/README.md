@@ -42,14 +42,14 @@ Cheapest operationally — one cluster to backup, monitor, upgrade, patch.
 5. **Bootstrap guard.** In `internal/server/daemon/daemon.go` validate that
    `Tenant<X>Config` is populated when the feature is enabled.
 6. **Tenant-operator provisioner.** Add `Provision` / `Deprovision` under
-   `enterprise/platform/tenant-operator/internal/dataplane/<store>.go`
+   `operators/tenant/internal/dataplane/<store>.go`
    that issues the `CREATE DATABASE` and writes any per-tenant credentials
    to the tenant's Vault namespace. Idempotent.
 7. **Chart subchart + values.** Add `tenant-<store>:` subchart; expose
    `dataPlane.<store>.adminY` values. Admin password via
    `valueFrom.secretKeyRef`.
 8. **Validator.** Extend `validateTenantStoresConfigured` in
-   `enterprise/deploy/helm/gibson/templates/_validators.tpl`.
+   `zeroroot-ai/charts` `helm/gibson-workloads/templates/_validators.tpl`.
 
 ---
 

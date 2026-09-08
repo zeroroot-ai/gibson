@@ -262,7 +262,7 @@ func (s *CallbackServer) Start(ctx context.Context) error {
 	//
 	// This listener is the ONLY place the service is registered, and Envoy's
 	// edge route for /gibson.harness.v1.HarnessCallbackService/ targets THIS
-	// port through the `gibson_daemon_callback` cluster (zeroroot-ai/deploy
+	// port through the `gibson_daemon_callback` cluster (zeroroot-ai/charts,
 	// helm/gibson-workloads/files/envoy/envoy.yaml). Both halves are load
 	// bearing and neither works alone:
 	//

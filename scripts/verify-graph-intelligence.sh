@@ -9,9 +9,9 @@
 #   1 Preflight        — kubectl context must be `kind-gibson` (NOT
 #                        `kind-gibson-customer`); grpcurl + kubectl + jq
 #                        on PATH.
-#   2 Deploy           — make restart in enterprise/deploy/helm/gibson
-#                        (CLUSTER=gibson, ONLY=gibson). Wait for daemon
-#                        readiness via kubectl wait.
+#   2 Deploy           — make restart-daemon in zeroroot-ai/hosted against
+#                        the kind cluster. Wait for daemon readiness via
+#                        kubectl wait.
 #   3 Mission #1       — trigger via gibson-cli (or direct gRPC) and wait
 #                        for completion. Assert Neo4j now contains
 #                        Mission/Technique/Finding nodes.

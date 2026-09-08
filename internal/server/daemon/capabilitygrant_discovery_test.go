@@ -60,7 +60,7 @@ func TestAgentConfigHandler_UnconfiguredIsServiceUnavailable(t *testing.T) {
 }
 
 // TestAgentConfigDocument_MatchesSDKFieldNames pins the JSON field names against
-// the SDK contract (opensource/sdk/capabilitygrant.DiscoveryDocument). A rename
+// the SDK contract (zeroroot-ai/sdk capabilitygrant.DiscoveryDocument). A rename
 // here silently breaks every external component's Discover().
 func TestAgentConfigDocument_MatchesSDKFieldNames(t *testing.T) {
 	b, err := json.Marshal(buildAgentConfigDocument("https://x"))

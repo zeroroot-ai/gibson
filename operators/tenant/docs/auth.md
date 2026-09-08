@@ -44,7 +44,7 @@ ZITADEL_ISSUER         # e.g. https://auth.zeroroot.ai
 ```
 
 The Helm Secret `gibson-zitadel-tenant-operator` mounts these
-([`enterprise/deploy/helm/gibson/templates/auth/zitadel-service-accounts-secret.yaml`](../../../deploy/helm/gibson/templates/auth/zitadel-service-accounts-secret.yaml)).
+(rendered by the umbrella chart in `zeroroot-ai/charts`).
 
 [`internal/grpc/client.go`](../internal/grpc/client.go) constructs an
 oauth2 client_credentials TokenSource that:
@@ -152,6 +152,6 @@ event the daemon forwards to ext-authz's cache for fast invalidation.
 - Wrong vs right code shapes: [`forbidden-patterns.md`](./forbidden-patterns.md).
 - Machine-readable rules: [`rules.yaml`](./rules.yaml).
 - Per-tenant data plane (the data-plane half of the saga): [`data-plane.md`](./data-plane.md).
-- Daemon-side: `core/gibson/docs/auth.md`.
-- Dashboard auth: `enterprise/platform/dashboard/docs/auth.md`.
-- Helm-side wiring (Zitadel service-account Secrets, FGA chart): `enterprise/deploy/docs/auth.md`.
+- Daemon-side: [`docs/auth.md`](../../../docs/auth.md).
+- Dashboard auth: `zeroroot-ai/dashboard` `docs/auth.md`.
+- Helm-side wiring (Zitadel service-account Secrets, FGA chart): the umbrella chart in `zeroroot-ai/charts`.

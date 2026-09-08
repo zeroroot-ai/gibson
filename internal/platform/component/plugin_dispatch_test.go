@@ -407,8 +407,7 @@ var _ = errors.New
 // asserts that PluginInvoke with method "Echo" succeeds (returns no error and
 // no PluginError). This test runs without a real daemon or Docker container.
 func TestDispatchEcho_ManifestDerived(t *testing.T) {
-	// Load the debug-plugin manifest from testdata (same YAML as
-	// enterprise/plugins/debug-plugin/plugin.yaml).
+	// Load the debug-plugin manifest from testdata.
 	m, err := pluginmanifest.Load("testdata/debug-plugin.yaml")
 	if err != nil {
 		t.Fatalf("manifest.Load: %v", err)

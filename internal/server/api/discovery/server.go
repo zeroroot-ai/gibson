@@ -7,7 +7,7 @@
 // the explicit scope+action logic in each List* handler.
 //
 // The service is the single substrate for:
-//   - opensource/adk/cmd/gibson-mcp (Claude Code's MCP discovery tools)
+//   - zeroroot-ai/adk cmd/gibson-mcp (Claude Code's MCP discovery tools)
 //   - the dashboard's in-flight migration away from
 //     app/api/components/permissions/route.ts (the bridge that fail-opens
 //     to enabled=true for every visible catalog item)

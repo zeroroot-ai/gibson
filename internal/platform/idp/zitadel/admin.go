@@ -5,7 +5,7 @@
 // Zitadel-specific code may appear. It implements idp.AdminClient by
 // translating abstract operations into Zitadel Management API HTTP calls,
 // porting the request shapes proven correct in the dashboard's
-// enterprise/platform/dashboard/src/lib/zitadel/admin-client.ts.
+// zeroroot-ai/dashboard src/lib/zitadel/admin-client.ts.
 //
 // Security constraints inherited from the TS reference:
 //   - ClientSecret is never logged, never included in error messages.
