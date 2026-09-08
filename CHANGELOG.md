@@ -62,6 +62,13 @@ Completed or cancelled missions are unaffected.
 
 ---
 
+## [0.134.8](https://github.com/zeroroot-ai/gibson/compare/v0.134.7...v0.134.8) (2026-09-08)
+
+
+### Bug Fixes
+
+* **tenant-operator:** never trim a whole master key; a raw key ending in 0x0A was read as 31 bytes ([#77](https://github.com/zeroroot-ai/gibson/issues/77)) ([1157dc6](https://github.com/zeroroot-ai/gibson/commit/1157dc66278f61dfda20896f852ca23d0815a00a))
+
 ## [0.134.7](https://github.com/zeroroot-ai/gibson/compare/v0.134.6...v0.134.7) (2026-09-07)
 
 
