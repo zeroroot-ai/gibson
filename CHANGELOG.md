@@ -62,6 +62,13 @@ Completed or cancelled missions are unaffected.
 
 ---
 
+## [0.134.9](https://github.com/zeroroot-ai/gibson/compare/v0.134.8...v0.134.9) (2026-09-08)
+
+
+### Bug Fixes
+
+* **brain:** belief is scored on evidence change, off the tick ([#79](https://github.com/zeroroot-ai/gibson/issues/79)) ([f7d6eb3](https://github.com/zeroroot-ai/gibson/commit/f7d6eb3f46e1c2a564dc007c23fcf53a7d277001))
+
 ## [0.134.8](https://github.com/zeroroot-ai/gibson/compare/v0.134.7...v0.134.8) (2026-09-08)
 
 
