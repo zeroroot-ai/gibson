@@ -756,3 +756,65 @@ func TestWorldService_GetFrameAt_HostsAndFindings(t *testing.T) {
 		t.Fatal("mission B finding bled into mission A frame")
 	}
 }
+
+// TestWorldService_MissionViewCarriesTheBeliefModelPin is the ADR-0005 §5
+// regression: a reviewer must be able to tell which model judged a run. The
+// mission records the pin at launch and the World carries it, but until this
+// field existed neither ListMissions nor GetFrameAt returned it, so the pin was
+// reachable from no customer surface at all.
+func TestWorldService_MissionViewCarriesTheBeliefModelPin(t *testing.T) {
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+	reg := brain.NewRegistry(ctx)
+	srv := NewWorldServer(reg, nil)
+
+	reg.For("acme").Submit(brain.MissionProjected{
+		ID:          "m1",
+		Goal:        "map the estate",
+		BeliefModel: "belief-2026-09-01",
+	})
+	// A second mission with no pin: an OSS install with no base model, or a
+	// placeholder provider. It must read empty, never the other mission's pin.
+	reg.For("acme").Submit(brain.MissionStarted{ID: "m2", Goal: "unpinned run"})
+
+	tctx := auth.WithTenant(context.Background(), auth.MustNewTenantID("acme"))
+	deadline := time.Now().Add(2 * time.Second)
+	for time.Now().Before(deadline) {
+		if len(reg.For("acme").Events()) == 2 {
+			break
+		}
+		time.Sleep(10 * time.Millisecond)
+	}
+
+	list, err := srv.ListMissions(tctx, &worldpb.ListMissionsRequest{})
+	if err != nil {
+		t.Fatalf("ListMissions: %v", err)
+	}
+	pins := map[string]string{}
+	for _, m := range list.GetMissions() {
+		pins[m.GetId()] = m.GetBeliefModel()
+	}
+	if pins["m1"] != "belief-2026-09-01" {
+		t.Errorf("ListMissions belief_model = %q, want belief-2026-09-01", pins["m1"])
+	}
+	if pins["m2"] != "" {
+		t.Errorf("an unpinned mission must report an empty belief_model, got %q", pins["m2"])
+	}
+
+	// The same pin must survive the fold, so a scrubbed frame names the model
+	// that judged the run as of that tick.
+	frame, err := srv.GetFrameAt(tctx, &worldpb.GetFrameAtRequest{Seq: 99})
+	if err != nil {
+		t.Fatalf("GetFrameAt: %v", err)
+	}
+	framePins := map[string]string{}
+	for _, m := range frame.GetMissions() {
+		framePins[m.GetId()] = m.GetBeliefModel()
+	}
+	if framePins["m1"] != "belief-2026-09-01" {
+		t.Errorf("GetFrameAt belief_model = %q, want belief-2026-09-01", framePins["m1"])
+	}
+	if framePins["m2"] != "" {
+		t.Errorf("an unpinned mission must report an empty belief_model in a frame, got %q", framePins["m2"])
+	}
+}

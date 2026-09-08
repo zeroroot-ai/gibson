@@ -39,6 +39,12 @@ graphical model** — **pgmpy** — not by the LLM and not by hand-tuned weights
 - pgmpy is Python; it runs as a **sidecar**. This is fine: training is fully offline (no
   hot path), and inference is only on evidence change (not every tick).
 - A model artifact + version registry is needed; missions record the version they used.
+- **The pin is a record, not a selector.** A mission stamps the belief-model version at
+  launch, and `MissionView.belief_model` surfaces it on the read path, so a reviewer can
+  tell which model judged a run. Replay reproduces a run by re-folding its recorded
+  `BeliefScored` events, so replay does not re-load the model. Re-executing a mission
+  against the version it pinned is not implemented, and whether it should be is open
+  (gibson#24).
 - The curated base model is a **commercial asset** — trained only on vendor red-team + public
   CVE/MITRE ATT&CK data, **never on tenant data**. OSS ships without it (or a minimal default);
   the commercial layer serves it. See [ADR-0003](0003-open-core-boundary.md).
