@@ -65,9 +65,11 @@ var bannedClientAuthLiterals = []string{
 // instead of skipping it.
 const callbackServerPath = "internal/engine/harness/callback_server.go"
 
-// findRepoRoot ascends from cwd until it finds the directory holding this
-// module's go.mod. It returns "" only when the test runs outside the module,
-// which the caller treats as a failure rather than a skip.
+// findRepoRoot ascends from cwd until it finds the directory that holds both a
+// go.mod and this test's own package. The second condition pins it to THIS
+// module: a go.mod alone would also match a nested module. It returns "" only
+// when the test runs outside the module, which the caller treats as a failure
+// rather than a skip.
 func findRepoRoot(t *testing.T) string {
 	t.Helper()
 	dir, err := os.Getwd()
@@ -75,8 +77,9 @@ func findRepoRoot(t *testing.T) string {
 		return ""
 	}
 	for {
-		data, readErr := os.ReadFile(filepath.Join(dir, "go.mod"))
-		if readErr == nil && strings.Contains(string(data), "module github.com/zeroroot-ai/gibson\n") {
+		_, modErr := os.Stat(filepath.Join(dir, "go.mod"))
+		_, selfErr := os.Stat(filepath.Join(dir, filepath.FromSlash("internal/platform/tlsaudit")))
+		if modErr == nil && selfErr == nil {
 			return dir
 		}
 		parent := filepath.Dir(dir)
