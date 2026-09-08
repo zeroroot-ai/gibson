@@ -98,7 +98,9 @@ type tokenResponse struct {
 // NEW refresh token on every refresh and invalidates the old one, so failing
 // to persist it leaves the stored grant dead — the connector works until the
 // next restart and then never again. That is precisely the failure a
-// bridge-owned token could not avoid, and the reason this lives here.
+// proxy-owned token could not avoid: the ToolHive proxy reads its credential
+// out of a Kubernetes Secret and can write nothing back. That is the reason
+// this lives here.
 func (r *Refresher) Refresh(ctx context.Context, connector string) (*AccessToken, error) {
 	grant, err := r.loadGrant(ctx, connector)
 	if err != nil {
@@ -190,11 +192,11 @@ func (r *Refresher) refreshGrant(ctx context.Context, connector string, grant *G
 
 	token := &AccessToken{Token: tr.AccessToken, ExpiresAt: expiresAt}
 
-	// The connector-visible secret holds the RAW token: the bridge presents
-	// the resolved bytes verbatim as `Authorization: Bearer <bytes>`, so any
+	// The connector-visible secret holds the RAW token: the ToolHive proxy
+	// presents those bytes verbatim as `Authorization: Bearer <bytes>`, so any
 	// wrapper would reach the vendor as a malformed credential. The expiry is
-	// platform bookkeeping and goes to a separate platform-only secret,
-	// written AFTER the token: if the process dies between the two writes,
+	// platform bookkeeping and goes to a separate secret that only platform
+	// code reads, written AFTER the token: if the process dies between the two writes,
 	// stale metadata makes the next pass refresh again (harmless), where the
 	// other order would schedule against a token that was never published.
 	if err := r.store.Put(ctx, AccessSecretName(connector), []byte(tr.AccessToken)); err != nil {

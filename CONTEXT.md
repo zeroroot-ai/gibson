@@ -329,7 +329,7 @@ _Avoid_: handler-written tuples, closed-by-default execute, tuple data migration
 **Connector execute granularity**:
 The execute gate is per **connector**, never per discovered tool (decided
 2026-08-24). `can_execute @ component:connector/<id>` covers every tool the
-connector exposes; the meta-tools path (ADR-0047) is the single check point, so
+connector exposes; the meta-tools path (ADR-0065) is the single check point, so
 finer narrowing stays an additive later change. The OAuth scope string is the
 real blast-radius bound and the UI shows it next to the execute toggle.
 _Avoid_: discovered tools as `component` objects, per-tool deny rows

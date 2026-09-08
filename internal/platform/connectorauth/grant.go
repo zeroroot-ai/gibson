@@ -3,31 +3,36 @@
 
 // Package connectorauth owns a connector's OAuth token lifecycle.
 //
-// A connector fronts a vendor MCP server (ADR-0047, ADR-0049). When that
-// vendor requires OAuth — GitLab's first-party MCP server does, with no
-// personal-access-token path — something has to acquire and refresh a token.
-// ADR-0064 decides that something is the platform, never the bridge, and the
-// reason is in the code rather than a preference: GetCredential is the only
-// credential RPC a plugin has. There is no write-back and no rotate. OAuth 2.1
-// mandates refresh-token rotation, so a bridge refreshing its own token would
-// receive a rotated refresh token it cannot persist and would break
-// permanently on the next restart.
+// A connector fronts a third-party MCP server that ToolHive runs in the
+// customer's tenant namespace (ADR-0014, ADR-0065). When that vendor requires
+// OAuth — GitLab's first-party MCP server does, with no personal-access-token
+// path — something has to acquire and refresh a token. ADR-0064 decides that
+// something is the platform, never the connector's ToolHive proxy, and the
+// reason is in the code rather than a preference: the proxy presents a
+// credential it reads out of a Kubernetes Secret. It has no way to write one
+// back. OAuth 2.1 mandates refresh-token rotation, so a proxy refreshing its
+// own token would receive a rotated refresh token it cannot persist and would
+// break permanently on the next restart.
 //
-// So the bridge presents a credential it reads, and this package produces it.
+// So the ToolHive proxy presents a credential it reads, and this package
+// produces it. The daemon materializes that credential into the Secret the
+// proxy mounts (ADR-0015).
 //
 // TWO SECRETS, NOT ONE. The Grant — refresh token, client id, token endpoint,
-// scope, expiry — is platform-only and bound to no component. The access token
-// is a separate short-lived secret and is the only one a connector can
-// resolve. The split is the point: what runs beside the bridge is a
-// third-party vendor MCP server, the code this platform classifies as
-// untrusted and runs in a microVM for that reason. If the grant were one
+// scope, expiry — is platform-code-only and bound to no component. That names
+// who may read it, not where it lives: the Grant sits in the tenant's own
+// secret store beside every other tenant credential, and only platform code
+// ever reads it. The access token is a separate short-lived secret and is the
+// only thing a connector is ever shown. The split is the point: what ToolHive
+// runs is a third-party vendor MCP server, the code this platform classifies
+// as untrusted and runs in a microVM for that reason. If the grant were one
 // secret, a compromise would mean standing access to the customer's system
 // rather than a credential that expires.
 //
 // The isolation is structural rather than conventional. The FGA model permits
 // can_resolve on a secret only for a plugin_principal, so a secret with no
 // such tuple is unresolvable by every component. This package therefore keeps
-// the grant platform-only by never asking for a tuple on it.
+// the grant platform-code-only by never asking for a tuple on it.
 package connectorauth
 
 import (
@@ -44,8 +49,8 @@ import (
 // Stored as one opaque JSON blob because the secrets broker holds bytes under
 // a single value key — there is no structured or multi-field secret.
 type Grant struct {
-	// RefreshToken mints new access tokens. The reason this type is
-	// platform-only.
+	// RefreshToken mints new access tokens. The reason platform code is the
+	// only reader of this type.
 	RefreshToken string `json:"refresh_token"`
 
 	// TokenEndpoint is the vendor's OAuth token URL, e.g.
@@ -148,11 +153,11 @@ func UnmarshalGrant(b []byte) (*Grant, error) {
 // AccessToken is the short-lived credential a connector actually presents,
 // with the expiry the platform's refresher schedules against.
 //
-// The two fields land in two different secrets. The connector presents the
-// resolved bytes of its auth secret verbatim (`Authorization: Bearer <bytes>`),
-// so the connector-visible secret holds the RAW token and
-// nothing else; the expiry is platform bookkeeping and lives in a separate
-// platform-only metadata secret.
+// The two fields land in two different secrets. The ToolHive proxy presents
+// the bytes of its auth secret verbatim (`Authorization: Bearer <bytes>`), so
+// the connector-visible secret holds the RAW token and nothing else. The
+// expiry is platform bookkeeping and lives in a separate metadata secret that
+// only platform code reads.
 type AccessToken struct {
 	Token     string    `json:"access_token"`
 	ExpiresAt time.Time `json:"expires_at"`
@@ -160,7 +165,7 @@ type AccessToken struct {
 
 // GrantSecretName is the broker name of a connector's grant.
 //
-// PLATFORM-ONLY. Never bind this name to a component: doing so hands a
+// PLATFORM CODE ONLY. Never bind this name to a component: doing so hands a
 // third-party vendor server standing access rather than a credential that
 // expires.
 func GrantSecretName(connector string) string {
