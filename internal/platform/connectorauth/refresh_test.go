@@ -105,7 +105,7 @@ func TestRefresh_PublishesAccessTokenToItsOwnSecret(t *testing.T) {
 	}
 
 	// The access token lands under its OWN name, never merged into the grant,
-	// and holds the RAW token bytes: the bridge presents the resolved value
+	// and holds the RAW token bytes: the ToolHive proxy presents that value
 	// verbatim as `Bearer <bytes>`, so a JSON wrapper would reach the vendor
 	// as a malformed credential.
 	if got := string(s.get(AccessSecretName("gitlab"))); got != "at-new" {
@@ -113,7 +113,7 @@ func TestRefresh_PublishesAccessTokenToItsOwnSecret(t *testing.T) {
 	}
 
 	// The expiry the refresher schedules against is platform bookkeeping and
-	// lives in the separate platform-only metadata secret.
+	// lives in the separate metadata secret that only platform code reads.
 	var meta AccessToken
 	if err := json.Unmarshal(s.get(AccessMetaSecretName("gitlab")), &meta); err != nil {
 		t.Fatalf("access metadata secret: %v", err)
@@ -123,9 +123,9 @@ func TestRefresh_PublishesAccessTokenToItsOwnSecret(t *testing.T) {
 	}
 }
 
-// The refresh token must NEVER appear in the secret a connector can resolve.
-// If it did, a compromised vendor MCP server would walk away with standing
-// access rather than a credential that expires.
+// The refresh token must NEVER appear in the secret a connector is shown. If
+// it did, a compromised vendor MCP server would walk away with standing access
+// rather than a credential that expires.
 func TestRefresh_AccessSecretCarriesNoRefreshToken(t *testing.T) {
 	s := newStore()
 	srv := tokenServer(t, true)
@@ -149,7 +149,7 @@ func TestRefresh_AccessSecretCarriesNoRefreshToken(t *testing.T) {
 
 // OAuth 2.1 invalidates the old refresh token on every refresh. Failing to
 // persist the rotated one leaves a grant that works until the next restart and
-// then never again — the exact failure a bridge-owned token could not avoid.
+// then never again — the exact failure a proxy-owned token could not avoid.
 func TestRefresh_PersistsRotatedRefreshToken(t *testing.T) {
 	s := newStore()
 	srv := tokenServer(t, true)

@@ -116,9 +116,9 @@ func TestUnmarshalGrant_WellFormedButIncomplete(t *testing.T) {
 	}
 }
 
-// The two names must never collide: one is platform-only and the other is
-// bound to the connector, so a naming bug would hand a vendor server the
-// refresh token.
+// The two names must never collide: platform code is the only reader of one,
+// and the other is bound to the connector, so a naming bug would hand a vendor
+// server the refresh token.
 func TestSecretNames_AreDistinctAndScopedToTheConnector(t *testing.T) {
 	g, a := GrantSecretName("gitlab"), AccessSecretName("gitlab")
 	if g == a {
