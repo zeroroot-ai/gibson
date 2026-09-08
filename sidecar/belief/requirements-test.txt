@@ -23,4 +23,4 @@ pygments==2.21.0 \
 pytest==9.1.1 \
     --hash=sha256:1088fbde8f2b49d95a549a195707afa7a76a3ce9bcadc26b6d71f0ffda5fe313 \
     --hash=sha256:37a86b45efb9a47a61a36449063e8e18d0cab3161329fc099eb21783169c4f0c
-    # via -r /tmp/claude-1000/-home-anthony-Code-zero-day-ai/44bdb004-e3df-4f6a-9465-e00876d4e08b/scratchpad/req-test.in
+    # via -r requirements-test.in

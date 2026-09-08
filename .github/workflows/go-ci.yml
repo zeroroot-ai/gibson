@@ -373,6 +373,13 @@ jobs:
           make check-ci-lane-parity
           make check-build-tags
           make check-queue-gate
+      - name: Guard the retired brand strings
+        # .github#14: the old guard matched one of the four retired strings,
+        # keyed its allowlist to files in repos that no longer exist, and ran
+        # only in `make check` locally. This job runs unconditionally in both
+        # lanes and carries no path filter, so a retired string in a README
+        # fails the same way as one in a manifest.
+        run: make check-brand
       - name: Guard gofmt cleanliness
         # gibson#1415: no lane ever CHECKED formatting -- `make fmt` rewrites
         # instead of failing, and .golangci.yml enables no formatter -- so

@@ -11,7 +11,7 @@ import "testing"
 // — must agree on this name or a founding member races into two CRs.
 func TestSlugifyEmail_MatchesDashboard(t *testing.T) {
 	cases := map[string]string{
-		"anthony@zeroroot.ai":         "anthony-zeroroot-ai",
+		"owner@example.com":           "owner-example-com",
 		"first-last@sub.example.test": "first-last-sub-example-test",
 		"OWNER@Acme.test":             "owner-acme-test",
 		"a..b@c":                      "a-b-c",
@@ -22,7 +22,7 @@ func TestSlugifyEmail_MatchesDashboard(t *testing.T) {
 			t.Errorf("SlugifyEmail(%q) = %q, want %q", in, got, want)
 		}
 	}
-	if got := FoundingMemberName("anthony@zeroroot.ai"); got != "anthony-zeroroot-ai-owner" {
+	if got := FoundingMemberName("owner@example.com"); got != "owner-example-com-owner" {
 		t.Errorf("FoundingMemberName: got %q", got)
 	}
 }
