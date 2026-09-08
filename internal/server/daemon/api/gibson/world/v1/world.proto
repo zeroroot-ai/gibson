@@ -131,11 +131,24 @@ service WorldService {
   }
 }
 
+// MissionView is one mission as the World holds it.
 message MissionView {
   string id = 1;
   string goal = 2;
   string status = 3;
   string reason = 4;
+  // belief_model is the belief-model version the mission was pinned to at
+  // launch (ADR-0005 §5). The daemon stamps the provider's current artifact
+  // onto the mission when it starts, and the World carries it from there, so a
+  // reviewer can tell which model judged a run. Empty means the mission ran
+  // unpinned: an OSS install with no base model, or a placeholder provider.
+  //
+  // It is a RECORD, not a selector. Nothing re-selects a model from it: the
+  // provider's version comes from the daemon's own configuration, and a replay
+  // is a re-fold of the recorded BeliefScored events, which is reproducible by
+  // construction. Re-executing a mission against the version it originally
+  // pinned is not implemented.
+  string belief_model = 5;
 }
 
 message HostView {

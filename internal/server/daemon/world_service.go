@@ -65,6 +65,7 @@ func (s *worldServer) ListMissions(ctx context.Context, _ *worldpb.ListMissionsR
 	for _, m := range e.Missions() {
 		resp.Missions = append(resp.Missions, &worldpb.MissionView{
 			Id: m.ID, Goal: m.Goal, Status: string(m.Status), Reason: m.Reason,
+			BeliefModel: m.BeliefModel,
 		})
 	}
 	return resp, nil
@@ -213,6 +214,7 @@ func (s *worldServer) GetFrameAt(ctx context.Context, req *worldpb.GetFrameAtReq
 	for _, m := range w.MissionSnapshot() {
 		resp.Missions = append(resp.Missions, &worldpb.MissionView{
 			Id: m.ID, Goal: m.Goal, Status: string(m.Status), Reason: m.Reason,
+			BeliefModel: m.BeliefModel,
 		})
 	}
 	for _, h := range w.Snapshot() {
