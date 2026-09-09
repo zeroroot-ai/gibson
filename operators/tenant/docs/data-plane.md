@@ -27,14 +27,15 @@ Concretely the operator owns:
     DB index, persist mapping in master index DB 0.
   - [`vector.go`](../internal/dataplane/vector.go) — Qdrant collection
     create via HTTP API.
-  - [`kek.go`](../internal/dataplane/kek.go) — HKDF derivation; matches the
-    daemon byte-for-byte.
+  - [`kek_deriver.go`](../internal/dataplane/kek_deriver.go) and
+    [`kek_kms.go`](../internal/dataplane/kek_kms.go) — per-tenant KEK
+    derivation; matches the daemon byte-for-byte.
 - The pipeline orchestrator at
   [`pipeline.go`](../internal/dataplane/pipeline.go), which runs the five
   steps in order with LIFO rollback on failure.
-- Quota application at
-  [`quotas.go`](../internal/dataplane/quotas.go) (Postgres CONNECTION LIMIT,
-  Redis per-DB MAXMEMORY where supported).
+- Quota application in [`postgres.go`](../internal/dataplane/postgres.go)
+  (`ALTER ROLE ... CONNECTION LIMIT`) and [`redis.go`](../internal/dataplane/redis.go)
+  (per-DB maxmemory policy where supported).
 - The standalone backup CLI
   [`cmd/gibson-backup/`](../cmd/gibson-backup/main.go).
 
@@ -97,9 +98,11 @@ KEK_tenant = HKDF-SHA256(masterKEK,
                          L    = 32 bytes)
 ```
 
-Source of truth: [`internal/dataplane/kek.go:50`](../internal/dataplane/kek.go).
-The daemon's matching implementation is at
-[`../../../core/gibson/internal/infra/datapool/kek.go:41`](../../../core/gibson/internal/infra/datapool/kek.go).
+Source of truth: [`internal/dataplane/kek_deriver.go`](../internal/dataplane/kek_deriver.go),
+which derives through Vault transit HMAC, and
+[`internal/dataplane/kek_kms.go`](../internal/dataplane/kek_kms.go), which derives
+through AWS KMS. The daemon's matching implementation is at
+[`internal/infra/datapool/kek.go`](../../../internal/infra/datapool/kek.go).
 The shared `info` string is the contract — changing it on either side
 without coordinated KEK rotation breaks every encrypted record.
 
@@ -109,15 +112,15 @@ The operator uses the KEK to set the **Postgres role password**:
 password = hex(KEK_tenant)[:32]
 ```
 
-See [`tenantRolePassword` in `kek.go:66`](../internal/dataplane/kek.go) and
-its caller in [`postgres.go:106`](../internal/dataplane/postgres.go). The
+See [`tenantRolePasswordVia` in `names.go`](../internal/dataplane/names.go) and
+its caller in [`postgres.go`](../internal/dataplane/postgres.go). The
 daemon reconstructs the same password at connection time from `masterKEK +
 tenantID` — neither the password nor the KEK is persisted as a Kubernetes
 Secret. Rotation is supported via `ALTER ROLE … PASSWORD` re-run on the
 existing role.
 
 The KEK is zeroed in a `defer` immediately after the password is extracted
-([`kek.go:72`](../internal/dataplane/kek.go)). Never log it. Never include
+([`names.go`](../internal/dataplane/names.go)). Never log it. Never include
 it in a CRD field.
 
 ## Backup CLI
@@ -143,10 +146,11 @@ source KEK and re-encrypted under the destination KEK before writing.
 
 ## Cross-link
 
-- The consumer (daemon) side: [`../../../core/gibson/docs/data-plane.md`](../../../core/gibson/docs/data-plane.md).
-- The SDK's (small) data-plane surface: [`../../../core/sdk/docs/data-plane.md`](../../../core/sdk/docs/data-plane.md).
-- The auth model that places the calling tenant on context (`auth.TenantID`,
-  `auth.TenantFromContext`) is owned by the [`unified-identity-and-authorization`](../../../.spec-workflow/specs/unified-identity-and-authorization/)
-  spec.
+- The consumer (daemon) side: [`docs/data-plane.md`](../../../docs/data-plane.md).
+- The SDK carries a small data-plane surface of its own. It is documented in
+  `docs/data-plane.md` of the `zeroroot-ai/sdk` repository.
+- The auth model that puts the calling tenant on the context (`auth.TenantID`,
+  `auth.TenantFromContext`) follows the `unified-identity-and-authorization`
+  spec, which this repository does not track.
 - Forbidden patterns with code examples: [`forbidden-patterns.md`](./forbidden-patterns.md).
 - Machine-readable rules: [`rules.yaml`](./rules.yaml).

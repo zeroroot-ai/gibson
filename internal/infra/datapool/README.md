@@ -8,7 +8,7 @@ call `Pool.For(tenant) -> Conn` then `Conn.Postgres() / Redis() / Neo4j() /
 Vector()`. Pattern choice is invisible above the resolver layer.
 
 Credential rules (admin vs. per-tenant) live in
-[`/core/gibson/docs/secrets.md`](../../docs/secrets.md) — read that first.
+[`docs/secrets.md`](../../../docs/secrets.md) — read that first.
 
 ---
 
@@ -94,15 +94,13 @@ from the per-tenant Vault namespace at resolve time.
 7. **Chart template.** Ship a `tenant-<store>-template:` ConfigMap the
    operator clones from. Tier-aware resource requests/limits.
 8. **Validator.** Same as Pattern A.
-9. **Migration doc.** Document Pattern B → Pattern A migration. See
-   [`MIGRATION-NEO4J.md`](./MIGRATION-NEO4J.md) as the worked example.
+9. **Migration doc.** Document the Pattern B to Pattern A migration for the
+   store you add. No worked example is tracked in this repository yet.
 
-Cross-mission analytics consumers (IntelligenceService, Observer
-graph-intelligence enrichment, startup migration drift detection) follow the
-same Pattern B per-call construction; see
-[`internal/server/daemon/intelligence_service.go`](../daemon/intelligence_service.go)
-and [`internal/orchestrator/adapter.go`](../orchestrator/adapter.go) for
-current call sites.
+Cross-mission graph consumers follow the same Pattern B per-call construction.
+See [`internal/server/daemon/graph_service.go`](../../server/daemon/graph_service.go)
+and [`internal/platform/component/graphrag_querier.go`](../../platform/component/graphrag_querier.go)
+for current call sites.
 
 ---
 
@@ -116,8 +114,8 @@ current call sites.
 | Operator burden of N StatefulSets exceeds team tolerance | **Migrate to A** regardless of fleet size |
 
 Crossover for Neo4j sits around 75-100 tenants; revisit at fleet size 75.
-Runbook: [`MIGRATION-NEO4J.md`](./MIGRATION-NEO4J.md) — five steps,
-config-swap + per-tenant export/import, no code rewrite.
+The migration is a config swap plus a per-tenant export and import. It needs no
+code rewrite. This repository tracks no runbook for it yet.
 
 ---
 

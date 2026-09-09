@@ -48,6 +48,7 @@ on:
       - architectural-doc-coverage
       - e2e-setec-roundtrip
       - pr-title-lint
+      - tree-guards
     types: [completed]
 
 permissions:

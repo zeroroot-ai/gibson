@@ -25,9 +25,11 @@ No static tokens, no PATs, no `gsk_` keys.
 
 | Concern | File |
 |---|---|
-| Service identity (Zitadel client_credentials → daemon gRPC dial) | [`internal/grpc/client.go`](../internal/grpc/client.go) |
-| Tenant lifecycle saga (Zitadel org create + FGA tuples + data plane) | [`internal/saga/flows/provision.go`](../internal/saga/flows/provision.go), [`provision_zitadel.go`](../internal/saga/flows/provision_zitadel.go) |
-| Tenant teardown saga (reverse order: data plane → FGA → Zitadel org) | [`internal/saga/flows/teardown.go`](../internal/saga/flows/teardown.go), [`teardown_zitadel.go`](../internal/saga/flows/teardown_zitadel.go) |
+| Service identity (Zitadel client_credentials token source) | [`internal/provision/entitlements_client.go`](../internal/provision/entitlements_client.go) |
+| Daemon gRPC dial over SPIFFE mTLS | [`pkg/transport/daemon/client.go`](../pkg/transport/daemon/client.go), [`internal/provision/entitlements_grpc_client.go`](../internal/provision/entitlements_grpc_client.go) |
+| Tenant lifecycle saga (foundation steps) | [`internal/saga/flows/provision.go`](../internal/saga/flows/provision.go) |
+| Zitadel org create, declarative | [`internal/controller/tenantidentity_controller.go`](../internal/controller/tenantidentity_controller.go), [`internal/identity/provisioner.go`](../internal/identity/provisioner.go) |
+| Tenant teardown saga (foundation cleanup) | [`internal/saga/flows/teardown.go`](../internal/saga/flows/teardown.go) |
 | Zitadel admin API client | [`internal/clients/zitadel/client.go`](../internal/clients/zitadel/client.go) |
 | FGA HTTP client | [`internal/clients/fga/`](../internal/clients/fga/) |
 | Operator main / wiring | [`cmd/main.go`](../cmd/main.go) |
@@ -46,7 +48,7 @@ ZITADEL_ISSUER         # e.g. https://auth.zeroroot.ai
 The Helm Secret `gibson-zitadel-tenant-operator` mounts these
 (rendered by the umbrella chart in `zeroroot-ai/charts`).
 
-[`internal/grpc/client.go`](../internal/grpc/client.go) constructs an
+[`internal/provision/entitlements_client.go`](../internal/provision/entitlements_client.go) wraps an
 oauth2 client_credentials TokenSource that:
 
 - exchanges client_id/client_secret for a Zitadel JWT,
@@ -84,11 +86,11 @@ Tenant delete:
 
 The two auth-relevant steps:
 
-- **EnsureZitadelOrg** ([`provision_zitadel.go`](../internal/saga/flows/provision_zitadel.go))
-  calls Zitadel's Management API to create the organization. The
-  fast-path verifies an existing `Status.ZitadelOrgID` still exists
-  before re-creating. Idempotent: 409/already-exists is treated as
-  success.
+- **Zitadel org create** ([`internal/identity/provisioner.go`](../internal/identity/provisioner.go),
+  driven by the `TenantIdentity` controller) calls Zitadel's Management API to
+  create the organization. The fast path verifies an existing
+  `Status.ZitadelOrgID` still exists before it re-creates. The step is
+  idempotent: a 409 already-exists counts as success.
 - **FGA tuple writes** (in [`provision.go`](../internal/saga/flows/provision.go))
   call the FGA HTTP API to add the initial tenant→admin / tenant→member
   tuples. The owner tuple binds the human who initiated tenant creation

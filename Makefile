@@ -1,7 +1,7 @@
 # Gibson Framework Makefile
 # Stage 1 - Foundation
 
-.PHONY: check-no-tracked-binaries check-brand
+.PHONY: check-no-tracked-binaries
 .PHONY: all build bin gibson-migrate sandbox-eviction-handler test test-coverage test-race lint lint-all lint-deadcode lint-deadcode-baseline clean install help proto proto-deps proto-clean check-authz check-coverage test-daemon-identity-roundtrip check-no-tenant-id check-fga-headers check-oss-boundary check-airgap-build check-rpc-test-walker coverage-profile check-coverage-floor check-diff-coverage check-coverage-gates check-critical-paths check-ci-lane-parity check-build-tags check-queue-gate vet-e2e vet-tags test-integration test-openbao test-merge-queue test-setec-roundtrip authz-registry tool-manifests tool-catalog-capture
 
 # Go parameters
@@ -344,15 +344,6 @@ check-fga-headers:
 	@bash scripts/check-fga-model-headers.sh
 	@echo "check-fga-headers PASSED"
 
-# check-brand asserts no retired brand string is tracked in the repo. The
-# script names the four strings it forbids. Keeping them out of this file is
-# the point. Exemptions are keyed by path or by a content marker, never by
-# line number. Self-test first so a silently-broken guard cannot pass by
-# finding nothing.
-check-brand:
-	@bash scripts/check-brand.sh --selftest
-	@bash scripts/check-brand.sh
-
 # check-no-tracked-binaries asserts no compiled binary (ELF, Mach-O, PE) is
 # tracked in git. Keyed by file magic, never by path. Self-test proves it fails.
 check-no-tracked-binaries:
@@ -602,7 +593,7 @@ test-merge-queue:
 # CI runs both directly (`.github/workflows/go-ci.yml` calls `make lint
 # LINT_BASE=…` and `make lint-deadcode`), so nothing is lost by keeping them out
 # of the local aggregate. Run `make lint` by hand when you actually want it.
-check: fmt check-fmt vet test-race check-no-tenant-id check-fga-headers check-brand check-no-tracked-binaries check-no-skipped-tests check-no-mcp-bridge check-noun-contract check-rpc-test-walker check-critical-paths check-ci-lane-parity check-build-tags check-queue-gate
+check: fmt check-fmt vet test-race check-no-tenant-id check-fga-headers check-no-tracked-binaries check-no-skipped-tests check-no-mcp-bridge check-noun-contract check-rpc-test-walker check-critical-paths check-ci-lane-parity check-build-tags check-queue-gate
 	@echo "All checks passed! (golangci-lint not included — run 'make lint' separately)"
 
 # Run authorization-specific checks: vet + unit tests + integration tests (requires Docker)

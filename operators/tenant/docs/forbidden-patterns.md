@@ -58,14 +58,14 @@ _, err := adminConn.Exec(ctx, sql)
 Correct (use the helper, then `pgx.Identifier`):
 
 ```go
-dbName, err := tenantDBName(tenantID)               // sanitize.go: lowercase + [a-z0-9_]
+dbName, err := tenantDBName(tenantID)               // names.go: lowercase + [a-z0-9_]
 if err != nil { return err }
 sql := "CREATE DATABASE " + pgx.Identifier{dbName}.Sanitize()
 _, err = adminConn.Exec(ctx, sql)
 ```
 
-See [`sanitize.go:30`](../internal/dataplane/sanitize.go) for the helper and
-[`postgres.go:99`](../internal/dataplane/postgres.go) for the use site.
+See [`names.go`](../internal/dataplane/names.go) for the helper and
+[`postgres.go`](../internal/dataplane/postgres.go) for the use site.
 
 ## DP-OP-003: logging or surfacing the KEK / derived password
 
@@ -89,8 +89,8 @@ if _, err := adminConn.Exec(ctx, roleSQL); err != nil {
 }
 ```
 
-See [`kek.go:72`](../internal/dataplane/kek.go) for the zero-on-defer pattern
-inside `tenantRolePassword`.
+See [`names.go`](../internal/dataplane/names.go) for the zero-on-defer pattern
+inside `tenantRolePasswordVia`.
 
 ## DP-OP-004: missing rollback in the pipeline
 
@@ -181,7 +181,7 @@ clientID := os.Getenv("ZITADEL_DASHBOARD_CLIENT_ID")          // forbidden
 clientSecret := os.Getenv("ZITADEL_DASHBOARD_CLIENT_SECRET")  // forbidden
 ```
 
-Right ([`internal/grpc/client.go:78`](../internal/grpc/client.go)):
+Right ([`internal/provision/entitlements_client.go`](../internal/provision/entitlements_client.go)):
 
 ```go
 clientID := os.Getenv("ZITADEL_TENANT_OPERATOR_CLIENT_ID")
@@ -250,7 +250,7 @@ func ensureZitadelOrg(ctx context.Context, t *Tenant) error {
 }
 ```
 
-Right ([`internal/saga/flows/provision_zitadel.go`](../internal/saga/flows/provision_zitadel.go)):
+Right ([`internal/identity/provisioner.go`](../internal/identity/provisioner.go)):
 
 ```go
 if t.Status.ZitadelOrgID != "" {
@@ -303,7 +303,7 @@ conn, err := grpc.Dial("gibson:50002",                     // forbidden
     grpc.WithTransportCredentials(insecure.NewCredentials()))
 ```
 
-Right ([`internal/grpc/client.go`](../internal/grpc/client.go) — Envoy edge):
+Right ([`pkg/transport/daemon/client.go`](../pkg/transport/daemon/client.go) — Envoy edge):
 
 ```go
 addr := config.GibsonURL                  // chart-supplied Envoy URL
