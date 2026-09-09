@@ -617,7 +617,21 @@ func (n *Neo4jProvisioner) deriveNeo4jPassword(ctx context.Context, tenantID, te
 		}
 	}
 
-	// 2) Fresh provision — generate cryptographically-random password.
+	// 2) The store. A restore (hosted, ADR-0014) brings the OpenBao volume
+	// and the Neo4j data volume back and NO Secret, so the password the
+	// data directory was initialised with lives at infra/neo4j in the
+	// tenant namespace and nowhere else. Generating a fresh one here wrote
+	// a Secret the restored store did not accept: every client failed,
+	// Neo4j rate-limited the user, and the exit test read "The client has
+	// provided incorrect authentication details too many times in a row"
+	// (blocker 3, hosted run 34377075123, 2026-09-09).
+	if creds, found, err := n.cfg.VaultClient.ReadInfraNeo4jCredentials(ctx, tenantID); err != nil {
+		return "", fmt.Errorf("dataplane/neo4j: read credentials from Vault for tenant %q: %w", tenantID, err)
+	} else if found && creds.Password != "" {
+		return creds.Password, nil
+	}
+
+	// 3) Fresh provision — generate cryptographically-random password.
 	// 32 raw bytes → 43-char base64-url (no padding); well within Neo4j's
 	// password length limits and high entropy.
 	//

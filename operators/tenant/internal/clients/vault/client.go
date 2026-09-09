@@ -143,6 +143,14 @@ type AdminClient interface {
 	// Spec tenant-provisioning-unification-phase2 Requirement 1.7.
 	WriteInfraNeo4jCredentials(ctx context.Context, tenantID string, creds pdataplane.Neo4jCredentials) error
 
+	// ReadInfraNeo4jCredentials reads the Neo4j credentials the operator
+	// wrote at "infra/neo4j" in the tenant-<id> namespace. found is false
+	// when the path holds nothing (a tenant provisioned for the first
+	// time); any other failure is an error. A restore brings the store
+	// back and no Secret, so this is how the operator learns the password
+	// the restored Neo4j data directory was initialised with.
+	ReadInfraNeo4jCredentials(ctx context.Context, tenantID string) (creds pdataplane.Neo4jCredentials, found bool, err error)
+
 	// DeleteInfraNeo4j removes the Neo4j credentials path "infra/neo4j" for
 	// tenantID. Idempotent: returns nil when the path is already absent.
 	// Does NOT delete the per-tenant namespace itself.
