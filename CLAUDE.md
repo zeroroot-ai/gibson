@@ -65,7 +65,7 @@ The authorization rule book lives at `internal/platform/authz/registry/`:
 - `permissions.ts` — TypeScript map for the dashboard sister spec
 - `audit.csv` — auditor-friendly flat table (rpc, relation, object_type, deriver, identities, source_proto_file)
 
-**Runtime delivery to ext-authz (deploy#852).** The daemon serves the embedded
+**Runtime delivery to ext-authz.** The daemon serves the embedded
 `registry.yaml` from an mTLS listener (`internal/server/daemon/authz_registry_subsystem.go`,
 `GET /authz/registry.yaml` on `GIBSON_AUTHZ_REGISTRY_PORT`, default `:8086`),
 authorized to an explicit SPIFFE reader allow-list
@@ -216,7 +216,7 @@ Spec: `canonical-service-identity`.
 
 ## Deployment mode (deleted)
 
-The `GIBSON_MODE` env var, the `Mode`/`ModeSaaS`/`ModeSelfhost`/`ModeDev` types, and the `cfg.Mode()` accessor were deleted as part of the one-code-path epic (`deploy#205`). The daemon binary boots identically in every environment — kind, staging, prod, customer self-hosted. Per-environment differences live ONLY in helm values (which fail-loud on missing dependencies).
+The `GIBSON_MODE` env var, the `Mode`/`ModeSaaS`/`ModeSelfhost`/`ModeDev` types, and the `cfg.Mode()` accessor were deleted as part of the one-code-path epic. The daemon binary boots identically in every environment — kind, staging, prod, customer self-hosted. Per-environment differences live ONLY in helm values (which fail-loud on missing dependencies).
 
 Do NOT re-introduce a deployment-mode env var. Per-feature gates that genuinely need a knob should consume a dedicated, single-purpose env var (e.g. `GIBSON_STRICT_TENANT`), validated at config-load time, NOT a multi-valued mode enum.
 
