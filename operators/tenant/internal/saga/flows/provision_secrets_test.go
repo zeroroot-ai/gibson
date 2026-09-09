@@ -87,6 +87,9 @@ func (s *stubVaultAdmin) DeleteInfraNeo4j(_ context.Context, _ string) error {
 func (s *stubVaultAdmin) WriteInfraNeo4jCredentials(_ context.Context, _ string, _ pdataplane.Neo4jCredentials) error {
 	return nil
 }
+func (s *stubVaultAdmin) ReadInfraNeo4jCredentials(_ context.Context, _ string) (pdataplane.Neo4jCredentials, bool, error) {
+	return pdataplane.Neo4jCredentials{}, false, nil
+}
 
 // Per-store credential writers added in spec
 // tenant-provisioning-unification-phase2 Phase 2.4 — stubbed as no-ops

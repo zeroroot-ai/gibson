@@ -64,6 +64,9 @@ func (r *recordingVaultAdmin) DeleteInfraNeo4j(_ context.Context, _ string) erro
 func (r *recordingVaultAdmin) WriteInfraNeo4jCredentials(_ context.Context, _ string, _ pdataplane.Neo4jCredentials) error {
 	return nil
 }
+func (r *recordingVaultAdmin) ReadInfraNeo4jCredentials(_ context.Context, _ string) (pdataplane.Neo4jCredentials, bool, error) {
+	return pdataplane.Neo4jCredentials{}, false, nil
+}
 
 func (r *recordingVaultAdmin) WriteInfraPostgres(_ context.Context, tenantID string, creds pdataplane.PostgresCredentials) error {
 	r.mu.Lock()

@@ -116,6 +116,53 @@ func (c *httpClient) DeleteInfraVector(ctx context.Context, tenantID string) err
 // daemon reads this with a single broker.Get and unmarshals into the
 // matching struct — no registry-table lookup needed for bolt URI.
 // Spec tenant-provisioning-unification-phase2 Requirement 1.7.
+// kvReadPayload is the KV v2 read envelope: `{"data":{"data":{"value":
+// "<base64 JSON>"}}}`, the mirror of kvWritePayload.
+type kvReadPayload struct {
+	Data struct {
+		Data struct {
+			Value string `json:"value"`
+		} `json:"data"`
+	} `json:"data"`
+}
+
+// readInfraSecret reads one blob written by writeInfraSecret back into out.
+// found is false on 404 (nothing written yet); any other failure is an
+// error, including a blob that is not the base64 JSON writeInfraSecret
+// produces.
+func (c *httpClient) readInfraSecret(ctx context.Context, tenantID, infraSuffix string, out any) (bool, error) {
+	if err := validateTenantID(tenantID); err != nil {
+		return false, err
+	}
+	ns := joinNamespace(c.cfg.RootNamespace, tenantNamespacePath(tenantID))
+	var env kvReadPayload
+	err := c.do(ctx, http.MethodGet, "/v1/secret/data/"+infraSuffix, ns, nil, &env)
+	if errors.Is(err, clients.ErrNotFound) {
+		return false, nil
+	}
+	if err != nil {
+		return false, err
+	}
+	raw, err := base64.StdEncoding.DecodeString(env.Data.Data.Value)
+	if err != nil {
+		return false, fmt.Errorf("vault: %s for tenant %q is not base64: %w", infraSuffix, tenantID, err)
+	}
+	if err := json.Unmarshal(raw, out); err != nil {
+		return false, fmt.Errorf("vault: %s for tenant %q is not the credentials JSON: %w", infraSuffix, tenantID, err)
+	}
+	return true, nil
+}
+
+// ReadInfraNeo4jCredentials implements AdminClient.
+func (c *httpClient) ReadInfraNeo4jCredentials(ctx context.Context, tenantID string) (pdataplane.Neo4jCredentials, bool, error) {
+	var creds pdataplane.Neo4jCredentials
+	found, err := c.readInfraSecret(ctx, tenantID, pdataplane.VaultPathInfraNeo4j, &creds)
+	if err != nil || !found {
+		return pdataplane.Neo4jCredentials{}, false, err
+	}
+	return creds, true, nil
+}
+
 func (c *httpClient) WriteInfraNeo4jCredentials(ctx context.Context, tenantID string, creds pdataplane.Neo4jCredentials) error {
 	return c.writeInfraSecret(ctx, tenantID, pdataplane.VaultPathInfraNeo4j, creds)
 }
