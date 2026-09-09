@@ -45,6 +45,12 @@ func TestReadInfraNeo4jCredentials(t *testing.T) {
 		case "tenant-broken", "tenant-broken/":
 			w.Header().Set("Content-Type", "application/json")
 			_, _ = w.Write([]byte(`{"data":{"data":{"value":"not base64!"}}}`))
+		case "tenant-notjson", "tenant-notjson/":
+			w.Header().Set("Content-Type", "application/json")
+			_, _ = w.Write([]byte(`{"data":{"data":{"value":"` + base64.StdEncoding.EncodeToString([]byte("plain text")) + `"}}}`))
+		case "tenant-sealed", "tenant-sealed/":
+			w.WriteHeader(http.StatusServiceUnavailable)
+			_, _ = w.Write([]byte(`{"errors":["Vault is sealed"]}`))
 		default:
 			w.WriteHeader(http.StatusNotFound)
 			_, _ = w.Write([]byte(`{"errors":[]}`))
@@ -79,5 +85,19 @@ func TestReadInfraNeo4jCredentials(t *testing.T) {
 	}
 	if errors.Is(err, context.Canceled) {
 		t.Fatal("unexpected error class")
+	}
+	if _, _, err = c.ReadInfraNeo4jCredentials(context.Background(), "notjson"); err == nil {
+		t.Fatal("a base64 blob that is not JSON must be an error")
+	}
+
+	// Any answer that is not 200 or 404 is an error: a sealed store must not
+	// read as "nothing written yet".
+	if _, found, err := c.ReadInfraNeo4jCredentials(context.Background(), "sealed"); err == nil || found {
+		t.Fatalf("a 503 must be an error, got found=%v err=%v", found, err)
+	}
+
+	// A tenant id the namespace rules refuse never reaches the wire.
+	if _, _, err := c.ReadInfraNeo4jCredentials(context.Background(), "not a tenant id!"); err == nil {
+		t.Fatal("an invalid tenant id must be refused")
 	}
 }
