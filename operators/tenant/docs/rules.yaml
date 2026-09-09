@@ -27,7 +27,7 @@ rules:
       - "internal/dataplane/neo4j.go"
       - "internal/dataplane/redis.go"
       - "internal/dataplane/vector.go"
-      - "internal/dataplane/kek.go"
+      - "internal/dataplane/kek_deriver.go"
     pattern: manual-review
     target:
       requires: "CREATE … IF NOT EXISTS or pre-check + skip; DROP … IF EXISTS or ignore-not-found"
@@ -43,12 +43,12 @@ rules:
     description: |
       Tenant identifiers used in SQL identifiers (database names, role
       names, schema names) MUST be sanitized via the helpers in
-      sanitize.go. Raw concatenation into a CREATE DATABASE / CREATE ROLE
+      names.go. Raw concatenation into a CREATE DATABASE / CREATE ROLE
       string is a SQL-injection footgun even in admin-only code.
     scope:
       - "internal/dataplane/**/*.go"
     exempt:
-      - "internal/dataplane/sanitize.go"
+      - "internal/dataplane/names.go"
       - "**/*_test.go"
     pattern: required-call
     target:
@@ -56,7 +56,7 @@ rules:
       requires: "tenantDBName(tenantID) or sanitizeTenantID(tenantID); then pgx.Identifier{...}.Sanitize()"
     severity: error
     message: |
-      Use tenantDBName / sanitizeTenantID from internal/dataplane/sanitize.go,
+      Use tenantDBName / sanitizeTenantID from internal/dataplane/names.go,
       then wrap with pgx.Identifier{name}.Sanitize() before interpolating
       into SQL. Bare fmt.Sprintf("CREATE DATABASE %s", tenantID) is forbidden.
     enforced_by:
@@ -115,7 +115,7 @@ rules:
       a coordinated re-encryption procedure invalidates every wrapped DEK
       in storage.
     scope:
-      - "internal/dataplane/kek.go"
+      - "cmd/gibson-backup/main.go"
     pattern: forbidden-literal
     target:
       regex: "hkdfInfo\\s*=\\s*\"(?!gibson/v1/tenant-kek\")"
@@ -223,8 +223,8 @@ rules:
       without creating a second org; the same applies to FGA tuple
       writes (which are inherently idempotent at the FGA layer).
     scope:
-      - "internal/saga/flows/provision_zitadel.go"
-      - "internal/saga/flows/teardown_zitadel.go"
+      - "internal/identity/provisioner.go"
+      - "internal/controller/tenantidentity_controller.go"
       - "internal/clients/zitadel/**/*.go"
     pattern:
       kind: required_call

@@ -48,7 +48,7 @@ require (
 	github.com/spiffe/go-spiffe/v2 v2.8.1
 	github.com/stretchr/testify v1.12.1
 	github.com/testcontainers/testcontainers-go v0.42.0
-	github.com/zeroroot-ai/ast-checks v0.3.0
+	github.com/zeroroot-ai/ast-checks v0.3.1
 	github.com/zeroroot-ai/sdk v0.177.3
 	github.com/zeroroot-ai/setec v0.114.0
 	github.com/zeroroot-ai/testfixtures v0.2.0

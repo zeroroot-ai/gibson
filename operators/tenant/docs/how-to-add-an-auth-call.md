@@ -23,7 +23,7 @@ The operator wires two auth-bearing clients at startup
   for org / member CRUD against Zitadel admin API.
 - `clients.FGA` ([`internal/clients/fga/`](../internal/clients/fga/))
   for tuple writes against the FGA HTTP API.
-- `clients.Daemon` ([`internal/grpc/client.go`](../internal/grpc/client.go))
+- the daemon transport ([`pkg/transport/daemon/client.go`](../pkg/transport/daemon/client.go))
   for outbound RPCs to the daemon (Envoy edge).
 
 New saga steps receive the same `ProvisionDeps` bundle. Reuse those

@@ -111,7 +111,7 @@ daemon process. `slog.LogValue` redaction is not enough — the byte slice is
 wiped at the source.
 
 The tenant-operator derives the same KEK independently
-([`tenant-operator/internal/dataplane/kek.go:50`](../../../enterprise/platform/tenant-operator/internal/dataplane/kek.go))
+([`operators/tenant/internal/dataplane/kek_deriver.go`](../operators/tenant/internal/dataplane/kek_deriver.go))
 to set the per-tenant Postgres role password. The shared `info` string
 `"gibson/v1/tenant-kek"` is the contract.
 
@@ -182,13 +182,13 @@ from non-admin code.
 ## Provisioning
 
 The daemon does **not** provision tenant data planes. The
-[`gibson-tenant-operator`](../../../enterprise/platform/tenant-operator/) owns
+[`gibson-tenant-operator`](../operators/tenant/) owns
 the lifecycle: it creates the per-tenant Postgres database, role, dedicated
 Neo4j StatefulSet, Redis logical-DB allocation, and Qdrant collection. Every
 tenant gets its own `tenant-<id>-neo4j-0` pod at onboarding — there is no
 shared Neo4j cluster; the daemon resolves per-tenant Neo4j sessions
 exclusively via `Pool.For(tenant).Neo4j()`. See
-[`../../../enterprise/platform/tenant-operator/docs/data-plane.md`](../../../enterprise/platform/tenant-operator/docs/data-plane.md).
+[`operators/tenant/docs/data-plane.md`](../operators/tenant/docs/data-plane.md).
 
 The daemon is a **read-consumer of provisioning state**. Before returning a
 `Conn`, `pool.For` calls
@@ -220,7 +220,7 @@ gibson-migrate down --tenant <id> --to <migration_id> --confirm
 
 Migration files:
 
-- Postgres: [`migrations/postgres/`](../migrations/postgres/) (`*.up.sql` /
+- Postgres: [`pkg/platform/migrations/postgres/`](../pkg/platform/migrations/postgres/) (`*.up.sql` /
   `*.down.sql`, golang-migrate format).
 - Neo4j: [`migrations/neo4j/`](../migrations/neo4j/) (`*.up.cypher` files
   applied in filename-sorted order).
@@ -236,28 +236,22 @@ The runner uses the admin pool for tenant enumeration; the
 analyzer allowlists `cmd/gibson-migrate/` for raw pgx and neo4j-go-driver
 imports.
 
-## Per-tenant intelligence + drift detection
+## Per-tenant graph queries
 
 Spec: `graphrag-intelligence-tenant-scope` (closes the last shared-Neo4j coupling
 points after `graphrag-tenant-scope`).
 
-Three cross-mission consumers route through `pool.For(tenant).Neo4j()` rather
-than a shared cluster: the IntelligenceService gRPC handlers
-([`internal/server/daemon/intelligence_service.go`](../internal/server/daemon/intelligence_service.go),
-five RPCs — `GetRecurringVulnerabilities`, `GetRemediationMetrics`,
-`GetAssetRiskScore`, `GetAttackPatterns`, `GetSimilarTargets` — each
-constructs a per-tenant `*graph.SessionGraphClient` per call); the startup
-migration drift gate
-([`internal/server/daemon/startup_migration_check.go`](../internal/server/daemon/startup_migration_check.go),
-which iterates tenants via the Tenant CRD list with a worker-pool of
-configurable concurrency, default 4, max 16, total deadline 30 s, surfacing
-drift as `gibson_tenant_neo4j_migration_drift{tenant}`); and the orchestrator
-Observer's graph-intelligence enrichment
-([`internal/orchestrator/adapter.go`](../internal/orchestrator/adapter.go),
-which dispatches through the `graph.GraphClient` interface — both
-`*Neo4jClient` and `*SessionGraphClient` implement `ExecuteRead`/`ExecuteWrite`
-— so the per-tenant session is the production path with no type-assertion
-fallback). All three follow Pattern B per-call construction.
+Cross-mission graph reads route through `pool.For(tenant).Neo4j()` rather than
+a shared cluster. The GraphService gRPC handlers
+([`internal/server/daemon/graph_service.go`](../internal/server/daemon/graph_service.go))
+are the in-tree example. Every RPC reads the tenant from the context, resolves
+the live pool, constructs a per-call `DashboardQueries` from `conn.Neo4j`, and
+runs the query under a five-second deadline. That is Pattern B per-call
+construction.
+
+The GraphRAG querier
+([`internal/platform/component/graphrag_querier.go`](../internal/platform/component/graphrag_querier.go))
+follows the same shape for component-facing queries.
 
 ## Mission / finding / run stores — per-tenant cutover complete
 
@@ -302,9 +296,9 @@ violation to a PR fails CI.
 
 ## Cross-link
 
-- `auth.TenantID`, `auth.TenantFromContext`, `auth.IdentityFromContext`, and the auth chain that places identity on context are defined by the [`unified-identity-and-authorization`](../../../.spec-workflow/specs/unified-identity-and-authorization/) spec. The SDK type is at [`sdk/auth/tenantid.go`](../../sdk/auth/tenantid.go).
-- The provisioner side of this story: [`../../../enterprise/platform/tenant-operator/docs/data-plane.md`](../../../enterprise/platform/tenant-operator/docs/data-plane.md).
-- The SDK's (small) data-plane surface: [`../../sdk/docs/data-plane.md`](../../sdk/docs/data-plane.md).
+- `auth.TenantID`, `auth.TenantFromContext` and `auth.IdentityFromContext` come from the SDK, in package `auth` of the `zeroroot-ai/sdk` repository. The auth chain that puts the identity on the context follows the `unified-identity-and-authorization` spec, which this repository does not track.
+- The provisioner side of this story: [`operators/tenant/docs/data-plane.md`](../operators/tenant/docs/data-plane.md).
+- The SDK carries a small data-plane surface of its own. It is documented in `docs/data-plane.md` of the `zeroroot-ai/sdk` repository.
 - Forbidden patterns with code examples: [`forbidden-patterns.md`](./forbidden-patterns.md).
 - Adding new ops on `Conn`: [`how-to-add-a-store-operation.md`](./how-to-add-a-store-operation.md).
 - Machine-readable rules: [`rules.yaml`](./rules.yaml).

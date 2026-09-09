@@ -19,7 +19,7 @@ What the daemon **does** own:
 | Concern | File |
 |---|---|
 | Capability-grant minting (Ed25519, KMS-derived) | [`internal/platform/capabilitygrant/mint.go`](../internal/platform/capabilitygrant/mint.go) |
-| JWKS publication for CG-JWT verifiers | [`internal/platform/capabilitygrant/jwks.go`](../internal/platform/capabilitygrant/jwks.go) |
+| Per-kid public-key endpoint for CG-JWT verifiers | [`internal/server/daemon/capabilitygrant_keys.go`](../internal/server/daemon/capabilitygrant_keys.go) |
 | Single multiplexed gRPC listener with SDK auth interceptor | [`internal/server/daemon/grpc.go`](../internal/server/daemon/grpc.go) |
 | Inbound SPIFFE peer pin (Envoy SVID only) | [`internal/server/daemon/grpc.go:179`](../internal/server/daemon/grpc.go) |
 | Startup self-check: every registered method has a registry entry | [`internal/server/daemon/grpc.go:762`](../internal/server/daemon/grpc.go) |
@@ -238,41 +238,6 @@ The auth-specific allowlists are narrow: the FGA bridge in
 capability-grant feature still has a residual FGA call that spec Phase 3
 plans to remove; until then the analyzer permits it explicitly.
 
-## Impersonation tokens
-
-The daemon mints platform-operator impersonation JWTs from
-`PlatformOperatorService.ImpersonateTenant`. The minter
-([`internal/platform/impersonation/issuer.go`](../internal/platform/impersonation/issuer.go))
-HMAC-SHA256-signs short-lived (≤ 1 h) tokens whose `sub` claim is the
-target tenant and whose `impersonator` claim is the operator's subject.
-
-The signing key is REQUIRED at startup. The daemon refuses to come up
-when `GIBSON_IMPERSONATION_KEY` is unset or shorter than 32 bytes
-(RFC 7518 §3.2). There is no in-process random fallback — that was the
-gibson#103 defect, which made every previously-issued token unverifiable
-on each restart and silently diverged across HA replicas.
-
-The chart sources both env vars from a single ESO-managed Secret
-(`gibson-workloads-impersonation-key`, template
-[`secrets/impersonation-key.yaml`](https://github.com/zeroroot-ai/charts/blob/main/helm/gibson-workloads/templates/secrets/impersonation-key.yaml)):
-
-| Env                                  | Purpose                                                       |
-|--------------------------------------|---------------------------------------------------------------|
-| `GIBSON_IMPERSONATION_KEY`           | **current** — the only key used to mint                       |
-| `GIBSON_IMPERSONATION_KEY_PREVIOUS`  | **previous** — optional; Verify accepts tokens signed by it   |
-
-`Issuer.Verify` (same file) accepts tokens signed by either key. The
-previous slot is empty in steady state and populated only during a
-rotation; once populated, in-flight operator sessions survive the
-rotation. The operator clears the slot after maxTTL has elapsed (≤ 1 h).
-
-Rotation procedure: the estate runbooks in `zeroroot-ai/hosted` (private; the `deploy` repo that held the old runbook was deleted on 2026-09-04).
-
-Note: no in-tree caller of `Verify` exists today. The method ships
-alongside the minter so the rotation contract lives next to the key
-material; the consumer (a downstream impersonation-token verifier) is
-not yet implemented.
-
 ## What's gone
 
 | Removed | Why |
@@ -285,6 +250,7 @@ not yet implemented.
 | `_system` fallback in `TenantFromContext` | Audit C11/C12. Empty tenant → PermissionDenied. |
 | Three separate gRPC listeners (`:50001`, `:50002`, `:50100`) | Single multiplexed port behind Envoy. |
 | `internal/platform/capabilitygrant/` inline-secret implementation | Replaced by KMS-derived Ed25519 minting. |
+| `DaemonOperatorService.ImpersonateTenant` and its JWT minter | Deleted as a dead, uncalled admin RPC (gibson#1049). |
 
 ## Cross-link
 
