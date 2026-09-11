@@ -47,7 +47,8 @@ func resolveCredential(
 		return "", nil
 	}
 
-	return "", llm.NewAuthError(provider, fmt.Errorf("missing credential: %s", describeCredentialSource(extraKey)))
+	return "", fmt.Errorf("resolve %s credential: %w",
+		provider, llm.NewAuthError(provider, fmt.Errorf("missing credential: %s", describeCredentialSource(extraKey))))
 }
 
 // describeCredentialSource builds a human-readable pointer to where the
