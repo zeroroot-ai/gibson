@@ -32,7 +32,7 @@ func NewHuggingFaceProvider(cfg llm.ProviderConfig) (*HuggingFaceProvider, error
 
 // newHuggingFaceProviderWithContext constructs a HuggingFace provider, resolving the credential from cfg (see resolveCredential).
 func newHuggingFaceProviderWithContext(ctx context.Context, cfg llm.ProviderConfig) (*HuggingFaceProvider, error) {
-	token, err := resolveCredential(cfg, "huggingface", "", "HUGGINGFACE_API_TOKEN", true)
+	token, err := resolveCredential(cfg, "huggingface", "", true)
 	if err != nil {
 		return nil, err
 	}

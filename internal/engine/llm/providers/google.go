@@ -27,16 +27,11 @@ type GoogleProvider struct {
 
 // NewGoogleProvider creates a new Google provider backed by the Eino Gemini component.
 //
-// The credential comes from cfg.APIKey — the caller's own key. The
-// GOOGLE_API_KEY environment variable is consulted only when the dev env-var
-// fallback is explicitly enabled (see devEnvCredential); otherwise a config
-// with no key is rejected rather than quietly constructed on the daemon's
-// ambient key.
+// The credential comes from cfg.APIKey — the caller's own key, which the
+// tenant provider resolver took from the secrets broker. A config with no
+// key is rejected: the daemon's environment is never a credential source.
 func NewGoogleProvider(cfg llm.ProviderConfig) (*GoogleProvider, error) {
 	apiKey := cfg.APIKey
-	if apiKey == "" {
-		apiKey = devEnvCredential("GOOGLE_API_KEY")
-	}
 
 	if apiKey == "" {
 		return nil, llm.NewAuthError("google", nil)

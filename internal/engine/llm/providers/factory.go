@@ -24,8 +24,8 @@ func NewProvider(cfg llm.ProviderConfig) (llm.LLMProvider, error) {
 // NewProviderWithContext constructs an LLMProvider from cfg. Credentials come
 // from cfg.APIKey/cfg.Extra, which the tenant provider resolver populates from
 // the secrets broker before the factory runs (see
-// tenantprovider.decryptedToLLMConfig); resolveCredential also honours the
-// dev-only GIBSON_DEV_ENV_FALLBACK env chain.
+// tenantprovider.decryptedToLLMConfig). There is no other source: the
+// daemon's environment is never a credential.
 //
 // Every constructed provider is wrapped with a circuitLLMProvider backed by a
 // sony/gobreaker circuit breaker (10 consecutive failures to open, 60 s

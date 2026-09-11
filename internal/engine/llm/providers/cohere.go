@@ -30,7 +30,7 @@ func NewCohereProvider(cfg llm.ProviderConfig) (*CohereProvider, error) {
 
 // newCohereProviderWithContext constructs a Cohere provider, resolving the credential from cfg (see resolveCredential).
 func newCohereProviderWithContext(ctx context.Context, cfg llm.ProviderConfig) (*CohereProvider, error) {
-	token, err := resolveCredential(cfg, "cohere", "", "COHERE_API_KEY", true)
+	token, err := resolveCredential(cfg, "cohere", "", true)
 	if err != nil {
 		return nil, err
 	}

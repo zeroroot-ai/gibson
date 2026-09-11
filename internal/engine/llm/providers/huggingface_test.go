@@ -27,18 +27,6 @@ func TestNewHuggingFaceProvider_MissingToken(t *testing.T) {
 	require.Error(t, err)
 }
 
-func TestNewHuggingFaceProvider_EnvFallback(t *testing.T) {
-	// GIBSON_DEV_ENV_FALLBACK must be true to allow env-var credential fallback.
-	t.Setenv("GIBSON_DEV_ENV_FALLBACK", "true")
-	t.Setenv("HUGGINGFACE_API_TOKEN", "hf-env")
-	p, err := NewHuggingFaceProvider(llm.ProviderConfig{
-		Type:         llm.ProviderHuggingFace,
-		DefaultModel: "meta-llama/Llama-3.1-8B-Instruct",
-	})
-	require.NoError(t, err)
-	require.NotNil(t, p.model)
-}
-
 func TestHuggingFaceProvider_Models(t *testing.T) {
 	p := &HuggingFaceProvider{}
 	models, err := p.Models(nil)

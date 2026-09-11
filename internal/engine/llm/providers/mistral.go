@@ -30,7 +30,7 @@ func NewMistralProvider(cfg llm.ProviderConfig) (*MistralProvider, error) {
 
 // newMistralProviderWithContext constructs a Mistral provider, resolving the credential from cfg (see resolveCredential).
 func newMistralProviderWithContext(ctx context.Context, cfg llm.ProviderConfig) (*MistralProvider, error) {
-	apiKey, err := resolveCredential(cfg, "mistral", "", "MISTRAL_API_KEY", true)
+	apiKey, err := resolveCredential(cfg, "mistral", "", true)
 	if err != nil {
 		return nil, err
 	}
