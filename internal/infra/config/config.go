@@ -212,59 +212,15 @@ type SecurityConfig struct {
 	AllowPrivateBrokerEndpoints bool `mapstructure:"allow_private_broker_endpoints" yaml:"allow_private_broker_endpoints"`
 }
 
-// LLMConfig contains LLM provider configuration.
+// LLMConfig contains the daemon's LLM execution settings. There is no
+// provider block: the platform holds no LLM credential of its own, and a
+// tenant's providers live in that tenant's provider configuration.
 type LLMConfig struct {
-	// DefaultProvider is the default LLM provider
-	DefaultProvider string `mapstructure:"default_provider" yaml:"default_provider"`
-
-	// Providers contains provider-specific configurations
-	Providers map[string]ProviderConfig `mapstructure:"providers" yaml:"providers"`
-
 	// ExecRateLimits configures per-RPC tenant rate limits for the LLM execution
 	// handlers (ExecuteLLM, StreamLLM, TestProvider). Keys are RPC names;
 	// values are requests-per-minute limits. When a key is absent the default
 	// from ratelimit.DefaultLimits() is used.
 	ExecRateLimits map[string]int `mapstructure:"rate_limits" yaml:"rate_limits"`
-}
-
-// ProviderConfig contains configuration for an LLM provider.
-type ProviderConfig struct {
-	// Type is the provider type (openai, anthropic, google, ollama)
-	Type string `mapstructure:"type" yaml:"type"`
-
-	// APIKey is the API key for the provider
-	APIKey string `mapstructure:"api_key" yaml:"api_key"`
-
-	// APIKeyEnv is the environment variable containing the API key
-	APIKeyEnv string `mapstructure:"api_key_env" yaml:"api_key_env"`
-
-	// BaseURL overrides the default API endpoint
-	BaseURL string `mapstructure:"base_url" yaml:"base_url"`
-
-	// Model is the default model to use
-	Model string `mapstructure:"model" yaml:"model"`
-
-	// MaxTokens is the default max tokens
-	MaxTokens int `mapstructure:"max_tokens" yaml:"max_tokens"`
-
-	// Temperature is the default temperature
-	Temperature float64 `mapstructure:"temperature" yaml:"temperature"`
-
-	// Timeout for API requests
-	Timeout time.Duration `mapstructure:"timeout" yaml:"timeout"`
-
-	// RateLimits configures rate limiting
-	RateLimits RateLimitConfig `mapstructure:"rate_limits" yaml:"rate_limits"`
-
-	// Available indicates whether this provider passed API key validation at startup.
-	// Set by ValidateProviderKeys(). Not persisted to config file.
-	Available bool `mapstructure:"-" yaml:"-" json:"-"`
-}
-
-// RateLimitConfig contains rate limiting configuration.
-type RateLimitConfig struct {
-	RequestsPerMinute int `mapstructure:"requests_per_minute" yaml:"requests_per_minute"`
-	TokensPerMinute   int `mapstructure:"tokens_per_minute" yaml:"tokens_per_minute"`
 }
 
 // LoggingConfig contains logging configuration.

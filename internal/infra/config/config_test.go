@@ -43,9 +43,6 @@ func TestDefaultConfig(t *testing.T) {
 	assert.True(t, cfg.Security.SSLValidation)
 	assert.True(t, cfg.Security.AuditLogging)
 
-	// Test LLM defaults
-	assert.Empty(t, cfg.LLM.DefaultProvider)
-
 	// Test Logging defaults
 	assert.Equal(t, "info", cfg.Logging.Level)
 	assert.Equal(t, "json", cfg.Logging.Format)
@@ -88,9 +85,6 @@ security:
   key_derivation: scrypt
   ssl_validation: true
   audit_logging: false
-
-llm:
-  default_provider: openai
 
 logging:
   level: debug
@@ -138,8 +132,6 @@ activity_logging:
 	assert.Equal(t, "scrypt", cfg.Security.KeyDerivation)
 	assert.True(t, cfg.Security.SSLValidation)
 	assert.False(t, cfg.Security.AuditLogging)
-
-	assert.Equal(t, "openai", cfg.LLM.DefaultProvider)
 
 	assert.Equal(t, "debug", cfg.Logging.Level)
 	assert.Equal(t, "text", cfg.Logging.Format)
@@ -190,9 +182,6 @@ security:
   ssl_validation: true
   audit_logging: true
 
-llm:
-  default_provider: ${GIBSON_PROVIDER}
-
 logging:
   level: info
   format: json
@@ -219,7 +208,6 @@ activity_logging:
 	assert.Equal(t, "/custom/gibson", cfg.Core.HomeDir)
 	assert.Equal(t, "/custom/gibson/data", cfg.Core.DataDir)
 	assert.Equal(t, "/custom/gibson/cache", cfg.Core.CacheDir)
-	assert.Equal(t, "anthropic", cfg.LLM.DefaultProvider)
 }
 
 func TestLoadWithMissingEnvironmentVariables(t *testing.T) {

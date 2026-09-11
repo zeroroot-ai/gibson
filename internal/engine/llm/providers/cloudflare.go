@@ -32,11 +32,11 @@ func NewCloudflareProvider(cfg llm.ProviderConfig) (*CloudflareProvider, error) 
 
 // newCloudflareProviderWithContext constructs a Cloudflare provider, resolving the credential from cfg (see resolveCredential).
 func newCloudflareProviderWithContext(ctx context.Context, cfg llm.ProviderConfig) (*CloudflareProvider, error) {
-	accountID, err := resolveCredential(cfg, "cloudflare", "cloudflare_account_id", "CLOUDFLARE_ACCOUNT_ID", true)
+	accountID, err := resolveCredential(cfg, "cloudflare", "cloudflare_account_id", true)
 	if err != nil {
 		return nil, err
 	}
-	token, err := resolveCredential(cfg, "cloudflare", "", "CLOUDFLARE_API_TOKEN", true)
+	token, err := resolveCredential(cfg, "cloudflare", "", true)
 	if err != nil {
 		return nil, err
 	}

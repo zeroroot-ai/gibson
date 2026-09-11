@@ -27,18 +27,6 @@ func TestNewCohereProvider_MissingToken(t *testing.T) {
 	require.Error(t, err)
 }
 
-func TestNewCohereProvider_EnvFallback(t *testing.T) {
-	// GIBSON_DEV_ENV_FALLBACK must be true to allow env-var credential fallback.
-	t.Setenv("GIBSON_DEV_ENV_FALLBACK", "true")
-	t.Setenv("COHERE_API_KEY", "env-key")
-	p, err := NewCohereProvider(llm.ProviderConfig{
-		Type:         llm.ProviderCohere,
-		DefaultModel: "command-r",
-	})
-	require.NoError(t, err)
-	require.NotNil(t, p.model)
-}
-
 func TestCohereProvider_Models(t *testing.T) {
 	p := &CohereProvider{}
 	models, err := p.Models(nil)

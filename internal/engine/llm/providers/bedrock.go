@@ -41,12 +41,11 @@ const defaultBedrockModelID = "anthropic.claude-3-sonnet-20240229-v1:0"
 //  2. Static creds from cfg.Extra["aws_access_key_id"] / ["aws_secret_access_key"]
 //     (and optional ["aws_session_token"]). These are treated as a pair — both
 //     must be set or both empty.
-//  3. Env vars AWS_ACCESS_KEY_ID / AWS_SECRET_ACCESS_KEY (+ optional
-//     AWS_SESSION_TOKEN) — ONLY when the dev env-var fallback is explicitly
-//     enabled (see devEnvCredential). Without that gate a config carrying no
-//     credential of its own would construct on the daemon's ambient keys and
-//     then be registered as though the credential belonged to the caller.
-//  4. The AWS SDK default credential chain (shared config, IAM role, IRSA, etc.).
+//  3. The AWS SDK default credential chain (shared config, IAM role, IRSA, etc.).
+//
+// The daemon's environment is never read for a static key: a config carrying
+// no credential of its own must not construct on the daemon's ambient keys and
+// then be registered as though the credential belonged to the caller.
 //
 // Region resolution: cfg.Extra["aws_region"] → AWS_REGION env → us-east-1.
 // Region is not a credential, so it is read from the environment unguarded.
@@ -78,9 +77,9 @@ func NewBedrockProvider(cfg llm.ProviderConfig) (*BedrockProvider, error) {
 	useIRSA := cfg.Extra["use_irsa"] == "true"
 
 	if !useIRSA {
-		ak := firstNonEmpty(cfg.Extra["aws_access_key_id"], devEnvCredential("AWS_ACCESS_KEY_ID"))
-		sk := firstNonEmpty(cfg.Extra["aws_secret_access_key"], devEnvCredential("AWS_SECRET_ACCESS_KEY"))
-		st := firstNonEmpty(cfg.Extra["aws_session_token"], devEnvCredential("AWS_SESSION_TOKEN"))
+		ak := cfg.Extra["aws_access_key_id"]
+		sk := cfg.Extra["aws_secret_access_key"]
+		st := cfg.Extra["aws_session_token"]
 
 		// If only one of ak/sk is set, that's a misconfiguration — fail loudly
 		// rather than silently falling through to the default chain.

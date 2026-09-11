@@ -12,7 +12,6 @@ import (
 	"github.com/zeroroot-ai/gibson/internal/engine/finding"
 	"github.com/zeroroot-ai/gibson/internal/engine/harness"
 	"github.com/zeroroot-ai/gibson/internal/engine/llm"
-	"github.com/zeroroot-ai/gibson/internal/engine/llm/providers"
 	"github.com/zeroroot-ai/gibson/internal/engine/llm/providers/catalogue"
 	"github.com/zeroroot-ai/gibson/internal/engine/mission"
 	"github.com/zeroroot-ai/gibson/internal/engine/state"
@@ -111,16 +110,6 @@ func (d *daemonImpl) newInfrastructure(ctx context.Context) (*Infrastructure, er
 	// Create slot manager with the LLM registry
 	slotManager := NewDaemonSlotManager(llmRegistry, d.logger.WithComponent("slot-manager").Slog())
 
-	// Populate provider env var hints for clear error messages on slot resolution failures
-	if d.config != nil && d.config.LLM.Providers != nil {
-		envVars := make(map[string]string)
-		for name, providerCfg := range d.config.LLM.Providers {
-			if providerCfg.APIKeyEnv != "" {
-				envVars[name] = providerCfg.APIKeyEnv
-			}
-		}
-		slotManager.SetProviderEnvVars(envVars)
-	}
 	d.logger.Info(ctx, "initialized slot manager")
 
 	// Initialize TaxonomyRegistry with core taxonomy
@@ -191,169 +180,25 @@ func (d *daemonImpl) newInfrastructure(ctx context.Context) (*Infrastructure, er
 	return infra, nil
 }
 
-// registerLLMProviders registers all configured LLM providers with the registry.
+// registerLLMProviders fills the daemon-wide LLM registry. In production it
+// stays EMPTY on purpose: the platform holds no LLM credential of its own.
+// A tenant's providers and their keys live in that tenant's provider
+// configuration and reach missions through the per-tenant registry the
+// tenantprovider resolver builds from the secrets broker. The daemon-wide
+// registry exists for one caller only, the e2e mock LLM provider, which is
+// compiled in with -tags=test_fixtures and enabled at runtime with
+// GIBSON_TEST_FIXTURES_ENABLED=true; production builds register nothing here.
 //
-// This method reads the LLM configuration and creates provider instances for
-// each configured provider (Anthropic, OpenAI, Ollama, Google). Providers are
-// registered with the LLM registry for slot-based selection during mission execution.
-//
-// Returns an error if any provider fails to initialize or register.
+// The config-driven (llm.providers in gibson.yaml) and environment-driven
+// (ANTHROPIC_API_KEY and friends) registration this function used to do are
+// gone with the platform LLM path (2026-09-10).
 func (d *daemonImpl) registerLLMProviders(ctx context.Context, registry llm.LLMRegistry) error {
-	d.logger.Debug(ctx, "registering LLM providers from configuration")
-
-	// Check if config has provider-specific configurations
-	if d.config != nil && d.config.LLM.Providers != nil && len(d.config.LLM.Providers) > 0 {
-		// Register providers from configuration
-		for name, providerCfg := range d.config.LLM.Providers {
-			// Resolve API key from environment variable if specified
-			apiKey := providerCfg.APIKey
-			if providerCfg.APIKeyEnv != "" {
-				if envKey := os.Getenv(providerCfg.APIKeyEnv); envKey != "" {
-					apiKey = envKey
-				}
-			}
-
-			// Convert config.ProviderConfig type string to llm.ProviderType
-			var providerType llm.ProviderType
-			switch providerCfg.Type {
-			case "anthropic":
-				providerType = llm.ProviderAnthropic
-			case "openai":
-				providerType = llm.ProviderOpenAI
-			case "google":
-				providerType = llm.ProviderGoogle
-			default:
-				providerType = llm.ProviderCustom
-			}
-
-			// Convert config.ProviderConfig to llm.ProviderConfig
-			llmCfg := llm.ProviderConfig{
-				Type:         providerType,
-				APIKey:       apiKey,
-				BaseURL:      providerCfg.BaseURL,
-				DefaultModel: providerCfg.Model,
-				// SSRF egress guard: on by default, opted out only by the
-				// operator-level security.allow_private_llm_endpoints knob.
-				AllowPrivateEndpoint: d.config.Security.AllowPrivateLLMEndpoints,
-				RateLimits: llm.RateLimitConfig{
-					RequestsPerMinute: providerCfg.RateLimits.RequestsPerMinute,
-					TokensPerMinute:   providerCfg.RateLimits.TokensPerMinute,
-				},
-			}
-
-			// Credentials are already in llmCfg (the resolver populated them).
-			provider, err := providers.NewProviderWithContext(ctx, llmCfg)
-			if err != nil {
-				// Wrap auth errors with env var hint so operators know which variable to check
-				translatedErr := llm.TranslateErrorWithEnvHint(name, providerCfg.APIKeyEnv, err)
-				d.logger.Warn(ctx, "failed to create provider",
-					"name", name,
-					"type", providerCfg.Type,
-					"error", translatedErr)
-				continue
-			}
-
-			// Wrap with rate limiter if configured
-			if llmCfg.RateLimits.IsEnabled() {
-				provider = llm.NewRateLimitedProvider(provider, llmCfg.RateLimits)
-				d.logger.Info(ctx, "rate limiting enabled for provider",
-					"name", name,
-					"requests_per_minute", llmCfg.RateLimits.RequestsPerMinute,
-					"tokens_per_minute", llmCfg.RateLimits.TokensPerMinute,
-				)
-			}
-
-			// Register provider
-			if regErr := registry.RegisterProvider(provider); regErr != nil {
-				d.logger.Warn(ctx, "failed to register provider",
-					"name", name,
-					"type", providerCfg.Type,
-					"error", regErr)
-			} else {
-				d.logger.Info(ctx, "registered LLM provider",
-					"name", name,
-					"type", providerCfg.Type,
-					"model", providerCfg.Model)
-			}
-		}
-	} else {
-		// Fallback to environment-based registration for backward compatibility
-		d.logger.Debug(ctx, "no provider configuration found, using environment-based registration")
-
-		// Try to register Anthropic provider from environment
-		provider, err := providers.NewAnthropicProvider(llm.ProviderConfig{
-			Type:         llm.ProviderAnthropic,
-			DefaultModel: os.Getenv("ANTHROPIC_MODEL"), // Use env var, provider will use its default if empty
-			// APIKey will be read from ANTHROPIC_API_KEY environment variable
-		})
-		if err == nil {
-			if regErr := registry.RegisterProvider(provider); regErr != nil {
-				d.logger.Warn(ctx, "failed to register Anthropic provider", "error", regErr)
-			} else {
-				d.logger.Info(ctx, "registered Anthropic provider")
-			}
-		} else {
-			d.logger.Debug(ctx, "Anthropic provider not available", "error", err)
-		}
-
-		// Try to register OpenAI provider from environment
-		openaiProvider, err := providers.NewOpenAIProvider(llm.ProviderConfig{
-			Type:         llm.ProviderOpenAI,
-			DefaultModel: os.Getenv("OPENAI_MODEL"), // Use env var, provider will use its default if empty
-			// APIKey will be read from OPENAI_API_KEY environment variable
-		})
-		if err == nil {
-			if regErr := registry.RegisterProvider(openaiProvider); regErr != nil {
-				d.logger.Warn(ctx, "failed to register OpenAI provider", "error", regErr)
-			} else {
-				d.logger.Info(ctx, "registered OpenAI provider")
-			}
-		} else {
-			d.logger.Debug(ctx, "OpenAI provider not available", "error", err)
-		}
-
-		// Try to register Google provider from environment
-		googleProvider, err := providers.NewGoogleProvider(llm.ProviderConfig{
-			Type:         llm.ProviderGoogle,
-			DefaultModel: os.Getenv("GOOGLE_MODEL"), // Use env var, provider will use its default if empty
-			// APIKey will be read from GOOGLE_API_KEY environment variable
-		})
-		if err == nil {
-			if regErr := registry.RegisterProvider(googleProvider); regErr != nil {
-				d.logger.Warn(ctx, "failed to register Google provider", "error", regErr)
-			} else {
-				d.logger.Info(ctx, "registered Google provider")
-			}
-		} else {
-			d.logger.Debug(ctx, "Google provider not available", "error", err)
-		}
-
-		// Try to register Ollama provider from environment
-		ollamaProvider, err := providers.NewOllamaProvider(llm.ProviderConfig{
-			Type:         "ollama",
-			BaseURL:      os.Getenv("OLLAMA_BASE_URL"), // Use env var, provider will use default if empty
-			DefaultModel: os.Getenv("OLLAMA_MODEL"),    // Use env var, provider will use its default if empty
-		})
-		if err == nil {
-			if regErr := registry.RegisterProvider(ollamaProvider); regErr != nil {
-				d.logger.Warn(ctx, "failed to register Ollama provider", "error", regErr)
-			} else {
-				d.logger.Info(ctx, "registered Ollama provider")
-			}
-		} else {
-			d.logger.Debug(ctx, "Ollama provider not available", "error", err)
-		}
-	}
-
-	// Register the e2e mock LLM provider when the binary was built with
-	// -tags=test_fixtures AND GIBSON_TEST_FIXTURES_ENABLED=true.
-	// In production builds this is a compile-time no-op (see
-	// fixture_mock_llm_register_stub.go).
 	maybeRegisterMockLLMProvider(ctx, registry)
 
-	// Verify at least one provider is registered
-	if len(registry.ListProviders()) == 0 {
-		d.logger.Warn(ctx, "no LLM providers registered - missions may fail if they require LLM access")
+	if n := len(registry.ListProviders()); n > 0 {
+		d.logger.Info(ctx, "daemon-wide LLM registry carries test fixture providers", "count", n)
+	} else {
+		d.logger.Info(ctx, "daemon-wide LLM registry is empty by design: LLM providers are per tenant")
 	}
 
 	return nil

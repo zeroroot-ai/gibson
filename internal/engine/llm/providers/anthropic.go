@@ -34,16 +34,11 @@ type AnthropicProvider struct {
 
 // NewAnthropicProvider creates a new Anthropic provider.
 //
-// The credential comes from cfg.APIKey — the caller's own key. The
-// ANTHROPIC_API_KEY environment variable is consulted only when the dev
-// env-var fallback is explicitly enabled (see devEnvCredential); otherwise a
-// config with no key is rejected rather than quietly constructed on the
-// daemon's ambient key.
+// The credential comes from cfg.APIKey — the caller's own key, which the
+// tenant provider resolver took from the secrets broker. A config with no
+// key is rejected: the daemon's environment is never a credential source.
 func NewAnthropicProvider(cfg llm.ProviderConfig) (*AnthropicProvider, error) {
 	apiKey := cfg.APIKey
-	if apiKey == "" {
-		apiKey = devEnvCredential("ANTHROPIC_API_KEY")
-	}
 
 	if apiKey == "" {
 		return nil, llm.NewAuthError("anthropic", nil)
@@ -79,8 +74,8 @@ func NewAnthropicProvider(cfg llm.ProviderConfig) (*AnthropicProvider, error) {
 // neither is refused rather than constructed on whatever the pod happens to
 // carry.
 func NewVertexProvider(ctx context.Context, cfg llm.ProviderConfig) (*AnthropicProvider, error) {
-	project := firstNonEmpty(cfg.Extra["vertex_project_id"], devEnvCredential("ANTHROPIC_VERTEX_PROJECT_ID"))
-	region := firstNonEmpty(cfg.Extra["vertex_region"], devEnvCredential("CLOUD_ML_REGION"))
+	project := cfg.Extra["vertex_project_id"]
+	region := cfg.Extra["vertex_region"]
 	if project == "" || region == "" {
 		return nil, fmt.Errorf("construct the vertex provider: %w", llm.NewAuthError(string(llm.ProviderVertex),
 			errors.New("vertex_project_id and vertex_region are both required")))
@@ -128,11 +123,11 @@ func newVertexChatModel(ctx context.Context, project, region string, cfg llm.Pro
 // shape at a per-resource endpoint, so it is the Anthropic client pointed at
 // that endpoint with the tenant's Foundry key.
 func NewFoundryProvider(ctx context.Context, cfg llm.ProviderConfig) (*AnthropicProvider, error) {
-	apiKey := firstNonEmpty(cfg.Extra["foundry_api_key"], cfg.APIKey, devEnvCredential("ANTHROPIC_FOUNDRY_API_KEY"))
+	apiKey := firstNonEmpty(cfg.Extra["foundry_api_key"], cfg.APIKey)
 	if apiKey == "" {
 		return nil, fmt.Errorf("construct the foundry provider: %w", llm.NewAuthError(string(llm.ProviderFoundry), nil))
 	}
-	resource := firstNonEmpty(cfg.Extra["foundry_resource"], devEnvCredential("ANTHROPIC_FOUNDRY_RESOURCE"))
+	resource := cfg.Extra["foundry_resource"]
 	baseURL := cfg.BaseURL
 	if baseURL == "" {
 		if resource == "" {

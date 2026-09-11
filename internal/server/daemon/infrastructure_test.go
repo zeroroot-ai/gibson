@@ -34,7 +34,6 @@ func TestInfrastructureInitialization(t *testing.T) {
 		},
 		LLM: config.LLMConfig{
 			// LLMConfig only has DefaultProvider field
-			DefaultProvider: "",
 		},
 	}
 

@@ -12,65 +12,45 @@ import (
 	"github.com/zeroroot-ai/gibson/internal/engine/llm"
 )
 
-// ---------------------------------------------------------------------------
-// Original resolveCredential tests (without broker) — behavior preserved.
-// ---------------------------------------------------------------------------
-
 func TestResolveCredential_Precedence(t *testing.T) {
 	t.Setenv("TESTPROV_KEY", "from-env")
-	t.Setenv("GIBSON_DEV_ENV_FALLBACK", "true")
 
 	tests := []struct {
 		name     string
 		cfg      llm.ProviderConfig
 		extraKey string
-		envVar   string
 		required bool
 		wantVal  string
 		wantErr  bool
 	}{
 		{
-			name: "extra map wins over api_key and env",
+			name: "extra map wins over api_key",
 			cfg: llm.ProviderConfig{
 				APIKey: "from-apikey",
 				Extra:  map[string]string{"my_token": "from-extra"},
 			},
 			extraKey: "my_token",
-			envVar:   "TESTPROV_KEY",
 			required: true,
 			wantVal:  "from-extra",
 		},
 		{
-			name: "api_key used when extraKey is empty",
-			cfg: llm.ProviderConfig{
-				APIKey: "from-apikey",
-			},
+			name:     "api_key used when extraKey is empty",
+			cfg:      llm.ProviderConfig{APIKey: "from-apikey"},
 			extraKey: "",
-			envVar:   "TESTPROV_KEY",
 			required: true,
 			wantVal:  "from-apikey",
 		},
 		{
-			name:     "env falls through when extra and api_key both empty (dev fallback enabled)",
+			name:     "the daemon environment is never a source: empty config + required = error",
 			cfg:      llm.ProviderConfig{},
 			extraKey: "",
-			envVar:   "TESTPROV_KEY",
 			required: true,
-			wantVal:  "from-env",
+			wantErr:  true,
 		},
 		{
-			name:     "extra key miss falls through to env",
+			name:     "extra key miss + required = error, never the environment",
 			cfg:      llm.ProviderConfig{Extra: map[string]string{"other_key": "x"}},
 			extraKey: "my_token",
-			envVar:   "TESTPROV_KEY",
-			required: true,
-			wantVal:  "from-env",
-		},
-		{
-			name:     "missing + required returns AuthError naming both sources",
-			cfg:      llm.ProviderConfig{},
-			extraKey: "my_token",
-			envVar:   "ABSENT_VAR_XYZ",
 			required: true,
 			wantErr:  true,
 		},
@@ -78,23 +58,14 @@ func TestResolveCredential_Precedence(t *testing.T) {
 			name:     "missing + not-required returns empty string, no error",
 			cfg:      llm.ProviderConfig{},
 			extraKey: "my_token",
-			envVar:   "ABSENT_VAR_XYZ",
 			required: false,
 			wantVal:  "",
-		},
-		{
-			name:     "extraKey empty + api_key empty + env empty + required = error",
-			cfg:      llm.ProviderConfig{},
-			extraKey: "",
-			envVar:   "ABSENT_VAR_XYZ",
-			required: true,
-			wantErr:  true,
 		},
 	}
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			got, err := resolveCredential(tt.cfg, "testprov", tt.extraKey, tt.envVar, tt.required)
+			got, err := resolveCredential(tt.cfg, "testprov", tt.extraKey, tt.required)
 			if tt.wantErr {
 				require.Error(t, err)
 				assert.Contains(t, strings.ToLower(err.Error()), "missing credential")
@@ -107,13 +78,15 @@ func TestResolveCredential_Precedence(t *testing.T) {
 }
 
 // TestResolveCredential_ErrorMessage_MentionsHint ensures operators get a
-// pointer to either the Extra key, the APIKey field, or the env var.
+// pointer to the Extra key or the APIKey field of the tenant's provider
+// configuration, and never to an environment variable.
 func TestResolveCredential_ErrorMessage_MentionsHint(t *testing.T) {
-	_, err := resolveCredential(llm.ProviderConfig{}, "bedrock", "aws_access_key_id", "AWS_ACCESS_KEY_ID", true)
+	_, err := resolveCredential(llm.ProviderConfig{}, "bedrock", "aws_access_key_id", true)
 	require.Error(t, err)
 	msg := err.Error()
 	assert.Contains(t, msg, "aws_access_key_id")
-	assert.Contains(t, msg, "AWS_ACCESS_KEY_ID")
+	assert.Contains(t, msg, "tenant's provider configuration")
+	assert.NotContains(t, msg, "env ")
 }
 
 func TestRedactCredentialKeys_IncludesEveryProviderSecret(t *testing.T) {
@@ -135,49 +108,6 @@ func TestRedactCredentialKeys_IncludesEveryProviderSecret(t *testing.T) {
 	for _, k := range required {
 		assert.True(t, set[k], "redactCredentialKeys() missing %q", k)
 	}
-}
-
-// TestResolveCredential_EnvFallbackDisabledByDefault verifies that env-var
-// fallback is off unless GIBSON_DEV_ENV_FALLBACK=true.
-func TestResolveCredential_EnvFallbackDisabledByDefault(t *testing.T) {
-	t.Setenv("MY_SECRET_KEY", "from-env")
-	// GIBSON_DEV_ENV_FALLBACK is NOT set → env fallback disabled.
-	t.Setenv("GIBSON_DEV_ENV_FALLBACK", "false")
-
-	_, err := resolveCredential(llm.ProviderConfig{}, "testprov", "", "MY_SECRET_KEY", true)
-	require.Error(t, err)
-	assert.Contains(t, strings.ToLower(err.Error()), "missing credential")
-}
-
-// ---------------------------------------------------------------------------
-// devEnvCredential gate — the single sanctioned door to the daemon's own
-// environment.
-//
-// Every provider constructor must go through it. A provider config that
-// carries no credential of its own must NOT construct on the daemon's ambient
-// key and then register as if the credential belonged to the caller: that
-// substitution is silent, so the only way to observe it is that construction
-// succeeds when it should have failed.
-// ---------------------------------------------------------------------------
-
-func TestDevEnvCredential_GateOff_ReturnsEmpty(t *testing.T) {
-	t.Setenv("GATED_TEST_KEY", "from-daemon-env")
-	t.Setenv("GIBSON_DEV_ENV_FALLBACK", "")
-
-	assert.Empty(t, devEnvCredential("GATED_TEST_KEY"))
-}
-
-func TestDevEnvCredential_GateOn_ReturnsValue(t *testing.T) {
-	t.Setenv("GATED_TEST_KEY", "from-daemon-env")
-	t.Setenv("GIBSON_DEV_ENV_FALLBACK", "true")
-
-	assert.Equal(t, "from-daemon-env", devEnvCredential("GATED_TEST_KEY"))
-}
-
-func TestDevEnvCredential_EmptyVarName_ReturnsEmpty(t *testing.T) {
-	t.Setenv("GIBSON_DEV_ENV_FALLBACK", "true")
-
-	assert.Empty(t, devEnvCredential(""))
 }
 
 // keylessProviderCase builds a provider from a config that carries no
@@ -217,13 +147,15 @@ func keylessProviderCases() []keylessProviderCase {
 	}
 }
 
-// TestKeylessConfig_DoesNotConstructOnDaemonEnv_GateOff asserts that with the
-// dev gate off, a config with an empty APIKey is REJECTED even though the
-// daemon's own key is present in the environment.
-func TestKeylessConfig_DoesNotConstructOnDaemonEnv_GateOff(t *testing.T) {
+// TestKeylessConfig_DoesNotConstructOnDaemonEnv asserts that a config with an
+// empty APIKey is REJECTED even though a key of the same name is present in
+// the daemon's environment. There is no gate that would turn this on: the
+// platform holds no LLM credential, and a tenant provider row that carries no
+// credential of its own must never construct on the pod's ambient key and
+// register as if the credential were the tenant's.
+func TestKeylessConfig_DoesNotConstructOnDaemonEnv(t *testing.T) {
 	for _, tc := range keylessProviderCases() {
 		t.Run(tc.name, func(t *testing.T) {
-			t.Setenv("GIBSON_DEV_ENV_FALLBACK", "")
 			t.Setenv(tc.envVar, "daemon-operator-key")
 
 			err := tc.build()
@@ -233,45 +165,16 @@ func TestKeylessConfig_DoesNotConstructOnDaemonEnv_GateOff(t *testing.T) {
 	}
 }
 
-// TestKeylessConfig_UsesEnv_GateOn is the positive control for the test above:
-// the env var IS still honoured in dev overlays, so the assertion there is
-// about the gate and not about construction always failing.
-func TestKeylessConfig_UsesEnv_GateOn(t *testing.T) {
-	for _, tc := range keylessProviderCases() {
-		t.Run(tc.name, func(t *testing.T) {
-			t.Setenv("GIBSON_DEV_ENV_FALLBACK", "true")
-			t.Setenv(tc.envVar, "dev-overlay-key")
-
-			require.NoError(t, tc.build())
-		})
-	}
-}
-
-// TestBedrock_KeylessConfig_DoesNotReadDaemonEnv_GateOff observes the gate
+// TestBedrock_KeylessConfig_DoesNotReadDaemonEnv observes the same property
 // through Bedrock's paired-credential guard: a lone AWS_ACCESS_KEY_ID in the
 // daemon's environment used to be adopted as the caller's own and tripped the
-// "both or neither" check. With the gate off the env is not read at all, so no
-// half-populated static credential pair is ever assembled.
-func TestBedrock_KeylessConfig_DoesNotReadDaemonEnv_GateOff(t *testing.T) {
-	t.Setenv("GIBSON_DEV_ENV_FALLBACK", "")
+// "both or neither" check. The env is not read at all, so no half-populated
+// static credential pair is ever assembled and the SDK default chain applies.
+func TestBedrock_KeylessConfig_DoesNotReadDaemonEnv(t *testing.T) {
 	t.Setenv("AWS_ACCESS_KEY_ID", "AKIADAEMONOPERATOR")
 	t.Setenv("AWS_SECRET_ACCESS_KEY", "")
 	t.Setenv("AWS_REGION", "us-east-1")
 
 	_, err := NewBedrockProvider(llm.ProviderConfig{Type: llm.ProviderBedrock})
 	require.NoError(t, err, "the daemon's ambient access key must not be adopted as the caller's credential")
-}
-
-// TestBedrock_KeylessConfig_ReadsEnv_GateOn is the positive control: with the
-// dev gate on the env IS read, so the lone access key is adopted and the
-// paired-credential guard fires.
-func TestBedrock_KeylessConfig_ReadsEnv_GateOn(t *testing.T) {
-	t.Setenv("GIBSON_DEV_ENV_FALLBACK", "true")
-	t.Setenv("AWS_ACCESS_KEY_ID", "AKIADEVOVERLAY")
-	t.Setenv("AWS_SECRET_ACCESS_KEY", "")
-	t.Setenv("AWS_REGION", "us-east-1")
-
-	_, err := NewBedrockProvider(llm.ProviderConfig{Type: llm.ProviderBedrock})
-	require.Error(t, err)
-	assert.Contains(t, err.Error(), "must both be set or both empty")
 }

@@ -5,7 +5,6 @@ package providers
 
 import (
 	"fmt"
-	"os"
 
 	"github.com/zeroroot-ai/gibson/internal/engine/llm"
 )
@@ -16,12 +15,16 @@ import (
 //
 //  1. cfg.Extra[extraKey]  (only when extraKey != "")
 //  2. cfg.APIKey           (only when extraKey == "" — typed field mode)
-//  3. os.Getenv(envVar)    (only when envVar != "" AND GIBSON_DEV_ENV_FALLBACK is
-//     "true"; a dev/Kind-only escape hatch, never set in production Helm charts).
 //
-// If required is true and all sources are empty, resolveCredential returns an
-// llm.AuthError naming the missing field and env var so operators can diagnose
-// the misconfiguration without the provider making a network call. Callers MUST
+// There is no third source. The daemon's own environment is never a
+// credential: the platform holds no LLM key of its own, and a provider config
+// that carries no credential is rejected rather than constructed on whatever
+// the pod happens to carry. (The GIBSON_DEV_ENV_FALLBACK escape hatch that
+// used to sit here is gone with the platform LLM path, 2026-09-10.)
+//
+// If required is true and both sources are empty, resolveCredential returns an
+// llm.AuthError naming the missing field so operators can diagnose the
+// misconfiguration without the provider making a network call. Callers MUST
 // pass the provider name exactly as the provider's Name() method reports, so
 // error strings line up with log/trace attributes.
 //
@@ -30,10 +33,8 @@ func resolveCredential(
 	cfg llm.ProviderConfig,
 	provider string,
 	extraKey string,
-	envVar string,
 	required bool,
 ) (string, error) {
-	// 1. cfg.Extra[extraKey] or cfg.APIKey.
 	if extraKey != "" {
 		if v := cfg.Extra[extraKey]; v != "" {
 			return v, nil
@@ -42,31 +43,21 @@ func resolveCredential(
 		return cfg.APIKey, nil
 	}
 
-	// 2. Environment-variable fallback — only in dev overlays.
-	if v := devEnvCredential(envVar); v != "" {
-		return v, nil
-	}
-
 	if !required {
 		return "", nil
 	}
-	hint := describeCredentialSource(extraKey, envVar)
-	return "", llm.NewAuthError(provider, fmt.Errorf("missing credential: %s", hint))
+
+	return "", llm.NewAuthError(provider, fmt.Errorf("missing credential: %s", describeCredentialSource(extraKey)))
 }
 
 // describeCredentialSource builds a human-readable pointer to where the
-// missing credential could come from.
-func describeCredentialSource(extraKey, envVar string) string {
-	switch {
-	case extraKey != "" && envVar != "":
-		return fmt.Sprintf("set cfg.Extra[%q] or env %s", extraKey, envVar)
-	case extraKey != "":
-		return fmt.Sprintf("set cfg.Extra[%q]", extraKey)
-	case envVar != "":
-		return fmt.Sprintf("set cfg.APIKey or env %s", envVar)
-	default:
-		return "set cfg.APIKey"
+// missing credential comes from: the tenant's provider configuration, which
+// the resolver hands over as cfg.Extra (typed fields) or cfg.APIKey.
+func describeCredentialSource(extraKey string) string {
+	if extraKey != "" {
+		return fmt.Sprintf("set cfg.Extra[%q] in the tenant's provider configuration", extraKey)
 	}
+	return "set cfg.APIKey in the tenant's provider configuration"
 }
 
 // redactCredentialKeys returns the canonical list of cfg.Extra keys carrying
@@ -99,39 +90,4 @@ func redactCredentialKeys() []string {
 		"mistral_api_key",
 		"cohere_api_key",
 	}
-}
-
-// ---------------------------------------------------------------------------
-// Private helpers
-// ---------------------------------------------------------------------------
-
-// devEnvFallbackEnabled returns true when the GIBSON_DEV_ENV_FALLBACK environment
-// variable is set to "true". This flag is intended for dev/Kind overlays only —
-// NEVER set in production. When disabled, env-var credential fallback is skipped
-// and the broker is the authoritative source.
-func devEnvFallbackEnabled() bool {
-	return os.Getenv("GIBSON_DEV_ENV_FALLBACK") == "true"
-}
-
-// devEnvCredential returns the value of envVar, but only when the dev env-var
-// fallback is explicitly enabled. It returns "" for an empty envVar or whenever
-// the gate is off.
-//
-// This is the ONLY sanctioned way for a provider constructor to read a
-// credential from the daemon's own environment. Reading os.Getenv directly
-// would let a tenant provider row that carries no credential of its own
-// construct successfully on the daemon's ambient key and then register as if
-// the credential were the tenant's — a silent substitution with no error and
-// no log. Every provider constructor must route env-var credential lookups
-// through here so the gate cannot be bypassed.
-//
-// Non-credential environment inputs (for example AWS_REGION) are not covered
-// by this gate and may be read directly.
-//
-// SECURITY: never log the returned value.
-func devEnvCredential(envVar string) string {
-	if envVar == "" || !devEnvFallbackEnabled() {
-		return ""
-	}
-	return os.Getenv(envVar)
 }

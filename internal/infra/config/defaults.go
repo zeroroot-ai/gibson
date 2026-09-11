@@ -30,9 +30,7 @@ func DefaultConfig() *Config {
 			SSLValidation:       true,
 			AuditLogging:        true,
 		},
-		LLM: LLMConfig{
-			DefaultProvider: "",
-		},
+
 		Logging: LoggingConfig{
 			Level:  "info",
 			Format: "json",

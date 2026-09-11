@@ -9,7 +9,6 @@ import (
 	"fmt"
 	"log/slog"
 	"sort"
-	"strings"
 	"sync"
 
 	"github.com/zeroroot-ai/gibson/internal/engine/agent"
@@ -31,10 +30,9 @@ import (
 // The manager queries the LLM registry to find available providers that match
 // slot requirements, selecting models based on constraints rather than hardcoded defaults.
 type DaemonSlotManager struct {
-	registry        llm.LLMRegistry
-	logger          *slog.Logger
-	mu              sync.RWMutex      // Protects concurrent access to slot resolution
-	providerEnvVars map[string]string // Maps provider name to its API key env var name
+	registry llm.LLMRegistry
+	logger   *slog.Logger
+	mu       sync.RWMutex // Protects concurrent access to slot resolution
 
 	// modelFilter gates the resolved (provider, model) against the
 	// calling user's FGA can_use grants. Nil = permit-all (backwards
@@ -59,19 +57,9 @@ type DaemonSlotManager struct {
 // enabling dynamic slot resolution based on runtime provider availability.
 func NewDaemonSlotManager(registry llm.LLMRegistry, logger *slog.Logger) *DaemonSlotManager {
 	return &DaemonSlotManager{
-		registry:        registry,
-		logger:          logger,
-		providerEnvVars: make(map[string]string),
+		registry: registry,
+		logger:   logger,
 	}
-}
-
-// SetProviderEnvVars configures the mapping from provider names to their API key
-// environment variable names. This enables clear error messages when a slot resolves
-// to a provider that has no API key configured.
-func (m *DaemonSlotManager) SetProviderEnvVars(envVars map[string]string) {
-	m.mu.Lock()
-	defer m.mu.Unlock()
-	m.providerEnvVars = envVars
 }
 
 // WithModelFilter wires a modelgate.Filter so slot resolution checks the
@@ -146,15 +134,6 @@ func (m *DaemonSlotManager) applyModelGate(ctx context.Context, slot agent.SlotD
 		)
 	}
 	return nil
-}
-
-// envVarHint returns the environment variable hint for a provider, falling back
-// to PROVIDER_NAME_API_KEY if not explicitly configured.
-func (m *DaemonSlotManager) envVarHint(providerName string) string {
-	if envVar, ok := m.providerEnvVars[providerName]; ok && envVar != "" {
-		return envVar
-	}
-	return strings.ToUpper(providerName) + "_API_KEY"
 }
 
 // ResolveSlot resolves a slot definition to a specific provider and model that
@@ -283,11 +262,10 @@ func (m *DaemonSlotManager) resolveExplicitConfig(ctx context.Context, slot agen
 	// Get the specified provider
 	provider, err := m.registry.GetProvider(config.Provider)
 	if err != nil {
-		envHint := m.envVarHint(config.Provider)
 		return nil, llm.ModelInfo{}, types.WrapError(
 			llm.ErrNoMatchingProvider,
-			fmt.Sprintf("provider %q not found for slot %q. Set %q or configure an alternative provider",
-				config.Provider, slot.Name, envHint),
+			fmt.Sprintf("provider %q not found for slot %q. Configure it in the tenant's provider configuration or pick another provider",
+				config.Provider, slot.Name),
 			err,
 		)
 	}

@@ -27,18 +27,6 @@ func TestNewMistralProvider_MissingAPIKey(t *testing.T) {
 	require.Error(t, err)
 }
 
-func TestNewMistralProvider_EnvFallback(t *testing.T) {
-	// GIBSON_DEV_ENV_FALLBACK must be true to allow env-var credential fallback.
-	t.Setenv("GIBSON_DEV_ENV_FALLBACK", "true")
-	t.Setenv("MISTRAL_API_KEY", "env-key")
-	p, err := NewMistralProvider(llm.ProviderConfig{
-		Type:         llm.ProviderMistral,
-		DefaultModel: "mistral-large-latest",
-	})
-	require.NoError(t, err)
-	require.NotNil(t, p.model)
-}
-
 func TestMistralProvider_Models_ToolCapability(t *testing.T) {
 	p := &MistralProvider{}
 	models, err := p.Models(nil)

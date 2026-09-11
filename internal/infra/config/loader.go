@@ -299,13 +299,6 @@ func applyInterpolation(cfg *Config, interpolated map[string]interface{}) error 
 		}
 	}
 
-	// Apply LLM config interpolation
-	if llm, ok := interpolated["llm"].(map[string]interface{}); ok {
-		if provider, ok := llm["default_provider"].(string); ok {
-			cfg.LLM.DefaultProvider = interpolateString(provider)
-		}
-	}
-
 	// Apply Logging config interpolation
 	if logging, ok := interpolated["logging"].(map[string]interface{}); ok {
 		if level, ok := logging["level"].(string); ok {

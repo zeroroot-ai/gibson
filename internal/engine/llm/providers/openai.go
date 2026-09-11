@@ -27,16 +27,11 @@ type OpenAIProvider struct {
 
 // NewOpenAIProvider creates a new OpenAI provider.
 //
-// The credential comes from cfg.APIKey — the caller's own key. The
-// OPENAI_API_KEY environment variable is consulted only when the dev env-var
-// fallback is explicitly enabled (see devEnvCredential); otherwise a config
-// with no key is rejected rather than quietly constructed on the daemon's
-// ambient key.
+// The credential comes from cfg.APIKey — the caller's own key, which the
+// tenant provider resolver took from the secrets broker. A config with no
+// key is rejected: the daemon's environment is never a credential source.
 func NewOpenAIProvider(cfg llm.ProviderConfig) (*OpenAIProvider, error) {
 	apiKey := cfg.APIKey
-	if apiKey == "" {
-		apiKey = devEnvCredential("OPENAI_API_KEY")
-	}
 
 	if apiKey == "" {
 		return nil, llm.NewAuthError("openai", nil)
