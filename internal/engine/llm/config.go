@@ -152,7 +152,6 @@ type ProviderConfig struct {
 	DefaultModel string                 `mapstructure:"default_model" yaml:"default_model" validate:"required"`
 	Models       map[string]ModelConfig `mapstructure:"models" yaml:"models" validate:"dive"`
 	Options      map[string]interface{} `mapstructure:"options" yaml:"options"`
-	RateLimits   RateLimitConfig        `mapstructure:"rate_limits" yaml:"rate_limits"`
 	// Extra carries provider-specific credentials (e.g. aws_access_key_id,
 	// watsonx_project_id, ernie_secret_key) that do not fit the typed fields
 	// above. Keys are provider-defined; values are treated as secrets and
