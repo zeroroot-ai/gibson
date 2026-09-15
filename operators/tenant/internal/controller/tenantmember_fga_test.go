@@ -206,7 +206,7 @@ func TestAcceptInvitation_WriteConditional_NonFatal(t *testing.T) {
 	}
 }
 
-// A pre-existing role tuple must read as success: the vanilla first-admin
+// A pre-existing role tuple must read as success: the baseline first-admin
 // bootstrap writes the owner tuple directly before the pre-accepted member
 // reconciles (gibson#1510), and a reconciler that errors on its own desired
 // state retries forever — the member sat Invited crash-looping on

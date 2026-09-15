@@ -60,7 +60,7 @@ COPY . .
 # provisioning op that builds the tenant and its Zitadel org, and
 # bootstrap-tenant-owner creates the owner's user in that org and grants it.
 # Shipping only the first left deploy#1631 with no way to run the second, so a
-# vanilla install produced a tenant nobody could sign into.
+# baseline install produced a tenant nobody could sign into.
 RUN --mount=type=cache,target=/root/.cache/go-build \
     --mount=type=cache,target=/go/pkg/mod \
     go build -ldflags="-s -w" -o /out/ \

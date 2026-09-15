@@ -59,7 +59,7 @@ func newFakeDyn(objs ...runtime.Object) *dynamicfake.FakeDynamicClient {
 		map[schema.GroupVersionResource]string{tenantMembersGVR: "TenantMemberList"}, objs...)
 }
 
-// The vanilla-install defect this exists for: the founding owner sat Invited,
+// The baseline-install defect this exists for: the founding owner sat Invited,
 // so the member reconciler never seeded the active_session tuples and every
 // tenant-scoped RPC failed closed at the session gate while login worked.
 func TestPreAcceptFoundingMember_StampsTheOwner(t *testing.T) {

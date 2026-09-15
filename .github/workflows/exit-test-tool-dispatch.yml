@@ -4,7 +4,7 @@
 # In plain words: a tenant that switched a tool on can run it, a tenant that
 # never did cannot, and nobody can run a tool that is not in the catalog.
 #
-# WHAT THIS PROVES vs. the other exit tests. hosted's exit-test-vanilla-install
+# WHAT THIS PROVES vs. the other exit tests. hosted's exit-test-baseline-install
 # proves the SANCTIONED PROFILE installs. exit-test-sandboxed-dispatch proves
 # AGENT dispatch isolation. This proves the TOOL half of ADR-0017: the catalog
 # manifest is the single source of truth for a tool's runtime shape, and the
@@ -58,9 +58,9 @@ env:
   CHARTS_ROOT: ${{ github.workspace }}/charts
   NS: gibson
   RELEASE: gibson
-  CLUSTER: vanilla
-  # The kind node the hosted bring-up creates (vanilla-up.sh: <cluster>-control-plane).
-  NODE: vanilla-control-plane
+  CLUSTER: gibson
+  # The kind node the hosted bring-up creates (baseline-up.sh: <cluster>-control-plane).
+  NODE: gibson-control-plane
 
 jobs:
   tool-dispatch:
@@ -122,7 +122,7 @@ jobs:
 
       # Stage 0 writes the bringup keyring the install reads (ADR-0015,
       # deploy#1730, deploy#1732). The registry pull token is the keyring
-      # member GHCR_PULL_TOKEN now; vanilla-up.sh refuses the environment
+      # member GHCR_PULL_TOKEN now; baseline-up.sh refuses the environment
       # variable it used to take, so there is one path and no second one. The
       # state dir is the runner's temp, because nothing here owns /bulk.
       - name: Stage 0, the substrate and the bringup keyring
@@ -136,15 +136,15 @@ jobs:
           fi
           SUBSTRATE_DIR="$RUNNER_TEMP/substrate" make substrate ENV=kind
 
-      # Stand up kind with the sanctioned setec+gvisor profile. vanilla-up.sh
+      # Stand up kind with the sanctioned setec+gvisor profile. baseline-up.sh
       # --fresh-kind does the gvisor node-prep (runsc install + the containerd
-      # runsc handler) and installs the umbrella with values-vanilla.yaml. The
+      # runsc handler) and installs the umbrella with values-baseline.yaml. The
       # 2-core overlay shrinks REQUESTS so the whole platform packs onto the runner.
       - name: Stand up the setec+gvisor cluster
         working-directory: hosted
         run: |
           SUBSTRATE_DIR="$RUNNER_TEMP/substrate" \
-            EXTRA_VALUES=test/vanilla/ci-2core-resources.values.yaml make recreate ENV=kind
+            EXTRA_VALUES=test/baseline/ci-2core-resources.values.yaml make recreate ENV=kind
 
       # The node must actually advertise gvisor, or every sandbox stays Pending.
       # Kept explicit so a node-prep regression fails HERE with a clear message,

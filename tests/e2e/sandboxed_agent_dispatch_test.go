@@ -8,7 +8,7 @@
 // (sandboxed platform-agent dispatch, epic gibson#1593, slice gibson#1600).
 //
 // It proves the isolation contract on a live kind cluster running the sanctioned
-// setec+gvisor profile (deploy values-vanilla.yaml):
+// setec+gvisor profile (charts values-baseline.yaml):
 //
 //  1. An ENABLED tenant that dispatches the platform agent `zerocool` runs it in
 //     an EPHEMERAL setec sandbox — a running instance appears in that tenant's
@@ -63,7 +63,7 @@ const (
 	zerocoolComponentRef = "agent/" + zerocoolAgentName
 
 	// dispatchTenant is the tenant that enables and runs zerocool. The sanctioned
-	// vanilla profile always provisions "primary".
+	// baseline profile always provisions "primary".
 	dispatchTenant = "primary"
 
 	// deniedTenant is a second tenant that NEVER enables zerocool. Its dispatch
