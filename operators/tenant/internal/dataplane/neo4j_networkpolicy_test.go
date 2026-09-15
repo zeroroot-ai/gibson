@@ -194,7 +194,10 @@ func buildTestNeo4j(t *testing.T) (*appsv1.StatefulSet, *networkingv1.NetworkPol
 		VaultClient:       newRecordingVaultAdmin(),
 		PlatformNamespace: testPlatformNS,
 	}}
-	sts, _, _, _, np := n.buildResources(context.Background(), testTenantID, testTenantID, "team", testTenantNS, "pw")
+	sts, _, _, _, np, err := n.buildResources(context.Background(), testTenantID, testTenantID, "team", testTenantNS, "pw")
+	if err != nil {
+		t.Fatalf("buildResources: %v", err)
+	}
 	if sts == nil || np == nil {
 		t.Fatal("buildResources returned nil StatefulSet or NetworkPolicy")
 	}
