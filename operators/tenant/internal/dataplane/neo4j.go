@@ -12,6 +12,7 @@ import (
 	"strings"
 	"time"
 
+	"gopkg.in/yaml.v3"
 	appsv1 "k8s.io/api/apps/v1"
 	corev1 "k8s.io/api/core/v1"
 	networkingv1 "k8s.io/api/networking/v1"
@@ -40,10 +41,13 @@ const (
 	// neo4jPollInterval is how frequently the provisioner checks pod readiness.
 	neo4jPollInterval = 5 * time.Second
 
-	// neo4jTemplateConfigMapName is the name of the ConfigMap (in the gibson
-	// namespace, created by the Helm chart — Task 22) that holds the YAML
-	// templates for the per-tenant StatefulSet, Service, PVC, and Secret.
+	// neo4jTemplateConfigMapName is the ConfigMap the Helm chart renders into
+	// the platform namespace carrying the per-tier sizing for per-tenant
+	// Neo4j. The chart owns the numbers; this operator owns the shape.
 	neo4jTemplateConfigMapName = "tenant-neo4j-template"
+
+	// neo4jTiersKey is the key in that ConfigMap holding the tier table.
+	neo4jTiersKey = "tiers.yaml"
 
 	// neo4jTemplateNamespace is the namespace where the template ConfigMap lives.
 	neo4jTemplateNamespace = "gibson"
@@ -227,7 +231,10 @@ func (n *Neo4jProvisioner) Deprovision(ctx context.Context, tenantID string) err
 
 // applyResources reads the template ConfigMap and applies the four K8s resources.
 func (n *Neo4jProvisioner) applyResources(ctx context.Context, safe, tenantID, tier, tenantNS, neo4jPassword string) error {
-	sts, svc, pvc, secret, np := n.buildResources(ctx, safe, tenantID, tier, tenantNS, neo4jPassword)
+	sts, svc, pvc, secret, np, err := n.buildResources(ctx, safe, tenantID, tier, tenantNS, neo4jPassword)
+	if err != nil {
+		return err
+	}
 
 	// Apply NetworkPolicy FIRST — before the StatefulSet that creates the
 	// pod — so there is no window in which a tenant's Neo4j is running
@@ -235,7 +242,7 @@ func (n *Neo4jProvisioner) applyResources(ctx context.Context, safe, tenantID, t
 	// is a create-or-update: the policy is the security boundary, so any
 	// hand-edit to its spec must be reconciled away rather than preserved.
 	existingNP := &networkingv1.NetworkPolicy{}
-	err := n.cfg.K8sClient.Get(ctx, types.NamespacedName{Name: np.Name, Namespace: np.Namespace}, existingNP)
+	err = n.cfg.K8sClient.Get(ctx, types.NamespacedName{Name: np.Name, Namespace: np.Namespace}, existingNP)
 	switch {
 	case apierrors.IsNotFound(err):
 		if err := n.cfg.K8sClient.Create(ctx, np); err != nil {
@@ -337,6 +344,7 @@ func (n *Neo4jProvisioner) buildResources(ctx context.Context, safe, tenantID, t
 	pvc *corev1.PersistentVolumeClaim,
 	secret *corev1.Secret,
 	np *networkingv1.NetworkPolicy,
+	err error,
 ) {
 	// tenantID is already validated upstream (Provision called sanitize); the
 	// only failure mode here is a programmer-bug call from a test that bypassed
@@ -356,22 +364,39 @@ func (n *Neo4jProvisioner) buildResources(ctx context.Context, safe, tenantID, t
 	// documented escape hatch.
 	var cm corev1.ConfigMap
 	templateAvailable := false
-	if err := n.cfg.K8sClient.Unscoped().Get(ctx, types.NamespacedName{
+	if getErr := n.cfg.K8sClient.Unscoped().Get(ctx, types.NamespacedName{
 		Name:      neo4jTemplateConfigMapName,
 		Namespace: neo4jTemplateNamespace,
-	}, &cm); err == nil {
+	}, &cm); getErr == nil {
 		templateAvailable = true
 	}
 
-	// Inline tier defaults — only active when ConfigMap is absent (D7 note above).
+	// The inline table, which is the sizing for a cluster with no chart.
 	storageRequest, cpuRequest, memRequest := tierDefaults(tier)
 
-	// Allow chart substitution to override defaults when ConfigMap is present.
-	// Full YAML template parsing is implemented once Task 22 delivers the ConfigMap.
+	// THE CHART'S SIZES WIN WHEN THE CHART SHIPPED THEM.
+	//
+	// Until this existed, the inline table was not a fallback — it was the
+	// only path. The ConfigMap was read and its content thrown away, so
+	// STAGING AND PRODUCTION ran the dev-shaped team sizing while the comment
+	// above and the chart's own values both said otherwise. The chart carried
+	// a tier table that nothing rendered and nothing read.
+	//
+	// A malformed table is an ERROR rather than a fall-through. Falling back
+	// would reproduce the exact defect this closes: production quietly running
+	// dev sizes while everything reports healthy.
 	if templateAvailable {
-		// TODO(Task-22): parse cm.Data["statefulset.yaml"] after substituting
-		// {{tenantID}}, {{tier}}, {{namespace}}, {{neo4jPassword}} placeholders.
-		_ = substituteTemplate(cm.Data["statefulset.yaml"], safe, tier, tenantNS, neo4jPassword)
+		tiers, parseErr := parseTierSizes(cm.Data[neo4jTiersKey])
+		if parseErr != nil {
+			return nil, nil, nil, nil, nil, fmt.Errorf(
+				"the %s ConfigMap in %s is present but unusable (%w). It is rendered by the chart, so this is a chart defect; refusing to size tenant %q from the dev defaults instead",
+				neo4jTemplateConfigMapName, neo4jTemplateNamespace, parseErr, tenantID)
+		}
+		// A tier the chart does not name — a legacy id the migrate job will
+		// rewrite — keeps the inline aliasing above.
+		if size, ok := tiers[tier]; ok {
+			storageRequest, cpuRequest, memRequest = size.Storage, size.CPU, size.Memory
+		}
 	}
 
 	// Shared with buildNeo4jNetworkPolicy's podSelector — see
@@ -547,20 +572,8 @@ func (n *Neo4jProvisioner) buildResources(ctx context.Context, safe, tenantID, t
 		svc,
 		pvc,
 		secret,
-		np
-}
-
-// substituteTemplate replaces {{tenantID}}, {{tier}}, {{namespace}},
-// {{neo4jPassword}} placeholders in a template string. Returns the substituted
-// result. Used to process ConfigMap templates from Task 22.
-func substituteTemplate(tmpl, tenantID, tier, namespace, password string) string {
-	r := strings.NewReplacer(
-		"{{tenantID}}", tenantID,
-		"{{tier}}", tier,
-		"{{namespace}}", namespace,
-		"{{neo4jPassword}}", password,
-	)
-	return r.Replace(tmpl)
+		np,
+		nil
 }
 
 // waitForReady polls the StatefulSet's ReadyReplicas until it reaches 1 or
@@ -648,6 +661,54 @@ func (n *Neo4jProvisioner) deriveNeo4jPassword(ctx context.Context, tenantID, te
 		return "", fmt.Errorf("dataplane/neo4j: rand.Read failed: %w", err)
 	}
 	return "P" + base64.RawURLEncoding.EncodeToString(buf), nil
+}
+
+// neo4jTierSize is one tier's sizing, in the shape this operator applies it:
+// one storage request, one CPU request, and one memory number used for BOTH
+// the request and the limit (neo4jMemoryEnv pins the JVM heap and page cache
+// from it, so request and limit must agree or the JVM is sized against a
+// number the container may not get).
+type neo4jTierSize struct {
+	Storage string `yaml:"storage"`
+	CPU     string `yaml:"cpu"`
+	Memory  string `yaml:"memory"`
+}
+
+// canonicalTiers are the tiers the chart must size. A rendered table missing
+// one of them is a chart defect, not a reason to quietly use dev sizes: that
+// is precisely the failure this whole path exists to end.
+var canonicalTiers = []string{"team", "org", "enterprise"}
+
+// parseTierSizes reads the chart-rendered tier table.
+//
+// Every quantity is parsed here rather than where it is used. The apply path
+// calls resource.MustParse, which PANICS on a bad string, so an operator that
+// trusted this data would crash on a typo in a values file instead of
+// reporting it.
+func parseTierSizes(data string) (map[string]neo4jTierSize, error) {
+	if strings.TrimSpace(data) == "" {
+		return nil, fmt.Errorf("the %s key is empty", neo4jTiersKey)
+	}
+	var tiers map[string]neo4jTierSize
+	if err := yaml.Unmarshal([]byte(data), &tiers); err != nil {
+		return nil, fmt.Errorf("parsing %s: %w", neo4jTiersKey, err)
+	}
+	for _, name := range canonicalTiers {
+		if _, ok := tiers[name]; !ok {
+			return nil, fmt.Errorf("tier %q is missing; the chart must size every one of %v", name, canonicalTiers)
+		}
+	}
+	for name, t := range tiers {
+		for field, value := range map[string]string{"storage": t.Storage, "cpu": t.CPU, "memory": t.Memory} {
+			if value == "" {
+				return nil, fmt.Errorf("tier %q has no %s", name, field)
+			}
+			if _, err := resource.ParseQuantity(value); err != nil {
+				return nil, fmt.Errorf("tier %q has an unparseable %s %q: %w", name, field, value, err)
+			}
+		}
+	}
+	return tiers, nil
 }
 
 // tierDefaults returns (storage, cpu, memory) resource request strings for
