@@ -157,12 +157,16 @@ jobs:
       # runsc handler) and installs the umbrella with values-baseline.yaml, which
       # now carries setec+gvisor+dispatch. The 2-core overlay shrinks REQUESTS so
       # the whole platform packs onto the runner. deploy's
-      # check-bank-runner-budget.py measures this exact command.
+      # The bank opens TWO always-on members on top of the CI rung, and each
+      # reserves the `agent` SandboxClass request, which is why this test runs
+      # on a 4-vCPU runner and can never fit a 2-vCPU one. The budget guard
+      # that used to measure this exact command was lost in the 2026-09-04
+      # split (ADR-0086) and has not been rebuilt, so nothing checks it today.
       - name: Stand up the setec+gvisor cluster
         working-directory: hosted
         run: |
           SUBSTRATE_DIR="$RUNNER_TEMP/substrate" \
-            EXTRA_VALUES=test/baseline/ci-2core-resources.values.yaml make recreate ENV=kind
+            RUNG=ci make recreate ENV=kind
 
       # The node must actually advertise gvisor, or every sandbox stays Pending.
       # This is the gvisor node-prep assertion, kept explicit so a node-prep

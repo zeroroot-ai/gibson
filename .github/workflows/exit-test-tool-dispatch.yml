@@ -144,7 +144,7 @@ jobs:
         working-directory: hosted
         run: |
           SUBSTRATE_DIR="$RUNNER_TEMP/substrate" \
-            EXTRA_VALUES=test/baseline/ci-2core-resources.values.yaml make recreate ENV=kind
+            RUNG=ci make recreate ENV=kind
 
       # The node must actually advertise gvisor, or every sandbox stays Pending.
       # Kept explicit so a node-prep regression fails HERE with a clear message,
