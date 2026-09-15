@@ -259,7 +259,7 @@ func (r *TenantMemberReconciler) resendInvitation(ctx context.Context, tm *gibso
 
 func (r *TenantMemberReconciler) acceptInvitation(ctx context.Context, tm *gibsonv1alpha1.TenantMember) (ctrl.Result, error) {
 	if r.FGA != nil {
-		// A pre-existing role tuple is success, not failure: the vanilla
+		// A pre-existing role tuple is success, not failure: the baseline
 		// first-admin bootstrap writes the owner tuple directly before the
 		// pre-accepted member reconciles here (gibson#1510), and a reconciler
 		// that errors on its own desired state retries forever — the member

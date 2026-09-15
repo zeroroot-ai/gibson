@@ -1,6 +1,6 @@
 # connector-operator deployment (ADR-0014). A later slice folds this into the
 # gibson umbrella chart; this manifest is the standalone, kustomize-free form
-# proven on kind-vanilla.
+# proven on kind.
 apiVersion: v1
 kind: Namespace
 metadata: { name: gibson-connector-operator-system }

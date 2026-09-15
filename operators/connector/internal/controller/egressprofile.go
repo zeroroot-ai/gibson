@@ -21,7 +21,7 @@ import (
 // renders it into a ToolHive custom permission profile, held in an owned
 // ConfigMap that the MCPServer references (permissionProfile type configmap).
 //
-// Enforcement needs a NetworkPolicy-capable CNI. kind-vanilla runs one (the
+// Enforcement needs a NetworkPolicy-capable CNI. kind runs one (the
 // tenant default-deny is enforced, ADR-0014 Spike 1); a cluster on kindnet's
 // default does not enforce it. The owned NetworkPolicy is the coarse fence at
 // the IP layer; this profile is the host-level refinement.

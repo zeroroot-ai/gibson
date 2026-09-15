@@ -57,9 +57,9 @@ env:
   CHARTS_ROOT: ${{ github.workspace }}/charts
   NS: gibson
   RELEASE: gibson
-  CLUSTER: vanilla
-  # The kind node the hosted bring-up creates (vanilla-up.sh: <cluster>-control-plane).
-  NODE: vanilla-control-plane
+  CLUSTER: gibson
+  # The kind node the hosted bring-up creates (baseline-up.sh: <cluster>-control-plane).
+  NODE: gibson-control-plane
 
 jobs:
   bank:
@@ -136,7 +136,7 @@ jobs:
 
       # Stage 0 writes the bringup keyring the install reads (ADR-0015,
       # deploy#1730, deploy#1732). The registry pull token is the keyring
-      # member GHCR_PULL_TOKEN now; vanilla-up.sh refuses the environment
+      # member GHCR_PULL_TOKEN now; baseline-up.sh refuses the environment
       # variable it used to take, so there is one path and no second one. The
       # state dir is the runner's temp, because nothing here owns /bulk.
       # GHCR_RO_PAT, not github.token: the first-party images live on packages
@@ -152,9 +152,9 @@ jobs:
           fi
           SUBSTRATE_DIR="$RUNNER_TEMP/substrate" make substrate ENV=kind
 
-      # Stand up kind with the sanctioned setec+gvisor profile. vanilla-up.sh
+      # Stand up kind with the sanctioned setec+gvisor profile. baseline-up.sh
       # --fresh-kind does the gvisor node-prep (runsc install + the containerd
-      # runsc handler) and installs the umbrella with values-vanilla.yaml, which
+      # runsc handler) and installs the umbrella with values-baseline.yaml, which
       # now carries setec+gvisor+dispatch. The 2-core overlay shrinks REQUESTS so
       # the whole platform packs onto the runner. deploy's
       # check-bank-runner-budget.py measures this exact command.
@@ -162,7 +162,7 @@ jobs:
         working-directory: hosted
         run: |
           SUBSTRATE_DIR="$RUNNER_TEMP/substrate" \
-            EXTRA_VALUES=test/vanilla/ci-2core-resources.values.yaml make recreate ENV=kind
+            EXTRA_VALUES=test/baseline/ci-2core-resources.values.yaml make recreate ENV=kind
 
       # The node must actually advertise gvisor, or every sandbox stays Pending.
       # This is the gvisor node-prep assertion, kept explicit so a node-prep
@@ -237,7 +237,7 @@ jobs:
           # The in-cluster suite needs an attested SVID: the runner's
           # ClusterSPIFFEID and ServiceAccount, and that SVID allow-listed on
           # the daemon's gRPC listener. deploy ships those settings as
-          # test/vanilla/e2e-runner.values.yaml, but that path CANNOT go in
+          # test/baseline/e2e-runner.values.yaml, but that path CANNOT go in
           # valueFiles here: this Application's source is a packaged CHART from
           # the chart repo, so a valueFiles entry resolves inside the chart, and
           # a deploy-repo path leaves the app unrenderable — run 33699918935

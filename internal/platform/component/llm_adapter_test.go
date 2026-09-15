@@ -861,7 +861,7 @@ func TestComplete_SlotResolutionFailure_IsNotPaperedOver(t *testing.T) {
 // server-side and a slot that omits it resolves to 0. Zero must mean "use the
 // default", never "generate nothing" — a 0 ceiling made the provider return an
 // empty completion (completion_tokens=0), which the calling agent SDK choked
-// on. Found live on kind-vanilla.
+// on. Found live on kind.
 func TestEffectiveMaxTokens_ZeroBecomesDefault(t *testing.T) {
 	if got := effectiveMaxTokens(0); got != defaultComponentMaxTokens {
 		t.Errorf("effectiveMaxTokens(0) = %d, want %d", got, defaultComponentMaxTokens)

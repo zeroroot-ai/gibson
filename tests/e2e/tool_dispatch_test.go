@@ -11,7 +11,7 @@
 // never did cannot, and nobody can run a tool that is not in the catalog.
 //
 // It proves that contract on a live kind cluster running the sanctioned
-// setec+gvisor profile (deploy values-vanilla.yaml):
+// setec+gvisor profile (charts values-baseline.yaml):
 //
 //  1. A tenant that ENABLED `tool/nmap` runs a TOOL-node mission to completion:
 //     the manifest supplies the runtime shape, the can_execute gate admits it,
@@ -74,7 +74,7 @@ const (
 	absentToolName = "e2e-tool-that-does-not-exist"
 
 	// toolTenant is the tenant that enables and runs the tool. The sanctioned
-	// vanilla profile always provisions "primary".
+	// baseline profile always provisions "primary".
 	toolTenant = "primary"
 
 	// toolDeniedTenant never enables the tool. Its dispatch must be refused.

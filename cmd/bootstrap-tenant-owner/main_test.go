@@ -995,7 +995,7 @@ var (
 // --- deploy#1631: the self-hosted first admin -----------------------------
 
 // With -generate-password the owner is created WITH a credential, because a
-// vanilla install configures no SMTP and the emailed credential-setup flow
+// baseline install configures no SMTP and the emailed credential-setup flow
 // would strand the operator with an account they can never sign into.
 func TestRunBootstrap_GeneratePassword_CreatesWithCredential(t *testing.T) {
 	tenants := &fakeTenantGetter{obj: makeTenant("acme", "org-1")}
@@ -1018,7 +1018,7 @@ func TestRunBootstrap_GeneratePassword_CreatesWithCredential(t *testing.T) {
 	if got := idpC.createCalls[0].Password; got != res.InitialPassword {
 		t.Errorf("password sent to the IdP (%q) differs from the one reported to the operator (%q)", got, res.InitialPassword)
 	}
-	// Sign-in-capable: a vanilla install cannot deliver a verification email,
+	// Sign-in-capable: a baseline install cannot deliver a verification email,
 	// so an unverified account is an account nobody can use.
 	if !idpC.createCalls[0].EmailVerified {
 		t.Error("EmailVerified=false would leave the account pending an email that cannot be sent")

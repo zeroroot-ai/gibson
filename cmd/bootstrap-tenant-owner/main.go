@@ -165,7 +165,7 @@ type idpClient interface {
 	EnsureHumanUser(ctx context.Context, req idp.EnsureHumanUserRequest) (userID string, err error)
 	// CreateHumanUser provisions a PASSWORD-BEARING human user. Used for the
 	// self-hosted first admin, where EnsureHumanUser's emailed
-	// credential-setup code is undeliverable: a vanilla install configures no
+	// credential-setup code is undeliverable: a baseline install configures no
 	// SMTP, so the invitation flow strands the operator with an account they
 	// can never sign into (deploy#1631).
 	CreateHumanUser(ctx context.Context, req idp.CreateHumanUserRequest) (idp.CreateHumanUserResult, error)
