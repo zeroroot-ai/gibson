@@ -179,7 +179,7 @@ jobs:
     # in the queue. Running both lanes would run the same vet/build/test twice
     # in the queue for no added signal.
     if: github.event_name == 'pull_request' && needs.changes.outputs.go == 'true'
-    uses: zeroroot-ai/.github/.github/workflows/reusable-go-ci.yml@e55c31f0bb5fe175e4b7f9cb4407be9f292885ce # v0.3.0
+    uses: zeroroot-ai/.github/.github/workflows/reusable-go-ci.yml@017f26148bffdc5d382a265edd863e8a647e7830 # v0.4.0
     with:
       tier: fast
       skip-lint: true # gibson runs its own pinned golangci-lint below (make lint)
@@ -199,7 +199,7 @@ jobs:
       fail-fast: false
       matrix:
         build_tags: ["", "setec_integration"]
-    uses: zeroroot-ai/.github/.github/workflows/reusable-go-ci.yml@e55c31f0bb5fe175e4b7f9cb4407be9f292885ce # v0.3.0
+    uses: zeroroot-ai/.github/.github/workflows/reusable-go-ci.yml@017f26148bffdc5d382a265edd863e8a647e7830 # v0.4.0
     with:
       tier: heavy
       build-tags: ${{ matrix.build_tags }}
@@ -413,7 +413,7 @@ jobs:
       # on all attempts still fails the job. Suspected flakes get tracked
       # issues (e.g. gibson#1392) instead of blind reruns.
       - name: Run integration lane (flake-quarantined)
-        uses: zeroroot-ai/.github/actions/flake-quarantine@e55c31f0bb5fe175e4b7f9cb4407be9f292885ce # v0.3.0
+        uses: zeroroot-ai/.github/actions/flake-quarantine@017f26148bffdc5d382a265edd863e8a647e7830 # v0.4.0
         with:
           cmd: make test-integration
 
