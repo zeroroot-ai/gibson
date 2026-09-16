@@ -41,11 +41,16 @@
 #     deterministic artifact travels with the image, never installed at pod
 #     start.
 #
-# Build context: sidecar/belief/ (self-contained; no private Go modules).
+# Build context: the repo root. The image must ship the repo's LICENSE, and
+# the only copy of it lives at the root. A second copy under sidecar/belief
+# would be a second source of truth, so the context is widened instead and
+# every COPY below names a repo-root-relative path. BuildKit still keys the
+# cache on the copied paths, so a change elsewhere in the repo does not
+# rebuild this image.
 #
 # Build:
 #   docker buildx build -f sidecar/belief/Dockerfile \
-#     -t ghcr.io/zeroroot-ai/gibson-belief-sidecar:latest sidecar/belief
+#     -t ghcr.io/zeroroot-ai/gibson-belief-sidecar:latest .
 # ============================================================================
 
 # ----------------------------------------------------------------------------
@@ -67,7 +72,7 @@ WORKDIR /build
 # hash pinned in requirements.txt, so a compromised or substituted wheel fails
 # the build rather than shipping. It also forces every transitive dependency to
 # be pinned, which is the property we actually want.
-COPY requirements.txt ./
+COPY sidecar/belief/requirements.txt ./
 RUN pip install --no-cache-dir --require-hashes --target=/deps -r requirements.txt
 
 # Drop what a runtime never reads. numpy ships its own test suite, its C
@@ -99,8 +104,8 @@ COPY --from=build /deps /deps
 # Bake the sidecar source AND the versioned model artifacts into the image
 # layer. models/ ships base-v1.json; the commercial layer drops additional
 # models/*.json into its own image build (ADR-0005 §7).
-COPY infer.py model.py server.py ./
-COPY models/ ./models/
+COPY sidecar/belief/infer.py sidecar/belief/model.py sidecar/belief/server.py ./
+COPY sidecar/belief/models/ ./models/
 
 USER 65532
 
@@ -112,6 +117,11 @@ EXPOSE 8087
 ENV BELIEF_HOST=0.0.0.0 \
     BELIEF_PORT=8087 \
     BELIEF_MODELS_DIR=/app/models
+
+# Elastic License 2.0, "Notices": anyone who gets a copy of the software
+# must also get a copy of these terms. A container image is a copy.
+# /licenses is the OCI convention for where that text lives.
+COPY LICENSE /licenses/LICENSE
 
 # The distroless python image's ENTRYPOINT is already the interpreter, so CMD
 # carries only the script. `python -m server` would need a shell that this image

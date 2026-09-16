@@ -51,6 +51,11 @@ COPY --from=bootstrap /gibson-bootstrap /usr/local/bin/gibson-bootstrap
 # the owner in the org that op produced (deploy#1631).
 COPY --from=bootstrap /bootstrap-tenant-owner /usr/local/bin/bootstrap-tenant-owner
 
+# Elastic License 2.0, "Notices": anyone who gets a copy of the software
+# must also get a copy of these terms. A container image is a copy.
+# /licenses is the OCI convention for where that text lives.
+COPY LICENSE /licenses/LICENSE
+
 # Reset entrypoint so the chart's command:[/bin/bash, /scripts/bootstrap.sh]
 # spec is honoured. Default CMD lands at bash if the chart is misconfigured,
 # which surfaces faster than a silent no-op.

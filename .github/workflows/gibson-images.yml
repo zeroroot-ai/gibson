@@ -213,7 +213,12 @@ jobs:
       actions: read
     with:
       component_name: gibson-belief-sidecar
-      component_path: sidecar/belief
+      # The context is the repo root, not sidecar/belief: the image ships the
+      # repo's LICENSE (ELv2 "Notices") and the only copy of it lives at the
+      # root. Copying it into sidecar/belief would make a second source of
+      # truth that drifts. Every COPY in the Dockerfile names a
+      # repo-root-relative path to match.
+      component_path: .
       dockerfile_path: sidecar/belief/Dockerfile
       image_name: ghcr.io/zeroroot-ai/gibson-belief-sidecar
       tag_pattern: gibson-belief-sidecar-(v.*)
