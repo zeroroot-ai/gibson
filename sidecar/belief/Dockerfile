@@ -89,7 +89,7 @@ RUN find /deps -type d -name tests -prune -exec rm -rf {} + \
 # distroless: glibc, CPython 3.13 and its stdlib, ca-certificates, tzdata. No
 # shell, no package manager, no pip, no perl. `nonroot` runs as uid 65532 and
 # owns nothing writable, so there is no `useradd` step and nothing to chown.
-FROM ghcr.io/zeroroot-ai/mirror/distroless-python3-debian13:nonroot@sha256:f3d5ddc6c64a019fe520e7f005f2880be21e6afc461b10a3c15ef2e4edc71e33
+FROM ghcr.io/zeroroot-ai/mirror/distroless-python3-debian13:nonroot@sha256:8ee214843129f43e2ebf5e0ca9f2e4e6d8292143d1b8a6787f169b5898578884
 
 # Don't write .pyc files; flush stdout/stderr immediately so container logs are
 # live (the server prints startup + listen lines to stderr).
