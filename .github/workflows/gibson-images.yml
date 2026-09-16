@@ -131,7 +131,7 @@ jobs:
             image: ghcr.io/zeroroot-ai/gibson-bootstrap
             tag_pattern: gibson-bootstrap-v(.*)
             build_args: ""
-    uses: zeroroot-ai/.github/.github/workflows/reusable-image-build.yml@0fed78673650eb244156e92f3a37ab7411e39750 # main, 2026-09-16: arm the pre-push vulnerability gate (.github#85)
+    uses: zeroroot-ai/.github/.github/workflows/reusable-image-build.yml@271a10c5de3fd796ef375da9658b569ab17d1ad5 # v0.2.0
     permissions:
       contents: read
       packages: write
@@ -160,7 +160,7 @@ jobs:
   bootstrap-runner:
     name: gibson-bootstrap-runner
     needs: images
-    uses: zeroroot-ai/.github/.github/workflows/reusable-image-build.yml@0fed78673650eb244156e92f3a37ab7411e39750 # main, 2026-09-16: arm the pre-push vulnerability gate (.github#85)
+    uses: zeroroot-ai/.github/.github/workflows/reusable-image-build.yml@271a10c5de3fd796ef375da9658b569ab17d1ad5 # v0.2.0
     permissions:
       contents: read
       packages: write
@@ -203,7 +203,7 @@ jobs:
   belief-sidecar-image:
     name: gibson-belief-sidecar
     needs: belief-sidecar-test
-    uses: zeroroot-ai/.github/.github/workflows/reusable-image-build.yml@0fed78673650eb244156e92f3a37ab7411e39750 # main, 2026-09-16: arm the pre-push vulnerability gate (.github#85)
+    uses: zeroroot-ai/.github/.github/workflows/reusable-image-build.yml@271a10c5de3fd796ef375da9658b569ab17d1ad5 # v0.2.0
     permissions:
       contents: read
       packages: write

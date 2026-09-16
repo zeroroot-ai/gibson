@@ -72,6 +72,6 @@ jobs:
   architectural-doc-coverage:
     needs: changes
     if: needs.changes.outputs.relevant == 'true'
-    uses: zeroroot-ai/.github/.github/workflows/architectural-doc-coverage.yml@f760edb01410e83c4e262218b80f64d939fe80f3 # main, 2026-09-07: .github#22 go toolchain guard
+    uses: zeroroot-ai/.github/.github/workflows/architectural-doc-coverage.yml@271a10c5de3fd796ef375da9658b569ab17d1ad5 # v0.2.0
     secrets:
       DOCS_REPO_READ_TOKEN: ${{ secrets.DOCS_REPO_READ_TOKEN }}
