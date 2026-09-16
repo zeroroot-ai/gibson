@@ -75,6 +75,11 @@ FROM ghcr.io/zeroroot-ai/mirror/distroless-static:nonroot@sha256:1c2c046bc09ed40
 COPY --from=builder /out/gibson-bootstrap /gibson-bootstrap
 COPY --from=builder /out/bootstrap-tenant-owner /bootstrap-tenant-owner
 
+# Elastic License 2.0, "Notices": anyone who gets a copy of the software
+# must also get a copy of these terms. A container image is a copy.
+# /licenses is the OCI convention for where that text lives.
+COPY LICENSE /licenses/LICENSE
+
 # gibson-bootstrap stays the default; the chart's first-admin Job overrides
 # `command` to run /bootstrap-tenant-owner.
 ENTRYPOINT ["/gibson-bootstrap"]

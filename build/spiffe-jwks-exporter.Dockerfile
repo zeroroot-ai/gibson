@@ -43,4 +43,9 @@ RUN --mount=type=cache,target=/root/.cache/go-build \
 FROM ghcr.io/zeroroot-ai/mirror/distroless-static:nonroot@sha256:1c2c046bc09ed40fad370b599a0b1ae7987f55b01e247cf27a7c27cd97e5bbc7
 USER nonroot:nonroot
 COPY --from=build /out/spiffe-jwks-exporter /spiffe-jwks-exporter
+# Elastic License 2.0, "Notices": anyone who gets a copy of the software
+# must also get a copy of these terms. A container image is a copy.
+# /licenses is the OCI convention for where that text lives.
+COPY LICENSE /licenses/LICENSE
+
 ENTRYPOINT ["/spiffe-jwks-exporter"]

@@ -74,4 +74,9 @@ COPY --from=builder /workspace/backfill-rbac .
 COPY --from=builder /workspace/migrate-tenant-tiers .
 USER 65532:65532
 
+# Elastic License 2.0, "Notices": anyone who gets a copy of the software
+# must also get a copy of these terms. A container image is a copy.
+# /licenses is the OCI convention for where that text lives.
+COPY LICENSE /licenses/LICENSE
+
 ENTRYPOINT ["/manager"]

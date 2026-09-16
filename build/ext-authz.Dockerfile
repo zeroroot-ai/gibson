@@ -86,4 +86,9 @@ EXPOSE 9002
 
 USER nonroot:nonroot
 
+# Elastic License 2.0, "Notices": anyone who gets a copy of the software
+# must also get a copy of these terms. A container image is a copy.
+# /licenses is the OCI convention for where that text lives.
+COPY LICENSE /licenses/LICENSE
+
 ENTRYPOINT ["/usr/local/bin/ext-authz"]

@@ -166,6 +166,11 @@ HEALTHCHECK --interval=30s --timeout=3s --start-period=10s --retries=3 \
 
 WORKDIR /root/.gibson
 
+# Elastic License 2.0, "Notices": anyone who gets a copy of the software
+# must also get a copy of these terms. A container image is a copy.
+# /licenses is the OCI convention for where that text lives.
+COPY LICENSE /licenses/LICENSE
+
 ENTRYPOINT ["/usr/local/bin/gibson"]
 # No subcommand: the binary reads GIBSON_CONFIG (or ~/.gibson/config.yaml) and
 # starts the daemon directly, matching the Mat Ryer entry-point pattern.
