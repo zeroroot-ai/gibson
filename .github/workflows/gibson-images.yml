@@ -131,7 +131,7 @@ jobs:
             image: ghcr.io/zeroroot-ai/gibson-bootstrap
             tag_pattern: gibson-bootstrap-v(.*)
             build_args: ""
-    uses: zeroroot-ai/.github/.github/workflows/reusable-image-build.yml@625c0b92ef329bfe40f11f639ee6136c8706538b # main, 2026-09-16: licence label, not NOASSERTION (.github#80)
+    uses: zeroroot-ai/.github/.github/workflows/reusable-image-build.yml@d33b5cc18ac03d012f37f6e54984ed5f994da41b # main, 2026-09-16: arm the image-licence guard (.github#82)
     permissions:
       contents: read
       packages: write
@@ -160,7 +160,7 @@ jobs:
   bootstrap-runner:
     name: gibson-bootstrap-runner
     needs: images
-    uses: zeroroot-ai/.github/.github/workflows/reusable-image-build.yml@625c0b92ef329bfe40f11f639ee6136c8706538b # main, 2026-09-16: licence label, not NOASSERTION (.github#80)
+    uses: zeroroot-ai/.github/.github/workflows/reusable-image-build.yml@d33b5cc18ac03d012f37f6e54984ed5f994da41b # main, 2026-09-16: arm the image-licence guard (.github#82)
     permissions:
       contents: read
       packages: write
@@ -203,7 +203,7 @@ jobs:
   belief-sidecar-image:
     name: gibson-belief-sidecar
     needs: belief-sidecar-test
-    uses: zeroroot-ai/.github/.github/workflows/reusable-image-build.yml@625c0b92ef329bfe40f11f639ee6136c8706538b # main, 2026-09-16: licence label, not NOASSERTION (.github#80)
+    uses: zeroroot-ai/.github/.github/workflows/reusable-image-build.yml@d33b5cc18ac03d012f37f6e54984ed5f994da41b # main, 2026-09-16: arm the image-licence guard (.github#82)
     permissions:
       contents: read
       packages: write
