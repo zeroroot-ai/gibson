@@ -37,7 +37,26 @@ FROM ghcr.io/zeroroot-ai/mirror/alpine:3.21@sha256:48b0309ca019d89d40f670aa1bc06
 # ca-certificates — for HTTPS to Zitadel and AWS
 # aws-cli      — bootstrap-secrets `aws` backend (AWS Secrets Manager)
 # kubectl      — bootstrap-secrets `kubernetes` backend (in-cluster Secret)
-RUN apk add --no-cache \
+# APT_CACHE_BUST — make `apk upgrade` actually run.
+#
+# The base is digest-pinned, which fixes where the build starts and says nothing
+# about currency: nothing here applied Alpine's own security updates between
+# base bumps. And an upgrade on its own would not hold either, because this
+# layer is cached by buildx (cache-from: type=gha) on instruction text plus base
+# digest, so it would run once and be replayed forever.
+#
+# Measured 2026-09-16 on gibson-executor, by accident: a broken step in the org
+# workflow briefly dropped cache-from/cache-to, and that one cache-less build
+# produced fully patched packages. The next cached build put them straight back,
+# and Trivy went from 0 OS findings to 40.
+#
+# The org reusable workflow passes APT_CACHE_BUST=${{ github.run_id }} to every
+# build (.github#84), so declaring the ARG here is the whole opt-in. The name
+# says APT because it is one shared arg for apt and apk alike.
+ARG APT_CACHE_BUST=0
+RUN echo "apk refresh ${APT_CACHE_BUST}" >/dev/null \
+ && apk upgrade --no-cache \
+ && apk add --no-cache \
         bash \
         jq \
         curl \
