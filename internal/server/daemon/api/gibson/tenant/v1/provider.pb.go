@@ -37,7 +37,7 @@ const (
 	_ = protoimpl.EnforceVersion(protoimpl.MaxVersion - 20)
 )
 
-// Capability declares a service a provider can fulfil. A provider may serve
+// Capability declares a service a provider can fulfill. A provider may serve
 // chat completions, embeddings, or both — letting an operator run e.g.
 // Anthropic for chat and OpenAI/Bedrock for embeddings (E11 BYO-embedder).
 type Capability int32
@@ -174,7 +174,7 @@ type ProviderRecord struct {
 	CredentialsMasked map[string]string `protobuf:"bytes,7,rep,name=credentials_masked,json=credentialsMasked,proto3" json:"credentials_masked,omitempty" protobuf_key:"bytes,1,opt,name=key,proto3" protobuf_val:"bytes,2,opt,name=value,proto3"`
 	CreatedAt         string            `protobuf:"bytes,8,opt,name=created_at,json=createdAt,proto3" json:"created_at,omitempty"`
 	UpdatedAt         string            `protobuf:"bytes,9,opt,name=updated_at,json=updatedAt,proto3" json:"updated_at,omitempty"`
-	// capabilities declares which services this provider fulfils (chat and/or
+	// capabilities declares which services this provider fulfills (chat and/or
 	// embedding). Empty implies the legacy chat-only default.
 	Capabilities []Capability `protobuf:"varint,10,rep,packed,name=capabilities,proto3,enum=gibson.tenant.v1.Capability" json:"capabilities,omitempty"`
 	// default_embedding_model is the default model used for embedding requests,
@@ -305,7 +305,7 @@ type ProviderConfigInput struct {
 	DefaultModel string            `protobuf:"bytes,3,opt,name=default_model,json=defaultModel,proto3" json:"default_model,omitempty"`
 	Credentials  map[string]string `protobuf:"bytes,4,rep,name=credentials,proto3" json:"credentials,omitempty" protobuf_key:"bytes,1,opt,name=key,proto3" protobuf_val:"bytes,2,opt,name=value,proto3"`
 	SetAsDefault bool              `protobuf:"varint,5,opt,name=set_as_default,json=setAsDefault,proto3" json:"set_as_default,omitempty"`
-	// capabilities declares which services this provider fulfils (chat and/or
+	// capabilities declares which services this provider fulfills (chat and/or
 	// embedding). Empty implies the legacy chat-only default.
 	Capabilities []Capability `protobuf:"varint,6,rep,packed,name=capabilities,proto3,enum=gibson.tenant.v1.Capability" json:"capabilities,omitempty"`
 	// default_embedding_model is the default model used for embedding requests,
@@ -506,7 +506,7 @@ type ModelDescriptor struct {
 	Family        string `protobuf:"bytes,2,opt,name=family,proto3" json:"family,omitempty"`
 	ContextWindow int32  `protobuf:"varint,3,opt,name=context_window,json=contextWindow,proto3" json:"context_window,omitempty"`
 	// capabilities declares what this model can do (chat, embedding, …).
-	// Empty implies legacy chat-only behaviour. The dashboard uses this field to
+	// Empty implies legacy chat-only behavior. The dashboard uses this field to
 	// populate the chat-model picker (CAPABILITY_CHAT) or the embedding-model
 	// picker (CAPABILITY_EMBEDDING) — a model may appear in both.
 	Capabilities []Capability `protobuf:"varint,4,rep,packed,name=capabilities,proto3,enum=gibson.tenant.v1.Capability" json:"capabilities,omitempty"`
@@ -583,11 +583,11 @@ type SupportedProvider struct {
 	DocsUrl     string             `protobuf:"bytes,3,opt,name=docs_url,json=docsUrl,proto3" json:"docs_url,omitempty"`
 	SelfHosted  bool               `protobuf:"varint,4,opt,name=self_hosted,json=selfHosted,proto3" json:"self_hosted,omitempty"`
 	Credentials []*CredentialField `protobuf:"bytes,5,rep,name=credentials,proto3" json:"credentials,omitempty"`
-	// default_models is the static catalogue of CHAT models this provider
+	// default_models is the static catalog of CHAT models this provider
 	// exposes when the daemon can enumerate them without a live API call.
 	// Empty for providers where the model list requires a live probe.
 	DefaultModels []*ModelDescriptor `protobuf:"bytes,6,rep,name=default_models,json=defaultModels,proto3" json:"default_models,omitempty"`
-	// embedding_models is the static catalogue of EMBEDDING models this
+	// embedding_models is the static catalog of EMBEDDING models this
 	// provider supports. Empty for providers that serve chat only (e.g.
 	// Anthropic, Google). The dashboard uses this list to populate the
 	// embedding-model picker in Settings > Providers.
@@ -1599,7 +1599,7 @@ type TestProviderResponse struct {
 	LatencyMs int64  `protobuf:"varint,2,opt,name=latency_ms,json=latencyMs,proto3" json:"latency_ms,omitempty"`
 	Model     string `protobuf:"bytes,3,opt,name=model,proto3" json:"model,omitempty"`
 	Error     string `protobuf:"bytes,4,opt,name=error,proto3" json:"error,omitempty"`
-	// Live model catalogue returned by the provider's API for these credentials.
+	// Live model catalog returned by the provider's API for these credentials.
 	// Empty when ok=false.
 	Models []*ModelDescriptor `protobuf:"bytes,5,rep,name=models,proto3" json:"models,omitempty"`
 	// embedding_ok is true when an embedding probe was attempted and succeeded.
@@ -1788,7 +1788,7 @@ func (x *GetSupportedProvidersResponse) GetProviders() []*SupportedProvider {
 }
 
 // ProbeProviderRequest carries candidate provider credentials for a
-// validation-only call that returns the live model catalogue. Credentials
+// validation-only call that returns the live model catalog. Credentials
 // are NEVER persisted by this RPC.
 // Source: previously ProbeProviderRequest in gibson.admin.v1 (platform-sdk).
 type ProbeProviderRequest struct {
@@ -1876,7 +1876,7 @@ type ProbeProviderResponse struct {
 	ErrorMessage string `protobuf:"bytes,2,opt,name=error_message,json=errorMessage,proto3" json:"error_message,omitempty"`
 	// Stable error class for programmatic dispatch when ok=false.
 	ErrorClass string `protobuf:"bytes,3,opt,name=error_class,json=errorClass,proto3" json:"error_class,omitempty"`
-	// Live chat-model catalogue the provider's API returned for these
+	// Live chat-model catalog the provider's API returned for these
 	// credentials. Empty when ok=false or the provider is embedding-only.
 	Models []*ModelDescriptor `protobuf:"bytes,4,rep,name=models,proto3" json:"models,omitempty"`
 	// Round-trip latency to the upstream provider, in milliseconds.

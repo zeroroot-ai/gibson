@@ -225,7 +225,7 @@ Migration files:
 - Neo4j: [`migrations/neo4j/`](../migrations/neo4j/) (`*.up.cypher` files
   applied in filename-sorted order).
 
-**Daemon startup behaviour**: on first `Pool.For` for a given tenant, the
+**Daemon startup behavior**: on first `Pool.For` for a given tenant, the
 daemon checks the tenant's migration version. If the tenant's schema is behind
 the embedded latest version, the daemon applies pending non-destructive
 migrations before serving traffic for that tenant. Destructive migrations

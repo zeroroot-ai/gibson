@@ -364,7 +364,7 @@ tenants; `tenant_enabled` marks a tenant's enabled instance. The catalog-source
 reconciler converges `platform_enabled` tuples from the embedded catalog table.
 `ListCatalog` filters by the gate and `EnableConnector` enforces it. v1 is
 **mechanical only**: every embedded entry is seeded `platform_enabled`, so
-behaviour is unchanged but de-listing works by removing one tuple. Plan-based
+behavior is unchanged but de-listing works by removing one tuple. Plan-based
 gating arrives later through the entitlements seam via `tenant_published`.
 _Avoid_: plan/Stripe policy inside gibson, per-tenant catalog tables
 
@@ -525,7 +525,7 @@ _Avoid_: loop node, retry edge, agent node (that one launches an ephemeral sandb
   all four kinds** (prevents cross-kind name collisions; matches the dashboard + connectors).
   `authz/objects.go` `CanonicalComponentResource` must **apply** the kind prefix, not strip it;
   existing bare objects are re-keyed (`component:zerocool` → `component:agent/zerocool`); the
-  team-only `SetComponentAccess` normaliser and every checker call-site move to the prefixed
+  team-only `SetComponentAccess` normalizer and every checker call-site move to the prefixed
   form. Fixes the agent/tool/plugin toggle "phantom object" bug (Defect C). Hard-to-reverse → ADR.
 
 - **"Write" vs "Configure"** named the same relation (`can_configure`) in two UIs —
@@ -573,13 +573,13 @@ _Avoid_: loop node, retry edge, agent node (that one launches an ephemeral sandb
   mints a new execution (`AgentRun`/`ToolExecution`) against an existing capability.
   `Complete` carries an outcome (Mission gains a `Failed`/abandoned state). **Deferred:**
   explicit sub-work-graph spawning with `DependsOn` (dispatch-after-results suffices),
-  priority-setting (belief field, #750), an explicit "wait" verb (empty decision list = wait).
+  priority-setting (belief field), an explicit "wait" verb (empty decision list = wait).
 - **Decider input v1 = own mission, serialized directly.** The Decider reasons over its
   own mission subgraph (work-graph nodes + states + results, findings, discovered
   hosts/assets) plus the **capability catalog** (enrolled `Agent`/`Tool`/`Plugin` entities
   + their input schemas — what it may dispatch and how to shape inputs), rendered as a
-  bounded structured serialization. **No dependency on the belief field (#750) or
-  ambient projection (#749)**; those swap in later by replacing the context-rendering step
+  bounded structured serialization. **No dependency on the belief field or
+  ambient projection**; those swap in later by replacing the context-rendering step
   without changing the Decider contract. **Sibling-mission context is out for v1** — cross-
   mission reuse arrives properly via the belief field at any distance, not an ad-hoc prompt
   dump.
@@ -597,15 +597,15 @@ _Avoid_: loop node, retry edge, agent node (that one launches an ephemeral sandb
   ordered log); a single per-tenant reducer folds it into the **Tenant World**; the
   **Scroller** is the UI over the Timeline, **scoped to a mission** by filtering. Log-first:
   World = fold of the Timeline.
-- **Cutover scope (#770, retiring `internal/orchestrator`).** *Survives, re-expressed:* the
+- **Cutover scope (retiring `internal/orchestrator`).** *Survives, re-expressed:* the
   **runaway guard** — an unbounded LLM Decider can loop forever, so a per-mission
   **budget/limit System** (max executions / depth / token-cost, from CUE `MissionConstraints`
   + the Entitlements provider) is **mandatory**, replacing the old ancestry-based
   `spawn_cycle_guard`. *Removed entirely:* **HITL approval + escalation** — the brain runs
   **fully autonomously**; bounds come from declared **Rules of Engagement** (CUE
   `MissionConstraints`) + **FGA authz** + the budget System, never a runtime human gate (fits
-  "no polling on human replies"). This is distinct from the **labeling HITL** (#753 /
-  ADR-0006, belief-model training labels — untouched). *Dropped/subsumed:* **data-policy
+  "no polling on human replies"). This is distinct from the **labeling HITL** (ADR-0006,
+  belief-model training labels — untouched). *Dropped/subsumed:* **data-policy
   reuse + scoping** (`data_policy`/`policy_checker`) — reuse is implicit (the Decider sees the
   World), scoping is superseded by scope-relative identity (ADR-0002) + ambient projection;
   the CUE `DataPolicy` fields are deprecated. *Already handled:* checkpoint/crash-resume →

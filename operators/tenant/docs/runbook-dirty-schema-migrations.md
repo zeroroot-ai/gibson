@@ -153,8 +153,6 @@ data-plane owner before another reconcile loop fires.
 
 ## Related issues / spec
 
-- zeroroot-ai/tenant-operator#46 (this runbook)
-- zeroroot-ai/tenant-operator#47 (saga-retry-from annotation)
 - `pkg/platform/migrations` (the embedded source — gibson repo)
 - `internal/dataplane/postgres.go::recoverFromDirtyMigrations` (the recovery
   function)

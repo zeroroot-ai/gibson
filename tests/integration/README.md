@@ -169,7 +169,7 @@ These issues are in Phase 2 store implementations that are still in progress. Th
 
 ---
 
-## Critical-path contract (gibson#795)
+## Critical-path contract
 
 QUALITY-BARS §4 Tier 3 names five critical paths that must each keep a present,
 green integration test. They are pinned in [`tests/criticalpath/manifest.go`](../criticalpath/manifest.go):

@@ -92,7 +92,7 @@ service AdminTenantService {
   // discloses billing state to any caller — gibson#1339), nor the own-tenant
   // TenantService.GetTenantBilling (the operator is not that tenant's admin). It
   // carries the same platform_operator gate as the other AdminTenantService
-  // RPCs: ext-authz authorises platform_operator on system_tenant:_system before
+  // RPCs: ext-authz authorizes platform_operator on system_tenant:_system before
   // the handler trusts the request tenant_id.
   rpc AdminGetTenantBilling(AdminGetTenantBillingRequest) returns (AdminGetTenantBillingResponse) {
     option (gibson.auth.v1.authz) = {
@@ -283,7 +283,7 @@ message AdminDeleteTenantResponse {
 }
 
 // AdminGetTenantBillingRequest names the tenant whose billing identifiers to
-// read. tenant_id is UNTRUSTED input, authorised by nothing on its own — the
+// read. tenant_id is UNTRUSTED input, authorized by nothing on its own — the
 // platform_operator gate on system_tenant is what permits the cross-tenant read.
 message AdminGetTenantBillingRequest {
   // tenant_id is the tenant slug to read billing for. Required.

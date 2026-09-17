@@ -37,7 +37,7 @@ projector from the World*, never written by an agent.
 | `technique` | reference | external id (e.g. `T1190`) | finding `USES_TECHNIQUE` → `:Technique` | planned |
 | `mission` | lifecycle | id | `:Mission` (from Mission entity) | **done** |
 | `mission_run` | lifecycle | run id | `RUN_OF` mission | **done** (WorkItem/Mission) |
-| `agent_run` | **entity** | run id (harness-assigned) | parent run `DELEGATED_TO` → `:AgentRun` | **done** (AgentRunObserved; run-provenance sole-written by projector, #837) |
+| `agent_run` | **entity** | run id (harness-assigned) | parent run `DELEGATED_TO` → `:AgentRun` | **done** (AgentRunObserved; run-provenance sole-written by projector) |
 | `tool_execution` | lifecycle | id | `USED_TOOL`; `PRODUCED` | **done** (WorkItem) |
 | `llm_call` | lifecycle | id | `TRIGGERED` | lifecycle |
 

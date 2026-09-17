@@ -1,6 +1,6 @@
 # Coverage gates
 
-Two blocking CI gates govern test coverage in this repo (gibson#794, E3 /
+Two blocking CI gates govern test coverage in this repo (E3 /
 QUALITY-BARS §4). Together they supersede the former flat 60% bar (ADR-0021).
 
 | Gate | What it checks | Where | Blocking |
@@ -12,7 +12,7 @@ Both run in the `coverage` job of `.github/workflows/go-ci.yml`, which generates
 one repo-wide profile (`make coverage-profile`, with the same redis + envtest
 setup as the correctness pass) and feeds it to both gates.
 
-**The job runs on `pull_request` as well as `merge_group` (gibson#1233).** It
+**The job runs on `pull_request` as well as `merge_group`.** It
 used to be merge_group-only. When `check-diff-coverage` failed there, GitHub
 evicted the PR from the merge queue and the PR still reported
 `mergeStateStatus: CLEAN` with no failing check — the uncovered lines were only
@@ -36,7 +36,7 @@ systemic block the workflow rules forbid. So the absolute floor is a **ratchet**
   enforced at the full 85% from day one.
 
 This mirrors the repo's existing `lint-deadcode-baseline` and the per-RPC
-handler-test baseline (gibson#793).
+handler-test baseline.
 
 ## Running locally
 

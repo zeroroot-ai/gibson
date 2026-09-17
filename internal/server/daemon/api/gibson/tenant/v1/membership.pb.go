@@ -2189,7 +2189,7 @@ type SetCatalogEnabledRequest struct {
 	unknownFields protoimpl.UnknownFields
 
 	// component_ref is the component identifier without the "component:" type
-	// prefix, kind-qualified as "<kind>:<name>" or "<kind>/<name>" — e.g. "tool:nmap" or "agent/zerocool". The daemon normalises it
+	// prefix, kind-qualified as "<kind>:<name>" or "<kind>/<name>" — e.g. "tool:nmap" or "agent/zerocool". The daemon normalizes it
 	// before writing to FGA.
 	ComponentRef string `protobuf:"bytes,1,opt,name=component_ref,json=componentRef,proto3" json:"component_ref,omitempty"`
 	// enabled: true writes the tenant_enabled tuple (adds to catalog); false
@@ -2306,7 +2306,7 @@ type SetCatalogPublishedRequest struct {
 	unknownFields protoimpl.UnknownFields
 
 	// component_ref is the component identifier without the "component:" type
-	// prefix, kind-qualified — e.g. "connector:gitlab" or "connector/gitlab". The daemon normalises it before writing.
+	// prefix, kind-qualified — e.g. "connector:gitlab" or "connector/gitlab". The daemon normalizes it before writing.
 	ComponentRef string `protobuf:"bytes,1,opt,name=component_ref,json=componentRef,proto3" json:"component_ref,omitempty"`
 	// published: true writes the tenant_published tuple (offers the BYO
 	// component in the tenant's private registry); false deletes it. Idempotent

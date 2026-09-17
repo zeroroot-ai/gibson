@@ -140,7 +140,7 @@ func ensureProviderConfigBaseline(deps ProvisionDeps) saga.StepFn {
 The operator's identity reaches the daemon via Envoy + ext-authz; the
 daemon's handler reads `auth.IdentityFromContext` and `auth.TenantFromContext`
 to act in the right scope. The operator does **not** invent a tenant
-header — the FGA tuple it just wrote authorises this call.
+header — the FGA tuple it just wrote authorizes this call.
 
 ## Step 6 — Avoid these patterns
 
@@ -153,7 +153,7 @@ header — the FGA tuple it just wrote authorises this call.
 - **Never** log the Zitadel admin PAT or any client_secret. The pre-
   commit gitleaks config catches accidental commits; the
   `tenant-operator-auth-002` and `tenant-operator-auth-003` rules
-  enforce sanitisation in source.
+  enforce sanitization in source.
 
 ## Step 7 — Run the build guards
 

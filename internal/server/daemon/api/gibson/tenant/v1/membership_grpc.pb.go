@@ -136,7 +136,7 @@ type MembershipServiceClient interface {
 	//
 	// The component_ref must be a fully-qualified component object key of the
 	// form "<kind>:<name>" or "<kind>/<name>" (e.g. "tool:nmap", "agent/zerocool"). The daemon
-	// normalises to "component:<component_ref>" before writing to FGA.
+	// normalizes to "component:<component_ref>" before writing to FGA.
 	//
 	// Authorization: tenant admin. Only a tenant admin may modify which
 	// components are available in their tenant's catalog.
@@ -433,7 +433,7 @@ type MembershipServiceServer interface {
 	//
 	// The component_ref must be a fully-qualified component object key of the
 	// form "<kind>:<name>" or "<kind>/<name>" (e.g. "tool:nmap", "agent/zerocool"). The daemon
-	// normalises to "component:<component_ref>" before writing to FGA.
+	// normalizes to "component:<component_ref>" before writing to FGA.
 	//
 	// Authorization: tenant admin. Only a tenant admin may modify which
 	// components are available in their tenant's catalog.

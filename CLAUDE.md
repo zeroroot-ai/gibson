@@ -13,9 +13,8 @@ Every gate in `.github/workflows/go-ci.yml` runs on **both** `pull_request` and
 runs only in the merge queue evicts the PR while it still reports
 `mergeStateStatus: CLEAN` with `failing checks: (none)`, because the failing run
 lives on a transient `gh-readonly-queue/...` branch that is not linked from the
-PR (gibson#1233 — four PRs cycled in and out of the queue that way in one
-evening, and a monitor watching for merges and failures stayed silent through
-all of it).
+PR. Four PRs cycled in and out of the queue that way in one evening, and a
+monitor that watched for merges and failures stayed silent through all of it.
 
 - **Queue-only, by declared exception:** `go-ci / heavy` (module-wide
   `go test -race` × 2 build tags + govulncheck), `security / govulncheck`, and
@@ -32,15 +31,15 @@ all of it).
 **`BUILD_TAGS` is empty**, so `make test` / `make test-race` /
 `make coverage-profile` compile only untagged files. Every `//go:build <tag>`
 suite is invisible to them — that is how 34 files under `tests/e2e/` went months
-without ever being built (gibson#1280). The `vet-tags` matrix in `go-ci.yml`
+without ever being built. The `vet-tags` matrix in `go-ci.yml`
 now type-checks every declared tag on both lanes, and `make check-build-tags`
 fails the build if a tag appears that no leg selects. `make vet-e2e` compiles the
 e2e suite locally.
 
 Compile signal is the floor. Where each tag actually **runs** is the table in
 [`docs/testing/ci-lanes.md`](docs/testing/ci-lanes.md) — keep it current:
-`openbao_*` runs hermetically on both lanes (gibson#1351), the cluster-free part
-of `e2e` was untagged into the default lane (gibson#1293), and `llm_integration`
+`openbao_*` runs hermetically on both lanes, the cluster-free part of `e2e`
+was untagged into the default lane, and `llm_integration`
 / `integration_spire` are compile-only by recorded decision. The rest of `e2e`
 needs a live cluster and still runs nowhere. Do not delete an unrun suite and do
 not mark it skipped.
@@ -53,8 +52,8 @@ builds/rebuilds it automatically when absent or stale — never a `golangci-lint
 from PATH. A system binary fails with the opaque "Go language version used to
 build golangci-lint is lower than the targeted Go version" config error, and a
 bare `go install …/golangci-lint@v2.x` silently reproduces the same trap:
-`GOTOOLCHAIN=auto` builds it with golangci's own older `go` directive
-(gibson#1234). `make check` deliberately excludes lint (~3 GB + a full core);
+`GOTOOLCHAIN=auto` builds it with golangci's own older `go` directive.
+`make check` deliberately excludes lint (~3 GB + a full core);
 run `make lint` by hand, and never concurrently with another module-wide build.
 
 ## Authz registry pipeline
@@ -85,10 +84,10 @@ generator no longer emits an FGA stub.
 
 These are **generated artifacts** — do NOT hand-edit them. Run regen instead.
 
-The annotations come from **two** proto sources (after the platform-sdk dissolution, gibson#781), merged via `cmd/fds-merge` into a single FileDescriptorSet before codegen:
+The annotations come from **two** proto sources (after the platform-sdk dissolution), merged via `cmd/fds-merge` into a single FileDescriptorSet before codegen:
 
-- **OSS SDK** at the pinned `github.com/zeroroot-ai/sdk` module (`gibson.daemon.v1.*` — customer-callable `DaemonService` RPCs only; admin protos no longer live here per sdk#105).
-- **daemon-local** protos at `internal/server/daemon/api/gibson/<pkg>/v1/**` — anything no other repo consumes, **plus** the genuinely-private platform services that used to live in the separate `platform-sdk` module (`gibson.daemon.operator.v1.*` `DaemonOperatorService`, `gibson.daemon.discovery.v1.*` `DiscoveryService`). platform-sdk was dissolved into this monorepo (open-core consolidation, ADR-0056, gibson#781). The former tenant-admin surface (`gibson.tenant.v1.*`, user, usage) is **customer-callable** but is **daemon-local** — it moved out of the OSS SDK into this repo at `internal/server/daemon/api/gibson/tenant/v1` (E6/sdk#390). The wire package name (`gibson.tenant.v1`) is unchanged, so it stays customer-callable; Envoy gates its admin prefixes. Billing (`gibson.billing.v1`) is **no longer in gibson** — the closed billing tier (Stripe/plans/`BillingService`) was ripped out to the closed `billing` repo and injects via the entitlements seam (ADR-0003/0050/0054, gibson#798/#915). Do not vendor; if a customer-facing repo needs a daemon type, expose it through the OSS SDK.
+- **OSS SDK** at the pinned `github.com/zeroroot-ai/sdk` module (`gibson.daemon.v1.*` — customer-callable `DaemonService` RPCs only; admin protos no longer live here).
+- **daemon-local** protos at `internal/server/daemon/api/gibson/<pkg>/v1/**` — anything no other repo consumes, **plus** the genuinely-private platform services that used to live in the separate `platform-sdk` module (`gibson.daemon.operator.v1.*` `DaemonOperatorService`, `gibson.daemon.discovery.v1.*` `DiscoveryService`). platform-sdk was dissolved into this monorepo (open-core consolidation, ADR-0056). The former tenant-admin surface (`gibson.tenant.v1.*`, user, usage) is **customer-callable** but is **daemon-local** — it moved out of the OSS SDK into this repo at `internal/server/daemon/api/gibson/tenant/v1` (E6). The wire package name (`gibson.tenant.v1`) is unchanged, so it stays customer-callable; Envoy gates its admin prefixes. Billing (`gibson.billing.v1`) is **no longer in gibson** — the closed billing tier (Stripe/plans/`BillingService`) was ripped out to the closed `billing` repo and injects via the entitlements seam (ADR-0003/0050/0054). Do not vendor; if a customer-facing repo needs a daemon type, expose it through the OSS SDK.
 
 Both sets must carry `option (gibson.auth.v1.authz) = {…};` on every authenticated RPC. The codegen tool fails closed on any unannotated method.
 
@@ -187,24 +186,24 @@ CI does not run `make proto` itself, but the `authz-registry-drift` gate exercis
 The daemon consumes:
 
 - **OSS SDK** (`github.com/zeroroot-ai/sdk`) — the single public, customer-facing surface. Imports here are visible to customers. Per docs ADR-0058 (SDK = component-dev surface): agent / tool / plugin interfaces, customer-callable `DaemonService`, `gibson.budget.v1` types, the `gibson.auth.v1` annotation extension.
-- **daemon-local platform protos** (`internal/server/daemon/api`) — the genuinely-private platform services: `DaemonOperatorService` (`gibson.daemon.operator.v1`), `DiscoveryService` (`gibson.daemon.discovery.v1`). These used to live in a separate `platform-sdk` module; it was dissolved into this monorepo (gibson#781, ADR-0053), so they are now daemon-local protos. Private; never re-exported through the OSS SDK; never vendored out. (Billing — `gibson.billing.v1` / `BillingService` — was ripped out of gibson into the closed `billing` repo and injects via the entitlements seam: ADR-0003/0050/0054, gibson#798/#915.)
+- **daemon-local platform protos** (`internal/server/daemon/api`) — the genuinely-private platform services: `DaemonOperatorService` (`gibson.daemon.operator.v1`), `DiscoveryService` (`gibson.daemon.discovery.v1`). These used to live in a separate `platform-sdk` module; it was dissolved into this monorepo (ADR-0053), so they are now daemon-local protos. Private; never re-exported through the OSS SDK; never vendored out. (Billing — `gibson.billing.v1` / `BillingService` — was ripped out of gibson into the closed `billing` repo and injects via the entitlements seam: ADR-0003/0050/0054.)
 - **`internal/infra`** — the shared Go primitives (transport, secrets, readiness, pools, observability, authz) that used to be the external `platform-clients` repo. It was dissolved into this monorepo as `internal/` (ADR-0053/0056) because nothing outside the module imports it anymore. Use it for these concerns; do NOT reinvent them — CI greps for ad-hoc OTel init / interceptor chains / pool constructors. A handler importing `github.com/zeroroot-ai/platform-clients/...` is dead code; that module no longer exists.
 
-The daemon registers **many gRPC services on `:50051`** — the customer-facing `gibson.daemon.v1.DaemonService` plus the decomposed, daemon-local tenant-admin surface (`gibson.tenant.v1` — `TenantService`, `UserService`, `UsageService`, `ProviderService`, `MembershipService`, `GrantsService`, `SecretsService`, `ModelAccessService`, `PluginAdminService`, `BudgetService`, `AgentIdentityService`), the daemon-local `TracesService` / `GraphService` / `IdentityService` / `IntelligenceService` / `ComponentService` / `HarnessCallbackService` / `PluginInvokeService`, and the private `DaemonOperatorService` (daemon-local). (`BillingService` was removed from gibson — gibson#915.)
+The daemon registers **many gRPC services on `:50051`** — the customer-facing `gibson.daemon.v1.DaemonService` plus the decomposed, daemon-local tenant-admin surface (`gibson.tenant.v1` — `TenantService`, `UserService`, `UsageService`, `ProviderService`, `MembershipService`, `GrantsService`, `SecretsService`, `ModelAccessService`, `PluginAdminService`, `BudgetService`, `AgentIdentityService`), the daemon-local `TracesService` / `GraphService` / `IdentityService` / `IntelligenceService` / `ComponentService` / `HarnessCallbackService` / `PluginInvokeService`, and the private `DaemonOperatorService` (daemon-local). (`BillingService` was removed from gibson.)
 
 There is a single listener. Surface separation is enforced on the wire by **Envoy's route table**, which gates the admin/operator prefixes — `/gibson.daemon.operator.v1.DaemonOperatorService/`, `/gibson.tenant.v1.TenantAdminService/`, `/gibson.platform.v1.PlatformOperatorService/` — behind the admin JWT requirement (see `zeroroot-ai/charts` `helm/gibson-workloads/files/envoy/envoy.yaml`). The daemon does NOT maintain a second listener.
 
-The operator protos and the customer-callable tenant-admin protos are both daemon-local (in-tree); tenant.v1 moved out of the OSS SDK in E6 (sdk#390) but keeps its `gibson.tenant.v1` wire package name, so it stays customer-callable, gated by Envoy:
+The operator protos and the customer-callable tenant-admin protos are both daemon-local (in-tree); tenant.v1 moved out of the OSS SDK in E6 but keeps its `gibson.tenant.v1` wire package name, so it stays customer-callable, gated by Envoy:
 
 ```go
 import (
     daemonoperatorv1 "github.com/zeroroot-ai/gibson/internal/server/daemon/api/gibson/daemon/operator/v1"
     discoverypb      "github.com/zeroroot-ai/gibson/internal/server/daemon/api/gibson/daemon/discovery/v1"
-    tenantv1         "github.com/zeroroot-ai/gibson/internal/server/daemon/api/gibson/tenant/v1" // customer-callable, daemon-local since E6/sdk#390
+    tenantv1         "github.com/zeroroot-ai/gibson/internal/server/daemon/api/gibson/tenant/v1" // customer-callable, daemon-local since E6
 )
 ```
 
-The platform protos moved in-tree when `platform-sdk` was dissolved (gibson#781); they are no longer a separate Go module. A daemon handler that imports `github.com/zeroroot-ai/platform-sdk/...` is dead code; that module no longer exists.
+The platform protos moved in-tree when `platform-sdk` was dissolved. They are no longer a separate Go module. A daemon handler that imports `github.com/zeroroot-ai/platform-sdk/...` is dead code; that module no longer exists.
 
 ## Service-account identity (canonical sub)
 
@@ -222,7 +221,7 @@ Do NOT re-introduce a deployment-mode env var. Per-feature gates that genuinely 
 
 ## MCP bridge (removed — ADR-0065)
 
-The legacy ADR-0048 **mcp-bridge** connector path is gone (hard cutover, ADR-0027, gibson#1524). Do NOT reintroduce it.
+The legacy ADR-0048 **mcp-bridge** connector path is gone (hard cutover, ADR-0027). Do NOT reintroduce it.
 
 - **MCP lives ONLY in the connector domain**, served via **ToolHive** behind the `ConnectorInstance` wrapper (ADR-0014). A connector is enabled by writing a `ConnectorInstance` CR (`ConnectorService` — catalog / enable / list / disable), which the connector-operator reconciles onto a ToolHive MCPServer / MCPRemoteProxy. Connector OAuth is `ConnectorAuthService` + the token freshener, whose desired set comes from `ConnectorInstance` CRs (`ConnectorInstanceCatalogSource`), not from any manifest table.
 - **The `plugin` domain has NO MCP.** Plugins are vendor-SDK, Go-first, JSON dispatch. `spec.runtime` is `process | pod | setec` — there is no `mcp-bridge` runtime and no `spec.mcp_bridge` block.
