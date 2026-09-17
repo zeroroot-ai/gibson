@@ -131,7 +131,7 @@ jobs:
             image: ghcr.io/zeroroot-ai/gibson-bootstrap
             tag_pattern: gibson-bootstrap-v(.*)
             build_args: ""
-    uses: zeroroot-ai/.github/.github/workflows/reusable-image-build.yml@017f26148bffdc5d382a265edd863e8a647e7830 # v0.4.0
+    uses: zeroroot-ai/.github/.github/workflows/reusable-image-build.yml@1366fb5a29590e522bf5a74308f55bb39a4edb56 # v0.5.1
     permissions:
       contents: read
       packages: write
@@ -160,7 +160,7 @@ jobs:
   bootstrap-runner:
     name: gibson-bootstrap-runner
     needs: images
-    uses: zeroroot-ai/.github/.github/workflows/reusable-image-build.yml@017f26148bffdc5d382a265edd863e8a647e7830 # v0.4.0
+    uses: zeroroot-ai/.github/.github/workflows/reusable-image-build.yml@1366fb5a29590e522bf5a74308f55bb39a4edb56 # v0.5.1
     permissions:
       contents: read
       packages: write
@@ -203,7 +203,7 @@ jobs:
   belief-sidecar-image:
     name: gibson-belief-sidecar
     needs: belief-sidecar-test
-    uses: zeroroot-ai/.github/.github/workflows/reusable-image-build.yml@017f26148bffdc5d382a265edd863e8a647e7830 # v0.4.0
+    uses: zeroroot-ai/.github/.github/workflows/reusable-image-build.yml@1366fb5a29590e522bf5a74308f55bb39a4edb56 # v0.5.1
     permissions:
       contents: read
       packages: write
