@@ -345,7 +345,7 @@ RETURN count(r) AS total_relationships;
 // Database size and statistics
 //
 // NOT AVAILABLE on a tenant Neo4j. The procedure allowlist admits
-// apoc.merge.node and apoc.merge.relationship only (ADR-0012, gibson#1257),
+// apoc.merge.node and apoc.merge.relationship only (ADR-0012),
 // so every other APOC procedure — including this one — is unregistered and
 // the call fails with "no procedure with the name ... registered". Use the
 // node/relationship counts above, or SHOW INDEXES / SHOW CONSTRAINTS.

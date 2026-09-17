@@ -60,7 +60,7 @@ service ConnectorAuthService {
   //
   // Re-authorizing replaces the previous grant in place. The daemon callback
   // runs the same path, so completing through the browser and completing
-  // through this RPC are one behaviour.
+  // through this RPC are one behavior.
   rpc CompleteConnectorAuthorization(CompleteConnectorAuthorizationRequest) returns (CompleteConnectorAuthorizationResponse) {
     option (gibson.auth.v1.authz) = {
       relation: "admin"

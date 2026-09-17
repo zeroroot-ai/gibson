@@ -5,7 +5,7 @@ Single-purpose CLI invoked by the chart's `bootstrap-secrets` pre-install/pre-up
 ## Subcommands
 
 ```
-# Ensure a Zitadel organisation exists; create if absent.
+# Ensure a Zitadel organization exists; create if absent.
 ZITADEL_ISSUER=http://gibson-zitadel.gibson.svc.cluster.local:8080 \
 ZITADEL_ADMIN_PAT=<pat> \
   gibson-bootstrap zitadel-ensure-org <name>

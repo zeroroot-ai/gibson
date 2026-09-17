@@ -28,7 +28,7 @@ This repository is the platform: the daemon, the ext-authz service, the three
 operators and the SPIFFE/JWKS sidecar. Findings in these are in scope,
 particularly anything that crosses a tenant boundary.
 
-**Cross-tenant issues are the highest severity we recognise.** World, timeline,
+**Cross-tenant issues are the highest severity we recognize.** World, timeline,
 reducer and knowledge graph are per-tenant by design and fully isolated. Any
 path where structure, event, projection or query spans tenants is a critical
 finding regardless of how difficult it is to reach.

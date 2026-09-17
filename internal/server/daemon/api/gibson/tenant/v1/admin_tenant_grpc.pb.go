@@ -95,7 +95,7 @@ type AdminTenantServiceClient interface {
 	// discloses billing state to any caller — gibson#1339), nor the own-tenant
 	// TenantService.GetTenantBilling (the operator is not that tenant's admin). It
 	// carries the same platform_operator gate as the other AdminTenantService
-	// RPCs: ext-authz authorises platform_operator on system_tenant:_system before
+	// RPCs: ext-authz authorizes platform_operator on system_tenant:_system before
 	// the handler trusts the request tenant_id.
 	AdminGetTenantBilling(ctx context.Context, in *AdminGetTenantBillingRequest, opts ...grpc.CallOption) (*AdminGetTenantBillingResponse, error)
 	// AdminListPendingRegistrations returns the registrations awaiting a
@@ -240,7 +240,7 @@ type AdminTenantServiceServer interface {
 	// discloses billing state to any caller — gibson#1339), nor the own-tenant
 	// TenantService.GetTenantBilling (the operator is not that tenant's admin). It
 	// carries the same platform_operator gate as the other AdminTenantService
-	// RPCs: ext-authz authorises platform_operator on system_tenant:_system before
+	// RPCs: ext-authz authorizes platform_operator on system_tenant:_system before
 	// the handler trusts the request tenant_id.
 	AdminGetTenantBilling(context.Context, *AdminGetTenantBillingRequest) (*AdminGetTenantBillingResponse, error)
 	// AdminListPendingRegistrations returns the registrations awaiting a

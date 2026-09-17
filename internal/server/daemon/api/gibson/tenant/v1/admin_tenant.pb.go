@@ -841,7 +841,7 @@ func (x *AdminDeleteTenantResponse) GetOpId() string {
 }
 
 // AdminGetTenantBillingRequest names the tenant whose billing identifiers to
-// read. tenant_id is UNTRUSTED input, authorised by nothing on its own — the
+// read. tenant_id is UNTRUSTED input, authorized by nothing on its own — the
 // platform_operator gate on system_tenant is what permits the cross-tenant read.
 type AdminGetTenantBillingRequest struct {
 	state         protoimpl.MessageState

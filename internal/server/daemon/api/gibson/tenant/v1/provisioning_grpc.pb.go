@@ -44,7 +44,7 @@
 //     unauthenticated-mode RPC (skipTenantResolution), so that allow-branch was
 //     unreachable for EVERY caller — including the tenant's own billing portal
 //     (gibson#1339). The identifiers now live on rule-mode RPCs where ext-authz
-//     + FGA can actually authorise the caller: TenantService.GetTenantBilling
+//     + FGA can actually authorize the caller: TenantService.GetTenantBilling
 //     (own tenant, tenant_from_identity) and AdminTenantService
 //     .AdminGetTenantBilling (cross-tenant, platform_operator).
 //   - SetTenantBillingActive requires a fresh HMAC assertion bound to this

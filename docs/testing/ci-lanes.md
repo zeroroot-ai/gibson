@@ -1,8 +1,5 @@
 # CI lanes — which gate runs where
 
-Spec: gibson#1236 (the class), gibson#1233 (the concrete case), gibson#1280
-(the tests nothing built).
-
 ## The contract
 
 **A green `pull_request` must mean the merge queue will accept the PR.**
@@ -25,7 +22,7 @@ failing checks:   (none)
 
 The failure lived in a run on a transient `gh-readonly-queue/main/pr-<n>-<sha>`
 branch, which is not linked from the PR and drops out of the default
-`gh run list` view. gibson#1233 watched four PRs in one evening cycle
+`gh run list` view. In one evening, four PRs cycled
 `added_to_merge_queue` → `removed_from_merge_queue` repeatedly, each showing
 CLEAN. A monitor watching for merges and CI failures stayed silent throughout,
 because from the PR's point of view neither ever happened.
@@ -43,7 +40,7 @@ entirely in *when* they ran and *how* the failure surfaced.
 | `vet-tags` | **both** | `go vet -tags=<leg> ./...` per declared build tag |
 | `coverage` | **both** | absolute floor + 85% diff coverage |
 | `integration` | **both** | `-tags integration`, testcontainers + envtest |
-| `openbao` | **both** | `-tags 'openbao_smoke openbao_integration'`, hermetic testcontainers (gibson#1293) |
+| `openbao` | **both** | `-tags 'openbao_smoke openbao_integration'`, hermetic testcontainers |
 | `critical-paths` | **both** | Tier-3 critical-path manifest guard, plus the two CI guards below |
 | `queue-gate` | **both** | native aggregator; the required status check |
 | `heavy` | **queue only** | `go test -race ./...` × 2 build tags + govulncheck |
@@ -91,13 +88,13 @@ Everything else the queue runs, the PR already ran.
 suite is invisible to them.
 
 That is how 34 test files under `tests/e2e/` went months without ever being
-built (gibson#1280). They could not even fail to compile. Five more tags were in
+built. They could not even fail to compile. Five more tags were in
 the same state: `test_fixtures`, `openbao_integration`, `openbao_smoke`,
 `llm_integration`, `integration_spire`.
 
 Compiling is not running, and the second half of the class is *mistagging*: a
 file that needs no infrastructure but carries an infrastructure tag is just as
-invisible. Six such files came out from under `e2e` in gibson#1293 — see
+invisible. Six such files came out from under `e2e`. See
 "The `e2e` tag was doing two jobs" below.
 
 The `vet-tags` matrix in `.github/workflows/go-ci.yml` now selects every declared
@@ -120,17 +117,17 @@ separate question per tag:
 |---|---|---|
 | `integration` | `vet-tags`, both lanes | `make test-integration`, both lanes (scoped `INTEGRATION_PKG`) |
 | `setec_integration` | `vet-tags`, both lanes | `e2e-setec-roundtrip.yml`, self-hosted KVM runner |
-| `openbao_smoke`, `openbao_integration` | `vet-tags`, both lanes | `make test-openbao` via the `openbao` job, both lanes (gibson#1293) — hermetic testcontainers, no live infra |
-| `e2e` | `vet-tags`, both lanes | **partially** — the cluster-free part was untagged and now runs in the default lane; the rest needs a live kind cluster, `GIBSON_TEST_FIXTURES_ENABLED=true` and an admin JWT (gibson#1293, see below) |
+| `openbao_smoke`, `openbao_integration` | `vet-tags`, both lanes | `make test-openbao` via the `openbao` job, both lanes (hermetic testcontainers, no live infra) |
+| `e2e` | `vet-tags`, both lanes | **partially** — the cluster-free part was untagged and now runs in the default lane; the rest needs a live kind cluster, `GIBSON_TEST_FIXTURES_ENABLED=true` and an admin JWT (see below) |
 | `test_fixtures` | `vet-tags`, both lanes | fixture-enabled image build (Dockerfile build-arg) |
-| `llm_integration` | `vet-tags`, both lanes | **compile-only, deliberately** — needs a live LLM key (`ANTHROPIC_API_KEY`); spend + secret is an owner decision (gibson#1293) |
-| `integration_spire` | `vet-tags`, both lanes | **compile-only, deliberately** — needs a live SPIRE Workload API socket, only reachable from inside a pod with the spire-agent socket mounted (gibson#1293) |
+| `llm_integration` | `vet-tags`, both lanes | **compile-only, deliberately** — needs a live LLM key (`ANTHROPIC_API_KEY`); spend + secret is an owner decision |
+| `integration_spire` | `vet-tags`, both lanes | **compile-only, deliberately** — needs a live SPIRE Workload API socket, only reachable from inside a pod with the spire-agent socket mounted |
 
 Do not delete an unrun suite and do not mark it skipped. Compile-level signal
 already catches the common rot (a test referencing an RPC or symbol that no
 longer exists); actually running them is tracked separately.
 
-### The `e2e` tag was doing two jobs (gibson#1293)
+### The `e2e` tag was doing two jobs
 
 `e2e` is supposed to mean *needs a live cluster*. Six files under it needed
 nothing at all — they were tagged by proximity, not by dependency, so 54 checks
@@ -175,21 +172,21 @@ The rest of the `e2e` tag genuinely needs infrastructure. Current status:
 its integration tests need a live Redis Stack (RediSearch + RedisJSON). They
 probe `localhost:6379` and skip when it is unreachable (see
 `requireTenantStoreRedis` / `main_test.go`; the bare `t.Skip` they used to open
-with was removed in gibson#1294). The `coverage` job provisions a
+with was removed). The `coverage` job provisions a
 `redis/redis-stack-server` service on `localhost:6379` and runs `go test ./...`
 (no `-short`), so these tests — including the `TestTenantScopedStore_*`
-tenant-isolation trio (gibson#1297) — execute there on **both** lanes. `heavy`
+tenant-isolation trio — execute there on **both** lanes. `heavy`
 and `vet-tags` do **not** provision Redis, so the same suites self-skip under
 those jobs by design.
 
-## Wall-clock latency assertions in the default lane (gibson#1392)
+## Wall-clock latency assertions in the default lane
 
 `TestBuilderBuild_P95Budget_50c_100r` (`internal/platform/manifest/builder_bench_test.go`)
 asserts a 100ms p95 budget on manifest builds. It is untagged, so it runs in the
 default lane on shared GitHub-hosted runners, where absolute wall-clock bounds
 are exposed to runner contention.
 
-**Decision (gibson#1392):** keep the test in the default lane, but assert a real
+**Decision:** keep the test in the default lane, but assert a real
 p95 over ≥100 samples (`slices.Sort` + index at `len*0.95`) instead of the max
 of 20 samples. A single contended sample no longer fails the gate; five
 concurrent slow samples out of 100 would have to land above budget, which is a

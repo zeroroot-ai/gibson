@@ -245,7 +245,7 @@ service MembershipService {
   //
   // The component_ref must be a fully-qualified component object key of the
   // form "<kind>:<name>" or "<kind>/<name>" (e.g. "tool:nmap", "agent/zerocool"). The daemon
-  // normalises to "component:<component_ref>" before writing to FGA.
+  // normalizes to "component:<component_ref>" before writing to FGA.
   //
   // Authorization: tenant admin. Only a tenant admin may modify which
   // components are available in their tenant's catalog.
@@ -563,7 +563,7 @@ message GrantComponentPermissionsResponse {
 
 message SetCatalogEnabledRequest {
   // component_ref is the component identifier without the "component:" type
-  // prefix, kind-qualified as "<kind>:<name>" or "<kind>/<name>" — e.g. "tool:nmap" or "agent/zerocool". The daemon normalises it
+  // prefix, kind-qualified as "<kind>:<name>" or "<kind>/<name>" — e.g. "tool:nmap" or "agent/zerocool". The daemon normalizes it
   // before writing to FGA.
   string component_ref = 1;
   // enabled: true writes the tenant_enabled tuple (adds to catalog); false
@@ -580,7 +580,7 @@ message SetCatalogEnabledResponse {
 
 message SetCatalogPublishedRequest {
   // component_ref is the component identifier without the "component:" type
-  // prefix, kind-qualified — e.g. "connector:gitlab" or "connector/gitlab". The daemon normalises it before writing.
+  // prefix, kind-qualified — e.g. "connector:gitlab" or "connector/gitlab". The daemon normalizes it before writing.
   string component_ref = 1;
   // published: true writes the tenant_published tuple (offers the BYO
   // component in the tenant's private registry); false deletes it. Idempotent

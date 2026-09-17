@@ -46,7 +46,7 @@ failing step and the root error (e.g. `DataPlaneProvisioned: ... 409 conflict`).
 
 Use `gibson.zeroroot.ai/saga-retry-from` **only** when `reason == "SagaFailed"`.
 
-The operator recognises two other permanent-failure reasons that require human
+The operator recognizes two other permanent-failure reasons that require human
 intervention before retrying:
 
 | Reason | Meaning | Recovery path |

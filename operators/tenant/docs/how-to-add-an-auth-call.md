@@ -140,7 +140,7 @@ func ensureProviderConfigBaseline(deps ProvisionDeps) saga.StepFn {
 The operator's identity reaches the daemon via Envoy + ext-authz; the
 daemon's handler reads `auth.IdentityFromContext` and `auth.TenantFromContext`
 to act in the right scope. The operator does **not** invent a tenant
-header — the FGA tuple it just wrote authorises this call.
+header — the FGA tuple it just wrote authorizes this call.
 
 ## Step 6 — Avoid these patterns
 

@@ -84,10 +84,10 @@ service ProviderService {
   }
 
   // ---------------------------------------------------------------------------
-  // Provider catalogue and probing
+  // Provider catalog and probing
   // ---------------------------------------------------------------------------
 
-  // GetSupportedProviders returns the daemon's static catalogue of LLM provider
+  // GetSupportedProviders returns the daemon's static catalog of LLM provider
   // types with their per-provider credential field schemas.
   rpc GetSupportedProviders(GetSupportedProvidersRequest) returns (GetSupportedProvidersResponse) {
     option (gibson.auth.v1.authz) = {
@@ -98,7 +98,7 @@ service ProviderService {
     };
   }
   // ProbeProvider validates candidate provider credentials WITHOUT persisting
-  // them, and returns the live model catalogue the provider's API exposes for
+  // them, and returns the live model catalog the provider's API exposes for
   // those credentials. Used by the wizard's "Test connection" step.
   //
   // SECURITY: credentials transit memory only — they are passed to the
@@ -116,7 +116,7 @@ service ProviderService {
       allowed_identities: 1  // USER
     };
   }
-  // ListProviderModels fetches the live model catalogue for an already-
+  // ListProviderModels fetches the live model catalog for an already-
   // configured provider, looked up by name. Credentials are read from the
   // encrypted store; the caller does not pass them.
   rpc ListProviderModels(ListProviderModelsRequest) returns (ListProviderModelsResponse) {
@@ -179,7 +179,7 @@ service ProviderService {
 // Provider record types
 // ---------------------------------------------------------------------------
 
-// Capability declares a service a provider can fulfil. A provider may serve
+// Capability declares a service a provider can fulfill. A provider may serve
 // chat completions, embeddings, or both — letting an operator run e.g.
 // Anthropic for chat and OpenAI/Bedrock for embeddings (E11 BYO-embedder).
 enum Capability {
@@ -202,7 +202,7 @@ message ProviderRecord {
   map<string, string> credentials_masked = 7;
   string created_at = 8;
   string updated_at = 9;
-  // capabilities declares which services this provider fulfils (chat and/or
+  // capabilities declares which services this provider fulfills (chat and/or
   // embedding). Empty implies the legacy chat-only default.
   repeated Capability capabilities = 10;
   // default_embedding_model is the default model used for embedding requests,
@@ -220,7 +220,7 @@ message ProviderConfigInput {
   string default_model = 3;
   map<string, string> credentials = 4;
   bool set_as_default = 5;
-  // capabilities declares which services this provider fulfils (chat and/or
+  // capabilities declares which services this provider fulfills (chat and/or
   // embedding). Empty implies the legacy chat-only default.
   repeated Capability capabilities = 6;
   // default_embedding_model is the default model used for embedding requests,
@@ -269,7 +269,7 @@ message ModelDescriptor {
   string family = 2;
   int32 context_window = 3;
   // capabilities declares what this model can do (chat, embedding, …).
-  // Empty implies legacy chat-only behaviour. The dashboard uses this field to
+  // Empty implies legacy chat-only behavior. The dashboard uses this field to
   // populate the chat-model picker (CAPABILITY_CHAT) or the embedding-model
   // picker (CAPABILITY_EMBEDDING) — a model may appear in both.
   repeated Capability capabilities = 4;
@@ -282,11 +282,11 @@ message SupportedProvider {
   string docs_url = 3;
   bool self_hosted = 4;
   repeated CredentialField credentials = 5;
-  // default_models is the static catalogue of CHAT models this provider
+  // default_models is the static catalog of CHAT models this provider
   // exposes when the daemon can enumerate them without a live API call.
   // Empty for providers where the model list requires a live probe.
   repeated ModelDescriptor default_models = 6;
-  // embedding_models is the static catalogue of EMBEDDING models this
+  // embedding_models is the static catalog of EMBEDDING models this
   // provider supports. Empty for providers that serve chat only (e.g.
   // Anthropic, Google). The dashboard uses this list to populate the
   // embedding-model picker in Settings > Providers.
@@ -392,7 +392,7 @@ message TestProviderResponse {
   int64 latency_ms = 2;
   string model = 3;
   string error = 4;
-  // Live model catalogue returned by the provider's API for these credentials.
+  // Live model catalog returned by the provider's API for these credentials.
   // Empty when ok=false.
   repeated ModelDescriptor models = 5;
   // embedding_ok is true when an embedding probe was attempted and succeeded.
@@ -414,7 +414,7 @@ message GetSupportedProvidersResponse {
 }
 
 // ProbeProviderRequest carries candidate provider credentials for a
-// validation-only call that returns the live model catalogue. Credentials
+// validation-only call that returns the live model catalog. Credentials
 // are NEVER persisted by this RPC.
 // Source: previously ProbeProviderRequest in gibson.admin.v1 (platform-sdk).
 message ProbeProviderRequest {
@@ -441,7 +441,7 @@ message ProbeProviderResponse {
   string error_message = 2;
   // Stable error class for programmatic dispatch when ok=false.
   string error_class = 3;
-  // Live chat-model catalogue the provider's API returned for these
+  // Live chat-model catalog the provider's API returned for these
   // credentials. Empty when ok=false or the provider is embedding-only.
   repeated ModelDescriptor models = 4;
   // Round-trip latency to the upstream provider, in milliseconds.

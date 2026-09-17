@@ -69,11 +69,11 @@ type ProviderServiceClient interface {
 	// TestProvider validates a proposed provider config by making a minimal live
 	// request.
 	TestProvider(ctx context.Context, in *TestProviderRequest, opts ...grpc.CallOption) (*TestProviderResponse, error)
-	// GetSupportedProviders returns the daemon's static catalogue of LLM provider
+	// GetSupportedProviders returns the daemon's static catalog of LLM provider
 	// types with their per-provider credential field schemas.
 	GetSupportedProviders(ctx context.Context, in *GetSupportedProvidersRequest, opts ...grpc.CallOption) (*GetSupportedProvidersResponse, error)
 	// ProbeProvider validates candidate provider credentials WITHOUT persisting
-	// them, and returns the live model catalogue the provider's API exposes for
+	// them, and returns the live model catalog the provider's API exposes for
 	// those credentials. Used by the wizard's "Test connection" step.
 	//
 	// SECURITY: credentials transit memory only — they are passed to the
@@ -84,7 +84,7 @@ type ProviderServiceClient interface {
 	// Source: previously ProbeProvider in gibson.admin.v1.TenantAdminService
 	// (platform-sdk); moved here as it is customer-callable.
 	ProbeProvider(ctx context.Context, in *ProbeProviderRequest, opts ...grpc.CallOption) (*ProbeProviderResponse, error)
-	// ListProviderModels fetches the live model catalogue for an already-
+	// ListProviderModels fetches the live model catalog for an already-
 	// configured provider, looked up by name. Credentials are read from the
 	// encrypted store; the caller does not pass them.
 	ListProviderModels(ctx context.Context, in *ListProviderModelsRequest, opts ...grpc.CallOption) (*ListProviderModelsResponse, error)
@@ -255,11 +255,11 @@ type ProviderServiceServer interface {
 	// TestProvider validates a proposed provider config by making a minimal live
 	// request.
 	TestProvider(context.Context, *TestProviderRequest) (*TestProviderResponse, error)
-	// GetSupportedProviders returns the daemon's static catalogue of LLM provider
+	// GetSupportedProviders returns the daemon's static catalog of LLM provider
 	// types with their per-provider credential field schemas.
 	GetSupportedProviders(context.Context, *GetSupportedProvidersRequest) (*GetSupportedProvidersResponse, error)
 	// ProbeProvider validates candidate provider credentials WITHOUT persisting
-	// them, and returns the live model catalogue the provider's API exposes for
+	// them, and returns the live model catalog the provider's API exposes for
 	// those credentials. Used by the wizard's "Test connection" step.
 	//
 	// SECURITY: credentials transit memory only — they are passed to the
@@ -270,7 +270,7 @@ type ProviderServiceServer interface {
 	// Source: previously ProbeProvider in gibson.admin.v1.TenantAdminService
 	// (platform-sdk); moved here as it is customer-callable.
 	ProbeProvider(context.Context, *ProbeProviderRequest) (*ProbeProviderResponse, error)
-	// ListProviderModels fetches the live model catalogue for an already-
+	// ListProviderModels fetches the live model catalog for an already-
 	// configured provider, looked up by name. Credentials are read from the
 	// encrypted store; the caller does not pass them.
 	ListProviderModels(context.Context, *ListProviderModelsRequest) (*ListProviderModelsResponse, error)

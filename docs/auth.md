@@ -170,13 +170,13 @@ Pinning is `AuthorizeID`, not trust-domain membership: every workload in
 
 The same route is still mounted on the plaintext `:8085` bootstrap listener for
 the SDK's own registration flow; ext-authz no longer reads it, and it is removed
-once the chart has moved (deploy#1187).
+once the chart has moved.
 
 There is **no `/.well-known/jwks.json`** and no key-set document of any kind.
 ADR-0045 collapsed key resolution to fetch-by-kid so ext-authz never enumerates
 the registered component keys. The daemon advertised that path in its
-Capability-Grant discovery document for a while without ever mounting it
-(gibson#1272); the advertisement is gone, and
+Capability-Grant discovery document for a while without ever mounting it.
+The advertisement is gone, and
 `TestBootstrapMux_ServesEveryAdvertisedPath` fails if any advertised URL is
 unmounted again.
 
@@ -250,7 +250,7 @@ plans to remove; until then the analyzer permits it explicitly.
 | `_system` fallback in `TenantFromContext` | Audit C11/C12. Empty tenant → PermissionDenied. |
 | Three separate gRPC listeners (`:50001`, `:50002`, `:50100`) | Single multiplexed port behind Envoy. |
 | `internal/platform/capabilitygrant/` inline-secret implementation | Replaced by KMS-derived Ed25519 minting. |
-| `DaemonOperatorService.ImpersonateTenant` and its JWT minter | Deleted as a dead, uncalled admin RPC (gibson#1049). |
+| `DaemonOperatorService.ImpersonateTenant` and its JWT minter | Deleted as a dead, uncalled admin RPC. |
 
 ## Cross-link
 

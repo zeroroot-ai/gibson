@@ -1,4 +1,4 @@
-# Belief-field sidecar (gibson#750, ADR-0005)
+# Belief-field sidecar (ADR-0005)
 
 This is the **belief-field sidecar**: a small Python service that runs **exact,
 read-only** Bayesian inference (variable elimination) over an attack-path
@@ -87,7 +87,7 @@ ordering — so existing model artifacts load untouched.
 Alongside that, the runtime image dropped its Debian userland for distroless.
 The two together were 24 of the 25 open HIGH/CRITICAL code-scanning alerts on
 the whole `gibson` repo, four of them CRITICAL in `perl-base`, in packages
-nothing here invokes. Details in gibson#1436.
+nothing here invokes.
 
 ## Run
 
