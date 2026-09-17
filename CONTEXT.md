@@ -525,7 +525,7 @@ _Avoid_: loop node, retry edge, agent node (that one launches an ephemeral sandb
   all four kinds** (prevents cross-kind name collisions; matches the dashboard + connectors).
   `authz/objects.go` `CanonicalComponentResource` must **apply** the kind prefix, not strip it;
   existing bare objects are re-keyed (`component:zerocool` → `component:agent/zerocool`); the
-  team-only `SetComponentAccess` normaliser and every checker call-site move to the prefixed
+  team-only `SetComponentAccess` normalizer and every checker call-site move to the prefixed
   form. Fixes the agent/tool/plugin toggle "phantom object" bug (Defect C). Hard-to-reverse → ADR.
 
 - **"Write" vs "Configure"** named the same relation (`can_configure`) in two UIs —

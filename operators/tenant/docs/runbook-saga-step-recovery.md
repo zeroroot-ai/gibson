@@ -91,7 +91,7 @@ re-runs all steps in order from that name onwards — steps that already
 completed are skipped via their `AlreadyProvisioned` or `IsConditionTrue`
 guard).
 
-Example (the Qdrant 409 bug from 2026-05-23, tenant-operator#197):
+Example (the Qdrant 409 bug from 2026-05-23):
 
 ```bash
 kubectl annotate tenant one \
