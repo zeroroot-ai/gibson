@@ -369,6 +369,12 @@ jobs:
                         value: "true"
                       - name: DAEMON_GRPC_ADDR
                         value: "gibson-gibson-workloads.${NS}.svc.cluster.local:50051"
+                      # The daemon's listener is SPIFFE mTLS. Name the socket
+                      # the csi.spiffe.io mount below carries (api.sock, the
+                      # chart's gibson.auth.spiffe.workloadAPISocket) so the
+                      # runner never guesses and never dials plaintext (gibson#14).
+                      - name: SPIFFE_ENDPOINT_SOCKET
+                        value: "unix:///run/spire/sockets/api.sock"
                       - name: REDIS_ADDR
                         value: "gibson-redis-stack.${NS}.svc.cluster.local:6379"
                       - name: REDIS_PASSWORD
