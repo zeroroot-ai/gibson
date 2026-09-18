@@ -21,17 +21,19 @@
 //     control that was already relied on and found insufficient: any caller
 //     reaching that route could flip billing_active for any tenant.
 //
-//  2. The HMAC-signed header bundle in internal/infra/authz (ext-authz signs
-//     the identity headers, the daemon recomputes and constant-time compares).
-//     That mechanism survives an Envoy hop precisely because it binds the
-//     ASSERTION, not the connection. This file applies the same shape to the
-//     billing write: the dashboard's Stripe-webhook handler signs the two
-//     request fields plus a timestamp with a secret only it and the daemon
-//     hold, and the daemon recomputes.
+//  2. An HMAC over the assertion itself. A signature that covers the request
+//     fields and a timestamp, computed with a secret only the two ends hold,
+//     survives an Envoy hop because it binds the ASSERTION, not the
+//     connection. This file is the one place in the daemon that does this:
+//     the dashboard's Stripe-webhook handler signs the two request fields
+//     plus a timestamp, and the daemon recomputes and constant-time compares.
+//     (An earlier HMAC-signed identity-header bundle in internal/infra/authz
+//     never had a caller and was deleted. ext-authz identity reaches the
+//     daemon over SPIFFE mTLS, not a signed header.)
 //
 // So: mechanism 2, because it is the only one of the two that can distinguish
 // the dashboard's webhook handler from an arbitrary client on the same Envoy
-// route, and because it is already the codebase's answer to that question.
+// route.
 //
 // # Failure posture
 //

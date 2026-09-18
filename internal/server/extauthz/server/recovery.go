@@ -4,10 +4,8 @@
 // Package server: panic-recovery interceptor for the raw gRPC server.
 //
 // ext-authz hosts a raw envoy.service.auth.v3.Authorization gRPC server
-// (not ConnectRPC); platform-clients/transport.NewServer ships a
-// ConnectRPC-shaped recovery interceptor and is therefore not a drop-in
-// replacement here. This file is the gRPC-shaped counterpart, kept
-// behaviour-equivalent: catches every panic in the handler chain,
+// (not ConnectRPC). This file is the gRPC-shaped recovery interceptor for
+// it: catches every panic in the handler chain,
 // converts to codes.Internal with a generic message (never leaks the
 // panic value across the trust boundary), and logs the full stack trace
 // to the supplied logger.
