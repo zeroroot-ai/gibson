@@ -158,6 +158,36 @@ jobs:
           kubectl -n setec-sandboxes describe pod "gibson-e2e-warm-${{ github.run_id }}-${{ github.job }}" || true
           exit 1
 
+      - name: Sweep stale throwaway SandboxClasses
+        # gibson#27: the end-of-job cleanup is `if: always()`, and always()
+        # does not survive a cancelled run or a runner that goes away, so a
+        # cancelled run leaked its cluster-scoped class for good (staging
+        # carried seven, the oldest 42h). A sweep at the START of every run is
+        # self-healing: it removes what earlier cancelled runs left behind. The
+        # threshold is longer than any run of this workflow, so a live sibling
+        # run's class is never touched. Best-effort: a sweep that cannot list
+        # must not fail a green e2e.
+        env:
+          STALE_AFTER_MINUTES: "180"
+        run: |
+          set -uo pipefail
+          if ! list="$(kubectl get sandboxclass -o go-template='{{range .items}}{{.metadata.name}} {{.metadata.creationTimestamp}}{{"\n"}}{{end}}' 2>&1)"; then
+            echo "::warning::cannot list sandboxclasses, stale sweep skipped: ${list}"
+            exit 0
+          fi
+          now="$(date -u +%s)"; stale=$(( STALE_AFTER_MINUTES * 60 )); swept=0
+          while read -r name created; do
+            case "$name" in gibson-roundtrip-qemu-*|gibson-connector-qemu-*) ;; *) continue ;; esac
+            case "$name" in *-${{ github.run_id }}) continue ;; esac
+            [ -n "$created" ] || continue
+            age=$(( now - $(date -u -d "$created" +%s) ))
+            [ "$age" -ge "$stale" ] || continue
+            echo "sweeping ${name} (age $(( age / 60 ))m)"
+            kubectl delete sandboxclass "$name" --ignore-not-found --wait=false || echo "::warning::failed to delete ${name}"
+            swept=$(( swept + 1 ))
+          done <<< "$list"
+          echo "swept ${swept} stale throwaway SandboxClass(es) older than ${STALE_AFTER_MINUTES}m"
+
       - name: Ensure a kata-qemu SandboxClass exists (throwaway, this run only)
         # SandboxClass is CLUSTER-scoped (setec api/v1alpha1/
         # sandboxclass_types.go: +kubebuilder:resource:scope=Cluster) — no
