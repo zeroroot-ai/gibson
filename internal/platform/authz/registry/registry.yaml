@@ -361,6 +361,12 @@ entries:
     object_deriver: "system_tenant"
     allowed_identities:
       - COMPONENT
+  "/gibson.component.v1.ComponentService/WatchComponentEvents":
+    relation: "can_poll_work"
+    object_type: "component"
+    object_deriver: "system_tenant"
+    allowed_identities:
+      - COMPONENT
   "/gibson.daemon.agentconsole.v1.AgentConsoleService/ListRunningAgents":
     relation: "member"
     object_type: "tenant"

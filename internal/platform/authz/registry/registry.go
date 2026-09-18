@@ -613,6 +613,16 @@ var Registry = map[string]Entry{
 		Unauthenticated:   false,
 		Self:              false,
 	},
+	"/gibson.component.v1.ComponentService/WatchComponentEvents": {
+		Method:            "/gibson.component.v1.ComponentService/WatchComponentEvents",
+		Service:           "gibson.component.v1.ComponentService",
+		Relation:          "can_poll_work",
+		ObjectType:        "component",
+		ObjectDeriver:     "system_tenant",
+		AllowedIdentities: IdentityComponent,
+		Unauthenticated:   false,
+		Self:              false,
+	},
 	"/gibson.daemon.agentconsole.v1.AgentConsoleService/ListRunningAgents": {
 		Method:            "/gibson.daemon.agentconsole.v1.AgentConsoleService/ListRunningAgents",
 		Service:           "gibson.daemon.agentconsole.v1.AgentConsoleService",

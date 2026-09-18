@@ -15,6 +15,7 @@ import (
 	"google.golang.org/grpc/status"
 
 	"github.com/zeroroot-ai/gibson/internal/platform/authz"
+	"github.com/zeroroot-ai/gibson/internal/platform/componentevents"
 	"github.com/zeroroot-ai/gibson/internal/platform/secrets"
 
 	tenantv1 "github.com/zeroroot-ai/sdk/api/gen/gibson/pluginadmin/v1"
@@ -186,6 +187,7 @@ func newPluginsTestServer(t *testing.T) (*PluginsAdminServer, *fakeComponentInst
 		SecretWriter:      sw,
 		Authorizer:        az,
 		BootstrapAuditor:  au,
+		Events:            &recordingPublisher{},
 		BootstrapTokenTTL: time.Hour,
 		Now:               func() time.Time { return time.Unix(1700000000, 0).UTC() },
 	})
@@ -493,4 +495,78 @@ var _ = secrets.AuditEvent{}
 // not set up for it must fail the gate loudly rather than answer "nobody".
 func (f *fakeAuthorizer) ListUsersOfType(context.Context, string, string, string, string) ([]string, error) {
 	return nil, errListUsersOfTypeNotStubbed
+}
+
+// recordingPublisher captures component events for assertions (gibson#154).
+type recordingPublisher struct {
+	events []publishedEvent
+	err    error
+}
+
+type publishedEvent struct {
+	tenant, principal string
+	ev                componentevents.Event
+}
+
+func (r *recordingPublisher) Publish(_ context.Context, tenant, principal string, ev componentevents.Event) error {
+	if r.err != nil {
+		return r.err
+	}
+	r.events = append(r.events, publishedEvent{tenant: tenant, principal: principal, ev: ev})
+	return nil
+}
+
+// TestRevokePluginSecretBinding_TellsTheRunningPlugin is the gibson#154
+// fixture: the revocation reaches the plugin's event channel under the
+// declared name, before the audit line, and a publish failure is
+// Unavailable so the operator retries.
+func TestRevokePluginSecretBinding_TellsTheRunningPlugin(t *testing.T) {
+	srv, _, _, _, _, _, au := newPluginsTestServer(t)
+	pub := &recordingPublisher{}
+	srv.events = pub
+	ctx := ctxWithTenant(t, "acme")
+	if _, err := srv.RevokePluginSecretBinding(ctx, &tenantv1.RevokePluginSecretBindingRequest{InstallId: "abc", DeclaredName: "cred:db"}); err != nil {
+		t.Fatalf("RevokePluginSecretBinding: %v", err)
+	}
+	if len(pub.events) != 1 {
+		t.Fatalf("published %+v", pub.events)
+	}
+	got := pub.events[0]
+	if got.tenant != "acme" || got.principal != "plugin_principal:abc" || got.ev.Type != componentevents.TypeSecretAccessRevoked || got.ev.SecretName != "cred:db" || got.ev.Reason == "" || got.ev.OccurredAt.IsZero() {
+		t.Fatalf("event = %+v", got)
+	}
+
+	srv.events = &recordingPublisher{err: errors.New("redis down")}
+	_, err := srv.RevokePluginSecretBinding(ctx, &tenantv1.RevokePluginSecretBindingRequest{InstallId: "abc", DeclaredName: "cred:db"})
+	if status.Code(err) != codes.Unavailable {
+		t.Fatalf("publish failure must be Unavailable, got %v", err)
+	}
+	if len(au.events) != 1 {
+		t.Fatalf("the audit line must not claim a revocation the plugin did not hear: %d audit events", len(au.events))
+	}
+}
+
+func TestEditPluginSecretBinding_TellsThePluginTheValueMoved(t *testing.T) {
+	srv, reg, _, _, _, _, _ := newPluginsTestServer(t)
+	reg.installs["i1"] = ComponentInstallInfo{InstallID: "i1", TenantID: "acme", Name: "p"}
+	pub := &recordingPublisher{}
+	srv.events = pub
+	ctx := ctxWithTenant(t, "acme")
+	if _, err := srv.EditPluginSecretBinding(ctx, &tenantv1.EditPluginSecretBindingRequest{InstallId: "i1", DeclaredName: "cred:db", NewExistingRef: "cred:db_v2"}); err != nil {
+		t.Fatalf("EditPluginSecretBinding: %v", err)
+	}
+	if len(pub.events) != 1 || pub.events[0].principal != "plugin_principal:i1" || pub.events[0].ev.Type != componentevents.TypeSecretRotated || pub.events[0].ev.SecretName != "cred:db" {
+		t.Fatalf("published %+v", pub.events)
+	}
+	srv.events = &recordingPublisher{err: errors.New("redis down")}
+	if _, err := srv.EditPluginSecretBinding(ctx, &tenantv1.EditPluginSecretBindingRequest{InstallId: "i1", DeclaredName: "cred:db", NewExistingRef: "cred:db_v3"}); status.Code(err) != codes.Unavailable {
+		t.Fatalf("publish failure must be Unavailable, got %v", err)
+	}
+}
+
+func TestNewPluginsAdminServer_RequiresEvents(t *testing.T) {
+	cfg := PluginsAdminConfig{Registry: &fakeComponentInstallRegistry{}, ManifestValidator: &fakeManifestValidator{}, ZitadelClient: &fakeZitadel{}, SecretWriter: &fakeSecretWriter{}, Authorizer: &fakeAuthorizer{}, BootstrapAuditor: &fakeAuditor{}}
+	if _, err := NewPluginsAdminServer(cfg); err == nil {
+		t.Fatal("a plugins admin with no event publisher must not construct")
+	}
 }

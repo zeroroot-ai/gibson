@@ -33,6 +33,7 @@ import (
 	"github.com/zeroroot-ai/gibson/internal/engine/graphrag/ingest"
 	"github.com/zeroroot-ai/gibson/internal/platform/audit"
 	"github.com/zeroroot-ai/gibson/internal/platform/authz"
+	"github.com/zeroroot-ai/gibson/internal/platform/componentevents"
 	bankpb "github.com/zeroroot-ai/sdk/api/gen/gibson/bank/v1"
 	componentpb "github.com/zeroroot-ai/sdk/api/gen/gibson/component/v1"
 	graphragpb "github.com/zeroroot-ai/sdk/api/gen/gibson/graphrag/v1"
@@ -234,6 +235,10 @@ type ComponentServiceServer struct {
 	// May be nil; when nil (noop/disabled mode), all FGA writes are skipped silently.
 	// Set via WithAuthorizer. Added by agent-auth-fga-integration spec (task 3).
 	authorizer authz.Authorizer
+
+	// eventHub feeds WatchComponentEvents (gibson#154). nil means the stream
+	// is Unavailable; the daemon always wires one.
+	eventHub *componentevents.Hub
 
 	// componentInstallRegistry is the daemon-side plugin install registry.
 	// When non-nil, RegisterComponent calls with kind="plugin" are forwarded to
