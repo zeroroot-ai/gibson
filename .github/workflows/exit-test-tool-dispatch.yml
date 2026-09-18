@@ -361,6 +361,21 @@ jobs:
         if: failure()
         run: |
           kubectl -n "$NS" get pods || true
+          # A pod stuck in Init:Error is invisible in the pod list and in the
+          # daemon log: print every not-ready pod's events and the last log of
+          # each container that is not ready, init containers included. The
+          # 2026-09-18 runs failed here twice with nothing to read (gibson#14).
+          echo "=== pods with a container not ready ==="
+          for p in $(kubectl -n "$NS" get pods -o json | jq -r '.items[] | select(.status.phase != "Succeeded") | select([.status.containerStatuses[]?, .status.initContainerStatuses[]?] | any(.ready == false)) | .metadata.name'); do
+            echo "--- $p"; kubectl -n "$NS" describe pod "$p" | grep -A15 '^Events' || true
+            for c in $(kubectl -n "$NS" get pod "$p" -o json | jq -r '[.status.containerStatuses[]?, .status.initContainerStatuses[]?] | .[] | select(.ready == false) | .name'); do
+              echo "..... last log of $p/$c (previous instance if it restarted)"
+              kubectl -n "$NS" logs "$p" -c "$c" --previous --tail=40 2>/dev/null || kubectl -n "$NS" logs "$p" -c "$c" --tail=40 || true
+            done
+          done
+          echo "=== Argo application conditions ==="
+          kubectl -n argocd get app gibson -o jsonpath='{range .status.conditions[*]}{.type}: {.message}{"\n"}{end}' 2>/dev/null || true
+          kubectl -n argocd get app gibson -o jsonpath='{range .status.operationState.syncResult.resources[?(@.status=="SyncFailed")]}{.kind}/{.name}: {.message}{"\n"}{end}' 2>/dev/null || true
           kubectl -n setec-system get pods,sandboxes,sandboxclasses || true
           kubectl -n setec-sandboxes get pods || true
           kubectl -n "$NS" logs -l app.kubernetes.io/component=daemon -c gibson --tail=200 || true
