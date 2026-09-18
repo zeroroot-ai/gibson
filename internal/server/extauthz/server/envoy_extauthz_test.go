@@ -1021,3 +1021,21 @@ func TestCredentialTypeFor_ZitadelMachineUserToken(t *testing.T) {
 		t.Fatalf("machine user token: got %+v", id)
 	}
 }
+
+// The constructor trims and drops blank entries, so a chart value with
+// stray whitespace still names the client.
+func TestNewEnvoyAuthzServer_HumanClientIDs(t *testing.T) {
+	t.Parallel()
+	reg, err := fga.LoadRegistry([]byte(sessionGateTestYAML))
+	if err != nil {
+		t.Fatalf("LoadRegistry: %v", err)
+	}
+	cc := fga.NewCachedChecker(fga.NewChecker(&sessionAwareFGA{rpcAllowed: true, sessionAllowed: false}, reg), 0, 0)
+	srv := NewEnvoyAuthzServer(Config{Cache: cc, Logger: newTestLogger(), HumanClientIDs: []string{" 334268812578094081@gibson ", "", "  "}})
+	if len(srv.humans) != 1 {
+		t.Fatalf("humans = %v, want the one trimmed client id", srv.humans)
+	}
+	if _, ok := srv.humans["334268812578094081@gibson"]; !ok {
+		t.Fatalf("humans = %v, want the trimmed client id as key", srv.humans)
+	}
+}

@@ -527,7 +527,7 @@ func (s *EnvoyAuthzServer) enforceCapabilityGrant(
 // (security-hardening R13) and for audit logging — never forwarded.
 //
 // See ext-authz#26 for the regression that motivated this split.
-func identityFromJWTPayload(httpHeaders map[string]string, humanClients map[string]struct{}) (id headers.Identity, subjectSource string, verifiedIss string, err error) {
+func identityFromJWTPayload(httpHeaders map[string]string, humanClients map[string]struct{}) (id headers.Identity, subjectSource, verifiedIss string, err error) {
 	encoded := httpHeaders[headerJWTPayload]
 	if encoded == "" {
 		return headers.Identity{}, "", "", errors.New("missing x-jwt-payload (Envoy jwt_authn must populate)")
