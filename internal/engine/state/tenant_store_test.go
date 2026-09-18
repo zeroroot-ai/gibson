@@ -528,3 +528,17 @@ func TestTenantScopedStore_GetTenant(t *testing.T) {
 		})
 	}
 }
+
+// The daemon builds its quota store from this; SaaS gets no default at all.
+func TestTenantStoreConfigForAuthMode(t *testing.T) {
+	saas := TenantStoreConfigForAuthMode("saas")
+	if !saas.RequireTenant || saas.DefaultTenant != "" {
+		t.Fatalf("saas: want RequireTenant and no default, got %+v", saas)
+	}
+	for _, mode := range []string{"enterprise", "dev", ""} {
+		cfg := TenantStoreConfigForAuthMode(mode)
+		if cfg.RequireTenant || cfg.DefaultTenant != "default" || cfg.AuthMode != mode {
+			t.Fatalf("%q: want default tenant and no requirement, got %+v", mode, cfg)
+		}
+	}
+}

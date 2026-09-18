@@ -56,6 +56,22 @@ type TenantStoreConfig struct {
 	RequireTenant bool
 }
 
+// TenantStoreConfigForAuthMode is the one place that decides how the daemon's
+// quota store treats a call with no tenant in context. In SaaS mode every
+// call carries a tenant and one that does not must fail, so the store gets
+// no default that could stand in for it. Every other mode is a single
+// operator's install, where "default" is the one tenant there is.
+func TenantStoreConfigForAuthMode(authMode string) *TenantStoreConfig {
+	cfg := &TenantStoreConfig{
+		AuthMode:      authMode,
+		RequireTenant: authMode == "saas",
+	}
+	if authMode != "saas" {
+		cfg.DefaultTenant = "default"
+	}
+	return cfg
+}
+
 // NewTenantScopedStore creates a new tenant-aware Redis store wrapper.
 //
 // The config determines how tenant isolation is enforced:
