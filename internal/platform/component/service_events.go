@@ -4,6 +4,7 @@
 package component
 
 import (
+	"fmt"
 	"time"
 
 	"google.golang.org/grpc"
@@ -60,11 +61,11 @@ func (s *ComponentServiceServer) WatchComponentEvents(_ *componentpb.WatchCompon
 				return nil
 			}
 			if err := stream.Send(toProtoEvent(ev)); err != nil {
-				return err
+				return fmt.Errorf("component events: send %s: %w", ev.Type, err)
 			}
 		case <-heartbeat.C:
 			if err := stream.Send(&componentpb.ComponentEvent{Type: componentevents.TypeHeartbeat, OccurredAt: timestamppb.Now()}); err != nil {
-				return err
+				return fmt.Errorf("component events: send heartbeat: %w", err)
 			}
 		}
 	}

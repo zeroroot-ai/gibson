@@ -73,7 +73,7 @@ func TestWatchComponentEvents_DeliversRevocationToTheCaller(t *testing.T) {
 
 	var gotRevoked, gotHeartbeat bool
 	deadline := time.After(3 * time.Second)
-	for !(gotRevoked && gotHeartbeat) {
+	for !gotRevoked || !gotHeartbeat {
 		select {
 		case ev := <-st.sent:
 			switch ev.GetType() {
@@ -127,8 +127,10 @@ type failingEventStream struct {
 }
 
 func (s *failingEventStream) Context() context.Context { return s.ctx }
+var errClientGone = errors.New("client gone")
+
 func (s *failingEventStream) Send(*componentpb.ComponentEvent) error {
-	return errors.New("client gone")
+	return errClientGone
 }
 
 // TestWatchComponentEvents_SendFailureEndsTheStream: a Send error on an
@@ -138,11 +140,11 @@ func TestWatchComponentEvents_SendFailureEndsTheStream(t *testing.T) {
 	ctx := credCallerCtx(t, "plugin_principal:p", "acme")
 	done := make(chan error, 1)
 	go func() {
-		done <- svc.WatchComponentEvents(nil, &failingEventStream{ctx: ctx})
+		done <- svc.WatchComponentEvents(nil, &failingEventStream{ctx: ctx}) //nolint:contextcheck // the context travels in the stream
 	}()
 	select {
 	case err := <-done: // the 50ms heartbeat fails first
-		if err == nil || err.Error() != "client gone" {
+		if err == nil || !errors.Is(err, errClientGone) {
 			t.Fatalf("heartbeat send failure: %v", err)
 		}
 	case <-time.After(2 * time.Second):
@@ -152,12 +154,12 @@ func TestWatchComponentEvents_SendFailureEndsTheStream(t *testing.T) {
 	svc2 := newParityServer().WithEventHub(componentevents.NewHub(rdb, nil, time.Hour, 4))
 	svc2.eventHub.Start(context.Background())
 	defer svc2.eventHub.Stop()
-	go func() { done <- svc2.WatchComponentEvents(nil, &failingEventStream{ctx: ctx}) }()
+	go func() { done <- svc2.WatchComponentEvents(nil, &failingEventStream{ctx: ctx}) }() //nolint:contextcheck // the context travels in the stream
 	time.Sleep(60 * time.Millisecond)
 	_ = componentevents.NewPublisher(rdb).Publish(context.Background(), "acme", "plugin_principal:p", componentevents.Event{Type: componentevents.TypeSecretRotated})
 	select {
 	case err := <-done:
-		if err == nil || err.Error() != "client gone" {
+		if err == nil || !errors.Is(err, errClientGone) {
 			t.Fatalf("event send failure: %v", err)
 		}
 	case <-time.After(2 * time.Second):

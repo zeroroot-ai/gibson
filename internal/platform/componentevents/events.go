@@ -188,7 +188,7 @@ func key(tenantID, principal string) string { return tenantID + "\x00" + princip
 
 // Subscribe registers a stream for one (tenant, principal) and returns the
 // channel plus the cleanup the handler defers.
-func (h *Hub) Subscribe(tenantID, principal string) (<-chan Event, func()) {
+func (h *Hub) Subscribe(tenantID, principal string) (events <-chan Event, unsubscribe func()) {
 	ch := make(chan Event, h.perClientBuffer)
 	k := key(tenantID, principal)
 	h.mu.Lock()
