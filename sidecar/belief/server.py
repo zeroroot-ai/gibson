@@ -93,7 +93,11 @@ def make_handler(registry: Registry):
             try:
                 out = model.score(req.get("evidence", {}), req.get("priors"))
             except Exception as exc:  # inference error -> 500, caller fails quiet
-                self._json(500, {"error": str(exc)})
+                # The exception text names internal model state and library
+                # paths. It goes to stderr for the operator. The caller gets a
+                # fixed string.
+                print(f"score failed: {exc!r}", file=sys.stderr)
+                self._json(500, {"error": "inference failed"})
                 return
             self._json(200, out)
 

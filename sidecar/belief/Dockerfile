@@ -112,10 +112,12 @@ USER 65532
 # Exact-inference HTTP server port (server.py default; overridable via BELIEF_PORT).
 EXPOSE 8087
 
-# Bind 0.0.0.0 so the sidecar is reachable from the daemon container over the
-# pod loopback / localhost; serve the baked artifacts from ./models.
-ENV BELIEF_HOST=0.0.0.0 \
-    BELIEF_PORT=8087 \
+# The sidecar shares the daemon's pod network namespace, so the daemon reaches
+# it on 127.0.0.1. server.py binds loopback by default and this image keeps
+# that default: /score has no authentication, so a bind on 0.0.0.0 would
+# offer inference to every pod that can route to the port. Serve the baked
+# artifacts from ./models.
+ENV BELIEF_PORT=8087 \
     BELIEF_MODELS_DIR=/app/models
 
 # Elastic License 2.0, "Notices": anyone who gets a copy of the software
