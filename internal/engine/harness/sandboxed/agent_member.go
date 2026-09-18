@@ -69,6 +69,9 @@ func (l *AgentLauncher) buildEnv(ctx context.Context, spec AgentLaunchSpec, disp
 		mode = "oneshot"
 	}
 	env[envInstanceMode] = mode
+	// Injected after the manifest and the dispatch so neither can claim a
+	// different sandbox than the one the launcher verifies.
+	env[envSandbox] = envSandboxValue
 	if sc := trace.SpanContextFromContext(ctx); sc.IsValid() {
 		env[envTraceID] = sc.TraceID().String()
 		env[envSpanID] = sc.SpanID().String()

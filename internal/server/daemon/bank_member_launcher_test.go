@@ -122,6 +122,8 @@ func TestMemberLauncher_LaunchesWithTheBaseGrantAndTheMemberContract(t *testing.
 		envJobStaleLimitMS: "5400000", envHeartbeatMS: "10000",
 		"GIBSON_INSTANCE_MODE": "member", "GIBSON_CALLBACK_ENDPOINT": "callback.gibson:443",
 		"GIBSON_MISSION_ID": "bank-1", "GIBSON_MISSION_RUN_ID": launched.MissionRunID, "GIBSON_MODEL": "claude-opus-4",
+		// zerocool-plugins#66: the member refuses to start without this.
+		"GIBSON_SANDBOX": "gvisor",
 	} {
 		if req.Env[k] != want {
 			t.Errorf("env[%s] = %q, want %q", k, req.Env[k], want)
