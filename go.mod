@@ -5,8 +5,6 @@ go 1.26.8
 require (
 	buf.build/go/protovalidate v1.2.0
 	cloud.google.com/go/secretmanager v1.21.0
-	connectrpc.com/connect v1.20.0
-	connectrpc.com/otelconnect v0.9.0
 	cuelang.org/go v0.17.1
 	github.com/Azure/azure-sdk-for-go/sdk/azidentity v1.14.1
 	github.com/Azure/azure-sdk-for-go/sdk/security/keyvault/azsecrets v1.4.0
@@ -63,7 +61,6 @@ require (
 	go.opentelemetry.io/otel/sdk v1.46.0
 	go.opentelemetry.io/otel/sdk/metric v1.46.0
 	go.opentelemetry.io/otel/trace v1.46.0
-	go.uber.org/goleak v1.3.0
 	golang.org/x/crypto v0.56.0
 	golang.org/x/net v0.58.0
 	golang.org/x/oauth2 v0.36.0

@@ -20,10 +20,6 @@ cloud.google.com/go/longrunning v1.0.0 h1:lwzWEYD8+NkYV7dhexOz6kmlvajZA70+bW/xMh
 cloud.google.com/go/longrunning v1.0.0/go.mod h1:8nqFBPOO1U/XkhWl0I19AMZEphrHi73VNABIpKYaTwM=
 cloud.google.com/go/secretmanager v1.21.0 h1:e56QQaKWRyzBdUz40AeZaio/ZHAl268cFx3QFAAw9CY=
 cloud.google.com/go/secretmanager v1.21.0/go.mod h1:+nlV+GYqTD8DM+x7Kk3UF7ZPYgdYMowrkZxAmMXORQ8=
-connectrpc.com/connect v1.20.0 h1:6TNDAB+WeNd2uolWNlYczB5E0KNNaVMNUEx8JEUsPmQ=
-connectrpc.com/connect v1.20.0/go.mod h1:A2ygJrukXwWy32vkCAAHNVguZrqZ+jeZ9rGRnGR4dN4=
-connectrpc.com/otelconnect v0.9.0 h1:NggB3pzRC3pukQWaYbRHJulxuXvmCKCKkQ9hbrHAWoA=
-connectrpc.com/otelconnect v0.9.0/go.mod h1:AEkVLjCPXra+ObGFCOClcJkNjS7zPaQSqvO0lCyjfZc=
 cuelabs.dev/go/oci/ociregistry v0.0.0-20260601085548-328ff8e2c943 h1:XUtzi/yWlmuy8V6kkmVbbmirmUqcFe9Ce3gmEaHXf1Q=
 cuelabs.dev/go/oci/ociregistry v0.0.0-20260601085548-328ff8e2c943/go.mod h1:WjmQxb+W6nVNCgj8nXrF24lIz95AHwnSl36tpjDZSU8=
 cuelang.org/go v0.17.1 h1:liOkxZDqTHrzq0USJX+6bMYOZ5PSf+wzvQr15AHpDCQ=
