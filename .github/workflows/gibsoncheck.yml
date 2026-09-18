@@ -246,6 +246,15 @@ jobs:
           SELFTEST=1 bash scripts/check-no-mcp-bridge.sh
           bash scripts/check-no-mcp-bridge.sh
 
+      # gibson#140 (2026-09-18): the coverage gate failed on a Docker Hub
+      # token timeout while a testcontainer pulled postgres:16-alpine. Tests
+      # pull from ghcr.io/zeroroot-ai/mirror, which the org controls. Self-test
+      # first so a broken guard cannot pass by finding nothing.
+      - name: Check test container images come from the org mirror
+        run: |
+          bash scripts/check-test-images-mirrored.sh --selftest
+          bash scripts/check-test-images-mirrored.sh
+
   rpc-test-walker:
     needs: changes
     if: github.event_name == 'merge_group' || (github.event_name == 'pull_request' && needs.changes.outputs.relevant == 'true')

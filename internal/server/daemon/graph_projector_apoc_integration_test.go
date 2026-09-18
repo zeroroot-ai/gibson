@@ -57,7 +57,7 @@ func startProvisionedNeo4j(t *testing.T, ctx context.Context) neo4j.DriverWithCo
 	install := pdataplane.APOCInstallCommand("/var/lib/neo4j/plugins")
 
 	req := testcontainers.ContainerRequest{
-		Image:        "neo4j:5.26-community",
+		Image:        "ghcr.io/zeroroot-ai/mirror/neo4j:5.26.0-community",
 		ExposedPorts: []string{"7687/tcp"},
 		Env:          env,
 		Entrypoint:   []string{"sh", "-c", install + " && exec /startup/docker-entrypoint.sh neo4j"},

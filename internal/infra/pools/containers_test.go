@@ -26,7 +26,7 @@ func startRedisContainer(t *testing.T, ctx context.Context) (containerHandle, st
 	t.Helper()
 
 	req := testcontainers.ContainerRequest{
-		Image:        "redis:7-alpine",
+		Image:        "ghcr.io/zeroroot-ai/mirror/redis:7.4-alpine",
 		ExposedPorts: []string{"6379/tcp"},
 		WaitingFor:   wait.ForLog("Ready to accept connections").WithStartupTimeout(60 * time.Second),
 	}
@@ -56,7 +56,7 @@ func startPostgresContainer(t *testing.T, ctx context.Context) (containerHandle,
 	t.Helper()
 
 	req := testcontainers.ContainerRequest{
-		Image:        "postgres:16-alpine",
+		Image:        "ghcr.io/zeroroot-ai/mirror/postgres:16.4-alpine",
 		ExposedPorts: []string{"5432/tcp"},
 		Env: map[string]string{
 			"POSTGRES_USER":     "testuser",
@@ -94,7 +94,7 @@ func startNeo4jContainer(t *testing.T, ctx context.Context) (containerHandle, st
 	t.Helper()
 
 	req := testcontainers.ContainerRequest{
-		Image:        "neo4j:5-community",
+		Image:        "ghcr.io/zeroroot-ai/mirror/neo4j:5.26.0-community",
 		ExposedPorts: []string{"7687/tcp"},
 		Env: map[string]string{
 			"NEO4J_AUTH":                        "neo4j/password",

@@ -393,6 +393,17 @@ check-no-mcp-bridge:
 	@bash scripts/check-no-mcp-bridge.sh
 	@echo "check-no-mcp-bridge PASSED"
 
+# check-test-images-mirrored: a Go test pulls its container images from
+# ghcr.io/zeroroot-ai/mirror, never from Docker Hub. Docker Hub rate limits
+# and token timeouts failed the coverage gate on gibson#140 before a single
+# assertion ran. Self-test first so a broken guard cannot pass by finding
+# nothing.
+check-test-images-mirrored:
+	@echo "Checking test container images come from the org mirror..."
+	@bash scripts/check-test-images-mirrored.sh --selftest
+	@bash scripts/check-test-images-mirrored.sh
+	@echo "check-test-images-mirrored PASSED"
+
 # check-noun-contract: enforce the verb/noun extension contract
 # from mission-verb-noun-registry Requirement 1. For every
 # NodeType enum value, asserts the four pieces are present:
@@ -593,7 +604,7 @@ test-merge-queue:
 # CI runs both directly (`.github/workflows/go-ci.yml` calls `make lint
 # LINT_BASE=…` and `make lint-deadcode`), so nothing is lost by keeping them out
 # of the local aggregate. Run `make lint` by hand when you actually want it.
-check: fmt check-fmt vet test-race check-no-tenant-id check-fga-headers check-no-tracked-binaries check-no-skipped-tests check-no-mcp-bridge check-noun-contract check-rpc-test-walker check-critical-paths check-ci-lane-parity check-build-tags check-queue-gate
+check: fmt check-fmt vet test-race check-no-tenant-id check-fga-headers check-no-tracked-binaries check-no-skipped-tests check-no-mcp-bridge check-test-images-mirrored check-noun-contract check-rpc-test-walker check-critical-paths check-ci-lane-parity check-build-tags check-queue-gate
 	@echo "All checks passed! (golangci-lint not included — run 'make lint' separately)"
 
 # Run authorization-specific checks: vet + unit tests + integration tests (requires Docker)
