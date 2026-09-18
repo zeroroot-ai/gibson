@@ -496,6 +496,11 @@ check-build-tags:
 	@bash scripts/check-build-tags-selected.sh --selftest
 	@bash scripts/check-build-tags-selected.sh
 
+.PHONY: check-no-gibson-io
+check-no-gibson-io: ## The retired gibson.io trust domain never comes back (gibson#26)
+	@bash scripts/check-no-gibson-io.sh --selftest
+	@bash scripts/check-no-gibson-io.sh
+
 # check-queue-gate: `queue-gate` is the ONE context the merge queue requires
 # from go-ci.yml, so every other job in that file is only as blocking as its
 # `needs:` list says. It shipped naming five of nine -- `fast`, `lint` and
@@ -593,7 +598,7 @@ test-merge-queue:
 # CI runs both directly (`.github/workflows/go-ci.yml` calls `make lint
 # LINT_BASE=…` and `make lint-deadcode`), so nothing is lost by keeping them out
 # of the local aggregate. Run `make lint` by hand when you actually want it.
-check: fmt check-fmt vet test-race check-no-tenant-id check-fga-headers check-no-tracked-binaries check-no-skipped-tests check-no-mcp-bridge check-noun-contract check-rpc-test-walker check-critical-paths check-ci-lane-parity check-build-tags check-queue-gate
+check: fmt check-fmt vet test-race check-no-gibson-io check-no-tenant-id check-fga-headers check-no-tracked-binaries check-no-skipped-tests check-no-mcp-bridge check-noun-contract check-rpc-test-walker check-critical-paths check-ci-lane-parity check-build-tags check-queue-gate
 	@echo "All checks passed! (golangci-lint not included — run 'make lint' separately)"
 
 # Run authorization-specific checks: vet + unit tests + integration tests (requires Docker)

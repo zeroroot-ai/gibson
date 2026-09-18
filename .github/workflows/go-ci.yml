@@ -373,6 +373,7 @@ jobs:
           make check-ci-lane-parity
           make check-build-tags
           make check-queue-gate
+          make check-no-gibson-io
       - name: Guard gofmt cleanliness
         # gibson#1415: no lane ever CHECKED formatting -- `make fmt` rewrites
         # instead of failing, and .golangci.yml enables no formatter -- so
