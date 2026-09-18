@@ -73,22 +73,48 @@ func (c *GRPCClientSet) Close() error {
 	return err
 }
 
-// defaultSPIREAgentSocket is where the exit-test Jobs mount the SPIRE agent
-// socket (csi.spiffe.io at /run/spire/sockets), the same path the platform
-// workloads use (internal/infra/config/authconfig.go).
-const defaultSPIREAgentSocket = "/run/spire/sockets/agent.sock"
+// spireSocketDir is where the exit-test Jobs mount the SPIRE agent socket
+// (csi.spiffe.io at /run/spire/sockets). The csi driver names the socket
+// api.sock in this chart (gibson-workloads gibson.auth.spiffe.workloadAPISocket),
+// the same file the daemon reads. agent.sock is the go-spiffe default name and
+// is tried second. A var so the test can point it at a temp dir.
+var spireSocketDir = "/run/spire/sockets"
 
-// transportCredentials picks how to reach the daemon. SPIFFE_ENDPOINT_SOCKET
-// wins when set (the go-spiffe convention); otherwise the mounted socket, if
-// present, selects mTLS; otherwise plaintext. The server must be a member of
-// the runner's own trust domain: the test-mode daemon has no fixed SPIFFE ID
-// worth pinning, and a foreign trust domain is the thing to refuse.
-func transportCredentials(ctx context.Context) (credentials.TransportCredentials, *workloadapi.X509Source, error) {
-	sock := strings.TrimSpace(os.Getenv("SPIFFE_ENDPOINT_SOCKET"))
-	if sock == "" {
-		if _, err := os.Stat(defaultSPIREAgentSocket); err == nil {
-			sock = "unix://" + defaultSPIREAgentSocket
+var spireSocketNames = []string{"api.sock", "agent.sock"}
+
+// resolveSPIFFESocket picks the Workload API socket. SPIFFE_ENDPOINT_SOCKET
+// wins when set (the go-spiffe convention). Otherwise, a mounted socket
+// directory must hold one of the known socket names: the mount says the
+// runner is in the mesh, and a runner in the mesh that dials plaintext gets
+// "error reading server preface: EOF" from the mTLS listener with no hint
+// why (gibson#14: every run since 2026-09-09 failed that way because the
+// helper looked for agent.sock while the mount carries api.sock). No mount
+// at all means a workstation against a port-forward, the one plaintext case.
+func resolveSPIFFESocket(envValue, dir string) (string, error) {
+	if sock := strings.TrimSpace(envValue); sock != "" {
+		return sock, nil
+	}
+	if _, err := os.Stat(dir); err != nil {
+		return "", nil
+	}
+	for _, name := range spireSocketNames {
+		p := dir + "/" + name
+		if _, err := os.Stat(p); err == nil {
+			return "unix://" + p, nil
 		}
+	}
+	return "", fmt.Errorf("grpc_clients: %s is mounted but holds none of %v; the runner is in the mesh and will not dial plaintext (set SPIFFE_ENDPOINT_SOCKET)", dir, spireSocketNames)
+}
+
+// transportCredentials picks how to reach the daemon: mTLS with the runner's
+// SVID when a Workload API socket resolves, plaintext only when nothing is
+// mounted. The server must be a member of the runner's own trust domain: the
+// test-mode daemon has no fixed SPIFFE ID worth pinning, and a foreign trust
+// domain is the thing to refuse.
+func transportCredentials(ctx context.Context) (credentials.TransportCredentials, *workloadapi.X509Source, error) {
+	sock, err := resolveSPIFFESocket(os.Getenv("SPIFFE_ENDPOINT_SOCKET"), spireSocketDir)
+	if err != nil {
+		return nil, nil, err
 	}
 	if sock == "" {
 		return insecure.NewCredentials(), nil, nil
