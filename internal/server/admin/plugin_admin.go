@@ -29,6 +29,7 @@ import (
 	"google.golang.org/grpc/status"
 
 	"github.com/zeroroot-ai/gibson/internal/platform/authz"
+	"github.com/zeroroot-ai/gibson/internal/platform/componentevents"
 	"github.com/zeroroot-ai/gibson/internal/platform/secrets"
 
 	tenantv1 "github.com/zeroroot-ai/sdk/api/gen/gibson/pluginadmin/v1"
@@ -160,6 +161,7 @@ type PluginsAdminServer struct {
 	secretW   SecretWriter
 	authzr    authz.Authorizer
 	auditor   BootstrapTokenAuditor
+	events    componentevents.Publisher
 	now       func() time.Time
 
 	bootstrapTTL time.Duration
@@ -173,6 +175,10 @@ type PluginsAdminConfig struct {
 	SecretWriter      SecretWriter
 	Authorizer        authz.Authorizer
 	BootstrapAuditor  BootstrapTokenAuditor
+	// Events carries secret_access_revoked and secret_rotated to the running
+	// plugin (gibson#154). Required: a revocation nobody hears is the hole
+	// sdk#55 closed.
+	Events            componentevents.Publisher
 	BootstrapTokenTTL time.Duration // ≤24h per Spec 2 R3.1; default 1h
 	Now               func() time.Time
 }
@@ -198,6 +204,9 @@ func NewPluginsAdminServer(cfg PluginsAdminConfig) (*PluginsAdminServer, error) 
 	if cfg.BootstrapAuditor == nil {
 		return nil, errors.New("plugins admin: BootstrapAuditor is required")
 	}
+	if cfg.Events == nil {
+		return nil, errors.New("plugins admin: Events is required")
+	}
 	now := cfg.Now
 	if now == nil {
 		now = time.Now
@@ -216,6 +225,7 @@ func NewPluginsAdminServer(cfg PluginsAdminConfig) (*PluginsAdminServer, error) 
 		secretW:      cfg.SecretWriter,
 		authzr:       cfg.Authorizer,
 		auditor:      cfg.BootstrapAuditor,
+		events:       cfg.Events,
 		now:          now,
 		bootstrapTTL: ttl,
 	}, nil
@@ -487,6 +497,13 @@ func (s *PluginsAdminServer) EditPluginSecretBinding(ctx context.Context, req *t
 	if err := s.authzr.Write(ctx, []authz.Tuple{newTuple}); err != nil {
 		return nil, status.Errorf(codes.Internal, "write new tuple: %v", err)
 	}
+	// The declared name now resolves to another value: the plugin drops its
+	// cached copy on secret_rotated.
+	if err := s.events.Publish(ctx, tenant.String(), pluginEventPrincipal(req.GetInstallId()), componentevents.Event{
+		Type: componentevents.TypeSecretRotated, SecretName: req.GetDeclaredName(), OccurredAt: s.now().UTC(),
+	}); err != nil {
+		return nil, status.Errorf(codes.Unavailable, "binding moved but the plugin was not told; retry: %v", err)
+	}
 	return &tenantv1.EditPluginSecretBindingResponse{}, nil
 }
 
@@ -511,6 +528,16 @@ func (s *PluginsAdminServer) RevokePluginSecretBinding(ctx context.Context, req 
 		return nil, status.Errorf(codes.Internal, "delete tuple: %v", err)
 	}
 
+	// Tell the running plugin before the audit line says the revocation
+	// landed. The tuple is already gone, so a failed publish leaves the
+	// plugin denied on its next resolve and holding its cache until the
+	// operator retries; Unavailable asks for that retry (gibson#154).
+	if err := s.events.Publish(ctx, tenant.String(), pluginEventPrincipal(req.GetInstallId()), componentevents.Event{
+		Type: componentevents.TypeSecretAccessRevoked, SecretName: req.GetDeclaredName(),
+		Reason: "binding revoked by a tenant admin", OccurredAt: s.now().UTC(),
+	}); err != nil {
+		return nil, status.Errorf(codes.Unavailable, "binding revoked but the plugin was not told; retry: %v", err)
+	}
 	s.auditor.Audit(ctx, secrets.AuditEvent{
 		ActorTenantID: tenant.String(),
 		Action:        "secret_access_revoked",
@@ -648,6 +675,15 @@ func (s *PluginsAdminServer) bindingsFor(ctx context.Context, tenant auth.Tenant
 // derive expected values without injecting another dependency.
 func principalForInstall(installID string) string {
 	return "plugin_principal_" + installID
+}
+
+// pluginEventPrincipal is the subscription key a running plugin streams
+// under: the typed FGA principal the daemon authorizes it as
+// (componentFGAUser keeps a "plugin_principal:" subject verbatim). It is the
+// user type model.fga declares for can_resolve, see
+// FGASecretsPluginAssociations.
+func pluginEventPrincipal(installID string) string {
+	return "plugin_principal:" + installID
 }
 
 // newInstallID returns a fresh install identifier. We use 16 random bytes

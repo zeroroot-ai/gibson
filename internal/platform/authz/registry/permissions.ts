@@ -600,6 +600,16 @@ export const AuthRegistry: Record<string, AuthEntry> = {
     unauthenticated: false,
     self: false,
   },
+  "/gibson.component.v1.ComponentService/WatchComponentEvents": {
+    method: "/gibson.component.v1.ComponentService/WatchComponentEvents",
+    service: "gibson.component.v1.ComponentService",
+    relation: "can_poll_work",
+    objectType: "component",
+    objectDeriver: "system_tenant",
+    allowedIdentities: IdentityClass.COMPONENT,
+    unauthenticated: false,
+    self: false,
+  },
   "/gibson.daemon.agentconsole.v1.AgentConsoleService/ListRunningAgents": {
     method: "/gibson.daemon.agentconsole.v1.AgentConsoleService/ListRunningAgents",
     service: "gibson.daemon.agentconsole.v1.AgentConsoleService",

@@ -21,6 +21,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"log/slog"
 	"strings"
 	"time"
 
@@ -29,6 +30,7 @@ import (
 
 	"github.com/zeroroot-ai/gibson/internal/platform/audit"
 	"github.com/zeroroot-ai/gibson/internal/platform/authz"
+	"github.com/zeroroot-ai/gibson/internal/platform/componentevents"
 	"github.com/zeroroot-ai/gibson/internal/platform/secrets"
 
 	sdksecrets "github.com/zeroroot-ai/gibson/internal/infra/secrets"
@@ -74,6 +76,7 @@ type SecretsAdminServer struct {
 	auditQuery     SecretsAdminAuditQuery
 	now            func() time.Time
 	rotatedAuditor secrets.ServiceAuditWriter
+	events         componentevents.Publisher
 }
 
 // SecretsAdminConfig groups the constructor's required dependencies.
@@ -98,6 +101,9 @@ type SecretsAdminConfig struct {
 	// secret_write / secret_delete event regardless).
 	RotatedAuditor secrets.ServiceAuditWriter
 
+	// Events carries secret_rotated to every plugin bound to the rotated
+	// secret (gibson#154). Required.
+	Events componentevents.Publisher
 	// Now is the clock; nil uses time.Now.
 	Now func() time.Time
 }
@@ -107,6 +113,9 @@ type SecretsAdminConfig struct {
 func NewSecretsAdminServer(cfg SecretsAdminConfig) (*SecretsAdminServer, error) {
 	if cfg.Service == nil {
 		return nil, errors.New("secrets admin: Service is required")
+	}
+	if cfg.Events == nil {
+		return nil, errors.New("secrets admin: Events is required")
 	}
 	if cfg.Broker == nil {
 		return nil, errors.New("secrets admin: Broker is required")
@@ -127,6 +136,7 @@ func NewSecretsAdminServer(cfg SecretsAdminConfig) (*SecretsAdminServer, error) 
 		pluginAssocs:   cfg.PluginAssociations,
 		auditQuery:     cfg.AuditQuery,
 		rotatedAuditor: cfg.RotatedAuditor,
+		events:         cfg.Events,
 		now:            now,
 	}, nil
 }
@@ -335,6 +345,21 @@ func (s *SecretsAdminServer) RotateSecret(ctx context.Context, req *tenantv1.Rot
 		})
 	}
 
+	// Every plugin holding can_resolve on this secret drops its cached value
+	// on secret_rotated (gibson#154). The value is already rotated, so a
+	// publish failure is logged and the response still reports success; a
+	// plugin that missed it serves the old value until its cache expires.
+	principals, perr := s.pluginAssocs.PluginsBoundTo(ctx, tenant, storedReq)
+	if perr != nil {
+		slog.Default().WarnContext(ctx, "secret rotated but the bound plugins could not be listed", "secret", callerReq, "error", perr)
+	}
+	for _, id := range principals {
+		if err := s.events.Publish(ctx, tenant.String(), pluginEventPrincipal(id), componentevents.Event{
+			Type: componentevents.TypeSecretRotated, SecretName: callerReq, OccurredAt: s.now().UTC(),
+		}); err != nil {
+			slog.Default().WarnContext(ctx, "secret rotated but a plugin was not told", "secret", callerReq, "principal", id, "error", err)
+		}
+	}
 	md, err := s.buildMetadata(ctx, tenant, storedReq)
 	if err != nil {
 		md = &tenantv1.SecretMetadata{

@@ -35,6 +35,7 @@ import (
 	"github.com/zeroroot-ai/gibson/internal/platform/budget"
 	"github.com/zeroroot-ai/gibson/internal/platform/capabilitygrant"
 	"github.com/zeroroot-ai/gibson/internal/platform/component"
+	"github.com/zeroroot-ai/gibson/internal/platform/componentevents"
 	"github.com/zeroroot-ai/gibson/internal/platform/identity"
 	"github.com/zeroroot-ai/gibson/internal/platform/job"
 	"github.com/zeroroot-ai/gibson/internal/platform/mailer"
@@ -1253,6 +1254,15 @@ func (d *daemonImpl) buildGRPCServer(ctx context.Context) (*grpcSubsystem, error
 	// register Unavailable stubs so the dashboard gets codes.Unavailable (actionable) rather
 	// than codes.Unimplemented (looks like a daemon-version mismatch).
 	// Spec: tenant-secrets-broker-completion (Task 11, design D2); ADR-0039.
+	// The component event wire (gibson#154): one publisher for the admin
+	// servers, one hub per replica for the WatchComponentEvents streams.
+	// Both ride the daemon's Redis, so a revocation on one replica reaches
+	// a plugin streaming from another.
+	componentEventPublisher := componentevents.NewPublisher(d.stateClient.Client())
+	componentEventHub := componentevents.NewHub(d.stateClient.Client(), d.logger.Slog(), 0, 0)
+	componentEventHub.Start(ctx)
+	d.logger.Info(ctx, "component event hub started (gibson#154)")
+
 	{
 		brokerStackOK := d.configStore != nil && d.brokerAuditWriter != nil && d.brokerFactories != nil &&
 			d.secretsRegistry != nil && d.secretsService != nil
@@ -1319,6 +1329,7 @@ func (d *daemonImpl) buildGRPCServer(ctx context.Context) (*grpcSubsystem, error
 				Broker:             d.secretsRegistry,
 				PluginAssociations: admin.NewFGASecretsPluginAssociations(d.authorizer),
 				AuditQuery:         audit.NewQuery(d.platformDB),
+				Events:             componentEventPublisher,
 			})
 			if saErr != nil {
 				d.logger.Warn(ctx, "SecretsService CRUD side not constructed; registering Unavailable stub", slog.String("error", saErr.Error()))
@@ -1358,6 +1369,7 @@ func (d *daemonImpl) buildGRPCServer(ctx context.Context) (*grpcSubsystem, error
 				SecretWriter:      &secretWriterAdapter{svc: d.secretsService},
 				Authorizer:        d.authorizer,
 				BootstrapAuditor:  d.brokerAuditWriter,
+				Events:            componentEventPublisher,
 			})
 
 			if paErr != nil {
@@ -1678,6 +1690,8 @@ func (d *daemonImpl) buildGRPCServer(ctx context.Context) (*grpcSubsystem, error
 			// Wire LLMToolCompleter for tool-calling and structured output support.
 			// A bank member heartbeats with its status (ADR-0019, gibson#1716).
 			compSvc.WithMemberStatusSink(&memberEvents{daemon: d})
+			compSvc.WithEventHub(componentEventHub)
+			d.logger.Info(ctx, "WatchComponentEvents wired into ComponentService (gibson#154)")
 			if llmToolCompleterIface != nil {
 				compSvc.WithLLMToolCompleter(llmToolCompleterIface)
 				d.logger.Info(ctx, "LLMToolCompleter wired into ComponentService")

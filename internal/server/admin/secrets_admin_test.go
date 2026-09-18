@@ -16,6 +16,7 @@ import (
 
 	"github.com/zeroroot-ai/gibson/internal/platform/audit"
 	"github.com/zeroroot-ai/gibson/internal/platform/authz"
+	"github.com/zeroroot-ai/gibson/internal/platform/componentevents"
 	"github.com/zeroroot-ai/gibson/internal/platform/secrets"
 
 	sdksecrets "github.com/zeroroot-ai/gibson/internal/infra/secrets"
@@ -131,6 +132,7 @@ func newTestServer(t *testing.T) (*SecretsAdminServer, *fakeBroker, *fakeAuditor
 	}
 
 	srv, err := NewSecretsAdminServer(SecretsAdminConfig{
+		Events:             &recordingPublisher{},
 		Service:            svc,
 		Broker:             registry,
 		PluginAssociations: &fakePluginAssocs{},
@@ -453,7 +455,8 @@ func TestUriToRef(t *testing.T) {
 }
 
 func TestNewSecretsAdminServer_RequiresService(t *testing.T) {
-	_, err := NewSecretsAdminServer(SecretsAdminConfig{})
+	_, err := NewSecretsAdminServer(SecretsAdminConfig{
+		Events: &recordingPublisher{}})
 	if err == nil || !strings.Contains(err.Error(), "Service is required") {
 		t.Errorf("want Service required error, got %v", err)
 	}
@@ -509,7 +512,8 @@ func TestSecretObjectID_WriterDeriverAgreement(t *testing.T) {
 func TestNewSecretsAdminServer_RequiresBroker(t *testing.T) {
 	registry := &fakeRegistry{broker: newFakeBroker()}
 	svc, _ := secrets.NewService(registry, fakeCircuit{}, &fakeAuditor{})
-	_, err := NewSecretsAdminServer(SecretsAdminConfig{Service: svc})
+	_, err := NewSecretsAdminServer(SecretsAdminConfig{
+		Events: &recordingPublisher{}, Service: svc})
 	if err == nil || !strings.Contains(err.Error(), "Broker is required") {
 		t.Errorf("want Broker required error, got %v", err)
 	}
@@ -651,3 +655,65 @@ func expectErrorContains(t *testing.T, err error, sub string) {
 
 // ensure unused-vars warnings fail-soft for tests not yet wired.
 var _ = errors.New
+
+// TestRotateSecret_TellsEveryBoundPlugin is the gibson#154 fixture for
+// rotation: each plugin principal holding can_resolve on the secret gets a
+// secret_rotated event, and a publish failure does not undo the rotation.
+func TestRotateSecret_TellsEveryBoundPlugin(t *testing.T) {
+	srv, broker, _, _, _ := newTestServer(t)
+	srv.pluginAssocs = &fakePluginAssocs{byName: map[string][]string{"cred:db": {"p1", "p2"}}}
+	pub := &recordingPublisher{}
+	srv.events = pub
+	broker.store["cred:db"] = []byte("old")
+	ctx := ctxWithTenant(t, "acme")
+	if _, err := srv.RotateSecret(ctx, &tenantv1.RotateSecretRequest{Name: "cred:db", Value: []byte("new")}); err != nil {
+		t.Fatalf("RotateSecret: %v", err)
+	}
+	if len(pub.events) != 2 {
+		t.Fatalf("published %+v", pub.events)
+	}
+	for i, want := range []string{"plugin_principal:p1", "plugin_principal:p2"} {
+		got := pub.events[i]
+		if got.tenant != "acme" || got.principal != want || got.ev.Type != componentevents.TypeSecretRotated || got.ev.SecretName != "cred:db" {
+			t.Fatalf("event %d = %+v", i, got)
+		}
+	}
+	srv.events = &recordingPublisher{err: errors.New("redis down")}
+	if _, err := srv.RotateSecret(ctx, &tenantv1.RotateSecretRequest{Name: "cred:db", Value: []byte("newer")}); err != nil {
+		t.Fatalf("a publish failure must not fail the rotation: %v", err)
+	}
+	if string(broker.store["cred:db"]) != "newer" {
+		t.Fatalf("value not rotated: %q", broker.store["cred:db"])
+	}
+}
+
+func TestNewSecretsAdminServer_RequiresEvents(t *testing.T) {
+	broker := newFakeBroker()
+	svc, err := secrets.NewService(&fakeRegistry{broker: broker}, fakeCircuit{}, &fakeAuditor{})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := NewSecretsAdminServer(SecretsAdminConfig{Service: svc, Broker: &fakeRegistry{broker: broker}, PluginAssociations: &fakePluginAssocs{}, AuditQuery: &fakeAuditQuery{}}); err == nil {
+		t.Fatal("a secrets admin with no event publisher must not construct")
+	}
+}
+
+type failingPluginAssocs struct{}
+
+func (failingPluginAssocs) PluginsBoundTo(context.Context, auth.TenantID, string) ([]string, error) {
+	return nil, errors.New("fga down")
+}
+
+func TestRotateSecret_ListingBoundPluginsFailureIsLoggedNotFatal(t *testing.T) {
+	srv, broker, _, _, _ := newTestServer(t)
+	srv.pluginAssocs = failingPluginAssocs{}
+	pub := &recordingPublisher{}
+	srv.events = pub
+	broker.store["cred:db"] = []byte("old")
+	if _, err := srv.RotateSecret(ctxWithTenant(t, "acme"), &tenantv1.RotateSecretRequest{Name: "cred:db", Value: []byte("new")}); err != nil {
+		t.Fatalf("RotateSecret: %v", err)
+	}
+	if len(pub.events) != 0 {
+		t.Fatalf("nothing to publish when the listing fails, got %+v", pub.events)
+	}
+}
