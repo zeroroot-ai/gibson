@@ -58,7 +58,7 @@ func TestIdentityFromJWTPayload_SAToken_NumericSub(t *testing.T) {
 		}),
 	}
 
-	id, src, _, err := identityFromJWTPayload(hdrs)
+	id, src, _, err := identityFromJWTPayload(hdrs, nil)
 	if err != nil {
 		t.Fatalf("identityFromJWTPayload: %v", err)
 	}
@@ -88,7 +88,7 @@ func TestIdentityFromJWTPayload_SAToken_NoPreferredUsername(t *testing.T) {
 		}),
 	}
 
-	id, src, _, err := identityFromJWTPayload(hdrs)
+	id, src, _, err := identityFromJWTPayload(hdrs, nil)
 	if err != nil {
 		t.Fatalf("identityFromJWTPayload: %v", err)
 	}
@@ -117,7 +117,7 @@ func TestIdentityFromJWTPayload_UserTokenUsesSub(t *testing.T) {
 		}),
 	}
 
-	id, src, _, err := identityFromJWTPayload(hdrs)
+	id, src, _, err := identityFromJWTPayload(hdrs, nil)
 	if err != nil {
 		t.Fatalf("identityFromJWTPayload: %v", err)
 	}
@@ -148,7 +148,7 @@ func TestIdentityFromJWTPayload_ParsesIat(t *testing.T) {
 		}),
 	}
 
-	id, _, _, err := identityFromJWTPayload(hdrs)
+	id, _, _, err := identityFromJWTPayload(hdrs, nil)
 	if err != nil {
 		t.Fatalf("identityFromJWTPayload: %v", err)
 	}
@@ -177,7 +177,7 @@ func TestIdentityFromJWTPayload_NoIat(t *testing.T) {
 		}),
 	}
 
-	id, _, _, err := identityFromJWTPayload(hdrs)
+	id, _, _, err := identityFromJWTPayload(hdrs, nil)
 	if err != nil {
 		t.Fatalf("identityFromJWTPayload: %v", err)
 	}
@@ -189,7 +189,7 @@ func TestIdentityFromJWTPayload_NoIat(t *testing.T) {
 // TestIdentityFromJWTPayload_MissingHeader — error on missing x-jwt-payload.
 func TestIdentityFromJWTPayload_MissingHeader(t *testing.T) {
 	t.Parallel()
-	if _, _, _, err := identityFromJWTPayload(map[string]string{}); err == nil {
+	if _, _, _, err := identityFromJWTPayload(map[string]string{}, nil); err == nil {
 		t.Fatal("identityFromJWTPayload: expected error on missing x-jwt-payload, got nil")
 	}
 }
@@ -202,7 +202,7 @@ func TestIdentityFromJWTPayload_MissingSub(t *testing.T) {
 			"iss": "https://zitadel.example",
 		}),
 	}
-	if _, _, _, err := identityFromJWTPayload(hdrs); err == nil {
+	if _, _, _, err := identityFromJWTPayload(hdrs, nil); err == nil {
 		t.Fatal("identityFromJWTPayload: expected error on missing sub, got nil")
 	}
 }
@@ -641,7 +641,7 @@ func TestIssuerAllowlist_CanonicalIssuerOnIdentity(t *testing.T) {
 			"client_id": "user-1",
 		}),
 	}
-	id, _, _, err := identityFromJWTPayload(hdrs)
+	id, _, _, err := identityFromJWTPayload(hdrs, nil)
 	if err != nil {
 		t.Fatalf("identityFromJWTPayload: %v", err)
 	}
@@ -977,5 +977,47 @@ func TestCapabilityGrant_Unverifiable_Denied(t *testing.T) {
 	if codes.Code(resp.GetStatus().GetCode()) != codes.PermissionDenied { //nolint:gosec // gRPC status code is a controlled small value
 		t.Errorf("expected PermissionDenied (grant does not verify), got %v",
 			resp.GetStatus().GetCode())
+	}
+}
+
+// gibson#133: a Zitadel machine user's client_credentials token carries
+// client_id = the user's name and sub = its numeric id. With the human
+// sign-in clients configured, that token is a machine credential; the
+// dashboard's own token is a person.
+func TestCredentialTypeFor_ZitadelMachineUserToken(t *testing.T) {
+	t.Parallel()
+	humans := map[string]struct{}{"334268812578094081@gibson": {}}
+	cases := []struct {
+		name               string
+		sub, clientID, azp string
+		humans             map[string]struct{}
+		want               string
+	}{
+		// THE FIXTURE THIS EXISTS FOR.
+		{"machine user, name as client_id", "212345678901234567", "gibson-sdk", "gibson-sdk", humans, "client-credentials"},
+		{"machine user, azp only", "212345678901234567", "", "tenant-acme-ci", humans, "client-credentials"},
+		{"client that is its own subject", "svc-1", "svc-1", "", nil, "client-credentials"},
+		{"dashboard sign-in token", "999888777", "334268812578094081@gibson", "334268812578094081@gibson", humans, "oidc-user"},
+		{"dashboard sign-in token, azp only", "999888777", "", "334268812578094081@gibson", humans, "oidc-user"},
+		{"no human clients configured keeps the old rule", "212345678901234567", "gibson-sdk", "", nil, "oidc-user"},
+		{"no client at all", "999888777", "", "", humans, "oidc-user"},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			if got := credentialTypeFor(tc.sub, tc.clientID, tc.azp, tc.humans); got != tc.want {
+				t.Fatalf("credentialTypeFor(%q,%q,%q) = %q, want %q", tc.sub, tc.clientID, tc.azp, got, tc.want)
+			}
+		})
+	}
+	// And through the payload decoder, as the server sees it.
+	hdrs := map[string]string{headerJWTPayload: encodePayload(t, map[string]any{
+		"iss": "https://zitadel.example", "sub": "212345678901234567", "client_id": "gibson-sdk", "azp": "gibson-sdk",
+	})}
+	id, _, _, err := identityFromJWTPayload(hdrs, humans)
+	if err != nil {
+		t.Fatalf("identityFromJWTPayload: %v", err)
+	}
+	if id.CredentialType != "client-credentials" || id.Subject != "212345678901234567" {
+		t.Fatalf("machine user token: got %+v", id)
 	}
 }
