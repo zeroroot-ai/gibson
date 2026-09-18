@@ -43,7 +43,9 @@ on:
 
 concurrency:
   group: exit-test-sandboxed-dispatch-${{ github.ref }}
-  cancel-in-progress: true
+  # A run that started finishes: with cancel-in-progress the merge queue
+  # cancelled exit-test runs before their cluster stood up (gibson#151).
+  cancel-in-progress: false
 
 permissions:
   contents: read
