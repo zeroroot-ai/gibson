@@ -54,6 +54,19 @@ func TestTenantScopedStore_ResolveTenant(t *testing.T) {
 			wantErr:       true,
 		},
 		{
+			// THE FIXTURE THIS EXISTS FOR: a configured default must never
+			// answer for a missing tenant when one is required.
+			name: "a default does not mask a missing tenant when required",
+			config: &TenantStoreConfig{
+				AuthMode:      "saas",
+				DefaultTenant: "default",
+				RequireTenant: true,
+			},
+			contextTenant: "",
+			want:          "",
+			wantErr:       true,
+		},
+		{
 			name: "dev mode uses default",
 			config: &TenantStoreConfig{
 				AuthMode:      "dev",
@@ -513,5 +526,19 @@ func TestTenantScopedStore_GetTenant(t *testing.T) {
 				assert.Equal(t, tt.want, got)
 			}
 		})
+	}
+}
+
+// The daemon builds its quota store from this; SaaS gets no default at all.
+func TestTenantStoreConfigForAuthMode(t *testing.T) {
+	saas := TenantStoreConfigForAuthMode("saas")
+	if !saas.RequireTenant || saas.DefaultTenant != "" {
+		t.Fatalf("saas: want RequireTenant and no default, got %+v", saas)
+	}
+	for _, mode := range []string{"enterprise", "dev", ""} {
+		cfg := TenantStoreConfigForAuthMode(mode)
+		if cfg.RequireTenant || cfg.DefaultTenant != "default" || cfg.AuthMode != mode {
+			t.Fatalf("%q: want default tenant and no requirement, got %+v", mode, cfg)
+		}
 	}
 }
