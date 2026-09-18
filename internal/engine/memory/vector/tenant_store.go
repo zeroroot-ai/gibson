@@ -21,7 +21,7 @@ import (
 func tenantKeyPrefix(tenantID string) string {
 	var b strings.Builder
 	b.WriteString("tenant_")
-	for i := 0; i < len(tenantID); i++ {
+	for i := range len(tenantID) {
 		c := tenantID[i]
 		if (c >= 'a' && c <= 'z') || (c >= '0' && c <= '9') {
 			b.WriteByte(c)

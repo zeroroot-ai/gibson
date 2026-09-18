@@ -143,7 +143,7 @@ func TestTenantKeyPrefix_IsInjective(t *testing.T) {
 // ranks everything together and nothing filtered the answer.
 func TestTenantScopedStore_SearchSeesOnlyItsOwnTenant(t *testing.T) {
 	shared := NewEmbeddedVectorStore(testDims)
-	defer shared.Close()
+	t.Cleanup(func() { _ = shared.Close() })
 	storeA := NewVectorStoreForTenantWithStore(shared, auth.MustNewTenantID("tenant-a"))
 	storeB := NewVectorStoreForTenantWithStore(shared, auth.MustNewTenantID("tenant-b"))
 	ctx := context.Background()
@@ -176,7 +176,7 @@ func TestTenantScopedStore_SearchSeesOnlyItsOwnTenant(t *testing.T) {
 // Two ids the old sanitizer collapsed are two namespaces now.
 func TestTenantScopedStore_SimilarIdsDoNotShareANamespace(t *testing.T) {
 	shared := NewEmbeddedVectorStore(testDims)
-	defer shared.Close()
+	t.Cleanup(func() { _ = shared.Close() })
 	hyphen := NewVectorStoreForTenantWithStore(shared, auth.MustNewTenantID("acme-corp"))
 	under := NewVectorStoreForTenantWithStore(shared, auth.MustNewTenantID("acme_corp"))
 	ctx := context.Background()
