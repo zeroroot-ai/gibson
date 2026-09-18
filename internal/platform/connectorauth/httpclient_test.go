@@ -5,8 +5,10 @@ package connectorauth
 
 import (
 	"context"
+	"errors"
 	"net/http"
 	"net/http/httptest"
+	"net/url"
 	"strings"
 	"sync/atomic"
 	"testing"
@@ -40,7 +42,7 @@ func TestDiscover_RefusesAPrivateVendorByDefault(t *testing.T) {
 	}
 }
 
-func TestValidateEndpointURL(t *testing.T) {
+func TestValidateURL(t *testing.T) {
 	cases := []struct {
 		raw          string
 		allowPrivate bool
@@ -56,7 +58,14 @@ func TestValidateEndpointURL(t *testing.T) {
 		{"not a url", false, false},
 	}
 	for _, tc := range cases {
-		err := ValidateEndpointURL(tc.raw, tc.allowPrivate)
+		u, perr := url.Parse(tc.raw)
+		if perr != nil {
+			if tc.ok {
+				t.Errorf("%q: unparseable but expected ok", tc.raw)
+			}
+			continue
+		}
+		err := validateURL(u, tc.allowPrivate)
 		if (err == nil) != tc.ok {
 			t.Errorf("%q allowPrivate=%v: err=%v want ok=%v", tc.raw, tc.allowPrivate, err, tc.ok)
 		}
@@ -88,3 +97,48 @@ func TestGuardedTransport_RefusesARedirectOffHTTPS(t *testing.T) {
 type roundTripFunc func(*http.Request) (*http.Response, error)
 
 func (f roundTripFunc) RoundTrip(r *http.Request) (*http.Response, error) { return f(r) }
+
+// A vendor that redirects forever is stopped after maxRedirects hops, and
+// an ordinary redirect is followed. Loopback, so the guard is lifted.
+func TestNewHTTPClient_StopsARedirectLoop(t *testing.T) {
+	var hops atomic.Int32
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.URL.Path == "/final" {
+			w.WriteHeader(http.StatusOK)
+			return
+		}
+		hops.Add(1)
+		if r.URL.Path == "/once" {
+			http.Redirect(w, r, "/final", http.StatusFound)
+			return
+		}
+		http.Redirect(w, r, "/loop", http.StatusFound)
+	}))
+	defer srv.Close()
+	client := NewHTTPClient(5*time.Second, true)
+
+	resp, err := client.Get(srv.URL + "/once")
+	if err != nil || resp.StatusCode != http.StatusOK {
+		t.Fatalf("one redirect must be followed: resp=%v err=%v", resp, err)
+	}
+	_ = resp.Body.Close()
+
+	hops.Store(0)
+	_, err = client.Get(srv.URL + "/loop")
+	if err == nil || !strings.Contains(err.Error(), "redirects") {
+		t.Fatalf("a redirect loop must be stopped, got err=%v", err)
+	}
+	if got := hops.Load(); got > maxRedirects+1 {
+		t.Fatalf("the loop ran %d hops, the limit is %d", got, maxRedirects)
+	}
+}
+
+// A transport failure is reported with the request it belongs to.
+func TestGuardedTransport_WrapsTheInnerError(t *testing.T) {
+	inner := roundTripFunc(func(*http.Request) (*http.Response, error) { return nil, errors.New("dial refused") })
+	client := &http.Client{Transport: &guardedTransport{allowPrivate: false, inner: inner}}
+	_, err := client.Get("https://vendor.example.com/token")
+	if err == nil || !strings.Contains(err.Error(), "dial refused") || !strings.Contains(err.Error(), "vendor.example.com") {
+		t.Fatalf("want the inner error wrapped with the request, got %v", err)
+	}
+}

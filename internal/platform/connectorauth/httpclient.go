@@ -49,17 +49,6 @@ func NewHTTPClient(timeout time.Duration, allowPrivate bool) *http.Client {
 	}
 }
 
-// ValidateEndpointURL is the scheme and shape check the transport applies. It
-// is exported so a caller can refuse a bad instance URL before any request
-// is built, with the same rule the transport enforces.
-func ValidateEndpointURL(raw string, allowPrivate bool) error {
-	u, err := url.Parse(raw)
-	if err != nil {
-		return fmt.Errorf("connectorauth: endpoint URL %q: %w", raw, err)
-	}
-	return validateURL(u, allowPrivate)
-}
-
 func validateURL(u *url.URL, allowPrivate bool) error {
 	if u.Host == "" {
 		return errors.New("connectorauth: endpoint URL has no host")
