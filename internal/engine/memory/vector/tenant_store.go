@@ -6,31 +6,38 @@ package vector
 import (
 	"context"
 	"errors"
-	"regexp"
+	"fmt"
 	"strings"
 
 	"github.com/zeroroot-ai/gibson/internal/infra/types"
 	"github.com/zeroroot-ai/sdk/auth"
 )
 
-// tenantSanitizeRE matches characters that are safe in a key prefix (alphanumeric
-// and underscores). Hyphens in tenant IDs are replaced with underscores to produce
-// a filesystem/Redis-safe prefix component.
-var tenantSanitizeRE = regexp.MustCompile(`[^a-z0-9_]`)
-
-// sanitizeTenantID converts a tenant ID string to a safe key prefix component.
-// Hyphens are replaced with underscores; any other non-[a-z0-9_] character is
-// removed. Mirrors the sanitizeForPostgres convention in internal/datapool.
-func sanitizeTenantID(tenantID string) string {
-	replaced := strings.ReplaceAll(tenantID, "-", "_")
-	return tenantSanitizeRE.ReplaceAllString(replaced, "")
+// tenantKeyPrefix renders a tenant id as the key prefix its records live
+// under. Lower-case letters and digits pass through; every other byte becomes
+// `_` and its two hex digits. The mapping is injective, so two distinct
+// tenant ids can never share a prefix — the earlier sanitizer stripped
+// characters, which collapsed "a-b", "a_b" and "ab" onto one namespace.
+func tenantKeyPrefix(tenantID string) string {
+	var b strings.Builder
+	b.WriteString("tenant_")
+	for i := 0; i < len(tenantID); i++ {
+		c := tenantID[i]
+		if (c >= 'a' && c <= 'z') || (c >= '0' && c <= '9') {
+			b.WriteByte(c)
+			continue
+		}
+		fmt.Fprintf(&b, "_%02x", c)
+	}
+	b.WriteByte(':')
+	return b.String()
 }
 
 // tenantScopedStore is a VectorStore wrapper that prefixes every key with
 // "tenant_<sanitized>:" before delegating to an underlying shared store.
 //
-// This provides per-tenant key-space isolation without spinning up separate
-// store instances per tenant (design D4). The underlying store is shared
+// Every operation, Search included, sees only this tenant's records; the
+// shared store is one map, and the prefix is the whole boundary (design D4). The underlying store is shared
 // across all tenants within a process; isolation is purely key-prefix based.
 //
 // Spec: per-tenant-data-plane-completion Req 3.1, 3.5, D4.
@@ -66,9 +73,8 @@ func NewVectorStoreForTenant(cfg VectorStoreConfig, tenantID auth.TenantID) (Vec
 // with per-tenant key prefixing. Use this variant when you already hold a
 // shared process-level store (the expected production path).
 func NewVectorStoreForTenantWithStore(underlying VectorStore, tenantID auth.TenantID) VectorStore {
-	sanitized := sanitizeTenantID(tenantID.String())
 	return &tenantScopedStore{
-		prefix:     "tenant_" + sanitized + ":",
+		prefix:     tenantKeyPrefix(tenantID.String()),
 		tenantID:   tenantID,
 		underlying: underlying,
 	}
@@ -102,29 +108,29 @@ func (t *tenantScopedStore) StoreBatch(ctx context.Context, records []VectorReco
 	return t.underlying.StoreBatch(ctx, prefixed)
 }
 
-// Search delegates without modifying the query (embeddings are namespace-agnostic),
-// then strips the tenant prefix from result IDs so callers see the original IDs.
+// Search runs the query against the shared store and keeps only the results
+// that live under this tenant's prefix, with the prefix stripped. The
+// underlying store ranks every tenant's records together, so a result set is
+// filtered here rather than trusted: before this filter, a tenant's Search
+// returned other tenants' records with their prefixes still attached.
 //
-// Note: because the underlying EmbeddedVectorStore stores ALL tenants in a single
-// shared map, Search results may include records from other tenants. The caller
-// should use this wrapper with a store that is dedicate to the tenant when
-// using the embedded backend in production. For the finding-classifier use
-// case, the classifier only stores category IDs so cross-tenant pollution is
-// benign; this note is retained for future callers.
-//
-// For production isolation, use NewVectorStoreForTenant with a store that
-// supports key-range filtering by prefix. The Redis VSS adapter in
-// internal/infra/datapool/vectordb/ provides this via per-tenant index prefixes.
+// TopK bounds what the shared store returns before the filter, so a tenant
+// can receive fewer than TopK hits when other tenants' records outrank its
+// own. That is a completeness limit of the shared-map design, never a leak.
 func (t *tenantScopedStore) Search(ctx context.Context, query VectorQuery) ([]VectorResult, error) {
 	results, err := t.underlying.Search(ctx, query)
 	if err != nil {
 		return nil, err
 	}
-	// Strip the prefix from result IDs so callers receive the original keys.
-	for i := range results {
-		results[i].Record.ID = t.unprefixID(results[i].Record.ID)
+	kept := results[:0]
+	for _, r := range results {
+		if !strings.HasPrefix(r.Record.ID, t.prefix) {
+			continue
+		}
+		r.Record.ID = t.unprefixID(r.Record.ID)
+		kept = append(kept, r)
 	}
-	return results, nil
+	return kept, nil
 }
 
 // Get prefixes the ID before delegating, then strips the prefix from the result.
