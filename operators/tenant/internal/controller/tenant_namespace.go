@@ -36,6 +36,12 @@ const (
 	envOperatorSAName      = "OPERATOR_SERVICE_ACCOUNT_NAME"
 	envOperatorSANamespace = "OPERATOR_SERVICE_ACCOUNT_NAMESPACE"
 
+	// The daemon's ServiceAccount, for the per-tenant connector-credential
+	// binding below. The chart sets it from the workloads release; the
+	// default is the umbrella's rendered name.
+	envDaemonSAName     = "DAEMON_SERVICE_ACCOUNT_NAME"
+	defaultDaemonSAName = "gibson-gibson-workloads"
+
 	// tenantOperatorRoleName is the per-tenant-namespace Role granting
 	// the operator the verbs it needs on every per-tenant resource it
 	// manages inside that namespace. Spec
@@ -70,6 +76,15 @@ const (
 	// tenant-namespace-cluster-role.yaml. Must stay name-aligned with
 	// the chart.
 	tenantOperatorNamespaceClusterRole = "gibson-tenant-operator-tenant-namespace"
+
+	// daemonConnectorCredsRoleBindingName binds the daemon's ServiceAccount
+	// to the chart-rendered ClusterRole daemonConnectorCredsClusterRole
+	// inside each tenant namespace. The daemon materializes
+	// <connector>-connector-cred Secrets there (its connector-token loop)
+	// and nowhere else. This RoleBinding replaces a ClusterRoleBinding that
+	// gave the daemon read and write on every Secret in every namespace.
+	daemonConnectorCredsRoleBindingName = "gibson-connector-creds"
+	daemonConnectorCredsClusterRole     = "gibson-connector-creds"
 )
 
 // Annotation keys the operator writes on tenant namespaces so downstream
@@ -397,6 +412,35 @@ func (p *NamespaceProvisioner) ensureTenantNamespaceRBAC(ctx context.Context, ns
 	}
 	if err := p.upsertRoleBinding(ctx, rb); err != nil {
 		return fmt.Errorf("upsert RoleBinding %s/%s: %w", nsName, tenantOperatorRoleBindingName, err)
+	}
+	// The daemon's Secret write, bounded to this namespace by the same
+	// shape: a RoleBinding to a chart-owned ClusterRole. The operator can
+	// bind only that one name (clusterroles/bind, resourceNames).
+	daemonSA := os.Getenv(envDaemonSAName)
+	if daemonSA == "" {
+		daemonSA = defaultDaemonSAName
+	}
+	drb := &rbacv1.RoleBinding{
+		ObjectMeta: metav1.ObjectMeta{
+			Name:      daemonConnectorCredsRoleBindingName,
+			Namespace: nsName,
+			Labels: map[string]string{
+				"gibson.zeroroot.ai/managed-by": "tenant-operator",
+			},
+		},
+		Subjects: []rbacv1.Subject{{
+			Kind:      rbacv1.ServiceAccountKind,
+			Name:      daemonSA,
+			Namespace: saNamespace,
+		}},
+		RoleRef: rbacv1.RoleRef{
+			APIGroup: rbacv1.GroupName,
+			Kind:     "ClusterRole",
+			Name:     daemonConnectorCredsClusterRole,
+		},
+	}
+	if err := p.upsertRoleBinding(ctx, drb); err != nil {
+		return fmt.Errorf("upsert RoleBinding %s/%s: %w", nsName, daemonConnectorCredsRoleBindingName, err)
 	}
 
 	// Best-effort delete the legacy narrow Role+RoleBinding from

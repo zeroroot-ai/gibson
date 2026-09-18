@@ -89,3 +89,34 @@ func TestEnsureTenantNamespaceRBAC_Idempotent(t *testing.T) {
 		t.Errorf("RoleRef.Name = %q, want %q", rb.RoleRef.Name, tenantOperatorNamespaceClusterRole)
 	}
 }
+
+// THE FIXTURE THIS EXISTS FOR: the daemon's connector-credential write is a
+// RoleBinding in the tenant namespace, never a cluster-wide grant.
+func TestEnsureTenantNamespaceRBAC_BindsTheDaemonInTheTenantNamespace(t *testing.T) {
+	scheme := runtime.NewScheme()
+	if err := clientgoscheme.AddToScheme(scheme); err != nil {
+		t.Fatalf("AddToScheme: %v", err)
+	}
+	cl := fake.NewClientBuilder().WithScheme(scheme).Build()
+	p := &NamespaceProvisioner{Client: cl, PlatformNamespace: "gibson"}
+	t.Setenv(envDaemonSAName, "daemon-sa-from-chart")
+	if err := p.ensureTenantNamespaceRBAC(context.Background(), "tenant-test"); err != nil {
+		t.Fatalf("ensureTenantNamespaceRBAC: %v", err)
+	}
+	rb := &rbacv1.RoleBinding{}
+	if err := cl.Get(context.Background(), types.NamespacedName{
+		Namespace: "tenant-test", Name: daemonConnectorCredsRoleBindingName,
+	}, rb); err != nil {
+		t.Fatalf("daemon RoleBinding not created: %v", err)
+	}
+	if rb.RoleRef.Kind != "ClusterRole" || rb.RoleRef.Name != daemonConnectorCredsClusterRole {
+		t.Errorf("RoleRef = %+v, want ClusterRole/%s", rb.RoleRef, daemonConnectorCredsClusterRole)
+	}
+	if len(rb.Subjects) != 1 || rb.Subjects[0].Name != "daemon-sa-from-chart" || rb.Subjects[0].Namespace != "gibson" {
+		t.Errorf("Subjects = %+v, want the daemon SA in the platform namespace", rb.Subjects)
+	}
+	// Idempotent: a second pass updates in place.
+	if err := p.ensureTenantNamespaceRBAC(context.Background(), "tenant-test"); err != nil {
+		t.Fatalf("second ensureTenantNamespaceRBAC: %v", err)
+	}
+}
