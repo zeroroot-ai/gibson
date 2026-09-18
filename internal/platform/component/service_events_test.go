@@ -127,6 +127,7 @@ type failingEventStream struct {
 }
 
 func (s *failingEventStream) Context() context.Context { return s.ctx }
+
 var errClientGone = errors.New("client gone")
 
 func (s *failingEventStream) Send(*componentpb.ComponentEvent) error {
