@@ -64,7 +64,7 @@ jobs:
       # importable in this environment (gibson#1436).
       - name: Unit + exact-inference tests (runtime dependency set only)
         working-directory: sidecar/belief
-        run: python -m pytest test_model.py test_infer.py -q
+        run: python -m pytest test_model.py test_infer.py test_server.py -q
 
       # Deliberately after the step above: installing pgmpy pulls torch, numpy's
       # transitive friends and a great deal else into site-packages. Doing it
