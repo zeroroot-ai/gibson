@@ -7,6 +7,7 @@ import (
 	"context"
 	"fmt"
 	"log"
+	"os"
 
 	"github.com/zeroroot-ai/gibson/internal/engine/graphrag/graph"
 )
@@ -17,7 +18,7 @@ func ExampleNewNeo4jClient() {
 	config := graph.DefaultConfig()
 	config.URI = "bolt://localhost:7687"
 	config.Username = "neo4j"
-	config.Password = "password"
+	config.Password = os.Getenv("NEO4J_PASSWORD")
 
 	// Create client
 	client, err := graph.NewNeo4jClient(config)
@@ -76,7 +77,7 @@ func ExampleGraphClientConfig_Validate() {
 	config := graph.GraphClientConfig{
 		URI:                     "bolt://localhost:7687",
 		Username:                "neo4j",
-		Password:                "password",
+		Password:                "replace-with-the-configured-password",
 		ConnectionTimeout:       30,
 		MaxTransactionRetryTime: 30,
 	}

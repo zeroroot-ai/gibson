@@ -22,7 +22,7 @@
 //	config := graph.DefaultConfig()
 //	config.URI = "bolt://localhost:7687"
 //	config.Username = "neo4j"
-//	config.Password = "password"
+//	config.Password = os.Getenv("NEO4J_PASSWORD")
 //
 //	client, err := graph.NewNeo4jClient(config)
 //	if err != nil {

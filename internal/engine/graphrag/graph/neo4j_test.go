@@ -116,20 +116,26 @@ func TestDefaultConfig(t *testing.T) {
 
 	assert.Equal(t, "bolt://localhost:7687", config.URI)
 	assert.Equal(t, "neo4j", config.Username)
-	assert.Equal(t, "password", config.Password)
+	assert.Equal(t, "", config.Password, "the default config ships no password")
 	assert.Equal(t, "", config.Database)
 	assert.Equal(t, 50, config.MaxConnectionPoolSize)
 	assert.Equal(t, 30*time.Second, config.ConnectionTimeout)
 	assert.Equal(t, 30*time.Second, config.MaxTransactionRetryTime)
 
-	// Should be valid
+	// The default is not valid on its own: a caller has to supply the
+	// password. A default that validated was a shared credential.
 	err := config.Validate()
-	require.NoError(t, err)
+	require.Error(t, err)
+	assert.Contains(t, err.Error(), "Password cannot be empty")
+
+	config.Password = "from-configuration"
+	require.NoError(t, config.Validate())
 }
 
 func TestNewNeo4jClient(t *testing.T) {
 	t.Run("valid config", func(t *testing.T) {
 		config := DefaultConfig()
+		config.Password = "from-configuration"
 		client, err := NewNeo4jClient(config)
 
 		require.NoError(t, err)
