@@ -5,6 +5,7 @@ package vector
 
 import (
 	"context"
+	"strings"
 	"testing"
 
 	"github.com/stretchr/testify/assert"
@@ -121,19 +122,68 @@ func TestNewVectorStoreForTenant_Delete(t *testing.T) {
 }
 
 // TestSanitizeTenantID verifies the sanitize helper produces safe prefixes.
-func TestSanitizeTenantID(t *testing.T) {
-	cases := []struct {
-		input    string
-		expected string
-	}{
-		{"acme", "acme"},
-		{"acme-corp", "acme_corp"},
-		{"tenant-123", "tenant_123"},
-		{"my_tenant", "my_tenant"},
+func TestTenantKeyPrefix_IsInjective(t *testing.T) {
+	// Ids that differ only in characters the old sanitizer stripped must
+	// not share a namespace.
+	ids := []string{"acme", "acme-corp", "acme_corp", "acmecorp", "acme.corp", "ACME"}
+	seen := map[string]string{}
+	for _, id := range ids {
+		p := sanitizeTenantID(id)
+		if prior, dup := seen[p]; dup {
+			t.Fatalf("%q and %q share prefix %q", prior, id, p)
+		}
+		seen[p] = id
+		assert.True(t, strings.HasPrefix(p, "tenant_") && strings.HasSuffix(p, ":"), p)
 	}
-	for _, c := range cases {
-		assert.Equal(t, c.expected, sanitizeTenantID(c.input), "input: %s", c.input)
+	assert.Equal(t, "tenant_acme_2dcorp:", sanitizeTenantID("acme-corp"))
+}
+
+// THE FIXTURE THIS EXISTS FOR: the wrapper's Search used to return other
+// tenants' records (with their prefixes still on), because the shared store
+// ranks everything together and nothing filtered the answer.
+func TestTenantScopedStore_SearchSeesOnlyItsOwnTenant(t *testing.T) {
+	shared := NewEmbeddedVectorStore(testDims)
+	t.Cleanup(func() { _ = shared.Close() })
+	storeA := NewVectorStoreForTenantWithStore(shared, auth.MustNewTenantID("tenant-a"))
+	storeB := NewVectorStoreForTenantWithStore(shared, auth.MustNewTenantID("tenant-b"))
+	ctx := context.Background()
+
+	require.NoError(t, storeA.Store(ctx, VectorRecord{ID: "a1", Content: "a one", Embedding: makeEmbedding(1.0)}))
+	require.NoError(t, storeA.Store(ctx, VectorRecord{ID: "a2", Content: "a two", Embedding: makeEmbedding(0.9)}))
+	require.NoError(t, storeB.Store(ctx, VectorRecord{ID: "b1", Content: "b one", Embedding: makeEmbedding(1.0)}))
+	require.NoError(t, storeB.Store(ctx, VectorRecord{ID: "b2", Content: "b two", Embedding: makeEmbedding(0.9)}))
+
+	q := VectorQuery{Embedding: makeEmbedding(1.0), TopK: 10}
+	resA, err := storeA.Search(ctx, q)
+	require.NoError(t, err)
+	resB, err := storeB.Search(ctx, q)
+	require.NoError(t, err)
+
+	idsOf := func(rs []VectorResult) []string {
+		out := make([]string, 0, len(rs))
+		for _, r := range rs {
+			out = append(out, r.Record.ID)
+		}
+		return out
 	}
+	assert.ElementsMatch(t, []string{"a1", "a2"}, idsOf(resA), "tenant A sees only its own records, unprefixed")
+	assert.ElementsMatch(t, []string{"b1", "b2"}, idsOf(resB), "tenant B sees only its own records, unprefixed")
+	for _, r := range append(resA, resB...) {
+		assert.False(t, strings.HasPrefix(r.Record.ID, "tenant_"), "no prefixed id may leak out: %s", r.Record.ID)
+	}
+}
+
+// Two ids the old sanitizer collapsed are two namespaces now.
+func TestTenantScopedStore_SimilarIdsDoNotShareANamespace(t *testing.T) {
+	shared := NewEmbeddedVectorStore(testDims)
+	t.Cleanup(func() { _ = shared.Close() })
+	hyphen := NewVectorStoreForTenantWithStore(shared, auth.MustNewTenantID("acme-corp"))
+	under := NewVectorStoreForTenantWithStore(shared, auth.MustNewTenantID("acme_corp"))
+	ctx := context.Background()
+	require.NoError(t, hyphen.Store(ctx, VectorRecord{ID: "k", Content: "hyphen", Embedding: makeEmbedding(1.0)}))
+	got, err := under.Get(ctx, "k")
+	require.NoError(t, err)
+	assert.Nil(t, got, "acme_corp must not read acme-corp's record")
 }
 
 // TestNewVectorStoreForTenant_FactoryFunction verifies the factory-level
