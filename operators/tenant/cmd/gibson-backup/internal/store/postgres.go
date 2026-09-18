@@ -18,8 +18,59 @@ import (
 	"encoding/hex"
 	"fmt"
 	"io"
+	"net/url"
 	"os/exec"
 )
+
+// pgCommand builds a pg_dump or pg_restore command whose argv never carries
+// the database password. The argv of any process is readable through
+// /proc/<pid>/cmdline by every process in the same PID namespace and by
+// every pod that can read the node's process table. The password leaves the
+// DSN and reaches the client through PGPASSWORD on the child's environment,
+// which only the child and root can read.
+//
+// The DSN is a URL (postgres://user:pass@host:port/db?opts). A DSN with no
+// password passes through unchanged and the environment is untouched. The
+// DSN itself is the last argument, or follows --dbname when dbnameFlag is set.
+func pgCommand(ctx context.Context, name, dsn string, dbnameFlag bool, args ...string) (*exec.Cmd, error) {
+	safeDSN, password, err := splitDSNPassword(dsn)
+	if err != nil {
+		return nil, err
+	}
+	if dbnameFlag {
+		args = append(args, "--dbname", safeDSN)
+	} else {
+		args = append(args, safeDSN)
+	}
+	// #nosec G204 — name is a constant and the DSN is caller-controlled and validated upstream.
+	cmd := exec.CommandContext(ctx, name, args...)
+	if password != "" {
+		cmd.Env = append(cmd.Environ(), "PGPASSWORD="+password)
+	}
+	return cmd, nil
+}
+
+// splitDSNPassword returns the DSN with its password removed, and the
+// password on its own. A DSN that is not a URL is an error: the tool never
+// guesses where a secret sits in a string it cannot parse.
+func splitDSNPassword(dsn string) (safeDSN, password string, err error) {
+	u, err := url.Parse(dsn)
+	if err != nil {
+		return "", "", fmt.Errorf("store/postgres: parse dsn: %w", err)
+	}
+	if u.Scheme != "postgres" && u.Scheme != "postgresql" {
+		return "", "", fmt.Errorf("store/postgres: dsn scheme %q is not postgres", u.Scheme)
+	}
+	if u.User == nil {
+		return dsn, "", nil
+	}
+	password, ok := u.User.Password()
+	if !ok {
+		return dsn, "", nil
+	}
+	u.User = url.User(u.User.Username())
+	return u.String(), password, nil
+}
 
 // PostgresBackup streams a pg_dump (custom format, -Fc) of the database
 // identified by dsn into w.
@@ -36,8 +87,10 @@ func PostgresBackup(ctx context.Context, dsn string, w io.Writer) (int64, string
 		return 0, "", fmt.Errorf("store/postgres: pg_dump not found on PATH: %w", err)
 	}
 
-	// #nosec G204 — dsn is caller-controlled and validated upstream.
-	cmd := exec.CommandContext(ctx, "pg_dump", "--format=custom", "--no-password", dsn)
+	cmd, err := pgCommand(ctx, "pg_dump", dsn, false, "--format=custom", "--no-password")
+	if err != nil {
+		return 0, "", err
+	}
 
 	stdout, err := cmd.StdoutPipe()
 	if err != nil {
@@ -73,15 +126,15 @@ func PostgresRestore(ctx context.Context, dsn string, r io.Reader) error {
 		return fmt.Errorf("store/postgres: pg_restore not found on PATH: %w", err)
 	}
 
-	// #nosec G204 — dsn is caller-controlled and validated upstream.
-	cmd := exec.CommandContext(ctx,
-		"pg_restore",
+	cmd, err := pgCommand(ctx, "pg_restore", dsn, true,
 		"--no-password",
 		"--clean",     // drop existing objects before restoring
 		"--if-exists", // suppress errors for missing objects on --clean
 		"--exit-on-error",
-		"--dbname", dsn,
 	)
+	if err != nil {
+		return err
+	}
 	cmd.Stdin = r
 
 	out, err := cmd.CombinedOutput()
