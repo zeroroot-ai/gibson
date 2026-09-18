@@ -43,7 +43,8 @@ func (d *daemonImpl) registerConnectorAuth(ctx context.Context, srv *grpc.Server
 	const connectorTokenInterval = 5 * time.Minute
 	// One guarded client for every vendor call: the instance URL is tenant
 	// input, and discovery follows what the instance advertises.
-	vendorClient := connectorauth.NewHTTPClient(30*time.Second, d.config.Security.AllowPrivateConnectorEndpoints)
+	allowPrivate := d.config != nil && d.config.Security.AllowPrivateConnectorEndpoints
+	vendorClient := connectorauth.NewHTTPClient(30*time.Second, allowPrivate)
 	connectorRefresher, crErr := connectorauth.NewRefresher(d.secretsService, vendorClient, nil,
 		connectorauth.WithSkew(connectorTokenInterval+2*time.Minute))
 	if crErr != nil {
