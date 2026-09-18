@@ -41,7 +41,10 @@ func (d *daemonImpl) registerConnectorAuth(ctx context.Context, srv *grpc.Server
 	// The skew must exceed the loop interval, or a token could expire
 	// between passes while NeedsRefresh still reads "fresh".
 	const connectorTokenInterval = 5 * time.Minute
-	connectorRefresher, crErr := connectorauth.NewRefresher(d.secretsService, nil, nil,
+	// One guarded client for every vendor call: the instance URL is tenant
+	// input, and discovery follows what the instance advertises.
+	vendorClient := connectorauth.NewHTTPClient(30*time.Second, d.config.Security.AllowPrivateConnectorEndpoints)
+	connectorRefresher, crErr := connectorauth.NewRefresher(d.secretsService, vendorClient, nil,
 		connectorauth.WithSkew(connectorTokenInterval+2*time.Minute))
 	if crErr != nil {
 		d.logger.Warn(ctx, "ConnectorAuthService: refresher construction failed; registering Unavailable stub",
@@ -64,6 +67,7 @@ func (d *daemonImpl) registerConnectorAuth(ctx context.Context, srv *grpc.Server
 		Status:          d.connectorTokenStatus,
 		Pending:         connectorPending,
 		CallbackBaseURL: os.Getenv("GIBSON_PUBLIC_URL"),
+		HTTPClient:      vendorClient,
 	})
 	if caErr != nil {
 		d.logger.Warn(ctx, "ConnectorAuthService: constructor failed; registering Unavailable stub",
