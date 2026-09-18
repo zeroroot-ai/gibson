@@ -63,7 +63,7 @@ func TestRelCreateQuery(t *testing.T) {
 		"empty type":      {Type: ""},
 		"start label":     {Type: "KNOWS", StartNodeLabels: []string{"a b"}},
 		"end label":       {Type: "KNOWS", EndNodeLabels: []string{"Node)"}},
-		"unicode in type": {Type: "KNOWS​"},
+		"unicode in type": {Type: "KNOWS\u200b"},
 	} {
 		t.Run(name, func(t *testing.T) {
 			t.Parallel()
@@ -71,5 +71,43 @@ func TestRelCreateQuery(t *testing.T) {
 				t.Fatalf("want ErrUnsafeCypherIdentifier, got %v", err)
 			}
 		})
+	}
+}
+
+// TestStatementsStopBeforeTheDatabase proves an archive with one bad record
+// produces no statements at all: nothing partial reaches the session.
+func TestStatementsStopBeforeTheDatabase(t *testing.T) {
+	t.Parallel()
+	good := `{"labels":["Person"],"properties":{"name":"a"}}` + "\n"
+	bad := `{"labels":["Person) DETACH DELETE n //"],"properties":{}}` + "\n"
+
+	stmts, err := nodeStatements([]byte(good + "\n" + good))
+	if err != nil || len(stmts) != 2 {
+		t.Fatalf("two good records: got %d statements, err %v", len(stmts), err)
+	}
+	if stmts[0].query != "CREATE (n:Person) SET n = $props" || stmts[0].params["props"] == nil {
+		t.Fatalf("unexpected statement %+v", stmts[0])
+	}
+	if stmts, err := nodeStatements([]byte(good + bad)); !errors.Is(err, ErrUnsafeCypherIdentifier) || stmts != nil {
+		t.Fatalf("want ErrUnsafeCypherIdentifier and no statements, got %v %v", err, stmts)
+	}
+	if _, err := nodeStatements([]byte("{not json")); err == nil {
+		t.Fatal("want a parse error")
+	}
+
+	rel := `{"type":"KNOWS","start_labels":["Person"],"start_props":{"name":"a"},"end_labels":["Person"],"end_props":{"name":"b"},"properties":{"since":1}}` + "\n"
+	rs, err := relStatements([]byte(rel))
+	if err != nil || len(rs) != 1 {
+		t.Fatalf("one rel: got %d statements, err %v", len(rs), err)
+	}
+	if rs[0].params["relProps"] == nil || rs[0].params["startProps"] == nil || rs[0].params["endProps"] == nil {
+		t.Fatalf("rel params incomplete: %+v", rs[0].params)
+	}
+	badRel := `{"type":"KNOWS]->(b) DETACH DELETE a //"}` + "\n"
+	if rs, err := relStatements([]byte(rel + badRel)); !errors.Is(err, ErrUnsafeCypherIdentifier) || rs != nil {
+		t.Fatalf("want ErrUnsafeCypherIdentifier and no statements, got %v %v", err, rs)
+	}
+	if _, err := relStatements([]byte("{not json")); err == nil {
+		t.Fatal("want a parse error")
 	}
 }

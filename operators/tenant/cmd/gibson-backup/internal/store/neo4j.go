@@ -426,22 +426,64 @@ func exportSchema(ctx context.Context, session neo4j.SessionWithContext) []byte 
 	return []byte(sb.String())
 }
 
-func importNodes(ctx context.Context, session neo4j.SessionWithContext, data []byte) error {
-	lines := strings.SplitSeq(strings.TrimSpace(string(data)), "\n")
-	for line := range lines {
+// statement is one write the restore runs: query text with every identifier
+// already checked, and the properties as parameters.
+type statement struct {
+	query  string
+	params map[string]any
+}
+
+// nodeStatements parses the node export and builds one CREATE per record.
+// It stops at the first record that fails to parse or carries an unsafe
+// label, before anything reaches the database.
+func nodeStatements(data []byte) ([]statement, error) {
+	var out []statement
+	for line := range strings.SplitSeq(strings.TrimSpace(string(data)), "\n") {
 		if line == "" {
 			continue
 		}
 		var nr nodeRecord
 		if err := json.Unmarshal([]byte(line), &nr); err != nil {
-			return fmt.Errorf("parse node record: %w", err)
+			return nil, fmt.Errorf("parse node record: %w", err)
 		}
 		q, err := nodeCreateQuery(nr)
 		if err != nil {
-			return err
+			return nil, err
 		}
+		out = append(out, statement{query: q, params: map[string]any{"props": nr.Properties}})
+	}
+	return out, nil
+}
+
+// relStatements parses the relationship export and builds one MATCH ...
+// CREATE per record, with the same stop-before-the-database rule.
+func relStatements(data []byte) ([]statement, error) {
+	var out []statement
+	for line := range strings.SplitSeq(strings.TrimSpace(string(data)), "\n") {
+		if line == "" {
+			continue
+		}
+		var rr relRecord
+		if err := json.Unmarshal([]byte(line), &rr); err != nil {
+			return nil, fmt.Errorf("parse rel record: %w", err)
+		}
+		q, err := relCreateQuery(rr)
+		if err != nil {
+			return nil, err
+		}
+		out = append(out, statement{query: q, params: map[string]any{
+			"startProps": rr.StartNodeProps,
+			"endProps":   rr.EndNodeProps,
+			"relProps":   rr.Properties,
+		}})
+	}
+	return out, nil
+}
+
+func runStatements(ctx context.Context, session neo4j.SessionWithContext, stmts []statement) error {
+	for _, st := range stmts {
 		if _, err := session.ExecuteWrite(ctx, func(tx neo4j.ManagedTransaction) (any, error) {
-			_, err := tx.Run(ctx, q, map[string]any{"props": nr.Properties})
+			_, err := tx.Run(ctx, st.query, st.params)
 			return nil, err
 		}); err != nil {
 			return err
@@ -450,32 +492,20 @@ func importNodes(ctx context.Context, session neo4j.SessionWithContext, data []b
 	return nil
 }
 
-func importRelationships(ctx context.Context, session neo4j.SessionWithContext, data []byte) error {
-	lines := strings.SplitSeq(strings.TrimSpace(string(data)), "\n")
-	for line := range lines {
-		if line == "" {
-			continue
-		}
-		var rr relRecord
-		if err := json.Unmarshal([]byte(line), &rr); err != nil {
-			return fmt.Errorf("parse rel record: %w", err)
-		}
-		q, err := relCreateQuery(rr)
-		if err != nil {
-			return err
-		}
-		if _, err := session.ExecuteWrite(ctx, func(tx neo4j.ManagedTransaction) (any, error) {
-			_, err := tx.Run(ctx, q, map[string]any{
-				"startProps": rr.StartNodeProps,
-				"endProps":   rr.EndNodeProps,
-				"relProps":   rr.Properties,
-			})
-			return nil, err
-		}); err != nil {
-			return err
-		}
+func importNodes(ctx context.Context, session neo4j.SessionWithContext, data []byte) error {
+	stmts, err := nodeStatements(data)
+	if err != nil {
+		return err
 	}
-	return nil
+	return runStatements(ctx, session, stmts)
+}
+
+func importRelationships(ctx context.Context, session neo4j.SessionWithContext, data []byte) error {
+	stmts, err := relStatements(data)
+	if err != nil {
+		return err
+	}
+	return runStatements(ctx, session, stmts)
 }
 
 func addTarEntry(tw *tar.Writer, name string, data []byte) error {
