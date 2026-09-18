@@ -116,7 +116,7 @@ func TestDefaultConfig(t *testing.T) {
 
 	assert.Equal(t, "bolt://localhost:7687", config.URI)
 	assert.Equal(t, "neo4j", config.Username)
-	assert.Equal(t, "", config.Password, "the default config ships no password")
+	assert.Empty(t, config.Password, "the default config ships no password")
 	assert.Equal(t, "", config.Database)
 	assert.Equal(t, 50, config.MaxConnectionPoolSize)
 	assert.Equal(t, 30*time.Second, config.ConnectionTimeout)
