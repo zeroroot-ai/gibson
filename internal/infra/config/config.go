@@ -191,6 +191,16 @@ type SecurityConfig struct {
 	// and the LLM provider SSRF guard.
 	AllowPrivateLLMEndpoints bool `mapstructure:"allow_private_llm_endpoints" yaml:"allow_private_llm_endpoints"`
 
+	// AllowPrivateConnectorEndpoints is the same opt-in for the connector
+	// OAuth flow: a tenant admin's instance URL, and every endpoint that
+	// instance advertises through discovery, is fetched by the daemon. Off
+	// by default (the secure default): the client refuses private,
+	// link-local, loopback and metadata destinations at connect time and
+	// refuses any URL that is not https. An operator whose connector vendor
+	// runs on the private network sets this true. Separate from the LLM and
+	// broker knobs for the same reason they are separate from each other.
+	AllowPrivateConnectorEndpoints bool `mapstructure:"allow_private_connector_endpoints" yaml:"allow_private_connector_endpoints"`
+
 	// AllowPrivateBrokerEndpoints is the same opt-in as
 	// AllowPrivateLLMEndpoints, for the secrets-broker probe: it disables the
 	// connect-time egress guard applied to the Vault address in a

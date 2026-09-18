@@ -485,6 +485,9 @@ func ExchangeCode(ctx context.Context, client *http.Client, pa *PendingAuthoriza
 	}, nil
 }
 
+// defaultHTTPClient is the fail-closed client a caller gets when it passes
+// nil: public https vendors only. The daemon builds its own through
+// NewHTTPClient with the operator's knob.
 func defaultHTTPClient() *http.Client {
-	return &http.Client{Timeout: 30 * time.Second}
+	return NewHTTPClient(30*time.Second, false)
 }

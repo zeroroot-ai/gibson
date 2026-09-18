@@ -62,6 +62,10 @@ type ConnectorAuthAdminConfig struct {
 	// client registration, the code-to-token exchange, and revocation. Nil
 	// gets a bounded default.
 	HTTPClient *http.Client
+	// AllowPrivateEndpoints lifts the egress guard on the vendor URLs a
+	// tenant admin supplies (security.allow_private_connector_endpoints).
+	// Ignored when HTTPClient is set. Off by default.
+	AllowPrivateEndpoints bool
 	// Pending holds the short-TTL server-side records of in-flight
 	// authorizations, keyed by state. It is SHARED with the pre-auth HTTP
 	// callback so the browser round trip and the RPC complete the same
@@ -101,7 +105,7 @@ func NewConnectorAuthAdminServer(cfg ConnectorAuthAdminConfig) (*ConnectorAuthAd
 	}
 	client := cfg.HTTPClient
 	if client == nil {
-		client = &http.Client{Timeout: 30 * time.Second}
+		client = connectorauth.NewHTTPClient(30*time.Second, cfg.AllowPrivateEndpoints)
 	}
 	now := cfg.Now
 	if now == nil {

@@ -69,7 +69,7 @@ func NewRefresher(store SecretStore, client *http.Client, now func() time.Time, 
 		return nil, errors.New("connectorauth: secret store must not be nil")
 	}
 	if client == nil {
-		client = &http.Client{Timeout: 30 * time.Second}
+		client = defaultHTTPClient()
 	}
 	if now == nil {
 		now = time.Now
