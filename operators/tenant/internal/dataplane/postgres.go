@@ -384,7 +384,15 @@ func (p *pgProvisioner) Deprovision(ctx context.Context, tenantID string) error 
 // role, which is what lets a non-superuser terminate that role's backends,
 // then every backend on the database is terminated. A database or role that
 // does not exist is a no-op at each step.
-func (p *pgProvisioner) terminateTenantBackends(ctx context.Context, adminConn *pgx.Conn, dbName, roleName string) error {
+// pgAdminConn is the slice of *pgx.Conn the deprovision steps use, so the
+// terminate path can be driven by a fake in unit tests.
+type pgAdminConn interface {
+	Exec(ctx context.Context, sql string, args ...any) (pgconn.CommandTag, error)
+	Query(ctx context.Context, sql string, args ...any) (pgx.Rows, error)
+	QueryRow(ctx context.Context, sql string, args ...any) pgx.Row
+}
+
+func (p *pgProvisioner) terminateTenantBackends(ctx context.Context, adminConn pgAdminConn, dbName, roleName string) error {
 	var exists bool
 	if err := adminConn.QueryRow(ctx, "SELECT EXISTS (SELECT 1 FROM pg_database WHERE datname = $1)", dbName).Scan(&exists); err != nil {
 		return fmt.Errorf("dataplane/postgres: check database %q: %w", dbName, err)
