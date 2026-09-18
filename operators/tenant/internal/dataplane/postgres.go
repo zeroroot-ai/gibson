@@ -351,19 +351,22 @@ func (p *pgProvisioner) Deprovision(ctx context.Context, tenantID string) error 
 	)
 	_, _ = adminConn.Exec(ctx, revokeSQL) // ignore: role/db may not exist
 
-	// DROP DATABASE WITH (FORCE) terminates backend connections (Postgres 13+).
-	// Use IF EXISTS for idempotency.
-	dropDBSQL := fmt.Sprintf("DROP DATABASE IF EXISTS %s WITH (FORCE)", pgx.Identifier{dbName}.Sanitize())
+	// DROP DATABASE WITH (FORCE) terminates the backends itself, but only for
+	// a caller allowed to terminate them: a superuser, or a member of the
+	// role each backend runs as. On CNPG the admin role is not a superuser,
+	// and it created the tenant role with CREATEROLE, which on Postgres 16
+	// grants ADMIN on the new role and nothing else, so the drop failed with
+	// "permission denied to terminate" on every retry and the Tenant never
+	// finished deleting (gibson#128). The admin can grant itself the tenant
+	// role (it holds ADMIN on it), terminate the role's backends, and then
+	// drop with no FORCE. Every step is idempotent and tolerates an absent
+	// database or role.
+	if err := p.terminateTenantBackends(ctx, adminConn, dbName, roleName); err != nil {
+		return err
+	}
+	dropDBSQL := fmt.Sprintf("DROP DATABASE IF EXISTS %s", pgx.Identifier{dbName}.Sanitize())
 	if _, err := adminConn.Exec(ctx, dropDBSQL); err != nil {
-		// Fallback for Postgres < 13 that doesn't support WITH (FORCE).
-		if strings.Contains(err.Error(), "syntax error") {
-			dropDBSQL = fmt.Sprintf("DROP DATABASE IF EXISTS %s", pgx.Identifier{dbName}.Sanitize())
-			if _, err2 := adminConn.Exec(ctx, dropDBSQL); err2 != nil {
-				return fmt.Errorf("dataplane/postgres: drop database %q: %w", dbName, err2)
-			}
-		} else {
-			return fmt.Errorf("dataplane/postgres: drop database %q: %w", dbName, err)
-		}
+		return fmt.Errorf("dataplane/postgres: drop database %q: %w", dbName, err)
 	}
 
 	// DROP ROLE IF EXISTS.
@@ -373,6 +376,43 @@ func (p *pgProvisioner) Deprovision(ctx context.Context, tenantID string) error 
 	}
 
 	return nil
+}
+
+// terminateTenantBackends closes every session on the tenant database so a
+// plain DROP DATABASE can proceed. New connections are refused first
+// (ALLOW_CONNECTIONS false), then the admin takes membership of the tenant
+// role, which is what lets a non-superuser terminate that role's backends,
+// then every backend on the database is terminated. A database or role that
+// does not exist is a no-op at each step.
+func (p *pgProvisioner) terminateTenantBackends(ctx context.Context, adminConn *pgx.Conn, dbName, roleName string) error {
+	var exists bool
+	if err := adminConn.QueryRow(ctx, "SELECT EXISTS (SELECT 1 FROM pg_database WHERE datname = $1)", dbName).Scan(&exists); err != nil {
+		return fmt.Errorf("dataplane/postgres: check database %q: %w", dbName, err)
+	}
+	if !exists {
+		return nil
+	}
+	_, _ = adminConn.Exec(ctx, fmt.Sprintf("ALTER DATABASE %s WITH ALLOW_CONNECTIONS false", pgx.Identifier{dbName}.Sanitize()))
+	// The admin created the role with CREATEROLE and so holds ADMIN on it;
+	// granting it to itself is what makes the role's backends terminable.
+	_, _ = adminConn.Exec(ctx, fmt.Sprintf("GRANT %s TO CURRENT_USER", pgx.Identifier{roleName}.Sanitize()))
+	rows, err := adminConn.Query(ctx,
+		"SELECT pid, pg_terminate_backend(pid) FROM pg_stat_activity WHERE datname = $1 AND pid <> pg_backend_pid()", dbName)
+	if err != nil {
+		return fmt.Errorf("dataplane/postgres: terminate backends of %q: %w", dbName, err)
+	}
+	defer rows.Close()
+	for rows.Next() {
+		var pid int32
+		var ok bool
+		if err := rows.Scan(&pid, &ok); err != nil {
+			return fmt.Errorf("dataplane/postgres: terminate backends of %q: %w", dbName, err)
+		}
+		if !ok {
+			return fmt.Errorf("dataplane/postgres: backend %d on %q could not be terminated; the admin role must be a member of %q", pid, dbName, roleName)
+		}
+	}
+	return rows.Err()
 }
 
 // runMigrations applies the embedded tenant migration set
