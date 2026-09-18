@@ -107,6 +107,15 @@ for repo in "${OSS_REPOS[@]}"; do
       exit 1
     }
 
+    # A tools-only module (gibson-executor/tools/recon: one `//go:build tools`
+    # file that pins binaries for `go run`) has no buildable package, so
+    # `go build ./...` matches nothing and `go test ./...` exits 1 with "no
+    # packages to test", which the gate read as a network fetch (gibson#99).
+    # Its whole dependency set is proven by phase 1, so phase 2 is a no-op.
+    if [[ -z "$(cd "${mod_dir}" && GOFLAGS=-mod=mod go list ./... 2>/dev/null)" ]]; then
+      note "   OK: ${label} is a tools-only module (no package to build); phase 1 proved its dependency set"
+      continue
+    fi
     note "== ${label}: phase 2 — air-gapped go build ./..."
     airgap_exec "${mod_dir}" go build ./... || {
       echo "AIR-GAP GATE FAILED: ${label} build needs a network fetch beyond the warmed module cache (gibson#818)" >&2
