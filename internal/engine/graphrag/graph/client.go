@@ -145,9 +145,12 @@ type GraphClientConfig struct {
 // DefaultConfig returns a GraphClientConfig with sensible defaults.
 func DefaultConfig() GraphClientConfig {
 	return GraphClientConfig{
-		URI:                     "bolt://localhost:7687",
-		Username:                "neo4j",
-		Password:                "password",
+		URI:      "bolt://localhost:7687",
+		Username: "neo4j",
+		// Password has no default. Validate rejects an empty password, so a
+		// caller has to supply one from configuration. A fixed default here
+		// was a credential every deployment that forgot to set one shared.
+		Password:                "",
 		Database:                "",
 		MaxConnectionPoolSize:   50,
 		ConnectionTimeout:       30 * time.Second,
