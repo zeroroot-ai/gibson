@@ -1152,10 +1152,14 @@ func (d *daemonImpl) Start(ctx context.Context) error {
 	// The TenantScopedStore wraps stateClient so that all quota counters are
 	// automatically namespaced by tenant — no cross-tenant data leakage.
 	if d.stateClient != nil {
+		// SaaS: every call carries a tenant, and a call that does not must
+		// fail, so no default is configured that could stand in for one.
 		tenantStoreCfg := &state.TenantStoreConfig{
 			AuthMode:      d.config.Auth.Mode,
-			DefaultTenant: "default",
 			RequireTenant: d.config.Auth.Mode == "saas",
+		}
+		if d.config.Auth.Mode != "saas" {
+			tenantStoreCfg.DefaultTenant = "default"
 		}
 		tenantStore := state.NewTenantScopedStore(d.stateClient, tenantStoreCfg)
 		// platformDB is guaranteed non-nil here: initPlatformPostgres ran

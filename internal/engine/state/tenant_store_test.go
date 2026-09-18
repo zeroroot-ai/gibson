@@ -54,6 +54,19 @@ func TestTenantScopedStore_ResolveTenant(t *testing.T) {
 			wantErr:       true,
 		},
 		{
+			// THE FIXTURE THIS EXISTS FOR: a configured default must never
+			// answer for a missing tenant when one is required.
+			name: "a default does not mask a missing tenant when required",
+			config: &TenantStoreConfig{
+				AuthMode:      "saas",
+				DefaultTenant: "default",
+				RequireTenant: true,
+			},
+			contextTenant: "",
+			want:          "",
+			wantErr:       true,
+		},
+		{
 			name: "dev mode uses default",
 			config: &TenantStoreConfig{
 				AuthMode:      "dev",
