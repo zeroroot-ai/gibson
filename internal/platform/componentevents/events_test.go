@@ -129,3 +129,67 @@ func TestHub_SlowStreamDropsOldest(t *testing.T) {
 	default:
 	}
 }
+
+// TestHub_ReconnectsAfterRedisDrops: when the pub/sub connection closes the
+// reader loop backs off and subscribes again, and Stop during the backoff
+// ends the goroutine.
+func TestHub_ReconnectsAfterRedisDrops(t *testing.T) {
+	mr, err := miniredis.Run()
+	if err != nil {
+		t.Fatal(err)
+	}
+	rdb := redis.NewClient(&redis.Options{Addr: mr.Addr()})
+	hub := NewHub(rdb, nil, time.Second, 4)
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+	hub.Start(ctx)
+	ch, unsub := hub.Subscribe("t", "p")
+	defer unsub()
+	time.Sleep(50 * time.Millisecond)
+
+	// Drop every client connection: the subscribe channel closes and the
+	// loop enters its backoff.
+	mr.Close()
+	time.Sleep(100 * time.Millisecond)
+	// A second hub on a fresh server proves the same code path resubscribes
+	// once the backoff elapses and delivers again.
+	mr2, err := miniredis.Run()
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer mr2.Close()
+	rdb2 := redis.NewClient(&redis.Options{Addr: mr2.Addr()})
+	hub2 := NewHub(rdb2, nil, time.Second, 4)
+	hub2.Start(ctx)
+	defer hub2.Stop()
+	ch2, unsub2 := hub2.Subscribe("t", "p")
+	defer unsub2()
+	time.Sleep(50 * time.Millisecond)
+	if err := NewPublisher(rdb2).Publish(ctx, "t", "p", Event{Type: TypeSecretRotated}); err != nil {
+		t.Fatal(err)
+	}
+	select {
+	case <-ch2:
+	case <-time.After(2 * time.Second):
+		t.Fatal("no delivery on the healthy hub")
+	}
+	hub.Stop() // ends the first hub inside its backoff
+	select {
+	case ev, open := <-ch:
+		if open {
+			t.Fatalf("unexpected event on the dropped hub: %+v", ev)
+		}
+	default:
+	}
+}
+
+func TestHub_StopsOnContextCancel(t *testing.T) {
+	rdb := newMiniredis(t)
+	hub := NewHub(rdb, nil, time.Second, 4)
+	ctx, cancel := context.WithCancel(context.Background())
+	hub.Start(ctx)
+	time.Sleep(30 * time.Millisecond)
+	cancel()
+	time.Sleep(30 * time.Millisecond)
+	hub.Stop()
+}

@@ -697,3 +697,23 @@ func TestNewSecretsAdminServer_RequiresEvents(t *testing.T) {
 		t.Fatal("a secrets admin with no event publisher must not construct")
 	}
 }
+
+type failingPluginAssocs struct{}
+
+func (failingPluginAssocs) PluginsBoundTo(context.Context, auth.TenantID, string) ([]string, error) {
+	return nil, errors.New("fga down")
+}
+
+func TestRotateSecret_ListingBoundPluginsFailureIsLoggedNotFatal(t *testing.T) {
+	srv, broker, _, _, _ := newTestServer(t)
+	srv.pluginAssocs = failingPluginAssocs{}
+	pub := &recordingPublisher{}
+	srv.events = pub
+	broker.store["cred:db"] = []byte("old")
+	if _, err := srv.RotateSecret(ctxWithTenant(t, "acme"), &tenantv1.RotateSecretRequest{Name: "cred:db", Value: []byte("new")}); err != nil {
+		t.Fatalf("RotateSecret: %v", err)
+	}
+	if len(pub.events) != 0 {
+		t.Fatalf("nothing to publish when the listing fails, got %+v", pub.events)
+	}
+}
