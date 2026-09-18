@@ -95,6 +95,16 @@ type Config struct {
 	// any entry are rejected with PermissionDenied. Optional in tests
 	// (an empty list disables the check); production main always sets it.
 	IssuerAllowlist []string
+	// HumanClientIDs is the set of OIDC client ids that human sign-in flows
+	// use (the dashboard application). A token whose `client_id` (or
+	// `azp`) is one of them was issued to a person and carries a session
+	// the gate can revoke. A token issued to any other client is a machine
+	// credential. Zitadel writes a machine user's client_credentials token
+	// with client_id = the user's name and sub = its numeric id, so the two
+	// never match; without this set every scripted caller (the SDK, the
+	// CLI, CI, the hosted smokes) was classed as a human and denied by the
+	// session gate. Optional: empty keeps the client_id == sub rule alone.
+	HumanClientIDs []string
 }
 
 // EnvoyAuthzServer implements envoy.service.auth.v3.AuthorizationServer.
@@ -105,6 +115,7 @@ type EnvoyAuthzServer struct {
 	component *cgjwt.ComponentVerifier
 	log       *slog.Logger
 	issuers   map[string]struct{} // empty ⇒ issuer check disabled (tests only)
+	humans    map[string]struct{} // OIDC client ids of human sign-in flows; empty ⇒ client_id == sub rule alone
 }
 
 // NewEnvoyAuthzServer constructs an EnvoyAuthzServer. cache and
@@ -124,12 +135,21 @@ func NewEnvoyAuthzServer(cfg Config) *EnvoyAuthzServer {
 		}
 		issuers[iss] = struct{}{}
 	}
+	humans := make(map[string]struct{}, len(cfg.HumanClientIDs))
+	for _, c := range cfg.HumanClientIDs {
+		c = strings.TrimSpace(c)
+		if c == "" {
+			continue
+		}
+		humans[c] = struct{}{}
+	}
 	return &EnvoyAuthzServer{
 		cache:     cfg.Cache,
 		cgjwt:     cfg.CGJWT,
 		component: cfg.Component,
 		log:       cfg.Logger,
 		issuers:   issuers,
+		humans:    humans,
 	}
 }
 
@@ -138,7 +158,7 @@ func (s *EnvoyAuthzServer) Check(ctx context.Context, req *authv3.CheckRequest) 
 	method := extractMethod(req)
 	httpHeaders := req.GetAttributes().GetRequest().GetHttp().GetHeaders()
 
-	id, subjectSource, verifiedIss, err := identityFromJWTPayload(httpHeaders)
+	id, subjectSource, verifiedIss, err := identityFromJWTPayload(httpHeaders, s.humans)
 	if err != nil {
 		// No Zitadel JWT. A component (agent/tool/plugin) authenticates instead
 		// with its self-signed Capability-Grant JWT in x-capability-grant, with
@@ -507,7 +527,7 @@ func (s *EnvoyAuthzServer) enforceCapabilityGrant(
 // (security-hardening R13) and for audit logging — never forwarded.
 //
 // See ext-authz#26 for the regression that motivated this split.
-func identityFromJWTPayload(httpHeaders map[string]string) (id headers.Identity, subjectSource string, verifiedIss string, err error) {
+func identityFromJWTPayload(httpHeaders map[string]string, humanClients map[string]struct{}) (id headers.Identity, subjectSource, verifiedIss string, err error) {
 	encoded := httpHeaders[headerJWTPayload]
 	if encoded == "" {
 		return headers.Identity{}, "", "", errors.New("missing x-jwt-payload (Envoy jwt_authn must populate)")
@@ -526,6 +546,10 @@ func identityFromJWTPayload(httpHeaders map[string]string) (id headers.Identity,
 		Sub      string `json:"sub"`
 		Aud      any    `json:"aud"`
 		ClientID string `json:"client_id"`
+		// Azp is the authorized party: the client the token was issued to.
+		// Zitadel sets it on every token; client_id is read first and azp
+		// stands in when client_id is absent.
+		Azp string `json:"azp"`
 		// The configured IdP may inject role claims such as
 		// "urn:zitadel:iam:org:project:roles" or our custom tenant claim.
 		// (The previous wire value was "zitadel"; the field name is IdP-specific.)
@@ -546,11 +570,7 @@ func identityFromJWTPayload(httpHeaders map[string]string) (id headers.Identity,
 		return headers.Identity{}, "", "", errors.New("x-jwt-payload: missing sub")
 	}
 
-	credType := "oidc-user"
-	if claims.ClientID != "" && claims.ClientID == claims.Sub {
-		// Service-account JWT (client_credentials grant): sub == client_id.
-		credType = "client-credentials"
-	}
+	credType := credentialTypeFor(claims.Sub, claims.ClientID, claims.Azp, humanClients)
 
 	// Subject derivation: always use the JWT sub claim (numeric Zitadel
 	// subject ID). This is the canonical-numeric-sub requirement
@@ -594,6 +614,36 @@ func identityFromJWTPayload(httpHeaders map[string]string) (id headers.Identity,
 	}
 	verifiedIss = claims.Iss
 	return id, subjectSource, verifiedIss, nil
+}
+
+// credentialTypeFor decides whether a token was issued to a person or to a
+// machine. Two rules, either one makes it a machine credential:
+//
+//  1. client_id == sub. The shape of a token minted to a client that is its
+//     own subject.
+//  2. The client the token was issued to (client_id, or azp when client_id
+//     is absent) is not one of the human sign-in clients the operator
+//     configured. Zitadel writes a machine user's client_credentials token
+//     with client_id = the user's name and sub = its numeric id, so rule 1
+//     never fires for it; rule 2 does, because the only clients that mint
+//     tokens for people are the ones the chart names.
+//
+// With no human clients configured only rule 1 applies, which is the
+// behaviour before gibson#133: every scripted caller read as a person.
+func credentialTypeFor(sub, clientID, azp string, humanClients map[string]struct{}) string {
+	if clientID != "" && clientID == sub {
+		return "client-credentials"
+	}
+	client := clientID
+	if client == "" {
+		client = azp
+	}
+	if client != "" && len(humanClients) > 0 {
+		if _, human := humanClients[client]; !human {
+			return "client-credentials"
+		}
+	}
+	return "oidc-user"
 }
 
 func extractCapabilityGrant(httpHeaders map[string]string) string {

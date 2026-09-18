@@ -75,6 +75,9 @@
 //	                                cache for component tokens (gibson#1246)
 //	EXT_AUTHZ_GRPC_REFLECTION       default off; set to "1" to enable gRPC reflection
 //	                                (zero-trust-hardening Req 11.2; leave unset in prod)
+//	EXT_AUTHZ_HUMAN_CLIENT_IDS      optional — comma-separated OIDC client ids of the
+//	                                human sign-in flows (the dashboard app); a token
+//	                                issued to any other client is a machine credential
 //	EXT_AUTHZ_ZITADEL_ISSUER        REQUIRED — Zitadel issuer allowlist (URL or
 //	                                comma-separated list); the JWT iss claim must match.
 //	SPIFFE_ENDPOINT_SOCKET          REQUIRED — SPIRE Workload API socket path
@@ -244,6 +247,7 @@ func main() {
 		Component:       componentVerifier,
 		Logger:          log,
 		IssuerAllowlist: issuerAllowlist,
+		HumanClientIDs:  loadHumanClientIDs(),
 	}))
 	// gRPC reflection is disabled by default in production.
 	// Set EXT_AUTHZ_GRPC_REFLECTION=1 to enable (dev/debug only).
@@ -623,6 +627,20 @@ func loadIssuerAllowlist() ([]string, error) {
 		return nil, errors.New("EXT_AUTHZ_ZITADEL_ISSUER produced an empty allowlist after trimming")
 	}
 	return out, nil
+}
+
+// loadHumanClientIDs parses EXT_AUTHZ_HUMAN_CLIENT_IDS, the comma-separated
+// OIDC client ids of the human sign-in flows (the dashboard application).
+// A token issued to any other client is a machine credential (gibson#133).
+// Optional: unset keeps the client_id == sub rule alone.
+func loadHumanClientIDs() []string {
+	var out []string
+	for _, p := range strings.Split(os.Getenv("EXT_AUTHZ_HUMAN_CLIENT_IDS"), ",") {
+		if p = strings.TrimSpace(p); p != "" {
+			out = append(out, p)
+		}
+	}
+	return out
 }
 
 // loadRegistryBytes returns the FGA authz-registry bytes plus a short label
