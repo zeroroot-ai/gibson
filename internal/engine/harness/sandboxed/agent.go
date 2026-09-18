@@ -67,6 +67,15 @@ const (
 	// many over its life. One image carries both, so the process reads this
 	// rather than inferring it from what it was given.
 	envInstanceMode = "GIBSON_INSTANCE_MODE"
+	// envSandbox tells the process which isolation it runs under. The
+	// zerocool-claude member refuses to start without the gvisor marker
+	// (zerocool-plugins#66): it keeps --dangerously-skip-permissions only
+	// inside a sandbox, and the marker is how it knows it is in one. Both
+	// launch paths land in the gVisor class and VerifyIsolation kills a
+	// sandbox that is not (ADR-0052), so the marker states a fact the
+	// launcher enforces, never a wish.
+	envSandbox      = "GIBSON_SANDBOX"
+	envSandboxValue = "gvisor"
 )
 
 // defaultAgentRunTimeout bounds one agent mission run when the launcher config

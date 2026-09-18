@@ -350,3 +350,29 @@ func TestLaunchAgent_MemberModeReachesTheSandbox(t *testing.T) {
 		t.Errorf("command = %v; want the member entry point", gotReq.Command)
 	}
 }
+
+// TestLaunchAgent_CarriesTheSandboxMarker: the one-shot path hands the process
+// GIBSON_SANDBOX=gvisor (gibson#152, zerocool-plugins#66), and neither the
+// manifest's static env nor the dispatch env can claim another sandbox.
+func TestLaunchAgent_CarriesTheSandboxMarker(t *testing.T) {
+	var gotReq LaunchRequest
+	c := &mockClient{
+		launch: func(_ context.Context, req LaunchRequest) (LaunchResponse, error) {
+			gotReq = req
+			return LaunchResponse{SandboxID: "sbx-1"}, nil
+		},
+		streamLog: func(context.Context, string) (LogStream, error) { return &fixedLogs{}, nil },
+		wait:      func(context.Context, string) (WaitResponse, error) { return WaitResponse{ExitCode: 0}, nil },
+		kill:      func(context.Context, string) error { return nil },
+	}
+	l := newAgentLauncher(t, c)
+	spec := agentSpec
+	spec.Env = map[string]string{envSandbox: "none"}
+	dispatch := AgentDispatch{Grant: "g", Env: map[string]string{envSandbox: "docker"}}
+	if _, err := l.LaunchAgent(context.Background(), spec, dispatch); err != nil {
+		t.Fatalf("LaunchAgent: %v", err)
+	}
+	if gotReq.Env[envSandbox] != envSandboxValue {
+		t.Fatalf("env[%s] = %q, want %q", envSandbox, gotReq.Env[envSandbox], envSandboxValue)
+	}
+}
