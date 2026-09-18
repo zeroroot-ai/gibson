@@ -5,6 +5,7 @@ package component
 
 import (
 	"context"
+	"errors"
 	"testing"
 	"time"
 
@@ -117,5 +118,49 @@ func TestWatchComponentEvents_RefusesWithoutHubTenantOrIdentity(t *testing.T) {
 	tenantOnly := auth.ContextWithTenant(context.Background(), tid)
 	if err := svc.WatchComponentEvents(nil, &eventStream{ctx: tenantOnly, sent: make(chan *componentpb.ComponentEvent, 1)}); status.Code(err) != codes.Unauthenticated {
 		t.Fatalf("no identity: %v", err)
+	}
+}
+
+type failingEventStream struct {
+	grpc.ServerStream
+	ctx context.Context
+}
+
+func (s *failingEventStream) Context() context.Context { return s.ctx }
+func (s *failingEventStream) Send(*componentpb.ComponentEvent) error {
+	return errors.New("client gone")
+}
+
+// TestWatchComponentEvents_SendFailureEndsTheStream: a Send error on an
+// event or on a heartbeat returns to gRPC instead of looping.
+func TestWatchComponentEvents_SendFailureEndsTheStream(t *testing.T) {
+	svc, _, rdb := newEventsServer(t)
+	ctx := credCallerCtx(t, "plugin_principal:p", "acme")
+	done := make(chan error, 1)
+	go func() {
+		done <- svc.WatchComponentEvents(nil, &failingEventStream{ctx: ctx})
+	}()
+	select {
+	case err := <-done: // the 50ms heartbeat fails first
+		if err == nil || err.Error() != "client gone" {
+			t.Fatalf("heartbeat send failure: %v", err)
+		}
+	case <-time.After(2 * time.Second):
+		t.Fatal("stream did not end on heartbeat send failure")
+	}
+	// The same on an event: a hub with a long heartbeat, a publish, a failing Send.
+	svc2 := newParityServer().WithEventHub(componentevents.NewHub(rdb, nil, time.Hour, 4))
+	svc2.eventHub.Start(context.Background())
+	defer svc2.eventHub.Stop()
+	go func() { done <- svc2.WatchComponentEvents(nil, &failingEventStream{ctx: ctx}) }()
+	time.Sleep(60 * time.Millisecond)
+	_ = componentevents.NewPublisher(rdb).Publish(context.Background(), "acme", "plugin_principal:p", componentevents.Event{Type: componentevents.TypeSecretRotated})
+	select {
+	case err := <-done:
+		if err == nil || err.Error() != "client gone" {
+			t.Fatalf("event send failure: %v", err)
+		}
+	case <-time.After(2 * time.Second):
+		t.Fatal("stream did not end on event send failure")
 	}
 }

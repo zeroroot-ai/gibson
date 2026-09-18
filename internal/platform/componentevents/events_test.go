@@ -193,3 +193,19 @@ func TestHub_StopsOnContextCancel(t *testing.T) {
 	time.Sleep(30 * time.Millisecond)
 	hub.Stop()
 }
+
+func TestNewHub_DefaultsAndPublishFailure(t *testing.T) {
+	hub := NewHub(nil, nil, 0, 0)
+	if hub.HeartbeatInterval() != 30*time.Second || hub.perClientBuffer != 16 || hub.log == nil {
+		t.Fatalf("defaults: interval=%v buffer=%d log=%v", hub.HeartbeatInterval(), hub.perClientBuffer, hub.log)
+	}
+	mr, err := miniredis.Run()
+	if err != nil {
+		t.Fatal(err)
+	}
+	rdb := redis.NewClient(&redis.Options{Addr: mr.Addr()})
+	mr.Close()
+	if err := NewPublisher(rdb).Publish(context.Background(), "t", "p", Event{Type: TypeSecretRotated}); err == nil {
+		t.Fatal("a publish against a dead redis must fail, never be swallowed")
+	}
+}
