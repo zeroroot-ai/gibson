@@ -4,8 +4,12 @@
 package store
 
 import (
+	"context"
 	"errors"
+	"strings"
 	"testing"
+
+	"github.com/neo4j/neo4j-go-driver/v5/neo4j"
 )
 
 // TestNodeCreateQuery proves a label from a backup archive reaches the query
@@ -109,5 +113,80 @@ func TestStatementsStopBeforeTheDatabase(t *testing.T) {
 	}
 	if _, err := relStatements([]byte("{not json")); err == nil {
 		t.Fatal("want a parse error")
+	}
+}
+
+// fakeSession records every query ExecuteWrite runs. The embedded interface
+// leaves every other method nil: the restore path calls only ExecuteWrite,
+// and the transaction calls only Run.
+type fakeSession struct {
+	neo4j.SessionWithContext
+	queries []string
+	failOn  string
+}
+
+type fakeTx struct {
+	neo4j.ManagedTransaction
+	s *fakeSession
+}
+
+func (s *fakeSession) ExecuteWrite(ctx context.Context, work neo4j.ManagedTransactionWork, _ ...func(*neo4j.TransactionConfig)) (any, error) {
+	return work(fakeTx{s: s})
+}
+
+func (t fakeTx) Run(_ context.Context, cypher string, _ map[string]any) (neo4j.ResultWithContext, error) {
+	t.s.queries = append(t.s.queries, cypher)
+	if t.s.failOn != "" && strings.Contains(cypher, t.s.failOn) {
+		return nil, errors.New("write refused")
+	}
+	return nil, nil
+}
+
+// TestImportRunsOnlyCheckedStatements drives importNodes and
+// importRelationships through the fake session: every query that reaches the
+// session is one the builders produced, a bad record runs nothing, and a
+// session error stops the import.
+func TestImportRunsOnlyCheckedStatements(t *testing.T) {
+	t.Parallel()
+	ctx := context.Background()
+	nodes := []byte(`{"labels":["Person"],"properties":{"name":"a"}}` + "\n" + `{"labels":[],"properties":{}}` + "\n")
+	rels := []byte(`{"type":"KNOWS","start_labels":["Person"],"end_labels":["Person"]}` + "\n")
+
+	s := &fakeSession{}
+	if err := importNodes(ctx, s, nodes); err != nil {
+		t.Fatalf("importNodes: %v", err)
+	}
+	if err := importRelationships(ctx, s, rels); err != nil {
+		t.Fatalf("importRelationships: %v", err)
+	}
+	want := []string{
+		"CREATE (n:Person) SET n = $props",
+		"CREATE (n:Node) SET n = $props",
+		"MATCH (a:Person), (b:Person) WHERE a = $startProps AND b = $endProps CREATE (a)-[r:KNOWS]->(b) SET r = $relProps",
+	}
+	if strings.Join(s.queries, "|") != strings.Join(want, "|") {
+		t.Fatalf("queries = %q", s.queries)
+	}
+
+	bad := &fakeSession{}
+	if err := importNodes(ctx, bad, []byte(`{"labels":["Node) DETACH DELETE n //"]}`)); !errors.Is(err, ErrUnsafeCypherIdentifier) {
+		t.Fatalf("want ErrUnsafeCypherIdentifier, got %v", err)
+	}
+	if err := importRelationships(ctx, bad, []byte(`{"type":"x y"}`)); !errors.Is(err, ErrUnsafeCypherIdentifier) {
+		t.Fatalf("want ErrUnsafeCypherIdentifier, got %v", err)
+	}
+	if len(bad.queries) != 0 {
+		t.Fatalf("a bad archive ran %d queries", len(bad.queries))
+	}
+
+	failing := &fakeSession{failOn: "Node"}
+	if err := importNodes(ctx, failing, nodes); err == nil || err.Error() != "write refused" {
+		t.Fatalf("want the session error, got %v", err)
+	}
+	if len(failing.queries) != 2 {
+		t.Fatalf("import continued past the failed write: %q", failing.queries)
+	}
+	if err := importRelationships(ctx, &fakeSession{failOn: "KNOWS"}, rels); err == nil {
+		t.Fatal("want the session error from importRelationships")
 	}
 }

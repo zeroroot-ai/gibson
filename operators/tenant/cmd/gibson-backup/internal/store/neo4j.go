@@ -437,8 +437,9 @@ type statement struct {
 // It stops at the first record that fails to parse or carries an unsafe
 // label, before anything reaches the database.
 func nodeStatements(data []byte) ([]statement, error) {
-	var out []statement
-	for line := range strings.SplitSeq(strings.TrimSpace(string(data)), "\n") {
+	lines := strings.Split(strings.TrimSpace(string(data)), "\n")
+	out := make([]statement, 0, len(lines))
+	for _, line := range lines {
 		if line == "" {
 			continue
 		}
@@ -458,8 +459,9 @@ func nodeStatements(data []byte) ([]statement, error) {
 // relStatements parses the relationship export and builds one MATCH ...
 // CREATE per record, with the same stop-before-the-database rule.
 func relStatements(data []byte) ([]statement, error) {
-	var out []statement
-	for line := range strings.SplitSeq(strings.TrimSpace(string(data)), "\n") {
+	lines := strings.Split(strings.TrimSpace(string(data)), "\n")
+	out := make([]statement, 0, len(lines))
+	for _, line := range lines {
 		if line == "" {
 			continue
 		}
