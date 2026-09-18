@@ -46,9 +46,16 @@ on:
     - cron: '30 5 * * *'
   workflow_dispatch: {}
 
+# One run at a time, and a run that started finishes. With cancel-in-progress
+# the merge queue cancelled every run before its cluster stood up (three in a
+# row on 2026-09-18: 35380002787, 35383082878, 35384991958 started and each
+# merge to main killed the one before it), so the scorecard row never moved
+# and the diagnostics from gibson#143 never printed. GitHub queues at most one
+# pending run per group, so the newest push still gets measured, after the
+# run in flight completes.
 concurrency:
   group: exit-test-tool-dispatch-${{ github.ref }}
-  cancel-in-progress: true
+  cancel-in-progress: false
 
 permissions:
   contents: read
