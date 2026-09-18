@@ -335,20 +335,22 @@ func (p *pgProvisioner) Deprovision(ctx context.Context, tenantID string) error 
 	if err != nil {
 		return err
 	}
-	roleName := dbName + "_app"
-
 	adminConn, err := pgx.Connect(ctx, p.cfg.AdminDSN)
 	if err != nil {
 		return fmt.Errorf("dataplane/postgres: admin connect: %w", err)
 	}
 	defer func() { _ = adminConn.Close(ctx) }()
+	return p.deprovisionWith(ctx, adminConn, dbName)
+}
+
+// deprovisionWith is Deprovision after the connection: revoke, terminate,
+// drop the database, drop the role. Separate so a fake connection can drive
+// it in unit tests.
+func (p *pgProvisioner) deprovisionWith(ctx context.Context, adminConn pgAdminConn, dbName string) error {
+	roleName := dbName + "_app"
 
 	// Revoke CONNECT so existing sessions are not replaced (idempotent).
-	revokeSQL := fmt.Sprintf(
-		"REVOKE CONNECT ON DATABASE %s FROM %s",
-		pgx.Identifier{dbName}.Sanitize(),
-		pgx.Identifier{roleName}.Sanitize(),
-	)
+	revokeSQL := "REVOKE CONNECT ON DATABASE " + pgx.Identifier{dbName}.Sanitize() + " FROM " + pgx.Identifier{roleName}.Sanitize()
 	_, _ = adminConn.Exec(ctx, revokeSQL) // ignore: role/db may not exist
 
 	// DROP DATABASE WITH (FORCE) terminates the backends itself, but only for
@@ -364,13 +366,13 @@ func (p *pgProvisioner) Deprovision(ctx context.Context, tenantID string) error 
 	if err := p.terminateTenantBackends(ctx, adminConn, dbName, roleName); err != nil {
 		return err
 	}
-	dropDBSQL := fmt.Sprintf("DROP DATABASE IF EXISTS %s", pgx.Identifier{dbName}.Sanitize())
+	dropDBSQL := "DROP DATABASE IF EXISTS " + pgx.Identifier{dbName}.Sanitize()
 	if _, err := adminConn.Exec(ctx, dropDBSQL); err != nil {
 		return fmt.Errorf("dataplane/postgres: drop database %q: %w", dbName, err)
 	}
 
 	// DROP ROLE IF EXISTS.
-	dropRoleSQL := fmt.Sprintf("DROP ROLE IF EXISTS %s", pgx.Identifier{roleName}.Sanitize())
+	dropRoleSQL := "DROP ROLE IF EXISTS " + pgx.Identifier{roleName}.Sanitize()
 	if _, err := adminConn.Exec(ctx, dropRoleSQL); err != nil {
 		return fmt.Errorf("dataplane/postgres: drop role %q: %w", roleName, err)
 	}

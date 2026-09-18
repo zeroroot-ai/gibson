@@ -133,3 +133,33 @@ func TestTerminateTenantBackends(t *testing.T) {
 		}
 	})
 }
+
+// The whole deprovision path against a fake: revoke, refuse connections,
+// take the role, terminate, drop the database, drop the role, in that order.
+func TestDeprovisionWith(t *testing.T) {
+	p := &pgProvisioner{}
+	f := &fakeAdminConn{exists: true, backends: []fakeBackend{{7, true}}}
+	if err := p.deprovisionWith(context.Background(), f, "tenant_x"); err != nil {
+		t.Fatalf("err = %v", err)
+	}
+	want := []string{
+		`REVOKE CONNECT ON DATABASE "tenant_x" FROM "tenant_x_app"`,
+		`ALTER DATABASE "tenant_x" WITH ALLOW_CONNECTIONS false`,
+		`GRANT "tenant_x_app" TO CURRENT_USER`,
+		`DROP DATABASE IF EXISTS "tenant_x"`,
+		`DROP ROLE IF EXISTS "tenant_x_app"`,
+	}
+	if len(f.execs) != len(want) {
+		t.Fatalf("statements = %q, want %q", f.execs, want)
+	}
+	for i := range want {
+		if f.execs[i] != want[i] {
+			t.Fatalf("statement %d = %q, want %q", i, f.execs[i], want[i])
+		}
+	}
+	// A backend that will not die stops the drop.
+	f = &fakeAdminConn{exists: true, backends: []fakeBackend{{7, false}}}
+	if err := p.deprovisionWith(context.Background(), f, "tenant_x"); err == nil || len(f.execs) != 3 {
+		t.Fatalf("a stuck backend must stop before the drop: err=%v execs=%q", err, f.execs)
+	}
+}
