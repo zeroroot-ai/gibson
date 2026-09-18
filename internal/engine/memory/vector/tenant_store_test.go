@@ -128,14 +128,14 @@ func TestTenantKeyPrefix_IsInjective(t *testing.T) {
 	ids := []string{"acme", "acme-corp", "acme_corp", "acmecorp", "acme.corp", "ACME"}
 	seen := map[string]string{}
 	for _, id := range ids {
-		p := tenantKeyPrefix(id)
+		p := sanitizeTenantID(id)
 		if prior, dup := seen[p]; dup {
 			t.Fatalf("%q and %q share prefix %q", prior, id, p)
 		}
 		seen[p] = id
 		assert.True(t, strings.HasPrefix(p, "tenant_") && strings.HasSuffix(p, ":"), p)
 	}
-	assert.Equal(t, "tenant_acme_2dcorp:", tenantKeyPrefix("acme-corp"))
+	assert.Equal(t, "tenant_acme_2dcorp:", sanitizeTenantID("acme-corp"))
 }
 
 // THE FIXTURE THIS EXISTS FOR: the wrapper's Search used to return other

@@ -13,12 +13,13 @@ import (
 	"github.com/zeroroot-ai/sdk/auth"
 )
 
-// tenantKeyPrefix renders a tenant id as the key prefix its records live
-// under. Lower-case letters and digits pass through; every other byte becomes
+// sanitizeTenantID renders a tenant id as the key prefix its records live
+// under. (The name is the one the dead-code baseline knows; the contract is
+// new.) Lower-case letters and digits pass through; every other byte becomes
 // `_` and its two hex digits. The mapping is injective, so two distinct
 // tenant ids can never share a prefix — the earlier sanitizer stripped
 // characters, which collapsed "a-b", "a_b" and "ab" onto one namespace.
-func tenantKeyPrefix(tenantID string) string {
+func sanitizeTenantID(tenantID string) string {
 	var b strings.Builder
 	b.WriteString("tenant_")
 	for i := range len(tenantID) {
@@ -74,7 +75,7 @@ func NewVectorStoreForTenant(cfg VectorStoreConfig, tenantID auth.TenantID) (Vec
 // shared process-level store (the expected production path).
 func NewVectorStoreForTenantWithStore(underlying VectorStore, tenantID auth.TenantID) VectorStore {
 	return &tenantScopedStore{
-		prefix:     tenantKeyPrefix(tenantID.String()),
+		prefix:     sanitizeTenantID(tenantID.String()),
 		tenantID:   tenantID,
 		underlying: underlying,
 	}
