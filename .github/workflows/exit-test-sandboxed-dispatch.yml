@@ -63,7 +63,10 @@ jobs:
   dispatch-isolation:
     name: sandboxed dispatch isolates by tenant on gvisor
     runs-on: ubuntu-latest
-    timeout-minutes: 45
+    # 90, not 45: the kind bringup alone took 45 minutes on 2026-09-18
+    # (run 35399104370 hit the limit inside "Stand up the cluster" with
+    # progress still flowing), and the build and the suite need 10 more.
+    timeout-minutes: 90
     steps:
       - name: Checkout gibson
         uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
@@ -364,8 +367,11 @@ jobs:
           echo "::error::the sandboxed-dispatch exit test did not finish"
           exit 1
 
+      # always(), not failure(): a job that hits timeout-minutes is
+      # cancelled, and a cancelled job skips failure() steps, so the
+      # 2026-09-18 timeout (run 35399104370) left nothing to read.
       - name: Diagnostics on failure
-        if: failure()
+        if: always()
         run: |
           kubectl -n "$NS" get pods || true
           kubectl -n setec-system get pods,sandboxes,sandboxclasses || true
