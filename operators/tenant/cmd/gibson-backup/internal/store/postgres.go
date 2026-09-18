@@ -53,7 +53,7 @@ func pgCommand(ctx context.Context, name, dsn string, dbnameFlag bool, args ...s
 // splitDSNPassword returns the DSN with its password removed, and the
 // password on its own. A DSN that is not a URL is an error: the tool never
 // guesses where a secret sits in a string it cannot parse.
-func splitDSNPassword(dsn string) (string, string, error) {
+func splitDSNPassword(dsn string) (safeDSN, password string, err error) {
 	u, err := url.Parse(dsn)
 	if err != nil {
 		return "", "", fmt.Errorf("store/postgres: parse dsn: %w", err)
