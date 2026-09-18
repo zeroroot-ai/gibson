@@ -22,7 +22,6 @@ type fakeAdminConn struct {
 	queryErr   error
 	existsErr  error
 	scanErr    error
-	rowsErrAt  int // >0: Err() after this many rows
 	rowsClosed bool
 }
 

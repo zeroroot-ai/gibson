@@ -400,10 +400,10 @@ func (p *pgProvisioner) terminateTenantBackends(ctx context.Context, adminConn p
 	if !exists {
 		return nil
 	}
-	_, _ = adminConn.Exec(ctx, fmt.Sprintf("ALTER DATABASE %s WITH ALLOW_CONNECTIONS false", pgx.Identifier{dbName}.Sanitize()))
+	_, _ = adminConn.Exec(ctx, "ALTER DATABASE "+pgx.Identifier{dbName}.Sanitize()+" WITH ALLOW_CONNECTIONS false")
 	// The admin created the role with CREATEROLE and so holds ADMIN on it;
 	// granting it to itself is what makes the role's backends terminable.
-	_, _ = adminConn.Exec(ctx, fmt.Sprintf("GRANT %s TO CURRENT_USER", pgx.Identifier{roleName}.Sanitize()))
+	_, _ = adminConn.Exec(ctx, "GRANT "+pgx.Identifier{roleName}.Sanitize()+" TO CURRENT_USER")
 	rows, err := adminConn.Query(ctx,
 		"SELECT pid, pg_terminate_backend(pid) FROM pg_stat_activity WHERE datname = $1 AND pid <> pg_backend_pid()", dbName)
 	if err != nil {
@@ -420,7 +420,10 @@ func (p *pgProvisioner) terminateTenantBackends(ctx context.Context, adminConn p
 			return fmt.Errorf("dataplane/postgres: backend %d on %q could not be terminated; the admin role must be a member of %q", pid, dbName, roleName)
 		}
 	}
-	return rows.Err()
+	if err := rows.Err(); err != nil {
+		return fmt.Errorf("dataplane/postgres: terminate backends of %q: %w", dbName, err)
+	}
+	return nil
 }
 
 // runMigrations applies the embedded tenant migration set
