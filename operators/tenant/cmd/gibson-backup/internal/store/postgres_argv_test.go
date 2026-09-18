@@ -120,7 +120,7 @@ func fakePg(t *testing.T, name, recordPath, body string, code int) {
 	dir := t.TempDir()
 	script := "#!/bin/sh\nprintf '%s\\n' \"$*\" > " + recordPath + "\nprintf 'PGPASSWORD=%s\\n' \"$PGPASSWORD\" >> " + recordPath + "\n" +
 		"printf '%s' '" + body + "'\nexit " + strconv.Itoa(code) + "\n"
-	if err := os.WriteFile(filepath.Join(dir, name), []byte(script), 0o755); err != nil {
+	if err := os.WriteFile(filepath.Join(dir, name), []byte(script), 0o755); err != nil { //nolint:gosec // the fake client must be executable; t.TempDir() path
 		t.Fatal(err)
 	}
 	t.Setenv("PATH", dir+string(os.PathListSeparator)+os.Getenv("PATH"))
@@ -146,7 +146,7 @@ func TestPostgresBackupAndRestoreWithFakeClient(t *testing.T) {
 	if sum != hex.EncodeToString(want[:]) {
 		t.Fatalf("sha256 = %s", sum)
 	}
-	seen, _ := os.ReadFile(rec)
+	seen, _ := os.ReadFile(rec) //nolint:gosec // t.TempDir() path
 	if strings.Contains(string(seen), "hunter2@") || !strings.Contains(string(seen), "PGPASSWORD=hunter2") {
 		t.Fatalf("pg_dump saw: %q", seen)
 	}
@@ -158,7 +158,7 @@ func TestPostgresBackupAndRestoreWithFakeClient(t *testing.T) {
 	if err := PostgresRestore(context.Background(), dsn, strings.NewReader("archive")); err != nil {
 		t.Fatalf("PostgresRestore: %v", err)
 	}
-	seen, _ = os.ReadFile(rec)
+	seen, _ = os.ReadFile(rec) //nolint:gosec // t.TempDir() path
 	if strings.Contains(string(seen), "hunter2@") || !strings.Contains(string(seen), "PGPASSWORD=hunter2") {
 		t.Fatalf("pg_restore saw: %q", seen)
 	}
