@@ -130,7 +130,7 @@ type fakeTx struct {
 	s *fakeSession
 }
 
-func (s *fakeSession) ExecuteWrite(ctx context.Context, work neo4j.ManagedTransactionWork, _ ...func(*neo4j.TransactionConfig)) (any, error) {
+func (s *fakeSession) ExecuteWrite(_ context.Context, work neo4j.ManagedTransactionWork, _ ...func(*neo4j.TransactionConfig)) (any, error) {
 	return work(fakeTx{s: s})
 }
 
