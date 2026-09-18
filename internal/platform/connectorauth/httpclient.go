@@ -91,5 +91,9 @@ func (g *guardedTransport) RoundTrip(req *http.Request) (*http.Response, error) 
 	if err := validateURL(req.URL, g.allowPrivate); err != nil {
 		return nil, err
 	}
-	return g.inner.RoundTrip(req)
+	resp, err := g.inner.RoundTrip(req)
+	if err != nil {
+		return nil, fmt.Errorf("connectorauth: %s %s: %w", req.Method, req.URL.Redacted(), err)
+	}
+	return resp, nil
 }
