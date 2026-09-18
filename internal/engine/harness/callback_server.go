@@ -378,14 +378,17 @@ func (s *CallbackServer) SetQueueManager(queueMgr *QueueManager) {
 }
 
 // SetAuthzStore sets the RunAuthzLookup for per-run authz state retrieval.
-// Required for the Authorize RPC handler. When not set, Authorize returns
-// codes.Unimplemented (SDK degrades to allow — rolling upgrade path).
+// The Authorize RPC requires it and carries no nil guard (deploy#195): the
+// daemon sets it at startup, and a nil store is a startup defect, not a
+// runtime mode.
 func (s *CallbackServer) SetAuthzStore(store RunAuthzLookup) {
 	s.service.authzStore = store
 }
 
 // SetComponentAuthorizer sets the FGA Authorizer for component authz decisions.
-// When not set, all active-mission Authorize requests return allowed=true (dev mode).
+// The Authorize RPC requires it and carries no nil guard (deploy#195). There
+// is no allow-all mode: every active-mission Authorize request is decided by
+// the authorizer.
 func (s *CallbackServer) SetComponentAuthorizer(a authz.Authorizer) {
 	s.service.componentAuthorizer = a
 }

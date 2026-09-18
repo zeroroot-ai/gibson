@@ -15,12 +15,6 @@
 //     OpenFGA stalled, the whole ext_authz request would block until
 //     Envoy aborted it, leaving no per-call timeout signal in metrics.
 //
-//   - ValidateIdentityHeaders: HMAC verification for the
-//     X-Gibson-Identity-* header bundle that ext-authz emits and the
-//     daemon consumes. HMAC is in addition to the SPIFFE-mTLS channel
-//     binding; a defense-in-depth layer for callers that want a
-//     cryptographic signal independent of the transport.
-//
 //   - VerifyCapabilityGrant: JWT verification of the
 //     daemon-minted capability-grant tokens that agents carry on
 //     harness callbacks. Signature + exp + nbf are checked; the caller
@@ -355,8 +349,8 @@ func (c *fgaClient) Close() error {
 	return nil
 }
 
-// Sentinel errors returned by FGAClient.Check and ValidateIdentityHeaders
-// / VerifyCapabilityGrant. Callers distinguish ErrFGATimeout from
+// Sentinel errors returned by FGAClient.Check and VerifyCapabilityGrant.
+// Callers distinguish ErrFGATimeout from
 // ErrFGAUnavailable to decide whether to retry, and from
 // ErrInvalidArgument to short-circuit.
 var (
@@ -370,12 +364,6 @@ var (
 	// ErrInvalidArgument fires for empty user/relation/object or
 	// malformed identity / capability inputs.
 	ErrInvalidArgument = errors.New("authz: invalid argument")
-
-	// ErrSkewExceeded fires when ValidateIdentityHeaders finds the
-	// bundle's IssuedAt is outside the allowed freshness window. It is
-	// intentionally distinct from ErrInvalidArgument so callers can
-	// emit a replay-specific metric / log line without string-matching.
-	ErrSkewExceeded = errors.New("authz: identity bundle outside freshness window")
 )
 
 // mapFGAError converts an SDK error into a typed sentinel error.
