@@ -14,6 +14,7 @@ import (
 	"fmt"
 	"io"
 	"net/url"
+	"regexp"
 	"strings"
 	"time"
 
@@ -24,6 +25,62 @@ import (
 // arrives without labels (or for relationship endpoints where the original
 // label is unknown at restore time).
 const defaultNodeLabel = "Node"
+
+// cypherIdentifier is the only shape a node label or relationship type may
+// take before it is spliced into a query. Labels and types are Cypher
+// identifiers, not parameters, so the driver cannot bind them. A backup
+// archive is data from outside the process. A label like
+// `Node) DETACH DELETE n //` would otherwise run as Cypher on restore.
+var cypherIdentifier = regexp.MustCompile(`^[A-Za-z_][A-Za-z0-9_]*$`)
+
+// ErrUnsafeCypherIdentifier is returned when a backup record carries a label
+// or relationship type that is not a plain Cypher identifier.
+var ErrUnsafeCypherIdentifier = errors.New("store/neo4j: label or relationship type is not a plain identifier")
+
+// checkIdentifier reports whether the identifier is safe to splice.
+func checkIdentifier(kind, s string) error {
+	if !cypherIdentifier.MatchString(s) {
+		return fmt.Errorf("%w: %s %q", ErrUnsafeCypherIdentifier, kind, s)
+	}
+	return nil
+}
+
+// nodeCreateQuery builds the CREATE for one node record. Every label is
+// checked before it reaches the query text. The properties travel as a
+// parameter.
+func nodeCreateQuery(nr nodeRecord) (string, error) {
+	labels := nr.Labels
+	if len(labels) == 0 {
+		labels = []string{defaultNodeLabel}
+	}
+	for _, l := range labels {
+		if err := checkIdentifier("label", l); err != nil {
+			return "", err
+		}
+	}
+	return "CREATE (n:" + strings.Join(labels, ":") + ") SET n = $props", nil
+}
+
+// relCreateQuery builds the MATCH ... CREATE for one relationship record.
+// The two endpoint labels and the relationship type are checked before they
+// reach the query text. The three property maps travel as parameters.
+func relCreateQuery(rr relRecord) (string, error) {
+	startLabel := defaultNodeLabel
+	if len(rr.StartNodeLabels) > 0 {
+		startLabel = rr.StartNodeLabels[0]
+	}
+	endLabel := defaultNodeLabel
+	if len(rr.EndNodeLabels) > 0 {
+		endLabel = rr.EndNodeLabels[0]
+	}
+	for _, c := range []struct{ kind, v string }{{"start label", startLabel}, {"end label", endLabel}, {"relationship type", rr.Type}} {
+		if err := checkIdentifier(c.kind, c.v); err != nil {
+			return "", err
+		}
+	}
+	return "MATCH (a:" + startLabel + "), (b:" + endLabel + ") WHERE a = $startProps AND b = $endProps" +
+		" CREATE (a)-[r:" + rr.Type + "]->(b) SET r = $relProps", nil
+}
 
 // ErrNeo4jAPOCNotAvailable is returned when APOC is not installed in the
 // target Neo4j instance and the streaming export path is unavailable.
@@ -379,11 +436,10 @@ func importNodes(ctx context.Context, session neo4j.SessionWithContext, data []b
 		if err := json.Unmarshal([]byte(line), &nr); err != nil {
 			return fmt.Errorf("parse node record: %w", err)
 		}
-		labels := strings.Join(nr.Labels, ":")
-		if labels == "" {
-			labels = defaultNodeLabel
+		q, err := nodeCreateQuery(nr)
+		if err != nil {
+			return err
 		}
-		q := fmt.Sprintf("CREATE (n:%s) SET n = $props", labels)
 		if _, err := session.ExecuteWrite(ctx, func(tx neo4j.ManagedTransaction) (any, error) {
 			_, err := tx.Run(ctx, q, map[string]any{"props": nr.Properties})
 			return nil, err
@@ -404,19 +460,10 @@ func importRelationships(ctx context.Context, session neo4j.SessionWithContext, 
 		if err := json.Unmarshal([]byte(line), &rr); err != nil {
 			return fmt.Errorf("parse rel record: %w", err)
 		}
-		startLabel := defaultNodeLabel
-		if len(rr.StartNodeLabels) > 0 {
-			startLabel = rr.StartNodeLabels[0]
+		q, err := relCreateQuery(rr)
+		if err != nil {
+			return err
 		}
-		endLabel := defaultNodeLabel
-		if len(rr.EndNodeLabels) > 0 {
-			endLabel = rr.EndNodeLabels[0]
-		}
-		q := fmt.Sprintf(
-			`MATCH (a:%s), (b:%s) WHERE a = $startProps AND b = $endProps
-			 CREATE (a)-[r:%s]->(b) SET r = $relProps`,
-			startLabel, endLabel, rr.Type,
-		)
 		if _, err := session.ExecuteWrite(ctx, func(tx neo4j.ManagedTransaction) (any, error) {
 			_, err := tx.Run(ctx, q, map[string]any{
 				"startProps": rr.StartNodeProps,
