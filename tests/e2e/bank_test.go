@@ -7,8 +7,16 @@
 // Package e2e: the bank exit test (ADR-0019, gibson#1718).
 //
 // In plain words: a bank of two members comes up on a real key, both report
-// idle, one job opens and reaches a member, the job closes with a verdict, a
-// stranger tenant cannot read it, and the bank scales to zero.
+// idle, one job opens and reaches a member, the job closes with a verdict,
+// and the bank scales to zero.
+//
+// It runs in the provisioned tenant. Provider configuration, banks and jobs
+// all live in the tenant's own data plane (datapool.Pool.For), so a tenant
+// the operator never provisioned fails at the first connection, before any
+// bank exists. The baseline provisions "primary" only, which is also why
+// there is no stranger-tenant read here: a second tenant would fail the
+// same way, not with NotFound. Cross-tenant reads are covered by the unit
+// tests in internal/server/daemon (job_service_test.go, bank_service_test.go).
 //
 // It asserts states, ids and counts, never model text. It needs:
 //
@@ -36,12 +44,11 @@ import (
 )
 
 const (
-	bankTenant         = "bank-e2e-tenant"
-	bankStrangerTenant = "bank-e2e-stranger"
-	bankProviderName   = "exit-anthropic"
-	bankMembersReady   = 5 * time.Minute
-	bankTurnDeadline   = 8 * time.Minute
-	bankScaleDown      = 5 * time.Minute
+	bankTenant       = "primary"
+	bankProviderName = "exit-anthropic"
+	bankMembersReady = 5 * time.Minute
+	bankTurnDeadline = 8 * time.Minute
+	bankScaleDown    = 5 * time.Minute
 )
 
 // TestBank is the whole proof, in the order the issue names it.
@@ -59,7 +66,6 @@ func TestBank(t *testing.T) {
 	banks := bankpb.NewBankServiceClient(clients.Conn())
 	jobs := jobpb.NewJobServiceClient(clients.Conn())
 	ctx := auth.ContextWithTenantString(context.Background(), bankTenant)
-	stranger := auth.ContextWithTenantString(context.Background(), bankStrangerTenant)
 
 	t.Run("the key goes into the tenant's provider configuration through the RPC", func(t *testing.T) {
 		_, err := providers.CreateProvider(ctx, &tenantv1.CreateProviderRequest{Input: &tenantv1.ProviderConfigInput{
@@ -119,13 +125,6 @@ func TestBank(t *testing.T) {
 		require.Equal(t, jobpb.JobVerdict_JOB_VERDICT_ACCOMPLISHED, closed.GetJob().GetVerdict())
 
 		waitForMembers(t, ctx, banks, bankID, 2, bankpb.MemberState_MEMBER_STATE_IDLE, bankMembersReady)
-	})
-
-	t.Run("a stranger tenant cannot read the job or the bank", func(t *testing.T) {
-		_, err := jobs.GetJob(stranger, &jobpb.GetJobRequest{JobId: jobID})
-		require.Equal(t, codes.NotFound, status.Code(err), "a job the tenant does not own must be NOT_FOUND, not a leak")
-		_, err = banks.GetBank(stranger, &bankpb.GetBankRequest{Id: bankID})
-		require.Equal(t, codes.NotFound, status.Code(err), "a bank the tenant does not own must be NOT_FOUND")
 	})
 
 	t.Run("scale to zero, and the sandboxes go", func(t *testing.T) {
