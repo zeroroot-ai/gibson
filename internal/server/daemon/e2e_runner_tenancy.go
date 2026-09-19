@@ -11,6 +11,25 @@ import (
 	"github.com/zeroroot-ai/gibson/internal/platform/authz"
 )
 
+// seedE2ERunnerTenancy makes the exit-test runner a member of the platform
+// tenant at boot, when the fixture build names one (e2eRunnerTenancy). A
+// production build names none, so this writes nothing there. A failed seed is
+// logged: the runner then stops at the dispatch gate, and the daemon log says
+// why (gibson#14).
+func seedE2ERunnerTenancy(ctx context.Context, authorizer authz.Authorizer, logger *slog.Logger) {
+	if user, tenant, ok := e2eRunnerTenancy(logger); ok && authorizer != nil {
+		seedTenantMembership(ctx, authorizer, user, tenant, logger)
+	}
+}
+
+// seedTenantMembership is the seed's write and its report: a membership that
+// cannot be written is logged, and the caller keeps booting.
+func seedTenantMembership(ctx context.Context, authorizer authz.Authorizer, user, tenant string, logger *slog.Logger) {
+	if err := ensureTenantMember(ctx, authorizer, user, tenant, logger); err != nil {
+		logger.Warn("test fixtures: e2e runner tenancy seed failed; every run it starts stops at the dispatch gate", "tenant", tenant, "error", err)
+	}
+}
+
 // ensureTenantMember writes the (user, member, tenant:<tenant>) tuple when it
 // is absent. It is the idempotent check-then-write every FGA seed in the
 // daemon does (SetCatalogEnabled, the catalog gate seed): a present tuple is
