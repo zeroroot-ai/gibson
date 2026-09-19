@@ -397,4 +397,4 @@ jobs:
           kubectl -n argocd get app gibson -o jsonpath='{range .status.operationState.syncResult.resources[?(@.status=="SyncFailed")]}{.kind}/{.name}: {.message}{"\n"}{end}' 2>/dev/null || true
           kubectl -n setec-system get pods,sandboxes,sandboxclasses || true
           kubectl -n setec-sandboxes get pods || true
-          kubectl -n "$NS" logs -l app.kubernetes.io/component=daemon -c gibson --tail=200 || true
+          kubectl -n "$NS" logs -l app.kubernetes.io/component=daemon -c gibson --tail=1500 || true

@@ -36,7 +36,7 @@ var gateReason = regexp.MustCompile(`(?i)not enabled for tenant|access not grant
 //
 // It returns the reason and whether it was a denial; inconclusive is non-empty
 // when the outcome proves nothing, and the caller fails the test with it.
-func denialVerdict(openErr error, terminal helpers.MissionEvent, waitErr error) (reason string, denied bool, inconclusive string) {
+func denialVerdict(openErr error, terminal helpers.MissionEvent, collected []helpers.MissionEvent, waitErr error) (reason string, denied bool, inconclusive string) {
 	if openErr != nil {
 		switch status.Code(openErr) {
 		case codes.PermissionDenied, codes.FailedPrecondition:
@@ -51,12 +51,31 @@ func denialVerdict(openErr error, terminal helpers.MissionEvent, waitErr error) 
 	case "mission_completed":
 		return terminal.EventType, false, ""
 	case "mission_failed", "stream_error":
-		if gateReason.MatchString(terminal.Error) {
-			return terminal.Error, true, ""
+		// The mission-level error is a summary ("a work item failed"); the
+		// node that failed says why. Judge the most specific reason we have.
+		why := failureReason(terminal, collected)
+		if gateReason.MatchString(why) {
+			return why, true, ""
 		}
-		return "", false, fmt.Sprintf("%s for a reason that is not the gate: %s", terminal.EventType, terminal.Error)
+		return "", false, fmt.Sprintf("%s for a reason that is not the gate: %s", terminal.EventType, why)
 	}
 	return "", false, fmt.Sprintf("unexpected terminal event %q", terminal.EventType)
+}
+
+// failureReason returns the node-level error behind a failed mission when
+// the stream carried one (the last node.failed / node_failed event with an
+// error), else the terminal event's own error, else its message.
+func failureReason(terminal helpers.MissionEvent, collected []helpers.MissionEvent) string {
+	for i := len(collected) - 1; i >= 0; i-- {
+		ev := collected[i]
+		if (ev.EventType == "node.failed" || ev.EventType == "node_failed") && ev.Error != "" {
+			return ev.Error
+		}
+	}
+	if terminal.Error != "" {
+		return terminal.Error
+	}
+	return terminal.Message
 }
 
 // runMissionExpectingGateDenial opens RunMission for defID against targetID
@@ -67,12 +86,13 @@ func runMissionExpectingGateDenial(t *testing.T, ctx context.Context, daemon dae
 	runCtx, cancel := context.WithTimeout(ctx, 2*time.Minute)
 	defer cancel()
 	var terminal helpers.MissionEvent
+	var collected []helpers.MissionEvent
 	eventCh, openErr := helpers.Subscribe(runCtx, daemon, defID, targetID)
 	var waitErr error
 	if openErr == nil {
-		terminal, _, waitErr = helpers.WaitForTerminal(runCtx, eventCh, 90*time.Second)
+		terminal, collected, waitErr = helpers.WaitForTerminal(runCtx, eventCh, 90*time.Second)
 	}
-	reason, denied, inconclusive := denialVerdict(openErr, terminal, waitErr)
+	reason, denied, inconclusive := denialVerdict(openErr, terminal, collected, waitErr)
 	if inconclusive != "" {
 		t.Fatalf("the run never reached the dispatch gate, so this proves nothing: %s", inconclusive)
 	}
