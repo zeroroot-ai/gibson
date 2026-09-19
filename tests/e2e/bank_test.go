@@ -46,7 +46,9 @@ import (
 const (
 	bankTenant       = "primary"
 	bankProviderName = "exit-anthropic"
-	bankMembersReady = 5 * time.Minute
+	// Above the reconciler's launch timeout (5 min): a member the reconciler
+	// gives up on is replaced, and the replacement gets its own chance.
+	bankMembersReady = 8 * time.Minute
 	bankTurnDeadline = 8 * time.Minute
 	bankScaleDown    = 5 * time.Minute
 )

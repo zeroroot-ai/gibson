@@ -307,14 +307,22 @@ func TestReconcileBank_AMemberThatNeverReportedIsJudgedFromItsBirth(t *testing.T
 		ID: "m-stillborn", BankID: "bank-1", State: bankstore.MemberLaunching,
 		CreatedAt: testNow.Add(-10 * time.Minute),
 	}
+	// Two minutes is four heartbeat timeouts and well inside the launch
+	// timeout: a microVM that is still pulling its image and booting. Judged
+	// by the heartbeat timeout it was killed here, before it could report,
+	// and the reconciler relaunched forever (gibson#13, run 35452177830).
+	booting := &bankstore.Member{
+		ID: "m-booting", BankID: "bank-1", State: bankstore.MemberLaunching,
+		CreatedAt: testNow.Add(-2 * time.Minute),
+	}
 	fresh := &bankstore.Member{
 		ID: "m-fresh", BankID: "bank-1", State: bankstore.MemberLaunching,
 		CreatedAt: testNow.Add(-2 * time.Second),
 	}
-	store.members["bank-1"] = []*bankstore.Member{stillborn, fresh}
+	store.members["bank-1"] = []*bankstore.Member{stillborn, booting, fresh}
 	r := newReconciler(t, store, launcher, nil)
 
-	if err := r.ReconcileBank(context.Background(), "acme", testBank(2)); err != nil {
+	if err := r.ReconcileBank(context.Background(), "acme", testBank(3)); err != nil {
 		t.Fatalf("ReconcileBank: %v", err)
 	}
 	if len(store.removed) != 1 || store.removed[0] != "m-stillborn" {
@@ -322,6 +330,29 @@ func TestReconcileBank_AMemberThatNeverReportedIsJudgedFromItsBirth(t *testing.T
 	}
 	if len(launcher.launched) != 1 {
 		t.Fatalf("launched %d, want one replacement for the stillborn member", len(launcher.launched))
+	}
+}
+
+// TestIsDead_ALaunchGetsTheLaunchTimeout pins the two clocks: a member that
+// has reported is judged by the heartbeat timeout, one that never has by the
+// launch timeout.
+func TestIsDead_ALaunchGetsTheLaunchTimeout(t *testing.T) {
+	r := newReconciler(t, newFakeStore(), &fakeLauncher{}, nil)
+	cases := []struct {
+		name string
+		m    bankstore.Member
+		dead bool
+	}{
+		{"reported 5s ago", bankstore.Member{LastHeartbeat: testNow.Add(-5 * time.Second), CreatedAt: testNow.Add(-time.Hour)}, false},
+		{"reported 5m ago", bankstore.Member{LastHeartbeat: testNow.Add(-5 * time.Minute), CreatedAt: testNow.Add(-time.Hour)}, true},
+		{"never reported, born 4m ago", bankstore.Member{CreatedAt: testNow.Add(-4 * time.Minute)}, false},
+		{"never reported, born 6m ago", bankstore.Member{CreatedAt: testNow.Add(-6 * time.Minute)}, true},
+		{"marked dead", bankstore.Member{State: bankstore.MemberDead, LastHeartbeat: testNow}, true},
+	}
+	for _, c := range cases {
+		if got := r.isDead(&c.m); got != c.dead {
+			t.Errorf("%s: isDead = %v, want %v", c.name, got, c.dead)
+		}
 	}
 }
 

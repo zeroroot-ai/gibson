@@ -83,6 +83,9 @@ type Config struct {
 	// HeartbeatTimeout is how long a member may go without reporting before it
 	// counts as dead. Zero takes DefaultHeartbeatTimeout.
 	HeartbeatTimeout time.Duration
+	// LaunchTimeout is how long a member that has never reported may take to
+	// come up. Zero takes DefaultLaunchTimeout.
+	LaunchTimeout time.Duration
 	// Now is the clock. Tests replace it; production leaves it nil.
 	Now func() time.Time
 }
@@ -91,15 +94,24 @@ type Config struct {
 // ten seconds, so a single missed report is a hiccup and three is a death.
 const DefaultHeartbeatTimeout = 30 * time.Second
 
+// DefaultLaunchTimeout is how long a launch may take before a member that has
+// never reported is judged dead. A member is a microVM that pulls its image,
+// boots, starts its driver and only then reports; judged by the heartbeat
+// timeout it was killed at 30 s, before setec had a loggable pod, and the
+// reconciler relaunched the pair every pass forever (gibson#13, run
+// 35452177830).
+const DefaultLaunchTimeout = 5 * time.Minute
+
 // Reconciler keeps each bank's running member count equal to its desired count.
 type Reconciler struct {
-	store     bankstore.Store
-	launcher  MemberLauncher
-	jobs      JobReleaser
-	events    Events
-	logger    *slog.Logger
-	heartbeat time.Duration
-	now       func() time.Time
+	store         bankstore.Store
+	launcher      MemberLauncher
+	jobs          JobReleaser
+	events        Events
+	logger        *slog.Logger
+	heartbeat     time.Duration
+	launchTimeout time.Duration
+	now           func() time.Time
 }
 
 // New builds a Reconciler. The store and the launcher are required: a
@@ -121,13 +133,16 @@ func New(cfg Config) (*Reconciler, error) {
 	if cfg.HeartbeatTimeout <= 0 {
 		cfg.HeartbeatTimeout = DefaultHeartbeatTimeout
 	}
+	if cfg.LaunchTimeout <= 0 {
+		cfg.LaunchTimeout = DefaultLaunchTimeout
+	}
 	if cfg.Now == nil {
 		cfg.Now = time.Now
 	}
 	return &Reconciler{
 		store: cfg.Store, launcher: cfg.Launcher, jobs: cfg.Jobs, events: cfg.Events,
 		logger:    cfg.Logger.With("component", "bank_reconciler"),
-		heartbeat: cfg.HeartbeatTimeout, now: cfg.Now,
+		heartbeat: cfg.HeartbeatTimeout, launchTimeout: cfg.LaunchTimeout, now: cfg.Now,
 	}, nil
 }
 
@@ -222,18 +237,19 @@ func (r *Reconciler) allMembers(ctx context.Context, tenantID, bankID string) ([
 
 // isDead reports whether a member has stopped reporting.
 //
-// A member that has never reported is judged from when it was created, so a
-// launch that never came up is found rather than waited on forever. A DEAD
-// member stays dead until it is replaced.
+// A member that has never reported is judged from when it was created and
+// against the launch timeout, so a launch that never came up is found rather
+// than waited on forever, and a launch that is still booting is not killed
+// for missing a heartbeat it could not yet send. A DEAD member stays dead
+// until it is replaced.
 func (r *Reconciler) isDead(m *bankstore.Member) bool {
 	if m.State == bankstore.MemberDead {
 		return true
 	}
-	last := m.LastHeartbeat
-	if last.IsZero() {
-		last = m.CreatedAt
+	if m.LastHeartbeat.IsZero() {
+		return r.now().Sub(m.CreatedAt) > r.launchTimeout
 	}
-	return r.now().Sub(last) > r.heartbeat
+	return r.now().Sub(m.LastHeartbeat) > r.heartbeat
 }
 
 func (r *Reconciler) markDead(ctx context.Context, tenantID string, m *bankstore.Member) error {
