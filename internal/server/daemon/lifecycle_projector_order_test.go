@@ -74,7 +74,7 @@ func TestLifecycleProjector_PublishesInTimelineOrder(t *testing.T) {
 	tickOrFail(t, eng)
 
 	// status running, node.started, node.failed, status failed.
-	for i := 0; i < 4; i++ {
+	for i := range 4 {
 		select {
 		case <-published:
 		case <-time.After(10 * time.Second):
@@ -88,7 +88,7 @@ func TestLifecycleProjector_PublishesInTimelineOrder(t *testing.T) {
 	}
 	mu.Lock()
 	defer mu.Unlock()
-	var kinds []string
+	kinds := make([]string, 0, len(got))
 	for _, e := range got {
 		k := e.EventType
 		if me := e.MissionEvent; me != nil && e.EventType == "status" {
