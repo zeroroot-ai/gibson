@@ -131,12 +131,25 @@ func (l *memberLauncher) LaunchMember(ctx context.Context, tenantID string, b *b
 }
 
 // memberEnv is the member driver's contract beside the injected runtime keys.
+// memberLoginShape renders a bank's login shape in the member driver's
+// vocabulary: ZEROCOOL_LOGIN_SHAPE is one of api-key, subscription, bedrock,
+// vertex, foundry (packages/claude-member/README.md). gibson stores the API
+// key shape as "api_key", and a member handed that exits at once with
+// `ZEROCOOL_LOGIN_SHAPE must be one of ...`; the reconciler relaunched the
+// pair every minute and the bank never came up (gibson#13, run 35448500555).
+func memberLoginShape(shape bank.LoginShape) string {
+	if shape == bank.LoginShapeAPIKey {
+		return "api-key"
+	}
+	return string(shape)
+}
+
 func memberEnv(b *bank.Bank, memberID, model string) map[string]string {
 	env := map[string]string{
 		envMemberID:        memberID,
 		envBankID:          b.ID,
 		envPlatformURL:     os.Getenv(envPublicURL),
-		envLoginShape:      string(b.LoginShape),
+		envLoginShape:      memberLoginShape(b.LoginShape),
 		envJobCap:          strconv.Itoa(int(b.MaxJobsInFlight)),
 		envJobStaleLimitMS: strconv.FormatInt(b.StaleLimit.Milliseconds(), 10),
 		envHeartbeatMS:     strconv.FormatInt(memberHeartbeatEvery.Milliseconds(), 10),
