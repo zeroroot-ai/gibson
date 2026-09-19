@@ -338,17 +338,24 @@ func TestCreateBank_TenantOwnedNamesTheTenant(t *testing.T) {
 	if resp.GetBank().GetOwner().GetKind() != commonpb.Principal_KIND_TENANT {
 		t.Fatalf("owner = %+v, want the tenant", resp.GetBank().GetOwner())
 	}
-	var sawTenantOwned bool
+	// The shared bank: admins own it, every member may send and read
+	// (ADR-0067 §5 posture, gibson#13).
+	want := map[string]string{
+		"parent":       "tenant:acme",
+		"tenant_owned": "tenant:acme",
+		"can_send":     "tenant:acme#member",
+		"can_read":     "tenant:acme#member",
+	}
+	if len(az.written) != len(want) {
+		t.Fatalf("tuples = %+v, want exactly %v", az.written, want)
+	}
 	for _, tp := range az.written {
-		if tp.Relation == "tenant_owned" && tp.User == "tenant:acme" {
-			sawTenantOwned = true
-		}
 		if tp.Relation == "owner" {
 			t.Errorf("a tenant-owned bank must not carry a personal owner tuple: %+v", tp)
 		}
-	}
-	if !sawTenantOwned {
-		t.Errorf("tuples = %+v, want tenant_owned", az.written)
+		if want[tp.Relation] != tp.User || tp.Object != "bank:"+resp.GetBank().GetId() {
+			t.Errorf("unexpected tuple %+v", tp)
+		}
 	}
 }
 
