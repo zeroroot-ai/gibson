@@ -16,6 +16,10 @@
 package daemon
 
 import (
+	"context"
+	"log/slog"
+
+	"github.com/zeroroot-ai/gibson/internal/platform/authz"
 	"github.com/zeroroot-ai/sdk/auth"
 	grpcmetadata "google.golang.org/grpc/metadata"
 )
@@ -26,3 +30,7 @@ func e2ePeerMethodPolicies() map[string]map[string]bool { return nil }
 // e2ePeerTenant never yields a tenant in a production build: no SPIFFE peer
 // may assert a tenant through a header on a direct dial.
 func e2ePeerTenant(string, grpcmetadata.MD) auth.TenantID { return auth.TenantID{} }
+
+// seedE2ERunnerTenancy writes nothing in a production build: there is no
+// runner identity to make a member of anything.
+func seedE2ERunnerTenancy(context.Context, authz.Authorizer, *slog.Logger) {}

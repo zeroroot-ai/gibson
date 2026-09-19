@@ -22,6 +22,12 @@
 package daemon
 
 import (
+	"context"
+	"log/slog"
+	"os"
+	"strings"
+
+	"github.com/zeroroot-ai/gibson/internal/platform/authz"
 	"github.com/zeroroot-ai/sdk/auth"
 	grpcmetadata "google.golang.org/grpc/metadata"
 )
@@ -84,4 +90,40 @@ func e2ePeerTenant(svid string, md grpcmetadata.MD) auth.TenantID {
 		return auth.TenantID{}
 	}
 	return t
+}
+
+// e2eRunnerFGAUser is the runner's FGA subject: the shape callbackFGAUser
+// (internal/engine/harness/callback_credential_authz.go) and ext-authz's
+// IdentityComponent branch give a SPIFFE subject with no principal type.
+var e2eRunnerFGAUser = "user:" + strings.TrimPrefix(e2eRunnerSVID, "spiffe://")
+
+// seedE2ERunnerTenancy makes the exit-test runner a member of the platform
+// tenant, once, at boot.
+//
+// A mission dispatches a tool or agent only when the CALLER may execute the
+// component: can_execute = direct_execute and in_tenant_catalog. Enabling a
+// catalog item grants direct_execute to tenant#member, so the caller has to be
+// a member of the tenant the run belongs to. A human caller is one through
+// first-admin or an invitation. The runner's SVID is nobody's member, so every
+// run it started ended at the gate with "not enabled for tenant", enabled or
+// not, and the denial it proves would have been vacuous (gibson#14).
+//
+// The membership is the one tuple a tenant member holds, nothing more: the
+// run still needs the tenant to have enabled the component, which is the gate
+// under test. Two gates, as everywhere in this file: the build tag and
+// GIBSON_TEST_FIXTURES_ENABLED=true. An empty tenant (GIBSON_PLATFORM_TENANT
+// unset) seeds nothing and says so. A failed seed is logged here: the runner
+// then stops at the gate, and the daemon log names why.
+func seedE2ERunnerTenancy(ctx context.Context, authorizer authz.Authorizer, logger *slog.Logger) {
+	if os.Getenv("GIBSON_TEST_FIXTURES_ENABLED") != "true" || authorizer == nil {
+		return
+	}
+	tenant := os.Getenv("GIBSON_PLATFORM_TENANT")
+	if tenant == "" {
+		logger.Warn("test fixtures: GIBSON_PLATFORM_TENANT is unset, so the e2e runner is a member of no tenant and every run it starts stops at the dispatch gate")
+		return
+	}
+	if err := ensureTenantMember(ctx, authorizer, e2eRunnerFGAUser, tenant, logger); err != nil {
+		logger.Warn("test fixtures: e2e runner tenancy seed failed; every run it starts stops at the dispatch gate", "tenant", tenant, "error", err)
+	}
 }
