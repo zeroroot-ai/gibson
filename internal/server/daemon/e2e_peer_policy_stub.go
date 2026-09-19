@@ -16,6 +16,8 @@
 package daemon
 
 import (
+	"log/slog"
+
 	"github.com/zeroroot-ai/sdk/auth"
 	grpcmetadata "google.golang.org/grpc/metadata"
 )
@@ -26,3 +28,7 @@ func e2ePeerMethodPolicies() map[string]map[string]bool { return nil }
 // e2ePeerTenant never yields a tenant in a production build: no SPIFFE peer
 // may assert a tenant through a header on a direct dial.
 func e2ePeerTenant(string, grpcmetadata.MD) auth.TenantID { return auth.TenantID{} }
+
+// e2eRunnerTenancy names no membership in a production build: there is no
+// runner identity to make a member of anything.
+func e2eRunnerTenancy(*slog.Logger) (user, tenant string, ok bool) { return "", "", false }

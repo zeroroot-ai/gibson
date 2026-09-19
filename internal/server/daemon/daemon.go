@@ -1940,6 +1940,12 @@ func (d *daemonImpl) Start(ctx context.Context) error {
 		// The refusal is a state, not a log line: /readyz names the credential
 		// an operator has to mount (gibson#1744).
 		d.registerComponentCatalogReadiness(ctx, catalogGate)
+
+		// Fixture build only: the exit-test runner is a member of the platform
+		// tenant, so the dispatch gate judges its runs the way it judges a
+		// member's (gibson#14). A production build writes nothing here. The
+		// fixture logs its own failure.
+		seedE2ERunnerTenancy(ctx, d.authorizer, d.logger.Slog())
 	}
 
 	// Start the connector token refresher — mints fresh vendor access tokens

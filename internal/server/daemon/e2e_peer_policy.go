@@ -22,6 +22,10 @@
 package daemon
 
 import (
+	"log/slog"
+	"os"
+	"strings"
+
 	"github.com/zeroroot-ai/sdk/auth"
 	grpcmetadata "google.golang.org/grpc/metadata"
 )
@@ -84,4 +88,37 @@ func e2ePeerTenant(svid string, md grpcmetadata.MD) auth.TenantID {
 		return auth.TenantID{}
 	}
 	return t
+}
+
+// e2eRunnerFGAUser is the runner's FGA subject: the shape callbackFGAUser
+// (internal/engine/harness/callback_credential_authz.go) and ext-authz's
+// IdentityComponent branch give a SPIFFE subject with no principal type.
+var e2eRunnerFGAUser = "user:" + strings.TrimPrefix(e2eRunnerSVID, "spiffe://")
+
+// e2eRunnerTenancy names the membership the exit-test runner holds: its FGA
+// user and the platform tenant, when the fixture is on.
+//
+// A mission dispatches a tool or agent only when the CALLER may execute the
+// component: can_execute = direct_execute and in_tenant_catalog. Enabling a
+// catalog item grants direct_execute to tenant#member, so the caller has to be
+// a member of the tenant the run belongs to. A human caller is one through
+// first-admin or an invitation. The runner's SVID is nobody's member, so every
+// run it started ended at the gate with "not enabled for tenant", enabled or
+// not, and the denial it proves would have been vacuous (gibson#14).
+//
+// The membership is the one tuple a tenant member holds, nothing more: the
+// run still needs the tenant to have enabled the component, which is the gate
+// under test. Two gates, as everywhere in this file: the build tag and
+// GIBSON_TEST_FIXTURES_ENABLED=true. An empty tenant (GIBSON_PLATFORM_TENANT
+// unset) yields nothing and says so.
+func e2eRunnerTenancy(logger *slog.Logger) (user, tenant string, ok bool) {
+	if os.Getenv("GIBSON_TEST_FIXTURES_ENABLED") != "true" {
+		return "", "", false
+	}
+	tenant = os.Getenv("GIBSON_PLATFORM_TENANT")
+	if tenant == "" {
+		logger.Warn("test fixtures: GIBSON_PLATFORM_TENANT is unset, so the e2e runner is a member of no tenant and every run it starts stops at the dispatch gate")
+		return "", "", false
+	}
+	return e2eRunnerFGAUser, tenant, true
 }
