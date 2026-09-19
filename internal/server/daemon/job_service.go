@@ -115,7 +115,7 @@ func (s *jobServer) principal(ctx context.Context) (job.Principal, error) {
 	if err != nil || id.Subject == "" {
 		return job.Principal{}, status.Error(codes.PermissionDenied, "no caller identity in context")
 	}
-	return job.Principal{Kind: principalKindOf(id.Subject), ID: id.Subject}, nil
+	return job.Principal{Kind: principalKindOf(id.Subject), ID: principalIDFromIdentity(id)}, nil
 }
 
 // principalKindOf reads the class of a subject. A component's subject is a
