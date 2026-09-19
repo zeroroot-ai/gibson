@@ -37,6 +37,7 @@ import (
 	tenantv1 "github.com/zeroroot-ai/gibson/internal/server/daemon/api/gibson/tenant/v1"
 	"github.com/zeroroot-ai/gibson/pkg/version"
 	agentidentityv1 "github.com/zeroroot-ai/sdk/api/gen/gibson/agentidentity/v1"
+	commonpb "github.com/zeroroot-ai/sdk/api/gen/gibson/common/v1"
 	daemonpb "github.com/zeroroot-ai/sdk/api/gen/gibson/daemon/v1"
 	missionpb "github.com/zeroroot-ai/sdk/api/gen/gibson/mission/v1"
 	"github.com/zeroroot-ai/sdk/auth"
@@ -1309,6 +1310,24 @@ func missionEventFromBus(ev EventData, missionID string) *MissionEventData {
 	return me
 }
 
+// missionEventWireData is the Data map a streamed mission event carries. The
+// orchestrator's events serialise their payload into Data as JSON; the
+// timeline lifecycle projector's "status" events carry theirs in Payload only
+// (status: running | completed | failed). Before this, a status event went on
+// the wire with an empty Data map, so a client could not tell the terminal
+// status from the running one and the exit tests waited for an event that
+// never came (gibson#14, run 35423738984). Payload fills Data when the JSON
+// form is absent.
+func missionEventWireData(me *MissionEventData) *commonpb.TypedMap {
+	if me.Data != "" {
+		return StringToTypedMap(me.Data)
+	}
+	if len(me.Payload) == 0 {
+		return nil
+	}
+	return MapToTypedMap(me.Payload)
+}
+
 // isTerminalMissionEvent reports whether a projector lifecycle event marks
 // the run's end: a "status" event carrying completed or failed. The lifecycle
 // projector is the single producer of these (ADR-0011 decision 4), which is
@@ -1414,7 +1433,7 @@ func (s *DaemonServer) RunMission(req *daemonpb.RunMissionRequest, stream grpc.S
 				MissionId: me.MissionID,
 				NodeId:    me.NodeID,
 				Message:   me.Message,
-				Data:      StringToTypedMap(me.Data),
+				Data:      missionEventWireData(me),
 				Error:     me.Error,
 			}
 
@@ -2130,7 +2149,7 @@ func (s *DaemonServer) ResumeMission(req *daemonpb.ResumeMissionRequest, stream 
 				MissionId: me.MissionID,
 				NodeId:    me.NodeID,
 				Message:   me.Message,
-				Data:      StringToTypedMap(me.Data),
+				Data:      missionEventWireData(me),
 				Error:     me.Error,
 			}
 

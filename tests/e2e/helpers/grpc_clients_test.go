@@ -8,6 +8,7 @@ package helpers
 
 import (
 	"context"
+	commonpb "github.com/zeroroot-ai/sdk/api/gen/gibson/common/v1"
 	"github.com/zeroroot-ai/sdk/auth"
 	"google.golang.org/grpc/metadata"
 	"os"
@@ -73,5 +74,32 @@ func TestWaitForTerminal_StreamErrorIsTerminal(t *testing.T) {
 	close(closed)
 	if _, _, err := WaitForTerminal(context.Background(), closed, time.Second); err != ErrStreamClosed {
 		t.Fatalf("closed channel: %v", err)
+	}
+}
+
+// TestNormalizeEventType: the daemon's dotted lifecycle types and its
+// projector "status" events become the names WaitForTerminal ends on; a
+// running status and everything else pass through unchanged.
+func TestNormalizeEventType(t *testing.T) {
+	st := func(v string) *commonpb.TypedMap {
+		return &commonpb.TypedMap{Entries: map[string]*commonpb.TypedValue{"status": {Kind: &commonpb.TypedValue_StringValue{StringValue: v}}}}
+	}
+	cases := map[string]struct {
+		in   string
+		data *commonpb.TypedMap
+		want string
+	}{
+		"dotted completed": {"mission.completed", nil, "mission_completed"},
+		"dotted failed":    {"mission.failed", nil, "mission_failed"},
+		"status completed": {"status", st("completed"), "mission_completed"},
+		"status failed":    {"status", st("failed"), "mission_failed"},
+		"status running":   {"status", st("running"), "status"},
+		"status no data":   {"status", nil, "status"},
+		"node event":       {"node_started", nil, "node_started"},
+	}
+	for name, tc := range cases {
+		if got := normalizeEventType(tc.in, tc.data); got != tc.want {
+			t.Fatalf("%s: got %q want %q", name, got, tc.want)
+		}
 	}
 }
