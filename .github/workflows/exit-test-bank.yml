@@ -257,12 +257,30 @@ jobs:
           # The e2eRunner values also set GIBSON_TEST_FIXTURES_ENABLED on the
           # daemon (charts#142): the chart has no gibson.extraEnv seam, so the
           # parameter that used to be here never reached the daemon.
+          # A sandbox resolves names only through setec.netpol.resolvers with
+          # dnsPolicy None, and its NetworkPolicy subtracts reservedCIDRs from
+          # every egress rule: it reaches the open web and nothing in private
+          # space. That is the product's posture and it is right on EKS, where
+          # api.<domain> is a public record on a public load balancer. On this
+          # kind cluster the API host has no public record and sits on Envoy's
+          # pinned ClusterIP, so a sandboxed agent could not heartbeat, poll
+          # work or call back: `getaddrinfo ENOTFOUND api.selfhosted.example.com`
+          # (gibson#13, run 35458857333). Test profile only: sandboxes resolve
+          # through CoreDNS and the agent class may reach Envoy's ClusterIP.
+          # The CoreDNS record for api.<domain> is the kind bring-up's
+          # (hosted#145); until it lands this changes nothing observable.
+          COREDNS_IP=$(kubectl -n kube-system get svc kube-dns -o jsonpath='{.spec.clusterIP}')
+          ENVOY_IP=$(kubectl -n "$NS" get svc -l app.kubernetes.io/component=envoy -o jsonpath='{.items[0].spec.clusterIP}')
+          [ -n "$COREDNS_IP" ] && [ -n "$ENVOY_IP" ] || { echo "::error::no CoreDNS or Envoy ClusterIP to hand the sandboxes (coredns=$COREDNS_IP envoy=$ENVOY_IP)"; exit 1; }
+          echo "sandboxes resolve through $COREDNS_IP and the agent class may reach Envoy at $ENVOY_IP"
           kubectl -n argocd patch application gibson --type json -p '[
               {"op":"add","path":"/spec/source/helm/values","value":"gibson-workloads:\n  gibson:\n    e2eRunner:\n      enabled: true\n  spiffe:\n    allowedPeerIDs:\n      - spiffe://zeroroot.ai/platform/tenant-operator\n      - spiffe://zeroroot.ai/platform/connector-operator\n      - spiffe://zeroroot.ai/platform/e2e-runner\n"},
               {"op":"add","path":"/spec/source/helm/parameters/-","value":{"name":"gibson-workloads.gibson.image.repository","value":"ghcr.io/zeroroot-ai/gibson","forceString":true}},
               {"op":"add","path":"/spec/source/helm/parameters/-","value":{"name":"gibson-workloads.gibson.image.tag","value":"e2e-bank","forceString":true}},
               {"op":"add","path":"/spec/source/helm/parameters/-","value":{"name":"gibson-workloads.gibson.image.pullPolicy","value":"IfNotPresent","forceString":true}},
-              {"op":"add","path":"/spec/source/helm/parameters/-","value":{"name":"gibson-workloads.gibson.authz.enabled","value":"false"}}
+              {"op":"add","path":"/spec/source/helm/parameters/-","value":{"name":"gibson-workloads.gibson.authz.enabled","value":"false"}},
+              {"op":"add","path":"/spec/source/helm/parameters/-","value":{"name":"gibson-workloads.setec.netpol.resolvers[0]","value":"'"$COREDNS_IP"'","forceString":true}},
+              {"op":"add","path":"/spec/source/helm/parameters/-","value":{"name":"gibson-workloads.setec.sandboxClasses.classes[2].spec.egressExemptCIDRs[0]","value":"'"$ENVOY_IP"'/32","forceString":true}}
             ]'
 
           # Argo reconciles the spec change; wait for the StatefulSet to carry
