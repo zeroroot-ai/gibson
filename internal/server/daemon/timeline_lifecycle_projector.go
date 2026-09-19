@@ -37,6 +37,7 @@ package daemon
 import (
 	"context"
 	"log/slog"
+	"sync"
 	"time"
 
 	"github.com/zeroroot-ai/gibson/internal/engine/brain"
@@ -159,13 +160,28 @@ type lifecycleProjectorTap struct {
 	eventBus    *EventBus
 	redisStream *RedisEventStream
 	logger      *slog.Logger
+
+	// publish is the sink one projected event goes to. It is fanOut (the
+	// in-process bus and the tenant's Redis stream) unless a test injects
+	// its own.
+	publish func(api.EventData)
+
+	// queue holds the events the tick has projected and the drainer has not
+	// published yet. One drainer goroutine runs at a time, so the sink sees
+	// the events in Timeline order. A goroutine per event did not: node.failed
+	// and the terminal status left the tick microseconds apart, each did its
+	// own XADD, and the status could land first. RunMission ends its stream on
+	// the terminal status, so the node's failure reason was lost on the wire
+	// (gibson#14).
+	mu       sync.Mutex
+	queue    []api.EventData
+	draining bool
 }
 
 // apply is called inside the engine tick after an event is applied. It must
-// not block or do I/O directly. Publishing to Redis is a network call but it
-// is already the established pattern used by OrchestratorEventBusAdapter
-// (which also runs inside Publish calls originating from the tick). To keep
-// the tap non-blocking the publish is launched in a goroutine.
+// not block or do I/O directly. Publishing to Redis is a network call, so the
+// tap only queues the projected event; a single drainer goroutine publishes
+// the queue in order, off the tick.
 //
 // IT MUST ALSO NOT CALL A LOCKING ACCESSOR ON THE ENGINE. A tap runs with the
 // engine's write lock held, and sync.RWMutex is not reentrant — so
@@ -202,26 +218,55 @@ func (p *lifecycleProjectorTap) apply(ev brain.Event) {
 		return // not a lifecycle event
 	}
 
-	// Fan out in a goroutine so the tick is never blocked on I/O.
-	out := *projected // copy: goroutine must not hold a pointer into the stack
-	go func() {
-		ctx := context.Background()
+	p.enqueue(*projected) // copy: the drainer must not hold a pointer into the stack
+}
 
-		// In-process EventBus.
-		if p.eventBus != nil {
-			if err := p.eventBus.Publish(ctx, out); err != nil {
-				p.logger.Debug("lifecycle projector: eventbus publish error", "error", err)
-			}
-		}
+// enqueue appends one projected event to the queue and starts the drainer
+// when none is running. It never blocks the tick.
+func (p *lifecycleProjectorTap) enqueue(out api.EventData) {
+	p.mu.Lock()
+	p.queue = append(p.queue, out)
+	start := !p.draining
+	if start {
+		p.draining = true
+	}
+	p.mu.Unlock()
+	if start {
+		go p.drain()
+	}
+}
 
-		// Redis stream (optional; matches existing fanout pattern in
-		// OrchestratorEventBusAdapter.Publish).
-		if p.redisStream != nil {
-			if err := p.redisStream.PublishEvent(ctx, p.tenant, out); err != nil {
-				p.logger.Debug("lifecycle projector: redis publish error", "error", err)
-			}
+// drain publishes queued events one at a time, in the order the tick queued
+// them, and exits when the queue is empty. enqueue starts the next drainer.
+func (p *lifecycleProjectorTap) drain() {
+	for {
+		p.mu.Lock()
+		if len(p.queue) == 0 {
+			p.draining = false
+			p.mu.Unlock()
+			return
 		}
-	}()
+		out := p.queue[0]
+		p.queue = p.queue[1:]
+		p.mu.Unlock()
+		p.publish(out)
+	}
+}
+
+// fanOut publishes one event to the in-process EventBus and the tenant's
+// Redis stream (the same fan-out OrchestratorEventBusAdapter.Publish does).
+func (p *lifecycleProjectorTap) fanOut(out api.EventData) {
+	ctx := context.Background()
+	if p.eventBus != nil {
+		if err := p.eventBus.Publish(ctx, out); err != nil {
+			p.logger.Debug("lifecycle projector: eventbus publish error", "error", err)
+		}
+	}
+	if p.redisStream != nil {
+		if err := p.redisStream.PublishEvent(ctx, p.tenant, out); err != nil {
+			p.logger.Debug("lifecycle projector: redis publish error", "error", err)
+		}
+	}
 }
 
 // InstallLifecycleProjector registers a lifecycle projector tap on the given
@@ -251,5 +296,6 @@ func InstallLifecycleProjector(
 		redisStream: redisStream,
 		logger:      logger.With("component", "lifecycle-projector", "tenant", tenant),
 	}
+	tap.publish = tap.fanOut
 	eng.Subscribe(tap.apply)
 }

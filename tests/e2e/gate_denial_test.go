@@ -23,8 +23,12 @@ import (
 // gateReason matches the daemon's wording when the per-tenant dispatch gate
 // or the catalog refuses a run: ErrToolNotEnabled / ErrAgentNotEnabled
 // ("... not enabled for tenant"), ErrToolAccessDenied ("... access not granted
-// for tenant"), and a tool or agent that no manifest names.
-var gateReason = regexp.MustCompile(`(?i)not enabled for tenant|access not granted|no (catalog )?manifest|not in (the )?catalog|unknown (tool|agent)|catalog.*(not found|unknown)|permission denied`)
+// for tenant"), and a tool or agent that no manifest names. A tool in no
+// manifest ends at the harness's registry lookup, which is the last path to a
+// tool: "tool not found ... (no tools registered)". The happy path is what
+// proves a real manifest tool does dispatch, so this match cannot hide a
+// misconfigured catalog.
+var gateReason = regexp.MustCompile(`(?i)not enabled for tenant|access not granted|no (catalog )?manifest|not in (the )?catalog|unknown (tool|agent)|catalog.*(not found|unknown)|tool not found|no tools registered|permission denied`)
 
 // denialVerdict decides what a RunMission outcome proves. Only a refusal the
 // gate produced counts as a denial. An InvalidArgument at open, a stream that

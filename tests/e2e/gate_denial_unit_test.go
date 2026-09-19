@@ -37,6 +37,7 @@ func TestDenialVerdict(t *testing.T) {
 		{name: "deadline is not a denial", waitErr: helpers.ErrStreamDeadlineExceeded, inconclusive: true},
 		{name: "mission failed by the gate", terminal: ev("mission_failed", "dispatch: tool not enabled for tenant primary"), wantDenied: true},
 		{name: "mission failed by an absent manifest", terminal: ev("mission_failed", "tool e2e-tool-that-does-not-exist: no catalog manifest"), wantDenied: true},
+		{name: "mission failed because no path serves the tool", terminal: ev("mission_failed", `tool "e2e-tool-that-does-not-exist": [HARNESS_TOOL_EXECUTION_FAILED] tool not found: e2e-tool-that-does-not-exist (tool 'e2e-tool-that-does-not-exist' not found (no tools registered))`), wantDenied: true},
 		{name: "stream error by the gate", terminal: ev("stream_error", "rpc error: code = PermissionDenied desc = agent not enabled for tenant"), wantDenied: true},
 		{name: "mission failed for another reason is not a denial", terminal: ev("mission_failed", "sandbox launch: image pull back-off"), inconclusive: true},
 		{name: "completed is not a denial", terminal: ev("mission_completed", ""), wantDenied: false},
