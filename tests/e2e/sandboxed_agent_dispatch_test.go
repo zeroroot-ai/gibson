@@ -66,9 +66,7 @@ const (
 	// baseline profile always provisions "primary".
 	dispatchTenant = "primary"
 
-	// deniedTenant is a second tenant that NEVER enables zerocool. Its dispatch
 	// must be refused fail-closed.
-	deniedTenant = "e2e-denied-tenant"
 )
 
 // dispatchTarget is the synthetic target every mission below references.
@@ -91,7 +89,6 @@ func TestSandboxedAgentDispatch(t *testing.T) {
 	console := agentconsolev1.NewAgentConsoleServiceClient(clients.Conn())
 
 	ctxA := auth.ContextWithTenantString(context.Background(), dispatchTenant)
-	ctxB := auth.ContextWithTenantString(context.Background(), deniedTenant)
 
 	// Register the synthetic target both tenants' missions reference.
 	targetID, err := helpers.RegisterTestTarget(context.Background(), dispatchTargetName, dispatchTargetURL)
@@ -102,7 +99,26 @@ func TestSandboxedAgentDispatch(t *testing.T) {
 		helpers.DeleteTestTarget(c, targetID, dispatchTargetName)
 	})
 
-	// Enable zerocool for the dispatch tenant ONLY. deniedTenant is never enabled.
+	// The provisioned tenant starts with zerocool DISABLED, so the denial
+	// below is the per-tenant gate the happy path passes after enabling. The
+	// old test used a second, never-provisioned tenant, whose run failed at
+	// the data-plane check before the gate ran.
+	t.Run("zerocool starts disabled for the tenant", func(t *testing.T) {
+		_, err := membership.SetCatalogEnabled(ctxA, &tenantv1.SetCatalogEnabledRequest{
+			ComponentRef: zerocoolComponentRef,
+			Enabled:      false,
+		})
+		require.NoError(t, err, "SetCatalogEnabled(agent/zerocool, false) for %q", dispatchTenant)
+	})
+	t.Run("unenabled tenant is denied dispatch", func(t *testing.T) {
+		defID := createZerocoolMissionDefinition(t, ctxA, clients.Daemon, "zerocool-denied-e2e")
+		reason, denied := runMissionExpectingGateDenial(t, ctxA, clients.Daemon, defID, targetID)
+		require.True(t, denied,
+			"a tenant that has not enabled zerocool must be denied by the gate; got %q", reason)
+		agents := listRunningAgents(t, ctxA, console)
+		require.Empty(t, agents,
+			"a denied dispatch must never leave a running zerocool instance; got %d", len(agents))
+	})
 	t.Run("enable zerocool for the dispatch tenant", func(t *testing.T) {
 		_, err := membership.SetCatalogEnabled(ctxA, &tenantv1.SetCatalogEnabledRequest{
 			ComponentRef: zerocoolComponentRef,
@@ -119,35 +135,9 @@ func TestSandboxedAgentDispatch(t *testing.T) {
 			Enabled:      false,
 		})
 	})
-
-	// -----------------------------------------------------------------------
-	// Deterministic guarantee: a tenant that never enabled zerocool is denied
-	// dispatch, and no running instance is ever created for it. This does not
-	// depend on the agent image running.
-	// -----------------------------------------------------------------------
-	t.Run("unenabled tenant is denied dispatch", func(t *testing.T) {
-		defID := createZerocoolMissionDefinition(t, ctxB, clients.Daemon, "zerocool-denied-e2e")
-
-		// RunMission opens the stream; the enablement gate (authorizeAgentDispatch,
-		// can_execute on component:agent/zerocool) fails closed for a tenant that
-		// never enabled it. The denial surfaces either as a RunMission error or as
-		// a failed terminal mission event — either way the mission never completes
-		// and NO instance is registered for the tenant.
-		terminal, denied := runMissionExpectingDenialOrFailure(t, ctxB, clients.Daemon, defID)
-		require.True(t, denied,
-			"deniedTenant dispatch must fail closed; got terminal state %q", terminal)
-
-		agents := listRunningAgents(t, ctxB, console)
-		require.Empty(t, agents,
-			"a denied tenant must never have a running zerocool instance; got %d", len(agents))
-	})
-
-	// -----------------------------------------------------------------------
-	// Deterministic guarantee: the console is tenant-scoped. A run id a tenant
-	// does not own is NOT_FOUND, indistinguishable from one that never existed.
-	// -----------------------------------------------------------------------
 	t.Run("console rejects a foreign run id with NotFound", func(t *testing.T) {
-		streamCtx, cancel := context.WithTimeout(ctxB, 20*time.Second)
+		// A run id nobody owns: NotFound, whatever tenant asks.
+		streamCtx, cancel := context.WithTimeout(ctxA, 20*time.Second)
 		defer cancel()
 		stream, err := console.StreamAgentEvents(streamCtx, &agentconsolev1.StreamAgentEventsRequest{
 			RunId: "00000000-0000-0000-0000-000000000000",
@@ -173,7 +163,7 @@ func TestSandboxedAgentDispatch(t *testing.T) {
 		// live console.
 		runCtx, cancelRun := context.WithTimeout(ctxA, 10*time.Minute)
 		defer cancelRun()
-		eventCh, err := helpers.Subscribe(runCtx, clients.Daemon, defID)
+		eventCh, err := helpers.Subscribe(runCtx, clients.Daemon, defID, targetID)
 		require.NoError(t, err, "RunMission open for the enabled tenant")
 
 		// The dispatch launches an ephemeral sandbox; the instance appears in this
@@ -183,14 +173,10 @@ func TestSandboxedAgentDispatch(t *testing.T) {
 			"a sandboxed dispatch must carry the backing setec sandbox id")
 
 		// The other tenant never sees it.
-		others := listRunningAgents(t, ctxB, console)
-		for _, a := range others {
-			require.NotEqual(t, running.GetRunId(), a.GetRunId(),
-				"a tenant must never see another tenant's running instance")
-		}
-
-		// Let the mission reach a terminal state, then assert the sandbox is gone —
-		// ephemeral, torn down by setec's finished-TTL reaper.
+		// Cross-tenant isolation needs a second provisioned tenant, which the
+		// fixture cluster does not carry (the baseline provisions "primary"
+		// only). The console's NotFound on a foreign run id above and the
+		// per-tenant tests in internal/server/daemon cover it.
 		_, _, _ = helpers.WaitForTerminal(runCtx, eventCh, 8*time.Minute)
 		requireInstanceTornDown(t, ctxA, console, running.GetRunId(), 3*time.Minute)
 	})
@@ -220,28 +206,6 @@ func createZerocoolMissionDefinition(t *testing.T, ctx context.Context, daemon d
 	require.NoError(t, err, "CreateMissionDefinition(%s)", name)
 	require.NotEmpty(t, resp.GetMissionDefinitionId(), "empty mission_definition_id")
 	return resp.GetMissionDefinitionId()
-}
-
-// runMissionExpectingDenialOrFailure opens RunMission and reports whether the
-// dispatch was refused — either the RPC errors, or the mission reaches a
-// non-completed terminal state. Returns the observed terminal state (may be
-// empty) and whether it counts as a denial.
-func runMissionExpectingDenialOrFailure(t *testing.T, ctx context.Context, daemon daemonpb.DaemonServiceClient, defID string) (string, bool) {
-	t.Helper()
-	runCtx, cancel := context.WithTimeout(ctx, 2*time.Minute)
-	defer cancel()
-	eventCh, err := helpers.Subscribe(runCtx, daemon, defID)
-	if err != nil {
-		// A denial that surfaces at RunMission open is still a denial.
-		return "", true
-	}
-	terminal, _, waitErr := helpers.WaitForTerminal(runCtx, eventCh, 90*time.Second)
-	if waitErr != nil {
-		return "", true
-	}
-	state := terminal.EventType
-	// Anything other than a clean completion is a refusal for our purposes.
-	return state, state != "mission_completed"
 }
 
 // listRunningAgents returns the caller-tenant's running instances.
