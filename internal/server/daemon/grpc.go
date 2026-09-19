@@ -474,11 +474,20 @@ func (d *daemonImpl) buildGRPCServer(ctx context.Context) (*grpcSubsystem, error
 		if !allow {
 			return ctx, false, nil
 		}
-		return auth.WithIdentity(ctx, auth.Identity{
+		id := auth.Identity{
 			Subject:        svid,
 			Issuer:         auth.Issuer("spiffe"),
 			CredentialType: auth.CredentialType("spiffe"),
-		}), true, nil
+		}
+		// The exit-test runner, in the fixture build only, asserts the tenant
+		// its tenant-scoped assertions run under. Every other peer keeps the
+		// zero tenant (e2e_peer_policy.go and its production stub).
+		if md, ok := grpcmetadata.FromIncomingContext(ctx); ok {
+			if t := e2ePeerTenant(svid, md); t != (auth.TenantID{}) {
+				id.Tenant = t
+			}
+		}
+		return auth.WithIdentity(ctx, id), true, nil
 	}
 
 	registryAwareUnary := func(ctx context.Context, req any, info *grpc.UnaryServerInfo, handler grpc.UnaryHandler) (any, error) {

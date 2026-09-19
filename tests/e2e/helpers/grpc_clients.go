@@ -39,9 +39,11 @@ import (
 
 	"github.com/spiffe/go-spiffe/v2/spiffetls/tlsconfig"
 	"github.com/spiffe/go-spiffe/v2/workloadapi"
+	"github.com/zeroroot-ai/sdk/auth"
 	"google.golang.org/grpc"
 	"google.golang.org/grpc/credentials"
 	"google.golang.org/grpc/credentials/insecure"
+	"google.golang.org/grpc/metadata"
 
 	daemonoperatorv1 "github.com/zeroroot-ai/gibson/internal/server/daemon/api/gibson/daemon/operator/v1"
 	sdktenantv1 "github.com/zeroroot-ai/gibson/internal/server/daemon/api/gibson/tenant/v1"
@@ -154,8 +156,9 @@ func DaemonGRPCAddr() string {
 // with the runner's SVID in the mesh and plaintext on a workstation (see
 // transportCredentials).
 //
-// The caller injects tenant/auth context via metadata.NewOutgoingContext when
-// making RPC calls.
+// A tenant placed on the context with auth.ContextWithTenant travels to the
+// daemon as x-gibson-identity-tenant (see tenantHeaderUnary), which is how
+// every tenant-scoped assertion in the suite names its tenant.
 func NewGRPCClients() (*GRPCClientSet, error) {
 	addr := DaemonGRPCAddr()
 
@@ -163,7 +166,11 @@ func NewGRPCClients() (*GRPCClientSet, error) {
 	if err != nil {
 		return nil, err
 	}
-	conn, err := grpc.NewClient(addr, grpc.WithTransportCredentials(creds))
+	conn, err := grpc.NewClient(addr,
+		grpc.WithTransportCredentials(creds),
+		grpc.WithUnaryInterceptor(tenantHeaderUnary),
+		grpc.WithStreamInterceptor(tenantHeaderStream),
+	)
 	if err != nil {
 		if source != nil {
 			_ = source.Close()
@@ -194,4 +201,26 @@ func MustNewGRPCClients(t *testing.T) *GRPCClientSet {
 		}
 	})
 	return clients
+}
+
+// withTenantHeader copies the tenant a test put on ctx with
+// auth.ContextWithTenant into the outgoing gRPC metadata as
+// x-gibson-identity-tenant. A Go context value never leaves the process;
+// before this, every tenant-scoped RPC in the suite reached the daemon with
+// no tenant and failed with FailedPrecondition (gibson#14, run 35413689180).
+// The daemon's fixture build reads the header for the runner's SVID only.
+func withTenantHeader(ctx context.Context) context.Context {
+	t, ok := auth.TenantFromContext(ctx)
+	if !ok || t == (auth.TenantID{}) {
+		return ctx
+	}
+	return metadata.AppendToOutgoingContext(ctx, auth.HeaderTenant, t.String())
+}
+
+func tenantHeaderUnary(ctx context.Context, method string, req, reply any, cc *grpc.ClientConn, invoker grpc.UnaryInvoker, opts ...grpc.CallOption) error {
+	return invoker(withTenantHeader(ctx), method, req, reply, cc, opts...)
+}
+
+func tenantHeaderStream(ctx context.Context, desc *grpc.StreamDesc, cc *grpc.ClientConn, method string, streamer grpc.Streamer, opts ...grpc.CallOption) (grpc.ClientStream, error) {
+	return streamer(withTenantHeader(ctx), desc, cc, method, opts...)
 }
