@@ -103,13 +103,15 @@ func (s *bankServer) tenant(ctx context.Context) (string, error) {
 }
 
 // caller resolves the identity that made the request. A bank needs one,
-// because ownership is what decides who may change it later.
+// because ownership is what decides who may change it later. The id is the
+// one the FGA checks read (principalIDFromIdentity), so the owner tuple
+// CreateBank writes is the tuple authorize finds.
 func (s *bankServer) caller(ctx context.Context) (string, error) {
 	id, err := auth.IdentityFromContext(ctx)
 	if err != nil || id.Subject == "" {
 		return "", status.Error(codes.PermissionDenied, "no caller identity in context")
 	}
-	return id.Subject, nil
+	return principalIDFromIdentity(id), nil
 }
 
 // CreateBank declares a bank and writes the tuples that say who owns it.
@@ -344,6 +346,17 @@ func fgaUserFromIdentity(id auth.Identity) string {
 		}
 	}
 	return "user:" + strings.TrimPrefix(id.Subject, "spiffe://")
+}
+
+// principalIDFromIdentity is the id a bank or job records for its caller: the
+// FGA user without the "user:" type, and a typed principal ref unchanged. The
+// tuple writers put "user:" back, so what CreateBank and OpenJob write is what
+// authorize reads. Recording the raw subject instead wrote
+// "user:spiffe://<id>" for a SPIFFE caller while every check asked for
+// "user:<id>", and the caller could not read the bank it had just created
+// (gibson#13, run 35443640498).
+func principalIDFromIdentity(id auth.Identity) string {
+	return strings.TrimPrefix(fgaUserFromIdentity(id), "user:")
 }
 
 // checkMemberCap refuses a desired count above the tenant's agent ceiling.
