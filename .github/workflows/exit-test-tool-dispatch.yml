@@ -215,6 +215,10 @@ jobs:
         working-directory: hosted
         run: |
           set -euo pipefail
+          # The e2eRunner values register the runner's ClusterSPIFFEID,
+          # allow-list its SVID, and set GIBSON_TEST_FIXTURES_ENABLED on the
+          # daemon (charts#142): the chart has no gibson.extraEnv seam, so
+          # the parameter that used to be here never reached the daemon.
           # The e2eRunner values register the runner's ClusterSPIFFEID and
           # allow-list its SVID on the daemon's gRPC listener. Without them the
           # runner has no identity and the daemon closes its connection: the
@@ -225,8 +229,7 @@ jobs:
               {"op":"add","path":"/spec/source/helm/parameters/-","value":{"name":"gibson-workloads.gibson.image.repository","value":"ghcr.io/zeroroot-ai/gibson","forceString":true}},
               {"op":"add","path":"/spec/source/helm/parameters/-","value":{"name":"gibson-workloads.gibson.image.tag","value":"e2e-tool","forceString":true}},
               {"op":"add","path":"/spec/source/helm/parameters/-","value":{"name":"gibson-workloads.gibson.image.pullPolicy","value":"IfNotPresent","forceString":true}},
-              {"op":"add","path":"/spec/source/helm/parameters/-","value":{"name":"gibson-workloads.gibson.authz.enabled","value":"false"}},
-              {"op":"add","path":"/spec/source/helm/parameters/-","value":{"name":"gibson-workloads.gibson.extraEnv.GIBSON_TEST_FIXTURES_ENABLED","value":"true","forceString":true}}
+              {"op":"add","path":"/spec/source/helm/parameters/-","value":{"name":"gibson-workloads.gibson.authz.enabled","value":"false"}}
             ]'
 
           for i in $(seq 1 60); do
