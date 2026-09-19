@@ -91,12 +91,12 @@ func TestSandboxedAgentDispatch(t *testing.T) {
 	ctxA := auth.ContextWithTenantString(context.Background(), dispatchTenant)
 
 	// Register the synthetic target both tenants' missions reference.
-	targetID, err := helpers.RegisterTestTarget(context.Background(), dispatchTargetName, dispatchTargetURL)
+	targetID, err := helpers.RegisterTestTarget(ctxA, clients.Daemon, dispatchTargetName, dispatchTargetURL)
 	require.NoError(t, err, "register synthetic target")
 	t.Cleanup(func() {
 		c, cancel := context.WithTimeout(context.Background(), 15*time.Second)
 		defer cancel()
-		helpers.DeleteTestTarget(c, targetID, dispatchTargetName)
+		helpers.DeleteTestTarget(auth.ContextWithTenantString(c, dispatchTenant), clients.Daemon, targetID)
 	})
 
 	// The provisioned tenant starts with zerocool DISABLED, so the denial

@@ -47,8 +47,14 @@ func (e MissionEvent) String() string {
 // IsTerminal reports whether the event signals the end of a mission run.
 // Terminal events: "mission_completed" and "mission_failed".
 func (e MissionEvent) IsTerminal() bool {
+	// A stream_error is terminal for the client: the daemon ended the run
+	// stream with a status and nothing follows it. Before it was listed here
+	// WaitForTerminal dropped it and reported the stream as closed with no
+	// terminal event, which hid every RunMission status from the exit tests
+	// (gibson#14, run 35421412151: "target not found" read as a closed stream).
 	return strings.EqualFold(e.EventType, "mission_completed") ||
-		strings.EqualFold(e.EventType, "mission_failed")
+		strings.EqualFold(e.EventType, "mission_failed") ||
+		strings.EqualFold(e.EventType, "stream_error")
 }
 
 // ErrStreamDeadlineExceeded is returned by WaitForTerminal when the deadline
