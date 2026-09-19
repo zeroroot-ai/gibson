@@ -178,11 +178,13 @@ func TestToolDispatch(t *testing.T) {
 		eventCh, err := helpers.Subscribe(runCtx, clients.Daemon, defID, targetID)
 		require.NoError(t, err, "RunMission open for the enabled tenant")
 
-		terminal, _, waitErr := helpers.WaitForTerminal(runCtx, eventCh, 8*time.Minute)
+		terminal, collected, waitErr := helpers.WaitForTerminal(runCtx, eventCh, 8*time.Minute)
 		require.NoError(t, waitErr, "the tool mission must reach a terminal state")
+		// The mission-level error is a summary ("a work item failed"); the node
+		// that failed says why, and that is what the next diagnosis needs.
 		require.Equal(t, "mission_completed", terminal.EventType,
-			"an enabled tenant's tool mission must complete; got %q (error: %s)",
-			terminal.EventType, terminal.Error)
+			"an enabled tenant's tool mission must complete; got %q (reason: %s)",
+			terminal.EventType, failureReason(terminal, collected))
 	})
 }
 

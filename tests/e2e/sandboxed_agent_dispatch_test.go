@@ -38,6 +38,7 @@ package e2e
 
 import (
 	"context"
+	"fmt"
 	"testing"
 	"time"
 
@@ -168,7 +169,7 @@ func TestSandboxedAgentDispatch(t *testing.T) {
 
 		// The dispatch launches an ephemeral sandbox; the instance appears in this
 		// tenant's console, backed by a real setec sandbox id.
-		running := waitForRunningAgent(t, ctxA, console, zerocoolAgentName, 3*time.Minute)
+		running := waitForRunningAgent(t, ctxA, console, zerocoolAgentName, eventCh, 3*time.Minute)
 		require.NotEmpty(t, running.GetSandboxId(),
 			"a sandboxed dispatch must carry the backing setec sandbox id")
 
@@ -219,20 +220,47 @@ func listRunningAgents(t *testing.T, ctx context.Context, console agentconsolev1
 }
 
 // waitForRunningAgent polls the console until a running instance of agentName
-// appears, or fails after the deadline.
-func waitForRunningAgent(t *testing.T, ctx context.Context, console agentconsolev1.AgentConsoleServiceClient, agentName string, deadline time.Duration) *agentconsolev1.RunningAgent {
+// appears. It fails at once when the mission stream ends first, naming the
+// node's reason: a run the gate refused never reaches the console, and three
+// silent minutes said nothing about why (gibson#14).
+func waitForRunningAgent(t *testing.T, ctx context.Context, console agentconsolev1.AgentConsoleServiceClient, agentName string, events <-chan helpers.MissionEvent, deadline time.Duration) *agentconsolev1.RunningAgent {
 	t.Helper()
+	running, err := runningAgentOrFailure(ctx, func() []*agentconsolev1.RunningAgent {
+		return listRunningAgents(t, ctx, console)
+	}, agentName, events, deadline)
+	if err != nil {
+		t.Fatal(err)
+	}
+	return running
+}
+
+// runningAgentOrFailure is waitForRunningAgent's decision, split from the
+// console client so it is testable: the first of a running instance, a
+// terminal mission event, or the deadline decides.
+func runningAgentOrFailure(ctx context.Context, list func() []*agentconsolev1.RunningAgent, agentName string, events <-chan helpers.MissionEvent, deadline time.Duration) (*agentconsolev1.RunningAgent, error) {
 	stop := time.Now().Add(deadline)
+	var collected []helpers.MissionEvent
 	for time.Now().Before(stop) {
-		for _, a := range listRunningAgents(t, ctx, console) {
+		for _, a := range list() {
 			if a.GetAgentName() == agentName {
-				return a
+				return a, nil
 			}
 		}
-		time.Sleep(3 * time.Second)
+		select {
+		case ev, ok := <-events:
+			if !ok {
+				return nil, fmt.Errorf("the mission stream closed before a running %q instance appeared (reason: %s)", agentName, failureReason(helpers.MissionEvent{}, collected))
+			}
+			collected = append(collected, ev)
+			if ev.IsTerminal() {
+				return nil, fmt.Errorf("the mission ended (%s) before a running %q instance appeared (reason: %s)", ev.EventType, agentName, failureReason(ev, collected))
+			}
+		case <-ctx.Done():
+			return nil, ctx.Err()
+		case <-time.After(3 * time.Second):
+		}
 	}
-	t.Fatalf("no running %q instance appeared in the console within %s", agentName, deadline)
-	return nil
+	return nil, fmt.Errorf("no running %q instance appeared in the console within %s", agentName, deadline)
 }
 
 // requireInstanceTornDown polls until the named run id is no longer listed —
