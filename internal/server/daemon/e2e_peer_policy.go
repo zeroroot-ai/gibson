@@ -41,8 +41,11 @@ const e2eRunnerSVID = "spiffe://zeroroot.ai/platform/e2e-runner"
 // It is deliberately NOT "allow everything". An e2e suite that can call any RPC
 // stops being able to prove that a denial is a denial — if the harness has more
 // authority than the thing under test, a passing assertion says nothing. These
-// are the RPCs tests/e2e/tool_dispatch_test.go and
-// tests/e2e/sandboxed_agent_dispatch_test.go actually use.
+// are the RPCs tests/e2e/tool_dispatch_test.go,
+// tests/e2e/sandboxed_agent_dispatch_test.go and tests/e2e/bank_test.go
+// actually use. A suite that calls an RPC not listed here is denied at the
+// daemon with PermissionDenied naming the method, which is how the bank exit
+// test read on every run since it landed (gibson#13, run 35436962740).
 func e2ePeerMethodPolicies() map[string]map[string]bool {
 	return map[string]map[string]bool{
 		e2eRunnerSVID: {
@@ -62,6 +65,20 @@ func e2ePeerMethodPolicies() map[string]map[string]bool {
 			// The live console assertions (tenant-scoped visibility).
 			"/gibson.daemon.agentconsole.v1.AgentConsoleService/ListRunningAgents": true,
 			"/gibson.daemon.agentconsole.v1.AgentConsoleService/StreamAgentEvents": true,
+			// The bank exit test (ADR-0019): the tenant's provider key goes in
+			// through the RPC, a bank of two comes up, one job opens and closes
+			// with a verdict, a stranger tenant reads NotFound, and the bank
+			// scales to zero.
+			"/gibson.tenant.v1.ProviderService/CreateProvider": true,
+			"/gibson.tenant.v1.ProviderService/DeleteProvider": true,
+			"/gibson.bank.v1.BankService/CreateBank":           true,
+			"/gibson.bank.v1.BankService/GetBank":              true,
+			"/gibson.bank.v1.BankService/UpdateBank":           true,
+			"/gibson.bank.v1.BankService/DeleteBank":           true,
+			"/gibson.bank.v1.BankService/ListMembers":          true,
+			"/gibson.job.v1.JobService/OpenJob":                true,
+			"/gibson.job.v1.JobService/GetJob":                 true,
+			"/gibson.job.v1.JobService/CloseJob":               true,
 		},
 	}
 }
