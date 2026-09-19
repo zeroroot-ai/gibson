@@ -429,6 +429,23 @@ jobs:
             kubectl get clusterspiffeids.spire.spiffe.io 2>/dev/null | grep -i e2e || echo "NO e2e-runner ClusterSPIFFEID"
             exit 1
           fi
+          # The suite's last step scales the bank to zero, which removes the
+          # member sandboxes before the diagnostics step runs, so a member
+          # that never reported left no log behind (run 35455428214). Collect
+          # every sandbox pod's log while the suite runs; diagnostics prints
+          # the files.
+          mkdir -p /tmp/sbx-logs
+          (
+            while true; do
+              for p in $(kubectl -n setec-sandboxes get pods -o name 2>/dev/null); do
+                n=${p#pod/}
+                kubectl -n setec-sandboxes logs "$p" --all-containers --tail=-1 > "/tmp/sbx-logs/$n.log" 2>/dev/null || true
+                kubectl -n setec-sandboxes describe "$p" 2>/dev/null | grep -A20 '^Events' > "/tmp/sbx-logs/$n.events" || true
+              done
+              sleep 15
+            done
+          ) &
+          echo $! > /tmp/sbx-logs/.collector.pid
           kubectl -n "$NS" logs -f job/gibson-e2e-bank --tail=-1 || true
 
           for _ in $(seq 1 240); do
@@ -448,9 +465,11 @@ jobs:
           kubectl -n setec-system get pods,sandboxes,sandboxclasses || true
           kubectl -n setec-sandboxes get pods || true
           # A member that never reported: its pod's events and log say why.
-          for p in $(kubectl -n setec-sandboxes get pods -o name 2>/dev/null); do
-            echo "--- $p"
-            kubectl -n setec-sandboxes describe "$p" | grep -A20 '^Events' || true
-            kubectl -n setec-sandboxes logs "$p" --all-containers --tail=80 || true
+          # The suite step collected them while the pods lived.
+          [ -f /tmp/sbx-logs/.collector.pid ] && kill "$(cat /tmp/sbx-logs/.collector.pid)" 2>/dev/null || true
+          for f in /tmp/sbx-logs/*.events /tmp/sbx-logs/*.log; do
+            [ -f "$f" ] || continue
+            echo "--- $f"
+            tail -n 120 "$f"
           done
           kubectl -n "$NS" logs -l app.kubernetes.io/component=daemon -c gibson --tail=1500 || true
