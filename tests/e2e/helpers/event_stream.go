@@ -22,6 +22,7 @@ import (
 	"testing"
 	"time"
 
+	commonpb "github.com/zeroroot-ai/sdk/api/gen/gibson/common/v1"
 	daemonpb "github.com/zeroroot-ai/sdk/api/gen/gibson/daemon/v1"
 )
 
@@ -118,7 +119,7 @@ func Subscribe(ctx context.Context, client daemonpb.DaemonServiceClient, mission
 			}
 
 			evt := MissionEvent{
-				EventType: resp.GetEventType(),
+				EventType: normalizeEventType(resp.GetEventType(), resp.GetData()),
 				MissionID: resp.GetMissionId(),
 				NodeID:    resp.GetNodeId(),
 				Message:   resp.GetMessage(),
@@ -340,4 +341,29 @@ func last5(events []MissionEvent) []string {
 		out = append(out, e.EventType)
 	}
 	return out
+}
+
+// normalizeEventType maps what the daemon streams onto the names this package
+// waits for. The orchestrator emits dotted types ("mission.completed",
+// "mission.failed"); the timeline lifecycle projector emits "status" with the
+// status in the data map (running | completed | failed), and it is the event
+// the daemon ends the stream on. Without this mapping WaitForTerminal saw
+// every run end with no terminal event (gibson#14, run 35423738984).
+func normalizeEventType(eventType string, data *commonpb.TypedMap) string {
+	switch eventType {
+	case "mission.completed":
+		return "mission_completed"
+	case "mission.failed":
+		return "mission_failed"
+	case "status":
+		if data != nil {
+			switch data.GetEntries()["status"].GetStringValue() {
+			case "completed":
+				return "mission_completed"
+			case "failed":
+				return "mission_failed"
+			}
+		}
+	}
+	return eventType
 }
