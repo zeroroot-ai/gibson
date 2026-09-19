@@ -118,7 +118,7 @@ func TestMemberLauncher_LaunchesWithTheBaseGrantAndTheMemberContract(t *testing.
 	req := client.launched[0]
 	for k, want := range map[string]string{
 		envMemberID: "m-1", envBankID: "bank-1", envPlatformURL: "https://app.zeroroot.example",
-		envLoginShape: "api_key", envClaudeModel: "claude-opus-4", envJobCap: "2",
+		envLoginShape: "api-key", envClaudeModel: "claude-opus-4", envJobCap: "2",
 		envJobStaleLimitMS: "5400000", envHeartbeatMS: "10000",
 		"GIBSON_INSTANCE_MODE": "member", "GIBSON_CALLBACK_ENDPOINT": "callback.gibson:443",
 		"GIBSON_MISSION_ID": "bank-1", "GIBSON_MISSION_RUN_ID": launched.MissionRunID, "GIBSON_MODEL": "claude-opus-4",
