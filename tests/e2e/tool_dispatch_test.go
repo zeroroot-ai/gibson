@@ -103,12 +103,12 @@ func TestToolDispatch(t *testing.T) {
 	ctxEnabled := auth.ContextWithTenantString(context.Background(), toolTenant)
 
 	// Register the synthetic target the missions reference.
-	targetID, err := helpers.RegisterTestTarget(context.Background(), toolTargetName, toolTargetURL)
+	targetID, err := helpers.RegisterTestTarget(ctxEnabled, clients.Daemon, toolTargetName, toolTargetURL)
 	require.NoError(t, err, "register synthetic target")
 	t.Cleanup(func() {
 		c, cancel := context.WithTimeout(context.Background(), 15*time.Second)
 		defer cancel()
-		helpers.DeleteTestTarget(c, targetID, toolTargetName)
+		helpers.DeleteTestTarget(auth.ContextWithTenantString(c, toolTenant), clients.Daemon, targetID)
 	})
 
 	// The provisioned tenant starts with the tool DISABLED: the denial below

@@ -13,6 +13,7 @@ import (
 	"os"
 	"path/filepath"
 	"testing"
+	"time"
 )
 
 // TestResolveSPIFFESocket is the gibson#14 fixture: a mounted socket
@@ -50,5 +51,27 @@ func TestWithTenantHeader(t *testing.T) {
 	}
 	if _, ok := metadata.FromOutgoingContext(withTenantHeader(context.Background())); ok {
 		t.Fatal("a context with no tenant must add no metadata")
+	}
+}
+
+// TestWaitForTerminal_StreamErrorIsTerminal: a stream_error ends the wait
+// with the event itself, so the caller sees the daemon's status instead of a
+// closed stream.
+func TestWaitForTerminal_StreamErrorIsTerminal(t *testing.T) {
+	ch := make(chan MissionEvent, 2)
+	ch <- MissionEvent{EventType: "node_started"}
+	ch <- MissionEvent{EventType: "stream_error", Error: "rpc error: code = Internal desc = failed to start mission: target not found"}
+	close(ch)
+	terminal, collected, err := WaitForTerminal(context.Background(), ch, time.Second)
+	if err != nil {
+		t.Fatalf("WaitForTerminal: %v", err)
+	}
+	if terminal.EventType != "stream_error" || len(collected) != 2 {
+		t.Fatalf("terminal = %+v collected = %d", terminal, len(collected))
+	}
+	closed := make(chan MissionEvent)
+	close(closed)
+	if _, _, err := WaitForTerminal(context.Background(), closed, time.Second); err != ErrStreamClosed {
+		t.Fatalf("closed channel: %v", err)
 	}
 }

@@ -45,6 +45,13 @@ func e2ePeerMethodPolicies() map[string]map[string]bool {
 			// Per-tenant enablement — the gate the tool/agent tests toggle.
 			"/gibson.tenant.v1.MembershipService/SetCatalogEnabled": true,
 			// Mission definition + run: how a tool or agent is actually dispatched.
+			// The synthetic scan target the suite runs its missions against.
+			// It is created through the API, never written into Redis: the
+			// state client keys every tenant's targets under its own prefix,
+			// and a document planted at the raw key is "not found" to the run
+			// (gibson#14, run 35421412151).
+			"/gibson.daemon.v1.DaemonService/CreateTarget":            true,
+			"/gibson.daemon.v1.DaemonService/DeleteTarget":            true,
 			"/gibson.daemon.v1.DaemonService/CreateMissionDefinition": true,
 			"/gibson.daemon.v1.DaemonService/RunMission":              true,
 			"/gibson.daemon.v1.DaemonService/GetMission":              true,
