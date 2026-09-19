@@ -220,13 +220,15 @@ jobs:
           # The e2e runner is a mesh peer: the e2eRunner values mint its SVID and
           # allow-list it on the daemon's gRPC listener, which refuses plaintext
           # (zero-trust-hardening Req 1.2). Same shape as exit-test-bank.
+          # The e2eRunner values also set GIBSON_TEST_FIXTURES_ENABLED on the
+          # daemon (charts#142): the chart has no gibson.extraEnv seam, so the
+          # parameter that used to be here never reached the daemon.
           kubectl -n argocd patch application gibson --type json -p '[
               {"op":"add","path":"/spec/source/helm/values","value":"gibson-workloads:\n  gibson:\n    e2eRunner:\n      enabled: true\n  spiffe:\n    allowedPeerIDs:\n      - spiffe://zeroroot.ai/platform/tenant-operator\n      - spiffe://zeroroot.ai/platform/connector-operator\n      - spiffe://zeroroot.ai/platform/e2e-runner\n"},
               {"op":"add","path":"/spec/source/helm/parameters/-","value":{"name":"gibson-workloads.gibson.image.repository","value":"ghcr.io/zeroroot-ai/gibson","forceString":true}},
               {"op":"add","path":"/spec/source/helm/parameters/-","value":{"name":"gibson-workloads.gibson.image.tag","value":"e2e-dispatch","forceString":true}},
               {"op":"add","path":"/spec/source/helm/parameters/-","value":{"name":"gibson-workloads.gibson.image.pullPolicy","value":"IfNotPresent","forceString":true}},
-              {"op":"add","path":"/spec/source/helm/parameters/-","value":{"name":"gibson-workloads.gibson.authz.enabled","value":"false"}},
-              {"op":"add","path":"/spec/source/helm/parameters/-","value":{"name":"gibson-workloads.gibson.extraEnv.GIBSON_TEST_FIXTURES_ENABLED","value":"true","forceString":true}}
+              {"op":"add","path":"/spec/source/helm/parameters/-","value":{"name":"gibson-workloads.gibson.authz.enabled","value":"false"}}
             ]'
 
           # Argo reconciles the spec change; wait for the StatefulSet to carry

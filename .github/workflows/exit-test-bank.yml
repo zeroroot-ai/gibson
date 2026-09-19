@@ -249,13 +249,15 @@ jobs:
           # a deploy-repo path leaves the app unrenderable — run 33699918935
           # reported sync status Unknown and the image never moved. Inline the
           # same settings as `helm.values`, which needs no path.
+          # The e2eRunner values also set GIBSON_TEST_FIXTURES_ENABLED on the
+          # daemon (charts#142): the chart has no gibson.extraEnv seam, so the
+          # parameter that used to be here never reached the daemon.
           kubectl -n argocd patch application gibson --type json -p '[
               {"op":"add","path":"/spec/source/helm/values","value":"gibson-workloads:\n  gibson:\n    e2eRunner:\n      enabled: true\n  spiffe:\n    allowedPeerIDs:\n      - spiffe://zeroroot.ai/platform/tenant-operator\n      - spiffe://zeroroot.ai/platform/connector-operator\n      - spiffe://zeroroot.ai/platform/e2e-runner\n"},
               {"op":"add","path":"/spec/source/helm/parameters/-","value":{"name":"gibson-workloads.gibson.image.repository","value":"ghcr.io/zeroroot-ai/gibson","forceString":true}},
               {"op":"add","path":"/spec/source/helm/parameters/-","value":{"name":"gibson-workloads.gibson.image.tag","value":"e2e-bank","forceString":true}},
               {"op":"add","path":"/spec/source/helm/parameters/-","value":{"name":"gibson-workloads.gibson.image.pullPolicy","value":"IfNotPresent","forceString":true}},
-              {"op":"add","path":"/spec/source/helm/parameters/-","value":{"name":"gibson-workloads.gibson.authz.enabled","value":"false"}},
-              {"op":"add","path":"/spec/source/helm/parameters/-","value":{"name":"gibson-workloads.gibson.extraEnv.GIBSON_TEST_FIXTURES_ENABLED","value":"true","forceString":true}}
+              {"op":"add","path":"/spec/source/helm/parameters/-","value":{"name":"gibson-workloads.gibson.authz.enabled","value":"false"}}
             ]'
 
           # Argo reconciles the spec change; wait for the StatefulSet to carry
