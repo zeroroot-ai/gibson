@@ -76,9 +76,6 @@ const (
 	// toolTenant is the tenant that enables and runs the tool. The sanctioned
 	// baseline profile always provisions "primary".
 	toolTenant = "primary"
-
-	// toolDeniedTenant never enables the tool. Its dispatch must be refused.
-	toolDeniedTenant = "e2e-tool-denied-tenant"
 )
 
 // The synthetic target every mission below scans. Loopback keeps the scan
@@ -104,9 +101,8 @@ func TestToolDispatch(t *testing.T) {
 	membership := tenantv1.NewMembershipServiceClient(clients.Conn())
 
 	ctxEnabled := auth.ContextWithTenantString(context.Background(), toolTenant)
-	ctxDenied := auth.ContextWithTenantString(context.Background(), toolDeniedTenant)
 
-	// Register the synthetic target both tenants' missions reference.
+	// Register the synthetic target the missions reference.
 	targetID, err := helpers.RegisterTestTarget(context.Background(), toolTargetName, toolTargetURL)
 	require.NoError(t, err, "register synthetic target")
 	t.Cleanup(func() {
@@ -115,7 +111,31 @@ func TestToolDispatch(t *testing.T) {
 		helpers.DeleteTestTarget(c, targetID, toolTargetName)
 	})
 
-	// Enable the tool for one tenant ONLY. toolDeniedTenant is never enabled.
+	// The provisioned tenant starts with the tool DISABLED: the denial below
+	// is the same per-tenant gate the happy path passes after enabling. The
+	// old test used a second tenant that was never provisioned, so its run
+	// failed at the data-plane check before the gate ever ran.
+	t.Run("the tool starts disabled for the tenant", func(t *testing.T) {
+		_, err := membership.SetCatalogEnabled(ctxEnabled, &tenantv1.SetCatalogEnabledRequest{
+			ComponentRef: toolComponentRef,
+			Enabled:      false,
+		})
+		require.NoError(t, err, "SetCatalogEnabled(%s, false) for %q", toolComponentRef, toolTenant)
+	})
+
+	// -----------------------------------------------------------------------
+	// Deterministic guarantee: a tenant that has not enabled the tool is
+	// denied. This is the property the deleted refresher used to break — it
+	// dispatched _system registry entries with no per-tenant check at all.
+	// -----------------------------------------------------------------------
+	t.Run("unenabled tenant is denied tool dispatch", func(t *testing.T) {
+		defID := createToolMissionDefinition(t, ctxEnabled, clients.Daemon, "tool-denied-e2e", toolName)
+		reason, denied := runMissionExpectingGateDenial(t, ctxEnabled, clients.Daemon, defID, targetID)
+		require.True(t, denied,
+			"a tenant that has not enabled %s must be denied by the gate; got %q", toolComponentRef, reason)
+	})
+
+	// Enable the tool for the tenant.
 	t.Run("enable the tool for one tenant", func(t *testing.T) {
 		_, err := membership.SetCatalogEnabled(ctxEnabled, &tenantv1.SetCatalogEnabledRequest{
 			ComponentRef: toolComponentRef,
@@ -134,28 +154,15 @@ func TestToolDispatch(t *testing.T) {
 	})
 
 	// -----------------------------------------------------------------------
-	// Deterministic guarantee: a tenant that never enabled the tool is denied.
-	// This is the property the deleted refresher used to break — it dispatched
-	// _system registry entries with no per-tenant check at all.
-	// -----------------------------------------------------------------------
-	t.Run("unenabled tenant is denied tool dispatch", func(t *testing.T) {
-		defID := createToolMissionDefinition(t, ctxDenied, clients.Daemon, "tool-denied-e2e", toolName)
-
-		terminal, denied := runMissionExpectingDenialOrFailure(t, ctxDenied, clients.Daemon, defID)
-		require.True(t, denied,
-			"a tenant that never enabled %s must be denied; got terminal state %q", toolComponentRef, terminal)
-	})
-
-	// -----------------------------------------------------------------------
 	// Deterministic guarantee: a tool in no manifest never dispatches, however
 	// the calling tenant is configured. There is no second path to a tool.
 	// -----------------------------------------------------------------------
 	t.Run("a tool in no manifest never dispatches", func(t *testing.T) {
 		defID := createToolMissionDefinition(t, ctxEnabled, clients.Daemon, "tool-absent-e2e", absentToolName)
 
-		terminal, denied := runMissionExpectingDenialOrFailure(t, ctxEnabled, clients.Daemon, defID)
+		reason, denied := runMissionExpectingGateDenial(t, ctxEnabled, clients.Daemon, defID, targetID)
 		require.True(t, denied,
-			"a tool with no catalog manifest must never run, even for an enabled tenant; got %q", terminal)
+			"a tool with no catalog manifest must never run, even for an enabled tenant; got %q", reason)
 	})
 
 	// -----------------------------------------------------------------------
@@ -168,7 +175,7 @@ func TestToolDispatch(t *testing.T) {
 
 		runCtx, cancelRun := context.WithTimeout(ctxEnabled, 10*time.Minute)
 		defer cancelRun()
-		eventCh, err := helpers.Subscribe(runCtx, clients.Daemon, defID)
+		eventCh, err := helpers.Subscribe(runCtx, clients.Daemon, defID, targetID)
 		require.NoError(t, err, "RunMission open for the enabled tenant")
 
 		terminal, _, waitErr := helpers.WaitForTerminal(runCtx, eventCh, 8*time.Minute)

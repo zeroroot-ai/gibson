@@ -68,13 +68,15 @@ var ErrStreamClosed = errors.New("event_stream: stream closed without terminal e
 // NFR Reliability: no raw blocking reads. The goroutine is bounded by ctx.
 //
 // Requirements: R1.5, R1.6.
-func Subscribe(ctx context.Context, client daemonpb.DaemonServiceClient, missionID string) (<-chan MissionEvent, error) {
+func Subscribe(ctx context.Context, client daemonpb.DaemonServiceClient, missionDefinitionID, targetID string) (<-chan MissionEvent, error) {
+	// The daemon refuses a run with no target (InvalidArgument "target_id is
+	// required"). Before targetID was a parameter every RunMission opened by
+	// this helper ended at once with that status, which WaitForTerminal saw as
+	// a closed stream; the exit tests registered a target and never sent it
+	// (gibson#14, run 35418825329).
 	stream, err := client.RunMission(ctx, &daemonpb.RunMissionRequest{
-		MissionDefinitionId: missionID, // RunMission takes the run's mission ID in this field
-		// Note: RunMission actually takes missionDefinitionId + targetId to start a run.
-		// For the Subscribe use-case (post-CreateMission), we use the Subscribe RPC instead.
-		// This function wraps the RunMission stream — see SubscribeToMission for the
-		// post-CreateMission streaming consumer.
+		MissionDefinitionId: missionDefinitionID,
+		TargetId:            targetID,
 	})
 	if err != nil {
 		return nil, fmt.Errorf("event_stream: Subscribe: RunMission open: %w", err)
@@ -101,7 +103,7 @@ func Subscribe(ctx context.Context, client daemonpb.DaemonServiceClient, mission
 				select {
 				case ch <- MissionEvent{
 					EventType: "stream_error",
-					MissionID: missionID,
+					MissionID: missionDefinitionID,
 					Error:     recvErr.Error(),
 				}:
 				case <-ctx.Done():
