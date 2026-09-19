@@ -15,5 +15,14 @@
 
 package daemon
 
+import (
+	"github.com/zeroroot-ai/sdk/auth"
+	grpcmetadata "google.golang.org/grpc/metadata"
+)
+
 // e2ePeerMethodPolicies returns nothing in a production build.
 func e2ePeerMethodPolicies() map[string]map[string]bool { return nil }
+
+// e2ePeerTenant never yields a tenant in a production build: no SPIFFE peer
+// may assert a tenant through a header on a direct dial.
+func e2ePeerTenant(string, grpcmetadata.MD) auth.TenantID { return auth.TenantID{} }

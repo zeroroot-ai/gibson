@@ -178,6 +178,22 @@ func looseIdentityFromMD(ctx context.Context) (context.Context, error) {
 	return auth.WithIdentity(ctx, id), nil
 }
 
+// spiffePeerIdentity is the identity a direct-dial SPIFFE peer acts as: its
+// SVID, and no tenant, because a platform SVID names a component. The one
+// exception is the exit-test runner in the fixture build, which asserts the
+// tenant of its tenant-scoped assertions through x-gibson-identity-tenant;
+// e2ePeerTenant yields the zero tenant for every other peer and in every
+// production build (e2e_peer_policy.go and its stub).
+func spiffePeerIdentity(ctx context.Context, svid string) auth.Identity {
+	md, _ := grpcmetadata.FromIncomingContext(ctx)
+	return auth.Identity{
+		Subject:        svid,
+		Issuer:         auth.Issuer("spiffe"),
+		CredentialType: auth.CredentialType("spiffe"),
+		Tenant:         e2ePeerTenant(svid, md),
+	}
+}
+
 // spiffeBypassFunc matches the signature of the spiffePlatformBypass closure
 // built in buildGRPCServer: given the request context and the fully-
 // qualified gRPC method, it returns an augmented context and ok=true when a
@@ -474,11 +490,7 @@ func (d *daemonImpl) buildGRPCServer(ctx context.Context) (*grpcSubsystem, error
 		if !allow {
 			return ctx, false, nil
 		}
-		return auth.WithIdentity(ctx, auth.Identity{
-			Subject:        svid,
-			Issuer:         auth.Issuer("spiffe"),
-			CredentialType: auth.CredentialType("spiffe"),
-		}), true, nil
+		return auth.WithIdentity(ctx, spiffePeerIdentity(ctx, svid)), true, nil
 	}
 
 	registryAwareUnary := func(ctx context.Context, req any, info *grpc.UnaryServerInfo, handler grpc.UnaryHandler) (any, error) {

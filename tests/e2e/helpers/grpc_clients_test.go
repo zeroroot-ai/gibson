@@ -7,6 +7,9 @@
 package helpers
 
 import (
+	"context"
+	"github.com/zeroroot-ai/sdk/auth"
+	"google.golang.org/grpc/metadata"
 	"os"
 	"path/filepath"
 	"testing"
@@ -33,5 +36,19 @@ func TestResolveSPIFFESocket(t *testing.T) {
 	}
 	if got, err := resolveSPIFFESocket("", filepath.Join(dir, "absent")); err != nil || got != "" {
 		t.Fatalf("no mount: got %q %v, want plaintext", got, err)
+	}
+}
+
+// TestWithTenantHeader: the tenant a test puts on the context reaches the
+// wire as x-gibson-identity-tenant, and a context with no tenant adds no
+// header.
+func TestWithTenantHeader(t *testing.T) {
+	ctx := withTenantHeader(auth.ContextWithTenantString(context.Background(), "acme"))
+	md, ok := metadata.FromOutgoingContext(ctx)
+	if !ok || len(md.Get(auth.HeaderTenant)) != 1 || md.Get(auth.HeaderTenant)[0] != "acme" {
+		t.Fatalf("outgoing metadata = %v", md)
+	}
+	if _, ok := metadata.FromOutgoingContext(withTenantHeader(context.Background())); ok {
+		t.Fatal("a context with no tenant must add no metadata")
 	}
 }

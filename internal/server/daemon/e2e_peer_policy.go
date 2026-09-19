@@ -21,6 +21,11 @@
 
 package daemon
 
+import (
+	"github.com/zeroroot-ai/sdk/auth"
+	grpcmetadata "google.golang.org/grpc/metadata"
+)
+
 // e2eRunnerSVID is the exit-test suite's identity. The deploy chart registers a
 // ClusterSPIFFEID for the runner's ServiceAccount that mints exactly this ID,
 // and lists it in allowedPeerIDs for the kind test profile only.
@@ -48,4 +53,28 @@ func e2ePeerMethodPolicies() map[string]map[string]bool {
 			"/gibson.daemon.agentconsole.v1.AgentConsoleService/StreamAgentEvents": true,
 		},
 	}
+}
+
+// e2ePeerTenant is the tenant the exit-test runner asserts for a tenant-scoped
+// RPC. A direct-dial SPIFFE peer gets an identity with no tenant (its SVID
+// names a platform component, not a tenant), and the suite's assertions are
+// tenant-scoped by design: it enables a tool for one tenant and proves the
+// other is denied. So the runner, and only the runner, carries the tenant in
+// x-gibson-identity-tenant, the header ext-authz would set on the edge path,
+// and the daemon takes it at face value because the SVID already proves who
+// is asking and this file exists only in the fixture build. A malformed or
+// absent header yields the zero tenant, which the handler refuses as before.
+func e2ePeerTenant(svid string, md grpcmetadata.MD) auth.TenantID {
+	if svid != e2eRunnerSVID {
+		return auth.TenantID{}
+	}
+	vals := md.Get(auth.HeaderTenant)
+	if len(vals) == 0 || vals[0] == "" {
+		return auth.TenantID{}
+	}
+	t, err := auth.NewTenantID(vals[0])
+	if err != nil {
+		return auth.TenantID{}
+	}
+	return t
 }
