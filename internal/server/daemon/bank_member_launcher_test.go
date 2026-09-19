@@ -118,7 +118,7 @@ func TestMemberLauncher_LaunchesWithTheBaseGrantAndTheMemberContract(t *testing.
 	req := client.launched[0]
 	for k, want := range map[string]string{
 		envMemberID: "m-1", envBankID: "bank-1", envPlatformURL: "https://app.zeroroot.example",
-		envLoginShape: "api_key", envClaudeModel: "claude-opus-4", envJobCap: "2",
+		envLoginShape: "api-key", envClaudeModel: "claude-opus-4", envJobCap: "2",
 		envJobStaleLimitMS: "5400000", envHeartbeatMS: "10000",
 		"GIBSON_INSTANCE_MODE": "member", "GIBSON_CALLBACK_ENDPOINT": "callback.gibson:443",
 		"GIBSON_MISSION_ID": "bank-1", "GIBSON_MISSION_RUN_ID": launched.MissionRunID, "GIBSON_MODEL": "claude-opus-4",
@@ -227,6 +227,24 @@ func TestMemberEnv_CarriesTheContract(t *testing.T) {
 	}
 	if env[envJobCap] != "2" || env[envJobStaleLimitMS] != "5400000" || env[envMemberID] != "m-9" {
 		t.Errorf("env = %v", env)
+	}
+}
+
+// TestMemberLoginShape_SpeaksTheDriverVocabulary pins ZEROCOOL_LOGIN_SHAPE to
+// the set the member driver accepts (packages/claude-member/README.md). gibson
+// stores the API key shape as "api_key"; the driver exits on it (gibson#13).
+func TestMemberLoginShape_SpeaksTheDriverVocabulary(t *testing.T) {
+	accepted := map[string]bool{"api-key": true, "subscription": true, "bedrock": true, "vertex": true, "foundry": true}
+	for _, shape := range []bank.LoginShape{bank.LoginShapeAPIKey, bank.LoginShapeSubscription, bank.LoginShapeBedrock, bank.LoginShapeVertex, bank.LoginShapeFoundry} {
+		got := memberLoginShape(shape)
+		if !accepted[got] {
+			t.Errorf("login shape %q renders as %q, which the member driver refuses", shape, got)
+		}
+	}
+	b := testBankForLaunch()
+	b.LoginShape = bank.LoginShapeAPIKey
+	if env := memberEnv(b, "m-9", ""); env[envLoginShape] != "api-key" {
+		t.Errorf("%s = %q, want api-key", envLoginShape, env[envLoginShape])
 	}
 }
 
