@@ -1,5 +1,46 @@
 # Changelog
 
+## [0.138.0](https://github.com/zeroroot-ai/gibson/compare/v0.137.0...v0.138.0) (2026-09-19)
+
+
+### Features
+
+* **component:** stream secret revocation and rotation to the running plugin ([#157](https://github.com/zeroroot-ai/gibson/issues/157)) ([2899438](https://github.com/zeroroot-ai/gibson/commit/2899438625adf46481cf5db4bd928d45174d76ec))
+
+
+### Bug Fixes
+
+* **backup:** keep the postgres password off the pg_dump argv ([#147](https://github.com/zeroroot-ai/gibson/issues/147)) ([a1781d8](https://github.com/zeroroot-ai/gibson/commit/a1781d801873b2a57e7eed85a4efd462e96d324e))
+* **backup:** validate cypher labels and types before the restore query ([#146](https://github.com/zeroroot-ai/gibson/issues/146)) ([cd6eecb](https://github.com/zeroroot-ai/gibson/commit/cd6eecbb2ffda57739d266b43fcf82a76c1896d5))
+* **bank:** a launching member gets a launch timeout, not the heartbeat timeout ([#179](https://github.com/zeroroot-ai/gibson/issues/179)) ([fb941aa](https://github.com/zeroroot-ai/gibson/commit/fb941aa47e48002e9ff3954ccba31e69507c883b)), closes [#13](https://github.com/zeroroot-ai/gibson/issues/13)
+* **belief:** bind loopback and keep exception text out of the response ([#150](https://github.com/zeroroot-ai/gibson/issues/150)) ([0364a0f](https://github.com/zeroroot-ai/gibson/commit/0364a0f148c6fefc29884db478d64c13b0b901fb))
+* **ci:** test containers pull from the org mirror, not docker hub ([#145](https://github.com/zeroroot-ai/gibson/issues/145)) ([446290a](https://github.com/zeroroot-ai/gibson/commit/446290ae31fe5b4c2fa67f0b7804251de2011b2a))
+* **ci:** the exit tests stop setting a fixture flag through a seam the chart never had ([#171](https://github.com/zeroroot-ai/gibson/issues/171)) ([0b30d0a](https://github.com/zeroroot-ai/gibson/commit/0b30d0a16143b04c6720f0c1686d383d6da761da)), closes [#14](https://github.com/zeroroot-ai/gibson/issues/14)
+* **ci:** the exit-test runner's peer id lands on the chart key the daemon reads ([#161](https://github.com/zeroroot-ai/gibson/issues/161)) ([3bc11de](https://github.com/zeroroot-ai/gibson/commit/3bc11de4345472826c16cbfad4ae75d783d202ff)), closes [#14](https://github.com/zeroroot-ai/gibson/issues/14)
+* **ci:** the in-cluster exit tests get 90 minutes and always print diagnostics ([#160](https://github.com/zeroroot-ai/gibson/issues/160)) ([98cf5b9](https://github.com/zeroroot-ai/gibson/commit/98cf5b94c5009bab6c1a19a8ff38684d19cedc5a)), closes [#14](https://github.com/zeroroot-ai/gibson/issues/14)
+* **ci:** the in-cluster exit tests run when the schema or the entitlements reader changes ([#175](https://github.com/zeroroot-ai/gibson/issues/175)) ([add5498](https://github.com/zeroroot-ai/gibson/commit/add5498c2ce690a2dada688bc478e3f85029f93b)), closes [#13](https://github.com/zeroroot-ai/gibson/issues/13)
+* **ci:** the tool-dispatch exit test finishes the run it started ([#151](https://github.com/zeroroot-ai/gibson/issues/151)) ([b7acf03](https://github.com/zeroroot-ai/gibson/commit/b7acf0322f5f0fcd67a9bd5b391ddc4c020c10b0))
+* **ci:** the tool-dispatch exit test prints why a pod is not ready when it fails ([#143](https://github.com/zeroroot-ai/gibson/issues/143)) ([cc60821](https://github.com/zeroroot-ai/gibson/commit/cc608210c521d4f75f8fbc4e0a4bb0420d499908)), closes [#14](https://github.com/zeroroot-ai/gibson/issues/14)
+* **daemon:** a bank's owner and a job's opener are the users the checks read ([#176](https://github.com/zeroroot-ai/gibson/issues/176)) ([d9d1e70](https://github.com/zeroroot-ai/gibson/commit/d9d1e70cae5fe61640acb1607e8c6184b0471d42)), closes [#13](https://github.com/zeroroot-ai/gibson/issues/13)
+* **daemon:** a tenant-owned bank is one every tenant member may send to and read ([#177](https://github.com/zeroroot-ai/gibson/issues/177)) ([e6c1191](https://github.com/zeroroot-ai/gibson/commit/e6c1191ee9668e428b2e2e57a5a3fcb4b1805b40)), closes [#13](https://github.com/zeroroot-ai/gibson/issues/13)
+* **daemon:** the exit-test runner is a member of the platform tenant in the fixture build ([#168](https://github.com/zeroroot-ai/gibson/issues/168)) ([0227d76](https://github.com/zeroroot-ai/gibson/commit/0227d76a25eb8930085ba14e9338958740f9773e))
+* **daemon:** the exit-test runner may call the bank, job and provider RPCs ([#172](https://github.com/zeroroot-ai/gibson/issues/172)) ([5a99169](https://github.com/zeroroot-ai/gibson/commit/5a99169b54004292044f36453749277f72f3e61c)), closes [#13](https://github.com/zeroroot-ai/gibson/issues/13)
+* **daemon:** the lifecycle projector publishes events in timeline order ([#167](https://github.com/zeroroot-ai/gibson/issues/167)) ([639fe19](https://github.com/zeroroot-ai/gibson/commit/639fe1998116ace59b1ee59a7a558791cacc22d2))
+* **daemon:** the member launch speaks the driver's login-shape vocabulary ([#178](https://github.com/zeroroot-ai/gibson/issues/178)) ([aaf1ed2](https://github.com/zeroroot-ai/gibson/commit/aaf1ed2649e335c45e9b82c76833c0af8b4286df))
+* **daemon:** the terminal status reaches the mission stream, and the suite reads it ([#165](https://github.com/zeroroot-ai/gibson/issues/165)) ([c04e1c9](https://github.com/zeroroot-ai/gibson/commit/c04e1c98bb69a961ba3048d48419a0a0e17bd8d4)), closes [#14](https://github.com/zeroroot-ai/gibson/issues/14)
+* **e2e:** a failed happy path names the node's reason ([#170](https://github.com/zeroroot-ai/gibson/issues/170)) ([a40209f](https://github.com/zeroroot-ai/gibson/commit/a40209fea7fd5cdbc82a2ee93a7f88ed03b74f68)), closes [#14](https://github.com/zeroroot-ai/gibson/issues/14)
+* **e2e:** the bank suite runs in the provisioned tenant ([#173](https://github.com/zeroroot-ai/gibson/issues/173)) ([239af24](https://github.com/zeroroot-ai/gibson/commit/239af24deb4cbc4dc64e38e708d24cfa8a9e8f7d)), closes [#13](https://github.com/zeroroot-ai/gibson/issues/13)
+* **e2e:** the runner dials the daemon over mTLS from the socket the chart mounts ([#155](https://github.com/zeroroot-ai/gibson/issues/155)) ([3ea5e26](https://github.com/zeroroot-ai/gibson/commit/3ea5e26b72390942700bdf3edaab29e0d8ee08a5)), closes [#14](https://github.com/zeroroot-ai/gibson/issues/14)
+* **e2e:** the runner's tenant reaches the daemon ([#162](https://github.com/zeroroot-ai/gibson/issues/162)) ([6269727](https://github.com/zeroroot-ai/gibson/commit/6269727f34ffac2f1df74b5bf80cc9c4d967eb42))
+* **e2e:** the suite creates its target through the API and sees the daemon's status ([#164](https://github.com/zeroroot-ai/gibson/issues/164)) ([4b666cd](https://github.com/zeroroot-ai/gibson/commit/4b666cd7d91fba63c2842a5a0f79a5008f5b5177)), closes [#14](https://github.com/zeroroot-ai/gibson/issues/14)
+* **e2e:** the suite runs against its target and a denial is the gate's, not any error ([#163](https://github.com/zeroroot-ai/gibson/issues/163)) ([38f2435](https://github.com/zeroroot-ai/gibson/commit/38f24354a5564d7606553995c02ebeec02d7cac9)), closes [#14](https://github.com/zeroroot-ai/gibson/issues/14)
+* **e2e:** the verdict reads the node's failure reason, and diagnostics keep more daemon log ([#166](https://github.com/zeroroot-ai/gibson/issues/166)) ([43555da](https://github.com/zeroroot-ai/gibson/commit/43555dab804dc8345d8db9d1c38a107256d9441e)), closes [#14](https://github.com/zeroroot-ai/gibson/issues/14)
+* **migrations:** tenant_quotas carries concurrent_connectors in the migration set ([#174](https://github.com/zeroroot-ai/gibson/issues/174)) ([d4e40e6](https://github.com/zeroroot-ai/gibson/commit/d4e40e68d15c4861983422d011578d5ecbd015b6))
+* **sandbox:** hand the member process the gvisor marker ([#153](https://github.com/zeroroot-ai/gibson/issues/153)) ([7860264](https://github.com/zeroroot-ai/gibson/commit/78602644b3dd7c4c32b723428346068e6bb09777)), closes [#152](https://github.com/zeroroot-ai/gibson/issues/152)
+* **security:** delete dead authz code that comments said was live ([#149](https://github.com/zeroroot-ai/gibson/issues/149)) ([0200677](https://github.com/zeroroot-ai/gibson/commit/0200677ef160f192a72ec89af3a5435b4f629c98))
+* **security:** no default credentials in code or the example env ([#148](https://github.com/zeroroot-ai/gibson/issues/148)) ([ce8ef0c](https://github.com/zeroroot-ai/gibson/commit/ce8ef0ce90278bd06d9715aab4aeb40bb72ea0cd))
+* **tenant-operator:** postgres deprovision terminates the tenant's backends before the drop ([#140](https://github.com/zeroroot-ai/gibson/issues/140)) ([7a4b6ee](https://github.com/zeroroot-ai/gibson/commit/7a4b6eedfa8f05afd6d23c73a230c41183261658))
+
 ## [0.137.0](https://github.com/zeroroot-ai/gibson/compare/v0.136.0...v0.137.0) (2026-09-18)
 
 
