@@ -4,6 +4,7 @@
 package daemon
 
 import (
+	"context"
 	"log/slog"
 	"sync"
 	"sync/atomic"
@@ -107,4 +108,42 @@ func TestLifecycleProjector_PublishesInTimelineOrder(t *testing.T) {
 	if got[2].MissionEvent == nil || got[2].MissionEvent.Error == "" {
 		t.Fatal("node.failed carried no error")
 	}
+}
+
+// TestLifecycleProjector_FanOutReachesTheBus pins the sink the drainer feeds:
+// an event reaches an in-process subscriber, a closed bus and a Redis stream
+// with no client are logged and never stop the drainer.
+func TestLifecycleProjector_FanOutReachesTheBus(t *testing.T) {
+	bus := NewEventBus(slog.Default())
+	tap := &lifecycleProjectorTap{
+		tenant:      "acme",
+		eventBus:    bus,
+		redisStream: &RedisEventStream{}, // no state client: PublishEvent errors
+		logger:      slog.Default(),
+	}
+	tap.publish = tap.fanOut
+
+	ch, unsubscribe := bus.Subscribe(context.Background(), nil, "")
+	defer unsubscribe()
+
+	ev := ProjectBrainEvent(brain.MissionStarted{ID: "m1"}, "")
+	if ev == nil {
+		t.Fatal("MissionStarted must project to a status event")
+	}
+	tap.enqueue(*ev)
+
+	select {
+	case got := <-ch:
+		if got.EventType != "status" || got.MissionEvent == nil || got.MissionEvent.MissionID != "m1" {
+			t.Fatalf("bus delivered %+v, want the status event for m1", got)
+		}
+	case <-time.After(5 * time.Second):
+		t.Fatal("the event never reached the in-process bus")
+	}
+
+	// A closed bus is an error the drainer logs and survives.
+	if err := bus.Close(); err != nil {
+		t.Fatal(err)
+	}
+	tap.fanOut(*ev)
 }
