@@ -26,19 +26,21 @@ func TestEmbed_TenantHasExpectedFiles(t *testing.T) {
 
 func TestEmbed_PlatformHasExpectedFiles(t *testing.T) {
 	t.Parallel()
-	// 24: 020 is bootstrap-token-consumption, 021 is signup-verification
+	// 25: 020 is bootstrap-token-consumption, 021 is signup-verification
 	// (gibson#1228, merged), 022 is audit_log hash chain, 023 indexes
 	// capability_grant_agents(tenant_id, principal_ref) for the mission:delegate
 	// / mission:originate capability check (gibson#1186 slice C), 024 adds the
-	// admin-approval registration rung's state (ADR-0006, gibson#22).
+	// admin-approval registration rung's state (ADR-0006, gibson#22), 025 adds
+	// tenant_quotas.concurrent_connectors, which the entitlements reader
+	// selects (gibson#13).
 	// golang-migrate tracks a single integer and only moves forward, so
 	// leaving a gap would let a later-landing migration be skipped forever.
 	upCount, downCount := countSQL(t, Platform, platformDir)
-	if upCount != 24 {
-		t.Errorf("platform: expected 24 up.sql files, got %d", upCount)
+	if upCount != 25 {
+		t.Errorf("platform: expected 25 up.sql files, got %d", upCount)
 	}
-	if downCount != 24 {
-		t.Errorf("platform: expected 24 down.sql files, got %d", downCount)
+	if downCount != 25 {
+		t.Errorf("platform: expected 25 down.sql files, got %d", downCount)
 	}
 }
 
@@ -136,8 +138,8 @@ func TestPlatformMaxVersion(t *testing.T) {
 	if err != nil {
 		t.Fatalf("PlatformMaxVersion: %v", err)
 	}
-	if v != 24 {
-		t.Errorf("PlatformMaxVersion: got %d, want 24", v)
+	if v != 25 {
+		t.Errorf("PlatformMaxVersion: got %d, want 25", v)
 	}
 }
 
