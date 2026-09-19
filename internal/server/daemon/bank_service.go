@@ -381,13 +381,25 @@ func (s *bankServer) checkMemberCap(ctx context.Context, tenant string, desired 
 // ownershipTuples is what "this bank belongs to this tenant, and this is its
 // owner" means in FGA. One function, used by create and delete, so the two can
 // never write and remove different sets.
+//
+// A tenant-owned bank is the tenant's shared bank: its admins own it (the
+// model's `owner: admin from tenant_owned`), and every member may send it
+// work and read it. That is the default posture SetCatalogEnabled gives a
+// catalog item (ADR-0067 §5). Without the member tuples only an admin could
+// open a job on the shared bank or list its members, and a member read it as
+// NotFound (gibson#13, run 35446199736). The tuples name the owning tenant's
+// members, so a stranger tenant still reads NotFound.
 func ownershipTuples(tenant string, b *bank.Bank) []authz.Tuple {
 	object := "bank:" + b.ID
 	tuples := []authz.Tuple{
 		{User: "tenant:" + tenant, Relation: "parent", Object: object},
 	}
 	if b.OwnerKind == bank.OwnerTenant {
-		tuples = append(tuples, authz.Tuple{User: "tenant:" + tenant, Relation: "tenant_owned", Object: object})
+		tuples = append(tuples,
+			authz.Tuple{User: "tenant:" + tenant, Relation: "tenant_owned", Object: object},
+			authz.Tuple{User: "tenant:" + tenant + "#member", Relation: "can_send", Object: object},
+			authz.Tuple{User: "tenant:" + tenant + "#member", Relation: "can_read", Object: object},
+		)
 		return tuples
 	}
 	tuples = append(tuples, authz.Tuple{User: "user:" + b.OwnerID, Relation: "owner", Object: object})
