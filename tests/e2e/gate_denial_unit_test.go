@@ -8,6 +8,7 @@ package e2e
 
 import (
 	"errors"
+	"strings"
 	"testing"
 
 	"google.golang.org/grpc/codes"
@@ -43,7 +44,7 @@ func TestDenialVerdict(t *testing.T) {
 	}
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {
-			reason, denied, inconclusive := denialVerdict(tc.openErr, tc.terminal, tc.waitErr)
+			reason, denied, inconclusive := denialVerdict(tc.openErr, tc.terminal, nil, tc.waitErr)
 			if (inconclusive != "") != tc.inconclusive {
 				t.Fatalf("inconclusive = %q, want inconclusive=%v", inconclusive, tc.inconclusive)
 			}
@@ -55,7 +56,29 @@ func TestDenialVerdict(t *testing.T) {
 			}
 		})
 	}
-	if _, _, inc := denialVerdict(errors.New("dial tcp: connection refused"), helpers.MissionEvent{}, nil); inc == "" {
+	if _, _, inc := denialVerdict(errors.New("dial tcp: connection refused"), helpers.MissionEvent{}, nil, nil); inc == "" {
 		t.Fatal("a transport error at open must be inconclusive")
+	}
+}
+
+// TestDenialVerdict_ReadsTheNodeReason: "a work item failed" is the mission's
+// summary; the node.failed event behind it carries the gate's wording, and
+// that is what the verdict reads (gibson#14, run 35426325346).
+func TestDenialVerdict_ReadsTheNodeReason(t *testing.T) {
+	terminal := helpers.MissionEvent{EventType: "mission_failed", Error: "a work item failed"}
+	gate := []helpers.MissionEvent{
+		{EventType: "node.started"},
+		{EventType: "node.failed", Error: "dispatch tool nmap: tool not enabled for tenant"},
+	}
+	reason, denied, inc := denialVerdict(nil, terminal, gate, nil)
+	if inc != "" || !denied || reason != gate[1].Error {
+		t.Fatalf("got reason=%q denied=%v inconclusive=%q", reason, denied, inc)
+	}
+	other := []helpers.MissionEvent{{EventType: "node.failed", Error: "sandbox: image pull back-off"}}
+	if _, _, inc := denialVerdict(nil, terminal, other, nil); inc == "" || !strings.Contains(inc, "image pull") {
+		t.Fatalf("a node failure for another reason must be inconclusive and name it: %q", inc)
+	}
+	if _, _, inc := denialVerdict(nil, terminal, nil, nil); inc == "" || !strings.Contains(inc, "a work item failed") {
+		t.Fatalf("no node event: the summary is the reason: %q", inc)
 	}
 }

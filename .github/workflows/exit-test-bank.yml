@@ -440,4 +440,4 @@ jobs:
           kubectl -n "$NS" get pods || true
           kubectl -n setec-system get pods,sandboxes,sandboxclasses || true
           kubectl -n setec-sandboxes get pods || true
-          kubectl -n "$NS" logs -l app.kubernetes.io/component=daemon -c gibson --tail=200 || true
+          kubectl -n "$NS" logs -l app.kubernetes.io/component=daemon -c gibson --tail=1500 || true
