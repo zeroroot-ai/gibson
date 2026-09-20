@@ -162,6 +162,16 @@ type AgentSpec struct {
 	// truncates, and the agent returns a short answer that reads as success.
 	// The resolver therefore refuses the dispatch instead (gibson#1692).
 	MinContextWindow int `yaml:"minContextWindow"`
+
+	// Env is the static environment every launch of this agent carries: the
+	// platform's knowledge of the sandbox the image runs in, which the image
+	// cannot know for itself. setec runs a sandbox with a read-only root
+	// filesystem and a scratch emptyDir at /tmp, so a driver whose state
+	// directory defaults to $HOME dies on its first write (gibson#13, run
+	// 35482176528). Keys are environment names. The launcher's own keys
+	// (the grant, the callback endpoint, the platform CA) are set after
+	// this and win.
+	Env map[string]string `yaml:"env"`
 	// Credentials the sandbox needs from the dispatching tenant's own provider
 	// configuration (gibson#1621 decision 12). Each entry names a provider type
 	// the tenant must have configured, and the env var the launch injects its
@@ -261,6 +271,9 @@ func (m *Manifest) validate() error {
 		if s.MaxJobsInFlight < 0 {
 			return fmt.Errorf("%s: maxJobsInFlight %d must not be negative", m.ID, s.MaxJobsInFlight)
 		}
+		if err := validateStaticEnv(m.ID, s.Env, s.DispatchMode); err != nil {
+			return err
+		}
 		// A member command only means anything on a sandboxed launch, which is
 		// the only path that reads a command at all. Declaring one elsewhere
 		// would ship a field that silently does nothing.
@@ -279,6 +292,24 @@ func (m *Manifest) validate() error {
 				m.ID, DispatchModeSandboxed, s.DispatchMode)
 		}
 		m.agent = &s
+	}
+	return nil
+}
+
+// validateStaticEnv checks a manifest's static launch environment. Like
+// memberCommand and minContextWindow it is read only on a sandboxed launch,
+// so declaring it elsewhere would ship a field that silently does nothing.
+func validateStaticEnv(id string, env map[string]string, dispatchMode string) error {
+	if len(env) == 0 {
+		return nil
+	}
+	if dispatchMode != DispatchModeSandboxed {
+		return fmt.Errorf("%s: env is carried only on a %s dispatch, so declaring it with dispatchMode %q would do nothing", id, DispatchModeSandboxed, dispatchMode)
+	}
+	for k := range env {
+		if !envNamePattern.MatchString(k) {
+			return fmt.Errorf("%s: env key %q is not an environment name", id, k)
+		}
 	}
 	return nil
 }
@@ -632,6 +663,8 @@ type AgentEntry struct {
 	BudgetLimit int
 	// EgressAllow is the agent's egress ceiling (ADR-0016 decision 2/5).
 	EgressAllow []string
+	// Env is the static environment every launch carries (AgentSpec.Env).
+	Env map[string]string
 	// Command is the one-shot sandbox launch command (the manifest's
 	// `command`, shell split). setec refuses a launch with no command, so a
 	// sandboxed agent's manifest must declare one.
@@ -664,6 +697,7 @@ func (m Manifest) toAgentEntry() AgentEntry {
 		Runtime:          s.Runtime,
 		Model:            s.Model,
 		MinContextWindow: s.MinContextWindow,
+		Env:              s.Env,
 		BudgetLimit:      s.BudgetLimit,
 		EgressAllow:      m.EgressAllow,
 		DispatchMode:     s.DispatchMode,

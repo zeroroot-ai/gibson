@@ -187,3 +187,33 @@ func TestCatalogAgentResolver_SizesTheSandbox(t *testing.T) {
 		t.Fatalf("sized: %+v", spec)
 	}
 }
+
+// TestCatalogAgentResolver_StaticEnv: the manifest's static environment
+// reaches the launch spec, and a tenant credential with the same name wins
+// over it (gibson#13).
+func TestCatalogAgentResolver_StaticEnv(t *testing.T) {
+	entry := componentcatalog.AgentEntry{
+		ID:    "claude",
+		Image: "ghcr.io/zeroroot-ai/zerocool-claude-agent@sha256:abc",
+		Env:   map[string]string{"ZEROCOOL_STATE_DIR": "/tmp/zerocool", "ANTHROPIC_API_KEY": "from-the-manifest"},
+		Credentials: []componentcatalog.CredentialRequirement{
+			{Provider: "anthropic", Env: "ANTHROPIC_API_KEY", Key: "api_key"},
+		},
+	}
+	lookup := func(id string) (componentcatalog.AgentEntry, bool) { return entry, id == "claude" }
+	src := &stubCredentialSource{values: map[string]string{"acme|anthropic|api_key": "sk-ant-acme"}}
+	r := &CatalogAgentResolver{sandboxClass: "agent", lookup: lookup, credentials: src}
+	spec, err := r.ResolveAgentLaunchSpec(auth.ContextWithTenantString(context.Background(), "acme"), AgentLaunchRequest{AgentName: "claude"})
+	if err != nil {
+		t.Fatalf("resolve: %v", err)
+	}
+	if spec.Env["ZEROCOOL_STATE_DIR"] != "/tmp/zerocool" {
+		t.Fatalf("env = %+v, want the manifest's ZEROCOOL_STATE_DIR", spec.Env)
+	}
+	if spec.Env["ANTHROPIC_API_KEY"] != "sk-ant-acme" {
+		t.Fatalf("env = %+v, want the tenant's credential over the manifest's value", spec.Env)
+	}
+	if entry.Env["ANTHROPIC_API_KEY"] != "from-the-manifest" {
+		t.Fatal("the manifest entry must not be mutated by a resolve")
+	}
+}

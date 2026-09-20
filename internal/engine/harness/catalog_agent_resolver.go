@@ -198,8 +198,17 @@ func (r *CatalogAgentResolver) ResolveAgentLaunchSpec(ctx context.Context, req A
 	if err != nil {
 		return sandboxed.AgentLaunchSpec{}, err
 	}
-	if len(env) > 0 {
-		spec.Env = env
+	// The manifest's static environment first, the tenant's credentials over
+	// it: a manifest cannot pre-empt a credential name, and the launcher's own
+	// keys are set after both (sandboxed.buildEnv).
+	if len(entry.Env)+len(env) > 0 {
+		spec.Env = make(map[string]string, len(entry.Env)+len(env))
+		for k, v := range entry.Env {
+			spec.Env[k] = v
+		}
+		for k, v := range env {
+			spec.Env[k] = v
+		}
 	}
 	return spec, nil
 }

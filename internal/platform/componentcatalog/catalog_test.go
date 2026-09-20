@@ -591,3 +591,28 @@ func TestClaudeManifest_RunsBothShapes(t *testing.T) {
 		t.Error("zerocool has no member driver, so it must declare no member command")
 	}
 }
+
+// TestAgentStaticEnv: a manifest's static launch environment reaches the
+// projected entry, its keys are environment names, and it is refused off a
+// sandboxed dispatch where nothing would read it (gibson#13).
+func TestAgentStaticEnv(t *testing.T) {
+	entry, ok := LookupAgent("claude")
+	if !ok {
+		t.Fatal("claude is not in the embedded catalog")
+	}
+	if entry.Env["ZEROCOOL_STATE_DIR"] != "/tmp/zerocool" {
+		t.Fatalf("claude env = %v, want ZEROCOOL_STATE_DIR=/tmp/zerocool: setec's rootfs is read-only and /tmp is its scratch", entry.Env)
+	}
+	if err := validateStaticEnv("a", map[string]string{"GOOD_1": "x"}, DispatchModeSandboxed); err != nil {
+		t.Fatalf("a valid key was refused: %v", err)
+	}
+	if err := validateStaticEnv("a", nil, ""); err != nil {
+		t.Fatalf("no env must pass on any dispatch mode: %v", err)
+	}
+	if err := validateStaticEnv("a", map[string]string{"1BAD": "x"}, DispatchModeSandboxed); err == nil {
+		t.Fatal("a key that is not an environment name must be refused")
+	}
+	if err := validateStaticEnv("a", map[string]string{"GOOD": "x"}, ""); err == nil {
+		t.Fatal("env off a sandboxed dispatch does nothing and must be refused")
+	}
+}
