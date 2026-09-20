@@ -26,3 +26,19 @@ func TestSandboxConfig_DefaultsAgentSandboxClass(t *testing.T) {
 		t.Fatalf("explicit AgentSandboxClass overwritten to %q", explicit.Setec.AgentSandboxClass)
 	}
 }
+
+// TestSandboxConfig_DefaultsPlatformCAFile: the edge CA every sandboxed
+// launch is handed comes from the chart's projection unless the install
+// names another file (gibson#13).
+func TestSandboxConfig_DefaultsPlatformCAFile(t *testing.T) {
+	c := &SandboxConfig{Enabled: true, Setec: SandboxSetecConfig{Address: "setec:8443", Tenant: "gibson"}}
+	_ = c.Validate()
+	if c.Setec.PlatformCAFile != DefaultPlatformCAFile {
+		t.Fatalf("PlatformCAFile = %q, want default %q", c.Setec.PlatformCAFile, DefaultPlatformCAFile)
+	}
+	explicit := &SandboxConfig{Enabled: true, Setec: SandboxSetecConfig{Address: "setec:8443", Tenant: "gibson", PlatformCAFile: "/etc/gibson/edge-ca.pem"}}
+	_ = explicit.Validate()
+	if explicit.Setec.PlatformCAFile != "/etc/gibson/edge-ca.pem" {
+		t.Fatalf("explicit PlatformCAFile overwritten to %q", explicit.Setec.PlatformCAFile)
+	}
+}

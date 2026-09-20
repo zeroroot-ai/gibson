@@ -32,7 +32,7 @@ import (
 // untrusted agent fail-closed under setec-only. On a dial/TLS failure it
 // returns (nil, err) — the caller logs the warning and continues, matching the
 // tool executor's Requirement 5.4 behavior.
-func NewSetecAgentLauncher(cfg config.SandboxConfig, tracer trace.Tracer, logger *slog.Logger, events sandboxed.EventPublisher) (*sandboxed.AgentLauncher, error) {
+func NewSetecAgentLauncher(cfg config.SandboxConfig, tracer trace.Tracer, logger *slog.Logger, events sandboxed.EventPublisher, platformCA string) (*sandboxed.AgentLauncher, error) {
 	if !cfg.Enabled {
 		return nil, nil
 	}
@@ -48,5 +48,9 @@ func NewSetecAgentLauncher(cfg config.SandboxConfig, tracer trace.Tracer, logger
 		SandboxClass: cfg.Setec.AgentSandboxClass,
 		RunTimeout:   cfg.Setec.AgentRunTimeout,
 		Events:       events,
+		// The edge CA every launch is handed, when the edge is private
+		// (gibson#13). The caller read it once: the mount does not change
+		// while the daemon runs, and a launch must not depend on a file read.
+		PlatformCAPEM: platformCA,
 	})
 }

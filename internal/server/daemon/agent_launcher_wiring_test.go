@@ -30,7 +30,7 @@ func TestAgentLauncherWiring(t *testing.T) {
 // fail-closed behavior: no setec client is compiled in, so the constructor
 // returns (nil, nil) and an untrusted agent is denied rather than run.
 func TestNewSetecAgentLauncher_DisabledBuild(t *testing.T) {
-	l, err := NewSetecAgentLauncher(config.SandboxConfig{}, nil, nil, nil)
+	l, err := NewSetecAgentLauncher(config.SandboxConfig{}, nil, nil, nil, "")
 	if l != nil || err != nil {
 		t.Fatalf("disabled build: got (%v, %v), want (nil, nil)", l, err)
 	}

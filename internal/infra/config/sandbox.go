@@ -90,7 +90,22 @@ type SandboxSetecConfig struct {
 	// whole mission, so this is far longer than CallTimeout. Zero defers to
 	// the launcher default (30m).
 	AgentRunTimeout time.Duration `mapstructure:"agent_run_timeout" yaml:"agent_run_timeout"`
+
+	// PlatformCAFile is the platform edge CA, as a PEM file, handed to
+	// every sandboxed agent and member launch in GIBSON_PLATFORM_CA_PEM. A
+	// sandbox cannot mount the Secret in-cluster consumers trust the edge
+	// through, and a private edge CA (kind, a self-hosted install) is not
+	// in the image's roots (gibson#13). Defaults to DefaultPlatformCAFile,
+	// the chart's projection of the Envoy TLS Secret's ca.crt. A missing
+	// file means the edge chains to public roots and nothing is handed
+	// over.
+	PlatformCAFile string `mapstructure:"platform_ca_file" yaml:"platform_ca_file"`
 }
+
+// DefaultPlatformCAFile is where the chart projects the Envoy edge CA for
+// the daemon (helm/gibson-workloads/templates/gibson/statefulset.yaml, the
+// envoy-ca volume), on every profile whose edge CA is private.
+const DefaultPlatformCAFile = "/etc/ssl/envoy-ca/ca.crt"
 
 // SandboxClass names gibson requests from setec. These match the classes the
 // setec chart ships (charts/setec/values.yaml `sandboxClasses`) from setec
@@ -149,6 +164,9 @@ func (c *SandboxConfig) Validate() error {
 	}
 	if c.Setec.AgentSandboxClass == "" {
 		c.Setec.AgentSandboxClass = DefaultAgentSandboxClass
+	}
+	if c.Setec.PlatformCAFile == "" {
+		c.Setec.PlatformCAFile = DefaultPlatformCAFile
 	}
 	// Devbox defaults apply only when an image is configured. With no image
 	// there is no session surface at all, and defaulting the rest would

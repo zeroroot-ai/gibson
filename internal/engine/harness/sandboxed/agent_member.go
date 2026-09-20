@@ -72,6 +72,12 @@ func (l *AgentLauncher) buildEnv(ctx context.Context, spec AgentLaunchSpec, disp
 	// Injected after the manifest and the dispatch so neither can claim a
 	// different sandbox than the one the launcher verifies.
 	env[envSandbox] = envSandboxValue
+	// The platform's edge CA, when it is private: the launcher's, never the
+	// manifest's or the dispatch's, so a sandbox trusts the edge this daemon
+	// runs behind and nothing else.
+	if l.platformCA != "" {
+		env[envPlatformCAPEM] = l.platformCA
+	}
 	if sc := trace.SpanContextFromContext(ctx); sc.IsValid() {
 		env[envTraceID] = sc.TraceID().String()
 		env[envSpanID] = sc.SpanID().String()

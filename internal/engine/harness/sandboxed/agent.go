@@ -51,6 +51,14 @@ const (
 	// envAgentCallbackEndpoint is the HarnessCallbackService address the agent
 	// dials to reach LLM/tools/findings and to return its mission result.
 	envAgentCallbackEndpoint = "GIBSON_CALLBACK_ENDPOINT"
+	// envPlatformCAPEM carries the platform's edge CA as PEM. A sandbox
+	// cannot mount the Secret in-cluster consumers trust the edge through,
+	// and a private edge CA (kind, a self-hosted install) is not in the
+	// image's roots, so the agent verified nothing and every callback and
+	// heartbeat died at TLS (gibson#13, run 35478182465). The driver writes
+	// it to a file and trusts it beside the public roots. Absent when the
+	// edge chains to public roots.
+	envPlatformCAPEM = "GIBSON_PLATFORM_CA_PEM"
 	// envAgentMissionID / envAgentMissionRunID / envAgentAgentRunID scope the
 	// callbacks to this mission run.
 	envAgentMissionID    = "GIBSON_MISSION_ID"
@@ -216,6 +224,7 @@ type AgentLauncher struct {
 	sandboxClass string
 	runTimeout   time.Duration
 	events       EventPublisher
+	platformCA   string
 }
 
 // AgentLauncherConfig is the constructor input for AgentLauncher. Client and
@@ -234,6 +243,10 @@ type AgentLauncherConfig struct {
 	// (ADR-0016 S11). Nil disables the live console; the launcher still tees the
 	// sandbox log to the ring buffer and the daemon logger.
 	Events EventPublisher
+	// PlatformCAPEM is the platform edge CA, as PEM, handed to every launch
+	// in GIBSON_PLATFORM_CA_PEM. Empty means the edge chains to public
+	// roots and nothing is handed over.
+	PlatformCAPEM string
 }
 
 // NewAgentLauncher constructs an AgentLauncher. It returns a clear error on
@@ -267,6 +280,7 @@ func NewAgentLauncher(cfg AgentLauncherConfig) (*AgentLauncher, error) {
 		sandboxClass: cfg.SandboxClass,
 		runTimeout:   cfg.RunTimeout,
 		events:       cfg.Events,
+		platformCA:   cfg.PlatformCAPEM,
 	}, nil
 }
 

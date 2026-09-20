@@ -376,3 +376,23 @@ func TestLaunchAgent_CarriesTheSandboxMarker(t *testing.T) {
 		t.Fatalf("env[%s] = %q, want %q", envSandbox, gotReq.Env[envSandbox], envSandboxValue)
 	}
 }
+
+// TestBuildEnv_PlatformCA: the launcher's edge CA reaches every launch as
+// GIBSON_PLATFORM_CA_PEM, and a launcher with none adds nothing (gibson#13).
+func TestBuildEnv_PlatformCA(t *testing.T) {
+	with := &AgentLauncher{platformCA: "-----BEGIN CERTIFICATE-----\nAA==\n-----END CERTIFICATE-----\n"}
+	env := with.buildEnv(context.Background(), AgentLaunchSpec{}, AgentDispatch{})
+	if env[envPlatformCAPEM] != with.platformCA {
+		t.Fatalf("%s = %q, want the launcher's CA", envPlatformCAPEM, env[envPlatformCAPEM])
+	}
+	without := &AgentLauncher{}
+	if _, has := without.buildEnv(context.Background(), AgentLaunchSpec{}, AgentDispatch{})[envPlatformCAPEM]; has {
+		t.Fatalf("a launcher with no platform CA must hand none over")
+	}
+	// Neither the manifest nor the dispatch may substitute their own.
+	forged := &AgentLauncher{platformCA: "mine"}
+	env = forged.buildEnv(context.Background(), AgentLaunchSpec{Env: map[string]string{envPlatformCAPEM: "theirs"}}, AgentDispatch{Env: map[string]string{envPlatformCAPEM: "theirs"}})
+	if env[envPlatformCAPEM] != "mine" {
+		t.Fatalf("%s = %q, want the launcher's own", envPlatformCAPEM, env[envPlatformCAPEM])
+	}
+}
