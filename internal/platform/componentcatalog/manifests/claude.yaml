@@ -18,12 +18,12 @@ egressAllow:
   - "*"
 spec:
   runtime: setec
-  # Tag 0.4.2 from the zerocool-plugins release claude-member v0.4.2
-  # (zeroroot-ai/zerocool-plugins#78): Claude Code 2.1.257, the Gibson MCP
-  # server 0.2.0, uid 65532. Verify with
+  # Tag 0.4.3 from the zerocool-plugins release claude-member v0.4.3
+  # (zeroroot-ai/zerocool-plugins#79): Claude Code 2.1.257, the Gibson MCP
+  # server 0.3.0, uid 65532. Verify with
   #   cosign verify <image> --certificate-identity-regexp '^https://github.com/zeroroot-ai/' \
   #     --certificate-oidc-issuer https://token.actions.githubusercontent.com
-  image: ghcr.io/zeroroot-ai/zerocool-claude-agent@sha256:17e97422a04fbdee1c0b52868bcc3f5f3c953070be0356514c32d2c6cd3cfd61
+  image: ghcr.io/zeroroot-ai/zerocool-claude-agent@sha256:6ff9ea109c8a8ab4d2f3d039a670dbb5fa67ae2a87d401dfba0e47677d31f98b
   svid: spiffe://zeroroot.ai/agent/claude
   dispatchMode: sandboxed
   # The sandbox launch command: the image ENTRYPOINT is not consulted by setec.
