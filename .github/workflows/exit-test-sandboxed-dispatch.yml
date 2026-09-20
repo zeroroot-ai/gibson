@@ -240,6 +240,10 @@ jobs:
           # class may reach the kube-dns pods on 53 and the Envoy pods on
           # https by selector (setec#76), and with that allowance the class
           # may use the kube-dns ClusterIP as its resolver.
+          # The Envoy pods are labelled app.kubernetes.io/name=gibson-workloads
+          # and app.kubernetes.io/component=envoy (the chart's common labels);
+          # a selector on name=envoy matched nothing and the connect timed out
+          # (run 35475259037).
           COREDNS_IP=$(kubectl -n kube-system get svc kube-dns -o jsonpath='{.spec.clusterIP}')
           [ -n "$COREDNS_IP" ] || { echo "::error::no kube-dns ClusterIP to hand the sandboxes"; exit 1; }
           echo "the agent class resolves through kube-dns at $COREDNS_IP and may reach the kube-dns and Envoy pods"
@@ -257,7 +261,8 @@ jobs:
               {"op":"add","path":"/spec/source/helm/parameters/-","value":{"name":"gibson-workloads.setec.sandboxClasses.classes[2].spec.egressAllowSelectors[0].ports[1].protocol","value":"TCP","forceString":true}},
               {"op":"add","path":"/spec/source/helm/parameters/-","value":{"name":"gibson-workloads.setec.sandboxClasses.classes[2].spec.egressAllowSelectors[0].ports[1].port","value":"53"}},
               {"op":"add","path":"/spec/source/helm/parameters/-","value":{"name":"gibson-workloads.setec.sandboxClasses.classes[2].spec.egressAllowSelectors[1].namespaceSelector.matchLabels.kubernetes\\.io/metadata\\.name","value":"gibson","forceString":true}},
-              {"op":"add","path":"/spec/source/helm/parameters/-","value":{"name":"gibson-workloads.setec.sandboxClasses.classes[2].spec.egressAllowSelectors[1].podSelector.matchLabels.app\\.kubernetes\\.io/name","value":"envoy","forceString":true}},
+              {"op":"add","path":"/spec/source/helm/parameters/-","value":{"name":"gibson-workloads.setec.sandboxClasses.classes[2].spec.egressAllowSelectors[1].podSelector.matchLabels.app\\.kubernetes\\.io/name","value":"gibson-workloads","forceString":true}},
+              {"op":"add","path":"/spec/source/helm/parameters/-","value":{"name":"gibson-workloads.setec.sandboxClasses.classes[2].spec.egressAllowSelectors[1].podSelector.matchLabels.app\\.kubernetes\\.io/component","value":"envoy","forceString":true}},
               {"op":"add","path":"/spec/source/helm/parameters/-","value":{"name":"gibson-workloads.setec.sandboxClasses.classes[2].spec.egressAllowSelectors[1].ports[0].port","value":"https","forceString":true}}
             ]'
 
