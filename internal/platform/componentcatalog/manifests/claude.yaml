@@ -23,7 +23,7 @@ spec:
   # server 0.2.0, uid 65532. Verify with
   #   cosign verify <image> --certificate-identity-regexp '^https://github.com/zeroroot-ai/' \
   #     --certificate-oidc-issuer https://token.actions.githubusercontent.com
-  image: ghcr.io/zeroroot-ai/zerocool-claude-agent@sha256:8e0e33e83ece0fe5e1ab0ec1e01906c5f43e3558a751d9cf7d0252ef26b44ab4
+  image: ghcr.io/zeroroot-ai/zerocool-claude-agent@sha256:541978fce5da46a0f96a3ce84ce4b9e154bcd9aae49f06a86faf56a61f923cd1
   svid: spiffe://zeroroot.ai/agent/claude
   dispatchMode: sandboxed
   # The sandbox launch command: the image ENTRYPOINT is not consulted by setec.
