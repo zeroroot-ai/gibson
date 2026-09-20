@@ -199,6 +199,13 @@ const memberInboxBatch int32 = 20
 
 // callerMember resolves which member is calling, from the mission run on the
 // request context and never from the request body.
+//
+// The run arrives under one of two names. A member's base grant is minted
+// with task_id = the run id (bank_member_launcher.LaunchMember), and the SDK
+// fills ContextInfo from the grant's claims, so the run reaches the daemon
+// as context.task_id. A caller that knows the run by its own name sends
+// mission_run_id. Requiring the second alone refused every member's inbox
+// subscription (gibson#13, run 35485807760).
 func (s *HarnessCallbackService) callerMember(ctx context.Context, info *harnesspb.ContextInfo) (tenantID, memberID, bankID string, err error) {
 	tenantID = auth.TenantStringFromContext(ctx)
 	if tenantID == "" || tenantID == auth.SystemTenantString {
@@ -206,7 +213,10 @@ func (s *HarnessCallbackService) callerMember(ctx context.Context, info *harness
 	}
 	runID := info.GetMissionRunId()
 	if runID == "" {
-		return "", "", "", status.Error(codes.InvalidArgument, "context.mission_run_id is required to identify the calling member")
+		runID = info.GetTaskId()
+	}
+	if runID == "" {
+		return "", "", "", status.Error(codes.InvalidArgument, "context.mission_run_id or context.task_id is required to identify the calling member")
 	}
 	memberID, bankID, err = s.members.MemberByRun(ctx, tenantID, runID)
 	switch {
