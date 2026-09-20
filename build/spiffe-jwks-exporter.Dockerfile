@@ -40,7 +40,7 @@ RUN --mount=type=cache,target=/root/.cache/go-build \
     CGO_ENABLED=0 GOFLAGS=-trimpath go build -ldflags='-s -w' \
     -o /out/spiffe-jwks-exporter ./cmd/spiffe-jwks-exporter
 
-FROM ghcr.io/zeroroot-ai/mirror/distroless-static:nonroot@sha256:1c2c046bc09ed40fad370b599a0b1ae7987f55b01e247cf27a7c27cd97e5bbc7
+FROM ghcr.io/zeroroot-ai/mirror/distroless-static:nonroot@sha256:e2e927ec666bae08560abb3c55d0659eceabb657f56b6782ab500a9fc7f555e3
 USER nonroot:nonroot
 COPY --from=build /out/spiffe-jwks-exporter /spiffe-jwks-exporter
 # Elastic License 2.0, "Notices": anyone who gets a copy of the software
