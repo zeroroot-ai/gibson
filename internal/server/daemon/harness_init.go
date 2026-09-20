@@ -185,7 +185,11 @@ func (d *daemonImpl) newHarnessFactory(ctx context.Context) (harness.HarnessFact
 		// per-mission-run sandbox instead of denied. The no-op constructor for
 		// the un-tagged build returns (nil, nil), so an untrusted agent stays
 		// denied fail-closed when setec_integration is not built.
-		launcher, launchErr := NewSetecAgentLauncher(d.config.Sandbox, sandboxTracer, sandboxLogger, newLiveEventPublisher(d.liveAgents))
+		// The platform edge CA every sandboxed agent and member is handed
+		// (gibson#13): read once, from the chart's projection of the Envoy
+		// TLS Secret, and empty when the edge chains to public roots.
+		platformCA := platformCAPEM(d.config.Sandbox.Setec.PlatformCAFile, sandboxLogger)
+		launcher, launchErr := NewSetecAgentLauncher(d.config.Sandbox, sandboxTracer, sandboxLogger, newLiveEventPublisher(d.liveAgents), platformCA)
 		if wire, warn := agentLauncherWiring(launcher, launchErr); !wire {
 			d.logger.Warn(ctx, warn, "error", launchErr)
 		} else {

@@ -51,6 +51,6 @@ func NewSetecSessionClient(_ config.SandboxConfig) (sandboxed.SessionClient, err
 // unavailable and denies an untrusted agent fail-closed under setec-only,
 // rather than the caller carrying a build-tag branch. The events publisher is
 // unused here — with no launcher there is nothing to tee.
-func NewSetecAgentLauncher(_ config.SandboxConfig, _ trace.Tracer, _ *slog.Logger, _ sandboxed.EventPublisher) (*sandboxed.AgentLauncher, error) {
+func NewSetecAgentLauncher(_ config.SandboxConfig, _ trace.Tracer, _ *slog.Logger, _ sandboxed.EventPublisher, _ string) (*sandboxed.AgentLauncher, error) {
 	return nil, nil
 }
