@@ -35,6 +35,14 @@ spec:
   # life as a member of a bank. An agent with no memberCommand cannot join a
   # bank, which is true of zerocool and is why its manifest declares none.
   memberCommand: "node /app/dist/member-main.js"
+  # The sandbox the image runs in, which the image cannot know for itself:
+  # setec gives every sandbox a read-only root filesystem and a scratch
+  # emptyDir at /tmp (a session workspace at /workspace exists only for
+  # session sandboxes, and a member is ephemeral). The driver's state
+  # directory, where the platform CA, the job table and the Claude config
+  # dir live, defaults to $HOME and died on its first write (gibson#13).
+  env:
+    ZEROCOOL_STATE_DIR: /tmp/zerocool
   # How many jobs one member holds at once. Claude Code is one conversation at
   # a time, so a second job would be a second process, not a second turn. A
   # bank that names no cap takes this.
