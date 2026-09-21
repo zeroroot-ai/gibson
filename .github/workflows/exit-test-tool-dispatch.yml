@@ -250,11 +250,12 @@ jobs:
       - name: Point the daemon at the test-mode image with authz off + fixtures on, and deploy the GitHub plugin
         working-directory: hosted
         env:
-          # ghcr.io/zeroroot-ai/integrations/github :latest = sha-944b8fe,
-          # built on sdk v0.179.0 (integrations#16), the first SDK that
-          # subscribes to WatchComponentEvents. Bump it when the integrations
-          # CI publishes a new digest.
-          PLUGIN_IMAGE_DIGEST: sha256:bfbaa4612be0e66b13742c2eeac9a4a5d9788e3373b517c8b7cdcbccc1da1b0f
+          # ghcr.io/zeroroot-ai/integrations/github :latest = sha-7005034,
+          # built on sdk v0.179.1 (integrations#17): the SDK subscribes to
+          # WatchComponentEvents and its heartbeat reports the lifecycle
+          # state (sdk#61), so a revoked secret reads DEGRADED. Bump it when
+          # the integrations CI publishes a new digest.
+          PLUGIN_IMAGE_DIGEST: sha256:12a5cb2ae9b7ed4380b07d063bcac83caed8989bd18fd3c6633394aefeda093c
         run: |
           set -euo pipefail
           # The e2eRunner values register the runner's ClusterSPIFFEID,
