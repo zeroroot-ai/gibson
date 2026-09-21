@@ -1952,6 +1952,14 @@ func (d *daemonImpl) Start(ctx context.Context) error {
 		// an operator has to mount (gibson#1744).
 		d.registerComponentCatalogReadiness(ctx, catalogGate)
 
+		// Every tenant registered under the platform is enabled on the
+		// system backplane (ADR-0046). Without the tuple no enrolled
+		// component can register, heartbeat, poll or watch through Envoy:
+		// can_poll_work on component:_system needs in_tenant_catalog, and
+		// nothing else writes it (gibson#154). Converges now and every
+		// interval, so a tenant created later is covered too.
+		go reconciler.RunSystemBackplaneBaseline(ctx, d.authorizer, reconciler.DefaultSystemBackplaneInterval, d.logger.Slog())
+
 		// Fixture build only: the exit-test runner is a member of the platform
 		// tenant, so the dispatch gate judges its runs the way it judges a
 		// member's (gibson#14). A production build writes nothing here. The
