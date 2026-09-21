@@ -726,6 +726,14 @@ tool-catalog-capture:
 	$(GOCMD) run ./cmd/tool-manifest-gen -capture-image "$(IMAGE)" -capture-tools "$$tmp"; \
 	rc=$$?; rm -f "$$tmp"; exit $$rc
 
+# apoc-contract regenerates pkg/platform/dataplane/apoc.env from the Go
+# constants (gibson#28). TestContractEnvFileIsCurrent fails a PR whose
+# constants moved without it; zeroroot-ai/.github version-links.yaml reads the
+# file and fans a change out to the chart's copies.
+.PHONY: apoc-contract
+apoc-contract:
+	@$(GOCMD) run ./cmd/apoc-contract
+
 # authz-registry: regenerate the three authz artifacts (registry.go, registry.yaml,
 # permissions.ts) plus audit.csv from the pinned SDK version's proto annotations.
 # Writes to internal/platform/authz/registry/. Run this target when the SDK version is bumped

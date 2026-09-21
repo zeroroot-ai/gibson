@@ -1652,6 +1652,17 @@ func (d *daemonImpl) Start(ctx context.Context) error {
 	})
 	d.logger.Debug(ctx, "registered neo4j schema migrations readiness check")
 
+	// The Neo4j this daemon writes to must carry the APOC contract in
+	// pkg/platform/dataplane (gibson#28). Three provisioners write it and
+	// only two read the Go constants, so the daemon asks the live server.
+	// A verified mismatch is Degraded, like the migration check above.
+	d.healthServer.RegisterReadinessCheck("neo4j_apoc_contract", newAPOCContractCheck(
+		os.Getenv("GIBSON_PLATFORM_TENANT"),
+		func() datapool.Pool { return d.pool },
+		d.logger.WithComponent("apoc-contract").Slog(),
+	).status)
+	d.logger.Debug(ctx, "registered neo4j apoc contract readiness check")
+
 	// Register key provider health check if available
 	if d.keyProvider != nil {
 		keyProvider := d.keyProvider
