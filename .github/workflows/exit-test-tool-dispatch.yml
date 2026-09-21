@@ -24,6 +24,13 @@
 # already uses. Authentication itself is
 # covered by login_full_chain / auth e2e, not here.
 #
+# The same cluster also hosts the PLUGIN SECRET REVOCATION exit test
+# (gibson#154): the GitHub plugin image runs beside Envoy, the suite revokes
+# its secret, and the install must read Degraded within one heartbeat plus the
+# event stream's latency. It needs Envoy, ext-authz, SPIRE and the test-mode
+# daemon, all of which stand here, so it is a step after the tool test rather
+# than a second 45-minute bring-up.
+#
 # ADR-0012: NEVER on pull_request. An exit test measures state on `main` for the
 # launch scorecard; it needs a live cluster, so it cannot gate a PR. The merge
 # gate is the ten-minute set in go-ci.yml.
@@ -44,6 +51,12 @@ on:
       - 'pkg/billing/entitlements/**'
       - 'tests/e2e/tool_dispatch_test.go'
       - 'tests/e2e/helpers/**'
+      # The plugin secret revocation half (gibson#154): the event stream,
+      # the admin RPC that revokes, and the suite.
+      - 'internal/platform/componentevents/**'
+      - 'internal/server/admin/**'
+      - 'tests/e2e/plugin_secret_revocation_test.go'
+      - '.github/scripts/run-e2e-job.sh'
       - '.github/workflows/exit-test-tool-dispatch.yml'
   schedule:
     # Daily. A tool path that is gated today and not tomorrow is the failure
@@ -78,10 +91,11 @@ jobs:
   tool-dispatch:
     name: manifest-seeded tools dispatch only for the tenants that enabled them
     runs-on: ubuntu-latest
-    # 90, not 45: the kind bringup alone took 45 minutes on 2026-09-18
+    # 120, not 45: the kind bringup alone took 45 minutes on 2026-09-18
     # (run 35399104370 hit the limit inside "Stand up the cluster" with
-    # progress still flowing), and the build and the suite need 10 more.
-    timeout-minutes: 90
+    # progress still flowing), the build and the tool suite need 30 more,
+    # and the plugin revocation suite up to 20 (gibson#154).
+    timeout-minutes: 120
     steps:
       - name: Checkout gibson
         uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
@@ -216,8 +230,31 @@ jobs:
           docker build -t ghcr.io/zeroroot-ai/gibson:e2e-tool /tmp/dctx
           kind load docker-image ghcr.io/zeroroot-ai/gibson:e2e-tool --name "$CLUSTER"
 
-      - name: Point the daemon at the test-mode image with authz off + fixtures on
+      # The same patch deploys the GitHub plugin, the fixture of the plugin
+      # secret revocation exit test (gibson#154): the real image the
+      # integrations CI published, pinned by digest, rendered by the chart's
+      # plugins template beside Envoy (pod runtime, SVID enrolment,
+      # cred:github_token declared as a required startup secret). One patch
+      # means one Argo sync and one daemon rollout: a second sync later rolled
+      # the daemon again and the revocation suite started against a
+      # restarting daemon (run 35626821216). The plugin pod restarts on a
+      # back-off until the suite seeds its secret; the suite waits for that.
+      #
+      # The digest is spliced into the JSON outside the single quotes, on
+      # purpose. Argo CD expands `${NAME}` in a Helm parameter value from its
+      # own build environment and an unknown name expands to nothing, so a
+      # literal `${PLUGIN_IMAGE_DIGEST}` reached the chart as an empty digest
+      # and the template fell back to the appVersion tag (run 35626821216).
+      # `enabled` is not forceString: the template tests the value's truth,
+      # and the string "false" is a non-empty string.
+      - name: Point the daemon at the test-mode image with authz off + fixtures on, and deploy the GitHub plugin
         working-directory: hosted
+        env:
+          # ghcr.io/zeroroot-ai/integrations/github :latest = sha-944b8fe,
+          # built on sdk v0.179.0 (integrations#16), the first SDK that
+          # subscribes to WatchComponentEvents. Bump it when the integrations
+          # CI publishes a new digest.
+          PLUGIN_IMAGE_DIGEST: sha256:bfbaa4612be0e66b13742c2eeac9a4a5d9788e3373b517c8b7cdcbccc1da1b0f
         run: |
           set -euo pipefail
           # The e2eRunner values register the runner's ClusterSPIFFEID,
@@ -234,7 +271,12 @@ jobs:
               {"op":"add","path":"/spec/source/helm/parameters/-","value":{"name":"gibson-workloads.gibson.image.repository","value":"ghcr.io/zeroroot-ai/gibson","forceString":true}},
               {"op":"add","path":"/spec/source/helm/parameters/-","value":{"name":"gibson-workloads.gibson.image.tag","value":"e2e-tool","forceString":true}},
               {"op":"add","path":"/spec/source/helm/parameters/-","value":{"name":"gibson-workloads.gibson.image.pullPolicy","value":"IfNotPresent","forceString":true}},
-              {"op":"add","path":"/spec/source/helm/parameters/-","value":{"name":"gibson-workloads.gibson.authz.enabled","value":"false"}}
+              {"op":"add","path":"/spec/source/helm/parameters/-","value":{"name":"gibson-workloads.gibson.authz.enabled","value":"false"}},
+              {"op":"add","path":"/spec/source/helm/parameters/-","value":{"name":"gibson-workloads.plugins.github.enabled","value":"true"}},
+              {"op":"add","path":"/spec/source/helm/parameters/-","value":{"name":"gibson-workloads.plugins.github.runtime","value":"pod","forceString":true}},
+              {"op":"add","path":"/spec/source/helm/parameters/-","value":{"name":"gibson-workloads.plugins.github.image.repository","value":"ghcr.io/zeroroot-ai/integrations/github","forceString":true}},
+              {"op":"add","path":"/spec/source/helm/parameters/-","value":{"name":"gibson-workloads.plugins.github.image.digest","value":"'"${PLUGIN_IMAGE_DIGEST}"'","forceString":true}},
+              {"op":"add","path":"/spec/source/helm/parameters/-","value":{"name":"gibson-workloads.plugins.github.image.pullPolicy","value":"IfNotPresent","forceString":true}}
             ]'
 
           for i in $(seq 1 60); do
@@ -265,6 +307,15 @@ jobs:
             fi
             sleep 10
           done
+          # The plugin Deployment carrying the digest is the proof the plugin
+          # values reached the chart. Readiness is not awaited: the pod cannot
+          # pass its startup probe before the suite seeds the secret it declares.
+          img=$(kubectl -n "$NS" get deployment "${RELEASE}-plugin-github" \
+                  -o jsonpath='{.spec.template.spec.containers[?(@.name=="plugin")].image}' 2>/dev/null || true)
+          case "$img" in
+            *"@${PLUGIN_IMAGE_DIGEST}") echo "plugin Deployment rendered: $img" ;;
+            *) echo "::error::the GitHub plugin Deployment did not render with the pinned digest (got '${img}'; Argo app: $(kubectl -n argocd get app gibson -o jsonpath='{.status.sync.status}/{.status.health.status}'))"; exit 1 ;;
+          esac
 
       # The suite runs INSIDE the cluster, not over a port-forward.
       #
@@ -275,6 +326,7 @@ jobs:
       # disables authorization, not transport. The suite therefore needs an
       # attested SVID, which means being a pod in the mesh.
       - name: Build the e2e suite into an image
+        id: suite-image
         working-directory: gibson
         run: |
           set -euo pipefail
@@ -292,94 +344,15 @@ jobs:
           kind load docker-image ghcr.io/zeroroot-ai/gibson-e2e-runner:local --name "$CLUSTER"
 
       - name: Run the tool-dispatch exit test in-cluster
-        run: |
-          set -euo pipefail
-          pw=$(kubectl -n "$NS" get secret gibson-redis-stack -o jsonpath='{.data.redis-password}' | base64 -d)
-          if [ -z "$pw" ]; then
-            echo "::error::gibson-redis-stack has no redis-password; the fixture helpers cannot authenticate"
-            exit 1
-          fi
-          echo "::add-mask::$pw"
-          kubectl -n "$NS" delete secret gibson-e2e-runner-env --ignore-not-found
-          kubectl -n "$NS" create secret generic gibson-e2e-runner-env \
-            --from-literal=REDIS_PASSWORD="$pw"
+        run: gibson/.github/scripts/run-e2e-job.sh gibson-e2e-tool-dispatch TestToolDispatch 20m
 
-          # In-cluster addresses: no port-forward, and the SVID is minted for
-          # this pod by the ClusterSPIFFEID keyed on its label + ServiceAccount.
-          kubectl -n "$NS" delete job gibson-e2e-tool-dispatch --ignore-not-found
-          cat <<EOF | kubectl -n "$NS" apply -f -
-          apiVersion: batch/v1
-          kind: Job
-          metadata:
-            name: gibson-e2e-tool-dispatch
-          spec:
-            backoffLimit: 0
-            template:
-              metadata:
-                labels:
-                  # The daemon's NetworkPolicy admits the runner by the chart's
-                  # selector labels plus the component; the component alone left
-                  # every dial to the daemon in "i/o timeout" (run 34154995591).
-                  app.kubernetes.io/name: gibson-workloads
-                  app.kubernetes.io/instance: ${RELEASE}
-                  app.kubernetes.io/component: e2e-runner
-              spec:
-                restartPolicy: Never
-                serviceAccountName: ${RELEASE}-e2e-runner
-                containers:
-                  - name: e2e
-                    image: ghcr.io/zeroroot-ai/gibson-e2e-runner:local
-                    imagePullPolicy: IfNotPresent
-                    args: ["-test.run", "TestToolDispatch", "-test.v", "-test.timeout", "20m"]
-                    env:
-                      - name: GIBSON_TEST_FIXTURES_ENABLED
-                        value: "true"
-                      - name: DAEMON_GRPC_ADDR
-                        value: "gibson-gibson-workloads.${NS}.svc.cluster.local:50051"
-                      # The daemon's listener is SPIFFE mTLS. Name the socket
-                      # the csi.spiffe.io mount below carries (api.sock, the
-                      # chart's gibson.auth.spiffe.workloadAPISocket) so the
-                      # runner never guesses and never dials plaintext (gibson#14).
-                      - name: SPIFFE_ENDPOINT_SOCKET
-                        value: "unix:///run/spire/sockets/api.sock"
-                      - name: REDIS_ADDR
-                        value: "gibson-redis-stack.${NS}.svc.cluster.local:6379"
-                      - name: REDIS_PASSWORD
-                        valueFrom:
-                          secretKeyRef:
-                            name: gibson-e2e-runner-env
-                            key: REDIS_PASSWORD
-                    volumeMounts:
-                      - name: spire-agent-socket
-                        mountPath: /run/spire/sockets
-                        readOnly: true
-                volumes:
-                  # The SPIRE Workload API arrives through the csi.spiffe.io
-                  # driver, as the daemon's own StatefulSet mounts it. A
-                  # hostPath to /run/spire/sockets does not exist on the kind
-                  # node and wedges the Pod in ContainerCreating.
-                  - name: spire-agent-socket
-                    csi:
-                      driver: csi.spiffe.io
-                      readOnly: true
-          EOF
-
-          # Stream the suite's output so a failure is readable here, then use
-          # the Job's own condition as the verdict — `kubectl wait` on Complete
-          # alone would hang the full timeout on a failed run.
-          kubectl -n "$NS" wait --for=condition=Ready pod \
-            -l job-name=gibson-e2e-tool-dispatch --timeout=3m || true
-          kubectl -n "$NS" logs -f job/gibson-e2e-tool-dispatch --tail=-1 || true
-
-          for _ in $(seq 1 120); do
-            ok=$(kubectl -n "$NS" get job gibson-e2e-tool-dispatch -o jsonpath='{.status.succeeded}' 2>/dev/null || true)
-            bad=$(kubectl -n "$NS" get job gibson-e2e-tool-dispatch -o jsonpath='{.status.failed}' 2>/dev/null || true)
-            [ "${ok:-0}" != "0" ] && [ -n "${ok:-}" ] && { echo "exit test PASSED"; exit 0; }
-            [ "${bad:-0}" != "0" ] && [ -n "${bad:-}" ] && { echo "::error::the tool-dispatch exit test FAILED"; exit 1; }
-            sleep 10
-          done
-          echo "::error::the tool-dispatch exit test did not finish"
-          exit 1
+      # Plugin secret revocation (gibson#154), on the plugin the daemon patch
+      # deployed. Runs whenever the suite image built, so a tool-dispatch
+      # failure does not hide this verdict and a bring-up failure does not
+      # fake one.
+      - name: Run the plugin secret revocation exit test in-cluster
+        if: ${{ !cancelled() && steps.suite-image.outcome == 'success' }}
+        run: gibson/.github/scripts/run-e2e-job.sh gibson-e2e-plugin-revocation TestPluginSecretRevocation 20m
 
       # always(), not failure(): a job that hits timeout-minutes is
       # cancelled, and a cancelled job skips failure() steps, so the
@@ -405,4 +378,20 @@ jobs:
           kubectl -n argocd get app gibson -o jsonpath='{range .status.operationState.syncResult.resources[?(@.status=="SyncFailed")]}{.kind}/{.name}: {.message}{"\n"}{end}' 2>/dev/null || true
           kubectl -n setec-system get pods,sandboxes,sandboxclasses || true
           kubectl -n setec-sandboxes get pods || true
+          # The plugin's own account of the revocation (gibson#154): its
+          # enrolment, "startup secret resolved", "events: secret access
+          # revoked" and the Degraded transition are all SDK log lines.
+          echo "=== GitHub plugin pod ==="
+          kubectl -n "$NS" get pods -l gibson.zeroroot.ai/plugin=github -o wide || true
+          for p in $(kubectl -n "$NS" get pods -l gibson.zeroroot.ai/plugin=github -o name 2>/dev/null); do
+            kubectl -n "$NS" describe "$p" | grep -A15 '^Events' || true
+            kubectl -n "$NS" logs "$p" -c plugin --tail=200 || true
+            kubectl -n "$NS" logs "$p" -c plugin --previous --tail=60 2>/dev/null || true
+          done
+          # ext-authz decides every edge call a plugin makes; a deny at the
+          # edge never reaches the daemon log (run 35630951761: the plugin's
+          # RegisterComponent was PermissionDenied and the daemon log had
+          # nothing to say about it).
+          echo "=== ext-authz ==="
+          kubectl -n "$NS" logs -l app.kubernetes.io/component=ext-authz --tail=300 || true
           kubectl -n "$NS" logs -l app.kubernetes.io/component=daemon -c gibson --tail=1500 || true
