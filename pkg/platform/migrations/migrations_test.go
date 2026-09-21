@@ -32,15 +32,17 @@ func TestEmbed_PlatformHasExpectedFiles(t *testing.T) {
 	// / mission:originate capability check (gibson#1186 slice C), 024 adds the
 	// admin-approval registration rung's state (ADR-0006, gibson#22), 025 adds
 	// tenant_quotas.concurrent_connectors, which the entitlements reader
-	// selects (gibson#13).
+	// selects (gibson#13), 026 adds component_install.principal_ref, the FGA
+	// user a component registered as, which the secret-binding admin RPCs
+	// address (gibson#154).
 	// golang-migrate tracks a single integer and only moves forward, so
 	// leaving a gap would let a later-landing migration be skipped forever.
 	upCount, downCount := countSQL(t, Platform, platformDir)
-	if upCount != 25 {
-		t.Errorf("platform: expected 25 up.sql files, got %d", upCount)
+	if upCount != 26 {
+		t.Errorf("platform: expected 26 up.sql files, got %d", upCount)
 	}
-	if downCount != 25 {
-		t.Errorf("platform: expected 25 down.sql files, got %d", downCount)
+	if downCount != 26 {
+		t.Errorf("platform: expected 26 down.sql files, got %d", downCount)
 	}
 }
 
@@ -125,6 +127,10 @@ func TestTenantMaxVersion(t *testing.T) {
 //	      capability check, gibson#1186 slice C)
 //	024 — signup_admin_approval (the ADR-0006 approval registration rung: a
 //	      deactivated owner account plus an attributable decision, gibson#22)
+//	025 — add_concurrent_connectors_to_tenant_quotas (the entitlements reader's
+//	      ceiling, gibson#13)
+//	026 — component_install_principal_ref (the FGA user a component registered
+//	      as, which the secret-binding admin RPCs address, gibson#154)
 //
 // The sequence must stay CONTIGUOUS. golang-migrate records a single integer
 // version, and `up` only ever moves forward from it — so a migration that lands
@@ -138,8 +144,8 @@ func TestPlatformMaxVersion(t *testing.T) {
 	if err != nil {
 		t.Fatalf("PlatformMaxVersion: %v", err)
 	}
-	if v != 25 {
-		t.Errorf("PlatformMaxVersion: got %d, want 25", v)
+	if v != 26 {
+		t.Errorf("PlatformMaxVersion: got %d, want 26", v)
 	}
 }
 
