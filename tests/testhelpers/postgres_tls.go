@@ -206,8 +206,16 @@ exec docker-entrypoint.sh "$@"`,
 			"-c", "ssl_cert_file=" + certInContainer,
 			"-c", "ssl_key_file=" + keyInContainer,
 		},
+		// The official image's entrypoint starts a temporary server for
+		// initdb, prints "ready to accept connections" once, shuts it
+		// down, then starts the real one and prints it again. Waiting
+		// for the first line hands the test a server that is about to
+		// restart: the first Ping got "connection reset by peer", "the
+		// database system is starting up (57P03)" or EOF (gibson#205,
+		// run 35645251989). The second occurrence is the real server,
+		// the same rule the testcontainers postgres module applies.
 		WaitingFor: wait.ForAll(
-			wait.ForLog("database system is ready to accept connections"),
+			wait.ForLog("database system is ready to accept connections").WithOccurrence(2),
 			wait.ForListeningPort("5432/tcp"),
 		).WithDeadline(90 * time.Second),
 	}
