@@ -16,7 +16,7 @@ func TestWriteRendersTheContract(t *testing.T) {
 	if err := write(path); err != nil {
 		t.Fatal(err)
 	}
-	got, err := os.ReadFile(path)
+	got, err := os.ReadFile(path) //nolint:gosec // a path under t.TempDir()
 	if err != nil {
 		t.Fatal(err)
 	}

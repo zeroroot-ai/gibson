@@ -24,5 +24,8 @@ func main() {
 // write renders the contract to path. The file is committed source, so it
 // is world-readable like the rest of the tree.
 func write(path string) error {
-	return os.WriteFile(path, []byte(dataplane.ContractEnv()), 0o644) //nolint:gosec // a generated, committed source file
+	if err := os.WriteFile(path, []byte(dataplane.ContractEnv()), 0o644); err != nil { //nolint:gosec // a generated, committed source file
+		return fmt.Errorf("write %s: %w", path, err)
+	}
+	return nil
 }

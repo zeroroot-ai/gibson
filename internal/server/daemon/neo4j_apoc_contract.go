@@ -75,7 +75,7 @@ func verifyAPOCContract(ctx context.Context, run cypherRows) error {
 
 	rows, err = run(ctx, "CALL dbms.listConfig('dbms.security.procedures.allowlist') YIELD value RETURN value", nil)
 	if err != nil {
-		return fmt.Errorf("%w: %v", errAllowlistUnreadable, err)
+		return fmt.Errorf("%w: %w", errAllowlistUnreadable, err)
 	}
 	if len(rows) == 0 {
 		return fmt.Errorf("%w: dbms.listConfig returned no row", errAllowlistUnreadable)
@@ -165,11 +165,11 @@ func sessionRows(s neo4j.SessionWithContext) cypherRows {
 	return func(ctx context.Context, cypher string, params map[string]any) ([]map[string]any, error) {
 		res, err := s.Run(ctx, cypher, params)
 		if err != nil {
-			return nil, err
+			return nil, fmt.Errorf("run %q: %w", cypher, err)
 		}
 		recs, err := res.Collect(ctx)
 		if err != nil {
-			return nil, err
+			return nil, fmt.Errorf("collect %q: %w", cypher, err)
 		}
 		out := make([]map[string]any, 0, len(recs))
 		for _, r := range recs {

@@ -97,14 +97,18 @@ func TestVerifyAPOCContract(t *testing.T) {
 	})
 }
 
-func TestAPOCContractCheck(t *testing.T) {
+// contractCheckWith returns a check whose pool hands out a conn and whose
+// queries are answered by f.
+func contractCheckWith(f *fakeNeo4j) *apocContractCheck {
+	c := newAPOCContractCheck("tenant-a", func() datapool.Pool { return &mockPool{conn: minimalConn()} }, slog.New(slog.DiscardHandler))
+	c.rows = func(neo4j.SessionWithContext) cypherRows { return f.run }
+	return c
+}
+
+// TestAPOCContractCheck_Unverifiable: every state the daemon cannot verify
+// stays Healthy and names the reason.
+func TestAPOCContractCheck_Unverifiable(t *testing.T) {
 	ctx := context.Background()
-	contract := dataplane.Neo4jProcedureAllowlist
-	good := func(f *fakeNeo4j) *apocContractCheck {
-		c := newAPOCContractCheck("tenant-a", func() datapool.Pool { return &mockPool{conn: minimalConn()} }, slog.New(slog.DiscardHandler))
-		c.rows = func(neo4j.SessionWithContext) cypherRows { return f.run }
-		return c
-	}
 
 	t.Run("no install tenant stays healthy and says so", func(t *testing.T) {
 		c := newAPOCContractCheck("", func() datapool.Pool { return nil }, slog.New(slog.DiscardHandler))
@@ -139,9 +143,16 @@ func TestAPOCContractCheck(t *testing.T) {
 			t.Fatalf("got %+v", st)
 		}
 	})
+}
+
+// TestAPOCContractCheck_Verified: the answers a live server gives.
+func TestAPOCContractCheck_Verified(t *testing.T) {
+	ctx := context.Background()
+	contract := dataplane.Neo4jProcedureAllowlist
+
 	t.Run("a verified contract is healthy and sticky", func(t *testing.T) {
 		f := &fakeNeo4j{procedures: []string{"apoc.merge.node", "apoc.merge.relationship"}, allowlist: contract}
-		c := good(f)
+		c := contractCheckWith(f)
 		if st := c.status(ctx); !st.IsHealthy() || !strings.Contains(st.Message, "verified") {
 			t.Fatalf("got %+v", st)
 		}
@@ -155,14 +166,14 @@ func TestAPOCContractCheck(t *testing.T) {
 	})
 	t.Run("an unreadable allowlist is healthy with a note", func(t *testing.T) {
 		f := &fakeNeo4j{procedures: []string{"apoc.merge.node", "apoc.merge.relationship"}, listErr: errors.New("Forbidden")}
-		c := good(f)
+		c := contractCheckWith(f)
 		if st := c.status(ctx); !st.IsHealthy() || !strings.Contains(st.Message, "not readable") {
 			t.Fatalf("got %+v", st)
 		}
 	})
 	t.Run("a mismatch is degraded and re-checked every tick", func(t *testing.T) {
 		f := &fakeNeo4j{procedures: []string{"apoc.merge.node"}, allowlist: contract}
-		c := good(f)
+		c := contractCheckWith(f)
 		st := c.status(ctx)
 		if !st.IsDegraded() || !strings.Contains(st.Message, "apoc.merge.relationship") {
 			t.Fatalf("got %+v", st)
