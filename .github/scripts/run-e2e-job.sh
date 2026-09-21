@@ -4,6 +4,15 @@
 #
 # Usage: run-e2e-job.sh <job-name> <-test.run regex> <-test.timeout>
 # Env:   NS (namespace), RELEASE (Helm release name)
+#        E2E_RUNNER_BINARY   optional: the test binary inside the image to run
+#                            (default: the image's ENTRYPOINT, e2e.test). The
+#                            cluster e2e lane (exit-test-e2e-cluster.yml) bakes
+#                            a second binary, secrets.test, into the same image.
+#        E2E_RUNNER_ENV_FILE optional: a KEY=VALUE file whose entries reach the
+#                            Job's environment through the same Secret that
+#                            carries REDIS_PASSWORD, so a suite's own settings
+#                            (a tenant id, a platform URL) never land in the
+#                            Job manifest in clear.
 #
 # The suite runs INSIDE the cluster, not over a port-forward. The daemon's
 # gRPC listener speaks SPIFFE mTLS and refuses to bind a non-loopback
@@ -28,8 +37,21 @@ if [ -z "$pw" ]; then
 fi
 echo "::add-mask::$pw"
 kubectl -n "$NS" delete secret gibson-e2e-runner-env --ignore-not-found
-kubectl -n "$NS" create secret generic gibson-e2e-runner-env \
-  --from-literal=REDIS_PASSWORD="$pw"
+if [ -n "${E2E_RUNNER_ENV_FILE:-}" ]; then
+  [ -s "$E2E_RUNNER_ENV_FILE" ] || { echo "::error::E2E_RUNNER_ENV_FILE=$E2E_RUNNER_ENV_FILE is missing or empty"; exit 1; }
+  kubectl -n "$NS" create secret generic gibson-e2e-runner-env \
+    --from-literal=REDIS_PASSWORD="$pw" \
+    --from-env-file="$E2E_RUNNER_ENV_FILE"
+else
+  kubectl -n "$NS" create secret generic gibson-e2e-runner-env \
+    --from-literal=REDIS_PASSWORD="$pw"
+fi
+
+# The binary the Job runs. Unset, the image's ENTRYPOINT (e2e.test) runs.
+COMMAND_LINE=""
+if [ -n "${E2E_RUNNER_BINARY:-}" ]; then
+  COMMAND_LINE="          command: [\"${E2E_RUNNER_BINARY}\"]"
+fi
 
 # In-cluster addresses: no port-forward, and the SVID is minted for this pod
 # by the ClusterSPIFFEID keyed on its label + ServiceAccount.
@@ -57,7 +79,13 @@ spec:
         - name: e2e
           image: ghcr.io/zeroroot-ai/gibson-e2e-runner:local
           imagePullPolicy: IfNotPresent
+${COMMAND_LINE}
           args: ["-test.run", "${TEST_RUN}", "-test.v", "-test.timeout", "${TEST_TIMEOUT}"]
+          # Every entry of the Secret is an environment variable: the
+          # password plus whatever E2E_RUNNER_ENV_FILE added.
+          envFrom:
+            - secretRef:
+                name: gibson-e2e-runner-env
           env:
             - name: GIBSON_TEST_FIXTURES_ENABLED
               value: "true"

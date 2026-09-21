@@ -118,7 +118,7 @@ separate question per tag:
 | `integration` | `vet-tags`, both lanes | `make test-integration`, both lanes (scoped `INTEGRATION_PKG`) |
 | `setec_integration` | `vet-tags`, both lanes | `e2e-setec-roundtrip.yml`, self-hosted KVM runner |
 | `openbao_smoke`, `openbao_integration` | `vet-tags`, both lanes | `make test-openbao` via the `openbao` job, both lanes (hermetic testcontainers, no live infra) |
-| `e2e` | `vet-tags`, both lanes | **partially** — the cluster-free part was untagged and now runs in the default lane; the rest needs a live kind cluster, `GIBSON_TEST_FIXTURES_ENABLED=true` and an admin JWT (see below) |
+| `e2e` | `vet-tags`, both lanes | the cluster-free part was untagged and runs in the default lane. The cluster-bound part runs on `main` and daily in the exit-test workflows (see "Where the cluster-bound `e2e` suites run" below), never on a PR (ADR-0012) |
 | `test_fixtures` | `vet-tags`, both lanes | fixture-enabled image build (Dockerfile build-arg) |
 | `llm_integration` | `vet-tags`, both lanes | **compile-only, deliberately** — needs a live LLM key (`ANTHROPIC_API_KEY`); spend + secret is an owner decision |
 | `integration_spire` | `vet-tags`, both lanes | **compile-only, deliberately** — needs a live SPIRE Workload API socket, only reachable from inside a pod with the spire-agent socket mounted |
@@ -156,15 +156,51 @@ files were written:
    asserting on a locally-built exporter, so the span it recorded could never
    arrive. `TestMissionSummarySpan` above it was the one mutating the global.
 
-The rest of the `e2e` tag genuinely needs infrastructure. Current status:
+### Where the cluster-bound `e2e` suites run
 
-| Suite | Needs | State |
+The rest of the `e2e` tag needs a live cluster. The venue is an ephemeral
+kind cluster on `ubuntu-latest`, brought up through hosted's
+`make substrate ENV=kind` and `make recreate ENV=kind` (charts `main`,
+`RUNG=ci`) with Envoy, Zitadel, SPIRE and a test-mode daemon. Per ADR-0012
+these workflows run on `main` and on a schedule, never on a pull request.
+They feed the launch scorecard and block nothing.
+
+Two ways a suite reaches the cluster:
+
+- **In-cluster.** The daemon's gRPC listener speaks SPIFFE mTLS only, so a
+  suite that dials it runs as a Kubernetes Job with the runner's SVID
+  (`.github/scripts/run-e2e-job.sh`). The test-mode daemon reads the tenant
+  from `x-gibson-identity-tenant` for that SVID
+  (`internal/server/daemon/e2e_peer_policy.go`). There is no tenant admin
+  JWT in this venue. The SVID is the identity.
+- **On the runner.** A suite that drives `kubectl`, port-forwards, or reads
+  files a browser driver wrote runs as `go test -tags=e2e` with the
+  cluster's kubeconfig.
+
+| Suite | Workflow | How it runs |
 |---|---|---|
-| `tests/e2e/secrets/*` (4 files) | kind + `GIBSON_TEST_FIXTURES_ENABLED` + tenant admin JWT | blocked; skips cleanly with a reason |
-| `plugin_e2e_test.go`, `mission_finding_per_tenant_e2e_test.go` | kind + fixtures | blocked; skips cleanly |
-| `audit_v4_foundation_test.go` | live daemon for the `live_*` subtests | partially runs — the mock subtests pass, the live ones skip |
-| `login_full_chain_test.go`, `signup_full_chain_test.go`, `dashboard_smoke_test.go` | kind + Zitadel + Envoy + a signed-up tenant | blocked; **fails** rather than skipping, and the `make test-{login,signup,dashboard-smoke}-e2e` targets their messages name do not exist in the Makefile |
-| `operators/tenant/test/e2e` | kind + cert-manager | blocked; its `BeforeSuite` runs `make docker-build` in `operators/tenant/`, where there is no `Dockerfile` — so it cannot pass even with a cluster |
+| `tool_dispatch_test.go` | `exit-test-tool-dispatch.yml` | in-cluster Job, `TestToolDispatch` |
+| `plugin_secret_revocation_test.go` | `exit-test-tool-dispatch.yml` | in-cluster Job, `TestPluginSecretRevocation` |
+| `sandboxed_agent_dispatch_test.go` | `exit-test-sandboxed-dispatch.yml` | in-cluster Job |
+| `bank_test.go` | `exit-test-bank.yml` | in-cluster Job, gated on a repository variable and a real key |
+| `tests/e2e/secrets/*` (5 files, 4 tests) | `exit-test-e2e-cluster.yml` | in-cluster Job, `secrets.test` binary |
+| `plugin_e2e_test.go` | `exit-test-e2e-cluster.yml` | on the runner |
+| `mission_finding_per_tenant_e2e_test.go` | `exit-test-e2e-cluster.yml` | on the runner, `kubectl`-driven |
+| `audit_v4_foundation_test.go` `live_*` | `exit-test-e2e-cluster.yml` | on the runner, port-forwards at the suite's NodePort constants |
+| `signup_full_chain_test.go`, `login_full_chain_test.go`, `dashboard_smoke_test.go` | `exit-test-e2e-cluster.yml` | on the runner through `make test-{signup,login,dashboard-smoke}-e2e` |
+| `operators/tenant/test/e2e` | `exit-test-e2e-cluster.yml` | on the runner, Ginkgo, `KIND_CLUSTER=gibson` |
+
+`exit-test-e2e-cluster.yml` writes one verdict row per suite
+(`.github/scripts/e2e-suite-verdict.sh`): PASS, FAIL or SKIP, with the
+skipped subtest count. Any FAIL fails the run. Every SKIP is a warning,
+because a skip is coverage the lane does not have. A suite whose step never
+ran counts as FAIL. The rows and every suite's log are uploaded as the
+`e2e-cluster-<run id>` artifact.
+
+The per-suite state after each run is recorded on zeroroot-ai/gibson#32
+until every suite passes or has its own issue.
+
+Do not delete an unrun suite and do not mark one skipped.
 
 ### Redis-backed suites (no build tag)
 

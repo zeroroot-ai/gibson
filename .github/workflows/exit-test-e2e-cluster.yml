@@ -1,0 +1,471 @@
+# ----------------------------------------------------------------------------
+# The cluster-bound e2e suites, on a real cluster (gibson#32).
+#
+# In plain words: every `-tags=e2e` suite that needs a live cluster runs here,
+# on the same kind cluster the tool-dispatch exit test brings up, and the run
+# says per suite whether it PASSED, FAILED or SKIPPED. A skip is missing
+# coverage and is warned about. A failure fails the run.
+#
+# WHY A SEPARATE WORKFLOW. exit-test-tool-dispatch.yml, exit-test-bank.yml and
+# exit-test-sandboxed-dispatch.yml each prove one launch blocker. A suite that
+# fails here must not hide a blocker signal there, so this lane has its own
+# run and its own scorecard row.
+#
+# HOW EACH SUITE RUNS. Two venues on the one cluster:
+#   - In-cluster, as a Kubernetes Job with the runner's SVID
+#     (.github/scripts/run-e2e-job.sh): the suites that dial the daemon's gRPC
+#     listener. The listener speaks SPIFFE mTLS only, so nothing on the runner
+#     can dial it. The test-mode daemon (test_fixtures build, authz off) takes
+#     the tenant from x-gibson-identity-tenant for that SVID
+#     (internal/server/daemon/e2e_peer_policy.go). There is no tenant admin
+#     JWT in this venue: the SVID is the identity.
+#   - On the runner, with the cluster's kubeconfig: the suites that drive
+#     kubectl, port-forward to a NodePort, or read files the browser driver
+#     writes. They run as plain `go test -tags=e2e`.
+#
+# The bring-up (stage 0, recreate, gvisor check, test-mode daemon) is the
+# tool-dispatch one, copied. ONE bring-up path.
+#
+# ADR-0012: NEVER on pull_request. It needs a live cluster, so it cannot gate
+# a PR. The merge gate is the ten-minute set in go-ci.yml.
+# ----------------------------------------------------------------------------
+name: exit-test-e2e-cluster
+
+on:
+  push:
+    branches: [main]
+    paths:
+      - 'tests/e2e/**'
+      - 'operators/tenant/**'
+      - 'internal/server/daemon/e2e_peer_policy*.go'
+      - '.github/scripts/run-e2e-job.sh'
+      - '.github/scripts/e2e-suite-verdict.sh'
+      - '.github/workflows/exit-test-e2e-cluster.yml'
+  schedule:
+    # Daily, after the tool-dispatch run. A suite that ran yesterday and not
+    # today is the regression this catches.
+    - cron: '15 7 * * *'
+  workflow_dispatch: {}
+
+# One run at a time, and a run that started finishes (gibson#151).
+concurrency:
+  group: exit-test-e2e-cluster-${{ github.ref }}
+  cancel-in-progress: false
+
+permissions:
+  contents: read
+
+env:
+  # hosted's recreate renders the chart from a checkout of zeroroot-ai/charts.
+  CHARTS_ROOT: ${{ github.workspace }}/charts
+  NS: gibson
+  RELEASE: gibson
+  CLUSTER: gibson
+  # The kind node the hosted bring-up creates (baseline-up.sh: <cluster>-control-plane).
+  NODE: gibson-control-plane
+  # The tenant the sanctioned baseline profile always provisions.
+  TENANT: primary
+  # Where every suite's log and the verdict rows land; uploaded at the end.
+  E2E_OUT: ${{ github.workspace }}/e2e-out
+  RESULTS: ${{ github.workspace }}/e2e-out/results.tsv
+
+jobs:
+  e2e-cluster:
+    name: every cluster-bound e2e suite runs on one kind cluster
+    runs-on: ubuntu-latest
+    # The kind bring-up alone took 45 minutes on 2026-09-18 (run 35399104370),
+    # the builds need 15 more, and nine suites follow, the tenant operator
+    # one with a 30-minute budget of its own.
+    timeout-minutes: 180
+    steps:
+      - name: Checkout gibson
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          path: gibson
+
+      # The verdict parser is a guard: it ships with fixtures that must get
+      # the right verdict, or nothing below is trusted.
+      - name: The verdict parser passes its own fixtures
+        run: bash gibson/.github/scripts/e2e-suite-verdict.sh --selftest
+
+      # The kind bring-up (make substrate / make recreate ENV=kind), the
+      # sanctioned setec+gvisor profile and the gvisor node-prep live in the
+      # hosted repo since the 2026-09-04 split (ADR-0086). hosted is private,
+      # so the checkout needs the org read PAT.
+      - name: Checkout hosted
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          repository: zeroroot-ai/hosted
+          path: hosted
+          token: ${{ secrets.GH_PAT_PLATFORM_RO }}
+
+      # The chart source lives in zeroroot-ai/charts (ADR-0086); hosted holds
+      # none and its recreate reads CHARTS_ROOT. charts is public.
+      - name: Checkout charts
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          repository: zeroroot-ai/charts
+          path: charts
+
+      - name: Set up Go
+        uses: actions/setup-go@b7ad1dad31e06c5925ef5d2fc7ad053ef454303e # v5
+        with:
+          go-version-file: gibson/go.mod
+          cache-dependency-path: gibson/go.sum
+
+      - uses: azure/setup-helm@9bc31f4ebc9c6b171d7bfbaa5d006ae7abdb4310 # v5
+        with:
+          version: v3.16.2
+
+      - name: Install kind + kubectl
+        uses: helm/kind-action@06c1ae10762d3b9c1644e7fe69596ae519e015a2 # v1.15.0
+        with:
+          install_only: true
+
+      # `make recreate ENV=kind` runs stage 1 through terraform
+      # (scripts/recreate-kind.sh). Pinned to hosted's own CI version.
+      - name: Install terraform
+        uses: hashicorp/setup-terraform@dfe3c3f87815947d99a8997f908cb6525fc44e9e # v4
+        with:
+          terraform_version: "1.9.8"
+          terraform_wrapper: false
+
+      # Stage 0 writes the bringup keyring the install reads (ADR-0015). The
+      # registry pull token is the keyring member GHCR_PULL_TOKEN. The state
+      # dir is the runner's temp, because nothing here owns /bulk.
+      - name: Stage 0, the substrate and the bringup keyring
+        working-directory: hosted
+        env:
+          GHCR_PULL_TOKEN: ${{ secrets.GHCR_RO_PAT }}
+        run: |
+          if [ -z "${GHCR_PULL_TOKEN}" ]; then
+            echo "::error::GHCR_RO_PAT is required to pull first-party images (daemon, setec)."
+            exit 1
+          fi
+          SUBSTRATE_DIR="$RUNNER_TEMP/substrate" make substrate ENV=kind
+
+      # Stand up kind with the sanctioned setec+gvisor profile. baseline-up.sh
+      # --fresh-kind does the gvisor node-prep and installs the umbrella with
+      # values-baseline.yaml. The 2-core overlay shrinks REQUESTS so the whole
+      # platform packs onto the runner.
+      - name: Stand up the setec+gvisor cluster
+        working-directory: hosted
+        run: |
+          SUBSTRATE_DIR="$RUNNER_TEMP/substrate" \
+            RUNG=ci make recreate ENV=kind
+
+      # The node must actually advertise gvisor, or every sandbox stays Pending.
+      - name: Node advertises gvisor
+        run: |
+          set -euo pipefail
+          for _ in $(seq 1 30); do
+            v=$(kubectl get node "$NODE" -o jsonpath='{.metadata.labels.setec\.zeroroot\.ai/runtime\.gvisor}' 2>/dev/null || true)
+            [ "$v" = "true" ] && { echo "node advertises runtime.gvisor=true"; break; }
+            sleep 5
+          done
+          v=$(kubectl get node "$NODE" -o jsonpath='{.metadata.labels.setec\.zeroroot\.ai/runtime\.gvisor}' 2>/dev/null || true)
+          if [ "$v" != "true" ]; then
+            echo "::error::node does not advertise runtime.gvisor=true — gvisor node-prep failed (runsc binary or the containerd io.containerd.cri.v1.runtime handler is missing)"
+            kubectl -n setec-system logs -l app.kubernetes.io/component=runtime-agent --tail=40 || true
+            exit 1
+          fi
+
+      # The overlay below builds FROM the private daemon image on ghcr.io.
+      # The runner's own docker needs the same read-only token the cluster
+      # pulls with (run 33643826807).
+      - name: Log the runner's docker in to ghcr.io
+        env:
+          GHCR_RO_PAT: ${{ secrets.GHCR_RO_PAT }}
+        run: echo "$GHCR_RO_PAT" | docker login ghcr.io -u "${{ github.actor }}" --password-stdin
+
+      # Swap in a TEST-MODE daemon: authz disabled, test fixtures on, built
+      # with setec_integration so dispatch reaches the real setec executor.
+      # This changes ONLY how the client authenticates, never the runtime.
+      - name: Build + load the test-mode daemon
+        working-directory: gibson
+        run: |
+          set -euo pipefail
+          BASE=$(kubectl -n "$NS" get statefulset -l app.kubernetes.io/component=daemon \
+            -o jsonpath='{.items[0].spec.template.spec.containers[?(@.name=="gibson")].image}')
+          echo "overlaying onto base daemon image: ${BASE}"
+          mkdir -p /tmp/dctx
+          CGO_ENABLED=0 GOOS=linux GOARCH=amd64 go build \
+            -tags="setec_integration test_fixtures" \
+            -ldflags="-s -w -X github.com/zeroroot-ai/gibson/pkg/version.GitCommit=$(git rev-parse --short HEAD)" \
+            -o /tmp/dctx/gibson ./cmd/gibson
+          cat > /tmp/dctx/Dockerfile <<EOF
+          FROM ${BASE}
+          COPY gibson /usr/local/bin/gibson
+          EOF
+          docker build -t ghcr.io/zeroroot-ai/gibson:e2e-cluster /tmp/dctx
+          kind load docker-image ghcr.io/zeroroot-ai/gibson:e2e-cluster --name "$CLUSTER"
+
+      # The e2eRunner values register the runner's ClusterSPIFFEID, allow-list
+      # its SVID on the daemon's listener and set GIBSON_TEST_FIXTURES_ENABLED
+      # on the daemon (charts#142). One patch means one Argo sync and one
+      # daemon rollout.
+      - name: Point the daemon at the test-mode image with authz off + fixtures on
+        working-directory: hosted
+        run: |
+          set -euo pipefail
+          kubectl -n argocd patch application gibson --type json -p '[
+              {"op":"add","path":"/spec/source/helm/values","value":"gibson-workloads:\n  gibson:\n    e2eRunner:\n      enabled: true\n  spiffe:\n    allowedPeerIDs:\n      - spiffe://zeroroot.ai/platform/tenant-operator\n      - spiffe://zeroroot.ai/platform/connector-operator\n      - spiffe://zeroroot.ai/platform/e2e-runner\n"},
+              {"op":"add","path":"/spec/source/helm/parameters/-","value":{"name":"gibson-workloads.gibson.image.repository","value":"ghcr.io/zeroroot-ai/gibson","forceString":true}},
+              {"op":"add","path":"/spec/source/helm/parameters/-","value":{"name":"gibson-workloads.gibson.image.tag","value":"e2e-cluster","forceString":true}},
+              {"op":"add","path":"/spec/source/helm/parameters/-","value":{"name":"gibson-workloads.gibson.image.pullPolicy","value":"IfNotPresent","forceString":true}},
+              {"op":"add","path":"/spec/source/helm/parameters/-","value":{"name":"gibson-workloads.gibson.authz.enabled","value":"false"}}
+            ]'
+
+          for i in $(seq 1 60); do
+            img=$(kubectl -n "$NS" get statefulset -l app.kubernetes.io/component=daemon \
+                    -o jsonpath='{.items[0].spec.template.spec.containers[?(@.name=="gibson")].image}' 2>/dev/null || true)
+            case "$img" in *:e2e-cluster) echo "daemon image is $img"; break;; esac
+            [ "$i" = 60 ] && { echo "::error::the daemon StatefulSet never took the e2e-cluster image (Argo app: $(kubectl -n argocd get app gibson -o jsonpath='{.status.sync.status}/{.status.health.status}'))"; exit 1; }
+            sleep 20
+          done
+          kubectl -n "$NS" rollout status statefulset -l app.kubernetes.io/component=daemon --timeout=20m
+
+      # One image, two test binaries: tests/e2e (e2e.test, the ENTRYPOINT) and
+      # tests/e2e/secrets (secrets.test), each compiled with `go test -c` so
+      # -test.run / -test.v select and report as usual.
+      - name: Build the e2e suites into an image
+        id: suite-image
+        working-directory: gibson
+        run: |
+          set -euo pipefail
+          mkdir -p /tmp/ectx "$E2E_OUT"
+          CGO_ENABLED=0 GOOS=linux GOARCH=amd64 go test -tags=e2e -c \
+            -o /tmp/ectx/e2e.test ./tests/e2e/
+          CGO_ENABLED=0 GOOS=linux GOARCH=amd64 go test -tags=e2e -c \
+            -o /tmp/ectx/secrets.test ./tests/e2e/secrets/
+          cat > /tmp/ectx/Dockerfile <<'EOF'
+          FROM gcr.io/distroless/static-debian12:nonroot
+          COPY e2e.test /usr/local/bin/e2e.test
+          COPY secrets.test /usr/local/bin/secrets.test
+          ENTRYPOINT ["/usr/local/bin/e2e.test"]
+          EOF
+          docker build -t ghcr.io/zeroroot-ai/gibson-e2e-runner:local /tmp/ectx
+          kind load docker-image ghcr.io/zeroroot-ai/gibson-e2e-runner:local --name "$CLUSTER"
+
+      # ------------------------------------------------------------------
+      # The suites. Every step below runs when the image built, whatever the
+      # step before it did: one suite's failure never hides another's verdict.
+      # Each step tees its log and records one verdict row; the summary step
+      # fails the job.
+      # ------------------------------------------------------------------
+
+      # tests/e2e/secrets/* (five files, four tests): in-cluster, SVID peer.
+      # The suites name their tenant with GIBSON_TEST_TENANT_ID and expect a
+      # tenant admin JWT in GIBSON_TEST_TENANT_ADMIN_TOKEN. No such token is
+      # minted in this venue (the SVID is the identity), so the token is not
+      # set and the suites report their own skip reason.
+      - name: "Suite: secrets (in-cluster)"
+        if: ${{ !cancelled() && steps.suite-image.outcome == 'success' }}
+        env:
+          E2E_RUNNER_BINARY: /usr/local/bin/secrets.test
+          E2E_RUNNER_ENV_FILE: ${{ runner.temp }}/secrets.env
+        run: |
+          set +e
+          printf 'GIBSON_TEST_TENANT_ID=%s\nGIBSON_PLATFORM_URL=http://%s-gibson-workloads.%s.svc.cluster.local:8085\n' \
+            "$TENANT" "$RELEASE" "$NS" > "$E2E_RUNNER_ENV_FILE"
+          gibson/.github/scripts/run-e2e-job.sh gibson-e2e-secrets \
+            'TestFGAEnforcement_Secrets|TestNonPluginDeny_HarnessAndComponent|TestForgedCGJWT_AgentDeniedByFGA|TestAgentLLMPreserved' 15m \
+            2>&1 | tee "$E2E_OUT/secrets.log"
+          rc=${PIPESTATUS[0]}
+          gibson/.github/scripts/e2e-suite-verdict.sh secrets "$E2E_OUT/secrets.log" "$rc" "$RESULTS"
+
+      # plugin_e2e_test.go: on the runner. It starts a debug-plugin binary as
+      # a subprocess and needs GIBSON_URL and GIBSON_BOOTSTRAP_TOKEN.
+      - name: "Suite: plugin_e2e (runner)"
+        if: ${{ !cancelled() && steps.suite-image.outcome == 'success' }}
+        working-directory: gibson
+        env:
+          GIBSON_TEST_FIXTURES_ENABLED: "true"
+        run: |
+          set +e
+          CGO_ENABLED=0 go test -tags=e2e -run 'TestPlugin_E2E$' -v -timeout 5m ./tests/e2e/ \
+            2>&1 | tee "$E2E_OUT/plugin_e2e.log"
+          rc=${PIPESTATUS[0]}
+          .github/scripts/e2e-suite-verdict.sh plugin_e2e "$E2E_OUT/plugin_e2e.log" "$rc" "$RESULTS"
+
+      # mission_finding_per_tenant_e2e_test.go: on the runner, kubectl-driven
+      # (current-context, pod phase, redis-cli key counts).
+      - name: "Suite: mission_finding_per_tenant (runner)"
+        if: ${{ !cancelled() && steps.suite-image.outcome == 'success' }}
+        working-directory: gibson
+        env:
+          GIBSON_TEST_FIXTURES_ENABLED: "true"
+        run: |
+          set +e
+          CGO_ENABLED=0 go test -tags=e2e -run 'TestMissionFindingPerTenant_E2E$' -v -timeout 10m ./tests/e2e/ \
+            2>&1 | tee "$E2E_OUT/mission_finding_per_tenant.log"
+          rc=${PIPESTATUS[0]}
+          .github/scripts/e2e-suite-verdict.sh mission_finding_per_tenant "$E2E_OUT/mission_finding_per_tenant.log" "$rc" "$RESULTS"
+
+      # audit_v4_foundation_test.go live_* subtests: on the runner. The suite
+      # dials the daemon at localhost:30002 and Neo4j bolt at localhost:30474
+      # (the old dev-cluster NodePorts). Port-forwards put the cluster's
+      # daemon Service and the tenant's Neo4j Service at those ports.
+      - name: "Suite: audit_v4 live (runner)"
+        if: ${{ !cancelled() && steps.suite-image.outcome == 'success' }}
+        working-directory: gibson
+        env:
+          GIBSON_TEST_FIXTURES_ENABLED: "true"
+          GIBSON_E2E_KIND_CLUSTER: gibson
+        run: |
+          set +e
+          kubectl -n "$NS" port-forward "svc/${RELEASE}-gibson-workloads" 30002:50051 >"$E2E_OUT/pf-daemon.log" 2>&1 &
+          pf_pids="$!"
+          neo=$(kubectl get svc -A -o json | jq -r '.items[] | select(.metadata.name | test("neo4j")) | select([.spec.ports[]?.port] | index(7687)) | "\(.metadata.namespace) \(.metadata.name)"' | head -1)
+          if [ -n "$neo" ]; then
+            read -r neo_ns neo_svc <<<"$neo"
+            echo "neo4j service: ${neo_ns}/${neo_svc}"
+            kubectl -n "$neo_ns" port-forward "svc/${neo_svc}" 30474:7687 >"$E2E_OUT/pf-neo4j.log" 2>&1 &
+            pf_pids="$pf_pids $!"
+            auth=$(kubectl -n "$neo_ns" get secret -o json | jq -r '[.items[] | select(.data.NEO4J_AUTH != null) | .data.NEO4J_AUTH][0] // empty' | base64 -d 2>/dev/null || true)
+            if [ -n "$auth" ]; then
+              export GIBSON_E2E_NEO4J_PASSWORD="${auth#*/}"
+              echo "::add-mask::$GIBSON_E2E_NEO4J_PASSWORD"
+            fi
+          else
+            echo "::warning::no Neo4j Service with port 7687 found; the live_* subtests will report the cluster unreachable"
+          fi
+          export GIBSON_E2E_TENANT_ID="$TENANT"
+          sleep 5
+          CGO_ENABLED=0 go test -tags=e2e -run 'TestAuditV4Foundation$' -v -timeout 10m ./tests/e2e/ \
+            2>&1 | tee "$E2E_OUT/audit_v4.log"
+          rc=${PIPESTATUS[0]}
+          # shellcheck disable=SC2086
+          kill $pf_pids 2>/dev/null || true
+          .github/scripts/e2e-suite-verdict.sh audit_v4 "$E2E_OUT/audit_v4.log" "$rc" "$RESULTS"
+
+      # signup_full_chain, login_full_chain, dashboard_smoke: on the runner
+      # through their Makefile targets, which are the documented entrypoints.
+      # They read files a browser driver writes (/tmp/*-<slug>.json) and
+      # need a signed-up tenant named by SIGNUP_SLUG / SIGNUP_EMAIL. The
+      # values below name this run, so the suites execute past their env
+      # guard and report what the venue is missing.
+      - name: "Suite: signup_full_chain (runner)"
+        if: ${{ !cancelled() && steps.suite-image.outcome == 'success' }}
+        working-directory: gibson
+        env:
+          SIGNUP_SLUG: e2e-${{ github.run_id }}
+          SIGNUP_EMAIL: e2e-${{ github.run_id }}@example.com
+        run: |
+          set +e
+          make test-signup-e2e 2>&1 | tee "$E2E_OUT/signup_full_chain.log"
+          rc=${PIPESTATUS[0]}
+          .github/scripts/e2e-suite-verdict.sh signup_full_chain "$E2E_OUT/signup_full_chain.log" "$rc" "$RESULTS"
+
+      - name: "Suite: login_full_chain (runner)"
+        if: ${{ !cancelled() && steps.suite-image.outcome == 'success' }}
+        working-directory: gibson
+        env:
+          SIGNUP_SLUG: e2e-${{ github.run_id }}
+          SIGNUP_EMAIL: e2e-${{ github.run_id }}@example.com
+        run: |
+          set +e
+          make test-login-e2e 2>&1 | tee "$E2E_OUT/login_full_chain.log"
+          rc=${PIPESTATUS[0]}
+          .github/scripts/e2e-suite-verdict.sh login_full_chain "$E2E_OUT/login_full_chain.log" "$rc" "$RESULTS"
+
+      - name: "Suite: dashboard_smoke (runner)"
+        if: ${{ !cancelled() && steps.suite-image.outcome == 'success' }}
+        working-directory: gibson
+        env:
+          SIGNUP_SLUG_A: e2e-${{ github.run_id }}-a
+          SIGNUP_EMAIL_A: e2e-${{ github.run_id }}-a@example.com
+          SIGNUP_SLUG_B: e2e-${{ github.run_id }}-b
+          SIGNUP_EMAIL_B: e2e-${{ github.run_id }}-b@example.com
+        run: |
+          set +e
+          make test-dashboard-smoke-e2e 2>&1 | tee "$E2E_OUT/dashboard_smoke.log"
+          rc=${PIPESTATUS[0]}
+          .github/scripts/e2e-suite-verdict.sh dashboard_smoke "$E2E_OUT/dashboard_smoke.log" "$rc" "$RESULTS"
+
+      # operators/tenant/test/e2e (Ginkgo): on the runner, against THIS
+      # cluster. Its BeforeSuite runs `make docker-build` (the repo-root
+      # build/tenant-operator.Dockerfile, gibson#1395) and loads the image
+      # into KIND_CLUSTER. cert-manager is already on the cluster, so the
+      # suite skips its own install. Not `make test-e2e`: that target creates
+      # and deletes a kind cluster of its own.
+      - name: "Suite: tenant_operator (runner)"
+        if: ${{ !cancelled() && steps.suite-image.outcome == 'success' }}
+        working-directory: gibson/operators/tenant
+        env:
+          KIND_CLUSTER: gibson
+        run: |
+          set +e
+          go test -tags=e2e ./test/e2e/ -v -ginkgo.v -timeout 30m \
+            2>&1 | tee "$E2E_OUT/tenant_operator.log"
+          rc=${PIPESTATUS[0]}
+          ../../.github/scripts/e2e-suite-verdict.sh tenant_operator "$E2E_OUT/tenant_operator.log" "$rc" "$RESULTS"
+
+      # ------------------------------------------------------------------
+      # The verdict table. A suite with no row never ran (the bring-up or the
+      # image build failed) and counts as FAIL. Every SKIP is a warning: it is
+      # coverage this lane does not have. Any FAIL fails the job.
+      # ------------------------------------------------------------------
+      - name: Per-suite summary
+        if: always()
+        run: |
+          set -euo pipefail
+          mkdir -p "$E2E_OUT"
+          touch "$RESULTS"
+          expected="secrets plugin_e2e mission_finding_per_tenant audit_v4 signup_full_chain login_full_chain dashboard_smoke tenant_operator"
+          {
+            echo "## Cluster-bound e2e suites (run ${{ github.run_id }})"
+            echo
+            echo "| Suite | Verdict | Passed | Failed | Skipped | Note |"
+            echo "|---|---|---|---|---|---|"
+          } >> "$GITHUB_STEP_SUMMARY"
+          fails=0
+          for s in $expected; do
+            row=$(awk -F'\t' -v s="$s" '$1==s' "$RESULTS" | tail -1)
+            if [ -z "$row" ]; then
+              echo "| $s | NOT RUN | | | | the step never ran |" >> "$GITHUB_STEP_SUMMARY"
+              echo "::error title=$s::NOT RUN — the bring-up or the image build failed before this suite"
+              fails=$((fails + 1))
+              continue
+            fi
+            IFS=$'\t' read -r _ verdict passed failed skipped note <<<"$row"
+            echo "| $s | $verdict | $passed | $failed | $skipped | ${note//|/\\|} |" >> "$GITHUB_STEP_SUMMARY"
+            case "$verdict" in
+              FAIL) echo "::error title=$s::FAIL — $note"; fails=$((fails + 1)) ;;
+              SKIP) echo "::warning title=$s::SKIP — missing coverage: $note" ;;
+              PASS) [ "$skipped" = "0" ] || echo "::warning title=$s::PASS with $skipped skipped subtest(s) — missing coverage" ;;
+            esac
+          done
+          cat "$RESULTS"
+          if [ "$fails" -gt 0 ]; then
+            echo "::error::$fails suite(s) failed or never ran"
+            exit 1
+          fi
+
+      - name: Upload the per-suite logs and verdicts
+        if: always()
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
+        with:
+          name: e2e-cluster-${{ github.run_id }}
+          path: ${{ github.workspace }}/e2e-out
+          if-no-files-found: ignore
+
+      # always(), not failure(): a job that hits timeout-minutes is
+      # cancelled, and a cancelled job skips failure() steps.
+      - name: Diagnostics
+        if: always()
+        run: |
+          kubectl -n "$NS" get pods || true
+          echo "=== pods with a container not ready ==="
+          for p in $(kubectl -n "$NS" get pods -o json | jq -r '.items[] | select(.status.phase != "Succeeded") | select([.status.containerStatuses[]?, .status.initContainerStatuses[]?] | any(.ready == false)) | .metadata.name'); do
+            echo "--- $p"; kubectl -n "$NS" describe pod "$p" | grep -A15 '^Events' || true
+            for c in $(kubectl -n "$NS" get pod "$p" -o json | jq -r '[.status.containerStatuses[]?, .status.initContainerStatuses[]?] | .[] | select(.ready == false) | .name'); do
+              echo "..... last log of $p/$c (previous instance if it restarted)"
+              kubectl -n "$NS" logs "$p" -c "$c" --previous --tail=40 2>/dev/null || kubectl -n "$NS" logs "$p" -c "$c" --tail=40 || true
+            done
+          done
+          echo "=== Argo application conditions ==="
+          kubectl -n argocd get app gibson -o jsonpath='{range .status.conditions[*]}{.type}: {.message}{"\n"}{end}' 2>/dev/null || true
+          echo "=== tenant operator e2e namespace ==="
+          kubectl -n tenant-operator-system get pods 2>/dev/null || true
+          kubectl -n "$NS" logs -l app.kubernetes.io/component=daemon -c gibson --tail=800 || true
