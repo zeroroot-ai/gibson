@@ -104,10 +104,17 @@ const (
 // is available.
 // ---------------------------------------------------------------------------
 
+// HeartbeatInterval is the cadence the daemon hands every registering
+// component (RegisterComponentResponse.heartbeat_interval_ms). It bounds how
+// long a state change inside a component takes to reach the daemon: a
+// plugin that turns Degraded reports it on its next heartbeat, so an
+// observer sees the new status within one interval plus the delivery
+// latency (gibson#154). Must stay shorter than the registry TTL.
+const HeartbeatInterval = 10 * time.Second
+
 const (
-	// defaultHeartbeatIntervalMs is the recommended heartbeat cadence sent to
-	// components on registration. Must be shorter than the registry TTL (30 s).
-	defaultHeartbeatIntervalMs = 10_000 // 10 seconds
+	// defaultHeartbeatIntervalMs is HeartbeatInterval on the wire.
+	defaultHeartbeatIntervalMs = int32(HeartbeatInterval / time.Millisecond)
 
 	// defaultPollIntervalMs is the recommended back-off between empty polls.
 	defaultPollIntervalMs = 1_000 // 1 second
@@ -577,8 +584,14 @@ func (s *ComponentServiceServer) RegisterComponent(
 	// authenticated caller's identity when present; absent for anonymous
 	// registrations (which graceful-degrade to no executor_user_id on
 	// downstream spans). Spec: llm-user-attribution-governance Req 1.5.
+	// principalRef is the FGA user this registration runs as. It is stored on
+	// the durable install so the secret-binding admin RPCs address the same
+	// user bindDeclaredSecrets grants and WatchComponentEvents keys on
+	// (gibson#154).
+	var principalRef string
 	if id, err := auth.IdentityFromContext(ctx); err == nil && id.Subject != "" {
 		info.Metadata[ComponentMetadataOwnerUserID] = id.Subject
+		principalRef = componentFGAUser(id.Subject)
 	} else if uid, ok := auth.ActingUserFromContext(ctx); ok && uid != "" {
 		info.Metadata[ComponentMetadataOwnerUserID] = uid
 	}
@@ -641,6 +654,7 @@ func (s *ComponentServiceServer) RegisterComponent(
 				RuntimeMode:        req.Metadata["plugin:runtime_mode"],
 				SetecRequired:      req.Metadata["plugin:setec_required"] == "true",
 				ContentTrust:       contentTrustFromMetadata(req.Metadata["plugin:content_trust"]),
+				PrincipalRef:       principalRef,
 			}
 			if install.RuntimeMode == "" {
 				install.RuntimeMode = "process"
@@ -840,11 +854,14 @@ func (s *ComponentServiceServer) Heartbeat(
 	)
 
 	// Forward plugin heartbeats to the ComponentInstallRegistry so the 90-second transient
-	// Redis TTL is refreshed and last_heartbeat_at is updated.
+	// Redis TTL is refreshed and last_heartbeat_at is updated, and so the
+	// status the plugin reports (health_status) is the status the admin
+	// surface shows: a plugin that lost a secret says "degraded" and
+	// ListPluginInstalls must say the same (gibson#154).
 	// The gRPC address is not available in HeartbeatRequest; pass "" so the registry
 	// preserves the address already stored from the prior heartbeat call.
 	if target.Kind == "plugin" && s.componentInstallRegistry != nil {
-		if prErr := s.componentInstallRegistry.Heartbeat(ctx, req.InstanceId, ""); prErr != nil {
+		if prErr := s.componentInstallRegistry.Heartbeat(ctx, req.InstanceId, "", req.GetHealthStatus()); prErr != nil {
 			s.logger.WarnContext(ctx, "heartbeat: plugin registry TTL refresh failed (non-fatal)",
 				slog.String("tenant", tenant),
 				slog.String("plugin", target.Name),

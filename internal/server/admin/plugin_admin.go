@@ -71,6 +71,11 @@ type ComponentInstallInfo struct {
 	Address         string
 	LastHeartbeatAt time.Time
 	CreatedAt       time.Time
+	// PrincipalRef is the FGA user the plugin registered as
+	// (plugin_principal:<id>): the user its can_resolve tuples name and the
+	// key it streams WatchComponentEvents under. Empty for an install
+	// recorded before gibson#154; the plugin re-registers on restart.
+	PrincipalRef string
 }
 
 // PluginManifestValidator validates a plugin manifest YAML and reports
@@ -463,31 +468,22 @@ func (s *PluginsAdminServer) EditPluginSecretBinding(ctx context.Context, req *t
 		return nil, status.Error(codes.InvalidArgument, "install_id, declared_name, new_existing_ref are required")
 	}
 
-	info, err := s.registry.Get(ctx, tenant, req.GetInstallId())
+	principal, err := s.installPrincipal(ctx, tenant, req.GetInstallId())
 	if err != nil {
-		if errors.Is(err, ErrInstallNotFound) {
-			return nil, status.Errorf(codes.NotFound, "install %q not found", req.GetInstallId())
-		}
-		return nil, status.Errorf(codes.Internal, "registry get: %v", err)
+		return nil, err
 	}
-	_ = info // production wiring uses info.HostID -> principal_id mapping
-
-	// Resolve the install's plugin_principal subject. In the production
-	// wiring this is stored on plugin_install; tests bypass via a fake
-	// registry whose Get returns a synthetic principal field elsewhere.
-	principal := principalForInstall(req.GetInstallId())
 
 	// Atomic rebind: delete old tuple, write new tuple in a single FGA
 	// batch where supported. For our v1 we issue Delete first then Write —
 	// a partial failure leaves the binding revoked, which is fail-safe
 	// (the plugin loses access rather than gaining unintended access).
 	oldTuple := authz.Tuple{
-		User:     "user:" + principal,
+		User:     principal,
 		Relation: "can_resolve",
 		Object:   authz.SecretObject(tenant.String(), req.GetDeclaredName()),
 	}
 	newTuple := authz.Tuple{
-		User:     "user:" + principal,
+		User:     principal,
 		Relation: "can_resolve",
 		Object:   authz.SecretObject(tenant.String(), req.GetNewExistingRef()),
 	}
@@ -499,7 +495,7 @@ func (s *PluginsAdminServer) EditPluginSecretBinding(ctx context.Context, req *t
 	}
 	// The declared name now resolves to another value: the plugin drops its
 	// cached copy on secret_rotated.
-	if err := s.events.Publish(ctx, tenant.String(), pluginEventPrincipal(req.GetInstallId()), componentevents.Event{
+	if err := s.events.Publish(ctx, tenant.String(), principal, componentevents.Event{
 		Type: componentevents.TypeSecretRotated, SecretName: req.GetDeclaredName(), OccurredAt: s.now().UTC(),
 	}); err != nil {
 		return nil, status.Errorf(codes.Unavailable, "binding moved but the plugin was not told; retry: %v", err)
@@ -518,9 +514,12 @@ func (s *PluginsAdminServer) RevokePluginSecretBinding(ctx context.Context, req 
 		return nil, status.Error(codes.InvalidArgument, "install_id and declared_name are required")
 	}
 
-	principal := principalForInstall(req.GetInstallId())
+	principal, err := s.installPrincipal(ctx, tenant, req.GetInstallId())
+	if err != nil {
+		return nil, err
+	}
 	tuple := authz.Tuple{
-		User:     "user:" + principal,
+		User:     principal,
 		Relation: "can_resolve",
 		Object:   authz.SecretObject(tenant.String(), req.GetDeclaredName()),
 	}
@@ -532,7 +531,7 @@ func (s *PluginsAdminServer) RevokePluginSecretBinding(ctx context.Context, req 
 	// landed. The tuple is already gone, so a failed publish leaves the
 	// plugin denied on its next resolve and holding its cache until the
 	// operator retries; Unavailable asks for that retry (gibson#154).
-	if err := s.events.Publish(ctx, tenant.String(), pluginEventPrincipal(req.GetInstallId()), componentevents.Event{
+	if err := s.events.Publish(ctx, tenant.String(), principal, componentevents.Event{
 		Type: componentevents.TypeSecretAccessRevoked, SecretName: req.GetDeclaredName(),
 		Reason: "binding revoked by a tenant admin", OccurredAt: s.now().UTC(),
 	}); err != nil {
@@ -654,8 +653,10 @@ func bindingRef(b *tenantv1.PluginSecretBinding) string {
 // bindingsFor walks FGA can_resolve tuples for the install's principal and
 // returns the (decoded) ref names. Best-effort.
 func (s *PluginsAdminServer) bindingsFor(ctx context.Context, tenant auth.TenantID, info ComponentInstallInfo) []string {
-	principal := principalForInstall(info.InstallID)
-	objects, err := s.authzr.ListObjects(ctx, "user:"+principal, "can_resolve", "secret")
+	if info.PrincipalRef == "" {
+		return nil
+	}
+	objects, err := s.authzr.ListObjects(ctx, info.PrincipalRef, "can_resolve", "secret")
 	if err != nil {
 		return nil
 	}
@@ -669,21 +670,25 @@ func (s *PluginsAdminServer) bindingsFor(ctx context.Context, tenant auth.Tenant
 	return out
 }
 
-// principalForInstall returns the plugin_principal subject ID for an install.
-// Production wiring resolves this via plugin_install.principal_id; for the
-// admin handler's helper we use a deterministic transform so tests can
-// derive expected values without injecting another dependency.
-func principalForInstall(installID string) string {
-	return "plugin_principal_" + installID
-}
-
-// pluginEventPrincipal is the subscription key a running plugin streams
-// under: the typed FGA principal the daemon authorizes it as
-// (componentFGAUser keeps a "plugin_principal:" subject verbatim). It is the
-// user type model.fga declares for can_resolve, see
-// FGASecretsPluginAssociations.
-func pluginEventPrincipal(installID string) string {
-	return "plugin_principal:" + installID
+// installPrincipal returns the FGA user the install's plugin registered as.
+// It is the one string three things agree on: the can_resolve tuples
+// bindDeclaredSecrets wrote, the WatchComponentEvents subscription the
+// running plugin holds, and the identity ext-authz authorizes its calls as.
+// An install with no recorded principal predates gibson#154 and cannot be
+// addressed; the plugin re-registers on restart and the row is filled then.
+func (s *PluginsAdminServer) installPrincipal(ctx context.Context, tenant auth.TenantID, installID string) (string, error) {
+	info, err := s.registry.Get(ctx, tenant, installID)
+	if err != nil {
+		if errors.Is(err, ErrInstallNotFound) {
+			return "", status.Errorf(codes.NotFound, "install %q not found", installID)
+		}
+		return "", status.Errorf(codes.Internal, "registry get: %v", err)
+	}
+	if info.PrincipalRef == "" {
+		return "", status.Errorf(codes.FailedPrecondition,
+			"install %q has no recorded principal; restart the plugin so it re-registers, then retry", installID)
+	}
+	return info.PrincipalRef, nil
 }
 
 // newInstallID returns a fresh install identifier. We use 16 random bytes

@@ -40,7 +40,7 @@ func (f *fakeComponentInstallRegistry) Register(_ context.Context, _ *ComponentI
 	return nil
 }
 
-func (f *fakeComponentInstallRegistry) Heartbeat(_ context.Context, _, _ string) error {
+func (f *fakeComponentInstallRegistry) Heartbeat(_ context.Context, _, _, _ string) error {
 	return nil
 }
 

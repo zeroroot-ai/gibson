@@ -64,7 +64,19 @@ func (f *FGASecretsPluginAssociations) PluginsBoundTo(ctx context.Context, tenan
 	out := make([]string, 0, len(users))
 	for _, u := range users {
 		// Refs come back fully qualified as "plugin_principal:<id>".
-		out = append(out, strings.TrimPrefix(u, "plugin_principal:"))
+		out = append(out, strings.TrimPrefix(u, pluginPrincipalPrefix))
 	}
 	return out, nil
+}
+
+// pluginPrincipalPrefix is the FGA type of a plugin's principal. PluginsBoundTo
+// strips it to hand the dashboard bare ids; pluginPrincipalRef puts it back
+// where the daemon needs the full FGA user again.
+const pluginPrincipalPrefix = "plugin_principal:"
+
+// pluginPrincipalRef is the inverse of the strip in PluginsBoundTo: the FGA
+// user a bare plugin principal id stands for, which is also the key the
+// plugin streams WatchComponentEvents under.
+func pluginPrincipalRef(id string) string {
+	return pluginPrincipalPrefix + id
 }

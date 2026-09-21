@@ -1375,7 +1375,7 @@ func (d *daemonImpl) buildGRPCServer(ctx context.Context) (*grpcSubsystem, error
 			principalClient := &idpPluginPrincipalAdapter{client: idpClient, cgMinter: d.cgMinter}
 
 			pluginAdminSvc, paErr := admin.NewPluginsAdminServer(admin.PluginsAdminConfig{
-				Registry:          &componentInstallRegistryReaderAdapter{db: d.platformDB},
+				Registry:          &componentInstallRegistryReaderAdapter{db: d.platformDB, redis: d.stateClient.Client()},
 				ManifestValidator: &pluginManifestValidator{},
 				ZitadelClient:     principalClient,
 				SecretWriter:      &secretWriterAdapter{svc: d.secretsService},
