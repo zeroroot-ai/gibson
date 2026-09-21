@@ -171,7 +171,7 @@ func TestDaemonCredentialStore_ImplementsInterface(t *testing.T) {
 }
 
 // ---------------------------------------------------------------------------
-// User-prefix (Vault "user/" namespace) tests — gibson#404
+// Stored-name tests: the caller-facing name is the stored name (gibson#1106)
 // ---------------------------------------------------------------------------
 
 // trackingBroker is a fake SecretsBroker that records the last name passed to
@@ -205,68 +205,18 @@ func buildTrackingStore(t *testing.T, val []byte) (*DaemonCredentialStore, *trac
 	return store, broker
 }
 
-// TestGetCredential_PrependUserPrefix verifies that GetCredential translates
-// "cred:<name>" → "user/cred:<name>" before calling Resolve, so plugins
-// resolve from the correct Vault sub-path.
-func TestGetCredential_PrependUserPrefix(t *testing.T) {
-	store, broker := buildTrackingStore(t, []byte("secret-value"))
+// TestGetCredential_ResolvesTheCallerNameVerbatim is the gibson#154 fixture:
+// tenant secrets are stored colon-flat at the KV root, the key SetSecret
+// writes, so the broker is asked for exactly the name the plugin declared.
+// The retired "user/<name>" layout is never consulted (gibson#1106).
+func TestGetCredential_ResolvesTheCallerNameVerbatim(t *testing.T) {
 	ctx := ctxWithTenantForCredStore()
-
-	cred, secret, err := store.GetCredential(ctx, "cred:openai-prod")
-	require.NoError(t, err)
-
-	// The broker should have been queried with the stored form.
-	assert.Equal(t, "user/cred:openai-prod", broker.lastGetName,
-		"GetCredential should prepend user/ before calling Resolve")
-
-	// The returned credential carries the caller-facing name (no user/).
-	assert.Equal(t, "cred:openai-prod", cred.Name)
-	assert.Equal(t, "secret-value", secret)
-}
-
-// TestGetCredential_ProviderConfigPrefix verifies the same for provider_config names.
-func TestGetCredential_ProviderConfigPrefix(t *testing.T) {
-	store, broker := buildTrackingStore(t, []byte("pk"))
-	ctx := ctxWithTenantForCredStore()
-
-	_, _, err := store.GetCredential(ctx, "provider_config:openai:key")
-	require.NoError(t, err)
-
-	assert.Equal(t, "user/provider_config:openai:key", broker.lastGetName)
-}
-
-// TestGetCredential_InfraPathNotPrefixed verifies that infra/ paths (e.g.
-// "infra/postgres") are NOT given the "user/" prefix — they go through
-// unchanged so the broker reads from the correct mount root.
-func TestGetCredential_InfraPathNotPrefixed(t *testing.T) {
-	store, broker := buildTrackingStore(t, []byte("pg-dsn"))
-	ctx := ctxWithTenantForCredStore()
-
-	_, _, err := store.GetCredential(ctx, "infra/postgres")
-	require.NoError(t, err)
-
-	assert.Equal(t, "infra/postgres", broker.lastGetName,
-		"infra/ paths must not get a user/ prefix")
-}
-
-// TestGetCredential_AlreadyPrefixed verifies idempotency: a name that already
-// starts with "user/" is not double-prefixed.
-func TestGetCredential_AlreadyPrefixed(t *testing.T) {
-	store, broker := buildTrackingStore(t, []byte("val"))
-	ctx := ctxWithTenantForCredStore()
-
-	_, _, err := store.GetCredential(ctx, "user/cred:my-key")
-	require.NoError(t, err)
-
-	assert.Equal(t, "user/cred:my-key", broker.lastGetName,
-		"already-prefixed names must not be double-prefixed")
-}
-
-// TestIsUserSecretName covers the name-classification helper.
-func TestIsUserSecretName(t *testing.T) {
-	assert.True(t, isUserSecretName("cred:openai"), "cred: is a user secret")
-	assert.True(t, isUserSecretName("provider_config:openai:key"), "provider_config: is a user secret")
-	assert.False(t, isUserSecretName("infra/postgres"), "infra/ is not a user secret")
-	assert.False(t, isUserSecretName(""), "empty string is not a user secret")
-	assert.False(t, isUserSecretName("cred"), "bare 'cred' (no colon) is not a user secret")
+	for _, name := range []string{"cred:github_token", "provider_config:openai:key", "infra/postgres", "user/cred:legacy"} {
+		store, broker := buildTrackingStore(t, []byte("secret-value"))
+		cred, secret, err := store.GetCredential(ctx, name)
+		require.NoError(t, err, name)
+		assert.Equal(t, name, broker.lastGetName, "the broker must be asked for the caller's name unchanged")
+		assert.Equal(t, name, cred.Name)
+		assert.Equal(t, "secret-value", secret)
+	}
 }
