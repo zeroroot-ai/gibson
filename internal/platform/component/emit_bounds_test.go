@@ -75,7 +75,7 @@ func TestComponentSubmitFindingRejectsOverSizePayload(t *testing.T) {
 		submitter := &countingFindingSubmitter{}
 		svc := boundedComponentServer(submitter)
 
-		_, err := svc.SubmitFinding(tenantCtx(), &componentpb.SubmitFindingRequest{
+		_, err := svc.SubmitFinding(submitterCtx("test-tenant", "agent_principal:bounds"), &componentpb.SubmitFindingRequest{
 			WorkId:  "work-1",
 			Finding: findingJSONOfSize(t, emitbounds.MaxPayloadBytes),
 		})
@@ -91,7 +91,7 @@ func TestComponentSubmitFindingRejectsOverSizePayload(t *testing.T) {
 		submitter := &countingFindingSubmitter{}
 		svc := boundedComponentServer(submitter)
 
-		_, err := svc.SubmitFinding(tenantCtx(), &componentpb.SubmitFindingRequest{
+		_, err := svc.SubmitFinding(submitterCtx("test-tenant", "agent_principal:bounds"), &componentpb.SubmitFindingRequest{
 			WorkId:  "work-1",
 			Finding: findingJSONOfSize(t, emitbounds.MaxPayloadBytes+1),
 		})
@@ -115,7 +115,7 @@ func TestComponentSubmitFindingRejectsOverSizePayload(t *testing.T) {
 		svc := boundedComponentServer(submitter)
 
 		oversize := findingJSONOfSize(t, emitbounds.MaxPayloadBytes*2)
-		_, _ = svc.SubmitFinding(tenantCtx(), &componentpb.SubmitFindingRequest{
+		_, _ = svc.SubmitFinding(submitterCtx("test-tenant", "agent_principal:bounds"), &componentpb.SubmitFindingRequest{
 			WorkId:  "work-1",
 			Finding: oversize,
 		})
@@ -147,7 +147,7 @@ func TestComponentSubmitFindingRejectsOverCountProperties(t *testing.T) {
 		submitter := &countingFindingSubmitter{}
 		svc := boundedComponentServer(submitter)
 
-		_, err := svc.SubmitFinding(tenantCtx(), &componentpb.SubmitFindingRequest{
+		_, err := svc.SubmitFinding(submitterCtx("test-tenant", "agent_principal:bounds"), &componentpb.SubmitFindingRequest{
 			WorkId:  "work-1",
 			Finding: metadataWith(emitbounds.MaxProperties),
 		})
@@ -163,7 +163,7 @@ func TestComponentSubmitFindingRejectsOverCountProperties(t *testing.T) {
 		submitter := &countingFindingSubmitter{}
 		svc := boundedComponentServer(submitter)
 
-		_, err := svc.SubmitFinding(tenantCtx(), &componentpb.SubmitFindingRequest{
+		_, err := svc.SubmitFinding(submitterCtx("test-tenant", "agent_principal:bounds"), &componentpb.SubmitFindingRequest{
 			WorkId:  "work-1",
 			Finding: metadataWith(emitbounds.MaxProperties + 1),
 		})
@@ -189,7 +189,7 @@ func TestComponentSubmitFindingRejectsOverCountProperties(t *testing.T) {
 		if marshalErr != nil {
 			t.Fatalf("marshal: %v", marshalErr)
 		}
-		_, err := svc.SubmitFinding(tenantCtx(), &componentpb.SubmitFindingRequest{WorkId: "work-1", Finding: payload})
+		_, err := svc.SubmitFinding(submitterCtx("test-tenant", "agent_principal:bounds"), &componentpb.SubmitFindingRequest{WorkId: "work-1", Finding: payload})
 		if err == nil {
 			t.Fatal("finding with an over-long metadata key accepted; want rejection")
 		}
@@ -211,7 +211,7 @@ func TestComponentSubmitFindingRejectsOverCountPerWorkItem(t *testing.T) {
 	small := []byte(`{"title":"f"}`)
 
 	for i := range emitbounds.MaxObservationsPerTask {
-		_, err := svc.SubmitFinding(tenantCtx(), &componentpb.SubmitFindingRequest{WorkId: "work-1", Finding: small})
+		_, err := svc.SubmitFinding(submitterCtx("test-tenant", "agent_principal:bounds"), &componentpb.SubmitFindingRequest{WorkId: "work-1", Finding: small})
 		if err != nil {
 			t.Fatalf("finding %d of MaxObservationsPerTask rejected: %v", i+1, err)
 		}
@@ -220,7 +220,7 @@ func TestComponentSubmitFindingRejectsOverCountPerWorkItem(t *testing.T) {
 		t.Fatalf("submitter saw %d findings, want %d", len(submitter.submitted), emitbounds.MaxObservationsPerTask)
 	}
 
-	_, err := svc.SubmitFinding(tenantCtx(), &componentpb.SubmitFindingRequest{WorkId: "work-1", Finding: small})
+	_, err := svc.SubmitFinding(submitterCtx("test-tenant", "agent_principal:bounds"), &componentpb.SubmitFindingRequest{WorkId: "work-1", Finding: small})
 	if err == nil {
 		t.Fatal("finding MaxObservationsPerTask+1 accepted; want rejection")
 	}
@@ -233,7 +233,7 @@ func TestComponentSubmitFindingRejectsOverCountPerWorkItem(t *testing.T) {
 	}
 
 	// A second work item gets its own budget.
-	if _, err := svc.SubmitFinding(tenantCtx(), &componentpb.SubmitFindingRequest{WorkId: "work-2", Finding: small}); err != nil {
+	if _, err := svc.SubmitFinding(submitterCtx("test-tenant", "agent_principal:bounds"), &componentpb.SubmitFindingRequest{WorkId: "work-2", Finding: small}); err != nil {
 		t.Fatalf("a second work item was charged against the first one's budget: %v", err)
 	}
 }

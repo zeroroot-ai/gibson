@@ -182,6 +182,17 @@ type Finding struct {
 	CWE         []string        `json:"cwe,omitempty"`
 	Metadata    map[string]any  `json:"metadata,omitempty"`
 	CreatedAt   time.Time       `json:"created_at"`
+
+	// SubmittedBy is the verified principal that submitted the finding over the
+	// component path (gibson#208), as the FGA user ref ext-authz asserted, for
+	// example "agent_principal:<id>". The daemon stamps it from the request
+	// identity. It never comes from the client payload.
+	SubmittedBy string `json:"submitted_by,omitempty"`
+
+	// EnrolledBy is the subject of the person who enrolled the submitting
+	// agent, read from the capability-grant registry. Empty when the submitter
+	// is not an enrolled agent.
+	EnrolledBy string `json:"enrolled_by,omitempty"`
 }
 
 // FindingSeverity represents the severity level of a finding

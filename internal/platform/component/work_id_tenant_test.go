@@ -25,7 +25,7 @@ import (
 	"google.golang.org/protobuf/encoding/protowire"
 	"google.golang.org/protobuf/proto"
 
-	"github.com/zeroroot-ai/gibson/internal/engine/agent"
+	"github.com/zeroroot-ai/gibson/internal/engine/finding"
 	"github.com/zeroroot-ai/gibson/internal/engine/graphrag/ingest"
 	"github.com/zeroroot-ai/gibson/internal/engine/state"
 	componentpb "github.com/zeroroot-ai/sdk/api/gen/gibson/component/v1"
@@ -243,7 +243,7 @@ func TestSubmitFinding_RefusesWorkIdOwnedByAnotherTenant(t *testing.T) {
 	env := newWorkIDEnv(t)
 	workID := env.enqueueFor(t, victimTenant, "work-finding-1")
 
-	ctx := auth.ContextWithTenantString(context.Background(), attackerTenant)
+	ctx := submitterCtx(attackerTenant, "agent_principal:attacker")
 	resp, err := env.svc.SubmitFinding(ctx, &componentpb.SubmitFindingRequest{
 		WorkId:  workID,
 		Finding: []byte(`{"title":"planted"}`),
@@ -260,7 +260,7 @@ func TestSubmitFinding_RefusesWorkIdOwnedByAnotherTenant(t *testing.T) {
 func TestSubmitFinding_AllowsFindingWithoutAWorkItem(t *testing.T) {
 	env := newWorkIDEnv(t)
 
-	ctx := auth.ContextWithTenantString(context.Background(), attackerTenant)
+	ctx := submitterCtx(attackerTenant, "agent_principal:attacker")
 	resp, err := env.svc.SubmitFinding(ctx, &componentpb.SubmitFindingRequest{
 		Finding: []byte(`{"title":"ambient"}`),
 	})
@@ -281,8 +281,8 @@ func newRecordingFindingSubmitter(t *testing.T, sc *state.StateClient) (submitte
 	t.Helper()
 
 	var seenMission string
-	sink := func(_ context.Context, _, missionID string, _ agent.Finding) {
-		seenMission = missionID
+	sink := func(_ context.Context, _ string, f finding.EnhancedFinding) {
+		seenMission = f.MissionID.String()
 	}
 	return NewGraphRAGFindingSubmitter(sink, nil, sc, testLogger()), &seenMission
 }
@@ -296,7 +296,7 @@ func TestFindingSubmitter_IgnoresWorkContextOfAnotherTenant(t *testing.T) {
 
 	writeWorkContext(t, env.mr, "work-mission-1", "mission-of-victim", victimTenant)
 
-	_, err := submitter.Submit(context.Background(), attackerTenant, "work-mission-1",
+	_, err := submitter.Submit(submitterCtx(attackerTenant, "agent_principal:attacker"), attackerTenant, "work-mission-1",
 		`{"title":"planted"}`, "high", "planted")
 
 	require.NoError(t, err, "the finding is still recorded under the submitter's own tenant")
@@ -312,7 +312,7 @@ func TestFindingSubmitter_ResolvesMissionForOwningTenant(t *testing.T) {
 
 	writeWorkContext(t, env.mr, "work-mission-2", "mission-of-victim", victimTenant)
 
-	_, err := submitter.Submit(context.Background(), victimTenant, "work-mission-2",
+	_, err := submitter.Submit(submitterCtx(victimTenant, "agent_principal:victim"), victimTenant, "work-mission-2",
 		`{"title":"genuine"}`, "high", "genuine")
 
 	require.NoError(t, err)

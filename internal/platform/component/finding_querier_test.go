@@ -58,9 +58,18 @@ func TestFindingRecordToSDKShape_MapsTheGraphVocabularyToTheSDKs(t *testing.T) {
 		Description: "the login next= parameter is unvalidated",
 		Type:        "injection",
 		Severity:    "high",
+		Properties:  map[string]string{"agent_name": "zerocool-demo", "submitted_by": "agent_principal:sa-1"},
 	})
 	if out["id"] != "f-1" || out["title"] != "open redirect" || out["category"] != "injection" {
 		t.Errorf("mapped %+v, want the SDK field names", out)
+	}
+	// The registered name of the submitting agent is the SDK's agent_name
+	// (gibson#208); the principal stays addressable under metadata.
+	if out["agent_name"] != "zerocool-demo" {
+		t.Errorf("agent_name = %v, want zerocool-demo", out["agent_name"])
+	}
+	if md, ok := out["metadata"].(map[string]any); !ok || md["submitted_by"] != "agent_principal:sa-1" {
+		t.Errorf("metadata = %v, want submitted_by", out["metadata"])
 	}
 	if out["severity"] != "high" {
 		t.Errorf("severity = %v", out["severity"])

@@ -1649,12 +1649,23 @@ func (d *daemonImpl) buildGRPCServer(ctx context.Context) (*grpcSubsystem, error
 			// ComponentServiceServer logs and returns a generated finding_id.
 			var findingSubmitter component.FindingSubmitter
 			if d.brainRegistry != nil {
-				findingSubmitter = component.NewGraphRAGFindingSubmitter(
+				graphRAGSubmitter := component.NewGraphRAGFindingSubmitter(
 					ingestComponentFinding(d.brainRegistry), // findings → World → projector (ADR-0007)
 					d.pool,                                  // per-tenant Pool: nil when security.key_provider not configured
 					d.stateClient,
 					d.logger.WithComponent("finding-submitter").Slog(),
 				)
+				// The submitter stamps every finding with the verified principal
+				// and names the enrolled agent behind it (gibson#208). The
+				// capability-grant service is nil exactly when the FGA authorizer
+				// is not wired (see the block above); a finding then carries the
+				// principal and no name.
+				if d.capabilityGrantSvc != nil {
+					graphRAGSubmitter.WithEnrolledAgentLookup(d.capabilityGrantSvc)
+				} else {
+					d.logger.Warn(ctx, "CapabilityGrantService unavailable; findings carry the submitting principal but no registered agent name")
+				}
+				findingSubmitter = graphRAGSubmitter
 				d.logger.Info(ctx, "GraphRAGFindingSubmitter wired: findings → per-tenant store + World projection")
 			} else {
 				d.logger.Warn(ctx, "brain registry not ready; finding submitter not wired (findings will be logged only)")

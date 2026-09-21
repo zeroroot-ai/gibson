@@ -1739,6 +1739,11 @@ func (s *ComponentServiceServer) SubmitFinding(
 	if tenant == "" {
 		return nil, status.Error(codes.Unauthenticated, "missing tenant in context")
 	}
+	// The finding is stored under the verified caller (gibson#208). A request
+	// with no identity has no submitter to record and is refused.
+	if id, err := auth.IdentityFromContext(ctx); err != nil || id.Subject == "" {
+		return nil, status.Error(codes.Unauthenticated, "missing caller identity in context")
+	}
 
 	if len(req.Finding) == 0 {
 		return nil, status.Error(codes.InvalidArgument, "finding is required")

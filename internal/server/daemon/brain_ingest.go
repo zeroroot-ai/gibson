@@ -20,8 +20,8 @@ import (
 	"fmt"
 	"time"
 
-	gibsonagent "github.com/zeroroot-ai/gibson/internal/engine/agent"
 	"github.com/zeroroot-ai/gibson/internal/engine/brain"
+	"github.com/zeroroot-ai/gibson/internal/engine/finding"
 	"github.com/zeroroot-ai/gibson/internal/engine/graphrag/ingest"
 	"github.com/zeroroot-ai/gibson/internal/engine/harness"
 	"github.com/zeroroot-ai/gibson/internal/engine/harness/sandboxed"
@@ -36,7 +36,7 @@ import (
 // tenant World as a Finding so the graph projector — the sole writer of finding
 // nodes — materializes it. Replaces the old direct StoreAsync graph write.
 func ingestComponentFinding(reg *brain.Registry) component.WorldFindingSink {
-	return func(_ context.Context, tenant, missionID string, f gibsonagent.Finding) {
+	return func(_ context.Context, tenant string, f finding.EnhancedFinding) {
 		if reg == nil {
 			return
 		}
@@ -48,7 +48,13 @@ func ingestComponentFinding(reg *brain.Registry) component.WorldFindingSink {
 			// Mission-evidence edge (gibson#1078): the submitter resolves the mission
 			// id from the work-item context and passes it through, so a component-path
 			// finding attaches to the mission that produced it. Empty = tenant-ambient.
-			MissionID: missionID,
+			MissionID: f.MissionID.String(),
+			// The verified submitter (gibson#208): the record the store keeps and
+			// the node the projector writes name the same principal, agent and
+			// enroller.
+			SubmittedBy: f.SubmittedBy,
+			AgentName:   f.AgentName,
+			EnrolledBy:  f.EnrolledBy,
 		})
 	}
 }
