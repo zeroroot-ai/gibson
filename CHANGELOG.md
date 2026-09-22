@@ -1,5 +1,12 @@
 # Changelog
 
+## [0.138.2](https://github.com/zeroroot-ai/gibson/compare/v0.138.1...v0.138.2) (2026-09-22)
+
+
+### Bug Fixes
+
+* **identity:** the identity list names the creator and the given name ([#217](https://github.com/zeroroot-ai/gibson/issues/217)) ([a7d857f](https://github.com/zeroroot-ai/gibson/commit/a7d857f0cd15665804f220a13f6c1fdad508f300))
+
 ## [0.138.1](https://github.com/zeroroot-ai/gibson/compare/v0.138.0...v0.138.1) (2026-09-22)
 
 
