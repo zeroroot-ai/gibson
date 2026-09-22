@@ -6,7 +6,9 @@ package api
 
 import (
 	"context"
+	"fmt"
 	"log/slog"
+	"strings"
 
 	"google.golang.org/grpc/codes"
 	status_grpc "google.golang.org/grpc/status"
@@ -102,12 +104,26 @@ func (s *DaemonServer) ListAgentIdentities(ctx context.Context, req *tenantpb.Li
 			continue
 		}
 		kind := roleToProtoKind(sa.Role)
+		// The person who created the identity is the `owner` tuple
+		// CreateAgentIdentity wrote. It is the accountable human the demo
+		// (zerocool-plugins#10) and the dashboard resolve an agent to. A
+		// lookup that fails is an error, never an identity with no owner.
+		createdBy, err := s.identityOwner(ctx, idpRoleFGAType(sa.Role), principalID)
+		if err != nil {
+			s.logger.ErrorContext(ctx, "ListAgentIdentities: owner lookup failed",
+				slog.String("tenant_id", tenantID),
+				slog.String("principal_id", principalID),
+				slog.String("error", err.Error()),
+			)
+			return nil, status_grpc.Error(codes.Internal, "failed to resolve identity owners")
+		}
 		entry := &tenantpb.AgentIdentity{
-			PrincipalId: principalID,
-			Kind:        kind,
-			Name:        sa.Name,
-			Description: sa.Description,
-			CreatedAt:   timestamppb.New(sa.CreatedAt),
+			PrincipalId:      principalID,
+			Kind:             kind,
+			Name:             identityName(sa.Role, tenantID, sa.Name),
+			Description:      sa.Description,
+			CreatedAt:        timestamppb.New(sa.CreatedAt),
+			CreatedBySubject: createdBy,
 			// LastAuthenticatedAt is nil when IdP doesn't track it; proto null
 			// is the zero value so we leave it unset when nil.
 		}
@@ -151,6 +167,22 @@ func (s *DaemonServer) tenantPrincipalSet(ctx context.Context, tenantID string, 
 		}
 	}
 	return set, nil
+}
+
+// identityOwner returns the bare subject of the person who owns the
+// principal, or "" when no owner tuple exists (an identity written before
+// the owner tuple was, or one whose owner was removed).
+func (s *DaemonServer) identityOwner(ctx context.Context, fgaType, principalID string) (string, error) {
+	users, err := s.authorizer.ListUsers(ctx, fgaType, principalID, "owner")
+	if err != nil {
+		return "", fmt.Errorf("ListUsers(%s, owner): %w", principalID, err)
+	}
+	for _, u := range users {
+		if sub, ok := strings.CutPrefix(u, "user:"); ok {
+			return sub, nil
+		}
+	}
+	return "", nil
 }
 
 // roleToProtoKind converts an idp.Role to a proto PrincipalKind.
