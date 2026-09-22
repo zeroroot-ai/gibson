@@ -1,5 +1,14 @@
 # Changelog
 
+## [0.138.1](https://github.com/zeroroot-ai/gibson/compare/v0.138.0...v0.138.1) (2026-09-22)
+
+
+### Bug Fixes
+
+* **findings:** stamp the verified principal on a component-path finding ([#212](https://github.com/zeroroot-ai/gibson/issues/212)) ([86f5cbb](https://github.com/zeroroot-ai/gibson/commit/86f5cbbdea780b3dd813ae3ddb6f66c801303904))
+* **graph:** read a Finding by the brain_id and title the projector writes ([#211](https://github.com/zeroroot-ai/gibson/issues/211)) ([8fa10d6](https://github.com/zeroroot-ai/gibson/commit/8fa10d66a9a0f95a458a53a00f3aeb3f72ad62ec)), closes [#210](https://github.com/zeroroot-ai/gibson/issues/210)
+* **test:** the Postgres TLS helper waits for the real server, not the initdb one ([#206](https://github.com/zeroroot-ai/gibson/issues/206)) ([4baa0f4](https://github.com/zeroroot-ai/gibson/commit/4baa0f4dd597a08bbded94b25a8aa4e90cd75368))
+
 ## [0.138.0](https://github.com/zeroroot-ai/gibson/compare/v0.137.0...v0.138.0) (2026-09-21)
 
 
