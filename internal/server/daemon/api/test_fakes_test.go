@@ -247,13 +247,8 @@ func (a *fakeAuthorizer) ListObjects(_ context.Context, user, relation, objectTy
 	defer a.mu.RUnlock()
 	return a.objects[user+"|"+relation+"|"+objectType], nil
 }
-func (a *fakeAuthorizer) ListUsers(_ context.Context, objectType, object, relation string) ([]string, error) {
-	a.mu.RLock()
-	defer a.mu.RUnlock()
-	if a.listUsersErr != nil {
-		return nil, a.listUsersErr
-	}
-	return a.users[objectType+"|"+object+"|"+relation], nil
+func (a *fakeAuthorizer) ListUsers(ctx context.Context, objectType, object, relation string) ([]string, error) {
+	return a.ListUsersOfType(ctx, objectType, object, relation, "user")
 }
 
 // withUsers scripts the ListUsers(objectType, object, relation) result.
@@ -288,6 +283,11 @@ func (a *fakeAuditWriter) recorded() []audit.Event {
 // ListUsersOfType is unused by this package's tests. It exists because the
 // method is on authz.Authorizer — a gate reached by type assertion was
 // silently skipped by every double that did not implement it.
-func (a *fakeAuthorizer) ListUsersOfType(context.Context, string, string, string, string) ([]string, error) {
-	return nil, nil
+func (a *fakeAuthorizer) ListUsersOfType(_ context.Context, objectType, object, relation, _ string) ([]string, error) {
+	a.mu.RLock()
+	defer a.mu.RUnlock()
+	if a.listUsersErr != nil {
+		return nil, a.listUsersErr
+	}
+	return a.users[objectType+"|"+object+"|"+relation], nil
 }

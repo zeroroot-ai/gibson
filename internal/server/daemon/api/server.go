@@ -53,6 +53,7 @@ type authzIface interface {
 	Delete(ctx context.Context, tuples []authz.Tuple) error
 	ListObjects(ctx context.Context, user, relation, objectType string) ([]string, error)
 	ListUsers(ctx context.Context, objectType, object, relation string) ([]string, error)
+	ListUsersOfType(ctx context.Context, objectType, object, relation, userType string) ([]string, error)
 }
 
 // DaemonServer implements the DaemonServiceServer interface.

@@ -173,7 +173,7 @@ func (s *DaemonServer) tenantPrincipalSet(ctx context.Context, tenantID string, 
 // principal, or "" when no owner tuple exists (an identity written before
 // the owner tuple was, or one whose owner was removed).
 func (s *DaemonServer) identityOwner(ctx context.Context, fgaType, principalID string) (string, error) {
-	users, err := s.authorizer.ListUsers(ctx, fgaType, principalID, "owner")
+	users, err := s.authorizer.ListUsersOfType(ctx, fgaType, principalID, "owner", "user")
 	if err != nil {
 		return "", fmt.Errorf("ListUsers(%s, owner): %w", principalID, err)
 	}
