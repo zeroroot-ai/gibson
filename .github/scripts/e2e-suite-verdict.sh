@@ -2,6 +2,7 @@
 # e2e-suite-verdict.sh — turn one suite's `go test -v` log into one verdict row.
 #
 # Usage: e2e-suite-verdict.sh <suite> <log-file> <exit-code> <results-file>
+#        e2e-suite-verdict.sh --skip <suite> <reason> <results-file>
 #        e2e-suite-verdict.sh --selftest
 #
 # The cluster e2e lane (exit-test-e2e-cluster.yml, gibson#32) runs every
@@ -16,6 +17,10 @@
 #         top-level test ran at all and none skipped.
 #   SKIP  when no top-level test passed or failed and at least one skipped.
 #   PASS  otherwise. Skipped subtests are counted and reported beside it.
+#
+# --skip records a SKIP row without a run, for a suite this venue cannot
+# execute by design (the reason names why and where it is tracked). It is a
+# warning in the summary like every other SKIP, never a pass.
 #
 # Output: one tab-separated row appended to <results-file>:
 #   suite  verdict  passed  failed  skipped  note
@@ -52,6 +57,12 @@ verdict() {
   printf '%s\t%s\t%s\t%s\t%s\t%s\n' \
     "$suite" "$verdict" "$passed" "$failed" "$((skipped_top + skipped_sub))" "$note" >> "$out"
   echo "verdict ${suite}: ${verdict} (passed=${passed} failed=${failed} skipped=$((skipped_top + skipped_sub)))${note:+ — $note}"
+}
+
+skip_row() {
+  local suite="$1" reason="$2" out="$3"
+  printf '%s\tSKIP\t0\t0\t0\t%s\n' "$suite" "$reason" >> "$out"
+  echo "verdict ${suite}: SKIP — ${reason}"
 }
 
 selftest() {
@@ -115,6 +126,16 @@ EOF
   expect empty-log               "$dir/empty.log"                    0 FAIL
   expect nothing-matched         "$dir/none.log"                     0 FAIL
 
+  # A --skip row reads SKIP with its reason, never PASS.
+  : > "$dir/results.tsv"
+  skip_row by-design "needs a browser" "$dir/results.tsv" >/dev/null
+  if [ "$(cut -f2 "$dir/results.tsv")" != "SKIP" ] || [ "$(cut -f6 "$dir/results.tsv")" != "needs a browser" ]; then
+    echo "selftest FAIL: --skip row is not SKIP with its reason"
+    fail=1
+  else
+    echo "selftest ok:   by-design -> SKIP"
+  fi
+
   # The skipped-subtest count must reach the row, or the summary cannot warn.
   : > "$dir/results.tsv"
   verdict count "$dir/pass-with-skipped-subtest.log" 0 "$dir/results.tsv" >/dev/null
@@ -127,6 +148,10 @@ EOF
 
 case "${1:-}" in
   --selftest) selftest ;;
+  --skip)
+    [ $# -eq 4 ] || { echo "usage: $0 --skip <suite> <reason> <results-file>" >&2; exit 2; }
+    skip_row "$2" "$3" "$4"
+    ;;
   "") echo "usage: $0 <suite> <log-file> <exit-code> <results-file> | --selftest" >&2; exit 2 ;;
   *)
     [ $# -eq 4 ] || { echo "usage: $0 <suite> <log-file> <exit-code> <results-file>" >&2; exit 2; }

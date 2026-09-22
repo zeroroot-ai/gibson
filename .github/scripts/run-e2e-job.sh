@@ -37,15 +37,16 @@ if [ -z "$pw" ]; then
 fi
 echo "::add-mask::$pw"
 kubectl -n "$NS" delete secret gibson-e2e-runner-env --ignore-not-found
+# One env file carries the password and the suite's own settings: kubectl
+# refuses --from-env-file beside --from-literal (run 35660778012).
+env_file=$(mktemp)
+trap 'rm -f "$env_file"' EXIT
+printf 'REDIS_PASSWORD=%s\n' "$pw" > "$env_file"
 if [ -n "${E2E_RUNNER_ENV_FILE:-}" ]; then
   [ -s "$E2E_RUNNER_ENV_FILE" ] || { echo "::error::E2E_RUNNER_ENV_FILE=$E2E_RUNNER_ENV_FILE is missing or empty"; exit 1; }
-  kubectl -n "$NS" create secret generic gibson-e2e-runner-env \
-    --from-literal=REDIS_PASSWORD="$pw" \
-    --from-env-file="$E2E_RUNNER_ENV_FILE"
-else
-  kubectl -n "$NS" create secret generic gibson-e2e-runner-env \
-    --from-literal=REDIS_PASSWORD="$pw"
+  cat "$E2E_RUNNER_ENV_FILE" >> "$env_file"
 fi
+kubectl -n "$NS" create secret generic gibson-e2e-runner-env --from-env-file="$env_file"
 
 # The binary the Job runs. Unset, the image's ENTRYPOINT (e2e.test) runs.
 COMMAND_LINE=""
