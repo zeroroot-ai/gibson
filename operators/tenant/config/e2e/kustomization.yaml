@@ -10,6 +10,11 @@ resources:
 - ../default
 - e2e-deps.yaml
 
+# plans.yaml is chart data (zeroroot-ai/charts helm/gibson-workloads/files/
+# plans.yaml); gibson ships no copy (internal/platform/plans). The lane that
+# runs this overlay copies the chart's file to operators/tenant/plans/ first
+# (.github/workflows/exit-test-e2e-cluster.yml), and a local run does the
+# same by hand. The path is untracked on purpose.
 configMapGenerator:
 - name: e2e-plans
   files:

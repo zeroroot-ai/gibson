@@ -74,8 +74,9 @@ jobs:
     name: every cluster-bound e2e suite runs on one kind cluster
     runs-on: ubuntu-latest
     # The kind bring-up alone took 45 minutes on 2026-09-18 (run 35399104370),
-    # the builds need 15 more, and nine suites follow, the tenant operator
-    # one with a 30-minute budget of its own.
+    # the builds need 15 more, and the suites follow: run 35660778012 reached
+    # the tenant operator suite at 87 minutes, and that suite builds its own
+    # image and cluster inside a 30-minute budget.
     timeout-minutes: 180
     steps:
       - name: Checkout gibson
@@ -258,7 +259,8 @@ jobs:
       # The suites name their tenant with GIBSON_TEST_TENANT_ID and expect a
       # tenant admin JWT in GIBSON_TEST_TENANT_ADMIN_TOKEN. No such token is
       # minted in this venue (the SVID is the identity), so the token is not
-      # set and the suites report their own skip reason.
+      # set and the suites report their own skip reason. gibson#213 moves
+      # them to the SVID path; until then this row reads SKIP.
       - name: "Suite: secrets (in-cluster)"
         if: ${{ !cancelled() && steps.suite-image.outcome == 'success' }}
         env:
@@ -274,19 +276,17 @@ jobs:
           rc=${PIPESTATUS[0]}
           gibson/.github/scripts/e2e-suite-verdict.sh secrets "$E2E_OUT/secrets.log" "$rc" "$RESULTS"
 
-      # plugin_e2e_test.go: on the runner. It starts a debug-plugin binary as
-      # a subprocess and needs GIBSON_URL and GIBSON_BOOTSTRAP_TOKEN.
-      - name: "Suite: plugin_e2e (runner)"
+      # plugin_e2e_test.go cannot run on this venue by design: it starts a
+      # debug-plugin binary from another repository as a subprocess and
+      # enrols it with a bootstrap token, which only a human mints (no
+      # autonomous bootstrap token). The plugin path this venue proves is
+      # plugin_secret_revocation_test.go on the tool-dispatch cluster: the
+      # real plugin image enrols with its SVID (ADR-0066). A SKIP row says so.
+      - name: "Suite: plugin_e2e (by design)"
         if: ${{ !cancelled() && steps.suite-image.outcome == 'success' }}
-        working-directory: gibson
-        env:
-          GIBSON_TEST_FIXTURES_ENABLED: "true"
         run: |
-          set +e
-          CGO_ENABLED=0 go test -tags=e2e -run 'TestPlugin_E2E$' -v -timeout 5m ./tests/e2e/ \
-            2>&1 | tee "$E2E_OUT/plugin_e2e.log"
-          rc=${PIPESTATUS[0]}
-          .github/scripts/e2e-suite-verdict.sh plugin_e2e "$E2E_OUT/plugin_e2e.log" "$rc" "$RESULTS"
+          gibson/.github/scripts/e2e-suite-verdict.sh --skip plugin_e2e \
+            "needs a debug-plugin subprocess and a human-minted bootstrap token; the plugin path is proven by plugin_secret_revocation on exit-test-tool-dispatch" "$RESULTS"
 
       # mission_finding_per_tenant_e2e_test.go: on the runner, kubectl-driven
       # (current-context, pod phase, redis-cli key counts).
@@ -305,7 +305,9 @@ jobs:
       # audit_v4_foundation_test.go live_* subtests: on the runner. The suite
       # dials the daemon at localhost:30002 and Neo4j bolt at localhost:30474
       # (the old dev-cluster NodePorts). Port-forwards put the cluster's
-      # daemon Service and the tenant's Neo4j Service at those ports.
+      # daemon Service and the tenant's Neo4j Service at those ports. The
+      # live_* subtests wait for a mission a human ran, so they read FAIL
+      # until gibson#214 makes the suite drive its own mission.
       - name: "Suite: audit_v4 live (runner)"
         if: ${{ !cancelled() && steps.suite-image.outcome == 'success' }}
         working-directory: gibson
@@ -339,65 +341,46 @@ jobs:
           kill $pf_pids 2>/dev/null || true
           .github/scripts/e2e-suite-verdict.sh audit_v4 "$E2E_OUT/audit_v4.log" "$rc" "$RESULTS"
 
-      # signup_full_chain, login_full_chain, dashboard_smoke: on the runner
-      # through their Makefile targets, which are the documented entrypoints.
-      # They read files a browser driver writes (/tmp/*-<slug>.json) and
-      # need a signed-up tenant named by SIGNUP_SLUG / SIGNUP_EMAIL. The
-      # values below name this run, so the suites execute past their env
-      # guard and report what the venue is missing.
-      - name: "Suite: signup_full_chain (runner)"
+      # signup_full_chain, login_full_chain, dashboard_smoke are the Go half
+      # of a two-part test. The other half is a Playwright spec in the
+      # dashboard repository that signs up, logs in and writes the files the
+      # Go half reads (/tmp/login-redirect-chain-<slug>.json and the like).
+      # No browser runs here, so the Go half alone can never pass (run
+      # 35660778012). gibson#215 wires the browser half; hosted's
+      # exit-test-signup.yml already proves the signup chain (blocker 2).
+      - name: "Suite: signup_full_chain, login_full_chain, dashboard_smoke (browser half missing)"
         if: ${{ !cancelled() && steps.suite-image.outcome == 'success' }}
-        working-directory: gibson
-        env:
-          SIGNUP_SLUG: e2e-${{ github.run_id }}
-          SIGNUP_EMAIL: e2e-${{ github.run_id }}@example.com
         run: |
-          set +e
-          make test-signup-e2e 2>&1 | tee "$E2E_OUT/signup_full_chain.log"
-          rc=${PIPESTATUS[0]}
-          .github/scripts/e2e-suite-verdict.sh signup_full_chain "$E2E_OUT/signup_full_chain.log" "$rc" "$RESULTS"
+          gibson/.github/scripts/e2e-suite-verdict.sh --skip signup_full_chain \
+            "superseded by hosted exit-test-signup.yml; the Go half reads browser artifacts no step here writes (gibson#215)" "$RESULTS"
+          gibson/.github/scripts/e2e-suite-verdict.sh --skip login_full_chain \
+            "reads the dashboard Playwright spec's files; no browser runs on this venue yet (gibson#215)" "$RESULTS"
+          gibson/.github/scripts/e2e-suite-verdict.sh --skip dashboard_smoke \
+            "reads the dashboard Playwright spec's smoke report; no browser runs on this venue yet (gibson#215)" "$RESULTS"
 
-      - name: "Suite: login_full_chain (runner)"
-        if: ${{ !cancelled() && steps.suite-image.outcome == 'success' }}
-        working-directory: gibson
-        env:
-          SIGNUP_SLUG: e2e-${{ github.run_id }}
-          SIGNUP_EMAIL: e2e-${{ github.run_id }}@example.com
-        run: |
-          set +e
-          make test-login-e2e 2>&1 | tee "$E2E_OUT/login_full_chain.log"
-          rc=${PIPESTATUS[0]}
-          .github/scripts/e2e-suite-verdict.sh login_full_chain "$E2E_OUT/login_full_chain.log" "$rc" "$RESULTS"
-
-      - name: "Suite: dashboard_smoke (runner)"
-        if: ${{ !cancelled() && steps.suite-image.outcome == 'success' }}
-        working-directory: gibson
-        env:
-          SIGNUP_SLUG_A: e2e-${{ github.run_id }}-a
-          SIGNUP_EMAIL_A: e2e-${{ github.run_id }}-a@example.com
-          SIGNUP_SLUG_B: e2e-${{ github.run_id }}-b
-          SIGNUP_EMAIL_B: e2e-${{ github.run_id }}-b@example.com
-        run: |
-          set +e
-          make test-dashboard-smoke-e2e 2>&1 | tee "$E2E_OUT/dashboard_smoke.log"
-          rc=${PIPESTATUS[0]}
-          .github/scripts/e2e-suite-verdict.sh dashboard_smoke "$E2E_OUT/dashboard_smoke.log" "$rc" "$RESULTS"
-
-      # operators/tenant/test/e2e (Ginkgo): on the runner, against THIS
-      # cluster. Its BeforeSuite runs `make docker-build` (the repo-root
-      # build/tenant-operator.Dockerfile, gibson#1395) and loads the image
-      # into KIND_CLUSTER. cert-manager is already on the cluster, so the
-      # suite skips its own install. Not `make test-e2e`: that target creates
-      # and deletes a kind cluster of its own.
-      - name: "Suite: tenant_operator (runner)"
+      # operators/tenant/test/e2e (Ginkgo), through its own entrypoint,
+      # `make test-e2e`: it creates a kind cluster of its own
+      # (tenant-operator-test-e2e), builds the operator image from
+      # build/tenant-operator.Dockerfile (gibson#1395), installs cert-manager
+      # and the CRDs, and deploys the controller with stub Postgres, Redis and
+      # mock-Vault. Its own cluster, because the suite's AfterAll runs
+      # `make uninstall`, which deletes the Tenant CRD and every Tenant with
+      # it; on the gibson cluster that would destroy the venue under the
+      # other suites.
+      #
+      # The e2e overlay mounts plans.yaml, which is chart data by decision
+      # (internal/platform/plans: gibson ships no copy). The charts checkout
+      # supplies it at the path config/e2e/kustomization.yaml reads (run
+      # 35660778012 failed with "open operators/tenant/plans/plans.yaml: no
+      # such file or directory").
+      - name: "Suite: tenant_operator (own kind cluster)"
         if: ${{ !cancelled() && steps.suite-image.outcome == 'success' }}
         working-directory: gibson/operators/tenant
-        env:
-          KIND_CLUSTER: gibson
         run: |
           set +e
-          go test -tags=e2e ./test/e2e/ -v -ginkgo.v -timeout 30m \
-            2>&1 | tee "$E2E_OUT/tenant_operator.log"
+          mkdir -p plans
+          cp "$CHARTS_ROOT/helm/gibson-workloads/files/plans.yaml" plans/plans.yaml || { echo "::error::charts has no helm/gibson-workloads/files/plans.yaml"; exit 1; }
+          make test-e2e 2>&1 | tee "$E2E_OUT/tenant_operator.log"
           rc=${PIPESTATUS[0]}
           ../../.github/scripts/e2e-suite-verdict.sh tenant_operator "$E2E_OUT/tenant_operator.log" "$rc" "$RESULTS"
 

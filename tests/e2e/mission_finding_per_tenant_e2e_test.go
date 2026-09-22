@@ -36,6 +36,7 @@ package e2e
 
 import (
 	"context"
+	"encoding/base64"
 	"fmt"
 	"os"
 	"os/exec"
@@ -70,9 +71,14 @@ func TestMissionFindingPerTenant_E2E(t *testing.T) {
 
 	// Assertion 2: Gibson daemon pod is running.
 	t.Log("[E2E assert 2] checking gibson daemon pod is running")
+	// The chart labels the daemon StatefulSet component=daemon (charts
+	// helm/gibson-workloads/templates/gibson/statefulset.yaml). The old
+	// component=gibson selector matched nothing, so jsonpath's items[0]
+	// failed the test on the first run of this venue (gibson#32, run
+	// 35660778012).
 	out, err = exec.CommandContext(ctx, "kubectl", "get", "pods",
 		"-n", "gibson",
-		"-l", "app.kubernetes.io/component=gibson",
+		"-l", "app.kubernetes.io/component=daemon",
 		"-o", "jsonpath={.items[0].status.phase}",
 	).Output()
 	require.NoError(t, err, "kubectl get pods should succeed")
@@ -98,12 +104,6 @@ func TestMissionFindingPerTenant_E2E(t *testing.T) {
 
 	// Assertion 5: Daemon health endpoint returns healthy.
 	t.Log("[E2E assert 5] checking daemon /healthz returns 200")
-	out, err = exec.CommandContext(ctx, "kubectl", "exec",
-		"-n", "gibson",
-		"$(kubectl get pods -n gibson -l app.kubernetes.io/component=gibson -o jsonpath={.items[0].metadata.name})",
-		"--", "wget", "-qO-", "http://localhost:8080/healthz",
-	).Output()
-	// kubectl exec with $(subshell) doesn't work; use a dedicated approach.
 	daemonPod := getGibsonDaemonPod(t, ctx)
 	if daemonPod != "" {
 		out, err = exec.CommandContext(ctx, "kubectl", "exec", "-n", "gibson", daemonPod,
@@ -122,40 +122,40 @@ func TestMissionFindingPerTenant_E2E(t *testing.T) {
 }
 
 // kubectlRedisKeyCount counts keys matching the given pattern in the shared
-// Redis (DB 0) within the given namespace. Returns 0 on error (logged).
+// Redis (DB 0) within the given namespace. Every step fails the test: a
+// count that reads 0 because the pod was not found or redis-cli was refused
+// is not a measurement (gibson#32). The chart labels the redis-stack
+// StatefulSet component=redis and requires a password, which the chart
+// keeps in the <release>-redis-stack Secret.
 func kubectlRedisKeyCount(t *testing.T, ctx context.Context, ns, pattern string) int {
 	t.Helper()
-	// Find redis pod.
 	out, err := exec.CommandContext(ctx, "kubectl", "get", "pods",
 		"-n", ns,
-		"-l", "app.kubernetes.io/component=redis-stack",
+		"-l", "app.kubernetes.io/component=redis",
 		"-o", "jsonpath={.items[0].metadata.name}",
 	).Output()
-	if err != nil || strings.TrimSpace(string(out)) == "" {
-		// Try without label selector.
-		out, err = exec.CommandContext(ctx, "kubectl", "get", "pods",
-			"-n", ns,
-			"--field-selector=status.phase=Running",
-			"-o", "jsonpath={.items[?(@.metadata.name contains 'redis')].metadata.name}",
-		).Output()
-	}
+	require.NoError(t, err, "kubectlRedisKeyCount: find the redis pod (component=redis) in %s", ns)
 	redisPod := strings.TrimSpace(string(out))
-	if redisPod == "" || err != nil {
-		t.Logf("kubectlRedisKeyCount: redis pod not found; returning 0 (err=%v)", err)
-		return 0
-	}
+	require.NotEmpty(t, redisPod, "kubectlRedisKeyCount: no pod with app.kubernetes.io/component=redis in %s", ns)
 
-	keyOut, err := exec.CommandContext(ctx, "kubectl", "exec", "-n", ns, redisPod,
-		"--", "redis-cli", "-n", "0", "KEYS", pattern,
+	pwOut, err := exec.CommandContext(ctx, "kubectl", "get", "secret",
+		"-n", ns, "gibson-redis-stack",
+		"-o", "jsonpath={.data.redis-password}",
 	).Output()
-	if err != nil {
-		t.Logf("kubectlRedisKeyCount: redis-cli KEYS failed: %v", err)
-		return 0
-	}
+	require.NoError(t, err, "kubectlRedisKeyCount: read the redis password Secret")
+	password, err := base64.StdEncoding.DecodeString(strings.TrimSpace(string(pwOut)))
+	require.NoError(t, err, "kubectlRedisKeyCount: decode the redis password")
+	require.NotEmpty(t, password, "kubectlRedisKeyCount: gibson-redis-stack has no redis-password")
 
-	lines := strings.Split(strings.TrimSpace(string(keyOut)), "\n")
+	cmd := exec.CommandContext(ctx, "kubectl", "exec", "-n", ns, redisPod,
+		"--", "env", "REDISCLI_AUTH="+string(password), "redis-cli", "--no-auth-warning", "-n", "0", "KEYS", pattern,
+	)
+	keyOut, err := cmd.CombinedOutput()
+	require.NoError(t, err, "kubectlRedisKeyCount: redis-cli KEYS %s: %s", pattern, strings.TrimSpace(string(keyOut)))
+	require.NotContains(t, string(keyOut), "NOAUTH", "kubectlRedisKeyCount: redis-cli was refused")
+
 	count := 0
-	for _, l := range lines {
+	for _, l := range strings.Split(strings.TrimSpace(string(keyOut)), "\n") {
 		if strings.TrimSpace(l) != "" {
 			count++
 		}
@@ -168,7 +168,7 @@ func getGibsonDaemonPod(t *testing.T, ctx context.Context) string {
 	t.Helper()
 	out, err := exec.CommandContext(ctx, "kubectl", "get", "pods",
 		"-n", "gibson",
-		"-l", "app.kubernetes.io/component=gibson",
+		"-l", "app.kubernetes.io/component=daemon",
 		"-o", "jsonpath={.items[0].metadata.name}",
 	).Output()
 	if err != nil {
