@@ -569,11 +569,11 @@ func scanAgent(row *sql.Row) (*Agent, error) {
 		&ag.PrincipalRef,
 		&ag.CreatedAt,
 	)
-	if err == sql.ErrNoRows {
+	if errors.Is(err, sql.ErrNoRows) {
 		return nil, nil
 	}
 	if err != nil {
-		return nil, err
+		return nil, fmt.Errorf("scan capability_grant_agents row: %w", err)
 	}
 	ag.PublicKeyJWK = json.RawMessage(jwk)
 	if lastActive.Valid {

@@ -43,7 +43,7 @@ type stubEnrolledAgents struct {
 	calls                               int
 }
 
-func (s *stubEnrolledAgents) LookupEnrolledAgent(_ context.Context, tenant, principal string) (string, string, error) {
+func (s *stubEnrolledAgents) LookupEnrolledAgent(_ context.Context, tenant, principal string) (agentName, enrolledBy string, err error) {
 	s.calls++
 	if s.err != nil {
 		return "", "", s.err
