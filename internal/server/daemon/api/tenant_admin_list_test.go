@@ -5,6 +5,7 @@ package api
 
 import (
 	"context"
+	"errors"
 	"testing"
 	"time"
 
@@ -183,5 +184,99 @@ func TestListAgentIdentities_NoIdPConfigured(t *testing.T) {
 	_, err := srv.ListAgentIdentities(ctx, &tenantpb.ListAgentIdentitiesRequest{})
 	if status.Code(err) != codes.Unavailable {
 		t.Errorf("got code %v, want Unavailable", status.Code(err))
+	}
+}
+
+// TestListAgentIdentities_NameAndCreator is the regression test for the
+// enrollment demo (zerocool-plugins#10, hosted run 35681085080). The list
+// returned the IdP username `agent-primary-<name>` and no
+// created_by_subject, so no reader could resolve an agent to the name the
+// person gave or to the person who enrolled it.
+func TestListAgentIdentities_NameAndCreator(t *testing.T) {
+	now := time.Now().UTC()
+	fakeidp := &fakeIDPClient{
+		listFn: func(_ context.Context, _ idp.ListServiceAccountsRequest) (*idp.ListServiceAccountsResponse, error) {
+			return &idp.ListServiceAccountsResponse{
+				ServiceAccounts: []idp.ServiceAccount{
+					{AccountID: "user-1", Name: "agent-acme-zerocool-demo", Role: idp.RoleAgent, CreatedAt: now},
+					// An account named outside the convention keeps its
+					// username, so nothing is hidden from the list.
+					{AccountID: "user-2", Name: "legacy-tool", Role: idp.RoleTool, CreatedAt: now},
+				},
+			}, nil
+		},
+	}
+	az := newFakeAuthorizer().
+		withObjects("tenant:acme", "belongs_to", "agent_principal", "agent_principal:user-1").
+		withObjects("tenant:acme", "belongs_to", "tool_principal", "tool_principal:user-2").
+		withUsers("agent_principal", "agent_principal:user-1", "owner", "user:391832821754232878")
+	srv := newTestDaemonServer(t).WithIdPAdminClient(fakeidp).WithAuthorizer(az)
+	ctx := ctxWithTenantAdmin(context.Background(), "acme", "user-admin")
+
+	resp, err := srv.ListAgentIdentities(ctx, &tenantpb.ListAgentIdentitiesRequest{})
+	if err != nil {
+		t.Fatalf("ListAgentIdentities: %v", err)
+	}
+	byID := map[string]*tenantpb.AgentIdentity{}
+	for _, id := range resp.Identities {
+		byID[id.PrincipalId] = id
+	}
+	agent := byID["agent_principal:user-1"]
+	if agent == nil {
+		t.Fatalf("agent_principal:user-1 missing from %v", resp.Identities)
+	}
+	if agent.Name != "zerocool-demo" {
+		t.Errorf("agent name = %q, want the name the person gave, %q", agent.Name, "zerocool-demo")
+	}
+	if agent.CreatedBySubject != "391832821754232878" {
+		t.Errorf("agent created_by_subject = %q, want the owner's bare subject", agent.CreatedBySubject)
+	}
+	tool := byID["tool_principal:user-2"]
+	if tool == nil {
+		t.Fatalf("tool_principal:user-2 missing from %v", resp.Identities)
+	}
+	if tool.Name != "legacy-tool" {
+		t.Errorf("tool name = %q, want the username kept as is", tool.Name)
+	}
+	if tool.CreatedBySubject != "" {
+		t.Errorf("tool created_by_subject = %q, want empty with no owner tuple", tool.CreatedBySubject)
+	}
+}
+
+// TestListAgentIdentities_OwnerLookupFails proves an owner lookup that fails
+// is an error, never a list of identities with no owner.
+func TestListAgentIdentities_OwnerLookupFails(t *testing.T) {
+	fakeidp := &fakeIDPClient{
+		listFn: func(_ context.Context, _ idp.ListServiceAccountsRequest) (*idp.ListServiceAccountsResponse, error) {
+			return &idp.ListServiceAccountsResponse{
+				ServiceAccounts: []idp.ServiceAccount{
+					{AccountID: "user-1", Name: "agent-acme-zerocool-demo", Role: idp.RoleAgent, CreatedAt: time.Now()},
+				},
+			}, nil
+		},
+	}
+	az := newFakeAuthorizer().
+		withObjects("tenant:acme", "belongs_to", "agent_principal", "agent_principal:user-1").
+		withListUsersError(errors.New("fga down"))
+	srv := newTestDaemonServer(t).WithIdPAdminClient(fakeidp).WithAuthorizer(az)
+	ctx := ctxWithTenantAdmin(context.Background(), "acme", "user-admin")
+
+	_, err := srv.ListAgentIdentities(ctx, &tenantpb.ListAgentIdentitiesRequest{})
+	if status.Code(err) != codes.Internal {
+		t.Fatalf("got %v, want codes.Internal when the owner lookup fails", err)
+	}
+}
+
+func TestServiceAccountName_RoundTrip(t *testing.T) {
+	username := serviceAccountName(idp.RoleAgent, "primary", "zerocool-demo-469743ac0")
+	if username != "agent-primary-zerocool-demo-469743ac0" {
+		t.Fatalf("serviceAccountName = %q", username)
+	}
+	if got := identityName(idp.RoleAgent, "primary", username); got != "zerocool-demo-469743ac0" {
+		t.Errorf("identityName = %q, want the name the person gave", got)
+	}
+	// A different tenant's prefix is not this tenant's, so it is kept whole.
+	if got := identityName(idp.RoleAgent, "other", username); got != username {
+		t.Errorf("identityName across tenants = %q, want the username unchanged", got)
 	}
 }

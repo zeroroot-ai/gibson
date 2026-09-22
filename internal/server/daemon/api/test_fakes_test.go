@@ -178,11 +178,13 @@ func fakePayloadKey(missionID, checkpointID string) string {
 // fakeAuthorizer is a programmable authzIface that scripts Check
 // responses by (user, relation, object) tuple. Unscripted tuples return false.
 type fakeAuthorizer struct {
-	mu      sync.RWMutex
-	allowed map[string]bool     // user|relation|object
-	objects map[string][]string // user|relation|objectType -> object IDs (ListObjects)
-	checks  []checkRecord
-	writes  []authz.Tuple // tuples captured by Write
+	mu           sync.RWMutex
+	allowed      map[string]bool     // user|relation|object
+	objects      map[string][]string // user|relation|objectType -> object IDs (ListObjects)
+	users        map[string][]string // objectType|object|relation -> user refs (ListUsers)
+	listUsersErr error
+	checks       []checkRecord
+	writes       []authz.Tuple // tuples captured by Write
 }
 
 type checkRecord struct {
@@ -190,7 +192,7 @@ type checkRecord struct {
 }
 
 func newFakeAuthorizer() *fakeAuthorizer {
-	return &fakeAuthorizer{allowed: make(map[string]bool), objects: make(map[string][]string)}
+	return &fakeAuthorizer{allowed: make(map[string]bool), objects: make(map[string][]string), users: make(map[string][]string)}
 }
 
 // withObjects scripts the ListObjects(user, relation, objectType) result.
@@ -245,8 +247,24 @@ func (a *fakeAuthorizer) ListObjects(_ context.Context, user, relation, objectTy
 	defer a.mu.RUnlock()
 	return a.objects[user+"|"+relation+"|"+objectType], nil
 }
-func (a *fakeAuthorizer) ListUsers(_ context.Context, _, _, _ string) ([]string, error) {
-	return nil, nil
+func (a *fakeAuthorizer) ListUsers(ctx context.Context, objectType, object, relation string) ([]string, error) {
+	return a.ListUsersOfType(ctx, objectType, object, relation, "user")
+}
+
+// withUsers scripts the ListUsers(objectType, object, relation) result.
+func (a *fakeAuthorizer) withUsers(objectType, object, relation string, users ...string) *fakeAuthorizer {
+	a.mu.Lock()
+	defer a.mu.Unlock()
+	a.users[objectType+"|"+object+"|"+relation] = users
+	return a
+}
+
+// withListUsersError makes every ListUsers call fail.
+func (a *fakeAuthorizer) withListUsersError(err error) *fakeAuthorizer {
+	a.mu.Lock()
+	defer a.mu.Unlock()
+	a.listUsersErr = err
+	return a
 }
 
 // newFakeAuditWriter returns an instance of the fakeAuditWriter
@@ -265,6 +283,11 @@ func (a *fakeAuditWriter) recorded() []audit.Event {
 // ListUsersOfType is unused by this package's tests. It exists because the
 // method is on authz.Authorizer — a gate reached by type assertion was
 // silently skipped by every double that did not implement it.
-func (a *fakeAuthorizer) ListUsersOfType(context.Context, string, string, string, string) ([]string, error) {
-	return nil, nil
+func (a *fakeAuthorizer) ListUsersOfType(_ context.Context, objectType, object, relation, _ string) ([]string, error) {
+	a.mu.RLock()
+	defer a.mu.RUnlock()
+	if a.listUsersErr != nil {
+		return nil, a.listUsersErr
+	}
+	return a.users[objectType+"|"+object+"|"+relation], nil
 }
