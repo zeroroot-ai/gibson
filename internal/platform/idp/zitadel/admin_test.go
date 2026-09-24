@@ -15,62 +15,41 @@ import (
 
 	"github.com/zeroroot-ai/gibson/internal/platform/idp"
 	"github.com/zeroroot-ai/gibson/internal/platform/idp/zitadel"
+	"github.com/zeroroot-ai/gibson/internal/platform/zitadelconn"
+	"github.com/zeroroot-ai/gibson/internal/platform/zitadelconn/zitadelconntest"
 )
 
 // ---------------------------------------------------------------------------
 // Test helpers
 // ---------------------------------------------------------------------------
 
-// setupServer returns a test server that serves OIDC discovery plus an OAuth2
-// token endpoint, and routes management API calls to the provided handler.
-// We use a closure over srvURL so the discovery doc can embed the server URL.
+// setupServer starts a fake Zitadel that selects its instance by header, like
+// the real one (zitadelconntest), and routes both API surfaces to the handler.
+// Zitadel's v1 Management API carries profile and membership; the v2 user
+// endpoint carries the credential timestamps.
 func setupServer(t *testing.T, managementHandler http.HandlerFunc) (*httptest.Server, zitadel.Config) {
 	t.Helper()
-
-	var srvURL string
-
-	handler := http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		switch {
-		case r.URL.Path == "/.well-known/openid-configuration":
-			doc := map[string]string{
-				"token_endpoint": srvURL + "/oauth/v2/token",
-			}
-			w.Header().Set("Content-Type", "application/json")
-			_ = json.NewEncoder(w).Encode(doc)
-
-		case r.URL.Path == "/oauth/v2/token":
-			w.Header().Set("Content-Type", "application/json")
-			_ = json.NewEncoder(w).Encode(map[string]interface{}{
-				"access_token": "test-admin-token",
-				"token_type":   "Bearer",
-				"expires_in":   3600,
-			})
-
-		// Both API surfaces reach the test handler. Zitadel's v1 Management
-		// API carries profile and membership; the v2 user endpoint carries the
-		// credential timestamps. A helper that routed only /management/ made a
-		// /v2/ call 404, which reads in a test as an upstream error rather than
-		// as "this helper does not serve that path".
-		case strings.HasPrefix(r.URL.Path, "/management/"), strings.HasPrefix(r.URL.Path, "/v2/"):
+	srv := zitadelconntest.New(t, "", http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if strings.HasPrefix(r.URL.Path, "/management/") || strings.HasPrefix(r.URL.Path, "/v2/") {
 			managementHandler(w, r)
-
-		default:
-			http.NotFound(w, r)
+			return
 		}
-	})
+		http.NotFound(w, r)
+	}))
+	return srv.Server, testConfig(t, srv)
+}
 
-	srv := httptest.NewServer(handler)
-	srvURL = srv.URL
-
-	cfg := zitadel.Config{
-		Issuer:       srv.URL,
+// testConfig is the admin client configuration a correct deployment renders
+// for srv (ADR-0092).
+func testConfig(t *testing.T, srv *zitadelconntest.Server) zitadel.Config {
+	t.Helper()
+	return zitadel.Config{
+		Issuer:       "https://" + srv.Domain,
 		ClientID:     "admin-client",
 		ClientSecret: "admin-secret",
 		OrgID:        "org-123",
+		Endpoint:     srv.Endpoint(t),
 	}
-
-	t.Cleanup(srv.Close)
-	return srv, cfg
 }
 
 // jsonResp is a helper to write a JSON response.
@@ -386,229 +365,20 @@ func TestGetUserProfile_EmptyBody(t *testing.T) {
 }
 
 // ---------------------------------------------------------------------------
-// Startup probe tests
+// Startup
 // ---------------------------------------------------------------------------
 
-func TestNew_DiscoveryUnreachable(t *testing.T) {
-	// Point at an invalid URL so discovery fails.
-	cfg := zitadel.Config{
-		Issuer:       "http://127.0.0.1:1", // nothing listens here
-		ClientID:     "client",
-		ClientSecret: "secret",
+func TestNew_Unreachable(t *testing.T) {
+	e, err := zitadelconn.New("http://127.0.0.1:1", "app.zitadel.invalid") // nothing listens
+	if err != nil {
+		t.Fatal(err)
 	}
-	_, err := zitadel.New(context.Background(), cfg)
-	if !errors.Is(err, idp.ErrUnreachable) {
-		t.Errorf("want ErrUnreachable on bad issuer, got: %v", err)
-	}
-}
-
-// ---------------------------------------------------------------------------
-// DiscoveryURL split tests — spec tier-2-host-aliases-cluster-dns
-// ---------------------------------------------------------------------------
-//
-// The daemon's IdP admin client takes two URLs:
-//   - Issuer:       externally-routable issuer claim (kept for token validation).
-//   - DiscoveryURL: optional in-cluster URL the client dials for the OIDC
-//                   discovery doc + JWKS. Empty → falls back to Issuer.
-//
-// These tests lock that split against drift.
-
-// TestNew_DiscoveryURL_FallsBackToIssuerWhenEmpty proves the pre-spec behavior
-// is preserved: with DiscoveryURL empty, the client dials the issuer for the
-// well-known doc.
-func TestNew_DiscoveryURL_FallsBackToIssuerWhenEmpty(t *testing.T) {
-	_, cfg := setupServer(t, func(w http.ResponseWriter, r *http.Request) {
-		http.NotFound(w, r) // no management API hits in this test
+	_, err = zitadel.New(context.Background(), zitadel.Config{
+		Issuer: "https://app.zitadel.invalid", ClientID: "client", ClientSecret: "secret",
+		HTTPTimeout: 200 * time.Millisecond, Endpoint: e,
 	})
-	if cfg.DiscoveryURL != "" {
-		t.Fatalf("setupServer should leave DiscoveryURL empty; got %q", cfg.DiscoveryURL)
-	}
-
-	client, err := zitadel.New(context.Background(), cfg)
-	if err != nil {
-		t.Fatalf("New: %v", err)
-	}
-	defer client.Close()
-}
-
-// TestNew_DiscoveryURL_PrefersDiscoveryWhenSet verifies that when both Issuer
-// and DiscoveryURL point at distinct httptest servers, the discovery doc is
-// fetched from DiscoveryURL — and the issuer server is never asked for it.
-// Server B serves only /.well-known/openid-configuration; server A serves
-// only the management API + token endpoint that the discovery doc points
-// the client at.
-func TestNew_DiscoveryURL_PrefersDiscoveryWhenSet(t *testing.T) {
-	var serverAURL string
-	serverADiscoveryHits := 0
-
-	// Server A — issuer + management API + token endpoint. Records every
-	// time someone asks it for the discovery doc (must be zero).
-	serverA := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		switch {
-		case r.URL.Path == "/.well-known/openid-configuration":
-			serverADiscoveryHits++
-			http.NotFound(w, r)
-		case r.URL.Path == "/oauth/v2/token":
-			w.Header().Set("Content-Type", "application/json")
-			_ = json.NewEncoder(w).Encode(map[string]interface{}{
-				"access_token": "test-admin-token",
-				"token_type":   "Bearer",
-				"expires_in":   3600,
-			})
-		default:
-			http.NotFound(w, r)
-		}
-	}))
-	t.Cleanup(serverA.Close)
-	serverAURL = serverA.URL
-
-	// Server B — discovery-only. Hands clients server A's token endpoint.
-	serverBDiscoveryHits := 0
-	serverB := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		if r.URL.Path != "/.well-known/openid-configuration" {
-			http.NotFound(w, r)
-			return
-		}
-		serverBDiscoveryHits++
-		w.Header().Set("Content-Type", "application/json")
-		_ = json.NewEncoder(w).Encode(map[string]string{
-			"token_endpoint": serverAURL + "/oauth/v2/token",
-		})
-	}))
-	t.Cleanup(serverB.Close)
-
-	cfg := zitadel.Config{
-		Issuer:       serverAURL,  // external issuer (used for management API + iss claim)
-		DiscoveryURL: serverB.URL, // in-cluster discovery URL
-		ClientID:     "admin-client",
-		ClientSecret: "admin-secret",
-		OrgID:        "org-123",
-	}
-
-	client, err := zitadel.New(context.Background(), cfg)
-	if err != nil {
-		t.Fatalf("New: %v", err)
-	}
-	defer client.Close()
-
-	if serverBDiscoveryHits != 1 {
-		t.Errorf("expected exactly 1 discovery hit on serverB, got %d", serverBDiscoveryHits)
-	}
-	if serverADiscoveryHits != 0 {
-		t.Errorf("expected 0 discovery hits on serverA (the issuer), got %d", serverADiscoveryHits)
-	}
-}
-
-// TestNew_DiscoveryURL_FailsFastOnUnreachableInClusterURL proves that when the
-// operator sets DiscoveryURL to a bad in-cluster address, the daemon fails
-// fast with ErrUnreachable AND the wrapped error mentions the discovery URL,
-// not the issuer URL — so an operator triaging a CrashLoopBackOff sees the
-// right URL in the pod log line.
-func TestNew_DiscoveryURL_FailsFastOnUnreachableInClusterURL(t *testing.T) {
-	const badDiscovery = "http://127.0.0.1:1" // nothing listens here
-
-	cfg := zitadel.Config{
-		Issuer:       "http://example.invalid",
-		DiscoveryURL: badDiscovery,
-		ClientID:     "client",
-		ClientSecret: "secret",
-		HTTPTimeout:  100 * time.Millisecond,
-	}
-	_, err := zitadel.New(context.Background(), cfg)
 	if !errors.Is(err, idp.ErrUnreachable) {
-		t.Fatalf("want ErrUnreachable on bad discovery URL, got: %v", err)
-	}
-	msg := err.Error()
-	if !strings.Contains(msg, "127.0.0.1:1") {
-		t.Errorf("error message should mention the bad discovery host (127.0.0.1:1); got: %v", err)
-	}
-	if strings.Contains(msg, "example.invalid") {
-		t.Errorf("error message should NOT mention the issuer host (example.invalid); got: %v", err)
-	}
-}
-
-// TestManagementCallsFollowTheInClusterBase is the contract test for
-// gibson#1560: when DiscoveryURL is set it is the base URL for ALL Zitadel
-// HTTP traffic — discovery, token, AND the Management API calls. The external
-// Issuer host is the ext_authz-gated public gateway that 403s admin writes, so
-// management calls must NOT egress there. We set DiscoveryURL (server B,
-// standing in for the in-cluster Envoy listener) distinct from Issuer
-// (server A, the public gateway), exercise a management API call, and verify
-// it lands on server B — never on Issuer/server A.
-func TestManagementCallsFollowTheInClusterBase(t *testing.T) {
-	var serverBURL string
-
-	// Server A is the external token endpoint the discovery doc points at.
-	// It must NEVER receive a management call (that is the public gateway
-	// that 403s admin writes).
-	serverAMgmtHits := 0
-	serverA := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		switch {
-		case r.URL.Path == "/oauth/v2/token":
-			w.Header().Set("Content-Type", "application/json")
-			_ = json.NewEncoder(w).Encode(map[string]interface{}{
-				"access_token": "test-admin-token",
-				"token_type":   "Bearer",
-				"expires_in":   3600,
-			})
-		case strings.HasPrefix(r.URL.Path, "/management/"):
-			serverAMgmtHits++
-			jsonResp(w, http.StatusOK, map[string]string{"userId": "user-from-A"})
-		default:
-			http.NotFound(w, r)
-		}
-	}))
-	t.Cleanup(serverA.Close)
-	serverAURL := serverA.URL
-
-	// Server B is the in-cluster base (DiscoveryURL). It serves discovery and
-	// the Management API. The token_endpoint in its discovery doc points at
-	// the external server A, mirroring how Envoy's in-cluster listener proxies
-	// discovery while the doc advertises the external token endpoint.
-	serverBMgmtHits := 0
-	serverB := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		switch {
-		case r.URL.Path == "/.well-known/openid-configuration":
-			w.Header().Set("Content-Type", "application/json")
-			_ = json.NewEncoder(w).Encode(map[string]string{
-				"token_endpoint": serverAURL + "/oauth/v2/token",
-			})
-		case strings.HasPrefix(r.URL.Path, "/management/"):
-			serverBMgmtHits++
-			jsonResp(w, http.StatusOK, map[string]string{"userId": "user-from-B"})
-		default:
-			http.NotFound(w, r)
-		}
-	}))
-	t.Cleanup(serverB.Close)
-	serverBURL = serverB.URL
-
-	cfg := zitadel.Config{
-		Issuer:       serverAURL,
-		DiscoveryURL: serverBURL,
-		ClientID:     "admin-client",
-		ClientSecret: "admin-secret",
-		OrgID:        "org-123",
-	}
-
-	client, err := zitadel.New(context.Background(), cfg)
-	if err != nil {
-		t.Fatalf("New: %v", err)
-	}
-	defer client.Close()
-
-	if _, err := client.CreateServiceAccount(context.Background(), idp.CreateServiceAccountRequest{
-		Name: "agent-sanity",
-		Role: idp.RoleAgent,
-	}); err != nil {
-		t.Fatalf("CreateServiceAccount: %v", err)
-	}
-
-	if serverBMgmtHits == 0 {
-		t.Errorf("expected the management API call to land on serverB (DiscoveryURL), got 0 hits")
-	}
-	if serverAMgmtHits != 0 {
-		t.Errorf("management API call must NOT land on serverA (Issuer/public gateway); got %d hits", serverAMgmtHits)
+		t.Errorf("want ErrUnreachable when nothing answers at the connect base, got: %v", err)
 	}
 }
 

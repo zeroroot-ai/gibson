@@ -13,7 +13,6 @@ package main
 import (
 	"bytes"
 	"context"
-	"encoding/json"
 	"errors"
 	apierrors "k8s.io/apimachinery/pkg/api/errors"
 	"k8s.io/client-go/kubernetes"
@@ -30,6 +29,7 @@ import (
 
 	"github.com/zeroroot-ai/gibson/internal/platform/authz"
 	"github.com/zeroroot-ai/gibson/internal/platform/idp"
+	"github.com/zeroroot-ai/gibson/internal/platform/zitadelconn/zitadelconntest"
 	corev1 "k8s.io/api/core/v1"
 	"k8s.io/apimachinery/pkg/runtime"
 	"k8s.io/apimachinery/pkg/runtime/schema"
@@ -652,37 +652,52 @@ func TestRunWithDeps_AlreadyOwner_ReturnsZero_NoPublicURLMessage(t *testing.T) {
 
 // ---- resolveIdpEnvConfig tests ------------------------------------------
 
-func TestResolveIdpEnvConfig_AllPresent(t *testing.T) {
-	t.Setenv("GIBSON_IDP_ADMIN_ISSUER", "https://auth.example.com")
+func setResolveEnv(t *testing.T) {
+	t.Helper()
+	t.Setenv("GIBSON_IDP_ADMIN_ISSUER", "https://app.example.com")
 	t.Setenv("GIBSON_IDP_ADMIN_CLIENT_ID", "client-1")
 	t.Setenv("GIBSON_IDP_ADMIN_CLIENT_SECRET", "secret-1")
 	t.Setenv("GIBSON_IDP_ZITADEL_ORG_ID", "org-1")
-	t.Setenv("GIBSON_IDP_ADMIN_DISCOVERY_URL", "https://in-cluster.example")
+	t.Setenv("ZITADEL_URL", "http://gibson-zitadel.gibson.svc.cluster.local:8080")
+	t.Setenv("ZITADEL_EXTERNAL_DOMAIN", "app.example.com")
+}
+
+func TestResolveIdpEnvConfig_AllPresent(t *testing.T) {
+	setResolveEnv(t)
 
 	cfg, err := resolveIdpEnvConfig()
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
-	if cfg.Issuer != "https://auth.example.com" || cfg.ClientID != "client-1" ||
-		cfg.ClientSecret != "secret-1" || cfg.ZitadelOrgID != "org-1" ||
-		cfg.DiscoveryURL != "https://in-cluster.example" {
+	if cfg.Issuer != "https://app.example.com" || cfg.ClientID != "client-1" ||
+		cfg.ClientSecret != "secret-1" || cfg.ZitadelOrgID != "org-1" {
 		t.Errorf("unexpected cfg: %+v", cfg)
+	}
+	if got := cfg.Endpoint.TokenURL(); got != "http://gibson-zitadel.gibson.svc.cluster.local:8080/oauth/v2/token" {
+		t.Errorf("token URL = %q, want the fixed path on the in-cluster base (ADR-0092)", got)
+	}
+	if got := cfg.Endpoint.Host(); got != "app.example.com" {
+		t.Errorf("claimed host = %q, want app.example.com", got)
 	}
 }
 
-func TestResolveIdpEnvConfig_OptionalDiscoveryURLEmpty(t *testing.T) {
-	t.Setenv("GIBSON_IDP_ADMIN_ISSUER", "https://auth.example.com")
-	t.Setenv("GIBSON_IDP_ADMIN_CLIENT_ID", "client-1")
-	t.Setenv("GIBSON_IDP_ADMIN_CLIENT_SECRET", "secret-1")
-	t.Setenv("GIBSON_IDP_ZITADEL_ORG_ID", "org-1")
-	t.Setenv("GIBSON_IDP_ADMIN_DISCOVERY_URL", "")
-
-	cfg, err := resolveIdpEnvConfig()
-	if err != nil {
-		t.Fatalf("unexpected error: %v", err)
+// ADR-0092: the endpoint is not optional. Before it, an empty discovery URL
+// silently sent every call to the public edge, which rejected the owner
+// creation with 403 on staging on 2026-09-23.
+func TestResolveIdpEnvConfig_EndpointIsRequired(t *testing.T) {
+	setResolveEnv(t)
+	t.Setenv("ZITADEL_URL", "")
+	if _, err := resolveIdpEnvConfig(); err == nil || !strings.Contains(err.Error(), "ZITADEL_URL") {
+		t.Fatalf("want an error naming ZITADEL_URL, got %v", err)
 	}
-	if cfg.DiscoveryURL != "" {
-		t.Errorf("DiscoveryURL = %q, want empty", cfg.DiscoveryURL)
+}
+
+// A ported claimed host would make Zitadel stamp the port into the issuer.
+func TestResolveIdpEnvConfig_RefusesAPortedHost(t *testing.T) {
+	setResolveEnv(t)
+	t.Setenv("ZITADEL_EXTERNAL_DOMAIN", "app.example.com:443")
+	if _, err := resolveIdpEnvConfig(); err == nil || !strings.Contains(err.Error(), "port") {
+		t.Fatalf("want an error about the port, got %v", err)
 	}
 }
 
@@ -864,34 +879,17 @@ func TestBuildFgaClient_InvalidStoreID_ReturnsWrappedError(t *testing.T) {
 // with httptest, so the happy and failure paths are exercised for real
 // rather than left at 0% coverage.
 
-// fakeZitadelServer serves a minimal OIDC discovery document and a
-// client_credentials token endpoint, matching what zitadel.New's startup
-// probe (discoverTokenEndpoint + oauth2 clientcredentials) requires.
+// fakeZitadelServer is a Zitadel that selects its instance by header, like
+// the real one (zitadelconntest). zitadel.New's startup probe is one token
+// request, which must name the instance.
 func fakeZitadelServer(t *testing.T) *httptest.Server {
 	t.Helper()
-	mux := http.NewServeMux()
-	var serverURL string
-	mux.HandleFunc("/.well-known/openid-configuration", func(w http.ResponseWriter, _ *http.Request) {
-		w.Header().Set("Content-Type", "application/json")
-		_ = json.NewEncoder(w).Encode(map[string]string{"token_endpoint": serverURL + "/oauth/v2/token"})
-	})
-	mux.HandleFunc("/oauth/v2/token", func(w http.ResponseWriter, _ *http.Request) {
-		w.Header().Set("Content-Type", "application/json")
-		_ = json.NewEncoder(w).Encode(map[string]any{
-			"access_token": "fake-token",
-			"token_type":   "Bearer",
-			"expires_in":   3600,
-		})
-	})
-	srv := httptest.NewServer(mux)
-	t.Cleanup(srv.Close)
-	serverURL = srv.URL
-	return srv
+	return zitadelconntest.New(t, "", nil).Server
 }
 
-// fakeZitadelServerDiscoveryFails serves a 500 on the discovery endpoint,
-// so zitadel.New's startup probe fails before ever reaching the token call.
-func fakeZitadelServerDiscoveryFails(t *testing.T) *httptest.Server {
+// fakeZitadelServerTokenFails answers 500 on every request, so zitadel.New's
+// startup probe fails at the token call.
+func fakeZitadelServerTokenFails(t *testing.T) *httptest.Server {
 	t.Helper()
 	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
 		w.WriteHeader(http.StatusInternalServerError)
@@ -900,13 +898,16 @@ func fakeZitadelServerDiscoveryFails(t *testing.T) *httptest.Server {
 	return srv
 }
 
-func setIdpEnv(t *testing.T, issuer string) {
+// setIdpEnv renders the env a correct chart gives the first-admin Job: the
+// fake as the in-cluster connect base, and the fake's instance as the claim.
+func setIdpEnv(t *testing.T, connectURL string) {
 	t.Helper()
-	t.Setenv("GIBSON_IDP_ADMIN_ISSUER", issuer)
+	t.Setenv("GIBSON_IDP_ADMIN_ISSUER", "https://"+zitadelconntest.DefaultDomain)
 	t.Setenv("GIBSON_IDP_ADMIN_CLIENT_ID", "client-1")
 	t.Setenv("GIBSON_IDP_ADMIN_CLIENT_SECRET", "secret-1")
 	t.Setenv("GIBSON_IDP_ZITADEL_ORG_ID", "org-1")
-	t.Setenv("GIBSON_IDP_ADMIN_DISCOVERY_URL", "")
+	t.Setenv("ZITADEL_URL", connectURL)
+	t.Setenv("ZITADEL_EXTERNAL_DOMAIN", zitadelconntest.DefaultDomain)
 }
 
 func TestBuildIdpClient_MissingEnv_ReturnsError(t *testing.T) {
@@ -938,7 +939,7 @@ func TestBuildIdpClient_ValidEnvAndReachableZitadel_Succeeds(t *testing.T) {
 }
 
 func TestBuildIdpClient_StartupProbeFails_ReturnsWrappedError(t *testing.T) {
-	srv := fakeZitadelServerDiscoveryFails(t)
+	srv := fakeZitadelServerTokenFails(t)
 	setIdpEnv(t, srv.URL)
 
 	_, err := buildIdpClient(context.Background())

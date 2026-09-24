@@ -48,13 +48,14 @@
 //
 // Environment variables:
 //
-//	GIBSON_IDP_ADMIN_ISSUER          — Zitadel OIDC issuer URL
+//	GIBSON_IDP_ADMIN_ISSUER          — claimed OIDC issuer (a string, never dialed)
 //	GIBSON_IDP_ADMIN_CLIENT_ID       — admin service account OAuth2 client id
 //	GIBSON_IDP_ADMIN_CLIENT_SECRET   — admin service account OAuth2 client secret
 //	GIBSON_IDP_ZITADEL_ORG_ID        — platform-level admin org id (default
 //	                                    x-zitadel-orgid header; NOT the
 //	                                    tenant's per-tenant org)
-//	GIBSON_IDP_ADMIN_DISCOVERY_URL   — optional in-cluster OIDC discovery URL
+//	ZITADEL_URL                      — in-cluster Zitadel Service base URL (ADR-0092)
+//	ZITADEL_EXTERNAL_DOMAIN          — claimed public host, sent as x-zitadel-instance-host
 //	EXT_AUTHZ_FGA_ADDR               — HTTP endpoint of the OpenFGA server
 //	EXT_AUTHZ_FGA_STORE_ID           — FGA store ID
 //	EXT_AUTHZ_FGA_MODEL_ID           — FGA authorization model ID
@@ -99,6 +100,7 @@ import (
 	"github.com/zeroroot-ai/gibson/internal/platform/authz"
 	"github.com/zeroroot-ai/gibson/internal/platform/idp"
 	"github.com/zeroroot-ai/gibson/internal/platform/idp/zitadel"
+	"github.com/zeroroot-ai/gibson/internal/platform/zitadelconn"
 )
 
 // tenantsGVR is the GVR for the cluster-scoped Tenant CR.
@@ -302,7 +304,7 @@ type idpEnvConfig struct {
 	ClientID     string
 	ClientSecret string
 	ZitadelOrgID string
-	DiscoveryURL string
+	Endpoint     zitadelconn.Endpoint
 }
 
 // resolveIdpEnvConfig reads the four required GIBSON_IDP_* env vars (plus the
@@ -326,12 +328,17 @@ func resolveIdpEnvConfig() (idpEnvConfig, error) {
 	if len(missing) > 0 {
 		return idpEnvConfig{}, fmt.Errorf("required env vars not set: %v", missing)
 	}
+	// ADR-0092: connect to the Zitadel Service, claim the public host by header.
+	endpoint, err := zitadelconn.FromEnv()
+	if err != nil {
+		return idpEnvConfig{}, fmt.Errorf("zitadel endpoint: %w", err)
+	}
 	return idpEnvConfig{
 		Issuer:       vars[0].value,
 		ClientID:     vars[1].value,
 		ClientSecret: vars[2].value,
 		ZitadelOrgID: vars[3].value,
-		DiscoveryURL: os.Getenv("GIBSON_IDP_ADMIN_DISCOVERY_URL"),
+		Endpoint:     endpoint,
 	}, nil
 }
 
@@ -348,7 +355,7 @@ func buildIdpClient(ctx context.Context) (idpClient, error) {
 		ClientID:     cfg.ClientID,
 		ClientSecret: cfg.ClientSecret,
 		OrgID:        cfg.ZitadelOrgID,
-		DiscoveryURL: cfg.DiscoveryURL,
+		Endpoint:     cfg.Endpoint,
 	})
 	if err != nil {
 		return nil, fmt.Errorf("zitadel startup probe failed (issuer=%s client_id=%s): %w",

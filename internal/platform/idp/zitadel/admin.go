@@ -28,6 +28,7 @@ import (
 	"time"
 
 	"github.com/zeroroot-ai/gibson/internal/platform/idp"
+	"github.com/zeroroot-ai/gibson/internal/platform/zitadelconn"
 	"golang.org/x/oauth2"
 	"golang.org/x/oauth2/clientcredentials"
 )
@@ -36,8 +37,8 @@ import (
 // as an admin client. All values are loaded from environment variables;
 // none are hard-coded.
 type Config struct {
-	// Issuer is the Zitadel OIDC issuer URL, e.g. "https://auth.example.com".
-	// Used for OIDC discovery to obtain the token endpoint.
+	// Issuer is the claimed OIDC issuer, e.g. "https://app.example.com". It is a
+	// string for logs and claims only. The client never dials it (ADR-0092).
 	Issuer string
 
 	// ClientID is the OAuth2 client ID of the admin service account.
@@ -53,33 +54,13 @@ type Config struct {
 	// HTTPTimeout is the per-request timeout. Defaults to 10 seconds.
 	HTTPTimeout time.Duration
 
-	// DiscoveryURL is the in-cluster base URL the client dials for ALL
-	// Zitadel HTTP traffic: OIDC discovery, the JWKS URL the discovery doc
-	// points at, AND every Management API call (see apiBaseURL). When empty,
-	// the client falls back to Issuer for all of these.
-	//
-	// The `iss` claim used in token validation is ALWAYS Issuer regardless
-	// of this field — DiscoveryURL only affects the network path the daemon
-	// uses. Use this knob when the issuer URL itself is externally-routable
-	// but you also have an in-cluster path (e.g. via Envoy by Service FQDN)
-	// that avoids egressing through DNS / a load balancer for daemon → IdP
-	// traffic.
-	//
-	// WHY MANAGEMENT CALLS MUST FOLLOW THIS PATH TOO (gibson#1560): the
-	// external Issuer host is fronted by the customer API gateway (Envoy's
-	// jwt_authn + ext_authz chain). That gateway lets OIDC discovery, the
-	// token exchange, and read-only searches through, but DENIES admin
-	// writes such as human-user creation with a bare 403 — the daemon's
-	// admin token carries the reserved `zitadel` project audience, not the
-	// `gibson-platform` audience the gateway requires. The in-cluster Envoy
-	// listener the daemon is meant to dial (gibson-envoy.<ns>.svc) proxies
-	// the Zitadel Management API straight through with no ext_authz, so
-	// admin writes must ride the DiscoveryURL path, not the Issuer path.
-	// Sending discovery + token in-cluster but the actual API calls out to
-	// the public gateway was the missing half of this split.
-	//
-	// Spec: tier-2-host-aliases-cluster-dns.
-	DiscoveryURL string
+	// Endpoint is where the client connects and which instance it claims
+	// (ADR-0092): the in-cluster Zitadel Service, with the public host in
+	// x-zitadel-instance-host on every request. Token, Management and every
+	// other call go to Endpoint; nothing goes to a public name, so no pod
+	// needs hostAliases and no request meets the public edge's auth chain,
+	// which rejects admin writes (gibson#1560). Required.
+	Endpoint zitadelconn.Endpoint
 }
 
 // Client implements idp.AdminClient against the Zitadel Management API.
@@ -102,29 +83,16 @@ func New(ctx context.Context, cfg Config) (*Client, error) {
 		cfg.HTTPTimeout = 10 * time.Second
 	}
 
-	// Discover the token endpoint from Zitadel's OIDC discovery document.
-	// Spec tier-2-host-aliases-cluster-dns: the daemon dials cfg.DiscoveryURL
-	// (in-cluster Envoy FQDN) for the discovery doc when set, falling back to
-	// cfg.Issuer otherwise. The `iss` claim used for token validation stays
-	// cfg.Issuer regardless — only the network path to the discovery doc is
-	// affected.
-	tokenEndpoint, err := discoverTokenEndpoint(ctx, cfg.Issuer, cfg.DiscoveryURL, cfg.HTTPTimeout)
-	if err != nil {
-		return nil, fmt.Errorf("%w: discovering token endpoint: %s", idp.ErrUnreachable, err)
+	if cfg.Endpoint.IsZero() {
+		return nil, fmt.Errorf("%w: zitadel endpoint not configured (ZITADEL_URL, ZITADEL_EXTERNAL_DOMAIN)", idp.ErrUnreachable)
 	}
 
-	// Spec tier-2-host-aliases-cluster-dns Reqs 2.4 / 2.5 — log which path
-	// was taken so operators can confirm in-cluster vs external discovery
-	// without packet-capturing. We deliberately do not log the resolved
-	// token endpoint URL or the discovery URL itself; the issuer is the
-	// operator-known correlator and discovery_path is the bounded enum.
-	discoveryPath := "external"
-	if cfg.DiscoveryURL != "" {
-		discoveryPath = "in_cluster"
-	}
+	// Log the two facts so an operator can confirm the path without a packet
+	// capture. Neither is a secret.
 	slog.Info("zitadel idp client started",
 		"issuer", cfg.Issuer,
-		"discovery_path", discoveryPath,
+		"connect", cfg.Endpoint.BaseURL(),
+		"instance_host", cfg.Endpoint.Host(),
 	)
 
 	// Build an OAuth2 client_credentials token source for the admin account.
@@ -136,14 +104,13 @@ func New(ctx context.Context, cfg Config) (*Client, error) {
 	ccCfg := clientcredentials.Config{
 		ClientID:     cfg.ClientID,
 		ClientSecret: cfg.ClientSecret,
-		TokenURL:     tokenEndpoint,
+		TokenURL:     cfg.Endpoint.TokenURL(),
 		Scopes:       []string{"openid", "urn:zitadel:iam:org:project:id:zitadel:aud"},
 	}
-	tokenSrc := oauth2.ReuseTokenSource(nil, ccCfg.TokenSource(ctx))
-
-	httpClient := &http.Client{
-		Timeout: cfg.HTTPTimeout,
-	}
+	// The token request needs the instance header too, so the oauth2 library
+	// uses the same header-stamping client as every Management call.
+	httpClient := cfg.Endpoint.HTTPClient(cfg.HTTPTimeout)
+	tokenSrc := oauth2.ReuseTokenSource(nil, ccCfg.TokenSource(context.WithValue(ctx, oauth2.HTTPClient, httpClient)))
 
 	c := &Client{
 		cfg:        cfg,
@@ -845,19 +812,9 @@ func (c *Client) RevokeSession(ctx context.Context, sessionID string) error {
 // HTTP helpers
 // ---------------------------------------------------------------------------
 
-// apiBaseURL returns the base URL for Management API calls. It prefers
-// DiscoveryURL (the in-cluster path) over Issuer for the reasons documented
-// on Config.DiscoveryURL (gibson#1560): the external Issuer host is the
-// ext_authz-gated public gateway, which 403s admin writes, whereas the
-// in-cluster listener proxies the Management API straight to Zitadel. When
-// DiscoveryURL is empty the client falls back to Issuer, preserving the
-// single-host behaviour for deployments that do not split the path.
+// apiBaseURL is the in-cluster connect base (ADR-0092).
 func (c *Client) apiBaseURL() string {
-	base := c.cfg.DiscoveryURL
-	if base == "" {
-		base = c.cfg.Issuer
-	}
-	return strings.TrimRight(base, "/")
+	return c.cfg.Endpoint.BaseURL()
 }
 
 // doRequest executes an authenticated HTTP request against the Zitadel
@@ -980,49 +937,6 @@ func mapError(err error, operation string) error {
 	default:
 		return fmt.Errorf("%w: %s: HTTP %d [%s]", idp.ErrUpstream, operation, hse.status, hse.code)
 	}
-}
-
-// discoverTokenEndpoint fetches the OIDC discovery document and extracts the
-// token_endpoint field. Pure stdlib HTTP; no OIDC library dependency needed.
-//
-// `issuer` is the externally-routable issuer URL (used as a fallback only);
-// `discoveryURL` is the optional in-cluster base URL the daemon dials when
-// non-empty. When `discoveryURL` is empty the function falls back to
-// `issuer` — preserving the pre-spec-tier-2-host-aliases-cluster-dns behavior.
-// The returned token_endpoint is whatever the discovery doc contains; callers
-// MUST NOT assume it shares a host with `issuer`.
-func discoverTokenEndpoint(ctx context.Context, issuer, discoveryURL string, timeout time.Duration) (string, error) {
-	base := discoveryURL
-	if base == "" {
-		base = issuer
-	}
-	client := &http.Client{Timeout: timeout}
-	wellKnownURL := strings.TrimRight(base, "/") + "/.well-known/openid-configuration"
-
-	req, err := http.NewRequestWithContext(ctx, http.MethodGet, wellKnownURL, nil)
-	if err != nil {
-		return "", err
-	}
-	resp, err := client.Do(req)
-	if err != nil {
-		return "", err
-	}
-	defer resp.Body.Close() //nolint:errcheck
-
-	if resp.StatusCode != http.StatusOK {
-		return "", fmt.Errorf("OIDC discovery returned HTTP %d from %s", resp.StatusCode, wellKnownURL)
-	}
-
-	var doc struct {
-		TokenEndpoint string `json:"token_endpoint"`
-	}
-	if err := json.NewDecoder(resp.Body).Decode(&doc); err != nil {
-		return "", fmt.Errorf("parsing OIDC discovery document: %w", err)
-	}
-	if doc.TokenEndpoint == "" {
-		return "", fmt.Errorf("OIDC discovery document missing token_endpoint")
-	}
-	return doc.TokenEndpoint, nil
 }
 
 // parseRoleFromName infers the role from the service account name prefix.

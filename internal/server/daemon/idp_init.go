@@ -15,6 +15,7 @@ import (
 
 	"github.com/zeroroot-ai/gibson/internal/platform/idp"
 	"github.com/zeroroot-ai/gibson/internal/platform/idp/zitadel"
+	"github.com/zeroroot-ai/gibson/internal/platform/zitadelconn"
 )
 
 const (
@@ -37,18 +38,6 @@ const (
 	// is intentionally prefixed with "env" to flag that it is an env var name,
 	// not a credential value.
 	envIDPAdminClientSecret = "GIBSON_IDP_ADMIN_CLIENT_SECRET" //nolint:gosec // env var name, not a credential
-
-	// envIDPAdminDiscoveryURL is the OPTIONAL in-cluster URL the daemon's
-	// IdP admin client dials for OIDC discovery and JWKS fetches. When
-	// empty (the default), discovery falls back to envIDPAdminIssuer. The
-	// `iss` claim used for token validation is always envIDPAdminIssuer
-	// regardless of this var; only the network path to the discovery doc
-	// is moved off the externally-routable hostname.
-	//
-	// Spec: tier-2-host-aliases-cluster-dns. Operators with the chart
-	// supply this from idp.zitadel.discoveryURL; without the chart it
-	// stays empty and discovery goes through cluster DNS to the issuer.
-	envIDPAdminDiscoveryURL = "GIBSON_IDP_ADMIN_DISCOVERY_URL"
 
 	// Zitadel-specific env vars (GIBSON_IDP_ZITADEL_*).
 
@@ -106,15 +95,20 @@ func initZitadelClient(ctx context.Context) (idp.AdminClient, error) {
 		return nil, fmt.Errorf("idp: provider \"zitadel\" requires env vars that are not set: %v", missing)
 	}
 
+	// ADR-0092: connect to the Zitadel Service and claim the public host by
+	// header. Both come from the chart helper; neither is optional.
+	endpoint, err := zitadelconn.FromEnv()
+	if err != nil {
+		return nil, fmt.Errorf("idp: provider \"zitadel\": %w", err)
+	}
+
 	cfg := zitadel.Config{
 		Issuer:       os.Getenv(envIDPAdminIssuer),
 		ClientID:     os.Getenv(envIDPAdminClientID),
 		ClientSecret: os.Getenv(envIDPAdminClientSecret),
 		OrgID:        os.Getenv(envZitadelOrgID),
 		HTTPTimeout:  10 * time.Second,
-		// Spec tier-2-host-aliases-cluster-dns: optional in-cluster
-		// discovery URL. Empty → discovery falls back to Issuer.
-		DiscoveryURL: os.Getenv(envIDPAdminDiscoveryURL),
+		Endpoint:     endpoint,
 	}
 
 	// zitadel.New performs the startup probe; if it fails the error wraps

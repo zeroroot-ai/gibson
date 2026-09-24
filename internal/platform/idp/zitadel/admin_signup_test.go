@@ -9,56 +9,28 @@ import (
 	"errors"
 	"io"
 	"net/http"
-	"net/http/httptest"
 	"strings"
 	"testing"
 
 	"github.com/zeroroot-ai/gibson/internal/platform/idp"
 	"github.com/zeroroot-ai/gibson/internal/platform/idp/zitadel"
+	"github.com/zeroroot-ai/gibson/internal/platform/zitadelconn/zitadelconntest"
 )
 
 // setupUsersServer stands up an httptest server that serves OIDC discovery +
-// the OAuth2 token endpoint (via writeOIDCBootstrap) so zitadel.New succeeds,
+// the OAuth2 token endpoint (via zitadelconntest) so zitadel.New succeeds,
 // and routes the Zitadel Management user API calls (/management/v1/users...)
 // to the provided handler.
 func setupUsersServer(t *testing.T, usersHandler http.HandlerFunc) zitadel.Config {
 	t.Helper()
-	var srvURL string
-	handler := http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		if writeOIDCBootstrap(w, r, func() string { return srvURL }) {
-			return
-		}
+	srv := zitadelconntest.New(t, "", http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		if strings.HasPrefix(r.URL.Path, "/management/v1/users") {
 			usersHandler(w, r)
 			return
 		}
 		http.NotFound(w, r)
-	})
-	srv := httptest.NewServer(handler)
-	srvURL = srv.URL
-	t.Cleanup(srv.Close)
-	return zitadel.Config{Issuer: srv.URL, ClientID: "admin-client", ClientSecret: "admin-secret", OrgID: "org-123"}
-}
-
-// writeOIDCBootstrap answers the OIDC discovery and OAuth2 token requests that
-// zitadel.New's startup probe makes. It returns true when it handled the
-// request so the caller can stop routing. baseURL is a thunk because the
-// httptest server URL is only known after the server starts.
-func writeOIDCBootstrap(w http.ResponseWriter, r *http.Request, baseURL func() string) bool {
-	switch r.URL.Path {
-	case "/.well-known/openid-configuration":
-		w.Header().Set("Content-Type", "application/json")
-		_ = json.NewEncoder(w).Encode(map[string]string{"token_endpoint": baseURL() + "/oauth/v2/token"})
-		return true
-	case "/oauth/v2/token":
-		w.Header().Set("Content-Type", "application/json")
-		_ = json.NewEncoder(w).Encode(map[string]interface{}{
-			"access_token": "test-admin-token", "token_type": "Bearer", "expires_in": 3600,
-		})
-		return true
-	default:
-		return false
-	}
+	}))
+	return testConfig(t, srv)
 }
 
 // closeClient closes the client, satisfying errcheck without a per-call

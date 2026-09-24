@@ -5,13 +5,12 @@ package zitadel_test
 
 import (
 	"context"
-	"encoding/json"
 	"net/http"
-	"net/http/httptest"
 	"strings"
 	"testing"
 
 	"github.com/zeroroot-ai/gibson/internal/platform/idp/zitadel"
+	"github.com/zeroroot-ai/gibson/internal/platform/zitadelconn/zitadelconntest"
 )
 
 // setupSessionServer stands up an httptest server that serves OIDC discovery +
@@ -19,27 +18,14 @@ import (
 // search/delete calls to the provided handler.
 func setupSessionServer(t *testing.T, sessionHandler http.HandlerFunc) zitadel.Config {
 	t.Helper()
-	var srvURL string
-	handler := http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		switch {
-		case r.URL.Path == "/.well-known/openid-configuration":
-			w.Header().Set("Content-Type", "application/json")
-			_ = json.NewEncoder(w).Encode(map[string]string{"token_endpoint": srvURL + "/oauth/v2/token"})
-		case r.URL.Path == "/oauth/v2/token":
-			w.Header().Set("Content-Type", "application/json")
-			_ = json.NewEncoder(w).Encode(map[string]interface{}{
-				"access_token": "test-admin-token", "token_type": "Bearer", "expires_in": 3600,
-			})
-		case strings.HasPrefix(r.URL.Path, "/v2/sessions"):
+	srv := zitadelconntest.New(t, "", http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if strings.HasPrefix(r.URL.Path, "/v2/sessions") {
 			sessionHandler(w, r)
-		default:
-			http.NotFound(w, r)
+			return
 		}
-	})
-	srv := httptest.NewServer(handler)
-	srvURL = srv.URL
-	t.Cleanup(srv.Close)
-	return zitadel.Config{Issuer: srv.URL, ClientID: "admin-client", ClientSecret: "admin-secret", OrgID: "org-123"}
+		http.NotFound(w, r)
+	}))
+	return testConfig(t, srv)
 }
 
 func TestListUserSessions_MapsMetadata(t *testing.T) {
