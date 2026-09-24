@@ -331,7 +331,7 @@ func resolveIdpEnvConfig() (idpEnvConfig, error) {
 	// ADR-0092: connect to the Zitadel Service, claim the public host by header.
 	endpoint, err := zitadelconn.FromEnv()
 	if err != nil {
-		return idpEnvConfig{}, err
+		return idpEnvConfig{}, fmt.Errorf("zitadel endpoint: %w", err)
 	}
 	return idpEnvConfig{
 		Issuer:       vars[0].value,

@@ -44,8 +44,8 @@ const (
 	// EnvExternalDomain names the claimed public host.
 	EnvExternalDomain = "ZITADEL_EXTERNAL_DOMAIN"
 
-	tokenPath = "/oauth/v2/token"
-	jwksPath  = "/oauth/v2/keys"
+	// oauthBase is Zitadel's fixed OAuth2 path prefix.
+	oauthBase = "/oauth/v2"
 )
 
 // Endpoint is the validated pair of facts. The zero value is not usable; build
@@ -108,10 +108,10 @@ func (e Endpoint) URL(path string) string {
 }
 
 // TokenURL is Zitadel's OAuth2 token endpoint on the connect base.
-func (e Endpoint) TokenURL() string { return e.URL(tokenPath) }
+func (e Endpoint) TokenURL() string { return e.URL(oauthBase + "/token") }
 
 // JWKSURL is Zitadel's key set endpoint on the connect base.
-func (e Endpoint) JWKSURL() string { return e.URL(jwksPath) }
+func (e Endpoint) JWKSURL() string { return e.URL(oauthBase + "/keys") }
 
 // Transport wraps next so every request carries the instance header. A nil
 // next means http.DefaultTransport. The caller's request is never mutated.
@@ -136,7 +136,11 @@ type instanceTransport struct {
 func (t *instanceTransport) RoundTrip(req *http.Request) (*http.Response, error) {
 	r := req.Clone(req.Context())
 	r.Header.Set(InstanceHostHeader, t.host)
-	return t.next.RoundTrip(r)
+	resp, err := t.next.RoundTrip(r)
+	if err != nil {
+		return nil, fmt.Errorf("zitadelconn: %w", err)
+	}
+	return resp, nil
 }
 
 func parseConnectURL(raw string) (*url.URL, error) {

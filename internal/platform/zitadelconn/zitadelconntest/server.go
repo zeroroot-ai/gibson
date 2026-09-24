@@ -57,8 +57,8 @@ type Server struct {
 
 // New starts a fake for domain. A nil handler answers 404 for every path
 // except the token endpoint.
-func New(t testing.TB, domain string, handler http.Handler) *Server {
-	t.Helper()
+func New(tb testing.TB, domain string, handler http.Handler) *Server {
+	tb.Helper()
 	if domain == "" {
 		domain = DefaultDomain
 	}
@@ -99,16 +99,16 @@ func New(t testing.TB, domain string, handler http.Handler) *Server {
 		}
 		handler.ServeHTTP(w, r)
 	}))
-	t.Cleanup(s.Close)
+	tb.Cleanup(s.Close)
 	return s
 }
 
 // Endpoint returns the zitadelconn.Endpoint a correct client uses.
-func (s *Server) Endpoint(t testing.TB) zitadelconn.Endpoint {
-	t.Helper()
+func (s *Server) Endpoint(tb testing.TB) zitadelconn.Endpoint {
+	tb.Helper()
 	e, err := zitadelconn.New(s.URL, s.Domain)
 	if err != nil {
-		t.Fatalf("zitadelconntest: endpoint: %v", err)
+		tb.Fatalf("zitadelconntest: endpoint: %v", err)
 	}
 	return e
 }
@@ -130,8 +130,9 @@ func (s *Server) Refused() int {
 
 // Paths returns the paths of every accepted request, for compact assertions.
 func (s *Server) Paths() []string {
-	var out []string
-	for _, r := range s.Requests() {
+	reqs := s.Requests()
+	out := make([]string, 0, len(reqs))
+	for _, r := range reqs {
 		out = append(out, r.Method+" "+r.Path)
 	}
 	return out

@@ -113,7 +113,7 @@ func TestHTTPClient_SelectsTheInstanceOnEveryRequest(t *testing.T) {
 func TestTransport_DoesNotMutateTheCallersRequest(t *testing.T) {
 	srv := zitadelconntest.New(t, "", nil)
 	e := srv.Endpoint(t)
-	req, err := http.NewRequest(http.MethodGet, e.JWKSURL(), nil)
+	req, err := http.NewRequest(http.MethodGet, e.JWKSURL(), http.NoBody)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -124,5 +124,31 @@ func TestTransport_DoesNotMutateTheCallersRequest(t *testing.T) {
 	_ = resp.Body.Close()
 	if req.Header.Get(zitadelconn.InstanceHostHeader) != "" {
 		t.Fatal("Transport set the instance header on the caller's request")
+	}
+}
+
+func TestNew_RefusesAnUnparsableOrHostlessURL(t *testing.T) {
+	for _, raw := range []string{"http://[::1", "http://"} {
+		if _, err := zitadelconn.New(raw, "app.example.com"); err == nil {
+			t.Errorf("New(%q): want an error", raw)
+		}
+	}
+}
+
+func TestEndpoint_ZeroValueIsUnusable(t *testing.T) {
+	var e zitadelconn.Endpoint
+	if !e.IsZero() || e.BaseURL() != "" {
+		t.Fatalf("zero Endpoint: IsZero=%v BaseURL=%q, want true and empty", e.IsZero(), e.BaseURL())
+	}
+}
+
+func TestTransport_WrapsATransportError(t *testing.T) {
+	e, err := zitadelconn.New("http://127.0.0.1:1", "app.example.com") // nothing listens
+	if err != nil {
+		t.Fatal(err)
+	}
+	_, err = e.HTTPClient(time.Second).Get(e.JWKSURL())
+	if err == nil || !strings.Contains(err.Error(), "zitadelconn:") {
+		t.Fatalf("want the dial error wrapped by zitadelconn, got %v", err)
 	}
 }
