@@ -1,5 +1,12 @@
 # Changelog
 
+## [0.138.3](https://github.com/zeroroot-ai/gibson/compare/v0.138.2...v0.138.3) (2026-09-24)
+
+
+### Bug Fixes
+
+* **idp:** the daemon reaches Zitadel by Service name and claims the host by header ([#224](https://github.com/zeroroot-ai/gibson/issues/224)) ([7343e8b](https://github.com/zeroroot-ai/gibson/commit/7343e8b099c53ced6bfb1197b000f6ef42021bf7))
+
 ## [0.138.2](https://github.com/zeroroot-ai/gibson/compare/v0.138.1...v0.138.2) (2026-09-22)
 
 
