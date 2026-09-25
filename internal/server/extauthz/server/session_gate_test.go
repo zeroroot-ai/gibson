@@ -138,21 +138,24 @@ func buildServerForSessionGateTests(t *testing.T, rpcAllowed, sessionAllowed boo
 	checker := fga.NewChecker(mock, reg)
 	cc := fga.NewCachedChecker(checker, 0, 0)
 	return NewEnvoyAuthzServer(Config{
-		Cache:  cc,
-		Logger: newTestLogger(),
+		Cache:      cc,
+		Logger:     newTestLogger(),
+		OrgTenants: &fakeOrgTenantResolver{},
 	})
 }
 
 // makeSessionGateRequest builds a CheckRequest for the given method with an
-// oidc-user JWT. Tenant is embedded in the JWT claim (not the header) so the
-// gateway takes the "JWT-only tenant" path.
+// oidc-user JWT. The tenant is derived from an
+// "urn:zitadel:iam:user:resourceowner:id": "org-<tenant>" claim, resolved by
+// fakeOrgTenantResolver's default convention (ADR-0093 decision 4) — never
+// from a JWT "tenant" claim.
 func makeSessionGateRequest(t *testing.T, method, subject, tenant string, iatUnix int64) *authv3.CheckRequest {
 	t.Helper()
 	claims := map[string]any{
-		"iss":    "https://zitadel.example",
-		"sub":    subject,
-		"tenant": tenant,
-		"iat":    iatUnix,
+		"iss":                                   "https://zitadel.example",
+		"sub":                                   subject,
+		"urn:zitadel:iam:user:resourceowner:id": "org-" + tenant,
+		"iat":                                   iatUnix,
 	}
 	return &authv3.CheckRequest{
 		Attributes: &authv3.AttributeContext{
@@ -241,14 +244,18 @@ func TestSessionGate_MachinePrincipal_GateSkipped(t *testing.T) {
 		t.Fatalf("LoadRegistry: %v", err)
 	}
 	cc := fga.NewCachedChecker(fga.NewChecker(mock, reg), 0, 0)
-	srv := NewEnvoyAuthzServer(Config{Cache: cc, Logger: newTestLogger()})
+	srv := NewEnvoyAuthzServer(Config{Cache: cc, Logger: newTestLogger(), OrgTenants: &fakeOrgTenantResolver{}})
 
-	// Build a client-credentials (SA) request: client_id == sub marks it as SERVICE class.
+	// Build a client-credentials (SA) request: client_id == sub marks it as
+	// SERVICE class, so the org->tenant resolver is never consulted for it.
+	// A service account still names its tenant via the header (case 2,
+	// unchanged by ADR-0093 decision 4), gated on platform_operator — the
+	// mock answers every non-active_session relation with rpcAllowed, so
+	// both that gate and the per-RPC check pass.
 	claims := map[string]any{
 		"iss":       "https://zitadel.example",
 		"sub":       "svc-account-1",
 		"client_id": "svc-account-1",
-		"tenant":    "acme",
 		// no iat — machine principals have no session iat to revoke
 	}
 	req := &authv3.CheckRequest{
@@ -258,6 +265,7 @@ func TestSessionGate_MachinePrincipal_GateSkipped(t *testing.T) {
 					Path: "/test.v1.S/SAOp",
 					Headers: map[string]string{
 						headerJWTPayload: encodePayload(t, claims),
+						headerTenantHint: "acme",
 					},
 				},
 			},
@@ -274,10 +282,11 @@ func TestSessionGate_MachinePrincipal_GateSkipped(t *testing.T) {
 		t.Errorf("expected OK for SA principal (session gate must be skipped), got %v: %s",
 			resp.GetStatus().GetCode(), resp.GetStatus().GetMessage())
 	}
-	// Confirm the session gate was NOT called: exactly 1 FGA call (the per-RPC check).
-	// If the session gate had fired there would be 2 calls.
-	if got := atomic.LoadInt32(&mock.calls); got != 1 {
-		t.Errorf("expected exactly 1 FGA call (per-RPC only, no session gate for SA), got %d", got)
+	// Confirm the session gate was NOT called: exactly 2 FGA calls (the
+	// platform_operator cross-tenant gate, then the per-RPC check). If the
+	// session gate had fired there would be a 3rd call.
+	if got := atomic.LoadInt32(&mock.calls); got != 2 {
+		t.Errorf("expected exactly 2 FGA calls (platform_operator gate + per-RPC, no session gate for SA), got %d", got)
 	}
 }
 
@@ -290,11 +299,13 @@ func TestSessionGate_ZeroIAT_DeniedFailClosed(t *testing.T) {
 	t.Parallel()
 	srv := buildServerForSessionGateTests(t, true /* rpc */, true /* session gate */)
 
-	// Build a request with an OIDC user JWT that omits the `iat` claim.
+	// Build a request with an OIDC user JWT that omits the `iat` claim. The
+	// org claim still resolves to a tenant so the request reaches the
+	// session gate rather than being denied earlier for "no tenant".
 	claims := map[string]any{
-		"iss":    "https://zitadel.example",
-		"sub":    "u-no-iat",
-		"tenant": "acme",
+		"iss":                                   "https://zitadel.example",
+		"sub":                                   "u-no-iat",
+		"urn:zitadel:iam:user:resourceowner:id": "org-acme",
 		// deliberately no "iat"
 	}
 	req := &authv3.CheckRequest{
@@ -334,7 +345,7 @@ func TestSessionGate_FGAError_Unavailable(t *testing.T) {
 	fgaErr := errors.New("fga: dial tcp: connection refused")
 	mock := &errorSessionFGA{rpcAllowed: true, sessionErr: fgaErr}
 	cc := fga.NewCachedChecker(fga.NewChecker(mock, reg), 0, 0)
-	srv := NewEnvoyAuthzServer(Config{Cache: cc, Logger: newTestLogger()})
+	srv := NewEnvoyAuthzServer(Config{Cache: cc, Logger: newTestLogger(), OrgTenants: &fakeOrgTenantResolver{}})
 
 	req := makeSessionGateRequest(t, "/test.v1.S/UserOp", "u-1", "acme", time.Now().Unix())
 
@@ -348,17 +359,17 @@ func TestSessionGate_FGAError_Unavailable(t *testing.T) {
 	}
 }
 
-// TestSessionGate_SelfMode_TenantFromHeader_GateFires — the case that matters
-// for real sign-ins: Zitadel user JWTs carry NO tenant claim, so on a
-// self-mode RPC the identity's tenant is empty and the request names its
-// tenant only in x-gibson-tenant. The revocation gate must still run — a
-// revoked user must not keep reading their own data just because the RPC
-// derives no FGA object from a tenant.
+// TestSessionGate_SelfMode_TenantFromOrg_GateFires — the case that matters
+// for real sign-ins: the identity's tenant is resolved from the token's
+// verified Zitadel org (ADR-0093 decision 4), even on a self-mode RPC. The
+// revocation gate must still run against that tenant — a revoked user must
+// not keep reading their own data just because the RPC derives no FGA
+// object from a tenant.
 //
 // The stub answers the session gate with "revoked", so the request can only
 // be denied if the gate actually ran, and the recorded object proves it ran
-// against the tenant the request named.
-func TestSessionGate_SelfMode_TenantFromHeader_GateFires(t *testing.T) {
+// against the tenant the org resolved to.
+func TestSessionGate_SelfMode_TenantFromOrg_GateFires(t *testing.T) {
 	t.Parallel()
 	reg, err := fga.LoadRegistry([]byte(sessionGateTestYAML))
 	if err != nil {
@@ -366,13 +377,16 @@ func TestSessionGate_SelfMode_TenantFromHeader_GateFires(t *testing.T) {
 	}
 	mock := &sessionObjectRecorder{sessionAllowed: false}
 	cc := fga.NewCachedChecker(fga.NewChecker(mock, reg), 0, 0)
-	srv := NewEnvoyAuthzServer(Config{Cache: cc, Logger: newTestLogger()})
+	srv := NewEnvoyAuthzServer(Config{Cache: cc, Logger: newTestLogger(), OrgTenants: &fakeOrgTenantResolver{}})
 
-	// No tenant claim in the JWT — exactly what Zitadel issues for a user.
+	// No x-gibson-tenant header — a person's tenant comes only from the org
+	// claim below, resolved to "acme" by fakeOrgTenantResolver's default
+	// "org-<tenant>" convention.
 	claims := map[string]any{
-		"iss": "https://zitadel.example",
-		"sub": "u-self",
-		"iat": time.Now().Unix(),
+		"iss":                                   "https://zitadel.example",
+		"sub":                                   "u-self",
+		"urn:zitadel:iam:user:resourceowner:id": "org-acme",
+		"iat":                                   time.Now().Unix(),
 	}
 	req := &authv3.CheckRequest{
 		Attributes: &authv3.AttributeContext{
@@ -381,7 +395,6 @@ func TestSessionGate_SelfMode_TenantFromHeader_GateFires(t *testing.T) {
 					Path: "/test.v1.S/SelfOp",
 					Headers: map[string]string{
 						headerJWTPayload: encodePayload(t, claims),
-						headerTenantHint: "acme",
 					},
 				},
 			},
@@ -501,7 +514,7 @@ func buildServerForUserScopedGate(t *testing.T, mock fga.FGAClient) *EnvoyAuthzS
 		t.Fatalf("LoadRegistry: %v", err)
 	}
 	cc := fga.NewCachedChecker(fga.NewChecker(mock, reg), 0, 0)
-	return NewEnvoyAuthzServer(Config{Cache: cc, Logger: newTestLogger()})
+	return NewEnvoyAuthzServer(Config{Cache: cc, Logger: newTestLogger(), OrgTenants: &fakeOrgTenantResolver{}})
 }
 
 // userScopedSessionFGA faithfully models the USER-SCOPED active_session tuple
@@ -636,13 +649,13 @@ func TestSessionGate_SelfMode_WithTenant_GateFires(t *testing.T) {
 	srv := buildServerForSessionGateTests(t, true /* rpc, unused for self-mode */, false /* session: revoked */)
 
 	// Self-mode RPC: SelfOp is defined as self:true + allowed_identities: USER.
-	// The user JWT carries a tenant claim so TokenIssuedAt can be set and the
-	// gate actually fires (non-empty tenant, non-zero iat).
+	// The user JWT carries an org claim (resolved to "acme") so the identity
+	// has a non-empty tenant and a non-zero iat, and the gate actually fires.
 	claims := map[string]any{
-		"iss":    "https://zitadel.example",
-		"sub":    "u-self",
-		"tenant": "acme",
-		"iat":    time.Now().Unix(),
+		"iss":                                   "https://zitadel.example",
+		"sub":                                   "u-self",
+		"urn:zitadel:iam:user:resourceowner:id": "org-acme",
+		"iat":                                   time.Now().Unix(),
 	}
 	req := &authv3.CheckRequest{
 		Attributes: &authv3.AttributeContext{

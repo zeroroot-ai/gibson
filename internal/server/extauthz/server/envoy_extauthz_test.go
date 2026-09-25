@@ -8,8 +8,10 @@ import (
 	"crypto/ed25519"
 	"encoding/base64"
 	"encoding/json"
+	"errors"
 	"net/http"
 	"net/http/httptest"
+	"strings"
 	"sync"
 	"testing"
 	"time"
@@ -23,6 +25,7 @@ import (
 	"github.com/zeroroot-ai/gibson/internal/server/extauthz/cgjwt"
 	"github.com/zeroroot-ai/gibson/internal/server/extauthz/fga"
 	"github.com/zeroroot-ai/gibson/internal/server/extauthz/headers"
+	"github.com/zeroroot-ai/gibson/internal/server/extauthz/orgtenant"
 )
 
 // encodePayload base64-encodes a JSON payload as Envoy's jwt_authn
@@ -35,6 +38,32 @@ func encodePayload(t *testing.T, claims map[string]any) string {
 		t.Fatalf("marshal claims: %v", err)
 	}
 	return base64.RawURLEncoding.EncodeToString(raw)
+}
+
+// fakeOrgTenantResolver is a test double for OrgTenantResolver (ADR-0093
+// decision 4). By default it treats an org id of the form "org-<tenant>" as
+// mapping to <tenant>, so a test can mint a token carrying
+// "urn:zitadel:iam:user:resourceowner:id": "org-acme" and get "acme" back
+// without a table per test, and any org id without that prefix is
+// unmapped (orgtenant.ErrNoTenant). Set tenantFor for a custom mapping, or
+// err for every call to fail the same way (orgtenant.ErrNoTenant for
+// "unmapped", any other error for "resolver unavailable").
+type fakeOrgTenantResolver struct {
+	tenantFor func(orgID string) (string, error)
+	err       error
+}
+
+func (f *fakeOrgTenantResolver) TenantForOrg(_ context.Context, orgID string) (string, error) {
+	if f.tenantFor != nil {
+		return f.tenantFor(orgID)
+	}
+	if f.err != nil {
+		return "", f.err
+	}
+	if tenant, ok := strings.CutPrefix(orgID, "org-"); ok {
+		return tenant, nil
+	}
+	return "", orgtenant.ErrNoTenant
 }
 
 // ---------------------------------------------------------------------------
@@ -58,19 +87,16 @@ func TestIdentityFromJWTPayload_SAToken_NumericSub(t *testing.T) {
 		}),
 	}
 
-	id, src, _, err := identityFromJWTPayload(hdrs, nil)
+	tok, err := identityFromJWTPayload(hdrs, nil)
 	if err != nil {
 		t.Fatalf("identityFromJWTPayload: %v", err)
 	}
 	// sub is always used — preferred_username swap is removed.
-	if id.Subject != numericClientID {
-		t.Errorf("Subject = %q, want numeric sub %q (preferred_username swap removed per Req 3.1)", id.Subject, numericClientID)
+	if tok.id.Subject != numericClientID {
+		t.Errorf("Subject = %q, want numeric sub %q (preferred_username swap removed per Req 3.1)", tok.id.Subject, numericClientID)
 	}
-	if src != "sub" {
-		t.Errorf("subjectSource = %q, want %q", src, "sub")
-	}
-	if id.CredentialType != "client-credentials" {
-		t.Errorf("CredentialType = %q, want %q", id.CredentialType, "client-credentials")
+	if tok.id.CredentialType != "client-credentials" {
+		t.Errorf("CredentialType = %q, want %q", tok.id.CredentialType, "client-credentials")
 	}
 }
 
@@ -88,18 +114,15 @@ func TestIdentityFromJWTPayload_SAToken_NoPreferredUsername(t *testing.T) {
 		}),
 	}
 
-	id, src, _, err := identityFromJWTPayload(hdrs, nil)
+	tok, err := identityFromJWTPayload(hdrs, nil)
 	if err != nil {
 		t.Fatalf("identityFromJWTPayload: %v", err)
 	}
-	if id.Subject != sub {
-		t.Errorf("Subject = %q, want %q", id.Subject, sub)
+	if tok.id.Subject != sub {
+		t.Errorf("Subject = %q, want %q", tok.id.Subject, sub)
 	}
-	if src != "sub" {
-		t.Errorf("subjectSource = %q, want %q", src, "sub")
-	}
-	if id.CredentialType != "client-credentials" {
-		t.Errorf("CredentialType = %q, want %q", id.CredentialType, "client-credentials")
+	if tok.id.CredentialType != "client-credentials" {
+		t.Errorf("CredentialType = %q, want %q", tok.id.CredentialType, "client-credentials")
 	}
 }
 
@@ -117,18 +140,15 @@ func TestIdentityFromJWTPayload_UserTokenUsesSub(t *testing.T) {
 		}),
 	}
 
-	id, src, _, err := identityFromJWTPayload(hdrs, nil)
+	tok, err := identityFromJWTPayload(hdrs, nil)
 	if err != nil {
 		t.Fatalf("identityFromJWTPayload: %v", err)
 	}
-	if id.Subject != userSub {
-		t.Errorf("Subject = %q, want %q", id.Subject, userSub)
+	if tok.id.Subject != userSub {
+		t.Errorf("Subject = %q, want %q", tok.id.Subject, userSub)
 	}
-	if src != "sub" {
-		t.Errorf("subjectSource = %q, want %q", src, "sub")
-	}
-	if id.CredentialType != "oidc-user" {
-		t.Errorf("CredentialType = %q, want %q", id.CredentialType, "oidc-user")
+	if tok.id.CredentialType != "oidc-user" {
+		t.Errorf("CredentialType = %q, want %q", tok.id.CredentialType, "oidc-user")
 	}
 }
 
@@ -148,20 +168,20 @@ func TestIdentityFromJWTPayload_ParsesIat(t *testing.T) {
 		}),
 	}
 
-	id, _, _, err := identityFromJWTPayload(hdrs, nil)
+	tok, err := identityFromJWTPayload(hdrs, nil)
 	if err != nil {
 		t.Fatalf("identityFromJWTPayload: %v", err)
 	}
-	if got := id.TokenIssuedAt.Unix(); got != iat {
+	if got := tok.id.TokenIssuedAt.Unix(); got != iat {
 		t.Errorf("TokenIssuedAt = %d, want token iat %d", got, iat)
 	}
-	if id.TokenIssuedAt.Location() != time.UTC {
-		t.Errorf("TokenIssuedAt location = %v, want UTC", id.TokenIssuedAt.Location())
+	if tok.id.TokenIssuedAt.Location() != time.UTC {
+		t.Errorf("TokenIssuedAt location = %v, want UTC", tok.id.TokenIssuedAt.Location())
 	}
 	// The freshness IssuedAt must NOT be populated from the token iat — it is
 	// stamped to allow-time later in the request path, not here.
-	if !id.IssuedAt.IsZero() {
-		t.Errorf("IssuedAt = %v, want zero (freshness stamp is set at allow time, not from iat)", id.IssuedAt)
+	if !tok.id.IssuedAt.IsZero() {
+		t.Errorf("IssuedAt = %v, want zero (freshness stamp is set at allow time, not from iat)", tok.id.IssuedAt)
 	}
 }
 
@@ -177,19 +197,19 @@ func TestIdentityFromJWTPayload_NoIat(t *testing.T) {
 		}),
 	}
 
-	id, _, _, err := identityFromJWTPayload(hdrs, nil)
+	tok, err := identityFromJWTPayload(hdrs, nil)
 	if err != nil {
 		t.Fatalf("identityFromJWTPayload: %v", err)
 	}
-	if !id.TokenIssuedAt.IsZero() {
-		t.Errorf("TokenIssuedAt = %v, want zero time when iat absent", id.TokenIssuedAt)
+	if !tok.id.TokenIssuedAt.IsZero() {
+		t.Errorf("TokenIssuedAt = %v, want zero time when iat absent", tok.id.TokenIssuedAt)
 	}
 }
 
 // TestIdentityFromJWTPayload_MissingHeader — error on missing x-jwt-payload.
 func TestIdentityFromJWTPayload_MissingHeader(t *testing.T) {
 	t.Parallel()
-	if _, _, _, err := identityFromJWTPayload(map[string]string{}, nil); err == nil {
+	if _, err := identityFromJWTPayload(map[string]string{}, nil); err == nil {
 		t.Fatal("identityFromJWTPayload: expected error on missing x-jwt-payload, got nil")
 	}
 }
@@ -202,36 +222,50 @@ func TestIdentityFromJWTPayload_MissingSub(t *testing.T) {
 			"iss": "https://zitadel.example",
 		}),
 	}
-	if _, _, _, err := identityFromJWTPayload(hdrs, nil); err == nil {
+	if _, err := identityFromJWTPayload(hdrs, nil); err == nil {
 		t.Fatal("identityFromJWTPayload: expected error on missing sub, got nil")
 	}
 }
 
-// ---------------------------------------------------------------------------
-// Tenant cross-check tests (zero-trust-hardening Req 4)
-// ---------------------------------------------------------------------------
-
-// stubCache is a minimal *fga.CachedChecker wrapper that stubs out Check.
-// It is used for tenant cross-check tests that need to exercise the server's
-// Check method without a real FGA server.
-type stubCache struct {
-	// checkFunc overrides the CachedChecker.Check call when set.
-	checkFunc func(ctx context.Context, method string, identity headers.Identity, meta map[string]string) (bool, error)
+// TestUser_TenantClaimIgnored — legacy gibson:tenant / tenant claims (the
+// dead path nothing in production ever produced — the former Zitadel Action
+// never existed) are simply unknown JSON fields now: the identity carries no
+// tenant and no org from them. A person's tenant comes ONLY from the
+// urn:zitadel:iam:user:resourceowner:id claim, resolved by the org->tenant
+// resolver (ADR-0093 decision 4).
+func TestUser_TenantClaimIgnored(t *testing.T) {
+	t.Parallel()
+	hdrs := map[string]string{
+		headerJWTPayload: encodePayload(t, map[string]any{
+			"iss":           "https://zitadel.example",
+			"sub":           "user-1",
+			"gibson:tenant": "acme",
+			"tenant":        "acme",
+		}),
+	}
+	tok, err := identityFromJWTPayload(hdrs, nil)
+	if err != nil {
+		t.Fatalf("identityFromJWTPayload: %v", err)
+	}
+	if tok.id.Tenant != "" {
+		t.Errorf("Identity.Tenant = %q, want empty (legacy tenant claims are ignored)", tok.id.Tenant)
+	}
+	if tok.orgID != "" {
+		t.Errorf("orgID = %q, want empty (legacy tenant claims never populate the org)", tok.orgID)
+	}
 }
 
-// buildServerWithStub builds an EnvoyAuthzServer whose CachedChecker is driven
-// by checkFunc. We construct a real CachedChecker to satisfy the type, then
-// wrap it — but since tests inject a stub registry that lacks any method, the
-// check falls through to checkFunc via the injected fga client.
-//
-// For simplicity in these tests, we build a special CachedChecker backed by
-// a mock FGA client and a registry that contains the platformOp sentinel method.
-func buildServerForTenantTests(t *testing.T, fgaAllowed bool) *EnvoyAuthzServer {
-	t.Helper()
+// ---------------------------------------------------------------------------
+// Tenant cross-check tests (case 2: a service account acting cross-tenant,
+// unchanged by ADR-0093 decision 4 — a service account still names its
+// tenant via x-gibson-tenant, gated on platform_operator)
+// ---------------------------------------------------------------------------
 
-	// Build a registry that contains the PlatformOperator sentinel used in
-	// the cross-tenant branch of Check.
-	const tenantTestYAML = `entries:
+// tenantTestYAML is the shared registry fixture for the tenant-derivation
+// tests below: one platform-operator sentinel method (case 2's gate), one
+// SERVICE-only rule-mode method, one USER-only rule-mode method, and one
+// USER-only self-mode method.
+const tenantTestYAML = `entries:
   "/gibson.daemon.v1.PlatformOperatorService/Ping":
     relation: "platform_operator"
     object_type: "system_tenant"
@@ -255,20 +289,47 @@ func buildServerForTenantTests(t *testing.T, fgaAllowed bool) *EnvoyAuthzServer 
     allowed_identities:
       - USER
 `
+
+// buildServerForTenantTests builds a server with the shared tenantTestYAML
+// registry and a fakeOrgTenantResolver that maps no org (an OIDC-user test
+// that never presents an org claim keeps id.Tenant empty). Case 2 (service
+// accounts) doesn't consult the org resolver at all, so this default is
+// inert for those tests.
+func buildServerForTenantTests(t *testing.T, fgaAllowed bool) *EnvoyAuthzServer {
+	t.Helper()
+
 	reg, err := fga.LoadRegistry([]byte(tenantTestYAML))
 	if err != nil {
 		t.Fatal(err)
 	}
 
-	import_openfga := fgaAllowed
-	mock := &tenantMockFGA{allowed: import_openfga}
+	mock := &tenantMockFGA{allowed: fgaAllowed}
 	checker := fga.NewChecker(mock, reg)
 	cachedChecker := fga.NewCachedChecker(checker, 0, 0)
 
-	import_slog := newTestLogger()
 	return NewEnvoyAuthzServer(Config{
-		Cache:  cachedChecker,
-		Logger: import_slog,
+		Cache:      cachedChecker,
+		Logger:     newTestLogger(),
+		OrgTenants: &fakeOrgTenantResolver{},
+	})
+}
+
+// buildServerForOrgTenantTests is buildServerForTenantTests with an
+// injectable OrgTenantResolver, for the ADR-0093 decision 4 tenant-derivation
+// tests below.
+func buildServerForOrgTenantTests(t *testing.T, fgaAllowed bool, resolver OrgTenantResolver) *EnvoyAuthzServer {
+	t.Helper()
+	reg, err := fga.LoadRegistry([]byte(tenantTestYAML))
+	if err != nil {
+		t.Fatal(err)
+	}
+	mock := &tenantMockFGA{allowed: fgaAllowed}
+	checker := fga.NewChecker(mock, reg)
+	cachedChecker := fga.NewCachedChecker(checker, 0, 0)
+	return NewEnvoyAuthzServer(Config{
+		Cache:      cachedChecker,
+		Logger:     newTestLogger(),
+		OrgTenants: resolver,
 	})
 }
 
@@ -292,70 +353,9 @@ func makeCheckRequest(t *testing.T, method string, jwtClaims map[string]any, ten
 	}
 }
 
-// TestTenantCrossCheck_MatchingValues — JWT-tenant and header match → allowed
-// (provided FGA also allows; here FGA is stubbed to allow).
-func TestTenantCrossCheck_MatchingValues(t *testing.T) {
-	t.Parallel()
-	srv := buildServerForTenantTests(t, true)
-	req := makeCheckRequest(t, "/test.v1.S/Op", map[string]any{
-		"iss":       "https://zitadel.example",
-		"sub":       "sa-123",
-		"client_id": "sa-123",
-		"tenant":    "acme",
-	}, "acme") // header matches JWT
-
-	resp, err := srv.Check(context.Background(), req)
-	if err != nil {
-		t.Fatalf("Check: %v", err)
-	}
-	if codes.Code(resp.GetStatus().GetCode()) != codes.OK {
-		t.Errorf("expected OK, got %v: %s", resp.GetStatus().GetCode(), resp.GetStatus().GetMessage())
-	}
-}
-
-// TestTenantCrossCheck_MismatchingValues — JWT-tenant and header differ → PermissionDenied.
-func TestTenantCrossCheck_MismatchingValues(t *testing.T) {
-	t.Parallel()
-	srv := buildServerForTenantTests(t, true)
-	req := makeCheckRequest(t, "/test.v1.S/Op", map[string]any{
-		"iss":       "https://zitadel.example",
-		"sub":       "user-456",
-		"client_id": "different",
-		"tenant":    "acme",
-	}, "bigcorp") // header != JWT tenant
-
-	resp, err := srv.Check(context.Background(), req)
-	if err != nil {
-		t.Fatalf("Check: %v", err)
-	}
-	if codes.Code(resp.GetStatus().GetCode()) != codes.PermissionDenied {
-		t.Errorf("expected PermissionDenied on tenant mismatch, got %v", resp.GetStatus().GetCode())
-	}
-}
-
-// TestTenantCrossCheck_MissingHeader — no header, JWT-tenant present → allowed.
-func TestTenantCrossCheck_MissingHeader(t *testing.T) {
-	t.Parallel()
-	srv := buildServerForTenantTests(t, true)
-	req := makeCheckRequest(t, "/test.v1.S/Op", map[string]any{
-		"iss":       "https://zitadel.example",
-		"sub":       "sa-789",
-		"client_id": "sa-789",
-		"tenant":    "acme",
-	}, "") // no header
-
-	resp, err := srv.Check(context.Background(), req)
-	if err != nil {
-		t.Fatalf("Check: %v", err)
-	}
-	// FGA stub returns allowed=true, identity is SERVICE, method allows SERVICE.
-	if codes.Code(resp.GetStatus().GetCode()) != codes.OK {
-		t.Errorf("expected OK for JWT-only tenant, got %v: %s", resp.GetStatus().GetCode(), resp.GetStatus().GetMessage())
-	}
-}
-
-// TestTenantCrossCheck_PlatformOperator — no JWT-tenant + header present + FGA confirms
-// platform_operator → allowed.
+// TestTenantCrossCheck_PlatformOperatorAllowed — no org-derived tenant
+// (SERVICE credential; the org resolver is never consulted for it) + header
+// present + FGA confirms platform_operator → allowed.
 func TestTenantCrossCheck_PlatformOperatorAllowed(t *testing.T) {
 	t.Parallel()
 	srv := buildServerForTenantTests(t, true) // FGA allows
@@ -363,7 +363,6 @@ func TestTenantCrossCheck_PlatformOperatorAllowed(t *testing.T) {
 		"iss":       "https://zitadel.example",
 		"sub":       "platform-op-id",
 		"client_id": "platform-op-id",
-		// no "tenant" claim — this is a cross-tenant operator
 	}, "some-tenant")
 
 	// The cross-tenant branch first checks platform_operator on system_tenant:_system.
@@ -382,8 +381,8 @@ func TestTenantCrossCheck_PlatformOperatorAllowed(t *testing.T) {
 	}
 }
 
-// TestTenantCrossCheck_PlatformOperatorDenied — no JWT-tenant + header present +
-// FGA denies platform_operator → PermissionDenied.
+// TestTenantCrossCheck_PlatformOperatorDenied — no org-derived tenant +
+// header present + FGA denies platform_operator → PermissionDenied.
 func TestTenantCrossCheck_PlatformOperatorDenied(t *testing.T) {
 	t.Parallel()
 	srv := buildServerForTenantTests(t, false) // FGA denies
@@ -402,110 +401,26 @@ func TestTenantCrossCheck_PlatformOperatorDenied(t *testing.T) {
 	}
 }
 
-// TestTenantCrossCheck_NeitherPresent — no JWT-tenant and no header → PermissionDenied.
-// Applies to RULE-mode entries only. Self-mode and unauthenticated entries skip
-// tenant resolution per self-mode-authz Req 4.6 — see TestSelfMode_NoTenant_Allows
-// below.
-func TestTenantCrossCheck_NeitherPresent(t *testing.T) {
-	t.Parallel()
-	srv := buildServerForTenantTests(t, true)
-	req := makeCheckRequest(t, "/test.v1.S/Op", map[string]any{
-		"iss":       "https://zitadel.example",
-		"sub":       "anon",
-		"client_id": "anon",
-		// no tenant claim, no header
-	}, "")
-
-	resp, err := srv.Check(context.Background(), req)
-	if err != nil {
-		t.Fatalf("Check: %v", err)
-	}
-	if codes.Code(resp.GetStatus().GetCode()) != codes.PermissionDenied {
-		t.Errorf("expected PermissionDenied when no tenant derivable, got %v", resp.GetStatus().GetCode())
-	}
-}
-
-// TestTenantCrossCheck_UserNoJWTTenantHeaderPresent_FGAMember — the standard
-// dashboard sign-in flow on rule-mode RPCs (e.g. ListProviders). Zitadel
-// user JWTs deliberately do NOT carry a `gibson:tenant` claim — users may
-// be members of multiple tenants and the active-tenant choice is a UI
-// selection (gibson_active_tenant cookie → x-gibson-tenant header). The
-// pre-fix behaviour treated this as "SA acting cross-tenant" and required
-// platform_operator, which broke every normal user request that hit a
-// rule-mode RPC. Post-fix the USER path trusts the header and lets the
-// rule-mode FGA Check on `tenant_from_identity` enforce membership.
-//
-// Spec: zero-trust-hardening Req 4 (post-fix).
-func TestTenantCrossCheck_UserNoJWTTenantHeaderPresent_FGAMember(t *testing.T) {
-	t.Parallel()
-	srv := buildServerForTenantTests(t, true) // FGA allows (=> user is a member + session valid)
-	req := makeCheckRequest(t, "/test.v1.S/UserOp", map[string]any{
-		"iss": "https://zitadel.example",
-		"sub": "user-987",
-		"iat": int64(1_700_000_100), // session gate requires iat; real Zitadel JWTs always include it
-		// no client_id (USER token)
-		// no tenant claim (Zitadel user JWTs don't carry one)
-	}, "acme") // dashboard sets x-gibson-tenant from gibson_active_tenant
-
-	resp, err := srv.Check(context.Background(), req)
-	if err != nil {
-		t.Fatalf("Check: %v", err)
-	}
-	if codes.Code(resp.GetStatus().GetCode()) != codes.OK {
-		t.Errorf("expected OK for USER caller with no JWT-tenant + header tenant + FGA membership, got %v: %s",
-			resp.GetStatus().GetCode(), resp.GetStatus().GetMessage())
-	}
-}
-
-// TestTenantCrossCheck_UserNoJWTTenantHeaderPresent_FGANonMember — the
-// tenant-probing case the audit's Req 4 was designed to block. A USER asserts
-// `x-gibson-tenant: <tenant they don't belong to>`. ext-authz trusts the
-// header (per the design above) but the rule-mode FGA Check fails because
-// `(user:<sub>, member, tenant:<X>)` is not seeded. Result: deny. Membership,
-// not JWT-tenant binding, is the protection.
-func TestTenantCrossCheck_UserNoJWTTenantHeaderPresent_FGANonMember(t *testing.T) {
-	t.Parallel()
-	srv := buildServerForTenantTests(t, false) // FGA denies (=> user is not a member)
-	req := makeCheckRequest(t, "/test.v1.S/UserOp", map[string]any{
-		"iss": "https://zitadel.example",
-		"sub": "user-987",
-	}, "tenant-they-dont-belong-to")
-
-	resp, err := srv.Check(context.Background(), req)
-	if err != nil {
-		t.Fatalf("Check: %v", err)
-	}
-	if codes.Code(resp.GetStatus().GetCode()) != codes.PermissionDenied {
-		t.Errorf("expected PermissionDenied for USER asserting tenant they're not a member of, got %v",
-			resp.GetStatus().GetCode())
-	}
-}
-
-// TestSelfMode_NoTenant_Allows — the sign-in scenario. A USER token with
-// NEITHER a JWT-tenant claim NOR an x-gibson-tenant header calls a self-mode
-// RPC. Pre-fix (ext-authz v0.2.0) this was denied with "no tenant derivable"
-// at the cross-check before the registry-aware Checker ever ran. Post-fix
-// (v0.2.1) the early registry lookup detects entry.Self and skips tenant
-// resolution; the request reaches cache.Check which short-circuits on Self
-// and returns OK.
+// TestSelfMode_NoTenant_Allows — the sign-in scenario. A USER token with no
+// org claim at all (so the org resolver is never even asked — userTenant
+// short-circuits on an empty orgID) calls a self-mode RPC. The early
+// registry lookup detects entry.Self and skips the rule-mode tenant-missing
+// deny; the request reaches cache.Check which short-circuits on Self and
+// returns OK, and the session gate runs against the user-scoped object.
 //
 // Spec: self-mode-authz Req 4.6.
 func TestSelfMode_NoTenant_Allows(t *testing.T) {
 	t.Parallel()
-	// Note: fgaAllowed=false here proves self-mode never calls the per-RPC FGA path.
-	// However, the session gate IS a separate FGA call for oidc-user requests. Since
-	// our FGA stub returns false for ALL checks, we must use fgaAllowed=true to make
-	// the session gate pass. This is correct: self-mode tests that pre-date #627
-	// used fgaAllowed=false to prove the per-RPC FGA call is skipped — that invariant
-	// still holds (the mock call count would show exactly 1 call: the session gate).
-	// The test is updated to fgaAllowed=true to reflect the backfill-populated session.
-	srv := buildServerForTenantTests(t, true) // FGA allows session gate (oidc-user requires active_session)
+	// fgaAllowed=true is required for the session gate (CheckUserSession) to
+	// pass — the mock answers every relation the same way, including
+	// active_session.
+	srv := buildServerForTenantTests(t, true)
 	req := makeCheckRequest(t, "/test.v1.S/SelfOp", map[string]any{
 		"iss": "https://zitadel.example",
 		"sub": "user-123",
 		"iat": int64(1_700_000_100), // session gate requires iat; real Zitadel JWTs always include it
 		// no client_id (USER token, not SA)
-		// no tenant claim, no header
+		// no org claim, no header
 	}, "")
 
 	resp, err := srv.Check(context.Background(), req)
@@ -516,6 +431,205 @@ func TestSelfMode_NoTenant_Allows(t *testing.T) {
 		t.Errorf("expected OK for self-mode RPC with no tenant context, got %v: %s",
 			resp.GetStatus().GetCode(), resp.GetStatus().GetMessage())
 	}
+}
+
+// ---------------------------------------------------------------------------
+// Tenant derivation from the token's verified Zitadel org (ADR-0093
+// decision 4): a person's tenant comes ONLY from their token's org, resolved
+// against the daemon's org->tenant mapping via OrgTenantResolver — never
+// from a client-supplied x-gibson-tenant header, and never from a JWT
+// "tenant" / "gibson:tenant" claim (see TestUser_TenantClaimIgnored above).
+// ---------------------------------------------------------------------------
+
+// TestUser_TenantHeaderRefused — an OIDC user presenting x-gibson-tenant is
+// refused outright on a rule-mode entry, even where the header would (if
+// trusted) name the caller's own real, org-resolved tenant.
+func TestUser_TenantHeaderRefused(t *testing.T) {
+	t.Parallel()
+	srv := buildServerForOrgTenantTests(t, true, &fakeOrgTenantResolver{})
+	req := makeCheckRequest(t, "/test.v1.S/UserOp", map[string]any{
+		"iss":                                   "https://zitadel.example",
+		"sub":                                   "user-1",
+		"iat":                                   time.Now().Unix(),
+		"urn:zitadel:iam:user:resourceowner:id": "org-acme",
+	}, "acme") // header names the caller's own real tenant — still refused
+
+	resp, err := srv.Check(context.Background(), req)
+	if err != nil {
+		t.Fatalf("Check: %v", err)
+	}
+	if codes.Code(resp.GetStatus().GetCode()) != codes.PermissionDenied {
+		t.Errorf("expected PermissionDenied (tenant header refused for a user), got %v: %s",
+			resp.GetStatus().GetCode(), resp.GetStatus().GetMessage())
+	}
+}
+
+// TestUser_TenantHeaderRefused_SelfMode — the same refusal fires on a
+// self-mode entry: the header is refused before the registry dispatch runs.
+func TestUser_TenantHeaderRefused_SelfMode(t *testing.T) {
+	t.Parallel()
+	srv := buildServerForOrgTenantTests(t, true, &fakeOrgTenantResolver{})
+	req := makeCheckRequest(t, "/test.v1.S/SelfOp", map[string]any{
+		"iss":                                   "https://zitadel.example",
+		"sub":                                   "user-1",
+		"iat":                                   time.Now().Unix(),
+		"urn:zitadel:iam:user:resourceowner:id": "org-acme",
+	}, "acme")
+
+	resp, err := srv.Check(context.Background(), req)
+	if err != nil {
+		t.Fatalf("Check: %v", err)
+	}
+	if codes.Code(resp.GetStatus().GetCode()) != codes.PermissionDenied {
+		t.Errorf("expected PermissionDenied (tenant header refused for a user, self-mode), got %v",
+			resp.GetStatus().GetCode())
+	}
+}
+
+// TestUser_TenantFromOrg — the normal sign-in shape: no header, the token's
+// org resolves to the caller's tenant, FGA is asked about that tenant, and
+// the emitted x-gibson-identity-tenant header carries it.
+func TestUser_TenantFromOrg(t *testing.T) {
+	t.Parallel()
+	srv := buildServerForOrgTenantTests(t, true, &fakeOrgTenantResolver{})
+	req := makeCheckRequest(t, "/test.v1.S/UserOp", map[string]any{
+		"iss":                                   "https://zitadel.example",
+		"sub":                                   "user-1",
+		"iat":                                   time.Now().Unix(),
+		"urn:zitadel:iam:user:resourceowner:id": "org-acme",
+	}, "") // no header
+
+	resp, err := srv.Check(context.Background(), req)
+	if err != nil {
+		t.Fatalf("Check: %v", err)
+	}
+	if codes.Code(resp.GetStatus().GetCode()) != codes.OK {
+		t.Fatalf("expected OK, got %v: %s", resp.GetStatus().GetCode(), resp.GetStatus().GetMessage())
+	}
+	var tenantHdr string
+	for _, h := range resp.GetOkResponse().GetHeaders() {
+		if h.GetHeader().GetKey() == headers.HeaderTenant {
+			tenantHdr = h.GetHeader().GetValue()
+		}
+	}
+	if tenantHdr != "acme" {
+		t.Errorf("emitted tenant header = %q, want acme (resolved from org-acme)", tenantHdr)
+	}
+}
+
+// TestUser_UnmappedOrg_RuleModeDenied — the token's org resolves to no
+// tenant (an org that is not a tenant, or a tenant not yet provisioned) on a
+// rule-mode entry: denied, the same as no tenant at all.
+func TestUser_UnmappedOrg_RuleModeDenied(t *testing.T) {
+	t.Parallel()
+	srv := buildServerForOrgTenantTests(t, true, &fakeOrgTenantResolver{err: orgtenant.ErrNoTenant})
+	req := makeCheckRequest(t, "/test.v1.S/UserOp", map[string]any{
+		"iss":                                   "https://zitadel.example",
+		"sub":                                   "user-1",
+		"iat":                                   time.Now().Unix(),
+		"urn:zitadel:iam:user:resourceowner:id": "org-platform",
+	}, "")
+
+	resp, err := srv.Check(context.Background(), req)
+	if err != nil {
+		t.Fatalf("Check: %v", err)
+	}
+	if codes.Code(resp.GetStatus().GetCode()) != codes.PermissionDenied {
+		t.Errorf("expected PermissionDenied (org maps to no tenant), got %v", resp.GetStatus().GetCode())
+	}
+}
+
+// TestUser_UnmappedOrg_SelfModeAllowed — the same unmapped org on a
+// self-mode entry (the Platform owner's shape): allowed, with an empty
+// emitted tenant header.
+func TestUser_UnmappedOrg_SelfModeAllowed(t *testing.T) {
+	t.Parallel()
+	srv := buildServerForOrgTenantTests(t, true, &fakeOrgTenantResolver{err: orgtenant.ErrNoTenant})
+	req := makeCheckRequest(t, "/test.v1.S/SelfOp", map[string]any{
+		"iss":                                   "https://zitadel.example",
+		"sub":                                   "platform-owner",
+		"iat":                                   time.Now().Unix(),
+		"urn:zitadel:iam:user:resourceowner:id": "org-platform",
+	}, "")
+
+	resp, err := srv.Check(context.Background(), req)
+	if err != nil {
+		t.Fatalf("Check: %v", err)
+	}
+	if codes.Code(resp.GetStatus().GetCode()) != codes.OK {
+		t.Fatalf("expected OK (self-mode allows a person with no tenant), got %v: %s",
+			resp.GetStatus().GetCode(), resp.GetStatus().GetMessage())
+	}
+	for _, h := range resp.GetOkResponse().GetHeaders() {
+		if h.GetHeader().GetKey() == headers.HeaderTenant && h.GetHeader().GetValue() != "" {
+			t.Errorf("emitted tenant header = %q, want empty (no tenant)", h.GetHeader().GetValue())
+		}
+	}
+}
+
+// TestUser_NoOrgClaim_RuleModeDenied — a token with no org claim at all
+// (e.g. a pre-ADR-0093 session) on a rule-mode entry: denied. userTenant
+// treats an empty orgID as ErrNoTenant, the same as an org that maps to
+// nothing.
+func TestUser_NoOrgClaim_RuleModeDenied(t *testing.T) {
+	t.Parallel()
+	srv := buildServerForOrgTenantTests(t, true, &fakeOrgTenantResolver{})
+	req := makeCheckRequest(t, "/test.v1.S/UserOp", map[string]any{
+		"iss": "https://zitadel.example",
+		"sub": "user-1",
+		"iat": time.Now().Unix(),
+		// no resourceowner claim
+	}, "")
+
+	resp, err := srv.Check(context.Background(), req)
+	if err != nil {
+		t.Fatalf("Check: %v", err)
+	}
+	if codes.Code(resp.GetStatus().GetCode()) != codes.PermissionDenied {
+		t.Errorf("expected PermissionDenied (no org claim), got %v", resp.GetStatus().GetCode())
+	}
+}
+
+// TestUser_ResolverError_Unavailable — a transport/daemon failure while
+// resolving the org must deny with Unavailable, never fall through to "no
+// tenant" or an allow.
+func TestUser_ResolverError_Unavailable(t *testing.T) {
+	t.Parallel()
+	srv := buildServerForOrgTenantTests(t, true, &fakeOrgTenantResolver{err: errors.New("daemon unreachable")})
+	req := makeCheckRequest(t, "/test.v1.S/UserOp", map[string]any{
+		"iss":                                   "https://zitadel.example",
+		"sub":                                   "user-1",
+		"iat":                                   time.Now().Unix(),
+		"urn:zitadel:iam:user:resourceowner:id": "org-acme",
+	}, "")
+
+	resp, err := srv.Check(context.Background(), req)
+	if err != nil {
+		t.Fatalf("Check: %v", err)
+	}
+	if codes.Code(resp.GetStatus().GetCode()) != codes.Unavailable {
+		t.Errorf("expected Unavailable (org resolver error), got %v: %s",
+			resp.GetStatus().GetCode(), resp.GetStatus().GetMessage())
+	}
+}
+
+// TestNewEnvoyAuthzServer_PanicsWithoutOrgTenants — OrgTenants is required,
+// the same as Cache and Logger: a person's tenant comes ONLY from this
+// resolver (ADR-0093 decision 4), so a server built without one must fail
+// loud at construction, not silently deny (or worse, allow) every user.
+func TestNewEnvoyAuthzServer_PanicsWithoutOrgTenants(t *testing.T) {
+	t.Parallel()
+	reg, err := fga.LoadRegistry([]byte(tenantTestYAML))
+	if err != nil {
+		t.Fatal(err)
+	}
+	cc := fga.NewCachedChecker(fga.NewChecker(&tenantMockFGA{allowed: true}, reg), 0, 0)
+	defer func() {
+		if r := recover(); r == nil {
+			t.Fatal("expected NewEnvoyAuthzServer to panic with a nil OrgTenants")
+		}
+	}()
+	NewEnvoyAuthzServer(Config{Cache: cc, Logger: newTestLogger()})
 }
 
 // ---------------------------------------------------------------------------
@@ -553,6 +667,7 @@ func buildServerWithIssuerAllowlist(t *testing.T, fgaAllowed bool, allowlist []s
 		Cache:           cachedChecker,
 		Logger:          newTestLogger(),
 		IssuerAllowlist: allowlist,
+		OrgTenants:      &fakeOrgTenantResolver{},
 	})
 }
 
@@ -565,7 +680,6 @@ func TestIssuerAllowlist_UnknownIssuerDenied(t *testing.T) {
 		"iss":       "https://attacker.example.com",
 		"sub":       "sa-x",
 		"client_id": "sa-x",
-		"tenant":    "acme",
 	}, "acme")
 
 	resp, err := srv.Check(context.Background(), req)
@@ -590,7 +704,6 @@ func TestIssuerAllowlist_AllowedIssuerAccepted(t *testing.T) {
 		"iss":       goodIss,
 		"sub":       "sa-y",
 		"client_id": "sa-y",
-		"tenant":    "acme",
 	}, "acme")
 
 	resp, err := srv.Check(context.Background(), req)
@@ -641,12 +754,12 @@ func TestIssuerAllowlist_CanonicalIssuerOnIdentity(t *testing.T) {
 			"client_id": "user-1",
 		}),
 	}
-	id, _, _, err := identityFromJWTPayload(hdrs, nil)
+	tok, err := identityFromJWTPayload(hdrs, nil)
 	if err != nil {
 		t.Fatalf("identityFromJWTPayload: %v", err)
 	}
-	if id.Issuer != headers.IssuerOIDC {
-		t.Errorf("Identity.Issuer = %q, want canonical wire constant %q", id.Issuer, headers.IssuerOIDC)
+	if tok.id.Issuer != headers.IssuerOIDC {
+		t.Errorf("Identity.Issuer = %q, want canonical wire constant %q", tok.id.Issuer, headers.IssuerOIDC)
 	}
 }
 
@@ -682,6 +795,13 @@ func TestSelfMode_ServiceTokenDenied(t *testing.T) {
 // A capability grant constrains a request; it never authorizes one. These
 // tests pin both halves of that: FGA decides every request, and a grant that
 // is not bound to the caller takes the request away.
+//
+// The primary identity's tenant here comes from an
+// "urn:zitadel:iam:user:resourceowner:id": "org-<tenant>" claim, resolved by
+// fakeOrgTenantResolver's default convention (ADR-0093 decision 4) — never
+// from a "tenant" claim. The capability GRANT's own tenant assertion
+// (mintGrant's "tenant" field, verified separately by cgjwt against the
+// grant's signature) is a distinct concept and is untouched by that change.
 // ---------------------------------------------------------------------------
 
 // grantTestFGA answers `allowed` to every question and records the objects it
@@ -824,20 +944,22 @@ func buildGrantServer(t *testing.T, fgaAllowed bool) (*EnvoyAuthzServer, ed25519
 	}
 	mock := &grantTestFGA{allowed: fgaAllowed}
 	cc := fga.NewCachedChecker(fga.NewChecker(mock, reg), 0, 0)
-	srv := NewEnvoyAuthzServer(Config{Cache: cc, CGJWT: verifier, Logger: newTestLogger()})
+	srv := NewEnvoyAuthzServer(Config{Cache: cc, CGJWT: verifier, Logger: newTestLogger(), OrgTenants: &fakeOrgTenantResolver{}})
 	return srv, priv, mock
 }
 
 // grantRequest builds a Check request from `subject` in `tenant` carrying the
-// supplied capability grant.
+// supplied capability grant. The primary identity's tenant is derived from
+// an org claim ("org-<tenant>", per fakeOrgTenantResolver's default), never
+// from a JWT "tenant" claim (ADR-0093 decision 4).
 func grantRequest(t *testing.T, subject, tenant, grant string) *authv3.CheckRequest {
 	t.Helper()
 	hdrs := map[string]string{
 		headerJWTPayload: encodePayload(t, map[string]any{
-			"iss":    "https://zitadel.example",
-			"sub":    subject,
-			"tenant": tenant,
-			"iat":    time.Now().Unix(),
+			"iss":                                   "https://zitadel.example",
+			"sub":                                   subject,
+			"urn:zitadel:iam:user:resourceowner:id": "org-" + tenant,
+			"iat":                                   time.Now().Unix(),
 		}),
 	}
 	if grant != "" {
@@ -1013,12 +1135,12 @@ func TestCredentialTypeFor_ZitadelMachineUserToken(t *testing.T) {
 	hdrs := map[string]string{headerJWTPayload: encodePayload(t, map[string]any{
 		"iss": "https://zitadel.example", "sub": "212345678901234567", "client_id": "gibson-sdk", "azp": "gibson-sdk",
 	})}
-	id, _, _, err := identityFromJWTPayload(hdrs, humans)
+	tok, err := identityFromJWTPayload(hdrs, humans)
 	if err != nil {
 		t.Fatalf("identityFromJWTPayload: %v", err)
 	}
-	if id.CredentialType != "client-credentials" || id.Subject != "212345678901234567" {
-		t.Fatalf("machine user token: got %+v", id)
+	if tok.id.CredentialType != "client-credentials" || tok.id.Subject != "212345678901234567" {
+		t.Fatalf("machine user token: got %+v", tok.id)
 	}
 }
 
@@ -1031,7 +1153,12 @@ func TestNewEnvoyAuthzServer_HumanClientIDs(t *testing.T) {
 		t.Fatalf("LoadRegistry: %v", err)
 	}
 	cc := fga.NewCachedChecker(fga.NewChecker(&sessionAwareFGA{rpcAllowed: true, sessionAllowed: false}, reg), 0, 0)
-	srv := NewEnvoyAuthzServer(Config{Cache: cc, Logger: newTestLogger(), HumanClientIDs: []string{" 334268812578094081@gibson ", "", "  "}})
+	srv := NewEnvoyAuthzServer(Config{
+		Cache:          cc,
+		Logger:         newTestLogger(),
+		HumanClientIDs: []string{" 334268812578094081@gibson ", "", "  "},
+		OrgTenants:     &fakeOrgTenantResolver{},
+	})
 	if len(srv.humans) != 1 {
 		t.Fatalf("humans = %v, want the one trimmed client id", srv.humans)
 	}
