@@ -268,10 +268,8 @@ func TestIdentity_ListAuthorizationsFiltersAndPaginates(t *testing.T) {
 	addRole(t, e, projectID, "viewer", "Viewer")
 	grantProject(t, e, projectID, tenantOrg, []string{"viewer"})
 
-	var userIDs []string
-	for i := 0; i < 3; i++ {
+	for range 3 {
 		u := id.AddUser(tenantOrg, "u@example.com")
-		userIDs = append(userIDs, u)
 		post(t, e, "/zitadel.authorization.v2.AuthorizationService/CreateAuthorization", map[string]any{
 			"userId": u, "projectId": projectID, "organizationId": tenantOrg, "roleKeys": []string{"viewer"},
 		}, nil)
