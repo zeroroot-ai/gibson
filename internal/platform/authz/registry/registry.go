@@ -2636,7 +2636,7 @@ var Registry = map[string]Entry{
 	"/gibson.tenant.v1.MembershipService/TransferOwnership": {
 		Method:            "/gibson.tenant.v1.MembershipService/TransferOwnership",
 		Service:           "gibson.tenant.v1.MembershipService",
-		Relation:          "admin",
+		Relation:          "owner",
 		ObjectType:        "tenant",
 		ObjectDeriver:     "tenant_from_identity",
 		AllowedIdentities: IdentityUser,

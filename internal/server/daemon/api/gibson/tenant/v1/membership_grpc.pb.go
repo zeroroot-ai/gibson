@@ -68,12 +68,16 @@ type MembershipServiceClient interface {
 	ListMembers(ctx context.Context, in *ListMembersRequest, opts ...grpc.CallOption) (*ListMembersResponse, error)
 	// SetTenantRole writes or removes admin / member / writer FGA tuples on
 	// the tenant for a given user. The role field must be one of "admin",
-	// "member", or "writer". Atomically removes any conflicting prior role
-	// tuple before writing the new one.
+	// "member", or "writer" — "owner" is refused; Owner can change only
+	// through TransferOwnership (hosted#190). Also refused when user_id
+	// already holds the tenant's owner relation: the Owner's role can never be
+	// changed or removed through this RPC.
 	SetTenantRole(ctx context.Context, in *SetTenantRoleRequest, opts ...grpc.CallOption) (*SetTenantRoleResponse, error)
-	// TransferOwnership atomically swaps the owner FGA tuple on the tenant
-	// from the current owner to new_owner_user_id. Fails if the caller is
-	// not the current owner.
+	// TransferOwnership atomically moves the owner relation from the caller to
+	// new_owner_user_id and grants the caller admin, in a single FGA write.
+	// Gated on the "owner" relation (not "admin"): only the tenant's current
+	// Owner may call this RPC (hosted#190). new_owner_user_id must already be
+	// a member of the caller's tenant.
 	TransferOwnership(ctx context.Context, in *TransferOwnershipRequest, opts ...grpc.CallOption) (*TransferOwnershipResponse, error)
 	// InviteMember creates a pending invitation for an email address with the
 	// given tenant role and emails the invitee an accept link. The invitee
@@ -365,12 +369,16 @@ type MembershipServiceServer interface {
 	ListMembers(context.Context, *ListMembersRequest) (*ListMembersResponse, error)
 	// SetTenantRole writes or removes admin / member / writer FGA tuples on
 	// the tenant for a given user. The role field must be one of "admin",
-	// "member", or "writer". Atomically removes any conflicting prior role
-	// tuple before writing the new one.
+	// "member", or "writer" — "owner" is refused; Owner can change only
+	// through TransferOwnership (hosted#190). Also refused when user_id
+	// already holds the tenant's owner relation: the Owner's role can never be
+	// changed or removed through this RPC.
 	SetTenantRole(context.Context, *SetTenantRoleRequest) (*SetTenantRoleResponse, error)
-	// TransferOwnership atomically swaps the owner FGA tuple on the tenant
-	// from the current owner to new_owner_user_id. Fails if the caller is
-	// not the current owner.
+	// TransferOwnership atomically moves the owner relation from the caller to
+	// new_owner_user_id and grants the caller admin, in a single FGA write.
+	// Gated on the "owner" relation (not "admin"): only the tenant's current
+	// Owner may call this RPC (hosted#190). new_owner_user_id must already be
+	// a member of the caller's tenant.
 	TransferOwnership(context.Context, *TransferOwnershipRequest) (*TransferOwnershipResponse, error)
 	// InviteMember creates a pending invitation for an email address with the
 	// given tenant role and emails the invitee an accept link. The invitee

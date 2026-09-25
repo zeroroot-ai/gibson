@@ -1657,7 +1657,7 @@ entries:
     allowed_identities:
       - USER
   "/gibson.tenant.v1.MembershipService/TransferOwnership":
-    relation: "admin"
+    relation: "owner"
     object_type: "tenant"
     object_deriver: "tenant_from_identity"
     allowed_identities:

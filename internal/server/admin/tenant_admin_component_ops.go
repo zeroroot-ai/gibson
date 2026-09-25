@@ -14,12 +14,14 @@
 //
 // SetTenantRole (admin on tenant):
 //
-//	Writes or removes a role (admin / member / owner) tuple for a user on the
-//	caller's tenant.
+//	Writes or removes a role (admin / member / writer) tuple for a user on the
+//	caller's tenant. Never "owner" — see TransferOwnership (hosted#190).
 //
-// TransferOwnership (admin on tenant):
+// TransferOwnership (owner on tenant):
 //
-//	Atomically swaps the owner tuple from the current owner to the new owner.
+//	Atomically moves the owner relation from the caller to the new owner and
+//	grants the caller admin, in one FGA write. Only the current Owner may
+//	call it (hosted#190, ADR-0093 §5).
 //
 // GrantComponentPermissions (member on tenant, issue #398):
 //
@@ -403,16 +405,25 @@ func componentObjectRef(component string) (string, error) {
 
 // allowedTenantRoles is the set of roles SetTenantRole accepts. Anything else
 // is rejected as InvalidArgument before any FGA tuple is touched.
+//
+// "owner" is deliberately absent (hosted#190): assigning a role can never set
+// or clear the tenant's Owner. TransferOwnership is the only way Owner
+// changes.
 var allowedTenantRoles = map[string]struct{}{
 	"admin":  {},
 	"member": {},
-	"owner":  {},
 	"writer": {},
 }
 
 // SetTenantRole writes or removes a role relation for a user on the caller's
 // tenant. When remove is true the tuple is deleted; otherwise it is written.
 // Idempotent in both directions.
+//
+// Owner rules (hosted#190, ADR-0093 §5): "owner" is refused as a role value in
+// both directions — it is not in allowedTenantRoles — and the RPC refuses to
+// touch a user_id that currently holds the tenant's owner relation at all, so
+// the Owner can never be demoted or removed through this path, only through
+// TransferOwnership.
 func (s *TenantAdminServer) SetTenantRole(ctx context.Context, req *tenantv1.SetTenantRoleRequest) (*tenantv1.SetTenantRoleResponse, error) {
 	if s.authorizer == nil {
 		return nil, status.Error(codes.Unavailable, "authorizer not configured")
@@ -425,12 +436,24 @@ func (s *TenantAdminServer) SetTenantRole(ctx context.Context, req *tenantv1.Set
 		return nil, status.Error(codes.InvalidArgument, "user_id required")
 	}
 	if _, valid := allowedTenantRoles[req.GetRole()]; !valid {
-		return nil, status.Errorf(codes.InvalidArgument, "role %q not allowed; must be one of admin, member, owner, writer", req.GetRole())
+		return nil, status.Errorf(codes.InvalidArgument, "role %q not allowed; must be one of admin, member, writer", req.GetRole())
 	}
 
 	tenantRef := "tenant:" + tenantID
 	userRef := "user:" + req.GetUserId()
 	role := req.GetRole()
+
+	// The Owner's role can be changed only through TransferOwnership. Refuse
+	// both a grant and a removal aimed at the current Owner, before any FGA
+	// mutation, so an Admin can never strip or dilute the Owner this way.
+	isOwner, err := s.authorizer.Check(ctx, userRef, "owner", tenantRef)
+	if err != nil {
+		return nil, status.Errorf(codes.Internal, "fga Check owner: %v", err)
+	}
+	if isOwner {
+		return nil, status.Error(codes.PermissionDenied,
+			"user_id is the tenant's Owner; the Owner's role can be changed only through TransferOwnership")
+	}
 
 	tuple := authz.Tuple{User: userRef, Relation: role, Object: tenantRef}
 
@@ -533,17 +556,36 @@ func (s *TenantAdminServer) maybeRemoveZitadelMember(ctx context.Context, tenant
 // TransferOwnership (#397)
 // ---------------------------------------------------------------------------
 
-// TransferOwnership atomically swaps the owner tuple from the current owner to
-// the new owner. It:
-//  1. Lists all users with the owner relation on the tenant.
-//  2. Deletes all existing owner tuples.
-//  3. Writes (user:newOwner, owner, tenant:X).
+// TransferOwnership moves the owner relation from the caller to
+// new_owner_user_id in a single atomic FGA write, granting the caller admin
+// in the same transaction (hosted#190, ADR-0093 §5).
 //
-// If new_owner_user_id already holds the owner relation, the operation is a
-// no-op beyond verifying the FGA state.
+// Rules, each enforced before any FGA mutation:
+//   - Only the tenant's current Owner may call this RPC. The authz registry
+//     gates the RPC on the "owner" relation (not "admin"), and the handler
+//     re-checks it directly so the invariant holds even if a caller reaches
+//     this code by some path other than the ext-authz-fronted one.
+//   - new_owner_user_id must already be a member of the caller's tenant
+//     (holds at least the "member" relation, which every tenant role implies).
+//   - The transfer itself — delete the caller's owner tuple, write the new
+//     owner's owner tuple, write the caller's admin tuple — is one FGA
+//     WriteRequest via AtomicWriter.WriteAndDelete. OpenFGA applies all of it
+//     or none of it, so the tenant is never observed with zero or two Owners,
+//     and a failure leaves the caller as the sole, unchanged Owner.
+//
+// Transferring ownership to oneself is a no-op: it still requires the caller
+// to already be Owner, and performs no FGA write.
 func (s *TenantAdminServer) TransferOwnership(ctx context.Context, req *tenantv1.TransferOwnershipRequest) (*tenantv1.TransferOwnershipResponse, error) {
 	if s.authorizer == nil {
 		return nil, status.Error(codes.Unavailable, "authorizer not configured")
+	}
+	// Identity is fetched and checked before tenant scoping (same order as
+	// GrantComponentPermissions): a fail-closed check on this specific error,
+	// not a discard, so an absent identity can never flow on as a zero-value
+	// tenant/subject.
+	identity, identityErr := auth.IdentityFromContext(ctx)
+	if identityErr != nil {
+		return nil, status.Error(codes.PermissionDenied, "no identity in context")
 	}
 	tenantID, err := requireCallerTenant(ctx, req)
 	if err != nil {
@@ -554,43 +596,65 @@ func (s *TenantAdminServer) TransferOwnership(ctx context.Context, req *tenantv1
 	}
 
 	tenantRef := "tenant:" + tenantID
+	callerRef := "user:" + identity.Subject
 	newOwnerRef := "user:" + req.GetNewOwnerUserId()
 
-	// List current owners.
-	currentOwners, err := s.authorizer.ListUsers(ctx, "tenant", tenantRef, "owner")
+	// Only the tenant's current Owner may transfer ownership.
+	callerIsOwner, err := s.authorizer.Check(ctx, callerRef, "owner", tenantRef)
 	if err != nil {
-		return nil, status.Errorf(codes.Internal, "fga ListUsers(owner): %v", err)
+		return nil, status.Errorf(codes.Internal, "fga Check owner: %v", err)
+	}
+	if !callerIsOwner {
+		return nil, status.Error(codes.PermissionDenied, "only the tenant's Owner may transfer ownership")
 	}
 
-	// Delete all existing owner tuples.
-	var toDelete []authz.Tuple
-	for _, ownerRef := range currentOwners {
-		if ownerRef == newOwnerRef {
-			continue // already the owner — skip
-		}
-		toDelete = append(toDelete, authz.Tuple{
-			User:     ownerRef,
-			Relation: "owner",
-			Object:   tenantRef,
-		})
-	}
-	if len(toDelete) > 0 {
-		if err := s.authorizer.Delete(ctx, toDelete); err != nil {
-			return nil, status.Errorf(codes.Internal, "fga Delete owner: %v", err)
-		}
+	if newOwnerRef == callerRef {
+		// Already the Owner; nothing changes.
+		return &tenantv1.TransferOwnershipResponse{}, nil
 	}
 
-	// Write new owner tuple (idempotent: check first).
-	newOwnerPresent, err := s.authorizer.Check(ctx, newOwnerRef, "owner", tenantRef)
+	// The target must be an existing tenant user. "member" is implied by
+	// every tenant role (owner > admin > writer > member in model.fga), so
+	// one Check covers all of them.
+	targetIsTenantUser, err := s.authorizer.Check(ctx, newOwnerRef, "member", tenantRef)
 	if err != nil {
-		return nil, status.Errorf(codes.Internal, "fga Check new owner: %v", err)
+		return nil, status.Errorf(codes.Internal, "fga Check member: %v", err)
 	}
-	if !newOwnerPresent {
-		if err := s.authorizer.Write(ctx, []authz.Tuple{
-			{User: newOwnerRef, Relation: "owner", Object: tenantRef},
-		}); err != nil {
-			return nil, status.Errorf(codes.Internal, "fga Write new owner: %v", err)
+	if !targetIsTenantUser {
+		return nil, status.Error(codes.InvalidArgument, "new_owner_user_id must be an existing user of this tenant")
+	}
+
+	atomic, ok := s.authorizer.(authz.AtomicWriter)
+	if !ok {
+		return nil, status.Error(codes.Internal, "authorizer does not support atomic ownership transfer")
+	}
+
+	writes := []authz.Tuple{{User: newOwnerRef, Relation: "owner", Object: tenantRef}}
+	// A caller who is Owner always passes Check(callerRef, "admin", tenantRef)
+	// — model.fga derives admin from owner by computed union — so Check
+	// cannot tell us whether a DIRECT admin tuple already exists. It can: a
+	// user promoted to Owner after already being granted admin directly (via
+	// SetTenantRole, before they became Owner) keeps that direct tuple. Ask
+	// for the stored tuple, not the derived permission, so we never attempt
+	// to write a tuple that is already there — that write would fail as
+	// "already exists" and abort the whole transaction, including the owner
+	// move. Authorizers that do not implement TupleReader (test doubles)
+	// always take the write; they do not model a pre-existing direct tuple.
+	callerHasDirectAdmin := false
+	if reader, ok := s.authorizer.(authz.TupleReader); ok {
+		existing, err := reader.ReadTuples(ctx, callerRef, "admin", tenantRef)
+		if err != nil {
+			return nil, status.Errorf(codes.Internal, "fga ReadTuples admin: %v", err)
 		}
+		callerHasDirectAdmin = len(existing) > 0
+	}
+	if !callerHasDirectAdmin {
+		writes = append(writes, authz.Tuple{User: callerRef, Relation: "admin", Object: tenantRef})
+	}
+	deletes := []authz.Tuple{{User: callerRef, Relation: "owner", Object: tenantRef}}
+
+	if err := atomic.WriteAndDelete(ctx, writes, deletes); err != nil {
+		return nil, status.Errorf(codes.Internal, "fga atomic ownership transfer: %v", err)
 	}
 
 	return &tenantv1.TransferOwnershipResponse{}, nil

@@ -82,11 +82,15 @@ func TestSetTenantRole_ForeignTenantRejected(t *testing.T) {
 			srv.authorizer = az
 			srv.orgResolver = staticOrgResolver{orgID: "org-123"}
 
+			// Role "admin", not "owner": SetTenantRole refuses "owner"
+			// unconditionally (hosted#190), which is exercised by
+			// TestSetTenantRole_RefusesOwnerRole. This test's own concern is
+			// tenant scoping, orthogonal to which allowed role is requested.
 			ctx := ctxWithTenant(t, scopeCallerTenant)
 			_, err := srv.SetTenantRole(ctx, &tenantv1.SetTenantRoleRequest{
 				TenantId: tc.reqTenantID,
 				UserId:   "attacker-id",
-				Role:     "owner",
+				Role:     "admin",
 			})
 			if got := grpcCodeOf(err); got != tc.wantCode {
 				t.Fatalf("SetTenantRole code = %v (err=%v), want %v", got, err, tc.wantCode)
