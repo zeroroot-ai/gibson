@@ -151,6 +151,7 @@ func (f *Identity) OrgMembers() []OrgMember {
 	return append([]OrgMember(nil), f.orgMembers...)
 }
 
+// OrgMember is one accepted AddOrgMember call, returned by OrgMembers.
 type OrgMember struct {
 	OrgID  string
 	UserID string
