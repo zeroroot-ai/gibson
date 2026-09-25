@@ -5,12 +5,16 @@ package zitadel
 
 import (
 	"context"
+	"encoding/json"
 	"errors"
 	"net/http"
 	"net/http/httptest"
 	"strings"
+	"sync"
 	"sync/atomic"
 	"testing"
+
+	"github.com/zeroroot-ai/gibson/internal/platform/tenantrole"
 )
 
 // TestNew_TrimsPATWhitespace pins the defensive trim that prevents Go's
@@ -317,4 +321,118 @@ func TestEnsureRegistrationDisabled(t *testing.T) {
 			t.Fatalf("puts = %d, want 0 (must not PUT when allowRegister is omitted)", puts)
 		}
 	})
+}
+
+// fakeProjectRoleServer is a minimal stateful fake of the v2
+// ProjectService role calls, enough to test EnsureProjectRoles'
+// convergence without pulling in zitadelconntest.Identity (that fake
+// enforces the x-zitadel-instance-host header this client does not send).
+type fakeProjectRoleServer struct {
+	mu    sync.Mutex
+	roles map[string]string // roleKey -> displayName
+
+	adds, updates, removes int
+}
+
+func (f *fakeProjectRoleServer) handler() http.HandlerFunc {
+	return func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Type", "application/json")
+		f.mu.Lock()
+		defer f.mu.Unlock()
+		switch r.URL.Path {
+		case "/zitadel.project.v2.ProjectService/ListProjectRoles":
+			type roleOut struct {
+				RoleKey     string `json:"roleKey"`
+				DisplayName string `json:"displayName"`
+			}
+			roles := make([]roleOut, 0, len(f.roles))
+			for k, v := range f.roles {
+				roles = append(roles, roleOut{RoleKey: k, DisplayName: v})
+			}
+			_ = json.NewEncoder(w).Encode(map[string]any{"roles": roles})
+		case "/zitadel.project.v2.ProjectService/AddProjectRole":
+			var req struct{ RoleKey, DisplayName string }
+			_ = json.NewDecoder(r.Body).Decode(&req)
+			if _, exists := f.roles[req.RoleKey]; exists {
+				w.WriteHeader(http.StatusConflict)
+				_ = json.NewEncoder(w).Encode(map[string]string{"code": "already_exists", "message": "Errors.Project.Role.AlreadyExists"})
+				return
+			}
+			f.roles[req.RoleKey] = req.DisplayName
+			f.adds++
+			_ = json.NewEncoder(w).Encode(map[string]any{})
+		case "/zitadel.project.v2.ProjectService/UpdateProjectRole":
+			var req struct{ RoleKey, DisplayName string }
+			_ = json.NewDecoder(r.Body).Decode(&req)
+			f.roles[req.RoleKey] = req.DisplayName
+			f.updates++
+			_ = json.NewEncoder(w).Encode(map[string]any{})
+		case "/zitadel.project.v2.ProjectService/RemoveProjectRole":
+			var req struct{ RoleKey string }
+			_ = json.NewDecoder(r.Body).Decode(&req)
+			delete(f.roles, req.RoleKey)
+			f.removes++
+			_ = json.NewEncoder(w).Encode(map[string]any{})
+		default:
+			w.WriteHeader(http.StatusNotFound)
+		}
+	}
+}
+
+func TestEnsureProjectRoles_AddsMissingRenamesAndRemovesExtra(t *testing.T) {
+	f := &fakeProjectRoleServer{roles: map[string]string{
+		"owner":    "Owner",
+		"obsolete": "Old Role",
+		"admin":    "Wrong Name",
+	}}
+	srv := httptest.NewServer(f.handler())
+	t.Cleanup(srv.Close)
+
+	c := New(srv.URL, "pat", "")
+	changed, err := c.EnsureProjectRoles(context.Background(), "PROJ-1", tenantrole.All)
+	if err != nil {
+		t.Fatalf("EnsureProjectRoles: %v", err)
+	}
+	if !changed {
+		t.Fatal("changed = false, want true")
+	}
+
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	want := map[string]string{"owner": "Owner", "admin": "Admin", "editor": "Editor", "viewer": "Viewer"}
+	if len(f.roles) != len(want) {
+		t.Fatalf("roles = %v, want %v", f.roles, want)
+	}
+	for k, v := range want {
+		if f.roles[k] != v {
+			t.Errorf("roles[%q] = %q, want %q", k, f.roles[k], v)
+		}
+	}
+	if f.adds != 2 { // editor, viewer
+		t.Errorf("adds = %d, want 2", f.adds)
+	}
+	if f.updates != 1 { // admin renamed
+		t.Errorf("updates = %d, want 1", f.updates)
+	}
+	if f.removes != 1 { // obsolete
+		t.Errorf("removes = %d, want 1", f.removes)
+	}
+}
+
+func TestEnsureProjectRoles_NoOpOnASecondCall(t *testing.T) {
+	f := &fakeProjectRoleServer{roles: map[string]string{}}
+	srv := httptest.NewServer(f.handler())
+	t.Cleanup(srv.Close)
+
+	c := New(srv.URL, "pat", "")
+	if _, err := c.EnsureProjectRoles(context.Background(), "PROJ-1", tenantrole.All); err != nil {
+		t.Fatalf("first EnsureProjectRoles: %v", err)
+	}
+	changed, err := c.EnsureProjectRoles(context.Background(), "PROJ-1", tenantrole.All)
+	if err != nil {
+		t.Fatalf("second EnsureProjectRoles: %v", err)
+	}
+	if changed {
+		t.Fatal("changed = true on the second call, want false (already converged)")
+	}
 }
