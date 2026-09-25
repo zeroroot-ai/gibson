@@ -5,6 +5,7 @@ package controller
 
 import (
 	"context"
+	"errors"
 	"io"
 	"net/http"
 	"net/http/httptest"
@@ -16,6 +17,7 @@ import (
 	corev1 "k8s.io/api/core/v1"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/types"
+	"sigs.k8s.io/controller-runtime/pkg/client/fake"
 
 	gibsonv1alpha1 "github.com/zeroroot-ai/gibson/operators/platform/api/v1alpha1"
 	zitadel "github.com/zeroroot-ai/gibson/operators/platform/internal/clients/zitadel"
@@ -437,6 +439,13 @@ type fakeMemberZitadelClient struct {
 	zitadel.Client
 	iamMembers map[string][]string            // userID -> roles; absent key = not a member
 	orgMembers map[string]map[string][]string // orgID -> userID -> roles
+
+	// removeIAMErr / removeOrgErr, when set, make the corresponding Remove
+	// call fail instead of succeeding — used to exercise the reconciler's
+	// error-propagation path (handleTransientOrPermanent) for a Remove
+	// failure, which is otherwise unreachable from the happy-path specs.
+	removeIAMErr error
+	removeOrgErr error
 }
 
 func newFakeMemberZitadelClient() *fakeMemberZitadelClient {
@@ -452,6 +461,9 @@ func (f *fakeMemberZitadelClient) AddIAMMember(_ context.Context, userID string,
 }
 
 func (f *fakeMemberZitadelClient) RemoveIAMMember(_ context.Context, userID string) error {
+	if f.removeIAMErr != nil {
+		return f.removeIAMErr
+	}
 	delete(f.iamMembers, userID)
 	return nil
 }
@@ -465,6 +477,9 @@ func (f *fakeMemberZitadelClient) AddOrgMember(_ context.Context, orgID, userID 
 }
 
 func (f *fakeMemberZitadelClient) RemoveOrgMember(_ context.Context, orgID, userID string) error {
+	if f.removeOrgErr != nil {
+		return f.removeOrgErr
+	}
 	if f.orgMembers[orgID] != nil {
 		delete(f.orgMembers[orgID], userID)
 	}
@@ -487,7 +502,7 @@ func (f *fakeMemberZitadelClient) EnsureMachineUser(_ context.Context, _ string)
 func (f *fakeMemberZitadelClient) EnsureMachineUserJWTAccessToken(_ context.Context, _, _ string) (bool, error) {
 	return false, nil
 }
-func (f *fakeMemberZitadelClient) AddMachineUserClientSecret(_ context.Context, _ string) (string, string, error) {
+func (f *fakeMemberZitadelClient) AddMachineUserClientSecret(_ context.Context, _ string) (clientID, clientSecret string, err error) {
 	return "CID-FAKE", "SECRET-FAKE", nil
 }
 
@@ -558,6 +573,47 @@ var _ = Describe("reconcileMachineUserRoles", func() {
 	})
 })
 
+// reconcileMachineUserRoles's error branches call r.handleTransientOrPermanent,
+// which persists a status condition — that needs a real (fake)
+// controller-runtime Client, unlike the happy-path specs above which never
+// touch it. A lightweight fake.NewClientBuilder client is enough; no envtest
+// API server is needed for this.
+var _ = Describe("reconcileMachineUserRoles: a Zitadel Remove failure is handled, not swallowed", func() {
+	It("requeues (transient) when RemoveIAMMember fails, without ever reaching the org step", func() {
+		oc := &gibsonv1alpha1.OIDCClient{
+			ObjectMeta: metav1.ObjectMeta{Name: "remove-iam-fails", Namespace: "default"},
+			Spec:       gibsonv1alpha1.OIDCClientSpec{ApplicationType: gibsonv1alpha1.OIDCAppTypeMachineUser},
+		}
+		cli := fake.NewClientBuilder().WithScheme(k8sClient.Scheme()).WithStatusSubresource(&gibsonv1alpha1.OIDCClient{}).WithObjects(oc).Build()
+		reconciler := &OIDCClientReconciler{Client: cli, Scheme: k8sClient.Scheme()}
+		zc := newFakeMemberZitadelClient()
+		zc.removeIAMErr = errors.New("zitadel unreachable")
+
+		result, err := reconciler.reconcileMachineUserRoles(ctx, oc, zc, "UID-1", "ORG-1", logr.Discard())
+		Expect(err).NotTo(HaveOccurred())
+		Expect(result.RequeueAfter).To(BeNumerically(">", 0))
+	})
+
+	It("requeues (transient) when RemoveOrgMember fails", func() {
+		oc := &gibsonv1alpha1.OIDCClient{
+			ObjectMeta: metav1.ObjectMeta{Name: "remove-org-fails", Namespace: "default"},
+			Spec: gibsonv1alpha1.OIDCClientSpec{
+				ApplicationType: gibsonv1alpha1.OIDCAppTypeMachineUser,
+				Roles:           []string{"IAM_OWNER"}, // IAM grant succeeds; org step is what fails
+			},
+		}
+		cli := fake.NewClientBuilder().WithScheme(k8sClient.Scheme()).WithStatusSubresource(&gibsonv1alpha1.OIDCClient{}).WithObjects(oc).Build()
+		reconciler := &OIDCClientReconciler{Client: cli, Scheme: k8sClient.Scheme()}
+		zc := newFakeMemberZitadelClient()
+		zc.removeOrgErr = errors.New("zitadel unreachable")
+
+		result, err := reconciler.reconcileMachineUserRoles(ctx, oc, zc, "UID-1", "ORG-1", logr.Discard())
+		Expect(err).NotTo(HaveOccurred())
+		Expect(result.RequeueAfter).To(BeNumerically(">", 0))
+		Expect(zc.iamMembers["UID-1"]).To(Equal([]string{"IAM_OWNER"}), "the IAM grant must still have gone through")
+	})
+})
+
 var _ = Describe("OIDCClient reconciler: role changes reach an EXISTING machine user", func() {
 	// Regression coverage for the bug this change fixes: role grants used
 	// to run only inside the create branch's call, so a role removed from
@@ -590,7 +646,7 @@ var _ = Describe("OIDCClient reconciler: role changes reach an EXISTING machine 
 		reconciler = &OIDCClientReconciler{
 			Client: k8sClient,
 			Scheme: k8sClient.Scheme(),
-			ZitadelFactory: func(issuer, pat string) zitadel.Client {
+			ZitadelFactory: func(_, _ string) zitadel.Client {
 				return fake
 			},
 		}
@@ -613,7 +669,7 @@ var _ = Describe("OIDCClient reconciler: role changes reach an EXISTING machine 
 		Expect(k8sClient.Create(ctx, oc)).To(Succeed())
 
 		// Finalizer add + create pass.
-		for i := 0; i < 4; i++ {
+		for range 4 {
 			_, err := reconciler.Reconcile(ctx, ctrlRequest(key))
 			Expect(err).NotTo(HaveOccurred())
 		}

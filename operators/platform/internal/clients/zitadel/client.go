@@ -737,13 +737,13 @@ func (e *errClient) AddMachineUserClientSecret(ctx context.Context, userID strin
 func (e *errClient) AddIAMMember(ctx context.Context, userID string, roles []string) error {
 	return e.err
 }
-func (e *errClient) RemoveIAMMember(ctx context.Context, userID string) error {
+func (e *errClient) RemoveIAMMember(_ context.Context, _ string) error {
 	return e.err
 }
 func (e *errClient) AddOrgMember(ctx context.Context, orgID, userID string, roles []string) error {
 	return e.err
 }
-func (e *errClient) RemoveOrgMember(ctx context.Context, orgID, userID string) error {
+func (e *errClient) RemoveOrgMember(_ context.Context, _, _ string) error {
 	return e.err
 }
 func (e *errClient) EnsureRegistrationDisabled(ctx context.Context) (bool, error) {
@@ -934,7 +934,7 @@ func (c *httpClient) AddIAMMember(ctx context.Context, userID string, roles []st
 // membership entirely. 404 (never a member) is treated as idempotent
 // success per the Client interface's contract.
 func (c *httpClient) RemoveIAMMember(ctx context.Context, userID string) error {
-	path := fmt.Sprintf("/admin/v1/members/%s", url.PathEscape(userID))
+	path := "/admin/v1/members/" + url.PathEscape(userID)
 	err := c.doJSON(ctx, http.MethodDelete, path, nil, nil)
 	if err == nil || IsNotFound(err) {
 		return nil

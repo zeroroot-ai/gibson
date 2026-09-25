@@ -290,6 +290,59 @@ func TestRemoveOrgMember_EmptyOrgIDIsInvalidInput(t *testing.T) {
 	}
 }
 
+// TestRemoveIAMMember_ConstructionErrorPropagates and
+// TestRemoveOrgMember_ConstructionErrorPropagates exercise the errClient
+// fallback: New() returns a client that fails every call with the original
+// url.Parse error when apiURL cannot be parsed at all. A malformed percent-
+// escape ("%zz") is the simplest input net/url reliably rejects.
+func TestRemoveIAMMember_ConstructionErrorPropagates(t *testing.T) {
+	c := New("http://example.invalid/%zz", "pat", "")
+	err := c.RemoveIAMMember(context.Background(), "UID-1")
+	if err == nil {
+		t.Fatal("expected the construction error to propagate, got nil")
+	}
+}
+
+func TestRemoveOrgMember_ConstructionErrorPropagates(t *testing.T) {
+	c := New("http://example.invalid/%zz", "pat", "")
+	err := c.RemoveOrgMember(context.Background(), "ORG-1", "UID-1")
+	if err == nil {
+		t.Fatal("expected the construction error to propagate, got nil")
+	}
+}
+
+// TestRemoveIAMMember_PropagatesNonNotFoundError and
+// TestRemoveOrgMember_PropagatesNonNotFoundError cover the "genuinely
+// failed" branch: a non-404 error from the server (e.g. 500, 401) must
+// come back to the caller, not be swallowed the way a 404 is.
+func TestRemoveIAMMember_PropagatesNonNotFoundError(t *testing.T) {
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.WriteHeader(http.StatusInternalServerError)
+		_, _ = w.Write([]byte(`{"message":"internal"}`))
+	}))
+	t.Cleanup(srv.Close)
+
+	c := New(srv.URL, "pat", "")
+	err := c.RemoveIAMMember(context.Background(), "UID-1")
+	if err == nil {
+		t.Fatal("expected a 500 to propagate as an error, got nil")
+	}
+}
+
+func TestRemoveOrgMember_PropagatesNonNotFoundError(t *testing.T) {
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.WriteHeader(http.StatusInternalServerError)
+		_, _ = w.Write([]byte(`{"message":"internal"}`))
+	}))
+	t.Cleanup(srv.Close)
+
+	c := New(srv.URL, "pat", "")
+	err := c.RemoveOrgMember(context.Background(), "ORG-1", "UID-1")
+	if err == nil {
+		t.Fatal("expected a 500 to propagate as an error, got nil")
+	}
+}
+
 // TestEnsureRegistrationDisabled covers the deploy#886 guard: registration
 // is turned off via a GET-then-PUT on the instance login policy, the PUT
 // preserves every other live field, and an already-disabled policy is a
