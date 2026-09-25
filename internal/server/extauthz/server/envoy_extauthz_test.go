@@ -458,7 +458,7 @@ func TestUser_TenantHeaderRefused(t *testing.T) {
 	if err != nil {
 		t.Fatalf("Check: %v", err)
 	}
-	if codes.Code(resp.GetStatus().GetCode()) != codes.PermissionDenied {
+	if codes.Code(resp.GetStatus().GetCode()) != codes.PermissionDenied { //nolint:gosec // controlled small value
 		t.Errorf("expected PermissionDenied (tenant header refused for a user), got %v: %s",
 			resp.GetStatus().GetCode(), resp.GetStatus().GetMessage())
 	}
@@ -503,7 +503,7 @@ func TestUser_TenantFromOrg(t *testing.T) {
 	if err != nil {
 		t.Fatalf("Check: %v", err)
 	}
-	if codes.Code(resp.GetStatus().GetCode()) != codes.OK {
+	if codes.Code(resp.GetStatus().GetCode()) != codes.OK { //nolint:gosec // controlled small value
 		t.Fatalf("expected OK, got %v: %s", resp.GetStatus().GetCode(), resp.GetStatus().GetMessage())
 	}
 	var tenantHdr string
@@ -607,7 +607,7 @@ func TestUser_ResolverError_Unavailable(t *testing.T) {
 	if err != nil {
 		t.Fatalf("Check: %v", err)
 	}
-	if codes.Code(resp.GetStatus().GetCode()) != codes.Unavailable {
+	if codes.Code(resp.GetStatus().GetCode()) != codes.Unavailable { //nolint:gosec // controlled small value
 		t.Errorf("expected Unavailable (org resolver error), got %v: %s",
 			resp.GetStatus().GetCode(), resp.GetStatus().GetMessage())
 	}

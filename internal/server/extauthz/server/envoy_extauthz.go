@@ -337,7 +337,7 @@ func (s *EnvoyAuthzServer) Check(ctx context.Context, req *authv3.CheckRequest) 
 			extauthzTenantCrossTenantDenied.Inc()
 			s.log.WarnContext(ctx, "ext-authz: cross-tenant denied — no platform_operator relation",
 				"method", method, "subject", id.Subject, "header_tenant", headerTenant)
-			return denyResponse(codes.PermissionDenied, typev3.StatusCode_Forbidden, bodyPermissionDenied), nil
+			return denyResponse(codes.PermissionDenied, typev3.StatusCode_Forbidden, bodyPermissionDenied), nil //nolint:nilerr // an FGA error denies via CheckResponse, not a Go error; every deny path in this handler returns a nil Go error
 		}
 		id.Tenant = headerTenant
 	default:
@@ -821,7 +821,13 @@ func (s *EnvoyAuthzServer) userTenant(ctx context.Context, orgID string) (string
 	if orgID == "" {
 		return "", orgtenant.ErrNoTenant
 	}
-	return s.orgTenants.TenantForOrg(ctx, orgID)
+	tenant, err := s.orgTenants.TenantForOrg(ctx, orgID)
+	if err != nil {
+		// %w keeps errors.Is(err, orgtenant.ErrNoTenant) working for the
+		// caller's switch above.
+		return "", fmt.Errorf("orgtenant: %w", err)
+	}
+	return tenant, nil
 }
 
 func okResponse(emitted httpHeader) *authv3.CheckResponse {

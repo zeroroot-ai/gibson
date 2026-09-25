@@ -156,7 +156,10 @@ func (r *TenantIdentityReconciler) Reconcile(ctx context.Context, req ctrl.Reque
 		if _, ferr := r.failIdentity(ctx, &ti, "seed tenant org mapping: "+err.Error()); ferr != nil {
 			return ctrl.Result{}, ferr
 		}
-		return ctrl.Result{}, err
+		// Mirrors the Provision-failure return above: the raw error drives
+		// controller-runtime's backoff, and is already logged and recorded
+		// on status, so it is returned unwrapped rather than double-wrapped.
+		return ctrl.Result{}, err //nolint:wrapcheck // see comment
 	}
 
 	r.markIdentityReady(ctx, &ti, res)

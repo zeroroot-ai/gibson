@@ -63,7 +63,7 @@ func TestTenantForOrg_PositiveHitIsCachedThenRefetched(t *testing.T) {
 		t.Fatalf("New: %v", err)
 	}
 
-	for i := 0; i < 3; i++ {
+	for range 3 {
 		tenant, err := r.TenantForOrg(context.Background(), "mapped")
 		if err != nil || tenant != "acme" {
 			t.Fatalf("TenantForOrg = (%q, %v), want (acme, nil)", tenant, err)
@@ -115,7 +115,7 @@ func TestTenantForOrg_UnmappedIsCachedOnlyForNegativeTTL(t *testing.T) {
 
 func TestTenantForOrg_TransportAndStatusErrorsAreNeverCached(t *testing.T) {
 	var hits int64
-	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
 		atomic.AddInt64(&hits, 1)
 		w.WriteHeader(http.StatusInternalServerError)
 	}))
@@ -126,7 +126,7 @@ func TestTenantForOrg_TransportAndStatusErrorsAreNeverCached(t *testing.T) {
 		t.Fatalf("New: %v", err)
 	}
 
-	for i := 0; i < 3; i++ {
+	for i := range 3 {
 		_, err := r.TenantForOrg(context.Background(), "123")
 		if err == nil || errors.Is(err, ErrNoTenant) {
 			t.Fatalf("call %d: err = %v, want a non-ErrNoTenant error", i, err)
@@ -158,7 +158,7 @@ func TestTenantForOrg_404IsAnErrorNeverUnmapped(t *testing.T) {
 
 func TestTenantForOrg_BadJSONIsAnErrorAndNotCached(t *testing.T) {
 	var hits int64
-	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
 		atomic.AddInt64(&hits, 1)
 		_, _ = fmt.Fprint(w, `not json`)
 	}))
@@ -184,7 +184,7 @@ func TestTenantForOrg_ConcurrentMissesMakeOneFetch(t *testing.T) {
 	block := make(chan struct{})
 	started := make(chan struct{})
 	var once sync.Once
-	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
 		atomic.AddInt64(&hits, 1)
 		once.Do(func() { close(started) })
 		<-block
@@ -202,7 +202,7 @@ func TestTenantForOrg_ConcurrentMissesMakeOneFetch(t *testing.T) {
 	results := make([]string, n)
 	errs := make([]error, n)
 	wg.Add(n)
-	for i := 0; i < n; i++ {
+	for i := range n {
 		go func(i int) {
 			defer wg.Done()
 			results[i], errs[i] = r.TenantForOrg(context.Background(), "concurrent")
@@ -242,7 +242,7 @@ func TestTenantForOrg_MalformedOrgIDMakesNoFetch(t *testing.T) {
 }
 
 func TestTenantForOrg_MapClearsAtMaxSize(t *testing.T) {
-	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
 		_, _ = fmt.Fprint(w, `{"tenant_id":"acme"}`)
 	}))
 	t.Cleanup(srv.Close)

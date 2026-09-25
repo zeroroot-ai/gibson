@@ -153,7 +153,10 @@ func (r *Resolver) TenantForOrg(ctx context.Context, orgID string) (string, erro
 		return tenant, nil
 	})
 	if err != nil {
-		return "", err
+		// The wrapped func above returns only errors fetch() already wraps
+		// with its own "orgtenant: ..." context; singleflight.Do itself adds
+		// nothing to wrap here.
+		return "", err //nolint:wrapcheck // see comment
 	}
 	tenant, _ := v.(string)
 	if tenant == "" {
@@ -198,7 +201,7 @@ func (r *Resolver) store(orgID, tenant string) {
 func (r *Resolver) fetch(ctx context.Context, orgID string) (string, error) {
 	reqCtx, cancel := context.WithTimeout(ctx, defaultFetchTimeout)
 	defer cancel()
-	req, err := http.NewRequestWithContext(reqCtx, http.MethodGet, r.baseURL+orgID, nil)
+	req, err := http.NewRequestWithContext(reqCtx, http.MethodGet, r.baseURL+orgID, http.NoBody)
 	if err != nil {
 		return "", fmt.Errorf("orgtenant: build request: %w", err)
 	}
