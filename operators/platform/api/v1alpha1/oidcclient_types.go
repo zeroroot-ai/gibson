@@ -97,9 +97,12 @@ type OIDCClientSpec struct {
 	// classified by its prefix: IAM_-prefixed roles (e.g. IAM_OWNER,
 	// IAM_USER_MANAGER, IAM_LOGIN_CLIENT) are granted as instance-scoped
 	// IAM members; ORG_-prefixed roles (e.g. ORG_OWNER) are granted as
-	// org-scoped members on the project's owning organization. When empty,
-	// the reconciler defaults to ["IAM_OWNER"] for backward compatibility
-	// with the daemon's IDP admin client. Ignored for OIDC-app types.
+	// org-scoped members on the project's owning organization. The
+	// reconciler enforces this set exactly on every reconcile: a role
+	// removed from this list is revoked from the machine user, not just
+	// left un-granted. When empty, the machine user receives no
+	// administrator role, and any role it previously held is revoked.
+	// Ignored for OIDC-app types.
 	// +optional
 	Roles []string `json:"roles,omitempty"`
 

@@ -4,11 +4,13 @@
 package controller
 
 import (
+	"context"
 	"io"
 	"net/http"
 	"net/http/httptest"
 	"sync/atomic"
 
+	"github.com/go-logr/logr"
 	. "github.com/onsi/ginkgo/v2"
 	. "github.com/onsi/gomega"
 	corev1 "k8s.io/api/core/v1"
@@ -400,9 +402,9 @@ var _ = Describe("OIDCClient reconciler", func() {
 })
 
 var _ = Describe("classifyMachineUserRoles", func() {
-	It("defaults to IAM_OWNER when empty", func() {
+	It("returns no roles when empty — there is no default", func() {
 		iam, org := classifyMachineUserRoles(nil)
-		Expect(iam).To(Equal([]string{"IAM_OWNER"}))
+		Expect(iam).To(BeEmpty())
 		Expect(org).To(BeEmpty())
 	})
 
@@ -416,6 +418,225 @@ var _ = Describe("classifyMachineUserRoles", func() {
 		iam, org := classifyMachineUserRoles([]string{"SOMETHING_ELSE"})
 		Expect(iam).To(Equal([]string{"SOMETHING_ELSE"}))
 		Expect(org).To(BeEmpty())
+	})
+})
+
+// fakeMemberZitadelClient is a zitadel.Client fake that RECORDS the live
+// IAM + org member role sets, keyed by userID (and orgID for org
+// members). It exists to exercise reconcileMachineUserRoles's exact-set
+// enforcement (declared replaces live, empty revokes) directly, without a
+// live Zitadel or an HTTP fixture whose state can't easily be inspected
+// between two reconciles.
+//
+// zitadel.Client is embedded (nil) so the type satisfies the interface;
+// only the four member-management methods are overridden. Any other
+// method call would panic on the nil embed — deliberate, since a test
+// using this fake for anything beyond role reconciliation should use a
+// different double instead of silently no-op'ing.
+type fakeMemberZitadelClient struct {
+	zitadel.Client
+	iamMembers map[string][]string            // userID -> roles; absent key = not a member
+	orgMembers map[string]map[string][]string // orgID -> userID -> roles
+}
+
+func newFakeMemberZitadelClient() *fakeMemberZitadelClient {
+	return &fakeMemberZitadelClient{
+		iamMembers: map[string][]string{},
+		orgMembers: map[string]map[string][]string{},
+	}
+}
+
+func (f *fakeMemberZitadelClient) AddIAMMember(_ context.Context, userID string, roles []string) error {
+	f.iamMembers[userID] = append([]string(nil), roles...)
+	return nil
+}
+
+func (f *fakeMemberZitadelClient) RemoveIAMMember(_ context.Context, userID string) error {
+	delete(f.iamMembers, userID)
+	return nil
+}
+
+func (f *fakeMemberZitadelClient) AddOrgMember(_ context.Context, orgID, userID string, roles []string) error {
+	if f.orgMembers[orgID] == nil {
+		f.orgMembers[orgID] = map[string][]string{}
+	}
+	f.orgMembers[orgID][userID] = append([]string(nil), roles...)
+	return nil
+}
+
+func (f *fakeMemberZitadelClient) RemoveOrgMember(_ context.Context, orgID, userID string) error {
+	if f.orgMembers[orgID] != nil {
+		delete(f.orgMembers[orgID], userID)
+	}
+	return nil
+}
+
+// The remaining methods let this fake drive a FULL Reconcile() pass (not
+// just a direct call to reconcileMachineUserRoles), so the envtest-level
+// regression test below can prove a role change reaches an EXISTING
+// machine user on a LATER reconcile — not only at creation.
+func (f *fakeMemberZitadelClient) GetProjectIDByName(_ context.Context, _ string) (string, error) {
+	return "PROJ-FAKE", nil
+}
+func (f *fakeMemberZitadelClient) GetOrgIDForProject(_ context.Context, _ string) (string, error) {
+	return "ORG-FAKE", nil
+}
+func (f *fakeMemberZitadelClient) EnsureMachineUser(_ context.Context, _ string) (string, error) {
+	return "UID-FAKE", nil
+}
+func (f *fakeMemberZitadelClient) EnsureMachineUserJWTAccessToken(_ context.Context, _, _ string) (bool, error) {
+	return false, nil
+}
+func (f *fakeMemberZitadelClient) AddMachineUserClientSecret(_ context.Context, _ string) (string, string, error) {
+	return "CID-FAKE", "SECRET-FAKE", nil
+}
+
+var _ = Describe("reconcileMachineUserRoles", func() {
+	var (
+		reconciler *OIDCClientReconciler
+		fake       *fakeMemberZitadelClient
+		oc         *gibsonv1alpha1.OIDCClient
+	)
+
+	BeforeEach(func() {
+		reconciler = &OIDCClientReconciler{}
+		fake = newFakeMemberZitadelClient()
+		oc = &gibsonv1alpha1.OIDCClient{}
+	})
+
+	It("replaces the live IAM set with the declared set rather than merging", func() {
+		fake.iamMembers["UID-1"] = []string{"IAM_OWNER"}
+		oc.Spec.Roles = []string{"IAM_USER_MANAGER"}
+
+		_, err := reconciler.reconcileMachineUserRoles(ctx, oc, fake, "UID-1", "ORG-1", logr.Discard())
+		Expect(err).NotTo(HaveOccurred())
+		Expect(fake.iamMembers["UID-1"]).To(Equal([]string{"IAM_USER_MANAGER"}))
+	})
+
+	It("revokes IAM membership entirely when no IAM roles are declared", func() {
+		fake.iamMembers["UID-1"] = []string{"IAM_OWNER"}
+		oc.Spec.Roles = nil
+
+		_, err := reconciler.reconcileMachineUserRoles(ctx, oc, fake, "UID-1", "ORG-1", logr.Discard())
+		Expect(err).NotTo(HaveOccurred())
+		_, stillMember := fake.iamMembers["UID-1"]
+		Expect(stillMember).To(BeFalse())
+	})
+
+	It("revokes org membership entirely when no ORG_ roles are declared", func() {
+		fake.orgMembers["ORG-1"] = map[string][]string{"UID-1": {"ORG_OWNER"}}
+		oc.Spec.Roles = []string{"IAM_OWNER"} // IAM-only now; org role dropped
+
+		_, err := reconciler.reconcileMachineUserRoles(ctx, oc, fake, "UID-1", "ORG-1", logr.Discard())
+		Expect(err).NotTo(HaveOccurred())
+		_, stillMember := fake.orgMembers["ORG-1"]["UID-1"]
+		Expect(stillMember).To(BeFalse())
+		Expect(fake.iamMembers["UID-1"]).To(Equal([]string{"IAM_OWNER"}))
+	})
+
+	It("grants IAM and org roles together and removes neither when both are declared", func() {
+		oc.Spec.Roles = []string{"IAM_USER_MANAGER", "ORG_OWNER"}
+
+		_, err := reconciler.reconcileMachineUserRoles(ctx, oc, fake, "UID-1", "ORG-1", logr.Discard())
+		Expect(err).NotTo(HaveOccurred())
+		Expect(fake.iamMembers["UID-1"]).To(Equal([]string{"IAM_USER_MANAGER"}))
+		Expect(fake.orgMembers["ORG-1"]["UID-1"]).To(Equal([]string{"ORG_OWNER"}))
+	})
+
+	It("removes everything when roles goes from populated to empty across two calls", func() {
+		oc.Spec.Roles = []string{"IAM_OWNER", "ORG_OWNER"}
+		_, err := reconciler.reconcileMachineUserRoles(ctx, oc, fake, "UID-1", "ORG-1", logr.Discard())
+		Expect(err).NotTo(HaveOccurred())
+		Expect(fake.iamMembers).To(HaveKey("UID-1"))
+		Expect(fake.orgMembers["ORG-1"]).To(HaveKey("UID-1"))
+
+		oc.Spec.Roles = nil
+		_, err = reconciler.reconcileMachineUserRoles(ctx, oc, fake, "UID-1", "ORG-1", logr.Discard())
+		Expect(err).NotTo(HaveOccurred())
+		Expect(fake.iamMembers).NotTo(HaveKey("UID-1"))
+		Expect(fake.orgMembers["ORG-1"]).NotTo(HaveKey("UID-1"))
+	})
+})
+
+var _ = Describe("OIDCClient reconciler: role changes reach an EXISTING machine user", func() {
+	// Regression coverage for the bug this change fixes: role grants used
+	// to run only inside the create branch's call, so a role removed from
+	// spec.roles after the machine user already existed was never revoked
+	// in Zitadel. This drives a full Reconcile() through both the create
+	// pass and a LATER steady-state pass after mutating spec.roles, and
+	// asserts against the fake's recorded live member set — not against
+	// an HTTP fixture, which can't easily show "what's live now".
+	const (
+		ns         = "gibson-role-drift-test"
+		clientName = "role-drift-bot"
+	)
+
+	var (
+		reconciler *OIDCClientReconciler
+		fake       *fakeMemberZitadelClient
+		key        types.NamespacedName
+	)
+
+	BeforeEach(func() {
+		Expect(k8sClient.Create(ctx, &corev1.Namespace{
+			ObjectMeta: metav1.ObjectMeta{Name: ns},
+		})).To(Or(Succeed(), MatchError(ContainSubstring("already exists"))))
+		Expect(k8sClient.Create(ctx, &corev1.Secret{
+			ObjectMeta: metav1.ObjectMeta{Name: "role-drift-pat", Namespace: ns},
+			Data:       map[string][]byte{"pat": []byte("fake-pat")},
+		})).To(Or(Succeed(), MatchError(ContainSubstring("already exists"))))
+
+		fake = newFakeMemberZitadelClient()
+		reconciler = &OIDCClientReconciler{
+			Client: k8sClient,
+			Scheme: k8sClient.Scheme(),
+			ZitadelFactory: func(issuer, pat string) zitadel.Client {
+				return fake
+			},
+		}
+		key = types.NamespacedName{Name: clientName, Namespace: ns}
+	})
+
+	It("revokes a role on a later reconcile after it is dropped from spec.roles", func() {
+		oc := &gibsonv1alpha1.OIDCClient{
+			ObjectMeta: metav1.ObjectMeta{Name: clientName, Namespace: ns},
+			Spec: gibsonv1alpha1.OIDCClientSpec{
+				ZitadelIssuer:   "http://fake.invalid",
+				AdminTokenRef:   gibsonv1alpha1.SecretKeyRef{Name: "role-drift-pat", Namespace: ns, Key: "pat"},
+				ProjectRef:      gibsonv1alpha1.ProjectReference{Name: "gibson"},
+				ClientName:      clientName,
+				ApplicationType: gibsonv1alpha1.OIDCAppTypeMachineUser,
+				Roles:           []string{"IAM_OWNER"},
+				SecretRef:       gibsonv1alpha1.SecretKeyRef{Name: clientName + "-secret", Namespace: ns, Key: "client_secret"},
+			},
+		}
+		Expect(k8sClient.Create(ctx, oc)).To(Succeed())
+
+		// Finalizer add + create pass.
+		for i := 0; i < 4; i++ {
+			_, err := reconciler.Reconcile(ctx, ctrlRequest(key))
+			Expect(err).NotTo(HaveOccurred())
+		}
+		Eventually(func(g Gomega) {
+			g.Expect(fake.iamMembers["UID-FAKE"]).To(Equal([]string{"IAM_OWNER"}),
+				"role must be granted on the create pass")
+		}).Should(Succeed())
+
+		// Drop the role from spec — simulates a chart value flipping
+		// roles: ["IAM_OWNER"] -> roles: [] on an EXISTING deployment.
+		var got gibsonv1alpha1.OIDCClient
+		Expect(k8sClient.Get(ctx, key, &got)).To(Succeed())
+		got.Spec.Roles = []string{}
+		Expect(k8sClient.Update(ctx, &got)).To(Succeed())
+
+		_, err := reconciler.Reconcile(ctx, ctrlRequest(key))
+		Expect(err).NotTo(HaveOccurred())
+
+		Eventually(func(g Gomega) {
+			_, stillMember := fake.iamMembers["UID-FAKE"]
+			g.Expect(stillMember).To(BeFalse(),
+				"the later reconcile must revoke the role from the EXISTING machine user, not just leave the removed config unenforced")
+		}).Should(Succeed())
 	})
 })
 

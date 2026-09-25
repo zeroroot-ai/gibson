@@ -447,13 +447,14 @@ func (r *OIDCClientReconciler) reconcileMachineUser(
 		} else if changed {
 			logger.Info("patched Zitadel machine user to ACCESS_TOKEN_TYPE_JWT", "userID", userID)
 		}
-		// Step 3: grant the machine user's roles (idempotent). The daemon's
-		// admin API calls require IAM_OWNER; signup-style bots need narrower
-		// roles (e.g. IAM_USER_MANAGER + IAM_LOGIN_CLIENT) and may also need
-		// org-scoped roles (ORG_OWNER). grantMachineUserRoles classifies each
-		// role by prefix and routes IAM vs org grants. Fold into the create
-		// path so the reconciler guarantees roles on first run.
-		if result, gerr := r.grantMachineUserRoles(ctx, oc, zc, userID, orgID, logger); gerr != nil || !result.IsZero() {
+		// Step 3: reconcile the machine user's roles to the exact declared
+		// set (idempotent). The daemon's admin API calls require IAM_OWNER;
+		// signup-style bots need narrower roles (e.g. IAM_USER_MANAGER +
+		// IAM_LOGIN_CLIENT) and may also need org-scoped roles (ORG_OWNER).
+		// reconcileMachineUserRoles classifies each role by prefix and
+		// routes IAM vs org grants/revocations. Fold into the create path
+		// so the reconciler guarantees the exact role set on first run.
+		if result, gerr := r.reconcileMachineUserRoles(ctx, oc, zc, userID, orgID, logger); gerr != nil || !result.IsZero() {
 			return result, gerr
 		}
 		// Step 4: mint the client-credentials secret. This regenerates
@@ -490,11 +491,15 @@ func (r *OIDCClientReconciler) reconcileMachineUser(
 			"userID", oc.Status.ClientID)
 	}
 
-	// Re-grant roles on every reconcile (idempotent) so role-set drift is
-	// reconciled — e.g. adding IAM_LOGIN_CLIENT to a bot that was
-	// bootstrapped with only IAM_USER_MANAGER. Mirrors the prior
-	// signup-bot-pat-minter Job's "always reconcile the role grant" step.
-	if result, gerr := r.grantMachineUserRoles(ctx, oc, zc, oc.Status.ClientID, orgID, logger); gerr != nil || !result.IsZero() {
+	// Reconcile roles to the exact declared set on every reconcile
+	// (idempotent) so role-set drift is corrected — e.g. adding
+	// IAM_LOGIN_CLIENT to a bot that was bootstrapped with only
+	// IAM_USER_MANAGER, or revoking a role removed from spec.roles.
+	// Without this step a role dropped from the chart's config was never
+	// removed from an EXISTING machine user: only the create path ever
+	// called the Zitadel client, so staging's long-lived service
+	// identities kept whatever they were first granted forever.
+	if result, gerr := r.reconcileMachineUserRoles(ctx, oc, zc, oc.Status.ClientID, orgID, logger); gerr != nil || !result.IsZero() {
 		return result, gerr
 	}
 
@@ -537,20 +542,28 @@ func (r *OIDCClientReconciler) reconcileMachineUser(
 	return ctrl.Result{}, nil
 }
 
-// grantMachineUserRoles grants the machine user the roles declared on
-// spec.roles, classifying each by prefix:
+// reconcileMachineUserRoles sets the machine user's Zitadel administrator
+// roles to EXACTLY the set declared on spec.roles, classifying each by
+// prefix:
 //
 //   - IAM_-prefixed roles (IAM_OWNER, IAM_USER_MANAGER, IAM_LOGIN_CLIENT, …)
 //     → instance-scoped IAM members via AddIAMMember.
 //   - ORG_-prefixed roles (ORG_OWNER, …) → org-scoped members on the
 //     project's owning org via AddOrgMember.
 //
-// When spec.roles is empty the machine user is granted ["IAM_OWNER"], the
-// historic default the daemon's IDP admin client relies on. Both client
-// calls are idempotent (409 → PUT merge), so this is safe to invoke on
-// every reconcile. Returns a non-zero Result / error only when a Zitadel
-// call needs the transient/permanent handling path.
-func (r *OIDCClientReconciler) grantMachineUserRoles(
+// A role no longer declared is revoked, not merely left un-granted: when
+// the declared set for a scope (IAM or org) is empty, the corresponding
+// Remove call runs instead, dropping the machine user's membership in
+// that scope entirely. Zitadel's PUT-on-conflict REPLACES a member's role
+// list rather than merging it, so passing the full desired set on every
+// call already gives exact-set semantics for the non-empty case; the
+// Remove calls cover the empty case, where Zitadel requires at least one
+// role in a PUT body and a membership must instead be deleted outright.
+// All four client calls are idempotent, so this is safe to invoke on
+// every reconcile — including on an EXISTING machine user, not only at
+// creation. Returns a non-zero Result / error only when a Zitadel call
+// needs the transient/permanent handling path.
+func (r *OIDCClientReconciler) reconcileMachineUserRoles(
 	ctx context.Context,
 	oc *gibsonv1alpha1.OIDCClient,
 	zc zitadel.Client,
@@ -564,25 +577,32 @@ func (r *OIDCClientReconciler) grantMachineUserRoles(
 			return r.handleTransientOrPermanent(ctx, oc, "AddIAMMember", err, logger)
 		}
 		logger.V(1).Info("granted IAM roles to machine user", "userID", userID, "roles", iamRoles)
+	} else if err := zc.RemoveIAMMember(ctx, userID); err != nil {
+		return r.handleTransientOrPermanent(ctx, oc, "RemoveIAMMember", err, logger)
+	} else {
+		logger.V(1).Info("revoked IAM membership from machine user (no IAM roles declared)", "userID", userID)
 	}
+
 	if len(orgRoles) > 0 {
 		if err := zc.AddOrgMember(ctx, orgID, userID, orgRoles); err != nil {
 			return r.handleTransientOrPermanent(ctx, oc, "AddOrgMember", err, logger)
 		}
 		logger.V(1).Info("granted org roles to machine user", "userID", userID, "orgID", orgID, "roles", orgRoles)
+	} else if err := zc.RemoveOrgMember(ctx, orgID, userID); err != nil {
+		return r.handleTransientOrPermanent(ctx, oc, "RemoveOrgMember", err, logger)
+	} else {
+		logger.V(1).Info("revoked org membership from machine user (no org roles declared)", "userID", userID, "orgID", orgID)
 	}
 	return ctrl.Result{}, nil
 }
 
 // classifyMachineUserRoles splits a role list into IAM (instance-scoped)
-// and org-scoped role sets by prefix. An empty input defaults to a single
-// IAM_OWNER grant. Roles that match neither prefix are conservatively
-// treated as IAM roles so a typo or a future role family still lands
-// somewhere visible rather than being silently dropped.
+// and org-scoped role sets by prefix. An empty input returns two empty
+// slices — empty means no role, full stop; there is no default. Roles
+// that match neither prefix are conservatively treated as IAM roles so a
+// typo or a future role family still lands somewhere visible rather than
+// being silently dropped.
 func classifyMachineUserRoles(roles []string) (iam, org []string) {
-	if len(roles) == 0 {
-		return []string{"IAM_OWNER"}, nil
-	}
 	for _, role := range roles {
 		switch {
 		case strings.HasPrefix(role, "ORG_"):
