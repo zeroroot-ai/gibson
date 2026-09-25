@@ -2623,7 +2623,7 @@ export const AuthRegistry: Record<string, AuthEntry> = {
   "/gibson.tenant.v1.MembershipService/TransferOwnership": {
     method: "/gibson.tenant.v1.MembershipService/TransferOwnership",
     service: "gibson.tenant.v1.MembershipService",
-    relation: "admin",
+    relation: "owner",
     objectType: "tenant",
     objectDeriver: "tenant_from_identity",
     allowedIdentities: IdentityClass.USER,

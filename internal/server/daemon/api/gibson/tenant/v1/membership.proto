@@ -46,8 +46,10 @@ service MembershipService {
 
   // SetTenantRole writes or removes admin / member / writer FGA tuples on
   // the tenant for a given user. The role field must be one of "admin",
-  // "member", or "writer". Atomically removes any conflicting prior role
-  // tuple before writing the new one.
+  // "member", or "writer" — "owner" is refused; Owner can change only
+  // through TransferOwnership (hosted#190). Also refused when user_id
+  // already holds the tenant's owner relation: the Owner's role can never be
+  // changed or removed through this RPC.
   rpc SetTenantRole(SetTenantRoleRequest) returns (SetTenantRoleResponse) {
     option (gibson.auth.v1.authz) = {
       relation: "admin"
@@ -57,12 +59,14 @@ service MembershipService {
     };
   }
 
-  // TransferOwnership atomically swaps the owner FGA tuple on the tenant
-  // from the current owner to new_owner_user_id. Fails if the caller is
-  // not the current owner.
+  // TransferOwnership atomically moves the owner relation from the caller to
+  // new_owner_user_id and grants the caller admin, in a single FGA write.
+  // Gated on the "owner" relation (not "admin"): only the tenant's current
+  // Owner may call this RPC (hosted#190). new_owner_user_id must already be
+  // a member of the caller's tenant.
   rpc TransferOwnership(TransferOwnershipRequest) returns (TransferOwnershipResponse) {
     option (gibson.auth.v1.authz) = {
-      relation: "admin"
+      relation: "owner"
       object_type: "tenant"
       object_deriver: "tenant_from_identity"
       allowed_identities: 1  // USER
@@ -336,7 +340,8 @@ message SetTenantRoleRequest {
   // user_id is the FGA user id without the type prefix.
   string user_id = 2;
   // role is the FGA relation to grant. Must be one of "admin", "member", or
-  // "writer". Use remove = true to remove the user's role entirely.
+  // "writer" — "owner" is refused; see TransferOwnership. Use remove = true
+  // to remove the user's role entirely.
   string role = 3;
   // remove: when true, all role tuples for the user on this tenant are
   // deleted and role is ignored. When false, the specified role is written.
