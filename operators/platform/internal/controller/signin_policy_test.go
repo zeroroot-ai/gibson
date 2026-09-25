@@ -33,11 +33,11 @@ type fakeSignInPolicyZitadel struct {
 	loginCalls  int
 }
 
-func (f *fakeSignInPolicyZitadel) EnsureProject(ctx context.Context, name string) (string, error) {
+func (f *fakeSignInPolicyZitadel) EnsureProject(_ context.Context, _ string) (string, error) {
 	return f.projectID, nil
 }
 
-func (f *fakeSignInPolicyZitadel) EnsureDomainPolicy(ctx context.Context, want zitadel.DomainPolicy) (bool, error) {
+func (f *fakeSignInPolicyZitadel) EnsureDomainPolicy(_ context.Context, want zitadel.DomainPolicy) (bool, error) {
 	f.domainCalls++
 	if f.userLoginMustBeDomain == want.UserLoginMustBeDomain {
 		return false, nil
@@ -46,7 +46,7 @@ func (f *fakeSignInPolicyZitadel) EnsureDomainPolicy(ctx context.Context, want z
 	return true, nil
 }
 
-func (f *fakeSignInPolicyZitadel) EnsureLoginPolicy(ctx context.Context, want zitadel.LoginPolicy) ([]string, error) {
+func (f *fakeSignInPolicyZitadel) EnsureLoginPolicy(_ context.Context, want zitadel.LoginPolicy) ([]string, error) {
 	f.loginCalls++
 	var corrected []string
 	if f.loginLive.ForceMFA != want.ForceMFA {
@@ -120,7 +120,7 @@ func TestReconcileZitadelProject_SignInPolicy(t *testing.T) {
 		userLoginMustBeDomain: true,
 		loginLive:             zitadel.LoginPolicy{ForceMFA: false, SecondFactors: []string{"SECOND_FACTOR_TYPE_OTP"}},
 	}
-	r := newSignInPolicyReconciler(t, func(issuer, pat string) zitadel.Client { return fakeZ })
+	r := newSignInPolicyReconciler(t, func(_, _ string) zitadel.Client { return fakeZ })
 	pb := newSignInPolicyTestBootstrap()
 
 	if _, err := r.reconcileZitadelProject(context.Background(), pb, logr.Discard()); err != nil {
@@ -173,7 +173,7 @@ func TestReconcileZitadelProject_SignInPolicy(t *testing.T) {
 // Unknown) and does not requeue for retry.
 func TestReconcileZitadelProject_SignInPolicy_PermanentError(t *testing.T) {
 	fakeZ := &erroringSignInPolicyZitadel{projectID: "PROJ-1", err: zitadel.WrapPermanent(context.DeadlineExceeded)}
-	r := newSignInPolicyReconciler(t, func(issuer, pat string) zitadel.Client { return fakeZ })
+	r := newSignInPolicyReconciler(t, func(_, _ string) zitadel.Client { return fakeZ })
 	pb := newSignInPolicyTestBootstrap()
 
 	res, err := r.reconcileZitadelProject(context.Background(), pb, logr.Discard())
@@ -194,7 +194,53 @@ func TestReconcileZitadelProject_SignInPolicy_PermanentError(t *testing.T) {
 // requeues.
 func TestReconcileZitadelProject_SignInPolicy_TransientError(t *testing.T) {
 	fakeZ := &erroringSignInPolicyZitadel{projectID: "PROJ-1", err: zitadel.ErrRateLimited}
-	r := newSignInPolicyReconciler(t, func(issuer, pat string) zitadel.Client { return fakeZ })
+	r := newSignInPolicyReconciler(t, func(_, _ string) zitadel.Client { return fakeZ })
+	pb := newSignInPolicyTestBootstrap()
+
+	res, err := r.reconcileZitadelProject(context.Background(), pb, logr.Discard())
+	if err != nil {
+		t.Fatalf("reconcileZitadelProject: %v", err)
+	}
+	if res.IsZero() {
+		t.Fatal("expected a requeue on a transient error, got zero Result")
+	}
+	cond := findCondition(pb.Status.Conditions, gibsonv1alpha1.ConditionZitadelProjectReady)
+	if cond == nil || cond.Status != metav1.ConditionUnknown || cond.Reason != "ZitadelTransientError" {
+		t.Fatalf("ZitadelProjectReady = %+v, want Unknown/ZitadelTransientError", cond)
+	}
+}
+
+// TestReconcileZitadelProject_DomainPolicy_PermanentError proves a
+// permanent EnsureDomainPolicy error sets ZitadelProjectReady=False (not
+// Unknown) and does not requeue for retry, and never reaches
+// EnsureLoginPolicy.
+func TestReconcileZitadelProject_DomainPolicy_PermanentError(t *testing.T) {
+	fakeZ := &erroringDomainPolicyZitadel{projectID: "PROJ-1", err: zitadel.WrapPermanent(context.DeadlineExceeded)}
+	r := newSignInPolicyReconciler(t, func(_, _ string) zitadel.Client { return fakeZ })
+	pb := newSignInPolicyTestBootstrap()
+
+	res, err := r.reconcileZitadelProject(context.Background(), pb, logr.Discard())
+	if err != nil {
+		t.Fatalf("reconcileZitadelProject: %v", err)
+	}
+	if !res.IsZero() {
+		t.Fatalf("expected no requeue on a permanent error, got %+v", res)
+	}
+	cond := findCondition(pb.Status.Conditions, gibsonv1alpha1.ConditionZitadelProjectReady)
+	if cond == nil || cond.Status != metav1.ConditionFalse || cond.Reason != "ZitadelPermanentError" {
+		t.Fatalf("ZitadelProjectReady = %+v, want False/ZitadelPermanentError", cond)
+	}
+	if fakeZ.loginCalls != 0 {
+		t.Fatalf("EnsureLoginPolicy called %d times, want 0 (domain policy failed first)", fakeZ.loginCalls)
+	}
+}
+
+// TestReconcileZitadelProject_DomainPolicy_TransientError proves a
+// transient EnsureDomainPolicy error sets ZitadelProjectReady=Unknown and
+// requeues.
+func TestReconcileZitadelProject_DomainPolicy_TransientError(t *testing.T) {
+	fakeZ := &erroringDomainPolicyZitadel{projectID: "PROJ-1", err: zitadel.ErrRateLimited}
+	r := newSignInPolicyReconciler(t, func(_, _ string) zitadel.Client { return fakeZ })
 	pb := newSignInPolicyTestBootstrap()
 
 	res, err := r.reconcileZitadelProject(context.Background(), pb, logr.Discard())
@@ -220,16 +266,40 @@ type erroringSignInPolicyZitadel struct {
 	err       error
 }
 
-func (f *erroringSignInPolicyZitadel) EnsureProject(ctx context.Context, name string) (string, error) {
+func (f *erroringSignInPolicyZitadel) EnsureProject(_ context.Context, _ string) (string, error) {
 	return f.projectID, nil
 }
 
-func (f *erroringSignInPolicyZitadel) EnsureDomainPolicy(ctx context.Context, want zitadel.DomainPolicy) (bool, error) {
+func (f *erroringSignInPolicyZitadel) EnsureDomainPolicy(_ context.Context, _ zitadel.DomainPolicy) (bool, error) {
 	return false, nil
 }
 
-func (f *erroringSignInPolicyZitadel) EnsureLoginPolicy(ctx context.Context, want zitadel.LoginPolicy) ([]string, error) {
+func (f *erroringSignInPolicyZitadel) EnsureLoginPolicy(_ context.Context, _ zitadel.LoginPolicy) ([]string, error) {
 	return nil, f.err
+}
+
+// erroringDomainPolicyZitadel fails EnsureDomainPolicy with the configured
+// error, to exercise reconcileZitadelProject's permanent/transient
+// branches for the domain-policy step. loginCalls proves the reconciler
+// never reaches EnsureLoginPolicy once the domain policy step fails.
+type erroringDomainPolicyZitadel struct {
+	zitadel.Client
+	projectID  string
+	err        error
+	loginCalls int
+}
+
+func (f *erroringDomainPolicyZitadel) EnsureProject(_ context.Context, _ string) (string, error) {
+	return f.projectID, nil
+}
+
+func (f *erroringDomainPolicyZitadel) EnsureDomainPolicy(_ context.Context, _ zitadel.DomainPolicy) (bool, error) {
+	return false, f.err
+}
+
+func (f *erroringDomainPolicyZitadel) EnsureLoginPolicy(_ context.Context, _ zitadel.LoginPolicy) ([]string, error) {
+	f.loginCalls++
+	return nil, nil
 }
 
 // drainEvents reads every currently-buffered event off a

@@ -754,10 +754,10 @@ func (e *errClient) AddIAMMember(ctx context.Context, userID string, roles []str
 func (e *errClient) AddOrgMember(ctx context.Context, orgID, userID string, roles []string) error {
 	return e.err
 }
-func (e *errClient) EnsureLoginPolicy(ctx context.Context, want LoginPolicy) ([]string, error) {
+func (e *errClient) EnsureLoginPolicy(_ context.Context, _ LoginPolicy) ([]string, error) {
 	return nil, e.err
 }
-func (e *errClient) EnsureDomainPolicy(ctx context.Context, want DomainPolicy) (bool, error) {
+func (e *errClient) EnsureDomainPolicy(_ context.Context, _ DomainPolicy) (bool, error) {
 	return false, e.err
 }
 func (e *errClient) GetOrgIDForProject(ctx context.Context, projectID string) (string, error) {
@@ -1114,12 +1114,12 @@ func (c *httpClient) syncFactors(ctx context.Context, kind string, want []string
 		wantSet[t] = true
 	}
 
-	var corrected []string
+	corrected := make([]string, 0, len(want)+len(resp.Result))
 	for _, t := range want {
 		if live[t] {
 			continue
 		}
-		addPath := fmt.Sprintf("/admin/v1/policies/login/%s", kind)
+		addPath := "/admin/v1/policies/login/" + kind
 		if err := c.doJSON(ctx, http.MethodPost, addPath, map[string]any{"type": t}, nil); err != nil {
 			return corrected, fmt.Errorf("EnsureLoginPolicy: add %s %s: %w", kind, t, err)
 		}
