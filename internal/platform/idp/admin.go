@@ -13,7 +13,10 @@
 // in this package or in any other package outside internal/platform/idp/zitadel/.
 package idp
 
-import "context"
+import (
+	"context"
+	"strings"
+)
 
 // AdminClient is the vendor-neutral interface for IdP admin operations
 // required by agent identity provisioning.
@@ -146,4 +149,19 @@ type AdminClient interface {
 
 	// Close releases any resources held by the client (HTTP connections, etc.).
 	Close() error
+}
+
+// UsernameForEmail is the IdP username of the person with this email.
+// Every human-user create path in this codebase MUST call this function
+// rather than passing the email straight through, so the username can
+// never drift from the email it is derived from.
+//
+// Usernames are unique across the whole install (the IdP's domain policy
+// keys the uniqueness constraint on the username alone, not on
+// username+org — see ADR-0093 decision 1), and the constraint is
+// case-insensitive. Lower-casing and trimming here means two people
+// typing "Alice@Example.com" and " alice@example.com " collide on the
+// same username, which is the point: it makes the email unique too.
+func UsernameForEmail(email string) string {
+	return strings.ToLower(strings.TrimSpace(email))
 }
