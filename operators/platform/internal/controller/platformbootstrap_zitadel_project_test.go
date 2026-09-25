@@ -27,15 +27,15 @@ import (
 func fakeProjectRolesZitadelServer(t *testing.T, projectID string, roles map[string]string) *httptest.Server {
 	t.Helper()
 	mux := http.NewServeMux()
-	mux.HandleFunc("/management/v1/projects", func(w http.ResponseWriter, r *http.Request) {
+	mux.HandleFunc("/management/v1/projects", func(w http.ResponseWriter, _ *http.Request) {
 		_ = json.NewEncoder(w).Encode(map[string]string{"id": projectID})
 	})
-	mux.HandleFunc("/management/v1/projects/_search", func(w http.ResponseWriter, r *http.Request) {
+	mux.HandleFunc("/management/v1/projects/_search", func(w http.ResponseWriter, _ *http.Request) {
 		_ = json.NewEncoder(w).Encode(map[string]any{
 			"result": []map[string]string{{"id": projectID, "name": "gibson"}},
 		})
 	})
-	mux.HandleFunc("/zitadel.project.v2.ProjectService/ListProjectRoles", func(w http.ResponseWriter, r *http.Request) {
+	mux.HandleFunc("/zitadel.project.v2.ProjectService/ListProjectRoles", func(w http.ResponseWriter, _ *http.Request) {
 		type roleOut struct{ RoleKey, DisplayName string }
 		out := make([]roleOut, 0, len(roles))
 		for k, v := range roles {
@@ -97,7 +97,7 @@ func newReconcilerWithPAT(t *testing.T, zitadelURL string) *PlatformBootstrapRec
 		Client:   cli,
 		Scheme:   s,
 		Recorder: record.NewFakeRecorder(8),
-		ZitadelFactory: func(issuer, pat string) zitadel.Client {
+		ZitadelFactory: func(_, pat string) zitadel.Client {
 			return zitadel.New(zitadelURL, pat, "")
 		},
 	}
@@ -152,10 +152,10 @@ func TestReconcileZitadelProject_CallsEnsureProjectRolesOnTheLookupBranch(t *tes
 // ZitadelPermanentError rather than looping the transient retry path.
 func TestReconcileZitadelProject_PermanentEnsureProjectRolesErrorSetsCondition(t *testing.T) {
 	mux := http.NewServeMux()
-	mux.HandleFunc("/management/v1/projects", func(w http.ResponseWriter, r *http.Request) {
+	mux.HandleFunc("/management/v1/projects", func(w http.ResponseWriter, _ *http.Request) {
 		_ = json.NewEncoder(w).Encode(map[string]string{"id": "PROJ-999"})
 	})
-	mux.HandleFunc("/zitadel.project.v2.ProjectService/ListProjectRoles", func(w http.ResponseWriter, r *http.Request) {
+	mux.HandleFunc("/zitadel.project.v2.ProjectService/ListProjectRoles", func(w http.ResponseWriter, _ *http.Request) {
 		w.WriteHeader(http.StatusUnauthorized)
 		_ = json.NewEncoder(w).Encode(map[string]string{"code": "permission_denied", "message": "Errors.PermissionDenied"})
 	})

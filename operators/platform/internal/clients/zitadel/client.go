@@ -737,7 +737,7 @@ func (e *errClient) EnsureRegistrationDisabled(ctx context.Context) (bool, error
 func (e *errClient) GetOrgIDForProject(ctx context.Context, projectID string) (string, error) {
 	return "", e.err
 }
-func (e *errClient) EnsureProjectRoles(ctx context.Context, projectID string, roles []tenantrole.Def) (bool, error) {
+func (e *errClient) EnsureProjectRoles(_ context.Context, _ string, _ []tenantrole.Def) (bool, error) {
 	return false, e.err
 }
 
