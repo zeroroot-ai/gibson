@@ -268,6 +268,29 @@ func (s *TenantAdminServer) withAuthorizer(az authz.Authorizer) *TenantAdminServ
 	return s
 }
 
+// TestTransferOwnership_NoIdentityInContext covers the fail-closed identity
+// check (gibsoncheck's privileged-fallback analyzer, G3): a context that
+// carries no Identity at all must be refused explicitly, never fall through
+// with a zero-value subject. TransferOwnership checks identity before tenant
+// scoping (same order as GrantComponentPermissions) specifically so this
+// branch is reachable: auth.TenantFromContext derives the tenant from the
+// SAME Identity, so an identity-less context also has no tenant, and
+// checking identity first is what makes IT the branch that fires.
+func TestTransferOwnership_NoIdentityInContext(t *testing.T) {
+	az := newOwnershipAuthorizer()
+	srv := newOwnershipTestServer(t, az)
+
+	_, err := srv.TransferOwnership(context.Background(), &tenantv1.TransferOwnershipRequest{
+		NewOwnerUserId: "bob-id",
+	})
+	if got := grpcCodeOf(err); got != codes.PermissionDenied {
+		t.Fatalf("TransferOwnership code = %v (err=%v), want PermissionDenied", got, err)
+	}
+	if az.writeAndDeleteCalls != 0 {
+		t.Errorf("must not reach FGA with no identity in context; writeAndDeleteCalls = %d", az.writeAndDeleteCalls)
+	}
+}
+
 func TestTransferOwnership_OnlyOwnerMayCall(t *testing.T) {
 	az := newOwnershipAuthorizer()
 	ft := newOwnershipTenant("user:owner-x")

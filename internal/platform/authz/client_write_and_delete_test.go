@@ -127,6 +127,6 @@ func TestWriteAndDelete_EmptyIsNoOp(t *testing.T) {
 // TestFgaAuthorizerImplementsAtomicWriter pins that the production
 // implementation satisfies the optional AtomicWriter interface TransferOwnership
 // type-asserts against.
-func TestFgaAuthorizerImplementsAtomicWriter(t *testing.T) {
+func TestFgaAuthorizerImplementsAtomicWriter(_ *testing.T) {
 	var _ AtomicWriter = (*fgaAuthorizer)(nil)
 }

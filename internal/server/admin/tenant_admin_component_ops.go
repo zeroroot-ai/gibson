@@ -579,15 +579,18 @@ func (s *TenantAdminServer) TransferOwnership(ctx context.Context, req *tenantv1
 	if s.authorizer == nil {
 		return nil, status.Error(codes.Unavailable, "authorizer not configured")
 	}
+	// Identity is fetched and checked before tenant scoping (same order as
+	// GrantComponentPermissions): a fail-closed check on this specific error,
+	// not a discard, so an absent identity can never flow on as a zero-value
+	// tenant/subject.
+	identity, identityErr := auth.IdentityFromContext(ctx)
+	if identityErr != nil {
+		return nil, status.Error(codes.PermissionDenied, "no identity in context")
+	}
 	tenantID, err := requireCallerTenant(ctx, req)
 	if err != nil {
 		return nil, err
 	}
-	// requireCallerTenant succeeding already proves an Identity is on ctx
-	// (auth.TenantFromContext reads it from the same Identity), so this
-	// cannot fail; ignoring the error matches the established pattern for
-	// this case elsewhere in the package (see tenant_admin.go).
-	identity, _ := auth.IdentityFromContext(ctx)
 	if req.GetNewOwnerUserId() == "" {
 		return nil, status.Error(codes.InvalidArgument, "new_owner_user_id required")
 	}
