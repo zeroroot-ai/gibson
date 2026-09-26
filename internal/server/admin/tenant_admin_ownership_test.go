@@ -699,3 +699,124 @@ func TestTransferOwnership_UnavailableWithoutRoles(t *testing.T) {
 		t.Errorf("must not fall back to non-atomic Write/Delete: wrote=%+v deleted=%+v", az.wrote, az.deleted)
 	}
 }
+
+// ---------------------------------------------------------------------------
+// SetTenantRole / tenantOf / TransferOwnership: the collaborator-error and
+// unavailable-dependency branches the happy-path tests above do not reach.
+// ---------------------------------------------------------------------------
+
+// newOwnershipTestServerWithGrants is newOwnershipTestServer, but also
+// returns the fakeGrants double so a test can inject a Zitadel-side error.
+func newOwnershipTestServerWithGrants(t *testing.T, az *ownershipAuthorizer) (*TenantAdminServer, *fakeGrants) {
+	t.Helper()
+	srv := newMembersTestServer(t, &membersAuthorizer{}, nil).withAuthorizer(az)
+	tuples, err := tenantrole.AuthzTuples(az)
+	if err != nil {
+		t.Fatalf("AuthzTuples: %v", err)
+	}
+	grants := newFakeGrants()
+	srv.roles = tenantrole.NewSyncer(grants, tuples, nil)
+	srv.orgResolver = staticOrgResolver{orgID: "org-1"}
+	return srv, grants
+}
+
+func TestSetTenantRole_UnavailableWithoutRoles(t *testing.T) {
+	az := newOwnershipAuthorizer()
+	az.tenants[ownTenantID] = newOwnershipTenant("user:owner-x")
+	srv := newMembersTestServer(t, &membersAuthorizer{}, nil).withAuthorizer(az)
+	srv.orgResolver = staticOrgResolver{orgID: "org-1"}
+	// srv.roles left nil.
+
+	ctx := ctxWithTenant(t, ownTenant)
+	_, err := srv.SetTenantRole(ctx, &tenantv1.SetTenantRoleRequest{UserId: "carol-id", Role: "writer"})
+	if got := grpcCodeOf(err); got != codes.Unavailable {
+		t.Fatalf("SetTenantRole code = %v (err=%v), want Unavailable", got, err)
+	}
+}
+
+func TestSetTenantRole_TenantOfErrorPropagates(t *testing.T) {
+	az := newOwnershipAuthorizer()
+	az.tenants[ownTenantID] = newOwnershipTenant("user:owner-x")
+	srv, _ := newOwnershipTestServerWithGrants(t, az)
+	srv.orgResolver = staticOrgResolver{err: errors.New("resolver boom")}
+
+	ctx := ctxWithTenant(t, ownTenant)
+	_, err := srv.SetTenantRole(ctx, &tenantv1.SetTenantRoleRequest{UserId: "carol-id", Role: "writer"})
+	if got := grpcCodeOf(err); got != codes.Internal {
+		t.Fatalf("SetTenantRole code = %v (err=%v), want Internal (tenantOf's error passed through)", got, err)
+	}
+}
+
+func TestSetTenantRole_RevokeErrorIsInternal(t *testing.T) {
+	az := newOwnershipAuthorizer()
+	az.tenants[ownTenantID] = newOwnershipTenant("user:owner-x")
+	srv, grants := newOwnershipTestServerWithGrants(t, az)
+	grants.listErr = errors.New("list boom")
+
+	ctx := ctxWithTenant(t, ownTenant)
+	_, err := srv.SetTenantRole(ctx, &tenantv1.SetTenantRoleRequest{UserId: "carol-id", Role: "writer", Remove: true})
+	if got := grpcCodeOf(err); got != codes.Internal {
+		t.Fatalf("SetTenantRole(remove) code = %v (err=%v), want Internal", got, err)
+	}
+}
+
+func TestSetTenantRole_AssignErrorIsInternal(t *testing.T) {
+	az := newOwnershipAuthorizer()
+	az.tenants[ownTenantID] = newOwnershipTenant("user:owner-x")
+	srv, grants := newOwnershipTestServerWithGrants(t, az)
+	grants.createErr = errors.New("create boom")
+
+	ctx := ctxWithTenant(t, ownTenant)
+	_, err := srv.SetTenantRole(ctx, &tenantv1.SetTenantRoleRequest{UserId: "carol-id", Role: "writer"})
+	if got := grpcCodeOf(err); got != codes.Internal {
+		t.Fatalf("SetTenantRole code = %v (err=%v), want Internal", got, err)
+	}
+}
+
+func TestTenantOf_NoOrgResolverConfigured(t *testing.T) {
+	az := newOwnershipAuthorizer()
+	az.tenants[ownTenantID] = newOwnershipTenant("user:owner-x")
+	srv, _ := newOwnershipTestServerWithGrants(t, az)
+	srv.orgResolver = nil
+
+	if _, err := srv.tenantOf(context.Background(), ownTenant); grpcCodeOf(err) != codes.Unavailable {
+		t.Fatalf("tenantOf with no resolver: code = %v (err=%v), want Unavailable", grpcCodeOf(err), err)
+	}
+}
+
+func TestTenantOf_ResolverErrorIsInternal(t *testing.T) {
+	az := newOwnershipAuthorizer()
+	az.tenants[ownTenantID] = newOwnershipTenant("user:owner-x")
+	srv, _ := newOwnershipTestServerWithGrants(t, az)
+	srv.orgResolver = staticOrgResolver{err: errors.New("resolver boom")}
+
+	if _, err := srv.tenantOf(context.Background(), ownTenant); grpcCodeOf(err) != codes.Internal {
+		t.Fatalf("tenantOf with a resolver error: code = %v (err=%v), want Internal", grpcCodeOf(err), err)
+	}
+}
+
+func TestTenantOf_EmptyOrgIDIsFailedPrecondition(t *testing.T) {
+	az := newOwnershipAuthorizer()
+	az.tenants[ownTenantID] = newOwnershipTenant("user:owner-x")
+	srv, _ := newOwnershipTestServerWithGrants(t, az)
+	srv.orgResolver = staticOrgResolver{orgID: ""}
+
+	if _, err := srv.tenantOf(context.Background(), ownTenant); grpcCodeOf(err) != codes.FailedPrecondition {
+		t.Fatalf("tenantOf with no org yet: code = %v (err=%v), want FailedPrecondition", grpcCodeOf(err), err)
+	}
+}
+
+func TestTransferOwnership_TenantOfErrorPropagates(t *testing.T) {
+	az := newOwnershipAuthorizer()
+	ft := newOwnershipTenant(ownCaller)
+	ft.member["user:bob-id"] = true
+	az.tenants[ownTenantID] = ft
+	srv, _ := newOwnershipTestServerWithGrants(t, az)
+	srv.orgResolver = staticOrgResolver{err: errors.New("resolver boom")}
+
+	ctx := ctxWithTenant(t, ownTenant)
+	_, err := srv.TransferOwnership(ctx, &tenantv1.TransferOwnershipRequest{NewOwnerUserId: "bob-id"})
+	if got := grpcCodeOf(err); got != codes.Internal {
+		t.Fatalf("TransferOwnership code = %v (err=%v), want Internal (tenantOf's error passed through)", got, err)
+	}
+}

@@ -200,6 +200,49 @@ func TestProvision_CreateErrorSurfaces(t *testing.T) {
 	}
 }
 
+// A permanent create error is returned as-is (unwrapped), so the caller's
+// clients.IsPermanent check still sees it and does not retry.
+func TestProvision_PermanentCreateErrorIsReturnedUnwrapped(t *testing.T) {
+	fz := newFakeZitadel()
+	permanent := clients.WrapPermanent(errors.New("quota exceeded"))
+	fz.createErr = permanent
+	p := New(fz, "PROJ-1")
+
+	_, err := p.Provision(context.Background(), Request{TenantID: "acme"})
+	if !clients.IsPermanent(err) {
+		t.Fatalf("Provision error = %v, want it to still satisfy IsPermanent", err)
+	}
+}
+
+// A GetOrganization failure that is neither "not found" nor permanent
+// surfaces as a wrapped, non-permanent error — the drift-recreate fallback
+// is only for ErrNotFound.
+func TestProvision_KnownOrgGetErrorSurfaces(t *testing.T) {
+	fz := newFakeZitadel()
+	fz.getErr = errors.New("zitadel unreachable")
+	p := New(fz, "PROJ-1")
+
+	_, err := p.Provision(context.Background(), Request{TenantID: "acme", KnownOrgID: "org_1"})
+	if err == nil {
+		t.Fatal("want an error when GetOrganization fails with something other than not-found")
+	}
+	if clients.IsPermanent(err) {
+		t.Fatalf("Provision error = %v, want it NOT to be permanent", err)
+	}
+}
+
+// A permanent GetOrganization failure is returned as-is (unwrapped).
+func TestProvision_PermanentKnownOrgGetErrorIsReturnedUnwrapped(t *testing.T) {
+	fz := newFakeZitadel()
+	fz.getErr = clients.WrapPermanent(errors.New("account suspended"))
+	p := New(fz, "PROJ-1")
+
+	_, err := p.Provision(context.Background(), Request{TenantID: "acme", KnownOrgID: "org_1"})
+	if !clients.IsPermanent(err) {
+		t.Fatalf("Provision error = %v, want it to still satisfy IsPermanent", err)
+	}
+}
+
 // Deprovision deletes the org.
 func TestDeprovision_DeletesOrg(t *testing.T) {
 	fz := newFakeZitadel()

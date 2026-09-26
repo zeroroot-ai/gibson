@@ -7,6 +7,7 @@ import (
 	"context"
 	"encoding/json"
 	"errors"
+	"strings"
 	"sync"
 	"sync/atomic"
 	"testing"
@@ -140,6 +141,25 @@ func TestPublishingClient_PublishesOnDelete(t *testing.T) {
 	require.Equal(t, fga.EventOpDelete, evt.Op)
 	require.Equal(t, "zzz", evt.UserID)
 	require.Equal(t, "acme", evt.Tenant)
+}
+
+// TestPublishingClient_WriteAndDeleteSurfacesTheInnerErrorWithoutPublishing
+// pins that a failed inner WriteAndDelete returns the error as-is and never
+// publishes an Event — a tenant role Sync that did not actually change FGA
+// must not invalidate the ext-authz decision cache.
+func TestPublishingClient_WriteAndDeleteSurfacesTheInnerErrorWithoutPublishing(t *testing.T) {
+	inner := &fakeFGAClient{err: errors.New("write boom")}
+	pub := &countingPublisher{}
+	wrapped := fga.WithEventPublisher(inner, pub)
+
+	writes := []fga.Tuple{{User: "user:bob", Relation: "owner", Object: "tenant:acme"}}
+	err := wrapped.WriteAndDelete(context.Background(), writes, nil)
+	if err == nil || !strings.Contains(err.Error(), "write boom") {
+		t.Fatalf("WriteAndDelete error = %v, want the inner client's error", err)
+	}
+	if pub.count() != 0 {
+		t.Fatalf("published %d event(s), want 0 (a failed write must not invalidate the decision cache)", pub.count())
+	}
 }
 
 // TestPublishingClient_WriteAndDeletePublishesBothLists asserts that a

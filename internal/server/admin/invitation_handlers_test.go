@@ -269,6 +269,69 @@ func TestAcceptInvitation_UnknownToken(t *testing.T) {
 	}
 }
 
+// acceptInvitationFixture builds a server ready to reach AcceptInvitation's
+// role-write step (a pending, unexpired invitation on file), so a test only
+// has to vary the one collaborator it wants to fail.
+func acceptInvitationFixture(t *testing.T, idpC *membersIdPClient) *TenantAdminServer {
+	t.Helper()
+	db, mock, err := sqlmock.New()
+	if err != nil {
+		t.Fatalf("sqlmock: %v", err)
+	}
+	t.Cleanup(func() { _ = db.Close() })
+	mock.ExpectExec("CREATE TABLE IF NOT EXISTS tenant_invitations").WillReturnResult(sqlmock.NewResult(0, 0))
+	mock.ExpectExec("CREATE UNIQUE INDEX").WillReturnResult(sqlmock.NewResult(0, 0))
+	mock.ExpectQuery("SELECT id, tenant_id, email, role, status, expires_at").
+		WillReturnRows(sqlmock.NewRows([]string{"id", "tenant_id", "email", "role", "status", "expires_at"}).
+			AddRow("inv-1", "acme", "bob@example.com", "member", "pending", nowPlus()))
+
+	az := &membersAuthorizer{}
+	srv := newMembersTestServer(t, az, idpC)
+	srv.invitations = NewInvitationStore(db)
+	srv.orgResolver = staticOrgResolver{orgID: "org-1"}
+	tuples, err := tenantrole.AuthzTuples(az)
+	if err != nil {
+		t.Fatalf("AuthzTuples: %v", err)
+	}
+	srv.roles = tenantrole.NewSyncer(newFakeGrants(), tuples, nil)
+	return srv
+}
+
+func TestAcceptInvitation_UnavailableWithoutRoles(t *testing.T) {
+	srv := acceptInvitationFixture(t, &membersIdPClient{ensureUserID: "user-bob"})
+	srv.roles = nil
+
+	_, err := srv.AcceptInvitation(context.Background(), &tenantv1.AcceptInvitationRequest{Token: "rawtoken"})
+	if status_grpc.Code(err) != codes.Unavailable {
+		t.Fatalf("AcceptInvitation code = %v (err=%v), want Unavailable", status_grpc.Code(err), err)
+	}
+}
+
+func TestAcceptInvitation_EnsureHumanUserErrorIsInternal(t *testing.T) {
+	srv := acceptInvitationFixture(t, &membersIdPClient{ensureErr: errors.New("idp boom")})
+
+	_, err := srv.AcceptInvitation(context.Background(), &tenantv1.AcceptInvitationRequest{Token: "rawtoken"})
+	if status_grpc.Code(err) != codes.Internal {
+		t.Fatalf("AcceptInvitation code = %v (err=%v), want Internal", status_grpc.Code(err), err)
+	}
+}
+
+func TestAcceptInvitation_AssignErrorIsInternal(t *testing.T) {
+	srv := acceptInvitationFixture(t, &membersIdPClient{ensureUserID: "user-bob"})
+	grants := newFakeGrants()
+	grants.createErr = errors.New("create boom")
+	tuples, err := tenantrole.AuthzTuples(srv.authorizer)
+	if err != nil {
+		t.Fatalf("AuthzTuples: %v", err)
+	}
+	srv.roles = tenantrole.NewSyncer(grants, tuples, nil)
+
+	_, err = srv.AcceptInvitation(context.Background(), &tenantv1.AcceptInvitationRequest{Token: "rawtoken"})
+	if status_grpc.Code(err) != codes.Internal {
+		t.Fatalf("AcceptInvitation code = %v (err=%v), want Internal", status_grpc.Code(err), err)
+	}
+}
+
 func TestCancelInvitation_MarksCancelled(t *testing.T) {
 	db, mock, err := sqlmock.New()
 	if err != nil {

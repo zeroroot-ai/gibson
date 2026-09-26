@@ -183,3 +183,108 @@ func TestZitadelGrants_ListPages(t *testing.T) {
 		t.Fatalf("List made %d requests, want 3 (2+2+1 pages)", calls)
 	}
 }
+
+// TestZitadelGrants_MapsHTTPStatusWhenTheConnectCodeIsMissingOrUnknown pins
+// mapConnectError's fallback path: real Connect deployments always answer
+// with the matching HTTP status even on a code this client does not
+// recognize, so the status alone must still resolve to the right sentinel.
+func TestZitadelGrants_MapsHTTPStatusWhenTheConnectCodeIsMissingOrUnknown(t *testing.T) {
+	cases := []struct {
+		name   string
+		status int
+		want   error
+	}{
+		{"404 with no code", http.StatusNotFound, tenantrole.ErrNotFound},
+		{"409 with no code", http.StatusConflict, tenantrole.ErrAlreadyExists},
+		{"401 with no code", http.StatusUnauthorized, tenantrole.ErrUnauthorized},
+		{"403 with no code", http.StatusForbidden, tenantrole.ErrUnauthorized},
+		{"422 with no code", http.StatusUnprocessableEntity, tenantrole.ErrRejected},
+		{"500 with no code", http.StatusInternalServerError, tenantrole.ErrUnreachable},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			mux := http.NewServeMux()
+			mux.HandleFunc("/zitadel.authorization.v2.AuthorizationService/CreateAuthorization", func(w http.ResponseWriter, r *http.Request) {
+				w.WriteHeader(tc.status)
+				_, _ = w.Write([]byte("plain text, no connect code"))
+			})
+			srv := zitadelconntest.New(t, "", mux)
+			ep := srv.Endpoint(t)
+			hc := &http.Client{Transport: ep.Transport(nil)}
+			grants := tenantrole.NewZitadelGrants(ep, hc, "PROJ-1")
+
+			_, err := grants.Create(context.Background(), "ORG-1", "USER-1", tenantrole.Owner)
+			if !errors.Is(err, tc.want) {
+				t.Fatalf("status %d, no code: err = %v, want it to wrap %v", tc.status, err, tc.want)
+			}
+		})
+	}
+}
+
+// TestZitadelGrants_ConnectJSONWrapsATransportFailure pins that a request
+// that never reaches a server (connection refused) surfaces ErrUnreachable,
+// not a bare transport error.
+func TestZitadelGrants_ConnectJSONWrapsATransportFailure(t *testing.T) {
+	srv := zitadelconntest.New(t, "", http.NewServeMux())
+	ep := srv.Endpoint(t)
+	hc := &http.Client{Transport: ep.Transport(nil)}
+	grants := tenantrole.NewZitadelGrants(ep, hc, "PROJ-1")
+	srv.Close() // now nothing is listening
+
+	_, err := grants.Create(context.Background(), "ORG-1", "USER-1", tenantrole.Owner)
+	if !errors.Is(err, tenantrole.ErrUnreachable) {
+		t.Fatalf("Create after the server closed: err = %v, want it to wrap ErrUnreachable", err)
+	}
+}
+
+// TestZitadelGrants_ConnectJSONWrapsADecodeFailure pins that a 200 response
+// whose body is not valid JSON surfaces a wrapped decode error rather than
+// panicking or silently returning a zero value.
+func TestZitadelGrants_ConnectJSONWrapsADecodeFailure(t *testing.T) {
+	mux := http.NewServeMux()
+	mux.HandleFunc("/zitadel.authorization.v2.AuthorizationService/CreateAuthorization", func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Type", "application/json")
+		_, _ = w.Write([]byte("{not valid json"))
+	})
+	srv := zitadelconntest.New(t, "", mux)
+	ep := srv.Endpoint(t)
+	hc := &http.Client{Transport: ep.Transport(nil)}
+	grants := tenantrole.NewZitadelGrants(ep, hc, "PROJ-1")
+
+	_, err := grants.Create(context.Background(), "ORG-1", "USER-1", tenantrole.Owner)
+	if err == nil {
+		t.Fatal("Create with an invalid JSON body: got nil error")
+	}
+}
+
+// TestZitadelGrants_UpdatePropagatesAnUpstreamError pins that Update, unlike
+// Delete, does not swallow any error class — a rejection from the fake
+// surfaces as-is.
+func TestZitadelGrants_UpdatePropagatesAnUpstreamError(t *testing.T) {
+	mux := http.NewServeMux()
+	mux.HandleFunc("/zitadel.authorization.v2.AuthorizationService/UpdateAuthorization", connectErrHandler("failed_precondition", http.StatusBadRequest))
+	srv := zitadelconntest.New(t, "", mux)
+	ep := srv.Endpoint(t)
+	hc := &http.Client{Transport: ep.Transport(nil)}
+	grants := tenantrole.NewZitadelGrants(ep, hc, "PROJ-1")
+
+	if err := grants.Update(context.Background(), "GRANT-1", tenantrole.Admin); !errors.Is(err, tenantrole.ErrRejected) {
+		t.Fatalf("Update: err = %v, want it to wrap ErrRejected", err)
+	}
+}
+
+// TestZitadelGrants_DeletePropagatesANonNotFoundError pins the other half of
+// TestZitadelGrants_DeleteToleratesAnAbsentID: Delete only swallows
+// ErrNotFound, every other failure still surfaces.
+func TestZitadelGrants_DeletePropagatesANonNotFoundError(t *testing.T) {
+	mux := http.NewServeMux()
+	mux.HandleFunc("/zitadel.authorization.v2.AuthorizationService/DeleteAuthorization", connectErrHandler("permission_denied", http.StatusForbidden))
+	srv := zitadelconntest.New(t, "", mux)
+	ep := srv.Endpoint(t)
+	hc := &http.Client{Transport: ep.Transport(nil)}
+	grants := tenantrole.NewZitadelGrants(ep, hc, "PROJ-1")
+
+	if err := grants.Delete(context.Background(), "GRANT-1"); !errors.Is(err, tenantrole.ErrUnauthorized) {
+		t.Fatalf("Delete: err = %v, want it to wrap ErrUnauthorized (only not_found is swallowed)", err)
+	}
+}

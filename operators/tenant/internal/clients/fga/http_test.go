@@ -62,6 +62,32 @@ func TestRead_FollowsContinuationTokens(t *testing.T) {
 	}
 }
 
+// TestRead_StopsAndSurfacesAnErrorMidPagination pins that a page fetch
+// failure after some pages already succeeded still returns the error (not
+// a partial, silently-truncated result).
+func TestRead_StopsAndSurfacesAnErrorMidPagination(t *testing.T) {
+	calls := 0
+	c := newHTTPClient(t, func(w http.ResponseWriter, r *http.Request) {
+		calls++
+		if calls == 1 {
+			w.Header().Set("Content-Type", "application/json")
+			_ = json.NewEncoder(w).Encode(map[string]any{
+				"tuples":             []map[string]any{{"key": map[string]string{"user": "user:1", "relation": "member", "object": "tenant:acme"}}},
+				"continuation_token": "page-2",
+			})
+			return
+		}
+		w.WriteHeader(http.StatusInternalServerError)
+	})
+
+	if _, err := c.Read(context.Background(), fga.Tuple{Object: "tenant:acme"}); err == nil {
+		t.Fatal("Read: got nil error, want the second page's failure to surface")
+	}
+	if calls != 2 {
+		t.Fatalf("Read made %d requests, want 2 (stop at the failing page)", calls)
+	}
+}
+
 // TestWriteAndDelete_SendsOneRequest pins that both lists ride in a single
 // POST /stores/:id/write, so OpenFGA applies all of it or none of it.
 func TestWriteAndDelete_SendsOneRequest(t *testing.T) {

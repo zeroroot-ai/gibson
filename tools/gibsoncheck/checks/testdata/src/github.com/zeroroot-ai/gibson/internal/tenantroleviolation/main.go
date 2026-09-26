@@ -5,6 +5,8 @@
 package tenantroleviolation
 
 import (
+	"fmt"
+
 	fgaclient "github.com/openfga/go-sdk/client"
 
 	"github.com/zeroroot-ai/gibson/internal/platform/authz"
@@ -40,7 +42,27 @@ func writeUsingActiveSessionObjectHelper(id, t, role string) authz.Tuple {
 	return authz.Tuple{User: "user:" + id, Relation: role, Object: authz.ActiveSessionObject(t)} // want `tenant-role tuple written outside tenantrole\.Syncer`
 }
 
+// R5 — the plan's original fmt.Sprintf case, and a pointer type
+// (*authz.ConditionalTuple): typeFullName must see through the pointer to
+// match by the same underlying name as the value type.
+func writeViaSprintfOnAConditionalTuplePointer(id, t string) *authz.ConditionalTuple {
+	return &authz.ConditionalTuple{User: "user:" + id, Relation: "admin", Object: fmt.Sprintf("tenant:%s", t)} // want `tenant-role tuple written outside tenantrole\.Syncer`
+}
+
 // --- must NOT be flagged ---------------------------------------------------
+
+// N4 — a fmt.Sprintf call whose format string does not start with
+// "tenant:": the Sprintf-detection path fires, but the prefix check fails,
+// so this is a component object, not a tenant object.
+func writeUsingSprintfOnANonTenantObject(id, componentRef string) authz.Tuple {
+	return authz.Tuple{User: "user:" + id, Relation: "owner", Object: fmt.Sprintf("component:%s", componentRef)}
+}
+
+// N5 — an unkeyed tuple literal. This codebase writes every tuple literal
+// keyed; the analyzer explicitly does not analyze the unkeyed form.
+func writeUnkeyedTuple(id, t string) authz.Tuple {
+	return authz.Tuple{"user:" + id, "owner", "tenant:" + t}
+}
 
 // N1 — a non-role relation on a tenant object. Real, legitimate direct
 // writes like this (tenant_enabled, parent, active_session) must never be

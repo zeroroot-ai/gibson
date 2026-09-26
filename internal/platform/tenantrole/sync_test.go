@@ -392,3 +392,22 @@ func TestSync_EmptyOrgIDIsAnError(t *testing.T) {
 		t.Fatal("expected an error for an empty org id")
 	}
 }
+
+// TestSync_WithCallerLabelsTheMetricWithoutChangingBehavior pins that a
+// context tagged with WithCaller (the tenant-operator's drift timer does
+// this) still syncs normally — the label is metric-only, never a behavior
+// switch.
+func TestSync_WithCallerLabelsTheMetricWithoutChangingBehavior(t *testing.T) {
+	f := newFixture(t)
+	ctx := tenantrole.WithCaller(context.Background(), "tenant-operator")
+	userID := f.id.AddUser(f.orgID, "labeled@example.com")
+	createGrant(t, f, userID, []string{"admin"})
+
+	res, err := f.syncer.Sync(ctx, tenant("acme", f.orgID), userID)
+	if err != nil {
+		t.Fatalf("Sync: %v", err)
+	}
+	if len(res.Written) != 1 {
+		t.Fatalf("Written = %+v, want one tuple written", res.Written)
+	}
+}

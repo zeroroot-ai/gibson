@@ -5,6 +5,8 @@ package fga_test
 
 import (
 	"context"
+	"errors"
+	"strings"
 	"testing"
 
 	"github.com/zeroroot-ai/gibson/internal/platform/tenantrole"
@@ -16,10 +18,14 @@ import (
 // real Read implementation (fakeFGAClient.Read always answers empty).
 type stubTenantRoleFGA struct {
 	fakeFGAClient
-	stored []fga.Tuple
+	stored  []fga.Tuple
+	readErr error
 }
 
 func (s *stubTenantRoleFGA) Read(_ context.Context, filter fga.Tuple) ([]fga.Tuple, error) {
+	if s.readErr != nil {
+		return nil, s.readErr
+	}
 	var out []fga.Tuple
 	for _, t := range s.stored {
 		if filter.Object != "" && filter.Object != t.Object {
@@ -80,5 +86,26 @@ func TestTenantRoleTuples_WriteAndDeleteDelegates(t *testing.T) {
 	}
 	if len(stub.deletes) != 1 || stub.deletes[0][0].User != "user:alice" {
 		t.Fatalf("deletes = %+v", stub.deletes)
+	}
+}
+
+func TestTenantRoleTuples_ReadRolesWrapsAReadError(t *testing.T) {
+	stub := &stubTenantRoleFGA{readErr: errors.New("read boom")}
+	tt := fga.NewTenantRoleTuples(stub)
+
+	if _, err := tt.ReadRoles(context.Background(), "acme", nil); err == nil || !strings.Contains(err.Error(), "read boom") {
+		t.Fatalf("ReadRoles error = %v, want it to wrap the Read error", err)
+	}
+}
+
+func TestTenantRoleTuples_WriteAndDeleteWrapsAnError(t *testing.T) {
+	stub := &stubTenantRoleFGA{}
+	stub.err = errors.New("write boom")
+	tt := fga.NewTenantRoleTuples(stub)
+
+	writes := []tenantrole.Tuple{{User: "user:bob", Relation: "owner", Object: "tenant:acme"}}
+	err := tt.WriteAndDelete(context.Background(), writes, nil)
+	if err == nil || !strings.Contains(err.Error(), "write boom") {
+		t.Fatalf("WriteAndDelete error = %v, want it to wrap the client's error", err)
 	}
 }
