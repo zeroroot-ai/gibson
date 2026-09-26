@@ -2,9 +2,17 @@
 // Copyright 2026 Zero Root AI
 
 // Package zitadel is the operator's client to the Zitadel Management API for
-// provisioning per-tenant organizations and user memberships. Auth uses a
-// Personal Access Token (PAT) mounted into the operator from the
-// <release>-zitadel-iam-admin-pat Secret.
+// provisioning per-tenant organizations and user memberships. Auth is an
+// OAuth2 client_credentials grant for the operator's own Zitadel machine
+// user (the gibson-zitadel-tenant-operator OIDCClient), the same pattern the
+// daemon's idp/zitadel client uses. The machine user's roles are declared on
+// its OIDCClient CR (ADR-0093) — this package does not itself decide which
+// roles it holds, and it reports a permission failure exactly as Zitadel
+// returns it (ErrUnauthorized) rather than papering over it.
+//
+// This package previously authenticated with a Personal Access Token bound
+// to a shared IAM_OWNER identity. That path is gone (ADR-0027 hard cutover):
+// the operator's own OIDCClient now holds only the roles hosted#200 grants.
 package zitadel
 
 import (
@@ -16,6 +24,8 @@ import (
 	"net/http"
 	"net/url"
 	"time"
+
+	"golang.org/x/oauth2"
 
 	"github.com/zeroroot-ai/gibson/internal/platform/idp"
 	"github.com/zeroroot-ai/gibson/operators/tenant/internal/clients"
@@ -75,7 +85,11 @@ type Organization struct {
 // httpClient implements Client against the Zitadel Management REST API v1.
 type httpClient struct {
 	baseURL *url.URL
-	pat     string
+	// tokens supplies a fresh bearer token on every request (an
+	// oauth2.ReuseTokenSource wrapping the operator's own client_credentials
+	// grant), so a token that expires mid-run is refreshed automatically
+	// instead of failing the way a static PAT string would.
+	tokens oauth2.TokenSource
 	// externalDomain is forged onto the HTTP Host header on every request.
 	// Zitadel routes to the correct instance by matching Host against its
 	// registered ExternalDomain — when the operator calls via the cluster
@@ -85,21 +99,24 @@ type httpClient struct {
 	http           *http.Client
 }
 
-// New constructs a Zitadel Management API client authenticated via PAT.
+// New constructs a Zitadel Management API client authenticated with an
+// OAuth2 client_credentials token (the operator's own Zitadel machine user).
 // apiURL must be the Zitadel base URL (e.g. "https://zitadel.example.com").
-// pat is the Personal Access Token mounted into the operator.
-// externalDomain is the configured Zitadel ExternalDomain — forged on every
-// request's Host header so in-cluster callers (reaching Zitadel via its
-// Service name) still route to the right Zitadel instance. Pass empty to
-// skip forgery when the caller already uses the external hostname.
-func New(apiURL, pat, externalDomain string) Client {
+// tokens supplies the bearer token for every request; callers pass an
+// oauth2.ReuseTokenSource wrapping a clientcredentials.Config's TokenSource
+// so a token near expiry is refreshed transparently. externalDomain is the
+// configured Zitadel ExternalDomain — forged on every request's Host header
+// so in-cluster callers (reaching Zitadel via its Service name) still route
+// to the right Zitadel instance. Pass empty to skip forgery when the caller
+// already uses the external hostname.
+func New(apiURL string, tokens oauth2.TokenSource, externalDomain string) Client {
 	u, err := url.Parse(apiURL)
 	if err != nil {
 		return &errClient{err: fmt.Errorf("zitadel: invalid apiURL %q: %w", apiURL, err)}
 	}
 	return &httpClient{
 		baseURL:        u,
-		pat:            pat,
+		tokens:         tokens,
 		externalDomain: externalDomain,
 		http:           &http.Client{Timeout: 30 * time.Second},
 	}
@@ -186,8 +203,8 @@ func (c *httpClient) DeleteOrganization(ctx context.Context, orgID string) error
 // Zitadel v4 dropped `/management/v1/orgs/{orgID}/members` in favour of a
 // self-scoped `/management/v1/orgs/me/members` path that takes the target
 // org via the `x-zitadel-orgid` header. We follow that pattern here — the
-// caller's PAT (IAM_OWNER) has the privilege to act in any org, and
-// `x-zitadel-orgid` selects which one.
+// operator's own machine user holds an instance-scoped role (hosted#200) so
+// it may act in any org, and `x-zitadel-orgid` selects which one.
 func (c *httpClient) AddMember(ctx context.Context, orgID, userID string, roles []string) (string, error) {
 	body := map[string]any{
 		"userId": userID,
@@ -474,8 +491,12 @@ func (c *httpClient) doJSONWithOrg(ctx context.Context, method, path, orgID stri
 		req.Header.Set("Content-Type", "application/json")
 	}
 	req.Header.Set("Accept", "application/json")
-	if c.pat != "" {
-		req.Header.Set("Authorization", "Bearer "+c.pat)
+	if c.tokens != nil {
+		tok, terr := c.tokens.Token()
+		if terr != nil {
+			return fmt.Errorf("zitadel: %s %s: obtain token: %w: %w", method, path, clients.ErrUnauthorized, terr)
+		}
+		tok.SetAuthHeader(req)
 	}
 	if orgID != "" {
 		// Zitadel's cross-org selector — scopes the request to the named
@@ -574,12 +595,13 @@ func (e *errClient) CreateServiceAccount(_ context.Context, _, _ string) (string
 func (e *errClient) DeleteServiceAccount(_ context.Context, _, _ string) error { return e.err }
 
 // NoopClient was a Client implementation that silently succeeded on every
-// call. It used to be injected when ZITADEL_PAT_PATH was unset, so the
+// call. It used to be injected when the Zitadel connection was unset, so the
 // operator booted in degraded mode and every EnsureZitadelOrg step
 // returned ErrUnreachable.
 //
 // Per epic one-code-path (deploy#186), slice deploy#196: the NoopClient
 // degradation surface has been DELETED. Zitadel is structurally required;
-// cmd/main.go now exits 1 at startup when ZITADEL_URL is empty or the PAT
-// is unreadable. Re-introducing this type would reopen the silent-no-op
-// failure mode the slice exists to prevent.
+// cmd/main.go now exits 1 at startup when ZITADEL_URL is empty or the
+// operator's own client_credentials grant cannot be obtained. Re-introducing
+// this type would reopen the silent-no-op failure mode the slice exists to
+// prevent.

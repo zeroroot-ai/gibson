@@ -11,9 +11,17 @@ import (
 	"net/http/httptest"
 	"testing"
 
+	"golang.org/x/oauth2"
+
 	"github.com/zeroroot-ai/gibson/internal/platform/idp"
 	"github.com/zeroroot-ai/gibson/operators/tenant/internal/clients"
 )
+
+// testTokenSource is a static oauth2.TokenSource for tests, standing in for
+// the operator's real client_credentials grant.
+func testTokenSource(token string) oauth2.TokenSource {
+	return oauth2.StaticTokenSource(&oauth2.Token{AccessToken: token, TokenType: "Bearer"})
+}
 
 // newTestServer creates an httptest.Server that dispatches to the given handler
 // map keyed by "METHOD /path". The last registered handler wins for any given
@@ -32,7 +40,7 @@ func newTestServer(t *testing.T, routes map[string]http.HandlerFunc) Client {
 		handler(w, r)
 	}))
 	t.Cleanup(srv.Close)
-	return New(srv.URL, "test-pat", "")
+	return New(srv.URL, testTokenSource("test-token"), "")
 }
 
 func writeJSON(w http.ResponseWriter, status int, v any) {
@@ -44,7 +52,7 @@ func writeJSON(w http.ResponseWriter, status int, v any) {
 // TestNew_InvalidURL verifies that an unparseable URL returns an errClient
 // that surfaces the error on every call.
 func TestNew_InvalidURL(t *testing.T) {
-	c := New("://bad-url", "pat", "")
+	c := New("://bad-url", testTokenSource("pat"), "")
 	_, err := c.CreateOrganization(context.Background(), "test", "test")
 	if err == nil {
 		t.Fatal("expected error from errClient, got nil")
@@ -385,7 +393,8 @@ func TestDeleteServiceAccount_Idempotent(t *testing.T) {
 	}
 }
 
-// TestAuthorizationHeader verifies the PAT is sent in Authorization: Bearer.
+// TestAuthorizationHeader verifies the operator's client_credentials token is
+// sent in Authorization: Bearer.
 func TestAuthorizationHeader(t *testing.T) {
 	var gotAuth string
 	c := newTestServer(t, map[string]http.HandlerFunc{
@@ -399,8 +408,30 @@ func TestAuthorizationHeader(t *testing.T) {
 		},
 	})
 	_, _ = c.GetOrganization(context.Background(), "org-abc")
-	if gotAuth != "Bearer test-pat" {
-		t.Errorf("expected %q, got %q", "Bearer test-pat", gotAuth)
+	if gotAuth != "Bearer test-token" {
+		t.Errorf("expected %q, got %q", "Bearer test-token", gotAuth)
+	}
+}
+
+// erroringTokenSource always fails, simulating a rejected or unreachable
+// client_credentials grant (e.g. the machine user's secret was rotated away
+// from under it).
+type erroringTokenSource struct{ err error }
+
+func (e erroringTokenSource) Token() (*oauth2.Token, error) { return nil, e.err }
+
+// TestTokenFetchFailure verifies a client_credentials failure surfaces as
+// ErrUnauthorized rather than a raw transport error, and never reaches the
+// network.
+func TestTokenFetchFailure(t *testing.T) {
+	srv := httptest.NewServer(http.HandlerFunc(func(_ http.ResponseWriter, _ *http.Request) {
+		t.Fatal("request must not be sent when the token source fails")
+	}))
+	t.Cleanup(srv.Close)
+	c := New(srv.URL, erroringTokenSource{err: errors.New("invalid_client")}, "")
+	_, err := c.GetOrganization(context.Background(), "org-abc")
+	if !errors.Is(err, clients.ErrUnauthorized) {
+		t.Fatalf("expected ErrUnauthorized, got %v", err)
 	}
 }
 

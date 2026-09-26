@@ -11,7 +11,6 @@ import (
 	"fmt"
 	"net/http"
 	"os"
-	"strings"
 	"time"
 
 	"github.com/jackc/pgx/v5/pgxpool"
@@ -470,9 +469,20 @@ func main() {
 		os.Exit(1)
 	}
 
-	// Zitadel IAM client — authenticates with a Personal Access Token (PAT)
-	// mounted from the <release>-zitadel-iam-admin-pat Secret. ZITADEL_PAT_PATH
-	// defaults to /etc/zitadel/pat.
+	// Zitadel IAM client — authenticates as the operator's own Zitadel
+	// machine user (the gibson-zitadel-tenant-operator OIDCClient) via an
+	// OAuth2 client_credentials grant, reusing the ZITADEL_TENANT_OPERATOR_
+	// CLIENT_ID/SECRET already required above for the dashboard-audience
+	// token. hosted#200: the operator no longer holds the shared IAM_OWNER
+	// PAT — its machine user declares exactly the roles its calls need
+	// (charts sets them on the OIDCClient CR), and this client reports a
+	// permission failure the way Zitadel returns it (ErrUnauthorized)
+	// instead of silently no-op'ing.
+	//
+	// The connection goes in-cluster with the public host claimed by header
+	// (ADR-0092, zitadelconn) — not the public zitadelIssuer used for the
+	// dashboard-audience token above — because Zitadel's Management/v2 API
+	// rejects admin writes that cross the public edge (gibson#1560).
 	//
 	// Per epic one-code-path (deploy#186), slice deploy#196: Zitadel is
 	// structurally required. The previous "noop client injected when
@@ -485,7 +495,6 @@ func main() {
 	// missing-org" silent corruption days later.
 	var zitadelClient zitadel.Client
 	zitadelURL := os.Getenv("ZITADEL_URL")
-	zitadelPATPath := os.Getenv("ZITADEL_PAT_PATH")
 	// Host-header forge target. Matches the chart's
 	// `zitadel.configmapConfig.ExternalDomain`; required when ZITADEL_URL
 	// points at the in-cluster Service name (gibson-zitadel:8080), because
@@ -493,34 +502,20 @@ func main() {
 	// a registered domain — a 404 that previously looked like a missing
 	// endpoint.
 	zitadelExternalDomain := os.Getenv("ZITADEL_EXTERNAL_DOMAIN")
-	if zitadelPATPath == "" {
-		zitadelPATPath = "/etc/zitadel/pat"
-	}
 	if zitadelURL == "" {
 		setupLog.Error(nil, "ZITADEL_URL is required (one-code-path / deploy#196): "+
 			"the noop-client degradation surface has been deleted; the operator refuses "+
 			"to start until the chart provides a reachable Zitadel URL")
 		os.Exit(1)
 	}
-	patBytes, patErr := os.ReadFile(zitadelPATPath)
-	if patErr != nil {
-		setupLog.Error(patErr, "ZITADEL_PAT_PATH unreadable (one-code-path / deploy#196): "+
-			"the noop-client degradation surface has been deleted; the operator refuses "+
-			"to start until the chart mounts a readable Zitadel admin PAT",
-			"path", zitadelPATPath)
+	zitadelClient, err = buildTenantOperatorZitadelClient(operatorClientID, operatorClientSecret, zitadelURL, zitadelExternalDomain)
+	if err != nil {
+		setupLog.Error(err, "failed to build the operator's Zitadel client (hosted#200)")
 		os.Exit(1)
 	}
-	pat := strings.TrimSpace(string(patBytes))
-	if pat == "" {
-		setupLog.Error(nil, "ZITADEL_PAT_PATH file is empty (one-code-path / deploy#196): "+
-			"the chart's Zitadel admin PAT Secret is mounted but contains no token bytes",
-			"path", zitadelPATPath)
-		os.Exit(1)
-	}
-	zitadelClient = zitadel.New(zitadelURL, pat, zitadelExternalDomain)
 	setupLog.Info("Zitadel client initialized",
 		"url", zitadelURL,
-		"pat-path", zitadelPATPath,
+		"clientID", operatorClientID,
 		"external-domain", zitadelExternalDomain)
 
 	// Email sender: SMTP is required infrastructure (one-code-path / tenant-operator#95).
