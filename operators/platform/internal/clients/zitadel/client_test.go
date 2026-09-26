@@ -5,12 +5,16 @@ package zitadel
 
 import (
 	"context"
+	"encoding/json"
 	"errors"
 	"net/http"
 	"net/http/httptest"
 	"strings"
+	"sync"
 	"sync/atomic"
 	"testing"
+
+	"github.com/zeroroot-ai/gibson/internal/platform/tenantrole"
 )
 
 // TestNew_TrimsPATWhitespace pins the defensive trim that prevents Go's
@@ -461,4 +465,227 @@ func TestEnsureRegistrationDisabled(t *testing.T) {
 			t.Fatalf("puts = %d, want 0 (must not PUT when allowRegister is omitted)", puts)
 		}
 	})
+}
+
+// fakeProjectRoleServer is a minimal stateful fake of the v2
+// ProjectService role calls, enough to test EnsureProjectRoles'
+// convergence without pulling in zitadelconntest.Identity (that fake
+// enforces the x-zitadel-instance-host header this client does not send).
+type fakeProjectRoleServer struct {
+	mu    sync.Mutex
+	roles map[string]string // roleKey -> displayName
+
+	adds, updates, removes int
+
+	// failList/failAdd/failUpdate/failRemove force the matching call to
+	// answer with an upstream failure (never already_exists/not_found, so
+	// the client's success-shaped-error handling in EnsureProjectRoles
+	// cannot swallow it) — used to exercise EnsureProjectRoles' four error
+	// return branches.
+	failList, failAdd, failUpdate, failRemove bool
+}
+
+func (f *fakeProjectRoleServer) writeUpstreamError(w http.ResponseWriter) {
+	w.WriteHeader(http.StatusInternalServerError)
+	_ = json.NewEncoder(w).Encode(map[string]string{"code": "internal", "message": "Errors.Internal"})
+}
+
+func (f *fakeProjectRoleServer) handler() http.HandlerFunc {
+	return func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Type", "application/json")
+		f.mu.Lock()
+		defer f.mu.Unlock()
+		switch r.URL.Path {
+		case "/zitadel.project.v2.ProjectService/ListProjectRoles":
+			if f.failList {
+				f.writeUpstreamError(w)
+				return
+			}
+			type roleOut struct {
+				RoleKey     string `json:"roleKey"`
+				DisplayName string `json:"displayName"`
+			}
+			roles := make([]roleOut, 0, len(f.roles))
+			for k, v := range f.roles {
+				roles = append(roles, roleOut{RoleKey: k, DisplayName: v})
+			}
+			_ = json.NewEncoder(w).Encode(map[string]any{"roles": roles})
+		case "/zitadel.project.v2.ProjectService/AddProjectRole":
+			if f.failAdd {
+				f.writeUpstreamError(w)
+				return
+			}
+			var req struct{ RoleKey, DisplayName string }
+			_ = json.NewDecoder(r.Body).Decode(&req)
+			if _, exists := f.roles[req.RoleKey]; exists {
+				w.WriteHeader(http.StatusConflict)
+				_ = json.NewEncoder(w).Encode(map[string]string{"code": "already_exists", "message": "Errors.Project.Role.AlreadyExists"})
+				return
+			}
+			f.roles[req.RoleKey] = req.DisplayName
+			f.adds++
+			_ = json.NewEncoder(w).Encode(map[string]any{})
+		case "/zitadel.project.v2.ProjectService/UpdateProjectRole":
+			if f.failUpdate {
+				f.writeUpstreamError(w)
+				return
+			}
+			var req struct{ RoleKey, DisplayName string }
+			_ = json.NewDecoder(r.Body).Decode(&req)
+			f.roles[req.RoleKey] = req.DisplayName
+			f.updates++
+			_ = json.NewEncoder(w).Encode(map[string]any{})
+		case "/zitadel.project.v2.ProjectService/RemoveProjectRole":
+			if f.failRemove {
+				f.writeUpstreamError(w)
+				return
+			}
+			var req struct{ RoleKey string }
+			_ = json.NewDecoder(r.Body).Decode(&req)
+			delete(f.roles, req.RoleKey)
+			f.removes++
+			_ = json.NewEncoder(w).Encode(map[string]any{})
+		default:
+			w.WriteHeader(http.StatusNotFound)
+		}
+	}
+}
+
+func TestEnsureProjectRoles_AddsMissingRenamesAndRemovesExtra(t *testing.T) {
+	f := &fakeProjectRoleServer{roles: map[string]string{
+		"owner":    "Owner",
+		"obsolete": "Old Role",
+		"admin":    "Wrong Name",
+	}}
+	srv := httptest.NewServer(f.handler())
+	t.Cleanup(srv.Close)
+
+	c := New(srv.URL, "pat", "")
+	changed, err := c.EnsureProjectRoles(context.Background(), "PROJ-1", tenantrole.All)
+	if err != nil {
+		t.Fatalf("EnsureProjectRoles: %v", err)
+	}
+	if !changed {
+		t.Fatal("changed = false, want true")
+	}
+
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	want := map[string]string{"owner": "Owner", "admin": "Admin", "editor": "Editor", "viewer": "Viewer"}
+	if len(f.roles) != len(want) {
+		t.Fatalf("roles = %v, want %v", f.roles, want)
+	}
+	for k, v := range want {
+		if f.roles[k] != v {
+			t.Errorf("roles[%q] = %q, want %q", k, f.roles[k], v)
+		}
+	}
+	if f.adds != 2 { // editor, viewer
+		t.Errorf("adds = %d, want 2", f.adds)
+	}
+	if f.updates != 1 { // admin renamed
+		t.Errorf("updates = %d, want 1", f.updates)
+	}
+	if f.removes != 1 { // obsolete
+		t.Errorf("removes = %d, want 1", f.removes)
+	}
+}
+
+func TestEnsureProjectRoles_NoOpOnASecondCall(t *testing.T) {
+	f := &fakeProjectRoleServer{roles: map[string]string{}}
+	srv := httptest.NewServer(f.handler())
+	t.Cleanup(srv.Close)
+
+	c := New(srv.URL, "pat", "")
+	if _, err := c.EnsureProjectRoles(context.Background(), "PROJ-1", tenantrole.All); err != nil {
+		t.Fatalf("first EnsureProjectRoles: %v", err)
+	}
+	changed, err := c.EnsureProjectRoles(context.Background(), "PROJ-1", tenantrole.All)
+	if err != nil {
+		t.Fatalf("second EnsureProjectRoles: %v", err)
+	}
+	if changed {
+		t.Fatal("changed = true on the second call, want false (already converged)")
+	}
+}
+
+// TestEnsureProjectRoles_PropagatesEachUpstreamError exercises the four
+// error-return branches of EnsureProjectRoles: a failure from
+// ListProjectRoles, AddProjectRole, UpdateProjectRole or RemoveProjectRole
+// (each answering something other than the shape EnsureProjectRoles
+// already treats as success — already_exists / not_found) must surface as
+// a wrapped error naming the failing call, and must never mark the sync as
+// fully converged.
+func TestEnsureProjectRoles_PropagatesEachUpstreamError(t *testing.T) {
+	tests := []struct {
+		name          string
+		configure     func(f *fakeProjectRoleServer)
+		wantErrSubstr string
+	}{
+		{
+			name:          "list fails",
+			configure:     func(f *fakeProjectRoleServer) { f.failList = true },
+			wantErrSubstr: "ListProjectRoles",
+		},
+		{
+			name: "add fails",
+			configure: func(f *fakeProjectRoleServer) {
+				f.roles = map[string]string{} // owner is missing, forces an Add
+				f.failAdd = true
+			},
+			wantErrSubstr: "AddProjectRole",
+		},
+		{
+			name: "update fails",
+			configure: func(f *fakeProjectRoleServer) {
+				f.roles = map[string]string{
+					"owner": "Wrong Name", "admin": "Admin", "editor": "Editor", "viewer": "Viewer",
+				} // owner's display name differs, forces an Update
+				f.failUpdate = true
+			},
+			wantErrSubstr: "UpdateProjectRole",
+		},
+		{
+			name: "remove fails",
+			configure: func(f *fakeProjectRoleServer) {
+				f.roles = map[string]string{
+					"owner": "Owner", "admin": "Admin", "editor": "Editor", "viewer": "Viewer",
+					"obsolete": "Old Role", // not in tenantrole.All, forces a Remove
+				}
+				f.failRemove = true
+			},
+			wantErrSubstr: "RemoveProjectRole",
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			f := &fakeProjectRoleServer{}
+			tt.configure(f)
+			srv := httptest.NewServer(f.handler())
+			t.Cleanup(srv.Close)
+
+			c := New(srv.URL, "pat", "")
+			if _, err := c.EnsureProjectRoles(context.Background(), "PROJ-1", tenantrole.All); err == nil {
+				t.Fatal("EnsureProjectRoles: got nil error, want one naming the failing call")
+			} else if !strings.Contains(err.Error(), tt.wantErrSubstr) {
+				t.Errorf("EnsureProjectRoles error = %q, want it to mention %q", err, tt.wantErrSubstr)
+			}
+		})
+	}
+}
+
+// TestEnsureProjectRoles_ErrClientReturnsConstructionError covers the
+// errClient stub: New returns an errClient when it cannot parse apiURL,
+// and every method on it — including EnsureProjectRoles — must return
+// that same construction error rather than panic or silently succeed.
+func TestEnsureProjectRoles_ErrClientReturnsConstructionError(t *testing.T) {
+	c := New("http://%zz", "pat", "")
+	_, err := c.EnsureProjectRoles(context.Background(), "PROJ-1", tenantrole.All)
+	if err == nil {
+		t.Fatal("EnsureProjectRoles on an errClient: got nil error, want the construction error")
+	}
+	if !strings.Contains(err.Error(), "invalid apiURL") {
+		t.Errorf("EnsureProjectRoles error = %q, want it to mention the invalid apiURL", err)
+	}
 }

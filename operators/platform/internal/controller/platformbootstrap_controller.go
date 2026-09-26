@@ -25,6 +25,7 @@ import (
 	"sigs.k8s.io/controller-runtime/pkg/log"
 	"sigs.k8s.io/controller-runtime/pkg/reconcile"
 
+	"github.com/zeroroot-ai/gibson/internal/platform/tenantrole"
 	gibsonv1alpha1 "github.com/zeroroot-ai/gibson/operators/platform/api/v1alpha1"
 	fga "github.com/zeroroot-ai/gibson/operators/platform/internal/clients/fga"
 	vault "github.com/zeroroot-ai/gibson/operators/platform/internal/clients/vault"
@@ -271,8 +272,10 @@ func (r *PlatformBootstrapReconciler) reconcileZitadelProject(ctx context.Contex
 		return ctrl.Result{RequeueAfter: requeueMedium}, nil
 	}
 	zc := r.ZitadelFactory(pb.Spec.Zitadel.Issuer, pat)
+	var projectID string
 	if pb.Spec.Zitadel.Project.EnsureExists {
-		if _, err := zc.EnsureProject(ctx, pb.Spec.Zitadel.Project.Name); err != nil {
+		id, err := zc.EnsureProject(ctx, pb.Spec.Zitadel.Project.Name)
+		if err != nil {
 			if zitadel.IsPermanent(err) {
 				setBootstrapCond(pb, gibsonv1alpha1.ConditionZitadelProjectReady, metav1.ConditionFalse,
 					"ZitadelPermanentError", fmt.Sprintf("EnsureProject: %v", err))
@@ -282,8 +285,10 @@ func (r *PlatformBootstrapReconciler) reconcileZitadelProject(ctx context.Contex
 				"ZitadelTransientError", fmt.Sprintf("EnsureProject: %v", err))
 			return ctrl.Result{RequeueAfter: requeueMedium}, nil
 		}
+		projectID = id
 	} else {
-		if _, err := zc.GetProjectIDByName(ctx, pb.Spec.Zitadel.Project.Name); err != nil {
+		id, err := zc.GetProjectIDByName(ctx, pb.Spec.Zitadel.Project.Name)
+		if err != nil {
 			if zitadel.IsNotFound(err) {
 				setBootstrapCond(pb, gibsonv1alpha1.ConditionZitadelProjectReady, metav1.ConditionFalse,
 					"ProjectNotFound", fmt.Sprintf("project %q does not exist (ensureExists=false)", pb.Spec.Zitadel.Project.Name))
@@ -291,7 +296,26 @@ func (r *PlatformBootstrapReconciler) reconcileZitadelProject(ctx context.Contex
 			}
 			return ctrl.Result{RequeueAfter: requeueMedium}, nil
 		}
+		projectID = id
 	}
+
+	// Reconcile the four tenant roles on the project (ADR-0093 decision 2).
+	// Every tenant org's project grant and every user's role grant name one
+	// of these keys, so the project must carry exactly this set before any
+	// tenant can be granted access to it.
+	if changed, err := zc.EnsureProjectRoles(ctx, projectID, tenantrole.All); err != nil {
+		if zitadel.IsPermanent(err) {
+			setBootstrapCond(pb, gibsonv1alpha1.ConditionZitadelProjectReady, metav1.ConditionFalse,
+				"ZitadelPermanentError", fmt.Sprintf("EnsureProjectRoles: %v", err))
+			return ctrl.Result{}, nil
+		}
+		setBootstrapCond(pb, gibsonv1alpha1.ConditionZitadelProjectReady, metav1.ConditionUnknown,
+			"ZitadelTransientError", fmt.Sprintf("EnsureProjectRoles: %v", err))
+		return ctrl.Result{RequeueAfter: requeueMedium}, nil
+	} else if changed {
+		logger.Info("reconciled tenant roles on the gibson project")
+	}
+
 	// Enforce allowRegister=false on the instance login policy so Zitadel's
 	// hosted self-registration page is not served. DefaultInstance config in
 	// the chart only applies at first-instance creation, so already-running
@@ -312,7 +336,7 @@ func (r *PlatformBootstrapReconciler) reconcileZitadelProject(ctx context.Contex
 	// Service-user provisioning is deferred — handled by tenant-operator's
 	// existing zitadel-mint-user-pat tooling. Marked Ready here.
 	setBootstrapCond(pb, gibsonv1alpha1.ConditionZitadelProjectReady, metav1.ConditionTrue,
-		"ProjectExists", "Zitadel project reachable")
+		"ProjectExists", "Zitadel project reachable; tenant roles present")
 	return ctrl.Result{}, nil
 }
 
