@@ -198,7 +198,11 @@ func verifyBrandActive(ctx context.Context, zc zitadel.LabelPolicyClient, b bran
 		return fmt.Errorf("read the label policy back: %w", err)
 	}
 	if !policyMatches(after, b.policy) {
-		return fmt.Errorf("the active label policy does not match the declared brand after activation (policy write: %v)", putErr)
+		errMismatch := errors.New("the active label policy does not match the declared brand after activation")
+		if putErr != nil {
+			return fmt.Errorf("%w (policy write: %w)", errMismatch, putErr)
+		}
+		return errMismatch
 	}
 	stale, err := staleMarks(ctx, zc, after, b)
 	if err != nil {

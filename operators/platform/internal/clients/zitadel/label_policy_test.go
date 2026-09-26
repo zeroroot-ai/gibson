@@ -46,7 +46,7 @@ func TestLabelAsset_Errors(t *testing.T) {
 }
 
 func TestUploadLabelAsset_SendsTheSVGAsTheFileField(t *testing.T) {
-	c := labelServer(t, func(w http.ResponseWriter, r *http.Request) {
+	c := labelServer(t, func(_ http.ResponseWriter, r *http.Request) {
 		if r.Method != http.MethodPost || r.URL.Path != "/assets/v1/instance/policy/label/logo/dark" {
 			t.Errorf("request = %s %s", r.Method, r.URL.Path)
 		}
