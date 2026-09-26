@@ -259,6 +259,58 @@ spec:
                 required:
                 - plansConfigMapRef
                 type: object
+              platformOwner:
+                description: |-
+                  PlatformOwner declares the ONE human Zitadel administrator this install
+                  creates (ADR-0093 decision 6/8, hosted#201).
+                properties:
+                  email:
+                    description: |-
+                      Email is the Platform owner's address. Required — an empty value skips
+                      the whole reconcile step (ConditionPlatformOwnerReady=True, reason
+                      NotConfigured), which exists only so an older PlatformBootstrap CR
+                      (rendered before this field existed) keeps reconciling everything else
+                      while the chart catches up; a real install always sets it.
+                    type: string
+                  offlineSetup:
+                    description: |-
+                      OfflineSetup, when true, skips emailing the setup link: the operator
+                      creates a one-time, expiring invite code and writes it as a URL into
+                      SetupSecretRef instead (readable only by cluster administrators). Set
+                      this on an install with no working mail transport (ADR-0093 decision 8).
+                    type: boolean
+                  setupGeneration:
+                    description: |-
+                      SetupGeneration is the Platform owner's reset: raising this integer
+                      makes the operator clear every second factor currently on file and
+                      mint a new setup link (sent, or written to SetupSecretRef in offline
+                      mode). It is a reviewed change to an install value, never a live-cluster
+                      action (ADR-0093 decision 12). Defaults to 0 — the first reconcile
+                      (status.observedSetupGeneration starts at 0 too) still sends the
+                      initial link, because a brand-new Platform owner has no prior link.
+                    format: int64
+                    type: integer
+                  setupSecretRef:
+                    description: |-
+                      SetupSecretRef names the Secret the operator writes the offline setup
+                      link into. Required when OfflineSetup is true; ignored otherwise.
+                    properties:
+                      key:
+                        description: Key is the entry within the Secret's data map.
+                        minLength: 1
+                        type: string
+                      name:
+                        description: Name is the Secret name.
+                        minLength: 1
+                        type: string
+                      namespace:
+                        description: Namespace overrides the default namespace.
+                        type: string
+                    required:
+                    - key
+                    - name
+                    type: object
+                type: object
               postgresBundle:
                 description: |-
                   PostgresBundle describes the CNPG database ownership + public-schema
@@ -676,6 +728,13 @@ spec:
                   "spec changed, not yet reconciled".
                 format: int64
                 type: integer
+              observedSetupGeneration:
+                description: |-
+                  ObservedSetupGeneration mirrors spec.platformOwner.setupGeneration once
+                  the reconciler has minted a setup link for that generation. A mismatch
+                  with the spec value is what tells the reconciler a reset was requested.
+                format: int64
+                type: integer
               oidcClients:
                 description: OIDCClients summarises each child OIDCClient's Ready
                   state.
@@ -698,6 +757,12 @@ spec:
                   - ready
                   type: object
                 type: array
+              platformOwnerUserID:
+                description: |-
+                  PlatformOwnerUserID is the Zitadel user id of the Platform owner, once
+                  created. Empty until spec.platformOwner.email is set and the reconciler
+                  has run.
+                type: string
             type: object
         type: object
     served: true

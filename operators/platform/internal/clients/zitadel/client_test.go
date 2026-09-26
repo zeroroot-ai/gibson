@@ -1219,3 +1219,171 @@ func (f *fakeProjectRoleServer) handler() http.HandlerFunc {
 		}
 	}
 }
+
+// --- Platform owner (ADR-0093 decision 6/8, hosted#201) --------------------
+
+func TestEnsureHumanUserNoPassword_NeverSendsPassword(t *testing.T) {
+	var gotBody string
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.URL.Path != "/zitadel.user.v2.UserService/AddHumanUser" {
+			http.NotFound(w, r)
+			return
+		}
+		b := make([]byte, r.ContentLength)
+		_, _ = r.Body.Read(b)
+		gotBody = string(b)
+		w.Header().Set("Content-Type", "application/json")
+		_, _ = w.Write([]byte(`{"userId":"UID-OWNER-1"}`))
+	}))
+	t.Cleanup(srv.Close)
+
+	c := New(srv.URL, "pat", "")
+	id, err := c.EnsureHumanUserNoPassword(context.Background(), "ORG-1", "owner@example.com", "Platform", "Owner")
+	if err != nil {
+		t.Fatalf("EnsureHumanUserNoPassword: %v", err)
+	}
+	if id != "UID-OWNER-1" {
+		t.Fatalf("userID = %q, want UID-OWNER-1", id)
+	}
+	if strings.Contains(gotBody, "password") {
+		t.Fatalf("request body carries a password field, ADR-0093 forbids it: %s", gotBody)
+	}
+	if !strings.Contains(gotBody, `"isVerified":true`) {
+		t.Fatalf("request body does not mark the email verified: %s", gotBody)
+	}
+}
+
+func TestEnsureHumanUserNoPassword_AlreadyExists_ResolvesByEmail(t *testing.T) {
+	mux := http.NewServeMux()
+	mux.HandleFunc("/zitadel.user.v2.UserService/AddHumanUser", func(w http.ResponseWriter, r *http.Request) {
+		w.WriteHeader(http.StatusConflict)
+		_, _ = w.Write([]byte(`{"code":"already_exists","message":"Errors.User.AlreadyExists"}`))
+	})
+	mux.HandleFunc("/zitadel.user.v2.UserService/ListUsers", func(w http.ResponseWriter, r *http.Request) {
+		_, _ = w.Write([]byte(`{"result":[{"userId":"UID-EXISTING"}]}`))
+	})
+	srv := httptest.NewServer(mux)
+	t.Cleanup(srv.Close)
+
+	c := New(srv.URL, "pat", "")
+	id, err := c.EnsureHumanUserNoPassword(context.Background(), "ORG-1", "owner@example.com", "Platform", "Owner")
+	if err != nil {
+		t.Fatalf("EnsureHumanUserNoPassword: %v", err)
+	}
+	if id != "UID-EXISTING" {
+		t.Fatalf("userID = %q, want UID-EXISTING (resolved via FindHumanUserByEmail)", id)
+	}
+}
+
+func TestFindHumanUserByEmail_NotFound(t *testing.T) {
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		_, _ = w.Write([]byte(`{"result":[]}`))
+	}))
+	t.Cleanup(srv.Close)
+
+	c := New(srv.URL, "pat", "")
+	if _, err := c.FindHumanUserByEmail(context.Background(), "nobody@example.com"); !IsNotFound(err) {
+		t.Fatalf("FindHumanUserByEmail: err = %v, want ErrNotFound", err)
+	}
+}
+
+func TestCreateSetupInviteCode_ReturnCodeVsSendCode(t *testing.T) {
+	var gotBody atomic.Value
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		b := make([]byte, r.ContentLength)
+		_, _ = r.Body.Read(b)
+		gotBody.Store(string(b))
+		if strings.Contains(string(b), "returnCode") {
+			_, _ = w.Write([]byte(`{"inviteCode":"CODE-123"}`))
+			return
+		}
+		_, _ = w.Write([]byte(`{}`))
+	}))
+	t.Cleanup(srv.Close)
+	c := New(srv.URL, "pat", "")
+
+	code, err := c.CreateSetupInviteCode(context.Background(), "UID-1", "https://app.example.com/invite", false)
+	if err != nil {
+		t.Fatalf("CreateSetupInviteCode (return): %v", err)
+	}
+	if code != "CODE-123" {
+		t.Fatalf("code = %q, want CODE-123", code)
+	}
+
+	code, err = c.CreateSetupInviteCode(context.Background(), "UID-1", "https://app.example.com/invite", true)
+	if err != nil {
+		t.Fatalf("CreateSetupInviteCode (send): %v", err)
+	}
+	if code != "" {
+		t.Fatalf("code = %q, want empty on sendCode", code)
+	}
+	if !strings.Contains(gotBody.Load().(string), "urlTemplate") {
+		t.Fatalf("sendCode request missing urlTemplate: %s", gotBody.Load())
+	}
+}
+
+func TestClearHumanFactors_RemovesEveryRegisteredType(t *testing.T) {
+	var removedTOTP, removedU2F, removedPasskey int32
+	mux := http.NewServeMux()
+	mux.HandleFunc("/zitadel.user.v2.UserService/ListAuthenticationMethodTypes", func(w http.ResponseWriter, r *http.Request) {
+		_, _ = w.Write([]byte(`{"authMethodTypes":["AUTHENTICATION_METHOD_TYPE_TOTP","AUTHENTICATION_METHOD_TYPE_U2F","AUTHENTICATION_METHOD_TYPE_PASSKEY"]}`))
+	})
+	mux.HandleFunc("/zitadel.user.v2.UserService/RemoveTOTP", func(w http.ResponseWriter, r *http.Request) {
+		atomic.AddInt32(&removedTOTP, 1)
+		_, _ = w.Write([]byte(`{}`))
+	})
+	mux.HandleFunc("/zitadel.user.v2.UserService/ListU2F", func(w http.ResponseWriter, r *http.Request) {
+		_, _ = w.Write([]byte(`{"result":[{"u2fId":"U2F-1"}]}`))
+	})
+	mux.HandleFunc("/zitadel.user.v2.UserService/RemoveU2F", func(w http.ResponseWriter, r *http.Request) {
+		atomic.AddInt32(&removedU2F, 1)
+		_, _ = w.Write([]byte(`{}`))
+	})
+	mux.HandleFunc("/zitadel.user.v2.UserService/ListPasskeys", func(w http.ResponseWriter, r *http.Request) {
+		_, _ = w.Write([]byte(`{"result":[{"passkeyId":"PK-1"}]}`))
+	})
+	mux.HandleFunc("/zitadel.user.v2.UserService/RemovePasskey", func(w http.ResponseWriter, r *http.Request) {
+		atomic.AddInt32(&removedPasskey, 1)
+		_, _ = w.Write([]byte(`{}`))
+	})
+	srv := httptest.NewServer(mux)
+	t.Cleanup(srv.Close)
+
+	c := New(srv.URL, "pat", "")
+	if err := c.ClearHumanFactors(context.Background(), "UID-1"); err != nil {
+		t.Fatalf("ClearHumanFactors: %v", err)
+	}
+	if atomic.LoadInt32(&removedTOTP) != 1 || atomic.LoadInt32(&removedU2F) != 1 || atomic.LoadInt32(&removedPasskey) != 1 {
+		t.Fatalf("not every factor type was removed: totp=%d u2f=%d passkey=%d",
+			removedTOTP, removedU2F, removedPasskey)
+	}
+}
+
+func TestClearHumanFactors_NoFactors_NoOp(t *testing.T) {
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.URL.Path != "/zitadel.user.v2.UserService/ListAuthenticationMethodTypes" {
+			t.Errorf("unexpected call to %s; a user with no factors should trigger no removal calls", r.URL.Path)
+		}
+		_, _ = w.Write([]byte(`{"authMethodTypes":[]}`))
+	}))
+	t.Cleanup(srv.Close)
+
+	c := New(srv.URL, "pat", "")
+	if err := c.ClearHumanFactors(context.Background(), "UID-1"); err != nil {
+		t.Fatalf("ClearHumanFactors: %v", err)
+	}
+}
+
+func TestEnsureHumanUserNoPassword_PermanentErrorOn403(t *testing.T) {
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.WriteHeader(http.StatusForbidden)
+		_, _ = w.Write([]byte(`{"code":"permission_denied","message":"Errors.User.PermissionDenied"}`))
+	}))
+	t.Cleanup(srv.Close)
+
+	c := New(srv.URL, "pat", "")
+	_, err := c.EnsureHumanUserNoPassword(context.Background(), "ORG-1", "owner@example.com", "Platform", "Owner")
+	if !IsPermanent(err) {
+		t.Fatalf("EnsureHumanUserNoPassword: err = %v, want a permanent error on 403", err)
+	}
+}

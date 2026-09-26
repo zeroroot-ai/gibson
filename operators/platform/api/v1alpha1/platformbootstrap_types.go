@@ -75,6 +75,13 @@ const (
 	// plus each Ready MACHINE_USER OIDCClient child's status.clientID. Replaces
 	// the gitops sa-identity-map-populator Sync Job (gitops#170).
 	ConditionSAIdentityMapReady = "SAIdentityMapReady"
+
+	// ConditionPlatformOwnerReady reports whether the Platform owner (ADR-0093
+	// decision 6, hosted#201) exists in Zitadel with IAM_OWNER and holds the
+	// FGA platform_owner relation on system_tenant:_system, and whether the
+	// current spec.platformOwner.setupGeneration has a setup link outstanding
+	// (sent or, in offline mode, written to a Secret).
+	ConditionPlatformOwnerReady = "PlatformOwnerReady"
 )
 
 // SecretKeyRef references a key in a Secret. namespace is optional; when
@@ -466,6 +473,43 @@ type DatabaseRoleOwnership struct {
 	Grants []string `json:"grants,omitempty"`
 }
 
+// PlatformOwnerSpec declares the ONE human Zitadel administrator this install
+// creates (ADR-0093 decision 6/8, hosted#201). The chart fails render before
+// this ever reaches the operator unless Email is set and differs from
+// global.firstTenant.ownerEmail — see the platform-owner-guard template in
+// zeroroot-ai/charts.
+type PlatformOwnerSpec struct {
+	// Email is the Platform owner's address. Required — an empty value skips
+	// the whole reconcile step (ConditionPlatformOwnerReady=True, reason
+	// NotConfigured), which exists only so an older PlatformBootstrap CR
+	// (rendered before this field existed) keeps reconciling everything else
+	// while the chart catches up; a real install always sets it.
+	// +optional
+	Email string `json:"email,omitempty"`
+
+	// OfflineSetup, when true, skips emailing the setup link: the operator
+	// creates a one-time, expiring invite code and writes it as a URL into
+	// SetupSecretRef instead (readable only by cluster administrators). Set
+	// this on an install with no working mail transport (ADR-0093 decision 8).
+	// +optional
+	OfflineSetup bool `json:"offlineSetup,omitempty"`
+
+	// SetupSecretRef names the Secret the operator writes the offline setup
+	// link into. Required when OfflineSetup is true; ignored otherwise.
+	// +optional
+	SetupSecretRef *SecretKeyRef `json:"setupSecretRef,omitempty"`
+
+	// SetupGeneration is the Platform owner's reset: raising this integer
+	// makes the operator clear every second factor currently on file and
+	// mint a new setup link (sent, or written to SetupSecretRef in offline
+	// mode). It is a reviewed change to an install value, never a live-cluster
+	// action (ADR-0093 decision 12). Defaults to 0 — the first reconcile
+	// (status.observedSetupGeneration starts at 0 too) still sends the
+	// initial link, because a brand-new Platform owner has no prior link.
+	// +optional
+	SetupGeneration int64 `json:"setupGeneration,omitempty"`
+}
+
 // PostgresBundleSpec describes the CNPG database ownership + public-schema
 // grants the platform reconciles. Replaces the CNPG `postInitApplicationSQL`
 // path, which has subtle semantics around ownership and isn't actually
@@ -523,6 +567,11 @@ type PlatformBootstrapSpec struct {
 	// infrastructure; no skip toggle.
 	// +kubebuilder:validation:Required
 	PostgresBundle PostgresBundleSpec `json:"postgresBundle"`
+
+	// PlatformOwner declares the ONE human Zitadel administrator this install
+	// creates (ADR-0093 decision 6/8, hosted#201).
+	// +optional
+	PlatformOwner PlatformOwnerSpec `json:"platformOwner,omitempty"`
 }
 
 // OIDCClientStatusEntry mirrors a child OIDCClient's status onto the
@@ -558,6 +607,18 @@ type PlatformBootstrapStatus struct {
 	// OIDCClients summarises each child OIDCClient's Ready state.
 	// +optional
 	OIDCClients []OIDCClientStatusEntry `json:"oidcClients,omitempty"`
+
+	// PlatformOwnerUserID is the Zitadel user id of the Platform owner, once
+	// created. Empty until spec.platformOwner.email is set and the reconciler
+	// has run.
+	// +optional
+	PlatformOwnerUserID string `json:"platformOwnerUserID,omitempty"`
+
+	// ObservedSetupGeneration mirrors spec.platformOwner.setupGeneration once
+	// the reconciler has minted a setup link for that generation. A mismatch
+	// with the spec value is what tells the reconciler a reset was requested.
+	// +optional
+	ObservedSetupGeneration int64 `json:"observedSetupGeneration,omitempty"`
 }
 
 // +kubebuilder:object:root=true

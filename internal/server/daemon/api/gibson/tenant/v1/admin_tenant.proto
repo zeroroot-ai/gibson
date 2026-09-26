@@ -20,14 +20,17 @@ syntax = "proto3";
 // gibson#948/#949): same enqueue-in-Postgres / operator-drains-and-applies
 // shape, but for the cross-tenant admin CRUD operations rather than signup.
 //
-// Authorization: every RPC is restricted to the cross-tenant platform-admin
-// principal — a USER holding platform_operator on system_tenant:_system — the
-// FGA relation that models "operator with cross-tenant elevated privilege"
-// (model.fga). This matches the dashboard's pre-existing requireCrdSession
-// cross-tenant-role gate. ext-authz enforces it via the (gibson.auth.v1.authz)
-// annotation; Envoy routes the /gibson. prefix to the daemon with the
-// jwt_authn + ext_authz chain (no admin-prefix chart change needed — the
-// catch-all route already gates every gibson.* method by its registry rule).
+// Authorization: every RPC is restricted to the Platform owner — the ONE
+// human Zitadel administrator a install creates (ADR-0093 decision 6) — a
+// USER holding platform_owner on system_tenant:_system (model.fga). Moved
+// off platform_operator (hosted#201): that relation is for platform SERVICE
+// ACCOUNTS only now, never a person, so a human platform-admin caller needs
+// its own relation. This matches the dashboard's pre-existing
+// requireCrdSession cross-tenant-role gate, updated to check platform_owner.
+// ext-authz enforces it via the (gibson.auth.v1.authz) annotation; Envoy
+// routes the /gibson. prefix to the daemon with the jwt_authn + ext_authz
+// chain (no admin-prefix chart change needed — the catch-all route already
+// gates every gibson.* method by its registry rule).
 package gibson.tenant.v1;
 
 option go_package = "github.com/zeroroot-ai/gibson/internal/server/daemon/api/gibson/tenant/v1;tenantv1";
@@ -37,7 +40,7 @@ import "gibson/auth/v1/options.proto";
 // AdminTenantService is the dashboard-facing write side of admin tenant CRUD.
 // Each RPC records a tenant_admin_ops row (the admin's intent) and returns the
 // generated op_id; the tenant-operator drains the queue and applies the op to
-// the Tenant CR. Cross-tenant platform-admin only (platform_operator USER).
+// the Tenant CR. Platform owner only (platform_owner USER, ADR-0093).
 service AdminTenantService {
   // AdminProvisionTenant records intent to create a new tenant. Replaces
   // provisionTenantAction's applyTenant() Tenant-CR create. The operator creates
@@ -47,7 +50,7 @@ service AdminTenantService {
   // double-submit cannot double-provision.
   rpc AdminProvisionTenant(AdminProvisionTenantRequest) returns (AdminProvisionTenantResponse) {
     option (gibson.auth.v1.authz) = {
-      relation: "platform_operator",
+      relation: "platform_owner",
       object_type: "system_tenant",
       object_deriver: "system_tenant",
       allowed_identities: 1  // USER
@@ -61,7 +64,7 @@ service AdminTenantService {
   // twice converges.
   rpc AdminUpdateTenant(AdminUpdateTenantRequest) returns (AdminUpdateTenantResponse) {
     option (gibson.auth.v1.authz) = {
-      relation: "platform_operator",
+      relation: "platform_owner",
       object_type: "system_tenant",
       object_deriver: "system_tenant",
       allowed_identities: 1  // USER
@@ -75,7 +78,7 @@ service AdminTenantService {
   // already-absent Tenant CR is a no-op success at apply time.
   rpc AdminDeleteTenant(AdminDeleteTenantRequest) returns (AdminDeleteTenantResponse) {
     option (gibson.auth.v1.authz) = {
-      relation: "platform_operator",
+      relation: "platform_owner",
       object_type: "system_tenant",
       object_deriver: "system_tenant",
       allowed_identities: 1  // USER
@@ -84,19 +87,19 @@ service AdminTenantService {
 
   // AdminGetTenantBilling returns ANY tenant's billing identifiers — the Stripe
   // customer id, the billing-active flag and the Zitadel org slug — for the
-  // platform-operator admin surfaces (the trial-extension tool, dashboard#1016).
+  // platform-owner admin surfaces (the trial-extension tool, dashboard#1016).
   //
   // This is a genuine CROSS-tenant read: a staff operator acting on an arbitrary
   // tenant_id. It cannot use the unauthenticated
   // TenantProvisioningService.GetTenantProvisioningStatus (that RPC no longer
   // discloses billing state to any caller — gibson#1339), nor the own-tenant
   // TenantService.GetTenantBilling (the operator is not that tenant's admin). It
-  // carries the same platform_operator gate as the other AdminTenantService
-  // RPCs: ext-authz authorizes platform_operator on system_tenant:_system before
+  // carries the same platform_owner gate as the other AdminTenantService
+  // RPCs: ext-authz authorizes platform_owner on system_tenant:_system before
   // the handler trusts the request tenant_id.
   rpc AdminGetTenantBilling(AdminGetTenantBillingRequest) returns (AdminGetTenantBillingResponse) {
     option (gibson.auth.v1.authz) = {
-      relation: "platform_operator",
+      relation: "platform_owner",
       object_type: "system_tenant",
       object_deriver: "system_tenant",
       allowed_identities: 1  // USER
@@ -116,7 +119,7 @@ service AdminTenantService {
   // the identity provider.
   rpc AdminListPendingRegistrations(AdminListPendingRegistrationsRequest) returns (AdminListPendingRegistrationsResponse) {
     option (gibson.auth.v1.authz) = {
-      relation: "platform_operator",
+      relation: "platform_owner",
       object_type: "system_tenant",
       object_deriver: "system_tenant",
       allowed_identities: 1  // USER
@@ -136,7 +139,7 @@ service AdminTenantService {
   // administrators cannot both believe they approved it.
   rpc AdminApproveRegistration(AdminApproveRegistrationRequest) returns (AdminApproveRegistrationResponse) {
     option (gibson.auth.v1.authz) = {
-      relation: "platform_operator",
+      relation: "platform_owner",
       object_type: "system_tenant",
       object_deriver: "system_tenant",
       allowed_identities: 1  // USER
@@ -148,7 +151,7 @@ service AdminTenantService {
   // created. Attributable in the same way as an approval.
   rpc AdminRejectRegistration(AdminRejectRegistrationRequest) returns (AdminRejectRegistrationResponse) {
     option (gibson.auth.v1.authz) = {
-      relation: "platform_operator",
+      relation: "platform_owner",
       object_type: "system_tenant",
       object_deriver: "system_tenant",
       allowed_identities: 1  // USER
@@ -284,7 +287,7 @@ message AdminDeleteTenantResponse {
 
 // AdminGetTenantBillingRequest names the tenant whose billing identifiers to
 // read. tenant_id is UNTRUSTED input, authorized by nothing on its own — the
-// platform_operator gate on system_tenant is what permits the cross-tenant read.
+// platform_owner gate on system_tenant is what permits the cross-tenant read.
 message AdminGetTenantBillingRequest {
   // tenant_id is the tenant slug to read billing for. Required.
   string tenant_id = 1;

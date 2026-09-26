@@ -2206,7 +2206,7 @@ var Registry = map[string]Entry{
 	"/gibson.tenant.v1.AdminTenantService/AdminApproveRegistration": {
 		Method:            "/gibson.tenant.v1.AdminTenantService/AdminApproveRegistration",
 		Service:           "gibson.tenant.v1.AdminTenantService",
-		Relation:          "platform_operator",
+		Relation:          "platform_owner",
 		ObjectType:        "system_tenant",
 		ObjectDeriver:     "system_tenant",
 		AllowedIdentities: IdentityUser,
@@ -2216,7 +2216,7 @@ var Registry = map[string]Entry{
 	"/gibson.tenant.v1.AdminTenantService/AdminDeleteTenant": {
 		Method:            "/gibson.tenant.v1.AdminTenantService/AdminDeleteTenant",
 		Service:           "gibson.tenant.v1.AdminTenantService",
-		Relation:          "platform_operator",
+		Relation:          "platform_owner",
 		ObjectType:        "system_tenant",
 		ObjectDeriver:     "system_tenant",
 		AllowedIdentities: IdentityUser,
@@ -2226,7 +2226,7 @@ var Registry = map[string]Entry{
 	"/gibson.tenant.v1.AdminTenantService/AdminGetTenantBilling": {
 		Method:            "/gibson.tenant.v1.AdminTenantService/AdminGetTenantBilling",
 		Service:           "gibson.tenant.v1.AdminTenantService",
-		Relation:          "platform_operator",
+		Relation:          "platform_owner",
 		ObjectType:        "system_tenant",
 		ObjectDeriver:     "system_tenant",
 		AllowedIdentities: IdentityUser,
@@ -2236,7 +2236,7 @@ var Registry = map[string]Entry{
 	"/gibson.tenant.v1.AdminTenantService/AdminListPendingRegistrations": {
 		Method:            "/gibson.tenant.v1.AdminTenantService/AdminListPendingRegistrations",
 		Service:           "gibson.tenant.v1.AdminTenantService",
-		Relation:          "platform_operator",
+		Relation:          "platform_owner",
 		ObjectType:        "system_tenant",
 		ObjectDeriver:     "system_tenant",
 		AllowedIdentities: IdentityUser,
@@ -2246,7 +2246,7 @@ var Registry = map[string]Entry{
 	"/gibson.tenant.v1.AdminTenantService/AdminProvisionTenant": {
 		Method:            "/gibson.tenant.v1.AdminTenantService/AdminProvisionTenant",
 		Service:           "gibson.tenant.v1.AdminTenantService",
-		Relation:          "platform_operator",
+		Relation:          "platform_owner",
 		ObjectType:        "system_tenant",
 		ObjectDeriver:     "system_tenant",
 		AllowedIdentities: IdentityUser,
@@ -2256,7 +2256,7 @@ var Registry = map[string]Entry{
 	"/gibson.tenant.v1.AdminTenantService/AdminRejectRegistration": {
 		Method:            "/gibson.tenant.v1.AdminTenantService/AdminRejectRegistration",
 		Service:           "gibson.tenant.v1.AdminTenantService",
-		Relation:          "platform_operator",
+		Relation:          "platform_owner",
 		ObjectType:        "system_tenant",
 		ObjectDeriver:     "system_tenant",
 		AllowedIdentities: IdentityUser,
@@ -2266,7 +2266,7 @@ var Registry = map[string]Entry{
 	"/gibson.tenant.v1.AdminTenantService/AdminUpdateTenant": {
 		Method:            "/gibson.tenant.v1.AdminTenantService/AdminUpdateTenant",
 		Service:           "gibson.tenant.v1.AdminTenantService",
-		Relation:          "platform_operator",
+		Relation:          "platform_owner",
 		ObjectType:        "system_tenant",
 		ObjectDeriver:     "system_tenant",
 		AllowedIdentities: IdentityUser,
