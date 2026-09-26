@@ -24,6 +24,12 @@
 //  5. On allow, emits the canonical x-gibson-identity-* header set
 //     to the upstream daemon. Headers are NOT HMAC-signed — the
 //     Envoy↔daemon channel is SPIFFE-pinned mTLS.
+//  6. Derives a signed-in person's tenant from their token's verified
+//     Zitadel org, via OrgTenants (ADR-0093 decision 4) — never from a
+//     client-supplied x-gibson-tenant header, which is refused outright
+//     for an OIDC-user identity. A service account acting cross-tenant
+//     (credential_type=client-credentials) still names its tenant via the
+//     header, gated on platform_operator (unchanged).
 //
 // Spec: unified-identity-and-authorization Phase 2.
 package server
@@ -49,6 +55,7 @@ import (
 	"github.com/zeroroot-ai/gibson/internal/server/extauthz/cgjwt"
 	"github.com/zeroroot-ai/gibson/internal/server/extauthz/fga"
 	"github.com/zeroroot-ai/gibson/internal/server/extauthz/headers"
+	"github.com/zeroroot-ai/gibson/internal/server/extauthz/orgtenant"
 	"github.com/zeroroot-ai/sdk/capabilitygrant"
 )
 
@@ -105,27 +112,46 @@ type Config struct {
 	// CLI, CI, the hosted smokes) was classed as a human and denied by the
 	// session gate. Optional: empty keeps the client_id == sub rule alone.
 	HumanClientIDs []string
+
+	// OrgTenants maps a signed-in person's verified Zitadel org (the
+	// urn:zitadel:iam:user:resourceowner:id claim) to their tenant
+	// (ADR-0093 decision 4). Required — NewEnvoyAuthzServer panics without
+	// it, the same as a nil Cache. A person's tenant comes ONLY from this
+	// resolver; a client-supplied x-gibson-tenant header is refused outright
+	// for an OIDC-user identity.
+	OrgTenants OrgTenantResolver
+}
+
+// OrgTenantResolver maps a verified Zitadel org id to a tenant id. See
+// internal/server/extauthz/orgtenant.Resolver for the production
+// implementation (a cached lookup against the daemon).
+type OrgTenantResolver interface {
+	TenantForOrg(ctx context.Context, orgID string) (string, error)
 }
 
 // EnvoyAuthzServer implements envoy.service.auth.v3.AuthorizationServer.
 type EnvoyAuthzServer struct {
 	authv3.UnimplementedAuthorizationServer
-	cache     *fga.CachedChecker
-	cgjwt     *cgjwt.Verifier
-	component *cgjwt.ComponentVerifier
-	log       *slog.Logger
-	issuers   map[string]struct{} // empty ⇒ issuer check disabled (tests only)
-	humans    map[string]struct{} // OIDC client ids of human sign-in flows; empty ⇒ client_id == sub rule alone
+	cache      *fga.CachedChecker
+	cgjwt      *cgjwt.Verifier
+	component  *cgjwt.ComponentVerifier
+	log        *slog.Logger
+	issuers    map[string]struct{} // empty ⇒ issuer check disabled (tests only)
+	humans     map[string]struct{} // OIDC client ids of human sign-in flows; empty ⇒ client_id == sub rule alone
+	orgTenants OrgTenantResolver
 }
 
-// NewEnvoyAuthzServer constructs an EnvoyAuthzServer. cache and
-// logger are required; cgjwt may be nil.
+// NewEnvoyAuthzServer constructs an EnvoyAuthzServer. cache, logger and
+// orgTenants are required; cgjwt may be nil.
 func NewEnvoyAuthzServer(cfg Config) *EnvoyAuthzServer {
 	if cfg.Cache == nil {
 		panic("server.NewEnvoyAuthzServer: Cache required")
 	}
 	if cfg.Logger == nil {
 		panic("server.NewEnvoyAuthzServer: Logger required")
+	}
+	if cfg.OrgTenants == nil {
+		panic("server.NewEnvoyAuthzServer: OrgTenants required")
 	}
 	issuers := make(map[string]struct{}, len(cfg.IssuerAllowlist))
 	for _, iss := range cfg.IssuerAllowlist {
@@ -144,12 +170,13 @@ func NewEnvoyAuthzServer(cfg Config) *EnvoyAuthzServer {
 		humans[c] = struct{}{}
 	}
 	return &EnvoyAuthzServer{
-		cache:     cfg.Cache,
-		cgjwt:     cfg.CGJWT,
-		component: cfg.Component,
-		log:       cfg.Logger,
-		issuers:   issuers,
-		humans:    humans,
+		cache:      cfg.Cache,
+		cgjwt:      cfg.CGJWT,
+		component:  cfg.Component,
+		log:        cfg.Logger,
+		issuers:    issuers,
+		humans:     humans,
+		orgTenants: cfg.OrgTenants,
 	}
 }
 
@@ -158,7 +185,7 @@ func (s *EnvoyAuthzServer) Check(ctx context.Context, req *authv3.CheckRequest) 
 	method := extractMethod(req)
 	httpHeaders := req.GetAttributes().GetRequest().GetHttp().GetHeaders()
 
-	id, subjectSource, verifiedIss, err := identityFromJWTPayload(httpHeaders, s.humans)
+	tok, err := identityFromJWTPayload(httpHeaders, s.humans)
 	if err != nil {
 		// No Zitadel JWT. A component (agent/tool/plugin) authenticates instead
 		// with its self-signed Capability-Grant JWT in x-capability-grant, with
@@ -180,6 +207,7 @@ func (s *EnvoyAuthzServer) Check(ctx context.Context, req *authv3.CheckRequest) 
 		extauthzUnauthenticatedTotal.WithLabelValues(method).Inc()
 		return denyResponse(codes.Unauthenticated, typev3.StatusCode_Unauthorized, bodyUnauthenticated), nil
 	}
+	id := tok.id
 	// Issuer allowlist check (security-hardening R13). The verified JWT iss
 	// claim (a URL like https://auth.zeroroot.local:30443) must match a
 	// configured acceptable issuer; mismatches are denied with
@@ -191,44 +219,59 @@ func (s *EnvoyAuthzServer) Check(ctx context.Context, req *authv3.CheckRequest) 
 	// URL lives only inside this handler. See ext-authz#26 for why these
 	// two values must remain separate.
 	if len(s.issuers) > 0 {
-		if _, ok := s.issuers[verifiedIss]; !ok {
+		if _, ok := s.issuers[tok.verifiedIss]; !ok {
 			extauthzIssuerMismatchTotal.WithLabelValues(method).Inc()
 			s.log.WarnContext(ctx, "extauthz.issuer_mismatch",
 				"method", method,
 				"subject", id.Subject,
-				"presented_iss", verifiedIss,
+				"presented_iss", tok.verifiedIss,
 			)
 			return denyResponse(codes.PermissionDenied, typev3.StatusCode_Forbidden, bodyPermissionDenied), nil
 		}
 	}
-	// subjectSource is always "sub" (preferred_username swap removed per
-	// zero-trust-hardening Req 3.1). Logged at debug for operator tracing.
 	s.log.DebugContext(ctx, "ext-authz: identity decoded",
-		"method", method, "subject", id.Subject, "subject_source", subjectSource, "credential_type", id.CredentialType)
+		"method", method, "subject", id.Subject, "credential_type", id.CredentialType)
 
-	// Early registry dispatch: look up the per-RPC authz entry BEFORE the
-	// tenant cross-check. Rule-mode entries derive their FGA object from a
-	// tenant — so the cross-check is required for them. Self-mode and
-	// unauthenticated entries by design have no tenant context (sign-in
-	// bootstrap, liveness probes) — running the cross-check would deny
-	// every such call with "no tenant derivable" before the registry-aware
-	// short-circuit in cache.Check ever runs. Skip it for those modes.
+	// A person's tenant is a fact of their identity (ADR-0093 decision 4):
+	// it comes from the verified Zitadel org their token names, resolved
+	// against the daemon's org->tenant mapping — never from a client-
+	// supplied header. This runs BEFORE the registry dispatch below, so
+	// both self-mode/unauthenticated entries (the sign-in bootstrap window)
+	// and rule-mode entries see the same resolved id.Tenant.
+	if id.CredentialType == headers.CredentialOIDCUser {
+		if httpHeaders[headerTenantHint] != "" {
+			extauthzUserTenantHeaderRefusedTotal.Inc()
+			s.log.WarnContext(ctx, "ext-authz: tenant header refused for a user",
+				"method", method, "subject", id.Subject)
+			return denyResponse(codes.PermissionDenied, typev3.StatusCode_Forbidden, bodyPermissionDenied), nil
+		}
+		tenant, tErr := s.userTenant(ctx, tok.orgID)
+		switch {
+		case errors.Is(tErr, orgtenant.ErrNoTenant):
+			// No tenant. Allowed only for self and unauthenticated entries
+			// (the Platform owner, and the sign-in window before a
+			// tenant finishes provisioning) — the rule-mode switch below
+			// denies an OIDC user with an empty id.Tenant.
+		case tErr != nil:
+			extauthzOrgTenantUnavailableTotal.Inc()
+			s.log.ErrorContext(ctx, "ext-authz: org->tenant resolver unavailable",
+				"method", method, "subject", id.Subject, "err", tErr)
+			return denyResponse(codes.Unavailable, typev3.StatusCode_ServiceUnavailable, bodyUnavailable), nil
+		default:
+			id.Tenant = tenant
+		}
+	}
+
+	// Early registry dispatch: look up the per-RPC authz entry. Self-mode
+	// and unauthenticated entries by design may have no tenant (sign-in
+	// bootstrap, liveness probes, the Platform owner) — running the
+	// rule-mode switch below would deny every such call with "no tenant
+	// derivable" before the registry-aware short-circuit in cache.Check
+	// ever runs. Skip it for those modes.
 	//
 	// Spec: self-mode-authz Req 3 (post-hotfix re-ordering).
 	regEntry, regOK := s.cache.LookupEntry(method)
 	skipTenantResolution := regOK && (regEntry.Self || regEntry.Unauthenticated)
-
-	// Tenant resolution: cross-check the x-gibson-tenant header against the
-	// JWT-asserted tenant claim (zero-trust-hardening Req 4). Only runs for
-	// rule-mode entries.
-	//
-	//   • JWT tenant + header match or header absent → use JWT tenant.
-	//   • JWT tenant + header mismatch → PermissionDenied (log both values).
-	//   • No JWT tenant + header present → require platform_operator on
-	//     system_tenant:_system; allow if FGA confirms, deny otherwise.
-	//   • Neither → deny (no derived tenant).
-	jwtTenant := id.Tenant // populated by identityFromJWTPayload from gibson:tenant / tenant claim
-	headerTenant := httpHeaders[headerTenantHint]
 
 	if skipTenantResolution {
 		// Self-mode and unauthenticated RPCs reach the FGA path directly.
@@ -255,15 +298,12 @@ func (s *EnvoyAuthzServer) Check(ctx context.Context, req *authv3.CheckRequest) 
 		// Unauthenticated entries (e.g. liveness probes) carry no identity and
 		// checkSessionGate is a no-op for non-oidc-user credential types.
 		//
-		// Self-mode entries skip tenant RESOLUTION (they derive no FGA object
-		// from a tenant), but the revocation gate is not an object derivation —
-		// it asks whether this user's session is still valid. Zitadel user JWTs
-		// carry no tenant claim, so id.Tenant is empty here for every human
-		// caller; passing the x-gibson-tenant hint is what makes the gate
-		// evaluable at all on this path. The hint is not trusted for
-		// authorization: a tenant the caller has no active_session tuple in
-		// denies (fail-closed), it never widens access.
-		if gateResp, _ := s.checkSessionGate(ctx, method, id, sessionGateTenant(id, headerTenant)); gateResp != nil {
+		// id.Tenant was resolved above from the token's verified Zitadel org
+		// (ADR-0093 decision 4) and may be empty — a person with no tenant
+		// yet (the Platform owner, or the sign-in window before provisioning
+		// finishes) gates on the user-scoped active_session relation instead
+		// of a per-tenant one. Either way the gate can only deny.
+		if gateResp, _ := s.checkSessionGate(ctx, method, id, id.Tenant); gateResp != nil {
 			extauthzDeniedTotal.WithLabelValues(method).Inc()
 			return gateResp, nil
 		}
@@ -275,55 +315,34 @@ func (s *EnvoyAuthzServer) Check(ctx context.Context, req *authv3.CheckRequest) 
 	}
 
 	switch {
-	case jwtTenant != "" && headerTenant == "":
-		// Normal case: JWT-only tenant — nothing to cross-check.
-		id.Tenant = jwtTenant
-	case jwtTenant != "" && headerTenant != "":
-		if jwtTenant != headerTenant {
-			extauthzTenantMismatchTotal.Inc()
-			s.log.WarnContext(ctx, "ext-authz: tenant cross-check failed",
-				"method", method, "subject", id.Subject,
-				"jwt_tenant", jwtTenant, "header_tenant", headerTenant)
+	case id.CredentialType == headers.CredentialOIDCUser:
+		// id.Tenant was already resolved above from the token's verified
+		// Zitadel org (ADR-0093 decision 4). A user with no tenant cannot
+		// be authorized for a rule-mode RPC — the tenant IS the FGA object
+		// these rules derive from.
+		if id.Tenant == "" {
+			extauthzTenantMissingTotal.Inc()
+			s.log.WarnContext(ctx, "ext-authz: user has no tenant",
+				"method", method, "subject", id.Subject)
 			return denyResponse(codes.PermissionDenied, typev3.StatusCode_Forbidden, bodyPermissionDenied), nil
 		}
-		id.Tenant = jwtTenant
-	case jwtTenant == "" && headerTenant != "":
-		// No JWT-asserted tenant + header tenant present. Two distinct paths:
-		//
-		//   1. OIDC user (credential_type=oidc-user). Standard sign-in flow.
-		//      Zitadel's user JWTs deliberately do NOT carry a tenant claim —
-		//      users may be members of multiple tenants and the active-tenant
-		//      choice is a UI selection (gibson_active_tenant cookie →
-		//      x-gibson-tenant header). Trust the header and let the
-		//      rule-mode FGA Check on `tenant_from_identity` enforce
-		//      membership: `(user:<sub>, member, tenant:<header>)`. Non-
-		//      members deny at the FGA layer; tenant probing is closed by
-		//      that membership check, not by the absence of a JWT claim.
-		//
-		//   2. Service account acting cross-tenant (credential_type=
-		//      client-credentials). Genuinely cross-tenant SA path —
-		//      tenant-operator pruning a deleted tenant, etc. Require the
-		//      caller to hold `platform_operator` on
-		//      `system_tenant:_system` via a direct FGA query.
-		//
-		// Spec: zero-trust-hardening Req 4 (post-fix); the original
-		// platform_operator-only gate broke OIDC user sign-in for any
-		// rule-mode RPC because it conflated the two cases.
-		if id.CredentialType == headers.CredentialClientCredentials {
-			allowed, fgaErr := s.cache.CheckPlatformOperator(ctx, id.Subject)
-			if fgaErr != nil || !allowed {
-				extauthzTenantCrossTenantDenied.Inc()
-				s.log.WarnContext(ctx, "ext-authz: cross-tenant denied — no platform_operator relation",
-					"method", method, "subject", id.Subject, "header_tenant", headerTenant)
-				return denyResponse(codes.PermissionDenied, typev3.StatusCode_Forbidden, bodyPermissionDenied), nil
-			}
+	case httpHeaders[headerTenantHint] != "" && id.CredentialType == headers.CredentialClientCredentials:
+		// Case 2, unchanged: a service account acting cross-tenant (e.g.
+		// tenant-operator pruning a deleted tenant) names the tenant via
+		// the header and must hold platform_operator on
+		// system_tenant:_system, verified by a direct FGA query.
+		headerTenant := httpHeaders[headerTenantHint]
+		allowed, fgaErr := s.cache.CheckPlatformOperator(ctx, id.Subject)
+		if fgaErr != nil || !allowed {
+			extauthzTenantCrossTenantDenied.Inc()
+			s.log.WarnContext(ctx, "ext-authz: cross-tenant denied — no platform_operator relation",
+				"method", method, "subject", id.Subject, "header_tenant", headerTenant)
+			return denyResponse(codes.PermissionDenied, typev3.StatusCode_Forbidden, bodyPermissionDenied), nil //nolint:nilerr // an FGA error denies via CheckResponse, not a Go error; every deny path in this handler returns a nil Go error
 		}
-		// USER (no platform_operator gate) and SERVICE (passed gate) both
-		// adopt the header tenant; the rule-mode FGA Check downstream
-		// enforces membership for USER and the rule's relation for SERVICE.
 		id.Tenant = headerTenant
 	default:
-		// Neither JWT tenant nor header present.
+		// Neither an OIDC user's resolved tenant nor a service account's
+		// header tenant is present.
 		extauthzTenantMissingTotal.Inc()
 		s.log.WarnContext(ctx, "ext-authz: no tenant derivable",
 			"method", method, "subject", id.Subject)
@@ -510,27 +529,35 @@ func (s *EnvoyAuthzServer) enforceCapabilityGrant(
 	return nil
 }
 
+// verifiedToken is what identityFromJWTPayload extracts from the verified
+// JWT payload Envoy forwards: the Identity ext-authz emits downstream, the
+// raw verified `iss` URL, and the verified Zitadel org id (ADR-0093
+// decision 4). id.Tenant is always empty here — a person's tenant is
+// resolved separately, from orgID, never read directly off the token.
+type verifiedToken struct {
+	id headers.Identity
+	// verifiedIss is the real `iss` URL, used by the caller for the
+	// issuer-allowlist check (security-hardening R13) and audit logging —
+	// never forwarded. Distinct from id.Issuer, which carries the
+	// canonical wire constant ("oidc") the daemon SDK expects. See
+	// ext-authz#26 for the regression that motivated this split.
+	verifiedIss string
+	// orgID is the urn:zitadel:iam:user:resourceowner:id claim: the
+	// Zitadel org the signed-in person belongs to. Empty for a token that
+	// carries no such claim (a pre-ADR-0093 session, or a non-OIDC-user
+	// credential). It is meaningless for anything but an OIDC-user
+	// identity — the tenant derivation in Check reads it only then.
+	orgID string
+}
+
 // identityFromJWTPayload parses the verified-claims payload Envoy's
 // jwt_authn filter forwards. We accept ONLY the configured OIDC IdP per
 // Requirement 1: every primary identity in the system is an OIDC IdP
 // JWT. SPIFFE/apikey paths are gone.
-//
-// Returns the decoded Identity and a debug-only `subjectSource` string
-// (always "sub" now that preferred_username swapping is removed per
-// zero-trust-hardening Req 3.1). The source field is kept for log
-// compatibility without affecting the deny/allow path.
-// identityFromJWTPayload extracts the Identity that ext-authz forwards
-// downstream PLUS the raw verified JWT iss URL. The two are intentionally
-// distinct return values: the Identity.Issuer carries the canonical wire
-// constant ("oidc") for the daemon's SDK contract; the verifiedIss is the
-// real iss URL, used by the caller for the issuer-allowlist check
-// (security-hardening R13) and for audit logging — never forwarded.
-//
-// See ext-authz#26 for the regression that motivated this split.
-func identityFromJWTPayload(httpHeaders map[string]string, humanClients map[string]struct{}) (id headers.Identity, subjectSource, verifiedIss string, err error) {
+func identityFromJWTPayload(httpHeaders map[string]string, humanClients map[string]struct{}) (verifiedToken, error) {
 	encoded := httpHeaders[headerJWTPayload]
 	if encoded == "" {
-		return headers.Identity{}, "", "", errors.New("missing x-jwt-payload (Envoy jwt_authn must populate)")
+		return verifiedToken{}, errors.New("missing x-jwt-payload (Envoy jwt_authn must populate)")
 	}
 	data, decErr := base64.RawURLEncoding.DecodeString(encoded)
 	if decErr != nil {
@@ -538,7 +565,7 @@ func identityFromJWTPayload(httpHeaders map[string]string, humanClients map[stri
 		if data2, err2 := base64.URLEncoding.DecodeString(encoded); err2 == nil {
 			data = data2
 		} else {
-			return headers.Identity{}, "", "", fmt.Errorf("x-jwt-payload base64 decode: %w", decErr)
+			return verifiedToken{}, fmt.Errorf("x-jwt-payload base64 decode: %w", decErr)
 		}
 	}
 	var claims struct {
@@ -550,11 +577,16 @@ func identityFromJWTPayload(httpHeaders map[string]string, humanClients map[stri
 		// Zitadel sets it on every token; client_id is read first and azp
 		// stands in when client_id is absent.
 		Azp string `json:"azp"`
-		// The configured IdP may inject role claims such as
-		// "urn:zitadel:iam:org:project:roles" or our custom tenant claim.
-		// (The previous wire value was "zitadel"; the field name is IdP-specific.)
-		GibsonTenant string `json:"gibson:tenant"`
-		Tenant       string `json:"tenant"`
+		// ResourceOwnerID is the urn:zitadel:iam:user:resourceowner:id
+		// claim: the Zitadel org the signed-in person belongs to (ADR-0093
+		// decision 4). Present on the access token when the client
+		// requested the urn:zitadel:iam:user:resourceowner scope. This is
+		// the ONLY source of a person's tenant — ext-authz resolves it
+		// against the daemon's org->tenant mapping. There is no
+		// client-asserted tenant claim (the former gibson:tenant / tenant
+		// claims and their Zitadel Action are gone; nothing ever produced
+		// them).
+		ResourceOwnerID string `json:"urn:zitadel:iam:user:resourceowner:id"`
 		// Iat is the standard JWT issued-at claim (Unix seconds). Carried
 		// for the ext-authz-local instant-revocation condition
 		// (token_iat > revoked_at; gibson#627), NOT for the downstream
@@ -564,10 +596,10 @@ func identityFromJWTPayload(httpHeaders map[string]string, humanClients map[stri
 		Iat int64 `json:"iat"`
 	}
 	if jerr := json.Unmarshal(data, &claims); jerr != nil {
-		return headers.Identity{}, "", "", fmt.Errorf("x-jwt-payload JSON: %w", jerr)
+		return verifiedToken{}, fmt.Errorf("x-jwt-payload JSON: %w", jerr)
 	}
 	if claims.Sub == "" {
-		return headers.Identity{}, "", "", errors.New("x-jwt-payload: missing sub")
+		return verifiedToken{}, errors.New("x-jwt-payload: missing sub")
 	}
 
 	credType := credentialTypeFor(claims.Sub, claims.ClientID, claims.Azp, humanClients)
@@ -583,12 +615,6 @@ func identityFromJWTPayload(httpHeaders map[string]string, humanClients map[stri
 	// (populated from gibson-sa-identity-map by the resolve-sa-identity-map
 	// init container). No downstream change is required.
 	subject := claims.Sub
-	subjectSource = "sub"
-
-	tenant := claims.GibsonTenant
-	if tenant == "" {
-		tenant = claims.Tenant
-	}
 
 	// Per security-hardening R13, the issuer allowlist check belongs in
 	// ext-authz (the caller verifies claims.Iss against the configured
@@ -600,11 +626,13 @@ func identityFromJWTPayload(httpHeaders map[string]string, humanClients map[stri
 	// forwarded claims.Iss verbatim, which broke every dashboard request
 	// for 10 days (ext-authz#26). The verified iss URL is returned
 	// separately for the allowlist check + audit logging.
-	id = headers.Identity{
+	id := headers.Identity{
 		Subject:        subject,
 		Issuer:         headers.IssuerOIDC,
 		CredentialType: credType,
-		Tenant:         tenant,
+		// Tenant is deliberately left empty here. It is resolved in Check
+		// from orgID, against the daemon's org->tenant mapping — never
+		// read directly off the token (ADR-0093 decision 4).
 	}
 	// Carry the token's iat for the instant-revocation condition
 	// (gibson#627). Left as the zero time when the token has no iat, which
@@ -612,8 +640,7 @@ func identityFromJWTPayload(httpHeaders map[string]string, humanClients map[stri
 	if claims.Iat > 0 {
 		id.TokenIssuedAt = time.Unix(claims.Iat, 0).UTC()
 	}
-	verifiedIss = claims.Iss
-	return id, subjectSource, verifiedIss, nil
+	return verifiedToken{id: id, verifiedIss: claims.Iss, orgID: claims.ResourceOwnerID}, nil
 }
 
 // credentialTypeFor decides whether a token was issued to a person or to a
@@ -676,11 +703,11 @@ func extractMethod(req *authv3.CheckRequest) string {
 //     capability-grant, platform-operator) are exempt — they are revoked at the
 //     key/credential level, not the session level.
 //   - When the request names a tenant, the gate checks the per-tenant
-//     active_session relation (`type tenant`). The caller supplies the tenant
-//     explicitly (see sessionGateTenant) rather than the gate reading id.Tenant,
-//     because on the self-mode path id.Tenant is empty for every human caller —
-//     Zitadel user JWTs carry no tenant claim — while the request usually still
-//     names one in x-gibson-tenant. A missing or absent tuple fails closed.
+//     active_session relation (`type tenant`). id.Tenant is the tenant Check
+//     already resolved from the token's verified Zitadel org (ADR-0093
+//     decision 4) — the same value on both the self-mode and rule-mode
+//     paths now, never a client-supplied header. A missing or absent tuple
+//     fails closed.
 //   - When the request names NO tenant at all (the sign-in bootstrap window),
 //     the gate checks the USER-SCOPED active_session relation (`type user`,
 //     gibson#1244) via CheckUserSession. That path is allow-on-absent (a
@@ -784,19 +811,23 @@ func requestMeta(tenant string) map[string]string {
 	return map[string]string{"tenant": tenant}
 }
 
-// sessionGateTenant returns the tenant the active_session revocation gate
-// should be evaluated against: the identity's own tenant when it has one,
-// otherwise the x-gibson-tenant hint the request carries.
-//
-// The hint is safe here precisely because the gate can only deny: an
-// active_session tuple exists for a (user, tenant) pair the user actually
-// holds, so naming any other tenant fails the check. It is not a substitute
-// for the tenant cross-check that rule-mode object derivation performs.
-func sessionGateTenant(id headers.Identity, headerTenant string) string {
-	if id.Tenant != "" {
-		return id.Tenant
+// userTenant resolves a signed-in person's tenant from their token's
+// verified Zitadel org (ADR-0093 decision 4), through s.orgTenants. It
+// returns orgtenant.ErrNoTenant when orgID is empty (a token with no org
+// claim, e.g. a pre-ADR-0093 session) or when the org maps to no tenant —
+// callers treat that as "no tenant," never as an error. Any other error
+// means the resolver could not be asked and the caller must deny.
+func (s *EnvoyAuthzServer) userTenant(ctx context.Context, orgID string) (string, error) {
+	if orgID == "" {
+		return "", orgtenant.ErrNoTenant
 	}
-	return headerTenant
+	tenant, err := s.orgTenants.TenantForOrg(ctx, orgID)
+	if err != nil {
+		// %w keeps errors.Is(err, orgtenant.ErrNoTenant) working for the
+		// caller's switch above.
+		return "", fmt.Errorf("orgtenant: %w", err)
+	}
+	return tenant, nil
 }
 
 func okResponse(emitted httpHeader) *authv3.CheckResponse {
@@ -871,10 +902,16 @@ var (
 			"verify, was not bound to the caller, or did not cover the method.",
 	}, []string{"reason"})
 
-	// Tenant cross-check counters (zero-trust-hardening Req 4).
-	extauthzTenantMismatchTotal = promauto.NewCounter(prometheus.CounterOpts{
-		Name: "extauthz_tenant_mismatch_total",
-		Help: "Requests denied because x-gibson-tenant header mismatches JWT-asserted tenant.",
+	// Tenant-from-identity counters (ADR-0093 decision 4).
+	extauthzUserTenantHeaderRefusedTotal = promauto.NewCounter(prometheus.CounterOpts{
+		Name: "extauthz_user_tenant_header_refused_total",
+		Help: "Requests denied because an OIDC-user identity presented an x-gibson-tenant header; " +
+			"a person's tenant comes only from their token's verified Zitadel org.",
+	})
+
+	extauthzOrgTenantUnavailableTotal = promauto.NewCounter(prometheus.CounterOpts{
+		Name: "extauthz_org_tenant_unavailable_total",
+		Help: "Requests denied because the org->tenant resolver was unreachable.",
 	})
 
 	extauthzTenantCrossTenantDenied = promauto.NewCounter(prometheus.CounterOpts{
@@ -884,7 +921,7 @@ var (
 
 	extauthzTenantMissingTotal = promauto.NewCounter(prometheus.CounterOpts{
 		Name: "extauthz_tenant_missing_total",
-		Help: "Requests denied because no tenant could be derived from JWT or header.",
+		Help: "Requests denied because no tenant could be derived from the identity or header.",
 	})
 
 	// Issuer allowlist counter (security-hardening R13).

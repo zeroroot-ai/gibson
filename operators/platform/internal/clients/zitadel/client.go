@@ -79,20 +79,39 @@ type Client interface {
 	AddMachineUserClientSecret(ctx context.Context, userID string) (clientID, clientSecret string, err error)
 
 	// AddIAMMember adds the given user to the IAM with the given roles
-	// (e.g. ["IAM_OWNER"]). Idempotent: if the user is already a member
-	// the roles are merged in via PUT semantics. Used to grant the
-	// daemon's machine user the IAM_OWNER role its admin API calls need.
+	// (e.g. ["IAM_OWNER"]). Idempotent: if the user is already a member,
+	// Zitadel's PUT on 409 REPLACES the member's role list with the given
+	// roles — it is not a merge, confirmed against Zitadel's own API
+	// documentation ("The whole roles list will be updated. Make sure to
+	// include roles that you don't want to change (remove)."). Passing
+	// the caller's full desired role set on every call therefore gives
+	// exact-set semantics. Used to grant a machine user its declared
+	// IAM-scoped roles.
 	AddIAMMember(ctx context.Context, userID string, roles []string) error
+
+	// RemoveIAMMember revokes the given user's IAM membership entirely
+	// (DELETE /admin/v1/members/{userId}). Idempotent: 404 (never a
+	// member, or already removed) is success. Used when a machine user's
+	// declared role set has no IAM_-prefixed roles, so any role it
+	// previously held is revoked rather than left in place.
+	RemoveIAMMember(ctx context.Context, userID string) error
 
 	// AddOrgMember adds the given user to the organization identified by
 	// orgID with the given org-scoped roles (e.g. ["ORG_OWNER"]).
-	// Idempotent: if the user is already an org member the roles are
-	// merged in via PUT semantics, mirroring AddIAMMember's 409→PUT
-	// handling. Org-scoped roles are distinct from IAM (instance-scoped)
-	// roles — Zitadel routes them through /management/v1/orgs/{orgID}/
-	// members rather than /admin/v1/members. Used by the machine-user
-	// reconciler path to grant signup-style bots their org roles.
+	// Idempotent: if the user is already an org member, Zitadel's PUT on
+	// 409 REPLACES the member's role list (same exact-set semantics as
+	// AddIAMMember). Org-scoped roles are distinct from IAM
+	// (instance-scoped) roles — Zitadel routes them through
+	// /management/v1/orgs/{orgID}/members rather than /admin/v1/members.
+	// Used by the machine-user reconciler path to grant signup-style
+	// bots their org roles.
 	AddOrgMember(ctx context.Context, orgID, userID string, roles []string) error
+
+	// RemoveOrgMember revokes the given user's membership in orgID
+	// entirely (DELETE /management/v1/orgs/{orgID}/members/{userId}).
+	// Idempotent: 404 is success. Used when a machine user's declared
+	// role set has no ORG_-prefixed roles.
+	RemoveOrgMember(ctx context.Context, orgID, userID string) error
 
 	// GetOrgIDForProject returns the Zitadel organization ID that owns
 	// the given project (Zitadel's `details.resourceOwner` field). The
@@ -728,7 +747,13 @@ func (e *errClient) AddMachineUserClientSecret(ctx context.Context, userID strin
 func (e *errClient) AddIAMMember(ctx context.Context, userID string, roles []string) error {
 	return e.err
 }
+func (e *errClient) RemoveIAMMember(_ context.Context, _ string) error {
+	return e.err
+}
 func (e *errClient) AddOrgMember(ctx context.Context, orgID, userID string, roles []string) error {
+	return e.err
+}
+func (e *errClient) RemoveOrgMember(_ context.Context, _, _ string) error {
 	return e.err
 }
 func (e *errClient) EnsureRegistrationDisabled(ctx context.Context) (bool, error) {
@@ -916,6 +941,20 @@ func (c *httpClient) AddIAMMember(ctx context.Context, userID string, roles []st
 	return fmt.Errorf("AddIAMMember user=%s: %w", userID, err)
 }
 
+// RemoveIAMMember implements Client.
+//
+// Zitadel v4: DELETE /admin/v1/members/{userId} revokes the user's IAM
+// membership entirely. 404 (never a member) is treated as idempotent
+// success per the Client interface's contract.
+func (c *httpClient) RemoveIAMMember(ctx context.Context, userID string) error {
+	path := "/admin/v1/members/" + url.PathEscape(userID)
+	err := c.doJSON(ctx, http.MethodDelete, path, nil, nil)
+	if err == nil || IsNotFound(err) {
+		return nil
+	}
+	return fmt.Errorf("RemoveIAMMember user=%s: %w", userID, err)
+}
+
 // AddOrgMember implements Client.
 //
 // Zitadel v4: POST /management/v1/orgs/{orgID}/members with body
@@ -948,6 +987,25 @@ func (c *httpClient) AddOrgMember(ctx context.Context, orgID, userID string, rol
 		return nil
 	}
 	return fmt.Errorf("AddOrgMember org=%s user=%s: %w", orgID, userID, err)
+}
+
+// RemoveOrgMember implements Client.
+//
+// Zitadel v4: DELETE /management/v1/orgs/{orgID}/members/{userId} revokes
+// the user's org membership entirely. The x-zitadel-orgid header pins the
+// request to orgID, mirroring AddOrgMember. 404 is idempotent success.
+func (c *httpClient) RemoveOrgMember(ctx context.Context, orgID, userID string) error {
+	if orgID == "" {
+		return fmt.Errorf("RemoveOrgMember user=%s: empty orgID: %w", userID, ErrInvalidInput)
+	}
+	headers := map[string]string{"x-zitadel-orgid": orgID}
+	path := fmt.Sprintf("/management/v1/orgs/%s/members/%s",
+		url.PathEscape(orgID), url.PathEscape(userID))
+	err := c.doJSONWithHeaders(ctx, http.MethodDelete, path, nil, nil, headers)
+	if err == nil || IsNotFound(err) {
+		return nil
+	}
+	return fmt.Errorf("RemoveOrgMember org=%s user=%s: %w", orgID, userID, err)
 }
 
 // updatableLoginPolicyFields are the keys the Admin UpdateLoginPolicy

@@ -47,8 +47,11 @@ import (
 
 const (
 	// openbaoImage matches the SDK's openbao_integration_test.go pin
-	// (sdk#90). Bumping must be coordinated across both repos.
-	openbaoImage = "openbao/openbao:2.5.3"
+	// (sdk#90). Bumping must be coordinated across both repos. Pulled from
+	// the org mirror (zeroroot-ai/.github mirror-list.yaml), never Docker
+	// Hub directly, so the merge queue never depends on Docker Hub's rate
+	// limit (gibson#233).
+	openbaoImage = "ghcr.io/zeroroot-ai/mirror/openbao:2.5.3"
 
 	// openbaoDevRootToken is the fixed root token used by OpenBao's
 	// dev-mode server.

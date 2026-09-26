@@ -80,6 +80,13 @@
 //	                                issued to any other client is a machine credential
 //	EXT_AUTHZ_ZITADEL_ISSUER        REQUIRED — Zitadel issuer allowlist (URL or
 //	                                comma-separated list); the JWT iss claim must match.
+//	EXT_AUTHZ_ORG_TENANT_URL        REQUIRED — the daemon's org->tenant route, e.g.
+//	                                https://gibson:8086/identity/v1/org-tenant/
+//	                                (ADR-0093 decision 4: a person's tenant comes
+//	                                from their token's verified Zitadel org, never
+//	                                from a client-supplied header). MUST be https —
+//	                                fetched over SPIFFE mTLS pinned to
+//	                                EXT_AUTHZ_DAEMON_SVID, like the CG keys fetch.
 //	SPIFFE_ENDPOINT_SOCKET          REQUIRED — SPIRE Workload API socket path
 //	                                (e.g. unix:///run/spire/agent-sockets/spire-agent.sock)
 //	EXT_AUTHZ_ENVOY_SVID            REQUIRED — Envoy peer SVID to authorize
@@ -126,6 +133,7 @@ import (
 
 	"github.com/zeroroot-ai/gibson/internal/server/extauthz/cgjwt"
 	"github.com/zeroroot-ai/gibson/internal/server/extauthz/fga"
+	"github.com/zeroroot-ai/gibson/internal/server/extauthz/orgtenant"
 	"github.com/zeroroot-ai/gibson/internal/server/extauthz/server"
 	"github.com/zeroroot-ai/sdk/capabilitygrant"
 )
@@ -215,6 +223,15 @@ func main() {
 		os.Exit(1)
 	}
 
+	// The org->tenant resolver (ADR-0093 decision 4): a person's tenant
+	// comes from their token's verified Zitadel org, resolved by asking the
+	// daemon, never from a client-supplied header.
+	orgTenants, err := buildOrgTenantResolver(log, x509Source, x509Source)
+	if err != nil {
+		log.Error("init org->tenant resolver", "err", err)
+		os.Exit(1)
+	}
+
 	// Issuer allowlist for the JWT iss check (security-hardening R13).
 	issuerAllowlist, err := loadIssuerAllowlist()
 	if err != nil {
@@ -248,6 +265,7 @@ func main() {
 		Logger:          log,
 		IssuerAllowlist: issuerAllowlist,
 		HumanClientIDs:  loadHumanClientIDs(),
+		OrgTenants:      orgTenants,
 	}))
 	// gRPC reflection is disabled by default in production.
 	// Set EXT_AUTHZ_GRPC_REFLECTION=1 to enable (dev/debug only).
@@ -503,6 +521,45 @@ func buildCGKeysClient(log *slog.Logger, svid x509svid.Source, bundle x509bundle
 	log.Info("capability-grant key transport is SVID-pinned mTLS",
 		"keys_url", keysURL, "daemon_svid", os.Getenv("EXT_AUTHZ_DAEMON_SVID"))
 	return client, nil
+}
+
+// buildOrgTenantResolver wires the org->tenant resolver (ADR-0093 decision
+// 4): a person's tenant comes from their token's verified Zitadel org,
+// resolved by asking the daemon over the SVID-pinned mTLS transport, never
+// from a client-supplied x-gibson-tenant header.
+//
+// EXT_AUTHZ_ORG_TENANT_URL is required and must be https, for the same
+// reason as EXT_AUTHZ_CGJWT_KEYS_URL: the mapping it fetches determines a
+// person's tenant, so an unauthenticated origin for it is an unauthenticated
+// origin for every signed-in person's authorization.
+func buildOrgTenantResolver(log *slog.Logger, svid x509svid.Source, bundle x509bundle.Source) (*orgtenant.Resolver, error) {
+	rawURL := strings.TrimSpace(os.Getenv("EXT_AUTHZ_ORG_TENANT_URL"))
+	if rawURL == "" {
+		return nil, errors.New("EXT_AUTHZ_ORG_TENANT_URL required (the daemon's org->tenant route, ADR-0093 decision 4)")
+	}
+	parsed, err := url.Parse(rawURL)
+	if err != nil {
+		return nil, fmt.Errorf("EXT_AUTHZ_ORG_TENANT_URL %q is not a parseable URL: %w", rawURL, err)
+	}
+	if parsed.Scheme != "https" {
+		return nil, fmt.Errorf(
+			"EXT_AUTHZ_ORG_TENANT_URL must be https, got scheme %q (%s): a person's tenant comes "+
+				"from this lookup, so it is fetched over SPIFFE mTLS pinned to EXT_AUTHZ_DAEMON_SVID — "+
+				"point this at the daemon's mTLS listener (https://<daemon>:8086/identity/v1/org-tenant/), "+
+				"not the plaintext bootstrap listener",
+			parsed.Scheme, rawURL)
+	}
+	client, err := daemonMTLSClient(svid, bundle, 5*time.Second)
+	if err != nil {
+		return nil, fmt.Errorf("org-tenant transport: %w", err)
+	}
+	resolver, err := orgtenant.New(orgtenant.Config{Client: client, BaseURL: rawURL})
+	if err != nil {
+		return nil, fmt.Errorf("org-tenant resolver: %w", err)
+	}
+	log.Info("org->tenant transport is SVID-pinned mTLS",
+		"url", rawURL, "daemon_svid", os.Getenv("EXT_AUTHZ_DAEMON_SVID"))
+	return resolver, nil
 }
 
 // daemonMTLSClient returns an HTTP client whose peer is pinned to the daemon
