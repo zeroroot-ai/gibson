@@ -29,3 +29,30 @@ func TestAll_HasExactlyTheFourTenantRolesInOrder(t *testing.T) {
 		}
 	}
 }
+
+// TestIsZitadelUserSubject pins the fail-closed filter (owner decision D2,
+// option b) that keeps Sync from ever reading, writing or deleting a role
+// tuple for a `user:`-typed subject that is not a Zitadel grant — most
+// notably the exit-test runner's SPIFFE-derived identity, which is a real
+// stored tenant.member tuple but has no Zitadel user behind it.
+func TestIsZitadelUserSubject(t *testing.T) {
+	cases := []struct {
+		subject string
+		want    bool
+	}{
+		{"user:218901902167211265", true},
+		{"user:1", true},
+		{"user:zeroroot.ai/platform/e2e-runner", false}, // the e2e runner, gibson#14 fixtures: a SPIFFE id, has "/"
+		{"user:", false},
+		{"user:bob-id", true}, // human-readable test fixture id, not numeric, but not SPIFFE-shaped either
+		{"user:user-1", true}, // ditto
+		{"agent_principal:abc-123", false},
+		{"tenant:acme", false},
+		{"", false},
+	}
+	for _, tc := range cases {
+		if got := tenantrole.IsZitadelUserSubject(tc.subject); got != tc.want {
+			t.Errorf("IsZitadelUserSubject(%q) = %v, want %v", tc.subject, got, tc.want)
+		}
+	}
+}

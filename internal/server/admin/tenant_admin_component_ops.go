@@ -35,6 +35,7 @@ package admin
 
 import (
 	"context"
+	"errors"
 	"log/slog"
 	"strings"
 
@@ -42,15 +43,11 @@ import (
 	"google.golang.org/grpc/status"
 
 	"github.com/zeroroot-ai/gibson/internal/platform/authz"
-	"github.com/zeroroot-ai/gibson/internal/platform/idp"
+	"github.com/zeroroot-ai/gibson/internal/platform/tenantrole"
 
 	tenantv1 "github.com/zeroroot-ai/gibson/internal/server/daemon/api/gibson/tenant/v1"
 	"github.com/zeroroot-ai/sdk/auth"
 )
-
-// tenantRoleRelations are the FGA relations that make a user a member of a
-// tenant. SetTenantRole removes Zitadel org membership only when none remain.
-var tenantRoleRelations = []string{"owner", "admin", "member", "writer"}
 
 // ---------------------------------------------------------------------------
 // SetCatalogEnabled (ADR-0041 remaining gap — catalog-enablement daemon route)
@@ -455,101 +452,51 @@ func (s *TenantAdminServer) SetTenantRole(ctx context.Context, req *tenantv1.Set
 			"user_id is the tenant's Owner; the Owner's role can be changed only through TransferOwnership")
 	}
 
-	tuple := authz.Tuple{User: userRef, Relation: role, Object: tenantRef}
+	if s.roles == nil {
+		return nil, status.Error(codes.Unavailable, "role sync not configured")
+	}
+	t, err := s.tenantOf(ctx, tenantID)
+	if err != nil {
+		return nil, err
+	}
 
+	// Under ADR-0093 a tenant user holds one role, stored as one Zitadel
+	// grant. "remove" therefore means "remove the tenant role" — there is no
+	// separate FGA-only relation to drop. Roles.Assign / Roles.Revoke write
+	// the Zitadel grant first and then copy it into FGA in the same call
+	// (Roles.Sync), so this handler never touches FGA directly.
 	if req.GetRemove() {
-		// FGA first (revoke authority), then Zitadel (drop org membership only
-		// when no tenant role remains). On Zitadel failure the FGA tuple is
-		// already gone — fail-closed on authority; an idempotent retry and the
-		// operator's reconciler converge the org side (ADR-0043).
-		present, err := s.authorizer.Check(ctx, userRef, role, tenantRef)
-		if err != nil {
-			return nil, status.Errorf(codes.Internal, "fga Check %s: %v", role, err)
-		}
-		if present {
-			if err := s.authorizer.Delete(ctx, []authz.Tuple{tuple}); err != nil {
-				return nil, status.Errorf(codes.Internal, "fga Delete %s: %v", role, err)
-			}
-		}
-		if err := s.maybeRemoveZitadelMember(ctx, tenantID, req.GetUserId()); err != nil {
-			return nil, err
+		if err := s.roles.Revoke(tenantrole.WithCaller(ctx, "daemon"), t, req.GetUserId()); err != nil {
+			return nil, status.Errorf(codes.Internal, "revoke tenant role: %v", err)
 		}
 	} else {
-		// Zitadel first (ensure org membership, idempotent), then FGA write. On
-		// FGA failure the user is in the org but holds no authority — fail-closed.
-		if err := s.addZitadelMember(ctx, tenantID, req.GetUserId(), role); err != nil {
-			return nil, err
+		roleValue, ok := tenantrole.FromRelation(role)
+		if !ok {
+			return nil, status.Errorf(codes.Internal, "role %q has no tenant-role mapping", role)
 		}
-		present, err := s.authorizer.Check(ctx, userRef, role, tenantRef)
-		if err != nil {
-			return nil, status.Errorf(codes.Internal, "fga Check %s: %v", role, err)
-		}
-		if !present {
-			if err := s.authorizer.Write(ctx, []authz.Tuple{tuple}); err != nil {
-				return nil, status.Errorf(codes.Internal, "fga Write %s: %v", role, err)
-			}
+		if err := s.roles.Assign(tenantrole.WithCaller(ctx, "daemon"), t, req.GetUserId(), roleValue); err != nil {
+			return nil, status.Errorf(codes.Internal, "assign tenant role: %v", err)
 		}
 	}
 	return &tenantv1.SetTenantRoleResponse{}, nil
 }
 
-// resolveTenantOrgID returns the IdP org id seeded for the tenant, or "" when
-// the Zitadel-membership projection should be skipped (no resolver, no idp
-// client, or no mapping yet — the operator backfill/reconcile converges it).
-func (s *TenantAdminServer) resolveTenantOrgID(ctx context.Context, tenantID string) (string, error) {
-	if s.orgResolver == nil || s.idpClient == nil {
-		return "", nil
+// tenantOf resolves tenantID into a tenantrole.Tenant using the configured
+// TenantZitadelOrgResolver. An unmapped tenant (no Zitadel org yet) is a
+// FailedPrecondition: a role write with nowhere to land in Zitadel is a bug
+// to surface, never a silent skip.
+func (s *TenantAdminServer) tenantOf(ctx context.Context, tenantID string) (tenantrole.Tenant, error) {
+	if s.orgResolver == nil {
+		return tenantrole.Tenant{}, status.Error(codes.Unavailable, "zitadel org resolver not configured")
 	}
 	orgID, err := s.orgResolver.ZitadelOrgID(ctx, tenantID)
 	if err != nil {
-		return "", status.Errorf(codes.Internal, "resolve zitadel org for tenant %q: %v", tenantID, err)
-	}
-	return orgID, nil
-}
-
-// addZitadelMember writes the Zitadel half of a role-add: ensure the user is a
-// member of the tenant's per-tenant org with the given role. Idempotent.
-func (s *TenantAdminServer) addZitadelMember(ctx context.Context, tenantID, userID, role string) error {
-	orgID, err := s.resolveTenantOrgID(ctx, tenantID)
-	if err != nil {
-		return err
+		return tenantrole.Tenant{}, status.Errorf(codes.Internal, "resolve zitadel org for tenant %q: %v", tenantID, err)
 	}
 	if orgID == "" {
-		return nil
+		return tenantrole.Tenant{}, status.Errorf(codes.FailedPrecondition, "tenant %q has no zitadel org yet", tenantID)
 	}
-	if err := s.idpClient.AddTenantMember(ctx, idp.TenantMembershipRequest{OrgID: orgID, UserID: userID, Role: role}); err != nil {
-		return status.Errorf(codes.Internal, "zitadel add member: %v", err)
-	}
-	return nil
-}
-
-// maybeRemoveZitadelMember removes the user from the tenant's per-tenant org,
-// but only when they retain no tenant role (Zitadel org membership is binary,
-// not per-role). Idempotent.
-func (s *TenantAdminServer) maybeRemoveZitadelMember(ctx context.Context, tenantID, userID string) error {
-	orgID, err := s.resolveTenantOrgID(ctx, tenantID)
-	if err != nil {
-		return err
-	}
-	if orgID == "" {
-		return nil
-	}
-	tenantRef := "tenant:" + tenantID
-	userRef := "user:" + userID
-	for _, r := range tenantRoleRelations {
-		present, cerr := s.authorizer.Check(ctx, userRef, r, tenantRef)
-		if cerr != nil {
-			return status.Errorf(codes.Internal, "fga Check %s: %v", r, cerr)
-		}
-		if present {
-			// Still a tenant member via another role — keep org membership.
-			return nil
-		}
-	}
-	if err := s.idpClient.RemoveTenantMember(ctx, idp.TenantMembershipRequest{OrgID: orgID, UserID: userID}); err != nil {
-		return status.Errorf(codes.Internal, "zitadel remove member: %v", err)
-	}
-	return nil
+	return tenantrole.Tenant{ID: tenantID, OrgID: orgID}, nil
 }
 
 // ---------------------------------------------------------------------------
@@ -624,37 +571,23 @@ func (s *TenantAdminServer) TransferOwnership(ctx context.Context, req *tenantv1
 		return nil, status.Error(codes.InvalidArgument, "new_owner_user_id must be an existing user of this tenant")
 	}
 
-	atomic, ok := s.authorizer.(authz.AtomicWriter)
-	if !ok {
-		return nil, status.Error(codes.Internal, "authorizer does not support atomic ownership transfer")
+	if s.roles == nil {
+		return nil, status.Error(codes.Unavailable, "role sync not configured")
+	}
+	t, err := s.tenantOf(ctx, tenantID)
+	if err != nil {
+		return nil, err
 	}
 
-	writes := []authz.Tuple{{User: newOwnerRef, Relation: "owner", Object: tenantRef}}
-	// A caller who is Owner always passes Check(callerRef, "admin", tenantRef)
-	// — model.fga derives admin from owner by computed union — so Check
-	// cannot tell us whether a DIRECT admin tuple already exists. It can: a
-	// user promoted to Owner after already being granted admin directly (via
-	// SetTenantRole, before they became Owner) keeps that direct tuple. Ask
-	// for the stored tuple, not the derived permission, so we never attempt
-	// to write a tuple that is already there — that write would fail as
-	// "already exists" and abort the whole transaction, including the owner
-	// move. Authorizers that do not implement TupleReader (test doubles)
-	// always take the write; they do not model a pre-existing direct tuple.
-	callerHasDirectAdmin := false
-	if reader, ok := s.authorizer.(authz.TupleReader); ok {
-		existing, err := reader.ReadTuples(ctx, callerRef, "admin", tenantRef)
-		if err != nil {
-			return nil, status.Errorf(codes.Internal, "fga ReadTuples admin: %v", err)
+	// Roles.Transfer writes the two Zitadel grants (new owner promoted, caller
+	// demoted to admin), then Roles.Sync copies both into FGA in one
+	// WriteAndDelete — Sync only writes a tuple that is not already there, so
+	// a caller who already held a direct admin tuple is left untouched.
+	if err := s.roles.Transfer(tenantrole.WithCaller(ctx, "daemon"), t, identity.Subject, req.GetNewOwnerUserId()); err != nil {
+		if errors.Is(err, tenantrole.ErrOwnerConflict) {
+			return nil, status.Error(codes.Aborted, "ownership transfer conflicted with a concurrent change; retry")
 		}
-		callerHasDirectAdmin = len(existing) > 0
-	}
-	if !callerHasDirectAdmin {
-		writes = append(writes, authz.Tuple{User: callerRef, Relation: "admin", Object: tenantRef})
-	}
-	deletes := []authz.Tuple{{User: callerRef, Relation: "owner", Object: tenantRef}}
-
-	if err := atomic.WriteAndDelete(ctx, writes, deletes); err != nil {
-		return nil, status.Errorf(codes.Internal, "fga atomic ownership transfer: %v", err)
+		return nil, status.Errorf(codes.Internal, "transfer ownership: %v", err)
 	}
 
 	return &tenantv1.TransferOwnershipResponse{}, nil

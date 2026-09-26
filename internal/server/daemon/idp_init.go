@@ -10,11 +10,17 @@ package daemon
 import (
 	"context"
 	"fmt"
+	"net/http"
 	"os"
 	"time"
 
+	"golang.org/x/oauth2"
+	"golang.org/x/oauth2/clientcredentials"
+
+	"github.com/zeroroot-ai/gibson/internal/platform/authz"
 	"github.com/zeroroot-ai/gibson/internal/platform/idp"
 	"github.com/zeroroot-ai/gibson/internal/platform/idp/zitadel"
+	"github.com/zeroroot-ai/gibson/internal/platform/tenantrole"
 	"github.com/zeroroot-ai/gibson/internal/platform/zitadelconn"
 )
 
@@ -43,6 +49,12 @@ const (
 
 	// envZitadelOrgID is the Zitadel organisation ID.
 	envZitadelOrgID = "GIBSON_IDP_ZITADEL_ORG_ID"
+
+	// envIDPZitadelProjectID is the gibson Zitadel project ID (ADR-0093): the
+	// project every tenant org is granted, and every tenant role is a user
+	// grant on. The chart sets it from the admin-credentials Secret's
+	// project_id key.
+	envIDPZitadelProjectID = "GIBSON_IDP_ZITADEL_PROJECT_ID"
 )
 
 // initIDPAdminClient constructs an idp.AdminClient from environment variables.
@@ -120,4 +132,59 @@ func initZitadelClient(ctx context.Context) (idp.AdminClient, error) {
 			cfg.Issuer, cfg.ClientID, err)
 	}
 	return client, nil
+}
+
+// initTenantRoleSyncer builds the daemon's tenantrole.Syncer (ADR-0093): the
+// one writer of tenant-role tuples. It follows initIDPAdminClient's
+// fail-closed convention:
+//
+//   - GIBSON_IDP_PROVIDER unset: returns (nil, nil). No IdP is configured, so
+//     there is nowhere for a tenant role to live.
+//   - GIBSON_IDP_PROVIDER set to "zitadel": every input becomes mandatory. A
+//     missing GIBSON_IDP_ZITADEL_PROJECT_ID or an authorizer that cannot
+//     support the Syncer (see tenantrole.AuthzTuples) is a boot error, never
+//     a silent skip — a daemon that started without a Syncer would accept
+//     SetTenantRole calls it cannot fulfil.
+func initTenantRoleSyncer(ctx context.Context, authorizer authz.Authorizer) (*tenantrole.Syncer, error) {
+	provider := os.Getenv(envIDPProvider)
+	if provider == "" {
+		return nil, nil
+	}
+	if provider != "zitadel" {
+		return nil, fmt.Errorf("tenantrole: unsupported provider %q in %s; supported values: zitadel", provider, envIDPProvider)
+	}
+
+	projectID := os.Getenv(envIDPZitadelProjectID)
+	if projectID == "" {
+		return nil, fmt.Errorf("tenantrole: %s is required when %s=zitadel", envIDPZitadelProjectID, envIDPProvider)
+	}
+	clientID := os.Getenv(envIDPAdminClientID)
+	clientSecret := os.Getenv(envIDPAdminClientSecret)
+	if clientID == "" || clientSecret == "" {
+		return nil, fmt.Errorf("tenantrole: %s and %s are required when %s=zitadel", envIDPAdminClientID, envIDPAdminClientSecret, envIDPProvider)
+	}
+
+	// ADR-0092: connect to the Zitadel Service and claim the public host by
+	// header, same as initZitadelClient.
+	endpoint, err := zitadelconn.FromEnv()
+	if err != nil {
+		return nil, fmt.Errorf("tenantrole: %w", err)
+	}
+
+	base := &http.Client{Timeout: 10 * time.Second, Transport: endpoint.Transport(nil)}
+	ccCfg := clientcredentials.Config{
+		ClientID:     clientID,
+		ClientSecret: clientSecret,
+		TokenURL:     endpoint.TokenURL(),
+		Scopes:       []string{"openid", "urn:zitadel:iam:org:project:id:zitadel:aud"},
+	}
+	baseCtx := context.WithValue(ctx, oauth2.HTTPClient, base)
+	hc := oauth2.NewClient(baseCtx, ccCfg.TokenSource(baseCtx))
+
+	grants := tenantrole.NewZitadelGrants(endpoint, hc, projectID)
+	tuples, err := tenantrole.AuthzTuples(authorizer)
+	if err != nil {
+		return nil, fmt.Errorf("tenantrole: %w", err)
+	}
+	return tenantrole.NewSyncer(grants, tuples, nil), nil
 }

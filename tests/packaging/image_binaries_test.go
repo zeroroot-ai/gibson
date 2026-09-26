@@ -41,7 +41,6 @@ var shippedTools = []string{
 	"gibson-migrate",
 	"lowercase-tenant-owner",
 	"sandbox-eviction-handler",
-	"tenant-owner-backfill",
 }
 
 // repoRoot resolves the module root from this file: tests/packaging/ ⇒ two up.

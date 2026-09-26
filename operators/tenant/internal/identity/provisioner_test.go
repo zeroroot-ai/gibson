@@ -28,6 +28,12 @@ type fakeZitadel struct {
 	createCalled int
 	getCalled    int
 	deleteCalled int
+
+	ensureGrantCalled  int
+	ensureGrantErr     error
+	lastGrantProjectID string
+	lastGrantOrgID     string
+	lastGrantRoleKeys  []string
 }
 
 func newFakeZitadel() *fakeZitadel {
@@ -85,12 +91,25 @@ func (f *fakeZitadel) CreateServiceAccount(_ context.Context, _, name string) (s
 }
 func (f *fakeZitadel) DeleteServiceAccount(_ context.Context, _, _ string) error { return nil }
 
+// EnsureProjectGrant records the call so tests can assert it ran on both the
+// known-org and new-org paths (section 7.1).
+func (f *fakeZitadel) EnsureProjectGrant(_ context.Context, projectID, orgID string, roleKeys []string) error {
+	f.ensureGrantCalled++
+	f.lastGrantProjectID = projectID
+	f.lastGrantOrgID = orgID
+	f.lastGrantRoleKeys = append([]string(nil), roleKeys...)
+	if f.ensureGrantErr != nil {
+		return f.ensureGrantErr
+	}
+	return nil
+}
+
 var _ zitadel.Client = (*fakeZitadel)(nil)
 
 // Provision on a fresh tenant creates the org and returns its id/slug.
 func TestProvision_CreatesOrg(t *testing.T) {
 	fz := newFakeZitadel()
-	p := New(fz)
+	p := New(fz, "PROJ-1")
 
 	res, err := p.Provision(context.Background(), Request{TenantID: "acme", DisplayName: "Acme Corp"})
 	if err != nil {
@@ -111,7 +130,7 @@ func TestProvision_CreatesOrg(t *testing.T) {
 // confirms it and CreateOrganization is NOT called.
 func TestProvision_KnownOrgFastPath(t *testing.T) {
 	fz := newFakeZitadel()
-	p := New(fz)
+	p := New(fz, "PROJ-1")
 	// Seed an existing org.
 	first, err := p.Provision(context.Background(), Request{TenantID: "acme", DisplayName: "Acme Corp"})
 	if err != nil {
@@ -137,7 +156,7 @@ func TestProvision_KnownOrgFastPath(t *testing.T) {
 // Provision with a KnownOrgID that no longer exists re-creates the org (drift).
 func TestProvision_DriftRecreates(t *testing.T) {
 	fz := newFakeZitadel()
-	p := New(fz)
+	p := New(fz, "PROJ-1")
 
 	res, err := p.Provision(context.Background(), Request{TenantID: "acme", DisplayName: "Acme Corp", KnownOrgID: "org_stale"})
 	if err != nil {
@@ -154,7 +173,7 @@ func TestProvision_DriftRecreates(t *testing.T) {
 // Empty DisplayName falls back to the tenant id as the org name.
 func TestProvision_EmptyDisplayNameFallsBackToTenantID(t *testing.T) {
 	fz := newFakeZitadel()
-	p := New(fz)
+	p := New(fz, "PROJ-1")
 	if _, err := p.Provision(context.Background(), Request{TenantID: "acme"}); err != nil {
 		t.Fatalf("provision: %v", err)
 	}
@@ -165,7 +184,7 @@ func TestProvision_EmptyDisplayNameFallsBackToTenantID(t *testing.T) {
 
 // Empty tenant id is rejected.
 func TestProvision_EmptyTenantRejected(t *testing.T) {
-	p := New(newFakeZitadel())
+	p := New(newFakeZitadel(), "PROJ-1")
 	if _, err := p.Provision(context.Background(), Request{}); err == nil {
 		t.Fatal("want error on empty tenant id")
 	}
@@ -175,7 +194,7 @@ func TestProvision_EmptyTenantRejected(t *testing.T) {
 func TestProvision_CreateErrorSurfaces(t *testing.T) {
 	fz := newFakeZitadel()
 	fz.createErr = errors.New("zitadel down")
-	p := New(fz)
+	p := New(fz, "PROJ-1")
 	if _, err := p.Provision(context.Background(), Request{TenantID: "acme"}); err == nil {
 		t.Fatal("want error when CreateOrganization fails")
 	}
@@ -184,7 +203,7 @@ func TestProvision_CreateErrorSurfaces(t *testing.T) {
 // Deprovision deletes the org.
 func TestDeprovision_DeletesOrg(t *testing.T) {
 	fz := newFakeZitadel()
-	p := New(fz)
+	p := New(fz, "PROJ-1")
 	res, err := p.Provision(context.Background(), Request{TenantID: "acme"})
 	if err != nil {
 		t.Fatalf("provision: %v", err)
@@ -204,7 +223,7 @@ func TestDeprovision_DeletesOrg(t *testing.T) {
 // does NOT call DeleteOrganization.
 func TestDeprovision_EmptyOrgIsNoop(t *testing.T) {
 	fz := newFakeZitadel()
-	p := New(fz)
+	p := New(fz, "PROJ-1")
 	if err := p.Deprovision(context.Background(), ""); err != nil {
 		t.Fatalf("empty org deprovision must be success, got %v", err)
 	}
@@ -216,7 +235,7 @@ func TestDeprovision_EmptyOrgIsNoop(t *testing.T) {
 // Deprovision of an already-gone org (NotFound) is success.
 func TestDeprovision_NotFoundIsSuccess(t *testing.T) {
 	fz := newFakeZitadel()
-	p := New(fz)
+	p := New(fz, "PROJ-1")
 	if err := p.Deprovision(context.Background(), "org_missing"); err != nil {
 		t.Fatalf("not-found delete must be success, got %v", err)
 	}
@@ -226,7 +245,7 @@ func TestDeprovision_NotFoundIsSuccess(t *testing.T) {
 func TestDeprovision_RealErrorSurfaces(t *testing.T) {
 	fz := newFakeZitadel()
 	fz.deleteErr = errors.New("zitadel down")
-	p := New(fz)
+	p := New(fz, "PROJ-1")
 	if err := p.Deprovision(context.Background(), "org_1"); err == nil {
 		t.Fatal("want error when DeleteOrganization fails with a non-notfound error")
 	}
@@ -238,5 +257,67 @@ func TestNew_NilClientPanics(t *testing.T) {
 			t.Fatal("want panic on nil zitadel client")
 		}
 	}()
-	New(nil)
+	New(nil, "PROJ-1")
+}
+
+func TestNew_EmptyProjectIDPanics(t *testing.T) {
+	defer func() {
+		if recover() == nil {
+			t.Fatal("want panic on empty projectID")
+		}
+	}()
+	New(newFakeZitadel(), "")
+}
+
+// TestProvision_EnsuresProjectGrantOnNewOrg pins that a fresh org gets the
+// gibson project granted with the four tenant role keys.
+func TestProvision_EnsuresProjectGrantOnNewOrg(t *testing.T) {
+	fz := newFakeZitadel()
+	p := New(fz, "PROJ-1")
+
+	res, err := p.Provision(context.Background(), Request{TenantID: "acme"})
+	if err != nil {
+		t.Fatalf("provision: %v", err)
+	}
+	if fz.ensureGrantCalled != 1 {
+		t.Fatalf("want 1 EnsureProjectGrant call, got %d", fz.ensureGrantCalled)
+	}
+	if fz.lastGrantProjectID != "PROJ-1" || fz.lastGrantOrgID != res.OrgID {
+		t.Fatalf("EnsureProjectGrant(project=%q, org=%q), want (PROJ-1, %q)", fz.lastGrantProjectID, fz.lastGrantOrgID, res.OrgID)
+	}
+	if len(fz.lastGrantRoleKeys) != 4 {
+		t.Fatalf("EnsureProjectGrant roleKeys = %v, want the four tenant roles", fz.lastGrantRoleKeys)
+	}
+}
+
+// TestProvision_EnsuresProjectGrantOnTheKnownOrgPathToo pins that the fast
+// path (KnownOrgID still resolves) still ensures the grant, so a grant that
+// drifted away — or never existed on an org provisioned before this project
+// did — is repaired on every reconcile.
+func TestProvision_EnsuresProjectGrantOnTheKnownOrgPathToo(t *testing.T) {
+	fz := newFakeZitadel()
+	p := New(fz, "PROJ-1")
+	first, err := p.Provision(context.Background(), Request{TenantID: "acme"})
+	if err != nil {
+		t.Fatalf("seed provision: %v", err)
+	}
+	fz.ensureGrantCalled = 0
+
+	if _, err := p.Provision(context.Background(), Request{TenantID: "acme", KnownOrgID: first.OrgID}); err != nil {
+		t.Fatalf("provision (known-org path): %v", err)
+	}
+	if fz.ensureGrantCalled != 1 {
+		t.Fatalf("want EnsureProjectGrant to run on the known-org path too, got %d calls", fz.ensureGrantCalled)
+	}
+}
+
+// TestProvision_EnsureProjectGrantErrorSurfaces pins that a Zitadel failure
+// granting the project surfaces as an error rather than a silent Ready.
+func TestProvision_EnsureProjectGrantErrorSurfaces(t *testing.T) {
+	fz := newFakeZitadel()
+	fz.ensureGrantErr = errors.New("zitadel down")
+	p := New(fz, "PROJ-1")
+	if _, err := p.Provision(context.Background(), Request{TenantID: "acme"}); err == nil {
+		t.Fatal("want error when EnsureProjectGrant fails")
+	}
 }

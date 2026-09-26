@@ -62,6 +62,11 @@ type Client interface {
 	// DeleteServiceAccount removes the service account identified by accountID
 	// from the given org. Idempotent: 404 is treated as success.
 	DeleteServiceAccount(ctx context.Context, orgID, accountID string) error
+
+	// EnsureProjectGrant grants the gibson project to orgID with exactly
+	// roleKeys (ADR-0093 decision 2): none found creates the grant, found
+	// with different keys updates it. Idempotent.
+	EnsureProjectGrant(ctx context.Context, projectID, orgID string, roleKeys []string) error
 }
 
 // Organization represents a Zitadel organization.
@@ -339,6 +344,80 @@ func (c *httpClient) DeleteServiceAccount(ctx context.Context, _, accountID stri
 	return nil
 }
 
+// connectJSON posts a Connect unary JSON request to /<service>/<method>,
+// the calling convention of Zitadel's v2 services (no REST mapping).
+func (c *httpClient) connectJSON(ctx context.Context, service, method string, body, out any) error {
+	return c.doJSON(ctx, http.MethodPost, "/"+service+"/"+method, body, out)
+}
+
+// EnsureProjectGrant implements Client.
+//
+// Zitadel v2: ListProjectGrants filtered by project + granted org; none
+// creates via CreateProjectGrant, found with different keys updates via
+// UpdateProjectGrant.
+func (c *httpClient) EnsureProjectGrant(ctx context.Context, projectID, orgID string, roleKeys []string) error {
+	const projectService = "zitadel.project.v2.ProjectService"
+
+	var listResp struct {
+		ProjectGrants []struct {
+			GrantedOrganizationID string   `json:"grantedOrganizationId"`
+			RoleKeys              []string `json:"roleKeys"`
+		} `json:"projectGrants"`
+	}
+	listBody := map[string]any{
+		"filters": []map[string]any{
+			{"inProjectIdsFilter": map[string]any{"ids": []string{projectID}}},
+			{"grantedOrganizationIdFilter": map[string]string{"id": orgID}},
+		},
+	}
+	if err := c.connectJSON(ctx, projectService, "ListProjectGrants", listBody, &listResp); err != nil {
+		return fmt.Errorf("EnsureProjectGrant: ListProjectGrants project=%s org=%s: %w", projectID, orgID, err)
+	}
+
+	var existing []string
+	found := false
+	for _, g := range listResp.ProjectGrants {
+		if g.GrantedOrganizationID == orgID {
+			existing = g.RoleKeys
+			found = true
+			break
+		}
+	}
+	if found && sameRoleKeys(existing, roleKeys) {
+		return nil
+	}
+
+	body := map[string]any{"projectId": projectID, "grantedOrganizationId": orgID, "roleKeys": roleKeys}
+	if !found {
+		if err := c.connectJSON(ctx, projectService, "CreateProjectGrant", body, nil); err != nil {
+			return fmt.Errorf("EnsureProjectGrant: CreateProjectGrant project=%s org=%s: %w", projectID, orgID, err)
+		}
+		return nil
+	}
+	if err := c.connectJSON(ctx, projectService, "UpdateProjectGrant", body, nil); err != nil {
+		return fmt.Errorf("EnsureProjectGrant: UpdateProjectGrant project=%s org=%s: %w", projectID, orgID, err)
+	}
+	return nil
+}
+
+// sameRoleKeys reports whether a and b hold the same set of keys, order
+// independent.
+func sameRoleKeys(a, b []string) bool {
+	if len(a) != len(b) {
+		return false
+	}
+	set := make(map[string]bool, len(a))
+	for _, k := range a {
+		set[k] = true
+	}
+	for _, k := range b {
+		if !set[k] {
+			return false
+		}
+	}
+	return true
+}
+
 // getMachineUserIDByName looks up a machine user by name within an org.
 // Used for conflict resolution in CreateServiceAccount.
 func (c *httpClient) getMachineUserIDByName(ctx context.Context, orgID, name string) (string, error) {
@@ -571,6 +650,9 @@ func (e *errClient) CreateServiceAccount(_ context.Context, _, _ string) (string
 	return "", "", "", e.err
 }
 func (e *errClient) DeleteServiceAccount(_ context.Context, _, _ string) error { return e.err }
+func (e *errClient) EnsureProjectGrant(_ context.Context, _, _ string, _ []string) error {
+	return e.err
+}
 
 // NoopClient was a Client implementation that silently succeeded on every
 // call. It used to be injected when ZITADEL_PAT_PATH was unset, so the

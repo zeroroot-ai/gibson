@@ -32,8 +32,9 @@ func (s *stubFGAClient) Delete(_ context.Context, _ []fga.Tuple) error { return 
 func (s *stubFGAClient) Read(_ context.Context, _ fga.Tuple) ([]fga.Tuple, error) {
 	return nil, nil
 }
-func (s *stubFGAClient) Check(_ context.Context, _, _, _ string) (bool, error) { return false, nil }
-func (s *stubFGAClient) Ping(_ context.Context) error                          { return nil }
+func (s *stubFGAClient) Check(_ context.Context, _, _, _ string) (bool, error)    { return false, nil }
+func (s *stubFGAClient) Ping(_ context.Context) error                             { return nil }
+func (s *stubFGAClient) WriteAndDelete(_ context.Context, _, _ []fga.Tuple) error { return nil }
 func (s *stubFGAClient) WriteConditional(_ context.Context, _ fga.ConditionalTuple) error {
 	return nil
 }
@@ -239,7 +240,8 @@ func (c *countingFGAClient) Read(_ context.Context, _ fga.Tuple) ([]fga.Tuple, e
 func (c *countingFGAClient) Check(_ context.Context, _, _, _ string) (bool, error) {
 	return false, nil
 }
-func (c *countingFGAClient) Ping(_ context.Context) error { return nil }
+func (c *countingFGAClient) Ping(_ context.Context) error                             { return nil }
+func (c *countingFGAClient) WriteAndDelete(_ context.Context, _, _ []fga.Tuple) error { return nil }
 func (c *countingFGAClient) WriteConditional(_ context.Context, _ fga.ConditionalTuple) error {
 	return nil
 }

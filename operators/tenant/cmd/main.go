@@ -40,6 +40,8 @@ import (
 	"github.com/zeroroot-ai/gibson/internal/infra/otelinit"
 	"github.com/zeroroot-ai/gibson/internal/infra/pools"
 	"github.com/zeroroot-ai/gibson/internal/infra/readiness"
+	"github.com/zeroroot-ai/gibson/internal/platform/tenantrole"
+	"github.com/zeroroot-ai/gibson/internal/platform/zitadelconn"
 
 	connectorv1alpha1 "github.com/zeroroot-ai/gibson/operators/connector/api/v1alpha1"
 	gibsonv1alpha1 "github.com/zeroroot-ai/gibson/operators/tenant/api/v1alpha1"
@@ -523,6 +525,17 @@ func main() {
 		"pat-path", zitadelPATPath,
 		"external-domain", zitadelExternalDomain)
 
+	// ZITADEL_PROJECT_ID (ADR-0093): the gibson project every tenant org is
+	// granted, and every tenant role is a user grant on. One-code-path, same
+	// style as ZITADEL_URL above: a tenant-operator that started without it
+	// would silently skip granting new tenants, so it refuses to start.
+	zitadelProjectID := os.Getenv("ZITADEL_PROJECT_ID")
+	if zitadelProjectID == "" {
+		setupLog.Error(nil, "ZITADEL_PROJECT_ID is required (ADR-0093): "+
+			"the operator refuses to start until the chart provides the gibson project id")
+		os.Exit(1)
+	}
+
 	// Email sender: SMTP is required infrastructure (one-code-path / tenant-operator#95).
 	// SMTP_HOST must be set; missing → exit 1. The previous NullSender default
 	// silently discarded welcome and invitation emails, masking misconfiguration
@@ -618,7 +631,32 @@ func main() {
 	// steps use (and both call the shared identity.EnsureOrg / identity.RemoveOrg
 	// core), so there is one provisioning codepath (ADR-0027). The TenantIdentity
 	// controller delegates to it.
-	identityProvisioner := identity.New(zitadelClient)
+	identityProvisioner := identity.New(zitadelClient, zitadelProjectID)
+
+	// Build the tenant role Syncer (ADR-0093 decision 3): the drift-repair
+	// half of the one sync. It calls the v2 Connect services directly (the
+	// management-API zitadel.Client above has no project-grant/authorization
+	// surface), over the same ZITADEL_URL/ZITADEL_EXTERNAL_DOMAIN this
+	// operator already requires, claiming the instance by header (ADR-0092)
+	// and authenticating with the same PAT.
+	zitadelEndpoint, err := zitadelconn.New(zitadelURL, zitadelExternalDomain)
+	if err != nil {
+		setupLog.Error(err, "zitadelconn.New failed (ADR-0092): ZITADEL_URL and ZITADEL_EXTERNAL_DOMAIN "+
+			"are both required for tenant role grants")
+		os.Exit(1)
+	}
+	tenantRolePATClient := &http.Client{Transport: &bearerTokenTransport{token: pat, next: zitadelEndpoint.Transport(nil)}}
+	tenantRoleGrants := tenantrole.NewZitadelGrants(zitadelEndpoint, tenantRolePATClient, zitadelProjectID)
+	tenantRoleTuples := fga.NewTenantRoleTuples(fgaClient)
+	tenantRoleSyncer := tenantrole.NewSyncer(tenantRoleGrants, tenantRoleTuples, nil)
+	tenantRoleSyncInterval := controller.DefaultTenantRoleSyncInterval
+	if v := os.Getenv("TENANT_ROLE_SYNC_INTERVAL"); v != "" {
+		if d, perr := time.ParseDuration(v); perr == nil {
+			tenantRoleSyncInterval = d
+		} else {
+			setupLog.Error(perr, "TENANT_ROLE_SYNC_INTERVAL invalid; using default", "value", v, "default", controller.DefaultTenantRoleSyncInterval)
+		}
+	}
 
 	// Build the declarative tenant-grants provisioner (E8/gibson#804). It wraps
 	// the SAME fgaClient the Tenant saga's RegisterTenantWithPlatform step uses
@@ -881,6 +919,19 @@ func main() {
 		Provisioner: identityProvisioner,
 	}).SetupWithManager(mgr); err != nil {
 		setupLog.Error(err, "Failed to create controller", "controller", "TenantIdentity")
+		os.Exit(1)
+	}
+
+	// TenantRoleSync — the drift-repair half of the one tenant-role sync
+	// (ADR-0093 decision 3). The daemon runs the SAME tenantrole.Syncer
+	// inline after each role write; this reconciler catches everything else
+	// on a timer.
+	if err := (&controller.TenantRoleSyncReconciler{
+		Client:   mgr.GetClient(),
+		Syncer:   tenantRoleSyncer,
+		Interval: tenantRoleSyncInterval,
+	}).SetupWithManager(mgr); err != nil {
+		setupLog.Error(err, "Failed to create controller", "controller", "TenantRoleSync")
 		os.Exit(1)
 	}
 
@@ -1387,6 +1438,21 @@ func buildVaultAdminClient(log logr.Logger) vaultadmin.AdminClient {
 // EnsureTenantNamespace's (Edition, error) return — the Edition is saga
 // record-keeping only, so the adapter discards it. All methods stay
 // idempotent (the underlying client guarantees it).
+// bearerTokenTransport adds an Authorization: Bearer header to every
+// request before delegating to next. Used to authenticate the tenant role
+// Syncer's Zitadel v2 Connect calls with the same PAT the management-API
+// zitadel.Client uses.
+type bearerTokenTransport struct {
+	token string
+	next  http.RoundTripper
+}
+
+func (t *bearerTokenTransport) RoundTrip(req *http.Request) (*http.Response, error) {
+	r := req.Clone(req.Context())
+	r.Header.Set("Authorization", "Bearer "+t.token)
+	return t.next.RoundTrip(r)
+}
+
 type secretsVaultAdapter struct {
 	c vaultadmin.AdminClient
 }

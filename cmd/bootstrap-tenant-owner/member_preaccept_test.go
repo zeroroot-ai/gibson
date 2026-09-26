@@ -183,6 +183,7 @@ func TestRunWithDeps_PreAcceptFailureIsFatal(t *testing.T) {
 		func(*rest.Config) (TenantGetter, error) { return tenants, nil },
 		func(context.Context) (idpClient, error) { return &fakeIdpClient{createUserID: "u1"}, nil },
 		func(context.Context) (fgaClient, error) { return &fakeFgaClient{}, nil },
+		func(context.Context) (tenantRoleAssigner, error) { return &fakeTenantRoleAssigner{}, nil },
 	)
 	if code != 1 {
 		t.Fatalf("a pre-accept failure must be fatal, exit=%d", code)

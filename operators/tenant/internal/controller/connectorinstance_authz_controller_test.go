@@ -54,6 +54,7 @@ func (s *authzStubFGA) Delete(_ context.Context, tuples []fga.Tuple) error {
 func (s *authzStubFGA) Read(_ context.Context, _ fga.Tuple) ([]fga.Tuple, error) { return nil, nil }
 func (s *authzStubFGA) Check(_ context.Context, _, _, _ string) (bool, error)    { return false, nil }
 func (s *authzStubFGA) Ping(_ context.Context) error                             { return nil }
+func (s *authzStubFGA) WriteAndDelete(_ context.Context, _, _ []fga.Tuple) error { return nil }
 
 var _ fga.Client = (*authzStubFGA)(nil)
 

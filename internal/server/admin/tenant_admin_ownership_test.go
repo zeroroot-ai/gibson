@@ -26,6 +26,7 @@ import (
 	"google.golang.org/grpc/codes"
 
 	"github.com/zeroroot-ai/gibson/internal/platform/authz"
+	"github.com/zeroroot-ai/gibson/internal/platform/tenantrole"
 	tenantv1 "github.com/zeroroot-ai/gibson/internal/server/daemon/api/gibson/tenant/v1"
 )
 
@@ -203,16 +204,41 @@ func (a *ownershipAuthorizer) ModelID() string { return "test" }
 func (a *ownershipAuthorizer) Close() error    { return nil }
 
 // ReadTuples implements authz.TupleReader: it answers the STORED question,
-// never derived through owner/admin/writer/member.
+// never derived through owner/admin/writer/member. An empty user or relation
+// is a wildcard on that field (matching OpenFGA's Read semantics, and
+// exercised by tenantrole.Syncer.Sync, which reads every direct role tuple
+// on an object with both fields empty).
 func (a *ownershipAuthorizer) ReadTuples(_ context.Context, user, relation, object string) ([]authz.Tuple, error) {
 	if a.readTuplesErr != nil {
 		return nil, a.readTuplesErr
 	}
 	ft, ok := a.tenants[object]
-	if !ok || !ft.direct(user, relation) {
+	if !ok {
 		return nil, nil
 	}
-	return []authz.Tuple{{User: user, Relation: relation, Object: object}}, nil
+	var out []authz.Tuple
+	add := func(u, rel string) {
+		if user != "" && user != u {
+			return
+		}
+		if relation != "" && relation != rel {
+			return
+		}
+		out = append(out, authz.Tuple{User: u, Relation: rel, Object: object})
+	}
+	if ft.owner != "" {
+		add(ft.owner, "owner")
+	}
+	for u := range ft.admin {
+		add(u, "admin")
+	}
+	for u := range ft.writer {
+		add(u, "writer")
+	}
+	for u := range ft.member {
+		add(u, "member")
+	}
+	return out, nil
 }
 
 // WriteAndDelete implements authz.AtomicWriter. It models OpenFGA's real
@@ -258,7 +284,14 @@ const (
 
 func newOwnershipTestServer(t *testing.T, az *ownershipAuthorizer) *TenantAdminServer {
 	t.Helper()
-	return newMembersTestServer(t, &membersAuthorizer{}, nil).withAuthorizer(az)
+	srv := newMembersTestServer(t, &membersAuthorizer{}, nil).withAuthorizer(az)
+	tuples, err := tenantrole.AuthzTuples(az)
+	if err != nil {
+		t.Fatalf("AuthzTuples: %v", err)
+	}
+	srv.roles = tenantrole.NewSyncer(newFakeGrants(), tuples, nil)
+	srv.orgResolver = staticOrgResolver{orgID: "org-1"}
+	return srv
 }
 
 // withAuthorizer swaps in az and returns srv, for a fluent one-liner in each
@@ -607,12 +640,51 @@ func TestTransferOwnership_ReadTuplesErrorIsInternal(t *testing.T) {
 	}
 }
 
-// TestTransferOwnership_AuthorizerWithoutAtomicWriter covers the defensive
-// type-assertion branch: an Authorizer implementation that cannot make the
-// all-or-nothing guarantee must refuse the call rather than fall back to a
-// non-atomic delete-then-write (the exact bug this fix removes).
-func TestTransferOwnership_AuthorizerWithoutAtomicWriter(t *testing.T) {
-	az := &tenantScopeAuthorizer{checkResult: true} // no AtomicWriter, no TupleReader
+// TestAuthzTuples_RefusesAnAuthorizerWithoutAtomicWriter covers the
+// defensive check that used to live inside TransferOwnership's type
+// assertion and now lives at Syncer-construction time: an Authorizer that
+// cannot make the all-or-nothing guarantee must never be wrapped into a
+// Syncer, so the daemon refuses to start rather than falling back to a
+// non-atomic delete-then-write (the exact bug hosted#190 removed).
+// authorizerWithoutTupleSupport implements exactly authz.Authorizer — no
+// TupleReader, no AtomicWriter — for the one test that needs an authorizer
+// AuthzTuples must refuse. Every other test double in this package also
+// implements TupleReader/AtomicWriter so it can be wired into a Syncer.
+type authorizerWithoutTupleSupport struct{}
+
+func (a *authorizerWithoutTupleSupport) Check(context.Context, string, string, string) (bool, error) {
+	return false, nil
+}
+func (a *authorizerWithoutTupleSupport) BatchCheck(context.Context, []authz.CheckRequest) ([]bool, error) {
+	return nil, nil
+}
+func (a *authorizerWithoutTupleSupport) Write(context.Context, []authz.Tuple) error  { return nil }
+func (a *authorizerWithoutTupleSupport) Delete(context.Context, []authz.Tuple) error { return nil }
+func (a *authorizerWithoutTupleSupport) ListObjects(context.Context, string, string, string) ([]string, error) {
+	return nil, nil
+}
+func (a *authorizerWithoutTupleSupport) ListUsers(context.Context, string, string, string) ([]string, error) {
+	return nil, nil
+}
+func (a *authorizerWithoutTupleSupport) ListUsersOfType(context.Context, string, string, string, string) ([]string, error) {
+	return nil, errListUsersOfTypeNotStubbed
+}
+func (a *authorizerWithoutTupleSupport) StoreID() string { return "test" }
+func (a *authorizerWithoutTupleSupport) ModelID() string { return "test" }
+func (a *authorizerWithoutTupleSupport) Close() error    { return nil }
+
+func TestAuthzTuples_RefusesAnAuthorizerWithoutAtomicWriter(t *testing.T) {
+	if _, err := tenantrole.AuthzTuples(&authorizerWithoutTupleSupport{}); err == nil {
+		t.Fatal("AuthzTuples: expected an error for an authorizer without AtomicWriter/TupleReader")
+	}
+}
+
+// TestTransferOwnership_UnavailableWithoutRoles covers the RPC-level half of
+// the same story: a TenantAdminServer built without a Roles Syncer (as it
+// would be if AuthzTuples had refused the authorizer at startup) answers
+// Unavailable, never falls back to a direct FGA write.
+func TestTransferOwnership_UnavailableWithoutRoles(t *testing.T) {
+	az := &tenantScopeAuthorizer{checkResult: true}
 	srv := newMembersTestServer(t, &membersAuthorizer{}, nil)
 	srv.authorizer = az
 
@@ -620,8 +692,8 @@ func TestTransferOwnership_AuthorizerWithoutAtomicWriter(t *testing.T) {
 	_, err := srv.TransferOwnership(ctx, &tenantv1.TransferOwnershipRequest{
 		NewOwnerUserId: "bob-id",
 	})
-	if got := grpcCodeOf(err); got != codes.Internal {
-		t.Fatalf("TransferOwnership code = %v (err=%v), want Internal", got, err)
+	if got := grpcCodeOf(err); got != codes.Unavailable {
+		t.Fatalf("TransferOwnership code = %v (err=%v), want Unavailable", got, err)
 	}
 	if len(az.wrote) != 0 || len(az.deleted) != 0 {
 		t.Errorf("must not fall back to non-atomic Write/Delete: wrote=%+v deleted=%+v", az.wrote, az.deleted)

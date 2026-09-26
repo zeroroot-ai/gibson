@@ -47,6 +47,7 @@ func (s *stubFGA) Delete(_ context.Context, _ []fga.Tuple) error            { re
 func (s *stubFGA) Read(_ context.Context, _ fga.Tuple) ([]fga.Tuple, error) { return nil, nil }
 func (s *stubFGA) Check(_ context.Context, _, _, _ string) (bool, error)    { return false, nil }
 func (s *stubFGA) Ping(_ context.Context) error                             { return nil }
+func (s *stubFGA) WriteAndDelete(_ context.Context, _, _ []fga.Tuple) error { return nil }
 func (s *stubFGA) WriteConditional(_ context.Context, _ fga.ConditionalTuple) error {
 	return nil
 }

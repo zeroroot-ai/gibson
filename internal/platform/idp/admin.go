@@ -47,15 +47,6 @@ type AdminClient interface {
 	// Only display_name and preferred_locale are editable; email is immutable.
 	UpdateUserProfile(ctx context.Context, accountID string, req UpdateUserProfileRequest) (*UserProfile, error)
 
-	// AddTenantMember adds (or re-affirms) the human user as a member of the
-	// IdP organization that bounds a tenant, with the given role. Idempotent:
-	// an already-present membership is treated as success (no error).
-	AddTenantMember(ctx context.Context, req TenantMembershipRequest) error
-
-	// RemoveTenantMember removes the human user from the IdP organization that
-	// bounds a tenant. Idempotent: a missing membership is treated as success.
-	RemoveTenantMember(ctx context.Context, req TenantMembershipRequest) error
-
 	// EnsureHumanUser finds the human user with the given email in the IdP
 	// organization, or creates one (triggering the IdP's verification /
 	// credential-setup email). Returns the user id. Idempotent: an existing

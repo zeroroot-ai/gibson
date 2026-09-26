@@ -50,6 +50,7 @@ import (
 	"github.com/zeroroot-ai/gibson/internal/platform/idp"
 	"github.com/zeroroot-ai/gibson/internal/platform/mailer"
 	"github.com/zeroroot-ai/gibson/internal/platform/secrets"
+	"github.com/zeroroot-ai/gibson/internal/platform/tenantrole"
 
 	sdksecrets "github.com/zeroroot-ai/gibson/internal/infra/secrets"
 	"github.com/zeroroot-ai/gibson/internal/infra/secrets/vault/brokercodec"
@@ -121,7 +122,8 @@ type TenantAdminServer struct {
 	now           func() time.Time
 	authorizer    authz.Authorizer         // optional; ListMembers returns empty when nil
 	idpClient     idp.AdminClient          // optional; members have empty display_name/email when nil
-	orgResolver   TenantZitadelOrgResolver // optional; when nil SetTenantRole skips the Zitadel-membership half
+	orgResolver   TenantZitadelOrgResolver // optional; when nil role writes refuse FailedPrecondition
+	roles         *tenantrole.Syncer       // optional; when nil, role-writing RPCs are Unavailable
 	invitations   *InvitationStore         // optional; when nil InviteMember is Unavailable + ListMembers omits invited
 	inviteMailer  InvitationMailer         // optional; when nil InviteMember/ResendInvitation send no email
 	inviteBaseURL string                   // accept-link origin (GIBSON_PUBLIC_URL); when empty no email is sent
@@ -161,9 +163,13 @@ type TenantAdminConfig struct {
 	// left empty in ListMembers responses.
 	IdPAdminClient idp.AdminClient
 	// ZitadelOrgResolver is optional. When nil (or when it resolves no mapping
-	// for a tenant), SetTenantRole writes only the FGA tuple and skips the
-	// Zitadel org-membership half.
+	// for a tenant), a role-writing RPC refuses FailedPrecondition rather
+	// than silently skipping the Zitadel half (ADR-0093).
 	ZitadelOrgResolver TenantZitadelOrgResolver
+	// Roles is optional. When nil, SetTenantRole, TransferOwnership and
+	// AcceptInvitation return Unavailable — there is nowhere for a role
+	// write to land. Roles.Sync is the only writer of tenant-role tuples.
+	Roles *tenantrole.Syncer
 	// Invitations is optional. When nil, InviteMember returns Unavailable and
 	// ListMembers omits invited members.
 	Invitations *InvitationStore
@@ -220,6 +226,7 @@ func NewTenantAdminServer(cfg TenantAdminConfig) (*TenantAdminServer, error) {
 		authorizer:    cfg.Authorizer,
 		idpClient:     cfg.IdPAdminClient,
 		orgResolver:   cfg.ZitadelOrgResolver,
+		roles:         cfg.Roles,
 		invitations:   cfg.Invitations,
 		inviteMailer:  cfg.InvitationMailer,
 		inviteBaseURL: cfg.InviteBaseURL,

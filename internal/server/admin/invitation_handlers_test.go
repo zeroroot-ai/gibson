@@ -16,6 +16,7 @@ import (
 	status_grpc "google.golang.org/grpc/status"
 
 	"github.com/zeroroot-ai/gibson/internal/platform/mailer"
+	"github.com/zeroroot-ai/gibson/internal/platform/tenantrole"
 	tenantv1 "github.com/zeroroot-ai/gibson/internal/server/daemon/api/gibson/tenant/v1"
 )
 
@@ -220,6 +221,12 @@ func TestAcceptInvitation_HappyPath(t *testing.T) {
 	srv := newMembersTestServer(t, az, idpC)
 	srv.invitations = NewInvitationStore(db)
 	srv.orgResolver = staticOrgResolver{orgID: "org-1"}
+	tuples, err := tenantrole.AuthzTuples(az)
+	if err != nil {
+		t.Fatalf("AuthzTuples: %v", err)
+	}
+	grants := newFakeGrants()
+	srv.roles = tenantrole.NewSyncer(grants, tuples, nil)
 
 	resp, err := srv.AcceptInvitation(context.Background(), &tenantv1.AcceptInvitationRequest{Token: "rawtoken"})
 	if err != nil {
@@ -228,9 +235,14 @@ func TestAcceptInvitation_HappyPath(t *testing.T) {
 	if resp.GetTenantId() != "acme" || resp.GetUserId() != "user-bob" {
 		t.Fatalf("unexpected resp: %+v", resp)
 	}
-	// dual-write happened: Zitadel member add recorded + FGA tuple written.
-	if len(idpC.added) != 1 || idpC.added[0].UserID != "user-bob" {
-		t.Fatalf("expected AddTenantMember for user-bob, got %v", idpC.added)
+	// The role write happened through the Syncer: a Zitadel grant for
+	// user-bob, mapped from the invitation's "member" relation to Viewer.
+	got, err := grants.List(context.Background(), "org-1", []string{"user-bob"})
+	if err != nil {
+		t.Fatalf("grants.List: %v", err)
+	}
+	if len(got) != 1 || !got[0].Active || len(got[0].RoleKeys) != 1 || got[0].RoleKeys[0] != string(tenantrole.Viewer) {
+		t.Fatalf("expected an active viewer grant for user-bob, got %+v", got)
 	}
 	if len(idpC.ensuredEmails) != 1 || idpC.ensuredEmails[0] != "bob@example.com" {
 		t.Fatalf("expected EnsureHumanUser for bob, got %v", idpC.ensuredEmails)

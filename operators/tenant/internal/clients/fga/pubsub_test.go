@@ -59,6 +59,17 @@ func (f *fakeFGAClient) Check(_ context.Context, _, _, _ string) (bool, error) {
 }
 
 func (f *fakeFGAClient) Ping(_ context.Context) error { return nil }
+
+func (f *fakeFGAClient) WriteAndDelete(_ context.Context, writes, deletes []fga.Tuple) error {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	if f.err != nil {
+		return f.err
+	}
+	f.writes = append(f.writes, writes)
+	f.deletes = append(f.deletes, deletes)
+	return nil
+}
 func (f *fakeFGAClient) WriteConditional(_ context.Context, _ fga.ConditionalTuple) error {
 	return nil
 }
@@ -129,6 +140,45 @@ func TestPublishingClient_PublishesOnDelete(t *testing.T) {
 	require.Equal(t, fga.EventOpDelete, evt.Op)
 	require.Equal(t, "zzz", evt.UserID)
 	require.Equal(t, "acme", evt.Tenant)
+}
+
+// TestPublishingClient_WriteAndDeletePublishesBothLists asserts that a
+// successful WriteAndDelete — the call a tenant role Sync makes — publishes
+// an Event for every tuple in BOTH the writes and the deletes list, so a
+// demotion invalidates the ext-authz decision cache for the demoted user
+// too, not just the promoted one.
+func TestPublishingClient_WriteAndDeletePublishesBothLists(t *testing.T) {
+	mr := miniredis.RunT(t)
+
+	rdb := redis.NewClient(&redis.Options{Addr: mr.Addr()})
+	t.Cleanup(func() { _ = rdb.Close() })
+
+	sub := rdb.Subscribe(context.Background(), fga.PubsubChannel)
+	t.Cleanup(func() { _ = sub.Close() })
+	_, err := sub.Receive(context.Background())
+	require.NoError(t, err)
+
+	pub := fga.NewRedisPublisher(rdb, fga.PubsubChannel, 500*time.Millisecond, testr.New(t))
+	inner := &fakeFGAClient{}
+	wrapped := fga.WithEventPublisher(inner, pub)
+
+	writes := []fga.Tuple{{User: "user:bob", Relation: "owner", Object: "tenant:acme"}}
+	deletes := []fga.Tuple{{User: "user:alice", Relation: "owner", Object: "tenant:acme"}}
+	require.NoError(t, wrapped.WriteAndDelete(context.Background(), writes, deletes))
+
+	got := receiveN(t, sub, 2, 2*time.Second)
+	require.Len(t, got, 2)
+
+	var ops []fga.EventOp
+	var users []string
+	for _, raw := range got {
+		var evt fga.Event
+		require.NoError(t, json.Unmarshal([]byte(raw), &evt))
+		ops = append(ops, evt.Op)
+		users = append(users, evt.UserID)
+	}
+	require.ElementsMatch(t, []fga.EventOp{fga.EventOpWrite, fga.EventOpDelete}, ops)
+	require.ElementsMatch(t, []string{"bob", "alice"}, users)
 }
 
 // TestPublishingClient_DoesNotPublishOnError asserts that the wrapper does
