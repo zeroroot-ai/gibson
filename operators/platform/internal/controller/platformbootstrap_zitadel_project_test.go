@@ -173,3 +173,37 @@ func TestReconcileZitadelProject_PermanentEnsureProjectRolesErrorSetsCondition(t
 		t.Fatalf("ZitadelProjectReady = %+v, want False/ZitadelPermanentError", c)
 	}
 }
+
+// TestReconcileZitadelProject_TransientEnsureProjectRolesErrorRequeues pins
+// the other branch of the same error check: a non-permanent
+// EnsureProjectRoles failure (here, a 500 from ListProjectRoles, which
+// zitadel.IsPermanent does not classify as permanent — only 401/403 are)
+// sets ZitadelTransientError with ConditionUnknown and asks for a requeue,
+// rather than a hard failure like the permanent case above.
+func TestReconcileZitadelProject_TransientEnsureProjectRolesErrorRequeues(t *testing.T) {
+	mux := http.NewServeMux()
+	mux.HandleFunc("/management/v1/projects", func(w http.ResponseWriter, _ *http.Request) {
+		_ = json.NewEncoder(w).Encode(map[string]string{"id": "PROJ-999"})
+	})
+	mux.HandleFunc("/zitadel.project.v2.ProjectService/ListProjectRoles", func(w http.ResponseWriter, _ *http.Request) {
+		w.WriteHeader(http.StatusInternalServerError)
+		_ = json.NewEncoder(w).Encode(map[string]string{"code": "internal", "message": "Errors.Internal"})
+	})
+	srv := httptest.NewServer(mux)
+	t.Cleanup(srv.Close)
+
+	r := newReconcilerWithPAT(t, srv.URL)
+	pb := newTestPlatformBootstrap(true)
+
+	result, err := r.reconcileZitadelProject(context.Background(), pb, logr.Discard())
+	if err != nil {
+		t.Fatalf("reconcileZitadelProject: %v", err)
+	}
+	if result.RequeueAfter <= 0 {
+		t.Fatalf("result = %+v, want a positive RequeueAfter", result)
+	}
+	c := findCondition(pb.Status.Conditions, gibsonv1alpha1.ConditionZitadelProjectReady)
+	if c == nil || c.Status != metav1.ConditionUnknown || c.Reason != "ZitadelTransientError" {
+		t.Fatalf("ZitadelProjectReady = %+v, want Unknown/ZitadelTransientError", c)
+	}
+}
