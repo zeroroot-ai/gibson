@@ -85,7 +85,7 @@ func (g *zitadelGrants) connectJSON(ctx context.Context, service, method string,
 	req.Header.Set("Content-Type", "application/json")
 	resp, err := g.hc.Do(req)
 	if err != nil {
-		return fmt.Errorf("%w: %s/%s: %v", ErrUnreachable, service, method, err)
+		return fmt.Errorf("%w: %s/%s: %w", ErrUnreachable, service, method, err)
 	}
 	defer func() { _ = resp.Body.Close() }()
 

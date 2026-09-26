@@ -28,22 +28,31 @@ func TestAll_HasExactlyTheFourTenantRolesInOrder(t *testing.T) {
 	}
 }
 
-// TestIsZitadelUserSubject pins the fail-closed filter (owner decision D2,
-// option b) that keeps Sync from ever reading, writing or deleting a role
-// tuple for a `user:`-typed subject that is not a Zitadel grant — most
-// notably the exit-test runner's SPIFFE-derived identity, which is a real
-// stored tenant.member tuple but has no Zitadel user behind it.
+// TestIsZitadelUserSubject pins the positive-match filter (owner decision
+// D2, option b, corrected): a `user:`-typed subject is a Zitadel grant only
+// when its id is shaped like a real Zitadel-issued numeric id (15-20
+// decimal digits, matching zitadelconntest's own 18-digit generator and
+// Zitadel v4.18's observed format). Everything else — a SPIFFE id, an empty
+// id, or any other shape — is not a Zitadel user, and Sync leaves it alone.
+// This keeps Sync from ever reading, writing or deleting a role tuple for a
+// subject that is not a Zitadel grant — most notably the exit-test runner's
+// SPIFFE-derived identity, which is a real stored tenant.member tuple but
+// has no Zitadel user behind it.
 func TestIsZitadelUserSubject(t *testing.T) {
 	cases := []struct {
 		subject string
 		want    bool
 	}{
-		{"user:218901902167211265", true},
-		{"user:1", true},
-		{"user:zeroroot.ai/platform/e2e-runner", false}, // the e2e runner, gibson#14 fixtures: a SPIFFE id, has "/"
-		{"user:", false},
-		{"user:bob-id", true}, // human-readable test fixture id, not numeric, but not SPIFFE-shaped either
-		{"user:user-1", true}, // ditto
+		{"user:218901902167211265", true},               // 18 digits: a real-shaped Zitadel id, managed
+		{"user:100000000000000001", true},               // 18 digits: zitadelconntest's own generator shape
+		{"user:123456789012345", true},                  // 15 digits: the short end of the accepted range
+		{"user:12345678901234567890", true},             // 20 digits: the long end of the accepted range
+		{"user:1", false},                               // far too short to be a real Zitadel id
+		{"user:zeroroot.ai/platform/e2e-runner", false}, // the e2e runner, gibson#14 fixtures: a SPIFFE id
+		{"user:", false},                                // empty id
+		{"user:bob-id", false},                          // human-readable test fixture id: not numeric
+		{"user:user-1", false},                          // ditto
+		{"user:1234567890123456789012", false},          // 22 digits: numeric but outside the accepted range
 		{"agent_principal:abc-123", false},
 		{"tenant:acme", false},
 		{"", false},

@@ -72,7 +72,7 @@ func TestZitadelGrants_EveryRequestSucceedsWithTheInstanceHeader(t *testing.T) {
 // --- Connect error code -> sentinel mapping --------------------------------
 
 func connectErrHandler(code string, status int) http.HandlerFunc {
-	return func(w http.ResponseWriter, r *http.Request) {
+	return func(w http.ResponseWriter, _ *http.Request) {
 		w.Header().Set("Content-Type", "application/json")
 		w.WriteHeader(status)
 		_ = json.NewEncoder(w).Encode(map[string]string{"code": code, "message": "Errors.Test"})
@@ -204,7 +204,7 @@ func TestZitadelGrants_MapsHTTPStatusWhenTheConnectCodeIsMissingOrUnknown(t *tes
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {
 			mux := http.NewServeMux()
-			mux.HandleFunc("/zitadel.authorization.v2.AuthorizationService/CreateAuthorization", func(w http.ResponseWriter, r *http.Request) {
+			mux.HandleFunc("/zitadel.authorization.v2.AuthorizationService/CreateAuthorization", func(w http.ResponseWriter, _ *http.Request) {
 				w.WriteHeader(tc.status)
 				_, _ = w.Write([]byte("plain text, no connect code"))
 			})
@@ -242,7 +242,7 @@ func TestZitadelGrants_ConnectJSONWrapsATransportFailure(t *testing.T) {
 // panicking or silently returning a zero value.
 func TestZitadelGrants_ConnectJSONWrapsADecodeFailure(t *testing.T) {
 	mux := http.NewServeMux()
-	mux.HandleFunc("/zitadel.authorization.v2.AuthorizationService/CreateAuthorization", func(w http.ResponseWriter, r *http.Request) {
+	mux.HandleFunc("/zitadel.authorization.v2.AuthorizationService/CreateAuthorization", func(w http.ResponseWriter, _ *http.Request) {
 		w.Header().Set("Content-Type", "application/json")
 		_, _ = w.Write([]byte("{not valid json"))
 	})

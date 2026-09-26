@@ -440,7 +440,7 @@ func (r *TenantMemberReconciler) syncZitadel(ctx context.Context, tm *gibsonv1al
 		// Zitadel grant first and copies it into FGA in the same call — the
 		// FGA role write acceptInvitation used to do is no longer needed.
 		if r.Roles == nil {
-			return ctrl.Result{}, fmt.Errorf("syncZitadel: role sync not configured")
+			return ctrl.Result{}, errors.New("syncZitadel: role sync not configured")
 		}
 		role, ok := tenantRoleFromMemberRole(tm.Spec.Role)
 		if !ok {

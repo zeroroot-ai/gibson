@@ -143,7 +143,7 @@ func EnsureOrg(ctx context.Context, z zitadel.Client, projectID string, req Requ
 		created, err := z.CreateOrganization(ctx, name, req.TenantID)
 		if err != nil {
 			if clients.IsPermanent(err) {
-				return Result{}, err
+				return Result{}, err //nolint:wrapcheck // permanent client errors are returned as-is (see doc comment) so callers do not retry them; same style as the GetOrganization branch above
 			}
 			return Result{}, fmt.Errorf("identity.EnsureOrg: CreateOrganization: %w", err)
 		}

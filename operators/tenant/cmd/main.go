@@ -1450,7 +1450,11 @@ type bearerTokenTransport struct {
 func (t *bearerTokenTransport) RoundTrip(req *http.Request) (*http.Response, error) {
 	r := req.Clone(req.Context())
 	r.Header.Set("Authorization", "Bearer "+t.token)
-	return t.next.RoundTrip(r)
+	resp, err := t.next.RoundTrip(r)
+	if err != nil {
+		return nil, fmt.Errorf("bearerTokenTransport: %w", err)
+	}
+	return resp, nil
 }
 
 type secretsVaultAdapter struct {

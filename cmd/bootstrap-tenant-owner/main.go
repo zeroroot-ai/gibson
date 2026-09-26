@@ -435,7 +435,7 @@ func buildTenantRoleSyncer(ctx context.Context) (tenantRoleAssigner, error) {
 	}
 	projectID := os.Getenv("GIBSON_IDP_ZITADEL_PROJECT_ID")
 	if projectID == "" {
-		return nil, fmt.Errorf("required env var not set: GIBSON_IDP_ZITADEL_PROJECT_ID")
+		return nil, errors.New("required env var not set: GIBSON_IDP_ZITADEL_PROJECT_ID")
 	}
 	fgaCfg, err := resolveFgaEnvConfig()
 	if err != nil {

@@ -189,8 +189,8 @@ func TestPublishingClient_WriteAndDeletePublishesBothLists(t *testing.T) {
 	got := receiveN(t, sub, 2, 2*time.Second)
 	require.Len(t, got, 2)
 
-	var ops []fga.EventOp
-	var users []string
+	ops := make([]fga.EventOp, 0, len(got))
+	users := make([]string, 0, len(got))
 	for _, raw := range got {
 		var evt fga.Event
 		require.NoError(t, json.Unmarshal([]byte(raw), &evt))

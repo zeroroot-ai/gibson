@@ -180,7 +180,7 @@ func (p *publishingClient) Delete(ctx context.Context, tuples []Tuple) error {
 // touched, not just the written half.
 func (p *publishingClient) WriteAndDelete(ctx context.Context, writes, deletes []Tuple) error {
 	if err := p.Client.WriteAndDelete(ctx, writes, deletes); err != nil {
-		return err
+		return fmt.Errorf("fga: WriteAndDelete: %w", err)
 	}
 	p.publishAll(ctx, EventOpWrite, writes)
 	p.publishAll(ctx, EventOpDelete, deletes)

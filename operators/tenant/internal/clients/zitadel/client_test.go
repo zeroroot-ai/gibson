@@ -411,10 +411,10 @@ func TestEnsureProjectGrant_CreatesUpdatesAndIsANoOp(t *testing.T) {
 	t.Run("creates when none exists", func(t *testing.T) {
 		var created bool
 		c := newTestServer(t, map[string]http.HandlerFunc{
-			"POST /zitadel.project.v2.ProjectService/ListProjectGrants": func(w http.ResponseWriter, r *http.Request) {
+			"POST /zitadel.project.v2.ProjectService/ListProjectGrants": func(w http.ResponseWriter, _ *http.Request) {
 				writeJSON(w, http.StatusOK, map[string]any{"projectGrants": []any{}})
 			},
-			"POST /zitadel.project.v2.ProjectService/CreateProjectGrant": func(w http.ResponseWriter, r *http.Request) {
+			"POST /zitadel.project.v2.ProjectService/CreateProjectGrant": func(w http.ResponseWriter, _ *http.Request) {
 				created = true
 				writeJSON(w, http.StatusOK, map[string]any{})
 			},
@@ -430,7 +430,7 @@ func TestEnsureProjectGrant_CreatesUpdatesAndIsANoOp(t *testing.T) {
 	t.Run("updates when keys differ", func(t *testing.T) {
 		var updatedKeys []string
 		c := newTestServer(t, map[string]http.HandlerFunc{
-			"POST /zitadel.project.v2.ProjectService/ListProjectGrants": func(w http.ResponseWriter, r *http.Request) {
+			"POST /zitadel.project.v2.ProjectService/ListProjectGrants": func(w http.ResponseWriter, _ *http.Request) {
 				writeJSON(w, http.StatusOK, map[string]any{
 					"projectGrants": []map[string]any{
 						{"grantedOrganizationId": "ORG-1", "roleKeys": []string{"owner"}},
@@ -456,7 +456,7 @@ func TestEnsureProjectGrant_CreatesUpdatesAndIsANoOp(t *testing.T) {
 
 	t.Run("no-op when already converged", func(t *testing.T) {
 		c := newTestServer(t, map[string]http.HandlerFunc{
-			"POST /zitadel.project.v2.ProjectService/ListProjectGrants": func(w http.ResponseWriter, r *http.Request) {
+			"POST /zitadel.project.v2.ProjectService/ListProjectGrants": func(w http.ResponseWriter, _ *http.Request) {
 				writeJSON(w, http.StatusOK, map[string]any{
 					"projectGrants": []map[string]any{
 						{"grantedOrganizationId": "ORG-1", "roleKeys": []string{"owner", "admin", "editor", "viewer"}},

@@ -43,7 +43,7 @@ func (f *fakeGrants) List(_ context.Context, orgID string, userIDs []string) ([]
 	for _, id := range userIDs {
 		want[id] = true
 	}
-	var out []tenantrole.Grant
+	out := make([]tenantrole.Grant, 0, len(f.grants))
 	for _, g := range f.grants {
 		if g.OrgID != orgID {
 			continue

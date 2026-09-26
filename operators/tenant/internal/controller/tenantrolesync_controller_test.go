@@ -42,7 +42,7 @@ func (g *fakeRoleGrants) List(_ context.Context, orgID string, userIDs []string)
 			want[id] = true
 		}
 	}
-	var out []tenantrole.Grant
+	out := make([]tenantrole.Grant, 0, len(g.grants))
 	for _, gr := range g.grants {
 		if gr.OrgID != orgID {
 			continue
@@ -190,7 +190,7 @@ func TestTenantRoleSync_DeletingTenantIsSkipped(t *testing.T) {
 	if err != nil {
 		t.Fatalf("Reconcile: %v", err)
 	}
-	if res.RequeueAfter != 0 || res.Requeue {
+	if res.RequeueAfter != 0 {
 		t.Fatalf("Result = %+v, want no requeue for a deleting tenant", res)
 	}
 	if len(tuples.tuples) != 0 {

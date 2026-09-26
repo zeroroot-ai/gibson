@@ -105,30 +105,31 @@ func TestAuthzTuples_AcceptsAnAuthorizerWithBothExtensions(t *testing.T) {
 
 func TestAuthzTuples_ReadRolesFiltersToRoleRelationsZitadelUsersAndRequestedIDs(t *testing.T) {
 	fa := &fakeFullAuthorizer{tuples: []authz.Tuple{
-		{User: "user:alice", Relation: "owner", Object: "tenant:acme"},                            // kept (in role set, real user, requested)
-		{User: "user:bob", Relation: "admin", Object: "tenant:acme"},                              // dropped: not requested
-		{User: "user:alice", Relation: "tenant_enabled", Object: "tenant:acme"},                   // dropped: not a role relation
+		{User: "user:111111111111111111", Relation: "owner", Object: "tenant:acme"},               // kept (in role set, real user, requested)
+		{User: "user:222222222222222222", Relation: "admin", Object: "tenant:acme"},               // dropped: not requested
+		{User: "user:111111111111111111", Relation: "tenant_enabled", Object: "tenant:acme"},      // dropped: not a role relation
 		{User: "agent_principal:x", Relation: "member", Object: "tenant:acme"},                    // dropped: not a Zitadel user subject
 		{User: "user:zeroroot.ai/platform/e2e-runner", Relation: "member", Object: "tenant:acme"}, // dropped: SPIFFE-shaped
+		{User: "user:bob-id", Relation: "member", Object: "tenant:acme"},                          // dropped: human-readable, not numeric
 	}}
 	tuples, err := tenantrole.AuthzTuples(fa)
 	if err != nil {
 		t.Fatalf("AuthzTuples: %v", err)
 	}
 
-	got, err := tuples.ReadRoles(context.Background(), "acme", []string{"alice"})
+	got, err := tuples.ReadRoles(context.Background(), "acme", []string{"111111111111111111"})
 	if err != nil {
 		t.Fatalf("ReadRoles: %v", err)
 	}
-	if len(got) != 1 || got[0].User != "user:alice" || got[0].Relation != "owner" {
-		t.Fatalf("ReadRoles = %+v, want exactly [user:alice owner tenant:acme]", got)
+	if len(got) != 1 || got[0].User != "user:111111111111111111" || got[0].Relation != "owner" {
+		t.Fatalf("ReadRoles = %+v, want exactly [user:111111111111111111 owner tenant:acme]", got)
 	}
 }
 
 func TestAuthzTuples_ReadRolesWithNoRequestedUsersReturnsEveryRoleTuple(t *testing.T) {
 	fa := &fakeFullAuthorizer{tuples: []authz.Tuple{
-		{User: "user:alice", Relation: "owner", Object: "tenant:acme"},
-		{User: "user:bob", Relation: "admin", Object: "tenant:acme"},
+		{User: "user:111111111111111111", Relation: "owner", Object: "tenant:acme"},
+		{User: "user:222222222222222222", Relation: "admin", Object: "tenant:acme"},
 	}}
 	tuples, err := tenantrole.AuthzTuples(fa)
 	if err != nil {

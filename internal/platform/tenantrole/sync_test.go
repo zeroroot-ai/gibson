@@ -55,7 +55,7 @@ func (f *fakeTuples) ReadRoles(_ context.Context, tenantID string, userIDs []str
 	}
 	f.mu.Lock()
 	defer f.mu.Unlock()
-	var out []tenantrole.Tuple
+	out := make([]tenantrole.Tuple, 0, len(f.tuples))
 	for _, t := range f.tuples {
 		if t.Object != object || !roleRelation[t.Relation] {
 			continue
@@ -171,7 +171,7 @@ func createGrant(t *testing.T, f *testFixture, userID string, roleKeys []string)
 	return out.ID
 }
 
-func tenant(id string, orgID string) tenantrole.Tenant {
+func tenant(id, orgID string) tenantrole.Tenant {
 	return tenantrole.Tenant{ID: id, OrgID: orgID}
 }
 
@@ -213,8 +213,8 @@ func TestSync_ChangedGrantDeletesOldAndWritesNewInOneCall(t *testing.T) {
 }
 
 func TestSync_DeletedGrantDeletesTheTuple(t *testing.T) {
-	f := newFixture(t, tenantrole.Tuple{User: "user:999", Relation: "writer", Object: "tenant:acme"})
-	res, err := f.syncer.Sync(context.Background(), tenant("acme", f.orgID), "999")
+	f := newFixture(t, tenantrole.Tuple{User: "user:999999999999999999", Relation: "writer", Object: "tenant:acme"})
+	res, err := f.syncer.Sync(context.Background(), tenant("acme", f.orgID), "999999999999999999")
 	if err != nil {
 		t.Fatalf("Sync: %v", err)
 	}
@@ -297,12 +297,12 @@ func TestSync_UserFromAnotherOrgGivesNoRole(t *testing.T) {
 func TestSync_WholeTenantSyncRepairsDrift(t *testing.T) {
 	// A stored tuple with no backing Zitadel grant: drift. A non-owner
 	// relation, so the fix does not also trip the owner-conflict guard.
-	f := newFixture(t, tenantrole.Tuple{User: "user:888", Relation: "member", Object: "tenant:acme"})
+	f := newFixture(t, tenantrole.Tuple{User: "user:888888888888888888", Relation: "member", Object: "tenant:acme"})
 	res, err := f.syncer.Sync(context.Background(), tenant("acme", f.orgID)) // no users: whole tenant
 	if err != nil {
 		t.Fatalf("Sync: %v", err)
 	}
-	if len(res.Deleted) != 1 || res.Deleted[0].User != "user:888" {
+	if len(res.Deleted) != 1 || res.Deleted[0].User != "user:888888888888888888" {
 		t.Fatalf("Deleted = %+v, want the ghost tuple gone", res.Deleted)
 	}
 }

@@ -5,6 +5,7 @@ package tenantrole
 
 import (
 	"context"
+	"errors"
 	"fmt"
 )
 
@@ -16,7 +17,7 @@ func (s *Syncer) Assign(ctx context.Context, t Tenant, userID string, r Role) er
 		return fmt.Errorf("tenantrole: Assign requires a tenant id and org id, got %+v", t)
 	}
 	if userID == "" {
-		return fmt.Errorf("tenantrole: Assign requires a userID")
+		return errors.New("tenantrole: Assign requires a userID")
 	}
 	existing, err := s.activeGrant(ctx, t, userID)
 	if err != nil {
@@ -43,7 +44,7 @@ func (s *Syncer) Revoke(ctx context.Context, t Tenant, userID string) error {
 		return fmt.Errorf("tenantrole: Revoke requires a tenant id and org id, got %+v", t)
 	}
 	if userID == "" {
-		return fmt.Errorf("tenantrole: Revoke requires a userID")
+		return errors.New("tenantrole: Revoke requires a userID")
 	}
 	grants, err := s.grants.List(ctx, t.OrgID, []string{userID})
 	if err != nil {

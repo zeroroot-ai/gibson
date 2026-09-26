@@ -147,12 +147,44 @@ func (s *Syncer) sync(ctx context.Context, t Tenant, users []string) (Result, er
 	if err != nil {
 		return Result{}, fmt.Errorf("tenantrole: Sync tenant=%s: list grants: %w", t.ID, err)
 	}
+	desired, invalid := desiredRoles(grants, t)
+
+	allActual, err := s.tuples.ReadRoles(ctx, t.ID, nil)
+	if err != nil {
+		return Result{}, fmt.Errorf("tenantrole: Sync tenant=%s: read roles: %w", t.ID, err)
+	}
+	actualByUser := actualRoles(allActual)
+
+	scope := syncScope(users, desired, actualByUser)
+	if err := checkOwnerInvariant(scope, desired, actualByUser); err != nil {
+		return Result{Invalid: invalid}, err
+	}
+
+	writes, deletes := diffTuples(scope, desired, actualByUser, t.ID)
+	if len(writes) == 0 && len(deletes) == 0 {
+		return Result{Invalid: invalid}, nil
+	}
+	if err := s.tuples.WriteAndDelete(ctx, writes, deletes); err != nil {
+		return Result{Invalid: invalid}, fmt.Errorf("tenantrole: Sync tenant=%s: write: %w", t.ID, err)
+	}
+	for _, w := range writes {
+		s.log.Info("tenantrole: wrote tenant role tuple", "tenant", t.ID, "user", w.User, "relation", w.Relation)
+	}
+	for _, d := range deletes {
+		s.log.Info("tenantrole: deleted tenant role tuple", "tenant", t.ID, "user", d.User, "relation", d.Relation)
+	}
+	return Result{Written: writes, Deleted: deletes, Invalid: invalid}, nil
+}
+
+// desiredRoles groups grants by user and resolves each user's single valid
+// role (owner decision D5, fail closed): a user with more than one grant, or
+// whose one grant gives no role (validRole), lands in invalid instead.
+func desiredRoles(grants []Grant, t Tenant) (desired map[string]Role, invalid []Grant) {
 	byUser := make(map[string][]Grant, len(grants))
 	for _, g := range grants {
 		byUser[g.UserID] = append(byUser[g.UserID], g)
 	}
-	desired := make(map[string]Role, len(byUser))
-	var invalid []Grant
+	desired = make(map[string]Role, len(byUser))
 	for userID, gs := range byUser {
 		if len(gs) != 1 {
 			invalid = append(invalid, gs...)
@@ -165,43 +197,53 @@ func (s *Syncer) sync(ctx context.Context, t Tenant, users []string) (Result, er
 		}
 		desired[userID] = role
 	}
+	return desired, invalid
+}
 
-	allActual, err := s.tuples.ReadRoles(ctx, t.ID, nil)
-	if err != nil {
-		return Result{}, fmt.Errorf("tenantrole: Sync tenant=%s: read roles: %w", t.ID, err)
-	}
+// actualRoles groups the stored role tuples by the bare user id.
+func actualRoles(allActual []Tuple) map[string][]Tuple {
 	actualByUser := make(map[string][]Tuple, len(allActual))
 	for _, tup := range allActual {
 		user := userIDFromSubject(tup.User)
 		actualByUser[user] = append(actualByUser[user], tup)
 	}
+	return actualByUser
+}
 
-	var scope []string
+// syncScope is the set of users a sync call touches: an explicit list when
+// given one, or every user with a desired or actual role when syncing a
+// whole tenant.
+func syncScope(users []string, desired map[string]Role, actualByUser map[string][]Tuple) []string {
 	if len(users) > 0 {
-		scope = users
-	} else {
-		seen := make(map[string]bool)
-		for u := range desired {
-			if !seen[u] {
-				seen[u] = true
-				scope = append(scope, u)
-			}
-		}
-		for u := range actualByUser {
-			if !seen[u] {
-				seen[u] = true
-				scope = append(scope, u)
-			}
+		return users
+	}
+	var scope []string
+	seen := make(map[string]bool)
+	for u := range desired {
+		if !seen[u] {
+			seen[u] = true
+			scope = append(scope, u)
 		}
 	}
+	for u := range actualByUser {
+		if !seen[u] {
+			seen[u] = true
+			scope = append(scope, u)
+		}
+	}
+	return scope
+}
+
+// checkOwnerInvariant enforces owner decision D3: after the change the
+// tenant must have exactly one Owner, unless it already had zero (a tenant
+// that never had one yet). Returns ErrOwnerConflict rather than applying a
+// change that would leave zero or two.
+func checkOwnerInvariant(scope []string, desired map[string]Role, actualByUser map[string][]Tuple) error {
 	scopeSet := make(map[string]bool, len(scope))
 	for _, u := range scope {
 		scopeSet[u] = true
 	}
 
-	// Owner rule check (owner decision D3): count Owners after the change
-	// and refuse a change that leaves the tenant with zero or two, unless
-	// it already had zero (a tenant that never had an Owner yet).
 	ownersBefore := 0
 	ownersOutsideScope := 0
 	for u, tuples := range actualByUser {
@@ -226,16 +268,21 @@ func (s *Syncer) sync(ctx context.Context, t Tenant, users []string) (Result, er
 		}
 	}
 	newOwnerCount := ownersOutsideScope + desiredOwnersInScope
-	if newOwnerCount != 1 && !(newOwnerCount == 0 && ownersBefore == 0) {
-		return Result{Invalid: invalid}, ErrOwnerConflict
+	if newOwnerCount != 1 && (newOwnerCount != 0 || ownersBefore != 0) {
+		return ErrOwnerConflict
 	}
+	return nil
+}
 
-	var writes, deletes []Tuple
+// diffTuples computes the FGA writes and deletes that converge actualByUser
+// onto desired for every user in scope: one write for a missing or changed
+// role, one delete for every other stored role tuple that user held.
+func diffTuples(scope []string, desired map[string]Role, actualByUser map[string][]Tuple, tenantID string) (writes, deletes []Tuple) {
 	for _, u := range scope {
 		role, hasDesired := desired[u]
 		var wanted Tuple
 		if hasDesired {
-			wanted = Tuple{User: "user:" + u, Relation: role.Relation(), Object: "tenant:" + t.ID}
+			wanted = Tuple{User: "user:" + u, Relation: role.Relation(), Object: "tenant:" + tenantID}
 		}
 		found := false
 		for _, existing := range actualByUser[u] {
@@ -249,20 +296,7 @@ func (s *Syncer) sync(ctx context.Context, t Tenant, users []string) (Result, er
 			writes = append(writes, wanted)
 		}
 	}
-
-	if len(writes) == 0 && len(deletes) == 0 {
-		return Result{Invalid: invalid}, nil
-	}
-	if err := s.tuples.WriteAndDelete(ctx, writes, deletes); err != nil {
-		return Result{Invalid: invalid}, fmt.Errorf("tenantrole: Sync tenant=%s: write: %w", t.ID, err)
-	}
-	for _, w := range writes {
-		s.log.Info("tenantrole: wrote tenant role tuple", "tenant", t.ID, "user", w.User, "relation", w.Relation)
-	}
-	for _, d := range deletes {
-		s.log.Info("tenantrole: deleted tenant role tuple", "tenant", t.ID, "user", d.User, "relation", d.Relation)
-	}
-	return Result{Written: writes, Deleted: deletes, Invalid: invalid}, nil
+	return writes, deletes
 }
 
 // userIDFromSubject strips the "user:" prefix ReadRoles already filtered on.

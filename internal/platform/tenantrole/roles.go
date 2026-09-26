@@ -6,7 +6,10 @@
 // role grant into its FGA copy (ADR-0093 decision 3).
 package tenantrole
 
-import "strings"
+import (
+	"regexp"
+	"strings"
+)
 
 // Role is a tenant role key on the gibson Zitadel project.
 type Role string
@@ -93,20 +96,28 @@ func FromRelation(rel string) (Role, bool) {
 	return "", false
 }
 
+// zitadelIDPattern matches a real Zitadel-issued numeric id: a decimal
+// snowflake. zitadelconntest's own generator (internal/platform/
+// zitadelconn/zitadelconntest/identity.go) always emits exactly 18 digits
+// ("IDs are 18-digit decimal strings, as Zitadel issues them" — verified
+// against Zitadel v4.18.0 on staging, 2026-09-23). The real generator's
+// output width grows by one digit only as its underlying 64-bit counter
+// crosses a power of ten, so 15-20 digits gives headroom on both sides of
+// today's 18 without accepting a short, human-readable test id ("1",
+// "user-1") or a long SPIFFE path as if it were numeric.
+var zitadelIDPattern = regexp.MustCompile(`^[0-9]{15,20}$`)
+
 // IsZitadelUserSubject reports whether subject is a "user:<id>" FGA
-// reference that COULD be a Zitadel user grant — i.e. not obviously a
-// SPIFFE-derived identity smuggled in under the "user" type.
+// reference whose id is shaped like a real Zitadel-issued numeric id — a
+// positive match, not a denylist.
 //
 // This is Sync's boundary against non-Zitadel `user:`-typed subjects such as
 // the exit-test runner's SPIFFE-derived identity ("user:zeroroot.ai/platform/
 // e2e-runner", gibson#14 fixtures): that subject is not backed by any
 // Zitadel grant, so Sync must never read, write or delete a role tuple for
-// it (owner decision D2, option b). Real Zitadel ids are decimal snowflakes
-// and never contain "/"; every SPIFFE id does (it is a URI path), so "/" is
-// the discriminator, not "must be all digits" — a stricter numeric check
-// would also reject the human-readable ids ("user-1", "bob-id") that test
-// fixtures across the daemon and the operators use for the very same "user"
-// type, which are not Zitadel ids either but ARE meant to be synced.
+// it (owner decision D2, option b). An id that does not match the pattern —
+// a SPIFFE path, an empty id, or any other shape — is not a Zitadel user,
+// and Sync leaves it alone.
 //
 // It exists here, not just as a filter inline in each Tuples adapter,
 // because both the daemon's authz.Authorizer adapter and the
@@ -117,5 +128,5 @@ func IsZitadelUserSubject(subject string) bool {
 		return false
 	}
 	id := subject[len(prefix):]
-	return id != "" && !strings.ContainsAny(id, "/")
+	return zitadelIDPattern.MatchString(id)
 }

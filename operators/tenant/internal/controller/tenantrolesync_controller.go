@@ -57,7 +57,7 @@ func (r *TenantRoleSyncReconciler) Reconcile(ctx context.Context, req ctrl.Reque
 
 	var tenant gibsonv1alpha1.Tenant
 	if err := r.Get(ctx, req.NamespacedName, &tenant); err != nil {
-		return ctrl.Result{}, client.IgnoreNotFound(err)
+		return ctrl.Result{}, client.IgnoreNotFound(err) //nolint:wrapcheck // every reconciler in this package returns IgnoreNotFound bare; controller-runtime retries on the sentinel form
 	}
 
 	if !tenant.DeletionTimestamp.IsZero() {
@@ -117,7 +117,7 @@ func (r *TenantRoleSyncReconciler) SetupWithManager(mgr ctrl.Manager) error {
 		For(&gibsonv1alpha1.Tenant{},
 			builder.WithPredicates(tenantRoleSyncPredicate())).
 		Named("tenantrolesync").
-		Complete(r)
+		Complete(r) //nolint:wrapcheck // every SetupWithManager in this package returns Complete bare
 }
 
 // tenantRoleSyncPredicate passes creates and any update where

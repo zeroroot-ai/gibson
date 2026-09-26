@@ -26,7 +26,7 @@ func (s *stubTenantRoleFGA) Read(_ context.Context, filter fga.Tuple) ([]fga.Tup
 	if s.readErr != nil {
 		return nil, s.readErr
 	}
-	var out []fga.Tuple
+	out := make([]fga.Tuple, 0, len(s.stored))
 	for _, t := range s.stored {
 		if filter.Object != "" && filter.Object != t.Object {
 			continue
@@ -58,17 +58,17 @@ func TestTenantRoleTuples_ReadRolesFiltersToRoleRelationsAndZitadelUserSubjects(
 
 func TestTenantRoleTuples_ReadRolesFiltersByUserIDs(t *testing.T) {
 	stub := &stubTenantRoleFGA{stored: []fga.Tuple{
-		{User: "user:111", Relation: "owner", Object: "tenant:acme"},
-		{User: "user:222", Relation: "writer", Object: "tenant:acme"},
+		{User: "user:111111111111111111", Relation: "owner", Object: "tenant:acme"},
+		{User: "user:222222222222222222", Relation: "writer", Object: "tenant:acme"},
 	}}
 	tt := fga.NewTenantRoleTuples(stub)
 
-	got, err := tt.ReadRoles(context.Background(), "acme", []string{"222"})
+	got, err := tt.ReadRoles(context.Background(), "acme", []string{"222222222222222222"})
 	if err != nil {
 		t.Fatalf("ReadRoles: %v", err)
 	}
-	if len(got) != 1 || got[0].User != "user:222" {
-		t.Fatalf("ReadRoles = %+v, want only the 222 tuple", got)
+	if len(got) != 1 || got[0].User != "user:222222222222222222" {
+		t.Fatalf("ReadRoles = %+v, want only the 222222222222222222 tuple", got)
 	}
 }
 

@@ -26,8 +26,7 @@ type fakeGrant struct {
 }
 
 // fakeGrants is an in-memory tenantrole.Grants. Every grant it creates has
-// UserOrgID == orgID (one tenant per person, ADR-0093 decision 1) unless a
-// test mutates it directly through seed.
+// UserOrgID == orgID (one tenant per person, ADR-0093 decision 1).
 type fakeGrants struct {
 	mu     sync.Mutex
 	grants map[string]*fakeGrant
@@ -38,16 +37,6 @@ type fakeGrants struct {
 
 func newFakeGrants() *fakeGrants {
 	return &fakeGrants{grants: map[string]*fakeGrant{}}
-}
-
-// seed installs a grant directly, for a test that needs to start from a
-// specific Zitadel state rather than letting Assign/Create build it.
-func (g *fakeGrants) seed(orgID, userID string, r tenantrole.Role) {
-	g.mu.Lock()
-	defer g.mu.Unlock()
-	g.nextID++
-	id := fmt.Sprintf("grant-%d", g.nextID)
-	g.grants[id] = &fakeGrant{id: id, userID: userID, userOrgID: orgID, orgID: orgID, roleKeys: []string{string(r)}, active: true}
 }
 
 func (g *fakeGrants) List(_ context.Context, orgID string, userIDs []string) ([]tenantrole.Grant, error) {
@@ -63,7 +52,7 @@ func (g *fakeGrants) List(_ context.Context, orgID string, userIDs []string) ([]
 	}
 	g.mu.Lock()
 	defer g.mu.Unlock()
-	var out []tenantrole.Grant
+	out := make([]tenantrole.Grant, 0, len(g.grants))
 	for _, gr := range g.grants {
 		if gr.orgID != orgID {
 			continue

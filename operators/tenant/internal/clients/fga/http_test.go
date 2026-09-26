@@ -29,7 +29,7 @@ func newHTTPClient(t *testing.T, handler http.HandlerFunc) fga.Client {
 // third call is asked three times, and every tuple is returned.
 func TestRead_FollowsContinuationTokens(t *testing.T) {
 	calls := 0
-	c := newHTTPClient(t, func(w http.ResponseWriter, r *http.Request) {
+	c := newHTTPClient(t, func(w http.ResponseWriter, _ *http.Request) {
 		calls++
 		w.Header().Set("Content-Type", "application/json")
 		switch calls {
@@ -67,7 +67,7 @@ func TestRead_FollowsContinuationTokens(t *testing.T) {
 // a partial, silently-truncated result).
 func TestRead_StopsAndSurfacesAnErrorMidPagination(t *testing.T) {
 	calls := 0
-	c := newHTTPClient(t, func(w http.ResponseWriter, r *http.Request) {
+	c := newHTTPClient(t, func(w http.ResponseWriter, _ *http.Request) {
 		calls++
 		if calls == 1 {
 			w.Header().Set("Content-Type", "application/json")
@@ -120,7 +120,7 @@ func TestWriteAndDelete_SendsOneRequest(t *testing.T) {
 // lists are empty.
 func TestWriteAndDelete_EmptyIsANoOp(t *testing.T) {
 	var calls int
-	c := newHTTPClient(t, func(w http.ResponseWriter, r *http.Request) {
+	c := newHTTPClient(t, func(w http.ResponseWriter, _ *http.Request) {
 		calls++
 		w.WriteHeader(http.StatusOK)
 	})

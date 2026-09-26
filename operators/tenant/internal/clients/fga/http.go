@@ -149,7 +149,7 @@ func (c *HTTPClient) Read(ctx context.Context, filter Tuple) ([]Tuple, error) {
 		token string
 		err   error
 	)
-	for page := 0; page < readMaxPages; page++ {
+	for range readMaxPages {
 		body := map[string]any{
 			"tuple_key": tupleKey(filter),
 			"page_size": readPageSize,

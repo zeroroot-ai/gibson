@@ -28,6 +28,7 @@ import (
 	"github.com/zeroroot-ai/gibson/internal/platform/authz"
 	"github.com/zeroroot-ai/gibson/internal/platform/tenantrole"
 	tenantv1 "github.com/zeroroot-ai/gibson/internal/server/daemon/api/gibson/tenant/v1"
+	"github.com/zeroroot-ai/sdk/auth"
 )
 
 // ---------------------------------------------------------------------------
@@ -454,15 +455,28 @@ func TestTransferOwnership_AtomicFailureLeavesExactlyOneOwner(t *testing.T) {
 // tuple. A naive re-grant of "admin" on transfer would collide with it and
 // OpenFGA would reject the whole write (see ownershipAuthorizer.WriteAndDelete),
 // aborting the owner move too. The handler must skip the redundant write.
+//
+// This needs the previous owner's existing tuple to actually be visible to
+// Sync's drift comparison, which since D2 (corrected) only recognizes a
+// `user:`-typed subject whose id is a real-shaped Zitadel numeric id — so
+// this test uses its own numeric caller identity rather than the package's
+// shared ownCaller ("user:user-1", chosen for readability everywhere else
+// in this file, none of which touches Sync's read-back path the way
+// TransferOwnership does).
 func TestTransferOwnership_PreviousOwnerWithExistingDirectAdmin_NoDuplicateWrite(t *testing.T) {
+	const numericCaller = "user:100000000000000001"
 	az := newOwnershipAuthorizer()
-	ft := newOwnershipTenant(ownCaller)
-	ft.admin[ownCaller] = true // pre-existing DIRECT admin tuple
+	ft := newOwnershipTenant(numericCaller)
+	ft.admin[numericCaller] = true // pre-existing DIRECT admin tuple
 	ft.member["user:bob-id"] = true
 	az.tenants[ownTenantID] = ft
 	srv := newOwnershipTestServer(t, az)
 
-	ctx := ctxWithTenant(t, ownTenant)
+	tid, err := auth.NewTenantID(ownTenant)
+	if err != nil {
+		t.Fatalf("NewTenantID: %v", err)
+	}
+	ctx := auth.WithIdentity(context.Background(), auth.Identity{Tenant: tid, Subject: "100000000000000001"})
 	if _, err := srv.TransferOwnership(ctx, &tenantv1.TransferOwnershipRequest{
 		NewOwnerUserId: "bob-id",
 	}); err != nil {
@@ -471,11 +485,11 @@ func TestTransferOwnership_PreviousOwnerWithExistingDirectAdmin_NoDuplicateWrite
 	if !ft.isOwner("user:bob-id") {
 		t.Error("new owner must hold the owner relation")
 	}
-	if !ft.isAdmin(ownCaller) {
+	if !ft.isAdmin(numericCaller) {
 		t.Error("previous owner must still hold admin")
 	}
 	for _, w := range az.lastWrites {
-		if w.User == ownCaller && w.Relation == "admin" {
+		if w.User == numericCaller && w.Relation == "admin" {
 			t.Error("must not re-write an admin tuple the previous owner already directly holds")
 		}
 	}
