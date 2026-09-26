@@ -36,12 +36,15 @@ func fakeProjectRolesZitadelServer(t *testing.T, projectID string, roles map[str
 		})
 	})
 	mux.HandleFunc("/zitadel.project.v2.ProjectService/ListProjectRoles", func(w http.ResponseWriter, _ *http.Request) {
-		type roleOut struct{ RoleKey, DisplayName string }
+		type roleOut struct {
+			Key         string `json:"key"`
+			DisplayName string `json:"displayName"`
+		}
 		out := make([]roleOut, 0, len(roles))
 		for k, v := range roles {
-			out = append(out, roleOut{RoleKey: k, DisplayName: v})
+			out = append(out, roleOut{Key: k, DisplayName: v})
 		}
-		_ = json.NewEncoder(w).Encode(map[string]any{"roles": out})
+		_ = json.NewEncoder(w).Encode(map[string]any{"projectRoles": out})
 	})
 	mux.HandleFunc("/zitadel.project.v2.ProjectService/AddProjectRole", func(w http.ResponseWriter, r *http.Request) {
 		var req struct{ RoleKey, DisplayName string }

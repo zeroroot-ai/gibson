@@ -179,15 +179,15 @@ func TestIdentity_ProjectRolesRoundTripAndCascadeOnRemove(t *testing.T) {
 	}
 
 	var listed struct {
-		Roles []struct {
-			RoleKey string `json:"roleKey"`
-		} `json:"roles"`
+		ProjectRoles []struct {
+			Key string `json:"key"`
+		} `json:"projectRoles"`
 	}
 	if status := post(t, e, "/zitadel.project.v2.ProjectService/ListProjectRoles", map[string]any{"projectId": projectID}, &listed); status != http.StatusOK {
 		t.Fatalf("ListProjectRoles status = %d", status)
 	}
-	if len(listed.Roles) != 4 {
-		t.Fatalf("roles = %v, want 4", listed.Roles)
+	if len(listed.ProjectRoles) != 4 {
+		t.Fatalf("roles = %v, want 4", listed.ProjectRoles)
 	}
 
 	grantProject(t, e, projectID, tenantOrg, []string{"owner", "admin", "editor", "viewer"})

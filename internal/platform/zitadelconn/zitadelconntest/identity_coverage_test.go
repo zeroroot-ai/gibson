@@ -92,14 +92,14 @@ func TestIdentity_UpdateProjectRole_RenamesAnExistingRole(t *testing.T) {
 	}
 
 	var listed struct {
-		Roles []struct {
-			RoleKey     string `json:"roleKey"`
+		ProjectRoles []struct {
+			Key         string `json:"key"`
 			DisplayName string `json:"displayName"`
-		} `json:"roles"`
+		} `json:"projectRoles"`
 	}
 	post(t, e, "/zitadel.project.v2.ProjectService/ListProjectRoles", map[string]any{"projectId": projectID}, &listed)
-	if len(listed.Roles) != 1 || listed.Roles[0].DisplayName != "Renamed Owner" {
-		t.Fatalf("roles after rename = %+v", listed.Roles)
+	if len(listed.ProjectRoles) != 1 || listed.ProjectRoles[0].Key != "owner" || listed.ProjectRoles[0].DisplayName != "Renamed Owner" {
+		t.Fatalf("roles after rename = %+v", listed.ProjectRoles)
 	}
 }
 
