@@ -257,7 +257,7 @@ func TestTenantRoleSync_SetupWithManager(t *testing.T) {
 	}
 }
 
-func TestTenantRoleSync_EmitWithNoRecorderIsANoOp(t *testing.T) {
+func TestTenantRoleSync_EmitWithNoRecorderIsANoOp(_ *testing.T) {
 	r := &TenantRoleSyncReconciler{}
 	tenant := &gibsonv1alpha1.Tenant{ObjectMeta: metav1.ObjectMeta{Name: "acme"}}
 	r.emit(tenant, "Normal", "Whatever", "no recorder wired, must not panic")
