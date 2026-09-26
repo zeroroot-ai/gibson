@@ -22,8 +22,8 @@ import (
 
 // fakeProjectRolesZitadelServer serves just enough of the Zitadel admin API
 // for reconcileZitadelProject to run end to end: project creation/lookup,
-// the v2 project-role calls EnsureProjectRoles issues, and the login-policy
-// GET/PUT of EnsureRegistrationDisabled.
+// the v2 project-role calls EnsureProjectRoles issues, and an empty success
+// for the sign-in policy calls.
 func fakeProjectRolesZitadelServer(t *testing.T, projectID string, roles map[string]string) *httptest.Server {
 	t.Helper()
 	mux := http.NewServeMux()
@@ -61,12 +61,11 @@ func fakeProjectRolesZitadelServer(t *testing.T, projectID string, roles map[str
 		delete(roles, req.RoleKey)
 		_ = json.NewEncoder(w).Encode(map[string]any{})
 	})
-	mux.HandleFunc("/admin/v1/policies/login", func(w http.ResponseWriter, r *http.Request) {
-		if r.Method == http.MethodGet {
-			_ = json.NewEncoder(w).Encode(map[string]any{"policy": map[string]any{"allowRegister": false}})
-			return
-		}
-		_ = json.NewEncoder(w).Encode(map[string]any{})
+	// The sign-in policy step runs after the project roles. This fake
+	// answers its policy calls with an empty success so the test stays about
+	// the project roles; signin_policy_test.go covers the policy itself.
+	mux.HandleFunc("/admin/v1/policies/", func(w http.ResponseWriter, _ *http.Request) {
+		_ = json.NewEncoder(w).Encode(map[string]any{"policy": map[string]any{}})
 	})
 	srv := httptest.NewServer(mux)
 	t.Cleanup(srv.Close)

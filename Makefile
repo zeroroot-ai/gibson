@@ -393,6 +393,18 @@ check-no-mcp-bridge:
 	@bash scripts/check-no-mcp-bridge.sh
 	@echo "check-no-mcp-bridge PASSED"
 
+# check-signin-policy-callers asserts the platform-operator is the only
+# caller of Zitadel's instance login/domain policy endpoints (ADR-0093
+# section 9 / decision 1). A second caller could create an org-level policy
+# that overrides the instance default for that org and reopen the sign-in /
+# username-uniqueness gap the operator closes on every reconcile. Self-test
+# first so a broken guard cannot pass by finding nothing.
+check-signin-policy-callers:
+	@echo "Checking only the platform-operator calls the Zitadel sign-in policy..."
+	@SELFTEST=1 bash scripts/check-signin-policy-callers.sh
+	@bash scripts/check-signin-policy-callers.sh
+	@echo "check-signin-policy-callers PASSED"
+
 # check-test-images-mirrored: a Go test pulls its container images from
 # ghcr.io/zeroroot-ai/mirror, never from Docker Hub. Docker Hub rate limits
 # and token timeouts failed the coverage gate on gibson#140 before a single
@@ -604,7 +616,7 @@ test-merge-queue:
 # CI runs both directly (`.github/workflows/go-ci.yml` calls `make lint
 # LINT_BASE=…` and `make lint-deadcode`), so nothing is lost by keeping them out
 # of the local aggregate. Run `make lint` by hand when you actually want it.
-check: fmt check-fmt vet test-race check-no-tenant-id check-fga-headers check-no-tracked-binaries check-no-skipped-tests check-no-mcp-bridge check-test-images-mirrored check-noun-contract check-rpc-test-walker check-critical-paths check-ci-lane-parity check-build-tags check-queue-gate
+check: fmt check-fmt vet test-race check-no-tenant-id check-fga-headers check-no-tracked-binaries check-no-skipped-tests check-no-mcp-bridge check-signin-policy-callers check-test-images-mirrored check-noun-contract check-rpc-test-walker check-critical-paths check-ci-lane-parity check-build-tags check-queue-gate
 	@echo "All checks passed! (golangci-lint not included — run 'make lint' separately)"
 
 # Run authorization-specific checks: vet + unit tests + integration tests (requires Docker)

@@ -160,14 +160,25 @@ type Client interface {
 	// See zeroroot-ai/platform-operator#65.
 	EnsureMachineUserJWTAccessToken(ctx context.Context, userID, userName string) (changed bool, err error)
 
-	// EnsureRegistrationDisabled enforces allowRegister=false on the
-	// instance default login policy so Zitadel's hosted self-registration
-	// page (/ui/v2/login/register) and the sign-in "Register" link are not
-	// served. All human users are provisioned through the admin API
-	// (controlled signup), so self-service registration must be off
-	// (deploy#886). Idempotent: returns changed=false when already
-	// disabled, changed=true when a PUT was applied.
-	EnsureRegistrationDisabled(ctx context.Context) (changed bool, err error)
+	// EnsureLoginPolicy makes the instance default login policy equal want.
+	// It folds in what used to be the separate EnsureRegistrationDisabled
+	// method (allowRegister is one of want's fields) — one codepath for the
+	// instance login policy, not two that can race or disagree.
+	//
+	// Returns one short string per corrected item ("forceMfa",
+	// "+SECOND_FACTOR_TYPE_U2F", "-SECOND_FACTOR_TYPE_OTP_SMS"), empty when
+	// nothing changed. It never sends a no-op PUT, add or remove — Zitadel
+	// rejects a no-op PUT with 400 (INSTANCE-5M9vdd, the deploy#886 wedge)
+	// and a no-op add/remove with 409/not-found (MFA.AlreadyExists /
+	// MFA.NotExisting), and either would put the reconciler into an
+	// unrecoverable retry loop.
+	EnsureLoginPolicy(ctx context.Context, want LoginPolicy) (corrected []string, err error)
+
+	// EnsureDomainPolicy makes the instance default domain policy equal
+	// want, echoing back the other live booleans (validateOrgDomains,
+	// smtpSenderAddressMatchesInstanceDomain) so a PUT never resets them.
+	// Idempotent: returns changed=false when already equal.
+	EnsureDomainPolicy(ctx context.Context, want DomainPolicy) (changed bool, err error)
 
 	// EnsureProjectRoles makes the project's role set exactly roles: it
 	// adds a missing key, renames a key whose display name differs, and
@@ -176,6 +187,28 @@ type Client interface {
 	// project grant and user grant that named it. Idempotent: returns
 	// changed=false when the project already holds exactly roles.
 	EnsureProjectRoles(ctx context.Context, projectID string, roles []tenantrole.Def) (changed bool, err error)
+}
+
+// LoginPolicy is the desired instance default login policy. EnsureLoginPolicy
+// makes the live policy equal every field below — this is a full-replace PUT
+// on the Zitadel side, so every field the operator cares about must be named
+// here, not left to "whatever the instance happened to default to."
+type LoginPolicy struct {
+	AllowUsernamePassword bool
+	AllowRegister         bool
+	AllowExternalIDP      bool
+	ForceMFA              bool
+	ForceMFALocalOnly     bool
+	PasswordlessAllowed   bool
+	AllowDomainDiscovery  bool
+	MFAInitSkipLifetime   time.Duration
+	SecondFactors         []string // enum names, e.g. "SECOND_FACTOR_TYPE_OTP"
+	MultiFactors          []string // enum names, e.g. "MULTI_FACTOR_TYPE_U2F_WITH_VERIFICATION"
+}
+
+// DomainPolicy is the desired instance default domain policy.
+type DomainPolicy struct {
+	UserLoginMustBeDomain bool
 }
 
 // CreateOIDCClientRequest is the input to CreateOIDCClient.
@@ -756,7 +789,10 @@ func (e *errClient) AddOrgMember(ctx context.Context, orgID, userID string, role
 func (e *errClient) RemoveOrgMember(_ context.Context, _, _ string) error {
 	return e.err
 }
-func (e *errClient) EnsureRegistrationDisabled(ctx context.Context) (bool, error) {
+func (e *errClient) EnsureLoginPolicy(_ context.Context, _ LoginPolicy) ([]string, error) {
+	return nil, e.err
+}
+func (e *errClient) EnsureDomainPolicy(_ context.Context, _ DomainPolicy) (bool, error) {
 	return false, e.err
 }
 func (e *errClient) GetOrgIDForProject(ctx context.Context, projectID string) (string, error) {
@@ -1035,46 +1071,36 @@ var updatableLoginPolicyFields = []string{
 	"multiFactorCheckLifetime",
 }
 
-// EnsureRegistrationDisabled implements Client.
+// EnsureLoginPolicy implements Client.
 //
 // Zitadel v4: GET /admin/v1/policies/login returns the instance default
-// login policy under `policy`; its `allowRegister` flag gates the hosted
-// Login-V2 self-registration page (/ui/v2/login/register) and the
-// "Register" link on the sign-in screen. The platform provisions all human
-// users through the admin API (the dashboard's controlled signup,
-// POST /v2/users/human), which does NOT consult this flag, so registration
-// must be off — otherwise anyone can mint an account outside the controlled
-// signup (no plan / Stripe / Tenant CR / FGA owner tuple). See deploy#886.
+// login policy under `policy`. A PUT to the same path fully replaces the
+// policy, so every field the operator cares about — not just the one it
+// wants to flip — must be echoed back, or Zitadel silently resets it (e.g.
+// zeroing an MFA lifetime). This folds in what used to be the standalone
+// EnsureRegistrationDisabled (allowRegister is one of want's fields) and
+// adds MFA enforcement, factor selection and external-IdP gating
+// (ADR-0093 section 9).
 //
-// DefaultInstance.LoginPolicy in the Zitadel chart config only applies at
-// FIRST-INSTANCE creation, so already-running instances need this runtime
-// enforcement. Idempotent: GET first, no-op when allowRegister is already
-// false; otherwise PUT /admin/v1/policies/login echoing every live field
-// with allowRegister flipped to false. Returns changed=true only when a
-// PUT was applied.
-func (c *httpClient) EnsureRegistrationDisabled(ctx context.Context) (bool, error) {
+// protojson drops false booleans, zero enums and empty lists from the GET
+// response, so a MISSING key means false / the zero enum, never "unset."
+// The idempotency checks below all treat a missing key that way. Getting
+// this wrong wedges the reconciler: a PUT that changes nothing fails with
+// 400 (INSTANCE-5M9vdd), which the caller classifies as transient and
+// retries forever (deploy#886).
+//
+// second_factors and multi_factors are a different sub-resource
+// (list/add/remove, not part of the policy body) — see syncFactors.
+// Returns one short string per corrected item, empty when nothing changed.
+func (c *httpClient) EnsureLoginPolicy(ctx context.Context, want LoginPolicy) ([]string, error) {
 	var current struct {
 		Policy map[string]any `json:"policy"`
 	}
 	if err := c.doJSON(ctx, http.MethodGet, "/admin/v1/policies/login", nil, &current); err != nil {
-		return false, fmt.Errorf("EnsureRegistrationDisabled: GET login policy: %w", err)
+		return nil, fmt.Errorf("EnsureLoginPolicy: GET login policy: %w", err)
 	}
 	if current.Policy == nil {
-		return false, fmt.Errorf("EnsureRegistrationDisabled: empty login policy in response: %w", ErrPermanent)
-	}
-	// Zitadel (protojson) omits allowRegister from the GET response once it is
-	// false — protojson drops false booleans — so a MISSING key also means
-	// registration is already disabled. Treat anything other than an explicit
-	// true as already-disabled. The previous `ok && !allow` check only no-oped
-	// when the key was present AND false, so on every reconcile after the first
-	// it re-PUT allowRegister=false; Zitadel rejected that no-op change with
-	// `400 Default Login Policy has not been changed (INSTANCE-5M9vdd)`, which
-	// the caller classified as a transient error and retried forever — wedging
-	// PlatformBootstrap (ZitadelProjectReady=Unknown) so the KEK was never
-	// minted and the daemon never started. deploy#886 regression.
-	if allow, _ := current.Policy["allowRegister"].(bool); !allow {
-		// Already disabled (false or omitted) — nothing to do.
-		return false, nil
+		return nil, fmt.Errorf("EnsureLoginPolicy: empty login policy in response: %w", ErrPermanent)
 	}
 
 	body := make(map[string]any, len(updatableLoginPolicyFields))
@@ -1083,12 +1109,156 @@ func (c *httpClient) EnsureRegistrationDisabled(ctx context.Context) (bool, erro
 			body[k] = v
 		}
 	}
-	body["allowRegister"] = false
 
-	if err := c.doJSON(ctx, http.MethodPut, "/admin/v1/policies/login", body, nil); err != nil {
-		return false, fmt.Errorf("EnsureRegistrationDisabled: PUT login policy: %w", err)
+	var corrected []string
+	setBool := func(key string, wantVal bool) {
+		live, _ := current.Policy[key].(bool) // missing = false (protojson)
+		if live != wantVal {
+			corrected = append(corrected, key)
+		}
+		body[key] = wantVal
+	}
+	setBool("allowUsernamePassword", want.AllowUsernamePassword)
+	setBool("allowRegister", want.AllowRegister)
+	setBool("allowExternalIdp", want.AllowExternalIDP)
+	setBool("forceMfa", want.ForceMFA)
+	setBool("forceMfaLocalOnly", want.ForceMFALocalOnly)
+	setBool("allowDomainDiscovery", want.AllowDomainDiscovery)
+
+	wantPasswordless := "PASSWORDLESS_TYPE_NOT_ALLOWED"
+	if want.PasswordlessAllowed {
+		wantPasswordless = "PASSWORDLESS_TYPE_ALLOWED"
+	}
+	livePasswordless, _ := current.Policy["passwordlessType"].(string)
+	if livePasswordless == "" {
+		livePasswordless = "PASSWORDLESS_TYPE_NOT_ALLOWED" // missing = zero enum
+	}
+	if livePasswordless != wantPasswordless {
+		corrected = append(corrected, "passwordlessType")
+	}
+	body["passwordlessType"] = wantPasswordless
+
+	liveSkip := parseProtoDuration(current.Policy["mfaInitSkipLifetime"])
+	if liveSkip != want.MFAInitSkipLifetime {
+		corrected = append(corrected, "mfaInitSkipLifetime")
+	}
+	body["mfaInitSkipLifetime"] = protoDuration(want.MFAInitSkipLifetime)
+
+	if len(corrected) > 0 {
+		if err := c.doJSON(ctx, http.MethodPut, "/admin/v1/policies/login", body, nil); err != nil {
+			return corrected, fmt.Errorf("EnsureLoginPolicy: PUT login policy: %w", err)
+		}
+	}
+
+	secondCorrected, err := c.syncFactors(ctx, "second_factors", want.SecondFactors)
+	corrected = append(corrected, secondCorrected...)
+	if err != nil {
+		return corrected, err
+	}
+	multiCorrected, err := c.syncFactors(ctx, "multi_factors", want.MultiFactors)
+	corrected = append(corrected, multiCorrected...)
+	if err != nil {
+		return corrected, err
+	}
+
+	return corrected, nil
+}
+
+// syncFactors makes the live second_factors or multi_factors set (kind is
+// "second_factors" or "multi_factors") equal want. Adds happen before
+// removes, so the login policy is never left with zero factors while
+// forceMfa is on. Returns "+TYPE" / "-TYPE" per correction.
+func (c *httpClient) syncFactors(ctx context.Context, kind string, want []string) ([]string, error) {
+	var resp struct {
+		Result []string `json:"result"`
+	}
+	searchPath := fmt.Sprintf("/admin/v1/policies/login/%s/_search", kind)
+	if err := c.doJSON(ctx, http.MethodPost, searchPath, map[string]any{}, &resp); err != nil {
+		return nil, fmt.Errorf("EnsureLoginPolicy: list %s: %w", kind, err)
+	}
+	live := make(map[string]bool, len(resp.Result))
+	for _, t := range resp.Result {
+		live[t] = true
+	}
+	wantSet := make(map[string]bool, len(want))
+	for _, t := range want {
+		wantSet[t] = true
+	}
+
+	corrected := make([]string, 0, len(want)+len(resp.Result))
+	for _, t := range want {
+		if live[t] {
+			continue
+		}
+		addPath := "/admin/v1/policies/login/" + kind
+		if err := c.doJSON(ctx, http.MethodPost, addPath, map[string]any{"type": t}, nil); err != nil {
+			return corrected, fmt.Errorf("EnsureLoginPolicy: add %s %s: %w", kind, t, err)
+		}
+		corrected = append(corrected, "+"+t)
+	}
+	for _, t := range resp.Result {
+		if wantSet[t] {
+			continue
+		}
+		delPath := fmt.Sprintf("/admin/v1/policies/login/%s/%s", kind, url.PathEscape(t))
+		if err := c.doJSON(ctx, http.MethodDelete, delPath, nil, nil); err != nil {
+			return corrected, fmt.Errorf("EnsureLoginPolicy: remove %s %s: %w", kind, t, err)
+		}
+		corrected = append(corrected, "-"+t)
+	}
+	return corrected, nil
+}
+
+// EnsureDomainPolicy implements Client. A missing userLoginMustBeDomain
+// means false (protojson drops false booleans). Echoes back the other live
+// booleans so a PUT never resets validateOrgDomains or
+// smtpSenderAddressMatchesInstanceDomain.
+func (c *httpClient) EnsureDomainPolicy(ctx context.Context, want DomainPolicy) (bool, error) {
+	var current struct {
+		Policy map[string]any `json:"policy"`
+	}
+	if err := c.doJSON(ctx, http.MethodGet, "/admin/v1/policies/domain", nil, &current); err != nil {
+		return false, fmt.Errorf("EnsureDomainPolicy: GET domain policy: %w", err)
+	}
+	live, _ := current.Policy["userLoginMustBeDomain"].(bool)
+	if live == want.UserLoginMustBeDomain {
+		return false, nil
+	}
+
+	body := map[string]any{
+		"userLoginMustBeDomain": want.UserLoginMustBeDomain,
+	}
+	if v, ok := current.Policy["validateOrgDomains"]; ok {
+		body["validateOrgDomains"] = v
+	}
+	if v, ok := current.Policy["smtpSenderAddressMatchesInstanceDomain"]; ok {
+		body["smtpSenderAddressMatchesInstanceDomain"] = v
+	}
+	if err := c.doJSON(ctx, http.MethodPut, "/admin/v1/policies/domain", body, nil); err != nil {
+		return false, fmt.Errorf("EnsureDomainPolicy: PUT domain policy: %w", err)
 	}
 	return true, nil
+}
+
+// parseProtoDuration parses a protojson duration string (e.g. "2592000s",
+// "0s"). A missing/unparseable value is zero, matching protojson's
+// convention of dropping zero-valued fields from GET responses.
+func parseProtoDuration(v any) time.Duration {
+	s, _ := v.(string)
+	if s == "" {
+		return 0
+	}
+	d, err := time.ParseDuration(s)
+	if err != nil {
+		return 0
+	}
+	return d
+}
+
+// protoDuration renders d as the protojson duration string Zitadel expects
+// (e.g. "0s", "2592000s").
+func protoDuration(d time.Duration) string {
+	return fmt.Sprintf("%ds", int64(d/time.Second))
 }
 
 // connectJSON posts a Connect unary JSON request to
