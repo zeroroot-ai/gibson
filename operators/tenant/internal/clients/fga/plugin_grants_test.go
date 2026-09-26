@@ -35,7 +35,8 @@ func (s *pluginStubFGAClient) Read(_ context.Context, _ fga.Tuple) ([]fga.Tuple,
 func (s *pluginStubFGAClient) Check(_ context.Context, _, _, _ string) (bool, error) {
 	return false, nil
 }
-func (s *pluginStubFGAClient) Ping(_ context.Context) error { return nil }
+func (s *pluginStubFGAClient) Ping(_ context.Context) error                             { return nil }
+func (s *pluginStubFGAClient) WriteAndDelete(_ context.Context, _, _ []fga.Tuple) error { return nil }
 func (s *pluginStubFGAClient) WriteConditional(_ context.Context, _ fga.ConditionalTuple) error {
 	return nil
 }

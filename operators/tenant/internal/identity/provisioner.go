@@ -25,6 +25,7 @@ import (
 	"errors"
 	"fmt"
 
+	"github.com/zeroroot-ai/gibson/internal/platform/tenantrole"
 	"github.com/zeroroot-ai/gibson/operators/tenant/internal/clients"
 	"github.com/zeroroot-ai/gibson/operators/tenant/internal/clients/zitadel"
 )
@@ -68,26 +69,31 @@ type Result struct {
 	Slug  string
 }
 
-// New returns the production Provisioner wrapping the supplied Zitadel client.
-// The client must be non-nil — a nil here is operator misconfiguration and New
-// panics so a misconfigured operator crash-loops at boot rather than silently
-// no-op'ing identity provisioning (one-code-path).
-func New(z zitadel.Client) Provisioner {
+// New returns the production Provisioner wrapping the supplied Zitadel
+// client. Both the client and projectID must be non-empty — either missing
+// is operator misconfiguration and New panics so a misconfigured operator
+// crash-loops at boot rather than silently no-op'ing identity provisioning
+// (one-code-path). projectID is the gibson Zitadel project every tenant org
+// is granted (ADR-0093 decision 2).
+func New(z zitadel.Client, projectID string) Provisioner {
 	if z == nil {
 		panic("identity.New: zitadel client is nil (operator misconfigured)")
 	}
-	return &provisioner{zitadel: z}
+	if projectID == "" {
+		panic("identity.New: projectID is empty (operator misconfigured)")
+	}
+	return &provisioner{zitadel: z, projectID: projectID}
 }
 
 type provisioner struct {
-	zitadel zitadel.Client
+	zitadel   zitadel.Client
+	projectID string
 }
 
-// Provision ensures the per-tenant Zitadel org exists by delegating to the
-// shared EnsureOrg core — the SAME sequence the Tenant saga's EnsureZitadelOrg
-// step runs.
+// Provision ensures the per-tenant Zitadel org exists, and the gibson
+// project is granted to it, by delegating to the shared EnsureOrg core.
 func (p *provisioner) Provision(ctx context.Context, req Request) (Result, error) {
-	return EnsureOrg(ctx, p.zitadel, req)
+	return EnsureOrg(ctx, p.zitadel, p.projectID, req)
 }
 
 // Deprovision tears down the per-tenant Zitadel org by delegating to the shared
@@ -101,9 +107,13 @@ func (p *provisioner) Deprovision(ctx context.Context, orgID string) error {
 // EnsureZitadelOrg step and the identity.Provisioner, so there is exactly one
 // Zitadel-org codepath (ADR-0027). It implements the saga's fast-path / drift
 // re-create logic: if KnownOrgID is set and still resolves it returns unchanged;
-// otherwise it creates the org. Permanent client errors are returned as-is so
+// otherwise it creates the org. Either way, once the org exists it ensures the
+// gibson project is granted to it with the four tenant roles (ADR-0093
+// decision 2) — on the known-org path too, so a grant that drifted away (or
+// never existed on an org provisioned before this project existed) is
+// repaired on every reconcile. Permanent client errors are returned as-is so
 // callers do not retry them.
-func EnsureOrg(ctx context.Context, z zitadel.Client, req Request) (Result, error) {
+func EnsureOrg(ctx context.Context, z zitadel.Client, projectID string, req Request) (Result, error) {
 	if req.TenantID == "" {
 		return Result{}, errors.New("identity.EnsureOrg: empty tenant id")
 	}
@@ -112,27 +122,39 @@ func EnsureOrg(ctx context.Context, z zitadel.Client, req Request) (Result, erro
 		name = req.TenantID
 	}
 
+	var orgID string
+
 	// Fast path: org already provisioned — verify it still exists in Zitadel.
 	if req.KnownOrgID != "" {
 		_, err := z.GetOrganization(ctx, req.KnownOrgID)
-		if err == nil {
-			return Result{OrgID: req.KnownOrgID, Slug: req.TenantID}, nil
-		}
-		if !errors.Is(err, clients.ErrNotFound) {
+		switch {
+		case err == nil:
+			orgID = req.KnownOrgID
+		case !errors.Is(err, clients.ErrNotFound):
 			if clients.IsPermanent(err) {
 				return Result{}, err
 			}
 			return Result{}, fmt.Errorf("identity.EnsureOrg: GetOrganization: %w", err)
 		}
-		// Org is gone — fall through to re-create.
+		// Org is gone (ErrNotFound) — fall through to re-create.
 	}
 
-	orgID, err := z.CreateOrganization(ctx, name, req.TenantID)
-	if err != nil {
+	if orgID == "" {
+		created, err := z.CreateOrganization(ctx, name, req.TenantID)
+		if err != nil {
+			if clients.IsPermanent(err) {
+				return Result{}, err //nolint:wrapcheck // permanent client errors are returned as-is (see doc comment) so callers do not retry them; same style as the GetOrganization branch above
+			}
+			return Result{}, fmt.Errorf("identity.EnsureOrg: CreateOrganization: %w", err)
+		}
+		orgID = created
+	}
+
+	if err := z.EnsureProjectGrant(ctx, projectID, orgID, tenantrole.Keys()); err != nil {
 		if clients.IsPermanent(err) {
 			return Result{}, err
 		}
-		return Result{}, fmt.Errorf("identity.EnsureOrg: CreateOrganization: %w", err)
+		return Result{}, fmt.Errorf("identity.EnsureOrg: EnsureProjectGrant: %w", err)
 	}
 	return Result{OrgID: orgID, Slug: req.TenantID}, nil
 }

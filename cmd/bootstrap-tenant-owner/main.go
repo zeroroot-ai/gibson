@@ -13,7 +13,7 @@
 // sign in as the owner without briefly reopening self-serve registration. This
 // binary closes that gap without ever opening registration or requiring a
 // pre-existing human session — the actor invoking it IS the operator (same
-// shape as cmd/active-session-backfill and cmd/tenant-owner-backfill).
+// shape as cmd/active-session-backfill).
 //
 // Given a tenant id (the Tenant CR name) and the owner's email, it:
 //
@@ -23,22 +23,22 @@
 //     Zitadel human user in that org — the exact call MembershipService's
 //     AcceptInvitation makes for an invited member. Zitadel emails the invitee
 //     a verification/credential-setup code; no password crosses this binary.
-//  3. Calls idp.AdminClient.AddTenantMember with role "owner" to grant Zitadel
-//     org membership (idempotent — a 409 is treated as success upstream).
-//  4. Checks and, if absent, writes the FGA tuple
+//  3. Checks the FGA owner tuple; if absent, calls tenantrole.Syncer.Assign
+//     with role Owner (ADR-0093) — it writes the Owner grant on the gibson
+//     Zitadel project and copies it into FGA as
 //     (user:<owner-id>, owner, tenant:<tenant-id>) — the top of the tenant
 //     relation hierarchy (admin/writer/member all derive "or owner" in
 //     model.fga), i.e. what the dashboard and this binary's operators refer to
 //     as "tenant_admin" authority.
-//  5. Prints the sign-in path the owner should visit (GIBSON_PUBLIC_URL +
+//  4. Prints the sign-in path the owner should visit (GIBSON_PUBLIC_URL +
 //     "/login") to stdout.
 //
-// Ordering matches AcceptInvitation / SetTenantRole: Zitadel first (both calls
-// are idempotent — safe to retry), FGA second. A failure in step 2 or 3 exits
-// non-zero before any FGA write is attempted, so a failed run never leaves a
-// partial ownership tuple. Re-running for an existing owner is a no-op success:
-// EnsureHumanUser finds the existing user, AddTenantMember's 409 is swallowed
-// upstream, and the FGA Check finds the tuple already present.
+// Ordering matches AcceptInvitation / SetTenantRole: EnsureHumanUser first
+// (idempotent — safe to retry), the tenant role Assign second, which is now
+// fatal on failure — nothing else can make this tenant's Owner. Re-running
+// for an existing owner is a no-op success: EnsureHumanUser finds the
+// existing user and the FGA Check finds the tuple already present, so Assign
+// is never called again.
 //
 // This binary deliberately does NOT provision the tenant itself — it assumes
 // AdminProvisionTenant has already run and the operator has drained the queue
@@ -54,6 +54,8 @@
 //	GIBSON_IDP_ZITADEL_ORG_ID        — platform-level admin org id (default
 //	                                    x-zitadel-orgid header; NOT the
 //	                                    tenant's per-tenant org)
+//	GIBSON_IDP_ZITADEL_PROJECT_ID    — the gibson Zitadel project id (ADR-0093):
+//	                                    the project the Owner role is granted on
 //	ZITADEL_URL                      — in-cluster Zitadel Service base URL (ADR-0092)
 //	ZITADEL_EXTERNAL_DOMAIN          — claimed public host, sent as x-zitadel-instance-host
 //	EXT_AUTHZ_FGA_ADDR               — HTTP endpoint of the OpenFGA server
@@ -82,24 +84,29 @@ import (
 	"flag"
 	"fmt"
 	"io"
-	corev1 "k8s.io/api/core/v1"
-	apierrors "k8s.io/apimachinery/pkg/api/errors"
-	"k8s.io/client-go/kubernetes"
 	"log/slog"
+	"net/http"
 	"os"
 	"strings"
 	"time"
 
+	corev1 "k8s.io/api/core/v1"
+	apierrors "k8s.io/apimachinery/pkg/api/errors"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/apis/meta/v1/unstructured"
 	"k8s.io/apimachinery/pkg/runtime/schema"
 	"k8s.io/client-go/dynamic"
+	"k8s.io/client-go/kubernetes"
 	"k8s.io/client-go/rest"
 	"k8s.io/client-go/tools/clientcmd"
+
+	"golang.org/x/oauth2"
+	"golang.org/x/oauth2/clientcredentials"
 
 	"github.com/zeroroot-ai/gibson/internal/platform/authz"
 	"github.com/zeroroot-ai/gibson/internal/platform/idp"
 	"github.com/zeroroot-ai/gibson/internal/platform/idp/zitadel"
+	"github.com/zeroroot-ai/gibson/internal/platform/tenantrole"
 	"github.com/zeroroot-ai/gibson/internal/platform/zitadelconn"
 )
 
@@ -129,14 +136,6 @@ type BootstrapResult struct {
 	Outcome     outcome
 	TenantID    string
 	OwnerUserID string
-	// MembershipWarning is set (non-empty) when granting the owner a Zitadel
-	// org-member role failed. It is NON-FATAL: gibson access is authorized by
-	// the FGA owner tuple written below, not by a Zitadel org-member role, so
-	// the first admin can still sign in and own the tenant. The most common
-	// cause is that the custom gibson.owner org-member role is not defined in
-	// this deployment's Zitadel config (a separate, platform-wide gap that also
-	// affects signup's founding-member grant).
-	MembershipWarning string
 
 	// SignInPath is the URL the owner should visit to complete sign-in, or ""
 	// when GIBSON_PUBLIC_URL is unset.
@@ -171,9 +170,6 @@ type idpClient interface {
 	// SMTP, so the invitation flow strands the operator with an account they
 	// can never sign into (deploy#1631).
 	CreateHumanUser(ctx context.Context, req idp.CreateHumanUserRequest) (idp.CreateHumanUserResult, error)
-	// AddTenantMember grants the owner org membership with the given role.
-	// Idempotent — an existing membership is treated as success.
-	AddTenantMember(ctx context.Context, req idp.TenantMembershipRequest) error
 	// FindUserIDByEmailInOrg resolves an existing user in the tenant's org, used
 	// when CreateHumanUser reports the founding owner already exists (the
 	// invitation flow created it) and on a re-run after the credential Secret
@@ -197,6 +193,14 @@ type fgaClient interface {
 	Write(ctx context.Context, tuples []authz.Tuple) error
 }
 
+// tenantRoleAssigner is the narrow surface of tenantrole.Syncer this tool
+// needs to grant the founding Owner's tenant role (ADR-0093): Assign writes
+// the Zitadel grant, then copies it into FGA in the same call, so this
+// binary no longer writes the FGA owner tuple directly.
+type tenantRoleAssigner interface {
+	Assign(ctx context.Context, t tenantrole.Tenant, userID string, r tenantrole.Role) error
+}
+
 // kubeConfigLoader loads a *rest.Config. Injectable for testing.
 type kubeConfigLoader func() (*rest.Config, error)
 
@@ -209,6 +213,9 @@ type idpClientBuilder func(ctx context.Context) (idpClient, error)
 
 // fgaClientBuilder builds the narrow FGA client. Injectable for testing.
 type fgaClientBuilder func(ctx context.Context) (fgaClient, error)
+
+// tenantRoleSyncerBuilder builds the tenant role Syncer. Injectable for testing.
+type tenantRoleSyncerBuilder func(ctx context.Context) (tenantRoleAssigner, error)
 
 func main() {
 	os.Exit(run())
@@ -240,6 +247,7 @@ func run() int {
 		newTenantGetter,
 		buildIdpClient,
 		buildFgaClient,
+		buildTenantRoleSyncer,
 	)
 }
 
@@ -372,8 +380,7 @@ type fgaEnvConfig struct {
 }
 
 // resolveFgaEnvConfig reads the three required EXT_AUTHZ_FGA_* env vars,
-// matching cmd/active-session-backfill and cmd/tenant-owner-backfill. Pure
-// and independently testable.
+// matching cmd/active-session-backfill. Pure and independently testable.
 func resolveFgaEnvConfig() (fgaEnvConfig, error) {
 	addr := os.Getenv("EXT_AUTHZ_FGA_ADDR")
 	storeID := os.Getenv("EXT_AUTHZ_FGA_STORE_ID")
@@ -414,6 +421,53 @@ func buildFgaClient(ctx context.Context) (fgaClient, error) {
 	return az, nil
 }
 
+// buildTenantRoleSyncer constructs the real tenantrole.Syncer (ADR-0093).
+// It reuses the same GIBSON_IDP_* Zitadel endpoint and admin credentials as
+// buildIdpClient (a client_credentials token, not the PAT-shaped clients the
+// operators use) plus GIBSON_IDP_ZITADEL_PROJECT_ID, and opens its own FGA
+// connection via resolveFgaEnvConfig — a second short-lived connection in a
+// one-shot Job binary is an acceptable simplicity trade against sharing the
+// fgaClient built above, which is deliberately narrowed to two methods.
+func buildTenantRoleSyncer(ctx context.Context) (tenantRoleAssigner, error) {
+	idpCfg, err := resolveIdpEnvConfig()
+	if err != nil {
+		return nil, err
+	}
+	projectID := os.Getenv("GIBSON_IDP_ZITADEL_PROJECT_ID")
+	if projectID == "" {
+		return nil, errors.New("required env var not set: GIBSON_IDP_ZITADEL_PROJECT_ID")
+	}
+	fgaCfg, err := resolveFgaEnvConfig()
+	if err != nil {
+		return nil, err
+	}
+	az, err := authz.NewFgaAuthorizer(ctx, authz.FgaConfig{
+		Endpoint:  fgaCfg.Addr,
+		StoreID:   fgaCfg.StoreID,
+		ModelID:   fgaCfg.ModelID,
+		TimeoutMs: 5000,
+	})
+	if err != nil {
+		return nil, fmt.Errorf("build FGA authorizer for tenant role sync: %w", err)
+	}
+	tuples, err := tenantrole.AuthzTuples(az)
+	if err != nil {
+		return nil, fmt.Errorf("tenant role tuples adapter: %w", err)
+	}
+
+	base := &http.Client{Timeout: 10 * time.Second, Transport: idpCfg.Endpoint.Transport(nil)}
+	ccCfg := clientcredentials.Config{
+		ClientID:     idpCfg.ClientID,
+		ClientSecret: idpCfg.ClientSecret,
+		TokenURL:     idpCfg.Endpoint.TokenURL(),
+		Scopes:       []string{"openid", "urn:zitadel:iam:org:project:id:zitadel:aud"},
+	}
+	baseCtx := context.WithValue(ctx, oauth2.HTTPClient, base)
+	hc := oauth2.NewClient(baseCtx, ccCfg.TokenSource(baseCtx))
+	grants := tenantrole.NewZitadelGrants(idpCfg.Endpoint, hc, projectID)
+	return tenantrole.NewSyncer(grants, tuples, nil), nil
+}
+
 // runWithDeps resolves the Tenant CR, constructs clients via the supplied
 // factory functions, and delegates to runBootstrap. All logic branches are
 // exercisable by injecting fakes — only the real constructor calls in
@@ -430,6 +484,7 @@ func runWithDeps(
 	tenantProvider tenantGetterProvider,
 	idpBuilder idpClientBuilder,
 	fgaBuilder fgaClientBuilder,
+	rolesBuilder tenantRoleSyncerBuilder,
 ) int {
 	k8sCfg, err := kubeLoader()
 	if err != nil {
@@ -460,6 +515,15 @@ func runWithDeps(
 		return 1
 	}
 
+	// A failed grant is now fatal (ADR-0093): nothing else can make the
+	// Owner, so an install with a Zitadel or FGA outage at this exact moment
+	// must not report success and strand the operator with no way in.
+	roles, err := rolesBuilder(ctx)
+	if err != nil {
+		logger.Error("failed to build tenant role syncer", "err", err)
+		return 1
+	}
+
 	// Idempotence gate: if the credential Secret already exists the owner was
 	// set up on a prior run (and the operator may have rotated the password), so
 	// the bootstrap must resolve the owner WITHOUT resetting it. Only consulted
@@ -474,11 +538,7 @@ func runWithDeps(
 		credentialExists = exists
 	}
 
-	result, err := runBootstrap(ctx, tenantID, ownerEmail, publicURL, generatePassword, credentialExists, tenantGetter, idpC, fgaC)
-	if err == nil && result.MembershipWarning != "" {
-		logger.Warn("owner is a gibson tenant owner (FGA) but the Zitadel org-member grant did not apply — sign-in still works; the Zitadel org-member role is a separate, tracked gap",
-			"tenant", tenantID, "detail", result.MembershipWarning)
-	}
+	result, err := runBootstrap(ctx, tenantID, ownerEmail, publicURL, generatePassword, credentialExists, tenantGetter, idpC, fgaC, roles)
 	if err == nil && result.InitialPassword != "" && credentialSecret != "" {
 		// Job logs are not a credential store: they are readable by anyone with
 		// pod-log access and they age out. Writing a Secret gives the operator
@@ -584,6 +644,7 @@ func runBootstrap(
 	tenants TenantGetter,
 	idpC idpClient,
 	fgaC fgaClient,
+	roles tenantRoleAssigner,
 ) (BootstrapResult, error) {
 	if tenantID == "" {
 		return BootstrapResult{}, errors.New("tenant id required")
@@ -666,17 +727,6 @@ func runBootstrap(
 		}
 	}
 
-	// Non-fatal: gibson authorises tenant access via the FGA owner tuple below,
-	// not via a Zitadel org-member role. If the org-member grant fails — the
-	// usual cause is that the custom gibson.owner org-member role is not defined
-	// in this deployment's Zitadel config — the first admin can still sign in and
-	// own the tenant, so record a warning and continue rather than stranding the
-	// install one grant short of a working login.
-	var membershipWarning string
-	if err := idpC.AddTenantMember(ctx, idp.TenantMembershipRequest{OrgID: orgID, UserID: userID, Role: ownerRelation}); err != nil {
-		membershipWarning = fmt.Sprintf("add owner to tenant Zitadel org: %v", err)
-	}
-
 	userRef := "user:" + userID
 	tenantRef := "tenant:" + tenantID
 	present, err := fgaC.Check(ctx, userRef, ownerRelation, tenantRef)
@@ -685,10 +735,9 @@ func runBootstrap(
 	}
 
 	result := BootstrapResult{
-		TenantID:          tenantID,
-		OwnerUserID:       userID,
-		InitialPassword:   initialPassword,
-		MembershipWarning: membershipWarning,
+		TenantID:        tenantID,
+		OwnerUserID:     userID,
+		InitialPassword: initialPassword,
 	}
 	if publicURL != "" {
 		result.SignInPath = strings.TrimRight(publicURL, "/") + "/login"
@@ -699,9 +748,11 @@ func runBootstrap(
 		return result, nil
 	}
 
-	tuple := authz.Tuple{User: userRef, Relation: ownerRelation, Object: tenantRef}
-	if err := fgaC.Write(ctx, []authz.Tuple{tuple}); err != nil {
-		return BootstrapResult{}, fmt.Errorf("fga Write %s: %w", ownerRelation, err)
+	// Assign the Owner tenant role through the Syncer (ADR-0093): it writes
+	// the Zitadel grant, then copies it into FGA in the same call. Nothing
+	// else can make this tenant's Owner, so a failure here is fatal.
+	if err := roles.Assign(ctx, tenantrole.Tenant{ID: tenantID, OrgID: orgID}, userID, tenantrole.Owner); err != nil {
+		return BootstrapResult{}, fmt.Errorf("assign owner tenant role: %w", err)
 	}
 	result.Outcome = outcomeBootstrapped
 	return result, nil

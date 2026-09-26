@@ -20,9 +20,9 @@ import (
 	"google.golang.org/grpc/status"
 	"google.golang.org/protobuf/types/known/timestamppb"
 
-	"github.com/zeroroot-ai/gibson/internal/platform/authz"
 	"github.com/zeroroot-ai/gibson/internal/platform/idp"
 	"github.com/zeroroot-ai/gibson/internal/platform/mailer"
+	"github.com/zeroroot-ai/gibson/internal/platform/tenantrole"
 	tenantv1 "github.com/zeroroot-ai/gibson/internal/server/daemon/api/gibson/tenant/v1"
 	"github.com/zeroroot-ai/sdk/auth"
 )
@@ -146,29 +146,27 @@ func (s *TenantAdminServer) AcceptInvitation(ctx context.Context, req *tenantv1.
 		return nil, status.Error(codes.FailedPrecondition, "invitation has expired")
 	}
 
-	// Ensure the invited human exists in the tenant's per-tenant org, then
-	// project both halves of membership. Zitadel-first (idempotent) then FGA,
-	// matching SetTenantRole's fail-closed-on-authority ordering.
-	orgID, err := s.resolveTenantOrgID(ctx, rec.TenantID)
+	if s.roles == nil {
+		return nil, status.Error(codes.Unavailable, "role sync not configured")
+	}
+	t, err := s.tenantOf(ctx, rec.TenantID)
 	if err != nil {
 		return nil, err
 	}
-	userID, err := s.idpClient.EnsureHumanUser(ctx, idp.EnsureHumanUserRequest{OrgID: orgID, Email: rec.Email})
+	roleValue, ok := tenantrole.FromRelation(rec.Role)
+	if !ok {
+		return nil, status.Errorf(codes.Internal, "invitation role %q has no tenant-role mapping", rec.Role)
+	}
+
+	// Ensure the invited human exists in the tenant's per-tenant org, then
+	// assign the role: Zitadel grant first, then Roles.Sync copies it into
+	// FGA in the same call.
+	userID, err := s.idpClient.EnsureHumanUser(ctx, idp.EnsureHumanUserRequest{OrgID: t.OrgID, Email: rec.Email})
 	if err != nil {
 		return nil, status.Errorf(codes.Internal, "ensure invited user: %v", err)
 	}
-	if err := s.addZitadelMember(ctx, rec.TenantID, userID, rec.Role); err != nil {
-		return nil, err
-	}
-	tuple := authz.Tuple{User: "user:" + userID, Relation: rec.Role, Object: "tenant:" + rec.TenantID}
-	present, err := s.authorizer.Check(ctx, tuple.User, tuple.Relation, tuple.Object)
-	if err != nil {
-		return nil, status.Errorf(codes.Internal, "fga Check %s: %v", rec.Role, err)
-	}
-	if !present {
-		if err := s.authorizer.Write(ctx, []authz.Tuple{tuple}); err != nil {
-			return nil, status.Errorf(codes.Internal, "fga Write %s: %v", rec.Role, err)
-		}
+	if err := s.roles.Assign(tenantrole.WithCaller(ctx, "daemon"), t, userID, roleValue); err != nil {
+		return nil, status.Errorf(codes.Internal, "assign tenant role: %v", err)
 	}
 
 	// rec.TenantID, not a caller-supplied tenant: AcceptInvitation is

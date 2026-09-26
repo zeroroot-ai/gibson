@@ -86,9 +86,6 @@ RUN --mount=type=cache,target=/root/.cache/go-build \
 # - lowercase-tenant-owner (spec auth-resolution-hardening R4) runs as a Helm
 #   post-install/post-upgrade Hook Job to lowercase any pre-existing
 #   Tenant.spec.owner values. Idempotent.
-# - tenant-owner-backfill (spec tenant-role-taxonomy, Req 5.1–5.4) seeds the FGA
-#   owner tuple for the founding user of each existing tenant. Runs as a regular
-#   Kubernetes Job (no Helm hook) on helm upgrade to v0.27.0+. Idempotent.
 # - active-session-backfill (spec instant-session-revocation, gibson#627 Slice 2
 #   / gibson#1302) is the chart's pre-upgrade Job that seeds the FGA
 #   active_session conditional tuple for every existing human tenant member.
@@ -118,7 +115,6 @@ RUN --mount=type=cache,target=/root/.cache/go-build \
     --mount=type=cache,target=/go/pkg/mod \
     go build -ldflags="-s -w" -o /out/ \
         ./cmd/lowercase-tenant-owner \
-        ./cmd/tenant-owner-backfill \
         ./cmd/active-session-backfill \
         ./cmd/gibson-migrate \
         ./cmd/sandbox-eviction-handler \
@@ -153,7 +149,6 @@ RUN echo "apk refresh ${APT_CACHE_BUST}" >/dev/null \
 # Copy gibson binary + auxiliary tools from builder
 COPY --from=builder /out/gibson /usr/local/bin/gibson
 COPY --from=builder /out/lowercase-tenant-owner /usr/local/bin/lowercase-tenant-owner
-COPY --from=builder /out/tenant-owner-backfill /usr/local/bin/tenant-owner-backfill
 COPY --from=builder /out/active-session-backfill /usr/local/bin/active-session-backfill
 COPY --from=builder /out/gibson-migrate /usr/local/bin/gibson-migrate
 COPY --from=builder /out/sandbox-eviction-handler /usr/local/bin/sandbox-eviction-handler

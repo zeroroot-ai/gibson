@@ -404,6 +404,75 @@ func TestAuthorizationHeader(t *testing.T) {
 	}
 }
 
+// TestEnsureProjectGrant_CreatesUpdatesAndIsANoOp covers the three
+// convergence branches: no grant creates one, a grant with different keys
+// updates it, and a grant already holding exactly the wanted keys is a
+// no-op (no CreateProjectGrant/UpdateProjectGrant call).
+func TestEnsureProjectGrant_CreatesUpdatesAndIsANoOp(t *testing.T) {
+	t.Run("creates when none exists", func(t *testing.T) {
+		var created bool
+		c := newTestServer(t, map[string]http.HandlerFunc{
+			"POST /zitadel.project.v2.ProjectService/ListProjectGrants": func(w http.ResponseWriter, _ *http.Request) {
+				writeJSON(w, http.StatusOK, map[string]any{"projectGrants": []any{}})
+			},
+			"POST /zitadel.project.v2.ProjectService/CreateProjectGrant": func(w http.ResponseWriter, _ *http.Request) {
+				created = true
+				writeJSON(w, http.StatusOK, map[string]any{})
+			},
+		})
+		if err := c.EnsureProjectGrant(context.Background(), "PROJ-1", "ORG-1", []string{"owner", "admin"}); err != nil {
+			t.Fatalf("EnsureProjectGrant: %v", err)
+		}
+		if !created {
+			t.Fatal("expected CreateProjectGrant to be called")
+		}
+	})
+
+	t.Run("updates when keys differ", func(t *testing.T) {
+		var updatedKeys []string
+		c := newTestServer(t, map[string]http.HandlerFunc{
+			"POST /zitadel.project.v2.ProjectService/ListProjectGrants": func(w http.ResponseWriter, _ *http.Request) {
+				writeJSON(w, http.StatusOK, map[string]any{
+					"projectGrants": []map[string]any{
+						{"grantedOrganizationId": "ORG-1", "roleKeys": []string{"owner"}},
+					},
+				})
+			},
+			"POST /zitadel.project.v2.ProjectService/UpdateProjectGrant": func(w http.ResponseWriter, r *http.Request) {
+				var req struct {
+					RoleKeys []string `json:"roleKeys"`
+				}
+				_ = json.NewDecoder(r.Body).Decode(&req)
+				updatedKeys = req.RoleKeys
+				writeJSON(w, http.StatusOK, map[string]any{})
+			},
+		})
+		if err := c.EnsureProjectGrant(context.Background(), "PROJ-1", "ORG-1", []string{"owner", "admin", "editor", "viewer"}); err != nil {
+			t.Fatalf("EnsureProjectGrant: %v", err)
+		}
+		if len(updatedKeys) != 4 {
+			t.Fatalf("updatedKeys = %v, want 4 entries", updatedKeys)
+		}
+	})
+
+	t.Run("no-op when already converged", func(t *testing.T) {
+		c := newTestServer(t, map[string]http.HandlerFunc{
+			"POST /zitadel.project.v2.ProjectService/ListProjectGrants": func(w http.ResponseWriter, _ *http.Request) {
+				writeJSON(w, http.StatusOK, map[string]any{
+					"projectGrants": []map[string]any{
+						{"grantedOrganizationId": "ORG-1", "roleKeys": []string{"owner", "admin", "editor", "viewer"}},
+					},
+				})
+			},
+			// No Create/Update route registered: any call there fails the test
+			// via newTestServer's "unexpected request" branch.
+		})
+		if err := c.EnsureProjectGrant(context.Background(), "PROJ-1", "ORG-1", []string{"viewer", "editor", "admin", "owner"}); err != nil {
+			t.Fatalf("EnsureProjectGrant: %v", err)
+		}
+	})
+}
+
 // TestSendInvitation_UsernameIsNormalizedEmail pins ADR-0093 decision 1:
 // SendInvitation derives the Zitadel username from
 // idp.UsernameForEmail(email), the same function every other human-user

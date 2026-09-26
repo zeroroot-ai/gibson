@@ -26,6 +26,7 @@ func (s *stubClient) Delete(_ context.Context, _ []Tuple) error             { re
 func (s *stubClient) Read(_ context.Context, _ Tuple) ([]Tuple, error)      { return nil, nil }
 func (s *stubClient) Check(_ context.Context, _, _, _ string) (bool, error) { return false, nil }
 func (s *stubClient) Ping(_ context.Context) error                          { return nil }
+func (s *stubClient) WriteAndDelete(_ context.Context, _, _ []Tuple) error  { return nil }
 
 func (s *stubClient) WriteConditional(_ context.Context, t ConditionalTuple) error {
 	s.writeConditionalCalls = append(s.writeConditionalCalls, t)

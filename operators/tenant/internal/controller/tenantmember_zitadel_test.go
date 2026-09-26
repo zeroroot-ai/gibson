@@ -20,6 +20,7 @@ import (
 	"sigs.k8s.io/controller-runtime/pkg/client"
 	"sigs.k8s.io/controller-runtime/pkg/client/fake"
 
+	"github.com/zeroroot-ai/gibson/internal/platform/tenantrole"
 	gibsonv1alpha1 "github.com/zeroroot-ai/gibson/operators/tenant/api/v1alpha1"
 	"github.com/zeroroot-ai/gibson/operators/tenant/internal/clients"
 	"github.com/zeroroot-ai/gibson/operators/tenant/internal/clients/zitadel"
@@ -108,6 +109,9 @@ func (f *fakeZitadelClient) CreateServiceAccount(_ context.Context, _, name stri
 	return "svc-" + name, "client-" + name, "secret-" + name, nil
 }
 func (f *fakeZitadelClient) DeleteServiceAccount(_ context.Context, _, _ string) error { return nil }
+func (f *fakeZitadelClient) EnsureProjectGrant(_ context.Context, _, _ string, _ []string) error {
+	return nil
+}
 
 var _ zitadel.Client = (*fakeZitadelClient)(nil)
 
@@ -125,12 +129,32 @@ func newMemberTestScheme(t *testing.T) *runtime.Scheme {
 	return s
 }
 
+// buildMemberReconciler wires a Roles Syncer over fresh in-memory fakes
+// (grants, tuples) alongside the legacy fz Zitadel client (still used for
+// SendInvitation, the non-role legacy path). Tests that need to inspect or
+// fail the role-grant side call buildMemberReconcilerWithRoles directly.
 func buildMemberReconciler(
 	t *testing.T,
 	fz *fakeZitadelClient,
 	tenant *gibsonv1alpha1.Tenant,
 	member *gibsonv1alpha1.TenantMember,
 ) (*TenantMemberReconciler, client.Client) {
+	t.Helper()
+	r, fc, _, _ := buildMemberReconcilerWithRoles(t, fz, tenant, member, &fakeRoleGrants{}, &fakeRoleTuples{})
+	return r, fc
+}
+
+// buildMemberReconcilerWithRoles is buildMemberReconciler with caller-supplied
+// Grants/Tuples fakes, so a test can inject an error or pre-seed state and
+// then inspect it after Reconcile.
+func buildMemberReconcilerWithRoles(
+	t *testing.T,
+	fz *fakeZitadelClient,
+	tenant *gibsonv1alpha1.Tenant,
+	member *gibsonv1alpha1.TenantMember,
+	grants *fakeRoleGrants,
+	tuples *fakeRoleTuples,
+) (*TenantMemberReconciler, client.Client, *fakeRoleGrants, *fakeRoleTuples) {
 	t.Helper()
 	s := newMemberTestScheme(t)
 	fc := fake.NewClientBuilder().
@@ -146,8 +170,9 @@ func buildMemberReconciler(
 		Scheme:   s,
 		Recorder: events.NewFakeRecorder(20),
 		Zitadel:  fz,
+		Roles:    tenantrole.NewSyncer(grants, tuples, nil),
 	}
-	return r, fc
+	return r, fc, grants, tuples
 }
 
 func doReconcile(t *testing.T, r *TenantMemberReconciler, name string) ctrl.Result {
@@ -186,10 +211,15 @@ func tenantWithOrgID() *gibsonv1alpha1.Tenant {
 
 // --- tests ---
 
-// TestSyncZitadel_AddMember_HappyPath: ZitadelUserID set → AddMember called
-// once, status.ZitadelMembershipID populated.
+// TestSyncZitadel_AddMember_HappyPath: ZitadelUserID set → the tenant role is
+// assigned through the Syncer (ADR-0093), which writes the Zitadel grant and
+// copies it into FGA in the same call; status.ZitadelMembershipID populated.
+// (Pre-ADR-0093 this called Zitadel AddMember with a gibson.* org role key —
+// see zitadelRoleKey's doc comment for why that path is legacy-only now.)
 func TestSyncZitadel_AddMember_HappyPath(t *testing.T) {
 	fz := &fakeZitadelClient{}
+	grants := &fakeRoleGrants{}
+	tuples := &fakeRoleTuples{}
 	member := &gibsonv1alpha1.TenantMember{
 		ObjectMeta: metav1.ObjectMeta{
 			Name:       "alice",
@@ -206,24 +236,20 @@ func TestSyncZitadel_AddMember_HappyPath(t *testing.T) {
 		},
 	}
 
-	r, fc := buildMemberReconciler(t, fz, tenantWithOrgID(), member)
+	r, fc, grants, tuples := buildMemberReconcilerWithRoles(t, fz, tenantWithOrgID(), member, grants, tuples)
 	doReconcile(t, r, "alice")
 
-	fz.mu.Lock()
-	calls := append([]addMemberCall(nil), fz.addMemberCalls...)
-	fz.mu.Unlock()
-
-	if len(calls) != 1 {
-		t.Fatalf("expected 1 AddMember call, got %d", len(calls))
+	if len(fz.addMemberCalls) != 0 {
+		t.Errorf("expected 0 legacy AddMember calls, got %d", len(fz.addMemberCalls))
 	}
-	if calls[0].OrgID != "org-111" {
-		t.Errorf("AddMember OrgID=%q want org-111", calls[0].OrgID)
+	if len(grants.grants) != 1 || grants.grants[0].UserID != "zuser-alice" || grants.grants[0].OrgID != "org-111" {
+		t.Fatalf("grants = %+v, want one grant for zuser-alice in org-111", grants.grants)
 	}
-	if calls[0].UserID != "zuser-alice" {
-		t.Errorf("AddMember UserID=%q want zuser-alice", calls[0].UserID)
+	if len(grants.grants[0].RoleKeys) != 1 || grants.grants[0].RoleKeys[0] != string(tenantrole.Viewer) {
+		t.Errorf("RoleKeys = %v, want [%s] (member maps to Viewer)", grants.grants[0].RoleKeys, tenantrole.Viewer)
 	}
-	if len(calls[0].Roles) != 1 || calls[0].Roles[0] != "gibson.member" {
-		t.Errorf("AddMember roles=%v want [gibson.member]", calls[0].Roles)
+	if len(tuples.tuples) != 1 || tuples.tuples[0].User != "user:zuser-alice" || tuples.tuples[0].Relation != "member" {
+		t.Errorf("tuples = %+v, want one (user:zuser-alice, member, tenant:acme) tuple", tuples.tuples)
 	}
 
 	var got gibsonv1alpha1.TenantMember
@@ -231,7 +257,7 @@ func TestSyncZitadel_AddMember_HappyPath(t *testing.T) {
 		t.Fatal(err)
 	}
 	if got.Status.ZitadelMembershipID == "" {
-		t.Error("ZitadelMembershipID not set after AddMember")
+		t.Error("ZitadelMembershipID not set after Roles.Assign")
 	}
 }
 
@@ -316,9 +342,17 @@ func TestSyncZitadel_AlreadyInZitadel_Idempotent(t *testing.T) {
 }
 
 // TestSyncZitadel_RemoveMember_HappyPath: deletion with MembershipID set →
-// RemoveMember called, finalizer removed.
+// cleanup revokes the tenant role through the Syncer (ADR-0093), which
+// deletes the Zitadel grant and copies the change into FGA in one call —
+// replacing the old direct Zitadel RemoveMember call. Finalizer removed.
 func TestSyncZitadel_RemoveMember_HappyPath(t *testing.T) {
 	fz := &fakeZitadelClient{}
+	grants := &fakeRoleGrants{grants: []tenantrole.Grant{
+		{ID: "g1", UserID: "zuser-dave", UserOrgID: "org-111", OrgID: "org-111", RoleKeys: []string{string(tenantrole.Viewer)}, Active: true},
+	}}
+	tuples := &fakeRoleTuples{tuples: []tenantrole.Tuple{
+		{User: "user:zuser-dave", Relation: "member", Object: "tenant:acme"},
+	}}
 	now := metav1.Now()
 	member := &gibsonv1alpha1.TenantMember{
 		ObjectMeta: metav1.ObjectMeta{
@@ -338,7 +372,7 @@ func TestSyncZitadel_RemoveMember_HappyPath(t *testing.T) {
 		},
 	}
 
-	r, fc := buildMemberReconciler(t, fz, tenantWithOrgID(), member)
+	r, fc, grants, tuples := buildMemberReconcilerWithRoles(t, fz, tenantWithOrgID(), member, grants, tuples)
 	_, err := r.Reconcile(context.Background(), ctrl.Request{
 		NamespacedName: types.NamespacedName{Namespace: "default", Name: "dave"},
 	})
@@ -346,15 +380,14 @@ func TestSyncZitadel_RemoveMember_HappyPath(t *testing.T) {
 		t.Fatalf("reconcile error: %v", err)
 	}
 
-	fz.mu.Lock()
-	removals := append([]removeMemberCall(nil), fz.removeMemberCalls...)
-	fz.mu.Unlock()
-
-	if len(removals) != 1 {
-		t.Fatalf("expected 1 RemoveMember call, got %d", len(removals))
+	if len(fz.removeMemberCalls) != 0 {
+		t.Errorf("expected 0 legacy RemoveMember calls, got %d", len(fz.removeMemberCalls))
 	}
-	if removals[0].OrgID != "org-111" || removals[0].UserID != "zuser-dave" {
-		t.Errorf("RemoveMember args=%+v", removals[0])
+	if len(grants.grants) != 0 {
+		t.Errorf("grants = %+v, want the Zitadel grant deleted", grants.grants)
+	}
+	if len(tuples.tuples) != 0 {
+		t.Errorf("tuples = %+v, want the FGA role tuple deleted", tuples.tuples)
 	}
 
 	// After the finalizer is removed the fake client garbage-collects the
@@ -422,12 +455,14 @@ func TestSyncZitadel_RemoveMember_NotFound(t *testing.T) {
 	}
 }
 
-// TestSyncZitadel_AddMember_Unavailable: Zitadel unreachable on add →
-// requeue with backoff, nil error.
+// TestSyncZitadel_AddMember_Unavailable: the Zitadel grant call inside
+// Roles.Assign fails (unreachable) → syncZitadel surfaces a hard error
+// (ADR-0093: only ErrOwnerConflict gets the soft-requeue treatment; every
+// other Assign failure is real and must retry the whole reconcile via
+// controller-runtime's error backoff, not a silent RequeueAfter).
 func TestSyncZitadel_AddMember_Unavailable(t *testing.T) {
-	fz := &fakeZitadelClient{
-		addMemberErr: fmt.Errorf("connect: %w", clients.ErrUnreachable),
-	}
+	fz := &fakeZitadelClient{}
+	grants := &fakeRoleGrants{createErr: fmt.Errorf("connect: %w", tenantrole.ErrUnreachable)}
 	member := &gibsonv1alpha1.TenantMember{
 		ObjectMeta: metav1.ObjectMeta{
 			Name:       "frank",
@@ -444,23 +479,22 @@ func TestSyncZitadel_AddMember_Unavailable(t *testing.T) {
 		},
 	}
 
-	r, _ := buildMemberReconciler(t, fz, tenantWithOrgID(), member)
-	res, err := r.Reconcile(context.Background(), ctrl.Request{
+	r, _, _, _ := buildMemberReconcilerWithRoles(t, fz, tenantWithOrgID(), member, grants, &fakeRoleTuples{})
+	_, err := r.Reconcile(context.Background(), ctrl.Request{
 		NamespacedName: types.NamespacedName{Namespace: "default", Name: "frank"},
 	})
-	if err != nil {
-		t.Fatalf("expected nil error on unavailable Zitadel (add), got: %v", err)
-	}
-	if res.RequeueAfter == 0 {
-		t.Error("expected non-zero RequeueAfter when Zitadel unavailable on add")
+	if err == nil {
+		t.Fatal("expected an error when the tenant role grant is unreachable")
 	}
 }
 
 // TestSyncZitadel_PreAccepted_BootstrapsFromSpec: TM with AcceptedByUserID set
 // and no ZitadelUserID (self-signup / founding-user path) → ZitadelUserID is
-// bootstrapped from spec, AddMember is called, SendInvitation is NOT called.
+// bootstrapped from spec, the Owner tenant role is assigned through the
+// Syncer, and the legacy SendInvitation path is NOT taken.
 func TestSyncZitadel_PreAccepted_BootstrapsFromSpec(t *testing.T) {
 	fz := &fakeZitadelClient{}
+	grants := &fakeRoleGrants{}
 	member := &gibsonv1alpha1.TenantMember{
 		ObjectMeta: metav1.ObjectMeta{
 			Name:       "founder",
@@ -476,23 +510,17 @@ func TestSyncZitadel_PreAccepted_BootstrapsFromSpec(t *testing.T) {
 		// status.ZitadelUserID intentionally empty — pre-accepted path.
 	}
 
-	r, fc := buildMemberReconciler(t, fz, tenantWithOrgID(), member)
+	r, fc, grants, _ := buildMemberReconcilerWithRoles(t, fz, tenantWithOrgID(), member, grants, &fakeRoleTuples{})
 	doReconcile(t, r, "founder")
 
-	fz.mu.Lock()
-	adds := append([]addMemberCall(nil), fz.addMemberCalls...)
-	invs := append([]sendInvitationCall(nil), fz.sendInvitationCalls...)
-	fz.mu.Unlock()
-
-	// Must call AddMember, never SendInvitation.
-	if len(adds) != 1 {
-		t.Fatalf("expected 1 AddMember call, got %d", len(adds))
+	if len(fz.sendInvitationCalls) != 0 {
+		t.Errorf("expected 0 SendInvitation calls, got %d — duplicate account would be created", len(fz.sendInvitationCalls))
 	}
-	if adds[0].UserID != "12345" {
-		t.Errorf("AddMember UserID=%q want 12345", adds[0].UserID)
+	if len(grants.grants) != 1 || grants.grants[0].UserID != "12345" {
+		t.Fatalf("grants = %+v, want one grant for user 12345", grants.grants)
 	}
-	if len(invs) != 0 {
-		t.Errorf("expected 0 SendInvitation calls, got %d — duplicate account would be created", len(invs))
+	if grants.grants[0].RoleKeys[0] != string(tenantrole.Owner) {
+		t.Errorf("RoleKeys = %v, want [%s]", grants.grants[0].RoleKeys, tenantrole.Owner)
 	}
 
 	// status.ZitadelUserID must be persisted.
@@ -504,19 +532,21 @@ func TestSyncZitadel_PreAccepted_BootstrapsFromSpec(t *testing.T) {
 		t.Errorf("ZitadelUserID=%q want 12345", got.Status.ZitadelUserID)
 	}
 	if got.Status.ZitadelMembershipID == "" {
-		t.Error("ZitadelMembershipID not set after AddMember on pre-accepted path")
+		t.Error("ZitadelMembershipID not set after Roles.Assign on the pre-accepted path")
 	}
 }
 
-// TestSyncZitadel_AddMember_AlreadyExists: AddMember returns ErrAlreadyExists →
-// reconcile treats it as success (nil error), membership is recorded as synced.
-// The member is placed in Active phase so the reconcile loop exits cleanly after
-// syncZitadel and we can assert on ZitadelMembershipID without noise from
-// phase-specific requeueing.
-func TestSyncZitadel_AddMember_AlreadyExists(t *testing.T) {
-	fz := &fakeZitadelClient{
-		addMemberErr: fmt.Errorf("zitadel 409: %w", clients.ErrAlreadyExists),
-	}
+// TestSyncZitadel_RoleChange_UpdatesExistingGrant replaces the pre-ADR-0093
+// TestSyncZitadel_AddMember_AlreadyExists: Assign no longer blindly creates
+// and catches a conflict — it looks up the user's existing active grant
+// first (Roles.activeGrant) and calls Update when one exists, so a role
+// change (e.g. promoted from Member to Admin in spec) converges to exactly
+// one grant rather than a rejected duplicate create.
+func TestSyncZitadel_RoleChange_UpdatesExistingGrant(t *testing.T) {
+	fz := &fakeZitadelClient{}
+	grants := &fakeRoleGrants{grants: []tenantrole.Grant{
+		{ID: "g1", UserID: "zuser-henry", UserOrgID: "org-111", OrgID: "org-111", RoleKeys: []string{string(tenantrole.Viewer)}, Active: true},
+	}}
 	member := &gibsonv1alpha1.TenantMember{
 		ObjectMeta: metav1.ObjectMeta{
 			Name:       "henry",
@@ -525,7 +555,7 @@ func TestSyncZitadel_AddMember_AlreadyExists(t *testing.T) {
 		},
 		Spec: gibsonv1alpha1.TenantMemberSpec{
 			Email:     "henry@acme.com",
-			Role:      gibsonv1alpha1.MemberRoleMember,
+			Role:      gibsonv1alpha1.MemberRoleAdmin,
 			TenantRef: localRef(),
 		},
 		Status: gibsonv1alpha1.TenantMemberStatus{
@@ -534,26 +564,33 @@ func TestSyncZitadel_AddMember_AlreadyExists(t *testing.T) {
 		},
 	}
 
-	r, fc := buildMemberReconciler(t, fz, tenantWithOrgID(), member)
-	// doReconcile asserts nil error — if ErrAlreadyExists propagated the test fails here.
+	r, fc, grants, _ := buildMemberReconcilerWithRoles(t, fz, tenantWithOrgID(), member, grants, &fakeRoleTuples{})
 	doReconcile(t, r, "henry")
 
-	// ZitadelMembershipID should be set even when AddMember returned AlreadyExists.
+	if len(grants.grants) != 1 {
+		t.Fatalf("grants = %+v, want exactly 1 (updated, not duplicated)", grants.grants)
+	}
+	if grants.grants[0].ID != "g1" || grants.grants[0].RoleKeys[0] != string(tenantrole.Admin) {
+		t.Errorf("grant = %+v, want id=g1 role=%s", grants.grants[0], tenantrole.Admin)
+	}
+
 	var got gibsonv1alpha1.TenantMember
 	if err := fc.Get(context.Background(), types.NamespacedName{Namespace: "default", Name: "henry"}, &got); err != nil {
 		t.Fatal(err)
 	}
 	if got.Status.ZitadelMembershipID == "" {
-		t.Error("ZitadelMembershipID not set after ErrAlreadyExists from AddMember")
+		t.Error("ZitadelMembershipID not set after Roles.Assign updated the existing grant")
 	}
 }
 
-// TestSyncZitadel_RemoveMember_Unavailable: Zitadel unreachable on remove →
-// reconcile returns error (so controller-runtime requeueues), finalizer NOT
-// removed.
+// TestSyncZitadel_RemoveMember_Unavailable: the Zitadel grant delete inside
+// Roles.Revoke fails (unreachable) → cleanup surfaces the error, so
+// controller-runtime requeues with backoff; finalizer NOT removed.
 func TestSyncZitadel_RemoveMember_Unavailable(t *testing.T) {
-	fz := &fakeZitadelClient{
-		removeMemberErr: fmt.Errorf("connect: %w", clients.ErrUnreachable),
+	fz := &fakeZitadelClient{}
+	grants := &fakeRoleGrants{
+		grants:    []tenantrole.Grant{{ID: "g1", UserID: "zuser-grace", UserOrgID: "org-111", OrgID: "org-111", RoleKeys: []string{string(tenantrole.Viewer)}, Active: true}},
+		deleteErr: fmt.Errorf("connect: %w", tenantrole.ErrUnreachable),
 	}
 	now := metav1.Now()
 	member := &gibsonv1alpha1.TenantMember{
@@ -574,13 +611,13 @@ func TestSyncZitadel_RemoveMember_Unavailable(t *testing.T) {
 		},
 	}
 
-	r, fc := buildMemberReconciler(t, fz, tenantWithOrgID(), member)
+	r, fc, _, _ := buildMemberReconcilerWithRoles(t, fz, tenantWithOrgID(), member, grants, &fakeRoleTuples{})
 	res, err := r.Reconcile(context.Background(), ctrl.Request{
 		NamespacedName: types.NamespacedName{Namespace: "default", Name: "grace"},
 	})
 	// The reconcile loop returns RequeueAfter on cleanup error for transient issues.
 	if err == nil && res.RequeueAfter == 0 {
-		t.Error("expected error or RequeueAfter when Zitadel unavailable on remove")
+		t.Error("expected error or RequeueAfter when the tenant role grant is unreachable on remove")
 	}
 
 	var got gibsonv1alpha1.TenantMember

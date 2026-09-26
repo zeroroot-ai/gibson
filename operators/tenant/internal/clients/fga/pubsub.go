@@ -174,6 +174,19 @@ func (p *publishingClient) Delete(ctx context.Context, tuples []Tuple) error {
 	return nil
 }
 
+// WriteAndDelete delegates to the inner client and, on success, publishes
+// one Event per tuple for BOTH lists — a tenant role Sync's promotion and
+// demotion must invalidate the ext-authz decision cache for every user it
+// touched, not just the written half.
+func (p *publishingClient) WriteAndDelete(ctx context.Context, writes, deletes []Tuple) error {
+	if err := p.Client.WriteAndDelete(ctx, writes, deletes); err != nil {
+		return fmt.Errorf("fga: WriteAndDelete: %w", err)
+	}
+	p.publishAll(ctx, EventOpWrite, writes)
+	p.publishAll(ctx, EventOpDelete, deletes)
+	return nil
+}
+
 func (p *publishingClient) publishAll(ctx context.Context, op EventOp, tuples []Tuple) {
 	for _, t := range tuples {
 		evt := Event{

@@ -54,6 +54,12 @@ type Client interface {
 	// Delete tuples atomically. Missing tuples are ignored.
 	Delete(ctx context.Context, tuples []Tuple) error
 
+	// WriteAndDelete applies both lists in a single FGA Write request:
+	// OpenFGA applies all of it or none of it (tenantrole.Tuples,
+	// ADR-0093). Used by the tenant role drift reconciler so a Sync never
+	// leaves the store in a half-applied state.
+	WriteAndDelete(ctx context.Context, writes, deletes []Tuple) error
+
 	// Read returns tuples matching the given filter (user, relation,
 	// or object may be empty wildcards).
 	Read(ctx context.Context, filter Tuple) ([]Tuple, error)

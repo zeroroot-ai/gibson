@@ -11,8 +11,6 @@ import (
 
 // TestAll_HasExactlyTheFourTenantRolesInOrder pins the declared set the
 // platform-operator's EnsureProjectRoles creates on the gibson project.
-// The FGA-relation mapping and the Zitadel-key/FGA-relation helpers land
-// with the rest of the tenantrole package in a later change.
 func TestAll_HasExactlyTheFourTenantRolesInOrder(t *testing.T) {
 	want := []tenantrole.Def{
 		{tenantrole.Owner, "Owner"},
@@ -27,5 +25,105 @@ func TestAll_HasExactlyTheFourTenantRolesInOrder(t *testing.T) {
 		if tenantrole.All[i] != d {
 			t.Errorf("All[%d] = %+v, want %+v", i, tenantrole.All[i], d)
 		}
+	}
+}
+
+// TestIsZitadelUserSubject pins the positive-match filter (owner decision
+// D2, option b, corrected): a `user:`-typed subject is a Zitadel grant only
+// when its id is shaped like a real Zitadel-issued numeric id (15-20
+// decimal digits, matching zitadelconntest's own 18-digit generator and
+// Zitadel v4.18's observed format). Everything else — a SPIFFE id, an empty
+// id, or any other shape — is not a Zitadel user, and Sync leaves it alone.
+// This keeps Sync from ever reading, writing or deleting a role tuple for a
+// subject that is not a Zitadel grant — most notably the exit-test runner's
+// SPIFFE-derived identity, which is a real stored tenant.member tuple but
+// has no Zitadel user behind it.
+func TestIsZitadelUserSubject(t *testing.T) {
+	cases := []struct {
+		subject string
+		want    bool
+	}{
+		{"user:218901902167211265", true},               // 18 digits: a real-shaped Zitadel id, managed
+		{"user:100000000000000001", true},               // 18 digits: zitadelconntest's own generator shape
+		{"user:123456789012345", true},                  // 15 digits: the short end of the accepted range
+		{"user:12345678901234567890", true},             // 20 digits: the long end of the accepted range
+		{"user:1", false},                               // far too short to be a real Zitadel id
+		{"user:zeroroot.ai/platform/e2e-runner", false}, // the e2e runner, gibson#14 fixtures: a SPIFFE id
+		{"user:", false},                                // empty id
+		{"user:bob-id", false},                          // human-readable test fixture id: not numeric
+		{"user:user-1", false},                          // ditto
+		{"user:1234567890123456789012", false},          // 22 digits: numeric but outside the accepted range
+		{"agent_principal:abc-123", false},
+		{"tenant:acme", false},
+		{"", false},
+	}
+	for _, tc := range cases {
+		if got := tenantrole.IsZitadelUserSubject(tc.subject); got != tc.want {
+			t.Errorf("IsZitadelUserSubject(%q) = %v, want %v", tc.subject, got, tc.want)
+		}
+	}
+}
+
+// TestKeys_ReturnsTheFourRoleKeysInOrder pins the plain-string form a
+// Zitadel project-grant call wants.
+func TestKeys_ReturnsTheFourRoleKeysInOrder(t *testing.T) {
+	want := []string{"owner", "admin", "editor", "viewer"}
+	got := tenantrole.Keys()
+	if len(got) != len(want) {
+		t.Fatalf("Keys() = %v, want %v", got, want)
+	}
+	for i, k := range want {
+		if got[i] != k {
+			t.Errorf("Keys()[%d] = %q, want %q", i, got[i], k)
+		}
+	}
+}
+
+// TestRole_Relation pins the FGA relation each role maps to, including the
+// two that predate ADR-0093's role names (Editor/writer, Viewer/member).
+func TestRole_Relation(t *testing.T) {
+	cases := []struct {
+		role tenantrole.Role
+		want string
+	}{
+		{tenantrole.Owner, "owner"},
+		{tenantrole.Admin, "admin"},
+		{tenantrole.Editor, "writer"},
+		{tenantrole.Viewer, "member"},
+		{tenantrole.Role("bogus"), ""},
+	}
+	for _, tc := range cases {
+		if got := tc.role.Relation(); got != tc.want {
+			t.Errorf("Role(%q).Relation() = %q, want %q", tc.role, got, tc.want)
+		}
+	}
+}
+
+// TestParse_RoundTripsEveryDeclaredKeyAndRejectsUnknown pins Parse against
+// every key in All, plus the not-ok case for an undeclared key.
+func TestParse_RoundTripsEveryDeclaredKeyAndRejectsUnknown(t *testing.T) {
+	for _, d := range tenantrole.All {
+		got, ok := tenantrole.Parse(string(d.Key))
+		if !ok || got != d.Key {
+			t.Errorf("Parse(%q) = (%q, %v), want (%q, true)", d.Key, got, ok, d.Key)
+		}
+	}
+	if _, ok := tenantrole.Parse("superuser"); ok {
+		t.Error("Parse(\"superuser\") ok = true, want false")
+	}
+}
+
+// TestFromRelation_RoundTripsEveryDeclaredRoleAndRejectsUnknown pins the
+// SetTenantRole boundary: every FGA relation name a role ever occupies maps
+// back to that role, and a relation no role occupies is rejected.
+func TestFromRelation_RoundTripsEveryDeclaredRoleAndRejectsUnknown(t *testing.T) {
+	for _, d := range tenantrole.All {
+		got, ok := tenantrole.FromRelation(d.Key.Relation())
+		if !ok || got != d.Key {
+			t.Errorf("FromRelation(%q) = (%q, %v), want (%q, true)", d.Key.Relation(), got, ok, d.Key)
+		}
+	}
+	if _, ok := tenantrole.FromRelation("tenant_enabled"); ok {
+		t.Error("FromRelation(\"tenant_enabled\") ok = true, want false")
 	}
 }

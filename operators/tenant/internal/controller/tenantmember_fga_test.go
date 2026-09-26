@@ -14,7 +14,6 @@ import (
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/types"
 	"k8s.io/client-go/tools/events"
-	ctrl "sigs.k8s.io/controller-runtime"
 	"sigs.k8s.io/controller-runtime/pkg/client/fake"
 
 	gibsonv1alpha1 "github.com/zeroroot-ai/gibson/operators/tenant/api/v1alpha1"
@@ -51,8 +50,9 @@ func (f *fakeFGAClient) Delete(_ context.Context, _ []fgaclient.Tuple) error { r
 func (f *fakeFGAClient) Read(_ context.Context, _ fgaclient.Tuple) ([]fgaclient.Tuple, error) {
 	return nil, nil
 }
-func (f *fakeFGAClient) Check(_ context.Context, _, _, _ string) (bool, error) { return false, nil }
-func (f *fakeFGAClient) Ping(_ context.Context) error                          { return nil }
+func (f *fakeFGAClient) Check(_ context.Context, _, _, _ string) (bool, error)          { return false, nil }
+func (f *fakeFGAClient) Ping(_ context.Context) error                                   { return nil }
+func (f *fakeFGAClient) WriteAndDelete(_ context.Context, _, _ []fgaclient.Tuple) error { return nil }
 
 // buildMemberReconcilerWithFGA builds a TenantMemberReconciler with the given
 // fake FGA client, no Zitadel client (Zitadel == nil skips syncZitadel), and
@@ -234,24 +234,11 @@ func TestAcceptInvitation_RoleTupleAlreadyExists_IsSuccess(t *testing.T) {
 	}
 }
 
-// Any other role-write failure still surfaces: tolerance is scoped to
-// already-exists, not to FGA being down.
-func TestAcceptInvitation_RoleTupleOtherFailure_StillErrors(t *testing.T) {
-	fga := &fakeFGAClient{writeErr: errors.New("fga 503: unavailable")}
-	member := invitedMemberFixture("alice", "user-alice-123")
-	r := buildMemberReconcilerWithFGA(t, fga, tenantWithOrgID(), member)
-
-	if _, err := r.Reconcile(context.Background(), ctrl.Request{
-		NamespacedName: types.NamespacedName{Namespace: "default", Name: "alice"},
-	}); err == nil {
-		t.Fatal("a non-already-exists FGA failure must surface from Reconcile")
-	}
-
-	got := &gibsonv1alpha1.TenantMember{}
-	if err := r.Get(context.Background(), types.NamespacedName{Namespace: "default", Name: "alice"}, got); err != nil {
-		t.Fatalf("get member: %v", err)
-	}
-	if got.Status.Phase == gibsonv1alpha1.TenantMemberPhaseActive {
-		t.Fatal("a non-already-exists FGA failure must not promote the member")
-	}
-}
+// TestSyncZitadel_AssignFailure_StillErrors replaces the pre-ADR-0093
+// TestAcceptInvitation_RoleTupleOtherFailure_StillErrors: acceptInvitation no
+// longer writes the role tuple directly (fgaClient.Write is not called from
+// this path at all), so a plain FGA Write failure has nothing to surface
+// there any more. The role write now happens in syncZitadel via
+// Roles.Assign, and it is that call whose failure must still be fatal — see
+// TestSyncZitadel_AddMember_Unavailable in tenantmember_zitadel_test.go for
+// the case actually exercised today.

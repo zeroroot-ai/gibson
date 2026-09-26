@@ -7,6 +7,7 @@ import (
 	"context"
 	"encoding/json"
 	"errors"
+	"strings"
 	"sync"
 	"sync/atomic"
 	"testing"
@@ -59,6 +60,17 @@ func (f *fakeFGAClient) Check(_ context.Context, _, _, _ string) (bool, error) {
 }
 
 func (f *fakeFGAClient) Ping(_ context.Context) error { return nil }
+
+func (f *fakeFGAClient) WriteAndDelete(_ context.Context, writes, deletes []fga.Tuple) error {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	if f.err != nil {
+		return f.err
+	}
+	f.writes = append(f.writes, writes)
+	f.deletes = append(f.deletes, deletes)
+	return nil
+}
 func (f *fakeFGAClient) WriteConditional(_ context.Context, _ fga.ConditionalTuple) error {
 	return nil
 }
@@ -129,6 +141,64 @@ func TestPublishingClient_PublishesOnDelete(t *testing.T) {
 	require.Equal(t, fga.EventOpDelete, evt.Op)
 	require.Equal(t, "zzz", evt.UserID)
 	require.Equal(t, "acme", evt.Tenant)
+}
+
+// TestPublishingClient_WriteAndDeleteSurfacesTheInnerErrorWithoutPublishing
+// pins that a failed inner WriteAndDelete returns the error as-is and never
+// publishes an Event — a tenant role Sync that did not actually change FGA
+// must not invalidate the ext-authz decision cache.
+func TestPublishingClient_WriteAndDeleteSurfacesTheInnerErrorWithoutPublishing(t *testing.T) {
+	inner := &fakeFGAClient{err: errors.New("write boom")}
+	pub := &countingPublisher{}
+	wrapped := fga.WithEventPublisher(inner, pub)
+
+	writes := []fga.Tuple{{User: "user:bob", Relation: "owner", Object: "tenant:acme"}}
+	err := wrapped.WriteAndDelete(context.Background(), writes, nil)
+	if err == nil || !strings.Contains(err.Error(), "write boom") {
+		t.Fatalf("WriteAndDelete error = %v, want the inner client's error", err)
+	}
+	if pub.count() != 0 {
+		t.Fatalf("published %d event(s), want 0 (a failed write must not invalidate the decision cache)", pub.count())
+	}
+}
+
+// TestPublishingClient_WriteAndDeletePublishesBothLists asserts that a
+// successful WriteAndDelete — the call a tenant role Sync makes — publishes
+// an Event for every tuple in BOTH the writes and the deletes list, so a
+// demotion invalidates the ext-authz decision cache for the demoted user
+// too, not just the promoted one.
+func TestPublishingClient_WriteAndDeletePublishesBothLists(t *testing.T) {
+	mr := miniredis.RunT(t)
+
+	rdb := redis.NewClient(&redis.Options{Addr: mr.Addr()})
+	t.Cleanup(func() { _ = rdb.Close() })
+
+	sub := rdb.Subscribe(context.Background(), fga.PubsubChannel)
+	t.Cleanup(func() { _ = sub.Close() })
+	_, err := sub.Receive(context.Background())
+	require.NoError(t, err)
+
+	pub := fga.NewRedisPublisher(rdb, fga.PubsubChannel, 500*time.Millisecond, testr.New(t))
+	inner := &fakeFGAClient{}
+	wrapped := fga.WithEventPublisher(inner, pub)
+
+	writes := []fga.Tuple{{User: "user:bob", Relation: "owner", Object: "tenant:acme"}}
+	deletes := []fga.Tuple{{User: "user:alice", Relation: "owner", Object: "tenant:acme"}}
+	require.NoError(t, wrapped.WriteAndDelete(context.Background(), writes, deletes))
+
+	got := receiveN(t, sub, 2, 2*time.Second)
+	require.Len(t, got, 2)
+
+	ops := make([]fga.EventOp, 0, len(got))
+	users := make([]string, 0, len(got))
+	for _, raw := range got {
+		var evt fga.Event
+		require.NoError(t, json.Unmarshal([]byte(raw), &evt))
+		ops = append(ops, evt.Op)
+		users = append(users, evt.UserID)
+	}
+	require.ElementsMatch(t, []fga.EventOp{fga.EventOpWrite, fga.EventOpDelete}, ops)
+	require.ElementsMatch(t, []string{"bob", "alice"}, users)
 }
 
 // TestPublishingClient_DoesNotPublishOnError asserts that the wrapper does
