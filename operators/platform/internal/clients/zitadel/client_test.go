@@ -316,7 +316,7 @@ func TestRemoveOrgMember_ConstructionErrorPropagates(t *testing.T) {
 // failed" branch: a non-404 error from the server (e.g. 500, 401) must
 // come back to the caller, not be swallowed the way a 404 is.
 func TestRemoveIAMMember_PropagatesNonNotFoundError(t *testing.T) {
-	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
 		w.WriteHeader(http.StatusInternalServerError)
 		_, _ = w.Write([]byte(`{"message":"internal"}`))
 	}))
@@ -330,7 +330,7 @@ func TestRemoveIAMMember_PropagatesNonNotFoundError(t *testing.T) {
 }
 
 func TestRemoveOrgMember_PropagatesNonNotFoundError(t *testing.T) {
-	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
 		w.WriteHeader(http.StatusInternalServerError)
 		_, _ = w.Write([]byte(`{"message":"internal"}`))
 	}))
