@@ -86,7 +86,7 @@ var allowedUnauthenticated = map[string]bool{
 	// gibson#22), and it runs before any tenant, membership or session exists,
 	// so there is no principal to FGA-check. It creates a DEACTIVATED account
 	// and a pending row and nothing else; what turns that into a tenant is
-	// AdminTenantService.AdminApproveRegistration, which is platform_operator
+	// AdminTenantService.AdminApproveRegistration, which is platform_owner
 	// only. The unauthenticated half can therefore create nothing usable on
 	// its own. The handler validates its input, refuses unless the deployment
 	// selects the approval rung, and rate-limits per address and globally.

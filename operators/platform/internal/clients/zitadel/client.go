@@ -187,6 +187,59 @@ type Client interface {
 	// project grant and user grant that named it. Idempotent: returns
 	// changed=false when the project already holds exactly roles.
 	EnsureProjectRoles(ctx context.Context, projectID string, roles []tenantrole.Def) (changed bool, err error)
+
+	// --- Platform owner (ADR-0093 decision 6/8, hosted#201) ---------------
+
+	// EnsureHumanUserNoPassword creates a human user in orgID with NO
+	// password field on the request at all — Zitadel never mints or stores
+	// one (ADR-0093: "no stored passwords"). email is marked verified on
+	// creation so AddHumanUser does not also fire Zitadel's separate
+	// email-verification-code flow; the invite-code flow
+	// (CreateSetupInviteCode) is the platform's one setup-link mechanism.
+	// Idempotent: on 409/already-exists, resolves the existing user's id via
+	// FindHumanUserByEmail.
+	//
+	// Zitadel v4.18.0, Connect-protocol path (matches the fake in
+	// zitadelconntest/identity.go): POST
+	// /zitadel.user.v2.UserService/AddHumanUser.
+	EnsureHumanUserNoPassword(ctx context.Context, orgID, email, givenName, familyName string) (userID string, err error)
+
+	// FindHumanUserByEmail resolves a human user's id from their exact email
+	// address across the instance. Returns ErrNotFound when no match.
+	//
+	// Zitadel v4.18.0: POST /zitadel.user.v2.UserService/ListUsers with an
+	// emailQuery.
+	FindHumanUserByEmail(ctx context.Context, email string) (userID string, err error)
+
+	// CreateSetupInviteCode creates a one-time setup-link code for userID via
+	// Zitadel's own invite-code flow. When send is true, Zitadel emails the
+	// link built from urlTemplate and the returned code is empty. When send
+	// is false, nothing is sent and the raw code is returned so the caller
+	// can build the link itself — the offline-mode path (ADR-0093 decision
+	// 8), which writes a one-time, expiring link to a Secret instead of
+	// relying on mail. Creating a new code invalidates any code created
+	// earlier for the same user (Zitadel's own documented behavior), which is
+	// exactly what platformOwner.setupGeneration needs on a reset.
+	//
+	// urlTemplate is always supplied explicitly (Go template placeholders
+	// {{.UserID}}, {{.OrgID}}, {{.Code}}) rather than relying on a Zitadel
+	// default invite path, so the emitted link is the same shape whether
+	// Zitadel sends it or the caller embeds it in the offline Secret.
+	//
+	// Zitadel v4.18.0: POST /zitadel.user.v2.UserService/CreateInviteCode.
+	CreateSetupInviteCode(ctx context.Context, userID, urlTemplate string, send bool) (code string, err error)
+
+	// ClearHumanFactors removes every second factor Zitadel has on file for
+	// userID (TOTP and U2F/passkey — the only two the Platform owner's login
+	// policy allows, ADR-0093 decision 9) so a subsequent
+	// CreateSetupInviteCode forces a fresh enrollment. Used by
+	// platformOwner.setupGeneration's reset path (ADR-0093 decision 12).
+	// Idempotent: a user with no factors on file is a no-op.
+	//
+	// Zitadel v4.18.0: POST
+	// /zitadel.user.v2.UserService/ListAuthenticationMethodTypes to
+	// enumerate, then POST .../RemoveTOTP or .../RemoveU2F per entry.
+	ClearHumanFactors(ctx context.Context, userID string) error
 }
 
 // LoginPolicy is the desired instance default login policy. EnsureLoginPolicy
@@ -801,6 +854,18 @@ func (e *errClient) GetOrgIDForProject(ctx context.Context, projectID string) (s
 func (e *errClient) EnsureProjectRoles(_ context.Context, _ string, _ []tenantrole.Def) (bool, error) {
 	return false, e.err
 }
+func (e *errClient) EnsureHumanUserNoPassword(_ context.Context, _, _, _, _ string) (string, error) {
+	return "", e.err
+}
+func (e *errClient) FindHumanUserByEmail(_ context.Context, _ string) (string, error) {
+	return "", e.err
+}
+func (e *errClient) CreateSetupInviteCode(_ context.Context, _, _ string, _ bool) (string, error) {
+	return "", e.err
+}
+func (e *errClient) ClearHumanFactors(_ context.Context, _ string) error {
+	return e.err
+}
 
 // GetOrgIDForProject implements Client.
 //
@@ -1273,6 +1338,17 @@ func (c *httpClient) connectJSON(ctx context.Context, service, method string, bo
 	return c.doJSON(ctx, http.MethodPost, "/"+service+"/"+method, body, out)
 }
 
+// connectJSONWithHeaders is connectJSON with caller-supplied extra request
+// headers — needed for the v2 calls whose target org Zitadel resolves from
+// the x-zitadel-orgid header via its auth interceptor
+// (internal/api/grpc/server/middleware, confirmed against the v4.18.0
+// source), never from a body field. AddHumanUser is the one case here: its
+// handler reads authz.GetCtxData(ctx).OrgID and never looks at the request
+// message for an organization at all.
+func (c *httpClient) connectJSONWithHeaders(ctx context.Context, service, method string, body, out any, headers map[string]string) error {
+	return c.doJSONWithHeaders(ctx, http.MethodPost, "/"+service+"/"+method, body, out, headers)
+}
+
 // EnsureProjectRoles implements Client.
 //
 // Lists the project's current roles (ListProjectRoles), then converges to
@@ -1334,4 +1410,152 @@ func (c *httpClient) EnsureProjectRoles(ctx context.Context, projectID string, r
 		changed = true
 	}
 	return changed, nil
+}
+
+// --- Platform owner (ADR-0093 decision 6/8, hosted#201) --------------------
+//
+// These calls target Zitadel v2's UserService over connectJSON, the same
+// Connect-protocol unary-over-HTTP convention EnsureProjectRoles above uses
+// for the v2 ProjectService, and the one the fake in
+// zitadelconn/zitadelconntest/identity.go serves. doJSON's existing
+// status-code classification (404 -> ErrNotFound, 409 -> ErrAlreadyExists,
+// 401/403 -> permanent ErrUnauthorized) applies unchanged: Zitadel's Connect
+// JSON error body maps the same "already_exists" / "not_found" /
+// "permission_denied" codes onto those same HTTP statuses.
+const userService = "zitadel.user.v2.UserService"
+
+// EnsureHumanUserNoPassword implements Client.
+func (c *httpClient) EnsureHumanUserNoPassword(ctx context.Context, orgID, email, givenName, familyName string) (string, error) {
+	body := map[string]any{
+		"username": email,
+		"profile": map[string]any{
+			"givenName":  givenName,
+			"familyName": familyName,
+		},
+		// isVerified: true — no separate email-verification-code flow;
+		// CreateSetupInviteCode is the one setup-link mechanism this client
+		// uses. No "password" field at all: Zitadel mints none (ADR-0093).
+		"email": map[string]any{"email": email, "isVerified": true},
+	}
+	var resp struct {
+		UserID string `json:"userId"`
+	}
+	// orgID travels as the x-zitadel-orgid header, never a body field:
+	// AddHumanUser's handler resolves the target org exclusively from
+	// authz.GetCtxData(ctx).OrgID, itself populated from this header by
+	// Zitadel's Connect auth interceptor. A request-message "organization"
+	// field does not exist on this RPC (confirmed against the v4.18.0
+	// source) — the same convention AddOrgMember already uses below for the
+	// v1 Management API.
+	err := c.connectJSONWithHeaders(ctx, userService, "AddHumanUser", body, &resp, map[string]string{"x-zitadel-orgid": orgID})
+	if err != nil {
+		if IsAlreadyExists(err) || IsConflict(err) {
+			id, lerr := c.FindHumanUserByEmail(ctx, email)
+			if lerr != nil {
+				return "", fmt.Errorf("EnsureHumanUserNoPassword: conflict lookup: %w", lerr)
+			}
+			return id, nil
+		}
+		return "", fmt.Errorf("EnsureHumanUserNoPassword %q: %w", email, err)
+	}
+	return resp.UserID, nil
+}
+
+// FindHumanUserByEmail implements Client.
+func (c *httpClient) FindHumanUserByEmail(ctx context.Context, email string) (string, error) {
+	body := map[string]any{
+		"queries": []map[string]any{
+			{"emailQuery": map[string]any{"email": email}},
+		},
+	}
+	var resp struct {
+		Result []struct {
+			UserID string `json:"userId"`
+		} `json:"result"`
+	}
+	if err := c.connectJSON(ctx, userService, "ListUsers", body, &resp); err != nil {
+		return "", fmt.Errorf("FindHumanUserByEmail %q: %w", email, err)
+	}
+	if len(resp.Result) == 0 {
+		return "", fmt.Errorf("FindHumanUserByEmail %q: %w", email, ErrNotFound)
+	}
+	return resp.Result[0].UserID, nil
+}
+
+// CreateSetupInviteCode implements Client.
+func (c *httpClient) CreateSetupInviteCode(ctx context.Context, userID, urlTemplate string, send bool) (string, error) {
+	body := map[string]any{"userId": userID}
+	if send {
+		body["sendCode"] = map[string]any{"urlTemplate": urlTemplate}
+	} else {
+		body["returnCode"] = map[string]any{}
+	}
+	var resp struct {
+		InviteCode string `json:"inviteCode"`
+	}
+	if err := c.connectJSON(ctx, userService, "CreateInviteCode", body, &resp); err != nil {
+		return "", fmt.Errorf("CreateSetupInviteCode user=%s: %w", userID, err)
+	}
+	return resp.InviteCode, nil
+}
+
+// authMethodTOTP / authMethodU2F / authMethodPasskey are the entries
+// ListAuthenticationMethodTypes reports.
+const (
+	authMethodTOTP    = "AUTHENTICATION_METHOD_TYPE_TOTP"
+	authMethodU2F     = "AUTHENTICATION_METHOD_TYPE_U2F"
+	authMethodPasskey = "AUTHENTICATION_METHOD_TYPE_PASSKEY"
+)
+
+// ClearHumanFactors implements Client.
+func (c *httpClient) ClearHumanFactors(ctx context.Context, userID string) error {
+	var listResp struct {
+		AuthMethodTypes []string `json:"authMethodTypes"`
+	}
+	listBody := map[string]any{"userId": userID}
+	if err := c.connectJSON(ctx, userService, "ListAuthenticationMethodTypes", listBody, &listResp); err != nil {
+		return fmt.Errorf("ClearHumanFactors: list user=%s: %w", userID, err)
+	}
+	for _, t := range listResp.AuthMethodTypes {
+		switch t {
+		case authMethodTOTP:
+			if err := c.connectJSON(ctx, userService, "RemoveTOTP", map[string]any{"userId": userID}, nil); err != nil && !IsNotFound(err) {
+				return fmt.Errorf("ClearHumanFactors: RemoveTOTP user=%s: %w", userID, err)
+			}
+		case authMethodU2F:
+			if err := c.removeAllCredentials(ctx, userID, "ListU2F", "RemoveU2F", "u2fId"); err != nil {
+				return fmt.Errorf("ClearHumanFactors: %w", err)
+			}
+		case authMethodPasskey:
+			if err := c.removeAllCredentials(ctx, userID, "ListPasskeys", "RemovePasskey", "passkeyId"); err != nil {
+				return fmt.Errorf("ClearHumanFactors: %w", err)
+			}
+		}
+	}
+	return nil
+}
+
+// removeAllCredentials lists a per-credential factor (U2F or passkey — both
+// can have more than one registered device) via the named ListX v2 call and
+// removes each one via the named RemoveX call, keyed by idField. Idempotent:
+// an empty list is a no-op.
+func (c *httpClient) removeAllCredentials(ctx context.Context, userID, listMethod, removeMethod, idField string) error {
+	var listResp struct {
+		Result []map[string]any `json:"result"`
+	}
+	listBody := map[string]any{"userId": userID}
+	if err := c.connectJSON(ctx, userService, listMethod, listBody, &listResp); err != nil {
+		return fmt.Errorf("%s user=%s: %w", listMethod, userID, err)
+	}
+	for _, cred := range listResp.Result {
+		id, _ := cred[idField].(string)
+		if id == "" {
+			continue
+		}
+		removeBody := map[string]any{"userId": userID, idField: id}
+		if err := c.connectJSON(ctx, userService, removeMethod, removeBody, nil); err != nil && !IsNotFound(err) {
+			return fmt.Errorf("%s user=%s %s=%s: %w", removeMethod, userID, idField, id, err)
+		}
+	}
+	return nil
 }

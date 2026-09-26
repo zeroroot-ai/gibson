@@ -1397,43 +1397,43 @@ entries:
     allowed_identities:
       - USER
   "/gibson.tenant.v1.AdminTenantService/AdminApproveRegistration":
-    relation: "platform_operator"
+    relation: "platform_owner"
     object_type: "system_tenant"
     object_deriver: "system_tenant"
     allowed_identities:
       - USER
   "/gibson.tenant.v1.AdminTenantService/AdminDeleteTenant":
-    relation: "platform_operator"
+    relation: "platform_owner"
     object_type: "system_tenant"
     object_deriver: "system_tenant"
     allowed_identities:
       - USER
   "/gibson.tenant.v1.AdminTenantService/AdminGetTenantBilling":
-    relation: "platform_operator"
+    relation: "platform_owner"
     object_type: "system_tenant"
     object_deriver: "system_tenant"
     allowed_identities:
       - USER
   "/gibson.tenant.v1.AdminTenantService/AdminListPendingRegistrations":
-    relation: "platform_operator"
+    relation: "platform_owner"
     object_type: "system_tenant"
     object_deriver: "system_tenant"
     allowed_identities:
       - USER
   "/gibson.tenant.v1.AdminTenantService/AdminProvisionTenant":
-    relation: "platform_operator"
+    relation: "platform_owner"
     object_type: "system_tenant"
     object_deriver: "system_tenant"
     allowed_identities:
       - USER
   "/gibson.tenant.v1.AdminTenantService/AdminRejectRegistration":
-    relation: "platform_operator"
+    relation: "platform_owner"
     object_type: "system_tenant"
     object_deriver: "system_tenant"
     allowed_identities:
       - USER
   "/gibson.tenant.v1.AdminTenantService/AdminUpdateTenant":
-    relation: "platform_operator"
+    relation: "platform_owner"
     object_type: "system_tenant"
     object_deriver: "system_tenant"
     allowed_identities:

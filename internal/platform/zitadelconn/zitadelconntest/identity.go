@@ -6,6 +6,7 @@ package zitadelconntest
 import (
 	"encoding/json"
 	"fmt"
+	"io"
 	"net/http"
 	"sync"
 )
@@ -45,9 +46,21 @@ type fakeOrg struct {
 }
 
 type fakeUser struct {
-	ID    string
-	OrgID string
-	Email string
+	ID       string
+	OrgID    string
+	Email    string
+	Verified bool
+
+	// Platform owner fields (ADR-0093 decision 6/8, hosted#201): AddHumanUser
+	// never sets a password, so there is no password field here at all —
+	// CreateInviteCode is the only setup-link mechanism the fake models.
+	// inviteCode is the last code CreateInviteCode minted with returnCode;
+	// creating a new one overwrites it, matching Zitadel's own documented
+	// "the new code will overwrite the previous one and make it invalid".
+	inviteCode string
+	totp       bool
+	u2f        []string
+	passkeys   []string
 }
 
 // ProjectRole is one role key declared on a project.
@@ -187,7 +200,64 @@ func (f *Identity) Handler() http.Handler {
 	mux.HandleFunc("/zitadel.authorization.v2.AuthorizationService/UpdateAuthorization", f.handleUpdateAuthorization)
 	mux.HandleFunc("/zitadel.authorization.v2.AuthorizationService/DeleteAuthorization", f.handleDeleteAuthorization)
 	mux.HandleFunc("/zitadel.authorization.v2.AuthorizationService/ListAuthorizations", f.handleListAuthorizations)
+	mux.HandleFunc("/zitadel.user.v2.UserService/AddHumanUser", f.handleAddHumanUser)
+	mux.HandleFunc("/zitadel.user.v2.UserService/ListUsers", f.handleListUsers)
+	mux.HandleFunc("/zitadel.user.v2.UserService/CreateInviteCode", f.handleCreateInviteCode)
+	mux.HandleFunc("/zitadel.user.v2.UserService/ListAuthenticationMethodTypes", f.handleListAuthenticationMethodTypes)
+	mux.HandleFunc("/zitadel.user.v2.UserService/RemoveTOTP", f.handleRemoveTOTP)
+	mux.HandleFunc("/zitadel.user.v2.UserService/ListU2F", f.handleListU2F)
+	mux.HandleFunc("/zitadel.user.v2.UserService/RemoveU2F", f.handleRemoveU2F)
+	mux.HandleFunc("/zitadel.user.v2.UserService/ListPasskeys", f.handleListPasskeys)
+	mux.HandleFunc("/zitadel.user.v2.UserService/RemovePasskey", f.handleRemovePasskey)
 	return mux
+}
+
+// AddTOTP seeds userID with a registered TOTP factor, for a test that
+// exercises ClearHumanFactors against a Platform owner who has already
+// enrolled one.
+func (f *Identity) AddTOTP(userID string) {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	if u := f.users[userID]; u != nil {
+		u.totp = true
+	}
+}
+
+// AddU2F seeds userID with a registered U2F/security-key credential and
+// returns its id.
+func (f *Identity) AddU2F(userID string) string {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	id := f.nextIDLocked()
+	if u := f.users[userID]; u != nil {
+		u.u2f = append(u.u2f, id)
+	}
+	return id
+}
+
+// HumanFactors reports whether userID currently has a TOTP generator and how
+// many U2F / passkey credentials are on file, for test assertions after
+// ClearHumanFactors.
+func (f *Identity) HumanFactors(userID string) (totp bool, u2fCount, passkeyCount int) {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	u := f.users[userID]
+	if u == nil {
+		return false, 0, 0
+	}
+	return u.totp, len(u.u2f), len(u.passkeys)
+}
+
+// InviteCode returns the last invite code CreateInviteCode minted with
+// returnCode for userID, or "" if none (or if the user was created only via
+// AddUser, the tenant-side helper this fake already had).
+func (f *Identity) InviteCode(userID string) string {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	if u := f.users[userID]; u != nil {
+		return u.inviteCode
+	}
+	return ""
 }
 
 // --- wire helpers -----------------------------------------------------
@@ -814,4 +884,250 @@ func (f *Identity) handleListAuthorizations(w http.ResponseWriter, r *http.Reque
 		"authorizations": out,
 		"pagination":     map[string]any{"totalResult": total},
 	})
+}
+
+// --- v2 UserService: the Platform owner path (ADR-0093, hosted#201) --------
+
+type addHumanUserReq struct {
+	Username string `json:"username"`
+	Profile  struct {
+		GivenName  string `json:"givenName"`
+		FamilyName string `json:"familyName"`
+	} `json:"profile"`
+	Email struct {
+		Email      string `json:"email"`
+		IsVerified bool   `json:"isVerified"`
+	} `json:"email"`
+	// Password is deliberately unread: EnsureHumanUserNoPassword never sends
+	// one, and a fake that accepted it silently would hide a real regression
+	// (ADR-0093: "no stored passwords").
+}
+
+// handleAddHumanUser rejects a request that carries a password field at all
+// — real Zitadel would happily create a user WITH one, but the platform-
+// operator's contract is that it never sends one, and this fake exists to
+// catch a regression on that contract, not merely to accept whatever it is
+// given.
+//
+// The target org comes from the x-zitadel-orgid header, never a request-body
+// field: AddHumanUserRequest carries no "organization" field at all on
+// Zitadel v4.18.0 — the real handler resolves it exclusively from
+// authz.GetCtxData(ctx).OrgID, itself populated from this header by
+// Zitadel's Connect auth interceptor (confirmed against the v4.18.0 source).
+func (f *Identity) handleAddHumanUser(w http.ResponseWriter, r *http.Request) {
+	defer func() { _ = r.Body.Close() }()
+	orgID := r.Header.Get("x-zitadel-orgid")
+	raw, _ := io.ReadAll(r.Body)
+	var probe map[string]json.RawMessage
+	if err := json.Unmarshal(raw, &probe); err == nil {
+		if _, hasPassword := probe["password"]; hasPassword {
+			writeConnectError(w, "invalid_argument", "Errors.User.PasswordNotAllowed", "COMMAND-nopw1")
+			return
+		}
+	}
+	var req addHumanUserReq
+	if err := json.Unmarshal(raw, &req); err != nil {
+		writeConnectError(w, "invalid_argument", "Errors.User.Invalid", "COMMAND-decode")
+		return
+	}
+	if orgID == "" {
+		writeConnectError(w, "invalid_argument", "Errors.Org.Empty", "COMMAND-org01")
+		return
+	}
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	if _, orgKnown := f.orgs[orgID]; !orgKnown {
+		writeConnectError(w, "not_found", "Errors.Org.NotFound", "ORG-nf001")
+		return
+	}
+	for _, u := range f.users {
+		if u.Email == req.Email.Email {
+			writeConnectError(w, "already_exists", "Errors.User.AlreadyExists", "COMMAND-usr1")
+			return
+		}
+	}
+	id := f.nextIDLocked()
+	f.users[id] = &fakeUser{
+		ID: id, OrgID: orgID, Email: req.Email.Email,
+		Verified: req.Email.IsVerified,
+	}
+	writeOK(w, map[string]string{"userId": id})
+}
+
+func (f *Identity) handleListUsers(w http.ResponseWriter, r *http.Request) {
+	var req struct {
+		Queries []struct {
+			EmailQuery *struct {
+				Email string `json:"email"`
+			} `json:"emailQuery,omitempty"`
+		} `json:"queries"`
+	}
+	_ = decode(r, &req)
+	var email string
+	for _, q := range req.Queries {
+		if q.EmailQuery != nil {
+			email = q.EmailQuery.Email
+		}
+	}
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	type userOut struct {
+		UserID string `json:"userId"`
+	}
+	out := make([]userOut, 0, 1)
+	for _, u := range f.users {
+		if email != "" && u.Email != email {
+			continue
+		}
+		out = append(out, userOut{UserID: u.ID})
+	}
+	writeOK(w, map[string]any{"result": out})
+}
+
+type createInviteCodeReq struct {
+	UserID     string `json:"userId"`
+	ReturnCode *struct {
+	} `json:"returnCode,omitempty"`
+	SendCode *struct {
+		URLTemplate string `json:"urlTemplate"`
+	} `json:"sendCode,omitempty"`
+}
+
+// handleCreateInviteCode mints a code when returnCode is set (and stores it,
+// overwriting — and so invalidating — any earlier one, matching Zitadel's
+// documented behavior) and mints nothing visible to the caller when sendCode
+// is set, matching the real send-by-email path.
+func (f *Identity) handleCreateInviteCode(w http.ResponseWriter, r *http.Request) {
+	var req createInviteCodeReq
+	_ = decode(r, &req)
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	u := f.users[req.UserID]
+	if u == nil {
+		writeConnectError(w, "not_found", "Errors.User.NotFound", "COMMAND-usr404")
+		return
+	}
+	if req.ReturnCode == nil && req.SendCode == nil {
+		writeConnectError(w, "invalid_argument", "Errors.User.Invite.MissingVerification", "COMMAND-inv01")
+		return
+	}
+	if req.ReturnCode != nil {
+		code := "code-" + f.nextIDLocked()
+		u.inviteCode = code
+		writeOK(w, map[string]string{"inviteCode": code})
+		return
+	}
+	// sendCode: a real send produces no code in the response; the fake
+	// still tracks that a link now exists, invalidating whatever return-code
+	// value came before it (one active invite at a time, per Zitadel).
+	u.inviteCode = ""
+	writeOK(w, map[string]string{})
+}
+
+func (f *Identity) handleListAuthenticationMethodTypes(w http.ResponseWriter, r *http.Request) {
+	var req struct {
+		UserID string `json:"userId"`
+	}
+	_ = decode(r, &req)
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	u := f.users[req.UserID]
+	if u == nil {
+		writeConnectError(w, "not_found", "Errors.User.NotFound", "COMMAND-usr404")
+		return
+	}
+	types := make([]string, 0, 2)
+	if u.totp {
+		types = append(types, authMethodTOTPWire)
+	}
+	if len(u.u2f) > 0 {
+		types = append(types, authMethodU2FWire)
+	}
+	if len(u.passkeys) > 0 {
+		types = append(types, authMethodPasskeyWire)
+	}
+	writeOK(w, map[string]any{"authMethodTypes": types})
+}
+
+// authMethodTOTPWire / authMethodU2FWire / authMethodPasskeyWire mirror the
+// wire constants the production client checks against
+// (operators/platform/internal/clients/zitadel.authMethodTOTP etc) — kept as
+// separate literals here (not an import of that unexported package constant)
+// so the fake fails the same way real Zitadel would if the client's constant
+// ever drifted from the wire value.
+const (
+	authMethodTOTPWire    = "AUTHENTICATION_METHOD_TYPE_TOTP"
+	authMethodU2FWire     = "AUTHENTICATION_METHOD_TYPE_U2F"
+	authMethodPasskeyWire = "AUTHENTICATION_METHOD_TYPE_PASSKEY"
+)
+
+func (f *Identity) handleRemoveTOTP(w http.ResponseWriter, r *http.Request) {
+	var req struct {
+		UserID string `json:"userId"`
+	}
+	_ = decode(r, &req)
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	u := f.users[req.UserID]
+	if u == nil || !u.totp {
+		writeConnectError(w, "not_found", "Errors.User.MFA.OTP.NotExisting", "COMMAND-totp1")
+		return
+	}
+	u.totp = false
+	writeOK(w, nil)
+}
+
+func (f *Identity) handleListU2F(w http.ResponseWriter, r *http.Request) {
+	f.listCredentials(w, r, "u2fId", func(u *fakeUser) []string { return u.u2f })
+}
+
+func (f *Identity) handleListPasskeys(w http.ResponseWriter, r *http.Request) {
+	f.listCredentials(w, r, "passkeyId", func(u *fakeUser) []string { return u.passkeys })
+}
+
+func (f *Identity) listCredentials(w http.ResponseWriter, r *http.Request, idField string, get func(*fakeUser) []string) {
+	var req struct {
+		UserID string `json:"userId"`
+	}
+	_ = decode(r, &req)
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	u := f.users[req.UserID]
+	if u == nil {
+		writeConnectError(w, "not_found", "Errors.User.NotFound", "COMMAND-usr404")
+		return
+	}
+	out := make([]map[string]string, 0, len(get(u)))
+	for _, id := range get(u) {
+		out = append(out, map[string]string{idField: id})
+	}
+	writeOK(w, map[string]any{"result": out})
+}
+
+func (f *Identity) handleRemoveU2F(w http.ResponseWriter, r *http.Request) {
+	f.removeCredential(w, r, "u2fId", func(u *fakeUser, id string) bool {
+		u.u2f = removeString(u.u2f, id)
+		return true
+	})
+}
+
+func (f *Identity) handleRemovePasskey(w http.ResponseWriter, r *http.Request) {
+	f.removeCredential(w, r, "passkeyId", func(u *fakeUser, id string) bool {
+		u.passkeys = removeString(u.passkeys, id)
+		return true
+	})
+}
+
+func (f *Identity) removeCredential(w http.ResponseWriter, r *http.Request, idField string, remove func(*fakeUser, string) bool) {
+	var req map[string]string
+	_ = decode(r, &req)
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	u := f.users[req["userId"]]
+	if u == nil {
+		writeConnectError(w, "not_found", "Errors.User.NotFound", "COMMAND-usr404")
+		return
+	}
+	remove(u, req[idField])
+	writeOK(w, nil)
 }
