@@ -146,9 +146,10 @@ func buildComponentServer(t *testing.T, mock fga.FGAClient, descBase string) *En
 		t.Fatal(err)
 	}
 	return NewEnvoyAuthzServer(Config{
-		Cache:     fga.NewCachedChecker(fga.NewChecker(mock, reg), 0, 0),
-		Component: cv,
-		Logger:    newTestLogger(),
+		Cache:      fga.NewCachedChecker(fga.NewChecker(mock, reg), 0, 0),
+		Component:  cv,
+		Logger:     newTestLogger(),
+		OrgTenants: &fakeOrgTenantResolver{},
 	})
 }
 

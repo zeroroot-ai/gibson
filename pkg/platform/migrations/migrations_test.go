@@ -34,15 +34,17 @@ func TestEmbed_PlatformHasExpectedFiles(t *testing.T) {
 	// tenant_quotas.concurrent_connectors, which the entitlements reader
 	// selects (gibson#13), 026 adds component_install.principal_ref, the FGA
 	// user a component registered as, which the secret-binding admin RPCs
-	// address (gibson#154).
+	// address (gibson#154), 027 makes tenant_zitadel_orgs.zitadel_org_id
+	// unique so ext-authz's org->tenant lookup is unambiguous (ADR-0093
+	// decision 4, hosted#195).
 	// golang-migrate tracks a single integer and only moves forward, so
 	// leaving a gap would let a later-landing migration be skipped forever.
 	upCount, downCount := countSQL(t, Platform, platformDir)
-	if upCount != 26 {
-		t.Errorf("platform: expected 26 up.sql files, got %d", upCount)
+	if upCount != 27 {
+		t.Errorf("platform: expected 27 up.sql files, got %d", upCount)
 	}
-	if downCount != 26 {
-		t.Errorf("platform: expected 26 down.sql files, got %d", downCount)
+	if downCount != 27 {
+		t.Errorf("platform: expected 27 down.sql files, got %d", downCount)
 	}
 }
 
@@ -131,6 +133,9 @@ func TestTenantMaxVersion(t *testing.T) {
 //	      ceiling, gibson#13)
 //	026 — component_install_principal_ref (the FGA user a component registered
 //	      as, which the secret-binding admin RPCs address, gibson#154)
+//	027 — tenant_zitadel_orgs_org_unique (one Zitadel org maps to at most one
+//	      tenant, so ext-authz's org->tenant lookup is unambiguous, ADR-0093
+//	      decision 4, hosted#195)
 //
 // The sequence must stay CONTIGUOUS. golang-migrate records a single integer
 // version, and `up` only ever moves forward from it — so a migration that lands
@@ -144,8 +149,8 @@ func TestPlatformMaxVersion(t *testing.T) {
 	if err != nil {
 		t.Fatalf("PlatformMaxVersion: %v", err)
 	}
-	if v != 26 {
-		t.Errorf("PlatformMaxVersion: got %d, want 26", v)
+	if v != 27 {
+		t.Errorf("PlatformMaxVersion: got %d, want 27", v)
 	}
 }
 

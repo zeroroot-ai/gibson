@@ -1854,7 +1854,16 @@ func (d *daemonImpl) Start(ctx context.Context) error {
 	// from one authenticated origin. The plain-HTTP :8085 copy of that route
 	// stays up until the chart repoints; see authz_registry_subsystem.go.
 	if x509Src, ok := d.spiffeX509Source.(*workloadapi.X509Source); ok && x509Src != nil {
-		authzRegSys, arErr := newAuthzRegistrySubsystem(x509Src, d.logger, d.cgMinter, d.capabilityGrantSvc)
+		// The org->tenant route (ADR-0093 decision 4) needs the platform DB;
+		// omit it (nil) rather than mount a route that could never answer.
+		// In production d.platformDB is always non-nil by this point (the
+		// daemon never serves traffic with platformDB=nil), so the route is
+		// always mounted here.
+		var orgResolver *api.ZitadelOrgResolver
+		if d.platformDB != nil {
+			orgResolver = api.NewZitadelOrgResolver(d.platformDB)
+		}
+		authzRegSys, arErr := newAuthzRegistrySubsystem(x509Src, d.logger, d.cgMinter, d.capabilityGrantSvc, orgResolver)
 		if arErr != nil {
 			return fmt.Errorf("authz-registry subsystem: %w", arErr)
 		}
