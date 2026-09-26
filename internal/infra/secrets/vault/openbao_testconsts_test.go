@@ -18,8 +18,10 @@ const (
 	// smoke + compat suites. Pinned to a specific 2.5.x release —
 	// NOT `latest`. Bump deliberately when picking up upstream
 	// security fixes; the version assertion in openbao_smoke_test.go
-	// catches accidental drift.
-	openbaoImage = "openbao/openbao:2.5.3" //nolint:unused // referenced only by build-tag-gated test files
+	// catches accidental drift. Pulled from the org mirror
+	// (zeroroot-ai/.github mirror-list.yaml), never Docker Hub directly
+	// (gibson#233).
+	openbaoImage = "ghcr.io/zeroroot-ai/mirror/openbao:2.5.3" //nolint:unused // referenced only by build-tag-gated test files
 
 	// openbaoExpectedVersion is the version string OpenBao reports at
 	// /v1/sys/health. Matches the image tag's semver, sans the leading
