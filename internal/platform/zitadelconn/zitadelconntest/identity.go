@@ -29,7 +29,7 @@ type Identity struct {
 	// projectGrants is keyed by projectID+"/"+orgID.
 	projectGrants map[string]*fakeProjectGrant
 	userGrants    map[string]*fakeUserGrant
-	orgMembers    []fakeOrgMember
+	orgMembers    []OrgMember
 }
 
 type fakeOrg struct {
@@ -130,7 +130,7 @@ func (f *Identity) AddUser(orgID, email string) string {
 func (f *Identity) Grants(orgID string) []Grant {
 	f.mu.Lock()
 	defer f.mu.Unlock()
-	var out []Grant
+	out := make([]Grant, 0, len(f.userGrants))
 	for _, g := range f.userGrants {
 		if g.OrgID != orgID {
 			continue
@@ -145,13 +145,14 @@ func (f *Identity) Grants(orgID string) []Grant {
 }
 
 // OrgMembers returns every accepted AddOrgMember call, for test assertions.
-func (f *Identity) OrgMembers() []fakeOrgMember {
+func (f *Identity) OrgMembers() []OrgMember {
 	f.mu.Lock()
 	defer f.mu.Unlock()
-	return append([]fakeOrgMember(nil), f.orgMembers...)
+	return append([]OrgMember(nil), f.orgMembers...)
 }
 
-type fakeOrgMember struct {
+// OrgMember is one accepted AddOrgMember call, returned by OrgMembers.
+type OrgMember struct {
 	OrgID  string
 	UserID string
 	Roles  []string
@@ -236,7 +237,10 @@ func writeOK(w http.ResponseWriter, v any) {
 
 func decode(r *http.Request, v any) error {
 	defer func() { _ = r.Body.Close() }()
-	return json.NewDecoder(r.Body).Decode(v)
+	if err := json.NewDecoder(r.Body).Decode(v); err != nil {
+		return fmt.Errorf("zitadelconntest: decode request body: %w", err)
+	}
+	return nil
 }
 
 // --- v1 Management: org members ---------------------------------------
@@ -283,7 +287,7 @@ func (f *Identity) handleAddOrgMember(w http.ResponseWriter, r *http.Request) {
 		}
 	}
 	f.mu.Lock()
-	f.orgMembers = append(f.orgMembers, fakeOrgMember{OrgID: orgID, UserID: req.UserID, Roles: req.Roles})
+	f.orgMembers = append(f.orgMembers, OrgMember{OrgID: orgID, UserID: req.UserID, Roles: req.Roles})
 	f.mu.Unlock()
 	writeOK(w, nil)
 }
@@ -413,7 +417,7 @@ func removeString(in []string, s string) []string {
 // --- v2 ProjectService: grants -------------------------------------------
 
 type grantFilter struct {
-	InProjectIdsFilter *struct {
+	InProjectIDsFilter *struct {
 		IDs []string `json:"ids"`
 	} `json:"inProjectIdsFilter,omitempty"`
 	GrantedOrganizationIDFilter *struct {
@@ -429,9 +433,9 @@ func (f *Identity) handleListProjectGrants(w http.ResponseWriter, r *http.Reques
 	var projectIDs map[string]bool
 	var orgID string
 	for _, flt := range req.Filters {
-		if flt.InProjectIdsFilter != nil {
+		if flt.InProjectIDsFilter != nil {
 			projectIDs = map[string]bool{}
-			for _, id := range flt.InProjectIdsFilter.IDs {
+			for _, id := range flt.InProjectIDsFilter.IDs {
 				projectIDs[id] = true
 			}
 		}
@@ -697,14 +701,6 @@ func (f *Identity) handleListAuthorizations(w http.ResponseWriter, r *http.Reque
 	type roleOut struct {
 		Key string `json:"key"`
 	}
-	type authOut struct {
-		ID           string    `json:"id"`
-		Project      idOut     `json:"project"`
-		Organization idOut     `json:"organization"`
-		User         idOut     `json:"user"`
-		State        string    `json:"state"`
-		Roles        []roleOut `json:"roles"`
-	}
 	// project carries organizationId too, per section 2 fact 4.
 	type projectOut struct {
 		ID             string `json:"id"`
@@ -723,7 +719,7 @@ func (f *Identity) handleListAuthorizations(w http.ResponseWriter, r *http.Reque
 		Roles        []roleOut  `json:"roles"`
 	}
 
-	var matched []*fakeUserGrant
+	matched := make([]*fakeUserGrant, 0, len(f.userGrants))
 	for _, ug := range f.userGrants {
 		if orgID != "" && ug.OrgID != orgID {
 			continue
