@@ -1,5 +1,22 @@
 # Changelog
 
+## [0.139.0](https://github.com/zeroroot-ai/gibson/compare/v0.138.3...v0.139.0) (2026-09-26)
+
+
+### Features
+
+* **platform-operator:** create the four tenant roles on the gibson project ([#231](https://github.com/zeroroot-ai/gibson/issues/231)) ([b39870c](https://github.com/zeroroot-ai/gibson/commit/b39870ce8c68f21888b26d1a3a2a99167a01bb3f))
+* **zitadelconntest:** add a stateful Identity fake for orgs, roles and grants ([#230](https://github.com/zeroroot-ai/gibson/issues/230)) ([0e095d6](https://github.com/zeroroot-ai/gibson/commit/0e095d67151c2d0af4164952cd4adef89c3b827d))
+
+
+### Bug Fixes
+
+* **authz:** the tenant comes from the token's org ([#233](https://github.com/zeroroot-ai/gibson/issues/233)) ([d89b720](https://github.com/zeroroot-ai/gibson/commit/d89b72031989ee91c4356f6478d6b7af10ac2da7))
+* **platform-operator:** enforce the sign-in policy and unique usernames ([#232](https://github.com/zeroroot-ai/gibson/issues/232)) ([1e8ac63](https://github.com/zeroroot-ai/gibson/commit/1e8ac6385e24857d01e694b5bea95613a9216ab3))
+* **platform-operator:** machine users get exactly the roles they declare ([#229](https://github.com/zeroroot-ai/gibson/issues/229)) ([fb88bd4](https://github.com/zeroroot-ai/gibson/commit/fb88bd481c1cb3640475d0f9d233bb9cbcc623d5))
+* **tenant:** enforce Owner rules for ownership transfer and role assignment ([#227](https://github.com/zeroroot-ai/gibson/issues/227)) ([5b3ade4](https://github.com/zeroroot-ai/gibson/commit/5b3ade4625ead738aa44bfa77e36a212d6e9ae4d))
+* **test:** pull the OpenBao test image from the org mirror ([#234](https://github.com/zeroroot-ai/gibson/issues/234)) ([2e8b5c5](https://github.com/zeroroot-ai/gibson/commit/2e8b5c5d1a83256da3db7b2b86b428a2900804fb))
+
 ## [0.138.3](https://github.com/zeroroot-ai/gibson/compare/v0.138.2...v0.138.3) (2026-09-24)
 
 
