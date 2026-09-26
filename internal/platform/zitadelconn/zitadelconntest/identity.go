@@ -319,17 +319,20 @@ func (f *Identity) handleListProjectRoles(w http.ResponseWriter, r *http.Request
 		writeConnectError(w, "not_found", "Errors.Project.NotFound", "PROJ-nf001")
 		return
 	}
+	// The real ListProjectRolesResponse: {pagination, projectRoles[]}, each
+	// with "key", not the request-side "roleKey".
 	type roleOut struct {
-		RoleKey     string `json:"roleKey"`
+		ProjectID   string `json:"projectId"`
+		Key         string `json:"key"`
 		DisplayName string `json:"displayName"`
 	}
 	roles := make([]roleOut, 0, len(p.roles))
 	for _, rr := range p.roles {
-		roles = append(roles, roleOut{RoleKey: rr.Key, DisplayName: rr.DisplayName})
+		roles = append(roles, roleOut{ProjectID: req.ProjectID, Key: rr.Key, DisplayName: rr.DisplayName})
 	}
 	writeOK(w, map[string]any{
-		"roles":      roles,
-		"pagination": map[string]any{"totalResult": len(roles)},
+		"projectRoles": roles,
+		"pagination":   map[string]any{"totalResult": len(roles)},
 	})
 }
 
@@ -470,10 +473,12 @@ func (f *Identity) handleListProjectGrants(w http.ResponseWriter, r *http.Reques
 	}
 	f.mu.Lock()
 	defer f.mu.Unlock()
+	// The real ProjectGrant (zitadel.project.v2) names its keys
+	// "grantedRoleKeys"; the Create/Update requests say "roleKeys".
 	type grantOut struct {
 		ProjectID             string   `json:"projectId"`
 		GrantedOrganizationID string   `json:"grantedOrganizationId"`
-		RoleKeys              []string `json:"roleKeys"`
+		GrantedRoleKeys       []string `json:"grantedRoleKeys"`
 	}
 	out := make([]grantOut, 0)
 	for _, pg := range f.projectGrants {
@@ -483,7 +488,7 @@ func (f *Identity) handleListProjectGrants(w http.ResponseWriter, r *http.Reques
 		if orgID != "" && pg.OrgID != orgID {
 			continue
 		}
-		out = append(out, grantOut{ProjectID: pg.ProjectID, GrantedOrganizationID: pg.OrgID, RoleKeys: append([]string(nil), pg.RoleKeys...)})
+		out = append(out, grantOut{ProjectID: pg.ProjectID, GrantedOrganizationID: pg.OrgID, GrantedRoleKeys: append([]string(nil), pg.RoleKeys...)})
 	}
 	writeOK(w, map[string]any{
 		"projectGrants": out,
