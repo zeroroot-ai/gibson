@@ -49,7 +49,7 @@ func TestBuildTenantOperatorZitadelClient_TokenObtainedFromOwnCredentials(t *tes
 		if r.URL.Path == "/oauth/v2/token" {
 			gotTokenInstanceHeader = r.Header.Get(zitadelconn.InstanceHostHeader)
 			w.Header().Set("Content-Type", "application/json")
-			_, _ = w.Write([]byte(`{"access_token":"tok-abc","token_type":"Bearer","expires_in":3600}`))
+			_, _ = w.Write([]byte(`{"access_token":"test-token","token_type":"Bearer","expires_in":3600}`))
 			return
 		}
 		gotAuth = r.Header.Get("Authorization")
@@ -66,7 +66,7 @@ func TestBuildTenantOperatorZitadelClient_TokenObtainedFromOwnCredentials(t *tes
 	if _, err := c.GetOrganization(context.Background(), "org-1"); !errors.Is(err, clients.ErrNotFound) {
 		t.Fatalf("expected ErrNotFound for an empty result set, got %v", err)
 	}
-	if gotAuth != "Bearer tok-abc" {
+	if gotAuth != "Bearer test-token" {
 		t.Errorf("expected the operator's own client_credentials token, got Authorization=%q", gotAuth)
 	}
 	if gotHost != "app.example.com" {
