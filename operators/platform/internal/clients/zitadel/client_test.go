@@ -199,6 +199,150 @@ func TestAddOrgMember_EmptyOrgIDIsInvalidInput(t *testing.T) {
 	}
 }
 
+// TestRemoveIAMMember_DeletesAndIsIdempotentOn404 verifies RemoveIAMMember
+// issues a DELETE to the IAM member's URL and treats a 404 (never a
+// member, or already removed) as idempotent success — the same contract
+// the Client interface documents for every mutating call.
+func TestRemoveIAMMember_DeletesAndIsIdempotentOn404(t *testing.T) {
+	cases := []struct {
+		name   string
+		status int
+	}{
+		{"member exists", http.StatusOK},
+		{"already gone", http.StatusNotFound},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			var gotMethod, gotPath string
+			srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+				gotMethod = r.Method
+				gotPath = r.URL.Path
+				w.WriteHeader(tc.status)
+				if tc.status < 300 {
+					_, _ = w.Write([]byte(`{}`))
+				}
+			}))
+			t.Cleanup(srv.Close)
+
+			c := New(srv.URL, "pat", "")
+			if err := c.RemoveIAMMember(context.Background(), "UID-1"); err != nil {
+				t.Fatalf("RemoveIAMMember: %v", err)
+			}
+			if gotMethod != http.MethodDelete {
+				t.Fatalf("method = %q, want DELETE", gotMethod)
+			}
+			if want := "/admin/v1/members/UID-1"; gotPath != want {
+				t.Fatalf("path = %q, want %q", gotPath, want)
+			}
+		})
+	}
+}
+
+// TestRemoveOrgMember_PinsOrgIDHeader mirrors
+// TestAddOrgMember_PinsOrgIDHeader: RemoveOrgMember DELETEs the org-scoped
+// member URL and pins the request to orgID via the x-zitadel-orgid header.
+func TestRemoveOrgMember_PinsOrgIDHeader(t *testing.T) {
+	const orgID = "ORG-XYZ"
+	var (
+		gotMethod string
+		gotPath   string
+		gotOrgID  string
+		hits      int32
+	)
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		atomic.AddInt32(&hits, 1)
+		gotMethod = r.Method
+		gotPath = r.URL.Path
+		gotOrgID = r.Header.Get("x-zitadel-orgid")
+		w.WriteHeader(http.StatusOK)
+		_, _ = w.Write([]byte(`{}`))
+	}))
+	t.Cleanup(srv.Close)
+
+	c := New(srv.URL, "pat", "")
+	if err := c.RemoveOrgMember(context.Background(), orgID, "UID-1"); err != nil {
+		t.Fatalf("RemoveOrgMember: %v", err)
+	}
+	if atomic.LoadInt32(&hits) != 1 {
+		t.Fatalf("expected 1 request, got %d", hits)
+	}
+	if gotMethod != http.MethodDelete {
+		t.Fatalf("method = %q, want DELETE", gotMethod)
+	}
+	if want := "/management/v1/orgs/" + orgID + "/members/UID-1"; gotPath != want {
+		t.Fatalf("path = %q, want %q", gotPath, want)
+	}
+	if gotOrgID != orgID {
+		t.Fatalf("x-zitadel-orgid = %q, want %q", gotOrgID, orgID)
+	}
+}
+
+// TestRemoveOrgMember_EmptyOrgIDIsInvalidInput mirrors
+// TestAddOrgMember_EmptyOrgIDIsInvalidInput.
+func TestRemoveOrgMember_EmptyOrgIDIsInvalidInput(t *testing.T) {
+	c := New("http://example.invalid", "pat", "")
+	err := c.RemoveOrgMember(context.Background(), "", "UID-1")
+	if err == nil {
+		t.Fatal("expected error for empty orgID, got nil")
+	}
+	if !errors.Is(err, ErrInvalidInput) {
+		t.Fatalf("error = %v, want it to wrap ErrInvalidInput", err)
+	}
+}
+
+// TestRemoveIAMMember_ConstructionErrorPropagates and
+// TestRemoveOrgMember_ConstructionErrorPropagates exercise the errClient
+// fallback: New() returns a client that fails every call with the original
+// url.Parse error when apiURL cannot be parsed at all. A malformed percent-
+// escape ("%zz") is the simplest input net/url reliably rejects.
+func TestRemoveIAMMember_ConstructionErrorPropagates(t *testing.T) {
+	c := New("http://example.invalid/%zz", "pat", "")
+	err := c.RemoveIAMMember(context.Background(), "UID-1")
+	if err == nil {
+		t.Fatal("expected the construction error to propagate, got nil")
+	}
+}
+
+func TestRemoveOrgMember_ConstructionErrorPropagates(t *testing.T) {
+	c := New("http://example.invalid/%zz", "pat", "")
+	err := c.RemoveOrgMember(context.Background(), "ORG-1", "UID-1")
+	if err == nil {
+		t.Fatal("expected the construction error to propagate, got nil")
+	}
+}
+
+// TestRemoveIAMMember_PropagatesNonNotFoundError and
+// TestRemoveOrgMember_PropagatesNonNotFoundError cover the "genuinely
+// failed" branch: a non-404 error from the server (e.g. 500, 401) must
+// come back to the caller, not be swallowed the way a 404 is.
+func TestRemoveIAMMember_PropagatesNonNotFoundError(t *testing.T) {
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+		w.WriteHeader(http.StatusInternalServerError)
+		_, _ = w.Write([]byte(`{"message":"internal"}`))
+	}))
+	t.Cleanup(srv.Close)
+
+	c := New(srv.URL, "pat", "")
+	err := c.RemoveIAMMember(context.Background(), "UID-1")
+	if err == nil {
+		t.Fatal("expected a 500 to propagate as an error, got nil")
+	}
+}
+
+func TestRemoveOrgMember_PropagatesNonNotFoundError(t *testing.T) {
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+		w.WriteHeader(http.StatusInternalServerError)
+		_, _ = w.Write([]byte(`{"message":"internal"}`))
+	}))
+	t.Cleanup(srv.Close)
+
+	c := New(srv.URL, "pat", "")
+	err := c.RemoveOrgMember(context.Background(), "ORG-1", "UID-1")
+	if err == nil {
+		t.Fatal("expected a 500 to propagate as an error, got nil")
+	}
+}
+
 // TestEnsureRegistrationDisabled covers the deploy#886 guard: registration
 // is turned off via a GET-then-PUT on the instance login policy, the PUT
 // preserves every other live field, and an already-disabled policy is a
