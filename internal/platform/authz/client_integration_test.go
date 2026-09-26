@@ -39,7 +39,7 @@ func setupFGAContainer(t *testing.T, ctx context.Context) (testcontainers.Contai
 	// OpenFGA with SQLite memory store (no external Postgres needed in CI).
 	//
 	// Pinned to the version the platform actually deploys
-	// (zeroroot-ai/charts helm/gibson-workloads/values.yaml: openfga tag), NOT
+	// (zeroroot-ai/charts helm/gibson/values.yaml `openfga.image.tag`), NOT
 	// `:latest`. A floating `:latest` silently broke the suite (gibson#1016):
 	// newer OpenFGA tightened object-id validation and rejected the colon-
 	// delimited secret ids the model uses (`secret:tenant-<id>:<name>`), so
@@ -47,8 +47,11 @@ func setupFGAContainer(t *testing.T, ctx context.Context) (testcontainers.Contai
 	// making the type-restriction assertions pass spuriously and the
 	// plugin_principal-allowed write fail. Pinning to the deployed version keeps
 	// the test validating against the real OpenFGA behaviour. Bump in lockstep
-	// with the Helm chart's openfga image tag.
-	const openFGAImage = "openfga/openfga:v1.8.4"
+	// with the Helm chart's openfga image tag. Pulled from the org mirror
+	// (zeroroot-ai/.github mirror-list.yaml), never Docker Hub directly
+	// (gibson#233); this pin had drifted to v1.8.4 while the chart moved to
+	// v1.21.0, so it is corrected here to match the deployed version again.
+	const openFGAImage = "ghcr.io/zeroroot-ai/mirror/openfga:v1.21.0"
 	req := testcontainers.ContainerRequest{
 		Image:        openFGAImage,
 		Cmd:          []string{"run", "--datastore-engine", "memory"},
