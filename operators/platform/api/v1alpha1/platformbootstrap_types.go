@@ -253,9 +253,10 @@ type OIDCClientReference struct {
 
 	// Roles is the set of Zitadel role keys granted to the minted machine
 	// user. Only honored for MACHINE_USER entries; threaded onto the child
-	// OIDCClient CR's spec.roles. IAM_-prefixed roles become instance IAM
-	// members; ORG_-prefixed roles become org members. Empty defaults to
-	// ["IAM_OWNER"] in the child reconciler.
+	// OIDCClient CR's spec.roles unchanged. IAM_-prefixed roles become
+	// instance IAM members; ORG_-prefixed roles become org members. Empty
+	// means no role: the child reconciler grants nothing and revokes any
+	// role the machine user previously held.
 	// +optional
 	Roles []string `json:"roles,omitempty"`
 
