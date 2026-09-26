@@ -477,6 +477,27 @@ spec:
                       and in-cluster traffic (forge Host header as needed).
                     pattern: ^https?://
                     type: string
+                  loginBranding:
+                    description: |-
+                      LoginBranding is the declared brand of the login pages. The
+                      reconciler keeps the instance's active label policy and its marks
+                      equal to it, compared by content. When nil, Zitadel's stock brand
+                      stays.
+                    properties:
+                      configMap:
+                        description: |-
+                          ConfigMap names a ConfigMap with three keys: label-policy.json (the
+                          instance label policy, in Zitadel admin API field names), logo.svg
+                          and icon.svg. The logo fills the light and the dark logo slot, and the
+                          icon fills both icon slots.
+                        minLength: 1
+                        type: string
+                      namespace:
+                        description: Namespace overrides the default namespace.
+                        type: string
+                    required:
+                    - configMap
+                    type: object
                   project:
                     description: Project is the per-cluster Zitadel project the platform
                       owns.
@@ -494,55 +515,6 @@ spec:
                     required:
                     - name
                     type: object
-                  serviceUsers:
-                    description: |-
-                      ServiceUsers is the list of machine users the platform mints + the
-                      roles each carries.
-                    items:
-                      description: |-
-                        ZitadelServiceUserSpec describes one machine user the platform mints
-                        at bootstrap.
-                      properties:
-                        name:
-                          description: Name is the Zitadel username for the service
-                            account.
-                          minLength: 1
-                          type: string
-                        patSecretRef:
-                          description: |-
-                            PATSecretRef points at the Secret + key where the minted Personal
-                            Access Token is materialised.
-                          properties:
-                            key:
-                              description: Key is the entry within the Secret's data
-                                map.
-                              minLength: 1
-                              type: string
-                            name:
-                              description: Name is the Secret name.
-                              minLength: 1
-                              type: string
-                            namespace:
-                              description: Namespace overrides the default namespace.
-                              type: string
-                          required:
-                          - key
-                          - name
-                          type: object
-                        roles:
-                          description: |-
-                            Roles is the list of Zitadel role keys assigned to this user
-                            (e.g. ["IAM_USER_MANAGER"]).
-                          items:
-                            type: string
-                          minItems: 1
-                          type: array
-                      required:
-                      - name
-                      - patSecretRef
-                      - roles
-                      type: object
-                    type: array
                   systemClient:
                     description: |-
                       SystemClient configures the System API client used to register the
