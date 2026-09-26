@@ -5,14 +5,19 @@ package controller
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"testing"
 	"time"
 
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/types"
+	"k8s.io/client-go/rest"
 	"k8s.io/client-go/tools/events"
 	"sigs.k8s.io/controller-runtime/pkg/client/fake"
+	"sigs.k8s.io/controller-runtime/pkg/event"
+	"sigs.k8s.io/controller-runtime/pkg/manager"
+	metricsserver "sigs.k8s.io/controller-runtime/pkg/metrics/server"
 	"sigs.k8s.io/controller-runtime/pkg/reconcile"
 
 	"github.com/zeroroot-ai/gibson/internal/platform/tenantrole"
@@ -228,5 +233,141 @@ func TestTenantRoleSync_OwnerConflictGivesAWarningEvent(t *testing.T) {
 		}
 	default:
 		t.Fatal("expected a Warning event on owner conflict, got none")
+	}
+}
+
+func TestTenantRoleSync_SetupWithManager(t *testing.T) {
+	scheme := setupScheme(t)
+	mgr, err := manager.New(&rest.Config{Host: "localhost:1"}, manager.Options{
+		Scheme:  scheme,
+		Metrics: metricsserver.Options{BindAddress: "0"},
+	})
+	if err != nil {
+		t.Fatalf("manager: %v", err)
+	}
+	r := &TenantRoleSyncReconciler{Client: mgr.GetClient()}
+	if err := r.SetupWithManager(mgr); err != nil {
+		t.Fatalf("SetupWithManager: %v", err)
+	}
+	if r.Recorder == nil {
+		t.Error("SetupWithManager must default Recorder from the manager")
+	}
+	if r.Interval != DefaultTenantRoleSyncInterval {
+		t.Errorf("Interval = %v, want the default %v", r.Interval, DefaultTenantRoleSyncInterval)
+	}
+}
+
+func TestTenantRoleSync_EmitWithNoRecorderIsANoOp(t *testing.T) {
+	r := &TenantRoleSyncReconciler{}
+	tenant := &gibsonv1alpha1.Tenant{ObjectMeta: metav1.ObjectMeta{Name: "acme"}}
+	r.emit(tenant, "Normal", "Whatever", "no recorder wired, must not panic")
+}
+
+func TestTenantRoleSyncPredicate_Create(t *testing.T) {
+	p := tenantRoleSyncPredicate()
+	tenant := &gibsonv1alpha1.Tenant{ObjectMeta: metav1.ObjectMeta{Name: "acme"}}
+	if !p.Create(event.CreateEvent{Object: tenant}) {
+		t.Error("Create must always pass")
+	}
+}
+
+func TestTenantRoleSyncPredicate_Delete(t *testing.T) {
+	p := tenantRoleSyncPredicate()
+	tenant := &gibsonv1alpha1.Tenant{ObjectMeta: metav1.ObjectMeta{Name: "acme"}}
+	if p.Delete(event.DeleteEvent{Object: tenant}) {
+		t.Error("Delete must never pass: the timer, not a delete, drives sync")
+	}
+}
+
+func TestTenantRoleSyncPredicate_Generic(t *testing.T) {
+	p := tenantRoleSyncPredicate()
+	tenant := &gibsonv1alpha1.Tenant{ObjectMeta: metav1.ObjectMeta{Name: "acme"}}
+	if p.Generic(event.GenericEvent{Object: tenant}) {
+		t.Error("Generic must never pass")
+	}
+}
+
+func TestTenantRoleSyncPredicate_Update(t *testing.T) {
+	older := &gibsonv1alpha1.Tenant{ObjectMeta: metav1.ObjectMeta{Name: "acme"}}
+	older.Status.ZitadelOrgID = ""
+	newer := &gibsonv1alpha1.Tenant{ObjectMeta: metav1.ObjectMeta{Name: "acme"}}
+	newer.Status.ZitadelOrgID = "org-1"
+	unchanged := &gibsonv1alpha1.Tenant{ObjectMeta: metav1.ObjectMeta{Name: "acme"}}
+	unchanged.Status.ZitadelOrgID = "org-1"
+
+	p := tenantRoleSyncPredicate()
+	if !p.Update(event.UpdateEvent{ObjectOld: older, ObjectNew: newer}) {
+		t.Error("Update must pass when status.zitadelOrgID changed")
+	}
+	if p.Update(event.UpdateEvent{ObjectOld: newer, ObjectNew: unchanged}) {
+		t.Error("Update must not pass when status.zitadelOrgID is unchanged")
+	}
+}
+
+// TestTenantRoleSyncPredicate_UpdateWithTheWrongType pins the fail-open type
+// assertion: an object that is not a *gibsonv1alpha1.Tenant (should never
+// happen given For(&Tenant{}), but the predicate must not panic) passes,
+// same as every other predicate function in this package.
+func TestTenantRoleSyncPredicate_UpdateWithTheWrongType(t *testing.T) {
+	p := tenantRoleSyncPredicate()
+	notATenant := &metav1.PartialObjectMetadata{}
+	if !p.Update(event.UpdateEvent{ObjectOld: notATenant, ObjectNew: notATenant}) {
+		t.Error("Update with the wrong object type must fail open (return true)")
+	}
+}
+
+func TestTenantRoleSync_UnknownTenantIgnoresNotFound(t *testing.T) {
+	scheme := setupScheme(t)
+	c := fake.NewClientBuilder().WithScheme(scheme).Build()
+	r := &TenantRoleSyncReconciler{Client: c, Recorder: events.NewFakeRecorder(1)}
+
+	res, err := r.Reconcile(context.Background(), reconcile.Request{NamespacedName: types.NamespacedName{Name: "does-not-exist"}})
+	if err != nil {
+		t.Fatalf("Reconcile: %v, want IgnoreNotFound to swallow it", err)
+	}
+	if res.RequeueAfter != 0 {
+		t.Fatalf("Result = %+v, want a zero Result for a not-found tenant", res)
+	}
+}
+
+func TestTenantRoleSync_UnsetSyncerRequeuesAndLogsWithoutPanicking(t *testing.T) {
+	scheme := setupScheme(t)
+	tenant := &gibsonv1alpha1.Tenant{ObjectMeta: metav1.ObjectMeta{Name: "acme"}}
+	tenant.Status.ZitadelOrgID = "org-1"
+	c := fake.NewClientBuilder().WithScheme(scheme).WithObjects(tenant).Build()
+
+	r := &TenantRoleSyncReconciler{Client: c, Recorder: events.NewFakeRecorder(1), Interval: 5 * time.Second}
+	res, err := r.Reconcile(context.Background(), reconcile.Request{NamespacedName: types.NamespacedName{Name: "acme"}})
+	if err != nil {
+		t.Fatalf("Reconcile: %v", err)
+	}
+	if res.RequeueAfter != 5*time.Second {
+		t.Fatalf("RequeueAfter = %v, want the interval when Syncer is unset (operator misconfigured)", res.RequeueAfter)
+	}
+}
+
+func TestTenantRoleSync_NonConflictSyncErrorRequeuesWithoutAnEvent(t *testing.T) {
+	scheme := setupScheme(t)
+	tenant := &gibsonv1alpha1.Tenant{ObjectMeta: metav1.ObjectMeta{Name: "acme"}}
+	tenant.Status.ZitadelOrgID = "org-1"
+	c := fake.NewClientBuilder().WithScheme(scheme).WithObjects(tenant).Build()
+
+	grants := &fakeRoleGrants{listErr: errors.New("zitadel unreachable")}
+	rec := events.NewFakeRecorder(10)
+	r := &TenantRoleSyncReconciler{
+		Client: c, Recorder: rec,
+		Syncer: tenantrole.NewSyncer(grants, &fakeRoleTuples{}, nil), Interval: 5 * time.Second,
+	}
+	res, err := r.Reconcile(context.Background(), reconcile.Request{NamespacedName: types.NamespacedName{Name: "acme"}})
+	if err != nil {
+		t.Fatalf("Reconcile: %v, want the sync error logged and swallowed, not returned", err)
+	}
+	if res.RequeueAfter != 5*time.Second {
+		t.Fatalf("RequeueAfter = %v, want the interval on a non-conflict sync error", res.RequeueAfter)
+	}
+	select {
+	case evt := <-rec.Events:
+		t.Fatalf("expected no event for a plain sync error, got %q", evt)
+	default:
 	}
 }
