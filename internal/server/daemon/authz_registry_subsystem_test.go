@@ -41,7 +41,7 @@ func TestNewAuthzRegistrySubsystem_NilSourceSkips(t *testing.T) {
 	// No SPIFFE source → (nil, nil): the endpoint MUST NOT start unsecured.
 	// Logger is unused on this path, so nil is safe and keeps the test free of
 	// observability wiring.
-	sys, err := newAuthzRegistrySubsystem(nil, nil, nil, nil)
+	sys, err := newAuthzRegistrySubsystem(nil, nil, nil, nil, nil)
 	if err != nil {
 		t.Fatalf("unexpected err: %v", err)
 	}

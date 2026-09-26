@@ -14,6 +14,7 @@ import (
 	"k8s.io/client-go/tools/record"
 	"sigs.k8s.io/controller-runtime/pkg/client/fake"
 
+	"github.com/zeroroot-ai/gibson/internal/platform/tenantrole"
 	gibsonv1alpha1 "github.com/zeroroot-ai/gibson/operators/platform/api/v1alpha1"
 	zitadel "github.com/zeroroot-ai/gibson/operators/platform/internal/clients/zitadel"
 )
@@ -35,6 +36,10 @@ type fakeSignInPolicyZitadel struct {
 
 func (f *fakeSignInPolicyZitadel) EnsureProject(_ context.Context, _ string) (string, error) {
 	return f.projectID, nil
+}
+
+func (f *fakeSignInPolicyZitadel) EnsureProjectRoles(_ context.Context, _ string, _ []tenantrole.Def) (bool, error) {
+	return false, nil
 }
 
 func (f *fakeSignInPolicyZitadel) EnsureDomainPolicy(_ context.Context, want zitadel.DomainPolicy) (bool, error) {
@@ -328,4 +333,12 @@ func countCorrected(events []string) int {
 		}
 	}
 	return n
+}
+
+func (f *erroringSignInPolicyZitadel) EnsureProjectRoles(_ context.Context, _ string, _ []tenantrole.Def) (bool, error) {
+	return false, nil
+}
+
+func (f *erroringDomainPolicyZitadel) EnsureProjectRoles(_ context.Context, _ string, _ []tenantrole.Def) (bool, error) {
+	return false, nil
 }

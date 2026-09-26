@@ -13,6 +13,8 @@ import (
 	"net/url"
 	"strings"
 	"time"
+
+	"github.com/zeroroot-ai/gibson/internal/platform/tenantrole"
 )
 
 // Client is the Zitadel Management/Admin API surface the platform-operator
@@ -177,6 +179,14 @@ type Client interface {
 	// smtpSenderAddressMatchesInstanceDomain) so a PUT never resets them.
 	// Idempotent: returns changed=false when already equal.
 	EnsureDomainPolicy(ctx context.Context, want DomainPolicy) (changed bool, err error)
+
+	// EnsureProjectRoles makes the project's role set exactly roles: it
+	// adds a missing key, renames a key whose display name differs, and
+	// removes a project role that is not declared (ADR-0093 decision 2,
+	// owner decision D4). Removing a role cascades in Zitadel to every
+	// project grant and user grant that named it. Idempotent: returns
+	// changed=false when the project already holds exactly roles.
+	EnsureProjectRoles(ctx context.Context, projectID string, roles []tenantrole.Def) (changed bool, err error)
 }
 
 // LoginPolicy is the desired instance default login policy. EnsureLoginPolicy
@@ -788,6 +798,9 @@ func (e *errClient) EnsureDomainPolicy(_ context.Context, _ DomainPolicy) (bool,
 func (e *errClient) GetOrgIDForProject(ctx context.Context, projectID string) (string, error) {
 	return "", e.err
 }
+func (e *errClient) EnsureProjectRoles(_ context.Context, _ string, _ []tenantrole.Def) (bool, error) {
+	return false, e.err
+}
 
 // GetOrgIDForProject implements Client.
 //
@@ -1246,4 +1259,79 @@ func parseProtoDuration(v any) time.Duration {
 // (e.g. "0s", "2592000s").
 func protoDuration(d time.Duration) string {
 	return fmt.Sprintf("%ds", int64(d/time.Second))
+}
+
+// connectJSON posts a Connect unary JSON request to
+// /<service>/<method> (e.g. "zitadel.project.v2.ProjectService",
+// "ListProjectRoles"), the calling convention of Zitadel's v2 services:
+// they have no REST (google.api.http) mapping, only Connect-over-HTTP.
+// Error mapping reuses doJSON's HTTP-status switch: the Connect protocol
+// answers failed_precondition and invalid_argument with 400,
+// already_exists with 409 and not_found with 404, which already collapse
+// onto this client's existing sentinels.
+func (c *httpClient) connectJSON(ctx context.Context, service, method string, body, out any) error {
+	return c.doJSON(ctx, http.MethodPost, "/"+service+"/"+method, body, out)
+}
+
+// EnsureProjectRoles implements Client.
+//
+// Lists the project's current roles (ListProjectRoles), then converges to
+// exactly `roles`: AddProjectRole for a missing key, UpdateProjectRole for
+// a key whose display name differs, and RemoveProjectRole for a key not in
+// `roles` (owner decision D4). RemoveProjectRole cascades in Zitadel to
+// every project grant and user grant that named the removed key.
+func (c *httpClient) EnsureProjectRoles(ctx context.Context, projectID string, roles []tenantrole.Def) (bool, error) {
+	const projectService = "zitadel.project.v2.ProjectService"
+
+	var listResp struct {
+		Roles []struct {
+			RoleKey     string `json:"roleKey"`
+			DisplayName string `json:"displayName"`
+		} `json:"roles"`
+	}
+	if err := c.connectJSON(ctx, projectService, "ListProjectRoles", map[string]any{"projectId": projectID}, &listResp); err != nil {
+		return false, fmt.Errorf("EnsureProjectRoles: ListProjectRoles project=%s: %w", projectID, err)
+	}
+
+	current := make(map[string]string, len(listResp.Roles))
+	for _, r := range listResp.Roles {
+		current[r.RoleKey] = r.DisplayName
+	}
+	want := make(map[string]string, len(roles))
+	for _, d := range roles {
+		want[string(d.Key)] = d.DisplayName
+	}
+
+	changed := false
+	for _, d := range roles {
+		displayName, exists := current[string(d.Key)]
+		switch {
+		case !exists:
+			if err := c.connectJSON(ctx, projectService, "AddProjectRole", map[string]any{
+				"projectId": projectID, "roleKey": string(d.Key), "displayName": d.DisplayName,
+			}, nil); err != nil && !IsAlreadyExists(err) {
+				return changed, fmt.Errorf("EnsureProjectRoles: AddProjectRole %s: %w", d.Key, err)
+			}
+			changed = true
+		case displayName != d.DisplayName:
+			if err := c.connectJSON(ctx, projectService, "UpdateProjectRole", map[string]any{
+				"projectId": projectID, "roleKey": string(d.Key), "displayName": d.DisplayName,
+			}, nil); err != nil {
+				return changed, fmt.Errorf("EnsureProjectRoles: UpdateProjectRole %s: %w", d.Key, err)
+			}
+			changed = true
+		}
+	}
+	for key := range current {
+		if _, wanted := want[key]; wanted {
+			continue
+		}
+		if err := c.connectJSON(ctx, projectService, "RemoveProjectRole", map[string]any{
+			"projectId": projectID, "roleKey": key,
+		}, nil); err != nil && !IsNotFound(err) {
+			return changed, fmt.Errorf("EnsureProjectRoles: RemoveProjectRole %s: %w", key, err)
+		}
+		changed = true
+	}
+	return changed, nil
 }

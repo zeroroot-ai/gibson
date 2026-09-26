@@ -9,7 +9,6 @@ import (
 	"fmt"
 	"log/slog"
 	"os"
-	"sort"
 	"strings"
 	"time"
 
@@ -2911,22 +2910,36 @@ func (s *DaemonServer) GetMyPermissions(ctx context.Context, req *daemonpb.GetMy
 	}, nil
 }
 
-// ListMyMemberships returns every tenant the authenticated caller is a
-// `member` of, with the caller's role (admin/member) per tenant. Identity
-// comes from the request context; no tenant_id parameter — this RPC
-// discovers the caller's tenants. Used by the dashboard at sign-in time
-// to populate the tenant picker / set the active-tenant cookie.
+// ListMyMemberships returns the authenticated caller's one tenant
+// membership (or none), with the caller's role (owner/admin/member).
+// Identity AND tenant both come from the request context — ext-authz
+// already resolved the tenant from the caller's token's verified Zitadel
+// org (ADR-0093 decision 4) and forwards it as x-gibson-identity-tenant.
+// This RPC never rediscovers the tenant independently (e.g. via FGA
+// ListObjects): the dashboard and ext-authz must always agree, and they can
+// only do that by reading the same value. Used by the dashboard at sign-in
+// time to stamp the session's tenant.
 //
 // Authz semantics: registered as `unauthenticated: true` in the ext-authz
 // RPC registry — caller identity is required (validated by Envoy
 // jwt_authn + ext-authz) but no per-tenant FGA gate is performed (the
-// response IS the tenant list).
+// response IS the membership, gated by the BatchCheck below).
 func (s *DaemonServer) ListMyMemberships(ctx context.Context, _ *daemonpb.ListMyMembershipsRequest) (*daemonpb.ListMyMembershipsResponse, error) {
 	callerID, err := auth.IdentityFromContext(ctx)
 	if err != nil || callerID.Subject == "" {
 		return nil, status_grpc.Error(codes.Unauthenticated, "user identity not found in context")
 	}
 	userID := callerID.Subject
+
+	// No tenant (the Platform owner, or a tenant still provisioning): the
+	// caller has no membership to report. There is nothing to discover
+	// independently — ext-authz is the one place a person's tenant is
+	// derived (ADR-0093 decision 4).
+	tenantID, hasTenant := auth.TenantFromContext(ctx)
+	if !hasTenant || tenantID.IsZero() {
+		return &daemonpb.ListMyMembershipsResponse{Memberships: nil}, nil
+	}
+	bareTID := tenantID.String()
 
 	if s.authorizer == nil {
 		// No authorizer wired — best we can do is return an empty list and
@@ -2938,101 +2951,58 @@ func (s *DaemonServer) ListMyMemberships(ctx context.Context, _ *daemonpb.ListMy
 		return &daemonpb.ListMyMembershipsResponse{Memberships: nil}, nil
 	}
 
-	tenantIDs, err := s.authorizer.ListObjects(ctx, "user:"+userID, "member", "tenant")
+	objStr := "tenant:" + bareTID
+	checks := []authz.CheckRequest{
+		{User: "user:" + userID, Relation: "owner", Object: objStr},
+		{User: "user:" + userID, Relation: "admin", Object: objStr},
+		{User: "user:" + userID, Relation: "member", Object: objStr},
+	}
+	results, err := s.authorizer.BatchCheck(ctx, checks)
 	if err != nil {
-		s.logger.WarnContext(ctx, "ListMyMemberships: ListObjects failed",
+		s.logger.WarnContext(ctx, "ListMyMemberships: BatchCheck failed",
 			slog.String("user_id", userID),
+			slog.String("tenant_id", bareTID),
 			slog.String("error", err.Error()),
 		)
 		return nil, status_grpc.Error(codes.Internal, "failed to list memberships")
 	}
-	if len(tenantIDs) == 0 {
+
+	isOwner := len(results) > 0 && results[0]
+	isAdmin := len(results) > 1 && results[1]
+	isMember := len(results) > 2 && results[2]
+	if !isOwner && !isAdmin && !isMember {
+		// The caller holds no relation on their resolved tenant at all —
+		// the role copy has not synced yet, or the person was removed.
+		// Fail closed to no memberships rather than assert a role the
+		// caller does not hold.
+		s.logger.InfoContext(ctx, "ListMyMemberships: caller has no relation on their resolved tenant",
+			slog.String("user_id", userID),
+			slog.String("tenant_id", bareTID),
+		)
 		return &daemonpb.ListMyMembershipsResponse{Memberships: nil}, nil
 	}
+	role := pickHighestRole(isOwner, isAdmin)
 
-	// Batch-evaluate owner AND admin relations across all tenants in a single
-	// FGA call. For N tenants we push 2*N checks: checks[2*i] = owner check
-	// for tenant i, checks[2*i+1] = admin check for tenant i.
-	//
-	// `tenantIDs` from `ListObjects` already includes the `tenant:` prefix
-	// (OpenFGA wire convention) — we MUST strip it before re-prefixing,
-	// otherwise the constructed Object becomes `tenant:tenant:<id>`, which
-	// FGA rejects as `invalid 'object' field format` and the entire
-	// BatchCheck errors out, degrading every caller's role to "member".
-	// (Pre-existing long-standing bug, exposed by tenant-role-taxonomy
-	// when the role string finally became visible in the dashboard.)
-	//
-	// Spec: tenant-role-taxonomy Req 2.1–2.3.
-	checks := make([]authz.CheckRequest, 0, 2*len(tenantIDs))
-	for _, tid := range tenantIDs {
-		bareTID := strings.TrimPrefix(tid, "tenant:")
-		objStr := "tenant:" + bareTID
-		checks = append(checks,
-			authz.CheckRequest{User: "user:" + userID, Relation: "owner", Object: objStr},
-			authz.CheckRequest{User: "user:" + userID, Relation: "admin", Object: objStr},
-		)
-	}
-	results, err := s.authorizer.BatchCheck(ctx, checks)
-	if err != nil {
-		// Non-fatal: degrade to "everyone is member"; log for observability.
-		// Req 2.4: fail-closed-to-member on BatchCheck error.
-		s.logger.WarnContext(ctx, "ListMyMemberships: BatchCheck failed; defaulting all roles to member",
-			slog.String("user_id", userID),
-			slog.String("error", err.Error()),
-		)
-		results = make([]bool, 2*len(tenantIDs))
-	}
-
-	memberships := make([]*daemonpb.Membership, 0, len(tenantIDs))
-	for i, tid := range tenantIDs {
-		isOwner := 2*i < len(results) && results[2*i]
-		isAdmin := 2*i+1 < len(results) && results[2*i+1]
-		role := pickHighestRole(isOwner, isAdmin)
-
-		// OpenFGA ListObjects returns object strings of the form
-		// "tenant:<id>". The wire contract for daemonpb.Membership.TenantId
-		// is the bare id — downstream consumers (dashboard's
-		// gibson_active_tenant cookie, x-gibson-tenant header, FGA's own
-		// resolveObject which re-adds the type prefix) expect the unprefixed
-		// form. Strip "tenant:" defensively; pass through anything that
-		// doesn't have the prefix.
-		bareID := strings.TrimPrefix(tid, "tenant:")
-		// Friendly name lookup is best-effort; on miss/timeout fall back to ID.
-		name := bareID
-		if s.tenantNameResolver != nil {
-			if resolved, ok, _ := s.tenantNameResolver(ctx, bareID); ok && resolved != "" {
-				name = resolved
-			}
+	// Friendly name lookup is best-effort; on miss/timeout fall back to ID.
+	name := bareTID
+	if s.tenantNameResolver != nil {
+		if resolved, ok, _ := s.tenantNameResolver(ctx, bareTID); ok && resolved != "" {
+			name = resolved
 		}
-
-		s.logger.InfoContext(ctx, "ListMyMemberships: resolved role",
-			slog.String("user_id", userID),
-			slog.String("tenant_id", bareID),
-			slog.String("role", role),
-		)
-
-		memberships = append(memberships, &daemonpb.Membership{
-			TenantId:   bareID,
-			TenantName: name,
-			Role:       role,
-		})
 	}
 
-	// Sort by display name ASC so the dashboard picker is stable across requests.
-	sortMembershipsByName(memberships)
+	s.logger.InfoContext(ctx, "ListMyMemberships: resolved role",
+		slog.String("user_id", userID),
+		slog.String("tenant_id", bareTID),
+		slog.String("role", role),
+	)
 
+	memberships := []*daemonpb.Membership{{
+		TenantId:   bareTID,
+		TenantName: name,
+		Role:       role,
+	}}
 	return &daemonpb.ListMyMembershipsResponse{Memberships: memberships}, nil
-}
-
-// sortMembershipsByName sorts a slice of Memberships in-place by TenantName ASC.
-// Equal names tie-break on TenantId for determinism.
-func sortMembershipsByName(ms []*daemonpb.Membership) {
-	sort.Slice(ms, func(i, j int) bool {
-		if ms[i].GetTenantName() != ms[j].GetTenantName() {
-			return ms[i].GetTenantName() < ms[j].GetTenantName()
-		}
-		return ms[i].GetTenantId() < ms[j].GetTenantId()
-	})
 }
 
 // pickHighestRole returns the highest role the user holds for a tenant, given

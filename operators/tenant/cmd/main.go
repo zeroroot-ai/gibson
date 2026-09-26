@@ -681,6 +681,12 @@ func main() {
 	// disabled) rather than nil, so the reconcile path never nil-guards an
 	// injected dependency (production-readiness no-graceful-nil gate).
 	var tenantStatusReporter controller.TenantStatusReporter = controller.NoopTenantStatusReporter{}
+	// orgMappingSeeder seeds the daemon's tenant -> Zitadel org mapping
+	// (ADR-0093 decision 4). Left nil when GIBSON_DAEMON_GRPC_ADDRESS is
+	// unset; TenantIdentityReconciler then fails every reconcile loud, the
+	// same as a nil Provisioner, rather than mark a tenant Ready with no
+	// mapping ext-authz can resolve.
+	var orgMappingSeeder controller.TenantOrgSeeder
 	if grpcAddr := os.Getenv("GIBSON_DAEMON_GRPC_ADDRESS"); grpcAddr != "" {
 		daemonSVID := os.Getenv("GIBSON_DAEMON_SPIFFE_ID")
 		if daemonSVID == "" {
@@ -695,6 +701,7 @@ func main() {
 		setupLog.Info("daemon provisioner: gRPC (SPIFFE mTLS)", "addr", grpcAddr, "daemon_svid", daemonSVID)
 		psagaDeps.DaemonGRPC = grpcClient
 		tenantStatusReporter = grpcClient
+		orgMappingSeeder = grpcClient
 
 		// Operator-pull tenant provisioning (E9, gibson#948, enables
 		// dashboard#813): drain the daemon's pending-provisioning queue and
@@ -879,6 +886,7 @@ func main() {
 		Client:      mgr.GetClient(),
 		Scheme:      mgr.GetScheme(),
 		Provisioner: identityProvisioner,
+		OrgMapping:  orgMappingSeeder,
 	}).SetupWithManager(mgr); err != nil {
 		setupLog.Error(err, "Failed to create controller", "controller", "TenantIdentity")
 		os.Exit(1)
