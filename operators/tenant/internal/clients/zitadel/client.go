@@ -360,9 +360,11 @@ func (c *httpClient) EnsureProjectGrant(ctx context.Context, projectID, orgID st
 	const projectService = "zitadel.project.v2.ProjectService"
 
 	var listResp struct {
+		// A listed ProjectGrant (zitadel.project.v2) names its keys
+		// "grantedRoleKeys"; only the Create/Update requests say "roleKeys".
 		ProjectGrants []struct {
 			GrantedOrganizationID string   `json:"grantedOrganizationId"`
-			RoleKeys              []string `json:"roleKeys"`
+			GrantedRoleKeys       []string `json:"grantedRoleKeys"`
 		} `json:"projectGrants"`
 	}
 	listBody := map[string]any{
@@ -379,7 +381,7 @@ func (c *httpClient) EnsureProjectGrant(ctx context.Context, projectID, orgID st
 	found := false
 	for _, g := range listResp.ProjectGrants {
 		if g.GrantedOrganizationID == orgID {
-			existing = g.RoleKeys
+			existing = g.GrantedRoleKeys
 			found = true
 			break
 		}
