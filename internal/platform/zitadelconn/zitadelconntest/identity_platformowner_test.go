@@ -10,6 +10,13 @@ import (
 
 // --- AddHumanUser -----------------------------------------------------
 
+// AddHumanUser's target org travels as the x-zitadel-orgid header, never a
+// request-body field — AddHumanUserRequest has no "organization" field on
+// Zitadel v4.18.0; the real handler resolves the org exclusively from
+// authz.GetCtxData(ctx).OrgID, itself populated from this header by
+// Zitadel's Connect auth interceptor. postWithOrg sets it the same way
+// AddOrgMember's existing v1 tests already do.
+
 func TestIdentity_AddHumanUser_Success(t *testing.T) {
 	id, e := newFake(t)
 	orgID := id.AddOrg("platform")
@@ -17,11 +24,10 @@ func TestIdentity_AddHumanUser_Success(t *testing.T) {
 	var resp struct {
 		UserID string `json:"userId"`
 	}
-	status := post(t, e, "/zitadel.user.v2.UserService/AddHumanUser", map[string]any{
-		"username":     "owner@example.com",
-		"organization": map[string]any{"orgId": orgID},
-		"profile":      map[string]any{"givenName": "Platform", "familyName": "Owner"},
-		"email":        map[string]any{"email": "owner@example.com", "isVerified": true},
+	status := postWithOrg(t, e, "/zitadel.user.v2.UserService/AddHumanUser", orgID, map[string]any{
+		"username": "owner@example.com",
+		"profile":  map[string]any{"givenName": "Platform", "familyName": "Owner"},
+		"email":    map[string]any{"email": "owner@example.com", "isVerified": true},
 	}, &resp)
 	if status != http.StatusOK {
 		t.Fatalf("status = %d, want 200", status)
@@ -36,11 +42,10 @@ func TestIdentity_AddHumanUser_RejectsAPasswordField(t *testing.T) {
 	orgID := id.AddOrg("platform")
 
 	var errBody map[string]any
-	status := post(t, e, "/zitadel.user.v2.UserService/AddHumanUser", map[string]any{
-		"username":     "owner@example.com",
-		"organization": map[string]any{"orgId": orgID},
-		"password":     map[string]any{"password": "sneaky"},
-		"email":        map[string]any{"email": "owner@example.com"},
+	status := postWithOrg(t, e, "/zitadel.user.v2.UserService/AddHumanUser", orgID, map[string]any{
+		"username": "owner@example.com",
+		"password": map[string]any{"password": "sneaky"},
+		"email":    map[string]any{"email": "owner@example.com"},
 	}, &errBody)
 	if status != http.StatusBadRequest {
 		t.Fatalf("status = %d, want 400 (a password field must be refused, ADR-0093)", status)
@@ -57,7 +62,7 @@ func TestIdentity_AddHumanUser_EmptyOrgID(t *testing.T) {
 		"email":    map[string]any{"email": "owner@example.com"},
 	}, &errBody)
 	if status != http.StatusBadRequest {
-		t.Fatalf("status = %d, want 400 (empty organization.orgId)", status)
+		t.Fatalf("status = %d, want 400 (no x-zitadel-orgid header)", status)
 	}
 }
 
@@ -66,10 +71,9 @@ func TestIdentity_AddHumanUser_UnknownOrg(t *testing.T) {
 	_ = id
 
 	var errBody map[string]any
-	status := post(t, e, "/zitadel.user.v2.UserService/AddHumanUser", map[string]any{
-		"username":     "owner@example.com",
-		"organization": map[string]any{"orgId": "no-such-org"},
-		"email":        map[string]any{"email": "owner@example.com"},
+	status := postWithOrg(t, e, "/zitadel.user.v2.UserService/AddHumanUser", "no-such-org", map[string]any{
+		"username": "owner@example.com",
+		"email":    map[string]any{"email": "owner@example.com"},
 	}, &errBody)
 	if status != http.StatusNotFound {
 		t.Fatalf("status = %d, want 404 (unknown org)", status)
@@ -82,10 +86,9 @@ func TestIdentity_AddHumanUser_AlreadyExists(t *testing.T) {
 	id.AddUser(orgID, "owner@example.com")
 
 	var errBody map[string]any
-	status := post(t, e, "/zitadel.user.v2.UserService/AddHumanUser", map[string]any{
-		"username":     "owner@example.com",
-		"organization": map[string]any{"orgId": orgID},
-		"email":        map[string]any{"email": "owner@example.com"},
+	status := postWithOrg(t, e, "/zitadel.user.v2.UserService/AddHumanUser", orgID, map[string]any{
+		"username": "owner@example.com",
+		"email":    map[string]any{"email": "owner@example.com"},
 	}, &errBody)
 	if status != http.StatusConflict {
 		t.Fatalf("status = %d, want 409 (duplicate email)", status)

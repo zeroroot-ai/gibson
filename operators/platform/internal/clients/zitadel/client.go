@@ -1338,6 +1338,17 @@ func (c *httpClient) connectJSON(ctx context.Context, service, method string, bo
 	return c.doJSON(ctx, http.MethodPost, "/"+service+"/"+method, body, out)
 }
 
+// connectJSONWithHeaders is connectJSON with caller-supplied extra request
+// headers — needed for the v2 calls whose target org Zitadel resolves from
+// the x-zitadel-orgid header via its auth interceptor
+// (internal/api/grpc/server/middleware, confirmed against the v4.18.0
+// source), never from a body field. AddHumanUser is the one case here: its
+// handler reads authz.GetCtxData(ctx).OrgID and never looks at the request
+// message for an organization at all.
+func (c *httpClient) connectJSONWithHeaders(ctx context.Context, service, method string, body, out any, headers map[string]string) error {
+	return c.doJSONWithHeaders(ctx, http.MethodPost, "/"+service+"/"+method, body, out, headers)
+}
+
 // EnsureProjectRoles implements Client.
 //
 // Lists the project's current roles (ListProjectRoles), then converges to
@@ -1416,8 +1427,7 @@ const userService = "zitadel.user.v2.UserService"
 // EnsureHumanUserNoPassword implements Client.
 func (c *httpClient) EnsureHumanUserNoPassword(ctx context.Context, orgID, email, givenName, familyName string) (string, error) {
 	body := map[string]any{
-		"username":     email,
-		"organization": map[string]any{"orgId": orgID},
+		"username": email,
 		"profile": map[string]any{
 			"givenName":  givenName,
 			"familyName": familyName,
@@ -1430,7 +1440,14 @@ func (c *httpClient) EnsureHumanUserNoPassword(ctx context.Context, orgID, email
 	var resp struct {
 		UserID string `json:"userId"`
 	}
-	err := c.connectJSON(ctx, userService, "AddHumanUser", body, &resp)
+	// orgID travels as the x-zitadel-orgid header, never a body field:
+	// AddHumanUser's handler resolves the target org exclusively from
+	// authz.GetCtxData(ctx).OrgID, itself populated from this header by
+	// Zitadel's Connect auth interceptor. A request-message "organization"
+	// field does not exist on this RPC (confirmed against the v4.18.0
+	// source) — the same convention AddOrgMember already uses below for the
+	// v1 Management API.
+	err := c.connectJSONWithHeaders(ctx, userService, "AddHumanUser", body, &resp, map[string]string{"x-zitadel-orgid": orgID})
 	if err != nil {
 		if IsAlreadyExists(err) || IsConflict(err) {
 			id, lerr := c.FindHumanUserByEmail(ctx, email)

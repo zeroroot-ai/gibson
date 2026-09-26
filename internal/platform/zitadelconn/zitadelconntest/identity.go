@@ -889,11 +889,8 @@ func (f *Identity) handleListAuthorizations(w http.ResponseWriter, r *http.Reque
 // --- v2 UserService: the Platform owner path (ADR-0093, hosted#201) --------
 
 type addHumanUserReq struct {
-	Username     string `json:"username"`
-	Organization struct {
-		OrgID string `json:"orgId"`
-	} `json:"organization"`
-	Profile struct {
+	Username string `json:"username"`
+	Profile  struct {
 		GivenName  string `json:"givenName"`
 		FamilyName string `json:"familyName"`
 	} `json:"profile"`
@@ -911,8 +908,15 @@ type addHumanUserReq struct {
 // operator's contract is that it never sends one, and this fake exists to
 // catch a regression on that contract, not merely to accept whatever it is
 // given.
+//
+// The target org comes from the x-zitadel-orgid header, never a request-body
+// field: AddHumanUserRequest carries no "organization" field at all on
+// Zitadel v4.18.0 — the real handler resolves it exclusively from
+// authz.GetCtxData(ctx).OrgID, itself populated from this header by
+// Zitadel's Connect auth interceptor (confirmed against the v4.18.0 source).
 func (f *Identity) handleAddHumanUser(w http.ResponseWriter, r *http.Request) {
 	defer func() { _ = r.Body.Close() }()
+	orgID := r.Header.Get("x-zitadel-orgid")
 	raw, _ := io.ReadAll(r.Body)
 	var probe map[string]json.RawMessage
 	if err := json.Unmarshal(raw, &probe); err == nil {
@@ -926,13 +930,13 @@ func (f *Identity) handleAddHumanUser(w http.ResponseWriter, r *http.Request) {
 		writeConnectError(w, "invalid_argument", "Errors.User.Invalid", "COMMAND-decode")
 		return
 	}
-	if req.Organization.OrgID == "" {
+	if orgID == "" {
 		writeConnectError(w, "invalid_argument", "Errors.Org.Empty", "COMMAND-org01")
 		return
 	}
 	f.mu.Lock()
 	defer f.mu.Unlock()
-	if _, orgKnown := f.orgs[req.Organization.OrgID]; !orgKnown {
+	if _, orgKnown := f.orgs[orgID]; !orgKnown {
 		writeConnectError(w, "not_found", "Errors.Org.NotFound", "ORG-nf001")
 		return
 	}
@@ -944,7 +948,7 @@ func (f *Identity) handleAddHumanUser(w http.ResponseWriter, r *http.Request) {
 	}
 	id := f.nextIDLocked()
 	f.users[id] = &fakeUser{
-		ID: id, OrgID: req.Organization.OrgID, Email: req.Email.Email,
+		ID: id, OrgID: orgID, Email: req.Email.Email,
 		Verified: req.Email.IsVerified,
 	}
 	writeOK(w, map[string]string{"userId": id})

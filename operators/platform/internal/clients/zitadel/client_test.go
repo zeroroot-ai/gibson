@@ -1223,12 +1223,13 @@ func (f *fakeProjectRoleServer) handler() http.HandlerFunc {
 // --- Platform owner (ADR-0093 decision 6/8, hosted#201) --------------------
 
 func TestEnsureHumanUserNoPassword_NeverSendsPassword(t *testing.T) {
-	var gotBody string
+	var gotBody, gotOrgHeader string
 	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		if r.URL.Path != "/zitadel.user.v2.UserService/AddHumanUser" {
 			http.NotFound(w, r)
 			return
 		}
+		gotOrgHeader = r.Header.Get("x-zitadel-orgid")
 		b := make([]byte, r.ContentLength)
 		_, _ = r.Body.Read(b)
 		gotBody = string(b)
@@ -1244,6 +1245,16 @@ func TestEnsureHumanUserNoPassword_NeverSendsPassword(t *testing.T) {
 	}
 	if id != "UID-OWNER-1" {
 		t.Fatalf("userID = %q, want UID-OWNER-1", id)
+	}
+	// The target org travels as the x-zitadel-orgid header, never a body
+	// field: AddHumanUserRequest carries no "organization" field at all on
+	// Zitadel v4.18.0 (confirmed against the v4.18.0 source) — the real
+	// handler resolves the org exclusively from authz.GetCtxData(ctx).OrgID.
+	if gotOrgHeader != "ORG-1" {
+		t.Fatalf("x-zitadel-orgid header = %q, want ORG-1", gotOrgHeader)
+	}
+	if strings.Contains(gotBody, "organization") {
+		t.Fatalf("request body carries an organization field; AddHumanUserRequest has none on v4.18.0: %s", gotBody)
 	}
 	if strings.Contains(gotBody, "password") {
 		t.Fatalf("request body carries a password field, ADR-0093 forbids it: %s", gotBody)
@@ -1277,11 +1288,11 @@ func TestEnsureHumanUserNoPassword_AlreadyExists_ResolvesByEmail(t *testing.T) {
 
 func TestEnsureHumanUserNoPassword_AlreadyExists_LookupFails(t *testing.T) {
 	mux := http.NewServeMux()
-	mux.HandleFunc("/zitadel.user.v2.UserService/AddHumanUser", func(w http.ResponseWriter, r *http.Request) {
+	mux.HandleFunc("/zitadel.user.v2.UserService/AddHumanUser", func(w http.ResponseWriter, _ *http.Request) {
 		w.WriteHeader(http.StatusConflict)
 		_, _ = w.Write([]byte(`{"code":"already_exists","message":"exists"}`))
 	})
-	mux.HandleFunc("/zitadel.user.v2.UserService/ListUsers", func(w http.ResponseWriter, r *http.Request) {
+	mux.HandleFunc("/zitadel.user.v2.UserService/ListUsers", func(w http.ResponseWriter, _ *http.Request) {
 		w.WriteHeader(http.StatusInternalServerError)
 	})
 	srv := httptest.NewServer(mux)
