@@ -128,63 +128,16 @@ func (r *PlatformBootstrapReconciler) reconcilePlatformOwner(
 	// Step 3: the FGA relation. Reuses the store the FGA-model step already
 	// ensured (Step 4 of Reconcile) rather than re-deriving it independently,
 	// so the two steps can never disagree on which store holds the tuple.
-	if result, err := r.writePlatformOwnerFGATuple(ctx, pb, userID); err != nil || !result.IsZero() {
+	if written, result, err := r.writePlatformOwnerFGATuple(ctx, pb, userID); !written {
 		return result, err
 	}
 
 	// Step 4: the setup link. Sent on first creation, or again when
 	// setupGeneration has been raised past what was last observed.
 	if userJustCreated || pb.Status.ObservedSetupGeneration != po.SetupGeneration {
-		if !userJustCreated {
-			// A reset, not a first-time send: clear every factor on file so
-			// the new link actually forces re-enrollment (ADR-0093 decision 12).
-			if err := zc.ClearHumanFactors(ctx, userID); err != nil {
-				if zitadel.IsPermanent(err) {
-					setBootstrapCond(pb, gibsonv1alpha1.ConditionPlatformOwnerReady, metav1.ConditionFalse,
-						"ZitadelPermanentError", fmt.Sprintf("ClearHumanFactors: %v", err))
-					return ctrl.Result{}, nil
-				}
-				setBootstrapCond(pb, gibsonv1alpha1.ConditionPlatformOwnerReady, metav1.ConditionUnknown,
-					"ZitadelTransientError", fmt.Sprintf("ClearHumanFactors: %v", err))
-				return ctrl.Result{RequeueAfter: requeueMedium}, nil
-			}
-		}
-
-		urlTemplate := setupLinkURLTemplate(pb.Spec.Zitadel.Issuer)
-		if po.OfflineSetup {
-			code, err := zc.CreateSetupInviteCode(ctx, userID, urlTemplate, false)
-			if err != nil {
-				if zitadel.IsPermanent(err) {
-					setBootstrapCond(pb, gibsonv1alpha1.ConditionPlatformOwnerReady, metav1.ConditionFalse,
-						"ZitadelPermanentError", fmt.Sprintf("CreateSetupInviteCode: %v", err))
-					return ctrl.Result{}, nil
-				}
-				setBootstrapCond(pb, gibsonv1alpha1.ConditionPlatformOwnerReady, metav1.ConditionUnknown,
-					"ZitadelTransientError", fmt.Sprintf("CreateSetupInviteCode: %v", err))
-				return ctrl.Result{RequeueAfter: requeueMedium}, nil
-			}
-			link := renderSetupLink(urlTemplate, userID, orgID, code)
-			if po.SetupSecretRef == nil {
-				setBootstrapCond(pb, gibsonv1alpha1.ConditionPlatformOwnerReady, metav1.ConditionFalse,
-					"MissingSetupSecretRef", "offlineSetup is true but spec.platformOwner.setupSecretRef is unset")
-				return ctrl.Result{}, nil
-			}
-			if err := r.writeOfflineSetupLink(ctx, *po.SetupSecretRef, link); err != nil {
-				return ctrl.Result{}, err
-			}
-			logger.Info("Platform owner offline setup link written", "secret", po.SetupSecretRef.Name)
-		} else {
-			if _, err := zc.CreateSetupInviteCode(ctx, userID, urlTemplate, true); err != nil {
-				if zitadel.IsPermanent(err) {
-					setBootstrapCond(pb, gibsonv1alpha1.ConditionPlatformOwnerReady, metav1.ConditionFalse,
-						"ZitadelPermanentError", fmt.Sprintf("CreateSetupInviteCode: %v", err))
-					return ctrl.Result{}, nil
-				}
-				setBootstrapCond(pb, gibsonv1alpha1.ConditionPlatformOwnerReady, metav1.ConditionUnknown,
-					"ZitadelTransientError", fmt.Sprintf("CreateSetupInviteCode: %v", err))
-				return ctrl.Result{RequeueAfter: requeueMedium}, nil
-			}
-			logger.Info("Platform owner setup link emailed", "email", po.Email)
+		sent, result, err := r.sendPlatformOwnerSetupLink(ctx, pb, zc, userID, orgID, userJustCreated, logger)
+		if !sent {
+			return result, err
 		}
 		pb.Status.ObservedSetupGeneration = po.SetupGeneration
 	}
@@ -194,49 +147,127 @@ func (r *PlatformBootstrapReconciler) reconcilePlatformOwner(
 	return ctrl.Result{}, nil
 }
 
+// sendPlatformOwnerSetupLink implements Step 4 of reconcilePlatformOwner: on
+// a reset (not a first-time send) it clears every factor on file so the new
+// link actually forces re-enrollment (ADR-0093 decision 12), then sends the
+// link by mail or writes it to the offline Secret.
+//
+// sent reports whether the link was actually sent/written: false means the
+// caller must return (result, err) immediately (a condition was already set
+// on pb), whether that is a retryable requeue or a permanent failure — Go
+// has no way to make ctrl.Result{}, nil mean two different things, so the
+// caller cannot tell "done, keep going" from "stopped here" without this.
+func (r *PlatformBootstrapReconciler) sendPlatformOwnerSetupLink(
+	ctx context.Context,
+	pb *gibsonv1alpha1.PlatformBootstrap,
+	zc zitadel.Client,
+	userID, orgID string,
+	userJustCreated bool,
+	logger logr.Logger,
+) (sent bool, result ctrl.Result, err error) {
+	po := pb.Spec.PlatformOwner
+
+	if !userJustCreated {
+		if err := zc.ClearHumanFactors(ctx, userID); err != nil {
+			if zitadel.IsPermanent(err) {
+				setBootstrapCond(pb, gibsonv1alpha1.ConditionPlatformOwnerReady, metav1.ConditionFalse,
+					"ZitadelPermanentError", fmt.Sprintf("ClearHumanFactors: %v", err))
+				return false, ctrl.Result{}, nil
+			}
+			setBootstrapCond(pb, gibsonv1alpha1.ConditionPlatformOwnerReady, metav1.ConditionUnknown,
+				"ZitadelTransientError", fmt.Sprintf("ClearHumanFactors: %v", err))
+			return false, ctrl.Result{RequeueAfter: requeueMedium}, nil
+		}
+	}
+
+	urlTemplate := setupLinkURLTemplate(pb.Spec.Zitadel.Issuer)
+	if !po.OfflineSetup {
+		if _, err := zc.CreateSetupInviteCode(ctx, userID, urlTemplate, true); err != nil {
+			if zitadel.IsPermanent(err) {
+				setBootstrapCond(pb, gibsonv1alpha1.ConditionPlatformOwnerReady, metav1.ConditionFalse,
+					"ZitadelPermanentError", fmt.Sprintf("CreateSetupInviteCode: %v", err))
+				return false, ctrl.Result{}, nil
+			}
+			setBootstrapCond(pb, gibsonv1alpha1.ConditionPlatformOwnerReady, metav1.ConditionUnknown,
+				"ZitadelTransientError", fmt.Sprintf("CreateSetupInviteCode: %v", err))
+			return false, ctrl.Result{RequeueAfter: requeueMedium}, nil
+		}
+		logger.Info("Platform owner setup link emailed", "email", po.Email)
+		return true, ctrl.Result{}, nil
+	}
+
+	code, err := zc.CreateSetupInviteCode(ctx, userID, urlTemplate, false)
+	if err != nil {
+		if zitadel.IsPermanent(err) {
+			setBootstrapCond(pb, gibsonv1alpha1.ConditionPlatformOwnerReady, metav1.ConditionFalse,
+				"ZitadelPermanentError", fmt.Sprintf("CreateSetupInviteCode: %v", err))
+			return false, ctrl.Result{}, nil
+		}
+		setBootstrapCond(pb, gibsonv1alpha1.ConditionPlatformOwnerReady, metav1.ConditionUnknown,
+			"ZitadelTransientError", fmt.Sprintf("CreateSetupInviteCode: %v", err))
+		return false, ctrl.Result{RequeueAfter: requeueMedium}, nil
+	}
+	if po.SetupSecretRef == nil {
+		setBootstrapCond(pb, gibsonv1alpha1.ConditionPlatformOwnerReady, metav1.ConditionFalse,
+			"MissingSetupSecretRef", "offlineSetup is true but spec.platformOwner.setupSecretRef is unset")
+		return false, ctrl.Result{}, nil
+	}
+	link := renderSetupLink(urlTemplate, userID, orgID, code)
+	if err := r.writeOfflineSetupLink(ctx, *po.SetupSecretRef, link); err != nil {
+		return false, ctrl.Result{}, err
+	}
+	logger.Info("Platform owner offline setup link written", "secret", po.SetupSecretRef.Name)
+	return true, ctrl.Result{}, nil
+}
+
 // writePlatformOwnerFGATuple writes (user:<userID>, platform_owner,
 // system_tenant:_system), reusing the store spec.fgaModel already ensured.
 // The model id comes from the same Secret writeFGAStoreID persists it to
 // ("model_id" alongside the store id), so this can never race ahead of a
 // store that reconcileFGAModel has not written yet.
+//
+// written reports whether the tuple is now in place: false means the caller
+// must return (result, err) immediately (a condition was already set on pb),
+// the same "cannot use ctrl.Result{}, nil to mean two things" reason
+// sendPlatformOwnerSetupLink documents.
 func (r *PlatformBootstrapReconciler) writePlatformOwnerFGATuple(
 	ctx context.Context,
 	pb *gibsonv1alpha1.PlatformBootstrap,
 	userID string,
-) (ctrl.Result, error) {
+) (written bool, result ctrl.Result, err error) {
 	storeID, ok, err := r.readSecretKey(ctx, defaultChildNamespace, pb.Spec.FGAModel.StoreNameRef)
 	if err != nil {
-		return ctrl.Result{}, err
+		return false, ctrl.Result{}, err
 	}
 	if !ok {
 		setBootstrapCond(pb, gibsonv1alpha1.ConditionPlatformOwnerReady, metav1.ConditionFalse,
 			"WaitingForFGAModel", "FGA store id not yet materialised")
-		return ctrl.Result{RequeueAfter: requeueMedium}, nil
+		return false, ctrl.Result{RequeueAfter: requeueMedium}, nil
 	}
 	modelRef := pb.Spec.FGAModel.StoreNameRef
 	modelRef.Key = "model_id"
 	modelID, ok, err := r.readSecretKey(ctx, defaultChildNamespace, modelRef)
 	if err != nil {
-		return ctrl.Result{}, err
+		return false, ctrl.Result{}, err
 	}
 	if !ok {
 		setBootstrapCond(pb, gibsonv1alpha1.ConditionPlatformOwnerReady, metav1.ConditionFalse,
 			"WaitingForFGAModel", "FGA model id not yet materialised")
-		return ctrl.Result{RequeueAfter: requeueMedium}, nil
+		return false, ctrl.Result{RequeueAfter: requeueMedium}, nil
 	}
 
 	fgaCli, err := r.FGAFactory(pb.Spec.FGAModel.APIEndpoint)
 	if err != nil {
 		setBootstrapCond(pb, gibsonv1alpha1.ConditionPlatformOwnerReady, metav1.ConditionFalse,
 			"FGAClientInit", err.Error())
-		return ctrl.Result{}, nil
+		return false, ctrl.Result{}, nil
 	}
 	if err := fgaCli.WriteTuple(ctx, storeID, modelID, "user:"+userID, "platform_owner", "system_tenant:_system"); err != nil {
 		setBootstrapCond(pb, gibsonv1alpha1.ConditionPlatformOwnerReady, metav1.ConditionUnknown,
 			"FGATransientError", fmt.Sprintf("WriteTuple: %v", err))
-		return ctrl.Result{RequeueAfter: requeueMedium}, nil
+		return false, ctrl.Result{RequeueAfter: requeueMedium}, nil
 	}
-	return ctrl.Result{}, nil
+	return true, ctrl.Result{}, nil
 }
 
 // writeOfflineSetupLink creates or updates the Secret spec.platformOwner.setupSecretRef

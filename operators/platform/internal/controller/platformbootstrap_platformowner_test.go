@@ -74,17 +74,17 @@ func newFakeFGAServer() *httptest.Server {
 // zitadelOwnerMux builds the fake Zitadel handler for the endpoints
 // reconcilePlatformOwner drives. userExists seeds AddHumanUser to answer 409
 // (already exists) so the idempotent-lookup branch is exercised.
-func zitadelOwnerMux(t *testing.T, userExists bool, factorTypes string) (*httptest.Server, *int32) {
+func zitadelOwnerMux(t *testing.T, userExists bool, factorTypes string) (srv *httptest.Server, clearFactorCalls *int32) {
 	t.Helper()
-	var clearFactorCalls int32
+	var calls int32
 	mux := http.NewServeMux()
-	mux.HandleFunc("/management/v1/projects/_search", func(w http.ResponseWriter, r *http.Request) {
+	mux.HandleFunc("/management/v1/projects/_search", func(w http.ResponseWriter, _ *http.Request) {
 		_, _ = w.Write([]byte(`{"result":[{"id":"PROJ-1","name":"gibson"}]}`))
 	})
-	mux.HandleFunc("/management/v1/projects/PROJ-1", func(w http.ResponseWriter, r *http.Request) {
+	mux.HandleFunc("/management/v1/projects/PROJ-1", func(w http.ResponseWriter, _ *http.Request) {
 		_, _ = w.Write([]byte(`{"project":{"details":{"resourceOwner":"ORG-1"}}}`))
 	})
-	mux.HandleFunc("/zitadel.user.v2.UserService/AddHumanUser", func(w http.ResponseWriter, r *http.Request) {
+	mux.HandleFunc("/zitadel.user.v2.UserService/AddHumanUser", func(w http.ResponseWriter, _ *http.Request) {
 		if userExists {
 			w.WriteHeader(http.StatusConflict)
 			_, _ = w.Write([]byte(`{"code":"already_exists","message":"exists"}`))
@@ -92,10 +92,10 @@ func zitadelOwnerMux(t *testing.T, userExists bool, factorTypes string) (*httpte
 		}
 		_, _ = w.Write([]byte(`{"userId":"UID-OWNER"}`))
 	})
-	mux.HandleFunc("/zitadel.user.v2.UserService/ListUsers", func(w http.ResponseWriter, r *http.Request) {
+	mux.HandleFunc("/zitadel.user.v2.UserService/ListUsers", func(w http.ResponseWriter, _ *http.Request) {
 		_, _ = w.Write([]byte(`{"result":[{"userId":"UID-OWNER"}]}`))
 	})
-	mux.HandleFunc("/admin/v1/members", func(w http.ResponseWriter, r *http.Request) {
+	mux.HandleFunc("/admin/v1/members", func(w http.ResponseWriter, _ *http.Request) {
 		_, _ = w.Write([]byte(`{}`))
 	})
 	mux.HandleFunc("/zitadel.user.v2.UserService/CreateInviteCode", func(w http.ResponseWriter, r *http.Request) {
@@ -106,16 +106,16 @@ func zitadelOwnerMux(t *testing.T, userExists bool, factorTypes string) (*httpte
 		}
 		_, _ = w.Write([]byte(`{}`))
 	})
-	mux.HandleFunc("/zitadel.user.v2.UserService/ListAuthenticationMethodTypes", func(w http.ResponseWriter, r *http.Request) {
+	mux.HandleFunc("/zitadel.user.v2.UserService/ListAuthenticationMethodTypes", func(w http.ResponseWriter, _ *http.Request) {
 		_, _ = w.Write([]byte(`{"authMethodTypes":[` + factorTypes + `]}`))
 	})
-	mux.HandleFunc("/zitadel.user.v2.UserService/RemoveTOTP", func(w http.ResponseWriter, r *http.Request) {
-		clearFactorCalls++
+	mux.HandleFunc("/zitadel.user.v2.UserService/RemoveTOTP", func(w http.ResponseWriter, _ *http.Request) {
+		calls++
 		_, _ = w.Write([]byte(`{}`))
 	})
-	srv := httptest.NewServer(mux)
+	srv = httptest.NewServer(mux)
 	t.Cleanup(srv.Close)
-	return srv, &clearFactorCalls
+	return srv, &calls
 }
 
 func basePlatformOwnerCR(zitadelURL string) *gibsonv1alpha1.PlatformBootstrap {
@@ -146,10 +146,10 @@ func newOwnerTestReconciler(t *testing.T, zitadelURL, fgaURL string, objs ...cli
 		Client:   cli,
 		Scheme:   s,
 		Recorder: record.NewFakeRecorder(8),
-		ZitadelFactory: func(issuer, pat string) zitadel.Client {
+		ZitadelFactory: func(_, pat string) zitadel.Client {
 			return zitadel.New(zitadelURL, pat, "")
 		},
-		FGAFactory: func(apiEndpoint string) (fgaclient.Client, error) {
+		FGAFactory: func(_ string) (fgaclient.Client, error) {
 			return fgaclient.New(fgaURL)
 		},
 	}
@@ -366,13 +366,13 @@ func TestReconcilePlatformOwner_SameGeneration_NoNewLink(t *testing.T) {
 
 func TestReconcilePlatformOwner_ZitadelPermanentError_OnCreateUser(t *testing.T) {
 	mux := http.NewServeMux()
-	mux.HandleFunc("/management/v1/projects/_search", func(w http.ResponseWriter, r *http.Request) {
+	mux.HandleFunc("/management/v1/projects/_search", func(w http.ResponseWriter, _ *http.Request) {
 		_, _ = w.Write([]byte(`{"result":[{"id":"PROJ-1","name":"gibson"}]}`))
 	})
-	mux.HandleFunc("/management/v1/projects/PROJ-1", func(w http.ResponseWriter, r *http.Request) {
+	mux.HandleFunc("/management/v1/projects/PROJ-1", func(w http.ResponseWriter, _ *http.Request) {
 		_, _ = w.Write([]byte(`{"project":{"details":{"resourceOwner":"ORG-1"}}}`))
 	})
-	mux.HandleFunc("/zitadel.user.v2.UserService/AddHumanUser", func(w http.ResponseWriter, r *http.Request) {
+	mux.HandleFunc("/zitadel.user.v2.UserService/AddHumanUser", func(w http.ResponseWriter, _ *http.Request) {
 		w.WriteHeader(http.StatusForbidden)
 		_, _ = w.Write([]byte(`{"code":"permission_denied","message":"denied"}`))
 	})
@@ -393,5 +393,329 @@ func TestReconcilePlatformOwner_ZitadelPermanentError_OnCreateUser(t *testing.T)
 	cond := findCondition(pb.Status.Conditions, gibsonv1alpha1.ConditionPlatformOwnerReady)
 	if cond == nil || cond.Status != metav1.ConditionFalse || cond.Reason != "ZitadelPermanentError" {
 		t.Fatalf("condition = %+v, want False/ZitadelPermanentError", cond)
+	}
+}
+
+func TestReconcilePlatformOwner_GetProjectIDByNameError(t *testing.T) {
+	mux := http.NewServeMux()
+	mux.HandleFunc("/management/v1/projects/_search", func(w http.ResponseWriter, _ *http.Request) {
+		w.WriteHeader(http.StatusInternalServerError)
+	})
+	srv := httptest.NewServer(mux)
+	t.Cleanup(srv.Close)
+
+	r := newOwnerTestReconciler(t, srv.URL, "http://unused.invalid", adminPATSecret())
+	pb := basePlatformOwnerCR(srv.URL)
+	pb.Spec.PlatformOwner.Email = "owner@example.com"
+
+	res, err := r.reconcilePlatformOwner(context.Background(), pb, logr.Discard())
+	if err != nil {
+		t.Fatalf("reconcilePlatformOwner: %v", err)
+	}
+	if res.RequeueAfter == 0 {
+		t.Fatal("expected a requeue when GetProjectIDByName fails")
+	}
+	cond := findCondition(pb.Status.Conditions, gibsonv1alpha1.ConditionPlatformOwnerReady)
+	if cond == nil || cond.Reason != "WaitingForProject" {
+		t.Fatalf("condition = %+v, want reason WaitingForProject", cond)
+	}
+}
+
+func TestReconcilePlatformOwner_GetOrgIDForProjectError(t *testing.T) {
+	mux := http.NewServeMux()
+	mux.HandleFunc("/management/v1/projects/_search", func(w http.ResponseWriter, _ *http.Request) {
+		_, _ = w.Write([]byte(`{"result":[{"id":"PROJ-1","name":"gibson"}]}`))
+	})
+	mux.HandleFunc("/management/v1/projects/PROJ-1", func(w http.ResponseWriter, _ *http.Request) {
+		w.WriteHeader(http.StatusInternalServerError)
+	})
+	srv := httptest.NewServer(mux)
+	t.Cleanup(srv.Close)
+
+	r := newOwnerTestReconciler(t, srv.URL, "http://unused.invalid", adminPATSecret())
+	pb := basePlatformOwnerCR(srv.URL)
+	pb.Spec.PlatformOwner.Email = "owner@example.com"
+
+	res, err := r.reconcilePlatformOwner(context.Background(), pb, logr.Discard())
+	if err != nil {
+		t.Fatalf("reconcilePlatformOwner: %v", err)
+	}
+	if res.RequeueAfter == 0 {
+		t.Fatal("expected a requeue when GetOrgIDForProject fails")
+	}
+	cond := findCondition(pb.Status.Conditions, gibsonv1alpha1.ConditionPlatformOwnerReady)
+	if cond == nil || cond.Reason != "WaitingForProject" {
+		t.Fatalf("condition = %+v, want reason WaitingForProject", cond)
+	}
+}
+
+func TestReconcilePlatformOwner_AddIAMMemberPermanentError(t *testing.T) {
+	mux := http.NewServeMux()
+	mux.HandleFunc("/management/v1/projects/_search", func(w http.ResponseWriter, _ *http.Request) {
+		_, _ = w.Write([]byte(`{"result":[{"id":"PROJ-1","name":"gibson"}]}`))
+	})
+	mux.HandleFunc("/management/v1/projects/PROJ-1", func(w http.ResponseWriter, _ *http.Request) {
+		_, _ = w.Write([]byte(`{"project":{"details":{"resourceOwner":"ORG-1"}}}`))
+	})
+	mux.HandleFunc("/zitadel.user.v2.UserService/AddHumanUser", func(w http.ResponseWriter, _ *http.Request) {
+		_, _ = w.Write([]byte(`{"userId":"UID-OWNER"}`))
+	})
+	mux.HandleFunc("/admin/v1/members", func(w http.ResponseWriter, _ *http.Request) {
+		w.WriteHeader(http.StatusForbidden)
+		_, _ = w.Write([]byte(`{"code":3,"message":"denied"}`))
+	})
+	srv := httptest.NewServer(mux)
+	t.Cleanup(srv.Close)
+
+	r := newOwnerTestReconciler(t, srv.URL, "http://unused.invalid", adminPATSecret())
+	pb := basePlatformOwnerCR(srv.URL)
+	pb.Spec.PlatformOwner.Email = "owner@example.com"
+
+	res, err := r.reconcilePlatformOwner(context.Background(), pb, logr.Discard())
+	if err != nil {
+		t.Fatalf("reconcilePlatformOwner: %v", err)
+	}
+	if !res.IsZero() {
+		t.Fatalf("result = %+v, want zero (permanent errors do not requeue)", res)
+	}
+	cond := findCondition(pb.Status.Conditions, gibsonv1alpha1.ConditionPlatformOwnerReady)
+	if cond == nil || cond.Reason != "ZitadelPermanentError" {
+		t.Fatalf("condition = %+v, want reason ZitadelPermanentError", cond)
+	}
+}
+
+func TestReconcilePlatformOwner_AddIAMMemberTransientError(t *testing.T) {
+	mux := http.NewServeMux()
+	mux.HandleFunc("/management/v1/projects/_search", func(w http.ResponseWriter, _ *http.Request) {
+		_, _ = w.Write([]byte(`{"result":[{"id":"PROJ-1","name":"gibson"}]}`))
+	})
+	mux.HandleFunc("/management/v1/projects/PROJ-1", func(w http.ResponseWriter, _ *http.Request) {
+		_, _ = w.Write([]byte(`{"project":{"details":{"resourceOwner":"ORG-1"}}}`))
+	})
+	mux.HandleFunc("/zitadel.user.v2.UserService/AddHumanUser", func(w http.ResponseWriter, _ *http.Request) {
+		_, _ = w.Write([]byte(`{"userId":"UID-OWNER"}`))
+	})
+	mux.HandleFunc("/admin/v1/members", func(w http.ResponseWriter, _ *http.Request) {
+		w.WriteHeader(http.StatusInternalServerError)
+	})
+	srv := httptest.NewServer(mux)
+	t.Cleanup(srv.Close)
+
+	r := newOwnerTestReconciler(t, srv.URL, "http://unused.invalid", adminPATSecret())
+	pb := basePlatformOwnerCR(srv.URL)
+	pb.Spec.PlatformOwner.Email = "owner@example.com"
+
+	res, err := r.reconcilePlatformOwner(context.Background(), pb, logr.Discard())
+	if err != nil {
+		t.Fatalf("reconcilePlatformOwner: %v", err)
+	}
+	if res.RequeueAfter == 0 {
+		t.Fatal("expected a requeue when AddIAMMember fails transiently")
+	}
+	cond := findCondition(pb.Status.Conditions, gibsonv1alpha1.ConditionPlatformOwnerReady)
+	if cond == nil || cond.Reason != "ZitadelTransientError" {
+		t.Fatalf("condition = %+v, want reason ZitadelTransientError", cond)
+	}
+}
+
+// ownerMuxWithFailure builds the standard success mux (as zitadelOwnerMux
+// does for a pre-existing user) but overrides one path to fail, so a single
+// step downstream of user-creation and IAM_OWNER can be tested in isolation.
+func ownerMuxWithFailure(t *testing.T, failPath string, status int) *httptest.Server {
+	t.Helper()
+	mux := http.NewServeMux()
+	mux.HandleFunc("/management/v1/projects/_search", func(w http.ResponseWriter, _ *http.Request) {
+		_, _ = w.Write([]byte(`{"result":[{"id":"PROJ-1","name":"gibson"}]}`))
+	})
+	mux.HandleFunc("/management/v1/projects/PROJ-1", func(w http.ResponseWriter, _ *http.Request) {
+		_, _ = w.Write([]byte(`{"project":{"details":{"resourceOwner":"ORG-1"}}}`))
+	})
+	mux.HandleFunc("/zitadel.user.v2.UserService/AddHumanUser", func(w http.ResponseWriter, _ *http.Request) {
+		_, _ = w.Write([]byte(`{"userId":"UID-OWNER"}`))
+	})
+	mux.HandleFunc("/admin/v1/members", func(w http.ResponseWriter, _ *http.Request) {
+		_, _ = w.Write([]byte(`{}`))
+	})
+	mux.HandleFunc(failPath, func(w http.ResponseWriter, _ *http.Request) {
+		w.WriteHeader(status)
+		if status == http.StatusForbidden {
+			_, _ = w.Write([]byte(`{"code":"permission_denied","message":"denied"}`))
+		}
+	})
+	srv := httptest.NewServer(mux)
+	t.Cleanup(srv.Close)
+	return srv
+}
+
+func TestReconcilePlatformOwner_ClearHumanFactorsErrors(t *testing.T) {
+	for _, tc := range []struct {
+		name        string
+		status      int
+		wantReason  string
+		wantRequeue bool
+	}{
+		{"permanent", http.StatusForbidden, "ZitadelPermanentError", false},
+		{"transient", http.StatusInternalServerError, "ZitadelTransientError", true},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			srv := ownerMuxWithFailure(t, "/zitadel.user.v2.UserService/ListAuthenticationMethodTypes", tc.status)
+			fgaSrv := newFakeFGAServer()
+			t.Cleanup(fgaSrv.Close)
+			r := newOwnerTestReconciler(t, srv.URL, fgaSrv.URL, adminPATSecret(), fgaStoreSecret())
+			pb := basePlatformOwnerCR(srv.URL)
+			pb.Spec.PlatformOwner.Email = "owner@example.com"
+			pb.Spec.PlatformOwner.SetupGeneration = 1
+			pb.Status.PlatformOwnerUserID = "UID-OWNER"
+			pb.Status.ObservedSetupGeneration = 0
+
+			res, err := r.reconcilePlatformOwner(context.Background(), pb, logr.Discard())
+			if err != nil {
+				t.Fatalf("reconcilePlatformOwner: %v", err)
+			}
+			if tc.wantRequeue != (res.RequeueAfter != 0) {
+				t.Fatalf("result = %+v, wantRequeue=%v", res, tc.wantRequeue)
+			}
+			cond := findCondition(pb.Status.Conditions, gibsonv1alpha1.ConditionPlatformOwnerReady)
+			if cond == nil || cond.Reason != tc.wantReason {
+				t.Fatalf("condition = %+v, want reason %s", cond, tc.wantReason)
+			}
+		})
+	}
+}
+
+func TestReconcilePlatformOwner_CreateSetupInviteCodeErrors_Online(t *testing.T) {
+	for _, tc := range []struct {
+		name        string
+		status      int
+		wantReason  string
+		wantRequeue bool
+	}{
+		{"permanent", http.StatusForbidden, "ZitadelPermanentError", false},
+		{"transient", http.StatusInternalServerError, "ZitadelTransientError", true},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			srv := ownerMuxWithFailure(t, "/zitadel.user.v2.UserService/CreateInviteCode", tc.status)
+			fgaSrv := newFakeFGAServer()
+			t.Cleanup(fgaSrv.Close)
+			r := newOwnerTestReconciler(t, srv.URL, fgaSrv.URL, adminPATSecret(), fgaStoreSecret())
+			pb := basePlatformOwnerCR(srv.URL)
+			pb.Spec.PlatformOwner.Email = "owner@example.com"
+			// userJustCreated path: no ClearHumanFactors call, straight to
+			// CreateSetupInviteCode(send=true).
+
+			res, err := r.reconcilePlatformOwner(context.Background(), pb, logr.Discard())
+			if err != nil {
+				t.Fatalf("reconcilePlatformOwner: %v", err)
+			}
+			if tc.wantRequeue != (res.RequeueAfter != 0) {
+				t.Fatalf("result = %+v, wantRequeue=%v", res, tc.wantRequeue)
+			}
+			cond := findCondition(pb.Status.Conditions, gibsonv1alpha1.ConditionPlatformOwnerReady)
+			if cond == nil || cond.Reason != tc.wantReason {
+				t.Fatalf("condition = %+v, want reason %s", cond, tc.wantReason)
+			}
+		})
+	}
+}
+
+func TestReconcilePlatformOwner_CreateSetupInviteCodeErrors_Offline(t *testing.T) {
+	for _, tc := range []struct {
+		name        string
+		status      int
+		wantReason  string
+		wantRequeue bool
+	}{
+		{"permanent", http.StatusForbidden, "ZitadelPermanentError", false},
+		{"transient", http.StatusInternalServerError, "ZitadelTransientError", true},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			srv := ownerMuxWithFailure(t, "/zitadel.user.v2.UserService/CreateInviteCode", tc.status)
+			fgaSrv := newFakeFGAServer()
+			t.Cleanup(fgaSrv.Close)
+			r := newOwnerTestReconciler(t, srv.URL, fgaSrv.URL, adminPATSecret(), fgaStoreSecret())
+			pb := basePlatformOwnerCR(srv.URL)
+			pb.Spec.PlatformOwner.Email = "owner@example.com"
+			pb.Spec.PlatformOwner.OfflineSetup = true
+			pb.Spec.PlatformOwner.SetupSecretRef = &gibsonv1alpha1.SecretKeyRef{Name: "setup", Namespace: "gibson"}
+
+			res, err := r.reconcilePlatformOwner(context.Background(), pb, logr.Discard())
+			if err != nil {
+				t.Fatalf("reconcilePlatformOwner: %v", err)
+			}
+			if tc.wantRequeue != (res.RequeueAfter != 0) {
+				t.Fatalf("result = %+v, wantRequeue=%v", res, tc.wantRequeue)
+			}
+			cond := findCondition(pb.Status.Conditions, gibsonv1alpha1.ConditionPlatformOwnerReady)
+			if cond == nil || cond.Reason != tc.wantReason {
+				t.Fatalf("condition = %+v, want reason %s", cond, tc.wantReason)
+			}
+		})
+	}
+}
+
+func TestReconcilePlatformOwner_WriteOfflineSetupLinkError(t *testing.T) {
+	srv, _ := zitadelOwnerMux(t, false, "")
+	fgaSrv := newFakeFGAServer()
+	t.Cleanup(fgaSrv.Close)
+	r := newOwnerTestReconciler(t, srv.URL, fgaSrv.URL, adminPATSecret(), fgaStoreSecret())
+	// An empty Secret name is invalid; controllerutil.CreateOrUpdate's Get
+	// (and, on NotFound, the create) fails, exercising writeOfflineSetupLink's
+	// error-propagation branch.
+	pb := basePlatformOwnerCR(srv.URL)
+	pb.Spec.PlatformOwner.Email = "owner@example.com"
+	pb.Spec.PlatformOwner.OfflineSetup = true
+	pb.Spec.PlatformOwner.SetupSecretRef = &gibsonv1alpha1.SecretKeyRef{Name: "", Namespace: "gibson"}
+
+	_, err := r.reconcilePlatformOwner(context.Background(), pb, logr.Discard())
+	if err == nil {
+		t.Fatal("reconcilePlatformOwner: expected an error when the offline Secret name is invalid")
+	}
+}
+
+func TestWritePlatformOwnerFGATuple_FGAClientInitError(t *testing.T) {
+	srv, _ := zitadelOwnerMux(t, false, "")
+	r := newOwnerTestReconciler(t, srv.URL, "://bad-fga-url", adminPATSecret(), fgaStoreSecret())
+	pb := basePlatformOwnerCR(srv.URL)
+	pb.Spec.PlatformOwner.Email = "owner@example.com"
+
+	res, err := r.reconcilePlatformOwner(context.Background(), pb, logr.Discard())
+	if err != nil {
+		t.Fatalf("reconcilePlatformOwner: %v", err)
+	}
+	if !res.IsZero() {
+		t.Fatalf("result = %+v, want zero (FGAClientInit does not requeue)", res)
+	}
+	cond := findCondition(pb.Status.Conditions, gibsonv1alpha1.ConditionPlatformOwnerReady)
+	if cond == nil || cond.Reason != "FGAClientInit" {
+		t.Fatalf("condition = %+v, want reason FGAClientInit", cond)
+	}
+}
+
+func TestWritePlatformOwnerFGATuple_WriteTupleTransientError(t *testing.T) {
+	srv, _ := zitadelOwnerMux(t, false, "")
+	fgaMux := http.NewServeMux()
+	fgaMux.HandleFunc("/stores/gibson-store/check", func(w http.ResponseWriter, _ *http.Request) {
+		_, _ = w.Write([]byte(`{"allowed":false}`))
+	})
+	fgaMux.HandleFunc("/stores/gibson-store/write", func(w http.ResponseWriter, _ *http.Request) {
+		w.WriteHeader(http.StatusInternalServerError)
+	})
+	fgaSrv := httptest.NewServer(fgaMux)
+	t.Cleanup(fgaSrv.Close)
+
+	r := newOwnerTestReconciler(t, srv.URL, fgaSrv.URL, adminPATSecret(), fgaStoreSecret())
+	pb := basePlatformOwnerCR(srv.URL)
+	pb.Spec.PlatformOwner.Email = "owner@example.com"
+
+	res, err := r.reconcilePlatformOwner(context.Background(), pb, logr.Discard())
+	if err != nil {
+		t.Fatalf("reconcilePlatformOwner: %v", err)
+	}
+	if res.RequeueAfter == 0 {
+		t.Fatal("expected a requeue when WriteTuple fails transiently")
+	}
+	cond := findCondition(pb.Status.Conditions, gibsonv1alpha1.ConditionPlatformOwnerReady)
+	if cond == nil || cond.Reason != "FGATransientError" {
+		t.Fatalf("condition = %+v, want reason FGATransientError", cond)
 	}
 }

@@ -19,10 +19,10 @@ import (
 func TestWriteTuple_NoOpWhenAlreadyTrue(t *testing.T) {
 	var writeCalls int32
 	mux := http.NewServeMux()
-	mux.HandleFunc("/stores/STORE-1/check", func(w http.ResponseWriter, r *http.Request) {
+	mux.HandleFunc("/stores/STORE-1/check", func(w http.ResponseWriter, _ *http.Request) {
 		_, _ = w.Write([]byte(`{"allowed":true}`))
 	})
-	mux.HandleFunc("/stores/STORE-1/write", func(w http.ResponseWriter, r *http.Request) {
+	mux.HandleFunc("/stores/STORE-1/write", func(w http.ResponseWriter, _ *http.Request) {
 		atomic.AddInt32(&writeCalls, 1)
 		_, _ = w.Write([]byte(`{}`))
 	})
@@ -46,7 +46,7 @@ func TestWriteTuple_NoOpWhenAlreadyTrue(t *testing.T) {
 func TestWriteTuple_WritesWhenAbsent(t *testing.T) {
 	var gotBody string
 	mux := http.NewServeMux()
-	mux.HandleFunc("/stores/STORE-1/check", func(w http.ResponseWriter, r *http.Request) {
+	mux.HandleFunc("/stores/STORE-1/check", func(w http.ResponseWriter, _ *http.Request) {
 		_, _ = w.Write([]byte(`{"allowed":false}`))
 	})
 	mux.HandleFunc("/stores/STORE-1/write", func(w http.ResponseWriter, r *http.Request) {
@@ -75,7 +75,7 @@ func TestWriteTuple_WritesWhenAbsent(t *testing.T) {
 // TestWriteTuple_CheckErrorPropagates ensures a Check transport failure is
 // surfaced rather than silently proceeding to Write.
 func TestWriteTuple_CheckErrorPropagates(t *testing.T) {
-	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
 		w.WriteHeader(http.StatusInternalServerError)
 	}))
 	t.Cleanup(srv.Close)
@@ -89,9 +89,31 @@ func TestWriteTuple_CheckErrorPropagates(t *testing.T) {
 	}
 }
 
+// TestWriteTuple_WriteErrorPropagates ensures a Write transport/server
+// failure (after a successful, false Check) is surfaced.
+func TestWriteTuple_WriteErrorPropagates(t *testing.T) {
+	mux := http.NewServeMux()
+	mux.HandleFunc("/stores/STORE-1/check", func(w http.ResponseWriter, _ *http.Request) {
+		_, _ = w.Write([]byte(`{"allowed":false}`))
+	})
+	mux.HandleFunc("/stores/STORE-1/write", func(w http.ResponseWriter, _ *http.Request) {
+		w.WriteHeader(http.StatusInternalServerError)
+	})
+	srv := httptest.NewServer(mux)
+	t.Cleanup(srv.Close)
+
+	c, err := New(srv.URL)
+	if err != nil {
+		t.Fatalf("New: %v", err)
+	}
+	if err := c.WriteTuple(context.Background(), "STORE-1", "MODEL-1", "user:UID-1", "platform_owner", "system_tenant:_system"); err == nil {
+		t.Fatal("WriteTuple: expected an error when Write fails, got nil")
+	}
+}
+
 // TestCheck_ReadsAllowedField pins the response decode.
 func TestCheck_ReadsAllowedField(t *testing.T) {
-	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
 		_, _ = w.Write([]byte(`{"allowed":true}`))
 	}))
 	t.Cleanup(srv.Close)

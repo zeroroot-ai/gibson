@@ -854,16 +854,16 @@ func (e *errClient) GetOrgIDForProject(ctx context.Context, projectID string) (s
 func (e *errClient) EnsureProjectRoles(_ context.Context, _ string, _ []tenantrole.Def) (bool, error) {
 	return false, e.err
 }
-func (e *errClient) EnsureHumanUserNoPassword(ctx context.Context, orgID, email, givenName, familyName string) (string, error) {
+func (e *errClient) EnsureHumanUserNoPassword(_ context.Context, _, _, _, _ string) (string, error) {
 	return "", e.err
 }
-func (e *errClient) FindHumanUserByEmail(ctx context.Context, email string) (string, error) {
+func (e *errClient) FindHumanUserByEmail(_ context.Context, _ string) (string, error) {
 	return "", e.err
 }
-func (e *errClient) CreateSetupInviteCode(ctx context.Context, userID, urlTemplate string, send bool) (string, error) {
+func (e *errClient) CreateSetupInviteCode(_ context.Context, _, _ string, _ bool) (string, error) {
 	return "", e.err
 }
-func (e *errClient) ClearHumanFactors(ctx context.Context, userID string) error {
+func (e *errClient) ClearHumanFactors(_ context.Context, _ string) error {
 	return e.err
 }
 

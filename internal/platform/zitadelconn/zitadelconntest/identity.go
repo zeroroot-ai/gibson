@@ -1008,7 +1008,7 @@ func (f *Identity) handleCreateInviteCode(w http.ResponseWriter, r *http.Request
 		return
 	}
 	if req.ReturnCode != nil {
-		code := fmt.Sprintf("code-%s", f.nextIDLocked())
+		code := "code-" + f.nextIDLocked()
 		u.inviteCode = code
 		writeOK(w, map[string]string{"inviteCode": code})
 		return
