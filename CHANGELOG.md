@@ -1,5 +1,17 @@
 # Changelog
 
+## [0.140.0](https://github.com/zeroroot-ai/gibson/compare/v0.139.0...v0.140.0) (2026-09-26)
+
+
+### Features
+
+* **tenantrole:** sync tenant roles from Zitadel into their FGA copy ([#235](https://github.com/zeroroot-ai/gibson/issues/235)) ([fa2d750](https://github.com/zeroroot-ai/gibson/commit/fa2d7508d849f5305b90a5a2bc166039edde9cf6))
+
+
+### Bug Fixes
+
+* **platform-operator:** read Zitadel's real project role list ([#241](https://github.com/zeroroot-ai/gibson/issues/241)) ([7491798](https://github.com/zeroroot-ai/gibson/commit/7491798650abd59bdd79f125e860bc2636e49d11))
+
 ## [0.139.0](https://github.com/zeroroot-ai/gibson/compare/v0.138.3...v0.139.0) (2026-09-26)
 
 
