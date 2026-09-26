@@ -364,7 +364,7 @@ func (c *Client) EnsureHumanUser(ctx context.Context, req idp.EnsureHumanUserReq
 		return "", fmt.Errorf("%w: EnsureHumanUser requires email", idp.ErrUpstream)
 	}
 	createBody := map[string]interface{}{
-		"userName": req.Email,
+		"userName": idp.UsernameForEmail(req.Email),
 		"profile":  map[string]interface{}{"firstName": "Invited", "lastName": "User"},
 		"email":    map[string]interface{}{"email": req.Email, "isEmailVerified": false},
 	}
@@ -426,7 +426,7 @@ func (c *Client) CreateHumanUser(ctx context.Context, req idp.CreateHumanUserReq
 	}
 
 	createBody := map[string]interface{}{
-		"userName": req.Email,
+		"userName": idp.UsernameForEmail(req.Email),
 		"profile": map[string]interface{}{
 			"firstName": req.GivenName,
 			"lastName":  req.FamilyName,

@@ -11,6 +11,7 @@ import (
 	"net/http/httptest"
 	"testing"
 
+	"github.com/zeroroot-ai/gibson/internal/platform/idp"
 	"github.com/zeroroot-ai/gibson/operators/tenant/internal/clients"
 )
 
@@ -470,4 +471,39 @@ func TestEnsureProjectGrant_CreatesUpdatesAndIsANoOp(t *testing.T) {
 			t.Fatalf("EnsureProjectGrant: %v", err)
 		}
 	})
+}
+
+// TestSendInvitation_UsernameIsNormalizedEmail pins ADR-0093 decision 1:
+// SendInvitation derives the Zitadel username from
+// idp.UsernameForEmail(email), the same function every other human-user
+// create path uses, so a stray case or whitespace difference in the
+// invited address can never mint a second username for the same mailbox.
+func TestSendInvitation_UsernameIsNormalizedEmail(t *testing.T) {
+	const rawEmail = " Alice@Example.COM "
+	var gotUsername string
+	c := newTestServer(t, map[string]http.HandlerFunc{
+		"POST /v2/users/human": func(w http.ResponseWriter, r *http.Request) {
+			var body struct {
+				Username string `json:"username"`
+			}
+			_ = json.NewDecoder(r.Body).Decode(&body)
+			gotUsername = body.Username
+			writeJSON(w, http.StatusOK, map[string]string{"userId": "user-new"})
+		},
+		"POST /management/v1/orgs/me/members": func(w http.ResponseWriter, _ *http.Request) {
+			writeJSON(w, http.StatusOK, map[string]any{
+				"details": map[string]string{"sequence": "1"},
+			})
+		},
+	})
+	if _, err := c.SendInvitation(context.Background(), "org-abc", rawEmail, []string{"gibson.member"}); err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	want := idp.UsernameForEmail(rawEmail)
+	if gotUsername != want {
+		t.Errorf("username = %q, want %q (normalized)", gotUsername, want)
+	}
+	if gotUsername == rawEmail {
+		t.Errorf("username was sent verbatim as %q, want it normalized", rawEmail)
+	}
 }

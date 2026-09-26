@@ -17,6 +17,7 @@ import (
 	"net/url"
 	"time"
 
+	"github.com/zeroroot-ai/gibson/internal/platform/idp"
 	"github.com/zeroroot-ai/gibson/operators/tenant/internal/clients"
 )
 
@@ -243,7 +244,7 @@ func (c *httpClient) SendInvitation(ctx context.Context, orgID, email string, ro
 		"organization": map[string]any{
 			"orgId": orgID,
 		},
-		"username": email,
+		"username": idp.UsernameForEmail(email),
 		"profile": map[string]any{
 			"givenName":  "Invited",
 			"familyName": "User",

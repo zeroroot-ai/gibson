@@ -316,21 +316,47 @@ func (r *PlatformBootstrapReconciler) reconcileZitadelProject(ctx context.Contex
 		logger.Info("reconciled tenant roles on the gibson project")
 	}
 
-	// Enforce allowRegister=false on the instance login policy so Zitadel's
-	// hosted self-registration page is not served. DefaultInstance config in
-	// the chart only applies at first-instance creation, so already-running
-	// instances are closed here, idempotently, on every reconcile (deploy#886).
-	if changed, err := zc.EnsureRegistrationDisabled(ctx); err != nil {
+	// Enforce the sign-in policy of every install (ADR-0093 section 9): MFA
+	// for everyone, passkey or authenticator app only, no external IdPs, no
+	// self-service registration (deploy#886 folds in here). Also keep
+	// usernames unique install-wide (decision 1), which is what makes our
+	// email-derived usernames unique too. DefaultInstance config in the
+	// chart only applies at first-instance creation, so already-running
+	// instances are corrected here, idempotently, on every reconcile.
+	if changed, err := zc.EnsureDomainPolicy(ctx, usernamePolicy); err != nil {
 		if zitadel.IsPermanent(err) {
 			setBootstrapCond(pb, gibsonv1alpha1.ConditionZitadelProjectReady, metav1.ConditionFalse,
-				"ZitadelPermanentError", fmt.Sprintf("EnsureRegistrationDisabled: %v", err))
+				"ZitadelPermanentError", fmt.Sprintf("EnsureDomainPolicy: %v", err))
 			return ctrl.Result{}, nil
 		}
 		setBootstrapCond(pb, gibsonv1alpha1.ConditionZitadelProjectReady, metav1.ConditionUnknown,
-			"ZitadelTransientError", fmt.Sprintf("EnsureRegistrationDisabled: %v", err))
+			"ZitadelTransientError", fmt.Sprintf("EnsureDomainPolicy: %v", err))
 		return ctrl.Result{RequeueAfter: requeueMedium}, nil
 	} else if changed {
-		logger.Info("disabled Zitadel self-service registration on the instance login policy (deploy#886)")
+		logger.Info("corrected the Zitadel instance domain policy (ADR-0093 decision 1)")
+		if r.Recorder != nil {
+			r.Recorder.Event(pb, corev1.EventTypeNormal, "SignInPolicyCorrected",
+				"corrected: userLoginMustBeDomain")
+		}
+	}
+
+	corrected, err := zc.EnsureLoginPolicy(ctx, signInPolicy)
+	if err != nil {
+		if zitadel.IsPermanent(err) {
+			setBootstrapCond(pb, gibsonv1alpha1.ConditionZitadelProjectReady, metav1.ConditionFalse,
+				"ZitadelPermanentError", fmt.Sprintf("EnsureLoginPolicy: %v", err))
+			return ctrl.Result{}, nil
+		}
+		setBootstrapCond(pb, gibsonv1alpha1.ConditionZitadelProjectReady, metav1.ConditionUnknown,
+			"ZitadelTransientError", fmt.Sprintf("EnsureLoginPolicy: %v", err))
+		return ctrl.Result{RequeueAfter: requeueMedium}, nil
+	}
+	if len(corrected) > 0 {
+		logger.Info("corrected the Zitadel instance login policy (ADR-0093 section 9)", "corrected", corrected)
+		if r.Recorder != nil {
+			r.Recorder.Eventf(pb, corev1.EventTypeNormal, "SignInPolicyCorrected",
+				"corrected: %s", strings.Join(corrected, ", "))
+		}
 	}
 
 	// Service-user provisioning is deferred — handled by tenant-operator's

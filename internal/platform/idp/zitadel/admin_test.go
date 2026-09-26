@@ -499,3 +499,87 @@ func TestHumanPasswordChangedAt_UpstreamErrorIsSurfaced(t *testing.T) {
 		t.Fatal("want the upstream error surfaced")
 	}
 }
+
+// ---------------------------------------------------------------------------
+// Username-from-email normalization (ADR-0093 decision 1)
+// ---------------------------------------------------------------------------
+
+// TestEnsureHumanUser_UsernameIsNormalizedEmail pins that EnsureHumanUser
+// derives userName from idp.UsernameForEmail(req.Email), not the raw email
+// as typed — the instance's domain policy keys username uniqueness on this
+// exact string, so a stray case or whitespace difference must not mint a
+// second account for the same address.
+func TestEnsureHumanUser_UsernameIsNormalizedEmail(t *testing.T) {
+	const rawEmail = " Alice@Example.COM "
+	var gotUserName string
+	_, cfg := setupServer(t, func(w http.ResponseWriter, r *http.Request) {
+		if !strings.HasSuffix(r.URL.Path, "/users/human") {
+			http.NotFound(w, r)
+			return
+		}
+		var body struct {
+			UserName string `json:"userName"`
+		}
+		_ = json.NewDecoder(r.Body).Decode(&body)
+		gotUserName = body.UserName
+		jsonResp(w, http.StatusOK, map[string]string{"userId": "user-1"})
+	})
+	client, err := zitadel.New(context.Background(), cfg)
+	if err != nil {
+		t.Fatalf("New: %v", err)
+	}
+	defer func() { _ = client.Close() }()
+
+	if _, err := client.EnsureHumanUser(context.Background(), idp.EnsureHumanUserRequest{
+		OrgID: "org-1",
+		Email: rawEmail,
+	}); err != nil {
+		t.Fatalf("EnsureHumanUser: %v", err)
+	}
+	want := idp.UsernameForEmail(rawEmail)
+	if gotUserName != want {
+		t.Errorf("userName = %q, want %q (normalized)", gotUserName, want)
+	}
+	if gotUserName == rawEmail {
+		t.Errorf("userName was sent verbatim as %q, want it normalized", rawEmail)
+	}
+}
+
+// TestCreateHumanUser_UsernameIsNormalizedEmail is the CreateHumanUser
+// analogue of the above, covering the self-serve signup and first-admin
+// bootstrap path.
+func TestCreateHumanUser_UsernameIsNormalizedEmail(t *testing.T) {
+	const rawEmail = " Alice@Example.COM "
+	var gotUserName string
+	_, cfg := setupServer(t, func(w http.ResponseWriter, r *http.Request) {
+		if !strings.HasSuffix(r.URL.Path, "/users/human") {
+			http.NotFound(w, r)
+			return
+		}
+		var body struct {
+			UserName string `json:"userName"`
+		}
+		_ = json.NewDecoder(r.Body).Decode(&body)
+		gotUserName = body.UserName
+		jsonResp(w, http.StatusOK, map[string]string{"userId": "user-1"})
+	})
+	client, err := zitadel.New(context.Background(), cfg)
+	if err != nil {
+		t.Fatalf("New: %v", err)
+	}
+	defer func() { _ = client.Close() }()
+
+	if _, err := client.CreateHumanUser(context.Background(), idp.CreateHumanUserRequest{
+		Email:    rawEmail,
+		Password: "correct-horse-battery-staple",
+	}); err != nil {
+		t.Fatalf("CreateHumanUser: %v", err)
+	}
+	want := idp.UsernameForEmail(rawEmail)
+	if gotUserName != want {
+		t.Errorf("userName = %q, want %q (normalized)", gotUserName, want)
+	}
+	if gotUserName == rawEmail {
+		t.Errorf("userName was sent verbatim as %q, want it normalized", rawEmail)
+	}
+}
