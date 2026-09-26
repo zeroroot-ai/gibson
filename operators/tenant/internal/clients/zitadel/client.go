@@ -479,7 +479,7 @@ func (c *httpClient) doJSONWithOrg(ctx context.Context, method, path, orgID stri
 	req.Header.Set("Accept", "application/json")
 	tok, err := c.tokens.Token()
 	if err != nil {
-		return fmt.Errorf("zitadel: get access token: %v: %w", err, clients.ErrUnreachable)
+		return fmt.Errorf("zitadel: get access token: %w: %w", err, clients.ErrUnreachable)
 	}
 	req.Header.Set("Authorization", "Bearer "+tok.AccessToken)
 	if orgID != "" {

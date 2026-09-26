@@ -96,7 +96,7 @@ func (failingTokens) Token() (*oauth2.Token, error) { return nil, errors.New("to
 // request and surfaces as unreachable, so the saga retries instead of failing
 // the tenant.
 func TestRequest_TokenFailureIsTransient(t *testing.T) {
-	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+	srv := httptest.NewServer(http.HandlerFunc(func(_ http.ResponseWriter, r *http.Request) {
 		t.Errorf("no API request may go out without a token, got %s %s", r.Method, r.URL.Path)
 	}))
 	t.Cleanup(srv.Close)
