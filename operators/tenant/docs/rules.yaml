@@ -198,10 +198,9 @@ rules:
 
   - id: tenant-operator-auth-003
     description: |
-      The Zitadel admin PAT (mounted from the
-      <release>-zitadel-iam-admin-pat Secret) is the highest-privilege
-      credential in the polyrepo. It must never appear in a log line, a
-      metric label, or a CRD status field.
+      A Zitadel credential (a PAT, the operator's client secret, or an
+      access token) must never appear in a log line, a metric label, or a
+      CRD status field.
     scope:
       - "**/*.go"
     exempt:
