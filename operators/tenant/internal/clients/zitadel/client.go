@@ -2,9 +2,10 @@
 // Copyright 2026 Zero Root AI
 
 // Package zitadel is the operator's client to the Zitadel Management API for
-// provisioning per-tenant organizations and user memberships. Auth uses a
-// Personal Access Token (PAT) mounted into the operator from the
-// <release>-zitadel-iam-admin-pat Secret.
+// provisioning per-tenant organizations and user memberships. It
+// authenticates as the tenant-operator's own machine user with a
+// client_credentials token (see TokenSource). It never uses the Zitadel
+// owner credentials: only bootstrap reads those.
 package zitadel
 
 import (
@@ -16,6 +17,8 @@ import (
 	"net/http"
 	"net/url"
 	"time"
+
+	"golang.org/x/oauth2"
 
 	"github.com/zeroroot-ai/gibson/internal/platform/idp"
 	"github.com/zeroroot-ai/gibson/operators/tenant/internal/clients"
@@ -75,7 +78,7 @@ type Organization struct {
 // httpClient implements Client against the Zitadel Management REST API v1.
 type httpClient struct {
 	baseURL *url.URL
-	pat     string
+	tokens  oauth2.TokenSource
 	// externalDomain is forged onto the HTTP Host header on every request.
 	// Zitadel routes to the correct instance by matching Host against its
 	// registered ExternalDomain — when the operator calls via the cluster
@@ -85,21 +88,21 @@ type httpClient struct {
 	http           *http.Client
 }
 
-// New constructs a Zitadel Management API client authenticated via PAT.
+// New constructs a Zitadel Management API client.
 // apiURL must be the Zitadel base URL (e.g. "https://zitadel.example.com").
-// pat is the Personal Access Token mounted into the operator.
+// tokens supplies the Bearer token for every request (see TokenSource).
 // externalDomain is the configured Zitadel ExternalDomain — forged on every
 // request's Host header so in-cluster callers (reaching Zitadel via its
 // Service name) still route to the right Zitadel instance. Pass empty to
 // skip forgery when the caller already uses the external hostname.
-func New(apiURL, pat, externalDomain string) Client {
+func New(apiURL string, tokens oauth2.TokenSource, externalDomain string) Client {
 	u, err := url.Parse(apiURL)
 	if err != nil {
 		return &errClient{err: fmt.Errorf("zitadel: invalid apiURL %q: %w", apiURL, err)}
 	}
 	return &httpClient{
 		baseURL:        u,
-		pat:            pat,
+		tokens:         tokens,
 		externalDomain: externalDomain,
 		http:           &http.Client{Timeout: 30 * time.Second},
 	}
@@ -474,9 +477,11 @@ func (c *httpClient) doJSONWithOrg(ctx context.Context, method, path, orgID stri
 		req.Header.Set("Content-Type", "application/json")
 	}
 	req.Header.Set("Accept", "application/json")
-	if c.pat != "" {
-		req.Header.Set("Authorization", "Bearer "+c.pat)
+	tok, err := c.tokens.Token()
+	if err != nil {
+		return fmt.Errorf("zitadel: get access token: %w: %w", err, clients.ErrUnreachable)
 	}
+	req.Header.Set("Authorization", "Bearer "+tok.AccessToken)
 	if orgID != "" {
 		// Zitadel's cross-org selector — scopes the request to the named
 		// org for endpoints that would otherwise act on the caller's own
@@ -580,6 +585,6 @@ func (e *errClient) DeleteServiceAccount(_ context.Context, _, _ string) error {
 //
 // Per epic one-code-path (deploy#186), slice deploy#196: the NoopClient
 // degradation surface has been DELETED. Zitadel is structurally required;
-// cmd/main.go now exits 1 at startup when ZITADEL_URL is empty or the PAT
-// is unreadable. Re-introducing this type would reopen the silent-no-op
+// cmd/main.go now exits 1 at startup when it cannot build the Zitadel
+// client. Re-introducing this type would reopen the silent-no-op
 // failure mode the slice exists to prevent.

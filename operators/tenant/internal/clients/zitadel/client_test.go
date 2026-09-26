@@ -11,6 +11,8 @@ import (
 	"net/http/httptest"
 	"testing"
 
+	"golang.org/x/oauth2"
+
 	"github.com/zeroroot-ai/gibson/internal/platform/idp"
 	"github.com/zeroroot-ai/gibson/operators/tenant/internal/clients"
 )
@@ -32,7 +34,7 @@ func newTestServer(t *testing.T, routes map[string]http.HandlerFunc) Client {
 		handler(w, r)
 	}))
 	t.Cleanup(srv.Close)
-	return New(srv.URL, "test-pat", "")
+	return New(srv.URL, oauth2.StaticTokenSource(&oauth2.Token{AccessToken: "test-token"}), "")
 }
 
 func writeJSON(w http.ResponseWriter, status int, v any) {
@@ -44,7 +46,7 @@ func writeJSON(w http.ResponseWriter, status int, v any) {
 // TestNew_InvalidURL verifies that an unparseable URL returns an errClient
 // that surfaces the error on every call.
 func TestNew_InvalidURL(t *testing.T) {
-	c := New("://bad-url", "pat", "")
+	c := New("://bad-url", oauth2.StaticTokenSource(&oauth2.Token{AccessToken: "t"}), "")
 	_, err := c.CreateOrganization(context.Background(), "test", "test")
 	if err == nil {
 		t.Fatal("expected error from errClient, got nil")
@@ -385,7 +387,7 @@ func TestDeleteServiceAccount_Idempotent(t *testing.T) {
 	}
 }
 
-// TestAuthorizationHeader verifies the PAT is sent in Authorization: Bearer.
+// TestAuthorizationHeader verifies the token source's token is sent in Authorization: Bearer.
 func TestAuthorizationHeader(t *testing.T) {
 	var gotAuth string
 	c := newTestServer(t, map[string]http.HandlerFunc{
@@ -399,8 +401,8 @@ func TestAuthorizationHeader(t *testing.T) {
 		},
 	})
 	_, _ = c.GetOrganization(context.Background(), "org-abc")
-	if gotAuth != "Bearer test-pat" {
-		t.Errorf("expected %q, got %q", "Bearer test-pat", gotAuth)
+	if gotAuth != "Bearer test-token" {
+		t.Errorf("expected %q, got %q", "Bearer test-token", gotAuth)
 	}
 }
 
