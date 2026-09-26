@@ -113,11 +113,12 @@ func (r *TenantRoleSyncReconciler) SetupWithManager(mgr ctrl.Manager) error {
 	if r.Interval <= 0 {
 		r.Interval = DefaultTenantRoleSyncInterval
 	}
-	return ctrl.NewControllerManagedBy(mgr).
+	err := ctrl.NewControllerManagedBy(mgr).
 		For(&gibsonv1alpha1.Tenant{},
 			builder.WithPredicates(tenantRoleSyncPredicate())).
 		Named("tenantrolesync").
-		Complete(r) //nolint:wrapcheck // every SetupWithManager in this package returns Complete bare
+		Complete(r)
+	return err //nolint:wrapcheck // every SetupWithManager in this package returns Complete bare
 }
 
 // tenantRoleSyncPredicate passes creates and any update where

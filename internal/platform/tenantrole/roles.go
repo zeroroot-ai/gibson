@@ -105,7 +105,7 @@ func FromRelation(rel string) (Role, bool) {
 // crosses a power of ten, so 15-20 digits gives headroom on both sides of
 // today's 18 without accepting a short, human-readable test id ("1",
 // "user-1") or a long SPIFFE path as if it were numeric.
-var zitadelIDPattern = regexp.MustCompile(`^[0-9]{15,20}$`)
+var zitadelIDPattern = regexp.MustCompile(`^\d{15,20}$`)
 
 // IsZitadelUserSubject reports whether subject is a "user:<id>" FGA
 // reference whose id is shaped like a real Zitadel-issued numeric id — a
