@@ -5,9 +5,16 @@ package mailer
 
 import (
 	"context"
+	"errors"
 	"strings"
 	"testing"
 )
+
+// errMailer always fails Send, for exercising the wrapping-error branch.
+type errMailer struct{ err error }
+
+func (e *errMailer) Send(_ context.Context, _ Message) error { return e.err }
+func (e *errMailer) Delivers() bool                          { return true }
 
 func TestMFAResetSender_RendersSignInLink(t *testing.T) {
 	cap := &captureMailer{}
@@ -66,5 +73,19 @@ func TestMFAResetSender_NilMailer(t *testing.T) {
 	s := NewMFAResetSender(nil)
 	if err := s.SendMFAReset(context.Background(), MFAResetEmail{To: "x"}); err == nil {
 		t.Fatal("expected error from a sender with no underlying mailer")
+	}
+}
+
+// TestMFAResetSender_TransportErrorIsWrapped proves a transport failure
+// surfaces as a wrapped, identifiable error rather than being swallowed.
+func TestMFAResetSender_TransportErrorIsWrapped(t *testing.T) {
+	boom := errors.New("smtp: connection refused")
+	s := NewMFAResetSender(&errMailer{err: boom})
+	err := s.SendMFAReset(context.Background(), MFAResetEmail{To: "alice@example.com"})
+	if err == nil {
+		t.Fatal("expected the transport error to surface")
+	}
+	if !errors.Is(err, boom) {
+		t.Errorf("error = %v, want it to wrap %v", err, boom)
 	}
 }

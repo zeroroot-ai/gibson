@@ -48,13 +48,17 @@ func (f *fakeMFAResetMailer) SendMFAReset(_ context.Context, e mailer.MFAResetEm
 }
 
 func resetMFAServer(az authzIface, idpC idp.AdminClient, mailerC mfaResetSender) *DaemonServer {
-	return &DaemonServer{
+	srv := &DaemonServer{
 		logger:         slog.Default(),
 		authorizer:     az,
 		idpAdminClient: idpC,
-		mfaResetMailer: mailerC,
 		appURL:         "https://app.example.com",
 	}
+	// Route through WithMFAResetMailer (rather than setting the field
+	// directly) so the setter itself is exercised, matching production wiring
+	// in grpc.go.
+	srv.WithMFAResetMailer(mailerC)
+	return srv
 }
 
 func TestResetUserMFA_AdminOverMember(t *testing.T) {
@@ -260,5 +264,24 @@ func TestResetUserMFA_CallerNeverReceivesNotice(t *testing.T) {
 		if sent.To == "admin1" {
 			t.Fatalf("the acting admin must never receive the reset notice, got To=%q", sent.To)
 		}
+	}
+}
+
+// TestResetUserMFA_MailerSendFails proves a transport failure while sending
+// the notice degrades to notified=false (the reset itself already
+// succeeded) rather than failing the whole call or panicking.
+func TestResetUserMFA_MailerSendFails(t *testing.T) {
+	az := newFakeAuthorizer().allow("user:bob", "member", "tenant:acme")
+	idpC := &mfaResetTestIDP{fakeIDPClient: &fakeIDPClient{}, profile: &idp.UserProfile{Email: "bob@example.com"}}
+	mailerC := &fakeMFAResetMailer{err: errBoom}
+	srv := resetMFAServer(az, idpC, mailerC)
+	ctx := ctxWithTenantAdmin(context.Background(), "acme", "admin1")
+
+	resp, err := srv.ResetUserMFA(ctx, &tenantv1.ResetUserMFARequest{TargetUserId: "bob"})
+	if err != nil {
+		t.Fatalf("ResetUserMFA: %v", err)
+	}
+	if resp.GetNotified() {
+		t.Error("expected Notified=false when the mail transport fails")
 	}
 }
