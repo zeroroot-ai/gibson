@@ -97,6 +97,14 @@ const (
 	// human admin outright. Machine members are untouched here.
 	ConditionHumanAdminsScoped = "HumanAdminsScoped"
 
+	// ConditionMachineAdminsScoped reports whether the declared service
+	// accounts (iam-admin plus every MACHINE_USER OIDCClient child) and
+	// Zitadel's login client are the only machine Zitadel instance
+	// administrators (ADR-0093 decision 6, hosted#207). Runs every
+	// reconcile: it revokes the IAM membership of any other machine member,
+	// which is how an upgrade drops a machine user an older chart declared.
+	ConditionMachineAdminsScoped = "MachineAdminsScoped"
+
 	// ConditionSMTPProviderReady reports whether the Zitadel instance has
 	// exactly one active SMTP email provider matching spec.zitadel.smtp
 	// (hosted#189). True with reason NotConfigured when spec.zitadel.smtp is
