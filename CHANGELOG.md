@@ -1,5 +1,21 @@
 # Changelog
 
+## [0.140.0](https://github.com/zeroroot-ai/gibson/compare/v0.139.0...v0.140.0) (2026-09-27)
+
+
+### Features
+
+* **platform-operator:** apply the login branding as a bootstrap step ([#239](https://github.com/zeroroot-ai/gibson/issues/239)) ([711473f](https://github.com/zeroroot-ai/gibson/commit/711473fad44a44d71533debe25caa1949fd65d38))
+* **platform-operator:** create the Platform owner from install values ([#240](https://github.com/zeroroot-ai/gibson/issues/240)) ([3ad083a](https://github.com/zeroroot-ai/gibson/commit/3ad083a5462fa99c5198713b9bc1fc916f39d2b3))
+* **tenantrole:** sync tenant roles from Zitadel into their FGA copy ([#235](https://github.com/zeroroot-ai/gibson/issues/235)) ([fa2d750](https://github.com/zeroroot-ai/gibson/commit/fa2d7508d849f5305b90a5a2bc166039edde9cf6))
+
+
+### Bug Fixes
+
+* **platform-operator:** read Zitadel's real project role list ([#241](https://github.com/zeroroot-ai/gibson/issues/241)) ([7491798](https://github.com/zeroroot-ai/gibson/commit/7491798650abd59bdd79f125e860bc2636e49d11))
+* **tenant-operator:** call Zitadel as the operator's own machine user ([#238](https://github.com/zeroroot-ai/gibson/issues/238)) ([bd9a704](https://github.com/zeroroot-ai/gibson/commit/bd9a704660c9cb0094d16769079ddc2cced0098f))
+* **tenant:** read a listed project grant's grantedRoleKeys ([#243](https://github.com/zeroroot-ai/gibson/issues/243)) ([6819312](https://github.com/zeroroot-ai/gibson/commit/6819312d3ca949abbb8dedd0e18c8f4559bc5754))
+
 ## [0.139.0](https://github.com/zeroroot-ai/gibson/compare/v0.138.3...v0.139.0) (2026-09-26)
 
 
