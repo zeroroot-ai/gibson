@@ -55,9 +55,13 @@ func evidenceText(e finding.EnhancedEvidence) (string, bool) {
 		}
 		return string(data), true
 
+	case finding.EvidenceScreenshot:
+		// A screenshot has no text representation.
+		return "", false
+
 	default:
-		// EvidenceScreenshot and any evidence type this package does not
-		// know about: no text representation.
+		// Any evidence type this package does not know about: no text
+		// representation.
 		return "", false
 	}
 }
@@ -66,7 +70,7 @@ func evidenceText(e finding.EnhancedEvidence) (string, bool) {
 // pattern EnhancedEvidence.Validate uses: content may already be the
 // concrete struct a constructor built, or a generic map[string]any if it
 // arrived via a JSON-deserialized graph read, and this normalizes both.
-func decodeContent(content any, out any) bool {
+func decodeContent(content, out any) bool {
 	data, err := json.Marshal(content)
 	if err != nil {
 		return false

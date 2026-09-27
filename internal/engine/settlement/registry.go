@@ -142,7 +142,11 @@ func encodeParams(params any) (json.RawMessage, error) {
 	case json.RawMessage:
 		return v, nil
 	default:
-		return json.Marshal(v)
+		data, err := json.Marshal(v)
+		if err != nil {
+			return nil, fmt.Errorf("settlement: marshal params: %w", err)
+		}
+		return data, nil
 	}
 }
 
@@ -160,7 +164,7 @@ func encodeParams(params any) (json.RawMessage, error) {
 // run, so that replay is exact.
 func (r *Registry) Evaluate(ctx context.Context, predicate Predicate, evidence []finding.EnhancedEvidence) (bool, error) {
 	if err := ctx.Err(); err != nil {
-		return false, err
+		return false, fmt.Errorf("settlement: %w", err)
 	}
 	if err := predicate.Validate(); err != nil {
 		return false, err

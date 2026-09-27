@@ -141,7 +141,7 @@ func TestMarkerPresent_Evaluate_Deterministic(t *testing.T) {
 		finding.NewEnhancedEvidence(finding.EvidenceLog, "capture", "nonce-1234"),
 	}
 
-	for i := 0; i < 50; i++ {
+	for range 50 {
 		ok, err := r.Evaluate(ctx, p, evidence)
 		require.NoError(t, err)
 		assert.True(t, ok)

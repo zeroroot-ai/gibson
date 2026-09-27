@@ -28,7 +28,10 @@ type HTTPStatusEqualsParams struct {
 // deterministic proof-of-reach check for techniques whose claim is "this
 // endpoint returns status N", such as an authorization bypass.
 func RegisterHTTPStatusEquals(r *settlement.Registry, technique settlement.TechniqueID) error {
-	return r.Register(technique, HTTPStatusEqualsType, httpStatusEqualsEvaluate)
+	if err := r.Register(technique, HTTPStatusEqualsType, httpStatusEqualsEvaluate); err != nil {
+		return fmt.Errorf("builtin: register %s: %w", HTTPStatusEqualsType, err)
+	}
+	return nil
 }
 
 func httpStatusEqualsEvaluate(params json.RawMessage, evidence []finding.EnhancedEvidence) (bool, error) {
