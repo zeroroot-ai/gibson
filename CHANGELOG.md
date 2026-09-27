@@ -1,5 +1,18 @@
 # Changelog
 
+## [0.141.0](https://github.com/zeroroot-ai/gibson/compare/v0.140.0...v0.141.0) (2026-09-27)
+
+
+### Features
+
+* **tenant:** removing a tenant user deletes their Zitadel account ([#244](https://github.com/zeroroot-ai/gibson/issues/244)) ([f510fae](https://github.com/zeroroot-ai/gibson/commit/f510fae2ff97889c518271e7d962cfce0312f7b7))
+
+
+### Bug Fixes
+
+* **platform-operator:** the Platform owner's setup link names the public host ([#254](https://github.com/zeroroot-ai/gibson/issues/254)) ([0812e75](https://github.com/zeroroot-ai/gibson/commit/0812e75c660f638e5b1819c2e014c63a511fa268))
+* **tenantrole:** read Zitadel's totalResult as the string it sends ([#253](https://github.com/zeroroot-ai/gibson/issues/253)) ([873858d](https://github.com/zeroroot-ai/gibson/commit/873858ddb40673c97ddf1420f06ae7a683fc725a))
+
 ## [0.140.0](https://github.com/zeroroot-ai/gibson/compare/v0.139.0...v0.140.0) (2026-09-27)
 
 
