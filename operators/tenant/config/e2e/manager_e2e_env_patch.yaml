@@ -1,4 +1,4 @@
-# Strategic merge patch: injects stub env vars + Zitadel PAT volume into the
+# Strategic merge patch: injects stub env vars into the
 # manager Deployment for the E2E kind environment. All values are fake/local
 # stubs — no real services are contacted. The operator starts up cleanly
 # because every hard startup gate only checks env var presence (not
@@ -71,11 +71,12 @@ spec:
           value: "e2e-client-secret"
         - name: ZITADEL_ISSUER
           value: "https://e2e-zitadel.invalid"
-        # --- Zitadel admin PAT (required: ZITADEL_URL + file at ZITADEL_PAT_PATH) ---
+        # --- Zitadel API (required: ZITADEL_URL + ZITADEL_EXTERNAL_DOMAIN; the
+        # client_credentials token is fetched on the first call, not at startup) ---
         - name: ZITADEL_URL
           value: "https://e2e-zitadel.invalid"
-        # ZITADEL_PAT_PATH defaults to /etc/zitadel/pat; the volume mount below
-        # satisfies os.ReadFile at startup.
+        - name: ZITADEL_EXTERNAL_DOMAIN
+          value: "e2e-zitadel.invalid"
         # --- FGA (required: FGA_URL + FGA_STORE_ID non-empty; readyz probe calls /healthz) ---
         # Points at the e2e-http-stub nginx that returns 200 {"status":"SERVING"} on /healthz.
         - name: FGA_URL
@@ -95,10 +96,6 @@ spec:
         - name: SMTP_FROM
           value: "e2e@test.invalid"
         volumeMounts:
-        - name: e2e-zitadel-pat
-          mountPath: /etc/zitadel/pat
-          subPath: pat
-          readOnly: true
         - name: e2e-plans
           mountPath: /etc/gibson/plans
           readOnly: true
@@ -108,9 +105,6 @@ spec:
         - name: tmp-metrics-certs
           mountPath: /tmp
       volumes:
-      - name: e2e-zitadel-pat
-        secret:
-          secretName: e2e-zitadel-pat
       - name: e2e-plans
         configMap:
           name: e2e-plans

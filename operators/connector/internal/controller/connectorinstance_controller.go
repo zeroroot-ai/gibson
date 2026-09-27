@@ -116,7 +116,7 @@ type ConnectorInstanceReconciler struct {
 // +kubebuilder:rbac:groups=gibson.zeroroot.ai,resources=connectorinstances/finalizers,verbs=update
 // +kubebuilder:rbac:groups=toolhive.stacklok.dev,resources=mcpservers;mcpremoteproxies,verbs=get;list;watch;create;update;patch;delete
 // +kubebuilder:rbac:groups=networking.k8s.io,resources=networkpolicies,verbs=get;list;watch;create;update;patch;delete
-// +kubebuilder:rbac:groups="",resources=configmaps;secrets,verbs=get;list;watch;create;update;patch;delete
+// +kubebuilder:rbac:groups="",resources=configmaps,verbs=get;list;watch;create;update;patch;delete
 
 // Reconcile drives a ConnectorInstance toward its desired state.
 func (r *ConnectorInstanceReconciler) Reconcile(ctx context.Context, req ctrl.Request) (ctrl.Result, error) {

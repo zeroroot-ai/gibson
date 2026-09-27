@@ -404,17 +404,3 @@ spec:
   ports:
   - port: 8080
     targetPort: 8080
----
-# Zitadel PAT file: mounted at /etc/zitadel/pat in the manager container.
-# Any non-empty value satisfies os.ReadFile(zitadelPATPath).
-apiVersion: v1
-kind: Secret
-metadata:
-  name: e2e-zitadel-pat
-  namespace: tenant-operator-system
-  labels:
-    app.kubernetes.io/part-of: e2e-deps
-    app.kubernetes.io/component: zitadel-pat
-type: Opaque
-stringData:
-  pat: e2e-fake-zitadel-pat-for-testing-only

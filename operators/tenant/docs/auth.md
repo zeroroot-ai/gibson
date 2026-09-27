@@ -104,12 +104,16 @@ corresponding FGA tuples leaves an unreachable database.
 ## Zitadel admin API client
 
 [`internal/clients/zitadel/client.go`](../internal/clients/zitadel/client.go)
-wraps the Zitadel Management API for org / member CRUD. Auth uses a
-**Personal Access Token (PAT)** mounted from the
-`<release>-zitadel-iam-admin-pat` Secret — this is a Zitadel-side
-constraint (the Management API requires IAM-admin authority that
-client_credentials grants do not carry). The PAT is issued out-of-band
-(the bootstrap Job at deploy time) and rotates on operator schedule.
+wraps the Zitadel Management API for org / member CRUD. It authenticates
+as the operator's own machine user, the `gibson-tenant-operator`
+OIDCClient. `zitadel.TokenSource` runs a client_credentials grant with
+`ZITADEL_TENANT_OPERATOR_CLIENT_ID` and `ZITADEL_TENANT_OPERATOR_CLIENT_SECRET`
+and the scope `urn:zitadel:iam:org:project:id:zitadel:aud`, which Zitadel's
+own APIs require. The token request goes to the in-cluster Service and
+claims the public host with the instance header (ADR-0092). The operator
+holds exactly the Zitadel roles its OIDCClient declares. It never reads the
+Zitadel owner credentials (`iam-admin-pat`, `iam-admin`): only bootstrap
+does.
 
 Operations:
 

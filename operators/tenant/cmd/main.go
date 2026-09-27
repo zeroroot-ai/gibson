@@ -11,7 +11,6 @@ import (
 	"fmt"
 	"net/http"
 	"os"
-	"strings"
 	"time"
 
 	"github.com/jackc/pgx/v5/pgxpool"
@@ -41,7 +40,6 @@ import (
 	"github.com/zeroroot-ai/gibson/internal/infra/pools"
 	"github.com/zeroroot-ai/gibson/internal/infra/readiness"
 	"github.com/zeroroot-ai/gibson/internal/platform/tenantrole"
-	"github.com/zeroroot-ai/gibson/internal/platform/zitadelconn"
 
 	connectorv1alpha1 "github.com/zeroroot-ai/gibson/operators/connector/api/v1alpha1"
 	gibsonv1alpha1 "github.com/zeroroot-ai/gibson/operators/tenant/api/v1alpha1"
@@ -472,9 +470,10 @@ func main() {
 		os.Exit(1)
 	}
 
-	// Zitadel IAM client — authenticates with a Personal Access Token (PAT)
-	// mounted from the <release>-zitadel-iam-admin-pat Secret. ZITADEL_PAT_PATH
-	// defaults to /etc/zitadel/pat.
+	// Zitadel client. It authenticates as the tenant-operator's own machine
+	// user (the gibson-tenant-operator OIDCClient) with a client_credentials
+	// token, so it holds only the roles that user declares. It never reads
+	// the Zitadel owner credentials: only bootstrap does.
 	//
 	// Per epic one-code-path (deploy#186), slice deploy#196: Zitadel is
 	// structurally required. The previous "noop client injected when
@@ -487,7 +486,6 @@ func main() {
 	// missing-org" silent corruption days later.
 	var zitadelClient zitadel.Client
 	zitadelURL := os.Getenv("ZITADEL_URL")
-	zitadelPATPath := os.Getenv("ZITADEL_PAT_PATH")
 	// Host-header forge target. Matches the chart's
 	// `zitadel.configmapConfig.ExternalDomain`; required when ZITADEL_URL
 	// points at the in-cluster Service name (gibson-zitadel:8080), because
@@ -495,34 +493,19 @@ func main() {
 	// a registered domain — a 404 that previously looked like a missing
 	// endpoint.
 	zitadelExternalDomain := os.Getenv("ZITADEL_EXTERNAL_DOMAIN")
-	if zitadelPATPath == "" {
-		zitadelPATPath = "/etc/zitadel/pat"
-	}
 	if zitadelURL == "" {
 		setupLog.Error(nil, "ZITADEL_URL is required (one-code-path / deploy#196): "+
 			"the noop-client degradation surface has been deleted; the operator refuses "+
 			"to start until the chart provides a reachable Zitadel URL")
 		os.Exit(1)
 	}
-	patBytes, patErr := os.ReadFile(zitadelPATPath)
-	if patErr != nil {
-		setupLog.Error(patErr, "ZITADEL_PAT_PATH unreadable (one-code-path / deploy#196): "+
-			"the noop-client degradation surface has been deleted; the operator refuses "+
-			"to start until the chart mounts a readable Zitadel admin PAT",
-			"path", zitadelPATPath)
+	zitadelClient, err = newZitadelClient(context.Background(), zitadelURL, zitadelExternalDomain, operatorClientID, operatorClientSecret)
+	if err != nil {
+		setupLog.Error(err, "Zitadel client (one-code-path / deploy#196): the operator refuses to start without its own client credentials")
 		os.Exit(1)
 	}
-	pat := strings.TrimSpace(string(patBytes))
-	if pat == "" {
-		setupLog.Error(nil, "ZITADEL_PAT_PATH file is empty (one-code-path / deploy#196): "+
-			"the chart's Zitadel admin PAT Secret is mounted but contains no token bytes",
-			"path", zitadelPATPath)
-		os.Exit(1)
-	}
-	zitadelClient = zitadel.New(zitadelURL, pat, zitadelExternalDomain)
 	setupLog.Info("Zitadel client initialized",
 		"url", zitadelURL,
-		"pat-path", zitadelPATPath,
 		"external-domain", zitadelExternalDomain)
 
 	// ZITADEL_PROJECT_ID (ADR-0093): the gibson project every tenant org is
@@ -638,15 +621,13 @@ func main() {
 	// management-API zitadel.Client above has no project-grant/authorization
 	// surface), over the same ZITADEL_URL/ZITADEL_EXTERNAL_DOMAIN this
 	// operator already requires, claiming the instance by header (ADR-0092)
-	// and authenticating with the same PAT.
-	zitadelEndpoint, err := zitadelconn.New(zitadelURL, zitadelExternalDomain)
+	// and authenticating as the operator's own machine user, with the same
+	// client credentials as the management-API client.
+	tenantRoleGrants, err := newTenantRoleGrants(context.Background(), zitadelURL, zitadelExternalDomain, operatorClientID, operatorClientSecret, zitadelProjectID)
 	if err != nil {
-		setupLog.Error(err, "zitadelconn.New failed (ADR-0092): ZITADEL_URL and ZITADEL_EXTERNAL_DOMAIN "+
-			"are both required for tenant role grants")
+		setupLog.Error(err, "tenant role grants (ADR-0092, ADR-0093): the operator refuses to start")
 		os.Exit(1)
 	}
-	tenantRolePATClient := &http.Client{Transport: &bearerTokenTransport{token: pat, next: zitadelEndpoint.Transport(nil)}}
-	tenantRoleGrants := tenantrole.NewZitadelGrants(zitadelEndpoint, tenantRolePATClient, zitadelProjectID)
 	tenantRoleTuples := fga.NewTenantRoleTuples(fgaClient)
 	tenantRoleSyncer := tenantrole.NewSyncer(tenantRoleGrants, tenantRoleTuples, nil)
 	tenantRoleSyncInterval := controller.DefaultTenantRoleSyncInterval
@@ -1446,25 +1427,6 @@ func buildVaultAdminClient(log logr.Logger) vaultadmin.AdminClient {
 // EnsureTenantNamespace's (Edition, error) return — the Edition is saga
 // record-keeping only, so the adapter discards it. All methods stay
 // idempotent (the underlying client guarantees it).
-// bearerTokenTransport adds an Authorization: Bearer header to every
-// request before delegating to next. Used to authenticate the tenant role
-// Syncer's Zitadel v2 Connect calls with the same PAT the management-API
-// zitadel.Client uses.
-type bearerTokenTransport struct {
-	token string
-	next  http.RoundTripper
-}
-
-func (t *bearerTokenTransport) RoundTrip(req *http.Request) (*http.Response, error) {
-	r := req.Clone(req.Context())
-	r.Header.Set("Authorization", "Bearer "+t.token)
-	resp, err := t.next.RoundTrip(r)
-	if err != nil {
-		return nil, fmt.Errorf("bearerTokenTransport: %w", err)
-	}
-	return resp, nil
-}
-
 type secretsVaultAdapter struct {
 	c vaultadmin.AdminClient
 }
