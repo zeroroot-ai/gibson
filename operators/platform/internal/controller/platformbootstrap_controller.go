@@ -128,6 +128,10 @@ func (r *PlatformBootstrapReconciler) SetupWithManager(mgr ctrl.Manager) error {
 			&gibsonv1alpha1.OIDCClient{},
 			handler.EnqueueRequestsFromMapFunc(r.mapChildToParent),
 		).
+		Watches(
+			&corev1.ConfigMap{},
+			handler.EnqueueRequestsFromMapFunc(r.mapBrandingConfigMap),
+		).
 		Complete(r)
 }
 
@@ -249,6 +253,10 @@ func (r *PlatformBootstrapReconciler) Reconcile(ctx context.Context, req ctrl.Re
 		_ = r.statusUpdate(ctx, &pb)
 		return result, err
 	}
+
+	// Step 9: the login pages' brand. It never stops the reconcile; see
+	// reconcileLoginBranding.
+	r.reconcileLoginBranding(ctx, &pb, logger)
 
 	// Top-level Ready rollup.
 	r.aggregateReady(&pb)
@@ -632,6 +640,7 @@ func (r *PlatformBootstrapReconciler) aggregateReady(pb *gibsonv1alpha1.Platform
 		gibsonv1alpha1.ConditionUnsealKeyEscrowed,
 		gibsonv1alpha1.ConditionPostgresBundleReady,
 		gibsonv1alpha1.ConditionTrustedDomainReady,
+		gibsonv1alpha1.ConditionLoginBrandingReady,
 	}
 	for _, cType := range all {
 		c := findCondition(pb.Status.Conditions, cType)

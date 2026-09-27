@@ -22,6 +22,10 @@ import (
 // PAT lifecycle. All mutating operations are idempotent: caller may
 // safely retry; 409/already-exists is success, 404 is success on delete.
 type Client interface {
+	// LabelPolicyClient reads and writes the instance label policy (the
+	// login pages' brand). See label_policy.go.
+	LabelPolicyClient
+
 	// EnsureProject creates the Zitadel project with the given name and
 	// returns its ID. If the project already exists, the existing ID is
 	// returned. Idempotent.

@@ -75,6 +75,12 @@ const (
 	// plus each Ready MACHINE_USER OIDCClient child's status.clientID. Replaces
 	// the gitops sa-identity-map-populator Sync Job (gitops#170).
 	ConditionSAIdentityMapReady = "SAIdentityMapReady"
+
+	// ConditionLoginBrandingReady reports whether the Zitadel instance's
+	// active label policy and its four brand marks match the declared
+	// brand in spec.zitadel.loginBranding. True with reason NotDeclared
+	// when no brand is declared.
+	ConditionLoginBrandingReady = "LoginBrandingReady"
 )
 
 // SecretKeyRef references a key in a Secret. namespace is optional; when
@@ -127,24 +133,22 @@ type ZitadelProjectSpec struct {
 	EnsureExists bool `json:"ensureExists,omitempty"`
 }
 
-// ZitadelServiceUserSpec describes one machine user the platform mints
-// at bootstrap.
-type ZitadelServiceUserSpec struct {
-	// Name is the Zitadel username for the service account.
+// LoginBrandingSpec names the declared brand of the Zitadel login pages.
+// Writing the instance label policy needs iam.policy.write, which no Zitadel
+// role below IAM_OWNER grants, so the brand is applied by bootstrap, with
+// the admin token in spec.zitadel.adminTokenRef.
+type LoginBrandingSpec struct {
+	// ConfigMap names a ConfigMap with three keys: label-policy.json (the
+	// instance label policy, in Zitadel admin API field names), logo.svg
+	// and icon.svg. The logo fills the light and the dark logo slot, and the
+	// icon fills both icon slots.
 	// +kubebuilder:validation:Required
 	// +kubebuilder:validation:MinLength=1
-	Name string `json:"name"`
+	ConfigMap string `json:"configMap"`
 
-	// Roles is the list of Zitadel role keys assigned to this user
-	// (e.g. ["IAM_USER_MANAGER"]).
-	// +kubebuilder:validation:Required
-	// +kubebuilder:validation:MinItems=1
-	Roles []string `json:"roles"`
-
-	// PATSecretRef points at the Secret + key where the minted Personal
-	// Access Token is materialised.
-	// +kubebuilder:validation:Required
-	PATSecretRef SecretKeyRef `json:"patSecretRef"`
+	// Namespace overrides the default namespace.
+	// +optional
+	Namespace string `json:"namespace,omitempty"`
 }
 
 // SystemClientSpec configures the Zitadel System API client used to
@@ -221,10 +225,12 @@ type ZitadelSpec struct {
 	// +kubebuilder:validation:Required
 	Project ZitadelProjectSpec `json:"project"`
 
-	// ServiceUsers is the list of machine users the platform mints + the
-	// roles each carries.
+	// LoginBranding is the declared brand of the login pages. The
+	// reconciler keeps the instance's active label policy and its marks
+	// equal to it, compared by content. When nil, Zitadel's stock brand
+	// stays.
 	// +optional
-	ServiceUsers []ZitadelServiceUserSpec `json:"serviceUsers,omitempty"`
+	LoginBranding *LoginBrandingSpec `json:"loginBranding,omitempty"`
 
 	// SystemClient configures the System API client used to register the
 	// cluster-internal Zitadel Service hostname as an additional trusted
