@@ -316,6 +316,39 @@ func TestBelief_ScoredQuiescentReplay(t *testing.T) {
 	}
 }
 
+// TestHostSnapshot_CarriesEvidenceDigest proves the evidence digest that gates
+// belief recompute (belief.go's BeliefSystem) is a visible part of the node's
+// projected snapshot, not just internal World bookkeeping. gibson#272: belief
+// is a first-class property on the node, and a consumer of the node (the graph
+// projection, a reviewer inspecting the frame) must be able to tell which
+// evidence a recorded belief answers for without re-deriving it from the Host
+// component directly.
+func TestHostSnapshot_CarriesEvidenceDigest(t *testing.T) {
+	e, bw := beliefEngine(PlaceholderBeliefProvider())
+
+	e.Submit(HostObserved{ScopeID: "s", Address: "10.0.0.5", OpenPorts: []int{22}})
+	settle(e, bw, 1)
+
+	snap := e.World.Snapshot()
+	if len(snap) != 1 {
+		t.Fatalf("got %d hosts, want 1", len(snap))
+	}
+
+	want := hostDigest(e.World, snap[0].ID)
+	if want == "" {
+		t.Fatalf("setup: host has no evidence digest recorded on its Host component")
+	}
+	if snap[0].EvidenceDigest != want {
+		t.Fatalf("HostSnapshot.EvidenceDigest = %q, want %q (the digest recorded on the Host component)",
+			snap[0].EvidenceDigest, want)
+	}
+
+	// Replay reproduces the digest along with the rest of the snapshot.
+	if r := Replay("t", e.Timeline); !reflect.DeepEqual(r.Snapshot(), e.World.Snapshot()) {
+		t.Fatalf("replay diverged:\n got %+v\nwant %+v", r.Snapshot(), e.World.Snapshot())
+	}
+}
+
 // TestBeliefEvents_CodecRoundTrip proves both belief events survive the durable
 // log: the Timeline persists them by kind, and a decoded event folds into the
 // World exactly as the original did.
