@@ -258,6 +258,17 @@ func (r *PlatformBootstrapReconciler) Reconcile(ctx context.Context, req ctrl.Re
 	// reconcileLoginBranding.
 	r.reconcileLoginBranding(ctx, &pb, logger)
 
+	// Step 10: Platform owner (ADR-0093 decision 6/8, hosted#201). Ordering
+	// rationale: depends on the Zitadel project (Step 1, for the org id and
+	// admin token) and the FGA model (Step 4, for the store/model ids the
+	// platform_owner tuple write needs) both being available. Placed last so
+	// a Platform owner is never provisioned against a half-bootstrapped
+	// instance.
+	if result, err := r.reconcilePlatformOwner(ctx, &pb, logger); err != nil || !result.IsZero() {
+		_ = r.statusUpdate(ctx, &pb)
+		return result, err
+	}
+
 	// Top-level Ready rollup.
 	r.aggregateReady(&pb)
 	pb.Status.ObservedGeneration = pb.Generation
@@ -641,6 +652,7 @@ func (r *PlatformBootstrapReconciler) aggregateReady(pb *gibsonv1alpha1.Platform
 		gibsonv1alpha1.ConditionPostgresBundleReady,
 		gibsonv1alpha1.ConditionTrustedDomainReady,
 		gibsonv1alpha1.ConditionLoginBrandingReady,
+		gibsonv1alpha1.ConditionPlatformOwnerReady,
 	}
 	for _, cType := range all {
 		c := findCondition(pb.Status.Conditions, cType)

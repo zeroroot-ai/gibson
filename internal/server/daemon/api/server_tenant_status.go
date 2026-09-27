@@ -133,7 +133,7 @@ func (s *DaemonServer) ReportTenantStatus(ctx context.Context, req *daemonoperat
 // a tenant on an unauthenticated-mode RPC, so even the tenant's own billing
 // portal was blinded (gibson#1339). Those reads moved to rule-mode RPCs:
 // TenantService.GetTenantBilling (own tenant) and
-// AdminTenantService.AdminGetTenantBilling (cross-tenant, platform_operator).
+// AdminTenantService.AdminGetTenantBilling (cross-tenant, platform_owner).
 //
 // zitadel_org_ready exists because the org-created edge is the signal the signup
 // poller waits on; it used to read that edge off the org SLUG being non-empty,
