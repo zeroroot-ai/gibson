@@ -83,6 +83,11 @@ type fakeIDPClient struct {
 	listSessionsErr   error
 	revokedSessionIDs []string
 
+	// ClearHumanFactors recording (hosted#206).
+	clearedFactorsUsers []string
+	clearFactorsResult  idp.ClearHumanFactorsResult
+	clearFactorsErr     error
+
 	// Signup recording. createHumanFn, when set, drives CreateHumanUser;
 	// otherwise it returns a default created user. createHumanReqs records the
 	// requests for assertion — tests assert on it to prove that a duplicate
@@ -170,6 +175,13 @@ func (f *fakeIDPClient) ListUserSessions(_ context.Context, userID string) ([]id
 func (f *fakeIDPClient) RevokeSession(_ context.Context, sessionID string) error {
 	f.revokedSessionIDs = append(f.revokedSessionIDs, sessionID)
 	return nil
+}
+func (f *fakeIDPClient) ClearHumanFactors(_ context.Context, userID string) (idp.ClearHumanFactorsResult, error) {
+	f.clearedFactorsUsers = append(f.clearedFactorsUsers, userID)
+	if f.clearFactorsErr != nil {
+		return idp.ClearHumanFactorsResult{}, f.clearFactorsErr
+	}
+	return f.clearFactorsResult, nil
 }
 func (f *fakeIDPClient) EnsureHumanUser(_ context.Context, _ idp.EnsureHumanUserRequest) (string, error) {
 	return "user-1", nil

@@ -261,6 +261,9 @@ func (f *fakeUserIdPClient) ListUserSessions(_ context.Context, _ string) ([]idp
 	return nil, nil
 }
 func (f *fakeUserIdPClient) RevokeSession(_ context.Context, _ string) error { return nil }
+func (f *fakeUserIdPClient) ClearHumanFactors(_ context.Context, _ string) (idp.ClearHumanFactorsResult, error) {
+	return idp.ClearHumanFactorsResult{}, nil
+}
 func (f *fakeUserIdPClient) EnsureHumanUser(_ context.Context, _ idp.EnsureHumanUserRequest) (string, error) {
 	return "user-1", nil
 }
