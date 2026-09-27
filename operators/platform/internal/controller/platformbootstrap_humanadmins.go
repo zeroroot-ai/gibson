@@ -49,10 +49,8 @@ const defaultFirstInstanceAdminPrefix = "zitadel-admin@"
 // record behind.
 //
 // Machine members (the bootstrap iam-admin identity, the login client, the
-// daemon, the tenant-operator) are untouched here; their role sets are the
-// other ADR-0093 slices' concern (hosted#191/#199/#200) — touching them
-// would risk revoking the very bootstrap identity this reconciler
-// authenticates as.
+// daemon, the tenant-operator) are untouched here: reconcileMachineAdminsScoped
+// owns them (hosted#207).
 //
 // Runs every reconcile, not once: nothing re-creates the default admin on
 // its own, but a human could be re-added to IAM_OWNER out of band (the
@@ -121,7 +119,7 @@ func (r *PlatformBootstrapReconciler) reconcileHumanAdminsScoped(
 	removed := 0
 	for _, m := range members {
 		if m.UserType != zitadel.ZitadelUserTypeHuman {
-			continue // machine members are the other slices' concern.
+			continue // reconcileMachineAdminsScoped owns machine members.
 		}
 		if m.UserID == pb.Status.PlatformOwnerUserID {
 			continue // keep the Platform owner.
