@@ -167,6 +167,20 @@ type RevokeUserSessionsResult struct {
 	GrantsRevoked int
 }
 
+// ClearHumanFactorsResult reports what ClearHumanFactors removed. Counts are
+// best-effort observability; callers must not treat zero as failure — a user
+// who had no second factors registered yields all-zero counts on success.
+type ClearHumanFactorsResult struct {
+	// OTPCleared is true when an authenticator-app (TOTP) factor was found
+	// and removed.
+	OTPCleared bool
+	// U2FCleared is the number of U2F security-key credentials removed.
+	U2FCleared int
+	// PasskeysCleared is the number of passwordless/passkey credentials
+	// removed.
+	PasskeysCleared int
+}
+
 // SessionInfo describes one active login session of a user, as reported by the
 // IdP. Fields the IdP does not populate are left zero (empty string / zero
 // time); a missing optional field must never fail the whole listing.

@@ -745,6 +745,104 @@ func (c *Client) RevokeSession(ctx context.Context, sessionID string) error {
 	return nil
 }
 
+// authFactorEntry is the subset of zitadel.user.v1.AuthFactor
+// (ListHumanAuthFactorsResponse.result[]) this client consumes. The oneof
+// `type` field (otp / u2f / otp_sms / otp_email) serialises as whichever
+// member is set; only otp and u2f are populated here because the login
+// policy this platform configures allows only those two second factors
+// (ADR-0093 decision 9) — otp_sms and otp_email are never enrolled, so
+// clearing them is a documented non-goal, not an oversight.
+//
+// Confirmed against the vendored Zitadel v4.18.0 proto/zitadel/user.proto:
+// AuthFactor{state, oneof type{otp AuthFactorOTP, u2f AuthFactorU2F{id,name}, ...}}.
+type authFactorEntry struct {
+	OTP *struct{} `json:"otp"`
+	U2F *struct {
+		ID string `json:"id"`
+	} `json:"u2f"`
+}
+
+// ClearHumanFactors removes every second factor and passkey Zitadel has on
+// file for userID:
+//
+//	POST   /management/v1/users/{userId}/auth_factors/_search   (list TOTP/U2F)
+//	DELETE /management/v1/users/{userId}/auth_factors/otp       (remove TOTP)
+//	DELETE /management/v1/users/{userId}/auth_factors/u2f/{id}  (remove each U2F key)
+//	POST   /management/v1/users/{userId}/passwordless/_search   (list passkeys)
+//	DELETE /management/v1/users/{userId}/passwordless/{id}      (remove each passkey)
+//
+// Deprecated-but-live Management (v1) RPCs (Zitadel v4.18.0
+// proto/zitadel/management.proto: ListHumanAuthFactors,
+// RemoveHumanAuthFactorOTP, RemoveHumanAuthFactorU2F, ListHumanPasswordless,
+// RemoveHumanPasswordless) — the same API surface every other userId-keyed
+// call in this file uses (GetUserProfile, UpdateUserProfile), so the org
+// header follows the same convention: c.cfg.OrgID, the platform admin org.
+//
+// A 404 on an individual remove is benign (the credential was already gone
+// between list and delete) and is not an error. Idempotent overall: a user
+// with no factors on file is a no-op.
+func (c *Client) ClearHumanFactors(ctx context.Context, userID string) (idp.ClearHumanFactorsResult, error) {
+	var res idp.ClearHumanFactorsResult
+	if userID == "" {
+		return res, fmt.Errorf("%w: ClearHumanFactors requires userID", idp.ErrUpstream)
+	}
+
+	var factorsResp struct {
+		Result []authFactorEntry `json:"result"`
+	}
+	factorsPath := "/management/v1/users/" + userID + "/auth_factors/_search"
+	if err := c.doRequest(ctx, http.MethodPost, factorsPath, nil, c.cfg.OrgID, &factorsResp); err != nil {
+		return res, mapError(err, "ClearHumanFactors:list_auth_factors")
+	}
+	for _, f := range factorsResp.Result {
+		switch {
+		case f.OTP != nil:
+			path := "/management/v1/users/" + userID + "/auth_factors/otp"
+			if err := c.doRequest(ctx, http.MethodDelete, path, nil, c.cfg.OrgID, nil); err != nil {
+				if mapped := mapError(err, "ClearHumanFactors:remove_otp"); !errors.Is(mapped, idp.ErrNotFound) {
+					return res, mapped
+				}
+			}
+			res.OTPCleared = true
+		case f.U2F != nil:
+			if f.U2F.ID == "" {
+				continue
+			}
+			path := "/management/v1/users/" + userID + "/auth_factors/u2f/" + url.PathEscape(f.U2F.ID)
+			if err := c.doRequest(ctx, http.MethodDelete, path, nil, c.cfg.OrgID, nil); err != nil {
+				if mapped := mapError(err, "ClearHumanFactors:remove_u2f"); !errors.Is(mapped, idp.ErrNotFound) {
+					return res, mapped
+				}
+			}
+			res.U2FCleared++
+		}
+	}
+
+	var passkeysResp struct {
+		Result []struct {
+			ID string `json:"id"`
+		} `json:"result"`
+	}
+	passkeysPath := "/management/v1/users/" + userID + "/passwordless/_search"
+	if err := c.doRequest(ctx, http.MethodPost, passkeysPath, nil, c.cfg.OrgID, &passkeysResp); err != nil {
+		return res, mapError(err, "ClearHumanFactors:list_passwordless")
+	}
+	for _, pk := range passkeysResp.Result {
+		if pk.ID == "" {
+			continue
+		}
+		path := "/management/v1/users/" + userID + "/passwordless/" + url.PathEscape(pk.ID)
+		if err := c.doRequest(ctx, http.MethodDelete, path, nil, c.cfg.OrgID, nil); err != nil {
+			if mapped := mapError(err, "ClearHumanFactors:remove_passwordless"); !errors.Is(mapped, idp.ErrNotFound) {
+				return res, mapped
+			}
+		}
+		res.PasskeysCleared++
+	}
+
+	return res, nil
+}
+
 // ---------------------------------------------------------------------------
 // HTTP helpers
 // ---------------------------------------------------------------------------

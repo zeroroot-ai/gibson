@@ -3283,6 +3283,16 @@ var Registry = map[string]Entry{
 		Unauthenticated:   false,
 		Self:              false,
 	},
+	"/gibson.tenant.v1.UserService/ResetUserMFA": {
+		Method:            "/gibson.tenant.v1.UserService/ResetUserMFA",
+		Service:           "gibson.tenant.v1.UserService",
+		Relation:          "admin",
+		ObjectType:        "tenant",
+		ObjectDeriver:     "tenant_from_identity",
+		AllowedIdentities: IdentityUser,
+		Unauthenticated:   false,
+		Self:              false,
+	},
 	"/gibson.tenant.v1.UserService/ResetUserOnboardingState": {
 		Method:            "/gibson.tenant.v1.UserService/ResetUserOnboardingState",
 		Service:           "gibson.tenant.v1.UserService",

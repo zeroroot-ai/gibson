@@ -138,6 +138,16 @@ type AdminClient interface {
 	// session belongs to the acting principal before calling.
 	RevokeSession(ctx context.Context, sessionID string) error
 
+	// ClearHumanFactors removes every second factor and passkey the IdP has
+	// on file for userID: authenticator app (TOTP/OTP), U2F security keys,
+	// and passwordless/passkey credentials. It does NOT touch the user's
+	// password. Used by UserService.ResetUserMFA (hosted#206) so that,
+	// combined with RevokeUserSessions, a lost-device member is forced to
+	// re-enroll from a clean state on their next sign-in rather than being
+	// permanently locked out. Idempotent: a user with no factors on file is
+	// a no-op, not an error.
+	ClearHumanFactors(ctx context.Context, userID string) (ClearHumanFactorsResult, error)
+
 	// Close releases any resources held by the client (HTTP connections, etc.).
 	Close() error
 }

@@ -122,6 +122,9 @@ func (c *membersIdPClient) ListUserSessions(_ context.Context, _ string) ([]idp.
 	return nil, nil
 }
 func (c *membersIdPClient) RevokeSession(_ context.Context, _ string) error { return nil }
+func (c *membersIdPClient) ClearHumanFactors(_ context.Context, _ string) (idp.ClearHumanFactorsResult, error) {
+	return idp.ClearHumanFactorsResult{}, nil
+}
 func (c *membersIdPClient) EnsureHumanUser(_ context.Context, req idp.EnsureHumanUserRequest) (string, error) {
 	c.ensuredEmails = append(c.ensuredEmails, req.Email)
 	if c.ensureErr != nil {

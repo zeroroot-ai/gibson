@@ -3270,6 +3270,16 @@ export const AuthRegistry: Record<string, AuthEntry> = {
     unauthenticated: false,
     self: false,
   },
+  "/gibson.tenant.v1.UserService/ResetUserMFA": {
+    method: "/gibson.tenant.v1.UserService/ResetUserMFA",
+    service: "gibson.tenant.v1.UserService",
+    relation: "admin",
+    objectType: "tenant",
+    objectDeriver: "tenant_from_identity",
+    allowedIdentities: IdentityClass.USER,
+    unauthenticated: false,
+    self: false,
+  },
   "/gibson.tenant.v1.UserService/ResetUserOnboardingState": {
     method: "/gibson.tenant.v1.UserService/ResetUserOnboardingState",
     service: "gibson.tenant.v1.UserService",

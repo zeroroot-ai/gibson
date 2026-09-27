@@ -86,7 +86,10 @@ func (s *stubIDP) ListUserSessions(_ context.Context, _ string) ([]idp.SessionIn
 	return nil, nil
 }
 func (s *stubIDP) RevokeSession(_ context.Context, _ string) error { return nil }
-func (s *stubIDP) Close() error                                    { return nil }
+func (s *stubIDP) ClearHumanFactors(_ context.Context, _ string) (idp.ClearHumanFactorsResult, error) {
+	return idp.ClearHumanFactorsResult{}, nil
+}
+func (s *stubIDP) Close() error { return nil }
 
 func adapterTestCtx(t *testing.T) (context.Context, auth.TenantID) {
 	t.Helper()
