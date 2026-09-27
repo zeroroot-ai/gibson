@@ -85,10 +85,11 @@ func (r *PlatformBootstrapReconciler) reconcileZitadelSMTP(ctx context.Context, 
 	hashHex := smtpSettingsHash(cfg)
 	zc := r.ZitadelFactory(pb.Spec.Zitadel.Issuer, pat)
 
-	id, state, found, resolveOK, result, err := r.resolveSMTPProvider(ctx, zc, pb)
+	lookup, resolveOK, result, err := r.resolveSMTPProvider(ctx, zc, pb)
 	if !resolveOK {
 		return result, err
 	}
+	id, state, found := lookup.id, lookup.state, lookup.found
 
 	created := false
 	switch {
@@ -184,6 +185,16 @@ func smtpSettingsHash(cfg zitadel.SMTPProviderConfig) string {
 	return hex.EncodeToString(sum[:])
 }
 
+// smtpProviderLookup is resolveSMTPProvider's result: found reports whether
+// an existing provider was located, in which case id and state are
+// populated. A zero value (found=false, id="") means "no provider found by
+// either path — create one," the genuinely-new-install case.
+type smtpProviderLookup struct {
+	id    string
+	state zitadel.SMTPProviderState
+	found bool
+}
+
 // resolveSMTPProvider finds the id + live state of the SMTP email provider
 // this reconciler owns. It tries the persisted status.smtpProviderID first
 // (the fast path on every steady-state reconcile), falling back to a
@@ -191,26 +202,28 @@ func smtpSettingsHash(cfg zitadel.SMTPProviderConfig) string {
 // wiped by CR recreation — so a provider already applied is never re-created
 // under a second id for the same mail settings.
 //
-// found reports whether an existing provider was located (state is then
-// populated); ok=false means the caller must return (result, err)
-// immediately (a condition was already set on pb) — the same contract
+// ok=false means the caller must return (result, err) immediately (a
+// condition was already set on pb) — the same contract
 // sendPlatformOwnerSetupLink documents in platformbootstrap_platformowner.go
-// for the identical reason: Go has no way to make (ctrl.Result{}, nil) mean
-// two different things.
+// for the identical reason: a PERMANENT Zitadel error deliberately reports
+// (ctrl.Result{}, nil) — no requeue — which is indistinguishable from
+// "proceed" by result/err alone, so ok carries that meaning explicitly
+// instead. ok=true's lookup is valid whether or not a provider was found.
 func (r *PlatformBootstrapReconciler) resolveSMTPProvider(
 	ctx context.Context,
 	zc zitadel.EmailProviderClient,
 	pb *gibsonv1alpha1.PlatformBootstrap,
-) (id string, state zitadel.SMTPProviderState, found, ok bool, result ctrl.Result, err error) {
-	if id = pb.Status.SMTPProviderID; id != "" {
+) (lookup smtpProviderLookup, ok bool, result ctrl.Result, err error) {
+	if id := pb.Status.SMTPProviderID; id != "" {
 		st, gerr := zc.GetSMTPEmailProviderState(ctx, id)
 		switch {
 		case gerr == nil:
-			return id, st, true, true, ctrl.Result{}, nil
+			return smtpProviderLookup{id: id, state: st, found: true}, true, ctrl.Result{}, nil
 		case zitadel.IsNotFound(gerr):
-			id = "" // removed out from under the operator; fall through
+			// Removed out from under the operator; fall through to the
+			// description search below rather than recreate blindly.
 		default:
-			return "", zitadel.SMTPProviderState{}, false, false, smtpZitadelErr(pb, "GetSMTPEmailProviderState", gerr), nil
+			return smtpProviderLookup{}, false, smtpZitadelErr(pb, "GetSMTPEmailProviderState", gerr), nil
 		}
 	}
 
@@ -219,13 +232,13 @@ func (r *PlatformBootstrapReconciler) resolveSMTPProvider(
 	case ferr == nil:
 		st, gerr := zc.GetSMTPEmailProviderState(ctx, foundID)
 		if gerr != nil {
-			return "", zitadel.SMTPProviderState{}, false, false, smtpZitadelErr(pb, "GetSMTPEmailProviderState", gerr), nil
+			return smtpProviderLookup{}, false, smtpZitadelErr(pb, "GetSMTPEmailProviderState", gerr), nil
 		}
-		return foundID, st, true, true, ctrl.Result{}, nil
+		return smtpProviderLookup{id: foundID, state: st, found: true}, true, ctrl.Result{}, nil
 	case zitadel.IsNotFound(ferr):
-		return "", zitadel.SMTPProviderState{}, false, true, ctrl.Result{}, nil
+		return smtpProviderLookup{}, true, ctrl.Result{}, nil
 	default:
-		return "", zitadel.SMTPProviderState{}, false, false, smtpZitadelErr(pb, "FindSMTPEmailProviderByDescription", ferr), nil
+		return smtpProviderLookup{}, false, smtpZitadelErr(pb, "FindSMTPEmailProviderByDescription", ferr), nil
 	}
 }
 

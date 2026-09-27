@@ -98,60 +98,79 @@ type smtpMux struct {
 	counters       smtpMuxCounters
 }
 
-func (m *smtpMux) handler() http.HandlerFunc {
-	return func(w http.ResponseWriter, r *http.Request) {
-		switch {
-		case r.Method == http.MethodGet && r.URL.Path == "/admin/v1/email/"+m.existingID && m.existingID != "":
-			atomic.AddInt32(&m.counters.getByID, 1)
-			if m.getByIDStatus != 0 {
-				w.WriteHeader(m.getByIDStatus)
-				return
-			}
-			smtp := "null"
-			if m.existingSMTP != "" {
-				smtp = m.existingSMTP
-			}
-			_, _ = w.Write([]byte(`{"config":{"id":"` + m.existingID + `","state":"` + m.existingState + `","smtp":` + smtp + `}}`))
-		case r.Method == http.MethodPost && r.URL.Path == "/admin/v1/email/_search":
-			atomic.AddInt32(&m.counters.search, 1)
-			if m.searchStatus != 0 {
-				w.WriteHeader(m.searchStatus)
-				return
-			}
-			if m.existingID == "" {
-				_, _ = w.Write([]byte(`{"result":[]}`))
-				return
-			}
-			_, _ = w.Write([]byte(`{"result":[{"id":"` + m.existingID + `","description":"gibson-platform-operator"}]}`))
-		case r.Method == http.MethodPost && r.URL.Path == "/admin/v1/email/smtp":
-			atomic.AddInt32(&m.counters.add, 1)
-			if m.addStatus != 0 {
-				w.WriteHeader(m.addStatus)
-				return
-			}
-			body := m.addBody
-			if body == "" {
-				body = `{"id":"NEW-PROVIDER"}`
-			}
-			_, _ = w.Write([]byte(body))
-		case r.Method == http.MethodPut && r.URL.Path == "/admin/v1/email/smtp/"+m.existingID:
-			atomic.AddInt32(&m.counters.update, 1)
-			if m.updateStatus != 0 {
-				w.WriteHeader(m.updateStatus)
-				return
-			}
-			_, _ = w.Write([]byte(`{"details":{}}`))
-		case r.Method == http.MethodPost && (r.URL.Path == "/admin/v1/email/"+m.existingID+"/_activate" || r.URL.Path == "/admin/v1/email/NEW-PROVIDER/_activate"):
-			atomic.AddInt32(&m.counters.activate, 1)
-			if m.activateStatus != 0 {
-				w.WriteHeader(m.activateStatus)
-				return
-			}
-			_, _ = w.Write([]byte(`{"details":{}}`))
-		default:
-			w.WriteHeader(http.StatusNotFound)
-		}
+// handler builds a *http.ServeMux with one route per endpoint, registered
+// against the concrete paths m.existingID resolves to (known up front, since
+// every smtpMux is fully configured before its test server starts). This
+// keeps each route's logic in its own small method instead of one large
+// branch, matching the shape http.ServeMux itself expects.
+func (m *smtpMux) handler() http.Handler {
+	mux := http.NewServeMux()
+	mux.HandleFunc("POST /admin/v1/email/_search", m.handleSearch)
+	mux.HandleFunc("POST /admin/v1/email/smtp", m.handleAdd)
+	if m.existingID != "" {
+		mux.HandleFunc("GET /admin/v1/email/"+m.existingID, m.handleGetByID)
+		mux.HandleFunc("PUT /admin/v1/email/smtp/"+m.existingID, m.handleUpdate)
+		mux.HandleFunc("POST /admin/v1/email/"+m.existingID+"/_activate", m.handleActivate)
 	}
+	mux.HandleFunc("POST /admin/v1/email/NEW-PROVIDER/_activate", m.handleActivate)
+	return mux
+}
+
+func (m *smtpMux) handleGetByID(w http.ResponseWriter, _ *http.Request) {
+	atomic.AddInt32(&m.counters.getByID, 1)
+	if m.getByIDStatus != 0 {
+		w.WriteHeader(m.getByIDStatus)
+		return
+	}
+	smtp := "null"
+	if m.existingSMTP != "" {
+		smtp = m.existingSMTP
+	}
+	_, _ = w.Write([]byte(`{"config":{"id":"` + m.existingID + `","state":"` + m.existingState + `","smtp":` + smtp + `}}`))
+}
+
+func (m *smtpMux) handleSearch(w http.ResponseWriter, _ *http.Request) {
+	atomic.AddInt32(&m.counters.search, 1)
+	if m.searchStatus != 0 {
+		w.WriteHeader(m.searchStatus)
+		return
+	}
+	if m.existingID == "" {
+		_, _ = w.Write([]byte(`{"result":[]}`))
+		return
+	}
+	_, _ = w.Write([]byte(`{"result":[{"id":"` + m.existingID + `","description":"gibson-platform-operator"}]}`))
+}
+
+func (m *smtpMux) handleAdd(w http.ResponseWriter, _ *http.Request) {
+	atomic.AddInt32(&m.counters.add, 1)
+	if m.addStatus != 0 {
+		w.WriteHeader(m.addStatus)
+		return
+	}
+	body := m.addBody
+	if body == "" {
+		body = `{"id":"NEW-PROVIDER"}`
+	}
+	_, _ = w.Write([]byte(body))
+}
+
+func (m *smtpMux) handleUpdate(w http.ResponseWriter, _ *http.Request) {
+	atomic.AddInt32(&m.counters.update, 1)
+	if m.updateStatus != 0 {
+		w.WriteHeader(m.updateStatus)
+		return
+	}
+	_, _ = w.Write([]byte(`{"details":{}}`))
+}
+
+func (m *smtpMux) handleActivate(w http.ResponseWriter, _ *http.Request) {
+	atomic.AddInt32(&m.counters.activate, 1)
+	if m.activateStatus != 0 {
+		w.WriteHeader(m.activateStatus)
+		return
+	}
+	_, _ = w.Write([]byte(`{"details":{}}`))
 }
 
 func TestReconcileZitadelSMTP_NotConfigured_Skips(t *testing.T) {
@@ -360,7 +379,7 @@ func TestReconcileZitadelSMTP_StaleIDRecoversByDescription(t *testing.T) {
 	mux.HandleFunc("/admin/v1/email/STALE-ID", func(w http.ResponseWriter, _ *http.Request) {
 		w.WriteHeader(http.StatusNotFound)
 	})
-	mux.HandleFunc("/", m.handler())
+	mux.Handle("/", m.handler())
 	srv := httptest.NewServer(mux)
 	t.Cleanup(srv.Close)
 	r := newSMTPReconciler(t, srv.URL, adminPATSecret(), smtpCredsSecret())
