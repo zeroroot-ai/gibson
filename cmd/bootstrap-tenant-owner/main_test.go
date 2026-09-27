@@ -246,7 +246,7 @@ func TestRunBootstrap_HappyPath_Emailed_CreatesUserSendsLinkAssignsOwner(t *test
 	fgaC := &fakeFgaClient{checkResult: false}
 	roles := &fakeTenantRoleAssigner{}
 
-	result, err := runBootstrap(context.Background(), "acme", "owner@acme.example", "https://app.example.com/", "https://auth.example.com", false, tenants, idpC, fgaC, roles)
+	result, err := runBootstrap(context.Background(), "acme", "owner@acme.example", "https://app.example.com/", "auth.example.com", false, tenants, idpC, fgaC, roles)
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
@@ -282,7 +282,7 @@ func TestRunBootstrap_HappyPath_Emailed_CreatesUserSendsLinkAssignsOwner(t *test
 		t.Errorf("invite userID = %q, want user-owner-1", idpC.inviteCalls[0].UserID)
 	}
 	if !strings.HasPrefix(idpC.inviteCalls[0].URLTemplate, "https://auth.example.com/") {
-		t.Errorf("invite urlTemplate = %q, want it built from the issuer", idpC.inviteCalls[0].URLTemplate)
+		t.Errorf("invite urlTemplate = %q, want it built from the public host (ZITADEL_EXTERNAL_DOMAIN), never the issuer", idpC.inviteCalls[0].URLTemplate)
 	}
 
 	// The tenant role Syncer assigned Owner for the right tenant and user
@@ -302,7 +302,7 @@ func TestRunBootstrap_HappyPath_Offline_ReturnsRenderedLink(t *testing.T) {
 	fgaC := &fakeFgaClient{checkResult: false}
 	roles := &fakeTenantRoleAssigner{}
 
-	result, err := runBootstrap(context.Background(), "acme", "owner@acme.example", "", "https://auth.example.com/", true, tenants, idpC, fgaC, roles)
+	result, err := runBootstrap(context.Background(), "acme", "owner@acme.example", "", "auth.example.com/", true, tenants, idpC, fgaC, roles)
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
@@ -558,7 +558,7 @@ func TestRunWithDeps_HappyPath_ReturnsZero_PrintsSignInPath(t *testing.T) {
 		context.Background(),
 		discardLogger(),
 		&stdout,
-		"acme", "owner@acme.example", "https://app.example.com", "https://auth.example.com",
+		"acme", "owner@acme.example", "https://app.example.com", "auth.example.com",
 		false,
 		"", "setup-link", "gibson",
 		happyKubeLoader,
@@ -746,7 +746,7 @@ func TestRunWithDeps_Offline_WritesSetupLinkSecret(t *testing.T) {
 		context.Background(),
 		discardLogger(),
 		&stdout,
-		"acme", "owner@acme.example", "", "https://auth.example.com",
+		"acme", "owner@acme.example", "", "auth.example.com",
 		true,
 		"acme-owner-setup", "setup-link", "gibson",
 		happyKubeLoader,
@@ -778,7 +778,7 @@ func TestRunWithDeps_Offline_SetupLinkWriteFailureIsNonFatal(t *testing.T) {
 		context.Background(),
 		discardLogger(),
 		&stdout,
-		"acme", "owner@acme.example", "", "https://auth.example.com",
+		"acme", "owner@acme.example", "", "auth.example.com",
 		true,
 		"acme-owner-setup", "setup-link", "gibson",
 		happyKubeLoader,
@@ -1261,15 +1261,29 @@ func TestOwnerProfileName(t *testing.T) {
 }
 
 func TestSetupLinkURLTemplate_TrimsTrailingSlash(t *testing.T) {
-	got := setupLinkURLTemplate("https://auth.example.com/")
+	got := setupLinkURLTemplate("auth.example.com/")
 	want := "https://auth.example.com/ui/v2/login/invite?userID={{.UserID}}&code={{.Code}}&organization={{.OrgID}}"
 	if got != want {
 		t.Errorf("got %q, want %q", got, want)
 	}
 }
 
+// gibson#254 fixed the identical bug in the Platform owner's setup link: it
+// was built from the in-cluster issuer, which no browser can reach. This
+// pins that the link always names the public host with an explicit scheme,
+// from a bare host with no scheme of its own (ZITADEL_EXTERNAL_DOMAIN).
+func TestSetupLinkURLTemplate_AlwaysStartsWithHTTPSPublicHost(t *testing.T) {
+	got := setupLinkURLTemplate("app.selfhosted.example.com")
+	if !strings.HasPrefix(got, "https://app.selfhosted.example.com/") {
+		t.Fatalf("got %q, want it to start with https://app.selfhosted.example.com/", got)
+	}
+	if strings.Contains(got, "https://https://") {
+		t.Fatalf("got %q, doubled scheme — externalDomain must never already carry one", got)
+	}
+}
+
 func TestRenderSetupLink_SubstitutesAllThreePlaceholders(t *testing.T) {
-	tmpl := setupLinkURLTemplate("https://auth.example.com")
+	tmpl := setupLinkURLTemplate("auth.example.com")
 	got := renderSetupLink(tmpl, "user-1", "org-1", "code-1")
 	want := "https://auth.example.com/ui/v2/login/invite?userID=user-1&code=code-1&organization=org-1"
 	if got != want {

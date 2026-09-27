@@ -29,6 +29,10 @@
 //     -offline-setup is given, in which case the raw code is turned into a
 //     link and written to -setup-secret instead — the exact reuse of the
 //     Platform owner's setup-link mechanism, never a second one (ADR-0027).
+//     The link always names ZITADEL_EXTERNAL_DOMAIN, the public host a
+//     browser can reach — never GIBSON_IDP_ADMIN_ISSUER or ZITADEL_URL,
+//     which name the in-cluster Service on some profiles (gibson#254 fixed
+//     the identical bug in the Platform owner's link).
 //  4. Calls tenantrole.Syncer.Assign with role Owner (ADR-0093) — it writes
 //     the Owner grant on the gibson Zitadel project and copies it into FGA as
 //     (user:<owner-id>, owner, tenant:<tenant-id>) — the top of the tenant
@@ -237,6 +241,16 @@ func run() int {
 		return 1
 	}
 
+	// The setup link is for a person's browser, so it names the public host
+	// (gibson#254 fixed the identical bug in the Platform owner's link).
+	// zitadelconn.FromEnv is the one helper that resolves ZITADEL_EXTERNAL_DOMAIN
+	// — the same helper resolveIdpEnvConfig uses for the same env vars.
+	endpoint, err := zitadelconn.FromEnv()
+	if err != nil {
+		logger.Error("zitadel endpoint", "err", err)
+		return 1
+	}
+
 	ctx := context.Background()
 	return runWithDeps(
 		ctx,
@@ -245,7 +259,7 @@ func run() int {
 		flags.TenantID,
 		flags.OwnerEmail,
 		os.Getenv("GIBSON_PUBLIC_URL"),
-		os.Getenv("GIBSON_IDP_ADMIN_ISSUER"),
+		endpoint.Host(),
 		flags.OfflineSetup,
 		flags.SetupSecret,
 		flags.SetupSecretKey,
@@ -490,7 +504,7 @@ func runWithDeps(
 	ctx context.Context,
 	logger *slog.Logger,
 	stdout io.Writer,
-	tenantID, ownerEmail, publicURL, issuerURL string,
+	tenantID, ownerEmail, publicURL, externalDomain string,
 	offlineSetup bool,
 	setupSecret, setupSecretKey, setupSecretNamespace string,
 	kubeLoader kubeConfigLoader,
@@ -537,7 +551,7 @@ func runWithDeps(
 		return 1
 	}
 
-	result, err := runBootstrap(ctx, tenantID, ownerEmail, publicURL, issuerURL, offlineSetup, tenantGetter, idpC, fgaC, roles)
+	result, err := runBootstrap(ctx, tenantID, ownerEmail, publicURL, externalDomain, offlineSetup, tenantGetter, idpC, fgaC, roles)
 	if err == nil && result.SetupLink != "" && setupSecret != "" {
 		// Job logs are not a credential store: they are readable by anyone with
 		// pod-log access and they age out. Writing a Secret gives the operator
@@ -613,7 +627,7 @@ func runWithDeps(
 // retry repeats both steps (see the package doc comment).
 func runBootstrap(
 	ctx context.Context,
-	tenantID, ownerEmail, publicURL, issuerURL string,
+	tenantID, ownerEmail, publicURL, externalDomain string,
 	offlineSetup bool,
 	tenants TenantGetter,
 	idpC idpClient,
@@ -669,7 +683,7 @@ func runBootstrap(
 	// First time this tenant gets its Owner: mint the one-time setup link,
 	// reusing the exact mechanism the Platform owner uses (ADR-0093
 	// decision 8, hosted#201/#202) — never a second one (ADR-0027).
-	urlTemplate := setupLinkURLTemplate(issuerURL)
+	urlTemplate := setupLinkURLTemplate(externalDomain)
 	if !offlineSetup {
 		if _, ierr := idpC.CreateSetupInviteCode(ctx, userID, urlTemplate, true); ierr != nil {
 			return BootstrapResult{}, fmt.Errorf("create setup invite code: %w", ierr)
@@ -699,8 +713,13 @@ func runBootstrap(
 // field) — the same shape the Platform owner's setup link uses (ADR-0093,
 // hosted#201), so the emitted link is identical whether Zitadel emails it or
 // this binary embeds it in the offline Secret.
-func setupLinkURLTemplate(issuer string) string {
-	return strings.TrimRight(issuer, "/") + "/ui/v2/login/invite?userID={{.UserID}}&code={{.Code}}&organization={{.OrgID}}"
+//
+// externalDomain is the public host a browser reaches (ZITADEL_EXTERNAL_DOMAIN,
+// a port included when the profile has one) — never GIBSON_IDP_ADMIN_ISSUER
+// or ZITADEL_URL, both of which name the in-cluster Service on some profiles.
+// gibson#254 fixed the identical bug in the Platform owner's setup link.
+func setupLinkURLTemplate(externalDomain string) string {
+	return "https://" + strings.TrimRight(externalDomain, "/") + "/ui/v2/login/invite?userID={{.UserID}}&code={{.Code}}&organization={{.OrgID}}"
 }
 
 // renderSetupLink substitutes the same three placeholders setupLinkURLTemplate
