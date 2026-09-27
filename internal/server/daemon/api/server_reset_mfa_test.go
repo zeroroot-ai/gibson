@@ -6,6 +6,7 @@ package api
 import (
 	"context"
 	"log/slog"
+	"strings"
 	"testing"
 
 	"google.golang.org/grpc/codes"
@@ -283,5 +284,37 @@ func TestResetUserMFA_MailerSendFails(t *testing.T) {
 	}
 	if resp.GetNotified() {
 		t.Error("expected Notified=false when the mail transport fails")
+	}
+}
+
+// TestResetUserMFA_SignInLinkUsesPublicAppURLNeverIssuer guards against the
+// exact class of bug found and fixed in gibson#254 for the Platform-owner
+// setup link (built there from spec.zitadel.issuer, the in-cluster URL, so
+// the emailed link pointed nowhere a browser could reach). ResetUserMFA's
+// link must come from s.appURL (GIBSON_APP_URL, the public product-surface
+// origin) and must never be influenced by gibsonPublicURL (the API-plane
+// origin) or any Zitadel issuer value, neither of which this handler even
+// has a field path to reach.
+func TestResetUserMFA_SignInLinkUsesPublicAppURLNeverIssuer(t *testing.T) {
+	az := newFakeAuthorizer().allow("user:bob", "member", "tenant:acme")
+	idpC := &mfaResetTestIDP{fakeIDPClient: &fakeIDPClient{}, profile: &idp.UserProfile{Email: "bob@example.com"}}
+	mailerC := &fakeMFAResetMailer{}
+	srv := resetMFAServer(az, idpC, mailerC)
+	// Deliberately set the API-plane origin to a value that would produce an
+	// unreachable link if it ever leaked into the sign-in URL, so this test
+	// fails loudly if a future edit reintroduces that bug.
+	srv.gibsonPublicURL = "https://internal-cluster-only.invalid"
+	ctx := ctxWithTenantAdmin(context.Background(), "acme", "admin1")
+
+	if _, err := srv.ResetUserMFA(ctx, &tenantv1.ResetUserMFARequest{TargetUserId: "bob"}); err != nil {
+		t.Fatalf("ResetUserMFA: %v", err)
+	}
+	if len(mailerC.sent) != 1 {
+		t.Fatalf("expected one email sent, got %d", len(mailerC.sent))
+	}
+	const wantPrefix = "https://app.example.com/"
+	got := mailerC.sent[0].SignInURL
+	if !strings.HasPrefix(got, wantPrefix) {
+		t.Errorf("SignInURL = %q, want it to start with the public app URL %q, never the internal/API-plane origin", got, wantPrefix)
 	}
 }
