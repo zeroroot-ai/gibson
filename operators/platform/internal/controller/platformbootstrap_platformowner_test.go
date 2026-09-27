@@ -356,6 +356,10 @@ func TestReconcilePlatformOwner_SameGeneration_NoNewLink(t *testing.T) {
 	pb.Spec.PlatformOwner.SetupGeneration = 2
 	pb.Status.PlatformOwnerUserID = "UID-OWNER"
 	pb.Status.ObservedSetupGeneration = 2
+	// This fixture represents a fully-settled steady state: the last send
+	// already happened under an active SMTP provider, so the hosted#189
+	// resend-once repair (see reconcilePlatformOwner) must not re-trigger.
+	pb.Status.PlatformOwnerLinkConfirmedSMTPActive = true
 
 	if _, err := r.reconcilePlatformOwner(context.Background(), pb, logr.Discard()); err != nil {
 		t.Fatalf("reconcilePlatformOwner: %v", err)
@@ -366,6 +370,53 @@ func TestReconcilePlatformOwner_SameGeneration_NoNewLink(t *testing.T) {
 	cond := findCondition(pb.Status.Conditions, gibsonv1alpha1.ConditionPlatformOwnerReady)
 	if cond == nil || cond.Status != metav1.ConditionTrue {
 		t.Fatalf("condition = %+v, want True", cond)
+	}
+}
+
+// TestReconcilePlatformOwner_ResendsOnceWhenSMTPWasNeverConfirmedActive pins
+// the hosted#189 fix: a Platform owner already provisioned at the current
+// setupGeneration, but whose status predates PlatformOwnerLinkConfirmedSMTPActive
+// (so it defaults to false), gets exactly one resent link — the repair for
+// an install whose very first link was "emailed" while Zitadel had no SMTP
+// provider at all, so nobody ever received it. A second reconcile, now that
+// the field is true, sends no further link.
+func TestReconcilePlatformOwner_ResendsOnceWhenSMTPWasNeverConfirmedActive(t *testing.T) {
+	var inviteCalls int32
+	zsrv, _ := zitadelOwnerMux(t, true /* AddHumanUser answers already-exists */, "")
+	origHandler := zsrv.Config.Handler
+	zsrv.Config.Handler = http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.URL.Path == "/zitadel.user.v2.UserService/CreateInviteCode" {
+			inviteCalls++
+		}
+		origHandler.ServeHTTP(w, r)
+	})
+	fgaSrv := newFakeFGAServer()
+	t.Cleanup(fgaSrv.Close)
+	r := newOwnerTestReconciler(t, zsrv.URL, fgaSrv.URL, adminPATSecret(), fgaStoreSecret())
+	pb := basePlatformOwnerCR(zsrv.URL)
+	pb.Spec.PlatformOwner.Email = "owner@example.com"
+	pb.Status.PlatformOwnerUserID = "UID-OWNER"
+	pb.Status.ObservedSetupGeneration = 0 // same as spec.platformOwner.setupGeneration (default 0)
+	// PlatformOwnerLinkConfirmedSMTPActive left at its zero value (false):
+	// exactly the shape of a CR persisted before this field existed.
+
+	if _, err := r.reconcilePlatformOwner(context.Background(), pb, logr.Discard()); err != nil {
+		t.Fatalf("reconcilePlatformOwner: %v", err)
+	}
+	if inviteCalls != 1 {
+		t.Fatalf("CreateInviteCode called %d times, want 1 (unconfirmed SMTP must resend once)", inviteCalls)
+	}
+	if !pb.Status.PlatformOwnerLinkConfirmedSMTPActive {
+		t.Fatal("PlatformOwnerLinkConfirmedSMTPActive = false, want true after a successful online send")
+	}
+
+	// A second reconcile at the same generation, now that the field is
+	// true, must not resend.
+	if _, err := r.reconcilePlatformOwner(context.Background(), pb, logr.Discard()); err != nil {
+		t.Fatalf("reconcilePlatformOwner (second): %v", err)
+	}
+	if inviteCalls != 1 {
+		t.Fatalf("CreateInviteCode called %d times after a second reconcile, want still 1", inviteCalls)
 	}
 }
 

@@ -26,6 +26,10 @@ type Client interface {
 	// login pages' brand). See label_policy.go.
 	LabelPolicyClient
 
+	// EmailProviderClient reads and writes the instance's one SMTP email
+	// provider (hosted#189). See email_provider.go.
+	EmailProviderClient
+
 	// EnsureProject creates the Zitadel project with the given name and
 	// returns its ID. If the project already exists, the existing ID is
 	// returned. Idempotent.

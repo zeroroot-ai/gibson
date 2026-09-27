@@ -258,6 +258,16 @@ func (r *PlatformBootstrapReconciler) Reconcile(ctx context.Context, req ctrl.Re
 	// reconcileLoginBranding.
 	r.reconcileLoginBranding(ctx, &pb, logger)
 
+	// Step 9b: the instance's one SMTP email provider (hosted#189). Placed
+	// before Step 10 deliberately: reconcilePlatformOwner's mailed setup
+	// link is only trustworthy once this step has confirmed (or repaired)
+	// an active SMTP provider in the same pass, so a fresh Platform owner is
+	// never told "emailed" while nothing can actually deliver the mail.
+	if result, err := r.reconcileZitadelSMTP(ctx, &pb, logger); err != nil || !result.IsZero() {
+		_ = r.statusUpdate(ctx, &pb)
+		return result, err
+	}
+
 	// Step 10: Platform owner (ADR-0093 decision 6/8, hosted#201). Ordering
 	// rationale: depends on the Zitadel project (Step 1, for the org id and
 	// admin token) and the FGA model (Step 4, for the store/model ids the
@@ -652,6 +662,7 @@ func (r *PlatformBootstrapReconciler) aggregateReady(pb *gibsonv1alpha1.Platform
 		gibsonv1alpha1.ConditionPostgresBundleReady,
 		gibsonv1alpha1.ConditionTrustedDomainReady,
 		gibsonv1alpha1.ConditionLoginBrandingReady,
+		gibsonv1alpha1.ConditionSMTPProviderReady,
 		gibsonv1alpha1.ConditionPlatformOwnerReady,
 	}
 	for _, cType := range all {
