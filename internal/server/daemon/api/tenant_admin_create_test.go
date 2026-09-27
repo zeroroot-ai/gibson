@@ -187,7 +187,7 @@ func (f *fakeIDPClient) EnsureHumanUser(_ context.Context, _ idp.EnsureHumanUser
 	return "user-1", nil
 }
 func (f *fakeIDPClient) CreateSetupLink(_ context.Context, _, userID, appURL string) (string, error) {
-	return appURL + "/ui/v2/login/invite?userID=" + userID, nil
+	return appURL + "/ui/v2/login/verify?invite=true&userId=" + userID, nil
 }
 func (f *fakeIDPClient) SetHumanPassword(context.Context, idp.SetHumanPasswordRequest) error {
 	return nil

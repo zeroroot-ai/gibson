@@ -309,7 +309,7 @@ func TestRunBootstrap_HappyPath_Offline_ReturnsRenderedLink(t *testing.T) {
 	if len(idpC.inviteCalls) != 1 || idpC.inviteCalls[0].Send {
 		t.Fatalf("expected 1 CreateSetupInviteCode call with send=false, got %+v", idpC.inviteCalls)
 	}
-	wantLink := "https://auth.example.com/ui/v2/login/invite?userID=user-owner-1&code=raw-code-xyz&organization=org-123"
+	wantLink := "https://auth.example.com/ui/v2/login/verify?userId=user-owner-1&code=raw-code-xyz&invite=true&organization=org-123"
 	if result.SetupLink != wantLink {
 		t.Errorf("SetupLink = %q, want %q", result.SetupLink, wantLink)
 	}
@@ -1262,7 +1262,7 @@ func TestOwnerProfileName(t *testing.T) {
 
 func TestSetupLinkURLTemplate_TrimsTrailingSlash(t *testing.T) {
 	got := setupLinkURLTemplate("auth.example.com/")
-	want := "https://auth.example.com/ui/v2/login/invite?userID={{.UserID}}&code={{.Code}}&organization={{.OrgID}}"
+	want := "https://auth.example.com/ui/v2/login/verify?userId={{.UserID}}&code={{.Code}}&invite=true&organization={{.OrgID}}"
 	if got != want {
 		t.Errorf("got %q, want %q", got, want)
 	}
@@ -1285,7 +1285,7 @@ func TestSetupLinkURLTemplate_AlwaysStartsWithHTTPSPublicHost(t *testing.T) {
 func TestRenderSetupLink_SubstitutesAllThreePlaceholders(t *testing.T) {
 	tmpl := setupLinkURLTemplate("auth.example.com")
 	got := renderSetupLink(tmpl, "user-1", "org-1", "code-1")
-	want := "https://auth.example.com/ui/v2/login/invite?userID=user-1&code=code-1&organization=org-1"
+	want := "https://auth.example.com/ui/v2/login/verify?userId=user-1&code=code-1&invite=true&organization=org-1"
 	if got != want {
 		t.Errorf("got %q, want %q", got, want)
 	}

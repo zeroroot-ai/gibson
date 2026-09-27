@@ -278,7 +278,7 @@ func TestReconcilePlatformOwner_OfflineSetup_WritesLinkSecret(t *testing.T) {
 	}
 	link := string(sec.Data[defaultSetupSecretKey])
 	// The link is for a browser: the public host, never the in-cluster issuer.
-	if !strings.HasPrefix(link, "https://app.example.test/ui/v2/login/invite?") {
+	if !strings.HasPrefix(link, "https://app.example.test/ui/v2/login/verify?") {
 		t.Fatalf("setup link %q does not start at the public host", link)
 	}
 	for _, want := range []string{"UID-OWNER", "ORG-1", "CODE-XYZ"} {
@@ -800,7 +800,7 @@ func TestReconcilePlatformOwner_NoPublicHost_Refuses(t *testing.T) {
 // Zitadel substitutes the placeholders into exactly this URL.
 func TestSetupLinkURLTemplate_UsesThePublicHost(t *testing.T) {
 	got := setupLinkURLTemplate("app.staging.zeroroot.ai")
-	want := "https://app.staging.zeroroot.ai/ui/v2/login/invite?userID={{.UserID}}&code={{.Code}}&organization={{.OrgID}}"
+	want := "https://app.staging.zeroroot.ai/ui/v2/login/verify?userId={{.UserID}}&code={{.Code}}&invite=true&organization={{.OrgID}}"
 	if got != want {
 		t.Fatalf("setupLinkURLTemplate = %q, want %q", got, want)
 	}

@@ -159,7 +159,7 @@ func (c *membersIdPClient) CreateSetupLink(_ context.Context, orgID, userID, app
 		return "", c.setupLinkErr
 	}
 	if c.setupLink == "" {
-		return appURL + "/ui/v2/login/invite?userID=" + userID + "&code=test-code", nil
+		return appURL + "/ui/v2/login/verify?invite=true&userId=" + userID + "&code=test-code", nil
 	}
 	return c.setupLink, nil
 }

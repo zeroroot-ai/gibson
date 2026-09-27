@@ -719,7 +719,7 @@ func runBootstrap(
 // or ZITADEL_URL, both of which name the in-cluster Service on some profiles.
 // gibson#254 fixed the identical bug in the Platform owner's setup link.
 func setupLinkURLTemplate(externalDomain string) string {
-	return "https://" + strings.TrimRight(externalDomain, "/") + "/ui/v2/login/invite?userID={{.UserID}}&code={{.Code}}&organization={{.OrgID}}"
+	return zitadelconn.SetupLinkURLTemplate("https://" + strings.TrimRight(externalDomain, "/"))
 }
 
 // renderSetupLink substitutes the same three placeholders setupLinkURLTemplate
