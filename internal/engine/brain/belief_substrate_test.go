@@ -140,6 +140,6 @@ func TestInMemoryBeliefSubstrate_OverwriteReplacesExactly(t *testing.T) {
 // InMemoryBeliefSubstrate must satisfy BeliefSubstrate, which is the seam
 // gibson#272/ADR-0029 §3 publishes for other views (market, reputation) to
 // build against without waiting on the full relational-PRM engine.
-func TestBeliefSubstrate_InterfaceCompileCheck(t *testing.T) {
+func TestBeliefSubstrate_InterfaceCompileCheck(_ *testing.T) {
 	var _ BeliefSubstrate = NewInMemoryBeliefSubstrate()
 }
