@@ -9,6 +9,7 @@ import (
 	"strings"
 	"testing"
 
+	"github.com/zeroroot-ai/gibson/internal/platform/idp"
 	"github.com/zeroroot-ai/gibson/internal/platform/idp/zitadel"
 	"github.com/zeroroot-ai/gibson/internal/platform/zitadelconn/zitadelconntest"
 )
@@ -56,7 +57,7 @@ func TestClearHumanFactors_RemovesEveryRegisteredType(t *testing.T) {
 	if err != nil {
 		t.Fatalf("New: %v", err)
 	}
-	defer client.Close()
+	defer func() { _ = client.Close() }()
 
 	res, err := client.ClearHumanFactors(context.Background(), "user-1")
 	if err != nil {
@@ -110,7 +111,7 @@ func TestClearHumanFactors_NoFactors_NoOp(t *testing.T) {
 		}
 	})
 	client, _ := zitadel.New(context.Background(), cfg)
-	defer client.Close()
+	defer func() { _ = client.Close() }()
 
 	res, err := client.ClearHumanFactors(context.Background(), "user-1")
 	if err != nil {
@@ -131,7 +132,7 @@ func TestClearHumanFactors_RequiresUserID(t *testing.T) {
 		http.Error(w, "should not be called", http.StatusInternalServerError)
 	})
 	client, _ := zitadel.New(context.Background(), cfg)
-	defer client.Close()
+	defer func() { _ = client.Close() }()
 
 	if _, err := client.ClearHumanFactors(context.Background(), ""); err == nil {
 		t.Fatal("expected an error for an empty userID")
@@ -149,7 +150,7 @@ func TestClearHumanFactors_ListAuthFactorsError(t *testing.T) {
 		http.NotFound(w, r)
 	})
 	client, _ := zitadel.New(context.Background(), cfg)
-	defer client.Close()
+	defer func() { _ = client.Close() }()
 
 	if _, err := client.ClearHumanFactors(context.Background(), "user-1"); err == nil {
 		t.Fatal("expected an error when listing auth factors fails")
@@ -170,7 +171,7 @@ func TestClearHumanFactors_ListPasswordlessError(t *testing.T) {
 		}
 	})
 	client, _ := zitadel.New(context.Background(), cfg)
-	defer client.Close()
+	defer func() { _ = client.Close() }()
 
 	if _, err := client.ClearHumanFactors(context.Background(), "user-1"); err == nil {
 		t.Fatal("expected an error when listing passkeys fails")
@@ -194,7 +195,7 @@ func TestClearHumanFactors_RemoveNotFoundIsIdempotent(t *testing.T) {
 		}
 	})
 	client, _ := zitadel.New(context.Background(), cfg)
-	defer client.Close()
+	defer func() { _ = client.Close() }()
 
 	res, err := client.ClearHumanFactors(context.Background(), "user-1")
 	if err != nil {
@@ -219,7 +220,7 @@ func TestClearHumanFactors_RemoveU2FNonNotFoundErrorFails(t *testing.T) {
 		}
 	})
 	client, _ := zitadel.New(context.Background(), cfg)
-	defer client.Close()
+	defer func() { _ = client.Close() }()
 
 	if _, err := client.ClearHumanFactors(context.Background(), "user-1"); err == nil {
 		t.Fatal("expected a non-404 remove failure to surface")
@@ -241,75 +242,66 @@ func TestClearHumanFactors_RemoveOTPNonNotFoundErrorFails(t *testing.T) {
 		}
 	})
 	client, _ := zitadel.New(context.Background(), cfg)
-	defer client.Close()
+	defer func() { _ = client.Close() }()
 
 	if _, err := client.ClearHumanFactors(context.Background(), "user-1"); err == nil {
 		t.Fatal("expected a non-404 OTP remove failure to surface")
 	}
 }
 
-// TestClearHumanFactors_SkipsU2FWithEmptyID proves a U2F entry with no id
-// (a malformed or unexpected upstream response) is skipped rather than
-// attempted as a delete with an empty path segment.
-func TestClearHumanFactors_SkipsU2FWithEmptyID(t *testing.T) {
-	var deleteCalls int
-	cfg := setupManagementServer(t, func(w http.ResponseWriter, r *http.Request) {
-		switch {
-		case r.Method == http.MethodPost && strings.HasSuffix(r.URL.Path, "/auth_factors/_search"):
-			_, _ = w.Write([]byte(`{"result":[{"state":"AUTH_FACTOR_STATE_READY","u2f":{"id":"","name":"key"}}]}`))
-		case r.Method == http.MethodPost && strings.HasSuffix(r.URL.Path, "/passwordless/_search"):
-			_, _ = w.Write([]byte(`{"result":[]}`))
-		case r.Method == http.MethodDelete:
-			deleteCalls++
-			w.WriteHeader(http.StatusOK)
-		default:
-			http.NotFound(w, r)
-		}
-	})
-	client, _ := zitadel.New(context.Background(), cfg)
-	defer client.Close()
+// TestClearHumanFactors_SkipsEntryWithEmptyID proves a U2F or passkey entry
+// with no id (a malformed or unexpected upstream response) is skipped
+// rather than attempted as a delete with an empty path segment.
+func TestClearHumanFactors_SkipsEntryWithEmptyID(t *testing.T) {
+	tests := []struct {
+		name         string
+		factorsBody  string
+		passkeysBody string
+		clearedCount func(idp.ClearHumanFactorsResult) int
+	}{
+		{
+			name:         "u2f",
+			factorsBody:  `{"result":[{"state":"AUTH_FACTOR_STATE_READY","u2f":{"id":"","name":"key"}}]}`,
+			passkeysBody: `{"result":[]}`,
+			clearedCount: func(r idp.ClearHumanFactorsResult) int { return r.U2FCleared },
+		},
+		{
+			name:         "passkey",
+			factorsBody:  `{"result":[]}`,
+			passkeysBody: `{"result":[{"id":"","state":"AUTH_FACTOR_STATE_READY","name":"face"}]}`,
+			clearedCount: func(r idp.ClearHumanFactorsResult) int { return r.PasskeysCleared },
+		},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			var deleteCalls int
+			cfg := setupManagementServer(t, func(w http.ResponseWriter, r *http.Request) {
+				switch {
+				case r.Method == http.MethodPost && strings.HasSuffix(r.URL.Path, "/auth_factors/_search"):
+					_, _ = w.Write([]byte(tt.factorsBody))
+				case r.Method == http.MethodPost && strings.HasSuffix(r.URL.Path, "/passwordless/_search"):
+					_, _ = w.Write([]byte(tt.passkeysBody))
+				case r.Method == http.MethodDelete:
+					deleteCalls++
+					w.WriteHeader(http.StatusOK)
+				default:
+					http.NotFound(w, r)
+				}
+			})
+			client, _ := zitadel.New(context.Background(), cfg)
+			defer func() { _ = client.Close() }()
 
-	res, err := client.ClearHumanFactors(context.Background(), "user-1")
-	if err != nil {
-		t.Fatalf("ClearHumanFactors: %v", err)
-	}
-	if res.U2FCleared != 0 {
-		t.Errorf("U2FCleared = %d, want 0 for an empty-id entry", res.U2FCleared)
-	}
-	if deleteCalls != 0 {
-		t.Errorf("expected no DELETE call for an empty-id U2F entry, got %d", deleteCalls)
-	}
-}
-
-// TestClearHumanFactors_SkipsPasskeyWithEmptyID is the passkey-branch twin
-// of TestClearHumanFactors_SkipsU2FWithEmptyID.
-func TestClearHumanFactors_SkipsPasskeyWithEmptyID(t *testing.T) {
-	var deleteCalls int
-	cfg := setupManagementServer(t, func(w http.ResponseWriter, r *http.Request) {
-		switch {
-		case r.Method == http.MethodPost && strings.HasSuffix(r.URL.Path, "/auth_factors/_search"):
-			_, _ = w.Write([]byte(`{"result":[]}`))
-		case r.Method == http.MethodPost && strings.HasSuffix(r.URL.Path, "/passwordless/_search"):
-			_, _ = w.Write([]byte(`{"result":[{"id":"","state":"AUTH_FACTOR_STATE_READY","name":"face"}]}`))
-		case r.Method == http.MethodDelete:
-			deleteCalls++
-			w.WriteHeader(http.StatusOK)
-		default:
-			http.NotFound(w, r)
-		}
-	})
-	client, _ := zitadel.New(context.Background(), cfg)
-	defer client.Close()
-
-	res, err := client.ClearHumanFactors(context.Background(), "user-1")
-	if err != nil {
-		t.Fatalf("ClearHumanFactors: %v", err)
-	}
-	if res.PasskeysCleared != 0 {
-		t.Errorf("PasskeysCleared = %d, want 0 for an empty-id entry", res.PasskeysCleared)
-	}
-	if deleteCalls != 0 {
-		t.Errorf("expected no DELETE call for an empty-id passkey entry, got %d", deleteCalls)
+			res, err := client.ClearHumanFactors(context.Background(), "user-1")
+			if err != nil {
+				t.Fatalf("ClearHumanFactors: %v", err)
+			}
+			if got := tt.clearedCount(res); got != 0 {
+				t.Errorf("cleared count = %d, want 0 for an empty-id entry", got)
+			}
+			if deleteCalls != 0 {
+				t.Errorf("expected no DELETE call for an empty-id entry, got %d", deleteCalls)
+			}
+		})
 	}
 }
 
@@ -329,7 +321,7 @@ func TestClearHumanFactors_RemovePasskeyNonNotFoundErrorFails(t *testing.T) {
 		}
 	})
 	client, _ := zitadel.New(context.Background(), cfg)
-	defer client.Close()
+	defer func() { _ = client.Close() }()
 
 	if _, err := client.ClearHumanFactors(context.Background(), "user-1"); err == nil {
 		t.Fatal("expected a non-404 passkey remove failure to surface")
