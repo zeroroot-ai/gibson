@@ -74,7 +74,6 @@ func TestBeliefSchemaRegistry_Variables_ReturnsDefensiveCopy(t *testing.T) {
 
 	vars := reg.Variables("Host")
 	vars[0].Name = "mutated"
-	vars = append(vars, BeliefVariable{Name: "injected"})
 
 	fresh := reg.Variables("Host")
 	require.Len(t, fresh, 1)

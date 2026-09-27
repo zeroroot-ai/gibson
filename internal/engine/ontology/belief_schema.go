@@ -327,9 +327,9 @@ func validateBeliefSchemaExtensionShape(ext BeliefSchemaExtension) error {
 // is blamed in the error may vary, and that is acceptable (the caller only
 // distinguishes error vs. no error; message text is not part of the
 // contract).
-func mergeBeliefSchemaExtensions(exts map[string]BeliefSchemaExtension) (map[string]map[string]BeliefVariable, map[string]struct{}, error) {
-	nodes := make(map[string]map[string]BeliefVariable)
-	enablementEdges := make(map[string]struct{})
+func mergeBeliefSchemaExtensions(exts map[string]BeliefSchemaExtension) (nodes map[string]map[string]BeliefVariable, enablementEdges map[string]struct{}, err error) {
+	nodes = make(map[string]map[string]BeliefVariable)
+	enablementEdges = make(map[string]struct{})
 
 	for _, ext := range exts {
 		for _, n := range ext.Nodes {
