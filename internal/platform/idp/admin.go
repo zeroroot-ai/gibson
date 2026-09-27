@@ -73,6 +73,26 @@ type AdminClient interface {
 	// address has been verified.
 	CreateHumanUser(ctx context.Context, req CreateHumanUserRequest) (CreateHumanUserResult, error)
 
+	// EnsureHumanUserNoPassword finds or creates a human user in orgID with NO
+	// password (ADR-0093 decisions 6/8). The one setup-link mechanism this
+	// interface offers — CreateSetupInviteCode — is how the person ever gets
+	// in; no implementation may accept or set a password anywhere in this
+	// call. Idempotent: an existing user is found by email and returned,
+	// never recreated or touched.
+	//
+	// Used by the Platform owner and the founding tenant Owner bootstrap
+	// (hosted#201/#202) — the same no-password contract for both, so there is
+	// exactly one way a human first signs in to this platform (ADR-0027).
+	EnsureHumanUserNoPassword(ctx context.Context, orgID, email, givenName, familyName string) (userID string, err error)
+
+	// CreateSetupInviteCode mints a one-time setup-link code for userID
+	// through the IdP's own invite-code flow. send=true delivers the link by
+	// mail, built from urlTemplate; send=false returns the raw code instead,
+	// for a caller with no mail transport to turn into an offline link and
+	// write to a Secret only cluster administrators can read (ADR-0093
+	// decision 8). Never a password, either way.
+	CreateSetupInviteCode(ctx context.Context, userID, urlTemplate string, send bool) (code string, err error)
+
 	// DeactivateHumanUser blocks a human user from signing in, without
 	// deleting them or their credential. It is what "registered but not yet
 	// approved" means on the admin-approval registration rung (ADR-0006): the
