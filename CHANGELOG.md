@@ -1,5 +1,18 @@
 # Changelog
 
+## [0.142.0](https://github.com/zeroroot-ai/gibson/compare/v0.141.0...v0.142.0) (2026-09-27)
+
+
+### Features
+
+* **tenant:** let an Owner or Admin reset a tenant user's MFA ([#246](https://github.com/zeroroot-ai/gibson/issues/246)) ([9f73706](https://github.com/zeroroot-ai/gibson/commit/9f73706d857757d1b61c60e70dbd60e124a14417))
+
+
+### Bug Fixes
+
+* **bootstrap-tenant-owner:** the first tenant's Owner gets a setup link, never a password ([#245](https://github.com/zeroroot-ai/gibson/issues/245)) ([43cc40f](https://github.com/zeroroot-ai/gibson/commit/43cc40f658398c2cd85e2d4596d1e5a66e96b39e))
+* **invitations:** accept through a Zitadel setup link, delete org-member API writes ([#255](https://github.com/zeroroot-ai/gibson/issues/255)) ([cd65f90](https://github.com/zeroroot-ai/gibson/commit/cd65f907c884b74383bca8d416b3d6220e2242ad))
+
 ## [0.141.0](https://github.com/zeroroot-ai/gibson/compare/v0.140.0...v0.141.0) (2026-09-27)
 
 
