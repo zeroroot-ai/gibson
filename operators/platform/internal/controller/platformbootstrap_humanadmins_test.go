@@ -6,9 +6,9 @@ package controller
 import (
 	"context"
 	"encoding/json"
-	"fmt"
 	"net/http"
 	"net/http/httptest"
+	"strconv"
 	"testing"
 
 	"github.com/go-logr/logr"
@@ -53,7 +53,7 @@ func membersSearchBody(members []iamMemberFixture) []byte {
 		} `json:"details"`
 		Result []resultRow `json:"result"`
 	}{}
-	resp.Details.TotalResult = fmt.Sprintf("%d", len(members))
+	resp.Details.TotalResult = strconv.Itoa(len(members))
 	for _, m := range members {
 		row := resultRow{
 			UserID:             m.UserID,
@@ -75,7 +75,7 @@ func membersSearchBody(members []iamMemberFixture) []byte {
 // GetOrgIDForProject (both reconcileHumanAdminsScoped resolves fresh, same
 // as reconcilePlatformOwner) plus /admin/v1/members/_search seeded with
 // members, and records every RemoveIAMMember / DeleteUser call.
-func humanAdminsMux(t *testing.T, members []iamMemberFixture) (srv *httptest.Server, removedIAM *[]string, deletedUsers *[]string) {
+func humanAdminsMux(t *testing.T, members []iamMemberFixture) (srv *httptest.Server, removedIAM, deletedUsers *[]string) {
 	t.Helper()
 	var removed, deleted []string
 	mux := http.NewServeMux()
