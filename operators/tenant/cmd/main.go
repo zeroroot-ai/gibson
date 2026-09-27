@@ -22,6 +22,7 @@ import (
 	awsconfig "github.com/aws/aws-sdk-go-v2/config"
 	awskms "github.com/aws/aws-sdk-go-v2/service/kms"
 	"github.com/go-logr/logr"
+	"golang.org/x/oauth2"
 	"golang.org/x/oauth2/clientcredentials"
 	"k8s.io/apimachinery/pkg/runtime"
 	utilruntime "k8s.io/apimachinery/pkg/util/runtime"
@@ -622,15 +623,21 @@ func main() {
 	// management-API zitadel.Client above has no project-grant/authorization
 	// surface), over the same ZITADEL_URL/ZITADEL_EXTERNAL_DOMAIN this
 	// operator already requires, claiming the instance by header (ADR-0092)
-	// and authenticating with the same PAT.
+	// and authenticating as the operator's own machine user, with the same
+	// client credentials as the management-API client.
 	zitadelEndpoint, err := zitadelconn.New(zitadelURL, zitadelExternalDomain)
 	if err != nil {
 		setupLog.Error(err, "zitadelconn.New failed (ADR-0092): ZITADEL_URL and ZITADEL_EXTERNAL_DOMAIN "+
 			"are both required for tenant role grants")
 		os.Exit(1)
 	}
-	tenantRolePATClient := &http.Client{Transport: &bearerTokenTransport{token: pat, next: zitadelEndpoint.Transport(nil)}}
-	tenantRoleGrants := tenantrole.NewZitadelGrants(zitadelEndpoint, tenantRolePATClient, zitadelProjectID)
+	tenantRoleTokens, err := zitadel.TokenSource(context.Background(), zitadelURL, zitadelExternalDomain, operatorClientID, operatorClientSecret)
+	if err != nil {
+		setupLog.Error(err, "tenant role grants: the operator refuses to start without its own client credentials")
+		os.Exit(1)
+	}
+	tenantRoleHTTP := &http.Client{Transport: &oauth2.Transport{Source: tenantRoleTokens, Base: zitadelEndpoint.Transport(nil)}}
+	tenantRoleGrants := tenantrole.NewZitadelGrants(zitadelEndpoint, tenantRoleHTTP, zitadelProjectID)
 	tenantRoleTuples := fga.NewTenantRoleTuples(fgaClient)
 	tenantRoleSyncer := tenantrole.NewSyncer(tenantRoleGrants, tenantRoleTuples, nil)
 	tenantRoleSyncInterval := controller.DefaultTenantRoleSyncInterval
@@ -1430,25 +1437,6 @@ func buildVaultAdminClient(log logr.Logger) vaultadmin.AdminClient {
 // EnsureTenantNamespace's (Edition, error) return — the Edition is saga
 // record-keeping only, so the adapter discards it. All methods stay
 // idempotent (the underlying client guarantees it).
-// bearerTokenTransport adds an Authorization: Bearer header to every
-// request before delegating to next. Used to authenticate the tenant role
-// Syncer's Zitadel v2 Connect calls with the same PAT the management-API
-// zitadel.Client uses.
-type bearerTokenTransport struct {
-	token string
-	next  http.RoundTripper
-}
-
-func (t *bearerTokenTransport) RoundTrip(req *http.Request) (*http.Response, error) {
-	r := req.Clone(req.Context())
-	r.Header.Set("Authorization", "Bearer "+t.token)
-	resp, err := t.next.RoundTrip(r)
-	if err != nil {
-		return nil, fmt.Errorf("bearerTokenTransport: %w", err)
-	}
-	return resp, nil
-}
-
 type secretsVaultAdapter struct {
 	c vaultadmin.AdminClient
 }
