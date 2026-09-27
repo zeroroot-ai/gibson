@@ -1,5 +1,14 @@
 # Changelog
 
+## [0.142.1](https://github.com/zeroroot-ai/gibson/compare/v0.142.0...v0.142.1) (2026-09-27)
+
+
+### Bug Fixes
+
+* **platform-operator:** keep the Platform owner the only human Zitadel administrator ([#259](https://github.com/zeroroot-ai/gibson/issues/259)) ([9b1af5d](https://github.com/zeroroot-ai/gibson/commit/9b1af5d6b710d489f6aa69ebe78064e94b5a8ae8))
+* **platform-operator:** make the Zitadel instance have an active SMTP provider ([#257](https://github.com/zeroroot-ai/gibson/issues/257)) ([e2f4d38](https://github.com/zeroroot-ai/gibson/commit/e2f4d3804f22865cd3d4f4f4e136c2aa72866e18))
+* **tenant-operator:** require the chart to size the enterprise-deploy tier ([#258](https://github.com/zeroroot-ai/gibson/issues/258)) ([3865bf9](https://github.com/zeroroot-ai/gibson/commit/3865bf98a843cc5218cc59be9113690fc36381e9))
+
 ## [0.142.0](https://github.com/zeroroot-ai/gibson/compare/v0.141.0...v0.142.0) (2026-09-27)
 
 
