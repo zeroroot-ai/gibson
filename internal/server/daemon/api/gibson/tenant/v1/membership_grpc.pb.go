@@ -38,6 +38,8 @@ const (
 	MembershipService_ListMembers_FullMethodName               = "/gibson.tenant.v1.MembershipService/ListMembers"
 	MembershipService_SetTenantRole_FullMethodName             = "/gibson.tenant.v1.MembershipService/SetTenantRole"
 	MembershipService_TransferOwnership_FullMethodName         = "/gibson.tenant.v1.MembershipService/TransferOwnership"
+	MembershipService_RemoveMember_FullMethodName              = "/gibson.tenant.v1.MembershipService/RemoveMember"
+	MembershipService_LeaveTenant_FullMethodName               = "/gibson.tenant.v1.MembershipService/LeaveTenant"
 	MembershipService_InviteMember_FullMethodName              = "/gibson.tenant.v1.MembershipService/InviteMember"
 	MembershipService_AcceptInvitation_FullMethodName          = "/gibson.tenant.v1.MembershipService/AcceptInvitation"
 	MembershipService_ResendInvitation_FullMethodName          = "/gibson.tenant.v1.MembershipService/ResendInvitation"
@@ -79,6 +81,24 @@ type MembershipServiceClient interface {
 	// Owner may call this RPC (hosted#190). new_owner_user_id must already be
 	// a member of the caller's tenant.
 	TransferOwnership(ctx context.Context, in *TransferOwnershipRequest, opts ...grpc.CallOption) (*TransferOwnershipResponse, error)
+	// RemoveMember ends user_id's place in the caller's tenant: their Zitadel
+	// account is deleted and every one of their sessions is revoked at once, so
+	// their next request fails immediately rather than waiting for a token to
+	// expire. Their missions and findings stay in the tenant, attributed by the
+	// name and email recorded at the time.
+	//
+	// Refused when user_id holds the tenant's owner relation: the Owner cannot
+	// be removed, only transferred out of first (TransferOwnership).
+	RemoveMember(ctx context.Context, in *RemoveMemberRequest, opts ...grpc.CallOption) (*RemoveMemberResponse, error)
+	// LeaveTenant is the self-service half of Removal (ADR-0093 §11): the
+	// caller ends their own place in their tenant, exactly like RemoveMember
+	// with themselves as the target. Gated on "member" (every tenant role
+	// implies it) rather than "admin", since removing yourself needs no
+	// admin standing.
+	//
+	// Refused when the caller holds the tenant's owner relation: the Owner
+	// cannot leave until ownership is transferred to another tenant user.
+	LeaveTenant(ctx context.Context, in *LeaveTenantRequest, opts ...grpc.CallOption) (*LeaveTenantResponse, error)
 	// InviteMember creates a pending invitation for an email address with the
 	// given tenant role and emails the invitee an accept link. The invitee
 	// appears in ListMembers with status "invited" until they accept. Idempotent:
@@ -191,6 +211,26 @@ func (c *membershipServiceClient) TransferOwnership(ctx context.Context, in *Tra
 	cOpts := append([]grpc.CallOption{grpc.StaticMethod()}, opts...)
 	out := new(TransferOwnershipResponse)
 	err := c.cc.Invoke(ctx, MembershipService_TransferOwnership_FullMethodName, in, out, cOpts...)
+	if err != nil {
+		return nil, err
+	}
+	return out, nil
+}
+
+func (c *membershipServiceClient) RemoveMember(ctx context.Context, in *RemoveMemberRequest, opts ...grpc.CallOption) (*RemoveMemberResponse, error) {
+	cOpts := append([]grpc.CallOption{grpc.StaticMethod()}, opts...)
+	out := new(RemoveMemberResponse)
+	err := c.cc.Invoke(ctx, MembershipService_RemoveMember_FullMethodName, in, out, cOpts...)
+	if err != nil {
+		return nil, err
+	}
+	return out, nil
+}
+
+func (c *membershipServiceClient) LeaveTenant(ctx context.Context, in *LeaveTenantRequest, opts ...grpc.CallOption) (*LeaveTenantResponse, error) {
+	cOpts := append([]grpc.CallOption{grpc.StaticMethod()}, opts...)
+	out := new(LeaveTenantResponse)
+	err := c.cc.Invoke(ctx, MembershipService_LeaveTenant_FullMethodName, in, out, cOpts...)
 	if err != nil {
 		return nil, err
 	}
@@ -380,6 +420,24 @@ type MembershipServiceServer interface {
 	// Owner may call this RPC (hosted#190). new_owner_user_id must already be
 	// a member of the caller's tenant.
 	TransferOwnership(context.Context, *TransferOwnershipRequest) (*TransferOwnershipResponse, error)
+	// RemoveMember ends user_id's place in the caller's tenant: their Zitadel
+	// account is deleted and every one of their sessions is revoked at once, so
+	// their next request fails immediately rather than waiting for a token to
+	// expire. Their missions and findings stay in the tenant, attributed by the
+	// name and email recorded at the time.
+	//
+	// Refused when user_id holds the tenant's owner relation: the Owner cannot
+	// be removed, only transferred out of first (TransferOwnership).
+	RemoveMember(context.Context, *RemoveMemberRequest) (*RemoveMemberResponse, error)
+	// LeaveTenant is the self-service half of Removal (ADR-0093 §11): the
+	// caller ends their own place in their tenant, exactly like RemoveMember
+	// with themselves as the target. Gated on "member" (every tenant role
+	// implies it) rather than "admin", since removing yourself needs no
+	// admin standing.
+	//
+	// Refused when the caller holds the tenant's owner relation: the Owner
+	// cannot leave until ownership is transferred to another tenant user.
+	LeaveTenant(context.Context, *LeaveTenantRequest) (*LeaveTenantResponse, error)
 	// InviteMember creates a pending invitation for an email address with the
 	// given tenant role and emails the invitee an accept link. The invitee
 	// appears in ListMembers with status "invited" until they accept. Idempotent:
@@ -476,6 +534,12 @@ func (UnimplementedMembershipServiceServer) SetTenantRole(context.Context, *SetT
 }
 func (UnimplementedMembershipServiceServer) TransferOwnership(context.Context, *TransferOwnershipRequest) (*TransferOwnershipResponse, error) {
 	return nil, status.Error(codes.Unimplemented, "method TransferOwnership not implemented")
+}
+func (UnimplementedMembershipServiceServer) RemoveMember(context.Context, *RemoveMemberRequest) (*RemoveMemberResponse, error) {
+	return nil, status.Error(codes.Unimplemented, "method RemoveMember not implemented")
+}
+func (UnimplementedMembershipServiceServer) LeaveTenant(context.Context, *LeaveTenantRequest) (*LeaveTenantResponse, error) {
+	return nil, status.Error(codes.Unimplemented, "method LeaveTenant not implemented")
 }
 func (UnimplementedMembershipServiceServer) InviteMember(context.Context, *InviteMemberRequest) (*InviteMemberResponse, error) {
 	return nil, status.Error(codes.Unimplemented, "method InviteMember not implemented")
@@ -596,6 +660,42 @@ func _MembershipService_TransferOwnership_Handler(srv interface{}, ctx context.C
 	}
 	handler := func(ctx context.Context, req interface{}) (interface{}, error) {
 		return srv.(MembershipServiceServer).TransferOwnership(ctx, req.(*TransferOwnershipRequest))
+	}
+	return interceptor(ctx, in, info, handler)
+}
+
+func _MembershipService_RemoveMember_Handler(srv interface{}, ctx context.Context, dec func(interface{}) error, interceptor grpc.UnaryServerInterceptor) (interface{}, error) {
+	in := new(RemoveMemberRequest)
+	if err := dec(in); err != nil {
+		return nil, err
+	}
+	if interceptor == nil {
+		return srv.(MembershipServiceServer).RemoveMember(ctx, in)
+	}
+	info := &grpc.UnaryServerInfo{
+		Server:     srv,
+		FullMethod: MembershipService_RemoveMember_FullMethodName,
+	}
+	handler := func(ctx context.Context, req interface{}) (interface{}, error) {
+		return srv.(MembershipServiceServer).RemoveMember(ctx, req.(*RemoveMemberRequest))
+	}
+	return interceptor(ctx, in, info, handler)
+}
+
+func _MembershipService_LeaveTenant_Handler(srv interface{}, ctx context.Context, dec func(interface{}) error, interceptor grpc.UnaryServerInterceptor) (interface{}, error) {
+	in := new(LeaveTenantRequest)
+	if err := dec(in); err != nil {
+		return nil, err
+	}
+	if interceptor == nil {
+		return srv.(MembershipServiceServer).LeaveTenant(ctx, in)
+	}
+	info := &grpc.UnaryServerInfo{
+		Server:     srv,
+		FullMethod: MembershipService_LeaveTenant_FullMethodName,
+	}
+	handler := func(ctx context.Context, req interface{}) (interface{}, error) {
+		return srv.(MembershipServiceServer).LeaveTenant(ctx, req.(*LeaveTenantRequest))
 	}
 	return interceptor(ctx, in, info, handler)
 }
@@ -906,6 +1006,14 @@ var MembershipService_ServiceDesc = grpc.ServiceDesc{
 		{
 			MethodName: "TransferOwnership",
 			Handler:    _MembershipService_TransferOwnership_Handler,
+		},
+		{
+			MethodName: "RemoveMember",
+			Handler:    _MembershipService_RemoveMember_Handler,
+		},
+		{
+			MethodName: "LeaveTenant",
+			Handler:    _MembershipService_LeaveTenant_Handler,
 		},
 		{
 			MethodName: "InviteMember",

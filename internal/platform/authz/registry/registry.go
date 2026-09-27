@@ -2533,6 +2533,16 @@ var Registry = map[string]Entry{
 		Unauthenticated:   false,
 		Self:              false,
 	},
+	"/gibson.tenant.v1.MembershipService/LeaveTenant": {
+		Method:            "/gibson.tenant.v1.MembershipService/LeaveTenant",
+		Service:           "gibson.tenant.v1.MembershipService",
+		Relation:          "member",
+		ObjectType:        "tenant",
+		ObjectDeriver:     "tenant_from_identity",
+		AllowedIdentities: IdentityUser,
+		Unauthenticated:   false,
+		Self:              false,
+	},
 	"/gibson.tenant.v1.MembershipService/ListMembers": {
 		Method:            "/gibson.tenant.v1.MembershipService/ListMembers",
 		Service:           "gibson.tenant.v1.MembershipService",
@@ -2555,6 +2565,16 @@ var Registry = map[string]Entry{
 	},
 	"/gibson.tenant.v1.MembershipService/ListTeams": {
 		Method:            "/gibson.tenant.v1.MembershipService/ListTeams",
+		Service:           "gibson.tenant.v1.MembershipService",
+		Relation:          "admin",
+		ObjectType:        "tenant",
+		ObjectDeriver:     "tenant_from_identity",
+		AllowedIdentities: IdentityUser,
+		Unauthenticated:   false,
+		Self:              false,
+	},
+	"/gibson.tenant.v1.MembershipService/RemoveMember": {
+		Method:            "/gibson.tenant.v1.MembershipService/RemoveMember",
 		Service:           "gibson.tenant.v1.MembershipService",
 		Relation:          "admin",
 		ObjectType:        "tenant",
