@@ -74,6 +74,44 @@ service MembershipService {
   }
 
   // ---------------------------------------------------------------------------
+  // Removal (ADR-0093 §11, hosted#205)
+  // ---------------------------------------------------------------------------
+
+  // RemoveMember ends user_id's place in the caller's tenant: their Zitadel
+  // account is deleted and every one of their sessions is revoked at once, so
+  // their next request fails immediately rather than waiting for a token to
+  // expire. Their missions and findings stay in the tenant, attributed by the
+  // name and email recorded at the time.
+  //
+  // Refused when user_id holds the tenant's owner relation: the Owner cannot
+  // be removed, only transferred out of first (TransferOwnership).
+  rpc RemoveMember(RemoveMemberRequest) returns (RemoveMemberResponse) {
+    option (gibson.auth.v1.authz) = {
+      relation: "admin"
+      object_type: "tenant"
+      object_deriver: "tenant_from_identity"
+      allowed_identities: 1  // USER
+    };
+  }
+
+  // LeaveTenant is the self-service half of Removal (ADR-0093 §11): the
+  // caller ends their own place in their tenant, exactly like RemoveMember
+  // with themselves as the target. Gated on "member" (every tenant role
+  // implies it) rather than "admin", since removing yourself needs no
+  // admin standing.
+  //
+  // Refused when the caller holds the tenant's owner relation: the Owner
+  // cannot leave until ownership is transferred to another tenant user.
+  rpc LeaveTenant(LeaveTenantRequest) returns (LeaveTenantResponse) {
+    option (gibson.auth.v1.authz) = {
+      relation: "member"
+      object_type: "tenant"
+      object_deriver: "tenant_from_identity"
+      allowed_identities: 1  // USER
+    };
+  }
+
+  // ---------------------------------------------------------------------------
   // Invitations (gibson#626 — invitation lifecycle owned by the daemon)
   // ---------------------------------------------------------------------------
 
@@ -358,6 +396,28 @@ message TransferOwnershipRequest {
 }
 
 message TransferOwnershipResponse {}
+
+// ---------------------------------------------------------------------------
+// Removal messages (ADR-0093 §11, hosted#205)
+// ---------------------------------------------------------------------------
+
+message RemoveMemberRequest {
+  // tenant_id is the FGA id of the tenant (e.g. "tenant:acme").
+  string tenant_id = 1;
+  // user_id is the FGA user id (without type prefix) of the tenant user to
+  // remove. Required.
+  string user_id = 2;
+}
+
+message RemoveMemberResponse {}
+
+message LeaveTenantRequest {
+  // tenant_id is the FGA id of the tenant (e.g. "tenant:acme"). Must match
+  // the authenticated caller's tenant.
+  string tenant_id = 1;
+}
+
+message LeaveTenantResponse {}
 
 // ---------------------------------------------------------------------------
 // Invitation messages (gibson#626)

@@ -82,6 +82,13 @@ type membersIdPClient struct {
 	ensuredEmails []string
 	ensureUserID  string
 	ensureErr     error
+
+	// Removal recording (ADR-0093 §11, hosted#205): RemoveMember/LeaveTenant
+	// tests inject a failure and assert the call happened.
+	revokeSessionsErr  error
+	revokedSessionsFor []string
+	deleteHumanUserErr error
+	deletedHumanUsers  []idp.HumanUserStateRequest
 }
 
 func (c *membersIdPClient) CreateServiceAccount(_ context.Context, _ idp.CreateServiceAccountRequest) (*idp.ServiceAccount, error) {
@@ -104,7 +111,11 @@ func (c *membersIdPClient) GetUserProfile(_ context.Context, accountID string) (
 	}
 	return p, nil
 }
-func (c *membersIdPClient) RevokeUserSessions(_ context.Context, _ string) (idp.RevokeUserSessionsResult, error) {
+func (c *membersIdPClient) RevokeUserSessions(_ context.Context, userID string) (idp.RevokeUserSessionsResult, error) {
+	c.revokedSessionsFor = append(c.revokedSessionsFor, userID)
+	if c.revokeSessionsErr != nil {
+		return idp.RevokeUserSessionsResult{}, c.revokeSessionsErr
+	}
 	return idp.RevokeUserSessionsResult{}, nil
 }
 func (c *membersIdPClient) ListUserSessions(_ context.Context, _ string) ([]idp.SessionInfo, error) {
@@ -502,6 +513,7 @@ func (*membersIdPClient) DeactivateHumanUser(context.Context, idp.HumanUserState
 func (*membersIdPClient) ReactivateHumanUser(context.Context, idp.HumanUserStateRequest) error {
 	return nil
 }
-func (*membersIdPClient) DeleteHumanUser(context.Context, idp.HumanUserStateRequest) error {
-	return nil
+func (c *membersIdPClient) DeleteHumanUser(_ context.Context, req idp.HumanUserStateRequest) error {
+	c.deletedHumanUsers = append(c.deletedHumanUsers, req)
+	return c.deleteHumanUserErr
 }
