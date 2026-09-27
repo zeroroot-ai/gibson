@@ -248,10 +248,16 @@ func (s *TenantAdminServer) AcceptInvitation(ctx context.Context, req *tenantv1.
 	// time by the IdP itself (CreateSetupLink's returnCode contract): this
 	// RPC's own caller already owns messaging for this invitee.
 	//
+	// s.inviteBaseURL is the product-surface origin (GIBSON_APP_URL) — the
+	// SAME value sendInvitationEmail already built the accept-link email
+	// from, above. Never an OIDC issuer or a Zitadel endpoint: gibson#254
+	// found the Platform owner's setup link built from spec.zitadel.issuer
+	// resolved to an in-cluster address on kind.
+	//
 	// Left of SetStatus deliberately: if this fails, the invitation stays
 	// "pending" so a retry can redeem the same token again — EnsureHumanUser
 	// and Roles.Assign above are both idempotent, so a retry costs nothing.
-	setupURL, err := s.idpClient.CreateSetupLink(ctx, t.OrgID, userID)
+	setupURL, err := s.idpClient.CreateSetupLink(ctx, t.OrgID, userID, s.inviteBaseURL)
 	if err != nil {
 		return nil, status.Errorf(codes.Internal, "create setup link: %v", err)
 	}

@@ -69,7 +69,7 @@ func (s *stubIDP) UpdateUserProfile(_ context.Context, _ string, _ idp.UpdateUse
 func (s *stubIDP) EnsureHumanUser(_ context.Context, _ idp.EnsureHumanUserRequest) (string, error) {
 	return "", nil
 }
-func (s *stubIDP) CreateSetupLink(_ context.Context, _, _ string) (string, error) {
+func (s *stubIDP) CreateSetupLink(_ context.Context, _, _, _ string) (string, error) {
 	return "", nil
 }
 func (s *stubIDP) SetHumanPassword(context.Context, idp.SetHumanPasswordRequest) error {

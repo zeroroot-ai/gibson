@@ -9,7 +9,6 @@ import (
 	"errors"
 	"net/http"
 	"net/http/httptest"
-	"strings"
 	"testing"
 
 	"golang.org/x/oauth2"
@@ -200,46 +199,6 @@ func TestEnsureHumanUser_ExistingUser(t *testing.T) {
 	}
 	if uid != "user-existing" {
 		t.Errorf("got uid=%q, want %q", uid, "user-existing")
-	}
-}
-
-// TestCreateSetupLink_Success verifies the mint call renders the invite
-// code into the setup URL, and that the call asks Zitadel to return the
-// code (returnCode) rather than email it (sendCode) — the caller already
-// owns messaging for this user.
-func TestCreateSetupLink_Success(t *testing.T) {
-	var gotBody map[string]any
-	c := newTestServer(t, map[string]http.HandlerFunc{
-		"POST /zitadel.user.v2.UserService/CreateInviteCode": func(w http.ResponseWriter, r *http.Request) {
-			_ = json.NewDecoder(r.Body).Decode(&gotBody)
-			writeJSON(w, http.StatusOK, map[string]string{"inviteCode": "abc123"})
-		},
-	})
-	link, err := c.CreateSetupLink(context.Background(), "org-abc", "user-1")
-	if err != nil {
-		t.Fatalf("unexpected error: %v", err)
-	}
-	if !strings.Contains(link, "userID=user-1") || !strings.Contains(link, "code=abc123") || !strings.Contains(link, "organization=org-abc") {
-		t.Errorf("link = %q, want it to carry userID, code and organization", link)
-	}
-	if _, ok := gotBody["sendCode"]; ok {
-		t.Error("request body carries sendCode; CreateSetupLink must never let Zitadel email the code itself")
-	}
-	if _, ok := gotBody["returnCode"]; !ok {
-		t.Error("request body missing returnCode")
-	}
-}
-
-// TestCreateSetupLink_EmptyCodeIsAnError guards against silently returning a
-// link with no code substituted when Zitadel's response is malformed.
-func TestCreateSetupLink_EmptyCodeIsAnError(t *testing.T) {
-	c := newTestServer(t, map[string]http.HandlerFunc{
-		"POST /zitadel.user.v2.UserService/CreateInviteCode": func(w http.ResponseWriter, _ *http.Request) {
-			writeJSON(w, http.StatusOK, map[string]string{})
-		},
-	})
-	if _, err := c.CreateSetupLink(context.Background(), "org-abc", "user-1"); err == nil {
-		t.Fatal("expected an error for an empty invite code")
 	}
 }
 

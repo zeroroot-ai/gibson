@@ -368,6 +368,11 @@ func TestAcceptInvitation_HappyPath(t *testing.T) {
 	srv := newMembersTestServer(t, az, idpC)
 	srv.invitations = NewInvitationStore(db)
 	srv.orgResolver = staticOrgResolver{orgID: "org-1"}
+	// The setup link must be built from this — the product-surface origin
+	// (GIBSON_APP_URL) — never from any issuer or Zitadel endpoint
+	// (gibson#254: the Platform owner's own setup link was built from an
+	// issuer that resolved to an in-cluster address on kind).
+	srv.inviteBaseURL = "https://app.example.com"
 	tuples, err := tenantrole.AuthzTuples(az)
 	if err != nil {
 		t.Fatalf("AuthzTuples: %v", err)
@@ -400,13 +405,20 @@ func TestAcceptInvitation_HappyPath(t *testing.T) {
 	if len(idpC.ensuredEmailsVerified) != 1 || !idpC.ensuredEmailsVerified[0] {
 		t.Fatalf("expected EnsureHumanUser called with EmailVerified=true, got %v", idpC.ensuredEmailsVerified)
 	}
-	// A setup link was minted for the same user, in the same org, and rides
-	// back in the response for the dashboard to redirect to.
+	// A setup link was minted for the same user, in the same org, built from
+	// the product-surface origin — and rides back in the response for the
+	// dashboard to redirect to.
 	if len(idpC.setupLinkUserIDs) != 1 || idpC.setupLinkUserIDs[0] != "user-bob" || idpC.setupLinkOrgIDs[0] != "org-1" {
 		t.Fatalf("expected CreateSetupLink(org-1, user-bob), got users=%v orgs=%v", idpC.setupLinkUserIDs, idpC.setupLinkOrgIDs)
 	}
+	if len(idpC.setupLinkAppURLs) != 1 || idpC.setupLinkAppURLs[0] != "https://app.example.com" {
+		t.Fatalf("expected CreateSetupLink called with appURL=https://app.example.com (inviteBaseURL), got %v", idpC.setupLinkAppURLs)
+	}
 	if resp.GetSetupUrl() == "" {
 		t.Error("SetupUrl empty; the dashboard has nowhere to send the invitee to set a credential")
+	}
+	if !strings.HasPrefix(resp.GetSetupUrl(), "https://app.example.com") {
+		t.Errorf("SetupUrl = %q, want it to start at the product-surface origin", resp.GetSetupUrl())
 	}
 }
 

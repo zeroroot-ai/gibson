@@ -35,22 +35,14 @@ type fakeZitadelClient struct {
 	mu sync.Mutex
 
 	ensureHumanUserCalls []ensureHumanUserCall
-	createSetupLinkCalls []createSetupLinkCall
 
 	ensureHumanUserErr error
 	ensureHumanUserID  string
-	createSetupLinkErr error
-	createSetupLink    string
 }
 
 type ensureHumanUserCall struct {
 	OrgID string
 	Email string
-}
-
-type createSetupLinkCall struct {
-	OrgID  string
-	UserID string
 }
 
 func (f *fakeZitadelClient) EnsureHumanUser(_ context.Context, orgID, email string) (string, error) {
@@ -65,20 +57,6 @@ func (f *fakeZitadelClient) EnsureHumanUser(_ context.Context, orgID, email stri
 		id = "fake-invitation-user-id"
 	}
 	return id, nil
-}
-
-func (f *fakeZitadelClient) CreateSetupLink(_ context.Context, orgID, userID string) (string, error) {
-	f.mu.Lock()
-	defer f.mu.Unlock()
-	f.createSetupLinkCalls = append(f.createSetupLinkCalls, createSetupLinkCall{OrgID: orgID, UserID: userID})
-	if f.createSetupLinkErr != nil {
-		return "", f.createSetupLinkErr
-	}
-	link := f.createSetupLink
-	if link == "" {
-		link = fmt.Sprintf("https://idp.example.com/ui/v2/login/invite?userID=%s", userID)
-	}
-	return link, nil
 }
 
 func (f *fakeZitadelClient) CreateOrganization(_ context.Context, _, _ string) (string, error) {

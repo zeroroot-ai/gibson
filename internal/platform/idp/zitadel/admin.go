@@ -395,8 +395,13 @@ func (c *Client) EnsureHumanUser(ctx context.Context, req idp.EnsureHumanUserReq
 // field). Mirrors operators/platform's identical helper for the Platform
 // owner (ADR-0093, gibson#240): the emitted link is the same shape whether
 // Zitadel emails it or a caller renders it itself.
-func setupLinkURLTemplate(issuer string) string {
-	return strings.TrimRight(issuer, "/") + "/ui/v2/login/invite?userID={{.UserID}}&code={{.Code}}&organization={{.OrgID}}"
+//
+// appURL must be the product-surface origin (GIBSON_APP_URL), never an OIDC
+// issuer or a Zitadel admin/management endpoint: gibson#254 found the
+// Platform owner's setup link built from spec.zitadel.issuer resolved to an
+// in-cluster address on kind, which nobody's browser could open.
+func setupLinkURLTemplate(appURL string) string {
+	return strings.TrimRight(appURL, "/") + "/ui/v2/login/invite?userID={{.UserID}}&code={{.Code}}&organization={{.OrgID}}"
 }
 
 // renderSetupLink substitutes the same three placeholders setupLinkURLTemplate
@@ -413,9 +418,12 @@ func renderSetupLink(urlTemplate, userID, orgID, code string) string {
 // endpoint. returnCode (never sendCode) means Zitadel mints the code and
 // hands it straight back instead of emailing it — this call's whole point is
 // that the CALLER already owns messaging for this user.
-func (c *Client) CreateSetupLink(ctx context.Context, orgID, userID string) (string, error) {
+func (c *Client) CreateSetupLink(ctx context.Context, orgID, userID, appURL string) (string, error) {
 	if userID == "" {
 		return "", fmt.Errorf("%w: CreateSetupLink requires userID", idp.ErrUpstream)
+	}
+	if appURL == "" {
+		return "", fmt.Errorf("%w: CreateSetupLink requires appURL", idp.ErrUpstream)
 	}
 	body := map[string]any{
 		"userId":     userID,
@@ -430,7 +438,7 @@ func (c *Client) CreateSetupLink(ctx context.Context, orgID, userID string) (str
 	if resp.InviteCode == "" {
 		return "", fmt.Errorf("%w: CreateSetupLink: empty invite code", idp.ErrUpstream)
 	}
-	urlTemplate := setupLinkURLTemplate(c.cfg.Issuer)
+	urlTemplate := setupLinkURLTemplate(appURL)
 	return renderSetupLink(urlTemplate, userID, orgID, resp.InviteCode), nil
 }
 

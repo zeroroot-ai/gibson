@@ -82,9 +82,6 @@ func (f *fakeZitadel) DeleteOrganization(_ context.Context, orgID string) error 
 func (f *fakeZitadel) EnsureHumanUser(_ context.Context, _, _ string) (string, error) {
 	return "", nil
 }
-func (f *fakeZitadel) CreateSetupLink(_ context.Context, _, _ string) (string, error) {
-	return "", nil
-}
 func (f *fakeZitadel) CreateServiceAccount(_ context.Context, _, name string) (string, string, string, error) {
 	return "svc-" + name, "client-" + name, "secret-" + name, nil
 }

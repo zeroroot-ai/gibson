@@ -151,14 +151,15 @@ func (c *membersIdPClient) EnsureHumanUser(_ context.Context, req idp.EnsureHuma
 	return c.ensureUserID, nil
 }
 
-func (c *membersIdPClient) CreateSetupLink(_ context.Context, orgID, userID string) (string, error) {
+func (c *membersIdPClient) CreateSetupLink(_ context.Context, orgID, userID, appURL string) (string, error) {
 	c.setupLinkOrgIDs = append(c.setupLinkOrgIDs, orgID)
 	c.setupLinkUserIDs = append(c.setupLinkUserIDs, userID)
+	c.setupLinkAppURLs = append(c.setupLinkAppURLs, appURL)
 	if c.setupLinkErr != nil {
 		return "", c.setupLinkErr
 	}
 	if c.setupLink == "" {
-		return "https://idp.example.com/ui/v2/login/invite?userID=" + userID + "&code=test-code", nil
+		return appURL + "/ui/v2/login/invite?userID=" + userID + "&code=test-code", nil
 	}
 	return c.setupLink, nil
 }

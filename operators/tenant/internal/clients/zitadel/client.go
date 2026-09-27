@@ -16,7 +16,6 @@ import (
 	"io"
 	"net/http"
 	"net/url"
-	"strings"
 	"time"
 
 	"golang.org/x/oauth2"
@@ -46,20 +45,16 @@ type Client interface {
 	// id. Idempotent: an existing user is found and returned rather than
 	// duplicated.
 	//
-	// This, plus CreateSetupLink and a tenant-role grant, is the ENTIRE
-	// mechanism by which a human joins a tenant (ADR-0093, hosted#203).
-	// There is no separate org-membership write: a tenant role IS the
-	// membership, and Zitadel's org-member API (`/orgs/me/members`) plays no
-	// part in it — that API grants ORG_-prefixed administrator roles, which
-	// no tenant user ever holds.
+	// This, plus a tenant-role grant, is the ENTIRE mechanism by which a
+	// human joins a tenant (ADR-0093, hosted#203). There is no separate
+	// org-membership write: a tenant role IS the membership, and Zitadel's
+	// org-member API (`/orgs/me/members`) plays no part in it — that API
+	// grants ORG_-prefixed administrator roles, which no tenant user ever
+	// holds. The created user's unverified email triggers Zitadel's own
+	// credential-setup email (matching internal/platform/idp.AdminClient.
+	// EnsureHumanUser's documented behavior); this client mints no separate
+	// setup link.
 	EnsureHumanUser(ctx context.Context, orgID, email string) (userID string, err error)
-
-	// CreateSetupLink mints a one-time Zitadel setup-link code for userID
-	// (returnCode, never sendCode — the caller already owns messaging for
-	// this user) and returns the ready-to-use URL: Zitadel's own hosted
-	// setup flow, where the person sets a password and enrolls MFA. It
-	// carries no password.
-	CreateSetupLink(ctx context.Context, orgID, userID string) (link string, err error)
 
 	// CreateServiceAccount creates a Zitadel machine user (service account)
 	// scoped to orgID with the given display name. Returns the stable
@@ -240,46 +235,6 @@ func (c *httpClient) EnsureHumanUser(ctx context.Context, orgID, email string) (
 	return userID, nil
 }
 
-// setupLinkURLTemplate builds the Go-template URL Zitadel substitutes
-// {{.UserID}}, {{.OrgID}} and {{.Code}} into (CreateInviteCode's urlTemplate
-// field). Mirrors the identical helper operators/platform uses for the
-// Platform owner (ADR-0093, gibson#240): the emitted link is the same shape
-// wherever it is minted.
-func setupLinkURLTemplate(externalDomain string) string {
-	return "https://" + strings.TrimRight(externalDomain, "/") + "/ui/v2/login/invite?userID={{.UserID}}&code={{.Code}}&organization={{.OrgID}}"
-}
-
-// renderSetupLink substitutes the three placeholders setupLinkURLTemplate
-// declares.
-func renderSetupLink(urlTemplate, userID, orgID, code string) string {
-	r := strings.NewReplacer("{{.UserID}}", userID, "{{.OrgID}}", orgID, "{{.Code}}", code)
-	return r.Replace(urlTemplate)
-}
-
-// CreateSetupLink implements Client.
-//
-// Calls the v2 UserService directly (zitadel.user.v2.UserService/
-// CreateInviteCode): v1 has no invite-code endpoint. returnCode (never
-// sendCode) means Zitadel mints the code and hands it straight back instead
-// of emailing it — the caller already owns messaging for this user.
-func (c *httpClient) CreateSetupLink(ctx context.Context, orgID, userID string) (string, error) {
-	body := map[string]any{
-		"userId":     userID,
-		"returnCode": map[string]any{},
-	}
-	var resp struct {
-		InviteCode string `json:"inviteCode"`
-	}
-	if err := c.connectJSON(ctx, userService, "CreateInviteCode", body, &resp); err != nil {
-		return "", fmt.Errorf("CreateSetupLink org=%s user=%s: %w", orgID, userID, err)
-	}
-	if resp.InviteCode == "" {
-		return "", fmt.Errorf("CreateSetupLink org=%s user=%s: empty invite code", orgID, userID)
-	}
-	urlTemplate := setupLinkURLTemplate(c.externalDomain)
-	return renderSetupLink(urlTemplate, userID, orgID, resp.InviteCode), nil
-}
-
 // CreateServiceAccount implements Client.
 //
 // Zitadel v4: machine users live under /v2/users/machine with
@@ -351,9 +306,6 @@ func (c *httpClient) DeleteServiceAccount(ctx context.Context, _, accountID stri
 func (c *httpClient) connectJSON(ctx context.Context, service, method string, body, out any) error {
 	return c.doJSON(ctx, http.MethodPost, "/"+service+"/"+method, body, out)
 }
-
-// userService is the v2 Connect service CreateSetupLink calls.
-const userService = "zitadel.user.v2.UserService"
 
 // EnsureProjectGrant implements Client.
 //
@@ -649,9 +601,6 @@ func (e *errClient) GetOrganization(_ context.Context, _ string) (*Organization,
 }
 func (e *errClient) DeleteOrganization(_ context.Context, _ string) error { return e.err }
 func (e *errClient) EnsureHumanUser(_ context.Context, _, _ string) (string, error) {
-	return "", e.err
-}
-func (e *errClient) CreateSetupLink(_ context.Context, _, _ string) (string, error) {
 	return "", e.err
 }
 func (e *errClient) CreateServiceAccount(_ context.Context, _, _ string) (string, string, string, error) {
