@@ -1,5 +1,12 @@
 # Changelog
 
+## [0.142.2](https://github.com/zeroroot-ai/gibson/compare/v0.142.1...v0.142.2) (2026-09-27)
+
+
+### Bug Fixes
+
+* **identity:** setup links open the Login v2 verify page ([#261](https://github.com/zeroroot-ai/gibson/issues/261)) ([d142418](https://github.com/zeroroot-ai/gibson/commit/d1424188e20de1603591216c2e3a5b78bf3f390d))
+
 ## [0.142.1](https://github.com/zeroroot-ai/gibson/compare/v0.142.0...v0.142.1) (2026-09-27)
 
 
