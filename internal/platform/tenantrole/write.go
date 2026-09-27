@@ -111,6 +111,29 @@ func (s *Syncer) Transfer(ctx context.Context, t Tenant, from, to string) error 
 	return nil
 }
 
+// IsMember reports whether userID holds an active role grant on t —
+// equivalently, whether userID is already a member of tenant t. Read-only;
+// unlike Assign/Revoke it writes nothing.
+//
+// Used by InviteMember (hosted#203) to tell "already a member of THIS
+// tenant" (a re-invite, not sensitive) from "belongs to a DIFFERENT tenant"
+// (ADR-0093 decision 1: one tenant per person, emails unique install-wide,
+// so any other existing account is necessarily elsewhere) — the case that
+// must never be disclosed to the inviter.
+func (s *Syncer) IsMember(ctx context.Context, t Tenant, userID string) (bool, error) {
+	if t.ID == "" || t.OrgID == "" {
+		return false, fmt.Errorf("tenantrole: IsMember requires a tenant id and org id, got %+v", t)
+	}
+	if userID == "" {
+		return false, errors.New("tenantrole: IsMember requires a userID")
+	}
+	g, err := s.activeGrant(ctx, t, userID)
+	if err != nil {
+		return false, fmt.Errorf("tenantrole: IsMember tenant=%s user=%s: %w", t.ID, userID, err)
+	}
+	return g != nil, nil
+}
+
 // activeGrant returns the user's one active grant on the tenant's project,
 // or nil when none exists.
 func (s *Syncer) activeGrant(ctx context.Context, t Tenant, userID string) (*Grant, error) {

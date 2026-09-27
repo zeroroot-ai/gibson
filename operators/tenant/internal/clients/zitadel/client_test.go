@@ -160,81 +160,17 @@ func TestDeleteOrganization_Idempotent(t *testing.T) {
 	}
 }
 
-// TestAddMember_Success verifies the composite membership ID is returned.
-// v4: POST /management/v1/orgs/me/members with x-zitadel-orgid header.
-func TestAddMember_Success(t *testing.T) {
-	c := newTestServer(t, map[string]http.HandlerFunc{
-		"POST /management/v1/orgs/me/members": func(w http.ResponseWriter, _ *http.Request) {
-			writeJSON(w, http.StatusOK, map[string]any{
-				"details": map[string]string{"sequence": "42"},
-			})
-		},
-	})
-	id, err := c.AddMember(context.Background(), "org-abc", "user-1", []string{"gibson.owner"})
-	if err != nil {
-		t.Fatalf("unexpected error: %v", err)
-	}
-	if id != "org-abc/user-1" {
-		t.Errorf("got id=%q, want %q", id, "org-abc/user-1")
-	}
-}
-
-// TestAddMember_Conflict409 verifies 409 returns the composite ID without error.
-func TestAddMember_Conflict409(t *testing.T) {
-	c := newTestServer(t, map[string]http.HandlerFunc{
-		"POST /management/v1/orgs/me/members": func(w http.ResponseWriter, _ *http.Request) {
-			writeJSON(w, http.StatusConflict, map[string]string{"message": "already member"})
-		},
-	})
-	id, err := c.AddMember(context.Background(), "org-abc", "user-1", []string{"gibson.owner"})
-	if err != nil {
-		t.Fatalf("expected nil error for conflict, got %v", err)
-	}
-	if id != "org-abc/user-1" {
-		t.Errorf("got id=%q, want %q", id, "org-abc/user-1")
-	}
-}
-
-// TestRemoveMember_Success verifies 200 returns nil.
-// v4: DELETE /management/v1/orgs/me/members/{userID}.
-func TestRemoveMember_Success(t *testing.T) {
-	c := newTestServer(t, map[string]http.HandlerFunc{
-		"DELETE /management/v1/orgs/me/members/user-1": func(w http.ResponseWriter, _ *http.Request) {
-			w.WriteHeader(http.StatusOK)
-		},
-	})
-	if err := c.RemoveMember(context.Background(), "org-abc", "user-1"); err != nil {
-		t.Fatalf("unexpected error: %v", err)
-	}
-}
-
-// TestRemoveMember_Idempotent verifies 404 is treated as success.
-func TestRemoveMember_Idempotent(t *testing.T) {
-	c := newTestServer(t, map[string]http.HandlerFunc{
-		"DELETE /management/v1/orgs/me/members/gone": func(w http.ResponseWriter, _ *http.Request) {
-			writeJSON(w, http.StatusNotFound, map[string]string{"message": "not found"})
-		},
-	})
-	if err := c.RemoveMember(context.Background(), "org-abc", "gone"); err != nil {
-		t.Fatalf("expected nil for 404, got %v", err)
-	}
-}
-
-// TestSendInvitation_NewUser verifies the happy path creates a user then adds
-// them as a member, returning the user ID.
-// v4: POST /v2/users/human for creation, POST /management/v1/orgs/me/members.
-func TestSendInvitation_NewUser(t *testing.T) {
+// TestEnsureHumanUser_Success verifies the happy path returns the newly
+// created user's id. Hosted#203: there is no follow-up org-membership call —
+// a tenant role (written separately, through tenantrole.Syncer) is the
+// membership.
+func TestEnsureHumanUser_Success(t *testing.T) {
 	c := newTestServer(t, map[string]http.HandlerFunc{
 		"POST /v2/users/human": func(w http.ResponseWriter, _ *http.Request) {
 			writeJSON(w, http.StatusOK, map[string]string{"userId": "user-new"})
 		},
-		"POST /management/v1/orgs/me/members": func(w http.ResponseWriter, _ *http.Request) {
-			writeJSON(w, http.StatusOK, map[string]any{
-				"details": map[string]string{"sequence": "1"},
-			})
-		},
 	})
-	uid, err := c.SendInvitation(context.Background(), "org-abc", "alice@example.com", []string{"gibson.member"})
+	uid, err := c.EnsureHumanUser(context.Background(), "org-abc", "alice@example.com")
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
@@ -243,9 +179,10 @@ func TestSendInvitation_NewUser(t *testing.T) {
 	}
 }
 
-// TestSendInvitation_ExistingUser verifies that if user creation returns 409,
-// the client looks up the existing user by email via /v2/users and still succeeds.
-func TestSendInvitation_ExistingUser(t *testing.T) {
+// TestEnsureHumanUser_ExistingUser verifies that if user creation returns
+// 409, the client looks up the existing user by email via /v2/users and
+// still succeeds — idempotent, per the interface doc.
+func TestEnsureHumanUser_ExistingUser(t *testing.T) {
 	c := newTestServer(t, map[string]http.HandlerFunc{
 		"POST /v2/users/human": func(w http.ResponseWriter, _ *http.Request) {
 			writeJSON(w, http.StatusConflict, map[string]string{"message": "user exists"})
@@ -255,18 +192,78 @@ func TestSendInvitation_ExistingUser(t *testing.T) {
 				"result": []map[string]string{{"userId": "user-existing"}},
 			})
 		},
-		"POST /management/v1/orgs/me/members": func(w http.ResponseWriter, _ *http.Request) {
-			writeJSON(w, http.StatusOK, map[string]any{
-				"details": map[string]string{"sequence": "2"},
-			})
-		},
 	})
-	uid, err := c.SendInvitation(context.Background(), "org-abc", "alice@example.com", []string{"gibson.member"})
+	uid, err := c.EnsureHumanUser(context.Background(), "org-abc", "alice@example.com")
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
 	if uid != "user-existing" {
 		t.Errorf("got uid=%q, want %q", uid, "user-existing")
+	}
+}
+
+// TestEnsureHumanUser_ConflictLooksUpExistingUser keeps the removed
+// TestAddMember_Conflict409 / TestSendInvitation_ExistingUser's
+// upstream-conflict-mapping coverage: a 409 on create falls back to the
+// by-email lookup and still succeeds (idempotent).
+func TestEnsureHumanUser_ConflictLooksUpExistingUser(t *testing.T) {
+	c := newTestServer(t, map[string]http.HandlerFunc{
+		"POST /v2/users/human": func(w http.ResponseWriter, _ *http.Request) {
+			writeJSON(w, http.StatusConflict, map[string]string{"message": "already exists"})
+		},
+		"POST /v2/users": func(w http.ResponseWriter, _ *http.Request) {
+			writeJSON(w, http.StatusOK, map[string]any{
+				"result": []map[string]string{{"userId": "user-1"}},
+			})
+		},
+	})
+	id, err := c.EnsureHumanUser(context.Background(), "org-abc", "alice@example.com")
+	if err != nil {
+		t.Fatalf("expected nil error for conflict, got %v", err)
+	}
+	if id != "user-1" {
+		t.Errorf("got id=%q, want %q", id, "user-1")
+	}
+}
+
+// TestEnsureHumanUser_NonConflictCreateErrorSurfaces: a create failure that
+// is not a 409 must be returned as-is, never fall through to the
+// conflict-lookup branch.
+func TestEnsureHumanUser_NonConflictCreateErrorSurfaces(t *testing.T) {
+	c := newTestServer(t, map[string]http.HandlerFunc{
+		"POST /v2/users/human": func(w http.ResponseWriter, _ *http.Request) {
+			writeJSON(w, http.StatusInternalServerError, map[string]string{"message": "boom"})
+		},
+	})
+	if _, err := c.EnsureHumanUser(context.Background(), "org-abc", "alice@example.com"); err == nil {
+		t.Fatal("expected an error for a non-conflict create failure")
+	}
+}
+
+// TestEnsureHumanUser_ConflictLookupFailureSurfaces: if the create returns
+// 409 but the follow-up lookup by email itself fails, that failure must
+// surface, not a stray empty userID.
+func TestEnsureHumanUser_ConflictLookupFailureSurfaces(t *testing.T) {
+	c := newTestServer(t, map[string]http.HandlerFunc{
+		"POST /v2/users/human": func(w http.ResponseWriter, _ *http.Request) {
+			writeJSON(w, http.StatusConflict, map[string]string{"message": "already exists"})
+		},
+		"POST /v2/users": func(w http.ResponseWriter, _ *http.Request) {
+			writeJSON(w, http.StatusInternalServerError, map[string]string{"message": "lookup boom"})
+		},
+	})
+	if _, err := c.EnsureHumanUser(context.Background(), "org-abc", "alice@example.com"); err == nil {
+		t.Fatal("expected an error when the conflict-lookup itself fails")
+	}
+}
+
+// TestEnsureHumanUser_ErrClient covers the errClient stand-in New returns
+// for an unparseable apiURL — every Client method must surface that
+// construction error, not panic or silently no-op.
+func TestEnsureHumanUser_ErrClient(t *testing.T) {
+	c := New("://bad-url", oauth2.StaticTokenSource(&oauth2.Token{AccessToken: "t"}), "")
+	if _, err := c.EnsureHumanUser(context.Background(), "org-abc", "alice@example.com"); err == nil {
+		t.Fatal("expected the errClient's construction error")
 	}
 }
 
@@ -480,7 +477,7 @@ func TestEnsureProjectGrant_CreatesUpdatesAndIsANoOp(t *testing.T) {
 // idp.UsernameForEmail(email), the same function every other human-user
 // create path uses, so a stray case or whitespace difference in the
 // invited address can never mint a second username for the same mailbox.
-func TestSendInvitation_UsernameIsNormalizedEmail(t *testing.T) {
+func TestEnsureHumanUser_UsernameIsNormalizedEmail(t *testing.T) {
 	const rawEmail = " Alice@Example.COM "
 	var gotUsername string
 	c := newTestServer(t, map[string]http.HandlerFunc{
@@ -492,13 +489,8 @@ func TestSendInvitation_UsernameIsNormalizedEmail(t *testing.T) {
 			gotUsername = body.Username
 			writeJSON(w, http.StatusOK, map[string]string{"userId": "user-new"})
 		},
-		"POST /management/v1/orgs/me/members": func(w http.ResponseWriter, _ *http.Request) {
-			writeJSON(w, http.StatusOK, map[string]any{
-				"details": map[string]string{"sequence": "1"},
-			})
-		},
 	})
-	if _, err := c.SendInvitation(context.Background(), "org-abc", rawEmail, []string{"gibson.member"}); err != nil {
+	if _, err := c.EnsureHumanUser(context.Background(), "org-abc", rawEmail); err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
 	want := idp.UsernameForEmail(rawEmail)

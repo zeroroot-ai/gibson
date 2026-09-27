@@ -57,6 +57,25 @@ type AdminClient interface {
 	// MembershipService.AcceptInvitation to provision an invited member.
 	EnsureHumanUser(ctx context.Context, req EnsureHumanUserRequest) (userID string, err error)
 
+	// CreateSetupLink mints a one-time Zitadel setup-link code for userID
+	// (the same invite-code mechanism ADR-0093 uses for the Platform owner,
+	// gibson#240/hosted#201) and returns the ready-to-use URL. The code is
+	// minted with returnCode, never sendCode: Zitadel never emails it, because
+	// the caller already owns messaging for this user (an invitation email
+	// this install sent, whose accept-token the invitee already redeemed).
+	// The returned link sends the browser straight to Zitadel's own hosted
+	// setup flow (password + MFA enrollment); it carries no password.
+	//
+	// orgID scopes the call to the user's org. appURL is the PRODUCT-surface
+	// origin the link is built on (e.g. "https://app.example.com", from
+	// GIBSON_APP_URL) — REQUIRED, and never the OIDC issuer or the Zitadel
+	// admin endpoint: gibson#254 found the Platform owner's setup link built
+	// from spec.zitadel.issuer resolved to an in-cluster address on kind, so
+	// this method takes no issuer/endpoint of its own to make that mistake
+	// with. Used by MembershipService.AcceptInvitation, which already
+	// resolves appURL from GIBSON_APP_URL for the accept-link email.
+	CreateSetupLink(ctx context.Context, orgID, userID, appURL string) (link string, err error)
+
 	// CreateHumanUser provisions a password-bearing founding-owner human user
 	// during self-serve signup. Unlike EnsureHumanUser (invitation flow, no
 	// password — the invitee sets credentials via the emailed code), this sets

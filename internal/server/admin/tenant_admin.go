@@ -138,6 +138,10 @@ type TenantAdminServer struct {
 // email (gibson#632).
 type InvitationMailer interface {
 	SendInvitation(ctx context.Context, inv mailer.InvitationEmail) error
+	// SendInvitationConflict sends the invitee-only notice for an address
+	// that already belongs to a different tenant (hosted#203). InviteMember
+	// still reports success to the inviter either way.
+	SendInvitationConflict(ctx context.Context, c mailer.InvitationConflictEmail) error
 }
 
 // TenantZitadelOrgResolver resolves the IdP organization id seeded for a

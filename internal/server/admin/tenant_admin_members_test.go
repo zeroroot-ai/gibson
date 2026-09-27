@@ -79,9 +79,10 @@ type membersIdPClient struct {
 	failFor  map[string]bool // accountIDs that should return an error
 
 	// EnsureHumanUser recording (gibson#633)
-	ensuredEmails []string
-	ensureUserID  string
-	ensureErr     error
+	ensuredEmails         []string
+	ensuredEmailsVerified []bool
+	ensureUserID          string
+	ensureErr             error
 
 	// Removal recording (ADR-0093 §11, hosted#205): RemoveMember/LeaveTenant
 	// tests inject a failure and assert the call happened.
@@ -89,6 +90,19 @@ type membersIdPClient struct {
 	revokedSessionsFor []string
 	deleteHumanUserErr error
 	deletedHumanUsers  []idp.HumanUserStateRequest
+
+	// CreateSetupLink recording (hosted#203)
+	setupLinkUserIDs []string
+	setupLinkOrgIDs  []string
+	setupLinkAppURLs []string
+	setupLink        string
+	setupLinkErr     error
+
+	// FindUserIDByEmail (hosted#203 cross-tenant invitation check). Defaults
+	// to idp.ErrNotFound (address unused), matching production behavior for
+	// an address nobody has an account with.
+	findByEmailUserID string
+	findByEmailErr    error
 }
 
 func (c *membersIdPClient) CreateServiceAccount(_ context.Context, _ idp.CreateServiceAccountRequest) (*idp.ServiceAccount, error) {
@@ -127,6 +141,7 @@ func (c *membersIdPClient) ClearHumanFactors(_ context.Context, _ string) (idp.C
 }
 func (c *membersIdPClient) EnsureHumanUser(_ context.Context, req idp.EnsureHumanUserRequest) (string, error) {
 	c.ensuredEmails = append(c.ensuredEmails, req.Email)
+	c.ensuredEmailsVerified = append(c.ensuredEmailsVerified, req.EmailVerified)
 	if c.ensureErr != nil {
 		return "", c.ensureErr
 	}
@@ -134,6 +149,19 @@ func (c *membersIdPClient) EnsureHumanUser(_ context.Context, req idp.EnsureHuma
 		return "user-ensured", nil
 	}
 	return c.ensureUserID, nil
+}
+
+func (c *membersIdPClient) CreateSetupLink(_ context.Context, orgID, userID, appURL string) (string, error) {
+	c.setupLinkOrgIDs = append(c.setupLinkOrgIDs, orgID)
+	c.setupLinkUserIDs = append(c.setupLinkUserIDs, userID)
+	c.setupLinkAppURLs = append(c.setupLinkAppURLs, appURL)
+	if c.setupLinkErr != nil {
+		return "", c.setupLinkErr
+	}
+	if c.setupLink == "" {
+		return appURL + "/ui/v2/login/invite?userID=" + userID + "&code=test-code", nil
+	}
+	return c.setupLink, nil
 }
 func (c *membersIdPClient) SetHumanPassword(context.Context, idp.SetHumanPasswordRequest) error {
 	return nil
@@ -143,6 +171,12 @@ func (c *membersIdPClient) CreateHumanUser(_ context.Context, _ idp.CreateHumanU
 	return idp.CreateHumanUserResult{}, nil
 }
 func (c *membersIdPClient) FindUserIDByEmail(_ context.Context, _ string) (string, error) {
+	if c.findByEmailErr != nil {
+		return "", c.findByEmailErr
+	}
+	if c.findByEmailUserID != "" {
+		return c.findByEmailUserID, nil
+	}
 	return "", idp.ErrNotFound
 }
 func (c *membersIdPClient) EnsureHumanUserNoPassword(_ context.Context, _, _, _, _ string) (string, error) {

@@ -1342,9 +1342,14 @@ func (d *daemonImpl) buildGRPCServer(ctx context.Context) (*grpcSubsystem, error
 				Roles:              tenantRoleSyncer,
 				Invitations:        admin.NewInvitationStore(d.platformDB),
 				InvitationMailer:   adminMailer,
-				InviteBaseURL:      os.Getenv("GIBSON_PUBLIC_URL"),
-				ReservedNames:      rnpForAdmin,
-				Logger:             d.logger.Slog(),
+				// The invitation accept link must land on the product surface,
+				// not the API plane — the same reason WithAppURL uses
+				// api.EnvAppURL for signup links, a few lines above. Reusing
+				// GIBSON_PUBLIC_URL here (the api.<domain> origin) built a
+				// link the dashboard serves no route for (hosted#203).
+				InviteBaseURL: os.Getenv(api.EnvAppURL),
+				ReservedNames: rnpForAdmin,
+				Logger:        d.logger.Slog(),
 			})
 			if taErr != nil {
 				d.logger.Warn(ctx, "broker admin stack: NewTenantAdminServer failed; MembershipService + SecretsService will use Unavailable stubs",

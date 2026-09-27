@@ -267,6 +267,9 @@ func (f *fakeUserIdPClient) ClearHumanFactors(_ context.Context, _ string) (idp.
 func (f *fakeUserIdPClient) EnsureHumanUser(_ context.Context, _ idp.EnsureHumanUserRequest) (string, error) {
 	return "user-1", nil
 }
+func (f *fakeUserIdPClient) CreateSetupLink(_ context.Context, _, userID, appURL string) (string, error) {
+	return appURL + "/ui/v2/login/invite?userID=" + userID, nil
+}
 func (f *fakeUserIdPClient) SetHumanPassword(context.Context, idp.SetHumanPasswordRequest) error {
 	return nil
 }
