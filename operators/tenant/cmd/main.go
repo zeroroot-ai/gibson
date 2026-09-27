@@ -22,7 +22,6 @@ import (
 	awsconfig "github.com/aws/aws-sdk-go-v2/config"
 	awskms "github.com/aws/aws-sdk-go-v2/service/kms"
 	"github.com/go-logr/logr"
-	"golang.org/x/oauth2"
 	"golang.org/x/oauth2/clientcredentials"
 	"k8s.io/apimachinery/pkg/runtime"
 	utilruntime "k8s.io/apimachinery/pkg/util/runtime"
@@ -41,7 +40,6 @@ import (
 	"github.com/zeroroot-ai/gibson/internal/infra/pools"
 	"github.com/zeroroot-ai/gibson/internal/infra/readiness"
 	"github.com/zeroroot-ai/gibson/internal/platform/tenantrole"
-	"github.com/zeroroot-ai/gibson/internal/platform/zitadelconn"
 
 	connectorv1alpha1 "github.com/zeroroot-ai/gibson/operators/connector/api/v1alpha1"
 	gibsonv1alpha1 "github.com/zeroroot-ai/gibson/operators/tenant/api/v1alpha1"
@@ -625,19 +623,11 @@ func main() {
 	// operator already requires, claiming the instance by header (ADR-0092)
 	// and authenticating as the operator's own machine user, with the same
 	// client credentials as the management-API client.
-	zitadelEndpoint, err := zitadelconn.New(zitadelURL, zitadelExternalDomain)
+	tenantRoleGrants, err := newTenantRoleGrants(context.Background(), zitadelURL, zitadelExternalDomain, operatorClientID, operatorClientSecret, zitadelProjectID)
 	if err != nil {
-		setupLog.Error(err, "zitadelconn.New failed (ADR-0092): ZITADEL_URL and ZITADEL_EXTERNAL_DOMAIN "+
-			"are both required for tenant role grants")
+		setupLog.Error(err, "tenant role grants (ADR-0092, ADR-0093): the operator refuses to start")
 		os.Exit(1)
 	}
-	tenantRoleTokens, err := zitadel.TokenSource(context.Background(), zitadelURL, zitadelExternalDomain, operatorClientID, operatorClientSecret)
-	if err != nil {
-		setupLog.Error(err, "tenant role grants: the operator refuses to start without its own client credentials")
-		os.Exit(1)
-	}
-	tenantRoleHTTP := &http.Client{Transport: &oauth2.Transport{Source: tenantRoleTokens, Base: zitadelEndpoint.Transport(nil)}}
-	tenantRoleGrants := tenantrole.NewZitadelGrants(zitadelEndpoint, tenantRoleHTTP, zitadelProjectID)
 	tenantRoleTuples := fga.NewTenantRoleTuples(fgaClient)
 	tenantRoleSyncer := tenantrole.NewSyncer(tenantRoleGrants, tenantRoleTuples, nil)
 	tenantRoleSyncInterval := controller.DefaultTenantRoleSyncInterval

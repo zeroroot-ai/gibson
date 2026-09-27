@@ -22,3 +22,24 @@ func TestNewZitadelClient_RefusesWithoutCredentials(t *testing.T) {
 		t.Fatal("newZitadelClient without client credentials = nil error, want refusal")
 	}
 }
+
+func TestNewTenantRoleGrants_UsesTheOperatorsOwnCredentials(t *testing.T) {
+	g, err := newTenantRoleGrants(context.Background(), "http://gibson-zitadel:8080", "app.example.test", "tenant-operator", "s3cret", "PROJ-1")
+	if err != nil || g == nil {
+		t.Fatalf("newTenantRoleGrants = %v, %v; want grants", g, err)
+	}
+}
+
+// TestNewTenantRoleGrants_RefusesABadEndpoint: a claimed host with a port is
+// refused (ADR-0092), and the operator must not start.
+func TestNewTenantRoleGrants_RefusesABadEndpoint(t *testing.T) {
+	if _, err := newTenantRoleGrants(context.Background(), "http://gibson-zitadel:8080", "app.example.test:443", "tenant-operator", "s3cret", "PROJ-1"); err == nil {
+		t.Fatal("newTenantRoleGrants with a ported host = nil error, want refusal")
+	}
+}
+
+func TestNewTenantRoleGrants_RefusesWithoutCredentials(t *testing.T) {
+	if _, err := newTenantRoleGrants(context.Background(), "http://gibson-zitadel:8080", "app.example.test", "", "", "PROJ-1"); err == nil {
+		t.Fatal("newTenantRoleGrants without client credentials = nil error, want refusal")
+	}
+}
