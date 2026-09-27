@@ -36,6 +36,10 @@ enterprise:
   storage: 200Gi
   cpu: "1"
   memory: 8Gi
+enterprise-deploy:
+  storage: 10Gi
+  cpu: 100m
+  memory: 1Gi
 `
 
 func newTierTestProvisioner(t *testing.T, cmData map[string]string) *Neo4jProvisioner {
@@ -112,9 +116,14 @@ func TestATierTheChartDoesNotNameKeepsTheInlineAliasing(t *testing.T) {
 // production quietly running dev sizes while everything reports healthy.
 func TestAMalformedTableFailsRatherThanUsingDevSizes(t *testing.T) {
 	for name, data := range map[string]string{
-		"not yaml":            "{{{",
-		"empty":               "",
-		"missing a tier":      "team:\n  storage: 10Gi\n  cpu: 250m\n  memory: 2Gi\n",
+		"not yaml":       "{{{",
+		"empty":          "",
+		"missing a tier": "team:\n  storage: 10Gi\n  cpu: 250m\n  memory: 2Gi\n",
+		// The first-tenant plan. A table sized for every other tier but this
+		// one is exactly what charts#180 shipped.
+		"missing enterprise-deploy": "team: {storage: 10Gi, cpu: 100m, memory: 1Gi}\n" +
+			"org: {storage: 50Gi, cpu: 500m, memory: 4Gi}\n" +
+			"enterprise: {storage: 200Gi, cpu: \"1\", memory: 8Gi}\n",
 		"unparseable cpu":     strings.Replace(chartTiers, "cpu: 250m", "cpu: 250mm", 1),
 		"a tier with no size": "team: {}\norg: {}\nenterprise: {}\n",
 	} {

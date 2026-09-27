@@ -677,7 +677,12 @@ type neo4jTierSize struct {
 // canonicalTiers are the tiers the chart must size. A rendered table missing
 // one of them is a chart defect, not a reason to quietly use dev sizes: that
 // is precisely the failure this whole path exists to end.
-var canonicalTiers = []string{"team", "org", "enterprise"}
+//
+// enterprise-deploy is the plan of the first tenant every self-hosted install
+// seeds. It was missing here, so when the chart shipped no row for it
+// (charts#180) this check passed, the tenant fell through to the inline
+// 1 CPU / 8Gi, and the pod never scheduled on a small node.
+var canonicalTiers = []string{"team", "org", "enterprise", "enterprise-deploy"}
 
 // parseTierSizes reads the chart-rendered tier table.
 //
