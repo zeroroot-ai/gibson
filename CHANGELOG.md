@@ -1,5 +1,12 @@
 # Changelog
 
+## [0.142.3](https://github.com/zeroroot-ai/gibson/compare/v0.142.2...v0.142.3) (2026-09-27)
+
+
+### Bug Fixes
+
+* **platform-operator:** revoke Zitadel admin rights from undeclared machine users ([#285](https://github.com/zeroroot-ai/gibson/issues/285)) ([f67aa9d](https://github.com/zeroroot-ai/gibson/commit/f67aa9dc68d0e496aff9878fd58a39de40aab932))
+
 ## [0.142.2](https://github.com/zeroroot-ai/gibson/compare/v0.142.1...v0.142.2) (2026-09-27)
 
 
