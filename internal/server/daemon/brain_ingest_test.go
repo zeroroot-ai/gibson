@@ -226,6 +226,90 @@ func TestIngestLLMCall_MissionStamped(t *testing.T) {
 	t.Fatalf("llm calls not folded into the World: %+v", reg.For("acme").LlmCalls())
 }
 
+// TestIngestLLMCall_CarriesToolCallsFullFidelity is the gibson#271
+// flight-recorder unit at the daemon-wiring boundary: an api.LLMCallRecord's
+// tool calls (both a historical prompt message's and the completion's own)
+// must survive the api → brain translation ingestLLMCall performs.
+func TestIngestLLMCall_CarriesToolCallsFullFidelity(t *testing.T) {
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+	reg := brain.NewRegistry(ctx)
+	sink := ingestLLMCall(reg)
+
+	sink(ctx, "acme", api.LLMCallRecord{
+		CallID: "c1", Model: "m",
+		Messages: []api.LLMMessage{
+			{Role: "assistant", ToolCalls: []api.LLMToolCall{
+				{ID: "tc1", Type: "function", Name: "nmap", Arguments: `{"host":"x"}`},
+			}},
+		},
+		CompletionToolCalls: []api.LLMToolCall{
+			{ID: "tc2", Type: "function", Name: "nikto", Arguments: `{"host":"x"}`},
+		},
+		RecordedAtUnixNano: 12345,
+	})
+
+	deadline := time.Now().Add(2 * time.Second)
+	for time.Now().Before(deadline) {
+		calls := reg.For("acme").LlmCalls()
+		if len(calls) == 1 {
+			c := calls[0]
+			if len(c.Messages) == 1 && len(c.Messages[0].ToolCalls) == 1 &&
+				c.Messages[0].ToolCalls[0].Name == "nmap" &&
+				len(c.CompletionToolCalls) == 1 && c.CompletionToolCalls[0].Name == "nikto" &&
+				c.RecordedAtUnixNano == 12345 {
+				return
+			}
+			t.Fatalf("tool calls not carried full-fidelity: %+v", c)
+		}
+		time.Sleep(10 * time.Millisecond)
+	}
+	t.Fatal("llm call not folded into the World")
+}
+
+// TestIngestToolCall_FeedsWorld is the gibson#271 flight-recorder unit for the
+// tool-I/O half: a completed CallToolProto invocation folds into the calling
+// tenant's brain World as an AgentToolCall entity, routed by tenant.
+func TestIngestToolCall_FeedsWorld(t *testing.T) {
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+	reg := brain.NewRegistry(ctx)
+	sink := ingestToolCall(reg)
+
+	sink(ctx, "acme", harness.ToolCallRecord{
+		ToolCallID: "tc1", MissionID: "m1", ToolName: "nmap",
+		Arguments: `{"host":"x"}`, Result: `{"ports":[22]}`,
+	})
+
+	deadline := time.Now().Add(2 * time.Second)
+	for time.Now().Before(deadline) {
+		calls := reg.For("acme").AgentToolCalls()
+		if len(calls) == 1 && calls[0].ToolName == "nmap" {
+			if len(reg.For("other").AgentToolCalls()) != 0 {
+				t.Fatal("cross-tenant tool-call leak")
+			}
+			return
+		}
+		time.Sleep(10 * time.Millisecond)
+	}
+	t.Fatalf("tool call not captured: %+v", reg.For("acme").AgentToolCalls())
+}
+
+// TestIngestToolCall_NilSafe ensures a nil registry and an empty ToolCallID are
+// no-ops, never a panic (capture is best-effort and must not break a tool call).
+func TestIngestToolCall_NilSafe(t *testing.T) {
+	ingestToolCall(nil)(context.Background(), "acme", harness.ToolCallRecord{ToolCallID: "tc1"})
+
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+	reg := brain.NewRegistry(ctx)
+	ingestToolCall(reg)(ctx, "acme", harness.ToolCallRecord{ToolCallID: ""})
+	time.Sleep(50 * time.Millisecond)
+	if got := reg.For("acme").AgentToolCalls(); len(got) != 0 {
+		t.Fatalf("empty ToolCallID must be ignored, got %+v", got)
+	}
+}
+
 // TestIngestDelegation: an agent delegation folds both the parent and child run
 // into the World (run-provenance), with the parent link carried so the projector
 // can draw DELEGATED_TO — replacing the old direct graph write (gibson#837).

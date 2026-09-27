@@ -361,7 +361,13 @@ func ingestLLMCall(reg *brain.Registry) api.LLMCallSink {
 		}
 		msgs := make([]brain.LlmMessage, 0, len(call.Messages))
 		for _, m := range call.Messages {
-			msgs = append(msgs, brain.LlmMessage{Role: m.Role, Content: m.Content})
+			msgs = append(msgs, brain.LlmMessage{
+				Role:       m.Role,
+				Content:    m.Content,
+				Name:       m.Name,
+				ToolCallID: m.ToolCallID,
+				ToolCalls:  toBrainToolCalls(m.ToolCalls),
+			})
 		}
 		reg.For(tenant).Submit(brain.LlmCallObserved{
 			CallID:  call.CallID,
@@ -372,11 +378,63 @@ func ingestLLMCall(reg *brain.Registry) api.LLMCallSink {
 			// stamps mission_id on the request; the handler carries it onto the record
 			// so the call attaches to its mission's frame. Empty = tenant-ambient (e.g.
 			// dashboard chat), which never attaches to a mission frame.
-			MissionID:        call.MissionID,
-			PromptTokens:     call.PromptTokens,
-			CompletionTokens: call.CompletionTokens,
-			Messages:         msgs,
-			Completion:       call.Completion,
+			MissionID:           call.MissionID,
+			PromptTokens:        call.PromptTokens,
+			CompletionTokens:    call.CompletionTokens,
+			Messages:            msgs,
+			Completion:          call.Completion,
+			CompletionToolCalls: toBrainToolCalls(call.CompletionToolCalls),
+			RecordedAtUnixNano:  call.RecordedAtUnixNano,
+		})
+	}
+}
+
+// toAPIToolCalls converts harness.LLMCallToolCall values to the daemon api
+// package's LLMToolCall shape (ADR-0020, gibson#271) — the bridge daemon.go's
+// callback→api LLM-call mapping uses.
+func toAPIToolCalls(calls []harness.LLMCallToolCall) []api.LLMToolCall {
+	if len(calls) == 0 {
+		return nil
+	}
+	out := make([]api.LLMToolCall, 0, len(calls))
+	for _, c := range calls {
+		out = append(out, api.LLMToolCall{ID: c.ID, Type: c.Type, Name: c.Name, Arguments: c.Arguments})
+	}
+	return out
+}
+
+// toBrainToolCalls converts api.LLMToolCall values to the brain package's
+// LlmToolCall shape (ADR-0020, gibson#271).
+func toBrainToolCalls(calls []api.LLMToolCall) []brain.LlmToolCall {
+	if len(calls) == 0 {
+		return nil
+	}
+	out := make([]brain.LlmToolCall, 0, len(calls))
+	for _, c := range calls {
+		out = append(out, brain.LlmToolCall{ID: c.ID, Type: c.Type, Name: c.Name, Arguments: c.Arguments})
+	}
+	return out
+}
+
+// ingestToolCall returns the daemon's tool-call capture sink (ADR-0020,
+// gibson#271): it folds a completed CallToolProto invocation into the calling
+// tenant's brain World as an AgentToolCall entity — the flight recorder's
+// tool-I/O half, alongside ingestLLMCall's transcript half. Routes by the
+// call's own tenant, same as ingestLLMCall.
+func ingestToolCall(reg *brain.Registry) harness.ToolCallSink {
+	return func(_ context.Context, tenant string, call harness.ToolCallRecord) {
+		if reg == nil || call.ToolCallID == "" {
+			return
+		}
+		reg.For(tenant).Submit(brain.AgentToolCallObserved{
+			ToolCallID:         call.ToolCallID,
+			MissionID:          call.MissionID,
+			RunID:              call.RunID,
+			ToolName:           call.ToolName,
+			Arguments:          call.Arguments,
+			Result:             call.Result,
+			Err:                call.Err,
+			RecordedAtUnixNano: call.RecordedAtUnixNano,
 		})
 	}
 }

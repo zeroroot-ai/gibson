@@ -307,6 +307,61 @@ func TestLLMCompleteStructured_FeedsLLMCallSink_Decider(t *testing.T) {
 	assert.Equal(t, int32(18), resp.Usage.TotalTokens)
 }
 
+// TestLLMCompleteWithTools_CapturesToolCallsFullFidelity is the gibson#271
+// flight-recorder unit: a tool-calling completion's ToolCalls must ride onto
+// the captured record (CompletionToolCalls), not be silently dropped the way
+// only Content was captured before. It also proves a tool-calling turn's
+// historical prompt messages (an assistant message with ToolCalls, and the
+// tool-result message replaying it) keep their full shape.
+func TestLLMCompleteWithTools_CapturesToolCallsFullFidelity(t *testing.T) {
+	var captured []capturedCall
+	registry := NewCallbackHarnessRegistry()
+	h := &completingMockHarness{
+		resp: &llm.CompletionResponse{
+			Model: "claude-haiku-4-5",
+			Message: llm.Message{
+				Role: llm.RoleAssistant,
+				ToolCalls: []llm.ToolCall{
+					{ID: "call_1", Type: "function", Name: "nmap", Arguments: `{"host":"10.0.0.5"}`},
+				},
+			},
+			FinishReason: llm.FinishReasonToolCalls,
+			Usage:        llm.CompletionTokenUsage{PromptTokens: 20, CompletionTokens: 8, TotalTokens: 28},
+		},
+	}
+	h.tenantID = "acme"
+	registry.Register("mission-A", "recon-agent", h)
+	svc := NewHarnessCallbackServiceWithRegistry(
+		slog.New(slog.NewTextHandler(io.Discard, nil)),
+		registry,
+		WithLLMCallSink(func(_ context.Context, tn string, call LLMCallRecord) {
+			captured = append(captured, capturedCall{tenant: tn, call: call})
+		}),
+	)
+
+	ctx := auth.ContextWithTenantString(context.Background(), "acme")
+	resp, err := svc.LLMCompleteWithTools(ctx, &harnesspb.LLMCompleteWithToolsRequest{
+		Context: &harnesspb.ContextInfo{MissionId: "mission-A", AgentName: "recon-agent"},
+		Slot:    "default",
+		Messages: []*harnesspb.LLMMessage{
+			{Role: "user", Content: "scan 10.0.0.5"},
+		},
+	})
+	require.NoError(t, err)
+	require.Nil(t, resp.Error)
+
+	require.Len(t, captured, 1)
+	got := captured[0].call
+	require.Len(t, got.CompletionToolCalls, 1, "the completion's own tool calls must not be dropped")
+	assert.Equal(t, "nmap", got.CompletionToolCalls[0].Name)
+	assert.Equal(t, `{"host":"10.0.0.5"}`, got.CompletionToolCalls[0].Arguments)
+	assert.NotZero(t, got.RecordedAtUnixNano, "a capture time must be stamped for retention sweeps")
+
+	// The wire response also carries the tool calls (unchanged behavior).
+	require.Len(t, resp.ToolCalls, 1)
+	assert.Equal(t, "nmap", resp.ToolCalls[0].Name)
+}
+
 // TestLLMComplete_NoSink_NoPanic ensures capture is a clean no-op when the sink
 // is unwired (chat-only / capture-disabled deployments).
 func TestLLMComplete_NoSink_NoPanic(t *testing.T) {

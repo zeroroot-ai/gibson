@@ -27,6 +27,13 @@ type worldSnapshotData struct {
 	Decisions    []DecisionSnapshot    `json:"decisions"`
 	Observations []ObservationSnapshot `json:"observations"`
 	Entities     []EntitySnapshot      `json:"entities"`
+	// AgentToolCalls + FlightRecorderPolicy: the flight recorder's captured
+	// tool I/O and the tenant's retention/redaction policy (ADR-0020,
+	// gibson#271). The policy must be snapshotted too, or a tenant's
+	// opt-in redaction/retention setting would silently reset to the
+	// capture-everything default across a snapshot+trim cycle.
+	AgentToolCalls       []AgentToolCallSnapshot `json:"agent_tool_calls"`
+	FlightRecorderPolicy FlightRecorderPolicy    `json:"flight_recorder_policy"`
 
 	// Monotonic ID counters (replay-deterministic; must be restored exactly).
 	NextHostID        uint64 `json:"next_host_id"`
@@ -57,6 +64,9 @@ func SnapshotWorld(w *World, atSeq string) WorldSnapshot {
 		Observations: w.ObservationSnapshot(),
 		Entities:     w.EntitySnapshot(),
 
+		AgentToolCalls:       w.AgentToolCallSnapshot(),
+		FlightRecorderPolicy: w.flightRecorderPolicy,
+
 		NextHostID:        w.nextHostID,
 		NextDomainID:      w.nextDomainID,
 		NextSubdomainID:   w.nextSubdomainID,
@@ -79,6 +89,15 @@ func RestoreWorld(snap WorldSnapshot, tenant string) (*World, error) {
 	}
 
 	w := NewWorld(tenant)
+
+	// Restore the flight recorder's retention/redaction policy FIRST (gibson#271):
+	// it must be in force before any LlmCall/AgentToolCall replay below, exactly
+	// as it was live when the snapshot was taken (redaction is applied once, at
+	// fold time, so folding order matters for a faithful restore).
+	Reduce(w, FlightRecorderPolicySet{
+		Redact:        data.FlightRecorderPolicy.Redact,
+		RetentionDays: data.FlightRecorderPolicy.RetentionDays,
+	})
 
 	// Replay hosts — sorted by ID (creation order) to reproduce deterministic IDs.
 	sort.Slice(data.Hosts, func(i, j int) bool { return data.Hosts[i].ID < data.Hosts[j].ID })
@@ -222,14 +241,31 @@ func RestoreWorld(snap WorldSnapshot, tenant string) (*World, error) {
 	// Replay LLM calls.
 	for _, c := range data.LlmCalls {
 		Reduce(w, LlmCallObserved{
-			CallID:           c.CallID,
-			RunID:            c.RunID,
-			Model:            c.Model,
-			ScopeID:          c.ScopeID,
-			PromptTokens:     c.PromptTokens,
-			CompletionTokens: c.CompletionTokens,
-			Messages:         append([]LlmMessage(nil), c.Messages...),
-			Completion:       c.Completion,
+			CallID:              c.CallID,
+			RunID:               c.RunID,
+			Model:               c.Model,
+			ScopeID:             c.ScopeID,
+			PromptTokens:        c.PromptTokens,
+			CompletionTokens:    c.CompletionTokens,
+			Messages:            append([]LlmMessage(nil), c.Messages...),
+			Completion:          c.Completion,
+			CompletionToolCalls: append([]LlmToolCall(nil), c.CompletionToolCalls...),
+			RecordedAtUnixNano:  c.RecordedAtUnixNano,
+		})
+	}
+
+	// Replay tool calls (ADR-0020, gibson#271).
+	for _, c := range data.AgentToolCalls {
+		Reduce(w, AgentToolCallObserved{
+			ToolCallID:         c.ToolCallID,
+			MissionID:          c.MissionID,
+			RunID:              c.RunID,
+			ScopeID:            c.ScopeID,
+			ToolName:           c.ToolName,
+			Arguments:          c.Arguments,
+			Result:             c.Result,
+			Err:                c.Err,
+			RecordedAtUnixNano: c.RecordedAtUnixNano,
 		})
 	}
 

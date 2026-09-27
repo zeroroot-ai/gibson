@@ -129,6 +129,12 @@ type HarnessCallbackService struct {
 	// frame surfaces the mission's LLM activity. nil means capture is disabled.
 	llmCallSink LLMCallSink
 
+	// toolCallSink receives completed tool calls observed on the callback
+	// CallToolProto path (ADR-0020, gibson#271); the daemon wires it to the
+	// per-tenant World's AgentToolCall capture — the flight recorder's tool-I/O
+	// half. nil means capture is disabled.
+	toolCallSink ToolCallSink
+
 	// spanProcessors receives spans exported from remote agents for tracing integration
 	spanProcessors []sdktrace.SpanProcessor
 
@@ -372,16 +378,43 @@ type LLMCallRecord struct {
 	Model            string
 	PromptTokens     int
 	CompletionTokens int
-	// Messages + Completion are the optional transcript, surfaced only behind
-	// GetLlmCall; the folded frame metadata uses model + token counts.
+	// Messages + Completion are the full transcript (ADR-0020 flight recorder,
+	// gibson#271: capture is ALWAYS ON, never optional). The folded frame
+	// metadata uses model + token counts; the transcript backs the dashboard
+	// conversation view and the flight recorder replay.
 	Messages   []LLMCallMessage
 	Completion string
+	// CompletionToolCalls carries the tool calls the model made as part of
+	// THIS completion — distinct from Completion, which is the assistant's
+	// text content and is often empty on a tool-calling turn. Without this a
+	// tool-calling turn's transcript was silently incomplete (gibson#271).
+	CompletionToolCalls []LLMCallToolCall
+	// RecordedAtUnixNano stamps when the daemon observed this call, so a
+	// tenant's retention policy can be swept deterministically later
+	// (gibson#271).
+	RecordedAtUnixNano int64
 }
 
-// LLMCallMessage is one prompt message in an LLMCallRecord transcript.
+// LLMCallMessage is one prompt message in an LLMCallRecord transcript. Role +
+// Content cover a plain turn; ToolCalls carries any tool calls an assistant
+// message in the prompt history made, and ToolCallID/Name identify a
+// tool-result message (role "tool") replaying that call's result back to the
+// model — full-fidelity capture of a tool-calling conversation (gibson#271).
 type LLMCallMessage struct {
-	Role    string
-	Content string
+	Role       string
+	Content    string
+	Name       string
+	ToolCalls  []LLMCallToolCall
+	ToolCallID string
+}
+
+// LLMCallToolCall is one tool call an LLM made as part of a completion.
+// Mirrors internal/engine/llm.ToolCall.
+type LLMCallToolCall struct {
+	ID        string
+	Type      string
+	Name      string
+	Arguments string
 }
 
 // LLMCallSink consumes a completed LLM call observed on the callback completion
@@ -395,6 +428,49 @@ type LLMCallSink func(ctx context.Context, tenant string, call LLMCallRecord)
 func WithLLMCallSink(sink LLMCallSink) CallbackServiceOption {
 	return func(s *HarnessCallbackService) {
 		s.llmCallSink = sink
+	}
+}
+
+// ToolCallRecord captures a completed tool call observed on the callback
+// CallToolProto path — the tool-I/O half of the flight recorder (ADR-0020,
+// gibson#271), alongside LLMCallRecord's transcript half. It mirrors the
+// daemon's brain.AgentToolCallObserved but lives here so the harness package
+// stays decoupled from the brain package, same as LLMCallRecord.
+type ToolCallRecord struct {
+	// ToolCallID is the call's stable World/graph identity — the
+	// ContextInfo.ToolExecutionId the calling agent's SDK already stamps for
+	// provenance (the same id discovery ingest attaches PRODUCED edges to), so
+	// a tool call and the graph nodes it produced share one key.
+	ToolCallID string
+	// MissionID attributes the call to its mission's frame, mirroring
+	// LLMCallRecord.MissionID.
+	MissionID string
+	// RunID is the mission run (or agent run) that made this call.
+	RunID string
+	// ToolName is the tool that was called.
+	ToolName string
+	// Arguments + Result are the full JSON the agent sent and the tool
+	// returned — captured in full, always (never optional).
+	Arguments string
+	Result    string
+	// Err is set instead of Result when the tool call failed.
+	Err string
+	// RecordedAtUnixNano stamps when the daemon observed this call, so a
+	// tenant's retention policy can be swept deterministically later.
+	RecordedAtUnixNano int64
+}
+
+// ToolCallSink consumes a completed tool call observed on the callback
+// CallToolProto path. The daemon wires this to the per-tenant World; tenant is
+// the call's tenant (already validated equal to the mission tenant by
+// getHarness). When unset, callback tool-call capture is a no-op.
+type ToolCallSink func(ctx context.Context, tenant string, call ToolCallRecord)
+
+// WithToolCallSink sets the sink CallToolProto forwards completed tool calls
+// to for World capture (ADR-0020, gibson#271). When unset, capture is disabled.
+func WithToolCallSink(sink ToolCallSink) CallbackServiceOption {
+	return func(s *HarnessCallbackService) {
+		s.toolCallSink = sink
 	}
 }
 
@@ -642,17 +718,77 @@ func (s *HarnessCallbackService) captureLLMCall(ctx context.Context, contextInfo
 	}
 	msgs := make([]LLMCallMessage, 0, len(promptMsgs))
 	for _, m := range promptMsgs {
-		msgs = append(msgs, LLMCallMessage{Role: string(m.Role), Content: m.Content})
+		msgs = append(msgs, LLMCallMessage{
+			Role:       string(m.Role),
+			Content:    m.Content,
+			Name:       m.Name,
+			ToolCallID: m.ToolCallID,
+			ToolCalls:  toLLMCallToolCalls(m.ToolCalls),
+		})
 	}
 	s.llmCallSink(ctx, tenant, LLMCallRecord{
-		CallID:           uuid.NewString(),
-		MissionID:        contextInfo.GetMissionId(),
-		RunID:            runID,
-		Model:            resp.Model,
-		PromptTokens:     resp.Usage.PromptTokens,
-		CompletionTokens: resp.Usage.CompletionTokens,
-		Messages:         msgs,
-		Completion:       resp.Message.Content,
+		CallID:              uuid.NewString(),
+		MissionID:           contextInfo.GetMissionId(),
+		RunID:               runID,
+		Model:               resp.Model,
+		PromptTokens:        resp.Usage.PromptTokens,
+		CompletionTokens:    resp.Usage.CompletionTokens,
+		Messages:            msgs,
+		Completion:          resp.Message.Content,
+		CompletionToolCalls: toLLMCallToolCalls(resp.Message.ToolCalls),
+		RecordedAtUnixNano:  time.Now().UnixNano(),
+	})
+}
+
+// toLLMCallToolCalls converts llm.ToolCall values (internal/engine/llm) to the
+// capture-record shape, preserving full fidelity (id, type, name, arguments) —
+// the gibson#271 fix for a tool-calling turn's transcript silently dropping
+// its tool calls.
+func toLLMCallToolCalls(calls []llm.ToolCall) []LLMCallToolCall {
+	if len(calls) == 0 {
+		return nil
+	}
+	out := make([]LLMCallToolCall, 0, len(calls))
+	for _, c := range calls {
+		out = append(out, LLMCallToolCall{ID: c.ID, Type: c.Type, Name: c.Name, Arguments: c.Arguments})
+	}
+	return out
+}
+
+// captureToolCall folds a completed CallToolProto invocation into the
+// per-tenant World via the wired toolCallSink (ADR-0020, gibson#271) — the
+// tool-I/O half of the flight recorder, alongside captureLLMCall's transcript
+// half. Best-effort: a missing sink, context, or tenant is a silent no-op, the
+// same contract as captureLLMCall, so capture can never break a tool call.
+//
+// ToolCallID is the ContextInfo.ToolExecutionId the calling agent's SDK already
+// stamps for provenance; when the caller left it empty a fresh id is minted so
+// the call is still captured (just not correlated to a PRODUCED-edge chain).
+func (s *HarnessCallbackService) captureToolCall(ctx context.Context, contextInfo *harnesspb.ContextInfo, toolName, argumentsJSON, resultJSON, callErr string) {
+	if s.toolCallSink == nil || contextInfo == nil {
+		return
+	}
+	tenant := auth.TenantStringFromContext(ctx)
+	if tenant == "" {
+		return
+	}
+	toolCallID := contextInfo.GetToolExecutionId()
+	if toolCallID == "" {
+		toolCallID = uuid.NewString()
+	}
+	runID := contextInfo.GetMissionRunId()
+	if runID == "" {
+		runID = contextInfo.GetAgentRunId()
+	}
+	s.toolCallSink(ctx, tenant, ToolCallRecord{
+		ToolCallID:         toolCallID,
+		MissionID:          contextInfo.GetMissionId(),
+		RunID:              runID,
+		ToolName:           toolName,
+		Arguments:          argumentsJSON,
+		Result:             resultJSON,
+		Err:                callErr,
+		RecordedAtUnixNano: time.Now().UnixNano(),
 	})
 }
 
@@ -1081,6 +1217,11 @@ func (s *HarnessCallbackService) CallToolProto(ctx context.Context, req *harness
 			"parent_span_id": req.Context.SpanId,
 		})
 
+		// Flight recorder (ADR-0020, gibson#271): capture the failed call too —
+		// the arguments the agent sent and why it failed, not just the ones
+		// that succeeded.
+		s.captureToolCall(ctx, req.Context, req.Name, string(req.InputJson), "", err.Error())
+
 		return &harnesspb.CallToolProtoResponse{
 			Error: &harnesspb.HarnessError{
 				Code:    commonpb.ErrorCode_ERROR_CODE_INTERNAL,
@@ -1149,6 +1290,13 @@ func (s *HarnessCallbackService) CallToolProto(ctx context.Context, req *harness
 		"task_id":        req.Context.TaskId,
 		"parent_span_id": req.Context.SpanId,
 	})
+
+	// Flight recorder (ADR-0020, gibson#271): capture the full arguments +
+	// result — the tool-I/O half of the flight recorder, alongside the LLM
+	// transcript half captureLLMCall already folds in. Before this, tool I/O
+	// only reached the daemon as bare tool.call.* pub/sub metadata (no
+	// arguments/result text) and never became part of the Timeline.
+	s.captureToolCall(ctx, req.Context, req.Name, string(req.InputJson), string(responseJSON), "")
 
 	return &harnesspb.CallToolProtoResponse{
 		OutputJson: responseJSON,
