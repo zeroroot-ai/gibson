@@ -7,6 +7,7 @@ import (
 	"context"
 	"encoding/json"
 	"errors"
+	"fmt"
 	"sync"
 	"testing"
 
@@ -162,8 +163,7 @@ func TestRegistry_Evaluate(t *testing.T) {
 		p := Predicate{Technique: testTechnique, Type: "not_registered", Params: nil}
 
 		ok, err := r.Evaluate(ctx, p, nil)
-		require.Error(t, err)
-		assert.ErrorIs(t, err, ErrUnregisteredPredicate)
+		require.ErrorIs(t, err, ErrUnregisteredPredicate)
 		assert.False(t, ok)
 	})
 
@@ -217,7 +217,7 @@ func TestRegistry_Evaluate_Deterministic(t *testing.T) {
 			Marker string `json:"marker"`
 		}
 		if err := json.Unmarshal(params, &p); err != nil {
-			return false, err
+			return false, fmt.Errorf("decode test predicate params: %w", err)
 		}
 		for _, e := range evidence {
 			if s, ok := e.Content.(string); ok && s == p.Marker {
@@ -237,12 +237,12 @@ func TestRegistry_Evaluate_Deterministic(t *testing.T) {
 	const iterations = 200
 	results := make([]bool, iterations)
 	var wg sync.WaitGroup
-	for i := 0; i < iterations; i++ {
+	for i := range iterations {
 		wg.Add(1)
 		go func(i int) {
 			defer wg.Done()
 			ok, evalErr := r.Evaluate(ctx, predicate, evidence)
-			require.NoError(t, evalErr)
+			assert.NoError(t, evalErr)
 			results[i] = ok
 		}(i)
 	}
@@ -293,14 +293,14 @@ func TestRegistry_ConcurrentRegisterAndEvaluate(t *testing.T) {
 	require.NoError(t, err)
 
 	var wg sync.WaitGroup
-	for i := 0; i < 50; i++ {
+	for range 50 {
 		wg.Add(1)
-		go func(i int) {
+		go func() {
 			defer wg.Done()
 			technique := TechniqueID("concurrent-technique")
 			ptype := PredicateType("concurrent-type")
 			_ = r.Register(technique, ptype, alwaysTrue) // duplicate errors are expected and fine
-		}(i)
+		}()
 
 		wg.Add(1)
 		go func() {

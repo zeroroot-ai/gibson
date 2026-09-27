@@ -40,7 +40,10 @@ type MarkerPresentParams struct {
 // captures a benign marker as its proof, and this predicate confirms the
 // marker actually shows up in what was captured.
 func RegisterMarkerPresent(r *settlement.Registry, technique settlement.TechniqueID) error {
-	return r.Register(technique, MarkerPresentType, markerPresentEvaluate)
+	if err := r.Register(technique, MarkerPresentType, markerPresentEvaluate); err != nil {
+		return fmt.Errorf("builtin: register %s: %w", MarkerPresentType, err)
+	}
+	return nil
 }
 
 func markerPresentEvaluate(params json.RawMessage, evidence []finding.EnhancedEvidence) (bool, error) {
