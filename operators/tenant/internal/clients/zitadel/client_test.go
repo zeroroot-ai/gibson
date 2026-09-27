@@ -434,7 +434,7 @@ func TestEnsureProjectGrant_CreatesUpdatesAndIsANoOp(t *testing.T) {
 			"POST /zitadel.project.v2.ProjectService/ListProjectGrants": func(w http.ResponseWriter, _ *http.Request) {
 				writeJSON(w, http.StatusOK, map[string]any{
 					"projectGrants": []map[string]any{
-						{"grantedOrganizationId": "ORG-1", "roleKeys": []string{"owner"}},
+						{"grantedOrganizationId": "ORG-1", "grantedRoleKeys": []string{"owner"}},
 					},
 				})
 			},
@@ -460,7 +460,7 @@ func TestEnsureProjectGrant_CreatesUpdatesAndIsANoOp(t *testing.T) {
 			"POST /zitadel.project.v2.ProjectService/ListProjectGrants": func(w http.ResponseWriter, _ *http.Request) {
 				writeJSON(w, http.StatusOK, map[string]any{
 					"projectGrants": []map[string]any{
-						{"grantedOrganizationId": "ORG-1", "roleKeys": []string{"owner", "admin", "editor", "viewer"}},
+						{"grantedOrganizationId": "ORG-1", "grantedRoleKeys": []string{"owner", "admin", "editor", "viewer"}},
 					},
 				})
 			},
