@@ -192,6 +192,12 @@ func (f *fakeIDPClient) FindUserIDByEmail(ctx context.Context, email string) (st
 	}
 	return "", idp.ErrNotFound
 }
+func (f *fakeIDPClient) EnsureHumanUserNoPassword(_ context.Context, _, _, _, _ string) (string, error) {
+	return "", nil
+}
+func (f *fakeIDPClient) CreateSetupInviteCode(_ context.Context, _, _ string, _ bool) (string, error) {
+	return "", nil
+}
 func (f *fakeIDPClient) Close() error { return nil }
 
 // ---------------------------------------------------------------------------
