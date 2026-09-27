@@ -401,7 +401,7 @@ func (c *Client) EnsureHumanUser(ctx context.Context, req idp.EnsureHumanUserReq
 // Platform owner's setup link built from spec.zitadel.issuer resolved to an
 // in-cluster address on kind, which nobody's browser could open.
 func setupLinkURLTemplate(appURL string) string {
-	return strings.TrimRight(appURL, "/") + "/ui/v2/login/invite?userID={{.UserID}}&code={{.Code}}&organization={{.OrgID}}"
+	return zitadelconn.SetupLinkURLTemplate(appURL)
 }
 
 // renderSetupLink substitutes the same three placeholders setupLinkURLTemplate

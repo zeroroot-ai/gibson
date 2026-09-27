@@ -8,6 +8,8 @@ import (
 	"fmt"
 	"strings"
 
+	"github.com/zeroroot-ai/gibson/internal/platform/zitadelconn"
+
 	"github.com/go-logr/logr"
 	corev1 "k8s.io/api/core/v1"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
@@ -333,7 +335,7 @@ func (r *PlatformBootstrapReconciler) writeOfflineSetupLink(ctx context.Context,
 // externalDomain is the public host a browser reaches (spec.zitadel.
 // externalDomain, a port included when the profile has one).
 func setupLinkURLTemplate(externalDomain string) string {
-	return "https://" + strings.TrimRight(externalDomain, "/") + "/ui/v2/login/invite?userID={{.UserID}}&code={{.Code}}&organization={{.OrgID}}"
+	return zitadelconn.SetupLinkURLTemplate("https://" + strings.TrimRight(externalDomain, "/"))
 }
 
 // renderSetupLink substitutes the same three placeholders setupLinkURLTemplate

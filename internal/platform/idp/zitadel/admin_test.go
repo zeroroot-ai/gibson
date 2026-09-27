@@ -621,14 +621,14 @@ func TestCreateSetupLink_BuildsFromTheGivenAppURL(t *testing.T) {
 	if err != nil {
 		t.Fatalf("CreateSetupLink: %v", err)
 	}
-	if !strings.HasPrefix(link, appURL+"/ui/v2/login/invite?") {
+	if !strings.HasPrefix(link, appURL+"/ui/v2/login/verify?") {
 		t.Fatalf("link = %q, want it to start at %q (the given appURL) — never at cfg.Issuer or any other endpoint", link, appURL)
 	}
 	if strings.Contains(link, "this-is-not-the-app-url") {
 		t.Errorf("link = %q, leaked cfg.Issuer instead of using the given appURL", link)
 	}
-	if !strings.Contains(link, "userID="+userID) || !strings.Contains(link, "organization="+orgID) {
-		t.Errorf("link = %q, want userID and organization substituted", link)
+	if !strings.Contains(link, "userId="+userID) || !strings.Contains(link, "organization="+orgID) || !strings.Contains(link, "invite=true") {
+		t.Errorf("link = %q, want userId, organization and invite=true (the Login v2 verify page)", link)
 	}
 	wantCode := id.InviteCode(userID)
 	if wantCode == "" || !strings.Contains(link, "code="+wantCode) {
