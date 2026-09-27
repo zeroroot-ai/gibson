@@ -774,11 +774,10 @@ func writeOfflineSetupLinkSecret(ctx context.Context, cs kubernetes.Interface, n
 			StringData: map[string]string{key: link},
 		}
 		if _, cerr := secrets.Create(ctx, sec, metav1.CreateOptions{}); cerr != nil {
-			if apierrors.IsAlreadyExists(cerr) {
-				// Lost a create race — fall through to the update path below.
-			} else {
+			if !apierrors.IsAlreadyExists(cerr) {
 				return fmt.Errorf("create setup-link Secret %s/%s: %w", namespace, name, cerr)
 			}
+			// Lost a create race — fall through to the update path below.
 		} else {
 			return nil
 		}

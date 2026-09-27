@@ -102,9 +102,9 @@ func TestEnsureHumanUserNoPassword_HappyPath_NeverSendsPassword(t *testing.T) {
 }
 
 func TestEnsureHumanUserNoPassword_Conflict_FallsBackToSearch(t *testing.T) {
-	cfg := setupUserServiceV2Server(t, func(w http.ResponseWriter, r *http.Request) {
+	cfg := setupUserServiceV2Server(t, func(w http.ResponseWriter, _ *http.Request) {
 		errorResp(w, http.StatusConflict, "ALREADY_EXISTS", "user already exists")
-	}, func(w http.ResponseWriter, r *http.Request) {
+	}, func(w http.ResponseWriter, _ *http.Request) {
 		jsonResp(w, http.StatusOK, map[string]interface{}{
 			"result": []map[string]string{{"id": "user-existing"}},
 		})
@@ -125,9 +125,9 @@ func TestEnsureHumanUserNoPassword_Conflict_FallsBackToSearch(t *testing.T) {
 }
 
 func TestEnsureHumanUserNoPassword_ConflictThenNotFound_ReturnsError(t *testing.T) {
-	cfg := setupUserServiceV2Server(t, func(w http.ResponseWriter, r *http.Request) {
+	cfg := setupUserServiceV2Server(t, func(w http.ResponseWriter, _ *http.Request) {
 		errorResp(w, http.StatusConflict, "ALREADY_EXISTS", "user already exists")
-	}, func(w http.ResponseWriter, r *http.Request) {
+	}, func(w http.ResponseWriter, _ *http.Request) {
 		jsonResp(w, http.StatusOK, map[string]interface{}{"result": []map[string]string{}})
 	})
 	client, err := zitadel.New(context.Background(), cfg)
@@ -142,7 +142,7 @@ func TestEnsureHumanUserNoPassword_ConflictThenNotFound_ReturnsError(t *testing.
 }
 
 func TestEnsureHumanUserNoPassword_ServerError_ReturnsWrappedError(t *testing.T) {
-	cfg := setupUserServiceV2Server(t, func(w http.ResponseWriter, r *http.Request) {
+	cfg := setupUserServiceV2Server(t, func(w http.ResponseWriter, _ *http.Request) {
 		errorResp(w, http.StatusInternalServerError, "INTERNAL", "boom")
 	}, nil)
 	client, err := zitadel.New(context.Background(), cfg)
@@ -158,7 +158,7 @@ func TestEnsureHumanUserNoPassword_ServerError_ReturnsWrappedError(t *testing.T)
 
 func TestEnsureHumanUserNoPassword_EmptyEmail_ReturnsErrorWithoutRequest(t *testing.T) {
 	called := false
-	cfg := setupUserServiceV2Server(t, func(w http.ResponseWriter, r *http.Request) {
+	cfg := setupUserServiceV2Server(t, func(w http.ResponseWriter, _ *http.Request) {
 		called = true
 		jsonResp(w, http.StatusOK, map[string]string{"userId": "should-not-be-used"})
 	}, nil)
@@ -242,7 +242,7 @@ func TestCreateSetupInviteCode_Offline_ReturnsRawCode(t *testing.T) {
 }
 
 func TestCreateSetupInviteCode_ServerError_ReturnsWrappedError(t *testing.T) {
-	cfg := setupUserServiceV2Server(t, func(w http.ResponseWriter, r *http.Request) {
+	cfg := setupUserServiceV2Server(t, func(w http.ResponseWriter, _ *http.Request) {
 		errorResp(w, http.StatusInternalServerError, "INTERNAL", "boom")
 	}, nil)
 	client, err := zitadel.New(context.Background(), cfg)
@@ -258,7 +258,7 @@ func TestCreateSetupInviteCode_ServerError_ReturnsWrappedError(t *testing.T) {
 
 func TestCreateSetupInviteCode_EmptyUserID_ReturnsErrorWithoutRequest(t *testing.T) {
 	called := false
-	cfg := setupUserServiceV2Server(t, func(w http.ResponseWriter, r *http.Request) {
+	cfg := setupUserServiceV2Server(t, func(w http.ResponseWriter, _ *http.Request) {
 		called = true
 		jsonResp(w, http.StatusOK, map[string]string{"inviteCode": "x"})
 	}, nil)
