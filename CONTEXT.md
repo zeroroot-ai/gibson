@@ -324,6 +324,41 @@ carries structure, never a tenant's secrets
 ([ADR-0024](docs/adr/0024-discoverable-taxonomy-and-ontology.md), [ADR-0025](docs/adr/0025-domain-packs.md)).
 _Avoid_: template, ruleset
 
+### Planning and proof (decided 2026-09-27, ADR-0026 – ADR-0028)
+
+**Value-of-Information (VoI)**:
+How the fleet chooses what to do next: it plans several steps ahead over the belief field
+and pursues the move that most reduces uncertainty about the goal, net of cost. It narrows
+the options to the highest-value few; the LLM picks within them. Not a new model — it queries
+the belief network with hypothetical outcomes. The planner is BAMCP (fully Bayesian)
+([ADR-0026](docs/adr/0026-bayesian-sequential-planner.md)).
+_Avoid_: prioritization score (VoI is forward-looking planning, not a static score)
+
+**Proof-of-demonstration**:
+The evidence that settles a Bet TRUE: the fleet demonstrated the claim and a typed success
+predicate fired against the captured evidence. Never an LLM opinion
+([ADR-0027](docs/adr/0027-proof-of-demonstration.md)).
+_Avoid_: proof (unqualified), report
+
+**Success predicate**:
+A machine-checkable condition, typed and drawn from the technique (not free-form), that
+defines what would prove a Hypothesis. A Bet settles TRUE iff its predicate evaluates true
+against captured evidence ([ADR-0027](docs/adr/0027-proof-of-demonstration.md)).
+_Avoid_: assertion, check
+
+**Proof-of-control**:
+A demonstration that proves a capability exists without causing harm — a benign marker that
+the fleet could reach, read, or act, never destruction or real-data exfiltration. The
+default, non-gated proof ([ADR-0027](docs/adr/0027-proof-of-demonstration.md)).
+_Avoid_: proof-of-damage (that is the gated, destructive case)
+
+**Destructive-proof authorization**:
+A per-action human approval, in the dashboard, before an irreversible or state-changing
+demonstration runs. The fleet keeps working while that one action waits
+([ADR-0028](docs/adr/0028-destructive-proof-authorization-gate.md), amends
+[ADR-0008](docs/adr/0008-autonomous-execution-no-hitl.md)).
+_Avoid_: approval gate (unqualified — the gate is per-action, not per-mission)
+
 **Runtime engine (clock-tick game loop)**:
 The brain runs as a fixed **~50 ms clock tick** (≈ one gRPC round-trip — the fastest an
 external result can arrive; ticking faster would poll for nothing). Each tick: ingest
