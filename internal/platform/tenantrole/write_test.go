@@ -235,6 +235,20 @@ func TestIsMember_FalseWithNoGrant(t *testing.T) {
 	}
 }
 
+// TestIsMember_WrapsAnActiveGrantLookupError mirrors
+// TestAssign_WrapsAnActiveGrantLookupError: a List failure must be
+// surfaced, not read as "not a member".
+func TestIsMember_WrapsAnActiveGrantLookupError(t *testing.T) {
+	grants := newFakeGrants()
+	grants.listErr = errors.New("list boom")
+	syncer := tenantrole.NewSyncer(grants, newFakeTuples(), nil)
+
+	_, err := syncer.IsMember(context.Background(), tenant("acme", "ORG-1"), "u1")
+	if err == nil || !strings.Contains(err.Error(), "list boom") {
+		t.Fatalf("IsMember: err = %v, want it to wrap the List error", err)
+	}
+}
+
 // --- Transfer: the branches TestSync_TransferMovesOwnerInOneWriteAndDelete
 // does not reach (both users already granted) ----------------------------
 

@@ -282,7 +282,7 @@ t.Status.AgentAPIKey = key                  // forbidden — Status leaks creden
 
 Right — onboarding creates the Zitadel user for the owner email on the
 Tenant CRD spec and assigns their tenant role through the Syncer
-(ADR-0093, hosted#203); the user signs in via Auth.js, and creates
+(ADR-0093); the user signs in via Auth.js, and creates
 agents through the dashboard's "Register Agent" UI:
 
 ```go

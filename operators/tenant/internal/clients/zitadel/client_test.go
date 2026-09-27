@@ -226,6 +226,47 @@ func TestEnsureHumanUser_ConflictLooksUpExistingUser(t *testing.T) {
 	}
 }
 
+// TestEnsureHumanUser_NonConflictCreateErrorSurfaces: a create failure that
+// is not a 409 must be returned as-is, never fall through to the
+// conflict-lookup branch.
+func TestEnsureHumanUser_NonConflictCreateErrorSurfaces(t *testing.T) {
+	c := newTestServer(t, map[string]http.HandlerFunc{
+		"POST /v2/users/human": func(w http.ResponseWriter, _ *http.Request) {
+			writeJSON(w, http.StatusInternalServerError, map[string]string{"message": "boom"})
+		},
+	})
+	if _, err := c.EnsureHumanUser(context.Background(), "org-abc", "alice@example.com"); err == nil {
+		t.Fatal("expected an error for a non-conflict create failure")
+	}
+}
+
+// TestEnsureHumanUser_ConflictLookupFailureSurfaces: if the create returns
+// 409 but the follow-up lookup by email itself fails, that failure must
+// surface, not a stray empty userID.
+func TestEnsureHumanUser_ConflictLookupFailureSurfaces(t *testing.T) {
+	c := newTestServer(t, map[string]http.HandlerFunc{
+		"POST /v2/users/human": func(w http.ResponseWriter, _ *http.Request) {
+			writeJSON(w, http.StatusConflict, map[string]string{"message": "already exists"})
+		},
+		"POST /v2/users": func(w http.ResponseWriter, _ *http.Request) {
+			writeJSON(w, http.StatusInternalServerError, map[string]string{"message": "lookup boom"})
+		},
+	})
+	if _, err := c.EnsureHumanUser(context.Background(), "org-abc", "alice@example.com"); err == nil {
+		t.Fatal("expected an error when the conflict-lookup itself fails")
+	}
+}
+
+// TestEnsureHumanUser_ErrClient covers the errClient stand-in New returns
+// for an unparseable apiURL — every Client method must surface that
+// construction error, not panic or silently no-op.
+func TestEnsureHumanUser_ErrClient(t *testing.T) {
+	c := New("://bad-url", oauth2.StaticTokenSource(&oauth2.Token{AccessToken: "t"}), "")
+	if _, err := c.EnsureHumanUser(context.Background(), "org-abc", "alice@example.com"); err == nil {
+		t.Fatal("expected the errClient's construction error")
+	}
+}
+
 // TestUnauthorized verifies 401 is wrapped as a permanent ErrUnauthorized.
 func TestUnauthorized(t *testing.T) {
 	c := newTestServer(t, map[string]http.HandlerFunc{

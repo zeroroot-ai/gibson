@@ -5,6 +5,7 @@ package mailer
 
 import (
 	"context"
+	"errors"
 	"strings"
 	"testing"
 )
@@ -49,5 +50,21 @@ func TestSendInvitationConflict_UnconfiguredSenderRefuses(t *testing.T) {
 	var s *InvitationSender
 	if err := s.SendInvitationConflict(context.Background(), InvitationConflictEmail{To: "a@b.com"}); err == nil {
 		t.Error("expected an error from an unconfigured sender")
+	}
+}
+
+// TestSendInvitationConflict_WrapsTransportError: a transport failure must
+// be surfaced, not swallowed.
+func TestSendInvitationConflict_WrapsTransportError(t *testing.T) {
+	transportErr := errors.New("smtp: connection refused")
+	capture := &verifyCaptureMailer{err: transportErr}
+	s := NewInvitationSender(capture)
+
+	err := s.SendInvitationConflict(context.Background(), InvitationConflictEmail{To: "taken@example.com"})
+	if err == nil {
+		t.Fatal("expected a wrapped transport error")
+	}
+	if !errors.Is(err, transportErr) {
+		t.Errorf("error does not wrap the transport failure: %v", err)
 	}
 }

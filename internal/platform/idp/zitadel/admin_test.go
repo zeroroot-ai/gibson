@@ -699,3 +699,48 @@ func TestCreateSetupLink_UnknownUserIsAnError(t *testing.T) {
 		t.Fatal("expected an error for an unknown user id")
 	}
 }
+
+// TestCreateSetupLink_RequiresUserID: an empty userID must refuse before
+// making any call.
+func TestCreateSetupLink_RequiresUserID(t *testing.T) {
+	id := zitadelconntest.NewIdentity()
+	srv := zitadelconntest.New(t, "", id.Handler())
+	cfg := testConfig(t, srv)
+
+	client, err := zitadel.New(context.Background(), cfg)
+	if err != nil {
+		t.Fatalf("New: %v", err)
+	}
+	defer func() { _ = client.Close() }()
+
+	if _, err := client.CreateSetupLink(context.Background(), "org-1", "", "https://app.example.com"); err == nil {
+		t.Fatal("expected an error for an empty userID")
+	}
+}
+
+// TestCreateSetupLink_EmptyInviteCodeIsAnError guards against silently
+// returning a link with no code substituted when Zitadel's response is
+// malformed: a 200 OK with no inviteCode field. The shared Identity fake
+// never produces this shape for a returnCode request (it is exercised in
+// TestCreateSetupLink_NeverSendsCode instead), so this uses a minimal
+// handler standing in for a malformed upstream response.
+func TestCreateSetupLink_EmptyInviteCodeIsAnError(t *testing.T) {
+	srv := zitadelconntest.New(t, "", http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.URL.Path != "/zitadel.user.v2.UserService/CreateInviteCode" {
+			http.NotFound(w, r)
+			return
+		}
+		jsonResp(w, http.StatusOK, map[string]string{})
+	}))
+	cfg := testConfig(t, srv)
+
+	client, err := zitadel.New(context.Background(), cfg)
+	if err != nil {
+		t.Fatalf("New: %v", err)
+	}
+	defer func() { _ = client.Close() }()
+
+	if _, err := client.CreateSetupLink(context.Background(), "org-1", "user-1", "https://app.example.com"); err == nil {
+		t.Fatal("expected an error for a response with no inviteCode")
+	}
+}

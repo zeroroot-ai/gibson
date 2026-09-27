@@ -5,6 +5,7 @@ package mailer
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"time"
 )
@@ -67,7 +68,7 @@ type InvitationConflictEmail struct {
 // to the mailbox that owns the address — never to the inviter.
 func (s *InvitationSender) SendInvitationConflict(ctx context.Context, c InvitationConflictEmail) error {
 	if s == nil || s.m == nil {
-		return fmt.Errorf("mailer: invitation sender not configured")
+		return errors.New("mailer: invitation sender not configured")
 	}
 	subject := "About your Gibson invitation"
 	text := fmt.Sprintf(
@@ -88,7 +89,10 @@ func (s *InvitationSender) SendInvitationConflict(ctx context.Context, c Invitat
 			"<p>If you weren't expecting this, you can ignore this email.</p>",
 		c.To,
 	)
-	return s.m.Send(ctx, Message{To: c.To, Subject: subject, Text: text, HTML: html})
+	if err := s.m.Send(ctx, Message{To: c.To, Subject: subject, Text: text, HTML: html}); err != nil {
+		return fmt.Errorf("mailer: send invitation conflict notice: %w", err)
+	}
+	return nil
 }
 
 func roleLabel(role string) string {

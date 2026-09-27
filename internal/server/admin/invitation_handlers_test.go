@@ -216,8 +216,8 @@ func TestInviteMember_ConflictingAddressReportsSentButOnlyNotifiesInvitee(t *tes
 		t.Fatalf("seed grant: %v", err)
 	}
 	srv.roles = tenantrole.NewSyncer(grants, tuples, nil)
-	cap := &captureInviteMailer{}
-	srv.inviteMailer = cap
+	capture := &captureInviteMailer{}
+	srv.inviteMailer = capture
 	srv.inviteBaseURL = "https://app.example.com"
 
 	ctx := ctxWithTenant(t, "acme")
@@ -231,11 +231,11 @@ func TestInviteMember_ConflictingAddressReportsSentButOnlyNotifiesInvitee(t *tes
 	if resp.GetExpiresAt() == nil {
 		t.Error("ExpiresAt empty; a fabricated response must look like a real one")
 	}
-	if cap.conflictCalls != 1 || cap.lastConflict.To != "taken@example.com" {
-		t.Fatalf("conflict notice: calls=%d to=%q, want 1 call to taken@example.com", cap.conflictCalls, cap.lastConflict.To)
+	if capture.conflictCalls != 1 || capture.lastConflict.To != "taken@example.com" {
+		t.Fatalf("conflict notice: calls=%d to=%q, want 1 call to taken@example.com", capture.conflictCalls, capture.lastConflict.To)
 	}
-	if cap.last != (mailer.InvitationEmail{}) {
-		t.Errorf("the normal accept-link email must never be sent on a conflict, got %+v", cap.last)
+	if capture.last != (mailer.InvitationEmail{}) {
+		t.Errorf("the normal accept-link email must never be sent on a conflict, got %+v", capture.last)
 	}
 }
 
@@ -268,19 +268,19 @@ func TestInviteMember_SameTenantMemberProceedsNormally(t *testing.T) {
 		t.Fatalf("seed grant: %v", err)
 	}
 	srv.roles = tenantrole.NewSyncer(grants, tuples, nil)
-	cap := &captureInviteMailer{}
-	srv.inviteMailer = cap
+	capture := &captureInviteMailer{}
+	srv.inviteMailer = capture
 	srv.inviteBaseURL = "https://app.example.com"
 
 	ctx := ctxWithTenant(t, "acme")
 	if _, err := srv.InviteMember(ctx, &tenantv1.InviteMemberRequest{Email: "alice@example.com", Role: "member"}); err != nil {
 		t.Fatalf("InviteMember: %v", err)
 	}
-	if cap.conflictCalls != 0 {
-		t.Errorf("expected no conflict notice for an existing same-tenant member, got %d", cap.conflictCalls)
+	if capture.conflictCalls != 0 {
+		t.Errorf("expected no conflict notice for an existing same-tenant member, got %d", capture.conflictCalls)
 	}
-	if cap.last.To != "alice@example.com" {
-		t.Errorf("expected the normal accept-link email to be sent, got %+v", cap.last)
+	if capture.last.To != "alice@example.com" {
+		t.Errorf("expected the normal accept-link email to be sent, got %+v", capture.last)
 	}
 }
 
@@ -308,16 +308,117 @@ func TestInviteMember_UnusedAddressProceedsNormally(t *testing.T) {
 		t.Fatalf("AuthzTuples: %v", err)
 	}
 	srv.roles = tenantrole.NewSyncer(newFakeGrants(), tuples, nil)
-	cap := &captureInviteMailer{}
-	srv.inviteMailer = cap
+	capture := &captureInviteMailer{}
+	srv.inviteMailer = capture
 	srv.inviteBaseURL = "https://app.example.com"
 
 	ctx := ctxWithTenant(t, "acme")
 	if _, err := srv.InviteMember(ctx, &tenantv1.InviteMemberRequest{Email: "fresh@example.com", Role: "member"}); err != nil {
 		t.Fatalf("InviteMember: %v", err)
 	}
-	if cap.conflictCalls != 0 || cap.last.To != "fresh@example.com" {
-		t.Errorf("expected the normal invite flow, got conflictCalls=%d last=%+v", cap.conflictCalls, cap.last)
+	if capture.conflictCalls != 0 || capture.last.To != "fresh@example.com" {
+		t.Errorf("expected the normal invite flow, got conflictCalls=%d last=%+v", capture.conflictCalls, capture.last)
+	}
+}
+
+// TestInviteMember_DirectoryLookupErrorProceedsNormally: a directory that
+// cannot answer must not block the invite or disclose anything — same
+// rationale as signup's existingSignupUserID.
+func TestInviteMember_DirectoryLookupErrorProceedsNormally(t *testing.T) {
+	db, mock, err := sqlmock.New()
+	if err != nil {
+		t.Fatalf("sqlmock: %v", err)
+	}
+	t.Cleanup(func() { _ = db.Close() })
+	mock.ExpectExec("CREATE TABLE IF NOT EXISTS tenant_invitations").WillReturnResult(sqlmock.NewResult(0, 0))
+	mock.ExpectExec("CREATE UNIQUE INDEX").WillReturnResult(sqlmock.NewResult(0, 0))
+	mock.ExpectQuery(regexp.QuoteMeta("INSERT INTO tenant_invitations")).
+		WillReturnRows(sqlmock.NewRows([]string{"id", "expires_at"}).AddRow("inv-1", nowPlus()))
+
+	az := &membersAuthorizer{}
+	idpC := &membersIdPClient{findByEmailErr: errors.New("directory down")}
+	srv := newMembersTestServer(t, az, idpC)
+	srv.invitations = NewInvitationStore(db)
+	srv.orgResolver = staticOrgResolver{orgID: "org-1"}
+	tuples, err := tenantrole.AuthzTuples(az)
+	if err != nil {
+		t.Fatalf("AuthzTuples: %v", err)
+	}
+	srv.roles = tenantrole.NewSyncer(newFakeGrants(), tuples, nil)
+	capture := &captureInviteMailer{}
+	srv.inviteMailer = capture
+	srv.inviteBaseURL = "https://app.example.com"
+
+	ctx := ctxWithTenant(t, "acme")
+	if _, err := srv.InviteMember(ctx, &tenantv1.InviteMemberRequest{Email: "someone@example.com", Role: "member"}); err != nil {
+		t.Fatalf("InviteMember: %v", err)
+	}
+	if capture.conflictCalls != 0 || capture.last.To != "someone@example.com" {
+		t.Errorf("expected the normal invite flow on a directory error, got conflictCalls=%d last=%+v", capture.conflictCalls, capture.last)
+	}
+}
+
+// TestInviteMember_RolesNilAfterFindingExistingUserIsInternalError: the
+// address exists elsewhere, but there is no Syncer to ask which tenant —
+// this must fail loudly (Internal), never disclose-by-guessing.
+func TestInviteMember_RolesNilAfterFindingExistingUserIsInternalError(t *testing.T) {
+	db, _, err := sqlmock.New()
+	if err != nil {
+		t.Fatalf("sqlmock: %v", err)
+	}
+	t.Cleanup(func() { _ = db.Close() })
+
+	idpC := &membersIdPClient{findByEmailUserID: "user-elsewhere"}
+	srv := newMembersTestServer(t, &membersAuthorizer{}, idpC)
+	srv.invitations = NewInvitationStore(db)
+	srv.orgResolver = staticOrgResolver{orgID: "org-1"}
+	// srv.roles deliberately left nil.
+
+	ctx := ctxWithTenant(t, "acme")
+	_, ierr := srv.InviteMember(ctx, &tenantv1.InviteMemberRequest{Email: "taken@example.com", Role: "member"})
+	if status_grpc.Code(ierr) != codes.Internal {
+		t.Fatalf("InviteMember code = %v (err=%v), want Internal", status_grpc.Code(ierr), ierr)
+	}
+}
+
+// TestInviteMember_ConflictNoticeSendFailureStillReportsSent: a delivery
+// failure on the invitee-only notice must not turn into a visible error for
+// the inviter — that would itself disclose that something about this
+// address is unusual.
+func TestInviteMember_ConflictNoticeSendFailureStillReportsSent(t *testing.T) {
+	db, _, err := sqlmock.New()
+	if err != nil {
+		t.Fatalf("sqlmock: %v", err)
+	}
+	t.Cleanup(func() { _ = db.Close() })
+
+	az := &membersAuthorizer{}
+	idpC := &membersIdPClient{findByEmailUserID: "user-elsewhere"}
+	srv := newMembersTestServer(t, az, idpC)
+	srv.invitations = NewInvitationStore(db)
+	srv.orgResolver = staticOrgResolver{orgID: "org-1"}
+	tuples, err := tenantrole.AuthzTuples(az)
+	if err != nil {
+		t.Fatalf("AuthzTuples: %v", err)
+	}
+	grants := newFakeGrants()
+	if _, err := grants.Create(context.Background(), "org-999", "user-elsewhere", tenantrole.Viewer); err != nil {
+		t.Fatalf("seed grant: %v", err)
+	}
+	srv.roles = tenantrole.NewSyncer(grants, tuples, nil)
+	capture := &captureInviteMailer{conflictSendErr: errors.New("smtp down")}
+	srv.inviteMailer = capture
+
+	ctx := ctxWithTenant(t, "acme")
+	resp, err := srv.InviteMember(ctx, &tenantv1.InviteMemberRequest{Email: "taken@example.com", Role: "member"})
+	if err != nil {
+		t.Fatalf("InviteMember must still report success when the conflict notice fails to send, got: %v", err)
+	}
+	if resp.GetInvitationId() == "" {
+		t.Error("InvitationId empty")
+	}
+	if capture.conflictCalls != 1 {
+		t.Errorf("expected 1 attempted conflict notice, got %d", capture.conflictCalls)
 	}
 }
 

@@ -5,6 +5,7 @@ package controller
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"slices"
 	"sync"
@@ -22,6 +23,7 @@ import (
 
 	"github.com/zeroroot-ai/gibson/internal/platform/tenantrole"
 	gibsonv1alpha1 "github.com/zeroroot-ai/gibson/operators/tenant/api/v1alpha1"
+	"github.com/zeroroot-ai/gibson/operators/tenant/internal/clients"
 	"github.com/zeroroot-ai/gibson/operators/tenant/internal/clients/zitadel"
 )
 
@@ -272,6 +274,117 @@ func TestSyncZitadel_EnsureHumanUser(t *testing.T) {
 	}
 	if got.Status.ZitadelMembershipID == "" {
 		t.Error("ZitadelMembershipID not persisted after EnsureHumanUser + Roles.Assign")
+	}
+}
+
+// noRoleSyncerMember builds the fixture the next several tests share: an
+// email-only TenantMember (no ZitadelUserID yet), used to exercise the
+// no-ZitadelUserID-yet branch's non-happy-path returns.
+func noRoleSyncerMember(name string) *gibsonv1alpha1.TenantMember {
+	return &gibsonv1alpha1.TenantMember{
+		ObjectMeta: metav1.ObjectMeta{
+			Name:       name,
+			Namespace:  "default",
+			Finalizers: []string{gibsonv1alpha1.TenantMemberFinalizer},
+		},
+		Spec: gibsonv1alpha1.TenantMemberSpec{
+			Email:     name + "@acme.com",
+			Role:      gibsonv1alpha1.MemberRoleAdmin,
+			TenantRef: localRef(),
+		},
+	}
+}
+
+// TestSyncZitadel_EnsureHumanUser_RolesNilIsAnError: no Syncer configured →
+// the role write has nowhere to land, so this must fail loudly rather than
+// silently skip creating the account's tenant role.
+func TestSyncZitadel_EnsureHumanUser_RolesNilIsAnError(t *testing.T) {
+	fz := &fakeZitadelClient{ensureHumanUserID: "user-x"}
+	tenant := tenantWithOrgID()
+	s := newMemberTestScheme(t)
+	fc := fake.NewClientBuilder().
+		WithScheme(s).
+		WithStatusSubresource(&gibsonv1alpha1.Tenant{}, &gibsonv1alpha1.TenantMember{}).
+		WithObjects(tenant, noRoleSyncerMember("dana")).
+		Build()
+	if err := fc.Status().Update(context.Background(), tenant); err != nil {
+		t.Fatalf("seed tenant status: %v", err)
+	}
+	r := &TenantMemberReconciler{
+		Client:   fc,
+		Scheme:   s,
+		Recorder: events.NewFakeRecorder(20),
+		Zitadel:  fz,
+		// Roles deliberately left nil.
+	}
+	_, err := r.Reconcile(context.Background(), ctrl.Request{
+		NamespacedName: types.NamespacedName{Namespace: "default", Name: "dana"},
+	})
+	if err == nil {
+		t.Fatal("expected an error when Roles is not configured")
+	}
+}
+
+// TestSyncZitadel_EnsureHumanUser_Unreachable: a transient Zitadel failure
+// creating the account must requeue with backoff, not fail the reconcile.
+func TestSyncZitadel_EnsureHumanUser_Unreachable(t *testing.T) {
+	fz := &fakeZitadelClient{ensureHumanUserErr: fmt.Errorf("connect: %w", clients.ErrUnreachable)}
+	r, _ := buildMemberReconciler(t, fz, tenantWithOrgID(), noRoleSyncerMember("erin"))
+
+	res, err := r.Reconcile(context.Background(), ctrl.Request{
+		NamespacedName: types.NamespacedName{Namespace: "default", Name: "erin"},
+	})
+	if err != nil {
+		t.Fatalf("expected no error, a soft requeue instead: %v", err)
+	}
+	if res.RequeueAfter == 0 {
+		t.Error("expected RequeueAfter on an unreachable Zitadel")
+	}
+}
+
+// TestSyncZitadel_EnsureHumanUser_PermanentErrorSurfaces: a non-transient
+// EnsureHumanUser failure must fail the reconcile (controller-runtime's own
+// error backoff), not be swallowed.
+func TestSyncZitadel_EnsureHumanUser_PermanentErrorSurfaces(t *testing.T) {
+	fz := &fakeZitadelClient{ensureHumanUserErr: errors.New("permanently rejected")}
+	r, _ := buildMemberReconciler(t, fz, tenantWithOrgID(), noRoleSyncerMember("frank"))
+
+	_, err := r.Reconcile(context.Background(), ctrl.Request{
+		NamespacedName: types.NamespacedName{Namespace: "default", Name: "frank"},
+	})
+	if err == nil {
+		t.Fatal("expected the permanent EnsureHumanUser error to surface")
+	}
+}
+
+// TestSyncZitadel_EnsureHumanUser_InvalidRoleMapping: a MemberRole with no
+// tenant-role mapping must fail rather than assign a made-up default.
+func TestSyncZitadel_EnsureHumanUser_InvalidRoleMapping(t *testing.T) {
+	fz := &fakeZitadelClient{ensureHumanUserID: "user-x"}
+	member := noRoleSyncerMember("grace")
+	member.Spec.Role = "not-a-real-role"
+
+	r, _ := buildMemberReconciler(t, fz, tenantWithOrgID(), member)
+	_, err := r.Reconcile(context.Background(), ctrl.Request{
+		NamespacedName: types.NamespacedName{Namespace: "default", Name: "grace"},
+	})
+	if err == nil {
+		t.Fatal("expected an error for an unmapped MemberRole")
+	}
+}
+
+// TestSyncZitadel_EnsureHumanUser_AssignErrorSurfaces: a role-write failure
+// after EnsureHumanUser succeeded must fail the reconcile.
+func TestSyncZitadel_EnsureHumanUser_AssignErrorSurfaces(t *testing.T) {
+	fz := &fakeZitadelClient{ensureHumanUserID: "user-x"}
+	grants := &fakeRoleGrants{createErr: errors.New("create boom")}
+
+	r, _, _, _ := buildMemberReconcilerWithRoles(t, fz, tenantWithOrgID(), noRoleSyncerMember("henry"), grants, &fakeRoleTuples{})
+	_, err := r.Reconcile(context.Background(), ctrl.Request{
+		NamespacedName: types.NamespacedName{Namespace: "default", Name: "henry"},
+	})
+	if err == nil {
+		t.Fatal("expected the Roles.Assign error to surface")
 	}
 }
 
