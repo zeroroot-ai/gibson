@@ -53,6 +53,44 @@ func (s *InvitationSender) SendInvitation(ctx context.Context, inv InvitationEma
 	return s.m.Send(ctx, Message{To: inv.To, Subject: subject, Text: text, HTML: html})
 }
 
+// InvitationConflictEmail is the input for the notice sent when someone
+// invites an address that already belongs to a different tenant (ADR-0093
+// decision 1: one tenant per person, emails unique install-wide). It carries
+// no accept link: there is nothing to accept. The inviter never sees this —
+// InviteMember reports "sent" either way (hosted#203).
+type InvitationConflictEmail struct {
+	To string
+}
+
+// SendInvitationConflict sends the "this address already belongs elsewhere"
+// notice. This is the only place the conflict is disclosed, and it goes only
+// to the mailbox that owns the address — never to the inviter.
+func (s *InvitationSender) SendInvitationConflict(ctx context.Context, c InvitationConflictEmail) error {
+	if s == nil || s.m == nil {
+		return fmt.Errorf("mailer: invitation sender not configured")
+	}
+	subject := "About your Gibson invitation"
+	text := fmt.Sprintf(
+		"Someone tried to invite this email address (%s) to a Gibson workspace, "+
+			"but it already belongs to a different one. Gibson accounts belong to "+
+			"one workspace at a time.\n\n"+
+			"To join the new workspace, use a different email address, or ask the "+
+			"current workspace's Owner to remove you first.\n\n"+
+			"If you weren't expecting this, you can ignore this email.",
+		c.To,
+	)
+	html := fmt.Sprintf(
+		"<p>Someone tried to invite this email address (%s) to a Gibson workspace, "+
+			"but it already belongs to a different one. Gibson accounts belong to "+
+			"one workspace at a time.</p>"+
+			"<p>To join the new workspace, use a different email address, or ask the "+
+			"current workspace's Owner to remove you first.</p>"+
+			"<p>If you weren't expecting this, you can ignore this email.</p>",
+		c.To,
+	)
+	return s.m.Send(ctx, Message{To: c.To, Subject: subject, Text: text, HTML: html})
+}
+
 func roleLabel(role string) string {
 	switch role {
 	case "admin":

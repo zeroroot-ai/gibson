@@ -12,10 +12,12 @@ package admin
 import (
 	"context"
 	"errors"
+	"fmt"
 	"log/slog"
 	"strings"
 	"time"
 
+	"github.com/google/uuid"
 	"google.golang.org/grpc/codes"
 	"google.golang.org/grpc/status"
 	"google.golang.org/protobuf/types/known/timestamppb"
@@ -64,6 +66,51 @@ func (s *TenantAdminServer) sendInvitationEmail(ctx context.Context, tenantID, t
 	return nil
 }
 
+// invitedAddressBelongsElsewhere reports whether email already belongs to a
+// Zitadel user who is not a member of t — hosted#203, ADR-0093 decision 1.
+// false, nil covers both "the address is unused" and "the lookup could not
+// run"; in both cases the caller proceeds with a normal invitation.
+func (s *TenantAdminServer) invitedAddressBelongsElsewhere(ctx context.Context, t tenantrole.Tenant, email string) (bool, error) {
+	existingUserID, err := s.idpClient.FindUserIDByEmail(ctx, email)
+	switch {
+	case errors.Is(err, idp.ErrNotFound):
+		return false, nil
+	case err != nil:
+		// A directory that cannot answer is not a reason to disclose
+		// anything or to block the invite (same rationale as signup's
+		// existingSignupUserID, signup_service.go): proceed as if the
+		// address is unused.
+		s.logger.WarnContext(ctx, "InviteMember: directory lookup failed; proceeding with a normal invitation",
+			slog.String("error", err.Error()))
+		return false, nil
+	}
+	if s.roles == nil {
+		return false, errors.New("tenant role sync not configured")
+	}
+	member, merr := s.roles.IsMember(ctx, t, existingUserID)
+	if merr != nil {
+		return false, fmt.Errorf("check tenant membership: %w", merr)
+	}
+	return !member, nil
+}
+
+// fakeSentAfterConflictNotice sends the invitee-only conflict notice (best
+// effort — a delivery failure here must not tell the inviter anything went
+// wrong) and returns the SAME response shape a real invitation would: the
+// inviter cannot distinguish this from success, by design.
+func (s *TenantAdminServer) fakeSentAfterConflictNotice(ctx context.Context, email string) (*tenantv1.InviteMemberResponse, error) {
+	if s.inviteMailer != nil {
+		if err := s.inviteMailer.SendInvitationConflict(ctx, mailer.InvitationConflictEmail{To: email}); err != nil {
+			s.logger.WarnContext(ctx, "InviteMember: conflict notice send failed",
+				slog.String("error", err.Error()))
+		}
+	}
+	return &tenantv1.InviteMemberResponse{
+		InvitationId: uuid.NewString(),
+		ExpiresAt:    timestamppb.New(time.Now().Add(InvitationTTL)),
+	}, nil
+}
+
 // InviteMember creates (or refreshes) a pending invitation for an email address
 // with a tenant role. It generates a random token, persists only its hash with
 // a TTL, and surfaces the invitee in ListMembers as "invited". Emailing the
@@ -85,6 +132,25 @@ func (s *TenantAdminServer) InviteMember(ctx context.Context, req *tenantv1.Invi
 	}
 	if s.invitations == nil {
 		return nil, status.Error(codes.Unavailable, "invitation store not configured")
+	}
+
+	// The invited address may already belong to a DIFFERENT tenant
+	// (ADR-0093 decision 1: one tenant per person, emails unique
+	// install-wide). The inviter must never learn this: this call still
+	// reports "sent" below, and only the invitee is told, by email
+	// (hosted#203). Skipped when the optional collaborators it needs
+	// (idpClient, orgResolver) are not configured — the same graceful
+	// degradation this file already uses elsewhere.
+	if s.idpClient != nil && s.orgResolver != nil {
+		if t, terr := s.tenantOf(ctx, tenantID); terr == nil {
+			conflict, cerr := s.invitedAddressBelongsElsewhere(ctx, t, req.GetEmail())
+			if cerr != nil {
+				return nil, status.Errorf(codes.Internal, "check invited address: %v", cerr)
+			}
+			if conflict {
+				return s.fakeSentAfterConflictNotice(ctx, req.GetEmail())
+			}
+		}
 	}
 
 	var invitedBy string
@@ -160,13 +226,34 @@ func (s *TenantAdminServer) AcceptInvitation(ctx context.Context, req *tenantv1.
 
 	// Ensure the invited human exists in the tenant's per-tenant org, then
 	// assign the role: Zitadel grant first, then Roles.Sync copies it into
-	// FGA in the same call.
-	userID, err := s.idpClient.EnsureHumanUser(ctx, idp.EnsureHumanUserRequest{OrgID: t.OrgID, Email: rec.Email})
+	// FGA in the same call. EmailVerified is true here (unlike the general
+	// EnsureHumanUser default): the caller already proved control of
+	// rec.Email by redeeming this exact token, an install-issued invitation
+	// this handler looked up above — so the IdP's own separate verification
+	// email would be redundant, and would compete with the setup link below.
+	userID, err := s.idpClient.EnsureHumanUser(ctx, idp.EnsureHumanUserRequest{
+		OrgID: t.OrgID, Email: rec.Email, EmailVerified: true,
+	})
 	if err != nil {
 		return nil, status.Errorf(codes.Internal, "ensure invited user: %v", err)
 	}
 	if err := s.roles.Assign(tenantrole.WithCaller(ctx, "daemon"), t, userID, roleValue); err != nil {
 		return nil, status.Errorf(codes.Internal, "assign tenant role: %v", err)
+	}
+
+	// Mint a one-time Zitadel setup link: it creates the user's credential
+	// (a password + MFA enrollment), which this call has not set — the
+	// invitee never had a password from us to leak, ADR-0093 decision 8's
+	// rule for every human this install creates. Never emailed a second
+	// time by the IdP itself (CreateSetupLink's returnCode contract): this
+	// RPC's own caller already owns messaging for this invitee.
+	//
+	// Left of SetStatus deliberately: if this fails, the invitation stays
+	// "pending" so a retry can redeem the same token again — EnsureHumanUser
+	// and Roles.Assign above are both idempotent, so a retry costs nothing.
+	setupURL, err := s.idpClient.CreateSetupLink(ctx, t.OrgID, userID)
+	if err != nil {
+		return nil, status.Errorf(codes.Internal, "create setup link: %v", err)
 	}
 
 	// rec.TenantID, not a caller-supplied tenant: AcceptInvitation is
@@ -179,7 +266,7 @@ func (s *TenantAdminServer) AcceptInvitation(ctx context.Context, req *tenantv1.
 		s.logger.WarnContext(ctx, "AcceptInvitation: membership projected but status update failed",
 			slog.String("invitation_id", rec.ID), slog.String("error", err.Error()))
 	}
-	return &tenantv1.AcceptInvitationResponse{TenantId: rec.TenantID, UserId: userID}, nil
+	return &tenantv1.AcceptInvitationResponse{TenantId: rec.TenantID, UserId: userID, SetupUrl: setupURL}, nil
 }
 
 // lookupPendingInvitation resolves the target invitation for resend/cancel from

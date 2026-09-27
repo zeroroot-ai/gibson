@@ -79,11 +79,10 @@ func (f *fakeZitadel) DeleteOrganization(_ context.Context, orgID string) error 
 	return nil
 }
 
-func (f *fakeZitadel) AddMember(_ context.Context, _, _ string, _ []string) (string, error) {
+func (f *fakeZitadel) EnsureHumanUser(_ context.Context, _, _ string) (string, error) {
 	return "", nil
 }
-func (f *fakeZitadel) RemoveMember(_ context.Context, _, _ string) error { return nil }
-func (f *fakeZitadel) SendInvitation(_ context.Context, _, _ string, _ []string) (string, error) {
+func (f *fakeZitadel) CreateSetupLink(_ context.Context, _, _ string) (string, error) {
 	return "", nil
 }
 func (f *fakeZitadel) CreateServiceAccount(_ context.Context, _, name string) (string, string, string, error) {

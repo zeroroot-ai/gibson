@@ -190,6 +190,51 @@ func TestRevoke_NoActiveGrantIsANoOpNotAnError(t *testing.T) {
 	}
 }
 
+// --- IsMember (hosted#203) ------------------------------------------------
+
+func TestIsMember_RequiresATenantIDAndOrgID(t *testing.T) {
+	f := newFixture(t)
+	_, err := f.syncer.IsMember(context.Background(), tenantrole.Tenant{ID: "acme", OrgID: ""}, "u1")
+	if err == nil || !strings.Contains(err.Error(), "tenant id and org id") {
+		t.Fatalf("IsMember with no org id: err = %v, want a tenant/org id error", err)
+	}
+}
+
+func TestIsMember_RequiresAUserID(t *testing.T) {
+	f := newFixture(t)
+	_, err := f.syncer.IsMember(context.Background(), tenant("acme", f.orgID), "")
+	if err == nil || !strings.Contains(err.Error(), "userID") {
+		t.Fatalf("IsMember with no userID: err = %v, want a userID error", err)
+	}
+}
+
+func TestIsMember_TrueForAnActiveGrant(t *testing.T) {
+	f := newFixture(t)
+	userID := f.id.AddUser(f.orgID, "member@example.com")
+	createGrant(t, f, userID, []string{"viewer"})
+
+	member, err := f.syncer.IsMember(context.Background(), tenant("acme", f.orgID), userID)
+	if err != nil {
+		t.Fatalf("IsMember: %v", err)
+	}
+	if !member {
+		t.Error("IsMember = false, want true for a user with an active grant")
+	}
+}
+
+func TestIsMember_FalseWithNoGrant(t *testing.T) {
+	f := newFixture(t)
+	userID := f.id.AddUser(f.orgID, "not-a-member@example.com")
+
+	member, err := f.syncer.IsMember(context.Background(), tenant("acme", f.orgID), userID)
+	if err != nil {
+		t.Fatalf("IsMember: %v", err)
+	}
+	if member {
+		t.Error("IsMember = true, want false for a user with no grant")
+	}
+}
+
 // --- Transfer: the branches TestSync_TransferMovesOwnerInOneWriteAndDelete
 // does not reach (both users already granted) ----------------------------
 

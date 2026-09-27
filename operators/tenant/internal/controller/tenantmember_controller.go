@@ -33,32 +33,6 @@ import (
 
 const invitationTTL = 7 * 24 * time.Hour
 
-// Zitadel project role keys minted by the post-install Job (task 2).
-// Owner / admin / member are the canonical three; member is the default
-// for any unrecognised value.
-const (
-	zitadelRoleKeyOwner  = "gibson.owner"
-	zitadelRoleKeyAdmin  = "gibson.admin"
-	zitadelRoleKeyMember = "gibson.member"
-)
-
-// zitadelRoleKey maps a MemberRole to the Zitadel project role key. Used
-// only by the legacy SendInvitation path (hosted#203 replaces invitations);
-// the self-signup/pre-accepted path below goes through tenantrole.Syncer
-// instead (ADR-0093).
-func zitadelRoleKey(role gibsonv1alpha1.MemberRole) string {
-	switch role {
-	case gibsonv1alpha1.MemberRoleOwner:
-		return zitadelRoleKeyOwner
-	case gibsonv1alpha1.MemberRoleAdmin:
-		return zitadelRoleKeyAdmin
-	case gibsonv1alpha1.MemberRoleMember:
-		return zitadelRoleKeyMember
-	default:
-		return zitadelRoleKeyMember
-	}
-}
-
 // tenantRoleFromMemberRole maps a TenantMember's MemberRole to a tenantrole.Role
 // (ADR-0093): owner to Owner, admin to Admin, member to Viewer.
 func tenantRoleFromMemberRole(role gibsonv1alpha1.MemberRole) (tenantrole.Role, bool) {
@@ -455,21 +429,39 @@ func (r *TenantMemberReconciler) syncZitadel(ctx context.Context, tm *gibsonv1al
 		}
 		membershipID = fmt.Sprintf("%s/%s", orgID, tm.Status.ZitadelUserID)
 	} else if tm.Spec.Email != "" {
-		// No Zitadel user yet — send an invitation which also creates the user
-		// and grants the org membership. Legacy path (hosted#203 replaces
-		// invitations): still uses the gibson.* org role keys, not a project
-		// role grant, so it is untouched by ADR-0093.
-		roles := []string{zitadelRoleKey(tm.Spec.Role)}
-		invitationID, ierr := r.Zitadel.SendInvitation(ctx, orgID, tm.Spec.Email, roles)
-		if ierr != nil {
-			if errors.Is(ierr, clients.ErrUnreachable) {
+		// No Zitadel user yet: create one. Zitadel's own unverified-email
+		// flow emails the invitee a way to set a credential — the same
+		// mechanism EnsureHumanUser triggers everywhere else in this
+		// codebase (internal/platform/idp.AdminClient.EnsureHumanUser) — then
+		// assign the tenant role through the Syncer (ADR-0093), exactly like
+		// the pre-accepted branch above: a Zitadel grant, copied into FGA in
+		// the same call. hosted#203 deleted the org-member API write this
+		// branch used to make (SendInvitation → AddMember,
+		// `/orgs/me/members`): a tenant role IS the membership, and no
+		// separate grant of it was ever needed.
+		if r.Roles == nil {
+			return ctrl.Result{}, errors.New("syncZitadel: role sync not configured")
+		}
+		userID, uerr := r.Zitadel.EnsureHumanUser(ctx, orgID, tm.Spec.Email)
+		if uerr != nil {
+			if errors.Is(uerr, clients.ErrUnreachable) {
 				return ctrl.Result{RequeueAfter: zitadelBackoff}, nil
 			}
-			return ctrl.Result{}, fmt.Errorf("syncZitadel: send invitation: %w", ierr)
+			return ctrl.Result{}, fmt.Errorf("syncZitadel: ensure human user: %w", uerr)
 		}
-		// invitationID is the Zitadel user ID; persist both fields.
-		tm.Status.ZitadelUserID = invitationID
-		membershipID = fmt.Sprintf("%s/%s", orgID, invitationID)
+		role, ok := tenantRoleFromMemberRole(tm.Spec.Role)
+		if !ok {
+			return ctrl.Result{}, fmt.Errorf("syncZitadel: role %q has no tenant-role mapping", tm.Spec.Role)
+		}
+		t := tenantrole.Tenant{ID: tm.Spec.TenantRef.Name, OrgID: orgID}
+		if err := r.Roles.Assign(tenantrole.WithCaller(ctx, "tenant-operator"), t, userID, role); err != nil {
+			if errors.Is(err, tenantrole.ErrOwnerConflict) {
+				return ctrl.Result{RequeueAfter: zitadelBackoff}, nil
+			}
+			return ctrl.Result{}, fmt.Errorf("syncZitadel: assign role: %w", err)
+		}
+		tm.Status.ZitadelUserID = userID
+		membershipID = fmt.Sprintf("%s/%s", orgID, userID)
 	} else {
 		// No email and no ZitadelUserID — nothing we can do yet.
 		return ctrl.Result{}, nil

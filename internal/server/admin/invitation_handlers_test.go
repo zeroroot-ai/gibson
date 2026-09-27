@@ -114,11 +114,21 @@ func TestInviteMember_UnconfiguredMailerRefuses(t *testing.T) {
 type captureInviteMailer struct {
 	last mailer.InvitationEmail
 	err  error
+
+	lastConflict    mailer.InvitationConflictEmail
+	conflictCalls   int
+	conflictSendErr error
 }
 
 func (c *captureInviteMailer) SendInvitation(_ context.Context, inv mailer.InvitationEmail) error {
 	c.last = inv
 	return c.err
+}
+
+func (c *captureInviteMailer) SendInvitationConflict(_ context.Context, conflict mailer.InvitationConflictEmail) error {
+	c.lastConflict = conflict
+	c.conflictCalls++
+	return c.conflictSendErr
 }
 
 func TestInviteMember_EmailsAcceptLink(t *testing.T) {
@@ -171,6 +181,143 @@ func TestInviteMember_SendFailureSurfaces(t *testing.T) {
 	ctx := ctxWithTenant(t, "acme")
 	if _, err := srv.InviteMember(ctx, &tenantv1.InviteMemberRequest{Email: "alice@example.com", Role: "member"}); err == nil {
 		t.Fatal("expected InviteMember to surface a send failure")
+	}
+}
+
+// --- InviteMember cross-tenant conflict tests (hosted#203) ---
+
+// TestInviteMember_ConflictingAddressReportsSentButOnlyNotifiesInvitee is the
+// core hosted#203 case: the invited address already belongs to a DIFFERENT
+// tenant's org (ADR-0093 decision 1). The inviter must see a normal success
+// response; no invitation row is written; only the invitee is emailed, and
+// with the conflict notice, never the accept-link email.
+func TestInviteMember_ConflictingAddressReportsSentButOnlyNotifiesInvitee(t *testing.T) {
+	db, _, err := sqlmock.New()
+	if err != nil {
+		t.Fatalf("sqlmock: %v", err)
+	}
+	t.Cleanup(func() { _ = db.Close() })
+
+	az := &membersAuthorizer{}
+	idpC := &membersIdPClient{findByEmailUserID: "user-elsewhere"}
+	srv := newMembersTestServer(t, az, idpC)
+	// Configured but never touched: the conflict branch returns before any
+	// invitation row would be read or written.
+	srv.invitations = NewInvitationStore(db)
+	srv.orgResolver = staticOrgResolver{orgID: "org-1"}
+	tuples, err := tenantrole.AuthzTuples(az)
+	if err != nil {
+		t.Fatalf("AuthzTuples: %v", err)
+	}
+	grants := newFakeGrants()
+	// user-elsewhere holds a grant, but in a DIFFERENT org than "acme"'s
+	// (org-1) — belongs to another tenant.
+	if _, err := grants.Create(context.Background(), "org-999", "user-elsewhere", tenantrole.Viewer); err != nil {
+		t.Fatalf("seed grant: %v", err)
+	}
+	srv.roles = tenantrole.NewSyncer(grants, tuples, nil)
+	cap := &captureInviteMailer{}
+	srv.inviteMailer = cap
+	srv.inviteBaseURL = "https://app.example.com"
+
+	ctx := ctxWithTenant(t, "acme")
+	resp, err := srv.InviteMember(ctx, &tenantv1.InviteMemberRequest{Email: "taken@example.com", Role: "member"})
+	if err != nil {
+		t.Fatalf("InviteMember must report success on a conflict, got error: %v", err)
+	}
+	if resp.GetInvitationId() == "" {
+		t.Error("InvitationId empty; a fabricated response must look like a real one")
+	}
+	if resp.GetExpiresAt() == nil {
+		t.Error("ExpiresAt empty; a fabricated response must look like a real one")
+	}
+	if cap.conflictCalls != 1 || cap.lastConflict.To != "taken@example.com" {
+		t.Fatalf("conflict notice: calls=%d to=%q, want 1 call to taken@example.com", cap.conflictCalls, cap.lastConflict.To)
+	}
+	if cap.last != (mailer.InvitationEmail{}) {
+		t.Errorf("the normal accept-link email must never be sent on a conflict, got %+v", cap.last)
+	}
+}
+
+// TestInviteMember_SameTenantMemberProceedsNormally: the invited address
+// already has a Zitadel account, but it is already a member of the SAME
+// tenant — not the sensitive case (the inviter already knows their own
+// tenant's membership), so the normal invitation flow runs.
+func TestInviteMember_SameTenantMemberProceedsNormally(t *testing.T) {
+	db, mock, err := sqlmock.New()
+	if err != nil {
+		t.Fatalf("sqlmock: %v", err)
+	}
+	t.Cleanup(func() { _ = db.Close() })
+	mock.ExpectExec("CREATE TABLE IF NOT EXISTS tenant_invitations").WillReturnResult(sqlmock.NewResult(0, 0))
+	mock.ExpectExec("CREATE UNIQUE INDEX").WillReturnResult(sqlmock.NewResult(0, 0))
+	mock.ExpectQuery(regexp.QuoteMeta("INSERT INTO tenant_invitations")).
+		WillReturnRows(sqlmock.NewRows([]string{"id", "expires_at"}).AddRow("inv-1", nowPlus()))
+
+	az := &membersAuthorizer{}
+	idpC := &membersIdPClient{findByEmailUserID: "user-here"}
+	srv := newMembersTestServer(t, az, idpC)
+	srv.invitations = NewInvitationStore(db)
+	srv.orgResolver = staticOrgResolver{orgID: "org-1"}
+	tuples, err := tenantrole.AuthzTuples(az)
+	if err != nil {
+		t.Fatalf("AuthzTuples: %v", err)
+	}
+	grants := newFakeGrants()
+	if _, err := grants.Create(context.Background(), "org-1", "user-here", tenantrole.Viewer); err != nil {
+		t.Fatalf("seed grant: %v", err)
+	}
+	srv.roles = tenantrole.NewSyncer(grants, tuples, nil)
+	cap := &captureInviteMailer{}
+	srv.inviteMailer = cap
+	srv.inviteBaseURL = "https://app.example.com"
+
+	ctx := ctxWithTenant(t, "acme")
+	if _, err := srv.InviteMember(ctx, &tenantv1.InviteMemberRequest{Email: "alice@example.com", Role: "member"}); err != nil {
+		t.Fatalf("InviteMember: %v", err)
+	}
+	if cap.conflictCalls != 0 {
+		t.Errorf("expected no conflict notice for an existing same-tenant member, got %d", cap.conflictCalls)
+	}
+	if cap.last.To != "alice@example.com" {
+		t.Errorf("expected the normal accept-link email to be sent, got %+v", cap.last)
+	}
+}
+
+// TestInviteMember_UnusedAddressProceedsNormally: FindUserIDByEmail's
+// default (idp.ErrNotFound) must not block the ordinary invite path even
+// when idpClient/orgResolver/roles are fully configured.
+func TestInviteMember_UnusedAddressProceedsNormally(t *testing.T) {
+	db, mock, err := sqlmock.New()
+	if err != nil {
+		t.Fatalf("sqlmock: %v", err)
+	}
+	t.Cleanup(func() { _ = db.Close() })
+	mock.ExpectExec("CREATE TABLE IF NOT EXISTS tenant_invitations").WillReturnResult(sqlmock.NewResult(0, 0))
+	mock.ExpectExec("CREATE UNIQUE INDEX").WillReturnResult(sqlmock.NewResult(0, 0))
+	mock.ExpectQuery(regexp.QuoteMeta("INSERT INTO tenant_invitations")).
+		WillReturnRows(sqlmock.NewRows([]string{"id", "expires_at"}).AddRow("inv-1", nowPlus()))
+
+	az := &membersAuthorizer{}
+	idpC := &membersIdPClient{} // FindUserIDByEmail defaults to ErrNotFound
+	srv := newMembersTestServer(t, az, idpC)
+	srv.invitations = NewInvitationStore(db)
+	srv.orgResolver = staticOrgResolver{orgID: "org-1"}
+	tuples, err := tenantrole.AuthzTuples(az)
+	if err != nil {
+		t.Fatalf("AuthzTuples: %v", err)
+	}
+	srv.roles = tenantrole.NewSyncer(newFakeGrants(), tuples, nil)
+	cap := &captureInviteMailer{}
+	srv.inviteMailer = cap
+	srv.inviteBaseURL = "https://app.example.com"
+
+	ctx := ctxWithTenant(t, "acme")
+	if _, err := srv.InviteMember(ctx, &tenantv1.InviteMemberRequest{Email: "fresh@example.com", Role: "member"}); err != nil {
+		t.Fatalf("InviteMember: %v", err)
+	}
+	if cap.conflictCalls != 0 || cap.last.To != "fresh@example.com" {
+		t.Errorf("expected the normal invite flow, got conflictCalls=%d last=%+v", cap.conflictCalls, cap.last)
 	}
 }
 
@@ -246,6 +393,33 @@ func TestAcceptInvitation_HappyPath(t *testing.T) {
 	}
 	if len(idpC.ensuredEmails) != 1 || idpC.ensuredEmails[0] != "bob@example.com" {
 		t.Fatalf("expected EnsureHumanUser for bob, got %v", idpC.ensuredEmails)
+	}
+	// EmailVerified is true: the token this call redeemed is itself the
+	// proof of mailbox control, so the IdP's own separate verification
+	// email would be redundant (hosted#203).
+	if len(idpC.ensuredEmailsVerified) != 1 || !idpC.ensuredEmailsVerified[0] {
+		t.Fatalf("expected EnsureHumanUser called with EmailVerified=true, got %v", idpC.ensuredEmailsVerified)
+	}
+	// A setup link was minted for the same user, in the same org, and rides
+	// back in the response for the dashboard to redirect to.
+	if len(idpC.setupLinkUserIDs) != 1 || idpC.setupLinkUserIDs[0] != "user-bob" || idpC.setupLinkOrgIDs[0] != "org-1" {
+		t.Fatalf("expected CreateSetupLink(org-1, user-bob), got users=%v orgs=%v", idpC.setupLinkUserIDs, idpC.setupLinkOrgIDs)
+	}
+	if resp.GetSetupUrl() == "" {
+		t.Error("SetupUrl empty; the dashboard has nowhere to send the invitee to set a credential")
+	}
+}
+
+// TestAcceptInvitation_CreateSetupLinkErrorIsInternal: a setup-link mint
+// failure must fail the call (Internal), and — crucially — must happen
+// BEFORE SetStatus marks the invitation accepted, so a retry can redeem the
+// same token again (EnsureHumanUser and Roles.Assign are both idempotent).
+func TestAcceptInvitation_CreateSetupLinkErrorIsInternal(t *testing.T) {
+	srv := acceptInvitationFixture(t, &membersIdPClient{ensureUserID: "user-bob", setupLinkErr: errors.New("zitadel boom")})
+
+	_, err := srv.AcceptInvitation(context.Background(), &tenantv1.AcceptInvitationRequest{Token: "rawtoken"})
+	if status_grpc.Code(err) != codes.Internal {
+		t.Fatalf("AcceptInvitation code = %v (err=%v), want Internal", status_grpc.Code(err), err)
 	}
 }
 

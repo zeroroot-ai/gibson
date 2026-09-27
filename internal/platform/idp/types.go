@@ -85,6 +85,13 @@ type EnsureHumanUserRequest struct {
 	OrgID string
 	// Email is the user's email address (also the login name). Required.
 	Email string
+	// EmailVerified marks the email verified at create-time. Set this true
+	// only when the CALLER has already proven control of the address by some
+	// other means — e.g. the invitee already redeemed a token this install
+	// emailed to that exact address (MembershipService.AcceptInvitation).
+	// Leaving it false lets the IdP mint its own verification email, which
+	// is correct when nothing has proven the address yet.
+	EmailVerified bool
 }
 
 // CreateHumanUserRequest carries parameters for provisioning a password-bearing

@@ -149,6 +149,7 @@ func main() {
 			checks.GraphWriteAnalyzer,
 			checks.CypherIdentifierAnalyzer,
 			checks.TenantRoleWriteAnalyzer,
+			checks.OrgMemberWriteAnalyzer,
 		}...,
 	)
 }

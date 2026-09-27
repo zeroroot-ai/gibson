@@ -366,7 +366,7 @@ func (c *Client) EnsureHumanUser(ctx context.Context, req idp.EnsureHumanUserReq
 	createBody := map[string]interface{}{
 		"userName": idp.UsernameForEmail(req.Email),
 		"profile":  map[string]interface{}{"firstName": "Invited", "lastName": "User"},
-		"email":    map[string]interface{}{"email": req.Email, "isEmailVerified": false},
+		"email":    map[string]interface{}{"email": req.Email, "isEmailVerified": req.EmailVerified},
 	}
 	var createResp struct {
 		UserID string `json:"userId"`
@@ -388,6 +388,50 @@ func (c *Client) EnsureHumanUser(ctx context.Context, req idp.EnsureHumanUserReq
 		return "", serr
 	}
 	return userID, nil
+}
+
+// setupLinkURLTemplate builds the Go-template URL Zitadel substitutes
+// {{.UserID}}, {{.OrgID}} and {{.Code}} into (CreateInviteCode's urlTemplate
+// field). Mirrors operators/platform's identical helper for the Platform
+// owner (ADR-0093, gibson#240): the emitted link is the same shape whether
+// Zitadel emails it or a caller renders it itself.
+func setupLinkURLTemplate(issuer string) string {
+	return strings.TrimRight(issuer, "/") + "/ui/v2/login/invite?userID={{.UserID}}&code={{.Code}}&organization={{.OrgID}}"
+}
+
+// renderSetupLink substitutes the same three placeholders setupLinkURLTemplate
+// declares.
+func renderSetupLink(urlTemplate, userID, orgID, code string) string {
+	r := strings.NewReplacer("{{.UserID}}", userID, "{{.OrgID}}", orgID, "{{.Code}}", code)
+	return r.Replace(urlTemplate)
+}
+
+// CreateSetupLink implements idp.AdminClient.
+//
+// Calls the v2 UserService directly (zitadel.user.v2.UserService/
+// CreateInviteCode) rather than a Management v1 path: v1 has no invite-code
+// endpoint. returnCode (never sendCode) means Zitadel mints the code and
+// hands it straight back instead of emailing it — this call's whole point is
+// that the CALLER already owns messaging for this user.
+func (c *Client) CreateSetupLink(ctx context.Context, orgID, userID string) (string, error) {
+	if userID == "" {
+		return "", fmt.Errorf("%w: CreateSetupLink requires userID", idp.ErrUpstream)
+	}
+	body := map[string]any{
+		"userId":     userID,
+		"returnCode": map[string]any{},
+	}
+	var resp struct {
+		InviteCode string `json:"inviteCode"`
+	}
+	if err := c.doRequest(ctx, http.MethodPost, "/zitadel.user.v2.UserService/CreateInviteCode", body, orgID, &resp); err != nil {
+		return "", mapError(err, "CreateSetupLink")
+	}
+	if resp.InviteCode == "" {
+		return "", fmt.Errorf("%w: CreateSetupLink: empty invite code", idp.ErrUpstream)
+	}
+	urlTemplate := setupLinkURLTemplate(c.cfg.Issuer)
+	return renderSetupLink(urlTemplate, userID, orgID, resp.InviteCode), nil
 }
 
 // CreateHumanUser provisions a password-bearing human user for self-serve

@@ -16,6 +16,7 @@ import (
 	"io"
 	"net/http"
 	"net/url"
+	"strings"
 	"time"
 
 	"golang.org/x/oauth2"
@@ -40,18 +41,25 @@ type Client interface {
 	// treated as success (already gone).
 	DeleteOrganization(ctx context.Context, orgID string) error
 
-	// AddMember adds a Zitadel user to an organization with the given roles.
-	// Returns the membership ID. Idempotent: existing membership is returned.
-	AddMember(ctx context.Context, orgID, userID string, roles []string) (membershipID string, err error)
+	// EnsureHumanUser finds the human user with the given email in orgID, or
+	// creates one with no password and no verified email. Returns the user
+	// id. Idempotent: an existing user is found and returned rather than
+	// duplicated.
+	//
+	// This, plus CreateSetupLink and a tenant-role grant, is the ENTIRE
+	// mechanism by which a human joins a tenant (ADR-0093, hosted#203).
+	// There is no separate org-membership write: a tenant role IS the
+	// membership, and Zitadel's org-member API (`/orgs/me/members`) plays no
+	// part in it — that API grants ORG_-prefixed administrator roles, which
+	// no tenant user ever holds.
+	EnsureHumanUser(ctx context.Context, orgID, email string) (userID string, err error)
 
-	// RemoveMember removes a Zitadel user from an organization. Idempotent:
-	// 404 is treated as success.
-	RemoveMember(ctx context.Context, orgID, userID string) error
-
-	// SendInvitation dispatches an invitation email to the given address and
-	// adds the user to the organization with the specified roles. Returns the
-	// Zitadel invitation/human user ID.
-	SendInvitation(ctx context.Context, orgID, email string, roles []string) (invitationID string, err error)
+	// CreateSetupLink mints a one-time Zitadel setup-link code for userID
+	// (returnCode, never sendCode — the caller already owns messaging for
+	// this user) and returns the ready-to-use URL: Zitadel's own hosted
+	// setup flow, where the person sets a password and enrolls MFA. It
+	// carries no password.
+	CreateSetupLink(ctx context.Context, orgID, userID string) (link string, err error)
 
 	// CreateServiceAccount creates a Zitadel machine user (service account)
 	// scoped to orgID with the given display name. Returns the stable
@@ -189,60 +197,16 @@ func (c *httpClient) DeleteOrganization(ctx context.Context, orgID string) error
 	return nil
 }
 
-// AddMember implements Client.
+// EnsureHumanUser implements Client. Creates a human user scoped to the org
+// with no password and no verified email, or finds the existing one on a
+// conflict. Never grants org membership: a tenant role (a project grant, ADR-
+// 0093) is the membership, and there is no separate org-member write here —
+// see the interface doc for why (hosted#203).
 //
-// Zitadel v4 dropped `/management/v1/orgs/{orgID}/members` in favour of a
-// self-scoped `/management/v1/orgs/me/members` path that takes the target
-// org via the `x-zitadel-orgid` header. We follow that pattern here — the
-// caller's PAT (IAM_OWNER) has the privilege to act in any org, and
-// `x-zitadel-orgid` selects which one.
-func (c *httpClient) AddMember(ctx context.Context, orgID, userID string, roles []string) (string, error) {
-	body := map[string]any{
-		"userId": userID,
-		"roles":  roles,
-	}
-	var resp struct {
-		// Zitadel org members don't have a discrete membership ID; we return
-		// a composite of orgID+userID as a stable idempotency key.
-		Details struct {
-			Sequence string `json:"sequence"`
-		} `json:"details"`
-	}
-	err := c.doJSONWithOrg(ctx, http.MethodPost, "/management/v1/orgs/me/members", orgID, body, &resp)
-	if err != nil {
-		if isConflict(err) {
-			// Member already added; return a deterministic composite ID.
-			return fmt.Sprintf("%s/%s", orgID, userID), nil
-		}
-		return "", fmt.Errorf("AddMember org=%s user=%s: %w", orgID, userID, err)
-	}
-	return fmt.Sprintf("%s/%s", orgID, userID), nil
-}
-
-// RemoveMember implements Client.
-//
-// v4: same self-scoped `/orgs/me/...` pattern as AddMember.
-func (c *httpClient) RemoveMember(ctx context.Context, orgID, userID string) error {
-	path := fmt.Sprintf("/management/v1/orgs/me/members/%s", url.PathEscape(userID))
-	err := c.doJSONWithOrg(ctx, http.MethodDelete, path, orgID, nil, nil)
-	if err != nil && isNotFound(err) {
-		return nil // already removed — idempotent
-	}
-	if err != nil {
-		return fmt.Errorf("RemoveMember org=%s user=%s: %w", orgID, userID, err)
-	}
-	return nil
-}
-
-// SendInvitation implements Client. Creates a human user scoped to the org,
-// triggers the email verification / invitation flow, and grants the given
-// roles. Returns the newly created Zitadel user ID as the invitation ID.
-//
-// v4: user creation moves to `/v2/users/human` with org scoping via the
-// `organization.orgId` body field. The v1 `/management/v1/orgs/{id}/users/human`
-// path is gone.
-func (c *httpClient) SendInvitation(ctx context.Context, orgID, email string, roles []string) (string, error) {
-	// Step 1: create human user inside the org via v2 API.
+// v4: user creation is `/v2/users/human` with org scoping via the
+// `organization.orgId` body field. The v1
+// `/management/v1/orgs/{id}/users/human` path is gone.
+func (c *httpClient) EnsureHumanUser(ctx context.Context, orgID, email string) (string, error) {
 	body := map[string]any{
 		"organization": map[string]any{
 			"orgId": orgID,
@@ -255,7 +219,6 @@ func (c *httpClient) SendInvitation(ctx context.Context, orgID, email string, ro
 		"email": map[string]any{
 			"email":      email,
 			"isVerified": false,
-			"sendCode":   map[string]any{}, // triggers invitation email
 		},
 	}
 	var resp struct {
@@ -263,23 +226,58 @@ func (c *httpClient) SendInvitation(ctx context.Context, orgID, email string, ro
 	}
 	err := c.doJSON(ctx, http.MethodPost, "/v2/users/human", body, &resp)
 	if err != nil && !isConflict(err) {
-		return "", fmt.Errorf("SendInvitation org=%s email=%s: create user: %w", orgID, email, err)
+		return "", fmt.Errorf("EnsureHumanUser org=%s email=%s: create user: %w", orgID, email, err)
 	}
 	userID := resp.UserID
 	if isConflict(err) || userID == "" {
 		// User exists; look up by login name to get their ID.
 		uid, lerr := c.getUserIDByEmail(ctx, orgID, email)
 		if lerr != nil {
-			return "", fmt.Errorf("SendInvitation: existing user lookup: %w", lerr)
+			return "", fmt.Errorf("EnsureHumanUser: existing user lookup: %w", lerr)
 		}
 		userID = uid
 	}
-
-	// Step 2: grant org membership with the requested roles.
-	if _, err := c.AddMember(ctx, orgID, userID, roles); err != nil {
-		return "", fmt.Errorf("SendInvitation: add member: %w", err)
-	}
 	return userID, nil
+}
+
+// setupLinkURLTemplate builds the Go-template URL Zitadel substitutes
+// {{.UserID}}, {{.OrgID}} and {{.Code}} into (CreateInviteCode's urlTemplate
+// field). Mirrors the identical helper operators/platform uses for the
+// Platform owner (ADR-0093, gibson#240): the emitted link is the same shape
+// wherever it is minted.
+func setupLinkURLTemplate(externalDomain string) string {
+	return "https://" + strings.TrimRight(externalDomain, "/") + "/ui/v2/login/invite?userID={{.UserID}}&code={{.Code}}&organization={{.OrgID}}"
+}
+
+// renderSetupLink substitutes the three placeholders setupLinkURLTemplate
+// declares.
+func renderSetupLink(urlTemplate, userID, orgID, code string) string {
+	r := strings.NewReplacer("{{.UserID}}", userID, "{{.OrgID}}", orgID, "{{.Code}}", code)
+	return r.Replace(urlTemplate)
+}
+
+// CreateSetupLink implements Client.
+//
+// Calls the v2 UserService directly (zitadel.user.v2.UserService/
+// CreateInviteCode): v1 has no invite-code endpoint. returnCode (never
+// sendCode) means Zitadel mints the code and hands it straight back instead
+// of emailing it — the caller already owns messaging for this user.
+func (c *httpClient) CreateSetupLink(ctx context.Context, orgID, userID string) (string, error) {
+	body := map[string]any{
+		"userId":     userID,
+		"returnCode": map[string]any{},
+	}
+	var resp struct {
+		InviteCode string `json:"inviteCode"`
+	}
+	if err := c.connectJSON(ctx, userService, "CreateInviteCode", body, &resp); err != nil {
+		return "", fmt.Errorf("CreateSetupLink org=%s user=%s: %w", orgID, userID, err)
+	}
+	if resp.InviteCode == "" {
+		return "", fmt.Errorf("CreateSetupLink org=%s user=%s: empty invite code", orgID, userID)
+	}
+	urlTemplate := setupLinkURLTemplate(c.externalDomain)
+	return renderSetupLink(urlTemplate, userID, orgID, resp.InviteCode), nil
 }
 
 // CreateServiceAccount implements Client.
@@ -353,6 +351,9 @@ func (c *httpClient) DeleteServiceAccount(ctx context.Context, _, accountID stri
 func (c *httpClient) connectJSON(ctx context.Context, service, method string, body, out any) error {
 	return c.doJSON(ctx, http.MethodPost, "/"+service+"/"+method, body, out)
 }
+
+// userService is the v2 Connect service CreateSetupLink calls.
+const userService = "zitadel.user.v2.UserService"
 
 // EnsureProjectGrant implements Client.
 //
@@ -647,11 +648,10 @@ func (e *errClient) GetOrganization(_ context.Context, _ string) (*Organization,
 	return nil, e.err
 }
 func (e *errClient) DeleteOrganization(_ context.Context, _ string) error { return e.err }
-func (e *errClient) AddMember(_ context.Context, _, _ string, _ []string) (string, error) {
+func (e *errClient) EnsureHumanUser(_ context.Context, _, _ string) (string, error) {
 	return "", e.err
 }
-func (e *errClient) RemoveMember(_ context.Context, _, _ string) error { return e.err }
-func (e *errClient) SendInvitation(_ context.Context, _, _ string, _ []string) (string, error) {
+func (e *errClient) CreateSetupLink(_ context.Context, _, _ string) (string, error) {
 	return "", e.err
 }
 func (e *errClient) CreateServiceAccount(_ context.Context, _, _ string) (string, string, string, error) {
