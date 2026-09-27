@@ -20,22 +20,41 @@ import (
 )
 
 // machineAdminsMux is a fake Zitadel serving the project lookup, the member
-// search seeded with members, and the member writes. removeStatus, when not
-// zero, is the status every DELETE /admin/v1/members/{id} returns. A POST
-// /admin/v1/members answers 409, as Zitadel does for an existing member, so
-// AddIAMMember goes on to PUT the new role set, which is recorded in puts.
-func machineAdminsMux(t *testing.T, members []iamMemberFixture, removeStatus int) (srv *httptest.Server, removed *[]string, puts map[string][]string) {
+// search seeded with members, and the member writes. fail maps a call name
+// ("projects", "project", "search", "delete", "put") to the HTTP status that
+// call returns instead of succeeding. A POST /admin/v1/members answers 409,
+// as Zitadel does for an existing member, so AddIAMMember goes on to PUT the
+// new role set, which is recorded in puts.
+func machineAdminsMux(t *testing.T, members []iamMemberFixture, fail map[string]int) (srv *httptest.Server, removed *[]string, puts map[string][]string) {
 	t.Helper()
 	var rm []string
 	puts = map[string][]string{}
+	failed := func(w http.ResponseWriter, call string) bool {
+		status, ok := fail[call]
+		if !ok {
+			return false
+		}
+		w.WriteHeader(status)
+		_, _ = w.Write([]byte(`{"code":13,"message":"boom"}`))
+		return true
+	}
 	mux := http.NewServeMux()
 	mux.HandleFunc("/management/v1/projects/_search", func(w http.ResponseWriter, _ *http.Request) {
+		if failed(w, "projects") {
+			return
+		}
 		_, _ = w.Write([]byte(`{"result":[{"id":"PROJ-1","name":"gibson"}]}`))
 	})
 	mux.HandleFunc("/management/v1/projects/PROJ-1", func(w http.ResponseWriter, _ *http.Request) {
+		if failed(w, "project") {
+			return
+		}
 		_, _ = w.Write([]byte(`{"project":{"details":{"resourceOwner":"ORG-1"}}}`))
 	})
 	mux.HandleFunc("/admin/v1/members/_search", func(w http.ResponseWriter, _ *http.Request) {
+		if failed(w, "search") {
+			return
+		}
 		_, _ = w.Write(membersSearchBody(members))
 	})
 	mux.HandleFunc("/admin/v1/members", func(w http.ResponseWriter, _ *http.Request) {
@@ -46,14 +65,15 @@ func machineAdminsMux(t *testing.T, members []iamMemberFixture, removeStatus int
 		userID := r.URL.Path[len("/admin/v1/members/"):]
 		switch r.Method {
 		case http.MethodDelete:
-			if removeStatus != 0 {
-				w.WriteHeader(removeStatus)
-				_, _ = w.Write([]byte(`{"code":13,"message":"boom"}`))
+			if failed(w, "delete") {
 				return
 			}
 			rm = append(rm, userID)
 			_, _ = w.Write([]byte(`{}`))
 		case http.MethodPut:
+			if failed(w, "put") {
+				return
+			}
 			var body struct {
 				Roles []string `json:"roles"`
 			}
@@ -116,7 +136,7 @@ func wantMachineAdminsCond(t *testing.T, pb *gibsonv1alpha1.PlatformBootstrap, s
 // upgrade case: the undeclared machine user loses its membership, and the
 // declared accounts, the login client and the human are untouched.
 func TestReconcileMachineAdminsScoped_RemovesUndeclaredMachineAdmin(t *testing.T) {
-	srv, removed, puts := machineAdminsMux(t, stagingMembers(), 0)
+	srv, removed, puts := machineAdminsMux(t, stagingMembers(), nil)
 	r := newOwnerTestReconciler(t, srv.URL, "http://unused.invalid", machineAdminsObjects()...)
 	pb := machineAdminsCR(srv.URL)
 
@@ -141,7 +161,7 @@ func TestReconcileMachineAdminsScoped_RemovesUndeclaredMachineAdmin(t *testing.T
 func TestReconcileMachineAdminsScoped_ResetsWidenedLoginClient(t *testing.T) {
 	members := stagingMembers()
 	members[1].Roles = []string{"IAM_LOGIN_CLIENT", "IAM_OWNER"}
-	srv, removed, puts := machineAdminsMux(t, members, 0)
+	srv, removed, puts := machineAdminsMux(t, members, nil)
 	r := newOwnerTestReconciler(t, srv.URL, "http://unused.invalid", machineAdminsObjects()...)
 	pb := machineAdminsCR(srv.URL)
 
@@ -164,7 +184,7 @@ func TestReconcileMachineAdminsScoped_LoginClientNameInOtherOrg_Removed(t *testi
 	members := append(stagingMembers(), iamMemberFixture{
 		UserID: "UID-FAKELOGIN", Roles: []string{"IAM_LOGIN_CLIENT"}, PreferredLoginName: "login-client", UserType: "TYPE_MACHINE", UserResourceOwner: "ORG-TENANT",
 	})
-	srv, removed, _ := machineAdminsMux(t, members, 0)
+	srv, removed, _ := machineAdminsMux(t, members, nil)
 	r := newOwnerTestReconciler(t, srv.URL, "http://unused.invalid", machineAdminsObjects()...)
 	pb := machineAdminsCR(srv.URL)
 
@@ -180,7 +200,7 @@ func TestReconcileMachineAdminsScoped_LoginClientNameInOtherOrg_Removed(t *testi
 // rule: while a declared child is not Ready, nothing is removed, because
 // that child may already be a member this step cannot yet name.
 func TestReconcileMachineAdminsScoped_WaitsForMachineUsers(t *testing.T) {
-	srv, removed, _ := machineAdminsMux(t, stagingMembers(), 0)
+	srv, removed, _ := machineAdminsMux(t, stagingMembers(), nil)
 	r := newOwnerTestReconciler(t, srv.URL, "http://unused.invalid",
 		adminPATSecret(), iamAdminSecret("UID-IAMADMIN"), machineUserChild("gibson-daemon", "UID-DAEMON"))
 	pb := machineAdminsCR(srv.URL)
@@ -212,20 +232,31 @@ func TestReconcileMachineAdminsScoped_WaitsForIAMAdminSecret(t *testing.T) {
 	wantMachineAdminsCond(t, pb, metav1.ConditionFalse, "WaitingForIAMAdminSecret")
 }
 
-func TestReconcileMachineAdminsScoped_RemoveIAMMemberErrors(t *testing.T) {
+// TestReconcileMachineAdminsScoped_ZitadelErrors pins every Zitadel failure
+// path: a failed project lookup waits, a transient error requeues, and a
+// permanent error stops without a requeue.
+func TestReconcileMachineAdminsScoped_ZitadelErrors(t *testing.T) {
+	widened := stagingMembers()
+	widened[1].Roles = []string{"IAM_OWNER"}
 	cases := []struct {
 		name        string
-		status      int
+		members     []iamMemberFixture
+		fail        map[string]int
 		wantStatus  metav1.ConditionStatus
 		wantReason  string
 		wantRequeue bool
 	}{
-		{"transient", http.StatusServiceUnavailable, metav1.ConditionUnknown, "ZitadelTransientError", true},
-		{"permanent", http.StatusForbidden, metav1.ConditionFalse, "ZitadelPermanentError", false},
+		{"project search", stagingMembers(), map[string]int{"projects": http.StatusServiceUnavailable}, metav1.ConditionUnknown, "WaitingForProject", true},
+		{"project org", stagingMembers(), map[string]int{"project": http.StatusServiceUnavailable}, metav1.ConditionUnknown, "WaitingForProject", true},
+		{"member search transient", stagingMembers(), map[string]int{"search": http.StatusServiceUnavailable}, metav1.ConditionUnknown, "ZitadelTransientError", true},
+		{"member search permanent", stagingMembers(), map[string]int{"search": http.StatusForbidden}, metav1.ConditionFalse, "ZitadelPermanentError", false},
+		{"remove transient", stagingMembers(), map[string]int{"delete": http.StatusServiceUnavailable}, metav1.ConditionUnknown, "ZitadelTransientError", true},
+		{"remove permanent", stagingMembers(), map[string]int{"delete": http.StatusForbidden}, metav1.ConditionFalse, "ZitadelPermanentError", false},
+		{"login client reset", widened, map[string]int{"put": http.StatusForbidden}, metav1.ConditionFalse, "ZitadelPermanentError", false},
 	}
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {
-			srv, _, _ := machineAdminsMux(t, stagingMembers(), tc.status)
+			srv, _, _ := machineAdminsMux(t, tc.members, tc.fail)
 			r := newOwnerTestReconciler(t, srv.URL, "http://unused.invalid", machineAdminsObjects()...)
 			pb := machineAdminsCR(srv.URL)
 
@@ -237,6 +268,40 @@ func TestReconcileMachineAdminsScoped_RemoveIAMMemberErrors(t *testing.T) {
 				t.Fatalf("result = %+v, want requeue=%v", res, tc.wantRequeue)
 			}
 			wantMachineAdminsCond(t, pb, tc.wantStatus, tc.wantReason)
+		})
+	}
+}
+
+func TestReconcileMachineAdminsScoped_WaitsForAdminToken(t *testing.T) {
+	r := newOwnerTestReconciler(t, "http://unused.invalid", "http://unused.invalid",
+		iamAdminSecret("UID-IAMADMIN"),
+		machineUserChild("gibson-daemon", "UID-DAEMON"),
+		machineUserChild("gibson-tenant-operator", "UID-TENANTOP"))
+	pb := machineAdminsCR("http://unused.invalid")
+
+	res, err := r.reconcileMachineAdminsScoped(context.Background(), pb, logr.Discard())
+	if err != nil {
+		t.Fatalf("reconcileMachineAdminsScoped: %v", err)
+	}
+	if res.RequeueAfter == 0 {
+		t.Fatal("expected a requeue while the admin token Secret is missing")
+	}
+	wantMachineAdminsCond(t, pb, metav1.ConditionFalse, "WaitingForAdminToken")
+}
+
+// TestReconcileMachineAdminsScoped_APIErrorsReturned pins that a Kubernetes
+// API error reading the service accounts or the admin token is returned, so
+// controller-runtime retries with backoff.
+func TestReconcileMachineAdminsScoped_APIErrorsReturned(t *testing.T) {
+	for _, name := range []string{iamAdminSecretName, "iam-admin-pat"} {
+		t.Run(name, func(t *testing.T) {
+			r := newOwnerTestReconciler(t, "http://unused.invalid", "http://unused.invalid", machineAdminsObjects()...)
+			r.Client = failGetNamed(r.Client.(client.WithWatch), name)
+			pb := machineAdminsCR("http://unused.invalid")
+
+			if _, err := r.reconcileMachineAdminsScoped(context.Background(), pb, logr.Discard()); err == nil {
+				t.Fatal("expected the API error to be returned")
+			}
 		})
 	}
 }

@@ -205,7 +205,7 @@ func (r *PlatformBootstrapReconciler) platformServiceSubjects(ctx context.Contex
 	if len(pending) > 0 {
 		sort.Strings(pending)
 		return nil, &serviceSubjectsWait{"WaitingForMachineUsers",
-			fmt.Sprintf("MACHINE_USER OIDCClients not yet Ready with a clientID: %s", strings.Join(pending, ", ")),
+			"MACHINE_USER OIDCClients not yet Ready with a clientID: " + strings.Join(pending, ", "),
 			requeueMedium}, nil
 	}
 	return entries, nil, nil

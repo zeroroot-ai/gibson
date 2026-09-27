@@ -110,7 +110,7 @@ func (r *PlatformBootstrapReconciler) reconcileMachineAdminsScoped(
 				continue
 			}
 			if aerr := zc.AddIAMMember(ctx, m.UserID, []string{loginClientRole}); aerr != nil {
-				return machineAdminsZitadelError(pb, fmt.Sprintf("AddIAMMember user=%s", m.UserID), aerr), nil
+				return machineAdminsZitadelError(pb, "AddIAMMember user="+m.UserID, aerr), nil
 			}
 			r.Recorder.Eventf(pb, corev1.EventTypeWarning, "LoginClientRolesReset",
 				"reset the Zitadel login client %s roles from %v to [%s]", m.UserID, m.Roles, loginClientRole)
@@ -118,7 +118,7 @@ func (r *PlatformBootstrapReconciler) reconcileMachineAdminsScoped(
 			continue
 		}
 		if rerr := zc.RemoveIAMMember(ctx, m.UserID); rerr != nil {
-			return machineAdminsZitadelError(pb, fmt.Sprintf("RemoveIAMMember user=%s", m.UserID), rerr), nil
+			return machineAdminsZitadelError(pb, "RemoveIAMMember user="+m.UserID, rerr), nil
 		}
 		r.Recorder.Eventf(pb, corev1.EventTypeWarning, "MachineAdminRemoved",
 			"revoked Zitadel instance-administrator membership %v from undeclared machine user %s (%s)",
