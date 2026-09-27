@@ -23,6 +23,7 @@ import (
 	"sigs.k8s.io/controller-runtime/pkg/controller/controllerutil"
 	logf "sigs.k8s.io/controller-runtime/pkg/log"
 
+	"github.com/zeroroot-ai/gibson/internal/platform/tenantrole"
 	gibsonv1alpha1 "github.com/zeroroot-ai/gibson/operators/tenant/api/v1alpha1"
 	"github.com/zeroroot-ai/gibson/operators/tenant/internal/clients"
 	"github.com/zeroroot-ai/gibson/operators/tenant/internal/clients/fga"
@@ -41,7 +42,10 @@ const (
 	zitadelRoleKeyMember = "gibson.member"
 )
 
-// zitadelRoleKey maps a MemberRole to the Zitadel project role key.
+// zitadelRoleKey maps a MemberRole to the Zitadel project role key. Used
+// only by the legacy SendInvitation path (hosted#203 replaces invitations);
+// the self-signup/pre-accepted path below goes through tenantrole.Syncer
+// instead (ADR-0093).
 func zitadelRoleKey(role gibsonv1alpha1.MemberRole) string {
 	switch role {
 	case gibsonv1alpha1.MemberRoleOwner:
@@ -52,6 +56,21 @@ func zitadelRoleKey(role gibsonv1alpha1.MemberRole) string {
 		return zitadelRoleKeyMember
 	default:
 		return zitadelRoleKeyMember
+	}
+}
+
+// tenantRoleFromMemberRole maps a TenantMember's MemberRole to a tenantrole.Role
+// (ADR-0093): owner to Owner, admin to Admin, member to Viewer.
+func tenantRoleFromMemberRole(role gibsonv1alpha1.MemberRole) (tenantrole.Role, bool) {
+	switch role {
+	case gibsonv1alpha1.MemberRoleOwner:
+		return tenantrole.Owner, true
+	case gibsonv1alpha1.MemberRoleAdmin:
+		return tenantrole.Admin, true
+	case gibsonv1alpha1.MemberRoleMember:
+		return tenantrole.Viewer, true
+	default:
+		return "", false
 	}
 }
 
@@ -68,6 +87,10 @@ type TenantMemberReconciler struct {
 	FGA     fga.Client
 	Mail    mail.Sender
 	Zitadel zitadel.Client
+	// Roles is the tenant role Syncer (ADR-0093 decision 3): the one writer
+	// of tenant-role tuples. syncZitadel calls Roles.Assign for a member
+	// whose Zitadel user already exists; cleanup calls Roles.Revoke.
+	Roles *tenantrole.Syncer
 
 	// BaseAcceptURL is the dashboard base URL for invitation accept links
 	// (e.g. "https://app.zeroroot.ai").
@@ -259,20 +282,12 @@ func (r *TenantMemberReconciler) resendInvitation(ctx context.Context, tm *gibso
 
 func (r *TenantMemberReconciler) acceptInvitation(ctx context.Context, tm *gibsonv1alpha1.TenantMember) (ctrl.Result, error) {
 	if r.FGA != nil {
-		// A pre-existing role tuple is success, not failure: the baseline
-		// first-admin bootstrap writes the owner tuple directly before the
-		// pre-accepted member reconciles here (gibson#1510), and a reconciler
-		// that errors on its own desired state retries forever — the member
-		// sat Invited with the accept branch crash-looping on
-		// "fga 400: already exists" while the session tuples below never got
-		// written.
-		if err := r.FGA.Write(ctx, []fga.Tuple{{
-			User:     fmt.Sprintf("user:%s", tm.Spec.AcceptedByUserID),
-			Relation: string(tm.Spec.Role),
-			Object:   fmt.Sprintf("tenant:%s", tm.Spec.TenantRef.Name),
-		}}); err != nil && !errors.Is(err, clients.ErrAlreadyExists) {
-			return ctrl.Result{}, err
-		}
+		// The tenant role tuple is no longer written here: syncZitadel runs
+		// before this branch on every reconcile and, for a member with a
+		// Zitadel user id, already called Roles.Assign — which writes the
+		// Zitadel grant and copies it into FGA in one call (ADR-0093). The
+		// only writes left here are the session tuples, which are not role
+		// tuples and stay direct FGA writes.
 
 		// Slice 2 of gibson#627: seed the active_session conditional tuple so
 		// that ext-authz (Slice 3) can enforce the session-validity gate.
@@ -353,32 +368,26 @@ func (r *TenantMemberReconciler) expireInvitation(ctx context.Context, tm *gibso
 }
 
 func (r *TenantMemberReconciler) cleanup(ctx context.Context, tm *gibsonv1alpha1.TenantMember) error {
-	// Remove FGA tuple (active members). Best-effort: fgaMissing is
-	// expected on retries (tuple already deleted) and other errors are
-	// not actionable on the cleanup path — surface a real error class
-	// + retry only when this becomes a saga step with its own status
-	// condition.
-	if r.FGA != nil && tm.Status.UserID != "" {
-		_ = r.FGA.Delete(ctx, []fga.Tuple{{
-			User:     fmt.Sprintf("user:%s", tm.Status.UserID),
-			Relation: string(tm.Spec.Role),
-			Object:   fmt.Sprintf("tenant:%s", tm.Spec.TenantRef.Name),
-		}})
+	// Revoke the tenant role through the Syncer (ADR-0093): it deletes the
+	// user's Zitadel grant, then copies the change into FGA in the same
+	// call, so this replaces both the old FGA Delete and the Zitadel
+	// RemoveMember call. Prefer the Zitadel-side id (what Assign granted
+	// against); fall back to the FGA-side id for a member that never
+	// resolved a Zitadel user.
+	userID := tm.Status.ZitadelUserID
+	if userID == "" {
+		userID = tm.Status.UserID
 	}
-
-	// Remove Zitadel membership if it was recorded.
-	if r.Zitadel != nil && tm.Status.ZitadelMembershipID != "" && tm.Status.ZitadelUserID != "" {
+	if r.Roles != nil && userID != "" {
 		orgID, err := r.zitadelOrgID(context.WithoutCancel(ctx), tm)
 		if err != nil {
 			// Zitadel unreachable — surface so the caller requeueues with backoff.
 			return fmt.Errorf("cleanup: resolve zitadel org: %w", err)
 		}
 		if orgID != "" {
-			if err := r.Zitadel.RemoveMember(ctx, orgID, tm.Status.ZitadelUserID); err != nil {
-				if !errors.Is(err, clients.ErrNotFound) {
-					return fmt.Errorf("cleanup: remove zitadel member: %w", err)
-				}
-				// 404 — already gone; treat as success (idempotent).
+			t := tenantrole.Tenant{ID: tm.Spec.TenantRef.Name, OrgID: orgID}
+			if err := r.Roles.Revoke(tenantrole.WithCaller(ctx, "tenant-operator"), t, userID); err != nil {
+				return fmt.Errorf("cleanup: revoke tenant role: %w", err)
 			}
 		}
 	}
@@ -423,30 +432,34 @@ func (r *TenantMemberReconciler) syncZitadel(ctx context.Context, tm *gibsonv1al
 		return ctrl.Result{RequeueAfter: zitadelBackoff}, nil
 	}
 
-	roles := []string{zitadelRoleKey(tm.Spec.Role)}
-
 	var membershipID string
 
 	if tm.Status.ZitadelUserID != "" {
-		// User already exists in Zitadel — just add org membership.
-		mid, merr := r.Zitadel.AddMember(ctx, orgID, tm.Status.ZitadelUserID, roles)
-		if merr != nil {
-			if errors.Is(merr, clients.ErrUnreachable) {
+		// User already exists in Zitadel (self-signup / pre-accepted): assign
+		// the tenant role through the Syncer (ADR-0093), which writes the
+		// Zitadel grant first and copies it into FGA in the same call — the
+		// FGA role write acceptInvitation used to do is no longer needed.
+		if r.Roles == nil {
+			return ctrl.Result{}, errors.New("syncZitadel: role sync not configured")
+		}
+		role, ok := tenantRoleFromMemberRole(tm.Spec.Role)
+		if !ok {
+			return ctrl.Result{}, fmt.Errorf("syncZitadel: role %q has no tenant-role mapping", tm.Spec.Role)
+		}
+		t := tenantrole.Tenant{ID: tm.Spec.TenantRef.Name, OrgID: orgID}
+		if err := r.Roles.Assign(tenantrole.WithCaller(ctx, "tenant-operator"), t, tm.Status.ZitadelUserID, role); err != nil {
+			if errors.Is(err, tenantrole.ErrOwnerConflict) {
 				return ctrl.Result{RequeueAfter: zitadelBackoff}, nil
 			}
-			if errors.Is(merr, clients.ErrAlreadyExists) {
-				// Membership already exists — desired state reached; treat as success.
-				log.Info("syncZitadel: membership already exists, treating as success", "orgID", orgID, "userID", tm.Status.ZitadelUserID)
-				membershipID = fmt.Sprintf("%s/%s", orgID, tm.Status.ZitadelUserID)
-			} else {
-				return ctrl.Result{}, fmt.Errorf("syncZitadel: add member: %w", merr)
-			}
-		} else {
-			membershipID = mid
+			return ctrl.Result{}, fmt.Errorf("syncZitadel: assign role: %w", err)
 		}
+		membershipID = fmt.Sprintf("%s/%s", orgID, tm.Status.ZitadelUserID)
 	} else if tm.Spec.Email != "" {
 		// No Zitadel user yet — send an invitation which also creates the user
-		// and grants the org membership.
+		// and grants the org membership. Legacy path (hosted#203 replaces
+		// invitations): still uses the gibson.* org role keys, not a project
+		// role grant, so it is untouched by ADR-0093.
+		roles := []string{zitadelRoleKey(tm.Spec.Role)}
 		invitationID, ierr := r.Zitadel.SendInvitation(ctx, orgID, tm.Spec.Email, roles)
 		if ierr != nil {
 			if errors.Is(ierr, clients.ErrUnreachable) {

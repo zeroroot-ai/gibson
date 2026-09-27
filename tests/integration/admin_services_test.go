@@ -254,12 +254,6 @@ func (f *fakeUserIdPClient) UpdateUserProfile(_ context.Context, _ string, req i
 	return f.profile, nil
 }
 
-func (f *fakeUserIdPClient) AddTenantMember(_ context.Context, _ idp.TenantMembershipRequest) error {
-	return nil
-}
-func (f *fakeUserIdPClient) RemoveTenantMember(_ context.Context, _ idp.TenantMembershipRequest) error {
-	return nil
-}
 func (f *fakeUserIdPClient) RevokeUserSessions(_ context.Context, _ string) (idp.RevokeUserSessionsResult, error) {
 	return idp.RevokeUserSessionsResult{}, nil
 }

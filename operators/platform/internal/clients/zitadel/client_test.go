@@ -1170,15 +1170,16 @@ func (f *fakeProjectRoleServer) handler() http.HandlerFunc {
 				f.writeUpstreamError(w)
 				return
 			}
+			// The real response shape: projectRoles[] with "key".
 			type roleOut struct {
-				RoleKey     string `json:"roleKey"`
+				Key         string `json:"key"`
 				DisplayName string `json:"displayName"`
 			}
 			roles := make([]roleOut, 0, len(f.roles))
 			for k, v := range f.roles {
-				roles = append(roles, roleOut{RoleKey: k, DisplayName: v})
+				roles = append(roles, roleOut{Key: k, DisplayName: v})
 			}
-			_ = json.NewEncoder(w).Encode(map[string]any{"roles": roles})
+			_ = json.NewEncoder(w).Encode(map[string]any{"projectRoles": roles})
 		case "/zitadel.project.v2.ProjectService/AddProjectRole":
 			if f.failAdd {
 				f.writeUpstreamError(w)
@@ -1217,5 +1218,51 @@ func (f *fakeProjectRoleServer) handler() http.HandlerFunc {
 		default:
 			w.WriteHeader(http.StatusNotFound)
 		}
+	}
+}
+
+// liveListProjectRolesBody is a ListProjectRoles response body recorded from
+// Zitadel v4.18.0 on kind (2026-09-26), with one extra undeclared role. The
+// fakes above mirror this shape; this test pins the client to the recorded
+// bytes, so a fake that drifts from Zitadel cannot hide a decoding bug again.
+const liveListProjectRolesBody = `{"pagination":{"totalResult":"5", "appliedLimit":"100"}, "projectRoles":[` +
+	`{"projectId":"392527900672262186", "key":"viewer", "creationDate":"2026-09-26T22:14:21.043473Z", "changeDate":"2026-09-26T22:14:21.043473Z", "displayName":"Viewer"}, ` +
+	`{"projectId":"392527900672262186", "key":"editor", "creationDate":"2026-09-26T22:14:21.030320Z", "changeDate":"2026-09-26T22:14:21.030320Z", "displayName":"Editor"}, ` +
+	`{"projectId":"392527900672262186", "key":"admin", "creationDate":"2026-09-26T22:14:21.011597Z", "changeDate":"2026-09-26T22:14:21.011597Z", "displayName":"Admin"}, ` +
+	`{"projectId":"392527900672262186", "key":"owner", "creationDate":"2026-09-26T22:14:20.896858Z", "changeDate":"2026-09-26T22:14:20.896858Z", "displayName":"Owner"}, ` +
+	`{"projectId":"392527900672262186", "key":"legacy", "creationDate":"2026-09-26T22:14:20.896858Z", "changeDate":"2026-09-26T22:14:20.896858Z", "displayName":"Legacy"}]}`
+
+// TestEnsureProjectRoles_DecodesTheRecordedZitadelResponse proves the client
+// reads the real response: the four declared roles are left alone, and the
+// one undeclared role is removed (owner decision D4). Before the fix the
+// client read "roles"/"roleKey", saw an empty list, re-added all four roles
+// on every reconcile and never removed anything.
+func TestEnsureProjectRoles_DecodesTheRecordedZitadelResponse(t *testing.T) {
+	var calls []string
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		calls = append(calls, r.URL.Path)
+		w.Header().Set("Content-Type", "application/json")
+		if r.URL.Path == "/zitadel.project.v2.ProjectService/ListProjectRoles" {
+			_, _ = w.Write([]byte(liveListProjectRolesBody))
+			return
+		}
+		_, _ = w.Write([]byte(`{}`))
+	}))
+	t.Cleanup(srv.Close)
+
+	c := New(srv.URL, "pat", "")
+	changed, err := c.EnsureProjectRoles(context.Background(), "392527900672262186", tenantrole.All)
+	if err != nil {
+		t.Fatalf("EnsureProjectRoles: %v", err)
+	}
+	if !changed {
+		t.Fatal("changed = false, want true (the undeclared role is removed)")
+	}
+	want := []string{
+		"/zitadel.project.v2.ProjectService/ListProjectRoles",
+		"/zitadel.project.v2.ProjectService/RemoveProjectRole",
+	}
+	if len(calls) != len(want) || calls[0] != want[0] || calls[1] != want[1] {
+		t.Fatalf("calls = %v, want %v (no Add, no Update, one Remove)", calls, want)
 	}
 }

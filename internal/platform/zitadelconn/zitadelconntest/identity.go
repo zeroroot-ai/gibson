@@ -30,6 +30,13 @@ type Identity struct {
 	projectGrants map[string]*fakeProjectGrant
 	userGrants    map[string]*fakeUserGrant
 	orgMembers    []OrgMember
+
+	// grantedPermissions restricts every request this Identity serves to
+	// exactly this set (see GrantRoles in permission.go). nil (the zero
+	// value) means unrestricted — every gated call succeeds — so an
+	// Identity that never calls GrantRoles behaves exactly as before this
+	// field existed.
+	grantedPermissions map[Permission]bool
 }
 
 type fakeOrg struct {
@@ -264,6 +271,9 @@ func (f *Identity) handleAddOrgMember(w http.ResponseWriter, r *http.Request) {
 		http.NotFound(w, r)
 		return
 	}
+	if !f.requirePermission(w, PermOrgMemberWrite, false) {
+		return
+	}
 	orgID := r.Header.Get("x-zitadel-orgid")
 	var req struct {
 		UserID string   `json:"userId"`
@@ -295,6 +305,9 @@ func (f *Identity) handleAddOrgMember(w http.ResponseWriter, r *http.Request) {
 // --- v2 ProjectService: roles -------------------------------------------
 
 func (f *Identity) handleListProjectRoles(w http.ResponseWriter, r *http.Request) {
+	if !f.requirePermission(w, PermProjectRoleRead, true) {
+		return
+	}
 	var req struct {
 		ProjectID string `json:"projectId"`
 	}
@@ -306,17 +319,20 @@ func (f *Identity) handleListProjectRoles(w http.ResponseWriter, r *http.Request
 		writeConnectError(w, "not_found", "Errors.Project.NotFound", "PROJ-nf001")
 		return
 	}
+	// The real ListProjectRolesResponse: {pagination, projectRoles[]}, each
+	// with "key", not the request-side "roleKey".
 	type roleOut struct {
-		RoleKey     string `json:"roleKey"`
+		ProjectID   string `json:"projectId"`
+		Key         string `json:"key"`
 		DisplayName string `json:"displayName"`
 	}
 	roles := make([]roleOut, 0, len(p.roles))
 	for _, rr := range p.roles {
-		roles = append(roles, roleOut{RoleKey: rr.Key, DisplayName: rr.DisplayName})
+		roles = append(roles, roleOut{ProjectID: req.ProjectID, Key: rr.Key, DisplayName: rr.DisplayName})
 	}
 	writeOK(w, map[string]any{
-		"roles":      roles,
-		"pagination": map[string]any{"totalResult": len(roles)},
+		"projectRoles": roles,
+		"pagination":   map[string]any{"totalResult": len(roles)},
 	})
 }
 
@@ -327,6 +343,9 @@ type projectRoleReq struct {
 }
 
 func (f *Identity) handleAddProjectRole(w http.ResponseWriter, r *http.Request) {
+	if !f.requirePermission(w, PermProjectRoleWrite, true) {
+		return
+	}
 	var req projectRoleReq
 	_ = decode(r, &req)
 	f.mu.Lock()
@@ -347,6 +366,9 @@ func (f *Identity) handleAddProjectRole(w http.ResponseWriter, r *http.Request) 
 }
 
 func (f *Identity) handleUpdateProjectRole(w http.ResponseWriter, r *http.Request) {
+	if !f.requirePermission(w, PermProjectRoleWrite, true) {
+		return
+	}
 	var req projectRoleReq
 	_ = decode(r, &req)
 	f.mu.Lock()
@@ -367,6 +389,9 @@ func (f *Identity) handleUpdateProjectRole(w http.ResponseWriter, r *http.Reques
 }
 
 func (f *Identity) handleRemoveProjectRole(w http.ResponseWriter, r *http.Request) {
+	if !f.requirePermission(w, PermProjectRoleWrite, true) {
+		return
+	}
 	var req projectRoleReq
 	_ = decode(r, &req)
 	f.mu.Lock()
@@ -426,6 +451,9 @@ type grantFilter struct {
 }
 
 func (f *Identity) handleListProjectGrants(w http.ResponseWriter, r *http.Request) {
+	if !f.requirePermission(w, PermProjectGrantRead, true) {
+		return
+	}
 	var req struct {
 		Filters []grantFilter `json:"filters"`
 	}
@@ -445,10 +473,12 @@ func (f *Identity) handleListProjectGrants(w http.ResponseWriter, r *http.Reques
 	}
 	f.mu.Lock()
 	defer f.mu.Unlock()
+	// The real ProjectGrant (zitadel.project.v2) names its keys
+	// "grantedRoleKeys"; the Create/Update requests say "roleKeys".
 	type grantOut struct {
 		ProjectID             string   `json:"projectId"`
 		GrantedOrganizationID string   `json:"grantedOrganizationId"`
-		RoleKeys              []string `json:"roleKeys"`
+		GrantedRoleKeys       []string `json:"grantedRoleKeys"`
 	}
 	out := make([]grantOut, 0)
 	for _, pg := range f.projectGrants {
@@ -458,7 +488,7 @@ func (f *Identity) handleListProjectGrants(w http.ResponseWriter, r *http.Reques
 		if orgID != "" && pg.OrgID != orgID {
 			continue
 		}
-		out = append(out, grantOut{ProjectID: pg.ProjectID, GrantedOrganizationID: pg.OrgID, RoleKeys: append([]string(nil), pg.RoleKeys...)})
+		out = append(out, grantOut{ProjectID: pg.ProjectID, GrantedOrganizationID: pg.OrgID, GrantedRoleKeys: append([]string(nil), pg.RoleKeys...)})
 	}
 	writeOK(w, map[string]any{
 		"projectGrants": out,
@@ -486,6 +516,9 @@ func (f *Identity) validRoleKeysLocked(p *fakeProject, keys []string) bool {
 }
 
 func (f *Identity) handleCreateProjectGrant(w http.ResponseWriter, r *http.Request) {
+	if !f.requirePermission(w, PermProjectGrantWrite, true) {
+		return
+	}
 	var req projectGrantReq
 	_ = decode(r, &req)
 	f.mu.Lock()
@@ -513,6 +546,9 @@ func (f *Identity) handleCreateProjectGrant(w http.ResponseWriter, r *http.Reque
 }
 
 func (f *Identity) handleUpdateProjectGrant(w http.ResponseWriter, r *http.Request) {
+	if !f.requirePermission(w, PermProjectGrantWrite, true) {
+		return
+	}
 	var req projectGrantReq
 	_ = decode(r, &req)
 	f.mu.Lock()
@@ -570,6 +606,9 @@ func (f *Identity) allowedKeysLocked(p *fakeProject, orgID string) (keys map[str
 }
 
 func (f *Identity) handleCreateAuthorization(w http.ResponseWriter, r *http.Request) {
+	if !f.requirePermission(w, PermUserGrantWrite, true) {
+		return
+	}
 	var req authorizationReq
 	_ = decode(r, &req)
 	f.mu.Lock()
@@ -612,6 +651,9 @@ func (f *Identity) handleCreateAuthorization(w http.ResponseWriter, r *http.Requ
 }
 
 func (f *Identity) handleUpdateAuthorization(w http.ResponseWriter, r *http.Request) {
+	if !f.requirePermission(w, PermUserGrantWrite, true) {
+		return
+	}
 	var req authorizationReq
 	_ = decode(r, &req)
 	f.mu.Lock()
@@ -643,6 +685,9 @@ func (f *Identity) handleUpdateAuthorization(w http.ResponseWriter, r *http.Requ
 }
 
 func (f *Identity) handleDeleteAuthorization(w http.ResponseWriter, r *http.Request) {
+	if !f.requirePermission(w, PermUserGrantDelete, true) {
+		return
+	}
 	var req struct {
 		ID string `json:"id"`
 	}
@@ -666,6 +711,9 @@ type authListFilter struct {
 }
 
 func (f *Identity) handleListAuthorizations(w http.ResponseWriter, r *http.Request) {
+	if !f.requirePermission(w, PermUserGrantRead, true) {
+		return
+	}
 	var req struct {
 		Pagination struct {
 			Offset int `json:"offset"`

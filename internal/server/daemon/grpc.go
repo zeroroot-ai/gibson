@@ -1243,6 +1243,18 @@ func (d *daemonImpl) buildGRPCServer(ctx context.Context) (*grpcSubsystem, error
 	} else {
 		d.logger.Info(ctx, "IdP admin client not configured (GIBSON_IDP_PROVIDER not set); TenantService agent-identity RPCs will return Unavailable")
 	}
+	// tenantrole.Syncer (ADR-0093): the one writer of tenant-role tuples.
+	// SetTenantRole, TransferOwnership and AcceptInvitation are Unavailable
+	// without it.
+	tenantRoleSyncer, tenantRoleErr := initTenantRoleSyncer(ctx, d.authorizer)
+	if tenantRoleErr != nil {
+		return nil, fmt.Errorf("daemon: tenant role syncer init failed: %w", tenantRoleErr)
+	}
+	if tenantRoleSyncer != nil {
+		d.logger.Info(ctx, "tenant role syncer wired into TenantAdminService")
+	} else {
+		d.logger.Info(ctx, "tenant role syncer not configured (GIBSON_IDP_PROVIDER not set); SetTenantRole/TransferOwnership/AcceptInvitation will return Unavailable")
+	}
 	// Wire audit writer for TenantService. platformDB is always non-nil
 	// after Start() (gibson#246).
 	tenantAuditWriter := audit.NewWriter(d.platformDB, d.logger.Slog())
@@ -1311,6 +1323,7 @@ func (d *daemonImpl) buildGRPCServer(ctx context.Context) (*grpcSubsystem, error
 				Authorizer:         d.authorizer,
 				IdPAdminClient:     idpClient,
 				ZitadelOrgResolver: api.NewZitadelOrgResolver(d.platformDB),
+				Roles:              tenantRoleSyncer,
 				Invitations:        admin.NewInvitationStore(d.platformDB),
 				InvitationMailer:   adminMailer,
 				InviteBaseURL:      os.Getenv("GIBSON_PUBLIC_URL"),

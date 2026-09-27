@@ -78,11 +78,6 @@ type membersIdPClient struct {
 	profiles map[string]*idp.UserProfile
 	failFor  map[string]bool // accountIDs that should return an error
 
-	// recorded membership projection calls (gibson#621)
-	added   []idp.TenantMembershipRequest
-	removed []idp.TenantMembershipRequest
-	addErr  error
-
 	// EnsureHumanUser recording (gibson#633)
 	ensuredEmails []string
 	ensureUserID  string
@@ -108,17 +103,6 @@ func (c *membersIdPClient) GetUserProfile(_ context.Context, accountID string) (
 		return nil, idp.ErrNotFound
 	}
 	return p, nil
-}
-func (c *membersIdPClient) AddTenantMember(_ context.Context, req idp.TenantMembershipRequest) error {
-	if c.addErr != nil {
-		return c.addErr
-	}
-	c.added = append(c.added, req)
-	return nil
-}
-func (c *membersIdPClient) RemoveTenantMember(_ context.Context, req idp.TenantMembershipRequest) error {
-	c.removed = append(c.removed, req)
-	return nil
 }
 func (c *membersIdPClient) RevokeUserSessions(_ context.Context, _ string) (idp.RevokeUserSessionsResult, error) {
 	return idp.RevokeUserSessionsResult{}, nil

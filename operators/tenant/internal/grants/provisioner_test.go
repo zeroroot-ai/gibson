@@ -69,7 +69,8 @@ func (f *recordingFGA) Check(context.Context, string, string, string) (bool, err
 	return false, nil
 }
 
-func (f *recordingFGA) Ping(context.Context) error { return nil }
+func (f *recordingFGA) Ping(context.Context) error                               { return nil }
+func (f *recordingFGA) WriteAndDelete(_ context.Context, _, _ []fga.Tuple) error { return nil }
 func (f *recordingFGA) WriteConditional(_ context.Context, _ fga.ConditionalTuple) error {
 	return nil
 }

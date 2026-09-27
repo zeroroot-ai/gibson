@@ -154,12 +154,6 @@ func (f *fakeIDPClient) UpdateUserProfile(_ context.Context, _ string, _ idp.Upd
 	return nil, idp.ErrNotFound
 }
 
-func (f *fakeIDPClient) AddTenantMember(_ context.Context, _ idp.TenantMembershipRequest) error {
-	return nil
-}
-func (f *fakeIDPClient) RemoveTenantMember(_ context.Context, _ idp.TenantMembershipRequest) error {
-	return nil
-}
 func (f *fakeIDPClient) RevokeUserSessions(_ context.Context, userID string) (idp.RevokeUserSessionsResult, error) {
 	f.revokedUsers = append(f.revokedUsers, userID)
 	if f.revokeErr != nil {
