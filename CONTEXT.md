@@ -324,6 +324,24 @@ carries structure, never a tenant's secrets
 ([ADR-0024](docs/adr/0024-discoverable-taxonomy-and-ontology.md), [ADR-0025](docs/adr/0025-domain-packs.md)).
 _Avoid_: template, ruleset
 
+### Belief substrate (decided 2026-09-27, ADR-0029, amends ADR-0005)
+
+**Belief substrate (PRM)**:
+The one relational probabilistic model over the graph. Any node type — asset, finding,
+technique, mission — declares its belief variables and dependencies in the ontology/Pack.
+`{reachable, exploitable, juicy}` on assets is seed content, not structure. The Bet market
+and Reputation are **views** of it: belief on a claim-node (`P(claim valid)`) and belief on
+a technique × environment node (`P(technique works here)`)
+([ADR-0029](docs/adr/0029-belief-is-a-relational-prm-over-the-graph.md)).
+_Avoid_: belief field (the older per-host framing), separate reputation store, per-host net
+
+**Bayesian attack graph**:
+The directed-acyclic graph belief propagates over, derived from the infra graph because
+enablement is directional. Belief on a node is computed by **exact inference on a bounded,
+deterministically-extracted acyclic slice** toward that node — the bound is in the slice's
+scope, never in the inference (ADR-0029, keeps ADR-0005's "exact only").
+_Avoid_: infra graph (the raw, cyclic one), loopy propagation (rejected)
+
 ### Planning and proof (decided 2026-09-27, ADR-0026 – ADR-0028)
 
 **Value-of-Information (VoI)**:
