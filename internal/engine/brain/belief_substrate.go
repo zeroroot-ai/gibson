@@ -3,10 +3,7 @@
 
 package brain
 
-import (
-	"context"
-	"sync"
-)
+import "context"
 
 // belief_substrate.go is the stub/seam for ADR-0029: belief generalized to any
 // node type the ontology declares belief variables for, not only Host.
@@ -85,36 +82,15 @@ type BeliefSubstrate interface {
 	SetBelief(ctx context.Context, ref NodeRef, nb NodeBelief) error
 }
 
-// InMemoryBeliefSubstrate is a stub BeliefSubstrate: an in-process, unshared
-// store with no persistence and no event log of its own. It exists so a
-// caller can compile and test against BeliefSubstrate today — Lane C's market
-// and reputation views, in particular — before a substrate backed by the
-// relational-PRM engine (ADR-0029 §§1-2) exists. It is not wired into the
-// Engine/World and does not replace the Host belief path (belief.go).
-type InMemoryBeliefSubstrate struct {
-	mu      sync.RWMutex
-	beliefs map[NodeRef]NodeBelief
-}
-
-// NewInMemoryBeliefSubstrate returns an empty stub substrate.
-func NewInMemoryBeliefSubstrate() *InMemoryBeliefSubstrate {
-	return &InMemoryBeliefSubstrate{beliefs: make(map[NodeRef]NodeBelief)}
-}
-
-// Belief returns ref's recorded belief, if any.
-func (s *InMemoryBeliefSubstrate) Belief(_ context.Context, ref NodeRef) (NodeBelief, bool, error) {
-	s.mu.RLock()
-	defer s.mu.RUnlock()
-	nb, ok := s.beliefs[ref]
-	return nb, ok, nil
-}
-
-// SetBelief replaces ref's recorded belief with nb.
-func (s *InMemoryBeliefSubstrate) SetBelief(_ context.Context, ref NodeRef, nb NodeBelief) error {
-	s.mu.Lock()
-	defer s.mu.Unlock()
-	s.beliefs[ref] = nb
-	return nil
-}
-
-var _ BeliefSubstrate = (*InMemoryBeliefSubstrate)(nil)
+// A concrete implementation is deliberately NOT published here. Publishing one
+// with nothing in this repo calling it yet is unreachable from every cmd/
+// entry point and fails the whole-program dead-code gate (make lint-deadcode) —
+// so shipping a stub impl now would either force a premature
+// .deadcode-baseline edit for code nothing uses, or force wiring it into a
+// live path ahead of the view that needs it. The interface above is the seam
+// gibson#272/ADR-0029 §3 asks for; whichever lane builds the market/reputation
+// view supplies (and reaches) its own backing implementation — an in-memory
+// one initially, the relational-PRM engine (ADR-0029 §§1-2) eventually. See
+// belief_substrate_test.go for a minimal implementation proving the interface
+// is satisfiable and its semantics (round-trip, kind independence, exact
+// overwrite) hold.

@@ -5,14 +5,47 @@ package brain
 
 import (
 	"context"
+	"sync"
 	"testing"
 )
 
-// TestInMemoryBeliefSubstrate_UnknownRefIsNotFound proves a node nobody has
-// scored yet reports "not found" rather than a zero-value belief that could be
-// mistaken for a real (if uninformative) score.
-func TestInMemoryBeliefSubstrate_UnknownRefIsNotFound(t *testing.T) {
-	s := NewInMemoryBeliefSubstrate()
+// fakeBeliefSubstrate is a minimal, in-memory BeliefSubstrate used only to
+// prove the interface is satisfiable and that its documented semantics hold
+// (round-trip, kind independence, exact overwrite). It is deliberately
+// test-only (see belief_substrate.go): a production BeliefSubstrate belongs to
+// whichever lane builds a real view (market, reputation) against it, so it is
+// reachable from a cmd/ entry point and does not trip the whole-program
+// dead-code gate for code nothing yet calls.
+type fakeBeliefSubstrate struct {
+	mu      sync.Mutex
+	beliefs map[NodeRef]NodeBelief
+}
+
+func newFakeBeliefSubstrate() *fakeBeliefSubstrate {
+	return &fakeBeliefSubstrate{beliefs: make(map[NodeRef]NodeBelief)}
+}
+
+func (s *fakeBeliefSubstrate) Belief(_ context.Context, ref NodeRef) (NodeBelief, bool, error) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	nb, ok := s.beliefs[ref]
+	return nb, ok, nil
+}
+
+func (s *fakeBeliefSubstrate) SetBelief(_ context.Context, ref NodeRef, nb NodeBelief) error {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	s.beliefs[ref] = nb
+	return nil
+}
+
+var _ BeliefSubstrate = (*fakeBeliefSubstrate)(nil)
+
+// TestBeliefSubstrate_UnknownRefIsNotFound proves a node nobody has scored yet
+// reports "not found" rather than a zero-value belief that could be mistaken
+// for a real (if uninformative) score.
+func TestBeliefSubstrate_UnknownRefIsNotFound(t *testing.T) {
+	s := newFakeBeliefSubstrate()
 
 	got, ok, err := s.Belief(context.Background(), NodeRef{Kind: NodeKindClaim, ID: "claim-1"})
 	if err != nil {
@@ -26,12 +59,12 @@ func TestInMemoryBeliefSubstrate_UnknownRefIsNotFound(t *testing.T) {
 	}
 }
 
-// TestInMemoryBeliefSubstrate_RoundTrip proves SetBelief/Belief round-trip
-// exactly for a claim-node and for a technique×environment node — the two
-// faces ADR-0029 §3 names (the market and reputation) as views over this
-// substrate. The substrate itself stays generic: it does not know what a
-// "claim" or a "technique×environment" node is beyond the NodeKind tag.
-func TestInMemoryBeliefSubstrate_RoundTrip(t *testing.T) {
+// TestBeliefSubstrate_RoundTrip proves SetBelief/Belief round-trip exactly for
+// a claim-node and for a technique×environment node — the two faces
+// ADR-0029 §3 names (the market and reputation) as views over this substrate.
+// The substrate itself stays generic: it does not know what a "claim" or a
+// "technique×environment" node is beyond the NodeKind tag.
+func TestBeliefSubstrate_RoundTrip(t *testing.T) {
 	tests := []struct {
 		name string
 		ref  NodeRef
@@ -57,7 +90,7 @@ func TestInMemoryBeliefSubstrate_RoundTrip(t *testing.T) {
 
 	for _, tc := range tests {
 		t.Run(tc.name, func(t *testing.T) {
-			s := NewInMemoryBeliefSubstrate()
+			s := newFakeBeliefSubstrate()
 			ctx := context.Background()
 
 			if err := s.SetBelief(ctx, tc.ref, tc.nb); err != nil {
@@ -77,12 +110,12 @@ func TestInMemoryBeliefSubstrate_RoundTrip(t *testing.T) {
 	}
 }
 
-// TestInMemoryBeliefSubstrate_KindsAreIndependent proves the substrate keys on
+// TestBeliefSubstrate_KindsAreIndependent proves a substrate keys on
 // (Kind, ID) together: a claim and a host sharing the literal id string "1"
 // must not collide, because the ontology (ADR-0029 §2) is what tells two
 // otherwise-identical ids apart.
-func TestInMemoryBeliefSubstrate_KindsAreIndependent(t *testing.T) {
-	s := NewInMemoryBeliefSubstrate()
+func TestBeliefSubstrate_KindsAreIndependent(t *testing.T) {
+	s := newFakeBeliefSubstrate()
 	ctx := context.Background()
 
 	claim := NodeRef{Kind: NodeKindClaim, ID: "1"}
@@ -108,12 +141,12 @@ func TestInMemoryBeliefSubstrate_KindsAreIndependent(t *testing.T) {
 	}
 }
 
-// TestInMemoryBeliefSubstrate_OverwriteReplacesExactly proves a later SetBelief
-// for the same ref fully replaces the earlier one — belief stays exact and
+// TestBeliefSubstrate_OverwriteReplacesExactly proves a later SetBelief for
+// the same ref fully replaces the earlier one — belief stays exact and
 // deterministic (ADR-0005 §2, still true under ADR-0029), never accumulated or
 // averaged.
-func TestInMemoryBeliefSubstrate_OverwriteReplacesExactly(t *testing.T) {
-	s := NewInMemoryBeliefSubstrate()
+func TestBeliefSubstrate_OverwriteReplacesExactly(t *testing.T) {
+	s := newFakeBeliefSubstrate()
 	ctx := context.Background()
 	ref := NodeRef{Kind: NodeKindClaim, ID: "claim-1"}
 
@@ -134,12 +167,4 @@ func TestInMemoryBeliefSubstrate_OverwriteReplacesExactly(t *testing.T) {
 	if got != second {
 		t.Fatalf("Belief = %+v, want the later write %+v (not a blend of both)", got, second)
 	}
-}
-
-// TestBeliefSubstrate_InterfaceCompileCheck is a compile-time-shaped test:
-// InMemoryBeliefSubstrate must satisfy BeliefSubstrate, which is the seam
-// gibson#272/ADR-0029 §3 publishes for other views (market, reputation) to
-// build against without waiting on the full relational-PRM engine.
-func TestBeliefSubstrate_InterfaceCompileCheck(_ *testing.T) {
-	var _ BeliefSubstrate = NewInMemoryBeliefSubstrate()
 }
