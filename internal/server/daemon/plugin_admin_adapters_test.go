@@ -79,6 +79,12 @@ func (s *stubIDP) CreateHumanUser(_ context.Context, _ idp.CreateHumanUserReques
 func (s *stubIDP) FindUserIDByEmail(_ context.Context, _ string) (string, error) {
 	return "", idp.ErrNotFound
 }
+func (s *stubIDP) EnsureHumanUserNoPassword(_ context.Context, _, _, _, _ string) (string, error) {
+	return "", nil
+}
+func (s *stubIDP) CreateSetupInviteCode(_ context.Context, _, _ string, _ bool) (string, error) {
+	return "", nil
+}
 func (s *stubIDP) RevokeUserSessions(_ context.Context, _ string) (idp.RevokeUserSessionsResult, error) {
 	return idp.RevokeUserSessionsResult{}, nil
 }

@@ -6,37 +6,35 @@
 //
 // Test fakes:
 //   - fakeTenantGetter: returns a static Tenant object or an error.
-//   - fakeIdpClient: captures EnsureHumanUser calls, optionally errors.
+//   - fakeIdpClient: captures EnsureHumanUserNoPassword/CreateSetupInviteCode
+//     calls, optionally errors.
 //   - fakeFgaClient: captures Check/Write calls, optionally errors.
+//   - fakeTenantRoleAssigner: captures Assign calls, optionally errors.
 package main
 
 import (
 	"bytes"
 	"context"
 	"errors"
-	apierrors "k8s.io/apimachinery/pkg/api/errors"
-	"k8s.io/client-go/kubernetes"
-	k8sfake "k8s.io/client-go/kubernetes/fake"
 	"log/slog"
 	"net/http"
 	"net/http/httptest"
+	"os"
 	"strings"
 	"testing"
+	"time"
 
+	corev1 "k8s.io/api/core/v1"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/apis/meta/v1/unstructured"
+	"k8s.io/apimachinery/pkg/runtime"
+	k8sfake "k8s.io/client-go/kubernetes/fake"
 	"k8s.io/client-go/rest"
+	k8stesting "k8s.io/client-go/testing"
 
 	"github.com/zeroroot-ai/gibson/internal/platform/authz"
-	"github.com/zeroroot-ai/gibson/internal/platform/idp"
 	"github.com/zeroroot-ai/gibson/internal/platform/tenantrole"
 	"github.com/zeroroot-ai/gibson/internal/platform/zitadelconn/zitadelconntest"
-	corev1 "k8s.io/api/core/v1"
-	"k8s.io/apimachinery/pkg/runtime"
-	"k8s.io/apimachinery/pkg/runtime/schema"
-	k8stesting "k8s.io/client-go/testing"
-	"os"
-	"time"
 )
 
 // ---- fakes ------------------------------------------------------------------
@@ -53,66 +51,44 @@ func (f *fakeTenantGetter) Get(_ context.Context, _ string, _ metav1.GetOptions,
 	return f.obj, nil
 }
 
+// ensureCall records one EnsureHumanUserNoPassword call.
+type ensureCall struct {
+	OrgID, Email, GivenName, FamilyName string
+}
+
+// inviteCall records one CreateSetupInviteCode call.
+type inviteCall struct {
+	UserID, URLTemplate string
+	Send                bool
+}
+
 type fakeIdpClient struct {
 	ensureUserID string
 	ensureErr    error
-	closeErr     error
+	ensureCalls  []ensureCall
 
-	ensureCalls []idp.EnsureHumanUserRequest
-	closed      bool
+	inviteCode  string
+	inviteErr   error
+	inviteCalls []inviteCall
 
-	createUserID string
-	createErr    error
-	createCalls  []idp.CreateHumanUserRequest
-
-	findUserID string
-	findErr    error
-	findCalls  []string
-	findOrgs   []string
-	setPwErr   error
-	setPwCalls []idp.SetHumanPasswordRequest
-
-	pwChangedAt    time.Time
-	pwChangedErr   error
-	pwChangedCalls []string
+	closeErr error
+	closed   bool
 }
 
-func (f *fakeIdpClient) HumanPasswordChangedAt(_ context.Context, userID string) (time.Time, error) {
-	f.pwChangedCalls = append(f.pwChangedCalls, userID)
-	if f.pwChangedErr != nil {
-		return time.Time{}, f.pwChangedErr
-	}
-	return f.pwChangedAt, nil
-}
-
-func (f *fakeIdpClient) FindUserIDByEmailInOrg(_ context.Context, email, orgID string) (string, error) {
-	f.findCalls = append(f.findCalls, email)
-	f.findOrgs = append(f.findOrgs, orgID)
-	if f.findErr != nil {
-		return "", f.findErr
-	}
-	return f.findUserID, nil
-}
-
-func (f *fakeIdpClient) SetHumanPassword(_ context.Context, req idp.SetHumanPasswordRequest) error {
-	f.setPwCalls = append(f.setPwCalls, req)
-	return f.setPwErr
-}
-
-func (f *fakeIdpClient) CreateHumanUser(_ context.Context, req idp.CreateHumanUserRequest) (idp.CreateHumanUserResult, error) {
-	f.createCalls = append(f.createCalls, req)
-	if f.createErr != nil {
-		return idp.CreateHumanUserResult{}, f.createErr
-	}
-	return idp.CreateHumanUserResult{UserID: f.createUserID}, nil
-}
-
-func (f *fakeIdpClient) EnsureHumanUser(_ context.Context, req idp.EnsureHumanUserRequest) (string, error) {
-	f.ensureCalls = append(f.ensureCalls, req)
+func (f *fakeIdpClient) EnsureHumanUserNoPassword(_ context.Context, orgID, email, givenName, familyName string) (string, error) {
+	f.ensureCalls = append(f.ensureCalls, ensureCall{OrgID: orgID, Email: email, GivenName: givenName, FamilyName: familyName})
 	if f.ensureErr != nil {
 		return "", f.ensureErr
 	}
 	return f.ensureUserID, nil
+}
+
+func (f *fakeIdpClient) CreateSetupInviteCode(_ context.Context, userID, urlTemplate string, send bool) (string, error) {
+	f.inviteCalls = append(f.inviteCalls, inviteCall{UserID: userID, URLTemplate: urlTemplate, Send: send})
+	if f.inviteErr != nil {
+		return "", f.inviteErr
+	}
+	return f.inviteCode, nil
 }
 
 func (f *fakeIdpClient) Close() error {
@@ -190,7 +166,7 @@ func TestRunBootstrap_TenantNotFound_FatalError(t *testing.T) {
 	fgaC := &fakeFgaClient{}
 	roles := &fakeTenantRoleAssigner{}
 
-	_, err := runBootstrap(context.Background(), "acme", "owner@acme.example", "", false, false, tenants, idpC, fgaC, roles)
+	_, err := runBootstrap(context.Background(), "acme", "owner@acme.example", "", "", false, tenants, idpC, fgaC, roles)
 	if err == nil {
 		t.Fatal("expected error when Tenant CR is missing, got nil")
 	}
@@ -208,7 +184,7 @@ func TestRunBootstrap_NoZitadelOrgID_FatalError(t *testing.T) {
 	fgaC := &fakeFgaClient{}
 	roles := &fakeTenantRoleAssigner{}
 
-	_, err := runBootstrap(context.Background(), "acme", "owner@acme.example", "", false, false, tenants, idpC, fgaC, roles)
+	_, err := runBootstrap(context.Background(), "acme", "owner@acme.example", "", "", false, tenants, idpC, fgaC, roles)
 	if err == nil {
 		t.Fatal("expected error when tenant has no zitadelOrgID, got nil")
 	}
@@ -226,46 +202,51 @@ func TestRunBootstrap_EnsureHumanUserFails_FatalError_NoPartialTuple(t *testing.
 	fgaC := &fakeFgaClient{}
 	roles := &fakeTenantRoleAssigner{}
 
-	_, err := runBootstrap(context.Background(), "acme", "owner@acme.example", "", false, false, tenants, idpC, fgaC, roles)
+	_, err := runBootstrap(context.Background(), "acme", "owner@acme.example", "", "", false, tenants, idpC, fgaC, roles)
 	if err == nil {
-		t.Fatal("expected error when EnsureHumanUser fails, got nil")
+		t.Fatal("expected error when EnsureHumanUserNoPassword fails, got nil")
 	}
 	if len(roles.assignCalls) != 0 {
-		t.Errorf("expected role assignment not called after EnsureHumanUser failure, got %d calls", len(roles.assignCalls))
+		t.Errorf("expected role assignment not called after EnsureHumanUserNoPassword failure, got %d calls", len(roles.assignCalls))
 	}
 	if len(fgaC.checkCalls) != 0 {
-		t.Errorf("expected no FGA activity after EnsureHumanUser failure, got checks=%d",
+		t.Errorf("expected no FGA activity after EnsureHumanUserNoPassword failure, got checks=%d",
 			len(fgaC.checkCalls))
 	}
 }
 
 // TestRunBootstrap_AssignFails_FatalError pins ADR-0093: a failed tenant role
-// grant is FATAL, unlike the old AddTenantMember call it replaces. Nothing
-// else can make this tenant's Owner, so an install with a Zitadel or FGA
-// outage at this exact moment must not report success and strand the
-// operator with no way in.
+// grant is FATAL. Nothing else can make this tenant's Owner, so an install
+// with a Zitadel or FGA outage at this exact moment must not report success
+// and strand the operator with no way in.
 func TestRunBootstrap_AssignFails_FatalError(t *testing.T) {
 	tenants := &fakeTenantGetter{obj: makeTenant("acme", "org-123")}
 	idpC := &fakeIdpClient{ensureUserID: "user-owner-1"}
 	fgaC := &fakeFgaClient{checkResult: false}
 	roles := &fakeTenantRoleAssigner{err: errors.New("zitadel grant failed")}
 
-	_, err := runBootstrap(context.Background(), "acme", "owner@acme.example", "", false, false, tenants, idpC, fgaC, roles)
+	_, err := runBootstrap(context.Background(), "acme", "owner@acme.example", "", "", false, tenants, idpC, fgaC, roles)
 	if err == nil {
 		t.Fatal("expected error when the tenant role assignment fails")
 	}
 	if len(roles.assignCalls) != 1 {
 		t.Errorf("expected exactly 1 Assign attempt, got %d", len(roles.assignCalls))
 	}
+	// The setup link must already have been sent BEFORE Assign runs, so a
+	// retry (the FGA tuple is still absent) can repeat both steps rather
+	// than silently skip the link forever.
+	if len(idpC.inviteCalls) != 1 {
+		t.Errorf("expected the setup link to be sent before the failed Assign, got %d invite calls", len(idpC.inviteCalls))
+	}
 }
 
-func TestRunBootstrap_HappyPath_CreatesUserAndAssignsOwner_ReturnsLink(t *testing.T) {
+func TestRunBootstrap_HappyPath_Emailed_CreatesUserSendsLinkAssignsOwner(t *testing.T) {
 	tenants := &fakeTenantGetter{obj: makeTenant("acme", "org-123")}
 	idpC := &fakeIdpClient{ensureUserID: "user-owner-1"}
 	fgaC := &fakeFgaClient{checkResult: false}
 	roles := &fakeTenantRoleAssigner{}
 
-	result, err := runBootstrap(context.Background(), "acme", "owner@acme.example", "https://app.example.com/", false, false, tenants, idpC, fgaC, roles)
+	result, err := runBootstrap(context.Background(), "acme", "owner@acme.example", "https://app.example.com/", "auth.example.com", false, tenants, idpC, fgaC, roles)
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
@@ -278,13 +259,30 @@ func TestRunBootstrap_HappyPath_CreatesUserAndAssignsOwner_ReturnsLink(t *testin
 	if result.SignInPath != "https://app.example.com/login" {
 		t.Errorf("SignInPath = %q, want https://app.example.com/login", result.SignInPath)
 	}
+	if result.SetupLink != "" {
+		t.Errorf("SetupLink = %q, want empty on the emailed path", result.SetupLink)
+	}
 
-	// EnsureHumanUser called with the tenant's org, not the platform org.
+	// EnsureHumanUserNoPassword called with the tenant's org, not the platform org.
 	if len(idpC.ensureCalls) != 1 {
-		t.Fatalf("expected 1 EnsureHumanUser call, got %d", len(idpC.ensureCalls))
+		t.Fatalf("expected 1 EnsureHumanUserNoPassword call, got %d", len(idpC.ensureCalls))
 	}
 	if idpC.ensureCalls[0].OrgID != "org-123" || idpC.ensureCalls[0].Email != "owner@acme.example" {
-		t.Errorf("EnsureHumanUser call = %+v, want OrgID=org-123 Email=owner@acme.example", idpC.ensureCalls[0])
+		t.Errorf("EnsureHumanUserNoPassword call = %+v, want OrgID=org-123 Email=owner@acme.example", idpC.ensureCalls[0])
+	}
+
+	// The setup link is emailed (send=true), never returned as a raw code.
+	if len(idpC.inviteCalls) != 1 {
+		t.Fatalf("expected 1 CreateSetupInviteCode call, got %d", len(idpC.inviteCalls))
+	}
+	if !idpC.inviteCalls[0].Send {
+		t.Error("expected send=true on the non-offline path")
+	}
+	if idpC.inviteCalls[0].UserID != "user-owner-1" {
+		t.Errorf("invite userID = %q, want user-owner-1", idpC.inviteCalls[0].UserID)
+	}
+	if !strings.HasPrefix(idpC.inviteCalls[0].URLTemplate, "https://auth.example.com/") {
+		t.Errorf("invite urlTemplate = %q, want it built from the public host (ZITADEL_EXTERNAL_DOMAIN), never the issuer", idpC.inviteCalls[0].URLTemplate)
 	}
 
 	// The tenant role Syncer assigned Owner for the right tenant and user
@@ -298,27 +296,52 @@ func TestRunBootstrap_HappyPath_CreatesUserAndAssignsOwner_ReturnsLink(t *testin
 	}
 }
 
-func TestRunBootstrap_AlreadyOwner_NoOpSuccess_NoDuplicateAssign(t *testing.T) {
+func TestRunBootstrap_HappyPath_Offline_ReturnsRenderedLink(t *testing.T) {
 	tenants := &fakeTenantGetter{obj: makeTenant("acme", "org-123")}
-	// EnsureHumanUser is idempotent by construction — a second run finds the
-	// same existing user.
+	idpC := &fakeIdpClient{ensureUserID: "user-owner-1", inviteCode: "raw-code-xyz"}
+	fgaC := &fakeFgaClient{checkResult: false}
+	roles := &fakeTenantRoleAssigner{}
+
+	result, err := runBootstrap(context.Background(), "acme", "owner@acme.example", "", "auth.example.com/", true, tenants, idpC, fgaC, roles)
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if len(idpC.inviteCalls) != 1 || idpC.inviteCalls[0].Send {
+		t.Fatalf("expected 1 CreateSetupInviteCode call with send=false, got %+v", idpC.inviteCalls)
+	}
+	wantLink := "https://auth.example.com/ui/v2/login/invite?userID=user-owner-1&code=raw-code-xyz&organization=org-123"
+	if result.SetupLink != wantLink {
+		t.Errorf("SetupLink = %q, want %q", result.SetupLink, wantLink)
+	}
+}
+
+func TestRunBootstrap_AlreadyOwner_NoOpSuccess_NoDuplicateAssignOrInvite(t *testing.T) {
+	tenants := &fakeTenantGetter{obj: makeTenant("acme", "org-123")}
+	// EnsureHumanUserNoPassword is idempotent by construction — a second run
+	// finds the same existing user.
 	idpC := &fakeIdpClient{ensureUserID: "user-owner-1"}
 	fgaC := &fakeFgaClient{checkResult: true} // tuple already present
 	roles := &fakeTenantRoleAssigner{}
 
-	result, err := runBootstrap(context.Background(), "acme", "owner@acme.example", "", false, false, tenants, idpC, fgaC, roles)
+	result, err := runBootstrap(context.Background(), "acme", "owner@acme.example", "", "", false, tenants, idpC, fgaC, roles)
 	if err != nil {
 		t.Fatalf("unexpected error on re-run: %v", err)
 	}
 	if result.Outcome != outcomeAlreadyOwner {
 		t.Errorf("Outcome = %q, want %q", result.Outcome, outcomeAlreadyOwner)
 	}
+	if result.SetupLink != "" {
+		t.Errorf("SetupLink = %q, want empty on a re-run — never re-invalidate a link the owner may have used", result.SetupLink)
+	}
 	if len(roles.assignCalls) != 0 {
 		t.Errorf("expected no role assignment on re-run (tuple already present), got %d calls", len(roles.assignCalls))
 	}
+	if len(idpC.inviteCalls) != 0 {
+		t.Errorf("expected no setup-link (re)send on re-run (tuple already present), got %d calls", len(idpC.inviteCalls))
+	}
 	// The Zitadel find call still happens (idempotent), but Assign does not.
 	if len(idpC.ensureCalls) != 1 {
-		t.Errorf("expected 1 EnsureHumanUser call on re-run, got %d", len(idpC.ensureCalls))
+		t.Errorf("expected 1 EnsureHumanUserNoPassword call on re-run, got %d", len(idpC.ensureCalls))
 	}
 }
 
@@ -328,7 +351,7 @@ func TestRunBootstrap_FgaCheckFails_FatalError(t *testing.T) {
 	fgaC := &fakeFgaClient{checkErr: errors.New("fga unreachable")}
 	roles := &fakeTenantRoleAssigner{}
 
-	_, err := runBootstrap(context.Background(), "acme", "owner@acme.example", "", false, false, tenants, idpC, fgaC, roles)
+	_, err := runBootstrap(context.Background(), "acme", "owner@acme.example", "", "", false, tenants, idpC, fgaC, roles)
 	if err == nil {
 		t.Fatal("expected error when FGA Check fails, got nil")
 	}
@@ -343,7 +366,7 @@ func TestRunBootstrap_NoPublicURL_EmptySignInPath(t *testing.T) {
 	fgaC := &fakeFgaClient{checkResult: false}
 	roles := &fakeTenantRoleAssigner{}
 
-	result, err := runBootstrap(context.Background(), "acme", "owner@acme.example", "", false, false, tenants, idpC, fgaC, roles)
+	result, err := runBootstrap(context.Background(), "acme", "owner@acme.example", "", "", false, tenants, idpC, fgaC, roles)
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
@@ -353,20 +376,37 @@ func TestRunBootstrap_NoPublicURL_EmptySignInPath(t *testing.T) {
 }
 
 func TestRunBootstrap_MissingTenantID_FatalError(t *testing.T) {
-	_, err := runBootstrap(context.Background(), "", "owner@acme.example", "", false, false, &fakeTenantGetter{}, &fakeIdpClient{}, &fakeFgaClient{}, &fakeTenantRoleAssigner{})
+	_, err := runBootstrap(context.Background(), "", "owner@acme.example", "", "", false, &fakeTenantGetter{}, &fakeIdpClient{}, &fakeFgaClient{}, &fakeTenantRoleAssigner{})
 	if err == nil {
 		t.Fatal("expected error for empty tenant id")
 	}
 }
 
 func TestRunBootstrap_MissingOwnerEmail_FatalError(t *testing.T) {
-	_, err := runBootstrap(context.Background(), "acme", "", "", false, false, &fakeTenantGetter{}, &fakeIdpClient{}, &fakeFgaClient{}, &fakeTenantRoleAssigner{})
+	_, err := runBootstrap(context.Background(), "acme", "", "", "", false, &fakeTenantGetter{}, &fakeIdpClient{}, &fakeFgaClient{}, &fakeTenantRoleAssigner{})
 	if err == nil {
 		t.Fatal("expected error for empty owner email")
 	}
 }
 
-// ---- parseFlags tests --------------------------------------------------------
+// A failure creating the invite code is fatal, and happens BEFORE Assign, so
+// a retry (the FGA tuple is still absent) safely repeats the invite.
+func TestRunBootstrap_CreateSetupInviteCodeFails_FatalError_BeforeAssign(t *testing.T) {
+	tenants := &fakeTenantGetter{obj: makeTenant("acme", "org-123")}
+	idpC := &fakeIdpClient{ensureUserID: "user-owner-1", inviteErr: errors.New("zitadel down")}
+	fgaC := &fakeFgaClient{checkResult: false}
+	roles := &fakeTenantRoleAssigner{}
+
+	_, err := runBootstrap(context.Background(), "acme", "owner@acme.example", "", "", false, tenants, idpC, fgaC, roles)
+	if err == nil || !strings.Contains(err.Error(), "create setup invite code") {
+		t.Fatalf("want a create-setup-invite-code error, got: %v", err)
+	}
+	if len(roles.assignCalls) != 0 {
+		t.Errorf("expected Assign not to run after a failed invite-code create, got %d calls", len(roles.assignCalls))
+	}
+}
+
+// ---- parseFlags tests ---------------------------------------------------------
 
 func TestParseFlags_Valid(t *testing.T) {
 	flags, err := parseFlags([]string{"-tenant", "acme", "-owner-email", "owner@acme.example"})
@@ -375,6 +415,15 @@ func TestParseFlags_Valid(t *testing.T) {
 	}
 	if flags.TenantID != "acme" || flags.OwnerEmail != "owner@acme.example" {
 		t.Errorf("got tenant=%q email=%q", flags.TenantID, flags.OwnerEmail)
+	}
+	if flags.OfflineSetup {
+		t.Error("OfflineSetup should default to false")
+	}
+	if flags.SetupSecretKey != "setup-link" {
+		t.Errorf("SetupSecretKey = %q, want default setup-link", flags.SetupSecretKey)
+	}
+	if flags.SetupSecretNamespace != "gibson" {
+		t.Errorf("SetupSecretNamespace = %q, want default gibson", flags.SetupSecretNamespace)
 	}
 }
 
@@ -396,6 +445,26 @@ func TestParseFlags_BlankValues(t *testing.T) {
 	_, err := parseFlags([]string{"-tenant", "  ", "-owner-email", "owner@acme.example"})
 	if err == nil {
 		t.Fatal("expected error when -tenant is blank/whitespace")
+	}
+}
+
+func TestParseFlags_OfflineRequiresSetupSecret(t *testing.T) {
+	_, err := parseFlags([]string{"-tenant", "acme", "-owner-email", "o@a.c", "-offline-setup"})
+	if err == nil || !strings.Contains(err.Error(), "-setup-secret is required") {
+		t.Fatalf("want a -setup-secret-required error, got: %v", err)
+	}
+}
+
+func TestParseFlags_OfflineWithSetupSecret_Valid(t *testing.T) {
+	flags, err := parseFlags([]string{
+		"-tenant", "acme", "-owner-email", "o@a.c",
+		"-offline-setup", "-setup-secret", "acme-owner-setup", "-setup-secret-key", "link",
+	})
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if !flags.OfflineSetup || flags.SetupSecret != "acme-owner-setup" || flags.SetupSecretKey != "link" {
+		t.Errorf("got %+v", flags)
 	}
 }
 
@@ -489,9 +558,9 @@ func TestRunWithDeps_HappyPath_ReturnsZero_PrintsSignInPath(t *testing.T) {
 		context.Background(),
 		discardLogger(),
 		&stdout,
-		"acme", "owner@acme.example", "https://app.example.com",
+		"acme", "owner@acme.example", "https://app.example.com", "auth.example.com",
 		false,
-		"", "gibson",
+		"", "setup-link", "gibson",
 		happyKubeLoader,
 		func(_ *rest.Config) (TenantGetter, error) { return tenants, nil },
 		func(_ context.Context) (idpClient, error) { return idpC, nil },
@@ -504,6 +573,9 @@ func TestRunWithDeps_HappyPath_ReturnsZero_PrintsSignInPath(t *testing.T) {
 	if !strings.Contains(stdout.String(), "https://app.example.com/login") {
 		t.Errorf("stdout = %q, want it to contain the sign-in link", stdout.String())
 	}
+	if !strings.Contains(stdout.String(), "emailed to the owner") {
+		t.Errorf("stdout = %q, want the emailed-link notice", stdout.String())
+	}
 	if !idpC.closed {
 		t.Error("expected idp client Close() to be called")
 	}
@@ -515,9 +587,9 @@ func TestRunWithDeps_KubeLoaderError_ReturnsOne(t *testing.T) {
 		context.Background(),
 		discardLogger(),
 		&stdout,
-		"acme", "owner@acme.example", "",
+		"acme", "owner@acme.example", "", "",
 		false,
-		"", "gibson",
+		"", "setup-link", "gibson",
 		func() (*rest.Config, error) { return nil, errors.New("no kubeconfig") },
 		func(_ *rest.Config) (TenantGetter, error) { return nil, errors.New("should not be called") },
 		func(_ context.Context) (idpClient, error) { return nil, errors.New("should not be called") },
@@ -535,9 +607,9 @@ func TestRunWithDeps_TenantProviderError_ReturnsOne(t *testing.T) {
 		context.Background(),
 		discardLogger(),
 		&stdout,
-		"acme", "owner@acme.example", "",
+		"acme", "owner@acme.example", "", "",
 		false,
-		"", "gibson",
+		"", "setup-link", "gibson",
 		happyKubeLoader,
 		func(_ *rest.Config) (TenantGetter, error) { return nil, errors.New("dynamic client failed") },
 		func(_ context.Context) (idpClient, error) { return nil, errors.New("should not be called") },
@@ -555,9 +627,9 @@ func TestRunWithDeps_IdpBuilderError_ReturnsOne(t *testing.T) {
 		context.Background(),
 		discardLogger(),
 		&stdout,
-		"acme", "owner@acme.example", "",
+		"acme", "owner@acme.example", "", "",
 		false,
-		"", "gibson",
+		"", "setup-link", "gibson",
 		happyKubeLoader,
 		func(_ *rest.Config) (TenantGetter, error) { return &fakeTenantGetter{}, nil },
 		func(_ context.Context) (idpClient, error) { return nil, errors.New("zitadel probe failed") },
@@ -576,9 +648,9 @@ func TestRunWithDeps_FgaBuilderError_ReturnsOne_ClosesIdp(t *testing.T) {
 		context.Background(),
 		discardLogger(),
 		&stdout,
-		"acme", "owner@acme.example", "",
+		"acme", "owner@acme.example", "", "",
 		false,
-		"", "gibson",
+		"", "setup-link", "gibson",
 		happyKubeLoader,
 		func(_ *rest.Config) (TenantGetter, error) { return &fakeTenantGetter{}, nil },
 		func(_ context.Context) (idpClient, error) { return idpC, nil },
@@ -604,9 +676,9 @@ func TestRunWithDeps_BootstrapError_ReturnsOne(t *testing.T) {
 		context.Background(),
 		discardLogger(),
 		&stdout,
-		"acme", "owner@acme.example", "",
+		"acme", "owner@acme.example", "", "",
 		false,
-		"", "gibson",
+		"", "setup-link", "gibson",
 		happyKubeLoader,
 		func(_ *rest.Config) (TenantGetter, error) { return tenants, nil },
 		func(_ context.Context) (idpClient, error) { return idpC, nil },
@@ -632,9 +704,9 @@ func TestRunWithDeps_AlreadyOwner_ReturnsZero_NoPublicURLMessage(t *testing.T) {
 		context.Background(),
 		discardLogger(),
 		&stdout,
-		"acme", "owner@acme.example", "",
+		"acme", "owner@acme.example", "", "",
 		false,
-		"", "gibson",
+		"", "setup-link", "gibson",
 		happyKubeLoader,
 		func(_ *rest.Config) (TenantGetter, error) { return tenants, nil },
 		func(_ context.Context) (idpClient, error) { return idpC, nil },
@@ -647,8 +719,105 @@ func TestRunWithDeps_AlreadyOwner_ReturnsZero_NoPublicURLMessage(t *testing.T) {
 	if !strings.Contains(stdout.String(), "GIBSON_PUBLIC_URL not set") {
 		t.Errorf("stdout = %q, want fallback message when publicURL unset", stdout.String())
 	}
+	if strings.Contains(stdout.String(), "setup link") || strings.Contains(stdout.String(), "emailed") {
+		t.Errorf("stdout = %q, want no setup-link message on an already-owner re-run", stdout.String())
+	}
 	if len(fgaC.writeCalls) != 0 {
 		t.Errorf("expected no FGA write for already-owner re-run, got %d", len(fgaC.writeCalls))
+	}
+}
+
+func TestRunWithDeps_Offline_WritesSetupLinkSecret(t *testing.T) {
+	orig := setupLinkWriter
+	t.Cleanup(func() { setupLinkWriter = orig })
+	var wroteNS, wroteName, wroteKey, wroteLink string
+	setupLinkWriter = func(_ context.Context, _ *rest.Config, ns, name, key, link string) error {
+		wroteNS, wroteName, wroteKey, wroteLink = ns, name, key, link
+		return nil
+	}
+
+	tenants := &fakeTenantGetter{obj: makeTenant("acme", "org-123")}
+	idpC := &fakeIdpClient{ensureUserID: "user-owner-1", inviteCode: "raw-code"}
+	fgaC := &fakeFgaClient{checkResult: false}
+	roles := &fakeTenantRoleAssigner{}
+	var stdout bytes.Buffer
+
+	code := runWithDeps(
+		context.Background(),
+		discardLogger(),
+		&stdout,
+		"acme", "owner@acme.example", "", "auth.example.com",
+		true,
+		"acme-owner-setup", "setup-link", "gibson",
+		happyKubeLoader,
+		func(_ *rest.Config) (TenantGetter, error) { return tenants, nil },
+		func(_ context.Context) (idpClient, error) { return idpC, nil },
+		func(_ context.Context) (fgaClient, error) { return fgaC, nil },
+		func(_ context.Context) (tenantRoleAssigner, error) { return roles, nil },
+	)
+	if code != 0 {
+		t.Fatalf("exit code = %d, want 0; stdout: %s", code, stdout.String())
+	}
+	if wroteNS != "gibson" || wroteName != "acme-owner-setup" || wroteKey != "setup-link" || wroteLink == "" {
+		t.Errorf("writer got ns=%q name=%q key=%q link-set=%v", wroteNS, wroteName, wroteKey, wroteLink != "")
+	}
+	if !strings.Contains(stdout.String(), wroteName) {
+		t.Error("stdout should name the Secret the link was written to")
+	}
+}
+
+func TestRunWithDeps_Offline_SetupLinkWriteFailureIsNonFatal(t *testing.T) {
+	orig := setupLinkWriter
+	t.Cleanup(func() { setupLinkWriter = orig })
+	setupLinkWriter = func(context.Context, *rest.Config, string, string, string, string) error {
+		return errors.New("apiserver said no")
+	}
+	tenants := &fakeTenantGetter{obj: makeTenant("acme", "org-123")}
+	var stdout bytes.Buffer
+	code := runWithDeps(
+		context.Background(),
+		discardLogger(),
+		&stdout,
+		"acme", "owner@acme.example", "", "auth.example.com",
+		true,
+		"acme-owner-setup", "setup-link", "gibson",
+		happyKubeLoader,
+		func(_ *rest.Config) (TenantGetter, error) { return tenants, nil },
+		func(_ context.Context) (idpClient, error) {
+			return &fakeIdpClient{ensureUserID: "u1", inviteCode: "c"}, nil
+		},
+		func(_ context.Context) (fgaClient, error) { return &fakeFgaClient{}, nil },
+		func(_ context.Context) (tenantRoleAssigner, error) { return &fakeTenantRoleAssigner{}, nil },
+	)
+	if code != 0 {
+		t.Fatalf("a failed Secret write must not fail a succeeded bootstrap; exit=%d", code)
+	}
+}
+
+// A failed tenant role Assign is FATAL (ADR-0093): nothing else can make this
+// tenant's Owner, so the run must exit non-zero rather than report success
+// with no Owner granted.
+func TestRunWithDeps_FailedRoleAssignIsFatal(t *testing.T) {
+	origPA := foundingMemberPreAcceptor
+	t.Cleanup(func() { foundingMemberPreAcceptor = origPA })
+	foundingMemberPreAcceptor = func(context.Context, *rest.Config, string, string, string) (preAcceptOutcome, error) {
+		return preAcceptDone, nil
+	}
+
+	tenants := &fakeTenantGetter{obj: makeTenant("acme", "org-1")}
+	idpC := &fakeIdpClient{ensureUserID: "u1"}
+	code := runWithDeps(context.Background(), discardLogger(), &bytes.Buffer{},
+		"acme", "owner@acme.example", "", "", false, "", "setup-link", "gibson",
+		happyKubeLoader,
+		func(_ *rest.Config) (TenantGetter, error) { return tenants, nil },
+		func(_ context.Context) (idpClient, error) { return idpC, nil },
+		func(_ context.Context) (fgaClient, error) { return &fakeFgaClient{}, nil },
+		func(_ context.Context) (tenantRoleAssigner, error) {
+			return &fakeTenantRoleAssigner{err: errors.New("gibson project role not found")}, nil
+		},
+	)
+	if code != 1 {
+		t.Fatalf("a failed tenant role assign must fail the run, exit=%d, want 1", code)
 	}
 }
 
@@ -789,9 +958,9 @@ func TestRunWithDeps_IdpCloseFails_StillReturnsSuccessCode(t *testing.T) {
 		context.Background(),
 		discardLogger(),
 		&stdout,
-		"acme", "owner@acme.example", "",
+		"acme", "owner@acme.example", "", "",
 		false,
-		"", "gibson",
+		"", "setup-link", "gibson",
 		happyKubeLoader,
 		func(_ *rest.Config) (TenantGetter, error) { return tenants, nil },
 		func(_ context.Context) (idpClient, error) { return idpC, nil },
@@ -816,9 +985,9 @@ func TestRunWithDeps_StdoutWriteFails_StillReturnsZero(t *testing.T) {
 		context.Background(),
 		discardLogger(),
 		errWriter{},
-		"acme", "owner@acme.example", "https://app.example.com",
+		"acme", "owner@acme.example", "https://app.example.com", "",
 		false,
-		"", "gibson",
+		"", "setup-link", "gibson",
 		happyKubeLoader,
 		func(_ *rest.Config) (TenantGetter, error) { return tenants, nil },
 		func(_ context.Context) (idpClient, error) { return idpC, nil },
@@ -999,253 +1168,126 @@ var (
 	_ fgaClient    = (*fakeFgaClient)(nil)
 )
 
-// --- deploy#1631: the self-hosted first admin -----------------------------
+// --- hosted#202: the offline setup-link Secret ------------------------------
+//
+// No password is ever written to a Secret (ADR-0093). These tests exercise
+// the create-or-update semantics writeOfflineSetupLinkSecret needs: a fresh
+// link on first write, and an overwrite on a retry where CreateSetupInviteCode
+// already invalidated the previous code on the Zitadel side.
 
-// With -generate-password the owner is created WITH a credential, because a
-// baseline install configures no SMTP and the emailed credential-setup flow
-// would strand the operator with an account they can never sign into.
-func TestRunBootstrap_GeneratePassword_CreatesWithCredential(t *testing.T) {
-	tenants := &fakeTenantGetter{obj: makeTenant("acme", "org-1")}
-	idpC := &fakeIdpClient{createUserID: "user-1"}
-	fgaC := &fakeFgaClient{}
-	roles := &fakeTenantRoleAssigner{}
-
-	res, err := runBootstrap(context.Background(), "acme", "owner@acme.example", "", true, false, tenants, idpC, fgaC, roles)
-	if err != nil {
-		t.Fatalf("unexpected error: %v", err)
-	}
-	if len(idpC.createCalls) != 1 {
-		t.Fatalf("CreateHumanUser calls = %d, want 1", len(idpC.createCalls))
-	}
-	if len(idpC.ensureCalls) != 0 {
-		t.Errorf("EnsureHumanUser must not be used on the generate path, got %d calls", len(idpC.ensureCalls))
-	}
-	if res.InitialPassword == "" {
-		t.Fatal("no initial password returned — the operator has no way in")
-	}
-	if got := idpC.createCalls[0].Password; got != res.InitialPassword {
-		t.Errorf("password sent to the IdP (%q) differs from the one reported to the operator (%q)", got, res.InitialPassword)
-	}
-	// Sign-in-capable: a baseline install cannot deliver a verification email,
-	// so an unverified account is an account nobody can use.
-	if !idpC.createCalls[0].EmailVerified {
-		t.Error("EmailVerified=false would leave the account pending an email that cannot be sent")
-	}
-	if len(res.InitialPassword) < 24 {
-		t.Errorf("initial password is only %d chars — too weak for a first admin", len(res.InitialPassword))
-	}
-}
-
-// THE ONE THAT MATTERS. Re-running the install must not reset a credential the
-// operator has already rotated: it falls back to finding the user and reports
-// NO password, rather than minting a new one and silently locking them out of
-// the one they set.
-func TestRunBootstrap_GeneratePassword_RerunDoesNotResetCredential(t *testing.T) {
-	tenants := &fakeTenantGetter{obj: makeTenant("acme", "org-1")}
-	// Re-run is signalled by the credential Secret already existing.
-	idpC := &fakeIdpClient{findUserID: "user-1"}
-	fgaC := &fakeFgaClient{}
-	roles := &fakeTenantRoleAssigner{}
-
-	res, err := runBootstrap(context.Background(), "acme", "owner@acme.example", "", true, true, tenants, idpC, fgaC, roles)
-	if err != nil {
-		t.Fatalf("a re-run must succeed, got: %v", err)
-	}
-	if res.InitialPassword != "" {
-		t.Fatalf("re-run reported a password (%q) — it reset a credential the operator may have rotated", res.InitialPassword)
-	}
-	if len(idpC.createCalls) != 0 {
-		t.Errorf("re-run must not create a user, got %d CreateHumanUser calls", len(idpC.createCalls))
-	}
-	if len(idpC.setPwCalls) != 0 {
-		t.Errorf("re-run must NOT reset the password, got %d SetHumanPassword calls", len(idpC.setPwCalls))
-	}
-	if len(idpC.findCalls) != 1 {
-		t.Errorf("expected the find path on re-run, got %d FindUserIDByEmail calls", len(idpC.findCalls))
-	}
-	// The owner lives in the TENANT org, not the daemon's admin org. Resolving
-	// in the admin org returned ErrNotFound and stranded every re-run and every
-	// post-upgrade hook (gibson#1560). The resolve MUST be scoped to the tenant
-	// org from the Tenant CR (here "org-1").
-	if len(idpC.findOrgs) != 1 || idpC.findOrgs[0] != "org-1" {
-		t.Errorf("re-run must resolve the owner in the tenant org, got findOrgs=%v want [org-1]", idpC.findOrgs)
-	}
-	if res.OwnerUserID != "user-1" {
-		t.Errorf("OwnerUserID = %q, want the existing user", res.OwnerUserID)
-	}
-}
-
-// First setup where the invitation flow already created the owner user: activate
-// it by setting the generated password, and DO report the credential.
-func TestRunBootstrap_GeneratePassword_ActivatesInvitedOwner(t *testing.T) {
-	tenants := &fakeTenantGetter{obj: makeTenant("acme", "org-1")}
-	idpC := &fakeIdpClient{createErr: idp.ErrAlreadyExists, findUserID: "invited-user"}
-	fgaC := &fakeFgaClient{}
-	roles := &fakeTenantRoleAssigner{}
-
-	res, err := runBootstrap(context.Background(), "acme", "owner@acme.example", "", true, false, tenants, idpC, fgaC, roles)
-	if err != nil {
-		t.Fatalf("activating an invited owner must succeed, got: %v", err)
-	}
-	if len(idpC.setPwCalls) != 1 {
-		t.Fatalf("want one SetHumanPassword to activate the invited owner, got %d", len(idpC.setPwCalls))
-	}
-	if res.InitialPassword == "" {
-		t.Fatal("activation must report the generated credential so it reaches the Secret")
-	}
-	if idpC.setPwCalls[0].Password != res.InitialPassword {
-		t.Errorf("password set on the IdP (%q) differs from the one reported (%q)", idpC.setPwCalls[0].Password, res.InitialPassword)
-	}
-	if res.OwnerUserID != "invited-user" {
-		t.Errorf("OwnerUserID = %q, want the resolved invited user", res.OwnerUserID)
-	}
-}
-
-// Without the flag nothing changes: the SaaS/invitation path is untouched.
-func TestRunBootstrap_WithoutGeneratePassword_UsesInvitationFlow(t *testing.T) {
-	tenants := &fakeTenantGetter{obj: makeTenant("acme", "org-1")}
-	idpC := &fakeIdpClient{ensureUserID: "user-1"}
-	fgaC := &fakeFgaClient{}
-	roles := &fakeTenantRoleAssigner{}
-
-	res, err := runBootstrap(context.Background(), "acme", "owner@acme.example", "", false, false, tenants, idpC, fgaC, roles)
-	if err != nil {
-		t.Fatalf("unexpected error: %v", err)
-	}
-	if len(idpC.createCalls) != 0 {
-		t.Errorf("CreateHumanUser must not be called without -generate-password, got %d", len(idpC.createCalls))
-	}
-	if res.InitialPassword != "" {
-		t.Errorf("no credential should be reported on the invitation path, got %q", res.InitialPassword)
-	}
-}
-
-// Two runs must not produce the same credential.
-func TestGenerateInitialPassword_IsRandomAndStrong(t *testing.T) {
-	a, err := generateInitialPassword()
-	if err != nil {
-		t.Fatal(err)
-	}
-	b, err := generateInitialPassword()
-	if err != nil {
-		t.Fatal(err)
-	}
-	if a == b {
-		t.Fatal("two generated passwords are identical — not random")
-	}
-	if len(a) < 24 {
-		t.Errorf("password length %d is too short", len(a))
-	}
-}
-
-// --- credential Secret: create-only, and actually exercised ---------------
-
-func TestWriteCredentialSecret_CreatesWithRotateInstruction(t *testing.T) {
+func TestWriteOfflineSetupLinkSecret_CreatesWithLink(t *testing.T) {
 	cs := k8sfake.NewSimpleClientset()
-	if err := writeCredentialSecret(context.Background(), cs, "gibson", "gibson-first-admin", "a@b.c", "pw-1"); err != nil {
+	if err := writeOfflineSetupLinkSecret(context.Background(), cs, "gibson", "acme-owner-setup", "setup-link", "https://auth.example.com/invite?code=abc"); err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
-	sec, err := cs.CoreV1().Secrets("gibson").Get(context.Background(), "gibson-first-admin", metav1.GetOptions{})
+	sec, err := cs.CoreV1().Secrets("gibson").Get(context.Background(), "acme-owner-setup", metav1.GetOptions{})
 	if err != nil {
 		t.Fatalf("secret not created: %v", err)
 	}
-	if sec.StringData["username"] != "a@b.c" || sec.StringData["password"] != "pw-1" {
+	if sec.StringData["setup-link"] != "https://auth.example.com/invite?code=abc" {
 		t.Errorf("secret data = %v", sec.StringData)
 	}
-	if sec.Annotations["gibson.zeroroot.ai/rotate-me"] == "" {
-		t.Error("the rotate-me instruction is the operator-facing contract; it must be present")
+	if _, hasPassword := sec.StringData["password"]; hasPassword {
+		t.Error("no password field may ever be written to this Secret (ADR-0093)")
 	}
 }
 
-// THE create-only rule: a pre-existing Secret is success and is NOT touched.
-// Overwriting would hand back a password the operator may have replaced.
-func TestWriteCredentialSecret_NeverOverwrites(t *testing.T) {
+// THE overwrite rule, the mirror image of the old credential Secret's
+// never-overwrite rule: CreateSetupInviteCode already invalidated the
+// previous code on the Zitadel side, so a stale value in the Secret would be
+// a link that looks live but no longer works.
+func TestWriteOfflineSetupLinkSecret_OverwritesStaleLink(t *testing.T) {
 	cs := k8sfake.NewSimpleClientset(&corev1.Secret{
-		ObjectMeta: metav1.ObjectMeta{Name: "gibson-first-admin", Namespace: "gibson"},
-		StringData: map[string]string{"password": "rotated-by-operator"},
+		ObjectMeta: metav1.ObjectMeta{Name: "acme-owner-setup", Namespace: "gibson"},
+		StringData: map[string]string{"setup-link": "https://auth.example.com/invite?code=stale"},
 	})
-	if err := writeCredentialSecret(context.Background(), cs, "gibson", "gibson-first-admin", "a@b.c", "new-pw"); err != nil {
-		t.Fatalf("AlreadyExists must be success, got: %v", err)
+	if err := writeOfflineSetupLinkSecret(context.Background(), cs, "gibson", "acme-owner-setup", "setup-link", "https://auth.example.com/invite?code=fresh"); err != nil {
+		t.Fatalf("unexpected error: %v", err)
 	}
-	sec, _ := cs.CoreV1().Secrets("gibson").Get(context.Background(), "gibson-first-admin", metav1.GetOptions{})
-	if sec.StringData["password"] != "rotated-by-operator" {
-		t.Fatalf("existing credential was overwritten: %v", sec.StringData)
-	}
-}
-
-// The full wiring: a generated credential flows from runBootstrap through the
-// injected writer, and a writer failure is non-fatal — the bootstrap already
-// succeeded and the password is in the Job output.
-func TestRunWithDeps_WritesCredentialSecret(t *testing.T) {
-	orig := credentialWriter
-	t.Cleanup(func() { credentialWriter = orig })
-	var wroteNS, wroteName, wrotePw string
-	credentialWriter = func(_ context.Context, _ *rest.Config, ns, name, _, pw string) error {
-		wroteNS, wroteName, wrotePw = ns, name, pw
-		return nil
-	}
-	origCheck := credentialChecker
-	t.Cleanup(func() { credentialChecker = origCheck })
-	credentialChecker = func(context.Context, *rest.Config, string, string) (bool, error) { return false, nil }
-
-	tenants := &fakeTenantGetter{obj: makeTenant("acme", "org-1")}
-	idpC := &fakeIdpClient{createUserID: "user-1"}
-	fgaC := &fakeFgaClient{}
-	roles := &fakeTenantRoleAssigner{}
-	var stdout bytes.Buffer
-	code := runWithDeps(
-		context.Background(),
-		discardLogger(),
-		&stdout,
-		"acme", "owner@acme.example", "https://app.example.com",
-		true,
-		"gibson-first-admin", "gibson",
-		happyKubeLoader,
-		func(_ *rest.Config) (TenantGetter, error) { return tenants, nil },
-		func(_ context.Context) (idpClient, error) { return idpC, nil },
-		func(_ context.Context) (fgaClient, error) { return fgaC, nil },
-		func(_ context.Context) (tenantRoleAssigner, error) { return roles, nil },
-	)
-	if code != 0 {
-		t.Fatalf("exit code = %d, want 0; stdout: %s", code, stdout.String())
-	}
-	if wroteNS != "gibson" || wroteName != "gibson-first-admin" || wrotePw == "" {
-		t.Errorf("writer got ns=%q name=%q pw-set=%v", wroteNS, wroteName, wrotePw != "")
-	}
-	if !strings.Contains(stdout.String(), wrotePw) {
-		t.Error("the password surfaced to the operator must be the one written to the Secret")
+	sec, _ := cs.CoreV1().Secrets("gibson").Get(context.Background(), "acme-owner-setup", metav1.GetOptions{})
+	if sec.StringData["setup-link"] != "https://auth.example.com/invite?code=fresh" {
+		t.Fatalf("stale link was not overwritten: %v", sec.StringData)
 	}
 }
 
-func TestRunWithDeps_CredentialWriteFailureIsNonFatal(t *testing.T) {
-	orig := credentialWriter
-	t.Cleanup(func() { credentialWriter = orig })
-	credentialWriter = func(context.Context, *rest.Config, string, string, string, string) error {
-		return errors.New("apiserver said no")
+func TestWriteOfflineSetupLinkSecret_WrapsCreateError(t *testing.T) {
+	cs := k8sfake.NewSimpleClientset()
+	cs.PrependReactor("create", "secrets", func(k8stesting.Action) (bool, runtime.Object, error) {
+		return true, nil, errors.New("etcd is on fire")
+	})
+	err := writeOfflineSetupLinkSecret(context.Background(), cs, "gibson", "acme-owner-setup", "setup-link", "https://x")
+	if err == nil || !strings.Contains(err.Error(), "gibson/acme-owner-setup") {
+		t.Fatalf("want a wrapped error naming the secret, got: %v", err)
 	}
-	origCheck := credentialChecker
-	t.Cleanup(func() { credentialChecker = origCheck })
-	credentialChecker = func(context.Context, *rest.Config, string, string) (bool, error) { return false, nil }
-	tenants := &fakeTenantGetter{obj: makeTenant("acme", "org-1")}
-	var stdout bytes.Buffer
-	code := runWithDeps(
-		context.Background(),
-		discardLogger(),
-		&stdout,
-		"acme", "owner@acme.example", "",
-		true,
-		"gibson-first-admin", "gibson",
-		happyKubeLoader,
-		func(_ *rest.Config) (TenantGetter, error) { return tenants, nil },
-		func(_ context.Context) (idpClient, error) { return &fakeIdpClient{createUserID: "u1"}, nil },
-		func(_ context.Context) (fgaClient, error) { return &fakeFgaClient{}, nil },
-		func(_ context.Context) (tenantRoleAssigner, error) { return &fakeTenantRoleAssigner{}, nil },
-	)
-	if code != 0 {
-		t.Fatalf("a failed Secret write must not fail a succeeded bootstrap; exit=%d", code)
+}
+
+func TestWriteOfflineSetupLinkSecret_WrapsUpdateError(t *testing.T) {
+	cs := k8sfake.NewSimpleClientset(&corev1.Secret{
+		ObjectMeta: metav1.ObjectMeta{Name: "acme-owner-setup", Namespace: "gibson"},
+	})
+	cs.PrependReactor("update", "secrets", func(k8stesting.Action) (bool, runtime.Object, error) {
+		return true, nil, errors.New("conflict")
+	})
+	err := writeOfflineSetupLinkSecret(context.Background(), cs, "gibson", "acme-owner-setup", "setup-link", "https://x")
+	if err == nil || !strings.Contains(err.Error(), "gibson/acme-owner-setup") {
+		t.Fatalf("want a wrapped update error naming the secret, got: %v", err)
 	}
-	if !strings.Contains(stdout.String(), "initial admin password:") {
-		t.Error("with the Secret write failed, stdout is the only copy — it must still print")
+}
+
+// writeOfflineSetupLinkViaConfig: a config the client cannot be built from
+// errors early; a buildable config pointing at nothing fails at the API call.
+func TestWriteOfflineSetupLinkViaConfig(t *testing.T) {
+	if err := writeOfflineSetupLinkViaConfig(context.Background(),
+		&rest.Config{Host: "https://127.0.0.1:1", Timeout: 500 * time.Millisecond},
+		"gibson", "s", "setup-link", "https://x"); err == nil {
+		t.Fatal("expected an error against an unreachable apiserver")
+	}
+	if err := writeOfflineSetupLinkViaConfig(context.Background(),
+		&rest.Config{Host: "://not a url"}, "gibson", "s", "setup-link", "https://x"); err == nil {
+		t.Fatal("expected a client-construction error")
+	}
+}
+
+func TestOwnerProfileName(t *testing.T) {
+	g, f := ownerProfileName("admin@selfhosted.example.com")
+	if g != "admin" || f != "Owner" {
+		t.Errorf("got %q/%q, want admin/Owner", g, f)
+	}
+	// no local part → falls back to Admin
+	g2, _ := ownerProfileName("@example.com")
+	if g2 != "Admin" {
+		t.Errorf("empty local: got %q, want Admin", g2)
+	}
+}
+
+func TestSetupLinkURLTemplate_TrimsTrailingSlash(t *testing.T) {
+	got := setupLinkURLTemplate("auth.example.com/")
+	want := "https://auth.example.com/ui/v2/login/invite?userID={{.UserID}}&code={{.Code}}&organization={{.OrgID}}"
+	if got != want {
+		t.Errorf("got %q, want %q", got, want)
+	}
+}
+
+// gibson#254 fixed the identical bug in the Platform owner's setup link: it
+// was built from the in-cluster issuer, which no browser can reach. This
+// pins that the link always names the public host with an explicit scheme,
+// from a bare host with no scheme of its own (ZITADEL_EXTERNAL_DOMAIN).
+func TestSetupLinkURLTemplate_AlwaysStartsWithHTTPSPublicHost(t *testing.T) {
+	got := setupLinkURLTemplate("app.selfhosted.example.com")
+	if !strings.HasPrefix(got, "https://app.selfhosted.example.com/") {
+		t.Fatalf("got %q, want it to start with https://app.selfhosted.example.com/", got)
+	}
+	if strings.Contains(got, "https://https://") {
+		t.Fatalf("got %q, doubled scheme — externalDomain must never already carry one", got)
+	}
+}
+
+func TestRenderSetupLink_SubstitutesAllThreePlaceholders(t *testing.T) {
+	tmpl := setupLinkURLTemplate("auth.example.com")
+	got := renderSetupLink(tmpl, "user-1", "org-1", "code-1")
+	want := "https://auth.example.com/ui/v2/login/invite?userID=user-1&code=code-1&organization=org-1"
+	if got != want {
+		t.Errorf("got %q, want %q", got, want)
 	}
 }
 
@@ -1271,480 +1313,5 @@ func TestRun_ValidFlagsNoCluster(t *testing.T) {
 	os.Args = []string{"bootstrap-tenant-owner", "-tenant", "acme", "-owner-email", "o@a.c"}
 	if code := run(); code != 1 {
 		t.Fatalf("exit = %d, want 1 (no cluster reachable)", code)
-	}
-}
-
-func TestRunBootstrap_GeneratePassword_RandFailure(t *testing.T) {
-	orig := randRead
-	t.Cleanup(func() { randRead = orig })
-	randRead = func([]byte) (int, error) { return 0, errors.New("entropy exhausted") }
-
-	tenants := &fakeTenantGetter{obj: makeTenant("acme", "org-1")}
-	_, err := runBootstrap(context.Background(), "acme", "o@a.c", "", true, false, tenants, &fakeIdpClient{}, &fakeFgaClient{}, &fakeTenantRoleAssigner{})
-	if err == nil || !strings.Contains(err.Error(), "generate initial password") {
-		t.Fatalf("want a generate-password error, got: %v", err)
-	}
-}
-
-// ErrAlreadyExists then the find path ALSO fails: surfaced, not swallowed.
-func TestRunBootstrap_RerunFindFailure(t *testing.T) {
-	tenants := &fakeTenantGetter{obj: makeTenant("acme", "org-1")}
-	idpC := &fakeIdpClient{createErr: idp.ErrAlreadyExists, findErr: errors.New("zitadel down")}
-	_, err := runBootstrap(context.Background(), "acme", "o@a.c", "", true, false, tenants, idpC, &fakeFgaClient{}, &fakeTenantRoleAssigner{})
-	if err == nil || !strings.Contains(err.Error(), "resolve existing owner") {
-		t.Fatalf("want resolve-existing error, got: %v", err)
-	}
-}
-
-// A non-AlreadyExists create failure is fatal.
-func TestRunBootstrap_CreateFailure(t *testing.T) {
-	tenants := &fakeTenantGetter{obj: makeTenant("acme", "org-1")}
-	idpC := &fakeIdpClient{createErr: errors.New("500 from zitadel")}
-	_, err := runBootstrap(context.Background(), "acme", "o@a.c", "", true, false, tenants, idpC, &fakeFgaClient{}, &fakeTenantRoleAssigner{})
-	if err == nil || !strings.Contains(err.Error(), "create owner Zitadel user") {
-		t.Fatalf("want create-owner error, got: %v", err)
-	}
-}
-
-// The Create error is wrapped with the namespace/name it failed on.
-func TestWriteCredentialSecret_WrapsCreateError(t *testing.T) {
-	cs := k8sfake.NewSimpleClientset()
-	cs.PrependReactor("create", "secrets", func(k8stesting.Action) (bool, runtime.Object, error) {
-		return true, nil, errors.New("etcd is on fire")
-	})
-	err := writeCredentialSecret(context.Background(), cs, "gibson", "gibson-first-admin", "a@b.c", "pw")
-	if err == nil || !strings.Contains(err.Error(), "gibson/gibson-first-admin") {
-		t.Fatalf("want a wrapped error naming the secret, got: %v", err)
-	}
-}
-
-// writeCredentialViaConfig: a config the client cannot be built from errors
-// early; a buildable config pointing at nothing fails at the Create call.
-func TestWriteCredentialViaConfig(t *testing.T) {
-	if err := writeCredentialViaConfig(context.Background(),
-		&rest.Config{Host: "https://127.0.0.1:1", Timeout: 500 * time.Millisecond},
-		"gibson", "s", "e", "p"); err == nil {
-		t.Fatal("expected an error against an unreachable apiserver")
-	}
-	if err := writeCredentialViaConfig(context.Background(),
-		&rest.Config{Host: "://not a url"}, "gibson", "s", "e", "p"); err == nil {
-		t.Fatal("expected a client-construction error")
-	}
-}
-
-func TestCredentialExists(t *testing.T) {
-	ctx := context.Background()
-	// present
-	cs := k8sfake.NewSimpleClientset(&corev1.Secret{
-		ObjectMeta: metav1.ObjectMeta{Name: "gibson-first-admin", Namespace: "gibson"},
-	})
-	if ok, err := credentialExists(ctx, cs, "gibson", "gibson-first-admin"); err != nil || !ok {
-		t.Fatalf("present: got ok=%v err=%v, want true,nil", ok, err)
-	}
-	// absent
-	empty := k8sfake.NewSimpleClientset()
-	if ok, err := credentialExists(ctx, empty, "gibson", "gibson-first-admin"); err != nil || ok {
-		t.Fatalf("absent: got ok=%v err=%v, want false,nil", ok, err)
-	}
-}
-
-func TestOwnerProfileName(t *testing.T) {
-	g, f := ownerProfileName("admin@selfhosted.example.com")
-	if g != "admin" || f != "Owner" {
-		t.Errorf("got %q/%q, want admin/Owner", g, f)
-	}
-	// no local part → falls back to Admin
-	g2, _ := ownerProfileName("@example.com")
-	if g2 != "Admin" {
-		t.Errorf("empty local: got %q, want Admin", g2)
-	}
-}
-
-// Re-run (credential exists) but resolving the owner fails → surfaced.
-func TestRunBootstrap_RerunResolveFailure(t *testing.T) {
-	tenants := &fakeTenantGetter{obj: makeTenant("acme", "org-1")}
-	idpC := &fakeIdpClient{findErr: errors.New("zitadel down")}
-	_, err := runBootstrap(context.Background(), "acme", "o@a.c", "", true, true, tenants, idpC, &fakeFgaClient{}, &fakeTenantRoleAssigner{})
-	if err == nil || !strings.Contains(err.Error(), "resolve existing owner") {
-		t.Fatalf("want resolve-existing error, got: %v", err)
-	}
-}
-
-// First setup, owner already exists (invited), but SetHumanPassword fails → surfaced.
-func TestRunBootstrap_ActivateExistingOwner_SetPasswordFails(t *testing.T) {
-	tenants := &fakeTenantGetter{obj: makeTenant("acme", "org-1")}
-	idpC := &fakeIdpClient{createErr: idp.ErrAlreadyExists, findUserID: "u-invited", setPwErr: errors.New("policy rejected")}
-	_, err := runBootstrap(context.Background(), "acme", "o@a.c", "", true, false, tenants, idpC, &fakeFgaClient{}, &fakeTenantRoleAssigner{})
-	if err == nil || !strings.Contains(err.Error(), "activate existing owner with a password") {
-		t.Fatalf("want activation error, got: %v", err)
-	}
-}
-
-// credentialExists surfaces a non-NotFound get error rather than reporting "absent".
-func TestCredentialExists_GetError(t *testing.T) {
-	cs := k8sfake.NewSimpleClientset()
-	cs.PrependReactor("get", "secrets", func(k8stesting.Action) (bool, runtime.Object, error) {
-		return true, nil, errors.New("apiserver exploded")
-	})
-	if _, err := credentialExists(context.Background(), cs, "gibson", "gibson-first-admin"); err == nil {
-		t.Fatal("want the get error surfaced, not swallowed as absent")
-	}
-}
-
-// credentialChecker error is fatal (refuse to risk resetting a rotated password).
-func TestRunWithDeps_CredentialCheckErrorIsFatal(t *testing.T) {
-	origChk := credentialChecker
-	t.Cleanup(func() { credentialChecker = origChk })
-	credentialChecker = func(context.Context, *rest.Config, string, string) (bool, error) {
-		return false, errors.New("apiserver blip")
-	}
-	tenants := &fakeTenantGetter{obj: makeTenant("acme", "org-1")}
-	code := runWithDeps(context.Background(), discardLogger(), &bytes.Buffer{},
-		"acme", "owner@acme.example", "", true, "gibson-first-admin", "gibson",
-		happyKubeLoader,
-		func(_ *rest.Config) (TenantGetter, error) { return tenants, nil },
-		func(_ context.Context) (idpClient, error) { return &fakeIdpClient{createUserID: "u1"}, nil },
-		func(_ context.Context) (fgaClient, error) { return &fakeFgaClient{}, nil },
-		func(_ context.Context) (tenantRoleAssigner, error) { return &fakeTenantRoleAssigner{}, nil },
-	)
-	if code != 1 {
-		t.Fatalf("credential-check error must be fatal, exit=%d", code)
-	}
-}
-
-// A failed tenant role Assign is now FATAL (ADR-0093): nothing else can make
-// this tenant's Owner, so the run must exit non-zero rather than report
-// success with no Owner granted.
-func TestRunWithDeps_FailedRoleAssignIsFatal(t *testing.T) {
-	origChk := credentialChecker
-	t.Cleanup(func() { credentialChecker = origChk })
-	credentialChecker = func(context.Context, *rest.Config, string, string) (bool, error) { return false, nil }
-	origW := credentialWriter
-	t.Cleanup(func() { credentialWriter = origW })
-	credentialWriter = func(context.Context, *rest.Config, string, string, string, string) error { return nil }
-	origPA := foundingMemberPreAcceptor
-	t.Cleanup(func() { foundingMemberPreAcceptor = origPA })
-	foundingMemberPreAcceptor = func(context.Context, *rest.Config, string, string, string) (preAcceptOutcome, error) {
-		return preAcceptDone, nil
-	}
-
-	tenants := &fakeTenantGetter{obj: makeTenant("acme", "org-1")}
-	idpC := &fakeIdpClient{createUserID: "u1"}
-	code := runWithDeps(context.Background(), discardLogger(), &bytes.Buffer{},
-		"acme", "owner@acme.example", "", true, "gibson-first-admin", "gibson",
-		happyKubeLoader,
-		func(_ *rest.Config) (TenantGetter, error) { return tenants, nil },
-		func(_ context.Context) (idpClient, error) { return idpC, nil },
-		func(_ context.Context) (fgaClient, error) { return &fakeFgaClient{}, nil },
-		func(_ context.Context) (tenantRoleAssigner, error) {
-			return &fakeTenantRoleAssigner{err: errors.New("gibson project role not found")}, nil
-		},
-	)
-	if code != 1 {
-		t.Fatalf("a failed tenant role assign must fail the run, exit=%d, want 1", code)
-	}
-}
-
-// --- spent-credential expiry -------------------------------------------------
-//
-// The Secret says "sign in, change it, then delete this Secret". Operators skip
-// the delete, so the bootstrap does it — but ONLY when the recorded password is
-// provably no longer the account's password. Every test below guards one half of
-// that: the deletes that must happen, and the deletes that must never happen.
-
-// firstAdminSecret builds a Secret shaped exactly like writeCredentialSecret's,
-// created at the given time.
-func firstAdminSecret(created time.Time) *corev1.Secret {
-	return &corev1.Secret{
-		ObjectMeta: metav1.ObjectMeta{
-			Name:              "gibson-first-admin",
-			Namespace:         "gibson",
-			UID:               "uid-1",
-			ResourceVersion:   "7",
-			CreationTimestamp: metav1.NewTime(created),
-			Labels: map[string]string{
-				"app.kubernetes.io/managed-by": "bootstrap-tenant-owner",
-			},
-		},
-		StringData: map[string]string{"password": "initial"},
-	}
-}
-
-func secretGone(t *testing.T, cs kubernetes.Interface) bool {
-	t.Helper()
-	_, err := cs.CoreV1().Secrets("gibson").Get(context.Background(), "gibson-first-admin", metav1.GetOptions{})
-	return apierrors.IsNotFound(err)
-}
-
-// The whole point: a password changed after the Secret was written means the
-// Secret holds a value Zitadel no longer accepts, so it must not survive.
-func TestExpireSpentCredential_DeletesAfterPasswordChange(t *testing.T) {
-	created := time.Date(2026, 8, 26, 13, 27, 33, 0, time.UTC)
-	cs := k8sfake.NewSimpleClientset(firstAdminSecret(created))
-
-	deleted, err := expireSpentCredential(context.Background(), cs, "gibson", "gibson-first-admin",
-		created.Add(2*time.Hour))
-	if err != nil {
-		t.Fatalf("unexpected error: %v", err)
-	}
-	if !deleted {
-		t.Fatal("a password changed 2h after the Secret was written makes it spent; it must be deleted")
-	}
-	if !secretGone(t, cs) {
-		t.Fatal("reported deleted but the Secret is still there")
-	}
-}
-
-// A zero timestamp means Zitadel holds no password-change record: the password
-// is still the one set at user creation, so the Secret is LIVE. Deleting it
-// would destroy the only copy of a working credential.
-func TestExpireSpentCredential_KeepsWhenNeverChanged(t *testing.T) {
-	created := time.Date(2026, 8, 26, 13, 27, 33, 0, time.UTC)
-	cs := k8sfake.NewSimpleClientset(firstAdminSecret(created))
-
-	deleted, err := expireSpentCredential(context.Background(), cs, "gibson", "gibson-first-admin", time.Time{})
-	if err != nil {
-		t.Fatalf("unexpected error: %v", err)
-	}
-	if deleted || secretGone(t, cs) {
-		t.Fatal("no recorded password change means the credential is live; it must be kept")
-	}
-}
-
-// The two timestamps come from different clocks. A change stamped a few seconds
-// after the Secret is skew, not a rotation, and must not cost the operator their
-// only copy of the password.
-func TestExpireSpentCredential_KeepsWithinSkewGuard(t *testing.T) {
-	created := time.Date(2026, 8, 26, 13, 27, 33, 0, time.UTC)
-	cs := k8sfake.NewSimpleClientset(firstAdminSecret(created))
-
-	deleted, err := expireSpentCredential(context.Background(), cs, "gibson", "gibson-first-admin",
-		created.Add(credentialSkewGuard-time.Second))
-	if err != nil {
-		t.Fatalf("unexpected error: %v", err)
-	}
-	if deleted || secretGone(t, cs) {
-		t.Fatalf("a change within the %s skew guard is clock disagreement, not a rotation", credentialSkewGuard)
-	}
-}
-
-// A password set BEFORE the Secret was written is what the Secret recorded. That
-// is the ordinary post-install state and must not read as spent.
-func TestExpireSpentCredential_KeepsWhenChangeIsOlderThanSecret(t *testing.T) {
-	created := time.Date(2026, 8, 26, 13, 27, 33, 0, time.UTC)
-	cs := k8sfake.NewSimpleClientset(firstAdminSecret(created))
-
-	deleted, err := expireSpentCredential(context.Background(), cs, "gibson", "gibson-first-admin",
-		created.Add(-time.Hour))
-	if err != nil {
-		t.Fatalf("unexpected error: %v", err)
-	}
-	if deleted || secretGone(t, cs) {
-		t.Fatal("a password set before the Secret is the one the Secret holds; it must be kept")
-	}
-}
-
-// A Secret this binary did not write may hold anything — including a password an
-// operator rotated to by hand. Never delete what we did not create.
-func TestExpireSpentCredential_KeepsUnmanagedSecret(t *testing.T) {
-	created := time.Date(2026, 8, 26, 13, 27, 33, 0, time.UTC)
-	sec := firstAdminSecret(created)
-	sec.Labels = map[string]string{"app.kubernetes.io/managed-by": "an-operator"}
-	cs := k8sfake.NewSimpleClientset(sec)
-
-	deleted, err := expireSpentCredential(context.Background(), cs, "gibson", "gibson-first-admin",
-		created.Add(2*time.Hour))
-	if err != nil {
-		t.Fatalf("unexpected error: %v", err)
-	}
-	if deleted || secretGone(t, cs) {
-		t.Fatal("a Secret this binary did not write must never be deleted")
-	}
-}
-
-// Nothing to expire is not an error: the operator already deleted it, exactly as
-// the annotation asked.
-func TestExpireSpentCredential_AbsentSecretIsNotAnError(t *testing.T) {
-	cs := k8sfake.NewSimpleClientset()
-	deleted, err := expireSpentCredential(context.Background(), cs, "gibson", "gibson-first-admin", time.Now())
-	if err != nil {
-		t.Fatalf("an absent Secret is the desired end state, not an error: %v", err)
-	}
-	if deleted {
-		t.Fatal("reported a delete with no Secret present")
-	}
-}
-
-// --- spent-credential expiry: error branches ---------------------------------
-
-// A get that fails for a reason OTHER than NotFound must be surfaced. Reporting
-// "nothing to expire" on an API blip would be a silent no-op that looks like
-// success, and the stale Secret would survive with nobody told.
-func TestExpireSpentCredential_GetErrorIsSurfaced(t *testing.T) {
-	cs := k8sfake.NewSimpleClientset()
-	cs.PrependReactor("get", "secrets", func(k8stesting.Action) (bool, runtime.Object, error) {
-		return true, nil, errors.New("apiserver exploded")
-	})
-	if _, err := expireSpentCredential(context.Background(), cs, "gibson", "gibson-first-admin", time.Now()); err == nil {
-		t.Fatal("want the get error surfaced, not swallowed as nothing-to-do")
-	}
-}
-
-// The delete carries UID and resourceVersion preconditions. A Conflict means
-// something rewrote the Secret between the read and the delete, so this
-// function's view of the content is stale — it must NOT report a delete, and
-// must not treat the disagreement as an error either.
-func TestExpireSpentCredential_DeleteConflictIsNotAnError(t *testing.T) {
-	created := time.Date(2026, 8, 26, 13, 27, 33, 0, time.UTC)
-	cs := k8sfake.NewSimpleClientset(firstAdminSecret(created))
-	cs.PrependReactor("delete", "secrets", func(k8stesting.Action) (bool, runtime.Object, error) {
-		return true, nil, apierrors.NewConflict(
-			schema.GroupResource{Resource: "secrets"}, "gibson-first-admin", errors.New("resourceVersion moved"))
-	})
-	deleted, err := expireSpentCredential(context.Background(), cs, "gibson", "gibson-first-admin",
-		created.Add(2*time.Hour))
-	if err != nil {
-		t.Fatalf("a precondition conflict is someone else winning the race, not an error: %v", err)
-	}
-	if deleted {
-		t.Fatal("reported a delete that the apiserver rejected")
-	}
-}
-
-// Any other delete failure is real and must be reported, so the operator learns
-// the Secret still holds a password Zitadel no longer accepts.
-func TestExpireSpentCredential_DeleteErrorIsSurfaced(t *testing.T) {
-	created := time.Date(2026, 8, 26, 13, 27, 33, 0, time.UTC)
-	cs := k8sfake.NewSimpleClientset(firstAdminSecret(created))
-	cs.PrependReactor("delete", "secrets", func(k8stesting.Action) (bool, runtime.Object, error) {
-		return true, nil, errors.New("apiserver exploded")
-	})
-	if _, err := expireSpentCredential(context.Background(), cs, "gibson", "gibson-first-admin",
-		created.Add(2*time.Hour)); err == nil {
-		t.Fatal("want the delete error surfaced")
-	}
-}
-
-// expireSpentCredentialViaConfig: a config the client cannot be built from
-// errors early; a buildable config pointing at nothing fails at the Get.
-func TestExpireSpentCredentialViaConfig(t *testing.T) {
-	if _, err := expireSpentCredentialViaConfig(context.Background(),
-		&rest.Config{Host: "https://127.0.0.1:1", Timeout: 500 * time.Millisecond},
-		"gibson", "gibson-first-admin", time.Now()); err == nil {
-		t.Fatal("expected an error against an unreachable apiserver")
-	}
-	if _, err := expireSpentCredentialViaConfig(context.Background(),
-		&rest.Config{Host: "://not a url"}, "gibson", "gibson-first-admin", time.Now()); err == nil {
-		t.Fatal("expected a client-construction error")
-	}
-}
-
-// --- spent-credential expiry: the run() wiring -------------------------------
-//
-// The three tests below pin WHEN the expiry runs and that it can never fail the
-// install. Expiring a credential is hygiene: an owner who can sign in with a
-// password they set themselves is a working install, whatever the Secret says.
-
-// reRunDeps returns the dependency set for a re-run (credential Secret already
-// present), which is the only path that expires anything.
-func reRunDeps(t *testing.T) (tenants *fakeTenantGetter, restore func()) {
-	t.Helper()
-	origChk, origPA := credentialChecker, foundingMemberPreAcceptor
-	credentialChecker = func(context.Context, *rest.Config, string, string) (bool, error) { return true, nil }
-	foundingMemberPreAcceptor = func(context.Context, *rest.Config, string, string, string) (preAcceptOutcome, error) {
-		return preAcceptDone, nil
-	}
-	return &fakeTenantGetter{obj: makeTenant("acme", "org-1")}, func() {
-		credentialChecker, foundingMemberPreAcceptor = origChk, origPA
-	}
-}
-
-func runReRun(t *testing.T, tenants *fakeTenantGetter, idpC idpClient) int {
-	t.Helper()
-	return runWithDeps(context.Background(), discardLogger(), &bytes.Buffer{},
-		"acme", "owner@acme.example", "", true, "gibson-first-admin", "gibson",
-		happyKubeLoader,
-		func(_ *rest.Config) (TenantGetter, error) { return tenants, nil },
-		func(_ context.Context) (idpClient, error) { return idpC, nil },
-		func(_ context.Context) (fgaClient, error) { return &fakeFgaClient{}, nil },
-		func(_ context.Context) (tenantRoleAssigner, error) { return &fakeTenantRoleAssigner{}, nil },
-	)
-}
-
-// The happy path: on a re-run the owner's password-change time is read and
-// handed to the expirer, scoped to the configured Secret.
-func TestRunWithDeps_ExpiresSpentCredentialOnReRun(t *testing.T) {
-	changed := time.Date(2026, 8, 26, 15, 27, 54, 0, time.UTC)
-	idpC := &fakeIdpClient{findUserID: "u1", pwChangedAt: changed}
-	tenants, restore := reRunDeps(t)
-	t.Cleanup(restore)
-
-	origExp := credentialExpirer
-	t.Cleanup(func() { credentialExpirer = origExp })
-	var gotNS, gotName string
-	var gotAt time.Time
-	calls := 0
-	credentialExpirer = func(_ context.Context, _ *rest.Config, ns, name string, at time.Time) (bool, error) {
-		calls++
-		gotNS, gotName, gotAt = ns, name, at
-		return true, nil
-	}
-
-	if code := runReRun(t, tenants, idpC); code != 0 {
-		t.Fatalf("re-run must succeed, exit=%d", code)
-	}
-	if calls != 1 {
-		t.Fatalf("expirer called %d times, want exactly 1", calls)
-	}
-	if gotNS != "gibson" || gotName != "gibson-first-admin" {
-		t.Errorf("expirer scoped to %s/%s, want gibson/gibson-first-admin", gotNS, gotName)
-	}
-	if !gotAt.Equal(changed) {
-		t.Errorf("expirer got password-change time %v, want %v", gotAt, changed)
-	}
-	if len(idpC.pwChangedCalls) != 1 || idpC.pwChangedCalls[0] != "u1" {
-		t.Errorf("password-change read = %v, want one read for u1", idpC.pwChangedCalls)
-	}
-}
-
-// Zitadel unreachable: without a change time there is no evidence the credential
-// is spent, so the expirer must NOT be called and the run must still succeed.
-// Deleting on a failed read would destroy a live credential over a network blip.
-func TestRunWithDeps_PasswordChangeReadErrorLeavesSecretAlone(t *testing.T) {
-	idpC := &fakeIdpClient{findUserID: "u1", pwChangedErr: errors.New("zitadel unreachable")}
-	tenants, restore := reRunDeps(t)
-	t.Cleanup(restore)
-
-	origExp := credentialExpirer
-	t.Cleanup(func() { credentialExpirer = origExp })
-	calls := 0
-	credentialExpirer = func(context.Context, *rest.Config, string, string, time.Time) (bool, error) {
-		calls++
-		return false, nil
-	}
-
-	if code := runReRun(t, tenants, idpC); code != 0 {
-		t.Fatalf("a failed password-change read must not fail the run, exit=%d", code)
-	}
-	if calls != 0 {
-		t.Fatal("expirer must not run without evidence the credential is spent")
-	}
-}
-
-// A delete that fails is logged and survived. The owner can sign in; a Secret
-// left behind is untidy, not broken.
-func TestRunWithDeps_ExpiryErrorIsNonFatal(t *testing.T) {
-	idpC := &fakeIdpClient{findUserID: "u1", pwChangedAt: time.Now()}
-	tenants, restore := reRunDeps(t)
-	t.Cleanup(restore)
-
-	origExp := credentialExpirer
-	t.Cleanup(func() { credentialExpirer = origExp })
-	credentialExpirer = func(context.Context, *rest.Config, string, string, time.Time) (bool, error) {
-		return false, errors.New("forbidden")
-	}
-
-	if code := runReRun(t, tenants, idpC); code != 0 {
-		t.Fatalf("a failed expiry must not fail the run, exit=%d", code)
 	}
 }

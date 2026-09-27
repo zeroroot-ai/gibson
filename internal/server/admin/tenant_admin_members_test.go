@@ -145,6 +145,12 @@ func (c *membersIdPClient) CreateHumanUser(_ context.Context, _ idp.CreateHumanU
 func (c *membersIdPClient) FindUserIDByEmail(_ context.Context, _ string) (string, error) {
 	return "", idp.ErrNotFound
 }
+func (c *membersIdPClient) EnsureHumanUserNoPassword(_ context.Context, _, _, _, _ string) (string, error) {
+	return "", nil
+}
+func (c *membersIdPClient) CreateSetupInviteCode(_ context.Context, _, _ string, _ bool) (string, error) {
+	return "", nil
+}
 func (c *membersIdPClient) Close() error { return nil }
 
 // staticOrgResolver is a fixed tenant->org resolver for tests.

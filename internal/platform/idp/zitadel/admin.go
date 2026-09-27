@@ -455,6 +455,93 @@ func (c *Client) CreateHumanUser(ctx context.Context, req idp.CreateHumanUserReq
 	return idp.CreateHumanUserResult{}, mapError(err, "CreateHumanUser:create")
 }
 
+// userServiceV2 is Zitadel v2's UserService, reached over the same
+// Connect-unary-over-HTTP convention as every other call in this file
+// (doRequest): a POST whose path is "/<package>.<Service>/<Method>" and
+// whose body/response are the Connect JSON codec's plain JSON. Zitadel's
+// error envelope is identical across v1 and v2, so parseZitadelError /
+// mapError apply unchanged.
+const userServiceV2 = "/zitadel.user.v2.UserService"
+
+// EnsureHumanUserNoPassword finds or creates a human user in orgID with NO
+// password (ADR-0093 decisions 6/8), via Zitadel v2's UserService.AddHumanUser.
+//
+// The v2 API — not the v1 Management API EnsureHumanUser/CreateHumanUser
+// use above — is required here: AddHumanUser is the only Zitadel create call
+// with no password field at all. The target org travels as the
+// x-zitadel-orgid header, never a body field: AddHumanUser's handler
+// resolves the org exclusively from the caller's instance context, populated
+// from that header by Zitadel's Connect auth interceptor — confirmed against
+// the v4.18.0 source during the Platform owner work this reuses (hosted#201).
+//
+// Idempotent: a 409/already-exists falls back to the same by-email search
+// EnsureHumanUser/FindUserIDByEmail already use (findUserIDByEmail) — v1 and
+// v2 read the same underlying user store, so the search sees a user AddHumanUser
+// just created.
+func (c *Client) EnsureHumanUserNoPassword(ctx context.Context, orgID, email, givenName, familyName string) (string, error) {
+	if email == "" {
+		return "", fmt.Errorf("%w: EnsureHumanUserNoPassword requires email", idp.ErrUpstream)
+	}
+	body := map[string]interface{}{
+		"username": email,
+		"profile": map[string]interface{}{
+			"givenName":  givenName,
+			"familyName": familyName,
+		},
+		// isVerified: true — no separate email-verification-code flow;
+		// CreateSetupInviteCode is the one setup-link mechanism this client
+		// uses. No "password" field anywhere in this body: Zitadel mints none.
+		"email": map[string]interface{}{"email": email, "isVerified": true},
+	}
+	var resp struct {
+		UserID string `json:"userId"`
+	}
+	err := c.doRequest(ctx, http.MethodPost, userServiceV2+"/AddHumanUser", body, orgID, &resp)
+	if err == nil {
+		if resp.UserID == "" {
+			return "", fmt.Errorf("%w: EnsureHumanUserNoPassword: response missing userId", idp.ErrUpstream)
+		}
+		return resp.UserID, nil
+	}
+	mapped := mapError(err, "EnsureHumanUserNoPassword:create")
+	if !errors.Is(mapped, idp.ErrAlreadyExists) {
+		return "", mapped
+	}
+	userID, serr := c.findUserIDByEmail(ctx, email, orgID)
+	switch {
+	case errors.Is(serr, idp.ErrNotFound):
+		return "", fmt.Errorf("%w: EnsureHumanUserNoPassword: user %q not found after conflict", idp.ErrUpstream, email)
+	case serr != nil:
+		return "", serr
+	}
+	return userID, nil
+}
+
+// CreateSetupInviteCode mints a one-time setup-link code via Zitadel v2's
+// UserService.CreateInviteCode, the same call the Platform owner's setup
+// link uses (ADR-0093 decision 8, hosted#201) — reused here rather than a
+// second mechanism (ADR-0027). send=true asks Zitadel to email the link
+// built from urlTemplate and returns no usable code; send=false returns the
+// raw code for an offline caller to embed in its own link.
+func (c *Client) CreateSetupInviteCode(ctx context.Context, userID, urlTemplate string, send bool) (string, error) {
+	if userID == "" {
+		return "", fmt.Errorf("%w: CreateSetupInviteCode requires userId", idp.ErrUpstream)
+	}
+	body := map[string]interface{}{"userId": userID}
+	if send {
+		body["sendCode"] = map[string]interface{}{"urlTemplate": urlTemplate}
+	} else {
+		body["returnCode"] = map[string]interface{}{}
+	}
+	var resp struct {
+		InviteCode string `json:"inviteCode"`
+	}
+	if err := c.doRequest(ctx, http.MethodPost, userServiceV2+"/CreateInviteCode", body, "", &resp); err != nil {
+		return "", mapError(err, "CreateSetupInviteCode")
+	}
+	return resp.InviteCode, nil
+}
+
 // DeactivateHumanUser blocks a human user from signing in (Zitadel Management
 // POST /management/v1/users/{userId}/_deactivate). The account and its
 // credential survive; only sign-in stops.

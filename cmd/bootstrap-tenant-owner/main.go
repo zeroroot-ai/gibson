@@ -19,26 +19,39 @@
 //
 //  1. Resolves the tenant's per-tenant Zitadel org id from the Tenant CR's
 //     status.zitadelOrgID (populated by the saga's EnsureZitadelOrg step).
-//  2. Calls idp.AdminClient.EnsureHumanUser to find-or-create the owner's
-//     Zitadel human user in that org — the exact call MembershipService's
-//     AcceptInvitation makes for an invited member. Zitadel emails the invitee
-//     a verification/credential-setup code; no password crosses this binary.
-//  3. Checks the FGA owner tuple; if absent, calls tenantrole.Syncer.Assign
-//     with role Owner (ADR-0093) — it writes the Owner grant on the gibson
-//     Zitadel project and copies it into FGA as
+//  2. Calls idp.AdminClient.EnsureHumanUserNoPassword to find-or-create the
+//     owner's Zitadel human user in that org, with NO password — the same
+//     no-password contract the Platform owner uses (ADR-0093 decision 6/8,
+//     hosted#201/#202). No password ever crosses this binary.
+//  3. Checks the FGA owner tuple. If absent (first time this tenant gets its
+//     Owner), calls idp.AdminClient.CreateSetupInviteCode to mint a one-time
+//     setup link through Zitadel's own invite-code flow: emailed, unless
+//     -offline-setup is given, in which case the raw code is turned into a
+//     link and written to -setup-secret instead — the exact reuse of the
+//     Platform owner's setup-link mechanism, never a second one (ADR-0027).
+//     The link always names ZITADEL_EXTERNAL_DOMAIN, the public host a
+//     browser can reach — never GIBSON_IDP_ADMIN_ISSUER or ZITADEL_URL,
+//     which name the in-cluster Service on some profiles (gibson#254 fixed
+//     the identical bug in the Platform owner's link).
+//  4. Calls tenantrole.Syncer.Assign with role Owner (ADR-0093) — it writes
+//     the Owner grant on the gibson Zitadel project and copies it into FGA as
 //     (user:<owner-id>, owner, tenant:<tenant-id>) — the top of the tenant
 //     relation hierarchy (admin/writer/member all derive "or owner" in
 //     model.fga), i.e. what the dashboard and this binary's operators refer to
 //     as "tenant_admin" authority.
-//  4. Prints the sign-in path the owner should visit (GIBSON_PUBLIC_URL +
+//  5. Prints the sign-in path the owner should visit (GIBSON_PUBLIC_URL +
 //     "/login") to stdout.
 //
-// Ordering matches AcceptInvitation / SetTenantRole: EnsureHumanUser first
-// (idempotent — safe to retry), the tenant role Assign second, which is now
-// fatal on failure — nothing else can make this tenant's Owner. Re-running
-// for an existing owner is a no-op success: EnsureHumanUser finds the
-// existing user and the FGA Check finds the tuple already present, so Assign
-// is never called again.
+// Ordering matches the Platform owner's reconcile: the Zitadel calls
+// (idempotent — safe to retry) run first, the setup link is sent or written
+// BEFORE the tenant role is granted, and the grant (step 4) is fatal on
+// failure — nothing else can make this tenant's Owner. Sending the link
+// before the grant means a failure between the two can never strand an
+// authorized Owner with no way to sign in: the FGA tuple is still absent, so
+// a retry repeats both steps. Re-running for an existing owner is a no-op
+// success: EnsureHumanUserNoPassword finds the existing user and the FGA
+// Check finds the tuple already present, so neither the link nor the grant
+// is repeated.
 //
 // This binary deliberately does NOT provision the tenant itself — it assumes
 // AdminProvisionTenant has already run and the operator has drained the queue
@@ -66,20 +79,26 @@
 //
 // Flags:
 //
-//	-tenant       Tenant CR name / tenant id (required)
-//	-owner-email  Owner's email address (required)
+//	-tenant                  Tenant CR name / tenant id (required)
+//	-owner-email             Owner's email address (required)
+//	-offline-setup           Write the one-time setup link to -setup-secret
+//	                         instead of emailing it. Required on an install
+//	                         with no delivering mail transport (ADR-0093).
+//	-setup-secret            Secret name the offline link is written into, in
+//	                         -setup-secret-namespace. Required with -offline-setup.
+//	-setup-secret-key        Key within -setup-secret the link is written
+//	                         under (default "setup-link").
+//	-setup-secret-namespace  Namespace for -setup-secret (default "gibson").
 //
 // Usage:
 //
 //	bootstrap-tenant-owner -tenant acme -owner-email owner@acme.example
 //
-// Spec: first-admin-bootstrap (gibson#1103).
+// Spec: first-admin-bootstrap (gibson#1103), tenant-owner-setup-link (hosted#202).
 package main
 
 import (
 	"context"
-	"crypto/rand"
-	"encoding/base64"
 	"errors"
 	"flag"
 	"fmt"
@@ -104,7 +123,6 @@ import (
 	"golang.org/x/oauth2/clientcredentials"
 
 	"github.com/zeroroot-ai/gibson/internal/platform/authz"
-	"github.com/zeroroot-ai/gibson/internal/platform/idp"
 	"github.com/zeroroot-ai/gibson/internal/platform/idp/zitadel"
 	"github.com/zeroroot-ai/gibson/internal/platform/tenantrole"
 	"github.com/zeroroot-ai/gibson/internal/platform/zitadelconn"
@@ -141,13 +159,17 @@ type BootstrapResult struct {
 	// when GIBSON_PUBLIC_URL is unset.
 	SignInPath string
 
-	// InitialPassword is the generated first-admin password, set ONLY when this
-	// run created the user and -generate-password was given. Empty on every
-	// other path, including a re-run against an existing owner — a re-run must
-	// not reset a credential the operator has already changed (deploy#1631).
+	// SetupLink is the offline one-time setup link, set ONLY when this run
+	// established the tenant's Owner (first bootstrap) AND -offline-setup was
+	// given. Empty on the emailed path and on every re-run against an
+	// existing owner — a re-run must never re-invalidate a link the owner may
+	// already have used (mirrors deploy#1631's "never reset a credential the
+	// operator has already changed", applied to a link instead of a password).
 	//
-	// The caller surfaces it exactly once. It is never logged by this package.
-	InitialPassword string
+	// The caller writes it to -setup-secret. It is never logged by this
+	// package, and no password is ever generated or stored anywhere
+	// (ADR-0093, hosted#202).
+	SetupLink string
 }
 
 // TenantGetter fetches a single Tenant CR by name. Injectable for testing.
@@ -161,29 +183,16 @@ type TenantGetter interface {
 // idpClient is the narrow surface of idp.AdminClient this tool needs.
 // idp.AdminClient (and *zitadel.Client) satisfy this interface structurally.
 type idpClient interface {
-	// EnsureHumanUser finds or creates the owner's human user in the tenant's
-	// Zitadel org. Idempotent.
-	EnsureHumanUser(ctx context.Context, req idp.EnsureHumanUserRequest) (userID string, err error)
-	// CreateHumanUser provisions a PASSWORD-BEARING human user. Used for the
-	// self-hosted first admin, where EnsureHumanUser's emailed
-	// credential-setup code is undeliverable: a baseline install configures no
-	// SMTP, so the invitation flow strands the operator with an account they
-	// can never sign into (deploy#1631).
-	CreateHumanUser(ctx context.Context, req idp.CreateHumanUserRequest) (idp.CreateHumanUserResult, error)
-	// FindUserIDByEmailInOrg resolves an existing user in the tenant's org, used
-	// when CreateHumanUser reports the founding owner already exists (the
-	// invitation flow created it) and on a re-run after the credential Secret
-	// exists. The owner lives in the TENANT org, not the daemon's admin org, so
-	// the resolve must be scoped to it (gibson#1560).
-	FindUserIDByEmailInOrg(ctx context.Context, email, orgID string) (userID string, err error)
-	// SetHumanPassword activates that already-created owner with a known
-	// password. Called only on first setup (credential Secret absent).
-	SetHumanPassword(ctx context.Context, req idp.SetHumanPasswordRequest) error
-	// HumanPasswordChangedAt reports when Zitadel last recorded a password set
-	// for the owner, or the zero time if it holds none. Read on a re-run to
-	// tell a SPENT initial credential from a live one — see
-	// expireSpentCredential.
-	HumanPasswordChangedAt(ctx context.Context, userID string) (time.Time, error)
+	// EnsureHumanUserNoPassword finds or creates the owner's human user in the
+	// tenant's Zitadel org, with NO password (ADR-0093). Idempotent: an
+	// existing user is found by email and returned, never recreated.
+	EnsureHumanUserNoPassword(ctx context.Context, orgID, email, givenName, familyName string) (userID string, err error)
+	// CreateSetupInviteCode mints a one-time setup-link code for userID via
+	// Zitadel's own invite-code flow — the same mechanism the Platform owner
+	// uses (ADR-0093, hosted#201/#202), reused here rather than a second one
+	// (ADR-0027). send=true emails the link built from urlTemplate; send=false
+	// returns the raw code for the caller to turn into an offline link.
+	CreateSetupInviteCode(ctx context.Context, userID, urlTemplate string, send bool) (code string, err error)
 	Close() error
 }
 
@@ -232,6 +241,16 @@ func run() int {
 		return 1
 	}
 
+	// The setup link is for a person's browser, so it names the public host
+	// (gibson#254 fixed the identical bug in the Platform owner's link).
+	// zitadelconn.FromEnv is the one helper that resolves ZITADEL_EXTERNAL_DOMAIN
+	// — the same helper resolveIdpEnvConfig uses for the same env vars.
+	endpoint, err := zitadelconn.FromEnv()
+	if err != nil {
+		logger.Error("zitadel endpoint", "err", err)
+		return 1
+	}
+
 	ctx := context.Background()
 	return runWithDeps(
 		ctx,
@@ -240,9 +259,11 @@ func run() int {
 		flags.TenantID,
 		flags.OwnerEmail,
 		os.Getenv("GIBSON_PUBLIC_URL"),
-		flags.GeneratePassword,
-		flags.CredentialSecret,
-		flags.CredentialNamespace,
+		endpoint.Host(),
+		flags.OfflineSetup,
+		flags.SetupSecret,
+		flags.SetupSecretKey,
+		flags.SetupSecretNamespace,
 		loadKubeConfig,
 		newTenantGetter,
 		buildIdpClient,
@@ -267,27 +288,29 @@ func newTenantGetter(cfg *rest.Config) (TenantGetter, error) {
 // returns: the flag set crossed five values and positional returns at that
 // size are exactly how a bool lands in the wrong slot silently.
 type cliFlags struct {
-	TenantID            string
-	OwnerEmail          string
-	GeneratePassword    bool
-	CredentialSecret    string
-	CredentialNamespace string
+	TenantID             string
+	OwnerEmail           string
+	OfflineSetup         bool
+	SetupSecret          string
+	SetupSecretKey       string
+	SetupSecretNamespace string
 }
 
-// parseFlags parses -tenant and -owner-email, both required.
+// parseFlags parses -tenant and -owner-email, both required, and the
+// setup-link flags (ADR-0093, hosted#202).
 func parseFlags(args []string) (cliFlags, error) {
 	fs := flag.NewFlagSet("bootstrap-tenant-owner", flag.ContinueOnError)
 	tenant := fs.String("tenant", "", "Tenant CR name / tenant id (required)")
 	email := fs.String("owner-email", "", "Owner's email address (required)")
-	credSecret := fs.String("credential-secret", "",
-		"Write the generated credential into this Secret in -credential-namespace "+
-			"instead of relying on Job logs. Created only if absent: a re-run must "+
-			"never overwrite a credential the operator has already rotated.")
-	credNS := fs.String("credential-namespace", "gibson", "Namespace for -credential-secret")
-	genPw := fs.Bool("generate-password", false,
-		"Create the owner with a GENERATED initial password instead of the emailed "+
-			"credential-setup flow. Required on a self-hosted install, which configures "+
-			"no SMTP and so cannot deliver an invitation (deploy#1631).")
+	offline := fs.Bool("offline-setup", false,
+		"Write the one-time setup link to -setup-secret instead of emailing it. "+
+			"Required on an install with no delivering mail transport (ADR-0093).")
+	setupSecret := fs.String("setup-secret", "",
+		"Secret name the offline setup link is written into, in "+
+			"-setup-secret-namespace. Required when -offline-setup is set.")
+	setupSecretKey := fs.String("setup-secret-key", "setup-link",
+		"Key within -setup-secret the link is written under.")
+	setupNS := fs.String("setup-secret-namespace", "gibson", "Namespace for -setup-secret.")
 	if perr := fs.Parse(args); perr != nil {
 		return cliFlags{}, fmt.Errorf("parse flags: %w", perr)
 	}
@@ -297,12 +320,16 @@ func parseFlags(args []string) (cliFlags, error) {
 	if strings.TrimSpace(*email) == "" {
 		return cliFlags{}, errors.New("-owner-email is required")
 	}
+	if *offline && strings.TrimSpace(*setupSecret) == "" {
+		return cliFlags{}, errors.New("-setup-secret is required when -offline-setup is set")
+	}
 	return cliFlags{
-		TenantID:            *tenant,
-		OwnerEmail:          *email,
-		GeneratePassword:    *genPw,
-		CredentialSecret:    *credSecret,
-		CredentialNamespace: *credNS,
+		TenantID:             *tenant,
+		OwnerEmail:           *email,
+		OfflineSetup:         *offline,
+		SetupSecret:          *setupSecret,
+		SetupSecretKey:       *setupSecretKey,
+		SetupSecretNamespace: *setupNS,
 	}, nil
 }
 
@@ -477,9 +504,9 @@ func runWithDeps(
 	ctx context.Context,
 	logger *slog.Logger,
 	stdout io.Writer,
-	tenantID, ownerEmail, publicURL string,
-	generatePassword bool,
-	credentialSecret, credentialNamespace string,
+	tenantID, ownerEmail, publicURL, externalDomain string,
+	offlineSetup bool,
+	setupSecret, setupSecretKey, setupSecretNamespace string,
 	kubeLoader kubeConfigLoader,
 	tenantProvider tenantGetterProvider,
 	idpBuilder idpClientBuilder,
@@ -524,67 +551,27 @@ func runWithDeps(
 		return 1
 	}
 
-	// Idempotence gate: if the credential Secret already exists the owner was
-	// set up on a prior run (and the operator may have rotated the password), so
-	// the bootstrap must resolve the owner WITHOUT resetting it. Only consulted
-	// when we would otherwise write a credential.
-	credentialExists := false
-	if generatePassword && credentialSecret != "" {
-		exists, cerr := credentialChecker(ctx, k8sCfg, credentialNamespace, credentialSecret)
-		if cerr != nil {
-			logger.Error("could not check the credential Secret; refusing to risk resetting a rotated password", "err", cerr)
-			return 1
-		}
-		credentialExists = exists
-	}
-
-	result, err := runBootstrap(ctx, tenantID, ownerEmail, publicURL, generatePassword, credentialExists, tenantGetter, idpC, fgaC, roles)
-	if err == nil && result.InitialPassword != "" && credentialSecret != "" {
+	result, err := runBootstrap(ctx, tenantID, ownerEmail, publicURL, externalDomain, offlineSetup, tenantGetter, idpC, fgaC, roles)
+	if err == nil && result.SetupLink != "" && setupSecret != "" {
 		// Job logs are not a credential store: they are readable by anyone with
 		// pod-log access and they age out. Writing a Secret gives the operator
-		// something to fetch deliberately and delete deliberately.
+		// something to fetch deliberately.
 		//
-		// CREATE ONLY. If the Secret already exists this leaves it untouched —
-		// the same rule as the re-run path, for the same reason: the operator
-		// may have rotated the credential already.
-		if serr := credentialWriter(ctx, k8sCfg, credentialNamespace, credentialSecret, ownerEmail, result.InitialPassword); serr != nil {
-			logger.Error("could not write the credential Secret — the password is in this Job's output and nowhere else",
-				"secret", credentialSecret, "err", serr)
+		// CREATE-OR-UPDATE: a retry that re-ran CreateSetupInviteCode (because
+		// the tenant-role grant failed after the link was sent) invalidated any
+		// previously written link on the Zitadel side, so the Secret must be
+		// overwritten to match — never left holding a link Zitadel no longer
+		// honors.
+		if serr := setupLinkWriter(ctx, k8sCfg, setupSecretNamespace, setupSecret, setupSecretKey, result.SetupLink); serr != nil {
+			logger.Error("could not write the offline setup-link Secret — the link is in this Job's output and nowhere else",
+				"secret", setupSecret, "err", serr)
 		} else {
-			logger.Info("wrote first-admin credential", "secret", credentialNamespace+"/"+credentialSecret)
+			logger.Info("wrote offline setup link", "secret", setupSecretNamespace+"/"+setupSecret)
 		}
 	}
 	if err != nil {
 		logger.Error("bootstrap failed", "tenant", tenantID, "err", err)
 		return 1
-	}
-
-	// Complete the instruction the credential Secret carries. It says "sign in,
-	// change it, then delete this Secret", and operators skip the delete, which
-	// leaves a Secret that still reads as the admin password after Zitadel
-	// stopped accepting it. Only on a re-run: on first setup the password and
-	// the Secret were written moments ago, so there is nothing spent yet.
-	//
-	// Never fatal. A live owner with a stale Secret is a hygiene problem; a Job
-	// that exits non-zero over it would make the install look broken when the
-	// bootstrap itself succeeded.
-	if credentialExists && credentialSecret != "" {
-		changedAt, perr := idpC.HumanPasswordChangedAt(ctx, result.OwnerUserID)
-		switch {
-		case perr != nil:
-			logger.Warn("could not read the owner's password-change time; leaving the credential Secret in place",
-				"secret", credentialNamespace+"/"+credentialSecret, "err", perr)
-		default:
-			deleted, derr := credentialExpirer(ctx, k8sCfg, credentialNamespace, credentialSecret, changedAt)
-			switch {
-			case derr != nil:
-				logger.Warn("could not expire the spent credential Secret; it still holds a password Zitadel no longer accepts",
-					"secret", credentialNamespace+"/"+credentialSecret, "err", derr)
-			case deleted:
-				logger.Info("the owner changed their password, so the initial credential is spent — deleted it",
-					"secret", credentialNamespace+"/"+credentialSecret, "password_changed", changedAt.UTC().Format(time.RFC3339))
-			}
-		}
 	}
 
 	// Pre-accept the founding-owner TenantMember, exactly what the signup
@@ -612,16 +599,16 @@ func runWithDeps(
 	} else {
 		_, printErr = fmt.Fprintln(stdout, "sign-in path: (GIBSON_PUBLIC_URL not set)")
 	}
-	if printErr == nil && result.InitialPassword != "" {
-		// The ONLY place this value is surfaced. It is not logged, not stored
-		// by this binary, and not printed again on a re-run — a second run
-		// against an existing owner deliberately reports nothing, because the
-		// operator may have rotated it already (deploy#1631).
-		_, printErr = fmt.Fprintf(stdout,
-			"\ninitial admin password: %s\n"+
-				"ROTATE THIS. It is shown once, here, and nowhere else. Sign in with\n"+
-				"the owner email above, change the password, and delete any copy of\n"+
-				"this output.\n", result.InitialPassword)
+	if printErr == nil && result.Outcome == outcomeBootstrapped {
+		if result.SetupLink != "" {
+			_, printErr = fmt.Fprintf(stdout,
+				"\nsetup link written to Secret %s/%s (key %q). It is one-time and expires — "+
+					"give it to the owner to set a password and enroll MFA.\n",
+				setupSecretNamespace, setupSecret, setupSecretKey)
+		} else {
+			_, printErr = fmt.Fprintln(stdout,
+				"\na one-time setup link was emailed to the owner. No password crosses this binary (ADR-0093).")
+		}
 	}
 	if printErr != nil {
 		// The bootstrap itself already succeeded (user created, membership
@@ -632,15 +619,16 @@ func runWithDeps(
 	return 0
 }
 
-// runBootstrap performs the three-step bootstrap: ensure the Zitadel human
-// user, ensure Zitadel org membership, ensure the FGA owner tuple. Zitadel
-// calls (both idempotent) run first; the FGA write runs only after both
-// succeed, so a Zitadel failure can never leave a partial FGA tuple.
+// runBootstrap performs the bootstrap: ensure the Zitadel human user with no
+// password, send or write its one-time setup link, then ensure the tenant
+// role grant (which copies the FGA owner tuple). The setup link is sent
+// BEFORE the tenant role is granted, so a failure in between never leaves an
+// authorized Owner unable to sign in: the FGA tuple is still absent, so a
+// retry repeats both steps (see the package doc comment).
 func runBootstrap(
 	ctx context.Context,
-	tenantID, ownerEmail, publicURL string,
-	generatePassword bool,
-	credentialExists bool,
+	tenantID, ownerEmail, publicURL, externalDomain string,
+	offlineSetup bool,
 	tenants TenantGetter,
 	idpC idpClient,
 	fgaC fgaClient,
@@ -663,68 +651,13 @@ func runBootstrap(
 			"tenant %q has no status.zitadelOrgID yet — wait for tenant provisioning (EnsureZitadelOrg) to converge and retry", tenantID)
 	}
 
-	var (
-		userID          string
-		initialPassword string
-	)
-	switch {
-	case generatePassword && credentialExists:
-		// Re-run after the credential Secret already exists. The operator holds
-		// that credential (and may have rotated it), so resolve the owner
-		// without touching the password and report no new credential.
-		initialPassword = ""
-		userID, err = idpC.FindUserIDByEmailInOrg(ctx, ownerEmail, orgID)
-		if err != nil {
-			return BootstrapResult{}, fmt.Errorf("resolve existing owner Zitadel user: %w", err)
-		}
-	case generatePassword:
-		// Self-hosted first admin, first setup (no credential Secret yet).
-		// EmailVerified is set true, and that is honest here in a way it would
-		// not be for signup: the address was supplied by the operator performing
-		// the install, on their own cluster, and there is no mail transport to
-		// prove it with anyway.
-		initialPassword, err = generateInitialPassword()
-		if err != nil {
-			return BootstrapResult{}, fmt.Errorf("generate initial password: %w", err)
-		}
-		givenName, familyName := ownerProfileName(ownerEmail)
-		res, cerr := idpC.CreateHumanUser(ctx, idp.CreateHumanUserRequest{
-			OrgID:         orgID,
-			Email:         ownerEmail,
-			GivenName:     givenName,
-			FamilyName:    familyName,
-			Password:      initialPassword,
-			EmailVerified: true,
-		})
-		switch {
-		case cerr == nil:
-			userID = res.UserID
-		case errors.Is(cerr, idp.ErrAlreadyExists):
-			// The founding-owner user already exists — the TenantMember
-			// invitation flow created it in an initial state (AcceptedByUserID
-			// was empty on the operator-seeded pending row, so it invited rather
-			// than pre-accepted). No credential Secret exists yet, so this IS the
-			// first setup: activate that account by setting the generated
-			// password on it, and keep the credential so the Secret is written.
-			userID, err = idpC.FindUserIDByEmailInOrg(ctx, ownerEmail, orgID)
-			if err != nil {
-				return BootstrapResult{}, fmt.Errorf("resolve existing owner Zitadel user: %w", err)
-			}
-			if serr := idpC.SetHumanPassword(ctx, idp.SetHumanPasswordRequest{
-				OrgID:    orgID,
-				UserID:   userID,
-				Password: initialPassword,
-			}); serr != nil {
-				return BootstrapResult{}, fmt.Errorf("activate existing owner with a password: %w", serr)
-			}
-		default:
-			return BootstrapResult{}, fmt.Errorf("create owner Zitadel user: %w", cerr)
-		}
-	default:
-		userID, err = idpC.EnsureHumanUser(ctx, idp.EnsureHumanUserRequest{OrgID: orgID, Email: ownerEmail})
-		if err != nil {
-			return BootstrapResult{}, fmt.Errorf("ensure owner Zitadel user: %w", err)
-		}
+	// No password ever crosses this binary (ADR-0093 decision 8, hosted#202):
+	// EnsureHumanUserNoPassword is idempotent — an existing owner is found by
+	// email and returned, never recreated or touched.
+	givenName, familyName := ownerProfileName(ownerEmail)
+	userID, err := idpC.EnsureHumanUserNoPassword(ctx, orgID, ownerEmail, givenName, familyName)
+	if err != nil {
+		return BootstrapResult{}, fmt.Errorf("ensure owner Zitadel user: %w", err)
 	}
 
 	userRef := "user:" + userID
@@ -735,9 +668,8 @@ func runBootstrap(
 	}
 
 	result := BootstrapResult{
-		TenantID:        tenantID,
-		OwnerUserID:     userID,
-		InitialPassword: initialPassword,
+		TenantID:    tenantID,
+		OwnerUserID: userID,
 	}
 	if publicURL != "" {
 		result.SignInPath = strings.TrimRight(publicURL, "/") + "/login"
@@ -748,14 +680,54 @@ func runBootstrap(
 		return result, nil
 	}
 
+	// First time this tenant gets its Owner: mint the one-time setup link,
+	// reusing the exact mechanism the Platform owner uses (ADR-0093
+	// decision 8, hosted#201/#202) — never a second one (ADR-0027).
+	urlTemplate := setupLinkURLTemplate(externalDomain)
+	if !offlineSetup {
+		if _, ierr := idpC.CreateSetupInviteCode(ctx, userID, urlTemplate, true); ierr != nil {
+			return BootstrapResult{}, fmt.Errorf("create setup invite code: %w", ierr)
+		}
+	} else {
+		code, ierr := idpC.CreateSetupInviteCode(ctx, userID, urlTemplate, false)
+		if ierr != nil {
+			return BootstrapResult{}, fmt.Errorf("create setup invite code: %w", ierr)
+		}
+		result.SetupLink = renderSetupLink(urlTemplate, userID, orgID, code)
+	}
+
 	// Assign the Owner tenant role through the Syncer (ADR-0093): it writes
 	// the Zitadel grant, then copies it into FGA in the same call. Nothing
-	// else can make this tenant's Owner, so a failure here is fatal.
+	// else can make this tenant's Owner, so a failure here is fatal — and,
+	// because it runs after the setup link, a retry (the FGA tuple is still
+	// absent) safely repeats the link step too.
 	if err := roles.Assign(ctx, tenantrole.Tenant{ID: tenantID, OrgID: orgID}, userID, tenantrole.Owner); err != nil {
 		return BootstrapResult{}, fmt.Errorf("assign owner tenant role: %w", err)
 	}
 	result.Outcome = outcomeBootstrapped
 	return result, nil
+}
+
+// setupLinkURLTemplate builds the Go-template URL Zitadel substitutes
+// {{.UserID}}, {{.OrgID}} and {{.Code}} into (CreateInviteCode's urlTemplate
+// field) — the same shape the Platform owner's setup link uses (ADR-0093,
+// hosted#201), so the emitted link is identical whether Zitadel emails it or
+// this binary embeds it in the offline Secret.
+//
+// externalDomain is the public host a browser reaches (ZITADEL_EXTERNAL_DOMAIN,
+// a port included when the profile has one) — never GIBSON_IDP_ADMIN_ISSUER
+// or ZITADEL_URL, both of which name the in-cluster Service on some profiles.
+// gibson#254 fixed the identical bug in the Platform owner's setup link.
+func setupLinkURLTemplate(externalDomain string) string {
+	return "https://" + strings.TrimRight(externalDomain, "/") + "/ui/v2/login/invite?userID={{.UserID}}&code={{.Code}}&organization={{.OrgID}}"
+}
+
+// renderSetupLink substitutes the same three placeholders setupLinkURLTemplate
+// declares, for the offline path where this binary builds the link itself
+// instead of letting Zitadel substitute them server-side.
+func renderSetupLink(urlTemplate, userID, orgID, code string) string {
+	r := strings.NewReplacer("{{.UserID}}", userID, "{{.OrgID}}", orgID, "{{.Code}}", code)
+	return r.Replace(urlTemplate)
 }
 
 // loadKubeConfig returns an in-cluster config if available, falling back to
@@ -773,113 +745,75 @@ func loadKubeConfig() (*rest.Config, error) {
 	return cfg, nil
 }
 
-// writeCredentialSecret stores the generated first-admin credential.
+// writeOfflineSetupLinkSecret creates or updates the offline setup-link
+// Secret. No password is ever written to a Secret (ADR-0093, hosted#202):
+// this holds only the one-time link.
 //
-// Create-only by design: an AlreadyExists is success, not an error to retry.
-// Overwriting would hand back a password the operator may have already
-// replaced, and would do it silently (deploy#1631).
-func writeCredentialSecret(ctx context.Context, cs kubernetes.Interface, namespace, name, email, password string) error {
-	sec := &corev1.Secret{
-		ObjectMeta: metav1.ObjectMeta{
-			Name:      name,
-			Namespace: namespace,
-			Labels: map[string]string{
-				"app.kubernetes.io/managed-by": "bootstrap-tenant-owner",
-				"app.kubernetes.io/component":  "first-admin",
+// CREATE-OR-UPDATE, unlike the credential Secret the password path used to
+// write: CreateSetupInviteCode already invalidated any previous link on the
+// Zitadel side (whether this is the first write or a retry after a
+// downstream failure), so leaving a stale value in the Secret would be a
+// link that looks live but no longer works.
+func writeOfflineSetupLinkSecret(ctx context.Context, cs kubernetes.Interface, namespace, name, key, link string) error {
+	secrets := cs.CoreV1().Secrets(namespace)
+	existing, err := secrets.Get(ctx, name, metav1.GetOptions{})
+	if apierrors.IsNotFound(err) {
+		sec := &corev1.Secret{
+			ObjectMeta: metav1.ObjectMeta{
+				Name:      name,
+				Namespace: namespace,
+				Labels: map[string]string{
+					"app.kubernetes.io/managed-by": "bootstrap-tenant-owner",
+					"app.kubernetes.io/component":  "first-admin",
+				},
+				Annotations: map[string]string{
+					"gibson.zeroroot.ai/ref": "hosted#202",
+				},
 			},
-			Annotations: map[string]string{
-				"gibson.zeroroot.ai/rotate-me": "This is the INITIAL credential. Sign in and change your password. This Secret is then deleted automatically on the next bootstrap run, and is safe to delete by hand at any time.",
-				"gibson.zeroroot.ai/ref":       "deploy#1631",
-			},
-		},
-		Type: corev1.SecretTypeOpaque,
-		StringData: map[string]string{
-			"username": email,
-			"password": password,
-		},
-	}
-	_, err := cs.CoreV1().Secrets(namespace).Create(ctx, sec, metav1.CreateOptions{})
-	if apierrors.IsAlreadyExists(err) {
-		return nil
+			Type:       corev1.SecretTypeOpaque,
+			StringData: map[string]string{key: link},
+		}
+		if _, cerr := secrets.Create(ctx, sec, metav1.CreateOptions{}); cerr != nil {
+			if !apierrors.IsAlreadyExists(cerr) {
+				return fmt.Errorf("create setup-link Secret %s/%s: %w", namespace, name, cerr)
+			}
+			// Lost a create race — fall through to the update path below.
+		} else {
+			return nil
+		}
+		existing, err = secrets.Get(ctx, name, metav1.GetOptions{})
 	}
 	if err != nil {
-		return fmt.Errorf("create credential Secret %s/%s: %w", namespace, name, err)
+		return fmt.Errorf("get setup-link Secret %s/%s: %w", namespace, name, err)
+	}
+	updated := existing.DeepCopy()
+	if updated.StringData == nil {
+		updated.StringData = map[string]string{}
+	}
+	updated.StringData[key] = link
+	if updated.Data != nil {
+		delete(updated.Data, key)
+	}
+	if _, uerr := secrets.Update(ctx, updated, metav1.UpdateOptions{}); uerr != nil {
+		return fmt.Errorf("update setup-link Secret %s/%s: %w", namespace, name, uerr)
 	}
 	return nil
 }
 
-// credentialWriter is swapped in tests: the write path must be exercisable
+// setupLinkWriter is swapped in tests: the write path must be exercisable
 // without a live API server, and a *rest.Config pointed at nothing either
 // hangs or fails for reasons unrelated to what the test asserts.
-var credentialWriter = writeCredentialViaConfig
+var setupLinkWriter = writeOfflineSetupLinkViaConfig
 
-// credentialChecker reports whether the credential Secret already exists, so the
-// bootstrap sets the owner's password ONCE (first install) and never resets it
-// on a re-run — the operator may have rotated it. Swapped in tests.
-var credentialChecker = credentialExistsViaConfig
-
-// writeCredentialViaConfig builds the real clientset and delegates. Split from
-// writeCredentialSecret so the create-only semantics are testable against a
-// fake clientset without a rest.Config.
-func writeCredentialViaConfig(ctx context.Context, cfg *rest.Config, namespace, name, email, password string) error {
+// writeOfflineSetupLinkViaConfig builds the real clientset and delegates.
+// Split from writeOfflineSetupLinkSecret so the create-or-update semantics
+// are testable against a fake clientset without a rest.Config.
+func writeOfflineSetupLinkViaConfig(ctx context.Context, cfg *rest.Config, namespace, name, key, link string) error {
 	cs, err := kubernetes.NewForConfig(cfg)
 	if err != nil {
 		return fmt.Errorf("build kubernetes client: %w", err)
 	}
-	return writeCredentialSecret(ctx, cs, namespace, name, email, password)
-}
-
-// credentialExistsViaConfig reports whether the credential Secret is already
-// present. A get that fails for any reason OTHER than NotFound is surfaced, so
-// an API blip is never mistaken for "no credential yet" (which would reset a
-// rotated password).
-func credentialExistsViaConfig(ctx context.Context, cfg *rest.Config, namespace, name string) (bool, error) {
-	cs, err := kubernetes.NewForConfig(cfg)
-	if err != nil {
-		return false, fmt.Errorf("build kubernetes client: %w", err)
-	}
-	return credentialExists(ctx, cs, namespace, name)
-}
-
-// credentialExists is the testable core of credentialExistsViaConfig: a get that
-// distinguishes "absent" (NotFound → false) from a real error (surfaced, so an
-// API blip is never mistaken for "no credential yet").
-func credentialExists(ctx context.Context, cs kubernetes.Interface, namespace, name string) (bool, error) {
-	_, err := cs.CoreV1().Secrets(namespace).Get(ctx, name, metav1.GetOptions{})
-	if err == nil {
-		return true, nil
-	}
-	if apierrors.IsNotFound(err) {
-		return false, nil
-	}
-	return false, fmt.Errorf("get credential Secret %s/%s: %w", namespace, name, err)
-}
-
-// generateInitialPassword mints the first admin's initial credential.
-//
-// Generated, never supplied in values: a password an operator types into a
-// values file exists in that file, in shell history and in whatever copied the
-// file there. This one exists only in the IdP and in the single output the
-// install surfaces (deploy#1631, following the GitLab self-managed pattern).
-//
-// 24 bytes of crypto/rand, base64url, no padding — ~192 bits, and safe to
-// paste into any terminal or form without quoting surprises.
-// randRead is swapped in tests: crypto/rand cannot be made to fail on demand,
-// and the error branch guards the one credential the operator gets.
-var randRead = rand.Read
-
-func generateInitialPassword() (string, error) {
-	buf := make([]byte, 24)
-	if _, err := randRead(buf); err != nil {
-		return "", fmt.Errorf("read random: %w", err)
-	}
-	// Zitadel's default password policy requires an upper-case letter, a
-	// lower-case letter, a digit and a symbol. base64url gives upper/lower/digit
-	// but its only symbols (- _) appear by chance, so a run could omit every
-	// class and Zitadel would reject the create with a bare INVALID_ARGUMENT.
-	// Append one guaranteed character from each required class so a valid
-	// password is produced on EVERY run, deterministically.
-	return base64.RawURLEncoding.EncodeToString(buf) + "Aa1!", nil
+	return writeOfflineSetupLinkSecret(ctx, cs, namespace, name, key, link)
 }
 
 // ownerProfileName derives a non-empty given/family name for the first-admin
@@ -919,100 +853,3 @@ func nestedString(obj map[string]any, fields ...string) (value string, found boo
 	}
 	return s, true, nil
 }
-
-// credentialSkewGuard is the margin the password-change timestamp must clear
-// before the initial credential counts as spent.
-//
-// The two timestamps compared come from different clocks — the Kubernetes API
-// server stamps the Secret, Zitadel stamps the password — so a small disagreement
-// between them is normal and must not be read as a rotation. A minute is far
-// more than NTP-synced hosts drift, and far less than the gap left by a real
-// operator signing in and changing a password.
-//
-// The guard fails SAFE in one direction only: an operator who rotates within a
-// minute of install keeps a stale Secret (harmless, and the annotation still
-// tells them to delete it). It never deletes a live credential over skew.
-const credentialSkewGuard = time.Minute
-
-// expireSpentCredential deletes the first-admin credential Secret once Zitadel
-// shows the password it holds is no longer the account's password.
-//
-// The Secret is written with the instruction "sign in, change it, then delete
-// this Secret". Operators do the first two and skip the third, which leaves a
-// Secret that still reads as the admin credential long after it stopped being
-// one. That is discovered during a break-glass event, which is the worst
-// possible moment to learn the recorded password is wrong.
-//
-// So the bootstrap completes step three itself: if the password changed AFTER
-// this Secret was created, the value inside it cannot be the current password,
-// and a spent credential is deleted rather than left to mislead.
-//
-// Three conditions must all hold before anything is deleted:
-//
-//  1. Zitadel reports a password-change timestamp at all (a zero time means the
-//     password is still the one set at user creation — the Secret is live).
-//  2. That timestamp is later than the Secret's own creation time by more than
-//     credentialSkewGuard.
-//  3. The Secret is one this binary wrote (managed-by label), so a Secret an
-//     operator hand-placed at that name is never touched.
-//
-// The delete carries UID and resourceVersion preconditions: if anything rewrote
-// the Secret between the read and the delete, the delete fails rather than
-// destroying content this function never examined.
-//
-// Returns true only when a Secret was actually deleted.
-func expireSpentCredential(
-	ctx context.Context,
-	cs kubernetes.Interface,
-	namespace, name string,
-	passwordChangedAt time.Time,
-) (bool, error) {
-	if passwordChangedAt.IsZero() {
-		return false, nil
-	}
-	sec, err := cs.CoreV1().Secrets(namespace).Get(ctx, name, metav1.GetOptions{})
-	if apierrors.IsNotFound(err) {
-		return false, nil
-	}
-	if err != nil {
-		return false, fmt.Errorf("get credential Secret %s/%s: %w", namespace, name, err)
-	}
-	if sec.Labels["app.kubernetes.io/managed-by"] != "bootstrap-tenant-owner" {
-		return false, nil
-	}
-	if !passwordChangedAt.After(sec.CreationTimestamp.Add(credentialSkewGuard)) {
-		return false, nil
-	}
-	uid, rv := sec.UID, sec.ResourceVersion
-	err = cs.CoreV1().Secrets(namespace).Delete(ctx, name, metav1.DeleteOptions{
-		Preconditions: &metav1.Preconditions{UID: &uid, ResourceVersion: &rv},
-	})
-	if apierrors.IsNotFound(err) || apierrors.IsConflict(err) {
-		// Someone else removed or rewrote it first. Either way this function's
-		// job is done and its view of the content is stale.
-		return false, nil
-	}
-	if err != nil {
-		return false, fmt.Errorf("delete spent credential Secret %s/%s: %w", namespace, name, err)
-	}
-	return true, nil
-}
-
-// expireSpentCredentialViaConfig builds the real clientset and delegates. Split
-// from expireSpentCredential so the delete semantics are testable against a
-// fake clientset without a rest.Config.
-func expireSpentCredentialViaConfig(
-	ctx context.Context,
-	cfg *rest.Config,
-	namespace, name string,
-	passwordChangedAt time.Time,
-) (bool, error) {
-	cs, err := kubernetes.NewForConfig(cfg)
-	if err != nil {
-		return false, fmt.Errorf("build kubernetes client: %w", err)
-	}
-	return expireSpentCredential(ctx, cs, namespace, name, passwordChangedAt)
-}
-
-// credentialExpirer is swapped in tests, for the same reason credentialWriter is.
-var credentialExpirer = expireSpentCredentialViaConfig

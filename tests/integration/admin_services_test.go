@@ -277,6 +277,12 @@ func (f *fakeUserIdPClient) CreateHumanUser(_ context.Context, _ idp.CreateHuman
 func (f *fakeUserIdPClient) FindUserIDByEmail(_ context.Context, _ string) (string, error) {
 	return "", idp.ErrNotFound
 }
+func (f *fakeUserIdPClient) EnsureHumanUserNoPassword(_ context.Context, _, _, _, _ string) (string, error) {
+	return "", nil
+}
+func (f *fakeUserIdPClient) CreateSetupInviteCode(_ context.Context, _, _ string, _ bool) (string, error) {
+	return "", nil
+}
 func (f *fakeUserIdPClient) Close() error { return nil }
 
 // Verify fakeUserIdPClient implements idp.AdminClient.
