@@ -279,6 +279,16 @@ func (r *PlatformBootstrapReconciler) Reconcile(ctx context.Context, req ctrl.Re
 		return result, err
 	}
 
+	// Step 11: keep the Platform owner the only human Zitadel administrator
+	// (ADR-0093 decision 6, hosted#189). Must run after reconcilePlatformOwner
+	// (Step 10): it needs status.PlatformOwnerUserID to know which human
+	// member to keep, and reconcilePlatformOwner only returns a zero Result
+	// once that id is persisted.
+	if result, err := r.reconcileHumanAdminsScoped(ctx, &pb, logger); err != nil || !result.IsZero() {
+		_ = r.statusUpdate(ctx, &pb)
+		return result, err
+	}
+
 	// Top-level Ready rollup.
 	r.aggregateReady(&pb)
 	pb.Status.ObservedGeneration = pb.Generation
@@ -664,6 +674,7 @@ func (r *PlatformBootstrapReconciler) aggregateReady(pb *gibsonv1alpha1.Platform
 		gibsonv1alpha1.ConditionLoginBrandingReady,
 		gibsonv1alpha1.ConditionSMTPProviderReady,
 		gibsonv1alpha1.ConditionPlatformOwnerReady,
+		gibsonv1alpha1.ConditionHumanAdminsScoped,
 	}
 	for _, cType := range all {
 		c := findCondition(pb.Status.Conditions, cType)

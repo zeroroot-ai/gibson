@@ -89,6 +89,14 @@ const (
 	// (sent or, in offline mode, written to a Secret).
 	ConditionPlatformOwnerReady = "PlatformOwnerReady"
 
+	// ConditionHumanAdminsScoped reports whether the Platform owner is the
+	// only human Zitadel instance administrator (ADR-0093 decision 6,
+	// hosted#189). Runs every reconcile, after ConditionPlatformOwnerReady:
+	// it revokes the IAM membership of every human member other than the
+	// Platform owner, and deletes Zitadel's own default first-instance
+	// human admin outright. Machine members are untouched here.
+	ConditionHumanAdminsScoped = "HumanAdminsScoped"
+
 	// ConditionSMTPProviderReady reports whether the Zitadel instance has
 	// exactly one active SMTP email provider matching spec.zitadel.smtp
 	// (hosted#189). True with reason NotConfigured when spec.zitadel.smtp is
