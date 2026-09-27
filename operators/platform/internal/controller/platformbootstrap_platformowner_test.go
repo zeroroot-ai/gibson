@@ -123,9 +123,10 @@ func basePlatformOwnerCR(zitadelURL string) *gibsonv1alpha1.PlatformBootstrap {
 		ObjectMeta: metav1.ObjectMeta{Name: "platform"},
 		Spec: gibsonv1alpha1.PlatformBootstrapSpec{
 			Zitadel: gibsonv1alpha1.ZitadelSpec{
-				Issuer:        zitadelURL,
-				AdminTokenRef: gibsonv1alpha1.SecretKeyRef{Name: "iam-admin-pat", Namespace: "gibson", Key: "pat"},
-				Project:       gibsonv1alpha1.ZitadelProjectSpec{Name: "gibson"},
+				Issuer:         zitadelURL,
+				ExternalDomain: "app.example.test",
+				AdminTokenRef:  gibsonv1alpha1.SecretKeyRef{Name: "iam-admin-pat", Namespace: "gibson", Key: "pat"},
+				Project:        gibsonv1alpha1.ZitadelProjectSpec{Name: "gibson"},
 			},
 			FGAModel: gibsonv1alpha1.FGAModelSpec{
 				StoreNameRef: gibsonv1alpha1.SecretKeyRef{Name: "gibson-fga-config", Namespace: "gibson", Key: "store_id"},
@@ -276,6 +277,10 @@ func TestReconcilePlatformOwner_OfflineSetup_WritesLinkSecret(t *testing.T) {
 		t.Fatalf("setup link secret not written: %v", err)
 	}
 	link := string(sec.Data[defaultSetupSecretKey])
+	// The link is for a browser: the public host, never the in-cluster issuer.
+	if !strings.HasPrefix(link, "https://app.example.test/ui/v2/login/invite?") {
+		t.Fatalf("setup link %q does not start at the public host", link)
+	}
 	for _, want := range []string{"UID-OWNER", "ORG-1", "CODE-XYZ"} {
 		if !strings.Contains(link, want) {
 			t.Fatalf("setup link %q missing %q", link, want)
@@ -717,5 +722,35 @@ func TestWritePlatformOwnerFGATuple_WriteTupleTransientError(t *testing.T) {
 	cond := findCondition(pb.Status.Conditions, gibsonv1alpha1.ConditionPlatformOwnerReady)
 	if cond == nil || cond.Reason != "FGATransientError" {
 		t.Fatalf("condition = %+v, want reason FGATransientError", cond)
+	}
+}
+
+// TestReconcilePlatformOwner_NoPublicHost_Refuses: with no public host there
+// is no link a browser can open, so the step reports it and sends nothing.
+func TestReconcilePlatformOwner_NoPublicHost_Refuses(t *testing.T) {
+	zsrv, _ := zitadelOwnerMux(t, false, "")
+	fgaSrv := newFakeFGAServer()
+	t.Cleanup(fgaSrv.Close)
+	r := newOwnerTestReconciler(t, zsrv.URL, fgaSrv.URL, adminPATSecret(), fgaStoreSecret())
+	pb := basePlatformOwnerCR(zsrv.URL)
+	pb.Spec.Zitadel.ExternalDomain = ""
+	pb.Spec.PlatformOwner.Email = "owner@example.com"
+
+	if _, err := r.reconcilePlatformOwner(context.Background(), pb, logr.Discard()); err != nil {
+		t.Fatalf("reconcilePlatformOwner: %v", err)
+	}
+	cond := findCondition(pb.Status.Conditions, gibsonv1alpha1.ConditionPlatformOwnerReady)
+	if cond == nil || cond.Status != metav1.ConditionFalse || cond.Reason != "NoPublicHost" {
+		t.Fatalf("condition = %+v, want False/NoPublicHost", cond)
+	}
+}
+
+// TestSetupLinkURLTemplate_UsesThePublicHost pins the emailed template too:
+// Zitadel substitutes the placeholders into exactly this URL.
+func TestSetupLinkURLTemplate_UsesThePublicHost(t *testing.T) {
+	got := setupLinkURLTemplate("app.staging.zeroroot.ai")
+	want := "https://app.staging.zeroroot.ai/ui/v2/login/invite?userID={{.UserID}}&code={{.Code}}&organization={{.OrgID}}"
+	if got != want {
+		t.Fatalf("setupLinkURLTemplate = %q, want %q", got, want)
 	}
 }

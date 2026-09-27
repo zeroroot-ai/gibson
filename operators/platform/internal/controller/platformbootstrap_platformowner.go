@@ -180,7 +180,15 @@ func (r *PlatformBootstrapReconciler) sendPlatformOwnerSetupLink(
 		}
 	}
 
-	urlTemplate := setupLinkURLTemplate(pb.Spec.Zitadel.Issuer)
+	// The link is for a person's browser, so it names the public host,
+	// never the issuer: the issuer is the in-cluster Service URL on every
+	// profile (http://gibson-zitadel:8080), which no browser can reach.
+	if pb.Spec.Zitadel.ExternalDomain == "" {
+		setBootstrapCond(pb, gibsonv1alpha1.ConditionPlatformOwnerReady, metav1.ConditionFalse,
+			"NoPublicHost", "spec.zitadel.externalDomain is empty: a setup link needs the public host")
+		return false, ctrl.Result{}, nil
+	}
+	urlTemplate := setupLinkURLTemplate(pb.Spec.Zitadel.ExternalDomain)
 	if !po.OfflineSetup {
 		if _, err := zc.CreateSetupInviteCode(ctx, userID, urlTemplate, true); err != nil {
 			if zitadel.IsPermanent(err) {
@@ -305,8 +313,11 @@ func (r *PlatformBootstrapReconciler) writeOfflineSetupLink(ctx context.Context,
 // field) — supplied explicitly rather than relying on Zitadel's own default
 // invite path, so the emitted link is the same shape whether Zitadel emails
 // it or the operator embeds it in the offline Secret.
-func setupLinkURLTemplate(issuer string) string {
-	return strings.TrimRight(issuer, "/") + "/ui/v2/login/invite?userID={{.UserID}}&code={{.Code}}&organization={{.OrgID}}"
+//
+// externalDomain is the public host a browser reaches (spec.zitadel.
+// externalDomain, a port included when the profile has one).
+func setupLinkURLTemplate(externalDomain string) string {
+	return "https://" + strings.TrimRight(externalDomain, "/") + "/ui/v2/login/invite?userID={{.UserID}}&code={{.Code}}&organization={{.OrgID}}"
 }
 
 // renderSetupLink substitutes the same three placeholders setupLinkURLTemplate
