@@ -148,6 +148,7 @@ func main() {
 			checks.ConstantVerdictDoubleAnalyzer,
 			checks.GraphWriteAnalyzer,
 			checks.CypherIdentifierAnalyzer,
+			checks.TenantRoleWriteAnalyzer,
 		}...,
 	)
 }

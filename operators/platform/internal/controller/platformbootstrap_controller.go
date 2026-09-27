@@ -128,6 +128,10 @@ func (r *PlatformBootstrapReconciler) SetupWithManager(mgr ctrl.Manager) error {
 			&gibsonv1alpha1.OIDCClient{},
 			handler.EnqueueRequestsFromMapFunc(r.mapChildToParent),
 		).
+		Watches(
+			&corev1.ConfigMap{},
+			handler.EnqueueRequestsFromMapFunc(r.mapBrandingConfigMap),
+		).
 		Complete(r)
 }
 
@@ -250,7 +254,11 @@ func (r *PlatformBootstrapReconciler) Reconcile(ctx context.Context, req ctrl.Re
 		return result, err
 	}
 
-	// Step 9: Platform owner (ADR-0093 decision 6/8, hosted#201). Ordering
+	// Step 9: the login pages' brand. It never stops the reconcile; see
+	// reconcileLoginBranding.
+	r.reconcileLoginBranding(ctx, &pb, logger)
+
+	// Step 10: Platform owner (ADR-0093 decision 6/8, hosted#201). Ordering
 	// rationale: depends on the Zitadel project (Step 1, for the org id and
 	// admin token) and the FGA model (Step 4, for the store/model ids the
 	// platform_owner tuple write needs) both being available. Placed last so
@@ -643,6 +651,7 @@ func (r *PlatformBootstrapReconciler) aggregateReady(pb *gibsonv1alpha1.Platform
 		gibsonv1alpha1.ConditionUnsealKeyEscrowed,
 		gibsonv1alpha1.ConditionPostgresBundleReady,
 		gibsonv1alpha1.ConditionTrustedDomainReady,
+		gibsonv1alpha1.ConditionLoginBrandingReady,
 		gibsonv1alpha1.ConditionPlatformOwnerReady,
 	}
 	for _, cType := range all {

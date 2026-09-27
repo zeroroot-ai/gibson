@@ -11,6 +11,7 @@ import (
 	"google.golang.org/grpc/status"
 
 	"github.com/zeroroot-ai/gibson/internal/platform/authz"
+	"github.com/zeroroot-ai/gibson/internal/platform/tenantrole"
 	tenantv1 "github.com/zeroroot-ai/gibson/internal/server/daemon/api/gibson/tenant/v1"
 )
 
@@ -81,13 +82,18 @@ func TestSetTenantRole_ForeignTenantRejected(t *testing.T) {
 			srv := newMembersTestServer(t, &membersAuthorizer{}, idpC)
 			srv.authorizer = az
 			srv.orgResolver = staticOrgResolver{orgID: "org-123"}
+			tuples, err := tenantrole.AuthzTuples(az)
+			if err != nil {
+				t.Fatalf("AuthzTuples: %v", err)
+			}
+			srv.roles = tenantrole.NewSyncer(newFakeGrants(), tuples, nil)
 
 			// Role "admin", not "owner": SetTenantRole refuses "owner"
 			// unconditionally (hosted#190), which is exercised by
 			// TestSetTenantRole_RefusesOwnerRole. This test's own concern is
 			// tenant scoping, orthogonal to which allowed role is requested.
 			ctx := ctxWithTenant(t, scopeCallerTenant)
-			_, err := srv.SetTenantRole(ctx, &tenantv1.SetTenantRoleRequest{
+			_, err = srv.SetTenantRole(ctx, &tenantv1.SetTenantRoleRequest{
 				TenantId: tc.reqTenantID,
 				UserId:   "attacker-id",
 				Role:     "admin",
@@ -97,12 +103,9 @@ func TestSetTenantRole_ForeignTenantRejected(t *testing.T) {
 			}
 
 			if tc.wantCode != codes.OK {
-				// A rejected call must leave no trace on either projection.
+				// A rejected call must leave no trace.
 				if len(az.wrote) != 0 {
 					t.Errorf("rejected call wrote FGA tuples: %+v", az.wrote)
-				}
-				if len(idpC.added) != 0 {
-					t.Errorf("rejected call added Zitadel org members: %+v", idpC.added)
 				}
 				return
 			}
@@ -295,6 +298,21 @@ func (a *tenantScopeAuthorizer) Write(_ context.Context, tuples []authz.Tuple) e
 }
 func (a *tenantScopeAuthorizer) Delete(_ context.Context, tuples []authz.Tuple) error {
 	a.deleted = append(a.deleted, tuples...)
+	return nil
+}
+
+// ReadTuples and WriteAndDelete make tenantScopeAuthorizer satisfy
+// authz.TupleReader and authz.AtomicWriter, so tenantrole.AuthzTuples
+// accepts it. There is no real stored state behind ReadTuples — it always
+// answers empty, so a Syncer.Sync always treats the request as a fresh
+// write — which is exactly what the scoping tests below need: they only
+// care what object an ACCEPTED request names, not steady-state convergence.
+func (a *tenantScopeAuthorizer) ReadTuples(_ context.Context, _, _, _ string) ([]authz.Tuple, error) {
+	return nil, nil
+}
+func (a *tenantScopeAuthorizer) WriteAndDelete(_ context.Context, writes, deletes []authz.Tuple) error {
+	a.wrote = append(a.wrote, writes...)
+	a.deleted = append(a.deleted, deletes...)
 	return nil
 }
 func (a *tenantScopeAuthorizer) ListObjects(_ context.Context, _, _, _ string) ([]string, error) {

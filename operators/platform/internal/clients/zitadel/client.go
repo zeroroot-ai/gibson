@@ -22,6 +22,10 @@ import (
 // PAT lifecycle. All mutating operations are idempotent: caller may
 // safely retry; 409/already-exists is success, 404 is success on delete.
 type Client interface {
+	// LabelPolicyClient reads and writes the instance label policy (the
+	// login pages' brand). See label_policy.go.
+	LabelPolicyClient
+
 	// EnsureProject creates the Zitadel project with the given name and
 	// returns its ID. If the project already exists, the existing ID is
 	// returned. Idempotent.
@@ -1359,19 +1363,22 @@ func (c *httpClient) connectJSONWithHeaders(ctx context.Context, service, method
 func (c *httpClient) EnsureProjectRoles(ctx context.Context, projectID string, roles []tenantrole.Def) (bool, error) {
 	const projectService = "zitadel.project.v2.ProjectService"
 
+	// ListProjectRolesResponse is {pagination, projectRoles[]}, and each
+	// ProjectRole names its key "key" (zitadel.project.v2 ProjectRole). The
+	// request side (Add/Update/RemoveProjectRole) uses "roleKey".
 	var listResp struct {
-		Roles []struct {
-			RoleKey     string `json:"roleKey"`
+		ProjectRoles []struct {
+			Key         string `json:"key"`
 			DisplayName string `json:"displayName"`
-		} `json:"roles"`
+		} `json:"projectRoles"`
 	}
 	if err := c.connectJSON(ctx, projectService, "ListProjectRoles", map[string]any{"projectId": projectID}, &listResp); err != nil {
 		return false, fmt.Errorf("EnsureProjectRoles: ListProjectRoles project=%s: %w", projectID, err)
 	}
 
-	current := make(map[string]string, len(listResp.Roles))
-	for _, r := range listResp.Roles {
-		current[r.RoleKey] = r.DisplayName
+	current := make(map[string]string, len(listResp.ProjectRoles))
+	for _, r := range listResp.ProjectRoles {
+		current[r.Key] = r.DisplayName
 	}
 	want := make(map[string]string, len(roles))
 	for _, d := range roles {

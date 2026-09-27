@@ -6,7 +6,7 @@
 //
 // Test fakes:
 //   - fakeTenantGetter: returns a static Tenant object or an error.
-//   - fakeIdpClient: captures EnsureHumanUser/AddTenantMember calls, optionally errors.
+//   - fakeIdpClient: captures EnsureHumanUser calls, optionally errors.
 //   - fakeFgaClient: captures Check/Write calls, optionally errors.
 package main
 
@@ -29,6 +29,7 @@ import (
 
 	"github.com/zeroroot-ai/gibson/internal/platform/authz"
 	"github.com/zeroroot-ai/gibson/internal/platform/idp"
+	"github.com/zeroroot-ai/gibson/internal/platform/tenantrole"
 	"github.com/zeroroot-ai/gibson/internal/platform/zitadelconn/zitadelconntest"
 	corev1 "k8s.io/api/core/v1"
 	"k8s.io/apimachinery/pkg/runtime"
@@ -55,11 +56,9 @@ func (f *fakeTenantGetter) Get(_ context.Context, _ string, _ metav1.GetOptions,
 type fakeIdpClient struct {
 	ensureUserID string
 	ensureErr    error
-	addMemberErr error
 	closeErr     error
 
 	ensureCalls []idp.EnsureHumanUserRequest
-	addCalls    []idp.TenantMembershipRequest
 	closed      bool
 
 	createUserID string
@@ -116,11 +115,6 @@ func (f *fakeIdpClient) EnsureHumanUser(_ context.Context, req idp.EnsureHumanUs
 	return f.ensureUserID, nil
 }
 
-func (f *fakeIdpClient) AddTenantMember(_ context.Context, req idp.TenantMembershipRequest) error {
-	f.addCalls = append(f.addCalls, req)
-	return f.addMemberErr
-}
-
 func (f *fakeIdpClient) Close() error {
 	f.closed = true
 	return f.closeErr
@@ -146,6 +140,25 @@ func (f *fakeFgaClient) Check(_ context.Context, user, relation, object string) 
 func (f *fakeFgaClient) Write(_ context.Context, tuples []authz.Tuple) error {
 	f.writeCalls = append(f.writeCalls, tuples)
 	return f.writeErr
+}
+
+// fakeTenantRoleAssigner records Assign calls made by runBootstrap in place
+// of the old AddTenantMember + FGA Write (ADR-0093).
+type fakeTenantRoleAssigner struct {
+	err error
+
+	assignCalls []fakeAssignCall
+}
+
+type fakeAssignCall struct {
+	Tenant tenantrole.Tenant
+	UserID string
+	Role   tenantrole.Role
+}
+
+func (f *fakeTenantRoleAssigner) Assign(_ context.Context, t tenantrole.Tenant, userID string, r tenantrole.Role) error {
+	f.assignCalls = append(f.assignCalls, fakeAssignCall{Tenant: t, UserID: userID, Role: r})
+	return f.err
 }
 
 // ---- helpers ----------------------------------------------------------------
@@ -175,16 +188,17 @@ func TestRunBootstrap_TenantNotFound_FatalError(t *testing.T) {
 	tenants := &fakeTenantGetter{err: errors.New("tenants.gibson.zeroroot.ai \"acme\" not found")}
 	idpC := &fakeIdpClient{}
 	fgaC := &fakeFgaClient{}
+	roles := &fakeTenantRoleAssigner{}
 
-	_, err := runBootstrap(context.Background(), "acme", "owner@acme.example", "", false, false, tenants, idpC, fgaC)
+	_, err := runBootstrap(context.Background(), "acme", "owner@acme.example", "", false, false, tenants, idpC, fgaC, roles)
 	if err == nil {
 		t.Fatal("expected error when Tenant CR is missing, got nil")
 	}
 	if len(idpC.ensureCalls) != 0 {
 		t.Errorf("expected no IdP calls when tenant lookup fails, got %d", len(idpC.ensureCalls))
 	}
-	if len(fgaC.writeCalls) != 0 {
-		t.Errorf("expected no FGA writes when tenant lookup fails, got %d", len(fgaC.writeCalls))
+	if len(roles.assignCalls) != 0 {
+		t.Errorf("expected no role assignment when tenant lookup fails, got %d", len(roles.assignCalls))
 	}
 }
 
@@ -192,8 +206,9 @@ func TestRunBootstrap_NoZitadelOrgID_FatalError(t *testing.T) {
 	tenants := &fakeTenantGetter{obj: makeTenant("acme", "")} // no org id yet
 	idpC := &fakeIdpClient{}
 	fgaC := &fakeFgaClient{}
+	roles := &fakeTenantRoleAssigner{}
 
-	_, err := runBootstrap(context.Background(), "acme", "owner@acme.example", "", false, false, tenants, idpC, fgaC)
+	_, err := runBootstrap(context.Background(), "acme", "owner@acme.example", "", false, false, tenants, idpC, fgaC, roles)
 	if err == nil {
 		t.Fatal("expected error when tenant has no zitadelOrgID, got nil")
 	}
@@ -209,48 +224,48 @@ func TestRunBootstrap_EnsureHumanUserFails_FatalError_NoPartialTuple(t *testing.
 	tenants := &fakeTenantGetter{obj: makeTenant("acme", "org-123")}
 	idpC := &fakeIdpClient{ensureErr: errors.New("zitadel unreachable")}
 	fgaC := &fakeFgaClient{}
+	roles := &fakeTenantRoleAssigner{}
 
-	_, err := runBootstrap(context.Background(), "acme", "owner@acme.example", "", false, false, tenants, idpC, fgaC)
+	_, err := runBootstrap(context.Background(), "acme", "owner@acme.example", "", false, false, tenants, idpC, fgaC, roles)
 	if err == nil {
 		t.Fatal("expected error when EnsureHumanUser fails, got nil")
 	}
-	if len(idpC.addCalls) != 0 {
-		t.Errorf("expected AddTenantMember not called after EnsureHumanUser failure, got %d calls", len(idpC.addCalls))
+	if len(roles.assignCalls) != 0 {
+		t.Errorf("expected role assignment not called after EnsureHumanUser failure, got %d calls", len(roles.assignCalls))
 	}
-	if len(fgaC.checkCalls) != 0 || len(fgaC.writeCalls) != 0 {
-		t.Errorf("expected no FGA activity after EnsureHumanUser failure, got checks=%d writes=%d",
-			len(fgaC.checkCalls), len(fgaC.writeCalls))
-	}
-}
-
-// AddTenantMember failure is NON-FATAL: gibson authorises tenant access via the
-// FGA owner tuple, not a Zitadel org-member role, so the bootstrap records a
-// warning and STILL writes the tuple. The first admin can sign in and own the
-// tenant even when the Zitadel org-member grant (e.g. an undefined gibson.owner
-// role) does not apply.
-func TestRunBootstrap_AddTenantMemberFails_NonFatal_StillWritesTuple(t *testing.T) {
-	tenants := &fakeTenantGetter{obj: makeTenant("acme", "org-123")}
-	idpC := &fakeIdpClient{ensureUserID: "user-owner-1", addMemberErr: errors.New("zitadel org add failed")}
-	fgaC := &fakeFgaClient{}
-
-	res, err := runBootstrap(context.Background(), "acme", "owner@acme.example", "", false, false, tenants, idpC, fgaC)
-	if err != nil {
-		t.Fatalf("AddTenantMember failure must be non-fatal, got: %v", err)
-	}
-	if res.MembershipWarning == "" {
-		t.Error("a failed org-member grant must surface a warning")
-	}
-	if len(fgaC.writeCalls) != 1 {
-		t.Errorf("the FGA owner tuple must still be written, got %d writes", len(fgaC.writeCalls))
+	if len(fgaC.checkCalls) != 0 {
+		t.Errorf("expected no FGA activity after EnsureHumanUser failure, got checks=%d",
+			len(fgaC.checkCalls))
 	}
 }
 
-func TestRunBootstrap_HappyPath_CreatesUserAndWritesTuple_ReturnsLink(t *testing.T) {
+// TestRunBootstrap_AssignFails_FatalError pins ADR-0093: a failed tenant role
+// grant is FATAL, unlike the old AddTenantMember call it replaces. Nothing
+// else can make this tenant's Owner, so an install with a Zitadel or FGA
+// outage at this exact moment must not report success and strand the
+// operator with no way in.
+func TestRunBootstrap_AssignFails_FatalError(t *testing.T) {
 	tenants := &fakeTenantGetter{obj: makeTenant("acme", "org-123")}
 	idpC := &fakeIdpClient{ensureUserID: "user-owner-1"}
 	fgaC := &fakeFgaClient{checkResult: false}
+	roles := &fakeTenantRoleAssigner{err: errors.New("zitadel grant failed")}
 
-	result, err := runBootstrap(context.Background(), "acme", "owner@acme.example", "https://app.example.com/", false, false, tenants, idpC, fgaC)
+	_, err := runBootstrap(context.Background(), "acme", "owner@acme.example", "", false, false, tenants, idpC, fgaC, roles)
+	if err == nil {
+		t.Fatal("expected error when the tenant role assignment fails")
+	}
+	if len(roles.assignCalls) != 1 {
+		t.Errorf("expected exactly 1 Assign attempt, got %d", len(roles.assignCalls))
+	}
+}
+
+func TestRunBootstrap_HappyPath_CreatesUserAndAssignsOwner_ReturnsLink(t *testing.T) {
+	tenants := &fakeTenantGetter{obj: makeTenant("acme", "org-123")}
+	idpC := &fakeIdpClient{ensureUserID: "user-owner-1"}
+	fgaC := &fakeFgaClient{checkResult: false}
+	roles := &fakeTenantRoleAssigner{}
+
+	result, err := runBootstrap(context.Background(), "acme", "owner@acme.example", "https://app.example.com/", false, false, tenants, idpC, fgaC, roles)
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
@@ -272,52 +287,38 @@ func TestRunBootstrap_HappyPath_CreatesUserAndWritesTuple_ReturnsLink(t *testing
 		t.Errorf("EnsureHumanUser call = %+v, want OrgID=org-123 Email=owner@acme.example", idpC.ensureCalls[0])
 	}
 
-	// AddTenantMember called with role "owner".
-	if len(idpC.addCalls) != 1 {
-		t.Fatalf("expected 1 AddTenantMember call, got %d", len(idpC.addCalls))
+	// The tenant role Syncer assigned Owner for the right tenant and user
+	// (ADR-0093): Assign writes the Zitadel grant, then copies it into FGA.
+	if len(roles.assignCalls) != 1 {
+		t.Fatalf("expected 1 Assign call, got %d", len(roles.assignCalls))
 	}
-	if idpC.addCalls[0].Role != "owner" || idpC.addCalls[0].UserID != "user-owner-1" {
-		t.Errorf("AddTenantMember call = %+v, want Role=owner UserID=user-owner-1", idpC.addCalls[0])
-	}
-
-	// FGA tuple written exactly once, with the right shape.
-	if len(fgaC.writeCalls) != 1 || len(fgaC.writeCalls[0]) != 1 {
-		t.Fatalf("expected exactly 1 FGA write of 1 tuple, got %+v", fgaC.writeCalls)
-	}
-	tuple := fgaC.writeCalls[0][0]
-	if tuple.User != "user:user-owner-1" {
-		t.Errorf("tuple.User = %q, want user:user-owner-1", tuple.User)
-	}
-	if tuple.Relation != "owner" {
-		t.Errorf("tuple.Relation = %q, want owner", tuple.Relation)
-	}
-	if tuple.Object != "tenant:acme" {
-		t.Errorf("tuple.Object = %q, want tenant:acme", tuple.Object)
+	got := roles.assignCalls[0]
+	if got.Role != tenantrole.Owner || got.UserID != "user-owner-1" || got.Tenant != (tenantrole.Tenant{ID: "acme", OrgID: "org-123"}) {
+		t.Errorf("Assign call = %+v, want Role=Owner UserID=user-owner-1 Tenant={acme org-123}", got)
 	}
 }
 
-func TestRunBootstrap_AlreadyOwner_NoOpSuccess_NoDuplicateWrite(t *testing.T) {
+func TestRunBootstrap_AlreadyOwner_NoOpSuccess_NoDuplicateAssign(t *testing.T) {
 	tenants := &fakeTenantGetter{obj: makeTenant("acme", "org-123")}
 	// EnsureHumanUser is idempotent by construction — a second run finds the
 	// same existing user.
 	idpC := &fakeIdpClient{ensureUserID: "user-owner-1"}
 	fgaC := &fakeFgaClient{checkResult: true} // tuple already present
+	roles := &fakeTenantRoleAssigner{}
 
-	result, err := runBootstrap(context.Background(), "acme", "owner@acme.example", "", false, false, tenants, idpC, fgaC)
+	result, err := runBootstrap(context.Background(), "acme", "owner@acme.example", "", false, false, tenants, idpC, fgaC, roles)
 	if err != nil {
 		t.Fatalf("unexpected error on re-run: %v", err)
 	}
 	if result.Outcome != outcomeAlreadyOwner {
 		t.Errorf("Outcome = %q, want %q", result.Outcome, outcomeAlreadyOwner)
 	}
-	if len(fgaC.writeCalls) != 0 {
-		t.Errorf("expected no FGA write on re-run (tuple already present), got %d writes", len(fgaC.writeCalls))
+	if len(roles.assignCalls) != 0 {
+		t.Errorf("expected no role assignment on re-run (tuple already present), got %d calls", len(roles.assignCalls))
 	}
-	// Zitadel calls still happen (both are idempotent finds, not creates) —
-	// re-running is safe to repeat exactly like the first run.
-	if len(idpC.ensureCalls) != 1 || len(idpC.addCalls) != 1 {
-		t.Errorf("expected 1 EnsureHumanUser + 1 AddTenantMember call on re-run, got %d/%d",
-			len(idpC.ensureCalls), len(idpC.addCalls))
+	// The Zitadel find call still happens (idempotent), but Assign does not.
+	if len(idpC.ensureCalls) != 1 {
+		t.Errorf("expected 1 EnsureHumanUser call on re-run, got %d", len(idpC.ensureCalls))
 	}
 }
 
@@ -325,24 +326,14 @@ func TestRunBootstrap_FgaCheckFails_FatalError(t *testing.T) {
 	tenants := &fakeTenantGetter{obj: makeTenant("acme", "org-123")}
 	idpC := &fakeIdpClient{ensureUserID: "user-owner-1"}
 	fgaC := &fakeFgaClient{checkErr: errors.New("fga unreachable")}
+	roles := &fakeTenantRoleAssigner{}
 
-	_, err := runBootstrap(context.Background(), "acme", "owner@acme.example", "", false, false, tenants, idpC, fgaC)
+	_, err := runBootstrap(context.Background(), "acme", "owner@acme.example", "", false, false, tenants, idpC, fgaC, roles)
 	if err == nil {
 		t.Fatal("expected error when FGA Check fails, got nil")
 	}
-	if len(fgaC.writeCalls) != 0 {
-		t.Errorf("expected no FGA write when Check fails, got %d", len(fgaC.writeCalls))
-	}
-}
-
-func TestRunBootstrap_FgaWriteFails_FatalError(t *testing.T) {
-	tenants := &fakeTenantGetter{obj: makeTenant("acme", "org-123")}
-	idpC := &fakeIdpClient{ensureUserID: "user-owner-1"}
-	fgaC := &fakeFgaClient{checkResult: false, writeErr: errors.New("fga write rejected")}
-
-	_, err := runBootstrap(context.Background(), "acme", "owner@acme.example", "", false, false, tenants, idpC, fgaC)
-	if err == nil {
-		t.Fatal("expected error when FGA Write fails, got nil")
+	if len(roles.assignCalls) != 0 {
+		t.Errorf("expected no role assignment when Check fails, got %d", len(roles.assignCalls))
 	}
 }
 
@@ -350,8 +341,9 @@ func TestRunBootstrap_NoPublicURL_EmptySignInPath(t *testing.T) {
 	tenants := &fakeTenantGetter{obj: makeTenant("acme", "org-123")}
 	idpC := &fakeIdpClient{ensureUserID: "user-owner-1"}
 	fgaC := &fakeFgaClient{checkResult: false}
+	roles := &fakeTenantRoleAssigner{}
 
-	result, err := runBootstrap(context.Background(), "acme", "owner@acme.example", "", false, false, tenants, idpC, fgaC)
+	result, err := runBootstrap(context.Background(), "acme", "owner@acme.example", "", false, false, tenants, idpC, fgaC, roles)
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
@@ -361,14 +353,14 @@ func TestRunBootstrap_NoPublicURL_EmptySignInPath(t *testing.T) {
 }
 
 func TestRunBootstrap_MissingTenantID_FatalError(t *testing.T) {
-	_, err := runBootstrap(context.Background(), "", "owner@acme.example", "", false, false, &fakeTenantGetter{}, &fakeIdpClient{}, &fakeFgaClient{})
+	_, err := runBootstrap(context.Background(), "", "owner@acme.example", "", false, false, &fakeTenantGetter{}, &fakeIdpClient{}, &fakeFgaClient{}, &fakeTenantRoleAssigner{})
 	if err == nil {
 		t.Fatal("expected error for empty tenant id")
 	}
 }
 
 func TestRunBootstrap_MissingOwnerEmail_FatalError(t *testing.T) {
-	_, err := runBootstrap(context.Background(), "acme", "", "", false, false, &fakeTenantGetter{}, &fakeIdpClient{}, &fakeFgaClient{})
+	_, err := runBootstrap(context.Background(), "acme", "", "", false, false, &fakeTenantGetter{}, &fakeIdpClient{}, &fakeFgaClient{}, &fakeTenantRoleAssigner{})
 	if err == nil {
 		t.Fatal("expected error for empty owner email")
 	}
@@ -490,6 +482,7 @@ func TestRunWithDeps_HappyPath_ReturnsZero_PrintsSignInPath(t *testing.T) {
 	tenants := &fakeTenantGetter{obj: makeTenant("acme", "org-123")}
 	idpC := &fakeIdpClient{ensureUserID: "user-owner-1"}
 	fgaC := &fakeFgaClient{checkResult: false}
+	roles := &fakeTenantRoleAssigner{}
 
 	var stdout bytes.Buffer
 	code := runWithDeps(
@@ -503,6 +496,7 @@ func TestRunWithDeps_HappyPath_ReturnsZero_PrintsSignInPath(t *testing.T) {
 		func(_ *rest.Config) (TenantGetter, error) { return tenants, nil },
 		func(_ context.Context) (idpClient, error) { return idpC, nil },
 		func(_ context.Context) (fgaClient, error) { return fgaC, nil },
+		func(_ context.Context) (tenantRoleAssigner, error) { return roles, nil },
 	)
 	if code != 0 {
 		t.Errorf("exit code = %d, want 0", code)
@@ -528,6 +522,7 @@ func TestRunWithDeps_KubeLoaderError_ReturnsOne(t *testing.T) {
 		func(_ *rest.Config) (TenantGetter, error) { return nil, errors.New("should not be called") },
 		func(_ context.Context) (idpClient, error) { return nil, errors.New("should not be called") },
 		func(_ context.Context) (fgaClient, error) { return nil, errors.New("should not be called") },
+		func(_ context.Context) (tenantRoleAssigner, error) { return nil, errors.New("should not be called") },
 	)
 	if code != 1 {
 		t.Errorf("exit code = %d, want 1", code)
@@ -547,6 +542,7 @@ func TestRunWithDeps_TenantProviderError_ReturnsOne(t *testing.T) {
 		func(_ *rest.Config) (TenantGetter, error) { return nil, errors.New("dynamic client failed") },
 		func(_ context.Context) (idpClient, error) { return nil, errors.New("should not be called") },
 		func(_ context.Context) (fgaClient, error) { return nil, errors.New("should not be called") },
+		func(_ context.Context) (tenantRoleAssigner, error) { return nil, errors.New("should not be called") },
 	)
 	if code != 1 {
 		t.Errorf("exit code = %d, want 1", code)
@@ -566,6 +562,7 @@ func TestRunWithDeps_IdpBuilderError_ReturnsOne(t *testing.T) {
 		func(_ *rest.Config) (TenantGetter, error) { return &fakeTenantGetter{}, nil },
 		func(_ context.Context) (idpClient, error) { return nil, errors.New("zitadel probe failed") },
 		func(_ context.Context) (fgaClient, error) { return nil, errors.New("should not be called") },
+		func(_ context.Context) (tenantRoleAssigner, error) { return nil, errors.New("should not be called") },
 	)
 	if code != 1 {
 		t.Errorf("exit code = %d, want 1", code)
@@ -586,6 +583,7 @@ func TestRunWithDeps_FgaBuilderError_ReturnsOne_ClosesIdp(t *testing.T) {
 		func(_ *rest.Config) (TenantGetter, error) { return &fakeTenantGetter{}, nil },
 		func(_ context.Context) (idpClient, error) { return idpC, nil },
 		func(_ context.Context) (fgaClient, error) { return nil, errors.New("fga dial failed") },
+		func(_ context.Context) (tenantRoleAssigner, error) { return nil, errors.New("should not be called") },
 	)
 	if code != 1 {
 		t.Errorf("exit code = %d, want 1", code)
@@ -599,6 +597,7 @@ func TestRunWithDeps_BootstrapError_ReturnsOne(t *testing.T) {
 	tenants := &fakeTenantGetter{err: errors.New("not found")}
 	idpC := &fakeIdpClient{}
 	fgaC := &fakeFgaClient{}
+	roles := &fakeTenantRoleAssigner{}
 	var stdout bytes.Buffer
 
 	code := runWithDeps(
@@ -612,6 +611,7 @@ func TestRunWithDeps_BootstrapError_ReturnsOne(t *testing.T) {
 		func(_ *rest.Config) (TenantGetter, error) { return tenants, nil },
 		func(_ context.Context) (idpClient, error) { return idpC, nil },
 		func(_ context.Context) (fgaClient, error) { return fgaC, nil },
+		func(_ context.Context) (tenantRoleAssigner, error) { return roles, nil },
 	)
 	if code != 1 {
 		t.Errorf("exit code = %d, want 1", code)
@@ -625,6 +625,7 @@ func TestRunWithDeps_AlreadyOwner_ReturnsZero_NoPublicURLMessage(t *testing.T) {
 	tenants := &fakeTenantGetter{obj: makeTenant("acme", "org-123")}
 	idpC := &fakeIdpClient{ensureUserID: "user-owner-1"}
 	fgaC := &fakeFgaClient{checkResult: true}
+	roles := &fakeTenantRoleAssigner{}
 	var stdout bytes.Buffer
 
 	code := runWithDeps(
@@ -638,6 +639,7 @@ func TestRunWithDeps_AlreadyOwner_ReturnsZero_NoPublicURLMessage(t *testing.T) {
 		func(_ *rest.Config) (TenantGetter, error) { return tenants, nil },
 		func(_ context.Context) (idpClient, error) { return idpC, nil },
 		func(_ context.Context) (fgaClient, error) { return fgaC, nil },
+		func(_ context.Context) (tenantRoleAssigner, error) { return roles, nil },
 	)
 	if code != 0 {
 		t.Errorf("exit code = %d, want 0", code)
@@ -780,6 +782,7 @@ func TestRunWithDeps_IdpCloseFails_StillReturnsSuccessCode(t *testing.T) {
 	tenants := &fakeTenantGetter{obj: makeTenant("acme", "org-123")}
 	idpC := &fakeIdpClient{ensureUserID: "user-owner-1", closeErr: errors.New("close failed")}
 	fgaC := &fakeFgaClient{checkResult: false}
+	roles := &fakeTenantRoleAssigner{}
 	var stdout bytes.Buffer
 
 	code := runWithDeps(
@@ -793,6 +796,7 @@ func TestRunWithDeps_IdpCloseFails_StillReturnsSuccessCode(t *testing.T) {
 		func(_ *rest.Config) (TenantGetter, error) { return tenants, nil },
 		func(_ context.Context) (idpClient, error) { return idpC, nil },
 		func(_ context.Context) (fgaClient, error) { return fgaC, nil },
+		func(_ context.Context) (tenantRoleAssigner, error) { return roles, nil },
 	)
 	if code != 0 {
 		t.Errorf("exit code = %d, want 0 (Close() failure is logged, not fatal)", code)
@@ -806,6 +810,7 @@ func TestRunWithDeps_StdoutWriteFails_StillReturnsZero(t *testing.T) {
 	tenants := &fakeTenantGetter{obj: makeTenant("acme", "org-123")}
 	idpC := &fakeIdpClient{ensureUserID: "user-owner-1"}
 	fgaC := &fakeFgaClient{checkResult: false}
+	roles := &fakeTenantRoleAssigner{}
 
 	code := runWithDeps(
 		context.Background(),
@@ -818,6 +823,7 @@ func TestRunWithDeps_StdoutWriteFails_StillReturnsZero(t *testing.T) {
 		func(_ *rest.Config) (TenantGetter, error) { return tenants, nil },
 		func(_ context.Context) (idpClient, error) { return idpC, nil },
 		func(_ context.Context) (fgaClient, error) { return fgaC, nil },
+		func(_ context.Context) (tenantRoleAssigner, error) { return roles, nil },
 	)
 	if code != 0 {
 		t.Errorf("exit code = %d, want 0 (bootstrap succeeded even though stdout write failed)", code)
@@ -1002,8 +1008,9 @@ func TestRunBootstrap_GeneratePassword_CreatesWithCredential(t *testing.T) {
 	tenants := &fakeTenantGetter{obj: makeTenant("acme", "org-1")}
 	idpC := &fakeIdpClient{createUserID: "user-1"}
 	fgaC := &fakeFgaClient{}
+	roles := &fakeTenantRoleAssigner{}
 
-	res, err := runBootstrap(context.Background(), "acme", "owner@acme.example", "", true, false, tenants, idpC, fgaC)
+	res, err := runBootstrap(context.Background(), "acme", "owner@acme.example", "", true, false, tenants, idpC, fgaC, roles)
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
@@ -1038,8 +1045,9 @@ func TestRunBootstrap_GeneratePassword_RerunDoesNotResetCredential(t *testing.T)
 	// Re-run is signalled by the credential Secret already existing.
 	idpC := &fakeIdpClient{findUserID: "user-1"}
 	fgaC := &fakeFgaClient{}
+	roles := &fakeTenantRoleAssigner{}
 
-	res, err := runBootstrap(context.Background(), "acme", "owner@acme.example", "", true, true, tenants, idpC, fgaC)
+	res, err := runBootstrap(context.Background(), "acme", "owner@acme.example", "", true, true, tenants, idpC, fgaC, roles)
 	if err != nil {
 		t.Fatalf("a re-run must succeed, got: %v", err)
 	}
@@ -1073,8 +1081,9 @@ func TestRunBootstrap_GeneratePassword_ActivatesInvitedOwner(t *testing.T) {
 	tenants := &fakeTenantGetter{obj: makeTenant("acme", "org-1")}
 	idpC := &fakeIdpClient{createErr: idp.ErrAlreadyExists, findUserID: "invited-user"}
 	fgaC := &fakeFgaClient{}
+	roles := &fakeTenantRoleAssigner{}
 
-	res, err := runBootstrap(context.Background(), "acme", "owner@acme.example", "", true, false, tenants, idpC, fgaC)
+	res, err := runBootstrap(context.Background(), "acme", "owner@acme.example", "", true, false, tenants, idpC, fgaC, roles)
 	if err != nil {
 		t.Fatalf("activating an invited owner must succeed, got: %v", err)
 	}
@@ -1097,8 +1106,9 @@ func TestRunBootstrap_WithoutGeneratePassword_UsesInvitationFlow(t *testing.T) {
 	tenants := &fakeTenantGetter{obj: makeTenant("acme", "org-1")}
 	idpC := &fakeIdpClient{ensureUserID: "user-1"}
 	fgaC := &fakeFgaClient{}
+	roles := &fakeTenantRoleAssigner{}
 
-	res, err := runBootstrap(context.Background(), "acme", "owner@acme.example", "", false, false, tenants, idpC, fgaC)
+	res, err := runBootstrap(context.Background(), "acme", "owner@acme.example", "", false, false, tenants, idpC, fgaC, roles)
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
@@ -1181,6 +1191,7 @@ func TestRunWithDeps_WritesCredentialSecret(t *testing.T) {
 	tenants := &fakeTenantGetter{obj: makeTenant("acme", "org-1")}
 	idpC := &fakeIdpClient{createUserID: "user-1"}
 	fgaC := &fakeFgaClient{}
+	roles := &fakeTenantRoleAssigner{}
 	var stdout bytes.Buffer
 	code := runWithDeps(
 		context.Background(),
@@ -1193,6 +1204,7 @@ func TestRunWithDeps_WritesCredentialSecret(t *testing.T) {
 		func(_ *rest.Config) (TenantGetter, error) { return tenants, nil },
 		func(_ context.Context) (idpClient, error) { return idpC, nil },
 		func(_ context.Context) (fgaClient, error) { return fgaC, nil },
+		func(_ context.Context) (tenantRoleAssigner, error) { return roles, nil },
 	)
 	if code != 0 {
 		t.Fatalf("exit code = %d, want 0; stdout: %s", code, stdout.String())
@@ -1227,6 +1239,7 @@ func TestRunWithDeps_CredentialWriteFailureIsNonFatal(t *testing.T) {
 		func(_ *rest.Config) (TenantGetter, error) { return tenants, nil },
 		func(_ context.Context) (idpClient, error) { return &fakeIdpClient{createUserID: "u1"}, nil },
 		func(_ context.Context) (fgaClient, error) { return &fakeFgaClient{}, nil },
+		func(_ context.Context) (tenantRoleAssigner, error) { return &fakeTenantRoleAssigner{}, nil },
 	)
 	if code != 0 {
 		t.Fatalf("a failed Secret write must not fail a succeeded bootstrap; exit=%d", code)
@@ -1267,7 +1280,7 @@ func TestRunBootstrap_GeneratePassword_RandFailure(t *testing.T) {
 	randRead = func([]byte) (int, error) { return 0, errors.New("entropy exhausted") }
 
 	tenants := &fakeTenantGetter{obj: makeTenant("acme", "org-1")}
-	_, err := runBootstrap(context.Background(), "acme", "o@a.c", "", true, false, tenants, &fakeIdpClient{}, &fakeFgaClient{})
+	_, err := runBootstrap(context.Background(), "acme", "o@a.c", "", true, false, tenants, &fakeIdpClient{}, &fakeFgaClient{}, &fakeTenantRoleAssigner{})
 	if err == nil || !strings.Contains(err.Error(), "generate initial password") {
 		t.Fatalf("want a generate-password error, got: %v", err)
 	}
@@ -1277,7 +1290,7 @@ func TestRunBootstrap_GeneratePassword_RandFailure(t *testing.T) {
 func TestRunBootstrap_RerunFindFailure(t *testing.T) {
 	tenants := &fakeTenantGetter{obj: makeTenant("acme", "org-1")}
 	idpC := &fakeIdpClient{createErr: idp.ErrAlreadyExists, findErr: errors.New("zitadel down")}
-	_, err := runBootstrap(context.Background(), "acme", "o@a.c", "", true, false, tenants, idpC, &fakeFgaClient{})
+	_, err := runBootstrap(context.Background(), "acme", "o@a.c", "", true, false, tenants, idpC, &fakeFgaClient{}, &fakeTenantRoleAssigner{})
 	if err == nil || !strings.Contains(err.Error(), "resolve existing owner") {
 		t.Fatalf("want resolve-existing error, got: %v", err)
 	}
@@ -1287,7 +1300,7 @@ func TestRunBootstrap_RerunFindFailure(t *testing.T) {
 func TestRunBootstrap_CreateFailure(t *testing.T) {
 	tenants := &fakeTenantGetter{obj: makeTenant("acme", "org-1")}
 	idpC := &fakeIdpClient{createErr: errors.New("500 from zitadel")}
-	_, err := runBootstrap(context.Background(), "acme", "o@a.c", "", true, false, tenants, idpC, &fakeFgaClient{})
+	_, err := runBootstrap(context.Background(), "acme", "o@a.c", "", true, false, tenants, idpC, &fakeFgaClient{}, &fakeTenantRoleAssigner{})
 	if err == nil || !strings.Contains(err.Error(), "create owner Zitadel user") {
 		t.Fatalf("want create-owner error, got: %v", err)
 	}
@@ -1351,7 +1364,7 @@ func TestOwnerProfileName(t *testing.T) {
 func TestRunBootstrap_RerunResolveFailure(t *testing.T) {
 	tenants := &fakeTenantGetter{obj: makeTenant("acme", "org-1")}
 	idpC := &fakeIdpClient{findErr: errors.New("zitadel down")}
-	_, err := runBootstrap(context.Background(), "acme", "o@a.c", "", true, true, tenants, idpC, &fakeFgaClient{})
+	_, err := runBootstrap(context.Background(), "acme", "o@a.c", "", true, true, tenants, idpC, &fakeFgaClient{}, &fakeTenantRoleAssigner{})
 	if err == nil || !strings.Contains(err.Error(), "resolve existing owner") {
 		t.Fatalf("want resolve-existing error, got: %v", err)
 	}
@@ -1361,7 +1374,7 @@ func TestRunBootstrap_RerunResolveFailure(t *testing.T) {
 func TestRunBootstrap_ActivateExistingOwner_SetPasswordFails(t *testing.T) {
 	tenants := &fakeTenantGetter{obj: makeTenant("acme", "org-1")}
 	idpC := &fakeIdpClient{createErr: idp.ErrAlreadyExists, findUserID: "u-invited", setPwErr: errors.New("policy rejected")}
-	_, err := runBootstrap(context.Background(), "acme", "o@a.c", "", true, false, tenants, idpC, &fakeFgaClient{})
+	_, err := runBootstrap(context.Background(), "acme", "o@a.c", "", true, false, tenants, idpC, &fakeFgaClient{}, &fakeTenantRoleAssigner{})
 	if err == nil || !strings.Contains(err.Error(), "activate existing owner with a password") {
 		t.Fatalf("want activation error, got: %v", err)
 	}
@@ -1392,14 +1405,17 @@ func TestRunWithDeps_CredentialCheckErrorIsFatal(t *testing.T) {
 		func(_ *rest.Config) (TenantGetter, error) { return tenants, nil },
 		func(_ context.Context) (idpClient, error) { return &fakeIdpClient{createUserID: "u1"}, nil },
 		func(_ context.Context) (fgaClient, error) { return &fakeFgaClient{}, nil },
+		func(_ context.Context) (tenantRoleAssigner, error) { return &fakeTenantRoleAssigner{}, nil },
 	)
 	if code != 1 {
 		t.Fatalf("credential-check error must be fatal, exit=%d", code)
 	}
 }
 
-// A failed org-member grant is logged as a warning but the run still succeeds.
-func TestRunWithDeps_MembershipWarningLoggedNonFatal(t *testing.T) {
+// A failed tenant role Assign is now FATAL (ADR-0093): nothing else can make
+// this tenant's Owner, so the run must exit non-zero rather than report
+// success with no Owner granted.
+func TestRunWithDeps_FailedRoleAssignIsFatal(t *testing.T) {
 	origChk := credentialChecker
 	t.Cleanup(func() { credentialChecker = origChk })
 	credentialChecker = func(context.Context, *rest.Config, string, string) (bool, error) { return false, nil }
@@ -1413,16 +1429,19 @@ func TestRunWithDeps_MembershipWarningLoggedNonFatal(t *testing.T) {
 	}
 
 	tenants := &fakeTenantGetter{obj: makeTenant("acme", "org-1")}
-	idpC := &fakeIdpClient{createUserID: "u1", addMemberErr: errors.New("gibson.owner undefined")}
+	idpC := &fakeIdpClient{createUserID: "u1"}
 	code := runWithDeps(context.Background(), discardLogger(), &bytes.Buffer{},
 		"acme", "owner@acme.example", "", true, "gibson-first-admin", "gibson",
 		happyKubeLoader,
 		func(_ *rest.Config) (TenantGetter, error) { return tenants, nil },
 		func(_ context.Context) (idpClient, error) { return idpC, nil },
 		func(_ context.Context) (fgaClient, error) { return &fakeFgaClient{}, nil },
+		func(_ context.Context) (tenantRoleAssigner, error) {
+			return &fakeTenantRoleAssigner{err: errors.New("gibson project role not found")}, nil
+		},
 	)
-	if code != 0 {
-		t.Fatalf("a failed org-member grant must not fail the run, exit=%d", code)
+	if code != 1 {
+		t.Fatalf("a failed tenant role assign must fail the run, exit=%d, want 1", code)
 	}
 }
 
@@ -1648,6 +1667,7 @@ func runReRun(t *testing.T, tenants *fakeTenantGetter, idpC idpClient) int {
 		func(_ *rest.Config) (TenantGetter, error) { return tenants, nil },
 		func(_ context.Context) (idpClient, error) { return idpC, nil },
 		func(_ context.Context) (fgaClient, error) { return &fakeFgaClient{}, nil },
+		func(_ context.Context) (tenantRoleAssigner, error) { return &fakeTenantRoleAssigner{}, nil },
 	)
 }
 
