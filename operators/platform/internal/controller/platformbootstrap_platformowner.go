@@ -132,14 +132,30 @@ func (r *PlatformBootstrapReconciler) reconcilePlatformOwner(
 		return result, err
 	}
 
-	// Step 4: the setup link. Sent on first creation, or again when
-	// setupGeneration has been raised past what was last observed.
-	if userJustCreated || pb.Status.ObservedSetupGeneration != po.SetupGeneration {
+	// Step 4: the setup link. Sent on first creation, when setupGeneration
+	// has been raised past what was last observed, or — hosted#189 — once
+	// more when the previous send happened (or might have happened) before
+	// Zitadel had any active SMTP provider at all. Zitadel's CreateInviteCode
+	// "succeeds" and queues a notification even with no mail transport
+	// configured, so a PlatformBootstrap from before
+	// PlatformOwnerLinkConfirmedSMTPActive existed defaults it to false,
+	// which is read as "not confirmed delivered" and triggers exactly one
+	// resend the first time this reconcile observes the field still false —
+	// by the time this step runs, reconcileZitadelSMTP (Step 9b, earlier in
+	// the same Reconcile pass) has already confirmed or repaired the active
+	// provider, or this whole pass would already have returned. Never
+	// consulted in offline mode, which never depends on SMTP.
+	needsLink := userJustCreated || pb.Status.ObservedSetupGeneration != po.SetupGeneration
+	resendForSMTP := !po.OfflineSetup && !userJustCreated && !pb.Status.PlatformOwnerLinkConfirmedSMTPActive
+	if needsLink || resendForSMTP {
 		sent, result, err := r.sendPlatformOwnerSetupLink(ctx, pb, zc, userID, orgID, userJustCreated, logger)
 		if !sent {
 			return result, err
 		}
 		pb.Status.ObservedSetupGeneration = po.SetupGeneration
+		if !po.OfflineSetup {
+			pb.Status.PlatformOwnerLinkConfirmedSMTPActive = true
+		}
 	}
 
 	setBootstrapCond(pb, gibsonv1alpha1.ConditionPlatformOwnerReady, metav1.ConditionTrue,
