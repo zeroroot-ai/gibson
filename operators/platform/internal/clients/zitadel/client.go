@@ -100,6 +100,22 @@ type Client interface {
 	// previously held is revoked rather than left in place.
 	RemoveIAMMember(ctx context.Context, userID string) error
 
+	// SearchIAMMembers returns every instance (IAM-level) member, human or
+	// machine. hosted#189: the HumanAdminsScoped reconcile step lists this
+	// once per reconcile to find any human Zitadel administrator besides
+	// the Platform owner.
+	//
+	// Zitadel v4.18.0: POST /admin/v1/members/_search with an empty body
+	// returns every member, unfiltered. Response field names are the exact
+	// protojson wire names of the member-search result: `userId`, `roles`,
+	// `preferredLoginName`, `email`, `firstName`, `lastName`,
+	// `displayName`, `userType` ("TYPE_HUMAN" / "TYPE_MACHINE" /
+	// "TYPE_UNSPECIFIED" — see ZitadelUserTypeHuman/ZitadelUserTypeMachine),
+	// and `userResourceOwner` (the org the USER belongs to — distinct from
+	// the member row's own `details.resourceOwner`, which names the
+	// instance's default org that owns the membership grant, not the user).
+	SearchIAMMembers(ctx context.Context) ([]IAMMember, error)
+
 	// AddOrgMember adds the given user to the organization identified by
 	// orgID with the given org-scoped roles (e.g. ["ORG_OWNER"]).
 	// Idempotent: if the user is already an org member, Zitadel's PUT on
@@ -244,7 +260,50 @@ type Client interface {
 	// /zitadel.user.v2.UserService/ListAuthenticationMethodTypes to
 	// enumerate, then POST .../RemoveTOTP or .../RemoveU2F per entry.
 	ClearHumanFactors(ctx context.Context, userID string) error
+
+	// DeleteUser permanently deletes a Zitadel user (human or machine) via
+	// the v2 UserService. Idempotent: NotFound (already deleted) is
+	// success. Used by the HumanAdminsScoped step (hosted#189) to remove
+	// Zitadel's own default first-instance human admin once its IAM_OWNER
+	// membership has already been revoked.
+	//
+	// Zitadel v4.18.0: POST /zitadel.user.v2.UserService/DeleteUser with
+	// body {"userId": "<id>"}.
+	DeleteUser(ctx context.Context, userID string) error
 }
+
+// IAMMember is one row of an instance member search
+// (POST /admin/v1/members/_search). SearchIAMMembers decodes only the
+// fields the HumanAdminsScoped step (hosted#189) needs: whether the member
+// is human or machine, and, for identifying Zitadel's own default
+// first-instance admin specifically, the login name and the org the
+// account was created in.
+type IAMMember struct {
+	UserID             string
+	Roles              []string
+	PreferredLoginName string
+	Email              string
+	FirstName          string
+	LastName           string
+	DisplayName        string
+	// UserType is Zitadel's protojson enum name for the member's user
+	// record — compare against ZitadelUserTypeHuman / ZitadelUserTypeMachine,
+	// never a raw literal.
+	UserType string
+	// UserResourceOwner is the id of the org the USER belongs to (distinct
+	// from the membership grant's own `details.resourceOwner`, which is
+	// always the instance's default org). Compare against
+	// GetOrgIDForProject's result to test "was this account created in the
+	// first-instance org."
+	UserResourceOwner string
+}
+
+// Zitadel protojson user-type enum values, as returned by
+// /admin/v1/members/_search's `userType` field.
+const (
+	ZitadelUserTypeHuman   = "TYPE_HUMAN"
+	ZitadelUserTypeMachine = "TYPE_MACHINE"
+)
 
 // LoginPolicy is the desired instance default login policy. EnsureLoginPolicy
 // makes the live policy equal every field below — this is a full-replace PUT
@@ -840,6 +899,9 @@ func (e *errClient) AddIAMMember(ctx context.Context, userID string, roles []str
 func (e *errClient) RemoveIAMMember(_ context.Context, _ string) error {
 	return e.err
 }
+func (e *errClient) SearchIAMMembers(_ context.Context) ([]IAMMember, error) {
+	return nil, e.err
+}
 func (e *errClient) AddOrgMember(ctx context.Context, orgID, userID string, roles []string) error {
 	return e.err
 }
@@ -868,6 +930,9 @@ func (e *errClient) CreateSetupInviteCode(_ context.Context, _, _ string, _ bool
 	return "", e.err
 }
 func (e *errClient) ClearHumanFactors(_ context.Context, _ string) error {
+	return e.err
+}
+func (e *errClient) DeleteUser(_ context.Context, _ string) error {
 	return e.err
 }
 
@@ -1058,6 +1123,44 @@ func (c *httpClient) RemoveIAMMember(ctx context.Context, userID string) error {
 		return nil
 	}
 	return fmt.Errorf("RemoveIAMMember user=%s: %w", userID, err)
+}
+
+// SearchIAMMembers implements Client.
+//
+// Zitadel v4: POST /admin/v1/members/_search with an empty body (no filter
+// queries) returns every instance member, human and machine.
+func (c *httpClient) SearchIAMMembers(ctx context.Context) ([]IAMMember, error) {
+	var resp struct {
+		Result []struct {
+			UserID             string   `json:"userId"`
+			Roles              []string `json:"roles"`
+			PreferredLoginName string   `json:"preferredLoginName"`
+			Email              string   `json:"email"`
+			FirstName          string   `json:"firstName"`
+			LastName           string   `json:"lastName"`
+			DisplayName        string   `json:"displayName"`
+			UserType           string   `json:"userType"`
+			UserResourceOwner  string   `json:"userResourceOwner"`
+		} `json:"result"`
+	}
+	if err := c.doJSON(ctx, http.MethodPost, "/admin/v1/members/_search", map[string]any{}, &resp); err != nil {
+		return nil, fmt.Errorf("SearchIAMMembers: %w", err)
+	}
+	out := make([]IAMMember, 0, len(resp.Result))
+	for _, m := range resp.Result {
+		out = append(out, IAMMember{
+			UserID:             m.UserID,
+			Roles:              m.Roles,
+			PreferredLoginName: m.PreferredLoginName,
+			Email:              m.Email,
+			FirstName:          m.FirstName,
+			LastName:           m.LastName,
+			DisplayName:        m.DisplayName,
+			UserType:           m.UserType,
+			UserResourceOwner:  m.UserResourceOwner,
+		})
+	}
+	return out, nil
 }
 
 // AddOrgMember implements Client.
@@ -1538,6 +1641,18 @@ func (c *httpClient) ClearHumanFactors(ctx context.Context, userID string) error
 				return fmt.Errorf("ClearHumanFactors: %w", err)
 			}
 		}
+	}
+	return nil
+}
+
+// DeleteUser implements Client.
+//
+// Zitadel v4.18.0: POST /zitadel.user.v2.UserService/DeleteUser with body
+// {"userId": "<id>"}. Idempotent: NotFound (already deleted) is success.
+func (c *httpClient) DeleteUser(ctx context.Context, userID string) error {
+	err := c.connectJSON(ctx, userService, "DeleteUser", map[string]any{"userId": userID}, nil)
+	if err != nil && !IsNotFound(err) {
+		return fmt.Errorf("DeleteUser user=%s: %w", userID, err)
 	}
 	return nil
 }

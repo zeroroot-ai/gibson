@@ -88,6 +88,14 @@ const (
 	// current spec.platformOwner.setupGeneration has a setup link outstanding
 	// (sent or, in offline mode, written to a Secret).
 	ConditionPlatformOwnerReady = "PlatformOwnerReady"
+
+	// ConditionHumanAdminsScoped reports whether the Platform owner is the
+	// only human Zitadel instance administrator (ADR-0093 decision 6,
+	// hosted#189). Runs every reconcile, after ConditionPlatformOwnerReady:
+	// it revokes the IAM membership of every human member other than the
+	// Platform owner, and deletes Zitadel's own default first-instance
+	// human admin outright. Machine members are untouched here.
+	ConditionHumanAdminsScoped = "HumanAdminsScoped"
 )
 
 // SecretKeyRef references a key in a Secret. namespace is optional; when
