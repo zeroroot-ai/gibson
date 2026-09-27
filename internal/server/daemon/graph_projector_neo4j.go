@@ -235,9 +235,19 @@ func hostUpsertParams(h brain.HostSnapshot) map[string]any {
 			"address":      h.Address,
 			"ssh_host_key": h.SSHHostKey,
 			"cloud_id":     h.CloudID,
-			"belief_juicy": h.Belief.Juicy,
-			"attention":    h.Attention,
-			"surprise":     h.Surprise,
+			// Belief is a first-class property of the node (gibson#272, amending
+			// ADR-0029 over ADR-0005), not a single side-car score: every
+			// posterior the model reports travels with the node, plus the
+			// evidence digest it was scored against, so a reader of the graph
+			// can tell what a belief answers for without a round-trip to the
+			// World.
+			"belief_juicy":           h.Belief.Juicy,
+			"belief_exploitable":     h.Belief.Exploitable,
+			"belief_reachable":       h.Belief.Reachable,
+			"belief_model":           h.Belief.Model,
+			"belief_evidence_digest": h.EvidenceDigest,
+			"attention":              h.Attention,
+			"surprise":               h.Surprise,
 		},
 		"ports": ports,
 	}

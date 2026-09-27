@@ -170,6 +170,14 @@ type HostSnapshot struct {
 	Belief       Belief  // attack-path belief (zero until a BeliefSystem scores it)
 	Attention    float64 // derived: belief.Juicy + surprise boost (ADR-0005/0006)
 	MissionID    string  // the mission that discovered this host (gibson#1075); empty if none
+	// EvidenceDigest fingerprints the evidence Belief was scored against
+	// (belief.go). Belief is a first-class property of the node (gibson#272), so
+	// the digest that gates its recompute travels with the node's snapshot
+	// rather than staying internal to the Host component: a consumer — the
+	// graph projection, a reviewer inspecting a frame — can then tell which
+	// evidence a recorded Belief answers for without re-deriving it. Empty
+	// until the first score request is made.
+	EvidenceDigest string
 }
 
 // Snapshot returns the current hosts in deterministic order — the materialized
@@ -222,20 +230,21 @@ func (w *World) Snapshot() []HostSnapshot {
 		}
 		sort.Ints(open)
 		out = append(out, HostSnapshot{
-			ID:           h.ID,
-			ScopeID:      h.ScopeID,
-			Address:      h.Address,
-			SSHHostKey:   h.SSHHostKey,
-			CloudID:      h.CloudID,
-			OpenPorts:    open,
-			Services:     svcs,
-			Endpoints:    eps,
-			Technologies: techs,
-			Certificates: certs,
-			Surprise:     surprised[q.Entity()],
-			Belief:       h.Belief,
-			Attention:    attentionScore(h.Belief.Juicy, surprised[q.Entity()] != ""),
-			MissionID:    h.MissionID,
+			ID:             h.ID,
+			ScopeID:        h.ScopeID,
+			Address:        h.Address,
+			SSHHostKey:     h.SSHHostKey,
+			CloudID:        h.CloudID,
+			OpenPorts:      open,
+			Services:       svcs,
+			Endpoints:      eps,
+			Technologies:   techs,
+			Certificates:   certs,
+			Surprise:       surprised[q.Entity()],
+			Belief:         h.Belief,
+			Attention:      attentionScore(h.Belief.Juicy, surprised[q.Entity()] != ""),
+			MissionID:      h.MissionID,
+			EvidenceDigest: h.EvidenceDigest,
 		})
 	}
 	sort.Slice(out, func(i, j int) bool {
