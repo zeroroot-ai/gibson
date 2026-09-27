@@ -11,6 +11,7 @@ import (
 	"fmt"
 	"io"
 	"net/http"
+	"strconv"
 
 	"github.com/zeroroot-ai/gibson/internal/platform/zitadelconn"
 )
@@ -174,8 +175,9 @@ func (g *zitadelGrants) List(ctx context.Context, orgID string, userIDs []string
 	}
 	type listResp struct {
 		Authorizations []authOut `json:"authorizations"`
-		Pagination     struct {
-			TotalResult int `json:"totalResult"`
+		// protojson writes a uint64 as a JSON string: {"totalResult":"1"}.
+		Pagination struct {
+			TotalResult string `json:"totalResult"`
 		} `json:"pagination"`
 	}
 
@@ -201,7 +203,11 @@ func (g *zitadelGrants) List(ctx context.Context, orgID string, userIDs []string
 			})
 		}
 		offset += len(resp.Authorizations)
-		if len(resp.Authorizations) == 0 || offset >= resp.Pagination.TotalResult {
+		total, err := parseTotalResult(resp.Pagination.TotalResult)
+		if err != nil {
+			return nil, fmt.Errorf("tenantrole: List org=%s: %w", orgID, err)
+		}
+		if len(resp.Authorizations) == 0 || offset >= total {
 			break
 		}
 	}
@@ -236,4 +242,17 @@ func (g *zitadelGrants) Delete(ctx context.Context, grantID string) error {
 		return fmt.Errorf("tenantrole: Delete id=%s: %w", grantID, err)
 	}
 	return nil
+}
+
+// parseTotalResult reads a protojson uint64, which Zitadel sends as a
+// string. An absent value is zero.
+func parseTotalResult(v string) (int, error) {
+	if v == "" {
+		return 0, nil
+	}
+	n, err := strconv.Atoi(v)
+	if err != nil {
+		return 0, fmt.Errorf("pagination.totalResult %q: %w", v, err)
+	}
+	return n, nil
 }

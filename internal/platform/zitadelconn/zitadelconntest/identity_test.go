@@ -288,7 +288,7 @@ func TestIdentity_ListAuthorizationsFiltersAndPaginates(t *testing.T) {
 			} `json:"roles"`
 		} `json:"authorizations"`
 		Pagination struct {
-			TotalResult int `json:"totalResult"`
+			TotalResult string `json:"totalResult"`
 		} `json:"pagination"`
 	}
 	status := post(t, e, "/zitadel.authorization.v2.AuthorizationService/ListAuthorizations", map[string]any{
@@ -298,8 +298,8 @@ func TestIdentity_ListAuthorizationsFiltersAndPaginates(t *testing.T) {
 	if status != http.StatusOK {
 		t.Fatalf("ListAuthorizations status = %d", status)
 	}
-	if page.Pagination.TotalResult != 3 {
-		t.Fatalf("totalResult = %d, want 3 (page is smaller, total is not)", page.Pagination.TotalResult)
+	if page.Pagination.TotalResult != "3" {
+		t.Fatalf("totalResult = %q, want \"3\" (page is smaller, total is not; protojson sends a uint64 as a string)", page.Pagination.TotalResult)
 	}
 	if len(page.Authorizations) != 1 {
 		t.Fatalf("page = %v, want exactly one row", page.Authorizations)
