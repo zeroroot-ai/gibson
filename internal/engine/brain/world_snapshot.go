@@ -254,19 +254,11 @@ func RestoreWorld(snap WorldSnapshot, tenant string) (*World, error) {
 		})
 	}
 
-	// Replay tool calls (ADR-0020, gibson#271).
+	// Replay tool calls (ADR-0020, gibson#271). AgentToolCallSnapshot and
+	// AgentToolCallObserved share identical fields, so a direct conversion
+	// replaces the field-by-field literal.
 	for _, c := range data.AgentToolCalls {
-		Reduce(w, AgentToolCallObserved{
-			ToolCallID:         c.ToolCallID,
-			MissionID:          c.MissionID,
-			RunID:              c.RunID,
-			ScopeID:            c.ScopeID,
-			ToolName:           c.ToolName,
-			Arguments:          c.Arguments,
-			Result:             c.Result,
-			Err:                c.Err,
-			RecordedAtUnixNano: c.RecordedAtUnixNano,
-		})
+		Reduce(w, AgentToolCallObserved(c))
 	}
 
 	// Replay decisions in deterministic (ID) order.

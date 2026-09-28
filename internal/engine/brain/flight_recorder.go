@@ -54,10 +54,11 @@ type FlightRecorderPolicySet struct {
 	RetentionDays int
 }
 
+// Kind identifies this event on the Timeline.
 func (FlightRecorderPolicySet) Kind() string { return "flight_recorder.policy_set" }
 
 func applyFlightRecorderPolicySet(w *World, e FlightRecorderPolicySet) {
-	w.flightRecorderPolicy = FlightRecorderPolicy{Redact: e.Redact, RetentionDays: e.RetentionDays}
+	w.flightRecorderPolicy = FlightRecorderPolicy(e)
 }
 
 // FlightRecorderPolicy returns the tenant's current policy
@@ -122,6 +123,7 @@ type FlightRecorderRetentionSwept struct {
 	CutoffUnixNano int64
 }
 
+// Kind identifies this event on the Timeline.
 func (FlightRecorderRetentionSwept) Kind() string { return "flight_recorder.retention_swept" }
 
 func applyFlightRecorderRetentionSwept(w *World, e FlightRecorderRetentionSwept) {

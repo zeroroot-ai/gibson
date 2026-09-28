@@ -59,6 +59,7 @@ type AgentToolCallObserved struct {
 	RecordedAtUnixNano int64
 }
 
+// Kind identifies this event on the Timeline.
 func (AgentToolCallObserved) Kind() string { return "agent_tool_call.observed" }
 
 // applyAgentToolCallObserved resolves a tool call by ToolCallID (idempotent) or

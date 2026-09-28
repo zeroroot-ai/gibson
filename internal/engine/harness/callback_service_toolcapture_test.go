@@ -43,7 +43,7 @@ func TestCallToolProto_FeedsToolCallSink_OnSuccess(t *testing.T) {
 				Metadata:        map[string]string{"file_descriptor_set": fdsBase64},
 			},
 		},
-		toolHandler: func(ctx context.Context, name string, request, response proto.Message) error {
+		toolHandler: func(_ context.Context, _ string, _, response proto.Message) error {
 			outputRefl := response.ProtoReflect()
 			outputRefl.Set(outputRefl.Descriptor().Fields().ByName("result"), protoreflect.ValueOfString("success"))
 			outputRefl.Set(outputRefl.Descriptor().Fields().ByName("count"), protoreflect.ValueOfInt32(42))
@@ -107,7 +107,7 @@ func TestCallToolProto_FeedsToolCallSink_OnFailure(t *testing.T) {
 				Metadata:        map[string]string{"file_descriptor_set": fdsBase64},
 			},
 		},
-		toolHandler: func(ctx context.Context, name string, request, response proto.Message) error {
+		toolHandler: func(_ context.Context, _ string, _, _ proto.Message) error {
 			return errors.New("connection refused")
 		},
 	}
@@ -160,7 +160,7 @@ func TestCallToolProto_ToolCallIDFallsBackToFreshUUID(t *testing.T) {
 				Metadata:        map[string]string{"file_descriptor_set": fdsBase64},
 			},
 		},
-		toolHandler: func(ctx context.Context, name string, request, response proto.Message) error {
+		toolHandler: func(_ context.Context, _ string, _, _ proto.Message) error {
 			return nil
 		},
 	}
@@ -203,7 +203,7 @@ func TestCallToolProto_NoSink_NoPanic(t *testing.T) {
 				Metadata:        map[string]string{"file_descriptor_set": fdsBase64},
 			},
 		},
-		toolHandler: func(ctx context.Context, name string, request, response proto.Message) error {
+		toolHandler: func(_ context.Context, _ string, _, _ proto.Message) error {
 			return nil
 		},
 	}

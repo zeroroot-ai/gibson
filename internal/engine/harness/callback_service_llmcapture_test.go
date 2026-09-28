@@ -332,7 +332,7 @@ func TestLLMCompleteWithTools_CapturesToolCallsFullFidelity(t *testing.T) {
 	h.tenantID = "acme"
 	registry.Register("mission-A", "recon-agent", h)
 	svc := NewHarnessCallbackServiceWithRegistry(
-		slog.New(slog.NewTextHandler(io.Discard, nil)),
+		slog.New(slog.DiscardHandler),
 		registry,
 		WithLLMCallSink(func(_ context.Context, tn string, call LLMCallRecord) {
 			captured = append(captured, capturedCall{tenant: tn, call: call})
@@ -354,7 +354,7 @@ func TestLLMCompleteWithTools_CapturesToolCallsFullFidelity(t *testing.T) {
 	got := captured[0].call
 	require.Len(t, got.CompletionToolCalls, 1, "the completion's own tool calls must not be dropped")
 	assert.Equal(t, "nmap", got.CompletionToolCalls[0].Name)
-	assert.Equal(t, `{"host":"10.0.0.5"}`, got.CompletionToolCalls[0].Arguments)
+	assert.JSONEq(t, `{"host":"10.0.0.5"}`, got.CompletionToolCalls[0].Arguments)
 	assert.NotZero(t, got.RecordedAtUnixNano, "a capture time must be stamped for retention sweeps")
 
 	// The wire response also carries the tool calls (unchanged behavior).
