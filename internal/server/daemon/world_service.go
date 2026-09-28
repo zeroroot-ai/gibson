@@ -18,6 +18,7 @@ import (
 	"context"
 	"fmt"
 	"log/slog"
+	"math"
 
 	"google.golang.org/grpc/codes"
 	"google.golang.org/grpc/status"
@@ -401,7 +402,7 @@ func (s *worldServer) GetCalibration(ctx context.Context, req *worldpb.GetCalibr
 		Tenant:      report.Tenant,
 		Overall:     techniqueCalibrationView(report.Overall),
 		ByTechnique: techniqueCalibrationViews(report.ByTechnique),
-		Unscored:    int32(report.Unscored),
+		Unscored:    int32Count(report.Unscored),
 	}, nil
 }
 
@@ -412,14 +413,14 @@ func techniqueCalibrationView(tc brain.TechniqueCalibration) *worldpb.TechniqueC
 		bins = append(bins, &worldpb.CalibrationBinView{
 			Low:               b.Low,
 			High:              b.High,
-			N:                 int32(b.N),
+			N:                 int32Count(b.N),
 			MeanPredicted:     b.MeanPredicted,
 			ObservedFrequency: b.ObservedFrequency,
 		})
 	}
 	return &worldpb.TechniqueCalibrationView{
 		Technique:         tc.Technique,
-		N:                 int32(tc.N),
+		N:                 int32Count(tc.N),
 		MeanPredicted:     tc.MeanPredicted,
 		ObservedFrequency: tc.ObservedFrequency,
 		BrierScore:        tc.BrierScore,
@@ -436,4 +437,18 @@ func techniqueCalibrationViews(in []brain.TechniqueCalibration) []*worldpb.Techn
 		out = append(out, techniqueCalibrationView(tc))
 	}
 	return out
+}
+
+// int32Count converts a non-negative count to int32, saturating at
+// math.MaxInt32. Calibration counts never realistically reach 2^31, so
+// saturation is a safe, honest bound and satisfies gosec G115 without an
+// unchecked conversion.
+func int32Count(n int) int32 {
+	if n < 0 {
+		return 0
+	}
+	if n > math.MaxInt32 {
+		return math.MaxInt32
+	}
+	return int32(n)
 }
