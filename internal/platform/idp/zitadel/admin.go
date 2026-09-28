@@ -291,15 +291,41 @@ type zitadelUserResponse struct {
 	} `json:"user"`
 }
 
+// userOrgID returns the id of the org userID belongs to. v1 Management
+// calls are scoped to the org in x-zitadel-orgid: a user in another org is
+// "User could not be found". Under ADR-0093 a person lives in their tenant's
+// org, not the platform admin org this client is configured with, so a
+// user-id-keyed v1 call must send the user's own org. The v2 user endpoint
+// finds a user by id in any org and reports the owning org in
+// details.resourceOwner.
+func (c *Client) userOrgID(ctx context.Context, userID string) (string, error) {
+	var resp struct {
+		Details struct {
+			ResourceOwner string `json:"resourceOwner"`
+		} `json:"details"`
+	}
+	if err := c.doRequest(ctx, http.MethodGet, "/v2/users/"+userID, nil, "", &resp); err != nil {
+		return "", err
+	}
+	if resp.Details.ResourceOwner == "" {
+		return "", fmt.Errorf("%w: user %s has no owning org", idp.ErrUpstream, userID)
+	}
+	return resp.Details.ResourceOwner, nil
+}
+
 // GetUserProfile retrieves a human user's profile from Zitadel.
 func (c *Client) GetUserProfile(ctx context.Context, accountID string) (*idp.UserProfile, error) {
 	if accountID == "" {
 		return nil, fmt.Errorf("%w: accountID required", idp.ErrUpstream)
 	}
 
+	orgID, err := c.userOrgID(ctx, accountID)
+	if err != nil {
+		return nil, mapError(err, "GetUserProfile:org")
+	}
 	var resp zitadelUserResponse
 	path := "/management/v1/users/" + accountID
-	if err := c.doRequest(ctx, "GET", path, nil, c.cfg.OrgID, &resp); err != nil {
+	if err := c.doRequest(ctx, "GET", path, nil, orgID, &resp); err != nil {
 		return nil, mapError(err, "GetUserProfile")
 	}
 
@@ -336,8 +362,12 @@ func (c *Client) UpdateUserProfile(ctx context.Context, accountID string, req id
 		PreferredLocale: req.PreferredLocale,
 	}
 
+	orgID, err := c.userOrgID(ctx, accountID)
+	if err != nil {
+		return nil, mapError(err, "UpdateUserProfile:org")
+	}
 	path := "/management/v1/users/" + accountID + "/profile"
-	if err := c.doRequest(ctx, "PUT", path, body, c.cfg.OrgID, nil); err != nil {
+	if err := c.doRequest(ctx, "PUT", path, body, orgID, nil); err != nil {
 		return nil, fmt.Errorf("update user profile: %w", err)
 	}
 
