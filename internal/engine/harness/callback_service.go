@@ -15,6 +15,7 @@ import (
 
 	"github.com/google/uuid"
 	"github.com/zeroroot-ai/gibson/internal/engine/agent"
+	"github.com/zeroroot-ai/gibson/internal/engine/brain"
 	"github.com/zeroroot-ai/gibson/internal/engine/emitbounds"
 	"github.com/zeroroot-ai/gibson/internal/engine/graphrag/ingest"
 	"github.com/zeroroot-ai/gibson/internal/engine/harness/middleware"
@@ -134,6 +135,12 @@ type HarnessCallbackService struct {
 	// per-tenant World's AgentToolCall capture — the flight recorder's tool-I/O
 	// half. nil means capture is disabled.
 	toolCallSink ToolCallSink
+
+	// beliefSubstrate backs the PlaceBet RPC (ADR-0022, ADR-0029 §3,
+	// gibson#273/#278): a placed bet is persisted as belief on its
+	// hypothesis's claim-node. nil means PlaceBet returns Unavailable — the
+	// market view is not wired on this daemon. See callback_place_bet.go.
+	beliefSubstrate brain.BeliefSubstrate
 
 	// spanProcessors receives spans exported from remote agents for tracing integration
 	spanProcessors []sdktrace.SpanProcessor
@@ -358,6 +365,15 @@ type ObservationSink func(ctx context.Context, attr ObservationAttribution, req 
 func WithObservationSink(sink ObservationSink) CallbackServiceOption {
 	return func(s *HarnessCallbackService) {
 		s.observationSink = sink
+	}
+}
+
+// WithBeliefSubstrate wires the belief substrate the PlaceBet RPC persists
+// staked bets to (ADR-0022, ADR-0029 §3). When unset, PlaceBet returns
+// Unavailable.
+func WithBeliefSubstrate(substrate brain.BeliefSubstrate) CallbackServiceOption {
+	return func(s *HarnessCallbackService) {
+		s.beliefSubstrate = substrate
 	}
 }
 
