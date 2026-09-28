@@ -263,29 +263,35 @@ func RestoreWorld(snap WorldSnapshot, tenant string) (*World, error) {
 		switch s.Method {
 		case SettlementMethodPredicate:
 			Reduce(w, BetSettledTrue{
-				HypothesisID:   s.HypothesisID,
-				Technique:      s.Technique,
-				PredicateType:  s.PredicateType,
-				EvidenceDigest: s.EvidenceDigest,
-				ScopeID:        s.ScopeID,
-				MissionID:      s.MissionID,
+				HypothesisID:         s.HypothesisID,
+				Technique:            s.Technique,
+				PredicateType:        s.PredicateType,
+				EvidenceDigest:       s.EvidenceDigest,
+				PredictedProbability: s.PredictedProbability,
+				BrierScore:           s.BrierScore,
+				ScopeID:              s.ScopeID,
+				MissionID:            s.MissionID,
 			})
 		case SettlementMethodExhaustion:
 			Reduce(w, BetSettledFalse{
-				HypothesisID:  s.HypothesisID,
-				AttemptBudget: s.AttemptBudget,
-				AttemptsMade:  s.AttemptsMade,
-				Reason:        s.Reason,
-				ScopeID:       s.ScopeID,
-				MissionID:     s.MissionID,
+				HypothesisID:         s.HypothesisID,
+				AttemptBudget:        s.AttemptBudget,
+				AttemptsMade:         s.AttemptsMade,
+				Reason:               s.Reason,
+				PredictedProbability: s.PredictedProbability,
+				BrierScore:           s.BrierScore,
+				ScopeID:              s.ScopeID,
+				MissionID:            s.MissionID,
 			})
 		case SettlementMethodHITL:
 			Reduce(w, BetSettledByHITL{
-				HypothesisID: s.HypothesisID,
-				Verdict:      s.Verdict,
-				UserID:       s.UserID,
-				ScopeID:      s.ScopeID,
-				MissionID:    s.MissionID,
+				HypothesisID:         s.HypothesisID,
+				Verdict:              s.Verdict,
+				UserID:               s.UserID,
+				PredictedProbability: s.PredictedProbability,
+				BrierScore:           s.BrierScore,
+				ScopeID:              s.ScopeID,
+				MissionID:            s.MissionID,
 			})
 		}
 	}

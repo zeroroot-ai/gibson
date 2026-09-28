@@ -136,9 +136,24 @@ type BetSettlement struct {
 	// UserID identifies the human who applied a HITL verdict — provenance
 	// only (ADR-0006 §6: labels pool tenant-wide regardless of who applied
 	// them). Set only for SettlementMethodHITL (gibson#280).
-	UserID    string
-	ScopeID   string
-	MissionID string
+	UserID string
+	// PredictedProbability is the confidence the fleet had staked on this
+	// hypothesis, as declared by the settlement caller (gibson#277). It is
+	// captured here rather than read from BeliefSubstrate at settlement
+	// time, because BeliefSubstrate is still an unbacked stub with no
+	// replay story of its own — recording it directly is what makes the
+	// score below replayable.
+	PredictedProbability float64
+	// BrierScore is this one bet's proper-scoring-rule score (ADR-0022):
+	// the squared error between PredictedProbability and the observed
+	// outcome (1.0 for TRUE, 0.0 for FALSE), computed once at settlement
+	// time by whichever of the three orchestrators settled it. This is the
+	// training signal braintrain consumes and the per-bet value gibson#284's
+	// TechniqueCalibration.BrierScore aggregate is a mean of. See
+	// bet_scoring.go.
+	BrierScore float64
+	ScopeID    string
+	MissionID  string
 }
 
 // BetSettledTrue records that a bet's hypothesis was demonstrated true: a
@@ -149,12 +164,14 @@ type BetSettlement struct {
 // uses: evaluation happens once, off the single-writer path, and only the
 // result is folded).
 type BetSettledTrue struct {
-	HypothesisID   string
-	Technique      string
-	PredicateType  string
-	EvidenceDigest string
-	ScopeID        string
-	MissionID      string
+	HypothesisID         string
+	Technique            string
+	PredicateType        string
+	EvidenceDigest       string
+	PredictedProbability float64
+	BrierScore           float64
+	ScopeID              string
+	MissionID            string
 }
 
 // Kind identifies the bet.settled_true brain event.
@@ -181,14 +198,16 @@ func applyBetSettledTrue(w *World, e BetSettledTrue) {
 	// Query exhausted → world unlocked.
 
 	w.betSettlements.NewEntity(&BetSettlement{
-		HypothesisID:   e.HypothesisID,
-		Verdict:        SettlementVerdictTrue,
-		Method:         SettlementMethodPredicate,
-		Technique:      e.Technique,
-		PredicateType:  e.PredicateType,
-		EvidenceDigest: e.EvidenceDigest,
-		ScopeID:        e.ScopeID,
-		MissionID:      e.MissionID,
+		HypothesisID:         e.HypothesisID,
+		Verdict:              SettlementVerdictTrue,
+		Method:               SettlementMethodPredicate,
+		Technique:            e.Technique,
+		PredicateType:        e.PredicateType,
+		EvidenceDigest:       e.EvidenceDigest,
+		PredictedProbability: e.PredictedProbability,
+		BrierScore:           e.BrierScore,
+		ScopeID:              e.ScopeID,
+		MissionID:            e.MissionID,
 	})
 }
 
@@ -197,12 +216,14 @@ func applyBetSettledTrue(w *World, e BetSettledTrue) {
 // outcome, not silence. Like BetSettledTrue, it folds through the normal
 // reducer path, so replay reproduces the settlement exactly.
 type BetSettledFalse struct {
-	HypothesisID  string
-	AttemptBudget int
-	AttemptsMade  int
-	Reason        string
-	ScopeID       string
-	MissionID     string
+	HypothesisID         string
+	AttemptBudget        int
+	AttemptsMade         int
+	Reason               string
+	PredictedProbability float64
+	BrierScore           float64
+	ScopeID              string
+	MissionID            string
 }
 
 // Kind identifies the bet.settled_false brain event.
@@ -229,14 +250,16 @@ func applyBetSettledFalse(w *World, e BetSettledFalse) {
 	// Query exhausted → world unlocked.
 
 	w.betSettlements.NewEntity(&BetSettlement{
-		HypothesisID:  e.HypothesisID,
-		Verdict:       SettlementVerdictFalse,
-		Method:        SettlementMethodExhaustion,
-		AttemptBudget: e.AttemptBudget,
-		AttemptsMade:  e.AttemptsMade,
-		Reason:        e.Reason,
-		ScopeID:       e.ScopeID,
-		MissionID:     e.MissionID,
+		HypothesisID:         e.HypothesisID,
+		Verdict:              SettlementVerdictFalse,
+		Method:               SettlementMethodExhaustion,
+		AttemptBudget:        e.AttemptBudget,
+		AttemptsMade:         e.AttemptsMade,
+		Reason:               e.Reason,
+		PredictedProbability: e.PredictedProbability,
+		BrierScore:           e.BrierScore,
+		ScopeID:              e.ScopeID,
+		MissionID:            e.MissionID,
 	})
 }
 
@@ -252,11 +275,13 @@ func applyBetSettledFalse(w *World, e BetSettledFalse) {
 // event is submitted; Reduce never re-derives it, the same "evaluate once,
 // fold the fact" rule every settlement event in this file follows.
 type BetSettledByHITL struct {
-	HypothesisID string
-	Verdict      SettlementVerdict
-	UserID       string
-	ScopeID      string
-	MissionID    string
+	HypothesisID         string
+	Verdict              SettlementVerdict
+	UserID               string
+	PredictedProbability float64
+	BrierScore           float64
+	ScopeID              string
+	MissionID            string
 }
 
 // Kind identifies the bet.settled_by_hitl brain event.
@@ -282,29 +307,33 @@ func applyBetSettledByHITL(w *World, e BetSettledByHITL) {
 	// Query exhausted → world unlocked.
 
 	w.betSettlements.NewEntity(&BetSettlement{
-		HypothesisID: e.HypothesisID,
-		Verdict:      e.Verdict,
-		Method:       SettlementMethodHITL,
-		UserID:       e.UserID,
-		ScopeID:      e.ScopeID,
-		MissionID:    e.MissionID,
+		HypothesisID:         e.HypothesisID,
+		Verdict:              e.Verdict,
+		Method:               SettlementMethodHITL,
+		UserID:               e.UserID,
+		PredictedProbability: e.PredictedProbability,
+		BrierScore:           e.BrierScore,
+		ScopeID:              e.ScopeID,
+		MissionID:            e.MissionID,
 	})
 }
 
 // BetSettlementSnapshot is a stable, comparable view of a BetSettlement.
 type BetSettlementSnapshot struct {
-	HypothesisID   string
-	Verdict        SettlementVerdict
-	Method         SettlementMethod
-	Technique      string
-	PredicateType  string
-	EvidenceDigest string
-	AttemptBudget  int
-	AttemptsMade   int
-	Reason         string
-	UserID         string
-	ScopeID        string
-	MissionID      string
+	HypothesisID         string
+	Verdict              SettlementVerdict
+	Method               SettlementMethod
+	Technique            string
+	PredicateType        string
+	EvidenceDigest       string
+	AttemptBudget        int
+	AttemptsMade         int
+	Reason               string
+	UserID               string
+	PredictedProbability float64
+	BrierScore           float64
+	ScopeID              string
+	MissionID            string
 }
 
 // BetSettlementSnapshot returns settlements in deterministic (HypothesisID)
@@ -315,18 +344,20 @@ func (w *World) BetSettlementSnapshot() []BetSettlementSnapshot {
 	for q.Next() {
 		s := q.Get()
 		out = append(out, BetSettlementSnapshot{
-			HypothesisID:   s.HypothesisID,
-			Verdict:        s.Verdict,
-			Method:         s.Method,
-			Technique:      s.Technique,
-			PredicateType:  s.PredicateType,
-			EvidenceDigest: s.EvidenceDigest,
-			AttemptBudget:  s.AttemptBudget,
-			AttemptsMade:   s.AttemptsMade,
-			Reason:         s.Reason,
-			UserID:         s.UserID,
-			ScopeID:        s.ScopeID,
-			MissionID:      s.MissionID,
+			HypothesisID:         s.HypothesisID,
+			Verdict:              s.Verdict,
+			Method:               s.Method,
+			Technique:            s.Technique,
+			PredicateType:        s.PredicateType,
+			EvidenceDigest:       s.EvidenceDigest,
+			AttemptBudget:        s.AttemptBudget,
+			AttemptsMade:         s.AttemptsMade,
+			Reason:               s.Reason,
+			UserID:               s.UserID,
+			PredictedProbability: s.PredictedProbability,
+			BrierScore:           s.BrierScore,
+			ScopeID:              s.ScopeID,
+			MissionID:            s.MissionID,
 		})
 	}
 	sort.Slice(out, func(i, j int) bool { return out[i].HypothesisID < out[j].HypothesisID })
@@ -366,6 +397,11 @@ type BetSettlementRequest struct {
 	// refused unless a DestructiveProofAuthorizer approves it — never
 	// auto-approved.
 	Destructive bool
+	// PredictedProbability is the confidence the fleet had staked on this
+	// hypothesis (gibson#277) — the same value PlaceBet recorded as
+	// Bet.Confidence. Scored against the settlement outcome under a proper
+	// scoring rule (bet_scoring.go); must be in [0, 1].
+	PredictedProbability float64
 }
 
 // DestructiveProofAuthorizer authorizes one specific destructive
@@ -399,6 +435,10 @@ type DestructiveProofAuthorizer func(ctx context.Context, tenant string, req Bet
 func (e *Engine) SettleBetTrue(ctx context.Context, registry *settlement.Registry, authorize DestructiveProofAuthorizer, req BetSettlementRequest) (bool, error) {
 	if req.HypothesisID == "" {
 		return false, errors.New("brain: settlement request must name a hypothesis id")
+	}
+	if !validPredictedProbability(req.PredictedProbability) {
+		return false, fmt.Errorf("brain: predicted probability for hypothesis %q must be in [0,1], got %v",
+			req.HypothesisID, req.PredictedProbability)
 	}
 
 	for _, s := range e.BetSettlements() {
@@ -439,12 +479,14 @@ func (e *Engine) SettleBetTrue(ctx context.Context, registry *settlement.Registr
 	}
 
 	e.Submit(BetSettledTrue{
-		HypothesisID:   req.HypothesisID,
-		Technique:      string(req.Technique),
-		PredicateType:  string(req.PredicateType),
-		EvidenceDigest: settlementEvidenceDigest(req.Evidence),
-		ScopeID:        req.ScopeID,
-		MissionID:      req.MissionID,
+		HypothesisID:         req.HypothesisID,
+		Technique:            string(req.Technique),
+		PredicateType:        string(req.PredicateType),
+		EvidenceDigest:       settlementEvidenceDigest(req.Evidence),
+		PredictedProbability: req.PredictedProbability,
+		BrierScore:           brierScore(req.PredictedProbability, settlementOutcome(SettlementVerdictTrue)),
+		ScopeID:              req.ScopeID,
+		MissionID:            req.MissionID,
 	})
 	return true, nil
 }
@@ -471,6 +513,11 @@ type BetExhaustionRequest struct {
 	// predicate match". Required: a FALSE verdict must record why it
 	// settled, never settle in silence.
 	Reason string
+	// PredictedProbability is the confidence the fleet had staked on this
+	// hypothesis (gibson#277) — the same value PlaceBet recorded as
+	// Bet.Confidence. Scored against the settlement outcome under a proper
+	// scoring rule (bet_scoring.go); must be in [0, 1].
+	PredictedProbability float64
 }
 
 // SettleBetFalse settles the named bet FALSE once its declared attempt
@@ -493,6 +540,10 @@ func (e *Engine) SettleBetFalse(_ context.Context, req BetExhaustionRequest) (bo
 	if req.HypothesisID == "" {
 		return false, errors.New("brain: settlement request must name a hypothesis id")
 	}
+	if !validPredictedProbability(req.PredictedProbability) {
+		return false, fmt.Errorf("brain: predicted probability for hypothesis %q must be in [0,1], got %v",
+			req.HypothesisID, req.PredictedProbability)
+	}
 	if req.AttemptBudget <= 0 {
 		return false, fmt.Errorf("brain: bet %q must declare a positive attempt budget, got %d", req.HypothesisID, req.AttemptBudget)
 	}
@@ -514,12 +565,14 @@ func (e *Engine) SettleBetFalse(_ context.Context, req BetExhaustionRequest) (bo
 	}
 
 	e.Submit(BetSettledFalse{
-		HypothesisID:  req.HypothesisID,
-		AttemptBudget: req.AttemptBudget,
-		AttemptsMade:  req.AttemptsMade,
-		Reason:        req.Reason,
-		ScopeID:       req.ScopeID,
-		MissionID:     req.MissionID,
+		HypothesisID:         req.HypothesisID,
+		AttemptBudget:        req.AttemptBudget,
+		AttemptsMade:         req.AttemptsMade,
+		Reason:               req.Reason,
+		PredictedProbability: req.PredictedProbability,
+		BrierScore:           brierScore(req.PredictedProbability, settlementOutcome(SettlementVerdictFalse)),
+		ScopeID:              req.ScopeID,
+		MissionID:            req.MissionID,
 	})
 	return true, nil
 }
@@ -544,6 +597,11 @@ type BetHITLRequest struct {
 	// Label.UserID follows (labels pool tenant-wide regardless of which
 	// user applied them; UserID is provenance, never a partition key).
 	UserID string
+	// PredictedProbability is the confidence the fleet had staked on this
+	// hypothesis (gibson#277) — the same value PlaceBet recorded as
+	// Bet.Confidence. Scored against the settlement outcome under a proper
+	// scoring rule (bet_scoring.go); must be in [0, 1].
+	PredictedProbability float64
 }
 
 // hitlSettlementVerdict translates a reviewer's LabelVerdict into the
@@ -596,6 +654,10 @@ func (e *Engine) SettleBetByHITL(_ context.Context, req BetHITLRequest) (bool, e
 	if req.UserID == "" {
 		return false, fmt.Errorf("brain: a HITL settlement for hypothesis %q must record who reviewed it", req.HypothesisID)
 	}
+	if !validPredictedProbability(req.PredictedProbability) {
+		return false, fmt.Errorf("brain: predicted probability for hypothesis %q must be in [0,1], got %v",
+			req.HypothesisID, req.PredictedProbability)
+	}
 	verdict, ok := hitlSettlementVerdict(req.Verdict)
 	if !ok {
 		return false, fmt.Errorf("brain: HITL settlement for hypothesis %q requires %q or %q, got %q",
@@ -618,11 +680,13 @@ func (e *Engine) SettleBetByHITL(_ context.Context, req BetHITLRequest) (bool, e
 		UserID:   req.UserID,
 	})
 	e.Submit(BetSettledByHITL{
-		HypothesisID: req.HypothesisID,
-		Verdict:      verdict,
-		UserID:       req.UserID,
-		ScopeID:      req.ScopeID,
-		MissionID:    req.MissionID,
+		HypothesisID:         req.HypothesisID,
+		Verdict:              verdict,
+		UserID:               req.UserID,
+		PredictedProbability: req.PredictedProbability,
+		BrierScore:           brierScore(req.PredictedProbability, settlementOutcome(verdict)),
+		ScopeID:              req.ScopeID,
+		MissionID:            req.MissionID,
 	})
 	return true, nil
 }
