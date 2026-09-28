@@ -16,7 +16,7 @@ import (
 // want, or fails the test — brain.WorldBeliefSubstrate.SetBelief is async
 // (it Submits an event for the next tick, node_belief.go), the same
 // Submit/tick pattern every other brain write in this package uses.
-func awaitBelief(t *testing.T, sub brain.BeliefSubstrate, ctx context.Context, ref brain.NodeRef, want float64) {
+func awaitBelief(ctx context.Context, t *testing.T, sub brain.BeliefSubstrate, ref brain.NodeRef, want float64) {
 	t.Helper()
 	deadline := time.Now().Add(2 * time.Second)
 	for time.Now().Before(deadline) {
@@ -54,8 +54,8 @@ func TestTenantRoutedBeliefSubstrate_RoutesEachCallByContextTenant(t *testing.T)
 		t.Fatalf("SetBelief globex: %v", err)
 	}
 
-	awaitBelief(t, sub, acmeCtx, ref, 0.9)
-	awaitBelief(t, sub, globexCtx, ref, 0.1)
+	awaitBelief(acmeCtx, t, sub, ref, 0.9)
+	awaitBelief(globexCtx, t, sub, ref, 0.1)
 }
 
 // TestTenantRoutedBeliefSubstrate_NoTenantInContext_Errors proves both

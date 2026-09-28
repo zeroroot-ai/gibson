@@ -5,6 +5,7 @@ package daemon
 
 import (
 	"context"
+	"fmt"
 
 	"google.golang.org/grpc/codes"
 	"google.golang.org/grpc/status"
@@ -53,7 +54,11 @@ func (s *tenantRoutedBeliefSubstrate) Belief(ctx context.Context, ref brain.Node
 	if err != nil {
 		return brain.NodeBelief{}, false, err
 	}
-	return sub.Belief(ctx, ref)
+	nb, ok, err := sub.Belief(ctx, ref)
+	if err != nil {
+		return brain.NodeBelief{}, false, fmt.Errorf("belief substrate: %w", err)
+	}
+	return nb, ok, nil
 }
 
 // SetBelief implements brain.BeliefSubstrate.
@@ -62,5 +67,8 @@ func (s *tenantRoutedBeliefSubstrate) SetBelief(ctx context.Context, ref brain.N
 	if err != nil {
 		return err
 	}
-	return sub.SetBelief(ctx, ref, nb)
+	if err := sub.SetBelief(ctx, ref, nb); err != nil {
+		return fmt.Errorf("belief substrate: %w", err)
+	}
+	return nil
 }
