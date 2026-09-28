@@ -300,7 +300,7 @@ func RestoreWorld(snap WorldSnapshot, tenant string) (*World, error) {
 	// seam). Order does not matter: identity is NodeRef, not a
 	// world-assigned counter, same as BetSettlements above.
 	for _, nb := range data.NodeBeliefs {
-		Reduce(w, NodeBeliefSet{Ref: nb.Ref, Belief: nb.Belief, EvidenceDigest: nb.EvidenceDigest})
+		Reduce(w, NodeBeliefSet(nb))
 	}
 
 	// Replay LLM calls.
