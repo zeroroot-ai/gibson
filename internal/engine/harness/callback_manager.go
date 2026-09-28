@@ -12,6 +12,7 @@ import (
 
 	"github.com/spiffe/go-spiffe/v2/spiffeid"
 	"github.com/spiffe/go-spiffe/v2/workloadapi"
+	"github.com/zeroroot-ai/gibson/internal/engine/brain"
 	"github.com/zeroroot-ai/gibson/internal/platform/authz"
 	"github.com/zeroroot-ai/gibson/internal/platform/component"
 	"github.com/zeroroot-ai/sdk/protoresolver"
@@ -533,9 +534,40 @@ func (m *CallbackManager) SetToolCallSink(sink ToolCallSink) {
 	if m.server != nil && m.server.service != nil {
 		m.server.service.mu.Lock()
 		defer m.server.service.mu.Unlock()
-		m.server.service.toolCallSink = sink
+		WithToolCallSink(sink)(m.server.service)
 		m.logger.Debug("set tool-call sink on callback service")
 	}
+}
+
+// SetBeliefSubstrate sets the belief substrate on the callback service,
+// wiring PlaceBet to persist staked bets (ADR-0022, ADR-0029 §3,
+// gibson#273/#278). Call after NewCallbackManager, before Start().
+// Thread-safe.
+func (m *CallbackManager) SetBeliefSubstrate(substrate brain.BeliefSubstrate) {
+	if m.server != nil && m.server.service != nil {
+		m.server.service.mu.Lock()
+		defer m.server.service.mu.Unlock()
+		WithBeliefSubstrate(substrate)(m.server.service)
+		m.logger.Debug("set belief substrate on callback service")
+	}
+}
+
+// BeliefSubstrate returns the belief substrate currently wired onto the
+// callback service (nil if none has been set) — the read half of
+// SetBeliefSubstrate. Lets a caller (or a test proving a wiring step reached
+// the manager, e.g. wirePlaceBetBeliefSubstrate in internal/server/daemon)
+// confirm the value without reaching into the unexported server/service
+// fields directly.
+//
+// Like every other request-path method on CallbackManager, this assumes the
+// manager was built through NewCallbackManager (ADR-0003: no graceful-nil in
+// request paths — the server/service are constructed eagerly there, and a
+// manager built any other way is a caller error, not a state to degrade
+// into).
+func (m *CallbackManager) BeliefSubstrate() brain.BeliefSubstrate {
+	m.server.service.mu.RLock()
+	defer m.server.service.mu.RUnlock()
+	return m.server.service.beliefSubstrate
 }
 
 // SetDiscoveryProcessor sets the DiscoveryProcessor on the callback service.

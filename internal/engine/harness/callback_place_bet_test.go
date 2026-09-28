@@ -46,6 +46,7 @@ type fakeBeliefSubstrate struct {
 	mu      sync.Mutex
 	beliefs map[brain.NodeRef]brain.NodeBelief
 	setErr  error
+	lastCtx context.Context //nolint:containedctx // captured only for test assertion, never used to make a call
 }
 
 func newFakeBeliefSubstrate() *fakeBeliefSubstrate {
@@ -59,12 +60,13 @@ func (f *fakeBeliefSubstrate) Belief(_ context.Context, ref brain.NodeRef) (brai
 	return nb, ok, nil
 }
 
-func (f *fakeBeliefSubstrate) SetBelief(_ context.Context, ref brain.NodeRef, nb brain.NodeBelief) error {
+func (f *fakeBeliefSubstrate) SetBelief(ctx context.Context, ref brain.NodeRef, nb brain.NodeBelief) error {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	f.lastCtx = ctx
 	if f.setErr != nil {
 		return f.setErr
 	}
-	f.mu.Lock()
-	defer f.mu.Unlock()
 	f.beliefs[ref] = nb
 	return nil
 }
@@ -129,6 +131,30 @@ func TestPlaceBet_Success(t *testing.T) {
 	require.NoError(t, berr)
 	require.True(t, ok)
 	assert.Equal(t, nb, nb2, "an identical bet must reproduce an identical belief write")
+}
+
+// TestPlaceBet_SubstrateContextCarriesTheValidatedTenant proves the ctx
+// PlaceBet passes to beliefSubstrate.SetBelief carries a tenant readable via
+// auth.TenantFromContext — the same mechanism world_service.go's engine(ctx)
+// uses. A daemon-supplied BeliefSubstrate is one field shared across every
+// tenant's PlaceBet calls, so it needs this to route a call to the right
+// tenant's own belief store. PlaceBet itself does no tenant derivation for
+// this: getHarness (called above) already required ctx to carry a tenant and
+// validated it equals the mission's own tenant, so the same ctx flows
+// through unchanged — this test pins that flow-through, not a new stamp.
+func TestPlaceBet_SubstrateContextCarriesTheValidatedTenant(t *testing.T) {
+	h := &placeBetMockHarness{missionID: "mission-A", tenantID: "acme"}
+	substrate := newFakeBeliefSubstrate()
+	svc := newPlaceBetService(t, h, "recon-agent", substrate)
+	ctx := auth.ContextWithTenantString(context.Background(), "acme")
+
+	_, err := svc.PlaceBet(ctx, placeBetRequest("mission-A", "recon-agent", "hyp-1", "recon-agent", 0.7, "T1190"))
+	require.NoError(t, err)
+
+	require.NotNil(t, substrate.lastCtx, "SetBelief must have been called")
+	got, ok := auth.TenantFromContext(substrate.lastCtx)
+	require.True(t, ok, "substrate ctx must carry a tenant")
+	assert.Equal(t, "acme", got.String())
 }
 
 // TestPlaceBet_TenantScopesTheClaimNode proves two tenants proposing a

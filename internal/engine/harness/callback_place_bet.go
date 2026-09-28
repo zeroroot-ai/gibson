@@ -88,6 +88,15 @@ func (s *HarnessCallbackService) PlaceBet(ctx context.Context, req *harnesspb.Pl
 	}
 	tenant := h.Mission().TenantID
 
+	// A daemon-supplied brain.BeliefSubstrate is shared across every
+	// tenant's PlaceBet calls (one field on HarnessCallbackService), so it
+	// must be able to route each call to the right tenant's own belief
+	// store. It does that the same way world_service.go's engine(ctx) does
+	// — reading the tenant from ctx via auth.TenantFromContext. ctx already
+	// carries it here: getHarness above already required and validated
+	// (auth.TenantStringFromContext(ctx) == harness.Mission().TenantID)
+	// before returning h, so it is redundant, not merely unnecessary, to
+	// re-derive or re-stamp tenant onto ctx from tenant/h.Mission() again.
 	ref := claimNodeRef(tenant, bet.GetHypothesisId())
 	nb := brain.NodeBelief{
 		Belief: brain.Belief{
