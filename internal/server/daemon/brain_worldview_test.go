@@ -328,3 +328,76 @@ func TestWorldViewSource_AllKindsSummaryAndFocus(t *testing.T) {
 		t.Errorf("focused finding description: %v", fByLabel["weak cred"].Attributes)
 	}
 }
+
+// seedWorldHypotheses waits for the World to fold at least wantHypotheses
+// hypotheses for scope, so the projection reads a settled World.
+func seedWorldHypotheses(t *testing.T, eng *brain.Engine, scope string, wantHypotheses int) {
+	t.Helper()
+	deadline := time.After(2 * time.Second)
+	for {
+		n := 0
+		for _, h := range eng.Hypotheses() {
+			if h.ScopeID == scope {
+				n++
+			}
+		}
+		if n >= wantHypotheses {
+			return
+		}
+		select {
+		case <-deadline:
+			t.Fatalf("world never folded %d hypotheses for scope %q (got %d)", wantHypotheses, scope, n)
+		case <-time.After(10 * time.Millisecond):
+		}
+	}
+}
+
+// TestWorldViewSource_ProjectsHypotheses proves a Hypothesis (ADR-0021) is
+// visible in the ambient projection alongside Evidence, scoped the same way,
+// and carries what another agent needs to test and bet on it: the claim (as
+// Label, so it reads directly in an LLM-facing projection), and the
+// hypothesis id, proposer and confidence as attributes. The SDK's
+// WorldEntityKind enum has no dedicated HYPOTHESIS value yet (v0.180.0), so
+// this projects as WORLD_ENTITY_KIND_UNSPECIFIED with an explicit "kind"
+// attribute until a future SDK release adds one — an interim, documented
+// shape, not a silently-wrong one.
+func TestWorldViewSource_ProjectsHypotheses(t *testing.T) {
+	src, reg := newWorldViewTestSource(t)
+	eng := reg.For("acme")
+	eng.Submit(brain.HypothesisObserved{
+		ScopeID: "scope-a", Proposer: "recon-agent", Confidence: 0.75,
+		Claim: "port 6443 is unauthenticated",
+	})
+	eng.Submit(brain.HypothesisObserved{ScopeID: "scope-b", Claim: "other scope's claim"})
+	seedWorldHypotheses(t, eng, "scope-a", 1)
+
+	res, err := src(context.Background(), harness.WorldViewQuery{Tenant: "acme", ScopeID: "scope-a", MissionID: "m-1"})
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	var found *harness.WorldEntityRecord
+	for i, e := range res.Entities {
+		if e.Label == "port 6443 is unauthenticated" {
+			found = &res.Entities[i]
+		}
+		if e.Label == "other scope's claim" {
+			t.Fatalf("scope-b's hypothesis must not appear in scope-a's slice: %+v", e)
+		}
+	}
+	if found == nil {
+		t.Fatalf("hypothesis not projected: %+v", res.Entities)
+	}
+	if found.Handle == "" {
+		t.Fatal("hypothesis must carry a handle like every other projected entity")
+	}
+	if found.Attributes["proposer"] != "recon-agent" {
+		t.Errorf("proposer attribute: got %q", found.Attributes["proposer"])
+	}
+	if found.Attributes["confidence"] != "0.75" {
+		t.Errorf("confidence attribute: got %q", found.Attributes["confidence"])
+	}
+	if found.Attributes["hypothesis_id"] == "" {
+		t.Error("hypothesis_id attribute must be set: an agent needs it to PlaceBet")
+	}
+}

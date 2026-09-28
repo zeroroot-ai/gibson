@@ -96,6 +96,9 @@ func init() {
 	// provenance.go
 	registerEvent("agent_run.observed", func() Event { return &AgentRunObserved{} })
 
+	// hypothesis.go
+	registerEvent("hypothesis.observed", func() Event { return &HypothesisObserved{} })
+
 	// llm_call.go
 	registerEvent("llm_call.observed", func() Event { return &LlmCallObserved{} })
 
@@ -199,6 +202,8 @@ func dereferenceEvent(ev Event) Event {
 	case *LabelApplied:
 		return *v
 	case *AgentRunObserved:
+		return *v
+	case *HypothesisObserved:
 		return *v
 	case *LlmCallObserved:
 		return *v

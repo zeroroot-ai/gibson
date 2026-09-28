@@ -150,6 +150,19 @@ func worldViewSource(reg *brain.Registry, minter *handleMinter) harness.WorldVie
 			emit(harnesspb.WorldEntityKind_WORLD_ENTITY_KIND_FINDING,
 				f.ID, f.Title, findingAttributes(f, full))
 		}
+		for _, h := range eng.Hypotheses() {
+			if h.ScopeID != q.ScopeID {
+				continue
+			}
+			// WorldEntityKind has no dedicated HYPOTHESIS value yet (SDK
+			// v0.180.0): a Hypothesis is a new provenance class (ADR-0021),
+			// not a new Evidence kind, and adding one is an SDK-side change
+			// out of this slice's control. UNSPECIFIED + an explicit "kind"
+			// attribute keeps a consuming agent from mistaking it for an
+			// unlabeled Evidence entity in the meantime.
+			emit(harnesspb.WorldEntityKind_WORLD_ENTITY_KIND_UNSPECIFIED,
+				strconv.FormatUint(h.ID, 10), h.Claim, hypothesisAttributes(h, full))
+		}
 
 		if full {
 			return focusSlice(all, focus)
@@ -290,6 +303,33 @@ func findingAttributes(f brain.FindingSnapshot, full bool) map[string]string {
 	}
 	if len(attrs) == 0 {
 		return nil
+	}
+	return attrs
+}
+
+// hypothesisAttributes projects a Hypothesis (ADR-0021, gibson#265). "kind"
+// stands in for the WorldEntityKind enum value the SDK does not have yet
+// (see the emit call site). hypothesis_id is the identifier a later PlaceBet
+// call names as bet.hypothesis_id — without it in the unfocused slice, an
+// agent could see a claim exists but have no way to stake on it.
+func hypothesisAttributes(h brain.HypothesisSnapshot, full bool) map[string]string {
+	attrs := map[string]string{
+		"kind":          "hypothesis",
+		"hypothesis_id": strconv.FormatUint(h.ID, 10),
+		"confidence":    strconv.FormatFloat(h.Confidence, 'f', -1, 64),
+	}
+	if h.Proposer != "" {
+		attrs["proposer"] = h.Proposer
+	}
+	if !full {
+		return attrs
+	}
+	if len(h.References) > 0 {
+		labels := make([]string, len(h.References))
+		for i, r := range h.References {
+			labels[i] = r.Label
+		}
+		attrs["references"] = strings.Join(labels, ",")
 	}
 	return attrs
 }

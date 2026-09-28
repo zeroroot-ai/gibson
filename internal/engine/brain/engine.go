@@ -451,6 +451,15 @@ func (e *Engine) AgentRuns() []AgentRunSnapshot {
 	return e.World.AgentRunSnapshot()
 }
 
+// Hypotheses returns the current hypothesis snapshots (ADR-0021, gibson#265)
+// in deterministic (scope, claim) order — the Hypothesis provenance class,
+// distinct from both Evidence and Belief.
+func (e *Engine) Hypotheses() []HypothesisSnapshot {
+	e.mu.RLock()
+	defer e.mu.RUnlock()
+	return e.World.HypothesisSnapshot()
+}
+
 // LlmCalls returns the mission's LLM-call provenance (gibson#755) in deterministic
 // order — the per-call model + token data the dashboard surfaces in place of the
 // retired Langfuse trace/cost views.

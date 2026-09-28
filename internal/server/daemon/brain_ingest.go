@@ -245,6 +245,30 @@ func ingestObservation(reg *brain.Registry) harness.ObservationSink {
 			reg.For(tenant).Submit(brain.SubdomainObserved{
 				ScopeID: scope, FQDN: s.Fqdn, Domain: s.Domain, Addresses: s.Addresses,
 			})
+		case *harnesspb.ObserveRequest_Hypothesis:
+			// An agent's proposed, unproven claim (ADR-0021, sdk#70). It folds
+			// as its own provenance class (hypothesis.go) — never as Evidence,
+			// never as a Belief — so it needs no Taxonomy admission the way an
+			// EntitySighting does: References are stored as reported, not
+			// resolved against the Taxonomy here (a later slice's job).
+			hyp := o.Hypothesis
+			refs := make([]brain.ReferencedEntityRef, 0, len(hyp.GetReferences()))
+			for _, r := range hyp.GetReferences() {
+				if r == nil {
+					continue
+				}
+				refs = append(refs, brain.ReferencedEntityRef{
+					Label: r.GetLabel(), IDProperties: r.GetIdProperties(),
+				})
+			}
+			reg.For(tenant).Submit(brain.HypothesisObserved{
+				MissionID:  missionID,
+				ScopeID:    scope,
+				Proposer:   hyp.GetProposer(),
+				Confidence: hyp.GetConfidence(),
+				Claim:      hyp.GetClaim(),
+				References: refs,
+			})
 		case *harnesspb.ObserveRequest_LifecycleEntity:
 			// A typed application-lifecycle entity an agent reported (sdk#537).
 			// It translates through the SAME mapping a tool's CustomNode uses,
