@@ -94,6 +94,12 @@ type World struct {
 	// both, never derived from or into either.
 	hypotheses *ecs.Map1[Hypothesis]
 
+	// betSettlements holds proof-of-demonstration verdicts (ADR-0027,
+	// gibson#278), keyed by HypothesisID — the same externally-given-string
+	// identity AgentRun uses for RunID, never a derived counter. See
+	// bet_settlement.go.
+	betSettlements *ecs.Map1[BetSettlement]
+
 	// next*ID are monotonic, replay-deterministic counters for assigning stable
 	// ids (incremented in the single-writer reducer, so replay reproduces ids).
 	// Counters are per-entity-type; ids are unique within a (label) namespace,
@@ -174,6 +180,7 @@ func NewWorld(tenant string) *World {
 		observations:   ecs.NewMap1[Observation](w),
 		entities:       ecs.NewMap1[Entity](w),
 		hypotheses:     ecs.NewMap1[Hypothesis](w),
+		betSettlements: ecs.NewMap1[BetSettlement](w),
 	}
 }
 
@@ -361,6 +368,8 @@ func Reduce(w *World, ev Event) {
 		applyAgentRunObserved(w, e)
 	case HypothesisObserved:
 		applyHypothesisObserved(w, e)
+	case BetSettledTrue:
+		applyBetSettledTrue(w, e)
 	case LlmCallObserved:
 		applyLlmCallObserved(w, e)
 	case AgentToolCallObserved:

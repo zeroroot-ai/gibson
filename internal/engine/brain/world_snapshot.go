@@ -32,6 +32,10 @@ type worldSnapshotData struct {
 	// Evidence store and from Belief — the three provenance classes stay
 	// distinct across a snapshot round trip too.
 	Hypotheses []HypothesisSnapshot `json:"hypotheses"`
+	// BetSettlements is the proof-of-demonstration outcome store (ADR-0027,
+	// gibson#278). Snapshotted like AgentRuns — an externally-keyed record
+	// with no monotonic id counter of its own.
+	BetSettlements []BetSettlementSnapshot `json:"bet_settlements"`
 	// AgentToolCalls + FlightRecorderPolicy: the flight recorder's captured
 	// tool I/O and the tenant's retention/redaction policy (ADR-0020,
 	// gibson#271). The policy must be snapshotted too, or a tenant's
@@ -55,21 +59,22 @@ type worldSnapshotData struct {
 // atSeq is the Timeline sequence ID of the last event folded into the snapshot.
 func SnapshotWorld(w *World, atSeq string) WorldSnapshot {
 	data := worldSnapshotData{
-		Hosts:        w.Snapshot(),
-		Missions:     w.MissionSnapshot(),
-		Work:         w.WorkSnapshot(),
-		Findings:     w.FindingSnapshot(),
-		Labels:       w.LabelSnapshot(),
-		Domains:      w.DomainSnapshot(),
-		Subdomains:   w.SubdomainSnapshot(),
-		Credentials:  w.CredentialSnapshot(),
-		Accounts:     w.AccountSnapshot(),
-		AgentRuns:    w.AgentRunSnapshot(),
-		LlmCalls:     w.LlmCallSnapshot(),
-		Decisions:    w.DecisionSnapshot(),
-		Observations: w.ObservationSnapshot(),
-		Entities:     w.EntitySnapshot(),
-		Hypotheses:   w.HypothesisSnapshot(),
+		Hosts:          w.Snapshot(),
+		Missions:       w.MissionSnapshot(),
+		Work:           w.WorkSnapshot(),
+		Findings:       w.FindingSnapshot(),
+		Labels:         w.LabelSnapshot(),
+		Domains:        w.DomainSnapshot(),
+		Subdomains:     w.SubdomainSnapshot(),
+		Credentials:    w.CredentialSnapshot(),
+		Accounts:       w.AccountSnapshot(),
+		AgentRuns:      w.AgentRunSnapshot(),
+		LlmCalls:       w.LlmCallSnapshot(),
+		Decisions:      w.DecisionSnapshot(),
+		Observations:   w.ObservationSnapshot(),
+		Entities:       w.EntitySnapshot(),
+		Hypotheses:     w.HypothesisSnapshot(),
+		BetSettlements: w.BetSettlementSnapshot(),
 
 		AgentToolCalls:       w.AgentToolCallSnapshot(),
 		FlightRecorderPolicy: w.flightRecorderPolicy,
@@ -243,6 +248,20 @@ func RestoreWorld(snap WorldSnapshot, tenant string) (*World, error) {
 			ParentRunID: r.ParentRunID,
 			AgentName:   r.AgentName,
 			ScopeID:     r.ScopeID,
+		})
+	}
+
+	// Replay bet settlements (ADR-0027, gibson#278). Order does not matter:
+	// identity is HypothesisID, not a world-assigned counter, so there is no
+	// id-renumbering hazard the way there is for observations/entities.
+	for _, s := range data.BetSettlements {
+		Reduce(w, BetSettledTrue{
+			HypothesisID:   s.HypothesisID,
+			Technique:      s.Technique,
+			PredicateType:  s.PredicateType,
+			EvidenceDigest: s.EvidenceDigest,
+			ScopeID:        s.ScopeID,
+			MissionID:      s.MissionID,
 		})
 	}
 
