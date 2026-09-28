@@ -387,3 +387,34 @@ func TestReasoner_ConcurrentReadsDuringRebuild(t *testing.T) {
 		}
 	}
 }
+
+// -----------------------------------------------------------------------
+// Extensions
+// -----------------------------------------------------------------------
+
+func TestReasoner_Extensions_ReturnsRegisteredContent(t *testing.T) {
+	r := newTestReasoner(t)
+
+	exts := r.Extensions()
+	require.Contains(t, exts, "core")
+	assert.Equal(t, coreExt.Hierarchies, exts["core"].Hierarchies)
+}
+
+func TestReasoner_Extensions_ReturnedMapIsADefensiveCopy(t *testing.T) {
+	r := newTestReasoner(t)
+
+	exts := r.Extensions()
+	core := exts["core"]
+	core.Hierarchies[0].Label = "mutated"
+	exts["injected"] = sdkgraphrag.OntologyExtension{}
+
+	fresh := r.Extensions()
+	require.Contains(t, fresh, "core")
+	assert.NotContains(t, fresh, "injected")
+	assert.Equal(t, coreExt.Hierarchies[0].Label, fresh["core"].Hierarchies[0].Label)
+}
+
+func TestReasoner_Extensions_EmptyWhenNoneRegistered(t *testing.T) {
+	r := NewReasoner(NewMetrics())
+	assert.Empty(t, r.Extensions())
+}
