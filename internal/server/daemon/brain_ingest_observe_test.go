@@ -211,7 +211,7 @@ func TestIngestObservation_Hypothesis(t *testing.T) {
 		&harnesspb.ReferencedEntity{Label: "Host", IdProperties: map[string]string{"address": "10.0.0.1"}},
 	)
 	if err := sink(ctx, harness.ObservationAttribution{
-		Tenant: "acme", ScopeID: "target-net-a", MissionID: "mission-A",
+		Tenant: "acme", ScopeID: "target-net-a", MissionID: "mission-A", RunID: "run-A",
 	}, req); err != nil {
 		t.Fatalf("sink: %v", err)
 	}
@@ -229,6 +229,13 @@ func TestIngestObservation_Hypothesis(t *testing.T) {
 	}
 	if h.ScopeID != "target-net-a" || h.MissionID != "mission-A" {
 		t.Fatalf("attribution lost in translation: %+v", h)
+	}
+	// RunID is server-resolved off ObservationAttribution (gibson#339's
+	// transcript-linking need), the same way MissionID is — not yet reachable
+	// from the wire request itself (HypothesisID/Technique are: see the
+	// comment in brain_ingest.go on why those two are not wired here yet).
+	if h.RunID != "run-A" {
+		t.Fatalf("run id lost in translation: %+v", h)
 	}
 	if len(h.References) != 1 || h.References[0].Label != "Host" || h.References[0].IDProperties["address"] != "10.0.0.1" {
 		t.Fatalf("references lost in translation: %+v", h)

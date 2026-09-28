@@ -387,19 +387,22 @@ func RestoreWorld(snap WorldSnapshot, tenant string) (*World, error) {
 	w.nextEntityID = data.NextEntityID
 
 	// Replay hypotheses in id order for the same reason as entities and
-	// observations: the world id is the identifier a later PlaceBet call
-	// names, so the order must not renumber it.
+	// observations: the world id rides along to the graph projection, so the
+	// order must not renumber it. HypothesisID (the agent-chosen join key,
+	// gibson#339) is a separate field and replays unaffected by this order.
 	sort.Slice(data.Hypotheses, func(i, j int) bool {
 		return data.Hypotheses[i].ID < data.Hypotheses[j].ID
 	})
 	for _, h := range data.Hypotheses {
 		Reduce(w, HypothesisObserved{
-			MissionID:  h.MissionID,
-			ScopeID:    h.ScopeID,
-			Proposer:   h.Proposer,
-			Confidence: h.Confidence,
-			Claim:      h.Claim,
-			References: h.References,
+			MissionID:    h.MissionID,
+			RunID:        h.RunID,
+			ScopeID:      h.ScopeID,
+			Proposer:     h.Proposer,
+			Confidence:   h.Confidence,
+			Claim:        h.Claim,
+			HypothesisID: h.HypothesisID,
+			References:   h.References,
 		})
 	}
 	w.nextHypothesisID = data.NextHypothesisID

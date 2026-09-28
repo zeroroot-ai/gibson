@@ -350,6 +350,14 @@ type ObservationAttribution struct {
 	// "a user was present" — agents outlive the session — but "every write is
 	// attributable to a mission a user launched".
 	MissionID string
+
+	// RunID is the mission run the write is attributable to (gibson#339's
+	// transcript-linking need), server-resolved off the mission record the
+	// same way MissionID is — never read from the request payload, which is
+	// client-supplied and unattributed. Empty when the mission record has no
+	// run recorded yet, the same "no signal yet" reading Host.MissionID's
+	// absence already gets.
+	RunID string
 }
 
 // ObservationSink consumes a typed observation emitted by an agent (ADR-0007).
@@ -3026,6 +3034,7 @@ func observationAttribution(h AgentHarness) (ObservationAttribution, error) {
 		Tenant:    mission.TenantID,
 		ScopeID:   scope,
 		MissionID: mission.ID.String(),
+		RunID:     mission.MissionRunID,
 	}, nil
 }
 
