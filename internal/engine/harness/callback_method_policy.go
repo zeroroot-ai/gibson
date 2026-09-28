@@ -167,6 +167,9 @@ var callbackMethodPolicy = map[string]callbackMethodDecision{
 	harnesspb.HarnessCallbackService_SubmitFinding_FullMethodName: {agentSurface: true, reason: reasonAgentCallbackSurface},
 	harnesspb.HarnessCallbackService_Observe_FullMethodName:       {agentSurface: true, reason: reasonAgentCallbackSurface},
 
+	// --- Betting (ADR-0022, gibson#278) ---
+	harnesspb.HarnessCallbackService_PlaceBet_FullMethodName: {agentSurface: true, reason: reasonAgentCallbackSurface},
+
 	// --- Taxonomy / validation ---
 	harnesspb.HarnessCallbackService_GetTaxonomySchema_FullMethodName:    {agentSurface: true, reason: reasonAgentCallbackSurface},
 	harnesspb.HarnessCallbackService_GenerateNodeID_FullMethodName:       {agentSurface: true, reason: reasonAgentCallbackSurface},
