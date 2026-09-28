@@ -50,6 +50,33 @@ Response:
 `GET /healthz` → `200 ok` once a model is loaded.
 `GET /version` → `{"versions": ["base-v1", ...], "default": "base-v1"}`.
 
+## Ground-slice inference (ADR-0029 §5/§6, gibson#288)
+
+`noisy_or.py` and `ground.py` are the multi-node counterpart to the
+single-host model above: given a bounded slice (gibson#287 — a set of nodes,
+each with its own declared belief variables, plus the enablement edges wiring
+one node's variable into another's), `ground.solve_slice` grounds it into one
+factor set and returns exact posteriors for every `(node, variable)` pair.
+
+A node with many enablement-edge parents would otherwise need a CPT with
+`2**N` columns. `noisy_or.noisy_or_factors` builds the same conditional
+distribution as an `O(N)` DECOMPOSITION of small factors instead (the standard
+"parent divorcing" construction: one mechanism variable per cause, one leak
+variable, and a chain of pairwise OR gates) — an exact reformulation, not an
+approximation, proven by parity against the brute-force full table for small
+`N` in `test_noisy_or.py`. `ground.py` treats an intra-node dependency (e.g.
+Host's `reachable -> exploitable -> juicy` funnel) and a cross-node
+enablement cause identically: both are just independent noisy-OR causes of
+the variable they feed, so one mechanism covers what used to be a
+node-specific hardcoded CPT and what ADR-0029 newly adds.
+
+This is not yet wired into the `/score` wire protocol or the Go daemon's
+`PgmpyBeliefProvider` — that integration is the belief engine proper
+(gibson#275), which will decide the actual request/response shape once it
+consumes `internal/engine/brain`'s `AttackGraph` (gibson#286) and
+`ExtractBoundedSlice` (gibson#287) output. This is the solving capability
+those pieces will call into.
+
 ## Model artifact format
 
 A model is a JSON file under `models/<version>.json` declaring a discrete
