@@ -63,6 +63,7 @@ type VoIPlanRequested struct {
 	Cursor    int
 }
 
+// Kind identifies the voi.plan.requested brain event.
 func (VoIPlanRequested) Kind() string { return "voi.plan.requested" }
 
 // VoIPlanned records a completed VoI planning round: the ranked, top-k
@@ -76,6 +77,7 @@ type VoIPlanned struct {
 	Candidates []VoICandidate
 }
 
+// Kind identifies the voi.plan.completed brain event.
 func (VoIPlanned) Kind() string { return "voi.plan.completed" }
 
 // findVoIPlanState returns the mission's VoIPlanState entity, if one has been
@@ -274,7 +276,12 @@ func WireVoIPlanner(
 		for {
 			select {
 			case <-ctx.Done():
-				worker.Drain(context.Background())
+				// context.WithoutCancel: this final drain must still run after
+				// ctx is done (the same shutdown-drain the caller asked for),
+				// but it must not inherit ctx's own already-fired
+				// cancellation, or the drain's own substrate/PlanVoI calls
+				// would fail immediately on ctx.Err() (contextcheck).
+				worker.Drain(context.WithoutCancel(ctx))
 				return
 			case <-t.C:
 				worker.Drain(ctx)
