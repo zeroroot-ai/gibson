@@ -46,6 +46,12 @@ type worldSnapshotData struct {
 	// BetSettlements — an externally-keyed record with no monotonic id
 	// counter of its own.
 	DestructiveActions []DestructiveActionSnapshot `json:"destructive_actions"`
+	// VoIPlans is the per-mission VoI planning state (ADR-0026, gibson#283),
+	// pending and completed alike. Snapshotted like BetSettlements — an
+	// externally-keyed (MissionID) record with no monotonic id counter of
+	// its own. Missing this field silently dropped in-flight VoI planning
+	// state across a snapshot-and-trim cycle (gibson#341).
+	VoIPlans []VoIPlanSnapshot `json:"voi_plans"`
 	// AgentToolCalls + FlightRecorderPolicy: the flight recorder's captured
 	// tool I/O and the tenant's retention/redaction policy (ADR-0020,
 	// gibson#271). The policy must be snapshotted too, or a tenant's
@@ -87,6 +93,7 @@ func SnapshotWorld(w *World, atSeq string) WorldSnapshot {
 		BetSettlements:     w.BetSettlementSnapshot(),
 		NodeBeliefs:        w.NodeBeliefSnapshot(),
 		DestructiveActions: w.DestructiveActionSnapshot(),
+		VoIPlans:           w.VoIPlanSnapshot(),
 
 		AgentToolCalls:       w.AgentToolCallSnapshot(),
 		FlightRecorderPolicy: w.flightRecorderPolicy,
@@ -337,6 +344,22 @@ func RestoreWorld(snap WorldSnapshot, tenant string) (*World, error) {
 				Approved:        a.Approved,
 				UserID:          a.UserID,
 				DecidedAtUnixMS: a.DecidedAtUnixMS,
+			})
+		}
+	}
+
+	// Replay VoI plan state (ADR-0026, gibson#283/#341): always replay the
+	// request first, then the completed round if one landed —
+	// applyVoIPlanned's defensive branch would otherwise create a second,
+	// duplicate entity when findVoIPlanState's lookup runs before the
+	// request has been replayed.
+	for _, p := range data.VoIPlans {
+		Reduce(w, VoIPlanRequested{MissionID: p.MissionID, Cursor: p.Cursor})
+		if !p.InFlight {
+			Reduce(w, VoIPlanned{
+				MissionID:  p.MissionID,
+				Cursor:     p.Cursor,
+				Candidates: p.Candidates,
 			})
 		}
 	}

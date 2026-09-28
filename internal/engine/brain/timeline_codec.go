@@ -111,6 +111,10 @@ func init() {
 	registerEvent("destructive_action.requested", func() Event { return &DestructiveActionRequested{} })
 	registerEvent("destructive_action.decided", func() Event { return &DestructiveActionDecided{} })
 
+	// voi_planner.go
+	registerEvent("voi.plan.requested", func() Event { return &VoIPlanRequested{} })
+	registerEvent("voi.plan.completed", func() Event { return &VoIPlanned{} })
+
 	// llm_call.go
 	registerEvent("llm_call.observed", func() Event { return &LlmCallObserved{} })
 
@@ -228,6 +232,10 @@ func dereferenceEvent(ev Event) Event {
 	case *DestructiveActionRequested:
 		return *v
 	case *DestructiveActionDecided:
+		return *v
+	case *VoIPlanRequested:
+		return *v
+	case *VoIPlanned:
 		return *v
 	case *LlmCallObserved:
 		return *v
