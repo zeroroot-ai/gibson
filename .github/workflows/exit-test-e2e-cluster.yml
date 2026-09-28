@@ -297,7 +297,7 @@ jobs:
           GIBSON_TEST_FIXTURES_ENABLED: "true"
         run: |
           set +e
-          CGO_ENABLED=0 go test -tags=e2e -run 'TestMissionFindingPerTenant_E2E$' -v -timeout 10m ./tests/e2e/ \
+          CGO_ENABLED=0 go test -count=1 -tags=e2e -run 'TestMissionFindingPerTenant_E2E$' -v -timeout 10m ./tests/e2e/ \
             2>&1 | tee "$E2E_OUT/mission_finding_per_tenant.log"
           rc=${PIPESTATUS[0]}
           .github/scripts/e2e-suite-verdict.sh mission_finding_per_tenant "$E2E_OUT/mission_finding_per_tenant.log" "$rc" "$RESULTS"
@@ -334,7 +334,7 @@ jobs:
           fi
           export GIBSON_E2E_TENANT_ID="$TENANT"
           sleep 5
-          CGO_ENABLED=0 go test -tags=e2e -run 'TestAuditV4Foundation$' -v -timeout 10m ./tests/e2e/ \
+          CGO_ENABLED=0 go test -count=1 -tags=e2e -run 'TestAuditV4Foundation$' -v -timeout 10m ./tests/e2e/ \
             2>&1 | tee "$E2E_OUT/audit_v4.log"
           rc=${PIPESTATUS[0]}
           # shellcheck disable=SC2086
