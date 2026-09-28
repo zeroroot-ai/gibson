@@ -372,6 +372,8 @@ func Reduce(w *World, ev Event) {
 		applyBetSettledTrue(w, e)
 	case BetSettledFalse:
 		applyBetSettledFalse(w, e)
+	case BetSettledByHITL:
+		applyBetSettledByHITL(w, e)
 	case LlmCallObserved:
 		applyLlmCallObserved(w, e)
 	case AgentToolCallObserved:

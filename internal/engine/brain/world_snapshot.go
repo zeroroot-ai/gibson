@@ -251,15 +251,17 @@ func RestoreWorld(snap WorldSnapshot, tenant string) (*World, error) {
 		})
 	}
 
-	// Replay bet settlements (ADR-0027/0023, gibson#278/#279). Order does not
-	// matter: identity is HypothesisID, not a world-assigned counter, so
-	// there is no id-renumbering hazard the way there is for
-	// observations/entities. Dispatch on the recorded verdict: replaying
-	// every snapshot row as BetSettledTrue would silently turn a recorded
-	// FALSE (bounded-exhaustion) verdict back into a TRUE one.
+	// Replay bet settlements (ADR-0027/0023, gibson#278/#279/#280). Order
+	// does not matter: identity is HypothesisID, not a world-assigned
+	// counter, so there is no id-renumbering hazard the way there is for
+	// observations/entities. Dispatch on the recorded Method, not Verdict:
+	// Method alone determines which event type reproduces the fact exactly
+	// (a HITL settlement can carry either verdict, so switching on Verdict
+	// alone could replay a HITL FALSE as a bounded-exhaustion FALSE with no
+	// budget/reason recorded).
 	for _, s := range data.BetSettlements {
-		switch s.Verdict {
-		case SettlementVerdictTrue:
+		switch s.Method {
+		case SettlementMethodPredicate:
 			Reduce(w, BetSettledTrue{
 				HypothesisID:   s.HypothesisID,
 				Technique:      s.Technique,
@@ -268,7 +270,7 @@ func RestoreWorld(snap WorldSnapshot, tenant string) (*World, error) {
 				ScopeID:        s.ScopeID,
 				MissionID:      s.MissionID,
 			})
-		case SettlementVerdictFalse:
+		case SettlementMethodExhaustion:
 			Reduce(w, BetSettledFalse{
 				HypothesisID:  s.HypothesisID,
 				AttemptBudget: s.AttemptBudget,
@@ -276,6 +278,14 @@ func RestoreWorld(snap WorldSnapshot, tenant string) (*World, error) {
 				Reason:        s.Reason,
 				ScopeID:       s.ScopeID,
 				MissionID:     s.MissionID,
+			})
+		case SettlementMethodHITL:
+			Reduce(w, BetSettledByHITL{
+				HypothesisID: s.HypothesisID,
+				Verdict:      s.Verdict,
+				UserID:       s.UserID,
+				ScopeID:      s.ScopeID,
+				MissionID:    s.MissionID,
 			})
 		}
 	}

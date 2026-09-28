@@ -102,6 +102,7 @@ func init() {
 	// bet_settlement.go
 	registerEvent("bet.settled_true", func() Event { return &BetSettledTrue{} })
 	registerEvent("bet.settled_false", func() Event { return &BetSettledFalse{} })
+	registerEvent("bet.settled_by_hitl", func() Event { return &BetSettledByHITL{} })
 
 	// llm_call.go
 	registerEvent("llm_call.observed", func() Event { return &LlmCallObserved{} })
@@ -212,6 +213,8 @@ func dereferenceEvent(ev Event) Event {
 	case *BetSettledTrue:
 		return *v
 	case *BetSettledFalse:
+		return *v
+	case *BetSettledByHITL:
 		return *v
 	case *LlmCallObserved:
 		return *v

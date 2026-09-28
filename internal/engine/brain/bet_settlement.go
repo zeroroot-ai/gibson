@@ -36,9 +36,16 @@ package brain
 // type, and both are terminal by the same rule: whichever settlement lands
 // first for a HypothesisID wins.
 //
-// gibson#280 (async HITL verdict) is a separate, later slice that will add
-// a third sibling event type (e.g. BetSettledByHITL) folding into the same
-// component.
+// gibson#280 adds the third settlement path: an async human verdict
+// (ADR-0023 decision 3, ADR-0006). It never blocks a mission (ADR-0008) —
+// the bet stays OPEN until the verdict arrives out of band — and it is the
+// SAME label channel braintrain and the review-and-label UI already
+// consume (label.go): settling a bet by HITL also applies the ordinary
+// Label the offline trainer reads, so a bet's HITL settlement and a
+// Finding's HITL label are one system, not two. All three paths
+// (predicate, exhaustion, HITL) share the one BetSettlement component and
+// SettlementVerdict type, and all three are mutually terminal: whichever
+// settlement lands first for a HypothesisID wins, regardless of method.
 
 import (
 	"context"
@@ -69,6 +76,29 @@ const (
 	SettlementVerdictFalse SettlementVerdict = "false"
 )
 
+// SettlementMethod names how a bet's verdict was reached (gibson#280):
+// demonstrated proof, bounded exhaustion, or an async human verdict. The
+// outcome (SettlementVerdict) and the method that reached it are
+// independent — a human can confirm either a TRUE or a FALSE verdict, while
+// the other two methods each only ever produce one specific verdict.
+// Recording the method keeps every settlement auditable (this is what
+// settled it, not merely what the outcome was) without a later reader
+// having to re-derive the distinction from which other fields happen to be
+// empty.
+type SettlementMethod string
+
+const (
+	// SettlementMethodPredicate is proof-of-demonstration (ADR-0027,
+	// gibson#278): a typed predicate fired against recorded evidence.
+	SettlementMethodPredicate SettlementMethod = "predicate"
+	// SettlementMethodExhaustion is bounded-exhaustion (ADR-0023,
+	// gibson#279): the declared attempt budget ran out with no proof.
+	SettlementMethodExhaustion SettlementMethod = "exhaustion"
+	// SettlementMethodHITL is an async human verdict (ADR-0023 decision 3,
+	// ADR-0006, gibson#280).
+	SettlementMethodHITL SettlementMethod = "hitl"
+)
+
 // BetSettlement records how a bet on a hypothesis resolved. Identity is
 // HypothesisID, matching Bet.HypothesisId (callback_place_bet.go) — the same
 // externally-given-string-key pattern AgentRun uses for RunID, so settlement
@@ -76,27 +106,37 @@ const (
 type BetSettlement struct {
 	HypothesisID string
 	Verdict      SettlementVerdict
+	// Method records which of the three settlement paths reached Verdict
+	// (gibson#280). See SettlementMethod.
+	Method SettlementMethod
 	// Technique and PredicateType name which predicate type (from the
 	// technique's Domain Pack, internal/engine/settlement) fired, so the
 	// verdict is auditable: this is what settled it, and it can be
-	// re-evaluated against the same recorded evidence to confirm.
+	// re-evaluated against the same recorded evidence to confirm. Set only
+	// for SettlementMethodPredicate (gibson#278).
 	Technique     string
 	PredicateType string
 	// EvidenceDigest fingerprints the captured evidence the predicate was
 	// evaluated against — the link between the proof and the settled bet
 	// (gibson#278's "the proof is evidence on the graph and links to the
-	// settled bet" acceptance criterion). Set only for SettlementVerdictTrue.
+	// settled bet" acceptance criterion). Set only for
+	// SettlementMethodPredicate.
 	EvidenceDigest string
 	// AttemptBudget and AttemptsMade record the bet's declared maximum
 	// number of demonstration attempts and how many were actually made
-	// before settlement. Set only for SettlementVerdictFalse (gibson#279).
+	// before settlement. Set only for SettlementMethodExhaustion
+	// (gibson#279).
 	AttemptBudget int
 	AttemptsMade  int
 	// Reason is a short, human-readable explanation of why the bet settled
 	// FALSE (e.g. "sandbox demonstration attempted 3/3 times with no
-	// predicate match"). Set only for SettlementVerdictFalse: a FALSE
+	// predicate match"). Set only for SettlementMethodExhaustion: a FALSE
 	// verdict must record why, never settle in silence.
-	Reason    string
+	Reason string
+	// UserID identifies the human who applied a HITL verdict — provenance
+	// only (ADR-0006 §6: labels pool tenant-wide regardless of who applied
+	// them). Set only for SettlementMethodHITL (gibson#280).
+	UserID    string
 	ScopeID   string
 	MissionID string
 }
@@ -143,6 +183,7 @@ func applyBetSettledTrue(w *World, e BetSettledTrue) {
 	w.betSettlements.NewEntity(&BetSettlement{
 		HypothesisID:   e.HypothesisID,
 		Verdict:        SettlementVerdictTrue,
+		Method:         SettlementMethodPredicate,
 		Technique:      e.Technique,
 		PredicateType:  e.PredicateType,
 		EvidenceDigest: e.EvidenceDigest,
@@ -190,6 +231,7 @@ func applyBetSettledFalse(w *World, e BetSettledFalse) {
 	w.betSettlements.NewEntity(&BetSettlement{
 		HypothesisID:  e.HypothesisID,
 		Verdict:       SettlementVerdictFalse,
+		Method:        SettlementMethodExhaustion,
 		AttemptBudget: e.AttemptBudget,
 		AttemptsMade:  e.AttemptsMade,
 		Reason:        e.Reason,
@@ -198,16 +240,69 @@ func applyBetSettledFalse(w *World, e BetSettledFalse) {
 	})
 }
 
+// BetSettledByHITL records a human's asynchronous verdict settling a bet
+// where objective proof was not possible (ADR-0023 decision 3, ADR-0006).
+// It never blocks a mission (ADR-0008): the bet stays OPEN until the
+// verdict arrives out of band, and settling it applies the ordinary Label
+// the review-and-label UI and braintrain already consume (label.go) via
+// Engine.SettleBetByHITL — a bet's HITL settlement and a Finding's HITL
+// label are one system, not two. Verdict here is already translated from
+// the reviewer's LabelVerdict (true_positive -> SettlementVerdictTrue,
+// false_positive -> SettlementVerdictFalse) by SettleBetByHITL before this
+// event is submitted; Reduce never re-derives it, the same "evaluate once,
+// fold the fact" rule every settlement event in this file follows.
+type BetSettledByHITL struct {
+	HypothesisID string
+	Verdict      SettlementVerdict
+	UserID       string
+	ScopeID      string
+	MissionID    string
+}
+
+// Kind identifies the bet.settled_by_hitl brain event.
+func (BetSettledByHITL) Kind() string { return "bet.settled_by_hitl" }
+
+// applyBetSettledByHITL folds a BetSettledByHITL event into the World.
+// Settlement is terminal, and the rule is shared with the other two
+// settlement paths: whichever settlement lands first for a HypothesisID
+// wins, regardless of method or verdict.
+func applyBetSettledByHITL(w *World, e BetSettledByHITL) {
+	if e.HypothesisID == "" {
+		return
+	}
+
+	q := ecs.NewFilter1[BetSettlement](w.ecs).Query()
+	for q.Next() {
+		s := q.Get()
+		if s.HypothesisID == e.HypothesisID {
+			q.Close()
+			return
+		}
+	}
+	// Query exhausted → world unlocked.
+
+	w.betSettlements.NewEntity(&BetSettlement{
+		HypothesisID: e.HypothesisID,
+		Verdict:      e.Verdict,
+		Method:       SettlementMethodHITL,
+		UserID:       e.UserID,
+		ScopeID:      e.ScopeID,
+		MissionID:    e.MissionID,
+	})
+}
+
 // BetSettlementSnapshot is a stable, comparable view of a BetSettlement.
 type BetSettlementSnapshot struct {
 	HypothesisID   string
 	Verdict        SettlementVerdict
+	Method         SettlementMethod
 	Technique      string
 	PredicateType  string
 	EvidenceDigest string
 	AttemptBudget  int
 	AttemptsMade   int
 	Reason         string
+	UserID         string
 	ScopeID        string
 	MissionID      string
 }
@@ -222,12 +317,14 @@ func (w *World) BetSettlementSnapshot() []BetSettlementSnapshot {
 		out = append(out, BetSettlementSnapshot{
 			HypothesisID:   s.HypothesisID,
 			Verdict:        s.Verdict,
+			Method:         s.Method,
 			Technique:      s.Technique,
 			PredicateType:  s.PredicateType,
 			EvidenceDigest: s.EvidenceDigest,
 			AttemptBudget:  s.AttemptBudget,
 			AttemptsMade:   s.AttemptsMade,
 			Reason:         s.Reason,
+			UserID:         s.UserID,
 			ScopeID:        s.ScopeID,
 			MissionID:      s.MissionID,
 		})
@@ -423,6 +520,109 @@ func (e *Engine) SettleBetFalse(_ context.Context, req BetExhaustionRequest) (bo
 		Reason:        req.Reason,
 		ScopeID:       req.ScopeID,
 		MissionID:     req.MissionID,
+	})
+	return true, nil
+}
+
+// BetHITLRequest carries a human's asynchronous verdict on a bet (ADR-0023
+// decision 3, ADR-0006) — the backend the dashboard's HITL settlement
+// surface (dashboard#97) calls into.
+type BetHITLRequest struct {
+	// HypothesisID names the bet being settled — the same identifier
+	// PlaceBet's Bet.HypothesisId carries.
+	HypothesisID string
+	ScopeID      string
+	MissionID    string
+	// Verdict must be VerdictTruePositive or VerdictFalsePositive
+	// (label.go) — the same vocabulary the review-and-label system already
+	// uses. VerdictDismiss and any other value are refused: a bet's binary
+	// settlement has no "not actionable" outcome the way a surfaced
+	// surprise does.
+	Verdict LabelVerdict
+	// UserID identifies the reviewer. Required: every settlement must be
+	// attributable to who decided it, the same ADR-0006 §6 provenance rule
+	// Label.UserID follows (labels pool tenant-wide regardless of which
+	// user applied them; UserID is provenance, never a partition key).
+	UserID string
+}
+
+// hitlSettlementVerdict translates a reviewer's LabelVerdict into the
+// settlement outcome it decides. Only the two verdicts a bet's binary
+// settlement understands map to one; anything else (including
+// VerdictDismiss) is not a settlement decision.
+func hitlSettlementVerdict(v LabelVerdict) (SettlementVerdict, bool) {
+	switch v {
+	case VerdictTruePositive:
+		return SettlementVerdictTrue, true
+	case VerdictFalsePositive:
+		return SettlementVerdictFalse, true
+	case VerdictDismiss:
+		// Not actionable / noise has no settlement meaning for a bet's
+		// binary outcome — only a real Finding/surprise can be dismissed.
+		return "", false
+	default:
+		return "", false
+	}
+}
+
+// betLabelTargetID returns the Label TargetID a bet's hypothesis is
+// labelled under. Prefixed so it can never collide with a Finding id or a
+// surprise-host id sharing the same Label namespace (label.go) — the same
+// disambiguation surpriseReviewID uses for a surprised host.
+func betLabelTargetID(hypothesisID string) string {
+	return "bet-" + hypothesisID
+}
+
+// SettleBetByHITL settles the named bet from a human's asynchronous
+// true_positive/false_positive verdict (ADR-0023 decision 3, ADR-0006).
+// This never blocks a mission (ADR-0008): the mission proceeds regardless,
+// and the verdict is applied whenever the human gets to it. It records two
+// facts: the ordinary Label braintrain and the review UI already consume
+// (label.go) — gibson#280's "the verdict path is the same label channel"
+// acceptance criterion — and the BetSettlement verdict every other
+// settlement path (gibson#278/#279) already produces, so a later reader
+// (e.g. the reputation/calibration view, gibson#267/#277) does not need to
+// know which of the three paths settled a given bet.
+//
+// It returns settled=true only when this call caused a new settlement;
+// settled=false with a nil error means the bet was already settled (an
+// idempotent no-op, by any of the three paths). A non-nil error means
+// settlement could not be attempted: no hypothesis id, no reviewer
+// recorded, or a verdict other than true_positive/false_positive.
+func (e *Engine) SettleBetByHITL(_ context.Context, req BetHITLRequest) (bool, error) {
+	if req.HypothesisID == "" {
+		return false, errors.New("brain: settlement request must name a hypothesis id")
+	}
+	if req.UserID == "" {
+		return false, fmt.Errorf("brain: a HITL settlement for hypothesis %q must record who reviewed it", req.HypothesisID)
+	}
+	verdict, ok := hitlSettlementVerdict(req.Verdict)
+	if !ok {
+		return false, fmt.Errorf("brain: HITL settlement for hypothesis %q requires %q or %q, got %q",
+			req.HypothesisID, VerdictTruePositive, VerdictFalsePositive, req.Verdict)
+	}
+
+	for _, s := range e.BetSettlements() {
+		if s.HypothesisID == req.HypothesisID {
+			// Terminal: already settled, by any of the three paths.
+			return false, nil
+		}
+	}
+
+	// The same label channel braintrain and the review UI already consume
+	// (label.go) — applied first so a reader watching the review queue sees
+	// it land at the same time as (never after) the bet settlement.
+	e.Submit(LabelApplied{
+		TargetID: betLabelTargetID(req.HypothesisID),
+		Verdict:  req.Verdict,
+		UserID:   req.UserID,
+	})
+	e.Submit(BetSettledByHITL{
+		HypothesisID: req.HypothesisID,
+		Verdict:      verdict,
+		UserID:       req.UserID,
+		ScopeID:      req.ScopeID,
+		MissionID:    req.MissionID,
 	})
 	return true, nil
 }

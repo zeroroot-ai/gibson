@@ -74,6 +74,7 @@ func TestBetSettledTrue_MarksSettled(t *testing.T) {
 	want := []BetSettlementSnapshot{{
 		HypothesisID:   "hyp-1",
 		Verdict:        SettlementVerdictTrue,
+		Method:         SettlementMethodPredicate,
 		Technique:      "T1190",
 		PredicateType:  "marker_present",
 		EvidenceDigest: "digest-a",
