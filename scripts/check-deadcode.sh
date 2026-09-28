@@ -41,7 +41,7 @@ fi
 # Normalise current deadcode to the same `file<TAB>func` shape as the baseline.
 CURRENT="$(mktemp)"
 trap 'rm -f "$CURRENT"' EXIT
-"$DEADCODE_BIN" -test=false ./cmd/... ./operators/... 2>/dev/null \
+bash scripts/run-capped.sh "$DEADCODE_BIN" -test=false ./cmd/... ./operators/... 2>/dev/null \
   | sed -E 's/^([^:]+):[0-9]+:[0-9]+: unreachable func: (.+)$/\1\t\2/' \
   | sort -u > "$CURRENT"
 
