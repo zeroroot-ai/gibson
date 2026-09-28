@@ -143,6 +143,37 @@ service WorldService {
       allowed_identities: 3  // USER | SERVICE
     };
   }
+
+  // ListOpenBets returns the tenant's placed-but-unsettled bets (gibson#339):
+  // a Hypothesis that carries a bettable HypothesisID (ADR-0021/ADR-0022,
+  // sdk#89) with no matching BetSettlement yet. Backend for dashboard#97's
+  // HITL-settle review queue. Read-only, so relation is member like every
+  // other WorldService read.
+  rpc ListOpenBets(ListOpenBetsRequest) returns (ListOpenBetsResponse) {
+    option (gibson.auth.v1.authz) = {
+      relation: "member",
+      object_type: "tenant",
+      object_deriver: "tenant_from_identity",
+      allowed_identities: 3  // USER | SERVICE
+    };
+  }
+
+  // SettleBetByHITL records a human review verdict on a bet (gibson#280,
+  // ADR-0023 decision 3): true_positive/false_positive settle the bet
+  // (Engine.SettleBetByHITL); dismiss is label-only/no-settle, matching the
+  // backend's own refusal semantics (a bet's binary settlement has no "not
+  // actionable" outcome the way a surfaced surprise does). A settlement is a
+  // more consequential, less reversible action than a plain read or label, so
+  // this is gated at writer, not bare member — dashboard#97's settle action,
+  // not every tenant member's review queue.
+  rpc SettleBetByHITL(SettleBetByHITLRequest) returns (SettleBetByHITLResponse) {
+    option (gibson.auth.v1.authz) = {
+      relation: "writer",
+      object_type: "tenant",
+      object_deriver: "tenant_from_identity",
+      allowed_identities: 3  // USER | SERVICE
+    };
+  }
 }
 
 // MissionView is one mission as the World holds it.
@@ -410,4 +441,59 @@ message GetCalibrationResponse {
   // because calibration cannot compare a predicted probability that was
   // never staked. Surfaced, not hidden.
   int32 unscored = 4;
+}
+
+// ListOpenBetsRequest takes no fields: the caller's tenant resolves the same
+// way it does for every other WorldService read.
+message ListOpenBetsRequest {}
+
+// ReferencedEntityView is an entity a bet's claim is about, by Taxonomy label
+// and identity properties — the same by-label-and-properties addressing
+// HypothesisObservation.references uses on the wire (sdk#70), so the review
+// UI can show what the claim references without a graph node id.
+message ReferencedEntityView {
+  string label = 1;
+  map<string, string> id_properties = 2;
+}
+
+// OpenBet is one placed-but-unsettled bet (gibson#339): a Hypothesis that
+// carries a bettable HypothesisID with no matching BetSettlement yet.
+//
+// confidence is the claim's own self-reported confidence (Hypothesis.Confidence),
+// NOT a reconciled market stake read back from BeliefSubstrate — that
+// reconciliation is a pre-existing, tracked gap (gibson#273) this RPC does not
+// close. run_id is the mission run that proposed the claim, for the review
+// UI's transcript link; empty when the observation carried no run id.
+message OpenBet {
+  string hypothesis_id = 1;
+  string claim = 2;
+  string proposer = 3;
+  double confidence = 4;
+  repeated ReferencedEntityView evidence = 5;
+  string run_id = 6;
+}
+
+message ListOpenBetsResponse {
+  repeated OpenBet bets = 1;
+}
+
+// SettleBetByHITLRequest names the bet and the reviewer's verdict.
+// The reviewing user is resolved server-side from the caller's identity
+// (ADR-0006 §6 provenance rule), never taken from the request — the same
+// rule SubmitLabel already follows, so a caller can never attribute a
+// settlement to another user.
+message SettleBetByHITLRequest {
+  string hypothesis_id = 1;
+  // verdict is true_positive, false_positive, or dismiss (the same
+  // vocabulary SubmitLabel uses). dismiss applies a label only; it never
+  // settles the bet.
+  string verdict = 2;
+}
+
+message SettleBetByHITLResponse {
+  // settled is true only when this call caused a NEW settlement. false with
+  // no error covers two honest non-events: the bet was already settled by
+  // any of the three settlement paths (idempotent no-op), or the verdict was
+  // dismiss (label-only/no-settle by design, never an error).
+  bool settled = 1;
 }
