@@ -251,18 +251,33 @@ func RestoreWorld(snap WorldSnapshot, tenant string) (*World, error) {
 		})
 	}
 
-	// Replay bet settlements (ADR-0027, gibson#278). Order does not matter:
-	// identity is HypothesisID, not a world-assigned counter, so there is no
-	// id-renumbering hazard the way there is for observations/entities.
+	// Replay bet settlements (ADR-0027/0023, gibson#278/#279). Order does not
+	// matter: identity is HypothesisID, not a world-assigned counter, so
+	// there is no id-renumbering hazard the way there is for
+	// observations/entities. Dispatch on the recorded verdict: replaying
+	// every snapshot row as BetSettledTrue would silently turn a recorded
+	// FALSE (bounded-exhaustion) verdict back into a TRUE one.
 	for _, s := range data.BetSettlements {
-		Reduce(w, BetSettledTrue{
-			HypothesisID:   s.HypothesisID,
-			Technique:      s.Technique,
-			PredicateType:  s.PredicateType,
-			EvidenceDigest: s.EvidenceDigest,
-			ScopeID:        s.ScopeID,
-			MissionID:      s.MissionID,
-		})
+		switch s.Verdict {
+		case SettlementVerdictTrue:
+			Reduce(w, BetSettledTrue{
+				HypothesisID:   s.HypothesisID,
+				Technique:      s.Technique,
+				PredicateType:  s.PredicateType,
+				EvidenceDigest: s.EvidenceDigest,
+				ScopeID:        s.ScopeID,
+				MissionID:      s.MissionID,
+			})
+		case SettlementVerdictFalse:
+			Reduce(w, BetSettledFalse{
+				HypothesisID:  s.HypothesisID,
+				AttemptBudget: s.AttemptBudget,
+				AttemptsMade:  s.AttemptsMade,
+				Reason:        s.Reason,
+				ScopeID:       s.ScopeID,
+				MissionID:     s.MissionID,
+			})
+		}
 	}
 
 	// Replay LLM calls.

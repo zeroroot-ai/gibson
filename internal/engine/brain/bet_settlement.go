@@ -29,11 +29,16 @@ package brain
 // verdict, mirroring how a stale BeliefScored is dropped rather than
 // reopening a decided question.
 //
-// gibson#279 (bounded-exhaustion -> FALSE) and gibson#280 (async HITL
-// verdict) are separate, later slices that will add sibling event types
-// (e.g. BetSettledFalse, BetSettledByHITL) folding into the same
-// BetSettlement component and the same SettlementVerdict type this file
-// defines — this file implements only the TRUE path.
+// gibson#279 adds the bounded-exhaustion FALSE path alongside the TRUE path
+// above: a bet whose declared attempt budget runs out with no demonstrated
+// proof settles FALSE, a real recorded outcome, never silence (ADR-0023).
+// Both verdicts share the one BetSettlement component and SettlementVerdict
+// type, and both are terminal by the same rule: whichever settlement lands
+// first for a HypothesisID wins.
+//
+// gibson#280 (async HITL verdict) is a separate, later slice that will add
+// a third sibling event type (e.g. BetSettledByHITL) folding into the same
+// component.
 
 import (
 	"context"
@@ -49,14 +54,20 @@ import (
 	"github.com/zeroroot-ai/gibson/internal/engine/settlement"
 )
 
-// SettlementVerdict is how a bet resolved (ADR-0023). Only SettlementVerdictTrue
-// is defined by this slice; gibson#279/#280 add the FALSE and HITL verdicts as
-// siblings.
+// SettlementVerdict is how a bet resolved (ADR-0023). gibson#280 adds the
+// HITL verdict as a sibling.
 type SettlementVerdict string
 
-// SettlementVerdictTrue means the fleet demonstrated the claim in a sandbox
-// and a typed predicate fired against the recorded evidence (ADR-0027).
-const SettlementVerdictTrue SettlementVerdict = "true"
+const (
+	// SettlementVerdictTrue means the fleet demonstrated the claim in a
+	// sandbox and a typed predicate fired against the recorded evidence
+	// (ADR-0027).
+	SettlementVerdictTrue SettlementVerdict = "true"
+	// SettlementVerdictFalse means the bet's declared attempt budget was
+	// exhausted with no demonstrated proof (ADR-0023, gibson#279) — a real,
+	// recorded outcome, not silence.
+	SettlementVerdictFalse SettlementVerdict = "false"
+)
 
 // BetSettlement records how a bet on a hypothesis resolved. Identity is
 // HypothesisID, matching Bet.HypothesisId (callback_place_bet.go) — the same
@@ -74,10 +85,20 @@ type BetSettlement struct {
 	// EvidenceDigest fingerprints the captured evidence the predicate was
 	// evaluated against — the link between the proof and the settled bet
 	// (gibson#278's "the proof is evidence on the graph and links to the
-	// settled bet" acceptance criterion).
+	// settled bet" acceptance criterion). Set only for SettlementVerdictTrue.
 	EvidenceDigest string
-	ScopeID        string
-	MissionID      string
+	// AttemptBudget and AttemptsMade record the bet's declared maximum
+	// number of demonstration attempts and how many were actually made
+	// before settlement. Set only for SettlementVerdictFalse (gibson#279).
+	AttemptBudget int
+	AttemptsMade  int
+	// Reason is a short, human-readable explanation of why the bet settled
+	// FALSE (e.g. "sandbox demonstration attempted 3/3 times with no
+	// predicate match"). Set only for SettlementVerdictFalse: a FALSE
+	// verdict must record why, never settle in silence.
+	Reason    string
+	ScopeID   string
+	MissionID string
 }
 
 // BetSettledTrue records that a bet's hypothesis was demonstrated true: a
@@ -130,6 +151,53 @@ func applyBetSettledTrue(w *World, e BetSettledTrue) {
 	})
 }
 
+// BetSettledFalse records that a bet's declared attempt budget was exhausted
+// with no demonstrated proof (ADR-0023, gibson#279): a real, recorded
+// outcome, not silence. Like BetSettledTrue, it folds through the normal
+// reducer path, so replay reproduces the settlement exactly.
+type BetSettledFalse struct {
+	HypothesisID  string
+	AttemptBudget int
+	AttemptsMade  int
+	Reason        string
+	ScopeID       string
+	MissionID     string
+}
+
+// Kind identifies the bet.settled_false brain event.
+func (BetSettledFalse) Kind() string { return "bet.settled_false" }
+
+// applyBetSettledFalse folds a BetSettledFalse event into the World. Settlement
+// is terminal, and the rule is shared with applyBetSettledTrue: whichever
+// settlement (TRUE or FALSE) lands first for a HypothesisID wins, so a bet
+// already settled TRUE can never be flipped FALSE by a later exhaustion
+// event, and vice versa.
+func applyBetSettledFalse(w *World, e BetSettledFalse) {
+	if e.HypothesisID == "" {
+		return
+	}
+
+	q := ecs.NewFilter1[BetSettlement](w.ecs).Query()
+	for q.Next() {
+		s := q.Get()
+		if s.HypothesisID == e.HypothesisID {
+			q.Close()
+			return
+		}
+	}
+	// Query exhausted → world unlocked.
+
+	w.betSettlements.NewEntity(&BetSettlement{
+		HypothesisID:  e.HypothesisID,
+		Verdict:       SettlementVerdictFalse,
+		AttemptBudget: e.AttemptBudget,
+		AttemptsMade:  e.AttemptsMade,
+		Reason:        e.Reason,
+		ScopeID:       e.ScopeID,
+		MissionID:     e.MissionID,
+	})
+}
+
 // BetSettlementSnapshot is a stable, comparable view of a BetSettlement.
 type BetSettlementSnapshot struct {
 	HypothesisID   string
@@ -137,6 +205,9 @@ type BetSettlementSnapshot struct {
 	Technique      string
 	PredicateType  string
 	EvidenceDigest string
+	AttemptBudget  int
+	AttemptsMade   int
+	Reason         string
 	ScopeID        string
 	MissionID      string
 }
@@ -154,6 +225,9 @@ func (w *World) BetSettlementSnapshot() []BetSettlementSnapshot {
 			Technique:      s.Technique,
 			PredicateType:  s.PredicateType,
 			EvidenceDigest: s.EvidenceDigest,
+			AttemptBudget:  s.AttemptBudget,
+			AttemptsMade:   s.AttemptsMade,
+			Reason:         s.Reason,
 			ScopeID:        s.ScopeID,
 			MissionID:      s.MissionID,
 		})
@@ -274,6 +348,81 @@ func (e *Engine) SettleBetTrue(ctx context.Context, registry *settlement.Registr
 		EvidenceDigest: settlementEvidenceDigest(req.Evidence),
 		ScopeID:        req.ScopeID,
 		MissionID:      req.MissionID,
+	})
+	return true, nil
+}
+
+// BetExhaustionRequest carries the facts needed to settle a bet FALSE on
+// bounded exhaustion (ADR-0023, gibson#279): the declared attempt budget ran
+// out with no demonstrated proof.
+type BetExhaustionRequest struct {
+	// HypothesisID names the bet being settled — the same identifier
+	// PlaceBet's Bet.HypothesisId carries.
+	HypothesisID string
+	ScopeID      string
+	MissionID    string
+	// AttemptBudget is the bet's declared maximum number of demonstration
+	// attempts. It must be positive: "each bet carries an attempt budget"
+	// is not satisfiable by a zero or absent one.
+	AttemptBudget int
+	// AttemptsMade is how many attempts were actually made. Settlement is
+	// refused while AttemptsMade < AttemptBudget: exhaustion cannot be
+	// declared early.
+	AttemptsMade int
+	// Reason is a short, human-readable explanation recorded with the
+	// verdict, e.g. "sandbox demonstration attempted 3/3 times with no
+	// predicate match". Required: a FALSE verdict must record why it
+	// settled, never settle in silence.
+	Reason string
+}
+
+// SettleBetFalse settles the named bet FALSE once its declared attempt
+// budget is exhausted with no demonstrated proof (ADR-0023). This is the
+// bounded-exhaustion counterpart to SettleBetTrue: a real, recorded outcome
+// — not silence — so the calibration signal learns from misses too.
+//
+// It returns settled=true only when this call caused a new FALSE
+// settlement; settled=false with a nil error means the bet was already
+// settled (a terminal, idempotent no-op, by either verdict). A non-nil
+// error means settlement could not be attempted: no hypothesis id, a
+// non-positive attempt budget, no recorded reason, or the budget is not
+// yet actually exhausted.
+//
+// Like SettleBetTrue, the resulting BetSettledFalse event is folded
+// asynchronously through the normal single-writer Submit path (ADR-0001); a
+// caller that needs to observe the settled state should read
+// BetSettlements() afterward.
+func (e *Engine) SettleBetFalse(_ context.Context, req BetExhaustionRequest) (bool, error) {
+	if req.HypothesisID == "" {
+		return false, errors.New("brain: settlement request must name a hypothesis id")
+	}
+	if req.AttemptBudget <= 0 {
+		return false, fmt.Errorf("brain: bet %q must declare a positive attempt budget, got %d", req.HypothesisID, req.AttemptBudget)
+	}
+	if req.Reason == "" {
+		return false, fmt.Errorf("brain: a FALSE settlement for hypothesis %q must record why", req.HypothesisID)
+	}
+	if req.AttemptsMade < req.AttemptBudget {
+		return false, fmt.Errorf("brain: attempt budget not yet exhausted for hypothesis %q (%d/%d attempts made)",
+			req.HypothesisID, req.AttemptsMade, req.AttemptBudget)
+	}
+
+	for _, s := range e.BetSettlements() {
+		if s.HypothesisID == req.HypothesisID {
+			// Terminal: already settled, by either verdict. Not an error —
+			// a caller retrying after a crash must not fail loudly for
+			// something already decided.
+			return false, nil
+		}
+	}
+
+	e.Submit(BetSettledFalse{
+		HypothesisID:  req.HypothesisID,
+		AttemptBudget: req.AttemptBudget,
+		AttemptsMade:  req.AttemptsMade,
+		Reason:        req.Reason,
+		ScopeID:       req.ScopeID,
+		MissionID:     req.MissionID,
 	})
 	return true, nil
 }
