@@ -27,6 +27,11 @@ type worldSnapshotData struct {
 	Decisions    []DecisionSnapshot    `json:"decisions"`
 	Observations []ObservationSnapshot `json:"observations"`
 	Entities     []EntitySnapshot      `json:"entities"`
+	// Hypotheses is the Hypothesis provenance class (ADR-0021, gibson#265):
+	// an agent's proposed, unproven claim. Snapshotted separately from every
+	// Evidence store and from Belief — the three provenance classes stay
+	// distinct across a snapshot round trip too.
+	Hypotheses []HypothesisSnapshot `json:"hypotheses"`
 	// AgentToolCalls + FlightRecorderPolicy: the flight recorder's captured
 	// tool I/O and the tenant's retention/redaction policy (ADR-0020,
 	// gibson#271). The policy must be snapshotted too, or a tenant's
@@ -43,6 +48,7 @@ type worldSnapshotData struct {
 	NextAccountID     uint64 `json:"next_account_id"`
 	NextObservationID uint64 `json:"next_observation_id"`
 	NextEntityID      uint64 `json:"next_entity_id"`
+	NextHypothesisID  uint64 `json:"next_hypothesis_id"`
 }
 
 // SnapshotWorld serializes the current World into a WorldSnapshot at atSeq.
@@ -63,6 +69,7 @@ func SnapshotWorld(w *World, atSeq string) WorldSnapshot {
 		Decisions:    w.DecisionSnapshot(),
 		Observations: w.ObservationSnapshot(),
 		Entities:     w.EntitySnapshot(),
+		Hypotheses:   w.HypothesisSnapshot(),
 
 		AgentToolCalls:       w.AgentToolCallSnapshot(),
 		FlightRecorderPolicy: w.flightRecorderPolicy,
@@ -74,6 +81,7 @@ func SnapshotWorld(w *World, atSeq string) WorldSnapshot {
 		NextAccountID:     w.nextAccountID,
 		NextObservationID: w.nextObservationID,
 		NextEntityID:      w.nextEntityID,
+		NextHypothesisID:  w.nextHypothesisID,
 	}
 	b, _ := json.Marshal(data)
 	return WorldSnapshot{AtSeq: atSeq, Data: b}
@@ -314,6 +322,24 @@ func RestoreWorld(snap WorldSnapshot, tenant string) (*World, error) {
 		})
 	}
 	w.nextEntityID = data.NextEntityID
+
+	// Replay hypotheses in id order for the same reason as entities and
+	// observations: the world id is the identifier a later PlaceBet call
+	// names, so the order must not renumber it.
+	sort.Slice(data.Hypotheses, func(i, j int) bool {
+		return data.Hypotheses[i].ID < data.Hypotheses[j].ID
+	})
+	for _, h := range data.Hypotheses {
+		Reduce(w, HypothesisObserved{
+			MissionID:  h.MissionID,
+			ScopeID:    h.ScopeID,
+			Proposer:   h.Proposer,
+			Confidence: h.Confidence,
+			Claim:      h.Claim,
+			References: h.References,
+		})
+	}
+	w.nextHypothesisID = data.NextHypothesisID
 
 	return w, nil
 }

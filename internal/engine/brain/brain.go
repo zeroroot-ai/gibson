@@ -87,6 +87,13 @@ type World struct {
 	// keyed by (Taxonomy label, stable key). See entity.go.
 	entities *ecs.Map1[Entity]
 
+	// hypotheses holds the Hypothesis provenance class (ADR-0021, gibson#265):
+	// an agent's proposed, unproven claim, keyed by (ScopeID, Claim). See
+	// hypothesis.go. Distinct from both Evidence (hosts, domains, ...) and
+	// Belief (belief.go) — a Hypothesis is folded and stored separately from
+	// both, never derived from or into either.
+	hypotheses *ecs.Map1[Hypothesis]
+
 	// next*ID are monotonic, replay-deterministic counters for assigning stable
 	// ids (incremented in the single-writer reducer, so replay reproduces ids).
 	// Counters are per-entity-type; ids are unique within a (label) namespace,
@@ -98,6 +105,7 @@ type World struct {
 	nextAccountID     uint64
 	nextObservationID uint64
 	nextEntityID      uint64
+	nextHypothesisID  uint64
 }
 
 func (w *World) newCredentialID() uint64 {
@@ -118,6 +126,13 @@ func (w *World) newObservationID() uint64 {
 func (w *World) newEntityID() uint64 {
 	w.nextEntityID++
 	return w.nextEntityID
+}
+
+// newHypothesisID returns the next stable hypothesis id (single-writer;
+// deterministic on replay).
+func (w *World) newHypothesisID() uint64 {
+	w.nextHypothesisID++
+	return w.nextHypothesisID
 }
 
 // newHostID returns the next stable host id (single-writer; deterministic on replay).
@@ -158,6 +173,7 @@ func NewWorld(tenant string) *World {
 		agentToolCalls: ecs.NewMap1[AgentToolCall](w),
 		observations:   ecs.NewMap1[Observation](w),
 		entities:       ecs.NewMap1[Entity](w),
+		hypotheses:     ecs.NewMap1[Hypothesis](w),
 	}
 }
 
@@ -343,6 +359,8 @@ func Reduce(w *World, ev Event) {
 		applyLabelApplied(w, e)
 	case AgentRunObserved:
 		applyAgentRunObserved(w, e)
+	case HypothesisObserved:
+		applyHypothesisObserved(w, e)
 	case LlmCallObserved:
 		applyLlmCallObserved(w, e)
 	case AgentToolCallObserved:
