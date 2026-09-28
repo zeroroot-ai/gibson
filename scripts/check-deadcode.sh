@@ -26,6 +26,17 @@ set -euo pipefail
 REPO_ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 cd "$REPO_ROOT"
 
+# Integration branches (epic/*) intentionally carry not-yet-wired code built
+# bottom-up: the whole-program closed-world gate cannot see a caller that a later
+# slice (e.g. the daemon-wiring PR) will add, so it false-positives on every such
+# PR. Skip here and enforce the gate at the epic->main merge, by which point the
+# integration is complete. GITHUB_BASE_REF is the PR target branch in CI;
+# DEADCODE_SKIP forces a skip locally.
+if [ -n "${DEADCODE_SKIP:-}" ] || [[ "${GITHUB_BASE_REF:-}" == epic/* ]]; then
+  echo "check-deadcode: skipping on integration branch base '${GITHUB_BASE_REF:-}' (enforced at epic->main)"
+  exit 0
+fi
+
 DEADCODE_BIN="${DEADCODE_BIN:-bin/tools/deadcode}"
 BASELINE="${DEADCODE_BASELINE:-.deadcode-baseline}"
 
