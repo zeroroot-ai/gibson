@@ -3640,6 +3640,16 @@ export const AuthRegistry: Record<string, AuthEntry> = {
     unauthenticated: false,
     self: false,
   },
+  "/gibson.world.v1.WorldService/GetCalibration": {
+    method: "/gibson.world.v1.WorldService/GetCalibration",
+    service: "gibson.world.v1.WorldService",
+    relation: "member",
+    objectType: "tenant",
+    objectDeriver: "tenant_from_identity",
+    allowedIdentities: IdentityClass.USER | IdentityClass.SERVICE,
+    unauthenticated: false,
+    self: false,
+  },
   "/gibson.world.v1.WorldService/GetFrameAt": {
     method: "/gibson.world.v1.WorldService/GetFrameAt",
     service: "gibson.world.v1.WorldService",

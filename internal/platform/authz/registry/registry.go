@@ -3653,6 +3653,16 @@ var Registry = map[string]Entry{
 		Unauthenticated:   false,
 		Self:              false,
 	},
+	"/gibson.world.v1.WorldService/GetCalibration": {
+		Method:            "/gibson.world.v1.WorldService/GetCalibration",
+		Service:           "gibson.world.v1.WorldService",
+		Relation:          "member",
+		ObjectType:        "tenant",
+		ObjectDeriver:     "tenant_from_identity",
+		AllowedIdentities: IdentityUser | IdentityService,
+		Unauthenticated:   false,
+		Self:              false,
+	},
 	"/gibson.world.v1.WorldService/GetFrameAt": {
 		Method:            "/gibson.world.v1.WorldService/GetFrameAt",
 		Service:           "gibson.world.v1.WorldService",

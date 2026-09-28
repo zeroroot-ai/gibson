@@ -29,6 +29,7 @@ const (
 	WorldService_ListReviewQueue_FullMethodName = "/gibson.world.v1.WorldService/ListReviewQueue"
 	WorldService_SubmitLabel_FullMethodName     = "/gibson.world.v1.WorldService/SubmitLabel"
 	WorldService_ListLabels_FullMethodName      = "/gibson.world.v1.WorldService/ListLabels"
+	WorldService_GetCalibration_FullMethodName  = "/gibson.world.v1.WorldService/GetCalibration"
 )
 
 // WorldServiceClient is the client API for WorldService service.
@@ -79,6 +80,12 @@ type WorldServiceClient interface {
 	// ListLabels returns the tenant's pooled review labels (ADR-0006) — the HITL
 	// training signal the offline trainer consumes alongside auto-outcomes.
 	ListLabels(ctx context.Context, in *ListLabelsRequest, opts ...grpc.CallOption) (*ListLabelsResponse, error)
+	// GetCalibration returns the tenant's reliability/calibration report from
+	// settled bets (gibson#284, ADR-0022/ADR-0006): does a predicted 0.8 mean
+	// 80% in reality? A tenant-wide summary plus a per-technique breakdown, each
+	// with a Brier score and a binned reliability-diagram curve — the source for
+	// the dashboard's reliability diagram (dashboard#98).
+	GetCalibration(ctx context.Context, in *GetCalibrationRequest, opts ...grpc.CallOption) (*GetCalibrationResponse, error)
 }
 
 type worldServiceClient struct {
@@ -189,6 +196,16 @@ func (c *worldServiceClient) ListLabels(ctx context.Context, in *ListLabelsReque
 	return out, nil
 }
 
+func (c *worldServiceClient) GetCalibration(ctx context.Context, in *GetCalibrationRequest, opts ...grpc.CallOption) (*GetCalibrationResponse, error) {
+	cOpts := append([]grpc.CallOption{grpc.StaticMethod()}, opts...)
+	out := new(GetCalibrationResponse)
+	err := c.cc.Invoke(ctx, WorldService_GetCalibration_FullMethodName, in, out, cOpts...)
+	if err != nil {
+		return nil, err
+	}
+	return out, nil
+}
+
 // WorldServiceServer is the server API for WorldService service.
 // All implementations must embed UnimplementedWorldServiceServer
 // for forward compatibility.
@@ -237,6 +254,12 @@ type WorldServiceServer interface {
 	// ListLabels returns the tenant's pooled review labels (ADR-0006) — the HITL
 	// training signal the offline trainer consumes alongside auto-outcomes.
 	ListLabels(context.Context, *ListLabelsRequest) (*ListLabelsResponse, error)
+	// GetCalibration returns the tenant's reliability/calibration report from
+	// settled bets (gibson#284, ADR-0022/ADR-0006): does a predicted 0.8 mean
+	// 80% in reality? A tenant-wide summary plus a per-technique breakdown, each
+	// with a Brier score and a binned reliability-diagram curve — the source for
+	// the dashboard's reliability diagram (dashboard#98).
+	GetCalibration(context.Context, *GetCalibrationRequest) (*GetCalibrationResponse, error)
 	mustEmbedUnimplementedWorldServiceServer()
 }
 
@@ -276,6 +299,9 @@ func (UnimplementedWorldServiceServer) SubmitLabel(context.Context, *SubmitLabel
 }
 func (UnimplementedWorldServiceServer) ListLabels(context.Context, *ListLabelsRequest) (*ListLabelsResponse, error) {
 	return nil, status.Error(codes.Unimplemented, "method ListLabels not implemented")
+}
+func (UnimplementedWorldServiceServer) GetCalibration(context.Context, *GetCalibrationRequest) (*GetCalibrationResponse, error) {
+	return nil, status.Error(codes.Unimplemented, "method GetCalibration not implemented")
 }
 func (UnimplementedWorldServiceServer) mustEmbedUnimplementedWorldServiceServer() {}
 func (UnimplementedWorldServiceServer) testEmbeddedByValue()                      {}
@@ -478,6 +504,24 @@ func _WorldService_ListLabels_Handler(srv interface{}, ctx context.Context, dec 
 	return interceptor(ctx, in, info, handler)
 }
 
+func _WorldService_GetCalibration_Handler(srv interface{}, ctx context.Context, dec func(interface{}) error, interceptor grpc.UnaryServerInterceptor) (interface{}, error) {
+	in := new(GetCalibrationRequest)
+	if err := dec(in); err != nil {
+		return nil, err
+	}
+	if interceptor == nil {
+		return srv.(WorldServiceServer).GetCalibration(ctx, in)
+	}
+	info := &grpc.UnaryServerInfo{
+		Server:     srv,
+		FullMethod: WorldService_GetCalibration_FullMethodName,
+	}
+	handler := func(ctx context.Context, req interface{}) (interface{}, error) {
+		return srv.(WorldServiceServer).GetCalibration(ctx, req.(*GetCalibrationRequest))
+	}
+	return interceptor(ctx, in, info, handler)
+}
+
 // WorldService_ServiceDesc is the grpc.ServiceDesc for WorldService service.
 // It's only intended for direct use with grpc.RegisterService,
 // and not to be introspected or modified (even as a copy)
@@ -524,6 +568,10 @@ var WorldService_ServiceDesc = grpc.ServiceDesc{
 		{
 			MethodName: "ListLabels",
 			Handler:    _WorldService_ListLabels_Handler,
+		},
+		{
+			MethodName: "GetCalibration",
+			Handler:    _WorldService_GetCalibration_Handler,
 		},
 	},
 	Streams:  []grpc.StreamDesc{},
