@@ -5,6 +5,7 @@ package admin
 
 import (
 	"context"
+	"errors"
 	"testing"
 
 	"google.golang.org/grpc/codes"
@@ -38,11 +39,16 @@ type membersAuthorizer struct {
 	conditionalWrites []authz.ConditionalTuple
 	// conditionalErr is returned by WriteConditional when non-nil.
 	conditionalErr error
+	// conditionalFailObject, when set, fails only the write to that object.
+	conditionalFailObject string
 }
 
 func (m *membersAuthorizer) WriteConditional(_ context.Context, t authz.ConditionalTuple) error {
 	if m.conditionalErr != nil {
 		return m.conditionalErr
+	}
+	if m.conditionalFailObject != "" && t.Object == m.conditionalFailObject {
+		return errors.New("fga boom on " + t.Object)
 	}
 	m.conditionalWrites = append(m.conditionalWrites, t)
 	return nil

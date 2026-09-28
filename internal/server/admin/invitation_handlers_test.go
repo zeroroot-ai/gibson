@@ -734,3 +734,26 @@ func TestAcceptInvitation_SessionSeedErrorIsInternal(t *testing.T) {
 		t.Fatalf("AcceptInvitation code = %v (err=%v), want Internal", status_grpc.Code(err), err)
 	}
 }
+
+// TestSeedSessionTuples_Failures pins both failure paths of the session seed:
+// an authorizer that cannot write conditional tuples, and a failed per-tenant
+// write after the user-scoped one succeeded. Either one fails the accept.
+func TestSeedSessionTuples_Failures(t *testing.T) {
+	t.Run("authorizer without conditional writes", func(t *testing.T) {
+		s := &TenantAdminServer{authorizer: newOwnershipAuthorizer()}
+		if err := s.seedSessionTuples(context.Background(), "user-bob", "acme"); err == nil {
+			t.Fatal("expected an error from an authorizer that cannot write session tuples")
+		}
+	})
+	t.Run("per-tenant write fails", func(t *testing.T) {
+		az := &membersAuthorizer{conditionalFailObject: "tenant:acme"}
+		s := &TenantAdminServer{authorizer: az}
+		err := s.seedSessionTuples(context.Background(), "user-bob", "acme")
+		if err == nil || !strings.Contains(err.Error(), "tenant acme") {
+			t.Fatalf("err = %v, want the per-tenant write failure", err)
+		}
+		if !reflect.DeepEqual(az.conditionalWrites, []authz.ConditionalTuple{authz.ActiveSessionUserTuple("user-bob")}) {
+			t.Fatalf("writes = %+v, want only the user-scoped tuple before the failure", az.conditionalWrites)
+		}
+	})
+}
