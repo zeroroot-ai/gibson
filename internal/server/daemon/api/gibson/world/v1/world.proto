@@ -144,6 +144,21 @@ service WorldService {
     };
   }
 
+  // GetReputation returns one technique's current track record in one scope
+  // (ADR-0022, ADR-0029 §3, gibson#267): does this technique tend to work
+  // here? Read-only projection of the technique x environment belief a
+  // settled bet updates (brain.UpdateReputation) — a caller that only needs
+  // one key's current value, not the full tenant-wide breakdown
+  // GetCalibration gives.
+  rpc GetReputation(GetReputationRequest) returns (GetReputationResponse) {
+    option (gibson.auth.v1.authz) = {
+      relation: "member",
+      object_type: "tenant",
+      object_deriver: "tenant_from_identity",
+      allowed_identities: 3  // USER | SERVICE
+    };
+  }
+
   // ListOpenBets returns the tenant's placed-but-unsettled bets (gibson#339):
   // a Hypothesis that carries a bettable HypothesisID (ADR-0021/ADR-0022,
   // sdk#89) with no matching BetSettlement yet. Backend for dashboard#97's
@@ -496,4 +511,24 @@ message SettleBetByHITLResponse {
   // any of the three settlement paths (idempotent no-op), or the verdict was
   // dismiss (label-only/no-settle by design, never an error).
   bool settled = 1;
+}
+
+// GetReputationRequest names the technique x environment key (ADR-0029 §3):
+// technique is the settlement.TechniqueID a Bet/Hypothesis names (e.g.
+// "T1190"); scope_id is the "environment" — the same ScopeID coordinate
+// every other observation in this brain partitions identity by.
+message GetReputationRequest {
+  string technique = 1;
+  string scope_id = 2;
+}
+
+message GetReputationResponse {
+  // prior_strength is the confidence a NEW hypothesis of this technique, in
+  // this scope, should start from (brain.Reputation.PriorStrength): the
+  // observed TRUE frequency once settled bets exist, or the neutral
+  // DefaultReputationPrior (0.5) when has_track_record is false.
+  double prior_strength = 1;
+  // has_track_record is false when nothing has been recorded for this key
+  // yet — "no data", never hidden behind a bare zero value.
+  bool has_track_record = 2;
 }
