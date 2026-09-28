@@ -30,6 +30,7 @@ func TestBetSettledFalse_MarksSettled(t *testing.T) {
 	want := []BetSettlementSnapshot{{
 		HypothesisID:  "hyp-1",
 		Verdict:       SettlementVerdictFalse,
+		Method:        SettlementMethodExhaustion,
 		AttemptBudget: 3,
 		AttemptsMade:  3,
 		Reason:        "sandbox demonstration attempted 3/3 times with no predicate match",
