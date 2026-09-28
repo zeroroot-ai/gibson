@@ -1,5 +1,12 @@
 # Changelog
 
+## [0.142.6](https://github.com/zeroroot-ai/gibson/compare/v0.142.5...v0.142.6) (2026-09-28)
+
+
+### Bug Fixes
+
+* **idp:** reach users in any org from the factor and profile calls ([#349](https://github.com/zeroroot-ai/gibson/issues/349)) ([6c18689](https://github.com/zeroroot-ai/gibson/commit/6c1868918ae04487e029966147cd7614f3326aae))
+
 ## [0.142.5](https://github.com/zeroroot-ai/gibson/compare/v0.142.4...v0.142.5) (2026-09-28)
 
 
