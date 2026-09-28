@@ -30,6 +30,8 @@ const (
 	WorldService_SubmitLabel_FullMethodName     = "/gibson.world.v1.WorldService/SubmitLabel"
 	WorldService_ListLabels_FullMethodName      = "/gibson.world.v1.WorldService/ListLabels"
 	WorldService_GetCalibration_FullMethodName  = "/gibson.world.v1.WorldService/GetCalibration"
+	WorldService_ListOpenBets_FullMethodName    = "/gibson.world.v1.WorldService/ListOpenBets"
+	WorldService_SettleBetByHITL_FullMethodName = "/gibson.world.v1.WorldService/SettleBetByHITL"
 )
 
 // WorldServiceClient is the client API for WorldService service.
@@ -86,6 +88,21 @@ type WorldServiceClient interface {
 	// with a Brier score and a binned reliability-diagram curve — the source for
 	// the dashboard's reliability diagram (dashboard#98).
 	GetCalibration(ctx context.Context, in *GetCalibrationRequest, opts ...grpc.CallOption) (*GetCalibrationResponse, error)
+	// ListOpenBets returns the tenant's placed-but-unsettled bets (gibson#339):
+	// a Hypothesis that carries a bettable HypothesisID (ADR-0021/ADR-0022,
+	// sdk#89) with no matching BetSettlement yet. Backend for dashboard#97's
+	// HITL-settle review queue. Read-only, so relation is member like every
+	// other WorldService read.
+	ListOpenBets(ctx context.Context, in *ListOpenBetsRequest, opts ...grpc.CallOption) (*ListOpenBetsResponse, error)
+	// SettleBetByHITL records a human review verdict on a bet (gibson#280,
+	// ADR-0023 decision 3): true_positive/false_positive settle the bet
+	// (Engine.SettleBetByHITL); dismiss is label-only/no-settle, matching the
+	// backend's own refusal semantics (a bet's binary settlement has no "not
+	// actionable" outcome the way a surfaced surprise does). A settlement is a
+	// more consequential, less reversible action than a plain read or label, so
+	// this is gated at writer, not bare member — dashboard#97's settle action,
+	// not every tenant member's review queue.
+	SettleBetByHITL(ctx context.Context, in *SettleBetByHITLRequest, opts ...grpc.CallOption) (*SettleBetByHITLResponse, error)
 }
 
 type worldServiceClient struct {
@@ -206,6 +223,26 @@ func (c *worldServiceClient) GetCalibration(ctx context.Context, in *GetCalibrat
 	return out, nil
 }
 
+func (c *worldServiceClient) ListOpenBets(ctx context.Context, in *ListOpenBetsRequest, opts ...grpc.CallOption) (*ListOpenBetsResponse, error) {
+	cOpts := append([]grpc.CallOption{grpc.StaticMethod()}, opts...)
+	out := new(ListOpenBetsResponse)
+	err := c.cc.Invoke(ctx, WorldService_ListOpenBets_FullMethodName, in, out, cOpts...)
+	if err != nil {
+		return nil, err
+	}
+	return out, nil
+}
+
+func (c *worldServiceClient) SettleBetByHITL(ctx context.Context, in *SettleBetByHITLRequest, opts ...grpc.CallOption) (*SettleBetByHITLResponse, error) {
+	cOpts := append([]grpc.CallOption{grpc.StaticMethod()}, opts...)
+	out := new(SettleBetByHITLResponse)
+	err := c.cc.Invoke(ctx, WorldService_SettleBetByHITL_FullMethodName, in, out, cOpts...)
+	if err != nil {
+		return nil, err
+	}
+	return out, nil
+}
+
 // WorldServiceServer is the server API for WorldService service.
 // All implementations must embed UnimplementedWorldServiceServer
 // for forward compatibility.
@@ -260,6 +297,21 @@ type WorldServiceServer interface {
 	// with a Brier score and a binned reliability-diagram curve — the source for
 	// the dashboard's reliability diagram (dashboard#98).
 	GetCalibration(context.Context, *GetCalibrationRequest) (*GetCalibrationResponse, error)
+	// ListOpenBets returns the tenant's placed-but-unsettled bets (gibson#339):
+	// a Hypothesis that carries a bettable HypothesisID (ADR-0021/ADR-0022,
+	// sdk#89) with no matching BetSettlement yet. Backend for dashboard#97's
+	// HITL-settle review queue. Read-only, so relation is member like every
+	// other WorldService read.
+	ListOpenBets(context.Context, *ListOpenBetsRequest) (*ListOpenBetsResponse, error)
+	// SettleBetByHITL records a human review verdict on a bet (gibson#280,
+	// ADR-0023 decision 3): true_positive/false_positive settle the bet
+	// (Engine.SettleBetByHITL); dismiss is label-only/no-settle, matching the
+	// backend's own refusal semantics (a bet's binary settlement has no "not
+	// actionable" outcome the way a surfaced surprise does). A settlement is a
+	// more consequential, less reversible action than a plain read or label, so
+	// this is gated at writer, not bare member — dashboard#97's settle action,
+	// not every tenant member's review queue.
+	SettleBetByHITL(context.Context, *SettleBetByHITLRequest) (*SettleBetByHITLResponse, error)
 	mustEmbedUnimplementedWorldServiceServer()
 }
 
@@ -302,6 +354,12 @@ func (UnimplementedWorldServiceServer) ListLabels(context.Context, *ListLabelsRe
 }
 func (UnimplementedWorldServiceServer) GetCalibration(context.Context, *GetCalibrationRequest) (*GetCalibrationResponse, error) {
 	return nil, status.Error(codes.Unimplemented, "method GetCalibration not implemented")
+}
+func (UnimplementedWorldServiceServer) ListOpenBets(context.Context, *ListOpenBetsRequest) (*ListOpenBetsResponse, error) {
+	return nil, status.Error(codes.Unimplemented, "method ListOpenBets not implemented")
+}
+func (UnimplementedWorldServiceServer) SettleBetByHITL(context.Context, *SettleBetByHITLRequest) (*SettleBetByHITLResponse, error) {
+	return nil, status.Error(codes.Unimplemented, "method SettleBetByHITL not implemented")
 }
 func (UnimplementedWorldServiceServer) mustEmbedUnimplementedWorldServiceServer() {}
 func (UnimplementedWorldServiceServer) testEmbeddedByValue()                      {}
@@ -522,6 +580,42 @@ func _WorldService_GetCalibration_Handler(srv interface{}, ctx context.Context, 
 	return interceptor(ctx, in, info, handler)
 }
 
+func _WorldService_ListOpenBets_Handler(srv interface{}, ctx context.Context, dec func(interface{}) error, interceptor grpc.UnaryServerInterceptor) (interface{}, error) {
+	in := new(ListOpenBetsRequest)
+	if err := dec(in); err != nil {
+		return nil, err
+	}
+	if interceptor == nil {
+		return srv.(WorldServiceServer).ListOpenBets(ctx, in)
+	}
+	info := &grpc.UnaryServerInfo{
+		Server:     srv,
+		FullMethod: WorldService_ListOpenBets_FullMethodName,
+	}
+	handler := func(ctx context.Context, req interface{}) (interface{}, error) {
+		return srv.(WorldServiceServer).ListOpenBets(ctx, req.(*ListOpenBetsRequest))
+	}
+	return interceptor(ctx, in, info, handler)
+}
+
+func _WorldService_SettleBetByHITL_Handler(srv interface{}, ctx context.Context, dec func(interface{}) error, interceptor grpc.UnaryServerInterceptor) (interface{}, error) {
+	in := new(SettleBetByHITLRequest)
+	if err := dec(in); err != nil {
+		return nil, err
+	}
+	if interceptor == nil {
+		return srv.(WorldServiceServer).SettleBetByHITL(ctx, in)
+	}
+	info := &grpc.UnaryServerInfo{
+		Server:     srv,
+		FullMethod: WorldService_SettleBetByHITL_FullMethodName,
+	}
+	handler := func(ctx context.Context, req interface{}) (interface{}, error) {
+		return srv.(WorldServiceServer).SettleBetByHITL(ctx, req.(*SettleBetByHITLRequest))
+	}
+	return interceptor(ctx, in, info, handler)
+}
+
 // WorldService_ServiceDesc is the grpc.ServiceDesc for WorldService service.
 // It's only intended for direct use with grpc.RegisterService,
 // and not to be introspected or modified (even as a copy)
@@ -572,6 +666,14 @@ var WorldService_ServiceDesc = grpc.ServiceDesc{
 		{
 			MethodName: "GetCalibration",
 			Handler:    _WorldService_GetCalibration_Handler,
+		},
+		{
+			MethodName: "ListOpenBets",
+			Handler:    _WorldService_ListOpenBets_Handler,
+		},
+		{
+			MethodName: "SettleBetByHITL",
+			Handler:    _WorldService_SettleBetByHITL_Handler,
 		},
 	},
 	Streams:  []grpc.StreamDesc{},
