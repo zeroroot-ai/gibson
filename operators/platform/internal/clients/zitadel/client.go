@@ -14,6 +14,7 @@ import (
 	"strings"
 	"time"
 
+	"github.com/zeroroot-ai/gibson/internal/platform/idp"
 	"github.com/zeroroot-ai/gibson/internal/platform/tenantrole"
 )
 
@@ -1541,7 +1542,7 @@ const userService = "zitadel.user.v2.UserService"
 // EnsureHumanUserNoPassword implements Client.
 func (c *httpClient) EnsureHumanUserNoPassword(ctx context.Context, orgID, email, givenName, familyName string) (string, error) {
 	body := map[string]any{
-		"username": email,
+		"username": idp.UsernameForEmail(email),
 		"profile": map[string]any{
 			"givenName":  givenName,
 			"familyName": familyName,

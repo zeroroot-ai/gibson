@@ -5,6 +5,7 @@ package zitadel_test
 
 import (
 	"context"
+	"encoding/json"
 	"net/http"
 	"strings"
 	"testing"
@@ -15,12 +16,12 @@ import (
 )
 
 // setupManagementServer stands up an httptest server serving OIDC discovery +
-// token (so zitadel.New succeeds) and routes /management/v1/users/... calls to
-// the provided handler.
+// token (so zitadel.New succeeds) and routes zitadel.user.v2.UserService
+// calls to the provided handler.
 func setupManagementServer(t *testing.T, handler http.HandlerFunc) zitadel.Config {
 	t.Helper()
 	srv := zitadelconntest.New(t, "", http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		if strings.HasPrefix(r.URL.Path, "/management/v1/users/") {
+		if strings.HasPrefix(r.URL.Path, "/zitadel.user.v2.UserService/") {
 			handler(w, r)
 			return
 		}
@@ -36,19 +37,23 @@ func setupManagementServer(t *testing.T, handler http.HandlerFunc) zitadel.Confi
 // otp/u2f, WebAuthNToken.id).
 func TestClearHumanFactors_RemovesEveryRegisteredType(t *testing.T) {
 	var deletedPaths []string
+	var orgHeaders, userIDs []string
 	cfg := setupManagementServer(t, func(w http.ResponseWriter, r *http.Request) {
+		body := decodeFactorsBody(t, r)
+		orgHeaders = append(orgHeaders, r.Header.Get("x-zitadel-orgid"))
+		userIDs = append(userIDs, body["userId"])
 		switch {
-		case r.Method == http.MethodPost && strings.HasSuffix(r.URL.Path, "/auth_factors/_search"):
+		case strings.HasSuffix(r.URL.Path, "/ListAuthenticationFactors"):
 			_, _ = w.Write([]byte(`{"result":[
 				{"state":"AUTH_FACTOR_STATE_READY","otp":{}},
 				{"state":"AUTH_FACTOR_STATE_READY","u2f":{"id":"u2f-1","name":"key one"}},
 				{"state":"AUTH_FACTOR_STATE_READY","u2f":{"id":"u2f-2","name":"key two"}}
 			]}`))
-		case r.Method == http.MethodPost && strings.HasSuffix(r.URL.Path, "/passwordless/_search"):
+		case strings.HasSuffix(r.URL.Path, "/ListPasskeys"):
 			_, _ = w.Write([]byte(`{"result":[{"id":"pk-1","state":"AUTH_FACTOR_STATE_READY","name":"face"}]}`))
-		case r.Method == http.MethodDelete:
-			deletedPaths = append(deletedPaths, r.URL.Path)
-			w.WriteHeader(http.StatusOK)
+		case isRemove(r):
+			deletedPaths = append(deletedPaths, strings.TrimSpace(r.URL.Path[strings.LastIndex(r.URL.Path, "/")+1:]+" "+body["u2fId"]+body["passkeyId"]))
+			_, _ = w.Write([]byte(`{}`))
 		default:
 			http.NotFound(w, r)
 		}
@@ -73,24 +78,36 @@ func TestClearHumanFactors_RemovesEveryRegisteredType(t *testing.T) {
 		t.Errorf("PasskeysCleared = %d, want 1", res.PasskeysCleared)
 	}
 
-	wantSuffixes := []string{
-		"/auth_factors/otp",
-		"/auth_factors/u2f/u2f-1",
-		"/auth_factors/u2f/u2f-2",
-		"/passwordless/pk-1",
+	want := []string{"RemoveTOTP", "RemoveU2F u2f-1", "RemoveU2F u2f-2", "RemovePasskey pk-1"}
+	if strings.Join(deletedPaths, ",") != strings.Join(want, ",") {
+		t.Errorf("remove calls = %v, want %v", deletedPaths, want)
 	}
-	for _, want := range wantSuffixes {
-		found := false
-		for _, got := range deletedPaths {
-			if strings.HasSuffix(got, want) {
-				found = true
-				break
-			}
+
+	// hosted#208: the v1 Management API filtered by the x-zitadel-orgid
+	// header, so a tenant user's factors listed empty under the platform org
+	// and nothing was cleared. The v2 calls name the user by id and carry no
+	// org header at all.
+	for i := range orgHeaders {
+		if orgHeaders[i] != "" {
+			t.Errorf("request %d carried x-zitadel-orgid %q, want none", i, orgHeaders[i])
 		}
-		if !found {
-			t.Errorf("expected a DELETE to a path ending %q; got deletes %v", want, deletedPaths)
+		if userIDs[i] != "user-1" {
+			t.Errorf("request %d named userId %q, want user-1", i, userIDs[i])
 		}
 	}
+}
+
+// isRemove reports whether r is one of the v2 factor-removal calls.
+func isRemove(r *http.Request) bool {
+	return strings.Contains(r.URL.Path, "/zitadel.user.v2.UserService/Remove")
+}
+
+// decodeFactorsBody reads a v2 request's JSON body as a string map.
+func decodeFactorsBody(t *testing.T, r *http.Request) map[string]string {
+	t.Helper()
+	out := map[string]string{}
+	_ = json.NewDecoder(r.Body).Decode(&out)
+	return out
 }
 
 // TestClearHumanFactors_NoFactors_NoOp proves a user with nothing registered
@@ -99,11 +116,11 @@ func TestClearHumanFactors_NoFactors_NoOp(t *testing.T) {
 	var deleteCalls int
 	cfg := setupManagementServer(t, func(w http.ResponseWriter, r *http.Request) {
 		switch {
-		case r.Method == http.MethodPost && strings.HasSuffix(r.URL.Path, "/auth_factors/_search"):
+		case strings.HasSuffix(r.URL.Path, "/ListAuthenticationFactors"):
 			_, _ = w.Write([]byte(`{"result":[]}`))
-		case r.Method == http.MethodPost && strings.HasSuffix(r.URL.Path, "/passwordless/_search"):
+		case strings.HasSuffix(r.URL.Path, "/ListPasskeys"):
 			_, _ = w.Write([]byte(`{"result":[]}`))
-		case r.Method == http.MethodDelete:
+		case isRemove(r):
 			deleteCalls++
 			w.WriteHeader(http.StatusOK)
 		default:
@@ -143,7 +160,7 @@ func TestClearHumanFactors_RequiresUserID(t *testing.T) {
 // second factors.
 func TestClearHumanFactors_ListAuthFactorsError(t *testing.T) {
 	cfg := setupManagementServer(t, func(w http.ResponseWriter, r *http.Request) {
-		if strings.HasSuffix(r.URL.Path, "/auth_factors/_search") {
+		if strings.HasSuffix(r.URL.Path, "/ListAuthenticationFactors") {
 			w.WriteHeader(http.StatusInternalServerError)
 			return
 		}
@@ -162,9 +179,9 @@ func TestClearHumanFactors_ListAuthFactorsError(t *testing.T) {
 func TestClearHumanFactors_ListPasswordlessError(t *testing.T) {
 	cfg := setupManagementServer(t, func(w http.ResponseWriter, r *http.Request) {
 		switch {
-		case strings.HasSuffix(r.URL.Path, "/auth_factors/_search"):
+		case strings.HasSuffix(r.URL.Path, "/ListAuthenticationFactors"):
 			_, _ = w.Write([]byte(`{"result":[]}`))
-		case strings.HasSuffix(r.URL.Path, "/passwordless/_search"):
+		case strings.HasSuffix(r.URL.Path, "/ListPasskeys"):
 			w.WriteHeader(http.StatusInternalServerError)
 		default:
 			http.NotFound(w, r)
@@ -184,11 +201,11 @@ func TestClearHumanFactors_ListPasswordlessError(t *testing.T) {
 func TestClearHumanFactors_RemoveNotFoundIsIdempotent(t *testing.T) {
 	cfg := setupManagementServer(t, func(w http.ResponseWriter, r *http.Request) {
 		switch {
-		case r.Method == http.MethodPost && strings.HasSuffix(r.URL.Path, "/auth_factors/_search"):
+		case strings.HasSuffix(r.URL.Path, "/ListAuthenticationFactors"):
 			_, _ = w.Write([]byte(`{"result":[{"state":"AUTH_FACTOR_STATE_READY","otp":{}}]}`))
-		case r.Method == http.MethodPost && strings.HasSuffix(r.URL.Path, "/passwordless/_search"):
+		case strings.HasSuffix(r.URL.Path, "/ListPasskeys"):
 			_, _ = w.Write([]byte(`{"result":[]}`))
-		case r.Method == http.MethodDelete:
+		case isRemove(r):
 			w.WriteHeader(http.StatusNotFound)
 		default:
 			http.NotFound(w, r)
@@ -211,9 +228,9 @@ func TestClearHumanFactors_RemoveNotFoundIsIdempotent(t *testing.T) {
 func TestClearHumanFactors_RemoveU2FNonNotFoundErrorFails(t *testing.T) {
 	cfg := setupManagementServer(t, func(w http.ResponseWriter, r *http.Request) {
 		switch {
-		case r.Method == http.MethodPost && strings.HasSuffix(r.URL.Path, "/auth_factors/_search"):
+		case strings.HasSuffix(r.URL.Path, "/ListAuthenticationFactors"):
 			_, _ = w.Write([]byte(`{"result":[{"state":"AUTH_FACTOR_STATE_READY","u2f":{"id":"u2f-1","name":"key"}}]}`))
-		case r.Method == http.MethodDelete:
+		case isRemove(r):
 			w.WriteHeader(http.StatusInternalServerError)
 		default:
 			http.NotFound(w, r)
@@ -233,9 +250,9 @@ func TestClearHumanFactors_RemoveU2FNonNotFoundErrorFails(t *testing.T) {
 func TestClearHumanFactors_RemoveOTPNonNotFoundErrorFails(t *testing.T) {
 	cfg := setupManagementServer(t, func(w http.ResponseWriter, r *http.Request) {
 		switch {
-		case r.Method == http.MethodPost && strings.HasSuffix(r.URL.Path, "/auth_factors/_search"):
+		case strings.HasSuffix(r.URL.Path, "/ListAuthenticationFactors"):
 			_, _ = w.Write([]byte(`{"result":[{"state":"AUTH_FACTOR_STATE_READY","otp":{}}]}`))
-		case r.Method == http.MethodDelete:
+		case isRemove(r):
 			w.WriteHeader(http.StatusInternalServerError)
 		default:
 			http.NotFound(w, r)
@@ -277,11 +294,11 @@ func TestClearHumanFactors_SkipsEntryWithEmptyID(t *testing.T) {
 			var deleteCalls int
 			cfg := setupManagementServer(t, func(w http.ResponseWriter, r *http.Request) {
 				switch {
-				case r.Method == http.MethodPost && strings.HasSuffix(r.URL.Path, "/auth_factors/_search"):
+				case strings.HasSuffix(r.URL.Path, "/ListAuthenticationFactors"):
 					_, _ = w.Write([]byte(tt.factorsBody))
-				case r.Method == http.MethodPost && strings.HasSuffix(r.URL.Path, "/passwordless/_search"):
+				case strings.HasSuffix(r.URL.Path, "/ListPasskeys"):
 					_, _ = w.Write([]byte(tt.passkeysBody))
-				case r.Method == http.MethodDelete:
+				case isRemove(r):
 					deleteCalls++
 					w.WriteHeader(http.StatusOK)
 				default:
@@ -310,11 +327,11 @@ func TestClearHumanFactors_SkipsEntryWithEmptyID(t *testing.T) {
 func TestClearHumanFactors_RemovePasskeyNonNotFoundErrorFails(t *testing.T) {
 	cfg := setupManagementServer(t, func(w http.ResponseWriter, r *http.Request) {
 		switch {
-		case r.Method == http.MethodPost && strings.HasSuffix(r.URL.Path, "/auth_factors/_search"):
+		case strings.HasSuffix(r.URL.Path, "/ListAuthenticationFactors"):
 			_, _ = w.Write([]byte(`{"result":[]}`))
-		case r.Method == http.MethodPost && strings.HasSuffix(r.URL.Path, "/passwordless/_search"):
+		case strings.HasSuffix(r.URL.Path, "/ListPasskeys"):
 			_, _ = w.Write([]byte(`{"result":[{"id":"pk-1","state":"AUTH_FACTOR_STATE_READY","name":"face"}]}`))
-		case r.Method == http.MethodDelete:
+		case isRemove(r):
 			w.WriteHeader(http.StatusInternalServerError)
 		default:
 			http.NotFound(w, r)

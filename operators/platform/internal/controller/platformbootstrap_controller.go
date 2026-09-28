@@ -289,6 +289,15 @@ func (r *PlatformBootstrapReconciler) Reconcile(ctx context.Context, req ctrl.Re
 		return result, err
 	}
 
+	// Step 12: keep the declared service accounts and the login client the
+	// only machine Zitadel administrators (ADR-0093 decision 6, hosted#207).
+	// Reads the same service-account list as Step 2b, so it only removes a
+	// machine member once every declared one is known.
+	if result, err := r.reconcileMachineAdminsScoped(ctx, &pb, logger); err != nil || !result.IsZero() {
+		_ = r.statusUpdate(ctx, &pb)
+		return result, err
+	}
+
 	// Top-level Ready rollup.
 	r.aggregateReady(&pb)
 	pb.Status.ObservedGeneration = pb.Generation
@@ -675,6 +684,7 @@ func (r *PlatformBootstrapReconciler) aggregateReady(pb *gibsonv1alpha1.Platform
 		gibsonv1alpha1.ConditionSMTPProviderReady,
 		gibsonv1alpha1.ConditionPlatformOwnerReady,
 		gibsonv1alpha1.ConditionHumanAdminsScoped,
+		gibsonv1alpha1.ConditionMachineAdminsScoped,
 	}
 	for _, cType := range all {
 		c := findCondition(pb.Status.Conditions, cType)

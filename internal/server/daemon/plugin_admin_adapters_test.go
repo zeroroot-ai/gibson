@@ -66,9 +66,6 @@ func (s *stubIDP) GetUserProfile(_ context.Context, _ string) (*idp.UserProfile,
 func (s *stubIDP) UpdateUserProfile(_ context.Context, _ string, _ idp.UpdateUserProfileRequest) (*idp.UserProfile, error) {
 	return nil, idp.ErrNotFound
 }
-func (s *stubIDP) EnsureHumanUser(_ context.Context, _ idp.EnsureHumanUserRequest) (string, error) {
-	return "", nil
-}
 func (s *stubIDP) CreateSetupLink(_ context.Context, _, _, _ string) (string, error) {
 	return "", nil
 }

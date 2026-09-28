@@ -78,22 +78,6 @@ type ServiceAccount struct {
 	Description string
 }
 
-// EnsureHumanUserRequest carries parameters for finding-or-creating a human
-// user in the IdP organization that bounds a tenant.
-type EnsureHumanUserRequest struct {
-	// OrgID is the IdP organization id the user belongs to / is created in.
-	OrgID string
-	// Email is the user's email address (also the login name). Required.
-	Email string
-	// EmailVerified marks the email verified at create-time. Set this true
-	// only when the CALLER has already proven control of the address by some
-	// other means — e.g. the invitee already redeemed a token this install
-	// emailed to that exact address (MembershipService.AcceptInvitation).
-	// Leaving it false lets the IdP mint its own verification email, which
-	// is correct when nothing has proven the address yet.
-	EmailVerified bool
-}
-
 // CreateHumanUserRequest carries parameters for provisioning a password-bearing
 // human user during self-serve signup. It mirrors the request the dashboard
 // signup-bot previously sent (createHumanUser): a profile, a verified-at-create

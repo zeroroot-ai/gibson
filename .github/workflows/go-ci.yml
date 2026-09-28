@@ -279,6 +279,35 @@ jobs:
         with:
           node-version: '22'
 
+      # gibson#308: this step took 8 minutes on every PR run. Two caches cut
+      # it. Both are keyed by content, never by anything a runner invents.
+      #
+      # 1. bin/tools holds golangci-lint and deadcode, which `make` compiles
+      #    from source on every run (about 2 minutes) because the Makefile
+      #    must build them with go.mod's own toolchain. The Makefile stamps
+      #    them with GOLANGCI_LINT_VERSION and go.mod's `go` directive, so
+      #    the key hashes exactly those two files.
+      #
+      # 2. ~/.cache/golangci-lint is the analysis cache. A PR branch cannot
+      #    read a cache another PR saved, only one saved on main, so
+      #    lint-cache-warm.yml refreshes it on every push to main. The key
+      #    carries the commit so each run saves its own entry, and
+      #    restore-keys fall back to the newest entry for the same inputs.
+      - name: Restore the pinned lint tool binaries
+        uses: actions/cache@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
+        with:
+          path: bin/tools
+          key: lint-tools-${{ runner.os }}-${{ hashFiles('Makefile', 'go.mod') }}
+
+      - name: Restore the golangci-lint analysis cache
+        uses: actions/cache@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
+        with:
+          path: ~/.cache/golangci-lint
+          key: golangci-cache-${{ runner.os }}-${{ hashFiles('go.sum', '.golangci.yml', 'Makefile') }}-${{ github.sha }}
+          restore-keys: |
+            golangci-cache-${{ runner.os }}-${{ hashFiles('go.sum', '.golangci.yml', 'Makefile') }}-
+            golangci-cache-${{ runner.os }}-
+
       - name: Lint (blocking, new-from-merge-base)
         run: make lint LINT_BASE=origin/${{ github.base_ref || 'main' }}
 

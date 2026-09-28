@@ -50,13 +50,6 @@ type AdminClient interface {
 	// Only display_name and preferred_locale are editable; email is immutable.
 	UpdateUserProfile(ctx context.Context, accountID string, req UpdateUserProfileRequest) (*UserProfile, error)
 
-	// EnsureHumanUser finds the human user with the given email in the IdP
-	// organization, or creates one (triggering the IdP's verification /
-	// credential-setup email). Returns the user id. Idempotent: an existing
-	// user is found and returned rather than duplicated. Used by
-	// MembershipService.AcceptInvitation to provision an invited member.
-	EnsureHumanUser(ctx context.Context, req EnsureHumanUserRequest) (userID string, err error)
-
 	// CreateSetupLink mints a one-time Zitadel setup-link code for userID
 	// (the same invite-code mechanism ADR-0093 uses for the Platform owner,
 	// gibson#240/hosted#201) and returns the ready-to-use URL. The code is
@@ -77,9 +70,10 @@ type AdminClient interface {
 	CreateSetupLink(ctx context.Context, orgID, userID, appURL string) (link string, err error)
 
 	// CreateHumanUser provisions a password-bearing founding-owner human user
-	// during self-serve signup. Unlike EnsureHumanUser (invitation flow, no
-	// password — the invitee sets credentials via the emailed code), this sets
-	// the password the user chose so they can sign in immediately.
+	// during self-serve signup. Unlike EnsureHumanUserNoPassword (the Platform
+	// owner, a tenant Owner and every invitee, who set credentials through a
+	// setup link), this sets the password the user chose so they can sign in
+	// immediately.
 	//
 	// CREATE-ONLY. If a user with the email already exists, implementations
 	// MUST return ErrAlreadyExists and MUST NOT touch that user. Signup never
