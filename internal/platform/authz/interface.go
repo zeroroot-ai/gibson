@@ -162,9 +162,10 @@ type ConditionalWriter interface {
 	// call is a no-op (no error returned).
 	WriteConditional(ctx context.Context, t ConditionalTuple) error
 
-	// UpdateConditionalTuple atomically replaces the context of an existing
-	// condition-bearing tuple by deleting the old tuple and writing the new one
-	// in a single FGA WriteRequest.
+	// UpdateConditionalTuple replaces the context of an existing
+	// condition-bearing tuple by deleting the old tuple and writing the new
+	// one, as two FGA Write requests: OpenFGA refuses one request that deletes
+	// and writes the same key.
 	//
 	// If no tuple with the given (user, relation, object) exists yet (pre-backfill
 	// callers), UpdateConditionalTuple falls back to a plain WriteConditional so

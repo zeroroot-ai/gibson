@@ -11,6 +11,7 @@ package authz
 import (
 	"context"
 	"encoding/json"
+	"fmt"
 	"io"
 	"log/slog"
 	"net/http"
@@ -230,11 +231,64 @@ type fgaWriteResponse struct {
 	body   string
 }
 
-func TestUpdateConditionalTuple_SendsDeleteAndWrite(t *testing.T) {
-	// UpdateConditionalTuple should issue a single Write request containing
-	// both Writes and Deletes. The SDK sends them in one call.
-	capture := &capturedWrite{}
-	srv := fgaWriteServer(t, http.StatusOK, "{}", capture)
+// strictWriteServer is a fake OpenFGA /write endpoint that enforces the rule
+// the real server enforces: one request may not delete and write the same
+// (user, relation, object) key. It answers such a request exactly as OpenFGA
+// did in identity exit test run 36494094749 (hosted#208), and records the
+// shape of every accepted request as "deletes=N writes=M".
+func strictWriteServer(t *testing.T, shapes *[]string) *httptest.Server {
+	t.Helper()
+	type key struct {
+		User     string `json:"user"`
+		Relation string `json:"relation"`
+		Object   string `json:"object"`
+	}
+	return httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if !strings.HasSuffix(r.URL.Path, "/write") {
+			w.WriteHeader(http.StatusOK)
+			_, _ = w.Write([]byte("{}"))
+			return
+		}
+		var body struct {
+			Writes *struct {
+				TupleKeys []key `json:"tuple_keys"`
+			} `json:"writes"`
+			Deletes *struct {
+				TupleKeys []key `json:"tuple_keys"`
+			} `json:"deletes"`
+		}
+		raw, _ := io.ReadAll(r.Body)
+		_ = json.Unmarshal(raw, &body)
+		var writes, deletes []key
+		if body.Writes != nil {
+			writes = body.Writes.TupleKeys
+		}
+		if body.Deletes != nil {
+			deletes = body.Deletes.TupleKeys
+		}
+		for _, d := range deletes {
+			for _, wk := range writes {
+				if d == wk {
+					w.Header().Set("Content-Type", "application/json")
+					w.WriteHeader(http.StatusBadRequest)
+					_, _ = w.Write([]byte(`{"code":"cannot_allow_duplicate_tuples_in_one_request","message":"duplicate tuple in write"}`))
+					return
+				}
+			}
+		}
+		*shapes = append(*shapes, fmt.Sprintf("deletes=%d writes=%d", len(deletes), len(writes)))
+		w.Header().Set("Content-Type", "application/json")
+		w.WriteHeader(http.StatusOK)
+		_, _ = w.Write([]byte("{}"))
+	}))
+}
+
+// TestUpdateConditionalTuple_DeletesThenWritesInTwoRequests pins that the
+// update never sends one request that deletes and writes the same key, which
+// OpenFGA refuses, so every revocation stamp failed (hosted#208).
+func TestUpdateConditionalTuple_DeletesThenWritesInTwoRequests(t *testing.T) {
+	var shapes []string
+	srv := strictWriteServer(t, &shapes)
 	defer srv.Close()
 
 	az := newTestFgaAuthorizer(t, srv.URL)
@@ -251,19 +305,9 @@ func TestUpdateConditionalTuple_SendsDeleteAndWrite(t *testing.T) {
 	if err := az.UpdateConditionalTuple(context.Background(), tuple); err != nil {
 		t.Fatalf("UpdateConditionalTuple: unexpected error: %v", err)
 	}
-	if capture.called.Load() == 0 {
-		t.Fatal("expected write endpoint to be called")
-	}
-
-	// The SDK should include both writes and deletes in the body.
-	// For TransactionMode (default), they're in separate calls but the SDK
-	// sends them sequentially. What we care about is that the logic runs at all.
-	// Verify the write leg includes the right tuple.
-	tupleKeys := extractTupleKeys(t, capture.body)
-	if len(tupleKeys) == 0 {
-		// May be in deletes instead on first call if delete comes first.
-		// Either path is fine — just confirm the endpoint was hit.
-		t.Logf("body keys: %v", capture.body)
+	want := []string{"deletes=1 writes=0", "deletes=0 writes=1"}
+	if strings.Join(shapes, ",") != strings.Join(want, ",") {
+		t.Fatalf("write requests = %v, want %v (delete, then write)", shapes, want)
 	}
 }
 
