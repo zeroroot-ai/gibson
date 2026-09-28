@@ -20,6 +20,9 @@ internal/engine/agent/delegation.go	registryToolExecutor.ExecuteTool
 internal/engine/agent/types.go	NewEvidence
 internal/engine/agent/types.go	NewFinding
 internal/engine/agent/types.go	NewTask
+internal/engine/brain/belief_attack_graph.go	assignTopologicalPotential
+internal/engine/brain/belief_attack_graph.go	DeriveAttackGraph
+internal/engine/brain/belief_attack_graph.go	sortEdges
 internal/engine/brain/orchestrator.go	Orchestrator.System
 internal/engine/braintrain/trainer.go	TrainTenant
 internal/engine/braintrain/train.go	autoOutcomeForHost
