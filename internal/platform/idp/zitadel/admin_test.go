@@ -340,7 +340,7 @@ func TestUpdateUserProfile_UsesTheUsersOwnOrg(t *testing.T) {
 	if err != nil {
 		t.Fatalf("New: %v", err)
 	}
-	defer client.Close()
+	defer func() { _ = client.Close() }()
 
 	if _, err := client.UpdateUserProfile(context.Background(), "user-xyz", idp.UpdateUserProfileRequest{DisplayName: "Alice"}); err != nil {
 		t.Fatalf("UpdateUserProfile: %v", err)
@@ -366,7 +366,7 @@ func TestUserProfile_OwningOrgUnknownIsAnError(t *testing.T) {
 	if err != nil {
 		t.Fatalf("New: %v", err)
 	}
-	defer client.Close()
+	defer func() { _ = client.Close() }()
 
 	if _, err := client.GetUserProfile(context.Background(), "user-xyz"); err == nil {
 		t.Error("GetUserProfile: expected an error for a user with no owning org")
