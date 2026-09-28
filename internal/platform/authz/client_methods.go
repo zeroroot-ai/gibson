@@ -552,19 +552,19 @@ func (f *fgaAuthorizer) WriteConditional(ctx context.Context, t ConditionalTuple
 	return nil
 }
 
-// UpdateConditionalTuple atomically replaces a conditioned tuple's context
-// by issuing a delete+write in a single FGA WriteRequest.
+// UpdateConditionalTuple replaces a conditioned tuple's context: it deletes
+// the (user, relation, object) key, then writes it again with the new
+// context, as two FGA Write requests.
 //
-// OpenFGA has no in-place update for tuple context: the old conditioned tuple
-// must be deleted (via the TupleKeyWithoutCondition shape) and the new one
-// must be written in the same transaction. Both operations are included in a
-// single Write call so the store never sees a gap.
+// OpenFGA has no in-place update for tuple context, and it refuses a single
+// Write whose deletes and writes name the same key
+// (cannot_allow_duplicate_tuples_in_one_request). So the key is briefly
+// absent between the two requests.
 //
-// If the existing tuple is absent (pre-backfill state), the delete portion
-// of the WriteRequest returns "tuple to be deleted did not exist". In that
-// case UpdateConditionalTuple falls back to a plain WriteConditional so
-// callers — including RevokeUserSessions — never need to distinguish between
-// "first write" and "update".
+// If the existing tuple is absent (pre-backfill state), the delete returns
+// "tuple to be deleted did not exist", which is benign: the write then
+// creates it. Callers — including RevokeUserSessions — never need to
+// distinguish between "first write" and "update".
 //
 // Spec: instant-session-revocation (gibson#627 Slice 2).
 func (f *fgaAuthorizer) UpdateConditionalTuple(ctx context.Context, t ConditionalTuple) error {
@@ -588,53 +588,42 @@ func (f *fgaAuthorizer) UpdateConditionalTuple(ctx context.Context, t Conditiona
 	callCtx, cancel := f.callContext(spanCtx)
 	defer cancel()
 
-	writeKey := fgaclient.ClientTupleKey{
-		User:     t.User,
-		Relation: t.Relation,
-		Object:   t.Object,
-		Condition: &fgasdk.RelationshipCondition{
-			Name:    t.ConditionName,
-			Context: conditionContextPtr(t.ConditionContext),
-		},
-	}
 	deleteKey := fgaclient.ClientTupleKeyWithoutCondition{
 		User:     t.User,
 		Relation: t.Relation,
 		Object:   t.Object,
 	}
 
+	// Two requests, never one. OpenFGA refuses a Write whose deletes and
+	// writes name the same (user, relation, object) key
+	// (cannot_allow_duplicate_tuples_in_one_request), and a conditioned
+	// tuple's context can only change by deleting the key and writing it
+	// again. The single combined request this method used to send was
+	// always refused, so no revocation stamp ever landed (hosted#208).
+	//
+	// Between the two requests the key is briefly absent. The per-tenant
+	// session gate denies an absent tuple; the user-scoped gate allows one
+	// (the sign-in bootstrap). A missing tuple on delete is benign: the
+	// write below then creates it.
 	_, err := f.client.Write(callCtx).Body(fgaclient.ClientWriteRequest{
-		Writes:  []fgaclient.ClientTupleKey{writeKey},
 		Deletes: []fgaclient.ClientTupleKeyWithoutCondition{deleteKey},
 	}).Execute()
 
 	durationMs := time.Since(start).Milliseconds()
 	span.SetAttributes(attribute.Int64("authz.duration_ms", durationMs))
 
-	if err != nil {
-		// If the delete leg fails because the tuple doesn't yet exist, fall
-		// back to a plain conditional write. This covers the pre-backfill
-		// window where RevokeUserSessions runs before the backfill Job has
-		// seeded the initial active_session tuple.
-		if isTupleNotFoundError(err) {
-			span.SetStatus(codes.Ok, "")
-			f.logger.Debug("authz: UpdateConditionalTuple fallback to WriteConditional (no prior tuple)",
-				"user", t.User, "relation", t.Relation, "object", t.Object,
-				"condition", t.ConditionName, "duration_ms", durationMs,
-			)
-			return f.WriteConditional(ctx, t)
-		}
+	if err != nil && !isTupleNotFoundError(err) {
 		typedErr := mapSDKError(err)
-		f.recordSpanError(span, typedErr, "UpdateConditionalTuple")
+		f.recordSpanError(span, typedErr, "UpdateConditionalTuple:delete")
 		return typedErr
 	}
 
 	span.SetStatus(codes.Ok, "")
-	f.logger.Debug("authz: UpdateConditionalTuple",
+	f.logger.Debug("authz: UpdateConditionalTuple deleted the prior tuple",
 		"user", t.User, "relation", t.Relation, "object", t.Object,
-		"condition", t.ConditionName, "duration_ms", durationMs,
+		"condition", t.ConditionName, "prior_absent", err != nil, "duration_ms", durationMs,
 	)
-	return nil
+	return f.WriteConditional(ctx, t)
 }
 
 // WriteAndDelete writes and deletes plain (unconditioned) tuples in a single
