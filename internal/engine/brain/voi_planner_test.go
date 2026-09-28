@@ -268,3 +268,108 @@ func (s *slowBeliefSubstrate) calls() int {
 	defer s.mu.Unlock()
 	return s.n
 }
+
+// -----------------------------------------------------------------------
+// gibson#341: VoIPlanRequested/VoIPlanned were never registered in
+// timeline_codec.go (registerEvent + dereferenceEvent), and VoIPlanState was
+// missing from world_snapshot.go's round trip. In-memory replay
+// (TestVoIWorker_ReplayReproducesThePlan above, via Replay()->Reduce
+// directly) was never affected — the gap is specifically the DURABLE store
+// path (EncodeEvent/DecodeEvent, used by a TimelineStore) and the
+// snapshot-and-trim path (ADR-0011's SnapshotWorld/RestoreWorld), both of
+// which a live daemon actually uses and neither of which Replay exercises.
+// -----------------------------------------------------------------------
+
+// TestTimelineCodec_EncodeDecode_VoIPlanRequested proves a VoIPlanRequested
+// event survives the JSON envelope round trip DecodeEvent(EncodeEvent(ev))
+// uses for durable persistence — this failed with "unknown event kind
+// \"voi.plan.requested\"" before the registerEvent/dereferenceEvent entries
+// existed.
+func TestTimelineCodec_EncodeDecode_VoIPlanRequested(t *testing.T) {
+	want := VoIPlanRequested{MissionID: "m1", Cursor: 3}
+	data, err := EncodeEvent(want)
+	if err != nil {
+		t.Fatalf("EncodeEvent: %v", err)
+	}
+	got, err := DecodeEvent(data)
+	if err != nil {
+		t.Fatalf("DecodeEvent: %v", err)
+	}
+	if !reflect.DeepEqual(got, Event(want)) {
+		t.Fatalf("round trip:\n got  %+v\nwant %+v", got, want)
+	}
+}
+
+// TestTimelineCodec_EncodeDecode_VoIPlanned proves a VoIPlanned event
+// survives the same round trip, including its nested Candidates slice —
+// proving the payload, not just the envelope's kind string, decodes
+// correctly.
+func TestTimelineCodec_EncodeDecode_VoIPlanned(t *testing.T) {
+	want := VoIPlanned{
+		MissionID: "m1",
+		Cursor:    3,
+		Candidates: []VoICandidate{
+			{Kind: VoICandidateHypothesis, RefID: "hyp-1", InfoGain: 0.5, Value: 0.9},
+			{Kind: VoICandidateEvidence, RefID: "host-1", InfoGain: 0.2, Value: 0.3},
+		},
+	}
+	data, err := EncodeEvent(want)
+	if err != nil {
+		t.Fatalf("EncodeEvent: %v", err)
+	}
+	got, err := DecodeEvent(data)
+	if err != nil {
+		t.Fatalf("DecodeEvent: %v", err)
+	}
+	if !reflect.DeepEqual(got, Event(want)) {
+		t.Fatalf("round trip:\n got  %+v\nwant %+v", got, want)
+	}
+}
+
+// TestSnapshotRestore_RoundTripsVoIPlanState_InFlight proves an in-flight
+// VoI plan (requested, not yet completed) survives a snapshot-and-restore
+// cycle (ADR-0011) — the exact scenario a snapshot-and-trim right after a
+// VoIGateSystem request, before VoIWorker completes it, would hit. Before
+// this fix, VoIPlanState had no entry in worldSnapshotData at all, so
+// RestoreWorld silently produced a World with no memory of it ever having
+// been requested.
+func TestSnapshotRestore_RoundTripsVoIPlanState_InFlight(t *testing.T) {
+	w := NewWorld("t")
+	Reduce(w, VoIPlanRequested{MissionID: "m1", Cursor: 2})
+
+	restored, err := RestoreWorld(SnapshotWorld(w, "seq-1"), "t")
+	if err != nil {
+		t.Fatalf("restore: %v", err)
+	}
+	if got, want := restored.VoIPlanSnapshot(), w.VoIPlanSnapshot(); !reflect.DeepEqual(got, want) {
+		t.Fatalf("VoI plan state did not round-trip:\n got  %+v\nwant %+v", got, want)
+	}
+	if len(restored.VoIPlanSnapshot()) != 1 || !restored.VoIPlanSnapshot()[0].InFlight {
+		t.Fatalf("want the restored plan still in flight, got %+v", restored.VoIPlanSnapshot())
+	}
+}
+
+// TestSnapshotRestore_RoundTripsVoIPlanState_Completed proves a completed VoI
+// plan (with its ranked candidates) survives the same round trip.
+func TestSnapshotRestore_RoundTripsVoIPlanState_Completed(t *testing.T) {
+	w := NewWorld("t")
+	Reduce(w, VoIPlanRequested{MissionID: "m1", Cursor: 2})
+	Reduce(w, VoIPlanned{
+		MissionID: "m1",
+		Cursor:    2,
+		Candidates: []VoICandidate{
+			{Kind: VoICandidateHypothesis, RefID: "hyp-1", Value: 0.9},
+		},
+	})
+
+	restored, err := RestoreWorld(SnapshotWorld(w, "seq-1"), "t")
+	if err != nil {
+		t.Fatalf("restore: %v", err)
+	}
+	if got, want := restored.VoIPlanSnapshot(), w.VoIPlanSnapshot(); !reflect.DeepEqual(got, want) {
+		t.Fatalf("VoI plan state did not round-trip:\n got  %+v\nwant %+v", got, want)
+	}
+	if restored.VoIPlanSnapshot()[0].InFlight {
+		t.Fatal("want the restored plan NOT in flight (it completed)")
+	}
+}
