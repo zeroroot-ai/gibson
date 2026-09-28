@@ -256,15 +256,11 @@ func ingestObservation(reg *brain.Registry) harness.ObservationSink {
 			// EntitySighting does: References are stored as reported, not
 			// resolved against the Taxonomy here (a later slice's job).
 			//
-			// HypothesisID and Technique are NOT wired here yet: they are new
-			// HypothesisObservation fields (sdk#89/#88) that landed on the
-			// SDK's epic/intelligence-layer branch after this daemon's pinned
-			// SDK release (v0.180.0). hyp.GetHypothesisId() / hyp.GetTechnique()
-			// do not exist on that pinned version and do not compile against
-			// it. Wire both the moment the SDK dependency bumps past the
-			// release that includes them — brain.Hypothesis/HypothesisObserved
-			// already carry HypothesisID (gibson#339's join key) and are ready
-			// to receive it.
+			// HypothesisID (gibson#339's join key across Hypothesis, Bet and
+			// BetSettlement) and Technique (reputation keying,
+			// gibson#333/#284) are wired here: go.mod pins SDK v0.181.0+,
+			// which carries HypothesisObservation.hypothesis_id (sdk#89) and
+			// .technique (sdk#88).
 			hyp := o.Hypothesis
 			refs := make([]brain.ReferencedEntityRef, 0, len(hyp.GetReferences()))
 			for _, r := range hyp.GetReferences() {
@@ -276,13 +272,15 @@ func ingestObservation(reg *brain.Registry) harness.ObservationSink {
 				})
 			}
 			reg.For(tenant).Submit(brain.HypothesisObserved{
-				MissionID:  missionID,
-				RunID:      runID,
-				ScopeID:    scope,
-				Proposer:   hyp.GetProposer(),
-				Confidence: hyp.GetConfidence(),
-				Claim:      hyp.GetClaim(),
-				References: refs,
+				MissionID:    missionID,
+				RunID:        runID,
+				ScopeID:      scope,
+				Proposer:     hyp.GetProposer(),
+				Confidence:   hyp.GetConfidence(),
+				Claim:        hyp.GetClaim(),
+				HypothesisID: hyp.GetHypothesisId(),
+				Technique:    hyp.GetTechnique(),
+				References:   refs,
 			})
 		case *harnesspb.ObserveRequest_LifecycleEntity:
 			// A typed application-lifecycle entity an agent reported (sdk#537).

@@ -101,6 +101,17 @@ type Hypothesis struct {
 	// (gibson#339's ListOpenBets). Same progressive-enrichment rule as
 	// MissionID.
 	RunID string
+	// Technique names the technique this hypothesis exercises
+	// (HypothesisObservation.technique, sdk#88). Reputation keys on
+	// technique x environment (ADR-0022, gibson#333/#284), so this must ride
+	// on the Hypothesis the same way it already rides on Bet.
+	// Progressive-enrichment, same rule as HypothesisID: kept from whichever
+	// observation first supplied one, never reassigned — a later,
+	// possibly-differently-labeled re-observation must not silently
+	// repoint reputation credit. May be empty: a Hypothesis with no
+	// technique carries no reputation signal (resolves to the neutral
+	// prior), the same behavior as before this field existed.
+	Technique string
 }
 
 // HypothesisObserved records that an agent proposed a claim about the target
@@ -116,6 +127,7 @@ type HypothesisObserved struct {
 	Confidence   float64
 	Claim        string
 	HypothesisID string
+	Technique    string
 	References   []ReferencedEntityRef
 }
 
@@ -154,6 +166,9 @@ func applyHypothesisObserved(w *World, e HypothesisObserved) {
 		if h.HypothesisID == "" {
 			h.HypothesisID = e.HypothesisID
 		}
+		if h.Technique == "" {
+			h.Technique = e.Technique
+		}
 		q.Close()
 		return
 	}
@@ -169,6 +184,7 @@ func applyHypothesisObserved(w *World, e HypothesisObserved) {
 		MissionID:    e.MissionID,
 		RunID:        e.RunID,
 		HypothesisID: e.HypothesisID,
+		Technique:    e.Technique,
 	})
 }
 
@@ -209,6 +225,7 @@ type HypothesisSnapshot struct {
 	MissionID    string
 	RunID        string
 	HypothesisID string
+	Technique    string
 }
 
 // HypothesisSnapshot returns hypotheses in deterministic (ScopeID, Claim)
@@ -228,6 +245,7 @@ func (w *World) HypothesisSnapshot() []HypothesisSnapshot {
 			MissionID:    h.MissionID,
 			RunID:        h.RunID,
 			HypothesisID: h.HypothesisID,
+			Technique:    h.Technique,
 		})
 	}
 	sort.Slice(out, func(i, j int) bool {

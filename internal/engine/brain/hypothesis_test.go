@@ -21,6 +21,7 @@ func TestHypothesisObserved_CreatesNewHypothesis(t *testing.T) {
 		Confidence:   0.6,
 		Claim:        "port 6443 on this host is unauthenticated",
 		HypothesisID: "hyp-6443",
+		Technique:    "unauthenticated-service-probe",
 		References: []ReferencedEntityRef{
 			{Label: "Host", IDProperties: map[string]string{"address": "10.0.0.1"}},
 		},
@@ -40,6 +41,7 @@ func TestHypothesisObserved_CreatesNewHypothesis(t *testing.T) {
 			MissionID:    "m1",
 			RunID:        "run-1",
 			HypothesisID: "hyp-6443",
+			Technique:    "unauthenticated-service-probe",
 		},
 	}
 	if !reflect.DeepEqual(got, want) {
@@ -78,15 +80,17 @@ func TestHypothesisObserved_MergesByScopeAndClaim(t *testing.T) {
 }
 
 // TestHypothesisObserved_HypothesisIDAndRunIDKeepFirstNonEmpty proves
-// HypothesisID and RunID follow the same progressive-enrichment rule as
-// MissionID/Proposer: kept from whichever observation first supplied one,
-// never overwritten by a later observation of the same claim. HypothesisID
-// is the one join key across Hypothesis, Bet and BetSettlement (gibson#339)
-// — an agent that proposes without an id and a second agent that re-observes
-// the same claim WITH one must not have the second agent's id silently
-// discarded (it is the only source of a bettable identity so far), but a
-// hypothesis that already has an id must never have it reassigned out from
-// under an in-flight Bet.
+// HypothesisID, RunID and Technique follow the same progressive-enrichment
+// rule as MissionID/Proposer: kept from whichever observation first supplied
+// one, never overwritten by a later observation of the same claim.
+// HypothesisID is the one join key across Hypothesis, Bet and BetSettlement
+// (gibson#339) — an agent that proposes without an id and a second agent
+// that re-observes the same claim WITH one must not have the second agent's
+// id silently discarded (it is the only source of a bettable identity so
+// far), but a hypothesis that already has an id must never have it
+// reassigned out from under an in-flight Bet. Technique feeds reputation
+// keying (gibson#333/#284) the same way, so a later, possibly-differently-
+// labeled re-observation must not silently repoint reputation credit.
 func TestHypothesisObserved_HypothesisIDAndRunIDKeepFirstNonEmpty(t *testing.T) {
 	w := NewWorld("t")
 
@@ -95,11 +99,11 @@ func TestHypothesisObserved_HypothesisIDAndRunIDKeepFirstNonEmpty(t *testing.T) 
 	})
 	Reduce(w, HypothesisObserved{
 		ScopeID: "s1", Claim: "the admin panel is reachable without auth",
-		HypothesisID: "hyp-admin-panel", RunID: "run-7",
+		HypothesisID: "hyp-admin-panel", RunID: "run-7", Technique: "auth-bypass-probe",
 	})
 	Reduce(w, HypothesisObserved{
 		ScopeID: "s1", Claim: "the admin panel is reachable without auth",
-		HypothesisID: "hyp-should-not-win", RunID: "run-should-not-win",
+		HypothesisID: "hyp-should-not-win", RunID: "run-should-not-win", Technique: "should-not-win",
 	})
 
 	got := w.HypothesisSnapshot()
@@ -111,6 +115,9 @@ func TestHypothesisObserved_HypothesisIDAndRunIDKeepFirstNonEmpty(t *testing.T) 
 	}
 	if got[0].RunID != "run-7" {
 		t.Fatalf("run id must keep the first non-empty value, got %q", got[0].RunID)
+	}
+	if got[0].Technique != "auth-bypass-probe" {
+		t.Fatalf("technique must keep the first non-empty value, got %q", got[0].Technique)
 	}
 }
 
@@ -207,6 +214,7 @@ func TestSnapshotRestore_RoundTripsHypotheses(t *testing.T) {
 		ScopeID: "s1", MissionID: "m1", RunID: "run-1", Proposer: "recon-agent", Confidence: 0.6,
 		Claim:        "port 6443 is unauthenticated",
 		HypothesisID: "hyp-6443",
+		Technique:    "unauthenticated-service-probe",
 		References:   []ReferencedEntityRef{{Label: "Host", IDProperties: map[string]string{"address": "10.0.0.1"}}},
 	})
 	Reduce(w, HypothesisObserved{ScopeID: "s1", Claim: "a second claim"})
