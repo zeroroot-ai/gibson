@@ -34,14 +34,19 @@ type NodeKind string
 
 const (
 	// NodeKindHost is a Host entity (ADR-0005) — the belief seed content.
-	NodeKindHost NodeKind = "host"
+	// Capitalized to match the taxonomy/ontology node-type convention
+	// (taxonomy.go's hostLabels, ontology.NodeBeliefSchema.NodeType, every
+	// InfraNode.Kind gibson#286/#287 produce all use "Host", never "host") —
+	// NodeKind values are meant to interoperate directly with those strings,
+	// not with a second, differently-cased vocabulary.
+	NodeKindHost NodeKind = "Host"
 	// NodeKindClaim is a hypothesis/bet node: belief here is P(claim valid),
 	// the market view (ADR-0022, reframed by ADR-0029 §3).
-	NodeKindClaim NodeKind = "claim"
+	NodeKindClaim NodeKind = "Claim"
 	// NodeKindTechniqueEnvironment is a technique×environment node: belief
 	// here is P(technique works in this environment), the reputation view
 	// (ADR-0029 §3).
-	NodeKindTechniqueEnvironment NodeKind = "technique_environment"
+	NodeKindTechniqueEnvironment NodeKind = "TechniqueEnvironment"
 )
 
 // NodeRef addresses one belief-bearing node: its kind plus a stable id within
