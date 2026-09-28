@@ -5,12 +5,43 @@ package brain
 
 import (
 	"context"
+	"errors"
+	"math"
 	"reflect"
 	"sort"
 	"sync"
 	"testing"
 	"time"
 )
+
+// erroringBeliefSubstrate wraps a fakeBeliefSubstrate but can be told to fail
+// (or to hand back an unmarshalable belief) for one specific NodeRef, so
+// SliceDigest/Check/Apply/Drain's error-propagation branches — which a
+// substrate that never fails can never exercise — have something to trigger
+// them.
+type erroringBeliefSubstrate struct {
+	*fakeBeliefSubstrate
+	failBeliefFor    NodeRef
+	failSetBeliefFor NodeRef
+	nanBeliefFor     NodeRef
+}
+
+func (s *erroringBeliefSubstrate) Belief(ctx context.Context, ref NodeRef) (NodeBelief, bool, error) {
+	if ref == s.failBeliefFor {
+		return NodeBelief{}, false, errors.New("boom: belief read failed")
+	}
+	if ref == s.nanBeliefFor {
+		return NodeBelief{Belief: Belief{Juicy: math.NaN()}}, true, nil
+	}
+	return s.fakeBeliefSubstrate.Belief(ctx, ref)
+}
+
+func (s *erroringBeliefSubstrate) SetBelief(ctx context.Context, ref NodeRef, nb NodeBelief) error {
+	if ref == s.failSetBeliefFor {
+		return errors.New("boom: set belief failed")
+	}
+	return s.fakeBeliefSubstrate.SetBelief(ctx, ref, nb)
+}
 
 // chainSliceGraph builds A -> B -> C -> D (each an enablement edge), all
 // belief-bearing Host nodes, via the real DeriveAttackGraph (gibson#286) —
@@ -460,5 +491,228 @@ func TestDownstreamAffected_DeterministicAcrossEdgeOrder(t *testing.T) {
 	b := downstreamAffected(reversed, "a", SliceOptions{MaxDepth: 5})
 	if !reflect.DeepEqual(a, b) {
 		t.Fatalf("order-dependent: %v vs %v", a, b)
+	}
+}
+
+// TestSliceEvents_Kind pins both event Kinds, the same way
+// TestBeliefEvents_CodecRoundTrip (belief_test.go) pins BeliefScoreRequested/
+// BeliefScored's.
+func TestSliceEvents_Kind(t *testing.T) {
+	if got := (SliceScoreRequested{}).Kind(); got != "belief.slice_requested" {
+		t.Fatalf("SliceScoreRequested.Kind() = %q, want belief.slice_requested", got)
+	}
+	if got := (SliceScored{}).Kind(); got != "belief.slice_scored" {
+		t.Fatalf("SliceScored.Kind() = %q, want belief.slice_scored", got)
+	}
+}
+
+// TestPlaceholderSliceBeliefProvider exercises the deterministic stand-in
+// provider directly: density is edges/nodes, reachable is always 1, and the
+// empty-graph edge case (zero nodes) does not divide by zero.
+func TestPlaceholderSliceBeliefProvider(t *testing.T) {
+	p := PlaceholderSliceBeliefProvider()
+	if p.Version() != "placeholder-slice-v0" {
+		t.Fatalf("Version() = %q, want placeholder-slice-v0", p.Version())
+	}
+
+	slice := AttackGraph{
+		Nodes: []AttackGraphNode{{InfraNode: InfraNode{ID: "a", Kind: "Host"}}, {InfraNode: InfraNode{ID: "b", Kind: "Host"}}},
+		Edges: []InfraEdge{{Type: "RESOLVES_TO", From: "a", To: "b"}},
+	}
+	out := p.ScoreSlice(slice)
+	if len(out) != 2 {
+		t.Fatalf("got %d scored nodes, want 2", len(out))
+	}
+	for _, id := range []string{"a", "b"} {
+		nb := out[id]
+		if nb.Belief.Juicy != 0.5 || nb.Belief.Exploitable != 0.5 {
+			t.Errorf("%s: Juicy/Exploitable = %v/%v, want 0.5/0.5 (1 edge / 2 nodes)", id, nb.Belief.Juicy, nb.Belief.Exploitable)
+		}
+		if nb.Belief.Reachable != 1 {
+			t.Errorf("%s: Reachable = %v, want 1", id, nb.Belief.Reachable)
+		}
+		if nb.Belief.Model != "placeholder-slice-v0" {
+			t.Errorf("%s: Model = %q, want placeholder-slice-v0", id, nb.Belief.Model)
+		}
+	}
+
+	if out := p.ScoreSlice(AttackGraph{}); len(out) != 0 {
+		t.Fatalf("empty slice: got %d scored nodes, want 0", len(out))
+	}
+}
+
+// TestSliceDigest_PropagatesSubstrateError proves a substrate read failure
+// surfaces as an error rather than silently digesting a zero-value belief.
+func TestSliceDigest_PropagatesSubstrateError(t *testing.T) {
+	graph := chainSliceGraph(t)
+	substrate := &erroringBeliefSubstrate{
+		fakeBeliefSubstrate: newFakeBeliefSubstrate(),
+		failBeliefFor:       NodeRef{Kind: NodeKindHost, ID: "a"},
+	}
+	slice := ExtractBoundedSlice(graph, "b", SliceOptions{MaxDepth: 1}, nil)
+
+	_, err := SliceDigest(context.Background(), slice, substrate)
+	if err == nil {
+		t.Fatalf("SliceDigest did not propagate the substrate error")
+	}
+}
+
+// TestSliceDigest_PropagatesMarshalError proves a belief that cannot be
+// JSON-marshaled (a NaN float) surfaces as an error rather than a digest
+// silently computed over truncated/garbage JSON.
+func TestSliceDigest_PropagatesMarshalError(t *testing.T) {
+	graph := chainSliceGraph(t)
+	substrate := &erroringBeliefSubstrate{
+		fakeBeliefSubstrate: newFakeBeliefSubstrate(),
+		nanBeliefFor:        NodeRef{Kind: NodeKindHost, ID: "a"},
+	}
+	slice := ExtractBoundedSlice(graph, "b", SliceOptions{MaxDepth: 1}, nil)
+
+	_, err := SliceDigest(context.Background(), slice, substrate)
+	if err == nil {
+		t.Fatalf("SliceDigest did not propagate the json.Marshal error for a NaN belief")
+	}
+}
+
+// TestSliceGate_Check_PropagatesDigestError proves Check surfaces a
+// SliceDigest failure rather than treating it as "nothing changed".
+func TestSliceGate_Check_PropagatesDigestError(t *testing.T) {
+	graph := chainSliceGraph(t)
+	substrate := &erroringBeliefSubstrate{
+		fakeBeliefSubstrate: newFakeBeliefSubstrate(),
+		failBeliefFor:       NodeRef{Kind: NodeKindHost, ID: "a"},
+	}
+	gate := NewSliceGate(substrate)
+
+	req, err := gate.Check(context.Background(), graph, "b", SliceOptions{MaxDepth: 1}, nil)
+	if err == nil {
+		t.Fatalf("Check did not propagate the digest error")
+	}
+	if req != nil {
+		t.Fatalf("Check returned a request alongside an error: %+v", req)
+	}
+}
+
+// TestSliceGate_Apply_PropagatesSetBeliefError proves Apply surfaces a
+// substrate write failure rather than reporting a silent success.
+func TestSliceGate_Apply_PropagatesSetBeliefError(t *testing.T) {
+	graph := chainSliceGraph(t)
+	failRef := NodeRef{Kind: NodeKindHost, ID: "d"}
+	substrate := &erroringBeliefSubstrate{fakeBeliefSubstrate: newFakeBeliefSubstrate(), failSetBeliefFor: failRef}
+	gate := NewSliceGate(substrate)
+	ctx := context.Background()
+
+	req, err := gate.Check(ctx, graph, "d", SliceOptions{}, nil)
+	if err != nil || req == nil {
+		t.Fatalf("setup Check: req=%+v err=%v", req, err)
+	}
+
+	applied, err := gate.Apply(ctx, SliceScored{
+		Target: "d",
+		Digest: req.Digest,
+		Nodes:  []ScoredNode{{Ref: failRef, Belief: NodeBelief{Belief: Belief{Juicy: 0.5}}}},
+	})
+	if err == nil {
+		t.Fatalf("Apply did not propagate the substrate SetBelief error")
+	}
+	if applied {
+		t.Fatalf("Apply reported success alongside an error")
+	}
+}
+
+// TestSliceBeliefWorker_Drain_PropagatesApplyError proves Drain surfaces an
+// Apply failure instead of swallowing it.
+func TestSliceBeliefWorker_Drain_PropagatesApplyError(t *testing.T) {
+	graph := chainSliceGraph(t)
+	failRef := NodeRef{Kind: NodeKindHost, ID: "d"}
+	substrate := &erroringBeliefSubstrate{fakeBeliefSubstrate: newFakeBeliefSubstrate(), failSetBeliefFor: failRef}
+	gate := NewSliceGate(substrate)
+	provider := &fakeSliceBeliefProvider{}
+	worker := NewSliceBeliefWorker(gate, provider)
+	ctx := context.Background()
+
+	req, err := gate.Check(ctx, graph, "d", SliceOptions{}, nil)
+	if err != nil || req == nil {
+		t.Fatalf("setup Check: req=%+v err=%v", req, err)
+	}
+	worker.Tap(*req)
+
+	if _, _, err := worker.Drain(ctx, graph, SliceOptions{}); err == nil {
+		t.Fatalf("Drain did not propagate the Apply error")
+	}
+}
+
+// TestSliceBeliefWorker_Drain_SkipsNodesMissingFromProviderResult proves a
+// provider that under-reports (returns no belief for a node the slice
+// includes) does not crash the drain — that node is simply left unscored
+// this round, not force-fed a zero value.
+func TestSliceBeliefWorker_Drain_SkipsNodesMissingFromProviderResult(t *testing.T) {
+	graph := chainSliceGraph(t)
+	substrate := newFakeBeliefSubstrate()
+	gate := NewSliceGate(substrate)
+	provider := &partialSliceBeliefProvider{omit: "a"}
+	worker := NewSliceBeliefWorker(gate, provider)
+	ctx := context.Background()
+
+	req, err := gate.Check(ctx, graph, "b", SliceOptions{MaxDepth: 1}, nil)
+	if err != nil || req == nil {
+		t.Fatalf("setup Check: req=%+v err=%v", req, err)
+	}
+	worker.Tap(*req)
+
+	scored, _, err := worker.Drain(ctx, graph, SliceOptions{MaxDepth: 1})
+	if err != nil {
+		t.Fatalf("Drain: %v", err)
+	}
+	if scored != 1 {
+		t.Fatalf("scored = %d, want 1", scored)
+	}
+
+	if _, ok, _ := substrate.Belief(ctx, NodeRef{Kind: NodeKindHost, ID: "a"}); ok {
+		t.Fatalf("a's belief was written despite being omitted from the provider's result")
+	}
+	if _, ok, _ := substrate.Belief(ctx, NodeRef{Kind: NodeKindHost, ID: "b"}); !ok {
+		t.Fatalf("b's belief (present in the provider's result) was not written")
+	}
+}
+
+// partialSliceBeliefProvider is a SliceBeliefProvider that omits one node id
+// from its result, simulating a real solver that could not score every node.
+type partialSliceBeliefProvider struct{ omit string }
+
+func (p *partialSliceBeliefProvider) ScoreSlice(slice AttackGraph) map[string]NodeBelief {
+	out := make(map[string]NodeBelief, len(slice.Nodes))
+	for _, n := range slice.Nodes {
+		if n.ID == p.omit {
+			continue
+		}
+		out[n.ID] = NodeBelief{Belief: Belief{Juicy: 1, Reachable: 1, Model: "partial-v0"}}
+	}
+	return out
+}
+
+func (p *partialSliceBeliefProvider) Version() string { return "partial-v0" }
+
+// TestDownstreamAffected_HandlesDiamondWithoutDuplicates proves a node
+// reachable by two different forward paths (a diamond: a->b, a->c, b->d,
+// c->d) is invalidated once, not twice, and BFS does not revisit it.
+func TestDownstreamAffected_HandlesDiamondWithoutDuplicates(t *testing.T) {
+	reg := testBeliefRegistry(t)
+	nodes := []InfraNode{
+		{ID: "a", Kind: "Host"}, {ID: "b", Kind: "Host"},
+		{ID: "c", Kind: "Host"}, {ID: "d", Kind: "Host"},
+	}
+	edges := []InfraEdge{
+		{Type: "RESOLVES_TO", From: "a", To: "b"},
+		{Type: "RESOLVES_TO", From: "a", To: "c"},
+		{Type: "RESOLVES_TO", From: "b", To: "d"},
+		{Type: "RESOLVES_TO", From: "c", To: "d"},
+	}
+	graph := DeriveAttackGraph(nodes, edges, reg)
+
+	got := downstreamAffected(graph, "a", SliceOptions{})
+	want := []string{"b", "c", "d"}
+	if !reflect.DeepEqual(got, want) {
+		t.Fatalf("downstreamAffected = %v, want %v (d must appear exactly once)", got, want)
 	}
 }
