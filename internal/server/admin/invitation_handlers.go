@@ -22,6 +22,7 @@ import (
 	"google.golang.org/grpc/status"
 	"google.golang.org/protobuf/types/known/timestamppb"
 
+	"github.com/zeroroot-ai/gibson/internal/platform/authz"
 	"github.com/zeroroot-ai/gibson/internal/platform/idp"
 	"github.com/zeroroot-ai/gibson/internal/platform/mailer"
 	"github.com/zeroroot-ai/gibson/internal/platform/tenantrole"
@@ -240,6 +241,9 @@ func (s *TenantAdminServer) AcceptInvitation(ctx context.Context, req *tenantv1.
 	if err := s.roles.Assign(tenantrole.WithCaller(ctx, "daemon"), t, userID, roleValue); err != nil {
 		return nil, status.Errorf(codes.Internal, "assign tenant role: %v", err)
 	}
+	if err := s.seedSessionTuples(ctx, userID, rec.TenantID); err != nil {
+		return nil, status.Errorf(codes.Internal, "seed session tuples: %v", err)
+	}
 
 	// Mint a one-time Zitadel setup link: it creates the user's credential
 	// (a password + MFA enrollment), which this call has not set — the
@@ -347,4 +351,32 @@ func (s *TenantAdminServer) CancelInvitation(ctx context.Context, req *tenantv1.
 		return nil, status.Errorf(codes.Internal, "cancel invitation: %v", err)
 	}
 	return &tenantv1.CancelInvitationResponse{}, nil
+}
+
+// seedSessionTuples writes the invitee's two active_session tuples, the
+// user-scoped one and the one for tenantID, with revoked_at at the epoch.
+// ext-authz's session gate fails closed on a missing per-tenant tuple, so a
+// member without it is denied on every call, starting with the
+// ListMyMemberships that resolves their tenant at sign-in (hosted#208). The
+// TenantMember controller wrote these for the old invitation path; this
+// path replaced it (ADR-0093) and has to write them itself.
+//
+// WriteConditional keys on (user, relation, object): an existing tuple is a
+// no-op. So a re-invited member who was removed keeps the revoked_at stamp
+// the removal wrote, and only tokens issued after it pass the gate.
+//
+// Unlike the removal stamp, a failure here fails the call: the invitation
+// stays pending, and a retry repairs it. Every write above is idempotent.
+func (s *TenantAdminServer) seedSessionTuples(ctx context.Context, userID, tenantID string) error {
+	cw, ok := s.authorizer.(authz.ConditionalWriter)
+	if !ok {
+		return errors.New("the authorizer cannot write session tuples")
+	}
+	if err := cw.WriteConditional(ctx, authz.ActiveSessionUserTuple(userID)); err != nil {
+		return fmt.Errorf("user-scoped active_session: %w", err)
+	}
+	if err := cw.WriteConditional(ctx, authz.ActiveSessionTuple(userID, tenantID)); err != nil {
+		return fmt.Errorf("active_session for tenant %s: %w", tenantID, err)
+	}
+	return nil
 }

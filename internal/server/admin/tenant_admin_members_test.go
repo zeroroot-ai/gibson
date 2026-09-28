@@ -5,6 +5,7 @@ package admin
 
 import (
 	"context"
+	"errors"
 	"testing"
 
 	"google.golang.org/grpc/codes"
@@ -33,6 +34,28 @@ type membersAuthorizer struct {
 	listUsersErr error
 	// batchCheckErr is returned by BatchCheck when non-nil.
 	batchCheckErr error
+	// conditionalWrites records every WriteConditional call (hosted#208:
+	// AcceptInvitation seeds the invitee's session tuples).
+	conditionalWrites []authz.ConditionalTuple
+	// conditionalErr is returned by WriteConditional when non-nil.
+	conditionalErr error
+	// conditionalFailObject, when set, fails only the write to that object.
+	conditionalFailObject string
+}
+
+func (m *membersAuthorizer) WriteConditional(_ context.Context, t authz.ConditionalTuple) error {
+	if m.conditionalErr != nil {
+		return m.conditionalErr
+	}
+	if m.conditionalFailObject != "" && t.Object == m.conditionalFailObject {
+		return errors.New("fga boom on " + t.Object)
+	}
+	m.conditionalWrites = append(m.conditionalWrites, t)
+	return nil
+}
+
+func (m *membersAuthorizer) UpdateConditionalTuple(ctx context.Context, t authz.ConditionalTuple) error {
+	return m.WriteConditional(ctx, t)
 }
 
 func (m *membersAuthorizer) Check(_ context.Context, _, _, _ string) (bool, error) {

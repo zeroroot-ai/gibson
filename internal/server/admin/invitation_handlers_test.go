@@ -6,6 +6,7 @@ package admin
 import (
 	"context"
 	"errors"
+	"reflect"
 	"regexp"
 	"strings"
 	"testing"
@@ -15,6 +16,7 @@ import (
 	"google.golang.org/grpc/codes"
 	status_grpc "google.golang.org/grpc/status"
 
+	"github.com/zeroroot-ai/gibson/internal/platform/authz"
 	"github.com/zeroroot-ai/gibson/internal/platform/mailer"
 	"github.com/zeroroot-ai/gibson/internal/platform/tenantrole"
 	tenantv1 "github.com/zeroroot-ai/gibson/internal/server/daemon/api/gibson/tenant/v1"
@@ -501,6 +503,16 @@ func TestAcceptInvitation_HappyPath(t *testing.T) {
 	// Platform owner and the first tenant Owner, in the tenant's own org. A
 	// v1 Management create left the user INITIAL, which the Login v2 app
 	// refuses (hosted#208).
+	// The invitee's two session tuples are seeded, or ext-authz's session
+	// gate denies every call they make, starting at sign-in (hosted#208).
+
+	wantTuples := []authz.ConditionalTuple{
+		authz.ActiveSessionUserTuple("user-bob"),
+		authz.ActiveSessionTuple("user-bob", "acme"),
+	}
+	if !reflect.DeepEqual(az.conditionalWrites, wantTuples) {
+		t.Fatalf("session tuples = %+v, want %+v", az.conditionalWrites, wantTuples)
+	}
 	if len(idpC.ensuredEmails) != 1 || idpC.ensuredEmails[0] != "bob@example.com" {
 		t.Fatalf("expected EnsureHumanUserNoPassword for bob, got %v", idpC.ensuredEmails)
 	}
@@ -708,4 +720,40 @@ func TestInvitationStore_SetStatus_RequiresTenant(t *testing.T) {
 	if err := mock.ExpectationsWereMet(); err != nil {
 		t.Errorf("sqlmock: %v", err)
 	}
+}
+
+// TestAcceptInvitation_SessionSeedErrorIsInternal pins that a failed session
+// seed fails the accept rather than leaving a member ext-authz will deny on
+// every call. The invitation stays pending, so a retry repairs it.
+func TestAcceptInvitation_SessionSeedErrorIsInternal(t *testing.T) {
+	srv := acceptInvitationFixture(t, &membersIdPClient{ensureUserID: "user-bob"})
+	srv.authorizer.(*membersAuthorizer).conditionalErr = errors.New("fga boom")
+
+	_, err := srv.AcceptInvitation(context.Background(), &tenantv1.AcceptInvitationRequest{Token: "rawtoken"})
+	if status_grpc.Code(err) != codes.Internal {
+		t.Fatalf("AcceptInvitation code = %v (err=%v), want Internal", status_grpc.Code(err), err)
+	}
+}
+
+// TestSeedSessionTuples_Failures pins both failure paths of the session seed:
+// an authorizer that cannot write conditional tuples, and a failed per-tenant
+// write after the user-scoped one succeeded. Either one fails the accept.
+func TestSeedSessionTuples_Failures(t *testing.T) {
+	t.Run("authorizer without conditional writes", func(t *testing.T) {
+		s := &TenantAdminServer{authorizer: newOwnershipAuthorizer()}
+		if err := s.seedSessionTuples(context.Background(), "user-bob", "acme"); err == nil {
+			t.Fatal("expected an error from an authorizer that cannot write session tuples")
+		}
+	})
+	t.Run("per-tenant write fails", func(t *testing.T) {
+		az := &membersAuthorizer{conditionalFailObject: "tenant:acme"}
+		s := &TenantAdminServer{authorizer: az}
+		err := s.seedSessionTuples(context.Background(), "user-bob", "acme")
+		if err == nil || !strings.Contains(err.Error(), "tenant acme") {
+			t.Fatalf("err = %v, want the per-tenant write failure", err)
+		}
+		if !reflect.DeepEqual(az.conditionalWrites, []authz.ConditionalTuple{authz.ActiveSessionUserTuple("user-bob")}) {
+			t.Fatalf("writes = %+v, want only the user-scoped tuple before the failure", az.conditionalWrites)
+		}
+	})
 }
