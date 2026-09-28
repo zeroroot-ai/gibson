@@ -125,7 +125,7 @@ func ComputeCalibration(
 		numBins = DefaultCalibrationBins
 	}
 
-	var overall []calibrationPoint
+	overall := make([]calibrationPoint, 0, len(settlements))
 	byTechnique := map[string][]calibrationPoint{}
 	unscored := 0
 

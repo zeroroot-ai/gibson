@@ -152,7 +152,7 @@ func TestComputeCalibration_GroupsByTechniqueSortedAlphabetically(t *testing.T) 
 // technique. MeanPredicted and ObservedFrequency should coincide.
 func TestComputeCalibration_WellCalibratedTechnique(t *testing.T) {
 	substrate := newFakeBeliefSubstrate()
-	var settlements []BetSettlementSnapshot
+	settlements := make([]BetSettlementSnapshot, 0, 10)
 	for i := range 10 {
 		id := "h" + string(rune('a'+i))
 		setClaimBelief(t, substrate, "acme", id, 0.8)
