@@ -525,6 +525,19 @@ func (m *CallbackManager) SetLLMCallSink(sink LLMCallSink) {
 	}
 }
 
+// SetToolCallSink sets the tool-call sink on the callback service, wiring
+// CallToolProto to the per-tenant World's AgentToolCall capture — the flight
+// recorder's tool-I/O half (ADR-0020, gibson#271). Call after
+// NewCallbackManager, before Start(). Thread-safe.
+func (m *CallbackManager) SetToolCallSink(sink ToolCallSink) {
+	if m.server != nil && m.server.service != nil {
+		m.server.service.mu.Lock()
+		defer m.server.service.mu.Unlock()
+		m.server.service.toolCallSink = sink
+		m.logger.Debug("set tool-call sink on callback service")
+	}
+}
+
 // SetDiscoveryProcessor sets the DiscoveryProcessor on the callback service.
 // This enables automatic extraction and storage of DiscoveryResult from tool responses.
 //

@@ -464,6 +464,52 @@ func TestExecuteLLM_ToolCalls(t *testing.T) {
 	assert.Equal(t, `{"target":"1.2.3.4"}`, resp.ToolCalls[0].Arguments)
 }
 
+// TestExecuteLLM_ToolCalls_CapturedInWorldSink is the gibson#271
+// flight-recorder unit: a tool-calling completion's ToolCalls must ride onto
+// the World-capture record (CompletionToolCalls), not be silently dropped.
+// Also proves a historical prompt message's own tool_calls/tool_call_id
+// survive the proto→llm.Message→api.LLMMessage translation.
+func TestExecuteLLM_ToolCalls_CapturedInWorldSink(t *testing.T) {
+	store := &stubProviderConfigStore{
+		resolveFunc: func(_ context.Context, _, _ string) (*providerconfig.DecryptedConfig, error) {
+			return knownDecryptedConfig(), nil
+		},
+	}
+	prov := &stubMockProvider{
+		completeFunc: func(_ context.Context, _ llm.CompletionRequest) (*llm.CompletionResponse, error) {
+			return &llm.CompletionResponse{
+				Message: llm.Message{
+					Role: llm.RoleAssistant,
+					ToolCalls: []llm.ToolCall{
+						{ID: "call-1", Type: "function", Name: "nmap", Arguments: `{"target":"1.2.3.4"}`},
+					},
+				},
+				FinishReason: llm.FinishReasonToolCalls,
+			}, nil
+		},
+	}
+	s := newExecServer(store, func(_ llm.ProviderConfig) (llm.LLMProvider, error) { return prov, nil })
+
+	var captured []LLMCallRecord
+	s.SetLLMCallSink(func(_ context.Context, _ string, call LLMCallRecord) {
+		captured = append(captured, call)
+	})
+
+	ctx := tenantCtx("tenant-tools")
+	_, err := s.ExecuteLLM(ctx, &tenantv1.ExecuteLLMRequest{
+		ProviderName: "p",
+		Messages:     []*tenantv1.LLMMessageContent{{Role: "user", Content: "scan this"}},
+		Tools:        []*tenantv1.LLMToolDef{{Name: "nmap", Description: "port scanner"}},
+	})
+	require.NoError(t, err)
+
+	require.Len(t, captured, 1)
+	require.Len(t, captured[0].CompletionToolCalls, 1, "the completion's own tool calls must not be dropped")
+	assert.Equal(t, "nmap", captured[0].CompletionToolCalls[0].Name)
+	assert.JSONEq(t, `{"target":"1.2.3.4"}`, captured[0].CompletionToolCalls[0].Arguments)
+	assert.NotZero(t, captured[0].RecordedAtUnixNano, "a capture time must be stamped for retention sweeps")
+}
+
 // TestExecuteLLM_StructuredOutputUnimplemented checks that requesting json_schema
 // format against a provider that doesn't implement StructuredOutputProvider
 // returns codes.Unimplemented.

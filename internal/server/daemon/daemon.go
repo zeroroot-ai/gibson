@@ -1471,22 +1471,17 @@ func (d *daemonImpl) Start(ctx context.Context) error {
 		// on the callback request; we map it onto the daemon's api record.
 		llmSink := ingestLLMCall(d.brainRegistry)
 		d.callback.SetLLMCallSink(func(ctx context.Context, tenant string, call harness.LLMCallRecord) {
-			msgs := make([]api.LLMMessage, 0, len(call.Messages))
-			for _, m := range call.Messages {
-				msgs = append(msgs, api.LLMMessage{Role: m.Role, Content: m.Content})
-			}
-			llmSink(ctx, tenant, api.LLMCallRecord{
-				CallID:           call.CallID,
-				MissionID:        call.MissionID,
-				RunID:            call.RunID,
-				Model:            call.Model,
-				PromptTokens:     call.PromptTokens,
-				CompletionTokens: call.CompletionTokens,
-				Messages:         msgs,
-				Completion:       call.Completion,
-			})
+			llmSink(ctx, tenant, harnessLLMCallToAPI(call))
 		})
 		d.logger.Info(ctx, "wired callback LLM completion RPCs to the ECS brain World")
+
+		// Wire CallToolProto to the per-tenant World's AgentToolCall capture —
+		// the flight recorder's tool-I/O half (ADR-0020, gibson#271). Before
+		// this, a fleet agent's tool calls reached the daemon only as bare
+		// tool.call.* pub/sub metadata with no argument/result text, so they
+		// never became part of the Timeline.
+		d.callback.SetToolCallSink(ingestToolCall(d.brainRegistry))
+		d.logger.Info(ctx, "wired callback CallToolProto to the ECS brain World")
 	}
 
 	// Wire the DiscoveryResult ingest path (gibson#1266). A callback-dispatched

@@ -98,6 +98,13 @@ func init() {
 
 	// llm_call.go
 	registerEvent("llm_call.observed", func() Event { return &LlmCallObserved{} })
+
+	// tool_call.go
+	registerEvent("agent_tool_call.observed", func() Event { return &AgentToolCallObserved{} })
+
+	// flight_recorder.go
+	registerEvent("flight_recorder.policy_set", func() Event { return &FlightRecorderPolicySet{} })
+	registerEvent("flight_recorder.retention_swept", func() Event { return &FlightRecorderRetentionSwept{} })
 }
 
 // EncodeEvent serialises ev as a JSON envelope. The envelope preserves the
@@ -194,6 +201,12 @@ func dereferenceEvent(ev Event) Event {
 	case *AgentRunObserved:
 		return *v
 	case *LlmCallObserved:
+		return *v
+	case *AgentToolCallObserved:
+		return *v
+	case *FlightRecorderPolicySet:
+		return *v
+	case *FlightRecorderRetentionSwept:
 		return *v
 	default:
 		// Unknown pointer type — return as-is; the caller will surface the

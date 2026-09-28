@@ -71,6 +71,13 @@ type World struct {
 	accounts    *ecs.Map1[Account]
 	agentRuns   *ecs.Map1[AgentRun]
 	llmCalls    *ecs.Map1[LlmCall]
+	// agentToolCalls holds the flight recorder's tool-I/O capture (ADR-0020,
+	// gibson#271) — the tool-call counterpart to llmCalls.
+	agentToolCalls *ecs.Map1[AgentToolCall]
+	// flightRecorderPolicy is the tenant's current retention/redaction policy
+	// (flight_recorder.go, gibson#271). Not ECS-backed: it is a per-tenant
+	// singleton, not a collection of entities.
+	flightRecorderPolicy FlightRecorderPolicy
 
 	// observations holds out-of-taxonomy shapes (ADR-0012). Keyed by Timeline
 	// event id rather than by content, so repeat sightings stay distinct.
@@ -133,23 +140,24 @@ func (w *World) newSubdomainID() uint64 {
 func NewWorld(tenant string) *World {
 	w := ecs.NewWorld()
 	return &World{
-		Tenant:       tenant,
-		ecs:          w,
-		hosts:        ecs.NewMap1[Host](w),
-		surprises:    ecs.NewMap1[Surprise](w),
-		work:         ecs.NewMap1[WorkItem](w),
-		decisions:    ecs.NewMap1[DecisionRecord](w),
-		missions:     ecs.NewMap1[Mission](w),
-		findings:     ecs.NewMap1[Finding](w),
-		labels:       ecs.NewMap1[Label](w),
-		domains:      ecs.NewMap1[Domain](w),
-		subdomains:   ecs.NewMap1[Subdomain](w),
-		credentials:  ecs.NewMap1[Credential](w),
-		accounts:     ecs.NewMap1[Account](w),
-		agentRuns:    ecs.NewMap1[AgentRun](w),
-		llmCalls:     ecs.NewMap1[LlmCall](w),
-		observations: ecs.NewMap1[Observation](w),
-		entities:     ecs.NewMap1[Entity](w),
+		Tenant:         tenant,
+		ecs:            w,
+		hosts:          ecs.NewMap1[Host](w),
+		surprises:      ecs.NewMap1[Surprise](w),
+		work:           ecs.NewMap1[WorkItem](w),
+		decisions:      ecs.NewMap1[DecisionRecord](w),
+		missions:       ecs.NewMap1[Mission](w),
+		findings:       ecs.NewMap1[Finding](w),
+		labels:         ecs.NewMap1[Label](w),
+		domains:        ecs.NewMap1[Domain](w),
+		subdomains:     ecs.NewMap1[Subdomain](w),
+		credentials:    ecs.NewMap1[Credential](w),
+		accounts:       ecs.NewMap1[Account](w),
+		agentRuns:      ecs.NewMap1[AgentRun](w),
+		llmCalls:       ecs.NewMap1[LlmCall](w),
+		agentToolCalls: ecs.NewMap1[AgentToolCall](w),
+		observations:   ecs.NewMap1[Observation](w),
+		entities:       ecs.NewMap1[Entity](w),
 	}
 }
 
@@ -337,6 +345,12 @@ func Reduce(w *World, ev Event) {
 		applyAgentRunObserved(w, e)
 	case LlmCallObserved:
 		applyLlmCallObserved(w, e)
+	case AgentToolCallObserved:
+		applyAgentToolCallObserved(w, e)
+	case FlightRecorderPolicySet:
+		applyFlightRecorderPolicySet(w, e)
+	case FlightRecorderRetentionSwept:
+		applyFlightRecorderRetentionSwept(w, e)
 	case ObservationRecorded:
 		applyObservationRecorded(w, e)
 	case EntityObserved:

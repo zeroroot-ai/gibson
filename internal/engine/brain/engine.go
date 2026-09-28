@@ -460,6 +460,23 @@ func (e *Engine) LlmCalls() []LlmCallSnapshot {
 	return e.World.LlmCallSnapshot()
 }
 
+// AgentToolCalls returns the mission's captured tool I/O (ADR-0020, gibson#271)
+// in deterministic order — the flight recorder's tool-call counterpart to
+// LlmCalls.
+func (e *Engine) AgentToolCalls() []AgentToolCallSnapshot {
+	e.mu.RLock()
+	defer e.mu.RUnlock()
+	return e.World.AgentToolCallSnapshot()
+}
+
+// FlightRecorderPolicy returns the tenant's current retention/redaction policy
+// (ADR-0020, gibson#271).
+func (e *Engine) FlightRecorderPolicy() FlightRecorderPolicy {
+	e.mu.RLock()
+	defer e.mu.RUnlock()
+	return e.World.FlightRecorderPolicy()
+}
+
 // Events returns a copy of the Timeline (the Scroller scrubs this).
 func (e *Engine) Events() []Event {
 	e.mu.RLock()
