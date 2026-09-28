@@ -183,9 +183,6 @@ func (f *fakeIDPClient) ClearHumanFactors(_ context.Context, userID string) (idp
 	}
 	return f.clearFactorsResult, nil
 }
-func (f *fakeIDPClient) EnsureHumanUser(_ context.Context, _ idp.EnsureHumanUserRequest) (string, error) {
-	return "user-1", nil
-}
 func (f *fakeIDPClient) CreateSetupLink(_ context.Context, _, userID, appURL string) (string, error) {
 	return appURL + "/ui/v2/login/verify?invite=true&userId=" + userID, nil
 }

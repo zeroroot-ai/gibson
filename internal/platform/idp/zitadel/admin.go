@@ -345,51 +345,6 @@ func (c *Client) UpdateUserProfile(ctx context.Context, accountID string, req id
 	return c.GetUserProfile(ctx, accountID)
 }
 
-// EnsureHumanUser finds the human user with the given email in the org, or
-// creates one. Maps to the Zitadel Management (v1) API:
-//
-//	POST /management/v1/users/human    (create)
-//	POST /management/v1/users/_search  (search by email when it already exists)
-//
-// The Management API — not the v2 resource API (/v2/users…) — is used on
-// purpose: it is the surface the platform's in-cluster Zitadel proxy exposes
-// to the daemon (gibson#1560). The target org is selected by the
-// x-zitadel-orgid header, so no `organization` block goes in the body.
-//
-// Idempotent: a 409 on create falls back to a by-email lookup. The created
-// user has no password and an unverified email — Zitadel's init flow emails
-// the invitee a code to set credentials.
-func (c *Client) EnsureHumanUser(ctx context.Context, req idp.EnsureHumanUserRequest) (string, error) {
-	if req.Email == "" {
-		return "", fmt.Errorf("%w: EnsureHumanUser requires email", idp.ErrUpstream)
-	}
-	createBody := map[string]interface{}{
-		"userName": idp.UsernameForEmail(req.Email),
-		"profile":  map[string]interface{}{"firstName": "Invited", "lastName": "User"},
-		"email":    map[string]interface{}{"email": req.Email, "isEmailVerified": req.EmailVerified},
-	}
-	var createResp struct {
-		UserID string `json:"userId"`
-	}
-	err := c.doRequest(ctx, http.MethodPost, "/management/v1/users/human", createBody, req.OrgID, &createResp)
-	if err == nil && createResp.UserID != "" {
-		return createResp.UserID, nil
-	}
-	if err != nil && !errors.Is(mapError(err, "EnsureHumanUser:create"), idp.ErrAlreadyExists) {
-		return "", mapError(err, "EnsureHumanUser:create")
-	}
-	// User already exists (409) — look it up by email. Same read-only search
-	// FindUserIDByEmail performs; no credential write follows it here either.
-	userID, serr := c.findUserIDByEmail(ctx, req.Email, req.OrgID)
-	switch {
-	case errors.Is(serr, idp.ErrNotFound):
-		return "", fmt.Errorf("%w: EnsureHumanUser: user %q not found after conflict", idp.ErrUpstream, req.Email)
-	case serr != nil:
-		return "", serr
-	}
-	return userID, nil
-}
-
 // setupLinkURLTemplate builds the Go-template URL Zitadel substitutes
 // {{.UserID}}, {{.OrgID}} and {{.Code}} into (CreateInviteCode's urlTemplate
 // field). Mirrors operators/platform's identical helper for the Platform
@@ -518,8 +473,8 @@ const userServiceV2 = "/zitadel.user.v2.UserService"
 // EnsureHumanUserNoPassword finds or creates a human user in orgID with NO
 // password (ADR-0093 decisions 6/8), via Zitadel v2's UserService.AddHumanUser.
 //
-// The v2 API — not the v1 Management API EnsureHumanUser/CreateHumanUser
-// use above — is required here: AddHumanUser is the only Zitadel create call
+// The v2 API — not the v1 Management API CreateHumanUser uses above — is
+// required here: AddHumanUser is the only Zitadel create call
 // with no password field at all. The target org travels as the
 // x-zitadel-orgid header, never a body field: AddHumanUser's handler
 // resolves the org exclusively from the caller's instance context, populated
@@ -527,7 +482,7 @@ const userServiceV2 = "/zitadel.user.v2.UserService"
 // the v4.18.0 source during the Platform owner work this reuses (hosted#201).
 //
 // Idempotent: a 409/already-exists falls back to the same by-email search
-// EnsureHumanUser/FindUserIDByEmail already use (findUserIDByEmail) — v1 and
+// FindUserIDByEmail uses (findUserIDByEmail) — v1 and
 // v2 read the same underlying user store, so the search sees a user AddHumanUser
 // just created.
 func (c *Client) EnsureHumanUserNoPassword(ctx context.Context, orgID, email, givenName, familyName string) (string, error) {
@@ -535,7 +490,7 @@ func (c *Client) EnsureHumanUserNoPassword(ctx context.Context, orgID, email, gi
 		return "", fmt.Errorf("%w: EnsureHumanUserNoPassword requires email", idp.ErrUpstream)
 	}
 	body := map[string]interface{}{
-		"username": email,
+		"username": idp.UsernameForEmail(email),
 		"profile": map[string]interface{}{
 			"givenName":  givenName,
 			"familyName": familyName,

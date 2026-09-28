@@ -226,14 +226,14 @@ func (s *TenantAdminServer) AcceptInvitation(ctx context.Context, req *tenantv1.
 
 	// Ensure the invited human exists in the tenant's per-tenant org, then
 	// assign the role: Zitadel grant first, then Roles.Sync copies it into
-	// FGA in the same call. EmailVerified is true here (unlike the general
-	// EnsureHumanUser default): the caller already proved control of
-	// rec.Email by redeeming this exact token, an install-issued invitation
-	// this handler looked up above — so the IdP's own separate verification
-	// email would be redundant, and would compete with the setup link below.
-	userID, err := s.idpClient.EnsureHumanUser(ctx, idp.EnsureHumanUserRequest{
-		OrgID: t.OrgID, Email: rec.Email, EmailVerified: true,
-	})
+	// FGA in the same call. The same no-password create as the Platform owner
+	// and the first tenant Owner: an ACTIVE user with a verified email and no
+	// credential. The caller already proved control of rec.Email by redeeming
+	// this exact token, and the setup link below is the one way to set a
+	// credential. A v1 Management create left the user INITIAL, which the
+	// Login v2 app refuses with "User Initial State is not supported"
+	// (hosted#208).
+	userID, err := s.idpClient.EnsureHumanUserNoPassword(ctx, t.OrgID, rec.Email, "Invited", "User")
 	if err != nil {
 		return nil, status.Errorf(codes.Internal, "ensure invited user: %v", err)
 	}
@@ -255,7 +255,7 @@ func (s *TenantAdminServer) AcceptInvitation(ctx context.Context, req *tenantv1.
 	// resolved to an in-cluster address on kind.
 	//
 	// Left of SetStatus deliberately: if this fails, the invitation stays
-	// "pending" so a retry can redeem the same token again — EnsureHumanUser
+	// "pending" so a retry can redeem the same token again — the user create
 	// and Roles.Assign above are both idempotent, so a retry costs nothing.
 	setupURL, err := s.idpClient.CreateSetupLink(ctx, t.OrgID, userID, s.inviteBaseURL)
 	if err != nil {
