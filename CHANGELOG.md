@@ -1,5 +1,12 @@
 # Changelog
 
+## [0.142.4](https://github.com/zeroroot-ai/gibson/compare/v0.142.3...v0.142.4) (2026-09-28)
+
+
+### Bug Fixes
+
+* **invitations:** create the invitee as an active user, like the owners ([#310](https://github.com/zeroroot-ai/gibson/issues/310)) ([a451c5d](https://github.com/zeroroot-ai/gibson/commit/a451c5df95fdea122c31b282667275afa4d506d3))
+
 ## [0.142.3](https://github.com/zeroroot-ai/gibson/compare/v0.142.2...v0.142.3) (2026-09-27)
 
 
