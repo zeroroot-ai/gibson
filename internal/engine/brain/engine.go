@@ -62,6 +62,13 @@ type Engine struct {
 	// they never race the reducer. Submit does not touch the World, so it is
 	// lock-free.
 	mu sync.RWMutex
+
+	// destructiveAuthzOnce/destructiveAuthz lazily construct this engine's
+	// DestructiveAuthorizationQueue (ADR-0028, gibson#336) on first access via
+	// DestructiveAuthorizationQueue() — see destructive_authz.go. Lazy because
+	// most engines never see a destructive proof request.
+	destructiveAuthzOnce sync.Once
+	destructiveAuthz     *DestructiveAuthorizationQueue
 }
 
 // NewEngine creates an Engine with an empty Tenant World and Timeline.
