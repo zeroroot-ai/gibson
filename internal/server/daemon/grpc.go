@@ -1612,10 +1612,13 @@ func (d *daemonImpl) buildGRPCServer(ctx context.Context) (*grpcSubsystem, error
 		if d.beliefProvider == nil {
 			d.beliefProvider = resolveBeliefProvider()
 		}
+		sliceBeliefProvider := resolveSliceBeliefProvider()
+		beliefSchemaRegistry, err := newBeliefSchemaRegistry()
+		if err != nil {
+			return nil, fmt.Errorf("failed to build belief schema registry: %w", err)
+		}
 		d.brainRegistry = brain.NewRegistry(ctx, brain.BeliefSystem)
-		d.brainRegistry.OnEngine(func(e *brain.Engine) {
-			brain.WireBelief(ctx, e, d.beliefProvider, 0)
-		})
+		wireBrainRegistry(ctx, d.brainRegistry, d.beliefProvider, sliceBeliefProvider, beliefSchemaRegistry)
 	}
 	worldpb.RegisterWorldServiceServer(srv, NewWorldServer(d.brainRegistry, d.logger.WithComponent("world-service").Slog()))
 	d.logger.Info(ctx, "registered WorldService gRPC endpoint")

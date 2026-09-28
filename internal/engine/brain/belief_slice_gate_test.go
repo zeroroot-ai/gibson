@@ -6,7 +6,6 @@ package brain
 import (
 	"context"
 	"errors"
-	"math"
 	"reflect"
 	"sort"
 	"sync"
@@ -15,23 +14,18 @@ import (
 )
 
 // erroringBeliefSubstrate wraps a fakeBeliefSubstrate but can be told to fail
-// (or to hand back an unmarshalable belief) for one specific NodeRef, so
-// SliceDigest/Check/Apply/Drain's error-propagation branches — which a
-// substrate that never fails can never exercise — have something to trigger
-// them.
+// for one specific NodeRef, so SliceDigest/Check/Apply/Drain's
+// error-propagation branches — which a substrate that never fails can never
+// exercise — have something to trigger them.
 type erroringBeliefSubstrate struct {
 	*fakeBeliefSubstrate
 	failBeliefFor    NodeRef
 	failSetBeliefFor NodeRef
-	nanBeliefFor     NodeRef
 }
 
 func (s *erroringBeliefSubstrate) Belief(ctx context.Context, ref NodeRef) (NodeBelief, bool, error) {
 	if ref == s.failBeliefFor {
 		return NodeBelief{}, false, errors.New("boom: belief read failed")
-	}
-	if ref == s.nanBeliefFor {
-		return NodeBelief{Belief: Belief{Juicy: math.NaN()}}, true, nil
 	}
 	return s.fakeBeliefSubstrate.Belief(ctx, ref)
 }
@@ -144,9 +138,11 @@ func TestSliceGate_DetectsChangeInsideTheSliceOnly(t *testing.T) {
 		t.Fatalf("Check: %v", err)
 	}
 
-	// "d" is not in b's depth-1 backward slice ({a, b}): changing it must not
-	// move b's slice-digest.
-	if err := substrate.SetBelief(ctx, NodeRef{Kind: NodeKindHost, ID: "d"}, NodeBelief{Belief: Belief{Juicy: 0.9}}); err != nil {
+	// "d" is not in b's depth-1 backward slice ({a, b}): new evidence on it
+	// must not move b's slice-digest. SliceDigest hashes EvidenceDigest, never
+	// Belief itself (belief is the gate's own output — see SliceDigest's doc),
+	// so the change that matters here is EvidenceDigest, not Juicy.
+	if err := substrate.SetBelief(ctx, NodeRef{Kind: NodeKindHost, ID: "d"}, NodeBelief{EvidenceDigest: "d-evidence-v2"}); err != nil {
 		t.Fatalf("SetBelief(d): %v", err)
 	}
 	req, err := gate.Check(ctx, graph, "b", SliceOptions{MaxDepth: 1}, nil)
@@ -157,8 +153,8 @@ func TestSliceGate_DetectsChangeInsideTheSliceOnly(t *testing.T) {
 		t.Fatalf("a change outside the bounded slice triggered a request: %+v", req)
 	}
 
-	// "a" IS in b's depth-1 backward slice: changing it must move the digest.
-	if err := substrate.SetBelief(ctx, NodeRef{Kind: NodeKindHost, ID: "a"}, NodeBelief{Belief: Belief{Juicy: 0.9}}); err != nil {
+	// "a" IS in b's depth-1 backward slice: new evidence on it must move the digest.
+	if err := substrate.SetBelief(ctx, NodeRef{Kind: NodeKindHost, ID: "a"}, NodeBelief{EvidenceDigest: "a-evidence-v2"}); err != nil {
 		t.Fatalf("SetBelief(a): %v", err)
 	}
 	req, err = gate.Check(ctx, graph, "b", SliceOptions{MaxDepth: 1}, nil)
@@ -557,23 +553,6 @@ func TestSliceDigest_PropagatesSubstrateError(t *testing.T) {
 	}
 }
 
-// TestSliceDigest_PropagatesMarshalError proves a belief that cannot be
-// JSON-marshaled (a NaN float) surfaces as an error rather than a digest
-// silently computed over truncated/garbage JSON.
-func TestSliceDigest_PropagatesMarshalError(t *testing.T) {
-	graph := chainSliceGraph(t)
-	substrate := &erroringBeliefSubstrate{
-		fakeBeliefSubstrate: newFakeBeliefSubstrate(),
-		nanBeliefFor:        NodeRef{Kind: NodeKindHost, ID: "a"},
-	}
-	slice := ExtractBoundedSlice(graph, "b", SliceOptions{MaxDepth: 1}, nil)
-
-	_, err := SliceDigest(context.Background(), slice, substrate)
-	if err == nil {
-		t.Fatalf("SliceDigest did not propagate the json.Marshal error for a NaN belief")
-	}
-}
-
 // TestSliceGate_Check_PropagatesDigestError proves Check surfaces a
 // SliceDigest failure rather than treating it as "nothing changed".
 func TestSliceGate_Check_PropagatesDigestError(t *testing.T) {
@@ -614,6 +593,38 @@ func TestSliceGate_Apply_PropagatesSetBeliefError(t *testing.T) {
 	})
 	if err == nil {
 		t.Fatalf("Apply did not propagate the substrate SetBelief error")
+	}
+	if applied {
+		t.Fatalf("Apply reported success alongside an error")
+	}
+}
+
+// TestSliceGate_Apply_PropagatesCurrentBeliefReadError proves Apply surfaces
+// a failure reading a node's CURRENT belief (needed to preserve its
+// EvidenceDigest) rather than reporting a silent success. The substrate must
+// succeed for Check (to establish a real outstanding digest) and only start
+// failing for the Apply that follows — otherwise Apply's own staleness check
+// would reject the write before ever reaching the read this test targets.
+func TestSliceGate_Apply_PropagatesCurrentBeliefReadError(t *testing.T) {
+	graph := chainSliceGraph(t)
+	failRef := NodeRef{Kind: NodeKindHost, ID: "d"}
+	substrate := &erroringBeliefSubstrate{fakeBeliefSubstrate: newFakeBeliefSubstrate()}
+	gate := NewSliceGate(substrate)
+	ctx := context.Background()
+
+	req, err := gate.Check(ctx, graph, "d", SliceOptions{}, nil)
+	if err != nil || req == nil {
+		t.Fatalf("setup Check: req=%+v err=%v", req, err)
+	}
+
+	substrate.failBeliefFor = failRef // now fail only for the read inside Apply
+	applied, err := gate.Apply(ctx, SliceScored{
+		Target: "d",
+		Digest: req.Digest,
+		Nodes:  []ScoredNode{{Ref: failRef, Belief: NodeBelief{Belief: Belief{Juicy: 0.5}}}},
+	})
+	if err == nil {
+		t.Fatalf("Apply did not propagate the substrate Belief read error")
 	}
 	if applied {
 		t.Fatalf("Apply reported success alongside an error")

@@ -101,18 +101,32 @@ type SliceBeliefProvider interface {
 	Version() string
 }
 
-// SliceDigest fingerprints target's slice-relevant state: every node in
-// slice (already deterministically ordered by ExtractBoundedSlice/
-// DeriveAttackGraph) paired with that node's CURRENT belief from substrate,
-// plus the slice's edge structure. Two calls over the same slice content and
-// the same substrate state yield the same digest; a change to ANY node's
-// belief inside the slice, or to the slice's own shape, changes it — nothing
-// outside the slice can.
+// SliceDigest fingerprints target's slice-relevant STATE: every node in slice
+// (already deterministically ordered by ExtractBoundedSlice/DeriveAttackGraph)
+// paired with that node's current EVIDENCE digest from substrate, plus the
+// slice's edge structure.
+//
+// This hashes EvidenceDigest, deliberately never Belief itself. Belief is the
+// gate's own OUTPUT (Apply writes it); a digest built from it would be
+// self-referential — every successful score would change the very state its
+// own digest is measured against, and Check would request a rescore forever
+// instead of settling to quiescence once nothing new has actually happened.
+// EvidenceDigest is a stable INPUT fingerprint (belief.go's per-host gate
+// already maintains it, untouched by applyBeliefScored) that changes only
+// when new evidence arrives — mirroring the same input/output separation the
+// per-host evidence-digest gate relies on. A belief-only change on an
+// upstream node therefore does NOT, by itself, move a downstream node's
+// digest; that propagation is SliceGate.Invalidate's job (ADR-0029 §8), not
+// this digest's.
+//
+// Two calls over the same slice content and the same substrate state yield
+// the same digest; a change to any node's EVIDENCE inside the slice, or to
+// the slice's own shape, changes it — nothing else can.
 func SliceDigest(ctx context.Context, slice AttackGraph, substrate BeliefSubstrate) (string, error) {
 	type digestNode struct {
-		ID     string     `json:"id"`
-		Kind   string     `json:"kind"`
-		Belief NodeBelief `json:"belief"`
+		ID             string `json:"id"`
+		Kind           string `json:"kind"`
+		EvidenceDigest string `json:"evidence_digest"`
 	}
 	nodes := make([]digestNode, 0, len(slice.Nodes))
 	for _, n := range slice.Nodes {
@@ -120,7 +134,7 @@ func SliceDigest(ctx context.Context, slice AttackGraph, substrate BeliefSubstra
 		if err != nil {
 			return "", fmt.Errorf("slice digest: belief for %s %s: %w", n.Kind, n.ID, err)
 		}
-		nodes = append(nodes, digestNode{ID: n.ID, Kind: n.Kind, Belief: nb})
+		nodes = append(nodes, digestNode{ID: n.ID, Kind: n.Kind, EvidenceDigest: nb.EvidenceDigest})
 	}
 	payload := struct {
 		Nodes []digestNode `json:"nodes"`
@@ -179,6 +193,15 @@ func (g *SliceGate) Check(
 // moved on while the model was scoring, so a newer request is (or will be)
 // outstanding, and s is dropped without touching the substrate. Mirrors
 // applyBeliefScored's staleness check.
+//
+// A graph-coupled score answers for the SAME evidence a node already has —
+// propagation refines the INFERENCE, it never observes new evidence — so
+// Apply preserves each node's CURRENT EvidenceDigest rather than writing
+// whatever s.Nodes[i].Belief.EvidenceDigest says (a SliceBeliefProvider has no
+// business knowing a Host's per-evidence digest scheme; that would make every
+// write look stale to a substrate like WorldBeliefSubstrate, whose backing
+// store — belief.go's applyBeliefScored — rejects a BeliefScored event whose
+// digest does not match the host's own recorded one).
 func (g *SliceGate) Apply(ctx context.Context, s SliceScored) (bool, error) {
 	g.mu.Lock()
 	current, ok := g.digests[s.Target]
@@ -188,7 +211,13 @@ func (g *SliceGate) Apply(ctx context.Context, s SliceScored) (bool, error) {
 	}
 
 	for _, n := range s.Nodes {
-		if err := g.substrate.SetBelief(ctx, n.Ref, n.Belief); err != nil {
+		existing, _, err := g.substrate.Belief(ctx, n.Ref)
+		if err != nil {
+			return false, fmt.Errorf("slice apply: read current belief for %s %s: %w", n.Ref.Kind, n.Ref.ID, err)
+		}
+		nb := n.Belief
+		nb.EvidenceDigest = existing.EvidenceDigest
+		if err := g.substrate.SetBelief(ctx, n.Ref, nb); err != nil {
 			return false, fmt.Errorf("slice apply: set belief for %s %s: %w", n.Ref.Kind, n.Ref.ID, err)
 		}
 	}
