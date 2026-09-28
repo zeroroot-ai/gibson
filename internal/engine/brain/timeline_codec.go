@@ -99,6 +99,9 @@ func init() {
 	// hypothesis.go
 	registerEvent("hypothesis.observed", func() Event { return &HypothesisObserved{} })
 
+	// bet_settlement.go
+	registerEvent("bet.settled_true", func() Event { return &BetSettledTrue{} })
+
 	// llm_call.go
 	registerEvent("llm_call.observed", func() Event { return &LlmCallObserved{} })
 
@@ -204,6 +207,8 @@ func dereferenceEvent(ev Event) Event {
 	case *AgentRunObserved:
 		return *v
 	case *HypothesisObserved:
+		return *v
+	case *BetSettledTrue:
 		return *v
 	case *LlmCallObserved:
 		return *v
