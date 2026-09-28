@@ -402,6 +402,7 @@ func RestoreWorld(snap WorldSnapshot, tenant string) (*World, error) {
 			Confidence:   h.Confidence,
 			Claim:        h.Claim,
 			HypothesisID: h.HypothesisID,
+			Technique:    h.Technique,
 			References:   h.References,
 		})
 	}
