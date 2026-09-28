@@ -41,6 +41,11 @@ type worldSnapshotData struct {
 	// substrate seam). Externally-keyed by NodeRef, like BetSettlements — no
 	// monotonic id counter of its own.
 	NodeBeliefs []NodeBeliefSnapshot `json:"node_beliefs"`
+	// DestructiveActions is the destructive-proof authorization queue
+	// (ADR-0028, gibson#336), pending and decided alike. Snapshotted like
+	// BetSettlements — an externally-keyed record with no monotonic id
+	// counter of its own.
+	DestructiveActions []DestructiveActionSnapshot `json:"destructive_actions"`
 	// AgentToolCalls + FlightRecorderPolicy: the flight recorder's captured
 	// tool I/O and the tenant's retention/redaction policy (ADR-0020,
 	// gibson#271). The policy must be snapshotted too, or a tenant's
@@ -64,23 +69,24 @@ type worldSnapshotData struct {
 // atSeq is the Timeline sequence ID of the last event folded into the snapshot.
 func SnapshotWorld(w *World, atSeq string) WorldSnapshot {
 	data := worldSnapshotData{
-		Hosts:          w.Snapshot(),
-		Missions:       w.MissionSnapshot(),
-		Work:           w.WorkSnapshot(),
-		Findings:       w.FindingSnapshot(),
-		Labels:         w.LabelSnapshot(),
-		Domains:        w.DomainSnapshot(),
-		Subdomains:     w.SubdomainSnapshot(),
-		Credentials:    w.CredentialSnapshot(),
-		Accounts:       w.AccountSnapshot(),
-		AgentRuns:      w.AgentRunSnapshot(),
-		LlmCalls:       w.LlmCallSnapshot(),
-		Decisions:      w.DecisionSnapshot(),
-		Observations:   w.ObservationSnapshot(),
-		Entities:       w.EntitySnapshot(),
-		Hypotheses:     w.HypothesisSnapshot(),
-		BetSettlements: w.BetSettlementSnapshot(),
-		NodeBeliefs:    w.NodeBeliefSnapshot(),
+		Hosts:              w.Snapshot(),
+		Missions:           w.MissionSnapshot(),
+		Work:               w.WorkSnapshot(),
+		Findings:           w.FindingSnapshot(),
+		Labels:             w.LabelSnapshot(),
+		Domains:            w.DomainSnapshot(),
+		Subdomains:         w.SubdomainSnapshot(),
+		Credentials:        w.CredentialSnapshot(),
+		Accounts:           w.AccountSnapshot(),
+		AgentRuns:          w.AgentRunSnapshot(),
+		LlmCalls:           w.LlmCallSnapshot(),
+		Decisions:          w.DecisionSnapshot(),
+		Observations:       w.ObservationSnapshot(),
+		Entities:           w.EntitySnapshot(),
+		Hypotheses:         w.HypothesisSnapshot(),
+		BetSettlements:     w.BetSettlementSnapshot(),
+		NodeBeliefs:        w.NodeBeliefSnapshot(),
+		DestructiveActions: w.DestructiveActionSnapshot(),
 
 		AgentToolCalls:       w.AgentToolCallSnapshot(),
 		FlightRecorderPolicy: w.flightRecorderPolicy,
@@ -307,6 +313,32 @@ func RestoreWorld(snap WorldSnapshot, tenant string) (*World, error) {
 	// world-assigned counter, same as BetSettlements above.
 	for _, nb := range data.NodeBeliefs {
 		Reduce(w, NodeBeliefSet(nb))
+	}
+
+	// Replay destructive-proof authorization actions (ADR-0028, gibson#336):
+	// always replay the request first, then the decision if one landed —
+	// applyDestructiveActionDecided is a no-op without a matching request, so
+	// order here matters, unlike the order-independent BetSettlements loop
+	// above (whose identity is likewise HypothesisID, but which never has a
+	// second, dependent event to sequence after the first).
+	for _, a := range data.DestructiveActions {
+		Reduce(w, DestructiveActionRequested{
+			HypothesisID:      a.HypothesisID,
+			Tenant:            a.Tenant,
+			ScopeID:           a.ScopeID,
+			MissionID:         a.MissionID,
+			Technique:         a.Technique,
+			PredicateType:     a.PredicateType,
+			RequestedAtUnixMS: a.RequestedAtUnixMS,
+		})
+		if a.Decided {
+			Reduce(w, DestructiveActionDecided{
+				HypothesisID:    a.HypothesisID,
+				Approved:        a.Approved,
+				UserID:          a.UserID,
+				DecidedAtUnixMS: a.DecidedAtUnixMS,
+			})
+		}
 	}
 
 	// Replay LLM calls.

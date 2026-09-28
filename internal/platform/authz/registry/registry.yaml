@@ -381,6 +381,24 @@ entries:
     allowed_identities:
       - USER
       - SERVICE
+  "/gibson.daemon.destructiveauthz.v1.DestructiveAuthorizationService/ApproveDestructiveAction":
+    relation: "admin"
+    object_type: "tenant"
+    object_deriver: "tenant_from_identity"
+    allowed_identities:
+      - USER
+  "/gibson.daemon.destructiveauthz.v1.DestructiveAuthorizationService/DenyDestructiveAction":
+    relation: "admin"
+    object_type: "tenant"
+    object_deriver: "tenant_from_identity"
+    allowed_identities:
+      - USER
+  "/gibson.daemon.destructiveauthz.v1.DestructiveAuthorizationService/ListPendingDestructiveActions":
+    relation: "admin"
+    object_type: "tenant"
+    object_deriver: "tenant_from_identity"
+    allowed_identities:
+      - USER
   "/gibson.daemon.discovery.v1.DiscoveryService/DescribeAgent":
     relation: "member"
     object_type: "tenant"

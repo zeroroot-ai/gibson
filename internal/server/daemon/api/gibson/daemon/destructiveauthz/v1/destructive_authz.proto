@@ -1,0 +1,116 @@
+syntax = "proto3";
+
+package gibson.daemon.destructiveauthz.v1;
+
+option go_package = "github.com/zeroroot-ai/gibson/internal/server/daemon/api/gibson/daemon/destructiveauthz/v1;destructiveauthzv1";
+
+import "gibson/auth/v1/options.proto";
+
+// DestructiveAuthorizationService is the daemon API backing the dashboard's
+// destructive-action authorization queue (dashboard#99, gibson#336). Per
+// ADR-0028, a destructive or irreversible proof-of-demonstration
+// (ADR-0027) runs only after a human authorizes that one specific action
+// here: the bet stays OPEN and the rest of the fleet keeps working while
+// exactly one action awaits a decision (ADR-0028 decision 2 — the gate is
+// per-action, never per-mission).
+//
+// Backed by internal/engine/brain.DestructiveAuthorizationQueue
+// (destructive_authz.go), which implements bet_settlement.go's existing
+// DestructiveProofAuthorizer seam. Every RPC is gated to the caller's own
+// tenant's admin relation: only a tenant admin may see or decide that
+// tenant's destructive actions.
+service DestructiveAuthorizationService {
+  // ListPendingDestructiveActions returns every destructive action for the
+  // caller's tenant still awaiting a human decision, in stable
+  // (hypothesis id) order.
+  rpc ListPendingDestructiveActions(ListPendingDestructiveActionsRequest) returns (ListPendingDestructiveActionsResponse) {
+    option (gibson.auth.v1.authz) = {
+      relation: "admin"
+      object_type: "tenant"
+      object_deriver: "tenant_from_identity"
+      allowed_identities: 1  // USER
+    };
+  }
+
+  // ApproveDestructiveAction authorizes the named pending action
+  // (ADR-0028 decision 3), unblocking the fleet's settlement attempt for
+  // it. Refused if action_id names no pending action for the caller's
+  // tenant, or one already decided (terminal: the first decision wins).
+  rpc ApproveDestructiveAction(ApproveDestructiveActionRequest) returns (ApproveDestructiveActionResponse) {
+    option (gibson.auth.v1.authz) = {
+      relation: "admin"
+      object_type: "tenant"
+      object_deriver: "tenant_from_identity"
+      allowed_identities: 1  // USER
+    };
+  }
+
+  // DenyDestructiveAction refuses the named pending action (ADR-0028
+  // decision 3). Same refusal rules as ApproveDestructiveAction.
+  rpc DenyDestructiveAction(DenyDestructiveActionRequest) returns (DenyDestructiveActionResponse) {
+    option (gibson.auth.v1.authz) = {
+      relation: "admin"
+      object_type: "tenant"
+      object_deriver: "tenant_from_identity"
+      allowed_identities: 1  // USER
+    };
+  }
+}
+
+// Reversibility is the demonstration's reversibility signal (ADR-0028
+// decision 1). UNSPECIFIED today for every action: the signal is meant to
+// come from a technique flag in the Domain Pack, which is not built yet
+// (ADR-0028's own text names it a plus-one to the risk-tier decision) — the
+// only live gating signal today is BetSettlementRequest.Destructive itself
+// (internal/engine/brain/bet_settlement.go), which is exactly why every
+// action reaching this queue is already known destructive-or-irreversible.
+// This field exists so the wire contract does not have to change again once
+// a real signal lands.
+enum Reversibility {
+  REVERSIBILITY_UNSPECIFIED = 0;
+  REVERSIBILITY_REVERSIBLE = 1;
+  REVERSIBILITY_IRREVERSIBLE = 2;
+}
+
+// PendingDestructiveAction describes one destructive proof-of-demonstration
+// attempt awaiting authorization: what it would prove (technique +
+// predicate), the bet/hypothesis it would settle, and when it was
+// requested.
+message PendingDestructiveAction {
+  // action_id identifies this pending action; pass it to
+  // Approve/DenyDestructiveAction. Equal to hypothesis_id — a destructive
+  // proof attempt is 1:1 with one bet's settlement attempt
+  // (SettleBetTrue's own terminal-settlement check prevents a second
+  // attempt once one succeeds), so there is no separate action identity to
+  // mint.
+  string action_id = 1;
+  string hypothesis_id = 2;
+  string scope_id = 3;
+  string mission_id = 4;
+  // technique and predicate_type name the settlement predicate
+  // (internal/engine/settlement) this action would satisfy — what the
+  // demonstration proves.
+  string technique = 5;
+  string predicate_type = 6;
+  int64 requested_at_unix_ms = 7;
+  // blast_radius is a human-readable description of what the action would
+  // affect. Empty today for the same reason Reversibility is UNSPECIFIED —
+  // no Domain Pack risk-tier signal exists yet to fill it from.
+  string blast_radius = 8;
+  Reversibility reversibility = 9;
+}
+
+message ListPendingDestructiveActionsRequest {}
+message ListPendingDestructiveActionsResponse {
+  repeated PendingDestructiveAction actions = 1;
+}
+
+message ApproveDestructiveActionRequest {
+  string action_id = 1;
+}
+message ApproveDestructiveActionResponse {}
+
+message DenyDestructiveActionRequest {
+  string action_id = 1;
+}
+message DenyDestructiveActionResponse {}

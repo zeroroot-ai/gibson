@@ -100,6 +100,12 @@ type World struct {
 	// bet_settlement.go.
 	betSettlements *ecs.Map1[BetSettlement]
 
+	// destructiveActions holds pending/decided destructive-proof
+	// authorization records (ADR-0028, gibson#336), keyed by HypothesisID —
+	// the same externally-given-string identity BetSettlement uses. See
+	// destructive_authz.go.
+	destructiveActions *ecs.Map1[DestructiveAction]
+
 	// voiPlans holds each mission's VoI planning state (gibson#283,
 	// ADR-0026): whether a plan is in flight, the evidence cursor it answers
 	// for, and the last completed plan's ranked, top-k candidates. See
@@ -175,28 +181,29 @@ func (w *World) newSubdomainID() uint64 {
 func NewWorld(tenant string) *World {
 	w := ecs.NewWorld()
 	return &World{
-		Tenant:         tenant,
-		ecs:            w,
-		hosts:          ecs.NewMap1[Host](w),
-		surprises:      ecs.NewMap1[Surprise](w),
-		work:           ecs.NewMap1[WorkItem](w),
-		decisions:      ecs.NewMap1[DecisionRecord](w),
-		missions:       ecs.NewMap1[Mission](w),
-		findings:       ecs.NewMap1[Finding](w),
-		labels:         ecs.NewMap1[Label](w),
-		domains:        ecs.NewMap1[Domain](w),
-		subdomains:     ecs.NewMap1[Subdomain](w),
-		credentials:    ecs.NewMap1[Credential](w),
-		accounts:       ecs.NewMap1[Account](w),
-		agentRuns:      ecs.NewMap1[AgentRun](w),
-		llmCalls:       ecs.NewMap1[LlmCall](w),
-		agentToolCalls: ecs.NewMap1[AgentToolCall](w),
-		observations:   ecs.NewMap1[Observation](w),
-		entities:       ecs.NewMap1[Entity](w),
-		hypotheses:     ecs.NewMap1[Hypothesis](w),
-		betSettlements: ecs.NewMap1[BetSettlement](w),
-		voiPlans:       ecs.NewMap1[VoIPlanState](w),
-		nodeBeliefs:    ecs.NewMap1[NodeBeliefRecord](w),
+		Tenant:             tenant,
+		ecs:                w,
+		hosts:              ecs.NewMap1[Host](w),
+		surprises:          ecs.NewMap1[Surprise](w),
+		work:               ecs.NewMap1[WorkItem](w),
+		decisions:          ecs.NewMap1[DecisionRecord](w),
+		missions:           ecs.NewMap1[Mission](w),
+		findings:           ecs.NewMap1[Finding](w),
+		labels:             ecs.NewMap1[Label](w),
+		domains:            ecs.NewMap1[Domain](w),
+		subdomains:         ecs.NewMap1[Subdomain](w),
+		credentials:        ecs.NewMap1[Credential](w),
+		accounts:           ecs.NewMap1[Account](w),
+		agentRuns:          ecs.NewMap1[AgentRun](w),
+		llmCalls:           ecs.NewMap1[LlmCall](w),
+		agentToolCalls:     ecs.NewMap1[AgentToolCall](w),
+		observations:       ecs.NewMap1[Observation](w),
+		entities:           ecs.NewMap1[Entity](w),
+		hypotheses:         ecs.NewMap1[Hypothesis](w),
+		betSettlements:     ecs.NewMap1[BetSettlement](w),
+		destructiveActions: ecs.NewMap1[DestructiveAction](w),
+		voiPlans:           ecs.NewMap1[VoIPlanState](w),
+		nodeBeliefs:        ecs.NewMap1[NodeBeliefRecord](w),
 	}
 }
 
@@ -390,6 +397,10 @@ func Reduce(w *World, ev Event) {
 		applyBetSettledFalse(w, e)
 	case BetSettledByHITL:
 		applyBetSettledByHITL(w, e)
+	case DestructiveActionRequested:
+		applyDestructiveActionRequested(w, e)
+	case DestructiveActionDecided:
+		applyDestructiveActionDecided(w, e)
 	case LlmCallObserved:
 		applyLlmCallObserved(w, e)
 	case AgentToolCallObserved:
