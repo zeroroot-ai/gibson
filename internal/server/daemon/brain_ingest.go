@@ -181,6 +181,10 @@ func ingestObservation(reg *brain.Registry) harness.ObservationSink {
 		// can attribute the discovered host to the mission that found it. Kept
 		// separate from scope so the two concepts do not re-conflate.
 		missionID := attr.MissionID
+		// The mission run, server-resolved the same way missionID is
+		// (gibson#339's transcript-linking need). Only consumed by the
+		// Hypothesis case today.
+		runID := attr.RunID
 		switch o := req.Observation.(type) {
 		case *harnesspb.ObserveRequest_Host:
 			h := o.Host
@@ -251,6 +255,16 @@ func ingestObservation(reg *brain.Registry) harness.ObservationSink {
 			// never as a Belief — so it needs no Taxonomy admission the way an
 			// EntitySighting does: References are stored as reported, not
 			// resolved against the Taxonomy here (a later slice's job).
+			//
+			// HypothesisID and Technique are NOT wired here yet: they are new
+			// HypothesisObservation fields (sdk#89/#88) that landed on the
+			// SDK's epic/intelligence-layer branch after this daemon's pinned
+			// SDK release (v0.180.0). hyp.GetHypothesisId() / hyp.GetTechnique()
+			// do not exist on that pinned version and do not compile against
+			// it. Wire both the moment the SDK dependency bumps past the
+			// release that includes them — brain.Hypothesis/HypothesisObserved
+			// already carry HypothesisID (gibson#339's join key) and are ready
+			// to receive it.
 			hyp := o.Hypothesis
 			refs := make([]brain.ReferencedEntityRef, 0, len(hyp.GetReferences()))
 			for _, r := range hyp.GetReferences() {
@@ -263,6 +277,7 @@ func ingestObservation(reg *brain.Registry) harness.ObservationSink {
 			}
 			reg.For(tenant).Submit(brain.HypothesisObserved{
 				MissionID:  missionID,
+				RunID:      runID,
 				ScopeID:    scope,
 				Proposer:   hyp.GetProposer(),
 				Confidence: hyp.GetConfidence(),

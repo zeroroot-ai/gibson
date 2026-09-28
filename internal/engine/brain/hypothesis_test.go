@@ -14,11 +14,13 @@ func TestHypothesisObserved_CreatesNewHypothesis(t *testing.T) {
 	w := NewWorld("t")
 
 	Reduce(w, HypothesisObserved{
-		MissionID:  "m1",
-		ScopeID:    "s1",
-		Proposer:   "recon-agent",
-		Confidence: 0.6,
-		Claim:      "port 6443 on this host is unauthenticated",
+		MissionID:    "m1",
+		RunID:        "run-1",
+		ScopeID:      "s1",
+		Proposer:     "recon-agent",
+		Confidence:   0.6,
+		Claim:        "port 6443 on this host is unauthenticated",
+		HypothesisID: "hyp-6443",
 		References: []ReferencedEntityRef{
 			{Label: "Host", IDProperties: map[string]string{"address": "10.0.0.1"}},
 		},
@@ -35,7 +37,9 @@ func TestHypothesisObserved_CreatesNewHypothesis(t *testing.T) {
 			References: []ReferencedEntityRef{
 				{Label: "Host", IDProperties: map[string]string{"address": "10.0.0.1"}},
 			},
-			MissionID: "m1",
+			MissionID:    "m1",
+			RunID:        "run-1",
+			HypothesisID: "hyp-6443",
 		},
 	}
 	if !reflect.DeepEqual(got, want) {
@@ -70,6 +74,43 @@ func TestHypothesisObserved_MergesByScopeAndClaim(t *testing.T) {
 	}
 	if got[0].Confidence != 0.9 {
 		t.Fatalf("confidence must take the latest report, got %v", got[0].Confidence)
+	}
+}
+
+// TestHypothesisObserved_HypothesisIDAndRunIDKeepFirstNonEmpty proves
+// HypothesisID and RunID follow the same progressive-enrichment rule as
+// MissionID/Proposer: kept from whichever observation first supplied one,
+// never overwritten by a later observation of the same claim. HypothesisID
+// is the one join key across Hypothesis, Bet and BetSettlement (gibson#339)
+// — an agent that proposes without an id and a second agent that re-observes
+// the same claim WITH one must not have the second agent's id silently
+// discarded (it is the only source of a bettable identity so far), but a
+// hypothesis that already has an id must never have it reassigned out from
+// under an in-flight Bet.
+func TestHypothesisObserved_HypothesisIDAndRunIDKeepFirstNonEmpty(t *testing.T) {
+	w := NewWorld("t")
+
+	Reduce(w, HypothesisObserved{
+		ScopeID: "s1", Claim: "the admin panel is reachable without auth",
+	})
+	Reduce(w, HypothesisObserved{
+		ScopeID: "s1", Claim: "the admin panel is reachable without auth",
+		HypothesisID: "hyp-admin-panel", RunID: "run-7",
+	})
+	Reduce(w, HypothesisObserved{
+		ScopeID: "s1", Claim: "the admin panel is reachable without auth",
+		HypothesisID: "hyp-should-not-win", RunID: "run-should-not-win",
+	})
+
+	got := w.HypothesisSnapshot()
+	if len(got) != 1 {
+		t.Fatalf("three observations of one claim must be one hypothesis, got %d: %+v", len(got), got)
+	}
+	if got[0].HypothesisID != "hyp-admin-panel" {
+		t.Fatalf("hypothesis id must keep the first non-empty value, got %q", got[0].HypothesisID)
+	}
+	if got[0].RunID != "run-7" {
+		t.Fatalf("run id must keep the first non-empty value, got %q", got[0].RunID)
 	}
 }
 
@@ -163,9 +204,10 @@ func TestHypothesisObserved_ReplayReproducesExactly(t *testing.T) {
 func TestSnapshotRestore_RoundTripsHypotheses(t *testing.T) {
 	w := NewWorld("t")
 	Reduce(w, HypothesisObserved{
-		ScopeID: "s1", MissionID: "m1", Proposer: "recon-agent", Confidence: 0.6,
-		Claim:      "port 6443 is unauthenticated",
-		References: []ReferencedEntityRef{{Label: "Host", IDProperties: map[string]string{"address": "10.0.0.1"}}},
+		ScopeID: "s1", MissionID: "m1", RunID: "run-1", Proposer: "recon-agent", Confidence: 0.6,
+		Claim:        "port 6443 is unauthenticated",
+		HypothesisID: "hyp-6443",
+		References:   []ReferencedEntityRef{{Label: "Host", IDProperties: map[string]string{"address": "10.0.0.1"}}},
 	})
 	Reduce(w, HypothesisObserved{ScopeID: "s1", Claim: "a second claim"})
 

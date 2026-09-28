@@ -53,9 +53,10 @@ type ReferencedEntityRef struct {
 type Hypothesis struct {
 	// ID is a stable, replay-deterministic id (assigned at creation) for
 	// event references and graph projection — the same role Host.ID plays.
-	// It is also the identifier a later PlaceBet call names as
-	// bet.hypothesis_id, once the ambient projection has surfaced it to the
-	// staking agent.
+	// It is NOT the identifier a PlaceBet or settlement call names — an
+	// agent can never learn this world-assigned id back (Observe has no
+	// return value carrying it), so it cannot be what a later Bet
+	// references. See HypothesisID for that join key (gibson#339).
 	ID uint64
 	// ScopeID partitions identity the same way it does for Host: two
 	// networks proposing the identical claim text are different hypotheses
@@ -84,6 +85,22 @@ type Hypothesis struct {
 	// MissionID is the mission whose agent proposed this hypothesis — the
 	// mission-evidence edge, the same role Host.MissionID plays.
 	MissionID string
+	// HypothesisID is the agent-chosen identifier the proposing agent set on
+	// HypothesisObservation (sdk#70/hypothesis_id field). This is the one
+	// join key across Hypothesis, Bet and BetSettlement (gibson#339): a Bet
+	// names the same value as Bet.HypothesisId, and a settlement
+	// (Engine.SettleBetByHITL, gibson#280, and the other two settlement
+	// paths) records against it. Progressive-enrichment, same rule as
+	// Proposer: kept from whichever observation first supplied one, never
+	// reassigned once set — an in-flight Bet must never have its target
+	// silently repointed. May be empty: a Hypothesis with no id still folds
+	// as a claim, it just cannot be staked on or settled by id.
+	HypothesisID string
+	// RunID is the mission run whose agent proposed this hypothesis
+	// (ContextInfo.mission_run_id on the wire), for transcript linking
+	// (gibson#339's ListOpenBets). Same progressive-enrichment rule as
+	// MissionID.
+	RunID string
 }
 
 // HypothesisObserved records that an agent proposed a claim about the target
@@ -92,12 +109,14 @@ type Hypothesis struct {
 // so it is replayable like any other event, but it lands as the Hypothesis
 // provenance class — never as Evidence, and never as a Belief.
 type HypothesisObserved struct {
-	MissionID  string
-	ScopeID    string
-	Proposer   string
-	Confidence float64
-	Claim      string
-	References []ReferencedEntityRef
+	MissionID    string
+	RunID        string
+	ScopeID      string
+	Proposer     string
+	Confidence   float64
+	Claim        string
+	HypothesisID string
+	References   []ReferencedEntityRef
 }
 
 // Kind identifies the hypothesis.observed brain event.
@@ -129,19 +148,27 @@ func applyHypothesisObserved(w *World, e HypothesisObserved) {
 		if h.MissionID == "" {
 			h.MissionID = e.MissionID
 		}
+		if h.RunID == "" {
+			h.RunID = e.RunID
+		}
+		if h.HypothesisID == "" {
+			h.HypothesisID = e.HypothesisID
+		}
 		q.Close()
 		return
 	}
 	// Query exhausted → world unlocked.
 
 	w.hypotheses.NewEntity(&Hypothesis{
-		ID:         w.newHypothesisID(),
-		ScopeID:    e.ScopeID,
-		Claim:      e.Claim,
-		Proposer:   e.Proposer,
-		Confidence: e.Confidence,
-		References: unionReferences(nil, e.References),
-		MissionID:  e.MissionID,
+		ID:           w.newHypothesisID(),
+		ScopeID:      e.ScopeID,
+		Claim:        e.Claim,
+		Proposer:     e.Proposer,
+		Confidence:   e.Confidence,
+		References:   unionReferences(nil, e.References),
+		MissionID:    e.MissionID,
+		RunID:        e.RunID,
+		HypothesisID: e.HypothesisID,
 	})
 }
 
@@ -173,13 +200,15 @@ func unionReferences(base, add []ReferencedEntityRef) []ReferencedEntityRef {
 // ambient projection (WorldView) surfaces to other agents so the fleet can
 // pick up a claim and test it (ADR-0021).
 type HypothesisSnapshot struct {
-	ID         uint64
-	ScopeID    string
-	Claim      string
-	Proposer   string
-	Confidence float64
-	References []ReferencedEntityRef
-	MissionID  string
+	ID           uint64
+	ScopeID      string
+	Claim        string
+	Proposer     string
+	Confidence   float64
+	References   []ReferencedEntityRef
+	MissionID    string
+	RunID        string
+	HypothesisID string
 }
 
 // HypothesisSnapshot returns hypotheses in deterministic (ScopeID, Claim)
@@ -190,13 +219,15 @@ func (w *World) HypothesisSnapshot() []HypothesisSnapshot {
 	for q.Next() {
 		h := q.Get()
 		out = append(out, HypothesisSnapshot{
-			ID:         h.ID,
-			ScopeID:    h.ScopeID,
-			Claim:      h.Claim,
-			Proposer:   h.Proposer,
-			Confidence: h.Confidence,
-			References: append([]ReferencedEntityRef(nil), h.References...),
-			MissionID:  h.MissionID,
+			ID:           h.ID,
+			ScopeID:      h.ScopeID,
+			Claim:        h.Claim,
+			Proposer:     h.Proposer,
+			Confidence:   h.Confidence,
+			References:   append([]ReferencedEntityRef(nil), h.References...),
+			MissionID:    h.MissionID,
+			RunID:        h.RunID,
+			HypothesisID: h.HypothesisID,
 		})
 	}
 	sort.Slice(out, func(i, j int) bool {
