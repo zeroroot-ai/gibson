@@ -1,5 +1,12 @@
 # Changelog
 
+## [0.142.7](https://github.com/zeroroot-ai/gibson/compare/v0.142.6...v0.142.7) (2026-09-28)
+
+
+### Bug Fixes
+
+* **mfa-reset:** refuse the target's already-issued tokens ([#357](https://github.com/zeroroot-ai/gibson/issues/357)) ([c488eaa](https://github.com/zeroroot-ai/gibson/commit/c488eaae6623bdeaffc664b6ffe15dd627da38e3))
+
 ## [0.142.6](https://github.com/zeroroot-ai/gibson/compare/v0.142.5...v0.142.6) (2026-09-28)
 
 
