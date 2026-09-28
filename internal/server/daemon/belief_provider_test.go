@@ -26,3 +26,32 @@ func TestResolveBeliefProvider_PinsConfiguredVersion(t *testing.T) {
 		t.Fatalf("pinned provider version = %q, want base-v3", got)
 	}
 }
+
+// TestResolveSliceBeliefProvider_IsTheDeterministicPlaceholder pins today's
+// documented state (belief_provider.go): the graph-coupled SliceBeliefProvider
+// is always the placeholder until the ontology's per-edge-type target
+// variable and noisy-OR strength/leak parameters exist for ground.py to
+// consume (gibson#275/#288).
+func TestResolveSliceBeliefProvider_IsTheDeterministicPlaceholder(t *testing.T) {
+	p := resolveSliceBeliefProvider()
+	if got := p.Version(); got != "placeholder-slice-v0" {
+		t.Fatalf("resolveSliceBeliefProvider version = %q, want placeholder-slice-v0", got)
+	}
+}
+
+// TestNewBeliefSchemaRegistry_RegistersTheCoreSeed proves the daemon's
+// belief-schema registry is the real, shipped core seed (gibson#296) — Host
+// belief-bearing with the reachable/exploitable/juicy funnel — not an empty
+// or hand-rolled registry.
+func TestNewBeliefSchemaRegistry_RegistersTheCoreSeed(t *testing.T) {
+	reg, err := newBeliefSchemaRegistry()
+	if err != nil {
+		t.Fatalf("newBeliefSchemaRegistry: %v", err)
+	}
+	if !reg.IsBeliefBearing("Host") {
+		t.Fatalf("registry does not declare Host belief-bearing")
+	}
+	if !reg.IsEnablementEdge("RESOLVES_TO") {
+		t.Fatalf("registry does not declare RESOLVES_TO an enablement edge")
+	}
+}
