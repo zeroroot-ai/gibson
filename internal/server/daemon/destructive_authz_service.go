@@ -36,7 +36,7 @@ type destructiveAuthzServer struct {
 
 // NewDestructiveAuthorizationServer constructs the DestructiveAuthorizationService
 // backed by the per-tenant brain registry.
-func NewDestructiveAuthorizationServer(registry *brain.Registry, logger *slog.Logger) *destructiveAuthzServer {
+func NewDestructiveAuthorizationServer(registry *brain.Registry, logger *slog.Logger) destructiveauthzv1.DestructiveAuthorizationServiceServer {
 	if registry == nil {
 		panic("destructive authorization server: registry cannot be nil")
 	}
@@ -94,6 +94,21 @@ func (s *destructiveAuthzServer) ListPendingDestructiveActions(
 	return resp, nil
 }
 
+// requireActingUser resolves the human acting on behalf of the tenant-admin
+// caller. Unlike world_service.go's SubmitLabel (where a missing acting-user
+// is provenance-only and tolerable), a destructive-action decision is
+// exactly the accountability record ADR-0028 exists for: proceeding with an
+// empty/unknown identity when resolution fails is the privileged-fallback
+// pattern (silently treating "we don't know who this is" as "proceed
+// anyway"). Refuse instead.
+func requireActingUser(ctx context.Context) (string, error) {
+	userID, ok := auth.ActingUserFromContext(ctx)
+	if !ok {
+		return "", status.Error(codes.Unauthenticated, "no acting user in context")
+	}
+	return userID, nil
+}
+
 // ApproveDestructiveAction authorizes the named pending action, unblocking
 // the fleet's settlement attempt for it (ADR-0028 decision 3).
 func (s *destructiveAuthzServer) ApproveDestructiveAction(
@@ -108,7 +123,10 @@ func (s *destructiveAuthzServer) ApproveDestructiveAction(
 	if actionID == "" {
 		return nil, status.Error(codes.InvalidArgument, "action_id is required")
 	}
-	userID, _ := auth.ActingUserFromContext(ctx) // provenance only; "" if absent
+	userID, err := requireActingUser(ctx)
+	if err != nil {
+		return nil, err
+	}
 	if err := q.Decide(actionID, userID, true); err != nil {
 		s.logger.Warn("approve destructive action failed",
 			slog.String("action_id", actionID), slog.Any("err", err))
@@ -131,7 +149,10 @@ func (s *destructiveAuthzServer) DenyDestructiveAction(
 	if actionID == "" {
 		return nil, status.Error(codes.InvalidArgument, "action_id is required")
 	}
-	userID, _ := auth.ActingUserFromContext(ctx) // provenance only; "" if absent
+	userID, err := requireActingUser(ctx)
+	if err != nil {
+		return nil, err
+	}
 	if err := q.Decide(actionID, userID, false); err != nil {
 		s.logger.Warn("deny destructive action failed",
 			slog.String("action_id", actionID), slog.Any("err", err))

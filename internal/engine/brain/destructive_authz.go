@@ -306,7 +306,7 @@ func (q *DestructiveAuthorizationQueue) Authorize(ctx context.Context, tenant st
 		q.mu.Lock()
 		delete(q.pending, req.HypothesisID)
 		q.mu.Unlock()
-		return false, ctx.Err()
+		return false, fmt.Errorf("brain: destructive authorization for hypothesis %q: %w", req.HypothesisID, ctx.Err())
 	}
 }
 
