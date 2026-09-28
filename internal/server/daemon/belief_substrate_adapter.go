@@ -11,6 +11,7 @@ import (
 	"google.golang.org/grpc/status"
 
 	"github.com/zeroroot-ai/gibson/internal/engine/brain"
+	"github.com/zeroroot-ai/gibson/internal/engine/harness"
 	"github.com/zeroroot-ai/sdk/auth"
 )
 
@@ -71,4 +72,15 @@ func (s *tenantRoutedBeliefSubstrate) SetBelief(ctx context.Context, ref brain.N
 		return fmt.Errorf("belief substrate: %w", err)
 	}
 	return nil
+}
+
+// wirePlaceBetBeliefSubstrate wires PlaceBet's belief substrate onto callback
+// (ADR-0022, ADR-0029 §3, gibson#273/#278): before this, PlaceBet always
+// answered Unavailable — no daemon ever gave it a substrate to persist a
+// staked bet to. Extracted from daemon.go's Start() into its own function so
+// this wiring step is unit-testable independent of Start()'s much larger
+// bootstrap sequence — the same reason wireBrainRegistry (belief_provider.go)
+// is its own function.
+func wirePlaceBetBeliefSubstrate(callback *harness.CallbackManager, registry *brain.Registry) {
+	callback.SetBeliefSubstrate(newTenantRoutedBeliefSubstrate(registry))
 }

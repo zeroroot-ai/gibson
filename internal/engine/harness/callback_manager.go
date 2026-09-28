@@ -552,6 +552,22 @@ func (m *CallbackManager) SetBeliefSubstrate(substrate brain.BeliefSubstrate) {
 	}
 }
 
+// BeliefSubstrate returns the belief substrate currently wired onto the
+// callback service (nil if none has been set, or the manager has no server
+// yet) — the read half of SetBeliefSubstrate, the same Get/Set shape
+// CallbackEndpoint/IsRunning already give the manager's other state. Lets a
+// caller (or a test proving a wiring step reached the manager, e.g.
+// wirePlaceBetBeliefSubstrate in internal/server/daemon) confirm the value
+// without reaching into the unexported server/service fields directly.
+func (m *CallbackManager) BeliefSubstrate() brain.BeliefSubstrate {
+	if m.server == nil || m.server.service == nil {
+		return nil
+	}
+	m.server.service.mu.RLock()
+	defer m.server.service.mu.RUnlock()
+	return m.server.service.beliefSubstrate
+}
+
 // SetDiscoveryProcessor sets the DiscoveryProcessor on the callback service.
 // This enables automatic extraction and storage of DiscoveryResult from tool responses.
 //

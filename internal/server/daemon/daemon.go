@@ -1498,10 +1498,12 @@ func (d *daemonImpl) Start(ctx context.Context) error {
 		// gibson#273/#278): before this, PlaceBet always answered Unavailable
 		// — no daemon ever gave it a substrate to persist a staked bet to.
 		// tenantRoutedBeliefSubstrate resolves each call's tenant from ctx
-		// (getHarness already validated it against the mission) and routes to
-		// that tenant's own WorldBeliefSubstrate, since this one substrate
-		// value is shared across every tenant's PlaceBet calls.
-		d.callback.SetBeliefSubstrate(newTenantRoutedBeliefSubstrate(d.brainRegistry))
+		// (getHarness already required and validated it against the mission)
+		// and routes to that tenant's own WorldBeliefSubstrate, since this one
+		// substrate value is shared across every tenant's PlaceBet calls. See
+		// wirePlaceBetBeliefSubstrate (belief_substrate_adapter.go) for why
+		// this one step is its own function.
+		wirePlaceBetBeliefSubstrate(d.callback, d.brainRegistry)
 		d.logger.Info(ctx, "wired callback PlaceBet RPC to the ECS brain belief substrate")
 	}
 
