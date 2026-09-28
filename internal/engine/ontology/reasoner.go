@@ -230,6 +230,50 @@ func (r *Reasoner) IFPsForType(nodeType string) []string {
 	return cp
 }
 
+// Extensions returns every currently registered extension, keyed by the name
+// it was registered under. The returned map and every OntologyExtension
+// value in it is a defensive deep copy, safe for the caller to hold or
+// mutate — used by Domain Pack export (gibson#282) to capture a domain's
+// discovered ontology content for a portable, versioned bundle.
+func (r *Reasoner) Extensions() map[string]sdkgraphrag.OntologyExtension {
+	r.mu.RLock()
+	defer r.mu.RUnlock()
+	out := make(map[string]sdkgraphrag.OntologyExtension, len(r.extensions))
+	for name, ext := range r.extensions {
+		out[name] = cloneOntologyExtension(ext)
+	}
+	return out
+}
+
+// cloneOntologyExtension deep-copies ext so a caller holding the result of
+// Extensions cannot mutate the Reasoner's live state through it.
+func cloneOntologyExtension(ext sdkgraphrag.OntologyExtension) sdkgraphrag.OntologyExtension {
+	cp := sdkgraphrag.OntologyExtension{}
+	if ext.Prefixes != nil {
+		cp.Prefixes = make(map[string]string, len(ext.Prefixes))
+		for k, v := range ext.Prefixes {
+			cp.Prefixes[k] = v
+		}
+	}
+	if ext.Hierarchies != nil {
+		cp.Hierarchies = make([]sdkgraphrag.HierarchyDef, len(ext.Hierarchies))
+		copy(cp.Hierarchies, ext.Hierarchies)
+	}
+	if ext.Equivalences != nil {
+		cp.Equivalences = make([][2]string, len(ext.Equivalences))
+		copy(cp.Equivalences, ext.Equivalences)
+	}
+	if ext.IFPs != nil {
+		cp.IFPs = make([]sdkgraphrag.IFPDef, len(ext.IFPs))
+		copy(cp.IFPs, ext.IFPs)
+	}
+	if ext.RawTriples != nil {
+		cp.RawTriples = make([]byte, len(ext.RawTriples))
+		copy(cp.RawTriples, ext.RawTriples)
+	}
+	return cp
+}
+
 // --- internal helpers ---
 
 // stagedGraph is a snapshot of the hierarchy graph used for cycle detection.
