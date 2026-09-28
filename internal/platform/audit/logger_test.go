@@ -443,8 +443,12 @@ func newBrokenLogger(t *testing.T) (*AuditLogger, context.CancelFunc) {
 
 	cfg := state.DefaultConfig()
 	cfg.URL = "redis://" + mr.Addr()
-	cfg.MaxRetries = -1                     // disable retries
-	cfg.DialTimeout = 50 * time.Millisecond // fail fast on connection
+	cfg.MaxRetries = -1 // disable retries
+	// DialTimeout stays at the default. NewStateClient pings with a context
+	// bounded by it, so a short value here fails the SETUP on a loaded runner
+	// before the broken path is ever exercised (go-ci run 36430697103,
+	// 2026-09-28). The broken path does not need it: a closed port refuses
+	// the dial at once, and the read and write timeouts below keep XADD fast.
 	cfg.ReadTimeout = 50 * time.Millisecond
 	cfg.WriteTimeout = 50 * time.Millisecond
 
