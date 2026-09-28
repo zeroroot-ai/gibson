@@ -87,7 +87,12 @@ func (s *worldServer) ListOpenBets(ctx context.Context, _ *worldpb.ListOpenBetsR
 //
 // The reviewing user is resolved server-side from the caller's identity,
 // never taken from the request — the same rule SubmitLabel already follows,
-// so a caller can never attribute a settlement to another user.
+// so a caller can never attribute a settlement to another user. Unlike
+// SubmitLabel, a missing acting user is refused rather than recorded as an
+// empty string: a HITL verdict is the accountability record for a bet's
+// settlement (ADR-0006 §6 provenance, ADR-0028's class of destructive/
+// consequential action), so an unattributable verdict must fail closed, not
+// flow through as a zero-value identity.
 func (s *worldServer) SettleBetByHITL(ctx context.Context, req *worldpb.SettleBetByHITLRequest) (*worldpb.SettleBetByHITLResponse, error) {
 	e, err := s.engine(ctx)
 	if err != nil {
@@ -102,7 +107,11 @@ func (s *worldServer) SettleBetByHITL(ctx context.Context, req *worldpb.SettleBe
 		return nil, status.Errorf(codes.InvalidArgument,
 			"unknown verdict %q (want true_positive|false_positive|dismiss)", req.GetVerdict())
 	}
-	userID, _ := auth.ActingUserFromContext(ctx) // provenance only; "" if absent
+	userID, ok := auth.ActingUserFromContext(ctx)
+	if !ok {
+		return nil, status.Error(codes.Unauthenticated,
+			"SettleBetByHITL requires an authenticated acting user; the bet was not settled")
+	}
 
 	if verdict == brain.VerdictDismiss {
 		e.Submit(brain.LabelApplied{

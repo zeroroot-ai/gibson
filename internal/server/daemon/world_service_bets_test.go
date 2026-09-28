@@ -8,6 +8,9 @@ import (
 	"testing"
 	"time"
 
+	"google.golang.org/grpc/codes"
+	"google.golang.org/grpc/status"
+
 	"github.com/zeroroot-ai/gibson/internal/engine/brain"
 	worldpb "github.com/zeroroot-ai/gibson/internal/server/daemon/api/gibson/world/v1"
 	"github.com/zeroroot-ai/sdk/auth"
@@ -15,9 +18,9 @@ import (
 
 // awaitOpenBets polls ListOpenBets until it returns want bets, then returns
 // them — mirroring awaitHypotheses's pattern for the async Submit -> World
-// pipeline (brain_ingest_observe_test.go) and waitLabels's parameter order
-// (world_service_label_test.go).
-func awaitOpenBets(t *testing.T, srv *worldServer, ctx context.Context, want int) []*worldpb.OpenBet {
+// pipeline (brain_ingest_observe_test.go). ctx leads the parameter list per
+// the codebase's context-as-argument convention.
+func awaitOpenBets(ctx context.Context, t *testing.T, srv *worldServer, want int) []*worldpb.OpenBet {
 	t.Helper()
 	deadline := time.Now().Add(2 * time.Second)
 	var got []*worldpb.OpenBet
@@ -54,7 +57,7 @@ func TestListOpenBets_TenantScoped(t *testing.T) {
 	})
 
 	tctx := auth.WithTenant(context.Background(), auth.MustNewTenantID("acme"))
-	got := awaitOpenBets(t, srv, tctx, 1)
+	got := awaitOpenBets(tctx, t, srv, 1)
 	if got[0].GetHypothesisId() != "hyp-6443" {
 		t.Fatalf("expected acme's own bet, got %+v", got[0])
 	}
@@ -83,7 +86,7 @@ func TestListOpenBets_ReturnsClaimProposerConfidenceEvidenceRunID(t *testing.T) 
 	})
 
 	tctx := auth.WithTenant(context.Background(), auth.MustNewTenantID("acme"))
-	got := awaitOpenBets(t, srv, tctx, 1)
+	got := awaitOpenBets(tctx, t, srv, 1)
 	b := got[0]
 	if b.GetHypothesisId() != "hyp-admin" {
 		t.Fatalf("hypothesis_id: %+v", b)
@@ -123,7 +126,7 @@ func TestListOpenBets_ExcludesSettled(t *testing.T) {
 	})
 
 	tctx := auth.WithTenant(context.Background(), auth.MustNewTenantID("acme"))
-	got := awaitOpenBets(t, srv, tctx, 1)
+	got := awaitOpenBets(tctx, t, srv, 1)
 	if got[0].GetHypothesisId() != "hyp-open" {
 		t.Fatalf("expected only the unsettled bet, got %+v", got)
 	}
@@ -148,7 +151,7 @@ func TestListOpenBets_ExcludesHypothesesWithNoHypothesisID(t *testing.T) {
 	})
 
 	tctx := auth.WithTenant(context.Background(), auth.MustNewTenantID("acme"))
-	got := awaitOpenBets(t, srv, tctx, 1)
+	got := awaitOpenBets(tctx, t, srv, 1)
 	if got[0].GetHypothesisId() != "hyp-1" {
 		t.Fatalf("expected only the id-bearing hypothesis, got %+v", got)
 	}
@@ -191,9 +194,11 @@ func TestSettleBetByHITL_TruePositive_Settles(t *testing.T) {
 }
 
 // TestSettleBetByHITL_MissingActingUser_Errors proves a settlement attempt
-// with no acting user resolvable from context is refused — the reviewer is
-// mandatory (ADR-0006 §6 provenance), and this must never silently record an
-// unattributed settlement.
+// with no acting user resolvable from context is refused with
+// codes.Unauthenticated (fail closed) and the bet stays unsettled — the
+// reviewer is the accountability record for a HITL verdict (ADR-0006 §6
+// provenance, ADR-0028's class of consequential action), so an
+// unattributable verdict must never flow through as a zero-value identity.
 func TestSettleBetByHITL_MissingActingUser_Errors(t *testing.T) {
 	ctx, cancel := context.WithCancel(context.Background())
 	defer cancel()
@@ -201,10 +206,17 @@ func TestSettleBetByHITL_MissingActingUser_Errors(t *testing.T) {
 	srv := NewWorldServer(reg, nil)
 
 	tctx := auth.WithTenant(context.Background(), auth.MustNewTenantID("acme"))
-	if _, err := srv.SettleBetByHITL(tctx, &worldpb.SettleBetByHITLRequest{
+	_, err := srv.SettleBetByHITL(tctx, &worldpb.SettleBetByHITLRequest{
 		HypothesisId: "hyp-1", Verdict: "true_positive",
-	}); err == nil {
+	})
+	if err == nil {
 		t.Fatal("expected an error when no acting user is in context")
+	}
+	if got := status.Code(err); got != codes.Unauthenticated {
+		t.Fatalf("code = %v, want Unauthenticated", got)
+	}
+	if settled := reg.For("acme").BetSettlements(); len(settled) != 0 {
+		t.Fatalf("an unattributed verdict must never settle a bet, got %+v", settled)
 	}
 }
 
@@ -220,6 +232,7 @@ func TestSettleBetByHITL_Dismiss_LabelOnlyNoSettle(t *testing.T) {
 	srv := NewWorldServer(reg, nil)
 
 	tctx := auth.WithTenant(context.Background(), auth.MustNewTenantID("acme"))
+	tctx = auth.ContextWithActingUser(tctx, "reviewer-1")
 	resp, err := srv.SettleBetByHITL(tctx, &worldpb.SettleBetByHITLRequest{
 		HypothesisId: "hyp-1", Verdict: "dismiss",
 	})
@@ -239,6 +252,9 @@ func TestSettleBetByHITL_Dismiss_LabelOnlyNoSettle(t *testing.T) {
 			}
 			if labels[0].Verdict != brain.VerdictDismiss {
 				t.Fatalf("label verdict = %v, want dismiss", labels[0].Verdict)
+			}
+			if labels[0].UserID != "reviewer-1" {
+				t.Fatalf("label user id = %q, want the server-resolved reviewer", labels[0].UserID)
 			}
 			break
 		}
