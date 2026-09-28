@@ -25,6 +25,7 @@ package api
 
 import (
 	"context"
+	"fmt"
 	"time"
 
 	"google.golang.org/grpc/codes"
@@ -64,67 +65,10 @@ func (s *DaemonServer) RevokeUserSessions(ctx context.Context, req *tenantv1.Rev
 		return nil, status.Errorf(codes.Internal, "revoke sessions: %v", err)
 	}
 
-	// gibson#627 / gibson#1244: stamp the target's active_session FGA tuples with
-	// revoked_at = now so that ext-authz enforces the instant-revocation gate.
-	// TWO objects are advanced on the SAME revocation event:
-	//
-	//   • The USER-SCOPED tuple (user:<target>, active_session, user:<target>),
-	//     ALWAYS — it is per-user and gates tenant-less requests (the sign-in
-	//     bootstrap window). Advancing it here is what closes gibson#1244: a
-	//     revoked session can no longer pass a tenant-less RPC just because the
-	//     request named no tenant.
-	//   • The PER-TENANT tuple (user:<target>, active_session, tenant:<slug>),
-	//     when the request named a tenant — so the tenant-scoped gate reflects
-	//     the revocation immediately for that tenant.
-	//
-	// Uses a type assertion to authz.ConditionalWriter — the concrete
-	// fgaAuthorizer satisfies this interface; test fakes that don't need it
-	// are unaffected (the assertion simply produces nil and the block is
-	// skipped).
-	//
-	// The writes are best-effort: IdP revocation already happened successfully
-	// and we must not roll it back. A FGA write failure is logged loudly but
-	// does not surface as an error to the caller. The session will age out of
-	// the IdP naturally; the FGA revocation is the instant-path.
-	if s.authorizer != nil {
-		if cw, ok := s.authorizer.(authz.ConditionalWriter); ok {
-			revokedAt := time.Unix(timeNowUnix(), 0).UTC().Format(time.RFC3339)
-
-			// Always stamp the user-scoped tuple, regardless of tenant context.
-			userTuple := authz.RevokedSessionUserTuple(target, revokedAt)
-			if fgaErr := cw.UpdateConditionalTuple(ctx, userTuple); fgaErr != nil {
-				s.logger.ErrorContext(ctx, "RevokeUserSessions: failed to stamp user-scoped active_session revoked_at in FGA (non-fatal)",
-					"target_user_id", target,
-					"revoked_at", revokedAt,
-					"error", fgaErr,
-				)
-			} else {
-				s.logger.InfoContext(ctx, "RevokeUserSessions: user-scoped active_session tuple stamped",
-					"target_user_id", target,
-					"revoked_at", revokedAt,
-				)
-			}
-
-			// Stamp the per-tenant tuple too when the request named a tenant.
-			if tenantSlug := auth.TenantStringFromContext(ctx); tenantSlug != "" {
-				tuple := authz.RevokedSessionTuple(target, tenantSlug, revokedAt)
-				if fgaErr := cw.UpdateConditionalTuple(ctx, tuple); fgaErr != nil {
-					s.logger.ErrorContext(ctx, "RevokeUserSessions: failed to stamp active_session revoked_at in FGA (non-fatal)",
-						"target_user_id", target,
-						"tenant", tenantSlug,
-						"revoked_at", revokedAt,
-						"error", fgaErr,
-					)
-				} else {
-					s.logger.InfoContext(ctx, "RevokeUserSessions: active_session tuple stamped",
-						"target_user_id", target,
-						"tenant", tenantSlug,
-						"revoked_at", revokedAt,
-					)
-				}
-			}
-		}
-	}
+	// Best-effort here: the IdP revocation already happened and must not be
+	// rolled back. stampSessionRevocation logs each failed write loudly; the
+	// session still ages out of the IdP within the access-token TTL.
+	_ = s.stampSessionRevocation(ctx, target, auth.TenantStringFromContext(ctx))
 
 	return &tenantv1.RevokeUserSessionsResponse{
 		SessionsTerminated: int32(res.SessionsTerminated),
@@ -194,4 +138,58 @@ func (s *DaemonServer) canRevokeSessions(ctx context.Context, callerSubject, cal
 		}
 	}
 	return false, nil
+}
+
+// stampSessionRevocation stamps the target's active_session FGA tuples with
+// revoked_at = now, so ext-authz refuses every token issued before this
+// moment (gibson#627 / gibson#1244). A Zitadel access token is a signed JWT
+// that stays valid until it expires; this stamp is what refuses it now.
+// TWO objects are advanced on the SAME revocation event:
+//
+//   - The USER-SCOPED tuple (user:<target>, active_session, user:<target>),
+//     ALWAYS. It is per-user and gates tenant-less requests (the sign-in
+//     bootstrap window), which closes gibson#1244.
+//   - The PER-TENANT tuple (user:<target>, active_session, tenant:<slug>),
+//     when tenantSlug is set, so the tenant-scoped gate reflects the
+//     revocation immediately for that tenant.
+//
+// It uses the optional authz.ConditionalWriter interface; an authorizer
+// without it stamps nothing and returns nil. Every write is attempted and
+// logged; the first failure is returned, so a caller that promises old
+// sessions are refused (ResetUserMFA) can fail instead of lying.
+func (s *DaemonServer) stampSessionRevocation(ctx context.Context, target, tenantSlug string) error {
+	if s.authorizer == nil {
+		return nil
+	}
+	cw, ok := s.authorizer.(authz.ConditionalWriter)
+	if !ok {
+		return nil
+	}
+	revokedAt := time.Unix(timeNowUnix(), 0).UTC().Format(time.RFC3339)
+	var firstErr error
+
+	userTuple := authz.RevokedSessionUserTuple(target, revokedAt)
+	if fgaErr := cw.UpdateConditionalTuple(ctx, userTuple); fgaErr != nil {
+		s.logger.ErrorContext(ctx, "failed to stamp user-scoped active_session revoked_at in FGA",
+			"target_user_id", target, "revoked_at", revokedAt, "error", fgaErr)
+		firstErr = fmt.Errorf("stamp user-scoped active_session: %w", fgaErr)
+	} else {
+		s.logger.InfoContext(ctx, "user-scoped active_session tuple stamped",
+			"target_user_id", target, "revoked_at", revokedAt)
+	}
+
+	if tenantSlug != "" {
+		tuple := authz.RevokedSessionTuple(target, tenantSlug, revokedAt)
+		if fgaErr := cw.UpdateConditionalTuple(ctx, tuple); fgaErr != nil {
+			s.logger.ErrorContext(ctx, "failed to stamp active_session revoked_at in FGA",
+				"target_user_id", target, "tenant", tenantSlug, "revoked_at", revokedAt, "error", fgaErr)
+			if firstErr == nil {
+				firstErr = fmt.Errorf("stamp active_session for tenant %s: %w", tenantSlug, fgaErr)
+			}
+		} else {
+			s.logger.InfoContext(ctx, "active_session tuple stamped",
+				"target_user_id", target, "tenant", tenantSlug, "revoked_at", revokedAt)
+		}
+	}
+	return firstErr
 }

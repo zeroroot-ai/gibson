@@ -5,6 +5,7 @@ package api
 
 import (
 	"context"
+	"errors"
 	"log/slog"
 	"strings"
 	"testing"
@@ -316,5 +317,51 @@ func TestResetUserMFA_SignInLinkUsesPublicAppURLNeverIssuer(t *testing.T) {
 	got := mailerC.sent[0].SignInURL
 	if !strings.HasPrefix(got, wantPrefix) {
 		t.Errorf("SignInURL = %q, want it to start with the public app URL %q, never the internal/API-plane origin", got, wantPrefix)
+	}
+}
+
+// TestResetUserMFA_StampsSessionRevocation pins that a reset refuses the
+// target's already-issued tokens: ending the IdP sessions does not end a
+// signed JWT, so the reset must also advance both active_session tuples
+// (hosted#208: the invitee's pre-reset token was still ACCEPTED).
+func TestResetUserMFA_StampsSessionRevocation(t *testing.T) {
+	az := newConditionalFakeAuthorizer()
+	az.allow("user:bob", "member", "tenant:acme")
+	idpC := &mfaResetTestIDP{fakeIDPClient: &fakeIDPClient{}}
+	srv := resetMFAServer(az, idpC, nil)
+	ctx := ctxWithTenantAdmin(context.Background(), "acme", "admin1")
+
+	if _, err := srv.ResetUserMFA(ctx, &tenantv1.ResetUserMFARequest{TargetUserId: "bob"}); err != nil {
+		t.Fatalf("ResetUserMFA: %v", err)
+	}
+	got := objectsOf(az.written())
+	want := []string{"user:bob", "tenant:acme"}
+	if strings.Join(got, ",") != strings.Join(want, ",") {
+		t.Fatalf("stamped objects = %v, want %v", got, want)
+	}
+	for _, tu := range az.written() {
+		if tu.User != "user:bob" || tu.Relation != "active_session" {
+			t.Errorf("stamped %s %s %s, want user:bob active_session", tu.User, tu.Relation, tu.Object)
+		}
+	}
+}
+
+// TestResetUserMFA_StampFailureIsInternal pins that a reset whose revocation
+// stamp fails reports an error rather than a success that leaves the old
+// tokens valid.
+func TestResetUserMFA_StampFailureIsInternal(t *testing.T) {
+	base := newConditionalFakeAuthorizer()
+	base.allow("user:bob", "member", "tenant:acme")
+	az := &conditionalFakeAuthorizerWithError{conditionalFakeAuthorizer: base, updateErr: errors.New("fga boom")}
+	idpC := &mfaResetTestIDP{fakeIDPClient: &fakeIDPClient{}}
+	srv := resetMFAServer(az, idpC, nil)
+	ctx := ctxWithTenantAdmin(context.Background(), "acme", "admin1")
+
+	_, err := srv.ResetUserMFA(ctx, &tenantv1.ResetUserMFARequest{TargetUserId: "bob"})
+	if status_grpc.Code(err) != codes.Internal {
+		t.Fatalf("ResetUserMFA code = %v (err=%v), want Internal", status_grpc.Code(err), err)
+	}
+	if len(idpC.clearedFactorsUsers) != 0 {
+		t.Errorf("factors cleared for %v after a failed revocation stamp, want none", idpC.clearedFactorsUsers)
 	}
 }

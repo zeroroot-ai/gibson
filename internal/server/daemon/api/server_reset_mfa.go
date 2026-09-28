@@ -83,6 +83,14 @@ func (s *DaemonServer) ResetUserMFA(ctx context.Context, req *tenantv1.ResetUser
 	if err != nil {
 		return nil, status.Errorf(codes.Internal, "revoke sessions: %v", err)
 	}
+	// Ending the IdP sessions does not end the access tokens already issued:
+	// they are signed JWTs, valid until they expire. The FGA revocation stamp
+	// is what makes ext-authz refuse them now. A reset promises that the
+	// target's old sessions are refused, so a failed stamp fails the call
+	// (hosted#208).
+	if err := s.stampSessionRevocation(ctx, target, tenant); err != nil {
+		return nil, status.Errorf(codes.Internal, "revoke tokens: %v", err)
+	}
 
 	factorsRes, err := s.idpAdminClient.ClearHumanFactors(ctx, target)
 	if err != nil {
