@@ -264,11 +264,19 @@ func TestListServiceAccounts_Upstream5xx(t *testing.T) {
 // ---------------------------------------------------------------------------
 
 func TestGetUserProfile_HappyPath(t *testing.T) {
+	var v1Org string
 	_, cfg := setupServer(t, func(w http.ResponseWriter, r *http.Request) {
+		if r.Method == http.MethodGet && r.URL.Path == "/v2/users/user-xyz" {
+			jsonResp(w, http.StatusOK, map[string]interface{}{
+				"details": map[string]string{"resourceOwner": "org-tenant-7"},
+			})
+			return
+		}
 		if r.Method != http.MethodGet || !strings.Contains(r.URL.Path, "/management/v1/users/") {
 			http.NotFound(w, r)
 			return
 		}
+		v1Org = r.Header.Get("x-zitadel-orgid")
 		jsonResp(w, http.StatusOK, map[string]interface{}{
 			"user": map[string]interface{}{
 				"id":    "user-xyz",
@@ -300,6 +308,74 @@ func TestGetUserProfile_HappyPath(t *testing.T) {
 	}
 	if profile.Email != "alice@example.com" {
 		t.Errorf("Email: got %q, want %q", profile.Email, "alice@example.com")
+	}
+	// A v1 Management call is scoped to the org in x-zitadel-orgid. The user
+	// lives in their tenant's org, so the call must send that org, never the
+	// platform admin org the client is configured with (hosted#208).
+	if v1Org != "org-tenant-7" {
+		t.Errorf("v1 x-zitadel-orgid = %q, want the user's own org org-tenant-7", v1Org)
+	}
+}
+
+// TestUpdateUserProfile_UsesTheUsersOwnOrg pins the same org scoping for the
+// profile update.
+func TestUpdateUserProfile_UsesTheUsersOwnOrg(t *testing.T) {
+	var putOrg string
+	_, cfg := setupServer(t, func(w http.ResponseWriter, r *http.Request) {
+		switch {
+		case r.Method == http.MethodGet && r.URL.Path == "/v2/users/user-xyz":
+			jsonResp(w, http.StatusOK, map[string]interface{}{
+				"details": map[string]string{"resourceOwner": "org-tenant-7"},
+			})
+		case r.Method == http.MethodPut && r.URL.Path == "/management/v1/users/user-xyz/profile":
+			putOrg = r.Header.Get("x-zitadel-orgid")
+			jsonResp(w, http.StatusOK, map[string]interface{}{})
+		case r.Method == http.MethodGet && r.URL.Path == "/management/v1/users/user-xyz":
+			jsonResp(w, http.StatusOK, map[string]interface{}{"user": map[string]interface{}{"id": "user-xyz"}})
+		default:
+			http.NotFound(w, r)
+		}
+	})
+	client, err := zitadel.New(context.Background(), cfg)
+	if err != nil {
+		t.Fatalf("New: %v", err)
+	}
+	defer func() { _ = client.Close() }()
+
+	if _, err := client.UpdateUserProfile(context.Background(), "user-xyz", idp.UpdateUserProfileRequest{DisplayName: "Alice"}); err != nil {
+		t.Fatalf("UpdateUserProfile: %v", err)
+	}
+	if putOrg != "org-tenant-7" {
+		t.Errorf("v1 x-zitadel-orgid = %q, want the user's own org org-tenant-7", putOrg)
+	}
+}
+
+// TestUserProfile_OwningOrgUnknownIsAnError pins that a user whose owning org
+// cannot be resolved is an error, never a v1 call under the wrong org.
+func TestUserProfile_OwningOrgUnknownIsAnError(t *testing.T) {
+	var v1Calls int
+	_, cfg := setupServer(t, func(w http.ResponseWriter, r *http.Request) {
+		if strings.HasPrefix(r.URL.Path, "/v2/users/") {
+			jsonResp(w, http.StatusOK, map[string]interface{}{"details": map[string]string{}})
+			return
+		}
+		v1Calls++
+		jsonResp(w, http.StatusOK, map[string]interface{}{})
+	})
+	client, err := zitadel.New(context.Background(), cfg)
+	if err != nil {
+		t.Fatalf("New: %v", err)
+	}
+	defer func() { _ = client.Close() }()
+
+	if _, err := client.GetUserProfile(context.Background(), "user-xyz"); err == nil {
+		t.Error("GetUserProfile: expected an error for a user with no owning org")
+	}
+	if _, err := client.UpdateUserProfile(context.Background(), "user-xyz", idp.UpdateUserProfileRequest{DisplayName: "Alice"}); err == nil {
+		t.Error("UpdateUserProfile: expected an error for a user with no owning org")
+	}
+	if v1Calls != 0 {
+		t.Errorf("v1 calls = %d, want none under an unknown org", v1Calls)
 	}
 }
 
