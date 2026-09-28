@@ -553,16 +553,18 @@ func (m *CallbackManager) SetBeliefSubstrate(substrate brain.BeliefSubstrate) {
 }
 
 // BeliefSubstrate returns the belief substrate currently wired onto the
-// callback service (nil if none has been set, or the manager has no server
-// yet) — the read half of SetBeliefSubstrate, the same Get/Set shape
-// CallbackEndpoint/IsRunning already give the manager's other state. Lets a
-// caller (or a test proving a wiring step reached the manager, e.g.
-// wirePlaceBetBeliefSubstrate in internal/server/daemon) confirm the value
-// without reaching into the unexported server/service fields directly.
+// callback service (nil if none has been set) — the read half of
+// SetBeliefSubstrate. Lets a caller (or a test proving a wiring step reached
+// the manager, e.g. wirePlaceBetBeliefSubstrate in internal/server/daemon)
+// confirm the value without reaching into the unexported server/service
+// fields directly.
+//
+// Like every other request-path method on CallbackManager, this assumes the
+// manager was built through NewCallbackManager (ADR-0003: no graceful-nil in
+// request paths — the server/service are constructed eagerly there, and a
+// manager built any other way is a caller error, not a state to degrade
+// into).
 func (m *CallbackManager) BeliefSubstrate() brain.BeliefSubstrate {
-	if m.server == nil || m.server.service == nil {
-		return nil
-	}
 	m.server.service.mu.RLock()
 	defer m.server.service.mu.RUnlock()
 	return m.server.service.beliefSubstrate

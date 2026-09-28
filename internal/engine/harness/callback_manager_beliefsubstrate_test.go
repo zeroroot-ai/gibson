@@ -48,15 +48,12 @@ func TestCallbackManager_SetBeliefSubstrate_NilServerIsNoOp(_ *testing.T) {
 }
 
 // TestCallbackManager_BeliefSubstrate proves the getter is the read half of
-// SetBeliefSubstrate: nil before anything is wired (including on a manager
-// with no server, the same defensive-nil shape SetBeliefSubstrate's own nil
-// case takes), and the exact value passed to SetBeliefSubstrate afterward.
+// SetBeliefSubstrate: nil before anything is wired, and the exact value
+// passed to SetBeliefSubstrate afterward. Unlike the setter, the getter is a
+// request-path method that assumes a manager built through
+// NewCallbackManager (ADR-0003) — it is not exercised against the bare,
+// no-server construction the setter's own nil-safety test uses.
 func TestCallbackManager_BeliefSubstrate(t *testing.T) {
-	bare := &CallbackManager{logger: slog.Default()}
-	if got := bare.BeliefSubstrate(); got != nil {
-		t.Fatalf("BeliefSubstrate() on a manager with no server = %v, want nil", got)
-	}
-
 	m := NewCallbackManager(CallbackConfig{ListenAddress: "127.0.0.1:0"}, slog.Default())
 	if got := m.BeliefSubstrate(); got != nil {
 		t.Fatalf("BeliefSubstrate() before SetBeliefSubstrate = %v, want nil", got)
