@@ -60,7 +60,7 @@
 # below: wheels are built for a specific ABI tag (cp313) and link against the
 # runtime's glibc. python:3.13-slim-trixie and distroless/python3-debian13 are
 # both Debian 13 / CPython 3.13, which is what makes the copy in stage 2 valid.
-FROM ghcr.io/zeroroot-ai/mirror/python:3.13-slim-trixie@sha256:9d2e5553305c7c7b0097999bb17187c69b921ccd6bc9d40e4bb5ebe652c00285 AS build
+FROM ghcr.io/zeroroot-ai/mirror/python:3.13-slim-trixie@sha256:7c61056e61ac89e852de05f3dc6fa51a6dd2181797bceed46aa725dd7cb2cd3b AS build
 
 ENV PYTHONDONTWRITEBYTECODE=1 \
     PIP_DISABLE_PIP_VERSION_CHECK=1 \
