@@ -30,6 +30,7 @@ const (
 	WorldService_SubmitLabel_FullMethodName     = "/gibson.world.v1.WorldService/SubmitLabel"
 	WorldService_ListLabels_FullMethodName      = "/gibson.world.v1.WorldService/ListLabels"
 	WorldService_GetCalibration_FullMethodName  = "/gibson.world.v1.WorldService/GetCalibration"
+	WorldService_GetReputation_FullMethodName   = "/gibson.world.v1.WorldService/GetReputation"
 	WorldService_ListOpenBets_FullMethodName    = "/gibson.world.v1.WorldService/ListOpenBets"
 	WorldService_SettleBetByHITL_FullMethodName = "/gibson.world.v1.WorldService/SettleBetByHITL"
 )
@@ -88,6 +89,13 @@ type WorldServiceClient interface {
 	// with a Brier score and a binned reliability-diagram curve — the source for
 	// the dashboard's reliability diagram (dashboard#98).
 	GetCalibration(ctx context.Context, in *GetCalibrationRequest, opts ...grpc.CallOption) (*GetCalibrationResponse, error)
+	// GetReputation returns one technique's current track record in one scope
+	// (ADR-0022, ADR-0029 §3, gibson#267): does this technique tend to work
+	// here? Read-only projection of the technique x environment belief a
+	// settled bet updates (brain.UpdateReputation) — a caller that only needs
+	// one key's current value, not the full tenant-wide breakdown
+	// GetCalibration gives.
+	GetReputation(ctx context.Context, in *GetReputationRequest, opts ...grpc.CallOption) (*GetReputationResponse, error)
 	// ListOpenBets returns the tenant's placed-but-unsettled bets (gibson#339):
 	// a Hypothesis that carries a bettable HypothesisID (ADR-0021/ADR-0022,
 	// sdk#89) with no matching BetSettlement yet. Backend for dashboard#97's
@@ -223,6 +231,16 @@ func (c *worldServiceClient) GetCalibration(ctx context.Context, in *GetCalibrat
 	return out, nil
 }
 
+func (c *worldServiceClient) GetReputation(ctx context.Context, in *GetReputationRequest, opts ...grpc.CallOption) (*GetReputationResponse, error) {
+	cOpts := append([]grpc.CallOption{grpc.StaticMethod()}, opts...)
+	out := new(GetReputationResponse)
+	err := c.cc.Invoke(ctx, WorldService_GetReputation_FullMethodName, in, out, cOpts...)
+	if err != nil {
+		return nil, err
+	}
+	return out, nil
+}
+
 func (c *worldServiceClient) ListOpenBets(ctx context.Context, in *ListOpenBetsRequest, opts ...grpc.CallOption) (*ListOpenBetsResponse, error) {
 	cOpts := append([]grpc.CallOption{grpc.StaticMethod()}, opts...)
 	out := new(ListOpenBetsResponse)
@@ -297,6 +315,13 @@ type WorldServiceServer interface {
 	// with a Brier score and a binned reliability-diagram curve — the source for
 	// the dashboard's reliability diagram (dashboard#98).
 	GetCalibration(context.Context, *GetCalibrationRequest) (*GetCalibrationResponse, error)
+	// GetReputation returns one technique's current track record in one scope
+	// (ADR-0022, ADR-0029 §3, gibson#267): does this technique tend to work
+	// here? Read-only projection of the technique x environment belief a
+	// settled bet updates (brain.UpdateReputation) — a caller that only needs
+	// one key's current value, not the full tenant-wide breakdown
+	// GetCalibration gives.
+	GetReputation(context.Context, *GetReputationRequest) (*GetReputationResponse, error)
 	// ListOpenBets returns the tenant's placed-but-unsettled bets (gibson#339):
 	// a Hypothesis that carries a bettable HypothesisID (ADR-0021/ADR-0022,
 	// sdk#89) with no matching BetSettlement yet. Backend for dashboard#97's
@@ -354,6 +379,9 @@ func (UnimplementedWorldServiceServer) ListLabels(context.Context, *ListLabelsRe
 }
 func (UnimplementedWorldServiceServer) GetCalibration(context.Context, *GetCalibrationRequest) (*GetCalibrationResponse, error) {
 	return nil, status.Error(codes.Unimplemented, "method GetCalibration not implemented")
+}
+func (UnimplementedWorldServiceServer) GetReputation(context.Context, *GetReputationRequest) (*GetReputationResponse, error) {
+	return nil, status.Error(codes.Unimplemented, "method GetReputation not implemented")
 }
 func (UnimplementedWorldServiceServer) ListOpenBets(context.Context, *ListOpenBetsRequest) (*ListOpenBetsResponse, error) {
 	return nil, status.Error(codes.Unimplemented, "method ListOpenBets not implemented")
@@ -580,6 +608,24 @@ func _WorldService_GetCalibration_Handler(srv interface{}, ctx context.Context, 
 	return interceptor(ctx, in, info, handler)
 }
 
+func _WorldService_GetReputation_Handler(srv interface{}, ctx context.Context, dec func(interface{}) error, interceptor grpc.UnaryServerInterceptor) (interface{}, error) {
+	in := new(GetReputationRequest)
+	if err := dec(in); err != nil {
+		return nil, err
+	}
+	if interceptor == nil {
+		return srv.(WorldServiceServer).GetReputation(ctx, in)
+	}
+	info := &grpc.UnaryServerInfo{
+		Server:     srv,
+		FullMethod: WorldService_GetReputation_FullMethodName,
+	}
+	handler := func(ctx context.Context, req interface{}) (interface{}, error) {
+		return srv.(WorldServiceServer).GetReputation(ctx, req.(*GetReputationRequest))
+	}
+	return interceptor(ctx, in, info, handler)
+}
+
 func _WorldService_ListOpenBets_Handler(srv interface{}, ctx context.Context, dec func(interface{}) error, interceptor grpc.UnaryServerInterceptor) (interface{}, error) {
 	in := new(ListOpenBetsRequest)
 	if err := dec(in); err != nil {
@@ -666,6 +712,10 @@ var WorldService_ServiceDesc = grpc.ServiceDesc{
 		{
 			MethodName: "GetCalibration",
 			Handler:    _WorldService_GetCalibration_Handler,
+		},
+		{
+			MethodName: "GetReputation",
+			Handler:    _WorldService_GetReputation_Handler,
 		},
 		{
 			MethodName: "ListOpenBets",

@@ -3713,6 +3713,16 @@ var Registry = map[string]Entry{
 		Unauthenticated:   false,
 		Self:              false,
 	},
+	"/gibson.world.v1.WorldService/GetReputation": {
+		Method:            "/gibson.world.v1.WorldService/GetReputation",
+		Service:           "gibson.world.v1.WorldService",
+		Relation:          "member",
+		ObjectType:        "tenant",
+		ObjectDeriver:     "tenant_from_identity",
+		AllowedIdentities: IdentityUser | IdentityService,
+		Unauthenticated:   false,
+		Self:              false,
+	},
 	"/gibson.world.v1.WorldService/GetTimeline": {
 		Method:            "/gibson.world.v1.WorldService/GetTimeline",
 		Service:           "gibson.world.v1.WorldService",
