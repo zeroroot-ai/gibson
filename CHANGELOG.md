@@ -1,5 +1,12 @@
 # Changelog
 
+## [0.143.0](https://github.com/zeroroot-ai/gibson/compare/v0.142.7...v0.143.0) (2026-09-28)
+
+
+### Features
+
+* **brain:** intelligence layer — belief substrate, betting market, settlement, discovery, VoI planner, daemon API ([#354](https://github.com/zeroroot-ai/gibson/issues/354)) ([6b4b85e](https://github.com/zeroroot-ai/gibson/commit/6b4b85e0f49149c710b644e42fd8d6d394e6faef))
+
 ## [0.142.7](https://github.com/zeroroot-ai/gibson/compare/v0.142.6...v0.142.7) (2026-09-28)
 
 
