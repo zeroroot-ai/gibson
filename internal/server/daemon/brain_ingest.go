@@ -389,6 +389,35 @@ func ingestLLMCall(reg *brain.Registry) api.LLMCallSink {
 	}
 }
 
+// harnessLLMCallToAPI maps a harness.LLMCallRecord (the callback-path capture
+// shape) onto the daemon's api.LLMCallRecord (ADR-0020, gibson#271) — the
+// bridge daemon.go's callback→api LLM-call wiring uses. Extracted as a pure
+// function so the mapping is unit-testable without a live daemon/gRPC server.
+func harnessLLMCallToAPI(call harness.LLMCallRecord) api.LLMCallRecord {
+	msgs := make([]api.LLMMessage, 0, len(call.Messages))
+	for _, m := range call.Messages {
+		msgs = append(msgs, api.LLMMessage{
+			Role:       m.Role,
+			Content:    m.Content,
+			Name:       m.Name,
+			ToolCallID: m.ToolCallID,
+			ToolCalls:  toAPIToolCalls(m.ToolCalls),
+		})
+	}
+	return api.LLMCallRecord{
+		CallID:              call.CallID,
+		MissionID:           call.MissionID,
+		RunID:               call.RunID,
+		Model:               call.Model,
+		PromptTokens:        call.PromptTokens,
+		CompletionTokens:    call.CompletionTokens,
+		Messages:            msgs,
+		Completion:          call.Completion,
+		CompletionToolCalls: toAPIToolCalls(call.CompletionToolCalls),
+		RecordedAtUnixNano:  call.RecordedAtUnixNano,
+	}
+}
+
 // toAPIToolCalls converts harness.LLMCallToolCall values to the daemon api
 // package's LLMToolCall shape (ADR-0020, gibson#271) — the bridge daemon.go's
 // callback→api LLM-call mapping uses.

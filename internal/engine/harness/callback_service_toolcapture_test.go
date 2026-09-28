@@ -190,6 +190,22 @@ func TestCallToolProto_ToolCallIDFallsBackToFreshUUID(t *testing.T) {
 	assert.NotEmpty(t, captured[0].call.ToolCallID, "a fresh id must be minted when the SDK left ToolExecutionId unset")
 }
 
+// TestCaptureToolCall_NoTenantInContext_NoOp exercises captureToolCall's
+// defensive no-tenant guard directly: a context with no tenant string must
+// never reach the sink, even though in practice CallToolProto's own
+// getHarness tenant-isolation check makes this unreachable on that path — the
+// guard exists so captureToolCall stays safe to call from anywhere.
+func TestCaptureToolCall_NoTenantInContext_NoOp(t *testing.T) {
+	var called bool
+	svc := &HarnessCallbackService{
+		toolCallSink: func(context.Context, string, ToolCallRecord) { called = true },
+	}
+	svc.captureToolCall(context.Background(), &harnesspb.ContextInfo{MissionId: "m1"}, "nmap", "{}", "{}", "")
+	if called {
+		t.Fatal("captureToolCall must no-op when the context carries no tenant")
+	}
+}
+
 // TestCallToolProto_NoSink_NoPanic ensures tool-call capture is a clean no-op
 // when the sink is unwired.
 func TestCallToolProto_NoSink_NoPanic(t *testing.T) {

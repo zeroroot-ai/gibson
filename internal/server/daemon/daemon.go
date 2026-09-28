@@ -1471,28 +1471,7 @@ func (d *daemonImpl) Start(ctx context.Context) error {
 		// on the callback request; we map it onto the daemon's api record.
 		llmSink := ingestLLMCall(d.brainRegistry)
 		d.callback.SetLLMCallSink(func(ctx context.Context, tenant string, call harness.LLMCallRecord) {
-			msgs := make([]api.LLMMessage, 0, len(call.Messages))
-			for _, m := range call.Messages {
-				msgs = append(msgs, api.LLMMessage{
-					Role:       m.Role,
-					Content:    m.Content,
-					Name:       m.Name,
-					ToolCallID: m.ToolCallID,
-					ToolCalls:  toAPIToolCalls(m.ToolCalls),
-				})
-			}
-			llmSink(ctx, tenant, api.LLMCallRecord{
-				CallID:              call.CallID,
-				MissionID:           call.MissionID,
-				RunID:               call.RunID,
-				Model:               call.Model,
-				PromptTokens:        call.PromptTokens,
-				CompletionTokens:    call.CompletionTokens,
-				Messages:            msgs,
-				Completion:          call.Completion,
-				CompletionToolCalls: toAPIToolCalls(call.CompletionToolCalls),
-				RecordedAtUnixNano:  call.RecordedAtUnixNano,
-			})
+			llmSink(ctx, tenant, harnessLLMCallToAPI(call))
 		})
 		d.logger.Info(ctx, "wired callback LLM completion RPCs to the ECS brain World")
 

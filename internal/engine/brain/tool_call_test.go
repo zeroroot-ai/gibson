@@ -58,6 +58,31 @@ func TestAgentToolCall_IdempotentEnrichment(t *testing.T) {
 	}
 }
 
+// TestAgentToolCall_EnrichesEveryFieldOnSecondObservation exercises every
+// progressive-enrichment branch in applyAgentToolCallObserved: a bare first
+// observation creates the entity with nothing set, so the second observation
+// must go through the merge loop (not the create-entity path) to fill in
+// MissionID, RunID, ScopeID, ToolName, Err, and RecordedAtUnixNano.
+func TestAgentToolCall_EnrichesEveryFieldOnSecondObservation(t *testing.T) {
+	w := NewWorld("t1")
+	Reduce(w, AgentToolCallObserved{ToolCallID: "tc1"}) // bare: nothing set yet
+	Reduce(w, AgentToolCallObserved{
+		ToolCallID: "tc1", MissionID: "m1", RunID: "r1", ScopeID: "s1",
+		ToolName: "nmap", Err: "boom", RecordedAtUnixNano: 42,
+	})
+
+	c := w.AgentToolCallSnapshot()[0]
+	if c.MissionID != "m1" || c.RunID != "r1" || c.ScopeID != "s1" || c.ToolName != "nmap" {
+		t.Fatalf("identity/provenance fields not enriched: %+v", c)
+	}
+	if c.Err != "boom" {
+		t.Fatalf("Err not enriched: %+v", c)
+	}
+	if c.RecordedAtUnixNano != 42 {
+		t.Fatalf("RecordedAtUnixNano not enriched: %+v", c)
+	}
+}
+
 func TestAgentToolCall_ErrCaptured(t *testing.T) {
 	w := NewWorld("t1")
 	Reduce(w, AgentToolCallObserved{ToolCallID: "tc1", ToolName: "nmap", Err: "connection refused"})

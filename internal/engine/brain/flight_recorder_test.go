@@ -158,3 +158,72 @@ func TestRedactSecrets_LeavesOrdinaryTextAlone(t *testing.T) {
 		t.Fatalf("ordinary text must be left alone, got %q", got)
 	}
 }
+
+// TestEngine_AgentToolCallsAndFlightRecorderPolicy exercises the Engine-level
+// read accessors (the locked-wrapper counterparts to LlmCalls/World access
+// used elsewhere) so the dashboard/read-path callers have a tested entry
+// point onto the flight recorder's captured data.
+func TestEngine_AgentToolCallsAndFlightRecorderPolicy(t *testing.T) {
+	e := NewEngine("t1")
+	e.Submit(FlightRecorderPolicySet{Redact: true, RetentionDays: 7})
+	e.Submit(AgentToolCallObserved{ToolCallID: "tc1", ToolName: "nmap"})
+	e.Tick()
+
+	got := e.AgentToolCalls()
+	if len(got) != 1 || got[0].ToolCallID != "tc1" {
+		t.Fatalf("Engine.AgentToolCalls() = %+v, want [tc1]", got)
+	}
+	if policy := e.FlightRecorderPolicy(); !policy.Redact || policy.RetentionDays != 7 {
+		t.Fatalf("Engine.FlightRecorderPolicy() = %+v, want Redact=true RetentionDays=7", policy)
+	}
+}
+
+// TestFlightRecorderRetentionSwept_ZeroCutoffIsNoOp proves a zero cutoff
+// (the event's zero value) never purges anything — a defensive guard against
+// an unset CutoffUnixNano wiping every captured call.
+func TestFlightRecorderRetentionSwept_ZeroCutoffIsNoOp(t *testing.T) {
+	w := NewWorld("t1")
+	Reduce(w, LlmCallObserved{CallID: "c1", Completion: "keep me", RecordedAtUnixNano: 100})
+	Reduce(w, AgentToolCallObserved{ToolCallID: "tc1", Result: "keep me too", RecordedAtUnixNano: 100})
+
+	Reduce(w, FlightRecorderRetentionSwept{}) // CutoffUnixNano: 0
+
+	if got := w.LlmCallSnapshot()[0].Completion; got != "keep me" {
+		t.Fatalf("a zero cutoff must not purge, got %q", got)
+	}
+	if got := w.AgentToolCallSnapshot()[0].Result; got != "keep me too" {
+		t.Fatalf("a zero cutoff must not purge, got %q", got)
+	}
+}
+
+// TestFlightRecorderEvents_CodecRoundTrip proves the flight recorder's three
+// event kinds (AgentToolCallObserved, FlightRecorderPolicySet,
+// FlightRecorderRetentionSwept) survive the durable Timeline's JSON envelope
+// round trip (EncodeEvent/DecodeEvent) — required for durable persistence
+// (ADR-0011) and for the codec's kind registry to stay complete.
+func TestFlightRecorderEvents_CodecRoundTrip(t *testing.T) {
+	events := []Event{
+		AgentToolCallObserved{
+			ToolCallID: "tc1", MissionID: "m1", RunID: "r1", ScopeID: "s1",
+			ToolName: "nmap", Arguments: `{"host":"x"}`, Result: `{"ok":true}`,
+			Err: "", RecordedAtUnixNano: 42,
+		},
+		FlightRecorderPolicySet{Redact: true, RetentionDays: 30},
+		FlightRecorderRetentionSwept{CutoffUnixNano: 12345},
+	}
+	for _, ev := range events {
+		t.Run(ev.Kind(), func(t *testing.T) {
+			b, err := EncodeEvent(ev)
+			if err != nil {
+				t.Fatalf("EncodeEvent: %v", err)
+			}
+			decoded, err := DecodeEvent(b)
+			if err != nil {
+				t.Fatalf("DecodeEvent: %v", err)
+			}
+			if !reflect.DeepEqual(decoded, ev) {
+				t.Fatalf("round trip: got %#v (%T), want %#v", decoded, decoded, ev)
+			}
+		})
+	}
+}

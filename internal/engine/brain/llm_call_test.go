@@ -122,6 +122,42 @@ func TestLlmCall_DeterministicOrderAndReplay(t *testing.T) {
 	}
 }
 
+// TestLlmCall_EnrichesEveryFieldOnSecondObservation exercises every
+// progressive-enrichment branch in applyLlmCallObserved: a bare first
+// observation creates the entity with nothing set, so the second observation
+// must go through the merge loop (not the create-entity path) to fill in
+// RunID, Model, ScopeID, tokens, Messages, Completion, CompletionToolCalls,
+// and RecordedAtUnixNano.
+func TestLlmCall_EnrichesEveryFieldOnSecondObservation(t *testing.T) {
+	w := NewWorld("t1")
+	Reduce(w, LlmCallObserved{CallID: "c1"}) // bare: nothing set yet
+	Reduce(w, LlmCallObserved{
+		CallID: "c1", RunID: "r1", Model: "m", ScopeID: "s1",
+		PromptTokens: 10, CompletionTokens: 5,
+		Messages:            []LlmMessage{{Role: "user", Content: "hi"}},
+		Completion:          "hello",
+		CompletionToolCalls: []LlmToolCall{{ID: "t1", Name: "nmap"}},
+		RecordedAtUnixNano:  42,
+	})
+
+	c := w.LlmCallSnapshot()[0]
+	if c.RunID != "r1" || c.Model != "m" || c.ScopeID != "s1" {
+		t.Fatalf("identity/provenance fields not enriched: %+v", c)
+	}
+	if c.PromptTokens != 10 || c.CompletionTokens != 5 {
+		t.Fatalf("tokens not enriched: %+v", c)
+	}
+	if len(c.Messages) != 1 || c.Completion != "hello" {
+		t.Fatalf("transcript not enriched: %+v", c)
+	}
+	if len(c.CompletionToolCalls) != 1 {
+		t.Fatalf("completion tool calls not enriched: %+v", c)
+	}
+	if c.RecordedAtUnixNano != 42 {
+		t.Fatalf("RecordedAtUnixNano not enriched: %+v", c)
+	}
+}
+
 // TestLlmCall_CapturesToolCallsFullFidelity is the gibson#271 flight-recorder
 // unit: a tool-calling turn's ToolCalls must not be silently dropped, on
 // either a historical prompt message or the completion itself. Before this,

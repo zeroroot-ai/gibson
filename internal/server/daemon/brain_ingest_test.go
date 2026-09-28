@@ -267,6 +267,58 @@ func TestIngestLLMCall_CarriesToolCallsFullFidelity(t *testing.T) {
 	t.Fatal("llm call not folded into the World")
 }
 
+// TestHarnessLLMCallToAPI_PreservesFullFidelity is a direct unit test for the
+// callback→api LLM-call mapping daemon.go's wiring uses (gibson#271),
+// extracted as a pure function so it is unit-testable without a live daemon.
+func TestHarnessLLMCallToAPI_PreservesFullFidelity(t *testing.T) {
+	got := harnessLLMCallToAPI(harness.LLMCallRecord{
+		CallID: "c1", MissionID: "m1", RunID: "r1", Model: "m",
+		PromptTokens: 10, CompletionTokens: 5,
+		Messages: []harness.LLMCallMessage{
+			{Role: "assistant", ToolCalls: []harness.LLMCallToolCall{
+				{ID: "tc1", Type: "function", Name: "nmap", Arguments: `{"host":"x"}`},
+			}},
+		},
+		Completion: "done",
+		CompletionToolCalls: []harness.LLMCallToolCall{
+			{ID: "tc2", Type: "function", Name: "nikto", Arguments: `{"host":"x"}`},
+		},
+		RecordedAtUnixNano: 42,
+	})
+
+	if got.CallID != "c1" || got.MissionID != "m1" || got.RunID != "r1" || got.Model != "m" {
+		t.Fatalf("identity/provenance fields not mapped: %+v", got)
+	}
+	if got.PromptTokens != 10 || got.CompletionTokens != 5 || got.Completion != "done" {
+		t.Fatalf("metadata/completion not mapped: %+v", got)
+	}
+	if len(got.Messages) != 1 || len(got.Messages[0].ToolCalls) != 1 || got.Messages[0].ToolCalls[0].Name != "nmap" {
+		t.Fatalf("prompt message tool calls not mapped: %+v", got.Messages)
+	}
+	if len(got.CompletionToolCalls) != 1 || got.CompletionToolCalls[0].Name != "nikto" {
+		t.Fatalf("completion tool calls not mapped: %+v", got.CompletionToolCalls)
+	}
+	if got.RecordedAtUnixNano != 42 {
+		t.Fatalf("RecordedAtUnixNano not mapped: %+v", got)
+	}
+}
+
+// TestToAPIToolCalls_PreservesFullFidelity is a direct unit test for the
+// harness→api tool-call bridge daemon.go's callback wiring uses (gibson#271):
+// exercised here directly since the wiring closure itself is startup glue,
+// not unit-testable in isolation.
+func TestToAPIToolCalls_PreservesFullFidelity(t *testing.T) {
+	got := toAPIToolCalls([]harness.LLMCallToolCall{
+		{ID: "tc1", Type: "function", Name: "nmap", Arguments: `{"host":"x"}`},
+	})
+	if len(got) != 1 || got[0].ID != "tc1" || got[0].Name != "nmap" || got[0].Arguments != `{"host":"x"}` {
+		t.Fatalf("tool calls not preserved full-fidelity: %+v", got)
+	}
+	if got := toAPIToolCalls(nil); got != nil {
+		t.Fatalf("empty input must return nil, got %+v", got)
+	}
+}
+
 // TestIngestToolCall_FeedsWorld is the gibson#271 flight-recorder unit for the
 // tool-I/O half: a completed CallToolProto invocation folds into the calling
 // tenant's brain World as an AgentToolCall entity, routed by tenant.
