@@ -1493,6 +1493,16 @@ func (d *daemonImpl) Start(ctx context.Context) error {
 		// never became part of the Timeline.
 		d.callback.SetToolCallSink(ingestToolCall(d.brainRegistry))
 		d.logger.Info(ctx, "wired callback CallToolProto to the ECS brain World")
+
+		// Wire PlaceBet's belief substrate (ADR-0022, ADR-0029 §3,
+		// gibson#273/#278): before this, PlaceBet always answered Unavailable
+		// — no daemon ever gave it a substrate to persist a staked bet to.
+		// tenantRoutedBeliefSubstrate resolves each call's tenant from ctx
+		// (getHarness already validated it against the mission) and routes to
+		// that tenant's own WorldBeliefSubstrate, since this one substrate
+		// value is shared across every tenant's PlaceBet calls.
+		d.callback.SetBeliefSubstrate(newTenantRoutedBeliefSubstrate(d.brainRegistry))
+		d.logger.Info(ctx, "wired callback PlaceBet RPC to the ECS brain belief substrate")
 	}
 
 	// Wire the DiscoveryResult ingest path (gibson#1266). A callback-dispatched

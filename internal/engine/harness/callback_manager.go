@@ -12,6 +12,7 @@ import (
 
 	"github.com/spiffe/go-spiffe/v2/spiffeid"
 	"github.com/spiffe/go-spiffe/v2/workloadapi"
+	"github.com/zeroroot-ai/gibson/internal/engine/brain"
 	"github.com/zeroroot-ai/gibson/internal/platform/authz"
 	"github.com/zeroroot-ai/gibson/internal/platform/component"
 	"github.com/zeroroot-ai/sdk/protoresolver"
@@ -533,8 +534,21 @@ func (m *CallbackManager) SetToolCallSink(sink ToolCallSink) {
 	if m.server != nil && m.server.service != nil {
 		m.server.service.mu.Lock()
 		defer m.server.service.mu.Unlock()
-		m.server.service.toolCallSink = sink
+		WithToolCallSink(sink)(m.server.service)
 		m.logger.Debug("set tool-call sink on callback service")
+	}
+}
+
+// SetBeliefSubstrate sets the belief substrate on the callback service,
+// wiring PlaceBet to persist staked bets (ADR-0022, ADR-0029 §3,
+// gibson#273/#278). Call after NewCallbackManager, before Start().
+// Thread-safe.
+func (m *CallbackManager) SetBeliefSubstrate(substrate brain.BeliefSubstrate) {
+	if m.server != nil && m.server.service != nil {
+		m.server.service.mu.Lock()
+		defer m.server.service.mu.Unlock()
+		WithBeliefSubstrate(substrate)(m.server.service)
+		m.logger.Debug("set belief substrate on callback service")
 	}
 }
 
