@@ -20,15 +20,21 @@ import (
 //
 // Reputation (ADR-0026 §3, ADR-0029 §3's technique×environment view) is
 // genuinely wired — resolveReputation reads NodeKindTechniqueEnvironment
-// belief through the SAME BeliefSubstrate the market view uses — but nothing
-// in this codebase yet records WHICH technique×environment key a hypothesis
-// or evidence move names (Hypothesis has no Technique field; harness.PlaceBet
-// only sees a technique string transiently, inside one RPC call, and never
-// stores it back onto the Hypothesis). Every candidate this file produces
-// therefore resolves to the neutral prior today — an honest reflection of
-// what the data model tracks (the same class of scope decision gibson#275
-// made for HostsToInfraGraph's edgeless graph), not a limitation of the
-// lookup itself.
+// belief through the SAME BeliefSubstrate the market view uses — and is
+// called live from PlanVoI (the whole-program deadcode gate confirms it:
+// wired at epic->main via wireBrainRegistry/WireVoIPlanner). Every candidate
+// this file produces still resolves to the neutral prior today, though:
+// Hypothesis now carries a Technique (gibson#353, sdk#88), but PlanVoI does
+// not yet read it here on purpose. gibson#347 tracks the real prerequisite —
+// reconciling the two technique vocabularies in play
+// (component.TechniqueType vs settlement.TechniqueID) and building the
+// VoICandidate -> Capability mapping gibson#333's dispatch-gating needs —
+// and is marked ready-for-human, not ready-for-agent, because that
+// reconciliation is a design decision, not a wiring gap. Resolving
+// reputation by Hypothesis.Technique in isolation, ahead of that decision,
+// risked keying reputation on a vocabulary #347 might later replace. Once
+// #347 lands, wiring the resolved technique key in here is a one-line
+// change, not a new lookup to invent.
 
 // VoIPlanInput bundles what PlanVoI needs for one mission's candidate set,
 // gathered once by the caller (voi_planner.go's worker, or a test).

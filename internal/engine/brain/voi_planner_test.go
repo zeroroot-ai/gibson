@@ -34,6 +34,26 @@ func voiSettle(e *Engine, w *VoIWorker, rounds int) {
 	}
 }
 
+// TestEngine_VoIPlanSnapshot proves the Engine-level accessor (the
+// RLock-guarded read path daemon.go's tests/a future admin surface use,
+// mirroring Hosts()/Hypotheses()) returns the same content World's own
+// VoIPlanSnapshot does, without reaching into World directly.
+func TestEngine_VoIPlanSnapshot(t *testing.T) {
+	substrate := newFakeBeliefSubstrate()
+	registry := liveBeliefRegistry(t)
+	e, w := voiEngine(substrate, registry, ExactVoIScorer(), DefaultVoITopK)
+	e.Submit(MissionProjected{ID: "m1", Goal: "find a path"})
+	voiSettle(e, w, 1)
+
+	got := e.VoIPlanSnapshot()
+	if len(got) != 1 || got[0].MissionID != "m1" {
+		t.Fatalf("VoIPlanSnapshot() = %+v, want one plan for m1", got)
+	}
+	if want := e.World.VoIPlanSnapshot(); !reflect.DeepEqual(got, want) {
+		t.Fatalf("Engine.VoIPlanSnapshot() = %+v, want World.VoIPlanSnapshot() = %+v", got, want)
+	}
+}
+
 // TestVoIGateSystem_RequestsOncePerEvidenceChange mirrors
 // TestBeliefSystem_ConsultsProviderOnEvidenceChange: a running goal mission
 // with no VoI plan yet always gets one; a repeated sweep with nothing new is

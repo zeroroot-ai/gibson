@@ -467,6 +467,17 @@ func (e *Engine) Hypotheses() []HypothesisSnapshot {
 	return e.World.HypothesisSnapshot()
 }
 
+// VoIPlanSnapshot returns every mission's current value-of-information
+// planning state (ADR-0026, gibson#283) in deterministic (MissionID) order —
+// the read accessor a caller (a test, or a future admin surface) uses to
+// observe VoIGateSystem/VoIWorker's live output without reaching into World
+// directly.
+func (e *Engine) VoIPlanSnapshot() []VoIPlanSnapshot {
+	e.mu.RLock()
+	defer e.mu.RUnlock()
+	return e.World.VoIPlanSnapshot()
+}
+
 // LlmCalls returns the mission's LLM-call provenance (gibson#755) in deterministic
 // order — the per-call model + token data the dashboard surfaces in place of the
 // retired Langfuse trace/cost views.
