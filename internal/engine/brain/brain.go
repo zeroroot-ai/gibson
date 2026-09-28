@@ -100,6 +100,12 @@ type World struct {
 	// bet_settlement.go.
 	betSettlements *ecs.Map1[BetSettlement]
 
+	// voiPlans holds each mission's VoI planning state (gibson#283,
+	// ADR-0026): whether a plan is in flight, the evidence cursor it answers
+	// for, and the last completed plan's ranked, top-k candidates. See
+	// voi_planner.go. Standalone, like decisions — never a field on Mission.
+	voiPlans *ecs.Map1[VoIPlanState]
+
 	// next*ID are monotonic, replay-deterministic counters for assigning stable
 	// ids (incremented in the single-writer reducer, so replay reproduces ids).
 	// Counters are per-entity-type; ids are unique within a (label) namespace,
@@ -181,6 +187,7 @@ func NewWorld(tenant string) *World {
 		entities:       ecs.NewMap1[Entity](w),
 		hypotheses:     ecs.NewMap1[Hypothesis](w),
 		betSettlements: ecs.NewMap1[BetSettlement](w),
+		voiPlans:       ecs.NewMap1[VoIPlanState](w),
 	}
 }
 
@@ -388,6 +395,10 @@ func Reduce(w *World, ev Event) {
 		applyFindingStatusChanged(w, e)
 	case ScanReconciled:
 		applyScanReconciled(w, e)
+	case VoIPlanRequested:
+		applyVoIPlanRequested(w, e)
+	case VoIPlanned:
+		applyVoIPlanned(w, e)
 	}
 }
 
