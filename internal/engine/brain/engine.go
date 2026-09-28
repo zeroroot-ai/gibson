@@ -62,6 +62,13 @@ type Engine struct {
 	// they never race the reducer. Submit does not touch the World, so it is
 	// lock-free.
 	mu sync.RWMutex
+
+	// destructiveAuthzOnce/destructiveAuthz lazily construct this engine's
+	// DestructiveAuthorizationQueue (ADR-0028, gibson#336) on first access via
+	// DestructiveAuthorizationQueue() — see destructive_authz.go. Lazy because
+	// most engines never see a destructive proof request.
+	destructiveAuthzOnce sync.Once
+	destructiveAuthz     *DestructiveAuthorizationQueue
 }
 
 // NewEngine creates an Engine with an empty Tenant World and Timeline.
@@ -451,6 +458,26 @@ func (e *Engine) AgentRuns() []AgentRunSnapshot {
 	return e.World.AgentRunSnapshot()
 }
 
+// Hypotheses returns the current hypothesis snapshots (ADR-0021, gibson#265)
+// in deterministic (scope, claim) order — the Hypothesis provenance class,
+// distinct from both Evidence and Belief.
+func (e *Engine) Hypotheses() []HypothesisSnapshot {
+	e.mu.RLock()
+	defer e.mu.RUnlock()
+	return e.World.HypothesisSnapshot()
+}
+
+// VoIPlanSnapshot returns every mission's current value-of-information
+// planning state (ADR-0026, gibson#283) in deterministic (MissionID) order —
+// the read accessor a caller (a test, or a future admin surface) uses to
+// observe VoIGateSystem/VoIWorker's live output without reaching into World
+// directly.
+func (e *Engine) VoIPlanSnapshot() []VoIPlanSnapshot {
+	e.mu.RLock()
+	defer e.mu.RUnlock()
+	return e.World.VoIPlanSnapshot()
+}
+
 // LlmCalls returns the mission's LLM-call provenance (gibson#755) in deterministic
 // order — the per-call model + token data the dashboard surfaces in place of the
 // retired Langfuse trace/cost views.
@@ -458,6 +485,23 @@ func (e *Engine) LlmCalls() []LlmCallSnapshot {
 	e.mu.RLock()
 	defer e.mu.RUnlock()
 	return e.World.LlmCallSnapshot()
+}
+
+// AgentToolCalls returns the mission's captured tool I/O (ADR-0020, gibson#271)
+// in deterministic order — the flight recorder's tool-call counterpart to
+// LlmCalls.
+func (e *Engine) AgentToolCalls() []AgentToolCallSnapshot {
+	e.mu.RLock()
+	defer e.mu.RUnlock()
+	return e.World.AgentToolCallSnapshot()
+}
+
+// FlightRecorderPolicy returns the tenant's current retention/redaction policy
+// (ADR-0020, gibson#271).
+func (e *Engine) FlightRecorderPolicy() FlightRecorderPolicy {
+	e.mu.RLock()
+	defer e.mu.RUnlock()
+	return e.World.FlightRecorderPolicy()
 }
 
 // Events returns a copy of the Timeline (the Scroller scrubs this).

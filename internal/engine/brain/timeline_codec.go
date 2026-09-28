@@ -80,6 +80,20 @@ func init() {
 	registerEvent("belief.requested", func() Event { return &BeliefScoreRequested{} })
 	registerEvent("belief.scored", func() Event { return &BeliefScored{} })
 
+	// belief_slice_gate.go (ADR-0029, gibson#275): registered for codec
+	// completeness like every other Event, though the live graph-coupled
+	// pipeline (WireSliceBelief/SliceBeliefWorker) drives SliceGate.Apply
+	// directly rather than through Engine.Submit/Reduce today — the belief
+	// write itself lands via BeliefSubstrate.SetBelief, not a World mutation
+	// Reduce would apply. Registering the codec still matters: it is what a
+	// future Submit-based caller (or a replay of a differently-produced
+	// Timeline) needs to decode these kinds at all.
+	registerEvent("belief.slice_requested", func() Event { return &SliceScoreRequested{} })
+	registerEvent("belief.slice_scored", func() Event { return &SliceScored{} })
+
+	// node_belief.go
+	registerEvent("node_belief.set", func() Event { return &NodeBeliefSet{} })
+
 	// attention.go
 	registerEvent("finding.raised", func() Event { return &FindingRaised{} })
 	registerEvent("finding.status_changed", func() Event { return &FindingStatusChanged{} })
@@ -96,8 +110,31 @@ func init() {
 	// provenance.go
 	registerEvent("agent_run.observed", func() Event { return &AgentRunObserved{} })
 
+	// hypothesis.go
+	registerEvent("hypothesis.observed", func() Event { return &HypothesisObserved{} })
+
+	// bet_settlement.go
+	registerEvent("bet.settled_true", func() Event { return &BetSettledTrue{} })
+	registerEvent("bet.settled_false", func() Event { return &BetSettledFalse{} })
+	registerEvent("bet.settled_by_hitl", func() Event { return &BetSettledByHITL{} })
+
+	// destructive_authz.go
+	registerEvent("destructive_action.requested", func() Event { return &DestructiveActionRequested{} })
+	registerEvent("destructive_action.decided", func() Event { return &DestructiveActionDecided{} })
+
+	// voi_planner.go
+	registerEvent("voi.plan.requested", func() Event { return &VoIPlanRequested{} })
+	registerEvent("voi.plan.completed", func() Event { return &VoIPlanned{} })
+
 	// llm_call.go
 	registerEvent("llm_call.observed", func() Event { return &LlmCallObserved{} })
+
+	// tool_call.go
+	registerEvent("agent_tool_call.observed", func() Event { return &AgentToolCallObserved{} })
+
+	// flight_recorder.go
+	registerEvent("flight_recorder.policy_set", func() Event { return &FlightRecorderPolicySet{} })
+	registerEvent("flight_recorder.retention_swept", func() Event { return &FlightRecorderRetentionSwept{} })
 }
 
 // EncodeEvent serialises ev as a JSON envelope. The envelope preserves the
@@ -185,6 +222,8 @@ func dereferenceEvent(ev Event) Event {
 		return *v
 	case *BeliefScored:
 		return *v
+	case *NodeBeliefSet:
+		return *v
 	case *FindingRaised:
 		return *v
 	case *ScanReconciled:
@@ -193,7 +232,29 @@ func dereferenceEvent(ev Event) Event {
 		return *v
 	case *AgentRunObserved:
 		return *v
+	case *HypothesisObserved:
+		return *v
+	case *BetSettledTrue:
+		return *v
+	case *BetSettledFalse:
+		return *v
+	case *BetSettledByHITL:
+		return *v
+	case *DestructiveActionRequested:
+		return *v
+	case *DestructiveActionDecided:
+		return *v
+	case *VoIPlanRequested:
+		return *v
+	case *VoIPlanned:
+		return *v
 	case *LlmCallObserved:
+		return *v
+	case *AgentToolCallObserved:
+		return *v
+	case *FlightRecorderPolicySet:
+		return *v
+	case *FlightRecorderRetentionSwept:
 		return *v
 	default:
 		// Unknown pointer type — return as-is; the caller will surface the

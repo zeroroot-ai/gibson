@@ -18,6 +18,7 @@ import (
 	"github.com/spiffe/go-spiffe/v2/spiffeid"
 	"github.com/spiffe/go-spiffe/v2/spiffetls/tlsconfig"
 	"github.com/spiffe/go-spiffe/v2/workloadapi"
+	"github.com/zeroroot-ai/gibson/internal/engine/brain"
 	"github.com/zeroroot-ai/gibson/internal/infra/grpckeepalive"
 	"github.com/zeroroot-ai/gibson/internal/platform/authz"
 	"github.com/zeroroot-ai/gibson/internal/platform/component"
@@ -419,6 +420,13 @@ func (s *CallbackServer) SetMissionManager(op MissionOperator) {
 // Start().
 func (s *CallbackServer) SetSessionContextStore(store SessionContextStore) {
 	s.service.sessionContextStore = store
+}
+
+// SetBeliefSubstrate wires the belief substrate PlaceBet persists staked bets
+// to (ADR-0022, ADR-0029 §3, gibson#273/#278). When not set, PlaceBet returns
+// Unavailable. Must be called before Start().
+func (s *CallbackServer) SetBeliefSubstrate(substrate brain.BeliefSubstrate) {
+	s.service.beliefSubstrate = substrate
 }
 
 // SetAgentOwnerLookup wires the AgentOwnerLookup hook so DelegateToAgent

@@ -7,6 +7,7 @@ import (
 	"context"
 	"encoding/json"
 	"errors"
+	"time"
 
 	"github.com/google/uuid"
 	"google.golang.org/grpc/codes"
@@ -400,16 +401,24 @@ func (s *DaemonServer) ExecuteLLM(ctx context.Context, req *tenantv1.ExecuteLLMR
 	if s.llmCallSink != nil && resp != nil {
 		msgs := make([]LLMMessage, 0, len(completionReq.Messages))
 		for _, m := range completionReq.Messages {
-			msgs = append(msgs, LLMMessage{Role: string(m.Role), Content: m.Content})
+			msgs = append(msgs, LLMMessage{
+				Role:       string(m.Role),
+				Content:    m.Content,
+				Name:       m.Name,
+				ToolCallID: m.ToolCallID,
+				ToolCalls:  toLLMToolCalls(m.ToolCalls),
+			})
 		}
 		s.llmCallSink(ctx, tenantID, LLMCallRecord{
-			CallID:           uuid.NewString(),
-			MissionID:        req.GetMissionId(),
-			Model:            completionReq.Model,
-			PromptTokens:     resp.Usage.PromptTokens,
-			CompletionTokens: resp.Usage.CompletionTokens,
-			Messages:         msgs,
-			Completion:       resp.Message.Content,
+			CallID:              uuid.NewString(),
+			MissionID:           req.GetMissionId(),
+			Model:               completionReq.Model,
+			PromptTokens:        resp.Usage.PromptTokens,
+			CompletionTokens:    resp.Usage.CompletionTokens,
+			Messages:            msgs,
+			Completion:          resp.Message.Content,
+			CompletionToolCalls: toLLMToolCalls(resp.Message.ToolCalls),
+			RecordedAtUnixNano:  time.Now().UnixNano(),
 		})
 	}
 

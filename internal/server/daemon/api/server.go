@@ -1008,17 +1008,55 @@ type LLMCallRecord struct {
 	RunID            string
 	PromptTokens     int
 	CompletionTokens int
-	// Transcript (optional): prompt messages + the assistant completion, so the
-	// World can back the dashboard conversation view without a separate trace
-	// store. Metadata-only consumers ignore these.
+	// Transcript: prompt messages + the assistant completion, captured in full
+	// every time (ADR-0020 flight recorder, gibson#271 — never optional), so
+	// the World can back the dashboard conversation view without a separate
+	// trace store.
 	Messages   []LLMMessage
 	Completion string
+	// CompletionToolCalls carries the tool calls the model made as part of
+	// THIS completion — distinct from Completion, which is the assistant's
+	// text content and is often empty on a tool-calling turn (gibson#271).
+	CompletionToolCalls []LLMToolCall
+	// RecordedAtUnixNano stamps when the daemon observed this call, so a
+	// tenant's retention policy can be swept deterministically later.
+	RecordedAtUnixNano int64
 }
 
-// LLMMessage is one prompt message in an LLMCallRecord transcript.
+// LLMMessage is one prompt message in an LLMCallRecord transcript. Role +
+// Content cover a plain turn; ToolCalls carries any tool calls an assistant
+// message in the prompt history made, and ToolCallID/Name identify a
+// tool-result message (role "tool") replaying that call's result back to the
+// model (gibson#271).
 type LLMMessage struct {
-	Role    string
-	Content string
+	Role       string
+	Content    string
+	Name       string
+	ToolCalls  []LLMToolCall
+	ToolCallID string
+}
+
+// LLMToolCall is one tool call an LLM made as part of a completion. Mirrors
+// internal/engine/llm.ToolCall.
+type LLMToolCall struct {
+	ID        string
+	Type      string
+	Name      string
+	Arguments string
+}
+
+// toLLMToolCalls converts llm.ToolCall values (internal/engine/llm) to the
+// capture-record shape, preserving full fidelity — the gibson#271 fix for a
+// tool-calling turn's transcript silently dropping its tool calls.
+func toLLMToolCalls(calls []llm.ToolCall) []LLMToolCall {
+	if len(calls) == 0 {
+		return nil
+	}
+	out := make([]LLMToolCall, 0, len(calls))
+	for _, c := range calls {
+		out = append(out, LLMToolCall{ID: c.ID, Type: c.Type, Name: c.Name, Arguments: c.Arguments})
+	}
+	return out
 }
 
 // LLMCallSink consumes a completed LLM call for per-tenant World capture. It is

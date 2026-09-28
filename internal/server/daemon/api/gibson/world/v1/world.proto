@@ -129,6 +129,66 @@ service WorldService {
       allowed_identities: 3  // USER | SERVICE
     };
   }
+
+  // GetCalibration returns the tenant's reliability/calibration report from
+  // settled bets (gibson#284, ADR-0022/ADR-0006): does a predicted 0.8 mean
+  // 80% in reality? A tenant-wide summary plus a per-technique breakdown, each
+  // with a Brier score and a binned reliability-diagram curve — the source for
+  // the dashboard's reliability diagram (dashboard#98).
+  rpc GetCalibration(GetCalibrationRequest) returns (GetCalibrationResponse) {
+    option (gibson.auth.v1.authz) = {
+      relation: "member",
+      object_type: "tenant",
+      object_deriver: "tenant_from_identity",
+      allowed_identities: 3  // USER | SERVICE
+    };
+  }
+
+  // GetReputation returns one technique's current track record in one scope
+  // (ADR-0022, ADR-0029 §3, gibson#267): does this technique tend to work
+  // here? Read-only projection of the technique x environment belief a
+  // settled bet updates (brain.UpdateReputation) — a caller that only needs
+  // one key's current value, not the full tenant-wide breakdown
+  // GetCalibration gives.
+  rpc GetReputation(GetReputationRequest) returns (GetReputationResponse) {
+    option (gibson.auth.v1.authz) = {
+      relation: "member",
+      object_type: "tenant",
+      object_deriver: "tenant_from_identity",
+      allowed_identities: 3  // USER | SERVICE
+    };
+  }
+
+  // ListOpenBets returns the tenant's placed-but-unsettled bets (gibson#339):
+  // a Hypothesis that carries a bettable HypothesisID (ADR-0021/ADR-0022,
+  // sdk#89) with no matching BetSettlement yet. Backend for dashboard#97's
+  // HITL-settle review queue. Read-only, so relation is member like every
+  // other WorldService read.
+  rpc ListOpenBets(ListOpenBetsRequest) returns (ListOpenBetsResponse) {
+    option (gibson.auth.v1.authz) = {
+      relation: "member",
+      object_type: "tenant",
+      object_deriver: "tenant_from_identity",
+      allowed_identities: 3  // USER | SERVICE
+    };
+  }
+
+  // SettleBetByHITL records a human review verdict on a bet (gibson#280,
+  // ADR-0023 decision 3): true_positive/false_positive settle the bet
+  // (Engine.SettleBetByHITL); dismiss is label-only/no-settle, matching the
+  // backend's own refusal semantics (a bet's binary settlement has no "not
+  // actionable" outcome the way a surfaced surprise does). A settlement is a
+  // more consequential, less reversible action than a plain read or label, so
+  // this is gated at writer, not bare member — dashboard#97's settle action,
+  // not every tenant member's review queue.
+  rpc SettleBetByHITL(SettleBetByHITLRequest) returns (SettleBetByHITLResponse) {
+    option (gibson.auth.v1.authz) = {
+      relation: "writer",
+      object_type: "tenant",
+      object_deriver: "tenant_from_identity",
+      allowed_identities: 3  // USER | SERVICE
+    };
+  }
 }
 
 // MissionView is one mission as the World holds it.
@@ -348,3 +408,127 @@ message SubmitLabelResponse {}
 
 message ListLabelsRequest {}
 message ListLabelsResponse { repeated LabelView labels = 1; }
+
+// GetCalibrationRequest asks for the tenant's reliability/calibration report.
+message GetCalibrationRequest {
+  // bins is the number of equal-width predicted-probability buckets the
+  // reliability curve is computed over. <= 0 uses the server's default
+  // (deciles).
+  int32 bins = 1;
+}
+
+// CalibrationBinView is one predicted-probability bucket of a reliability
+// diagram: every settled, staked bet whose predicted probability fell in
+// [low, high), and the mean predicted probability vs. the observed frequency
+// of a TRUE verdict among them.
+message CalibrationBinView {
+  double low = 1;
+  double high = 2;
+  int32 n = 3;
+  double mean_predicted = 4;
+  double observed_frequency = 5;
+}
+
+// TechniqueCalibrationView is the reliability/calibration measure for one
+// group of settled, staked bets: either every settled bet in the tenant
+// (GetCalibrationResponse.overall, technique == "") or one specific
+// technique's settled bets (GetCalibrationResponse.by_technique).
+message TechniqueCalibrationView {
+  string technique = 1;
+  int32 n = 2;
+  double mean_predicted = 3;
+  double observed_frequency = 4;
+  // brier_score is the mean squared error between each bet's predicted
+  // probability and its observed outcome (0 or 1) — the standard proper
+  // scoring rule for calibration (0 is perfect; lower is better).
+  double brier_score = 5;
+  repeated CalibrationBinView bins = 6;
+}
+
+// GetCalibrationResponse is gibson#284's full reliability answer for the
+// caller's tenant.
+message GetCalibrationResponse {
+  string tenant = 1;
+  TechniqueCalibrationView overall = 2;
+  repeated TechniqueCalibrationView by_technique = 3;
+  // unscored counts settled bets with no recorded claim-node belief (no bet
+  // was ever staked for that hypothesis) — excluded from every aggregate
+  // because calibration cannot compare a predicted probability that was
+  // never staked. Surfaced, not hidden.
+  int32 unscored = 4;
+}
+
+// ListOpenBetsRequest takes no fields: the caller's tenant resolves the same
+// way it does for every other WorldService read.
+message ListOpenBetsRequest {}
+
+// ReferencedEntityView is an entity a bet's claim is about, by Taxonomy label
+// and identity properties — the same by-label-and-properties addressing
+// HypothesisObservation.references uses on the wire (sdk#70), so the review
+// UI can show what the claim references without a graph node id.
+message ReferencedEntityView {
+  string label = 1;
+  map<string, string> id_properties = 2;
+}
+
+// OpenBet is one placed-but-unsettled bet (gibson#339): a Hypothesis that
+// carries a bettable HypothesisID with no matching BetSettlement yet.
+//
+// confidence is the claim's own self-reported confidence (Hypothesis.Confidence),
+// NOT a reconciled market stake read back from BeliefSubstrate — that
+// reconciliation is a pre-existing, tracked gap (gibson#273) this RPC does not
+// close. run_id is the mission run that proposed the claim, for the review
+// UI's transcript link; empty when the observation carried no run id.
+message OpenBet {
+  string hypothesis_id = 1;
+  string claim = 2;
+  string proposer = 3;
+  double confidence = 4;
+  repeated ReferencedEntityView evidence = 5;
+  string run_id = 6;
+}
+
+message ListOpenBetsResponse {
+  repeated OpenBet bets = 1;
+}
+
+// SettleBetByHITLRequest names the bet and the reviewer's verdict.
+// The reviewing user is resolved server-side from the caller's identity
+// (ADR-0006 §6 provenance rule), never taken from the request — the same
+// rule SubmitLabel already follows, so a caller can never attribute a
+// settlement to another user.
+message SettleBetByHITLRequest {
+  string hypothesis_id = 1;
+  // verdict is true_positive, false_positive, or dismiss (the same
+  // vocabulary SubmitLabel uses). dismiss applies a label only; it never
+  // settles the bet.
+  string verdict = 2;
+}
+
+message SettleBetByHITLResponse {
+  // settled is true only when this call caused a NEW settlement. false with
+  // no error covers two honest non-events: the bet was already settled by
+  // any of the three settlement paths (idempotent no-op), or the verdict was
+  // dismiss (label-only/no-settle by design, never an error).
+  bool settled = 1;
+}
+
+// GetReputationRequest names the technique x environment key (ADR-0029 §3):
+// technique is the settlement.TechniqueID a Bet/Hypothesis names (e.g.
+// "T1190"); scope_id is the "environment" — the same ScopeID coordinate
+// every other observation in this brain partitions identity by.
+message GetReputationRequest {
+  string technique = 1;
+  string scope_id = 2;
+}
+
+message GetReputationResponse {
+  // prior_strength is the confidence a NEW hypothesis of this technique, in
+  // this scope, should start from (brain.Reputation.PriorStrength): the
+  // observed TRUE frequency once settled bets exist, or the neutral
+  // DefaultReputationPrior (0.5) when has_track_record is false.
+  double prior_strength = 1;
+  // has_track_record is false when nothing has been recorded for this key
+  // yet — "no data", never hidden behind a bare zero value.
+  bool has_track_record = 2;
+}

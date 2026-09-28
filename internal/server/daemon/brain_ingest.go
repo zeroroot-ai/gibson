@@ -181,6 +181,10 @@ func ingestObservation(reg *brain.Registry) harness.ObservationSink {
 		// can attribute the discovered host to the mission that found it. Kept
 		// separate from scope so the two concepts do not re-conflate.
 		missionID := attr.MissionID
+		// The mission run, server-resolved the same way missionID is
+		// (gibson#339's transcript-linking need). Only consumed by the
+		// Hypothesis case today.
+		runID := attr.RunID
 		switch o := req.Observation.(type) {
 		case *harnesspb.ObserveRequest_Host:
 			h := o.Host
@@ -244,6 +248,39 @@ func ingestObservation(reg *brain.Registry) harness.ObservationSink {
 			s := o.Subdomain
 			reg.For(tenant).Submit(brain.SubdomainObserved{
 				ScopeID: scope, FQDN: s.Fqdn, Domain: s.Domain, Addresses: s.Addresses,
+			})
+		case *harnesspb.ObserveRequest_Hypothesis:
+			// An agent's proposed, unproven claim (ADR-0021, sdk#70). It folds
+			// as its own provenance class (hypothesis.go) — never as Evidence,
+			// never as a Belief — so it needs no Taxonomy admission the way an
+			// EntitySighting does: References are stored as reported, not
+			// resolved against the Taxonomy here (a later slice's job).
+			//
+			// HypothesisID (gibson#339's join key across Hypothesis, Bet and
+			// BetSettlement) and Technique (reputation keying,
+			// gibson#333/#284) are wired here: go.mod pins SDK v0.181.0+,
+			// which carries HypothesisObservation.hypothesis_id (sdk#89) and
+			// .technique (sdk#88).
+			hyp := o.Hypothesis
+			refs := make([]brain.ReferencedEntityRef, 0, len(hyp.GetReferences()))
+			for _, r := range hyp.GetReferences() {
+				if r == nil {
+					continue
+				}
+				refs = append(refs, brain.ReferencedEntityRef{
+					Label: r.GetLabel(), IDProperties: r.GetIdProperties(),
+				})
+			}
+			reg.For(tenant).Submit(brain.HypothesisObserved{
+				MissionID:    missionID,
+				RunID:        runID,
+				ScopeID:      scope,
+				Proposer:     hyp.GetProposer(),
+				Confidence:   hyp.GetConfidence(),
+				Claim:        hyp.GetClaim(),
+				HypothesisID: hyp.GetHypothesisId(),
+				Technique:    hyp.GetTechnique(),
+				References:   refs,
 			})
 		case *harnesspb.ObserveRequest_LifecycleEntity:
 			// A typed application-lifecycle entity an agent reported (sdk#537).
@@ -361,7 +398,13 @@ func ingestLLMCall(reg *brain.Registry) api.LLMCallSink {
 		}
 		msgs := make([]brain.LlmMessage, 0, len(call.Messages))
 		for _, m := range call.Messages {
-			msgs = append(msgs, brain.LlmMessage{Role: m.Role, Content: m.Content})
+			msgs = append(msgs, brain.LlmMessage{
+				Role:       m.Role,
+				Content:    m.Content,
+				Name:       m.Name,
+				ToolCallID: m.ToolCallID,
+				ToolCalls:  toBrainToolCalls(m.ToolCalls),
+			})
 		}
 		reg.For(tenant).Submit(brain.LlmCallObserved{
 			CallID:  call.CallID,
@@ -372,11 +415,92 @@ func ingestLLMCall(reg *brain.Registry) api.LLMCallSink {
 			// stamps mission_id on the request; the handler carries it onto the record
 			// so the call attaches to its mission's frame. Empty = tenant-ambient (e.g.
 			// dashboard chat), which never attaches to a mission frame.
-			MissionID:        call.MissionID,
-			PromptTokens:     call.PromptTokens,
-			CompletionTokens: call.CompletionTokens,
-			Messages:         msgs,
-			Completion:       call.Completion,
+			MissionID:           call.MissionID,
+			PromptTokens:        call.PromptTokens,
+			CompletionTokens:    call.CompletionTokens,
+			Messages:            msgs,
+			Completion:          call.Completion,
+			CompletionToolCalls: toBrainToolCalls(call.CompletionToolCalls),
+			RecordedAtUnixNano:  call.RecordedAtUnixNano,
+		})
+	}
+}
+
+// harnessLLMCallToAPI maps a harness.LLMCallRecord (the callback-path capture
+// shape) onto the daemon's api.LLMCallRecord (ADR-0020, gibson#271) — the
+// bridge daemon.go's callback→api LLM-call wiring uses. Extracted as a pure
+// function so the mapping is unit-testable without a live daemon/gRPC server.
+func harnessLLMCallToAPI(call harness.LLMCallRecord) api.LLMCallRecord {
+	msgs := make([]api.LLMMessage, 0, len(call.Messages))
+	for _, m := range call.Messages {
+		msgs = append(msgs, api.LLMMessage{
+			Role:       m.Role,
+			Content:    m.Content,
+			Name:       m.Name,
+			ToolCallID: m.ToolCallID,
+			ToolCalls:  toAPIToolCalls(m.ToolCalls),
+		})
+	}
+	return api.LLMCallRecord{
+		CallID:              call.CallID,
+		MissionID:           call.MissionID,
+		RunID:               call.RunID,
+		Model:               call.Model,
+		PromptTokens:        call.PromptTokens,
+		CompletionTokens:    call.CompletionTokens,
+		Messages:            msgs,
+		Completion:          call.Completion,
+		CompletionToolCalls: toAPIToolCalls(call.CompletionToolCalls),
+		RecordedAtUnixNano:  call.RecordedAtUnixNano,
+	}
+}
+
+// toAPIToolCalls converts harness.LLMCallToolCall values to the daemon api
+// package's LLMToolCall shape (ADR-0020, gibson#271) — the bridge daemon.go's
+// callback→api LLM-call mapping uses.
+func toAPIToolCalls(calls []harness.LLMCallToolCall) []api.LLMToolCall {
+	if len(calls) == 0 {
+		return nil
+	}
+	out := make([]api.LLMToolCall, 0, len(calls))
+	for _, c := range calls {
+		out = append(out, api.LLMToolCall{ID: c.ID, Type: c.Type, Name: c.Name, Arguments: c.Arguments})
+	}
+	return out
+}
+
+// toBrainToolCalls converts api.LLMToolCall values to the brain package's
+// LlmToolCall shape (ADR-0020, gibson#271).
+func toBrainToolCalls(calls []api.LLMToolCall) []brain.LlmToolCall {
+	if len(calls) == 0 {
+		return nil
+	}
+	out := make([]brain.LlmToolCall, 0, len(calls))
+	for _, c := range calls {
+		out = append(out, brain.LlmToolCall{ID: c.ID, Type: c.Type, Name: c.Name, Arguments: c.Arguments})
+	}
+	return out
+}
+
+// ingestToolCall returns the daemon's tool-call capture sink (ADR-0020,
+// gibson#271): it folds a completed CallToolProto invocation into the calling
+// tenant's brain World as an AgentToolCall entity — the flight recorder's
+// tool-I/O half, alongside ingestLLMCall's transcript half. Routes by the
+// call's own tenant, same as ingestLLMCall.
+func ingestToolCall(reg *brain.Registry) harness.ToolCallSink {
+	return func(_ context.Context, tenant string, call harness.ToolCallRecord) {
+		if reg == nil || call.ToolCallID == "" {
+			return
+		}
+		reg.For(tenant).Submit(brain.AgentToolCallObserved{
+			ToolCallID:         call.ToolCallID,
+			MissionID:          call.MissionID,
+			RunID:              call.RunID,
+			ToolName:           call.ToolName,
+			Arguments:          call.Arguments,
+			Result:             call.Result,
+			Err:                call.Err,
+			RecordedAtUnixNano: call.RecordedAtUnixNano,
 		})
 	}
 }

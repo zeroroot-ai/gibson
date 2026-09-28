@@ -18,9 +18,11 @@ import (
 // run within a tick: budget first (abort an over-budget mission before it
 // dispatches more), then scheduler/condition (advance the scripted graph), retry
 // (re-arm failures before completion judges them), the Decider gate (request
-// decisions on current state), completion (mechanical no-goal finish), and
-// finally rescan reconciliation, which can only judge what a scan did not see
-// once that scan is terminal.
+// decisions on current state), the VoI gate (request a fresh value-of-
+// information plan on the same evidence-change signal, ADR-0026/gibson#283 —
+// mechanical and quiescent like the Decider gate, so it runs alongside it),
+// completion (mechanical no-goal finish), and finally rescan reconciliation,
+// which can only judge what a scan did not see once that scan is terminal.
 // The daemon installs these alongside the belief System on the per-tenant engines.
 func ExecutorSystems() []System {
 	return []System{
@@ -30,6 +32,7 @@ func ExecutorSystems() []System {
 		RetrySystem,
 		SurpriseFindingSystem, // promote identity-contradiction anomalies → Findings (gibson#751)
 		DeciderGateSystem,
+		VoIGateSystem,
 		MissionCompletionSystem,
 		// Last: it judges what a scan did not see, so it must run after the
 		// completion System has decided the scan is finished looking (gibson#1686).

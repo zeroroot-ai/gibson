@@ -18,6 +18,7 @@ import (
 	"context"
 	"fmt"
 	"log/slog"
+	"math"
 
 	"google.golang.org/grpc/codes"
 	"google.golang.org/grpc/status"
@@ -374,4 +375,80 @@ func labelView(l brain.LabelSnapshot) *worldpb.LabelView {
 		Category: l.Category,
 		UserId:   l.UserID,
 	}
+}
+
+// GetCalibration returns the tenant's reliability/calibration report from
+// settled bets (gibson#284, ADR-0022/ADR-0006) — the source for the
+// dashboard's reliability diagram (dashboard#98). The claim-node belief
+// substrate is constructed the same way every other brain wiring site builds
+// one (WireVoIPlanner, WireSliceBelief): a WorldBeliefSubstrate bound to this
+// call's own engine. WorldBeliefSubstrate does not back Claim nodes yet
+// (belief_world_substrate.go's own doc comment — "a substrate for those
+// views is separate, later work", the same gap harness.PlaceBet's live
+// wiring has today), so every settled bet reads as Unscored until that
+// lands; this handler will start returning real numbers the day it does,
+// with no code change here.
+func (s *worldServer) GetCalibration(ctx context.Context, req *worldpb.GetCalibrationRequest) (*worldpb.GetCalibrationResponse, error) {
+	e, err := s.engine(ctx)
+	if err != nil {
+		return nil, err
+	}
+	substrate := brain.NewWorldBeliefSubstrate(e)
+	report, err := e.Calibration(ctx, substrate, int(req.GetBins()))
+	if err != nil {
+		return nil, status.Errorf(codes.Internal, "compute calibration: %v", err)
+	}
+	return &worldpb.GetCalibrationResponse{
+		Tenant:      report.Tenant,
+		Overall:     techniqueCalibrationView(report.Overall),
+		ByTechnique: techniqueCalibrationViews(report.ByTechnique),
+		Unscored:    int32Count(report.Unscored),
+	}, nil
+}
+
+// techniqueCalibrationView maps one brain.TechniqueCalibration to its proto view.
+func techniqueCalibrationView(tc brain.TechniqueCalibration) *worldpb.TechniqueCalibrationView {
+	bins := make([]*worldpb.CalibrationBinView, 0, len(tc.Bins))
+	for _, b := range tc.Bins {
+		bins = append(bins, &worldpb.CalibrationBinView{
+			Low:               b.Low,
+			High:              b.High,
+			N:                 int32Count(b.N),
+			MeanPredicted:     b.MeanPredicted,
+			ObservedFrequency: b.ObservedFrequency,
+		})
+	}
+	return &worldpb.TechniqueCalibrationView{
+		Technique:         tc.Technique,
+		N:                 int32Count(tc.N),
+		MeanPredicted:     tc.MeanPredicted,
+		ObservedFrequency: tc.ObservedFrequency,
+		BrierScore:        tc.BrierScore,
+		Bins:              bins,
+	}
+}
+
+// techniqueCalibrationViews maps a slice of brain.TechniqueCalibration, order
+// preserved (the caller, brain.ComputeCalibration, already sorts it
+// alphabetically by technique).
+func techniqueCalibrationViews(in []brain.TechniqueCalibration) []*worldpb.TechniqueCalibrationView {
+	out := make([]*worldpb.TechniqueCalibrationView, 0, len(in))
+	for _, tc := range in {
+		out = append(out, techniqueCalibrationView(tc))
+	}
+	return out
+}
+
+// int32Count converts a non-negative count to int32, saturating at
+// math.MaxInt32. Calibration counts never realistically reach 2^31, so
+// saturation is a safe, honest bound and satisfies gosec G115 without an
+// unchecked conversion.
+func int32Count(n int) int32 {
+	if n < 0 {
+		return 0
+	}
+	if n > math.MaxInt32 {
+		return math.MaxInt32
+	}
+	return int32(n)
 }

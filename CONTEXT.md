@@ -131,8 +131,10 @@ _Avoid_: attributes, properties, metadata
 **Taxonomy**:
 The **global**, platform-versioned allow-list of node labels and relationship types the
 Knowledge graph may materialise — the same for every tenant. `Sensing` promotes a recurring
-`Observation` shape into the Taxonomy; promotion is a reviewed code change, not something a
-tenant or an agent can do at runtime. A shape outside the Taxonomy is never rejected — it
+`Observation` shape into the Taxonomy. Since [ADR-0024](docs/adr/0024-discoverable-taxonomy-and-ontology.md)
+promotion happens **at runtime through a safety-gated settlement** — a proposed label must pass
+`ValidIdentifier` and settle (recurrence plus HITL) before it reaches query structure — and is
+no longer a reviewed code change. A shape outside the Taxonomy is never rejected — it
 lands as an `Observation` instead — so an agent can always write and can never invent
 schema. Labels reach Neo4j as **parameters** (`apoc.merge.node`), never as query text, so an
 out-of-taxonomy label is at worst a bad name and never a query.
@@ -287,6 +289,93 @@ inference only on evidence change — no Go/Python hot path). Sources: a **comme
 **base model** (vendor red-team + public CVE/ATT&CK only — never tenant data) + per-tenant
 refinement. Labels never leave the tenant; **within** a tenant they pool across all its users.
 _Avoid_: LLM scoring, online learning (breaks replay), sampling/approximate inference
+
+### Hypotheses, bets and Domain Packs (decided 2026-09-27, ADR-0021 – ADR-0025)
+
+**Hypothesis**:
+A proposed, unproven claim an agent writes to the graph — its own reasoning, not a sighting.
+Attributed to the proposing agent and carries a confidence. It stays unverified until it
+settles. Modeled as a `HypothesisObservation`, so the agent write surface stays emit-only
+([ADR-0021](docs/adr/0021-agents-emit-hypotheses.md)).
+_Avoid_: finding (a settled result), guess, belief (the system computes that, agents do not assert it)
+
+**Bet**:
+An agent's calibrated stake on a Hypothesis. Being wrong costs standing. A stake that settles,
+not a bare confidence number ([ADR-0022](docs/adr/0022-betting-prediction-market.md)).
+_Avoid_: score, confidence (a Bet is staked and settled)
+
+**Settlement**:
+How a Bet resolves: demonstrated proof in a sandbox (TRUE), a bounded attempt budget exhausted
+(FALSE), or a human verdict for a judgment call. Never an LLM judge. The human verdict is
+asynchronous labeling, never a runtime approval gate
+([ADR-0023](docs/adr/0023-bet-settlement.md), consistent with [ADR-0008](docs/adr/0008-autonomous-execution-no-hitl.md)).
+_Avoid_: LLM-as-judge, approval gate
+
+**Reputation**:
+The durable track record of a *technique × environment*, never of an agent (members are
+interchangeable). Persists per tenant. Feeds the prior strength on new Hypotheses of that
+technique and the priority of pursuing them ([ADR-0022](docs/adr/0022-betting-prediction-market.md)).
+_Avoid_: agent reputation, per-run score
+
+**Domain Pack**:
+The discovered Taxonomy and ontology for one vertical or target type (k8s, web, a LAN, defense,
+healthcare). Accumulates from usage, seeded minimally, portable. The unit sold per vertical. It
+carries structure, never a tenant's secrets
+([ADR-0024](docs/adr/0024-discoverable-taxonomy-and-ontology.md), [ADR-0025](docs/adr/0025-domain-packs.md)).
+_Avoid_: template, ruleset
+
+### Belief substrate (decided 2026-09-27, ADR-0029, amends ADR-0005)
+
+**Belief substrate (PRM)**:
+The one relational probabilistic model over the graph. Any node type — asset, finding,
+technique, mission — declares its belief variables and dependencies in the ontology/Pack.
+`{reachable, exploitable, juicy}` on assets is seed content, not structure. The Bet market
+and Reputation are **views** of it: belief on a claim-node (`P(claim valid)`) and belief on
+a technique × environment node (`P(technique works here)`)
+([ADR-0029](docs/adr/0029-belief-is-a-relational-prm-over-the-graph.md)).
+_Avoid_: belief field (the older per-host framing), separate reputation store, per-host net
+
+**Bayesian attack graph**:
+The directed-acyclic graph belief propagates over, derived from the infra graph because
+enablement is directional. Belief on a node is computed by **exact inference on a bounded,
+deterministically-extracted acyclic slice** toward that node — the bound is in the slice's
+scope, never in the inference (ADR-0029, keeps ADR-0005's "exact only").
+_Avoid_: infra graph (the raw, cyclic one), loopy propagation (rejected)
+
+### Planning and proof (decided 2026-09-27, ADR-0026 – ADR-0028)
+
+**Value-of-Information (VoI)**:
+How the fleet chooses what to do next: it plans several steps ahead over the belief field
+and pursues the move that most reduces uncertainty about the goal, net of cost. It narrows
+the options to the highest-value few; the LLM picks within them. Not a new model — it queries
+the belief network with hypothetical outcomes. The planner is BAMCP (fully Bayesian)
+([ADR-0026](docs/adr/0026-bayesian-sequential-planner.md)).
+_Avoid_: prioritization score (VoI is forward-looking planning, not a static score)
+
+**Proof-of-demonstration**:
+The evidence that settles a Bet TRUE: the fleet demonstrated the claim and a typed success
+predicate fired against the captured evidence. Never an LLM opinion
+([ADR-0027](docs/adr/0027-proof-of-demonstration.md)).
+_Avoid_: proof (unqualified), report
+
+**Success predicate**:
+A machine-checkable condition, typed and drawn from the technique (not free-form), that
+defines what would prove a Hypothesis. A Bet settles TRUE iff its predicate evaluates true
+against captured evidence ([ADR-0027](docs/adr/0027-proof-of-demonstration.md)).
+_Avoid_: assertion, check
+
+**Proof-of-control**:
+A demonstration that proves a capability exists without causing harm — a benign marker that
+the fleet could reach, read, or act, never destruction or real-data exfiltration. The
+default, non-gated proof ([ADR-0027](docs/adr/0027-proof-of-demonstration.md)).
+_Avoid_: proof-of-damage (that is the gated, destructive case)
+
+**Destructive-proof authorization**:
+A per-action human approval, in the dashboard, before an irreversible or state-changing
+demonstration runs. The fleet keeps working while that one action waits
+([ADR-0028](docs/adr/0028-destructive-proof-authorization-gate.md), amends
+[ADR-0008](docs/adr/0008-autonomous-execution-no-hitl.md)).
+_Avoid_: approval gate (unqualified — the gate is per-action, not per-mission)
 
 **Runtime engine (clock-tick game loop)**:
 The brain runs as a fixed **~50 ms clock tick** (≈ one gRPC round-trip — the fastest an

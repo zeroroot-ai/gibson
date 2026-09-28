@@ -47,6 +47,7 @@ import (
 	discoverysvc "github.com/zeroroot-ai/gibson/internal/server/api/discovery"
 	"github.com/zeroroot-ai/gibson/internal/server/daemon/api"
 	agentconsolepb "github.com/zeroroot-ai/gibson/internal/server/daemon/api/gibson/daemon/agentconsole/v1"
+	destructiveauthzv1 "github.com/zeroroot-ai/gibson/internal/server/daemon/api/gibson/daemon/destructiveauthz/v1"
 	discoverypb "github.com/zeroroot-ai/gibson/internal/server/daemon/api/gibson/daemon/discovery/v1"
 	logspb "github.com/zeroroot-ai/gibson/internal/server/daemon/api/gibson/daemon/logs/v1"
 	daemonoperatorv1 "github.com/zeroroot-ai/gibson/internal/server/daemon/api/gibson/daemon/operator/v1"
@@ -1612,13 +1613,26 @@ func (d *daemonImpl) buildGRPCServer(ctx context.Context) (*grpcSubsystem, error
 		if d.beliefProvider == nil {
 			d.beliefProvider = resolveBeliefProvider()
 		}
+		sliceBeliefProvider := resolveSliceBeliefProvider()
+		beliefSchemaRegistry, err := newBeliefSchemaRegistry()
+		if err != nil {
+			return nil, fmt.Errorf("failed to build belief schema registry: %w", err)
+		}
 		d.brainRegistry = brain.NewRegistry(ctx, brain.BeliefSystem)
-		d.brainRegistry.OnEngine(func(e *brain.Engine) {
-			brain.WireBelief(ctx, e, d.beliefProvider, 0)
-		})
+		wireBrainRegistry(ctx, d.brainRegistry, d.beliefProvider, sliceBeliefProvider, beliefSchemaRegistry)
 	}
 	worldpb.RegisterWorldServiceServer(srv, NewWorldServer(d.brainRegistry, d.logger.WithComponent("world-service").Slog()))
 	d.logger.Info(ctx, "registered WorldService gRPC endpoint")
+
+	// Register gibson.daemon.destructiveauthz.v1.DestructiveAuthorizationService
+	// — the daemon API backing the dashboard's destructive-action authorization
+	// queue (dashboard#99, gibson#336, ADR-0028). Tenant-admin-gated (see the
+	// .proto's authz options), unlike WorldService/LogsService above.
+	destructiveauthzv1.RegisterDestructiveAuthorizationServiceServer(
+		srv,
+		NewDestructiveAuthorizationServer(d.brainRegistry, d.logger.WithComponent("destructive-authz-service").Slog()),
+	)
+	d.logger.Info(ctx, "registered DestructiveAuthorizationService gRPC endpoint")
 
 	// Register gibson.daemon.logs.v1.LogsService — the daemon-mediated read path
 	// into tenant-scoped mission/daemon logs stored in Loki (E9, gibson#811). The

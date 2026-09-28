@@ -381,6 +381,24 @@ entries:
     allowed_identities:
       - USER
       - SERVICE
+  "/gibson.daemon.destructiveauthz.v1.DestructiveAuthorizationService/ApproveDestructiveAction":
+    relation: "admin"
+    object_type: "tenant"
+    object_deriver: "tenant_from_identity"
+    allowed_identities:
+      - USER
+  "/gibson.daemon.destructiveauthz.v1.DestructiveAuthorizationService/DenyDestructiveAction":
+    relation: "admin"
+    object_type: "tenant"
+    object_deriver: "tenant_from_identity"
+    allowed_identities:
+      - USER
+  "/gibson.daemon.destructiveauthz.v1.DestructiveAuthorizationService/ListPendingDestructiveActions":
+    relation: "admin"
+    object_type: "tenant"
+    object_deriver: "tenant_from_identity"
+    allowed_identities:
+      - USER
   "/gibson.daemon.discovery.v1.DiscoveryService/DescribeAgent":
     relation: "member"
     object_type: "tenant"
@@ -1125,6 +1143,12 @@ entries:
     allowed_identities:
       - COMPONENT
   "/gibson.harness.v1.HarnessCallbackService/OpenJob":
+    relation: "can_use"
+    object_type: "component"
+    object_deriver: "system_tenant"
+    allowed_identities:
+      - COMPONENT
+  "/gibson.harness.v1.HarnessCallbackService/PlaceBet":
     relation: "can_use"
     object_type: "component"
     object_deriver: "system_tenant"
@@ -2293,6 +2317,13 @@ entries:
     allowed_identities:
       - USER
       - SERVICE
+  "/gibson.world.v1.WorldService/GetCalibration":
+    relation: "member"
+    object_type: "tenant"
+    object_deriver: "tenant_from_identity"
+    allowed_identities:
+      - USER
+      - SERVICE
   "/gibson.world.v1.WorldService/GetFrameAt":
     relation: "member"
     object_type: "tenant"
@@ -2301,6 +2332,13 @@ entries:
       - USER
       - SERVICE
   "/gibson.world.v1.WorldService/GetLlmCall":
+    relation: "member"
+    object_type: "tenant"
+    object_deriver: "tenant_from_identity"
+    allowed_identities:
+      - USER
+      - SERVICE
+  "/gibson.world.v1.WorldService/GetReputation":
     relation: "member"
     object_type: "tenant"
     object_deriver: "tenant_from_identity"
@@ -2349,8 +2387,22 @@ entries:
     allowed_identities:
       - USER
       - SERVICE
+  "/gibson.world.v1.WorldService/ListOpenBets":
+    relation: "member"
+    object_type: "tenant"
+    object_deriver: "tenant_from_identity"
+    allowed_identities:
+      - USER
+      - SERVICE
   "/gibson.world.v1.WorldService/ListReviewQueue":
     relation: "member"
+    object_type: "tenant"
+    object_deriver: "tenant_from_identity"
+    allowed_identities:
+      - USER
+      - SERVICE
+  "/gibson.world.v1.WorldService/SettleBetByHITL":
+    relation: "writer"
     object_type: "tenant"
     object_deriver: "tenant_from_identity"
     allowed_identities:

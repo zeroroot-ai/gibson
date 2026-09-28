@@ -60,6 +60,9 @@ rpc,relation,object_type,deriver,identities,source_proto_file,mode
 /gibson.component.v1.ComponentService/WatchComponentEvents,can_poll_work,component,system_tenant,COMPONENT,gibson/component/v1/component.proto,rule
 /gibson.daemon.agentconsole.v1.AgentConsoleService/ListRunningAgents,member,tenant,tenant_from_identity,USER|SERVICE,gibson/daemon/agentconsole/v1/agentconsole.proto,rule
 /gibson.daemon.agentconsole.v1.AgentConsoleService/StreamAgentEvents,member,tenant,tenant_from_identity,USER|SERVICE,gibson/daemon/agentconsole/v1/agentconsole.proto,rule
+/gibson.daemon.destructiveauthz.v1.DestructiveAuthorizationService/ApproveDestructiveAction,admin,tenant,tenant_from_identity,USER,gibson/daemon/destructiveauthz/v1/destructive_authz.proto,rule
+/gibson.daemon.destructiveauthz.v1.DestructiveAuthorizationService/DenyDestructiveAction,admin,tenant,tenant_from_identity,USER,gibson/daemon/destructiveauthz/v1/destructive_authz.proto,rule
+/gibson.daemon.destructiveauthz.v1.DestructiveAuthorizationService/ListPendingDestructiveActions,admin,tenant,tenant_from_identity,USER,gibson/daemon/destructiveauthz/v1/destructive_authz.proto,rule
 /gibson.daemon.discovery.v1.DiscoveryService/DescribeAgent,member,tenant,tenant_from_identity,USER|SERVICE|COMPONENT,gibson/daemon/discovery/v1/discovery.proto,rule
 /gibson.daemon.discovery.v1.DiscoveryService/DescribePlugin,member,tenant,tenant_from_identity,USER|SERVICE|COMPONENT,gibson/daemon/discovery/v1/discovery.proto,rule
 /gibson.daemon.discovery.v1.DiscoveryService/DescribeTool,member,tenant,tenant_from_identity,USER|SERVICE|COMPONENT,gibson/daemon/discovery/v1/discovery.proto,rule
@@ -173,6 +176,7 @@ rpc,relation,object_type,deriver,identities,source_proto_file,mode
 /gibson.harness.v1.HarnessCallbackService/ListTools,can_use,component,system_tenant,COMPONENT,gibson/harness/v1/harness_callback.proto,rule
 /gibson.harness.v1.HarnessCallbackService/Observe,can_use,component,system_tenant,COMPONENT,gibson/harness/v1/harness_callback.proto,rule
 /gibson.harness.v1.HarnessCallbackService/OpenJob,can_use,component,system_tenant,COMPONENT,gibson/harness/v1/harness_callback.proto,rule
+/gibson.harness.v1.HarnessCallbackService/PlaceBet,can_use,component,system_tenant,COMPONENT,gibson/harness/v1/harness_callback.proto,rule
 /gibson.harness.v1.HarnessCallbackService/PullJob,can_use,component,system_tenant,COMPONENT,gibson/harness/v1/harness_callback.proto,rule
 /gibson.harness.v1.HarnessCallbackService/PutSessionContext,can_use,component,system_tenant,COMPONENT,gibson/harness/v1/harness_callback.proto,rule
 /gibson.harness.v1.HarnessCallbackService/QueryNodes,can_use,component,system_tenant,COMPONENT,gibson/harness/v1/harness_callback.proto,rule
@@ -360,13 +364,17 @@ rpc,relation,object_type,deriver,identities,source_proto_file,mode
 /gibson.user.v1.UserService/StageAttachment,member,tenant,tenant_from_identity,USER|SERVICE,gibson/user/v1/user.proto,rule
 /gibson.user.v1.UserService/UpdateUserOnboardingState,member,tenant,tenant_from_identity,USER|SERVICE,gibson/user/v1/user.proto,rule
 /gibson.user.v1.UserService/UpdateUserProfile,member,tenant,tenant_from_identity,USER|SERVICE,gibson/user/v1/user.proto,rule
+/gibson.world.v1.WorldService/GetCalibration,member,tenant,tenant_from_identity,USER|SERVICE,gibson/world/v1/world.proto,rule
 /gibson.world.v1.WorldService/GetFrameAt,member,tenant,tenant_from_identity,USER|SERVICE,gibson/world/v1/world.proto,rule
 /gibson.world.v1.WorldService/GetLlmCall,member,tenant,tenant_from_identity,USER|SERVICE,gibson/world/v1/world.proto,rule
+/gibson.world.v1.WorldService/GetReputation,member,tenant,tenant_from_identity,USER|SERVICE,gibson/world/v1/world.proto,rule
 /gibson.world.v1.WorldService/GetTimeline,member,tenant,tenant_from_identity,USER|SERVICE,gibson/world/v1/world.proto,rule
 /gibson.world.v1.WorldService/ListFindings,member,tenant,tenant_from_identity,USER|SERVICE,gibson/world/v1/world.proto,rule
 /gibson.world.v1.WorldService/ListHosts,member,tenant,tenant_from_identity,USER|SERVICE,gibson/world/v1/world.proto,rule
 /gibson.world.v1.WorldService/ListLabels,member,tenant,tenant_from_identity,USER|SERVICE,gibson/world/v1/world.proto,rule
 /gibson.world.v1.WorldService/ListLlmCalls,member,tenant,tenant_from_identity,USER|SERVICE,gibson/world/v1/world.proto,rule
 /gibson.world.v1.WorldService/ListMissions,member,tenant,tenant_from_identity,USER|SERVICE,gibson/world/v1/world.proto,rule
+/gibson.world.v1.WorldService/ListOpenBets,member,tenant,tenant_from_identity,USER|SERVICE,gibson/world/v1/world.proto,rule
 /gibson.world.v1.WorldService/ListReviewQueue,member,tenant,tenant_from_identity,USER|SERVICE,gibson/world/v1/world.proto,rule
+/gibson.world.v1.WorldService/SettleBetByHITL,writer,tenant,tenant_from_identity,USER|SERVICE,gibson/world/v1/world.proto,rule
 /gibson.world.v1.WorldService/SubmitLabel,member,tenant,tenant_from_identity,USER|SERVICE,gibson/world/v1/world.proto,rule

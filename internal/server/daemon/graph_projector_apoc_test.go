@@ -116,7 +116,9 @@ func TestHostMergeSemanticsAreUnchanged(t *testing.T) {
 	h := brain.HostSnapshot{
 		ID: 42, ScopeID: "scope-1", Address: "10.0.0.7",
 		SSHHostKey: "key", CloudID: "i-123",
-		Belief: brain.Belief{Juicy: 0.5}, Attention: 0.25, Surprise: "new port",
+		Belief:         brain.Belief{Juicy: 0.5, Exploitable: 0.4, Reachable: 1, Model: "belief-v1"},
+		EvidenceDigest: "deadbeef",
+		Attention:      0.25, Surprise: "new port",
 	}
 	props, ok := hostUpsertParams(h)["host"].(map[string]any)
 	if !ok {
@@ -124,7 +126,7 @@ func TestHostMergeSemanticsAreUnchanged(t *testing.T) {
 	}
 	for key, want := range map[string]any{
 		"scope": "scope-1", "address": "10.0.0.7", "ssh_host_key": "key",
-		"cloud_id": "i-123", "belief_juicy": 0.5, "attention": 0.25, "surprise": "new port",
+		"cloud_id": "i-123", "attention": 0.25, "surprise": "new port",
 	} {
 		if props[key] != want {
 			t.Errorf("host property %q = %v, want %v", key, props[key], want)
@@ -135,6 +137,36 @@ func TestHostMergeSemanticsAreUnchanged(t *testing.T) {
 	}
 }
 
+// TestHostBeliefIsProjectedInFull is gibson#272: belief is a first-class
+// property on the graph node, not a single side-car score. Every field the
+// engine records for a host's Belief — and the evidence digest that gates its
+// recompute (ADR-0005 §8) — must reach the projected node, not just Juicy.
+func TestHostBeliefIsProjectedInFull(t *testing.T) {
+	t.Parallel()
+
+	h := brain.HostSnapshot{
+		ID:             1,
+		Belief:         brain.Belief{Juicy: 0.75, Exploitable: 0.6, Reachable: 1, Model: "belief-v1"},
+		EvidenceDigest: "deadbeef",
+	}
+	props, ok := hostUpsertParams(h)["host"].(map[string]any)
+	if !ok {
+		t.Fatalf("params[host] = %T, want map[string]any", hostUpsertParams(h)["host"])
+	}
+	for key, want := range map[string]any{
+		"belief_juicy":           0.75,
+		"belief_exploitable":     0.6,
+		"belief_reachable":       1.0,
+		"belief_model":           "belief-v1",
+		"belief_evidence_digest": "deadbeef",
+	} {
+		if props[key] != want {
+			t.Errorf("host property %q = %v (%T), want %v (%T) — belief is a side-car "+
+				"score again if this is missing", key, props[key], props[key], want, want)
+		}
+	}
+}
+
 // TestHostQueryDoesNotVaryWithTheHost is the negative of the above: no part of
 // a host snapshot may reach the query text. It fails the moment any field is
 // formatted into the Cypher rather than passed as a parameter.
@@ -142,16 +174,19 @@ func TestHostQueryDoesNotVaryWithTheHost(t *testing.T) {
 	t.Parallel()
 
 	adversarial := brain.HostSnapshot{
-		ID:         7,
-		ScopeID:    "scope`) DETACH DELETE (n",
-		Address:    "'; MATCH (n) DETACH DELETE n //",
-		SSHHostKey: "`",
-		CloudID:    "$smuggled_parameter",
-		Surprise:   "MATCH (n) DETACH DELETE n",
+		ID:             7,
+		ScopeID:        "scope`) DETACH DELETE (n",
+		Address:        "'; MATCH (n) DETACH DELETE n //",
+		SSHHostKey:     "`",
+		CloudID:        "$smuggled_parameter",
+		Surprise:       "MATCH (n) DETACH DELETE n",
+		Belief:         brain.Belief{Model: "model`) DETACH DELETE (n) //"},
+		EvidenceDigest: "digest`) DETACH DELETE (n) //",
 	}
 	for _, fragment := range []string{
 		adversarial.ScopeID, adversarial.Address, adversarial.SSHHostKey,
-		adversarial.CloudID, adversarial.Surprise, "DETACH DELETE",
+		adversarial.CloudID, adversarial.Surprise, adversarial.Belief.Model,
+		adversarial.EvidenceDigest, "DETACH DELETE",
 	} {
 		if strings.Contains(upsertHostCypher, fragment) {
 			t.Errorf("host-derived text %q appears in the query; the write path assembles Cypher from input", fragment)

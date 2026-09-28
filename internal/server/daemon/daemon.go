@@ -1009,6 +1009,12 @@ func (d *daemonImpl) Start(ctx context.Context) error {
 	// for the daemon's lifetime; the orchestrator event-bus adapter feeds each
 	// tenant's World from its live mission event stream (ADR-0001 capture path).
 	d.beliefProvider = resolveBeliefProvider()
+	sliceBeliefProvider := resolveSliceBeliefProvider()
+	beliefSchemaRegistry, err := newBeliefSchemaRegistry()
+	if err != nil {
+		d.stopServices(ctx)
+		return fmt.Errorf("failed to build belief schema registry: %w", err)
+	}
 	d.brainRegistry = brain.NewRegistry(ctx, append(
 		[]brain.System{brain.BeliefSystem},
 		brain.ExecutorSystems()..., // scheduler/condition/decider-gate/budget/retry/completion (gibson#851)
@@ -1016,11 +1022,16 @@ func (d *daemonImpl) Start(ctx context.Context) error {
 	// Belief inference is an HTTP call to the pgmpy sidecar, so it runs off the
 	// tick: BeliefSystem asks for a score when a host's evidence changes, and the
 	// worker WireBelief installs answers with a BeliefScored event (gibson#25).
-	// Registered here because engines fault in lazily on the first event.
-	d.brainRegistry.OnEngine(func(e *brain.Engine) {
-		brain.WireBelief(ctx, e, d.beliefProvider, 0)
-	})
-	d.logger.Info(ctx, "ECS brain registry initialized", "belief_model", d.beliefProvider.Version())
+	// wireBrainRegistry ALSO installs WireSliceBelief (gibson#275, ADR-0029), the
+	// graph-coupled pipeline, the same way, off its own ticker: it derives the
+	// current attack graph from the engine's live hosts (gibson#286), extracts
+	// each host's bounded slice (gibson#287), and refines/propagates belief
+	// through the SAME BeliefScored write path — so the two pipelines share one
+	// Host.Belief and never race. Registered here because engines fault in
+	// lazily on the first event.
+	wireBrainRegistry(ctx, d.brainRegistry, d.beliefProvider, sliceBeliefProvider, beliefSchemaRegistry)
+	d.logger.Info(ctx, "ECS brain registry initialized", "belief_model", d.beliefProvider.Version(),
+		"slice_belief_model", sliceBeliefProvider.Version())
 
 	// Project each tenant's World into its Neo4j knowledge graph (ADR-0007): the
 	// graph is a read-model of the World, written only by this projector. Runs
@@ -1471,22 +1482,29 @@ func (d *daemonImpl) Start(ctx context.Context) error {
 		// on the callback request; we map it onto the daemon's api record.
 		llmSink := ingestLLMCall(d.brainRegistry)
 		d.callback.SetLLMCallSink(func(ctx context.Context, tenant string, call harness.LLMCallRecord) {
-			msgs := make([]api.LLMMessage, 0, len(call.Messages))
-			for _, m := range call.Messages {
-				msgs = append(msgs, api.LLMMessage{Role: m.Role, Content: m.Content})
-			}
-			llmSink(ctx, tenant, api.LLMCallRecord{
-				CallID:           call.CallID,
-				MissionID:        call.MissionID,
-				RunID:            call.RunID,
-				Model:            call.Model,
-				PromptTokens:     call.PromptTokens,
-				CompletionTokens: call.CompletionTokens,
-				Messages:         msgs,
-				Completion:       call.Completion,
-			})
+			llmSink(ctx, tenant, harnessLLMCallToAPI(call))
 		})
 		d.logger.Info(ctx, "wired callback LLM completion RPCs to the ECS brain World")
+
+		// Wire CallToolProto to the per-tenant World's AgentToolCall capture —
+		// the flight recorder's tool-I/O half (ADR-0020, gibson#271). Before
+		// this, a fleet agent's tool calls reached the daemon only as bare
+		// tool.call.* pub/sub metadata with no argument/result text, so they
+		// never became part of the Timeline.
+		d.callback.SetToolCallSink(ingestToolCall(d.brainRegistry))
+		d.logger.Info(ctx, "wired callback CallToolProto to the ECS brain World")
+
+		// Wire PlaceBet's belief substrate (ADR-0022, ADR-0029 §3,
+		// gibson#273/#278): before this, PlaceBet always answered Unavailable
+		// — no daemon ever gave it a substrate to persist a staked bet to.
+		// tenantRoutedBeliefSubstrate resolves each call's tenant from ctx
+		// (getHarness already required and validated it against the mission)
+		// and routes to that tenant's own WorldBeliefSubstrate, since this one
+		// substrate value is shared across every tenant's PlaceBet calls. See
+		// wirePlaceBetBeliefSubstrate (belief_substrate_adapter.go) for why
+		// this one step is its own function.
+		wirePlaceBetBeliefSubstrate(d.callback, d.brainRegistry)
+		d.logger.Info(ctx, "wired callback PlaceBet RPC to the ECS brain belief substrate")
 	}
 
 	// Wire the DiscoveryResult ingest path (gibson#1266). A callback-dispatched

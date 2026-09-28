@@ -27,6 +27,38 @@ type worldSnapshotData struct {
 	Decisions    []DecisionSnapshot    `json:"decisions"`
 	Observations []ObservationSnapshot `json:"observations"`
 	Entities     []EntitySnapshot      `json:"entities"`
+	// Hypotheses is the Hypothesis provenance class (ADR-0021, gibson#265):
+	// an agent's proposed, unproven claim. Snapshotted separately from every
+	// Evidence store and from Belief — the three provenance classes stay
+	// distinct across a snapshot round trip too.
+	Hypotheses []HypothesisSnapshot `json:"hypotheses"`
+	// BetSettlements is the proof-of-demonstration outcome store (ADR-0027,
+	// gibson#278). Snapshotted like AgentRuns — an externally-keyed record
+	// with no monotonic id counter of its own.
+	BetSettlements []BetSettlementSnapshot `json:"bet_settlements"`
+	// NodeBeliefs backs BeliefSubstrate for every non-Host node kind
+	// (NodeKindClaim, NodeKindTechniqueEnvironment — ADR-0029 §3, gibson#272's
+	// substrate seam). Externally-keyed by NodeRef, like BetSettlements — no
+	// monotonic id counter of its own.
+	NodeBeliefs []NodeBeliefSnapshot `json:"node_beliefs"`
+	// DestructiveActions is the destructive-proof authorization queue
+	// (ADR-0028, gibson#336), pending and decided alike. Snapshotted like
+	// BetSettlements — an externally-keyed record with no monotonic id
+	// counter of its own.
+	DestructiveActions []DestructiveActionSnapshot `json:"destructive_actions"`
+	// VoIPlans is the per-mission VoI planning state (ADR-0026, gibson#283),
+	// pending and completed alike. Snapshotted like BetSettlements — an
+	// externally-keyed (MissionID) record with no monotonic id counter of
+	// its own. Missing this field silently dropped in-flight VoI planning
+	// state across a snapshot-and-trim cycle (gibson#341).
+	VoIPlans []VoIPlanSnapshot `json:"voi_plans"`
+	// AgentToolCalls + FlightRecorderPolicy: the flight recorder's captured
+	// tool I/O and the tenant's retention/redaction policy (ADR-0020,
+	// gibson#271). The policy must be snapshotted too, or a tenant's
+	// opt-in redaction/retention setting would silently reset to the
+	// capture-everything default across a snapshot+trim cycle.
+	AgentToolCalls       []AgentToolCallSnapshot `json:"agent_tool_calls"`
+	FlightRecorderPolicy FlightRecorderPolicy    `json:"flight_recorder_policy"`
 
 	// Monotonic ID counters (replay-deterministic; must be restored exactly).
 	NextHostID        uint64 `json:"next_host_id"`
@@ -36,26 +68,35 @@ type worldSnapshotData struct {
 	NextAccountID     uint64 `json:"next_account_id"`
 	NextObservationID uint64 `json:"next_observation_id"`
 	NextEntityID      uint64 `json:"next_entity_id"`
+	NextHypothesisID  uint64 `json:"next_hypothesis_id"`
 }
 
 // SnapshotWorld serializes the current World into a WorldSnapshot at atSeq.
 // atSeq is the Timeline sequence ID of the last event folded into the snapshot.
 func SnapshotWorld(w *World, atSeq string) WorldSnapshot {
 	data := worldSnapshotData{
-		Hosts:        w.Snapshot(),
-		Missions:     w.MissionSnapshot(),
-		Work:         w.WorkSnapshot(),
-		Findings:     w.FindingSnapshot(),
-		Labels:       w.LabelSnapshot(),
-		Domains:      w.DomainSnapshot(),
-		Subdomains:   w.SubdomainSnapshot(),
-		Credentials:  w.CredentialSnapshot(),
-		Accounts:     w.AccountSnapshot(),
-		AgentRuns:    w.AgentRunSnapshot(),
-		LlmCalls:     w.LlmCallSnapshot(),
-		Decisions:    w.DecisionSnapshot(),
-		Observations: w.ObservationSnapshot(),
-		Entities:     w.EntitySnapshot(),
+		Hosts:              w.Snapshot(),
+		Missions:           w.MissionSnapshot(),
+		Work:               w.WorkSnapshot(),
+		Findings:           w.FindingSnapshot(),
+		Labels:             w.LabelSnapshot(),
+		Domains:            w.DomainSnapshot(),
+		Subdomains:         w.SubdomainSnapshot(),
+		Credentials:        w.CredentialSnapshot(),
+		Accounts:           w.AccountSnapshot(),
+		AgentRuns:          w.AgentRunSnapshot(),
+		LlmCalls:           w.LlmCallSnapshot(),
+		Decisions:          w.DecisionSnapshot(),
+		Observations:       w.ObservationSnapshot(),
+		Entities:           w.EntitySnapshot(),
+		Hypotheses:         w.HypothesisSnapshot(),
+		BetSettlements:     w.BetSettlementSnapshot(),
+		NodeBeliefs:        w.NodeBeliefSnapshot(),
+		DestructiveActions: w.DestructiveActionSnapshot(),
+		VoIPlans:           w.VoIPlanSnapshot(),
+
+		AgentToolCalls:       w.AgentToolCallSnapshot(),
+		FlightRecorderPolicy: w.flightRecorderPolicy,
 
 		NextHostID:        w.nextHostID,
 		NextDomainID:      w.nextDomainID,
@@ -64,6 +105,7 @@ func SnapshotWorld(w *World, atSeq string) WorldSnapshot {
 		NextAccountID:     w.nextAccountID,
 		NextObservationID: w.nextObservationID,
 		NextEntityID:      w.nextEntityID,
+		NextHypothesisID:  w.nextHypothesisID,
 	}
 	b, _ := json.Marshal(data)
 	return WorldSnapshot{AtSeq: atSeq, Data: b}
@@ -79,6 +121,15 @@ func RestoreWorld(snap WorldSnapshot, tenant string) (*World, error) {
 	}
 
 	w := NewWorld(tenant)
+
+	// Restore the flight recorder's retention/redaction policy FIRST (gibson#271):
+	// it must be in force before any LlmCall/AgentToolCall replay below, exactly
+	// as it was live when the snapshot was taken (redaction is applied once, at
+	// fold time, so folding order matters for a faithful restore).
+	Reduce(w, FlightRecorderPolicySet{
+		Redact:        data.FlightRecorderPolicy.Redact,
+		RetentionDays: data.FlightRecorderPolicy.RetentionDays,
+	})
 
 	// Replay hosts — sorted by ID (creation order) to reproduce deterministic IDs.
 	sort.Slice(data.Hosts, func(i, j int) bool { return data.Hosts[i].ID < data.Hosts[j].ID })
@@ -219,18 +270,121 @@ func RestoreWorld(snap WorldSnapshot, tenant string) (*World, error) {
 		})
 	}
 
+	// Replay bet settlements (ADR-0027/0023, gibson#278/#279/#280). Order
+	// does not matter: identity is HypothesisID, not a world-assigned
+	// counter, so there is no id-renumbering hazard the way there is for
+	// observations/entities. Dispatch on the recorded Method, not Verdict:
+	// Method alone determines which event type reproduces the fact exactly
+	// (a HITL settlement can carry either verdict, so switching on Verdict
+	// alone could replay a HITL FALSE as a bounded-exhaustion FALSE with no
+	// budget/reason recorded).
+	for _, s := range data.BetSettlements {
+		switch s.Method {
+		case SettlementMethodPredicate:
+			Reduce(w, BetSettledTrue{
+				HypothesisID:         s.HypothesisID,
+				Technique:            s.Technique,
+				PredicateType:        s.PredicateType,
+				EvidenceDigest:       s.EvidenceDigest,
+				PredictedProbability: s.PredictedProbability,
+				BrierScore:           s.BrierScore,
+				ScopeID:              s.ScopeID,
+				MissionID:            s.MissionID,
+			})
+		case SettlementMethodExhaustion:
+			Reduce(w, BetSettledFalse{
+				HypothesisID:         s.HypothesisID,
+				AttemptBudget:        s.AttemptBudget,
+				AttemptsMade:         s.AttemptsMade,
+				Reason:               s.Reason,
+				PredictedProbability: s.PredictedProbability,
+				BrierScore:           s.BrierScore,
+				ScopeID:              s.ScopeID,
+				MissionID:            s.MissionID,
+			})
+		case SettlementMethodHITL:
+			Reduce(w, BetSettledByHITL{
+				HypothesisID:         s.HypothesisID,
+				Verdict:              s.Verdict,
+				UserID:               s.UserID,
+				PredictedProbability: s.PredictedProbability,
+				BrierScore:           s.BrierScore,
+				ScopeID:              s.ScopeID,
+				MissionID:            s.MissionID,
+			})
+		}
+	}
+
+	// Replay non-Host node beliefs (ADR-0029 §3, gibson#272's substrate
+	// seam). Order does not matter: identity is NodeRef, not a
+	// world-assigned counter, same as BetSettlements above.
+	for _, nb := range data.NodeBeliefs {
+		Reduce(w, NodeBeliefSet(nb))
+	}
+
+	// Replay destructive-proof authorization actions (ADR-0028, gibson#336):
+	// always replay the request first, then the decision if one landed —
+	// applyDestructiveActionDecided is a no-op without a matching request, so
+	// order here matters, unlike the order-independent BetSettlements loop
+	// above (whose identity is likewise HypothesisID, but which never has a
+	// second, dependent event to sequence after the first).
+	for _, a := range data.DestructiveActions {
+		Reduce(w, DestructiveActionRequested{
+			HypothesisID:      a.HypothesisID,
+			Tenant:            a.Tenant,
+			ScopeID:           a.ScopeID,
+			MissionID:         a.MissionID,
+			Technique:         a.Technique,
+			PredicateType:     a.PredicateType,
+			RequestedAtUnixMS: a.RequestedAtUnixMS,
+		})
+		if a.Decided {
+			Reduce(w, DestructiveActionDecided{
+				HypothesisID:    a.HypothesisID,
+				Approved:        a.Approved,
+				UserID:          a.UserID,
+				DecidedAtUnixMS: a.DecidedAtUnixMS,
+			})
+		}
+	}
+
+	// Replay VoI plan state (ADR-0026, gibson#283/#341): always replay the
+	// request first, then the completed round if one landed —
+	// applyVoIPlanned's defensive branch would otherwise create a second,
+	// duplicate entity when findVoIPlanState's lookup runs before the
+	// request has been replayed.
+	for _, p := range data.VoIPlans {
+		Reduce(w, VoIPlanRequested{MissionID: p.MissionID, Cursor: p.Cursor})
+		if !p.InFlight {
+			Reduce(w, VoIPlanned{
+				MissionID:  p.MissionID,
+				Cursor:     p.Cursor,
+				Candidates: p.Candidates,
+			})
+		}
+	}
+
 	// Replay LLM calls.
 	for _, c := range data.LlmCalls {
 		Reduce(w, LlmCallObserved{
-			CallID:           c.CallID,
-			RunID:            c.RunID,
-			Model:            c.Model,
-			ScopeID:          c.ScopeID,
-			PromptTokens:     c.PromptTokens,
-			CompletionTokens: c.CompletionTokens,
-			Messages:         append([]LlmMessage(nil), c.Messages...),
-			Completion:       c.Completion,
+			CallID:              c.CallID,
+			RunID:               c.RunID,
+			Model:               c.Model,
+			ScopeID:             c.ScopeID,
+			PromptTokens:        c.PromptTokens,
+			CompletionTokens:    c.CompletionTokens,
+			Messages:            append([]LlmMessage(nil), c.Messages...),
+			Completion:          c.Completion,
+			CompletionToolCalls: append([]LlmToolCall(nil), c.CompletionToolCalls...),
+			RecordedAtUnixNano:  c.RecordedAtUnixNano,
 		})
+	}
+
+	// Replay tool calls (ADR-0020, gibson#271). AgentToolCallSnapshot and
+	// AgentToolCallObserved share identical fields, so a direct conversion
+	// replaces the field-by-field literal.
+	for _, c := range data.AgentToolCalls {
+		Reduce(w, AgentToolCallObserved(c))
 	}
 
 	// Replay decisions in deterministic (ID) order.
@@ -286,6 +440,28 @@ func RestoreWorld(snap WorldSnapshot, tenant string) (*World, error) {
 		})
 	}
 	w.nextEntityID = data.NextEntityID
+
+	// Replay hypotheses in id order for the same reason as entities and
+	// observations: the world id rides along to the graph projection, so the
+	// order must not renumber it. HypothesisID (the agent-chosen join key,
+	// gibson#339) is a separate field and replays unaffected by this order.
+	sort.Slice(data.Hypotheses, func(i, j int) bool {
+		return data.Hypotheses[i].ID < data.Hypotheses[j].ID
+	})
+	for _, h := range data.Hypotheses {
+		Reduce(w, HypothesisObserved{
+			MissionID:    h.MissionID,
+			RunID:        h.RunID,
+			ScopeID:      h.ScopeID,
+			Proposer:     h.Proposer,
+			Confidence:   h.Confidence,
+			Claim:        h.Claim,
+			HypothesisID: h.HypothesisID,
+			Technique:    h.Technique,
+			References:   h.References,
+		})
+	}
+	w.nextHypothesisID = data.NextHypothesisID
 
 	return w, nil
 }

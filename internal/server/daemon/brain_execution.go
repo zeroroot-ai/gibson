@@ -25,7 +25,9 @@ import (
 	"log/slog"
 	"strings"
 	"sync"
+	"time"
 
+	"github.com/google/uuid"
 	"github.com/zeroroot-ai/gibson/internal/engine/agent"
 	"github.com/zeroroot-ai/gibson/internal/engine/brain"
 	gibsonharness "github.com/zeroroot-ai/gibson/internal/engine/harness"
@@ -189,6 +191,15 @@ func (b *brainExecutor) dispatchTool(bind *missionBinding, req brain.DispatchReq
 
 // Decide (brain.DeciderLLM) asks the mission's slot LLM for the next action over
 // the serialized own-mission World slice + capability catalog.
+//
+// The Decider's own reasoning turn is captured onto the mission's Timeline as
+// an LlmCallObserved (ADR-0020 flight recorder, gibson#271): before this fix,
+// the Decider called the harness in-process (CompleteStructuredAny), bypassing
+// the callback-RPC path captureLLMCall instruments, so the brain's own
+// decision-loop prompt + raw response never became part of the recorded
+// transcript — every OTHER fleet-agent LLM call did, but the Decider's did
+// not. bind.eng is the mission's own Engine, so capture Submits directly; no
+// sink indirection is needed here the way the callback RPCs need one.
 func (b *brainExecutor) Decide(ctx context.Context, mc brain.MissionContext) (brain.DeciderOutput, error) {
 	bind, ok := b.get(mc.MissionID)
 	if !ok {
@@ -199,11 +210,31 @@ func (b *brainExecutor) Decide(ctx context.Context, mc brain.MissionContext) (br
 		slot = deciderSlot
 	}
 	messages := buildDeciderPrompt(mc)
-	raw, err := bind.harness.CompleteStructuredAny(ctx, slot, messages, deciderDecision{})
+	structured, err := bind.harness.CompleteStructuredAnyWithUsage(ctx, slot, messages, deciderDecision{})
 	if err != nil {
 		return brain.DeciderOutput{}, fmt.Errorf("brain decide: llm: %w", err)
 	}
-	return parseDecision(raw), nil
+
+	if bind.eng != nil {
+		msgs := make([]brain.LlmMessage, 0, len(messages))
+		for _, m := range messages {
+			msgs = append(msgs, brain.LlmMessage{Role: string(m.Role), Content: m.Content})
+		}
+		bind.eng.Submit(brain.LlmCallObserved{
+			CallID:    uuid.NewString(),
+			MissionID: mc.MissionID,
+			// RunID is empty: the Decider is a mission-level call with no
+			// owning AgentRun (llm_call.go's documented convention).
+			Model:              structured.Model,
+			PromptTokens:       structured.PromptTokens,
+			CompletionTokens:   structured.CompletionTokens,
+			Messages:           msgs,
+			Completion:         structured.RawJSON,
+			RecordedAtUnixNano: time.Now().UnixNano(),
+		})
+	}
+
+	return parseDecision(structured.Result), nil
 }
 
 // catalog lists the mission tenant's enrolled components as brain capabilities.

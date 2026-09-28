@@ -162,3 +162,149 @@ func TestIngestObservation_CarriesMissionAttribution(t *testing.T) {
 		t.Fatalf("scope and mission must stay distinct concepts: %+v", hosts[0])
 	}
 }
+
+// observeHypothesis builds a hypothesis observation (sdk#70, ADR-0021). Note
+// what it cannot express: no tenant, no scope, no mission id — those reach
+// the sink only through ObservationAttribution, exactly like every other
+// observation kind.
+func observeHypothesis(proposer, claim string, confidence float64, refs ...*harnesspb.ReferencedEntity) *harnesspb.ObserveRequest {
+	return &harnesspb.ObserveRequest{
+		Observation: &harnesspb.ObserveRequest_Hypothesis{
+			Hypothesis: &harnesspb.HypothesisObservation{
+				Proposer:   proposer,
+				Confidence: confidence,
+				Claim:      claim,
+				References: refs,
+			},
+		},
+	}
+}
+
+// awaitHypotheses polls a tenant's World until it holds want hypotheses, then
+// returns them.
+func awaitHypotheses(t *testing.T, reg *brain.Registry, tenant string, want int) []brain.HypothesisSnapshot {
+	t.Helper()
+	deadline := time.Now().Add(2 * time.Second)
+	var got []brain.HypothesisSnapshot
+	for time.Now().Before(deadline) {
+		got = reg.For(tenant).Hypotheses()
+		if len(got) == want {
+			return got
+		}
+		time.Sleep(10 * time.Millisecond)
+	}
+	t.Fatalf("tenant %q: want %d hypotheses, got %d: %+v", tenant, want, len(got), got)
+	return nil
+}
+
+// TestIngestObservation_Hypothesis proves a HypothesisObservation (ADR-0021)
+// folds through the same Observe -> reducer path as every Evidence kind,
+// lands as a Hypothesis (never a Host, never a Belief), and carries its
+// references through the wire-to-brain translation.
+func TestIngestObservation_Hypothesis(t *testing.T) {
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+	reg := brain.NewRegistry(ctx)
+	sink := ingestObservation(reg)
+
+	req := observeHypothesis("recon-agent", "port 6443 is unauthenticated", 0.75,
+		&harnesspb.ReferencedEntity{Label: "Host", IdProperties: map[string]string{"address": "10.0.0.1"}},
+	)
+	if err := sink(ctx, harness.ObservationAttribution{
+		Tenant: "acme", ScopeID: "target-net-a", MissionID: "mission-A", RunID: "run-A",
+	}, req); err != nil {
+		t.Fatalf("sink: %v", err)
+	}
+
+	got := awaitHypotheses(t, reg, "acme", 1)
+	h := got[0]
+	if h.Claim != "port 6443 is unauthenticated" {
+		t.Fatalf("claim lost in translation: %+v", h)
+	}
+	if h.Proposer != "recon-agent" {
+		t.Fatalf("proposer lost in translation: %+v", h)
+	}
+	if h.Confidence != 0.75 {
+		t.Fatalf("confidence lost in translation: %+v", h)
+	}
+	if h.ScopeID != "target-net-a" || h.MissionID != "mission-A" {
+		t.Fatalf("attribution lost in translation: %+v", h)
+	}
+	// RunID is server-resolved off ObservationAttribution (gibson#339's
+	// transcript-linking need), the same way MissionID is.
+	if h.RunID != "run-A" {
+		t.Fatalf("run id lost in translation: %+v", h)
+	}
+	if len(h.References) != 1 || h.References[0].Label != "Host" || h.References[0].IDProperties["address"] != "10.0.0.1" {
+		t.Fatalf("references lost in translation: %+v", h)
+	}
+
+	// The Hypothesis provenance class never creates a Host, even though its
+	// claim is about one (ADR-0021: a Hypothesis never sets Belief, and it
+	// is folded entirely separately from Evidence).
+	if hosts := reg.For("acme").Hosts(); len(hosts) != 0 {
+		t.Fatalf("a hypothesis must never create a Host: %+v", hosts)
+	}
+}
+
+// TestIngestObservation_Hypothesis_HypothesisIDAndTechnique proves
+// HypothesisObservation.hypothesis_id and .technique (sdk#89/#88, wired now
+// that go.mod pins an SDK release that carries them) survive the
+// wire-to-brain translation into brain.Hypothesis — the join key gibson#339's
+// ListOpenBets needs, and the reputation-keying signal gibson#333/#284 need,
+// neither silently dropped.
+func TestIngestObservation_Hypothesis_HypothesisIDAndTechnique(t *testing.T) {
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+	reg := brain.NewRegistry(ctx)
+	sink := ingestObservation(reg)
+
+	req := &harnesspb.ObserveRequest{
+		Observation: &harnesspb.ObserveRequest_Hypothesis{
+			Hypothesis: &harnesspb.HypothesisObservation{
+				Proposer:     "recon-agent",
+				Confidence:   0.75,
+				Claim:        "port 6443 is unauthenticated",
+				HypothesisId: "hyp-6443",
+				Technique:    "unauthenticated-service-probe",
+			},
+		},
+	}
+	if err := sink(ctx, harness.ObservationAttribution{
+		Tenant: "acme", ScopeID: "target-net-a", MissionID: "mission-A", RunID: "run-A",
+	}, req); err != nil {
+		t.Fatalf("sink: %v", err)
+	}
+
+	got := awaitHypotheses(t, reg, "acme", 1)
+	h := got[0]
+	if h.HypothesisID != "hyp-6443" {
+		t.Fatalf("hypothesis id lost in translation: %+v", h)
+	}
+	if h.Technique != "unauthenticated-service-probe" {
+		t.Fatalf("technique lost in translation: %+v", h)
+	}
+}
+
+// TestIngestObservation_Hypothesis_SameClaimInDifferentTenantsStaysDistinct
+// proves tenant isolation holds for hypotheses the same way it does for
+// hosts: each tenant has its own World (ADR-0001), so an identical claim
+// proposed under two tenants is two hypotheses, one per World, never one
+// record leaking across the tenant boundary.
+func TestIngestObservation_Hypothesis_SameClaimInDifferentTenantsStaysDistinct(t *testing.T) {
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+	reg := brain.NewRegistry(ctx)
+	sink := ingestObservation(reg)
+
+	req := observeHypothesis("recon-agent", "shared claim text", 0.5)
+	if err := sink(ctx, harness.ObservationAttribution{Tenant: "acme", ScopeID: "s1", MissionID: "m1"}, req); err != nil {
+		t.Fatalf("sink acme: %v", err)
+	}
+	if err := sink(ctx, harness.ObservationAttribution{Tenant: "globex", ScopeID: "s1", MissionID: "m1"}, req); err != nil {
+		t.Fatalf("sink globex: %v", err)
+	}
+
+	awaitHypotheses(t, reg, "acme", 1)
+	awaitHypotheses(t, reg, "globex", 1)
+}

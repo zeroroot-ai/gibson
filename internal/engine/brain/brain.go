@@ -71,6 +71,13 @@ type World struct {
 	accounts    *ecs.Map1[Account]
 	agentRuns   *ecs.Map1[AgentRun]
 	llmCalls    *ecs.Map1[LlmCall]
+	// agentToolCalls holds the flight recorder's tool-I/O capture (ADR-0020,
+	// gibson#271) — the tool-call counterpart to llmCalls.
+	agentToolCalls *ecs.Map1[AgentToolCall]
+	// flightRecorderPolicy is the tenant's current retention/redaction policy
+	// (flight_recorder.go, gibson#271). Not ECS-backed: it is a per-tenant
+	// singleton, not a collection of entities.
+	flightRecorderPolicy FlightRecorderPolicy
 
 	// observations holds out-of-taxonomy shapes (ADR-0012). Keyed by Timeline
 	// event id rather than by content, so repeat sightings stay distinct.
@@ -79,6 +86,39 @@ type World struct {
 	// entities holds the typed application-lifecycle nodes (gibson#1656),
 	// keyed by (Taxonomy label, stable key). See entity.go.
 	entities *ecs.Map1[Entity]
+
+	// hypotheses holds the Hypothesis provenance class (ADR-0021, gibson#265):
+	// an agent's proposed, unproven claim, keyed by (ScopeID, Claim). See
+	// hypothesis.go. Distinct from both Evidence (hosts, domains, ...) and
+	// Belief (belief.go) — a Hypothesis is folded and stored separately from
+	// both, never derived from or into either.
+	hypotheses *ecs.Map1[Hypothesis]
+
+	// betSettlements holds proof-of-demonstration verdicts (ADR-0027,
+	// gibson#278), keyed by HypothesisID — the same externally-given-string
+	// identity AgentRun uses for RunID, never a derived counter. See
+	// bet_settlement.go.
+	betSettlements *ecs.Map1[BetSettlement]
+
+	// destructiveActions holds pending/decided destructive-proof
+	// authorization records (ADR-0028, gibson#336), keyed by HypothesisID —
+	// the same externally-given-string identity BetSettlement uses. See
+	// destructive_authz.go.
+	destructiveActions *ecs.Map1[DestructiveAction]
+
+	// voiPlans holds each mission's VoI planning state (gibson#283,
+	// ADR-0026): whether a plan is in flight, the evidence cursor it answers
+	// for, and the last completed plan's ranked, top-k candidates. See
+	// voi_planner.go. Standalone, like decisions — never a field on Mission.
+	voiPlans *ecs.Map1[VoIPlanState]
+
+	// nodeBeliefs backs BeliefSubstrate (belief_substrate.go, gibson#272) for
+	// every node kind that is not its own ECS entity — NodeKindClaim (the
+	// market view) and NodeKindTechniqueEnvironment (the reputation view),
+	// ADR-0029 §3. Host belief stays on the Host component itself
+	// (belief.go); this is the general-purpose store for every other kind.
+	// See node_belief.go.
+	nodeBeliefs *ecs.Map1[NodeBeliefRecord]
 
 	// next*ID are monotonic, replay-deterministic counters for assigning stable
 	// ids (incremented in the single-writer reducer, so replay reproduces ids).
@@ -91,6 +131,7 @@ type World struct {
 	nextAccountID     uint64
 	nextObservationID uint64
 	nextEntityID      uint64
+	nextHypothesisID  uint64
 }
 
 func (w *World) newCredentialID() uint64 {
@@ -113,6 +154,13 @@ func (w *World) newEntityID() uint64 {
 	return w.nextEntityID
 }
 
+// newHypothesisID returns the next stable hypothesis id (single-writer;
+// deterministic on replay).
+func (w *World) newHypothesisID() uint64 {
+	w.nextHypothesisID++
+	return w.nextHypothesisID
+}
+
 // newHostID returns the next stable host id (single-writer; deterministic on replay).
 func (w *World) newHostID() uint64 {
 	w.nextHostID++
@@ -133,23 +181,29 @@ func (w *World) newSubdomainID() uint64 {
 func NewWorld(tenant string) *World {
 	w := ecs.NewWorld()
 	return &World{
-		Tenant:       tenant,
-		ecs:          w,
-		hosts:        ecs.NewMap1[Host](w),
-		surprises:    ecs.NewMap1[Surprise](w),
-		work:         ecs.NewMap1[WorkItem](w),
-		decisions:    ecs.NewMap1[DecisionRecord](w),
-		missions:     ecs.NewMap1[Mission](w),
-		findings:     ecs.NewMap1[Finding](w),
-		labels:       ecs.NewMap1[Label](w),
-		domains:      ecs.NewMap1[Domain](w),
-		subdomains:   ecs.NewMap1[Subdomain](w),
-		credentials:  ecs.NewMap1[Credential](w),
-		accounts:     ecs.NewMap1[Account](w),
-		agentRuns:    ecs.NewMap1[AgentRun](w),
-		llmCalls:     ecs.NewMap1[LlmCall](w),
-		observations: ecs.NewMap1[Observation](w),
-		entities:     ecs.NewMap1[Entity](w),
+		Tenant:             tenant,
+		ecs:                w,
+		hosts:              ecs.NewMap1[Host](w),
+		surprises:          ecs.NewMap1[Surprise](w),
+		work:               ecs.NewMap1[WorkItem](w),
+		decisions:          ecs.NewMap1[DecisionRecord](w),
+		missions:           ecs.NewMap1[Mission](w),
+		findings:           ecs.NewMap1[Finding](w),
+		labels:             ecs.NewMap1[Label](w),
+		domains:            ecs.NewMap1[Domain](w),
+		subdomains:         ecs.NewMap1[Subdomain](w),
+		credentials:        ecs.NewMap1[Credential](w),
+		accounts:           ecs.NewMap1[Account](w),
+		agentRuns:          ecs.NewMap1[AgentRun](w),
+		llmCalls:           ecs.NewMap1[LlmCall](w),
+		agentToolCalls:     ecs.NewMap1[AgentToolCall](w),
+		observations:       ecs.NewMap1[Observation](w),
+		entities:           ecs.NewMap1[Entity](w),
+		hypotheses:         ecs.NewMap1[Hypothesis](w),
+		betSettlements:     ecs.NewMap1[BetSettlement](w),
+		destructiveActions: ecs.NewMap1[DestructiveAction](w),
+		voiPlans:           ecs.NewMap1[VoIPlanState](w),
+		nodeBeliefs:        ecs.NewMap1[NodeBeliefRecord](w),
 	}
 }
 
@@ -170,6 +224,14 @@ type HostSnapshot struct {
 	Belief       Belief  // attack-path belief (zero until a BeliefSystem scores it)
 	Attention    float64 // derived: belief.Juicy + surprise boost (ADR-0005/0006)
 	MissionID    string  // the mission that discovered this host (gibson#1075); empty if none
+	// EvidenceDigest fingerprints the evidence Belief was scored against
+	// (belief.go). Belief is a first-class property of the node (gibson#272), so
+	// the digest that gates its recompute travels with the node's snapshot
+	// rather than staying internal to the Host component: a consumer — the
+	// graph projection, a reviewer inspecting a frame — can then tell which
+	// evidence a recorded Belief answers for without re-deriving it. Empty
+	// until the first score request is made.
+	EvidenceDigest string
 }
 
 // Snapshot returns the current hosts in deterministic order — the materialized
@@ -222,20 +284,21 @@ func (w *World) Snapshot() []HostSnapshot {
 		}
 		sort.Ints(open)
 		out = append(out, HostSnapshot{
-			ID:           h.ID,
-			ScopeID:      h.ScopeID,
-			Address:      h.Address,
-			SSHHostKey:   h.SSHHostKey,
-			CloudID:      h.CloudID,
-			OpenPorts:    open,
-			Services:     svcs,
-			Endpoints:    eps,
-			Technologies: techs,
-			Certificates: certs,
-			Surprise:     surprised[q.Entity()],
-			Belief:       h.Belief,
-			Attention:    attentionScore(h.Belief.Juicy, surprised[q.Entity()] != ""),
-			MissionID:    h.MissionID,
+			ID:             h.ID,
+			ScopeID:        h.ScopeID,
+			Address:        h.Address,
+			SSHHostKey:     h.SSHHostKey,
+			CloudID:        h.CloudID,
+			OpenPorts:      open,
+			Services:       svcs,
+			Endpoints:      eps,
+			Technologies:   techs,
+			Certificates:   certs,
+			Surprise:       surprised[q.Entity()],
+			Belief:         h.Belief,
+			Attention:      attentionScore(h.Belief.Juicy, surprised[q.Entity()] != ""),
+			MissionID:      h.MissionID,
+			EvidenceDigest: h.EvidenceDigest,
 		})
 	}
 	sort.Slice(out, func(i, j int) bool {
@@ -326,8 +389,26 @@ func Reduce(w *World, ev Event) {
 		applyLabelApplied(w, e)
 	case AgentRunObserved:
 		applyAgentRunObserved(w, e)
+	case HypothesisObserved:
+		applyHypothesisObserved(w, e)
+	case BetSettledTrue:
+		applyBetSettledTrue(w, e)
+	case BetSettledFalse:
+		applyBetSettledFalse(w, e)
+	case BetSettledByHITL:
+		applyBetSettledByHITL(w, e)
+	case DestructiveActionRequested:
+		applyDestructiveActionRequested(w, e)
+	case DestructiveActionDecided:
+		applyDestructiveActionDecided(w, e)
 	case LlmCallObserved:
 		applyLlmCallObserved(w, e)
+	case AgentToolCallObserved:
+		applyAgentToolCallObserved(w, e)
+	case FlightRecorderPolicySet:
+		applyFlightRecorderPolicySet(w, e)
+	case FlightRecorderRetentionSwept:
+		applyFlightRecorderRetentionSwept(w, e)
 	case ObservationRecorded:
 		applyObservationRecorded(w, e)
 	case EntityObserved:
@@ -336,6 +417,12 @@ func Reduce(w *World, ev Event) {
 		applyFindingStatusChanged(w, e)
 	case ScanReconciled:
 		applyScanReconciled(w, e)
+	case VoIPlanRequested:
+		applyVoIPlanRequested(w, e)
+	case VoIPlanned:
+		applyVoIPlanned(w, e)
+	case NodeBeliefSet:
+		applyNodeBeliefSet(w, e)
 	}
 }
 

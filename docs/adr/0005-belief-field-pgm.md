@@ -6,6 +6,12 @@ attack graph — the unified score / prioritization / attention model from
 graphical model** — **pgmpy** — not by the LLM and not by hand-tuned weights. See
 [`CONTEXT.md`](../../CONTEXT.md).
 
+> **Amended by [ADR-0029](0029-belief-is-a-relational-prm-over-the-graph.md) (2026-09-27):**
+> belief is no longer a fixed per-host net. It is a generic relational PRM whose schema
+> comes from the ontology/Pack, instantiated over the graph as a Bayesian attack graph and
+> solved by **exact inference on a bounded slice**. The "exact inference only" rule below
+> still holds — the bound is in the *scope* of the slice, never in the inference.
+
 ## Decision
 
 1. **A PGM does the calculation, not the LLM.** LLMs are bad probability calculators —

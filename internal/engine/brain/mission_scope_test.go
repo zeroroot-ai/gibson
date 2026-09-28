@@ -314,6 +314,28 @@ func TestMissionFrameAt_LlmCalls(t *testing.T) {
 	}
 }
 
+// TestMissionFrameAt_AgentToolCalls mirrors TestMissionFrameAt_LlmCalls for the
+// flight recorder's tool-I/O capture (ADR-0020, gibson#271): a mission-scoped
+// frame surfaces the tool calls that mission's agents made, one mission's tool
+// calls never bleed into another's frame, and a tenant-ambient tool call (no
+// mission context) attaches to no mission frame.
+func TestMissionFrameAt_AgentToolCalls(t *testing.T) {
+	e := NewEngine("t1")
+	e.Submit(MissionStarted{ID: "A", Goal: "ga"})
+	e.Submit(AgentToolCallObserved{ToolCallID: "ta1", MissionID: "A", ToolName: "nmap"})
+	// mission B — its tool call must never bleed into A.
+	e.Submit(AgentToolCallObserved{ToolCallID: "tb1", MissionID: "B", ToolName: "nmap"})
+	// a call with no mission context — tenant-ambient, attaches to no mission frame.
+	e.Submit(AgentToolCallObserved{ToolCallID: "tamb", MissionID: "", ToolName: "nmap"})
+	e.Tick()
+
+	end := e.MissionFrameAt("A", e.Timeline.Len())
+	got := end.AgentToolCallSnapshot()
+	if len(got) != 1 || got[0].ToolCallID != "ta1" {
+		t.Fatalf("mission A tool-call frame = %+v, want only ta1", got)
+	}
+}
+
 // The mission-evidence edge (gibson#1075) surfaces the hosts and findings a
 // mission's work discovered in that mission's frame: a host carries the MissionID
 // of the mission that observed it, a directly-raised finding carries the mission's
