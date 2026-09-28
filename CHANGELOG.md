@@ -1,5 +1,17 @@
 # Changelog
 
+## [0.142.5](https://github.com/zeroroot-ai/gibson/compare/v0.142.4...v0.142.5) (2026-09-28)
+
+
+### Bug Fixes
+
+* **invitations:** seed the invitee's session tuples so ext-authz lets them in ([#326](https://github.com/zeroroot-ai/gibson/issues/326)) ([ab936c1](https://github.com/zeroroot-ai/gibson/commit/ab936c111bc4189c68b4d7ccde338fa580cc1f0a))
+
+
+### Performance Improvements
+
+* **ci:** cache the lint tool binaries and the golangci-lint analysis cache ([#316](https://github.com/zeroroot-ai/gibson/issues/316)) ([7fbff0d](https://github.com/zeroroot-ai/gibson/commit/7fbff0d918c3ad8fd463b420abd97c052eb82aa2)), closes [#308](https://github.com/zeroroot-ai/gibson/issues/308)
+
 ## [0.142.4](https://github.com/zeroroot-ai/gibson/compare/v0.142.3...v0.142.4) (2026-09-28)
 
 
