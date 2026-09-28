@@ -56,6 +56,96 @@ func TestVoIGateSystem_RequestsOncePerEvidenceChange(t *testing.T) {
 	}
 }
 
+// TestVoIPlanEvents_Kind proves the event Kind() strings, the same convention
+// every other Timeline event in this package follows.
+func TestVoIPlanEvents_Kind(t *testing.T) {
+	if got := (VoIPlanRequested{}).Kind(); got != "voi.plan.requested" {
+		t.Fatalf("VoIPlanRequested.Kind() = %q", got)
+	}
+	if got := (VoIPlanned{}).Kind(); got != "voi.plan.completed" {
+		t.Fatalf("VoIPlanned.Kind() = %q", got)
+	}
+}
+
+// TestVoIGateSystem_SkipsMissionsNotEligible proves the gate ignores a mission
+// that is not running (paused) and a no-goal (scripted) mission, mirroring
+// DeciderGateSystem's own eligibility check — only running goal missions get a
+// VoI plan.
+func TestVoIGateSystem_SkipsMissionsNotEligible(t *testing.T) {
+	substrate := newFakeBeliefSubstrate()
+	registry := liveBeliefRegistry(t)
+	e, w := voiEngine(substrate, registry, ExactVoIScorer(), DefaultVoITopK)
+	e.Submit(MissionProjected{ID: "no-goal"}) // Goal == "" : scripted mission
+	e.Submit(MissionProjected{ID: "paused", Goal: "find a path"})
+	e.Submit(MissionPauseRequested{ID: "paused"})
+
+	voiSettle(e, w, 1)
+
+	if plans := e.World.VoIPlanSnapshot(); len(plans) != 0 {
+		t.Fatalf("plans = %+v, want none (no eligible goal mission)", plans)
+	}
+}
+
+// TestApplyVoIPlanned_DefensivelyRecordsAnUnrequestedPlan proves the reducer
+// never drops a completed plan even if no VoIPlanRequested preceded it
+// (should not happen live — the worker only plans a mission it Tapped a
+// request for — but the reducer must still be total over its own event type).
+func TestApplyVoIPlanned_DefensivelyRecordsAnUnrequestedPlan(t *testing.T) {
+	w := NewWorld("t")
+	Reduce(w, VoIPlanned{MissionID: "m1", Candidates: []VoICandidate{{RefID: "h1"}}})
+
+	plans := w.VoIPlanSnapshot()
+	if len(plans) != 1 || plans[0].MissionID != "m1" || plans[0].InFlight {
+		t.Fatalf("plans = %+v, want one completed (not in-flight) plan for m1", plans)
+	}
+}
+
+// TestVoIWorker_FailedPlanClearsInFlightWithNoCandidates proves a substrate
+// error during planning does not wedge the mission permanently in-flight —
+// the same non-fatal failure handling DeciderWorker.decide uses for a failed
+// LLM call: clear in-flight, record no candidates, let the gate retry.
+func TestVoIWorker_FailedPlanClearsInFlightWithNoCandidates(t *testing.T) {
+	substrate := &erroringBeliefSubstrate{
+		fakeBeliefSubstrate: newFakeBeliefSubstrate(),
+		failBeliefFor:       NodeRef{Kind: NodeKindClaim, ID: "t/1"}, // "t": the engine's tenant; "1": the first assigned hypothesis id
+	}
+	registry := liveBeliefRegistry(t)
+	e, w := voiEngine(substrate, registry, ExactVoIScorer(), DefaultVoITopK)
+	e.Submit(MissionProjected{ID: "m1", Goal: "find a path"})
+	e.Submit(HypothesisObserved{ScopeID: "s", Claim: "port 22 is exploitable", Proposer: "agent-1"})
+
+	voiSettle(e, w, 1)
+
+	plans := e.World.VoIPlanSnapshot()
+	if len(plans) != 1 || plans[0].InFlight || plans[0].Candidates != nil {
+		t.Fatalf("plans = %+v, want one completed plan with no candidates (planning failed)", plans)
+	}
+}
+
+// TestWireVoIPlanner_ProducesAReplayablePlanOffTheTick is the end-to-end wiring
+// test: WireVoIPlanner's own ticker (not a test-driven Drain) settles a plan,
+// proving the exported entry point the daemon will call actually works, and
+// that cancelling ctx stops the goroutine cleanly (the ctx.Done() drain path).
+func TestWireVoIPlanner_ProducesAReplayablePlanOffTheTick(t *testing.T) {
+	registry := liveBeliefRegistry(t)
+	e := NewEngine("t")
+	e.AddSystem(VoIGateSystem)
+	ctx, cancel := context.WithCancel(context.Background())
+	WireVoIPlanner(ctx, e, registry, ExactVoIScorer(), DefaultVoITopK, 5*time.Millisecond)
+
+	e.Submit(MissionProjected{ID: "m1", Goal: "find a path"})
+	e.Submit(HostObserved{ScopeID: "s", Address: "10.0.0.5", OpenPorts: []int{22}})
+	e.Tick()
+
+	waitFor(t, func() bool {
+		e.Tick()
+		plans := e.World.VoIPlanSnapshot()
+		return len(plans) == 1 && !plans[0].InFlight && len(plans[0].Candidates) == 1
+	})
+
+	cancel()
+}
+
 // TestVoIWorker_RecordsRankedCandidates proves the worker actually calls
 // PlanVoI against the mission's hosts/hypotheses and records the ranked,
 // bounded result as a replayable VoIPlanSnapshot.

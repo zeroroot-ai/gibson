@@ -206,6 +206,26 @@ func TestPlanVoI_DeterministicAcrossInputOrder(t *testing.T) {
 	}
 }
 
+// TestSortVoICandidates_TiesBrokenByKindThenRefID proves the total order:
+// equal Value falls through to Kind, and equal Value+Kind falls through to
+// RefID — never a coin flip (Go's sort is otherwise unspecified for ties).
+func TestSortVoICandidates_TiesBrokenByKindThenRefID(t *testing.T) {
+	c := []VoICandidate{
+		{Kind: VoICandidateHypothesis, RefID: "z", Value: 1},
+		{Kind: VoICandidateEvidence, RefID: "b", Value: 1},
+		{Kind: VoICandidateEvidence, RefID: "a", Value: 1},
+	}
+	sortVoICandidates(c)
+	want := []VoICandidate{
+		{Kind: VoICandidateEvidence, RefID: "a", Value: 1},
+		{Kind: VoICandidateEvidence, RefID: "b", Value: 1},
+		{Kind: VoICandidateHypothesis, RefID: "z", Value: 1},
+	}
+	if !reflect.DeepEqual(c, want) {
+		t.Fatalf("sortVoICandidates = %+v, want %+v", c, want)
+	}
+}
+
 // TestPlanVoI_PropagatesSubstrateError proves a belief-read failure surfaces
 // as an error rather than silently treating the hypothesis as unstaked.
 func TestPlanVoI_PropagatesSubstrateError(t *testing.T) {
@@ -219,5 +239,63 @@ func TestPlanVoI_PropagatesSubstrateError(t *testing.T) {
 	}
 	if _, err := PlanVoI(context.Background(), in, substrate, ExactVoIScorer(), 0); err == nil {
 		t.Fatalf("PlanVoI did not propagate the substrate error")
+	}
+}
+
+// TestResolveReputation_EmptyKeyIsTheNeutralPrior proves the "no resolvable
+// technique×environment key yet" path (every candidate today) never touches
+// the substrate at all.
+func TestResolveReputation_EmptyKeyIsTheNeutralPrior(t *testing.T) {
+	substrate := newFakeBeliefSubstrate()
+	got, err := resolveReputation(context.Background(), substrate, "")
+	if err != nil {
+		t.Fatalf("resolveReputation: %v", err)
+	}
+	if got != voiNeutralReputationPrior {
+		t.Fatalf("got %v, want the neutral prior %v", got, voiNeutralReputationPrior)
+	}
+}
+
+// TestResolveReputation_ReadsTechniqueEnvironmentBelief proves the seam a
+// future candidate carrying a real technique×environment key will use: a
+// recorded belief on that key's NodeKindTechniqueEnvironment node is read and
+// returned as-is (ADR-0029 §3's "P(technique works here)").
+func TestResolveReputation_ReadsTechniqueEnvironmentBelief(t *testing.T) {
+	substrate := newFakeBeliefSubstrate()
+	ctx := context.Background()
+	ref := NodeRef{Kind: NodeKindTechniqueEnvironment, ID: "cve-2024-1234@host-class-a"}
+	if err := substrate.SetBelief(ctx, ref, NodeBelief{Belief: Belief{Exploitable: 0.42}}); err != nil {
+		t.Fatalf("SetBelief: %v", err)
+	}
+	got, err := resolveReputation(ctx, substrate, "cve-2024-1234@host-class-a")
+	if err != nil {
+		t.Fatalf("resolveReputation: %v", err)
+	}
+	if got != 0.42 {
+		t.Fatalf("got %v, want the recorded reputation 0.42", got)
+	}
+}
+
+// TestResolveReputation_UnknownKeyIsTheNeutralPrior proves a technique×
+// environment key with no recorded belief yet also resolves to the neutral
+// prior — no data means "do not penalize" (ADR-0026 §6), same as an empty key.
+func TestResolveReputation_UnknownKeyIsTheNeutralPrior(t *testing.T) {
+	substrate := newFakeBeliefSubstrate()
+	got, err := resolveReputation(context.Background(), substrate, "never-recorded")
+	if err != nil {
+		t.Fatalf("resolveReputation: %v", err)
+	}
+	if got != voiNeutralReputationPrior {
+		t.Fatalf("got %v, want the neutral prior %v", got, voiNeutralReputationPrior)
+	}
+}
+
+// TestResolveReputation_PropagatesSubstrateError proves a belief-read failure
+// on a technique×environment lookup surfaces as an error.
+func TestResolveReputation_PropagatesSubstrateError(t *testing.T) {
+	ref := NodeRef{Kind: NodeKindTechniqueEnvironment, ID: "boom"}
+	substrate := &erroringBeliefSubstrate{fakeBeliefSubstrate: newFakeBeliefSubstrate(), failBeliefFor: ref}
+	if _, err := resolveReputation(context.Background(), substrate, "boom"); err == nil {
+		t.Fatalf("resolveReputation did not propagate the substrate error")
 	}
 }
