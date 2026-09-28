@@ -46,3 +46,25 @@ func TestCallbackManager_SetBeliefSubstrate_NilServerIsNoOp(_ *testing.T) {
 	m := &CallbackManager{logger: slog.Default()}
 	m.SetBeliefSubstrate(newFakeBeliefSubstrate())
 }
+
+// TestCallbackManager_BeliefSubstrate proves the getter is the read half of
+// SetBeliefSubstrate: nil before anything is wired (including on a manager
+// with no server, the same defensive-nil shape SetBeliefSubstrate's own nil
+// case takes), and the exact value passed to SetBeliefSubstrate afterward.
+func TestCallbackManager_BeliefSubstrate(t *testing.T) {
+	bare := &CallbackManager{logger: slog.Default()}
+	if got := bare.BeliefSubstrate(); got != nil {
+		t.Fatalf("BeliefSubstrate() on a manager with no server = %v, want nil", got)
+	}
+
+	m := NewCallbackManager(CallbackConfig{ListenAddress: "127.0.0.1:0"}, slog.Default())
+	if got := m.BeliefSubstrate(); got != nil {
+		t.Fatalf("BeliefSubstrate() before SetBeliefSubstrate = %v, want nil", got)
+	}
+
+	substrate := newFakeBeliefSubstrate()
+	m.SetBeliefSubstrate(substrate)
+	if got := m.BeliefSubstrate(); got != brain.BeliefSubstrate(substrate) {
+		t.Fatalf("BeliefSubstrate() = %v, want the exact value passed to SetBeliefSubstrate", got)
+	}
+}
