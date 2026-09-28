@@ -280,16 +280,22 @@ err := apikeyStore.Save(ctx, t.Spec.Name, key)
 t.Status.AgentAPIKey = key                  // forbidden — Status leaks credentials
 ```
 
-Right — onboarding emits a Zitadel user invitation for the owner email
-on the Tenant CRD spec; the user accepts the invite, signs in via
-Auth.js, and creates agents through the dashboard's "Register Agent"
-UI:
+Right — onboarding creates the Zitadel user for the owner email on the
+Tenant CRD spec and assigns their tenant role through the Syncer
+(ADR-0093); the user signs in via Auth.js, and creates
+agents through the dashboard's "Register Agent" UI:
 
 ```go
-err := zitadel.SendInvitation(ctx, orgID, t.Spec.OwnerEmail, /* roles */ )
+userID, err := zitadel.EnsureHumanUser(ctx, orgID, t.Spec.OwnerEmail)
+if err != nil { return false, err }
+err = roles.Assign(ctx, tenantrole.Tenant{ID: t.Name, OrgID: orgID}, userID, tenantrole.Owner)
 if err != nil { return false, err }
 // Status carries org ID + invitation status; no credentials.
 ```
+
+There is no separate org-membership write: a tenant role IS the
+membership, and Zitadel's org-member API (`/orgs/me/members`) plays no
+part in it.
 
 The agent client_id / client_secret are response-body of the dashboard
 endpoint, never persisted to a CRD status.

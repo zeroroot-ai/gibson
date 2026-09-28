@@ -78,15 +78,6 @@ type ServiceAccount struct {
 	Description string
 }
 
-// EnsureHumanUserRequest carries parameters for finding-or-creating a human
-// user in the IdP organization that bounds a tenant.
-type EnsureHumanUserRequest struct {
-	// OrgID is the IdP organization id the user belongs to / is created in.
-	OrgID string
-	// Email is the user's email address (also the login name). Required.
-	Email string
-}
-
 // CreateHumanUserRequest carries parameters for provisioning a password-bearing
 // human user during self-serve signup. It mirrors the request the dashboard
 // signup-bot previously sent (createHumanUser): a profile, a verified-at-create
@@ -165,6 +156,20 @@ type RevokeUserSessionsResult struct {
 	SessionsTerminated int
 	// GrantsRevoked is the number of refresh-token grants revoked.
 	GrantsRevoked int
+}
+
+// ClearHumanFactorsResult reports what ClearHumanFactors removed. Counts are
+// best-effort observability; callers must not treat zero as failure — a user
+// who had no second factors registered yields all-zero counts on success.
+type ClearHumanFactorsResult struct {
+	// OTPCleared is true when an authenticator-app (TOTP) factor was found
+	// and removed.
+	OTPCleared bool
+	// U2FCleared is the number of U2F security-key credentials removed.
+	U2FCleared int
+	// PasskeysCleared is the number of passwordless/passkey credentials
+	// removed.
+	PasskeysCleared int
 }
 
 // SessionInfo describes one active login session of a user, as reported by the

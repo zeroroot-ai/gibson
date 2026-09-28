@@ -9,6 +9,7 @@ import (
 	"errors"
 	"fmt"
 	"net/http"
+	"strconv"
 	"testing"
 
 	"github.com/zeroroot-ai/gibson/internal/platform/tenantrole"
@@ -164,7 +165,7 @@ func TestZitadelGrants_ListPages(t *testing.T) {
 		}
 		_ = json.NewEncoder(w).Encode(map[string]any{
 			"authorizations": page,
-			"pagination":     map[string]any{"totalResult": len(all)},
+			"pagination":     map[string]any{"totalResult": strconv.Itoa(len(all))},
 		})
 	})
 	srv := zitadelconntest.New(t, "", mux)
@@ -286,5 +287,55 @@ func TestZitadelGrants_DeletePropagatesANonNotFoundError(t *testing.T) {
 
 	if err := grants.Delete(context.Background(), "GRANT-1"); !errors.Is(err, tenantrole.ErrUnauthorized) {
 		t.Fatalf("Delete: err = %v, want it to wrap ErrUnauthorized (only not_found is swallowed)", err)
+	}
+}
+
+// recordedListAuthorizations is a ListAuthorizations response recorded from
+// Zitadel v4.18.0 on kind (2026-09-27). protojson writes uint64 values as
+// JSON strings, so pagination.totalResult is "1", not 1.
+const recordedListAuthorizations = `{"pagination":{"totalResult":"1", "appliedLimit":"100"}, "authorizations":[` +
+	`{"id":"392562355503890478", "creationDate":"2026-09-27T03:56:37.528593Z", "changeDate":"2026-09-27T03:56:37.528593Z", ` +
+	`"project":{"id":"392561993183133742", "name":"gibson", "organizationId":"392561303102750758"}, ` +
+	`"organization":{"id":"392562338911223854", "name":"Primary Workspace"}, ` +
+	`"user":{"id":"392562353507401774", "preferredLoginName":"admin@selfhosted.example.com", "displayName":"admin Owner", "organizationId":"392562338911223854"}, ` +
+	`"state":"STATE_ACTIVE", "roles":[{"key":"owner", "displayName":"Owner"}]}]}`
+
+// TestZitadelGrants_DecodesTheRecordedZitadelResponse pins List to the bytes
+// the real server sends. Before the fix, List decoded totalResult as a number
+// and every first-admin run on kind failed with "cannot unmarshal string".
+func TestZitadelGrants_DecodesTheRecordedZitadelResponse(t *testing.T) {
+	srv := zitadelconntest.New(t, "", http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+		w.Header().Set("Content-Type", "application/json")
+		_, _ = w.Write([]byte(recordedListAuthorizations))
+	}))
+	ep := srv.Endpoint(t)
+	grants := tenantrole.NewZitadelGrants(ep, ep.HTTPClient(0), "392561993183133742")
+
+	got, err := grants.List(context.Background(), "392562338911223854", []string{"392562353507401774"})
+	if err != nil {
+		t.Fatalf("List: %v", err)
+	}
+	want := tenantrole.Grant{
+		ID: "392562355503890478", UserID: "392562353507401774", UserOrgID: "392562338911223854",
+		OrgID: "392562338911223854", RoleKeys: []string{"owner"}, Active: true,
+	}
+	if len(got) != 1 || got[0].ID != want.ID || got[0].UserID != want.UserID ||
+		got[0].UserOrgID != want.UserOrgID || got[0].OrgID != want.OrgID ||
+		len(got[0].RoleKeys) != 1 || got[0].RoleKeys[0] != "owner" || !got[0].Active {
+		t.Fatalf("List = %+v, want [%+v]", got, want)
+	}
+}
+
+// TestZitadelGrants_RefusesAnUnreadableTotal: a totalResult that is not a
+// number is an error, never a silent zero.
+func TestZitadelGrants_RefusesAnUnreadableTotal(t *testing.T) {
+	srv := zitadelconntest.New(t, "", http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+		w.Header().Set("Content-Type", "application/json")
+		_, _ = w.Write([]byte(`{"pagination":{"totalResult":"many"}, "authorizations":[{"id":"a"}]}`))
+	}))
+	ep := srv.Endpoint(t)
+	grants := tenantrole.NewZitadelGrants(ep, ep.HTTPClient(0), "PROJ-1")
+	if _, err := grants.List(context.Background(), "ORG-1", nil); err == nil {
+		t.Fatal("List with totalResult \"many\" = nil error, want an error")
 	}
 }

@@ -50,6 +50,7 @@ const (
 	UserService_StageAttachment_FullMethodName           = "/gibson.tenant.v1.UserService/StageAttachment"
 	UserService_ConsumeAttachment_FullMethodName         = "/gibson.tenant.v1.UserService/ConsumeAttachment"
 	UserService_RevokeUserSessions_FullMethodName        = "/gibson.tenant.v1.UserService/RevokeUserSessions"
+	UserService_ResetUserMFA_FullMethodName              = "/gibson.tenant.v1.UserService/ResetUserMFA"
 )
 
 // UserServiceClient is the client API for UserService service.
@@ -116,6 +117,31 @@ type UserServiceClient interface {
 	// JWT ages out within the (15-minute) access-token TTL. No per-request
 	// revocation check is added to ext-authz in v1.
 	RevokeUserSessions(ctx context.Context, in *RevokeUserSessionsRequest, opts ...grpc.CallOption) (*RevokeUserSessionsResponse, error)
+	// ResetUserMFA lets an Owner or Admin recover a tenant member who is
+	// locked out of a lost authenticator device: it revokes the target's
+	// active sessions, clears every second factor and passkey Zitadel has on
+	// file for them (TOTP, U2F, passkeys — ADR-0093 decision 9's login
+	// policy allows only those), and emails the target their own sign-in link
+	// so they can sign in and re-enroll from a clean state.
+	//
+	// Unlike RevokeUserSessions, this is NOT self-service: the coarse
+	// ext-authz gate below requires the "admin" relation, which the tenant
+	// Owner also holds (owner implies admin in model.fga), matching the scope
+	// exactly — "an Owner or Admin resets any tenant user's MFA in their
+	// tenant, including the Owner's." A plain member cannot call this on
+	// themselves; that is a deliberate scope boundary, not an oversight.
+	//
+	// The caller receives nothing that grants access to the reset account —
+	// no code, no link, no session. The email goes to the target's own
+	// address only. Every call is audited (actor, target, tenant, when) via
+	// the daemon's existing audit pipeline, action "tenant_user_mfa_reset".
+	//
+	// target_user_id must be a member of the caller's own tenant (checked via
+	// FGA "member" — the same umbrella relation ListMembers enumerates,
+	// encompassing every role). A target in a different tenant is refused
+	// with NotFound, so the RPC cannot be used to probe whether a user id
+	// exists in some other tenant.
+	ResetUserMFA(ctx context.Context, in *ResetUserMFARequest, opts ...grpc.CallOption) (*ResetUserMFAResponse, error)
 }
 
 type userServiceClient struct {
@@ -366,6 +392,16 @@ func (c *userServiceClient) RevokeUserSessions(ctx context.Context, in *RevokeUs
 	return out, nil
 }
 
+func (c *userServiceClient) ResetUserMFA(ctx context.Context, in *ResetUserMFARequest, opts ...grpc.CallOption) (*ResetUserMFAResponse, error) {
+	cOpts := append([]grpc.CallOption{grpc.StaticMethod()}, opts...)
+	out := new(ResetUserMFAResponse)
+	err := c.cc.Invoke(ctx, UserService_ResetUserMFA_FullMethodName, in, out, cOpts...)
+	if err != nil {
+		return nil, err
+	}
+	return out, nil
+}
+
 // UserServiceServer is the server API for UserService service.
 // All implementations must embed UnimplementedUserServiceServer
 // for forward compatibility.
@@ -430,6 +466,31 @@ type UserServiceServer interface {
 	// JWT ages out within the (15-minute) access-token TTL. No per-request
 	// revocation check is added to ext-authz in v1.
 	RevokeUserSessions(context.Context, *RevokeUserSessionsRequest) (*RevokeUserSessionsResponse, error)
+	// ResetUserMFA lets an Owner or Admin recover a tenant member who is
+	// locked out of a lost authenticator device: it revokes the target's
+	// active sessions, clears every second factor and passkey Zitadel has on
+	// file for them (TOTP, U2F, passkeys — ADR-0093 decision 9's login
+	// policy allows only those), and emails the target their own sign-in link
+	// so they can sign in and re-enroll from a clean state.
+	//
+	// Unlike RevokeUserSessions, this is NOT self-service: the coarse
+	// ext-authz gate below requires the "admin" relation, which the tenant
+	// Owner also holds (owner implies admin in model.fga), matching the scope
+	// exactly — "an Owner or Admin resets any tenant user's MFA in their
+	// tenant, including the Owner's." A plain member cannot call this on
+	// themselves; that is a deliberate scope boundary, not an oversight.
+	//
+	// The caller receives nothing that grants access to the reset account —
+	// no code, no link, no session. The email goes to the target's own
+	// address only. Every call is audited (actor, target, tenant, when) via
+	// the daemon's existing audit pipeline, action "tenant_user_mfa_reset".
+	//
+	// target_user_id must be a member of the caller's own tenant (checked via
+	// FGA "member" — the same umbrella relation ListMembers enumerates,
+	// encompassing every role). A target in a different tenant is refused
+	// with NotFound, so the RPC cannot be used to probe whether a user id
+	// exists in some other tenant.
+	ResetUserMFA(context.Context, *ResetUserMFARequest) (*ResetUserMFAResponse, error)
 	mustEmbedUnimplementedUserServiceServer()
 }
 
@@ -511,6 +572,9 @@ func (UnimplementedUserServiceServer) ConsumeAttachment(context.Context, *Consum
 }
 func (UnimplementedUserServiceServer) RevokeUserSessions(context.Context, *RevokeUserSessionsRequest) (*RevokeUserSessionsResponse, error) {
 	return nil, status.Error(codes.Unimplemented, "method RevokeUserSessions not implemented")
+}
+func (UnimplementedUserServiceServer) ResetUserMFA(context.Context, *ResetUserMFARequest) (*ResetUserMFAResponse, error) {
+	return nil, status.Error(codes.Unimplemented, "method ResetUserMFA not implemented")
 }
 func (UnimplementedUserServiceServer) mustEmbedUnimplementedUserServiceServer() {}
 func (UnimplementedUserServiceServer) testEmbeddedByValue()                     {}
@@ -965,6 +1029,24 @@ func _UserService_RevokeUserSessions_Handler(srv interface{}, ctx context.Contex
 	return interceptor(ctx, in, info, handler)
 }
 
+func _UserService_ResetUserMFA_Handler(srv interface{}, ctx context.Context, dec func(interface{}) error, interceptor grpc.UnaryServerInterceptor) (interface{}, error) {
+	in := new(ResetUserMFARequest)
+	if err := dec(in); err != nil {
+		return nil, err
+	}
+	if interceptor == nil {
+		return srv.(UserServiceServer).ResetUserMFA(ctx, in)
+	}
+	info := &grpc.UnaryServerInfo{
+		Server:     srv,
+		FullMethod: UserService_ResetUserMFA_FullMethodName,
+	}
+	handler := func(ctx context.Context, req interface{}) (interface{}, error) {
+		return srv.(UserServiceServer).ResetUserMFA(ctx, req.(*ResetUserMFARequest))
+	}
+	return interceptor(ctx, in, info, handler)
+}
+
 // UserService_ServiceDesc is the grpc.ServiceDesc for UserService service.
 // It's only intended for direct use with grpc.RegisterService,
 // and not to be introspected or modified (even as a copy)
@@ -1067,6 +1149,10 @@ var UserService_ServiceDesc = grpc.ServiceDesc{
 		{
 			MethodName: "RevokeUserSessions",
 			Handler:    _UserService_RevokeUserSessions_Handler,
+		},
+		{
+			MethodName: "ResetUserMFA",
+			Handler:    _UserService_ResetUserMFA_Handler,
 		},
 	},
 	Streams:  []grpc.StreamDesc{},

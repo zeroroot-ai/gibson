@@ -8,6 +8,7 @@ import (
 	"fmt"
 	"io"
 	"net/http"
+	"strconv"
 	"sync"
 )
 
@@ -402,7 +403,7 @@ func (f *Identity) handleListProjectRoles(w http.ResponseWriter, r *http.Request
 	}
 	writeOK(w, map[string]any{
 		"projectRoles": roles,
-		"pagination":   map[string]any{"totalResult": len(roles)},
+		"pagination":   map[string]any{"totalResult": strconv.Itoa(len(roles))},
 	})
 }
 
@@ -562,7 +563,7 @@ func (f *Identity) handleListProjectGrants(w http.ResponseWriter, r *http.Reques
 	}
 	writeOK(w, map[string]any{
 		"projectGrants": out,
-		"pagination":    map[string]any{"totalResult": len(out)},
+		"pagination":    map[string]any{"totalResult": strconv.Itoa(len(out))},
 	})
 }
 
@@ -887,7 +888,7 @@ func (f *Identity) handleListAuthorizations(w http.ResponseWriter, r *http.Reque
 	}
 	writeOK(w, map[string]any{
 		"authorizations": out,
-		"pagination":     map[string]any{"totalResult": total},
+		"pagination":     map[string]any{"totalResult": strconv.Itoa(total)},
 	})
 }
 

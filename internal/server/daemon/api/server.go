@@ -269,6 +269,13 @@ type DaemonServer struct {
 	// Spec: agent-service-credentials.
 	idpAdminClient idp.AdminClient
 
+	// mfaResetMailer sends the "your 2FA was reset" notice to a tenant
+	// member whose sessions/factors ResetUserMFA just cleared (hosted#206).
+	// Wired via WithMFAResetMailer. May be nil (e.g. no mail transport
+	// configured): the reset itself still completes; the response reports
+	// notified=false so the caller knows to tell the target out-of-band.
+	mfaResetMailer mfaResetSender
+
 	// tenantAdminAuditWriter is the Postgres-backed audit event writer for
 	// TenantAdminService operations. May be nil; when nil audit events are
 	// silently dropped (not a fatal error — the operation still succeeds).

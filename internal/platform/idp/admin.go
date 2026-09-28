@@ -50,17 +50,30 @@ type AdminClient interface {
 	// Only display_name and preferred_locale are editable; email is immutable.
 	UpdateUserProfile(ctx context.Context, accountID string, req UpdateUserProfileRequest) (*UserProfile, error)
 
-	// EnsureHumanUser finds the human user with the given email in the IdP
-	// organization, or creates one (triggering the IdP's verification /
-	// credential-setup email). Returns the user id. Idempotent: an existing
-	// user is found and returned rather than duplicated. Used by
-	// MembershipService.AcceptInvitation to provision an invited member.
-	EnsureHumanUser(ctx context.Context, req EnsureHumanUserRequest) (userID string, err error)
+	// CreateSetupLink mints a one-time Zitadel setup-link code for userID
+	// (the same invite-code mechanism ADR-0093 uses for the Platform owner,
+	// gibson#240/hosted#201) and returns the ready-to-use URL. The code is
+	// minted with returnCode, never sendCode: Zitadel never emails it, because
+	// the caller already owns messaging for this user (an invitation email
+	// this install sent, whose accept-token the invitee already redeemed).
+	// The returned link sends the browser straight to Zitadel's own hosted
+	// setup flow (password + MFA enrollment); it carries no password.
+	//
+	// orgID scopes the call to the user's org. appURL is the PRODUCT-surface
+	// origin the link is built on (e.g. "https://app.example.com", from
+	// GIBSON_APP_URL) — REQUIRED, and never the OIDC issuer or the Zitadel
+	// admin endpoint: gibson#254 found the Platform owner's setup link built
+	// from spec.zitadel.issuer resolved to an in-cluster address on kind, so
+	// this method takes no issuer/endpoint of its own to make that mistake
+	// with. Used by MembershipService.AcceptInvitation, which already
+	// resolves appURL from GIBSON_APP_URL for the accept-link email.
+	CreateSetupLink(ctx context.Context, orgID, userID, appURL string) (link string, err error)
 
 	// CreateHumanUser provisions a password-bearing founding-owner human user
-	// during self-serve signup. Unlike EnsureHumanUser (invitation flow, no
-	// password — the invitee sets credentials via the emailed code), this sets
-	// the password the user chose so they can sign in immediately.
+	// during self-serve signup. Unlike EnsureHumanUserNoPassword (the Platform
+	// owner, a tenant Owner and every invitee, who set credentials through a
+	// setup link), this sets the password the user chose so they can sign in
+	// immediately.
 	//
 	// CREATE-ONLY. If a user with the email already exists, implementations
 	// MUST return ErrAlreadyExists and MUST NOT touch that user. Signup never
@@ -72,6 +85,26 @@ type AdminClient interface {
 	// Used by SignupService.Signup, which only reaches this call after the
 	// address has been verified.
 	CreateHumanUser(ctx context.Context, req CreateHumanUserRequest) (CreateHumanUserResult, error)
+
+	// EnsureHumanUserNoPassword finds or creates a human user in orgID with NO
+	// password (ADR-0093 decisions 6/8). The one setup-link mechanism this
+	// interface offers — CreateSetupInviteCode — is how the person ever gets
+	// in; no implementation may accept or set a password anywhere in this
+	// call. Idempotent: an existing user is found by email and returned,
+	// never recreated or touched.
+	//
+	// Used by the Platform owner and the founding tenant Owner bootstrap
+	// (hosted#201/#202) — the same no-password contract for both, so there is
+	// exactly one way a human first signs in to this platform (ADR-0027).
+	EnsureHumanUserNoPassword(ctx context.Context, orgID, email, givenName, familyName string) (userID string, err error)
+
+	// CreateSetupInviteCode mints a one-time setup-link code for userID
+	// through the IdP's own invite-code flow. send=true delivers the link by
+	// mail, built from urlTemplate; send=false returns the raw code instead,
+	// for a caller with no mail transport to turn into an offline link and
+	// write to a Secret only cluster administrators can read (ADR-0093
+	// decision 8). Never a password, either way.
+	CreateSetupInviteCode(ctx context.Context, userID, urlTemplate string, send bool) (code string, err error)
 
 	// DeactivateHumanUser blocks a human user from signing in, without
 	// deleting them or their credential. It is what "registered but not yet
@@ -137,6 +170,16 @@ type AdminClient interface {
 	// session is not an error. Callers are responsible for confirming the
 	// session belongs to the acting principal before calling.
 	RevokeSession(ctx context.Context, sessionID string) error
+
+	// ClearHumanFactors removes every second factor and passkey the IdP has
+	// on file for userID: authenticator app (TOTP/OTP), U2F security keys,
+	// and passwordless/passkey credentials. It does NOT touch the user's
+	// password. Used by UserService.ResetUserMFA (hosted#206) so that,
+	// combined with RevokeUserSessions, a lost-device member is forced to
+	// re-enroll from a clean state on their next sign-in rather than being
+	// permanently locked out. Idempotent: a user with no factors on file is
+	// a no-op, not an error.
+	ClearHumanFactors(ctx context.Context, userID string) (ClearHumanFactorsResult, error)
 
 	// Close releases any resources held by the client (HTTP connections, etc.).
 	Close() error

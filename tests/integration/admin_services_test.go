@@ -261,8 +261,11 @@ func (f *fakeUserIdPClient) ListUserSessions(_ context.Context, _ string) ([]idp
 	return nil, nil
 }
 func (f *fakeUserIdPClient) RevokeSession(_ context.Context, _ string) error { return nil }
-func (f *fakeUserIdPClient) EnsureHumanUser(_ context.Context, _ idp.EnsureHumanUserRequest) (string, error) {
-	return "user-1", nil
+func (f *fakeUserIdPClient) ClearHumanFactors(_ context.Context, _ string) (idp.ClearHumanFactorsResult, error) {
+	return idp.ClearHumanFactorsResult{}, nil
+}
+func (f *fakeUserIdPClient) CreateSetupLink(_ context.Context, _, userID, appURL string) (string, error) {
+	return appURL + "/ui/v2/login/verify?invite=true&userId=" + userID, nil
 }
 func (f *fakeUserIdPClient) SetHumanPassword(context.Context, idp.SetHumanPasswordRequest) error {
 	return nil
@@ -273,6 +276,12 @@ func (f *fakeUserIdPClient) CreateHumanUser(_ context.Context, _ idp.CreateHuman
 }
 func (f *fakeUserIdPClient) FindUserIDByEmail(_ context.Context, _ string) (string, error) {
 	return "", idp.ErrNotFound
+}
+func (f *fakeUserIdPClient) EnsureHumanUserNoPassword(_ context.Context, _, _, _, _ string) (string, error) {
+	return "", nil
+}
+func (f *fakeUserIdPClient) CreateSetupInviteCode(_ context.Context, _, _ string, _ bool) (string, error) {
+	return "", nil
 }
 func (f *fakeUserIdPClient) Close() error { return nil }
 

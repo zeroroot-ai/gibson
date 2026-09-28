@@ -1,5 +1,73 @@
 # Changelog
 
+## [0.142.5](https://github.com/zeroroot-ai/gibson/compare/v0.142.4...v0.142.5) (2026-09-28)
+
+
+### Bug Fixes
+
+* **invitations:** seed the invitee's session tuples so ext-authz lets them in ([#326](https://github.com/zeroroot-ai/gibson/issues/326)) ([ab936c1](https://github.com/zeroroot-ai/gibson/commit/ab936c111bc4189c68b4d7ccde338fa580cc1f0a))
+
+
+### Performance Improvements
+
+* **ci:** cache the lint tool binaries and the golangci-lint analysis cache ([#316](https://github.com/zeroroot-ai/gibson/issues/316)) ([7fbff0d](https://github.com/zeroroot-ai/gibson/commit/7fbff0d918c3ad8fd463b420abd97c052eb82aa2)), closes [#308](https://github.com/zeroroot-ai/gibson/issues/308)
+
+## [0.142.4](https://github.com/zeroroot-ai/gibson/compare/v0.142.3...v0.142.4) (2026-09-28)
+
+
+### Bug Fixes
+
+* **invitations:** create the invitee as an active user, like the owners ([#310](https://github.com/zeroroot-ai/gibson/issues/310)) ([a451c5d](https://github.com/zeroroot-ai/gibson/commit/a451c5df95fdea122c31b282667275afa4d506d3))
+
+## [0.142.3](https://github.com/zeroroot-ai/gibson/compare/v0.142.2...v0.142.3) (2026-09-27)
+
+
+### Bug Fixes
+
+* **platform-operator:** revoke Zitadel admin rights from undeclared machine users ([#285](https://github.com/zeroroot-ai/gibson/issues/285)) ([f67aa9d](https://github.com/zeroroot-ai/gibson/commit/f67aa9dc68d0e496aff9878fd58a39de40aab932))
+
+## [0.142.2](https://github.com/zeroroot-ai/gibson/compare/v0.142.1...v0.142.2) (2026-09-27)
+
+
+### Bug Fixes
+
+* **identity:** setup links open the Login v2 verify page ([#261](https://github.com/zeroroot-ai/gibson/issues/261)) ([d142418](https://github.com/zeroroot-ai/gibson/commit/d1424188e20de1603591216c2e3a5b78bf3f390d))
+
+## [0.142.1](https://github.com/zeroroot-ai/gibson/compare/v0.142.0...v0.142.1) (2026-09-27)
+
+
+### Bug Fixes
+
+* **platform-operator:** keep the Platform owner the only human Zitadel administrator ([#259](https://github.com/zeroroot-ai/gibson/issues/259)) ([9b1af5d](https://github.com/zeroroot-ai/gibson/commit/9b1af5d6b710d489f6aa69ebe78064e94b5a8ae8))
+* **platform-operator:** make the Zitadel instance have an active SMTP provider ([#257](https://github.com/zeroroot-ai/gibson/issues/257)) ([e2f4d38](https://github.com/zeroroot-ai/gibson/commit/e2f4d3804f22865cd3d4f4f4e136c2aa72866e18))
+* **tenant-operator:** require the chart to size the enterprise-deploy tier ([#258](https://github.com/zeroroot-ai/gibson/issues/258)) ([3865bf9](https://github.com/zeroroot-ai/gibson/commit/3865bf98a843cc5218cc59be9113690fc36381e9))
+
+## [0.142.0](https://github.com/zeroroot-ai/gibson/compare/v0.141.0...v0.142.0) (2026-09-27)
+
+
+### Features
+
+* **tenant:** let an Owner or Admin reset a tenant user's MFA ([#246](https://github.com/zeroroot-ai/gibson/issues/246)) ([9f73706](https://github.com/zeroroot-ai/gibson/commit/9f73706d857757d1b61c60e70dbd60e124a14417))
+
+
+### Bug Fixes
+
+* **bootstrap-tenant-owner:** the first tenant's Owner gets a setup link, never a password ([#245](https://github.com/zeroroot-ai/gibson/issues/245)) ([43cc40f](https://github.com/zeroroot-ai/gibson/commit/43cc40f658398c2cd85e2d4596d1e5a66e96b39e))
+* **invitations:** accept through a Zitadel setup link, delete org-member API writes ([#255](https://github.com/zeroroot-ai/gibson/issues/255)) ([cd65f90](https://github.com/zeroroot-ai/gibson/commit/cd65f907c884b74383bca8d416b3d6220e2242ad))
+
+## [0.141.0](https://github.com/zeroroot-ai/gibson/compare/v0.140.0...v0.141.0) (2026-09-27)
+
+
+### Features
+
+* **tenant:** removing a tenant user deletes their Zitadel account ([#244](https://github.com/zeroroot-ai/gibson/issues/244)) ([f510fae](https://github.com/zeroroot-ai/gibson/commit/f510fae2ff97889c518271e7d962cfce0312f7b7))
+
+
+### Bug Fixes
+
+* **platform-operator:** the Platform owner's setup link names the public host ([#254](https://github.com/zeroroot-ai/gibson/issues/254)) ([0812e75](https://github.com/zeroroot-ai/gibson/commit/0812e75c660f638e5b1819c2e014c63a511fa268))
+* **tenantrole:** read Zitadel's totalResult as the string it sends ([#253](https://github.com/zeroroot-ai/gibson/issues/253)) ([873858d](https://github.com/zeroroot-ai/gibson/commit/873858ddb40673c97ddf1420f06ae7a683fc725a))
+
 ## [0.140.0](https://github.com/zeroroot-ai/gibson/compare/v0.139.0...v0.140.0) (2026-09-27)
 
 

@@ -452,6 +452,11 @@ message AcceptInvitationResponse {
   string tenant_id = 1;
   // user_id is the (possibly newly-provisioned) IdP user id of the member.
   string user_id = 2;
+  // setup_url sends the browser straight to the IdP's own hosted setup flow,
+  // where the invitee sets a password and enrolls MFA. It carries a one-time
+  // code and is never redeemable a second time. The dashboard's accept page
+  // redirects here immediately after this call returns.
+  string setup_url = 3;
 }
 
 message ResendInvitationRequest {

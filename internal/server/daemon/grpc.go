@@ -1196,6 +1196,22 @@ func (d *daemonImpl) buildGRPCServer(ctx context.Context) (*grpcSubsystem, error
 		}
 	}
 
+	// ResetUserMFA (hosted#206): wired unconditionally, unlike the signup
+	// block above — MFA recovery is core tenant-admin functionality on every
+	// profile, not gated by any signup-policy knob. Never fatal: a mail
+	// misconfiguration means the reset completes but the notice is not sent
+	// (ResetUserMFA reports notified=false), not that the daemon fails to boot.
+	if sender := resolveMFAResetMailer(ctx, d.logger); sender != nil {
+		daemonSvc.WithMFAResetMailer(sender)
+	}
+	// The product-surface origin may already be set from the signup block
+	// above; WithAppURL is idempotent (last value wins) so setting it again
+	// here from the same env var is harmless when both apply, and this is
+	// what makes the sign-in link work when self-serve signup is off.
+	if appURL := strings.TrimSpace(os.Getenv(api.EnvAppURL)); appURL != "" {
+		daemonSvc.WithAppURL(appURL)
+	}
+
 	// Register TenantProvisioningService — the dashboard-facing read side of
 	// operator-pull tenant provisioning (E9, gibson#948, dashboard#813). Serves
 	// the operator-reported tenant_status snapshot back to the dashboard
@@ -1326,9 +1342,14 @@ func (d *daemonImpl) buildGRPCServer(ctx context.Context) (*grpcSubsystem, error
 				Roles:              tenantRoleSyncer,
 				Invitations:        admin.NewInvitationStore(d.platformDB),
 				InvitationMailer:   adminMailer,
-				InviteBaseURL:      os.Getenv("GIBSON_PUBLIC_URL"),
-				ReservedNames:      rnpForAdmin,
-				Logger:             d.logger.Slog(),
+				// The invitation accept link must land on the product surface,
+				// not the API plane — the same reason WithAppURL uses
+				// api.EnvAppURL for signup links, a few lines above. Reusing
+				// GIBSON_PUBLIC_URL here (the api.<domain> origin) built a
+				// link the dashboard serves no route for (hosted#203).
+				InviteBaseURL: os.Getenv(api.EnvAppURL),
+				ReservedNames: rnpForAdmin,
+				Logger:        d.logger.Slog(),
 			})
 			if taErr != nil {
 				d.logger.Warn(ctx, "broker admin stack: NewTenantAdminServer failed; MembershipService + SecretsService will use Unavailable stubs",

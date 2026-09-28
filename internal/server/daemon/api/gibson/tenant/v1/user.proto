@@ -283,6 +283,43 @@ service UserService {
       allowed_identities: 1  // USER
     };
   }
+
+  // ---------------------------------------------------------------------------
+  // MFA reset (hosted#206)
+  // ---------------------------------------------------------------------------
+
+  // ResetUserMFA lets an Owner or Admin recover a tenant member who is
+  // locked out of a lost authenticator device: it revokes the target's
+  // active sessions, clears every second factor and passkey Zitadel has on
+  // file for them (TOTP, U2F, passkeys — ADR-0093 decision 9's login
+  // policy allows only those), and emails the target their own sign-in link
+  // so they can sign in and re-enroll from a clean state.
+  //
+  // Unlike RevokeUserSessions, this is NOT self-service: the coarse
+  // ext-authz gate below requires the "admin" relation, which the tenant
+  // Owner also holds (owner implies admin in model.fga), matching the scope
+  // exactly — "an Owner or Admin resets any tenant user's MFA in their
+  // tenant, including the Owner's." A plain member cannot call this on
+  // themselves; that is a deliberate scope boundary, not an oversight.
+  //
+  // The caller receives nothing that grants access to the reset account —
+  // no code, no link, no session. The email goes to the target's own
+  // address only. Every call is audited (actor, target, tenant, when) via
+  // the daemon's existing audit pipeline, action "tenant_user_mfa_reset".
+  //
+  // target_user_id must be a member of the caller's own tenant (checked via
+  // FGA "member" — the same umbrella relation ListMembers enumerates,
+  // encompassing every role). A target in a different tenant is refused
+  // with NotFound, so the RPC cannot be used to probe whether a user id
+  // exists in some other tenant.
+  rpc ResetUserMFA(ResetUserMFARequest) returns (ResetUserMFAResponse) {
+    option (gibson.auth.v1.authz) = {
+      relation: "admin"
+      object_type: "tenant"
+      object_deriver: "tenant_from_identity"
+      allowed_identities: 1  // USER
+    };
+  }
 }
 
 // ---------------------------------------------------------------------------
@@ -705,4 +742,33 @@ message RevokeUserSessionsResponse {
   // grants_revoked is the number of refresh-token grants that were revoked
   // for the target user.
   int32 grants_revoked = 2;
+}
+
+// ---------------------------------------------------------------------------
+// MFA reset messages (hosted#206)
+// ---------------------------------------------------------------------------
+
+message ResetUserMFARequest {
+  // target_user_id is the FGA user id (the Zitadel numeric sub, without the
+  // "user:" type prefix) of the tenant member whose MFA is reset. Required.
+  // Must be a member of the caller's own tenant, including the tenant Owner.
+  string target_user_id = 1;
+}
+
+message ResetUserMFAResponse {
+  // sessions_terminated is the number of active sessions that were
+  // terminated for the target user.
+  int32 sessions_terminated = 1;
+  // otp_cleared is true when an authenticator-app (TOTP) factor was removed.
+  bool otp_cleared = 2;
+  // u2f_cleared is the number of U2F security-key credentials removed.
+  int32 u2f_cleared = 3;
+  // passkeys_cleared is the number of passwordless/passkey credentials
+  // removed.
+  int32 passkeys_cleared = 4;
+  // notified is true when the reset notice was sent to the target's own
+  // address. False when no delivering mail transport is configured — the
+  // reset itself still completed (sessions revoked, factors cleared); the
+  // caller should tell the target out-of-band in that case.
+  bool notified = 5;
 }

@@ -819,18 +819,25 @@ func main() {
 		MigrationEmitter:  migrationEmitter,
 		StatusReporter:    tenantStatusReporter,
 		Mail:              mailer,
-		DashboardBaseURL:  os.Getenv("DASHBOARD_URL"),
+		// The product-surface origin (app.<domain>), never DASHBOARD_URL: that
+		// name named the in-cluster Service DNS address
+		// (http://gibson-dashboard:3000), which built a welcome-email link no
+		// human's browser could open (hosted#203).
+		DashboardBaseURL: os.Getenv("GIBSON_APP_URL"),
 	}).SetupWithManager(mgr); err != nil {
 		setupLog.Error(err, "Failed to create controller", "controller", "Tenant")
 		os.Exit(1)
 	}
 
 	if err := (&controller.TenantMemberReconciler{
-		Client:        mgr.GetClient(),
-		Scheme:        mgr.GetScheme(),
-		FGA:           fgaClient,
-		Mail:          mailer,
-		BaseAcceptURL: os.Getenv("DASHBOARD_URL"),
+		Client: mgr.GetClient(),
+		Scheme: mgr.GetScheme(),
+		FGA:    fgaClient,
+		Mail:   mailer,
+		// Same product-surface origin as TenantReconciler.DashboardBaseURL
+		// above, for the same reason: the invitation accept link must reach
+		// a human's browser, not an in-cluster address (hosted#203).
+		BaseAcceptURL: os.Getenv("GIBSON_APP_URL"),
 	}).SetupWithManager(mgr); err != nil {
 		setupLog.Error(err, "Failed to create controller", "controller", "TenantMember")
 		os.Exit(1)

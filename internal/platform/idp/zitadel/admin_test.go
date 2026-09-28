@@ -504,44 +504,41 @@ func TestHumanPasswordChangedAt_UpstreamErrorIsSurfaced(t *testing.T) {
 // Username-from-email normalization (ADR-0093 decision 1)
 // ---------------------------------------------------------------------------
 
-// TestEnsureHumanUser_UsernameIsNormalizedEmail pins that EnsureHumanUser
-// derives userName from idp.UsernameForEmail(req.Email), not the raw email
-// as typed — the instance's domain policy keys username uniqueness on this
-// exact string, so a stray case or whitespace difference must not mint a
-// second account for the same address.
-func TestEnsureHumanUser_UsernameIsNormalizedEmail(t *testing.T) {
+// TestEnsureHumanUserNoPassword_UsernameIsNormalizedEmail pins that the
+// human-user create derives username from idp.UsernameForEmail(email), not
+// the raw email as typed — the instance's domain policy keys username
+// uniqueness on this exact string, so a stray case or whitespace difference
+// must not mint a second account for the same address.
+func TestEnsureHumanUserNoPassword_UsernameIsNormalizedEmail(t *testing.T) {
 	const rawEmail = " Alice@Example.COM "
 	var gotUserName string
-	_, cfg := setupServer(t, func(w http.ResponseWriter, r *http.Request) {
-		if !strings.HasSuffix(r.URL.Path, "/users/human") {
+	cfg := setupUserServiceV2Server(t, func(w http.ResponseWriter, r *http.Request) {
+		if !strings.HasSuffix(r.URL.Path, "/zitadel.user.v2.UserService/AddHumanUser") {
 			http.NotFound(w, r)
 			return
 		}
 		var body struct {
-			UserName string `json:"userName"`
+			Username string `json:"username"`
 		}
 		_ = json.NewDecoder(r.Body).Decode(&body)
-		gotUserName = body.UserName
+		gotUserName = body.Username
 		jsonResp(w, http.StatusOK, map[string]string{"userId": "user-1"})
-	})
+	}, nil)
 	client, err := zitadel.New(context.Background(), cfg)
 	if err != nil {
 		t.Fatalf("New: %v", err)
 	}
 	defer func() { _ = client.Close() }()
 
-	if _, err := client.EnsureHumanUser(context.Background(), idp.EnsureHumanUserRequest{
-		OrgID: "org-1",
-		Email: rawEmail,
-	}); err != nil {
-		t.Fatalf("EnsureHumanUser: %v", err)
+	if _, err := client.EnsureHumanUserNoPassword(context.Background(), "org-1", rawEmail, "Invited", "User"); err != nil {
+		t.Fatalf("EnsureHumanUserNoPassword: %v", err)
 	}
 	want := idp.UsernameForEmail(rawEmail)
 	if gotUserName != want {
-		t.Errorf("userName = %q, want %q (normalized)", gotUserName, want)
+		t.Errorf("username = %q, want %q (normalized)", gotUserName, want)
 	}
 	if gotUserName == rawEmail {
-		t.Errorf("userName was sent verbatim as %q, want it normalized", rawEmail)
+		t.Errorf("username was sent verbatim as %q, want it normalized", rawEmail)
 	}
 }
 
@@ -581,5 +578,166 @@ func TestCreateHumanUser_UsernameIsNormalizedEmail(t *testing.T) {
 	}
 	if gotUserName == rawEmail {
 		t.Errorf("userName was sent verbatim as %q, want it normalized", rawEmail)
+	}
+}
+
+// ---------------------------------------------------------------------------
+// CreateSetupLink tests (hosted#203)
+//
+// Uses the shared zitadelconntest.Identity fake directly (not setupServer's
+// minimal management/v2-prefix router) because CreateInviteCode is a plain
+// Connect-JSON call with no REST-gateway path, and because the fake's
+// request/response field names (userId, returnCode, inviteCode) come from
+// real Zitadel v4.18.0 source, not an assumption — the wire shape this test
+// needs to trust, not just exercise.
+// ---------------------------------------------------------------------------
+
+// TestCreateSetupLink_BuildsFromTheGivenAppURL is the gibson#254 regression:
+// the link must start at the appURL the CALLER passed in, never at the
+// client's own configured issuer or Zitadel endpoint. cfg.Issuer here is
+// deliberately set to something that is NOT the appURL, so a link built from
+// the wrong source is caught immediately rather than by coincidence of both
+// values matching in the test fixture.
+func TestCreateSetupLink_BuildsFromTheGivenAppURL(t *testing.T) {
+	id := zitadelconntest.NewIdentity()
+	srv := zitadelconntest.New(t, "", id.Handler())
+	cfg := testConfig(t, srv)
+	cfg.Issuer = "https://this-is-not-the-app-url.invalid"
+
+	orgID := id.AddOrg("tenant-1")
+	userID := id.AddUser(orgID, "invitee@example.com")
+
+	client, err := zitadel.New(context.Background(), cfg)
+	if err != nil {
+		t.Fatalf("New: %v", err)
+	}
+	defer func() { _ = client.Close() }()
+
+	const appURL = "https://app.example.com"
+	link, err := client.CreateSetupLink(context.Background(), orgID, userID, appURL)
+	if err != nil {
+		t.Fatalf("CreateSetupLink: %v", err)
+	}
+	if !strings.HasPrefix(link, appURL+"/ui/v2/login/verify?") {
+		t.Fatalf("link = %q, want it to start at %q (the given appURL) — never at cfg.Issuer or any other endpoint", link, appURL)
+	}
+	if strings.Contains(link, "this-is-not-the-app-url") {
+		t.Errorf("link = %q, leaked cfg.Issuer instead of using the given appURL", link)
+	}
+	if !strings.Contains(link, "userId="+userID) || !strings.Contains(link, "organization="+orgID) || !strings.Contains(link, "invite=true") {
+		t.Errorf("link = %q, want userId, organization and invite=true (the Login v2 verify page)", link)
+	}
+	wantCode := id.InviteCode(userID)
+	if wantCode == "" || !strings.Contains(link, "code="+wantCode) {
+		t.Errorf("link = %q, want the code the fake minted (%q) substituted in", link, wantCode)
+	}
+}
+
+// TestCreateSetupLink_RequiresAppURL: an empty appURL must refuse rather
+// than silently mint a link with an empty host.
+func TestCreateSetupLink_RequiresAppURL(t *testing.T) {
+	id := zitadelconntest.NewIdentity()
+	srv := zitadelconntest.New(t, "", id.Handler())
+	cfg := testConfig(t, srv)
+	orgID := id.AddOrg("tenant-1")
+	userID := id.AddUser(orgID, "invitee@example.com")
+
+	client, err := zitadel.New(context.Background(), cfg)
+	if err != nil {
+		t.Fatalf("New: %v", err)
+	}
+	defer func() { _ = client.Close() }()
+
+	if _, err := client.CreateSetupLink(context.Background(), orgID, userID, ""); err == nil {
+		t.Fatal("expected an error for an empty appURL")
+	}
+}
+
+// TestCreateSetupLink_NeverSendsCode: the request must use returnCode, never
+// sendCode — Zitadel must never email the code itself, since the caller
+// already owns messaging for this user.
+func TestCreateSetupLink_NeverSendsCode(t *testing.T) {
+	id := zitadelconntest.NewIdentity()
+	srv := zitadelconntest.New(t, "", id.Handler())
+	cfg := testConfig(t, srv)
+	orgID := id.AddOrg("tenant-1")
+	userID := id.AddUser(orgID, "invitee@example.com")
+
+	client, err := zitadel.New(context.Background(), cfg)
+	if err != nil {
+		t.Fatalf("New: %v", err)
+	}
+	defer func() { _ = client.Close() }()
+
+	if _, err := client.CreateSetupLink(context.Background(), orgID, userID, "https://app.example.com"); err != nil {
+		t.Fatalf("CreateSetupLink: %v", err)
+	}
+	// The fake's own state proves it took the returnCode branch: sendCode
+	// clears u.inviteCode instead of setting it (see handleCreateInviteCode).
+	if id.InviteCode(userID) == "" {
+		t.Error("no invite code recorded; CreateSetupLink must call returnCode, not sendCode")
+	}
+}
+
+// TestCreateSetupLink_UnknownUserIsAnError: the fake 404s an unknown user id,
+// and that must surface as an error, not a link built for nobody.
+func TestCreateSetupLink_UnknownUserIsAnError(t *testing.T) {
+	id := zitadelconntest.NewIdentity()
+	srv := zitadelconntest.New(t, "", id.Handler())
+	cfg := testConfig(t, srv)
+
+	client, err := zitadel.New(context.Background(), cfg)
+	if err != nil {
+		t.Fatalf("New: %v", err)
+	}
+	defer func() { _ = client.Close() }()
+
+	if _, err := client.CreateSetupLink(context.Background(), "org-1", "no-such-user", "https://app.example.com"); err == nil {
+		t.Fatal("expected an error for an unknown user id")
+	}
+}
+
+// TestCreateSetupLink_RequiresUserID: an empty userID must refuse before
+// making any call.
+func TestCreateSetupLink_RequiresUserID(t *testing.T) {
+	id := zitadelconntest.NewIdentity()
+	srv := zitadelconntest.New(t, "", id.Handler())
+	cfg := testConfig(t, srv)
+
+	client, err := zitadel.New(context.Background(), cfg)
+	if err != nil {
+		t.Fatalf("New: %v", err)
+	}
+	defer func() { _ = client.Close() }()
+
+	if _, err := client.CreateSetupLink(context.Background(), "org-1", "", "https://app.example.com"); err == nil {
+		t.Fatal("expected an error for an empty userID")
+	}
+}
+
+// TestCreateSetupLink_EmptyInviteCodeIsAnError guards against silently
+// returning a link with no code substituted when Zitadel's response is
+// malformed: a 200 OK with no inviteCode field. The shared Identity fake
+// never produces this shape for a returnCode request (it is exercised in
+// TestCreateSetupLink_NeverSendsCode instead), so this uses a minimal
+// handler standing in for a malformed upstream response.
+func TestCreateSetupLink_EmptyInviteCodeIsAnError(t *testing.T) {
+	srv := zitadelconntest.New(t, "", http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.URL.Path != "/zitadel.user.v2.UserService/CreateInviteCode" {
+			http.NotFound(w, r)
+			return
+		}
+		jsonResp(w, http.StatusOK, map[string]string{})
+	}))
+	cfg := testConfig(t, srv)
+
+	client, err := zitadel.New(context.Background(), cfg)
+	if err != nil {
+		t.Fatalf("New: %v", err)
+	}
+	defer func() { _ = client.Close() }()
+
+	if _, err := client.CreateSetupLink(context.Background(), "org-1", "user-1", "https://app.example.com"); err == nil {
+		t.Fatal("expected an error for a response with no inviteCode")
 	}
 }

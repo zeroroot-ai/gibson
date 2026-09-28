@@ -1,0 +1,70 @@
+# Warms the two caches go-ci's `lint` job restores (gibson#308).
+#
+# Why a workflow on push to main and not the lint job itself: a cache saved
+# on a PR branch is visible only to that branch, while a cache saved on main
+# is visible to every PR. The lint job runs on pull_request only, so without
+# this workflow every PR's first run starts cold and pays the full 8 minutes.
+#
+# `make lint LINT_BASE=HEAD~1` analyzes the whole tree, which is what fills
+# the cache, and reports only findings new in the last commit. main is gated
+# by the same lint on every PR, so a red here is a real finding that slipped
+# through, not noise.
+name: lint-cache-warm
+
+on:
+  push:
+    branches: [main]
+    paths:
+      - '**/*.go'
+      - 'go.mod'
+      - 'go.sum'
+      - '.golangci.yml'
+      - 'Makefile'
+      - '.github/workflows/lint-cache-warm.yml'
+
+permissions:
+  contents: read
+
+concurrency:
+  group: lint-cache-warm
+  cancel-in-progress: true
+
+jobs:
+  warm:
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          fetch-depth: 2 # HEAD~1 must exist
+
+      - uses: actions/setup-go@b7ad1dad31e06c5925ef5d2fc7ad053ef454303e # v7.0.0
+        with:
+          go-version-file: go.mod
+
+      - uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v7.0.0
+        with:
+          node-version: '22'
+
+      # Same keys as go-ci's lint job, so what this run saves is what the
+      # next PR restores.
+      - name: Restore the pinned lint tool binaries
+        uses: actions/cache@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
+        with:
+          path: bin/tools
+          key: lint-tools-${{ runner.os }}-${{ hashFiles('Makefile', 'go.mod') }}
+
+      - name: Restore the golangci-lint analysis cache
+        uses: actions/cache@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
+        with:
+          path: ~/.cache/golangci-lint
+          key: golangci-cache-${{ runner.os }}-${{ hashFiles('go.sum', '.golangci.yml', 'Makefile') }}-${{ github.sha }}
+          restore-keys: |
+            golangci-cache-${{ runner.os }}-${{ hashFiles('go.sum', '.golangci.yml', 'Makefile') }}-
+            golangci-cache-${{ runner.os }}-
+
+      - name: Lint the last commit and fill the cache
+        run: make lint LINT_BASE=HEAD~1
+
+      - name: Build deadcode so its binary is cached too
+        run: make lint-deadcode

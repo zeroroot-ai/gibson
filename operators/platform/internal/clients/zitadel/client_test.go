@@ -7,6 +7,7 @@ import (
 	"context"
 	"encoding/json"
 	"errors"
+	"io"
 	"net/http"
 	"net/http/httptest"
 	"reflect"
@@ -1561,5 +1562,135 @@ func TestClearHumanFactors_PasskeyErrorPath(t *testing.T) {
 	c := New(srv.URL, "pat", "")
 	if err := c.ClearHumanFactors(context.Background(), "UID-1"); err == nil {
 		t.Fatal("ClearHumanFactors: expected an error when ListPasskeys fails")
+	}
+}
+
+// TestSearchIAMMembers_DecodesFields pins the response shape against a real
+// staging capture (hosted#189): `/admin/v1/members/_search` returns
+// `result[]` rows naming `userId`, `roles`, `preferredLoginName`, `email`,
+// `firstName`, `lastName`, `displayName`, `userType`
+// ("TYPE_HUMAN"/"TYPE_MACHINE") and `userResourceOwner` — distinct from the
+// per-row `details.resourceOwner`, which this decode intentionally ignores.
+func TestSearchIAMMembers_DecodesFields(t *testing.T) {
+	const body = `{
+		"details": {"totalResult": "2"},
+		"result": [
+			{
+				"userId": "392089930845388841",
+				"details": {"resourceOwner": "392089930844602409"},
+				"roles": ["IAM_OWNER"],
+				"preferredLoginName": "zitadel-admin@zitadel.app.staging.zeroroot.ai",
+				"email": "zitadel-admin@zitadel.app.staging.zeroroot.ai",
+				"firstName": "ZITADEL",
+				"lastName": "Admin",
+				"displayName": "ZITADEL Admin",
+				"userType": "TYPE_HUMAN",
+				"userResourceOwner": "392089930844667945"
+			},
+			{
+				"userId": "392089930845192233",
+				"details": {"resourceOwner": "392089930844602409"},
+				"roles": ["IAM_OWNER"],
+				"preferredLoginName": "iam-admin",
+				"displayName": "Automatically Initialized IAM Admin",
+				"userType": "TYPE_MACHINE",
+				"userResourceOwner": "392089930844667945"
+			}
+		]
+	}`
+	var gotPath, gotMethod string
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		gotPath, gotMethod = r.URL.Path, r.Method
+		_, _ = w.Write([]byte(body))
+	}))
+	t.Cleanup(srv.Close)
+
+	c := New(srv.URL, "pat", "")
+	members, err := c.SearchIAMMembers(context.Background())
+	if err != nil {
+		t.Fatalf("SearchIAMMembers: %v", err)
+	}
+	if gotMethod != http.MethodPost || gotPath != "/admin/v1/members/_search" {
+		t.Fatalf("request = %s %s, want POST /admin/v1/members/_search", gotMethod, gotPath)
+	}
+	if len(members) != 2 {
+		t.Fatalf("len(members) = %d, want 2", len(members))
+	}
+	human := members[0]
+	if human.UserType != ZitadelUserTypeHuman {
+		t.Fatalf("members[0].UserType = %q, want %q", human.UserType, ZitadelUserTypeHuman)
+	}
+	if human.PreferredLoginName != "zitadel-admin@zitadel.app.staging.zeroroot.ai" {
+		t.Fatalf("members[0].PreferredLoginName = %q", human.PreferredLoginName)
+	}
+	if human.UserResourceOwner != "392089930844667945" {
+		t.Fatalf("members[0].UserResourceOwner = %q, want the USER's org, not details.resourceOwner", human.UserResourceOwner)
+	}
+	if len(human.Roles) != 1 || human.Roles[0] != "IAM_OWNER" {
+		t.Fatalf("members[0].Roles = %v, want [IAM_OWNER]", human.Roles)
+	}
+	if members[1].UserType != ZitadelUserTypeMachine {
+		t.Fatalf("members[1].UserType = %q, want %q", members[1].UserType, ZitadelUserTypeMachine)
+	}
+}
+
+func TestSearchIAMMembers_Error(t *testing.T) {
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+		w.WriteHeader(http.StatusInternalServerError)
+	}))
+	t.Cleanup(srv.Close)
+
+	c := New(srv.URL, "pat", "")
+	if _, err := c.SearchIAMMembers(context.Background()); err == nil {
+		t.Fatal("SearchIAMMembers: expected an error on 500")
+	}
+}
+
+func TestDeleteUser_Success(t *testing.T) {
+	var gotPath string
+	var gotBody string
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		gotPath = r.URL.Path
+		buf, _ := io.ReadAll(r.Body)
+		gotBody = string(buf)
+		_, _ = w.Write([]byte(`{}`))
+	}))
+	t.Cleanup(srv.Close)
+
+	c := New(srv.URL, "pat", "")
+	if err := c.DeleteUser(context.Background(), "UID-1"); err != nil {
+		t.Fatalf("DeleteUser: %v", err)
+	}
+	if gotPath != "/zitadel.user.v2.UserService/DeleteUser" {
+		t.Fatalf("path = %q, want /zitadel.user.v2.UserService/DeleteUser", gotPath)
+	}
+	if !strings.Contains(gotBody, `"UID-1"`) {
+		t.Fatalf("body = %q, want it to name the userId", gotBody)
+	}
+}
+
+// TestDeleteUser_NotFoundIsIdempotent pins the Client interface's contract:
+// deleting a user that is already gone is success, not an error.
+func TestDeleteUser_NotFoundIsIdempotent(t *testing.T) {
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+		w.WriteHeader(http.StatusNotFound)
+	}))
+	t.Cleanup(srv.Close)
+
+	c := New(srv.URL, "pat", "")
+	if err := c.DeleteUser(context.Background(), "UID-1"); err != nil {
+		t.Fatalf("DeleteUser: expected nil on 404, got %v", err)
+	}
+}
+
+func TestDeleteUser_Error(t *testing.T) {
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+		w.WriteHeader(http.StatusInternalServerError)
+	}))
+	t.Cleanup(srv.Close)
+
+	c := New(srv.URL, "pat", "")
+	if err := c.DeleteUser(context.Background(), "UID-1"); err == nil {
+		t.Fatal("DeleteUser: expected an error on 500")
 	}
 }
