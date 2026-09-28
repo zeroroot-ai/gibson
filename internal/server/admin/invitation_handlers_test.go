@@ -497,14 +497,15 @@ func TestAcceptInvitation_HappyPath(t *testing.T) {
 	if len(got) != 1 || !got[0].Active || len(got[0].RoleKeys) != 1 || got[0].RoleKeys[0] != string(tenantrole.Viewer) {
 		t.Fatalf("expected an active viewer grant for user-bob, got %+v", got)
 	}
+	// The invitee is created with the same no-password create as the
+	// Platform owner and the first tenant Owner, in the tenant's own org. A
+	// v1 Management create left the user INITIAL, which the Login v2 app
+	// refuses (hosted#208).
 	if len(idpC.ensuredEmails) != 1 || idpC.ensuredEmails[0] != "bob@example.com" {
-		t.Fatalf("expected EnsureHumanUser for bob, got %v", idpC.ensuredEmails)
+		t.Fatalf("expected EnsureHumanUserNoPassword for bob, got %v", idpC.ensuredEmails)
 	}
-	// EmailVerified is true: the token this call redeemed is itself the
-	// proof of mailbox control, so the IdP's own separate verification
-	// email would be redundant (hosted#203).
-	if len(idpC.ensuredEmailsVerified) != 1 || !idpC.ensuredEmailsVerified[0] {
-		t.Fatalf("expected EnsureHumanUser called with EmailVerified=true, got %v", idpC.ensuredEmailsVerified)
+	if len(idpC.ensuredOrgIDs) != 1 || idpC.ensuredOrgIDs[0] != "org-1" {
+		t.Fatalf("expected the invitee created in org-1, got %v", idpC.ensuredOrgIDs)
 	}
 	// A setup link was minted for the same user, in the same org, built from
 	// the product-surface origin — and rides back in the response for the

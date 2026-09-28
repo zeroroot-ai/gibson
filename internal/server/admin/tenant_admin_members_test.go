@@ -78,11 +78,11 @@ type membersIdPClient struct {
 	profiles map[string]*idp.UserProfile
 	failFor  map[string]bool // accountIDs that should return an error
 
-	// EnsureHumanUser recording (gibson#633)
-	ensuredEmails         []string
-	ensuredEmailsVerified []bool
-	ensureUserID          string
-	ensureErr             error
+	// EnsureHumanUserNoPassword recording (gibson#633, hosted#208)
+	ensuredOrgIDs []string
+	ensuredEmails []string
+	ensureUserID  string
+	ensureErr     error
 
 	// Removal recording (ADR-0093 §11, hosted#205): RemoveMember/LeaveTenant
 	// tests inject a failure and assert the call happened.
@@ -139,18 +139,6 @@ func (c *membersIdPClient) RevokeSession(_ context.Context, _ string) error { re
 func (c *membersIdPClient) ClearHumanFactors(_ context.Context, _ string) (idp.ClearHumanFactorsResult, error) {
 	return idp.ClearHumanFactorsResult{}, nil
 }
-func (c *membersIdPClient) EnsureHumanUser(_ context.Context, req idp.EnsureHumanUserRequest) (string, error) {
-	c.ensuredEmails = append(c.ensuredEmails, req.Email)
-	c.ensuredEmailsVerified = append(c.ensuredEmailsVerified, req.EmailVerified)
-	if c.ensureErr != nil {
-		return "", c.ensureErr
-	}
-	if c.ensureUserID == "" {
-		return "user-ensured", nil
-	}
-	return c.ensureUserID, nil
-}
-
 func (c *membersIdPClient) CreateSetupLink(_ context.Context, orgID, userID, appURL string) (string, error) {
 	c.setupLinkOrgIDs = append(c.setupLinkOrgIDs, orgID)
 	c.setupLinkUserIDs = append(c.setupLinkUserIDs, userID)
@@ -179,8 +167,16 @@ func (c *membersIdPClient) FindUserIDByEmail(_ context.Context, _ string) (strin
 	}
 	return "", idp.ErrNotFound
 }
-func (c *membersIdPClient) EnsureHumanUserNoPassword(_ context.Context, _, _, _, _ string) (string, error) {
-	return "", nil
+func (c *membersIdPClient) EnsureHumanUserNoPassword(_ context.Context, orgID, email, _, _ string) (string, error) {
+	c.ensuredOrgIDs = append(c.ensuredOrgIDs, orgID)
+	c.ensuredEmails = append(c.ensuredEmails, email)
+	if c.ensureErr != nil {
+		return "", c.ensureErr
+	}
+	if c.ensureUserID == "" {
+		return "user-ensured", nil
+	}
+	return c.ensureUserID, nil
 }
 func (c *membersIdPClient) CreateSetupInviteCode(_ context.Context, _, _ string, _ bool) (string, error) {
 	return "", nil

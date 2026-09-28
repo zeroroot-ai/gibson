@@ -504,44 +504,41 @@ func TestHumanPasswordChangedAt_UpstreamErrorIsSurfaced(t *testing.T) {
 // Username-from-email normalization (ADR-0093 decision 1)
 // ---------------------------------------------------------------------------
 
-// TestEnsureHumanUser_UsernameIsNormalizedEmail pins that EnsureHumanUser
-// derives userName from idp.UsernameForEmail(req.Email), not the raw email
-// as typed — the instance's domain policy keys username uniqueness on this
-// exact string, so a stray case or whitespace difference must not mint a
-// second account for the same address.
-func TestEnsureHumanUser_UsernameIsNormalizedEmail(t *testing.T) {
+// TestEnsureHumanUserNoPassword_UsernameIsNormalizedEmail pins that the
+// human-user create derives username from idp.UsernameForEmail(email), not
+// the raw email as typed — the instance's domain policy keys username
+// uniqueness on this exact string, so a stray case or whitespace difference
+// must not mint a second account for the same address.
+func TestEnsureHumanUserNoPassword_UsernameIsNormalizedEmail(t *testing.T) {
 	const rawEmail = " Alice@Example.COM "
 	var gotUserName string
-	_, cfg := setupServer(t, func(w http.ResponseWriter, r *http.Request) {
-		if !strings.HasSuffix(r.URL.Path, "/users/human") {
+	cfg := setupUserServiceV2Server(t, func(w http.ResponseWriter, r *http.Request) {
+		if !strings.HasSuffix(r.URL.Path, "/zitadel.user.v2.UserService/AddHumanUser") {
 			http.NotFound(w, r)
 			return
 		}
 		var body struct {
-			UserName string `json:"userName"`
+			Username string `json:"username"`
 		}
 		_ = json.NewDecoder(r.Body).Decode(&body)
-		gotUserName = body.UserName
+		gotUserName = body.Username
 		jsonResp(w, http.StatusOK, map[string]string{"userId": "user-1"})
-	})
+	}, nil)
 	client, err := zitadel.New(context.Background(), cfg)
 	if err != nil {
 		t.Fatalf("New: %v", err)
 	}
 	defer func() { _ = client.Close() }()
 
-	if _, err := client.EnsureHumanUser(context.Background(), idp.EnsureHumanUserRequest{
-		OrgID: "org-1",
-		Email: rawEmail,
-	}); err != nil {
-		t.Fatalf("EnsureHumanUser: %v", err)
+	if _, err := client.EnsureHumanUserNoPassword(context.Background(), "org-1", rawEmail, "Invited", "User"); err != nil {
+		t.Fatalf("EnsureHumanUserNoPassword: %v", err)
 	}
 	want := idp.UsernameForEmail(rawEmail)
 	if gotUserName != want {
-		t.Errorf("userName = %q, want %q (normalized)", gotUserName, want)
+		t.Errorf("username = %q, want %q (normalized)", gotUserName, want)
 	}
 	if gotUserName == rawEmail {
-		t.Errorf("userName was sent verbatim as %q, want it normalized", rawEmail)
+		t.Errorf("username was sent verbatim as %q, want it normalized", rawEmail)
 	}
 }
 

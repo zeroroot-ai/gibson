@@ -264,9 +264,6 @@ func (f *fakeUserIdPClient) RevokeSession(_ context.Context, _ string) error { r
 func (f *fakeUserIdPClient) ClearHumanFactors(_ context.Context, _ string) (idp.ClearHumanFactorsResult, error) {
 	return idp.ClearHumanFactorsResult{}, nil
 }
-func (f *fakeUserIdPClient) EnsureHumanUser(_ context.Context, _ idp.EnsureHumanUserRequest) (string, error) {
-	return "user-1", nil
-}
 func (f *fakeUserIdPClient) CreateSetupLink(_ context.Context, _, userID, appURL string) (string, error) {
 	return appURL + "/ui/v2/login/verify?invite=true&userId=" + userID, nil
 }
