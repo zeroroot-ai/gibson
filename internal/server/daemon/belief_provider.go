@@ -69,14 +69,20 @@ func newBeliefSchemaRegistry() (*ontology.BeliefSchemaRegistry, error) {
 	return reg, nil
 }
 
-// wireBrainRegistry registers the belief-engine OnEngine hooks — both the
-// per-host WireBelief pipeline and the graph-coupled WireSliceBelief pipeline
-// (gibson#275) — onto registry, using the default bounded schedule
+// wireBrainRegistry registers the belief-engine OnEngine hooks — the per-host
+// WireBelief pipeline, the graph-coupled WireSliceBelief pipeline
+// (gibson#275), and value-of-information planning (WireVoIPlanner, ADR-0026,
+// gibson#283) — onto registry, using the default bounded schedule
 // (brain.DefaultSliceSchedule). Shared by daemon.go's Start() and grpc.go's
 // lazy buildGRPCServer() fallback, which used to duplicate this wiring
 // inline; extracting it here keeps the two construction paths from drifting
 // apart and makes the wiring itself unit-testable independent of either
 // call site's much larger bootstrap sequence (Redis, state client, ...).
+//
+// WireVoIPlanner requires VoIGateSystem to already be registered as a System
+// on registry (brain.ExecutorSystems() carries it) — this hook only starts
+// the off-tick worker; the caller's System list is what makes the in-tick
+// gate half live.
 func wireBrainRegistry(
 	ctx context.Context,
 	registry *brain.Registry,
@@ -88,5 +94,9 @@ func wireBrainRegistry(
 	registry.OnEngine(func(e *brain.Engine) {
 		brain.WireBelief(ctx, e, beliefProvider, 0)
 		brain.WireSliceBelief(ctx, e, beliefSchemaRegistry, sliceBeliefProvider, 0, sliceOpts, propagateOpts)
+		// The deep BAMCP sequential tree search stays gibson#333; this is
+		// ADR-0026's one-step-exact plan, re-triggered per evidence change via
+		// the closed loop (VoIGateSystem/VoIWorker's gate/worker split).
+		brain.WireVoIPlanner(ctx, e, beliefSchemaRegistry, brain.ExactVoIScorer(), brain.DefaultVoITopK, 0)
 	})
 }

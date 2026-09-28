@@ -96,3 +96,45 @@ func TestWireBrainRegistry_InstallsBothBeliefPipelines(t *testing.T) {
 	}
 	t.Fatalf("host was never scored by either belief pipeline within the deadline")
 }
+
+// TestWireBrainRegistry_InstallsVoIPlanner proves wireBrainRegistry also
+// installs value-of-information planning (ADR-0026, gibson#283) live: a
+// running goal mission gets a completed VoI plan within a few ticks, the
+// same way TestWireBrainRegistry_InstallsBothBeliefPipelines proves the
+// belief pipelines. Before this wiring, VoIGateSystem/WireVoIPlanner were
+// never installed on any engine the daemon constructs — the whole VoI
+// subsystem was built but unreachable from daemon main() (the whole-program
+// deadcode gate's finding at epic->main).
+//
+// The registry is constructed with brain.ExecutorSystems() (which
+// VoIGateSystem joins), mirroring daemon.go's Start() exactly — not just
+// brain.BeliefSystem alone, the way the belief-pipeline test above does —
+// because VoIGateSystem's in-tick request is the other half VoIWorker's
+// off-tick drain needs.
+func TestWireBrainRegistry_InstallsVoIPlanner(t *testing.T) {
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+
+	registry := brain.NewRegistry(ctx, append(
+		[]brain.System{brain.BeliefSystem},
+		brain.ExecutorSystems()...,
+	)...)
+	beliefSchemaRegistry, err := newBeliefSchemaRegistry()
+	if err != nil {
+		t.Fatalf("newBeliefSchemaRegistry: %v", err)
+	}
+	wireBrainRegistry(ctx, registry, brain.PlaceholderBeliefProvider(), brain.PlaceholderSliceBeliefProvider(), beliefSchemaRegistry)
+
+	e := registry.For("tenant-voi-wire-test") // triggers the OnEngine hook
+	e.Submit(brain.MissionProjected{ID: "m1", Goal: "find a path"})
+
+	deadline := time.Now().Add(2 * time.Second)
+	for time.Now().Before(deadline) {
+		plans := e.VoIPlanSnapshot()
+		if len(plans) == 1 && plans[0].MissionID == "m1" && !plans[0].InFlight {
+			return // VoIGateSystem requested a plan, VoIWorker completed it
+		}
+		time.Sleep(5 * time.Millisecond)
+	}
+	t.Fatalf("mission m1 never got a completed VoI plan within the deadline")
+}

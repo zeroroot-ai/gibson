@@ -80,6 +80,17 @@ func init() {
 	registerEvent("belief.requested", func() Event { return &BeliefScoreRequested{} })
 	registerEvent("belief.scored", func() Event { return &BeliefScored{} })
 
+	// belief_slice_gate.go (ADR-0029, gibson#275): registered for codec
+	// completeness like every other Event, though the live graph-coupled
+	// pipeline (WireSliceBelief/SliceBeliefWorker) drives SliceGate.Apply
+	// directly rather than through Engine.Submit/Reduce today — the belief
+	// write itself lands via BeliefSubstrate.SetBelief, not a World mutation
+	// Reduce would apply. Registering the codec still matters: it is what a
+	// future Submit-based caller (or a replay of a differently-produced
+	// Timeline) needs to decode these kinds at all.
+	registerEvent("belief.slice_requested", func() Event { return &SliceScoreRequested{} })
+	registerEvent("belief.slice_scored", func() Event { return &SliceScored{} })
+
 	// node_belief.go
 	registerEvent("node_belief.set", func() Event { return &NodeBeliefSet{} })
 
