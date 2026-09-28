@@ -36,6 +36,11 @@ type worldSnapshotData struct {
 	// gibson#278). Snapshotted like AgentRuns — an externally-keyed record
 	// with no monotonic id counter of its own.
 	BetSettlements []BetSettlementSnapshot `json:"bet_settlements"`
+	// NodeBeliefs backs BeliefSubstrate for every non-Host node kind
+	// (NodeKindClaim, NodeKindTechniqueEnvironment — ADR-0029 §3, gibson#272's
+	// substrate seam). Externally-keyed by NodeRef, like BetSettlements — no
+	// monotonic id counter of its own.
+	NodeBeliefs []NodeBeliefSnapshot `json:"node_beliefs"`
 	// AgentToolCalls + FlightRecorderPolicy: the flight recorder's captured
 	// tool I/O and the tenant's retention/redaction policy (ADR-0020,
 	// gibson#271). The policy must be snapshotted too, or a tenant's
@@ -75,6 +80,7 @@ func SnapshotWorld(w *World, atSeq string) WorldSnapshot {
 		Entities:       w.EntitySnapshot(),
 		Hypotheses:     w.HypothesisSnapshot(),
 		BetSettlements: w.BetSettlementSnapshot(),
+		NodeBeliefs:    w.NodeBeliefSnapshot(),
 
 		AgentToolCalls:       w.AgentToolCallSnapshot(),
 		FlightRecorderPolicy: w.flightRecorderPolicy,
@@ -294,6 +300,13 @@ func RestoreWorld(snap WorldSnapshot, tenant string) (*World, error) {
 				MissionID:            s.MissionID,
 			})
 		}
+	}
+
+	// Replay non-Host node beliefs (ADR-0029 §3, gibson#272's substrate
+	// seam). Order does not matter: identity is NodeRef, not a
+	// world-assigned counter, same as BetSettlements above.
+	for _, nb := range data.NodeBeliefs {
+		Reduce(w, NodeBeliefSet(nb))
 	}
 
 	// Replay LLM calls.

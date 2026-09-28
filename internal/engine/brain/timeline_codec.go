@@ -80,6 +80,9 @@ func init() {
 	registerEvent("belief.requested", func() Event { return &BeliefScoreRequested{} })
 	registerEvent("belief.scored", func() Event { return &BeliefScored{} })
 
+	// node_belief.go
+	registerEvent("node_belief.set", func() Event { return &NodeBeliefSet{} })
+
 	// attention.go
 	registerEvent("finding.raised", func() Event { return &FindingRaised{} })
 	registerEvent("finding.status_changed", func() Event { return &FindingStatusChanged{} })
@@ -199,6 +202,8 @@ func dereferenceEvent(ev Event) Event {
 	case *BeliefScoreRequested:
 		return *v
 	case *BeliefScored:
+		return *v
+	case *NodeBeliefSet:
 		return *v
 	case *FindingRaised:
 		return *v

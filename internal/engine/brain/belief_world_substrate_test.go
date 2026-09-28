@@ -92,7 +92,11 @@ func TestWorldBeliefSubstrate_BeliefPropagatesAnUnparseableHostID(t *testing.T) 
 // Claim/TechniqueEnvironment (ADR-0029 §3) are not ECS entities yet, so this
 // substrate — the ONE backing the live World — has nothing to read for them.
 // A different BeliefSubstrate implementation is what those views will need.
-func TestWorldBeliefSubstrate_NonHostKindIsNotFound(t *testing.T) {
+// TestWorldBeliefSubstrate_UnwrittenNonHostKindIsNotFound proves a
+// Claim/TechniqueEnvironment ref nobody has written yet reports "not found",
+// not an error and not a zero-value belief mistaken for a real one — the
+// same contract fakeBeliefSubstrate holds for an unscored node.
+func TestWorldBeliefSubstrate_UnwrittenNonHostKindIsNotFound(t *testing.T) {
 	e := NewEngine("t")
 	sub := NewWorldBeliefSubstrate(e)
 	_, ok, err := sub.Belief(context.Background(), NodeRef{Kind: NodeKindClaim, ID: "acme/hyp-1"})
@@ -100,16 +104,56 @@ func TestWorldBeliefSubstrate_NonHostKindIsNotFound(t *testing.T) {
 		t.Fatalf("Belief: %v", err)
 	}
 	if ok {
-		t.Fatalf("Belief reported ok=true for a non-Host kind this substrate cannot back")
+		t.Fatalf("Belief reported ok=true for a node nobody has written yet")
 	}
 }
 
-func TestWorldBeliefSubstrate_SetBeliefRejectsNonHostKind(t *testing.T) {
+// TestWorldBeliefSubstrate_ClaimAndTechniqueEnvironmentRoundTrip proves
+// gibson#284's calibration/reputation unblocker: a SetBelief on a Claim or
+// TechniqueEnvironment node is readable back once the engine ticks — the
+// gap that previously left calibration reading every settled bet as
+// Unscored and VoI's reputation resolving to the neutral prior.
+func TestWorldBeliefSubstrate_ClaimAndTechniqueEnvironmentRoundTrip(t *testing.T) {
 	e := NewEngine("t")
 	sub := NewWorldBeliefSubstrate(e)
-	err := sub.SetBelief(context.Background(), NodeRef{Kind: NodeKindClaim, ID: "acme/hyp-1"}, NodeBelief{})
-	if err == nil {
-		t.Fatalf("SetBelief accepted a non-Host kind this substrate cannot back")
+
+	claim := NodeRef{Kind: NodeKindClaim, ID: "acme/hyp-1"}
+	if err := sub.SetBelief(context.Background(), claim, NodeBelief{Belief: Belief{Exploitable: 0.85, Model: "bet:v1"}, EvidenceDigest: "d1"}); err != nil {
+		t.Fatalf("SetBelief(claim): %v", err)
+	}
+	techEnv := NodeRef{Kind: NodeKindTechniqueEnvironment, ID: "sqli@web"}
+	if err := sub.SetBelief(context.Background(), techEnv, NodeBelief{Belief: Belief{Exploitable: 0.4}}); err != nil {
+		t.Fatalf("SetBelief(techEnv): %v", err)
+	}
+	e.Tick()
+
+	nb, ok, err := sub.Belief(context.Background(), claim)
+	if err != nil {
+		t.Fatalf("Belief(claim): %v", err)
+	}
+	if !ok || nb.Belief.Exploitable != 0.85 || nb.EvidenceDigest != "d1" {
+		t.Fatalf("Belief(claim) = (%+v, %v), want the staked 0.85/d1", nb, ok)
+	}
+
+	nb, ok, err = sub.Belief(context.Background(), techEnv)
+	if err != nil {
+		t.Fatalf("Belief(techEnv): %v", err)
+	}
+	if !ok || nb.Belief.Exploitable != 0.4 {
+		t.Fatalf("Belief(techEnv) = (%+v, %v), want the recorded 0.4", nb, ok)
+	}
+}
+
+// TestWorldBeliefSubstrate_SetBeliefRejectsAnUnaddressableNonHostRef proves a
+// non-Host ref with no Kind or ID is a caller error, not a silent no-op.
+func TestWorldBeliefSubstrate_SetBeliefRejectsAnUnaddressableNonHostRef(t *testing.T) {
+	e := NewEngine("t")
+	sub := NewWorldBeliefSubstrate(e)
+	if err := sub.SetBelief(context.Background(), NodeRef{Kind: NodeKindClaim, ID: ""}, NodeBelief{}); err == nil {
+		t.Fatalf("SetBelief accepted a Claim ref with no id")
+	}
+	if _, _, err := sub.Belief(context.Background(), NodeRef{Kind: NodeKindClaim, ID: ""}); err == nil {
+		t.Fatalf("Belief accepted a Claim ref with no id")
 	}
 }
 

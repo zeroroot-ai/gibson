@@ -106,6 +106,14 @@ type World struct {
 	// voi_planner.go. Standalone, like decisions — never a field on Mission.
 	voiPlans *ecs.Map1[VoIPlanState]
 
+	// nodeBeliefs backs BeliefSubstrate (belief_substrate.go, gibson#272) for
+	// every node kind that is not its own ECS entity — NodeKindClaim (the
+	// market view) and NodeKindTechniqueEnvironment (the reputation view),
+	// ADR-0029 §3. Host belief stays on the Host component itself
+	// (belief.go); this is the general-purpose store for every other kind.
+	// See node_belief.go.
+	nodeBeliefs *ecs.Map1[NodeBeliefRecord]
+
 	// next*ID are monotonic, replay-deterministic counters for assigning stable
 	// ids (incremented in the single-writer reducer, so replay reproduces ids).
 	// Counters are per-entity-type; ids are unique within a (label) namespace,
@@ -188,6 +196,7 @@ func NewWorld(tenant string) *World {
 		hypotheses:     ecs.NewMap1[Hypothesis](w),
 		betSettlements: ecs.NewMap1[BetSettlement](w),
 		voiPlans:       ecs.NewMap1[VoIPlanState](w),
+		nodeBeliefs:    ecs.NewMap1[NodeBeliefRecord](w),
 	}
 }
 
@@ -401,6 +410,8 @@ func Reduce(w *World, ev Event) {
 		applyVoIPlanRequested(w, e)
 	case VoIPlanned:
 		applyVoIPlanned(w, e)
+	case NodeBeliefSet:
+		applyNodeBeliefSet(w, e)
 	}
 }
 
