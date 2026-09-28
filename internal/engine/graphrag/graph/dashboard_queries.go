@@ -27,6 +27,7 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
+	"slices"
 	"sort"
 	"strings"
 	"time"
@@ -1006,16 +1007,16 @@ RETURN label, cnt
 	}
 
 	// --- 2. Critical/high findings with affected assets ---
-	findingsCypher := `
+	findingsCypher := fmt.Sprintf(`
 MATCH (f)
 WHERE (f:Finding OR f:Vulnerability)
   AND f.severity IN ['critical', 'high']
 OPTIONAL MATCH (f)-[:AFFECTS]->(a)
-RETURN f.name AS name, f.severity AS severity, f.cve AS cve,
+RETURN coalesce(f.%s, f.%s) AS name, f.severity AS severity, f.cve AS cve,
        labels(a)[0] AS assetType, a.name AS assetName
-ORDER BY CASE f.severity WHEN 'critical' THEN 0 ELSE 1 END, f.name
+ORDER BY CASE f.severity WHEN 'critical' THEN 0 ELSE 1 END, name
 LIMIT 20
-`
+`, FindingTitleProperty, VulnerabilityKeyProperty)
 	raw2, err := q.client.ExecuteRead(ctx, func(tx neo4j.ManagedTransaction) (any, error) {
 		res, err := tx.Run(ctx, findingsCypher, params)
 		if err != nil {
@@ -1506,7 +1507,7 @@ type FindingsFilters struct {
 	Severity  string // exact match on n.severity
 	Category  string // exact match on n.type
 	MissionID string // restrict to findings reachable from the given mission
-	Search    string // case-insensitive substring on name + description
+	Search    string // case-insensitive substring on title (key for a :Vulnerability) + description
 	Limit     uint32 // default 100 when 0; clamped to 500
 	Offset    uint32 // default 0
 }
@@ -1522,6 +1523,57 @@ type FindingRecord struct {
 	Properties  map[string]string
 	Labels      []string
 	CreatedAt   time.Time
+}
+
+// The :Finding property contract (gibson#210). The graph projector is the sole
+// writer of :Finding nodes (ADR-0007). It merges a Finding on brain_id, the
+// World entity id, the same way every first-class projection is keyed, and it
+// writes the World's Title as title. The reader maps exactly those two
+// properties. A :Vulnerability is the one other label this query returns. The
+// projector merges it on key, the shared weakness id, and writes no title, so
+// the key is both its id and its name.
+const (
+	// FindingIDProperty is the property the projector merges a :Finding on.
+	FindingIDProperty = "brain_id"
+	// FindingTitleProperty is the property the projector writes the title to.
+	FindingTitleProperty = "title"
+	// VulnerabilityKeyProperty is the property the projector merges a
+	// :Vulnerability on.
+	VulnerabilityKeyProperty = "key"
+)
+
+// FindingRecordFromNode maps one node the Findings query returned onto a
+// FindingRecord. The id and the name come from the property the projector
+// writes for the node's label. A node with neither label, or one without its
+// identity property, maps to an empty id. There is no fallback to the Neo4j
+// internal id: that id is not the id the daemon handed the submitter, and a
+// read by it finds nothing.
+func FindingRecordFromNode(n dbtype.Node) FindingRecord {
+	props := coerceProps(n.Props)
+	fr := FindingRecord{
+		Description: props["description"],
+		Type:        props["type"],
+		Severity:    props["severity"],
+		Properties:  props,
+		Labels:      n.Labels,
+	}
+	if slices.Contains(n.Labels, "Finding") {
+		fr.ID = props[FindingIDProperty]
+		fr.Name = props[FindingTitleProperty]
+	} else if slices.Contains(n.Labels, "Vulnerability") {
+		fr.ID = props[VulnerabilityKeyProperty]
+		fr.Name = props[VulnerabilityKeyProperty]
+	}
+	// Created-at: prefer created_at; fall back to discoveredAt.
+	for _, key := range []string{"created_at", "discoveredAt"} {
+		if v, ok := n.Props[key]; ok {
+			if t := toTimeValue(v); !t.IsZero() {
+				fr.CreatedAt = t
+				break
+			}
+		}
+	}
+	return fr
 }
 
 const (
@@ -1578,7 +1630,12 @@ func (q *DashboardQueries) Findings(
 		params["mission_id"] = f.MissionID
 	}
 	if f.Search != "" {
-		where += "\n  AND (toLower(n.name) CONTAINS toLower($search) OR toLower(coalesce(n.description, \"\")) CONTAINS toLower($search))"
+		// A :Finding is searched by the title the projector writes, a
+		// :Vulnerability by its key. Both are searched by description.
+		where += fmt.Sprintf("\n  AND (toLower(coalesce(n.%s, \"\")) CONTAINS toLower($search)"+
+			" OR toLower(coalesce(n.%s, \"\")) CONTAINS toLower($search)"+
+			" OR toLower(coalesce(n.description, \"\")) CONTAINS toLower($search))",
+			FindingTitleProperty, VulnerabilityKeyProperty)
 		params["search"] = f.Search
 	}
 
@@ -1586,7 +1643,7 @@ func (q *DashboardQueries) Findings(
 	pageCypher := fmt.Sprintf(`
 MATCH (n)
 %s
-RETURN n, labels(n) AS labels
+RETURN n
 ORDER BY CASE n.severity WHEN 'critical' THEN 0 WHEN 'high' THEN 1 WHEN 'medium' THEN 2 WHEN 'low' THEN 3 ELSE 4 END, n.created_at DESC
 SKIP $offset LIMIT $limit
 `, where)
@@ -1610,34 +1667,7 @@ SKIP $offset LIMIT $limit
 			if !ok {
 				continue
 			}
-			lblRaw, _ := rec.Get("labels")
-			var lbls []string
-			if lArr, ok := lblRaw.([]any); ok {
-				for _, l := range lArr {
-					lbls = append(lbls, stringify(l))
-				}
-			}
-
-			props := coerceProps(neoNode.Props)
-			fr := FindingRecord{
-				ID:          orProp(props, "id", fmt.Sprintf("%d", neoNode.Id)),
-				Name:        props["name"],
-				Description: props["description"],
-				Type:        props["type"],
-				Severity:    props["severity"],
-				Properties:  props,
-				Labels:      lbls,
-			}
-			// Created-at: prefer created_at; fall back to discoveredAt.
-			for _, key := range []string{"created_at", "discoveredAt"} {
-				if v, ok := neoNode.Props[key]; ok {
-					if t := toTimeValue(v); !t.IsZero() {
-						fr.CreatedAt = t
-						break
-					}
-				}
-			}
-			out = append(out, fr)
+			out = append(out, FindingRecordFromNode(neoNode))
 		}
 		return out, nil
 	})
@@ -1685,12 +1715,4 @@ RETURN count(n) AS total
 	}
 
 	return records, total, nil
-}
-
-// orProp returns props[key] if non-empty, else fallback.
-func orProp(props map[string]string, key, fallback string) string {
-	if v, ok := props[key]; ok && v != "" {
-		return v
-	}
-	return fallback
 }

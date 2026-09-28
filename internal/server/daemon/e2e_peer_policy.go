@@ -79,6 +79,16 @@ func e2ePeerMethodPolicies() map[string]map[string]bool {
 			"/gibson.job.v1.JobService/OpenJob":                true,
 			"/gibson.job.v1.JobService/GetJob":                 true,
 			"/gibson.job.v1.JobService/CloseJob":               true,
+			// The plugin secret revocation exit test (gibson#154,
+			// tests/e2e/plugin_secret_revocation_test.go): seed the secret
+			// the GitHub plugin declares, read the install's status, revoke
+			// the binding, and clean the secret up. RegisterPlugin is not
+			// here: a chart-deployed plugin enrols with its SVID and binds
+			// its declared secrets itself (ADR-0066).
+			"/gibson.tenant.v1.SecretsService/SetSecret":                          true,
+			"/gibson.tenant.v1.SecretsService/DeleteSecret":                       true,
+			"/gibson.pluginadmin.v1.PluginAdminService/ListPluginInstalls":        true,
+			"/gibson.pluginadmin.v1.PluginAdminService/RevokePluginSecretBinding": true,
 		},
 	}
 }

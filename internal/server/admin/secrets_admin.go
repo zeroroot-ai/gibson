@@ -354,7 +354,7 @@ func (s *SecretsAdminServer) RotateSecret(ctx context.Context, req *tenantv1.Rot
 		slog.Default().WarnContext(ctx, "secret rotated but the bound plugins could not be listed", "secret", callerReq, "error", perr)
 	}
 	for _, id := range principals {
-		if err := s.events.Publish(ctx, tenant.String(), pluginEventPrincipal(id), componentevents.Event{
+		if err := s.events.Publish(ctx, tenant.String(), pluginPrincipalRef(id), componentevents.Event{
 			Type: componentevents.TypeSecretRotated, SecretName: callerReq, OccurredAt: s.now().UTC(),
 		}); err != nil {
 			slog.Default().WarnContext(ctx, "secret rotated but a plugin was not told", "secret", callerReq, "principal", id, "error", err)

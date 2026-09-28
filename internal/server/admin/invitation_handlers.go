@@ -12,10 +12,12 @@ package admin
 import (
 	"context"
 	"errors"
+	"fmt"
 	"log/slog"
 	"strings"
 	"time"
 
+	"github.com/google/uuid"
 	"google.golang.org/grpc/codes"
 	"google.golang.org/grpc/status"
 	"google.golang.org/protobuf/types/known/timestamppb"
@@ -23,6 +25,7 @@ import (
 	"github.com/zeroroot-ai/gibson/internal/platform/authz"
 	"github.com/zeroroot-ai/gibson/internal/platform/idp"
 	"github.com/zeroroot-ai/gibson/internal/platform/mailer"
+	"github.com/zeroroot-ai/gibson/internal/platform/tenantrole"
 	tenantv1 "github.com/zeroroot-ai/gibson/internal/server/daemon/api/gibson/tenant/v1"
 	"github.com/zeroroot-ai/sdk/auth"
 )
@@ -64,6 +67,51 @@ func (s *TenantAdminServer) sendInvitationEmail(ctx context.Context, tenantID, t
 	return nil
 }
 
+// invitedAddressBelongsElsewhere reports whether email already belongs to a
+// Zitadel user who is not a member of t — hosted#203, ADR-0093 decision 1.
+// false, nil covers both "the address is unused" and "the lookup could not
+// run"; in both cases the caller proceeds with a normal invitation.
+func (s *TenantAdminServer) invitedAddressBelongsElsewhere(ctx context.Context, t tenantrole.Tenant, email string) (bool, error) {
+	existingUserID, err := s.idpClient.FindUserIDByEmail(ctx, email)
+	switch {
+	case errors.Is(err, idp.ErrNotFound):
+		return false, nil
+	case err != nil:
+		// A directory that cannot answer is not a reason to disclose
+		// anything or to block the invite (same rationale as signup's
+		// existingSignupUserID, signup_service.go): proceed as if the
+		// address is unused.
+		s.logger.WarnContext(ctx, "InviteMember: directory lookup failed; proceeding with a normal invitation",
+			slog.String("error", err.Error()))
+		return false, nil
+	}
+	if s.roles == nil {
+		return false, errors.New("tenant role sync not configured")
+	}
+	member, merr := s.roles.IsMember(ctx, t, existingUserID)
+	if merr != nil {
+		return false, fmt.Errorf("check tenant membership: %w", merr)
+	}
+	return !member, nil
+}
+
+// fakeSentAfterConflictNotice sends the invitee-only conflict notice (best
+// effort — a delivery failure here must not tell the inviter anything went
+// wrong) and returns the SAME response shape a real invitation would: the
+// inviter cannot distinguish this from success, by design.
+func (s *TenantAdminServer) fakeSentAfterConflictNotice(ctx context.Context, email string) (*tenantv1.InviteMemberResponse, error) {
+	if s.inviteMailer != nil {
+		if err := s.inviteMailer.SendInvitationConflict(ctx, mailer.InvitationConflictEmail{To: email}); err != nil {
+			s.logger.WarnContext(ctx, "InviteMember: conflict notice send failed",
+				slog.String("error", err.Error()))
+		}
+	}
+	return &tenantv1.InviteMemberResponse{
+		InvitationId: uuid.NewString(),
+		ExpiresAt:    timestamppb.New(time.Now().Add(InvitationTTL)),
+	}, nil
+}
+
 // InviteMember creates (or refreshes) a pending invitation for an email address
 // with a tenant role. It generates a random token, persists only its hash with
 // a TTL, and surfaces the invitee in ListMembers as "invited". Emailing the
@@ -85,6 +133,25 @@ func (s *TenantAdminServer) InviteMember(ctx context.Context, req *tenantv1.Invi
 	}
 	if s.invitations == nil {
 		return nil, status.Error(codes.Unavailable, "invitation store not configured")
+	}
+
+	// The invited address may already belong to a DIFFERENT tenant
+	// (ADR-0093 decision 1: one tenant per person, emails unique
+	// install-wide). The inviter must never learn this: this call still
+	// reports "sent" below, and only the invitee is told, by email
+	// (hosted#203). Skipped when the optional collaborators it needs
+	// (idpClient, orgResolver) are not configured — the same graceful
+	// degradation this file already uses elsewhere.
+	if s.idpClient != nil && s.orgResolver != nil {
+		if t, terr := s.tenantOf(ctx, tenantID); terr == nil {
+			conflict, cerr := s.invitedAddressBelongsElsewhere(ctx, t, req.GetEmail())
+			if cerr != nil {
+				return nil, status.Errorf(codes.Internal, "check invited address: %v", cerr)
+			}
+			if conflict {
+				return s.fakeSentAfterConflictNotice(ctx, req.GetEmail())
+			}
+		}
 	}
 
 	var invitedBy string
@@ -146,29 +213,57 @@ func (s *TenantAdminServer) AcceptInvitation(ctx context.Context, req *tenantv1.
 		return nil, status.Error(codes.FailedPrecondition, "invitation has expired")
 	}
 
-	// Ensure the invited human exists in the tenant's per-tenant org, then
-	// project both halves of membership. Zitadel-first (idempotent) then FGA,
-	// matching SetTenantRole's fail-closed-on-authority ordering.
-	orgID, err := s.resolveTenantOrgID(ctx, rec.TenantID)
+	if s.roles == nil {
+		return nil, status.Error(codes.Unavailable, "role sync not configured")
+	}
+	t, err := s.tenantOf(ctx, rec.TenantID)
 	if err != nil {
 		return nil, err
 	}
-	userID, err := s.idpClient.EnsureHumanUser(ctx, idp.EnsureHumanUserRequest{OrgID: orgID, Email: rec.Email})
+	roleValue, ok := tenantrole.FromRelation(rec.Role)
+	if !ok {
+		return nil, status.Errorf(codes.Internal, "invitation role %q has no tenant-role mapping", rec.Role)
+	}
+
+	// Ensure the invited human exists in the tenant's per-tenant org, then
+	// assign the role: Zitadel grant first, then Roles.Sync copies it into
+	// FGA in the same call. The same no-password create as the Platform owner
+	// and the first tenant Owner: an ACTIVE user with a verified email and no
+	// credential. The caller already proved control of rec.Email by redeeming
+	// this exact token, and the setup link below is the one way to set a
+	// credential. A v1 Management create left the user INITIAL, which the
+	// Login v2 app refuses with "User Initial State is not supported"
+	// (hosted#208).
+	userID, err := s.idpClient.EnsureHumanUserNoPassword(ctx, t.OrgID, rec.Email, "Invited", "User")
 	if err != nil {
 		return nil, status.Errorf(codes.Internal, "ensure invited user: %v", err)
 	}
-	if err := s.addZitadelMember(ctx, rec.TenantID, userID, rec.Role); err != nil {
-		return nil, err
+	if err := s.roles.Assign(tenantrole.WithCaller(ctx, "daemon"), t, userID, roleValue); err != nil {
+		return nil, status.Errorf(codes.Internal, "assign tenant role: %v", err)
 	}
-	tuple := authz.Tuple{User: "user:" + userID, Relation: rec.Role, Object: "tenant:" + rec.TenantID}
-	present, err := s.authorizer.Check(ctx, tuple.User, tuple.Relation, tuple.Object)
+	if err := s.seedSessionTuples(ctx, userID, rec.TenantID); err != nil {
+		return nil, status.Errorf(codes.Internal, "seed session tuples: %v", err)
+	}
+
+	// Mint a one-time Zitadel setup link: it creates the user's credential
+	// (a password + MFA enrollment), which this call has not set — the
+	// invitee never had a password from us to leak, ADR-0093 decision 8's
+	// rule for every human this install creates. Never emailed a second
+	// time by the IdP itself (CreateSetupLink's returnCode contract): this
+	// RPC's own caller already owns messaging for this invitee.
+	//
+	// s.inviteBaseURL is the product-surface origin (GIBSON_APP_URL) — the
+	// SAME value sendInvitationEmail already built the accept-link email
+	// from, above. Never an OIDC issuer or a Zitadel endpoint: gibson#254
+	// found the Platform owner's setup link built from spec.zitadel.issuer
+	// resolved to an in-cluster address on kind.
+	//
+	// Left of SetStatus deliberately: if this fails, the invitation stays
+	// "pending" so a retry can redeem the same token again — the user create
+	// and Roles.Assign above are both idempotent, so a retry costs nothing.
+	setupURL, err := s.idpClient.CreateSetupLink(ctx, t.OrgID, userID, s.inviteBaseURL)
 	if err != nil {
-		return nil, status.Errorf(codes.Internal, "fga Check %s: %v", rec.Role, err)
-	}
-	if !present {
-		if err := s.authorizer.Write(ctx, []authz.Tuple{tuple}); err != nil {
-			return nil, status.Errorf(codes.Internal, "fga Write %s: %v", rec.Role, err)
-		}
+		return nil, status.Errorf(codes.Internal, "create setup link: %v", err)
 	}
 
 	// rec.TenantID, not a caller-supplied tenant: AcceptInvitation is
@@ -181,7 +276,7 @@ func (s *TenantAdminServer) AcceptInvitation(ctx context.Context, req *tenantv1.
 		s.logger.WarnContext(ctx, "AcceptInvitation: membership projected but status update failed",
 			slog.String("invitation_id", rec.ID), slog.String("error", err.Error()))
 	}
-	return &tenantv1.AcceptInvitationResponse{TenantId: rec.TenantID, UserId: userID}, nil
+	return &tenantv1.AcceptInvitationResponse{TenantId: rec.TenantID, UserId: userID, SetupUrl: setupURL}, nil
 }
 
 // lookupPendingInvitation resolves the target invitation for resend/cancel from
@@ -256,4 +351,32 @@ func (s *TenantAdminServer) CancelInvitation(ctx context.Context, req *tenantv1.
 		return nil, status.Errorf(codes.Internal, "cancel invitation: %v", err)
 	}
 	return &tenantv1.CancelInvitationResponse{}, nil
+}
+
+// seedSessionTuples writes the invitee's two active_session tuples, the
+// user-scoped one and the one for tenantID, with revoked_at at the epoch.
+// ext-authz's session gate fails closed on a missing per-tenant tuple, so a
+// member without it is denied on every call, starting with the
+// ListMyMemberships that resolves their tenant at sign-in (hosted#208). The
+// TenantMember controller wrote these for the old invitation path; this
+// path replaced it (ADR-0093) and has to write them itself.
+//
+// WriteConditional keys on (user, relation, object): an existing tuple is a
+// no-op. So a re-invited member who was removed keeps the revoked_at stamp
+// the removal wrote, and only tokens issued after it pass the gate.
+//
+// Unlike the removal stamp, a failure here fails the call: the invitation
+// stays pending, and a retry repairs it. Every write above is idempotent.
+func (s *TenantAdminServer) seedSessionTuples(ctx context.Context, userID, tenantID string) error {
+	cw, ok := s.authorizer.(authz.ConditionalWriter)
+	if !ok {
+		return errors.New("the authorizer cannot write session tuples")
+	}
+	if err := cw.WriteConditional(ctx, authz.ActiveSessionUserTuple(userID)); err != nil {
+		return fmt.Errorf("user-scoped active_session: %w", err)
+	}
+	if err := cw.WriteConditional(ctx, authz.ActiveSessionTuple(userID, tenantID)); err != nil {
+		return fmt.Errorf("active_session for tenant %s: %w", tenantID, err)
+	}
+	return nil
 }

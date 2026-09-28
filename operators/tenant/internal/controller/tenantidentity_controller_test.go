@@ -43,6 +43,24 @@ func (s *stubIdentityProvisioner) Deprovision(_ context.Context, orgID string) e
 	return s.deprovisionErr
 }
 
+// stubOrgMapping is a fake TenantOrgSeeder that records the (tenantID,
+// zitadelOrgID) pairs it was asked to seed and can be configured to fail
+// (ADR-0093 decision 4, hosted#195).
+type stubOrgMapping struct {
+	err   error
+	seeds []stubOrgMappingSeed
+}
+
+type stubOrgMappingSeed struct {
+	tenantID     string
+	zitadelOrgID string
+}
+
+func (s *stubOrgMapping) SetTenantZitadelOrg(_ context.Context, tenantID, zitadelOrgID string) error {
+	s.seeds = append(s.seeds, stubOrgMappingSeed{tenantID: tenantID, zitadelOrgID: zitadelOrgID})
+	return s.err
+}
+
 func newTenantIdentity(name, tenantID string) *gibsonv1alpha1.TenantIdentity {
 	return &gibsonv1alpha1.TenantIdentity{
 		ObjectMeta: metav1.ObjectMeta{Name: name, Namespace: "tenant-acme"},
@@ -72,7 +90,7 @@ func TestTenantIdentity_ProvisionsAndMarksReady(t *testing.T) {
 		Build()
 
 	stub := &stubIdentityProvisioner{result: identity.Result{OrgID: "org-123", Slug: "acme"}}
-	r := &TenantIdentityReconciler{Client: c, Scheme: scheme, Recorder: events.NewFakeRecorder(100), Provisioner: stub}
+	r := &TenantIdentityReconciler{Client: c, Scheme: scheme, Recorder: events.NewFakeRecorder(100), Provisioner: stub, OrgMapping: &stubOrgMapping{}}
 
 	// Pass 1: finalizer added, requeue.
 	if _, err := reconcileTI(t, r, "acme-identity"); err != nil {
@@ -136,7 +154,7 @@ func TestTenantIdentity_OIDCClientComponentReported(t *testing.T) {
 		Build()
 
 	stub := &stubIdentityProvisioner{result: identity.Result{OrgID: "org-123", Slug: "acme"}}
-	r := &TenantIdentityReconciler{Client: c, Scheme: scheme, Recorder: events.NewFakeRecorder(100), Provisioner: stub}
+	r := &TenantIdentityReconciler{Client: c, Scheme: scheme, Recorder: events.NewFakeRecorder(100), Provisioner: stub, OrgMapping: &stubOrgMapping{}}
 
 	if _, err := reconcileTI(t, r, "acme-identity"); err != nil {
 		t.Fatalf("reconcile: %v", err)
@@ -163,7 +181,7 @@ func TestTenantIdentity_ProvisionFailureSetsFailed(t *testing.T) {
 		Build()
 
 	stub := &stubIdentityProvisioner{provisionErr: errors.New("zitadel create org failed")}
-	r := &TenantIdentityReconciler{Client: c, Scheme: scheme, Recorder: events.NewFakeRecorder(100), Provisioner: stub}
+	r := &TenantIdentityReconciler{Client: c, Scheme: scheme, Recorder: events.NewFakeRecorder(100), Provisioner: stub, OrgMapping: &stubOrgMapping{}}
 
 	_, err := reconcileTI(t, r, "acme-identity")
 	if err == nil {
@@ -201,7 +219,7 @@ func TestTenantIdentity_FinalizerTeardown(t *testing.T) {
 		Build()
 
 	stub := &stubIdentityProvisioner{}
-	r := &TenantIdentityReconciler{Client: c, Scheme: scheme, Recorder: events.NewFakeRecorder(100), Provisioner: stub}
+	r := &TenantIdentityReconciler{Client: c, Scheme: scheme, Recorder: events.NewFakeRecorder(100), Provisioner: stub, OrgMapping: &stubOrgMapping{}}
 
 	if _, err := reconcileTI(t, r, "acme-identity"); err != nil {
 		t.Fatalf("reconcile delete: %v", err)
@@ -244,7 +262,7 @@ func TestTenantIdentity_SteadyStateNoPhaseFlip(t *testing.T) {
 		Build()
 
 	stub := &stubIdentityProvisioner{result: identity.Result{OrgID: "org-123", Slug: "acme"}}
-	r := &TenantIdentityReconciler{Client: c, Scheme: scheme, Recorder: events.NewFakeRecorder(100), Provisioner: stub}
+	r := &TenantIdentityReconciler{Client: c, Scheme: scheme, Recorder: events.NewFakeRecorder(100), Provisioner: stub, OrgMapping: &stubOrgMapping{}}
 
 	// Steady-state resync: Provision still runs (drift-correction) but phase
 	// must NOT flip to Provisioning.
@@ -295,7 +313,7 @@ func TestTenantIdentity_TeardownNotFoundIsSuccess(t *testing.T) {
 		Build()
 
 	stub := &stubIdentityProvisioner{deprovisionErr: clients.ErrNotFound}
-	r := &TenantIdentityReconciler{Client: c, Scheme: scheme, Recorder: events.NewFakeRecorder(100), Provisioner: stub}
+	r := &TenantIdentityReconciler{Client: c, Scheme: scheme, Recorder: events.NewFakeRecorder(100), Provisioner: stub, OrgMapping: &stubOrgMapping{}}
 
 	if _, err := reconcileTI(t, r, "acme-identity"); err != nil {
 		t.Fatalf("NotFound from deprovision must not error: %v", err)
@@ -303,5 +321,113 @@ func TestTenantIdentity_TeardownNotFoundIsSuccess(t *testing.T) {
 	var got gibsonv1alpha1.TenantIdentity
 	if err := c.Get(context.Background(), types.NamespacedName{Namespace: "tenant-acme", Name: "acme-identity"}, &got); err == nil {
 		t.Fatalf("want object gone after teardown, still present: %+v", got)
+	}
+}
+
+// ---------------------------------------------------------------------------
+// Org mapping (ADR-0093 decision 4, hosted#195): TenantIdentity seeds the
+// daemon's tenant -> Zitadel org mapping that ext-authz reads to resolve a
+// signed-in person's tenant. It is Ready only once that write succeeds.
+// ---------------------------------------------------------------------------
+
+// TestTenantIdentity_SeedsOrgMapping: a successful provision seeds the
+// mapping with the org id Provision returned, before the identity is marked
+// Ready.
+func TestTenantIdentity_SeedsOrgMapping(t *testing.T) {
+	scheme := setupScheme(t)
+	ti := newTenantIdentity("acme-identity", "acme")
+	controllerutil.AddFinalizer(ti, gibsonv1alpha1.TenantIdentityFinalizer)
+	c := fake.NewClientBuilder().
+		WithScheme(scheme).
+		WithStatusSubresource(&gibsonv1alpha1.TenantIdentity{}).
+		WithObjects(ti).
+		Build()
+
+	stub := &stubIdentityProvisioner{result: identity.Result{OrgID: "org-123", Slug: "acme"}}
+	orgMapping := &stubOrgMapping{}
+	r := &TenantIdentityReconciler{Client: c, Scheme: scheme, Recorder: events.NewFakeRecorder(100), Provisioner: stub, OrgMapping: orgMapping}
+
+	if _, err := reconcileTI(t, r, "acme-identity"); err != nil {
+		t.Fatalf("reconcile: %v", err)
+	}
+	if len(orgMapping.seeds) != 1 {
+		t.Fatalf("want SetTenantZitadelOrg called once, got %v", orgMapping.seeds)
+	}
+	if orgMapping.seeds[0].tenantID != "acme" || orgMapping.seeds[0].zitadelOrgID != "org-123" {
+		t.Fatalf("want seed (acme, org-123), got %+v", orgMapping.seeds[0])
+	}
+	var got gibsonv1alpha1.TenantIdentity
+	if err := c.Get(context.Background(), types.NamespacedName{Namespace: "tenant-acme", Name: "acme-identity"}, &got); err != nil {
+		t.Fatalf("get: %v", err)
+	}
+	if !got.Status.Ready {
+		t.Fatalf("want Ready=true once the org mapping is seeded, got %+v", got.Status)
+	}
+}
+
+// TestTenantIdentity_SeedFailureKeepsNotReady: a mapping-write failure keeps
+// the identity Failed (never Ready) and returns the error so
+// controller-runtime backs off — the same treatment as a Provision failure.
+func TestTenantIdentity_SeedFailureKeepsNotReady(t *testing.T) {
+	scheme := setupScheme(t)
+	ti := newTenantIdentity("acme-identity", "acme")
+	controllerutil.AddFinalizer(ti, gibsonv1alpha1.TenantIdentityFinalizer)
+	c := fake.NewClientBuilder().
+		WithScheme(scheme).
+		WithStatusSubresource(&gibsonv1alpha1.TenantIdentity{}).
+		WithObjects(ti).
+		Build()
+
+	stub := &stubIdentityProvisioner{result: identity.Result{OrgID: "org-123", Slug: "acme"}}
+	orgMapping := &stubOrgMapping{err: errors.New("daemon unreachable")}
+	r := &TenantIdentityReconciler{Client: c, Scheme: scheme, Recorder: events.NewFakeRecorder(100), Provisioner: stub, OrgMapping: orgMapping}
+
+	_, err := reconcileTI(t, r, "acme-identity")
+	if err == nil {
+		t.Fatalf("want error from a failed org-mapping seed so controller-runtime requeues")
+	}
+
+	var got gibsonv1alpha1.TenantIdentity
+	if err := c.Get(context.Background(), types.NamespacedName{Namespace: "tenant-acme", Name: "acme-identity"}, &got); err != nil {
+		t.Fatalf("get: %v", err)
+	}
+	if got.Status.Ready {
+		t.Fatalf("want Ready=false when the org mapping seed fails, got %+v", got.Status)
+	}
+	if got.Status.Phase != gibsonv1alpha1.TenantIdentityPhaseFailed {
+		t.Fatalf("want phase Failed, got %q", got.Status.Phase)
+	}
+	if got.Status.LastError == "" {
+		t.Fatalf("want LastError populated on a seed failure")
+	}
+}
+
+// TestTenantIdentity_NilOrgMappingFailsLoud: a nil OrgMapping is an operator
+// wiring bug, the same as a nil Provisioner — it fails the reconcile loud
+// rather than silently skip seeding the mapping ext-authz depends on.
+func TestTenantIdentity_NilOrgMappingFailsLoud(t *testing.T) {
+	scheme := setupScheme(t)
+	ti := newTenantIdentity("acme-identity", "acme")
+	c := fake.NewClientBuilder().
+		WithScheme(scheme).
+		WithStatusSubresource(&gibsonv1alpha1.TenantIdentity{}).
+		WithObjects(ti).
+		Build()
+
+	stub := &stubIdentityProvisioner{result: identity.Result{OrgID: "org-123", Slug: "acme"}}
+	r := &TenantIdentityReconciler{Client: c, Scheme: scheme, Recorder: events.NewFakeRecorder(100), Provisioner: stub, OrgMapping: nil}
+
+	if _, err := reconcileTI(t, r, "acme-identity"); err != nil {
+		t.Fatalf("reconcile: %v", err)
+	}
+	if len(stub.provisioned) != 0 {
+		t.Fatalf("want Provision never called with a nil OrgMapping, got %v", stub.provisioned)
+	}
+	var got gibsonv1alpha1.TenantIdentity
+	if err := c.Get(context.Background(), types.NamespacedName{Namespace: "tenant-acme", Name: "acme-identity"}, &got); err != nil {
+		t.Fatalf("get: %v", err)
+	}
+	if got.Status.Phase != gibsonv1alpha1.TenantIdentityPhaseFailed {
+		t.Fatalf("want phase Failed with a nil OrgMapping, got %q", got.Status.Phase)
 	}
 }

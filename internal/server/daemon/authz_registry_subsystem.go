@@ -19,6 +19,7 @@ import (
 	"github.com/zeroroot-ai/gibson/internal/infra/observability"
 	"github.com/zeroroot-ai/gibson/internal/platform/authz/registry"
 	"github.com/zeroroot-ai/gibson/internal/platform/capabilitygrant"
+	"github.com/zeroroot-ai/gibson/internal/server/daemon/api"
 )
 
 // The authz-registry endpoint lets ext-authz fetch the daemon's compiled-in
@@ -64,7 +65,7 @@ const (
 
 // authzRegistryMuxPaths is what the mTLS listener answers on, for the startup
 // log line. Package-level so the log cannot drift from the mux.
-var authzRegistryMuxPaths = []string{authzRegistryPath, capabilityGrantKeysPath}
+var authzRegistryMuxPaths = []string{authzRegistryPath, capabilityGrantKeysPath, orgTenantPath}
 
 // authzRegistrySubsystem owns the mTLS HTTPS listener that serves the embedded
 // authz registry to allow-listed platform peers (ext-authz). Its Serve(ctx)
@@ -82,15 +83,19 @@ type authzRegistrySubsystem struct {
 // fail the daemon (e.g. an unparseable reader SVID).
 //
 // cgMinter and cgSvc are the Capability-Grant key sources for the per-kid key
-// route. They are taken as concrete pointers, not interfaces, so a nil daemon
-// field stays a nil check: assigning a typed nil pointer into an interface
-// produces a non-nil interface, which would mount a route that panics instead
-// of one that is absent.
+// route. orgResolver is the org->tenant lookup for the ADR-0093 decision 4
+// route; the caller passes nil when the platform DB is absent, so the route
+// is omitted rather than mounted on a source that could never answer. All
+// three are taken as concrete pointers, not interfaces, so a nil daemon field
+// stays a nil check: assigning a typed nil pointer into an interface produces
+// a non-nil interface, which would mount a route that panics instead of one
+// that is absent.
 func newAuthzRegistrySubsystem(
 	x509Source *workloadapi.X509Source,
 	logger *observability.Logger,
 	cgMinter *capabilitygrant.Minter,
 	cgSvc *capabilitygrant.CapabilityGrantService,
+	orgResolver *api.ZitadelOrgResolver,
 ) (*authzRegistrySubsystem, error) {
 	if x509Source == nil {
 		// No SPIFFE source → cannot secure the endpoint → do not start it.
@@ -119,7 +124,8 @@ func newAuthzRegistrySubsystem(
 
 	tlsCfg := tlsconfig.MTLSServerConfig(x509Source, x509Source, tlsconfig.AuthorizeOneOf(readers...))
 
-	mux := authzRegistryMux(cgKeySources(cgMinter, cgSvc))
+	minter, lookup := cgKeySources(cgMinter, cgSvc)
+	mux := authzRegistryMux(minter, lookup, orgTenantSource(orgResolver))
 
 	addr := ":" + port
 	return &authzRegistrySubsystem{
@@ -155,19 +161,35 @@ func cgKeySources(m *capabilitygrant.Minter, s *capabilitygrant.CapabilityGrantS
 	return minter, lookup
 }
 
+// orgTenantSource narrows a possibly-nil *api.ZitadelOrgResolver into the
+// orgTenantLookup interface, mapping a nil pointer to a nil interface. Same
+// trap as cgKeySources: a typed nil pointer assigned into an interface is a
+// non-nil interface, which would mount the route on a resolver that can
+// never answer instead of leaving it cleanly absent.
+func orgTenantSource(r *api.ZitadelOrgResolver) orgTenantLookup {
+	if r == nil {
+		return nil
+	}
+	return r
+}
+
 // authzRegistryMux builds the route table the mTLS listener serves. It is split
 // from the subsystem constructor because the constructor needs a real SPIFFE
 // X509Source, which a unit test cannot produce — the routes are testable, the
 // listener is not.
 //
-// The Capability-Grant key route mounts only when both key sources are present,
-// matching the pre-auth listener: a missing source yields an absent route and a
-// clean 404 rather than a route that answers 503 forever.
-func authzRegistryMux(minter cgKeyMinter, lookup cgAgentKeyLookup) *http.ServeMux {
+// The Capability-Grant key route and the org->tenant route each mount only
+// when their source is present, matching the pre-auth listener: a missing
+// source yields an absent route and a clean 404 rather than a route that
+// answers 503 forever.
+func authzRegistryMux(minter cgKeyMinter, lookup cgAgentKeyLookup, orgTenants orgTenantLookup) *http.ServeMux {
 	mux := http.NewServeMux()
 	mux.HandleFunc(authzRegistryPath, authzRegistryHandler)
 	if minter != nil && lookup != nil {
 		mux.HandleFunc(capabilityGrantKeysPath, capabilityGrantKeysHandler(minter, lookup))
+	}
+	if orgTenants != nil {
+		mux.HandleFunc(orgTenantPath, orgTenantHandler(orgTenants))
 	}
 	return mux
 }

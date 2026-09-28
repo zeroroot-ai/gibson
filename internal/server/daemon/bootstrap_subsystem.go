@@ -42,8 +42,14 @@ const (
 	// envNativeLoginScopes optionally overrides the space-separated scope list.
 	envNativeLoginScopes = "GIBSON_NATIVE_LOGIN_SCOPES"
 
-	defaultNativeLoginPort   = "8085"
-	defaultNativeLoginScopes = "openid profile email offline_access"
+	defaultNativeLoginPort = "8085"
+	// defaultNativeLoginScopes requests the org claim
+	// (urn:zitadel:iam:user:resourceowner) alongside the existing scopes, so
+	// a native login (gibson login, device flow) carries the same tenant
+	// derivation as the dashboard's browser sign-in (ADR-0093 decision 4).
+	// Without it, ext-authz sees no org claim and denies every rule-mode RPC
+	// for a CLI-authenticated person.
+	defaultNativeLoginScopes = "openid profile email offline_access urn:zitadel:iam:user:resourceowner"
 	nativeLoginWellKnownPath = "/.well-known/gibson-login"
 )
 

@@ -5,6 +5,7 @@ package admin
 
 import (
 	"context"
+	"errors"
 	"testing"
 
 	"google.golang.org/grpc/codes"
@@ -33,6 +34,28 @@ type membersAuthorizer struct {
 	listUsersErr error
 	// batchCheckErr is returned by BatchCheck when non-nil.
 	batchCheckErr error
+	// conditionalWrites records every WriteConditional call (hosted#208:
+	// AcceptInvitation seeds the invitee's session tuples).
+	conditionalWrites []authz.ConditionalTuple
+	// conditionalErr is returned by WriteConditional when non-nil.
+	conditionalErr error
+	// conditionalFailObject, when set, fails only the write to that object.
+	conditionalFailObject string
+}
+
+func (m *membersAuthorizer) WriteConditional(_ context.Context, t authz.ConditionalTuple) error {
+	if m.conditionalErr != nil {
+		return m.conditionalErr
+	}
+	if m.conditionalFailObject != "" && t.Object == m.conditionalFailObject {
+		return errors.New("fga boom on " + t.Object)
+	}
+	m.conditionalWrites = append(m.conditionalWrites, t)
+	return nil
+}
+
+func (m *membersAuthorizer) UpdateConditionalTuple(ctx context.Context, t authz.ConditionalTuple) error {
+	return m.WriteConditional(ctx, t)
 }
 
 func (m *membersAuthorizer) Check(_ context.Context, _, _, _ string) (bool, error) {
@@ -78,15 +101,31 @@ type membersIdPClient struct {
 	profiles map[string]*idp.UserProfile
 	failFor  map[string]bool // accountIDs that should return an error
 
-	// recorded membership projection calls (gibson#621)
-	added   []idp.TenantMembershipRequest
-	removed []idp.TenantMembershipRequest
-	addErr  error
-
-	// EnsureHumanUser recording (gibson#633)
+	// EnsureHumanUserNoPassword recording (gibson#633, hosted#208)
+	ensuredOrgIDs []string
 	ensuredEmails []string
 	ensureUserID  string
 	ensureErr     error
+
+	// Removal recording (ADR-0093 §11, hosted#205): RemoveMember/LeaveTenant
+	// tests inject a failure and assert the call happened.
+	revokeSessionsErr  error
+	revokedSessionsFor []string
+	deleteHumanUserErr error
+	deletedHumanUsers  []idp.HumanUserStateRequest
+
+	// CreateSetupLink recording (hosted#203)
+	setupLinkUserIDs []string
+	setupLinkOrgIDs  []string
+	setupLinkAppURLs []string
+	setupLink        string
+	setupLinkErr     error
+
+	// FindUserIDByEmail (hosted#203 cross-tenant invitation check). Defaults
+	// to idp.ErrNotFound (address unused), matching production behavior for
+	// an address nobody has an account with.
+	findByEmailUserID string
+	findByEmailErr    error
 }
 
 func (c *membersIdPClient) CreateServiceAccount(_ context.Context, _ idp.CreateServiceAccountRequest) (*idp.ServiceAccount, error) {
@@ -109,33 +148,31 @@ func (c *membersIdPClient) GetUserProfile(_ context.Context, accountID string) (
 	}
 	return p, nil
 }
-func (c *membersIdPClient) AddTenantMember(_ context.Context, req idp.TenantMembershipRequest) error {
-	if c.addErr != nil {
-		return c.addErr
+func (c *membersIdPClient) RevokeUserSessions(_ context.Context, userID string) (idp.RevokeUserSessionsResult, error) {
+	c.revokedSessionsFor = append(c.revokedSessionsFor, userID)
+	if c.revokeSessionsErr != nil {
+		return idp.RevokeUserSessionsResult{}, c.revokeSessionsErr
 	}
-	c.added = append(c.added, req)
-	return nil
-}
-func (c *membersIdPClient) RemoveTenantMember(_ context.Context, req idp.TenantMembershipRequest) error {
-	c.removed = append(c.removed, req)
-	return nil
-}
-func (c *membersIdPClient) RevokeUserSessions(_ context.Context, _ string) (idp.RevokeUserSessionsResult, error) {
 	return idp.RevokeUserSessionsResult{}, nil
 }
 func (c *membersIdPClient) ListUserSessions(_ context.Context, _ string) ([]idp.SessionInfo, error) {
 	return nil, nil
 }
 func (c *membersIdPClient) RevokeSession(_ context.Context, _ string) error { return nil }
-func (c *membersIdPClient) EnsureHumanUser(_ context.Context, req idp.EnsureHumanUserRequest) (string, error) {
-	c.ensuredEmails = append(c.ensuredEmails, req.Email)
-	if c.ensureErr != nil {
-		return "", c.ensureErr
+func (c *membersIdPClient) ClearHumanFactors(_ context.Context, _ string) (idp.ClearHumanFactorsResult, error) {
+	return idp.ClearHumanFactorsResult{}, nil
+}
+func (c *membersIdPClient) CreateSetupLink(_ context.Context, orgID, userID, appURL string) (string, error) {
+	c.setupLinkOrgIDs = append(c.setupLinkOrgIDs, orgID)
+	c.setupLinkUserIDs = append(c.setupLinkUserIDs, userID)
+	c.setupLinkAppURLs = append(c.setupLinkAppURLs, appURL)
+	if c.setupLinkErr != nil {
+		return "", c.setupLinkErr
 	}
-	if c.ensureUserID == "" {
-		return "user-ensured", nil
+	if c.setupLink == "" {
+		return appURL + "/ui/v2/login/verify?invite=true&userId=" + userID + "&code=test-code", nil
 	}
-	return c.ensureUserID, nil
+	return c.setupLink, nil
 }
 func (c *membersIdPClient) SetHumanPassword(context.Context, idp.SetHumanPasswordRequest) error {
 	return nil
@@ -145,7 +182,27 @@ func (c *membersIdPClient) CreateHumanUser(_ context.Context, _ idp.CreateHumanU
 	return idp.CreateHumanUserResult{}, nil
 }
 func (c *membersIdPClient) FindUserIDByEmail(_ context.Context, _ string) (string, error) {
+	if c.findByEmailErr != nil {
+		return "", c.findByEmailErr
+	}
+	if c.findByEmailUserID != "" {
+		return c.findByEmailUserID, nil
+	}
 	return "", idp.ErrNotFound
+}
+func (c *membersIdPClient) EnsureHumanUserNoPassword(_ context.Context, orgID, email, _, _ string) (string, error) {
+	c.ensuredOrgIDs = append(c.ensuredOrgIDs, orgID)
+	c.ensuredEmails = append(c.ensuredEmails, email)
+	if c.ensureErr != nil {
+		return "", c.ensureErr
+	}
+	if c.ensureUserID == "" {
+		return "user-ensured", nil
+	}
+	return c.ensureUserID, nil
+}
+func (c *membersIdPClient) CreateSetupInviteCode(_ context.Context, _, _ string, _ bool) (string, error) {
+	return "", nil
 }
 func (c *membersIdPClient) Close() error { return nil }
 
@@ -518,6 +575,7 @@ func (*membersIdPClient) DeactivateHumanUser(context.Context, idp.HumanUserState
 func (*membersIdPClient) ReactivateHumanUser(context.Context, idp.HumanUserStateRequest) error {
 	return nil
 }
-func (*membersIdPClient) DeleteHumanUser(context.Context, idp.HumanUserStateRequest) error {
-	return nil
+func (c *membersIdPClient) DeleteHumanUser(_ context.Context, req idp.HumanUserStateRequest) error {
+	c.deletedHumanUsers = append(c.deletedHumanUsers, req)
+	return c.deleteHumanUserErr
 }

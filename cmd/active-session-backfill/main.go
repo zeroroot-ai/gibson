@@ -22,7 +22,7 @@
 // Idempotent and safe to re-run. Exits zero unconditionally — per-member
 // failures are logged and skipped.
 //
-// Environment variables (matching the pattern in cmd/tenant-owner-backfill):
+// Environment variables:
 //
 //	EXT_AUTHZ_FGA_ADDR      — HTTP endpoint of the OpenFGA server
 //	EXT_AUTHZ_FGA_STORE_ID  — FGA store ID

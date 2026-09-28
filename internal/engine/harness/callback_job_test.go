@@ -925,3 +925,25 @@ func TestMemberControl_DropsWhatNobodyTookInTime(t *testing.T) {
 		t.Error("another tenant's member has nothing")
 	}
 }
+
+// TestPullJob_TheGrantsTaskIdNamesTheRun: the SDK fills ContextInfo from the
+// member's grant, whose task_id the daemon minted as the run id, so a member
+// that sends task_id and no mission_run_id is the member of that run
+// (gibson#13, run 35485807760).
+func TestPullJob_TheGrantsTaskIdNamesTheRun(t *testing.T) {
+	jobs := newFakeJobs()
+	jobs.claim = openJob("j-1")
+	s := memberService(t, jobs, liveMembers(), &recordingMinter{})
+	info := &harnesspb.ContextInfo{TaskId: "run-1", MissionId: "bank-1", AgentName: "claude"}
+	res, err := s.PullJob(memberCtx("acme"), &harnesspb.PullJobRequest{Context: info})
+	if err != nil {
+		t.Fatalf("PullJob with task_id: %v", err)
+	}
+	if res.GetJob().GetId() != "j-1" {
+		t.Fatalf("job = %v, want the member's queued job", res.GetJob())
+	}
+	both := &harnesspb.ContextInfo{MissionRunId: "run-1", TaskId: "other", MissionId: "bank-1"}
+	if _, err := s.PullJob(memberCtx("acme"), &harnesspb.PullJobRequest{Context: both}); err != nil {
+		t.Fatalf("mission_run_id must win when both are set: %v", err)
+	}
+}

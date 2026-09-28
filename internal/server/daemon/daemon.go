@@ -1652,6 +1652,17 @@ func (d *daemonImpl) Start(ctx context.Context) error {
 	})
 	d.logger.Debug(ctx, "registered neo4j schema migrations readiness check")
 
+	// The Neo4j this daemon writes to must carry the APOC contract in
+	// pkg/platform/dataplane (gibson#28). Three provisioners write it and
+	// only two read the Go constants, so the daemon asks the live server.
+	// A verified mismatch is Degraded, like the migration check above.
+	d.healthServer.RegisterReadinessCheck("neo4j_apoc_contract", newAPOCContractCheck(
+		os.Getenv("GIBSON_PLATFORM_TENANT"),
+		func() datapool.Pool { return d.pool },
+		d.logger.WithComponent("apoc-contract").Slog(),
+	).status)
+	d.logger.Debug(ctx, "registered neo4j apoc contract readiness check")
+
 	// Register key provider health check if available
 	if d.keyProvider != nil {
 		keyProvider := d.keyProvider
@@ -1843,7 +1854,16 @@ func (d *daemonImpl) Start(ctx context.Context) error {
 	// from one authenticated origin. The plain-HTTP :8085 copy of that route
 	// stays up until the chart repoints; see authz_registry_subsystem.go.
 	if x509Src, ok := d.spiffeX509Source.(*workloadapi.X509Source); ok && x509Src != nil {
-		authzRegSys, arErr := newAuthzRegistrySubsystem(x509Src, d.logger, d.cgMinter, d.capabilityGrantSvc)
+		// The org->tenant route (ADR-0093 decision 4) needs the platform DB;
+		// omit it (nil) rather than mount a route that could never answer.
+		// In production d.platformDB is always non-nil by this point (the
+		// daemon never serves traffic with platformDB=nil), so the route is
+		// always mounted here.
+		var orgResolver *api.ZitadelOrgResolver
+		if d.platformDB != nil {
+			orgResolver = api.NewZitadelOrgResolver(d.platformDB)
+		}
+		authzRegSys, arErr := newAuthzRegistrySubsystem(x509Src, d.logger, d.cgMinter, d.capabilityGrantSvc, orgResolver)
 		if arErr != nil {
 			return fmt.Errorf("authz-registry subsystem: %w", arErr)
 		}
@@ -1940,6 +1960,14 @@ func (d *daemonImpl) Start(ctx context.Context) error {
 		// The refusal is a state, not a log line: /readyz names the credential
 		// an operator has to mount (gibson#1744).
 		d.registerComponentCatalogReadiness(ctx, catalogGate)
+
+		// Every tenant registered under the platform is enabled on the
+		// system backplane (ADR-0046). Without the tuple no enrolled
+		// component can register, heartbeat, poll or watch through Envoy:
+		// can_poll_work on component:_system needs in_tenant_catalog, and
+		// nothing else writes it (gibson#154). Converges now and every
+		// interval, so a tenant created later is covered too.
+		go reconciler.RunSystemBackplaneBaseline(ctx, d.authorizer, reconciler.DefaultSystemBackplaneInterval, d.logger.Slog())
 
 		// Fixture build only: the exit-test runner is a member of the platform
 		// tenant, so the dispatch gate judges its runs the way it judges a

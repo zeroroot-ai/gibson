@@ -178,11 +178,12 @@ func TestRunWithDeps_PreAcceptFailureIsFatal(t *testing.T) {
 
 	tenants := &fakeTenantGetter{obj: makeTenant("acme", "org-1")}
 	code := runWithDeps(context.Background(), discardLogger(), &bytes.Buffer{},
-		"acme", "owner@acme.example", "", false, "", "",
+		"acme", "owner@acme.example", "", "", false, "", "setup-link", "",
 		happyKubeLoader,
 		func(*rest.Config) (TenantGetter, error) { return tenants, nil },
-		func(context.Context) (idpClient, error) { return &fakeIdpClient{createUserID: "u1"}, nil },
+		func(context.Context) (idpClient, error) { return &fakeIdpClient{ensureUserID: "u1"}, nil },
 		func(context.Context) (fgaClient, error) { return &fakeFgaClient{}, nil },
+		func(context.Context) (tenantRoleAssigner, error) { return &fakeTenantRoleAssigner{}, nil },
 	)
 	if code != 1 {
 		t.Fatalf("a pre-accept failure must be fatal, exit=%d", code)

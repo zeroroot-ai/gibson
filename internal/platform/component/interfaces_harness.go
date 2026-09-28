@@ -168,6 +168,19 @@ type CapabilityChecker interface {
 	ActiveGrantID(ctx context.Context, tenant, principal, capabilityName string) (string, error)
 }
 
+// EnrolledAgentLookup names the enrolled agent behind a verified component
+// principal (gibson#208). The finding submitter uses it to stamp a submitted
+// finding with the name the agent registered under and the subject of the
+// person who enrolled it. Both answers are empty when the registry has no
+// active agent for the principal.
+//
+// *capabilitygrant.CapabilityGrantService satisfies it structurally.
+type EnrolledAgentLookup interface {
+	// LookupEnrolledAgent returns the registered agent name and the enrolling
+	// subject for principalRef within tenantID, or two empty strings.
+	LookupEnrolledAgent(ctx context.Context, tenantID, principalRef string) (agentName, enrolledBy string, err error)
+}
+
 // CredentialStore retrieves tenant-scoped credentials for remote agents.
 // May be nil; GetCredential returns Unimplemented when nil.
 type CredentialStore interface {

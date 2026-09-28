@@ -177,6 +177,8 @@ jobs:
           ./bin/gibsoncheck -privilegedfallback   ./internal/... ./cmd/... ./operators/... ./pkg/...
           ./bin/gibsoncheck -fgalistusers         ./internal/... ./cmd/... ./operators/... ./pkg/...
           ./bin/gibsoncheck -constantverdictdouble ./internal/... ./cmd/... ./operators/... ./pkg/...
+          ./bin/gibsoncheck -tenantrolewrite      ./internal/... ./cmd/... ./operators/... ./pkg/...
+          ./bin/gibsoncheck -orgmemberwrite       ./internal/... ./cmd/... ./operators/... ./pkg/...
 
       # The STALE half of the baseline ratchet. The analyzers above refuse
       # new findings; this refuses baseline lines whose site is fixed or
@@ -245,6 +247,17 @@ jobs:
         run: |
           SELFTEST=1 bash scripts/check-no-mcp-bridge.sh
           bash scripts/check-no-mcp-bridge.sh
+
+      # ADR-0093 section 9 / decision 1: the platform-operator is the only
+      # writer of Zitadel's instance login and domain policy. A second
+      # caller could create an org-level policy that overrides the instance
+      # default for that org and reopen the sign-in / username-uniqueness
+      # gap. Self-test first so a broken guard cannot pass by finding
+      # nothing.
+      - name: Check only the platform-operator calls the sign-in policy
+        run: |
+          SELFTEST=1 bash scripts/check-signin-policy-callers.sh
+          bash scripts/check-signin-policy-callers.sh
 
       # gibson#140 (2026-09-18): the coverage gate failed on a Docker Hub
       # token timeout while a testcontainer pulled postgres:16-alpine. Tests

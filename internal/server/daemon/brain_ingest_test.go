@@ -10,6 +10,7 @@ import (
 
 	gibsonagent "github.com/zeroroot-ai/gibson/internal/engine/agent"
 	"github.com/zeroroot-ai/gibson/internal/engine/brain"
+	"github.com/zeroroot-ai/gibson/internal/engine/finding"
 	"github.com/zeroroot-ai/gibson/internal/engine/harness"
 	"github.com/zeroroot-ai/gibson/internal/infra/types"
 	"github.com/zeroroot-ai/gibson/internal/server/daemon/api"
@@ -130,7 +131,10 @@ func TestIngestComponentFinding(t *testing.T) {
 	reg := brain.NewRegistry(ctx)
 
 	sink := ingestComponentFinding(reg)
-	sink(ctx, "acme", "", gibsonagent.Finding{ID: types.NewID(), Title: "RCE", Description: "unauth RCE", Severity: gibsonagent.SeverityCritical})
+	sink(ctx, "acme", finding.NewEnhancedFinding(gibsonagent.Finding{
+		ID: types.NewID(), Title: "RCE", Description: "unauth RCE", Severity: gibsonagent.SeverityCritical,
+		SubmittedBy: "agent_principal:sa-1", EnrolledBy: "user-9",
+	}, "", "zerocool-demo"))
 
 	deadline := time.Now().Add(2 * time.Second)
 	for time.Now().Before(deadline) {
@@ -138,6 +142,10 @@ func TestIngestComponentFinding(t *testing.T) {
 		if len(fs) == 1 && fs[0].Title == "RCE" && fs[0].Severity == "critical" {
 			if len(reg.For("other").Findings()) != 0 {
 				t.Fatal("cross-tenant leak")
+			}
+			// The verified submitter rides the World event (gibson#208).
+			if fs[0].SubmittedBy != "agent_principal:sa-1" || fs[0].AgentName != "zerocool-demo" || fs[0].EnrolledBy != "user-9" {
+				t.Fatalf("submitter not folded: %+v", fs[0])
 			}
 			return
 		}
@@ -156,8 +164,8 @@ func TestIngestComponentFinding_MissionStamped(t *testing.T) {
 	reg := brain.NewRegistry(ctx)
 
 	sink := ingestComponentFinding(reg)
-	sink(ctx, "acme", "m-7", gibsonagent.Finding{ID: types.NewID(), Title: "SQLi", Description: "auth bypass", Severity: gibsonagent.SeverityHigh})
-	sink(ctx, "acme", "", gibsonagent.Finding{ID: types.NewID(), Title: "ambient", Description: "no mission", Severity: gibsonagent.SeverityLow})
+	sink(ctx, "acme", finding.NewEnhancedFinding(gibsonagent.Finding{ID: types.NewID(), Title: "SQLi", Description: "auth bypass", Severity: gibsonagent.SeverityHigh}, "m-7", ""))
+	sink(ctx, "acme", finding.NewEnhancedFinding(gibsonagent.Finding{ID: types.NewID(), Title: "ambient", Description: "no mission", Severity: gibsonagent.SeverityLow}, "", ""))
 
 	deadline := time.Now().Add(2 * time.Second)
 	for time.Now().Before(deadline) {

@@ -75,6 +75,46 @@ const (
 	// plus each Ready MACHINE_USER OIDCClient child's status.clientID. Replaces
 	// the gitops sa-identity-map-populator Sync Job (gitops#170).
 	ConditionSAIdentityMapReady = "SAIdentityMapReady"
+
+	// ConditionLoginBrandingReady reports whether the Zitadel instance's
+	// active label policy and its four brand marks match the declared
+	// brand in spec.zitadel.loginBranding. True with reason NotDeclared
+	// when no brand is declared.
+	ConditionLoginBrandingReady = "LoginBrandingReady"
+
+	// ConditionPlatformOwnerReady reports whether the Platform owner (ADR-0093
+	// decision 6, hosted#201) exists in Zitadel with IAM_OWNER and holds the
+	// FGA platform_owner relation on system_tenant:_system, and whether the
+	// current spec.platformOwner.setupGeneration has a setup link outstanding
+	// (sent or, in offline mode, written to a Secret).
+	ConditionPlatformOwnerReady = "PlatformOwnerReady"
+
+	// ConditionHumanAdminsScoped reports whether the Platform owner is the
+	// only human Zitadel instance administrator (ADR-0093 decision 6,
+	// hosted#189). Runs every reconcile, after ConditionPlatformOwnerReady:
+	// it revokes the IAM membership of every human member other than the
+	// Platform owner, and deletes Zitadel's own default first-instance
+	// human admin outright. Machine members are untouched here.
+	ConditionHumanAdminsScoped = "HumanAdminsScoped"
+
+	// ConditionMachineAdminsScoped reports whether the declared service
+	// accounts (iam-admin plus every MACHINE_USER OIDCClient child) and
+	// Zitadel's login client are the only machine Zitadel instance
+	// administrators (ADR-0093 decision 6, hosted#207). Runs every
+	// reconcile: it revokes the IAM membership of any other machine member,
+	// which is how an upgrade drops a machine user an older chart declared.
+	ConditionMachineAdminsScoped = "MachineAdminsScoped"
+
+	// ConditionSMTPProviderReady reports whether the Zitadel instance has
+	// exactly one active SMTP email provider matching spec.zitadel.smtp
+	// (hosted#189). True with reason NotConfigured when spec.zitadel.smtp is
+	// nil (an explicit offline install, ADR-0093 decision 11). Every
+	// Zitadel-sent email — the Platform owner's setup link, a tenant
+	// Owner's setup link, invitations, an MFA reset routed through Zitadel —
+	// depends on this being True; DefaultInstance chart config only applies
+	// to a brand-new instance, so an already-running instance is corrected
+	// here, idempotently, on every reconcile.
+	ConditionSMTPProviderReady = "SMTPProviderReady"
 )
 
 // SecretKeyRef references a key in a Secret. namespace is optional; when
@@ -127,24 +167,22 @@ type ZitadelProjectSpec struct {
 	EnsureExists bool `json:"ensureExists,omitempty"`
 }
 
-// ZitadelServiceUserSpec describes one machine user the platform mints
-// at bootstrap.
-type ZitadelServiceUserSpec struct {
-	// Name is the Zitadel username for the service account.
+// LoginBrandingSpec names the declared brand of the Zitadel login pages.
+// Writing the instance label policy needs iam.policy.write, which no Zitadel
+// role below IAM_OWNER grants, so the brand is applied by bootstrap, with
+// the admin token in spec.zitadel.adminTokenRef.
+type LoginBrandingSpec struct {
+	// ConfigMap names a ConfigMap with three keys: label-policy.json (the
+	// instance label policy, in Zitadel admin API field names), logo.svg
+	// and icon.svg. The logo fills the light and the dark logo slot, and the
+	// icon fills both icon slots.
 	// +kubebuilder:validation:Required
 	// +kubebuilder:validation:MinLength=1
-	Name string `json:"name"`
+	ConfigMap string `json:"configMap"`
 
-	// Roles is the list of Zitadel role keys assigned to this user
-	// (e.g. ["IAM_USER_MANAGER"]).
-	// +kubebuilder:validation:Required
-	// +kubebuilder:validation:MinItems=1
-	Roles []string `json:"roles"`
-
-	// PATSecretRef points at the Secret + key where the minted Personal
-	// Access Token is materialised.
-	// +kubebuilder:validation:Required
-	PATSecretRef SecretKeyRef `json:"patSecretRef"`
+	// Namespace overrides the default namespace.
+	// +optional
+	Namespace string `json:"namespace,omitempty"`
 }
 
 // SystemClientSpec configures the Zitadel System API client used to
@@ -196,6 +234,69 @@ type SystemClientSpec struct {
 	APIURL string `json:"apiURL,omitempty"`
 }
 
+// ZitadelSMTPSpec configures the Zitadel instance's one SMTP email provider
+// (hosted#189). Every Zitadel-sent email — the Platform owner's setup link
+// (ADR-0093 decision 8), a tenant Owner's setup link, invitations, an MFA
+// reset routed through Zitadel — depends on this being set correctly:
+// Zitadel's CreateInviteCode "succeeds" and just queues a notification even
+// with no mail transport at all, so a missing or wrong SMTP provider fails
+// silently at the delivery step, never at the API call that looks like it
+// worked.
+//
+// Point this at the SAME credentials gibson-workloads' own mail settings use
+// (GIBSON_SMTP_HOST / GIBSON_SMTP_PORT / GIBSON_EMAIL_FROM and the Secret
+// backing GIBSON_SMTP_USERNAME / GIBSON_SMTP_PASSWORD) — one mail transport
+// per install, never a second one configured only for Zitadel.
+type ZitadelSMTPSpec struct {
+	// Host is the SMTP server hostname, with NO port (e.g.
+	// "email-smtp.us-east-1.amazonaws.com"). The reconciler joins Host and
+	// Port before calling Zitadel, which expects "host:port" in one field.
+	// +kubebuilder:validation:Required
+	// +kubebuilder:validation:MinLength=1
+	Host string `json:"host"`
+
+	// Port is the SMTP server port (e.g. 587).
+	// +kubebuilder:validation:Required
+	// +kubebuilder:validation:Minimum=1
+	// +kubebuilder:validation:Maximum=65535
+	Port int32 `json:"port"`
+
+	// FromAddress is the envelope/header From address every Zitadel email is
+	// sent as (Zitadel's senderAddress).
+	// +kubebuilder:validation:Required
+	// +kubebuilder:validation:MinLength=1
+	FromAddress string `json:"fromAddress"`
+
+	// FromName is the display name attached to FromAddress (Zitadel's
+	// senderName). Zitadel rejects an empty value.
+	// +kubebuilder:validation:Required
+	// +kubebuilder:validation:MinLength=1
+	FromName string `json:"fromName"`
+
+	// TLS enables STARTTLS on the SMTP connection. Defaults to true; every
+	// SMTP relay this platform ships against (AWS SES, Mailpit's smtp
+	// listener) accepts STARTTLS on the configured port.
+	// +optional
+	// +kubebuilder:default=true
+	TLS *bool `json:"tls,omitempty"`
+
+	// UserSecretRef points at the Secret + key holding the SMTP username.
+	// Nil means no SMTP authentication (Zitadel's SMTPNoAuth) — only correct
+	// for a relay that accepts anonymous submission on a trusted network
+	// (e.g. a kind/k3d in-cluster Mailpit). A real mail provider (AWS SES,
+	// Postmark, etc.) always sets this.
+	// +optional
+	UserSecretRef *SecretKeyRef `json:"userSecretRef,omitempty"`
+
+	// PasswordSecretRef points at the Secret + key holding the SMTP
+	// password. Required when UserSecretRef is set; ignored otherwise.
+	// Zitadel never returns a stored password, so the reconciler tracks a
+	// hash of the last-applied settings (status.smtpSettingsHash) to detect
+	// a password change without ever reading it back from Zitadel.
+	// +optional
+	PasswordSecretRef *SecretKeyRef `json:"passwordSecretRef,omitempty"`
+}
+
 // ZitadelSpec collects every Zitadel-facing field in one block.
 type ZitadelSpec struct {
 	// Issuer is the OIDC issuer URL the platform uses for both browser
@@ -221,10 +322,12 @@ type ZitadelSpec struct {
 	// +kubebuilder:validation:Required
 	Project ZitadelProjectSpec `json:"project"`
 
-	// ServiceUsers is the list of machine users the platform mints + the
-	// roles each carries.
+	// LoginBranding is the declared brand of the login pages. The
+	// reconciler keeps the instance's active label policy and its marks
+	// equal to it, compared by content. When nil, Zitadel's stock brand
+	// stays.
 	// +optional
-	ServiceUsers []ZitadelServiceUserSpec `json:"serviceUsers,omitempty"`
+	LoginBranding *LoginBrandingSpec `json:"loginBranding,omitempty"`
 
 	// SystemClient configures the System API client used to register the
 	// cluster-internal Zitadel Service hostname as an additional trusted
@@ -232,6 +335,15 @@ type ZitadelSpec struct {
 	// clusters without a system-bot user provisioned).
 	// +optional
 	SystemClient *SystemClientSpec `json:"systemClient,omitempty"`
+
+	// SMTP configures the Zitadel instance's SMTP email provider (hosted#189).
+	// Nil means an explicit offline install (ADR-0093 decision 11): the
+	// SMTPProviderReady condition reports NotConfigured and does nothing. The
+	// chart's platform-owner-guard template refuses to render a
+	// PlatformBootstrap with SMTP nil unless platformOwner.offlineSetup is
+	// true — mail is required otherwise.
+	// +optional
+	SMTP *ZitadelSMTPSpec `json:"smtp,omitempty"`
 }
 
 // OIDCClientReference describes one OIDC client the orchestrator will
@@ -253,9 +365,10 @@ type OIDCClientReference struct {
 
 	// Roles is the set of Zitadel role keys granted to the minted machine
 	// user. Only honored for MACHINE_USER entries; threaded onto the child
-	// OIDCClient CR's spec.roles. IAM_-prefixed roles become instance IAM
-	// members; ORG_-prefixed roles become org members. Empty defaults to
-	// ["IAM_OWNER"] in the child reconciler.
+	// OIDCClient CR's spec.roles unchanged. IAM_-prefixed roles become
+	// instance IAM members; ORG_-prefixed roles become org members. Empty
+	// means no role: the child reconciler grants nothing and revokes any
+	// role the machine user previously held.
 	// +optional
 	Roles []string `json:"roles,omitempty"`
 
@@ -465,6 +578,43 @@ type DatabaseRoleOwnership struct {
 	Grants []string `json:"grants,omitempty"`
 }
 
+// PlatformOwnerSpec declares the ONE human Zitadel administrator this install
+// creates (ADR-0093 decision 6/8, hosted#201). The chart fails render before
+// this ever reaches the operator unless Email is set and differs from
+// global.firstTenant.ownerEmail — see the platform-owner-guard template in
+// zeroroot-ai/charts.
+type PlatformOwnerSpec struct {
+	// Email is the Platform owner's address. Required — an empty value skips
+	// the whole reconcile step (ConditionPlatformOwnerReady=True, reason
+	// NotConfigured), which exists only so an older PlatformBootstrap CR
+	// (rendered before this field existed) keeps reconciling everything else
+	// while the chart catches up; a real install always sets it.
+	// +optional
+	Email string `json:"email,omitempty"`
+
+	// OfflineSetup, when true, skips emailing the setup link: the operator
+	// creates a one-time, expiring invite code and writes it as a URL into
+	// SetupSecretRef instead (readable only by cluster administrators). Set
+	// this on an install with no working mail transport (ADR-0093 decision 8).
+	// +optional
+	OfflineSetup bool `json:"offlineSetup,omitempty"`
+
+	// SetupSecretRef names the Secret the operator writes the offline setup
+	// link into. Required when OfflineSetup is true; ignored otherwise.
+	// +optional
+	SetupSecretRef *SecretKeyRef `json:"setupSecretRef,omitempty"`
+
+	// SetupGeneration is the Platform owner's reset: raising this integer
+	// makes the operator clear every second factor currently on file and
+	// mint a new setup link (sent, or written to SetupSecretRef in offline
+	// mode). It is a reviewed change to an install value, never a live-cluster
+	// action (ADR-0093 decision 12). Defaults to 0 — the first reconcile
+	// (status.observedSetupGeneration starts at 0 too) still sends the
+	// initial link, because a brand-new Platform owner has no prior link.
+	// +optional
+	SetupGeneration int64 `json:"setupGeneration,omitempty"`
+}
+
 // PostgresBundleSpec describes the CNPG database ownership + public-schema
 // grants the platform reconciles. Replaces the CNPG `postInitApplicationSQL`
 // path, which has subtle semantics around ownership and isn't actually
@@ -522,6 +672,11 @@ type PlatformBootstrapSpec struct {
 	// infrastructure; no skip toggle.
 	// +kubebuilder:validation:Required
 	PostgresBundle PostgresBundleSpec `json:"postgresBundle"`
+
+	// PlatformOwner declares the ONE human Zitadel administrator this install
+	// creates (ADR-0093 decision 6/8, hosted#201).
+	// +optional
+	PlatformOwner PlatformOwnerSpec `json:"platformOwner,omitempty"`
 }
 
 // OIDCClientStatusEntry mirrors a child OIDCClient's status onto the
@@ -557,6 +712,46 @@ type PlatformBootstrapStatus struct {
 	// OIDCClients summarises each child OIDCClient's Ready state.
 	// +optional
 	OIDCClients []OIDCClientStatusEntry `json:"oidcClients,omitempty"`
+
+	// PlatformOwnerUserID is the Zitadel user id of the Platform owner, once
+	// created. Empty until spec.platformOwner.email is set and the reconciler
+	// has run.
+	// +optional
+	PlatformOwnerUserID string `json:"platformOwnerUserID,omitempty"`
+
+	// ObservedSetupGeneration mirrors spec.platformOwner.setupGeneration once
+	// the reconciler has minted a setup link for that generation. A mismatch
+	// with the spec value is what tells the reconciler a reset was requested.
+	// +optional
+	ObservedSetupGeneration int64 `json:"observedSetupGeneration,omitempty"`
+
+	// SMTPProviderID is the Zitadel email-provider id (the management API's
+	// "id", not a display name) once the reconciler has created it. Empty
+	// until spec.zitadel.smtp is set and the reconciler has run. Persisting
+	// this lets the reconciler update-in-place rather than re-discovering the
+	// provider by description on every reconcile.
+	// +optional
+	SMTPProviderID string `json:"smtpProviderID,omitempty"`
+
+	// SMTPSettingsHash is a hash of the last-applied SMTP settings, including
+	// the password. Zitadel never returns a stored password, so this is the
+	// only way the reconciler can detect a password change and know to
+	// re-apply it; a mismatch (or an id whose live settings otherwise differ)
+	// triggers a repair on the next reconcile.
+	// +optional
+	SMTPSettingsHash string `json:"smtpSettingsHash,omitempty"`
+
+	// PlatformOwnerLinkConfirmedSMTPActive reports whether the Platform
+	// owner's last mailed setup link was sent while Zitadel had an active
+	// SMTP provider. A PlatformBootstrap from before this field existed
+	// defaults to false, which makes the reconciler send exactly one
+	// confirmatory link the first time SMTP becomes active — the fix for
+	// hosted#189, where the very first link was "emailed" while Zitadel had
+	// no mail server at all, so nobody ever received it and nothing resent
+	// it. Never consulted in offline mode (spec.platformOwner.offlineSetup),
+	// which never depends on SMTP.
+	// +optional
+	PlatformOwnerLinkConfirmedSMTPActive bool `json:"platformOwnerLinkConfirmedSMTPActive,omitempty"`
 }
 
 // +kubebuilder:object:root=true

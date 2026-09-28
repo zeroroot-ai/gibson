@@ -100,7 +100,7 @@ func (s *DaemonServer) CreateAgentIdentity(ctx context.Context, req *tenantpb.Cr
 	}
 
 	// Step 4: Create service account in IdP.
-	saName := fmt.Sprintf("%s-%s-%s", string(idpRole), tenantID, req.Name)
+	saName := serviceAccountName(idpRole, tenantID, req.Name)
 	sa, err := s.idpAdminClient.CreateServiceAccount(ctx, idp.CreateServiceAccountRequest{
 		Name:        saName,
 		Description: req.Description,

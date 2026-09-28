@@ -83,6 +83,11 @@ type fakeIDPClient struct {
 	listSessionsErr   error
 	revokedSessionIDs []string
 
+	// ClearHumanFactors recording (hosted#206).
+	clearedFactorsUsers []string
+	clearFactorsResult  idp.ClearHumanFactorsResult
+	clearFactorsErr     error
+
 	// Signup recording. createHumanFn, when set, drives CreateHumanUser;
 	// otherwise it returns a default created user. createHumanReqs records the
 	// requests for assertion — tests assert on it to prove that a duplicate
@@ -154,12 +159,6 @@ func (f *fakeIDPClient) UpdateUserProfile(_ context.Context, _ string, _ idp.Upd
 	return nil, idp.ErrNotFound
 }
 
-func (f *fakeIDPClient) AddTenantMember(_ context.Context, _ idp.TenantMembershipRequest) error {
-	return nil
-}
-func (f *fakeIDPClient) RemoveTenantMember(_ context.Context, _ idp.TenantMembershipRequest) error {
-	return nil
-}
 func (f *fakeIDPClient) RevokeUserSessions(_ context.Context, userID string) (idp.RevokeUserSessionsResult, error) {
 	f.revokedUsers = append(f.revokedUsers, userID)
 	if f.revokeErr != nil {
@@ -177,8 +176,15 @@ func (f *fakeIDPClient) RevokeSession(_ context.Context, sessionID string) error
 	f.revokedSessionIDs = append(f.revokedSessionIDs, sessionID)
 	return nil
 }
-func (f *fakeIDPClient) EnsureHumanUser(_ context.Context, _ idp.EnsureHumanUserRequest) (string, error) {
-	return "user-1", nil
+func (f *fakeIDPClient) ClearHumanFactors(_ context.Context, userID string) (idp.ClearHumanFactorsResult, error) {
+	f.clearedFactorsUsers = append(f.clearedFactorsUsers, userID)
+	if f.clearFactorsErr != nil {
+		return idp.ClearHumanFactorsResult{}, f.clearFactorsErr
+	}
+	return f.clearFactorsResult, nil
+}
+func (f *fakeIDPClient) CreateSetupLink(_ context.Context, _, userID, appURL string) (string, error) {
+	return appURL + "/ui/v2/login/verify?invite=true&userId=" + userID, nil
 }
 func (f *fakeIDPClient) SetHumanPassword(context.Context, idp.SetHumanPasswordRequest) error {
 	return nil
@@ -197,6 +203,12 @@ func (f *fakeIDPClient) FindUserIDByEmail(ctx context.Context, email string) (st
 		return f.findUserFn(ctx, email)
 	}
 	return "", idp.ErrNotFound
+}
+func (f *fakeIDPClient) EnsureHumanUserNoPassword(_ context.Context, _, _, _, _ string) (string, error) {
+	return "", nil
+}
+func (f *fakeIDPClient) CreateSetupInviteCode(_ context.Context, _, _ string, _ bool) (string, error) {
+	return "", nil
 }
 func (f *fakeIDPClient) Close() error { return nil }
 

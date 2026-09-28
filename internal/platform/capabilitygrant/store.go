@@ -484,6 +484,41 @@ func (s *CapabilityGrantStore) GetAgentInTenant(ctx context.Context, tenantID, a
 	return s.getAgent(ctx, agentID, tenantID)
 }
 
+// AgentByPrincipal returns the active agent enrolled under principalRef in
+// tenantID, or (nil, nil) when there is none.
+//
+// principalRef, not agent_id, for the same reason HasActiveGrant takes it: a
+// request arrives with the caller's FGA principal ref, the CG-JWT's verified
+// identity, never the capability_grant_agents row id. The name and the
+// enrolling user are properties of the principal, not of the row: every row
+// a principal has (a host that registers again copies the principal onto a
+// fresh agent row) carries the same name and user_id from the same bootstrap
+// claims. The newest active row is therefore the same answer as any other,
+// and LIMIT 1 only guards the scan.
+func (s *CapabilityGrantStore) AgentByPrincipal(ctx context.Context, tenantID, principalRef string) (*Agent, error) {
+	if tenantID == "" {
+		return nil, errors.New("capabilitygrant: AgentByPrincipal: tenant is required")
+	}
+	if principalRef == "" {
+		return nil, errors.New("capabilitygrant: AgentByPrincipal: principal_ref is required")
+	}
+	const query = `
+SELECT a.id, a.host_id, a.tenant_id, COALESCE(a.user_id, ''), a.name, a.mode,
+       a.public_key_jwk, a.status, a.session_ttl_s, a.max_lifetime_s,
+       a.last_active_at, a.expires_at, COALESCE(a.principal_ref, ''), a.created_at
+FROM   capability_grant_agents a
+WHERE  a.tenant_id = $1
+  AND  a.principal_ref = $2
+  AND  a.status = 'active'
+ORDER BY a.created_at DESC
+LIMIT 1`
+	ag, err := scanAgent(s.db.QueryRowContext(ctx, query, tenantID, principalRef))
+	if err != nil {
+		return nil, fmt.Errorf("capabilitygrant: AgentByPrincipal %q: %w", principalRef, err)
+	}
+	return ag, nil
+}
+
 // getAgent backs both agent reads. A non-empty tenantID adds the tenant
 // predicate; the empty tenantID is reachable only from GetAgent, the
 // credential-verification path.
@@ -503,12 +538,22 @@ WHERE  a.id = $1`
 		args = append(args, tenantID)
 	}
 
+	ag, err := scanAgent(s.db.QueryRowContext(ctx, query, args...))
+	if err != nil {
+		return nil, fmt.Errorf("capabilitygrant: GetAgent %q: %w", agentID, err)
+	}
+	return ag, nil
+}
+
+// scanAgent reads one capability_grant_agents row in the column order every
+// agent read selects. No row is (nil, nil).
+func scanAgent(row *sql.Row) (*Agent, error) {
 	var ag Agent
 	var jwk []byte
 	var lastActive sql.NullTime
 	var expiresAt sql.NullTime
 
-	err := s.db.QueryRowContext(ctx, query, args...).Scan(
+	err := row.Scan(
 		&ag.ID,
 		&ag.HostID,
 		&ag.TenantID,
@@ -524,11 +569,11 @@ WHERE  a.id = $1`
 		&ag.PrincipalRef,
 		&ag.CreatedAt,
 	)
-	if err == sql.ErrNoRows {
+	if errors.Is(err, sql.ErrNoRows) {
 		return nil, nil
 	}
 	if err != nil {
-		return nil, fmt.Errorf("capabilitygrant: GetAgent %q: %w", agentID, err)
+		return nil, fmt.Errorf("scan capability_grant_agents row: %w", err)
 	}
 	ag.PublicKeyJWK = json.RawMessage(jwk)
 	if lastActive.Valid {

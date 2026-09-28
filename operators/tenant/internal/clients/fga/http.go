@@ -129,31 +129,82 @@ func (c *HTTPClient) Delete(ctx context.Context, tuples []Tuple) error {
 	return err
 }
 
-// Read implements Client.
+// readPageSize is the page size Read requests. OpenFGA defaults to 50 when
+// unset, so a filter matching more than 50 tuples silently truncated before
+// this was added a page size and followed the continuation token.
+const readPageSize = 100
+
+// readMaxPages bounds the continuation-token walk. A filter that needs more
+// pages than this is not a normal admin read; looping forever against a
+// paginating server is worse than stopping loudly.
+const readMaxPages = 1000
+
+// Read implements Client. It follows the continuation token until OpenFGA
+// stops returning one, so a filter matching more than one page of tuples
+// (readPageSize) is not silently truncated.
 func (c *HTTPClient) Read(ctx context.Context, filter Tuple) ([]Tuple, error) {
 	start := time.Now()
-	body := map[string]any{
-		"tuple_key": tupleKey(filter),
+	var (
+		out   []Tuple
+		token string
+		err   error
+	)
+	for range readMaxPages {
+		body := map[string]any{
+			"tuple_key": tupleKey(filter),
+			"page_size": readPageSize,
+		}
+		if token != "" {
+			body["continuation_token"] = token
+		}
+		var resp struct {
+			Tuples []struct {
+				Key struct {
+					User     string `json:"user"`
+					Relation string `json:"relation"`
+					Object   string `json:"object"`
+				} `json:"key"`
+			} `json:"tuples"`
+			ContinuationToken string `json:"continuation_token"`
+		}
+		if err = c.doJSON(ctx, fmt.Sprintf("/stores/%s/read", c.storeID), body, &resp); err != nil {
+			break
+		}
+		for _, t := range resp.Tuples {
+			out = append(out, Tuple{User: t.Key.User, Relation: t.Key.Relation, Object: t.Key.Object})
+		}
+		token = resp.ContinuationToken
+		if token == "" {
+			break
+		}
 	}
-	var resp struct {
-		Tuples []struct {
-			Key struct {
-				User     string `json:"user"`
-				Relation string `json:"relation"`
-				Object   string `json:"object"`
-			} `json:"key"`
-		} `json:"tuples"`
-	}
-	err := c.doJSON(ctx, fmt.Sprintf("/stores/%s/read", c.storeID), body, &resp)
 	metrics.ObserveSubsystemCall("fga", "Read", start, err)
 	if err != nil {
 		return nil, err
 	}
-	out := make([]Tuple, 0, len(resp.Tuples))
-	for _, t := range resp.Tuples {
-		out = append(out, Tuple{User: t.Key.User, Relation: t.Key.Relation, Object: t.Key.Object})
-	}
 	return out, nil
+}
+
+// WriteAndDelete implements Client: one POST /stores/:id/write carrying both
+// the writes and deletes tuple-key lists, so OpenFGA applies all of it or
+// none of it.
+func (c *HTTPClient) WriteAndDelete(ctx context.Context, writes, deletes []Tuple) error {
+	if len(writes) == 0 && len(deletes) == 0 {
+		return nil
+	}
+	start := time.Now()
+	body := map[string]any{
+		"authorization_model_id": c.modelID,
+	}
+	if len(writes) > 0 {
+		body["writes"] = map[string]any{"tuple_keys": toTupleKeys(writes)}
+	}
+	if len(deletes) > 0 {
+		body["deletes"] = map[string]any{"tuple_keys": toTupleKeys(deletes)}
+	}
+	err := c.doJSON(ctx, fmt.Sprintf("/stores/%s/write", c.storeID), body, nil)
+	metrics.ObserveSubsystemCall("fga", "WriteAndDelete", start, err)
+	return err
 }
 
 // Check implements Client.

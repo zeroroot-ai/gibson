@@ -15,12 +15,19 @@ import (
 	"database/sql"
 	"errors"
 	"fmt"
+	"os"
 
 	"google.golang.org/grpc/codes"
 	"google.golang.org/grpc/status"
 
 	daemonoperatorv1 "github.com/zeroroot-ai/gibson/internal/server/daemon/api/gibson/daemon/operator/v1"
 )
+
+// envIDPZitadelOrgID is the platform org's Zitadel org id (the same env var
+// idp_init.go reads as envZitadelOrgID). The Platform owner and the service
+// accounts live there; mapping it to a tenant would give them a tenant
+// (ADR-0093 decision 4).
+const envIDPZitadelOrgID = "GIBSON_IDP_ZITADEL_ORG_ID"
 
 // SetTenantZitadelOrg upserts the tenant -> Zitadel-org-id mapping. Operator-only
 // (platform_operator on system_tenant, enforced by ext-authz). Idempotent:
@@ -42,6 +49,11 @@ func (s *DaemonServer) SetTenantZitadelOrg(ctx context.Context, req *daemonopera
 		// then silently skip.
 		return nil, status.Error(codes.InvalidArgument, "zitadel_org_id required")
 	}
+	if platformOrg := os.Getenv(envIDPZitadelOrgID); platformOrg != "" && req.GetZitadelOrgId() == platformOrg {
+		// Refuse a mapping that cannot be right (ADR-0093 decision 4): the
+		// Platform owner and the service accounts live in the platform org.
+		return nil, status.Error(codes.InvalidArgument, "zitadel_org_id is the platform org, not a tenant org")
+	}
 	if err := ensureTenantZitadelOrgsTable(ctx, db); err != nil {
 		return nil, status.Errorf(codes.Internal, "ensure table: %v", err)
 	}
@@ -54,14 +66,36 @@ func (s *DaemonServer) SetTenantZitadelOrg(ctx context.Context, req *daemonopera
 			updated_at = NOW()
 	`
 	if _, err := db.ExecContext(ctx, q, req.GetTenantId(), req.GetZitadelOrgId()); err != nil {
+		if isPgUniqueViolation(err) {
+			// The unique index (migration 027) makes one org map to at most
+			// one tenant. A second tenant claiming an already-mapped org
+			// would make ext-authz's org->tenant lookup ambiguous.
+			return nil, status.Errorf(codes.FailedPrecondition,
+				"zitadel_org_id %s is already mapped to a different tenant", req.GetZitadelOrgId())
+		}
 		return nil, status.Errorf(codes.Internal, "upsert tenant_zitadel_orgs: %v", err)
 	}
 	return &daemonoperatorv1.SetTenantZitadelOrgResponse{}, nil
 }
 
-// ensureTenantZitadelOrgsTable creates tenant_zitadel_orgs if it does not yet
-// exist. Mirrors ensureTenantQuotasTable: the migration (006) is authoritative,
-// but this keeps the RPC working on a freshly-pointed DB before migrations run.
+// isPgUniqueViolation reports whether err is a Postgres unique constraint
+// violation (SQLSTATE 23505).
+func isPgUniqueViolation(err error) bool {
+	if err == nil {
+		return false
+	}
+	type pgError interface{ SQLState() string }
+	var pe pgError
+	if errors.As(err, &pe) {
+		return pe.SQLState() == "23505"
+	}
+	return false
+}
+
+// ensureTenantZitadelOrgsTable creates tenant_zitadel_orgs (and its
+// org-uniqueness index) if they do not yet exist. Mirrors
+// ensureTenantQuotasTable: migrations 006 and 027 are authoritative, but this
+// keeps the RPC working on a freshly-pointed DB before migrations run.
 func ensureTenantZitadelOrgsTable(ctx context.Context, db *sql.DB) error {
 	const create = `
 		CREATE TABLE IF NOT EXISTS tenant_zitadel_orgs (
@@ -72,6 +106,13 @@ func ensureTenantZitadelOrgsTable(ctx context.Context, db *sql.DB) error {
 	`
 	if _, err := db.ExecContext(ctx, create); err != nil {
 		return fmt.Errorf("create tenant_zitadel_orgs: %w", err)
+	}
+	const uniq = `
+		CREATE UNIQUE INDEX IF NOT EXISTS tenant_zitadel_orgs_org_uidx
+			ON tenant_zitadel_orgs (zitadel_org_id)
+	`
+	if _, err := db.ExecContext(ctx, uniq); err != nil {
+		return fmt.Errorf("create tenant_zitadel_orgs_org_uidx: %w", err)
 	}
 	return nil
 }
@@ -111,5 +152,32 @@ func readTenantZitadelOrgID(ctx context.Context, db *sql.DB, tenantID string) (s
 		return "", fmt.Errorf("read tenant_zitadel_orgs: %w", err)
 	default:
 		return orgID, nil
+	}
+}
+
+// TenantForOrg returns the tenant mapped to zitadelOrgID, or ("", nil) when
+// the org maps to no tenant. This is the reverse lookup of ZitadelOrgID: the
+// daemon's org-tenant route (org_tenant_route.go) calls it so ext-authz can
+// resolve a signed-in person's tenant from their token's verified Zitadel
+// org (ADR-0093 decision 4), never from a client-supplied header.
+func (r *ZitadelOrgResolver) TenantForOrg(ctx context.Context, zitadelOrgID string) (string, error) {
+	if r == nil || r.db == nil {
+		return "", nil
+	}
+	return readTenantForZitadelOrg(ctx, r.db, zitadelOrgID)
+}
+
+// readTenantForZitadelOrg returns the tenant id mapped to this Zitadel org,
+// or ("", nil) when no mapping exists.
+func readTenantForZitadelOrg(ctx context.Context, db *sql.DB, zitadelOrgID string) (string, error) {
+	const q = `SELECT tenant_id FROM tenant_zitadel_orgs WHERE zitadel_org_id = $1`
+	var tenantID string
+	switch err := db.QueryRowContext(ctx, q, zitadelOrgID).Scan(&tenantID); {
+	case errors.Is(err, sql.ErrNoRows):
+		return "", nil
+	case err != nil:
+		return "", fmt.Errorf("read tenant_zitadel_orgs by org: %w", err)
+	default:
+		return tenantID, nil
 	}
 }

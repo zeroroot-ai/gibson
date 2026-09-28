@@ -637,6 +637,70 @@ func (f *fgaAuthorizer) UpdateConditionalTuple(ctx context.Context, t Conditiona
 	return nil
 }
 
+// WriteAndDelete writes and deletes plain (unconditioned) tuples in a single
+// FGA WriteRequest, so both legs land in one transaction: OpenFGA applies the
+// whole request or none of it.
+//
+// This is the plain-tuple counterpart of UpdateConditionalTuple. It is used
+// by TransferOwnership (hosted#190) to move the owner relation from the
+// current Owner to the new one and grant the previous Owner admin, all in one
+// call — a tenant is never observed with zero or two Owners, even when the
+// call fails: on error, nothing has been applied, so the previous Owner
+// remains the sole Owner.
+//
+// Unlike Write, WriteAndDelete does not retry around an "already exists" or
+// "not found" partial failure — the whole point is that a failure here must
+// leave state exactly as it was. Callers are expected to pass only tuples
+// whose current presence/absence they have already established (e.g. via
+// Check), so a well-formed call does not hit either error in practice.
+func (f *fgaAuthorizer) WriteAndDelete(ctx context.Context, writes, deletes []Tuple) error {
+	if len(writes) == 0 && len(deletes) == 0 {
+		return nil
+	}
+
+	start := time.Now()
+	spanCtx, span := f.startSpan(ctx, spanWrite,
+		attribute.Int("authz.write_count", len(writes)),
+		attribute.Int("authz.delete_count", len(deletes)),
+		attribute.String("authz.op", "write_and_delete"),
+	)
+	defer span.End()
+
+	callCtx, cancel := f.callContext(spanCtx)
+	defer cancel()
+
+	writeKeys := make([]fgaclient.ClientTupleKey, len(writes))
+	for i, t := range writes {
+		writeKeys[i] = fgaclient.ClientTupleKey{User: t.User, Relation: t.Relation, Object: t.Object}
+	}
+	deleteKeys := make([]fgaclient.ClientTupleKeyWithoutCondition, len(deletes))
+	for i, t := range deletes {
+		deleteKeys[i] = fgaclient.ClientTupleKeyWithoutCondition{User: t.User, Relation: t.Relation, Object: t.Object}
+	}
+
+	_, err := f.client.Write(callCtx).Body(fgaclient.ClientWriteRequest{
+		Writes:  writeKeys,
+		Deletes: deleteKeys,
+	}).Execute()
+
+	durationMs := time.Since(start).Milliseconds()
+	span.SetAttributes(attribute.Int64("authz.duration_ms", durationMs))
+
+	if err != nil {
+		typedErr := mapSDKError(err)
+		f.recordSpanError(span, typedErr, "WriteAndDelete")
+		return typedErr
+	}
+
+	span.SetStatus(codes.Ok, "")
+	f.logger.Debug("authz: WriteAndDelete",
+		"write_count", len(writes),
+		"delete_count", len(deletes),
+		"duration_ms", durationMs,
+	)
+	return nil
+}
+
 // conditionContextPtr makes a defensive copy of m and returns a pointer to the
 // copy, as required by the OpenFGA SDK's RelationshipCondition.Context field
 // (*map[string]any). Returns nil when m is nil or empty. The copy prevents the

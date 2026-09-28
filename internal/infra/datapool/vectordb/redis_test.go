@@ -85,7 +85,7 @@ func TestBuildKNNQuery_NoFilter(t *testing.T) {
 // ---------------------------------------------------------------------------
 
 const (
-	redisStackImage    = "redis/redis-stack-server:7.4.0-v1"
+	redisStackImage    = "ghcr.io/zeroroot-ai/mirror/redis-stack-server:7.4.0-v1"
 	testIndexName      = "vector_idx:tenant_test"
 	testVectorDim      = 4 // small dimension for tests
 	integrationTimeout = 90 * time.Second

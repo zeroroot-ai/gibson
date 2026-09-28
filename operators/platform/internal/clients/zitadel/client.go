@@ -13,6 +13,9 @@ import (
 	"net/url"
 	"strings"
 	"time"
+
+	"github.com/zeroroot-ai/gibson/internal/platform/idp"
+	"github.com/zeroroot-ai/gibson/internal/platform/tenantrole"
 )
 
 // Client is the Zitadel Management/Admin API surface the platform-operator
@@ -20,6 +23,14 @@ import (
 // PAT lifecycle. All mutating operations are idempotent: caller may
 // safely retry; 409/already-exists is success, 404 is success on delete.
 type Client interface {
+	// LabelPolicyClient reads and writes the instance label policy (the
+	// login pages' brand). See label_policy.go.
+	LabelPolicyClient
+
+	// EmailProviderClient reads and writes the instance's one SMTP email
+	// provider (hosted#189). See email_provider.go.
+	EmailProviderClient
+
 	// EnsureProject creates the Zitadel project with the given name and
 	// returns its ID. If the project already exists, the existing ID is
 	// returned. Idempotent.
@@ -77,20 +88,55 @@ type Client interface {
 	AddMachineUserClientSecret(ctx context.Context, userID string) (clientID, clientSecret string, err error)
 
 	// AddIAMMember adds the given user to the IAM with the given roles
-	// (e.g. ["IAM_OWNER"]). Idempotent: if the user is already a member
-	// the roles are merged in via PUT semantics. Used to grant the
-	// daemon's machine user the IAM_OWNER role its admin API calls need.
+	// (e.g. ["IAM_OWNER"]). Idempotent: if the user is already a member,
+	// Zitadel's PUT on 409 REPLACES the member's role list with the given
+	// roles — it is not a merge, confirmed against Zitadel's own API
+	// documentation ("The whole roles list will be updated. Make sure to
+	// include roles that you don't want to change (remove)."). Passing
+	// the caller's full desired role set on every call therefore gives
+	// exact-set semantics. Used to grant a machine user its declared
+	// IAM-scoped roles.
 	AddIAMMember(ctx context.Context, userID string, roles []string) error
+
+	// RemoveIAMMember revokes the given user's IAM membership entirely
+	// (DELETE /admin/v1/members/{userId}). Idempotent: 404 (never a
+	// member, or already removed) is success. Used when a machine user's
+	// declared role set has no IAM_-prefixed roles, so any role it
+	// previously held is revoked rather than left in place.
+	RemoveIAMMember(ctx context.Context, userID string) error
+
+	// SearchIAMMembers returns every instance (IAM-level) member, human or
+	// machine. hosted#189: the HumanAdminsScoped reconcile step lists this
+	// once per reconcile to find any human Zitadel administrator besides
+	// the Platform owner.
+	//
+	// Zitadel v4.18.0: POST /admin/v1/members/_search with an empty body
+	// returns every member, unfiltered. Response field names are the exact
+	// protojson wire names of the member-search result: `userId`, `roles`,
+	// `preferredLoginName`, `email`, `firstName`, `lastName`,
+	// `displayName`, `userType` ("TYPE_HUMAN" / "TYPE_MACHINE" /
+	// "TYPE_UNSPECIFIED" — see ZitadelUserTypeHuman/ZitadelUserTypeMachine),
+	// and `userResourceOwner` (the org the USER belongs to — distinct from
+	// the member row's own `details.resourceOwner`, which names the
+	// instance's default org that owns the membership grant, not the user).
+	SearchIAMMembers(ctx context.Context) ([]IAMMember, error)
 
 	// AddOrgMember adds the given user to the organization identified by
 	// orgID with the given org-scoped roles (e.g. ["ORG_OWNER"]).
-	// Idempotent: if the user is already an org member the roles are
-	// merged in via PUT semantics, mirroring AddIAMMember's 409→PUT
-	// handling. Org-scoped roles are distinct from IAM (instance-scoped)
-	// roles — Zitadel routes them through /management/v1/orgs/{orgID}/
-	// members rather than /admin/v1/members. Used by the machine-user
-	// reconciler path to grant signup-style bots their org roles.
+	// Idempotent: if the user is already an org member, Zitadel's PUT on
+	// 409 REPLACES the member's role list (same exact-set semantics as
+	// AddIAMMember). Org-scoped roles are distinct from IAM
+	// (instance-scoped) roles — Zitadel routes them through
+	// /management/v1/orgs/{orgID}/members rather than /admin/v1/members.
+	// Used by the machine-user reconciler path to grant signup-style
+	// bots their org roles.
 	AddOrgMember(ctx context.Context, orgID, userID string, roles []string) error
+
+	// RemoveOrgMember revokes the given user's membership in orgID
+	// entirely (DELETE /management/v1/orgs/{orgID}/members/{userId}).
+	// Idempotent: 404 is success. Used when a machine user's declared
+	// role set has no ORG_-prefixed roles.
+	RemoveOrgMember(ctx context.Context, orgID, userID string) error
 
 	// GetOrgIDForProject returns the Zitadel organization ID that owns
 	// the given project (Zitadel's `details.resourceOwner` field). The
@@ -139,14 +185,151 @@ type Client interface {
 	// See zeroroot-ai/platform-operator#65.
 	EnsureMachineUserJWTAccessToken(ctx context.Context, userID, userName string) (changed bool, err error)
 
-	// EnsureRegistrationDisabled enforces allowRegister=false on the
-	// instance default login policy so Zitadel's hosted self-registration
-	// page (/ui/v2/login/register) and the sign-in "Register" link are not
-	// served. All human users are provisioned through the admin API
-	// (controlled signup), so self-service registration must be off
-	// (deploy#886). Idempotent: returns changed=false when already
-	// disabled, changed=true when a PUT was applied.
-	EnsureRegistrationDisabled(ctx context.Context) (changed bool, err error)
+	// EnsureLoginPolicy makes the instance default login policy equal want.
+	// It folds in what used to be the separate EnsureRegistrationDisabled
+	// method (allowRegister is one of want's fields) — one codepath for the
+	// instance login policy, not two that can race or disagree.
+	//
+	// Returns one short string per corrected item ("forceMfa",
+	// "+SECOND_FACTOR_TYPE_U2F", "-SECOND_FACTOR_TYPE_OTP_SMS"), empty when
+	// nothing changed. It never sends a no-op PUT, add or remove — Zitadel
+	// rejects a no-op PUT with 400 (INSTANCE-5M9vdd, the deploy#886 wedge)
+	// and a no-op add/remove with 409/not-found (MFA.AlreadyExists /
+	// MFA.NotExisting), and either would put the reconciler into an
+	// unrecoverable retry loop.
+	EnsureLoginPolicy(ctx context.Context, want LoginPolicy) (corrected []string, err error)
+
+	// EnsureDomainPolicy makes the instance default domain policy equal
+	// want, echoing back the other live booleans (validateOrgDomains,
+	// smtpSenderAddressMatchesInstanceDomain) so a PUT never resets them.
+	// Idempotent: returns changed=false when already equal.
+	EnsureDomainPolicy(ctx context.Context, want DomainPolicy) (changed bool, err error)
+
+	// EnsureProjectRoles makes the project's role set exactly roles: it
+	// adds a missing key, renames a key whose display name differs, and
+	// removes a project role that is not declared (ADR-0093 decision 2,
+	// owner decision D4). Removing a role cascades in Zitadel to every
+	// project grant and user grant that named it. Idempotent: returns
+	// changed=false when the project already holds exactly roles.
+	EnsureProjectRoles(ctx context.Context, projectID string, roles []tenantrole.Def) (changed bool, err error)
+
+	// --- Platform owner (ADR-0093 decision 6/8, hosted#201) ---------------
+
+	// EnsureHumanUserNoPassword creates a human user in orgID with NO
+	// password field on the request at all — Zitadel never mints or stores
+	// one (ADR-0093: "no stored passwords"). email is marked verified on
+	// creation so AddHumanUser does not also fire Zitadel's separate
+	// email-verification-code flow; the invite-code flow
+	// (CreateSetupInviteCode) is the platform's one setup-link mechanism.
+	// Idempotent: on 409/already-exists, resolves the existing user's id via
+	// FindHumanUserByEmail.
+	//
+	// Zitadel v4.18.0, Connect-protocol path (matches the fake in
+	// zitadelconntest/identity.go): POST
+	// /zitadel.user.v2.UserService/AddHumanUser.
+	EnsureHumanUserNoPassword(ctx context.Context, orgID, email, givenName, familyName string) (userID string, err error)
+
+	// FindHumanUserByEmail resolves a human user's id from their exact email
+	// address across the instance. Returns ErrNotFound when no match.
+	//
+	// Zitadel v4.18.0: POST /zitadel.user.v2.UserService/ListUsers with an
+	// emailQuery.
+	FindHumanUserByEmail(ctx context.Context, email string) (userID string, err error)
+
+	// CreateSetupInviteCode creates a one-time setup-link code for userID via
+	// Zitadel's own invite-code flow. When send is true, Zitadel emails the
+	// link built from urlTemplate and the returned code is empty. When send
+	// is false, nothing is sent and the raw code is returned so the caller
+	// can build the link itself — the offline-mode path (ADR-0093 decision
+	// 8), which writes a one-time, expiring link to a Secret instead of
+	// relying on mail. Creating a new code invalidates any code created
+	// earlier for the same user (Zitadel's own documented behavior), which is
+	// exactly what platformOwner.setupGeneration needs on a reset.
+	//
+	// urlTemplate is always supplied explicitly (Go template placeholders
+	// {{.UserID}}, {{.OrgID}}, {{.Code}}) rather than relying on a Zitadel
+	// default invite path, so the emitted link is the same shape whether
+	// Zitadel sends it or the caller embeds it in the offline Secret.
+	//
+	// Zitadel v4.18.0: POST /zitadel.user.v2.UserService/CreateInviteCode.
+	CreateSetupInviteCode(ctx context.Context, userID, urlTemplate string, send bool) (code string, err error)
+
+	// ClearHumanFactors removes every second factor Zitadel has on file for
+	// userID (TOTP and U2F/passkey — the only two the Platform owner's login
+	// policy allows, ADR-0093 decision 9) so a subsequent
+	// CreateSetupInviteCode forces a fresh enrollment. Used by
+	// platformOwner.setupGeneration's reset path (ADR-0093 decision 12).
+	// Idempotent: a user with no factors on file is a no-op.
+	//
+	// Zitadel v4.18.0: POST
+	// /zitadel.user.v2.UserService/ListAuthenticationMethodTypes to
+	// enumerate, then POST .../RemoveTOTP or .../RemoveU2F per entry.
+	ClearHumanFactors(ctx context.Context, userID string) error
+
+	// DeleteUser permanently deletes a Zitadel user (human or machine) via
+	// the v2 UserService. Idempotent: NotFound (already deleted) is
+	// success. Used by the HumanAdminsScoped step (hosted#189) to remove
+	// Zitadel's own default first-instance human admin once its IAM_OWNER
+	// membership has already been revoked.
+	//
+	// Zitadel v4.18.0: POST /zitadel.user.v2.UserService/DeleteUser with
+	// body {"userId": "<id>"}.
+	DeleteUser(ctx context.Context, userID string) error
+}
+
+// IAMMember is one row of an instance member search
+// (POST /admin/v1/members/_search). SearchIAMMembers decodes only the
+// fields the HumanAdminsScoped step (hosted#189) needs: whether the member
+// is human or machine, and, for identifying Zitadel's own default
+// first-instance admin specifically, the login name and the org the
+// account was created in.
+type IAMMember struct {
+	UserID             string
+	Roles              []string
+	PreferredLoginName string
+	Email              string
+	FirstName          string
+	LastName           string
+	DisplayName        string
+	// UserType is Zitadel's protojson enum name for the member's user
+	// record — compare against ZitadelUserTypeHuman / ZitadelUserTypeMachine,
+	// never a raw literal.
+	UserType string
+	// UserResourceOwner is the id of the org the USER belongs to (distinct
+	// from the membership grant's own `details.resourceOwner`, which is
+	// always the instance's default org). Compare against
+	// GetOrgIDForProject's result to test "was this account created in the
+	// first-instance org."
+	UserResourceOwner string
+}
+
+// Zitadel protojson user-type enum values, as returned by
+// /admin/v1/members/_search's `userType` field.
+const (
+	ZitadelUserTypeHuman   = "TYPE_HUMAN"
+	ZitadelUserTypeMachine = "TYPE_MACHINE"
+)
+
+// LoginPolicy is the desired instance default login policy. EnsureLoginPolicy
+// makes the live policy equal every field below — this is a full-replace PUT
+// on the Zitadel side, so every field the operator cares about must be named
+// here, not left to "whatever the instance happened to default to."
+type LoginPolicy struct {
+	AllowUsernamePassword bool
+	AllowRegister         bool
+	AllowExternalIDP      bool
+	ForceMFA              bool
+	ForceMFALocalOnly     bool
+	PasswordlessAllowed   bool
+	AllowDomainDiscovery  bool
+	MFAInitSkipLifetime   time.Duration
+	SecondFactors         []string // enum names, e.g. "SECOND_FACTOR_TYPE_OTP"
+	MultiFactors          []string // enum names, e.g. "MULTI_FACTOR_TYPE_U2F_WITH_VERIFICATION"
+}
+
+// DomainPolicy is the desired instance default domain policy.
+type DomainPolicy struct {
+	UserLoginMustBeDomain bool
 }
 
 // CreateOIDCClientRequest is the input to CreateOIDCClient.
@@ -718,14 +901,44 @@ func (e *errClient) AddMachineUserClientSecret(ctx context.Context, userID strin
 func (e *errClient) AddIAMMember(ctx context.Context, userID string, roles []string) error {
 	return e.err
 }
+func (e *errClient) RemoveIAMMember(_ context.Context, _ string) error {
+	return e.err
+}
+func (e *errClient) SearchIAMMembers(_ context.Context) ([]IAMMember, error) {
+	return nil, e.err
+}
 func (e *errClient) AddOrgMember(ctx context.Context, orgID, userID string, roles []string) error {
 	return e.err
 }
-func (e *errClient) EnsureRegistrationDisabled(ctx context.Context) (bool, error) {
+func (e *errClient) RemoveOrgMember(_ context.Context, _, _ string) error {
+	return e.err
+}
+func (e *errClient) EnsureLoginPolicy(_ context.Context, _ LoginPolicy) ([]string, error) {
+	return nil, e.err
+}
+func (e *errClient) EnsureDomainPolicy(_ context.Context, _ DomainPolicy) (bool, error) {
 	return false, e.err
 }
 func (e *errClient) GetOrgIDForProject(ctx context.Context, projectID string) (string, error) {
 	return "", e.err
+}
+func (e *errClient) EnsureProjectRoles(_ context.Context, _ string, _ []tenantrole.Def) (bool, error) {
+	return false, e.err
+}
+func (e *errClient) EnsureHumanUserNoPassword(_ context.Context, _, _, _, _ string) (string, error) {
+	return "", e.err
+}
+func (e *errClient) FindHumanUserByEmail(_ context.Context, _ string) (string, error) {
+	return "", e.err
+}
+func (e *errClient) CreateSetupInviteCode(_ context.Context, _, _ string, _ bool) (string, error) {
+	return "", e.err
+}
+func (e *errClient) ClearHumanFactors(_ context.Context, _ string) error {
+	return e.err
+}
+func (e *errClient) DeleteUser(_ context.Context, _ string) error {
+	return e.err
 }
 
 // GetOrgIDForProject implements Client.
@@ -903,6 +1116,58 @@ func (c *httpClient) AddIAMMember(ctx context.Context, userID string, roles []st
 	return fmt.Errorf("AddIAMMember user=%s: %w", userID, err)
 }
 
+// RemoveIAMMember implements Client.
+//
+// Zitadel v4: DELETE /admin/v1/members/{userId} revokes the user's IAM
+// membership entirely. 404 (never a member) is treated as idempotent
+// success per the Client interface's contract.
+func (c *httpClient) RemoveIAMMember(ctx context.Context, userID string) error {
+	path := "/admin/v1/members/" + url.PathEscape(userID)
+	err := c.doJSON(ctx, http.MethodDelete, path, nil, nil)
+	if err == nil || IsNotFound(err) {
+		return nil
+	}
+	return fmt.Errorf("RemoveIAMMember user=%s: %w", userID, err)
+}
+
+// SearchIAMMembers implements Client.
+//
+// Zitadel v4: POST /admin/v1/members/_search with an empty body (no filter
+// queries) returns every instance member, human and machine.
+func (c *httpClient) SearchIAMMembers(ctx context.Context) ([]IAMMember, error) {
+	var resp struct {
+		Result []struct {
+			UserID             string   `json:"userId"`
+			Roles              []string `json:"roles"`
+			PreferredLoginName string   `json:"preferredLoginName"`
+			Email              string   `json:"email"`
+			FirstName          string   `json:"firstName"`
+			LastName           string   `json:"lastName"`
+			DisplayName        string   `json:"displayName"`
+			UserType           string   `json:"userType"`
+			UserResourceOwner  string   `json:"userResourceOwner"`
+		} `json:"result"`
+	}
+	if err := c.doJSON(ctx, http.MethodPost, "/admin/v1/members/_search", map[string]any{}, &resp); err != nil {
+		return nil, fmt.Errorf("SearchIAMMembers: %w", err)
+	}
+	out := make([]IAMMember, 0, len(resp.Result))
+	for _, m := range resp.Result {
+		out = append(out, IAMMember{
+			UserID:             m.UserID,
+			Roles:              m.Roles,
+			PreferredLoginName: m.PreferredLoginName,
+			Email:              m.Email,
+			FirstName:          m.FirstName,
+			LastName:           m.LastName,
+			DisplayName:        m.DisplayName,
+			UserType:           m.UserType,
+			UserResourceOwner:  m.UserResourceOwner,
+		})
+	}
+	return out, nil
+}
+
 // AddOrgMember implements Client.
 //
 // Zitadel v4: POST /management/v1/orgs/{orgID}/members with body
@@ -937,6 +1202,25 @@ func (c *httpClient) AddOrgMember(ctx context.Context, orgID, userID string, rol
 	return fmt.Errorf("AddOrgMember org=%s user=%s: %w", orgID, userID, err)
 }
 
+// RemoveOrgMember implements Client.
+//
+// Zitadel v4: DELETE /management/v1/orgs/{orgID}/members/{userId} revokes
+// the user's org membership entirely. The x-zitadel-orgid header pins the
+// request to orgID, mirroring AddOrgMember. 404 is idempotent success.
+func (c *httpClient) RemoveOrgMember(ctx context.Context, orgID, userID string) error {
+	if orgID == "" {
+		return fmt.Errorf("RemoveOrgMember user=%s: empty orgID: %w", userID, ErrInvalidInput)
+	}
+	headers := map[string]string{"x-zitadel-orgid": orgID}
+	path := fmt.Sprintf("/management/v1/orgs/%s/members/%s",
+		url.PathEscape(orgID), url.PathEscape(userID))
+	err := c.doJSONWithHeaders(ctx, http.MethodDelete, path, nil, nil, headers)
+	if err == nil || IsNotFound(err) {
+		return nil
+	}
+	return fmt.Errorf("RemoveOrgMember org=%s user=%s: %w", orgID, userID, err)
+}
+
 // updatableLoginPolicyFields are the keys the Admin UpdateLoginPolicy
 // (PUT /admin/v1/policies/login) request accepts. We copy these verbatim
 // from the current GET response so a PUT preserves every live setting and
@@ -964,46 +1248,36 @@ var updatableLoginPolicyFields = []string{
 	"multiFactorCheckLifetime",
 }
 
-// EnsureRegistrationDisabled implements Client.
+// EnsureLoginPolicy implements Client.
 //
 // Zitadel v4: GET /admin/v1/policies/login returns the instance default
-// login policy under `policy`; its `allowRegister` flag gates the hosted
-// Login-V2 self-registration page (/ui/v2/login/register) and the
-// "Register" link on the sign-in screen. The platform provisions all human
-// users through the admin API (the dashboard's controlled signup,
-// POST /v2/users/human), which does NOT consult this flag, so registration
-// must be off — otherwise anyone can mint an account outside the controlled
-// signup (no plan / Stripe / Tenant CR / FGA owner tuple). See deploy#886.
+// login policy under `policy`. A PUT to the same path fully replaces the
+// policy, so every field the operator cares about — not just the one it
+// wants to flip — must be echoed back, or Zitadel silently resets it (e.g.
+// zeroing an MFA lifetime). This folds in what used to be the standalone
+// EnsureRegistrationDisabled (allowRegister is one of want's fields) and
+// adds MFA enforcement, factor selection and external-IdP gating
+// (ADR-0093 section 9).
 //
-// DefaultInstance.LoginPolicy in the Zitadel chart config only applies at
-// FIRST-INSTANCE creation, so already-running instances need this runtime
-// enforcement. Idempotent: GET first, no-op when allowRegister is already
-// false; otherwise PUT /admin/v1/policies/login echoing every live field
-// with allowRegister flipped to false. Returns changed=true only when a
-// PUT was applied.
-func (c *httpClient) EnsureRegistrationDisabled(ctx context.Context) (bool, error) {
+// protojson drops false booleans, zero enums and empty lists from the GET
+// response, so a MISSING key means false / the zero enum, never "unset."
+// The idempotency checks below all treat a missing key that way. Getting
+// this wrong wedges the reconciler: a PUT that changes nothing fails with
+// 400 (INSTANCE-5M9vdd), which the caller classifies as transient and
+// retries forever (deploy#886).
+//
+// second_factors and multi_factors are a different sub-resource
+// (list/add/remove, not part of the policy body) — see syncFactors.
+// Returns one short string per corrected item, empty when nothing changed.
+func (c *httpClient) EnsureLoginPolicy(ctx context.Context, want LoginPolicy) ([]string, error) {
 	var current struct {
 		Policy map[string]any `json:"policy"`
 	}
 	if err := c.doJSON(ctx, http.MethodGet, "/admin/v1/policies/login", nil, &current); err != nil {
-		return false, fmt.Errorf("EnsureRegistrationDisabled: GET login policy: %w", err)
+		return nil, fmt.Errorf("EnsureLoginPolicy: GET login policy: %w", err)
 	}
 	if current.Policy == nil {
-		return false, fmt.Errorf("EnsureRegistrationDisabled: empty login policy in response: %w", ErrPermanent)
-	}
-	// Zitadel (protojson) omits allowRegister from the GET response once it is
-	// false — protojson drops false booleans — so a MISSING key also means
-	// registration is already disabled. Treat anything other than an explicit
-	// true as already-disabled. The previous `ok && !allow` check only no-oped
-	// when the key was present AND false, so on every reconcile after the first
-	// it re-PUT allowRegister=false; Zitadel rejected that no-op change with
-	// `400 Default Login Policy has not been changed (INSTANCE-5M9vdd)`, which
-	// the caller classified as a transient error and retried forever — wedging
-	// PlatformBootstrap (ZitadelProjectReady=Unknown) so the KEK was never
-	// minted and the daemon never started. deploy#886 regression.
-	if allow, _ := current.Policy["allowRegister"].(bool); !allow {
-		// Already disabled (false or omitted) — nothing to do.
-		return false, nil
+		return nil, fmt.Errorf("EnsureLoginPolicy: empty login policy in response: %w", ErrPermanent)
 	}
 
 	body := make(map[string]any, len(updatableLoginPolicyFields))
@@ -1012,10 +1286,403 @@ func (c *httpClient) EnsureRegistrationDisabled(ctx context.Context) (bool, erro
 			body[k] = v
 		}
 	}
-	body["allowRegister"] = false
 
-	if err := c.doJSON(ctx, http.MethodPut, "/admin/v1/policies/login", body, nil); err != nil {
-		return false, fmt.Errorf("EnsureRegistrationDisabled: PUT login policy: %w", err)
+	var corrected []string
+	setBool := func(key string, wantVal bool) {
+		live, _ := current.Policy[key].(bool) // missing = false (protojson)
+		if live != wantVal {
+			corrected = append(corrected, key)
+		}
+		body[key] = wantVal
+	}
+	setBool("allowUsernamePassword", want.AllowUsernamePassword)
+	setBool("allowRegister", want.AllowRegister)
+	setBool("allowExternalIdp", want.AllowExternalIDP)
+	setBool("forceMfa", want.ForceMFA)
+	setBool("forceMfaLocalOnly", want.ForceMFALocalOnly)
+	setBool("allowDomainDiscovery", want.AllowDomainDiscovery)
+
+	wantPasswordless := "PASSWORDLESS_TYPE_NOT_ALLOWED"
+	if want.PasswordlessAllowed {
+		wantPasswordless = "PASSWORDLESS_TYPE_ALLOWED"
+	}
+	livePasswordless, _ := current.Policy["passwordlessType"].(string)
+	if livePasswordless == "" {
+		livePasswordless = "PASSWORDLESS_TYPE_NOT_ALLOWED" // missing = zero enum
+	}
+	if livePasswordless != wantPasswordless {
+		corrected = append(corrected, "passwordlessType")
+	}
+	body["passwordlessType"] = wantPasswordless
+
+	liveSkip := parseProtoDuration(current.Policy["mfaInitSkipLifetime"])
+	if liveSkip != want.MFAInitSkipLifetime {
+		corrected = append(corrected, "mfaInitSkipLifetime")
+	}
+	body["mfaInitSkipLifetime"] = protoDuration(want.MFAInitSkipLifetime)
+
+	if len(corrected) > 0 {
+		if err := c.doJSON(ctx, http.MethodPut, "/admin/v1/policies/login", body, nil); err != nil {
+			return corrected, fmt.Errorf("EnsureLoginPolicy: PUT login policy: %w", err)
+		}
+	}
+
+	secondCorrected, err := c.syncFactors(ctx, "second_factors", want.SecondFactors)
+	corrected = append(corrected, secondCorrected...)
+	if err != nil {
+		return corrected, err
+	}
+	multiCorrected, err := c.syncFactors(ctx, "multi_factors", want.MultiFactors)
+	corrected = append(corrected, multiCorrected...)
+	if err != nil {
+		return corrected, err
+	}
+
+	return corrected, nil
+}
+
+// syncFactors makes the live second_factors or multi_factors set (kind is
+// "second_factors" or "multi_factors") equal want. Adds happen before
+// removes, so the login policy is never left with zero factors while
+// forceMfa is on. Returns "+TYPE" / "-TYPE" per correction.
+func (c *httpClient) syncFactors(ctx context.Context, kind string, want []string) ([]string, error) {
+	var resp struct {
+		Result []string `json:"result"`
+	}
+	searchPath := fmt.Sprintf("/admin/v1/policies/login/%s/_search", kind)
+	if err := c.doJSON(ctx, http.MethodPost, searchPath, map[string]any{}, &resp); err != nil {
+		return nil, fmt.Errorf("EnsureLoginPolicy: list %s: %w", kind, err)
+	}
+	live := make(map[string]bool, len(resp.Result))
+	for _, t := range resp.Result {
+		live[t] = true
+	}
+	wantSet := make(map[string]bool, len(want))
+	for _, t := range want {
+		wantSet[t] = true
+	}
+
+	corrected := make([]string, 0, len(want)+len(resp.Result))
+	for _, t := range want {
+		if live[t] {
+			continue
+		}
+		addPath := "/admin/v1/policies/login/" + kind
+		if err := c.doJSON(ctx, http.MethodPost, addPath, map[string]any{"type": t}, nil); err != nil {
+			return corrected, fmt.Errorf("EnsureLoginPolicy: add %s %s: %w", kind, t, err)
+		}
+		corrected = append(corrected, "+"+t)
+	}
+	for _, t := range resp.Result {
+		if wantSet[t] {
+			continue
+		}
+		delPath := fmt.Sprintf("/admin/v1/policies/login/%s/%s", kind, url.PathEscape(t))
+		if err := c.doJSON(ctx, http.MethodDelete, delPath, nil, nil); err != nil {
+			return corrected, fmt.Errorf("EnsureLoginPolicy: remove %s %s: %w", kind, t, err)
+		}
+		corrected = append(corrected, "-"+t)
+	}
+	return corrected, nil
+}
+
+// EnsureDomainPolicy implements Client. A missing userLoginMustBeDomain
+// means false (protojson drops false booleans). Echoes back the other live
+// booleans so a PUT never resets validateOrgDomains or
+// smtpSenderAddressMatchesInstanceDomain.
+func (c *httpClient) EnsureDomainPolicy(ctx context.Context, want DomainPolicy) (bool, error) {
+	var current struct {
+		Policy map[string]any `json:"policy"`
+	}
+	if err := c.doJSON(ctx, http.MethodGet, "/admin/v1/policies/domain", nil, &current); err != nil {
+		return false, fmt.Errorf("EnsureDomainPolicy: GET domain policy: %w", err)
+	}
+	live, _ := current.Policy["userLoginMustBeDomain"].(bool)
+	if live == want.UserLoginMustBeDomain {
+		return false, nil
+	}
+
+	body := map[string]any{
+		"userLoginMustBeDomain": want.UserLoginMustBeDomain,
+	}
+	if v, ok := current.Policy["validateOrgDomains"]; ok {
+		body["validateOrgDomains"] = v
+	}
+	if v, ok := current.Policy["smtpSenderAddressMatchesInstanceDomain"]; ok {
+		body["smtpSenderAddressMatchesInstanceDomain"] = v
+	}
+	if err := c.doJSON(ctx, http.MethodPut, "/admin/v1/policies/domain", body, nil); err != nil {
+		return false, fmt.Errorf("EnsureDomainPolicy: PUT domain policy: %w", err)
 	}
 	return true, nil
+}
+
+// parseProtoDuration parses a protojson duration string (e.g. "2592000s",
+// "0s"). A missing/unparseable value is zero, matching protojson's
+// convention of dropping zero-valued fields from GET responses.
+func parseProtoDuration(v any) time.Duration {
+	s, _ := v.(string)
+	if s == "" {
+		return 0
+	}
+	d, err := time.ParseDuration(s)
+	if err != nil {
+		return 0
+	}
+	return d
+}
+
+// protoDuration renders d as the protojson duration string Zitadel expects
+// (e.g. "0s", "2592000s").
+func protoDuration(d time.Duration) string {
+	return fmt.Sprintf("%ds", int64(d/time.Second))
+}
+
+// connectJSON posts a Connect unary JSON request to
+// /<service>/<method> (e.g. "zitadel.project.v2.ProjectService",
+// "ListProjectRoles"), the calling convention of Zitadel's v2 services:
+// they have no REST (google.api.http) mapping, only Connect-over-HTTP.
+// Error mapping reuses doJSON's HTTP-status switch: the Connect protocol
+// answers failed_precondition and invalid_argument with 400,
+// already_exists with 409 and not_found with 404, which already collapse
+// onto this client's existing sentinels.
+func (c *httpClient) connectJSON(ctx context.Context, service, method string, body, out any) error {
+	return c.doJSON(ctx, http.MethodPost, "/"+service+"/"+method, body, out)
+}
+
+// connectJSONWithHeaders is connectJSON with caller-supplied extra request
+// headers — needed for the v2 calls whose target org Zitadel resolves from
+// the x-zitadel-orgid header via its auth interceptor
+// (internal/api/grpc/server/middleware, confirmed against the v4.18.0
+// source), never from a body field. AddHumanUser is the one case here: its
+// handler reads authz.GetCtxData(ctx).OrgID and never looks at the request
+// message for an organization at all.
+func (c *httpClient) connectJSONWithHeaders(ctx context.Context, service, method string, body, out any, headers map[string]string) error {
+	return c.doJSONWithHeaders(ctx, http.MethodPost, "/"+service+"/"+method, body, out, headers)
+}
+
+// EnsureProjectRoles implements Client.
+//
+// Lists the project's current roles (ListProjectRoles), then converges to
+// exactly `roles`: AddProjectRole for a missing key, UpdateProjectRole for
+// a key whose display name differs, and RemoveProjectRole for a key not in
+// `roles` (owner decision D4). RemoveProjectRole cascades in Zitadel to
+// every project grant and user grant that named the removed key.
+func (c *httpClient) EnsureProjectRoles(ctx context.Context, projectID string, roles []tenantrole.Def) (bool, error) {
+	const projectService = "zitadel.project.v2.ProjectService"
+
+	// ListProjectRolesResponse is {pagination, projectRoles[]}, and each
+	// ProjectRole names its key "key" (zitadel.project.v2 ProjectRole). The
+	// request side (Add/Update/RemoveProjectRole) uses "roleKey".
+	var listResp struct {
+		ProjectRoles []struct {
+			Key         string `json:"key"`
+			DisplayName string `json:"displayName"`
+		} `json:"projectRoles"`
+	}
+	if err := c.connectJSON(ctx, projectService, "ListProjectRoles", map[string]any{"projectId": projectID}, &listResp); err != nil {
+		return false, fmt.Errorf("EnsureProjectRoles: ListProjectRoles project=%s: %w", projectID, err)
+	}
+
+	current := make(map[string]string, len(listResp.ProjectRoles))
+	for _, r := range listResp.ProjectRoles {
+		current[r.Key] = r.DisplayName
+	}
+	want := make(map[string]string, len(roles))
+	for _, d := range roles {
+		want[string(d.Key)] = d.DisplayName
+	}
+
+	changed := false
+	for _, d := range roles {
+		displayName, exists := current[string(d.Key)]
+		switch {
+		case !exists:
+			if err := c.connectJSON(ctx, projectService, "AddProjectRole", map[string]any{
+				"projectId": projectID, "roleKey": string(d.Key), "displayName": d.DisplayName,
+			}, nil); err != nil && !IsAlreadyExists(err) {
+				return changed, fmt.Errorf("EnsureProjectRoles: AddProjectRole %s: %w", d.Key, err)
+			}
+			changed = true
+		case displayName != d.DisplayName:
+			if err := c.connectJSON(ctx, projectService, "UpdateProjectRole", map[string]any{
+				"projectId": projectID, "roleKey": string(d.Key), "displayName": d.DisplayName,
+			}, nil); err != nil {
+				return changed, fmt.Errorf("EnsureProjectRoles: UpdateProjectRole %s: %w", d.Key, err)
+			}
+			changed = true
+		}
+	}
+	for key := range current {
+		if _, wanted := want[key]; wanted {
+			continue
+		}
+		if err := c.connectJSON(ctx, projectService, "RemoveProjectRole", map[string]any{
+			"projectId": projectID, "roleKey": key,
+		}, nil); err != nil && !IsNotFound(err) {
+			return changed, fmt.Errorf("EnsureProjectRoles: RemoveProjectRole %s: %w", key, err)
+		}
+		changed = true
+	}
+	return changed, nil
+}
+
+// --- Platform owner (ADR-0093 decision 6/8, hosted#201) --------------------
+//
+// These calls target Zitadel v2's UserService over connectJSON, the same
+// Connect-protocol unary-over-HTTP convention EnsureProjectRoles above uses
+// for the v2 ProjectService, and the one the fake in
+// zitadelconn/zitadelconntest/identity.go serves. doJSON's existing
+// status-code classification (404 -> ErrNotFound, 409 -> ErrAlreadyExists,
+// 401/403 -> permanent ErrUnauthorized) applies unchanged: Zitadel's Connect
+// JSON error body maps the same "already_exists" / "not_found" /
+// "permission_denied" codes onto those same HTTP statuses.
+const userService = "zitadel.user.v2.UserService"
+
+// EnsureHumanUserNoPassword implements Client.
+func (c *httpClient) EnsureHumanUserNoPassword(ctx context.Context, orgID, email, givenName, familyName string) (string, error) {
+	body := map[string]any{
+		"username": idp.UsernameForEmail(email),
+		"profile": map[string]any{
+			"givenName":  givenName,
+			"familyName": familyName,
+		},
+		// isVerified: true — no separate email-verification-code flow;
+		// CreateSetupInviteCode is the one setup-link mechanism this client
+		// uses. No "password" field at all: Zitadel mints none (ADR-0093).
+		"email": map[string]any{"email": email, "isVerified": true},
+	}
+	var resp struct {
+		UserID string `json:"userId"`
+	}
+	// orgID travels as the x-zitadel-orgid header, never a body field:
+	// AddHumanUser's handler resolves the target org exclusively from
+	// authz.GetCtxData(ctx).OrgID, itself populated from this header by
+	// Zitadel's Connect auth interceptor. A request-message "organization"
+	// field does not exist on this RPC (confirmed against the v4.18.0
+	// source) — the same convention AddOrgMember already uses below for the
+	// v1 Management API.
+	err := c.connectJSONWithHeaders(ctx, userService, "AddHumanUser", body, &resp, map[string]string{"x-zitadel-orgid": orgID})
+	if err != nil {
+		if IsAlreadyExists(err) || IsConflict(err) {
+			id, lerr := c.FindHumanUserByEmail(ctx, email)
+			if lerr != nil {
+				return "", fmt.Errorf("EnsureHumanUserNoPassword: conflict lookup: %w", lerr)
+			}
+			return id, nil
+		}
+		return "", fmt.Errorf("EnsureHumanUserNoPassword %q: %w", email, err)
+	}
+	return resp.UserID, nil
+}
+
+// FindHumanUserByEmail implements Client.
+func (c *httpClient) FindHumanUserByEmail(ctx context.Context, email string) (string, error) {
+	body := map[string]any{
+		"queries": []map[string]any{
+			{"emailQuery": map[string]any{"email": email}},
+		},
+	}
+	var resp struct {
+		Result []struct {
+			UserID string `json:"userId"`
+		} `json:"result"`
+	}
+	if err := c.connectJSON(ctx, userService, "ListUsers", body, &resp); err != nil {
+		return "", fmt.Errorf("FindHumanUserByEmail %q: %w", email, err)
+	}
+	if len(resp.Result) == 0 {
+		return "", fmt.Errorf("FindHumanUserByEmail %q: %w", email, ErrNotFound)
+	}
+	return resp.Result[0].UserID, nil
+}
+
+// CreateSetupInviteCode implements Client.
+func (c *httpClient) CreateSetupInviteCode(ctx context.Context, userID, urlTemplate string, send bool) (string, error) {
+	body := map[string]any{"userId": userID}
+	if send {
+		body["sendCode"] = map[string]any{"urlTemplate": urlTemplate}
+	} else {
+		body["returnCode"] = map[string]any{}
+	}
+	var resp struct {
+		InviteCode string `json:"inviteCode"`
+	}
+	if err := c.connectJSON(ctx, userService, "CreateInviteCode", body, &resp); err != nil {
+		return "", fmt.Errorf("CreateSetupInviteCode user=%s: %w", userID, err)
+	}
+	return resp.InviteCode, nil
+}
+
+// authMethodTOTP / authMethodU2F / authMethodPasskey are the entries
+// ListAuthenticationMethodTypes reports.
+const (
+	authMethodTOTP    = "AUTHENTICATION_METHOD_TYPE_TOTP"
+	authMethodU2F     = "AUTHENTICATION_METHOD_TYPE_U2F"
+	authMethodPasskey = "AUTHENTICATION_METHOD_TYPE_PASSKEY"
+)
+
+// ClearHumanFactors implements Client.
+func (c *httpClient) ClearHumanFactors(ctx context.Context, userID string) error {
+	var listResp struct {
+		AuthMethodTypes []string `json:"authMethodTypes"`
+	}
+	listBody := map[string]any{"userId": userID}
+	if err := c.connectJSON(ctx, userService, "ListAuthenticationMethodTypes", listBody, &listResp); err != nil {
+		return fmt.Errorf("ClearHumanFactors: list user=%s: %w", userID, err)
+	}
+	for _, t := range listResp.AuthMethodTypes {
+		switch t {
+		case authMethodTOTP:
+			if err := c.connectJSON(ctx, userService, "RemoveTOTP", map[string]any{"userId": userID}, nil); err != nil && !IsNotFound(err) {
+				return fmt.Errorf("ClearHumanFactors: RemoveTOTP user=%s: %w", userID, err)
+			}
+		case authMethodU2F:
+			if err := c.removeAllCredentials(ctx, userID, "ListU2F", "RemoveU2F", "u2fId"); err != nil {
+				return fmt.Errorf("ClearHumanFactors: %w", err)
+			}
+		case authMethodPasskey:
+			if err := c.removeAllCredentials(ctx, userID, "ListPasskeys", "RemovePasskey", "passkeyId"); err != nil {
+				return fmt.Errorf("ClearHumanFactors: %w", err)
+			}
+		}
+	}
+	return nil
+}
+
+// DeleteUser implements Client.
+//
+// Zitadel v4.18.0: POST /zitadel.user.v2.UserService/DeleteUser with body
+// {"userId": "<id>"}. Idempotent: NotFound (already deleted) is success.
+func (c *httpClient) DeleteUser(ctx context.Context, userID string) error {
+	err := c.connectJSON(ctx, userService, "DeleteUser", map[string]any{"userId": userID}, nil)
+	if err != nil && !IsNotFound(err) {
+		return fmt.Errorf("DeleteUser user=%s: %w", userID, err)
+	}
+	return nil
+}
+
+// removeAllCredentials lists a per-credential factor (U2F or passkey — both
+// can have more than one registered device) via the named ListX v2 call and
+// removes each one via the named RemoveX call, keyed by idField. Idempotent:
+// an empty list is a no-op.
+func (c *httpClient) removeAllCredentials(ctx context.Context, userID, listMethod, removeMethod, idField string) error {
+	var listResp struct {
+		Result []map[string]any `json:"result"`
+	}
+	listBody := map[string]any{"userId": userID}
+	if err := c.connectJSON(ctx, userService, listMethod, listBody, &listResp); err != nil {
+		return fmt.Errorf("%s user=%s: %w", listMethod, userID, err)
+	}
+	for _, cred := range listResp.Result {
+		id, _ := cred[idField].(string)
+		if id == "" {
+			continue
+		}
+		removeBody := map[string]any{"userId": userID, idField: id}
+		if err := c.connectJSON(ctx, userService, removeMethod, removeBody, nil); err != nil && !IsNotFound(err) {
+			return fmt.Errorf("%s user=%s %s=%s: %w", removeMethod, userID, idField, id, err)
+		}
+	}
+	return nil
 }

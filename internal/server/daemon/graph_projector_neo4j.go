@@ -263,7 +263,9 @@ MERGE (f:Finding {brain_id: $id})
   ON CREATE SET f.created_at = datetime()
   SET f.title = $title, f.description = $description, f.severity = $severity,
       f.scope = $scope, f.address = $address, f.status = $status,
-      f.vulnerability_id = $vulnerability_id, f.updated_at = timestamp()
+      f.vulnerability_id = $vulnerability_id,
+      f.submitted_by = $submitted_by, f.agent_name = $agent_name, f.enrolled_by = $enrolled_by,
+      f.updated_at = timestamp()
 WITH f
 FOREACH (_ IN CASE WHEN $status = $verified_status AND f.verified_at IS NULL THEN [1] ELSE [] END |
   SET f.verified_at = datetime())
@@ -693,6 +695,11 @@ func findingUpsertParams(f brain.FindingSnapshot) map[string]any {
 		"address":          f.Address,
 		"status":           status,
 		"vulnerability_id": f.VulnerabilityID,
+		// The verified submitter (gibson#208): who raised the finding, under
+		// which registered name, and who enrolled that agent.
+		"submitted_by": f.SubmittedBy,
+		"agent_name":   f.AgentName,
+		"enrolled_by":  f.EnrolledBy,
 		// The terminal status travels as a parameter like every other value, so
 		// the Cypher stays a constant and the definition of "verified" stays in
 		// one place (brain.FindingStatusVerified).

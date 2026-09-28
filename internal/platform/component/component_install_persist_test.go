@@ -99,4 +99,30 @@ func TestRegisterComponent_PersistsWhatTheCallerRegistered(t *testing.T) {
 	if spy.got.Kind != "tool" || spy.got.Name != "zerocool-http" || spy.got.Version != "0.1.0" {
 		t.Errorf("persisted %+v, want the registered kind/name/version", spy.got)
 	}
+	if spy.got.PrincipalRef != "" {
+		t.Errorf("a registration with no caller identity must record no principal, got %q", spy.got.PrincipalRef)
+	}
+}
+
+// TestRegisterComponent_PersistsTheCallersPrincipal: the install records the
+// FGA user the caller registered as, in the shape bindDeclaredSecrets grants
+// under and WatchComponentEvents keys on, so a later revocation addresses
+// this plugin and not a guess derived from the install id (gibson#154).
+func TestRegisterComponent_PersistsTheCallersPrincipal(t *testing.T) {
+	spy := &installRegistrySpy{}
+	svc := newParityServer()
+	svc.WithComponentInstallRegistry(spy)
+
+	ctx := credCallerCtx(t, "plugin_principal:github", "test-tenant")
+	if _, err := svc.RegisterComponent(ctx, &componentpb.RegisterComponentRequest{
+		Kind: "plugin", Name: "github", Version: "0.1.0",
+	}); err != nil {
+		t.Fatalf("RegisterComponent: %v", err)
+	}
+	if spy.got == nil {
+		t.Fatal("the service never asked to persist an install record")
+	}
+	if spy.got.PrincipalRef != "plugin_principal:github" {
+		t.Errorf("persisted principal %q, want the caller's plugin_principal verbatim", spy.got.PrincipalRef)
+	}
 }

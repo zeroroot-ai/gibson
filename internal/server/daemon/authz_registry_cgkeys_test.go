@@ -45,7 +45,7 @@ func TestAuthzRegistryMux_ServesTheCapabilityGrantKeyRoute(t *testing.T) {
 	minter := fakeKeyMinter{keyID: "cg-v1", jwks: []byte(`{"keys":[{"kty":"OKP","kid":"cg-v1"}]}`)}
 	lookup := &fakeAgentKeyLookup{}
 
-	resp := serveMux(t, authzRegistryMux(minter, lookup), capabilityGrantKeysPath+"cg-v1")
+	resp := serveMux(t, authzRegistryMux(minter, lookup, nil), capabilityGrantKeysPath+"cg-v1")
 
 	if resp.StatusCode != http.StatusOK {
 		t.Fatalf("keys route on the mTLS mux: status = %d, want 200", resp.StatusCode)
@@ -64,7 +64,7 @@ func TestAuthzRegistryMux_StillServesTheRegistry(t *testing.T) {
 	minter := fakeKeyMinter{keyID: "cg-v1", jwks: []byte(`{"keys":[]}`)}
 	lookup := &fakeAgentKeyLookup{}
 
-	resp := serveMux(t, authzRegistryMux(minter, lookup), authzRegistryPath)
+	resp := serveMux(t, authzRegistryMux(minter, lookup, nil), authzRegistryPath)
 
 	if resp.StatusCode != http.StatusOK {
 		t.Fatalf("registry route: status = %d, want 200", resp.StatusCode)
@@ -75,7 +75,7 @@ func TestAuthzRegistryMux_StillServesTheRegistry(t *testing.T) {
 }
 
 func TestAuthzRegistryMux_RejectsNonGETOnTheRegistry(t *testing.T) {
-	srv := httptest.NewServer(authzRegistryMux(nil, nil))
+	srv := httptest.NewServer(authzRegistryMux(nil, nil, nil))
 	t.Cleanup(srv.Close)
 
 	resp, err := srv.Client().Post(srv.URL+authzRegistryPath, "application/yaml", nil)
@@ -148,7 +148,7 @@ func TestNewNativeLoginSubsystem_BuildsAListenerWithoutKeySources(t *testing.T) 
 func TestAuthzRegistryMux_OmitsTheKeyRouteWithoutKeySources(t *testing.T) {
 	// A nil key source must leave the route absent (404), not mounted and
 	// permanently 503 — the same rule the pre-auth listener follows.
-	resp := serveMux(t, authzRegistryMux(nil, nil), capabilityGrantKeysPath+"cg-v1")
+	resp := serveMux(t, authzRegistryMux(nil, nil, nil), capabilityGrantKeysPath+"cg-v1")
 
 	if resp.StatusCode != http.StatusNotFound {
 		t.Fatalf("unmounted keys route: status = %d, want 404", resp.StatusCode)

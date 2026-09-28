@@ -121,6 +121,28 @@ type CheckRequest struct {
 	Object string
 }
 
+// AtomicWriter is the optional interface implemented by Authorizer
+// implementations that support a plain write-and-delete in a single FGA
+// transaction (hosted#190 — ownership transfer).
+//
+// Write and Delete on the base Authorizer interface are two separate API
+// calls: a crash or an FGA error between them can leave a tenant with zero
+// Owners (delete succeeded, write did not) or, more subtly, two Owners (write
+// of a duplicate call retried after an already-applied delete). WriteAndDelete
+// submits both legs in one FGA WriteRequest, so the store applies all of it or
+// none of it.
+//
+// Callers that need this all-or-nothing guarantee should type-assert the
+// Authorizer they hold to AtomicWriter before calling. The concrete
+// fgaAuthorizer returned by NewFgaAuthorizer implements both Authorizer and
+// AtomicWriter.
+type AtomicWriter interface {
+	// WriteAndDelete writes and deletes tuples in a single FGA transaction.
+	// Either every tuple in both slices is applied, or none is — there is no
+	// partial state a caller can observe.
+	WriteAndDelete(ctx context.Context, writes, deletes []Tuple) error
+}
+
 // ConditionalWriter is the optional interface implemented by Authorizer
 // implementations that support condition-bearing tuple writes (gibson#627).
 //

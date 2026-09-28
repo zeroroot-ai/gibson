@@ -149,6 +149,10 @@ func findingRecordToSDKShape(r graph.FindingRecord) map[string]any {
 		"category":    r.Type,
 		"severity":    r.Severity,
 		"mission_id":  r.MissionID,
+		// The registered name of the agent that submitted the finding
+		// (gibson#208), the SDK's agent_name. The principal and the enroller
+		// travel under metadata with the other graph properties.
+		"agent_name": r.Properties["agent_name"],
 	}
 	if !r.CreatedAt.IsZero() {
 		out["created_at"] = r.CreatedAt.UTC().Format(time.RFC3339)

@@ -308,7 +308,23 @@ type component
 
 type system_tenant
   relations
+    # platform_operator — cross-tenant elevated privilege for PLATFORM
+    # SERVICE ACCOUNTS ONLY (ADR-0093 decision 6/7). Never a person: the
+    # dashboard's identity used to hold this relation and it is being removed
+    # from every human caller (hosted#201). The seven AdminTenantService RPCs
+    # that used to gate on this for a human caller now gate on platform_owner
+    # instead (see below); platform_operator keeps gating the machine-only
+    # DaemonOperatorService / cross-tenant ext-authz service path.
     define platform_operator: [user]
+    # platform_owner — the ONE human Zitadel administrator this install
+    # creates (ADR-0093 decision 6, hosted#201). Written once by the
+    # platform-operator when it provisions the Platform owner's Zitadel user;
+    # never a direct tenant grant, never a service account. The Platform
+    # owner belongs to no tenant and has no tenant data access by default.
+    #
+    # Tuple shape:
+    #   user:<platform-owner-zitadel-user-id> | platform_owner | system_tenant:_system
+    define platform_owner: [user]
     # parent: the set of tenants registered under the platform. Enumeration-only
     # (NOT referenced by any computed/authz relation) — it lets the catalog
     # fan-out reconciler list every tenant via

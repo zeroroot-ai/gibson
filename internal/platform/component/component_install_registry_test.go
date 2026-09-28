@@ -453,3 +453,51 @@ func TestContentTrustDBRoundTrip(t *testing.T) {
 		t.Errorf("contentTrustFromDB(garbage) = %v; want UNSPECIFIED", got)
 	}
 }
+
+// TestPluginRegistry_Heartbeat_StoresTheReportedStatus is the gibson#154
+// fixture on the registry: the status a plugin heartbeats is the status the
+// registry stores, so a plugin that turned Degraded after a secret
+// revocation reads back degraded, and a later "serving" clears it. This
+// drives the real Heartbeat, not the test-local copy above.
+func TestPluginRegistry_Heartbeat_StoresTheReportedStatus(t *testing.T) {
+	ctx := context.Background()
+	tr := newTestPluginRegistry(t)
+	reg := NewPluginRegistry(nil, tr.redisClient, nil, nil)
+
+	if err := reg.Heartbeat(ctx, "inst-1", "10.0.0.7:50055", "degraded"); err != nil {
+		t.Fatalf("Heartbeat: %v", err)
+	}
+	st, addr, hb, ok := InstallStatus(ctx, tr.redisClient, "inst-1")
+	if !ok || st != ComponentInstallStatusDegraded || addr != "10.0.0.7:50055" || hb.IsZero() {
+		t.Fatalf("after a degraded heartbeat: status=%q addr=%q hb=%v ok=%v", st, addr, hb, ok)
+	}
+
+	if err := reg.Heartbeat(ctx, "inst-1", "", "serving"); err != nil {
+		t.Fatalf("Heartbeat: %v", err)
+	}
+	st, addr, _, ok = InstallStatus(ctx, tr.redisClient, "inst-1")
+	if !ok || st != ComponentInstallStatusServing || addr != "10.0.0.7:50055" {
+		t.Fatalf("after a serving heartbeat: status=%q addr=%q ok=%v", st, addr, ok)
+	}
+
+	if _, _, _, ok := InstallStatus(ctx, tr.redisClient, "never-registered"); ok {
+		t.Fatal("an install with no status key must read as absent")
+	}
+}
+
+func TestInstallStatusFromHealth(t *testing.T) {
+	t.Parallel()
+	cases := map[string]ComponentInstallStatus{
+		"degraded":  ComponentInstallStatusDegraded,
+		"serving":   ComponentInstallStatusServing,
+		"":          ComponentInstallStatusServing,
+		"healthy":   ComponentInstallStatusServing,
+		"Degraded":  ComponentInstallStatusServing,
+		"unhealthy": ComponentInstallStatusServing,
+	}
+	for in, want := range cases {
+		if got := InstallStatusFromHealth(in); got != want {
+			t.Errorf("InstallStatusFromHealth(%q) = %q, want %q", in, got, want)
+		}
+	}
+}

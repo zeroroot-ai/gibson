@@ -9,56 +9,28 @@ import (
 	"errors"
 	"io"
 	"net/http"
-	"net/http/httptest"
 	"strings"
 	"testing"
 
 	"github.com/zeroroot-ai/gibson/internal/platform/idp"
 	"github.com/zeroroot-ai/gibson/internal/platform/idp/zitadel"
+	"github.com/zeroroot-ai/gibson/internal/platform/zitadelconn/zitadelconntest"
 )
 
 // setupUsersServer stands up an httptest server that serves OIDC discovery +
-// the OAuth2 token endpoint (via writeOIDCBootstrap) so zitadel.New succeeds,
+// the OAuth2 token endpoint (via zitadelconntest) so zitadel.New succeeds,
 // and routes the Zitadel Management user API calls (/management/v1/users...)
 // to the provided handler.
 func setupUsersServer(t *testing.T, usersHandler http.HandlerFunc) zitadel.Config {
 	t.Helper()
-	var srvURL string
-	handler := http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		if writeOIDCBootstrap(w, r, func() string { return srvURL }) {
-			return
-		}
+	srv := zitadelconntest.New(t, "", http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		if strings.HasPrefix(r.URL.Path, "/management/v1/users") {
 			usersHandler(w, r)
 			return
 		}
 		http.NotFound(w, r)
-	})
-	srv := httptest.NewServer(handler)
-	srvURL = srv.URL
-	t.Cleanup(srv.Close)
-	return zitadel.Config{Issuer: srv.URL, ClientID: "admin-client", ClientSecret: "admin-secret", OrgID: "org-123"}
-}
-
-// writeOIDCBootstrap answers the OIDC discovery and OAuth2 token requests that
-// zitadel.New's startup probe makes. It returns true when it handled the
-// request so the caller can stop routing. baseURL is a thunk because the
-// httptest server URL is only known after the server starts.
-func writeOIDCBootstrap(w http.ResponseWriter, r *http.Request, baseURL func() string) bool {
-	switch r.URL.Path {
-	case "/.well-known/openid-configuration":
-		w.Header().Set("Content-Type", "application/json")
-		_ = json.NewEncoder(w).Encode(map[string]string{"token_endpoint": baseURL() + "/oauth/v2/token"})
-		return true
-	case "/oauth/v2/token":
-		w.Header().Set("Content-Type", "application/json")
-		_ = json.NewEncoder(w).Encode(map[string]interface{}{
-			"access_token": "test-admin-token", "token_type": "Bearer", "expires_in": 3600,
-		})
-		return true
-	default:
-		return false
-	}
+	}))
+	return testConfig(t, srv)
 }
 
 // closeClient closes the client, satisfying errcheck without a per-call
@@ -191,120 +163,6 @@ func TestCreateHumanUser_RequiresEmailAndPassword(t *testing.T) {
 	}
 	if _, err := client.CreateHumanUser(context.Background(), idp.CreateHumanUserRequest{Email: "a@b.c"}); err == nil {
 		t.Errorf("expected error when password is empty")
-	}
-}
-
-// TestEnsureHumanUser_CreatesANewUser covers the invitation-acceptance path
-// (distinct from signup's CreateHumanUser): the plain create.
-func TestEnsureHumanUser_CreatesANewUser(t *testing.T) {
-	cfg := setupUsersServer(t, func(w http.ResponseWriter, r *http.Request) {
-		if r.Method != http.MethodPost || r.URL.Path != "/management/v1/users/human" {
-			http.NotFound(w, r)
-			return
-		}
-		jsonResp(w, http.StatusCreated, map[string]string{"userId": "user-new"})
-	})
-	client, err := zitadel.New(context.Background(), cfg)
-	if err != nil {
-		t.Fatalf("New: %v", err)
-	}
-	defer closeClient(t, client)
-
-	id, err := client.EnsureHumanUser(context.Background(), idp.EnsureHumanUserRequest{Email: "invitee@example.com"})
-	if err != nil {
-		t.Fatalf("EnsureHumanUser: %v", err)
-	}
-	if id != "user-new" {
-		t.Errorf("id = %q, want user-new", id)
-	}
-}
-
-// TestEnsureHumanUser_ConflictFallsBackToTheByEmailSearch is the 409 path: the
-// same shared search FindUserIDByEmail uses.
-func TestEnsureHumanUser_ConflictFallsBackToTheByEmailSearch(t *testing.T) {
-	cfg := setupUsersServer(t, func(w http.ResponseWriter, r *http.Request) {
-		switch {
-		case r.Method == http.MethodPost && r.URL.Path == "/management/v1/users/human":
-			errorResp(w, http.StatusConflict, "ALREADY_EXISTS", "user already exists")
-		default:
-			jsonResp(w, http.StatusOK, map[string]interface{}{
-				"result": []map[string]string{{"id": "user-existing"}},
-			})
-		}
-	})
-	client, err := zitadel.New(context.Background(), cfg)
-	if err != nil {
-		t.Fatalf("New: %v", err)
-	}
-	defer closeClient(t, client)
-
-	id, err := client.EnsureHumanUser(context.Background(), idp.EnsureHumanUserRequest{Email: "existing@example.com"})
-	if err != nil {
-		t.Fatalf("EnsureHumanUser: %v", err)
-	}
-	if id != "user-existing" {
-		t.Errorf("id = %q, want user-existing", id)
-	}
-}
-
-// TestEnsureHumanUser_ConflictWithNoSearchResultIsAnUpstreamError — a 409
-// with nothing found on the follow-up search means the two calls disagreed;
-// that is reported, not silently treated as either outcome.
-func TestEnsureHumanUser_ConflictWithNoSearchResultIsAnUpstreamError(t *testing.T) {
-	cfg := setupUsersServer(t, func(w http.ResponseWriter, r *http.Request) {
-		switch {
-		case r.Method == http.MethodPost && r.URL.Path == "/management/v1/users/human":
-			errorResp(w, http.StatusConflict, "ALREADY_EXISTS", "user already exists")
-		default:
-			jsonResp(w, http.StatusOK, map[string]interface{}{"result": []map[string]string{}})
-		}
-	})
-	client, err := zitadel.New(context.Background(), cfg)
-	if err != nil {
-		t.Fatalf("New: %v", err)
-	}
-	defer closeClient(t, client)
-
-	if _, err := client.EnsureHumanUser(context.Background(), idp.EnsureHumanUserRequest{Email: "ghost@example.com"}); !errors.Is(err, idp.ErrUpstream) {
-		t.Errorf("error = %v, want it to wrap idp.ErrUpstream", err)
-	}
-}
-
-// TestEnsureHumanUser_ConflictLookupFailureIsReported — a broken follow-up
-// search must surface as an error, not read as either a fresh create or a
-// resolved conflict.
-func TestEnsureHumanUser_ConflictLookupFailureIsReported(t *testing.T) {
-	cfg := setupUsersServer(t, func(w http.ResponseWriter, r *http.Request) {
-		switch {
-		case r.Method == http.MethodPost && r.URL.Path == "/management/v1/users/human":
-			errorResp(w, http.StatusConflict, "ALREADY_EXISTS", "user already exists")
-		default:
-			http.Error(w, "internal error", http.StatusInternalServerError)
-		}
-	})
-	client, err := zitadel.New(context.Background(), cfg)
-	if err != nil {
-		t.Fatalf("New: %v", err)
-	}
-	defer closeClient(t, client)
-
-	if _, err := client.EnsureHumanUser(context.Background(), idp.EnsureHumanUserRequest{Email: "owner@example.com"}); err == nil {
-		t.Error("expected an error when the post-conflict search itself fails")
-	}
-}
-
-// TestEnsureHumanUser_RequiresEmail — an empty address has nothing to search
-// or create against, so it is refused before any upstream call.
-func TestEnsureHumanUser_RequiresEmail(t *testing.T) {
-	cfg := setupUsersServer(t, func(w http.ResponseWriter, r *http.Request) { http.NotFound(w, r) })
-	client, err := zitadel.New(context.Background(), cfg)
-	if err != nil {
-		t.Fatalf("New: %v", err)
-	}
-	defer closeClient(t, client)
-
-	if _, err := client.EnsureHumanUser(context.Background(), idp.EnsureHumanUserRequest{}); !errors.Is(err, idp.ErrUpstream) {
-		t.Errorf("error = %v, want it to wrap idp.ErrUpstream", err)
 	}
 }
 

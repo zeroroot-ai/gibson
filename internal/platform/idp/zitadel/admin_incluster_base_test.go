@@ -6,84 +6,65 @@ package zitadel_test
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"io"
 	"net/http"
-	"net/http/httptest"
 	"testing"
 
 	"github.com/zeroroot-ai/gibson/internal/platform/idp"
 	"github.com/zeroroot-ai/gibson/internal/platform/idp/zitadel"
+	"github.com/zeroroot-ai/gibson/internal/platform/zitadelconn"
+	"github.com/zeroroot-ai/gibson/internal/platform/zitadelconn/zitadelconntest"
 )
 
-// TestCreateHumanUser_RoutesToInClusterBase_AgainstTenantOrg is the regression
-// test for gibson#1560: on a self-hosted install the first-admin bootstrap could
-// not create the founding owner because the daemon's Zitadel admin client sent
-// its Management API calls to the external Issuer host — the customer API gateway
-// (Envoy's jwt_authn + ext_authz chain) — which 403s admin writes. The in-cluster
-// listener the daemon is meant to dial (Config.DiscoveryURL) proxies the
-// Management API straight through, so writes must ride the DiscoveryURL path.
+// TestCreateHumanUser_ReachesTheServiceAndSelectsTheInstance is the regression
+// test for the staging failure of 2026-09-23 (hosted#185, ADR-0092).
 //
-// This test proves the client, when DiscoveryURL is set:
+// The first-admin bootstrap could not create the founding owner. Its admin
+// client dialed the public issuer host; hostAliases sent that to the public
+// Envoy edge; the edge's auth chain rejected the admin write with 403, which
+// surfaced as "admin client lacks permission: CreateHumanUser:create". The
+// earlier test for the same symptom (gibson#1560) used a fake that answered
+// every request whatever its host, so it could not see the problem.
 //
-//  1. sends CreateHumanUser to the in-cluster base (DiscoveryURL), NOT Issuer —
-//     Issuer is a non-resolvable sentinel, so any egress to it fails the run;
-//  2. targets the Zitadel Management create endpoint (/management/v1/users/human),
-//     the surface the in-cluster proxy exposes — never the /v2 resource API;
-//  3. selects the freshly-provisioned tenant org via the x-zitadel-orgid header,
-//     even though the admin client's default OrgID is the platform admin org.
-func TestCreateHumanUser_RoutesToInClusterBase_AgainstTenantOrg(t *testing.T) {
+// This fake behaves like Zitadel: a request that does not name the instance in
+// x-zitadel-instance-host gets 404. The client must therefore:
+//
+//  1. connect only to the in-cluster base, never to a public name (the claimed
+//     host is under .invalid, so any attempt to dial it fails the run);
+//  2. name the instance on the token request and on the Management call;
+//  3. use the fixed token path and never fetch a discovery document;
+//  4. send CreateHumanUser to the Management API with the tenant org in
+//     x-zitadel-orgid, not the admin client's default org.
+func TestCreateHumanUser_ReachesTheServiceAndSelectsTheInstance(t *testing.T) {
 	const (
-		adminOrg  = "111111111111111111" // client default org (platform admin org)
-		tenantOrg = "387872765320888363" // the per-tenant org the owner belongs to
+		adminOrg  = "111111111111111111"
+		tenantOrg = "387872765320888363"
 	)
-
 	var (
-		servedDiscovery bool
-		createPath      string
 		createOrgHeader string
 		createBody      map[string]interface{}
 	)
-
-	var srvURL string
-	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		switch {
-		case r.URL.Path == "/.well-known/openid-configuration":
-			servedDiscovery = true
-			w.Header().Set("Content-Type", "application/json")
-			_ = json.NewEncoder(w).Encode(map[string]string{"token_endpoint": srvURL + "/oauth/v2/token"})
-		case r.URL.Path == "/oauth/v2/token":
-			w.Header().Set("Content-Type", "application/json")
-			_ = json.NewEncoder(w).Encode(map[string]interface{}{
-				"access_token": "test-admin-token", "token_type": "Bearer", "expires_in": 3600,
-			})
-		case r.Method == http.MethodPost && r.URL.Path == "/management/v1/users/human":
-			createPath = r.URL.Path
+	srv := zitadelconntest.New(t, "", http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.Method == http.MethodPost && r.URL.Path == "/management/v1/users/human" {
 			createOrgHeader = r.Header.Get("x-zitadel-orgid")
 			raw, _ := io.ReadAll(r.Body)
 			_ = json.Unmarshal(raw, &createBody)
 			jsonResp(w, http.StatusOK, map[string]string{"userId": "owner-user-id"})
-		default:
-			// A /v2/... call, or a call to any other path, is a bug under test.
-			http.Error(w, "unexpected path "+r.URL.Path, http.StatusNotFound)
+			return
 		}
+		http.Error(w, "unexpected path "+r.URL.Path, http.StatusNotFound)
 	}))
-	srvURL = srv.URL
-	t.Cleanup(srv.Close)
 
-	cfg := zitadel.Config{
-		// Issuer is a host that does NOT resolve. If the client dials it for
-		// discovery, token, or the management call, the run fails — proving the
-		// in-cluster DiscoveryURL path carries ALL traffic, not just discovery.
-		Issuer:       "https://public-gateway.gibson-1560.invalid",
-		DiscoveryURL: srv.URL,
+	client, err := zitadel.New(context.Background(), zitadel.Config{
+		Issuer:       "https://" + srv.Domain,
 		ClientID:     "gibson-daemon",
 		ClientSecret: "admin-secret",
 		OrgID:        adminOrg,
-	}
-
-	client, err := zitadel.New(context.Background(), cfg)
+		Endpoint:     srv.Endpoint(t),
+	})
 	if err != nil {
-		t.Fatalf("New (must dial the in-cluster DiscoveryURL, not the sentinel Issuer): %v", err)
+		t.Fatalf("New: %v", err)
 	}
 	defer closeClient(t, client)
 
@@ -101,11 +82,17 @@ func TestCreateHumanUser_RoutesToInClusterBase_AgainstTenantOrg(t *testing.T) {
 	if res.UserID != "owner-user-id" {
 		t.Errorf("UserID = %q, want owner-user-id", res.UserID)
 	}
-	if !servedDiscovery {
-		t.Error("discovery was not served by the in-cluster base — the client dialed the Issuer host")
+	if n := srv.Refused(); n != 0 {
+		t.Errorf("%d request(s) did not name the instance; every request must carry %s", n, zitadelconn.InstanceHostHeader)
 	}
-	if createPath != "/management/v1/users/human" {
-		t.Errorf("create hit %q, want /management/v1/users/human (the Management API, not /v2)", createPath)
+	if !srv.HasPath(http.MethodPost, "/oauth/v2/token") {
+		t.Errorf("the token request did not reach the in-cluster base: %v", srv.Paths())
+	}
+	if srv.HasPath(http.MethodGet, "/.well-known/openid-configuration") {
+		t.Error("the client fetched a discovery document; ADR-0092 uses fixed paths")
+	}
+	if !srv.HasPath(http.MethodPost, "/management/v1/users/human") {
+		t.Errorf("create did not reach the Management API: %v", srv.Paths())
 	}
 	if createOrgHeader != tenantOrg {
 		t.Errorf("x-zitadel-orgid = %q, want the tenant org %q (not the admin default %q)",
@@ -113,5 +100,33 @@ func TestCreateHumanUser_RoutesToInClusterBase_AgainstTenantOrg(t *testing.T) {
 	}
 	if createBody["initialPassword"] != "s3cret-passw0rd!" {
 		t.Errorf("initialPassword not forwarded: %v", createBody["initialPassword"])
+	}
+}
+
+// A client built without the instance header is what staging ran. The fake
+// refuses it at the token request, before any Management call.
+func TestNew_RefusedWhenTheInstanceIsNotNamed(t *testing.T) {
+	srv := zitadelconntest.New(t, "", nil)
+	wrong, err := zitadelconn.New(srv.URL, "some-other-host.invalid")
+	if err != nil {
+		t.Fatal(err)
+	}
+	_, err = zitadel.New(context.Background(), zitadel.Config{
+		Issuer: "https://" + srv.Domain, ClientID: "c", ClientSecret: "s", Endpoint: wrong,
+	})
+	if err == nil {
+		t.Fatal("New succeeded against an instance it did not name")
+	}
+	if srv.Refused() == 0 {
+		t.Error("the fake never saw the refused request")
+	}
+}
+
+func TestNew_RequiresAnEndpoint(t *testing.T) {
+	_, err := zitadel.New(context.Background(), zitadel.Config{
+		Issuer: "https://app.example.invalid", ClientID: "c", ClientSecret: "s",
+	})
+	if !errors.Is(err, idp.ErrUnreachable) {
+		t.Fatalf("want ErrUnreachable without an endpoint, got %v", err)
 	}
 }

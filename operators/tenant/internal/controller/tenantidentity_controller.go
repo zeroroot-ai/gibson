@@ -30,6 +30,15 @@ import (
 // is cheap when everything is already in place.
 const identityResyncInterval = 10 * time.Minute
 
+// TenantOrgSeeder seeds the daemon's tenant -> Zitadel org mapping that
+// ext-authz reads to find a signed-in person's tenant (ADR-0093 decision 4).
+// Required: a nil OrgMapping fails a reconcile loud, the same as a nil
+// Provisioner, rather than leaving a tenant Ready with no mapping ext-authz
+// can resolve.
+type TenantOrgSeeder interface {
+	SetTenantZitadelOrg(ctx context.Context, tenantID, zitadelOrgID string) error
+}
+
 // TenantIdentityReconciler reconciles a TenantIdentity object. It is the
 // declarative replacement for the imperative EnsureZitadelOrg / RemoveZitadelOrg
 // saga steps: it composes the per-tenant Zitadel organization by delegating to
@@ -48,6 +57,11 @@ type TenantIdentityReconciler struct {
 	// a nil here fails loud so a misconfigured operator crash-loops rather than
 	// silently no-op'ing identity provisioning.
 	Provisioner identity.Provisioner
+
+	// OrgMapping seeds the daemon's tenant -> Zitadel org mapping that
+	// ext-authz reads to find a signed-in person's tenant (ADR-0093 decision
+	// 4). Required. TenantIdentity is Ready only once the mapping exists.
+	OrgMapping TenantOrgSeeder
 }
 
 // +kubebuilder:rbac:groups=gibson.zeroroot.ai,resources=tenantidentities,verbs=get;list;watch;create;update;patch;delete
@@ -80,6 +94,13 @@ func (r *TenantIdentityReconciler) Reconcile(ctx context.Context, req ctrl.Reque
 		// explicitly. Record the error in status and requeue with backoff.
 		log.Error(clients.ErrInvalidInput, "identity provisioner unset (operator misconfigured)")
 		return r.failIdentity(ctx, &ti, "identity provisioner unset (operator misconfigured)")
+	}
+	if r.OrgMapping == nil {
+		// Fail loud, same as a nil Provisioner: without it a Ready tenant
+		// would have no org mapping for ext-authz to resolve a person's
+		// tenant from (ADR-0093 decision 4).
+		log.Error(clients.ErrInvalidInput, "org mapping seeder unset (operator misconfigured)")
+		return r.failIdentity(ctx, &ti, "org mapping seeder unset (operator misconfigured)")
 	}
 
 	// Deletion path: run teardown, then drop the finalizer.
@@ -123,6 +144,22 @@ func (r *TenantIdentityReconciler) Reconcile(ctx context.Context, req ctrl.Reque
 		}
 		// Return the provision error so controller-runtime backs off.
 		return ctrl.Result{}, err
+	}
+
+	// Seed the daemon's tenant -> Zitadel org mapping (ADR-0093 decision 4).
+	// TenantIdentity is Ready only once this write succeeds. It runs on every
+	// resync (identityResyncInterval), so a lost row is repaired without a
+	// spec change.
+	if err := r.OrgMapping.SetTenantZitadelOrg(ctx, ti.Spec.TenantID, res.OrgID); err != nil {
+		log.Error(err, "seed tenant org mapping failed", "tenant", ti.Spec.TenantID)
+		r.emitIdentity(&ti, "Warning", "OrgMappingFailed", err.Error())
+		if _, ferr := r.failIdentity(ctx, &ti, "seed tenant org mapping: "+err.Error()); ferr != nil {
+			return ctrl.Result{}, ferr
+		}
+		// Mirrors the Provision-failure return above: the raw error drives
+		// controller-runtime's backoff, and is already logged and recorded
+		// on status, so it is returned unwrapped rather than double-wrapped.
+		return ctrl.Result{}, err //nolint:wrapcheck // see comment
 	}
 
 	r.markIdentityReady(ctx, &ti, res)

@@ -77,8 +77,20 @@ func TestNativeLoginConfigFromEnv_Defaults(t *testing.T) {
 	if cfg.Issuer != "https://idp.example.com" || cfg.ClientID != "cli-xyz" {
 		t.Errorf("cfg = %+v, want issuer+client id from env", cfg)
 	}
-	if len(cfg.Scopes) != 4 {
-		t.Errorf("scopes = %v, want 4 default scopes", cfg.Scopes)
+	// 5: the four pre-existing scopes plus urn:zitadel:iam:user:resourceowner
+	// (ADR-0093 decision 4) — a native login must carry the org claim so
+	// ext-authz can resolve the CLI-authenticated person's tenant.
+	if len(cfg.Scopes) != 5 {
+		t.Errorf("scopes = %v, want 5 default scopes", cfg.Scopes)
+	}
+	found := false
+	for _, s := range cfg.Scopes {
+		if s == "urn:zitadel:iam:user:resourceowner" {
+			found = true
+		}
+	}
+	if !found {
+		t.Errorf("scopes = %v, want urn:zitadel:iam:user:resourceowner (ADR-0093 decision 4)", cfg.Scopes)
 	}
 }
 

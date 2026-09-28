@@ -2193,7 +2193,7 @@ export const AuthRegistry: Record<string, AuthEntry> = {
   "/gibson.tenant.v1.AdminTenantService/AdminApproveRegistration": {
     method: "/gibson.tenant.v1.AdminTenantService/AdminApproveRegistration",
     service: "gibson.tenant.v1.AdminTenantService",
-    relation: "platform_operator",
+    relation: "platform_owner",
     objectType: "system_tenant",
     objectDeriver: "system_tenant",
     allowedIdentities: IdentityClass.USER,
@@ -2203,7 +2203,7 @@ export const AuthRegistry: Record<string, AuthEntry> = {
   "/gibson.tenant.v1.AdminTenantService/AdminDeleteTenant": {
     method: "/gibson.tenant.v1.AdminTenantService/AdminDeleteTenant",
     service: "gibson.tenant.v1.AdminTenantService",
-    relation: "platform_operator",
+    relation: "platform_owner",
     objectType: "system_tenant",
     objectDeriver: "system_tenant",
     allowedIdentities: IdentityClass.USER,
@@ -2213,7 +2213,7 @@ export const AuthRegistry: Record<string, AuthEntry> = {
   "/gibson.tenant.v1.AdminTenantService/AdminGetTenantBilling": {
     method: "/gibson.tenant.v1.AdminTenantService/AdminGetTenantBilling",
     service: "gibson.tenant.v1.AdminTenantService",
-    relation: "platform_operator",
+    relation: "platform_owner",
     objectType: "system_tenant",
     objectDeriver: "system_tenant",
     allowedIdentities: IdentityClass.USER,
@@ -2223,7 +2223,7 @@ export const AuthRegistry: Record<string, AuthEntry> = {
   "/gibson.tenant.v1.AdminTenantService/AdminListPendingRegistrations": {
     method: "/gibson.tenant.v1.AdminTenantService/AdminListPendingRegistrations",
     service: "gibson.tenant.v1.AdminTenantService",
-    relation: "platform_operator",
+    relation: "platform_owner",
     objectType: "system_tenant",
     objectDeriver: "system_tenant",
     allowedIdentities: IdentityClass.USER,
@@ -2233,7 +2233,7 @@ export const AuthRegistry: Record<string, AuthEntry> = {
   "/gibson.tenant.v1.AdminTenantService/AdminProvisionTenant": {
     method: "/gibson.tenant.v1.AdminTenantService/AdminProvisionTenant",
     service: "gibson.tenant.v1.AdminTenantService",
-    relation: "platform_operator",
+    relation: "platform_owner",
     objectType: "system_tenant",
     objectDeriver: "system_tenant",
     allowedIdentities: IdentityClass.USER,
@@ -2243,7 +2243,7 @@ export const AuthRegistry: Record<string, AuthEntry> = {
   "/gibson.tenant.v1.AdminTenantService/AdminRejectRegistration": {
     method: "/gibson.tenant.v1.AdminTenantService/AdminRejectRegistration",
     service: "gibson.tenant.v1.AdminTenantService",
-    relation: "platform_operator",
+    relation: "platform_owner",
     objectType: "system_tenant",
     objectDeriver: "system_tenant",
     allowedIdentities: IdentityClass.USER,
@@ -2253,7 +2253,7 @@ export const AuthRegistry: Record<string, AuthEntry> = {
   "/gibson.tenant.v1.AdminTenantService/AdminUpdateTenant": {
     method: "/gibson.tenant.v1.AdminTenantService/AdminUpdateTenant",
     service: "gibson.tenant.v1.AdminTenantService",
-    relation: "platform_operator",
+    relation: "platform_owner",
     objectType: "system_tenant",
     objectDeriver: "system_tenant",
     allowedIdentities: IdentityClass.USER,
@@ -2520,6 +2520,16 @@ export const AuthRegistry: Record<string, AuthEntry> = {
     unauthenticated: false,
     self: false,
   },
+  "/gibson.tenant.v1.MembershipService/LeaveTenant": {
+    method: "/gibson.tenant.v1.MembershipService/LeaveTenant",
+    service: "gibson.tenant.v1.MembershipService",
+    relation: "member",
+    objectType: "tenant",
+    objectDeriver: "tenant_from_identity",
+    allowedIdentities: IdentityClass.USER,
+    unauthenticated: false,
+    self: false,
+  },
   "/gibson.tenant.v1.MembershipService/ListMembers": {
     method: "/gibson.tenant.v1.MembershipService/ListMembers",
     service: "gibson.tenant.v1.MembershipService",
@@ -2542,6 +2552,16 @@ export const AuthRegistry: Record<string, AuthEntry> = {
   },
   "/gibson.tenant.v1.MembershipService/ListTeams": {
     method: "/gibson.tenant.v1.MembershipService/ListTeams",
+    service: "gibson.tenant.v1.MembershipService",
+    relation: "admin",
+    objectType: "tenant",
+    objectDeriver: "tenant_from_identity",
+    allowedIdentities: IdentityClass.USER,
+    unauthenticated: false,
+    self: false,
+  },
+  "/gibson.tenant.v1.MembershipService/RemoveMember": {
+    method: "/gibson.tenant.v1.MembershipService/RemoveMember",
     service: "gibson.tenant.v1.MembershipService",
     relation: "admin",
     objectType: "tenant",
@@ -2623,7 +2643,7 @@ export const AuthRegistry: Record<string, AuthEntry> = {
   "/gibson.tenant.v1.MembershipService/TransferOwnership": {
     method: "/gibson.tenant.v1.MembershipService/TransferOwnership",
     service: "gibson.tenant.v1.MembershipService",
-    relation: "admin",
+    relation: "owner",
     objectType: "tenant",
     objectDeriver: "tenant_from_identity",
     allowedIdentities: IdentityClass.USER,
@@ -3247,6 +3267,16 @@ export const AuthRegistry: Record<string, AuthEntry> = {
     objectType: "tenant",
     objectDeriver: "tenant_from_identity",
     allowedIdentities: IdentityClass.USER | IdentityClass.SERVICE,
+    unauthenticated: false,
+    self: false,
+  },
+  "/gibson.tenant.v1.UserService/ResetUserMFA": {
+    method: "/gibson.tenant.v1.UserService/ResetUserMFA",
+    service: "gibson.tenant.v1.UserService",
+    relation: "admin",
+    objectType: "tenant",
+    objectDeriver: "tenant_from_identity",
+    allowedIdentities: IdentityClass.USER,
     unauthenticated: false,
     self: false,
   },

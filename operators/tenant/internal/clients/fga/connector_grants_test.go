@@ -53,6 +53,9 @@ func (s *connectorStubFGAClient) Check(_ context.Context, _, _, _ string) (bool,
 }
 
 func (s *connectorStubFGAClient) Ping(_ context.Context) error { return nil }
+func (s *connectorStubFGAClient) WriteAndDelete(_ context.Context, _, _ []fga.Tuple) error {
+	return nil
+}
 
 func TestConnectorComponentTuples_Shape(t *testing.T) {
 	tuples := fga.ConnectorComponentTuples("gitlab", "acme")

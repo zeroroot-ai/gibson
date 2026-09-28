@@ -12,6 +12,7 @@ import (
 	"testing"
 
 	"github.com/neo4j/neo4j-go-driver/v5/neo4j"
+	"github.com/neo4j/neo4j-go-driver/v5/neo4j/dbtype"
 )
 
 // buildFindingsClient returns a callableGraphClient that returns:
@@ -244,16 +245,45 @@ func TestFindings_DefaultLimitCap(t *testing.T) {
 
 // mustTenantID is defined in dashboard_queries_test.go.
 
-// Verify orProp helper.
-func TestOrProp(t *testing.T) {
-	props := map[string]string{"id": "x"}
-	if got := orProp(props, "id", "fallback"); got != "x" {
-		t.Errorf("orProp found = %q, want 'x'", got)
+// TestFindingRecordFromNode_ReadsTheProjectorsProperties (gibson#210): a
+// :Finding is identified by brain_id and titled by title, which is what the
+// graph projector writes. A :Vulnerability is identified and named by its key.
+// A node that carries neither identity property maps to an empty id, never to
+// the Neo4j internal id.
+func TestFindingRecordFromNode_ReadsTheProjectorsProperties(t *testing.T) {
+	t.Parallel()
+
+	finding := FindingRecordFromNode(dbtype.Node{
+		Id:     42,
+		Labels: []string{"Finding"},
+		Props: map[string]any{
+			"brain_id":    "299176b7-0306-4ecb-9948-95d4bd0e0beb",
+			"title":       "Exposed admin panel",
+			"description": "no auth on /admin",
+			"severity":    "info",
+		},
+	})
+	if finding.ID != "299176b7-0306-4ecb-9948-95d4bd0e0beb" {
+		t.Errorf("Finding ID = %q, want the brain_id the daemon returned", finding.ID)
 	}
-	if got := orProp(props, "missing", "fallback"); got != "fallback" {
-		t.Errorf("orProp missing = %q, want 'fallback'", got)
+	if finding.Name != "Exposed admin panel" {
+		t.Errorf("Finding Name = %q, want the title", finding.Name)
 	}
-	if got := orProp(map[string]string{"id": ""}, "id", "fallback"); got != "fallback" {
-		t.Errorf("orProp empty = %q, want 'fallback'", got)
+	if finding.Severity != "info" || finding.Description != "no auth on /admin" {
+		t.Errorf("Finding record = %+v", finding)
+	}
+
+	vuln := FindingRecordFromNode(dbtype.Node{
+		Id:     7,
+		Labels: []string{"Vulnerability"},
+		Props:  map[string]any{"key": "CVE-2025-1234"},
+	})
+	if vuln.ID != "CVE-2025-1234" || vuln.Name != "CVE-2025-1234" {
+		t.Errorf("Vulnerability record = %+v, want id and name = key", vuln)
+	}
+
+	bare := FindingRecordFromNode(dbtype.Node{Id: 9, Labels: []string{"Finding"}, Props: map[string]any{}})
+	if bare.ID != "" {
+		t.Errorf("a Finding without brain_id maps to id %q, want empty (no internal-id fallback)", bare.ID)
 	}
 }

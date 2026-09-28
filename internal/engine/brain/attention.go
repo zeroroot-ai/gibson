@@ -66,6 +66,12 @@ type Finding struct {
 	// else means this scan looked and did not find it.
 	ScanScope string
 	LastScan  string
+
+	// SubmittedBy, AgentName and EnrolledBy are the verified submitter
+	// (gibson#208). See FindingRaised.
+	SubmittedBy string
+	AgentName   string
+	EnrolledBy  string
 }
 
 // Finding statuses (gibson#1656). FindingStatusOpen is the default for a raised
@@ -108,6 +114,14 @@ type FindingRaised struct {
 
 	// VulnerabilityID is the shared identity of the weakness, when known.
 	VulnerabilityID string
+
+	// SubmittedBy, AgentName and EnrolledBy are the verified submitter
+	// (gibson#208): the FGA principal that submitted the finding, the name the
+	// agent registered under, and the subject of the person who enrolled it.
+	// Empty on paths that carry no submitter identity.
+	SubmittedBy string
+	AgentName   string
+	EnrolledBy  string
 }
 
 func (FindingRaised) Kind() string { return "finding.raised" }
@@ -143,6 +157,7 @@ func applyFindingRaised(w *World, e FindingRaised) {
 		ID: e.ID, Title: e.Title, Description: e.Description, ScopeID: e.ScopeID,
 		Address: e.Address, Severity: e.Severity, Status: status, VulnerabilityID: e.VulnerabilityID,
 		ScanScope: scope, LastScan: scan,
+		SubmittedBy: e.SubmittedBy, AgentName: e.AgentName, EnrolledBy: e.EnrolledBy,
 	})
 }
 
@@ -207,6 +222,11 @@ type FindingSnapshot struct {
 	// recurring scan responsible for this Finding, and the scan that last saw it.
 	ScanScope string
 	LastScan  string
+	// SubmittedBy, AgentName and EnrolledBy are the verified submitter
+	// (gibson#208). See FindingRaised.
+	SubmittedBy string
+	AgentName   string
+	EnrolledBy  string
 }
 
 // surpriseFindingID is the stable finding id for a host's identity anomaly, so the
@@ -258,6 +278,7 @@ func (w *World) FindingSnapshot() []FindingSnapshot {
 			ID: f.ID, Title: f.Title, Description: f.Description, ScopeID: f.ScopeID,
 			Address: f.Address, Severity: f.Severity, Status: f.Status, VulnerabilityID: f.VulnerabilityID,
 			ScanScope: f.ScanScope, LastScan: f.LastScan,
+			SubmittedBy: f.SubmittedBy, AgentName: f.AgentName, EnrolledBy: f.EnrolledBy,
 		})
 	}
 	sort.Slice(out, func(i, j int) bool { return out[i].ID < out[j].ID })

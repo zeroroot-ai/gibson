@@ -11,7 +11,6 @@ import (
 	"fmt"
 	"net/http"
 	"os"
-	"strings"
 	"time"
 
 	"github.com/jackc/pgx/v5/pgxpool"
@@ -40,6 +39,7 @@ import (
 	"github.com/zeroroot-ai/gibson/internal/infra/otelinit"
 	"github.com/zeroroot-ai/gibson/internal/infra/pools"
 	"github.com/zeroroot-ai/gibson/internal/infra/readiness"
+	"github.com/zeroroot-ai/gibson/internal/platform/tenantrole"
 
 	connectorv1alpha1 "github.com/zeroroot-ai/gibson/operators/connector/api/v1alpha1"
 	gibsonv1alpha1 "github.com/zeroroot-ai/gibson/operators/tenant/api/v1alpha1"
@@ -470,9 +470,10 @@ func main() {
 		os.Exit(1)
 	}
 
-	// Zitadel IAM client — authenticates with a Personal Access Token (PAT)
-	// mounted from the <release>-zitadel-iam-admin-pat Secret. ZITADEL_PAT_PATH
-	// defaults to /etc/zitadel/pat.
+	// Zitadel client. It authenticates as the tenant-operator's own machine
+	// user (the gibson-tenant-operator OIDCClient) with a client_credentials
+	// token, so it holds only the roles that user declares. It never reads
+	// the Zitadel owner credentials: only bootstrap does.
 	//
 	// Per epic one-code-path (deploy#186), slice deploy#196: Zitadel is
 	// structurally required. The previous "noop client injected when
@@ -485,7 +486,6 @@ func main() {
 	// missing-org" silent corruption days later.
 	var zitadelClient zitadel.Client
 	zitadelURL := os.Getenv("ZITADEL_URL")
-	zitadelPATPath := os.Getenv("ZITADEL_PAT_PATH")
 	// Host-header forge target. Matches the chart's
 	// `zitadel.configmapConfig.ExternalDomain`; required when ZITADEL_URL
 	// points at the in-cluster Service name (gibson-zitadel:8080), because
@@ -493,35 +493,31 @@ func main() {
 	// a registered domain — a 404 that previously looked like a missing
 	// endpoint.
 	zitadelExternalDomain := os.Getenv("ZITADEL_EXTERNAL_DOMAIN")
-	if zitadelPATPath == "" {
-		zitadelPATPath = "/etc/zitadel/pat"
-	}
 	if zitadelURL == "" {
 		setupLog.Error(nil, "ZITADEL_URL is required (one-code-path / deploy#196): "+
 			"the noop-client degradation surface has been deleted; the operator refuses "+
 			"to start until the chart provides a reachable Zitadel URL")
 		os.Exit(1)
 	}
-	patBytes, patErr := os.ReadFile(zitadelPATPath)
-	if patErr != nil {
-		setupLog.Error(patErr, "ZITADEL_PAT_PATH unreadable (one-code-path / deploy#196): "+
-			"the noop-client degradation surface has been deleted; the operator refuses "+
-			"to start until the chart mounts a readable Zitadel admin PAT",
-			"path", zitadelPATPath)
+	zitadelClient, err = newZitadelClient(context.Background(), zitadelURL, zitadelExternalDomain, operatorClientID, operatorClientSecret)
+	if err != nil {
+		setupLog.Error(err, "Zitadel client (one-code-path / deploy#196): the operator refuses to start without its own client credentials")
 		os.Exit(1)
 	}
-	pat := strings.TrimSpace(string(patBytes))
-	if pat == "" {
-		setupLog.Error(nil, "ZITADEL_PAT_PATH file is empty (one-code-path / deploy#196): "+
-			"the chart's Zitadel admin PAT Secret is mounted but contains no token bytes",
-			"path", zitadelPATPath)
-		os.Exit(1)
-	}
-	zitadelClient = zitadel.New(zitadelURL, pat, zitadelExternalDomain)
 	setupLog.Info("Zitadel client initialized",
 		"url", zitadelURL,
-		"pat-path", zitadelPATPath,
 		"external-domain", zitadelExternalDomain)
+
+	// ZITADEL_PROJECT_ID (ADR-0093): the gibson project every tenant org is
+	// granted, and every tenant role is a user grant on. One-code-path, same
+	// style as ZITADEL_URL above: a tenant-operator that started without it
+	// would silently skip granting new tenants, so it refuses to start.
+	zitadelProjectID := os.Getenv("ZITADEL_PROJECT_ID")
+	if zitadelProjectID == "" {
+		setupLog.Error(nil, "ZITADEL_PROJECT_ID is required (ADR-0093): "+
+			"the operator refuses to start until the chart provides the gibson project id")
+		os.Exit(1)
+	}
 
 	// Email sender: SMTP is required infrastructure (one-code-path / tenant-operator#95).
 	// SMTP_HOST must be set; missing → exit 1. The previous NullSender default
@@ -618,7 +614,30 @@ func main() {
 	// steps use (and both call the shared identity.EnsureOrg / identity.RemoveOrg
 	// core), so there is one provisioning codepath (ADR-0027). The TenantIdentity
 	// controller delegates to it.
-	identityProvisioner := identity.New(zitadelClient)
+	identityProvisioner := identity.New(zitadelClient, zitadelProjectID)
+
+	// Build the tenant role Syncer (ADR-0093 decision 3): the drift-repair
+	// half of the one sync. It calls the v2 Connect services directly (the
+	// management-API zitadel.Client above has no project-grant/authorization
+	// surface), over the same ZITADEL_URL/ZITADEL_EXTERNAL_DOMAIN this
+	// operator already requires, claiming the instance by header (ADR-0092)
+	// and authenticating as the operator's own machine user, with the same
+	// client credentials as the management-API client.
+	tenantRoleGrants, err := newTenantRoleGrants(context.Background(), zitadelURL, zitadelExternalDomain, operatorClientID, operatorClientSecret, zitadelProjectID)
+	if err != nil {
+		setupLog.Error(err, "tenant role grants (ADR-0092, ADR-0093): the operator refuses to start")
+		os.Exit(1)
+	}
+	tenantRoleTuples := fga.NewTenantRoleTuples(fgaClient)
+	tenantRoleSyncer := tenantrole.NewSyncer(tenantRoleGrants, tenantRoleTuples, nil)
+	tenantRoleSyncInterval := controller.DefaultTenantRoleSyncInterval
+	if v := os.Getenv("TENANT_ROLE_SYNC_INTERVAL"); v != "" {
+		if d, perr := time.ParseDuration(v); perr == nil {
+			tenantRoleSyncInterval = d
+		} else {
+			setupLog.Error(perr, "TENANT_ROLE_SYNC_INTERVAL invalid; using default", "value", v, "default", controller.DefaultTenantRoleSyncInterval)
+		}
+	}
 
 	// Build the declarative tenant-grants provisioner (E8/gibson#804). It wraps
 	// the SAME fgaClient the Tenant saga's RegisterTenantWithPlatform step uses
@@ -681,6 +700,12 @@ func main() {
 	// disabled) rather than nil, so the reconcile path never nil-guards an
 	// injected dependency (production-readiness no-graceful-nil gate).
 	var tenantStatusReporter controller.TenantStatusReporter = controller.NoopTenantStatusReporter{}
+	// orgMappingSeeder seeds the daemon's tenant -> Zitadel org mapping
+	// (ADR-0093 decision 4). Left nil when GIBSON_DAEMON_GRPC_ADDRESS is
+	// unset; TenantIdentityReconciler then fails every reconcile loud, the
+	// same as a nil Provisioner, rather than mark a tenant Ready with no
+	// mapping ext-authz can resolve.
+	var orgMappingSeeder controller.TenantOrgSeeder
 	if grpcAddr := os.Getenv("GIBSON_DAEMON_GRPC_ADDRESS"); grpcAddr != "" {
 		daemonSVID := os.Getenv("GIBSON_DAEMON_SPIFFE_ID")
 		if daemonSVID == "" {
@@ -695,6 +720,7 @@ func main() {
 		setupLog.Info("daemon provisioner: gRPC (SPIFFE mTLS)", "addr", grpcAddr, "daemon_svid", daemonSVID)
 		psagaDeps.DaemonGRPC = grpcClient
 		tenantStatusReporter = grpcClient
+		orgMappingSeeder = grpcClient
 
 		// Operator-pull tenant provisioning (E9, gibson#948, enables
 		// dashboard#813): drain the daemon's pending-provisioning queue and
@@ -793,18 +819,25 @@ func main() {
 		MigrationEmitter:  migrationEmitter,
 		StatusReporter:    tenantStatusReporter,
 		Mail:              mailer,
-		DashboardBaseURL:  os.Getenv("DASHBOARD_URL"),
+		// The product-surface origin (app.<domain>), never DASHBOARD_URL: that
+		// name named the in-cluster Service DNS address
+		// (http://gibson-dashboard:3000), which built a welcome-email link no
+		// human's browser could open (hosted#203).
+		DashboardBaseURL: os.Getenv("GIBSON_APP_URL"),
 	}).SetupWithManager(mgr); err != nil {
 		setupLog.Error(err, "Failed to create controller", "controller", "Tenant")
 		os.Exit(1)
 	}
 
 	if err := (&controller.TenantMemberReconciler{
-		Client:        mgr.GetClient(),
-		Scheme:        mgr.GetScheme(),
-		FGA:           fgaClient,
-		Mail:          mailer,
-		BaseAcceptURL: os.Getenv("DASHBOARD_URL"),
+		Client: mgr.GetClient(),
+		Scheme: mgr.GetScheme(),
+		FGA:    fgaClient,
+		Mail:   mailer,
+		// Same product-surface origin as TenantReconciler.DashboardBaseURL
+		// above, for the same reason: the invitation accept link must reach
+		// a human's browser, not an in-cluster address (hosted#203).
+		BaseAcceptURL: os.Getenv("GIBSON_APP_URL"),
 	}).SetupWithManager(mgr); err != nil {
 		setupLog.Error(err, "Failed to create controller", "controller", "TenantMember")
 		os.Exit(1)
@@ -879,8 +912,22 @@ func main() {
 		Client:      mgr.GetClient(),
 		Scheme:      mgr.GetScheme(),
 		Provisioner: identityProvisioner,
+		OrgMapping:  orgMappingSeeder,
 	}).SetupWithManager(mgr); err != nil {
 		setupLog.Error(err, "Failed to create controller", "controller", "TenantIdentity")
+		os.Exit(1)
+	}
+
+	// TenantRoleSync — the drift-repair half of the one tenant-role sync
+	// (ADR-0093 decision 3). The daemon runs the SAME tenantrole.Syncer
+	// inline after each role write; this reconciler catches everything else
+	// on a timer.
+	if err := (&controller.TenantRoleSyncReconciler{
+		Client:   mgr.GetClient(),
+		Syncer:   tenantRoleSyncer,
+		Interval: tenantRoleSyncInterval,
+	}).SetupWithManager(mgr); err != nil {
+		setupLog.Error(err, "Failed to create controller", "controller", "TenantRoleSync")
 		os.Exit(1)
 	}
 

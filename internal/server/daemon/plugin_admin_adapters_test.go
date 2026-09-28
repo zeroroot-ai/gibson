@@ -66,11 +66,7 @@ func (s *stubIDP) GetUserProfile(_ context.Context, _ string) (*idp.UserProfile,
 func (s *stubIDP) UpdateUserProfile(_ context.Context, _ string, _ idp.UpdateUserProfileRequest) (*idp.UserProfile, error) {
 	return nil, idp.ErrNotFound
 }
-func (s *stubIDP) AddTenantMember(_ context.Context, _ idp.TenantMembershipRequest) error { return nil }
-func (s *stubIDP) RemoveTenantMember(_ context.Context, _ idp.TenantMembershipRequest) error {
-	return nil
-}
-func (s *stubIDP) EnsureHumanUser(_ context.Context, _ idp.EnsureHumanUserRequest) (string, error) {
+func (s *stubIDP) CreateSetupLink(_ context.Context, _, _, _ string) (string, error) {
 	return "", nil
 }
 func (s *stubIDP) SetHumanPassword(context.Context, idp.SetHumanPasswordRequest) error {
@@ -83,6 +79,12 @@ func (s *stubIDP) CreateHumanUser(_ context.Context, _ idp.CreateHumanUserReques
 func (s *stubIDP) FindUserIDByEmail(_ context.Context, _ string) (string, error) {
 	return "", idp.ErrNotFound
 }
+func (s *stubIDP) EnsureHumanUserNoPassword(_ context.Context, _, _, _, _ string) (string, error) {
+	return "", nil
+}
+func (s *stubIDP) CreateSetupInviteCode(_ context.Context, _, _ string, _ bool) (string, error) {
+	return "", nil
+}
 func (s *stubIDP) RevokeUserSessions(_ context.Context, _ string) (idp.RevokeUserSessionsResult, error) {
 	return idp.RevokeUserSessionsResult{}, nil
 }
@@ -90,7 +92,10 @@ func (s *stubIDP) ListUserSessions(_ context.Context, _ string) ([]idp.SessionIn
 	return nil, nil
 }
 func (s *stubIDP) RevokeSession(_ context.Context, _ string) error { return nil }
-func (s *stubIDP) Close() error                                    { return nil }
+func (s *stubIDP) ClearHumanFactors(_ context.Context, _ string) (idp.ClearHumanFactorsResult, error) {
+	return idp.ClearHumanFactorsResult{}, nil
+}
+func (s *stubIDP) Close() error { return nil }
 
 func adapterTestCtx(t *testing.T) (context.Context, auth.TenantID) {
 	t.Helper()

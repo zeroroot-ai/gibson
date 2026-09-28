@@ -78,15 +78,6 @@ type ServiceAccount struct {
 	Description string
 }
 
-// EnsureHumanUserRequest carries parameters for finding-or-creating a human
-// user in the IdP organization that bounds a tenant.
-type EnsureHumanUserRequest struct {
-	// OrgID is the IdP organization id the user belongs to / is created in.
-	OrgID string
-	// Email is the user's email address (also the login name). Required.
-	Email string
-}
-
 // CreateHumanUserRequest carries parameters for provisioning a password-bearing
 // human user during self-serve signup. It mirrors the request the dashboard
 // signup-bot previously sent (createHumanUser): a profile, a verified-at-create
@@ -167,6 +158,20 @@ type RevokeUserSessionsResult struct {
 	GrantsRevoked int
 }
 
+// ClearHumanFactorsResult reports what ClearHumanFactors removed. Counts are
+// best-effort observability; callers must not treat zero as failure — a user
+// who had no second factors registered yields all-zero counts on success.
+type ClearHumanFactorsResult struct {
+	// OTPCleared is true when an authenticator-app (TOTP) factor was found
+	// and removed.
+	OTPCleared bool
+	// U2FCleared is the number of U2F security-key credentials removed.
+	U2FCleared int
+	// PasskeysCleared is the number of passwordless/passkey credentials
+	// removed.
+	PasskeysCleared int
+}
+
 // SessionInfo describes one active login session of a user, as reported by the
 // IdP. Fields the IdP does not populate are left zero (empty string / zero
 // time); a missing optional field must never fail the whole listing.
@@ -181,20 +186,6 @@ type SessionInfo struct {
 	CreatedAt time.Time
 	// LastActiveAt is when the session was last seen active, if reported.
 	LastActiveAt time.Time
-}
-
-// TenantMembershipRequest carries parameters for adding or removing a human
-// user's membership of the IdP organization that bounds a tenant.
-type TenantMembershipRequest struct {
-	// OrgID is the IdP organization id provisioned for the tenant. Required.
-	OrgID string
-
-	// UserID is the IdP-assigned id of the human user. Required.
-	UserID string
-
-	// Role is the neutral tenant role to grant on add ("owner", "admin",
-	// "member"); unknown values map to "member". Unused on remove.
-	Role string
 }
 
 // CreateServiceAccountRequest carries parameters for creating a new service account.

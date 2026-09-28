@@ -24,14 +24,17 @@
 // gibson#948/#949): same enqueue-in-Postgres / operator-drains-and-applies
 // shape, but for the cross-tenant admin CRUD operations rather than signup.
 //
-// Authorization: every RPC is restricted to the cross-tenant platform-admin
-// principal — a USER holding platform_operator on system_tenant:_system — the
-// FGA relation that models "operator with cross-tenant elevated privilege"
-// (model.fga). This matches the dashboard's pre-existing requireCrdSession
-// cross-tenant-role gate. ext-authz enforces it via the (gibson.auth.v1.authz)
-// annotation; Envoy routes the /gibson. prefix to the daemon with the
-// jwt_authn + ext_authz chain (no admin-prefix chart change needed — the
-// catch-all route already gates every gibson.* method by its registry rule).
+// Authorization: every RPC is restricted to the Platform owner — the ONE
+// human Zitadel administrator a install creates (ADR-0093 decision 6) — a
+// USER holding platform_owner on system_tenant:_system (model.fga). Moved
+// off platform_operator (hosted#201): that relation is for platform SERVICE
+// ACCOUNTS only now, never a person, so a human platform-admin caller needs
+// its own relation. This matches the dashboard's pre-existing
+// requireCrdSession cross-tenant-role gate, updated to check platform_owner.
+// ext-authz enforces it via the (gibson.auth.v1.authz) annotation; Envoy
+// routes the /gibson. prefix to the daemon with the jwt_authn + ext_authz
+// chain (no admin-prefix chart change needed — the catch-all route already
+// gates every gibson.* method by its registry rule).
 
 package tenantv1
 
@@ -64,7 +67,7 @@ const (
 // AdminTenantService is the dashboard-facing write side of admin tenant CRUD.
 // Each RPC records a tenant_admin_ops row (the admin's intent) and returns the
 // generated op_id; the tenant-operator drains the queue and applies the op to
-// the Tenant CR. Cross-tenant platform-admin only (platform_operator USER).
+// the Tenant CR. Platform owner only (platform_owner USER, ADR-0093).
 type AdminTenantServiceClient interface {
 	// AdminProvisionTenant records intent to create a new tenant. Replaces
 	// provisionTenantAction's applyTenant() Tenant-CR create. The operator creates
@@ -87,15 +90,15 @@ type AdminTenantServiceClient interface {
 	AdminDeleteTenant(ctx context.Context, in *AdminDeleteTenantRequest, opts ...grpc.CallOption) (*AdminDeleteTenantResponse, error)
 	// AdminGetTenantBilling returns ANY tenant's billing identifiers — the Stripe
 	// customer id, the billing-active flag and the Zitadel org slug — for the
-	// platform-operator admin surfaces (the trial-extension tool, dashboard#1016).
+	// platform-owner admin surfaces (the trial-extension tool, dashboard#1016).
 	//
 	// This is a genuine CROSS-tenant read: a staff operator acting on an arbitrary
 	// tenant_id. It cannot use the unauthenticated
 	// TenantProvisioningService.GetTenantProvisioningStatus (that RPC no longer
 	// discloses billing state to any caller — gibson#1339), nor the own-tenant
 	// TenantService.GetTenantBilling (the operator is not that tenant's admin). It
-	// carries the same platform_operator gate as the other AdminTenantService
-	// RPCs: ext-authz authorizes platform_operator on system_tenant:_system before
+	// carries the same platform_owner gate as the other AdminTenantService
+	// RPCs: ext-authz authorizes platform_owner on system_tenant:_system before
 	// the handler trusts the request tenant_id.
 	AdminGetTenantBilling(ctx context.Context, in *AdminGetTenantBillingRequest, opts ...grpc.CallOption) (*AdminGetTenantBillingResponse, error)
 	// AdminListPendingRegistrations returns the registrations awaiting a
@@ -209,7 +212,7 @@ func (c *adminTenantServiceClient) AdminRejectRegistration(ctx context.Context, 
 // AdminTenantService is the dashboard-facing write side of admin tenant CRUD.
 // Each RPC records a tenant_admin_ops row (the admin's intent) and returns the
 // generated op_id; the tenant-operator drains the queue and applies the op to
-// the Tenant CR. Cross-tenant platform-admin only (platform_operator USER).
+// the Tenant CR. Platform owner only (platform_owner USER, ADR-0093).
 type AdminTenantServiceServer interface {
 	// AdminProvisionTenant records intent to create a new tenant. Replaces
 	// provisionTenantAction's applyTenant() Tenant-CR create. The operator creates
@@ -232,15 +235,15 @@ type AdminTenantServiceServer interface {
 	AdminDeleteTenant(context.Context, *AdminDeleteTenantRequest) (*AdminDeleteTenantResponse, error)
 	// AdminGetTenantBilling returns ANY tenant's billing identifiers — the Stripe
 	// customer id, the billing-active flag and the Zitadel org slug — for the
-	// platform-operator admin surfaces (the trial-extension tool, dashboard#1016).
+	// platform-owner admin surfaces (the trial-extension tool, dashboard#1016).
 	//
 	// This is a genuine CROSS-tenant read: a staff operator acting on an arbitrary
 	// tenant_id. It cannot use the unauthenticated
 	// TenantProvisioningService.GetTenantProvisioningStatus (that RPC no longer
 	// discloses billing state to any caller — gibson#1339), nor the own-tenant
 	// TenantService.GetTenantBilling (the operator is not that tenant's admin). It
-	// carries the same platform_operator gate as the other AdminTenantService
-	// RPCs: ext-authz authorizes platform_operator on system_tenant:_system before
+	// carries the same platform_owner gate as the other AdminTenantService
+	// RPCs: ext-authz authorizes platform_owner on system_tenant:_system before
 	// the handler trusts the request tenant_id.
 	AdminGetTenantBilling(context.Context, *AdminGetTenantBillingRequest) (*AdminGetTenantBillingResponse, error)
 	// AdminListPendingRegistrations returns the registrations awaiting a

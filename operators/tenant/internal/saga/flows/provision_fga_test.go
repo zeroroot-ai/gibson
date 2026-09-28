@@ -82,6 +82,7 @@ func (s *stubFGAClient) Ping(_ context.Context) error {
 	s.pingCalls++
 	return nil
 }
+func (s *stubFGAClient) WriteAndDelete(_ context.Context, _, _ []fga.Tuple) error { return nil }
 func (s *stubFGAClient) WriteConditional(_ context.Context, _ fga.ConditionalTuple) error {
 	return nil
 }

@@ -25,6 +25,7 @@ import (
 	"sigs.k8s.io/controller-runtime/pkg/log"
 	"sigs.k8s.io/controller-runtime/pkg/reconcile"
 
+	"github.com/zeroroot-ai/gibson/internal/platform/tenantrole"
 	gibsonv1alpha1 "github.com/zeroroot-ai/gibson/operators/platform/api/v1alpha1"
 	fga "github.com/zeroroot-ai/gibson/operators/platform/internal/clients/fga"
 	vault "github.com/zeroroot-ai/gibson/operators/platform/internal/clients/vault"
@@ -126,6 +127,10 @@ func (r *PlatformBootstrapReconciler) SetupWithManager(mgr ctrl.Manager) error {
 		Watches(
 			&gibsonv1alpha1.OIDCClient{},
 			handler.EnqueueRequestsFromMapFunc(r.mapChildToParent),
+		).
+		Watches(
+			&corev1.ConfigMap{},
+			handler.EnqueueRequestsFromMapFunc(r.mapBrandingConfigMap),
 		).
 		Complete(r)
 }
@@ -249,6 +254,50 @@ func (r *PlatformBootstrapReconciler) Reconcile(ctx context.Context, req ctrl.Re
 		return result, err
 	}
 
+	// Step 9: the login pages' brand. It never stops the reconcile; see
+	// reconcileLoginBranding.
+	r.reconcileLoginBranding(ctx, &pb, logger)
+
+	// Step 9b: the instance's one SMTP email provider (hosted#189). Placed
+	// before Step 10 deliberately: reconcilePlatformOwner's mailed setup
+	// link is only trustworthy once this step has confirmed (or repaired)
+	// an active SMTP provider in the same pass, so a fresh Platform owner is
+	// never told "emailed" while nothing can actually deliver the mail.
+	if result, err := r.reconcileZitadelSMTP(ctx, &pb, logger); err != nil || !result.IsZero() {
+		_ = r.statusUpdate(ctx, &pb)
+		return result, err
+	}
+
+	// Step 10: Platform owner (ADR-0093 decision 6/8, hosted#201). Ordering
+	// rationale: depends on the Zitadel project (Step 1, for the org id and
+	// admin token) and the FGA model (Step 4, for the store/model ids the
+	// platform_owner tuple write needs) both being available. Placed last so
+	// a Platform owner is never provisioned against a half-bootstrapped
+	// instance.
+	if result, err := r.reconcilePlatformOwner(ctx, &pb, logger); err != nil || !result.IsZero() {
+		_ = r.statusUpdate(ctx, &pb)
+		return result, err
+	}
+
+	// Step 11: keep the Platform owner the only human Zitadel administrator
+	// (ADR-0093 decision 6, hosted#189). Must run after reconcilePlatformOwner
+	// (Step 10): it needs status.PlatformOwnerUserID to know which human
+	// member to keep, and reconcilePlatformOwner only returns a zero Result
+	// once that id is persisted.
+	if result, err := r.reconcileHumanAdminsScoped(ctx, &pb, logger); err != nil || !result.IsZero() {
+		_ = r.statusUpdate(ctx, &pb)
+		return result, err
+	}
+
+	// Step 12: keep the declared service accounts and the login client the
+	// only machine Zitadel administrators (ADR-0093 decision 6, hosted#207).
+	// Reads the same service-account list as Step 2b, so it only removes a
+	// machine member once every declared one is known.
+	if result, err := r.reconcileMachineAdminsScoped(ctx, &pb, logger); err != nil || !result.IsZero() {
+		_ = r.statusUpdate(ctx, &pb)
+		return result, err
+	}
+
 	// Top-level Ready rollup.
 	r.aggregateReady(&pb)
 	pb.Status.ObservedGeneration = pb.Generation
@@ -271,8 +320,10 @@ func (r *PlatformBootstrapReconciler) reconcileZitadelProject(ctx context.Contex
 		return ctrl.Result{RequeueAfter: requeueMedium}, nil
 	}
 	zc := r.ZitadelFactory(pb.Spec.Zitadel.Issuer, pat)
+	var projectID string
 	if pb.Spec.Zitadel.Project.EnsureExists {
-		if _, err := zc.EnsureProject(ctx, pb.Spec.Zitadel.Project.Name); err != nil {
+		id, err := zc.EnsureProject(ctx, pb.Spec.Zitadel.Project.Name)
+		if err != nil {
 			if zitadel.IsPermanent(err) {
 				setBootstrapCond(pb, gibsonv1alpha1.ConditionZitadelProjectReady, metav1.ConditionFalse,
 					"ZitadelPermanentError", fmt.Sprintf("EnsureProject: %v", err))
@@ -282,8 +333,10 @@ func (r *PlatformBootstrapReconciler) reconcileZitadelProject(ctx context.Contex
 				"ZitadelTransientError", fmt.Sprintf("EnsureProject: %v", err))
 			return ctrl.Result{RequeueAfter: requeueMedium}, nil
 		}
+		projectID = id
 	} else {
-		if _, err := zc.GetProjectIDByName(ctx, pb.Spec.Zitadel.Project.Name); err != nil {
+		id, err := zc.GetProjectIDByName(ctx, pb.Spec.Zitadel.Project.Name)
+		if err != nil {
 			if zitadel.IsNotFound(err) {
 				setBootstrapCond(pb, gibsonv1alpha1.ConditionZitadelProjectReady, metav1.ConditionFalse,
 					"ProjectNotFound", fmt.Sprintf("project %q does not exist (ensureExists=false)", pb.Spec.Zitadel.Project.Name))
@@ -291,28 +344,73 @@ func (r *PlatformBootstrapReconciler) reconcileZitadelProject(ctx context.Contex
 			}
 			return ctrl.Result{RequeueAfter: requeueMedium}, nil
 		}
+		projectID = id
 	}
-	// Enforce allowRegister=false on the instance login policy so Zitadel's
-	// hosted self-registration page is not served. DefaultInstance config in
-	// the chart only applies at first-instance creation, so already-running
-	// instances are closed here, idempotently, on every reconcile (deploy#886).
-	if changed, err := zc.EnsureRegistrationDisabled(ctx); err != nil {
+
+	// Reconcile the four tenant roles on the project (ADR-0093 decision 2).
+	// Every tenant org's project grant and every user's role grant name one
+	// of these keys, so the project must carry exactly this set before any
+	// tenant can be granted access to it.
+	if changed, err := zc.EnsureProjectRoles(ctx, projectID, tenantrole.All); err != nil {
 		if zitadel.IsPermanent(err) {
 			setBootstrapCond(pb, gibsonv1alpha1.ConditionZitadelProjectReady, metav1.ConditionFalse,
-				"ZitadelPermanentError", fmt.Sprintf("EnsureRegistrationDisabled: %v", err))
+				"ZitadelPermanentError", fmt.Sprintf("EnsureProjectRoles: %v", err))
 			return ctrl.Result{}, nil
 		}
 		setBootstrapCond(pb, gibsonv1alpha1.ConditionZitadelProjectReady, metav1.ConditionUnknown,
-			"ZitadelTransientError", fmt.Sprintf("EnsureRegistrationDisabled: %v", err))
+			"ZitadelTransientError", fmt.Sprintf("EnsureProjectRoles: %v", err))
 		return ctrl.Result{RequeueAfter: requeueMedium}, nil
 	} else if changed {
-		logger.Info("disabled Zitadel self-service registration on the instance login policy (deploy#886)")
+		logger.Info("reconciled tenant roles on the gibson project")
+	}
+
+	// Enforce the sign-in policy of every install (ADR-0093 section 9): MFA
+	// for everyone, passkey or authenticator app only, no external IdPs, no
+	// self-service registration (deploy#886 folds in here). Also keep
+	// usernames unique install-wide (decision 1), which is what makes our
+	// email-derived usernames unique too. DefaultInstance config in the
+	// chart only applies at first-instance creation, so already-running
+	// instances are corrected here, idempotently, on every reconcile.
+	if changed, err := zc.EnsureDomainPolicy(ctx, usernamePolicy); err != nil {
+		if zitadel.IsPermanent(err) {
+			setBootstrapCond(pb, gibsonv1alpha1.ConditionZitadelProjectReady, metav1.ConditionFalse,
+				"ZitadelPermanentError", fmt.Sprintf("EnsureDomainPolicy: %v", err))
+			return ctrl.Result{}, nil
+		}
+		setBootstrapCond(pb, gibsonv1alpha1.ConditionZitadelProjectReady, metav1.ConditionUnknown,
+			"ZitadelTransientError", fmt.Sprintf("EnsureDomainPolicy: %v", err))
+		return ctrl.Result{RequeueAfter: requeueMedium}, nil
+	} else if changed {
+		logger.Info("corrected the Zitadel instance domain policy (ADR-0093 decision 1)")
+		if r.Recorder != nil {
+			r.Recorder.Event(pb, corev1.EventTypeNormal, "SignInPolicyCorrected",
+				"corrected: userLoginMustBeDomain")
+		}
+	}
+
+	corrected, err := zc.EnsureLoginPolicy(ctx, signInPolicy)
+	if err != nil {
+		if zitadel.IsPermanent(err) {
+			setBootstrapCond(pb, gibsonv1alpha1.ConditionZitadelProjectReady, metav1.ConditionFalse,
+				"ZitadelPermanentError", fmt.Sprintf("EnsureLoginPolicy: %v", err))
+			return ctrl.Result{}, nil
+		}
+		setBootstrapCond(pb, gibsonv1alpha1.ConditionZitadelProjectReady, metav1.ConditionUnknown,
+			"ZitadelTransientError", fmt.Sprintf("EnsureLoginPolicy: %v", err))
+		return ctrl.Result{RequeueAfter: requeueMedium}, nil
+	}
+	if len(corrected) > 0 {
+		logger.Info("corrected the Zitadel instance login policy (ADR-0093 section 9)", "corrected", corrected)
+		if r.Recorder != nil {
+			r.Recorder.Eventf(pb, corev1.EventTypeNormal, "SignInPolicyCorrected",
+				"corrected: %s", strings.Join(corrected, ", "))
+		}
 	}
 
 	// Service-user provisioning is deferred — handled by tenant-operator's
 	// existing zitadel-mint-user-pat tooling. Marked Ready here.
 	setBootstrapCond(pb, gibsonv1alpha1.ConditionZitadelProjectReady, metav1.ConditionTrue,
-		"ProjectExists", "Zitadel project reachable")
+		"ProjectExists", "Zitadel project reachable; tenant roles present")
 	return ctrl.Result{}, nil
 }
 
@@ -582,6 +680,11 @@ func (r *PlatformBootstrapReconciler) aggregateReady(pb *gibsonv1alpha1.Platform
 		gibsonv1alpha1.ConditionUnsealKeyEscrowed,
 		gibsonv1alpha1.ConditionPostgresBundleReady,
 		gibsonv1alpha1.ConditionTrustedDomainReady,
+		gibsonv1alpha1.ConditionLoginBrandingReady,
+		gibsonv1alpha1.ConditionSMTPProviderReady,
+		gibsonv1alpha1.ConditionPlatformOwnerReady,
+		gibsonv1alpha1.ConditionHumanAdminsScoped,
+		gibsonv1alpha1.ConditionMachineAdminsScoped,
 	}
 	for _, cType := range all {
 		c := findCondition(pb.Status.Conditions, cType)

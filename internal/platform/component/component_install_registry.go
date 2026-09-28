@@ -46,6 +46,10 @@ const (
 	ComponentInstallStatusServing ComponentInstallStatus = "serving"
 	// ComponentInstallStatusUnreachable indicates the install has not heartbeated within TTL.
 	ComponentInstallStatusUnreachable ComponentInstallStatus = "unreachable"
+	// ComponentInstallStatusDegraded indicates the install heartbeats but
+	// reports a reduced state: the SDK enters Degraded when a declared secret
+	// is revoked (gibson#154). A degraded install receives no dispatch.
+	ComponentInstallStatusDegraded ComponentInstallStatus = "degraded"
 )
 
 const (
@@ -94,6 +98,13 @@ type ComponentInstall struct {
 	// registration metadata key. Consumed by the PluginInvoke dispatch-policy
 	// gate. Zero value (UNSPECIFIED) is treated as trusted.
 	ContentTrust componentpb.ContentTrust
+	// PrincipalRef is the FGA user the component registered as, the caller's
+	// signed identity in componentFGAUser shape (plugin_principal:<id> for a
+	// plugin). It is the user bindDeclaredSecrets grants can_resolve to and the
+	// key the component streams WatchComponentEvents under, so the admin RPCs
+	// that revoke or rebind a secret address it verbatim (gibson#154). Empty
+	// when the registration carried no identity.
+	PrincipalRef string
 }
 
 // contentTrustToDB renders a ContentTrust as the canonical enum name stored in
@@ -166,7 +177,10 @@ type ComponentInstallRegistry interface {
 
 	// Heartbeat refreshes the Redis TTL for the install identified by installID
 	// and updates last_heartbeat_at in the status payload.
-	Heartbeat(ctx context.Context, installID string, address string) error
+	// Heartbeat refreshes the install's transient status. healthStatus is the
+	// state the component reports (HeartbeatRequest.health_status):
+	// "degraded" marks the install degraded, anything else marks it serving.
+	Heartbeat(ctx context.Context, installID, address, healthStatus string) error
 
 	// ListInstalls returns all installs of name for tenant whose Redis status key
 	// currently exists and whose status is "serving".
@@ -277,8 +291,8 @@ func (r *postgresComponentInstallRegistry) Register(ctx context.Context, install
 INSERT INTO component_install (
     id, tenant_id, kind, component_name, version, manifest_hash,
     declared_methods, proto_descriptor_set, host_id,
-    runtime_mode, setec_required, content_trust, created_at, created_by
-) VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,now(),$13)
+    runtime_mode, setec_required, content_trust, principal_ref, created_at, created_by
+) VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,now(),$14)
 ON CONFLICT (tenant_id, kind, component_name, host_id)
 DO UPDATE SET
     id                   = EXCLUDED.id,
@@ -288,7 +302,8 @@ DO UPDATE SET
     proto_descriptor_set = EXCLUDED.proto_descriptor_set,
     runtime_mode         = EXCLUDED.runtime_mode,
     setec_required       = EXCLUDED.setec_required,
-    content_trust        = EXCLUDED.content_trust
+    content_trust        = EXCLUDED.content_trust,
+    principal_ref        = EXCLUDED.principal_ref
 RETURNING id`
 
 	var assignedID string
@@ -305,6 +320,7 @@ RETURNING id`
 		install.RuntimeMode,
 		install.SetecRequired,
 		contentTrustToDB(install.ContentTrust),
+		install.PrincipalRef,
 		install.HostID, // created_by = host_id
 	).Scan(&assignedID)
 	if err != nil {
@@ -333,12 +349,25 @@ RETURNING id`
 	return nil
 }
 
+// InstallStatusFromHealth maps the health_status a component heartbeats to
+// the install status the registry stores. The SDK reports "degraded" once a
+// declared secret is revoked (gibson#154); every other value, including the
+// empty one an older SDK sends, is serving. Unknown values are not stored
+// verbatim: ListInstalls and the admin summary switch on the three known
+// statuses, and a fourth would read as "nothing".
+func InstallStatusFromHealth(healthStatus string) ComponentInstallStatus {
+	if healthStatus == string(ComponentInstallStatusDegraded) {
+		return ComponentInstallStatusDegraded
+	}
+	return ComponentInstallStatusServing
+}
+
 // Heartbeat implements ComponentInstallRegistry.
 //
-// It reads the current Redis status payload, updates last_heartbeat_at and
-// address, and resets the 90-second TTL. If the key has expired (install
-// previously unreachable) the payload is recreated with status "serving".
-func (r *postgresComponentInstallRegistry) Heartbeat(ctx context.Context, installID string, address string) error {
+// It reads the current Redis status payload, updates last_heartbeat_at,
+// address and status, and resets the 90-second TTL. If the key has expired
+// (install previously unreachable) the payload is recreated.
+func (r *postgresComponentInstallRegistry) Heartbeat(ctx context.Context, installID, address, healthStatus string) error {
 	if installID == "" {
 		return fmt.Errorf("plugin registry heartbeat: installID must not be empty")
 	}
@@ -363,7 +392,7 @@ func (r *postgresComponentInstallRegistry) Heartbeat(ctx context.Context, instal
 	if address != "" {
 		payload.Address = address
 	}
-	payload.Status = string(ComponentInstallStatusServing)
+	payload.Status = string(InstallStatusFromHealth(healthStatus))
 
 	if err := r.setRedisStatus(ctx, installID, payload); err != nil {
 		return fmt.Errorf("plugin registry heartbeat: update redis status: %w", err)
@@ -554,7 +583,17 @@ func (r *postgresComponentInstallRegistry) setRedisStatus(ctx context.Context, i
 // redisStatus reads the transient status for installID. Returns false when the
 // key is absent (expired or never written).
 func (r *postgresComponentInstallRegistry) redisStatus(ctx context.Context, installID string) (ComponentInstallStatus, string, time.Time, bool) {
-	data, err := r.redis.Get(ctx, pluginStatusKey(installID)).Bytes()
+	return InstallStatus(ctx, r.redis, installID)
+}
+
+// InstallStatus reads the transient status the registry keeps for installID:
+// the status the component last heartbeated, its address and the heartbeat
+// time. ok is false when the key is absent (the TTL expired or the install
+// never registered on this daemon), and the status is then unreachable. The
+// admin surface reads through this so ListPluginInstalls reports the same
+// status dispatch sees (gibson#154).
+func InstallStatus(ctx context.Context, rdb redis.UniversalClient, installID string) (status ComponentInstallStatus, address string, lastHeartbeat time.Time, ok bool) {
+	data, err := rdb.Get(ctx, pluginStatusKey(installID)).Bytes()
 	if err != nil {
 		return ComponentInstallStatusUnreachable, "", time.Time{}, false
 	}

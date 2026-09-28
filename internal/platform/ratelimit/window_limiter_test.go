@@ -6,6 +6,7 @@ package ratelimit_test
 import (
 	"context"
 	"errors"
+	"net"
 	"testing"
 	"time"
 
@@ -151,10 +152,21 @@ func TestWindowLimiter_FailsClosedWithoutABackend(t *testing.T) {
 	})
 
 	t.Run("unreachable redis", func(t *testing.T) {
-		mr := miniredis.RunT(t)
-		client := redis.NewClient(&redis.Options{Addr: mr.Addr()})
+		// Unreachability is built in, not raced. This used to start a
+		// miniredis, close it, and rely on nothing re-binding the freed
+		// ephemeral port before go-redis dialed lazily at Check; a parallel
+		// test that re-bound it made the dial succeed and the fail-closed
+		// assertion red the whole lane (gibson#30). A dialer that always
+		// fails keeps the property under test (backend unreachable =>
+		// ErrLimiterUnavailable) with no port allocator in the picture.
+		client := redis.NewClient(&redis.Options{
+			Addr: "127.0.0.1:1",
+			Dialer: func(context.Context, string, string) (net.Conn, error) {
+				return nil, net.ErrClosed
+			},
+			MaxRetries: -1,
+		})
 		limiter := ratelimit.NewWindowLimiter(client)
-		mr.Close()
 
 		err := limiter.Check(ctx, "sv:global", w)
 		require.ErrorIs(t, err, ratelimit.ErrLimiterUnavailable)

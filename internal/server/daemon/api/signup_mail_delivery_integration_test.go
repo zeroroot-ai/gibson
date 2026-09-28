@@ -69,8 +69,12 @@ import (
 const (
 	// mailpitImage is the SMTP sink. It is a real SMTP server with an HTTP
 	// API for reading what arrived, which is what makes "did it actually get
-	// delivered" answerable rather than inferred.
-	mailpitImage = "axllent/mailpit:v1.21"
+	// delivered" answerable rather than inferred. Pulled from the org
+	// mirror (zeroroot-ai/.github mirror-list.yaml), pinned to the same
+	// v1.28.3 tag the Helm chart deploys (charts helm/gibson-workloads
+	// values.yaml `mailpit.image.tag`), never Docker Hub directly
+	// (gibson#233).
+	mailpitImage = "ghcr.io/zeroroot-ai/mirror/mailpit:v1.28.3"
 
 	signupAppURL = "https://app.example.test"
 	signupAPIURL = "https://api.example.test"

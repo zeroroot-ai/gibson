@@ -494,6 +494,31 @@ func (s *CapabilityGrantService) ActiveGrantID(ctx context.Context, tenantID, pr
 	return id, nil
 }
 
+// LookupEnrolledAgent returns the registered name of the active agent enrolled
+// under principalRef in tenantID, and the subject of the person who enrolled
+// it. Both are empty when the registry has no active agent for the principal.
+//
+// This is the attribution read for a finding an enrolled agent submits
+// (gibson#208): the principal is what ext-authz verified, and this call turns
+// it into the name the agent registered under and the person behind it. An
+// empty principalRef or tenantID answers empty rather than querying.
+//
+// Implements component.EnrolledAgentLookup (structurally; component cannot
+// import this package, see internal/platform/capname's doc comment for why).
+func (s *CapabilityGrantService) LookupEnrolledAgent(ctx context.Context, tenantID, principalRef string) (agentName, enrolledBy string, err error) {
+	if tenantID == "" || principalRef == "" {
+		return "", "", nil
+	}
+	ag, err := s.store.AgentByPrincipal(ctx, tenantID, principalRef)
+	if err != nil {
+		return "", "", fmt.Errorf("capabilitygrant: LookupEnrolledAgent: %w", err)
+	}
+	if ag == nil {
+		return "", "", nil
+	}
+	return ag.Name, ag.UserID, nil
+}
+
 // ExecuteAgentCapabilityResult is the result returned by ExecuteAgentCapability.
 type ExecuteAgentCapabilityResult struct {
 	Result       []byte

@@ -163,6 +163,7 @@ func TestNoGracefulNilInRequestPaths(t *testing.T) {
 		"internal/controller/tenantsecretsbackend_controller.go :: if r.Recorder == nil { ... }": recorderOpt,
 		"internal/controller/tenantidentity_controller.go :: if r.Recorder == nil { ... }":       recorderOpt,
 		"internal/controller/tenantgrants_controller.go :: if r.Recorder == nil { ... }":         recorderOpt,
+		"internal/controller/tenantrolesync_controller.go :: if r.Recorder == nil { ... }":       recorderOpt,
 
 		// Audit emitter + health probes
 		"internal/audit/emitter.go :: if e.cfg.RedisClient == nil { ... }": emitterOpt,

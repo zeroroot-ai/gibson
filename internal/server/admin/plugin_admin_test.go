@@ -416,8 +416,14 @@ func TestRegisterPlugin_BootstrapTokenAudited(t *testing.T) {
 // Tests — bindings edit / revoke
 // ---------------------------------------------------------------------------
 
+// TestRevokePluginSecretBinding_DeletesAndAudits: the tuple deleted names the
+// FGA user the plugin registered as, verbatim. A chart-deployed plugin enrols
+// as plugin_principal:<vendor> and binds its own can_resolve under that user
+// (bindDeclaredSecrets); a revocation that shaped the user from the install
+// id deleted a tuple nobody held (gibson#154).
 func TestRevokePluginSecretBinding_DeletesAndAudits(t *testing.T) {
-	srv, _, _, _, _, az, au := newPluginsTestServer(t)
+	srv, reg, _, _, _, az, au := newPluginsTestServer(t)
+	reg.installs["abc"] = ComponentInstallInfo{InstallID: "abc", TenantID: "acme", Name: "github", PrincipalRef: "plugin_principal:github"}
 	ctx := ctxWithTenant(t, "acme")
 
 	_, err := srv.RevokePluginSecretBinding(ctx, &tenantv1.RevokePluginSecretBindingRequest{
@@ -428,16 +434,43 @@ func TestRevokePluginSecretBinding_DeletesAndAudits(t *testing.T) {
 		t.Fatalf("RevokePluginSecretBinding: %v", err)
 	}
 	if len(az.deletes) != 1 || len(az.deletes[0]) != 1 {
-		t.Errorf("expected 1 tuple delete, got %+v", az.deletes)
+		t.Fatalf("expected 1 tuple delete, got %+v", az.deletes)
+	}
+	if got := az.deletes[0][0]; got.User != "plugin_principal:github" || got.Relation != "can_resolve" || got.Object != authz.SecretObject("acme", "cred:db") {
+		t.Errorf("deleted tuple = %+v, want the install's own principal on the declared secret", got)
 	}
 	if len(au.events) != 1 || au.events[0].Action != "secret_access_revoked" {
 		t.Errorf("expected secret_access_revoked audit, got %+v", au.events)
 	}
 }
 
+// TestRevokePluginSecretBinding_RefusesAnInstallItCannotAddress: an install
+// with no recorded principal predates gibson#154. Deleting a guessed tuple
+// and publishing to a guessed channel would report a revocation that never
+// happened, so the RPC refuses and nothing is written, published or audited.
+func TestRevokePluginSecretBinding_RefusesAnInstallItCannotAddress(t *testing.T) {
+	srv, reg, _, _, _, az, au := newPluginsTestServer(t)
+	pub := &recordingPublisher{}
+	srv.events = pub
+	reg.installs["old"] = ComponentInstallInfo{InstallID: "old", TenantID: "acme", Name: "github"}
+	ctx := ctxWithTenant(t, "acme")
+
+	_, err := srv.RevokePluginSecretBinding(ctx, &tenantv1.RevokePluginSecretBindingRequest{InstallId: "old", DeclaredName: "cred:db"})
+	if status.Code(err) != codes.FailedPrecondition {
+		t.Fatalf("no principal: want FailedPrecondition, got %v", err)
+	}
+	_, err = srv.RevokePluginSecretBinding(ctx, &tenantv1.RevokePluginSecretBindingRequest{InstallId: "missing", DeclaredName: "cred:db"})
+	if status.Code(err) != codes.NotFound {
+		t.Fatalf("unknown install: want NotFound, got %v", err)
+	}
+	if len(az.deletes) != 0 || len(pub.events) != 0 || len(au.events) != 0 {
+		t.Fatalf("a refused revocation must leave no trace: deletes=%d published=%d audited=%d", len(az.deletes), len(pub.events), len(au.events))
+	}
+}
+
 func TestEditPluginSecretBinding_DeletesThenWrites(t *testing.T) {
 	srv, reg, _, _, _, az, _ := newPluginsTestServer(t)
-	reg.installs["i1"] = ComponentInstallInfo{InstallID: "i1", TenantID: "acme", Name: "p"}
+	reg.installs["i1"] = ComponentInstallInfo{InstallID: "i1", TenantID: "acme", Name: "p", PrincipalRef: "plugin_principal:p"}
 	ctx := ctxWithTenant(t, "acme")
 
 	_, err := srv.EditPluginSecretBinding(ctx, &tenantv1.EditPluginSecretBindingRequest{
@@ -449,7 +482,15 @@ func TestEditPluginSecretBinding_DeletesThenWrites(t *testing.T) {
 		t.Fatalf("EditPluginSecretBinding: %v", err)
 	}
 	if len(az.deletes) != 1 || len(az.writes) != 1 {
-		t.Errorf("expected 1 delete + 1 write, got deletes=%d writes=%d", len(az.deletes), len(az.writes))
+		t.Fatalf("expected 1 delete + 1 write, got deletes=%d writes=%d", len(az.deletes), len(az.writes))
+	}
+	if az.deletes[0][0].User != "plugin_principal:p" || az.writes[0][0].User != "plugin_principal:p" {
+		t.Errorf("rebind must move the install's own principal: deleted %+v wrote %+v", az.deletes[0], az.writes[0])
+	}
+	reg.installs["old"] = ComponentInstallInfo{InstallID: "old", TenantID: "acme", Name: "p"}
+	_, err = srv.EditPluginSecretBinding(ctx, &tenantv1.EditPluginSecretBindingRequest{InstallId: "old", DeclaredName: "cred:db", NewExistingRef: "cred:db_v2"})
+	if status.Code(err) != codes.FailedPrecondition {
+		t.Fatalf("no principal: want FailedPrecondition, got %v", err)
 	}
 }
 
@@ -521,7 +562,8 @@ func (r *recordingPublisher) Publish(_ context.Context, tenant, principal string
 // declared name, before the audit line, and a publish failure is
 // Unavailable so the operator retries.
 func TestRevokePluginSecretBinding_TellsTheRunningPlugin(t *testing.T) {
-	srv, _, _, _, _, _, au := newPluginsTestServer(t)
+	srv, reg, _, _, _, _, au := newPluginsTestServer(t)
+	reg.installs["abc"] = ComponentInstallInfo{InstallID: "abc", TenantID: "acme", Name: "github", PrincipalRef: "plugin_principal:github"}
 	pub := &recordingPublisher{}
 	srv.events = pub
 	ctx := ctxWithTenant(t, "acme")
@@ -532,7 +574,7 @@ func TestRevokePluginSecretBinding_TellsTheRunningPlugin(t *testing.T) {
 		t.Fatalf("published %+v", pub.events)
 	}
 	got := pub.events[0]
-	if got.tenant != "acme" || got.principal != "plugin_principal:abc" || got.ev.Type != componentevents.TypeSecretAccessRevoked || got.ev.SecretName != "cred:db" || got.ev.Reason == "" || got.ev.OccurredAt.IsZero() {
+	if got.tenant != "acme" || got.principal != "plugin_principal:github" || got.ev.Type != componentevents.TypeSecretAccessRevoked || got.ev.SecretName != "cred:db" || got.ev.Reason == "" || got.ev.OccurredAt.IsZero() {
 		t.Fatalf("event = %+v", got)
 	}
 
@@ -548,14 +590,14 @@ func TestRevokePluginSecretBinding_TellsTheRunningPlugin(t *testing.T) {
 
 func TestEditPluginSecretBinding_TellsThePluginTheValueMoved(t *testing.T) {
 	srv, reg, _, _, _, _, _ := newPluginsTestServer(t)
-	reg.installs["i1"] = ComponentInstallInfo{InstallID: "i1", TenantID: "acme", Name: "p"}
+	reg.installs["i1"] = ComponentInstallInfo{InstallID: "i1", TenantID: "acme", Name: "p", PrincipalRef: "plugin_principal:p"}
 	pub := &recordingPublisher{}
 	srv.events = pub
 	ctx := ctxWithTenant(t, "acme")
 	if _, err := srv.EditPluginSecretBinding(ctx, &tenantv1.EditPluginSecretBindingRequest{InstallId: "i1", DeclaredName: "cred:db", NewExistingRef: "cred:db_v2"}); err != nil {
 		t.Fatalf("EditPluginSecretBinding: %v", err)
 	}
-	if len(pub.events) != 1 || pub.events[0].principal != "plugin_principal:i1" || pub.events[0].ev.Type != componentevents.TypeSecretRotated || pub.events[0].ev.SecretName != "cred:db" {
+	if len(pub.events) != 1 || pub.events[0].principal != "plugin_principal:p" || pub.events[0].ev.Type != componentevents.TypeSecretRotated || pub.events[0].ev.SecretName != "cred:db" {
 		t.Fatalf("published %+v", pub.events)
 	}
 	srv.events = &recordingPublisher{err: errors.New("redis down")}

@@ -33,10 +33,12 @@ import (
 	"strings"
 	"time"
 
+	"github.com/redis/go-redis/v9"
 	"gopkg.in/yaml.v3"
 
 	sdksecrets "github.com/zeroroot-ai/gibson/internal/infra/secrets"
 	"github.com/zeroroot-ai/gibson/internal/platform/capabilitygrant"
+	"github.com/zeroroot-ai/gibson/internal/platform/component"
 	"github.com/zeroroot-ai/gibson/internal/platform/idp"
 	"github.com/zeroroot-ai/gibson/internal/platform/secrets"
 	"github.com/zeroroot-ai/gibson/internal/server/admin"
@@ -53,12 +55,17 @@ import (
 // operations needed by the admin surface without extending the
 // component.ComponentInstallRegistry interface.
 //
-// The adapter is read-only and does not touch Redis transient state — the
-// admin dashboard cares about install metadata, not live liveness status.
-// Status is reported as "serving" for all rows (the liveness model is the
-// component.ComponentInstallRegistry's concern).
+// The adapter is read-only. Metadata comes from Postgres; the status comes
+// from the Redis key the ComponentInstallRegistry refreshes on every
+// heartbeat, so the admin surface and dispatch agree on it.
 type componentInstallRegistryReaderAdapter struct {
 	db *sql.DB
+	// redis holds the transient status the install registry writes on
+	// every heartbeat (component.InstallStatus). The admin surface reads it
+	// so ListPluginInstalls shows the status the plugin last reported:
+	// serving, degraded after a secret revocation, or unreachable once the
+	// TTL lapsed (gibson#154).
+	redis redis.UniversalClient
 }
 
 var _ admin.PluginRegistryReader = (*componentInstallRegistryReaderAdapter)(nil)
@@ -69,7 +76,7 @@ var _ admin.PluginRegistryReader = (*componentInstallRegistryReaderAdapter)(nil)
 func (a *componentInstallRegistryReaderAdapter) ListAll(ctx context.Context, tenant auth.TenantID) ([]admin.ComponentInstallInfo, error) {
 	const q = `
 SELECT id, tenant_id, component_name, version, declared_methods,
-       runtime_mode, setec_required, created_at
+       runtime_mode, setec_required, principal_ref, created_at
 FROM   component_install
 WHERE  tenant_id = $1
 ORDER BY created_at`
@@ -90,15 +97,13 @@ ORDER BY created_at`
 		)
 		if err := rows.Scan(
 			&info.InstallID, &tenantIDStr, &info.Name, &info.Version,
-			&methodsJSON, &info.RuntimeMode, &info.SetecRequired, &createdAt,
+			&methodsJSON, &info.RuntimeMode, &info.SetecRequired, &info.PrincipalRef, &createdAt,
 		); err != nil {
 			return nil, fmt.Errorf("plugin registry reader: scan row: %w", err)
 		}
 		info.TenantID = tenantIDStr
 		info.CreatedAt = createdAt
-		// Status is best-effort from the admin surface; mark as serving
-		// (liveness is the component surface's concern).
-		info.Status = "serving"
+		a.fillStatus(ctx, &info)
 		if len(methodsJSON) > 0 {
 			if jsonErr := json.Unmarshal(methodsJSON, &info.DeclaredMethods); jsonErr != nil {
 				// Non-fatal: log by returning an empty methods slice.
@@ -117,7 +122,7 @@ ORDER BY created_at`
 func (a *componentInstallRegistryReaderAdapter) Get(ctx context.Context, tenant auth.TenantID, installID string) (*admin.ComponentInstallInfo, error) {
 	const q = `
 SELECT id, tenant_id, component_name, version, declared_methods,
-       runtime_mode, setec_required, created_at
+       runtime_mode, setec_required, principal_ref, created_at
 FROM   component_install
 WHERE  tenant_id  = $1
 AND    id         = $2
@@ -131,7 +136,7 @@ LIMIT 1`
 	)
 	err := a.db.QueryRowContext(ctx, q, tenant.String(), installID).Scan(
 		&info.InstallID, &tenantIDStr, &info.Name, &info.Version,
-		&methodsJSON, &info.RuntimeMode, &info.SetecRequired, &createdAt,
+		&methodsJSON, &info.RuntimeMode, &info.SetecRequired, &info.PrincipalRef, &createdAt,
 	)
 	if errors.Is(err, sql.ErrNoRows) {
 		return nil, admin.ErrInstallNotFound
@@ -141,11 +146,20 @@ LIMIT 1`
 	}
 	info.TenantID = tenantIDStr
 	info.CreatedAt = createdAt
-	info.Status = "serving"
+	a.fillStatus(ctx, &info)
 	if len(methodsJSON) > 0 {
 		_ = json.Unmarshal(methodsJSON, &info.DeclaredMethods)
 	}
 	return &info, nil
+}
+
+// fillStatus copies the install's transient status out of Redis. An absent
+// key is an install no heartbeat refreshed within the TTL: unreachable.
+func (a *componentInstallRegistryReaderAdapter) fillStatus(ctx context.Context, info *admin.ComponentInstallInfo) {
+	st, addr, hb, _ := component.InstallStatus(ctx, a.redis, info.InstallID)
+	info.Status = string(st)
+	info.Address = addr
+	info.LastHeartbeatAt = hb
 }
 
 // ---------------------------------------------------------------------------

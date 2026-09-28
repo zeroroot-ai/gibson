@@ -9,6 +9,7 @@ import (
 	"fmt"
 	"sort"
 	"strings"
+	"time"
 
 	"github.com/go-logr/logr"
 	corev1 "k8s.io/api/core/v1"
@@ -72,74 +73,13 @@ const (
 // owns reflecting their numeric subjects into the ConfigMap rather than a
 // separate Job re-deriving them from CR status.
 func (r *PlatformBootstrapReconciler) reconcileSAIdentityMap(ctx context.Context, pb *gibsonv1alpha1.PlatformBootstrap, logger logr.Logger) (ctrl.Result, error) {
-	entries := map[string]string{}
-
-	// iam-admin numeric subject from the machine-key Secret.
-	var sec corev1.Secret
-	err := r.Get(ctx, types.NamespacedName{Namespace: defaultChildNamespace, Name: iamAdminSecretName}, &sec)
-	switch {
-	case apierrors.IsNotFound(err):
-		setBootstrapCond(pb, gibsonv1alpha1.ConditionSAIdentityMapReady, metav1.ConditionFalse,
-			"WaitingForIAMAdminSecret",
-			fmt.Sprintf("Secret %s/%s not yet written by the Zitadel setup Job", defaultChildNamespace, iamAdminSecretName))
-		return ctrl.Result{RequeueAfter: requeueShort}, nil
-	case err != nil:
-		return ctrl.Result{}, fmt.Errorf("get secret %s/%s: %w", defaultChildNamespace, iamAdminSecretName, err)
+	entries, wait, err := r.platformServiceSubjects(ctx, pb)
+	if err != nil {
+		return ctrl.Result{}, err
 	}
-	raw, ok := sec.Data[iamAdminMachineKeyFile]
-	if !ok || len(raw) == 0 {
-		setBootstrapCond(pb, gibsonv1alpha1.ConditionSAIdentityMapReady, metav1.ConditionFalse,
-			"WaitingForIAMAdminSecret",
-			fmt.Sprintf("Secret %s/%s missing key %q", defaultChildNamespace, iamAdminSecretName, iamAdminMachineKeyFile))
-		return ctrl.Result{RequeueAfter: requeueShort}, nil
-	}
-	var machineKey struct {
-		UserID string `json:"userId"`
-	}
-	if jerr := json.Unmarshal(raw, &machineKey); jerr != nil {
-		setBootstrapCond(pb, gibsonv1alpha1.ConditionSAIdentityMapReady, metav1.ConditionFalse,
-			"MalformedIAMAdminSecret",
-			fmt.Sprintf("parse %s key %q: %v", iamAdminSecretName, iamAdminMachineKeyFile, jerr))
-		return ctrl.Result{}, nil
-	}
-	if strings.TrimSpace(machineKey.UserID) == "" {
-		setBootstrapCond(pb, gibsonv1alpha1.ConditionSAIdentityMapReady, metav1.ConditionFalse,
-			"WaitingForIAMAdminSecret",
-			fmt.Sprintf("Secret %s/%s key %q has empty userId", defaultChildNamespace, iamAdminSecretName, iamAdminMachineKeyFile))
-		return ctrl.Result{RequeueAfter: requeueShort}, nil
-	}
-	entries[saIAMAdminEntry] = strings.TrimSpace(machineKey.UserID)
-
-	// MACHINE_USER children: collect {name → status.clientID}. For a
-	// MACHINE_USER the OIDCClient controller persists the numeric Zitadel
-	// user id into status.clientID. Only Ready children with a non-empty
-	// clientID are eligible — an in-flight child means we requeue.
-	pending := []string{}
-	for _, ref := range pb.Spec.OIDCClients {
-		if defaultAppType(ref) != gibsonv1alpha1.OIDCAppTypeMachineUser {
-			continue
-		}
-		var child gibsonv1alpha1.OIDCClient
-		if gerr := r.Get(ctx, types.NamespacedName{Namespace: defaultChildNamespace, Name: ref.Name}, &child); gerr != nil {
-			if apierrors.IsNotFound(gerr) {
-				pending = append(pending, ref.Name)
-				continue
-			}
-			return ctrl.Result{}, fmt.Errorf("get OIDCClient %s: %w", ref.Name, gerr)
-		}
-		ready := isConditionTrue(child.Status.Conditions, gibsonv1alpha1.ConditionReady)
-		if !ready || strings.TrimSpace(child.Status.ClientID) == "" {
-			pending = append(pending, ref.Name)
-			continue
-		}
-		entries[ref.Name] = strings.TrimSpace(child.Status.ClientID)
-	}
-	if len(pending) > 0 {
-		sort.Strings(pending)
-		setBootstrapCond(pb, gibsonv1alpha1.ConditionSAIdentityMapReady, metav1.ConditionFalse,
-			"WaitingForMachineUsers",
-			fmt.Sprintf("MACHINE_USER OIDCClients not yet Ready with a clientID: %s", strings.Join(pending, ", ")))
-		return ctrl.Result{RequeueAfter: requeueMedium}, nil
+	if wait != nil {
+		setBootstrapCond(pb, gibsonv1alpha1.ConditionSAIdentityMapReady, metav1.ConditionFalse, wait.reason, wait.message)
+		return ctrl.Result{RequeueAfter: wait.requeue}, nil
 	}
 
 	cm := &corev1.ConfigMap{
@@ -181,4 +121,92 @@ func (r *PlatformBootstrapReconciler) reconcileSAIdentityMap(ctx context.Context
 		fmt.Sprintf("ConfigMap %s/%s populated with %d service-account subjects: %s",
 			defaultChildNamespace, saIdentityMapName, len(keys), strings.Join(keys, ", ")))
 	return ctrl.Result{}, nil
+}
+
+// serviceSubjectsWait says why platformServiceSubjects cannot name every
+// platform service account yet. The caller copies reason and message into
+// its own condition and requeues after requeue (zero means no requeue: the
+// state needs a fix, not time).
+type serviceSubjectsWait struct {
+	reason  string
+	message string
+	requeue time.Duration
+}
+
+// platformServiceSubjects returns the numeric Zitadel subject of every
+// platform service account, keyed by its gibson-sa-identity-map name:
+//
+//   - "gibson-iam-admin" → .userId from secret/iam-admin key iam-admin.json
+//   - one key per MACHINE_USER OIDCClient child in spec.oidcClients →
+//     child.status.clientID (e.g. "gibson-tenant-operator")
+//
+// A non-nil wait means at least one subject is not known yet. Both the
+// sa-identity-map step and the machine-admin scoping step read this one
+// list, so the two can never disagree about which machine users exist.
+func (r *PlatformBootstrapReconciler) platformServiceSubjects(ctx context.Context, pb *gibsonv1alpha1.PlatformBootstrap) (map[string]string, *serviceSubjectsWait, error) {
+	entries := map[string]string{}
+
+	// iam-admin numeric subject from the machine-key Secret.
+	var sec corev1.Secret
+	err := r.Get(ctx, types.NamespacedName{Namespace: defaultChildNamespace, Name: iamAdminSecretName}, &sec)
+	switch {
+	case apierrors.IsNotFound(err):
+		return nil, &serviceSubjectsWait{"WaitingForIAMAdminSecret",
+			fmt.Sprintf("Secret %s/%s not yet written by the Zitadel setup Job", defaultChildNamespace, iamAdminSecretName),
+			requeueShort}, nil
+	case err != nil:
+		return nil, nil, fmt.Errorf("get secret %s/%s: %w", defaultChildNamespace, iamAdminSecretName, err)
+	}
+	raw, ok := sec.Data[iamAdminMachineKeyFile]
+	if !ok || len(raw) == 0 {
+		return nil, &serviceSubjectsWait{"WaitingForIAMAdminSecret",
+			fmt.Sprintf("Secret %s/%s missing key %q", defaultChildNamespace, iamAdminSecretName, iamAdminMachineKeyFile),
+			requeueShort}, nil
+	}
+	var machineKey struct {
+		UserID string `json:"userId"`
+	}
+	if jerr := json.Unmarshal(raw, &machineKey); jerr != nil {
+		return nil, &serviceSubjectsWait{"MalformedIAMAdminSecret",
+			fmt.Sprintf("parse %s key %q: %v", iamAdminSecretName, iamAdminMachineKeyFile, jerr),
+			0}, nil
+	}
+	if strings.TrimSpace(machineKey.UserID) == "" {
+		return nil, &serviceSubjectsWait{"WaitingForIAMAdminSecret",
+			fmt.Sprintf("Secret %s/%s key %q has empty userId", defaultChildNamespace, iamAdminSecretName, iamAdminMachineKeyFile),
+			requeueShort}, nil
+	}
+	entries[saIAMAdminEntry] = strings.TrimSpace(machineKey.UserID)
+
+	// MACHINE_USER children: collect {name → status.clientID}. For a
+	// MACHINE_USER the OIDCClient controller persists the numeric Zitadel
+	// user id into status.clientID. Only Ready children with a non-empty
+	// clientID are eligible — an in-flight child means we requeue.
+	pending := []string{}
+	for _, ref := range pb.Spec.OIDCClients {
+		if defaultAppType(ref) != gibsonv1alpha1.OIDCAppTypeMachineUser {
+			continue
+		}
+		var child gibsonv1alpha1.OIDCClient
+		if gerr := r.Get(ctx, types.NamespacedName{Namespace: defaultChildNamespace, Name: ref.Name}, &child); gerr != nil {
+			if apierrors.IsNotFound(gerr) {
+				pending = append(pending, ref.Name)
+				continue
+			}
+			return nil, nil, fmt.Errorf("get OIDCClient %s: %w", ref.Name, gerr)
+		}
+		ready := isConditionTrue(child.Status.Conditions, gibsonv1alpha1.ConditionReady)
+		if !ready || strings.TrimSpace(child.Status.ClientID) == "" {
+			pending = append(pending, ref.Name)
+			continue
+		}
+		entries[ref.Name] = strings.TrimSpace(child.Status.ClientID)
+	}
+	if len(pending) > 0 {
+		sort.Strings(pending)
+		return nil, &serviceSubjectsWait{"WaitingForMachineUsers",
+			"MACHINE_USER OIDCClients not yet Ready with a clientID: " + strings.Join(pending, ", "),
+			requeueMedium}, nil
+	}
+	return entries, nil, nil
 }

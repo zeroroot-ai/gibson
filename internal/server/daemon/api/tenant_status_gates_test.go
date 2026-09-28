@@ -364,8 +364,8 @@ func TestGetTenantBilling_UnknownTenantReturnsNotFound(t *testing.T) {
 }
 
 // TestAdminGetTenantBilling_CrossTenantRead confirms the trial-extension path
-// (dashboard#1016): a platform operator (authorised by ext-authz's
-// platform_operator gate before this handler runs) reads an ARBITRARY tenant's
+// (dashboard#1016): the Platform owner (authorised by ext-authz's
+// platform_owner gate before this handler runs) reads an ARBITRARY tenant's
 // billing identifiers by naming it in the request.
 func TestAdminGetTenantBilling_CrossTenantRead(t *testing.T) {
 	db, mock, err := sqlmock.New()
@@ -382,8 +382,8 @@ func TestAdminGetTenantBilling_CrossTenantRead(t *testing.T) {
 		WithArgs("globex").
 		WillReturnRows(billingRows("cus_42", true, "globex-org"))
 
-	// A staff operator names another tenant; the request tenant_id is the whole
-	// point of this surface (ext-authz enforced platform_operator upstream).
+	// The Platform owner names another tenant; the request tenant_id is the whole
+	// point of this surface (ext-authz enforced platform_owner upstream).
 	resp, err := srv.AdminGetTenantBilling(context.Background(),
 		&tenantv1.AdminGetTenantBillingRequest{TenantId: "globex"})
 	if err != nil {

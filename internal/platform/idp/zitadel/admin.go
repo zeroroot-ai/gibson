@@ -28,6 +28,7 @@ import (
 	"time"
 
 	"github.com/zeroroot-ai/gibson/internal/platform/idp"
+	"github.com/zeroroot-ai/gibson/internal/platform/zitadelconn"
 	"golang.org/x/oauth2"
 	"golang.org/x/oauth2/clientcredentials"
 )
@@ -36,8 +37,8 @@ import (
 // as an admin client. All values are loaded from environment variables;
 // none are hard-coded.
 type Config struct {
-	// Issuer is the Zitadel OIDC issuer URL, e.g. "https://auth.example.com".
-	// Used for OIDC discovery to obtain the token endpoint.
+	// Issuer is the claimed OIDC issuer, e.g. "https://app.example.com". It is a
+	// string for logs and claims only. The client never dials it (ADR-0092).
 	Issuer string
 
 	// ClientID is the OAuth2 client ID of the admin service account.
@@ -53,33 +54,13 @@ type Config struct {
 	// HTTPTimeout is the per-request timeout. Defaults to 10 seconds.
 	HTTPTimeout time.Duration
 
-	// DiscoveryURL is the in-cluster base URL the client dials for ALL
-	// Zitadel HTTP traffic: OIDC discovery, the JWKS URL the discovery doc
-	// points at, AND every Management API call (see apiBaseURL). When empty,
-	// the client falls back to Issuer for all of these.
-	//
-	// The `iss` claim used in token validation is ALWAYS Issuer regardless
-	// of this field — DiscoveryURL only affects the network path the daemon
-	// uses. Use this knob when the issuer URL itself is externally-routable
-	// but you also have an in-cluster path (e.g. via Envoy by Service FQDN)
-	// that avoids egressing through DNS / a load balancer for daemon → IdP
-	// traffic.
-	//
-	// WHY MANAGEMENT CALLS MUST FOLLOW THIS PATH TOO (gibson#1560): the
-	// external Issuer host is fronted by the customer API gateway (Envoy's
-	// jwt_authn + ext_authz chain). That gateway lets OIDC discovery, the
-	// token exchange, and read-only searches through, but DENIES admin
-	// writes such as human-user creation with a bare 403 — the daemon's
-	// admin token carries the reserved `zitadel` project audience, not the
-	// `gibson-platform` audience the gateway requires. The in-cluster Envoy
-	// listener the daemon is meant to dial (gibson-envoy.<ns>.svc) proxies
-	// the Zitadel Management API straight through with no ext_authz, so
-	// admin writes must ride the DiscoveryURL path, not the Issuer path.
-	// Sending discovery + token in-cluster but the actual API calls out to
-	// the public gateway was the missing half of this split.
-	//
-	// Spec: tier-2-host-aliases-cluster-dns.
-	DiscoveryURL string
+	// Endpoint is where the client connects and which instance it claims
+	// (ADR-0092): the in-cluster Zitadel Service, with the public host in
+	// x-zitadel-instance-host on every request. Token, Management and every
+	// other call go to Endpoint; nothing goes to a public name, so no pod
+	// needs hostAliases and no request meets the public edge's auth chain,
+	// which rejects admin writes (gibson#1560). Required.
+	Endpoint zitadelconn.Endpoint
 }
 
 // Client implements idp.AdminClient against the Zitadel Management API.
@@ -102,29 +83,16 @@ func New(ctx context.Context, cfg Config) (*Client, error) {
 		cfg.HTTPTimeout = 10 * time.Second
 	}
 
-	// Discover the token endpoint from Zitadel's OIDC discovery document.
-	// Spec tier-2-host-aliases-cluster-dns: the daemon dials cfg.DiscoveryURL
-	// (in-cluster Envoy FQDN) for the discovery doc when set, falling back to
-	// cfg.Issuer otherwise. The `iss` claim used for token validation stays
-	// cfg.Issuer regardless — only the network path to the discovery doc is
-	// affected.
-	tokenEndpoint, err := discoverTokenEndpoint(ctx, cfg.Issuer, cfg.DiscoveryURL, cfg.HTTPTimeout)
-	if err != nil {
-		return nil, fmt.Errorf("%w: discovering token endpoint: %s", idp.ErrUnreachable, err)
+	if cfg.Endpoint.IsZero() {
+		return nil, fmt.Errorf("%w: zitadel endpoint not configured (ZITADEL_URL, ZITADEL_EXTERNAL_DOMAIN)", idp.ErrUnreachable)
 	}
 
-	// Spec tier-2-host-aliases-cluster-dns Reqs 2.4 / 2.5 — log which path
-	// was taken so operators can confirm in-cluster vs external discovery
-	// without packet-capturing. We deliberately do not log the resolved
-	// token endpoint URL or the discovery URL itself; the issuer is the
-	// operator-known correlator and discovery_path is the bounded enum.
-	discoveryPath := "external"
-	if cfg.DiscoveryURL != "" {
-		discoveryPath = "in_cluster"
-	}
+	// Log the two facts so an operator can confirm the path without a packet
+	// capture. Neither is a secret.
 	slog.Info("zitadel idp client started",
 		"issuer", cfg.Issuer,
-		"discovery_path", discoveryPath,
+		"connect", cfg.Endpoint.BaseURL(),
+		"instance_host", cfg.Endpoint.Host(),
 	)
 
 	// Build an OAuth2 client_credentials token source for the admin account.
@@ -136,14 +104,13 @@ func New(ctx context.Context, cfg Config) (*Client, error) {
 	ccCfg := clientcredentials.Config{
 		ClientID:     cfg.ClientID,
 		ClientSecret: cfg.ClientSecret,
-		TokenURL:     tokenEndpoint,
+		TokenURL:     cfg.Endpoint.TokenURL(),
 		Scopes:       []string{"openid", "urn:zitadel:iam:org:project:id:zitadel:aud"},
 	}
-	tokenSrc := oauth2.ReuseTokenSource(nil, ccCfg.TokenSource(ctx))
-
-	httpClient := &http.Client{
-		Timeout: cfg.HTTPTimeout,
-	}
+	// The token request needs the instance header too, so the oauth2 library
+	// uses the same header-stamping client as every Management call.
+	httpClient := cfg.Endpoint.HTTPClient(cfg.HTTPTimeout)
+	tokenSrc := oauth2.ReuseTokenSource(nil, ccCfg.TokenSource(context.WithValue(ctx, oauth2.HTTPClient, httpClient)))
 
 	c := &Client{
 		cfg:        cfg,
@@ -378,112 +345,56 @@ func (c *Client) UpdateUserProfile(ctx context.Context, accountID string, req id
 	return c.GetUserProfile(ctx, accountID)
 }
 
-// orgRoleKeys are the Zitadel org-member role keys minted by the platform's
-// post-install Job. They mirror tenant-operator's zitadelRoleKey mapping so
-// the daemon and the operator project the same membership.
-const (
-	orgRoleKeyOwner  = "gibson.owner"
-	orgRoleKeyAdmin  = "gibson.admin"
-	orgRoleKeyMember = "gibson.member"
-)
-
-// tenantRoleToOrgRoleKey maps a neutral tenant role to its Zitadel org-member
-// role key. Unknown roles (including "writer") map to member.
-func tenantRoleToOrgRoleKey(role string) string {
-	switch role {
-	case "owner":
-		return orgRoleKeyOwner
-	case "admin":
-		return orgRoleKeyAdmin
-	default:
-		return orgRoleKeyMember
-	}
+// setupLinkURLTemplate builds the Go-template URL Zitadel substitutes
+// {{.UserID}}, {{.OrgID}} and {{.Code}} into (CreateInviteCode's urlTemplate
+// field). Mirrors operators/platform's identical helper for the Platform
+// owner (ADR-0093, gibson#240): the emitted link is the same shape whether
+// Zitadel emails it or a caller renders it itself.
+//
+// appURL must be the product-surface origin (GIBSON_APP_URL), never an OIDC
+// issuer or a Zitadel admin/management endpoint: gibson#254 found the
+// Platform owner's setup link built from spec.zitadel.issuer resolved to an
+// in-cluster address on kind, which nobody's browser could open.
+func setupLinkURLTemplate(appURL string) string {
+	return zitadelconn.SetupLinkURLTemplate(appURL)
 }
 
-// AddTenantMember adds the human user as a member of the tenant's per-tenant
-// org. Maps to POST /management/v1/orgs/me/members with the target org selected
-// via the x-zitadel-orgid header (the admin PAT may act in any org). Idempotent:
-// a 409 (already a member) is treated as success.
-func (c *Client) AddTenantMember(ctx context.Context, req idp.TenantMembershipRequest) error {
-	if req.OrgID == "" || req.UserID == "" {
-		return fmt.Errorf("%w: AddTenantMember requires orgID and userID", idp.ErrUpstream)
-	}
-	body := map[string]interface{}{
-		"userId": req.UserID,
-		"roles":  []string{tenantRoleToOrgRoleKey(req.Role)},
-	}
-	if err := c.doRequest(ctx, http.MethodPost, "/management/v1/orgs/me/members", body, req.OrgID, nil); err != nil {
-		mapped := mapError(err, "AddTenantMember")
-		if errors.Is(mapped, idp.ErrAlreadyExists) {
-			// Already a member — desired state reached.
-			return nil
-		}
-		return mapped
-	}
-	return nil
+// renderSetupLink substitutes the same three placeholders setupLinkURLTemplate
+// declares.
+func renderSetupLink(urlTemplate, userID, orgID, code string) string {
+	r := strings.NewReplacer("{{.UserID}}", userID, "{{.OrgID}}", orgID, "{{.Code}}", code)
+	return r.Replace(urlTemplate)
 }
 
-// RemoveTenantMember removes the human user from the tenant's per-tenant org.
-// Maps to DELETE /management/v1/orgs/me/members/{userId} with the target org
-// selected via x-zitadel-orgid. Idempotent: a 404 (not a member) is success.
-func (c *Client) RemoveTenantMember(ctx context.Context, req idp.TenantMembershipRequest) error {
-	if req.OrgID == "" || req.UserID == "" {
-		return fmt.Errorf("%w: RemoveTenantMember requires orgID and userID", idp.ErrUpstream)
-	}
-	path := "/management/v1/orgs/me/members/" + url.PathEscape(req.UserID)
-	if err := c.doRequest(ctx, http.MethodDelete, path, nil, req.OrgID, nil); err != nil {
-		mapped := mapError(err, "RemoveTenantMember")
-		if errors.Is(mapped, idp.ErrNotFound) {
-			return nil
-		}
-		return mapped
-	}
-	return nil
-}
-
-// EnsureHumanUser finds the human user with the given email in the org, or
-// creates one. Maps to the Zitadel Management (v1) API:
+// CreateSetupLink implements idp.AdminClient.
 //
-//	POST /management/v1/users/human    (create)
-//	POST /management/v1/users/_search  (search by email when it already exists)
-//
-// The Management API — not the v2 resource API (/v2/users…) — is used on
-// purpose: it is the surface the platform's in-cluster Zitadel proxy exposes
-// to the daemon (gibson#1560). The target org is selected by the
-// x-zitadel-orgid header, so no `organization` block goes in the body.
-//
-// Idempotent: a 409 on create falls back to a by-email lookup. The created
-// user has no password and an unverified email — Zitadel's init flow emails
-// the invitee a code to set credentials.
-func (c *Client) EnsureHumanUser(ctx context.Context, req idp.EnsureHumanUserRequest) (string, error) {
-	if req.Email == "" {
-		return "", fmt.Errorf("%w: EnsureHumanUser requires email", idp.ErrUpstream)
+// Calls the v2 UserService directly (zitadel.user.v2.UserService/
+// CreateInviteCode) rather than a Management v1 path: v1 has no invite-code
+// endpoint. returnCode (never sendCode) means Zitadel mints the code and
+// hands it straight back instead of emailing it — this call's whole point is
+// that the CALLER already owns messaging for this user.
+func (c *Client) CreateSetupLink(ctx context.Context, orgID, userID, appURL string) (string, error) {
+	if userID == "" {
+		return "", fmt.Errorf("%w: CreateSetupLink requires userID", idp.ErrUpstream)
 	}
-	createBody := map[string]interface{}{
-		"userName": req.Email,
-		"profile":  map[string]interface{}{"firstName": "Invited", "lastName": "User"},
-		"email":    map[string]interface{}{"email": req.Email, "isEmailVerified": false},
+	if appURL == "" {
+		return "", fmt.Errorf("%w: CreateSetupLink requires appURL", idp.ErrUpstream)
 	}
-	var createResp struct {
-		UserID string `json:"userId"`
+	body := map[string]any{
+		"userId":     userID,
+		"returnCode": map[string]any{},
 	}
-	err := c.doRequest(ctx, http.MethodPost, "/management/v1/users/human", createBody, req.OrgID, &createResp)
-	if err == nil && createResp.UserID != "" {
-		return createResp.UserID, nil
+	var resp struct {
+		InviteCode string `json:"inviteCode"`
 	}
-	if err != nil && !errors.Is(mapError(err, "EnsureHumanUser:create"), idp.ErrAlreadyExists) {
-		return "", mapError(err, "EnsureHumanUser:create")
+	if err := c.doRequest(ctx, http.MethodPost, "/zitadel.user.v2.UserService/CreateInviteCode", body, orgID, &resp); err != nil {
+		return "", mapError(err, "CreateSetupLink")
 	}
-	// User already exists (409) — look it up by email. Same read-only search
-	// FindUserIDByEmail performs; no credential write follows it here either.
-	userID, serr := c.findUserIDByEmail(ctx, req.Email, req.OrgID)
-	switch {
-	case errors.Is(serr, idp.ErrNotFound):
-		return "", fmt.Errorf("%w: EnsureHumanUser: user %q not found after conflict", idp.ErrUpstream, req.Email)
-	case serr != nil:
-		return "", serr
+	if resp.InviteCode == "" {
+		return "", fmt.Errorf("%w: CreateSetupLink: empty invite code", idp.ErrUpstream)
 	}
-	return userID, nil
+	urlTemplate := setupLinkURLTemplate(appURL)
+	return renderSetupLink(urlTemplate, userID, orgID, resp.InviteCode), nil
 }
 
 // CreateHumanUser provisions a password-bearing human user for self-serve
@@ -522,7 +433,7 @@ func (c *Client) CreateHumanUser(ctx context.Context, req idp.CreateHumanUserReq
 	}
 
 	createBody := map[string]interface{}{
-		"userName": req.Email,
+		"userName": idp.UsernameForEmail(req.Email),
 		"profile": map[string]interface{}{
 			"firstName": req.GivenName,
 			"lastName":  req.FamilyName,
@@ -549,6 +460,93 @@ func (c *Client) CreateHumanUser(ctx context.Context, req idp.CreateHumanUserReq
 	// conflict maps to idp.ErrAlreadyExists; no lookup and no credential write
 	// follow it.
 	return idp.CreateHumanUserResult{}, mapError(err, "CreateHumanUser:create")
+}
+
+// userServiceV2 is Zitadel v2's UserService, reached over the same
+// Connect-unary-over-HTTP convention as every other call in this file
+// (doRequest): a POST whose path is "/<package>.<Service>/<Method>" and
+// whose body/response are the Connect JSON codec's plain JSON. Zitadel's
+// error envelope is identical across v1 and v2, so parseZitadelError /
+// mapError apply unchanged.
+const userServiceV2 = "/zitadel.user.v2.UserService"
+
+// EnsureHumanUserNoPassword finds or creates a human user in orgID with NO
+// password (ADR-0093 decisions 6/8), via Zitadel v2's UserService.AddHumanUser.
+//
+// The v2 API — not the v1 Management API CreateHumanUser uses above — is
+// required here: AddHumanUser is the only Zitadel create call
+// with no password field at all. The target org travels as the
+// x-zitadel-orgid header, never a body field: AddHumanUser's handler
+// resolves the org exclusively from the caller's instance context, populated
+// from that header by Zitadel's Connect auth interceptor — confirmed against
+// the v4.18.0 source during the Platform owner work this reuses (hosted#201).
+//
+// Idempotent: a 409/already-exists falls back to the same by-email search
+// FindUserIDByEmail uses (findUserIDByEmail) — v1 and
+// v2 read the same underlying user store, so the search sees a user AddHumanUser
+// just created.
+func (c *Client) EnsureHumanUserNoPassword(ctx context.Context, orgID, email, givenName, familyName string) (string, error) {
+	if email == "" {
+		return "", fmt.Errorf("%w: EnsureHumanUserNoPassword requires email", idp.ErrUpstream)
+	}
+	body := map[string]interface{}{
+		"username": idp.UsernameForEmail(email),
+		"profile": map[string]interface{}{
+			"givenName":  givenName,
+			"familyName": familyName,
+		},
+		// isVerified: true — no separate email-verification-code flow;
+		// CreateSetupInviteCode is the one setup-link mechanism this client
+		// uses. No "password" field anywhere in this body: Zitadel mints none.
+		"email": map[string]interface{}{"email": email, "isVerified": true},
+	}
+	var resp struct {
+		UserID string `json:"userId"`
+	}
+	err := c.doRequest(ctx, http.MethodPost, userServiceV2+"/AddHumanUser", body, orgID, &resp)
+	if err == nil {
+		if resp.UserID == "" {
+			return "", fmt.Errorf("%w: EnsureHumanUserNoPassword: response missing userId", idp.ErrUpstream)
+		}
+		return resp.UserID, nil
+	}
+	mapped := mapError(err, "EnsureHumanUserNoPassword:create")
+	if !errors.Is(mapped, idp.ErrAlreadyExists) {
+		return "", mapped
+	}
+	userID, serr := c.findUserIDByEmail(ctx, email, orgID)
+	switch {
+	case errors.Is(serr, idp.ErrNotFound):
+		return "", fmt.Errorf("%w: EnsureHumanUserNoPassword: user %q not found after conflict", idp.ErrUpstream, email)
+	case serr != nil:
+		return "", serr
+	}
+	return userID, nil
+}
+
+// CreateSetupInviteCode mints a one-time setup-link code via Zitadel v2's
+// UserService.CreateInviteCode, the same call the Platform owner's setup
+// link uses (ADR-0093 decision 8, hosted#201) — reused here rather than a
+// second mechanism (ADR-0027). send=true asks Zitadel to email the link
+// built from urlTemplate and returns no usable code; send=false returns the
+// raw code for an offline caller to embed in its own link.
+func (c *Client) CreateSetupInviteCode(ctx context.Context, userID, urlTemplate string, send bool) (string, error) {
+	if userID == "" {
+		return "", fmt.Errorf("%w: CreateSetupInviteCode requires userId", idp.ErrUpstream)
+	}
+	body := map[string]interface{}{"userId": userID}
+	if send {
+		body["sendCode"] = map[string]interface{}{"urlTemplate": urlTemplate}
+	} else {
+		body["returnCode"] = map[string]interface{}{}
+	}
+	var resp struct {
+		InviteCode string `json:"inviteCode"`
+	}
+	if err := c.doRequest(ctx, http.MethodPost, userServiceV2+"/CreateInviteCode", body, "", &resp); err != nil {
+		return "", mapError(err, "CreateSetupInviteCode")
+	}
+	return resp.InviteCode, nil
 }
 
 // DeactivateHumanUser blocks a human user from signing in (Zitadel Management
@@ -841,23 +839,111 @@ func (c *Client) RevokeSession(ctx context.Context, sessionID string) error {
 	return nil
 }
 
+// authFactorEntry is the subset of zitadel.user.v1.AuthFactor
+// (ListHumanAuthFactorsResponse.result[]) this client consumes. The oneof
+// `type` field (otp / u2f / otp_sms / otp_email) serialises as whichever
+// member is set; only otp and u2f are populated here because the login
+// policy this platform configures allows only those two second factors
+// (ADR-0093 decision 9) — otp_sms and otp_email are never enrolled, so
+// clearing them is a documented non-goal, not an oversight.
+//
+// Confirmed against the vendored Zitadel v4.18.0 proto/zitadel/user.proto:
+// AuthFactor{state, oneof type{otp AuthFactorOTP, u2f AuthFactorU2F{id,name}, ...}}.
+type authFactorEntry struct {
+	OTP *struct{} `json:"otp"`
+	U2F *struct {
+		ID string `json:"id"`
+	} `json:"u2f"`
+}
+
+// ClearHumanFactors removes every second factor and passkey Zitadel has on
+// file for userID:
+//
+//	POST   /management/v1/users/{userId}/auth_factors/_search   (list TOTP/U2F)
+//	DELETE /management/v1/users/{userId}/auth_factors/otp       (remove TOTP)
+//	DELETE /management/v1/users/{userId}/auth_factors/u2f/{id}  (remove each U2F key)
+//	POST   /management/v1/users/{userId}/passwordless/_search   (list passkeys)
+//	DELETE /management/v1/users/{userId}/passwordless/{id}      (remove each passkey)
+//
+// Deprecated-but-live Management (v1) RPCs (Zitadel v4.18.0
+// proto/zitadel/management.proto: ListHumanAuthFactors,
+// RemoveHumanAuthFactorOTP, RemoveHumanAuthFactorU2F, ListHumanPasswordless,
+// RemoveHumanPasswordless) — the same API surface every other userId-keyed
+// call in this file uses (GetUserProfile, UpdateUserProfile), so the org
+// header follows the same convention: c.cfg.OrgID, the platform admin org.
+//
+// A 404 on an individual remove is benign (the credential was already gone
+// between list and delete) and is not an error. Idempotent overall: a user
+// with no factors on file is a no-op.
+func (c *Client) ClearHumanFactors(ctx context.Context, userID string) (idp.ClearHumanFactorsResult, error) {
+	var res idp.ClearHumanFactorsResult
+	if userID == "" {
+		return res, fmt.Errorf("%w: ClearHumanFactors requires userID", idp.ErrUpstream)
+	}
+
+	var factorsResp struct {
+		Result []authFactorEntry `json:"result"`
+	}
+	factorsPath := "/management/v1/users/" + userID + "/auth_factors/_search"
+	if err := c.doRequest(ctx, http.MethodPost, factorsPath, nil, c.cfg.OrgID, &factorsResp); err != nil {
+		return res, mapError(err, "ClearHumanFactors:list_auth_factors")
+	}
+	for _, f := range factorsResp.Result {
+		switch {
+		case f.OTP != nil:
+			path := "/management/v1/users/" + userID + "/auth_factors/otp"
+			if err := c.doRequest(ctx, http.MethodDelete, path, nil, c.cfg.OrgID, nil); err != nil {
+				if mapped := mapError(err, "ClearHumanFactors:remove_otp"); !errors.Is(mapped, idp.ErrNotFound) {
+					return res, mapped
+				}
+			}
+			res.OTPCleared = true
+		case f.U2F != nil:
+			if f.U2F.ID == "" {
+				continue
+			}
+			path := "/management/v1/users/" + userID + "/auth_factors/u2f/" + url.PathEscape(f.U2F.ID)
+			if err := c.doRequest(ctx, http.MethodDelete, path, nil, c.cfg.OrgID, nil); err != nil {
+				if mapped := mapError(err, "ClearHumanFactors:remove_u2f"); !errors.Is(mapped, idp.ErrNotFound) {
+					return res, mapped
+				}
+			}
+			res.U2FCleared++
+		}
+	}
+
+	var passkeysResp struct {
+		Result []struct {
+			ID string `json:"id"`
+		} `json:"result"`
+	}
+	passkeysPath := "/management/v1/users/" + userID + "/passwordless/_search"
+	if err := c.doRequest(ctx, http.MethodPost, passkeysPath, nil, c.cfg.OrgID, &passkeysResp); err != nil {
+		return res, mapError(err, "ClearHumanFactors:list_passwordless")
+	}
+	for _, pk := range passkeysResp.Result {
+		if pk.ID == "" {
+			continue
+		}
+		path := "/management/v1/users/" + userID + "/passwordless/" + url.PathEscape(pk.ID)
+		if err := c.doRequest(ctx, http.MethodDelete, path, nil, c.cfg.OrgID, nil); err != nil {
+			if mapped := mapError(err, "ClearHumanFactors:remove_passwordless"); !errors.Is(mapped, idp.ErrNotFound) {
+				return res, mapped
+			}
+		}
+		res.PasskeysCleared++
+	}
+
+	return res, nil
+}
+
 // ---------------------------------------------------------------------------
 // HTTP helpers
 // ---------------------------------------------------------------------------
 
-// apiBaseURL returns the base URL for Management API calls. It prefers
-// DiscoveryURL (the in-cluster path) over Issuer for the reasons documented
-// on Config.DiscoveryURL (gibson#1560): the external Issuer host is the
-// ext_authz-gated public gateway, which 403s admin writes, whereas the
-// in-cluster listener proxies the Management API straight to Zitadel. When
-// DiscoveryURL is empty the client falls back to Issuer, preserving the
-// single-host behaviour for deployments that do not split the path.
+// apiBaseURL is the in-cluster connect base (ADR-0092).
 func (c *Client) apiBaseURL() string {
-	base := c.cfg.DiscoveryURL
-	if base == "" {
-		base = c.cfg.Issuer
-	}
-	return strings.TrimRight(base, "/")
+	return c.cfg.Endpoint.BaseURL()
 }
 
 // doRequest executes an authenticated HTTP request against the Zitadel
@@ -980,49 +1066,6 @@ func mapError(err error, operation string) error {
 	default:
 		return fmt.Errorf("%w: %s: HTTP %d [%s]", idp.ErrUpstream, operation, hse.status, hse.code)
 	}
-}
-
-// discoverTokenEndpoint fetches the OIDC discovery document and extracts the
-// token_endpoint field. Pure stdlib HTTP; no OIDC library dependency needed.
-//
-// `issuer` is the externally-routable issuer URL (used as a fallback only);
-// `discoveryURL` is the optional in-cluster base URL the daemon dials when
-// non-empty. When `discoveryURL` is empty the function falls back to
-// `issuer` — preserving the pre-spec-tier-2-host-aliases-cluster-dns behavior.
-// The returned token_endpoint is whatever the discovery doc contains; callers
-// MUST NOT assume it shares a host with `issuer`.
-func discoverTokenEndpoint(ctx context.Context, issuer, discoveryURL string, timeout time.Duration) (string, error) {
-	base := discoveryURL
-	if base == "" {
-		base = issuer
-	}
-	client := &http.Client{Timeout: timeout}
-	wellKnownURL := strings.TrimRight(base, "/") + "/.well-known/openid-configuration"
-
-	req, err := http.NewRequestWithContext(ctx, http.MethodGet, wellKnownURL, nil)
-	if err != nil {
-		return "", err
-	}
-	resp, err := client.Do(req)
-	if err != nil {
-		return "", err
-	}
-	defer resp.Body.Close() //nolint:errcheck
-
-	if resp.StatusCode != http.StatusOK {
-		return "", fmt.Errorf("OIDC discovery returned HTTP %d from %s", resp.StatusCode, wellKnownURL)
-	}
-
-	var doc struct {
-		TokenEndpoint string `json:"token_endpoint"`
-	}
-	if err := json.NewDecoder(resp.Body).Decode(&doc); err != nil {
-		return "", fmt.Errorf("parsing OIDC discovery document: %w", err)
-	}
-	if doc.TokenEndpoint == "" {
-		return "", fmt.Errorf("OIDC discovery document missing token_endpoint")
-	}
-	return doc.TokenEndpoint, nil
 }
 
 // parseRoleFromName infers the role from the service account name prefix.

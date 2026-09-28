@@ -3,8 +3,10 @@
 
 // Package fga is platform-operator's internal OpenFGA HTTP client.
 // Owns the minimum API surface needed by PlatformBootstrap's FGA model
-// load step: ensure a named store, write an authorization model from
-// DSL/JSON, return the resulting model ID.
+// load step (ensure a named store, write an authorization model from
+// DSL/JSON, return the resulting model ID) and by the Platform owner
+// reconcile step (ADR-0093 decision 6, hosted#201): check and write the
+// single `platform_owner` tuple on `system_tenant:_system`.
 package fga
 
 import (
@@ -34,6 +36,19 @@ type Client interface {
 	// WriteAuthorizationModel uploads a model and returns the resulting
 	// model ID.
 	WriteAuthorizationModel(ctx context.Context, storeID string, model []byte) (modelID string, err error)
+
+	// Check returns whether (user, relation, object) currently holds under
+	// modelID — a direct grant or a computed-union path. Used by WriteTuple's
+	// idempotency check and by callers that only need a read.
+	Check(ctx context.Context, storeID, modelID, user, relation, object string) (bool, error)
+
+	// WriteTuple writes the direct tuple (user, relation, object). Idempotent
+	// for a relation with no computed-union path to true other than this
+	// exact direct grant (true of platform_owner: [user], the only relation
+	// this method is used for): it Checks first and no-ops when the tuple
+	// already holds, because OpenFGA's own Write errors on a duplicate write
+	// rather than treating it as a no-op.
+	WriteTuple(ctx context.Context, storeID, modelID, user, relation, object string) error
 }
 
 // New returns an HTTP client at the given base URL.
@@ -96,6 +111,57 @@ func (c *httpClient) WriteAuthorizationModel(ctx context.Context, storeID string
 		return "", fmt.Errorf("WriteAuthorizationModel store=%s: %w", storeID, err)
 	}
 	return resp.AuthorizationModelID, nil
+}
+
+// Check implements Client.
+//
+// OpenFGA: POST /stores/{store_id}/check with
+// {"tuple_key":{"user":..,"relation":..,"object":..},"authorization_model_id":..}
+// returns {"allowed": bool}.
+func (c *httpClient) Check(ctx context.Context, storeID, modelID, user, relation, object string) (bool, error) {
+	path := fmt.Sprintf("/stores/%s/check", url.PathEscape(storeID))
+	body := map[string]any{
+		"tuple_key": map[string]any{
+			"user":     user,
+			"relation": relation,
+			"object":   object,
+		},
+		"authorization_model_id": modelID,
+	}
+	var resp struct {
+		Allowed bool `json:"allowed"`
+	}
+	if err := c.doJSON(ctx, http.MethodPost, path, body, &resp); err != nil {
+		return false, fmt.Errorf("Check store=%s %s %s %s: %w", storeID, user, relation, object, err)
+	}
+	return resp.Allowed, nil
+}
+
+// WriteTuple implements Client.
+//
+// OpenFGA: POST /stores/{store_id}/write with
+// {"writes":{"tuple_keys":[{"user":..,"relation":..,"object":..}]},"authorization_model_id":..}.
+func (c *httpClient) WriteTuple(ctx context.Context, storeID, modelID, user, relation, object string) error {
+	allowed, err := c.Check(ctx, storeID, modelID, user, relation, object)
+	if err != nil {
+		return fmt.Errorf("WriteTuple: precheck: %w", err)
+	}
+	if allowed {
+		return nil
+	}
+	path := fmt.Sprintf("/stores/%s/write", url.PathEscape(storeID))
+	body := map[string]any{
+		"writes": map[string]any{
+			"tuple_keys": []map[string]any{
+				{"user": user, "relation": relation, "object": object},
+			},
+		},
+		"authorization_model_id": modelID,
+	}
+	if err := c.doJSON(ctx, http.MethodPost, path, body, nil); err != nil {
+		return fmt.Errorf("WriteTuple store=%s %s %s %s: %w", storeID, user, relation, object, err)
+	}
+	return nil
 }
 
 func (c *httpClient) doJSON(ctx context.Context, method, path string, body, out any) error {
