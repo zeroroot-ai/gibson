@@ -22,3 +22,13 @@ updates:
     schedule: { interval: "weekly" }
     labels: ["dependencies", "github-actions"]
     commit-message: { prefix: "chore(deps)" }
+    # github/codeql-action is one action with several sub-actions (init,
+    # autobuild, analyze, upload-sarif). Dependabot sees each sub-action as
+    # its own dependency and bumps them in separate PRs. One of those PRs
+    # merged alone leaves init and analyze at different versions, and the
+    # CodeQL run fails with "Loaded a configuration file for version X, but
+    # running version Y" (.github#121). Group them so they bump together.
+    groups:
+      codeql-action:
+        patterns:
+          - "github/codeql-action*"
