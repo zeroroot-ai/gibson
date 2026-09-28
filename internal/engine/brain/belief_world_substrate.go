@@ -67,15 +67,16 @@ func NewWorldBeliefSubstrate(eng *Engine) *WorldBeliefSubstrate {
 	return &WorldBeliefSubstrate{eng: eng}
 }
 
-// Belief returns ref's current belief. Only NodeKindHost is backed; any other
-// kind, or a Host id this World has never observed, reports ok=false.
+// Belief returns ref's current belief. A non-Host kind, or a Host id this
+// World has never observed, reports ok=false; an unparseable Host id is a
+// caller error, surfaced as err rather than masked as "not found".
 func (s *WorldBeliefSubstrate) Belief(_ context.Context, ref NodeRef) (NodeBelief, bool, error) {
 	if ref.Kind != NodeKindHost {
 		return NodeBelief{}, false, nil
 	}
 	id, err := ParseHostNodeID(ref.ID)
 	if err != nil {
-		return NodeBelief{}, false, nil
+		return NodeBelief{}, false, err
 	}
 	for _, h := range s.eng.Hosts() {
 		if h.ID == id {

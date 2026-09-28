@@ -4,6 +4,8 @@
 package daemon
 
 import (
+	"context"
+	"fmt"
 	"os"
 
 	"github.com/zeroroot-ai/gibson/internal/engine/brain"
@@ -62,7 +64,29 @@ func resolveSliceBeliefProvider() brain.SliceBeliefProvider {
 func newBeliefSchemaRegistry() (*ontology.BeliefSchemaRegistry, error) {
 	reg := ontology.NewBeliefSchemaRegistry()
 	if err := ontology.RegisterCoreBeliefSchemaSeed(reg); err != nil {
-		return nil, err
+		return nil, fmt.Errorf("belief schema registry: register core seed: %w", err)
 	}
 	return reg, nil
+}
+
+// wireBrainRegistry registers the belief-engine OnEngine hooks — both the
+// per-host WireBelief pipeline and the graph-coupled WireSliceBelief pipeline
+// (gibson#275) — onto registry, using the default bounded schedule
+// (brain.DefaultSliceSchedule). Shared by daemon.go's Start() and grpc.go's
+// lazy buildGRPCServer() fallback, which used to duplicate this wiring
+// inline; extracting it here keeps the two construction paths from drifting
+// apart and makes the wiring itself unit-testable independent of either
+// call site's much larger bootstrap sequence (Redis, state client, ...).
+func wireBrainRegistry(
+	ctx context.Context,
+	registry *brain.Registry,
+	beliefProvider brain.BeliefProvider,
+	sliceBeliefProvider brain.SliceBeliefProvider,
+	beliefSchemaRegistry *ontology.BeliefSchemaRegistry,
+) {
+	sliceOpts, propagateOpts := brain.DefaultSliceSchedule()
+	registry.OnEngine(func(e *brain.Engine) {
+		brain.WireBelief(ctx, e, beliefProvider, 0)
+		brain.WireSliceBelief(ctx, e, beliefSchemaRegistry, sliceBeliefProvider, 0, sliceOpts, propagateOpts)
+	})
 }

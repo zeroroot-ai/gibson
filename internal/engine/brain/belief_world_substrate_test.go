@@ -72,6 +72,22 @@ func TestWorldBeliefSubstrate_UnknownHostIsNotFound(t *testing.T) {
 	}
 }
 
+// TestWorldBeliefSubstrate_BeliefPropagatesAnUnparseableHostID proves an
+// unparseable NodeRef.ID surfaces as an error rather than being masked as
+// "not found" — a malformed ref is a caller bug, not a legitimately unknown
+// host, and nilerr-style swallowing would hide it.
+func TestWorldBeliefSubstrate_BeliefPropagatesAnUnparseableHostID(t *testing.T) {
+	e := NewEngine("t")
+	sub := NewWorldBeliefSubstrate(e)
+	_, ok, err := sub.Belief(context.Background(), NodeRef{Kind: NodeKindHost, ID: "not-a-number"})
+	if err == nil {
+		t.Fatalf("Belief did not surface the unparseable host id as an error")
+	}
+	if ok {
+		t.Fatalf("Belief reported ok=true alongside an error")
+	}
+}
+
 // TestWorldBeliefSubstrate_NonHostKindIsNotFound documents today's boundary:
 // Claim/TechniqueEnvironment (ADR-0029 §3) are not ECS entities yet, so this
 // substrate — the ONE backing the live World — has nothing to read for them.

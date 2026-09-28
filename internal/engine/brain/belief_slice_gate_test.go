@@ -599,6 +599,38 @@ func TestSliceGate_Apply_PropagatesSetBeliefError(t *testing.T) {
 	}
 }
 
+// TestSliceGate_Apply_PropagatesCurrentBeliefReadError proves Apply surfaces
+// a failure reading a node's CURRENT belief (needed to preserve its
+// EvidenceDigest) rather than reporting a silent success. The substrate must
+// succeed for Check (to establish a real outstanding digest) and only start
+// failing for the Apply that follows — otherwise Apply's own staleness check
+// would reject the write before ever reaching the read this test targets.
+func TestSliceGate_Apply_PropagatesCurrentBeliefReadError(t *testing.T) {
+	graph := chainSliceGraph(t)
+	failRef := NodeRef{Kind: NodeKindHost, ID: "d"}
+	substrate := &erroringBeliefSubstrate{fakeBeliefSubstrate: newFakeBeliefSubstrate()}
+	gate := NewSliceGate(substrate)
+	ctx := context.Background()
+
+	req, err := gate.Check(ctx, graph, "d", SliceOptions{}, nil)
+	if err != nil || req == nil {
+		t.Fatalf("setup Check: req=%+v err=%v", req, err)
+	}
+
+	substrate.failBeliefFor = failRef // now fail only for the read inside Apply
+	applied, err := gate.Apply(ctx, SliceScored{
+		Target: "d",
+		Digest: req.Digest,
+		Nodes:  []ScoredNode{{Ref: failRef, Belief: NodeBelief{Belief: Belief{Juicy: 0.5}}}},
+	})
+	if err == nil {
+		t.Fatalf("Apply did not propagate the substrate Belief read error")
+	}
+	if applied {
+		t.Fatalf("Apply reported success alongside an error")
+	}
+}
+
 // TestSliceBeliefWorker_Drain_PropagatesApplyError proves Drain surfaces an
 // Apply failure instead of swallowing it.
 func TestSliceBeliefWorker_Drain_PropagatesApplyError(t *testing.T) {

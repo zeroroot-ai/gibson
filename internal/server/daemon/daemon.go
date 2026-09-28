@@ -1019,20 +1019,17 @@ func (d *daemonImpl) Start(ctx context.Context) error {
 		[]brain.System{brain.BeliefSystem},
 		brain.ExecutorSystems()..., // scheduler/condition/decider-gate/budget/retry/completion (gibson#851)
 	)...)
-	sliceOpts, propagateOpts := brain.DefaultSliceSchedule()
 	// Belief inference is an HTTP call to the pgmpy sidecar, so it runs off the
 	// tick: BeliefSystem asks for a score when a host's evidence changes, and the
 	// worker WireBelief installs answers with a BeliefScored event (gibson#25).
-	// WireSliceBelief (gibson#275, ADR-0029) runs the graph-coupled pipeline the
-	// same way, off its own ticker: it derives the current attack graph from the
-	// engine's live hosts (gibson#286), extracts each host's bounded slice
-	// (gibson#287), and refines/propagates belief through the SAME BeliefScored
-	// write path — so the two pipelines share one Host.Belief and never race.
-	// Both registered here because engines fault in lazily on the first event.
-	d.brainRegistry.OnEngine(func(e *brain.Engine) {
-		brain.WireBelief(ctx, e, d.beliefProvider, 0)
-		brain.WireSliceBelief(ctx, e, beliefSchemaRegistry, sliceBeliefProvider, 0, sliceOpts, propagateOpts)
-	})
+	// wireBrainRegistry ALSO installs WireSliceBelief (gibson#275, ADR-0029), the
+	// graph-coupled pipeline, the same way, off its own ticker: it derives the
+	// current attack graph from the engine's live hosts (gibson#286), extracts
+	// each host's bounded slice (gibson#287), and refines/propagates belief
+	// through the SAME BeliefScored write path — so the two pipelines share one
+	// Host.Belief and never race. Registered here because engines fault in
+	// lazily on the first event.
+	wireBrainRegistry(ctx, d.brainRegistry, d.beliefProvider, sliceBeliefProvider, beliefSchemaRegistry)
 	d.logger.Info(ctx, "ECS brain registry initialized", "belief_model", d.beliefProvider.Version(),
 		"slice_belief_model", sliceBeliefProvider.Version())
 

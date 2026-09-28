@@ -161,3 +161,83 @@ func TestWireSliceBelief_RunsOffTheEngineTick(t *testing.T) {
 
 	close(release)
 }
+
+// TestDefaultSliceSchedule_MatchesTheDocumentedConstants pins the bound
+// gibson#275's acceptance criterion ("propagation is bounded... documented
+// bound") actually names — a test that would fail the moment the constants
+// and the schedule builder drift apart.
+func TestDefaultSliceSchedule_MatchesTheDocumentedConstants(t *testing.T) {
+	sliceOpts, propagateOpts := DefaultSliceSchedule()
+	want := SliceOptions{MaxDepth: DefaultSliceMaxDepth, NodeBudget: DefaultSliceNodeBudget}
+	if sliceOpts != want {
+		t.Fatalf("sliceOpts = %+v, want %+v", sliceOpts, want)
+	}
+	wantPropagate := SliceOptions{MaxDepth: DefaultPropagateMaxDepth, NodeBudget: DefaultPropagateNodeBudget}
+	if propagateOpts != wantPropagate {
+		t.Fatalf("propagateOpts = %+v, want %+v", propagateOpts, wantPropagate)
+	}
+}
+
+// TestSliceBeliefRound_PropagatesCheckError proves a round surfaces a Check
+// failure (a bad substrate read) rather than silently treating it as nothing
+// to score.
+func TestSliceBeliefRound_PropagatesCheckError(t *testing.T) {
+	e, bw := beliefEngine(PlaceholderBeliefProvider())
+	e.Submit(HostObserved{ScopeID: "s", Address: "10.0.0.5", OpenPorts: []int{22}})
+	settle(e, bw, 1)
+	hostID := e.World.Snapshot()[0].ID
+
+	registry := liveBeliefRegistry(t)
+	substrate := &erroringBeliefSubstrate{
+		fakeBeliefSubstrate: newFakeBeliefSubstrate(),
+		failBeliefFor:       NodeRef{Kind: NodeKindHost, ID: HostNodeID(hostID)},
+	}
+	gate := NewSliceGate(substrate)
+	worker := NewSliceBeliefWorker(gate, &fakeSliceBeliefProvider{})
+	opts := SliceOptions{MaxDepth: 3, NodeBudget: 50}
+
+	if _, _, err := SliceBeliefRound(context.Background(), e, registry, gate, worker, opts, opts); err == nil {
+		t.Fatalf("SliceBeliefRound did not propagate the Check error")
+	}
+}
+
+// TestSliceBeliefRound_PropagatesDrainError proves a round surfaces a Drain
+// failure (here, Apply rejecting a write) rather than reporting success.
+func TestSliceBeliefRound_PropagatesDrainError(t *testing.T) {
+	e, bw := beliefEngine(PlaceholderBeliefProvider())
+	e.Submit(HostObserved{ScopeID: "s", Address: "10.0.0.5", OpenPorts: []int{22}})
+	settle(e, bw, 1)
+	hostID := e.World.Snapshot()[0].ID
+	hostRef := NodeRef{Kind: NodeKindHost, ID: HostNodeID(hostID)}
+
+	registry := liveBeliefRegistry(t)
+	substrate := &erroringBeliefSubstrate{fakeBeliefSubstrate: newFakeBeliefSubstrate(), failSetBeliefFor: hostRef}
+	gate := NewSliceGate(substrate)
+	worker := NewSliceBeliefWorker(gate, &fakeSliceBeliefProvider{})
+	opts := SliceOptions{MaxDepth: 3, NodeBudget: 50}
+
+	if _, _, err := SliceBeliefRound(context.Background(), e, registry, gate, worker, opts, opts); err == nil {
+		t.Fatalf("SliceBeliefRound did not propagate the Drain/Apply error")
+	}
+}
+
+// TestWireSliceBelief_DefaultsNonPositiveInterval proves interval <= 0 falls
+// back to TickInterval (the same convention WireBelief uses) rather than a
+// busy loop or no ticking at all.
+func TestWireSliceBelief_DefaultsNonPositiveInterval(t *testing.T) {
+	e, bw := beliefEngine(PlaceholderBeliefProvider())
+	e.Submit(HostObserved{ScopeID: "s", Address: "10.0.0.5", OpenPorts: []int{22}})
+	settle(e, bw, 1)
+
+	registry := liveBeliefRegistry(t)
+	provider := &fakeSliceBeliefProvider{}
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+
+	sliceOpts, propagateOpts := DefaultSliceSchedule()
+	gate := WireSliceBelief(ctx, e, registry, provider, 0, sliceOpts, propagateOpts)
+	if gate == nil {
+		t.Fatalf("WireSliceBelief returned a nil gate")
+	}
+	waitFor(t, func() bool { return provider.count() >= 1 })
+}

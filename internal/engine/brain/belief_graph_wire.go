@@ -83,7 +83,7 @@ func SliceBeliefRound(
 	worker *SliceBeliefWorker,
 	sliceOpts SliceOptions,
 	propagateOpts SliceOptions,
-) (checked int, scored int, err error) {
+) (checked, scored int, err error) {
 	hosts := eng.Hosts()
 	nodes := HostsToInfraGraph(hosts)
 	graph := DeriveAttackGraph(nodes, nil, registry)
