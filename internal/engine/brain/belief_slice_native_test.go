@@ -77,13 +77,13 @@ func TestGroundAttackGraph_IntraNodeDependsOnUsesUninformativePrior(t *testing.T
 
 	exploitable, ok := nodes[0].Variables["exploitable"]
 	require.True(t, ok)
-	assert.Equal(t, UninformativePriorStrength, exploitable.Leak)
+	assert.InDelta(t, UninformativePriorStrength, exploitable.Leak, 1e-9)
 	require.Contains(t, exploitable.DependsOn, "reachable")
-	assert.Equal(t, UninformativePriorStrength, exploitable.DependsOn["reachable"])
+	assert.InDelta(t, UninformativePriorStrength, exploitable.DependsOn["reachable"], 1e-9)
 
 	reachable, ok := nodes[0].Variables["reachable"]
 	require.True(t, ok)
-	assert.Equal(t, UninformativePriorStrength, reachable.Leak)
+	assert.InDelta(t, UninformativePriorStrength, reachable.Leak, 1e-9)
 	assert.Empty(t, reachable.DependsOn)
 }
 
@@ -187,7 +187,7 @@ func TestGroundAttackGraph_MultipleTerminalsEachBecomeAnIndependentCause(t *test
 		assert.Equal(t, "widget-1", c.SourceNode)
 		assert.Equal(t, "target-1", c.TargetNode)
 		assert.Equal(t, "fed", c.TargetVariable)
-		assert.Equal(t, UninformativePriorStrength, c.Strength)
+		assert.InDelta(t, UninformativePriorStrength, c.Strength, 1e-9)
 	}
 }
 
