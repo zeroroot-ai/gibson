@@ -1154,6 +1154,12 @@ entries:
     object_deriver: "system_tenant"
     allowed_identities:
       - COMPONENT
+  "/gibson.harness.v1.HarnessCallbackService/ProposeOntologyExtension":
+    relation: "can_use"
+    object_type: "component"
+    object_deriver: "system_tenant"
+    allowed_identities:
+      - COMPONENT
   "/gibson.harness.v1.HarnessCallbackService/PullJob":
     relation: "can_use"
     object_type: "component"

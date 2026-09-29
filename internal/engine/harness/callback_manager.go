@@ -594,6 +594,31 @@ func (m *CallbackManager) ProofSettlement() brain.ProofSettlementEngine {
 	return m.server.service.proofSettlement
 }
 
+// SetOntologyDiscovery sets the ontology-discovery engine on the callback
+// service, wiring ProposeOntologyExtension to fold an agent-proposed
+// Taxonomy node label or relationship type through the ValidIdentifier
+// safety gate and PromotionGate.Observe (ADR-0024 §2, ADR-0033 decision 2,
+// gibson#391). Call after NewCallbackManager, before Start(). Thread-safe.
+func (m *CallbackManager) SetOntologyDiscovery(engine brain.OntologyDiscoveryEngine) {
+	if m.server != nil && m.server.service != nil {
+		m.server.service.mu.Lock()
+		defer m.server.service.mu.Unlock()
+		WithOntologyDiscovery(engine)(m.server.service)
+		m.logger.Debug("set ontology discovery engine on callback service")
+	}
+}
+
+// OntologyDiscovery returns the ontology-discovery engine currently wired
+// onto the callback service (nil if none has been set) — the read half of
+// SetOntologyDiscovery, mirroring ProofSettlement (e.g. for a test proving a
+// wiring step reached the manager, such as wireOntologyDiscovery in
+// internal/server/daemon).
+func (m *CallbackManager) OntologyDiscovery() brain.OntologyDiscoveryEngine {
+	m.server.service.mu.RLock()
+	defer m.server.service.mu.RUnlock()
+	return m.server.service.ontologyDiscovery
+}
+
 // SetDiscoveryProcessor sets the DiscoveryProcessor on the callback service.
 // This enables automatic extraction and storage of DiscoveryResult from tool responses.
 //

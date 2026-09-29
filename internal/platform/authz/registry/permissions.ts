@@ -1800,6 +1800,16 @@ export const AuthRegistry: Record<string, AuthEntry> = {
     unauthenticated: false,
     self: false,
   },
+  "/gibson.harness.v1.HarnessCallbackService/ProposeOntologyExtension": {
+    method: "/gibson.harness.v1.HarnessCallbackService/ProposeOntologyExtension",
+    service: "gibson.harness.v1.HarnessCallbackService",
+    relation: "can_use",
+    objectType: "component",
+    objectDeriver: "system_tenant",
+    allowedIdentities: IdentityClass.COMPONENT,
+    unauthenticated: false,
+    self: false,
+  },
   "/gibson.harness.v1.HarnessCallbackService/PullJob": {
     method: "/gibson.harness.v1.HarnessCallbackService/PullJob",
     service: "gibson.harness.v1.HarnessCallbackService",
