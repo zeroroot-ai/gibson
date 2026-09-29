@@ -1580,7 +1580,11 @@ func (c *httpClient) EnsureHumanUserNoPassword(ctx context.Context, orgID, email
 func (c *httpClient) FindHumanUserByEmail(ctx context.Context, email string) (string, error) {
 	body := map[string]any{
 		"queries": []map[string]any{
-			{"emailQuery": map[string]any{"email": email}},
+			// zitadel.user.v2.EmailQuery: the field is email_address, JSON
+			// "emailAddress". "email" was silently ignored, the query matched
+			// nothing, and the owner the operator had just created was never
+			// found again after a 409 (hosted#309).
+			{"emailQuery": map[string]any{"emailAddress": email}},
 		},
 	}
 	var resp struct {
