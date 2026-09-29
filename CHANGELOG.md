@@ -1,5 +1,12 @@
 # Changelog
 
+## [0.144.0](https://github.com/zeroroot-ai/gibson/compare/v0.143.8...v0.144.0) (2026-09-29)
+
+
+### Features
+
+* **authz:** a role change reaches ext-authz at once through the FGA write event ([#433](https://github.com/zeroroot-ai/gibson/issues/433)) ([242ee01](https://github.com/zeroroot-ai/gibson/commit/242ee01f220b0e4aa8a2e7cb65d9d8dcc7f67187))
+
 ## [0.143.8](https://github.com/zeroroot-ai/gibson/compare/v0.143.7...v0.143.8) (2026-09-29)
 
 
