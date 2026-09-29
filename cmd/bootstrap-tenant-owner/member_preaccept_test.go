@@ -63,9 +63,9 @@ func newFakeDyn(objs ...runtime.Object) *dynamicfake.FakeDynamicClient {
 // so the member reconciler never seeded the active_session tuples and every
 // tenant-scoped RPC failed closed at the session gate while login worked.
 func TestPreAcceptFoundingMember_StampsTheOwner(t *testing.T) {
-	dyn := newFakeDyn(memberObj("tenant-primary", "admin-owner", "admin@selfhosted.example.com", "owner", ""))
+	dyn := newFakeDyn(memberObj("tenant-primary", "admin-owner", "admin@localhost.zeroroot.ai", "owner", ""))
 
-	outcome, err := preAcceptFoundingMember(context.Background(), dyn, "primary", "admin@selfhosted.example.com", "u-42")
+	outcome, err := preAcceptFoundingMember(context.Background(), dyn, "primary", "admin@localhost.zeroroot.ai", "u-42")
 	if err != nil {
 		t.Fatalf("preAcceptFoundingMember: %v", err)
 	}
@@ -85,9 +85,9 @@ func TestPreAcceptFoundingMember_StampsTheOwner(t *testing.T) {
 
 // Re-running the bootstrap must not disturb an accepted membership.
 func TestPreAcceptFoundingMember_AlreadyAcceptedIsANoOp(t *testing.T) {
-	dyn := newFakeDyn(memberObj("tenant-primary", "admin-owner", "admin@selfhosted.example.com", "owner", "u-1"))
+	dyn := newFakeDyn(memberObj("tenant-primary", "admin-owner", "admin@localhost.zeroroot.ai", "owner", "u-1"))
 
-	outcome, err := preAcceptFoundingMember(context.Background(), dyn, "primary", "admin@selfhosted.example.com", "u-42")
+	outcome, err := preAcceptFoundingMember(context.Background(), dyn, "primary", "admin@localhost.zeroroot.ai", "u-42")
 	if err != nil {
 		t.Fatalf("preAcceptFoundingMember: %v", err)
 	}
@@ -109,7 +109,7 @@ func TestPreAcceptFoundingMember_AlreadyAcceptedIsANoOp(t *testing.T) {
 func TestPreAcceptFoundingMember_NoMemberCreatesAccepted(t *testing.T) {
 	dyn := newFakeDyn()
 
-	outcome, err := preAcceptFoundingMember(context.Background(), dyn, "primary", "admin@selfhosted.example.com", "u-42")
+	outcome, err := preAcceptFoundingMember(context.Background(), dyn, "primary", "admin@localhost.zeroroot.ai", "u-42")
 	if err != nil {
 		t.Fatalf("preAcceptFoundingMember: %v", err)
 	}
@@ -117,7 +117,7 @@ func TestPreAcceptFoundingMember_NoMemberCreatesAccepted(t *testing.T) {
 		t.Fatalf("outcome = %q, want %q", outcome, preAcceptCreated)
 	}
 	// The member CR now exists, accepted, with the canonical name + spec.
-	name := "admin-selfhosted-example-com-owner"
+	name := "admin-localhost-zeroroot-ai-owner"
 	got, err := dyn.Resource(tenantMembersGVR).Namespace("tenant-primary").Get(context.Background(), name, metav1.GetOptions{})
 	if err != nil {
 		t.Fatalf("get created member %q: %v", name, err)
@@ -128,7 +128,7 @@ func TestPreAcceptFoundingMember_NoMemberCreatesAccepted(t *testing.T) {
 	if r, _, _ := unstructured.NestedString(got.Object, "spec", "role"); r != "owner" {
 		t.Errorf("role = %q, want owner", r)
 	}
-	if e, _, _ := unstructured.NestedString(got.Object, "spec", "email"); e != "admin@selfhosted.example.com" {
+	if e, _, _ := unstructured.NestedString(got.Object, "spec", "email"); e != "admin@localhost.zeroroot.ai" {
 		t.Errorf("email = %q", e)
 	}
 	if tr, _, _ := unstructured.NestedString(got.Object, "spec", "tenantRef", "name"); tr != "primary" {
@@ -140,11 +140,11 @@ func TestPreAcceptFoundingMember_NoMemberCreatesAccepted(t *testing.T) {
 // invitee stays untouched.
 func TestPreAcceptFoundingMember_MatchesByEmailAndRole(t *testing.T) {
 	dyn := newFakeDyn(
-		memberObj("tenant-primary", "teammate", "teammate@selfhosted.example.com", "member", ""),
-		memberObj("tenant-primary", "admin-owner", "Admin@Selfhosted.Example.Com", "owner", ""),
+		memberObj("tenant-primary", "teammate", "teammate@localhost.zeroroot.ai", "member", ""),
+		memberObj("tenant-primary", "admin-owner", "Admin@Localhost.Zeroroot.Ai", "owner", ""),
 	)
 
-	outcome, err := preAcceptFoundingMember(context.Background(), dyn, "primary", "admin@selfhosted.example.com", "u-42")
+	outcome, err := preAcceptFoundingMember(context.Background(), dyn, "primary", "admin@localhost.zeroroot.ai", "u-42")
 	if err != nil || outcome != preAcceptDone {
 		t.Fatalf("outcome=%q err=%v", outcome, err)
 	}
@@ -157,12 +157,12 @@ func TestPreAcceptFoundingMember_MatchesByEmailAndRole(t *testing.T) {
 // A patch failure is a real error: an owner who can log in and do nothing is a
 // broken install wearing a working login.
 func TestPreAcceptFoundingMember_PatchFailureSurfaces(t *testing.T) {
-	dyn := newFakeDyn(memberObj("tenant-primary", "admin-owner", "admin@selfhosted.example.com", "owner", ""))
+	dyn := newFakeDyn(memberObj("tenant-primary", "admin-owner", "admin@localhost.zeroroot.ai", "owner", ""))
 	dyn.PrependReactor("patch", "tenantmembers", func(k8stesting.Action) (bool, runtime.Object, error) {
 		return true, nil, errors.New("webhook says no")
 	})
 
-	if _, err := preAcceptFoundingMember(context.Background(), dyn, "primary", "admin@selfhosted.example.com", "u-42"); err == nil {
+	if _, err := preAcceptFoundingMember(context.Background(), dyn, "primary", "admin@localhost.zeroroot.ai", "u-42"); err == nil {
 		t.Fatal("a patch failure must surface")
 	}
 }
@@ -198,7 +198,7 @@ func TestPreAcceptFoundingMember_ListNotFoundCreatesAccepted(t *testing.T) {
 		return true, nil, apierrors.NewNotFound(schema.GroupResource{Group: "gibson.zeroroot.ai", Resource: "tenantmembers"}, "")
 	})
 
-	outcome, err := preAcceptFoundingMember(context.Background(), dyn, "primary", "admin@selfhosted.example.com", "u-42")
+	outcome, err := preAcceptFoundingMember(context.Background(), dyn, "primary", "admin@localhost.zeroroot.ai", "u-42")
 	if err != nil || outcome != preAcceptCreated {
 		t.Fatalf("outcome=%q err=%v, want %q with no error", outcome, err, preAcceptCreated)
 	}
@@ -214,15 +214,15 @@ func TestPreAcceptFoundingMember_CreateRaceAcceptsExisting(t *testing.T) {
 	})
 	// ...but the create collides with a member the reconcile just wrote.
 	dyn.PrependReactor("create", "tenantmembers", func(k8stesting.Action) (bool, runtime.Object, error) {
-		return true, nil, apierrors.NewAlreadyExists(schema.GroupResource{Group: "gibson.zeroroot.ai", Resource: "tenantmembers"}, "admin-selfhosted-example-com-owner")
+		return true, nil, apierrors.NewAlreadyExists(schema.GroupResource{Group: "gibson.zeroroot.ai", Resource: "tenantmembers"}, "admin-localhost-zeroroot-ai-owner")
 	})
 	var patched bool
 	dyn.PrependReactor("patch", "tenantmembers", func(k8stesting.Action) (bool, runtime.Object, error) {
 		patched = true
-		return true, memberObj("tenant-primary", "admin-selfhosted-example-com-owner", "admin@selfhosted.example.com", "owner", "u-42"), nil
+		return true, memberObj("tenant-primary", "admin-localhost-zeroroot-ai-owner", "admin@localhost.zeroroot.ai", "owner", "u-42"), nil
 	})
 
-	outcome, err := preAcceptFoundingMember(context.Background(), dyn, "primary", "admin@selfhosted.example.com", "u-42")
+	outcome, err := preAcceptFoundingMember(context.Background(), dyn, "primary", "admin@localhost.zeroroot.ai", "u-42")
 	if err != nil || outcome != preAcceptDone {
 		t.Fatalf("outcome=%q err=%v, want %q", outcome, err, preAcceptDone)
 	}
@@ -239,7 +239,7 @@ func TestPreAcceptFoundingMember_ListFailureSurfaces(t *testing.T) {
 		return true, nil, errors.New("apiserver hiccup")
 	})
 
-	if _, err := preAcceptFoundingMember(context.Background(), dyn, "primary", "admin@selfhosted.example.com", "u-42"); err == nil {
+	if _, err := preAcceptFoundingMember(context.Background(), dyn, "primary", "admin@localhost.zeroroot.ai", "u-42"); err == nil {
 		t.Fatal("a non-NotFound list failure must surface")
 	}
 }
@@ -251,7 +251,7 @@ func TestPreAcceptFoundingMemberViaConfig_BuildsAClientAndDelegates(t *testing.T
 	ctx, cancel := context.WithTimeout(context.Background(), 3*time.Second)
 	defer cancel()
 	_, err := preAcceptFoundingMemberViaConfig(ctx, &rest.Config{Host: "http://127.0.0.1:1"},
-		"primary", "admin@selfhosted.example.com", "u-42")
+		"primary", "admin@localhost.zeroroot.ai", "u-42")
 	if err == nil {
 		t.Fatal("a config pointing at nothing must surface a list error")
 	}
