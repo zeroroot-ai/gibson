@@ -623,7 +623,7 @@ entries:
   "/gibson.daemon.v1.DaemonService/Connect":
     unauthenticated: true
   "/gibson.daemon.v1.DaemonService/CreateMission":
-    relation: "member"
+    relation: "writer"
     object_type: "tenant"
     object_deriver: "tenant_from_identity"
     allowed_identities:
@@ -637,14 +637,14 @@ entries:
       - USER
       - SERVICE
   "/gibson.daemon.v1.DaemonService/CreateTarget":
-    relation: "member"
+    relation: "writer"
     object_type: "tenant"
     object_deriver: "tenant_from_identity"
     allowed_identities:
       - USER
       - SERVICE
   "/gibson.daemon.v1.DaemonService/DeleteTarget":
-    relation: "member"
+    relation: "writer"
     object_type: "tenant"
     object_deriver: "tenant_from_identity"
     allowed_identities:
@@ -763,7 +763,7 @@ entries:
       - USER
       - SERVICE
   "/gibson.daemon.v1.DaemonService/PauseMission":
-    relation: "member"
+    relation: "writer"
     object_type: "tenant"
     object_deriver: "tenant_from_identity"
     allowed_identities:
@@ -785,14 +785,14 @@ entries:
     allowed_identities:
       - COMPONENT
   "/gibson.daemon.v1.DaemonService/ResumeMission":
-    relation: "member"
+    relation: "writer"
     object_type: "tenant"
     object_deriver: "tenant_from_identity"
     allowed_identities:
       - USER
       - SERVICE
   "/gibson.daemon.v1.DaemonService/RunMission":
-    relation: "member"
+    relation: "writer"
     object_type: "tenant"
     object_deriver: "tenant_from_identity"
     allowed_identities:
@@ -834,7 +834,7 @@ entries:
       - USER
       - SERVICE
   "/gibson.daemon.v1.DaemonService/StopMission":
-    relation: "member"
+    relation: "writer"
     object_type: "tenant"
     object_deriver: "tenant_from_identity"
     allowed_identities:
@@ -855,7 +855,7 @@ entries:
       - USER
       - SERVICE
   "/gibson.daemon.v1.DaemonService/UpdateTarget":
-    relation: "member"
+    relation: "writer"
     object_type: "tenant"
     object_deriver: "tenant_from_identity"
     allowed_identities:
@@ -1154,6 +1154,12 @@ entries:
     object_deriver: "system_tenant"
     allowed_identities:
       - COMPONENT
+  "/gibson.harness.v1.HarnessCallbackService/ProposeOntologyExtension":
+    relation: "can_use"
+    object_type: "component"
+    object_deriver: "system_tenant"
+    allowed_identities:
+      - COMPONENT
   "/gibson.harness.v1.HarnessCallbackService/PullJob":
     relation: "can_use"
     object_type: "component"
@@ -1214,6 +1220,12 @@ entries:
     object_deriver: "system_tenant"
     allowed_identities:
       - COMPONENT
+  "/gibson.harness.v1.HarnessCallbackService/RequestDestructiveAuthorization":
+    relation: "can_use"
+    object_type: "component"
+    object_deriver: "system_tenant"
+    allowed_identities:
+      - COMPONENT
   "/gibson.harness.v1.HarnessCallbackService/RunMission":
     relation: "can_use"
     object_type: "component"
@@ -1233,6 +1245,12 @@ entries:
     allowed_identities:
       - COMPONENT
   "/gibson.harness.v1.HarnessCallbackService/SubmitFinding":
+    relation: "can_use"
+    object_type: "component"
+    object_deriver: "system_tenant"
+    allowed_identities:
+      - COMPONENT
+  "/gibson.harness.v1.HarnessCallbackService/SubmitProof":
     relation: "can_use"
     object_type: "component"
     object_deriver: "system_tenant"
@@ -1498,7 +1516,7 @@ entries:
       - USER
       - SERVICE
   "/gibson.tenant.v1.BudgetService/SetTenantBudgetDefaults":
-    relation: "member"
+    relation: "admin"
     object_type: "tenant"
     object_deriver: "tenant_from_identity"
     allowed_identities:
@@ -1609,7 +1627,7 @@ entries:
   "/gibson.tenant.v1.MembershipService/GetReservedNames":
     unauthenticated: true
   "/gibson.tenant.v1.MembershipService/GrantComponentPermissions":
-    relation: "member"
+    relation: "writer"
     object_type: "tenant"
     object_deriver: "tenant_from_identity"
     allowed_identities:
@@ -1699,7 +1717,7 @@ entries:
     allowed_identities:
       - USER
   "/gibson.tenant.v1.ModelAccessService/GrantAccess":
-    relation: "member"
+    relation: "writer"
     object_type: "tenant"
     object_deriver: "tenant_from_identity"
     allowed_identities:
@@ -1720,7 +1738,7 @@ entries:
       - USER
       - SERVICE
   "/gibson.tenant.v1.ModelAccessService/RevokeAccess":
-    relation: "member"
+    relation: "writer"
     object_type: "tenant"
     object_deriver: "tenant_from_identity"
     allowed_identities:
@@ -1898,7 +1916,7 @@ entries:
       - USER
       - SERVICE
   "/gibson.tenant.v1.TenantService/ExportFindings":
-    relation: "writer"
+    relation: "member"
     object_type: "tenant"
     object_deriver: "tenant_from_identity"
     allowed_identities:
@@ -1940,7 +1958,7 @@ entries:
       - USER
       - SERVICE
   "/gibson.tenant.v1.TenantService/ListAuditEvents":
-    relation: "writer"
+    relation: "admin"
     object_type: "tenant"
     object_deriver: "tenant_from_identity"
     allowed_identities:
@@ -2409,7 +2427,7 @@ entries:
       - USER
       - SERVICE
   "/gibson.world.v1.WorldService/SubmitLabel":
-    relation: "member"
+    relation: "writer"
     object_type: "tenant"
     object_deriver: "tenant_from_identity"
     allowed_identities:

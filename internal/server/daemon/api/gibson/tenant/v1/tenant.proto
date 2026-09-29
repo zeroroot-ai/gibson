@@ -84,7 +84,7 @@ service TenantService {
   // ListAuditEvents returns audit events for a tenant.
   rpc ListAuditEvents(ListAuditEventsRequest) returns (ListAuditEventsResponse) {
     option (gibson.auth.v1.authz) = {
-      relation: "writer"
+      relation: "admin"
       object_type: "tenant"
       object_deriver: "tenant_from_identity"
       allowed_identities: 3  // USER | SERVICE
@@ -93,7 +93,7 @@ service TenantService {
   // ExportFindings exports findings to the requested format (json, csv, sarif).
   rpc ExportFindings(ExportFindingsRequest) returns (ExportFindingsResponse) {
     option (gibson.auth.v1.authz) = {
-      relation: "writer"
+      relation: "member"
       object_type: "tenant"
       object_deriver: "tenant_from_identity"
       allowed_identities: 3  // USER | SERVICE
