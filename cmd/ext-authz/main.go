@@ -46,7 +46,7 @@
 //	EXT_AUTHZ_FGA_ADDR              REQUIRED — missing causes immediate exit(1)
 //	                                (zero-trust-hardening Req 11.1)
 //	EXT_AUTHZ_FGA_STORE_ID          required in production
-//	EXT_AUTHZ_FGA_CACHE_TTL         default 30s
+//	EXT_AUTHZ_FGA_CACHE_TTL         default fga.DefaultCacheTTL (5s)
 //	EXT_AUTHZ_FGA_CACHE_MAX_SIZE    default 100000
 //	EXT_AUTHZ_CGJWT_KEYS_URL        required in production — the daemon per-kid
 //	                                key endpoint base; backs BOTH the dispatch
@@ -212,7 +212,7 @@ func main() {
 	// applies a per-call timeout floor under the Envoy ext_authz
 	// budget (audit fix).
 	checker, fgaClient := buildChecker(log, reg)
-	cacheTTL := durationOr("EXT_AUTHZ_FGA_CACHE_TTL", 30*time.Second)
+	cacheTTL := fgaCacheTTL()
 	cacheMax := intOr("EXT_AUTHZ_FGA_CACHE_MAX_SIZE", 100_000)
 	cachedChecker := fga.NewCachedChecker(checker, cacheTTL, cacheMax)
 
@@ -944,4 +944,14 @@ func parseHealthPeerSVIDs() ([]string, error) {
 		out = append(out, p)
 	}
 	return out, nil
+}
+
+// fgaCacheTTL is the FGA decision cache's TTL: EXT_AUTHZ_FGA_CACHE_TTL when
+// set, else the package default. The default lives in ONE place,
+// fga.DefaultCacheTTL, because this file used to carry its own 30 s and
+// silently outlived a change of the package default to 5 s: the identity
+// exit test kept accepting a demoted writer for 30 s while the code said
+// five (hosted#204, run 36619037626). TestFGACacheTTL pins the two together.
+func fgaCacheTTL() time.Duration {
+	return durationOr("EXT_AUTHZ_FGA_CACHE_TTL", fga.DefaultCacheTTL)
 }
