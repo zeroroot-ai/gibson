@@ -34,9 +34,10 @@ func TestRegisterDomainPack_ServesWithRegistryAndAuthorizer(t *testing.T) {
 }
 
 // A nil domainPackCatalog must not block registration: registerDomainPack
-// lazily constructs an empty one (mirrors the daemon's own newInfrastructure
-// wiring), so a daemon that reaches this point before that field is set
-// still serves the (empty) catalog rather than skipping registration.
+// lazily constructs one seeded with the platform's skeleton "main" pack
+// (mirrors the daemon's own newInfrastructure wiring, gibson#382), so a
+// daemon that reaches this point before that field is set still serves the
+// seeded catalog rather than skipping registration.
 func TestRegisterDomainPack_ConstructsCatalogWhenNil(t *testing.T) {
 	d := &daemonImpl{
 		logger:        testObservabilityLogger(),
@@ -49,6 +50,9 @@ func TestRegisterDomainPack_ConstructsCatalogWhenNil(t *testing.T) {
 
 	if d.domainPackCatalog == nil {
 		t.Fatal("registerDomainPack must construct a catalog when none is wired")
+	}
+	if _, ok := d.domainPackCatalog.Get(ontology.MainDomainPackName); !ok {
+		t.Fatal("the lazily-constructed catalog must carry the seed \"main\" pack")
 	}
 	if _, ok := srv.GetServiceInfo()[domainPackServiceName]; !ok {
 		t.Fatal("DomainPackService must still be registered")
