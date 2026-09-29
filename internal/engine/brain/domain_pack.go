@@ -76,9 +76,6 @@ type DomainPackDisabled struct {
 func (DomainPackDisabled) Kind() string { return "domain_pack.disabled" }
 
 func applyDomainPackEnabled(w *World, e DomainPackEnabled) {
-	if w.domainPacks == nil {
-		w.domainPacks = make(map[string]DomainPackState)
-	}
 	w.domainPacks[e.Name] = DomainPackState{
 		Version:                   e.Version,
 		TaxonomyNodeLabels:        append([]string(nil), e.TaxonomyNodeLabels...),
@@ -88,9 +85,6 @@ func applyDomainPackEnabled(w *World, e DomainPackEnabled) {
 }
 
 func applyDomainPackDisabled(w *World, e DomainPackDisabled) {
-	if w.domainPacks == nil {
-		return
-	}
 	delete(w.domainPacks, e.Name)
 }
 

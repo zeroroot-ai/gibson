@@ -5,6 +5,7 @@ package api
 
 import (
 	"context"
+	"math"
 	"sort"
 
 	"google.golang.org/grpc/codes"
@@ -108,7 +109,7 @@ func (s *DomainPackService) ListDomainPacks(
 	for _, p := range e.DomainPacks() {
 		out = append(out, &tenantv1.DomainPackView{
 			Name:       p.Name,
-			Version:    int32(p.Version),
+			Version:    int32Count(p.Version),
 			Techniques: sortedPredicateKeys(p.Predicates),
 		})
 	}
@@ -165,7 +166,7 @@ func (s *DomainPackService) EnableDomainPack(
 		TaxonomyRelationshipTypes: append([]string(nil), pack.TaxonomyRelationshipTypes...),
 		Predicates:                clonePredicates(pack.Predicates),
 	})
-	return &tenantv1.EnableDomainPackResponse{Name: pack.Name, Version: int32(pack.Version)}, nil
+	return &tenantv1.EnableDomainPackResponse{Name: pack.Name, Version: int32Count(pack.Version)}, nil
 }
 
 // DisableDomainPack folds a DomainPackDisabled event that removes the pack's
@@ -190,7 +191,7 @@ func (s *DomainPackService) DisableDomainPack(
 func domainPackCatalogEntryView(p ontology.DomainPack) *tenantv1.DomainPackCatalogEntry {
 	return &tenantv1.DomainPackCatalogEntry{
 		Name:                      p.Name,
-		Version:                   int32(p.Version),
+		Version:                   int32Count(p.Version),
 		Author:                    p.Author,
 		Visibility:                string(p.Visibility),
 		Entitlement:               p.Entitlement,
@@ -212,6 +213,20 @@ func sortedPredicateKeys(m map[string]string) []string {
 	}
 	sort.Strings(out)
 	return out
+}
+
+// int32Count converts a non-negative count to int32, saturating at
+// math.MaxInt32 (mirrors daemon.int32Count in world_service.go). A Pack's
+// Version never realistically reaches 2^31, so saturation is a safe, honest
+// bound and satisfies gosec G115 without an unchecked conversion.
+func int32Count(n int) int32 {
+	if n < 0 {
+		return 0
+	}
+	if n > math.MaxInt32 {
+		return math.MaxInt32
+	}
+	return int32(n)
 }
 
 // clonePredicates returns a defensive copy of m so the folded event never

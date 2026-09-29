@@ -211,6 +211,7 @@ func NewWorld(tenant string) *World {
 		destructiveActions: ecs.NewMap1[DestructiveAction](w),
 		voiPlans:           ecs.NewMap1[VoIPlanState](w),
 		nodeBeliefs:        ecs.NewMap1[NodeBeliefRecord](w),
+		domainPacks:        make(map[string]DomainPackState),
 	}
 }
 

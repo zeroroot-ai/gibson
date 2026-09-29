@@ -36,7 +36,7 @@ func newDomainPackServiceWithGate(t *testing.T, catalog *ontology.DomainPackCata
 // waitForDomainPacks polls until ListDomainPacks returns n packs or the
 // deadline passes — Engine.Submit is asynchronous (mirrors
 // TestWorldService_TenantScopedRead's poll loop).
-func waitForDomainPacks(t *testing.T, s *DomainPackService, ctx context.Context, n int) *tenantv1.ListDomainPacksResponse {
+func waitForDomainPacks(ctx context.Context, t *testing.T, s *DomainPackService, n int) *tenantv1.ListDomainPacksResponse {
 	t.Helper()
 	deadline := time.Now().Add(2 * time.Second)
 	var resp *tenantv1.ListDomainPacksResponse
@@ -130,7 +130,7 @@ func TestEnableDomainPack_MakesItLiveInTenantOnly(t *testing.T) {
 	assert.Equal(t, "main", resp.GetName())
 	assert.Equal(t, int32(1), resp.GetVersion())
 
-	got := waitForDomainPacks(t, s, tenantCtx("acme"), 1)
+	got := waitForDomainPacks(tenantCtx("acme"), t, s, 1)
 	assert.Equal(t, "main", got.GetPacks()[0].GetName())
 	assert.Equal(t, []string{"privilege_escalation"}, got.GetPacks()[0].GetTechniques())
 
@@ -199,11 +199,11 @@ func TestDisableDomainPack_RemovesIt(t *testing.T) {
 
 	_, err := s.EnableDomainPack(tenantCtx("acme"), &tenantv1.EnableDomainPackRequest{Name: "main"})
 	require.NoError(t, err)
-	waitForDomainPacks(t, s, tenantCtx("acme"), 1)
+	waitForDomainPacks(tenantCtx("acme"), t, s, 1)
 
 	_, err = s.DisableDomainPack(tenantCtx("acme"), &tenantv1.DisableDomainPackRequest{Name: "main"})
 	require.NoError(t, err)
-	waitForDomainPacks(t, s, tenantCtx("acme"), 0)
+	waitForDomainPacks(tenantCtx("acme"), t, s, 0)
 }
 
 func TestDisableDomainPack_EmptyName(t *testing.T) {

@@ -213,3 +213,25 @@ func TestDomainPackEvents_CodecRoundTrip(t *testing.T) {
 		})
 	}
 }
+
+// TestDomainPack_SnapshotSortsMultiplePacksByName proves DomainPackSnapshot's
+// documented deterministic (name) order actually engages its sort comparator
+// — a single-pack World never exercises the sort.Slice closure at all, so
+// this needs at least two enabled packs, deliberately enabled out of
+// alphabetical order.
+func TestDomainPack_SnapshotSortsMultiplePacksByName(t *testing.T) {
+	w := NewWorld("t")
+	Reduce(w, DomainPackEnabled{Name: "web", Version: 1})
+	Reduce(w, DomainPackEnabled{Name: "k8s", Version: 1})
+	Reduce(w, DomainPackEnabled{Name: "healthcare", Version: 1})
+
+	got := w.DomainPackSnapshot()
+	if len(got) != 3 {
+		t.Fatalf("DomainPackSnapshot() = %+v, want 3 packs", got)
+	}
+	names := []string{got[0].Name, got[1].Name, got[2].Name}
+	want := []string{"healthcare", "k8s", "web"}
+	if !reflect.DeepEqual(names, want) {
+		t.Fatalf("DomainPackSnapshot() names = %v, want sorted %v", names, want)
+	}
+}
