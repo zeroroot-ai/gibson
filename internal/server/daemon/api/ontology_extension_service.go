@@ -233,8 +233,8 @@ func (s *OntologyExtensionService) SubmitOntologyExtensionUpstream(
 	}
 	return &tenantv1.SubmitOntologyExtensionUpstreamResponse{
 		PackJson:          packJSON,
-		SuggestedFilePath: fmt.Sprintf("packs/%s.json", pack.Name),
-		SuggestedPrTitle:  fmt.Sprintf("Add domain pack contribution: %s", pack.Name),
+		SuggestedFilePath: "packs/" + pack.Name + ".json",
+		SuggestedPrTitle:  "Add domain pack contribution: " + pack.Name,
 		SuggestedPrBody: fmt.Sprintf(
 			"Contributed by tenant %q via submit-upstream (gibson#393, ADR-0033).\n\n"+
 				"This adds %s %q as a candidate Domain Pack fragment for platform-owner review. "+

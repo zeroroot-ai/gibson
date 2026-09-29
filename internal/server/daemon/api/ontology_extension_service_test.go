@@ -42,10 +42,10 @@ func ownerCtx(tenantID, userID string) context.Context {
 
 // proposeNTimes submits label to e's tenant via ProposeOntologyExtension n
 // times and ticks the engine, driving recurrence to exactly n.
-func proposeNTimes(t *testing.T, e *brain.Engine, kind taxonomy.ProposalKind, label string, n int) {
+func proposeNTimes(ctx context.Context, t *testing.T, e *brain.Engine, kind taxonomy.ProposalKind, label string, n int) {
 	t.Helper()
 	for range n {
-		require.NoError(t, e.ProposeOntologyExtension(context.Background(), kind, label, "agent-1", "sighted it"))
+		require.NoError(t, e.ProposeOntologyExtension(ctx, kind, label, "agent-1", "sighted it"))
 	}
 	e.Tick()
 }
@@ -139,7 +139,7 @@ func TestListOntologyExtensionProposals_MissingTenantIsDenied(t *testing.T) {
 
 func TestListOntologyExtensionProposals_OtherTenantIsInvisible(t *testing.T) {
 	s, reg := newOntologyExtensionService(t)
-	proposeNTimes(t, reg.For("acme"), taxonomy.ProposedNodeLabel, "Container", 1)
+	proposeNTimes(context.Background(), t, reg.For("acme"), taxonomy.ProposedNodeLabel, "Container", 1)
 
 	resp, err := s.ListOntologyExtensionProposals(tenantCtx("umbrella"), &tenantv1.ListOntologyExtensionProposalsRequest{})
 	require.NoError(t, err)
@@ -148,7 +148,7 @@ func TestListOntologyExtensionProposals_OtherTenantIsInvisible(t *testing.T) {
 
 func TestListOntologyExtensionProposals_ReturnsRecurrenceAndAttribution(t *testing.T) {
 	s, reg := newOntologyExtensionService(t)
-	proposeNTimes(t, reg.For("acme"), taxonomy.ProposedNodeLabel, "Container", 2)
+	proposeNTimes(context.Background(), t, reg.For("acme"), taxonomy.ProposedNodeLabel, "Container", 2)
 
 	resp, err := s.ListOntologyExtensionProposals(tenantCtx("acme"), &tenantv1.ListOntologyExtensionProposalsRequest{})
 	require.NoError(t, err)
@@ -176,7 +176,7 @@ func TestApproveOntologyExtensionProposal_MissingTenantIsDenied(t *testing.T) {
 
 func TestApproveOntologyExtensionProposal_MissingActingUserIsUnauthenticated(t *testing.T) {
 	s, reg := newOntologyExtensionService(t)
-	proposeNTimes(t, reg.For("acme"), taxonomy.ProposedNodeLabel, "Container", 1)
+	proposeNTimes(context.Background(), t, reg.For("acme"), taxonomy.ProposedNodeLabel, "Container", 1)
 
 	_, err := s.ApproveOntologyExtensionProposal(tenantCtx("acme"), &tenantv1.ApproveOntologyExtensionProposalRequest{
 		Kind: tenantv1.OntologyProposalKind_ONTOLOGY_PROPOSAL_KIND_NODE_LABEL, Label: "Container",
@@ -187,7 +187,7 @@ func TestApproveOntologyExtensionProposal_MissingActingUserIsUnauthenticated(t *
 
 func TestApproveOntologyExtensionProposal_UnspecifiedKindIsInvalidArgument(t *testing.T) {
 	s, reg := newOntologyExtensionService(t)
-	proposeNTimes(t, reg.For("acme"), taxonomy.ProposedNodeLabel, "Container", 1)
+	proposeNTimes(context.Background(), t, reg.For("acme"), taxonomy.ProposedNodeLabel, "Container", 1)
 
 	_, err := s.ApproveOntologyExtensionProposal(ownerCtx("acme", "owner-1"), &tenantv1.ApproveOntologyExtensionProposalRequest{
 		Label: "Container",
@@ -221,7 +221,7 @@ func TestApproveOntologyExtensionProposal_NotFoundIsNotFound(t *testing.T) {
 // the owner approves it.
 func TestApproveOntologyExtensionProposal_PromotesOnceSettled(t *testing.T) {
 	s, reg := newOntologyExtensionService(t)
-	proposeNTimes(t, reg.For("acme"), taxonomy.ProposedNodeLabel, "Container", taxonomy.MinRecurrenceForSettlement)
+	proposeNTimes(context.Background(), t, reg.For("acme"), taxonomy.ProposedNodeLabel, "Container", taxonomy.MinRecurrenceForSettlement)
 
 	ctx := ownerCtx("acme", "owner-1")
 	_, err := s.ApproveOntologyExtensionProposal(ctx, &tenantv1.ApproveOntologyExtensionProposalRequest{
@@ -244,7 +244,7 @@ func TestApproveOntologyExtensionProposal_PromotesOnceSettled(t *testing.T) {
 // proves the owner's decision is terminal through this RPC surface too.
 func TestApproveOntologyExtensionProposal_AlreadyDecidedIsFailedPrecondition(t *testing.T) {
 	s, reg := newOntologyExtensionService(t)
-	proposeNTimes(t, reg.For("acme"), taxonomy.ProposedNodeLabel, "Container", taxonomy.MinRecurrenceForSettlement)
+	proposeNTimes(context.Background(), t, reg.For("acme"), taxonomy.ProposedNodeLabel, "Container", taxonomy.MinRecurrenceForSettlement)
 
 	ctx := ownerCtx("acme", "owner-1")
 	req := &tenantv1.ApproveOntologyExtensionProposalRequest{
@@ -265,7 +265,7 @@ func TestApproveOntologyExtensionProposal_AlreadyDecidedIsFailedPrecondition(t *
 
 func TestRejectOntologyExtensionProposal_UnspecifiedKindIsInvalidArgument(t *testing.T) {
 	s, reg := newOntologyExtensionService(t)
-	proposeNTimes(t, reg.For("acme"), taxonomy.ProposedNodeLabel, "Container", 1)
+	proposeNTimes(context.Background(), t, reg.For("acme"), taxonomy.ProposedNodeLabel, "Container", 1)
 
 	_, err := s.RejectOntologyExtensionProposal(ownerCtx("acme", "owner-1"), &tenantv1.RejectOntologyExtensionProposalRequest{
 		Label: "Container",
@@ -294,7 +294,7 @@ func TestRejectOntologyExtensionProposal_MissingTenantIsDenied(t *testing.T) {
 
 func TestRejectOntologyExtensionProposal_MissingActingUserIsUnauthenticated(t *testing.T) {
 	s, reg := newOntologyExtensionService(t)
-	proposeNTimes(t, reg.For("acme"), taxonomy.ProposedNodeLabel, "Container", 1)
+	proposeNTimes(context.Background(), t, reg.For("acme"), taxonomy.ProposedNodeLabel, "Container", 1)
 
 	_, err := s.RejectOntologyExtensionProposal(tenantCtx("acme"), &tenantv1.RejectOntologyExtensionProposalRequest{
 		Kind: tenantv1.OntologyProposalKind_ONTOLOGY_PROPOSAL_KIND_NODE_LABEL, Label: "Container",
@@ -318,7 +318,7 @@ func TestRejectOntologyExtensionProposal_NotFoundIsNotFound(t *testing.T) {
 func TestRejectOntologyExtensionProposal_RecordsRejectionAndNeverPromotes(t *testing.T) {
 	s, reg := newOntologyExtensionService(t)
 	e := reg.For("acme")
-	proposeNTimes(t, e, taxonomy.ProposedNodeLabel, "Container", 1)
+	proposeNTimes(context.Background(), t, e, taxonomy.ProposedNodeLabel, "Container", 1)
 
 	ctx := ownerCtx("acme", "owner-1")
 	_, err := s.RejectOntologyExtensionProposal(ctx, &tenantv1.RejectOntologyExtensionProposalRequest{
@@ -331,7 +331,7 @@ func TestRejectOntologyExtensionProposal_RecordsRejectionAndNeverPromotes(t *tes
 	assert.Equal(t, "not needed", p.GetRejectReason())
 	assert.False(t, p.GetPromoted())
 
-	proposeNTimes(t, e, taxonomy.ProposedNodeLabel, "Container", taxonomy.MinRecurrenceForSettlement+2)
+	proposeNTimes(context.Background(), t, e, taxonomy.ProposedNodeLabel, "Container", taxonomy.MinRecurrenceForSettlement+2)
 	resp, err := s.ListOntologyExtensionProposals(ctx, &tenantv1.ListOntologyExtensionProposalsRequest{})
 	require.NoError(t, err)
 	require.Len(t, resp.GetProposals(), 1)
@@ -349,7 +349,7 @@ func TestRejectOntologyExtensionProposal_RecordsRejectionAndNeverPromotes(t *tes
 // setup.
 func promoteViaRPC(ctx context.Context, t *testing.T, s *OntologyExtensionService, reg *brain.Registry, tenantID string, kind taxonomy.ProposalKind, label string) {
 	t.Helper()
-	proposeNTimes(t, reg.For(tenantID), kind, label, taxonomy.MinRecurrenceForSettlement)
+	proposeNTimes(ctx, t, reg.For(tenantID), kind, label, taxonomy.MinRecurrenceForSettlement)
 	_, err := s.ApproveOntologyExtensionProposal(ctx, &tenantv1.ApproveOntologyExtensionProposalRequest{
 		Kind: ontologyProposalKindPB(kind), Label: label,
 	})
@@ -399,7 +399,7 @@ func TestSubmitOntologyExtensionUpstream_NotFoundIsNotFound(t *testing.T) {
 // proposal is refused.
 func TestSubmitOntologyExtensionUpstream_PendingProposalIsFailedPrecondition(t *testing.T) {
 	s, reg := newOntologyExtensionService(t)
-	proposeNTimes(t, reg.For("acme"), taxonomy.ProposedNodeLabel, "Container", 1)
+	proposeNTimes(context.Background(), t, reg.For("acme"), taxonomy.ProposedNodeLabel, "Container", 1)
 
 	_, err := s.SubmitOntologyExtensionUpstream(tenantCtx("acme"), &tenantv1.SubmitOntologyExtensionUpstreamRequest{
 		Kind: tenantv1.OntologyProposalKind_ONTOLOGY_PROPOSAL_KIND_NODE_LABEL, Label: "Container",
