@@ -5,6 +5,7 @@ package api
 
 import (
 	"context"
+	"encoding/json"
 	"testing"
 	"time"
 
@@ -14,6 +15,7 @@ import (
 	"google.golang.org/grpc/status"
 
 	"github.com/zeroroot-ai/gibson/internal/engine/brain"
+	"github.com/zeroroot-ai/gibson/internal/engine/ontology"
 	"github.com/zeroroot-ai/gibson/internal/engine/taxonomy"
 	tenantv1 "github.com/zeroroot-ai/gibson/internal/server/daemon/api/gibson/tenant/v1"
 	"github.com/zeroroot-ai/sdk/auth"
@@ -40,10 +42,10 @@ func ownerCtx(tenantID, userID string) context.Context {
 
 // proposeNTimes submits label to e's tenant via ProposeOntologyExtension n
 // times and ticks the engine, driving recurrence to exactly n.
-func proposeNTimes(t *testing.T, e *brain.Engine, kind taxonomy.ProposalKind, label string, n int) {
+func proposeNTimes(ctx context.Context, t *testing.T, e *brain.Engine, kind taxonomy.ProposalKind, label string, n int) {
 	t.Helper()
 	for range n {
-		require.NoError(t, e.ProposeOntologyExtension(context.Background(), kind, label, "agent-1", "sighted it"))
+		require.NoError(t, e.ProposeOntologyExtension(ctx, kind, label, "agent-1", "sighted it"))
 	}
 	e.Tick()
 }
@@ -113,6 +115,7 @@ func TestOntologyDecisionError_MapsEachErrorKind(t *testing.T) {
 	}{
 		{"not found", &brain.OntologyProposalNotFoundError{Kind: taxonomy.ProposedNodeLabel, Label: "Container"}, codes.NotFound},
 		{"already decided", &brain.OntologyProposalAlreadyDecidedError{Kind: taxonomy.ProposedNodeLabel, Label: "Container", Status: brain.OntologyProposalApproved}, codes.FailedPrecondition},
+		{"not promoted", &brain.OntologyProposalNotPromotedError{Kind: taxonomy.ProposedNodeLabel, Label: "Container", Status: brain.OntologyProposalPending}, codes.FailedPrecondition},
 		{"invalid identifier", &taxonomy.InvalidProposalError{Kind: taxonomy.ProposedNodeLabel, Label: "!bad", Err: assert.AnError}, codes.InvalidArgument},
 		{"anything else", assert.AnError, codes.Internal},
 	}
@@ -136,7 +139,7 @@ func TestListOntologyExtensionProposals_MissingTenantIsDenied(t *testing.T) {
 
 func TestListOntologyExtensionProposals_OtherTenantIsInvisible(t *testing.T) {
 	s, reg := newOntologyExtensionService(t)
-	proposeNTimes(t, reg.For("acme"), taxonomy.ProposedNodeLabel, "Container", 1)
+	proposeNTimes(context.Background(), t, reg.For("acme"), taxonomy.ProposedNodeLabel, "Container", 1)
 
 	resp, err := s.ListOntologyExtensionProposals(tenantCtx("umbrella"), &tenantv1.ListOntologyExtensionProposalsRequest{})
 	require.NoError(t, err)
@@ -145,7 +148,7 @@ func TestListOntologyExtensionProposals_OtherTenantIsInvisible(t *testing.T) {
 
 func TestListOntologyExtensionProposals_ReturnsRecurrenceAndAttribution(t *testing.T) {
 	s, reg := newOntologyExtensionService(t)
-	proposeNTimes(t, reg.For("acme"), taxonomy.ProposedNodeLabel, "Container", 2)
+	proposeNTimes(context.Background(), t, reg.For("acme"), taxonomy.ProposedNodeLabel, "Container", 2)
 
 	resp, err := s.ListOntologyExtensionProposals(tenantCtx("acme"), &tenantv1.ListOntologyExtensionProposalsRequest{})
 	require.NoError(t, err)
@@ -173,7 +176,7 @@ func TestApproveOntologyExtensionProposal_MissingTenantIsDenied(t *testing.T) {
 
 func TestApproveOntologyExtensionProposal_MissingActingUserIsUnauthenticated(t *testing.T) {
 	s, reg := newOntologyExtensionService(t)
-	proposeNTimes(t, reg.For("acme"), taxonomy.ProposedNodeLabel, "Container", 1)
+	proposeNTimes(context.Background(), t, reg.For("acme"), taxonomy.ProposedNodeLabel, "Container", 1)
 
 	_, err := s.ApproveOntologyExtensionProposal(tenantCtx("acme"), &tenantv1.ApproveOntologyExtensionProposalRequest{
 		Kind: tenantv1.OntologyProposalKind_ONTOLOGY_PROPOSAL_KIND_NODE_LABEL, Label: "Container",
@@ -184,7 +187,7 @@ func TestApproveOntologyExtensionProposal_MissingActingUserIsUnauthenticated(t *
 
 func TestApproveOntologyExtensionProposal_UnspecifiedKindIsInvalidArgument(t *testing.T) {
 	s, reg := newOntologyExtensionService(t)
-	proposeNTimes(t, reg.For("acme"), taxonomy.ProposedNodeLabel, "Container", 1)
+	proposeNTimes(context.Background(), t, reg.For("acme"), taxonomy.ProposedNodeLabel, "Container", 1)
 
 	_, err := s.ApproveOntologyExtensionProposal(ownerCtx("acme", "owner-1"), &tenantv1.ApproveOntologyExtensionProposalRequest{
 		Label: "Container",
@@ -218,7 +221,7 @@ func TestApproveOntologyExtensionProposal_NotFoundIsNotFound(t *testing.T) {
 // the owner approves it.
 func TestApproveOntologyExtensionProposal_PromotesOnceSettled(t *testing.T) {
 	s, reg := newOntologyExtensionService(t)
-	proposeNTimes(t, reg.For("acme"), taxonomy.ProposedNodeLabel, "Container", taxonomy.MinRecurrenceForSettlement)
+	proposeNTimes(context.Background(), t, reg.For("acme"), taxonomy.ProposedNodeLabel, "Container", taxonomy.MinRecurrenceForSettlement)
 
 	ctx := ownerCtx("acme", "owner-1")
 	_, err := s.ApproveOntologyExtensionProposal(ctx, &tenantv1.ApproveOntologyExtensionProposalRequest{
@@ -241,7 +244,7 @@ func TestApproveOntologyExtensionProposal_PromotesOnceSettled(t *testing.T) {
 // proves the owner's decision is terminal through this RPC surface too.
 func TestApproveOntologyExtensionProposal_AlreadyDecidedIsFailedPrecondition(t *testing.T) {
 	s, reg := newOntologyExtensionService(t)
-	proposeNTimes(t, reg.For("acme"), taxonomy.ProposedNodeLabel, "Container", taxonomy.MinRecurrenceForSettlement)
+	proposeNTimes(context.Background(), t, reg.For("acme"), taxonomy.ProposedNodeLabel, "Container", taxonomy.MinRecurrenceForSettlement)
 
 	ctx := ownerCtx("acme", "owner-1")
 	req := &tenantv1.ApproveOntologyExtensionProposalRequest{
@@ -262,7 +265,7 @@ func TestApproveOntologyExtensionProposal_AlreadyDecidedIsFailedPrecondition(t *
 
 func TestRejectOntologyExtensionProposal_UnspecifiedKindIsInvalidArgument(t *testing.T) {
 	s, reg := newOntologyExtensionService(t)
-	proposeNTimes(t, reg.For("acme"), taxonomy.ProposedNodeLabel, "Container", 1)
+	proposeNTimes(context.Background(), t, reg.For("acme"), taxonomy.ProposedNodeLabel, "Container", 1)
 
 	_, err := s.RejectOntologyExtensionProposal(ownerCtx("acme", "owner-1"), &tenantv1.RejectOntologyExtensionProposalRequest{
 		Label: "Container",
@@ -291,7 +294,7 @@ func TestRejectOntologyExtensionProposal_MissingTenantIsDenied(t *testing.T) {
 
 func TestRejectOntologyExtensionProposal_MissingActingUserIsUnauthenticated(t *testing.T) {
 	s, reg := newOntologyExtensionService(t)
-	proposeNTimes(t, reg.For("acme"), taxonomy.ProposedNodeLabel, "Container", 1)
+	proposeNTimes(context.Background(), t, reg.For("acme"), taxonomy.ProposedNodeLabel, "Container", 1)
 
 	_, err := s.RejectOntologyExtensionProposal(tenantCtx("acme"), &tenantv1.RejectOntologyExtensionProposalRequest{
 		Kind: tenantv1.OntologyProposalKind_ONTOLOGY_PROPOSAL_KIND_NODE_LABEL, Label: "Container",
@@ -315,7 +318,7 @@ func TestRejectOntologyExtensionProposal_NotFoundIsNotFound(t *testing.T) {
 func TestRejectOntologyExtensionProposal_RecordsRejectionAndNeverPromotes(t *testing.T) {
 	s, reg := newOntologyExtensionService(t)
 	e := reg.For("acme")
-	proposeNTimes(t, e, taxonomy.ProposedNodeLabel, "Container", 1)
+	proposeNTimes(context.Background(), t, e, taxonomy.ProposedNodeLabel, "Container", 1)
 
 	ctx := ownerCtx("acme", "owner-1")
 	_, err := s.RejectOntologyExtensionProposal(ctx, &tenantv1.RejectOntologyExtensionProposalRequest{
@@ -328,9 +331,141 @@ func TestRejectOntologyExtensionProposal_RecordsRejectionAndNeverPromotes(t *tes
 	assert.Equal(t, "not needed", p.GetRejectReason())
 	assert.False(t, p.GetPromoted())
 
-	proposeNTimes(t, e, taxonomy.ProposedNodeLabel, "Container", taxonomy.MinRecurrenceForSettlement+2)
+	proposeNTimes(context.Background(), t, e, taxonomy.ProposedNodeLabel, "Container", taxonomy.MinRecurrenceForSettlement+2)
 	resp, err := s.ListOntologyExtensionProposals(ctx, &tenantv1.ListOntologyExtensionProposalsRequest{})
 	require.NoError(t, err)
 	require.Len(t, resp.GetProposals(), 1)
 	assert.False(t, resp.GetProposals()[0].GetPromoted())
+}
+
+// -----------------------------------------------------------------------
+// SubmitOntologyExtensionUpstream (gibson#393, ADR-0033 decision 2)
+// -----------------------------------------------------------------------
+
+// promoteViaRPC drives (kind, label) to a live tenant extension entirely
+// through the RPC surface: taxonomy.MinRecurrenceForSettlement sightings
+// plus one owner approval, then waits for the promoted read to land —
+// mirrors TestApproveOntologyExtensionProposal_PromotesOnceSettled's own
+// setup.
+func promoteViaRPC(ctx context.Context, t *testing.T, s *OntologyExtensionService, reg *brain.Registry, tenantID string, kind taxonomy.ProposalKind, label string) {
+	t.Helper()
+	proposeNTimes(ctx, t, reg.For(tenantID), kind, label, taxonomy.MinRecurrenceForSettlement)
+	_, err := s.ApproveOntologyExtensionProposal(ctx, &tenantv1.ApproveOntologyExtensionProposalRequest{
+		Kind: ontologyProposalKindPB(kind), Label: label,
+	})
+	require.NoError(t, err)
+	waitForOntologyProposal(ctx, t, s, label, tenantv1.OntologyProposalStatus_ONTOLOGY_PROPOSAL_STATUS_APPROVED)
+}
+
+func TestSubmitOntologyExtensionUpstream_MissingTenantIsDenied(t *testing.T) {
+	s, _ := newOntologyExtensionService(t)
+	_, err := s.SubmitOntologyExtensionUpstream(context.Background(), &tenantv1.SubmitOntologyExtensionUpstreamRequest{
+		Kind: tenantv1.OntologyProposalKind_ONTOLOGY_PROPOSAL_KIND_NODE_LABEL, Label: "Container",
+	})
+	require.Error(t, err)
+	assert.Equal(t, codes.PermissionDenied, status.Code(err))
+}
+
+func TestSubmitOntologyExtensionUpstream_UnspecifiedKindIsInvalidArgument(t *testing.T) {
+	s, _ := newOntologyExtensionService(t)
+	_, err := s.SubmitOntologyExtensionUpstream(tenantCtx("acme"), &tenantv1.SubmitOntologyExtensionUpstreamRequest{
+		Label: "Container",
+	})
+	require.Error(t, err)
+	assert.Equal(t, codes.InvalidArgument, status.Code(err))
+}
+
+func TestSubmitOntologyExtensionUpstream_EmptyLabelIsInvalidArgument(t *testing.T) {
+	s, _ := newOntologyExtensionService(t)
+	_, err := s.SubmitOntologyExtensionUpstream(tenantCtx("acme"), &tenantv1.SubmitOntologyExtensionUpstreamRequest{
+		Kind: tenantv1.OntologyProposalKind_ONTOLOGY_PROPOSAL_KIND_NODE_LABEL,
+	})
+	require.Error(t, err)
+	assert.Equal(t, codes.InvalidArgument, status.Code(err))
+}
+
+func TestSubmitOntologyExtensionUpstream_NotFoundIsNotFound(t *testing.T) {
+	s, _ := newOntologyExtensionService(t)
+	_, err := s.SubmitOntologyExtensionUpstream(tenantCtx("acme"), &tenantv1.SubmitOntologyExtensionUpstreamRequest{
+		Kind: tenantv1.OntologyProposalKind_ONTOLOGY_PROPOSAL_KIND_NODE_LABEL, Label: "Container",
+	})
+	require.Error(t, err)
+	assert.Equal(t, codes.NotFound, status.Code(err))
+}
+
+// TestSubmitOntologyExtensionUpstream_PendingProposalIsFailedPrecondition
+// proves ADR-0033 decision 3's "available only from a live tenant
+// extension" through this RPC surface: a merely-observed, never-approved
+// proposal is refused.
+func TestSubmitOntologyExtensionUpstream_PendingProposalIsFailedPrecondition(t *testing.T) {
+	s, reg := newOntologyExtensionService(t)
+	proposeNTimes(context.Background(), t, reg.For("acme"), taxonomy.ProposedNodeLabel, "Container", 1)
+
+	_, err := s.SubmitOntologyExtensionUpstream(tenantCtx("acme"), &tenantv1.SubmitOntologyExtensionUpstreamRequest{
+		Kind: tenantv1.OntologyProposalKind_ONTOLOGY_PROPOSAL_KIND_NODE_LABEL, Label: "Container",
+	})
+	require.Error(t, err)
+	assert.Equal(t, codes.FailedPrecondition, status.Code(err))
+}
+
+// TestSubmitOntologyExtensionUpstream_OtherTenantsExtensionIsInvisible proves
+// cross-tenant isolation holds for this RPC too: a proposal promoted in one
+// tenant is invisible (NotFound, never leaked as content) from another.
+func TestSubmitOntologyExtensionUpstream_OtherTenantsExtensionIsInvisible(t *testing.T) {
+	s, reg := newOntologyExtensionService(t)
+	promoteViaRPC(ownerCtx("acme", "owner-1"), t, s, reg, "acme", taxonomy.ProposedNodeLabel, "Container")
+
+	_, err := s.SubmitOntologyExtensionUpstream(tenantCtx("umbrella"), &tenantv1.SubmitOntologyExtensionUpstreamRequest{
+		Kind: tenantv1.OntologyProposalKind_ONTOLOGY_PROPOSAL_KIND_NODE_LABEL, Label: "Container",
+	})
+	require.Error(t, err)
+	assert.Equal(t, codes.NotFound, status.Code(err))
+}
+
+// TestSubmitOntologyExtensionUpstream_RendersContributionArtifact is the full
+// gibson#393 acceptance path: a live tenant extension renders as a valid
+// ontology.DomainPack fragment, JSON-encoded, plus the suggested file path
+// and PR text a tenant owner needs to open the SDK contribution PR by hand
+// (the owner/credential hand-off documented on the RPC).
+func TestSubmitOntologyExtensionUpstream_RendersContributionArtifact(t *testing.T) {
+	s, reg := newOntologyExtensionService(t)
+	ctx := ownerCtx("acme", "owner-1")
+	promoteViaRPC(ctx, t, s, reg, "acme", taxonomy.ProposedNodeLabel, "Container")
+
+	resp, err := s.SubmitOntologyExtensionUpstream(tenantCtx("acme"), &tenantv1.SubmitOntologyExtensionUpstreamRequest{
+		Kind: tenantv1.OntologyProposalKind_ONTOLOGY_PROPOSAL_KIND_NODE_LABEL, Label: "Container",
+	})
+	require.NoError(t, err)
+	require.NotNil(t, resp)
+
+	assert.Equal(t, "packs/Container.json", resp.GetSuggestedFilePath())
+	assert.Contains(t, resp.GetSuggestedPrTitle(), "Container")
+	assert.Contains(t, resp.GetSuggestedPrBody(), "acme")
+	assert.Contains(t, resp.GetSuggestedPrBody(), "Container")
+
+	var pack ontology.DomainPack
+	require.NoError(t, json.Unmarshal(resp.GetPackJson(), &pack))
+	assert.Equal(t, "Container", pack.Name)
+	assert.Equal(t, "acme", pack.Author)
+	assert.Equal(t, []string{"Container"}, pack.TaxonomyNodeLabels)
+	require.NoError(t, pack.Validate())
+}
+
+// TestSubmitOntologyExtensionUpstream_RelationshipTypeRendersUnderCorrectField
+// proves the wire path plumbs the relationship-type vocabulary correctly
+// too, not just node labels.
+func TestSubmitOntologyExtensionUpstream_RelationshipTypeRendersUnderCorrectField(t *testing.T) {
+	s, reg := newOntologyExtensionService(t)
+	ctx := ownerCtx("acme", "owner-1")
+	promoteViaRPC(ctx, t, s, reg, "acme", taxonomy.ProposedRelationshipType, "RUNS_ON")
+
+	resp, err := s.SubmitOntologyExtensionUpstream(tenantCtx("acme"), &tenantv1.SubmitOntologyExtensionUpstreamRequest{
+		Kind: tenantv1.OntologyProposalKind_ONTOLOGY_PROPOSAL_KIND_RELATIONSHIP_TYPE, Label: "RUNS_ON",
+	})
+	require.NoError(t, err)
+
+	var pack ontology.DomainPack
+	require.NoError(t, json.Unmarshal(resp.GetPackJson(), &pack))
+	assert.Equal(t, []string{"RUNS_ON"}, pack.TaxonomyRelationshipTypes)
+	assert.Empty(t, pack.TaxonomyNodeLabels)
 }

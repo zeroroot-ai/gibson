@@ -13,12 +13,15 @@ import (
 )
 
 // registerOntologyExtension registers gibson.tenant.v1.OntologyExtensionService
-// on srv (ADR-0024 §2, ADR-0033 decisions 2-3, gibson#392): the tenant
-// owner's review of agent-proposed Taxonomy extensions. The service submits
-// OntologyExtensionApproved/Rejected events onto the caller's tenant
-// brain.Engine via d.brainRegistry — the SAME per-tenant registry
-// registerDomainPack and WorldService read/write, so an approved proposal's
-// promotion is visible to every other daemon surface immediately.
+// on srv (ADR-0024 §2, ADR-0033 decisions 2-3, gibson#392; decision 2's
+// "submit upstream" arrow, gibson#393): the tenant owner's review of
+// agent-proposed Taxonomy extensions, plus rendering an already-live one as
+// an SDK pack contribution. The service submits OntologyExtensionApproved/
+// Rejected events onto the caller's tenant brain.Engine via d.brainRegistry —
+// the SAME per-tenant registry registerDomainPack and WorldService
+// read/write, so an approved proposal's promotion is visible to every other
+// daemon surface immediately. SubmitOntologyExtensionUpstream submits no
+// event; it only reads that same per-tenant state.
 //
 // d.brainRegistry must already be constructed by the time this runs — it is
 // built earlier in the WorldService registration block (grpc.go), the same

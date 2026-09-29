@@ -2830,6 +2830,16 @@ export const AuthRegistry: Record<string, AuthEntry> = {
     unauthenticated: false,
     self: false,
   },
+  "/gibson.tenant.v1.OntologyExtensionService/SubmitOntologyExtensionUpstream": {
+    method: "/gibson.tenant.v1.OntologyExtensionService/SubmitOntologyExtensionUpstream",
+    service: "gibson.tenant.v1.OntologyExtensionService",
+    relation: "owner",
+    objectType: "tenant",
+    objectDeriver: "tenant_from_identity",
+    allowedIdentities: IdentityClass.USER,
+    unauthenticated: false,
+    self: false,
+  },
   "/gibson.tenant.v1.ProviderService/CreateProvider": {
     method: "/gibson.tenant.v1.ProviderService/CreateProvider",
     service: "gibson.tenant.v1.ProviderService",
