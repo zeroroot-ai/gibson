@@ -394,6 +394,13 @@ and pursues the move that most reduces uncertainty about the goal, net of cost. 
 the options to the highest-value few; the LLM picks within them. Not a new model — it queries
 the belief network with hypothetical outcomes. The planner is BAMCP (fully Bayesian)
 ([ADR-0026](docs/adr/0026-bayesian-sequential-planner.md)).
+The native Go BAMCP planner (`internal/engine/brain/bamcp.go`, gibson#396) is now live: it
+grounds the mission's belief network the same way exact inference does, then runs seeded
+Monte Carlo rollouts that Thompson-sample each enablement edge's Beta posterior
+([ADR-0037](docs/adr/0037-enablement-edge-strengths-are-learned-not-authored.md)) instead of
+using its fixed prior mean. A fixed seed always replays the same rollouts. It refines
+`PlanVoI`'s one-step ranking; it does not yet enforce hard top-k dispatch (gibson#397) or
+resolve real technique-by-environment reputation, both still open.
 _Avoid_: prioritization score (VoI is forward-looking planning, not a static score)
 
 **Proof-of-demonstration**:
