@@ -155,14 +155,17 @@ func (s *HarnessCallbackService) SubmitProof(ctx context.Context, req *harnesspb
 		}, nil
 	}
 
-	predictedProbability, confErr := s.stakedConfidence(ctx, mission.TenantID, hypothesisID)
-	if confErr != nil {
-		return &harnesspb.SubmitProofResponse{
+	predictedProbability, err := s.stakedConfidence(ctx, mission.TenantID, hypothesisID)
+	if err != nil {
+		// Deliberate in-band error: the missing-stake failure is surfaced to the
+		// agent in the response's HarnessError, and the gRPC error is intentionally
+		// nil (same contract as the compileErr branch above).
+		return &harnesspb.SubmitProofResponse{ //nolint:nilerr // in-band error via HarnessError; gRPC error intentionally nil
 			HypothesisId: hypothesisID,
 			Outcome:      harnesspb.SettlementOutcome_SETTLEMENT_OUTCOME_UNSPECIFIED,
 			Error: &harnesspb.HarnessError{
 				Code:    commonpb.ErrorCode_ERROR_CODE_NOT_FOUND,
-				Message: confErr.Error(),
+				Message: err.Error(),
 			},
 		}, nil
 	}
