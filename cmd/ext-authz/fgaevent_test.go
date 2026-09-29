@@ -18,14 +18,14 @@ import (
 // TestFGAEventStateClient: no URL means no subscriber, a bad URL is an
 // error, a good URL gives a client.
 func TestFGAEventStateClient(t *testing.T) {
-	if c, err := fgaEventStateClient("", "x"); c != nil || err != nil {
+	if c, err := fgaEventStateClient(context.Background(), "", "x"); c != nil || err != nil {
 		t.Fatalf("empty url: client=%v err=%v, want nil, nil", c, err)
 	}
-	if _, err := fgaEventStateClient("not a url", ""); err == nil {
+	if _, err := fgaEventStateClient(context.Background(), "not a url", ""); err == nil {
 		t.Fatal("a bad url must be an error, never a silent no-subscriber")
 	}
 	mr := miniredis.RunT(t)
-	c, err := fgaEventStateClient("redis://"+mr.Addr(), "")
+	c, err := fgaEventStateClient(context.Background(), "redis://"+mr.Addr(), "")
 	if err != nil || c == nil {
 		t.Fatalf("good url: client=%v err=%v", c, err)
 	}
@@ -48,7 +48,7 @@ func (r *recordingEvicter) InvalidateSubject(subject string) int {
 // user, keyed on the bare Zitadel id the cache uses.
 func TestRunFGAEventSubscriber_EvictsTheUser(t *testing.T) {
 	mr := miniredis.RunT(t)
-	sc, err := fgaEventStateClient("redis://"+mr.Addr(), "")
+	sc, err := fgaEventStateClient(context.Background(), "redis://"+mr.Addr(), "")
 	if err != nil {
 		t.Fatal(err)
 	}

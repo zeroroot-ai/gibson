@@ -978,7 +978,7 @@ const defaultFGACacheMaxSize = 100_000
 // is its password when set (the same Secret the daemon uses). Without a URL
 // the cache TTL is the only bound, and the log says so once.
 func startFGAEventSubscriber(ctx context.Context, log *slog.Logger, cc *fga.CachedChecker) {
-	sc, err := fgaEventStateClient(os.Getenv("EXT_AUTHZ_REDIS_URL"), os.Getenv("REDIS_PASSWORD"))
+	sc, err := fgaEventStateClient(ctx, os.Getenv("EXT_AUTHZ_REDIS_URL"), os.Getenv("REDIS_PASSWORD"))
 	if err != nil {
 		log.Error("EXT_AUTHZ_REDIS_URL is not usable; FGA write events are not subscribed, the cache TTL bounds role changes", "err", err)
 		return
@@ -996,8 +996,10 @@ type subjectEvicter interface {
 }
 
 // fgaEventStateClient builds the subscriber's Redis client from a URL and an
-// optional password. An empty URL means no subscriber (nil, nil).
-func fgaEventStateClient(redisURL, password string) (*state.StateClient, error) {
+// optional password, and proves it reachable once so a wrong address or
+// password is a boot-time error, not silence. An empty URL means no
+// subscriber (nil, nil).
+func fgaEventStateClient(ctx context.Context, redisURL, password string) (*state.StateClient, error) {
 	if redisURL == "" {
 		return nil, nil
 	}
@@ -1007,6 +1009,12 @@ func fgaEventStateClient(redisURL, password string) (*state.StateClient, error) 
 	sc, err := state.NewStateClient(cfg)
 	if err != nil {
 		return nil, fmt.Errorf("state client for EXT_AUTHZ_REDIS_URL: %w", err)
+	}
+	pingCtx, cancel := context.WithTimeout(ctx, 5*time.Second)
+	defer cancel()
+	if err := sc.Client().Ping(pingCtx).Err(); err != nil {
+		_ = sc.Close()
+		return nil, fmt.Errorf("ping EXT_AUTHZ_REDIS_URL: %w", err)
 	}
 	return sc, nil
 }
