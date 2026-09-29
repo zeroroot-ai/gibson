@@ -49,7 +49,6 @@
 /gibson.daemon.v1.DaemonService/StopComponent
 /gibson.daemon.v1.DaemonService/UpdateTarget
 /gibson.daemon.v1.DaemonService/WatchManifestInvalidations
-/gibson.harness.v1.HarnessCallbackService/CallToolProtoStream
 /gibson.harness.v1.HarnessCallbackService/GenerateNodeID
 /gibson.harness.v1.HarnessCallbackService/GetPlanContext
 /gibson.harness.v1.HarnessCallbackService/GetTaxonomySchema
