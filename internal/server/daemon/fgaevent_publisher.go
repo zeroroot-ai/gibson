@@ -18,5 +18,5 @@ func fgaEventPublisher(sc *state.StateClient, log *slog.Logger) fgaevent.Publish
 		log.Warn("no state client: FGA write events are not published, the ext-authz cache TTL bounds role changes")
 		return nil
 	}
-	return fgaevent.NewRedisPublisher(sc.Client(), log, 0)
+	return fgaevent.NewPublisher(sc, log, 0)
 }

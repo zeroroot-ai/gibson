@@ -18,7 +18,7 @@
 // import this one). Channel "gibson:fga.write", JSON:
 //
 //	{"userId": "<zitadel user id>", "op": "write"|"delete",
-//	 "tenant": "<tenant id>", "relation": "<fga relation>", "object": "tenant:<tenant id>"}
+//	 "tenant": "<tenant id>", "relation": "<fga relation>", "object": "<fga object>"}
 //
 // A change here is a change there, and the subscriber tolerates unknown
 // fields so the two may move one at a time.
@@ -27,18 +27,16 @@
 // connected misses the event. That is acceptable because the cache TTL still
 // bounds staleness at fga.DefaultCacheTTL; the event makes the common case
 // instant, the TTL keeps the worst case bounded. The subscriber reconnects
-// with backoff and logs every gap.
+// with backoff and logs every gap. The Redis client itself lives in
+// internal/engine/state; this package sees only two methods of it.
 package fgaevent
 
 import (
 	"context"
 	"encoding/json"
-	"errors"
 	"log/slog"
 	"strings"
 	"time"
-
-	"github.com/redis/go-redis/v9"
 )
 
 // Channel is the Redis pub/sub channel. It is also the value of PubsubChannel
@@ -48,8 +46,11 @@ const Channel = "gibson:fga.write"
 // Op is what happened to the tuple.
 type Op string
 
+// The two operations a tuple change can be.
 const (
-	OpWrite  Op = "write"
+	// OpWrite: the tuple was written.
+	OpWrite Op = "write"
+	// OpDelete: the tuple was deleted.
 	OpDelete Op = "delete"
 )
 
@@ -62,18 +63,37 @@ type Event struct {
 	Object   string `json:"object"`
 }
 
+const (
+	userPrefix   = "user:"
+	tenantPrefix = "tenant:"
+)
+
 // FromTuple builds the event for a tuple. The user id is the subject without
-// its "user:" prefix; the tenant is the object without its "tenant:" prefix.
-// A subject that is not a user, or an object that is not a tenant, yields an
-// event with that field empty, which the subscriber ignores.
+// its FGA type prefix; the tenant is the object without its type prefix. A
+// subject that is not a user yields an event with no user id, which the
+// publisher and the subscriber ignore.
 func FromTuple(op Op, user, relation, object string) Event {
+	userID := ""
+	if strings.HasPrefix(user, userPrefix) {
+		userID = strings.TrimPrefix(user, userPrefix)
+	}
 	return Event{
-		UserID:   strings.TrimPrefix(user, "user:"),
+		UserID:   userID,
 		Op:       op,
-		Tenant:   strings.TrimPrefix(object, "tenant:"),
+		Tenant:   strings.TrimPrefix(object, tenantPrefix),
 		Relation: relation,
 		Object:   object,
 	}
+}
+
+// MessagePublisher is the one method of the state client a publisher needs.
+type MessagePublisher interface {
+	PublishMessage(ctx context.Context, channel, payload string) error
+}
+
+// MessageSubscriber is the one method of the state client a subscriber needs.
+type MessageSubscriber interface {
+	SubscribeMessages(ctx context.Context, channel string, handle func(payload string)) error
 }
 
 // Publisher publishes events. Publish never blocks a write on Redis: it
@@ -83,22 +103,22 @@ type Publisher interface {
 	Publish(ctx context.Context, evt Event)
 }
 
-// NewRedisPublisher publishes on Channel through rdb. timeout bounds each
-// publish; zero means one second.
-func NewRedisPublisher(rdb redis.UniversalClient, log *slog.Logger, timeout time.Duration) Publisher {
+// NewPublisher publishes on Channel through mp. timeout bounds each publish;
+// zero means one second.
+func NewPublisher(mp MessagePublisher, log *slog.Logger, timeout time.Duration) Publisher {
 	if timeout <= 0 {
 		timeout = time.Second
 	}
-	return &redisPublisher{rdb: rdb, log: log, timeout: timeout}
+	return &publisher{mp: mp, log: log, timeout: timeout}
 }
 
-type redisPublisher struct {
-	rdb     redis.UniversalClient
+type publisher struct {
+	mp      MessagePublisher
 	log     *slog.Logger
 	timeout time.Duration
 }
 
-func (p *redisPublisher) Publish(ctx context.Context, evt Event) {
+func (p *publisher) Publish(ctx context.Context, evt Event) {
 	if evt.UserID == "" {
 		return
 	}
@@ -109,20 +129,30 @@ func (p *redisPublisher) Publish(ctx context.Context, evt Event) {
 	}
 	pubCtx, cancel := context.WithTimeout(ctx, p.timeout)
 	defer cancel()
-	if err := p.rdb.Publish(pubCtx, Channel, payload).Err(); err != nil {
+	if err := p.mp.PublishMessage(pubCtx, Channel, string(payload)); err != nil {
 		p.log.Warn("fgaevent: publish failed; the cache TTL bounds this change",
 			"user_id", evt.UserID, "tenant", evt.Tenant, "relation", evt.Relation, "error", err.Error())
 	}
 }
 
 // Subscribe delivers every event on Channel to handle until ctx ends. A lost
-// connection is retried with backoff up to maxBackoff; each gap is logged,
+// subscription is retried with backoff up to maxBackoff; each gap is logged,
 // because during a gap the cache TTL is the only bound.
-func Subscribe(ctx context.Context, rdb redis.UniversalClient, log *slog.Logger, handle func(Event)) {
+func Subscribe(ctx context.Context, ms MessageSubscriber, log *slog.Logger, handle func(Event)) {
 	backoff := 500 * time.Millisecond
 	const maxBackoff = 10 * time.Second
 	for {
-		err := subscribeOnce(ctx, rdb, log, handle)
+		err := ms.SubscribeMessages(ctx, Channel, func(payload string) {
+			var evt Event
+			if uerr := json.Unmarshal([]byte(payload), &evt); uerr != nil {
+				log.Warn("fgaevent: bad payload ignored", "error", uerr.Error())
+				return
+			}
+			if evt.UserID == "" {
+				return
+			}
+			handle(evt)
+		})
 		if ctx.Err() != nil {
 			return
 		}
@@ -136,37 +166,6 @@ func Subscribe(ctx context.Context, rdb redis.UniversalClient, log *slog.Logger,
 		backoff *= 2
 		if backoff > maxBackoff {
 			backoff = maxBackoff
-		}
-	}
-}
-
-func subscribeOnce(ctx context.Context, rdb redis.UniversalClient, log *slog.Logger, handle func(Event)) error {
-	sub := rdb.Subscribe(ctx, Channel)
-	defer func() { _ = sub.Close() }()
-	// Receive confirms the subscription (or fails), so a bad address shows
-	// up here rather than as silence.
-	if _, err := sub.Receive(ctx); err != nil {
-		return err
-	}
-	log.Info("fgaevent: subscribed", "channel", Channel)
-	ch := sub.Channel()
-	for {
-		select {
-		case <-ctx.Done():
-			return ctx.Err()
-		case msg, ok := <-ch:
-			if !ok {
-				return errors.New("subscription channel closed")
-			}
-			var evt Event
-			if err := json.Unmarshal([]byte(msg.Payload), &evt); err != nil {
-				log.Warn("fgaevent: bad payload ignored", "error", err.Error())
-				continue
-			}
-			if evt.UserID == "" {
-				continue
-			}
-			handle(evt)
 		}
 	}
 }

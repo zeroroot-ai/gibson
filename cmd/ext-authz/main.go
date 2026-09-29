@@ -105,7 +105,7 @@ import (
 	"crypto/x509"
 	"errors"
 	"fmt"
-	"github.com/redis/go-redis/v9"
+	"github.com/zeroroot-ai/gibson/internal/engine/state"
 	"github.com/zeroroot-ai/gibson/internal/platform/fgaevent"
 	"io"
 	"log/slog"
@@ -978,35 +978,45 @@ const defaultFGACacheMaxSize = 100_000
 // is its password when set (the same Secret the daemon uses). Without a URL
 // the cache TTL is the only bound, and the log says so once.
 func startFGAEventSubscriber(ctx context.Context, log *slog.Logger, cc *fga.CachedChecker) {
-	rdb, err := fgaEventRedis(os.Getenv("EXT_AUTHZ_REDIS_URL"), os.Getenv("REDIS_PASSWORD"))
+	sc, err := fgaEventStateClient(os.Getenv("EXT_AUTHZ_REDIS_URL"), os.Getenv("REDIS_PASSWORD"))
 	if err != nil {
-		log.Error("EXT_AUTHZ_REDIS_URL is not a Redis URL; FGA write events are not subscribed, the cache TTL bounds role changes", "err", err)
+		log.Error("EXT_AUTHZ_REDIS_URL is not usable; FGA write events are not subscribed, the cache TTL bounds role changes", "err", err)
 		return
 	}
-	if rdb == nil {
+	if sc == nil {
 		log.Warn("EXT_AUTHZ_REDIS_URL not set: FGA write events are not subscribed, the cache TTL bounds role changes")
 		return
 	}
-	go fgaevent.Subscribe(ctx, rdb, log, func(e fgaevent.Event) {
-		// The cache keys a human decision on the bare Zitadel user id (the
-		// token subject), not the FGA "user:<id>" form.
+	go runFGAEventSubscriber(ctx, sc, log, cc)
+}
+
+// subjectEvicter is the one method of the decision cache the subscriber uses.
+type subjectEvicter interface {
+	InvalidateSubject(subject string) int
+}
+
+// fgaEventStateClient builds the subscriber's Redis client from a URL and an
+// optional password. An empty URL means no subscriber (nil, nil).
+func fgaEventStateClient(redisURL, password string) (*state.StateClient, error) {
+	if redisURL == "" {
+		return nil, nil
+	}
+	cfg := state.DefaultConfig()
+	cfg.URL = redisURL
+	cfg.Password = password
+	sc, err := state.NewStateClient(cfg)
+	if err != nil {
+		return nil, fmt.Errorf("state client for EXT_AUTHZ_REDIS_URL: %w", err)
+	}
+	return sc, nil
+}
+
+// runFGAEventSubscriber evicts a user's cached decisions on every event. The
+// cache keys a human decision on the bare Zitadel user id (the token
+// subject), not the FGA "user:<id>" form.
+func runFGAEventSubscriber(ctx context.Context, ms fgaevent.MessageSubscriber, log *slog.Logger, cc subjectEvicter) {
+	fgaevent.Subscribe(ctx, ms, log, func(e fgaevent.Event) {
 		n := cc.InvalidateSubject(e.UserID)
 		log.Debug("fga write event: subject decisions evicted", "user_id", e.UserID, "tenant", e.Tenant, "relation", e.Relation, "op", string(e.Op), "evicted", n)
 	})
-}
-
-// fgaEventRedis builds the subscriber's Redis client from a URL and an
-// optional password. An empty URL means no subscriber (nil, nil).
-func fgaEventRedis(url, password string) (redis.UniversalClient, error) {
-	if url == "" {
-		return nil, nil
-	}
-	opts, err := redis.ParseURL(url)
-	if err != nil {
-		return nil, fmt.Errorf("parse EXT_AUTHZ_REDIS_URL: %w", err)
-	}
-	if password != "" {
-		opts.Password = password
-	}
-	return redis.NewClient(opts), nil
 }
