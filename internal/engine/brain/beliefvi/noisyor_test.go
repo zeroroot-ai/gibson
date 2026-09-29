@@ -13,9 +13,9 @@ import (
 // parent_i=true} (1-strengths[i]) — the O(2**nParents) reference the
 // decomposition must agree with. Mirrors test_noisy_or.py's
 // _brute_force_cpt, including pgmpy's column order (last parent fastest).
-func bruteForceNoisyOrCPT(t *testing.T, nParents int, strengths []float64, leak float64) (Factor, []string) {
+func bruteForceNoisyOrCPT(t *testing.T, nParents int, strengths []float64, leak float64) (factor Factor, parents []string) {
 	t.Helper()
-	parents := make([]string, nParents)
+	parents = make([]string, nParents)
 	for i := range parents {
 		parents[i] = fmt.Sprintf("p%d", i)
 	}
@@ -47,9 +47,9 @@ func bruteForceNoisyOrCPT(t *testing.T, nParents int, strengths []float64, leak 
 	return f, parents
 }
 
-func decomposedNoisyOr(t *testing.T, nParents int, strengths []float64, leak float64) ([]Factor, []string) {
+func decomposedNoisyOr(t *testing.T, nParents int, strengths []float64, leak float64) (factors []Factor, parents []string) {
 	t.Helper()
-	parents := make([]string, nParents)
+	parents = make([]string, nParents)
 	causes := make([]NoisyOrCause, nParents)
 	for i := range nParents {
 		parents[i] = fmt.Sprintf("p%d", i)

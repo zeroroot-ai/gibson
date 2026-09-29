@@ -211,7 +211,10 @@ func Query(factors []Factor, variable string, evidence map[string]string) (map[s
 		for _, f := range involved[1:] {
 			product = product.Multiply(f)
 		}
-		working = append(rest, product.SumOut(v))
+		next := make([]Factor, 0, len(rest)+1)
+		next = append(next, rest...)
+		next = append(next, product.SumOut(v))
+		working = next
 	}
 
 	if len(working) == 0 {
@@ -239,12 +242,28 @@ func Query(factors []Factor, variable string, evidence map[string]string) (map[s
 // mirroring infer.check_model exactly: every declared variable needs exactly
 // one CPD, every parent a CPD names must be declared, each CPD must be a
 // proper conditional distribution (its variable's states sum to 1 for every
-// parent assignment), and the parent relation must be acyclic.
+// parent assignment), and the parent relation must be acyclic. Split into
+// three focused passes (ownership, normalisation, acyclicity) so each stays
+// simple enough to read on its own.
 func CheckModel(factors []Factor, variables []string) error {
+	owned, err := checkModelOwnership(factors, variables)
+	if err != nil {
+		return err
+	}
+	if err := checkModelNormalised(factors, owned); err != nil {
+		return err
+	}
+	return checkModelAcyclic(factors, variables)
+}
+
+// checkModelOwnership validates that factors and variables name exactly the
+// same set, with no factor missing a variable and no variable declared
+// twice, and returns each factor's owned (first-axis) variable.
+func checkModelOwnership(factors []Factor, variables []string) ([]string, error) {
 	owned := make([]string, len(factors))
 	for i, f := range factors {
 		if len(f.Variables) == 0 {
-			return fmt.Errorf("beliefvi: check model: factor %d owns no variable", i)
+			return nil, fmt.Errorf("beliefvi: check model: factor %d owns no variable", i)
 		}
 		owned[i] = f.Variables[0]
 	}
@@ -256,7 +275,7 @@ func CheckModel(factors []Factor, variables []string) error {
 		}
 	}
 	if len(missing) > 0 {
-		return fmt.Errorf("beliefvi: no cpd for declared variable(s): %v", missing)
+		return nil, fmt.Errorf("beliefvi: no cpd for declared variable(s): %v", missing)
 	}
 	var extra []string
 	for _, v := range owned {
@@ -265,18 +284,24 @@ func CheckModel(factors []Factor, variables []string) error {
 		}
 	}
 	if len(extra) > 0 {
-		return fmt.Errorf("beliefvi: cpd for undeclared variable(s): %v", extra)
+		return nil, fmt.Errorf("beliefvi: cpd for undeclared variable(s): %v", extra)
 	}
 	seen := make(map[string]struct{}, len(owned))
 	for _, v := range owned {
 		if _, dup := seen[v]; dup {
-			return fmt.Errorf("beliefvi: more than one cpd declared for the same variable: %q", v)
+			return nil, fmt.Errorf("beliefvi: more than one cpd declared for the same variable: %q", v)
 		}
 		seen[v] = struct{}{}
 	}
+	return owned, nil
+}
 
-	declared := make(map[string]struct{}, len(variables))
-	for _, v := range variables {
+// checkModelNormalised validates that every factor names only declared
+// parents and is a proper conditional distribution (its owned variable's
+// states sum to 1 for every parent assignment).
+func checkModelNormalised(factors []Factor, owned []string) error {
+	declared := make(map[string]struct{}, len(owned))
+	for _, v := range owned {
 		declared[v] = struct{}{}
 	}
 	for _, f := range factors {
@@ -301,16 +326,21 @@ func CheckModel(factors []Factor, variables []string) error {
 			}
 		}
 	}
+	return nil
+}
 
-	// A cyclic parent relation is not a Bayesian network. Variable
-	// elimination would still terminate on one and hand back a confident
-	// number, so reject it here rather than serve a meaningless posterior.
+// checkModelAcyclic validates that factors' parent relation is acyclic. A
+// cyclic parent relation is not a Bayesian network: variable elimination
+// would still terminate on one and hand back a confident number, so this is
+// rejected here rather than serving a meaningless posterior.
+func checkModelAcyclic(factors []Factor, variables []string) error {
 	parents := make(map[string][]string, len(factors))
 	for _, f := range factors {
 		p := append([]string(nil), f.Variables[1:]...)
 		sort.Strings(p)
 		parents[f.Variables[0]] = p
 	}
+
 	const (
 		unvisited = 0
 		visiting  = 1

@@ -4,6 +4,7 @@
 package beliefvi
 
 import (
+	"bytes"
 	"os"
 	"testing"
 )
@@ -24,7 +25,7 @@ func TestDefaultArtifact_MatchesTheCanonicalPythonSource(t *testing.T) {
 	if err != nil {
 		t.Fatalf("read canonical source %s: %v", canonicalBaseV1Path, err)
 	}
-	if string(canonical) != string(embeddedBaseV1JSON) {
+	if !bytes.Equal(canonical, embeddedBaseV1JSON) {
 		t.Fatalf("embedded models/base-v1.json has drifted from the canonical %s; "+
 			"copy the canonical file over the embedded one", canonicalBaseV1Path)
 	}

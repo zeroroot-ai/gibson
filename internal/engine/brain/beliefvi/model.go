@@ -8,6 +8,7 @@ import (
 	"fmt"
 	"os"
 	"sort"
+	"strings"
 )
 
 // QueryVars are the three belief-field components every model artifact MUST
@@ -33,6 +34,8 @@ type ModelArtifact struct {
 
 // LoadModelArtifact reads and parses a model artifact JSON file.
 func LoadModelArtifact(path string) (ModelArtifact, error) {
+	// #nosec G304 -- path is an operator-supplied config path (daemon startup
+	// flag / GIBSON_BELIEF_MODEL_PATH), never end-user input.
 	raw, err := os.ReadFile(path)
 	if err != nil {
 		return ModelArtifact{}, fmt.Errorf("beliefvi: load model artifact: %w", err)
@@ -107,11 +110,8 @@ func EvidenceToObservations(ev Evidence, knownVars map[string]struct{}) (obs map
 	sort.Strings(svcs)
 	for _, svc := range svcs {
 		name := svc
-		for i := 0; i < len(svc); i++ {
-			if svc[i] == '/' {
-				name = svc[i+1:]
-				break
-			}
+		if _, after, ok := strings.Cut(svc, "/"); ok {
+			name = after
 		}
 		v := "svc_" + name
 		if _, ok := knownVars[v]; ok {

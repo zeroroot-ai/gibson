@@ -43,6 +43,8 @@ func TestPgmpyParity(t *testing.T) {
 			parityFixtureEnv, parityFixtureEnv)
 	}
 
+	// #nosec G304 -- path comes from GIBSON_BELIEF_PARITY_FIXTURE, a CI/dev
+	// environment variable, never end-user input.
 	raw, err := os.ReadFile(path)
 	if err != nil {
 		t.Fatalf("read fixture %s: %v", path, err)
