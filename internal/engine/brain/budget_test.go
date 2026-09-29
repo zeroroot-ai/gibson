@@ -33,6 +33,7 @@ func TestBudget_ExecutionRunawayGuardAborts(t *testing.T) {
 	e, dw := budgetEngine(llm, func(string) []Capability { return []Capability{{Kind: "agent", Name: "loop"}} })
 
 	e.Submit(MissionProjected{ID: "m1", Goal: "endless", Budget: Budget{MaxExecutions: 3}})
+	approveViaVoI(e, "m1", Capability{Kind: "agent", Name: "loop"})
 	runRounds(e, dw, 20)
 
 	m := e.Missions()[0]

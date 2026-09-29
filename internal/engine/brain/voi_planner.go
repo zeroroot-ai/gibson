@@ -40,12 +40,12 @@ import (
 // resolved CoveringCapabilities (ADR-0035 decision 4, gibson#387's
 // technique -> capability bridge, wired through catalog/hierarchy below), the
 // mapping from a VoICandidate to the dispatchable capabilities that can
-// address it. Turning that into an actual DeciderDispatch — choosing ONE
-// covering capability and refusing dispatch outside the VoI top-k — is
-// gibson#396's (BAMCP planner) and gibson#397's (hard top-k enforcement) job,
-// not this file's; this one makes the ranked, capability-resolved plan a
-// first-class, replayable fact on the World, which is the seam that wiring
-// needs.
+// address it. Refining that ranking into a multi-step plan is gibson#396's
+// BAMCP planner (bamcp.go); refusing a DeciderDispatch outside the VoI top-k
+// is gibson#397's hard top-k enforcement (decider.go's voiGatedDispatch),
+// which reads the VoIPlanState this file folds — not this file's own job; this
+// one makes the ranked, capability-resolved plan a first-class, replayable
+// fact on the World, which is the seam #397's gate reads from.
 
 // VoIPlanState is the per-mission VoI planning record: whether a plan is
 // currently being computed (in flight), the evidence cursor it was requested
