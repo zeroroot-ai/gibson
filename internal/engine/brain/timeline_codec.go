@@ -139,6 +139,9 @@ func init() {
 	// domain_pack.go
 	registerEvent("domain_pack.enabled", func() Event { return &DomainPackEnabled{} })
 	registerEvent("domain_pack.disabled", func() Event { return &DomainPackDisabled{} })
+
+	// ontology_extension.go
+	registerEvent("ontology_extension.proposed", func() Event { return &OntologyExtensionProposed{} })
 }
 
 // EncodeEvent serialises ev as a JSON envelope. The envelope preserves the
@@ -263,6 +266,8 @@ func dereferenceEvent(ev Event) Event {
 	case *DomainPackEnabled:
 		return *v
 	case *DomainPackDisabled:
+		return *v
+	case *OntologyExtensionProposed:
 		return *v
 	default:
 		// Unknown pointer type — return as-is; the caller will surface the
