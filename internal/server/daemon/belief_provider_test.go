@@ -70,15 +70,20 @@ func TestResolveBeliefProvider_FailsLoudOnAnInvalidOverride(t *testing.T) {
 	}
 }
 
-// TestResolveSliceBeliefProvider_IsTheDeterministicPlaceholder pins today's
-// documented state (belief_provider.go): the graph-coupled SliceBeliefProvider
-// is always the placeholder until the ontology's per-edge-type target
-// variable and noisy-OR strength/leak parameters exist for ground.py to
-// consume (gibson#275/#288).
-func TestResolveSliceBeliefProvider_IsTheDeterministicPlaceholder(t *testing.T) {
-	p := resolveSliceBeliefProvider()
-	if got := p.Version(); got != "placeholder-slice-v0" {
-		t.Fatalf("resolveSliceBeliefProvider version = %q, want placeholder-slice-v0", got)
+// TestResolveSliceBeliefProvider_IsTheNativeGroundingProvider pins today's
+// documented state (belief_provider.go, gibson#394/ADR-0037): the
+// graph-coupled SliceBeliefProvider grounds the registry's declared belief-PRM
+// schema in-process via beliefvi (brain.NativeSliceBeliefProvider), never the
+// deterministic placeholder — the ontology's per-edge-type target-variable
+// declaration (ADR-0037 decision 1) is what unblocked the switch.
+func TestResolveSliceBeliefProvider_IsTheNativeGroundingProvider(t *testing.T) {
+	reg, err := newBeliefSchemaRegistry()
+	if err != nil {
+		t.Fatalf("newBeliefSchemaRegistry: %v", err)
+	}
+	p := resolveSliceBeliefProvider(reg)
+	if got := p.Version(); got != "native-slice-v0-uninformative-prior" {
+		t.Fatalf("resolveSliceBeliefProvider version = %q, want native-slice-v0-uninformative-prior", got)
 	}
 }
 

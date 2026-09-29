@@ -1021,12 +1021,12 @@ func (d *daemonImpl) Start(ctx context.Context) error {
 		return fmt.Errorf("failed to resolve belief provider: %w", err)
 	}
 	d.beliefProvider = beliefProvider
-	sliceBeliefProvider := resolveSliceBeliefProvider()
 	beliefSchemaRegistry, err := newBeliefSchemaRegistry()
 	if err != nil {
 		d.stopServices(ctx)
 		return fmt.Errorf("failed to build belief schema registry: %w", err)
 	}
+	sliceBeliefProvider := resolveSliceBeliefProvider(beliefSchemaRegistry)
 	d.brainRegistry = brain.NewRegistry(ctx, append(
 		[]brain.System{brain.BeliefSystem},
 		brain.ExecutorSystems()..., // scheduler/condition/decider-gate/budget/retry/completion (gibson#851)

@@ -65,6 +65,34 @@ type NodeBeliefSchema struct {
 	Variables []BeliefVariable
 }
 
+// EnablementEdgeSpec declares one relationship type that propagates belief
+// (ADR-0029 §7) and the STRUCTURE of that propagation (ADR-0037 decision 1):
+// "an edge of RelType feeds TargetVariable on its destination node" — the
+// node at the edge's To end, direction taken verbatim from the infra graph
+// the same way DeriveAttackGraph already does, so no separate direction
+// field is needed.
+//
+// This is declarative structure only, authored like the rest of the
+// ontology. The noisy-OR STRENGTH that contribution carries is never
+// declared here: ADR-0037 decision 2 makes it a learned Beta posterior, fit
+// offline by braintrain from recorded outcomes (#395), consumed as the
+// posterior mean; until a posterior exists, the belief runtime grounds this
+// edge type at the uninformative-prior mean instead (ADR-0037 decision 3,
+// internal/engine/brain's UninformativePriorStrength) — never a
+// hand-authored number.
+type EnablementEdgeSpec struct {
+	// RelType is the relationship type this spec flags as belief-propagating
+	// (e.g. "RESOLVES_TO").
+	RelType string
+
+	// TargetVariable names the belief variable this edge type feeds on its
+	// destination node — a BeliefVariable.Name the destination node's OWN
+	// NodeBeliefSchema declares, though that is validated at grounding time
+	// (which concrete node types an edge type ever points at is graph data,
+	// not schema), not at registration time.
+	TargetVariable string
+}
+
 // BeliefSchemaExtension is a named, Pack-contributed bundle of belief-bearing
 // node declarations and enablement-edge flags (ADR-0024 / ADR-0029 §2, §7).
 // Register it with a BeliefSchemaRegistry the same way an
@@ -75,9 +103,12 @@ type BeliefSchemaExtension struct {
 	Nodes []NodeBeliefSchema
 
 	// EnablementEdges lists relationship types that propagate belief along
-	// them (ADR-0029 §7). Order is insignificant; duplicates across
-	// extensions are benign (see BeliefSchemaRegistry.RegisterExtension).
-	EnablementEdges []string
+	// them, and which target variable each feeds (ADR-0029 §7, ADR-0037
+	// decision 1). Order is insignificant; two extensions (or one extension,
+	// twice) declaring the SAME RelType with the SAME TargetVariable is
+	// benign and unioned; declaring it with a DIFFERENT TargetVariable is a
+	// hard conflict (see BeliefSchemaRegistry.RegisterExtension).
+	EnablementEdges []EnablementEdgeSpec
 }
 
 // DuplicateVariableError is returned by RegisterExtension when two
@@ -120,6 +151,24 @@ func (e *VariableCycleError) Error() string {
 	return fmt.Sprintf("ontology: belief variable cycle on node type %q: %v", e.NodeType, e.Cycle)
 }
 
+// ConflictingEnablementEdgeTargetError is returned by RegisterExtension when
+// two extensions (or one extension, twice) declare the SAME enablement edge
+// RelType with DIFFERENT TargetVariable values (ADR-0037 decision 1). Unlike
+// the plain enablement-edge flag, a target variable is a payload, not just a
+// flag, so two competing declarations cannot be silently unioned.
+type ConflictingEnablementEdgeTargetError struct {
+	RelType  string
+	Existing string
+	New      string
+}
+
+func (e *ConflictingEnablementEdgeTargetError) Error() string {
+	return fmt.Sprintf(
+		"ontology: enablement edge %q already targets variable %q, cannot also target %q",
+		e.RelType, e.Existing, e.New,
+	)
+}
+
 // BeliefSchemaRegistry holds the belief-PRM schema declared by the
 // ontology/Pack: which node types are belief-bearing, their variables and
 // intra-node dependencies, and which relationship types are enablement
@@ -136,8 +185,9 @@ type BeliefSchemaRegistry struct {
 	// A nested map keeps variable lookup and duplicate detection O(1).
 	nodes map[string]map[string]BeliefVariable
 
-	// enablementEdges is the merged, live set of enablement edge types.
-	enablementEdges map[string]struct{}
+	// enablementEdges is the merged, live view: relationship type -> the
+	// target variable it feeds (ADR-0037 decision 1).
+	enablementEdges map[string]string
 }
 
 // NewBeliefSchemaRegistry constructs an empty registry. Register the core
@@ -147,7 +197,7 @@ func NewBeliefSchemaRegistry() *BeliefSchemaRegistry {
 	return &BeliefSchemaRegistry{
 		extensions:      make(map[string]BeliefSchemaExtension),
 		nodes:           make(map[string]map[string]BeliefVariable),
-		enablementEdges: make(map[string]struct{}),
+		enablementEdges: make(map[string]string),
 	}
 }
 
@@ -279,6 +329,20 @@ func (r *BeliefSchemaRegistry) EnablementEdgeTypes() []string {
 	return out
 }
 
+// EnablementEdgeTargetVariable returns the belief variable relType feeds on
+// its destination node (ADR-0037 decision 1), and whether relType is a known
+// enablement edge at all (equivalent to IsEnablementEdge) — a TargetVariable
+// is mandatory on every registered EnablementEdgeSpec (see
+// validateBeliefSchemaExtensionShape), so ok is false only when relType was
+// never flagged as belief-propagating in the first place; a registered edge
+// type always has a target variable to report.
+func (r *BeliefSchemaRegistry) EnablementEdgeTargetVariable(relType string) (variable string, ok bool) {
+	r.mu.RLock()
+	defer r.mu.RUnlock()
+	variable, ok = r.enablementEdges[relType]
+	return variable, ok
+}
+
 // --- internal helpers ---
 
 // validateBeliefSchemaExtensionShape checks the parts of ext that can be
@@ -308,8 +372,11 @@ func validateBeliefSchemaExtensionShape(ext BeliefSchemaExtension) error {
 		}
 	}
 	for _, edge := range ext.EnablementEdges {
-		if err := taxonomy.ValidIdentifier(edge); err != nil {
+		if err := taxonomy.ValidIdentifier(edge.RelType); err != nil {
 			return fmt.Errorf("ontology: enablement edge type: %w", err)
+		}
+		if err := taxonomy.ValidIdentifier(edge.TargetVariable); err != nil {
+			return fmt.Errorf("ontology: enablement edge %q target variable: %w", edge.RelType, err)
 		}
 	}
 	return nil
@@ -327,9 +394,9 @@ func validateBeliefSchemaExtensionShape(ext BeliefSchemaExtension) error {
 // is blamed in the error may vary, and that is acceptable (the caller only
 // distinguishes error vs. no error; message text is not part of the
 // contract).
-func mergeBeliefSchemaExtensions(exts map[string]BeliefSchemaExtension) (nodes map[string]map[string]BeliefVariable, enablementEdges map[string]struct{}, err error) {
+func mergeBeliefSchemaExtensions(exts map[string]BeliefSchemaExtension) (nodes map[string]map[string]BeliefVariable, enablementEdges map[string]string, err error) {
 	nodes = make(map[string]map[string]BeliefVariable)
-	enablementEdges = make(map[string]struct{})
+	enablementEdges = make(map[string]string)
 
 	for _, ext := range exts {
 		for _, n := range ext.Nodes {
@@ -346,7 +413,12 @@ func mergeBeliefSchemaExtensions(exts map[string]BeliefSchemaExtension) (nodes m
 			}
 		}
 		for _, edge := range ext.EnablementEdges {
-			enablementEdges[edge] = struct{}{}
+			if existing, ok := enablementEdges[edge.RelType]; ok && existing != edge.TargetVariable {
+				return nil, nil, &ConflictingEnablementEdgeTargetError{
+					RelType: edge.RelType, Existing: existing, New: edge.TargetVariable,
+				}
+			}
+			enablementEdges[edge.RelType] = edge.TargetVariable
 		}
 	}
 

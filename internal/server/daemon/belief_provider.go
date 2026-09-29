@@ -62,28 +62,21 @@ func loadBeliefModelArtifact() (beliefvi.ModelArtifact, error) {
 // (ADR-0029, gibson#275): the belief engine consulted for a whole bounded
 // slice (gibson#287) at once, instead of one host in isolation.
 //
-// This is deliberately always the deterministic placeholder for now, NOT an
-// oversight, and NOT something ADR-0034's native-Go port changes: the exact
-// VE + noisy-OR engine a real implementation needs (grounding a bounded
-// slice, internal/engine/brain/beliefvi's GroundSlice/SolveSlice) already
-// exists and is parity-tested — what is still missing is the ontology DATA it
-// would ground, not an inference engine to run it with. ground.py's
-// cross-node enablement edges need two numbers the ontology schema has no
-// source for yet: which of a target node's OWN declared variables an
-// incoming enablement edge feeds (gibson#296's schema declares intra-node
-// DependsOn names but not a per-edge-type target variable — ADR-0037
-// decision 1 names this as future work), and the noisy-OR strength/leak for
-// that contribution (ADR-0037 decision 2: a learned Beta posterior per
-// edge-type, fit by braintrain — braintrain gibson#25 still only refits the
-// OLD single-host CPT template). Both are real ontology/training decisions
-// from a separate epic (gibson#346/#333), not values this wiring should
-// invent silently. Once they exist, a beliefvi.GroundSlice/SolveSlice-backed
-// implementation of brain.SliceBeliefProvider plugs in here exactly the way
-// beliefvi.BeliefModel already does for resolveBeliefProvider above — and,
-// same as that provider, entirely in-process; there is no sidecar HTTP path
-// left anywhere in this seam to cut over.
-func resolveSliceBeliefProvider() brain.SliceBeliefProvider {
-	return brain.PlaceholderSliceBeliefProvider()
+// This is now brain.NativeSliceBeliefProvider (gibson#394, ADR-0037):
+// registry supplies both the schema data ground.py's cross-node enablement
+// edges used to have no source for (which of a target node's OWN declared
+// variables an incoming enablement edge feeds — ADR-0037 decision 1's
+// EnablementEdgeSpec.TargetVariable) and the exact VE + noisy-OR engine
+// (internal/engine/brain/beliefvi's GroundSlice/SolveSlice, #401,
+// parity-tested) that grounds it, entirely in-process; there is no sidecar
+// HTTP path left anywhere in this seam to cut over to. The noisy-OR
+// strength/leak ADR-0037 decision 2 assigns to a learned Beta posterior per
+// edge-type is a separate, later slice (braintrain, gibson#395); until it
+// lands, every cause grounds at the uninformative-prior cold start
+// (brain.UninformativePriorStrength, ADR-0037 decision 3) — never a
+// hand-authored number.
+func resolveSliceBeliefProvider(registry *ontology.BeliefSchemaRegistry) brain.SliceBeliefProvider {
+	return brain.NativeSliceBeliefProvider(registry)
 }
 
 // newBeliefSchemaRegistry builds the ontology belief-PRM schema registry
