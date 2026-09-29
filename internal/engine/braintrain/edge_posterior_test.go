@@ -18,7 +18,7 @@ import (
 // tested against). RESOLVES_TO: 7 successes, 3 failures. AFFECTS: 1 success,
 // 0 failures. NEVER_OBSERVED never appears.
 func syntheticOutcomes() []EdgeOutcome {
-	var out []EdgeOutcome
+	out := make([]EdgeOutcome, 0, 11)
 	for range 7 {
 		out = append(out, EdgeOutcome{EdgeType: "RESOLVES_TO", Success: true})
 	}

@@ -73,7 +73,7 @@ func run(args []string) error {
 		out          = fs.String("out", ".", "output directory for the versioned per-tenant artifact(s)")
 	)
 	if err := fs.Parse(args); err != nil {
-		return err
+		return fmt.Errorf("belief-trainer: parse flags: %w", err)
 	}
 
 	if *tenant == "" {

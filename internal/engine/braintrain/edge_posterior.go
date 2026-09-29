@@ -163,7 +163,10 @@ func (a *EdgePosteriorArtifact) Write(path string) error {
 		return fmt.Errorf("braintrain: encode edge posterior artifact: %w", err)
 	}
 	b = append(b, '\n')
-	return os.WriteFile(path, b, 0o600)
+	if err := os.WriteFile(path, b, 0o600); err != nil {
+		return fmt.Errorf("braintrain: write edge posterior artifact: %w", err)
+	}
+	return nil
 }
 
 // LoadEdgePosteriorArtifact reads a fitted edge-posterior artifact JSON file
