@@ -1,5 +1,12 @@
 # Changelog
 
+## [0.143.1](https://github.com/zeroroot-ai/gibson/compare/v0.143.0...v0.143.1) (2026-09-29)
+
+
+### Bug Fixes
+
+* **authz:** update a conditioned tuple with two OpenFGA writes, not one ([#366](https://github.com/zeroroot-ai/gibson/issues/366)) ([d3466fd](https://github.com/zeroroot-ai/gibson/commit/d3466fdc5f5b414b8127318dc634c896ead53541))
+
 ## [0.143.0](https://github.com/zeroroot-ai/gibson/compare/v0.142.7...v0.143.0) (2026-09-28)
 
 
