@@ -4,7 +4,7 @@
 // Command belief-trainer is the offline batch trainer for the belief field
 // (ADR-0006, gibson#753). It fits a NEW versioned PER-TENANT belief model from a
 // tenant's outcomes + HITL labels and writes it in the exact artifact format the
-// pgmpy sidecar loads (ADR-0005, gibson#750).
+// native Go belief runtime loads (ADR-0005, ADR-0034, gibson#750).
 //
 // It is strictly OUT-OF-BAND — never the daemon hot path, never online learning
 // (that would break deterministic replay). In production the daemon drives the

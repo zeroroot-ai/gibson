@@ -1608,11 +1608,15 @@ func (d *daemonImpl) buildGRPCServer(ctx context.Context) (*grpcSubsystem, error
 
 	// Register gibson.world.v1.WorldService — the daemon-mediated read path into
 	// the ECS brain (epic ecs-brain, gibson#752). Per-tenant, tenant-isolated; the
-	// registry is created lazily here with the resolved belief provider (the pgmpy
-	// sidecar when GIBSON_BELIEF_SIDECAR_URL is set, else the placeholder).
+	// registry is created lazily here with the resolved belief provider (native
+	// Go, in-process — ADR-0034).
 	if d.brainRegistry == nil {
 		if d.beliefProvider == nil {
-			d.beliefProvider = resolveBeliefProvider()
+			beliefProvider, err := resolveBeliefProvider()
+			if err != nil {
+				return nil, fmt.Errorf("failed to resolve belief provider: %w", err)
+			}
+			d.beliefProvider = beliefProvider
 		}
 		sliceBeliefProvider := resolveSliceBeliefProvider()
 		beliefSchemaRegistry, err := newBeliefSchemaRegistry()

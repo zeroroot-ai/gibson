@@ -5,7 +5,9 @@
 // gibson#753). It consumes a tenant's brain Timeline — auto-outcomes (mission
 // results folded into the World) plus HITL labels — fits the belief network's
 // CPTs by smoothed counting, and ships a NEW versioned PER-TENANT model artifact
-// in the exact on-disk format the pgmpy sidecar loads (ADR-0005, gibson#750).
+// in the exact on-disk format the native Go belief runtime loads (ADR-0005,
+// ADR-0034, gibson#750): internal/engine/brain/beliefvi.LoadModelArtifact, in
+// the daemon; the retired Python belief sidecar loaded the same format.
 //
 // This is strictly OUT-OF-BAND. It never runs in the daemon hot path and never
 // mutates a live World (online learning would drift the field mid-mission and
@@ -24,8 +26,8 @@ import (
 	"sort"
 )
 
-// Artifact is the on-disk belief-model JSON the pgmpy sidecar loads
-// (sidecar/belief/models/<version>.json). It mirrors that schema exactly: a
+// Artifact is the on-disk belief-model JSON the native Go belief runtime
+// loads (sidecar/belief/models/<version>.json). It mirrors that schema exactly: a
 // discrete Bayesian network of binary variables with a CPT per variable. The
 // trainer reads a base artifact for STRUCTURE (variables + edges) and rewrites
 // the CPT values from tenant data.

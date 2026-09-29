@@ -1,54 +1,46 @@
-# Belief-field sidecar (ADR-0005)
+# Belief-field reference implementation (ADR-0005, ADR-0034)
 
-This is the **belief-field sidecar**: a small Python service that runs **exact,
-read-only** Bayesian inference (variable elimination) over an attack-path
-network and returns the three belief-field components for a host —
-`P(juicy)` / `P(exploitable)` / `P(reachable)`.
+This package is the **offline reference implementation and pgmpy parity
+oracle** for the belief-field inference algorithm — exact Bayesian inference
+(variable elimination) plus the noisy-OR enablement-CPT decomposition
+(ADR-0029 §6). It is NOT a running service.
 
-The Go daemon never does probability math itself (ADR-0005 §1: "LLMs are bad
-probability calculators; a Bayes net is calibrated, fast, free"). The daemon's
-`brain.PgmpyBeliefProvider` POSTs host evidence here on **evidence change**
-(never per clock tick). `internal/engine/brain/belief.go::BeliefSystem` fingerprints
-each host's evidence and asks for a score only when that fingerprint moves, and
-`BeliefWorker` makes the POST off the engine tick, so inference never blocks the
-tick loop. The daemon records the returned model **version** on the host so replay
-reproduces.
+Belief inference itself runs **in-process, in Go**, in the daemon:
+`internal/engine/brain/beliefvi` is a line-for-line port of the algorithm
+here (`infer.py`, `noisy_or.py`, `ground.py`, `model.py`), used by
+`brain.NativeBeliefProvider` (ADR-0034, gibson#377). The Python HTTP sidecar
+this package used to run (`server.py`) and its image
+(`gibson-belief-sidecar`) are retired — hard cutover, no HTTP round-trip left
+anywhere in this seam.
 
-## Invariants (ADR-0005)
+## What stays, and why
 
-- **Exact inference only** (variable elimination, `infer.py`) — never sampling.
-  Deterministic and reproducible, which 1:1 replay / the Scroller require.
-- **Read-only at runtime.** The server loads versioned artifacts and answers
-  posteriors; it never trains or mutates a model online (online learning would
-  drift the field mid-mission and break replay). Training is a separate offline
-  batch job (out of scope here; see ADR-0005 §4).
-- **Versioned artifacts.** Each model file declares its `version`. A mission pins
-  the version it ran under (`Mission.BeliefModel`); a `version` in the request
-  selects that artifact, so replay re-loads the exact model.
-- **Novel nodes → the caller's LLM fills the gap, not the math** (ADR-0005 §6).
-  When evidence references a variable the network has no table for, the response
-  flags it under `novel`; the daemon may re-POST with an LLM-estimated `prior`.
+- **`infer.py` / `noisy_or.py` / `ground.py` / `model.py`** stay as the
+  reference implementation `beliefvi`'s Go answers are checked against.
+  `test_parity.py` asserts `infer.query` agrees with `pgmpy`'s
+  `VariableElimination` to 1e-12 (unchanged from before ADR-0034);
+  `gen_parity_fixture.py` generates the same cases as a JSON fixture so a Go
+  test (`beliefvi.TestPgmpyParity`) can assert the same 1e-12 agreement
+  transitively, without pgmpy (or numpy) ever linking into the Go binary or
+  any runtime image.
+- **`models/base-v1.json`** stays canonical here — `braintrain`
+  (`cmd/belief-trainer`, `internal/engine/braintrain`) and this package's own
+  tests read it from this path. `internal/engine/brain/beliefvi` embeds a
+  guarded byte-identical copy (`beliefvi/models/base-v1.json`,
+  `TestDefaultArtifact_MatchesTheCanonicalPythonSource`) so the daemon binary
+  needs no external model file for the OSS default.
+- **pgmpy** is a dev-only, CI-only dependency (`requirements-dev.txt`) — the
+  offline parity oracle, never a deployed dependency, exactly as ADR-0005
+  originally intended before the sidecar existed.
 
-## Wire protocol
+## What is gone
 
-`POST /score` with:
-
-```json
-{
-  "version": "base-v1",
-  "evidence": {"open_ports": [22, 443], "services": ["22/ssh", "443/https"], "reachable": true},
-  "priors": {"10.0.0.5": {"juicy": 0.3, "exploitable": 0.4, "reachable": 1.0}}
-}
-```
-
-Response:
-
-```json
-{"version": "base-v1", "juicy": 0.61, "exploitable": 0.74, "reachable": 1.0, "novel": []}
-```
-
-`GET /healthz` → `200 ok` once a model is loaded.
-`GET /version` → `{"versions": ["base-v1", ...], "default": "base-v1"}`.
+`server.py`, `test_server.py`, the `/score` / `/healthz` / `/version` HTTP
+wire protocol, and `Dockerfile` (the `gibson-belief-sidecar` image and its
+`gibson-images.yml` publish job). Nothing calls `resolveBeliefProvider`'s old
+`GIBSON_BELIEF_SIDECAR_URL` env var any more; the daemon now takes an
+optional `GIBSON_BELIEF_MODEL_PATH` file path (e.g. for a curated commercial
+base model) and otherwise uses the embedded `base-v1` model.
 
 ## Ground-slice inference (ADR-0029 §5/§6, gibson#288)
 
@@ -57,6 +49,8 @@ single-host model above: given a bounded slice (gibson#287 — a set of nodes,
 each with its own declared belief variables, plus the enablement edges wiring
 one node's variable into another's), `ground.solve_slice` grounds it into one
 factor set and returns exact posteriors for every `(node, variable)` pair.
+`beliefvi.GroundSlice` / `beliefvi.SolveSlice` are the Go port, exercised by
+the same test shapes as `test_ground.py` / `test_noisy_or.py`.
 
 A node with many enablement-edge parents would otherwise need a CPT with
 `2**N` columns. `noisy_or.noisy_or_factors` builds the same conditional
@@ -70,12 +64,15 @@ enablement cause identically: both are just independent noisy-OR causes of
 the variable they feed, so one mechanism covers what used to be a
 node-specific hardcoded CPT and what ADR-0029 newly adds.
 
-This is not yet wired into the `/score` wire protocol or the Go daemon's
-`PgmpyBeliefProvider` — that integration is the belief engine proper
-(gibson#275), which will decide the actual request/response shape once it
-consumes `internal/engine/brain`'s `AttackGraph` (gibson#286) and
-`ExtractBoundedSlice` (gibson#287) output. This is the solving capability
-those pieces will call into.
+Grounding a *live* bounded slice (as opposed to running the algorithm on
+hand-built `NodeSpec`/`EnablementCause` values in a test) still needs two
+numbers the ontology has no source for yet: which of a target node's own
+declared variables an incoming enablement edge feeds, and the noisy-OR
+strength/leak for that contribution (ADR-0037 — a learned Beta posterior per
+edge-type, gibson#346/#333). `beliefvi.GroundSlice`/`SolveSlice` are ready;
+`internal/server/daemon/belief_provider.go`'s `resolveSliceBeliefProvider`
+documents exactly what still blocks wiring a real
+`brain.SliceBeliefProvider` from them.
 
 ## Model artifact format
 
@@ -87,52 +84,41 @@ base model and `model.py` for the schema.
 
 OSS ships the minimal `base-v1`; the curated commercial base model (vendor
 red-team + public CVE/MITRE ATT&CK, never tenant data — ADR-0003/0005 §7) is
-served by the commercial layer and dropped in as additional `models/*.json`.
+served by the commercial layer via `GIBSON_BELIEF_MODEL_PATH`.
 
 ## Dependencies: numpy, and nothing else
 
-Inference used to run on `pgmpy==0.1.26`. It no longer does.
-
-`pgmpy` requires `torch`, and `torch` brings `triton`, `xgboost`,
-`scikit-learn`, `pandas`, `scipy`, `statsmodels` and `sympy`. Three lines in
-`requirements.txt` resolved to 44 packages and roughly 3 GB of a deep-learning
-stack — shipped to production, in a security product, to marginalise a
-seven-node binary network. None of it did any work: this service runs no
-training, no autodiff and no tensor operations.
+Inference used to run on `pgmpy==0.1.26`, then on a Python sidecar running
+`infer.py` (numpy only), then — since ADR-0034 — in-process in Go. `pgmpy`
+requires `torch`, and `torch` brings `triton`, `xgboost`, `scikit-learn`,
+`pandas`, `scipy`, `statsmodels` and `sympy`: roughly 3 GB of a deep-learning
+stack that never did any work here — this package runs no training, no
+autodiff and no tensor operations of its own. It exists purely so the exact
+answer `pgmpy` gives has something to check `infer.py` — and, transitively,
+`beliefvi` — against.
 
 `infer.py` is the same algorithm — sum-product variable elimination — on numpy
 alone, in about 200 lines. Variable elimination *is* exact inference, so this is
 not an approximation of what pgmpy did; the elimination order changes the cost,
 never the answer. `test_parity.py` asserts agreement with `pgmpy==0.1.26` to
 1e-12 across the shipped artifact's entire evidence space and 25 randomly
-generated networks. It runs in CI (`requirements-dev.txt`, compiled from `requirements-dev.in` with hashes, installs pgmpy there)
-and skips locally when pgmpy is absent.
+generated networks. It runs in CI (`requirements-dev.txt`, compiled from
+`requirements-dev.in` with hashes, installs pgmpy there) and skips locally
+when pgmpy is absent.
 
 The on-disk CPD layout is unchanged — still pgmpy's `TabularCPD` column
-ordering — so existing model artifacts load untouched.
-
-Alongside that, the runtime image dropped its Debian userland for distroless.
-The two together were 24 of the 25 open HIGH/CRITICAL code-scanning alerts on
-the whole `gibson` repo, four of them CRITICAL in `perl-base`, in packages
-nothing here invokes.
+ordering — so existing model artifacts load untouched, in Python or in Go.
 
 ## Run
 
 ```bash
-pip install -r requirements.txt
-python -m server --models ./models --port 8087
-```
-
-Tests:
-
-```bash
 pip install --require-hashes -r requirements.txt -r requirements-test.txt
-python -m pytest test_model.py test_infer.py -q     # runtime dependency set
+python -m pytest test_model.py test_infer.py test_noisy_or.py test_ground.py -q     # reference implementation
 
 pip install --require-hashes -r requirements-dev.txt   # adds pgmpy — dev only
 python -m pytest test_parity.py -q                  # the pgmpy comparison
-```
 
-The daemon points at it via `GIBSON_BELIEF_SIDECAR_URL=http://127.0.0.1:8087/score`.
-When that env var is unset the daemon uses the deterministic Go placeholder
-provider (OSS-without-base-model), so the sidecar is optional at runtime.
+python gen_parity_fixture.py > /tmp/belief-parity.json   # the Go-vs-reference fixture
+GIBSON_BELIEF_PARITY_FIXTURE=/tmp/belief-parity.json \
+    go test ../../internal/engine/brain/beliefvi/... -run TestPgmpyParity -v
+```

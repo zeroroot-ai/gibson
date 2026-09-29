@@ -122,9 +122,9 @@ type daemonImpl struct {
 	// WorldService read path reads through it. Lazily created at gRPC registration.
 	brainRegistry *brain.Registry
 	brainExecutor *brainExecutor
-	// beliefProvider scores the belief field (ADR-0005). The pgmpy sidecar when
-	// GIBSON_BELIEF_SIDECAR_URL is set, else the deterministic placeholder. Held
-	// here so the mission launch path can pin its model version (ADR-0005 §5).
+	// beliefProvider scores the belief field (ADR-0005), in-process via the
+	// native Go belief runtime (ADR-0034). Held here so the mission launch path
+	// can pin its model version (ADR-0005 §5).
 	beliefProvider brain.BeliefProvider
 
 	// liveAgents is the in-memory registry of running agent instances and their
@@ -1008,7 +1008,12 @@ func (d *daemonImpl) Start(ctx context.Context) error {
 	// Initialize the per-tenant ECS brain registry (epic ecs-brain). Engines run
 	// for the daemon's lifetime; the orchestrator event-bus adapter feeds each
 	// tenant's World from its live mission event stream (ADR-0001 capture path).
-	d.beliefProvider = resolveBeliefProvider()
+	beliefProvider, err := resolveBeliefProvider()
+	if err != nil {
+		d.stopServices(ctx)
+		return fmt.Errorf("failed to resolve belief provider: %w", err)
+	}
+	d.beliefProvider = beliefProvider
 	sliceBeliefProvider := resolveSliceBeliefProvider()
 	beliefSchemaRegistry, err := newBeliefSchemaRegistry()
 	if err != nil {
@@ -1019,9 +1024,10 @@ func (d *daemonImpl) Start(ctx context.Context) error {
 		[]brain.System{brain.BeliefSystem},
 		brain.ExecutorSystems()..., // scheduler/condition/decider-gate/budget/retry/completion (gibson#851)
 	)...)
-	// Belief inference is an HTTP call to the pgmpy sidecar, so it runs off the
-	// tick: BeliefSystem asks for a score when a host's evidence changes, and the
-	// worker WireBelief installs answers with a BeliefScored event (gibson#25).
+	// Belief inference runs in-process (ADR-0034) but still off the tick, since
+	// exact variable elimination is not free: BeliefSystem asks for a score when
+	// a host's evidence changes, and the worker WireBelief installs answers with
+	// a BeliefScored event (gibson#25), so inference never blocks the ~50ms tick.
 	// wireBrainRegistry ALSO installs WireSliceBelief (gibson#275, ADR-0029), the
 	// graph-coupled pipeline, the same way, off its own ticker: it derives the
 	// current attack graph from the engine's live hosts (gibson#286), extracts

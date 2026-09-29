@@ -9,46 +9,79 @@ import (
 	"os"
 
 	"github.com/zeroroot-ai/gibson/internal/engine/brain"
+	"github.com/zeroroot-ai/gibson/internal/engine/brain/beliefvi"
 	"github.com/zeroroot-ai/gibson/internal/engine/ontology"
 )
 
-// resolveBeliefProvider selects the brain's belief-field provider (ADR-0005).
+// resolveBeliefProvider selects the brain's belief-field provider (ADR-0005,
+// ADR-0034). Inference runs IN-PROCESS via internal/engine/brain/beliefvi — the
+// native Go port of the (now-retired) Python belief sidecar's exact
+// variable-elimination engine — never over HTTP.
 //
-// When GIBSON_BELIEF_SIDECAR_URL is set, the daemon uses the pgmpy sidecar
-// (exact, read-only, versioned Bayesian inference). GIBSON_BELIEF_MODEL_VERSION
-// optionally pins a specific model artifact; empty means the sidecar's current
-// default. When the sidecar URL is unset — OSS without the curated base model —
-// the daemon falls back to the deterministic Go placeholder, so the brain still
-// produces a (rough) field with zero external dependencies.
+// GIBSON_BELIEF_MODEL_PATH optionally names an alternate model artifact file
+// (e.g. the curated commercial base model the commercial layer drops in,
+// sidecar/belief/README.md); unset uses the OSS-shipped base-v1 model, which
+// is embedded into the binary (beliefvi.DefaultArtifact) so belief inference
+// needs no external file, container or network dependency by default.
 //
-// No GIBSON_MODE branch: the binary boots identically everywhere; the sidecar is
-// wired per-environment via Helm values, fail-loud only on a real dependency.
-func resolveBeliefProvider() brain.BeliefProvider {
-	url := os.Getenv("GIBSON_BELIEF_SIDECAR_URL")
-	if url == "" {
-		return brain.PlaceholderBeliefProvider()
+// No GIBSON_MODE branch: the binary boots identically everywhere; a curated
+// model is wired per-environment via Helm values (a mounted file path), never
+// a mode switch. There is no placeholder fallback here any more — unlike the
+// pgmpy sidecar, the native engine has no extra deployment cost to opt out
+// of, so OSS always gets a real (if minimal) belief field.
+func resolveBeliefProvider() (brain.BeliefProvider, error) {
+	art, err := loadBeliefModelArtifact()
+	if err != nil {
+		return nil, fmt.Errorf("resolve belief provider: %w", err)
 	}
-	version := os.Getenv("GIBSON_BELIEF_MODEL_VERSION")
-	return brain.PgmpyBeliefProvider(url, version, nil)
+	model, err := beliefvi.NewBeliefModel(art)
+	if err != nil {
+		return nil, fmt.Errorf("resolve belief provider: build belief model: %w", err)
+	}
+	return brain.NativeBeliefProvider(model, nil), nil
+}
+
+// loadBeliefModelArtifact loads the model artifact GIBSON_BELIEF_MODEL_PATH
+// names, or the embedded OSS default when the env var is unset.
+func loadBeliefModelArtifact() (beliefvi.ModelArtifact, error) {
+	if path := os.Getenv("GIBSON_BELIEF_MODEL_PATH"); path != "" {
+		art, err := beliefvi.LoadModelArtifact(path)
+		if err != nil {
+			return beliefvi.ModelArtifact{}, fmt.Errorf("load model artifact %s: %w", path, err)
+		}
+		return art, nil
+	}
+	art, err := beliefvi.DefaultArtifact()
+	if err != nil {
+		return beliefvi.ModelArtifact{}, fmt.Errorf("load embedded default model artifact: %w", err)
+	}
+	return art, nil
 }
 
 // resolveSliceBeliefProvider selects the graph-coupled SliceBeliefProvider
 // (ADR-0029, gibson#275): the belief engine consulted for a whole bounded
 // slice (gibson#287) at once, instead of one host in isolation.
 //
-// This is deliberately always the deterministic placeholder for now, never
-// the pgmpy sidecar's ground-slice solver (gibson#288's sidecar/belief/
-// ground.py) — NOT an oversight. Grounding a slice's cross-node enablement
-// edges needs two numbers ground.py has no source for yet: which of a target
-// node's OWN declared variables an incoming enablement edge feeds (the
-// ontology schema, gibson#296, declares intra-node DependsOn names but not a
-// per-edge-type target variable), and the noisy-OR strength/leak for that
-// contribution (braintrain, gibson#25, refits the OLD single-host CPT
-// template; it does not yet produce relational-PRM noisy-OR parameters). Both
-// are real ontology/training decisions, not values this wiring should invent
-// silently. Once they exist, an HTTP-calling implementation of
-// brain.SliceBeliefProvider plugs in here exactly the way pgmpyBelief already
-// does for resolveBeliefProvider above.
+// This is deliberately always the deterministic placeholder for now, NOT an
+// oversight, and NOT something ADR-0034's native-Go port changes: the exact
+// VE + noisy-OR engine a real implementation needs (grounding a bounded
+// slice, internal/engine/brain/beliefvi's GroundSlice/SolveSlice) already
+// exists and is parity-tested — what is still missing is the ontology DATA it
+// would ground, not an inference engine to run it with. ground.py's
+// cross-node enablement edges need two numbers the ontology schema has no
+// source for yet: which of a target node's OWN declared variables an
+// incoming enablement edge feeds (gibson#296's schema declares intra-node
+// DependsOn names but not a per-edge-type target variable — ADR-0037
+// decision 1 names this as future work), and the noisy-OR strength/leak for
+// that contribution (ADR-0037 decision 2: a learned Beta posterior per
+// edge-type, fit by braintrain — braintrain gibson#25 still only refits the
+// OLD single-host CPT template). Both are real ontology/training decisions
+// from a separate epic (gibson#346/#333), not values this wiring should
+// invent silently. Once they exist, a beliefvi.GroundSlice/SolveSlice-backed
+// implementation of brain.SliceBeliefProvider plugs in here exactly the way
+// beliefvi.BeliefModel already does for resolveBeliefProvider above — and,
+// same as that provider, entirely in-process; there is no sidecar HTTP path
+// left anywhere in this seam to cut over.
 func resolveSliceBeliefProvider() brain.SliceBeliefProvider {
 	return brain.PlaceholderSliceBeliefProvider()
 }
