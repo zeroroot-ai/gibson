@@ -209,6 +209,12 @@ func TestCreateSetupInviteCode_Send_UsesSendCode(t *testing.T) {
 	if sendCode["urlTemplate"] != "https://app.example.com/invite" {
 		t.Errorf("sendCode.urlTemplate = %v, want https://app.example.com/invite", sendCode["urlTemplate"])
 	}
+	// The mail Zitadel sends names the product. Without this Zitadel prints
+	// the login client's name and the subject reads "Invitation to Zitadel
+	// Login" (hosted#209).
+	if sendCode["applicationName"] != "Gibson" {
+		t.Errorf("sendCode.applicationName = %v, want Gibson", sendCode["applicationName"])
+	}
 	if _, hasReturn := gotBody["returnCode"]; hasReturn {
 		t.Error("expected no returnCode field when send=true")
 	}
