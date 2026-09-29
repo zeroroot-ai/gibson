@@ -311,14 +311,14 @@ func (p *BAMCPPlanner) Plan(ctx context.Context, in VoIPlanInput, substrate Beli
 		depth = len(candidates)
 	}
 
-	rng := rand.New(rand.NewPCG(seed, seed))
+	rng := rand.New(rand.NewPCG(seed, seed)) //nolint:gosec // deterministic seeded PRNG is required for reproducible BAMCP rollouts, not security-sensitive
 
 	out := make([]VoICandidate, len(candidates))
 	copy(out, candidates)
 	for root := range candidates {
 		seq := bamcpRolloutSequence(candidates, root, depth)
 		var total float64
-		for s := 0; s < cfg.Simulations; s++ {
+		for range cfg.Simulations {
 			realized := bamcpSampleWorld(vars, order, p.Posteriors, rng)
 			total += bamcpRolloutReturn(cfg, seq, candidates, nodeKind, hypothesisOutcomeProb, p.Registry, realized, rng)
 		}

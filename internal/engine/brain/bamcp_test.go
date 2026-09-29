@@ -63,7 +63,9 @@ func bamcpTestInput(reg *ontology.BeliefSchemaRegistry) VoIPlanInput {
 // -----------------------------------------------------------------------
 
 func TestBAMCPSeed_DeterministicForTheSameMissionAndCursor(t *testing.T) {
-	assert.Equal(t, BAMCPSeed("m1", 3), BAMCPSeed("m1", 3))
+	first := BAMCPSeed("m1", 3)
+	second := BAMCPSeed("m1", 3)
+	assert.Equal(t, first, second)
 }
 
 func TestBAMCPSeed_DiffersAcrossMissionOrCursor(t *testing.T) {
@@ -95,7 +97,7 @@ func TestBAMCPPlanner_SameSeedReproducesIdenticalRollouts(t *testing.T) {
 	second, err := planner.Plan(context.Background(), in, substrate, ExactVoIScorer(), 0, seed)
 	require.NoError(t, err)
 
-	require.Equal(t, len(first), len(second))
+	require.Len(t, second, len(first))
 	assert.True(t, reflect.DeepEqual(first, second), "same seed must reproduce identical rollouts:\n got  %+v\nwant %+v", second, first)
 }
 
@@ -263,11 +265,11 @@ func TestBamcpSampleWorld_ThompsonSamplesTheEdgePosterior(t *testing.T) {
 	const trials = 300
 	var strongTrue, weakTrue int
 	for seed := uint64(1); seed <= trials; seed++ {
-		rngStrong := rand.New(rand.NewPCG(seed, seed))
+		rngStrong := rand.New(rand.NewPCG(seed, seed)) //nolint:gosec // deterministic seeded PRNG for a reproducible statistical test, not security-sensitive
 		if bamcpSampleWorld(vars, order, strongPosteriors, rngStrong)[HostNodeID(2)+"::reachable"] {
 			strongTrue++
 		}
-		rngWeak := rand.New(rand.NewPCG(seed, seed))
+		rngWeak := rand.New(rand.NewPCG(seed, seed)) //nolint:gosec // deterministic seeded PRNG for a reproducible statistical test, not security-sensitive
 		if bamcpSampleWorld(vars, order, weakPosteriors, rngWeak)[HostNodeID(2)+"::reachable"] {
 			weakTrue++
 		}
