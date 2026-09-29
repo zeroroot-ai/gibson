@@ -1,5 +1,12 @@
 # Changelog
 
+## [0.143.6](https://github.com/zeroroot-ai/gibson/compare/v0.143.5...v0.143.6) (2026-09-29)
+
+
+### Bug Fixes
+
+* **platform-operator:** the Platform owner becomes ready when its status write races its own user create ([#421](https://github.com/zeroroot-ai/gibson/issues/421)) ([25f8a41](https://github.com/zeroroot-ai/gibson/commit/25f8a410582eb52887fed83274771a96765ad151))
+
 ## [0.143.5](https://github.com/zeroroot-ai/gibson/compare/v0.143.4...v0.143.5) (2026-09-29)
 
 
