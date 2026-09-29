@@ -116,10 +116,41 @@ func validRole(g Grant, t Tenant) (Role, bool) {
 // copies the Zitadel grants of the named users (or of every user of the
 // tenant, when users is empty) into FGA, in one FGA transaction.
 func (s *Syncer) Sync(ctx context.Context, t Tenant, users ...string) (Result, error) {
+	return s.syncMeasured(ctx, t, users, nil)
+}
+
+// expectation is what a write just made true in Zitadel for one user: the
+// role it wrote, or, with present false, that no grant remains.
+//
+// WHY THIS EXISTS. Zitadel answers a grant write from its command side and
+// answers ListAuthorizations from a projection, and the projection can lag
+// the write it just accepted by a moment. The inline sync that follows every
+// write read the projection, saw the old role, and left FGA as it was, while
+// the call reported success (identity run 36587978263, 2026-09-29: a writer
+// demoted to member kept writer until the 60 s timer). The write is the
+// truth the caller was promised, so the sync trusts it over a read that
+// disagrees. The timer sync carries no expectation and repairs any drift.
+type expectation struct {
+	user    string
+	role    Role
+	present bool
+}
+
+// syncExpecting is Sync for the users a write just touched, with the
+// written state overriding a lagging read.
+func (s *Syncer) syncExpecting(ctx context.Context, t Tenant, expects ...expectation) (Result, error) {
+	users := make([]string, 0, len(expects))
+	for _, e := range expects {
+		users = append(users, e.user)
+	}
+	return s.syncMeasured(ctx, t, users, expects)
+}
+
+func (s *Syncer) syncMeasured(ctx context.Context, t Tenant, users []string, expects []expectation) (Result, error) {
 	initMetrics()
 	start := time.Now()
 	caller := callerLabel(ctx)
-	result, err := s.sync(ctx, t, users)
+	result, err := s.sync(ctx, t, users, expects)
 	syncDurationMS.Record(ctx, float64(time.Since(start).Milliseconds()))
 	outcome := "ok"
 	switch {
@@ -138,7 +169,7 @@ func (s *Syncer) Sync(ctx context.Context, t Tenant, users ...string) (Result, e
 	return result, err
 }
 
-func (s *Syncer) sync(ctx context.Context, t Tenant, users []string) (Result, error) {
+func (s *Syncer) sync(ctx context.Context, t Tenant, users []string, expects []expectation) (Result, error) {
 	if t.ID == "" || t.OrgID == "" {
 		return Result{}, fmt.Errorf("tenantrole: Sync requires a tenant id and org id, got %+v", t)
 	}
@@ -148,6 +179,19 @@ func (s *Syncer) sync(ctx context.Context, t Tenant, users []string) (Result, er
 		return Result{}, fmt.Errorf("tenantrole: Sync tenant=%s: list grants: %w", t.ID, err)
 	}
 	desired, invalid := desiredRoles(grants, t)
+	for _, e := range expects {
+		got, has := desired[e.user]
+		switch {
+		case e.present && (!has || got != e.role):
+			s.log.Info("tenantrole: the grant read lags the write; using the written role",
+				"tenant", t.ID, "user", e.user, "read", string(got), "written", string(e.role))
+			desired[e.user] = e.role
+		case !e.present && has:
+			s.log.Info("tenantrole: the grant read lags the delete; using the deletion",
+				"tenant", t.ID, "user", e.user, "read", string(got))
+			delete(desired, e.user)
+		}
+	}
 
 	allActual, err := s.tuples.ReadRoles(ctx, t.ID, nil)
 	if err != nil {
