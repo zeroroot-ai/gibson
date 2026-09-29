@@ -813,3 +813,34 @@ func TestInviteProvisionedOwner_RefusesWithoutMail(t *testing.T) {
 		t.Errorf("no row may be written before the refusal: %v", err)
 	}
 }
+
+// TestInviteProvisionedOwner_Refusals: the argument, store and Issue refusals.
+func TestInviteProvisionedOwner_Refusals(t *testing.T) {
+	srv := newMembersTestServer(t, &membersAuthorizer{}, &membersIdPClient{})
+	srv.inviteMailer = &captureInviteMailer{}
+	srv.inviteBaseURL = "https://app.example.com"
+
+	if err := srv.InviteProvisionedOwner(context.Background(), "", "owner@example.com", "p"); status_grpc.Code(err) != codes.InvalidArgument {
+		t.Fatalf("empty tenant: expected InvalidArgument, got %v", err)
+	}
+	if err := srv.InviteProvisionedOwner(context.Background(), "second", "", "p"); status_grpc.Code(err) != codes.InvalidArgument {
+		t.Fatalf("empty owner: expected InvalidArgument, got %v", err)
+	}
+	srv.invitations = nil
+	if err := srv.InviteProvisionedOwner(context.Background(), "second", "owner@example.com", "p"); status_grpc.Code(err) != codes.Unavailable {
+		t.Fatalf("nil store: expected Unavailable, got %v", err)
+	}
+
+	db, mock, err := sqlmock.New()
+	if err != nil {
+		t.Fatalf("sqlmock: %v", err)
+	}
+	t.Cleanup(func() { _ = db.Close() })
+	mock.ExpectExec("CREATE TABLE IF NOT EXISTS tenant_invitations").WillReturnResult(sqlmock.NewResult(0, 0))
+	mock.ExpectExec("CREATE UNIQUE INDEX").WillReturnResult(sqlmock.NewResult(0, 0))
+	mock.ExpectQuery(regexp.QuoteMeta("INSERT INTO tenant_invitations")).WillReturnError(errors.New("db down"))
+	srv.invitations = NewInvitationStore(db)
+	if err := srv.InviteProvisionedOwner(context.Background(), "second", "owner@example.com", "p"); status_grpc.Code(err) != codes.Internal {
+		t.Fatalf("Issue failure: expected Internal, got %v", err)
+	}
+}

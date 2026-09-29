@@ -7,6 +7,7 @@ package api
 
 import (
 	"context"
+	"errors"
 	"log/slog"
 	"os"
 	"testing"
@@ -33,10 +34,12 @@ func (f *fakeOwnerInviter) InviteProvisionedOwner(_ context.Context, tenantID, o
 }
 
 func newAdminOpsServer() *DaemonServer {
-	return &DaemonServer{
-		ownerInviter: &fakeOwnerInviter{},
-		logger:       slog.New(slog.NewTextHandler(os.Stderr, &slog.HandlerOptions{Level: slog.LevelError})),
+	srv := &DaemonServer{
+		logger: slog.New(slog.NewTextHandler(os.Stderr, &slog.HandlerOptions{Level: slog.LevelError})),
 	}
+	// Through the setter, as grpc.go wires it.
+	srv.WithProvisionedOwnerInviter(&fakeOwnerInviter{})
+	return srv
 }
 
 func expectEnsureAdminOpsTable(mock sqlmock.Sqlmock) {
@@ -89,7 +92,7 @@ func TestAdminProvisionTenant_RecordsOp_DefaultsTier(t *testing.T) {
 		WithArgs(sqlmock.AnyArg(), "acme", "Acme Inc", "owner@acme.test", "team").
 		WillReturnResult(sqlmock.NewResult(0, 1))
 
-	resp, err := srv.AdminProvisionTenant(context.Background(), &tenantv1.AdminProvisionTenantRequest{
+	resp, err := srv.AdminProvisionTenant(ctxWithTenantAdmin(context.Background(), "_system", "platform-owner-1"), &tenantv1.AdminProvisionTenantRequest{
 		TenantId: "acme", DisplayName: "Acme Inc", OwnerEmail: "owner@acme.test",
 	})
 	if err != nil {
@@ -106,6 +109,33 @@ func TestAdminProvisionTenant_RecordsOp_DefaultsTier(t *testing.T) {
 	inv := srv.ownerInviter.(*fakeOwnerInviter)
 	if len(inv.calls) != 1 || inv.calls[0].tenantID != "acme" || inv.calls[0].ownerEmail != "owner@acme.test" {
 		t.Fatalf("owner invitation calls = %+v, want one for acme/owner@acme.test", inv.calls)
+	}
+	if inv.calls[0].invitedBy != "platform-owner-1" {
+		t.Errorf("invitedBy = %q, want the caller's subject", inv.calls[0].invitedBy)
+	}
+}
+
+// TestAdminProvisionTenant_PlainInviteErrorIsInternal: an inviter error that
+// carries no gRPC code comes back as Internal, never as a bare error.
+func TestAdminProvisionTenant_PlainInviteErrorIsInternal(t *testing.T) {
+	db, mock, err := sqlmock.New()
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() { _ = db.Close() })
+	srv := newAdminOpsServer()
+	srv.platformDB = db
+	srv.WithProvisionedOwnerInviter(&fakeOwnerInviter{err: errors.New("boom")})
+
+	expectEnsureAdminOpsTable(mock)
+	mock.ExpectExec("INSERT INTO tenant_admin_ops").
+		WithArgs(sqlmock.AnyArg(), "acme", "Acme Inc", "owner@acme.test", "team").
+		WillReturnResult(sqlmock.NewResult(0, 1))
+	_, err = srv.AdminProvisionTenant(context.Background(), &tenantv1.AdminProvisionTenantRequest{
+		TenantId: "acme", DisplayName: "Acme Inc", OwnerEmail: "owner@acme.test",
+	})
+	if status.Code(err) != codes.Internal {
+		t.Fatalf("expected Internal for a plain inviter error, got %v", err)
 	}
 }
 
