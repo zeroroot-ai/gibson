@@ -1,34 +1,40 @@
 name: belief-sidecar
-# Python tests for sidecar/belief.
+# The belief-field inference algorithm's tests: the retained sidecar/belief
+# Python package (ADR-0034) and the native Go port it stays the parity oracle
+# for (internal/engine/brain/beliefvi).
 #
-# Why this is its own workflow rather than a job in gibson-images.yml: that
-# workflow triggers only on `push: main`, tags and dispatch, so a job living
-# there never appears on a pull request. The sidecar is the one component in
-# this repo that go-ci.yml does not compile — it is Python — so before this
-# file existed, a change to sidecar/belief reached `main` with **no gate having
-# run on the PR at all**, and only then hit the publish gate. That is the same
-# invisible-gate failure mode as gibson#1233, just in the other direction.
+# ADR-0034 (gibson#377) retired the Python HTTP sidecar and its image
+# (gibson-belief-sidecar) — inference now runs in-process in the daemon via
+# beliefvi, a line-for-line port of sidecar/belief's exact variable-elimination
+# engine. sidecar/belief itself is NOT gone: infer.py/noisy_or.py/ground.py/
+# model.py stay as the OFFLINE reference implementation braintrain's tooling
+# and this workflow's parity gate depend on; pgmpy stays the parity oracle
+# underneath them. Neither ships in any runtime image.
 #
-# The job is defined once here and consumed twice:
-#   - `pull_request` (path-filtered) — the PR-visible gate.
-#   - `workflow_call` — gibson-images.yml calls it as the publish gate, so a
-#     sidecar that fails its tests is still un-publishable.
+# Why this is its own workflow rather than a job in gibson-images.yml: this
+# repo's default `pull_request` gate (go-ci.yml) compiles no Python, and (as
+# of ADR-0034) beliefvi's own Go tests skip their parity assertion unless a
+# fixture path is handed to them — so without this workflow, a change to
+# sidecar/belief OR to beliefvi that broke their agreement would reach `main`
+# with no gate having run on the PR at all. That is the same invisible-gate
+# failure mode as gibson#1233, just for a Python/Go pair instead of Python
+# alone.
 #
 # lane-exception: not run on `merge_group`. The tests are scoped to a single
-# directory that no Go lane compiles, and running them in the queue would
-# install torch (the pgmpy reference implementation, ~3 GB) on every queue
-# entry in the repo rather than only on the rare PR that touches this
-# directory. Absence from the queue lane is made visible by the fact that the
-# identical workflow runs again via gibson-images.yml on `push: main` before
-# any image is published — a regression that slipped the queue blocks the
-# publish rather than shipping.
+# directory pair that no other lane compiles, and running them in the queue
+# would install torch (the pgmpy reference implementation, ~3 GB) on every
+# queue entry in the repo rather than only on the rare PR that touches either
+# directory. Absence from the queue lane is made visible by the fact that
+# nothing publishes an image gated on this job any more (ADR-0034 removed
+# that coupling) — a regression here blocks the PR itself, not a downstream
+# publish step.
 
 on:
   pull_request:
     paths:
       - 'sidecar/belief/**'
+      - 'internal/engine/brain/beliefvi/**'
       - '.github/workflows/belief-sidecar.yml'
-  workflow_call:
 
 permissions:
   contents: read
@@ -39,15 +45,17 @@ concurrency:
 
 jobs:
   test:
-    name: python tests
+    name: python + go parity
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
       - uses: actions/setup-python@5fda3b95a4ea91299a34e894583c3862153e4b97 # v7
         with:
-          # Must track the sidecar's runtime base (distroless/python3-debian13
-          # is CPython 3.13). Testing on a different minor than we ship is how a
-          # version-specific break reaches production green.
+          # Must track the OSS-shipped base model's training/parity toolchain.
+          # No runtime image reads this any more (ADR-0034), so there is no
+          # "ship the same minor" constraint left — 3.13 is kept anyway so a
+          # version-specific break in the reference implementation itself is
+          # still caught here rather than downstream.
           python-version: "3.13"
 
       - name: Install runtime deps + pytest
@@ -57,23 +65,43 @@ jobs:
           pip install --require-hashes -r requirements-test.txt
 
       # Runs with the runtime dependency set and nothing else, so it also
-      # proves the shipped image's dependency closure is sufficient. The
-      # inference tests used to be guarded by pytest.importorskip("pgmpy") and
-      # therefore skipped silently here; inference no longer needs pgmpy, the
-      # guards are gone, and test_infer.py asserts no heavy library is even
+      # proves the reference implementation's own dependency closure (numpy
+      # only) is sufficient. test_infer.py asserts no heavy library is even
       # importable in this environment (gibson#1436).
-      - name: Unit + exact-inference tests (runtime dependency set only)
+      - name: Unit + exact-inference tests (reference implementation)
         working-directory: sidecar/belief
-        run: python -m pytest test_model.py test_infer.py test_server.py test_noisy_or.py test_ground.py -q
+        run: python -m pytest test_model.py test_infer.py test_noisy_or.py test_ground.py -q
 
       # Deliberately after the step above: installing pgmpy pulls torch, numpy's
       # transitive friends and a great deal else into site-packages. Doing it
-      # first would let the runtime tests pass on a dependency the image does
-      # not ship.
-      - name: Install the pgmpy reference implementation (dev-only, never shipped)
+      # first would let the runtime tests pass on a dependency the reference
+      # implementation does not actually need.
+      - name: Install the pgmpy parity oracle (dev-only, never shipped)
         working-directory: sidecar/belief
         run: pip install --require-hashes -r requirements-dev.txt
 
-      - name: Parity against pgmpy 0.1.26
+      - name: Parity against pgmpy 0.1.26 (numpy reference vs pgmpy)
         working-directory: sidecar/belief
         run: python -m pytest test_parity.py -q
+
+      # ADR-0034 decision 4's other half: the Go port must agree with the
+      # SAME reference to the SAME 1e-12 tolerance, so this generates the
+      # fixture from the numpy reference (no pgmpy import needed here — that
+      # agreement was just proven by test_parity.py above) and points the Go
+      # test at it.
+      - name: Generate the Go-vs-reference parity fixture
+        working-directory: sidecar/belief
+        run: python gen_parity_fixture.py > ${{ runner.temp }}/belief-parity.json
+
+      - uses: actions/setup-go@b7ad1dad31e06c5925ef5d2fc7ad053ef454303e # v7.0.0
+        with:
+          go-version-file: go.mod
+          cache: true
+
+      - name: Go belief runtime parity test (beliefvi vs the reference)
+        env:
+          GIBSON_BELIEF_PARITY_FIXTURE: ${{ runner.temp }}/belief-parity.json
+        run: go test ./internal/engine/brain/beliefvi/... -run TestPgmpyParity -v
+
+      - name: Go belief runtime unit tests
+        run: go test ./internal/engine/brain/beliefvi/...

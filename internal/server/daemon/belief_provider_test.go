@@ -5,31 +5,68 @@ package daemon
 
 import (
 	"context"
+	"os"
+	"path/filepath"
 	"testing"
 	"time"
 
 	"github.com/zeroroot-ai/gibson/internal/engine/brain"
 )
 
-// TestResolveBeliefProvider_DefaultsToPlaceholder proves that without the sidecar
-// URL the daemon uses the deterministic Go placeholder (OSS-without-base-model),
-// so the brain still produces a field with zero external dependencies.
-func TestResolveBeliefProvider_DefaultsToPlaceholder(t *testing.T) {
-	t.Setenv("GIBSON_BELIEF_SIDECAR_URL", "")
-	p := resolveBeliefProvider()
-	if got := p.Version(); got != "placeholder-v0" {
-		t.Fatalf("default provider version = %q, want placeholder-v0", got)
+// TestResolveBeliefProvider_DefaultsToTheEmbeddedBaseModel proves that
+// without a GIBSON_BELIEF_MODEL_PATH override the daemon scores in-process
+// against the OSS-embedded base-v1 model (ADR-0034) — no sidecar, no
+// placeholder fallback, since the native engine has no deployment cost left
+// to opt out of.
+func TestResolveBeliefProvider_DefaultsToTheEmbeddedBaseModel(t *testing.T) {
+	t.Setenv("GIBSON_BELIEF_MODEL_PATH", "")
+	p, err := resolveBeliefProvider()
+	if err != nil {
+		t.Fatalf("resolveBeliefProvider: %v", err)
+	}
+	if got := p.Version(); got != "base-v1" {
+		t.Fatalf("default provider version = %q, want base-v1", got)
 	}
 }
 
-// TestResolveBeliefProvider_PinsConfiguredVersion proves the sidecar provider is
-// selected when the URL is set and pins GIBSON_BELIEF_MODEL_VERSION (ADR-0005 §5).
-func TestResolveBeliefProvider_PinsConfiguredVersion(t *testing.T) {
-	t.Setenv("GIBSON_BELIEF_SIDECAR_URL", "http://127.0.0.1:8087/score")
-	t.Setenv("GIBSON_BELIEF_MODEL_VERSION", "base-v3")
-	p := resolveBeliefProvider()
+// TestResolveBeliefProvider_PinsAnOverrideModelPath proves GIBSON_BELIEF_MODEL_PATH
+// selects an alternate model artifact (e.g. a curated commercial base model
+// dropped in by the commercial layer), ADR-0005 §5.
+func TestResolveBeliefProvider_PinsAnOverrideModelPath(t *testing.T) {
+	dir := t.TempDir()
+	path := filepath.Join(dir, "base-v3.json")
+	const raw = `{
+  "version": "base-v3",
+  "variables": ["reachable", "exploitable", "juicy"],
+  "edges": [["reachable", "exploitable"], ["exploitable", "juicy"]],
+  "cpds": {
+    "reachable": {"values": [[0.5], [0.5]]},
+    "exploitable": {"evidence": ["reachable"], "evidence_card": [2], "values": [[0.9, 0.2], [0.1, 0.8]]},
+    "juicy": {"evidence": ["exploitable"], "evidence_card": [2], "values": [[0.9, 0.3], [0.1, 0.7]]}
+  }
+}`
+	if err := os.WriteFile(path, []byte(raw), 0o600); err != nil {
+		t.Fatal(err)
+	}
+
+	t.Setenv("GIBSON_BELIEF_MODEL_PATH", path)
+	p, err := resolveBeliefProvider()
+	if err != nil {
+		t.Fatalf("resolveBeliefProvider: %v", err)
+	}
 	if got := p.Version(); got != "base-v3" {
 		t.Fatalf("pinned provider version = %q, want base-v3", got)
+	}
+}
+
+// TestResolveBeliefProvider_FailsLoudOnAnInvalidOverride proves a
+// misconfigured GIBSON_BELIEF_MODEL_PATH fails daemon startup rather than
+// silently falling back to a different model (fail-loud on a real
+// dependency, matching every other resolve* helper in this file).
+func TestResolveBeliefProvider_FailsLoudOnAnInvalidOverride(t *testing.T) {
+	t.Setenv("GIBSON_BELIEF_MODEL_PATH", filepath.Join(t.TempDir(), "does-not-exist.json"))
+	if _, err := resolveBeliefProvider(); err == nil {
+		t.Fatal("expected an error for a missing model artifact file")
 	}
 }
 
