@@ -44,18 +44,6 @@ const defaultProvisionTier = "team"
 
 // --- AdminTenantService (dashboard-facing) -------------------------------
 
-// AdminProvisionTenant records intent to create a new tenant. Replaces the
-// dashboard provisionTenantAction's applyTenant() Tenant-CR create. The operator
-// drains the queue and creates the Tenant CR. Cross-tenant platform-admin only
-// (ext-authz enforces platform_operator USER).
-//
-// Idempotent on tenant_id: if a provision op is already pending for this slug,
-// the insert is a no-op and op_id is empty — a double-submit cannot enqueue two
-// provisions (and even if it did, the operator's existence check would make the
-// second create a no-op).
-//
-// gibsoncheck:allow tenant-from-request — AdminTenantService: platform_operator on
-// system_tenant at ext-authz. Naming another tenant is the whole point of this surface.
 // ProvisionedOwnerInviter issues the founding Owner's invitation for a tenant
 // the Platform owner provisions. The MembershipService implements it with the
 // one invitation mechanism the install has (admin.TenantAdminServer).
@@ -70,6 +58,18 @@ func (s *DaemonServer) WithProvisionedOwnerInviter(i ProvisionedOwnerInviter) *D
 	return s
 }
 
+// AdminProvisionTenant records intent to create a new tenant. Replaces the
+// dashboard provisionTenantAction's applyTenant() Tenant-CR create. The operator
+// drains the queue and creates the Tenant CR. Cross-tenant platform-admin only
+// (ext-authz enforces platform_operator USER).
+//
+// Idempotent on tenant_id: if a provision op is already pending for this slug,
+// the insert is a no-op and op_id is empty — a double-submit cannot enqueue two
+// provisions (and even if it did, the operator's existence check would make the
+// second create a no-op).
+//
+// gibsoncheck:allow tenant-from-request — AdminTenantService: platform_operator on
+// system_tenant at ext-authz. Naming another tenant is the whole point of this surface.
 func (s *DaemonServer) AdminProvisionTenant(ctx context.Context, req *tenantv1.AdminProvisionTenantRequest) (*tenantv1.AdminProvisionTenantResponse, error) {
 	db := s.entitlementsDB()
 	if db == nil {
