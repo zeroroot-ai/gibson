@@ -1,5 +1,12 @@
 # Changelog
 
+## [0.143.2](https://github.com/zeroroot-ai/gibson/compare/v0.143.1...v0.143.2) (2026-09-29)
+
+
+### Bug Fixes
+
+* **idp:** a setup mail Zitadel sends names Gibson, not the login client ([#368](https://github.com/zeroroot-ai/gibson/issues/368)) ([8d83ad2](https://github.com/zeroroot-ai/gibson/commit/8d83ad2240d7766ab4e6595fb56967e96df068ce))
+
 ## [0.143.1](https://github.com/zeroroot-ai/gibson/compare/v0.143.0...v0.143.1) (2026-09-29)
 
 
