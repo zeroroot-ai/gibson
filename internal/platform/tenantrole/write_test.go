@@ -27,6 +27,23 @@ type fakeGrants struct {
 	// instead of every call — for a test that needs the first lookup (e.g.
 	// Transfer's activeGrant(from)) to succeed and a later one to fail.
 	listErrOnCall int
+	// lag makes the next `lag` List calls after a write answer from the
+	// snapshot taken before that write, the way Zitadel's query side lags
+	// its command side for a moment.
+	lag     int
+	lagLeft int
+	stale   map[string]tenantrole.Grant
+}
+
+func (f *fakeGrants) snapshotForLag() {
+	if f.lag == 0 {
+		return
+	}
+	f.stale = make(map[string]tenantrole.Grant, len(f.grants))
+	for k, v := range f.grants {
+		f.stale[k] = v
+	}
+	f.lagLeft = f.lag
 }
 
 func newFakeGrants() *fakeGrants { return &fakeGrants{grants: map[string]tenantrole.Grant{}} }
@@ -43,8 +60,13 @@ func (f *fakeGrants) List(_ context.Context, orgID string, userIDs []string) ([]
 	for _, id := range userIDs {
 		want[id] = true
 	}
-	out := make([]tenantrole.Grant, 0, len(f.grants))
-	for _, g := range f.grants {
+	source := f.grants
+	if f.lagLeft > 0 {
+		f.lagLeft--
+		source = f.stale
+	}
+	out := make([]tenantrole.Grant, 0, len(source))
+	for _, g := range source {
 		if g.OrgID != orgID {
 			continue
 		}
@@ -60,6 +82,7 @@ func (f *fakeGrants) Create(_ context.Context, orgID, userID string, r tenantrol
 	if f.createErr != nil {
 		return "", f.createErr
 	}
+	f.snapshotForLag()
 	f.nextID++
 	id := "grant-" + strconv.Itoa(f.nextID)
 	f.grants[id] = tenantrole.Grant{ID: id, UserID: userID, UserOrgID: orgID, OrgID: orgID, RoleKeys: []string{string(r)}, Active: true}
@@ -70,6 +93,7 @@ func (f *fakeGrants) Update(_ context.Context, grantID string, r tenantrole.Role
 	if f.updateErr != nil {
 		return f.updateErr
 	}
+	f.snapshotForLag()
 	g := f.grants[grantID]
 	g.RoleKeys = []string{string(r)}
 	f.grants[grantID] = g
@@ -80,6 +104,7 @@ func (f *fakeGrants) Delete(_ context.Context, grantID string) error {
 	if f.deleteErr != nil {
 		return f.deleteErr
 	}
+	f.snapshotForLag()
 	delete(f.grants, grantID)
 	return nil
 }
@@ -537,5 +562,56 @@ func TestTransfer_WrapsACreateErrorDemotingFrom(t *testing.T) {
 	err := syncer.Transfer(context.Background(), tenant("acme", "ORG-1"), "from", "to")
 	if err == nil || !strings.Contains(err.Error(), "demote create boom") {
 		t.Fatalf("Transfer: err = %v, want it to wrap the demote Create error", err)
+	}
+}
+
+// rolesIn lists the role relations FGA holds for a user on a tenant.
+func rolesIn(tuples *fakeTuples, user, tenantID string) []string {
+	var out []string
+	for _, tup := range tuples.all() {
+		if tup.User == "user:"+user && tup.Object == "tenant:"+tenantID {
+			out = append(out, tup.Relation)
+		}
+	}
+	return out
+}
+
+// TestAssign_WritesTheRoleWhenTheReadLagsTheWrite: Zitadel's query side can
+// answer with the grant as it was before the write it just accepted. The
+// inline sync must still land the role it wrote (identity run 36587978263,
+// 2026-09-29: a writer demoted to member kept writer in FGA).
+func TestAssign_WritesTheRoleWhenTheReadLagsTheWrite(t *testing.T) {
+	grants := newFakeGrants()
+	grants.lag = 1
+	if _, err := grants.Create(context.Background(), "ORG-1", "100000000000000001", tenantrole.Editor); err != nil {
+		t.Fatal(err)
+	}
+	tuples := newFakeTuples(tenantrole.Tuple{User: "user:100000000000000001", Relation: "writer", Object: "tenant:acme"})
+	syncer := tenantrole.NewSyncer(grants, tuples, nil)
+
+	if err := syncer.Assign(context.Background(), tenant("acme", "ORG-1"), "100000000000000001", tenantrole.Viewer); err != nil {
+		t.Fatalf("Assign: %v", err)
+	}
+	if got := rolesIn(tuples, "100000000000000001", "acme"); len(got) != 1 || got[0] != "member" {
+		t.Fatalf("FGA roles for 100000000000000001 = %v, want [member] although the read lagged the write", got)
+	}
+}
+
+// TestRevoke_DeletesTheRoleWhenTheReadLagsTheDelete: the same lag on a
+// removal must not leave the tuple behind.
+func TestRevoke_DeletesTheRoleWhenTheReadLagsTheDelete(t *testing.T) {
+	grants := newFakeGrants()
+	grants.lag = 1
+	if _, err := grants.Create(context.Background(), "ORG-1", "100000000000000001", tenantrole.Editor); err != nil {
+		t.Fatal(err)
+	}
+	tuples := newFakeTuples(tenantrole.Tuple{User: "user:100000000000000001", Relation: "writer", Object: "tenant:acme"})
+	syncer := tenantrole.NewSyncer(grants, tuples, nil)
+
+	if err := syncer.Revoke(context.Background(), tenant("acme", "ORG-1"), "100000000000000001"); err != nil {
+		t.Fatalf("Revoke: %v", err)
+	}
+	if got := rolesIn(tuples, "100000000000000001", "acme"); len(got) != 0 {
+		t.Fatalf("FGA roles for 100000000000000001 = %v, want none although the read lagged the delete", got)
 	}
 }

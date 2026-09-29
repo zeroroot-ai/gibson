@@ -32,7 +32,7 @@ func (s *Syncer) Assign(ctx context.Context, t Tenant, userID string, r Role) er
 			return fmt.Errorf("tenantrole: Assign tenant=%s user=%s: create grant: %w", t.ID, userID, err)
 		}
 	}
-	if _, err := s.Sync(ctx, t, userID); err != nil {
+	if _, err := s.syncExpecting(ctx, t, expectation{user: userID, role: r, present: true}); err != nil {
 		return fmt.Errorf("tenantrole: Assign tenant=%s user=%s: %w", t.ID, userID, err)
 	}
 	return nil
@@ -58,7 +58,7 @@ func (s *Syncer) Revoke(ctx context.Context, t Tenant, userID string) error {
 			return fmt.Errorf("tenantrole: Revoke tenant=%s user=%s: delete grant: %w", t.ID, userID, err)
 		}
 	}
-	if _, err := s.Sync(ctx, t, userID); err != nil {
+	if _, err := s.syncExpecting(ctx, t, expectation{user: userID}); err != nil {
 		return fmt.Errorf("tenantrole: Revoke tenant=%s user=%s: %w", t.ID, userID, err)
 	}
 	return nil
@@ -105,7 +105,10 @@ func (s *Syncer) Transfer(ctx context.Context, t Tenant, from, to string) error 
 		return fmt.Errorf("tenantrole: Transfer tenant=%s: demote %s: %w", t.ID, from, err)
 	}
 
-	if _, err := s.Sync(ctx, t, from, to); err != nil {
+	if _, err := s.syncExpecting(ctx, t,
+		expectation{user: to, role: Owner, present: true},
+		expectation{user: from, role: Admin, present: true},
+	); err != nil {
 		return fmt.Errorf("tenantrole: Transfer tenant=%s: %w", t.ID, err)
 	}
 	return nil
