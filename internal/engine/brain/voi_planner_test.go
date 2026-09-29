@@ -36,7 +36,7 @@ func voiEngineWithCatalog(
 ) (*Engine, *VoIWorker) {
 	e := NewEngine("t")
 	e.AddSystem(VoIGateSystem)
-	w := NewVoIWorker(e, substrate, registry, scorer, topK, catalog, hierarchy)
+	w := NewVoIWorker(e, substrate, registry, scorer, topK, catalog, hierarchy, testBAMCPPlanner(registry))
 	e.Subscribe(w.Tap)
 	return e, w
 }
@@ -168,7 +168,7 @@ func TestWireVoIPlanner_ProducesAReplayablePlanOffTheTick(t *testing.T) {
 	e := NewEngine("t")
 	e.AddSystem(VoIGateSystem)
 	ctx, cancel := context.WithCancel(context.Background())
-	WireVoIPlanner(ctx, e, registry, ExactVoIScorer(), DefaultVoITopK, 5*time.Millisecond, nil, nil)
+	WireVoIPlanner(ctx, e, registry, ExactVoIScorer(), DefaultVoITopK, 5*time.Millisecond, nil, nil, testBAMCPPlanner(registry))
 
 	e.Submit(MissionProjected{ID: "m1", Goal: "find a path"})
 	e.Submit(HostObserved{ScopeID: "s", Address: "10.0.0.5", OpenPorts: []int{22}})

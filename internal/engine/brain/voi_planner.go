@@ -199,6 +199,12 @@ type VoIWorker struct {
 	// default brainExecutor.agentCoverage uses to validate a capability's own
 	// declared coverage).
 	hierarchy *taxonomy.TechniqueHierarchy
+	// bamcp is the native BAMCP planner (ADR-0026 decision 4, gibson#396)
+	// that refines PlanVoI's one-step candidate ranking into a multi-step,
+	// model-uncertainty-aware one before it is Submitted. Never nil
+	// (NewVoIWorker defaults it via NewBAMCPPlanner) — ADR-0026 names BAMCP
+	// as the planner, not an optional refinement, so there is no "off" path.
+	bamcp *BAMCPPlanner
 
 	mu      sync.Mutex
 	pending []string // mission ids awaiting a plan
@@ -210,7 +216,10 @@ type VoIWorker struct {
 // DefaultVoITopK. catalog may be nil (no capabilities offered, matching
 // NewDeciderWorker's own convention) — VoI dispatch gating then resolves no
 // covering capabilities for any candidate. hierarchy may be nil, which
-// defaults to taxonomy.GlobalTechniques.
+// defaults to taxonomy.GlobalTechniques. bamcp may be nil, which defaults to
+// NewBAMCPPlanner(registry, nil, DefaultBAMCPConfig()) — the same
+// uninformative-prior cold start belief_slice_native.go uses until braintrain
+// (gibson#395) fits real per-edge-type posteriors.
 func NewVoIWorker(
 	eng *Engine,
 	substrate BeliefSubstrate,
@@ -219,6 +228,7 @@ func NewVoIWorker(
 	topK int,
 	catalog func(missionID string) []Capability,
 	hierarchy *taxonomy.TechniqueHierarchy,
+	bamcp *BAMCPPlanner,
 ) *VoIWorker {
 	if catalog == nil {
 		catalog = func(string) []Capability { return nil }
@@ -226,9 +236,12 @@ func NewVoIWorker(
 	if hierarchy == nil {
 		hierarchy = taxonomy.GlobalTechniques
 	}
+	if bamcp == nil {
+		bamcp = NewBAMCPPlanner(registry, nil, DefaultBAMCPConfig())
+	}
 	return &VoIWorker{
 		eng: eng, substrate: substrate, registry: registry, scorer: scorer, topK: topK,
-		catalog: catalog, hierarchy: hierarchy,
+		catalog: catalog, hierarchy: hierarchy, bamcp: bamcp,
 	}
 }
 
@@ -257,7 +270,8 @@ func (vw *VoIWorker) Drain(ctx context.Context) int {
 
 func (vw *VoIWorker) plan(ctx context.Context, missionID string) {
 	in := vw.buildInput(missionID)
-	candidates, err := PlanVoI(ctx, in, vw.substrate, vw.scorer, vw.topK)
+	seed := BAMCPSeed(missionID, voiPlanCursor(vw.eng.World, missionID))
+	candidates, err := vw.bamcp.Plan(ctx, in, vw.substrate, vw.scorer, vw.topK, seed)
 	if err != nil {
 		// A failed plan does not kill the mission; clear in-flight (with no
 		// candidates) and let the gate retry on the next evidence change —
@@ -266,6 +280,24 @@ func (vw *VoIWorker) plan(ctx context.Context, missionID string) {
 		candidates = nil
 	}
 	vw.eng.Submit(VoIPlanned{MissionID: missionID, Candidates: candidates})
+}
+
+// voiPlanCursor returns missionID's current in-flight evidence cursor from
+// w's VoI plan state (set by applyVoIPlanRequested, the same cursor
+// VoIGateSystem stamped into the VoIPlanRequested that triggered this round)
+// — 0 if the mission has no VoI plan state yet, which should not happen in
+// practice (VoIWorker only ever plans a mission it Tapped a request for) but
+// is never a panic. This is BAMCPSeed's other input alongside missionID: both
+// are already durable, replayable facts, so the seed a live planning round
+// uses is always exactly reproducible from state the Timeline already
+// records.
+func voiPlanCursor(w *World, missionID string) int {
+	for _, st := range w.VoIPlanSnapshot() {
+		if st.MissionID == missionID {
+			return st.Cursor
+		}
+	}
+	return 0
 }
 
 // buildInput gathers the mission's ambient-bounded candidate set (ADR-0026
@@ -295,8 +327,8 @@ func (vw *VoIWorker) buildInput(missionID string) VoIPlanInput {
 // be registered as a System (ExecutorSystems, or a test's own AddSystem) —
 // this function only starts the off-tick worker and its drain loop, mirroring
 // WireExecutor/WireSliceBelief's ticker pattern exactly. interval <= 0 uses
-// TickInterval. catalog and hierarchy are forwarded to NewVoIWorker verbatim
-// (both may be nil; see its own doc comment).
+// TickInterval. catalog, hierarchy and bamcp are forwarded to NewVoIWorker
+// verbatim (all three may be nil; see its own doc comment).
 func WireVoIPlanner(
 	ctx context.Context,
 	eng *Engine,
@@ -306,12 +338,13 @@ func WireVoIPlanner(
 	interval time.Duration,
 	catalog func(missionID string) []Capability,
 	hierarchy *taxonomy.TechniqueHierarchy,
+	bamcp *BAMCPPlanner,
 ) *VoIWorker {
 	if interval <= 0 {
 		interval = TickInterval
 	}
 	substrate := NewWorldBeliefSubstrate(eng)
-	worker := NewVoIWorker(eng, substrate, registry, scorer, topK, catalog, hierarchy)
+	worker := NewVoIWorker(eng, substrate, registry, scorer, topK, catalog, hierarchy, bamcp)
 	eng.Subscribe(worker.Tap)
 
 	go func() {

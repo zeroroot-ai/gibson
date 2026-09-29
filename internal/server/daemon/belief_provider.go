@@ -120,9 +120,13 @@ func wireBrainRegistry(
 	registry.OnEngine(func(e *brain.Engine) {
 		brain.WireBelief(ctx, e, beliefProvider, 0)
 		brain.WireSliceBelief(ctx, e, beliefSchemaRegistry, sliceBeliefProvider, 0, sliceOpts, propagateOpts)
-		// The deep BAMCP sequential tree search stays gibson#333; this is
-		// ADR-0026's one-step-exact plan, re-triggered per evidence change via
-		// the closed loop (VoIGateSystem/VoIWorker's gate/worker split).
+		// gibson#333 ("complete the BAMCP sequential planner") is CLOSED,
+		// superseded by the phase-2 decomposition (epic gibson#376): its
+		// generative-simulator/Thompson-sampling item is this repo's
+		// gibson#396 (brain.BAMCPPlanner, wired below). Real technique x
+		// environment reputation (still the neutral prior, voi_plan.go's own
+		// doc comment) and hard Decider-dispatch enforcement within the VoI
+		// top-k remain separate, still-open scope (gibson#397).
 		//
 		// catalog is nil here (no covering-capability resolution yet, ADR-0035
 		// decision 4/gibson#387): the live per-mission capability catalog
@@ -130,10 +134,16 @@ func wireBrainRegistry(
 		// per-tenant-engine wiring runs, the same way ExecutorDeps.Catalog is
 		// wired onto DeciderWorker in a SEPARATE, later OnEngine registration
 		// (daemon.go). Threading it through here is follow-up wiring for
-		// gibson#396/#397, which consume VoICandidate.CoveringCapabilities;
-		// nil is safe and documented (NewVoIWorker/WireVoIPlanner), and
-		// preserves today's behavior exactly (no candidate resolves a
-		// covering capability).
-		brain.WireVoIPlanner(ctx, e, beliefSchemaRegistry, brain.ExactVoIScorer(), brain.DefaultVoITopK, 0, nil, nil)
+		// gibson#397, which consumes VoICandidate.CoveringCapabilities; nil is
+		// safe and documented (NewVoIWorker/WireVoIPlanner), and preserves
+		// today's behavior exactly (no candidate resolves a covering
+		// capability).
+		//
+		// bamcp is nil: NewVoIWorker defaults it to
+		// NewBAMCPPlanner(beliefSchemaRegistry, nil, DefaultBAMCPConfig()) —
+		// the uninformative-prior cold start (ADR-0037 decision 3) every edge
+		// type gets until braintrain (gibson#395) fits real per-type Beta
+		// posteriors.
+		brain.WireVoIPlanner(ctx, e, beliefSchemaRegistry, brain.ExactVoIScorer(), brain.DefaultVoITopK, 0, nil, nil, nil)
 	})
 }
