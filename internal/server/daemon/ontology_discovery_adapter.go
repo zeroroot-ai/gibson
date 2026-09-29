@@ -5,6 +5,7 @@ package daemon
 
 import (
 	"context"
+	"fmt"
 
 	"google.golang.org/grpc/codes"
 	"google.golang.org/grpc/status"
@@ -50,7 +51,10 @@ func (s *tenantRoutedOntologyDiscovery) ProposeOntologyExtension(
 	if !ok {
 		return status.Error(codes.PermissionDenied, "no tenant in context")
 	}
-	return s.registry.For(tenant.String()).ProposeOntologyExtension(ctx, kind, label, proposer, claim)
+	if err := s.registry.For(tenant.String()).ProposeOntologyExtension(ctx, kind, label, proposer, claim); err != nil {
+		return fmt.Errorf("propose ontology extension: %w", err)
+	}
+	return nil
 }
 
 var _ brain.OntologyDiscoveryEngine = (*tenantRoutedOntologyDiscovery)(nil)

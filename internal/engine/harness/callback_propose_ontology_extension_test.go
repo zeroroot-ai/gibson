@@ -5,6 +5,7 @@ package harness
 
 import (
 	"context"
+	"errors"
 	"log/slog"
 	"testing"
 	"time"
@@ -13,6 +14,7 @@ import (
 	"github.com/stretchr/testify/require"
 
 	"github.com/zeroroot-ai/gibson/internal/engine/brain"
+	"github.com/zeroroot-ai/gibson/internal/engine/taxonomy"
 	"github.com/zeroroot-ai/gibson/internal/infra/types"
 	harnesspb "github.com/zeroroot-ai/sdk/api/gen/gibson/harness/v1"
 	"github.com/zeroroot-ai/sdk/auth"
@@ -20,6 +22,21 @@ import (
 	"google.golang.org/grpc/codes"
 	"google.golang.org/grpc/status"
 )
+
+// fakeOntologyDiscoveryEngine is a brain.OntologyDiscoveryEngine test double
+// that returns a fixed, non-*taxonomy.InvalidProposalError error, so the
+// handler's generic codes.Internal branch (an engine failure OTHER than the
+// identifier safety gate) can be exercised independent of a real *brain.Engine,
+// which never returns anything else.
+type fakeOntologyDiscoveryEngine struct {
+	err error
+}
+
+func (f *fakeOntologyDiscoveryEngine) ProposeOntologyExtension(context.Context, taxonomy.ProposalKind, string, string, string) error {
+	return f.err
+}
+
+var _ brain.OntologyDiscoveryEngine = (*fakeOntologyDiscoveryEngine)(nil)
 
 // proposeOntologyExtensionMockHarness is an AgentHarness stub carrying the
 // one server-side fact ProposeOntologyExtension reads besides tenant: the
@@ -208,4 +225,86 @@ func TestProposeOntologyExtension_RelationshipType_UsesRelationshipVocabulary(t 
 	snaps := awaitOntologyProposalRecurrence(t, engine, "EXPOSES", 1)
 	require.Len(t, snaps, 1)
 	assert.Equal(t, "EXPOSES", snaps[0].Label)
+}
+
+// TestProposeOntologyExtension_NilRequest_InvalidArgument proves a nil
+// request is refused as a gRPC error, the same nil-request guard every other
+// callback in this package uses (mirrors SubmitProof/PlaceBet).
+func TestProposeOntologyExtension_NilRequest_InvalidArgument(t *testing.T) {
+	ctx0, cancel := context.WithCancel(context.Background())
+	defer cancel()
+	engine := brain.NewRegistry(ctx0).For("acme")
+	h := &proposeOntologyExtensionMockHarness{missionID: "mission-A", tenantID: "acme"}
+	svc := newProposeOntologyExtensionService(t, h, "recon-agent", engine)
+	ctx := auth.ContextWithTenantString(context.Background(), "acme")
+
+	resp, err := svc.ProposeOntologyExtension(ctx, nil)
+	require.Nil(t, resp)
+	require.Error(t, err)
+	assert.Equal(t, codes.InvalidArgument, status.Code(err))
+}
+
+// TestProposeOntologyExtension_UnregisteredHarness_PropagatesLookupError
+// proves a well-formed request for a mission/agent pair with no active
+// harness registration fails the same way SubmitProof/PlaceBet do: getHarness
+// itself returns the gRPC error, propagated unchanged.
+func TestProposeOntologyExtension_UnregisteredHarness_PropagatesLookupError(t *testing.T) {
+	ctx0, cancel := context.WithCancel(context.Background())
+	defer cancel()
+	engine := brain.NewRegistry(ctx0).For("acme")
+	h := &proposeOntologyExtensionMockHarness{missionID: "mission-A", tenantID: "acme"}
+	svc := newProposeOntologyExtensionService(t, h, "recon-agent", engine)
+	ctx := auth.ContextWithTenantString(context.Background(), "acme")
+
+	resp, err := svc.ProposeOntologyExtension(ctx, proposeOntologyExtensionRequest(
+		"mission-UNREGISTERED", "recon-agent", harnesspb.OntologyExtensionKind_ONTOLOGY_EXTENSION_KIND_NODE_LABEL, "CustomHost", "recon-agent", "claim"))
+	require.Nil(t, resp)
+	require.Error(t, err)
+	assert.Equal(t, codes.NotFound, status.Code(err))
+}
+
+// TestProposeOntologyExtension_EngineFailure_Internal proves an engine error
+// OTHER than *taxonomy.InvalidProposalError (the identifier safety gate) is
+// reported as codes.Internal, never silently swallowed or mistaken for an
+// in-band rejection.
+func TestProposeOntologyExtension_EngineFailure_Internal(t *testing.T) {
+	h := &proposeOntologyExtensionMockHarness{missionID: "mission-A", tenantID: "acme"}
+	engine := &fakeOntologyDiscoveryEngine{err: errors.New("boom")}
+	svc := newProposeOntologyExtensionService(t, h, "recon-agent", engine)
+	ctx := auth.ContextWithTenantString(context.Background(), "acme")
+
+	resp, err := svc.ProposeOntologyExtension(ctx, proposeOntologyExtensionRequest(
+		"mission-A", "recon-agent", harnesspb.OntologyExtensionKind_ONTOLOGY_EXTENSION_KIND_NODE_LABEL, "CustomHost", "recon-agent", "claim"))
+	require.Nil(t, resp)
+	require.Error(t, err)
+	assert.Equal(t, codes.Internal, status.Code(err))
+}
+
+// TestProposeOntologyExtensionKind proves the wire-to-taxonomy kind
+// conversion: the two valid kinds map to their taxonomy vocabulary, and both
+// the unspecified and an out-of-range value are refused rather than silently
+// defaulting to either vocabulary.
+func TestProposeOntologyExtensionKind(t *testing.T) {
+	tests := []struct {
+		name    string
+		kind    harnesspb.OntologyExtensionKind
+		want    taxonomy.ProposalKind
+		wantErr bool
+	}{
+		{"node label", harnesspb.OntologyExtensionKind_ONTOLOGY_EXTENSION_KIND_NODE_LABEL, taxonomy.ProposedNodeLabel, false},
+		{"relationship type", harnesspb.OntologyExtensionKind_ONTOLOGY_EXTENSION_KIND_RELATIONSHIP_TYPE, taxonomy.ProposedRelationshipType, false},
+		{"unspecified", harnesspb.OntologyExtensionKind_ONTOLOGY_EXTENSION_KIND_UNSPECIFIED, 0, true},
+		{"out of range", harnesspb.OntologyExtensionKind(99), 0, true},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			got, err := proposeOntologyExtensionKind(tt.kind)
+			if tt.wantErr {
+				require.Error(t, err)
+				return
+			}
+			require.NoError(t, err)
+			assert.Equal(t, tt.want, got)
+		})
+	}
 }

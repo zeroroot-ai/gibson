@@ -6,10 +6,12 @@ package daemon
 import (
 	"context"
 	"errors"
+	"log/slog"
 	"testing"
 	"time"
 
 	"github.com/zeroroot-ai/gibson/internal/engine/brain"
+	"github.com/zeroroot-ai/gibson/internal/engine/harness"
 	"github.com/zeroroot-ai/gibson/internal/engine/taxonomy"
 	"github.com/zeroroot-ai/sdk/auth"
 )
@@ -92,5 +94,27 @@ func TestTenantRoutedOntologyDiscovery_InvalidIdentifier_FailsClosed(t *testing.
 	var invalid *taxonomy.InvalidProposalError
 	if !errors.As(err, &invalid) {
 		t.Fatalf("expected a *taxonomy.InvalidProposalError, got %v", err)
+	}
+}
+
+// TestWireOntologyDiscovery proves the daemon.go Start() glue reaches the
+// callback manager: wireOntologyDiscovery is extracted into its own function
+// (ontology_discovery_adapter.go) specifically so this step is testable
+// independent of Start()'s much larger bootstrap sequence, the same reason
+// wireProofSettlement/wirePlaceBetBeliefSubstrate are their own functions.
+func TestWireOntologyDiscovery(t *testing.T) {
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+	registry := brain.NewRegistry(ctx)
+	callback := harness.NewCallbackManager(harness.CallbackConfig{ListenAddress: "127.0.0.1:0"}, slog.Default())
+
+	wireOntologyDiscovery(callback, registry)
+
+	got := callback.OntologyDiscovery()
+	if got == nil {
+		t.Fatal("wireOntologyDiscovery must set a non-nil ontology discovery engine")
+	}
+	if _, ok := got.(*tenantRoutedOntologyDiscovery); !ok {
+		t.Fatalf("ontology discovery engine = %T, want *tenantRoutedOntologyDiscovery", got)
 	}
 }
