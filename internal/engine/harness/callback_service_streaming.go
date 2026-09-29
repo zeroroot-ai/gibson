@@ -46,6 +46,7 @@ func (s *HarnessCallbackService) CallToolProtoStream(req *harnesspb.CallToolProt
 		s.logger.Error("tool not found", "error", err, "tool", req.Name)
 
 		// Send error event
+		// gibson:no-tool-executed — the tool was never resolved, so it never ran.
 		errEvent := &harnesspb.CallToolProtoStreamResponse{
 			Payload: &harnesspb.CallToolProtoStreamResponse_Error{
 				Error: &harnesspb.ToolErrorEvent{
@@ -89,6 +90,7 @@ func (s *HarnessCallbackService) CallToolProtoStream(req *harnesspb.CallToolProt
 		err := resolveErr
 		s.logger.Error("failed to resolve tool endpoint", "error", err, "tool", req.Name)
 
+		// gibson:no-tool-executed — the tool endpoint never resolved, so it never ran.
 		errEvent := &harnesspb.CallToolProtoStreamResponse{
 			Payload: &harnesspb.CallToolProtoStreamResponse_Error{
 				Error: &harnesspb.ToolErrorEvent{
@@ -125,6 +127,7 @@ func (s *HarnessCallbackService) CallToolProtoStream(req *harnesspb.CallToolProt
 		// Tool is local - not yet supported for streaming
 		s.logger.Error("streaming not supported for local tools", "tool", req.Name)
 
+		// gibson:no-tool-executed — refused before dispatch; nothing ran.
 		errEvent := &harnesspb.CallToolProtoStreamResponse{
 			Payload: &harnesspb.CallToolProtoStreamResponse_Error{
 				Error: &harnesspb.ToolErrorEvent{
@@ -156,6 +159,7 @@ func (s *HarnessCallbackService) CallToolProtoStream(req *harnesspb.CallToolProt
 	if err != nil {
 		s.logger.Error("failed to open tool stream", "error", err, "tool", req.Name)
 
+		// gibson:no-tool-executed — the stream never opened, so the tool never ran.
 		errEvent := &harnesspb.CallToolProtoStreamResponse{
 			Payload: &harnesspb.CallToolProtoStreamResponse_Error{
 				Error: &harnesspb.ToolErrorEvent{
@@ -194,6 +198,7 @@ func (s *HarnessCallbackService) CallToolProtoStream(req *harnesspb.CallToolProt
 	if err := toolStream.Send(startReq); err != nil {
 		s.logger.Error("failed to send start request to tool", "error", err, "tool", req.Name)
 
+		// gibson:no-tool-executed — the tool never received a start signal.
 		errEvent := &harnesspb.CallToolProtoStreamResponse{
 			Payload: &harnesspb.CallToolProtoStreamResponse_Error{
 				Error: &harnesspb.ToolErrorEvent{
@@ -280,6 +285,12 @@ func (s *HarnessCallbackService) CallToolProtoStream(req *harnesspb.CallToolProt
 			}
 
 			s.logger.Error("error receiving from tool stream", "error", err, "tool", req.Name)
+
+			// Flight recorder completeness (ADR-0030 §3): the tool stream was
+			// started (Send(startReq) already succeeded above), so this is a
+			// post-dispatch failure, not a pre-execution rejection — it must
+			// still reach the sink.
+			s.captureToolCall(ctx, req.Context, req.Name, string(req.InputJson), "", fmt.Sprintf("tool stream error: %v", err))
 
 			// Send error to agent
 			sequence++
@@ -404,6 +415,14 @@ func (s *HarnessCallbackService) CallToolProtoStream(req *harnesspb.CallToolProt
 			})
 
 		case *toolpb.StreamExecuteResponse_Complete:
+			// Flight recorder completeness (ADR-0030 §3): the streaming
+			// dispatch path had no recording at all before this — a
+			// streamed tool call could complete and hand the agent a real
+			// result with zero independent corroborating record. Capture
+			// before building the terminal response, same contract as the
+			// non-streaming captureToolCall call sites.
+			s.captureToolCall(ctx, req.Context, req.Name, string(req.InputJson), payload.Complete.OutputJson, "")
+
 			response = &harnesspb.CallToolProtoStreamResponse{
 				Payload: &harnesspb.CallToolProtoStreamResponse_Complete{
 					Complete: &harnesspb.ToolCompleteEvent{
@@ -442,6 +461,11 @@ func (s *HarnessCallbackService) CallToolProtoStream(req *harnesspb.CallToolProt
 					errorCode = commonpb.ErrorCode_ERROR_CODE_INTERNAL
 				}
 			}
+
+			// Flight recorder completeness (ADR-0030 §3): a streamed tool's
+			// own reported terminal error is a post-dispatch outcome, not a
+			// pre-execution rejection, so it must be captured too.
+			s.captureToolCall(ctx, req.Context, req.Name, string(req.InputJson), "", payload.Error.Error.Message)
 
 			response = &harnesspb.CallToolProtoStreamResponse{
 				Payload: &harnesspb.CallToolProtoStreamResponse_Error{
