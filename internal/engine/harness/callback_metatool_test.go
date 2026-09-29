@@ -7,6 +7,7 @@ import (
 	"context"
 	"encoding/json"
 	"log/slog"
+	"math"
 	"testing"
 
 	commonpb "github.com/zeroroot-ai/sdk/api/gen/gibson/common/v1"
@@ -193,6 +194,52 @@ func TestMetaInvoke_FeedsToolCallSink_OnFailure(t *testing.T) {
 	}
 	if got.Result != "" {
 		t.Fatalf("failure must not record a result, got %q", got.Result)
+	}
+}
+
+// TestMetaInvoke_RecordsSuccessEvenWhenResultIsNotJSONMarshalable covers the
+// defensive branch in metaInvoke where h.Invoke succeeds but its result
+// cannot be marshaled to JSON (e.g. a plugin returning a float64 Inf/NaN,
+// which encoding/json refuses outright). The invocation still happened, so
+// the flight recorder must still know about it — with an empty result rather
+// than silently dropping the whole capture.
+func TestMetaInvoke_RecordsSuccessEvenWhenResultIsNotJSONMarshalable(t *testing.T) {
+	q := &mtQuerier{ret: math.Inf(1)}
+	h := metatool.NewHandler(nil, mtAuthz{allow: map[string]bool{"mcp:gitlab:create_issue": true}}, q)
+
+	var captured []capturedTool
+	svc := &HarnessCallbackService{
+		logger: slog.Default(),
+		toolCallSink: func(_ context.Context, tn string, call ToolCallRecord) {
+			captured = append(captured, capturedTool{tenant: tn, call: call})
+		},
+	}
+	contextInfo := &harnesspb.ContextInfo{MissionId: "m1", ToolExecutionId: "tool-exec-meta-3"}
+
+	resp, err := svc.metaInvoke(testCtxWithTenant(), contextInfo, h, catalog.Caller{Tenant: "acme"}, nil,
+		[]byte(`{"id":"mcp:gitlab:create_issue","args":{"title":"x"}}`))
+	if err != nil {
+		t.Fatalf("metaInvoke: %v", err)
+	}
+	// marshalMetaResult itself cannot marshal +Inf either, so the RPC-level
+	// response degrades to an internal error — the point of this test is that
+	// the capture below still happened regardless.
+	if resp.GetError() == nil {
+		t.Fatal("expected marshalMetaResult to also fail on +Inf and report an error response")
+	}
+
+	if len(captured) != 1 {
+		t.Fatalf("a successful invocation must be captured even if its result cannot be marshaled, got %d", len(captured))
+	}
+	got := captured[0].call
+	if got.ToolCallID != "tool-exec-meta-3" {
+		t.Fatalf("wrong ToolCallID: %q", got.ToolCallID)
+	}
+	if got.Err != "" {
+		t.Fatalf("this is a successful invocation, must not record an error, got %q", got.Err)
+	}
+	if got.Result != "" {
+		t.Fatalf("an unmarshalable result must be recorded empty, not silently substituted, got %q", got.Result)
 	}
 }
 

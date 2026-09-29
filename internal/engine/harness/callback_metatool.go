@@ -210,10 +210,16 @@ func (s *HarnessCallbackService) metaInvoke(ctx context.Context, contextInfo *ha
 		return metaToolErr(commonpb.ErrorCode_ERROR_CODE_PERMISSION_DENIED, "tool '"+blockedID+"' is blocked by mission policy"), nil
 	}
 
-	// argsJSON is captured evidence, not the wire response — best-effort only
-	// (a marshal failure here must never mask the invoke outcome below).
-	argsJSON, marshalErr := json.Marshal(in.Args)
-	if marshalErr != nil {
+	// argsJSON is the agent's own "args" bytes, captured verbatim as evidence —
+	// a second, narrower decode of the SAME already-validated inputJSON,
+	// rather than a re-marshal of in.Args, so the recorded evidence is
+	// exactly what the agent sent instead of a re-serialized copy.
+	var rawArgs struct {
+		Args json.RawMessage `json:"args"`
+	}
+	_ = json.Unmarshal(inputJSON, &rawArgs) // inputJSON already parsed successfully above
+	argsJSON := []byte(rawArgs.Args)
+	if len(argsJSON) == 0 {
 		argsJSON = []byte("{}")
 	}
 
@@ -236,6 +242,10 @@ func (s *HarnessCallbackService) metaInvoke(ctx context.Context, contextInfo *ha
 
 	resultJSON, marshalErr := json.Marshal(result)
 	if marshalErr != nil {
+		// A tool result that cannot be marshaled to JSON is still a real,
+		// completed invocation — the flight recorder must know it happened
+		// even though there is no usable result payload to attach.
+		s.logger.WarnContext(ctx, "meta-tool invoke result not JSON-marshalable", "id", in.ID, "tenant", caller.Tenant, "err", marshalErr)
 		resultJSON = nil
 	}
 

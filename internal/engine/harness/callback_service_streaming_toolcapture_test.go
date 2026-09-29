@@ -6,6 +6,7 @@ package harness
 import (
 	"context"
 	"errors"
+	"fmt"
 	"log/slog"
 	"net"
 	"os"
@@ -13,7 +14,7 @@ import (
 	"time"
 
 	"github.com/stretchr/testify/require"
-	"go.opentelemetry.io/otel/trace"
+	"go.opentelemetry.io/otel/trace/noop"
 	"google.golang.org/grpc"
 	"google.golang.org/grpc/credentials/insecure"
 	"google.golang.org/protobuf/proto"
@@ -36,35 +37,51 @@ import (
 // callback_service_streaming.go.
 
 // fakeStreamToolServer is a minimal toolpb.ToolServiceServer: it reads the
-// Start message and replies with exactly one terminal event (Complete or
-// Error), enough to drive CallToolProtoStream's forwarding loop to its two
-// capture-worthy outcomes.
+// Start message and either replies with exactly one terminal event (Complete
+// or Error) or, for transportFail, drops the stream with a bare gRPC error
+// and no response message at all — driving CallToolProtoStream's forwarding
+// loop to all three capture-worthy outcomes (Complete, the tool's own
+// reported Error, and a post-dispatch transport failure).
 type fakeStreamToolServer struct {
 	toolpb.UnimplementedToolServiceServer
-	sendComplete bool
-	outputJSON   string
-	errMessage   string
+	sendComplete  bool
+	transportFail bool
+	outputJSON    string
+	errMessage    string
 }
 
 func (f *fakeStreamToolServer) StreamExecute(stream toolpb.ToolService_StreamExecuteServer) error {
 	if _, err := stream.Recv(); err != nil {
-		return err
+		return fmt.Errorf("fake tool server: recv start request: %w", err)
+	}
+	if f.transportFail {
+		// No response sent at all: the client's next Recv() surfaces this as
+		// a genuine transport-level error, not io.EOF — the mid-stream
+		// "tool stream error" branch, distinct from the tool's own reported
+		// StreamExecuteResponse_Error.
+		return errors.New(f.errMessage)
 	}
 	if f.sendComplete {
-		return stream.Send(&toolpb.StreamExecuteResponse{
+		if err := stream.Send(&toolpb.StreamExecuteResponse{
 			Payload: &toolpb.StreamExecuteResponse_Complete{
 				Complete: &toolpb.ToolComplete{OutputJson: f.outputJSON},
 			},
-		})
+		}); err != nil {
+			return fmt.Errorf("fake tool server: send complete: %w", err)
+		}
+		return nil
 	}
-	return stream.Send(&toolpb.StreamExecuteResponse{
+	if err := stream.Send(&toolpb.StreamExecuteResponse{
 		Payload: &toolpb.StreamExecuteResponse_Error{
 			Error: &toolpb.ToolError{
 				Error: &commonpb.Error{Code: "internal", Message: f.errMessage},
 				Fatal: true,
 			},
 		},
-	})
+	}); err != nil {
+		return fmt.Errorf("fake tool server: send error: %w", err)
+	}
+	return nil
 }
 
 // startFakeToolServer boots the fake tool service on an ephemeral local port
@@ -135,7 +152,7 @@ func newStreamingTestHarness(conn *grpc.ClientConn) *DefaultAgentHarness {
 	return &DefaultAgentHarness{
 		registryAdapter: fakeStreamDiscovery{t: streamConnTool{conn: conn}},
 		logger:          slog.New(slog.NewTextHandler(os.Stdout, nil)),
-		tracer:          trace.NewNoopTracerProvider().Tracer("test"),
+		tracer:          noop.NewTracerProvider().Tracer("test"),
 		missionCtx:      MissionContext{TenantID: "test-tenant"},
 	}
 }
@@ -233,5 +250,50 @@ func TestCallToolProtoStream_FeedsToolCallSink_OnError(t *testing.T) {
 	got := captured[0].call
 	require.Equal(t, "tool-exec-stream-2", got.ToolCallID)
 	require.Equal(t, "boom", got.Err)
+	require.Empty(t, got.Result)
+}
+
+// TestCallToolProtoStream_FeedsToolCallSink_OnTransportError covers the
+// third streaming outcome: the tool stream was already dispatched (Send of
+// the start request succeeded) but then failed at the transport level — a
+// post-dispatch failure distinct from the tool's own reported
+// StreamExecuteResponse_Error, and distinct from every pre-dispatch
+// rejection at the top of CallToolProtoStream. It must still be captured.
+func TestCallToolProtoStream_FeedsToolCallSink_OnTransportError(t *testing.T) {
+	conn := startFakeToolServer(t, &fakeStreamToolServer{transportFail: true, errMessage: "connection reset"})
+
+	registry := NewCallbackHarnessRegistry()
+	registry.Register("test-mission-stream", "test-agent", newStreamingTestHarness(conn))
+
+	var captured []capturedTool
+	svc := NewHarnessCallbackServiceWithRegistry(
+		slog.New(slog.NewTextHandler(os.Stdout, nil)),
+		registry,
+		WithToolCallSink(func(_ context.Context, tn string, call ToolCallRecord) {
+			captured = append(captured, capturedTool{tenant: tn, call: call})
+		}),
+	)
+
+	req := &harnesspb.CallToolProtoStreamRequest{
+		Context: &harnesspb.ContextInfo{
+			TaskId: "task-1", AgentName: "test-agent", MissionId: "test-mission-stream",
+			ToolExecutionId: "tool-exec-stream-3",
+		},
+		Name:       "stream-tool",
+		InputType:  "testtool.ToolInput",
+		InputJson:  []byte(`{"query":"transport"}`),
+		OutputType: "testtool.ToolOutput",
+		TimeoutMs:  5000,
+	}
+	stream := &fakeStreamSendServer{ctx: testCtxWithTenant()}
+
+	err := svc.CallToolProtoStream(req, stream)
+	require.Error(t, err, "a transport failure mid-stream must surface as an RPC error")
+
+	require.Len(t, captured, 1, "a mid-stream transport failure must still be captured")
+	got := captured[0].call
+	require.Equal(t, "tool-exec-stream-3", got.ToolCallID)
+	require.Contains(t, got.Err, "tool stream error")
+	require.Contains(t, got.Err, "connection reset")
 	require.Empty(t, got.Result)
 }

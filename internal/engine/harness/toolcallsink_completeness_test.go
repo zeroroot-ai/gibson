@@ -51,6 +51,7 @@ import (
 	"go/parser"
 	"go/token"
 	"os"
+	"path/filepath"
 	"strings"
 	"testing"
 )
@@ -124,7 +125,7 @@ func scanToolCallSinkCompleteness(filename string, src []byte) ([]toolCallSinkVi
 		return nil, fmt.Errorf("parse %s: %w", filename, err)
 	}
 
-	var violations []toolCallSinkViolation
+	violations := make([]toolCallSinkViolation, 0, len(file.Decls))
 	for _, decl := range file.Decls {
 		fd, ok := decl.(*ast.FuncDecl)
 		if !ok || fd.Body == nil {
@@ -184,7 +185,7 @@ func scanToolCallSinkFunc(fset *token.FileSet, file *ast.File, filename string, 
 		return nil
 	}
 
-	var violations []toolCallSinkViolation
+	violations := make([]toolCallSinkViolation, 0, len(terminals))
 	for _, term := range terminals {
 		if toolCallSinkPrecededByCapture(term.pos, capturePositions) {
 			continue
@@ -346,7 +347,15 @@ func toolCallSinkExemptedByComment(fset *token.FileSet, file *ast.File, stmt ast
 // below for the failing-fixture proof that this guard actually fires.
 func TestToolCallSinkCompleteness(t *testing.T) {
 	for _, name := range toolCallSinkCompletenessFiles {
-		src, err := os.ReadFile(name)
+		// name comes only from the fixed, package-level toolCallSinkCompletenessFiles
+		// literal above (never external input); filepath.Clean + a basename
+		// check keep it pinned to a plain file in this test's own package
+		// directory, so this can never become an arbitrary-path read.
+		clean := filepath.Clean(name)
+		if clean != filepath.Base(clean) {
+			t.Fatalf("toolCallSinkCompletenessFiles entry %q must be a bare filename", name)
+		}
+		src, err := os.ReadFile(clean) //nolint:gosec // G304: clean is a validated basename from a fixed package-level literal list, not external input.
 		if err != nil {
 			t.Fatalf("read %s: %v", name, err)
 		}
