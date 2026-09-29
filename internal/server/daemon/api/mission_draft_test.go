@@ -32,7 +32,7 @@ import (
 const draftTestSubject = "draft-admin"
 
 // newDraftTestServer wires a mission-draft store plus a fakeAuthorizer that
-// grants draftTestSubject the tenant admin relation on both "tenant-a" and
+// grants draftTestSubject the tenant writer relation on both "tenant-a" and
 // "tenant-b" — the two tenants exercised across this file's tests — so
 // requireTenantAdmin's FGA Check passes for the happy-path assertions below.
 func newDraftTestServer(t *testing.T) *DaemonServer {
@@ -44,10 +44,31 @@ func newDraftTestServer(t *testing.T) *DaemonServer {
 	logger := slog.New(slog.NewTextHandler(os.Stderr, &slog.HandlerOptions{Level: slog.LevelError}))
 	srv := &DaemonServer{logger: logger}
 	srv.WithMissionDraftStore(missiondraft.New(client, logger))
+	// The registry grants the draft RPCs to writers, and the gate checks that
+	// relation: the test subject is a writer and nothing more.
 	srv.WithAuthorizer(newFakeAuthorizer().
-		allow("user:"+draftTestSubject, "admin", "tenant:tenant-a").
-		allow("user:"+draftTestSubject, "admin", "tenant:tenant-b"))
+		allow("user:"+draftTestSubject, "writer", "tenant:tenant-a").
+		allow("user:"+draftTestSubject, "writer", "tenant:tenant-b"))
 	return srv
+}
+
+// TestMissionDraft_MemberIsRefused: a caller who holds only member on the
+// tenant gets PermissionDenied naming the writer relation, on every one of
+// the four RPCs (the registry says writer, and so does the gate).
+func TestMissionDraft_MemberIsRefused(t *testing.T) {
+	srv := newDraftTestServer(t)
+	srv.WithAuthorizer(newFakeAuthorizer().allow("user:"+draftTestSubject, "member", "tenant:tenant-a"))
+	ctx := draftCtx()
+
+	_, err := srv.SaveMissionDraft(ctx, &tenantv1.SaveMissionDraftRequest{TenantId: "tenant-a", Name: "n", CueSource: "x: 1\n"})
+	require.Equal(t, codes.PermissionDenied, draftCode(t, err))
+	require.Contains(t, err.Error(), "tenant writer required")
+	_, err = srv.ListMissionDrafts(ctx, &tenantv1.ListMissionDraftsRequest{TenantId: "tenant-a"})
+	require.Equal(t, codes.PermissionDenied, draftCode(t, err))
+	_, err = srv.GetMissionDraft(ctx, &tenantv1.GetMissionDraftRequest{TenantId: "tenant-a", DraftId: "d"})
+	require.Equal(t, codes.PermissionDenied, draftCode(t, err))
+	_, err = srv.DeleteMissionDraft(ctx, &tenantv1.DeleteMissionDraftRequest{TenantId: "tenant-a", DraftId: "d"})
+	require.Equal(t, codes.PermissionDenied, draftCode(t, err))
 }
 
 // draftCtx returns a context carrying draftTestSubject as the caller
