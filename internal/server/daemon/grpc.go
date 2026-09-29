@@ -1635,6 +1635,12 @@ func (d *daemonImpl) buildGRPCServer(ctx context.Context) (*grpcSubsystem, error
 	// the SAME per-tenant World WorldService reads.
 	d.registerDomainPack(ctx, srv)
 
+	// Register gibson.tenant.v1.OntologyExtensionService — the tenant
+	// owner's review of agent-proposed Taxonomy extensions (ADR-0024 §2,
+	// ADR-0033 decisions 2-3, gibson#392). Reuses d.brainRegistry (just
+	// constructed above), same as DomainPackService.
+	d.registerOntologyExtension(ctx, srv)
+
 	// Register gibson.daemon.destructiveauthz.v1.DestructiveAuthorizationService
 	// — the daemon API backing the dashboard's destructive-action authorization
 	// queue (dashboard#99, gibson#336, ADR-0028). Tenant-admin-gated (see the

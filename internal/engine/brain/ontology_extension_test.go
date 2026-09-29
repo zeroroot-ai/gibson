@@ -5,6 +5,7 @@ package brain
 
 import (
 	"context"
+	"fmt"
 	"reflect"
 	"testing"
 
@@ -185,4 +186,256 @@ func TestOntologyDiscoveryEngine_EngineSatisfiesTheSeam(t *testing.T) {
 	var seam OntologyDiscoveryEngine = NewEngine("tenant-1")
 	err := seam.ProposeOntologyExtension(context.Background(), taxonomy.ProposedNodeLabel, "Container", "agent-1", "a claim")
 	require.NoError(t, err)
+}
+
+// -----------------------------------------------------------------------
+// Engine.ApproveOntologyExtension / RejectOntologyExtension (gibson#392,
+// ADR-0033 decision 3): the tenant-owner approval flow.
+// -----------------------------------------------------------------------
+
+// proposeNTimes submits label n times through ProposeOntologyExtension and
+// ticks the engine, driving recurrence to exactly n.
+func proposeNTimes(t *testing.T, e *Engine, kind taxonomy.ProposalKind, label string, n int) {
+	t.Helper()
+	for i := range n {
+		require.NoError(t, e.ProposeOntologyExtension(context.Background(), kind, label, fmt.Sprintf("agent-%d", i), "sighted it"))
+	}
+	e.Tick()
+}
+
+func TestApproveOntologyExtension_NotFoundIsRefused(t *testing.T) {
+	e := newTestEngine()
+	err := e.ApproveOntologyExtension(context.Background(), taxonomy.ProposedNodeLabel, "Container", "owner-1")
+	require.Error(t, err)
+	var notFound *OntologyProposalNotFoundError
+	require.ErrorAs(t, err, &notFound)
+}
+
+func TestRejectOntologyExtension_NotFoundIsRefused(t *testing.T) {
+	e := newTestEngine()
+	err := e.RejectOntologyExtension(context.Background(), taxonomy.ProposedNodeLabel, "Container", "owner-1", "no thanks")
+	require.Error(t, err)
+	var notFound *OntologyProposalNotFoundError
+	require.ErrorAs(t, err, &notFound)
+}
+
+func TestApproveOntologyExtension_RequiresReviewer(t *testing.T) {
+	e := newTestEngine()
+	proposeNTimes(t, e, taxonomy.ProposedNodeLabel, "Container", 1)
+	err := e.ApproveOntologyExtension(context.Background(), taxonomy.ProposedNodeLabel, "Container", "")
+	require.Error(t, err)
+}
+
+func TestRejectOntologyExtension_RequiresReviewer(t *testing.T) {
+	e := newTestEngine()
+	proposeNTimes(t, e, taxonomy.ProposedNodeLabel, "Container", 1)
+	err := e.RejectOntologyExtension(context.Background(), taxonomy.ProposedNodeLabel, "Container", "", "reason")
+	require.Error(t, err)
+}
+
+func TestApproveOntologyExtension_InvalidIdentifierIsRejectedFailClosed(t *testing.T) {
+	e := newTestEngine()
+	err := e.ApproveOntologyExtension(context.Background(), taxonomy.ProposedNodeLabel, "not a valid identifier!", "owner-1")
+	require.Error(t, err)
+	var invalid *taxonomy.InvalidProposalError
+	require.ErrorAs(t, err, &invalid)
+}
+
+// TestApproveOntologyExtension_PromotesOnceSettled proves the full gibson#392
+// acceptance path: a proposal that has ALREADY recurred
+// taxonomy.MinRecurrenceForSettlement times is promoted into a live,
+// per-tenant taxonomy extension the instant the owner approves it.
+func TestApproveOntologyExtension_PromotesOnceSettled(t *testing.T) {
+	e := newTestEngine()
+	proposeNTimes(t, e, taxonomy.ProposedNodeLabel, "Container", taxonomy.MinRecurrenceForSettlement)
+
+	require.NoError(t, e.ApproveOntologyExtension(context.Background(), taxonomy.ProposedNodeLabel, "Container", "owner-1"))
+	e.Tick()
+
+	snapshot := e.OntologyProposals()
+	require.Len(t, snapshot, 1)
+	assert.Equal(t, OntologyProposalApproved, snapshot[0].Status)
+	assert.Equal(t, "owner-1", snapshot[0].Reviewer)
+	assert.True(t, snapshot[0].Promoted, "settlement is complete (recurrence + approval); the extension must be live")
+	assert.Positive(t, snapshot[0].PromotedVersion)
+
+	// The live effect: the tenant's own taxonomy registry now admits the
+	// promoted label — this IS "a live tenant extension" (ADR-0033).
+	assert.Contains(t, e.World.ontologyGate.Base().NodeLabels(), "Container")
+}
+
+// TestApproveOntologyExtension_NotYetSettledRecordsApprovalWithoutPromoting
+// proves approving BEFORE enough recurrence records the owner's decision
+// without promoting — and that a later sighting completes promotion without
+// requiring the owner to approve twice (settlement is symmetric in its two
+// halves, ADR-0033 decision 2).
+func TestApproveOntologyExtension_NotYetSettledRecordsApprovalWithoutPromoting(t *testing.T) {
+	e := newTestEngine()
+	proposeNTimes(t, e, taxonomy.ProposedNodeLabel, "Container", 1)
+
+	require.NoError(t, e.ApproveOntologyExtension(context.Background(), taxonomy.ProposedNodeLabel, "Container", "owner-1"))
+	e.Tick()
+
+	snapshot := e.OntologyProposals()
+	require.Len(t, snapshot, 1)
+	assert.Equal(t, OntologyProposalApproved, snapshot[0].Status)
+	assert.False(t, snapshot[0].Promoted, "recurrence has not met MinRecurrenceForSettlement yet")
+	assert.NotContains(t, e.World.ontologyGate.Base().NodeLabels(), "Container")
+
+	// A later sighting pushes recurrence to MinRecurrenceForSettlement.
+	// Promotion completes automatically — no second approval needed.
+	proposeNTimes(t, e, taxonomy.ProposedNodeLabel, "Container", taxonomy.MinRecurrenceForSettlement-1)
+
+	snapshot = e.OntologyProposals()
+	require.Len(t, snapshot, 1)
+	assert.True(t, snapshot[0].Promoted)
+	assert.Contains(t, e.World.ontologyGate.Base().NodeLabels(), "Container")
+}
+
+// TestApproveOntologyExtension_AlreadyDecidedIsRefused proves the owner's
+// decision is terminal: approving (or rejecting) an already-decided proposal
+// is refused rather than silently overwriting the first decision.
+func TestApproveOntologyExtension_AlreadyDecidedIsRefused(t *testing.T) {
+	e := newTestEngine()
+	proposeNTimes(t, e, taxonomy.ProposedNodeLabel, "Container", taxonomy.MinRecurrenceForSettlement)
+	require.NoError(t, e.ApproveOntologyExtension(context.Background(), taxonomy.ProposedNodeLabel, "Container", "owner-1"))
+	e.Tick()
+
+	err := e.ApproveOntologyExtension(context.Background(), taxonomy.ProposedNodeLabel, "Container", "owner-1")
+	require.Error(t, err)
+	var decided *OntologyProposalAlreadyDecidedError
+	require.ErrorAs(t, err, &decided)
+
+	err = e.RejectOntologyExtension(context.Background(), taxonomy.ProposedNodeLabel, "Container", "owner-1", "changed my mind")
+	require.Error(t, err)
+	require.ErrorAs(t, err, &decided)
+}
+
+// TestRejectOntologyExtension_NeverPromotesEvenAfterMoreRecurrence proves
+// rejection is a real, non-bypassable refusal: further sightings of the SAME
+// (kind, label) after a rejection still never promote it, because Confirm
+// (the HITL half) was never recorded.
+func TestRejectOntologyExtension_NeverPromotesEvenAfterMoreRecurrence(t *testing.T) {
+	e := newTestEngine()
+	proposeNTimes(t, e, taxonomy.ProposedNodeLabel, "Container", 1)
+
+	require.NoError(t, e.RejectOntologyExtension(context.Background(), taxonomy.ProposedNodeLabel, "Container", "owner-1", "not needed"))
+	e.Tick()
+
+	snapshot := e.OntologyProposals()
+	require.Len(t, snapshot, 1)
+	assert.Equal(t, OntologyProposalRejected, snapshot[0].Status)
+	assert.Equal(t, "owner-1", snapshot[0].Reviewer)
+	assert.Equal(t, "not needed", snapshot[0].RejectReason)
+
+	// Even sighting it MinRecurrenceForSettlement more times never promotes it.
+	proposeNTimes(t, e, taxonomy.ProposedNodeLabel, "Container", taxonomy.MinRecurrenceForSettlement+2)
+
+	snapshot = e.OntologyProposals()
+	require.Len(t, snapshot, 1)
+	assert.Equal(t, OntologyProposalRejected, snapshot[0].Status)
+	assert.False(t, snapshot[0].Promoted)
+	assert.NotContains(t, e.World.ontologyGate.Base().NodeLabels(), "Container")
+}
+
+// TestOntologyExtensionApproved_CodecRoundTrip and
+// TestOntologyExtensionRejected_CodecRoundTrip prove the two new events
+// survive the durable Timeline's JSON envelope round trip, mirroring
+// TestOntologyExtensionProposed_CodecRoundTrip.
+func TestOntologyExtensionApproved_CodecRoundTrip(t *testing.T) {
+	ev := OntologyExtensionApproved{
+		ProposalKind: taxonomy.ProposedNodeLabel,
+		Label:        "Container",
+		Reviewer:     "owner-1",
+	}
+	b, err := EncodeEvent(ev)
+	require.NoError(t, err)
+	decoded, err := DecodeEvent(b)
+	require.NoError(t, err)
+	assert.True(t, reflect.DeepEqual(decoded, Event(ev)), "round trip: got %#v (%T), want %#v", decoded, decoded, ev)
+}
+
+func TestOntologyExtensionRejected_CodecRoundTrip(t *testing.T) {
+	ev := OntologyExtensionRejected{
+		ProposalKind: taxonomy.ProposedRelationshipType,
+		Label:        "RUNS_ON",
+		Reviewer:     "owner-1",
+		Reason:       "too niche",
+	}
+	b, err := EncodeEvent(ev)
+	require.NoError(t, err)
+	decoded, err := DecodeEvent(b)
+	require.NoError(t, err)
+	assert.True(t, reflect.DeepEqual(decoded, Event(ev)), "round trip: got %#v (%T), want %#v", decoded, decoded, ev)
+}
+
+func TestOntologyProposalStatus_String(t *testing.T) {
+	assert.Equal(t, "pending", OntologyProposalPending.String())
+	assert.Equal(t, "approved", OntologyProposalApproved.String())
+	assert.Equal(t, "rejected", OntologyProposalRejected.String())
+	assert.Equal(t, "unknown", OntologyProposalStatus(99).String())
+}
+
+// TestApplyOntologyExtensionApproved_NoMatchingProposalIsANoOp proves the
+// fold stays defined (never panics) for an OntologyExtensionApproved that
+// names no proposal this tenant's World has ever observed — a defensive
+// branch that cannot occur via the Engine seam (which checks existence
+// before Submit), exercised directly through Reduce for replay-robustness.
+func TestApplyOntologyExtensionApproved_NoMatchingProposalIsANoOp(t *testing.T) {
+	w := NewWorld("tenant-1")
+	Reduce(w, OntologyExtensionApproved{ProposalKind: taxonomy.ProposedNodeLabel, Label: "Container", Reviewer: "owner-1"})
+	assert.Empty(t, w.OntologyProposalSnapshot())
+}
+
+// TestApplyOntologyExtensionApproved_ConfirmFailureIsANoOp proves the fold's
+// Confirm-error branch is defensive, not reachable via the Engine seam
+// (which checks taxonomy.ValidIdentifier before Submit), by planting an
+// invalid-identifier proposal directly through Reduce (bypassing the Engine
+// gate entirely, as Replay itself would).
+func TestApplyOntologyExtensionApproved_ConfirmFailureIsANoOp(t *testing.T) {
+	w := NewWorld("tenant-1")
+	Reduce(w, OntologyExtensionProposed{ProposalKind: taxonomy.ProposedNodeLabel, Label: "not valid!", Proposer: "agent-1", Claim: "c"})
+	Reduce(w, OntologyExtensionApproved{ProposalKind: taxonomy.ProposedNodeLabel, Label: "not valid!", Reviewer: "owner-1"})
+
+	snapshot := w.OntologyProposalSnapshot()
+	require.Len(t, snapshot, 1)
+	assert.Equal(t, OntologyProposalPending, snapshot[0].Status, "Confirm's ValidIdentifier failure must leave the proposal Pending, not silently Approved")
+}
+
+// TestApplyOntologyExtensionRejected_NoMatchingProposalIsANoOp mirrors
+// TestApplyOntologyExtensionApproved_NoMatchingProposalIsANoOp for rejection.
+func TestApplyOntologyExtensionRejected_NoMatchingProposalIsANoOp(t *testing.T) {
+	w := NewWorld("tenant-1")
+	Reduce(w, OntologyExtensionRejected{ProposalKind: taxonomy.ProposedNodeLabel, Label: "Container", Reviewer: "owner-1", Reason: "no"})
+	assert.Empty(t, w.OntologyProposalSnapshot())
+}
+
+func TestRejectOntologyExtension_InvalidIdentifierIsRejectedFailClosed(t *testing.T) {
+	e := newTestEngine()
+	err := e.RejectOntologyExtension(context.Background(), taxonomy.ProposedNodeLabel, "not a valid identifier!", "owner-1", "reason")
+	require.Error(t, err)
+	var invalid *taxonomy.InvalidProposalError
+	require.ErrorAs(t, err, &invalid)
+}
+
+// TestOntologyExtensionApproved_ReplayReproducesTheWorld is the gibson#392
+// determinism unit, mirroring TestOntologyExtensionProposed_ReplayReproducesTheWorld:
+// World == fold(Timeline) for the approval/promotion outcome too.
+func TestOntologyExtensionApproved_ReplayReproducesTheWorld(t *testing.T) {
+	tl := &Timeline{}
+	w := NewWorld("tenant-1")
+	apply := func(ev Event) { tl.Append(ev); Reduce(w, ev) }
+
+	for range taxonomy.MinRecurrenceForSettlement {
+		apply(OntologyExtensionProposed{ProposalKind: taxonomy.ProposedNodeLabel, Label: "Container", Proposer: "agent-1", Claim: "sighted"})
+	}
+	apply(OntologyExtensionApproved{ProposalKind: taxonomy.ProposedNodeLabel, Label: "Container", Reviewer: "owner-1"})
+
+	want := w.OntologyProposalSnapshot()
+	require.Len(t, want, 1)
+	require.True(t, want[0].Promoted)
+
+	replayed := Replay("tenant-1", tl)
+	assert.Equal(t, want, replayed.OntologyProposalSnapshot())
+	assert.Equal(t, w.ontologyGate.Base().NodeLabels(), replayed.ontologyGate.Base().NodeLabels())
 }

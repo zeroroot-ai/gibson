@@ -89,22 +89,25 @@ type World struct {
 	domainPacks map[string]DomainPackState
 
 	// ontologyGate is this tenant's taxonomy-discovery safety gate
-	// (taxonomy.PromotionGate, ADR-0024 §2, ADR-0033 decision 2, gibson#391),
-	// folded from OntologyExtensionProposed (ontology_extension.go). Base is
-	// taxonomy.Global — the platform's own core Taxonomy — the same base
-	// gibson#281's original design classifies sightings against; nothing
-	// here ever calls Promote (that is gibson#392's tenant-owner approval
-	// flow), so the base registry is never actually consulted by this
-	// change, only carried because NewPromotionGate requires one.
+	// (taxonomy.PromotionGate, ADR-0024 §2, ADR-0033 decisions 2-3,
+	// gibson#391/#392), folded from OntologyExtensionProposed/Approved
+	// (ontology_extension.go). Base is taxonomy.Global — the platform's own
+	// core Taxonomy — the same base gibson#281's original design classifies
+	// sightings against. applyOntologyExtensionApproved (gibson#392) is the
+	// only path that ever calls Promote: once a proposal has BOTH recurred
+	// taxonomy.MinRecurrenceForSettlement times AND been explicitly approved
+	// by the tenant owner, Base() advances to admit the new label — this
+	// tenant's live taxonomy extension.
 	ontologyGate *taxonomy.PromotionGate
 
 	// ontologyProposals holds this tenant's currently observed ontology/
-	// taxonomy extension proposals (ADR-0024 §2, ADR-0033 decision 2,
-	// gibson#391), keyed by (kind, label) — the read model gibson#392's
-	// tenant-owner approval flow will list from. Not ECS-backed: like
-	// domainPacks, per-tenant singleton-shaped state keyed by proposal
-	// identity — a repeat sighting of the SAME (kind, label) updates its
-	// entry in place rather than adding a new one.
+	// taxonomy extension proposals (ADR-0024 §2, ADR-0033 decisions 2-3,
+	// gibson#391/#392), keyed by (kind, label) — the read model
+	// OntologyExtensionService.ListOntologyExtensionProposals (gibson#392)
+	// lists from. Not ECS-backed: like domainPacks, per-tenant
+	// singleton-shaped state keyed by proposal identity — a repeat sighting
+	// of the SAME (kind, label) updates its entry in place rather than
+	// adding a new one.
 	ontologyProposals map[ontologyProposalKey]OntologyProposalState
 
 	// observations holds out-of-taxonomy shapes (ADR-0012). Keyed by Timeline
@@ -460,6 +463,10 @@ func Reduce(w *World, ev Event) {
 		applyDomainPackDisabled(w, e)
 	case OntologyExtensionProposed:
 		applyOntologyExtensionProposed(w, e)
+	case OntologyExtensionApproved:
+		applyOntologyExtensionApproved(w, e)
+	case OntologyExtensionRejected:
+		applyOntologyExtensionRejected(w, e)
 	}
 }
 

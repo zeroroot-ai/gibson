@@ -78,6 +78,53 @@ type OntologyExtensionProposed struct {
 // Kind identifies this event on the Timeline.
 func (OntologyExtensionProposed) Kind() string { return "ontology_extension.proposed" }
 
+// OntologyExtensionApproved records that the tenant owner explicitly
+// approved a previously-proposed Taxonomy node label or relationship type
+// (ADR-0033 decision 3, gibson#392). Folding this event runs
+// taxonomy.PromotionGate.Confirm for this tenant — the HITL half of
+// settlement — and attempts Promote; the label becomes a live, per-tenant
+// taxonomy extension immediately once BOTH settlement halves (recurrence and
+// this approval) are satisfied.
+//
+// The field is named ProposalKind, not Kind, for the same reason
+// OntologyExtensionProposed's is: it never collides with the Event
+// interface's own Kind() method.
+type OntologyExtensionApproved struct {
+	// ProposalKind and Label identify which pending proposal this approval
+	// decides — must match a prior OntologyExtensionProposed's fields
+	// exactly (taxonomy's own (kind, label) proposal identity).
+	ProposalKind taxonomy.ProposalKind
+	Label        string
+	// Reviewer identifies the tenant owner who approved this proposal,
+	// carried through for audit/attribution and recorded as
+	// taxonomy.PromotionGate's Confirm reviewer.
+	Reviewer string
+}
+
+// Kind identifies this event on the Timeline.
+func (OntologyExtensionApproved) Kind() string { return "ontology_extension.approved" }
+
+// OntologyExtensionRejected records that the tenant owner explicitly
+// rejected a previously-proposed Taxonomy node label or relationship type
+// (ADR-0033 decision 3, gibson#392). Folding this event never touches
+// taxonomy.PromotionGate — a rejected proposal is simply never Confirmed, so
+// it can never be promoted through this tenant's gate. Terminal: this
+// package exposes no "undo a rejection" event.
+type OntologyExtensionRejected struct {
+	// ProposalKind and Label identify which pending proposal this rejection
+	// decides — same identity contract as OntologyExtensionApproved's.
+	ProposalKind taxonomy.ProposalKind
+	Label        string
+	// Reviewer identifies the tenant owner who rejected this proposal.
+	Reviewer string
+	// Reason is the tenant owner's free-text rationale for rejecting,
+	// carried through for audit.
+	Reason string
+}
+
+// Kind identifies this event on the Timeline.
+func (OntologyExtensionRejected) Kind() string { return "ontology_extension.rejected" }
+
 // ontologyProposalKey identifies one proposed label independent of how many
 // times it has been sighted — mirrors taxonomy's own unexported proposalKey.
 type ontologyProposalKey struct {
@@ -85,12 +132,49 @@ type ontologyProposalKey struct {
 	label string
 }
 
+// OntologyProposalStatus is a proposed taxonomy label or relationship type's
+// current position in ADR-0033 decision 2's lifecycle, as observed by this
+// tenant's World: proposed and awaiting a decision, explicitly approved by
+// the tenant owner, or explicitly rejected. It is independent of Promoted
+// (below) — an OntologyProposalApproved proposal that has not yet recurred
+// taxonomy.MinRecurrenceForSettlement times is Approved but not yet
+// Promoted; a later sighting completes promotion without another approval.
+type OntologyProposalStatus int
+
+const (
+	// OntologyProposalPending is the initial state: observed at least once,
+	// awaiting the tenant owner's explicit approval or rejection (gibson#392).
+	OntologyProposalPending OntologyProposalStatus = iota
+	// OntologyProposalApproved records that the tenant owner approved this
+	// proposal (the HITL half of taxonomy.PromotionGate's settlement rule).
+	OntologyProposalApproved
+	// OntologyProposalRejected records that the tenant owner rejected this
+	// proposal. Terminal: nothing in this package promotes a rejected
+	// proposal, and there is no "undo a rejection" path.
+	OntologyProposalRejected
+)
+
+// String renders s for error messages and the approval-queue read model.
+func (s OntologyProposalStatus) String() string {
+	switch s {
+	case OntologyProposalPending:
+		return "pending"
+	case OntologyProposalApproved:
+		return "approved"
+	case OntologyProposalRejected:
+		return "rejected"
+	default:
+		return "unknown"
+	}
+}
+
 // OntologyProposalState is this tenant's current record of one proposed
-// taxonomy label or relationship type: its running recurrence count and the
-// most recent proposer/claim that sighted it. It is per-tenant fold state
-// (ontologyProposals), not itself ECS-backed — like DomainPackState, a
-// singleton-shaped value keyed by proposal identity rather than a growing
-// collection of distinct sightings.
+// taxonomy label or relationship type: its running recurrence count, the
+// most recent proposer/claim that sighted it, and the tenant owner's
+// decision (if any) plus whether that decision has produced a live taxonomy
+// extension yet. It is per-tenant fold state (ontologyProposals), not itself
+// ECS-backed — like DomainPackState, a singleton-shaped value keyed by
+// proposal identity rather than a growing collection of distinct sightings.
 type OntologyProposalState struct {
 	ProposalKind taxonomy.ProposalKind
 	Label        string
@@ -103,6 +187,25 @@ type OntologyProposalState struct {
 	// current state, not a full sighting history.
 	LastProposer string
 	LastClaim    string
+	// Status is this proposal's position in the approval lifecycle
+	// (gibson#392, ADR-0033 decision 3). Zero value is OntologyProposalPending.
+	Status OntologyProposalStatus
+	// Reviewer is the tenant owner who approved or rejected this proposal.
+	// Empty while Status is Pending.
+	Reviewer string
+	// RejectReason is the tenant owner's free-text rationale for rejecting
+	// this proposal. Empty unless Status is Rejected.
+	RejectReason string
+	// Promoted is true once taxonomy.PromotionGate.Promote has actually
+	// admitted this label into the tenant's live Taxonomy (ontologyGate.Base()) —
+	// the authoritative "is this a live tenant extension yet" signal.
+	// Status == OntologyProposalApproved alone does NOT imply Promoted: the
+	// proposal may still be short of taxonomy.MinRecurrenceForSettlement
+	// independent sightings.
+	Promoted bool
+	// PromotedVersion is the resulting taxonomy.Registry version once
+	// Promoted is true; zero otherwise.
+	PromotedVersion int
 }
 
 // applyOntologyExtensionProposed is the reducer half of
@@ -118,27 +221,119 @@ type OntologyProposalState struct {
 // replay-deterministic (ADR-0001): folding the identical sequence of
 // OntologyExtensionProposed events against a fresh World reproduces the
 // identical sequence of Observe calls, hence identical recurrence counts.
+//
+// A later sighting can complete settlement for a proposal the tenant owner
+// already approved (gibson#392) before it had recurred enough times: after
+// updating recurrence, promoteIfSettled retries Promote for an
+// already-Approved, not-yet-Promoted proposal, so the owner never has to
+// approve the same proposal twice.
 func applyOntologyExtensionProposed(w *World, e OntologyExtensionProposed) {
 	recurrence := w.ontologyGate.Observe(e.ProposalKind, e.Label)
-	w.ontologyProposals[ontologyProposalKey{kind: e.ProposalKind, label: e.Label}] = OntologyProposalState{
-		ProposalKind: e.ProposalKind,
-		Label:        e.Label,
-		Recurrence:   recurrence,
-		LastProposer: e.Proposer,
-		LastClaim:    e.Claim,
+	key := ontologyProposalKey{kind: e.ProposalKind, label: e.Label}
+	state := w.ontologyProposals[key]
+	state.ProposalKind = e.ProposalKind
+	state.Label = e.Label
+	state.Recurrence = recurrence
+	state.LastProposer = e.Proposer
+	state.LastClaim = e.Claim
+	promoteIfSettled(w, key, &state)
+	w.ontologyProposals[key] = state
+}
+
+// applyOntologyExtensionApproved is the reducer half of
+// OntologyExtensionApproved (ADR-0033 decision 3, gibson#392): the tenant
+// owner's explicit approval is the HITL half of taxonomy.PromotionGate's
+// settlement rule. Folding this event runs PromotionGate.Confirm for e's
+// (kind, label) — recording the reviewer — then attempts promoteIfSettled:
+// once the SAME proposal has ALSO recurred taxonomy.MinRecurrenceForSettlement
+// times (the automated half, already tracked by applyOntologyExtensionProposed),
+// promotion succeeds and the label becomes live, per-tenant, replayable
+// Cypher structure immediately (w.ontologyGate.Base() advances).
+//
+// Calling Confirm/Promote here (inside the single-writer fold), rather than
+// in Engine.ApproveOntologyExtension before Submit, keeps this
+// replay-deterministic for the same reason applyOntologyExtensionProposed's
+// own Observe call does.
+//
+// A missing proposal (no prior OntologyExtensionProposed ever folded for
+// this key) or a Confirm failure (ValidIdentifier, which
+// Engine.ApproveOntologyExtension already checked before Submit) are both
+// impossible via the only exported path to this event — folding stays
+// defined for every input regardless, never panicking on a fold path,
+// mirroring the rest of this package's discipline.
+func applyOntologyExtensionApproved(w *World, e OntologyExtensionApproved) {
+	key := ontologyProposalKey{kind: e.ProposalKind, label: e.Label}
+	state, ok := w.ontologyProposals[key]
+	if !ok {
+		return
 	}
+	if err := w.ontologyGate.Confirm(e.ProposalKind, e.Label, e.Reviewer); err != nil {
+		return
+	}
+	state.Status = OntologyProposalApproved
+	state.Reviewer = e.Reviewer
+	promoteIfSettled(w, key, &state)
+	w.ontologyProposals[key] = state
+}
+
+// applyOntologyExtensionRejected is the reducer half of
+// OntologyExtensionRejected (ADR-0033 decision 3, gibson#392): records the
+// tenant owner's explicit rejection. This never touches ontologyGate — a
+// rejected proposal is simply never Confirmed, so PromotionGate.Promote can
+// never admit it; rejection is audit state, not a Taxonomy mutation.
+func applyOntologyExtensionRejected(w *World, e OntologyExtensionRejected) {
+	key := ontologyProposalKey{kind: e.ProposalKind, label: e.Label}
+	state, ok := w.ontologyProposals[key]
+	if !ok {
+		return
+	}
+	state.Status = OntologyProposalRejected
+	state.Reviewer = e.Reviewer
+	state.RejectReason = e.Reason
+	w.ontologyProposals[key] = state
+}
+
+// promoteIfSettled attempts taxonomy.PromotionGate.Promote for key and
+// records the outcome onto state in place. It is the ONE place either fold
+// path (applyOntologyExtensionProposed or applyOntologyExtensionApproved)
+// calls Promote, so a proposal is never promoted twice nor by two different
+// code paths — settlement is symmetric in its two halves (recurrence and
+// HITL confirmation, ADR-0033 decision 2), and whichever half completes
+// last is the one that actually triggers promotion.
+//
+// A no-op once state.Promoted is already true, or while state.Status is not
+// yet Approved (nothing to attempt). A taxonomy.NotSettledError from Promote
+// (insufficient recurrence) is an expected, not-yet-settled outcome — not a
+// fold-time invariant violation — so it is silently absorbed here; the next
+// qualifying sighting or approval retries.
+func promoteIfSettled(w *World, key ontologyProposalKey, state *OntologyProposalState) {
+	if state.Promoted || state.Status != OntologyProposalApproved {
+		return
+	}
+	registry, err := w.ontologyGate.Promote(key.kind, key.label)
+	if err != nil {
+		return
+	}
+	state.Promoted = true
+	state.PromotedVersion = registry.Version()
 }
 
 // OntologyProposalSnapshot is a stable, comparable view of one proposed
-// taxonomy label or relationship type and its recurrence so far. This is the
-// read model gibson#392's tenant-owner approval flow lists from; nothing in
-// this package promotes it into the Taxonomy.
+// taxonomy label or relationship type, its recurrence so far, and the tenant
+// owner's decision (if any). This is the read model gibson#392's
+// tenant-owner approval flow (OntologyExtensionService, ListOntologyExtensionProposals)
+// lists from.
 type OntologyProposalSnapshot struct {
-	ProposalKind taxonomy.ProposalKind
-	Label        string
-	Recurrence   int
-	LastProposer string
-	LastClaim    string
+	ProposalKind    taxonomy.ProposalKind
+	Label           string
+	Recurrence      int
+	LastProposer    string
+	LastClaim       string
+	Status          OntologyProposalStatus
+	Reviewer        string
+	RejectReason    string
+	Promoted        bool
+	PromotedVersion int
 }
 
 // OntologyProposalSnapshot returns the tenant's currently observed ontology/
@@ -230,4 +425,121 @@ func (e *Engine) OntologyProposals() []OntologyProposalSnapshot {
 	e.mu.RLock()
 	defer e.mu.RUnlock()
 	return e.World.OntologyProposalSnapshot()
+}
+
+// OntologyProposalNotFoundError is returned by ApproveOntologyExtension and
+// RejectOntologyExtension when (kind, label) names no proposal this tenant's
+// World has ever observed.
+type OntologyProposalNotFoundError struct {
+	Kind  taxonomy.ProposalKind
+	Label string
+}
+
+func (e *OntologyProposalNotFoundError) Error() string {
+	return fmt.Sprintf("brain: no ontology extension proposal found for %s %q", e.Kind, e.Label)
+}
+
+// OntologyProposalAlreadyDecidedError is returned by ApproveOntologyExtension
+// and RejectOntologyExtension when (kind, label) already carries a terminal
+// tenant-owner decision. The tenant owner's decision is per-proposal and
+// final through this seam — there is no "change your mind" path, so a second
+// decision on the same proposal is refused rather than silently overwriting
+// the first.
+type OntologyProposalAlreadyDecidedError struct {
+	Kind   taxonomy.ProposalKind
+	Label  string
+	Status OntologyProposalStatus
+}
+
+func (e *OntologyProposalAlreadyDecidedError) Error() string {
+	return fmt.Sprintf("brain: ontology extension proposal for %s %q was already %s", e.Kind, e.Label, e.Status)
+}
+
+// ontologyProposalState reads back the current state for (kind, label), if
+// this tenant's World has ever observed it. Read-locked, mirroring
+// OntologyProposals' own locking, since ApproveOntologyExtension and
+// RejectOntologyExtension must validate against current state before
+// Submitting — the same pre-Submit validation pattern
+// ProposeOntologyExtension uses for taxonomy.ValidIdentifier.
+func (e *Engine) ontologyProposalState(kind taxonomy.ProposalKind, label string) (OntologyProposalState, bool) {
+	e.mu.RLock()
+	defer e.mu.RUnlock()
+	s, ok := e.World.ontologyProposals[ontologyProposalKey{kind: kind, label: label}]
+	return s, ok
+}
+
+// ApproveOntologyExtension is the entry point the tenant-owner-gated
+// OntologyExtensionService.ApproveOntologyExtensionProposal RPC calls
+// (gibson#392, ADR-0033 decision 3): the tenant owner approves a
+// previously-proposed Taxonomy node label or relationship type. It is the
+// ONLY exported way an OntologyExtensionApproved event reaches this Engine's
+// intake.
+//
+// label is checked against taxonomy.ValidIdentifier BEFORE Submit, mirroring
+// ProposeOntologyExtension's own fail-closed check — redundant in practice
+// (an invalid label could never have reached ontologyProposals in the first
+// place), but independent defense in depth, exactly like
+// taxonomy.PromotionGate.Confirm's own re-check. reviewer is required,
+// mirroring ProposeOntologyExtension's proposer/claim requirement — an
+// unattributed approval cannot be audited.
+//
+// Refuses with *OntologyProposalNotFoundError when no matching proposal has
+// ever been observed, and with *OntologyProposalAlreadyDecidedError when
+// (kind, label) already carries a terminal decision.
+//
+// Like ProposeOntologyExtension, the resulting event is folded asynchronously
+// through the normal single-writer Submit path (ADR-0001): whether this
+// approval actually promoted the extension (enough recurrence, not just
+// approval) is visible only after the fold — read OntologyProposals()
+// afterward, never assume Promoted the instant this call returns.
+func (e *Engine) ApproveOntologyExtension(_ context.Context, kind taxonomy.ProposalKind, label, reviewer string) error {
+	if err := taxonomy.ValidIdentifier(label); err != nil {
+		return &taxonomy.InvalidProposalError{Kind: kind, Label: label, Err: err}
+	}
+	if reviewer == "" {
+		return fmt.Errorf("brain: ontology extension approval for %s %q has no reviewer; an unattributed approval cannot be audited", kind, label)
+	}
+	state, ok := e.ontologyProposalState(kind, label)
+	if !ok {
+		return &OntologyProposalNotFoundError{Kind: kind, Label: label}
+	}
+	if state.Status != OntologyProposalPending {
+		return &OntologyProposalAlreadyDecidedError{Kind: kind, Label: label, Status: state.Status}
+	}
+	e.Submit(OntologyExtensionApproved{
+		ProposalKind: kind,
+		Label:        label,
+		Reviewer:     reviewer,
+	})
+	return nil
+}
+
+// RejectOntologyExtension is the entry point the tenant-owner-gated
+// OntologyExtensionService.RejectOntologyExtensionProposal RPC calls
+// (gibson#392, ADR-0033 decision 3): the tenant owner rejects a
+// previously-proposed Taxonomy node label or relationship type. Same
+// existence/terminal-decision/attribution checks as ApproveOntologyExtension;
+// reason is optional (a rejection needs no rationale to take effect, unlike
+// a proposal's Claim, which motivates review in the first place).
+func (e *Engine) RejectOntologyExtension(_ context.Context, kind taxonomy.ProposalKind, label, reviewer, reason string) error {
+	if err := taxonomy.ValidIdentifier(label); err != nil {
+		return &taxonomy.InvalidProposalError{Kind: kind, Label: label, Err: err}
+	}
+	if reviewer == "" {
+		return fmt.Errorf("brain: ontology extension rejection for %s %q has no reviewer; an unattributed rejection cannot be audited", kind, label)
+	}
+	state, ok := e.ontologyProposalState(kind, label)
+	if !ok {
+		return &OntologyProposalNotFoundError{Kind: kind, Label: label}
+	}
+	if state.Status != OntologyProposalPending {
+		return &OntologyProposalAlreadyDecidedError{Kind: kind, Label: label, Status: state.Status}
+	}
+	e.Submit(OntologyExtensionRejected{
+		ProposalKind: kind,
+		Label:        label,
+		Reviewer:     reviewer,
+		Reason:       reason,
+	})
+	return nil
 }
