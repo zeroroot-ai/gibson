@@ -70,7 +70,7 @@ func TestGroundAttackGraph_IntraNodeDependsOnUsesUninformativePrior(t *testing.T
 		},
 	}
 
-	nodes, causes := groundAttackGraph(graph, reg)
+	nodes, causes := groundAttackGraph(graph, reg, nil)
 	require.Empty(t, causes)
 	require.Len(t, nodes, 1)
 	require.Equal(t, "host-a", nodes[0].NodeID)
@@ -99,7 +99,7 @@ func TestGroundAttackGraph_EnablementEdgeBecomesATerminalSourcedCause(t *testing
 		Edges: []InfraEdge{{Type: "RESOLVES_TO", From: "host-a", To: "host-b"}},
 	}
 
-	_, causes := groundAttackGraph(graph, reg)
+	_, causes := groundAttackGraph(graph, reg, nil)
 	require.Len(t, causes, 1)
 	assert.Equal(t, beliefvi.EnablementCause{
 		SourceNode:     "host-a",
@@ -129,7 +129,7 @@ func TestGroundAttackGraph_SkipsAnEdgeWhoseTargetVariableTheDestinationDoesNotDe
 		Edges: []InfraEdge{{Type: "RESOLVES_TO", From: "host-a", To: "finding-1"}},
 	}
 
-	_, causes := groundAttackGraph(graph, reg)
+	_, causes := groundAttackGraph(graph, reg, nil)
 	assert.Empty(t, causes)
 }
 
@@ -152,7 +152,7 @@ func TestGroundAttackGraph_SkipsAnEdgeTypeAbsentFromTheRegistry(t *testing.T) {
 		Edges: []InfraEdge{{Type: "NOT_REGISTERED", From: "host-a", To: "host-b"}},
 	}
 
-	_, causes := groundAttackGraph(graph, reg)
+	_, causes := groundAttackGraph(graph, reg, nil)
 	assert.Empty(t, causes)
 }
 
@@ -178,7 +178,7 @@ func TestGroundAttackGraph_MultipleTerminalsEachBecomeAnIndependentCause(t *test
 		Edges: []InfraEdge{{Type: "AFFECTS", From: "widget-1", To: "target-1"}},
 	}
 
-	_, causes := groundAttackGraph(graph, reg)
+	_, causes := groundAttackGraph(graph, reg, nil)
 	require.Len(t, causes, 2)
 	sourceVars := []string{causes[0].SourceVariable, causes[1].SourceVariable}
 	sort.Strings(sourceVars)
@@ -207,7 +207,7 @@ func TestNativeSliceBelief_ColdStartLoneNodeIsExactlyOneHalf(t *testing.T) {
 		},
 	}))
 
-	p := NativeSliceBeliefProvider(reg)
+	p := NativeSliceBeliefProvider(reg, nil)
 	graph := AttackGraph{Nodes: []AttackGraphNode{
 		{InfraNode: InfraNode{ID: "host-a", Kind: "Host"}, Variables: reg.Variables("Host")},
 	}}
@@ -236,11 +236,11 @@ func TestNativeSliceBelief_ScoreSlice_MatchesDirectBeliefviSolve(t *testing.T) {
 		Edges: []InfraEdge{{Type: "RESOLVES_TO", From: "host-a", To: "host-b"}},
 	}
 
-	nodes, causes := groundAttackGraph(graph, reg)
+	nodes, causes := groundAttackGraph(graph, reg, nil)
 	want, err := beliefvi.SolveSlice(nodes, causes, nil)
 	require.NoError(t, err)
 
-	p := NativeSliceBeliefProvider(reg)
+	p := NativeSliceBeliefProvider(reg, nil)
 	got := p.ScoreSlice(graph)
 
 	for _, id := range []string{"host-a", "host-b"} {
@@ -257,6 +257,149 @@ func TestNativeSliceBelief_ScoreSlice_MatchesDirectBeliefviSolve(t *testing.T) {
 
 func TestNativeSliceBelief_Version(t *testing.T) {
 	reg := ontology.NewBeliefSchemaRegistry()
-	p := NativeSliceBeliefProvider(reg)
+	p := NativeSliceBeliefProvider(reg, nil)
 	assert.Equal(t, "native-slice-v0-uninformative-prior", p.Version())
+}
+
+// -----------------------------------------------------------------------
+// gibson#395: pinned per-edge-type Beta posteriors
+// -----------------------------------------------------------------------
+
+// fakePinnedPosteriors is a minimal PinnedEdgeStrengthPosteriorProvider test
+// double standing in for braintrain.EdgePosteriorArtifact.Provider().
+type fakePinnedPosteriors struct {
+	version     string
+	posteriors  map[string]EdgeStrengthPosterior
+	defaultBeta EdgeStrengthPosterior
+}
+
+func (f fakePinnedPosteriors) Posterior(edgeType string) EdgeStrengthPosterior {
+	if p, ok := f.posteriors[edgeType]; ok {
+		return p
+	}
+	if f.defaultBeta != (EdgeStrengthPosterior{}) {
+		return f.defaultBeta
+	}
+	return EdgeStrengthPosterior{Alpha: 1, Beta: 1} // mirrors UninformativeEdgePosteriors
+}
+
+func (f fakePinnedPosteriors) Version() string { return f.version }
+
+func TestGroundAttackGraph_PinnedPosteriorReplacesEnablementEdgeStrength(t *testing.T) {
+	reg := ontology.NewBeliefSchemaRegistry()
+	require.NoError(t, reg.RegisterExtension("core/belief-schema", ontology.SeedBeliefSchemaExtension()))
+
+	graph := AttackGraph{
+		Nodes: []AttackGraphNode{
+			{InfraNode: InfraNode{ID: "host-a", Kind: "Host"}, Variables: reg.Variables("Host")},
+			{InfraNode: InfraNode{ID: "host-b", Kind: "Host"}, Variables: reg.Variables("Host")},
+		},
+		Edges: []InfraEdge{{Type: "RESOLVES_TO", From: "host-a", To: "host-b"}},
+	}
+
+	// A fitted posterior with mean 0.9 (Alpha=9, Beta=1), well away from the
+	// 0.5 cold start, so the substitution is unambiguous.
+	posteriors := fakePinnedPosteriors{
+		version:    "tenant-acme-edges-v1",
+		posteriors: map[string]EdgeStrengthPosterior{"RESOLVES_TO": {Alpha: 9, Beta: 1}},
+	}
+
+	_, causes := groundAttackGraph(graph, reg, posteriors)
+	require.Len(t, causes, 1)
+	assert.InDelta(t, 0.9, causes[0].Strength, 1e-12)
+}
+
+func TestGroundAttackGraph_PinnedPosteriorFallsBackForAnUnfittedEdgeType(t *testing.T) {
+	reg := ontology.NewBeliefSchemaRegistry()
+	require.NoError(t, reg.RegisterExtension("core/belief-schema", ontology.SeedBeliefSchemaExtension()))
+
+	graph := AttackGraph{
+		Nodes: []AttackGraphNode{
+			{InfraNode: InfraNode{ID: "host-a", Kind: "Host"}, Variables: reg.Variables("Host")},
+			{InfraNode: InfraNode{ID: "host-b", Kind: "Host"}, Variables: reg.Variables("Host")},
+		},
+		Edges: []InfraEdge{{Type: "RESOLVES_TO", From: "host-a", To: "host-b"}},
+	}
+
+	// A pinned artifact that never fitted RESOLVES_TO (e.g. it has no
+	// recorded outcomes yet) still grounds at the uninformative mean.
+	posteriors := fakePinnedPosteriors{version: "tenant-acme-edges-v1"}
+
+	_, causes := groundAttackGraph(graph, reg, posteriors)
+	require.Len(t, causes, 1)
+	assert.InDelta(t, UninformativePriorStrength, causes[0].Strength, 1e-12)
+}
+
+func TestGroundAttackGraph_PinnedPosteriorNeverChangesIntraNodeStrength(t *testing.T) {
+	// ADR-0037 scopes the learned posterior to ENABLEMENT edges only; an
+	// intra-node DependsOn cause keeps UninformativePriorStrength even when a
+	// posterior is pinned.
+	reg := ontology.NewBeliefSchemaRegistry()
+	require.NoError(t, reg.RegisterExtension("core/belief-schema", ontology.SeedBeliefSchemaExtension()))
+
+	graph := AttackGraph{
+		Nodes: []AttackGraphNode{
+			{InfraNode: InfraNode{ID: "host-a", Kind: "Host"}, Variables: reg.Variables("Host")},
+		},
+	}
+	posteriors := fakePinnedPosteriors{
+		version:    "tenant-acme-edges-v1",
+		posteriors: map[string]EdgeStrengthPosterior{"RESOLVES_TO": {Alpha: 9, Beta: 1}},
+	}
+
+	nodes, _ := groundAttackGraph(graph, reg, posteriors)
+	require.Len(t, nodes, 1)
+	exploitable, ok := nodes[0].Variables["exploitable"]
+	require.True(t, ok)
+	assert.InDelta(t, UninformativePriorStrength, exploitable.Leak, 1e-9)
+	assert.InDelta(t, UninformativePriorStrength, exploitable.DependsOn["reachable"], 1e-9)
+}
+
+func TestNativeSliceBelief_PinnedPosteriorStampsItsVersionOntoEveryScoredNode(t *testing.T) {
+	reg := ontology.NewBeliefSchemaRegistry()
+	require.NoError(t, reg.RegisterExtension("core/belief-schema", ontology.SeedBeliefSchemaExtension()))
+
+	graph := AttackGraph{
+		Nodes: []AttackGraphNode{
+			{InfraNode: InfraNode{ID: "host-a", Kind: "Host"}, Variables: reg.Variables("Host")},
+		},
+	}
+	posteriors := fakePinnedPosteriors{version: "tenant-acme-edges-v3"}
+	p := NativeSliceBeliefProvider(reg, posteriors)
+
+	assert.Equal(t, "native-slice-v0-uninformative-prior+edges:tenant-acme-edges-v3", p.Version())
+
+	got := p.ScoreSlice(graph)
+	require.Contains(t, got, "host-a")
+	assert.Equal(t, p.Version(), got["host-a"].Belief.Model)
+}
+
+func TestNativeSliceBelief_ReplayIsDeterministicForThePinnedVersion(t *testing.T) {
+	// Same mission graph + same pinned posterior version -> identical
+	// strengths and posteriors, every time (the hard replay-determinism
+	// requirement this epic holds every belief-runtime slice to).
+	reg := ontology.NewBeliefSchemaRegistry()
+	require.NoError(t, reg.RegisterExtension("core/belief-schema", ontology.SeedBeliefSchemaExtension()))
+
+	graph := AttackGraph{
+		Nodes: []AttackGraphNode{
+			{InfraNode: InfraNode{ID: "host-a", Kind: "Host"}, Variables: reg.Variables("Host")},
+			{InfraNode: InfraNode{ID: "host-b", Kind: "Host"}, Variables: reg.Variables("Host")},
+		},
+		Edges: []InfraEdge{{Type: "RESOLVES_TO", From: "host-a", To: "host-b"}},
+	}
+	posteriors := fakePinnedPosteriors{
+		version:    "tenant-acme-edges-v7",
+		posteriors: map[string]EdgeStrengthPosterior{"RESOLVES_TO": {Alpha: 3, Beta: 2}},
+	}
+
+	first := NativeSliceBeliefProvider(reg, posteriors).ScoreSlice(graph)
+	second := NativeSliceBeliefProvider(reg, posteriors).ScoreSlice(graph)
+
+	require.Len(t, second, len(first))
+	for id, nb := range first {
+		other, ok := second[id]
+		require.True(t, ok)
+		assert.Equal(t, nb.Belief, other.Belief)
+	}
 }

@@ -81,9 +81,89 @@ func TestResolveSliceBeliefProvider_IsTheNativeGroundingProvider(t *testing.T) {
 	if err != nil {
 		t.Fatalf("newBeliefSchemaRegistry: %v", err)
 	}
-	p := resolveSliceBeliefProvider(reg)
+	p := resolveSliceBeliefProvider(reg, nil)
 	if got := p.Version(); got != "native-slice-v0-uninformative-prior" {
 		t.Fatalf("resolveSliceBeliefProvider version = %q, want native-slice-v0-uninformative-prior", got)
+	}
+}
+
+// TestResolveEdgePosteriorProvider_DefaultsToNilWhenUnset proves the
+// gibson#395 documented data caveat: with no GIBSON_EDGE_POSTERIOR_PATH the
+// daemon pins no posterior at all, which NativeSliceBeliefProvider and
+// NewBAMCPPlanner both already treat as the uninformative-prior cold start —
+// production is allowed to have no recorded outcomes yet.
+func TestResolveEdgePosteriorProvider_DefaultsToNilWhenUnset(t *testing.T) {
+	t.Setenv("GIBSON_EDGE_POSTERIOR_PATH", "")
+	p, err := resolveEdgePosteriorProvider()
+	if err != nil {
+		t.Fatalf("resolveEdgePosteriorProvider: %v", err)
+	}
+	if p != nil {
+		t.Fatalf("expected a nil provider when GIBSON_EDGE_POSTERIOR_PATH is unset, got %v", p)
+	}
+}
+
+// TestResolveEdgePosteriorProvider_PinsAFittedArtifact proves
+// GIBSON_EDGE_POSTERIOR_PATH selects a braintrain-fitted edge-posterior
+// artifact (gibson#395, ADR-0037 decisions 2 and 5).
+func TestResolveEdgePosteriorProvider_PinsAFittedArtifact(t *testing.T) {
+	dir := t.TempDir()
+	path := filepath.Join(dir, "tenant-acme-edges-v3.json")
+	const raw = `{"version":"tenant-acme-edges-v3","posteriors":{"RESOLVES_TO":{"alpha":8,"beta":4}}}`
+	if err := os.WriteFile(path, []byte(raw), 0o600); err != nil {
+		t.Fatal(err)
+	}
+
+	t.Setenv("GIBSON_EDGE_POSTERIOR_PATH", path)
+	p, err := resolveEdgePosteriorProvider()
+	if err != nil {
+		t.Fatalf("resolveEdgePosteriorProvider: %v", err)
+	}
+	if got := p.Version(); got != "tenant-acme-edges-v3" {
+		t.Fatalf("pinned provider version = %q, want tenant-acme-edges-v3", got)
+	}
+	if got := p.Posterior("RESOLVES_TO").Mean(); got != 8.0/12.0 {
+		t.Fatalf("RESOLVES_TO mean = %v, want %v", got, 8.0/12.0)
+	}
+}
+
+// TestResolveEdgePosteriorProvider_FailsLoudOnAnInvalidOverride mirrors
+// TestResolveBeliefProvider_FailsLoudOnAnInvalidOverride: a misconfigured
+// GIBSON_EDGE_POSTERIOR_PATH fails daemon startup rather than silently
+// falling back to the cold start.
+func TestResolveEdgePosteriorProvider_FailsLoudOnAnInvalidOverride(t *testing.T) {
+	t.Setenv("GIBSON_EDGE_POSTERIOR_PATH", filepath.Join(t.TempDir(), "does-not-exist.json"))
+	if _, err := resolveEdgePosteriorProvider(); err == nil {
+		t.Fatal("expected an error for a missing edge posterior artifact file")
+	}
+}
+
+// TestResolveSliceBeliefProvider_PinsThePosteriorVersionIntoItsOwnVersion
+// proves resolveSliceBeliefProvider actually threads a resolved posterior
+// provider into brain.NativeSliceBeliefProvider rather than dropping it
+// (gibson#395's mission-pin requirement starts here: Version() is what a
+// scored node's Belief.Model gets stamped with).
+func TestResolveSliceBeliefProvider_PinsThePosteriorVersionIntoItsOwnVersion(t *testing.T) {
+	dir := t.TempDir()
+	path := filepath.Join(dir, "tenant-acme-edges-v1.json")
+	const raw = `{"version":"tenant-acme-edges-v1","posteriors":{}}`
+	if err := os.WriteFile(path, []byte(raw), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	t.Setenv("GIBSON_EDGE_POSTERIOR_PATH", path)
+	posteriors, err := resolveEdgePosteriorProvider()
+	if err != nil {
+		t.Fatalf("resolveEdgePosteriorProvider: %v", err)
+	}
+
+	reg, err := newBeliefSchemaRegistry()
+	if err != nil {
+		t.Fatalf("newBeliefSchemaRegistry: %v", err)
+	}
+	p := resolveSliceBeliefProvider(reg, posteriors)
+	want := "native-slice-v0-uninformative-prior+edges:tenant-acme-edges-v1"
+	if got := p.Version(); got != want {
+		t.Fatalf("resolveSliceBeliefProvider version = %q, want %q", got, want)
 	}
 }
 
@@ -123,7 +203,7 @@ func TestWireBrainRegistry_InstallsBothBeliefPipelines(t *testing.T) {
 	if err != nil {
 		t.Fatalf("newBeliefSchemaRegistry: %v", err)
 	}
-	wireBrainRegistry(ctx, registry, brain.PlaceholderBeliefProvider(), brain.PlaceholderSliceBeliefProvider(), beliefSchemaRegistry)
+	wireBrainRegistry(ctx, registry, brain.PlaceholderBeliefProvider(), brain.PlaceholderSliceBeliefProvider(), beliefSchemaRegistry, nil)
 
 	e := registry.For("tenant-wire-test") // triggers the OnEngine hook
 	e.Submit(brain.HostObserved{ScopeID: "s", Address: "10.0.0.5", OpenPorts: []int{22}})
@@ -165,7 +245,7 @@ func TestWireBrainRegistry_InstallsVoIPlanner(t *testing.T) {
 	if err != nil {
 		t.Fatalf("newBeliefSchemaRegistry: %v", err)
 	}
-	wireBrainRegistry(ctx, registry, brain.PlaceholderBeliefProvider(), brain.PlaceholderSliceBeliefProvider(), beliefSchemaRegistry)
+	wireBrainRegistry(ctx, registry, brain.PlaceholderBeliefProvider(), brain.PlaceholderSliceBeliefProvider(), beliefSchemaRegistry, nil)
 
 	e := registry.For("tenant-voi-wire-test") // triggers the OnEngine hook
 	e.Submit(brain.MissionProjected{ID: "m1", Goal: "find a path"})

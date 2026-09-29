@@ -161,13 +161,43 @@ func (p EdgeStrengthPosterior) sample(rng *rand.Rand) float64 {
 	return distuv.Beta{Alpha: p.Alpha, Beta: p.Beta, Src: rng}.Rand()
 }
 
+// Mean returns the posterior's mean, Alpha/(Alpha+Beta) -- the noisy-OR
+// strength EXACT inference consumes (belief_slice_native.go's
+// groundAttackGraph), the other of ADR-0037 decision 4's "one output, two
+// uses" (sample is the Thompson-sampling use BAMCP's rollouts need). Both
+// methods read the SAME posterior; braintrain (gibson#395) fits the one
+// artifact both consume.
+func (p EdgeStrengthPosterior) Mean() float64 {
+	return p.Alpha / (p.Alpha + p.Beta)
+}
+
 // EdgeStrengthPosteriorProvider supplies BAMCP's per-edge-type Beta
-// posterior. UninformativeEdgePosteriors is the only implementation this
-// package ships until braintrain (gibson#395) fits real per-type posteriors
-// from recorded outcomes -- see this file's own doc comment for why swapping
-// it in later touches only NewBAMCPPlanner's caller, never the rollout code.
+// posterior. UninformativeEdgePosteriors is the cold-start implementation;
+// braintrain.EdgePosteriorArtifact.Provider() (gibson#395) is the fitted one,
+// built offline from recorded outcomes -- see this file's own doc comment for
+// why swapping it in touches only NewBAMCPPlanner's caller, never the
+// rollout code.
 type EdgeStrengthPosteriorProvider interface {
 	Posterior(edgeType string) EdgeStrengthPosterior
+}
+
+// PinnedEdgeStrengthPosteriorProvider is an EdgeStrengthPosteriorProvider
+// fitted from a versioned artifact (ADR-0037 decisions 2 and 5, gibson#395):
+// braintrain's per-tenant edge-posterior artifact, versioned exactly like the
+// belief-CPT model (braintrain.NextVersion / braintrain.NextEdgePosteriorVersion).
+// NativeSliceBeliefProvider (belief_slice_native.go) accepts this richer
+// interface, not the plain EdgeStrengthPosteriorProvider BAMCP uses, because
+// it stamps Version() onto every scored node's Belief.Model -- ADR-0005 §5's
+// "it is a RECORD, not a selector" discipline, applied to the slice belief
+// path: a mission's recorded Timeline events, not a re-loaded file, are what
+// replay reproduces from. UninformativeEdgePosteriors does not implement
+// this: the cold-start prior has no fitted artifact version to report, which
+// is exactly why a nil/absent provider means "no posterior pinned."
+type PinnedEdgeStrengthPosteriorProvider interface {
+	EdgeStrengthPosteriorProvider
+	// Version identifies the fitted artifact this provider's posteriors came
+	// from (e.g. "tenant-acme-edges-v3").
+	Version() string
 }
 
 // UninformativeEdgePosteriors is the cold-start EdgeStrengthPosteriorProvider:

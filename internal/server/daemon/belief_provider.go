@@ -10,6 +10,7 @@ import (
 
 	"github.com/zeroroot-ai/gibson/internal/engine/brain"
 	"github.com/zeroroot-ai/gibson/internal/engine/brain/beliefvi"
+	"github.com/zeroroot-ai/gibson/internal/engine/braintrain"
 	"github.com/zeroroot-ai/gibson/internal/engine/ontology"
 )
 
@@ -69,14 +70,39 @@ func loadBeliefModelArtifact() (beliefvi.ModelArtifact, error) {
 // EnablementEdgeSpec.TargetVariable) and the exact VE + noisy-OR engine
 // (internal/engine/brain/beliefvi's GroundSlice/SolveSlice, #401,
 // parity-tested) that grounds it, entirely in-process; there is no sidecar
-// HTTP path left anywhere in this seam to cut over to. The noisy-OR
-// strength/leak ADR-0037 decision 2 assigns to a learned Beta posterior per
-// edge-type is a separate, later slice (braintrain, gibson#395); until it
-// lands, every cause grounds at the uninformative-prior cold start
+// HTTP path left anywhere in this seam to cut over to. posteriors is the
+// per-edge-type Beta posterior resolveEdgePosteriorProvider resolved
+// (gibson#395, ADR-0037 decision 2); nil means no posterior is pinned, so
+// every cause grounds at the uninformative-prior cold start
 // (brain.UninformativePriorStrength, ADR-0037 decision 3) — never a
 // hand-authored number.
-func resolveSliceBeliefProvider(registry *ontology.BeliefSchemaRegistry) brain.SliceBeliefProvider {
-	return brain.NativeSliceBeliefProvider(registry)
+func resolveSliceBeliefProvider(registry *ontology.BeliefSchemaRegistry, posteriors brain.PinnedEdgeStrengthPosteriorProvider) brain.SliceBeliefProvider {
+	return brain.NativeSliceBeliefProvider(registry, posteriors)
+}
+
+// resolveEdgePosteriorProvider selects braintrain's fitted per-edge-type Beta
+// posterior (gibson#395, ADR-0037 decisions 2 and 5), the learned strength
+// that replaces the uninformative-prior cold start (#394) once braintrain has
+// fitted one.
+//
+// GIBSON_EDGE_POSTERIOR_PATH optionally names a braintrain-emitted
+// EdgePosteriorArtifact JSON file (e.g. cmd/belief-trainer's -edge-out
+// output, mounted the same way GIBSON_BELIEF_MODEL_PATH mounts a curated CPT
+// model). Unset returns a nil provider: production may have no recorded
+// outcomes yet (this issue's documented data caveat), and a nil provider is
+// exactly "no posterior pinned" — NativeSliceBeliefProvider and
+// NewBAMCPPlanner both already treat that as the uninformative-prior cold
+// start, never a hard error and never a second code path to maintain.
+func resolveEdgePosteriorProvider() (brain.PinnedEdgeStrengthPosteriorProvider, error) {
+	path := os.Getenv("GIBSON_EDGE_POSTERIOR_PATH")
+	if path == "" {
+		return nil, nil
+	}
+	art, err := braintrain.LoadEdgePosteriorArtifact(path)
+	if err != nil {
+		return nil, fmt.Errorf("resolve edge posterior provider: %w", err)
+	}
+	return art.Provider(), nil
 }
 
 // newBeliefSchemaRegistry builds the ontology belief-PRM schema registry
@@ -109,14 +135,28 @@ func newBeliefSchemaRegistry() (*ontology.BeliefSchemaRegistry, error) {
 // on registry (brain.ExecutorSystems() carries it) — this hook only starts
 // the off-tick worker; the caller's System list is what makes the in-tick
 // gate half live.
+//
+// edgePosteriorProvider is braintrain's fitted per-edge-type Beta posterior
+// (gibson#395, resolveEdgePosteriorProvider); nil means none is pinned, and
+// every consumer below keeps its documented uninformative-prior cold start
+// exactly as before this parameter existed.
 func wireBrainRegistry(
 	ctx context.Context,
 	registry *brain.Registry,
 	beliefProvider brain.BeliefProvider,
 	sliceBeliefProvider brain.SliceBeliefProvider,
 	beliefSchemaRegistry *ontology.BeliefSchemaRegistry,
+	edgePosteriorProvider brain.PinnedEdgeStrengthPosteriorProvider,
 ) {
 	sliceOpts, propagateOpts := brain.DefaultSliceSchedule()
+	// bamcp Thompson-samples edgePosteriorProvider's SAME fitted posterior
+	// (ADR-0037 decision 4's "one output, two uses" — sliceBeliefProvider
+	// above, if built via resolveSliceBeliefProvider, already consumes its
+	// MEAN). NewBAMCPPlanner defaults a nil provider to
+	// UninformativeEdgePosteriors itself, so passing edgePosteriorProvider
+	// straight through preserves the documented cold start when none is
+	// pinned.
+	bamcp := brain.NewBAMCPPlanner(beliefSchemaRegistry, edgePosteriorProvider, brain.DefaultBAMCPConfig())
 	registry.OnEngine(func(e *brain.Engine) {
 		brain.WireBelief(ctx, e, beliefProvider, 0)
 		brain.WireSliceBelief(ctx, e, beliefSchemaRegistry, sliceBeliefProvider, 0, sliceOpts, propagateOpts)
@@ -125,8 +165,7 @@ func wireBrainRegistry(
 		// generative-simulator/Thompson-sampling item is this repo's
 		// gibson#396 (brain.BAMCPPlanner, wired below). Real technique x
 		// environment reputation (still the neutral prior, voi_plan.go's own
-		// doc comment) and hard Decider-dispatch enforcement within the VoI
-		// top-k remain separate, still-open scope (gibson#397).
+		// doc comment) remains separate, still-open scope.
 		//
 		// catalog is nil here (no covering-capability resolution yet, ADR-0035
 		// decision 4/gibson#387): the live per-mission capability catalog
@@ -138,12 +177,6 @@ func wireBrainRegistry(
 		// safe and documented (NewVoIWorker/WireVoIPlanner), and preserves
 		// today's behavior exactly (no candidate resolves a covering
 		// capability).
-		//
-		// bamcp is nil: NewVoIWorker defaults it to
-		// NewBAMCPPlanner(beliefSchemaRegistry, nil, DefaultBAMCPConfig()) —
-		// the uninformative-prior cold start (ADR-0037 decision 3) every edge
-		// type gets until braintrain (gibson#395) fits real per-type Beta
-		// posteriors.
-		brain.WireVoIPlanner(ctx, e, beliefSchemaRegistry, brain.ExactVoIScorer(), brain.DefaultVoITopK, 0, nil, nil, nil)
+		brain.WireVoIPlanner(ctx, e, beliefSchemaRegistry, brain.ExactVoIScorer(), brain.DefaultVoITopK, 0, nil, nil, bamcp)
 	})
 }
