@@ -212,8 +212,7 @@ func main() {
 	// applies a per-call timeout floor under the Envoy ext_authz
 	// budget (audit fix).
 	checker, fgaClient := buildChecker(log, reg)
-	cacheTTL := fgaCacheTTL()
-	cacheMax := intOr("EXT_AUTHZ_FGA_CACHE_MAX_SIZE", 100_000)
+	cacheTTL, cacheMax := fgaCacheSettings()
 	cachedChecker := fga.NewCachedChecker(checker, cacheTTL, cacheMax)
 
 	// Both capability-grant verifiers, on one SVID-pinned key transport.
@@ -946,12 +945,26 @@ func parseHealthPeerSVIDs() ([]string, error) {
 	return out, nil
 }
 
-// fgaCacheTTL is the FGA decision cache's TTL: EXT_AUTHZ_FGA_CACHE_TTL when
-// set, else the package default. The default lives in ONE place,
-// fga.DefaultCacheTTL, because this file used to carry its own 30 s and
-// silently outlived a change of the package default to 5 s: the identity
-// exit test kept accepting a demoted writer for 30 s while the code said
-// five (hosted#204, run 36619037626). TestFGACacheTTL pins the two together.
-func fgaCacheTTL() time.Duration {
-	return durationOr("EXT_AUTHZ_FGA_CACHE_TTL", fga.DefaultCacheTTL)
+// fgaCacheSettings is the FGA decision cache's TTL and size:
+// EXT_AUTHZ_FGA_CACHE_TTL and EXT_AUTHZ_FGA_CACHE_MAX_SIZE when set, else the
+// defaults. The TTL default lives in ONE place, fga.DefaultCacheTTL, because
+// this file used to carry its own 30 s and silently outlived a change of
+// the package default to 5 s: the identity exit test kept accepting a
+// demoted writer for 30 s while the code said five (hosted#204, run
+// 36619037626). TestFGACacheSettings pins the two together. A non-positive
+// override is a misconfiguration and falls back to the default rather than
+// an unbounded or empty cache.
+func fgaCacheSettings() (time.Duration, int) {
+	ttl := durationOr("EXT_AUTHZ_FGA_CACHE_TTL", fga.DefaultCacheTTL)
+	if ttl <= 0 {
+		ttl = fga.DefaultCacheTTL
+	}
+	maxSize := intOr("EXT_AUTHZ_FGA_CACHE_MAX_SIZE", defaultFGACacheMaxSize)
+	if maxSize <= 0 {
+		maxSize = defaultFGACacheMaxSize
+	}
+	return ttl, maxSize
 }
+
+// defaultFGACacheMaxSize bounds the decision cache; random eviction above it.
+const defaultFGACacheMaxSize = 100_000
