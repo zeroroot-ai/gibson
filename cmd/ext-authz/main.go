@@ -954,12 +954,12 @@ func parseHealthPeerSVIDs() ([]string, error) {
 // 36619037626). TestFGACacheSettings pins the two together. A non-positive
 // override is a misconfiguration and falls back to the default rather than
 // an unbounded or empty cache.
-func fgaCacheSettings() (time.Duration, int) {
-	ttl := durationOr("EXT_AUTHZ_FGA_CACHE_TTL", fga.DefaultCacheTTL)
+func fgaCacheSettings() (ttl time.Duration, maxSize int) {
+	ttl = durationOr("EXT_AUTHZ_FGA_CACHE_TTL", fga.DefaultCacheTTL)
 	if ttl <= 0 {
 		ttl = fga.DefaultCacheTTL
 	}
-	maxSize := intOr("EXT_AUTHZ_FGA_CACHE_MAX_SIZE", defaultFGACacheMaxSize)
+	maxSize = intOr("EXT_AUTHZ_FGA_CACHE_MAX_SIZE", defaultFGACacheMaxSize)
 	if maxSize <= 0 {
 		maxSize = defaultFGACacheMaxSize
 	}
