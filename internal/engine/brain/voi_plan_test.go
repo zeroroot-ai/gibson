@@ -7,6 +7,8 @@ import (
 	"context"
 	"reflect"
 	"testing"
+
+	"github.com/zeroroot-ai/gibson/internal/engine/taxonomy"
 )
 
 // TestAttackGraphDegree_CountsBothEndpoints proves connectivity counts an
@@ -297,5 +299,120 @@ func TestResolveReputation_PropagatesSubstrateError(t *testing.T) {
 	substrate := &erroringBeliefSubstrate{fakeBeliefSubstrate: newFakeBeliefSubstrate(), failBeliefFor: ref}
 	if _, err := resolveReputation(context.Background(), substrate, "boom"); err == nil {
 		t.Fatalf("resolveReputation did not propagate the substrate error")
+	}
+}
+
+// ---------------------------------------------------------------------------
+// PlanVoI's technique -> capability bridge (ADR-0035 decision 4, gibson#387):
+// a hypothesis candidate's Technique is resolved against VoIPlanInput's
+// Capabilities/Hierarchy into CoveringCapabilities.
+// ---------------------------------------------------------------------------
+
+// TestPlanVoI_HypothesisCandidateResolvesCoveringCapabilities proves a
+// hypothesis's Technique carries onto its candidate and resolves the
+// capabilities whose declared Coverage matches it via the taxonomy category
+// rollup — the consumer that ties #385 (Hypothesis.Technique) and #386
+// (Capability.Coverage) together.
+func TestPlanVoI_HypothesisCandidateResolvesCoveringCapabilities(t *testing.T) {
+	substrate := newFakeBeliefSubstrate()
+	hierarchy := dispatchTestHierarchy(t)
+	generalist := Capability{Kind: "agent", Name: "injection-hunter",
+		Coverage: dispatchCoverage(t, hierarchy, []taxonomy.CategoryID{"prompt_injection"}, nil)}
+	unrelated := Capability{Kind: "tool", Name: "port-scanner", Coverage: taxonomy.EmptyCoverage()}
+
+	in := VoIPlanInput{
+		Hypotheses:   []HypothesisSnapshot{{ID: 7, Claim: "the prompt filter is bypassable", Technique: "indirect_prompt_injection"}},
+		Tenant:       "acme",
+		Capabilities: []Capability{generalist, unrelated},
+		Hierarchy:    hierarchy,
+	}
+
+	got, err := PlanVoI(context.Background(), in, substrate, ExactVoIScorer(), 0)
+	if err != nil {
+		t.Fatalf("PlanVoI: %v", err)
+	}
+	if len(got) != 1 {
+		t.Fatalf("got %d candidates, want 1", len(got))
+	}
+	c := got[0]
+	if c.Technique != "indirect_prompt_injection" {
+		t.Fatalf("Technique = %q, want %q", c.Technique, "indirect_prompt_injection")
+	}
+	if len(c.CoveringCapabilities) != 1 || c.CoveringCapabilities[0].Name != "injection-hunter" {
+		t.Fatalf("CoveringCapabilities = %+v, want only %q (via the category rollup)", c.CoveringCapabilities, "injection-hunter")
+	}
+}
+
+// TestPlanVoI_HypothesisWithNoTechniqueResolvesNoCoveringCapabilities proves
+// gibson#387's "no covering capability handled explicitly" acceptance
+// criterion at the PlanVoI level: a hypothesis that never had a technique set
+// resolves an empty CoveringCapabilities, even with a non-empty catalog, and
+// PlanVoI does not error.
+func TestPlanVoI_HypothesisWithNoTechniqueResolvesNoCoveringCapabilities(t *testing.T) {
+	substrate := newFakeBeliefSubstrate()
+	hierarchy := dispatchTestHierarchy(t)
+	generalist := Capability{Kind: "agent", Name: "injection-hunter",
+		Coverage: dispatchCoverage(t, hierarchy, []taxonomy.CategoryID{"prompt_injection"}, nil)}
+
+	in := VoIPlanInput{
+		Hypotheses:   []HypothesisSnapshot{{ID: 7, Claim: "no technique named"}},
+		Tenant:       "acme",
+		Capabilities: []Capability{generalist},
+		Hierarchy:    hierarchy,
+	}
+
+	got, err := PlanVoI(context.Background(), in, substrate, ExactVoIScorer(), 0)
+	if err != nil {
+		t.Fatalf("PlanVoI: %v", err)
+	}
+	if len(got) != 1 || got[0].Technique != "" || len(got[0].CoveringCapabilities) != 0 {
+		t.Fatalf("candidate = %+v, want Technique=\"\" and no covering capabilities", got[0])
+	}
+}
+
+// TestPlanVoI_EvidenceCandidateNeverResolvesCoveringCapabilities proves an
+// evidence-move candidate (a Host, not a Hypothesis) always carries an empty
+// Technique and CoveringCapabilities — a bare evidence move names no
+// technique (the same convention resolveReputation already documents), so it
+// has nothing to gate against even with a populated catalog.
+func TestPlanVoI_EvidenceCandidateNeverResolvesCoveringCapabilities(t *testing.T) {
+	substrate := newFakeBeliefSubstrate()
+	hierarchy := dispatchTestHierarchy(t)
+	generalist := Capability{Kind: "agent", Name: "injection-hunter",
+		Coverage: dispatchCoverage(t, hierarchy, []taxonomy.CategoryID{"prompt_injection"}, nil)}
+
+	in := VoIPlanInput{
+		Hosts:        []HostSnapshot{{ID: 1, Belief: Belief{Juicy: 0.5}}},
+		Tenant:       "acme",
+		Capabilities: []Capability{generalist},
+		Hierarchy:    hierarchy,
+	}
+
+	got, err := PlanVoI(context.Background(), in, substrate, ExactVoIScorer(), 0)
+	if err != nil {
+		t.Fatalf("PlanVoI: %v", err)
+	}
+	if len(got) != 1 || got[0].Technique != "" || len(got[0].CoveringCapabilities) != 0 {
+		t.Fatalf("candidate = %+v, want Technique=\"\" and no covering capabilities", got[0])
+	}
+}
+
+// TestPlanVoI_NoHierarchySuppliedNeverPanics proves an unset Hierarchy (the
+// zero VoIPlanInput's default, and today's only daemon-wired shape — see
+// belief_provider.go's wireBrainRegistry) is handled explicitly: no candidate
+// resolves a covering capability, and PlanVoI never panics or errors.
+func TestPlanVoI_NoHierarchySuppliedNeverPanics(t *testing.T) {
+	substrate := newFakeBeliefSubstrate()
+	in := VoIPlanInput{
+		Hypotheses: []HypothesisSnapshot{{ID: 7, Claim: "c", Technique: "indirect_prompt_injection"}},
+		Tenant:     "acme",
+	}
+
+	got, err := PlanVoI(context.Background(), in, substrate, ExactVoIScorer(), 0)
+	if err != nil {
+		t.Fatalf("PlanVoI: %v", err)
+	}
+	if len(got) != 1 || len(got[0].CoveringCapabilities) != 0 {
+		t.Fatalf("candidate = %+v, want no covering capabilities (no hierarchy supplied)", got[0])
 	}
 }

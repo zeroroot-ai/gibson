@@ -11,6 +11,7 @@ import (
 
 	"github.com/mlange-42/ark/ecs"
 	"github.com/zeroroot-ai/gibson/internal/engine/ontology"
+	"github.com/zeroroot-ai/gibson/internal/engine/taxonomy"
 )
 
 // voi_planner.go is gibson#283's gate/worker layer: it makes voi_plan.go's
@@ -35,12 +36,16 @@ import (
 // What this file deliberately does NOT do (see voi_score.go/voi_plan.go for
 // the rest of the scope ledger): it does not dispatch anything. VoIPlanState
 // records the ranked top-k candidates for a mission — the "choice" AC3 asks
-// to be "recorded and replayable" — but turning the top candidate into an
-// actual DeciderDispatch requires a mapping from a VoICandidate (a host or a
-// hypothesis) to a dispatchable capability target that does not exist yet
-// (DeciderDispatch names a Capability, not a graph node). That wiring is the
-// next slice's job; this one makes the ranked plan a first-class, replayable
-// fact on the World, which is the seam that wiring needs.
+// to be "recorded and replayable" — and each candidate now also carries its
+// resolved CoveringCapabilities (ADR-0035 decision 4, gibson#387's
+// technique -> capability bridge, wired through catalog/hierarchy below), the
+// mapping from a VoICandidate to the dispatchable capabilities that can
+// address it. Turning that into an actual DeciderDispatch — choosing ONE
+// covering capability and refusing dispatch outside the VoI top-k — is
+// gibson#396's (BAMCP planner) and gibson#397's (hard top-k enforcement) job,
+// not this file's; this one makes the ranked, capability-resolved plan a
+// first-class, replayable fact on the World, which is the seam that wiring
+// needs.
 
 // VoIPlanState is the per-mission VoI planning record: whether a plan is
 // currently being computed (in flight), the evidence cursor it was requested
@@ -182,6 +187,18 @@ type VoIWorker struct {
 	registry  *ontology.BeliefSchemaRegistry
 	scorer    VoIScorer
 	topK      int
+	// catalog returns the mission's enrolled capability catalog (the same
+	// shape ExecutorDeps.Catalog supplies to DeciderWorker) — the set VoI
+	// dispatch gating's technique -> capability bridge resolves each
+	// candidate's CoveringCapabilities against (ADR-0035 decision 4,
+	// gibson#387). Never nil (NewVoIWorker defaults it).
+	catalog func(missionID string) []Capability
+	// hierarchy is the taxonomy technique hierarchy a candidate's Technique
+	// rolls up through (gibson#379's TechniqueHierarchy.CategoryOf). Never
+	// nil (NewVoIWorker defaults it to taxonomy.GlobalTechniques, the same
+	// default brainExecutor.agentCoverage uses to validate a capability's own
+	// declared coverage).
+	hierarchy *taxonomy.TechniqueHierarchy
 
 	mu      sync.Mutex
 	pending []string // mission ids awaiting a plan
@@ -190,9 +207,29 @@ type VoIWorker struct {
 // NewVoIWorker builds a worker. substrate is typically a WorldBeliefSubstrate
 // bound to the same eng (reputation/stake reads must see the live belief
 // field); scorer is typically ExactVoIScorer(); topK is typically
-// DefaultVoITopK.
-func NewVoIWorker(eng *Engine, substrate BeliefSubstrate, registry *ontology.BeliefSchemaRegistry, scorer VoIScorer, topK int) *VoIWorker {
-	return &VoIWorker{eng: eng, substrate: substrate, registry: registry, scorer: scorer, topK: topK}
+// DefaultVoITopK. catalog may be nil (no capabilities offered, matching
+// NewDeciderWorker's own convention) — VoI dispatch gating then resolves no
+// covering capabilities for any candidate. hierarchy may be nil, which
+// defaults to taxonomy.GlobalTechniques.
+func NewVoIWorker(
+	eng *Engine,
+	substrate BeliefSubstrate,
+	registry *ontology.BeliefSchemaRegistry,
+	scorer VoIScorer,
+	topK int,
+	catalog func(missionID string) []Capability,
+	hierarchy *taxonomy.TechniqueHierarchy,
+) *VoIWorker {
+	if catalog == nil {
+		catalog = func(string) []Capability { return nil }
+	}
+	if hierarchy == nil {
+		hierarchy = taxonomy.GlobalTechniques
+	}
+	return &VoIWorker{
+		eng: eng, substrate: substrate, registry: registry, scorer: scorer, topK: topK,
+		catalog: catalog, hierarchy: hierarchy,
+	}
 }
 
 // Tap is the engine subscriber (in-tick, no I/O): buffer the mission id.
@@ -237,16 +274,20 @@ func (vw *VoIWorker) plan(ctx context.Context, missionID string) {
 // Findings() precedent — tenant-wide, since Mission carries no ScopeID to
 // filter by), and the current attack graph (DeriveAttackGraph over
 // HostsToInfraGraph, gibson#275/#286's live-wiring machinery, reused
-// unchanged).
-func (vw *VoIWorker) buildInput(_ string) VoIPlanInput {
+// unchanged) — plus the mission's capability catalog and the technique
+// hierarchy (vw.catalog/vw.hierarchy), so PlanVoI can resolve each
+// candidate's CoveringCapabilities (ADR-0035 decision 4, gibson#387).
+func (vw *VoIWorker) buildInput(missionID string) VoIPlanInput {
 	hosts, _ := vw.eng.AmbientHosts(deciderHostBudget)
 	nodes := HostsToInfraGraph(hosts)
 	graph := DeriveAttackGraph(nodes, nil, vw.registry)
 	return VoIPlanInput{
-		Hosts:      hosts,
-		Hypotheses: vw.eng.Hypotheses(),
-		Graph:      graph,
-		Tenant:     vw.eng.World.Tenant,
+		Hosts:        hosts,
+		Hypotheses:   vw.eng.Hypotheses(),
+		Graph:        graph,
+		Tenant:       vw.eng.World.Tenant,
+		Capabilities: vw.catalog(missionID),
+		Hierarchy:    vw.hierarchy,
 	}
 }
 
@@ -254,7 +295,8 @@ func (vw *VoIWorker) buildInput(_ string) VoIPlanInput {
 // be registered as a System (ExecutorSystems, or a test's own AddSystem) —
 // this function only starts the off-tick worker and its drain loop, mirroring
 // WireExecutor/WireSliceBelief's ticker pattern exactly. interval <= 0 uses
-// TickInterval.
+// TickInterval. catalog and hierarchy are forwarded to NewVoIWorker verbatim
+// (both may be nil; see its own doc comment).
 func WireVoIPlanner(
 	ctx context.Context,
 	eng *Engine,
@@ -262,12 +304,14 @@ func WireVoIPlanner(
 	scorer VoIScorer,
 	topK int,
 	interval time.Duration,
+	catalog func(missionID string) []Capability,
+	hierarchy *taxonomy.TechniqueHierarchy,
 ) *VoIWorker {
 	if interval <= 0 {
 		interval = TickInterval
 	}
 	substrate := NewWorldBeliefSubstrate(eng)
-	worker := NewVoIWorker(eng, substrate, registry, scorer, topK)
+	worker := NewVoIWorker(eng, substrate, registry, scorer, topK, catalog, hierarchy)
 	eng.Subscribe(worker.Tap)
 
 	go func() {
