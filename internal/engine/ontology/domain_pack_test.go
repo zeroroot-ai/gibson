@@ -6,6 +6,7 @@ package ontology
 import (
 	"encoding/json"
 	"math"
+	"strings"
 	"testing"
 
 	"github.com/stretchr/testify/assert"
@@ -324,4 +325,198 @@ func TestDomainPack_Import_WrapsATaxonomyConstructionFailure(t *testing.T) {
 	assert.Contains(t, err.Error(), "taxonomy")
 	// The ontology side already registered before the taxonomy step failed.
 	assert.Contains(t, r.Ancestors("k8s:Pod"), "k8s:Workload")
+}
+
+// -----------------------------------------------------------------------
+// Phase 2 (gibson#378, ADR-0031 / ADR-0033): a Pack carries technique -> CEL
+// predicate bindings plus commercial metadata (author, visibility,
+// entitlement), and Validate covers every new field.
+// -----------------------------------------------------------------------
+
+func catalogPack() *DomainPack {
+	return &DomainPack{
+		Name:                      "k8s",
+		Version:                   1,
+		TaxonomyNodeLabels:        []string{"Pod"},
+		TaxonomyRelationshipTypes: []string{"MANAGES"},
+		Ontology:                  map[string]sdkgraphrag.OntologyExtension{"discovered/x": k8sVerticalExtension()},
+		Predicates: map[string]string{
+			"exposed_dashboard": `evidence.exists(e, e.type == "http_response" && e.status == 200)`,
+		},
+		Author:      "Zero Root AI",
+		Visibility:  PackVisibilityPublic,
+		Entitlement: "pack_k8s_pro",
+	}
+}
+
+func TestDomainPack_Validate_AcceptsPredicatesAndCommercialMetadata(t *testing.T) {
+	require.NoError(t, catalogPack().Validate())
+}
+
+func TestDomainPack_Validate_AcceptsUnclassifiedCommercialMetadata(t *testing.T) {
+	// A tenant extension (ADR-0033 decision 1) has no commercial metadata
+	// yet — the zero values must all validate.
+	pack := &DomainPack{Name: "k8s", Version: 1}
+	require.NoError(t, pack.Validate())
+}
+
+func TestDomainPack_Validate_RejectsInvalidPredicateTechnique(t *testing.T) {
+	pack := catalogPack()
+	pack.Predicates = map[string]string{
+		"exposed`; DETACH DELETE n; //": `evidence.exists(e, true)`,
+	}
+	err := pack.Validate()
+	require.Error(t, err)
+	assert.Contains(t, err.Error(), "predicate technique")
+}
+
+func TestDomainPack_Validate_RejectsEmptyPredicateExpression(t *testing.T) {
+	pack := catalogPack()
+	pack.Predicates = map[string]string{"exposed_dashboard": "   "}
+	err := pack.Validate()
+	require.Error(t, err)
+	assert.Contains(t, err.Error(), `predicate for technique "exposed_dashboard"`)
+	assert.Contains(t, err.Error(), "must not be empty")
+}
+
+func TestDomainPack_Validate_RejectsNonUTF8PredicateExpression(t *testing.T) {
+	pack := catalogPack()
+	pack.Predicates = map[string]string{"exposed_dashboard": "evidence \xff\xfe bad"}
+	err := pack.Validate()
+	require.Error(t, err)
+	assert.Contains(t, err.Error(), "valid UTF-8")
+}
+
+func TestDomainPack_Validate_RejectsOversizedPredicateExpression(t *testing.T) {
+	pack := catalogPack()
+	pack.Predicates = map[string]string{"exposed_dashboard": strings.Repeat("a", MaxPredicateExpressionBytes+1)}
+	err := pack.Validate()
+	require.Error(t, err)
+	assert.Contains(t, err.Error(), "over the")
+}
+
+func TestDomainPack_Validate_DoesNotCompileOrTypeCheckPredicateExpression(t *testing.T) {
+	// gibson#388, not gibson#378: a well-formed but semantically bogus CEL
+	// string (unbalanced parens, undefined identifiers) must still pass
+	// Validate here. Only compiling/type-checking against the gibson-owned
+	// CEL environment rejects it, and that is out of scope for this Pack.
+	pack := catalogPack()
+	pack.Predicates = map[string]string{"exposed_dashboard": "this is not even close to valid CEL (("}
+	require.NoError(t, pack.Validate())
+}
+
+func TestDomainPack_Validate_RejectsInvalidVisibility(t *testing.T) {
+	pack := catalogPack()
+	pack.Visibility = "shared-with-everyone"
+	err := pack.Validate()
+	require.Error(t, err)
+	assert.Contains(t, err.Error(), "visibility")
+}
+
+func TestDomainPack_Validate_RejectsOversizedAuthor(t *testing.T) {
+	pack := catalogPack()
+	pack.Author = strings.Repeat("a", MaxAuthorBytes+1)
+	err := pack.Validate()
+	require.Error(t, err)
+	assert.Contains(t, err.Error(), "author")
+}
+
+func TestDomainPack_Validate_RejectsNonUTF8Author(t *testing.T) {
+	pack := catalogPack()
+	pack.Author = "bad \xff\xfe author"
+	err := pack.Validate()
+	require.Error(t, err)
+	assert.Contains(t, err.Error(), "author")
+	assert.Contains(t, err.Error(), "UTF-8")
+}
+
+func TestDomainPack_Validate_RejectsInvalidEntitlementKey(t *testing.T) {
+	pack := catalogPack()
+	pack.Entitlement = "pack`; DETACH DELETE n; //"
+	err := pack.Validate()
+	require.Error(t, err)
+	assert.Contains(t, err.Error(), "entitlement key")
+}
+
+func TestDomainPack_Validate_AcceptsEmptyEntitlement(t *testing.T) {
+	pack := catalogPack()
+	pack.Entitlement = ""
+	require.NoError(t, pack.Validate())
+}
+
+func TestPackVisibility_Validate(t *testing.T) {
+	tests := []struct {
+		name    string
+		v       PackVisibility
+		wantErr bool
+	}{
+		{"empty is unclassified", "", false},
+		{"public", PackVisibilityPublic, false},
+		{"private", PackVisibilityPrivate, false},
+		{"anything else", PackVisibility("shared"), true},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			err := tt.v.Validate()
+			if tt.wantErr {
+				require.Error(t, err)
+			} else {
+				require.NoError(t, err)
+			}
+		})
+	}
+}
+
+// -----------------------------------------------------------------------
+// Export/Import round-trip stays lossless with the new fields.
+// -----------------------------------------------------------------------
+
+func TestDomainPack_ExportImport_RoundTripsCommercialAndPredicateFields(t *testing.T) {
+	original := catalogPack()
+
+	data, err := json.Marshal(original)
+	require.NoError(t, err)
+
+	var roundTripped DomainPack
+	require.NoError(t, json.Unmarshal(data, &roundTripped))
+
+	assert.Equal(t, original, &roundTripped)
+	assert.Equal(t, original.Predicates, roundTripped.Predicates)
+	assert.Equal(t, original.Author, roundTripped.Author)
+	assert.Equal(t, original.Visibility, roundTripped.Visibility)
+	assert.Equal(t, original.Entitlement, roundTripped.Entitlement)
+
+	// Importing a pack that carries predicates/commercial metadata still
+	// only touches taxonomy + ontology (Predicates/Author/Visibility/
+	// Entitlement are not yet consumed anywhere — gibson#388 and a future
+	// DomainPackService do that), and it must not error or drop them.
+	tax, err := taxonomy.New(1, []string{taxonomy.ObservationLabel}, nil)
+	require.NoError(t, err)
+	r := NewReasoner(NewMetrics())
+	_, err = roundTripped.Import(tax, r)
+	require.NoError(t, err)
+	assert.Equal(t, original.Predicates, roundTripped.Predicates)
+	assert.Equal(t, original.Author, roundTripped.Author)
+	assert.Equal(t, original.Visibility, roundTripped.Visibility)
+	assert.Equal(t, original.Entitlement, roundTripped.Entitlement)
+}
+
+func TestDomainPack_Import_RefusesAnInvalidPredicateBinding(t *testing.T) {
+	// Import calls Validate first (see TestDomainPack_Import_RefusesAnAlreadyInvalidPack
+	// for the taxonomy-label case): an invalid Predicates entry must fail
+	// closed the same way, before anything is registered.
+	tax, err := taxonomy.New(1, []string{taxonomy.ObservationLabel}, nil)
+	require.NoError(t, err)
+	r := NewReasoner(NewMetrics())
+
+	pack := &DomainPack{
+		Name:       "k8s",
+		Version:    1,
+		Predicates: map[string]string{"exposed_dashboard": ""},
+	}
+
+	newTax, err := pack.Import(tax, r)
+	require.Error(t, err)
+	assert.Nil(t, newTax)
+	assert.Contains(t, err.Error(), "import domain pack")
 }
