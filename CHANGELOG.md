@@ -1,5 +1,13 @@
 # Changelog
 
+## [0.143.5](https://github.com/zeroroot-ai/gibson/compare/v0.143.4...v0.143.5) (2026-09-29)
+
+
+### Bug Fixes
+
+* **ext-authz:** the FGA decision cache expires in five seconds, and its dead invalidation hooks are gone ([#412](https://github.com/zeroroot-ai/gibson/issues/412)) ([72260c5](https://github.com/zeroroot-ai/gibson/commit/72260c5bdf0afd6075ea613c956711a133601669))
+* **tenantrole:** the inline sync trusts the role it just wrote over a lagging read ([#413](https://github.com/zeroroot-ai/gibson/issues/413)) ([079e834](https://github.com/zeroroot-ai/gibson/commit/079e83486307f34aebe7b18e1716c50ade54d53c))
+
 ## [0.143.4](https://github.com/zeroroot-ai/gibson/compare/v0.143.3...v0.143.4) (2026-09-29)
 
 
