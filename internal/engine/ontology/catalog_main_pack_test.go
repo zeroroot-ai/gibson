@@ -12,7 +12,7 @@ import (
 
 func TestMainDomainPack_IsValid(t *testing.T) {
 	pack := MainDomainPack()
-	assert.NoError(t, pack.Validate())
+	require.NoError(t, pack.Validate())
 	assert.Equal(t, MainDomainPackName, pack.Name)
 	assert.Equal(t, "main", pack.Name)
 	assert.NotZero(t, pack.Version)
