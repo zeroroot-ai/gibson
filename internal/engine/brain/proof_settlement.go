@@ -51,4 +51,13 @@ type ProofSettlementEngine interface {
 	// against req's evidence and, if it fires, fold BetSettledTrue. See
 	// Engine.SettleBetTrue's doc for the full (bool, error) contract.
 	SettleBetTrue(ctx context.Context, registry *settlement.Registry, authorize DestructiveProofAuthorizer, req BetSettlementRequest) (bool, error)
+
+	// RequestDestructiveAuthorization resolves ctx's tenant's Engine and
+	// enqueues req against that tenant's own DestructiveAuthorizationQueue
+	// (ADR-0032 decision 1, gibson#390), returning immediately with the
+	// pending request's id: the RequestDestructiveAuthorization RPC
+	// handler's (internal/engine/harness) only dependency besides the two
+	// methods above. The fleet keeps working while the human decision is
+	// pending; this never blocks.
+	RequestDestructiveAuthorization(ctx context.Context, req DestructiveAuthorizationRequest) (authorizationRequestID string, err error)
 }

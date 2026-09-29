@@ -211,120 +211,166 @@ func awaitDestructiveActionDecided(t *testing.T, e *Engine, hypothesisID string)
 	return DestructiveActionSnapshot{}
 }
 
-func TestDestructiveAuthorizationQueue_Authorize_BlocksUntilApproved(t *testing.T) {
+func TestDestructiveAuthorizationQueue_Request_EnqueuesAndReturnsImmediately(t *testing.T) {
 	e := newDestructiveAuthzTestEngine(t)
 	q := NewDestructiveAuthorizationQueue(e)
 
-	req := BetSettlementRequest{HypothesisID: "hyp-1", Technique: "T1490", PredicateType: "marker_present"}
-	resultCh := make(chan bool, 1)
-	errCh := make(chan error, 1)
-	go func() {
-		approved, err := q.Authorize(context.Background(), "acme", req)
-		errCh <- err
-		resultCh <- approved
-	}()
-
-	awaitDestructiveActions(t, e, 1)
-	pending := q.Pending()
-	if len(pending) != 1 || pending[0].HypothesisID != "hyp-1" {
-		t.Fatalf("want hyp-1 pending, got %+v", pending)
+	id, err := q.Request("acme", DestructiveAuthorizationRequest{
+		HypothesisID:  "hyp-1",
+		ScopeID:       "s1",
+		MissionID:     "m1",
+		Technique:     "T1490",
+		PredicateType: "T1490",
+	})
+	if err != nil {
+		t.Fatalf("Request: %v", err)
+	}
+	if id != "hyp-1" {
+		t.Fatalf("want authorization_request_id %q, got %q", "hyp-1", id)
 	}
 
-	if err := q.Decide("hyp-1", "reviewer-1", true); err != nil {
-		t.Fatalf("Decide: %v", err)
+	got := awaitDestructiveActions(t, e, 1)
+	want := []DestructiveActionSnapshot{{
+		HypothesisID:  "hyp-1",
+		Tenant:        "acme",
+		ScopeID:       "s1",
+		MissionID:     "m1",
+		Technique:     "T1490",
+		PredicateType: "T1490",
+	}}
+	// RequestedAtUnixMS is real wall-clock time here (q.now defaults to
+	// time.Now) — compare everything else and only assert it is non-zero.
+	if got[0].RequestedAtUnixMS == 0 {
+		t.Fatal("want a non-zero RequestedAtUnixMS")
 	}
-
-	select {
-	case err := <-errCh:
-		if err != nil {
-			t.Fatalf("Authorize returned error: %v", err)
-		}
-	case <-time.After(2 * time.Second):
-		t.Fatal("Authorize did not return after Decide")
-	}
-	if approved := <-resultCh; !approved {
-		t.Fatal("want approved=true")
-	}
-
-	got := awaitDestructiveActionDecided(t, e, "hyp-1")
-	if !got.Approved || got.UserID != "reviewer-1" {
-		t.Fatalf("decision not folded correctly: %+v", got)
-	}
-	if len(q.Pending()) != 0 {
-		t.Fatalf("a decided action must not still be pending, got %+v", q.Pending())
+	got[0].RequestedAtUnixMS = 0
+	if !reflect.DeepEqual(got, want) {
+		t.Fatalf("destructive actions:\n got %+v\nwant %+v", got, want)
 	}
 }
 
-func TestDestructiveAuthorizationQueue_Authorize_BlocksUntilDenied(t *testing.T) {
+func TestDestructiveAuthorizationQueue_Request_EmptyHypothesisIDErrors(t *testing.T) {
 	e := newDestructiveAuthzTestEngine(t)
 	q := NewDestructiveAuthorizationQueue(e)
 
-	req := BetSettlementRequest{HypothesisID: "hyp-1"}
-	resultCh := make(chan bool, 1)
-	go func() {
-		approved, _ := q.Authorize(context.Background(), "acme", req)
-		resultCh <- approved
-	}()
-
-	awaitDestructiveActions(t, e, 1)
-	if err := q.Decide("hyp-1", "reviewer-1", false); err != nil {
-		t.Fatalf("Decide: %v", err)
-	}
-
-	select {
-	case approved := <-resultCh:
-		if approved {
-			t.Fatal("want approved=false")
-		}
-	case <-time.After(2 * time.Second):
-		t.Fatal("Authorize did not return after Decide")
-	}
-}
-
-func TestDestructiveAuthorizationQueue_Authorize_ContextCanceledUnblocks(t *testing.T) {
-	e := newDestructiveAuthzTestEngine(t)
-	q := NewDestructiveAuthorizationQueue(e)
-	ctx, cancel := context.WithCancel(context.Background())
-
-	errCh := make(chan error, 1)
-	go func() {
-		_, err := q.Authorize(ctx, "acme", BetSettlementRequest{HypothesisID: "hyp-1"})
-		errCh <- err
-	}()
-
-	awaitDestructiveActions(t, e, 1)
-	cancel()
-
-	select {
-	case err := <-errCh:
-		if !errors.Is(err, context.Canceled) {
-			t.Fatalf("want context.Canceled, got %v", err)
-		}
-	case <-time.After(2 * time.Second):
-		t.Fatal("Authorize did not return after context cancellation")
-	}
-}
-
-func TestDestructiveAuthorizationQueue_Authorize_EmptyHypothesisIDErrors(t *testing.T) {
-	e := newDestructiveAuthzTestEngine(t)
-	q := NewDestructiveAuthorizationQueue(e)
-
-	_, err := q.Authorize(context.Background(), "acme", BetSettlementRequest{})
-	if err == nil {
+	if _, err := q.Request("acme", DestructiveAuthorizationRequest{}); err == nil {
 		t.Fatal("want an error when the request names no hypothesis id")
 	}
 }
 
-func TestDestructiveAuthorizationQueue_Authorize_DuplicateRequestErrors(t *testing.T) {
+func TestDestructiveAuthorizationQueue_Request_IsIdempotent(t *testing.T) {
+	// A retried Request for a still-pending hypothesis (e.g. the agent's RPC
+	// call retried after a network hiccup) must never reset the original
+	// request's recorded timestamp or duplicate the record (ADR-0032): Request
+	// has no duplicate-detection of its own, it relies entirely on the
+	// reducer's idempotent fold (applyDestructiveActionRequested).
 	e := newDestructiveAuthzTestEngine(t)
 	q := NewDestructiveAuthorizationQueue(e)
 
-	go func() { _, _ = q.Authorize(context.Background(), "acme", BetSettlementRequest{HypothesisID: "hyp-1"}) }()
+	if _, err := q.Request("acme", DestructiveAuthorizationRequest{HypothesisID: "hyp-1"}); err != nil {
+		t.Fatalf("first Request: %v", err)
+	}
+	first := awaitDestructiveActions(t, e, 1)[0]
+
+	if _, err := q.Request("acme", DestructiveAuthorizationRequest{HypothesisID: "hyp-1"}); err != nil {
+		t.Fatalf("second Request: %v", err)
+	}
+	// Give the (no-op) second fold a moment to land, then confirm nothing
+	// changed: still exactly one record, same timestamp.
+	deadline := time.Now().Add(500 * time.Millisecond)
+	for time.Now().Before(deadline) {
+		time.Sleep(10 * time.Millisecond)
+	}
+	got := e.DestructiveActionSnapshot()
+	if len(got) != 1 {
+		t.Fatalf("want exactly one destructive action, got %+v", got)
+	}
+	if got[0].RequestedAtUnixMS != first.RequestedAtUnixMS {
+		t.Fatalf("want the first request's timestamp preserved, got %+v want %+v", got[0], first)
+	}
+}
+
+func TestDestructiveAuthorizationQueue_Verify_EmptyHypothesisIDErrors(t *testing.T) {
+	e := newDestructiveAuthzTestEngine(t)
+	q := NewDestructiveAuthorizationQueue(e)
+
+	if _, err := q.Verify(context.Background(), "acme", BetSettlementRequest{}); err == nil {
+		t.Fatal("want an error when the request names no hypothesis id")
+	}
+}
+
+func TestDestructiveAuthorizationQueue_Verify_NoRequestReturnsPending(t *testing.T) {
+	e := newDestructiveAuthzTestEngine(t)
+	q := NewDestructiveAuthorizationQueue(e)
+
+	approved, err := q.Verify(context.Background(), "acme", BetSettlementRequest{HypothesisID: "hyp-never-requested"})
+	if approved {
+		t.Fatal("want approved=false")
+	}
+	if !errors.Is(err, ErrDestructiveActionPending) {
+		t.Fatalf("want ErrDestructiveActionPending, got %v", err)
+	}
+}
+
+func TestDestructiveAuthorizationQueue_Verify_UndecidedReturnsPending(t *testing.T) {
+	e := newDestructiveAuthzTestEngine(t)
+	q := NewDestructiveAuthorizationQueue(e)
+
+	if _, err := q.Request("acme", DestructiveAuthorizationRequest{HypothesisID: "hyp-1"}); err != nil {
+		t.Fatalf("Request: %v", err)
+	}
 	awaitDestructiveActions(t, e, 1)
 
-	_, err := q.Authorize(context.Background(), "acme", BetSettlementRequest{HypothesisID: "hyp-1"})
-	if err == nil {
-		t.Fatal("want an error: hyp-1 is already awaiting authorization")
+	approved, err := q.Verify(context.Background(), "acme", BetSettlementRequest{HypothesisID: "hyp-1"})
+	if approved {
+		t.Fatal("want approved=false")
+	}
+	if !errors.Is(err, ErrDestructiveActionPending) {
+		t.Fatalf("want ErrDestructiveActionPending, got %v", err)
+	}
+}
+
+func TestDestructiveAuthorizationQueue_Verify_DeniedReturnsDenied(t *testing.T) {
+	e := newDestructiveAuthzTestEngine(t)
+	q := NewDestructiveAuthorizationQueue(e)
+
+	if _, err := q.Request("acme", DestructiveAuthorizationRequest{HypothesisID: "hyp-1"}); err != nil {
+		t.Fatalf("Request: %v", err)
+	}
+	awaitDestructiveActions(t, e, 1)
+	if err := q.Decide("hyp-1", "reviewer-1", false); err != nil {
+		t.Fatalf("Decide: %v", err)
+	}
+	awaitDestructiveActionDecided(t, e, "hyp-1")
+
+	approved, err := q.Verify(context.Background(), "acme", BetSettlementRequest{HypothesisID: "hyp-1"})
+	if approved {
+		t.Fatal("want approved=false")
+	}
+	if !errors.Is(err, ErrDestructiveActionDenied) {
+		t.Fatalf("want ErrDestructiveActionDenied, got %v", err)
+	}
+}
+
+func TestDestructiveAuthorizationQueue_Verify_ApprovedReturnsTrue(t *testing.T) {
+	e := newDestructiveAuthzTestEngine(t)
+	q := NewDestructiveAuthorizationQueue(e)
+
+	if _, err := q.Request("acme", DestructiveAuthorizationRequest{HypothesisID: "hyp-1"}); err != nil {
+		t.Fatalf("Request: %v", err)
+	}
+	awaitDestructiveActions(t, e, 1)
+	if err := q.Decide("hyp-1", "reviewer-1", true); err != nil {
+		t.Fatalf("Decide: %v", err)
+	}
+	awaitDestructiveActionDecided(t, e, "hyp-1")
+
+	approved, err := q.Verify(context.Background(), "acme", BetSettlementRequest{HypothesisID: "hyp-1"})
+	if err != nil {
+		t.Fatalf("Verify: %v", err)
+	}
+	if !approved {
+		t.Fatal("want approved=true")
 	}
 }
 
@@ -332,8 +378,12 @@ func TestDestructiveAuthorizationQueue_Pending_ListsOnlyUndecided(t *testing.T) 
 	e := newDestructiveAuthzTestEngine(t)
 	q := NewDestructiveAuthorizationQueue(e)
 
-	go func() { _, _ = q.Authorize(context.Background(), "acme", BetSettlementRequest{HypothesisID: "hyp-1"}) }()
-	go func() { _, _ = q.Authorize(context.Background(), "acme", BetSettlementRequest{HypothesisID: "hyp-2"}) }()
+	if _, err := q.Request("acme", DestructiveAuthorizationRequest{HypothesisID: "hyp-1"}); err != nil {
+		t.Fatalf("Request hyp-1: %v", err)
+	}
+	if _, err := q.Request("acme", DestructiveAuthorizationRequest{HypothesisID: "hyp-2"}); err != nil {
+		t.Fatalf("Request hyp-2: %v", err)
+	}
 	awaitDestructiveActions(t, e, 2)
 
 	if err := q.Decide("hyp-1", "reviewer-1", true); err != nil {
@@ -364,7 +414,9 @@ func TestDestructiveAuthorizationQueue_Decide_AlreadyDecidedErrors(t *testing.T)
 	e := newDestructiveAuthzTestEngine(t)
 	q := NewDestructiveAuthorizationQueue(e)
 
-	go func() { _, _ = q.Authorize(context.Background(), "acme", BetSettlementRequest{HypothesisID: "hyp-1"}) }()
+	if _, err := q.Request("acme", DestructiveAuthorizationRequest{HypothesisID: "hyp-1"}); err != nil {
+		t.Fatalf("Request: %v", err)
+	}
 	awaitDestructiveActions(t, e, 1)
 	if err := q.Decide("hyp-1", "reviewer-1", true); err != nil {
 		t.Fatalf("first decide: %v", err)
@@ -386,14 +438,17 @@ func TestEngine_DestructiveAuthorizationQueue_IsMemoized(t *testing.T) {
 }
 
 func TestDestructiveAuthorizationQueue_DoesNotBlockUnrelatedSettlement(t *testing.T) {
-	// ADR-0028 decision 2: the gate is per-action, not per-mission. While
-	// hyp-1's destructive proof awaits authorization, an unrelated
-	// non-destructive settlement for hyp-2 must complete immediately.
+	// ADR-0028 decision 2 (still true under ADR-0032's non-blocking wiring):
+	// the gate is per-action, not per-mission. A pending, undecided
+	// destructive request for hyp-1 must never affect an unrelated
+	// non-destructive settlement for hyp-2.
 	e := newDestructiveAuthzTestEngine(t)
 	q := NewDestructiveAuthorizationQueue(e)
 	registry := newMarkerRegistry(t)
 
-	go func() { _, _ = q.Authorize(context.Background(), "acme", BetSettlementRequest{HypothesisID: "hyp-1"}) }()
+	if _, err := q.Request("acme", DestructiveAuthorizationRequest{HypothesisID: "hyp-1"}); err != nil {
+		t.Fatalf("Request: %v", err)
+	}
 	awaitDestructiveActions(t, e, 1)
 
 	settled, err := e.SettleBetTrue(context.Background(), registry, nil, BetSettlementRequest{
@@ -409,80 +464,102 @@ func TestDestructiveAuthorizationQueue_DoesNotBlockUnrelatedSettlement(t *testin
 	if !settled {
 		t.Fatal("want the unrelated, non-destructive settlement to succeed immediately")
 	}
-
-	// Clean up the still-pending goroutine so it doesn't leak past the test.
-	if err := q.Decide("hyp-1", "reviewer-1", false); err != nil {
-		t.Fatalf("cleanup decide: %v", err)
-	}
 }
 
 // -----------------------------------------------------------------------
-// End-to-end: DestructiveAuthorizationQueue wired as SettleBetTrue's
+// End-to-end: DestructiveAuthorizationQueue.Verify wired as SettleBetTrue's
 // DestructiveProofAuthorizer (proving the concrete type satisfies the
-// existing seam in bet_settlement.go without modifying that file).
+// existing seam in bet_settlement.go without modifying that file's
+// signature, ADR-0032).
 // -----------------------------------------------------------------------
 
-func TestSettleBetTrue_Destructive_QueueApproves_Settles(t *testing.T) {
+func TestSettleBetTrue_Destructive_VerifyApproved_Settles(t *testing.T) {
 	e := newDestructiveAuthzTestEngine(t)
 	q := NewDestructiveAuthorizationQueue(e)
 	registry := newMarkerRegistry(t)
 
-	settledCh := make(chan bool, 1)
-	errCh := make(chan error, 1)
-	go func() {
-		settled, err := e.SettleBetTrue(context.Background(), registry, q.Authorize, BetSettlementRequest{
-			HypothesisID:    "hyp-1",
-			Technique:       testTechnique,
-			PredicateType:   testPredicateType,
-			PredicateParams: map[string]any{"marker": "tok"},
-			Evidence:        markerEvidence("tok"),
-			Destructive:     true,
-		})
-		errCh <- err
-		settledCh <- settled
-	}()
-
+	if _, err := q.Request("acme", DestructiveAuthorizationRequest{HypothesisID: "hyp-1"}); err != nil {
+		t.Fatalf("Request: %v", err)
+	}
 	awaitDestructiveActions(t, e, 1)
 	if err := q.Decide("hyp-1", "reviewer-1", true); err != nil {
 		t.Fatalf("Decide: %v", err)
 	}
+	awaitDestructiveActionDecided(t, e, "hyp-1")
 
-	if err := <-errCh; err != nil {
+	settled, err := e.SettleBetTrue(context.Background(), registry, q.Verify, BetSettlementRequest{
+		HypothesisID:    "hyp-1",
+		Technique:       testTechnique,
+		PredicateType:   testPredicateType,
+		PredicateParams: map[string]any{"marker": "tok"},
+		Evidence:        markerEvidence("tok"),
+		Destructive:     true,
+	})
+	if err != nil {
 		t.Fatalf("SettleBetTrue: %v", err)
 	}
-	if !<-settledCh {
-		t.Fatal("want settled=true once the queue approves")
+	if !settled {
+		t.Fatal("want settled=true once the recorded decision is approved")
 	}
 	awaitBetSettlements(t, e, 1)
 }
 
-func TestSettleBetTrue_Destructive_QueueDenies_Refused(t *testing.T) {
+func TestSettleBetTrue_Destructive_VerifyDenied_Refused(t *testing.T) {
 	e := newDestructiveAuthzTestEngine(t)
 	q := NewDestructiveAuthorizationQueue(e)
 	registry := newMarkerRegistry(t)
 
-	errCh := make(chan error, 1)
-	go func() {
-		_, err := e.SettleBetTrue(context.Background(), registry, q.Authorize, BetSettlementRequest{
-			HypothesisID:    "hyp-1",
-			Technique:       testTechnique,
-			PredicateType:   testPredicateType,
-			PredicateParams: map[string]any{"marker": "tok"},
-			Evidence:        markerEvidence("tok"),
-			Destructive:     true,
-		})
-		errCh <- err
-	}()
-
+	if _, err := q.Request("acme", DestructiveAuthorizationRequest{HypothesisID: "hyp-1"}); err != nil {
+		t.Fatalf("Request: %v", err)
+	}
 	awaitDestructiveActions(t, e, 1)
 	if err := q.Decide("hyp-1", "reviewer-1", false); err != nil {
 		t.Fatalf("Decide: %v", err)
 	}
+	awaitDestructiveActionDecided(t, e, "hyp-1")
 
-	if err := <-errCh; err == nil {
-		t.Fatal("want an error: the queue denied authorization")
+	_, err := e.SettleBetTrue(context.Background(), registry, q.Verify, BetSettlementRequest{
+		HypothesisID:    "hyp-1",
+		Technique:       testTechnique,
+		PredicateType:   testPredicateType,
+		PredicateParams: map[string]any{"marker": "tok"},
+		Evidence:        markerEvidence("tok"),
+		Destructive:     true,
+	})
+	if err == nil {
+		t.Fatal("want an error: the recorded decision denied authorization")
+	}
+	if !errors.Is(err, ErrDestructiveActionDenied) {
+		t.Fatalf("want ErrDestructiveActionDenied, got %v", err)
 	}
 	if got := e.BetSettlements(); len(got) != 0 {
 		t.Fatalf("a denied destructive proof must never settle, got %+v", got)
+	}
+}
+
+func TestSettleBetTrue_Destructive_VerifyNoDecision_Refused(t *testing.T) {
+	// The ADR-0032 case that matters most: an agent that calls SettleBetTrue
+	// (via SubmitProof) for a destructive proof it never got authorization
+	// for at all must be refused, never silently settled.
+	e := newDestructiveAuthzTestEngine(t)
+	q := NewDestructiveAuthorizationQueue(e)
+	registry := newMarkerRegistry(t)
+
+	_, err := e.SettleBetTrue(context.Background(), registry, q.Verify, BetSettlementRequest{
+		HypothesisID:    "hyp-never-requested",
+		Technique:       testTechnique,
+		PredicateType:   testPredicateType,
+		PredicateParams: map[string]any{"marker": "tok"},
+		Evidence:        markerEvidence("tok"),
+		Destructive:     true,
+	})
+	if err == nil {
+		t.Fatal("want an error: no authorization was ever requested")
+	}
+	if !errors.Is(err, ErrDestructiveActionPending) {
+		t.Fatalf("want ErrDestructiveActionPending, got %v", err)
+	}
+	if got := e.BetSettlements(); len(got) != 0 {
+		t.Fatalf("an unauthorized destructive proof must never settle, got %+v", got)
 	}
 }

@@ -58,7 +58,6 @@
 /gibson.harness.v1.HarnessCallbackService/RecordSpan
 /gibson.harness.v1.HarnessCallbackService/RecordSpans
 /gibson.harness.v1.HarnessCallbackService/ReportStepHints
-/gibson.harness.v1.HarnessCallbackService/RequestDestructiveAuthorization
 /gibson.harness.v1.HarnessCallbackService/ToolResults
 /gibson.harness.v1.HarnessCallbackService/ValidateFinding
 /gibson.harness.v1.HarnessCallbackService/ValidateGraphNode

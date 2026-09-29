@@ -68,6 +68,14 @@ func (s *tenantRoutedProofSettlement) DomainPackPredicate(ctx context.Context, p
 
 // SettleBetTrue implements brain.ProofSettlementEngine by delegating to ctx's
 // tenant's own Engine.SettleBetTrue.
+//
+// For a destructive proof, the harness callback handler
+// (callback_submit_proof.go) always calls with authorize=nil — it has no
+// direct route to a tenant's DestructiveAuthorizationQueue, only this
+// tenant-routing adapter does. So when req.Destructive is set and the caller
+// left authorize nil, this wires in the tenant's own queue's Verify method
+// (ADR-0032 decision 3/4): SettleBetTrue's authorizer becomes a verification
+// of the recorded DestructiveActionDecided fact, never a live ask.
 func (s *tenantRoutedProofSettlement) SettleBetTrue(
 	ctx context.Context, registry *settlement.Registry, authorize brain.DestructiveProofAuthorizer, req brain.BetSettlementRequest,
 ) (bool, error) {
@@ -75,11 +83,35 @@ func (s *tenantRoutedProofSettlement) SettleBetTrue(
 	if err != nil {
 		return false, err
 	}
+	if req.Destructive && authorize == nil {
+		authorize = e.DestructiveAuthorizationQueue().Verify
+	}
 	settled, err := e.SettleBetTrue(ctx, registry, authorize, req)
 	if err != nil {
 		return false, fmt.Errorf("proof settlement: %w", err)
 	}
 	return settled, nil
+}
+
+// RequestDestructiveAuthorization implements brain.ProofSettlementEngine
+// (ADR-0032 decision 1, gibson#390): it resolves ctx's tenant's own Engine
+// and enqueues req against that tenant's DestructiveAuthorizationQueue,
+// mirroring SettleBetTrue's and DomainPackPredicate's tenant-routing
+// exactly. Returns immediately — the fleet keeps working while the human
+// decision is pending.
+func (s *tenantRoutedProofSettlement) RequestDestructiveAuthorization(
+	ctx context.Context, req brain.DestructiveAuthorizationRequest,
+) (string, error) {
+	tenant, ok := auth.TenantFromContext(ctx)
+	if !ok {
+		return "", status.Error(codes.PermissionDenied, "no tenant in context")
+	}
+	e := s.registry.For(tenant.String())
+	id, err := e.DestructiveAuthorizationQueue().Request(tenant.String(), req)
+	if err != nil {
+		return "", fmt.Errorf("request destructive authorization: %w", err)
+	}
+	return id, nil
 }
 
 // wireProofSettlement wires SubmitProof's proof-settlement engine onto

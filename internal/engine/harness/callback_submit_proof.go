@@ -36,17 +36,37 @@ package harness
 // a value decided elsewhere. Nothing here alters Registry, Predicate, or
 // Engine.SettleBetTrue.
 //
-// Destructive proofs (ADR-0032) are out of scope: SubmitProof recognizes
-// req.Destructive and returns SETTLEMENT_OUTCOME_PENDING_AUTHORIZATION
-// immediately, without evaluating or settling, leaving the async
-// authorization-gate wiring to gibson#390. It still resolves the named
-// predicate first, so a destructive proof for an unknown predicate name
-// fails closed the same way a non-destructive one does, rather than
-// reporting PENDING_AUTHORIZATION for a predicate that could never settle.
+// Destructive proofs (ADR-0032, gibson#390) go through the SAME
+// compile/stake/evaluate path as a non-destructive proof, carrying
+// req.Destructive onto the BetSettlementRequest. Engine.SettleBetTrue's
+// authorizer (wired in by the daemon-side tenant-routing adapter,
+// proof_settlement_adapter.go, as brain.DestructiveAuthorizationQueue.Verify)
+// then refuses to even evaluate the predicate unless a human already
+// approved this hypothesis_id via RequestDestructiveAuthorization +
+// the dashboard's decision surface (callback_request_destructive_authorization.go):
+//
+//   - No decision recorded yet (or none ever requested): SubmitProof reports
+//     SETTLEMENT_OUTCOME_PENDING_AUTHORIZATION — a routine, expected state
+//     while a human decision is outstanding, never a gRPC-level error. The
+//     bet stays open; the caller (or a later SubmitProof retry) checks back.
+//   - The recorded decision denied authorization: SubmitProof reports it
+//     in-band as a PERMISSION_DENIED HarnessError, the same
+//     in-band-failure pattern every other SubmitProof failure in this file
+//     uses — terminal, never retried into a different answer.
+//   - The recorded decision approved: evaluation proceeds exactly like a
+//     non-destructive proof, so the predicate still decides the verdict —
+//     an approval to attempt the demonstration is not a verdict that it
+//     succeeded.
+//
+// The named predicate is still resolved first regardless of Destructive, so
+// a destructive proof for an unknown predicate name fails closed the same
+// way a non-destructive one does, rather than reporting PENDING_AUTHORIZATION
+// for a predicate that could never settle.
 
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"time"
 
@@ -123,17 +143,6 @@ func (s *HarnessCallbackService) SubmitProof(ctx context.Context, req *harnesspb
 		}, nil
 	}
 
-	// Destructive proofs settle only after a prior RequestDestructiveAuthorization
-	// approval (ADR-0032); that gate is gibson#390's build. SubmitProof never
-	// blocks on it (ADR-0030 decision 4) — it reports the pending state and
-	// returns immediately, once it has confirmed the named predicate is real.
-	if req.GetDestructive() {
-		return &harnesspb.SubmitProofResponse{
-			HypothesisId: hypothesisID,
-			Outcome:      harnesspb.SettlementOutcome_SETTLEMENT_OUTCOME_PENDING_AUTHORIZATION,
-		}, nil
-	}
-
 	if _, compileErr := celenv.Compile(expr); compileErr != nil {
 		return &harnesspb.SubmitProofResponse{
 			HypothesisId: hypothesisID,
@@ -176,11 +185,28 @@ func (s *HarnessCallbackService) SubmitProof(ctx context.Context, req *harnesspb
 		PredicateType:        domainPackCELPredicateType,
 		PredicateParams:      json.RawMessage(rawExpr),
 		Evidence:             submitProofEvidence(req.GetEvidence()),
-		Destructive:          false,
+		Destructive:          req.GetDestructive(),
 		PredictedProbability: predictedProbability,
 	})
 	if err != nil {
-		return nil, status.Errorf(codes.Internal, "SubmitProof: settle hypothesis %q: %v", hypothesisID, err)
+		switch {
+		case errors.Is(err, brain.ErrDestructiveActionPending):
+			return &harnesspb.SubmitProofResponse{
+				HypothesisId: hypothesisID,
+				Outcome:      harnesspb.SettlementOutcome_SETTLEMENT_OUTCOME_PENDING_AUTHORIZATION,
+			}, nil
+		case errors.Is(err, brain.ErrDestructiveActionDenied):
+			return &harnesspb.SubmitProofResponse{
+				HypothesisId: hypothesisID,
+				Outcome:      harnesspb.SettlementOutcome_SETTLEMENT_OUTCOME_UNSPECIFIED,
+				Error: &harnesspb.HarnessError{
+					Code:    commonpb.ErrorCode_ERROR_CODE_PERMISSION_DENIED,
+					Message: fmt.Sprintf("SubmitProof: destructive proof for hypothesis %q was denied authorization", hypothesisID),
+				},
+			}, nil
+		default:
+			return nil, status.Errorf(codes.Internal, "SubmitProof: settle hypothesis %q: %v", hypothesisID, err)
+		}
 	}
 
 	outcome := harnesspb.SettlementOutcome_SETTLEMENT_OUTCOME_NOT_SETTLED
