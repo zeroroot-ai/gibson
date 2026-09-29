@@ -1,5 +1,12 @@
 # Changelog
 
+## [0.143.8](https://github.com/zeroroot-ai/gibson/compare/v0.143.7...v0.143.8) (2026-09-29)
+
+
+### Bug Fixes
+
+* **rework:** the FGA cache TTL has one default, and ext-authz main reads it ([#428](https://github.com/zeroroot-ai/gibson/issues/428)) ([5aae047](https://github.com/zeroroot-ai/gibson/commit/5aae047e8cab81b6fd443660767d07c1e9ef53a5))
+
 ## [0.143.7](https://github.com/zeroroot-ai/gibson/compare/v0.143.6...v0.143.7) (2026-09-29)
 
 
