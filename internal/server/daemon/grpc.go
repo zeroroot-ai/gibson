@@ -671,6 +671,7 @@ func (d *daemonImpl) buildGRPCServer(ctx context.Context) (*grpcSubsystem, error
 	// Create and register daemon service.
 	// Attach the quota manager so RunMission enforces per-tenant mission limits.
 	daemonSvc := api.NewDaemonServer(d, d.credentialHandler, d.logger.Slog())
+	auditLogger := wireDaemonAudit(ctx, d.stateClient, d.logger.Slog(), daemonSvc)
 	// SSRF egress policy for every LLM provider this server constructs from a
 	// tenant-supplied base_url. Off by default (guard on); operators running an
 	// in-cluster or air-gapped model server opt in via
@@ -1686,8 +1687,6 @@ func (d *daemonImpl) buildGRPCServer(ctx context.Context) (*grpcSubsystem, error
 		if redisClient, ok := d.stateClient.Client().(*goredis.Client); ok {
 			compRegistry := component.NewRedisComponentRegistry(redisClient, 30*time.Second)
 			compQueue := component.NewRedisWorkQueue(d.stateClient.Client())
-
-			auditLogger := audit.NewAuditLogger(ctx, d.stateClient, d.logger.Slog())
 
 			// Wire GraphRAGFindingSubmitter when infrastructure is available.
 			// It persists findings to the per-tenant data-plane (via Pool) and

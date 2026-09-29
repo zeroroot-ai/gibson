@@ -66,6 +66,12 @@ func (s *DaemonServer) ResetUserMFA(ctx context.Context, req *tenantv1.ResetUser
 	if s.authorizer == nil {
 		return nil, status.Error(codes.Unavailable, "authorization service not configured")
 	}
+	// A reset without its record is not performed. The record is what lets
+	// the tenant see who reset whom and when (hosted#206), and the logger
+	// was silently absent in production until the daemon wired it.
+	if s.auditLogger == nil {
+		return nil, status.Error(codes.Unavailable, "audit log not configured: an MFA reset is not performed without its record")
+	}
 
 	// The target must belong to the caller's own tenant. "member" is the
 	// umbrella relation every role (owner/admin/writer/member) implies in
@@ -117,16 +123,14 @@ func (s *DaemonServer) ResetUserMFA(ctx context.Context, req *tenantv1.ResetUser
 		}
 	}
 
-	if s.auditLogger != nil {
-		s.auditLogger.Log(ctx, auditActionTenantUserMFAReset, "user", target, map[string]any{
-			"target_user_id":      target,
-			"sessions_terminated": sessionsRes.SessionsTerminated,
-			"otp_cleared":         factorsRes.OTPCleared,
-			"u2f_cleared":         factorsRes.U2FCleared,
-			"passkeys_cleared":    factorsRes.PasskeysCleared,
-			"notified":            notified,
-		})
-	}
+	s.auditLogger.Log(ctx, auditActionTenantUserMFAReset, "user", target, map[string]any{
+		"target_user_id":      target,
+		"sessions_terminated": sessionsRes.SessionsTerminated,
+		"otp_cleared":         factorsRes.OTPCleared,
+		"u2f_cleared":         factorsRes.U2FCleared,
+		"passkeys_cleared":    factorsRes.PasskeysCleared,
+		"notified":            notified,
+	})
 
 	return &tenantv1.ResetUserMFAResponse{
 		SessionsTerminated: int32(sessionsRes.SessionsTerminated), //nolint:gosec // bounded by active session count

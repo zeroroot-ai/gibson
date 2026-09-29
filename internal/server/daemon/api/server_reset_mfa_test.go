@@ -7,12 +7,17 @@ import (
 	"context"
 	"errors"
 	"log/slog"
+	"time"
+
+	"github.com/alicebob/miniredis/v2"
 	"strings"
 	"testing"
 
 	"google.golang.org/grpc/codes"
 	status_grpc "google.golang.org/grpc/status"
 
+	"github.com/zeroroot-ai/gibson/internal/engine/state"
+	"github.com/zeroroot-ai/gibson/internal/platform/audit"
 	"github.com/zeroroot-ai/gibson/internal/platform/idp"
 	"github.com/zeroroot-ai/gibson/internal/platform/mailer"
 	tenantv1 "github.com/zeroroot-ai/gibson/internal/server/daemon/api/gibson/tenant/v1"
@@ -26,13 +31,36 @@ type mfaResetTestIDP struct {
 	*fakeIDPClient
 	profile    *idp.UserProfile
 	profileErr error
+	// profiles answers per user id when set, so a test can give the caller
+	// and the target different addresses and tell them apart in the mail.
+	profiles map[string]*idp.UserProfile
 }
 
-func (f *mfaResetTestIDP) GetUserProfile(_ context.Context, _ string) (*idp.UserProfile, error) {
+func (f *mfaResetTestIDP) GetUserProfile(_ context.Context, userID string) (*idp.UserProfile, error) {
 	if f.profileErr != nil {
 		return nil, f.profileErr
 	}
+	if p, ok := f.profiles[userID]; ok {
+		return p, nil
+	}
 	return f.profile, nil
+}
+
+// testAuditLogger is an AuditLogger over an in-process miniredis, the same
+// shape production wires (grpc.go). ResetUserMFA refuses to run without one.
+func testAuditLogger(t *testing.T) *audit.AuditLogger {
+	t.Helper()
+	mr := miniredis.RunT(t)
+	cfg := state.DefaultConfig()
+	cfg.URL = "redis://" + mr.Addr()
+	sc, err := state.NewStateClient(cfg)
+	if err != nil {
+		t.Fatalf("state client against miniredis: %v", err)
+	}
+	t.Cleanup(func() { _ = sc.Close() })
+	ctx, cancel := context.WithCancel(context.Background())
+	t.Cleanup(cancel)
+	return audit.NewAuditLogger(ctx, sc, slog.Default())
 }
 
 // fakeMFAResetMailer records SendMFAReset calls.
@@ -49,18 +77,86 @@ func (f *fakeMFAResetMailer) SendMFAReset(_ context.Context, e mailer.MFAResetEm
 	return nil
 }
 
-func resetMFAServer(az authzIface, idpC idp.AdminClient, mailerC mfaResetSender) *DaemonServer {
+func resetMFAServer(t *testing.T, az authzIface, idpC idp.AdminClient, mailerC mfaResetSender) *DaemonServer {
+	t.Helper()
 	srv := &DaemonServer{
 		logger:         slog.Default(),
 		authorizer:     az,
 		idpAdminClient: idpC,
 		appURL:         "https://app.example.com",
 	}
-	// Route through WithMFAResetMailer (rather than setting the field
-	// directly) so the setter itself is exercised, matching production wiring
-	// in grpc.go.
+	// Route through the setters (rather than setting the fields directly) so
+	// the setters themselves are exercised, matching production wiring in
+	// grpc.go.
 	srv.WithMFAResetMailer(mailerC)
+	srv.WithAuditLogger(testAuditLogger(t))
 	return srv
+}
+
+// TestResetUserMFA_RefusesWithoutAuditLog: a reset without its record is not
+// performed (hosted#206). Nothing is revoked and nobody is mailed.
+func TestResetUserMFA_RefusesWithoutAuditLog(t *testing.T) {
+	az := newFakeAuthorizer().allow("user:bob", "member", "tenant:acme")
+	idpC := &mfaResetTestIDP{fakeIDPClient: &fakeIDPClient{}, profile: &idp.UserProfile{Email: "bob@example.com"}}
+	mailerC := &fakeMFAResetMailer{}
+	srv := &DaemonServer{logger: slog.Default(), authorizer: az, idpAdminClient: idpC, appURL: "https://app.example.com"}
+	srv.WithMFAResetMailer(mailerC)
+	ctx := ctxWithTenantAdmin(context.Background(), "acme", "admin1")
+
+	_, err := srv.ResetUserMFA(ctx, &tenantv1.ResetUserMFARequest{TargetUserId: "bob"})
+	if status_grpc.Code(err) != codes.Unavailable {
+		t.Fatalf("expected Unavailable without an audit log, got %v", err)
+	}
+	if len(mailerC.sent) != 0 {
+		t.Fatalf("expected no notice when the reset was refused, got %v", mailerC.sent)
+	}
+}
+
+// TestResetUserMFA_WritesAuditRecord reads the record back from the stream:
+// who reset whom, in which tenant, with the counts the reset reported.
+func TestResetUserMFA_WritesAuditRecord(t *testing.T) {
+	az := newFakeAuthorizer().allow("user:bob", "member", "tenant:acme")
+	idpC := &mfaResetTestIDP{
+		fakeIDPClient: &fakeIDPClient{
+			revokeResult:       idp.RevokeUserSessionsResult{SessionsTerminated: 2, GrantsRevoked: 2},
+			clearFactorsResult: idp.ClearHumanFactorsResult{OTPCleared: true, PasskeysCleared: 1},
+		},
+		profile: &idp.UserProfile{Email: "bob@example.com"},
+	}
+	srv := resetMFAServer(t, az, idpC, &fakeMFAResetMailer{})
+	ctx := ctxWithTenantAdmin(context.Background(), "acme", "admin1")
+
+	if _, err := srv.ResetUserMFA(ctx, &tenantv1.ResetUserMFARequest{TargetUserId: "bob"}); err != nil {
+		t.Fatalf("ResetUserMFA: %v", err)
+	}
+
+	// The logger writes asynchronously; give the drain loop a moment.
+	var entries []audit.AuditEntry
+	deadline := time.Now().Add(5 * time.Second)
+	for time.Now().Before(deadline) {
+		var err error
+		entries, err = srv.auditLogger.Query(context.Background(), "acme", audit.AuditQueryOptions{Action: auditActionTenantUserMFAReset, Limit: 10})
+		if err != nil {
+			t.Fatalf("audit Query: %v", err)
+		}
+		if len(entries) > 0 {
+			break
+		}
+		time.Sleep(50 * time.Millisecond)
+	}
+	if len(entries) != 1 {
+		t.Fatalf("expected one %s record for tenant acme, got %d", auditActionTenantUserMFAReset, len(entries))
+	}
+	e := entries[0]
+	if e.ActorID != "admin1" || e.Resource != "user" || e.ResourceID != "bob" {
+		t.Errorf("record = actor %q resource %q/%q, want admin1 user/bob", e.ActorID, e.Resource, e.ResourceID)
+	}
+	if e.Details["target_user_id"] != "bob" {
+		t.Errorf("details.target_user_id = %v, want bob", e.Details["target_user_id"])
+	}
+	if e.Details["notified"] != true {
+		t.Errorf("details.notified = %v, want true", e.Details["notified"])
+	}
 }
 
 func TestResetUserMFA_AdminOverMember(t *testing.T) {
@@ -73,7 +169,7 @@ func TestResetUserMFA_AdminOverMember(t *testing.T) {
 		profile: &idp.UserProfile{Email: "bob@example.com"},
 	}
 	mailerC := &fakeMFAResetMailer{}
-	srv := resetMFAServer(az, idpC, mailerC)
+	srv := resetMFAServer(t, az, idpC, mailerC)
 	ctx := ctxWithTenantAdmin(context.Background(), "acme", "admin1")
 
 	resp, err := srv.ResetUserMFA(ctx, &tenantv1.ResetUserMFARequest{TargetUserId: "bob"})
@@ -112,7 +208,7 @@ func TestResetUserMFA_OwnerCanResetOwnMFA(t *testing.T) {
 	// admin in model.fga) and is themselves a tenant member.
 	az := newFakeAuthorizer().allow("user:owner1", "member", "tenant:acme")
 	idpC := &mfaResetTestIDP{fakeIDPClient: &fakeIDPClient{}}
-	srv := resetMFAServer(az, idpC, nil)
+	srv := resetMFAServer(t, az, idpC, nil)
 	ctx := ctxWithTenantAdmin(context.Background(), "acme", "owner1")
 
 	if _, err := srv.ResetUserMFA(ctx, &tenantv1.ResetUserMFARequest{TargetUserId: "owner1"}); err != nil {
@@ -131,7 +227,7 @@ func TestResetUserMFA_OwnerCanResetOwnMFA(t *testing.T) {
 func TestResetUserMFA_CrossTenantTargetDenied(t *testing.T) {
 	az := newFakeAuthorizer().allow("user:eve", "member", "tenant:beta") // NOT acme
 	idpC := &mfaResetTestIDP{fakeIDPClient: &fakeIDPClient{}}
-	srv := resetMFAServer(az, idpC, nil)
+	srv := resetMFAServer(t, az, idpC, nil)
 	ctx := ctxWithTenantAdmin(context.Background(), "acme", "admin1")
 
 	_, err := srv.ResetUserMFA(ctx, &tenantv1.ResetUserMFARequest{TargetUserId: "eve"})
@@ -145,7 +241,7 @@ func TestResetUserMFA_CrossTenantTargetDenied(t *testing.T) {
 }
 
 func TestResetUserMFA_MissingTarget(t *testing.T) {
-	srv := resetMFAServer(newFakeAuthorizer(), &mfaResetTestIDP{fakeIDPClient: &fakeIDPClient{}}, nil)
+	srv := resetMFAServer(t, newFakeAuthorizer(), &mfaResetTestIDP{fakeIDPClient: &fakeIDPClient{}}, nil)
 	ctx := ctxWithTenantAdmin(context.Background(), "acme", "admin1")
 
 	_, err := srv.ResetUserMFA(ctx, &tenantv1.ResetUserMFARequest{})
@@ -155,7 +251,7 @@ func TestResetUserMFA_MissingTarget(t *testing.T) {
 }
 
 func TestResetUserMFA_NoIdentity(t *testing.T) {
-	srv := resetMFAServer(newFakeAuthorizer(), &mfaResetTestIDP{fakeIDPClient: &fakeIDPClient{}}, nil)
+	srv := resetMFAServer(t, newFakeAuthorizer(), &mfaResetTestIDP{fakeIDPClient: &fakeIDPClient{}}, nil)
 
 	_, err := srv.ResetUserMFA(context.Background(), &tenantv1.ResetUserMFARequest{TargetUserId: "bob"})
 	if status_grpc.Code(err) != codes.Unauthenticated {
@@ -186,7 +282,7 @@ func TestResetUserMFA_NoAuthorizerConfigured(t *testing.T) {
 func TestResetUserMFA_RevokeSessionsError(t *testing.T) {
 	az := newFakeAuthorizer().allow("user:bob", "member", "tenant:acme")
 	idpC := &mfaResetTestIDP{fakeIDPClient: &fakeIDPClient{revokeErr: errBoom}}
-	srv := resetMFAServer(az, idpC, nil)
+	srv := resetMFAServer(t, az, idpC, nil)
 	ctx := ctxWithTenantAdmin(context.Background(), "acme", "admin1")
 
 	_, err := srv.ResetUserMFA(ctx, &tenantv1.ResetUserMFARequest{TargetUserId: "bob"})
@@ -202,7 +298,7 @@ func TestResetUserMFA_RevokeSessionsError(t *testing.T) {
 func TestResetUserMFA_ClearFactorsError(t *testing.T) {
 	az := newFakeAuthorizer().allow("user:bob", "member", "tenant:acme")
 	idpC := &mfaResetTestIDP{fakeIDPClient: &fakeIDPClient{clearFactorsErr: errBoom}}
-	srv := resetMFAServer(az, idpC, nil)
+	srv := resetMFAServer(t, az, idpC, nil)
 	ctx := ctxWithTenantAdmin(context.Background(), "acme", "admin1")
 
 	_, err := srv.ResetUserMFA(ctx, &tenantv1.ResetUserMFARequest{TargetUserId: "bob"})
@@ -216,7 +312,7 @@ func TestResetUserMFA_ClearFactorsError(t *testing.T) {
 func TestResetUserMFA_NoMailerConfigured(t *testing.T) {
 	az := newFakeAuthorizer().allow("user:bob", "member", "tenant:acme")
 	idpC := &mfaResetTestIDP{fakeIDPClient: &fakeIDPClient{}, profile: &idp.UserProfile{Email: "bob@example.com"}}
-	srv := resetMFAServer(az, idpC, nil) // no mailer
+	srv := resetMFAServer(t, az, idpC, nil) // no mailer
 	ctx := ctxWithTenantAdmin(context.Background(), "acme", "admin1")
 
 	resp, err := srv.ResetUserMFA(ctx, &tenantv1.ResetUserMFARequest{TargetUserId: "bob"})
@@ -234,7 +330,7 @@ func TestResetUserMFA_NoEmailOnFile(t *testing.T) {
 	az := newFakeAuthorizer().allow("user:bob", "member", "tenant:acme")
 	idpC := &mfaResetTestIDP{fakeIDPClient: &fakeIDPClient{}, profileErr: idp.ErrNotFound}
 	mailerC := &fakeMFAResetMailer{}
-	srv := resetMFAServer(az, idpC, mailerC)
+	srv := resetMFAServer(t, az, idpC, mailerC)
 	ctx := ctxWithTenantAdmin(context.Background(), "acme", "admin1")
 
 	resp, err := srv.ResetUserMFA(ctx, &tenantv1.ResetUserMFARequest{TargetUserId: "bob"})
@@ -254,18 +350,25 @@ func TestResetUserMFA_NoEmailOnFile(t *testing.T) {
 // the admin's own email happens to resolve.
 func TestResetUserMFA_CallerNeverReceivesNotice(t *testing.T) {
 	az := newFakeAuthorizer().allow("user:bob", "member", "tenant:acme")
-	idpC := &mfaResetTestIDP{fakeIDPClient: &fakeIDPClient{}, profile: &idp.UserProfile{Email: "bob@example.com"}}
+	// The caller and the target both resolve to an address, so a wrong
+	// recipient would be visible. The old form compared against the user id
+	// "admin1", which no mail ever carries, so it could not fail.
+	idpC := &mfaResetTestIDP{fakeIDPClient: &fakeIDPClient{}, profiles: map[string]*idp.UserProfile{
+		"admin1": {Email: "admin1@example.com"},
+		"bob":    {Email: "bob@example.com"},
+	}}
 	mailerC := &fakeMFAResetMailer{}
-	srv := resetMFAServer(az, idpC, mailerC)
+	srv := resetMFAServer(t, az, idpC, mailerC)
 	ctx := ctxWithTenantAdmin(context.Background(), "acme", "admin1")
 
 	if _, err := srv.ResetUserMFA(ctx, &tenantv1.ResetUserMFARequest{TargetUserId: "bob"}); err != nil {
 		t.Fatalf("ResetUserMFA: %v", err)
 	}
-	for _, sent := range mailerC.sent {
-		if sent.To == "admin1" {
-			t.Fatalf("the acting admin must never receive the reset notice, got To=%q", sent.To)
-		}
+	if len(mailerC.sent) != 1 {
+		t.Fatalf("expected exactly one notice, got %d: %v", len(mailerC.sent), mailerC.sent)
+	}
+	if got := mailerC.sent[0].To; got != "bob@example.com" {
+		t.Fatalf("the notice must go to the target only, got To=%q", got)
 	}
 }
 
@@ -276,7 +379,7 @@ func TestResetUserMFA_MailerSendFails(t *testing.T) {
 	az := newFakeAuthorizer().allow("user:bob", "member", "tenant:acme")
 	idpC := &mfaResetTestIDP{fakeIDPClient: &fakeIDPClient{}, profile: &idp.UserProfile{Email: "bob@example.com"}}
 	mailerC := &fakeMFAResetMailer{err: errBoom}
-	srv := resetMFAServer(az, idpC, mailerC)
+	srv := resetMFAServer(t, az, idpC, mailerC)
 	ctx := ctxWithTenantAdmin(context.Background(), "acme", "admin1")
 
 	resp, err := srv.ResetUserMFA(ctx, &tenantv1.ResetUserMFARequest{TargetUserId: "bob"})
@@ -300,7 +403,7 @@ func TestResetUserMFA_SignInLinkUsesPublicAppURLNeverIssuer(t *testing.T) {
 	az := newFakeAuthorizer().allow("user:bob", "member", "tenant:acme")
 	idpC := &mfaResetTestIDP{fakeIDPClient: &fakeIDPClient{}, profile: &idp.UserProfile{Email: "bob@example.com"}}
 	mailerC := &fakeMFAResetMailer{}
-	srv := resetMFAServer(az, idpC, mailerC)
+	srv := resetMFAServer(t, az, idpC, mailerC)
 	// Deliberately set the API-plane origin to a value that would produce an
 	// unreachable link if it ever leaked into the sign-in URL, so this test
 	// fails loudly if a future edit reintroduces that bug.
@@ -328,7 +431,7 @@ func TestResetUserMFA_StampsSessionRevocation(t *testing.T) {
 	az := newConditionalFakeAuthorizer()
 	az.allow("user:bob", "member", "tenant:acme")
 	idpC := &mfaResetTestIDP{fakeIDPClient: &fakeIDPClient{}}
-	srv := resetMFAServer(az, idpC, nil)
+	srv := resetMFAServer(t, az, idpC, nil)
 	ctx := ctxWithTenantAdmin(context.Background(), "acme", "admin1")
 
 	if _, err := srv.ResetUserMFA(ctx, &tenantv1.ResetUserMFARequest{TargetUserId: "bob"}); err != nil {
@@ -354,7 +457,7 @@ func TestResetUserMFA_StampFailureIsInternal(t *testing.T) {
 	base.allow("user:bob", "member", "tenant:acme")
 	az := &conditionalFakeAuthorizerWithError{conditionalFakeAuthorizer: base, updateErr: errors.New("fga boom")}
 	idpC := &mfaResetTestIDP{fakeIDPClient: &fakeIDPClient{}}
-	srv := resetMFAServer(az, idpC, nil)
+	srv := resetMFAServer(t, az, idpC, nil)
 	ctx := ctxWithTenantAdmin(context.Background(), "acme", "admin1")
 
 	_, err := srv.ResetUserMFA(ctx, &tenantv1.ResetUserMFARequest{TargetUserId: "bob"})
