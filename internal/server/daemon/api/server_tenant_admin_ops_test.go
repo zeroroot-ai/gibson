@@ -13,14 +13,29 @@ import (
 
 	sqlmock "github.com/DATA-DOG/go-sqlmock"
 	"google.golang.org/grpc/codes"
+	"google.golang.org/grpc/status"
 
 	daemonoperatorv1 "github.com/zeroroot-ai/gibson/internal/server/daemon/api/gibson/daemon/operator/v1"
 	tenantv1 "github.com/zeroroot-ai/gibson/internal/server/daemon/api/gibson/tenant/v1"
 )
 
+// fakeOwnerInviter records InviteProvisionedOwner calls and returns err.
+type fakeOwnerInviter struct {
+	calls []ownerInviteCall
+	err   error
+}
+
+type ownerInviteCall struct{ tenantID, ownerEmail, invitedBy string }
+
+func (f *fakeOwnerInviter) InviteProvisionedOwner(_ context.Context, tenantID, ownerEmail, invitedBy string) error {
+	f.calls = append(f.calls, ownerInviteCall{tenantID, ownerEmail, invitedBy})
+	return f.err
+}
+
 func newAdminOpsServer() *DaemonServer {
 	return &DaemonServer{
-		logger: slog.New(slog.NewTextHandler(os.Stderr, &slog.HandlerOptions{Level: slog.LevelError})),
+		ownerInviter: &fakeOwnerInviter{},
+		logger:       slog.New(slog.NewTextHandler(os.Stderr, &slog.HandlerOptions{Level: slog.LevelError})),
 	}
 }
 
@@ -82,6 +97,83 @@ func TestAdminProvisionTenant_RecordsOp_DefaultsTier(t *testing.T) {
 	}
 	if resp.GetOpId() == "" {
 		t.Errorf("expected non-empty op_id on fresh provision")
+	}
+	if err := mock.ExpectationsWereMet(); err != nil {
+		t.Errorf("expectations: %v", err)
+	}
+	// The owner is invited through the one invitation path, after the op is
+	// queued (hosted#205).
+	inv := srv.ownerInviter.(*fakeOwnerInviter)
+	if len(inv.calls) != 1 || inv.calls[0].tenantID != "acme" || inv.calls[0].ownerEmail != "owner@acme.test" {
+		t.Fatalf("owner invitation calls = %+v, want one for acme/owner@acme.test", inv.calls)
+	}
+}
+
+// TestAdminProvisionTenant_RefusesWithoutOwnerInviter: a tenant is not queued
+// when its owner has no way in (hosted#205). No SQL runs.
+func TestAdminProvisionTenant_RefusesWithoutOwnerInviter(t *testing.T) {
+	db, mock, err := sqlmock.New()
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer db.Close()
+	srv := newAdminOpsServer()
+	srv.platformDB = db
+	srv.ownerInviter = nil
+
+	_, err = srv.AdminProvisionTenant(context.Background(), &tenantv1.AdminProvisionTenantRequest{
+		TenantId: "acme", DisplayName: "Acme Inc", OwnerEmail: "owner@acme.test",
+	})
+	if status.Code(err) != codes.Unavailable {
+		t.Fatalf("expected Unavailable without an owner inviter, got %v", err)
+	}
+	if err := mock.ExpectationsWereMet(); err != nil {
+		t.Errorf("no SQL may run before the refusal: %v", err)
+	}
+}
+
+// TestAdminProvisionTenant_OwnerInviteFailureIsReturned: the op is queued, the
+// invitation fails, and the caller learns it. A retry lands in the dedup
+// branch and invites again (Issue is an upsert).
+func TestAdminProvisionTenant_OwnerInviteFailureIsReturned(t *testing.T) {
+	db, mock, err := sqlmock.New()
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer db.Close()
+	srv := newAdminOpsServer()
+	srv.platformDB = db
+	inv := &fakeOwnerInviter{err: status.Error(codes.Internal, "send invitation email: smtp down")}
+	srv.ownerInviter = inv
+
+	expectEnsureAdminOpsTable(mock)
+	mock.ExpectExec("INSERT INTO tenant_admin_ops").
+		WithArgs(sqlmock.AnyArg(), "acme", "Acme Inc", "owner@acme.test", "team").
+		WillReturnResult(sqlmock.NewResult(0, 1))
+	_, err = srv.AdminProvisionTenant(context.Background(), &tenantv1.AdminProvisionTenantRequest{
+		TenantId: "acme", DisplayName: "Acme Inc", OwnerEmail: "owner@acme.test",
+	})
+	if status.Code(err) != codes.Internal {
+		t.Fatalf("expected the invitation failure back, got %v", err)
+	}
+
+	// The retry: the op is already pending (0 rows), the owner is invited again.
+	expectEnsureAdminOpsTable(mock)
+	mock.ExpectExec("INSERT INTO tenant_admin_ops").
+		WithArgs(sqlmock.AnyArg(), "acme", "Acme Inc", "owner@acme.test", "team").
+		WillReturnResult(sqlmock.NewResult(0, 0))
+	inv.err = nil
+	resp, err := srv.AdminProvisionTenant(context.Background(), &tenantv1.AdminProvisionTenantRequest{
+		TenantId: "acme", DisplayName: "Acme Inc", OwnerEmail: "owner@acme.test",
+	})
+	if err != nil {
+		t.Fatalf("retry: %v", err)
+	}
+	if resp.GetOpId() != "" {
+		t.Errorf("retry must not report a new op, got %q", resp.GetOpId())
+	}
+	if len(inv.calls) != 2 {
+		t.Fatalf("expected the owner invited on both calls, got %d", len(inv.calls))
 	}
 	if err := mock.ExpectationsWereMet(); err != nil {
 		t.Errorf("expectations: %v", err)

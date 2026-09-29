@@ -144,6 +144,11 @@ type DaemonServer struct {
 	// May be nil; when nil, ListAuditEvents falls back to Loki only (or returns Unavailable).
 	auditLogger *audit.AuditLogger
 
+	// ownerInviter issues the founding Owner's invitation for a tenant the
+	// Platform owner provisions. AdminProvisionTenant refuses without it: a
+	// tenant is not queued when its owner has no way in (hosted#205).
+	ownerInviter ProvisionedOwnerInviter
+
 	// lokiQuerier is the Loki HTTP query client for audit events.
 	// May be nil; when nil, ListAuditEvents falls back to the Redis audit stream.
 	lokiQuerier audit.LokiQuerier
