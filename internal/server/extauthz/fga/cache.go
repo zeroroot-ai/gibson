@@ -296,6 +296,27 @@ func (c *CachedChecker) LookupEntry(method string) (Entry, bool) {
 	return c.inner.reg.Lookup(method)
 }
 
+// InvalidateSubject drops every cached decision for one subject, keyed as
+// the cache keys it: the identity's bare subject (a Zitadel user id for a
+// person). It is called by the FGA write event subscriber (cmd/ext-authz)
+// when a tuple about that user was written or deleted, so a demoted or
+// removed user is refused on their next request rather than at the TTL
+// (hosted#204).
+func (c *CachedChecker) InvalidateSubject(subject string) int {
+	c.mu.Lock()
+	n := 0
+	for k := range c.entries {
+		if k.subject == subject {
+			delete(c.entries, k)
+			n++
+		}
+	}
+	cacheEvictionsTotal.WithLabelValues("subject_invalidate").Add(float64(n))
+	cacheSizeGauge.Set(float64(len(c.entries)))
+	c.mu.Unlock()
+	return n
+}
+
 // Len returns the number of currently-cached entries (for tests and
 // admin diagnostics).
 func (c *CachedChecker) Len() int {

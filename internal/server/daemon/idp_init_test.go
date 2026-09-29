@@ -122,7 +122,7 @@ func setTenantRoleSyncerEnv(t *testing.T, connectURL, claim, projectID string) {
 
 func TestInitTenantRoleSyncer_NoProviderReturnsNilNil(t *testing.T) {
 	t.Setenv(envIDPProvider, "")
-	syncer, err := initTenantRoleSyncer(context.Background(), fullAuthorizer{})
+	syncer, err := initTenantRoleSyncer(context.Background(), fullAuthorizer{}, nil)
 	if err != nil || syncer != nil {
 		t.Fatalf("initTenantRoleSyncer with no provider = (%v, %v), want (nil, nil)", syncer, err)
 	}
@@ -130,7 +130,7 @@ func TestInitTenantRoleSyncer_NoProviderReturnsNilNil(t *testing.T) {
 
 func TestInitTenantRoleSyncer_RejectsAnUnsupportedProvider(t *testing.T) {
 	t.Setenv(envIDPProvider, "okta")
-	_, err := initTenantRoleSyncer(context.Background(), fullAuthorizer{})
+	_, err := initTenantRoleSyncer(context.Background(), fullAuthorizer{}, nil)
 	if err == nil || !strings.Contains(err.Error(), "unsupported provider") {
 		t.Fatalf("initTenantRoleSyncer with an unsupported provider: err = %v", err)
 	}
@@ -138,7 +138,7 @@ func TestInitTenantRoleSyncer_RejectsAnUnsupportedProvider(t *testing.T) {
 
 func TestInitTenantRoleSyncer_RequiresTheProjectID(t *testing.T) {
 	setTenantRoleSyncerEnv(t, "http://ignored.invalid", "app.zitadel.invalid", "")
-	_, err := initTenantRoleSyncer(context.Background(), fullAuthorizer{})
+	_, err := initTenantRoleSyncer(context.Background(), fullAuthorizer{}, nil)
 	if err == nil || !strings.Contains(err.Error(), envIDPZitadelProjectID) {
 		t.Fatalf("initTenantRoleSyncer with no project id: err = %v, want it to name %s", err, envIDPZitadelProjectID)
 	}
@@ -147,7 +147,7 @@ func TestInitTenantRoleSyncer_RequiresTheProjectID(t *testing.T) {
 func TestInitTenantRoleSyncer_RequiresClientCredentials(t *testing.T) {
 	setTenantRoleSyncerEnv(t, "http://ignored.invalid", "app.zitadel.invalid", "PROJ-1")
 	t.Setenv(envIDPAdminClientID, "")
-	_, err := initTenantRoleSyncer(context.Background(), fullAuthorizer{})
+	_, err := initTenantRoleSyncer(context.Background(), fullAuthorizer{}, nil)
 	if err == nil || !strings.Contains(err.Error(), envIDPAdminClientID) {
 		t.Fatalf("initTenantRoleSyncer with no client id: err = %v, want it to name %s", err, envIDPAdminClientID)
 	}
@@ -155,7 +155,7 @@ func TestInitTenantRoleSyncer_RequiresClientCredentials(t *testing.T) {
 
 func TestInitTenantRoleSyncer_RequiresTheZitadelEndpoint(t *testing.T) {
 	setTenantRoleSyncerEnv(t, "", "app.zitadel.invalid", "PROJ-1")
-	_, err := initTenantRoleSyncer(context.Background(), fullAuthorizer{})
+	_, err := initTenantRoleSyncer(context.Background(), fullAuthorizer{}, nil)
 	if err == nil || !strings.Contains(err.Error(), zitadelconn.EnvURL) {
 		t.Fatalf("initTenantRoleSyncer with no connect URL: err = %v, want it to name %s", err, zitadelconn.EnvURL)
 	}
@@ -165,7 +165,7 @@ func TestInitTenantRoleSyncer_WrapsAnAuthzTuplesConstructionError(t *testing.T) 
 	srv := zitadelconntest.New(t, "", nil)
 	setTenantRoleSyncerEnv(t, srv.URL, srv.Domain, "PROJ-1")
 
-	_, err := initTenantRoleSyncer(context.Background(), readerOnlyAuthorizer{})
+	_, err := initTenantRoleSyncer(context.Background(), readerOnlyAuthorizer{}, nil)
 	if err == nil || !strings.Contains(err.Error(), "AtomicWriter") {
 		t.Fatalf("initTenantRoleSyncer with an authorizer missing AtomicWriter: err = %v", err)
 	}
@@ -175,7 +175,7 @@ func TestInitTenantRoleSyncer_BuildsASyncerWhenEverythingIsSet(t *testing.T) {
 	srv := zitadelconntest.New(t, "", nil)
 	setTenantRoleSyncerEnv(t, srv.URL, srv.Domain, "PROJ-1")
 
-	syncer, err := initTenantRoleSyncer(context.Background(), fullAuthorizer{})
+	syncer, err := initTenantRoleSyncer(context.Background(), fullAuthorizer{}, nil)
 	if err != nil {
 		t.Fatalf("initTenantRoleSyncer: %v", err)
 	}

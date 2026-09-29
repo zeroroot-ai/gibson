@@ -105,6 +105,8 @@ import (
 	"crypto/x509"
 	"errors"
 	"fmt"
+	"github.com/redis/go-redis/v9"
+	"github.com/zeroroot-ai/gibson/internal/platform/fgaevent"
 	"io"
 	"log/slog"
 	"net"
@@ -214,6 +216,7 @@ func main() {
 	checker, fgaClient := buildChecker(log, reg)
 	cacheTTL, cacheMax := fgaCacheSettings()
 	cachedChecker := fga.NewCachedChecker(checker, cacheTTL, cacheMax)
+	startFGAEventSubscriber(ctx, log, cachedChecker)
 
 	// Both capability-grant verifiers, on one SVID-pinned key transport.
 	cgVerifier, componentVerifier, err := buildCGVerifiers(log, x509Source, x509Source)
@@ -968,3 +971,42 @@ func fgaCacheSettings() (ttl time.Duration, maxSize int) {
 
 // defaultFGACacheMaxSize bounds the decision cache; random eviction above it.
 const defaultFGACacheMaxSize = 100_000
+
+// startFGAEventSubscriber subscribes to the FGA write events the daemon and
+// the tenant-operator publish, and evicts the subject's cached decisions on
+// each one (hosted#204). EXT_AUTHZ_REDIS_URL names the Redis; REDIS_PASSWORD
+// is its password when set (the same Secret the daemon uses). Without a URL
+// the cache TTL is the only bound, and the log says so once.
+func startFGAEventSubscriber(ctx context.Context, log *slog.Logger, cc *fga.CachedChecker) {
+	rdb, err := fgaEventRedis(os.Getenv("EXT_AUTHZ_REDIS_URL"), os.Getenv("REDIS_PASSWORD"))
+	if err != nil {
+		log.Error("EXT_AUTHZ_REDIS_URL is not a Redis URL; FGA write events are not subscribed, the cache TTL bounds role changes", "err", err)
+		return
+	}
+	if rdb == nil {
+		log.Warn("EXT_AUTHZ_REDIS_URL not set: FGA write events are not subscribed, the cache TTL bounds role changes")
+		return
+	}
+	go fgaevent.Subscribe(ctx, rdb, log, func(e fgaevent.Event) {
+		// The cache keys a human decision on the bare Zitadel user id (the
+		// token subject), not the FGA "user:<id>" form.
+		n := cc.InvalidateSubject(e.UserID)
+		log.Debug("fga write event: subject decisions evicted", "user_id", e.UserID, "tenant", e.Tenant, "relation", e.Relation, "op", string(e.Op), "evicted", n)
+	})
+}
+
+// fgaEventRedis builds the subscriber's Redis client from a URL and an
+// optional password. An empty URL means no subscriber (nil, nil).
+func fgaEventRedis(url, password string) (redis.UniversalClient, error) {
+	if url == "" {
+		return nil, nil
+	}
+	opts, err := redis.ParseURL(url)
+	if err != nil {
+		return nil, fmt.Errorf("parse EXT_AUTHZ_REDIS_URL: %w", err)
+	}
+	if password != "" {
+		opts.Password = password
+	}
+	return redis.NewClient(opts), nil
+}
