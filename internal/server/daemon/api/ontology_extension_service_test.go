@@ -47,7 +47,7 @@ func proposeNTimes(ctx context.Context, t *testing.T, e *brain.Engine, kind taxo
 	for range n {
 		require.NoError(t, e.ProposeOntologyExtension(ctx, kind, label, "agent-1", "sighted it"))
 	}
-	e.Tick()
+	e.Tick() //nolint:contextcheck // Tick() is the engine's context-free synchronous drain; it takes no per-call context by design
 }
 
 // waitForOntologyProposal polls ListOntologyExtensionProposals until it sees

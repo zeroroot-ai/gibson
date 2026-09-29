@@ -67,8 +67,8 @@ func newTestProofSettlementEngine(t *testing.T, tenant string, predicates map[st
 	}
 }
 
-func (e *testProofSettlementEngine) DomainPackPredicate(_ context.Context, predicateName string) (string, bool, error) {
-	expr, ok := e.predicates[predicateName]
+func (e *testProofSettlementEngine) DomainPackPredicate(_ context.Context, predicateName string) (expr string, ok bool, err error) {
+	expr, ok = e.predicates[predicateName]
 	return expr, ok, nil
 }
 
@@ -85,7 +85,11 @@ func (e *testProofSettlementEngine) SettleBetTrue(
 	if req.Destructive && authorize == nil {
 		authorize = e.engine.DestructiveAuthorizationQueue().Verify
 	}
-	return e.engine.SettleBetTrue(ctx, registry, authorize, req)
+	settled, err := e.engine.SettleBetTrue(ctx, registry, authorize, req)
+	if err != nil {
+		return settled, fmt.Errorf("settle bet true: %w", err)
+	}
+	return settled, nil
 }
 
 // RequestDestructiveAuthorization mirrors

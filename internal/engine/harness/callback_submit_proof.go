@@ -155,14 +155,14 @@ func (s *HarnessCallbackService) SubmitProof(ctx context.Context, req *harnesspb
 		}, nil
 	}
 
-	predictedProbability, err := s.stakedConfidence(ctx, mission.TenantID, hypothesisID)
-	if err != nil {
+	predictedProbability, confErr := s.stakedConfidence(ctx, mission.TenantID, hypothesisID)
+	if confErr != nil {
 		return &harnesspb.SubmitProofResponse{
 			HypothesisId: hypothesisID,
 			Outcome:      harnesspb.SettlementOutcome_SETTLEMENT_OUTCOME_UNSPECIFIED,
 			Error: &harnesspb.HarnessError{
 				Code:    commonpb.ErrorCode_ERROR_CODE_NOT_FOUND,
-				Message: err.Error(),
+				Message: confErr.Error(),
 			},
 		}, nil
 	}

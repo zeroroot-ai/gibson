@@ -53,7 +53,7 @@ func (s *tenantRoutedProofSettlement) forTenant(ctx context.Context) (*brain.Eng
 // per-technique-identifier lookup World.DomainPackPredicate performs for a
 // direct in-process reader, via the Engine's own read-locked DomainPacks
 // accessor (safe to call concurrently with that tenant's tick loop).
-func (s *tenantRoutedProofSettlement) DomainPackPredicate(ctx context.Context, predicateName string) (string, bool, error) {
+func (s *tenantRoutedProofSettlement) DomainPackPredicate(ctx context.Context, predicateName string) (expr string, ok bool, err error) {
 	e, err := s.forTenant(ctx)
 	if err != nil {
 		return "", false, err
