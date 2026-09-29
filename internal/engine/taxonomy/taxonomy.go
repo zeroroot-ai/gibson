@@ -52,7 +52,7 @@ import (
 // Version is the Taxonomy's platform-wide version. Bump it in the same change
 // that promotes a shape, so a projected graph can be attributed to the schema
 // that produced it.
-const Version = 2
+const Version = 3
 
 // ObservationLabel is the label every out-of-taxonomy shape lands on. It is a
 // compile-time constant and a plain identifier, so it is never caller-influenced.
@@ -92,6 +92,12 @@ var coreNodeLabels = []string{
 	"Pipeline",
 	"Repository",
 	"Vulnerability",
+
+	// Technique hierarchy (v3, ADR-0035, gibson#379). See technique.go: a
+	// Technique node rolls up to a Category node via
+	// RollsUpToRelationshipType.
+	CategoryLabel,
+	TechniqueLabel,
 }
 
 // coreRelationshipTypes is the promoted edge vocabulary, likewise tracking the
@@ -117,6 +123,9 @@ var coreRelationshipTypes = []string{
 	"RUNS",           // Deployment -> Image
 	"TOUCHES",        // Finding -> Control
 	"VERIFIED_BY",    // Finding -> Pipeline
+
+	// Technique hierarchy (v3, ADR-0035, gibson#379).
+	RollsUpToRelationshipType, // Technique -> Category
 }
 
 // Registry is a Taxonomy: a version plus the labels and relationship types it
