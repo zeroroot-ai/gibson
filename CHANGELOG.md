@@ -1,5 +1,13 @@
 # Changelog
 
+## [0.143.3](https://github.com/zeroroot-ai/gibson/compare/v0.143.2...v0.143.3) (2026-09-29)
+
+
+### Bug Fixes
+
+* **daemon:** a tenant the Platform owner provisions brings its owner in ([#372](https://github.com/zeroroot-ai/gibson/issues/372)) ([cbc70ad](https://github.com/zeroroot-ai/gibson/commit/cbc70ade6fbf2c48c608ad0783a047a773c2517f))
+* **daemon:** an MFA reset is not performed without its audit record ([#371](https://github.com/zeroroot-ai/gibson/issues/371)) ([093cb49](https://github.com/zeroroot-ai/gibson/commit/093cb497cf9c2be9875cfb9c24e72d8ce0508b50))
+
 ## [0.143.2](https://github.com/zeroroot-ai/gibson/compare/v0.143.1...v0.143.2) (2026-09-29)
 
 
