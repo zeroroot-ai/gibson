@@ -6,6 +6,7 @@ package agent
 import (
 	"time"
 
+	"github.com/zeroroot-ai/gibson/internal/engine/taxonomy"
 	"github.com/zeroroot-ai/gibson/internal/infra/types"
 	sdktypes "github.com/zeroroot-ai/sdk/types"
 )
@@ -102,7 +103,7 @@ type AgentDescriptor struct {
 	Capabilities   []string              `json:"capabilities"`
 	TargetTypes    []types.TargetType    `json:"target_types"`   // Deprecated: use TargetSchemas
 	TargetSchemas  []TargetSchema        `json:"target_schemas"` // New: schema-based target definitions
-	TechniqueTypes []types.TechniqueType `json:"technique_types"`
+	TechniqueTypes []taxonomy.CategoryID `json:"technique_types"`
 	Slots          []SlotDefinition      `json:"slots"`
 	IsExternal     bool                  `json:"is_external"` // True if agent runs via gRPC
 }
@@ -129,7 +130,7 @@ func NewExternalAgentDescriptor(name, version, description string) AgentDescript
 		Description:    description,
 		Capabilities:   []string{},
 		TargetTypes:    []types.TargetType{},
-		TechniqueTypes: []types.TechniqueType{},
+		TechniqueTypes: []taxonomy.CategoryID{},
 		Slots:          []SlotDefinition{},
 		IsExternal:     true,
 	}

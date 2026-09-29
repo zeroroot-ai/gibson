@@ -25,9 +25,10 @@ import (
 // in the Registry's label/relationship-type sets. The core pack seeds only
 // the coarse categories, one per types.TechniqueType value — the fixed Go
 // enum this hierarchy supersedes as the authority (types.TechniqueType
-// itself is untouched here; migrating its consumers is gibson#385).
-// Fine-grained techniques are pack-extensible and are not seeded from any
-// enum, because none exists at that grain.
+// itself is untouched here; its consumers — agent.Agent.TechniqueTypes,
+// agent.AgentDescriptor, the GRPCAgentClient wire conversion — were migrated
+// to CategoryID in gibson#385). Fine-grained techniques are pack-extensible
+// and are not seeded from any enum, because none exists at that grain.
 
 // CategoryLabel is the node label a coarse category materialises as.
 const CategoryLabel = "Category"
