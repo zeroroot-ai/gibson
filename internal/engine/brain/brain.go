@@ -19,6 +19,8 @@ import (
 	"sort"
 
 	"github.com/mlange-42/ark/ecs"
+
+	"github.com/zeroroot-ai/gibson/internal/engine/taxonomy"
 )
 
 // Host is the host component. Identity is the (ScopeID, Address) coordinate plus
@@ -85,6 +87,25 @@ type World struct {
 	// per-tenant state, like flightRecorderPolicy, not a collection of
 	// sighted facts.
 	domainPacks map[string]DomainPackState
+
+	// ontologyGate is this tenant's taxonomy-discovery safety gate
+	// (taxonomy.PromotionGate, ADR-0024 §2, ADR-0033 decision 2, gibson#391),
+	// folded from OntologyExtensionProposed (ontology_extension.go). Base is
+	// taxonomy.Global — the platform's own core Taxonomy — the same base
+	// gibson#281's original design classifies sightings against; nothing
+	// here ever calls Promote (that is gibson#392's tenant-owner approval
+	// flow), so the base registry is never actually consulted by this
+	// change, only carried because NewPromotionGate requires one.
+	ontologyGate *taxonomy.PromotionGate
+
+	// ontologyProposals holds this tenant's currently observed ontology/
+	// taxonomy extension proposals (ADR-0024 §2, ADR-0033 decision 2,
+	// gibson#391), keyed by (kind, label) — the read model gibson#392's
+	// tenant-owner approval flow will list from. Not ECS-backed: like
+	// domainPacks, per-tenant singleton-shaped state keyed by proposal
+	// identity — a repeat sighting of the SAME (kind, label) updates its
+	// entry in place rather than adding a new one.
+	ontologyProposals map[ontologyProposalKey]OntologyProposalState
 
 	// observations holds out-of-taxonomy shapes (ADR-0012). Keyed by Timeline
 	// event id rather than by content, so repeat sightings stay distinct.
@@ -212,6 +233,8 @@ func NewWorld(tenant string) *World {
 		voiPlans:           ecs.NewMap1[VoIPlanState](w),
 		nodeBeliefs:        ecs.NewMap1[NodeBeliefRecord](w),
 		domainPacks:        make(map[string]DomainPackState),
+		ontologyGate:       taxonomy.NewPromotionGate(taxonomy.Global),
+		ontologyProposals:  make(map[ontologyProposalKey]OntologyProposalState),
 	}
 }
 
@@ -435,6 +458,8 @@ func Reduce(w *World, ev Event) {
 		applyDomainPackEnabled(w, e)
 	case DomainPackDisabled:
 		applyDomainPackDisabled(w, e)
+	case OntologyExtensionProposed:
+		applyOntologyExtensionProposed(w, e)
 	}
 }
 
