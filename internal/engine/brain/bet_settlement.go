@@ -404,17 +404,21 @@ type BetSettlementRequest struct {
 	PredictedProbability float64
 }
 
-// DestructiveProofAuthorizer authorizes one specific destructive
-// demonstration (ADR-0028): a human sees the action, its blast radius, and
-// the predicate it would satisfy — in practice, the dashboard authorization
-// queue (gibson#99, tracked as a separate lane) — and approves or denies
-// that one action. The bet stays OPEN and the rest of the fleet keeps
-// working while this is pending; nothing here pauses a mission.
+// DestructiveProofAuthorizer verifies that one specific destructive
+// demonstration was already authorized (ADR-0028, corrected by ADR-0032):
+// the gate sits BEFORE the destructive act, via the agent-facing
+// RequestDestructiveAuthorization RPC (internal/engine/harness) and the
+// dashboard's approve/deny queue (gibson#99/#336/#342) — both of which read
+// and write the same DestructiveAuthorizationQueue
+// (internal/engine/brain/destructive_authz.go). By the time SettleBetTrue
+// calls this, the agent has already performed the act and read back an
+// approval, so this is a check of an already-recorded decision, never a
+// live ask: it must not block waiting for a human, only look up what a
+// human already decided.
 //
 // nil means no authorizer is wired: a destructive request is refused, never
-// auto-approved. This is a stub seam, not a finished integration — wiring a
-// real authorizer through to the dashboard's authorization queue is a
-// follow-up slice.
+// auto-approved. The concrete implementation is
+// DestructiveAuthorizationQueue.Verify.
 type DestructiveProofAuthorizer func(ctx context.Context, tenant string, req BetSettlementRequest) (approved bool, err error)
 
 // SettleBetTrue evaluates req's predicate against req's evidence (ADR-0027)

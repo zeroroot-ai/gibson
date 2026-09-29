@@ -51,6 +51,7 @@ func (m *submitProofMockHarness) Workspaces() map[string]workspace.Workspace {
 // standing in for a tenant's enabled Domain Packs.
 type testProofSettlementEngine struct {
 	engine     *brain.Engine
+	tenant     string
 	predicates map[string]string
 }
 
@@ -60,6 +61,7 @@ func newTestProofSettlementEngine(t *testing.T, tenant string, predicates map[st
 	t.Cleanup(cancel)
 	return &testProofSettlementEngine{
 		engine:     brain.NewRegistry(ctx).For(tenant),
+		tenant:     tenant,
 		predicates: predicates,
 	}
 }
@@ -69,10 +71,31 @@ func (e *testProofSettlementEngine) DomainPackPredicate(_ context.Context, predi
 	return expr, ok, nil
 }
 
+// SettleBetTrue mirrors tenantRoutedProofSettlement.SettleBetTrue's ADR-0032
+// wiring (proof_settlement_adapter.go): when the caller (the SubmitProof
+// handler) leaves authorize nil for a destructive request, the real tenant
+// routing wires in that tenant's own DestructiveAuthorizationQueue.Verify.
+// This fake does the same, so a SubmitProof test that requests and decides
+// authorization through e.engine.DestructiveAuthorizationQueue() exercises
+// the exact verification path production uses.
 func (e *testProofSettlementEngine) SettleBetTrue(
 	ctx context.Context, registry *settlement.Registry, authorize brain.DestructiveProofAuthorizer, req brain.BetSettlementRequest,
 ) (bool, error) {
+	if req.Destructive && authorize == nil {
+		authorize = e.engine.DestructiveAuthorizationQueue().Verify
+	}
 	return e.engine.SettleBetTrue(ctx, registry, authorize, req)
+}
+
+// RequestDestructiveAuthorization mirrors
+// tenantRoutedProofSettlement.RequestDestructiveAuthorization: enqueue
+// against the SAME engine's DestructiveAuthorizationQueue that SettleBetTrue
+// above verifies against, so a test can Request+Decide and then observe
+// SubmitProof settle.
+func (e *testProofSettlementEngine) RequestDestructiveAuthorization(
+	_ context.Context, req brain.DestructiveAuthorizationRequest,
+) (string, error) {
+	return e.engine.DestructiveAuthorizationQueue().Request(e.tenant, req)
 }
 
 var _ brain.ProofSettlementEngine = (*testProofSettlementEngine)(nil)
@@ -184,9 +207,10 @@ func TestSubmitProof_UnknownPredicate_FailsClosed(t *testing.T) {
 	assert.Empty(t, engine.engine.BetSettlements())
 }
 
-// TestSubmitProof_Destructive_ReturnsPendingAuthorization proves a destructive
-// proof never evaluates or settles (gibson#390 builds the real gate); it
-// reports PENDING_AUTHORIZATION once the named predicate is confirmed real.
+// TestSubmitProof_Destructive_ReturnsPendingAuthorization proves a
+// destructive proof with no recorded authorization decision at all reports
+// PENDING_AUTHORIZATION and never settles (ADR-0032): SettleBetTrue's
+// verification refuses before the predicate ever evaluates.
 func TestSubmitProof_Destructive_ReturnsPendingAuthorization(t *testing.T) {
 	h := &submitProofMockHarness{missionID: "mission-A", tenantID: "acme"}
 	engine := newTestProofSettlementEngine(t, "acme", map[string]string{"T1190": `markerPresent(evidence, "tok")`})
@@ -202,6 +226,126 @@ func TestSubmitProof_Destructive_ReturnsPendingAuthorization(t *testing.T) {
 	assert.Nil(t, resp.GetError())
 	assert.Equal(t, harnesspb.SettlementOutcome_SETTLEMENT_OUTCOME_PENDING_AUTHORIZATION, resp.GetOutcome())
 	assert.Empty(t, engine.engine.BetSettlements(), "a destructive proof must never settle synchronously")
+}
+
+// awaitDestructivePending polls engine's DestructiveActionSnapshot until
+// hypothesisID's request has folded (the async Submit->fold path,
+// ADR-0001), or fails the test after 2s. Decide requires the request to have
+// already landed, so a Request immediately followed by Decide must wait here
+// first to avoid racing the fold.
+func awaitDestructivePending(t *testing.T, e *brain.Engine, hypothesisID string) {
+	t.Helper()
+	deadline := time.Now().Add(2 * time.Second)
+	for time.Now().Before(deadline) {
+		for _, a := range e.DestructiveActionSnapshot() {
+			if a.HypothesisID == hypothesisID {
+				return
+			}
+		}
+		time.Sleep(10 * time.Millisecond)
+	}
+	t.Fatalf("destructive action %q was not recorded within the deadline", hypothesisID)
+}
+
+// awaitDestructiveDecided polls engine's DestructiveActionSnapshot until
+// hypothesisID shows Decided=true (the async Submit->fold path, ADR-0001),
+// or fails the test after 2s. Mirrors brain's own private test helper of the
+// same shape (destructive_authz_test.go), reimplemented here since it is
+// unexported across packages.
+func awaitDestructiveDecided(t *testing.T, e *brain.Engine, hypothesisID string) {
+	t.Helper()
+	deadline := time.Now().Add(2 * time.Second)
+	for time.Now().Before(deadline) {
+		for _, a := range e.DestructiveActionSnapshot() {
+			if a.HypothesisID == hypothesisID && a.Decided {
+				return
+			}
+		}
+		time.Sleep(10 * time.Millisecond)
+	}
+	t.Fatalf("destructive action %q was not decided within the deadline", hypothesisID)
+}
+
+// TestSubmitProof_DestructiveApproved_SettlesTrue proves the ADR-0032
+// end-to-end path this file exists for: once a human approves a hypothesis's
+// destructive authorization request (RequestDestructiveAuthorization +
+// Decide, both reading/writing the same DestructiveAuthorizationQueue
+// SettleBetTrue's authorizer verifies), a subsequent SubmitProof whose
+// evidence satisfies the predicate settles the bet true — the same as any
+// non-destructive proof, once authorized.
+func TestSubmitProof_DestructiveApproved_SettlesTrue(t *testing.T) {
+	h := &submitProofMockHarness{missionID: "mission-A", tenantID: "acme"}
+	engine := newTestProofSettlementEngine(t, "acme", map[string]string{
+		"T1190": `markerPresent(evidence, "proof-token-9f3a")`,
+	})
+	substrate := newFakeBeliefSubstrate()
+	require.NoError(t, substrate.SetBelief(context.Background(), claimNodeRef("acme", "hyp-1"), brain.NodeBelief{Belief: brain.Belief{Exploitable: 0.8}}))
+	svc := newSubmitProofService(t, h, "recon-agent", substrate, engine)
+	ctx := auth.ContextWithTenantString(context.Background(), "acme")
+
+	// The agent asks BEFORE performing the destructive act (ADR-0032
+	// decision 1), a human approves, and only then does the agent submit the
+	// proof of having performed it.
+	_, err := engine.RequestDestructiveAuthorization(ctx, brain.DestructiveAuthorizationRequest{
+		HypothesisID: "hyp-1", Technique: "T1190", PredicateType: "T1190",
+	})
+	require.NoError(t, err)
+	awaitDestructivePending(t, engine.engine, "hyp-1")
+	require.NoError(t, engine.engine.DestructiveAuthorizationQueue().Decide("hyp-1", "reviewer-1", true))
+	awaitDestructiveDecided(t, engine.engine, "hyp-1")
+
+	evidence := &typespb.Evidence{
+		Type:    typespb.EvidenceType_EVIDENCE_TYPE_RESPONSE,
+		Title:   "destructive demonstration",
+		Content: "HTTP/1.1 200 OK\nproof-token-9f3a\n",
+	}
+	resp, err := svc.SubmitProof(ctx, submitProofRequest("mission-A", "recon-agent", "hyp-1", "T1190", "T1190", true, evidence))
+	require.NoError(t, err)
+	require.NotNil(t, resp)
+	require.Nil(t, resp.GetError())
+	assert.Equal(t, harnesspb.SettlementOutcome_SETTLEMENT_OUTCOME_SETTLED_TRUE, resp.GetOutcome())
+
+	got := awaitProofSettlements(t, engine.engine, 1)
+	assert.Equal(t, "hyp-1", got[0].HypothesisID)
+	assert.Equal(t, brain.SettlementVerdictTrue, got[0].Verdict)
+	assert.InDelta(t, 0.8, got[0].PredictedProbability, 1e-9)
+}
+
+// TestSubmitProof_DestructiveDenied_PermissionDenied proves a destructive
+// proof for a hypothesis whose authorization was explicitly denied is
+// reported in-band as a terminal failure — never PENDING_AUTHORIZATION
+// (which would wrongly imply retrying could still succeed) and never
+// settled.
+func TestSubmitProof_DestructiveDenied_PermissionDenied(t *testing.T) {
+	h := &submitProofMockHarness{missionID: "mission-A", tenantID: "acme"}
+	engine := newTestProofSettlementEngine(t, "acme", map[string]string{
+		"T1190": `markerPresent(evidence, "proof-token-9f3a")`,
+	})
+	substrate := newFakeBeliefSubstrate()
+	require.NoError(t, substrate.SetBelief(context.Background(), claimNodeRef("acme", "hyp-1"), brain.NodeBelief{Belief: brain.Belief{Exploitable: 0.8}}))
+	svc := newSubmitProofService(t, h, "recon-agent", substrate, engine)
+	ctx := auth.ContextWithTenantString(context.Background(), "acme")
+
+	_, err := engine.RequestDestructiveAuthorization(ctx, brain.DestructiveAuthorizationRequest{
+		HypothesisID: "hyp-1", Technique: "T1190", PredicateType: "T1190",
+	})
+	require.NoError(t, err)
+	awaitDestructivePending(t, engine.engine, "hyp-1")
+	require.NoError(t, engine.engine.DestructiveAuthorizationQueue().Decide("hyp-1", "reviewer-1", false))
+	awaitDestructiveDecided(t, engine.engine, "hyp-1")
+
+	evidence := &typespb.Evidence{
+		Type:    typespb.EvidenceType_EVIDENCE_TYPE_RESPONSE,
+		Title:   "destructive demonstration",
+		Content: "HTTP/1.1 200 OK\nproof-token-9f3a\n",
+	}
+	resp, err := svc.SubmitProof(ctx, submitProofRequest("mission-A", "recon-agent", "hyp-1", "T1190", "T1190", true, evidence))
+	require.NoError(t, err)
+	require.NotNil(t, resp)
+	require.NotNil(t, resp.GetError())
+	assert.Equal(t, commonpb.ErrorCode_ERROR_CODE_PERMISSION_DENIED, resp.GetError().GetCode())
+	assert.Equal(t, harnesspb.SettlementOutcome_SETTLEMENT_OUTCOME_UNSPECIFIED, resp.GetOutcome())
+	assert.Empty(t, engine.engine.BetSettlements())
 }
 
 // TestSubmitProof_PredicateFires_SettlesTrue proves the full non-destructive

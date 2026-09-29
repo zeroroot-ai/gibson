@@ -170,8 +170,9 @@ var callbackMethodPolicy = map[string]callbackMethodDecision{
 	// --- Betting (ADR-0022, gibson#278) ---
 	harnesspb.HarnessCallbackService_PlaceBet_FullMethodName: {agentSurface: true, reason: reasonAgentCallbackSurface},
 
-	// --- Proof settlement (ADR-0030, ADR-0031, gibson#389) ---
-	harnesspb.HarnessCallbackService_SubmitProof_FullMethodName: {agentSurface: true, reason: reasonAgentCallbackSurface},
+	// --- Proof settlement (ADR-0030, ADR-0031, gibson#389; ADR-0032, gibson#390) ---
+	harnesspb.HarnessCallbackService_SubmitProof_FullMethodName:                     {agentSurface: true, reason: reasonAgentCallbackSurface},
+	harnesspb.HarnessCallbackService_RequestDestructiveAuthorization_FullMethodName: {agentSurface: true, reason: reasonAgentCallbackSurface},
 
 	// --- Taxonomy / validation ---
 	harnesspb.HarnessCallbackService_GetTaxonomySchema_FullMethodName:    {agentSurface: true, reason: reasonAgentCallbackSurface},
@@ -222,13 +223,6 @@ var callbackMethodPolicy = map[string]callbackMethodDecision{
 	// --- Denied: declared in the proto, no handler on this daemon ---
 	harnesspb.HarnessCallbackService_GetPlanContext_FullMethodName:  {agentSurface: false, reason: reasonUnimplemented},
 	harnesspb.HarnessCallbackService_ReportStepHints_FullMethodName: {agentSurface: false, reason: reasonUnimplemented},
-
-	// RequestDestructiveAuthorization (ADR-0032) is the destructive-proof
-	// authorization gate gibson#390 builds. SubmitProof (this change) already
-	// recognizes a destructive proof and reports PENDING_AUTHORIZATION rather
-	// than faking approval, but nothing here yet lets an agent actually
-	// request that approval — denied until #390 adds its handler.
-	harnesspb.HarnessCallbackService_RequestDestructiveAuthorization_FullMethodName: {agentSurface: false, reason: reasonUnimplemented},
 
 	// --- Bank member callbacks: declared by the sdk bump, served by a later
 	// slice of epic gibson#1706. They are the member-facing half of the job

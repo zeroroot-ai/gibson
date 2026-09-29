@@ -4,41 +4,46 @@
 package brain
 
 // destructive_authz.go implements ADR-0028's per-action destructive-proof
-// authorization gate (gibson#336): a concrete DestructiveProofAuthorizer
-// (declared in bet_settlement.go, NOT modified here) that queues a pending
-// request and blocks ONLY the one goroutine attempting that one destructive
-// settlement, until a human decision lands or its context ends.
+// authorization gate (gibson#336), wired the way ADR-0032 (gibson#390)
+// corrects it: the gate sits BEFORE the destructive act, not at settlement.
+//
+// Originally (ADR-0028's first wiring) Authorize queued a pending request
+// and blocked the ONE goroutine attempting that one destructive settlement
+// until a human decision landed. That gated *accepting the proof*, which is
+// too late — the irreversible act had already happened by the time
+// SettleBetTrue ran. ADR-0032 splits the single blocking call into two
+// non-blocking halves:
+//
+//   - Request (called from the RequestDestructiveAuthorization RPC,
+//     internal/engine/harness) enqueues the pending request and returns
+//     immediately, BEFORE the agent performs the destructive act. The fleet
+//     keeps working while the decision is pending (ADR-0028's own intent).
+//   - Verify (SettleBetTrue's DestructiveProofAuthorizer, bet_settlement.go)
+//     reads back the recorded decision at settlement time — by then the
+//     agent has already performed the act and read back an approval, so
+//     this is a check of an existing fact, never a live ask.
+//
+// Decide (the dashboard's ApproveDestructiveAction/DenyDestructiveAction
+// backing call, gibson#342) is the one thing both halves share (ADR-0032
+// decision 4, "one authorization path"): it folds a DestructiveActionDecided
+// fact that Verify later reads. There is no live in-memory hand-off left to
+// coordinate — nothing blocks anymore — so Decide operates purely off the
+// durable DestructiveAction World record (via DestructiveActionRequested /
+// DestructiveActionDecided, folded through the normal Reduce path,
+// ADR-0007): restart-durable, replayable, and the single source of truth
+// for both Verify and ListPendingDestructiveActions.
 //
 // Identity is HypothesisID — the SAME identifier BetSettlement uses
 // (bet_settlement.go) — because a destructive demonstration attempt is 1:1
 // with one bet's settlement attempt: SettleBetTrue's own terminal-settlement
 // check already prevents a second attempt once one succeeds, so there is
 // never more than one outstanding destructive request per hypothesis.
-//
-// Two concerns are kept deliberately separate:
-//   - The in-memory pending map is the live hand-off: a channel per
-//     outstanding HypothesisID, registered by Authorize and signalled by
-//     Decide. It has no durability and needs none — it only ever matters
-//     while the requesting goroutine (SettleBetTrue's off-tick caller) is
-//     still alive and waiting.
-//   - The DestructiveAction World component (via DestructiveActionRequested /
-//     DestructiveActionDecided, folded through the normal Reduce path,
-//     ADR-0007) is the durable, replayable audit record ListPending reads —
-//     restart-durable, independent of whether any goroutine is still
-//     waiting on it.
-//
-// ADR-0028 decision 2 ("the gate is per-action, not per-mission") holds
-// structurally here: Authorize is invoked from SettleBetTrue's own call
-// stack — an off-tick call, per ADR-0027's evaluation model — so blocking
-// inside it blocks nothing but that one caller. The tick loop, and every
-// other hypothesis's settlement attempt, is untouched.
 
 import (
 	"context"
 	"errors"
 	"fmt"
 	"sort"
-	"sync"
 	"time"
 
 	"github.com/mlange-42/ark/ecs"
@@ -54,7 +59,7 @@ type DestructiveAction struct {
 	Technique     string
 	PredicateType string
 	// RequestedAtUnixMS is when the request was queued, captured by the live
-	// caller (Authorize) — never derived from wall-clock inside the reducer,
+	// caller (Request) — never derived from wall-clock inside the reducer,
 	// so replay reproduces the exact recorded value (the same pattern
 	// observation.go's ObservedAt uses).
 	RequestedAtUnixMS int64
@@ -88,7 +93,7 @@ func (DestructiveActionRequested) Kind() string { return "destructive_action.req
 // applyDestructiveActionRequested folds a DestructiveActionRequested event
 // into the World. An empty HypothesisID records nothing — there would be no
 // action to authorize. A HypothesisID that already has a DestructiveAction is
-// left untouched (idempotent: a retried Authorize call for a still-pending
+// left untouched (idempotent: a retried Request call for a still-pending
 // hypothesis, e.g. after a daemon restart, must not reset the original
 // request's timestamp or duplicate the entity).
 func applyDestructiveActionRequested(w *World, e DestructiveActionRequested) {
@@ -120,7 +125,7 @@ func applyDestructiveActionRequested(w *World, e DestructiveActionRequested) {
 // DestructiveActionDecided records a human's approve/deny verdict for one
 // pending destructive action (ADR-0028 decision 3). It folds through the
 // normal reducer path, so replay reproduces the decision exactly — replay
-// re-applies this already-decided fact, it never re-runs Authorize/Decide.
+// re-applies this already-decided fact, it never re-runs Request/Decide.
 type DestructiveActionDecided struct {
 	HypothesisID    string
 	Approved        bool
@@ -213,30 +218,45 @@ func (e *Engine) DestructiveActionSnapshot() []DestructiveActionSnapshot {
 	return e.World.DestructiveActionSnapshot()
 }
 
-// destructiveDecision is the payload sent over a pending action's channel
-// when Decide resolves it.
-type destructiveDecision struct {
-	approved bool
-	userID   string
-}
+// ErrDestructiveActionPending means Verify found no recorded human decision
+// yet for the named hypothesis — a pending request with no decision, or no
+// request at all. SubmitProof (internal/engine/harness/callback_submit_proof.go)
+// treats this specially (ADR-0032): it is the caller's routine cue that the
+// bet stays open, never a system failure.
+var ErrDestructiveActionPending = errors.New("brain: destructive proof authorization is still pending")
 
-// DestructiveAuthorizationQueue is a concrete DestructiveProofAuthorizer
-// (ADR-0028, gibson#336). Wire it into SettleBetTrue by passing its Authorize
-// method:
+// ErrDestructiveActionDenied means Verify found a recorded human decision
+// that refused authorization for the named hypothesis. Unlike
+// ErrDestructiveActionPending, this is terminal: the bet can never settle
+// this way, and SubmitProof reports it in-band rather than retrying.
+var ErrDestructiveActionDenied = errors.New("brain: destructive proof authorization was denied")
+
+// DestructiveAuthorizationQueue is the concrete ADR-0028/ADR-0032
+// implementation split across three roles, all reading and writing the SAME
+// durable DestructiveAction World record (decision 4, "one authorization
+// path"):
 //
-//	q := brain.NewDestructiveAuthorizationQueue(engine)
-//	settled, err := engine.SettleBetTrue(ctx, registry, q.Authorize, req)
+//   - Request (the RequestDestructiveAuthorization RPC's backing call,
+//     internal/engine/harness) enqueues a pending action and returns
+//     immediately, BEFORE the agent performs the destructive act.
 //
-// A human decides through Decide (the daemon RPC handler's job — see
-// gibson#336's ApproveDestructiveAction/DenyDestructiveAction), and reads the
-// outstanding queue through Pending (ListPendingDestructiveActions).
+//   - Decide (the dashboard's ApproveDestructiveAction/DenyDestructiveAction
+//     backing call, gibson#342) records a human's verdict.
 //
-// Thread safety: all public methods are safe for concurrent use.
+//   - Verify is SettleBetTrue's DestructiveProofAuthorizer (bet_settlement.go):
+//     wire it in by passing this method —
+//
+//     q := brain.NewDestructiveAuthorizationQueue(engine)
+//     settled, err := engine.SettleBetTrue(ctx, registry, q.Verify, req)
+//
+// Pending (ListPendingDestructiveActions) reads the same record for the
+// dashboard's queue view.
+//
+// Thread safety: all public methods are safe for concurrent use. There is no
+// live in-memory hand-off to protect — every method reads or writes the
+// engine's own Timeline/World, which is already safe for concurrent use.
 type DestructiveAuthorizationQueue struct {
 	engine *Engine
-
-	mu      sync.Mutex
-	pending map[string]chan destructiveDecision
 
 	// now is an injectable clock, defaulting to time.Now, so tests can pin
 	// timestamps deterministically without sleeping.
@@ -245,24 +265,24 @@ type DestructiveAuthorizationQueue struct {
 
 // NewDestructiveAuthorizationQueue constructs a queue bound to engine. engine
 // must not be nil: the queue submits Timeline events through it and reads its
-// World snapshot for Pending.
+// World snapshot for Pending/Verify.
 func NewDestructiveAuthorizationQueue(engine *Engine) *DestructiveAuthorizationQueue {
 	if engine == nil {
 		panic("brain: NewDestructiveAuthorizationQueue requires a non-nil engine")
 	}
 	return &DestructiveAuthorizationQueue{
-		engine:  engine,
-		pending: make(map[string]chan destructiveDecision),
-		now:     time.Now,
+		engine: engine,
+		now:    time.Now,
 	}
 }
 
 // DestructiveAuthorizationQueue returns e's queue, constructing it on first
 // call (most engines never see a destructive proof request, so this is
 // deliberately lazy rather than a field every Engine pays for up front). The
-// daemon's DestructiveAuthorizationService handlers and whatever eventually
-// wires SettleBetTrue's authorize parameter both call this to reach the SAME
-// queue instance for a given engine.
+// daemon's DestructiveAuthorizationService handlers, the
+// RequestDestructiveAuthorization RPC's tenant-routing adapter, and
+// SettleBetTrue's wired-in verifier all call this to reach the SAME queue
+// instance for a given engine.
 func (e *Engine) DestructiveAuthorizationQueue() *DestructiveAuthorizationQueue {
 	e.destructiveAuthzOnce.Do(func() {
 		e.destructiveAuthz = NewDestructiveAuthorizationQueue(e)
@@ -270,44 +290,86 @@ func (e *Engine) DestructiveAuthorizationQueue() *DestructiveAuthorizationQueue 
 	return e.destructiveAuthz
 }
 
-// Authorize implements DestructiveProofAuthorizer (bet_settlement.go). It
-// enqueues req as a pending destructive action (folded onto the engine's
-// Timeline, so ListPendingDestructiveActions and replay both see it) and
-// blocks the calling goroutine — and only it — until Decide is called for
-// req.HypothesisID, or ctx ends first.
-func (q *DestructiveAuthorizationQueue) Authorize(ctx context.Context, tenant string, req BetSettlementRequest) (bool, error) {
-	if req.HypothesisID == "" {
-		return false, errors.New("brain: destructive authorization requires a hypothesis id")
-	}
+// DestructiveAuthorizationRequest carries what Request (the
+// RequestDestructiveAuthorization RPC's backing call, ADR-0032 decision 1,
+// gibson#390) needs to enqueue a pending destructive action BEFORE the agent
+// performs it — the same identifying facts DestructiveActionRequested folds.
+type DestructiveAuthorizationRequest struct {
+	HypothesisID  string
+	ScopeID       string
+	MissionID     string
+	Technique     string
+	PredicateType string
+}
 
-	ch := make(chan destructiveDecision, 1)
-	q.mu.Lock()
-	if _, exists := q.pending[req.HypothesisID]; exists {
-		q.mu.Unlock()
-		return false, fmt.Errorf("brain: destructive proof for hypothesis %q is already awaiting authorization", req.HypothesisID)
+// Request enqueues req as a pending destructive action and returns
+// immediately (ADR-0032 decision 1): the fleet keeps working while a human
+// decides, because by construction the agent has not yet performed the
+// destructive act — it asks first. This is the non-blocking replacement for
+// the superseded blocking Authorize: nothing here waits on a channel, and
+// nothing needs to be registered for Decide to unblock later, because Decide
+// now operates purely off the durable World record (see Decide).
+//
+// Folding is idempotent (applyDestructiveActionRequested): a retried Request
+// for a still-pending hypothesis — e.g. the agent's RPC call itself retried
+// after a network hiccup — never resets the original request's timestamp or
+// duplicates the record, so Request never needs to refuse a duplicate the
+// way Authorize's live pending map once did.
+//
+// Returns the authorization_request_id the caller reads back before
+// performing the destructive act, and later names on SubmitProof:
+// req.HypothesisID itself — DestructiveAction's own identity (see this
+// file's package doc) — because a destructive demonstration attempt is 1:1
+// with one bet's settlement attempt.
+func (q *DestructiveAuthorizationQueue) Request(tenant string, req DestructiveAuthorizationRequest) (string, error) {
+	if req.HypothesisID == "" {
+		return "", errors.New("brain: destructive authorization request requires a hypothesis id")
 	}
-	q.pending[req.HypothesisID] = ch
-	q.mu.Unlock()
 
 	q.engine.Submit(DestructiveActionRequested{
 		HypothesisID:      req.HypothesisID,
 		Tenant:            tenant,
 		ScopeID:           req.ScopeID,
 		MissionID:         req.MissionID,
-		Technique:         string(req.Technique),
-		PredicateType:     string(req.PredicateType),
+		Technique:         req.Technique,
+		PredicateType:     req.PredicateType,
 		RequestedAtUnixMS: q.now().UnixMilli(),
 	})
+	return req.HypothesisID, nil
+}
 
-	select {
-	case dec := <-ch:
-		return dec.approved, nil
-	case <-ctx.Done():
-		q.mu.Lock()
-		delete(q.pending, req.HypothesisID)
-		q.mu.Unlock()
-		return false, fmt.Errorf("brain: destructive authorization for hypothesis %q: %w", req.HypothesisID, ctx.Err())
+// Verify implements the ADR-0032 request-then-verify shape of
+// DestructiveProofAuthorizer (bet_settlement.go). It reads the durable
+// DestructiveActionDecided fact recorded for req.HypothesisID and approves
+// settlement only when that decision was an approval; it never blocks and
+// never asks a human live — by the time SettleBetTrue calls this, the agent
+// has already performed the destructive act and read back an approval
+// (ADR-0032 decision 1), so this is a check of an existing fact.
+//
+//   - No request was ever made, or one is pending with no decision yet:
+//     returns ErrDestructiveActionPending.
+//   - A decision was recorded and it denied authorization:
+//     returns ErrDestructiveActionDenied.
+//   - A decision was recorded and it approved authorization: returns
+//     (true, nil).
+func (q *DestructiveAuthorizationQueue) Verify(_ context.Context, _ string, req BetSettlementRequest) (bool, error) {
+	if req.HypothesisID == "" {
+		return false, errors.New("brain: destructive authorization verification requires a hypothesis id")
 	}
+
+	for _, a := range q.engine.DestructiveActionSnapshot() {
+		if a.HypothesisID != req.HypothesisID {
+			continue
+		}
+		if !a.Decided {
+			return false, fmt.Errorf("%w: hypothesis %q has a pending request awaiting decision", ErrDestructiveActionPending, req.HypothesisID)
+		}
+		if !a.Approved {
+			return false, fmt.Errorf("%w: hypothesis %q", ErrDestructiveActionDenied, req.HypothesisID)
+		}
+		return true, nil
+	}
+	return false, fmt.Errorf("%w: hypothesis %q: no authorization was ever requested", ErrDestructiveActionPending, req.HypothesisID)
 }
 
 // Pending returns every destructive action still awaiting a decision, in
@@ -326,17 +388,11 @@ func (q *DestructiveAuthorizationQueue) Pending() []DestructiveActionSnapshot {
 
 // Decide records a human's approve/deny verdict for hypothesisID (ADR-0028
 // decision 3): ApproveDestructiveAction/DenyDestructiveAction's backing call.
-//
-// It checks the live, in-memory pending map first (authoritative and
-// immediate — no dependency on the async Timeline fold having landed yet).
-// If a goroutine is still waiting in Authorize for this action, Decide
-// unblocks it and records the decision. If no goroutine is waiting — the
-// action settled via a different path, or the daemon restarted after the
-// request was persisted but before it was decided — Decide falls back to the
-// durable World record: an already-decided action is refused (terminal,
-// first-decision-wins), an unknown one is refused, and a known-but-orphaned
-// pending one still gets its decision recorded for the audit trail even
-// though there is no longer anyone to unblock.
+// It reads the durable World record directly: since ADR-0032 moved
+// authorization to the non-blocking request-then-verify shape above, there
+// is no live goroutine left to unblock the way the superseded blocking
+// Authorize needed Decide to find. An unknown hypothesis id is refused, and
+// an already-decided one is refused (terminal, first-decision-wins).
 //
 // A benign race is possible if two Decide calls race for the same
 // hypothesisID: the losing caller's decision is recorded on the Timeline but
@@ -349,47 +405,26 @@ func (q *DestructiveAuthorizationQueue) Decide(hypothesisID, userID string, appr
 		return errors.New("brain: decide requires a hypothesis id")
 	}
 
-	q.mu.Lock()
-	ch, ok := q.pending[hypothesisID]
-	if ok {
-		delete(q.pending, hypothesisID)
+	found := false
+	for _, a := range q.engine.DestructiveActionSnapshot() {
+		if a.HypothesisID != hypothesisID {
+			continue
+		}
+		found = true
+		if a.Decided {
+			return fmt.Errorf("brain: destructive action for hypothesis %q was already decided", hypothesisID)
+		}
+		break
 	}
-	q.mu.Unlock()
-
-	decidedAt := q.now().UnixMilli()
-
-	if !ok {
-		found := false
-		for _, a := range q.engine.DestructiveActionSnapshot() {
-			if a.HypothesisID != hypothesisID {
-				continue
-			}
-			found = true
-			if a.Decided {
-				return fmt.Errorf("brain: destructive action for hypothesis %q was already decided", hypothesisID)
-			}
-			break
-		}
-		if !found {
-			return fmt.Errorf("brain: no pending destructive action for hypothesis %q", hypothesisID)
-		}
-		// Known to the World but no live waiter (e.g. after a daemon
-		// restart): still record the decision for the audit trail.
-		q.engine.Submit(DestructiveActionDecided{
-			HypothesisID:    hypothesisID,
-			Approved:        approved,
-			UserID:          userID,
-			DecidedAtUnixMS: decidedAt,
-		})
-		return nil
+	if !found {
+		return fmt.Errorf("brain: no pending destructive action for hypothesis %q", hypothesisID)
 	}
 
-	ch <- destructiveDecision{approved: approved, userID: userID}
 	q.engine.Submit(DestructiveActionDecided{
 		HypothesisID:    hypothesisID,
 		Approved:        approved,
 		UserID:          userID,
-		DecidedAtUnixMS: decidedAt,
+		DecidedAtUnixMS: q.now().UnixMilli(),
 	})
 	return nil
 }

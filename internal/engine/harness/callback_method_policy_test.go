@@ -87,11 +87,10 @@ func TestCallbackAgentSurface_MatchesImplementedRPCs(t *testing.T) {
 	unimplemented := map[string]bool{
 		harnesspb.HarnessCallbackService_GetPlanContext_FullMethodName:  true,
 		harnesspb.HarnessCallbackService_ReportStepHints_FullMethodName: true,
-		// RequestDestructiveAuthorization (ADR-0032) is gibson#390's build —
-		// SubmitProof (gibson#389) already recognizes a destructive proof and
-		// reports PENDING_AUTHORIZATION, but nothing serves the authorization
-		// request itself yet.
-		harnesspb.HarnessCallbackService_RequestDestructiveAuthorization_FullMethodName: true,
+		// RequestDestructiveAuthorization (ADR-0032, gibson#390) landed:
+		// callback_request_destructive_authorization.go serves it, and
+		// SubmitProof's SettleBetTrue now verifies the recorded decision — no
+		// longer absent here, and carries agentSurface: true.
 		// The three job callbacks a DISPATCHED AGENT calls to drive a bank.
 		// They mirror JobService and land with the job node executor,
 		// gibson#1713. The four a MEMBER calls landed in gibson#1711 and are
