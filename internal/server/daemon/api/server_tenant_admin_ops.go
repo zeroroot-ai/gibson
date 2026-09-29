@@ -30,6 +30,7 @@ import (
 	"fmt"
 
 	"github.com/google/uuid"
+	"github.com/zeroroot-ai/sdk/auth"
 	"google.golang.org/grpc/codes"
 	"google.golang.org/grpc/status"
 
@@ -42,6 +43,20 @@ import (
 const defaultProvisionTier = "team"
 
 // --- AdminTenantService (dashboard-facing) -------------------------------
+
+// ProvisionedOwnerInviter issues the founding Owner's invitation for a tenant
+// the Platform owner provisions. The MembershipService implements it with the
+// one invitation mechanism the install has (admin.TenantAdminServer).
+type ProvisionedOwnerInviter interface {
+	InviteProvisionedOwner(ctx context.Context, tenantID, ownerEmail, invitedBy string) error
+}
+
+// WithProvisionedOwnerInviter wires the owner-invitation path AdminProvisionTenant
+// requires.
+func (s *DaemonServer) WithProvisionedOwnerInviter(i ProvisionedOwnerInviter) *DaemonServer {
+	s.ownerInviter = i
+	return s
+}
 
 // AdminProvisionTenant records intent to create a new tenant. Replaces the
 // dashboard provisionTenantAction's applyTenant() Tenant-CR create. The operator
@@ -69,6 +84,12 @@ func (s *DaemonServer) AdminProvisionTenant(ctx context.Context, req *tenantv1.A
 	if req.GetOwnerEmail() == "" {
 		return nil, status.Error(codes.InvalidArgument, "owner_email required")
 	}
+	// A tenant is not queued when its owner has no way in. The owner named
+	// here has, in general, no account yet; the invitation is how they get
+	// one (hosted#205), so the path must exist before the op does.
+	if s.ownerInviter == nil {
+		return nil, status.Error(codes.Unavailable, "owner invitation not configured: a tenant is not provisioned without a way for its owner in")
+	}
 	if err := ensureTenantAdminOpsTable(ctx, db); err != nil {
 		return nil, status.Errorf(codes.Internal, "ensure table: %v", err)
 	}
@@ -90,8 +111,31 @@ func (s *DaemonServer) AdminProvisionTenant(ctx context.Context, req *tenantv1.A
 	if err != nil {
 		return nil, status.Errorf(codes.Internal, "insert tenant_admin_ops: %v", err)
 	}
+	queued := true
 	if n, _ := res.RowsAffected(); n == 0 {
-		// A provision op was already pending — idempotent de-dup.
+		// A provision for this tenant is already pending. The op is not
+		// duplicated, but the owner's invitation is still ensured below: a
+		// call that failed after the insert, or whose mail did not go out,
+		// converges here on its retry.
+		queued = false
+	}
+
+	// Invite the owner through the one invitation mechanism (see
+	// ProvisionedOwnerInviter). Issue is an upsert, so a repeat mints a
+	// fresh token and mails again rather than stranding a lost one.
+	var invitedBy string
+	if id, err := auth.IdentityFromContext(ctx); err == nil {
+		invitedBy = id.Subject
+	}
+	if err := s.ownerInviter.InviteProvisionedOwner(ctx, req.GetTenantId(), req.GetOwnerEmail(), invitedBy); err != nil {
+		// Keep the inviter's gRPC code (Unavailable for a missing transport,
+		// Internal for a failed send) so the caller can tell them apart.
+		if st, ok := status.FromError(err); ok {
+			return nil, status.Errorf(st.Code(), "invite owner: %s", st.Message())
+		}
+		return nil, status.Errorf(codes.Internal, "invite owner: %v", err)
+	}
+	if !queued {
 		return &tenantv1.AdminProvisionTenantResponse{}, nil
 	}
 	return &tenantv1.AdminProvisionTenantResponse{OpId: opID}, nil
