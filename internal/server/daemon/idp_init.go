@@ -18,6 +18,7 @@ import (
 	"golang.org/x/oauth2/clientcredentials"
 
 	"github.com/zeroroot-ai/gibson/internal/platform/authz"
+	"github.com/zeroroot-ai/gibson/internal/platform/fgaevent"
 	"github.com/zeroroot-ai/gibson/internal/platform/idp"
 	"github.com/zeroroot-ai/gibson/internal/platform/idp/zitadel"
 	"github.com/zeroroot-ai/gibson/internal/platform/tenantrole"
@@ -145,7 +146,7 @@ func initZitadelClient(ctx context.Context) (idp.AdminClient, error) {
 //     support the Syncer (see tenantrole.AuthzTuples) is a boot error, never
 //     a silent skip — a daemon that started without a Syncer would accept
 //     SetTenantRole calls it cannot fulfil.
-func initTenantRoleSyncer(ctx context.Context, authorizer authz.Authorizer) (*tenantrole.Syncer, error) {
+func initTenantRoleSyncer(ctx context.Context, authorizer authz.Authorizer, pub fgaevent.Publisher) (*tenantrole.Syncer, error) {
 	provider := os.Getenv(envIDPProvider)
 	if provider == "" {
 		return nil, nil
@@ -182,7 +183,10 @@ func initTenantRoleSyncer(ctx context.Context, authorizer authz.Authorizer) (*te
 	hc := oauth2.NewClient(baseCtx, ccCfg.TokenSource(baseCtx))
 
 	grants := tenantrole.NewZitadelGrants(endpoint, hc, projectID)
-	tuples, err := tenantrole.AuthzTuples(authorizer)
+	// Every tuple this syncer writes is announced on gibson:fga.write, so
+	// ext-authz drops the user's cached decisions at once (hosted#204). With
+	// no publisher the ext-authz cache TTL is the bound.
+	tuples, err := tenantrole.AuthzTuplesPublishing(authorizer, pub)
 	if err != nil {
 		return nil, fmt.Errorf("tenantrole: %w", err)
 	}

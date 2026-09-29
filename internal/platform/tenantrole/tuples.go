@@ -8,6 +8,7 @@ import (
 	"fmt"
 
 	"github.com/zeroroot-ai/gibson/internal/platform/authz"
+	"github.com/zeroroot-ai/gibson/internal/platform/fgaevent"
 )
 
 // Tuple is one FGA relationship tuple, restated here so this package does
@@ -44,9 +45,21 @@ func AuthzTuples(a authz.Authorizer) (Tuples, error) {
 	return &authzTuples{reader: reader, writer: writer}, nil
 }
 
+// AuthzTuplesPublishing is AuthzTuples with an FGA write event per tuple
+// (fgaevent) so ext-authz drops the affected decisions at once (hosted#204).
+func AuthzTuplesPublishing(a authz.Authorizer, pub fgaevent.Publisher) (Tuples, error) {
+	t, err := AuthzTuples(a)
+	if err != nil {
+		return nil, err
+	}
+	t.(*authzTuples).pub = pub
+	return t, nil
+}
+
 type authzTuples struct {
 	reader authz.TupleReader
 	writer authz.AtomicWriter
+	pub    fgaevent.Publisher // nil: no event, the ext-authz cache TTL is the bound
 }
 
 func (t *authzTuples) ReadRoles(ctx context.Context, tenantID string, userIDs []string) ([]Tuple, error) {
@@ -87,6 +100,14 @@ func (t *authzTuples) ReadRoles(ctx context.Context, tenantID string, userIDs []
 func (t *authzTuples) WriteAndDelete(ctx context.Context, writes, deletes []Tuple) error {
 	if err := t.writer.WriteAndDelete(ctx, toAuthzTuples(writes), toAuthzTuples(deletes)); err != nil {
 		return fmt.Errorf("tenantrole: WriteAndDelete: %w", err)
+	}
+	if t.pub != nil {
+		for _, w := range writes {
+			t.pub.Publish(ctx, fgaevent.FromTuple(fgaevent.OpWrite, w.User, w.Relation, w.Object))
+		}
+		for _, d := range deletes {
+			t.pub.Publish(ctx, fgaevent.FromTuple(fgaevent.OpDelete, d.User, d.Relation, d.Object))
+		}
 	}
 	return nil
 }

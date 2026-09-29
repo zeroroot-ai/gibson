@@ -123,3 +123,32 @@ func TestCachedChecker_UnauthenticatedSkipsCacheAndFGA(t *testing.T) {
 		t.Fatalf("expected 0 inner calls, got %d", got)
 	}
 }
+
+// TestCachedChecker_InvalidateSubjectClearsOnlyThatSubject: the write event
+// for one user evicts that user's decisions and nobody else's.
+func TestCachedChecker_InvalidateSubjectClearsOnlyThatSubject(t *testing.T) {
+	stub := &mockFGA{allowed: true}
+	cc := NewCachedChecker(NewChecker(stub, makeReg(t)), time.Hour, 100)
+	ctx := context.Background()
+	for _, subj := range []string{"100000000000000001", "100000000000000002"} {
+		if _, err := cc.Check(ctx, "/test.v1.S/Member", headers.Identity{Subject: subj, Tenant: "acme", CredentialType: "oidc-user"}, nil); err != nil {
+			t.Fatalf("seed %s: %v", subj, err)
+		}
+	}
+	if cc.Len() != 2 {
+		t.Fatalf("seeded %d entries, want 2", cc.Len())
+	}
+	if n := cc.InvalidateSubject("100000000000000001"); n != 1 {
+		t.Fatalf("evicted %d, want 1", n)
+	}
+	if cc.Len() != 1 {
+		t.Fatalf("%d entries left, want 1 (the other user untouched)", cc.Len())
+	}
+	// The evicted user's next check goes to FGA again; the other's is a hit.
+	before := atomic.LoadInt32(&stub.calls)
+	_, _ = cc.Check(ctx, "/test.v1.S/Member", headers.Identity{Subject: "100000000000000001", Tenant: "acme", CredentialType: "oidc-user"}, nil)
+	_, _ = cc.Check(ctx, "/test.v1.S/Member", headers.Identity{Subject: "100000000000000002", Tenant: "acme", CredentialType: "oidc-user"}, nil)
+	if got := atomic.LoadInt32(&stub.calls) - before; got != 1 {
+		t.Fatalf("expected exactly one inner call after the eviction, got %d", got)
+	}
+}

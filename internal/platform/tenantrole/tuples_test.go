@@ -10,6 +10,7 @@ import (
 	"testing"
 
 	"github.com/zeroroot-ai/gibson/internal/platform/authz"
+	"github.com/zeroroot-ai/gibson/internal/platform/fgaevent"
 	"github.com/zeroroot-ai/gibson/internal/platform/tenantrole"
 )
 
@@ -202,5 +203,39 @@ func TestAuthzTuples_WriteAndDeleteWrapsAWriterError(t *testing.T) {
 	err = tuples.WriteAndDelete(context.Background(), []tenantrole.Tuple{{User: "user:a", Relation: "owner", Object: "tenant:acme"}}, nil)
 	if err == nil || !strings.Contains(err.Error(), "kaboom") {
 		t.Fatalf("WriteAndDelete error = %v, want it to wrap the writer's error", err)
+	}
+}
+
+type recordingPublisher struct{ events []fgaevent.Event }
+
+func (r *recordingPublisher) Publish(_ context.Context, e fgaevent.Event) {
+	r.events = append(r.events, e)
+}
+
+// TestAuthzTuplesPublishing_AnnouncesEveryWriteAndDelete: after a successful
+// write, one event per tuple goes out, with the FGA prefixes stripped, so
+// ext-authz can evict the user's cached decisions (hosted#204).
+func TestAuthzTuplesPublishing_AnnouncesEveryWriteAndDelete(t *testing.T) {
+	rec := &recordingPublisher{}
+	tuples, err := tenantrole.AuthzTuplesPublishing(&fakeFullAuthorizer{}, rec)
+	if err != nil {
+		t.Fatal(err)
+	}
+	err = tuples.WriteAndDelete(context.Background(),
+		[]tenantrole.Tuple{{User: "user:100000000000000001", Relation: "member", Object: "tenant:acme"}},
+		[]tenantrole.Tuple{{User: "user:100000000000000001", Relation: "writer", Object: "tenant:acme"}},
+	)
+	if err != nil {
+		t.Fatalf("WriteAndDelete: %v", err)
+	}
+	if len(rec.events) != 2 {
+		t.Fatalf("published %d events, want 2: %+v", len(rec.events), rec.events)
+	}
+	w, d := rec.events[0], rec.events[1]
+	if w.Op != fgaevent.OpWrite || w.UserID != "100000000000000001" || w.Tenant != "acme" || w.Relation != "member" {
+		t.Fatalf("write event = %+v", w)
+	}
+	if d.Op != fgaevent.OpDelete || d.Relation != "writer" {
+		t.Fatalf("delete event = %+v", d)
 	}
 }

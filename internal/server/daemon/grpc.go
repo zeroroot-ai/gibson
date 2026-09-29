@@ -1264,7 +1264,7 @@ func (d *daemonImpl) buildGRPCServer(ctx context.Context) (*grpcSubsystem, error
 	// tenantrole.Syncer (ADR-0093): the one writer of tenant-role tuples.
 	// SetTenantRole, TransferOwnership and AcceptInvitation are Unavailable
 	// without it.
-	tenantRoleSyncer, tenantRoleErr := initTenantRoleSyncer(ctx, d.authorizer)
+	tenantRoleSyncer, tenantRoleErr := initTenantRoleSyncer(ctx, d.authorizer, fgaEventPublisher(d.stateClient, d.logger.Slog()))
 	if tenantRoleErr != nil {
 		return nil, fmt.Errorf("daemon: tenant role syncer init failed: %w", tenantRoleErr)
 	}
