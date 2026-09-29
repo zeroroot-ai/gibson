@@ -128,7 +128,12 @@ func (s *DaemonServer) AdminProvisionTenant(ctx context.Context, req *tenantv1.A
 		invitedBy = id.Subject
 	}
 	if err := s.ownerInviter.InviteProvisionedOwner(ctx, req.GetTenantId(), req.GetOwnerEmail(), invitedBy); err != nil {
-		return nil, err
+		// Keep the inviter's gRPC code (Unavailable for a missing transport,
+		// Internal for a failed send) so the caller can tell them apart.
+		if st, ok := status.FromError(err); ok {
+			return nil, status.Errorf(st.Code(), "invite owner: %s", st.Message())
+		}
+		return nil, status.Errorf(codes.Internal, "invite owner: %v", err)
 	}
 	if !queued {
 		return &tenantv1.AdminProvisionTenantResponse{}, nil

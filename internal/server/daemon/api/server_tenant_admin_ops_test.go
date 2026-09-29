@@ -116,7 +116,7 @@ func TestAdminProvisionTenant_RefusesWithoutOwnerInviter(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	defer db.Close()
+	t.Cleanup(func() { _ = db.Close() })
 	srv := newAdminOpsServer()
 	srv.platformDB = db
 	srv.ownerInviter = nil
@@ -140,7 +140,7 @@ func TestAdminProvisionTenant_OwnerInviteFailureIsReturned(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	defer db.Close()
+	t.Cleanup(func() { _ = db.Close() })
 	srv := newAdminOpsServer()
 	srv.platformDB = db
 	inv := &fakeOwnerInviter{err: status.Error(codes.Internal, "send invitation email: smtp down")}
