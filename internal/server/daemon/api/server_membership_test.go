@@ -96,21 +96,24 @@ func newServerForMembershipTest() *DaemonServer {
 
 func TestPickHighestRole(t *testing.T) {
 	tests := []struct {
-		name    string
-		isOwner bool
-		isAdmin bool
-		want    string
+		name     string
+		isOwner  bool
+		isAdmin  bool
+		isWriter bool
+		want     string
 	}{
-		{name: "owner_only", isOwner: true, isAdmin: false, want: "owner"},
-		{name: "admin_only", isOwner: false, isAdmin: true, want: "admin"},
-		{name: "member_only", isOwner: false, isAdmin: false, want: "member"},
-		// Over-permissioned: both owner and admin true (FGA computed union can
-		// produce this). Owner wins.
-		{name: "owner_and_admin", isOwner: true, isAdmin: true, want: "owner"},
+		{name: "owner_only", isOwner: true, want: "owner"},
+		{name: "admin_only", isAdmin: true, want: "admin"},
+		{name: "writer_only", isWriter: true, want: "writer"},
+		{name: "member_only", want: "member"},
+		// The FGA model computes admin from owner and writer from admin, so a
+		// BatchCheck answers true down the chain. The highest wins.
+		{name: "owner_implies_all", isOwner: true, isAdmin: true, isWriter: true, want: "owner"},
+		{name: "admin_implies_writer", isAdmin: true, isWriter: true, want: "admin"},
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			got := pickHighestRole(tt.isOwner, tt.isAdmin)
+			got := pickHighestRole(tt.isOwner, tt.isAdmin, tt.isWriter)
 			assert.Equal(t, tt.want, got)
 		})
 	}
@@ -189,7 +192,7 @@ func TestListMyMemberships_HappyPath(t *testing.T) {
 	s := newServerForMembershipTest()
 	s.authorizer = &stubAuthorizer{
 		batchCheck: func(_ context.Context, checks []authz.CheckRequest) ([]bool, error) {
-			require.Len(t, checks, 3)
+			require.Len(t, checks, 4)
 			out := make([]bool, len(checks))
 			for i, c := range checks {
 				assert.Equal(t, "user:user-uuid-1", c.User)
@@ -214,6 +217,28 @@ func TestListMyMemberships_HappyPath(t *testing.T) {
 	assert.Equal(t, "Acme Corp", resp.Memberships[0].GetTenantName())
 	assert.Equal(t, "acme", resp.Memberships[0].GetTenantId())
 	assert.Equal(t, "member", resp.Memberships[0].GetRole())
+}
+
+// An Editor (FGA writer) is reported as "writer", not flattened to member:
+// the dashboard's client-side authorization ranks roles by this string.
+func TestListMyMemberships_EditorReportsWriter(t *testing.T) {
+	s := newServerForMembershipTest()
+	s.authorizer = &stubAuthorizer{
+		batchCheck: func(_ context.Context, checks []authz.CheckRequest) ([]bool, error) {
+			require.Len(t, checks, 4)
+			out := make([]bool, len(checks))
+			for i, c := range checks {
+				if c.Relation == "writer" || c.Relation == "member" {
+					out[i] = true
+				}
+			}
+			return out, nil
+		},
+	}
+	resp, err := s.ListMyMemberships(ctxWithSubjectAndTenant(t, "user-uuid-1", "acme"), &daemonpb.ListMyMembershipsRequest{})
+	require.NoError(t, err)
+	require.Len(t, resp.GetMemberships(), 1)
+	assert.Equal(t, "writer", resp.Memberships[0].GetRole())
 }
 
 func TestListMyMemberships_NameResolverNil_UsesIDFallback(t *testing.T) {
