@@ -11,6 +11,7 @@ import (
 	"sync"
 
 	"github.com/mlange-42/ark/ecs"
+	"github.com/zeroroot-ai/gibson/internal/engine/taxonomy"
 )
 
 // decider.go is the LLM decision loop (ADR-0001/0004, CONTEXT.md). It fits a slow
@@ -33,6 +34,15 @@ type Capability struct {
 	Name        string
 	Description string
 	InputSchema string // for tools/plugins (gibson#848); empty for agents
+
+	// Coverage is the capability's declared technique coverage (ADR-0035
+	// decision 4, gibson#386): the taxonomy categories and/or fine-grained
+	// techniques this capability can address. The zero value is empty
+	// coverage — a capability that has not declared any. #387 resolves a
+	// VoI candidate's technique to its category and matches it against
+	// capabilities whose Coverage includes that technique or its category;
+	// that resolution is not built here.
+	Coverage taxonomy.Coverage
 }
 
 // DeciderSlot names the LLM the Decider runs on (gibson#850): the mission-level

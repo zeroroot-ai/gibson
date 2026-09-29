@@ -9,8 +9,12 @@ import (
 	"strings"
 	"testing"
 
+	"github.com/stretchr/testify/assert"
+	"github.com/stretchr/testify/require"
+
 	"github.com/zeroroot-ai/gibson/internal/engine/agent"
 	"github.com/zeroroot-ai/gibson/internal/engine/brain"
+	"github.com/zeroroot-ai/gibson/internal/engine/taxonomy"
 	"github.com/zeroroot-ai/gibson/internal/engine/tool"
 	"github.com/zeroroot-ai/gibson/internal/platform/component"
 	"github.com/zeroroot-ai/sdk/auth"
@@ -176,6 +180,63 @@ func TestCatalog_MapsAllKinds(t *testing.T) {
 		if c.Kind == "plugin" && !strings.Contains(c.Description, "scan") {
 			t.Errorf("plugin desc should list methods: %q", c.Description)
 		}
+	}
+}
+
+// ---------------------------------------------------------------------------
+// catalog() populates Capability.Coverage for agents from their declared
+// technique types (ADR-0035 decision 4, gibson#386), validated against the
+// taxonomy. Tools and plugins have no technique-type source today, so they
+// get empty coverage rather than a fabricated one.
+// ---------------------------------------------------------------------------
+
+func TestCatalog_AgentCoverage_ValidCategoryIsDeclared(t *testing.T) {
+	coreCategory := string(taxonomy.GlobalTechniques.Categories()[0])
+
+	b := newBrainExecutor(&fakeDiscovery{
+		agents: []component.AgentInfo{{Name: "recon", TechniqueTypes: []string{coreCategory}}},
+	}, slog.Default())
+	b.register("m1", &missionBinding{ctx: context.Background(), tenant: "acme-corp"})
+
+	caps := b.catalog("m1")
+	require.Len(t, caps, 1)
+	assert.True(t, caps[0].Coverage.HasCategory(taxonomy.CategoryID(coreCategory)))
+	assert.False(t, caps[0].Coverage.IsEmpty())
+}
+
+func TestCatalog_AgentCoverage_UnknownCategoryFallsBackToEmpty(t *testing.T) {
+	b := newBrainExecutor(&fakeDiscovery{
+		agents: []component.AgentInfo{{Name: "recon", TechniqueTypes: []string{"not_a_real_category"}}},
+	}, slog.Default())
+	b.register("m1", &missionBinding{ctx: context.Background(), tenant: "acme-corp"})
+
+	caps := b.catalog("m1")
+	require.Len(t, caps, 1)
+	assert.True(t, caps[0].Coverage.IsEmpty(), "an unadmitted category must not silently become coverage")
+}
+
+func TestCatalog_AgentCoverage_NoDeclarationIsEmpty(t *testing.T) {
+	b := newBrainExecutor(&fakeDiscovery{
+		agents: []component.AgentInfo{{Name: "recon"}},
+	}, slog.Default())
+	b.register("m1", &missionBinding{ctx: context.Background(), tenant: "acme-corp"})
+
+	caps := b.catalog("m1")
+	require.Len(t, caps, 1)
+	assert.True(t, caps[0].Coverage.IsEmpty())
+}
+
+func TestCatalog_ToolAndPluginCoverage_AreEmpty(t *testing.T) {
+	b := newBrainExecutor(&fakeDiscovery{
+		tools:   []component.ToolInfo{{Name: "nmap"}},
+		plugins: []component.PluginInfo{{Name: "gitleaks"}},
+	}, slog.Default())
+	b.register("m1", &missionBinding{ctx: context.Background(), tenant: "acme-corp"})
+
+	caps := b.catalog("m1")
+	require.Len(t, caps, 2)
+	for _, c := range caps {
+		assert.True(t, c.Coverage.IsEmpty(), "kind %s should have no coverage source yet", c.Kind)
 	}
 }
 
