@@ -149,13 +149,7 @@ func (w *World) OntologyProposalSnapshot() []OntologyProposalSnapshot {
 	}
 	out := make([]OntologyProposalSnapshot, 0, len(w.ontologyProposals))
 	for _, s := range w.ontologyProposals {
-		out = append(out, OntologyProposalSnapshot{
-			ProposalKind: s.ProposalKind,
-			Label:        s.Label,
-			Recurrence:   s.Recurrence,
-			LastProposer: s.LastProposer,
-			LastClaim:    s.LastClaim,
-		})
+		out = append(out, OntologyProposalSnapshot(s))
 	}
 	sort.Slice(out, func(i, j int) bool {
 		if out[i].ProposalKind != out[j].ProposalKind {

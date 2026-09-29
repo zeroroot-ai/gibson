@@ -129,7 +129,7 @@ func TestProposeOntologyExtension_InvalidIdentifierIsRejectedFailClosed(t *testi
 	require.Error(t, err)
 
 	var invalid *taxonomy.InvalidProposalError
-	assert.ErrorAs(t, err, &invalid)
+	require.ErrorAs(t, err, &invalid)
 
 	// Rejected fail-closed: nothing was ever Submitted, so a Tick folds
 	// nothing and no recurrence accumulates for the rejected label.
