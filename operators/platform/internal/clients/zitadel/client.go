@@ -1597,11 +1597,22 @@ func (c *httpClient) FindHumanUserByEmail(ctx context.Context, email string) (st
 	return resp.Result[0].UserID, nil
 }
 
+// setupMailApplicationName is the name Zitadel prints in a setup mail it
+// sends on this client's behalf. It is the product, never the IdP.
+const setupMailApplicationName = "Gibson"
+
 // CreateSetupInviteCode implements Client.
 func (c *httpClient) CreateSetupInviteCode(ctx context.Context, userID, urlTemplate string, send bool) (string, error) {
 	body := map[string]any{"userId": userID}
 	if send {
-		body["sendCode"] = map[string]any{"urlTemplate": urlTemplate}
+		// applicationName is the product name Zitadel prints in the setup
+		// mail ("Invitation to <name>"). Left empty, Zitadel falls back to
+		// the login client's name, and the Platform owner's mail read
+		// "Invitation to Zitadel Login" (hosted#209, 2026-09-29).
+		body["sendCode"] = map[string]any{
+			"urlTemplate":     urlTemplate,
+			"applicationName": setupMailApplicationName,
+		}
 	} else {
 		body["returnCode"] = map[string]any{}
 	}

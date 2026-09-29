@@ -554,6 +554,10 @@ func (c *Client) EnsureHumanUserNoPassword(ctx context.Context, orgID, email, gi
 	return userID, nil
 }
 
+// setupMailApplicationName is the name Zitadel prints in a setup mail it
+// sends on this client's behalf. It is the product, never the IdP.
+const setupMailApplicationName = "Gibson"
+
 // CreateSetupInviteCode mints a one-time setup-link code via Zitadel v2's
 // UserService.CreateInviteCode, the same call the Platform owner's setup
 // link uses (ADR-0093 decision 8, hosted#201) — reused here rather than a
@@ -566,7 +570,15 @@ func (c *Client) CreateSetupInviteCode(ctx context.Context, userID, urlTemplate 
 	}
 	body := map[string]interface{}{"userId": userID}
 	if send {
-		body["sendCode"] = map[string]interface{}{"urlTemplate": urlTemplate}
+		// applicationName is the product name Zitadel puts in the mail's
+		// subject and body ("Invitation to <name>"). Left empty, Zitadel
+		// falls back to the login client's application name, which read
+		// "Invitation to Zitadel Login" on the staging rebuild (hosted#209,
+		// 2026-09-29). The person is being set up in Gibson, so say so.
+		body["sendCode"] = map[string]interface{}{
+			"urlTemplate":     urlTemplate,
+			"applicationName": setupMailApplicationName,
+		}
 	} else {
 		body["returnCode"] = map[string]interface{}{}
 	}

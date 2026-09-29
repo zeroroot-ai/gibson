@@ -1397,6 +1397,11 @@ func TestCreateSetupInviteCode_ReturnCodeVsSendCode(t *testing.T) {
 	if !strings.Contains(gotBody.Load().(string), "urlTemplate") {
 		t.Fatalf("sendCode request missing urlTemplate: %s", gotBody.Load())
 	}
+	// The mail names the product, or Zitadel prints the login client's name
+	// ("Invitation to Zitadel Login", hosted#209).
+	if !strings.Contains(gotBody.Load().(string), `"applicationName":"Gibson"`) {
+		t.Fatalf("sendCode request missing applicationName Gibson: %s", gotBody.Load())
+	}
 }
 
 func TestClearHumanFactors_RemovesEveryRegisteredType(t *testing.T) {
