@@ -42,7 +42,7 @@ func ownerCtx(tenantID, userID string) context.Context {
 // times and ticks the engine, driving recurrence to exactly n.
 func proposeNTimes(t *testing.T, e *brain.Engine, kind taxonomy.ProposalKind, label string, n int) {
 	t.Helper()
-	for i := 0; i < n; i++ {
+	for range n {
 		require.NoError(t, e.ProposeOntologyExtension(context.Background(), kind, label, "agent-1", "sighted it"))
 	}
 	e.Tick()

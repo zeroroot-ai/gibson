@@ -197,7 +197,7 @@ func TestOntologyDiscoveryEngine_EngineSatisfiesTheSeam(t *testing.T) {
 // ticks the engine, driving recurrence to exactly n.
 func proposeNTimes(t *testing.T, e *Engine, kind taxonomy.ProposalKind, label string, n int) {
 	t.Helper()
-	for i := 0; i < n; i++ {
+	for i := range n {
 		require.NoError(t, e.ProposeOntologyExtension(context.Background(), kind, label, fmt.Sprintf("agent-%d", i), "sighted it"))
 	}
 	e.Tick()
@@ -426,7 +426,7 @@ func TestOntologyExtensionApproved_ReplayReproducesTheWorld(t *testing.T) {
 	w := NewWorld("tenant-1")
 	apply := func(ev Event) { tl.Append(ev); Reduce(w, ev) }
 
-	for i := 0; i < taxonomy.MinRecurrenceForSettlement; i++ {
+	for range taxonomy.MinRecurrenceForSettlement {
 		apply(OntologyExtensionProposed{ProposalKind: taxonomy.ProposedNodeLabel, Label: "Container", Proposer: "agent-1", Claim: "sighted"})
 	}
 	apply(OntologyExtensionApproved{ProposalKind: taxonomy.ProposedNodeLabel, Label: "Container", Reviewer: "owner-1"})
