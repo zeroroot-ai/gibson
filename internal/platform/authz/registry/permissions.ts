@@ -1900,6 +1900,16 @@ export const AuthRegistry: Record<string, AuthEntry> = {
     unauthenticated: false,
     self: false,
   },
+  "/gibson.harness.v1.HarnessCallbackService/RequestDestructiveAuthorization": {
+    method: "/gibson.harness.v1.HarnessCallbackService/RequestDestructiveAuthorization",
+    service: "gibson.harness.v1.HarnessCallbackService",
+    relation: "can_use",
+    objectType: "component",
+    objectDeriver: "system_tenant",
+    allowedIdentities: IdentityClass.COMPONENT,
+    unauthenticated: false,
+    self: false,
+  },
   "/gibson.harness.v1.HarnessCallbackService/RunMission": {
     method: "/gibson.harness.v1.HarnessCallbackService/RunMission",
     service: "gibson.harness.v1.HarnessCallbackService",
@@ -1932,6 +1942,16 @@ export const AuthRegistry: Record<string, AuthEntry> = {
   },
   "/gibson.harness.v1.HarnessCallbackService/SubmitFinding": {
     method: "/gibson.harness.v1.HarnessCallbackService/SubmitFinding",
+    service: "gibson.harness.v1.HarnessCallbackService",
+    relation: "can_use",
+    objectType: "component",
+    objectDeriver: "system_tenant",
+    allowedIdentities: IdentityClass.COMPONENT,
+    unauthenticated: false,
+    self: false,
+  },
+  "/gibson.harness.v1.HarnessCallbackService/SubmitProof": {
+    method: "/gibson.harness.v1.HarnessCallbackService/SubmitProof",
     service: "gibson.harness.v1.HarnessCallbackService",
     relation: "can_use",
     objectType: "component",

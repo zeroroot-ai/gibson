@@ -1518,6 +1518,16 @@ func (d *daemonImpl) Start(ctx context.Context) error {
 		// this one step is its own function.
 		wirePlaceBetBeliefSubstrate(d.callback, d.brainRegistry)
 		d.logger.Info(ctx, "wired callback PlaceBet RPC to the ECS brain belief substrate")
+
+		// Wire SubmitProof's proof-settlement engine (ADR-0030, ADR-0031,
+		// gibson#389): before this, SubmitProof always answered Unavailable —
+		// no daemon ever gave it an engine to resolve Domain Pack CEL
+		// predicates and settle bets against. tenantRoutedProofSettlement
+		// resolves each call's tenant from ctx the same way the belief
+		// substrate adapter does, and routes to that tenant's own Engine. See
+		// wireProofSettlement (proof_settlement_adapter.go).
+		wireProofSettlement(d.callback, d.brainRegistry)
+		d.logger.Info(ctx, "wired callback SubmitProof RPC to the ECS brain settlement engine")
 	}
 
 	// Wire the DiscoveryResult ingest path (gibson#1266). A callback-dispatched

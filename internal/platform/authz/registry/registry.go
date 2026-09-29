@@ -1913,6 +1913,16 @@ var Registry = map[string]Entry{
 		Unauthenticated:   false,
 		Self:              false,
 	},
+	"/gibson.harness.v1.HarnessCallbackService/RequestDestructiveAuthorization": {
+		Method:            "/gibson.harness.v1.HarnessCallbackService/RequestDestructiveAuthorization",
+		Service:           "gibson.harness.v1.HarnessCallbackService",
+		Relation:          "can_use",
+		ObjectType:        "component",
+		ObjectDeriver:     "system_tenant",
+		AllowedIdentities: IdentityComponent,
+		Unauthenticated:   false,
+		Self:              false,
+	},
 	"/gibson.harness.v1.HarnessCallbackService/RunMission": {
 		Method:            "/gibson.harness.v1.HarnessCallbackService/RunMission",
 		Service:           "gibson.harness.v1.HarnessCallbackService",
@@ -1945,6 +1955,16 @@ var Registry = map[string]Entry{
 	},
 	"/gibson.harness.v1.HarnessCallbackService/SubmitFinding": {
 		Method:            "/gibson.harness.v1.HarnessCallbackService/SubmitFinding",
+		Service:           "gibson.harness.v1.HarnessCallbackService",
+		Relation:          "can_use",
+		ObjectType:        "component",
+		ObjectDeriver:     "system_tenant",
+		AllowedIdentities: IdentityComponent,
+		Unauthenticated:   false,
+		Self:              false,
+	},
+	"/gibson.harness.v1.HarnessCallbackService/SubmitProof": {
+		Method:            "/gibson.harness.v1.HarnessCallbackService/SubmitProof",
 		Service:           "gibson.harness.v1.HarnessCallbackService",
 		Relation:          "can_use",
 		ObjectType:        "component",
