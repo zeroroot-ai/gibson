@@ -17,19 +17,27 @@ import (
 )
 
 // CachedChecker wraps a Checker with an in-memory TTL cache keyed on
-// (subject, tenant, relation, object). It is the primary FGA path used
-// by the ext-authz Envoy Check handler — the underlying Checker is
-// only consulted on cache miss.
+// (subject, derived tenant, relation, object). A decision is reused until
+// its entry expires; there is no other eviction path.
 //
-// Cache invalidation:
+// THE TTL IS THE BOUND. This cache lives inside the ext-authz process, and
+// the tuple writes that change a decision happen in the daemon (the
+// tenantrole syncer, session revocation stamps). Nothing can reach into this
+// process to evict an entry, so three invalidation methods that nothing
+// called, and a comment that promised a push-invalidation slice, were
+// removed (ADR-0027). What the platform promises, "a demoted or removed user
+// is refused within seconds", is therefore exactly defaultCacheTTL after the
+// tuple lands, and the identity exit test measures against that bound. An
+// operator may set EXT_AUTHZ_FGA_CACHE_TTL; longer is looser.
 //
-//   - TTL expiry: every entry has a deadline; expired entries are
-//     evicted lazily on next access.
-//   - Tuple-write callback: callers wire FGA tuple-write events
-//     (admin RPC, FGA write API) into Invalidate so authoritative
-//     changes propagate within seconds rather than waiting for TTL.
-//
-// Spec: unified-identity-and-authorization Requirement 4.6.
+// The cache is bounded (maxSize) with random eviction when full, and every
+// hit and miss is counted (cacheHitsTotal, cacheMissesTotal) so the FGA load
+// the TTL buys can be read off the metrics.
+// defaultCacheTTL is how long a decision may lag the tuple that changed it.
+// Five seconds keeps FGA load to one check per (subject, tenant, relation,
+// object) per five seconds, and keeps the refusal promise measurable.
+const defaultCacheTTL = 5 * time.Second
+
 type CachedChecker struct {
 	inner   *Checker
 	ttl     time.Duration
@@ -84,7 +92,7 @@ func NewCachedChecker(inner *Checker, ttl time.Duration, maxSize int) *CachedChe
 		panic("fga.NewCachedChecker: inner Checker must not be nil")
 	}
 	if ttl <= 0 {
-		ttl = 30 * time.Second
+		ttl = defaultCacheTTL
 	}
 	return &CachedChecker{
 		inner:   inner,
@@ -286,51 +294,6 @@ func (c *CachedChecker) Check(ctx context.Context, method string, identity heade
 // check vs. registry lookup).
 func (c *CachedChecker) LookupEntry(method string) (Entry, bool) {
 	return c.inner.reg.Lookup(method)
-}
-
-// Invalidate clears the entire cache. Use when an authoritative tuple
-// write happens (admin RPC, FGA write API) and you cannot determine
-// the affected key set precisely. Coarse but correct.
-func (c *CachedChecker) Invalidate() {
-	c.mu.Lock()
-	n := len(c.entries)
-	c.entries = make(map[cacheKey]cacheValue)
-	cacheEvictionsTotal.WithLabelValues("invalidate").Add(float64(n))
-	cacheSizeGauge.Set(0)
-	c.mu.Unlock()
-}
-
-// InvalidateSubject clears all cache entries for a given subject.
-// Useful after an IdP role/membership change for a specific user.
-func (c *CachedChecker) InvalidateSubject(subject string) {
-	c.mu.Lock()
-	n := 0
-	for k := range c.entries {
-		if k.subject == subject {
-			delete(c.entries, k)
-			n++
-		}
-	}
-	cacheEvictionsTotal.WithLabelValues("subject_invalidate").Add(float64(n))
-	cacheSizeGauge.Set(float64(len(c.entries)))
-	c.mu.Unlock()
-}
-
-// InvalidateTenant clears all cache entries for a given tenant. Useful
-// when an FGA tuple write affects the tenant's membership (group add,
-// role change, etc.).
-func (c *CachedChecker) InvalidateTenant(tenant string) {
-	c.mu.Lock()
-	n := 0
-	for k := range c.entries {
-		if k.tenant == tenant {
-			delete(c.entries, k)
-			n++
-		}
-	}
-	cacheEvictionsTotal.WithLabelValues("tenant_invalidate").Add(float64(n))
-	cacheSizeGauge.Set(float64(len(c.entries)))
-	c.mu.Unlock()
 }
 
 // Len returns the number of currently-cached entries (for tests and
