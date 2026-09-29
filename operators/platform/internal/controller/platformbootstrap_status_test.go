@@ -26,7 +26,7 @@ func TestStatusUpdate_RetriesAConflictWithTheComputedStatus(t *testing.T) {
 	base := fake.NewClientBuilder().WithScheme(s).WithObjects(pb).WithStatusSubresource(pb).Build()
 	conflicts := 0
 	cli := interceptor.NewClient(base, interceptor.Funcs{
-		SubResourceUpdate: func(ctx context.Context, c client.Client, sub string, obj client.Object, opts ...client.SubResourceUpdateOption) error {
+		SubResourceUpdate: func(ctx context.Context, c client.Client, _ string, obj client.Object, opts ...client.SubResourceUpdateOption) error {
 			if conflicts == 0 {
 				conflicts++
 				return apierrors.NewConflict(schema.GroupResource{Group: "gibson.zeroroot.ai", Resource: "platformbootstraps"}, obj.GetName(), nil)

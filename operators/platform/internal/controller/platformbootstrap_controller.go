@@ -771,17 +771,21 @@ func (r *PlatformBootstrapReconciler) writeFGAStoreID(ctx context.Context, ref g
 func (r *PlatformBootstrapReconciler) statusUpdate(ctx context.Context, pb *gibsonv1alpha1.PlatformBootstrap) error {
 	desired := pb.Status.DeepCopy()
 	err := retry.RetryOnConflict(retry.DefaultBackoff, func() error {
-		err := r.Status().Update(ctx, pb)
-		if !apierrors.IsConflict(err) {
-			return err
+		uerr := r.Status().Update(ctx, pb)
+		if uerr == nil {
+			return nil
+		}
+		if !apierrors.IsConflict(uerr) {
+			return fmt.Errorf("status update: %w", uerr)
 		}
 		fresh := &gibsonv1alpha1.PlatformBootstrap{}
 		if gerr := r.Get(ctx, client.ObjectKeyFromObject(pb), fresh); gerr != nil {
-			return gerr
+			return fmt.Errorf("re-read PlatformBootstrap after a conflict: %w", gerr)
 		}
 		fresh.Status = *desired
 		*pb = *fresh
-		return err
+		// Wrapped, and still a conflict for RetryOnConflict (errors.As).
+		return fmt.Errorf("status update conflict, retrying: %w", uerr)
 	})
 	if err != nil {
 		return fmt.Errorf("PlatformBootstrap status update: %w", err)
