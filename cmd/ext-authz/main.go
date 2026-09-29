@@ -1006,7 +1006,7 @@ func fgaEventStateClient(ctx context.Context, redisURL, password string) (*state
 	cfg := state.DefaultConfig()
 	cfg.URL = redisURL
 	cfg.Password = password
-	sc, err := state.NewStateClient(cfg)
+	sc, err := state.NewStateClient(cfg) //nolint:contextcheck // NewStateClient takes no context; the reachability probe below runs under ctx
 	if err != nil {
 		return nil, fmt.Errorf("state client for EXT_AUTHZ_REDIS_URL: %w", err)
 	}
