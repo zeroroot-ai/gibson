@@ -149,6 +149,14 @@ type HarnessCallbackService struct {
 	// beliefSubstrate uses. See callback_submit_proof.go.
 	proofSettlement brain.ProofSettlementEngine
 
+	// ontologyDiscovery backs the ProposeOntologyExtension RPC (ADR-0024 §2,
+	// ADR-0033 decision 2, gibson#391): folding an agent-proposed Taxonomy
+	// node label or relationship type through the ValidIdentifier safety gate
+	// and PromotionGate.Observe's recurrence counting. nil means
+	// ProposeOntologyExtension returns Unavailable, the same staged-wiring
+	// default proofSettlement uses. See callback_propose_ontology_extension.go.
+	ontologyDiscovery brain.OntologyDiscoveryEngine
+
 	// spanProcessors receives spans exported from remote agents for tracing integration
 	spanProcessors []sdktrace.SpanProcessor
 
@@ -398,6 +406,16 @@ func WithBeliefSubstrate(substrate brain.BeliefSubstrate) CallbackServiceOption 
 func WithProofSettlement(engine brain.ProofSettlementEngine) CallbackServiceOption {
 	return func(s *HarnessCallbackService) {
 		s.proofSettlement = engine
+	}
+}
+
+// WithOntologyDiscovery wires the tenant-scoped engine the
+// ProposeOntologyExtension RPC folds an agent-proposed Taxonomy node label or
+// relationship type through (ADR-0024 §2, ADR-0033 decision 2, gibson#391).
+// When unset, ProposeOntologyExtension returns Unavailable.
+func WithOntologyDiscovery(engine brain.OntologyDiscoveryEngine) CallbackServiceOption {
+	return func(s *HarnessCallbackService) {
+		s.ontologyDiscovery = engine
 	}
 }
 

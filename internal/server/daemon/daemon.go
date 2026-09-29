@@ -1531,6 +1531,17 @@ func (d *daemonImpl) Start(ctx context.Context) error {
 		// wireProofSettlement (proof_settlement_adapter.go).
 		wireProofSettlement(d.callback, d.brainRegistry)
 		d.logger.Info(ctx, "wired callback SubmitProof RPC to the ECS brain settlement engine")
+
+		// Wire ProposeOntologyExtension's ontology-discovery engine (ADR-0024
+		// §2, ADR-0033 decision 2, gibson#391): before this,
+		// ProposeOntologyExtension always answered Unavailable — no daemon
+		// ever gave it an engine to fold the proposal through ValidIdentifier
+		// and PromotionGate.Observe. tenantRoutedOntologyDiscovery resolves
+		// each call's tenant from ctx the same way the belief substrate and
+		// proof settlement adapters do, and routes to that tenant's own
+		// Engine. See wireOntologyDiscovery (ontology_discovery_adapter.go).
+		wireOntologyDiscovery(d.callback, d.brainRegistry)
+		d.logger.Info(ctx, "wired callback ProposeOntologyExtension RPC to the ECS brain taxonomy discovery gate")
 	}
 
 	// Wire the DiscoveryResult ingest path (gibson#1266). A callback-dispatched

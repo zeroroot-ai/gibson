@@ -1813,6 +1813,16 @@ var Registry = map[string]Entry{
 		Unauthenticated:   false,
 		Self:              false,
 	},
+	"/gibson.harness.v1.HarnessCallbackService/ProposeOntologyExtension": {
+		Method:            "/gibson.harness.v1.HarnessCallbackService/ProposeOntologyExtension",
+		Service:           "gibson.harness.v1.HarnessCallbackService",
+		Relation:          "can_use",
+		ObjectType:        "component",
+		ObjectDeriver:     "system_tenant",
+		AllowedIdentities: IdentityComponent,
+		Unauthenticated:   false,
+		Self:              false,
+	},
 	"/gibson.harness.v1.HarnessCallbackService/PullJob": {
 		Method:            "/gibson.harness.v1.HarnessCallbackService/PullJob",
 		Service:           "gibson.harness.v1.HarnessCallbackService",
