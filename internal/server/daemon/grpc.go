@@ -671,16 +671,7 @@ func (d *daemonImpl) buildGRPCServer(ctx context.Context) (*grpcSubsystem, error
 	// Create and register daemon service.
 	// Attach the quota manager so RunMission enforces per-tenant mission limits.
 	daemonSvc := api.NewDaemonServer(d, d.credentialHandler, d.logger.Slog())
-	// The audit log is a required record for the tenant-admin RPCs that
-	// change who can sign in: ResetUserMFA refuses to run without it
-	// (hosted#206). One logger serves this service and the component
-	// service below, so the stream has one writer per process.
-	var auditLogger *audit.AuditLogger
-	if d.stateClient != nil {
-		auditLogger = audit.NewAuditLogger(ctx, d.stateClient, d.logger.Slog())
-		daemonSvc.WithAuditLogger(auditLogger)
-		d.logger.Info(ctx, "audit logger wired into DaemonServer")
-	}
+	auditLogger := wireDaemonAudit(ctx, d.stateClient, d.logger.Slog(), daemonSvc)
 	// SSRF egress policy for every LLM provider this server constructs from a
 	// tenant-supplied base_url. Off by default (guard on); operators running an
 	// in-cluster or air-gapped model server opt in via
