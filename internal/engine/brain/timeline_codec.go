@@ -135,6 +135,10 @@ func init() {
 	// flight_recorder.go
 	registerEvent("flight_recorder.policy_set", func() Event { return &FlightRecorderPolicySet{} })
 	registerEvent("flight_recorder.retention_swept", func() Event { return &FlightRecorderRetentionSwept{} })
+
+	// domain_pack.go
+	registerEvent("domain_pack.enabled", func() Event { return &DomainPackEnabled{} })
+	registerEvent("domain_pack.disabled", func() Event { return &DomainPackDisabled{} })
 }
 
 // EncodeEvent serialises ev as a JSON envelope. The envelope preserves the
@@ -255,6 +259,10 @@ func dereferenceEvent(ev Event) Event {
 	case *FlightRecorderPolicySet:
 		return *v
 	case *FlightRecorderRetentionSwept:
+		return *v
+	case *DomainPackEnabled:
+		return *v
+	case *DomainPackDisabled:
 		return *v
 	default:
 		// Unknown pointer type — return as-is; the caller will surface the
