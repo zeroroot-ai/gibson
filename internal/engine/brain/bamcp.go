@@ -239,9 +239,10 @@ func (cfg BAMCPConfig) sanitized() BAMCPConfig {
 // BAMCPPlanner is the native Go BAMCP implementation (ADR-0026 decision 4):
 // it refines PlanVoI's one-step-exact candidate ranking into a multi-step,
 // model-uncertainty-aware one. gibson#396's scope is the planner itself,
-// seeded and deterministic; choosing ONE covering capability and refusing
-// dispatch outside the VoI top-k from its ranked output is gibson#397's hard
-// top-k enforcement (voi_plan.go's own doc comment), not built here.
+// seeded and deterministic; refusing dispatch outside its ranked top-k output
+// is gibson#397's hard top-k enforcement (decider.go's voiGatedDispatch,
+// reading the VoIPlanState this planner's output is folded into — voi_planner.go),
+// not built here.
 type BAMCPPlanner struct {
 	Registry   *ontology.BeliefSchemaRegistry
 	Posteriors EdgeStrengthPosteriorProvider

@@ -399,8 +399,12 @@ grounds the mission's belief network the same way exact inference does, then run
 Monte Carlo rollouts that Thompson-sample each enablement edge's Beta posterior
 ([ADR-0037](docs/adr/0037-enablement-edge-strengths-are-learned-not-authored.md)) instead of
 using its fixed prior mean. A fixed seed always replays the same rollouts. It refines
-`PlanVoI`'s one-step ranking; it does not yet enforce hard top-k dispatch (gibson#397) or
-resolve real technique-by-environment reputation, both still open.
+`PlanVoI`'s one-step ranking. The Decider is now hard-gated to it (gibson#397,
+`internal/engine/brain/decider.go`'s `voiGatedDispatch`): a dispatch's target capability must
+be covered by a candidate in the mission's current VoI top-k (`VoICandidate.CoveringCapabilities`,
+gibson#387's technique -> capability bridge) or it is refused, unconditionally — a mission
+with no VoI plan yet dispatches nothing. Resolving real technique-by-environment reputation
+remains open.
 _Avoid_: prioritization score (VoI is forward-looking planning, not a static score)
 
 **Proof-of-demonstration**:

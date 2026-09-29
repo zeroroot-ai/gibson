@@ -157,6 +157,7 @@ func TestCrashResume_GoalMissionDeciderReEngages(t *testing.T) {
 	e.Subscribe(dw.Tap)
 
 	e.Submit(MissionProjected{ID: "m1", Goal: "scan network"})
+	approveViaVoI(e, "m1", Capability{Kind: "tool", Name: "nmap"})
 	// Round 1: gate fires → worker dispatches nmap.
 	e.Tick()
 	dw.Drain(context.Background())

@@ -39,9 +39,11 @@ import (
 // through in.Hierarchy (gibson#379's TechniqueHierarchy.CategoryOf) rather
 // than through any separate reconciliation table (ADR-0035 decision 2). This
 // only RESOLVES the covering capabilities onto VoICandidate.
-// CoveringCapabilities — it does not gate or refuse a dispatch itself; that is
-// gibson#396's (BAMCP planner) and gibson#397's (hard top-k enforcement) job,
-// both blocked on this file.
+// CoveringCapabilities — it does not gate or refuse a dispatch itself. Ranking
+// candidates by a deep multi-step plan is gibson#396's BAMCP planner
+// (bamcp.go); turning the resolved coverage into an actual dispatch refusal is
+// gibson#397's hard top-k enforcement (decider.go's voiGatedDispatch), both
+// built on this file.
 
 // VoIPlanInput bundles what PlanVoI needs for one mission's candidate set,
 // gathered once by the caller (voi_planner.go's worker, or a test).

@@ -342,13 +342,16 @@ func (dw *DeciderWorker) decide(ctx context.Context, missionID string) {
 	mc := dw.buildContext(missionID)
 
 	out, err := dw.llm.Decide(ctx, mc)
-	// Validate/filter dispatches against the catalog before acting: an agent/tool/
-	// plugin the Decider hallucinated, or a tool/plugin with non-JSON structured
-	// input, is dropped so garbage never reaches dispatch (gibson#848).
+	// Validate/filter dispatches before acting: an agent/tool/plugin the Decider
+	// hallucinated, or a tool/plugin with non-JSON structured input, is dropped so
+	// garbage never reaches dispatch (gibson#848); a dispatch outside the mission's
+	// current VoI top-k is dropped too, unconditionally (gibson#397's hard gate —
+	// see voiGatedDispatch's own doc comment). There is no order in which one check
+	// can rescue what the other rejected: both must pass.
 	var valid []DeciderDispatch
 	if err == nil {
 		for _, d := range out.Dispatches {
-			if validateDispatch(d, mc.Capabilities) {
+			if validateDispatch(d, mc.Capabilities) && dw.voiGatedDispatch(missionID, d) {
 				valid = append(valid, d)
 			}
 		}
@@ -400,6 +403,30 @@ func validateDispatch(d DeciderDispatch, catalog []Capability) bool {
 		return json.Valid([]byte(d.Input))
 	}
 	return true
+}
+
+// voiGatedDispatch reports whether d's target capability is covered by
+// missionID's current VoI top-k — gibson#397's hard enforcement of ADR-0026
+// decision 1 ("the LLM Decider picks from that set and cannot go outside it")
+// over gibson#387's technique -> capability bridge (VoICandidate.
+// CoveringCapabilities, voi_dispatch.go). This is a HARD gate (ADR-0027): there
+// is no flag to turn it off and no fallback path that lets a dispatch through
+// when the gate has no opinion. A mission with no VoI plan yet — before its
+// first VoIPlanned, e.g. gibson#396's BAMCP planner has not completed a round
+// for it — resolves no allowed capabilities at all, so every dispatch this
+// round is refused; the Decider simply has nothing valid to act on, exactly the
+// same "no actionable dispatch" shape an all-hallucinated or all-malformed
+// DeciderOutput already produces (mc.quiescent() decides whether that ends the
+// mission), and DeciderGateSystem retries on the next evidence change once VoI
+// has planned.
+func (dw *DeciderWorker) voiGatedDispatch(missionID string, d DeciderDispatch) bool {
+	for _, st := range dw.eng.VoIPlanSnapshot() {
+		if st.MissionID != missionID {
+			continue
+		}
+		return voiTopKCapabilities(st.Candidates)[CapabilityRef{Kind: d.Kind, Name: d.Target}]
+	}
+	return false
 }
 
 func (dw *DeciderWorker) dispatchEvent(missionID string, d DeciderDispatch) Event {

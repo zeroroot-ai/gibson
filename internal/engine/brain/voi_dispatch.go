@@ -14,11 +14,12 @@ import "github.com/zeroroot-ai/gibson/internal/engine/taxonomy"
 // table between a candidate's fine-grained technique and a capability's
 // coarse coverage declaration.
 //
-// This file makes the mapping resolvable; it does not gate anything itself.
-// Turning "these capabilities cover this candidate" into an actual dispatch
-// refusal is gibson#397's hard top-k enforcement, and ranking candidates by a
-// deep multi-step plan is gibson#396's BAMCP planner — both are blocked on
-// this file (#387), neither is built here.
+// This file makes the mapping resolvable; CapabilitiesForTechnique/
+// capabilityRefs do not gate anything themselves. Ranking candidates by a deep
+// multi-step plan is gibson#396's BAMCP planner (bamcp.go), built on this
+// file. Turning "these capabilities cover this candidate" into an actual
+// dispatch refusal is gibson#397's hard top-k enforcement — voiTopKCapabilities
+// below, wired into DeciderWorker.decide via voiGatedDispatch (decider.go).
 
 // CapabilitiesForTechnique resolves the capabilities in capabilities that can
 // address technique: every capability whose declared Coverage includes
@@ -89,4 +90,37 @@ func capabilityRefs(capabilities []Capability) []CapabilityRef {
 		refs[i] = CapabilityRef{Kind: c.Kind, Name: c.Name}
 	}
 	return refs
+}
+
+// voiTopKCapabilities flattens candidates' resolved CoveringCapabilities
+// (each already the output of CapabilitiesForTechnique, via PlanVoI/BAMCPPlanner)
+// into the set of (Kind, Name) dispatch targets gibson#397's hard top-k gate
+// allows for this planning round — ADR-0026 decision 1: "the planner computes
+// the top-k highest-value candidate moves; the LLM Decider picks from that set
+// and cannot go outside it." candidates is expected to already be the
+// planner's top-k (VoIPlanState.Candidates/VoIPlanned.Candidates — both are
+// PlanVoI/BAMCPPlanner's topK-truncated output, never the unbounded set); this
+// function does no truncation of its own.
+//
+// A candidate contributes nothing when its own CoveringCapabilities is nil —
+// an evidence move (which never carries a technique, so voi_plan.go never
+// resolves one) or a hypothesis the catalog does not cover. Being ranked in
+// the top-k is necessary but not sufficient to license a dispatch: the
+// candidate must also resolve to a concrete dispatchable capability, the same
+// "no covering capability" case CapabilitiesForTechnique's own doc comment
+// says the caller must decide — gibson#397 decides it here: no license, no
+// dispatch. Returns nil (never a non-nil empty map) for an empty or
+// all-uncovered candidates, so a caller can tell "no plan yet" and "a plan
+// that covers nothing" apart from a genuinely empty allow-set the same way.
+func voiTopKCapabilities(candidates []VoICandidate) map[CapabilityRef]bool {
+	var allowed map[CapabilityRef]bool
+	for _, c := range candidates {
+		for _, ref := range c.CoveringCapabilities {
+			if allowed == nil {
+				allowed = make(map[CapabilityRef]bool, len(candidates))
+			}
+			allowed[ref] = true
+		}
+	}
+	return allowed
 }
