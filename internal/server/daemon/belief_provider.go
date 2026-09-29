@@ -123,6 +123,17 @@ func wireBrainRegistry(
 		// The deep BAMCP sequential tree search stays gibson#333; this is
 		// ADR-0026's one-step-exact plan, re-triggered per evidence change via
 		// the closed loop (VoIGateSystem/VoIWorker's gate/worker split).
-		brain.WireVoIPlanner(ctx, e, beliefSchemaRegistry, brain.ExactVoIScorer(), brain.DefaultVoITopK, 0)
+		//
+		// catalog is nil here (no covering-capability resolution yet, ADR-0035
+		// decision 4/gibson#387): the live per-mission capability catalog
+		// (brainExecutor.catalog) is built later in Start(), after this
+		// per-tenant-engine wiring runs, the same way ExecutorDeps.Catalog is
+		// wired onto DeciderWorker in a SEPARATE, later OnEngine registration
+		// (daemon.go). Threading it through here is follow-up wiring for
+		// gibson#396/#397, which consume VoICandidate.CoveringCapabilities;
+		// nil is safe and documented (NewVoIWorker/WireVoIPlanner), and
+		// preserves today's behavior exactly (no candidate resolves a
+		// covering capability).
+		brain.WireVoIPlanner(ctx, e, beliefSchemaRegistry, brain.ExactVoIScorer(), brain.DefaultVoITopK, 0, nil, nil)
 	})
 }

@@ -107,6 +107,27 @@ type VoICandidate struct {
 	Reputation   float64
 	Stake        float64
 	Value        float64
+
+	// Technique names the taxonomy technique (a taxonomy.TechniqueID, kept as
+	// a plain string the same way Hypothesis.Technique is) this candidate
+	// exercises, when known: carried from the source Hypothesis for a
+	// VoICandidateHypothesis candidate, and always empty for a
+	// VoICandidateEvidence candidate — a bare evidence move names no
+	// technique (the same convention voi_plan.go's resolveReputation already
+	// uses). PlanVoI sets it; VoIScorer never reads or sets it, since it is a
+	// dispatch-gating input, not a value input.
+	Technique string
+	// CoveringCapabilities is VoI dispatch gating's technique -> capability
+	// bridge resolved for this candidate (ADR-0035 decision 4, gibson#387):
+	// the (Kind, Name) refs of every capability from the plan's Capabilities
+	// catalog whose declared Coverage includes Technique itself or the
+	// category it rolls up to (CapabilitiesForTechnique, voi_dispatch.go —
+	// refs, not full Capability values: see CapabilityRef's own doc comment
+	// for why). Nil means either the candidate names no technique, or nothing
+	// in the catalog covers it — both are the explicit "no covering
+	// capability" case, never an error; the caller (VoI dispatch gating,
+	// gibson#396/#397) decides what an uncovered candidate means.
+	CoveringCapabilities []CapabilityRef
 }
 
 // VoIScorer computes one candidate's VoICandidate (Value filled in) from its
