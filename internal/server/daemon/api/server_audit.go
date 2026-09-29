@@ -237,6 +237,17 @@ func (s *DaemonServer) auditEntriesToResponse(entries []audit.AuditEntry, nextCu
 // ListBudgets (team/user scope), SetTenantBudgetDefaults, and the four
 // mission-draft RPCs — into a no-op gate whenever it ran unwired.
 func (s *DaemonServer) requireTenantAdmin(ctx context.Context, tenantID string) error {
+	return s.requireTenantRelation(ctx, tenantID, "admin")
+}
+
+// requireTenantRelation is the in-handler cross-check for RPCs that read the
+// tenant from the request body: the caller must hold `relation` on that
+// tenant in FGA. It is the same gate for every relation, so a handler's gate
+// and the authz registry's relation for that RPC can agree; the four
+// mission-draft RPCs are registered as "writer" and gated as such (found by
+// the hosted#204 exit test, 2026-09-29, when a writer got "tenant admin
+// required" from an RPC the registry grants to writers).
+func (s *DaemonServer) requireTenantRelation(ctx context.Context, tenantID, relation string) error {
 	if s.authorizer == nil {
 		s.logger.WarnContext(ctx, "admin_rpc_denied",
 			slog.String("reason", "authorizer_not_configured"),
@@ -259,27 +270,27 @@ func (s *DaemonServer) requireTenantAdmin(ctx context.Context, tenantID string) 
 		return status_grpc.Error(codes.Unauthenticated, "authentication required")
 	}
 
-	isAdmin, err := s.authorizer.Check(ctx,
+	held, err := s.authorizer.Check(ctx,
 		fmt.Sprintf("user:%s", id.Subject),
-		"admin",
+		relation,
 		fmt.Sprintf("tenant:%s", tenantID),
 	)
 	if err != nil {
-		s.logger.ErrorContext(ctx, "requireTenantAdmin: FGA check failed",
+		s.logger.ErrorContext(ctx, "requireTenantRelation: FGA check failed",
 			slog.String("tenant_id", tenantID),
 			slog.String("user_id", id.Subject),
 			slog.String("error", err.Error()),
 		)
 		return status_grpc.Error(codes.Internal, "authorization check failed")
 	}
-	if !isAdmin {
+	if !held {
 		s.logger.InfoContext(ctx, "admin_rpc_denied",
-			slog.String("reason", "not_tenant_admin"),
+			slog.String("reason", "relation_not_held"),
 			slog.String("tenant_id", tenantID),
 			slog.String("subject", id.Subject),
-			slog.String("relation", "admin"),
+			slog.String("relation", relation),
 		)
-		return status_grpc.Error(codes.PermissionDenied, "tenant admin required")
+		return status_grpc.Errorf(codes.PermissionDenied, "tenant %s required", relation)
 	}
 	return nil
 }
