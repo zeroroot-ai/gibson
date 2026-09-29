@@ -5,6 +5,7 @@ package fgaevent_test
 
 import (
 	"context"
+	"errors"
 	"log/slog"
 	"testing"
 	"time"
@@ -127,5 +128,67 @@ func TestSubscribeRetriesAfterADrop(t *testing.T) {
 		}
 	case <-time.After(10 * time.Second):
 		t.Fatal("no event after the reconnect")
+	}
+}
+
+type failingPublisher struct{ calls int }
+
+func (f *failingPublisher) PublishMessage(context.Context, string, string) error {
+	f.calls++
+	return errors.New("redis down")
+}
+
+// TestPublishLogsAndContinuesOnFailure: a failed publish is logged, never
+// returned; the tuple write it follows already landed.
+func TestPublishLogsAndContinuesOnFailure(t *testing.T) {
+	fp := &failingPublisher{}
+	fgaevent.NewPublisher(fp, slog.Default(), time.Second).Publish(context.Background(), fgaevent.FromTuple(fgaevent.OpWrite, "user:100000000000000001", "member", "tenant:acme"))
+	if fp.calls != 1 {
+		t.Fatalf("publish calls = %d, want 1", fp.calls)
+	}
+}
+
+type flakySubscriber struct {
+	failures int
+	calls    int
+	payloads []string
+}
+
+func (f *flakySubscriber) SubscribeMessages(ctx context.Context, _ string, handle func(string)) error {
+	f.calls++
+	if f.calls <= f.failures {
+		return errors.New("dropped")
+	}
+	for _, p := range f.payloads {
+		handle(p)
+	}
+	<-ctx.Done()
+	return nil
+}
+
+// TestSubscribeRetriesWithBackoff: dropped subscriptions are retried, and
+// the events after the reconnect are handled.
+func TestSubscribeRetriesWithBackoff(t *testing.T) {
+	fs := &flakySubscriber{failures: 2, payloads: []string{`{"userId":"100000000000000009","op":"write","tenant":"acme","relation":"admin","object":"tenant:acme"}`}}
+	ctx, cancel := context.WithCancel(context.Background())
+	got := make(chan fgaevent.Event, 1)
+	done := make(chan struct{})
+	go func() { fgaevent.Subscribe(ctx, fs, slog.Default(), func(e fgaevent.Event) { got <- e }); close(done) }()
+	select {
+	case e := <-got:
+		if e.UserID != "100000000000000009" {
+			t.Fatalf("event = %+v", e)
+		}
+	case <-time.After(10 * time.Second):
+		t.Fatal("no event after the retries")
+	}
+	if fs.calls != 3 {
+		t.Fatalf("subscribe calls = %d, want 3 (two drops, one success)", fs.calls)
+	}
+	cancel()
+	select {
+	case <-done:
+	case <-time.After(5 * time.Second):
+		t.Fatal("Subscribe did not return after cancel")
 	}
 }

@@ -82,3 +82,28 @@ func TestRunFGAEventSubscriber_EvictsTheUser(t *testing.T) {
 		t.Fatalf("evicted %q, want the bare user id", ev.seen[0])
 	}
 }
+
+// TestStartFGAEventSubscriber: no URL and an unreachable URL start nothing
+// and say so; a reachable one subscribes.
+func TestStartFGAEventSubscriber(t *testing.T) {
+	ctx, cancel := context.WithCancel(context.Background())
+	t.Cleanup(cancel)
+	ev := &recordingEvicter{}
+	if startFGAEventSubscriber(ctx, slog.Default(), ev, "", "") {
+		t.Fatal("no URL must start no subscriber")
+	}
+	if startFGAEventSubscriber(ctx, slog.Default(), ev, "redis://127.0.0.1:1", "") {
+		t.Fatal("an unreachable Redis must start no subscriber")
+	}
+	mr := miniredis.RunT(t)
+	if !startFGAEventSubscriber(ctx, slog.Default(), ev, "redis://"+mr.Addr(), "") {
+		t.Fatal("a reachable Redis must start the subscriber")
+	}
+	deadline := time.Now().Add(5 * time.Second)
+	for mr.PubSubNumSub(fgaevent.Channel)[fgaevent.Channel] == 0 {
+		if time.Now().After(deadline) {
+			t.Fatal("subscriber never subscribed")
+		}
+		time.Sleep(10 * time.Millisecond)
+	}
+}

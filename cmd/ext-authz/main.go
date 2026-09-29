@@ -216,7 +216,7 @@ func main() {
 	checker, fgaClient := buildChecker(log, reg)
 	cacheTTL, cacheMax := fgaCacheSettings()
 	cachedChecker := fga.NewCachedChecker(checker, cacheTTL, cacheMax)
-	startFGAEventSubscriber(ctx, log, cachedChecker)
+	startFGAEventSubscriber(ctx, log, cachedChecker, os.Getenv("EXT_AUTHZ_REDIS_URL"), os.Getenv("REDIS_PASSWORD"))
 
 	// Both capability-grant verifiers, on one SVID-pinned key transport.
 	cgVerifier, componentVerifier, err := buildCGVerifiers(log, x509Source, x509Source)
@@ -977,17 +977,18 @@ const defaultFGACacheMaxSize = 100_000
 // each one (hosted#204). EXT_AUTHZ_REDIS_URL names the Redis; REDIS_PASSWORD
 // is its password when set (the same Secret the daemon uses). Without a URL
 // the cache TTL is the only bound, and the log says so once.
-func startFGAEventSubscriber(ctx context.Context, log *slog.Logger, cc *fga.CachedChecker) {
-	sc, err := fgaEventStateClient(ctx, os.Getenv("EXT_AUTHZ_REDIS_URL"), os.Getenv("REDIS_PASSWORD"))
+func startFGAEventSubscriber(ctx context.Context, log *slog.Logger, cc subjectEvicter, redisURL, password string) bool {
+	sc, err := fgaEventStateClient(ctx, redisURL, password)
 	if err != nil {
 		log.Error("EXT_AUTHZ_REDIS_URL is not usable; FGA write events are not subscribed, the cache TTL bounds role changes", "err", err)
-		return
+		return false
 	}
 	if sc == nil {
 		log.Warn("EXT_AUTHZ_REDIS_URL not set: FGA write events are not subscribed, the cache TTL bounds role changes")
-		return
+		return false
 	}
 	go runFGAEventSubscriber(ctx, sc, log, cc)
+	return true
 }
 
 // subjectEvicter is the one method of the decision cache the subscriber uses.

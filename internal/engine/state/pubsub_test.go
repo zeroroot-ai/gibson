@@ -60,3 +60,25 @@ func TestPublishAndSubscribeMessages(t *testing.T) {
 		t.Fatal("SubscribeMessages did not return after cancel")
 	}
 }
+
+// TestPubSubErrorsSurface: a Redis that is gone makes publish and subscribe
+// return errors rather than hang or pretend.
+func TestPubSubErrorsSurface(t *testing.T) {
+	mr := miniredis.RunT(t)
+	cfg := DefaultConfig()
+	cfg.URL = "redis://" + mr.Addr()
+	c, err := NewStateClient(cfg)
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() { _ = c.Close() })
+	mr.Close()
+	ctx, cancel := context.WithTimeout(context.Background(), 3*time.Second)
+	defer cancel()
+	if err := c.PublishMessage(ctx, "t:chan", "x"); err == nil {
+		t.Fatal("publish to a closed Redis must fail")
+	}
+	if err := c.SubscribeMessages(ctx, "t:chan", func(string) {}); err == nil {
+		t.Fatal("subscribe to a closed Redis must fail")
+	}
+}
