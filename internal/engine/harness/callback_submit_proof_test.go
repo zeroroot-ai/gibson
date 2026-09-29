@@ -5,6 +5,7 @@ package harness
 
 import (
 	"context"
+	"fmt"
 	"log/slog"
 	"testing"
 	"time"
@@ -95,7 +96,11 @@ func (e *testProofSettlementEngine) SettleBetTrue(
 func (e *testProofSettlementEngine) RequestDestructiveAuthorization(
 	_ context.Context, req brain.DestructiveAuthorizationRequest,
 ) (string, error) {
-	return e.engine.DestructiveAuthorizationQueue().Request(e.tenant, req)
+	id, err := e.engine.DestructiveAuthorizationQueue().Request(e.tenant, req)
+	if err != nil {
+		return "", fmt.Errorf("request destructive authorization: %w", err)
+	}
+	return id, nil
 }
 
 var _ brain.ProofSettlementEngine = (*testProofSettlementEngine)(nil)

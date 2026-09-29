@@ -7,6 +7,7 @@ import (
 	"context"
 	"encoding/json"
 	"errors"
+	"fmt"
 	"testing"
 	"time"
 
@@ -46,7 +47,7 @@ func destructiveMarkerRegistry(t *testing.T) *settlement.Registry {
 			Marker string `json:"marker"`
 		}
 		if uerr := json.Unmarshal(params, &p); uerr != nil {
-			return false, uerr
+			return false, fmt.Errorf("unmarshal params: %w", uerr)
 		}
 		for _, e := range evidence {
 			if s, ok := e.Content.(string); ok && s == p.Marker {
