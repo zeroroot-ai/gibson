@@ -324,6 +324,48 @@ carries structure, never a tenant's secrets
 ([ADR-0024](docs/adr/0024-discoverable-taxonomy-and-ontology.md), [ADR-0025](docs/adr/0025-domain-packs.md)).
 _Avoid_: template, ruleset
 
+### Packs, proposals, and contribution (decided 2026-09-29, ADR-0030 – ADR-0037)
+
+**Proposal**:
+A candidate extension (a node label, relationship type, ontology triple, or predicate) that a
+tenant's agent captured at runtime. Not yet live anywhere; it sits in the tenant's queue for the
+owner to see, through the ValidIdentifier safety gate, with PromotionGate de-duping recurrences
+([ADR-0033](docs/adr/0033-domain-packs-two-tier-catalog-and-tenant-extensions.md)).
+_Avoid_: discovery (the act), extension (the approved result)
+
+**Tenant extension**:
+A Proposal the tenant owner has explicitly approved. Live in that one tenant only, as
+event-sourced, mission-pinned state — never shared, never sold. This is a tenant's private
+self-construction ([ADR-0033](docs/adr/0033-domain-packs-two-tier-catalog-and-tenant-extensions.md)).
+_Avoid_: Catalog pack (that is the shared, curated tier)
+
+**Catalog pack**:
+A versioned Domain Pack the platform owner curates and distributes to all tenants — SDK source of
+truth, shipped via release/rollout, entitlement-gated (free or paid). Pure data (taxonomy /
+ontology + CEL predicates), never code
+([ADR-0033](docs/adr/0033-domain-packs-two-tier-catalog-and-tenant-extensions.md)).
+_Avoid_: Tenant extension (that is the private tier), template
+
+**Contribution**:
+A Tenant extension a tenant nominates upstream — realized as a PR into the SDK (which anyone may
+open), reviewed and merged by the platform owner to become a Catalog pack
+([ADR-0033](docs/adr/0033-domain-packs-two-tier-catalog-and-tenant-extensions.md)).
+_Avoid_: submit (the action), merge (the platform-owner gate)
+
+**CEL evidence-environment**:
+The gibson-owned surface a settlement predicate's CEL expression may reference — the evidence
+schema plus a curated helper catalog. A pack predicate that stays within it is read in and just
+works; extending it is the only thing that needs a gibson change
+([ADR-0031](docs/adr/0031-settlement-predicates-are-cel-over-a-gibson-environment.md)).
+_Avoid_: evaluator (the old per-technique Go function this replaces)
+
+**Enablement-edge schema**:
+Per enablement-edge-type: the declared **target variable** it feeds on the destination node
+(structure, in the pack) and the **noisy-OR strength** it contributes (a learned Beta posterior
+from braintrain, uninformative prior at cold-start — never hand-authored)
+([ADR-0037](docs/adr/0037-enablement-edge-strengths-are-learned-not-authored.md)).
+_Avoid_: influence weight, hand-tuned strength
+
 ### Belief substrate (decided 2026-09-27, ADR-0029, amends ADR-0005)
 
 **Belief substrate (PRM)**:
