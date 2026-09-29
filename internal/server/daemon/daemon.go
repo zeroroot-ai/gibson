@@ -485,8 +485,11 @@ type daemonImpl struct {
 	// domainPackCatalog is the curated, shipped set of catalog Domain Packs
 	// (ADR-0033 decision 1, gibson#381). Constructed during newInfrastructure
 	// alongside reasoner and shared by DomainPackService (ListCatalog /
-	// EnableDomainPack) and the startup catalog-gate seed. Starts empty in
-	// this change — see ontology.NewDomainPackCatalog's doc comment.
+	// EnableDomainPack) and the startup catalog-gate seed. Seeded with the
+	// skeleton "main" pack (gibson#382, see ontology.MainDomainPack) — every
+	// pack it carries ships default-off (ADR-0033 decision 4); a fresh
+	// tenant's World carries none of a listed pack's bindings until that
+	// tenant's admin calls EnableDomainPack.
 	domainPackCatalog *ontology.DomainPackCatalog
 }
 

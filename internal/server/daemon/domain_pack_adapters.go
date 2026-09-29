@@ -33,7 +33,7 @@ func (d *daemonImpl) registerDomainPack(ctx context.Context, srv *grpc.Server) {
 		return
 	}
 	if d.domainPackCatalog == nil {
-		d.domainPackCatalog = ontology.NewDomainPackCatalog()
+		d.domainPackCatalog = ontology.NewDomainPackCatalog(ontology.MainDomainPack())
 	}
 	tenantv1.RegisterDomainPackServiceServer(srv, api.NewDomainPackService(d.brainRegistry, d.domainPackCatalog, d.authorizer))
 	d.logger.Info(ctx, "DomainPackService registered (ADR-0033)")

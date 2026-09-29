@@ -15,10 +15,9 @@ import (
 // rollout pipeline (ADR-0033 decision 4) — never hot-reloaded, never written
 // by a tenant. DomainPackCatalog is the in-process registry
 // DomainPackService.ListCatalog reads and EnableDomainPack resolves a
-// catalog name against. This change (gibson#381) builds the enablement
-// mechanism only, not pack authoring: the catalog is wired empty here, ready
-// for a follow-up change to seed it (the "main" pack ADR-0033 names,
-// default-off).
+// catalog name against. gibson#381 built the enablement mechanism; gibson#382
+// seeds the catalog's content — see MainDomainPack in catalog_main_pack.go,
+// the "main" pack ADR-0033 names, default-off.
 
 // DomainPackCatalog is the curated set of catalog Domain Packs available to
 // enable, keyed by Name. Immutable after construction — a catalog never
