@@ -26,9 +26,10 @@ import (
 // this file produces still resolves to the neutral prior today, though:
 // Hypothesis now carries a Technique (gibson#353, sdk#88), but PlanVoI does
 // not yet read it here on purpose. gibson#347 tracks the real prerequisite —
-// reconciling the two technique vocabularies in play
-// (component.TechniqueType vs settlement.TechniqueID) and building the
-// VoICandidate -> Capability mapping gibson#333's dispatch-gating needs —
+// bridging the taxonomy technique hierarchy (ADR-0035, gibson#379/#385:
+// taxonomy.CategoryID/TechniqueID, the authority types.TechniqueType now only
+// seeds) to settlement.TechniqueID and building the VoICandidate ->
+// Capability mapping gibson#333's dispatch-gating needs (gibson#386/#387) —
 // and is marked ready-for-human, not ready-for-agent, because that
 // reconciliation is a design decision, not a wiring gap. Resolving
 // reputation by Hypothesis.Technique in isolation, ahead of that decision,

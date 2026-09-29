@@ -16,6 +16,7 @@ import (
 	"github.com/stretchr/testify/require"
 	"github.com/zeroroot-ai/gibson/internal/engine/agent"
 	"github.com/zeroroot-ai/gibson/internal/engine/llm"
+	"github.com/zeroroot-ai/gibson/internal/engine/taxonomy"
 	"github.com/zeroroot-ai/gibson/internal/engine/tool"
 	"github.com/zeroroot-ai/gibson/internal/infra/contextkeys"
 	"github.com/zeroroot-ai/gibson/internal/infra/types"
@@ -49,7 +50,7 @@ func (a *captureAgent) Version() string                                         
 func (a *captureAgent) Description() string                                         { return "capture agent for delegation tests" }
 func (a *captureAgent) Capabilities() []string                                      { return nil }
 func (a *captureAgent) TargetTypes() []component.TargetType                         { return nil }
-func (a *captureAgent) TechniqueTypes() []component.TechniqueType                   { return nil }
+func (a *captureAgent) TechniqueTypes() []taxonomy.CategoryID                       { return nil }
 func (a *captureAgent) LLMSlots() []agent.SlotDefinition                            { return nil }
 func (a *captureAgent) Initialize(ctx context.Context, cfg agent.AgentConfig) error { return nil }
 func (a *captureAgent) Shutdown(ctx context.Context) error                          { return nil }

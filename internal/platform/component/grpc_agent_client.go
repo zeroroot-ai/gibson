@@ -12,6 +12,7 @@ import (
 	"google.golang.org/grpc"
 
 	"github.com/zeroroot-ai/gibson/internal/engine/agent"
+	"github.com/zeroroot-ai/gibson/internal/engine/taxonomy"
 	"github.com/zeroroot-ai/gibson/internal/infra/types"
 	agentpb "github.com/zeroroot-ai/sdk/api/gen/gibson/agent/v1"
 	commonpb "github.com/zeroroot-ai/sdk/api/gen/gibson/common/v1"
@@ -140,19 +141,20 @@ func (c *GRPCAgentClient) TargetTypes() []TargetType {
 	return result
 }
 
-// TechniqueTypes returns the types of techniques this agent can execute.
+// TechniqueTypes returns the taxonomy category ids of the techniques this
+// agent can execute (ADR-0035).
 //
-// The metadata should contain a "technique_types" key with comma-separated values.
-// For example: "prompt_injection,model_extraction,jailbreak"
-func (c *GRPCAgentClient) TechniqueTypes() []TechniqueType {
+// The metadata should contain a "technique_types" key with comma-separated
+// values. For example: "prompt_injection,model_extraction,jailbreak"
+func (c *GRPCAgentClient) TechniqueTypes() []taxonomy.CategoryID {
 	if c.descriptor != nil {
 		return c.descriptor.TechniqueTypes
 	}
 
 	techniqueStrs := parseCommaSeparated(c.info.Metadata["technique_types"])
-	result := make([]TechniqueType, len(techniqueStrs))
+	result := make([]taxonomy.CategoryID, len(techniqueStrs))
 	for i, t := range techniqueStrs {
-		result[i] = TechniqueType(t)
+		result[i] = taxonomy.CategoryID(t)
 	}
 	return result
 }
@@ -455,11 +457,12 @@ func convertTargetTypes(protoTypes []string) []TargetType {
 	return result
 }
 
-// convertTechniqueTypes converts proto technique types to internal TechniqueType
-func convertTechniqueTypes(protoTypes []string) []TechniqueType {
-	result := make([]TechniqueType, len(protoTypes))
+// convertTechniqueTypes converts proto technique type strings to taxonomy
+// category ids (ADR-0035).
+func convertTechniqueTypes(protoTypes []string) []taxonomy.CategoryID {
+	result := make([]taxonomy.CategoryID, len(protoTypes))
 	for i, t := range protoTypes {
-		result[i] = TechniqueType(t)
+		result[i] = taxonomy.CategoryID(t)
 	}
 	return result
 }
