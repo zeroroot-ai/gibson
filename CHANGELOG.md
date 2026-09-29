@@ -1,5 +1,12 @@
 # Changelog
 
+## [0.143.4](https://github.com/zeroroot-ai/gibson/compare/v0.143.3...v0.143.4) (2026-09-29)
+
+
+### Bug Fixes
+
+* **daemon:** report all four tenant roles, so an Editor is an Editor and an Owner is an Owner ([#404](https://github.com/zeroroot-ai/gibson/issues/404)) ([2557b58](https://github.com/zeroroot-ai/gibson/commit/2557b586051ee2c8195b08cd6ead6ad15e3e82f3))
+
 ## [0.143.3](https://github.com/zeroroot-ai/gibson/compare/v0.143.2...v0.143.3) (2026-09-29)
 
 
