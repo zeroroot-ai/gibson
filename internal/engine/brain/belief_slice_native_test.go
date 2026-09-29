@@ -396,7 +396,7 @@ func TestNativeSliceBelief_ReplayIsDeterministicForThePinnedVersion(t *testing.T
 	first := NativeSliceBeliefProvider(reg, posteriors).ScoreSlice(graph)
 	second := NativeSliceBeliefProvider(reg, posteriors).ScoreSlice(graph)
 
-	require.Equal(t, len(first), len(second))
+	require.Len(t, second, len(first))
 	for id, nb := range first {
 		other, ok := second[id]
 		require.True(t, ok)

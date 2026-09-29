@@ -4,6 +4,7 @@
 package braintrain
 
 import (
+	"math"
 	"os"
 	"path/filepath"
 	"testing"
@@ -18,10 +19,10 @@ import (
 // 0 failures. NEVER_OBSERVED never appears.
 func syntheticOutcomes() []EdgeOutcome {
 	var out []EdgeOutcome
-	for i := 0; i < 7; i++ {
+	for range 7 {
 		out = append(out, EdgeOutcome{EdgeType: "RESOLVES_TO", Success: true})
 	}
-	for i := 0; i < 3; i++ {
+	for range 3 {
 		out = append(out, EdgeOutcome{EdgeType: "RESOLVES_TO", Success: false})
 	}
 	out = append(out, EdgeOutcome{EdgeType: "AFFECTS", Success: true})
@@ -111,7 +112,7 @@ func TestEdgePosteriorArtifact_WriteLoadRoundTrip(t *testing.T) {
 func TestLoadEdgePosteriorArtifact_RejectsAMissingVersion(t *testing.T) {
 	dir := t.TempDir()
 	path := filepath.Join(dir, "bad.json")
-	if err := os.WriteFile(path, []byte(`{"posteriors":{}}`), 0o644); err != nil {
+	if err := os.WriteFile(path, []byte(`{"posteriors":{}}`), 0o600); err != nil {
 		t.Fatal(err)
 	}
 	if _, err := LoadEdgePosteriorArtifact(path); err == nil {
@@ -123,7 +124,7 @@ func TestLoadEdgePosteriorArtifact_RejectsANonPositiveBetaShape(t *testing.T) {
 	dir := t.TempDir()
 	path := filepath.Join(dir, "bad.json")
 	const raw = `{"version":"v1","posteriors":{"RESOLVES_TO":{"alpha":0,"beta":4}}}`
-	if err := os.WriteFile(path, []byte(raw), 0o644); err != nil {
+	if err := os.WriteFile(path, []byte(raw), 0o600); err != nil {
 		t.Fatal(err)
 	}
 	if _, err := LoadEdgePosteriorArtifact(path); err == nil {
@@ -163,7 +164,7 @@ func TestNextEdgePosteriorVersion_BumpsPastExistingAndIsIndependentOfTheCPTModel
 	if v := NextEdgePosteriorVersion(dir, "acme"); v != "tenant-acme-edges-v1" {
 		t.Errorf("empty dir should start at v1, got %q", v)
 	}
-	if err := os.WriteFile(filepath.Join(dir, "tenant-acme-edges-v1.json"), []byte("{}"), 0o644); err != nil {
+	if err := os.WriteFile(filepath.Join(dir, "tenant-acme-edges-v1.json"), []byte("{}"), 0o600); err != nil {
 		t.Fatal(err)
 	}
 	if v := NextEdgePosteriorVersion(dir, "acme"); v != "tenant-acme-edges-v2" {
@@ -219,5 +220,80 @@ func TestTrainTenantEdgePosteriors_EndToEnd(t *testing.T) {
 func TestTrainTenantEdgePosteriors_EmptyTenantErrors(t *testing.T) {
 	if _, err := TrainTenantEdgePosteriors("  ", syntheticOutcomes(), t.TempDir()); err == nil {
 		t.Fatal("expected an error for a blank tenant")
+	}
+}
+
+func TestEdgePosteriorArtifact_Write_RejectsAnInvalidArtifact(t *testing.T) {
+	dir := t.TempDir()
+	a := &EdgePosteriorArtifact{Version: ""} // fails validate(): empty version
+	if err := a.Write(filepath.Join(dir, "bad.json")); err == nil {
+		t.Fatal("expected Write to reject an artifact with no version")
+	}
+}
+
+func TestEdgePosteriorArtifact_Write_PropagatesAnEncodingError(t *testing.T) {
+	dir := t.TempDir()
+	// math.Inf is a valid (positive) Beta shape parameter by validate()'s own
+	// check, but encoding/json cannot marshal +Inf -- this exercises Write's
+	// json.MarshalIndent error branch honestly, without a mock encoder.
+	a := &EdgePosteriorArtifact{
+		Version:    "test-v1",
+		Posteriors: map[string]edgePosteriorJSON{"RESOLVES_TO": {Alpha: math.Inf(1), Beta: 1}},
+	}
+	if err := a.Write(filepath.Join(dir, "bad.json")); err == nil {
+		t.Fatal("expected Write to fail encoding a +Inf posterior")
+	}
+}
+
+func TestLoadEdgePosteriorArtifact_MissingFileErrors(t *testing.T) {
+	if _, err := LoadEdgePosteriorArtifact(filepath.Join(t.TempDir(), "does-not-exist.json")); err == nil {
+		t.Fatal("expected an error for a missing artifact file")
+	}
+}
+
+func TestLoadEdgePosteriorArtifact_InvalidJSONErrors(t *testing.T) {
+	dir := t.TempDir()
+	path := filepath.Join(dir, "bad.json")
+	if err := os.WriteFile(path, []byte("not json"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := LoadEdgePosteriorArtifact(path); err == nil {
+		t.Fatal("expected an error for invalid JSON")
+	}
+}
+
+func TestTrainTenantEdgePosteriors_FailsWhenModelsDirIsAnExistingFile(t *testing.T) {
+	dir := t.TempDir()
+	// modelsDir names a path that is already a regular file, so os.MkdirAll
+	// fails ("not a directory") -- a portable, honest way to exercise that
+	// error branch without relying on filesystem permissions.
+	modelsDirAsFile := filepath.Join(dir, "models")
+	if err := os.WriteFile(modelsDirAsFile, []byte("not a directory"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := TrainTenantEdgePosteriors("acme", syntheticOutcomes(), modelsDirAsFile); err == nil {
+		t.Fatal("expected an error when modelsDir is an existing regular file")
+	}
+}
+
+func TestTrainTenantEdgePosteriors_FailsWhenModelsDirIsNotWritable(t *testing.T) {
+	if os.Geteuid() == 0 {
+		t.Skip("running as root: permission bits do not restrict writes")
+	}
+	dir := t.TempDir()
+	modelsDir := filepath.Join(dir, "models")
+	// A read+execute-only modelsDir lets NextEdgePosteriorVersion's os.ReadDir
+	// scan succeed (so version resolves normally, v1) and lets MkdirAll's
+	// already-exists check succeed (MkdirAll never touches an existing
+	// directory's mode), but the actual os.WriteFile inside
+	// (*EdgePosteriorArtifact).Write still needs WRITE permission on the
+	// directory to create the new file -- so this exercises
+	// TrainTenantEdgePosteriors' `fitted.Write(path)` error branch honestly,
+	// without colliding on a name the version scanner would just skip past.
+	if err := os.MkdirAll(modelsDir, 0o500); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := TrainTenantEdgePosteriors("acme", syntheticOutcomes(), modelsDir); err == nil {
+		t.Fatal("expected an error when modelsDir is not writable")
 	}
 }

@@ -5,6 +5,7 @@ package braintrain
 
 import (
 	"encoding/json"
+	"errors"
 	"fmt"
 	"os"
 	"path/filepath"
@@ -99,7 +100,7 @@ type EdgePosteriorTrainResult struct {
 // would be dead weight, not a real fitted value.
 func FitEdgePosteriors(outcomes []EdgeOutcome, version string) (*EdgePosteriorArtifact, error) {
 	if version == "" {
-		return nil, fmt.Errorf("braintrain: empty version")
+		return nil, errors.New("braintrain: empty version")
 	}
 
 	prior := brain.UninformativeEdgePosteriors{}.Posterior("")
@@ -140,7 +141,7 @@ func FitEdgePosteriors(outcomes []EdgeOutcome, version string) (*EdgePosteriorAr
 // shape parameter is not a Beta distribution at all).
 func (a *EdgePosteriorArtifact) validate() error {
 	if a.Version == "" {
-		return fmt.Errorf("braintrain: edge posterior artifact missing version")
+		return errors.New("braintrain: edge posterior artifact missing version")
 	}
 	for edgeType, p := range a.Posteriors {
 		if p.Alpha <= 0 || p.Beta <= 0 {
@@ -162,13 +163,16 @@ func (a *EdgePosteriorArtifact) Write(path string) error {
 		return fmt.Errorf("braintrain: encode edge posterior artifact: %w", err)
 	}
 	b = append(b, '\n')
-	return os.WriteFile(path, b, 0o644)
+	return os.WriteFile(path, b, 0o600)
 }
 
 // LoadEdgePosteriorArtifact reads a fitted edge-posterior artifact JSON file
 // (e.g. one GIBSON_EDGE_POSTERIOR_PATH names, internal/server/daemon/belief_provider.go).
 func LoadEdgePosteriorArtifact(path string) (*EdgePosteriorArtifact, error) {
-	b, err := os.ReadFile(path)
+	//nolint:gosec // G304: path is an operator-supplied config path
+	// (GIBSON_EDGE_POSTERIOR_PATH / a CLI -out artifact), never end-user
+	// input, mirroring beliefvi.LoadModelArtifact's identical seam.
+	b, err := os.ReadFile(filepath.Clean(path))
 	if err != nil {
 		return nil, fmt.Errorf("braintrain: read edge posterior artifact: %w", err)
 	}
@@ -243,7 +247,7 @@ func NextEdgePosteriorVersion(modelsDir, tenant string) string {
 // contract; no cross-tenant pooling.
 func TrainTenantEdgePosteriors(tenant string, outcomes []EdgeOutcome, modelsDir string) (*EdgePosteriorTrainResult, error) {
 	if strings.TrimSpace(tenant) == "" {
-		return nil, fmt.Errorf("braintrain: empty tenant")
+		return nil, errors.New("braintrain: empty tenant")
 	}
 	version := NextEdgePosteriorVersion(modelsDir, tenant)
 	fitted, err := FitEdgePosteriors(outcomes, version)
@@ -251,7 +255,7 @@ func TrainTenantEdgePosteriors(tenant string, outcomes []EdgeOutcome, modelsDir 
 		return nil, err
 	}
 
-	if err := os.MkdirAll(modelsDir, 0o755); err != nil {
+	if err := os.MkdirAll(modelsDir, 0o750); err != nil {
 		return nil, fmt.Errorf("braintrain: create models dir: %w", err)
 	}
 	path := filepath.Join(modelsDir, version+".json")

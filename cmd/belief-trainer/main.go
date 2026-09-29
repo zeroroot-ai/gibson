@@ -42,42 +42,52 @@ package main
 
 import (
 	"encoding/json"
+	"errors"
 	"flag"
 	"fmt"
 	"os"
+	"path/filepath"
 
 	"github.com/zeroroot-ai/gibson/internal/engine/braintrain"
 )
 
 func main() {
-	if err := run(); err != nil {
+	if err := run(os.Args[1:]); err != nil {
 		fmt.Fprintln(os.Stderr, "belief-trainer:", err)
 		os.Exit(1)
 	}
 }
 
-func run() error {
+// run parses args against a fresh, non-global FlagSet (flag.ContinueOnError,
+// never the package-global flag.CommandLine/flag.Parse) so it is a plain,
+// directly unit-testable function: no shared flag state across test cases,
+// and a bad flag returns an error instead of calling os.Exit through the
+// default ExitOnError handling.
+func run(args []string) error {
+	fs := flag.NewFlagSet("belief-trainer", flag.ContinueOnError)
 	var (
-		tenant       = flag.String("tenant", "", "tenant id the artifact(s) are trained for (required)")
-		base         = flag.String("base", "", "path to the base model artifact (structural template; fits the belief-CPT model when set with -rows)")
-		rows         = flag.String("rows", "", "path to a JSON array of training rows {var:bool} (fits the belief-CPT model when set with -base)")
-		edgeOutcomes = flag.String("edge-outcomes", "", "path to a JSON array of braintrain.EdgeOutcome (fits the per-edge-type Beta posterior, gibson#395)")
-		out          = flag.String("out", ".", "output directory for the versioned per-tenant artifact(s)")
+		tenant       = fs.String("tenant", "", "tenant id the artifact(s) are trained for (required)")
+		base         = fs.String("base", "", "path to the base model artifact (structural template; fits the belief-CPT model when set with -rows)")
+		rows         = fs.String("rows", "", "path to a JSON array of training rows {var:bool} (fits the belief-CPT model when set with -base)")
+		edgeOutcomes = fs.String("edge-outcomes", "", "path to a JSON array of braintrain.EdgeOutcome (fits the per-edge-type Beta posterior, gibson#395)")
+		out          = fs.String("out", ".", "output directory for the versioned per-tenant artifact(s)")
 	)
-	flag.Parse()
+	if err := fs.Parse(args); err != nil {
+		return err
+	}
 
 	if *tenant == "" {
-		flag.Usage()
-		return fmt.Errorf("-tenant is required")
+		fs.Usage()
+		return errors.New("-tenant is required")
 	}
 	trainCPT := *base != "" || *rows != ""
 	if trainCPT && (*base == "" || *rows == "") {
-		flag.Usage()
-		return fmt.Errorf("-base and -rows must be given together")
+		fs.Usage()
+		return errors.New("-base and -rows must be given together")
 	}
 	if !trainCPT && *edgeOutcomes == "" {
-		flag.Usage()
-		return fmt.Errorf("give -base/-rows, -edge-outcomes, or both")
+		fs.Usage()
+		return errors.New("give -base/-rows, -edge-outcomes, or both")
 	}
 
 	if trainCPT {
@@ -113,7 +123,7 @@ func runCPTTraining(tenant, base, rows, out string) error {
 	if err != nil {
 		return err
 	}
-	if err := os.MkdirAll(out, 0o755); err != nil {
+	if err := os.MkdirAll(out, 0o750); err != nil {
 		return fmt.Errorf("create out dir: %w", err)
 	}
 	path := out + "/" + version + ".json"
@@ -131,7 +141,7 @@ func runEdgePosteriorTraining(tenant, edgeOutcomesPath, out string) error {
 	}
 	res, err := braintrain.TrainTenantEdgePosteriors(tenant, outcomes, out)
 	if err != nil {
-		return err
+		return fmt.Errorf("train edge posteriors: %w", err)
 	}
 	fmt.Printf("trained %s from %d recorded outcomes -> %s\n", res.Version, res.Outcomes, res.Path)
 	return nil
@@ -164,7 +174,9 @@ func loadRows(path string, known map[string]bool) ([]braintrain.Row, error) {
 // loadEdgeOutcomes decodes the -edge-outcomes JSON array into
 // braintrain.EdgeOutcome records.
 func loadEdgeOutcomes(path string) ([]braintrain.EdgeOutcome, error) {
-	b, err := os.ReadFile(path)
+	//nolint:gosec // G304: path is this CLI's own -edge-outcomes flag value,
+	// an operator-supplied input file, never end-user/attacker input.
+	b, err := os.ReadFile(filepath.Clean(path))
 	if err != nil {
 		return nil, fmt.Errorf("read edge outcomes: %w", err)
 	}
