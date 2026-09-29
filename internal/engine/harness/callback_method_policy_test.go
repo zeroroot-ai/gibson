@@ -94,6 +94,14 @@ func TestCallbackAgentSurface_MatchesImplementedRPCs(t *testing.T) {
 		harnesspb.HarnessCallbackService_OpenJob_FullMethodName:   true,
 		harnesspb.HarnessCallbackService_SendInput_FullMethodName: true,
 		harnesspb.HarnessCallbackService_CloseJob_FullMethodName:  true,
+		// The phase-2 harness RPCs sdk v0.182.0 and v0.183.0 declared ahead
+		// of their handlers (gibson#389 SubmitProof, destructive
+		// authorization, gibson#391 ProposeOntologyExtension). Each leaves
+		// this map in the change that adds its handler; until then
+		// callback_unimplemented_test.go pins the honest Unimplemented.
+		harnesspb.HarnessCallbackService_SubmitProof_FullMethodName:                     true,
+		harnesspb.HarnessCallbackService_RequestDestructiveAuthorization_FullMethodName: true,
+		harnesspb.HarnessCallbackService_ProposeOntologyExtension_FullMethodName:        true,
 		// WorldView handler landed in gibson#1377 — no longer unimplemented.
 		// Session-context store handlers landed (gibson#1184,
 		// callback_session_context.go) — no longer unimplemented.
