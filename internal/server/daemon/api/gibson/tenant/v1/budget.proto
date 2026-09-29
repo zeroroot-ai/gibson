@@ -37,6 +37,7 @@ service BudgetService {
       object_type: "tenant"
       object_deriver: "tenant_from_identity"
       allowed_identities: 3  // USER | SERVICE
+      own_state: true
     };
   }
   rpc ListBudgets(ListBudgetsRequest) returns (ListBudgetsResponse) {
@@ -65,7 +66,7 @@ service BudgetService {
   }
   rpc SetTenantBudgetDefaults(SetTenantBudgetDefaultsRequest) returns (SetTenantBudgetDefaultsResponse) {
     option (gibson.auth.v1.authz) = {
-      relation: "member"
+      relation: "admin"
       object_type: "tenant"
       object_deriver: "tenant_from_identity"
       allowed_identities: 3  // USER | SERVICE

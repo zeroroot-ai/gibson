@@ -219,6 +219,14 @@ var callbackMethodPolicy = map[string]callbackMethodDecision{
 	// --- Denied: declared in the proto, no handler on this daemon ---
 	harnesspb.HarnessCallbackService_GetPlanContext_FullMethodName:  {agentSurface: false, reason: reasonUnimplemented},
 	harnesspb.HarnessCallbackService_ReportStepHints_FullMethodName: {agentSurface: false, reason: reasonUnimplemented},
+	// The three RPCs sdk v0.182.0 and v0.183.0 declared for the phase-2
+	// harness (gibson#389 SubmitProof, destructive authorization, gibson#391
+	// ProposeOntologyExtension). Each lands with its handler and flips to
+	// agentSurface in that change; until then the daemon refuses them the
+	// honest way, Unimplemented, which callback_unimplemented_test.go pins.
+	harnesspb.HarnessCallbackService_SubmitProof_FullMethodName:                     {agentSurface: false, reason: reasonUnimplemented},
+	harnesspb.HarnessCallbackService_RequestDestructiveAuthorization_FullMethodName: {agentSurface: false, reason: reasonUnimplemented},
+	harnesspb.HarnessCallbackService_ProposeOntologyExtension_FullMethodName:        {agentSurface: false, reason: reasonUnimplemented},
 
 	// --- Bank member callbacks: declared by the sdk bump, served by a later
 	// slice of epic gibson#1706. They are the member-facing half of the job

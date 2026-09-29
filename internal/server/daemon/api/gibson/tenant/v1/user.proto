@@ -32,6 +32,7 @@ service UserService {
       object_type: "tenant"
       object_deriver: "tenant_from_identity"
       allowed_identities: 3  // USER | SERVICE
+      own_state: true
     };
   }
 
@@ -53,6 +54,7 @@ service UserService {
       object_type: "tenant"
       object_deriver: "tenant_from_identity"
       allowed_identities: 3  // USER | SERVICE
+      own_state: true
     };
   }
   rpc MarkAllAlertsRead(MarkAllAlertsReadRequest) returns (MarkAllAlertsReadResponse) {
@@ -61,6 +63,7 @@ service UserService {
       object_type: "tenant"
       object_deriver: "tenant_from_identity"
       allowed_identities: 3  // USER | SERVICE
+      own_state: true
     };
   }
 
@@ -90,6 +93,7 @@ service UserService {
       object_type: "tenant"
       object_deriver: "tenant_from_identity"
       allowed_identities: 3  // USER | SERVICE
+      own_state: true
     };
   }
   rpc RenameConversation(RenameConversationRequest) returns (RenameConversationResponse) {
@@ -98,6 +102,7 @@ service UserService {
       object_type: "tenant"
       object_deriver: "tenant_from_identity"
       allowed_identities: 3  // USER | SERVICE
+      own_state: true
     };
   }
   rpc DeleteConversation(DeleteConversationRequest) returns (DeleteConversationResponse) {
@@ -106,6 +111,7 @@ service UserService {
       object_type: "tenant"
       object_deriver: "tenant_from_identity"
       allowed_identities: 3  // USER | SERVICE
+      own_state: true
     };
   }
 
@@ -127,6 +133,7 @@ service UserService {
       object_type: "tenant"
       object_deriver: "tenant_from_identity"
       allowed_identities: 3  // USER | SERVICE
+      own_state: true
     };
   }
   rpc ResetUserOnboardingState(ResetUserOnboardingStateRequest) returns (ResetUserOnboardingStateResponse) {
@@ -135,6 +142,7 @@ service UserService {
       object_type: "tenant"
       object_deriver: "tenant_from_identity"
       allowed_identities: 3  // USER | SERVICE
+      own_state: true
     };
   }
 
@@ -156,6 +164,7 @@ service UserService {
       object_type: "tenant"
       object_deriver: "tenant_from_identity"
       allowed_identities: 3  // USER | SERVICE
+      own_state: true
     };
   }
   rpc ResetUserLayout(ResetUserLayoutRequest) returns (ResetUserLayoutResponse) {
@@ -164,6 +173,7 @@ service UserService {
       object_type: "tenant"
       object_deriver: "tenant_from_identity"
       allowed_identities: 3  // USER | SERVICE
+      own_state: true
     };
   }
 
@@ -185,6 +195,7 @@ service UserService {
       object_type: "tenant"
       object_deriver: "tenant_from_identity"
       allowed_identities: 3  // USER | SERVICE
+      own_state: true
     };
   }
 
@@ -219,6 +230,7 @@ service UserService {
       object_type: "tenant"
       object_deriver: "tenant_from_identity"
       allowed_identities: 3  // USER | SERVICE
+      own_state: true
     };
   }
 
@@ -232,6 +244,7 @@ service UserService {
       object_type: "tenant"
       object_deriver: "tenant_from_identity"
       allowed_identities: 3  // USER | SERVICE
+      own_state: true
     };
   }
   rpc ConsumeAttachment(ConsumeAttachmentRequest) returns (ConsumeAttachmentResponse) {
@@ -240,6 +253,7 @@ service UserService {
       object_type: "tenant"
       object_deriver: "tenant_from_identity"
       allowed_identities: 3  // USER | SERVICE
+      own_state: true
     };
   }
 
@@ -281,6 +295,7 @@ service UserService {
       object_type: "tenant"
       object_deriver: "tenant_from_identity"
       allowed_identities: 1  // USER
+      own_state: true
     };
   }
 

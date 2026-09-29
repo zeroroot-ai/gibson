@@ -46,6 +46,7 @@ service SessionService {
       object_type: "tenant",
       object_deriver: "tenant_from_identity",
       allowed_identities: 1  // USER
+      own_state: true
     };
   }
 }

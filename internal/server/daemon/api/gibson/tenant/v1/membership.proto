@@ -108,6 +108,7 @@ service MembershipService {
       object_type: "tenant"
       object_deriver: "tenant_from_identity"
       allowed_identities: 1  // USER
+      own_state: true
     };
   }
 
@@ -264,7 +265,7 @@ service MembershipService {
   // installation principal.
   rpc GrantComponentPermissions(GrantComponentPermissionsRequest) returns (GrantComponentPermissionsResponse) {
     option (gibson.auth.v1.authz) = {
-      relation: "member"
+      relation: "writer"
       object_type: "tenant"
       object_deriver: "tenant_from_identity"
       allowed_identities: 1  // USER

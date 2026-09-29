@@ -112,7 +112,7 @@ service WorldService {
   // member, not admin.
   rpc SubmitLabel(SubmitLabelRequest) returns (SubmitLabelResponse) {
     option (gibson.auth.v1.authz) = {
-      relation: "member",
+      relation: "writer",
       object_type: "tenant",
       object_deriver: "tenant_from_identity",
       allowed_identities: 3  // USER | SERVICE
