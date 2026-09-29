@@ -90,6 +90,7 @@ func isMetaTool(name string) bool {
 // because this in-process path does not pass the per-plugin ext-authz gate.
 func (s *HarnessCallbackService) callMetaTool(ctx context.Context, req *harnesspb.CallToolProtoRequest) (*harnesspb.CallToolProtoResponse, error) {
 	if !s.metaToolsWired() {
+		// gibson:no-tool-executed — the catalog is not wired; nothing runs.
 		return metaToolErr(commonpb.ErrorCode_ERROR_CODE_INTERNAL, "meta-tools are not wired on this daemon"), nil
 	}
 
@@ -103,14 +104,17 @@ func (s *HarnessCallbackService) callMetaTool(ctx context.Context, req *harnessp
 		runID = req.GetContext().GetAgentRunId()
 	}
 	if runID == "" {
+		// gibson:no-tool-executed — rejected before any dispatch is attempted.
 		return metaToolErr(commonpb.ErrorCode_ERROR_CODE_INVALID_ARGUMENT, "meta-tool call requires a mission_run_id or agent_run_id"), nil
 	}
 	state, err := s.authzStore.Get(ctx, runID)
 	if err != nil {
 		s.logger.WarnContext(ctx, "meta-tool: run authz state not found", "run_id", runID, "err", err)
+		// gibson:no-tool-executed — no resolvable run state, so nothing ran.
 		return metaToolErr(commonpb.ErrorCode_ERROR_CODE_NOT_FOUND, "run authz state not found"), nil
 	}
 	if state.Status != "active" {
+		// gibson:no-tool-executed — denied before dispatch.
 		return metaToolErr(commonpb.ErrorCode_ERROR_CODE_PERMISSION_DENIED, "mission run is not active"), nil
 	}
 
@@ -126,8 +130,9 @@ func (s *HarnessCallbackService) callMetaTool(ctx context.Context, req *harnessp
 	case metatool.SearchToolsName:
 		return s.metaSearch(ctx, handler, caller, req.GetInputJson())
 	case metatool.InvokeToolName:
-		return s.metaInvoke(ctx, handler, caller, h.Mission().BlockedTools, req.GetInputJson())
+		return s.metaInvoke(ctx, req.GetContext(), handler, caller, h.Mission().BlockedTools, req.GetInputJson())
 	default:
+		// gibson:no-tool-executed — not one of the two known meta-tools.
 		return metaToolErr(commonpb.ErrorCode_ERROR_CODE_NOT_FOUND, "unknown meta-tool: "+req.GetName()), nil
 	}
 }
@@ -141,6 +146,7 @@ func (s *HarnessCallbackService) metaSearch(ctx context.Context, h *metatool.Han
 	}
 	if len(inputJSON) > 0 {
 		if err := json.Unmarshal(inputJSON, &in); err != nil {
+			// gibson:no-tool-executed — malformed request, nothing dispatched.
 			return metaToolErr(commonpb.ErrorCode_ERROR_CODE_INVALID_ARGUMENT, "search_tools input is not valid JSON: "+err.Error()), nil
 		}
 	}
@@ -153,6 +159,8 @@ func (s *HarnessCallbackService) metaSearch(ctx context.Context, h *metatool.Han
 	})
 	if err != nil {
 		s.logger.ErrorContext(ctx, "meta-tool search failed", "tenant", caller.Tenant, "err", err)
+		// gibson:no-tool-executed — search_tools only queries the catalog; it
+		// never invokes a tool, so a search failure has nothing to record.
 		return metaToolErr(commonpb.ErrorCode_ERROR_CODE_INTERNAL, "tool search failed"), nil
 	}
 
@@ -171,18 +179,22 @@ func (s *HarnessCallbackService) metaSearch(ctx context.Context, h *metatool.Han
 			out.Candidates[i].InputSchema = json.RawMessage(c.InputSchema)
 		}
 	}
+	// gibson:no-tool-executed — search_tools never invokes a tool; only
+	// invoke_tool does, and that path records below.
 	return marshalMetaResult(s, out)
 }
 
-func (s *HarnessCallbackService) metaInvoke(ctx context.Context, h *metatool.Handler, caller catalog.Caller, blocked []string, inputJSON []byte) (*harnesspb.CallToolProtoResponse, error) {
+func (s *HarnessCallbackService) metaInvoke(ctx context.Context, contextInfo *harnesspb.ContextInfo, h *metatool.Handler, caller catalog.Caller, blocked []string, inputJSON []byte) (*harnesspb.CallToolProtoResponse, error) {
 	var in struct {
 		ID   string         `json:"id"`
 		Args map[string]any `json:"args"`
 	}
 	if err := json.Unmarshal(inputJSON, &in); err != nil {
+		// gibson:no-tool-executed — malformed request, nothing dispatched.
 		return metaToolErr(commonpb.ErrorCode_ERROR_CODE_INVALID_ARGUMENT, "invoke_tool input is not valid JSON: "+err.Error()), nil
 	}
 	if in.ID == "" {
+		// gibson:no-tool-executed — no id to dispatch to.
 		return metaToolErr(commonpb.ErrorCode_ERROR_CODE_INVALID_ARGUMENT, "invoke_tool requires a non-empty id"), nil
 	}
 
@@ -194,7 +206,15 @@ func (s *HarnessCallbackService) metaInvoke(ctx context.Context, h *metatool.Han
 		canon = tid.Canonical()
 	}
 	if blockedID, ok := matchBlocked(blocked, in.ID, canon); ok {
+		// gibson:no-tool-executed — denied before dispatch.
 		return metaToolErr(commonpb.ErrorCode_ERROR_CODE_PERMISSION_DENIED, "tool '"+blockedID+"' is blocked by mission policy"), nil
+	}
+
+	// argsJSON is captured evidence, not the wire response — best-effort only
+	// (a marshal failure here must never mask the invoke outcome below).
+	argsJSON, marshalErr := json.Marshal(in.Args)
+	if marshalErr != nil {
+		argsJSON = []byte("{}")
 	}
 
 	result, err := h.Invoke(ctx, caller, in.ID, in.Args)
@@ -204,8 +224,25 @@ func (s *HarnessCallbackService) metaInvoke(ctx context.Context, h *metatool.Han
 			code = commonpb.ErrorCode_ERROR_CODE_PERMISSION_DENIED
 		}
 		s.logger.WarnContext(ctx, "meta-tool invoke failed", "id", in.ID, "tenant", caller.Tenant, "err", err)
+
+		// Flight recorder completeness (ADR-0030 §3): invoke_tool dispatches a
+		// real catalog tool through the same trust boundary as a native
+		// CallToolProto call, so a failed invocation must be recorded too —
+		// exactly like captureToolCall's contract for the native path.
+		s.captureToolCall(ctx, contextInfo, canon, string(argsJSON), "", err.Error())
+
 		return metaToolErr(code, err.Error()), nil
 	}
+
+	resultJSON, marshalErr := json.Marshal(result)
+	if marshalErr != nil {
+		resultJSON = nil
+	}
+
+	// Flight recorder completeness (ADR-0030 §3): invoke_tool is the
+	// metatool dispatch path the completeness guard requires — the agent
+	// never gets a real tool's result without an independent record of it.
+	s.captureToolCall(ctx, contextInfo, canon, string(argsJSON), string(resultJSON), "")
 
 	return marshalMetaResult(s, struct {
 		Result any `json:"result"`

@@ -10,6 +10,7 @@ import (
 	"testing"
 
 	commonpb "github.com/zeroroot-ai/sdk/api/gen/gibson/common/v1"
+	harnesspb "github.com/zeroroot-ai/sdk/api/gen/gibson/harness/v1"
 
 	"github.com/zeroroot-ai/gibson/internal/engine/catalog"
 	"github.com/zeroroot-ai/gibson/internal/engine/metatool"
@@ -81,7 +82,7 @@ func TestMetaInvoke_DispatchesAndWrapsResult(t *testing.T) {
 	q := &mtQuerier{ret: map[string]any{"number": 7}}
 	h := metatool.NewHandler(nil, mtAuthz{allow: map[string]bool{"mcp:gitlab:create_issue": true}}, q)
 
-	resp, err := newSvc().metaInvoke(context.Background(), h, catalog.Caller{Tenant: "acme"}, nil,
+	resp, err := newSvc().metaInvoke(context.Background(), nil, h, catalog.Caller{Tenant: "acme"}, nil,
 		[]byte(`{"id":"mcp:gitlab:create_issue","args":{"title":"x"}}`))
 	if err != nil {
 		t.Fatalf("metaInvoke: %v", err)
@@ -100,12 +101,107 @@ func TestMetaInvoke_DispatchesAndWrapsResult(t *testing.T) {
 	}
 }
 
+// TestMetaInvoke_FeedsToolCallSink_OnSuccess is the gibson#380 / ADR-0030 §3
+// flight-recorder unit for the metatool dispatch path: invoke_tool runs a
+// real catalog tool through the same trust boundary as a native CallToolProto
+// call, so a successful invocation must reach the sink exactly like the
+// native path does (TestCallToolProto_FeedsToolCallSink_OnSuccess). Before
+// this fix, invoke_tool never called captureToolCall at all.
+func TestMetaInvoke_FeedsToolCallSink_OnSuccess(t *testing.T) {
+	q := &mtQuerier{ret: map[string]any{"number": 7}}
+	h := metatool.NewHandler(nil, mtAuthz{allow: map[string]bool{"mcp:gitlab:create_issue": true}}, q)
+
+	var captured []capturedTool
+	svc := &HarnessCallbackService{
+		logger: slog.Default(),
+		toolCallSink: func(_ context.Context, tn string, call ToolCallRecord) {
+			captured = append(captured, capturedTool{tenant: tn, call: call})
+		},
+	}
+	contextInfo := &harnesspb.ContextInfo{
+		MissionId: "m1", MissionRunId: "run-1", ToolExecutionId: "tool-exec-meta-1",
+	}
+
+	resp, err := svc.metaInvoke(testCtxWithTenant(), contextInfo, h, catalog.Caller{Tenant: "acme"}, nil,
+		[]byte(`{"id":"mcp:gitlab:create_issue","args":{"title":"x"}}`))
+	if err != nil {
+		t.Fatalf("metaInvoke: %v", err)
+	}
+	if resp.GetError() != nil {
+		t.Fatalf("unexpected error response: %v", resp.GetError())
+	}
+
+	if len(captured) != 1 {
+		t.Fatalf("exactly one tool call should be captured, got %d", len(captured))
+	}
+	got := captured[0]
+	if got.tenant != "test-tenant" {
+		t.Fatalf("wrong tenant: %q", got.tenant)
+	}
+	if got.call.ToolCallID != "tool-exec-meta-1" {
+		t.Fatalf("wrong ToolCallID: %q", got.call.ToolCallID)
+	}
+	if got.call.ToolName != "mcp:gitlab:create_issue" {
+		t.Fatalf("ToolName should be the canonical invoked id, got %q", got.call.ToolName)
+	}
+	if got.call.Err != "" {
+		t.Fatalf("success must not record an error, got %q", got.call.Err)
+	}
+	var args map[string]any
+	if err := json.Unmarshal([]byte(got.call.Arguments), &args); err != nil || args["title"] != "x" {
+		t.Fatalf("arguments not captured full-fidelity: %s (%v)", got.call.Arguments, err)
+	}
+	var result map[string]any
+	if err := json.Unmarshal([]byte(got.call.Result), &result); err != nil || result["number"].(float64) != 7 {
+		t.Fatalf("result not captured full-fidelity: %s (%v)", got.call.Result, err)
+	}
+}
+
+// TestMetaInvoke_FeedsToolCallSink_OnFailure proves a failed invoke_tool call
+// is captured too, mirroring captureToolCall's contract on the native path.
+func TestMetaInvoke_FeedsToolCallSink_OnFailure(t *testing.T) {
+	q := &mtQuerier{}
+	h := metatool.NewHandler(nil, mtAuthz{allow: map[string]bool{}}, q)
+
+	var captured []capturedTool
+	svc := &HarnessCallbackService{
+		logger: slog.Default(),
+		toolCallSink: func(_ context.Context, tn string, call ToolCallRecord) {
+			captured = append(captured, capturedTool{tenant: tn, call: call})
+		},
+	}
+	contextInfo := &harnesspb.ContextInfo{MissionId: "m1", ToolExecutionId: "tool-exec-meta-2"}
+
+	resp, err := svc.metaInvoke(testCtxWithTenant(), contextInfo, h, catalog.Caller{Tenant: "acme"}, nil,
+		[]byte(`{"id":"mcp:github:create_issue"}`))
+	if err != nil {
+		t.Fatalf("metaInvoke: %v", err)
+	}
+	if resp.GetError() == nil {
+		t.Fatal("expected a permission-denied error response")
+	}
+
+	if len(captured) != 1 {
+		t.Fatalf("a failed invoke_tool call must still be captured, got %d", len(captured))
+	}
+	got := captured[0].call
+	if got.ToolCallID != "tool-exec-meta-2" {
+		t.Fatalf("wrong ToolCallID: %q", got.ToolCallID)
+	}
+	if got.Err == "" {
+		t.Fatal("failure must record the error")
+	}
+	if got.Result != "" {
+		t.Fatalf("failure must not record a result, got %q", got.Result)
+	}
+}
+
 // An unauthorized id is reported as PERMISSION_DENIED and never dispatched.
 func TestMetaInvoke_UnauthorizedIsPermissionDenied(t *testing.T) {
 	q := &mtQuerier{}
 	h := metatool.NewHandler(nil, mtAuthz{allow: map[string]bool{}}, q)
 
-	resp, err := newSvc().metaInvoke(context.Background(), h, catalog.Caller{Tenant: "acme"}, nil,
+	resp, err := newSvc().metaInvoke(context.Background(), nil, h, catalog.Caller{Tenant: "acme"}, nil,
 		[]byte(`{"id":"mcp:github:create_issue"}`))
 	if err != nil {
 		t.Fatalf("metaInvoke: %v", err)
@@ -124,7 +220,7 @@ func TestMetaInvoke_BlockedByMissionPolicy(t *testing.T) {
 	q := &mtQuerier{}
 	h := metatool.NewHandler(nil, mtAuthz{allow: map[string]bool{"mcp:gitlab:create_issue": true}}, q)
 
-	resp, err := newSvc().metaInvoke(context.Background(), h, catalog.Caller{Tenant: "acme"},
+	resp, err := newSvc().metaInvoke(context.Background(), nil, h, catalog.Caller{Tenant: "acme"},
 		[]string{"mcp:gitlab:create_issue"},
 		[]byte(`{"id":"mcp:gitlab:create_issue","args":{"title":"x"}}`))
 	if err != nil {
@@ -156,7 +252,7 @@ func TestMatchBlocked(t *testing.T) {
 
 func TestMetaInvoke_MissingIdIsInvalidArgument(t *testing.T) {
 	h := metatool.NewHandler(nil, mtAuthz{}, &mtQuerier{})
-	resp, err := newSvc().metaInvoke(context.Background(), h, catalog.Caller{}, nil, []byte(`{"args":{}}`))
+	resp, err := newSvc().metaInvoke(context.Background(), nil, h, catalog.Caller{}, nil, []byte(`{"args":{}}`))
 	if err != nil {
 		t.Fatalf("metaInvoke: %v", err)
 	}
