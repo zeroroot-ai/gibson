@@ -179,7 +179,7 @@ func markerPresentImpl(listVal, markerVal ref.Val) ref.Val {
 	if !ok {
 		return types.False
 	}
-	for i := int64(0); i < size; i++ {
+	for i := range size {
 		item, ok := evidenceItemFromVal(lister.Get(types.Int(i)))
 		if !ok {
 			continue

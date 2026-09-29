@@ -8,6 +8,9 @@ import (
 	"testing"
 	"time"
 
+	"github.com/google/cel-go/cel"
+	"github.com/google/cel-go/common/types"
+	"github.com/google/cel-go/common/types/ref"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 
@@ -71,6 +74,24 @@ func TestCompile_RejectsNonBoolResult_Int(t *testing.T) {
 	_, err := Compile(`evidence.size()`)
 	require.Error(t, err)
 	assert.Contains(t, err.Error(), "not bool")
+}
+
+// TestCompileWithEnv_ProgramBuildError exercises env.Program's build-error
+// path with a genuinely unimplemented overload (declared, but bound to no
+// Unary/Binary/Function implementation) — a real cel-go "no such overload"
+// build failure, not a fabricated one. This can never happen through
+// [NewEnv]'s own catalog, since every declared overload there is bound; the
+// test goes through newEnv's extra-options seam to construct the failing
+// environment.
+func TestCompileWithEnv_ProgramBuildError(t *testing.T) {
+	env, err := newEnv(
+		cel.Function("unimplementedHelper", cel.Overload("unimplemented_helper", nil, cel.BoolType)),
+	)
+	require.NoError(t, err)
+
+	_, err = CompileWithEnv(env, `unimplementedHelper()`)
+	require.Error(t, err)
+	assert.Contains(t, err.Error(), "build program")
 }
 
 func httpResponseEvidence(status int, body string) finding.EnhancedEvidence {
@@ -217,6 +238,52 @@ func TestCompiledPredicate_Evaluate_ConversationText(t *testing.T) {
 	})
 	require.NoError(t, err)
 	assert.True(t, ok)
+}
+
+// TestCompiledPredicate_Evaluate_ContextEvalError exercises Evaluate's
+// ContextEval error-propagation path with a genuine runtime failure: an
+// invalid regex pattern reaches regexMatchImpl's own error branch, and
+// because the top-level expression is not wrapped in an error-tolerant
+// evidence.exists(...) fold, cel-go surfaces it as ContextEval's err rather
+// than swallowing it.
+func TestCompiledPredicate_Evaluate_ContextEvalError(t *testing.T) {
+	cp, err := Compile(`regexMatch("hello", "(unbalanced")`)
+	require.NoError(t, err)
+
+	_, err = cp.Evaluate(context.Background(), nil)
+	require.Error(t, err)
+	assert.Contains(t, err.Error(), "evaluate predicate")
+}
+
+// TestCompiledPredicate_Evaluate_NonBoolResult exercises Evaluate's
+// non-bool-result guard. Compile's own static bool-output check can never
+// let a predicate through that would trip this in practice — every helper
+// in functions.go actually returns what it declares — so this test builds a
+// pathological CEL program directly: an overload DECLARED to return bool
+// (so it type-checks as a valid predicate) whose binding actually returns a
+// string. That is exactly the class of bug this guard exists to catch if a
+// future helper's implementation and declaration ever drift apart.
+func TestCompiledPredicate_Evaluate_NonBoolResult(t *testing.T) {
+	env, err := cel.NewEnv(
+		cel.Function("liesAboutItsType",
+			cel.Overload("lies_about_its_type", nil, cel.BoolType,
+				cel.FunctionBinding(func(...ref.Val) ref.Val {
+					return types.String("not actually a bool")
+				}),
+			),
+		),
+	)
+	require.NoError(t, err)
+
+	ast, issues := env.Compile(`liesAboutItsType()`)
+	require.NoError(t, issues.Err())
+	prg, err := env.Program(ast)
+	require.NoError(t, err)
+
+	cp := &CompiledPredicate{expr: "liesAboutItsType()", prg: prg}
+	_, err = cp.Evaluate(context.Background(), nil)
+	require.Error(t, err)
+	assert.Contains(t, err.Error(), "non-bool result")
 }
 
 func TestCompiledPredicate_Evaluate_ContextCanceled(t *testing.T) {

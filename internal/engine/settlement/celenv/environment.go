@@ -45,8 +45,19 @@ var EvidenceListType = cel.ListType(EvidenceMapType)
 // should build it once with NewEnv and reuse it via [CompileWithEnv] — a
 // cel.Env is safe for concurrent Compile and Program calls.
 func NewEnv() (*cel.Env, error) {
+	return newEnv()
+}
+
+// newEnv is NewEnv's implementation, taking extra cel.EnvOptions on top of
+// the fixed declaration set. Production code only ever calls it through
+// NewEnv (extra is always empty there); this package's own tests use extra
+// to exercise cel.NewEnv's build-error path with a genuinely conflicting
+// declaration (e.g. redefining an existing function overload) — a failure
+// NewEnv's own fixed, hardcoded declarations can never trigger on their own.
+func newEnv(extra ...cel.EnvOption) (*cel.Env, error) {
 	opts := []cel.EnvOption{cel.Variable(EvidenceVariable, EvidenceListType)}
 	opts = append(opts, helperFunctionOptions()...)
+	opts = append(opts, extra...)
 
 	env, err := cel.NewEnv(opts...)
 	if err != nil {

@@ -6,6 +6,7 @@ package celenv
 import (
 	"testing"
 
+	"github.com/google/cel-go/cel"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 )
@@ -61,4 +62,20 @@ func TestNewEnv_IsMinimal(t *testing.T) {
 			assert.Error(t, issues.Err(), "expected %q to be outside the environment", expr)
 		})
 	}
+}
+
+// TestNewEnv_WrapsBuildError exercises newEnv's cel.NewEnv error-wrap with a
+// genuinely conflicting extra declaration (redefining an already-declared
+// overload ID with a different signature is a real cel-go build error, not a
+// fabricated one) — NewEnv's own fixed, hardcoded declarations can never
+// trigger this on their own, which is why the test goes through newEnv's
+// extra-options seam instead.
+func TestNewEnv_WrapsBuildError(t *testing.T) {
+	_, err := newEnv(
+		cel.Function(fnEvidenceText,
+			cel.Overload("evidence_text_map", []*cel.Type{cel.StringType}, cel.BoolType),
+		),
+	)
+	require.Error(t, err)
+	assert.Contains(t, err.Error(), "celenv: build environment")
 }
