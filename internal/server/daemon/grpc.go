@@ -1618,11 +1618,11 @@ func (d *daemonImpl) buildGRPCServer(ctx context.Context) (*grpcSubsystem, error
 			}
 			d.beliefProvider = beliefProvider
 		}
-		sliceBeliefProvider := resolveSliceBeliefProvider()
 		beliefSchemaRegistry, err := newBeliefSchemaRegistry()
 		if err != nil {
 			return nil, fmt.Errorf("failed to build belief schema registry: %w", err)
 		}
+		sliceBeliefProvider := resolveSliceBeliefProvider(beliefSchemaRegistry)
 		d.brainRegistry = brain.NewRegistry(ctx, brain.BeliefSystem)
 		wireBrainRegistry(ctx, d.brainRegistry, d.beliefProvider, sliceBeliefProvider, beliefSchemaRegistry)
 	}

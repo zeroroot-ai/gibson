@@ -24,7 +24,10 @@ func testBeliefRegistry(t *testing.T) *ontology.BeliefSchemaRegistry {
 			{NodeType: "Host", Variables: []ontology.BeliefVariable{{Name: "reachable"}}},
 			{NodeType: "Finding", Variables: []ontology.BeliefVariable{{Name: "verified"}}},
 		},
-		EnablementEdges: []string{"RESOLVES_TO", "AFFECTS"},
+		EnablementEdges: []ontology.EnablementEdgeSpec{
+			{RelType: "RESOLVES_TO", TargetVariable: "reachable"},
+			{RelType: "AFFECTS", TargetVariable: "verified"},
+		},
 	})
 	if err != nil {
 		t.Fatalf("RegisterExtension: %v", err)

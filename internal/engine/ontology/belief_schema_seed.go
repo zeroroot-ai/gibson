@@ -21,12 +21,21 @@ const coreBeliefSchemaExtensionName = "core/belief-schema"
 //     matching the funnel the pre-PRM belief field already encodes: a target
 //     cannot be exploitable if it is not reachable, and cannot be juicy if it
 //     is not exploitable.
-//   - The core enablement edges belief propagates along (ADR-0029 §7):
-//     reachability (RESOLVES_TO — a subdomain resolves to a reachable host),
-//     credential-grants (ISSUED — a run issues a credential),
-//     trust (DELEGATED_TO — a run delegates to a sub-run), and
-//     runs-service -> affects (RUNS_SERVICE, AFFECTS — a port runs a
-//     service, and a finding affects the asset it was found on).
+//   - The core enablement edges belief propagates along (ADR-0029 §7), each
+//     naming the belief variable it feeds on its destination node (ADR-0037
+//     decision 1 — structure only; the noisy-OR strength each contributes is
+//     a learned Beta posterior, cold-started at the uninformative prior,
+//     never authored here):
+//   - RESOLVES_TO feeds "reachable" (reachability — a subdomain resolving to
+//     a host is what makes it reachable at all).
+//   - DELEGATED_TO feeds "reachable" (trust — a run delegating to a sub-run
+//     extends which further hosts that trust boundary makes reachable).
+//   - ISSUED feeds "exploitable" (credential-grants — a run issuing a
+//     credential is a usable path onto whatever it grants access to).
+//   - RUNS_SERVICE feeds "exploitable" (runs-service — a running,
+//     network-exposed service is attack surface, not just reachability).
+//   - AFFECTS feeds "juicy" (a finding affecting an asset is what marks the
+//     asset a valuable/vulnerable target, the funnel's terminal variable).
 //
 // A Domain Pack extends this schema — more belief-bearing node types (e.g.
 // Finding, technique, mission per the ADR), more variables, more enablement
@@ -45,12 +54,12 @@ func SeedBeliefSchemaExtension() BeliefSchemaExtension {
 				},
 			},
 		},
-		EnablementEdges: []string{
-			"RESOLVES_TO",  // reachability
-			"ISSUED",       // credential-grants
-			"DELEGATED_TO", // trust
-			"RUNS_SERVICE", // runs-service
-			"AFFECTS",      // ...-> affects
+		EnablementEdges: []EnablementEdgeSpec{
+			{RelType: "RESOLVES_TO", TargetVariable: "reachable"},    // reachability
+			{RelType: "DELEGATED_TO", TargetVariable: "reachable"},   // trust
+			{RelType: "ISSUED", TargetVariable: "exploitable"},       // credential-grants
+			{RelType: "RUNS_SERVICE", TargetVariable: "exploitable"}, // runs-service
+			{RelType: "AFFECTS", TargetVariable: "juicy"},            // ...-> affects
 		},
 	}
 }
