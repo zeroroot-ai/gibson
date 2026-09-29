@@ -142,6 +142,13 @@ type HarnessCallbackService struct {
 	// market view is not wired on this daemon. See callback_place_bet.go.
 	beliefSubstrate brain.BeliefSubstrate
 
+	// proofSettlement backs the SubmitProof RPC (ADR-0030, ADR-0031,
+	// gibson#389): resolving an enabled Domain Pack's CEL predicate binding
+	// and settling a bet true once it fires against submitted evidence. nil
+	// means SubmitProof returns Unavailable, the same staged-wiring default
+	// beliefSubstrate uses. See callback_submit_proof.go.
+	proofSettlement brain.ProofSettlementEngine
+
 	// spanProcessors receives spans exported from remote agents for tracing integration
 	spanProcessors []sdktrace.SpanProcessor
 
@@ -382,6 +389,15 @@ func WithObservationSink(sink ObservationSink) CallbackServiceOption {
 func WithBeliefSubstrate(substrate brain.BeliefSubstrate) CallbackServiceOption {
 	return func(s *HarnessCallbackService) {
 		s.beliefSubstrate = substrate
+	}
+}
+
+// WithProofSettlement wires the tenant-scoped engine the SubmitProof RPC
+// resolves pack predicates and settles bets against (ADR-0030, ADR-0031,
+// gibson#389). When unset, SubmitProof returns Unavailable.
+func WithProofSettlement(engine brain.ProofSettlementEngine) CallbackServiceOption {
+	return func(s *HarnessCallbackService) {
+		s.proofSettlement = engine
 	}
 }
 

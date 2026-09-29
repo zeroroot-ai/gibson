@@ -570,6 +570,30 @@ func (m *CallbackManager) BeliefSubstrate() brain.BeliefSubstrate {
 	return m.server.service.beliefSubstrate
 }
 
+// SetProofSettlement sets the proof-settlement engine on the callback
+// service, wiring SubmitProof to resolve pack predicates and settle bets
+// (ADR-0030, ADR-0031, gibson#389). Call after NewCallbackManager, before
+// Start(). Thread-safe.
+func (m *CallbackManager) SetProofSettlement(engine brain.ProofSettlementEngine) {
+	if m.server != nil && m.server.service != nil {
+		m.server.service.mu.Lock()
+		defer m.server.service.mu.Unlock()
+		WithProofSettlement(engine)(m.server.service)
+		m.logger.Debug("set proof settlement engine on callback service")
+	}
+}
+
+// ProofSettlement returns the proof-settlement engine currently wired onto
+// the callback service (nil if none has been set) — the read half of
+// SetProofSettlement, mirroring BeliefSubstrate's (e.g. for a test proving a
+// wiring step reached the manager, such as wireProofSettlement in
+// internal/server/daemon).
+func (m *CallbackManager) ProofSettlement() brain.ProofSettlementEngine {
+	m.server.service.mu.RLock()
+	defer m.server.service.mu.RUnlock()
+	return m.server.service.proofSettlement
+}
+
 // SetDiscoveryProcessor sets the DiscoveryProcessor on the callback service.
 // This enables automatic extraction and storage of DiscoveryResult from tool responses.
 //

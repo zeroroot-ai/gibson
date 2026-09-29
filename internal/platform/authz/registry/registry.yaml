@@ -1214,6 +1214,12 @@ entries:
     object_deriver: "system_tenant"
     allowed_identities:
       - COMPONENT
+  "/gibson.harness.v1.HarnessCallbackService/RequestDestructiveAuthorization":
+    relation: "can_use"
+    object_type: "component"
+    object_deriver: "system_tenant"
+    allowed_identities:
+      - COMPONENT
   "/gibson.harness.v1.HarnessCallbackService/RunMission":
     relation: "can_use"
     object_type: "component"
@@ -1233,6 +1239,12 @@ entries:
     allowed_identities:
       - COMPONENT
   "/gibson.harness.v1.HarnessCallbackService/SubmitFinding":
+    relation: "can_use"
+    object_type: "component"
+    object_deriver: "system_tenant"
+    allowed_identities:
+      - COMPONENT
+  "/gibson.harness.v1.HarnessCallbackService/SubmitProof":
     relation: "can_use"
     object_type: "component"
     object_deriver: "system_tenant"
