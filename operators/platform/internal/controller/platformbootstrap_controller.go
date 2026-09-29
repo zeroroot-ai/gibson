@@ -8,6 +8,7 @@ import (
 	"crypto/sha256"
 	"encoding/hex"
 	"fmt"
+	"k8s.io/client-go/util/retry"
 	"strings"
 	"time"
 
@@ -759,8 +760,34 @@ func (r *PlatformBootstrapReconciler) writeFGAStoreID(ctx context.Context, ref g
 }
 
 // statusUpdate writes status via the subresource.
+//
+// A conflict is retried onto a fresh read of the object with the status THIS
+// reconcile computed. One reconcile creates the Platform owner in Zitadel,
+// records the new user id in pb.Status and writes it here; when the write
+// lost a conflict to a concurrent status writer, the id was dropped, the
+// next reconcile created the user again (409) and looked it up by email,
+// and the platform never became ready (hosted#309). Zitadel side effects
+// are not repeatable, so the status that records them must land.
 func (r *PlatformBootstrapReconciler) statusUpdate(ctx context.Context, pb *gibsonv1alpha1.PlatformBootstrap) error {
-	if err := r.Status().Update(ctx, pb); err != nil {
+	desired := pb.Status.DeepCopy()
+	err := retry.RetryOnConflict(retry.DefaultBackoff, func() error {
+		uerr := r.Status().Update(ctx, pb)
+		if uerr == nil {
+			return nil
+		}
+		if !apierrors.IsConflict(uerr) {
+			return fmt.Errorf("status update: %w", uerr)
+		}
+		fresh := &gibsonv1alpha1.PlatformBootstrap{}
+		if gerr := r.Get(ctx, client.ObjectKeyFromObject(pb), fresh); gerr != nil {
+			return fmt.Errorf("re-read PlatformBootstrap after a conflict: %w", gerr)
+		}
+		fresh.Status = *desired
+		*pb = *fresh
+		// Wrapped, and still a conflict for RetryOnConflict (errors.As).
+		return fmt.Errorf("status update conflict, retrying: %w", uerr)
+	})
+	if err != nil {
 		return fmt.Errorf("PlatformBootstrap status update: %w", err)
 	}
 	return nil

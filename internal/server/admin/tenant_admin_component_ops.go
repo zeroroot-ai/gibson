@@ -494,7 +494,7 @@ func (s *TenantAdminServer) tenantOf(ctx context.Context, tenantID string) (tena
 		return tenantrole.Tenant{}, status.Errorf(codes.Internal, "resolve zitadel org for tenant %q: %v", tenantID, err)
 	}
 	if orgID == "" {
-		return tenantrole.Tenant{}, status.Errorf(codes.FailedPrecondition, "tenant %q has no zitadel org yet", tenantID)
+		return tenantrole.Tenant{}, status.Errorf(codes.FailedPrecondition, "tenant %q is still provisioning: no Zitadel org yet", tenantID)
 	}
 	return tenantrole.Tenant{ID: tenantID, OrgID: orgID}, nil
 }

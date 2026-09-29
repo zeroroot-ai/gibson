@@ -986,7 +986,7 @@ var Registry = map[string]Entry{
 	"/gibson.daemon.v1.DaemonService/CreateMission": {
 		Method:            "/gibson.daemon.v1.DaemonService/CreateMission",
 		Service:           "gibson.daemon.v1.DaemonService",
-		Relation:          "member",
+		Relation:          "writer",
 		ObjectType:        "tenant",
 		ObjectDeriver:     "tenant_from_identity",
 		AllowedIdentities: IdentityUser | IdentityService,
@@ -1006,7 +1006,7 @@ var Registry = map[string]Entry{
 	"/gibson.daemon.v1.DaemonService/CreateTarget": {
 		Method:            "/gibson.daemon.v1.DaemonService/CreateTarget",
 		Service:           "gibson.daemon.v1.DaemonService",
-		Relation:          "member",
+		Relation:          "writer",
 		ObjectType:        "tenant",
 		ObjectDeriver:     "tenant_from_identity",
 		AllowedIdentities: IdentityUser | IdentityService,
@@ -1016,7 +1016,7 @@ var Registry = map[string]Entry{
 	"/gibson.daemon.v1.DaemonService/DeleteTarget": {
 		Method:            "/gibson.daemon.v1.DaemonService/DeleteTarget",
 		Service:           "gibson.daemon.v1.DaemonService",
-		Relation:          "member",
+		Relation:          "writer",
 		ObjectType:        "tenant",
 		ObjectDeriver:     "tenant_from_identity",
 		AllowedIdentities: IdentityUser | IdentityService,
@@ -1196,7 +1196,7 @@ var Registry = map[string]Entry{
 	"/gibson.daemon.v1.DaemonService/PauseMission": {
 		Method:            "/gibson.daemon.v1.DaemonService/PauseMission",
 		Service:           "gibson.daemon.v1.DaemonService",
-		Relation:          "member",
+		Relation:          "writer",
 		ObjectType:        "tenant",
 		ObjectDeriver:     "tenant_from_identity",
 		AllowedIdentities: IdentityUser | IdentityService,
@@ -1236,7 +1236,7 @@ var Registry = map[string]Entry{
 	"/gibson.daemon.v1.DaemonService/ResumeMission": {
 		Method:            "/gibson.daemon.v1.DaemonService/ResumeMission",
 		Service:           "gibson.daemon.v1.DaemonService",
-		Relation:          "member",
+		Relation:          "writer",
 		ObjectType:        "tenant",
 		ObjectDeriver:     "tenant_from_identity",
 		AllowedIdentities: IdentityUser | IdentityService,
@@ -1246,7 +1246,7 @@ var Registry = map[string]Entry{
 	"/gibson.daemon.v1.DaemonService/RunMission": {
 		Method:            "/gibson.daemon.v1.DaemonService/RunMission",
 		Service:           "gibson.daemon.v1.DaemonService",
-		Relation:          "member",
+		Relation:          "writer",
 		ObjectType:        "tenant",
 		ObjectDeriver:     "tenant_from_identity",
 		AllowedIdentities: IdentityUser | IdentityService,
@@ -1306,7 +1306,7 @@ var Registry = map[string]Entry{
 	"/gibson.daemon.v1.DaemonService/StopMission": {
 		Method:            "/gibson.daemon.v1.DaemonService/StopMission",
 		Service:           "gibson.daemon.v1.DaemonService",
-		Relation:          "member",
+		Relation:          "writer",
 		ObjectType:        "tenant",
 		ObjectDeriver:     "tenant_from_identity",
 		AllowedIdentities: IdentityUser | IdentityService,
@@ -1336,7 +1336,7 @@ var Registry = map[string]Entry{
 	"/gibson.daemon.v1.DaemonService/UpdateTarget": {
 		Method:            "/gibson.daemon.v1.DaemonService/UpdateTarget",
 		Service:           "gibson.daemon.v1.DaemonService",
-		Relation:          "member",
+		Relation:          "writer",
 		ObjectType:        "tenant",
 		ObjectDeriver:     "tenant_from_identity",
 		AllowedIdentities: IdentityUser | IdentityService,
@@ -2396,7 +2396,7 @@ var Registry = map[string]Entry{
 	"/gibson.tenant.v1.BudgetService/SetTenantBudgetDefaults": {
 		Method:            "/gibson.tenant.v1.BudgetService/SetTenantBudgetDefaults",
 		Service:           "gibson.tenant.v1.BudgetService",
-		Relation:          "member",
+		Relation:          "admin",
 		ObjectType:        "tenant",
 		ObjectDeriver:     "tenant_from_identity",
 		AllowedIdentities: IdentityUser | IdentityService,
@@ -2626,7 +2626,7 @@ var Registry = map[string]Entry{
 	"/gibson.tenant.v1.MembershipService/GrantComponentPermissions": {
 		Method:            "/gibson.tenant.v1.MembershipService/GrantComponentPermissions",
 		Service:           "gibson.tenant.v1.MembershipService",
-		Relation:          "member",
+		Relation:          "writer",
 		ObjectType:        "tenant",
 		ObjectDeriver:     "tenant_from_identity",
 		AllowedIdentities: IdentityUser,
@@ -2776,7 +2776,7 @@ var Registry = map[string]Entry{
 	"/gibson.tenant.v1.ModelAccessService/GrantAccess": {
 		Method:            "/gibson.tenant.v1.ModelAccessService/GrantAccess",
 		Service:           "gibson.tenant.v1.ModelAccessService",
-		Relation:          "member",
+		Relation:          "writer",
 		ObjectType:        "tenant",
 		ObjectDeriver:     "tenant_from_identity",
 		AllowedIdentities: IdentityUser | IdentityService,
@@ -2806,7 +2806,7 @@ var Registry = map[string]Entry{
 	"/gibson.tenant.v1.ModelAccessService/RevokeAccess": {
 		Method:            "/gibson.tenant.v1.ModelAccessService/RevokeAccess",
 		Service:           "gibson.tenant.v1.ModelAccessService",
-		Relation:          "member",
+		Relation:          "writer",
 		ObjectType:        "tenant",
 		ObjectDeriver:     "tenant_from_identity",
 		AllowedIdentities: IdentityUser | IdentityService,
@@ -3166,7 +3166,7 @@ var Registry = map[string]Entry{
 	"/gibson.tenant.v1.TenantService/ExportFindings": {
 		Method:            "/gibson.tenant.v1.TenantService/ExportFindings",
 		Service:           "gibson.tenant.v1.TenantService",
-		Relation:          "writer",
+		Relation:          "member",
 		ObjectType:        "tenant",
 		ObjectDeriver:     "tenant_from_identity",
 		AllowedIdentities: IdentityUser | IdentityService,
@@ -3226,7 +3226,7 @@ var Registry = map[string]Entry{
 	"/gibson.tenant.v1.TenantService/ListAuditEvents": {
 		Method:            "/gibson.tenant.v1.TenantService/ListAuditEvents",
 		Service:           "gibson.tenant.v1.TenantService",
-		Relation:          "writer",
+		Relation:          "admin",
 		ObjectType:        "tenant",
 		ObjectDeriver:     "tenant_from_identity",
 		AllowedIdentities: IdentityUser | IdentityService,
@@ -3926,7 +3926,7 @@ var Registry = map[string]Entry{
 	"/gibson.world.v1.WorldService/SubmitLabel": {
 		Method:            "/gibson.world.v1.WorldService/SubmitLabel",
 		Service:           "gibson.world.v1.WorldService",
-		Relation:          "member",
+		Relation:          "writer",
 		ObjectType:        "tenant",
 		ObjectDeriver:     "tenant_from_identity",
 		AllowedIdentities: IdentityUser | IdentityService,

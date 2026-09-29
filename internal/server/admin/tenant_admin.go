@@ -382,10 +382,28 @@ func (s *TenantAdminServer) CountSecrets(ctx context.Context, _ *tenantv1.CountS
 	return &tenantv1.CountSecretsResponse{Count: int64(len(names))}, nil
 }
 
+// rosterRoleRelations are the FGA relations ListMembers checks for each
+// tenant user, highest first. "member" is implied by every tenant role and
+// is what ListUsers enumerated, so it needs no check.
+var rosterRoleRelations = []string{"owner", "admin", "writer"}
+
+// rosterRole maps one user's BatchCheck results, in rosterRoleRelations
+// order, to the tenant role the roster reports. The FGA model computes
+// admin from owner and writer from admin, so an Owner answers true to all
+// three; the highest relation wins.
+func rosterRole(held []bool) string {
+	for i, rel := range rosterRoleRelations {
+		if i < len(held) && held[i] {
+			return rel
+		}
+	}
+	return "member"
+}
+
 // ListMembers enumerates the members of the caller's tenant. It:
 //  1. Queries OpenFGA for all user references with the "member" relation on
 //     the tenant object.
-//  2. Batch-checks which of those users also have the "admin" relation.
+//  2. Batch-checks owner, admin and writer for each, and reports the highest.
 //  3. Enriches each entry with display_name and email from the IdP.
 //  4. Applies name_filter (case-insensitive prefix on display_name or email).
 //  5. Sorts by display_name, applies offset-based pagination via a
@@ -417,18 +435,28 @@ func (s *TenantAdminServer) ListMembers(ctx context.Context, req *tenantv1.ListM
 		return &tenantv1.ListMembersResponse{}, nil
 	}
 
-	// 2. Batch-check which users are also admins.
-	adminChecks := make([]authz.CheckRequest, len(userRefs))
-	for i, ref := range userRefs {
-		adminChecks[i] = authz.CheckRequest{
-			User:     ref,
-			Relation: "admin",
-			Object:   tenantObject,
+	// 2. Batch-check the three relations above "member" for every user, so
+	//    the roster reports the one tenant role each person holds (ADR-0093
+	//    decision 2: Owner, Admin, Editor, Viewer; FGA relations owner, admin,
+	//    writer, member). Until 2026-09-29 only "admin" was checked, so an
+	//    Owner showed as admin and an Editor as member, and the dashboard's
+	//    Owner rules and Editor role could not work from the roster.
+	roleChecks := make([]authz.CheckRequest, 0, len(userRefs)*len(rosterRoleRelations))
+	for _, ref := range userRefs {
+		for _, rel := range rosterRoleRelations {
+			roleChecks = append(roleChecks, authz.CheckRequest{
+				User:     ref,
+				Relation: rel,
+				Object:   tenantObject,
+			})
 		}
 	}
-	isAdmin, err := s.authorizer.BatchCheck(ctx, adminChecks)
+	held, err := s.authorizer.BatchCheck(ctx, roleChecks)
 	if err != nil {
-		return nil, status.Errorf(codes.Internal, "batch-check admin roles from FGA: %v", err)
+		return nil, status.Errorf(codes.Internal, "batch-check tenant roles from FGA: %v", err)
+	}
+	if len(held) != len(roleChecks) {
+		return nil, status.Errorf(codes.Internal, "batch-check tenant roles from FGA: %d results for %d checks", len(held), len(roleChecks))
 	}
 
 	// 3. Build member structs enriched from the IdP.
@@ -437,10 +465,7 @@ func (s *TenantAdminServer) ListMembers(ctx context.Context, req *tenantv1.ListM
 		// FGA user refs have the form "user:<id>".
 		userID := strings.TrimPrefix(ref, "user:")
 
-		role := "member"
-		if isAdmin[i] {
-			role = "admin"
-		}
+		role := rosterRole(held[i*len(rosterRoleRelations) : (i+1)*len(rosterRoleRelations)])
 
 		m := &tenantv1.TenantMember{
 			UserId: userID,

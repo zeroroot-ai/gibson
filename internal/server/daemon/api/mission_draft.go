@@ -21,11 +21,16 @@ import (
 	"github.com/zeroroot-ai/sdk/auth"
 )
 
+// tenantRelationWriter is the relation the authz registry grants the four
+// mission-draft RPCs (registry.yaml: relation "writer"). A draft is a
+// writer's work; the in-handler cross-check gates on the same relation.
+const tenantRelationWriter = "writer"
+
 // SaveMissionDraft persists a mission CUE draft for the calling tenant.
 // When req.DraftId is empty a new draft is created and its ID returned;
 // otherwise the existing draft is overwritten.
 //
-// gibsoncheck:allow tenant-from-request — guarded by requireTenantAdmin(ctx, tenantID) below,
+// gibsoncheck:allow tenant-from-request — guarded by requireTenantRelation(ctx, tenantID, "writer") below,
 // which FGA-Checks the caller's subject against the supplied tenant.
 func (s *DaemonServer) SaveMissionDraft(ctx context.Context, req *tenantv1.SaveMissionDraftRequest) (*tenantv1.SaveMissionDraftResponse, error) {
 	if s.missionDraftStore == nil {
@@ -39,7 +44,7 @@ func (s *DaemonServer) SaveMissionDraft(ctx context.Context, req *tenantv1.SaveM
 	if tenantID == "" {
 		return nil, status_grpc.Error(codes.InvalidArgument, "tenant_id is required")
 	}
-	if err := s.requireTenantAdmin(ctx, tenantID); err != nil {
+	if err := s.requireTenantRelation(ctx, tenantID, tenantRelationWriter); err != nil {
 		return nil, err
 	}
 
@@ -54,7 +59,7 @@ func (s *DaemonServer) SaveMissionDraft(ctx context.Context, req *tenantv1.SaveM
 // ordered by update time descending. CUE source is omitted from list
 // responses; use GetMissionDraft to fetch a single draft's full content.
 //
-// gibsoncheck:allow tenant-from-request — guarded by requireTenantAdmin(ctx, tenantID) below.
+// gibsoncheck:allow tenant-from-request — guarded by requireTenantRelation(ctx, tenantID, "writer") below.
 func (s *DaemonServer) ListMissionDrafts(ctx context.Context, req *tenantv1.ListMissionDraftsRequest) (*tenantv1.ListMissionDraftsResponse, error) {
 	if s.missionDraftStore == nil {
 		return nil, status_grpc.Error(codes.Unavailable, "mission draft store is not configured")
@@ -67,7 +72,7 @@ func (s *DaemonServer) ListMissionDrafts(ctx context.Context, req *tenantv1.List
 	if tenantID == "" {
 		return nil, status_grpc.Error(codes.InvalidArgument, "tenant_id is required")
 	}
-	if err := s.requireTenantAdmin(ctx, tenantID); err != nil {
+	if err := s.requireTenantRelation(ctx, tenantID, tenantRelationWriter); err != nil {
 		return nil, err
 	}
 
@@ -92,7 +97,7 @@ func (s *DaemonServer) ListMissionDrafts(ctx context.Context, req *tenantv1.List
 // GetMissionDraft fetches a single saved draft including its CUE source.
 // Returns codes.NotFound when no draft with that ID exists for the tenant.
 //
-// gibsoncheck:allow tenant-from-request — guarded by requireTenantAdmin(ctx, tenantID) below.
+// gibsoncheck:allow tenant-from-request — guarded by requireTenantRelation(ctx, tenantID, "writer") below.
 func (s *DaemonServer) GetMissionDraft(ctx context.Context, req *tenantv1.GetMissionDraftRequest) (*tenantv1.GetMissionDraftResponse, error) {
 	if s.missionDraftStore == nil {
 		return nil, status_grpc.Error(codes.Unavailable, "mission draft store is not configured")
@@ -108,7 +113,7 @@ func (s *DaemonServer) GetMissionDraft(ctx context.Context, req *tenantv1.GetMis
 	if req.GetDraftId() == "" {
 		return nil, status_grpc.Error(codes.InvalidArgument, "draft_id is required")
 	}
-	if err := s.requireTenantAdmin(ctx, tenantID); err != nil {
+	if err := s.requireTenantRelation(ctx, tenantID, tenantRelationWriter); err != nil {
 		return nil, err
 	}
 
@@ -134,7 +139,7 @@ func (s *DaemonServer) GetMissionDraft(ctx context.Context, req *tenantv1.GetMis
 // DeleteMissionDraft removes a saved draft. Idempotent: deleting a missing
 // draft returns OK (the underlying Redis DEL is a no-op on missing keys).
 //
-// gibsoncheck:allow tenant-from-request — guarded by requireTenantAdmin(ctx, tenantID) below.
+// gibsoncheck:allow tenant-from-request — guarded by requireTenantRelation(ctx, tenantID, "writer") below.
 func (s *DaemonServer) DeleteMissionDraft(ctx context.Context, req *tenantv1.DeleteMissionDraftRequest) (*tenantv1.DeleteMissionDraftResponse, error) {
 	if s.missionDraftStore == nil {
 		return nil, status_grpc.Error(codes.Unavailable, "mission draft store is not configured")
@@ -150,7 +155,7 @@ func (s *DaemonServer) DeleteMissionDraft(ctx context.Context, req *tenantv1.Del
 	if req.GetDraftId() == "" {
 		return nil, status_grpc.Error(codes.InvalidArgument, "draft_id is required")
 	}
-	if err := s.requireTenantAdmin(ctx, tenantID); err != nil {
+	if err := s.requireTenantRelation(ctx, tenantID, tenantRelationWriter); err != nil {
 		return nil, err
 	}
 

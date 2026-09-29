@@ -30,6 +30,12 @@ type membersAuthorizer struct {
 	// admins is the set of user IDs (without "user:" prefix) that the
 	// BatchCheck call should consider admins.
 	admins map[string]bool
+	// owners and writers answer the owner and writer relation checks the
+	// four-role roster makes (ADR-0093 decision 2). An owner is also an
+	// admin and a writer in the FGA model, so the fake answers the way the
+	// model would: owner implies admin implies writer.
+	owners  map[string]bool
+	writers map[string]bool
 	// listUsersErr is returned by ListUsers when non-nil.
 	listUsersErr error
 	// batchCheckErr is returned by BatchCheck when non-nil.
@@ -73,7 +79,16 @@ func (m *membersAuthorizer) BatchCheck(_ context.Context, checks []authz.CheckRe
 		if len(uid) > 5 && uid[:5] == "user:" {
 			uid = uid[5:]
 		}
-		out[i] = m.admins[uid]
+		switch c.Relation {
+		case "owner":
+			out[i] = m.owners[uid]
+		case "admin":
+			out[i] = m.owners[uid] || m.admins[uid]
+		case "writer":
+			out[i] = m.owners[uid] || m.admins[uid] || m.writers[uid]
+		default:
+			out[i] = true
+		}
 	}
 	return out, nil
 }
@@ -298,6 +313,60 @@ func TestListMembers_TwoMembersOneAdmin(t *testing.T) {
 	}
 	if bob.GetDisplayName() != "Bob Member" {
 		t.Errorf("members[1].display_name: got %q", bob.GetDisplayName())
+	}
+}
+
+// TestListMembers_FourRoles checks that the roster reports each of the four
+// tenant roles (ADR-0093 decision 2): owner, admin, writer (Editor) and
+// member (Viewer), highest relation first when the FGA model implies the
+// lower ones.
+func TestListMembers_FourRoles(t *testing.T) {
+	az := &membersAuthorizer{
+		members: []string{"user:owner-id", "user:admin-id", "user:editor-id", "user:viewer-id"},
+		owners:  map[string]bool{"owner-id": true},
+		admins:  map[string]bool{"admin-id": true},
+		writers: map[string]bool{"editor-id": true},
+	}
+	idpC := &membersIdPClient{
+		profiles: map[string]*idp.UserProfile{
+			"owner-id":  {AccountID: "owner-id", DisplayName: "A Owner", Email: "owner@example.com"},
+			"admin-id":  {AccountID: "admin-id", DisplayName: "B Admin", Email: "admin@example.com"},
+			"editor-id": {AccountID: "editor-id", DisplayName: "C Editor", Email: "editor@example.com"},
+			"viewer-id": {AccountID: "viewer-id", DisplayName: "D Viewer", Email: "viewer@example.com"},
+		},
+	}
+	srv := newMembersTestServer(t, az, idpC)
+	resp, err := srv.ListMembers(ctxWithTenant(t, "acme"), &tenantv1.ListMembersRequest{})
+	if err != nil {
+		t.Fatalf("ListMembers: %v", err)
+	}
+	want := map[string]string{"owner-id": "owner", "admin-id": "admin", "editor-id": "writer", "viewer-id": "member"}
+	if len(resp.GetMembers()) != len(want) {
+		t.Fatalf("expected %d members, got %d", len(want), len(resp.GetMembers()))
+	}
+	for _, m := range resp.GetMembers() {
+		if got := m.GetRole(); got != want[m.GetUserId()] {
+			t.Errorf("%s: role %q, want %q", m.GetUserId(), got, want[m.GetUserId()])
+		}
+	}
+}
+
+// TestRosterRole covers the precedence table on its own.
+func TestRosterRole(t *testing.T) {
+	cases := []struct {
+		held []bool
+		want string
+	}{
+		{[]bool{true, true, true}, "owner"},
+		{[]bool{false, true, true}, "admin"},
+		{[]bool{false, false, true}, "writer"},
+		{[]bool{false, false, false}, "member"},
+		{nil, "member"},
+	}
+	for _, c := range cases {
+		if got := rosterRole(c.held); got != c.want {
+			t.Errorf("rosterRole(%v) = %q, want %q", c.held, got, c.want)
+		}
 	}
 }
 

@@ -757,3 +757,90 @@ func TestSeedSessionTuples_Failures(t *testing.T) {
 		}
 	})
 }
+
+// TestInviteProvisionedOwner_IssuesOwnerAndMails: the founding Owner of a
+// provisioned tenant gets the same store row and the same accept-link mail an
+// invitee gets, with role owner (hosted#205).
+func TestInviteProvisionedOwner_IssuesOwnerAndMails(t *testing.T) {
+	db, mock, err := sqlmock.New()
+	if err != nil {
+		t.Fatalf("sqlmock: %v", err)
+	}
+	t.Cleanup(func() { _ = db.Close() })
+	mock.ExpectExec("CREATE TABLE IF NOT EXISTS tenant_invitations").WillReturnResult(sqlmock.NewResult(0, 0))
+	mock.ExpectExec("CREATE UNIQUE INDEX").WillReturnResult(sqlmock.NewResult(0, 0))
+	mock.ExpectQuery(regexp.QuoteMeta("INSERT INTO tenant_invitations")).
+		WithArgs(sqlmock.AnyArg(), "second", "owner@example.com", "owner", sqlmock.AnyArg(), "platform-owner-1", sqlmock.AnyArg()).
+		WillReturnRows(sqlmock.NewRows([]string{"id", "expires_at"}).AddRow("inv-owner", nowPlus()))
+
+	srv := newMembersTestServer(t, &membersAuthorizer{}, &membersIdPClient{})
+	srv.invitations = NewInvitationStore(db)
+	capture := &captureInviteMailer{}
+	srv.inviteMailer = capture
+	srv.inviteBaseURL = "https://app.example.com/"
+
+	if err := srv.InviteProvisionedOwner(context.Background(), "second", "owner@example.com", "platform-owner-1"); err != nil {
+		t.Fatalf("InviteProvisionedOwner: %v", err)
+	}
+	if capture.last.To != "owner@example.com" || capture.last.Role != "owner" || capture.last.TenantID != "second" {
+		t.Fatalf("mail = %+v, want owner@example.com as owner of second", capture.last)
+	}
+	if !strings.HasPrefix(capture.last.AcceptURL, "https://app.example.com/invite/") {
+		t.Fatalf("accept link = %q, want <app origin>/invite/<token>", capture.last.AcceptURL)
+	}
+	if err := mock.ExpectationsWereMet(); err != nil {
+		t.Errorf("expectations: %v", err)
+	}
+}
+
+// TestInviteProvisionedOwner_RefusesWithoutMail: no transport means no way in
+// for the owner, so nothing is written (hosted#205).
+func TestInviteProvisionedOwner_RefusesWithoutMail(t *testing.T) {
+	db, mock, err := sqlmock.New()
+	if err != nil {
+		t.Fatalf("sqlmock: %v", err)
+	}
+	t.Cleanup(func() { _ = db.Close() })
+	srv := newMembersTestServer(t, &membersAuthorizer{}, &membersIdPClient{})
+	srv.invitations = NewInvitationStore(db)
+	srv.inviteMailer = nil
+
+	err = srv.InviteProvisionedOwner(context.Background(), "second", "owner@example.com", "platform-owner-1")
+	if status_grpc.Code(err) != codes.Unavailable {
+		t.Fatalf("expected Unavailable without mail, got %v", err)
+	}
+	if err := mock.ExpectationsWereMet(); err != nil {
+		t.Errorf("no row may be written before the refusal: %v", err)
+	}
+}
+
+// TestInviteProvisionedOwner_Refusals: the argument, store and Issue refusals.
+func TestInviteProvisionedOwner_Refusals(t *testing.T) {
+	srv := newMembersTestServer(t, &membersAuthorizer{}, &membersIdPClient{})
+	srv.inviteMailer = &captureInviteMailer{}
+	srv.inviteBaseURL = "https://app.example.com"
+
+	if err := srv.InviteProvisionedOwner(context.Background(), "", "owner@example.com", "p"); status_grpc.Code(err) != codes.InvalidArgument {
+		t.Fatalf("empty tenant: expected InvalidArgument, got %v", err)
+	}
+	if err := srv.InviteProvisionedOwner(context.Background(), "second", "", "p"); status_grpc.Code(err) != codes.InvalidArgument {
+		t.Fatalf("empty owner: expected InvalidArgument, got %v", err)
+	}
+	srv.invitations = nil
+	if err := srv.InviteProvisionedOwner(context.Background(), "second", "owner@example.com", "p"); status_grpc.Code(err) != codes.Unavailable {
+		t.Fatalf("nil store: expected Unavailable, got %v", err)
+	}
+
+	db, mock, err := sqlmock.New()
+	if err != nil {
+		t.Fatalf("sqlmock: %v", err)
+	}
+	t.Cleanup(func() { _ = db.Close() })
+	mock.ExpectExec("CREATE TABLE IF NOT EXISTS tenant_invitations").WillReturnResult(sqlmock.NewResult(0, 0))
+	mock.ExpectExec("CREATE UNIQUE INDEX").WillReturnResult(sqlmock.NewResult(0, 0))
+	mock.ExpectQuery(regexp.QuoteMeta("INSERT INTO tenant_invitations")).WillReturnError(errors.New("db down"))
+	srv.invitations = NewInvitationStore(db)
+	if err := srv.InviteProvisionedOwner(context.Background(), "second", "owner@example.com", "p"); status_grpc.Code(err) != codes.Internal {
+		t.Fatalf("Issue failure: expected Internal, got %v", err)
+	}
+}

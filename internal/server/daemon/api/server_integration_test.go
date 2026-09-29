@@ -62,7 +62,7 @@ const integTestSubject = "integ-admin"
 
 // newIntegServer builds a DaemonServer with the mission-draft store wired using
 // miniredis, plus a fakeAuthorizer granting integTestSubject the tenant admin
-// relation on "tenant-1" so requireTenantAdmin's FGA Check passes.
+// and writer relations on "tenant-1" so the in-handler gates pass.
 func newIntegServer(t *testing.T) *DaemonServer {
 	t.Helper()
 	mr := miniredis.RunT(t)
@@ -73,7 +73,12 @@ func newIntegServer(t *testing.T) *DaemonServer {
 
 	srv := &DaemonServer{logger: integTestLogger}
 	srv.WithMissionDraftStore(draftStore)
-	srv.WithAuthorizer(newFakeAuthorizer().allow("user:"+integTestSubject, "admin", "tenant:tenant-1"))
+	// The fake authorizer holds exact tuples, unlike the FGA model where admin
+	// implies writer: grant both, since the draft RPCs gate on writer (the
+	// registry's relation) and the other tenant RPCs on admin.
+	srv.WithAuthorizer(newFakeAuthorizer().
+		allow("user:"+integTestSubject, "admin", "tenant:tenant-1").
+		allow("user:"+integTestSubject, "writer", "tenant:tenant-1"))
 	return srv
 }
 

@@ -19,7 +19,7 @@ import "gibson/auth/v1/options.proto";
 service ModelAccessService {
   rpc GrantAccess(GrantAccessRequest) returns (GrantAccessResponse) {
     option (gibson.auth.v1.authz) = {
-      relation: "member"
+      relation: "writer"
       object_type: "tenant"
       object_deriver: "tenant_from_identity"
       allowed_identities: 3  // USER | SERVICE
@@ -27,7 +27,7 @@ service ModelAccessService {
   }
   rpc RevokeAccess(RevokeAccessRequest) returns (RevokeAccessResponse) {
     option (gibson.auth.v1.authz) = {
-      relation: "member"
+      relation: "writer"
       object_type: "tenant"
       object_deriver: "tenant_from_identity"
       allowed_identities: 3  // USER | SERVICE

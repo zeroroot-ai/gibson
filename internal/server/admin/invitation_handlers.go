@@ -112,6 +112,44 @@ func (s *TenantAdminServer) fakeSentAfterConflictNotice(ctx context.Context, ema
 	}, nil
 }
 
+// InviteProvisionedOwner issues the founding Owner's invitation for a tenant
+// the Platform owner provisions through AdminProvisionTenant (hosted#205).
+//
+// It is the same mechanism InviteMember uses, and nothing else: the same
+// store row (role "owner", invited by the Platform owner), the same mail with
+// the same <app origin>/invite/<token> link, and the same AcceptInvitation
+// that creates the Zitadel user in the tenant's org, assigns Owner with its
+// FGA copy and hands the person their setup link. Until this existed the
+// provision path created the Tenant CR only, so the named owner had no
+// account, no role and no way in.
+//
+// The mail is checked BEFORE anything is written: an install with no mail
+// transport cannot bring an owner in, and AdminProvisionTenant must refuse
+// before it queues a tenant nobody can reach. Issue is an upsert on
+// (tenant, email), so a retry after a failed send mints a fresh token and
+// mails again; it never strands a row whose token was lost.
+func (s *TenantAdminServer) InviteProvisionedOwner(ctx context.Context, tenantID, ownerEmail, invitedBy string) error {
+	if tenantID == "" || ownerEmail == "" {
+		return status.Error(codes.InvalidArgument, "tenant id and owner email required")
+	}
+	if s.invitations == nil {
+		return status.Error(codes.Unavailable, "invitation store not configured")
+	}
+	if s.inviteMailer == nil || s.inviteBaseURL == "" {
+		return status.Error(codes.Unavailable,
+			"transactional email is not configured; a provisioned tenant's owner is brought in by an emailed invitation, so configure the email provider and public URL first")
+	}
+	token, hash, err := GenerateInvitationToken()
+	if err != nil {
+		return status.Errorf(codes.Internal, "generate invitation token: %v", err)
+	}
+	_, expiresAt, err := s.invitations.Issue(ctx, tenantID, ownerEmail, tenantrole.Owner.Relation(), hash, invitedBy)
+	if err != nil {
+		return status.Errorf(codes.Internal, "issue owner invitation: %v", err)
+	}
+	return s.sendInvitationEmail(ctx, tenantID, ownerEmail, tenantrole.Owner.Relation(), token, expiresAt)
+}
+
 // InviteMember creates (or refreshes) a pending invitation for an email address
 // with a tenant role. It generates a random token, persists only its hash with
 // a TTL, and surfaces the invitee in ListMembers as "invited". Emailing the

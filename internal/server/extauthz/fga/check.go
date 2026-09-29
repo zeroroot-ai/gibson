@@ -437,10 +437,11 @@ func (c *CachedChecker) CheckPlatformOperator(ctx context.Context, subject strin
 // The result is NOT cached. Caching is intentionally omitted for this check:
 // the condition is evaluated per RFC3339-serialised iat value (token-specific),
 // so two requests from the same user with different tokens would require
-// distinct cache keys. More importantly, correctness requires that a revocation
-// propagates within the FGA cache TTL (≤30 s) — caching the gate's "allowed"
-// result at the ext-authz level would let a revoked token continue to pass for
-// up to another TTL window after the next slice's push-invalidation arrives.
+// distinct cache keys. More importantly, a revocation must refuse the token
+// on its next request: caching the gate's "allowed" result here would let a
+// revoked token pass for up to DefaultCacheTTL. Nothing evicts this
+// process's cache from outside (cache.go), so the only correct cache for
+// this gate is none.
 // The FGA network round-trip for this uncached call is within budget: the
 // per-call timeout floor from platform-clients applies, and active_session is a
 // hot path that benefits from FGA's in-process LRU.

@@ -109,19 +109,6 @@ func TestCachedChecker_DoesNotCacheErrors(t *testing.T) {
 	}
 }
 
-func TestCachedChecker_InvalidateTenantClearsOnlyThatTenant(t *testing.T) {
-	stub := &mockFGA{allowed: true}
-	cc := NewCachedChecker(NewChecker(stub, makeReg(t)), time.Hour, 100)
-	_, _ = cc.Check(context.Background(), "/test.v1.S/Member", headers.Identity{Subject: "u", Tenant: "acme", CredentialType: "oidc-user"}, nil)
-	_, _ = cc.Check(context.Background(), "/test.v1.S/Member", headers.Identity{Subject: "u", Tenant: "bigcorp", CredentialType: "oidc-user"}, nil)
-	cc.InvalidateTenant("acme")
-	_, _ = cc.Check(context.Background(), "/test.v1.S/Member", headers.Identity{Subject: "u", Tenant: "acme", CredentialType: "oidc-user"}, nil)
-	_, _ = cc.Check(context.Background(), "/test.v1.S/Member", headers.Identity{Subject: "u", Tenant: "bigcorp", CredentialType: "oidc-user"}, nil)
-	if got := atomic.LoadInt32(&stub.calls); got != 3 {
-		t.Fatalf("expected 3 inner calls, got %d", got)
-	}
-}
-
 func TestCachedChecker_UnauthenticatedSkipsCacheAndFGA(t *testing.T) {
 	stub := &mockFGA{allowed: false}
 	cc := NewCachedChecker(NewChecker(stub, makeReg(t)), time.Hour, 100)

@@ -973,7 +973,7 @@ export const AuthRegistry: Record<string, AuthEntry> = {
   "/gibson.daemon.v1.DaemonService/CreateMission": {
     method: "/gibson.daemon.v1.DaemonService/CreateMission",
     service: "gibson.daemon.v1.DaemonService",
-    relation: "member",
+    relation: "writer",
     objectType: "tenant",
     objectDeriver: "tenant_from_identity",
     allowedIdentities: IdentityClass.USER | IdentityClass.SERVICE,
@@ -993,7 +993,7 @@ export const AuthRegistry: Record<string, AuthEntry> = {
   "/gibson.daemon.v1.DaemonService/CreateTarget": {
     method: "/gibson.daemon.v1.DaemonService/CreateTarget",
     service: "gibson.daemon.v1.DaemonService",
-    relation: "member",
+    relation: "writer",
     objectType: "tenant",
     objectDeriver: "tenant_from_identity",
     allowedIdentities: IdentityClass.USER | IdentityClass.SERVICE,
@@ -1003,7 +1003,7 @@ export const AuthRegistry: Record<string, AuthEntry> = {
   "/gibson.daemon.v1.DaemonService/DeleteTarget": {
     method: "/gibson.daemon.v1.DaemonService/DeleteTarget",
     service: "gibson.daemon.v1.DaemonService",
-    relation: "member",
+    relation: "writer",
     objectType: "tenant",
     objectDeriver: "tenant_from_identity",
     allowedIdentities: IdentityClass.USER | IdentityClass.SERVICE,
@@ -1183,7 +1183,7 @@ export const AuthRegistry: Record<string, AuthEntry> = {
   "/gibson.daemon.v1.DaemonService/PauseMission": {
     method: "/gibson.daemon.v1.DaemonService/PauseMission",
     service: "gibson.daemon.v1.DaemonService",
-    relation: "member",
+    relation: "writer",
     objectType: "tenant",
     objectDeriver: "tenant_from_identity",
     allowedIdentities: IdentityClass.USER | IdentityClass.SERVICE,
@@ -1223,7 +1223,7 @@ export const AuthRegistry: Record<string, AuthEntry> = {
   "/gibson.daemon.v1.DaemonService/ResumeMission": {
     method: "/gibson.daemon.v1.DaemonService/ResumeMission",
     service: "gibson.daemon.v1.DaemonService",
-    relation: "member",
+    relation: "writer",
     objectType: "tenant",
     objectDeriver: "tenant_from_identity",
     allowedIdentities: IdentityClass.USER | IdentityClass.SERVICE,
@@ -1233,7 +1233,7 @@ export const AuthRegistry: Record<string, AuthEntry> = {
   "/gibson.daemon.v1.DaemonService/RunMission": {
     method: "/gibson.daemon.v1.DaemonService/RunMission",
     service: "gibson.daemon.v1.DaemonService",
-    relation: "member",
+    relation: "writer",
     objectType: "tenant",
     objectDeriver: "tenant_from_identity",
     allowedIdentities: IdentityClass.USER | IdentityClass.SERVICE,
@@ -1293,7 +1293,7 @@ export const AuthRegistry: Record<string, AuthEntry> = {
   "/gibson.daemon.v1.DaemonService/StopMission": {
     method: "/gibson.daemon.v1.DaemonService/StopMission",
     service: "gibson.daemon.v1.DaemonService",
-    relation: "member",
+    relation: "writer",
     objectType: "tenant",
     objectDeriver: "tenant_from_identity",
     allowedIdentities: IdentityClass.USER | IdentityClass.SERVICE,
@@ -1323,7 +1323,7 @@ export const AuthRegistry: Record<string, AuthEntry> = {
   "/gibson.daemon.v1.DaemonService/UpdateTarget": {
     method: "/gibson.daemon.v1.DaemonService/UpdateTarget",
     service: "gibson.daemon.v1.DaemonService",
-    relation: "member",
+    relation: "writer",
     objectType: "tenant",
     objectDeriver: "tenant_from_identity",
     allowedIdentities: IdentityClass.USER | IdentityClass.SERVICE,
@@ -2383,7 +2383,7 @@ export const AuthRegistry: Record<string, AuthEntry> = {
   "/gibson.tenant.v1.BudgetService/SetTenantBudgetDefaults": {
     method: "/gibson.tenant.v1.BudgetService/SetTenantBudgetDefaults",
     service: "gibson.tenant.v1.BudgetService",
-    relation: "member",
+    relation: "admin",
     objectType: "tenant",
     objectDeriver: "tenant_from_identity",
     allowedIdentities: IdentityClass.USER | IdentityClass.SERVICE,
@@ -2613,7 +2613,7 @@ export const AuthRegistry: Record<string, AuthEntry> = {
   "/gibson.tenant.v1.MembershipService/GrantComponentPermissions": {
     method: "/gibson.tenant.v1.MembershipService/GrantComponentPermissions",
     service: "gibson.tenant.v1.MembershipService",
-    relation: "member",
+    relation: "writer",
     objectType: "tenant",
     objectDeriver: "tenant_from_identity",
     allowedIdentities: IdentityClass.USER,
@@ -2763,7 +2763,7 @@ export const AuthRegistry: Record<string, AuthEntry> = {
   "/gibson.tenant.v1.ModelAccessService/GrantAccess": {
     method: "/gibson.tenant.v1.ModelAccessService/GrantAccess",
     service: "gibson.tenant.v1.ModelAccessService",
-    relation: "member",
+    relation: "writer",
     objectType: "tenant",
     objectDeriver: "tenant_from_identity",
     allowedIdentities: IdentityClass.USER | IdentityClass.SERVICE,
@@ -2793,7 +2793,7 @@ export const AuthRegistry: Record<string, AuthEntry> = {
   "/gibson.tenant.v1.ModelAccessService/RevokeAccess": {
     method: "/gibson.tenant.v1.ModelAccessService/RevokeAccess",
     service: "gibson.tenant.v1.ModelAccessService",
-    relation: "member",
+    relation: "writer",
     objectType: "tenant",
     objectDeriver: "tenant_from_identity",
     allowedIdentities: IdentityClass.USER | IdentityClass.SERVICE,
@@ -3153,7 +3153,7 @@ export const AuthRegistry: Record<string, AuthEntry> = {
   "/gibson.tenant.v1.TenantService/ExportFindings": {
     method: "/gibson.tenant.v1.TenantService/ExportFindings",
     service: "gibson.tenant.v1.TenantService",
-    relation: "writer",
+    relation: "member",
     objectType: "tenant",
     objectDeriver: "tenant_from_identity",
     allowedIdentities: IdentityClass.USER | IdentityClass.SERVICE,
@@ -3213,7 +3213,7 @@ export const AuthRegistry: Record<string, AuthEntry> = {
   "/gibson.tenant.v1.TenantService/ListAuditEvents": {
     method: "/gibson.tenant.v1.TenantService/ListAuditEvents",
     service: "gibson.tenant.v1.TenantService",
-    relation: "writer",
+    relation: "admin",
     objectType: "tenant",
     objectDeriver: "tenant_from_identity",
     allowedIdentities: IdentityClass.USER | IdentityClass.SERVICE,
@@ -3913,7 +3913,7 @@ export const AuthRegistry: Record<string, AuthEntry> = {
   "/gibson.world.v1.WorldService/SubmitLabel": {
     method: "/gibson.world.v1.WorldService/SubmitLabel",
     service: "gibson.world.v1.WorldService",
-    relation: "member",
+    relation: "writer",
     objectType: "tenant",
     objectDeriver: "tenant_from_identity",
     allowedIdentities: IdentityClass.USER | IdentityClass.SERVICE,

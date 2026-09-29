@@ -1,5 +1,49 @@
 # Changelog
 
+## [0.143.8](https://github.com/zeroroot-ai/gibson/compare/v0.143.7...v0.143.8) (2026-09-29)
+
+
+### Bug Fixes
+
+* **rework:** the FGA cache TTL has one default, and ext-authz main reads it ([#428](https://github.com/zeroroot-ai/gibson/issues/428)) ([5aae047](https://github.com/zeroroot-ai/gibson/commit/5aae047e8cab81b6fd443660767d07c1e9ef53a5))
+
+## [0.143.7](https://github.com/zeroroot-ai/gibson/compare/v0.143.6...v0.143.7) (2026-09-29)
+
+
+### Bug Fixes
+
+* **authz:** adopt sdk v0.183.1, a Viewer reads and never changes tenant state ([#424](https://github.com/zeroroot-ai/gibson/issues/424)) ([57171d6](https://github.com/zeroroot-ai/gibson/commit/57171d63d453f5e57f34ec8aabbf485b7a4219fc))
+
+## [0.143.6](https://github.com/zeroroot-ai/gibson/compare/v0.143.5...v0.143.6) (2026-09-29)
+
+
+### Bug Fixes
+
+* **platform-operator:** the Platform owner becomes ready when its status write races its own user create ([#421](https://github.com/zeroroot-ai/gibson/issues/421)) ([25f8a41](https://github.com/zeroroot-ai/gibson/commit/25f8a410582eb52887fed83274771a96765ad151))
+
+## [0.143.5](https://github.com/zeroroot-ai/gibson/compare/v0.143.4...v0.143.5) (2026-09-29)
+
+
+### Bug Fixes
+
+* **ext-authz:** the FGA decision cache expires in five seconds, and its dead invalidation hooks are gone ([#412](https://github.com/zeroroot-ai/gibson/issues/412)) ([72260c5](https://github.com/zeroroot-ai/gibson/commit/72260c5bdf0afd6075ea613c956711a133601669))
+* **tenantrole:** the inline sync trusts the role it just wrote over a lagging read ([#413](https://github.com/zeroroot-ai/gibson/issues/413)) ([079e834](https://github.com/zeroroot-ai/gibson/commit/079e83486307f34aebe7b18e1716c50ade54d53c))
+
+## [0.143.4](https://github.com/zeroroot-ai/gibson/compare/v0.143.3...v0.143.4) (2026-09-29)
+
+
+### Bug Fixes
+
+* **daemon:** report all four tenant roles, so an Editor is an Editor and an Owner is an Owner ([#404](https://github.com/zeroroot-ai/gibson/issues/404)) ([2557b58](https://github.com/zeroroot-ai/gibson/commit/2557b586051ee2c8195b08cd6ead6ad15e3e82f3))
+
+## [0.143.3](https://github.com/zeroroot-ai/gibson/compare/v0.143.2...v0.143.3) (2026-09-29)
+
+
+### Bug Fixes
+
+* **daemon:** a tenant the Platform owner provisions brings its owner in ([#372](https://github.com/zeroroot-ai/gibson/issues/372)) ([cbc70ad](https://github.com/zeroroot-ai/gibson/commit/cbc70ade6fbf2c48c608ad0783a047a773c2517f))
+* **daemon:** an MFA reset is not performed without its audit record ([#371](https://github.com/zeroroot-ai/gibson/issues/371)) ([093cb49](https://github.com/zeroroot-ai/gibson/commit/093cb497cf9c2be9875cfb9c24e72d8ce0508b50))
+
 ## [0.143.2](https://github.com/zeroroot-ai/gibson/compare/v0.143.1...v0.143.2) (2026-09-29)
 
 

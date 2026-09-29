@@ -1366,6 +1366,9 @@ func (d *daemonImpl) buildGRPCServer(ctx context.Context) (*grpcSubsystem, error
 		if brokerStackOK {
 			tenantv1.RegisterMembershipServiceServer(srv, tenantAdminSvc)
 			d.logger.Info(ctx, "registered gibson.tenant.v1.MembershipService gRPC endpoint")
+			// A tenant the Platform owner provisions brings its owner in
+			// through the same invitation path (hosted#205).
+			daemonSvc.WithProvisionedOwnerInviter(tenantAdminSvc)
 		} else {
 			tenantv1.RegisterMembershipServiceServer(srv, admin.NewUnavailableMembershipServer())
 		}

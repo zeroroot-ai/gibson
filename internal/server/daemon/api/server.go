@@ -144,6 +144,11 @@ type DaemonServer struct {
 	// May be nil; when nil, ListAuditEvents falls back to Loki only (or returns Unavailable).
 	auditLogger *audit.AuditLogger
 
+	// ownerInviter issues the founding Owner's invitation for a tenant the
+	// Platform owner provisions. AdminProvisionTenant refuses without it: a
+	// tenant is not queued when its owner has no way in (hosted#205).
+	ownerInviter ProvisionedOwnerInviter
+
 	// lokiQuerier is the Loki HTTP query client for audit events.
 	// May be nil; when nil, ListAuditEvents falls back to the Redis audit stream.
 	lokiQuerier audit.LokiQuerier
@@ -2907,6 +2912,7 @@ func (s *DaemonServer) GetMyPermissions(ctx context.Context, req *daemonpb.GetMy
 	checks := []authz.CheckRequest{
 		{User: userStr, Relation: "owner", Object: objStr},
 		{User: userStr, Relation: "admin", Object: objStr},
+		{User: userStr, Relation: "writer", Object: objStr},
 		{User: userStr, Relation: "member", Object: objStr},
 	}
 	results, err := s.authorizer.BatchCheck(ctx, checks)
@@ -2924,9 +2930,10 @@ func (s *DaemonServer) GetMyPermissions(ctx context.Context, req *daemonpb.GetMy
 
 	isOwner := len(results) > 0 && results[0]
 	isAdmin := len(results) > 1 && results[1]
-	isMember := len(results) > 2 && results[2]
+	isWriter := len(results) > 2 && results[2]
+	isMember := len(results) > 3 && results[3]
 
-	if !isOwner && !isAdmin && !isMember {
+	if !isOwner && !isAdmin && !isWriter && !isMember {
 		// The caller holds no relation on tenantID at all. Returning
 		// role:"member" here would be an untrue assertion the dashboard
 		// renders as real access to a tenant the caller cannot reach.
@@ -2934,13 +2941,13 @@ func (s *DaemonServer) GetMyPermissions(ctx context.Context, req *daemonpb.GetMy
 		return nil, status_grpc.Errorf(codes.PermissionDenied, "caller has no relation on tenant")
 	}
 
-	// pickHighestRole: owner > admin > member. Safe to call here because we
-	// have just established the caller holds at least one of the three
-	// relations; pickHighestRole(false, false) is only reached when isMember
-	// is true, so "member" is an accurate answer, not a default.
+	// pickHighestRole: owner > admin > writer > member. Safe to call here
+	// because we have just established the caller holds at least one of the
+	// four relations; the "member" answer is only reached when isMember is
+	// true, so it is an accurate answer, not a default.
 	// IsAdmin is true whenever the caller holds admin-or-above privilege
 	// (owners satisfy FGA "admin" checks via the computed union).
-	role := pickHighestRole(isOwner, isAdmin)
+	role := pickHighestRole(isOwner, isAdmin, isWriter)
 	effectiveAdmin := isOwner || isAdmin
 
 	// Component grants and team memberships were previously sourced from the
@@ -3000,6 +3007,7 @@ func (s *DaemonServer) ListMyMemberships(ctx context.Context, _ *daemonpb.ListMy
 	checks := []authz.CheckRequest{
 		{User: "user:" + userID, Relation: "owner", Object: objStr},
 		{User: "user:" + userID, Relation: "admin", Object: objStr},
+		{User: "user:" + userID, Relation: "writer", Object: objStr},
 		{User: "user:" + userID, Relation: "member", Object: objStr},
 	}
 	results, err := s.authorizer.BatchCheck(ctx, checks)
@@ -3014,8 +3022,9 @@ func (s *DaemonServer) ListMyMemberships(ctx context.Context, _ *daemonpb.ListMy
 
 	isOwner := len(results) > 0 && results[0]
 	isAdmin := len(results) > 1 && results[1]
-	isMember := len(results) > 2 && results[2]
-	if !isOwner && !isAdmin && !isMember {
+	isWriter := len(results) > 2 && results[2]
+	isMember := len(results) > 3 && results[3]
+	if !isOwner && !isAdmin && !isWriter && !isMember {
 		// The caller holds no relation on their resolved tenant at all —
 		// the role copy has not synced yet, or the person was removed.
 		// Fail closed to no memberships rather than assert a role the
@@ -3026,7 +3035,7 @@ func (s *DaemonServer) ListMyMemberships(ctx context.Context, _ *daemonpb.ListMy
 		)
 		return &daemonpb.ListMyMembershipsResponse{Memberships: nil}, nil
 	}
-	role := pickHighestRole(isOwner, isAdmin)
+	role := pickHighestRole(isOwner, isAdmin, isWriter)
 
 	// Friendly name lookup is best-effort; on miss/timeout fall back to ID.
 	name := bareTID
@@ -3053,19 +3062,23 @@ func (s *DaemonServer) ListMyMemberships(ctx context.Context, _ *daemonpb.ListMy
 // pickHighestRole returns the highest role the user holds for a tenant, given
 // the results of owner and admin BatchCheck calls.
 //
-// Role precedence (highest to lowest): owner > admin > member.
-// A user who holds owner inherits admin and member by FGA computed union, but
-// the daemon's BatchCheck observes the raw tuple-level result: if the owner
-// tuple exists, isOwner is true (and isAdmin may also be true due to the
-// computed union). We always return the highest explicit signal.
+// Role precedence (highest to lowest): owner > admin > writer > member, the
+// four tenant roles of ADR-0093 decision 2 (Owner, Admin, Editor, Viewer).
+// The FGA model computes each relation from the one above it, so an Owner
+// answers true to every check; the highest explicit signal wins. "writer"
+// was missing until 2026-09-29, so an Editor reached the dashboard as a
+// Viewer and its client-side authorization refused every Editor RPC.
 //
 // Spec: tenant-role-taxonomy Req 2.1, 2.2, 2.3.
-func pickHighestRole(isOwner, isAdmin bool) string {
+func pickHighestRole(isOwner, isAdmin, isWriter bool) string {
 	if isOwner {
 		return "owner"
 	}
 	if isAdmin {
 		return "admin"
+	}
+	if isWriter {
+		return "writer"
 	}
 	return "member"
 }
