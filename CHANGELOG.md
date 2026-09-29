@@ -1,5 +1,12 @@
 # Changelog
 
+## [0.143.7](https://github.com/zeroroot-ai/gibson/compare/v0.143.6...v0.143.7) (2026-09-29)
+
+
+### Bug Fixes
+
+* **authz:** adopt sdk v0.183.1, a Viewer reads and never changes tenant state ([#424](https://github.com/zeroroot-ai/gibson/issues/424)) ([57171d6](https://github.com/zeroroot-ai/gibson/commit/57171d63d453f5e57f34ec8aabbf485b7a4219fc))
+
 ## [0.143.6](https://github.com/zeroroot-ai/gibson/compare/v0.143.5...v0.143.6) (2026-09-29)
 
 
