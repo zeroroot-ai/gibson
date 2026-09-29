@@ -1029,7 +1029,12 @@ func (d *daemonImpl) Start(ctx context.Context) error {
 		d.stopServices(ctx)
 		return fmt.Errorf("failed to build belief schema registry: %w", err)
 	}
-	sliceBeliefProvider := resolveSliceBeliefProvider(beliefSchemaRegistry)
+	edgePosteriorProvider, err := resolveEdgePosteriorProvider()
+	if err != nil {
+		d.stopServices(ctx)
+		return fmt.Errorf("failed to resolve edge posterior provider: %w", err)
+	}
+	sliceBeliefProvider := resolveSliceBeliefProvider(beliefSchemaRegistry, edgePosteriorProvider)
 	d.brainRegistry = brain.NewRegistry(ctx, append(
 		[]brain.System{brain.BeliefSystem},
 		brain.ExecutorSystems()..., // scheduler/condition/decider-gate/budget/retry/completion (gibson#851)
@@ -1045,7 +1050,7 @@ func (d *daemonImpl) Start(ctx context.Context) error {
 	// through the SAME BeliefScored write path — so the two pipelines share one
 	// Host.Belief and never race. Registered here because engines fault in
 	// lazily on the first event.
-	wireBrainRegistry(ctx, d.brainRegistry, d.beliefProvider, sliceBeliefProvider, beliefSchemaRegistry)
+	wireBrainRegistry(ctx, d.brainRegistry, d.beliefProvider, sliceBeliefProvider, beliefSchemaRegistry, edgePosteriorProvider)
 	d.logger.Info(ctx, "ECS brain registry initialized", "belief_model", d.beliefProvider.Version(),
 		"slice_belief_model", sliceBeliefProvider.Version())
 

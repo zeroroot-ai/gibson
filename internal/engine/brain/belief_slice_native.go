@@ -22,71 +22,95 @@ import (
 // #401), so a bounded AttackGraph slice grounds to real noisy-OR causes
 // instead of the deterministic placeholder.
 //
-// Strength is NEVER hand-authored here (ADR-0037 decisions 2-3): every cause
-// this file builds — intra-node DependsOn and cross-node enablement alike —
-// uses UninformativePriorStrength, the cold-start mean of an uninformative
-// Beta prior. A learned per-edge-type Beta posterior (braintrain, #395) is a
-// separate, later slice; when it lands, only the strength this file plugs
-// into beliefvi.EnablementCause.Strength changes — the grounding structure
-// (which variable is a cause of which) does not.
+// Strength is NEVER hand-authored here (ADR-0037 decisions 2-3): every
+// intra-node DependsOn cause always uses UninformativePriorStrength — ADR-0037
+// scopes the learned posterior to ENABLEMENT edges only (bamcp.go's bamcpVar
+// doc comment applies the same scoping to BAMCP's rollouts). A cross-node
+// enablement cause uses the SAME constant only until a per-edge-type Beta
+// posterior is pinned (gibson#395, ADR-0037 decision 2): when
+// NativeSliceBeliefProvider is given a non-nil PinnedEdgeStrengthPosteriorProvider
+// (braintrain.EdgePosteriorArtifact.Provider(), fit offline by braintrain from
+// recorded outcomes), groundAttackGraph reads that edge type's posterior MEAN
+// instead — the grounding STRUCTURE (which variable is a cause of which)
+// never changes, only the strength number plugged into
+// beliefvi.EnablementCause.Strength.
 
 // UninformativePriorStrength is the cold-start noisy-OR strength (and leak)
-// every cause grounds at until braintrain (#395) fits a per-edge-type Beta
-// posterior from recorded outcomes (ADR-0037 decision 3): the mean of an
+// every intra-node cause grounds at, and every enablement-edge cause grounds
+// at when no posterior is pinned (ADR-0037 decision 3): the mean of an
 // uninformative Beta prior — Jeffreys Beta(1/2, 1/2) or uniform Beta(1, 1),
 // both mean 1/2 — so belief still propagates from day one instead of waiting
 // on data, and no hand-authored magic number stands in for a strength nobody
-// has measured yet. #395 changes what feeds beliefvi.EnablementCause.Strength
-// (a posterior mean instead of this constant); it does not change this
-// constant's own meaning as the PRIOR that posterior starts from.
+// has measured yet. It is also the fallback groundAttackGraph and BAMCP both
+// still use for an edge TYPE a pinned posterior has no fitted row for
+// (bamcp.go's UninformativeEdgePosteriors returns this same mean).
 const UninformativePriorStrength = 0.5
 
-// nativeSliceBeliefVersion identifies this provider's model: the schema
-// structure ontology.BeliefSchemaRegistry declares, always grounded at the
-// uninformative-prior cold start (ADR-0037 decisions 2-3) — never a learned
-// posterior, which is #395's separate, later version.
+// nativeSliceBeliefVersion identifies this provider's grounding SCHEME: the
+// schema structure ontology.BeliefSchemaRegistry declares and the
+// uninformative-prior cold start (ADR-0037 decisions 2-3). It never changes
+// when a posterior is pinned — see (*nativeSliceBelief).version, which
+// appends the pinned posterior's own artifact version alongside it, so a
+// scored Belief.Model always names BOTH "which grounding scheme" and "which
+// edge-posterior artifact, if any" that produced it.
 const nativeSliceBeliefVersion = "native-slice-v0-uninformative-prior"
 
 // nativeSliceBelief is the real SliceBeliefProvider (ADR-0029 §5/§6,
 // ADR-0037): it grounds and exactly solves a bounded slice in-process via
 // beliefvi, using registry to decide the noisy-OR structure (which variables
 // exist, which depend on which, which enablement edges feed which target
-// variable) and UninformativePriorStrength for every cause's strength.
+// variable). Every cause grounds at UninformativePriorStrength unless
+// posteriors is non-nil, in which case an enablement-edge cause's strength is
+// that edge type's fitted Beta posterior MEAN (gibson#395, ADR-0037 decision
+// 4's "one output, two uses" — BAMCP Thompson-samples the same posterior).
 type nativeSliceBelief struct {
-	registry *ontology.BeliefSchemaRegistry
+	registry   *ontology.BeliefSchemaRegistry
+	posteriors PinnedEdgeStrengthPosteriorProvider
 }
 
 // NativeSliceBeliefProvider returns a SliceBeliefProvider that grounds every
 // slice it is asked to score against registry's declared belief-PRM schema
 // (ADR-0029 §2, §7; ADR-0037 decision 1), via beliefvi.GroundSlice/SolveSlice
-// (#401). registry must not be nil.
-func NativeSliceBeliefProvider(registry *ontology.BeliefSchemaRegistry) SliceBeliefProvider {
-	return &nativeSliceBelief{registry: registry}
+// (#401). registry must not be nil. posteriors is the per-edge-type Beta
+// posterior a mission pins for replay (gibson#395); nil preserves the
+// original cold-start-only behavior (every enablement edge grounds at
+// UninformativePriorStrength) exactly.
+func NativeSliceBeliefProvider(registry *ontology.BeliefSchemaRegistry, posteriors PinnedEdgeStrengthPosteriorProvider) SliceBeliefProvider {
+	return &nativeSliceBelief{registry: registry, posteriors: posteriors}
 }
 
-// ScoreSlice grounds slice against p.registry and returns every node's
-// posterior, translated into the fixed Juicy/Exploitable/Reachable shape
-// NodeBelief.Belief still carries (ADR-0029 §3's substrate has not yet
-// generalized Belief itself beyond the Host seed's three named fields — a
-// separate, later slice; this provider maps whichever of those three names a
-// node's OWN declared variables include, and leaves the rest at their zero
-// value, the same partial mapping placeholderSliceBelief's stand-in already
-// accepted). On any grounding/solve error (e.g. a cyclic slice VE cannot
-// factor) it returns an empty map — fail-quiet, no score rather than a wrong
-// one, mirroring nativeBelief.Score's contract; the gate asks again on the
-// next digest change.
+// ScoreSlice grounds slice against p.registry (and p.posteriors, if pinned)
+// and returns every node's posterior, translated into the fixed
+// Juicy/Exploitable/Reachable shape NodeBelief.Belief still carries
+// (ADR-0029 §3's substrate has not yet generalized Belief itself beyond the
+// Host seed's three named fields — a separate, later slice; this provider
+// maps whichever of those three names a node's OWN declared variables
+// include, and leaves the rest at their zero value, the same partial mapping
+// placeholderSliceBelief's stand-in already accepted). On any grounding/solve
+// error (e.g. a cyclic slice VE cannot factor) it returns an empty map —
+// fail-quiet, no score rather than a wrong one, mirroring
+// nativeBelief.Score's contract; the gate asks again on the next digest
+// change.
+//
+// Every scored node's Belief.Model is stamped with p.version() — the SAME
+// value Version() reports — so the Timeline event this feeds (SliceScored,
+// belief_slice_gate.go) is a durable, replayable RECORD of which edge-posterior
+// artifact (if any) produced it (ADR-0005 §5's discipline, gibson#395's
+// mission-pin requirement: replay re-folds the recorded event, it never
+// re-selects or re-loads a posterior file).
 func (p *nativeSliceBelief) ScoreSlice(slice AttackGraph) map[string]NodeBelief {
-	nodes, causes := groundAttackGraph(slice, p.registry)
+	nodes, causes := groundAttackGraph(slice, p.registry, p.posteriors)
 
 	posteriors, err := beliefvi.SolveSlice(nodes, causes, nil)
 	if err != nil {
 		return map[string]NodeBelief{}
 	}
 
+	version := p.version()
 	out := make(map[string]NodeBelief, len(slice.Nodes))
 	for _, n := range slice.Nodes {
 		byVar := posteriors[n.ID]
-		b := Belief{Model: nativeSliceBeliefVersion}
+		b := Belief{Model: version}
 		if vb, ok := byVar["reachable"]; ok {
 			b.Reachable = vb.True
 		}
@@ -101,8 +125,21 @@ func (p *nativeSliceBelief) ScoreSlice(slice AttackGraph) map[string]NodeBelief 
 	return out
 }
 
-// Version reports the cold-start model identity (see nativeSliceBeliefVersion).
-func (p *nativeSliceBelief) Version() string { return nativeSliceBeliefVersion }
+// Version reports p.version() (see its doc comment).
+func (p *nativeSliceBelief) Version() string { return p.version() }
+
+// version is nativeSliceBeliefVersion (the grounding scheme, unchanged by
+// ADR-0037 decision 2) alone when no posterior is pinned, or that plus the
+// pinned posterior artifact's own Version() when one is (gibson#395). This is
+// the "mission-pinned for replay" identity: whatever this returns at score
+// time is exactly what lands in the recorded Belief.Model, so a later replay
+// reads back which artifact produced it without re-selecting anything.
+func (p *nativeSliceBelief) version() string {
+	if p.posteriors == nil {
+		return nativeSliceBeliefVersion
+	}
+	return nativeSliceBeliefVersion + "+edges:" + p.posteriors.Version()
+}
 
 // groundAttackGraph converts a derived AttackGraph (belief_attack_graph.go)
 // into the beliefvi.NodeSpec/EnablementCause shape GroundSlice/SolveSlice
@@ -121,7 +158,13 @@ func (p *nativeSliceBelief) Version() string { return nativeSliceBeliefVersion }
 //     (belief_attack_graph.go's doc comment) means the From node reaching
 //     its own terminal belief state, not an arbitrarily-chosen one — feeding
 //     whatever variable the registry declares that edge TYPE targets on its
-//     destination node (ADR-0037 decision 1), at UninformativePriorStrength.
+//     destination node (ADR-0037 decision 1), at that edge type's fitted Beta
+//     posterior MEAN when posteriors is non-nil (gibson#395), or
+//     UninformativePriorStrength when it is nil or has no fitted row for that
+//     type — posteriors.Posterior always returns SOMETHING (a fitted provider
+//     falls back to the same uninformative Beta(1,1) internally, mirroring
+//     bamcp.go's UninformativeEdgePosteriors), so "nil provider" is the only
+//     branch this function itself needs.
 //
 // An edge whose destination node does not itself declare the registry's
 // declared target variable is skipped rather than erroring: a Domain Pack is
@@ -131,7 +174,7 @@ func (p *nativeSliceBelief) Version() string { return nativeSliceBeliefVersion }
 // caught up. Likewise an edge type absent from the registry entirely (should
 // not happen — DeriveAttackGraph already only keeps registry-flagged types —
 // but this function does not assume its caller's invariant) is skipped.
-func groundAttackGraph(graph AttackGraph, registry *ontology.BeliefSchemaRegistry) ([]beliefvi.NodeSpec, []beliefvi.EnablementCause) {
+func groundAttackGraph(graph AttackGraph, registry *ontology.BeliefSchemaRegistry, posteriors EdgeStrengthPosteriorProvider) ([]beliefvi.NodeSpec, []beliefvi.EnablementCause) {
 	nodeVariables := make(map[string]map[string]struct{}, len(graph.Nodes))
 	nodeKind := make(map[string]string, len(graph.Nodes))
 	specs := make([]beliefvi.NodeSpec, 0, len(graph.Nodes))
@@ -164,18 +207,36 @@ func groundAttackGraph(graph AttackGraph, registry *ontology.BeliefSchemaRegistr
 		if _, declared := nodeVariables[e.To][targetVar]; !declared {
 			continue
 		}
+		strength := enablementEdgeStrength(e.Type, posteriors)
 		for _, sourceVar := range terminalVariables(registry, nodeKind[e.From]) {
 			causes = append(causes, beliefvi.EnablementCause{
 				SourceNode:     e.From,
 				SourceVariable: sourceVar,
 				TargetNode:     e.To,
 				TargetVariable: targetVar,
-				Strength:       UninformativePriorStrength,
+				Strength:       strength,
 			})
 		}
 	}
 
 	return specs, causes
+}
+
+// enablementEdgeStrength resolves one enablement-edge TYPE's noisy-OR
+// strength: UninformativePriorStrength when posteriors is nil (no posterior
+// pinned, ADR-0037 decision 3's cold start), else that edge type's fitted
+// Beta posterior MEAN (gibson#395, ADR-0037 decision 4 — the other of "one
+// output, two uses" is bamcp.go Thompson-sampling the same posterior). A
+// pinned provider with no fitted row for edgeType still returns a
+// posterior — braintrain.EdgePosteriorArtifact.Provider() falls back to
+// UninformativeEdgePosteriors internally, so its Mean() is exactly
+// UninformativePriorStrength too; this function never needs to special-case
+// "known type" vs "unknown type" itself.
+func enablementEdgeStrength(edgeType string, posteriors EdgeStrengthPosteriorProvider) float64 {
+	if posteriors == nil {
+		return UninformativePriorStrength
+	}
+	return posteriors.Posterior(edgeType).Mean()
 }
 
 // terminalVariables returns the sorted, deterministic set of nodeKind's own

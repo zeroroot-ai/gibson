@@ -365,7 +365,14 @@ _Avoid_: evaluator (the old per-technique Go function this replaces)
 Per enablement-edge-type: the declared **target variable** it feeds on the destination node
 (structure, in the pack) and the **noisy-OR strength** it contributes (a learned Beta posterior
 from braintrain, uninformative prior at cold-start — never hand-authored)
-([ADR-0037](docs/adr/0037-enablement-edge-strengths-are-learned-not-authored.md)).
+([ADR-0037](docs/adr/0037-enablement-edge-strengths-are-learned-not-authored.md)). Braintrain
+(gibson#395, `internal/engine/braintrain/edge_posterior.go`) now fits that posterior: a
+Beta-Bernoulli update per edge type from recorded (cause-active -> effect-observed?) outcomes,
+versioned per tenant (`tenant-<id>-edges-v<n>`, independent of the belief-CPT model's own
+version sequence). `NativeSliceBeliefProvider` consumes the posterior **mean** in place of the
+uninformative prior once one is pinned (`GIBSON_EDGE_POSTERIOR_PATH`); `BAMCPPlanner` Thompson-
+samples the same artifact. No posterior pinned still means the documented cold start — production
+may have no recorded outcomes yet.
 _Avoid_: influence weight, hand-tuned strength
 
 ### Belief substrate (decided 2026-09-27, ADR-0029, amends ADR-0005)
