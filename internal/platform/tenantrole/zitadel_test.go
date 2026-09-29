@@ -297,7 +297,7 @@ const recordedListAuthorizations = `{"pagination":{"totalResult":"1", "appliedLi
 	`{"id":"392562355503890478", "creationDate":"2026-09-27T03:56:37.528593Z", "changeDate":"2026-09-27T03:56:37.528593Z", ` +
 	`"project":{"id":"392561993183133742", "name":"gibson", "organizationId":"392561303102750758"}, ` +
 	`"organization":{"id":"392562338911223854", "name":"Primary Workspace"}, ` +
-	`"user":{"id":"392562353507401774", "preferredLoginName":"admin@selfhosted.example.com", "displayName":"admin Owner", "organizationId":"392562338911223854"}, ` +
+	`"user":{"id":"392562353507401774", "preferredLoginName":"admin@localhost.zeroroot.ai", "displayName":"admin Owner", "organizationId":"392562338911223854"}, ` +
 	`"state":"STATE_ACTIVE", "roles":[{"key":"owner", "displayName":"Owner"}]}]}`
 
 // TestZitadelGrants_DecodesTheRecordedZitadelResponse pins List to the bytes

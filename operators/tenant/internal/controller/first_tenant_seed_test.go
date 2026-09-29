@@ -47,7 +47,7 @@ func TestFirstTenantSeed_EnqueuesOnceThenReturns(t *testing.T) {
 		Daemon:      enq,
 		TenantID:    "founding",
 		DisplayName: "Founding Org",
-		OwnerEmail:  "admin@selfhosted.example.com",
+		OwnerEmail:  "admin@localhost.zeroroot.ai",
 		Tier:        "enterprise",
 	}
 	if err := r.Start(context.Background()); err != nil {
@@ -57,7 +57,7 @@ func TestFirstTenantSeed_EnqueuesOnceThenReturns(t *testing.T) {
 		t.Fatalf("want exactly 1 enqueue, got %d", got)
 	}
 	c := enq.calls[0]
-	if c.TenantID != "founding" || c.OwnerEmail != "admin@selfhosted.example.com" ||
+	if c.TenantID != "founding" || c.OwnerEmail != "admin@localhost.zeroroot.ai" ||
 		c.WorkspaceName != "Founding Org" || c.Tier != "enterprise" {
 		t.Errorf("unexpected pending tenant: %+v", c)
 	}
@@ -68,7 +68,7 @@ func TestFirstTenantSeed_RetriesUntilAccepted(t *testing.T) {
 	r := &FirstTenantSeedRunnable{
 		Daemon:     enq,
 		TenantID:   "founding",
-		OwnerEmail: "admin@selfhosted.example.com",
+		OwnerEmail: "admin@localhost.zeroroot.ai",
 		Interval:   5 * time.Millisecond,
 	}
 	if err := r.Start(context.Background()); err != nil {
@@ -84,7 +84,7 @@ func TestFirstTenantSeed_AlreadyExisted_ReturnsNoRetry(t *testing.T) {
 	r := &FirstTenantSeedRunnable{
 		Daemon:     enq,
 		TenantID:   "founding",
-		OwnerEmail: "admin@selfhosted.example.com",
+		OwnerEmail: "admin@localhost.zeroroot.ai",
 	}
 	if err := r.Start(context.Background()); err != nil {
 		t.Fatalf("Start: %v", err)
@@ -110,7 +110,7 @@ func TestFirstTenantSeed_ContextCancelledDuringRetry(t *testing.T) {
 	r := &FirstTenantSeedRunnable{
 		Daemon:     enq,
 		TenantID:   "founding",
-		OwnerEmail: "admin@selfhosted.example.com",
+		OwnerEmail: "admin@localhost.zeroroot.ai",
 		Interval:   5 * time.Millisecond,
 	}
 	ctx, cancel := context.WithTimeout(context.Background(), 30*time.Millisecond)
@@ -128,7 +128,7 @@ func TestFirstTenantSeedFromEnv(t *testing.T) {
 	base := map[string]string{
 		"FIRST_TENANT_ENABLED":      "true",
 		"FIRST_TENANT_ID":           "default",
-		"FIRST_TENANT_OWNER_EMAIL":  "admin@selfhosted.example.com",
+		"FIRST_TENANT_OWNER_EMAIL":  "admin@localhost.zeroroot.ai",
 		"FIRST_TENANT_DISPLAY_NAME": "Default Workspace",
 		"FIRST_TENANT_TIER":         "enterprise",
 	}
@@ -148,7 +148,7 @@ func TestFirstTenantSeedFromEnv(t *testing.T) {
 		if err != nil || !enabled || seed == nil {
 			t.Fatalf("want a seed enabled with no error, got (%v,%v,%v)", seed, enabled, err)
 		}
-		if seed.TenantID != "default" || seed.OwnerEmail != "admin@selfhosted.example.com" ||
+		if seed.TenantID != "default" || seed.OwnerEmail != "admin@localhost.zeroroot.ai" ||
 			seed.DisplayName != "Default Workspace" || seed.Tier != "enterprise" || seed.Daemon != enq {
 			t.Errorf("seed fields not mapped from env: %+v", seed)
 		}
@@ -190,7 +190,7 @@ func TestRegisterFirstTenantSeed(t *testing.T) {
 		return map[string]string{
 			"FIRST_TENANT_ENABLED":     "true",
 			"FIRST_TENANT_ID":          "default",
-			"FIRST_TENANT_OWNER_EMAIL": "admin@selfhosted.example.com",
+			"FIRST_TENANT_OWNER_EMAIL": "admin@localhost.zeroroot.ai",
 		}[k]
 	}
 

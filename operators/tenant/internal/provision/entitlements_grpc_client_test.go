@@ -230,7 +230,7 @@ func TestEnqueueTenantProvisioning_SendsFirstTenant(t *testing.T) {
 	already, err := c.EnqueueTenantProvisioning(context.Background(), PendingTenant{
 		TenantID:      "default",
 		WorkspaceName: "Default Workspace",
-		OwnerEmail:    "admin@selfhosted.example.com",
+		OwnerEmail:    "admin@localhost.zeroroot.ai",
 		Tier:          "enterprise",
 	})
 	if err != nil {
@@ -248,7 +248,7 @@ func TestEnqueueTenantProvisioning_SendsFirstTenant(t *testing.T) {
 	if got, want := srv.got.GetDisplayName(), "Default Workspace"; got != want {
 		t.Errorf("display_name: got %q, want %q", got, want)
 	}
-	if got, want := srv.got.GetOwnerEmail(), "admin@selfhosted.example.com"; got != want {
+	if got, want := srv.got.GetOwnerEmail(), "admin@localhost.zeroroot.ai"; got != want {
 		t.Errorf("owner_email: got %q, want %q", got, want)
 	}
 	if got, want := srv.got.GetTier(), "enterprise"; got != want {
@@ -291,7 +291,7 @@ func TestEnqueueTenantProvisioning_RPCError_Translated(t *testing.T) {
 	}
 	already, err := c.EnqueueTenantProvisioning(context.Background(), PendingTenant{
 		TenantID:   "default",
-		OwnerEmail: "admin@selfhosted.example.com",
+		OwnerEmail: "admin@localhost.zeroroot.ai",
 	})
 	if err == nil {
 		t.Fatal("want an error when the daemon RPC fails")

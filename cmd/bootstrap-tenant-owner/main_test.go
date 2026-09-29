@@ -1249,7 +1249,7 @@ func TestWriteOfflineSetupLinkViaConfig(t *testing.T) {
 }
 
 func TestOwnerProfileName(t *testing.T) {
-	g, f := ownerProfileName("admin@selfhosted.example.com")
+	g, f := ownerProfileName("admin@localhost.zeroroot.ai")
 	if g != "admin" || f != "Owner" {
 		t.Errorf("got %q/%q, want admin/Owner", g, f)
 	}
@@ -1273,9 +1273,9 @@ func TestSetupLinkURLTemplate_TrimsTrailingSlash(t *testing.T) {
 // pins that the link always names the public host with an explicit scheme,
 // from a bare host with no scheme of its own (ZITADEL_EXTERNAL_DOMAIN).
 func TestSetupLinkURLTemplate_AlwaysStartsWithHTTPSPublicHost(t *testing.T) {
-	got := setupLinkURLTemplate("app.selfhosted.example.com")
-	if !strings.HasPrefix(got, "https://app.selfhosted.example.com/") {
-		t.Fatalf("got %q, want it to start with https://app.selfhosted.example.com/", got)
+	got := setupLinkURLTemplate("app.localhost.zeroroot.ai")
+	if !strings.HasPrefix(got, "https://app.localhost.zeroroot.ai/") {
+		t.Fatalf("got %q, want it to start with https://app.localhost.zeroroot.ai/", got)
 	}
 	if strings.Contains(got, "https://https://") {
 		t.Fatalf("got %q, doubled scheme — externalDomain must never already carry one", got)
