@@ -79,6 +79,13 @@ type World struct {
 	// singleton, not a collection of entities.
 	flightRecorderPolicy FlightRecorderPolicy
 
+	// domainPacks holds this tenant's currently enabled Domain Packs
+	// (domain_pack.go, ADR-0033, gibson#381) — the "live registry" a
+	// DomainPackEnabled/Disabled fold maintains. Not ECS-backed: keyed
+	// per-tenant state, like flightRecorderPolicy, not a collection of
+	// sighted facts.
+	domainPacks map[string]DomainPackState
+
 	// observations holds out-of-taxonomy shapes (ADR-0012). Keyed by Timeline
 	// event id rather than by content, so repeat sightings stay distinct.
 	observations *ecs.Map1[Observation]
@@ -204,6 +211,7 @@ func NewWorld(tenant string) *World {
 		destructiveActions: ecs.NewMap1[DestructiveAction](w),
 		voiPlans:           ecs.NewMap1[VoIPlanState](w),
 		nodeBeliefs:        ecs.NewMap1[NodeBeliefRecord](w),
+		domainPacks:        make(map[string]DomainPackState),
 	}
 }
 
@@ -423,6 +431,10 @@ func Reduce(w *World, ev Event) {
 		applyVoIPlanned(w, e)
 	case NodeBeliefSet:
 		applyNodeBeliefSet(w, e)
+	case DomainPackEnabled:
+		applyDomainPackEnabled(w, e)
+	case DomainPackDisabled:
+		applyDomainPackDisabled(w, e)
 	}
 }
 

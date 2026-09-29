@@ -1629,6 +1629,12 @@ func (d *daemonImpl) buildGRPCServer(ctx context.Context) (*grpcSubsystem, error
 	worldpb.RegisterWorldServiceServer(srv, NewWorldServer(d.brainRegistry, d.logger.WithComponent("world-service").Slog()))
 	d.logger.Info(ctx, "registered WorldService gRPC endpoint")
 
+	// Register gibson.tenant.v1.DomainPackService — the per-tenant Domain
+	// Pack catalog + enable/disable lifecycle (ADR-0033, gibson#381). Reuses
+	// d.brainRegistry (just constructed above) so an enabled pack folds into
+	// the SAME per-tenant World WorldService reads.
+	d.registerDomainPack(ctx, srv)
+
 	// Register gibson.daemon.destructiveauthz.v1.DestructiveAuthorizationService
 	// — the daemon API backing the dashboard's destructive-action authorization
 	// queue (dashboard#99, gibson#336, ADR-0028). Tenant-admin-gated (see the

@@ -134,6 +134,21 @@ func TestConnectorComponentObject(t *testing.T) {
 	}
 }
 
+func TestDomainPackComponentObject(t *testing.T) {
+	if got := DomainPackComponentObject("main"); got != "component:domainpack/main" {
+		t.Fatalf("DomainPackComponentObject(main) = %q", got)
+	}
+	// Idempotent under CanonicalComponentResource (ADR-0015): a kind-qualified
+	// name round-trips to the canonical prefixed object, same as connectors.
+	got, err := CanonicalComponentResource("domainpack:main")
+	if err != nil || got != "component:domainpack/main" {
+		t.Fatalf("CanonicalComponentResource(domainpack:main) = %q, err=%v", got, err)
+	}
+	if !IsComponentKind(KindDomainPack) {
+		t.Fatal("KindDomainPack must be a recognized component kind")
+	}
+}
+
 func TestPluginObject(t *testing.T) {
 	if got := PluginObject("acme", "gitlab"); got != "plugin:acme/gitlab" {
 		t.Fatalf("PluginObject(acme, gitlab) = %q", got)

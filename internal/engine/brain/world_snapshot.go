@@ -60,6 +60,12 @@ type worldSnapshotData struct {
 	AgentToolCalls       []AgentToolCallSnapshot `json:"agent_tool_calls"`
 	FlightRecorderPolicy FlightRecorderPolicy    `json:"flight_recorder_policy"`
 
+	// DomainPacks is the tenant's currently enabled Domain Packs (ADR-0033,
+	// gibson#381). Must be snapshotted like FlightRecorderPolicy above, or a
+	// tenant's enabled packs would silently vanish across a snapshot+trim
+	// cycle even though the World fold never disabled them.
+	DomainPacks []DomainPackSnapshot `json:"domain_packs"`
+
 	// Monotonic ID counters (replay-deterministic; must be restored exactly).
 	NextHostID        uint64 `json:"next_host_id"`
 	NextDomainID      uint64 `json:"next_domain_id"`
@@ -97,6 +103,7 @@ func SnapshotWorld(w *World, atSeq string) WorldSnapshot {
 
 		AgentToolCalls:       w.AgentToolCallSnapshot(),
 		FlightRecorderPolicy: w.flightRecorderPolicy,
+		DomainPacks:          w.DomainPackSnapshot(),
 
 		NextHostID:        w.nextHostID,
 		NextDomainID:      w.nextDomainID,
@@ -362,6 +369,20 @@ func RestoreWorld(snap WorldSnapshot, tenant string) (*World, error) {
 				Candidates: p.Candidates,
 			})
 		}
+	}
+
+	// Replay enabled Domain Packs (ADR-0033, gibson#381). Order does not
+	// matter: identity is Name, not a world-assigned counter, same as
+	// BetSettlements above — a disabled pack is simply absent from
+	// data.DomainPacks, so only currently-enabled packs replay here.
+	for _, p := range data.DomainPacks {
+		Reduce(w, DomainPackEnabled{
+			Name:                      p.Name,
+			Version:                   p.Version,
+			TaxonomyNodeLabels:        append([]string(nil), p.TaxonomyNodeLabels...),
+			TaxonomyRelationshipTypes: append([]string(nil), p.TaxonomyRelationshipTypes...),
+			Predicates:                clonePredicateMap(p.Predicates),
+		})
 	}
 
 	// Replay LLM calls.

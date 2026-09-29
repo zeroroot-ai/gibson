@@ -481,6 +481,13 @@ type daemonImpl struct {
 	// after a successful Start; may be nil during unit tests that bypass
 	// newInfrastructure.
 	reasoner *ontology.Reasoner
+
+	// domainPackCatalog is the curated, shipped set of catalog Domain Packs
+	// (ADR-0033 decision 1, gibson#381). Constructed during newInfrastructure
+	// alongside reasoner and shared by DomainPackService (ListCatalog /
+	// EnableDomainPack) and the startup catalog-gate seed. Starts empty in
+	// this change — see ontology.NewDomainPackCatalog's doc comment.
+	domainPackCatalog *ontology.DomainPackCatalog
 }
 
 // spiffeX509Closer is the narrow interface for closing an X.509 source on shutdown.
@@ -1984,6 +1991,18 @@ func (d *daemonImpl) Start(ctx context.Context) error {
 		// The refusal is a state, not a log line: /readyz names the credential
 		// an operator has to mount (gibson#1744).
 		d.registerComponentCatalogReadiness(ctx, catalogGate)
+
+		// Seed the Domain Pack platform catalog gate (ADR-0033, gibson#381):
+		// every catalog pack gets its platform_enabled tuple, so
+		// DomainPackService's gate checks pass for listed entries and fail
+		// for anything else. Startup converge, add-only, best-effort — a
+		// no-op today (the catalog ships empty; see domainPackCatalog's doc
+		// comment).
+		if d.domainPackCatalog != nil {
+			if err := seedDomainPackCatalogGate(ctx, d.authorizer, d.domainPackCatalog, d.logger.Slog()); err != nil {
+				d.logger.Warn(ctx, "domain pack catalog gate seed failed (non-fatal)", "error", err)
+			}
+		}
 
 		// Every tenant registered under the platform is enabled on the
 		// system backplane (ADR-0046). Without the tuple no enrolled

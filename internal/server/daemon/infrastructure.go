@@ -14,6 +14,7 @@ import (
 	"github.com/zeroroot-ai/gibson/internal/engine/llm"
 	"github.com/zeroroot-ai/gibson/internal/engine/llm/providers/catalogue"
 	"github.com/zeroroot-ai/gibson/internal/engine/mission"
+	"github.com/zeroroot-ai/gibson/internal/engine/ontology"
 	"github.com/zeroroot-ai/gibson/internal/engine/state"
 	"github.com/zeroroot-ai/gibson/internal/infra/observability"
 	"github.com/zeroroot-ai/gibson/internal/infra/queue"
@@ -129,6 +130,13 @@ func (d *daemonImpl) newInfrastructure(ctx context.Context) (*Infrastructure, er
 		return nil, fmt.Errorf("failed to initialize ontology reasoner: %w", err)
 	}
 	d.reasoner = reasoner
+
+	// Initialize the Domain Pack catalog (ADR-0033 decision 1, gibson#381):
+	// the curated, shipped set of packs DomainPackService.ListCatalog reads
+	// and EnableDomainPack resolves a name against. Empty in this change —
+	// gibson#381 builds the enablement mechanism, not pack authoring; a
+	// follow-up change seeds the "main" pack ADR-0033 names (default-off).
+	d.domainPackCatalog = ontology.NewDomainPackCatalog()
 
 	// Initialize Redis client for tool execution
 	// Redis is required for distributed tool execution via work queues

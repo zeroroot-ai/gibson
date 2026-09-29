@@ -48,15 +48,17 @@ import (
 // kinds (ADR-0046/0067); the kind is part of the object id, never a separate
 // FGA type. These are the canonical kind qualifiers (ADR-0015).
 const (
-	KindAgent     = "agent"
-	KindTool      = "tool"
-	KindPlugin    = "plugin"
-	KindConnector = "connector"
+	KindAgent      = "agent"
+	KindTool       = "tool"
+	KindPlugin     = "plugin"
+	KindConnector  = "connector"
+	KindDomainPack = "domainpack"
 )
 
 // ComponentObject returns the canonical FGA object reference for a component:
 // "component:<kind>/<name>" (ADR-0015). The kind is one of KindAgent/Tool/
-// Plugin/Connector; the name is the bare component name, never tenant-qualified.
+// Plugin/Connector/DomainPack; the name is the bare component name, never
+// tenant-qualified.
 // Kind-prefixing keeps an agent and a tool of the same name distinct objects.
 func ComponentObject(kind, name string) string {
 	return "component:" + kind + "/" + name
@@ -73,6 +75,16 @@ const ConnectorKindPrefix = KindConnector + "/"
 // only a third ":" is rejected by OpenFGA (see TenantQualifiedSep, gibson#1024).
 func ConnectorComponentObject(catalogID string) string {
 	return ComponentObject(KindConnector, catalogID)
+}
+
+// DomainPackComponentObject returns the canonical FGA object reference for a
+// Domain Pack catalog entry: "component:domainpack/<name>" (ADR-0033). One
+// object per catalog entry, shared across tenants; DomainPackService checks
+// this object's platform_enabled tuple in ListCatalog and EnableDomainPack,
+// the same platform-catalog-gate pattern ConnectorComponentObject serves for
+// connectors.
+func DomainPackComponentObject(name string) string {
+	return ComponentObject(KindDomainPack, name)
 }
 
 // TenantQualifiedSep joins the tenant and field segments of a tenant-qualified
@@ -370,10 +382,11 @@ func RevokedSessionUserTuple(userID, revokedAt string) ConditionalTuple {
 // `component` object type. CanonicalComponentResource prefixes them onto the
 // object id: the FGA object is "component:<kind>/<name>" (ADR-0015).
 var componentKinds = map[string]bool{
-	KindAgent:     true,
-	KindTool:      true,
-	KindPlugin:    true,
-	KindConnector: true,
+	KindAgent:      true,
+	KindTool:       true,
+	KindPlugin:     true,
+	KindConnector:  true,
+	KindDomainPack: true,
 }
 
 // IsComponentKind reports whether kind is one of the four canonical component
@@ -407,8 +420,8 @@ func CanonicalComponentResource(resource string) (string, error) {
 			return ComponentObject(kind, name), nil
 		}
 		return "", fmt.Errorf(
-			"component resource %q is kind-less; qualify it with a component kind (%s/%s/%s/%s) — e.g. %s:%s or %s/%s",
-			resource, KindAgent, KindTool, KindPlugin, KindConnector, KindTool, resource, KindTool, resource)
+			"component resource %q is kind-less; qualify it with a component kind (%s/%s/%s/%s/%s) — e.g. %s:%s or %s/%s",
+			resource, KindAgent, KindTool, KindPlugin, KindConnector, KindDomainPack, KindTool, resource, KindTool, resource)
 	case 2:
 		typ, rest := parts[0], parts[1]
 		if typ == "component" {
