@@ -109,7 +109,7 @@ func TestIdentity_ListUsers_FiltersByEmail(t *testing.T) {
 		} `json:"result"`
 	}
 	status := post(t, e, "/zitadel.user.v2.UserService/ListUsers", map[string]any{
-		"queries": []map[string]any{{"emailQuery": map[string]any{"email": "owner@example.com"}}},
+		"queries": []map[string]any{{"emailQuery": map[string]any{"emailAddress": "owner@example.com"}}},
 	}, &resp)
 	if status != http.StatusOK {
 		t.Fatalf("status = %d, want 200", status)
@@ -130,7 +130,7 @@ func TestIdentity_ListUsers_NoMatch(t *testing.T) {
 		} `json:"result"`
 	}
 	status := post(t, e, "/zitadel.user.v2.UserService/ListUsers", map[string]any{
-		"queries": []map[string]any{{"emailQuery": map[string]any{"email": "nobody@example.com"}}},
+		"queries": []map[string]any{{"emailQuery": map[string]any{"emailAddress": "nobody@example.com"}}},
 	}, &resp)
 	if status != http.StatusOK {
 		t.Fatalf("status = %d, want 200", status)

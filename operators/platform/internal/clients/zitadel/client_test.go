@@ -1699,3 +1699,30 @@ func TestDeleteUser_Error(t *testing.T) {
 		t.Fatal("DeleteUser: expected an error on 500")
 	}
 }
+
+// TestFindHumanUserByEmail_SendsTheV2FieldName: zitadel.user.v2.EmailQuery
+// carries email_address ("emailAddress" on the wire). The client sent
+// "email", Zitadel ignored it, and the lookup after a 409 never found the
+// user it was looking for (hosted#309).
+func TestFindHumanUserByEmail_SendsTheV2FieldName(t *testing.T) {
+	var gotBody atomic.Value
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		b, _ := io.ReadAll(r.Body)
+		gotBody.Store(string(b))
+		_, _ = w.Write([]byte(`{"result":[{"userId":"UID-9"}]}`))
+	}))
+	t.Cleanup(srv.Close)
+
+	c := New(srv.URL, "pat", "")
+	id, err := c.FindHumanUserByEmail(context.Background(), "owner@example.com")
+	if err != nil || id != "UID-9" {
+		t.Fatalf("FindHumanUserByEmail: id=%q err=%v", id, err)
+	}
+	body, _ := gotBody.Load().(string)
+	if !strings.Contains(body, `"emailAddress":"owner@example.com"`) {
+		t.Fatalf("request must carry emailQuery.emailAddress, got %s", body)
+	}
+	if strings.Contains(body, `"email":"owner@example.com"`) {
+		t.Fatalf("request must not carry the unknown field emailQuery.email, got %s", body)
+	}
+}

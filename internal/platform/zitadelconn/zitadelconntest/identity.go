@@ -9,6 +9,7 @@ import (
 	"io"
 	"net/http"
 	"strconv"
+	"strings"
 	"sync"
 )
 
@@ -961,18 +962,26 @@ func (f *Identity) handleAddHumanUser(w http.ResponseWriter, r *http.Request) {
 }
 
 func (f *Identity) handleListUsers(w http.ResponseWriter, r *http.Request) {
+	// zitadel.user.v2.EmailQuery is {email_address, method}: the JSON field is
+	// "emailAddress". The fake used to read "email", so a client that sent
+	// the wrong field matched every user here and no user on a real Zitadel
+	// (hosted#309: the platform-operator never found the owner it had just
+	// created). The fake now reads the real field and nothing else.
 	var req struct {
 		Queries []struct {
 			EmailQuery *struct {
-				Email string `json:"email"`
+				EmailAddress string `json:"emailAddress"`
+				Method       string `json:"method"`
 			} `json:"emailQuery,omitempty"`
 		} `json:"queries"`
 	}
 	_ = decode(r, &req)
 	var email string
+	ignoreCase := false
 	for _, q := range req.Queries {
 		if q.EmailQuery != nil {
-			email = q.EmailQuery.Email
+			email = q.EmailQuery.EmailAddress
+			ignoreCase = strings.Contains(q.EmailQuery.Method, "IGNORE_CASE")
 		}
 	}
 	f.mu.Lock()
@@ -982,8 +991,13 @@ func (f *Identity) handleListUsers(w http.ResponseWriter, r *http.Request) {
 	}
 	out := make([]userOut, 0, 1)
 	for _, u := range f.users {
-		if email != "" && u.Email != email {
-			continue
+		if email != "" {
+			if ignoreCase && !strings.EqualFold(u.Email, email) {
+				continue
+			}
+			if !ignoreCase && u.Email != email {
+				continue
+			}
 		}
 		out = append(out, userOut{UserID: u.ID})
 	}
