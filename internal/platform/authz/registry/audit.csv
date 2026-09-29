@@ -280,6 +280,7 @@ rpc,relation,object_type,deriver,identities,source_proto_file,mode
 /gibson.tenant.v1.OntologyExtensionService/ApproveOntologyExtensionProposal,owner,tenant,tenant_from_identity,USER,gibson/tenant/v1/ontology_extension.proto,rule
 /gibson.tenant.v1.OntologyExtensionService/ListOntologyExtensionProposals,admin,tenant,tenant_from_identity,USER,gibson/tenant/v1/ontology_extension.proto,rule
 /gibson.tenant.v1.OntologyExtensionService/RejectOntologyExtensionProposal,owner,tenant,tenant_from_identity,USER,gibson/tenant/v1/ontology_extension.proto,rule
+/gibson.tenant.v1.OntologyExtensionService/SubmitOntologyExtensionUpstream,owner,tenant,tenant_from_identity,USER,gibson/tenant/v1/ontology_extension.proto,rule
 /gibson.tenant.v1.ProviderService/CreateProvider,writer,tenant,tenant_from_identity,USER|SERVICE,gibson/tenant/v1/provider.proto,rule
 /gibson.tenant.v1.ProviderService/DeleteProvider,writer,tenant,tenant_from_identity,USER|SERVICE,gibson/tenant/v1/provider.proto,rule
 /gibson.tenant.v1.ProviderService/ExecuteLLM,writer,tenant,tenant_from_identity,USER|SERVICE,gibson/tenant/v1/provider.proto,rule

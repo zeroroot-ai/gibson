@@ -112,6 +112,38 @@ message RejectOntologyExtensionProposalRequest {
 
 message RejectOntologyExtensionProposalResponse {}
 
+message SubmitOntologyExtensionUpstreamRequest {
+  OntologyProposalKind kind = 1;
+  string label = 2;
+}
+
+// SubmitOntologyExtensionUpstreamResponse carries the rendered SDK Domain
+// Pack contribution artifact (ADR-0033 decision 2's final arrow: "owner
+// 'submit upstream' -> contribution", gibson#393) — the exact file content a
+// human or CI commits into the SDK's pack source tree to open the review PR.
+//
+// This daemon does NOT open that PR itself: gibson holds no GitHub credential
+// or bot identity scoped to the `sdk` repository, and ADR-0033 names the
+// contribution as "a PR into the SDK, which anyone may open" — a step the
+// design deliberately leaves to a person, the same way other owner-only
+// actions in this org (DNS, Stripe keys, required reviewers) are hand-offs
+// rather than automated. suggested_pr_title/suggested_pr_body are meant to
+// be pasted directly into that PR once the tenant owner (or whoever opens it)
+// commits pack_json at suggested_file_path.
+message SubmitOntologyExtensionUpstreamResponse {
+  // pack_json is the ontology.DomainPack fragment, JSON-encoded exactly as
+  // Export/Import already round-trip it (gibson#378) — never a new,
+  // one-off format invented for this RPC.
+  bytes pack_json = 1;
+  // suggested_file_path is where this fragment belongs in the SDK's pack
+  // source tree, e.g. "packs/<name>.json".
+  string suggested_file_path = 2;
+  // suggested_pr_title and suggested_pr_body are ready-to-paste PR text for
+  // whoever opens the contribution PR.
+  string suggested_pr_title = 3;
+  string suggested_pr_body = 4;
+}
+
 service OntologyExtensionService {
   // ListOntologyExtensionProposals returns every ontology/taxonomy extension
   // proposal this tenant's agents have made, pending and decided alike, so
@@ -148,6 +180,25 @@ service OntologyExtensionService {
   // of a pending proposal. Same refusal rules as
   // ApproveOntologyExtensionProposal, and the same "owner" gate.
   rpc RejectOntologyExtensionProposal(RejectOntologyExtensionProposalRequest) returns (RejectOntologyExtensionProposalResponse) {
+    option (gibson.auth.v1.authz) = {
+      relation: "owner"
+      object_type: "tenant"
+      object_deriver: "tenant_from_identity"
+      allowed_identities: 1  // USER
+    };
+  }
+
+  // SubmitOntologyExtensionUpstream renders a LIVE tenant extension (a
+  // promoted proposal — NOT_FOUND if (kind, label) names no proposal ever
+  // observed, FAILED_PRECONDITION if it has not yet been promoted) as an SDK
+  // Domain Pack contribution artifact (ADR-0033 decision 2's "submit
+  // upstream -> contribution"). Gated to "owner", mirroring
+  // ApproveOntologyExtensionProposal: only the tenant that vouches for its
+  // own live extension nominates it for the shared catalog.
+  //
+  // This RPC renders the artifact only; it never opens a PR itself (see the
+  // response message's doc for why that hand-off exists).
+  rpc SubmitOntologyExtensionUpstream(SubmitOntologyExtensionUpstreamRequest) returns (SubmitOntologyExtensionUpstreamResponse) {
     option (gibson.auth.v1.authz) = {
       relation: "owner"
       object_type: "tenant"

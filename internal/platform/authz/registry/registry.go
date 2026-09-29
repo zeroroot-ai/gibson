@@ -2843,6 +2843,16 @@ var Registry = map[string]Entry{
 		Unauthenticated:   false,
 		Self:              false,
 	},
+	"/gibson.tenant.v1.OntologyExtensionService/SubmitOntologyExtensionUpstream": {
+		Method:            "/gibson.tenant.v1.OntologyExtensionService/SubmitOntologyExtensionUpstream",
+		Service:           "gibson.tenant.v1.OntologyExtensionService",
+		Relation:          "owner",
+		ObjectType:        "tenant",
+		ObjectDeriver:     "tenant_from_identity",
+		AllowedIdentities: IdentityUser,
+		Unauthenticated:   false,
+		Self:              false,
+	},
 	"/gibson.tenant.v1.ProviderService/CreateProvider": {
 		Method:            "/gibson.tenant.v1.ProviderService/CreateProvider",
 		Service:           "gibson.tenant.v1.ProviderService",

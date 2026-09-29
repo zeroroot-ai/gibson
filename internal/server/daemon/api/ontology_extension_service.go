@@ -5,7 +5,9 @@ package api
 
 import (
 	"context"
+	"encoding/json"
 	"errors"
+	"fmt"
 
 	"google.golang.org/grpc/codes"
 	status_grpc "google.golang.org/grpc/status"
@@ -18,11 +20,15 @@ import (
 
 // OntologyExtensionService is the daemon API backing the tenant OWNER's
 // review of agent-proposed Taxonomy extensions (ADR-0024 §2, ADR-0033
-// decisions 2-3, gibson#392). An agent proposes a new Taxonomy node label or
-// relationship type via ProposeOntologyExtension (gibson#391, the
-// agent-facing HarnessCallbackService RPC); this service is the other end of
-// that pipeline: the tenant owner lists every proposal
-// (ListOntologyExtensionProposals) and explicitly approves or rejects one.
+// decisions 2-3, gibson#392) and, once a proposal is live, the owner's
+// "submit upstream" contribution action (ADR-0033 decision 2, gibson#393).
+// An agent proposes a new Taxonomy node label or relationship type via
+// ProposeOntologyExtension (gibson#391, the agent-facing
+// HarnessCallbackService RPC); this service is the other end of that
+// pipeline: the tenant owner lists every proposal
+// (ListOntologyExtensionProposals), explicitly approves or rejects one, and
+// may render an already-live extension as an SDK pack contribution
+// (SubmitOntologyExtensionUpstream).
 //
 // Approval submits an OntologyExtensionApproved event onto the caller's
 // tenant brain.Engine — the HITL half of taxonomy.PromotionGate's settlement
@@ -31,7 +37,9 @@ import (
 // fold promotes it into live, per-tenant, replayable Cypher structure —
 // exactly the tenant extension ADR-0033 describes. Rejection submits an
 // OntologyExtensionRejected event, a terminal audit decision that never
-// mutates the Taxonomy.
+// mutates the Taxonomy. SubmitOntologyExtensionUpstream submits no event at
+// all — it is a pure render over already-live state
+// (internal/engine/brain/ontology_extension_upstream.go).
 //
 // Mirrors DomainPackService's shape exactly: daemon-local, tenant-scoped,
 // backed by the per-tenant brain registry directly — no separate
@@ -195,6 +203,47 @@ func (s *OntologyExtensionService) RejectOntologyExtensionProposal(
 	return &tenantv1.RejectOntologyExtensionProposalResponse{}, nil
 }
 
+// SubmitOntologyExtensionUpstream renders a live tenant extension as an SDK
+// Domain Pack contribution artifact (ADR-0033 decision 2, gibson#393). See
+// the .proto's doc for why opening the resulting PR is a deliberate
+// owner/credential hand-off this handler never performs: it returns the
+// rendered file content plus ready-to-paste PR text, nothing more.
+func (s *OntologyExtensionService) SubmitOntologyExtensionUpstream(
+	ctx context.Context, req *tenantv1.SubmitOntologyExtensionUpstreamRequest,
+) (*tenantv1.SubmitOntologyExtensionUpstreamResponse, error) {
+	e, err := s.engine(ctx, "SubmitOntologyExtensionUpstream")
+	if err != nil {
+		return nil, err
+	}
+	kind, kindErr := ontologyProposalKind(req.GetKind())
+	if kindErr != nil {
+		return nil, status_grpc.Error(codes.InvalidArgument, kindErr.Error())
+	}
+	label := req.GetLabel()
+	if label == "" {
+		return nil, status_grpc.Error(codes.InvalidArgument, "label must not be empty")
+	}
+	pack, err := e.SubmitOntologyExtensionUpstream(ctx, kind, label)
+	if err != nil {
+		return nil, ontologyDecisionError("SubmitOntologyExtensionUpstream", err)
+	}
+	packJSON, err := json.MarshalIndent(pack, "", "  ")
+	if err != nil {
+		return nil, status_grpc.Errorf(codes.Internal, "SubmitOntologyExtensionUpstream: encode pack fragment: %v", err)
+	}
+	return &tenantv1.SubmitOntologyExtensionUpstreamResponse{
+		PackJson:          packJSON,
+		SuggestedFilePath: fmt.Sprintf("packs/%s.json", pack.Name),
+		SuggestedPrTitle:  fmt.Sprintf("Add domain pack contribution: %s", pack.Name),
+		SuggestedPrBody: fmt.Sprintf(
+			"Contributed by tenant %q via submit-upstream (gibson#393, ADR-0033).\n\n"+
+				"This adds %s %q as a candidate Domain Pack fragment for platform-owner review. "+
+				"See packs/%s.json for the rendered content.",
+			pack.Author, kind, label, pack.Name,
+		),
+	}, nil
+}
+
 // ontologyDecisionError maps Engine.ApproveOntologyExtension/RejectOntologyExtension's
 // error taxonomy onto gRPC status codes: NotFound for no such proposal,
 // FailedPrecondition for an already-decided one, InvalidArgument for an
@@ -209,6 +258,10 @@ func ontologyDecisionError(rpc string, err error) error {
 	}
 	var decided *brain.OntologyProposalAlreadyDecidedError
 	if errors.As(err, &decided) {
+		return status_grpc.Errorf(codes.FailedPrecondition, "%s: %v", rpc, err)
+	}
+	var notPromoted *brain.OntologyProposalNotPromotedError
+	if errors.As(err, &notPromoted) {
 		return status_grpc.Errorf(codes.FailedPrecondition, "%s: %v", rpc, err)
 	}
 	var invalid *taxonomy.InvalidProposalError

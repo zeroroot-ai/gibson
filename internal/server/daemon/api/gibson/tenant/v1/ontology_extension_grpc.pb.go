@@ -55,6 +55,7 @@ const (
 	OntologyExtensionService_ListOntologyExtensionProposals_FullMethodName   = "/gibson.tenant.v1.OntologyExtensionService/ListOntologyExtensionProposals"
 	OntologyExtensionService_ApproveOntologyExtensionProposal_FullMethodName = "/gibson.tenant.v1.OntologyExtensionService/ApproveOntologyExtensionProposal"
 	OntologyExtensionService_RejectOntologyExtensionProposal_FullMethodName  = "/gibson.tenant.v1.OntologyExtensionService/RejectOntologyExtensionProposal"
+	OntologyExtensionService_SubmitOntologyExtensionUpstream_FullMethodName  = "/gibson.tenant.v1.OntologyExtensionService/SubmitOntologyExtensionUpstream"
 )
 
 // OntologyExtensionServiceClient is the client API for OntologyExtensionService service.
@@ -80,6 +81,17 @@ type OntologyExtensionServiceClient interface {
 	// of a pending proposal. Same refusal rules as
 	// ApproveOntologyExtensionProposal, and the same "owner" gate.
 	RejectOntologyExtensionProposal(ctx context.Context, in *RejectOntologyExtensionProposalRequest, opts ...grpc.CallOption) (*RejectOntologyExtensionProposalResponse, error)
+	// SubmitOntologyExtensionUpstream renders a LIVE tenant extension (a
+	// promoted proposal — NOT_FOUND if (kind, label) names no proposal ever
+	// observed, FAILED_PRECONDITION if it has not yet been promoted) as an SDK
+	// Domain Pack contribution artifact (ADR-0033 decision 2's "submit
+	// upstream -> contribution"). Gated to "owner", mirroring
+	// ApproveOntologyExtensionProposal: only the tenant that vouches for its
+	// own live extension nominates it for the shared catalog.
+	//
+	// This RPC renders the artifact only; it never opens a PR itself (see the
+	// response message's doc for why that hand-off exists).
+	SubmitOntologyExtensionUpstream(ctx context.Context, in *SubmitOntologyExtensionUpstreamRequest, opts ...grpc.CallOption) (*SubmitOntologyExtensionUpstreamResponse, error)
 }
 
 type ontologyExtensionServiceClient struct {
@@ -120,6 +132,16 @@ func (c *ontologyExtensionServiceClient) RejectOntologyExtensionProposal(ctx con
 	return out, nil
 }
 
+func (c *ontologyExtensionServiceClient) SubmitOntologyExtensionUpstream(ctx context.Context, in *SubmitOntologyExtensionUpstreamRequest, opts ...grpc.CallOption) (*SubmitOntologyExtensionUpstreamResponse, error) {
+	cOpts := append([]grpc.CallOption{grpc.StaticMethod()}, opts...)
+	out := new(SubmitOntologyExtensionUpstreamResponse)
+	err := c.cc.Invoke(ctx, OntologyExtensionService_SubmitOntologyExtensionUpstream_FullMethodName, in, out, cOpts...)
+	if err != nil {
+		return nil, err
+	}
+	return out, nil
+}
+
 // OntologyExtensionServiceServer is the server API for OntologyExtensionService service.
 // All implementations must embed UnimplementedOntologyExtensionServiceServer
 // for forward compatibility.
@@ -143,6 +165,17 @@ type OntologyExtensionServiceServer interface {
 	// of a pending proposal. Same refusal rules as
 	// ApproveOntologyExtensionProposal, and the same "owner" gate.
 	RejectOntologyExtensionProposal(context.Context, *RejectOntologyExtensionProposalRequest) (*RejectOntologyExtensionProposalResponse, error)
+	// SubmitOntologyExtensionUpstream renders a LIVE tenant extension (a
+	// promoted proposal — NOT_FOUND if (kind, label) names no proposal ever
+	// observed, FAILED_PRECONDITION if it has not yet been promoted) as an SDK
+	// Domain Pack contribution artifact (ADR-0033 decision 2's "submit
+	// upstream -> contribution"). Gated to "owner", mirroring
+	// ApproveOntologyExtensionProposal: only the tenant that vouches for its
+	// own live extension nominates it for the shared catalog.
+	//
+	// This RPC renders the artifact only; it never opens a PR itself (see the
+	// response message's doc for why that hand-off exists).
+	SubmitOntologyExtensionUpstream(context.Context, *SubmitOntologyExtensionUpstreamRequest) (*SubmitOntologyExtensionUpstreamResponse, error)
 	mustEmbedUnimplementedOntologyExtensionServiceServer()
 }
 
@@ -161,6 +194,9 @@ func (UnimplementedOntologyExtensionServiceServer) ApproveOntologyExtensionPropo
 }
 func (UnimplementedOntologyExtensionServiceServer) RejectOntologyExtensionProposal(context.Context, *RejectOntologyExtensionProposalRequest) (*RejectOntologyExtensionProposalResponse, error) {
 	return nil, status.Error(codes.Unimplemented, "method RejectOntologyExtensionProposal not implemented")
+}
+func (UnimplementedOntologyExtensionServiceServer) SubmitOntologyExtensionUpstream(context.Context, *SubmitOntologyExtensionUpstreamRequest) (*SubmitOntologyExtensionUpstreamResponse, error) {
+	return nil, status.Error(codes.Unimplemented, "method SubmitOntologyExtensionUpstream not implemented")
 }
 func (UnimplementedOntologyExtensionServiceServer) mustEmbedUnimplementedOntologyExtensionServiceServer() {
 }
@@ -238,6 +274,24 @@ func _OntologyExtensionService_RejectOntologyExtensionProposal_Handler(srv inter
 	return interceptor(ctx, in, info, handler)
 }
 
+func _OntologyExtensionService_SubmitOntologyExtensionUpstream_Handler(srv interface{}, ctx context.Context, dec func(interface{}) error, interceptor grpc.UnaryServerInterceptor) (interface{}, error) {
+	in := new(SubmitOntologyExtensionUpstreamRequest)
+	if err := dec(in); err != nil {
+		return nil, err
+	}
+	if interceptor == nil {
+		return srv.(OntologyExtensionServiceServer).SubmitOntologyExtensionUpstream(ctx, in)
+	}
+	info := &grpc.UnaryServerInfo{
+		Server:     srv,
+		FullMethod: OntologyExtensionService_SubmitOntologyExtensionUpstream_FullMethodName,
+	}
+	handler := func(ctx context.Context, req interface{}) (interface{}, error) {
+		return srv.(OntologyExtensionServiceServer).SubmitOntologyExtensionUpstream(ctx, req.(*SubmitOntologyExtensionUpstreamRequest))
+	}
+	return interceptor(ctx, in, info, handler)
+}
+
 // OntologyExtensionService_ServiceDesc is the grpc.ServiceDesc for OntologyExtensionService service.
 // It's only intended for direct use with grpc.RegisterService,
 // and not to be introspected or modified (even as a copy)
@@ -256,6 +310,10 @@ var OntologyExtensionService_ServiceDesc = grpc.ServiceDesc{
 		{
 			MethodName: "RejectOntologyExtensionProposal",
 			Handler:    _OntologyExtensionService_RejectOntologyExtensionProposal_Handler,
+		},
+		{
+			MethodName: "SubmitOntologyExtensionUpstream",
+			Handler:    _OntologyExtensionService_SubmitOntologyExtensionUpstream_Handler,
 		},
 	},
 	Streams:  []grpc.StreamDesc{},

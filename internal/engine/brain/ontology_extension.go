@@ -11,9 +11,9 @@
 // This file builds the FIRST arrow only: an agent proposing a new Taxonomy
 // node label or relationship type at runtime. It deliberately stops at
 // "observe" — promotion into a live tenant extension is the tenant owner's
-// explicit approval (gibson#392, not built here), and submitting a live
-// extension upstream as a catalog contribution is a further step still
-// (gibson#393, not built here either).
+// explicit approval (gibson#392, not built here). Submitting a live
+// extension upstream as a catalog contribution is the further step gibson#393
+// builds, in ontology_extension_upstream.go.
 //
 // The safety gate is deliberately STRICTER here than
 // taxonomy.PromotionGate.Observe's own documented behavior. Observe never
