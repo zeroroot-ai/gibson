@@ -26,17 +26,17 @@ import (
 // process to evict an entry, so three invalidation methods that nothing
 // called, and a comment that promised a push-invalidation slice, were
 // removed (ADR-0027). What the platform promises, "a demoted or removed user
-// is refused within seconds", is therefore exactly defaultCacheTTL after the
+// is refused within seconds", is therefore exactly DefaultCacheTTL after the
 // tuple lands, and the identity exit test measures against that bound. An
 // operator may set EXT_AUTHZ_FGA_CACHE_TTL; longer is looser.
 //
 // The cache is bounded (maxSize) with random eviction when full, and every
 // hit and miss is counted (cacheHitsTotal, cacheMissesTotal) so the FGA load
 // the TTL buys can be read off the metrics.
-// defaultCacheTTL is how long a decision may lag the tuple that changed it.
+// DefaultCacheTTL is how long a decision may lag the tuple that changed it.
 // Five seconds keeps FGA load to one check per (subject, tenant, relation,
 // object) per five seconds, and keeps the refusal promise measurable.
-const defaultCacheTTL = 5 * time.Second
+const DefaultCacheTTL = 5 * time.Second
 
 type CachedChecker struct {
 	inner   *Checker
@@ -92,7 +92,7 @@ func NewCachedChecker(inner *Checker, ttl time.Duration, maxSize int) *CachedChe
 		panic("fga.NewCachedChecker: inner Checker must not be nil")
 	}
 	if ttl <= 0 {
-		ttl = defaultCacheTTL
+		ttl = DefaultCacheTTL
 	}
 	return &CachedChecker{
 		inner:   inner,

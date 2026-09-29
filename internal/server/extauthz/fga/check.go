@@ -439,7 +439,7 @@ func (c *CachedChecker) CheckPlatformOperator(ctx context.Context, subject strin
 // so two requests from the same user with different tokens would require
 // distinct cache keys. More importantly, a revocation must refuse the token
 // on its next request: caching the gate's "allowed" result here would let a
-// revoked token pass for up to defaultCacheTTL. Nothing evicts this
+// revoked token pass for up to DefaultCacheTTL. Nothing evicts this
 // process's cache from outside (cache.go), so the only correct cache for
 // this gate is none.
 // The FGA network round-trip for this uncached call is within budget: the
