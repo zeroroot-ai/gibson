@@ -1,5 +1,12 @@
 # Changelog
 
+## [0.146.0](https://github.com/zeroroot-ai/gibson/compare/v0.145.0...v0.146.0) (2026-09-30)
+
+
+### Features
+
+* **missions:** record who created a mission, and resolve people at read time ([#438](https://github.com/zeroroot-ai/gibson/issues/438)) ([1a6c649](https://github.com/zeroroot-ai/gibson/commit/1a6c649d97b15d8d403b3d9c478417fdd490c96c))
+
 ## [0.145.0](https://github.com/zeroroot-ai/gibson/compare/v0.144.0...v0.145.0) (2026-09-30)
 
 
