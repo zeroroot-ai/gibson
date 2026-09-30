@@ -1,5 +1,19 @@
 # Changelog
 
+## [0.145.0](https://github.com/zeroroot-ai/gibson/compare/v0.144.0...v0.145.0) (2026-09-30)
+
+
+### Features
+
+* **brain:** hard-gate Decider dispatch to the VoI top-k (gibson[#397](https://github.com/zeroroot-ai/gibson/issues/397)) ([faaa55e](https://github.com/zeroroot-ai/gibson/commit/faaa55ee32650d0c3ed7883b59db8a0ea1eb3e9d))
+* **intelligence:** phase 2 — CEL proof-settlement, domain packs, native belief runtime, ontology self-construction ([#432](https://github.com/zeroroot-ai/gibson/issues/432)) ([faaa55e](https://github.com/zeroroot-ai/gibson/commit/faaa55ee32650d0c3ed7883b59db8a0ea1eb3e9d))
+
+
+### Bug Fixes
+
+* **ci:** link-check checks only the Markdown a PR touched (.github v0.7.2) ([#436](https://github.com/zeroroot-ai/gibson/issues/436)) ([8ebd260](https://github.com/zeroroot-ai/gibson/commit/8ebd26053bf814df83866c44f0be5cf63f680ab5))
+* **ext-authz:** session gates in flight for one token share one FGA call ([#435](https://github.com/zeroroot-ai/gibson/issues/435)) ([ed2f31d](https://github.com/zeroroot-ai/gibson/commit/ed2f31d8ccc9d94ef569ae6baa20852a309b4248))
+
 ## [0.144.0](https://github.com/zeroroot-ai/gibson/compare/v0.143.8...v0.144.0) (2026-09-29)
 
 
