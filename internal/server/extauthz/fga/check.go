@@ -530,10 +530,7 @@ func (c *CachedChecker) sharedSessionGate(ctx context.Context, key string, fn fu
 	if err != nil {
 		return false, err //nolint:wrapcheck // the inner gate already names the RPC that failed
 	}
-	allowed, ok := v.(bool)
-	if !ok {
-		return false, errors.New("fga: session gate returned a non-bool result")
-	}
+	allowed, _ := v.(bool) // fn returns a bool; a failed assertion is a deny, never a panic
 	return allowed, nil
 }
 

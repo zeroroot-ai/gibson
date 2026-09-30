@@ -5,6 +5,7 @@ package fga
 
 import (
 	"context"
+	"errors"
 	"runtime"
 	"strings"
 	"sync"
@@ -20,6 +21,7 @@ import (
 // closed, so a test can pile concurrent callers onto one in-flight call.
 type gatedFGA struct {
 	release chan struct{}
+	err     error
 	calls   int32
 }
 
@@ -38,11 +40,14 @@ func (r *gatedReq) Options(_ fgaclient.ClientCheckOptions) fgaclient.SdkClientCh
 }
 func (r *gatedReq) Execute() (*fgaclient.ClientCheckResponse, error) {
 	<-r.g.release
+	if r.g.err != nil {
+		return nil, r.g.err
+	}
 	allowed := true
 	return &fgaclient.ClientCheckResponse{CheckResponse: openfga.CheckResponse{Allowed: &allowed}}, nil
 }
-func (r *gatedReq) GetAuthorizationModelIdOverride() *string  { return nil }
-func (r *gatedReq) GetStoreIdOverride() *string               { return nil }
+func (r *gatedReq) GetAuthorizationModelIdOverride() *string  { return nil } //nolint:revive,staticcheck // method name set by openfga SDK request interface
+func (r *gatedReq) GetStoreIdOverride() *string               { return nil } //nolint:revive,staticcheck // method name set by openfga SDK request interface
 func (r *gatedReq) GetContext() context.Context               { return context.Background() }
 func (r *gatedReq) GetBody() *fgaclient.ClientCheckRequest    { return nil }
 func (r *gatedReq) GetOptions() *fgaclient.ClientCheckOptions { return nil }
@@ -145,6 +150,39 @@ func TestCachedChecker_CheckActiveSession_SharedCallSurvivesFirstCallerCancel(t 
 // singleflight.Group.Do: the one running the FGA call and the ones waiting
 // to share its result. Without this the test could release the call before
 // a joiner arrives, and that joiner would start a call of its own.
+// Every caller that shares a failed call gets the failure, so the server maps
+// each of them to Unavailable rather than one of them to a silent allow.
+func TestCachedChecker_CheckActiveSession_SharedCallSharesTheError(t *testing.T) {
+	t.Parallel()
+	stub := &gatedFGA{release: make(chan struct{}), err: errors.New("fga: boom")}
+	cc := NewCachedChecker(NewChecker(stub, makeMinimalReg(t)), time.Hour, 100)
+	iat := time.Unix(1_700_000_100, 0).UTC()
+
+	const burst = 3
+	var wg sync.WaitGroup
+	errs := make([]error, burst)
+	for i := range burst {
+		wg.Add(1)
+		go func() {
+			defer wg.Done()
+			_, errs[i] = cc.CheckActiveSession(context.Background(), "u-1", "acme", iat)
+		}()
+	}
+	waitForCalls(t, &stub.calls, 1)
+	waitForCallersInGate(t, burst)
+	close(stub.release)
+	wg.Wait()
+
+	for i := range burst {
+		if errs[i] == nil || !strings.Contains(errs[i].Error(), "boom") {
+			t.Fatalf("caller %d: want the shared FGA error, got %v", i, errs[i])
+		}
+	}
+	if got := atomic.LoadInt32(&stub.calls); got != 1 {
+		t.Fatalf("expected one shared FGA call, got %d", got)
+	}
+}
+
 func waitForCallersInGate(t *testing.T, want int) {
 	t.Helper()
 	deadline := time.Now().Add(5 * time.Second)
