@@ -1,5 +1,12 @@
 # Changelog
 
+## [0.146.4](https://github.com/zeroroot-ai/gibson/compare/v0.146.3...v0.146.4) (2026-09-30)
+
+
+### Bug Fixes
+
+* **image:** move the runtime base to alpine 3.22, 3.21 cannot ship the OpenSSL fix ([#446](https://github.com/zeroroot-ai/gibson/issues/446)) ([ac09972](https://github.com/zeroroot-ai/gibson/commit/ac09972879e6728841854f5d1e95c02c66cabe56))
+
 ## [0.146.3](https://github.com/zeroroot-ai/gibson/compare/v0.146.2...v0.146.3) (2026-09-30)
 
 
