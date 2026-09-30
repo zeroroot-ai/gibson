@@ -1,5 +1,12 @@
 # Changelog
 
+## [0.146.3](https://github.com/zeroroot-ai/gibson/compare/v0.146.2...v0.146.3) (2026-09-30)
+
+
+### Bug Fixes
+
+* **image:** bump the alpine runtime base, libssl3 3.3.7-r2 closes two CVEs ([#444](https://github.com/zeroroot-ai/gibson/issues/444)) ([1071271](https://github.com/zeroroot-ai/gibson/commit/10712716c4f5978d8168df19559992f3d1a05077))
+
 ## [0.146.2](https://github.com/zeroroot-ai/gibson/compare/v0.146.1...v0.146.2) (2026-09-30)
 
 
