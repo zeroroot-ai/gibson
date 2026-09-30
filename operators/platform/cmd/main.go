@@ -204,6 +204,7 @@ func run(cfg runConfig) error {
 
 	if err := (&controller.PlatformBootstrapReconciler{
 		Client:     mgr.GetClient(),
+		APIReader:  mgr.GetAPIReader(),
 		Scheme:     mgr.GetScheme(),
 		Recorder:   mgr.GetEventRecorderFor("platformbootstrap-controller"),
 		VaultToken: vaultRenewer,

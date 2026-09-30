@@ -97,6 +97,14 @@ type VaultTokenSource interface {
 // +kubebuilder:rbac:groups="",resources=secrets,verbs=create
 type PlatformBootstrapReconciler struct {
 	client.Client
+	// APIReader reads the PlatformBootstrap straight from the API server.
+	// The manager's default client reads through the informer cache, which
+	// lags the reconciler's own status write by up to a second, so the very
+	// next pass could read stale status and repeat a side effect it had
+	// already recorded: identity run 36680224658 mailed the Platform owner's
+	// setup link twice one second apart that way. Nil in tests, where the
+	// fake client has no cache and Client serves both reads.
+	APIReader           client.Reader
 	Scheme              *runtime.Scheme
 	Recorder            record.EventRecorder
 	ZitadelFactory      ZitadelClientFactory
@@ -153,11 +161,11 @@ func (r *PlatformBootstrapReconciler) mapChildToParent(ctx context.Context, obj 
 }
 
 // Reconcile is the top-level state-machine entry.
-func (r *PlatformBootstrapReconciler) Reconcile(ctx context.Context, req ctrl.Request) (ctrl.Result, error) {
+func (r *PlatformBootstrapReconciler) Reconcile(ctx context.Context, req ctrl.Request) (result ctrl.Result, err error) {
 	logger := log.FromContext(ctx).WithValues("platformbootstrap", req.Name)
 
 	var pb gibsonv1alpha1.PlatformBootstrap
-	if err := r.Get(ctx, req.NamespacedName, &pb); err != nil {
+	if err := r.reader().Get(ctx, req.NamespacedName, &pb); err != nil {
 		return ctrl.Result{}, client.IgnoreNotFound(err)
 	}
 
@@ -172,139 +180,98 @@ func (r *PlatformBootstrapReconciler) Reconcile(ctx context.Context, req ctrl.Re
 		}
 		return ctrl.Result{Requeue: true}, nil
 	}
-
-	// Step 0: escrow the OpenBao unseal key.
-	//
-	// FIRST, deliberately. Escrow depends on nothing but the minted key, and
-	// every later step depends on services that can be down. Running it after
-	// them means a cluster that is partially broken — a failed Zitadel domain
-	// listing is enough — never escrows its key at all, which is precisely the
-	// cluster whose key you will wish had been copied out. Ordering this last
-	// made escrow least likely to happen exactly when it mattered most.
-	//
-	// It never blocks the rest: an unescrowed key holds the Ready condition,
-	// not the reconcile.
-	if result, err := r.reconcileUnsealEscrow(ctx, &pb, logger); err != nil || !result.IsZero() {
-		_ = r.statusUpdate(ctx, &pb)
-		return result, err
+	// Every step below records what it did on pb.Status. One deferred write
+	// persists that on every return path, and a failed write is a reconcile
+	// error, never a silent loss: the next pass would otherwise read the old
+	// status and repeat a step, and a step that mailed a setup link or
+	// deleted an account cannot be repeated (identity run 36680224658).
+	defer func() { result, err = r.finish(ctx, &pb, result, err) }()
+	// The steps, in order. Each records what it did on pb.Status and returns
+	// a non-zero Result or an error to stop the pass there; the comments
+	// above each step say why it sits where it does.
+	steps := []reconcileStep{
+		// Step 0: escrow the OpenBao unseal key.
+		//
+		// FIRST, deliberately. Escrow depends on nothing but the minted key, and
+		// every later step depends on services that can be down. Running it after
+		// them means a cluster that is partially broken — a failed Zitadel domain
+		// listing is enough — never escrows its key at all, which is precisely the
+		// cluster whose key you will wish had been copied out. Ordering this last
+		// made escrow least likely to happen exactly when it mattered most.
+		//
+		// It never blocks the rest: an unescrowed key holds the Ready condition,
+		// not the reconcile.
+		r.reconcileUnsealEscrow,
+		// Step 1: Zitadel project + service users.
+		r.reconcileZitadelProject,
+		// Step 2: OIDCClient children.
+		r.reconcileOIDCChildren,
+		// Step 2b: SA identity map. Runs after the OIDCClient children are Ready
+		// because it reflects each MACHINE_USER child's numeric status.clientID
+		// into the gibson-sa-identity-map ConfigMap. Replaces the gitops
+		// sa-identity-map-populator Sync Job (gitops#170).
+		r.reconcileSAIdentityMap,
+		// Step 3: Register cluster-internal Zitadel Service hostname as a trusted
+		// domain so in-cluster consumers can dial it directly (ADR-0008).
+		//
+		// Ordering rationale: trusted-domain registration depends only on
+		// reconcileZitadelProject (Step 1) + reconcileOIDCChildren (Step 2)
+		// being complete (it needs the Zitadel instance + the system-bot
+		// MACHINE_USER to exist). It is orthogonal to FGA, vault, plans,
+		// master-key, and postgres-bundle — promoting it ahead of those
+		// avoids gating slice 0 behind an unrelated reconciler short-circuit
+		// (gitops#122 tracks the postgres-side investigation).
+		r.reconcileTrustedDomain,
+		// Step 4: FGA model.
+		r.reconcileFGAModel,
+		// Step 5: Vault transit.
+		r.reconcileVaultTransit,
+		// Step 6: Plan sync.
+		r.reconcilePlanSync,
+		// Step 7: Master-key Secret.
+		r.reconcileMasterKey,
+		// Step 8: Postgres database ownership + grants.
+		r.reconcilePostgresBundle,
+		// Step 9: the login pages' brand. It never stops the reconcile; see
+		// reconcileLoginBranding.
+		func(ctx context.Context, pb *gibsonv1alpha1.PlatformBootstrap, logger logr.Logger) (ctrl.Result, error) {
+			r.reconcileLoginBranding(ctx, pb, logger)
+			return ctrl.Result{}, nil
+		},
+		// Step 9b: the instance's one SMTP email provider (hosted#189). Placed
+		// before Step 10 deliberately: reconcilePlatformOwner's mailed setup
+		// link is only trustworthy once this step has confirmed (or repaired)
+		// an active SMTP provider in the same pass, so a fresh Platform owner is
+		// never told "emailed" while nothing can actually deliver the mail.
+		r.reconcileZitadelSMTP,
+		// Step 10: Platform owner (ADR-0093 decision 6/8, hosted#201). Ordering
+		// rationale: depends on the Zitadel project (Step 1, for the org id and
+		// admin token) and the FGA model (Step 4, for the store/model ids the
+		// platform_owner tuple write needs) both being available. Placed last so
+		// a Platform owner is never provisioned against a half-bootstrapped
+		// instance.
+		r.reconcilePlatformOwner,
+		// Step 11: keep the Platform owner the only human Zitadel administrator
+		// (ADR-0093 decision 6, hosted#189). Must run after reconcilePlatformOwner
+		// (Step 10): it needs status.PlatformOwnerUserID to know which human
+		// member to keep, and reconcilePlatformOwner only returns a zero Result
+		// once that id is persisted.
+		r.reconcileHumanAdminsScoped,
+		// Step 12: keep the declared service accounts and the login client the
+		// only machine Zitadel administrators (ADR-0093 decision 6, hosted#207).
+		// Reads the same service-account list as Step 2b, so it only removes a
+		// machine member once every declared one is known.
+		r.reconcileMachineAdminsScoped,
+		// Top-level Ready rollup.
 	}
-
-	// Step 1: Zitadel project + service users.
-	if result, err := r.reconcileZitadelProject(ctx, &pb, logger); err != nil || !result.IsZero() {
-		_ = r.statusUpdate(ctx, &pb)
-		return result, err
+	for _, step := range steps {
+		if result, err = step(ctx, &pb, logger); err != nil || !result.IsZero() {
+			return result, err
+		}
 	}
-
-	// Step 2: OIDCClient children.
-	if result, err := r.reconcileOIDCChildren(ctx, &pb, logger); err != nil || !result.IsZero() {
-		_ = r.statusUpdate(ctx, &pb)
-		return result, err
-	}
-
-	// Step 2b: SA identity map. Runs after the OIDCClient children are Ready
-	// because it reflects each MACHINE_USER child's numeric status.clientID
-	// into the gibson-sa-identity-map ConfigMap. Replaces the gitops
-	// sa-identity-map-populator Sync Job (gitops#170).
-	if result, err := r.reconcileSAIdentityMap(ctx, &pb, logger); err != nil || !result.IsZero() {
-		_ = r.statusUpdate(ctx, &pb)
-		return result, err
-	}
-
-	// Step 3: Register cluster-internal Zitadel Service hostname as a trusted
-	// domain so in-cluster consumers can dial it directly (ADR-0008).
-	//
-	// Ordering rationale: trusted-domain registration depends only on
-	// reconcileZitadelProject (Step 1) + reconcileOIDCChildren (Step 2)
-	// being complete (it needs the Zitadel instance + the system-bot
-	// MACHINE_USER to exist). It is orthogonal to FGA, vault, plans,
-	// master-key, and postgres-bundle — promoting it ahead of those
-	// avoids gating slice 0 behind an unrelated reconciler short-circuit
-	// (gitops#122 tracks the postgres-side investigation).
-	if result, err := r.reconcileTrustedDomain(ctx, &pb, logger); err != nil || !result.IsZero() {
-		_ = r.statusUpdate(ctx, &pb)
-		return result, err
-	}
-
-	// Step 4: FGA model.
-	if result, err := r.reconcileFGAModel(ctx, &pb, logger); err != nil || !result.IsZero() {
-		_ = r.statusUpdate(ctx, &pb)
-		return result, err
-	}
-
-	// Step 5: Vault transit.
-	if result, err := r.reconcileVaultTransit(ctx, &pb, logger); err != nil || !result.IsZero() {
-		_ = r.statusUpdate(ctx, &pb)
-		return result, err
-	}
-
-	// Step 6: Plan sync.
-	if result, err := r.reconcilePlanSync(ctx, &pb, logger); err != nil || !result.IsZero() {
-		_ = r.statusUpdate(ctx, &pb)
-		return result, err
-	}
-
-	// Step 7: Master-key Secret.
-	if result, err := r.reconcileMasterKey(ctx, &pb, logger); err != nil || !result.IsZero() {
-		_ = r.statusUpdate(ctx, &pb)
-		return result, err
-	}
-
-	// Step 8: Postgres database ownership + grants.
-	if result, err := r.reconcilePostgresBundle(ctx, &pb, logger); err != nil || !result.IsZero() {
-		_ = r.statusUpdate(ctx, &pb)
-		return result, err
-	}
-
-	// Step 9: the login pages' brand. It never stops the reconcile; see
-	// reconcileLoginBranding.
-	r.reconcileLoginBranding(ctx, &pb, logger)
-
-	// Step 9b: the instance's one SMTP email provider (hosted#189). Placed
-	// before Step 10 deliberately: reconcilePlatformOwner's mailed setup
-	// link is only trustworthy once this step has confirmed (or repaired)
-	// an active SMTP provider in the same pass, so a fresh Platform owner is
-	// never told "emailed" while nothing can actually deliver the mail.
-	if result, err := r.reconcileZitadelSMTP(ctx, &pb, logger); err != nil || !result.IsZero() {
-		_ = r.statusUpdate(ctx, &pb)
-		return result, err
-	}
-
-	// Step 10: Platform owner (ADR-0093 decision 6/8, hosted#201). Ordering
-	// rationale: depends on the Zitadel project (Step 1, for the org id and
-	// admin token) and the FGA model (Step 4, for the store/model ids the
-	// platform_owner tuple write needs) both being available. Placed last so
-	// a Platform owner is never provisioned against a half-bootstrapped
-	// instance.
-	if result, err := r.reconcilePlatformOwner(ctx, &pb, logger); err != nil || !result.IsZero() {
-		_ = r.statusUpdate(ctx, &pb)
-		return result, err
-	}
-
-	// Step 11: keep the Platform owner the only human Zitadel administrator
-	// (ADR-0093 decision 6, hosted#189). Must run after reconcilePlatformOwner
-	// (Step 10): it needs status.PlatformOwnerUserID to know which human
-	// member to keep, and reconcilePlatformOwner only returns a zero Result
-	// once that id is persisted.
-	if result, err := r.reconcileHumanAdminsScoped(ctx, &pb, logger); err != nil || !result.IsZero() {
-		_ = r.statusUpdate(ctx, &pb)
-		return result, err
-	}
-
-	// Step 12: keep the declared service accounts and the login client the
-	// only machine Zitadel administrators (ADR-0093 decision 6, hosted#207).
-	// Reads the same service-account list as Step 2b, so it only removes a
-	// machine member once every declared one is known.
-	if result, err := r.reconcileMachineAdminsScoped(ctx, &pb, logger); err != nil || !result.IsZero() {
-		_ = r.statusUpdate(ctx, &pb)
-		return result, err
-	}
-
-	// Top-level Ready rollup.
 	r.aggregateReady(&pb)
 	pb.Status.ObservedGeneration = pb.Generation
-	if err := r.statusUpdate(ctx, &pb); err != nil {
-		return ctrl.Result{}, err
-	}
+	// The deferred finish writes the status this pass left on pb.
 	return ctrl.Result{RequeueAfter: 5 * time.Minute}, nil
 }
 
@@ -791,6 +758,36 @@ func (r *PlatformBootstrapReconciler) statusUpdate(ctx context.Context, pb *gibs
 		return fmt.Errorf("PlatformBootstrap status update: %w", err)
 	}
 	return nil
+}
+
+// reconcileStep is one ordered step of Reconcile. A non-zero Result or an
+// error stops the pass at that step; the deferred finish still writes the
+// status the step left on pb.
+type reconcileStep func(ctx context.Context, pb *gibsonv1alpha1.PlatformBootstrap, logger logr.Logger) (ctrl.Result, error)
+
+// reader is the client that fetches the PlatformBootstrap at the start of a
+// pass: the uncached API reader when the manager gave us one, else Client.
+func (r *PlatformBootstrapReconciler) reader() client.Reader {
+	if r.APIReader != nil {
+		return r.APIReader
+	}
+	return r.Client
+}
+
+// finish writes the status a step left on pb and returns the step's result.
+// A status write that fails is a reconcile error, never a silent loss: the
+// next pass would otherwise read the old status and repeat the step, and a
+// step that mailed a setup link or deleted an account cannot be repeated.
+// The error surfaces in the controller's "Reconciler error" log line and
+// requeues the object with backoff.
+func (r *PlatformBootstrapReconciler) finish(ctx context.Context, pb *gibsonv1alpha1.PlatformBootstrap, result ctrl.Result, err error) (ctrl.Result, error) {
+	if serr := r.statusUpdate(ctx, pb); serr != nil {
+		if err != nil {
+			return result, fmt.Errorf("%w (and the status write failed: %w)", err, serr)
+		}
+		return result, serr
+	}
+	return result, err
 }
 
 // setBootstrapCond patches one condition on a PlatformBootstrap.
