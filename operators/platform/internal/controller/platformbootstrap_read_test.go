@@ -27,7 +27,7 @@ type countingReader struct {
 
 func (c *countingReader) Get(ctx context.Context, key client.ObjectKey, obj client.Object, opts ...client.GetOption) error {
 	c.gets++
-	return c.Reader.Get(ctx, key, obj, opts...)
+	return c.Reader.Get(ctx, key, obj, opts...) //nolint:wrapcheck // a test double passes the client error through unchanged
 }
 
 // countingClient is a full client that records every Get.
@@ -38,7 +38,7 @@ type countingClient struct {
 
 func (c *countingClient) Get(ctx context.Context, key client.ObjectKey, obj client.Object, opts ...client.GetOption) error {
 	c.gets++
-	return c.Client.Get(ctx, key, obj, opts...)
+	return c.Client.Get(ctx, key, obj, opts...) //nolint:wrapcheck // a test double passes the client error through unchanged
 }
 
 // The reconciler reads the PlatformBootstrap through the uncached API reader
