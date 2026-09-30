@@ -109,3 +109,51 @@ func TestFinish_SurfacesAFailedStatusWrite(t *testing.T) {
 		t.Fatalf("a working status write must not fail the pass: %v", err)
 	}
 }
+
+// A pass runs the steps in order, stops at the first one that asks to
+// requeue, and the deferred finish persists what every step left on the
+// status. With no escrow declared and no Zitadel admin token Secret, step 1
+// records EscrowNotConfigured and step 2 stops the pass with
+// WaitingForAdminToken; both conditions must be on the stored object. When
+// that status write fails, the pass fails, so the next pass cannot read old
+// status and repeat a step.
+func TestReconcile_RunsStepsInOrderAndPersistsStatus(t *testing.T) {
+	s := mustScheme(t)
+	pb := &gibsonv1alpha1.PlatformBootstrap{ObjectMeta: metav1.ObjectMeta{Name: "platform", Finalizers: []string{platformBootstrapFinalizer}}}
+	pb.Spec.Zitadel.AdminTokenRef = gibsonv1alpha1.SecretKeyRef{Name: "zitadel-admin-pat", Key: "pat"}
+	cli := fake.NewClientBuilder().WithScheme(s).WithObjects(pb).WithStatusSubresource(pb).Build()
+	r := &PlatformBootstrapReconciler{Client: cli, Scheme: s}
+
+	res, err := r.Reconcile(context.Background(), ctrl.Request{NamespacedName: client.ObjectKeyFromObject(pb)})
+	if err != nil {
+		t.Fatalf("Reconcile: %v", err)
+	}
+	if res.RequeueAfter == 0 {
+		t.Fatalf("result = %+v, want a requeue from the admin-token wait", res)
+	}
+	var stored gibsonv1alpha1.PlatformBootstrap
+	if err := cli.Get(context.Background(), client.ObjectKeyFromObject(pb), &stored); err != nil {
+		t.Fatalf("Get: %v", err)
+	}
+	for _, want := range []struct{ cond, reason string }{
+		{gibsonv1alpha1.ConditionUnsealKeyEscrowed, "EscrowNotConfigured"},
+		{gibsonv1alpha1.ConditionZitadelProjectReady, "WaitingForAdminToken"},
+	} {
+		c := findCondition(stored.Status.Conditions, want.cond)
+		if c == nil || c.Reason != want.reason {
+			t.Fatalf("stored condition %s = %+v, want reason %s", want.cond, c, want.reason)
+		}
+	}
+
+	boom := errors.New("etcdserver: request timed out")
+	failing := fake.NewClientBuilder().WithScheme(s).WithObjects(pb).WithStatusSubresource(pb).
+		WithInterceptorFuncs(interceptor.Funcs{
+			SubResourceUpdate: func(context.Context, client.Client, string, client.Object, ...client.SubResourceUpdateOption) error {
+				return boom
+			},
+		}).Build()
+	r = &PlatformBootstrapReconciler{Client: failing, Scheme: s}
+	if _, err := r.Reconcile(context.Background(), ctrl.Request{NamespacedName: client.ObjectKeyFromObject(pb)}); !errors.Is(err, boom) {
+		t.Fatalf("a failed status write must fail the pass, got %v", err)
+	}
+}
