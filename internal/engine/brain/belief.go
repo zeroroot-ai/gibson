@@ -95,11 +95,11 @@ func evidenceDigest(ev BeliefEvidence) string {
 
 // BeliefProvider scores attack-path beliefs from a host's evidence.
 //
-// The real implementation is a **pgmpy sidecar** (ADR-0005): a probabilistic
-// graphical model doing exact, read-only, deterministic inference, trained
-// offline and versioned. This interface is the seam; placeholderBelief is a
-// deterministic Go stand-in so attention (#751) and the Decider can consume
-// belief now — it is replaced by the pgmpy-backed provider in a later slice.
+// The real implementation is nativeBelief (belief_native.go, ADR-0005,
+// ADR-0034): exact, read-only Bayesian inference computed in-process via
+// internal/engine/brain/beliefvi — the native Go port that replaced the old
+// Python pgmpy sidecar (ADR-0027 hard cutover, gibson#377). This interface
+// is the seam attention (#751) and the Decider consume belief through.
 //
 // Score runs off the tick, in the BeliefWorker, so it may block on network I/O.
 type BeliefProvider interface {
@@ -258,29 +258,3 @@ func WireBelief(ctx context.Context, eng *Engine, p BeliefProvider, interval tim
 		}
 	}()
 }
-
-// placeholderBelief is a deterministic stand-in for the pgmpy provider (ADR-0005).
-// A reachable host with more open ports scores higher exploitability/juiciness.
-// NOT the real model — swapped for the pgmpy sidecar.
-type placeholderBelief struct{}
-
-func (placeholderBelief) Score(ev BeliefEvidence) Belief {
-	open := len(ev.OpenPorts)
-	reachable := 0.0
-	if open > 0 {
-		reachable = 1.0
-	}
-	exploitable := float64(open) / (float64(open) + 1.0) // 0,0.5,0.67,… monotonic in open ports
-	return Belief{
-		Juicy:       reachable * exploitable,
-		Exploitable: exploitable,
-		Reachable:   reachable,
-		Model:       "placeholder-v0",
-	}
-}
-
-// Version is the placeholder's static stand-in id.
-func (placeholderBelief) Version() string { return "placeholder-v0" }
-
-// PlaceholderBeliefProvider returns the deterministic stand-in provider.
-func PlaceholderBeliefProvider() BeliefProvider { return placeholderBelief{} }

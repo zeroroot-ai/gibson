@@ -5,6 +5,7 @@ package daemon
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"testing"
 	"time"
@@ -20,7 +21,7 @@ import (
 // awaitPending polls ListPendingDestructiveActions until it returns want
 // entries, or fails the test — the request is folded onto the engine's
 // Timeline asynchronously (ADR-0001), so a call made immediately after
-// Authorize starts can race the fold.
+// Request starts can race the fold.
 func awaitPending(ctx context.Context, t *testing.T, srv destructiveauthzv1.DestructiveAuthorizationServiceServer, want int) *destructiveauthzv1.ListPendingDestructiveActionsResponse {
 	t.Helper()
 	deadline := time.Now().Add(2 * time.Second)
@@ -48,9 +49,9 @@ func TestListPendingDestructiveActions_TenantScoped(t *testing.T) {
 
 	e := reg.For("acme")
 	q := e.DestructiveAuthorizationQueue()
-	go func() {
-		_, _ = q.Authorize(context.Background(), "acme", brain.BetSettlementRequest{HypothesisID: "hyp-1"})
-	}()
+	if _, err := q.Request("acme", brain.DestructiveAuthorizationRequest{HypothesisID: "hyp-1"}); err != nil {
+		t.Fatalf("Request: %v", err)
+	}
 
 	tctx := auth.WithTenant(context.Background(), auth.MustNewTenantID("acme"))
 	resp := awaitPending(tctx, t, srv, 1)
@@ -63,7 +64,7 @@ func TestListPendingDestructiveActions_TenantScoped(t *testing.T) {
 		t.Fatal("expected an error when no tenant is in context")
 	}
 
-	// Cleanup so the goroutine does not leak past the test.
+	// Cleanup for hygiene (nothing is blocked waiting on this anymore).
 	_ = q.Decide("hyp-1", "reviewer-1", false)
 }
 
@@ -75,9 +76,9 @@ func TestListPendingDestructiveActions_OtherTenantIsInvisible(t *testing.T) {
 
 	e := reg.For("acme")
 	q := e.DestructiveAuthorizationQueue()
-	go func() {
-		_, _ = q.Authorize(context.Background(), "acme", brain.BetSettlementRequest{HypothesisID: "hyp-1"})
-	}()
+	if _, err := q.Request("acme", brain.DestructiveAuthorizationRequest{HypothesisID: "hyp-1"}); err != nil {
+		t.Fatalf("Request: %v", err)
+	}
 	acmeCtx := auth.WithTenant(context.Background(), auth.MustNewTenantID("acme"))
 	awaitPending(acmeCtx, t, srv, 1)
 
@@ -93,7 +94,12 @@ func TestListPendingDestructiveActions_OtherTenantIsInvisible(t *testing.T) {
 	_ = q.Decide("hyp-1", "reviewer-1", false)
 }
 
-func TestApproveDestructiveAction_UnblocksTheWaitingSettlement(t *testing.T) {
+// TestApproveDestructiveAction_RecordsApproval proves an approval both drops
+// the action off the pending list AND becomes the fact SettleBetTrue's
+// verification (DestructiveAuthorizationQueue.Verify, ADR-0032) reads back —
+// the two effects ApproveDestructiveAction exists to produce, now that
+// nothing blocks waiting for it directly.
+func TestApproveDestructiveAction_RecordsApproval(t *testing.T) {
 	ctx, cancel := context.WithCancel(context.Background())
 	defer cancel()
 	reg := brain.NewRegistry(ctx)
@@ -101,11 +107,9 @@ func TestApproveDestructiveAction_UnblocksTheWaitingSettlement(t *testing.T) {
 
 	e := reg.For("acme")
 	q := e.DestructiveAuthorizationQueue()
-	resultCh := make(chan bool, 1)
-	go func() {
-		approved, _ := q.Authorize(context.Background(), "acme", brain.BetSettlementRequest{HypothesisID: "hyp-1"})
-		resultCh <- approved
-	}()
+	if _, err := q.Request("acme", brain.DestructiveAuthorizationRequest{HypothesisID: "hyp-1"}); err != nil {
+		t.Fatalf("Request: %v", err)
+	}
 
 	tctx := auth.WithTenant(context.Background(), auth.MustNewTenantID("acme"))
 	tctx = auth.ContextWithActingUser(tctx, "reviewer-1")
@@ -115,16 +119,15 @@ func TestApproveDestructiveAction_UnblocksTheWaitingSettlement(t *testing.T) {
 		t.Fatalf("ApproveDestructiveAction: %v", err)
 	}
 
-	select {
-	case approved := <-resultCh:
-		if !approved {
-			t.Fatal("want the waiting Authorize call to see approved=true")
-		}
-	case <-time.After(2 * time.Second):
-		t.Fatal("Authorize did not unblock after ApproveDestructiveAction")
-	}
-
 	awaitPending(tctx, t, srv, 0)
+
+	approved, err := q.Verify(context.Background(), "acme", brain.BetSettlementRequest{HypothesisID: "hyp-1"})
+	if err != nil {
+		t.Fatalf("Verify: %v", err)
+	}
+	if !approved {
+		t.Fatal("want Verify to see the recorded approval")
+	}
 }
 
 func TestApproveDestructiveAction_RequiresActionID(t *testing.T) {
@@ -156,7 +159,11 @@ func TestApproveDestructiveAction_UnknownActionErrors(t *testing.T) {
 	}
 }
 
-func TestDenyDestructiveAction_UnblocksTheWaitingSettlementAsDenied(t *testing.T) {
+// TestDenyDestructiveAction_RecordsDenial proves a denial both drops the
+// action off the pending list AND becomes the fact Verify reads back as a
+// terminal refusal (ErrDestructiveActionDenied, ADR-0032) — the bet can
+// never settle this way.
+func TestDenyDestructiveAction_RecordsDenial(t *testing.T) {
 	ctx, cancel := context.WithCancel(context.Background())
 	defer cancel()
 	reg := brain.NewRegistry(ctx)
@@ -164,11 +171,9 @@ func TestDenyDestructiveAction_UnblocksTheWaitingSettlementAsDenied(t *testing.T
 
 	e := reg.For("acme")
 	q := e.DestructiveAuthorizationQueue()
-	resultCh := make(chan bool, 1)
-	go func() {
-		approved, _ := q.Authorize(context.Background(), "acme", brain.BetSettlementRequest{HypothesisID: "hyp-1"})
-		resultCh <- approved
-	}()
+	if _, err := q.Request("acme", brain.DestructiveAuthorizationRequest{HypothesisID: "hyp-1"}); err != nil {
+		t.Fatalf("Request: %v", err)
+	}
 
 	tctx := auth.WithTenant(context.Background(), auth.MustNewTenantID("acme"))
 	tctx = auth.ContextWithActingUser(tctx, "reviewer-1")
@@ -178,13 +183,14 @@ func TestDenyDestructiveAction_UnblocksTheWaitingSettlementAsDenied(t *testing.T
 		t.Fatalf("DenyDestructiveAction: %v", err)
 	}
 
-	select {
-	case approved := <-resultCh:
-		if approved {
-			t.Fatal("want the waiting Authorize call to see approved=false")
-		}
-	case <-time.After(2 * time.Second):
-		t.Fatal("Authorize did not unblock after DenyDestructiveAction")
+	awaitPending(tctx, t, srv, 0)
+
+	approved, err := q.Verify(context.Background(), "acme", brain.BetSettlementRequest{HypothesisID: "hyp-1"})
+	if approved {
+		t.Fatal("want approved=false")
+	}
+	if !errors.Is(err, brain.ErrDestructiveActionDenied) {
+		t.Fatalf("want ErrDestructiveActionDenied, got %v", err)
 	}
 }
 
@@ -242,9 +248,9 @@ func assertRequiresActingUser(
 
 	e := reg.For("acme")
 	q := e.DestructiveAuthorizationQueue()
-	go func() {
-		_, _ = q.Authorize(context.Background(), "acme", brain.BetSettlementRequest{HypothesisID: "hyp-1"})
-	}()
+	if _, err := q.Request("acme", brain.DestructiveAuthorizationRequest{HypothesisID: "hyp-1"}); err != nil {
+		t.Fatalf("Request: %v", err)
+	}
 
 	// Tenant present, but NO acting-user set — the exact failure mode
 	// ActingUserFromContext's "ok=false" return represents.
@@ -266,7 +272,7 @@ func assertRequiresActingUser(
 		t.Fatalf("want hyp-1 still pending after the rejected call, got %+v", resp.Actions)
 	}
 
-	// Cleanup so the goroutine does not leak past the test.
+	// Cleanup for hygiene.
 	_ = q.Decide("hyp-1", "reviewer-1", false)
 }
 

@@ -170,6 +170,28 @@ var callbackMethodPolicy = map[string]callbackMethodDecision{
 	// --- Betting (ADR-0022, gibson#278) ---
 	harnesspb.HarnessCallbackService_PlaceBet_FullMethodName: {agentSurface: true, reason: reasonAgentCallbackSurface},
 
+	// --- Proof settlement (ADR-0030, ADR-0031, gibson#389; ADR-0032, gibson#390) ---
+	harnesspb.HarnessCallbackService_SubmitProof_FullMethodName:                     {agentSurface: true, reason: reasonAgentCallbackSurface},
+	harnesspb.HarnessCallbackService_RequestDestructiveAuthorization_FullMethodName: {agentSurface: true, reason: reasonAgentCallbackSurface},
+
+	// --- Ontology/taxonomy proposal (ADR-0024 §2, ADR-0033 decision 2,
+	// gibson#391) ---
+	// ProposeOntologyExtension is agent surface: served here
+	// (callback_propose_ontology_extension.go) and dialed by an agent (or
+	// agent run) proposing a new Taxonomy node label or relationship type
+	// discovered at runtime. The SDK bump that adds this RPC has not yet
+	// grown a Go CallbackHarness convenience wrapper (unlike SubmitProof's
+	// sibling), so today it is reached through the generated harnesspb
+	// client directly, the same way SearchTools and the session-context RPCs
+	// are reached off the meta-tool / external-component path rather than a
+	// generated harness method.
+	harnesspb.HarnessCallbackService_ProposeOntologyExtension_FullMethodName: {
+		agentSurface: true,
+		reason: "served here (callback_propose_ontology_extension.go); agent-proposed Taxonomy " +
+			"node label or relationship type, folded through the ValidIdentifier safety gate " +
+			"and PromotionGate.Observe (gibson#391)",
+	},
+
 	// --- Taxonomy / validation ---
 	harnesspb.HarnessCallbackService_GetTaxonomySchema_FullMethodName:    {agentSurface: true, reason: reasonAgentCallbackSurface},
 	harnesspb.HarnessCallbackService_GenerateNodeID_FullMethodName:       {agentSurface: true, reason: reasonAgentCallbackSurface},
@@ -219,14 +241,6 @@ var callbackMethodPolicy = map[string]callbackMethodDecision{
 	// --- Denied: declared in the proto, no handler on this daemon ---
 	harnesspb.HarnessCallbackService_GetPlanContext_FullMethodName:  {agentSurface: false, reason: reasonUnimplemented},
 	harnesspb.HarnessCallbackService_ReportStepHints_FullMethodName: {agentSurface: false, reason: reasonUnimplemented},
-	// The three RPCs sdk v0.182.0 and v0.183.0 declared for the phase-2
-	// harness (gibson#389 SubmitProof, destructive authorization, gibson#391
-	// ProposeOntologyExtension). Each lands with its handler and flips to
-	// agentSurface in that change; until then the daemon refuses them the
-	// honest way, Unimplemented, which callback_unimplemented_test.go pins.
-	harnesspb.HarnessCallbackService_SubmitProof_FullMethodName:                     {agentSurface: false, reason: reasonUnimplemented},
-	harnesspb.HarnessCallbackService_RequestDestructiveAuthorization_FullMethodName: {agentSurface: false, reason: reasonUnimplemented},
-	harnesspb.HarnessCallbackService_ProposeOntologyExtension_FullMethodName:        {agentSurface: false, reason: reasonUnimplemented},
 
 	// --- Bank member callbacks: declared by the sdk bump, served by a later
 	// slice of epic gibson#1706. They are the member-facing half of the job

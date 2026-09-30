@@ -11,6 +11,7 @@ import (
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 
+	"github.com/zeroroot-ai/gibson/internal/engine/taxonomy"
 	"github.com/zeroroot-ai/gibson/internal/infra/types"
 )
 
@@ -21,7 +22,7 @@ type mockAgent struct {
 	description    string
 	capabilities   []string
 	targetTypes    []types.TargetType
-	techniqueTypes []types.TechniqueType
+	techniqueTypes []taxonomy.CategoryID
 	slots          []SlotDefinition
 	initialized    bool
 	shutdownCalled bool
@@ -35,7 +36,7 @@ func newMockAgent(name string) *mockAgent {
 		description:    "Mock agent for testing",
 		capabilities:   []string{"test"},
 		targetTypes:    []types.TargetType{types.TargetTypeLLMChat},
-		techniqueTypes: []types.TechniqueType{types.TechniqueReconnaissance},
+		techniqueTypes: []taxonomy.CategoryID{taxonomy.CategoryID(types.TechniqueReconnaissance.String())},
 		slots: []SlotDefinition{
 			NewSlotDefinition("main", "Main LLM slot", true),
 		},
@@ -47,7 +48,7 @@ func (m *mockAgent) Version() string                       { return m.version }
 func (m *mockAgent) Description() string                   { return m.description }
 func (m *mockAgent) Capabilities() []string                { return m.capabilities }
 func (m *mockAgent) TargetTypes() []types.TargetType       { return m.targetTypes }
-func (m *mockAgent) TechniqueTypes() []types.TechniqueType { return m.techniqueTypes }
+func (m *mockAgent) TechniqueTypes() []taxonomy.CategoryID { return m.techniqueTypes }
 func (m *mockAgent) LLMSlots() []SlotDefinition            { return m.slots }
 
 func (m *mockAgent) Execute(ctx context.Context, task Task, harness AgentHarness) (Result, error) {
@@ -368,6 +369,7 @@ func TestAgentDescriptor(t *testing.T) {
 		assert.Equal(t, "Mock agent for testing", desc.Description)
 		assert.Contains(t, desc.Capabilities, "test")
 		assert.False(t, desc.IsExternal)
+		assert.Equal(t, []taxonomy.CategoryID{taxonomy.CategoryID("reconnaissance")}, desc.TechniqueTypes)
 	})
 
 	t.Run("NewExternalAgentDescriptor", func(t *testing.T) {
@@ -375,6 +377,7 @@ func TestAgentDescriptor(t *testing.T) {
 		assert.Equal(t, "external", desc.Name)
 		assert.Equal(t, "2.0.0", desc.Version)
 		assert.True(t, desc.IsExternal)
+		assert.Empty(t, desc.TechniqueTypes)
 	})
 
 	t.Run("RequiresSlot", func(t *testing.T) {

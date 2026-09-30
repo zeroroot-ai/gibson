@@ -11,15 +11,32 @@ import (
 	"time"
 
 	"github.com/zeroroot-ai/gibson/internal/engine/ontology"
+	"github.com/zeroroot-ai/gibson/internal/engine/taxonomy"
 )
 
 // voiEngine wires a minimal goal-mission engine with the VoI gate installed,
 // mirroring belief_test.go's beliefEngine / decider_test.go's goalEngine
-// helpers. The worker is returned for off-tick draining.
+// helpers. The worker is returned for off-tick draining. No capability
+// catalog or hierarchy: tests exercising the technique -> capability bridge
+// use voiEngineWithCatalog instead.
 func voiEngine(substrate BeliefSubstrate, registry *ontology.BeliefSchemaRegistry, scorer VoIScorer, topK int) (*Engine, *VoIWorker) {
+	return voiEngineWithCatalog(substrate, registry, scorer, topK, nil, nil)
+}
+
+// voiEngineWithCatalog is voiEngine plus an explicit capability catalog and
+// technique hierarchy, for tests proving VoI dispatch gating's
+// CoveringCapabilities resolution (ADR-0035 decision 4, gibson#387).
+func voiEngineWithCatalog(
+	substrate BeliefSubstrate,
+	registry *ontology.BeliefSchemaRegistry,
+	scorer VoIScorer,
+	topK int,
+	catalog func(missionID string) []Capability,
+	hierarchy *taxonomy.TechniqueHierarchy,
+) (*Engine, *VoIWorker) {
 	e := NewEngine("t")
 	e.AddSystem(VoIGateSystem)
-	w := NewVoIWorker(e, substrate, registry, scorer, topK)
+	w := NewVoIWorker(e, substrate, registry, scorer, topK, catalog, hierarchy, testBAMCPPlanner(registry))
 	e.Subscribe(w.Tap)
 	return e, w
 }
@@ -151,7 +168,7 @@ func TestWireVoIPlanner_ProducesAReplayablePlanOffTheTick(t *testing.T) {
 	e := NewEngine("t")
 	e.AddSystem(VoIGateSystem)
 	ctx, cancel := context.WithCancel(context.Background())
-	WireVoIPlanner(ctx, e, registry, ExactVoIScorer(), DefaultVoITopK, 5*time.Millisecond)
+	WireVoIPlanner(ctx, e, registry, ExactVoIScorer(), DefaultVoITopK, 5*time.Millisecond, nil, nil, testBAMCPPlanner(registry))
 
 	e.Submit(MissionProjected{ID: "m1", Goal: "find a path"})
 	e.Submit(HostObserved{ScopeID: "s", Address: "10.0.0.5", OpenPorts: []int{22}})
@@ -193,6 +210,66 @@ func TestVoIWorker_RecordsRankedCandidates(t *testing.T) {
 	}
 	if !kinds[VoICandidateEvidence] || !kinds[VoICandidateHypothesis] {
 		t.Fatalf("candidates = %+v, want both an evidence and a hypothesis candidate", plan.Candidates)
+	}
+}
+
+// TestNewVoIWorker_NilCatalogAndHierarchyNeverPanic proves NewVoIWorker's nil
+// catalog/hierarchy defaults (mirroring NewDeciderWorker's own nil-catalog
+// convention) make a fully-usable worker: draining a plan for a hypothesis
+// with a technique set resolves no covering capabilities, never a panic.
+func TestNewVoIWorker_NilCatalogAndHierarchyNeverPanic(t *testing.T) {
+	substrate := newFakeBeliefSubstrate()
+	registry := liveBeliefRegistry(t)
+	e, w := voiEngineWithCatalog(substrate, registry, ExactVoIScorer(), DefaultVoITopK, nil, nil)
+	e.Submit(MissionProjected{ID: "m1", Goal: "find a path"})
+	e.Submit(HypothesisObserved{ScopeID: "s", Claim: "c", Proposer: "agent-1", Technique: "indirect_prompt_injection"})
+
+	voiSettle(e, w, 1)
+
+	plans := e.World.VoIPlanSnapshot()
+	if len(plans) != 1 || len(plans[0].Candidates) != 1 {
+		t.Fatalf("plans = %+v, want one plan with one candidate", plans)
+	}
+	if got := plans[0].Candidates[0].CoveringCapabilities; len(got) != 0 {
+		t.Fatalf("CoveringCapabilities = %+v, want none (no catalog supplied)", got)
+	}
+}
+
+// TestVoIWorker_ResolvesCoveringCapabilitiesFromItsLiveCatalog proves the
+// worker's own catalog/hierarchy (NewVoIWorker's trailing params, ADR-0035
+// decision 4/gibson#387) reach PlanVoI end-to-end through a live tick/drain
+// cycle, not just through a directly-constructed VoIPlanInput: a hypothesis
+// candidate's technique resolves against the mission id the gate/worker
+// actually dispatched with.
+func TestVoIWorker_ResolvesCoveringCapabilitiesFromItsLiveCatalog(t *testing.T) {
+	substrate := newFakeBeliefSubstrate()
+	registry := liveBeliefRegistry(t)
+	hierarchy := dispatchTestHierarchy(t)
+	generalist := Capability{Kind: "agent", Name: "injection-hunter",
+		Coverage: dispatchCoverage(t, hierarchy, []taxonomy.CategoryID{"prompt_injection"}, nil)}
+
+	var gotMissionID string
+	catalog := func(missionID string) []Capability {
+		gotMissionID = missionID
+		return []Capability{generalist}
+	}
+
+	e, w := voiEngineWithCatalog(substrate, registry, ExactVoIScorer(), DefaultVoITopK, catalog, hierarchy)
+	e.Submit(MissionProjected{ID: "m1", Goal: "find a path"})
+	e.Submit(HypothesisObserved{ScopeID: "s", Claim: "the filter is bypassable", Proposer: "agent-1", Technique: "indirect_prompt_injection"})
+
+	voiSettle(e, w, 1)
+
+	if gotMissionID != "m1" {
+		t.Fatalf("catalog called with mission id %q, want %q", gotMissionID, "m1")
+	}
+	plans := e.World.VoIPlanSnapshot()
+	if len(plans) != 1 || len(plans[0].Candidates) != 1 {
+		t.Fatalf("plans = %+v, want one plan with one candidate", plans)
+	}
+	c := plans[0].Candidates[0]
+	if len(c.CoveringCapabilities) != 1 || c.CoveringCapabilities[0].Name != "injection-hunter" {
+		t.Fatalf("CoveringCapabilities = %+v, want only %q", c.CoveringCapabilities, "injection-hunter")
 	}
 }
 
@@ -323,13 +400,21 @@ func TestTimelineCodec_EncodeDecode_VoIPlanRequested(t *testing.T) {
 // TestTimelineCodec_EncodeDecode_VoIPlanned proves a VoIPlanned event
 // survives the same round trip, including its nested Candidates slice —
 // proving the payload, not just the envelope's kind string, decodes
-// correctly.
+// correctly. The first candidate's Technique/CoveringCapabilities (ADR-0035
+// decision 4, gibson#387) exercise the exact reason CoveringCapabilities is
+// []CapabilityRef and not []Capability: a Capability's Coverage carries
+// unexported internal state the JSON codec would silently drop, so a ref
+// (plain exported strings) is what must survive this round trip intact.
 func TestTimelineCodec_EncodeDecode_VoIPlanned(t *testing.T) {
 	want := VoIPlanned{
 		MissionID: "m1",
 		Cursor:    3,
 		Candidates: []VoICandidate{
-			{Kind: VoICandidateHypothesis, RefID: "hyp-1", InfoGain: 0.5, Value: 0.9},
+			{
+				Kind: VoICandidateHypothesis, RefID: "hyp-1", InfoGain: 0.5, Value: 0.9,
+				Technique:            "indirect_prompt_injection",
+				CoveringCapabilities: []CapabilityRef{{Kind: "agent", Name: "injection-hunter"}},
+			},
 			{Kind: VoICandidateEvidence, RefID: "host-1", InfoGain: 0.2, Value: 0.3},
 		},
 	}
@@ -370,7 +455,12 @@ func TestSnapshotRestore_RoundTripsVoIPlanState_InFlight(t *testing.T) {
 }
 
 // TestSnapshotRestore_RoundTripsVoIPlanState_Completed proves a completed VoI
-// plan (with its ranked candidates) survives the same round trip.
+// plan (with its ranked candidates) survives the same round trip, including a
+// candidate's Technique/CoveringCapabilities (ADR-0035 decision 4,
+// gibson#387) — the same JSON-safety property
+// TestTimelineCodec_EncodeDecode_VoIPlanned proves for the durable Timeline
+// path, proven here for the snapshot-and-trim path (ADR-0011), which
+// round-trips through the same encoding/json marshal (world_snapshot.go).
 func TestSnapshotRestore_RoundTripsVoIPlanState_Completed(t *testing.T) {
 	w := NewWorld("t")
 	Reduce(w, VoIPlanRequested{MissionID: "m1", Cursor: 2})
@@ -378,7 +468,11 @@ func TestSnapshotRestore_RoundTripsVoIPlanState_Completed(t *testing.T) {
 		MissionID: "m1",
 		Cursor:    2,
 		Candidates: []VoICandidate{
-			{Kind: VoICandidateHypothesis, RefID: "hyp-1", Value: 0.9},
+			{
+				Kind: VoICandidateHypothesis, RefID: "hyp-1", Value: 0.9,
+				Technique:            "indirect_prompt_injection",
+				CoveringCapabilities: []CapabilityRef{{Kind: "agent", Name: "injection-hunter"}},
+			},
 		},
 	})
 

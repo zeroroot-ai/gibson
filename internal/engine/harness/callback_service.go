@@ -142,6 +142,21 @@ type HarnessCallbackService struct {
 	// market view is not wired on this daemon. See callback_place_bet.go.
 	beliefSubstrate brain.BeliefSubstrate
 
+	// proofSettlement backs the SubmitProof RPC (ADR-0030, ADR-0031,
+	// gibson#389): resolving an enabled Domain Pack's CEL predicate binding
+	// and settling a bet true once it fires against submitted evidence. nil
+	// means SubmitProof returns Unavailable, the same staged-wiring default
+	// beliefSubstrate uses. See callback_submit_proof.go.
+	proofSettlement brain.ProofSettlementEngine
+
+	// ontologyDiscovery backs the ProposeOntologyExtension RPC (ADR-0024 §2,
+	// ADR-0033 decision 2, gibson#391): folding an agent-proposed Taxonomy
+	// node label or relationship type through the ValidIdentifier safety gate
+	// and PromotionGate.Observe's recurrence counting. nil means
+	// ProposeOntologyExtension returns Unavailable, the same staged-wiring
+	// default proofSettlement uses. See callback_propose_ontology_extension.go.
+	ontologyDiscovery brain.OntologyDiscoveryEngine
+
 	// spanProcessors receives spans exported from remote agents for tracing integration
 	spanProcessors []sdktrace.SpanProcessor
 
@@ -382,6 +397,25 @@ func WithObservationSink(sink ObservationSink) CallbackServiceOption {
 func WithBeliefSubstrate(substrate brain.BeliefSubstrate) CallbackServiceOption {
 	return func(s *HarnessCallbackService) {
 		s.beliefSubstrate = substrate
+	}
+}
+
+// WithProofSettlement wires the tenant-scoped engine the SubmitProof RPC
+// resolves pack predicates and settles bets against (ADR-0030, ADR-0031,
+// gibson#389). When unset, SubmitProof returns Unavailable.
+func WithProofSettlement(engine brain.ProofSettlementEngine) CallbackServiceOption {
+	return func(s *HarnessCallbackService) {
+		s.proofSettlement = engine
+	}
+}
+
+// WithOntologyDiscovery wires the tenant-scoped engine the
+// ProposeOntologyExtension RPC folds an agent-proposed Taxonomy node label or
+// relationship type through (ADR-0024 §2, ADR-0033 decision 2, gibson#391).
+// When unset, ProposeOntologyExtension returns Unavailable.
+func WithOntologyDiscovery(engine brain.OntologyDiscoveryEngine) CallbackServiceOption {
+	return func(s *HarnessCallbackService) {
+		s.ontologyDiscovery = engine
 	}
 }
 
@@ -1160,6 +1194,8 @@ func (s *HarnessCallbackService) CallToolProto(ctx context.Context, req *harness
 			"mission_id": req.Context.MissionId,
 			"agent_name": req.Context.AgentName,
 		})
+		// gibson:no-tool-executed — denied before dispatch; no tool ran, so
+		// the flight recorder has nothing to corroborate.
 		return &harnesspb.CallToolProtoResponse{
 			Error: &harnesspb.HarnessError{
 				Code:    commonpb.ErrorCode_ERROR_CODE_PERMISSION_DENIED,
@@ -1183,6 +1219,7 @@ func (s *HarnessCallbackService) CallToolProto(ctx context.Context, req *harness
 	toolDesc, err := harness.GetToolDescriptor(ctx, req.Name)
 	if err != nil {
 		s.logger.Error("tool not found", "error", err, "tool", req.Name)
+		// gibson:no-tool-executed — the tool was never resolved, so it never ran.
 		return &harnesspb.CallToolProtoResponse{
 			Error: &harnesspb.HarnessError{
 				Code:    commonpb.ErrorCode_ERROR_CODE_NOT_FOUND,
@@ -1204,6 +1241,8 @@ func (s *HarnessCallbackService) CallToolProto(ctx context.Context, req *harness
 			"error", err,
 			"tool", req.Name,
 			"input_type", req.InputType)
+		// gibson:no-tool-executed — the request never became a valid proto
+		// call, so no tool was invoked.
 		return &harnesspb.CallToolProtoResponse{
 			Error: &harnesspb.HarnessError{
 				Code:    commonpb.ErrorCode_ERROR_CODE_INVALID_ARGUMENT,
@@ -1219,6 +1258,8 @@ func (s *HarnessCallbackService) CallToolProto(ctx context.Context, req *harness
 			"error", err,
 			"tool", req.Name,
 			"output_type", req.OutputType)
+		// gibson:no-tool-executed — the output message could not even be
+		// constructed, so CallToolProto below was never reached.
 		return &harnesspb.CallToolProtoResponse{
 			Error: &harnesspb.HarnessError{
 				Code:    commonpb.ErrorCode_ERROR_CODE_INTERNAL,
@@ -1298,6 +1339,15 @@ func (s *HarnessCallbackService) CallToolProto(ctx context.Context, req *harness
 	responseJSON, err := marshaler.Marshal(responseMsg)
 	if err != nil {
 		s.logger.Error("failed to marshal proto response to JSON", "error", err, "tool", req.Name)
+
+		// Flight recorder completeness (ADR-0030 §3): the tool DID run — this
+		// is a post-execution failure, not a pre-dispatch validation error —
+		// so it must still reach the sink. Without this, a tool that produced
+		// a real (unmarshalable) result leaves no independent record at all,
+		// which is exactly the unrecorded path the completeness guard exists
+		// to catch.
+		s.captureToolCall(ctx, req.Context, req.Name, string(req.InputJson), "", fmt.Sprintf("failed to marshal response: %v", err))
+
 		return &harnesspb.CallToolProtoResponse{
 			Error: &harnesspb.HarnessError{
 				Code:    commonpb.ErrorCode_ERROR_CODE_INTERNAL,

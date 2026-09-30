@@ -51,9 +51,9 @@ on:
         description: >-
           Optional tag to (re)publish -- select it via the branch/tag dropdown
           or pass `--ref <tag>` to `gh workflow run` (e.g. v1.2.3,
-          gibson-bootstrap-v1.0.0, gibson-bootstrap-runner-v1.0.0,
-          gibson-belief-sidecar-v1.0.0). Informational: the actual ref built is
-          whatever ref the dispatch runs against, not this input.
+          gibson-bootstrap-v1.0.0, gibson-bootstrap-runner-v1.0.0).
+          Informational: the actual ref built is whatever ref the dispatch
+          runs against, not this input.
         required: false
         type: string
 
@@ -176,50 +176,12 @@ jobs:
       tag_pattern: gibson-bootstrap-runner-v(.*)
       build_args: ""
 
-  # ---- gibson-belief-sidecar: kept as its own job (distinct pytest gate) ----
-  # The image build never runs the container and the inference import is lazy,
-  # so nothing else would catch a sidecar that cannot construct a BeliefModel --
-  # which is exactly how the gibson#982 startup ImportError shipped. Gating the
-  # image build on this job makes a runtime-broken sidecar un-publishable. Kept
-  # out of the `images` matrix so a sidecar test failure never blocks the other
-  # seven (unrelated) images from publishing.
-  #
-  # test_model.py used to guard its inference tests with pytest.importorskip
-  # ("pgmpy"), which meant they skipped silently anywhere pgmpy was absent.
-  # Inference no longer needs pgmpy at all (gibson#1436), so those guards are
-  # gone and the tests always run. The one place pgmpy is still needed is
-  # test_parity.py, which proves the numpy engine agrees with the pgmpy one it
-  # replaced -- that gets its own step with requirements-dev.txt, installed
-  # AFTER the runtime step so a torch in site-packages can never make the
-  # runtime tests pass by accident.
-  belief-sidecar-test:
-    # Defined in .github/workflows/belief-sidecar.yml so the identical job also
-    # runs on pull requests. It cannot live here: this workflow triggers only on
-    # `push: main`, tags and dispatch, so a job defined here is invisible on a
-    # PR -- and sidecar/belief is Python, which no go-ci lane compiles. Calling
-    # it keeps it as the publish gate as well.
-    uses: ./.github/workflows/belief-sidecar.yml
-
-  belief-sidecar-image:
-    name: gibson-belief-sidecar
-    needs: belief-sidecar-test
-    uses: zeroroot-ai/.github/.github/workflows/reusable-image-build.yml@1366fb5a29590e522bf5a74308f55bb39a4edb56 # v0.5.1
-    permissions:
-      contents: read
-      packages: write
-      id-token: write
-      attestations: write
-      security-events: write
-      actions: read
-    with:
-      component_name: gibson-belief-sidecar
-      # The context is the repo root, not sidecar/belief: the image ships the
-      # repo's LICENSE (ELv2 "Notices") and the only copy of it lives at the
-      # root. Copying it into sidecar/belief would make a second source of
-      # truth that drifts. Every COPY in the Dockerfile names a
-      # repo-root-relative path to match.
-      component_path: .
-      dockerfile_path: sidecar/belief/Dockerfile
-      image_name: ghcr.io/zeroroot-ai/gibson-belief-sidecar
-      tag_pattern: gibson-belief-sidecar-(v.*)
-    # Self-contained Python (pinned public deps in requirements.txt).
+  # ---- gibson-belief-sidecar: RETIRED (ADR-0034, gibson#377) ----
+  # The Python belief sidecar and its image are gone: belief inference runs
+  # in-process in the `gibson` daemon image via internal/engine/brain/beliefvi,
+  # a native Go port of sidecar/belief's exact-inference algorithm. There is
+  # nothing left to build or publish here. sidecar/belief itself stays as the
+  # offline pgmpy parity oracle (never a runtime dependency); its own tests,
+  # plus the Go-vs-reference parity gate, run in .github/workflows/belief-sidecar.yml
+  # on `pull_request` — it needs no `workflow_call` hook here any more, since
+  # no image build depends on it passing.

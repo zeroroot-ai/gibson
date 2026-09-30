@@ -6,6 +6,7 @@ package agent
 import (
 	"context"
 
+	"github.com/zeroroot-ai/gibson/internal/engine/taxonomy"
 	"github.com/zeroroot-ai/gibson/internal/infra/types"
 )
 
@@ -42,8 +43,11 @@ type Agent interface {
 	// TargetTypes returns the types of targets this agent can operate against
 	TargetTypes() []types.TargetType
 
-	// TechniqueTypes returns the types of techniques this agent can execute
-	TechniqueTypes() []types.TechniqueType
+	// TechniqueTypes returns the taxonomy category ids of the techniques this
+	// agent can execute (ADR-0035: the taxonomy is the technique authority,
+	// not the types.TechniqueType enum — that enum now only seeds the core
+	// categories GlobalTechniques starts from).
+	TechniqueTypes() []taxonomy.CategoryID
 
 	// LLMSlots returns the LLM slot definitions this agent requires
 	LLMSlots() []SlotDefinition

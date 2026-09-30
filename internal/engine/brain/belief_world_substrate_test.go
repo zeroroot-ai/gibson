@@ -35,7 +35,7 @@ func TestParseHostNodeID_RejectsGarbage(t *testing.T) {
 // live read of the ECS World, not a separate store: it reflects whatever
 // belief.go's existing per-host pipeline has already folded.
 func TestWorldBeliefSubstrate_BeliefReadsCurrentHostState(t *testing.T) {
-	e, bw := beliefEngine(PlaceholderBeliefProvider())
+	e, bw := beliefEngine(deterministicBelief{})
 	e.Submit(HostObserved{ScopeID: "s", Address: "10.0.0.5", OpenPorts: []int{22}})
 	settle(e, bw, 1)
 
@@ -173,7 +173,7 @@ func TestWorldBeliefSubstrate_SetBeliefRejectsAnUnparseableHostID(t *testing.T) 
 // already enforces — the graph-coupled pipeline and the per-host pipeline
 // share one write path into Host.Belief, so they cannot fight over it.
 func TestWorldBeliefSubstrate_SetBeliefAppliesThroughTheExistingReducer(t *testing.T) {
-	e, bw := beliefEngine(PlaceholderBeliefProvider())
+	e, bw := beliefEngine(deterministicBelief{})
 	e.Submit(HostObserved{ScopeID: "s", Address: "10.0.0.5", OpenPorts: []int{22}})
 	settle(e, bw, 1)
 	hostID := e.World.Snapshot()[0].ID
@@ -215,7 +215,7 @@ func TestWorldBeliefSubstrate_SetBeliefAppliesThroughTheExistingReducer(t *testi
 // host's evidence moved on since the digest the caller read, the write is
 // silently dropped (the same behavior a stale per-host BeliefScored gets).
 func TestWorldBeliefSubstrate_StaleEvidenceDigestIsDropped(t *testing.T) {
-	e, bw := beliefEngine(PlaceholderBeliefProvider())
+	e, bw := beliefEngine(deterministicBelief{})
 	e.Submit(HostObserved{ScopeID: "s", Address: "10.0.0.5", OpenPorts: []int{22}})
 	settle(e, bw, 1)
 	hostID := e.World.Snapshot()[0].ID

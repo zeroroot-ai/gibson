@@ -504,6 +504,14 @@ func (e *Engine) FlightRecorderPolicy() FlightRecorderPolicy {
 	return e.World.FlightRecorderPolicy()
 }
 
+// DomainPacks returns the tenant's currently enabled Domain Packs (ADR-0033,
+// gibson#381).
+func (e *Engine) DomainPacks() []DomainPackSnapshot {
+	e.mu.RLock()
+	defer e.mu.RUnlock()
+	return e.World.DomainPackSnapshot()
+}
+
 // Events returns a copy of the Timeline (the Scroller scrubs this).
 func (e *Engine) Events() []Event {
 	e.mu.RLock()

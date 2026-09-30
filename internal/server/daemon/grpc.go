@@ -1611,22 +1611,42 @@ func (d *daemonImpl) buildGRPCServer(ctx context.Context) (*grpcSubsystem, error
 
 	// Register gibson.world.v1.WorldService — the daemon-mediated read path into
 	// the ECS brain (epic ecs-brain, gibson#752). Per-tenant, tenant-isolated; the
-	// registry is created lazily here with the resolved belief provider (the pgmpy
-	// sidecar when GIBSON_BELIEF_SIDECAR_URL is set, else the placeholder).
+	// registry is created lazily here with the resolved belief provider (native
+	// Go, in-process — ADR-0034).
 	if d.brainRegistry == nil {
 		if d.beliefProvider == nil {
-			d.beliefProvider = resolveBeliefProvider()
+			beliefProvider, err := resolveBeliefProvider()
+			if err != nil {
+				return nil, fmt.Errorf("failed to resolve belief provider: %w", err)
+			}
+			d.beliefProvider = beliefProvider
 		}
-		sliceBeliefProvider := resolveSliceBeliefProvider()
 		beliefSchemaRegistry, err := newBeliefSchemaRegistry()
 		if err != nil {
 			return nil, fmt.Errorf("failed to build belief schema registry: %w", err)
 		}
+		edgePosteriorProvider, err := resolveEdgePosteriorProvider()
+		if err != nil {
+			return nil, fmt.Errorf("failed to resolve edge posterior provider: %w", err)
+		}
+		sliceBeliefProvider := resolveSliceBeliefProvider(beliefSchemaRegistry, edgePosteriorProvider)
 		d.brainRegistry = brain.NewRegistry(ctx, brain.BeliefSystem)
-		wireBrainRegistry(ctx, d.brainRegistry, d.beliefProvider, sliceBeliefProvider, beliefSchemaRegistry)
+		wireBrainRegistry(ctx, d.brainRegistry, d.beliefProvider, sliceBeliefProvider, beliefSchemaRegistry, edgePosteriorProvider)
 	}
 	worldpb.RegisterWorldServiceServer(srv, NewWorldServer(d.brainRegistry, d.logger.WithComponent("world-service").Slog()))
 	d.logger.Info(ctx, "registered WorldService gRPC endpoint")
+
+	// Register gibson.tenant.v1.DomainPackService — the per-tenant Domain
+	// Pack catalog + enable/disable lifecycle (ADR-0033, gibson#381). Reuses
+	// d.brainRegistry (just constructed above) so an enabled pack folds into
+	// the SAME per-tenant World WorldService reads.
+	d.registerDomainPack(ctx, srv)
+
+	// Register gibson.tenant.v1.OntologyExtensionService — the tenant
+	// owner's review of agent-proposed Taxonomy extensions (ADR-0024 §2,
+	// ADR-0033 decisions 2-3, gibson#392). Reuses d.brainRegistry (just
+	// constructed above), same as DomainPackService.
+	d.registerOntologyExtension(ctx, srv)
 
 	// Register gibson.daemon.destructiveauthz.v1.DestructiveAuthorizationService
 	// — the daemon API backing the dashboard's destructive-action authorization

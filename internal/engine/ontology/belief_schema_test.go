@@ -41,7 +41,7 @@ func TestBeliefSchemaRegistry_RegisterExtension_MakesNodeBeliefBearing(t *testin
 				},
 			},
 		},
-		EnablementEdges: []string{"RESOLVES_TO"},
+		EnablementEdges: []EnablementEdgeSpec{{RelType: "RESOLVES_TO", TargetVariable: "reachable"}},
 	})
 	require.NoError(t, err)
 
@@ -62,6 +62,10 @@ func TestBeliefSchemaRegistry_RegisterExtension_MakesNodeBeliefBearing(t *testin
 	assert.True(t, reg.IsEnablementEdge("RESOLVES_TO"))
 	assert.False(t, reg.IsEnablementEdge("AFFECTS"))
 	assert.Equal(t, []string{"RESOLVES_TO"}, reg.EnablementEdgeTypes())
+
+	target, ok := reg.EnablementEdgeTargetVariable("RESOLVES_TO")
+	assert.True(t, ok)
+	assert.Equal(t, "reachable", target)
 }
 
 func TestBeliefSchemaRegistry_Variables_ReturnsDefensiveCopy(t *testing.T) {
@@ -96,7 +100,11 @@ func TestBeliefSchemaRegistry_BeliefBearingNodeTypes_Sorted(t *testing.T) {
 func TestBeliefSchemaRegistry_EnablementEdgeTypes_Sorted(t *testing.T) {
 	reg := NewBeliefSchemaRegistry()
 	require.NoError(t, reg.RegisterExtension("core", BeliefSchemaExtension{
-		EnablementEdges: []string{"RUNS_SERVICE", "AFFECTS", "ISSUED"},
+		EnablementEdges: []EnablementEdgeSpec{
+			{RelType: "RUNS_SERVICE", TargetVariable: "exploitable"},
+			{RelType: "AFFECTS", TargetVariable: "juicy"},
+			{RelType: "ISSUED", TargetVariable: "exploitable"},
+		},
 	}))
 
 	assert.Equal(t, []string{"AFFECTS", "ISSUED", "RUNS_SERVICE"}, reg.EnablementEdgeTypes())
@@ -113,13 +121,13 @@ func TestBeliefSchemaRegistry_MultipleExtensions_MergeAdditively(t *testing.T) {
 		Nodes: []NodeBeliefSchema{
 			{NodeType: "Host", Variables: []BeliefVariable{{Name: "reachable"}}},
 		},
-		EnablementEdges: []string{"RESOLVES_TO"},
+		EnablementEdges: []EnablementEdgeSpec{{RelType: "RESOLVES_TO", TargetVariable: "reachable"}},
 	}))
 	require.NoError(t, reg.RegisterExtension("pack/webapp", BeliefSchemaExtension{
 		Nodes: []NodeBeliefSchema{
 			{NodeType: "Finding", Variables: []BeliefVariable{{Name: "confirmed"}}},
 		},
-		EnablementEdges: []string{"AFFECTS"},
+		EnablementEdges: []EnablementEdgeSpec{{RelType: "AFFECTS", TargetVariable: "confirmed"}},
 	}))
 
 	assert.ElementsMatch(t, []string{"Host", "Finding"}, reg.BeliefBearingNodeTypes())
@@ -132,7 +140,7 @@ func TestBeliefSchemaRegistry_UnregisterExtension_RemovesItsContributions(t *tes
 		Nodes: []NodeBeliefSchema{
 			{NodeType: "Host", Variables: []BeliefVariable{{Name: "reachable"}}},
 		},
-		EnablementEdges: []string{"RESOLVES_TO"},
+		EnablementEdges: []EnablementEdgeSpec{{RelType: "RESOLVES_TO", TargetVariable: "reachable"}},
 	}))
 	require.NoError(t, reg.RegisterExtension("pack/webapp", BeliefSchemaExtension{
 		Nodes: []NodeBeliefSchema{
@@ -277,23 +285,71 @@ func TestBeliefSchemaRegistry_RejectsCyclicVariableDependency(t *testing.T) {
 func TestBeliefSchemaRegistry_RejectsInvalidEnablementEdgeIdentifier(t *testing.T) {
 	reg := NewBeliefSchemaRegistry()
 	err := reg.RegisterExtension("core", BeliefSchemaExtension{
-		EnablementEdges: []string{"not an identifier"},
+		EnablementEdges: []EnablementEdgeSpec{{RelType: "not an identifier", TargetVariable: "reachable"}},
 	})
 	require.Error(t, err)
 }
 
-func TestBeliefSchemaRegistry_DuplicateEnablementEdgeAcrossExtensions_IsBenign(t *testing.T) {
-	// Two Packs independently flagging the same edge type as enablement is
-	// not a conflict — unlike variable declarations, there is no competing
-	// payload to reconcile.
+func TestBeliefSchemaRegistry_RejectsEmptyEnablementEdgeTargetVariable(t *testing.T) {
+	reg := NewBeliefSchemaRegistry()
+	err := reg.RegisterExtension("core", BeliefSchemaExtension{
+		EnablementEdges: []EnablementEdgeSpec{{RelType: "RESOLVES_TO", TargetVariable: ""}},
+	})
+	require.Error(t, err)
+}
+
+func TestBeliefSchemaRegistry_RejectsInvalidEnablementEdgeTargetVariableIdentifier(t *testing.T) {
+	reg := NewBeliefSchemaRegistry()
+	err := reg.RegisterExtension("core", BeliefSchemaExtension{
+		EnablementEdges: []EnablementEdgeSpec{{RelType: "RESOLVES_TO", TargetVariable: "not an identifier"}},
+	})
+	require.Error(t, err)
+}
+
+func TestBeliefSchemaRegistry_DuplicateEnablementEdgeAcrossExtensions_SameTargetIsBenign(t *testing.T) {
+	// Two Packs independently flagging the same edge type as enablement, at
+	// the same target variable, is not a conflict — the declaration is
+	// idempotent, unioned like the old bare flag was.
 	reg := NewBeliefSchemaRegistry()
 	require.NoError(t, reg.RegisterExtension("core", BeliefSchemaExtension{
-		EnablementEdges: []string{"RESOLVES_TO"},
+		EnablementEdges: []EnablementEdgeSpec{{RelType: "RESOLVES_TO", TargetVariable: "reachable"}},
 	}))
 	require.NoError(t, reg.RegisterExtension("pack/other", BeliefSchemaExtension{
-		EnablementEdges: []string{"RESOLVES_TO"},
+		EnablementEdges: []EnablementEdgeSpec{{RelType: "RESOLVES_TO", TargetVariable: "reachable"}},
 	}))
 	assert.Equal(t, []string{"RESOLVES_TO"}, reg.EnablementEdgeTypes())
+	target, ok := reg.EnablementEdgeTargetVariable("RESOLVES_TO")
+	assert.True(t, ok)
+	assert.Equal(t, "reachable", target)
+}
+
+func TestBeliefSchemaRegistry_ConflictingEnablementEdgeTargetAcrossExtensions_IsRejected(t *testing.T) {
+	// Unlike the bare flag, a target variable is a payload: two Packs naming
+	// DIFFERENT targets for the SAME edge type cannot both be right, and
+	// there is no way to reconcile them, so this is a hard error — the same
+	// discipline DuplicateVariableError already applies to variable names.
+	reg := NewBeliefSchemaRegistry()
+	require.NoError(t, reg.RegisterExtension("core", BeliefSchemaExtension{
+		EnablementEdges: []EnablementEdgeSpec{{RelType: "RESOLVES_TO", TargetVariable: "reachable"}},
+	}))
+	err := reg.RegisterExtension("pack/other", BeliefSchemaExtension{
+		EnablementEdges: []EnablementEdgeSpec{{RelType: "RESOLVES_TO", TargetVariable: "exploitable"}},
+	})
+	require.Error(t, err)
+	var conflictErr *ConflictingEnablementEdgeTargetError
+	require.ErrorAs(t, err, &conflictErr)
+	assert.Equal(t, "RESOLVES_TO", conflictErr.RelType)
+
+	// The rejected extension must not have partially applied.
+	target, ok := reg.EnablementEdgeTargetVariable("RESOLVES_TO")
+	assert.True(t, ok)
+	assert.Equal(t, "reachable", target)
+}
+
+func TestBeliefSchemaRegistry_EnablementEdgeTargetVariable_UnknownEdgeIsNotOK(t *testing.T) {
+	reg := NewBeliefSchemaRegistry()
+	_, ok := reg.EnablementEdgeTargetVariable("RESOLVES_TO")
+	assert.False(t, ok)
 }
 
 // -----------------------------------------------------------------------
@@ -331,7 +387,30 @@ func TestSeedBeliefSchemaExtension_EnablementEdgesAreValidTaxonomyRelationshipTy
 	seed := SeedBeliefSchemaExtension()
 	known := taxonomy.Global.RelationshipTypes()
 	for _, edge := range seed.EnablementEdges {
-		assert.Truef(t, slices.Contains(known, edge), "seed enablement edge %q is not a known taxonomy relationship type", edge)
+		assert.Truef(t, slices.Contains(known, edge.RelType),
+			"seed enablement edge %q is not a known taxonomy relationship type", edge.RelType)
+	}
+}
+
+func TestSeedBeliefSchemaExtension_EnablementEdgesTargetDeclaredHostVariables(t *testing.T) {
+	// ADR-0037 decision 1: every seed edge type must feed a variable Host
+	// (the seed's only belief-bearing node type) actually declares — a
+	// target_variable dangling on nothing would ground to nothing.
+	seed := SeedBeliefSchemaExtension()
+	hostVars := make(map[string]struct{})
+	for _, n := range seed.Nodes {
+		if n.NodeType != "Host" {
+			continue
+		}
+		for _, v := range n.Variables {
+			hostVars[v.Name] = struct{}{}
+		}
+	}
+	require.NotEmpty(t, hostVars)
+	for _, edge := range seed.EnablementEdges {
+		_, ok := hostVars[edge.TargetVariable]
+		assert.Truef(t, ok, "seed enablement edge %q targets %q, which Host does not declare",
+			edge.RelType, edge.TargetVariable)
 	}
 }
 

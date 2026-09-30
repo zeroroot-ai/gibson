@@ -12,7 +12,7 @@ import (
 // belief as its non-surprised twin but a higher attention — the surprise input
 // boosts it (ADR-0005/0006: attention = belief field + surprise).
 func TestAttention_SurpriseBoost(t *testing.T) {
-	e, bw := beliefEngine(PlaceholderBeliefProvider())
+	e, bw := beliefEngine(deterministicBelief{})
 
 	// Same coordinate, different strong signals -> a contradiction -> the newcomer
 	// carries a Surprise. Same ports -> identical belief.

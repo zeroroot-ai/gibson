@@ -1,0 +1,209 @@
+// Use of this source code is governed by the Elastic License 2.0
+// that can be found in the LICENSE file in the repo root.
+
+// OntologyExtensionService is the tenant-OWNER-facing approval surface for
+// agent-proposed Taxonomy extensions (ADR-0024 §2, ADR-0033 decisions 2-3,
+// gibson#392).
+//
+// An agent proposes a new Taxonomy node label or relationship type it
+// discovers at runtime via ProposeOntologyExtension (gibson#391, the
+// agent-facing HarnessCallbackService RPC in the OSS SDK). That proposal is
+// folded into the caller's tenant World as a pending sighting and counted
+// for recurrence by taxonomy.PromotionGate — it is NEVER auto-promoted
+// (ADR-0033 decision 3).
+//
+// This service is the other end of that pipeline: the tenant owner reviews
+// every pending proposal (ListOntologyExtensionProposals) and explicitly
+// approves or rejects one. Approval runs the human-in-the-loop half of
+// taxonomy.PromotionGate's settlement rule; once BOTH halves are satisfied
+// (the proposal has recurred enough independent times, AND the owner
+// approved it), the label is promoted into live, per-tenant, replayable
+// Cypher structure immediately — the tenant's own taxonomy extension, visible
+// to every mission in that tenant from then on. Rejection is a terminal
+// decision recorded for audit; it never mutates the Taxonomy.
+//
+// Gated strictly to the tenant's OWNER relation (not "admin"): ADR-0033
+// decision 3 calls for "explicit tenant-owner approval" specifically — one
+// step stronger than the "tenant admin" gate DomainPackService's
+// EnableDomainPack uses for already-curated catalog content. A proposal
+// reviewed here is NOVEL, agent-discovered structure the platform has never
+// seen before; only the tenant's Owner may admit it.
+//
+// Authorization: every RPC carries a (gibson.auth.v1.authz) annotation.
+syntax = "proto3";
+
+package gibson.tenant.v1;
+
+option go_package = "github.com/zeroroot-ai/gibson/internal/server/daemon/api/gibson/tenant/v1;tenantv1";
+
+import "gibson/auth/v1/options.proto";
+
+// OntologyProposalKind distinguishes a proposed Taxonomy node label from a
+// proposed relationship type — mirrors internal/engine/taxonomy.ProposalKind.
+enum OntologyProposalKind {
+  ONTOLOGY_PROPOSAL_KIND_UNSPECIFIED = 0;
+  ONTOLOGY_PROPOSAL_KIND_NODE_LABEL = 1;
+  ONTOLOGY_PROPOSAL_KIND_RELATIONSHIP_TYPE = 2;
+}
+
+// OntologyProposalStatus mirrors brain.OntologyProposalStatus.
+enum OntologyProposalStatus {
+  ONTOLOGY_PROPOSAL_STATUS_UNSPECIFIED = 0;
+  ONTOLOGY_PROPOSAL_STATUS_PENDING = 1;
+  ONTOLOGY_PROPOSAL_STATUS_APPROVED = 2;
+  ONTOLOGY_PROPOSAL_STATUS_REJECTED = 3;
+}
+
+// OntologyExtensionProposal is one taxonomy node label or relationship type
+// an agent proposed in the caller's tenant, with its recurrence so far and
+// the tenant owner's decision (if any).
+message OntologyExtensionProposal {
+  OntologyProposalKind kind = 1;
+  string label = 2;
+  // recurrence is how many independent times this exact (kind, label) has
+  // been sighted (taxonomy.PromotionGate.Observe's running count).
+  int32 recurrence = 3;
+  string last_proposer = 4;
+  string last_claim = 5;
+  OntologyProposalStatus status = 6;
+  // reviewer is the tenant owner who approved or rejected this proposal.
+  // Empty while status is PENDING.
+  string reviewer = 7;
+  // reject_reason is set only when status is REJECTED.
+  string reject_reason = 8;
+  // promoted is true once this proposal has actually been admitted into the
+  // tenant's live Taxonomy — the authoritative "is this a live tenant
+  // extension yet" signal. status == APPROVED alone does not imply promoted:
+  // the proposal may still be short of the recurrence settlement requires.
+  bool promoted = 9;
+  // promoted_taxonomy_version is the resulting Taxonomy registry version
+  // once promoted is true; zero otherwise.
+  int32 promoted_taxonomy_version = 10;
+}
+
+message ListOntologyExtensionProposalsRequest {}
+
+message ListOntologyExtensionProposalsResponse {
+  repeated OntologyExtensionProposal proposals = 1;
+}
+
+message ApproveOntologyExtensionProposalRequest {
+  OntologyProposalKind kind = 1;
+  string label = 2;
+}
+
+// ApproveOntologyExtensionProposalResponse is intentionally empty: whether
+// this approval ALSO completed settlement (the proposal had already recurred
+// enough times, so it is live now) is decided by the tenant's brain.Engine
+// single-writer fold, which runs asynchronously off this RPC (ADR-0001,
+// mirroring ProposeOntologyExtension's own documented contract). A caller
+// that needs the resulting promoted/live state calls
+// ListOntologyExtensionProposals afterward rather than assume it is visible
+// the instant this call returns — reporting a synchronous guess here would
+// be wrong exactly often enough to matter.
+message ApproveOntologyExtensionProposalResponse {}
+
+message RejectOntologyExtensionProposalRequest {
+  OntologyProposalKind kind = 1;
+  string label = 2;
+  // reason is an optional free-text rationale, carried through for audit.
+  string reason = 3;
+}
+
+message RejectOntologyExtensionProposalResponse {}
+
+message SubmitOntologyExtensionUpstreamRequest {
+  OntologyProposalKind kind = 1;
+  string label = 2;
+}
+
+// SubmitOntologyExtensionUpstreamResponse carries the rendered SDK Domain
+// Pack contribution artifact (ADR-0033 decision 2's final arrow: "owner
+// 'submit upstream' -> contribution", gibson#393) — the exact file content a
+// human or CI commits into the SDK's pack source tree to open the review PR.
+//
+// This daemon does NOT open that PR itself: gibson holds no GitHub credential
+// or bot identity scoped to the `sdk` repository, and ADR-0033 names the
+// contribution as "a PR into the SDK, which anyone may open" — a step the
+// design deliberately leaves to a person, the same way other owner-only
+// actions in this org (DNS, Stripe keys, required reviewers) are hand-offs
+// rather than automated. suggested_pr_title/suggested_pr_body are meant to
+// be pasted directly into that PR once the tenant owner (or whoever opens it)
+// commits pack_json at suggested_file_path.
+message SubmitOntologyExtensionUpstreamResponse {
+  // pack_json is the ontology.DomainPack fragment, JSON-encoded exactly as
+  // Export/Import already round-trip it (gibson#378) — never a new,
+  // one-off format invented for this RPC.
+  bytes pack_json = 1;
+  // suggested_file_path is where this fragment belongs in the SDK's pack
+  // source tree, e.g. "packs/<name>.json".
+  string suggested_file_path = 2;
+  // suggested_pr_title and suggested_pr_body are ready-to-paste PR text for
+  // whoever opens the contribution PR.
+  string suggested_pr_title = 3;
+  string suggested_pr_body = 4;
+}
+
+service OntologyExtensionService {
+  // ListOntologyExtensionProposals returns every ontology/taxonomy extension
+  // proposal this tenant's agents have made, pending and decided alike, so
+  // the tenant owner (or an admin assisting them) has full visibility into
+  // what agents are proposing (ADR-0033's "the tenant owner seeing every
+  // proposal").
+  rpc ListOntologyExtensionProposals(ListOntologyExtensionProposalsRequest) returns (ListOntologyExtensionProposalsResponse) {
+    option (gibson.auth.v1.authz) = {
+      relation: "admin"
+      object_type: "tenant"
+      object_deriver: "tenant_from_identity"
+      allowed_identities: 1  // USER
+    };
+  }
+
+  // ApproveOntologyExtensionProposal is the tenant owner's explicit approval
+  // of a pending proposal (ADR-0033 decision 3). Refused (NOT_FOUND) if
+  // (kind, label) names no proposal ever observed in this tenant, and
+  // (FAILED_PRECONDITION) if it already carries a terminal decision.
+  //
+  // Gated to "owner", not "admin": this is the stronger, singular
+  // tenant-owner sign-off ADR-0033 decision 3 requires — not a routine
+  // admin action any delegated admin may take.
+  rpc ApproveOntologyExtensionProposal(ApproveOntologyExtensionProposalRequest) returns (ApproveOntologyExtensionProposalResponse) {
+    option (gibson.auth.v1.authz) = {
+      relation: "owner"
+      object_type: "tenant"
+      object_deriver: "tenant_from_identity"
+      allowed_identities: 1  // USER
+    };
+  }
+
+  // RejectOntologyExtensionProposal is the tenant owner's explicit rejection
+  // of a pending proposal. Same refusal rules as
+  // ApproveOntologyExtensionProposal, and the same "owner" gate.
+  rpc RejectOntologyExtensionProposal(RejectOntologyExtensionProposalRequest) returns (RejectOntologyExtensionProposalResponse) {
+    option (gibson.auth.v1.authz) = {
+      relation: "owner"
+      object_type: "tenant"
+      object_deriver: "tenant_from_identity"
+      allowed_identities: 1  // USER
+    };
+  }
+
+  // SubmitOntologyExtensionUpstream renders a LIVE tenant extension (a
+  // promoted proposal — NOT_FOUND if (kind, label) names no proposal ever
+  // observed, FAILED_PRECONDITION if it has not yet been promoted) as an SDK
+  // Domain Pack contribution artifact (ADR-0033 decision 2's "submit
+  // upstream -> contribution"). Gated to "owner", mirroring
+  // ApproveOntologyExtensionProposal: only the tenant that vouches for its
+  // own live extension nominates it for the shared catalog.
+  //
+  // This RPC renders the artifact only; it never opens a PR itself (see the
+  // response message's doc for why that hand-off exists).
+  rpc SubmitOntologyExtensionUpstream(SubmitOntologyExtensionUpstreamRequest) returns (SubmitOntologyExtensionUpstreamResponse) {
+    option (gibson.auth.v1.authz) = {
+      relation: "owner"
+      object_type: "tenant"
+      object_deriver: "tenant_from_identity"
+      allowed_identities: 1  // USER
+    };
+  }
+}

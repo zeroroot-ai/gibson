@@ -277,17 +277,19 @@ entities a pure goal-directed field would miss.
 _Avoid_: graph-distance relevance (rejected), influence map (the game-AI analog), the score
 
 **Belief model (PGM)**:
-The belief field is computed by a real probabilistic graphical model (**pgmpy**) — not an LLM
+The belief field is computed by a real probabilistic graphical model — not an LLM
 (poorly calibrated, non-deterministic, expensive) and not hand-tuned weights. **Exact**
-inference only (VariableElimination), so the field is **deterministic and reproducible** for
+inference only (variable elimination), so the field is **deterministic and reproducible** for
 replay. **Read-only at runtime** (consulted for posteriors on evidence change); **learning is
-out-of-band** — a batch job fits CPTs from event-log outcomes (`evidence → outcome` pairs are
-auto-labeled by mission results) and ships a **versioned model**; each mission **pins the
-model version** it ran under so replay reproduces exactly. The LLM supplies priors only for
-**novel** nodes the model has no table for. Runs as a Python sidecar (training fully offline;
-inference only on evidence change — no Go/Python hot path). Sources: a **commercial** curated
-**base model** (vendor red-team + public CVE/ATT&CK only — never tenant data) + per-tenant
-refinement. Labels never leave the tenant; **within** a tenant they pool across all its users.
+out-of-band** — a batch job (`braintrain`) fits CPTs from event-log outcomes (`evidence →
+outcome` pairs are auto-labeled by mission results) and ships a **versioned model**; each
+mission **pins the model version** it ran under so replay reproduces exactly. The LLM supplies
+priors only for **novel** nodes the model has no table for. Inference runs **in-process, in Go**
+(ADR-0034, `internal/engine/brain/beliefvi`) — no sidecar, no round-trip; **pgmpy** is kept only
+as the offline training / parity oracle (`sidecar/belief`, never a deployed dependency), asserted
+to agree with the Go engine to 1e-12. Sources: a **commercial** curated **base model** (vendor
+red-team + public CVE/ATT&CK only — never tenant data) + per-tenant refinement. Labels never
+leave the tenant; **within** a tenant they pool across all its users.
 _Avoid_: LLM scoring, online learning (breaks replay), sampling/approximate inference
 
 ### Hypotheses, bets and Domain Packs (decided 2026-09-27, ADR-0021 – ADR-0025)
@@ -363,7 +365,14 @@ _Avoid_: evaluator (the old per-technique Go function this replaces)
 Per enablement-edge-type: the declared **target variable** it feeds on the destination node
 (structure, in the pack) and the **noisy-OR strength** it contributes (a learned Beta posterior
 from braintrain, uninformative prior at cold-start — never hand-authored)
-([ADR-0037](docs/adr/0037-enablement-edge-strengths-are-learned-not-authored.md)).
+([ADR-0037](docs/adr/0037-enablement-edge-strengths-are-learned-not-authored.md)). Braintrain
+(gibson#395, `internal/engine/braintrain/edge_posterior.go`) now fits that posterior: a
+Beta-Bernoulli update per edge type from recorded (cause-active -> effect-observed?) outcomes,
+versioned per tenant (`tenant-<id>-edges-v<n>`, independent of the belief-CPT model's own
+version sequence). `NativeSliceBeliefProvider` consumes the posterior **mean** in place of the
+uninformative prior once one is pinned (`GIBSON_EDGE_POSTERIOR_PATH`); `BAMCPPlanner` Thompson-
+samples the same artifact. No posterior pinned still means the documented cold start — production
+may have no recorded outcomes yet.
 _Avoid_: influence weight, hand-tuned strength
 
 ### Belief substrate (decided 2026-09-27, ADR-0029, amends ADR-0005)
@@ -392,6 +401,17 @@ and pursues the move that most reduces uncertainty about the goal, net of cost. 
 the options to the highest-value few; the LLM picks within them. Not a new model — it queries
 the belief network with hypothetical outcomes. The planner is BAMCP (fully Bayesian)
 ([ADR-0026](docs/adr/0026-bayesian-sequential-planner.md)).
+The native Go BAMCP planner (`internal/engine/brain/bamcp.go`, gibson#396) is now live: it
+grounds the mission's belief network the same way exact inference does, then runs seeded
+Monte Carlo rollouts that Thompson-sample each enablement edge's Beta posterior
+([ADR-0037](docs/adr/0037-enablement-edge-strengths-are-learned-not-authored.md)) instead of
+using its fixed prior mean. A fixed seed always replays the same rollouts. It refines
+`PlanVoI`'s one-step ranking. The Decider is now hard-gated to it (gibson#397,
+`internal/engine/brain/decider.go`'s `voiGatedDispatch`): a dispatch's target capability must
+be covered by a candidate in the mission's current VoI top-k (`VoICandidate.CoveringCapabilities`,
+gibson#387's technique -> capability bridge) or it is refused, unconditionally — a mission
+with no VoI plan yet dispatches nothing. Resolving real technique-by-environment reputation
+remains open.
 _Avoid_: prioritization score (VoI is forward-looking planning, not a static score)
 
 **Proof-of-demonstration**:

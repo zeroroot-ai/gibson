@@ -66,11 +66,20 @@ func TrainTenant(tenant string, events []brain.Event, basePath, modelsDir string
 	return &TrainResult{Version: version, Path: path, Rows: len(rows), Artifact: trained}, nil
 }
 
-// tenantVersionRe matches a per-tenant artifact filename version suffix.
+// sanitizeTenant turns tenant into a filesystem/version-safe token, shared by
+// every per-tenant artifact kind this package versions (the belief-CPT model,
+// edge_posterior.go's per-edge-type Beta posteriors).
+func sanitizeTenant(tenant string) string {
+	return regexp.MustCompile(`[^a-zA-Z0-9_-]`).ReplaceAllString(tenant, "-")
+}
+
+// tenantVersionPrefix is the belief-CPT model's per-tenant artifact filename
+// prefix. edge_posterior.go's edgePosteriorVersionPrefix is the distinct
+// prefix for the OTHER artifact kind this package versions, so a `tenant-<id>-v`
+// listing and a `tenant-<id>-edges-v` listing never collide in the same
+// modelsDir.
 func tenantVersionPrefix(tenant string) string {
-	// Sanitise the tenant id into a filesystem/version-safe token.
-	safe := regexp.MustCompile(`[^a-zA-Z0-9_-]`).ReplaceAllString(tenant, "-")
-	return "tenant-" + safe + "-v"
+	return "tenant-" + sanitizeTenant(tenant) + "-v"
 }
 
 // NextVersion scans modelsDir for existing `tenant-<id>-v<n>.json` artifacts and
@@ -78,9 +87,18 @@ func tenantVersionPrefix(tenant string) string {
 // versions are NEVER reused, so a mission that pinned vN can always re-load it.
 // Exported so the standalone belief-trainer CLI versions the same way TrainTenant does.
 func NextVersion(modelsDir, tenant string) string {
-	prefix := tenantVersionPrefix(tenant)
+	return nextVersionWithPrefix(modelsDir, tenantVersionPrefix(tenant))
+}
+
+// nextVersionWithPrefix scans modelsDir for existing `<prefix><n>.json`
+// artifacts and returns the next version string (one past the highest n; 1
+// if none) — the version-scanning logic shared by NextVersion (the
+// belief-CPT model) and NextEdgePosteriorVersion (edge_posterior.go's
+// per-edge-type Beta posteriors); the two differ only in which prefix they
+// scan for.
+func nextVersionWithPrefix(modelsDir, prefix string) string {
 	highest := 0
-	entries, _ := os.ReadDir(modelsDir) // missing dir → start at v1
+	entries, _ := os.ReadDir(modelsDir) // missing dir → start at 1
 	var nums []int
 	for _, e := range entries {
 		name := e.Name()

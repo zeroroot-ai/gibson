@@ -135,6 +135,15 @@ func init() {
 	// flight_recorder.go
 	registerEvent("flight_recorder.policy_set", func() Event { return &FlightRecorderPolicySet{} })
 	registerEvent("flight_recorder.retention_swept", func() Event { return &FlightRecorderRetentionSwept{} })
+
+	// domain_pack.go
+	registerEvent("domain_pack.enabled", func() Event { return &DomainPackEnabled{} })
+	registerEvent("domain_pack.disabled", func() Event { return &DomainPackDisabled{} })
+
+	// ontology_extension.go
+	registerEvent("ontology_extension.proposed", func() Event { return &OntologyExtensionProposed{} })
+	registerEvent("ontology_extension.approved", func() Event { return &OntologyExtensionApproved{} })
+	registerEvent("ontology_extension.rejected", func() Event { return &OntologyExtensionRejected{} })
 }
 
 // EncodeEvent serialises ev as a JSON envelope. The envelope preserves the
@@ -255,6 +264,16 @@ func dereferenceEvent(ev Event) Event {
 	case *FlightRecorderPolicySet:
 		return *v
 	case *FlightRecorderRetentionSwept:
+		return *v
+	case *DomainPackEnabled:
+		return *v
+	case *DomainPackDisabled:
+		return *v
+	case *OntologyExtensionProposed:
+		return *v
+	case *OntologyExtensionApproved:
+		return *v
+	case *OntologyExtensionRejected:
 		return *v
 	default:
 		// Unknown pointer type — return as-is; the caller will surface the

@@ -489,6 +489,9 @@ internal/engine/taxonomy/discovery.go	PromotionGate.Observe
 internal/engine/taxonomy/discovery.go	PromotionGate.Promote
 internal/engine/taxonomy/discovery.go	PromotionGate.Promotions
 internal/engine/taxonomy/discovery.go	ProposalKind.String
+internal/engine/taxonomy/technique.go	TechniqueHierarchy.Categories
+internal/engine/taxonomy/technique.go	TechniqueHierarchy.Techniques
+internal/engine/taxonomy/technique.go	TechniqueHierarchy.WithTechnique
 internal/infra/authz/grant.go	containsAny
 internal/infra/authz/grant.go	indexFold
 internal/infra/authz/grant.go	isStructuralParseError

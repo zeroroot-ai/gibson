@@ -32,6 +32,7 @@ import (
 	"github.com/zeroroot-ai/gibson/internal/engine/brain"
 	gibsonharness "github.com/zeroroot-ai/gibson/internal/engine/harness"
 	"github.com/zeroroot-ai/gibson/internal/engine/llm"
+	"github.com/zeroroot-ai/gibson/internal/engine/taxonomy"
 	"github.com/zeroroot-ai/gibson/internal/platform/component"
 	"github.com/zeroroot-ai/gibson/internal/platform/job"
 	toolpb "github.com/zeroroot-ai/sdk/api/gen/gibson/tool/v1"
@@ -267,7 +268,12 @@ func (b *brainExecutor) catalog(missionID string) []brain.Capability {
 	var caps []brain.Capability
 	if agents, err := b.registry.ListAgents(ctx); err == nil {
 		for _, a := range agents {
-			caps = append(caps, brain.Capability{Kind: "agent", Name: a.Name, Description: a.Description})
+			caps = append(caps, brain.Capability{
+				Kind:        "agent",
+				Name:        a.Name,
+				Description: a.Description,
+				Coverage:    b.agentCoverage(a),
+			})
 		}
 	}
 	if tools, err := b.registry.ListTools(ctx); err == nil {
@@ -285,6 +291,31 @@ func (b *brainExecutor) catalog(missionID string) []brain.Capability {
 		}
 	}
 	return caps
+}
+
+// agentCoverage converts an enrolled agent's declared technique types
+// (component.AgentInfo.TechniqueTypes — raw, unvalidated registry-metadata
+// strings) into a validated taxonomy.Coverage (ADR-0035 decision 4,
+// gibson#386). An agent that declares no technique types, or one whose
+// declared category is not in GlobalTechniques, gets empty coverage rather
+// than breaking the whole catalog listing — the same "an agent can always
+// write, and can never invent schema" fallback the taxonomy package itself
+// uses for out-of-taxonomy shapes.
+func (b *brainExecutor) agentCoverage(a component.AgentInfo) taxonomy.Coverage {
+	if len(a.TechniqueTypes) == 0 {
+		return taxonomy.EmptyCoverage()
+	}
+	categories := make([]taxonomy.CategoryID, len(a.TechniqueTypes))
+	for i, t := range a.TechniqueTypes {
+		categories[i] = taxonomy.CategoryID(t)
+	}
+	coverage, err := taxonomy.NewCoverage(taxonomy.GlobalTechniques, categories, nil)
+	if err != nil {
+		b.logger.Warn("agent declares technique coverage outside the taxonomy",
+			"agent", a.Name, "technique_types", a.TechniqueTypes, "error", err)
+		return taxonomy.EmptyCoverage()
+	}
+	return coverage
 }
 
 // deciderDecision is the structured-output schema for one single-shot decision

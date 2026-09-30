@@ -26,11 +26,11 @@ import (
 //     only when they differ — the same "consulted once per change" gate
 //     BeliefSystem runs for a single host's evidence.
 //   - SliceBeliefWorker (off-tick) buffers requests (Tap, in-tick, no I/O)
-//     and, on Drain, calls a SliceBeliefProvider (the sidecar's ground-slice
-//     solver, gibson#288 — this package only defines the seam and a
-//     deterministic placeholder, the same pattern BeliefProvider/
-//     placeholderBelief/pgmpyBelief already establish) and applies the
-//     result.
+//     and, on Drain, calls a SliceBeliefProvider (an in-process ground-slice
+//     solver, gibson#288, beliefvi.GroundSlice/SolveSlice — this package
+//     defines the seam; nativeSliceBelief, belief_slice_native.go, is the
+//     real implementation, the same relationship BeliefProvider has to
+//     nativeBelief) and applies the result.
 //   - SliceGate.Apply drops a SliceScored whose digest no longer matches the
 //     outstanding request — the slice moved on while the model was scoring —
 //     mirroring applyBeliefScored's staleness check.
@@ -52,8 +52,8 @@ import (
 // SliceScoreRequested/SliceScored sequence into a fresh SliceGate + substrate
 // reproduces the same belief state, the same World==fold(Timeline) discipline
 // belief.go's own tests hold the per-host gate to. Wiring this into the live
-// engine tick loop (deriving `graph` from the World, driving a real
-// SliceBeliefProvider over HTTP) is the belief engine proper, gibson#275.
+// engine tick loop (deriving `graph` from the World, driving a real, in-process
+// SliceBeliefProvider) is the belief engine proper, gibson#275.
 
 // ScoredNode pairs a NodeRef with the NodeBelief a SliceBeliefProvider
 // computed for it, so SliceScored can carry the (kind, id) a node needs to
@@ -89,10 +89,10 @@ type SliceScored struct {
 func (SliceScored) Kind() string { return "belief.slice_scored" }
 
 // SliceBeliefProvider scores every node in a bounded slice at once (ADR-0029
-// §5/§6). The real implementation calls the pgmpy sidecar's ground-slice
-// solver (gibson#288, sidecar/belief/ground.py); this interface is the seam,
-// and placeholderSliceBelief below is a deterministic stand-in, the same
-// relationship BeliefProvider has to placeholderBelief/pgmpyBelief.
+// §5/§6). The real implementation, nativeSliceBelief (belief_slice_native.go,
+// ADR-0034/ADR-0037, gibson#394), grounds and solves the slice in-process via
+// internal/engine/brain/beliefvi's GroundSlice/SolveSlice (gibson#288's
+// ported ground.py); this interface is the seam it implements.
 type SliceBeliefProvider interface {
 	// ScoreSlice returns a NodeBelief for every node in slice, keyed by
 	// AttackGraphNode.ID.
@@ -355,30 +355,3 @@ func (w *SliceBeliefWorker) Drain(ctx context.Context, graph AttackGraph, propag
 	sort.Strings(affected)
 	return len(reqs), affected, nil
 }
-
-// placeholderSliceBelief is a deterministic stand-in SliceBeliefProvider
-// (mirrors placeholderBelief in belief.go): every node's juicy/exploitable is
-// the slice's edge-to-node ratio, reachable is always 1. NOT the real model —
-// swapped for the pgmpy ground-slice sidecar (gibson#288) once gibson#275
-// wires this seam into the live engine.
-type placeholderSliceBelief struct{}
-
-func (placeholderSliceBelief) ScoreSlice(slice AttackGraph) map[string]NodeBelief {
-	out := make(map[string]NodeBelief, len(slice.Nodes))
-	density := 0.0
-	if len(slice.Nodes) > 0 {
-		density = float64(len(slice.Edges)) / float64(len(slice.Nodes))
-	}
-	for _, n := range slice.Nodes {
-		out[n.ID] = NodeBelief{
-			Belief: Belief{Juicy: density, Exploitable: density, Reachable: 1, Model: "placeholder-slice-v0"},
-		}
-	}
-	return out
-}
-
-func (placeholderSliceBelief) Version() string { return "placeholder-slice-v0" }
-
-// PlaceholderSliceBeliefProvider returns the deterministic stand-in
-// SliceBeliefProvider.
-func PlaceholderSliceBeliefProvider() SliceBeliefProvider { return placeholderSliceBelief{} }

@@ -41,6 +41,7 @@ func TestRedispatch_ToolWithValidStructuredInput(t *testing.T) {
 	}}
 	e, dw := richCatalogEngine(llm)
 	e.Submit(MissionProjected{ID: "m1", Goal: "scan"})
+	approveViaVoI(e, "m1", Capability{Kind: "tool", Name: "nmap"})
 	runRounds(e, dw, 8)
 
 	if got := dispatchedTargets(e)["nmap"]; got != WorkDone {
@@ -61,6 +62,7 @@ func TestRedispatch_PluginWithMethodParams(t *testing.T) {
 	}}
 	e, dw := richCatalogEngine(llm)
 	e.Submit(MissionProjected{ID: "m1", Goal: "secrets"})
+	approveViaVoI(e, "m1", Capability{Kind: "plugin", Name: "gitleaks"})
 	runRounds(e, dw, 8)
 
 	if got := dispatchedTargets(e)["gitleaks"]; got != WorkDone {

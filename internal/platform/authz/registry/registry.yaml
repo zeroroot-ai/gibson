@@ -1580,6 +1580,34 @@ entries:
     allowed_identities:
       - USER
       - SERVICE
+  "/gibson.tenant.v1.DomainPackService/DisableDomainPack":
+    relation: "admin"
+    object_type: "tenant"
+    object_deriver: "tenant_from_identity"
+    allowed_identities:
+      - USER
+      - SERVICE
+  "/gibson.tenant.v1.DomainPackService/EnableDomainPack":
+    relation: "admin"
+    object_type: "tenant"
+    object_deriver: "tenant_from_identity"
+    allowed_identities:
+      - USER
+      - SERVICE
+  "/gibson.tenant.v1.DomainPackService/ListDomainPackCatalog":
+    relation: "member"
+    object_type: "tenant"
+    object_deriver: "tenant_from_identity"
+    allowed_identities:
+      - USER
+      - SERVICE
+  "/gibson.tenant.v1.DomainPackService/ListDomainPacks":
+    relation: "member"
+    object_type: "tenant"
+    object_deriver: "tenant_from_identity"
+    allowed_identities:
+      - USER
+      - SERVICE
   "/gibson.tenant.v1.GrantsService/DeleteAgentGrants":
     relation: "admin"
     object_type: "tenant"
@@ -1744,6 +1772,30 @@ entries:
     allowed_identities:
       - USER
       - SERVICE
+  "/gibson.tenant.v1.OntologyExtensionService/ApproveOntologyExtensionProposal":
+    relation: "owner"
+    object_type: "tenant"
+    object_deriver: "tenant_from_identity"
+    allowed_identities:
+      - USER
+  "/gibson.tenant.v1.OntologyExtensionService/ListOntologyExtensionProposals":
+    relation: "admin"
+    object_type: "tenant"
+    object_deriver: "tenant_from_identity"
+    allowed_identities:
+      - USER
+  "/gibson.tenant.v1.OntologyExtensionService/RejectOntologyExtensionProposal":
+    relation: "owner"
+    object_type: "tenant"
+    object_deriver: "tenant_from_identity"
+    allowed_identities:
+      - USER
+  "/gibson.tenant.v1.OntologyExtensionService/SubmitOntologyExtensionUpstream":
+    relation: "owner"
+    object_type: "tenant"
+    object_deriver: "tenant_from_identity"
+    allowed_identities:
+      - USER
   "/gibson.tenant.v1.ProviderService/CreateProvider":
     relation: "writer"
     object_type: "tenant"

@@ -19,6 +19,8 @@ import (
 	"sort"
 
 	"github.com/mlange-42/ark/ecs"
+
+	"github.com/zeroroot-ai/gibson/internal/engine/taxonomy"
 )
 
 // Host is the host component. Identity is the (ScopeID, Address) coordinate plus
@@ -78,6 +80,35 @@ type World struct {
 	// (flight_recorder.go, gibson#271). Not ECS-backed: it is a per-tenant
 	// singleton, not a collection of entities.
 	flightRecorderPolicy FlightRecorderPolicy
+
+	// domainPacks holds this tenant's currently enabled Domain Packs
+	// (domain_pack.go, ADR-0033, gibson#381) — the "live registry" a
+	// DomainPackEnabled/Disabled fold maintains. Not ECS-backed: keyed
+	// per-tenant state, like flightRecorderPolicy, not a collection of
+	// sighted facts.
+	domainPacks map[string]DomainPackState
+
+	// ontologyGate is this tenant's taxonomy-discovery safety gate
+	// (taxonomy.PromotionGate, ADR-0024 §2, ADR-0033 decisions 2-3,
+	// gibson#391/#392), folded from OntologyExtensionProposed/Approved
+	// (ontology_extension.go). Base is taxonomy.Global — the platform's own
+	// core Taxonomy — the same base gibson#281's original design classifies
+	// sightings against. applyOntologyExtensionApproved (gibson#392) is the
+	// only path that ever calls Promote: once a proposal has BOTH recurred
+	// taxonomy.MinRecurrenceForSettlement times AND been explicitly approved
+	// by the tenant owner, Base() advances to admit the new label — this
+	// tenant's live taxonomy extension.
+	ontologyGate *taxonomy.PromotionGate
+
+	// ontologyProposals holds this tenant's currently observed ontology/
+	// taxonomy extension proposals (ADR-0024 §2, ADR-0033 decisions 2-3,
+	// gibson#391/#392), keyed by (kind, label) — the read model
+	// OntologyExtensionService.ListOntologyExtensionProposals (gibson#392)
+	// lists from. Not ECS-backed: like domainPacks, per-tenant
+	// singleton-shaped state keyed by proposal identity — a repeat sighting
+	// of the SAME (kind, label) updates its entry in place rather than
+	// adding a new one.
+	ontologyProposals map[ontologyProposalKey]OntologyProposalState
 
 	// observations holds out-of-taxonomy shapes (ADR-0012). Keyed by Timeline
 	// event id rather than by content, so repeat sightings stay distinct.
@@ -204,6 +235,9 @@ func NewWorld(tenant string) *World {
 		destructiveActions: ecs.NewMap1[DestructiveAction](w),
 		voiPlans:           ecs.NewMap1[VoIPlanState](w),
 		nodeBeliefs:        ecs.NewMap1[NodeBeliefRecord](w),
+		domainPacks:        make(map[string]DomainPackState),
+		ontologyGate:       taxonomy.NewPromotionGate(taxonomy.Global),
+		ontologyProposals:  make(map[ontologyProposalKey]OntologyProposalState),
 	}
 }
 
@@ -423,6 +457,16 @@ func Reduce(w *World, ev Event) {
 		applyVoIPlanned(w, e)
 	case NodeBeliefSet:
 		applyNodeBeliefSet(w, e)
+	case DomainPackEnabled:
+		applyDomainPackEnabled(w, e)
+	case DomainPackDisabled:
+		applyDomainPackDisabled(w, e)
+	case OntologyExtensionProposed:
+		applyOntologyExtensionProposed(w, e)
+	case OntologyExtensionApproved:
+		applyOntologyExtensionApproved(w, e)
+	case OntologyExtensionRejected:
+		applyOntologyExtensionRejected(w, e)
 	}
 }
 

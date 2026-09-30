@@ -70,6 +70,7 @@ func TestDecider_GoalMissionDispatchesThenCompletes(t *testing.T) {
 	e.Submit(MissionProjected{ID: "m1", Goal: "find the flag", Nodes: []WorkNode{
 		{ID: "a", Kind: "tool", Target: "recon"},
 	}})
+	approveViaVoI(e, "m1", Capability{Kind: "agent", Name: "exploit"})
 	runRounds(e, dw, 8)
 
 	if got := missionStatus(e, "m1"); got != MissionCompleted {
@@ -173,6 +174,22 @@ func TestDecider_MissionSlotFlowsToContext(t *testing.T) {
 	if captured.DeciderSlot.Provider != "anthropic" || captured.DeciderSlot.Model != "claude-opus-4-8" {
 		t.Fatalf("decider slot not carried into context: %+v", captured.DeciderSlot)
 	}
+}
+
+// approveViaVoI seeds missionID's VoI top-k (VoIPlanned, folded on the next
+// Tick) so gibson#397's hard gate lets a dispatch to every capability in caps
+// through — the fixture equivalent of a completed BAMCP round that resolved
+// full coverage for a hypothesis candidate. For tests exercising catalog/JSON
+// validation (decider_test.go, decider_redispatch_test.go) rather than the
+// gate itself, which has its own dedicated tests in decider_voi_gate_test.go.
+func approveViaVoI(e *Engine, missionID string, caps ...Capability) {
+	refs := make([]CapabilityRef, len(caps))
+	for i, c := range caps {
+		refs[i] = CapabilityRef{Kind: c.Kind, Name: c.Name}
+	}
+	e.Submit(VoIPlanned{MissionID: missionID, Candidates: []VoICandidate{
+		{Kind: VoICandidateHypothesis, RefID: "fixture", CoveringCapabilities: refs},
+	}})
 }
 
 // llmFunc adapts a func to DeciderLLM.

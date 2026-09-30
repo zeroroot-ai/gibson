@@ -11,6 +11,7 @@ import (
 
 	"github.com/mlange-42/ark/ecs"
 	"github.com/zeroroot-ai/gibson/internal/engine/ontology"
+	"github.com/zeroroot-ai/gibson/internal/engine/taxonomy"
 )
 
 // voi_planner.go is gibson#283's gate/worker layer: it makes voi_plan.go's
@@ -35,12 +36,16 @@ import (
 // What this file deliberately does NOT do (see voi_score.go/voi_plan.go for
 // the rest of the scope ledger): it does not dispatch anything. VoIPlanState
 // records the ranked top-k candidates for a mission — the "choice" AC3 asks
-// to be "recorded and replayable" — but turning the top candidate into an
-// actual DeciderDispatch requires a mapping from a VoICandidate (a host or a
-// hypothesis) to a dispatchable capability target that does not exist yet
-// (DeciderDispatch names a Capability, not a graph node). That wiring is the
-// next slice's job; this one makes the ranked plan a first-class, replayable
-// fact on the World, which is the seam that wiring needs.
+// to be "recorded and replayable" — and each candidate now also carries its
+// resolved CoveringCapabilities (ADR-0035 decision 4, gibson#387's
+// technique -> capability bridge, wired through catalog/hierarchy below), the
+// mapping from a VoICandidate to the dispatchable capabilities that can
+// address it. Refining that ranking into a multi-step plan is gibson#396's
+// BAMCP planner (bamcp.go); refusing a DeciderDispatch outside the VoI top-k
+// is gibson#397's hard top-k enforcement (decider.go's voiGatedDispatch),
+// which reads the VoIPlanState this file folds — not this file's own job; this
+// one makes the ranked, capability-resolved plan a first-class, replayable
+// fact on the World, which is the seam #397's gate reads from.
 
 // VoIPlanState is the per-mission VoI planning record: whether a plan is
 // currently being computed (in flight), the evidence cursor it was requested
@@ -182,6 +187,24 @@ type VoIWorker struct {
 	registry  *ontology.BeliefSchemaRegistry
 	scorer    VoIScorer
 	topK      int
+	// catalog returns the mission's enrolled capability catalog (the same
+	// shape ExecutorDeps.Catalog supplies to DeciderWorker) — the set VoI
+	// dispatch gating's technique -> capability bridge resolves each
+	// candidate's CoveringCapabilities against (ADR-0035 decision 4,
+	// gibson#387). Never nil (NewVoIWorker defaults it).
+	catalog func(missionID string) []Capability
+	// hierarchy is the taxonomy technique hierarchy a candidate's Technique
+	// rolls up through (gibson#379's TechniqueHierarchy.CategoryOf). Never
+	// nil (NewVoIWorker defaults it to taxonomy.GlobalTechniques, the same
+	// default brainExecutor.agentCoverage uses to validate a capability's own
+	// declared coverage).
+	hierarchy *taxonomy.TechniqueHierarchy
+	// bamcp is the native BAMCP planner (ADR-0026 decision 4, gibson#396)
+	// that refines PlanVoI's one-step candidate ranking into a multi-step,
+	// model-uncertainty-aware one before it is Submitted. Never nil
+	// (NewVoIWorker defaults it via NewBAMCPPlanner) — ADR-0026 names BAMCP
+	// as the planner, not an optional refinement, so there is no "off" path.
+	bamcp *BAMCPPlanner
 
 	mu      sync.Mutex
 	pending []string // mission ids awaiting a plan
@@ -190,9 +213,36 @@ type VoIWorker struct {
 // NewVoIWorker builds a worker. substrate is typically a WorldBeliefSubstrate
 // bound to the same eng (reputation/stake reads must see the live belief
 // field); scorer is typically ExactVoIScorer(); topK is typically
-// DefaultVoITopK.
-func NewVoIWorker(eng *Engine, substrate BeliefSubstrate, registry *ontology.BeliefSchemaRegistry, scorer VoIScorer, topK int) *VoIWorker {
-	return &VoIWorker{eng: eng, substrate: substrate, registry: registry, scorer: scorer, topK: topK}
+// DefaultVoITopK. catalog may be nil (no capabilities offered, matching
+// NewDeciderWorker's own convention) — VoI dispatch gating then resolves no
+// covering capabilities for any candidate. hierarchy may be nil, which
+// defaults to taxonomy.GlobalTechniques. bamcp may be nil, which defaults to
+// NewBAMCPPlanner(registry, nil, DefaultBAMCPConfig()) — the same
+// uninformative-prior cold start belief_slice_native.go uses until braintrain
+// (gibson#395) fits real per-edge-type posteriors.
+func NewVoIWorker(
+	eng *Engine,
+	substrate BeliefSubstrate,
+	registry *ontology.BeliefSchemaRegistry,
+	scorer VoIScorer,
+	topK int,
+	catalog func(missionID string) []Capability,
+	hierarchy *taxonomy.TechniqueHierarchy,
+	bamcp *BAMCPPlanner,
+) *VoIWorker {
+	if catalog == nil {
+		catalog = func(string) []Capability { return nil }
+	}
+	if hierarchy == nil {
+		hierarchy = taxonomy.GlobalTechniques
+	}
+	if bamcp == nil {
+		bamcp = NewBAMCPPlanner(registry, nil, DefaultBAMCPConfig())
+	}
+	return &VoIWorker{
+		eng: eng, substrate: substrate, registry: registry, scorer: scorer, topK: topK,
+		catalog: catalog, hierarchy: hierarchy, bamcp: bamcp,
+	}
 }
 
 // Tap is the engine subscriber (in-tick, no I/O): buffer the mission id.
@@ -220,7 +270,8 @@ func (vw *VoIWorker) Drain(ctx context.Context) int {
 
 func (vw *VoIWorker) plan(ctx context.Context, missionID string) {
 	in := vw.buildInput(missionID)
-	candidates, err := PlanVoI(ctx, in, vw.substrate, vw.scorer, vw.topK)
+	seed := BAMCPSeed(missionID, voiPlanCursor(vw.eng.World, missionID))
+	candidates, err := vw.bamcp.Plan(ctx, in, vw.substrate, vw.scorer, vw.topK, seed)
 	if err != nil {
 		// A failed plan does not kill the mission; clear in-flight (with no
 		// candidates) and let the gate retry on the next evidence change —
@@ -231,22 +282,44 @@ func (vw *VoIWorker) plan(ctx context.Context, missionID string) {
 	vw.eng.Submit(VoIPlanned{MissionID: missionID, Candidates: candidates})
 }
 
+// voiPlanCursor returns missionID's current in-flight evidence cursor from
+// w's VoI plan state (set by applyVoIPlanRequested, the same cursor
+// VoIGateSystem stamped into the VoIPlanRequested that triggered this round)
+// — 0 if the mission has no VoI plan state yet, which should not happen in
+// practice (VoIWorker only ever plans a mission it Tapped a request for) but
+// is never a panic. This is BAMCPSeed's other input alongside missionID: both
+// are already durable, replayable facts, so the seed a live planning round
+// uses is always exactly reproducible from state the Timeline already
+// records.
+func voiPlanCursor(w *World, missionID string) int {
+	for _, st := range w.VoIPlanSnapshot() {
+		if st.MissionID == missionID {
+			return st.Cursor
+		}
+	}
+	return 0
+}
+
 // buildInput gathers the mission's ambient-bounded candidate set (ADR-0026
 // §2): the ambient host slice (the same budget/curation the Decider itself
 // reads, deciderHostBudget), every hypothesis (mirroring DeciderWorker's own
 // Findings() precedent — tenant-wide, since Mission carries no ScopeID to
 // filter by), and the current attack graph (DeriveAttackGraph over
 // HostsToInfraGraph, gibson#275/#286's live-wiring machinery, reused
-// unchanged).
-func (vw *VoIWorker) buildInput(_ string) VoIPlanInput {
+// unchanged) — plus the mission's capability catalog and the technique
+// hierarchy (vw.catalog/vw.hierarchy), so PlanVoI can resolve each
+// candidate's CoveringCapabilities (ADR-0035 decision 4, gibson#387).
+func (vw *VoIWorker) buildInput(missionID string) VoIPlanInput {
 	hosts, _ := vw.eng.AmbientHosts(deciderHostBudget)
 	nodes := HostsToInfraGraph(hosts)
 	graph := DeriveAttackGraph(nodes, nil, vw.registry)
 	return VoIPlanInput{
-		Hosts:      hosts,
-		Hypotheses: vw.eng.Hypotheses(),
-		Graph:      graph,
-		Tenant:     vw.eng.World.Tenant,
+		Hosts:        hosts,
+		Hypotheses:   vw.eng.Hypotheses(),
+		Graph:        graph,
+		Tenant:       vw.eng.World.Tenant,
+		Capabilities: vw.catalog(missionID),
+		Hierarchy:    vw.hierarchy,
 	}
 }
 
@@ -254,7 +327,8 @@ func (vw *VoIWorker) buildInput(_ string) VoIPlanInput {
 // be registered as a System (ExecutorSystems, or a test's own AddSystem) —
 // this function only starts the off-tick worker and its drain loop, mirroring
 // WireExecutor/WireSliceBelief's ticker pattern exactly. interval <= 0 uses
-// TickInterval.
+// TickInterval. catalog, hierarchy and bamcp are forwarded to NewVoIWorker
+// verbatim (all three may be nil; see its own doc comment).
 func WireVoIPlanner(
 	ctx context.Context,
 	eng *Engine,
@@ -262,12 +336,15 @@ func WireVoIPlanner(
 	scorer VoIScorer,
 	topK int,
 	interval time.Duration,
+	catalog func(missionID string) []Capability,
+	hierarchy *taxonomy.TechniqueHierarchy,
+	bamcp *BAMCPPlanner,
 ) *VoIWorker {
 	if interval <= 0 {
 		interval = TickInterval
 	}
 	substrate := NewWorldBeliefSubstrate(eng)
-	worker := NewVoIWorker(eng, substrate, registry, scorer, topK)
+	worker := NewVoIWorker(eng, substrate, registry, scorer, topK, catalog, hierarchy, bamcp)
 	eng.Subscribe(worker.Tap)
 
 	go func() {

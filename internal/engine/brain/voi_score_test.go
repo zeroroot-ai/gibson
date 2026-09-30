@@ -5,6 +5,7 @@ package brain
 
 import (
 	"math"
+	"reflect"
 	"testing"
 )
 
@@ -144,7 +145,9 @@ func TestExactVoIScorer_DeterministicAndExact(t *testing.T) {
 	in := VoIScoreInput{Kind: VoICandidateHypothesis, RefID: "h1", Confidence: 0.73, Connectivity: 3, Surprised: true, HasStake: true, Reputation: 1.4}
 	first := scorer.Score(in)
 	for range 5 {
-		if got := scorer.Score(in); got != first {
+		// reflect.DeepEqual, not !=: VoICandidate carries a []Capability field
+		// (CoveringCapabilities, ADR-0035/gibson#387), which is not comparable.
+		if got := scorer.Score(in); !reflect.DeepEqual(got, first) {
 			t.Fatalf("repeated Score(%+v) diverged: %+v vs %+v", in, got, first)
 		}
 	}

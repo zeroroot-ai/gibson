@@ -5,43 +5,165 @@ package daemon
 
 import (
 	"context"
+	"os"
+	"path/filepath"
 	"testing"
 	"time"
 
 	"github.com/zeroroot-ai/gibson/internal/engine/brain"
 )
 
-// TestResolveBeliefProvider_DefaultsToPlaceholder proves that without the sidecar
-// URL the daemon uses the deterministic Go placeholder (OSS-without-base-model),
-// so the brain still produces a field with zero external dependencies.
-func TestResolveBeliefProvider_DefaultsToPlaceholder(t *testing.T) {
-	t.Setenv("GIBSON_BELIEF_SIDECAR_URL", "")
-	p := resolveBeliefProvider()
-	if got := p.Version(); got != "placeholder-v0" {
-		t.Fatalf("default provider version = %q, want placeholder-v0", got)
+// TestResolveBeliefProvider_DefaultsToTheEmbeddedBaseModel proves that
+// without a GIBSON_BELIEF_MODEL_PATH override the daemon scores in-process
+// against the OSS-embedded base-v1 model (ADR-0034) — no sidecar, no
+// placeholder fallback, since the native engine has no deployment cost left
+// to opt out of.
+func TestResolveBeliefProvider_DefaultsToTheEmbeddedBaseModel(t *testing.T) {
+	t.Setenv("GIBSON_BELIEF_MODEL_PATH", "")
+	p, err := resolveBeliefProvider()
+	if err != nil {
+		t.Fatalf("resolveBeliefProvider: %v", err)
+	}
+	if got := p.Version(); got != "base-v1" {
+		t.Fatalf("default provider version = %q, want base-v1", got)
 	}
 }
 
-// TestResolveBeliefProvider_PinsConfiguredVersion proves the sidecar provider is
-// selected when the URL is set and pins GIBSON_BELIEF_MODEL_VERSION (ADR-0005 §5).
-func TestResolveBeliefProvider_PinsConfiguredVersion(t *testing.T) {
-	t.Setenv("GIBSON_BELIEF_SIDECAR_URL", "http://127.0.0.1:8087/score")
-	t.Setenv("GIBSON_BELIEF_MODEL_VERSION", "base-v3")
-	p := resolveBeliefProvider()
+// TestResolveBeliefProvider_PinsAnOverrideModelPath proves GIBSON_BELIEF_MODEL_PATH
+// selects an alternate model artifact (e.g. a curated commercial base model
+// dropped in by the commercial layer), ADR-0005 §5.
+func TestResolveBeliefProvider_PinsAnOverrideModelPath(t *testing.T) {
+	dir := t.TempDir()
+	path := filepath.Join(dir, "base-v3.json")
+	const raw = `{
+  "version": "base-v3",
+  "variables": ["reachable", "exploitable", "juicy"],
+  "edges": [["reachable", "exploitable"], ["exploitable", "juicy"]],
+  "cpds": {
+    "reachable": {"values": [[0.5], [0.5]]},
+    "exploitable": {"evidence": ["reachable"], "evidence_card": [2], "values": [[0.9, 0.2], [0.1, 0.8]]},
+    "juicy": {"evidence": ["exploitable"], "evidence_card": [2], "values": [[0.9, 0.3], [0.1, 0.7]]}
+  }
+}`
+	if err := os.WriteFile(path, []byte(raw), 0o600); err != nil {
+		t.Fatal(err)
+	}
+
+	t.Setenv("GIBSON_BELIEF_MODEL_PATH", path)
+	p, err := resolveBeliefProvider()
+	if err != nil {
+		t.Fatalf("resolveBeliefProvider: %v", err)
+	}
 	if got := p.Version(); got != "base-v3" {
 		t.Fatalf("pinned provider version = %q, want base-v3", got)
 	}
 }
 
-// TestResolveSliceBeliefProvider_IsTheDeterministicPlaceholder pins today's
-// documented state (belief_provider.go): the graph-coupled SliceBeliefProvider
-// is always the placeholder until the ontology's per-edge-type target
-// variable and noisy-OR strength/leak parameters exist for ground.py to
-// consume (gibson#275/#288).
-func TestResolveSliceBeliefProvider_IsTheDeterministicPlaceholder(t *testing.T) {
-	p := resolveSliceBeliefProvider()
-	if got := p.Version(); got != "placeholder-slice-v0" {
-		t.Fatalf("resolveSliceBeliefProvider version = %q, want placeholder-slice-v0", got)
+// TestResolveBeliefProvider_FailsLoudOnAnInvalidOverride proves a
+// misconfigured GIBSON_BELIEF_MODEL_PATH fails daemon startup rather than
+// silently falling back to a different model (fail-loud on a real
+// dependency, matching every other resolve* helper in this file).
+func TestResolveBeliefProvider_FailsLoudOnAnInvalidOverride(t *testing.T) {
+	t.Setenv("GIBSON_BELIEF_MODEL_PATH", filepath.Join(t.TempDir(), "does-not-exist.json"))
+	if _, err := resolveBeliefProvider(); err == nil {
+		t.Fatal("expected an error for a missing model artifact file")
+	}
+}
+
+// TestResolveSliceBeliefProvider_IsTheNativeGroundingProvider pins today's
+// documented state (belief_provider.go, gibson#394/ADR-0037): the
+// graph-coupled SliceBeliefProvider grounds the registry's declared belief-PRM
+// schema in-process via beliefvi (brain.NativeSliceBeliefProvider), never the
+// deterministic placeholder — the ontology's per-edge-type target-variable
+// declaration (ADR-0037 decision 1) is what unblocked the switch.
+func TestResolveSliceBeliefProvider_IsTheNativeGroundingProvider(t *testing.T) {
+	reg, err := newBeliefSchemaRegistry()
+	if err != nil {
+		t.Fatalf("newBeliefSchemaRegistry: %v", err)
+	}
+	p := resolveSliceBeliefProvider(reg, nil)
+	if got := p.Version(); got != "native-slice-v0-uninformative-prior" {
+		t.Fatalf("resolveSliceBeliefProvider version = %q, want native-slice-v0-uninformative-prior", got)
+	}
+}
+
+// TestResolveEdgePosteriorProvider_DefaultsToNilWhenUnset proves the
+// gibson#395 documented data caveat: with no GIBSON_EDGE_POSTERIOR_PATH the
+// daemon pins no posterior at all, which NativeSliceBeliefProvider and
+// NewBAMCPPlanner both already treat as the uninformative-prior cold start —
+// production is allowed to have no recorded outcomes yet.
+func TestResolveEdgePosteriorProvider_DefaultsToNilWhenUnset(t *testing.T) {
+	t.Setenv("GIBSON_EDGE_POSTERIOR_PATH", "")
+	p, err := resolveEdgePosteriorProvider()
+	if err != nil {
+		t.Fatalf("resolveEdgePosteriorProvider: %v", err)
+	}
+	if p != nil {
+		t.Fatalf("expected a nil provider when GIBSON_EDGE_POSTERIOR_PATH is unset, got %v", p)
+	}
+}
+
+// TestResolveEdgePosteriorProvider_PinsAFittedArtifact proves
+// GIBSON_EDGE_POSTERIOR_PATH selects a braintrain-fitted edge-posterior
+// artifact (gibson#395, ADR-0037 decisions 2 and 5).
+func TestResolveEdgePosteriorProvider_PinsAFittedArtifact(t *testing.T) {
+	dir := t.TempDir()
+	path := filepath.Join(dir, "tenant-acme-edges-v3.json")
+	const raw = `{"version":"tenant-acme-edges-v3","posteriors":{"RESOLVES_TO":{"alpha":8,"beta":4}}}`
+	if err := os.WriteFile(path, []byte(raw), 0o600); err != nil {
+		t.Fatal(err)
+	}
+
+	t.Setenv("GIBSON_EDGE_POSTERIOR_PATH", path)
+	p, err := resolveEdgePosteriorProvider()
+	if err != nil {
+		t.Fatalf("resolveEdgePosteriorProvider: %v", err)
+	}
+	if got := p.Version(); got != "tenant-acme-edges-v3" {
+		t.Fatalf("pinned provider version = %q, want tenant-acme-edges-v3", got)
+	}
+	if got := p.Posterior("RESOLVES_TO").Mean(); got != 8.0/12.0 {
+		t.Fatalf("RESOLVES_TO mean = %v, want %v", got, 8.0/12.0)
+	}
+}
+
+// TestResolveEdgePosteriorProvider_FailsLoudOnAnInvalidOverride mirrors
+// TestResolveBeliefProvider_FailsLoudOnAnInvalidOverride: a misconfigured
+// GIBSON_EDGE_POSTERIOR_PATH fails daemon startup rather than silently
+// falling back to the cold start.
+func TestResolveEdgePosteriorProvider_FailsLoudOnAnInvalidOverride(t *testing.T) {
+	t.Setenv("GIBSON_EDGE_POSTERIOR_PATH", filepath.Join(t.TempDir(), "does-not-exist.json"))
+	if _, err := resolveEdgePosteriorProvider(); err == nil {
+		t.Fatal("expected an error for a missing edge posterior artifact file")
+	}
+}
+
+// TestResolveSliceBeliefProvider_PinsThePosteriorVersionIntoItsOwnVersion
+// proves resolveSliceBeliefProvider actually threads a resolved posterior
+// provider into brain.NativeSliceBeliefProvider rather than dropping it
+// (gibson#395's mission-pin requirement starts here: Version() is what a
+// scored node's Belief.Model gets stamped with).
+func TestResolveSliceBeliefProvider_PinsThePosteriorVersionIntoItsOwnVersion(t *testing.T) {
+	dir := t.TempDir()
+	path := filepath.Join(dir, "tenant-acme-edges-v1.json")
+	const raw = `{"version":"tenant-acme-edges-v1","posteriors":{}}`
+	if err := os.WriteFile(path, []byte(raw), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	t.Setenv("GIBSON_EDGE_POSTERIOR_PATH", path)
+	posteriors, err := resolveEdgePosteriorProvider()
+	if err != nil {
+		t.Fatalf("resolveEdgePosteriorProvider: %v", err)
+	}
+
+	reg, err := newBeliefSchemaRegistry()
+	if err != nil {
+		t.Fatalf("newBeliefSchemaRegistry: %v", err)
+	}
+	p := resolveSliceBeliefProvider(reg, posteriors)
+	want := "native-slice-v0-uninformative-prior+edges:tenant-acme-edges-v1"
+	if got := p.Version(); got != want {
+		t.Fatalf("resolveSliceBeliefProvider version = %q, want %q", got, want)
 	}
 }
 
@@ -81,7 +203,11 @@ func TestWireBrainRegistry_InstallsBothBeliefPipelines(t *testing.T) {
 	if err != nil {
 		t.Fatalf("newBeliefSchemaRegistry: %v", err)
 	}
-	wireBrainRegistry(ctx, registry, brain.PlaceholderBeliefProvider(), brain.PlaceholderSliceBeliefProvider(), beliefSchemaRegistry)
+	beliefProvider, err := resolveBeliefProvider()
+	if err != nil {
+		t.Fatalf("resolveBeliefProvider: %v", err)
+	}
+	wireBrainRegistry(ctx, registry, beliefProvider, resolveSliceBeliefProvider(beliefSchemaRegistry, nil), beliefSchemaRegistry, nil)
 
 	e := registry.For("tenant-wire-test") // triggers the OnEngine hook
 	e.Submit(brain.HostObserved{ScopeID: "s", Address: "10.0.0.5", OpenPorts: []int{22}})
@@ -123,7 +249,11 @@ func TestWireBrainRegistry_InstallsVoIPlanner(t *testing.T) {
 	if err != nil {
 		t.Fatalf("newBeliefSchemaRegistry: %v", err)
 	}
-	wireBrainRegistry(ctx, registry, brain.PlaceholderBeliefProvider(), brain.PlaceholderSliceBeliefProvider(), beliefSchemaRegistry)
+	beliefProvider, err := resolveBeliefProvider()
+	if err != nil {
+		t.Fatalf("resolveBeliefProvider: %v", err)
+	}
+	wireBrainRegistry(ctx, registry, beliefProvider, resolveSliceBeliefProvider(beliefSchemaRegistry, nil), beliefSchemaRegistry, nil)
 
 	e := registry.For("tenant-voi-wire-test") // triggers the OnEngine hook
 	e.Submit(brain.MissionProjected{ID: "m1", Goal: "find a path"})

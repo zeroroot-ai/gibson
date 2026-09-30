@@ -122,9 +122,9 @@ type daemonImpl struct {
 	// WorldService read path reads through it. Lazily created at gRPC registration.
 	brainRegistry *brain.Registry
 	brainExecutor *brainExecutor
-	// beliefProvider scores the belief field (ADR-0005). The pgmpy sidecar when
-	// GIBSON_BELIEF_SIDECAR_URL is set, else the deterministic placeholder. Held
-	// here so the mission launch path can pin its model version (ADR-0005 §5).
+	// beliefProvider scores the belief field (ADR-0005), in-process via the
+	// native Go belief runtime (ADR-0034). Held here so the mission launch path
+	// can pin its model version (ADR-0005 §5).
 	beliefProvider brain.BeliefProvider
 
 	// liveAgents is the in-memory registry of running agent instances and their
@@ -481,6 +481,16 @@ type daemonImpl struct {
 	// after a successful Start; may be nil during unit tests that bypass
 	// newInfrastructure.
 	reasoner *ontology.Reasoner
+
+	// domainPackCatalog is the curated, shipped set of catalog Domain Packs
+	// (ADR-0033 decision 1, gibson#381). Constructed during newInfrastructure
+	// alongside reasoner and shared by DomainPackService (ListCatalog /
+	// EnableDomainPack) and the startup catalog-gate seed. Seeded with the
+	// skeleton "main" pack (gibson#382, see ontology.MainDomainPack) — every
+	// pack it carries ships default-off (ADR-0033 decision 4); a fresh
+	// tenant's World carries none of a listed pack's bindings until that
+	// tenant's admin calls EnableDomainPack.
+	domainPackCatalog *ontology.DomainPackCatalog
 }
 
 // spiffeX509Closer is the narrow interface for closing an X.509 source on shutdown.
@@ -1008,20 +1018,31 @@ func (d *daemonImpl) Start(ctx context.Context) error {
 	// Initialize the per-tenant ECS brain registry (epic ecs-brain). Engines run
 	// for the daemon's lifetime; the orchestrator event-bus adapter feeds each
 	// tenant's World from its live mission event stream (ADR-0001 capture path).
-	d.beliefProvider = resolveBeliefProvider()
-	sliceBeliefProvider := resolveSliceBeliefProvider()
+	beliefProvider, err := resolveBeliefProvider()
+	if err != nil {
+		d.stopServices(ctx)
+		return fmt.Errorf("failed to resolve belief provider: %w", err)
+	}
+	d.beliefProvider = beliefProvider
 	beliefSchemaRegistry, err := newBeliefSchemaRegistry()
 	if err != nil {
 		d.stopServices(ctx)
 		return fmt.Errorf("failed to build belief schema registry: %w", err)
 	}
+	edgePosteriorProvider, err := resolveEdgePosteriorProvider()
+	if err != nil {
+		d.stopServices(ctx)
+		return fmt.Errorf("failed to resolve edge posterior provider: %w", err)
+	}
+	sliceBeliefProvider := resolveSliceBeliefProvider(beliefSchemaRegistry, edgePosteriorProvider)
 	d.brainRegistry = brain.NewRegistry(ctx, append(
 		[]brain.System{brain.BeliefSystem},
 		brain.ExecutorSystems()..., // scheduler/condition/decider-gate/budget/retry/completion (gibson#851)
 	)...)
-	// Belief inference is an HTTP call to the pgmpy sidecar, so it runs off the
-	// tick: BeliefSystem asks for a score when a host's evidence changes, and the
-	// worker WireBelief installs answers with a BeliefScored event (gibson#25).
+	// Belief inference runs in-process (ADR-0034) but still off the tick, since
+	// exact variable elimination is not free: BeliefSystem asks for a score when
+	// a host's evidence changes, and the worker WireBelief installs answers with
+	// a BeliefScored event (gibson#25), so inference never blocks the ~50ms tick.
 	// wireBrainRegistry ALSO installs WireSliceBelief (gibson#275, ADR-0029), the
 	// graph-coupled pipeline, the same way, off its own ticker: it derives the
 	// current attack graph from the engine's live hosts (gibson#286), extracts
@@ -1029,7 +1050,7 @@ func (d *daemonImpl) Start(ctx context.Context) error {
 	// through the SAME BeliefScored write path — so the two pipelines share one
 	// Host.Belief and never race. Registered here because engines fault in
 	// lazily on the first event.
-	wireBrainRegistry(ctx, d.brainRegistry, d.beliefProvider, sliceBeliefProvider, beliefSchemaRegistry)
+	wireBrainRegistry(ctx, d.brainRegistry, d.beliefProvider, sliceBeliefProvider, beliefSchemaRegistry, edgePosteriorProvider)
 	d.logger.Info(ctx, "ECS brain registry initialized", "belief_model", d.beliefProvider.Version(),
 		"slice_belief_model", sliceBeliefProvider.Version())
 
@@ -1505,6 +1526,27 @@ func (d *daemonImpl) Start(ctx context.Context) error {
 		// this one step is its own function.
 		wirePlaceBetBeliefSubstrate(d.callback, d.brainRegistry)
 		d.logger.Info(ctx, "wired callback PlaceBet RPC to the ECS brain belief substrate")
+
+		// Wire SubmitProof's proof-settlement engine (ADR-0030, ADR-0031,
+		// gibson#389): before this, SubmitProof always answered Unavailable —
+		// no daemon ever gave it an engine to resolve Domain Pack CEL
+		// predicates and settle bets against. tenantRoutedProofSettlement
+		// resolves each call's tenant from ctx the same way the belief
+		// substrate adapter does, and routes to that tenant's own Engine. See
+		// wireProofSettlement (proof_settlement_adapter.go).
+		wireProofSettlement(d.callback, d.brainRegistry)
+		d.logger.Info(ctx, "wired callback SubmitProof RPC to the ECS brain settlement engine")
+
+		// Wire ProposeOntologyExtension's ontology-discovery engine (ADR-0024
+		// §2, ADR-0033 decision 2, gibson#391): before this,
+		// ProposeOntologyExtension always answered Unavailable — no daemon
+		// ever gave it an engine to fold the proposal through ValidIdentifier
+		// and PromotionGate.Observe. tenantRoutedOntologyDiscovery resolves
+		// each call's tenant from ctx the same way the belief substrate and
+		// proof settlement adapters do, and routes to that tenant's own
+		// Engine. See wireOntologyDiscovery (ontology_discovery_adapter.go).
+		wireOntologyDiscovery(d.callback, d.brainRegistry)
+		d.logger.Info(ctx, "wired callback ProposeOntologyExtension RPC to the ECS brain taxonomy discovery gate")
 	}
 
 	// Wire the DiscoveryResult ingest path (gibson#1266). A callback-dispatched
@@ -1978,6 +2020,18 @@ func (d *daemonImpl) Start(ctx context.Context) error {
 		// The refusal is a state, not a log line: /readyz names the credential
 		// an operator has to mount (gibson#1744).
 		d.registerComponentCatalogReadiness(ctx, catalogGate)
+
+		// Seed the Domain Pack platform catalog gate (ADR-0033, gibson#381):
+		// every catalog pack gets its platform_enabled tuple, so
+		// DomainPackService's gate checks pass for listed entries and fail
+		// for anything else. Startup converge, add-only, best-effort — a
+		// no-op today (the catalog ships empty; see domainPackCatalog's doc
+		// comment).
+		if d.domainPackCatalog != nil {
+			if err := seedDomainPackCatalogGate(ctx, d.authorizer, d.domainPackCatalog, d.logger.Slog()); err != nil {
+				d.logger.Warn(ctx, "domain pack catalog gate seed failed (non-fatal)", "error", err)
+			}
+		}
 
 		// Every tenant registered under the platform is enabled on the
 		// system backplane (ADR-0046). Without the tuple no enrolled

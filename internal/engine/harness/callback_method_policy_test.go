@@ -87,6 +87,10 @@ func TestCallbackAgentSurface_MatchesImplementedRPCs(t *testing.T) {
 	unimplemented := map[string]bool{
 		harnesspb.HarnessCallbackService_GetPlanContext_FullMethodName:  true,
 		harnesspb.HarnessCallbackService_ReportStepHints_FullMethodName: true,
+		// RequestDestructiveAuthorization (ADR-0032, gibson#390) landed:
+		// callback_request_destructive_authorization.go serves it, and
+		// SubmitProof's SettleBetTrue now verifies the recorded decision — no
+		// longer absent here, and carries agentSurface: true.
 		// The three job callbacks a DISPATCHED AGENT calls to drive a bank.
 		// They mirror JobService and land with the job node executor,
 		// gibson#1713. The four a MEMBER calls landed in gibson#1711 and are
@@ -94,14 +98,6 @@ func TestCallbackAgentSurface_MatchesImplementedRPCs(t *testing.T) {
 		harnesspb.HarnessCallbackService_OpenJob_FullMethodName:   true,
 		harnesspb.HarnessCallbackService_SendInput_FullMethodName: true,
 		harnesspb.HarnessCallbackService_CloseJob_FullMethodName:  true,
-		// The phase-2 harness RPCs sdk v0.182.0 and v0.183.0 declared ahead
-		// of their handlers (gibson#389 SubmitProof, destructive
-		// authorization, gibson#391 ProposeOntologyExtension). Each leaves
-		// this map in the change that adds its handler; until then
-		// callback_unimplemented_test.go pins the honest Unimplemented.
-		harnesspb.HarnessCallbackService_SubmitProof_FullMethodName:                     true,
-		harnesspb.HarnessCallbackService_RequestDestructiveAuthorization_FullMethodName: true,
-		harnesspb.HarnessCallbackService_ProposeOntologyExtension_FullMethodName:        true,
 		// WorldView handler landed in gibson#1377 — no longer unimplemented.
 		// Session-context store handlers landed (gibson#1184,
 		// callback_session_context.go) — no longer unimplemented.

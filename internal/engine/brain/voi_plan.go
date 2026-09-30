@@ -8,6 +8,8 @@ import (
 	"fmt"
 	"sort"
 	"strconv"
+
+	"github.com/zeroroot-ai/gibson/internal/engine/taxonomy"
 )
 
 // voi_plan.go gathers candidates (ADR-0026 §2: an open hypothesis to test, or
@@ -23,18 +25,25 @@ import (
 // belief through the SAME BeliefSubstrate the market view uses — and is
 // called live from PlanVoI (the whole-program deadcode gate confirms it:
 // wired at epic->main via wireBrainRegistry/WireVoIPlanner). Every candidate
-// this file produces still resolves to the neutral prior today, though:
-// Hypothesis now carries a Technique (gibson#353, sdk#88), but PlanVoI does
-// not yet read it here on purpose. gibson#347 tracks the real prerequisite —
-// reconciling the two technique vocabularies in play
-// (component.TechniqueType vs settlement.TechniqueID) and building the
-// VoICandidate -> Capability mapping gibson#333's dispatch-gating needs —
-// and is marked ready-for-human, not ready-for-agent, because that
-// reconciliation is a design decision, not a wiring gap. Resolving
-// reputation by Hypothesis.Technique in isolation, ahead of that decision,
-// risked keying reputation on a vocabulary #347 might later replace. Once
-// #347 lands, wiring the resolved technique key in here is a one-line
-// change, not a new lookup to invent.
+// this file produces still resolves reputation to the neutral prior today,
+// though: resolveReputation's technique×environment key stays "" (see its own
+// doc comment) — that is a SEPARATE resolution from the technique ->
+// capability bridge below, and gibson#347/reputation-by-technique remains
+// future work, tracked independently of this file's own #387 scope.
+//
+// The technique -> capability bridge (ADR-0035 decision 4, gibson#387) IS
+// wired here: each candidate's Technique (carried from Hypothesis.Technique,
+// gibson#353/sdk#88 — empty for an evidence move, which names none) is
+// resolved against in.Capabilities via CapabilitiesForTechnique
+// (voi_dispatch.go), which rolls the technique up to its taxonomy category
+// through in.Hierarchy (gibson#379's TechniqueHierarchy.CategoryOf) rather
+// than through any separate reconciliation table (ADR-0035 decision 2). This
+// only RESOLVES the covering capabilities onto VoICandidate.
+// CoveringCapabilities — it does not gate or refuse a dispatch itself. Ranking
+// candidates by a deep multi-step plan is gibson#396's BAMCP planner
+// (bamcp.go); turning the resolved coverage into an actual dispatch refusal is
+// gibson#397's hard top-k enforcement (decider.go's voiGatedDispatch), both
+// built on this file.
 
 // VoIPlanInput bundles what PlanVoI needs for one mission's candidate set,
 // gathered once by the caller (voi_planner.go's worker, or a test).
@@ -51,6 +60,19 @@ type VoIPlanInput struct {
 	// Tenant scopes a hypothesis's claim-node lookup exactly the way
 	// harness.claimNodeRef scopes a placed bet's write.
 	Tenant string
+	// Capabilities is the mission's enrolled capability catalog (the same
+	// shape decider.go's MissionContext.Capabilities carries) — the set
+	// CapabilitiesForTechnique resolves each candidate's covering
+	// capabilities against. Nil means no catalog was supplied: every
+	// candidate's CoveringCapabilities resolves to nil, the same "nothing to
+	// gate against" shape an empty catalog would produce.
+	Capabilities []Capability
+	// Hierarchy is the taxonomy technique hierarchy (gibson#379) used to roll
+	// a candidate's Technique up to its category (ADR-0035 decision 4). Nil
+	// means no hierarchy was supplied: CapabilitiesForTechnique then resolves
+	// no covering capabilities at all for any candidate (see its own doc
+	// comment) — it still never panics.
+	Hierarchy *taxonomy.TechniqueHierarchy
 }
 
 // PlanVoI scores every candidate in in (evidence moves from Hosts, test moves
@@ -70,6 +92,9 @@ func PlanVoI(ctx context.Context, in VoIPlanInput, substrate BeliefSubstrate, sc
 		if err != nil {
 			return nil, err
 		}
+		// An evidence move names no technique (see the "" above), so it has
+		// nothing for CapabilitiesForTechnique to resolve — Technique and
+		// CoveringCapabilities stay at their zero value (empty/nil).
 		candidates = append(candidates, scorer.Score(VoIScoreInput{
 			Kind:         VoICandidateEvidence,
 			RefID:        id,
@@ -97,14 +122,22 @@ func PlanVoI(ctx context.Context, in VoIPlanInput, substrate BeliefSubstrate, sc
 		if err != nil {
 			return nil, err
 		}
-		candidates = append(candidates, scorer.Score(VoIScoreInput{
+		c := scorer.Score(VoIScoreInput{
 			Kind:         VoICandidateHypothesis,
 			RefID:        id,
 			Confidence:   confidence,
 			Connectivity: len(hyp.References),
 			HasStake:     ok,
 			Reputation:   reputation,
-		}))
+		})
+		// VoI dispatch gating's technique -> capability bridge (ADR-0035
+		// decision 4, gibson#387): resolve this candidate's covering
+		// capabilities from its source Hypothesis's technique. hyp.Technique
+		// is "" when the proposing agent never set one, which
+		// CapabilitiesForTechnique already treats as "nothing to resolve".
+		c.Technique = hyp.Technique
+		c.CoveringCapabilities = capabilityRefs(CapabilitiesForTechnique(in.Hierarchy, hyp.Technique, in.Capabilities))
+		candidates = append(candidates, c)
 	}
 
 	sortVoICandidates(candidates)

@@ -46,6 +46,33 @@ func (c *countingBelief) count() int {
 	return c.calls
 }
 
+// deterministicBelief is a fixture BeliefProvider for gate/wiring tests that
+// need a real, reproducible score (not just a call count): a reachable host
+// with more open ports scores higher exploitability/juiciness. It is the
+// production placeholderBelief formula (belief.go, deleted once
+// nativeBelief/beliefvi became the only wired provider — gibson#432) kept
+// here as a test-only double, since these tests exercise the gate's
+// mechanics (evidence-change detection, quiescence, replay), not any
+// specific provider's inference.
+type deterministicBelief struct{}
+
+func (deterministicBelief) Score(ev BeliefEvidence) Belief {
+	open := len(ev.OpenPorts)
+	reachable := 0.0
+	if open > 0 {
+		reachable = 1.0
+	}
+	exploitable := float64(open) / (float64(open) + 1.0) // 0,0.5,0.67,… monotonic in open ports
+	return Belief{
+		Juicy:       reachable * exploitable,
+		Exploitable: exploitable,
+		Reachable:   reachable,
+		Model:       "test-belief-v0",
+	}
+}
+
+func (deterministicBelief) Version() string { return "test-belief-v0" }
+
 // beliefEngine builds an engine with the belief gate installed as a System and
 // the belief worker subscribed as a live tap — the wiring WireBelief performs,
 // with the drain driven by the test instead of a ticker.
@@ -268,7 +295,7 @@ func TestBeliefWorker_SlowProviderDoesNotStallTick(t *testing.T) {
 // TestBelief_TracksEvidence: as evidence changes (a new open port), belief is
 // recomputed (higher exploitability).
 func TestBelief_TracksEvidence(t *testing.T) {
-	e, bw := beliefEngine(PlaceholderBeliefProvider())
+	e, bw := beliefEngine(deterministicBelief{})
 
 	e.Submit(HostObserved{ScopeID: "s", Address: "10.0.0.5", OpenPorts: []int{22}})
 	settle(e, bw, 1)
@@ -287,7 +314,7 @@ func TestBelief_TracksEvidence(t *testing.T) {
 // BeliefProvider off the tick, recorded on the host, quiescent once current, and
 // reproduced by replay.
 func TestBelief_ScoredQuiescentReplay(t *testing.T) {
-	e, bw := beliefEngine(PlaceholderBeliefProvider())
+	e, bw := beliefEngine(deterministicBelief{})
 
 	e.Submit(HostObserved{ScopeID: "s", Address: "10.0.0.5", OpenPorts: []int{22, 80, 443}})
 	settle(e, bw, 1)
@@ -296,8 +323,8 @@ func TestBelief_ScoredQuiescentReplay(t *testing.T) {
 	if len(snap) != 1 {
 		t.Fatalf("got %d hosts, want 1", len(snap))
 	}
-	// placeholder: 3 open ports -> exploitable 3/4, reachable 1, juicy 0.75
-	want := Belief{Juicy: 0.75, Exploitable: 0.75, Reachable: 1.0, Model: "placeholder-v0"}
+	// deterministicBelief: 3 open ports -> exploitable 3/4, reachable 1, juicy 0.75
+	want := Belief{Juicy: 0.75, Exploitable: 0.75, Reachable: 1.0, Model: "test-belief-v0"}
 	if snap[0].Belief != want {
 		t.Fatalf("belief = %+v, want %+v", snap[0].Belief, want)
 	}
@@ -324,7 +351,7 @@ func TestBelief_ScoredQuiescentReplay(t *testing.T) {
 // evidence a recorded belief answers for without re-deriving it from the Host
 // component directly.
 func TestHostSnapshot_CarriesEvidenceDigest(t *testing.T) {
-	e, bw := beliefEngine(PlaceholderBeliefProvider())
+	e, bw := beliefEngine(deterministicBelief{})
 
 	e.Submit(HostObserved{ScopeID: "s", Address: "10.0.0.5", OpenPorts: []int{22}})
 	settle(e, bw, 1)
