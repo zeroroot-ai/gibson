@@ -1,5 +1,12 @@
 # Changelog
 
+## [0.146.2](https://github.com/zeroroot-ai/gibson/compare/v0.146.1...v0.146.2) (2026-09-30)
+
+
+### Bug Fixes
+
+* **platform-operator:** a pass reads the CR uncached and never loses a status write ([#442](https://github.com/zeroroot-ai/gibson/issues/442)) ([38d143b](https://github.com/zeroroot-ai/gibson/commit/38d143bb25530e0c419404a52c56ca69ac48e2cc))
+
 ## [0.146.1](https://github.com/zeroroot-ai/gibson/compare/v0.146.0...v0.146.1) (2026-09-30)
 
 
