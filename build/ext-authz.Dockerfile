@@ -61,7 +61,7 @@ RUN --mount=type=cache,target=/root/.cache/go-build \
 # Pre-creating the empty dirs in a writable builder stage and COPY-ing
 # them into the distroless final image side-steps this entirely.
 # ============================================================================
-FROM ghcr.io/zeroroot-ai/mirror/alpine:3.21@sha256:48b0309ca019d89d40f670aa1bc06e426dc0931948452e8491e3d65087abc07d AS rootfs-dirs
+FROM ghcr.io/zeroroot-ai/mirror/alpine:3.21@sha256:ce64758a109eb420d874a118f87920e625e12d3634e03b4a5573fd9f6e5d3507 AS rootfs-dirs
 RUN mkdir -p /rootfs/etc/gibson/sa-identity-map \
     && mkdir -p /rootfs/etc/oras-auth
 
