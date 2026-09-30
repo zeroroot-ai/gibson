@@ -1,5 +1,12 @@
 # Changelog
 
+## [0.146.5](https://github.com/zeroroot-ai/gibson/compare/v0.146.4...v0.146.5) (2026-09-30)
+
+
+### Bug Fixes
+
+* **missions:** the real CreateMission result carries the creator ([#448](https://github.com/zeroroot-ai/gibson/issues/448)) ([bb78264](https://github.com/zeroroot-ai/gibson/commit/bb78264c1c6496c1881185b67961de9cc2739c85))
+
 ## [0.146.4](https://github.com/zeroroot-ai/gibson/compare/v0.146.3...v0.146.4) (2026-09-30)
 
 
