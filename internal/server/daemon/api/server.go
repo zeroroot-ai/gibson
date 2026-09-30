@@ -12,6 +12,8 @@ import (
 	"strings"
 	"time"
 
+	"github.com/zeroroot-ai/gibson/internal/platform/principal"
+
 	"google.golang.org/grpc"
 	"google.golang.org/grpc/codes"
 	status_grpc "google.golang.org/grpc/status"
@@ -598,6 +600,7 @@ type MissionData struct {
 	EndTime             time.Time
 	FindingCount        int32
 	Progress            float64
+	CreatedBy           principal.Principal
 }
 
 // MissionEventData represents mission event data from the daemon.
@@ -900,6 +903,9 @@ type CreateMissionData struct {
 	Variables           map[string]string
 	MemoryContinuity    string
 	Metadata            map[string]string
+	// CreatedBy is the caller, stamped by the RPC handler from the identity
+	// in the request context (hosted#205).
+	CreatedBy principal.Principal
 }
 
 // CreateMissionResultData represents the result of creating a mission.
@@ -909,6 +915,7 @@ type CreateMissionResultData struct {
 	MissionDefinitionID string
 	Name                string
 	Description         string
+	CreatedBy           principal.Principal
 	Status              string
 	CreatedAt           time.Time
 }
@@ -1578,6 +1585,7 @@ func (s *DaemonServer) ListMissions(ctx context.Context, req *daemonpb.ListMissi
 			EndTime:             m.EndTime.Unix(),
 			FindingCount:        m.FindingCount,
 			Progress:            m.Progress,
+			CreatedBy:           principal.ToProto(m.CreatedBy),
 		}
 	}
 
@@ -2674,6 +2682,10 @@ func (s *DaemonServer) CreateMission(ctx context.Context, req *daemonpb.CreateMi
 		return nil, status_grpc.Errorf(codes.InvalidArgument, "mission_definition_id is required")
 	}
 
+	creator, err := callerPrincipal(ctx)
+	if err != nil {
+		return nil, err
+	}
 	data := CreateMissionData{
 		Name:                req.Name,
 		Description:         req.Description,
@@ -2682,6 +2694,7 @@ func (s *DaemonServer) CreateMission(ctx context.Context, req *daemonpb.CreateMi
 		Variables:           req.Variables,
 		MemoryContinuity:    req.MemoryContinuity,
 		Metadata:            req.Metadata,
+		CreatedBy:           creator,
 	}
 
 	// Call daemon implementation
@@ -2745,10 +2758,11 @@ func (s *DaemonServer) CreateMission(ctx context.Context, req *daemonpb.CreateMi
 
 	// Build proto Mission response
 	protoMission := &daemonpb.Mission{
-		Id:       result.MissionID,
-		Name:     result.Name,
-		Status:   daemonpb.MissionStatus_MISSION_STATUS_PENDING,
-		TargetId: result.TargetID,
+		Id:        result.MissionID,
+		Name:      result.Name,
+		Status:    daemonpb.MissionStatus_MISSION_STATUS_PENDING,
+		TargetId:  result.TargetID,
+		CreatedBy: principal.ToProto(result.CreatedBy),
 	}
 
 	return &daemonpb.CreateMissionResponse{
@@ -3081,4 +3095,14 @@ func pickHighestRole(isOwner, isAdmin, isWriter bool) string {
 		return "writer"
 	}
 	return "member"
+}
+
+// callerPrincipal is the principal a record stores for the caller of an RPC.
+// A request with no identity is refused: every record must name who made it.
+func callerPrincipal(ctx context.Context) (principal.Principal, error) {
+	id, err := auth.IdentityFromContext(ctx)
+	if err != nil || id.Subject == "" {
+		return principal.Principal{}, status_grpc.Error(codes.Unauthenticated, "no caller identity in context")
+	}
+	return principal.FromIdentity(id), nil
 }

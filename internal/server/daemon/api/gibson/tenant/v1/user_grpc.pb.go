@@ -27,6 +27,7 @@ const _ = grpc.SupportPackageIsVersion9
 
 const (
 	UserService_GetUserProfile_FullMethodName            = "/gibson.tenant.v1.UserService/GetUserProfile"
+	UserService_ResolveUsers_FullMethodName              = "/gibson.tenant.v1.UserService/ResolveUsers"
 	UserService_UpdateUserProfile_FullMethodName         = "/gibson.tenant.v1.UserService/UpdateUserProfile"
 	UserService_ListAlerts_FullMethodName                = "/gibson.tenant.v1.UserService/ListAlerts"
 	UserService_MarkAlertRead_FullMethodName             = "/gibson.tenant.v1.UserService/MarkAlertRead"
@@ -60,6 +61,12 @@ const (
 // UserService provides user self-service operations scoped to a tenant member.
 type UserServiceClient interface {
 	GetUserProfile(ctx context.Context, in *GetUserProfileRequest, opts ...grpc.CallOption) (*GetUserProfileResponse, error)
+	// ResolveUsers turns user ids into names for display. A member of the
+	// tenant may resolve the people named on the tenant's missions, jobs and
+	// banks. A user id that is not a member of the caller's tenant resolves
+	// to REMOVED with no name, so a person who left the tenant shows as
+	// "removed user" and nothing about a user of another tenant leaks.
+	ResolveUsers(ctx context.Context, in *ResolveUsersRequest, opts ...grpc.CallOption) (*ResolveUsersResponse, error)
 	UpdateUserProfile(ctx context.Context, in *UpdateUserProfileRequest, opts ...grpc.CallOption) (*UpdateUserProfileResponse, error)
 	ListAlerts(ctx context.Context, in *ListAlertsRequest, opts ...grpc.CallOption) (*ListAlertsResponse, error)
 	MarkAlertRead(ctx context.Context, in *MarkAlertReadRequest, opts ...grpc.CallOption) (*MarkAlertReadResponse, error)
@@ -156,6 +163,16 @@ func (c *userServiceClient) GetUserProfile(ctx context.Context, in *GetUserProfi
 	cOpts := append([]grpc.CallOption{grpc.StaticMethod()}, opts...)
 	out := new(GetUserProfileResponse)
 	err := c.cc.Invoke(ctx, UserService_GetUserProfile_FullMethodName, in, out, cOpts...)
+	if err != nil {
+		return nil, err
+	}
+	return out, nil
+}
+
+func (c *userServiceClient) ResolveUsers(ctx context.Context, in *ResolveUsersRequest, opts ...grpc.CallOption) (*ResolveUsersResponse, error) {
+	cOpts := append([]grpc.CallOption{grpc.StaticMethod()}, opts...)
+	out := new(ResolveUsersResponse)
+	err := c.cc.Invoke(ctx, UserService_ResolveUsers_FullMethodName, in, out, cOpts...)
 	if err != nil {
 		return nil, err
 	}
@@ -409,6 +426,12 @@ func (c *userServiceClient) ResetUserMFA(ctx context.Context, in *ResetUserMFARe
 // UserService provides user self-service operations scoped to a tenant member.
 type UserServiceServer interface {
 	GetUserProfile(context.Context, *GetUserProfileRequest) (*GetUserProfileResponse, error)
+	// ResolveUsers turns user ids into names for display. A member of the
+	// tenant may resolve the people named on the tenant's missions, jobs and
+	// banks. A user id that is not a member of the caller's tenant resolves
+	// to REMOVED with no name, so a person who left the tenant shows as
+	// "removed user" and nothing about a user of another tenant leaks.
+	ResolveUsers(context.Context, *ResolveUsersRequest) (*ResolveUsersResponse, error)
 	UpdateUserProfile(context.Context, *UpdateUserProfileRequest) (*UpdateUserProfileResponse, error)
 	ListAlerts(context.Context, *ListAlertsRequest) (*ListAlertsResponse, error)
 	MarkAlertRead(context.Context, *MarkAlertReadRequest) (*MarkAlertReadResponse, error)
@@ -503,6 +526,9 @@ type UnimplementedUserServiceServer struct{}
 
 func (UnimplementedUserServiceServer) GetUserProfile(context.Context, *GetUserProfileRequest) (*GetUserProfileResponse, error) {
 	return nil, status.Error(codes.Unimplemented, "method GetUserProfile not implemented")
+}
+func (UnimplementedUserServiceServer) ResolveUsers(context.Context, *ResolveUsersRequest) (*ResolveUsersResponse, error) {
+	return nil, status.Error(codes.Unimplemented, "method ResolveUsers not implemented")
 }
 func (UnimplementedUserServiceServer) UpdateUserProfile(context.Context, *UpdateUserProfileRequest) (*UpdateUserProfileResponse, error) {
 	return nil, status.Error(codes.Unimplemented, "method UpdateUserProfile not implemented")
@@ -611,6 +637,24 @@ func _UserService_GetUserProfile_Handler(srv interface{}, ctx context.Context, d
 	}
 	handler := func(ctx context.Context, req interface{}) (interface{}, error) {
 		return srv.(UserServiceServer).GetUserProfile(ctx, req.(*GetUserProfileRequest))
+	}
+	return interceptor(ctx, in, info, handler)
+}
+
+func _UserService_ResolveUsers_Handler(srv interface{}, ctx context.Context, dec func(interface{}) error, interceptor grpc.UnaryServerInterceptor) (interface{}, error) {
+	in := new(ResolveUsersRequest)
+	if err := dec(in); err != nil {
+		return nil, err
+	}
+	if interceptor == nil {
+		return srv.(UserServiceServer).ResolveUsers(ctx, in)
+	}
+	info := &grpc.UnaryServerInfo{
+		Server:     srv,
+		FullMethod: UserService_ResolveUsers_FullMethodName,
+	}
+	handler := func(ctx context.Context, req interface{}) (interface{}, error) {
+		return srv.(UserServiceServer).ResolveUsers(ctx, req.(*ResolveUsersRequest))
 	}
 	return interceptor(ctx, in, info, handler)
 }
@@ -1057,6 +1101,10 @@ var UserService_ServiceDesc = grpc.ServiceDesc{
 		{
 			MethodName: "GetUserProfile",
 			Handler:    _UserService_GetUserProfile_Handler,
+		},
+		{
+			MethodName: "ResolveUsers",
+			Handler:    _UserService_ResolveUsers_Handler,
 		},
 		{
 			MethodName: "UpdateUserProfile",

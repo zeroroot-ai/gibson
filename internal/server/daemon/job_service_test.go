@@ -13,6 +13,8 @@ import (
 	"testing"
 	"time"
 
+	"github.com/zeroroot-ai/gibson/internal/platform/principal"
+
 	"google.golang.org/grpc"
 	"google.golang.org/grpc/codes"
 	"google.golang.org/grpc/status"
@@ -619,8 +621,8 @@ func TestPrincipalKindOf(t *testing.T) {
 		"plugin_principal:gh":    job.PrincipalComponent,
 		"alice":                  job.PrincipalUser,
 	} {
-		if got := principalKindOf(subject); got != want {
-			t.Errorf("principalKindOf(%q) = %q, want %q", subject, got, want)
+		if got := principal.KindOf(subject); got != want {
+			t.Errorf("principal.KindOf(%q) = %q, want %q", subject, got, want)
 		}
 	}
 }
@@ -761,9 +763,9 @@ func TestJobEnums_EventAndPrincipalKindsToProto(t *testing.T) {
 		job.PrincipalService:   commonpb.Principal_KIND_SERVICE,
 	}
 	for domain, wire := range principals {
-		got := principalToProto(job.Principal{Kind: domain, ID: "p-1"})
+		got := principal.ToProto(job.Principal{Kind: domain, ID: "p-1"})
 		if got.GetKind() != wire || got.GetId() != "p-1" {
-			t.Errorf("principalToProto(%q) = %v/%q, want %v/p-1", domain, got.GetKind(), got.GetId(), wire)
+			t.Errorf("principal.ToProto(%q) = %v/%q, want %v/p-1", domain, got.GetKind(), got.GetId(), wire)
 		}
 	}
 }

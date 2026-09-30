@@ -167,6 +167,7 @@ func RestoreWorld(snap WorldSnapshot, tenant string) (*World, error) {
 			Description: m.Description,
 			TargetID:    m.TargetID,
 			TenantID:    m.TenantID,
+			CreatedBy:   m.CreatedBy,
 		}
 		Reduce(w, startEv)
 		switch m.Status {

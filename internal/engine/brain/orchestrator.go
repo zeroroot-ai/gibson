@@ -6,6 +6,8 @@ package brain
 import (
 	"sort"
 
+	"github.com/zeroroot-ai/gibson/internal/platform/principal"
+
 	"github.com/mlange-42/ark/ecs"
 )
 
@@ -66,10 +68,11 @@ type Mission struct {
 	// Metadata carried at launch so the World is the single source of truth for
 	// mission status + display data (ADR-0011/ADR-0027, gibson#1118).
 	// These fields are populated by MissionStarted and never mutated.
-	Name        string // human-readable mission name (from the definition)
-	Description string // mission description (from the definition)
-	TargetID    string // UUID of the target this mission runs against
-	TenantID    string // tenant this mission belongs to (for ListMissions scoping)
+	Name        string              // human-readable mission name (from the definition)
+	Description string              // mission description (from the definition)
+	TargetID    string              // UUID of the target this mission runs against
+	TenantID    string              // tenant this mission belongs to (for ListMissions scoping)
+	CreatedBy   principal.Principal // who created the mission (hosted#205)
 
 	// Reconciled records that this scan's rescan reconciliation has already run
 	// (gibson#1686). It exists because reconciliation is a one-shot at the
@@ -98,6 +101,9 @@ type MissionStarted struct {
 	Description string
 	TargetID    string
 	TenantID    string
+	// CreatedBy is the principal that created the mission (hosted#205). The
+	// World carries it so ListMissions serves it without a secondary store.
+	CreatedBy principal.Principal
 }
 
 func (MissionStarted) Kind() string { return "mission.started" }
@@ -140,6 +146,7 @@ func applyMissionStarted(w *World, e MissionStarted) {
 		Description:    e.Description,
 		TargetID:       e.TargetID,
 		TenantID:       e.TenantID,
+		CreatedBy:      e.CreatedBy,
 	})
 }
 
@@ -269,6 +276,8 @@ type MissionSnapshot struct {
 	Description string
 	TargetID    string
 	TenantID    string
+	// CreatedBy is who created the mission (hosted#205), folded from MissionStarted.
+	CreatedBy principal.Principal
 	// Reconciled reports that this scan's rescan reconciliation has run (gibson#1686).
 	Reconciled bool
 
@@ -339,6 +348,7 @@ func (w *World) MissionSnapshot() []MissionSnapshot {
 			Description:      m.Description,
 			TargetID:         m.TargetID,
 			TenantID:         m.TenantID,
+			CreatedBy:        m.CreatedBy,
 			Reconciled:       m.Reconciled,
 			Progress:         progress,
 			FindingsCount:    missionFindingsCount(w, m.ID),

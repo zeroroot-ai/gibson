@@ -2164,6 +2164,13 @@ entries:
     allowed_identities:
       - USER
       - SERVICE
+  "/gibson.tenant.v1.UserService/ResolveUsers":
+    relation: "member"
+    object_type: "tenant"
+    object_deriver: "tenant_from_identity"
+    allowed_identities:
+      - USER
+      - SERVICE
   "/gibson.tenant.v1.UserService/RevokeUserSessions":
     relation: "member"
     object_type: "tenant"
