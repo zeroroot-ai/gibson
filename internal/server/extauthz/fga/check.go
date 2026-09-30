@@ -500,10 +500,38 @@ func (c *Checker) CheckActiveSession(ctx context.Context, subject, tenant string
 
 // CheckActiveSession delegates to the inner Checker's CheckActiveSession.
 // The result is deliberately NOT cached — see Checker.CheckActiveSession for
-// the full rationale. Every human-JWT request pays one uncached FGA round-trip
-// for the session gate; the per-call timeout from platform-clients applies.
+// the full rationale. Calls that are in flight at the same moment for the
+// same subject, tenant and token share one FGA round-trip (see
+// CachedChecker.sessions); the per-call timeout from platform-clients
+// applies to that one call.
 func (c *CachedChecker) CheckActiveSession(ctx context.Context, subject, tenant string, tokenIssuedAt time.Time) (bool, error) {
-	return c.inner.CheckActiveSession(ctx, subject, tenant, tokenIssuedAt)
+	key := sessionGateKey("tenant", subject, tenant, tokenIssuedAt)
+	return c.sharedSessionGate(ctx, key, func(ctx context.Context) (bool, error) {
+		return c.inner.CheckActiveSession(ctx, subject, tenant, tokenIssuedAt)
+	})
+}
+
+// sessionGateKey names one in-flight session gate: the gate kind, the subject,
+// the tenant (empty for the user-scoped gate) and the token's iat, which is
+// what the FGA condition evaluates.
+func sessionGateKey(gate, subject, tenant string, tokenIssuedAt time.Time) string {
+	return gate + "\x00" + subject + "\x00" + tenant + "\x00" + tokenIssuedAt.UTC().Format(time.RFC3339)
+}
+
+// sharedSessionGate runs fn once per key across the callers that are in
+// flight together, and hands every one of them the same result. The FGA call
+// runs under a context detached from the first caller's cancellation, so one
+// aborted request cannot fail the others that share the call; the per-call
+// timeout the FGA client applies still bounds it.
+func (c *CachedChecker) sharedSessionGate(ctx context.Context, key string, fn func(context.Context) (bool, error)) (bool, error) {
+	v, err, _ := c.sessions.Do(key, func() (any, error) {
+		return fn(context.WithoutCancel(ctx))
+	})
+	if err != nil {
+		return false, err //nolint:wrapcheck // the inner gate already names the RPC that failed
+	}
+	allowed, _ := v.(bool) // fn returns a bool; a failed assertion is a deny, never a panic
+	return allowed, nil
 }
 
 // userSessionProbeIAT is a token_issued_at value far enough in the future that
@@ -607,9 +635,14 @@ func (c *Checker) checkUserSessionAt(ctx context.Context, user, iatStr string) (
 }
 
 // CheckUserSession delegates to the inner Checker's CheckUserSession. The
-// result is deliberately NOT cached — see Checker.CheckUserSession.
+// result is deliberately NOT cached — see Checker.CheckUserSession. Calls in
+// flight together for the same subject and token share one round-trip, as
+// CheckActiveSession does.
 func (c *CachedChecker) CheckUserSession(ctx context.Context, subject string, tokenIssuedAt time.Time) (bool, error) {
-	return c.inner.CheckUserSession(ctx, subject, tokenIssuedAt)
+	key := sessionGateKey("user", subject, "", tokenIssuedAt)
+	return c.sharedSessionGate(ctx, key, func(ctx context.Context) (bool, error) {
+		return c.inner.CheckUserSession(ctx, subject, tokenIssuedAt)
+	})
 }
 
 // resolveObject derives the FGA object string for the given entry.

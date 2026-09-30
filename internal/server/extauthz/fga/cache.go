@@ -12,6 +12,7 @@ import (
 
 	"github.com/prometheus/client_golang/prometheus"
 	"github.com/prometheus/client_golang/prometheus/promauto"
+	"golang.org/x/sync/singleflight"
 
 	"github.com/zeroroot-ai/gibson/internal/server/extauthz/headers"
 )
@@ -45,6 +46,16 @@ type CachedChecker struct {
 
 	mu      sync.Mutex
 	entries map[cacheKey]cacheValue
+
+	// sessions coalesces the session gates that run at the same moment for
+	// the same token. A dashboard page load fans out several RPCs with one
+	// token, and each RPC pays an uncached FGA round-trip for the gate. On
+	// a slow OpenFGA those round-trips time out together and count as
+	// consecutive failures on the FGA breaker, which then refuses the next
+	// sign-in for its open window. singleflight shares one in-flight call
+	// per (gate, subject, tenant, token iat) and forgets it when it
+	// returns, so nothing outlives the call and revocation stays instant.
+	sessions singleflight.Group
 }
 
 type cacheKey struct {
