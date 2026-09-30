@@ -1207,7 +1207,7 @@ func TestUser_NoTenant_SystemTenantRuleReachesFGA(t *testing.T) {
 	if err != nil {
 		t.Fatalf("Check: %v", err)
 	}
-	if codes.Code(resp.GetStatus().GetCode()) != codes.PermissionDenied {
+	if codes.Code(resp.GetStatus().GetCode()) != codes.PermissionDenied { //nolint:gosec // controlled small value
 		t.Errorf("tenant-derived rule with no tenant: got %v, want PermissionDenied", resp.GetStatus().GetCode())
 	}
 }
