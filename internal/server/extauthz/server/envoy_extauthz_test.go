@@ -288,6 +288,12 @@ const tenantTestYAML = `entries:
     self: true
     allowed_identities:
       - USER
+  "/test.v1.S/PlatformOp":
+    relation: "platform_owner"
+    object_type: "system_tenant"
+    object_deriver: "system_tenant"
+    allowed_identities:
+      - USER
 `
 
 // buildServerForTenantTests builds a server with the shared tenantTestYAML
@@ -1164,5 +1170,44 @@ func TestNewEnvoyAuthzServer_HumanClientIDs(t *testing.T) {
 	}
 	if _, ok := srv.humans["334268812578094081@gibson"]; !ok {
 		t.Fatalf("humans = %v, want the trimmed client id as key", srv.humans)
+	}
+}
+
+// TestUser_NoTenant_SystemTenantRuleReachesFGA — the Platform owner has no
+// tenant by design (ADR-0093). A rule whose object is the system tenant
+// needs none, so the call reaches FGA and is decided there (hosted#189 step
+// 7: AdminProvisionTenant was refused as "user has no tenant" before FGA).
+func TestUser_NoTenant_SystemTenantRuleReachesFGA(t *testing.T) {
+	t.Parallel()
+	claims := map[string]any{
+		"iss":                                   "https://zitadel.example",
+		"sub":                                   "platform-owner",
+		"iat":                                   time.Now().Unix(),
+		"urn:zitadel:iam:user:resourceowner:id": "org-platform",
+	}
+	for name, tc := range map[string]struct {
+		fgaAllowed bool
+		want       codes.Code
+	}{
+		"fga allows the platform owner": {fgaAllowed: true, want: codes.OK},
+		"fga denies everyone else":      {fgaAllowed: false, want: codes.PermissionDenied},
+	} {
+		srv := buildServerForOrgTenantTests(t, tc.fgaAllowed, &fakeOrgTenantResolver{err: orgtenant.ErrNoTenant})
+		resp, err := srv.Check(context.Background(), makeCheckRequest(t, "/test.v1.S/PlatformOp", claims, ""))
+		if err != nil {
+			t.Fatalf("%s: Check: %v", name, err)
+		}
+		if got := codes.Code(resp.GetStatus().GetCode()); got != tc.want { //nolint:gosec // controlled small value
+			t.Errorf("%s: got %v, want %v: %s", name, got, tc.want, resp.GetStatus().GetMessage())
+		}
+	}
+	// The tenant-derived rule keeps refusing a caller with no tenant, FGA or not.
+	srv := buildServerForOrgTenantTests(t, true, &fakeOrgTenantResolver{err: orgtenant.ErrNoTenant})
+	resp, err := srv.Check(context.Background(), makeCheckRequest(t, "/test.v1.S/UserOp", claims, ""))
+	if err != nil {
+		t.Fatalf("Check: %v", err)
+	}
+	if codes.Code(resp.GetStatus().GetCode()) != codes.PermissionDenied { //nolint:gosec // controlled small value
+		t.Errorf("tenant-derived rule with no tenant: got %v, want PermissionDenied", resp.GetStatus().GetCode())
 	}
 }

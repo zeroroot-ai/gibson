@@ -183,13 +183,25 @@ func TestCachedChecker_CheckActiveSession_SharedCallSharesTheError(t *testing.T)
 	}
 }
 
+// waitForCallersInGate blocks until want goroutines OF THIS TEST sit inside
+// singleflight.Group.Do: the one running the FGA call and the ones waiting
+// to share its result. Without this the test could release the call before
+// a joiner arrives, and that joiner would start a call of its own. The
+// tests of this file run in parallel, so a goroutine counts only when its
+// stack names the calling test: another test's callers in the gate must not
+// satisfy the wait (that released a call early under the coverage run).
 func waitForCallersInGate(t *testing.T, want int) {
 	t.Helper()
 	deadline := time.Now().Add(5 * time.Second)
 	buf := make([]byte, 1<<20)
 	for {
 		n := runtime.Stack(buf, true)
-		got := strings.Count(string(buf[:n]), "singleflight.(*Group).Do(")
+		got := 0
+		for _, g := range strings.Split(string(buf[:n]), "\n\n") {
+			if strings.Contains(g, "singleflight.(*Group).Do(") && strings.Contains(g, t.Name()) {
+				got++
+			}
+		}
 		if got >= want {
 			return
 		}
