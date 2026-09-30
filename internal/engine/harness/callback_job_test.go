@@ -18,6 +18,7 @@ import (
 
 	"github.com/zeroroot-ai/gibson/internal/platform/capabilitygrant"
 	"github.com/zeroroot-ai/gibson/internal/platform/job"
+	"github.com/zeroroot-ai/gibson/internal/platform/principal"
 	commonpb "github.com/zeroroot-ai/sdk/api/gen/gibson/common/v1"
 	harnesspb "github.com/zeroroot-ai/sdk/api/gen/gibson/harness/v1"
 	jobpb "github.com/zeroroot-ai/sdk/api/gen/gibson/job/v1"
@@ -633,9 +634,9 @@ func TestJobWire_EveryNamedValueRoundTrips(t *testing.T) {
 		job.PrincipalService:   commonpb.Principal_KIND_SERVICE,
 	}
 	for domain, wire := range principals {
-		got := senderToWire(job.Principal{Kind: domain, ID: "p-1"})
+		got := principal.ToProto(job.Principal{Kind: domain, ID: "p-1"})
 		if got.GetKind() != wire || got.GetId() != "p-1" {
-			t.Errorf("senderToWire(%q) = %v/%q, want %v/p-1", domain, got.GetKind(), got.GetId(), wire)
+			t.Errorf("principal.ToProto(%q) = %v/%q, want %v/p-1", domain, got.GetKind(), got.GetId(), wire)
 		}
 	}
 }

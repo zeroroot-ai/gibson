@@ -19,7 +19,8 @@ import (
 	"context"
 	"errors"
 	"log/slog"
-	"strings"
+
+	"github.com/zeroroot-ai/gibson/internal/platform/principal"
 
 	"google.golang.org/grpc/codes"
 	"google.golang.org/grpc/status"
@@ -111,7 +112,7 @@ func (s *bankServer) caller(ctx context.Context) (string, error) {
 	if err != nil || id.Subject == "" {
 		return "", status.Error(codes.PermissionDenied, "no caller identity in context")
 	}
-	return principalIDFromIdentity(id), nil
+	return principal.IDOf(id), nil
 }
 
 // CreateBank declares a bank and writes the tuples that say who owns it.
@@ -320,7 +321,7 @@ func (s *bankServer) authorize(ctx context.Context, relation, bankID string) err
 	if err != nil || id.Subject == "" {
 		return status.Error(codes.PermissionDenied, "no caller identity in context")
 	}
-	allowed, err := s.authorizer.Check(ctx, fgaUserFromIdentity(id), relation, "bank:"+bankID)
+	allowed, err := s.authorizer.Check(ctx, principal.FGAUser(id), relation, "bank:"+bankID)
 	if err != nil {
 		// An undecidable authorization question is a deny, never a pass.
 		s.logger.ErrorContext(ctx, "bank authorization check failed",
@@ -339,26 +340,6 @@ func (s *bankServer) authorize(ctx context.Context, relation, bankID string) err
 // component authenticates with a capability grant and its subject is already
 // the typed principal ref the model accepts (ADR-0045); the model rejects the
 // `user:` type for those, so it is used unchanged.
-func fgaUserFromIdentity(id auth.Identity) string {
-	for _, prefix := range []string{"agent_principal:", "tool_principal:", "plugin_principal:", "user:"} {
-		if strings.HasPrefix(id.Subject, prefix) {
-			return id.Subject
-		}
-	}
-	return "user:" + strings.TrimPrefix(id.Subject, "spiffe://")
-}
-
-// principalIDFromIdentity is the id a bank or job records for its caller: the
-// FGA user without the "user:" type, and a typed principal ref unchanged. The
-// tuple writers put "user:" back, so what CreateBank and OpenJob write is what
-// authorize reads. Recording the raw subject instead wrote
-// "user:spiffe://<id>" for a SPIFFE caller while every check asked for
-// "user:<id>", and the caller could not read the bank it had just created
-// (gibson#13, run 35443640498).
-func principalIDFromIdentity(id auth.Identity) string {
-	return strings.TrimPrefix(fgaUserFromIdentity(id), "user:")
-}
-
 // checkMemberCap refuses a desired count above the tenant's agent ceiling.
 //
 // The ceiling is entitlements.Limits.ConcurrentAgents, the seam that already

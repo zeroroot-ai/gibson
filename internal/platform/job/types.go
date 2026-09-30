@@ -20,6 +20,8 @@ import (
 	"errors"
 	"time"
 
+	"github.com/zeroroot-ai/gibson/internal/platform/principal"
+
 	jobpb "github.com/zeroroot-ai/sdk/api/gen/gibson/job/v1"
 )
 
@@ -120,21 +122,19 @@ const (
 )
 
 // PrincipalKind is the class of a principal that opened a job or sent an input.
-type PrincipalKind string
+type PrincipalKind = principal.Kind
 
 // The principal kinds a job accepts.
 const (
-	PrincipalUser      PrincipalKind = "user"
-	PrincipalTenant    PrincipalKind = "tenant"
-	PrincipalComponent PrincipalKind = "component"
-	PrincipalService   PrincipalKind = "service"
+	PrincipalUser      = principal.User
+	PrincipalTenant    = principal.Tenant
+	PrincipalComponent = principal.Component
+	PrincipalService   = principal.Service
 )
 
 // Principal is who did something: opened a job, sent an input, closed a job.
-type Principal struct {
-	Kind PrincipalKind
-	ID   string
-}
+// It is the shared principal type; the job names stay for their callers.
+type Principal = principal.Principal
 
 // Job is one persistent Claude Code session on a bank member.
 type Job struct {

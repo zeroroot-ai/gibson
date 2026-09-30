@@ -26,6 +26,19 @@ service UserService {
       allowed_identities: 3  // USER | SERVICE
     };
   }
+  // ResolveUsers turns user ids into names for display. A member of the
+  // tenant may resolve the people named on the tenant's missions, jobs and
+  // banks. A user id that is not a member of the caller's tenant resolves
+  // to REMOVED with no name, so a person who left the tenant shows as
+  // "removed user" and nothing about a user of another tenant leaks.
+  rpc ResolveUsers(ResolveUsersRequest) returns (ResolveUsersResponse) {
+    option (gibson.auth.v1.authz) = {
+      relation: "member"
+      object_type: "tenant"
+      object_deriver: "tenant_from_identity"
+      allowed_identities: 3  // USER | SERVICE
+    };
+  }
   rpc UpdateUserProfile(UpdateUserProfileRequest) returns (UpdateUserProfileResponse) {
     option (gibson.auth.v1.authz) = {
       relation: "member"
@@ -786,4 +799,41 @@ message ResetUserMFAResponse {
   // reset itself still completed (sessions revoked, factors cleared); the
   // caller should tell the target out-of-band in that case.
   bool notified = 5;
+}
+
+// ---------------------------------------------------------------------------
+// ResolveUsers
+// ---------------------------------------------------------------------------
+
+message ResolveUsersRequest {
+  // user_ids are the Zitadel user ids to resolve, at most 100, duplicates
+  // allowed. The tenant is the caller's own.
+  repeated string user_ids = 1;
+}
+
+// UserRefState says what the tenant knows about a user id.
+enum UserRefState {
+  USER_REF_STATE_UNSPECIFIED = 0;
+  // USER_REF_STATE_MEMBER: the user is a member of the caller's tenant and
+  // the name fields are filled from the identity provider.
+  USER_REF_STATE_MEMBER = 1;
+  // USER_REF_STATE_REMOVED: the user is not a member of the caller's
+  // tenant. The name fields are empty. A person who left the tenant, and
+  // an id that never belonged to it, both resolve here.
+  USER_REF_STATE_REMOVED = 2;
+}
+
+message UserRef {
+  string user_id = 1;
+  UserRefState state = 2;
+  // display_name is the name the identity provider shows for a member.
+  string display_name = 3;
+  // email is the member's address.
+  string email = 4;
+}
+
+message ResolveUsersResponse {
+  // users holds one entry per distinct user id in the request, in request
+  // order.
+  repeated UserRef users = 1;
 }

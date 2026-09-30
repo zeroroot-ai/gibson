@@ -3024,6 +3024,7 @@ func (d *daemonImpl) CreateMission(ctx context.Context, req api.CreateMissionDat
 		Status:              mission.MissionStatusPending,
 		TargetID:            targetID,
 		MissionDefinitionID: missionDefinitionID,
+		CreatedBy:           req.CreatedBy,
 		CreatedAt:           mission.NewUnixTimeNow(),
 		UpdatedAt:           mission.NewUnixTimeNow(),
 	}
@@ -3070,7 +3071,7 @@ func (d *daemonImpl) CreateMission(ctx context.Context, req api.CreateMissionDat
 			Name:      missionName,
 			TargetID:  missionTargetID,
 			Status:    missionStatus,
-			CreatedBy: missionName, // mission name as proxy; updated when user attribution is wired
+			CreatedBy: m.CreatedBy.Ref(),
 		}); mergeErr != nil {
 			d.logger.Error(bgCtx, "CreateMission: Neo4j MERGE failed (non-fatal)",
 				"mission_id", missionIDStr,

@@ -29,7 +29,7 @@ import (
 
 	"github.com/zeroroot-ai/gibson/internal/platform/capabilitygrant"
 	"github.com/zeroroot-ai/gibson/internal/platform/job"
-	commonpb "github.com/zeroroot-ai/sdk/api/gen/gibson/common/v1"
+	"github.com/zeroroot-ai/gibson/internal/platform/principal"
 	harnesspb "github.com/zeroroot-ai/sdk/api/gen/gibson/harness/v1"
 	jobpb "github.com/zeroroot-ai/sdk/api/gen/gibson/job/v1"
 	"github.com/zeroroot-ai/sdk/auth"
@@ -345,7 +345,7 @@ func (s *HarnessCallbackService) SubscribeInput(req *harnesspb.SubscribeInputReq
 func (s *HarnessCallbackService) inputWithTurnGrant(ctx context.Context, tenantID string, in *job.Input) (*jobpb.Input, error) {
 	wire := &jobpb.Input{
 		Id: in.ID, JobId: in.JobID, Message: in.Message,
-		Sender: senderToWire(in.Sender), SentAt: timestamppb.New(in.SentAt),
+		Sender: principal.ToProto(in.Sender), SentAt: timestamppb.New(in.SentAt),
 		Kind: inputKindToWire(in.Kind),
 	}
 	j, err := s.jobs.Get(ctx, tenantID, in.JobID)
@@ -501,28 +501,12 @@ func jobToWire(j *job.Job) *jobpb.Job {
 		Id: j.ID, BankId: j.BankID, MemberId: j.MemberID,
 		State: jobStateToWire(j.State), Spec: j.Spec,
 		ClaudeSessionId: j.ClaudeSessionID,
-		OpenedBy:        senderToWire(j.OpenedBy),
+		OpenedBy:        principal.ToProto(j.OpenedBy),
 		OpenedAt:        timestamppb.New(j.OpenedAt),
 		LastInputAt:     timestamppb.New(j.LastInputAt),
 		Deliverables:    j.Deliverables,
 		Attempts:        j.Attempts,
 	}
-}
-
-func senderToWire(p job.Principal) *commonpb.Principal {
-	kind := commonpb.Principal_KIND_USER
-	switch p.Kind {
-	case job.PrincipalTenant:
-		kind = commonpb.Principal_KIND_TENANT
-	case job.PrincipalComponent:
-		kind = commonpb.Principal_KIND_COMPONENT
-	case job.PrincipalService:
-		kind = commonpb.Principal_KIND_SERVICE
-	case job.PrincipalUser:
-		// The default above. Named so a new kind fails the exhaustive check
-		// rather than quietly rendering as a person.
-	}
-	return &commonpb.Principal{Kind: kind, Id: p.ID}
 }
 
 func jobStateToWire(s job.State) jobpb.JobState {

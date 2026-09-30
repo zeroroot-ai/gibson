@@ -942,6 +942,7 @@ func (m *missionManager) executeMission(ctx context.Context, missionID string, d
 			Description: active.mission.Description,
 			TargetID:    active.mission.TargetID.String(),
 			TenantID:    active.mission.TenantID,
+			CreatedBy:   active.mission.CreatedBy,
 		})
 
 		// Block until the brain reaches a terminal mission state (or ctx is cancelled).
@@ -1168,6 +1169,7 @@ func missionSnapshotToData(ms brain.MissionSnapshot) api.MissionData {
 		Status:       string(ms.Status),
 		Progress:     ms.Progress,
 		FindingCount: ms.FindingsCount,
+		CreatedBy:    ms.CreatedBy,
 	}
 }
 

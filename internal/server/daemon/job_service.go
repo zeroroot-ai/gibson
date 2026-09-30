@@ -18,7 +18,6 @@ import (
 	"encoding/json"
 	"errors"
 	"log/slog"
-	"strings"
 	"time"
 
 	"google.golang.org/grpc/codes"
@@ -29,7 +28,7 @@ import (
 	"github.com/zeroroot-ai/gibson/internal/platform/authz"
 	"github.com/zeroroot-ai/gibson/internal/platform/bank"
 	"github.com/zeroroot-ai/gibson/internal/platform/job"
-	commonpb "github.com/zeroroot-ai/sdk/api/gen/gibson/common/v1"
+	"github.com/zeroroot-ai/gibson/internal/platform/principal"
 	jobpb "github.com/zeroroot-ai/sdk/api/gen/gibson/job/v1"
 	"github.com/zeroroot-ai/sdk/auth"
 )
@@ -115,20 +114,7 @@ func (s *jobServer) principal(ctx context.Context) (job.Principal, error) {
 	if err != nil || id.Subject == "" {
 		return job.Principal{}, status.Error(codes.PermissionDenied, "no caller identity in context")
 	}
-	return job.Principal{Kind: principalKindOf(id.Subject), ID: principalIDFromIdentity(id)}, nil
-}
-
-// principalKindOf reads the class of a subject. A component's subject is a
-// typed FGA principal (ADR-0045); anything else is a person or a service
-// account, and the two are told apart by the credential the identity carries,
-// not by the subject, so a subject alone maps to user.
-func principalKindOf(subject string) job.PrincipalKind {
-	for _, prefix := range []string{"agent_principal:", "tool_principal:", "plugin_principal:"} {
-		if strings.HasPrefix(subject, prefix) {
-			return job.PrincipalComponent
-		}
-	}
-	return job.PrincipalUser
+	return principal.FromIdentity(id), nil
 }
 
 // authorize makes the per-resource decision for every rule whose object is
@@ -139,7 +125,7 @@ func (s *jobServer) authorize(ctx context.Context, relation, objectType, id stri
 	if err != nil || identity.Subject == "" {
 		return status.Error(codes.PermissionDenied, "no caller identity in context")
 	}
-	allowed, err := s.authorizer.Check(ctx, fgaUserFromIdentity(identity), relation, objectType+":"+id)
+	allowed, err := s.authorizer.Check(ctx, principal.FGAUser(identity), relation, objectType+":"+id)
 	if err != nil {
 		s.logger.ErrorContext(ctx, "job authorization check failed",
 			"relation", relation, "object", objectType+":"+id, "error", err)
@@ -383,7 +369,7 @@ func jobToProto(j *job.Job) *jobpb.Job {
 		State:           stateToProto(j.State),
 		Spec:            j.Spec,
 		ClaudeSessionId: j.ClaudeSessionID,
-		OpenedBy:        principalToProto(j.OpenedBy),
+		OpenedBy:        principal.ToProto(j.OpenedBy),
 		OpenedAt:        timestamppb.New(j.OpenedAt),
 		LastInputAt:     timestamppb.New(j.LastInputAt),
 		Verdict:         verdictToProto(j.Verdict),
@@ -404,7 +390,7 @@ func inputToProto(in *job.Input) *jobpb.Input {
 		Id:      in.ID,
 		JobId:   in.JobID,
 		Message: in.Message,
-		Sender:  principalToProto(in.Sender),
+		Sender:  principal.ToProto(in.Sender),
 		SentAt:  timestamppb.New(in.SentAt),
 		Kind:    inputKindToProto(in.Kind),
 	}
@@ -428,22 +414,6 @@ func eventToProto(e *job.Event) *jobpb.JobEvent {
 		out.Input = inputToProto(e.Input)
 	}
 	return out
-}
-
-func principalToProto(p job.Principal) *commonpb.Principal {
-	kind := commonpb.Principal_KIND_USER
-	switch p.Kind {
-	case job.PrincipalTenant:
-		kind = commonpb.Principal_KIND_TENANT
-	case job.PrincipalComponent:
-		kind = commonpb.Principal_KIND_COMPONENT
-	case job.PrincipalService:
-		kind = commonpb.Principal_KIND_SERVICE
-	case job.PrincipalUser:
-		// The default above. Named so a new kind fails the exhaustive check
-		// rather than quietly rendering as a person.
-	}
-	return &commonpb.Principal{Kind: kind, Id: p.ID}
 }
 
 func stateFromProto(s jobpb.JobState) job.State {

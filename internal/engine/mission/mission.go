@@ -8,6 +8,8 @@ import (
 	"fmt"
 	"time"
 
+	"github.com/zeroroot-ai/gibson/internal/platform/principal"
+
 	missionv1 "github.com/zeroroot-ai/sdk/api/gen/gibson/mission/v1"
 
 	"github.com/zeroroot-ai/gibson/internal/infra/types"
@@ -302,6 +304,13 @@ type Mission struct {
 
 	// Error contains error message if mission failed.
 	Error string `json:"error,omitempty"`
+
+	// CreatedBy is the principal that created the mission: the person who
+	// asked for the run, or the service that scheduled it. The id only, never
+	// a name (hosted#205): a reader resolves it at read time, so a person who
+	// left the tenant shows as "removed user". Zero on a mission created
+	// before attribution existed.
+	CreatedBy principal.Principal `json:"created_by,omitempty"`
 
 	// CreatedAt is the timestamp when the mission was created.
 	// Stored as Unix epoch milliseconds for RediSearch NUMERIC compatibility.
