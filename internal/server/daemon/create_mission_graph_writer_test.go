@@ -8,6 +8,8 @@ import (
 	"testing"
 	"time"
 
+	"github.com/zeroroot-ai/gibson/internal/platform/principal"
+
 	goredis "github.com/redis/go-redis/v9"
 	"github.com/stretchr/testify/require"
 
@@ -100,9 +102,16 @@ func TestCreateMission_MaterializesViaGraphWriter(t *testing.T) {
 		Name:                "recon-1",
 		TargetID:            target.ID.String(),
 		MissionDefinitionID: missionDefinitionID,
+		CreatedBy:           principal.Principal{Kind: principal.User, ID: "123456789012345678"},
 	})
 	if err != nil {
 		t.Fatalf("CreateMission: %v", err)
+	}
+	// The creator the handler stamped rides the real result (hosted#205):
+	// identity run 36786911496 saw a CreateMission response with no
+	// created_by because only the fake backend echoed it.
+	if want := (principal.Principal{Kind: principal.User, ID: "123456789012345678"}); res.CreatedBy != want {
+		t.Fatalf("result.CreatedBy = %+v, want %+v", res.CreatedBy, want)
 	}
 	if res.MissionID == "" {
 		t.Fatal("CreateMission returned no mission id")
@@ -119,6 +128,9 @@ func TestCreateMission_MaterializesViaGraphWriter(t *testing.T) {
 	writer.mu.Unlock()
 	if got.ID != res.MissionID {
 		t.Errorf("UpsertMission got ID %q, want %q", got.ID, res.MissionID)
+	}
+	if got.CreatedBy != "user:123456789012345678" {
+		t.Errorf("UpsertMission got CreatedBy %q, want the principal ref, not the mission name", got.CreatedBy)
 	}
 	if got.Name != "recon-1" {
 		t.Errorf("UpsertMission got Name %q, want recon-1", got.Name)

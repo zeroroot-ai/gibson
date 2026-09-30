@@ -3110,6 +3110,7 @@ func (d *daemonImpl) CreateMission(ctx context.Context, req api.CreateMissionDat
 		Description:         m.Description,
 		Status:              string(m.Status),
 		CreatedAt:           m.CreatedAt.Time,
+		CreatedBy:           m.CreatedBy,
 	}, nil
 }
 

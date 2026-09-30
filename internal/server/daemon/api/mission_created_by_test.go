@@ -22,7 +22,7 @@ func TestCreateMission_StampsCaller(t *testing.T) {
 	daemon := &mockDaemon{
 		createMissionFn: func(_ context.Context, req CreateMissionData) (CreateMissionResultData, error) {
 			got = req
-			return CreateMissionResultData{MissionID: "m1", Name: req.Name, TargetID: req.TargetID, CreatedBy: req.CreatedBy}, nil
+			return CreateMissionResultData{MissionID: "m1", Name: req.Name, TargetID: req.TargetID, MissionDefinitionID: req.MissionDefinitionID, CreatedBy: req.CreatedBy}, nil
 		},
 	}
 	server := NewDaemonServer(daemon, nil, nil)
@@ -35,6 +35,9 @@ func TestCreateMission_StampsCaller(t *testing.T) {
 	want := principal.Principal{Kind: principal.User, ID: "123456789012345678"}
 	if got.CreatedBy != want {
 		t.Fatalf("daemon received creator %+v, want %+v", got.CreatedBy, want)
+	}
+	if got := resp.GetMission().GetMissionDefinitionId(); got != "d1" {
+		t.Fatalf("response mission_definition_id = %q, want d1", got)
 	}
 	cb := resp.GetMission().GetCreatedBy()
 	if cb.GetKind() != commonpb.Principal_KIND_USER || cb.GetId() != want.ID {
