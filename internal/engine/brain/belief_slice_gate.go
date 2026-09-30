@@ -27,10 +27,10 @@ import (
 //     BeliefSystem runs for a single host's evidence.
 //   - SliceBeliefWorker (off-tick) buffers requests (Tap, in-tick, no I/O)
 //     and, on Drain, calls a SliceBeliefProvider (an in-process ground-slice
-//     solver, gibson#288, beliefvi.GroundSlice/SolveSlice — this package only
-//     defines the seam and a deterministic placeholder, the same pattern
-//     BeliefProvider/placeholderBelief/nativeBelief already establish) and
-//     applies the result.
+//     solver, gibson#288, beliefvi.GroundSlice/SolveSlice — this package
+//     defines the seam; nativeSliceBelief, belief_slice_native.go, is the
+//     real implementation, the same relationship BeliefProvider has to
+//     nativeBelief) and applies the result.
 //   - SliceGate.Apply drops a SliceScored whose digest no longer matches the
 //     outstanding request — the slice moved on while the model was scoring —
 //     mirroring applyBeliefScored's staleness check.
@@ -89,12 +89,10 @@ type SliceScored struct {
 func (SliceScored) Kind() string { return "belief.slice_scored" }
 
 // SliceBeliefProvider scores every node in a bounded slice at once (ADR-0029
-// §5/§6). A real implementation grounds and solves the slice in-process via
-// internal/engine/brain/beliefvi's GroundSlice/SolveSlice (ADR-0034,
-// gibson#288's ported ground.py — see resolveSliceBeliefProvider's doc
-// comment for what still blocks wiring one in); this interface is the seam,
-// and placeholderSliceBelief below is a deterministic stand-in, the same
-// relationship BeliefProvider has to placeholderBelief/nativeBelief.
+// §5/§6). The real implementation, nativeSliceBelief (belief_slice_native.go,
+// ADR-0034/ADR-0037, gibson#394), grounds and solves the slice in-process via
+// internal/engine/brain/beliefvi's GroundSlice/SolveSlice (gibson#288's
+// ported ground.py); this interface is the seam it implements.
 type SliceBeliefProvider interface {
 	// ScoreSlice returns a NodeBelief for every node in slice, keyed by
 	// AttackGraphNode.ID.
@@ -357,30 +355,3 @@ func (w *SliceBeliefWorker) Drain(ctx context.Context, graph AttackGraph, propag
 	sort.Strings(affected)
 	return len(reqs), affected, nil
 }
-
-// placeholderSliceBelief is a deterministic stand-in SliceBeliefProvider
-// (mirrors placeholderBelief in belief.go): every node's juicy/exploitable is
-// the slice's edge-to-node ratio, reachable is always 1. NOT the real model —
-// swapped for a beliefvi.GroundSlice/SolveSlice-backed implementation
-// (gibson#288) once gibson#275 wires this seam into the live engine.
-type placeholderSliceBelief struct{}
-
-func (placeholderSliceBelief) ScoreSlice(slice AttackGraph) map[string]NodeBelief {
-	out := make(map[string]NodeBelief, len(slice.Nodes))
-	density := 0.0
-	if len(slice.Nodes) > 0 {
-		density = float64(len(slice.Edges)) / float64(len(slice.Nodes))
-	}
-	for _, n := range slice.Nodes {
-		out[n.ID] = NodeBelief{
-			Belief: Belief{Juicy: density, Exploitable: density, Reachable: 1, Model: "placeholder-slice-v0"},
-		}
-	}
-	return out
-}
-
-func (placeholderSliceBelief) Version() string { return "placeholder-slice-v0" }
-
-// PlaceholderSliceBeliefProvider returns the deterministic stand-in
-// SliceBeliefProvider.
-func PlaceholderSliceBeliefProvider() SliceBeliefProvider { return placeholderSliceBelief{} }

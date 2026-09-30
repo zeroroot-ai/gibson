@@ -203,7 +203,11 @@ func TestWireBrainRegistry_InstallsBothBeliefPipelines(t *testing.T) {
 	if err != nil {
 		t.Fatalf("newBeliefSchemaRegistry: %v", err)
 	}
-	wireBrainRegistry(ctx, registry, brain.PlaceholderBeliefProvider(), brain.PlaceholderSliceBeliefProvider(), beliefSchemaRegistry, nil)
+	beliefProvider, err := resolveBeliefProvider()
+	if err != nil {
+		t.Fatalf("resolveBeliefProvider: %v", err)
+	}
+	wireBrainRegistry(ctx, registry, beliefProvider, resolveSliceBeliefProvider(beliefSchemaRegistry, nil), beliefSchemaRegistry, nil)
 
 	e := registry.For("tenant-wire-test") // triggers the OnEngine hook
 	e.Submit(brain.HostObserved{ScopeID: "s", Address: "10.0.0.5", OpenPorts: []int{22}})
@@ -245,7 +249,11 @@ func TestWireBrainRegistry_InstallsVoIPlanner(t *testing.T) {
 	if err != nil {
 		t.Fatalf("newBeliefSchemaRegistry: %v", err)
 	}
-	wireBrainRegistry(ctx, registry, brain.PlaceholderBeliefProvider(), brain.PlaceholderSliceBeliefProvider(), beliefSchemaRegistry, nil)
+	beliefProvider, err := resolveBeliefProvider()
+	if err != nil {
+		t.Fatalf("resolveBeliefProvider: %v", err)
+	}
+	wireBrainRegistry(ctx, registry, beliefProvider, resolveSliceBeliefProvider(beliefSchemaRegistry, nil), beliefSchemaRegistry, nil)
 
 	e := registry.For("tenant-voi-wire-test") // triggers the OnEngine hook
 	e.Submit(brain.MissionProjected{ID: "m1", Goal: "find a path"})

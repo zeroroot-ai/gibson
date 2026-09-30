@@ -13,6 +13,7 @@ import (
 
 	"github.com/zeroroot-ai/gibson/internal/engine/brain"
 	"github.com/zeroroot-ai/gibson/internal/engine/ontology"
+	"github.com/zeroroot-ai/gibson/internal/engine/settlement/celenv"
 	"github.com/zeroroot-ai/gibson/internal/platform/authz"
 	tenantv1 "github.com/zeroroot-ai/gibson/internal/server/daemon/api/gibson/tenant/v1"
 	"github.com/zeroroot-ai/sdk/auth"
@@ -158,6 +159,21 @@ func (s *DomainPackService) EnableDomainPack(
 		return nil, status_grpc.Errorf(codes.FailedPrecondition,
 			"EnableDomainPack: domain pack %q requires entitlement %q, which is not yet checked by this daemon (ADR-0033 decision 5 commercial seam)",
 			pack.Name, pack.Entitlement)
+	}
+	// Fail closed on the pack's CEL predicates before folding the enable event
+	// (ADR-0031 decisions 1 and 2, gibson#388/#398): DomainPack.Validate above
+	// (via the catalog gate path and NewDomainPackCatalog) only checks the
+	// predicate expressions are well-formed TEXT, never that they compile and
+	// type-check as CEL against the gibson-owned environment. LoadDomainPack
+	// compiles every technique's predicate against one shared environment and
+	// fails the whole enable on the first bad one, so a pack with one broken
+	// predicate never becomes live for a tenant — the guarantee its own doc
+	// comment promises, run at the one point that gates a pack's Predicates
+	// map from ever reaching a tenant's World (domain_pack.go's
+	// applyDomainPackEnabled stores them as opaque, uncompiled text).
+	if _, err := celenv.LoadDomainPack(&pack); err != nil {
+		return nil, status_grpc.Errorf(codes.InvalidArgument,
+			"EnableDomainPack: domain pack %q: %v", pack.Name, err)
 	}
 	e.Submit(brain.DomainPackEnabled{
 		Name:                      pack.Name,

@@ -502,41 +502,6 @@ func TestSliceEvents_Kind(t *testing.T) {
 	}
 }
 
-// TestPlaceholderSliceBeliefProvider exercises the deterministic stand-in
-// provider directly: density is edges/nodes, reachable is always 1, and the
-// empty-graph edge case (zero nodes) does not divide by zero.
-func TestPlaceholderSliceBeliefProvider(t *testing.T) {
-	p := PlaceholderSliceBeliefProvider()
-	if p.Version() != "placeholder-slice-v0" {
-		t.Fatalf("Version() = %q, want placeholder-slice-v0", p.Version())
-	}
-
-	slice := AttackGraph{
-		Nodes: []AttackGraphNode{{InfraNode: InfraNode{ID: "a", Kind: "Host"}}, {InfraNode: InfraNode{ID: "b", Kind: "Host"}}},
-		Edges: []InfraEdge{{Type: "RESOLVES_TO", From: "a", To: "b"}},
-	}
-	out := p.ScoreSlice(slice)
-	if len(out) != 2 {
-		t.Fatalf("got %d scored nodes, want 2", len(out))
-	}
-	for _, id := range []string{"a", "b"} {
-		nb := out[id]
-		if nb.Belief.Juicy != 0.5 || nb.Belief.Exploitable != 0.5 {
-			t.Errorf("%s: Juicy/Exploitable = %v/%v, want 0.5/0.5 (1 edge / 2 nodes)", id, nb.Belief.Juicy, nb.Belief.Exploitable)
-		}
-		if nb.Belief.Reachable != 1 {
-			t.Errorf("%s: Reachable = %v, want 1", id, nb.Belief.Reachable)
-		}
-		if nb.Belief.Model != "placeholder-slice-v0" {
-			t.Errorf("%s: Model = %q, want placeholder-slice-v0", id, nb.Belief.Model)
-		}
-	}
-
-	if out := p.ScoreSlice(AttackGraph{}); len(out) != 0 {
-		t.Fatalf("empty slice: got %d scored nodes, want 0", len(out))
-	}
-}
-
 // TestSliceDigest_PropagatesSubstrateError proves a substrate read failure
 // surfaces as an error rather than silently digesting a zero-value belief.
 func TestSliceDigest_PropagatesSubstrateError(t *testing.T) {

@@ -35,12 +35,6 @@ type CompiledPredicate struct {
 	prg  cel.Program
 }
 
-// Expression returns the original CEL source text this CompiledPredicate was
-// built from.
-func (c *CompiledPredicate) Expression() string {
-	return c.expr
-}
-
 // Compile parses, type-checks, and builds an executable program from expr
 // against a freshly built gibson-owned CEL environment ([NewEnv]). See
 // [CompileWithEnv] for the fail-closed behavior this delegates to, and

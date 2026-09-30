@@ -33,7 +33,7 @@ func TestCompile_AcceptsWithinEnvironment(t *testing.T) {
 			cp, err := Compile(expr)
 			require.NoError(t, err)
 			require.NotNil(t, cp)
-			assert.Equal(t, expr, cp.Expression())
+			assert.Equal(t, expr, cp.expr)
 		})
 	}
 }

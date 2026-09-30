@@ -85,8 +85,7 @@ func NativeSliceBeliefProvider(registry *ontology.BeliefSchemaRegistry, posterio
 // (ADR-0029 §3's substrate has not yet generalized Belief itself beyond the
 // Host seed's three named fields — a separate, later slice; this provider
 // maps whichever of those three names a node's OWN declared variables
-// include, and leaves the rest at their zero value, the same partial mapping
-// placeholderSliceBelief's stand-in already accepted). On any grounding/solve
+// include, and leaves the rest at their zero value). On any grounding/solve
 // error (e.g. a cyclic slice VE cannot factor) it returns an empty map —
 // fail-quiet, no score rather than a wrong one, mirroring
 // nativeBelief.Score's contract; the gate asks again on the next digest

@@ -63,11 +63,11 @@ func TestRegistry_LiveSystemsRun(t *testing.T) {
 	ctx, cancel := context.WithCancel(context.Background())
 	defer cancel()
 	r := NewRegistry(ctx, BeliefSystem)
-	r.OnEngine(func(e *Engine) { WireBelief(ctx, e, PlaceholderBeliefProvider(), 0) })
+	r.OnEngine(func(e *Engine) { WireBelief(ctx, e, deterministicBelief{}, 0) })
 
 	r.For("a").Submit(HostObserved{ScopeID: "s", Address: "10.0.0.1", OpenPorts: []int{22, 80}})
 	waitFor(t, func() bool {
 		h := r.For("a").Hosts()
-		return len(h) == 1 && h[0].Belief.Model == "placeholder-v0"
+		return len(h) == 1 && h[0].Belief.Model == "test-belief-v0"
 	})
 }

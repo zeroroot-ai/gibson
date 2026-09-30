@@ -28,7 +28,7 @@ func liveBeliefRegistry(t *testing.T) *ontology.BeliefSchemaRegistry {
 // each, Drain — ends with every host's Belief updated once the engine ticks
 // the resulting BeliefScored events (WorldBeliefSubstrate's write path).
 func TestSliceBeliefRound_ScoresEveryHostAndAppliesOnTick(t *testing.T) {
-	e, bw := beliefEngine(PlaceholderBeliefProvider())
+	e, bw := beliefEngine(deterministicBelief{})
 	e.Submit(HostObserved{ScopeID: "s", Address: "10.0.0.5", OpenPorts: []int{22}})
 	e.Submit(HostObserved{ScopeID: "s", Address: "10.0.0.6", OpenPorts: []int{80}})
 	settle(e, bw, 1) // per-host evidence pipeline settles first, as it would live
@@ -65,7 +65,7 @@ func TestSliceBeliefRound_ScoresEveryHostAndAppliesOnTick(t *testing.T) {
 // is gated exactly like the per-host one: nothing changed between rounds, so
 // the second round checks every host again (cheap) but scores none.
 func TestSliceBeliefRound_QuiescentOnSecondRound(t *testing.T) {
-	e, bw := beliefEngine(PlaceholderBeliefProvider())
+	e, bw := beliefEngine(deterministicBelief{})
 	e.Submit(HostObserved{ScopeID: "s", Address: "10.0.0.5", OpenPorts: []int{22}})
 	settle(e, bw, 1)
 
@@ -96,7 +96,7 @@ func TestSliceBeliefRound_QuiescentOnSecondRound(t *testing.T) {
 // belief changing (from new evidence, via the ordinary per-host pipeline)
 // moves that host's slice-digest, so the next round re-requests it.
 func TestSliceBeliefRound_EvidenceChangeReScoresThatHost(t *testing.T) {
-	e, bw := beliefEngine(PlaceholderBeliefProvider())
+	e, bw := beliefEngine(deterministicBelief{})
 	e.Submit(HostObserved{ScopeID: "s", Address: "10.0.0.5", OpenPorts: []int{22}})
 	settle(e, bw, 1)
 
@@ -134,7 +134,7 @@ func TestSliceBeliefRound_EvidenceChangeReScoresThatHost(t *testing.T) {
 // entirely outside runSystems, and this pins it end to end through
 // WireSliceBelief itself, not just its pieces.
 func TestWireSliceBelief_RunsOffTheEngineTick(t *testing.T) {
-	e, bw := beliefEngine(PlaceholderBeliefProvider())
+	e, bw := beliefEngine(deterministicBelief{})
 	e.Submit(HostObserved{ScopeID: "s", Address: "10.0.0.5", OpenPorts: []int{22}})
 	settle(e, bw, 1)
 
@@ -182,7 +182,7 @@ func TestDefaultSliceSchedule_MatchesTheDocumentedConstants(t *testing.T) {
 // failure (a bad substrate read) rather than silently treating it as nothing
 // to score.
 func TestSliceBeliefRound_PropagatesCheckError(t *testing.T) {
-	e, bw := beliefEngine(PlaceholderBeliefProvider())
+	e, bw := beliefEngine(deterministicBelief{})
 	e.Submit(HostObserved{ScopeID: "s", Address: "10.0.0.5", OpenPorts: []int{22}})
 	settle(e, bw, 1)
 	hostID := e.World.Snapshot()[0].ID
@@ -204,7 +204,7 @@ func TestSliceBeliefRound_PropagatesCheckError(t *testing.T) {
 // TestSliceBeliefRound_PropagatesDrainError proves a round surfaces a Drain
 // failure (here, Apply rejecting a write) rather than reporting success.
 func TestSliceBeliefRound_PropagatesDrainError(t *testing.T) {
-	e, bw := beliefEngine(PlaceholderBeliefProvider())
+	e, bw := beliefEngine(deterministicBelief{})
 	e.Submit(HostObserved{ScopeID: "s", Address: "10.0.0.5", OpenPorts: []int{22}})
 	settle(e, bw, 1)
 	hostID := e.World.Snapshot()[0].ID
@@ -225,7 +225,7 @@ func TestSliceBeliefRound_PropagatesDrainError(t *testing.T) {
 // back to TickInterval (the same convention WireBelief uses) rather than a
 // busy loop or no ticking at all.
 func TestWireSliceBelief_DefaultsNonPositiveInterval(t *testing.T) {
-	e, bw := beliefEngine(PlaceholderBeliefProvider())
+	e, bw := beliefEngine(deterministicBelief{})
 	e.Submit(HostObserved{ScopeID: "s", Address: "10.0.0.5", OpenPorts: []int{22}})
 	settle(e, bw, 1)
 
