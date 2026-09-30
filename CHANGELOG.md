@@ -1,5 +1,12 @@
 # Changelog
 
+## [0.146.1](https://github.com/zeroroot-ai/gibson/compare/v0.146.0...v0.146.1) (2026-09-30)
+
+
+### Bug Fixes
+
+* **ext-authz:** a rule that needs no tenant reaches FGA for a user with none ([#440](https://github.com/zeroroot-ai/gibson/issues/440)) ([4698547](https://github.com/zeroroot-ai/gibson/commit/4698547ead42e3c6a0fb38b09101c69c8f52c5d9))
+
 ## [0.146.0](https://github.com/zeroroot-ai/gibson/compare/v0.145.0...v0.146.0) (2026-09-30)
 
 
