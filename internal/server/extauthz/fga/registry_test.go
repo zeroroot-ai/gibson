@@ -242,3 +242,18 @@ func TestIdentityClass_String(t *testing.T) {
 		}
 	}
 }
+
+func TestEntry_NeedsTenant(t *testing.T) {
+	t.Parallel()
+	for deriver, want := range map[string]bool{
+		"tenant_from_identity":     true,
+		"tenant_and_field('name')": true,
+		"system_tenant":            false,
+		"from_field('mission_id')": false,
+		"component_from_identity":  false,
+	} {
+		if got := (Entry{ObjectDeriver: deriver}).NeedsTenant(); got != want {
+			t.Errorf("%s: NeedsTenant = %v, want %v", deriver, got, want)
+		}
+	}
+}

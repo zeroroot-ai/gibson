@@ -319,8 +319,12 @@ func (s *EnvoyAuthzServer) Check(ctx context.Context, req *authv3.CheckRequest) 
 		// id.Tenant was already resolved above from the token's verified
 		// Zitadel org (ADR-0093 decision 4). A user with no tenant cannot
 		// be authorized for a rule-mode RPC — the tenant IS the FGA object
-		// these rules derive from.
-		if id.Tenant == "" {
+		// these rules derive from. A rule that derives its object from
+		// somewhere else (the system tenant, a request field, the caller's
+		// own component) is decided by FGA with no tenant: the Platform
+		// owner has none by design (ADR-0093) and administers the platform
+		// through system_tenant-derived RPCs (hosted#189 step 7).
+		if id.Tenant == "" && (!regOK || regEntry.NeedsTenant()) {
 			extauthzTenantMissingTotal.Inc()
 			s.log.WarnContext(ctx, "ext-authz: user has no tenant",
 				"method", method, "subject", id.Subject)

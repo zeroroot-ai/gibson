@@ -17,6 +17,7 @@ import (
 	"errors"
 	"fmt"
 	"sort"
+	"strings"
 
 	"gopkg.in/yaml.v3"
 )
@@ -268,4 +269,20 @@ func (r *Registry) Methods() []string {
 // Len returns the number of entries in the registry.
 func (r *Registry) Len() int {
 	return len(r.entries)
+}
+
+// NeedsTenant reports whether the entry's object is derived from the caller's
+// tenant. A rule that reads the tenant cannot be decided for a caller who has
+// none, so ext-authz refuses such a caller before FGA. A rule whose object is
+// the system tenant, a request field or the caller's own component needs no
+// tenant: the Platform owner has none by design (ADR-0093) and still calls
+// every system_tenant-derived RPC.
+func (e Entry) NeedsTenant() bool {
+	switch {
+	case e.ObjectDeriver == "tenant_from_identity":
+		return true
+	case strings.HasPrefix(e.ObjectDeriver, "tenant_and_field("):
+		return true
+	}
+	return false
 }
