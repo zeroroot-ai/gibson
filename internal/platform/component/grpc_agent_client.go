@@ -74,7 +74,7 @@ type CallbackInfo struct {
 	// This will be JSON-marshaled and sent to the agent via the TargetJson field.
 	Target any
 	// MissionRunID is the unique identifier for this specific mission execution.
-	// Created by MissionGraphManager.CreateMissionRunNode() at mission start.
+	// Assigned when the mission run starts.
 	// Used for mission-scoped GraphRAG storage.
 	MissionRunID string
 	// AgentRunID is the unique identifier for this specific agent execution.
