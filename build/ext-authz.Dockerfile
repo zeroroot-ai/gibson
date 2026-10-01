@@ -67,8 +67,14 @@ RUN mkdir -p /rootfs/etc/gibson/sa-identity-map \
 
 # ============================================================================
 # Stage 2: Runtime — Distroless (no shell, minimal attack surface)
+#
+# Debian 13 static (gcr.io/distroless/static:nonroot), the base every other
+# runtime here uses. static-debian12 stopped at tzdata 2026b-0+deb12u1
+# (its last upstream push: 2026-08-21) while DLA-4792-1 names
+# 2026c-0+deb12u1 as the fix, so the ext-authz vulnerability scan stayed
+# red on it (hosted#198); Debian 13 ships tzdata 2026c-0+deb13u1.
 # ============================================================================
-FROM ghcr.io/zeroroot-ai/mirror/distroless-static-debian12:nonroot@sha256:afa5c872c891853ca7fcf1f12c3edb23f7eeef36189728842dd51042ff57f7ab AS runtime
+FROM ghcr.io/zeroroot-ai/mirror/distroless-static:nonroot@sha256:e2e927ec666bae08560abb3c55d0659eceabb657f56b6782ab500a9fc7f555e3 AS runtime
 
 # Copy the binary and CA certificates from the builder.
 COPY --from=builder /out/ext-authz /usr/local/bin/ext-authz
