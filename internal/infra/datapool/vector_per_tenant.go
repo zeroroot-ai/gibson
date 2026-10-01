@@ -5,7 +5,6 @@ package datapool
 
 import (
 	"context"
-	"errors"
 	"fmt"
 	"strings"
 
@@ -74,10 +73,6 @@ func newVectorPerTenant(driver vectordb.Driver, resolver VectorIndexResolver) *v
 func (v *vectorPerTenant) ForTenant(ctx context.Context, tenant auth.TenantID) (vectordb.Client, error) {
 	index, err := v.resolver.VectorIndex(ctx, tenant)
 	if err != nil {
-		var np *NotProvisionedError
-		if errors.As(err, &np) {
-			return nil, err
-		}
 		return nil, fmt.Errorf("datapool: vector: resolve index for tenant %s: %w", tenant, err)
 	}
 	if index == "" {

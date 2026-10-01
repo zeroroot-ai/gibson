@@ -256,14 +256,8 @@ func (p *pool) For(ctx context.Context, tenant auth.TenantID) (*Conn, error) {
 	// readers refuse on their own with a message that names the tenant. Any
 	// other error is a real fault and fails the acquisition.
 	if p.vector != nil {
-		vc, err := p.vector.ForTenant(ctx, tenant)
-		if err != nil {
-			var np *NotProvisionedError
-			if !errors.As(err, &np) {
-				return zeroKEKOnErr(fmt.Errorf("datapool: For: vector: %w", err))
-			}
-		} else {
-			conn.Vector = vc
+		if err := attachVector(ctx, p.vector, conn); err != nil {
+			return zeroKEKOnErr(err)
 		}
 	}
 
@@ -459,4 +453,25 @@ type staticNeo4jResolver struct {
 
 func (s *staticNeo4jResolver) Resolve(_ context.Context, _ auth.TenantID) (*Neo4jEndpoint, error) {
 	return s.endpoint, nil
+}
+
+// vectorSource is the part of vectorPerTenant that attachVector needs.
+type vectorSource interface {
+	ForTenant(ctx context.Context, tenant auth.TenantID) (vectordb.Client, error)
+}
+
+// attachVector sets conn.Vector for the conn's tenant. A *NotProvisionedError
+// leaves conn.Vector nil and returns nil, so the Conn stays usable without
+// vector reads. Any other failure returns an error.
+func attachVector(ctx context.Context, src vectorSource, conn *Conn) error {
+	vc, err := src.ForTenant(ctx, conn.Tenant)
+	if err != nil {
+		var np *NotProvisionedError
+		if errors.As(err, &np) {
+			return nil
+		}
+		return fmt.Errorf("datapool: For: vector: %w", err)
+	}
+	conn.Vector = vc
+	return nil
 }

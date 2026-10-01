@@ -1406,27 +1406,7 @@ func (d *daemonImpl) Start(ctx context.Context) error {
 				d.logger.Warn(ctx, "vector store not wired: no redis address resolved (vector-backed graph reads will refuse)")
 			} else {
 				poolCfg.VectorStoreAddr = poolCfg.RedisAddr
-				poolCfg.VectorIndexResolver = datapool.VectorIndexResolverFunc(func(ctx context.Context, tenant auth.TenantID) (string, error) {
-					if d.secretsService == nil {
-						return "", &datapool.NotProvisionedError{
-							Tenant: tenant.String(),
-							Reason: "vector index resolver: secrets broker not yet initialized",
-						}
-					}
-					ctxWithTenant := auth.WithTenant(ctx, tenant)
-					raw, getErr := d.secretsService.Resolve(ctxWithTenant, pdataplane.VaultPathInfraVector)
-					if getErr != nil {
-						return "", &datapool.NotProvisionedError{
-							Tenant: tenant.String(),
-							Reason: fmt.Sprintf("vault read of %s failed: %v", pdataplane.VaultPathInfraVector, getErr),
-						}
-					}
-					var creds pdataplane.VectorCredentials
-					if jsonErr := json.Unmarshal(raw, &creds); jsonErr != nil {
-						return "", fmt.Errorf("vector index resolver: malformed VectorCredentials JSON in Vault: %w", jsonErr)
-					}
-					return creds.IndexName, nil
-				})
+				poolCfg.VectorIndexResolver = d.vectorIndexResolver()
 			}
 
 			p, poolErr := datapool.NewPool(ctx, poolCfg, keyProvider, nil)

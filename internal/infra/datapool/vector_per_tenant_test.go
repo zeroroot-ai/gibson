@@ -6,6 +6,7 @@ package datapool
 import (
 	"context"
 	"errors"
+	"fmt"
 	"testing"
 
 	"github.com/stretchr/testify/assert"
@@ -140,7 +141,7 @@ func TestVectorPerTenant_ForTenant_ResolverError(t *testing.T) {
 	require.ErrorIs(t, err, boom)
 
 	var npErr *NotProvisionedError
-	assert.False(t, errors.As(err, &npErr), "a broken resolver is not an unprovisioned tenant")
+	assert.NotErrorAs(t, err, &npErr, "a broken resolver is not an unprovisioned tenant")
 }
 
 func TestVectorPerTenant_Close(t *testing.T) {
@@ -178,4 +179,46 @@ func TestValidateVectorConfig(t *testing.T) {
 			require.NoError(t, err)
 		})
 	}
+}
+
+type fakeVectorSource struct {
+	client vectordb.Client
+	err    error
+}
+
+func (f fakeVectorSource) ForTenant(context.Context, auth.TenantID) (vectordb.Client, error) {
+	return f.client, f.err
+}
+
+func TestAttachVector(t *testing.T) {
+	tenant := auth.MustNewTenantID("acme")
+
+	t.Run("not provisioned leaves Vector nil and does not fail", func(t *testing.T) {
+		conn := &Conn{Tenant: tenant}
+		err := attachVector(context.Background(), fakeVectorSource{err: &NotProvisionedError{Tenant: "acme", Reason: "x"}}, conn)
+		require.NoError(t, err)
+		assert.Nil(t, conn.Vector)
+	})
+
+	t.Run("wrapped not provisioned is still tolerated", func(t *testing.T) {
+		conn := &Conn{Tenant: tenant}
+		wrapped := fmt.Errorf("wrap: %w", &NotProvisionedError{Tenant: "acme", Reason: "x"})
+		require.NoError(t, attachVector(context.Background(), fakeVectorSource{err: wrapped}, conn))
+		assert.Nil(t, conn.Vector)
+	})
+
+	t.Run("any other error fails the acquisition", func(t *testing.T) {
+		boom := errors.New("boom")
+		conn := &Conn{Tenant: tenant}
+		err := attachVector(context.Background(), fakeVectorSource{err: boom}, conn)
+		require.ErrorIs(t, err, boom)
+		assert.Nil(t, conn.Vector)
+	})
+
+	t.Run("success assigns the client", func(t *testing.T) {
+		c := &fakeVectorClient{}
+		conn := &Conn{Tenant: tenant}
+		require.NoError(t, attachVector(context.Background(), fakeVectorSource{client: c}, conn))
+		assert.Same(t, c, conn.Vector)
+	})
 }
