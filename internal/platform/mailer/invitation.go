@@ -141,11 +141,12 @@ func invitationSteps(inv InvitationEmail) []onboardingStep {
 	api := strings.TrimRight(inv.APIURL, "/")
 
 	steps := []onboardingStep{{
-		Title: "Accept, and set a password",
+		Title: "Accept, set a password, enroll a second factor",
 		Body: "The link below accepts the invitation and then walks you into setting a " +
 			"password. That is the only credential step: this platform stores no password " +
-			"of its own, and it sends no other email. One workspace means no picker, so you " +
-			"land on the dashboard.",
+			"of its own, and it sends no other email. Have an authenticator app open — a " +
+			"second factor is required, and sign-in will not complete without one. One " +
+			"workspace means no picker, so you land on the dashboard.",
 		Link: inv.AcceptURL,
 	}, {
 		Title: "Clone the ADK, not a bare binary",
