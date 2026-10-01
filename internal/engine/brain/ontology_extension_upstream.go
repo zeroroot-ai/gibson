@@ -83,12 +83,12 @@ func (e *OntologyProposalNotPromotedError) Error() string {
 // World.
 //
 // The returned pack's Author identifies the submitting tenant (ADR-0033
-// decision 5: "the tenant that proposed a tenant extension"); Visibility is
+// decision 1: "the tenant that proposed a tenant extension"); Visibility is
 // deliberately left unclassified (the zero value) rather than "private" or
 // "public" — a contribution candidate is neither yet: DomainPack.Validate
 // documents the zero value as exactly this "not yet classified" case, and
-// classification (public, plus any Entitlement) is the platform owner's
-// decision at PR-review time (ADR-0033 decision 6), not this tenant's.
+// classification as public is the platform owner's decision at PR-review time
+// (ADR-0033 decision 6), not this tenant's.
 func (e *Engine) SubmitOntologyExtensionUpstream(_ context.Context, kind taxonomy.ProposalKind, label string) (*ontology.DomainPack, error) {
 	if err := taxonomy.ValidIdentifier(label); err != nil {
 		return nil, &taxonomy.InvalidProposalError{Kind: kind, Label: label, Err: err}

@@ -3,8 +3,8 @@
 Domain knowledge lives at two tiers. A **tenant extension** is discovered by a
 tenant's own agents, approved by the tenant owner, and live in that one tenant as
 event-sourced state. A **catalog pack** is curated by the platform owner, shipped
-as SDK-sourced content via release/rollout, shared across tenants, and entitlement
--gated (free or paid). A tenant may nominate an extension upstream as a
+as SDK-sourced content via release/rollout, shared across tenants, and free.
+A tenant may nominate an extension upstream as a
 **contribution** (a PR into the SDK). Builds on
 [ADR-0024](0024-discoverable-taxonomy-and-ontology.md) /
 [ADR-0025](0025-domain-packs.md). See [`CONTEXT.md`](../../CONTEXT.md). Issues:
@@ -12,8 +12,8 @@ as SDK-sourced content via release/rollout, shared across tenants, and entitleme
 
 ## Context
 
-The platform owner wants central control over what packs exist (and to charge for
-them later), but also wants tenant agents to capture extension ideas so the model
+The platform owner wants central control over what packs exist, but also wants
+tenant agents to capture extension ideas so the model
 grows without the owner developing in isolation, with the tenant owner seeing
 every proposal. Those reconcile only if content lives at two tiers with different
 scope, source, and control.
@@ -22,7 +22,7 @@ scope, source, and control.
 
 1. **Two tiers.** *Tenant extension*: event-sourced, live in one tenant only,
    private, free. *Catalog pack*: SDK source of truth, versioned, shipped via
-   release/rollout, shared, entitlement-gated. A pack is **pure data** — taxonomy
+   release/rollout, shared, free. A pack is **pure data** — taxonomy
    / ontology structure + CEL predicates ([ADR-0031](0031-settlement-predicates-are-cel-over-a-gibson-environment.md))
    — never code.
 
@@ -32,7 +32,7 @@ scope, source, and control.
    **tenant extension** (live, per-tenant, mission-pinned) → owner "submit
    upstream" → **contribution** (a PR into the SDK, which anyone may open) →
    platform-owner review + merge + rollout → **catalog pack** → tenant enable
-   toggle + entitlement check.
+   toggle.
 
 3. **Approval is explicit, human, per-proposal.** No auto-promotion: every
    proposal requires the tenant owner's approval before it goes live. Submit-
@@ -47,10 +47,16 @@ scope, source, and control.
    content). The core taxonomy/ontology stays SDK-embedded and always-on; the
    seed "main" pack is default-off.
 
-5. **Commercial seam now, billing later.** A catalog pack carries `author`,
-   `visibility`, and an optional `entitlement` key; enabling runs one entitlement
-   check through the existing closed billing seam ([ADR-0003](0003-open-core-boundary.md)).
-   Free by default; a future paid pack sets an entitlement key.
+5. **~~Commercial seam now, billing later.~~ Withdrawn 2026-10-01 — packs are
+   free.** This decision once planned an `entitlement` key on each catalog pack
+   and one entitlement check through the closed billing seam
+   ([ADR-0003](0003-open-core-boundary.md)) at enable time, for a future paid
+   pack. The platform owner decided every pack is free (gibson#384). The
+   `entitlement` key, its validation, and the enable-time check are removed;
+   proto field 5 of `DomainPackCatalogEntry` is reserved. A catalog pack now
+   carries only `author` and `visibility`, and the catalog gate (decision 1) is
+   the only gate on enable. If paid packs ever return, this decision is the
+   place to supersede.
 
 6. **Community contributions are safe by construction.** Because a pack is data
    (CEL + structure, bounded by ValidIdentifier and the gibson-owned CEL
@@ -69,9 +75,9 @@ scope, source, and control.
 
 ## Consequences
 
-`DomainPack` grows technique→predicate (CEL) bindings and commercial metadata.
-Three surfaces appear: a proposal/approval flow (tenant), a `DomainPackService`
-catalog + enable/disable, and a contribution path (SDK PRs). The platform owner
-holds absolute control over the shared, monetizable catalog without gating each
-tenant's private extensions. A future pack marketplace is a config change, not a
-re-architecture.
+`DomainPack` grows technique→predicate (CEL) bindings and catalog metadata
+(`author`, `visibility`). Three surfaces appear: a proposal/approval flow
+(tenant), a `DomainPackService` catalog + enable/disable, and a contribution
+path (SDK PRs). The platform owner holds absolute control over the shared
+catalog without gating each tenant's private extensions. Every pack is free
+(decision 5 withdrawn).

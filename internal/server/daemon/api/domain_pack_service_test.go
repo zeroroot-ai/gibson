@@ -171,18 +171,6 @@ func TestEnableDomainPack_GateErrorIsInternal(t *testing.T) {
 	assert.Equal(t, codes.Internal, grpcCode(err))
 }
 
-func TestEnableDomainPack_EntitledPackFailsClosed(t *testing.T) {
-	entitled := mainPack()
-	entitled.Name = "premium"
-	entitled.Entitlement = "premium_intel"
-	catalog := ontology.NewDomainPackCatalog(entitled)
-	s, _ := newDomainPackService(t, catalog)
-
-	_, err := s.EnableDomainPack(tenantCtx("acme"), &tenantv1.EnableDomainPackRequest{Name: "premium"})
-	assert.Equal(t, codes.FailedPrecondition, grpcCode(err),
-		"a pack with a non-empty Entitlement must fail closed until the commercial seam is wired")
-}
-
 func TestEnableDomainPack_NoTenant(t *testing.T) {
 	s, _ := newDomainPackService(t, ontology.NewDomainPackCatalog())
 	_, err := s.EnableDomainPack(context.Background(), &tenantv1.EnableDomainPackRequest{Name: "main"})

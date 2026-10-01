@@ -145,21 +145,9 @@ func (s *DomainPackService) EnableDomainPack(
 	if !allowed {
 		return nil, status_grpc.Errorf(codes.NotFound, "EnableDomainPack: domain pack %q is not in the catalog", pack.Name)
 	}
-	// The commercial seam (ADR-0033 decision 5): free by construction — an
-	// empty Entitlement means no check is needed and enabling always
-	// proceeds. A non-empty Entitlement means this pack is paid; the
-	// tenant-scoped entitlement check the ADR calls for ("one entitlement
-	// check through the existing closed billing seam") is not wired yet —
-	// gibson#381 builds the enablement mechanism only, and no catalog pack
-	// ships with a non-empty Entitlement in this change (the catalog starts
-	// empty). Fail closed rather than silently allow or silently build a
-	// partial gate: a future change wires the real check and this branch
-	// disappears.
-	if pack.Entitlement != "" {
-		return nil, status_grpc.Errorf(codes.FailedPrecondition,
-			"EnableDomainPack: domain pack %q requires entitlement %q, which is not yet checked by this daemon (ADR-0033 decision 5 commercial seam)",
-			pack.Name, pack.Entitlement)
-	}
+	// Every pack is free (ADR-0033 decision 5 withdrawn, gibson#384): the
+	// catalog gate above is the only gate on enable. No entitlement check.
+	//
 	// Fail closed on the pack's CEL predicates before folding the enable event
 	// (ADR-0031 decisions 1 and 2, gibson#388/#398): DomainPack.Validate above
 	// (via the catalog gate path and NewDomainPackCatalog) only checks the
@@ -210,7 +198,6 @@ func domainPackCatalogEntryView(p ontology.DomainPack) *tenantv1.DomainPackCatal
 		Version:                   int32Count(p.Version),
 		Author:                    p.Author,
 		Visibility:                string(p.Visibility),
-		Entitlement:               p.Entitlement,
 		TaxonomyNodeLabels:        append([]string(nil), p.TaxonomyNodeLabels...),
 		TaxonomyRelationshipTypes: append([]string(nil), p.TaxonomyRelationshipTypes...),
 		Techniques:                sortedPredicateKeys(p.Predicates),

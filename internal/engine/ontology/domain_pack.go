@@ -36,12 +36,11 @@ import (
 //     compiles or type-checks it against the gibson-owned CEL environment
 //     (ADR-0031 decision 2) — that is gibson#388, which runs strictly after
 //     a Pack has already passed Validate here.
-//   - Commercial metadata (Author, Visibility, Entitlement): ADR-0033
-//     decision 5's "commercial seam now, billing later" — a catalog pack
-//     carries who curates it, whether it is shared or tenant-private, and
-//     an optional entitlement key an eventual DomainPackService checks
-//     through the existing closed billing seam (ADR-0003) before enabling
-//     it. Free by default: Entitlement empty means no check is needed.
+//   - Catalog metadata (Author, Visibility): a catalog pack carries who
+//     curates it and whether it is shared or tenant-private. Every pack is
+//     free — the owner withdrew the entitlement gate ADR-0033 decision 5
+//     once planned, so a pack carries no billing key and enabling it runs no
+//     entitlement check.
 
 // MaxPredicateExpressionBytes bounds a Predicates CEL expression string, the
 // same defense-in-depth reasoning as taxonomy.MaxIdentifierBytes: a Pack is
@@ -52,17 +51,16 @@ const MaxPredicateExpressionBytes = 4096
 // MaxAuthorBytes bounds the free-text Author field.
 const MaxAuthorBytes = 256
 
-// PackVisibility is a Pack's commercial sharing scope (ADR-0033 decisions 1
-// and 5): "public" names a curated catalog pack shared across tenants
-// (subject to Entitlement); "private" names a tenant extension, visible
-// only to the tenant that owns it. The zero value means "not yet
-// classified" and Validate accepts it, so a Pack captured before its
-// commercial metadata is assigned still round-trips.
+// PackVisibility is a Pack's sharing scope (ADR-0033 decision 1): "public"
+// names a curated catalog pack shared across tenants; "private" names a
+// tenant extension, visible only to the tenant that owns it. The zero value
+// means "not yet classified" and Validate accepts it, so a Pack captured
+// before its metadata is assigned still round-trips.
 type PackVisibility string
 
 const (
 	// PackVisibilityPublic marks a curated catalog pack (ADR-0033 decision
-	// 1), shared across tenants and gated only by Entitlement.
+	// 1), shared across tenants. Every catalog pack is free.
 	PackVisibilityPublic PackVisibility = "public"
 
 	// PackVisibilityPrivate marks a tenant extension (ADR-0033 decision 1),
@@ -125,15 +123,9 @@ type DomainPack struct {
 	// its length and encoding.
 	Author string `json:"author,omitempty"`
 
-	// Visibility is this pack's commercial sharing scope (ADR-0033
-	// decisions 1 and 5). See [PackVisibility].
+	// Visibility is this pack's sharing scope (ADR-0033 decision 1). See
+	// [PackVisibility].
 	Visibility PackVisibility `json:"visibility,omitempty"`
-
-	// Entitlement is the optional billing entitlement key a tenant must
-	// hold before an eventual DomainPackService may enable this pack
-	// (ADR-0033 decision 5, ADR-0003's closed billing seam). Empty means
-	// the pack is free — no entitlement check is needed.
-	Entitlement string `json:"entitlement,omitempty"`
 }
 
 // ExportDomainPack captures name's currently discovered structure:
@@ -194,9 +186,8 @@ func ExportDomainPack(name string, version int, taxonomyBase, taxonomyNow *taxon
 //     every value is well-formed CEL-expression TEXT (ADR-0031 decision 1)
 //     — non-empty, valid UTF-8, within MaxPredicateExpressionBytes; this
 //     never parses or type-checks the expression as CEL (gibson#388's job);
-//   - Author is valid UTF-8 within MaxAuthorBytes, Visibility is one of the
-//     recognized [PackVisibility] values, and Entitlement (when set) is a
-//     plain ValidIdentifier key (ADR-0033 decision 5).
+//   - Author is valid UTF-8 within MaxAuthorBytes, and Visibility is one of
+//     the recognized [PackVisibility] values.
 func (p *DomainPack) Validate() error {
 	for _, l := range p.TaxonomyNodeLabels {
 		if err := taxonomy.ValidIdentifier(l); err != nil {
@@ -234,11 +225,6 @@ func (p *DomainPack) Validate() error {
 	}
 	if err := p.Visibility.Validate(); err != nil {
 		return fmt.Errorf("domain pack %q: %w", p.Name, err)
-	}
-	if p.Entitlement != "" {
-		if err := taxonomy.ValidIdentifier(p.Entitlement); err != nil {
-			return fmt.Errorf("domain pack %q: entitlement key: %w", p.Name, err)
-		}
 	}
 	return nil
 }
