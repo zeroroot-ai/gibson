@@ -41,8 +41,6 @@ type targetDocument struct {
 	Model        string                 `json:"model,omitempty"`
 	Config       map[string]interface{} `json:"config,omitempty"`
 	Capabilities []string               `json:"capabilities,omitempty"`
-	AuthType     string                 `json:"auth_type,omitempty"`
-	SecretName   string                 `json:"secret_name,omitempty"`
 	Status       string                 `json:"status"`
 	Description  string                 `json:"description,omitempty"`
 	Tags         []string               `json:"tags,omitempty"`
@@ -84,14 +82,12 @@ func toTargetDocument(target *types.Target) *targetDocument {
 		Model:        target.Model,
 		Config:       target.Config,
 		Capabilities: target.Capabilities,
-		AuthType:     target.AuthType.String(),
 		Status:       target.Status.String(),
 		Description:  target.Description,
 		Tags:         target.Tags,
 		Timeout:      target.Timeout,
 		CreatedAt:    target.CreatedAt.UnixMilli(),
 		UpdatedAt:    target.UpdatedAt.UnixMilli(),
-		SecretName:   target.SecretName,
 		URL:          target.URL,
 		Headers:      target.Headers,
 	}
@@ -134,14 +130,12 @@ func fromTargetDocument(doc *targetDocument) (*types.Target, error) {
 		Model:        doc.Model,
 		Config:       doc.Config,
 		Capabilities: doc.Capabilities,
-		AuthType:     types.AuthType(doc.AuthType),
 		Status:       types.TargetStatus(doc.Status),
 		Description:  doc.Description,
 		Tags:         doc.Tags,
 		Timeout:      doc.Timeout,
 		CreatedAt:    time.UnixMilli(doc.CreatedAt),
 		UpdatedAt:    time.UnixMilli(doc.UpdatedAt),
-		SecretName:   doc.SecretName,
 		URL:          doc.URL,
 		Headers:      doc.Headers,
 	}

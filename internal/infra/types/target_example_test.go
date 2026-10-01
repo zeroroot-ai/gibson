@@ -20,7 +20,6 @@ func Example_createTarget() {
 
 	target.Provider = types.ProviderOpenAI
 	target.Model = "gpt-4"
-	target.AuthType = types.AuthTypeBearer
 	target.Description = "OpenAI GPT-4 API endpoint"
 	target.Tags = []string{"openai", "production"}
 	target.Capabilities = []string{"chat", "completion"}
@@ -53,7 +52,6 @@ func Example_targetJSON() {
 
 	target.Provider = types.ProviderAnthropic
 	target.Model = "claude-3-opus-20240229"
-	target.AuthType = types.AuthTypeAPIKey
 
 	// Marshal to JSON
 	data, err := json.MarshalIndent(target, "", "  ")
@@ -142,30 +140,6 @@ func Example_providers() {
 	// - custom
 }
 
-// Example_authTypes demonstrates all auth types
-func Example_authTypes() {
-	authTypes := []types.AuthType{
-		types.AuthTypeNone,
-		types.AuthTypeAPIKey,
-		types.AuthTypeBearer,
-		types.AuthTypeBasic,
-		types.AuthTypeOAuth,
-	}
-
-	fmt.Println("Available auth types:")
-	for _, a := range authTypes {
-		fmt.Printf("- %s\n", a)
-	}
-
-	// Output:
-	// Available auth types:
-	// - none
-	// - api_key
-	// - bearer
-	// - basic
-	// - oauth
-}
-
 // Example_ragTarget demonstrates creating a RAG target
 func Example_ragTarget() {
 	target := types.NewTarget(
@@ -175,7 +149,6 @@ func Example_ragTarget() {
 	)
 
 	target.Provider = types.ProviderCustom
-	target.AuthType = types.AuthTypeBearer
 	target.Description = "Internal RAG system with company knowledge"
 	target.Tags = []string{"internal", "rag", "knowledge-base"}
 	target.Capabilities = []string{"semantic-search", "question-answering"}
@@ -216,7 +189,6 @@ func Example_agentTarget() {
 	)
 
 	target.Provider = types.ProviderCustom
-	target.AuthType = types.AuthTypeOAuth
 	target.Description = "Autonomous coding agent with tool access"
 	target.Tags = []string{"agent", "code", "autonomous"}
 	target.Capabilities = []string{

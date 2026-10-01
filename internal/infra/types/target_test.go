@@ -150,54 +150,6 @@ func TestProvider_IsValid(t *testing.T) {
 	}
 }
 
-// TestAuthType_String tests the String method
-func TestAuthType_String(t *testing.T) {
-	tests := []struct {
-		name     string
-		a        AuthType
-		expected string
-	}{
-		{"none", AuthTypeNone, "none"},
-		{"api_key", AuthTypeAPIKey, "api_key"},
-		{"bearer", AuthTypeBearer, "bearer"},
-		{"basic", AuthTypeBasic, "basic"},
-		{"oauth", AuthTypeOAuth, "oauth"},
-	}
-
-	for _, tt := range tests {
-		t.Run(tt.name, func(t *testing.T) {
-			if got := tt.a.String(); got != tt.expected {
-				t.Errorf("AuthType.String() = %v, want %v", got, tt.expected)
-			}
-		})
-	}
-}
-
-// TestAuthType_IsValid tests the IsValid method
-func TestAuthType_IsValid(t *testing.T) {
-	tests := []struct {
-		name     string
-		a        AuthType
-		expected bool
-	}{
-		{"valid none", AuthTypeNone, true},
-		{"valid api_key", AuthTypeAPIKey, true},
-		{"valid bearer", AuthTypeBearer, true},
-		{"valid basic", AuthTypeBasic, true},
-		{"valid oauth", AuthTypeOAuth, true},
-		{"invalid", AuthType("invalid"), false},
-		{"empty", AuthType(""), false},
-	}
-
-	for _, tt := range tests {
-		t.Run(tt.name, func(t *testing.T) {
-			if got := tt.a.IsValid(); got != tt.expected {
-				t.Errorf("AuthType.IsValid() = %v, want %v", got, tt.expected)
-			}
-		})
-	}
-}
-
 // TestNewTarget tests the NewTarget constructor
 func TestNewTarget(t *testing.T) {
 	name := "Test Target"
@@ -339,19 +291,6 @@ func TestTarget_Validate(t *testing.T) {
 			wantErr: true,
 		},
 		{
-			name: "invalid auth type",
-			target: &Target{
-				ID:       NewID(),
-				Name:     "Test",
-				URL:      "https://api.example.com",
-				Type:     string(TargetTypeLLMAPI),
-				AuthType: AuthType("invalid"),
-				Status:   TargetStatusActive,
-				Timeout:  30,
-			},
-			wantErr: true,
-		},
-		{
 			name: "invalid timeout",
 			target: &Target{
 				ID:      NewID(),
@@ -380,7 +319,6 @@ func TestTarget_JSON(t *testing.T) {
 	target := NewTarget("Test Target", "https://api.example.com", TargetTypeLLMAPI)
 	target.Provider = ProviderOpenAI
 	target.Model = "gpt-4"
-	target.AuthType = AuthTypeAPIKey
 	target.Description = "Test description"
 	target.Tags = []string{"test", "example"}
 

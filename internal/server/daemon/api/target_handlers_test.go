@@ -62,45 +62,6 @@ func TestTargetRPCs_MissingTargetIsNotFound(t *testing.T) {
 	}
 }
 
-// TestProtoTarget_SecretNameSurvivesBothDirections is the gibson#485 fixture at
-// the wire boundary, which is exactly where the old field lost the value: it was
-// accepted only when it parsed as a UUID and dropped in silence otherwise, so a
-// caller writing "goat-kubeconfig" had the name swallowed with no error.
-func TestProtoTarget_SecretNameSurvivesBothDirections(t *testing.T) {
-	in := &types.Target{
-		ID:         types.NewID(),
-		Name:       "kubernetes-goat",
-		Type:       "custom",
-		SecretName: "goat-kubeconfig",
-		AuthType:   types.AuthTypeAPIKey,
-		Status:     types.TargetStatusActive,
-		Timeout:    30,
-		URL:        "https://goat.internal:8080",
-	}
-
-	p, err := toProtoTarget(in)
-	require.NoError(t, err)
-	require.Equal(t, "goat-kubeconfig", p.GetSecretName(),
-		"a secret name is not a UUID and must reach the wire as written")
-
-	back := fromProtoTarget(p)
-	require.NotNil(t, back)
-	require.Equal(t, "goat-kubeconfig", back.SecretName)
-	require.Equal(t, in.AuthType, back.AuthType,
-		"auth_type states the shape of the secret, so it travels with the name")
-}
-
-// A target that needs no secret names none, in both directions.
-func TestProtoTarget_NoSecretNameStaysEmpty(t *testing.T) {
-	p, err := toProtoTarget(&types.Target{
-		ID: types.NewID(), Name: "public", Type: "custom",
-		Status: types.TargetStatusActive, Timeout: 30,
-	})
-	require.NoError(t, err)
-	require.Empty(t, p.GetSecretName())
-	require.Empty(t, fromProtoTarget(p).SecretName)
-}
-
 func TestFromProtoTarget_NilIsNil(t *testing.T) {
 	require.Nil(t, fromProtoTarget(nil))
 }

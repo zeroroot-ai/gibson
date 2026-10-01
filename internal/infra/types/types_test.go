@@ -336,8 +336,6 @@ func TestTargetEntityIntegration(t *testing.T) {
 				target := NewTarget("Test LLM", "https://api.example.com/v1", TargetTypeLLMAPI)
 				target.Provider = ProviderOpenAI
 				target.Model = "gpt-4"
-				target.AuthType = AuthTypeAPIKey
-				target.SecretName = "test-llm-api-key"
 				target.Description = "Test target for integration"
 				target.Tags = []string{"test", "integration"}
 				target.Headers = map[string]string{"X-Custom": "value"}
@@ -350,7 +348,6 @@ func TestTargetEntityIntegration(t *testing.T) {
 				assert.Equal(t, string(TargetTypeLLMAPI), target.Type)
 				assert.Equal(t, ProviderOpenAI, target.Provider)
 				assert.Equal(t, "gpt-4", target.Model)
-				assert.Equal(t, "test-llm-api-key", target.SecretName)
 				assert.Len(t, target.Tags, 2)
 			},
 		},
@@ -676,16 +673,15 @@ func TestCrossTypeIntegration(t *testing.T) {
 		cred.KeyDerivationSalt = []byte("mock-salt-value!")
 		require.NoError(t, cred.Validate())
 
-		// Create target naming its secret
+		// A Target carries no credential reference at all: it names WHAT is
+		// assessed, never how to authenticate to it (owner decision
+		// 2026-10-01). The credential above and the target below are
+		// independent records with nothing joining them on the target.
 		target := NewTarget("OpenAI GPT-4", "https://api.openai.com/v1", TargetTypeLLMAPI)
-		target.SecretName = "openai-api-key"
 		target.Provider = ProviderOpenAI
-		target.AuthType = AuthTypeAPIKey
 		require.NoError(t, target.Validate())
 
-		assert.Equal(t, "openai-api-key", target.SecretName)
-
-		// JSON round-trip preserves relationship
+		// JSON round-trip
 		jsonData, err := json.Marshal(target)
 		require.NoError(t, err)
 
@@ -693,7 +689,8 @@ func TestCrossTypeIntegration(t *testing.T) {
 		err = json.Unmarshal(jsonData, &decoded)
 		require.NoError(t, err)
 
-		assert.Equal(t, "openai-api-key", decoded.SecretName)
+		assert.Equal(t, target.Name, decoded.Name)
+		assert.Equal(t, ProviderOpenAI, decoded.Provider)
 	})
 
 	t.Run("Error handling with entity validation", func(t *testing.T) {
@@ -757,7 +754,7 @@ func TestCrossTypeIntegration(t *testing.T) {
 	})
 }
 
-// TestEnumTypeIntegration tests TargetType, Provider, AuthType enums
+// TestEnumTypeIntegration tests the TargetType, Provider and CredentialType enums
 func TestEnumTypeIntegration(t *testing.T) {
 	tests := []struct {
 		name       string
@@ -790,18 +787,6 @@ func TestEnumTypeIntegration(t *testing.T) {
 				ProviderCustom,
 			},
 			invalidVal: "unknown_provider",
-		},
-		{
-			name:     "AuthType",
-			enumType: "auth_type",
-			validVals: []interface{}{
-				AuthTypeNone,
-				AuthTypeAPIKey,
-				AuthTypeBearer,
-				AuthTypeBasic,
-				AuthTypeOAuth,
-			},
-			invalidVal: "bad_auth",
 		},
 		{
 			name:     "CredentialType",
@@ -838,12 +823,6 @@ func TestEnumTypeIntegration(t *testing.T) {
 					require.NoError(t, err)
 					assert.True(t, decoded.IsValid())
 
-				case "auth_type":
-					var decoded AuthType
-					err = json.Unmarshal(jsonData, &decoded)
-					require.NoError(t, err)
-					assert.True(t, decoded.IsValid())
-
 				case "credential_type":
 					var decoded CredentialType
 					err = json.Unmarshal(jsonData, &decoded)
@@ -862,11 +841,6 @@ func TestEnumTypeIntegration(t *testing.T) {
 
 			case "provider":
 				var decoded Provider
-				err := json.Unmarshal([]byte(invalidJSON), &decoded)
-				assert.Error(t, err)
-
-			case "auth_type":
-				var decoded AuthType
 				err := json.Unmarshal([]byte(invalidJSON), &decoded)
 				assert.Error(t, err)
 
@@ -891,18 +865,7 @@ func TestEdgeCases(t *testing.T) {
 		var decoded Target
 		err = json.Unmarshal(jsonData, &decoded)
 		require.NoError(t, err)
-		assert.Empty(t, decoded.SecretName)
-	})
-
-	// The name is a tenant_secrets primary key and the AAD of its envelope, so
-	// " x " and "x" are different keys. Refuse rather than store a key the
-	// author did not mean to write.
-	t.Run("secret name with surrounding whitespace is refused", func(t *testing.T) {
-		target := NewTarget("Test", "https://test.com", TargetTypeLLMChat)
-		target.SecretName = " goat-kubeconfig "
-		err := target.Validate()
-		require.Error(t, err)
-		assert.Contains(t, err.Error(), "whitespace")
+		assert.Equal(t, target.Name, decoded.Name)
 	})
 
 	t.Run("empty maps and slices", func(t *testing.T) {

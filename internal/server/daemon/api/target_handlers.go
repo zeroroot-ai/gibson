@@ -135,14 +135,12 @@ func toProtoTarget(t *types.Target) (*targetpb.Target, error) {
 		Provider:     t.Provider.String(),
 		Model:        t.Model,
 		Capabilities: t.Capabilities,
-		AuthType:     t.AuthType.String(),
 		Status:       t.Status.String(),
 		Description:  t.Description,
 		Tags:         t.Tags,
 		Timeout:      int32(t.Timeout),
 		Url:          t.URL,
 		Headers:      t.Headers,
-		SecretName:   t.SecretName,
 	}
 	if len(t.Connection) > 0 {
 		conn, err := structpb.NewStruct(t.Connection)
@@ -181,7 +179,6 @@ func fromProtoTarget(p *targetpb.Target) *types.Target {
 		Provider:     types.Provider(p.GetProvider()),
 		Model:        p.GetModel(),
 		Capabilities: p.GetCapabilities(),
-		AuthType:     types.AuthType(p.GetAuthType()),
 		Status:       types.TargetStatus(p.GetStatus()),
 		Description:  p.GetDescription(),
 		Tags:         p.GetTags(),
@@ -193,7 +190,6 @@ func fromProtoTarget(p *targetpb.Target) *types.Target {
 		// a secret had the name swallowed with no error (gibson#485). A name
 		// that does not resolve must fail where it is used, loudly, not vanish
 		// here.
-		SecretName: p.GetSecretName(),
 	}
 	if p.GetConnection() != nil {
 		t.Connection = p.GetConnection().AsMap()
