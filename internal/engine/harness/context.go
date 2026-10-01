@@ -155,6 +155,31 @@ type TargetInfo struct {
 	URL string `json:"url,omitempty"`
 	// Deprecated: Use Connection["headers"] instead. Kept for backward compatibility.
 	Headers map[string]string `json:"headers,omitempty"`
+
+	// SecretName is the tenant secret this target authenticates with, by name,
+	// copied from types.Target.SecretName. It is a NAME and never a value: the
+	// plaintext is resolved server-side at the moment a tool is dispatched and
+	// lives only in that one sandbox's env (gibson#485).
+	//
+	// Every field of this struct is JSON-tagged and this struct serializes, so a
+	// resolved secret must never be stored on it. The name is safe: the target
+	// record already stores and lists it.
+	SecretName string `json:"secret_name,omitempty"`
+
+	// AuthType tells the tool what SHAPE the resolved secret has, so it can
+	// refuse a credential of the wrong kind rather than mis-parse it. Carried
+	// verbatim from types.Target.AuthType.
+	AuthType string `json:"auth_type,omitempty"`
+}
+
+// WithSecret names the tenant secret this target authenticates with, and the
+// shape it has. Both are names, never the value. Mirrors WithProvider so a
+// caller building a TargetInfo does not have to widen NewTargetInfoFull's
+// signature and every one of its existing callers.
+func (t TargetInfo) WithSecret(secretName, authType string) TargetInfo {
+	t.SecretName = secretName
+	t.AuthType = authType
+	return t
 }
 
 // NewTargetInfo creates a new target info with the given ID, name, URL, and type.

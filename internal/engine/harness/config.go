@@ -80,6 +80,27 @@ type HarnessConfig struct {
 	// "cannot read" from "nothing known".
 	GraphRAGQuerier func() component.GraphRAGQuerier
 
+	// Credentials resolves a tenant secret by name when a mission's target
+	// names one, so a sandboxed tool can authenticate to the thing it acts
+	// against (gibson#485). It is the SAME store that serves
+	// HarnessCallbackService/GetCredential: one resolution path, one audit
+	// trail, one set of broker semantics.
+	//
+	// It is a function, not a store, for the reason providerCredentialSource
+	// records in internal/server/daemon/agent_credentials.go: the harness
+	// factory is built BEFORE the data-plane pool and the broker stack exist
+	// (daemon Start runs newInfrastructure, then the pool, then
+	// initBrokerStack). A store wired at construction is therefore always nil,
+	// and the last feature that tried it refused every dispatch with "no
+	// credential source is wired". Resolving at dispatch binds to whatever the
+	// daemon actually has.
+	//
+	// Optional. When it is nil and a target names no secret, dispatch is
+	// unchanged. When it is nil and a target DOES name a secret, dispatch
+	// fails loudly rather than launching a tool that would read an empty
+	// credential and report nothing found.
+	Credentials func() (CredentialStore, error)
+
 	// Tracer for distributed tracing (OpenTelemetry).
 	// Used for creating spans around LLM operations, tool execution, etc.
 	// Optional: defaults to no-op tracer if nil.

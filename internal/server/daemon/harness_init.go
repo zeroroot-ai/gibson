@@ -79,6 +79,17 @@ func (d *daemonImpl) newHarnessFactory(ctx context.Context) (harness.HarnessFact
 		// (PluginInvokeService, see internal/platform/component/plugin_dispatch.go).
 		ComponentAccess: d.pluginAccessStore, // nil when no KeyProvider configured; harness skips opt-in checks
 
+		// Credentials resolves the secret a mission's target names, at tool
+		// dispatch (gibson#485). Read LAZILY from d.credentialStore: this
+		// function runs before initBrokerStack, which is what constructs that
+		// store, so capturing the value here would capture nil forever.
+		Credentials: func() (harness.CredentialStore, error) {
+			if d.credentialStore == nil {
+				return nil, fmt.Errorf("credential store is not initialized yet (broker stack not wired)")
+			}
+			return d.credentialStore, nil
+		},
+
 		// ComponentAuthorizer gates AGENT dispatch on can_execute (gibson#1595).
 		// The SAME FGA authorizer the callback service gets (daemon.go
 		// SetComponentAuthorizer), so a dispatch-time check matches the

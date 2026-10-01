@@ -10,6 +10,7 @@ import (
 	"fmt"
 	harnesspb "github.com/zeroroot-ai/sdk/api/gen/gibson/harness/v1"
 	"log/slog"
+	"strings"
 	"sync"
 	"time"
 
@@ -84,6 +85,15 @@ type DefaultAgentHarness struct {
 	missionCtx      MissionContext
 	targetInfo      TargetInfo
 	contextProvider MissionContextProvider
+
+	// credentials yields the store that resolves a tenant secret by name at
+	// tool dispatch, for a target that names one (gibson#485). It is the same
+	// store that serves HarnessCallbackService/GetCredential, so there is one
+	// secret-resolution path and not two. It is a function because the harness
+	// factory is constructed before the broker stack exists; see the field
+	// comment on HarnessConfig.Credentials. Unexported and untagged on purpose:
+	// the resolved plaintext must never reach a struct that serializes.
+	credentials func() (CredentialStore, error)
 
 	// Observability
 	tracer     trace.Tracer
@@ -791,7 +801,10 @@ func (h *DefaultAgentHarness) CallToolProto(ctx context.Context, name string, re
 	// tenant's can_execute (per-tenant enablement, gibson#1638) and dispatch it
 	// to the sandbox. This is the one gated path that replaces the ungated
 	// _system refresher lookup below (removed in gibson#1641).
-	if spec, ok := h.sandboxedToolSpecFromManifest(name); ok {
+	if spec, ok, specErr := h.sandboxedToolSpecFromManifest(ctx, name); ok {
+		if specErr != nil {
+			return specErr
+		}
 		if err := h.authorizeToolDispatch(ctx, name); err != nil {
 			return err
 		}
@@ -2098,19 +2111,97 @@ func (h *DefaultAgentHarness) liveScope(ctx context.Context) sandboxed.LiveScope
 	}
 }
 
-func (h *DefaultAgentHarness) sandboxedToolSpecFromManifest(name string) (sandboxed.ToolSpec, bool) {
+// envToolSecret carries the resolved plaintext of the secret the mission's
+// target names, and envToolSecretAuthType the shape it has, so a tool can
+// refuse a credential of the wrong kind rather than mis-parse it (gibson#485).
+//
+// The value reaches the sandbox the way an agent's provider credential already
+// does, by env, because that is the executor ABI: a tool is invoked with
+// GIBSON_TOOL_NAME and GIBSON_TOOL_INPUT_B64 and answers on stdout. The microVM
+// is the boundary (ADR-0052). It is NOT put in GIBSON_TOOL_INPUT_B64, which is
+// built from the mission definition and is logged and rendered.
+const (
+	envToolSecret         = "GIBSON_TOOL_SECRET"
+	envToolSecretAuthType = "GIBSON_TOOL_SECRET_AUTH_TYPE"
+)
+
+func (h *DefaultAgentHarness) sandboxedToolSpecFromManifest(ctx context.Context, name string) (sandboxed.ToolSpec, bool, error) {
 	entry, ok := componentcatalog.LookupTool(name)
 	if !ok || entry.DispatchMode != componentcatalog.DispatchModeSandboxed {
-		return sandboxed.ToolSpec{}, false
+		return sandboxed.ToolSpec{}, false, nil
 	}
+
+	env := map[string]string{"GIBSON_TOOL_NAME": name}
+	if err := h.injectTargetSecret(ctx, env); err != nil {
+		return sandboxed.ToolSpec{}, true, err
+	}
+
 	return sandboxed.ToolSpec{
 		Image:   entry.Image,
 		Command: append([]string(nil), entry.Command...),
-		Env:     map[string]string{"GIBSON_TOOL_NAME": name},
+		Env:     env,
 		VCPU:    entry.Resources.VCPU,
 		Memory:  entry.Resources.Memory,
 		Egress:  agentEgressCeiling(h.missionCtx.CurrentAgent),
-	}, true
+	}, true, nil
+}
+
+// injectTargetSecret resolves the secret the mission's target names and puts it
+// in the dispatch env. A target that names none is left untouched, which is
+// every target that exists today.
+//
+// Resolution is SERVER-SIDE and scoped to the mission's tenant. The tool never
+// names a secret, so it cannot name one it was not granted — the same property
+// ScopeID gets by being resolved from the target definition rather than from an
+// agent-supplied payload. It deliberately does NOT go through the FGA
+// can_resolve check that HarnessCallbackService/GetCredential makes: per
+// internal/platform/authz/model.fga, `secret.can_resolve` admits
+// plugin_principal and nothing else, and tool_principal has no relation to
+// secret at all. That absence is a structural gate asserted by
+// tests/e2e/secrets/non_plugin_deny_test.go, so a tool must never acquire that
+// relation. See the design note on gibson#485.
+//
+// Every failure is loud. The field it replaced, Target.credential_id, accepted a
+// value only when it parsed as a UUID and dropped it in silence otherwise,
+// which is how a mission could scan an authenticated endpoint, find nothing, and
+// report success.
+func (h *DefaultAgentHarness) injectTargetSecret(ctx context.Context, env map[string]string) error {
+	secretName := strings.TrimSpace(h.targetInfo.SecretName)
+	if secretName == "" {
+		return nil
+	}
+
+	if h.credentials == nil {
+		return types.WrapError(types.CREDENTIAL_INVALID,
+			fmt.Sprintf("target %q names secret %q but this daemon has no credential store wired, so the tool would run unauthenticated",
+				h.targetInfo.Name, secretName), nil)
+	}
+	store, storeErr := h.credentials()
+	if storeErr != nil {
+		return types.WrapError(types.CREDENTIAL_INVALID,
+			fmt.Sprintf("target %q names secret %q and the credential store is not usable", h.targetInfo.Name, secretName), storeErr)
+	}
+	if store == nil {
+		return types.WrapError(types.CREDENTIAL_INVALID,
+			fmt.Sprintf("target %q names secret %q and the credential store resolved nil", h.targetInfo.Name, secretName), nil)
+	}
+
+	_, secret, err := store.GetCredential(ctx, secretName)
+	if err != nil {
+		// The name is safe to report; the value is not, and no branch here logs it.
+		return types.WrapError(types.CREDENTIAL_NOT_FOUND,
+			fmt.Sprintf("target %q names secret %q, which did not resolve", h.targetInfo.Name, secretName), err)
+	}
+	if secret == "" {
+		return types.WrapError(types.CREDENTIAL_INVALID,
+			fmt.Sprintf("target %q names secret %q, which resolved empty", h.targetInfo.Name, secretName), nil)
+	}
+
+	env[envToolSecret] = secret
+	if authType := strings.TrimSpace(h.targetInfo.AuthType); authType != "" {
+		env[envToolSecretAuthType] = authType
+	}
+	return nil
 }
 
 func (h *DefaultAgentHarness) DelegateToAgent(ctx context.Context, name string, task agent.Task) (agent.Result, error) {

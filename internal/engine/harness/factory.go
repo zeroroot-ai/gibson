@@ -236,6 +236,7 @@ func (f *DefaultHarnessFactory) Create(agentName string, missionCtx MissionConte
 		factory:                 selfFactory,
 		missionCtx:              updatedMissionCtx,
 		targetInfo:              target,
+		credentials:             f.config.Credentials,
 		tracer:                  f.config.Tracer,
 		logger:                  logger,
 		metrics:                 f.config.Metrics,

@@ -695,13 +695,15 @@ func (m *missionManager) resolveRunTargetInfo(ctx context.Context, targetID type
 		m.logger.Error("failed to load target", "error", err, "target_id", targetID)
 		return harness.TargetInfo{}, fmt.Errorf("load target %s: %w", targetID, err)
 	}
+	// SecretName and AuthType are names, not values. The plaintext is resolved
+	// server-side at tool dispatch, under this mission's tenant (gibson#485).
 	return harness.NewTargetInfoFull(
 		target.ID,
 		target.Name,
 		target.URL,
 		target.Type,
 		target.Connection,
-	), nil
+	).WithSecret(target.SecretName, target.AuthType.String()), nil
 }
 
 // finalizeAuthzState transitions the run's authz record to its terminal state

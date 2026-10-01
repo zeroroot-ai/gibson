@@ -4,6 +4,7 @@
 package harness
 
 import (
+	"context"
 	"errors"
 	"log/slog"
 	"testing"
@@ -83,7 +84,10 @@ func TestToolGate_NilAuthorizer_FailsClosed(t *testing.T) {
 // launch command, and GIBSON_TOOL_NAME selecting the tool inside it.
 func TestSandboxedToolSpecFromManifest(t *testing.T) {
 	h := &DefaultAgentHarness{} // zero missionCtx is fine: agentEgressCeiling("") is nil
-	spec, ok := h.sandboxedToolSpecFromManifest("nmap")
+	spec, ok, err := h.sandboxedToolSpecFromManifest(context.Background(), "nmap")
+	if err != nil {
+		t.Fatalf("sandboxedToolSpecFromManifest: %v", err)
+	}
 	if !ok {
 		t.Fatal("nmap must resolve from the embedded manifest")
 	}
@@ -93,7 +97,7 @@ func TestSandboxedToolSpecFromManifest(t *testing.T) {
 	if spec.Image == "" || len(spec.Command) == 0 {
 		t.Errorf("spec must carry the executor image + command, got image=%q command=%v", spec.Image, spec.Command)
 	}
-	if _, ok := h.sandboxedToolSpecFromManifest("does-not-exist"); ok {
+	if _, ok, _ := h.sandboxedToolSpecFromManifest(context.Background(), "does-not-exist"); ok {
 		t.Error("an unknown tool must not resolve")
 	}
 }
