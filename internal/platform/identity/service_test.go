@@ -6,7 +6,11 @@ package identity
 import (
 	"context"
 	"errors"
+	"strings"
 	"testing"
+
+	"google.golang.org/grpc/codes"
+	"google.golang.org/grpc/status"
 
 	identitypb "github.com/zeroroot-ai/sdk/api/gen/gibson/identity/v1"
 	"github.com/zeroroot-ai/sdk/auth"
@@ -261,4 +265,82 @@ func TestWhoAmI_TargetNotFound(t *testing.T) {
 // silently skipped by every double that did not implement it.
 func (f *fakeAuthorizer) ListUsersOfType(context.Context, string, string, string, string) ([]string, error) {
 	return nil, nil
+}
+
+// strictFGA mimics OpenFGA's request validation: a user that is not
+// type:id is rejected with an invalid-argument error. It records the users
+// it saw for the plugin can_invoke listing.
+func strictFGA(pluginUsers *[]string) *fakeAuthorizer {
+	return &fakeAuthorizer{
+		listObjectsFn: func(user, relation, objectType string) ([]string, error) {
+			if !strings.Contains(user, ":") {
+				return nil, &authz.FgaError{
+					Sentinel: authz.ErrInvalidArgument,
+					Message:  "invalid 'user' value: the 'user' field must be an object",
+				}
+			}
+			if objectType == "plugin" && relation == "can_invoke" {
+				*pluginUsers = append(*pluginUsers, user)
+				return []string{"plugin:p1"}, nil
+			}
+			return nil, nil
+		},
+	}
+}
+
+// TestWhoAmI_HumanCaller: a human OIDC caller carries a bare subject. WhoAmI
+// must send FGA the user:<sub> form, not the bare subject (gibson#455).
+func TestWhoAmI_HumanCaller(t *testing.T) {
+	var pluginUsers []string
+	srv, err := NewServer(Config{Authorizer: strictFGA(&pluginUsers), Lookup: &fakeLookup{}})
+	if err != nil {
+		t.Fatalf("NewServer: %v", err)
+	}
+
+	ctx := ctxWithIdentity(t, "human-sub-1", "tenant-a")
+	resp, err := srv.WhoAmI(ctx, &identitypb.WhoAmIRequest{})
+	if err != nil {
+		t.Fatalf("WhoAmI: %v", err)
+	}
+	if got := resp.GetPrincipalId(); got != "human-sub-1" {
+		t.Errorf("principal_id = %q, want human-sub-1", got)
+	}
+	if len(pluginUsers) != 1 || pluginUsers[0] != "user:human-sub-1" {
+		t.Errorf("plugin can_invoke user = %v, want [user:human-sub-1]", pluginUsers)
+	}
+	if len(resp.GetPluginGrants()) != 1 {
+		t.Errorf("plugin grants = %v, want 1", resp.GetPluginGrants())
+	}
+}
+
+// TestWhoAmI_FGAErrorStatus: an FGA validation fault is InvalidArgument and an
+// outage is Unavailable. Neither is a bare Internal.
+func TestWhoAmI_FGAErrorStatus(t *testing.T) {
+	for _, tc := range []struct {
+		name     string
+		sentinel error
+		want     codes.Code
+	}{
+		{"invalid", authz.ErrInvalidArgument, codes.InvalidArgument},
+		{"unavailable", authz.ErrFgaUnavailable, codes.Unavailable},
+		{"timeout", authz.ErrFgaTimeout, codes.DeadlineExceeded},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			az := &fakeAuthorizer{listObjectsFn: func(_, relation, _ string) ([]string, error) {
+				if relation == "can_invoke" {
+					return nil, &authz.FgaError{Sentinel: tc.sentinel, Message: "x"}
+				}
+				return nil, nil
+			}}
+			srv, err := NewServer(Config{Authorizer: az, Lookup: &fakeLookup{}})
+			if err != nil {
+				t.Fatalf("NewServer: %v", err)
+			}
+			ctx := ctxWithIdentity(t, "human-sub-1", "tenant-a")
+			_, err = srv.WhoAmI(ctx, &identitypb.WhoAmIRequest{})
+			if got := status.Code(err); got != tc.want {
+				t.Fatalf("code = %v (%v), want %v", got, err, tc.want)
+			}
+		})
+	}
 }
