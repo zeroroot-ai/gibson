@@ -11,7 +11,7 @@
 # ============================================================================
 # Stage 1: Builder - Pure Go compilation (no CGO)
 # ============================================================================
-FROM ghcr.io/zeroroot-ai/mirror/golang:1.26.8-alpine@sha256:ce864e7223ac17b1775e6fd0b4c0db580c2eb50e7953a427916379e4b92a1628 AS builder
+FROM ghcr.io/zeroroot-ai/mirror/golang:1.27.1-alpine@sha256:8a5910f31396cd4d89662f56c68b3ae31d374308270a1c3bd96672ee5ed43414 AS builder
 
 # Install git and ca-certificates for dependency fetching
 RUN apk add --no-cache git ca-certificates

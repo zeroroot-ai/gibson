@@ -150,7 +150,7 @@ coverage-html: test-coverage
 # own Go toolchain (GOTOOLCHAIN below) so its embedded Go version is never lower
 # than go.mod's `go` target — golangci v2 refuses to load a newer target,
 # the known v2 trap that bit sdk#355 / adk#154.
-GOLANGCI_LINT_VERSION := v2.4.0
+GOLANGCI_LINT_VERSION := v2.14.0
 
 # Toolchain used to BUILD golangci-lint (and deadcode), derived from go.mod's
 # `go` directive so it can never drift when go.mod bumps (gibson#1234 — a
