@@ -179,7 +179,7 @@ jobs:
     # in the queue. Running both lanes would run the same vet/build/test twice
     # in the queue for no added signal.
     if: github.event_name == 'pull_request' && needs.changes.outputs.go == 'true'
-    uses: zeroroot-ai/.github/.github/workflows/reusable-go-ci.yml@1366fb5a29590e522bf5a74308f55bb39a4edb56 # v0.5.1
+    uses: zeroroot-ai/.github/.github/workflows/reusable-go-ci.yml@82522c83b5bef5c671e5da4e276238b175f3b2bd # v0.8.0
     with:
       tier: fast
       skip-lint: true # gibson runs its own pinned golangci-lint below (make lint)
@@ -199,7 +199,7 @@ jobs:
       fail-fast: false
       matrix:
         build_tags: ["", "setec_integration"]
-    uses: zeroroot-ai/.github/.github/workflows/reusable-go-ci.yml@1366fb5a29590e522bf5a74308f55bb39a4edb56 # v0.5.1
+    uses: zeroroot-ai/.github/.github/workflows/reusable-go-ci.yml@82522c83b5bef5c671e5da4e276238b175f3b2bd # v0.8.0
     with:
       tier: heavy
       build-tags: ${{ matrix.build_tags }}
