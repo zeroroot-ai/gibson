@@ -6,6 +6,7 @@ package brain
 import (
 	"context"
 	"testing"
+	"time"
 )
 
 // newReputationTestEngine wires a manually-ticked engine with the reputation
@@ -157,4 +158,37 @@ func TestReputationWorker_DrainIsQuiescentWithoutSettlements(t *testing.T) {
 	if n := w.Drain(context.Background()); n != 0 {
 		t.Fatalf("Drain recomputed %d reputations, want 0 (nothing settled)", n)
 	}
+}
+
+// TestWireReputation_UpdatesReputationOffTheTick is the end-to-end wiring test:
+// WireReputation's own ticker (not a test-driven Drain) recomputes the
+// reputation after a bet settles, and it is readable back through the belief
+// substrate. Mirrors TestWireVoIPlanner_ProducesAReplayablePlanOffTheTick.
+func TestWireReputation_UpdatesReputationOffTheTick(t *testing.T) {
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+	e := NewEngine("acme")
+	WireReputation(ctx, e, 5*time.Millisecond)
+
+	e.Submit(HypothesisObserved{HypothesisID: "hyp-1", ScopeID: "scope-a", Claim: "c", Technique: "t1190"})
+	e.Tick()
+	if _, err := e.SettleBetByHITL(ctx, BetHITLRequest{
+		HypothesisID: "hyp-1", Verdict: VerdictTruePositive, UserID: "reviewer-1",
+	}); err != nil {
+		t.Fatalf("SettleBetByHITL: %v", err)
+	}
+
+	substrate := NewWorldBeliefSubstrate(e)
+	deadline := time.Now().Add(2 * time.Second)
+	for time.Now().Before(deadline) {
+		e.Tick() // fold the settlement, then the worker's NodeBeliefSet write
+		if prior, ok, _ := ReadReputation(ctx, e.World.Tenant, "t1190", "scope-a", substrate); ok {
+			if prior != 1.0 {
+				t.Fatalf("PriorStrength = %v, want 1.0 (one TRUE settlement)", prior)
+			}
+			return
+		}
+		time.Sleep(5 * time.Millisecond)
+	}
+	t.Fatal("reputation was never written by the off-tick worker within the deadline")
 }
