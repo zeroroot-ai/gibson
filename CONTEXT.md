@@ -670,7 +670,56 @@ The node declares acceptance: verifier component and passing score. Each pass is
 in the run history.
 _Avoid_: loop node, retry edge, agent node (that one launches an ephemeral sandbox)
 
+### Users and roles (decided 2026-09-25, grill on hosted#185 follow-up)
+
+**Tenant user**:
+A person who belongs to exactly one tenant, as a user of that tenant's Zitadel org; Zitadel is the authority for who they are and whether they may sign in.
+_Avoid_: member (a **Member** is one instance in a bank), account
+
+**Tenant role**:
+A tenant user's standing in one tenant. It is written only in Zitadel, as an app role granted on the gibson project, and every access check reads it from its FGA copy; the role claim in a sign-in token is never trusted for access.
+_Avoid_: org membership, Zitadel admin role
+
+**Owner**:
+The tenant role with every right in a tenant, including billing and deleting the tenant. A tenant has exactly one Owner at every moment.
+_Avoid_: super-admin, root, co-owner
+
+**Admin**:
+The tenant role that manages tenant users, their roles below Owner, and the tenant's settings and connectors.
+_Avoid_: manager, org admin
+
+**Editor**:
+The tenant role that runs missions and changes components and data (FGA relation `writer`).
+_Avoid_: writer (the FGA name), contributor
+
+**Viewer**:
+The tenant role with read-only access (FGA relation `member`); agents, tools and plugins enter FGA at the same level through Capability Grants, never through a tenant role.
+_Avoid_: member (a **Member** is one instance in a bank), reader
+
+**Ownership transfer**:
+The only way a tenant's Owner changes: the current Owner hands ownership to an existing tenant user of that tenant, who becomes Owner while the previous Owner becomes Admin, all at once or not at all.
+_Avoid_: assigning Owner, promoting to Owner
+
+**Platform owner**:
+The one person who owns an install: the only human with a Zitadel admin role and the only holder of the FGA `platform_owner` relation, created from an install value at first boot and never a tenant role.
+_Avoid_: platform operator, super-admin, root user
+
+**Invitation**:
+An Admin's or Owner's offer of a tenant role to an email address; the inviter always sees it as sent, and only the invitee learns if their address already belongs to another tenant, because an email address can belong to one tenant user in the whole install.
+_Avoid_: invite link (the link is only its delivery), membership request
+
+**Removal**:
+Ending a tenant user's place in their tenant: every session is revoked at once and their Zitadel account is deleted, while their work stays in the tenant under the name recorded at the time; the Owner cannot be removed.
+_Avoid_: deactivation, suspension, kick
+
+**MFA reset**:
+An Owner's or Admin's action that revokes a tenant user's sessions, clears their second factors and emails a setup link to that user's own address, so the person resetting never gains access; the Platform owner's reset is a reviewed change in git, never an action on the live cluster.
+_Avoid_: account recovery, password reset (a different, self-service flow)
+
 ## Flagged ambiguities (component authorization)
+
+- "platform operator" named three different things (resolved 2026-09-25): **platform-operator** is the Kubernetes controller that bootstraps Zitadel; `platform_operator` is an FGA relation held only by platform service accounts, never a person; the person who owns the install is the **Platform owner**, whose FGA relation is `platform_owner`.
+- "member" named both a bank instance and the lowest tenant level (resolved 2026-09-25): a **Member** is a bank instance; the lowest tenant role is **Viewer**.
 
 - **Canonical component object ref** — RESOLVED 2026-08-27: **`component:<kind>/<name>` for
   all four kinds** (prevents cross-kind name collisions; matches the dashboard + connectors).
@@ -690,6 +739,10 @@ _Avoid_: loop node, retry edge, agent node (that one launches an ephemeral sandb
   commands). No sync pipeline — one prose copy.
 
 ## Relationships
+
+- A **Tenant user** belongs to exactly one tenant and holds exactly one **Tenant role** in it; the tenant is read from the user's verified identity, never from anything the client sends.
+- A tenant has exactly one **Owner**; it changes only by **Ownership transfer**.
+- The **Platform owner** belongs to no tenant.
 
 - **OSS boundary:** gibson is **OSS and multi-tenant** (a self-hoster's teams get real
   tenancy with the per-tenant isolation above). The *only* commercial coupling is the payment
