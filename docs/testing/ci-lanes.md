@@ -163,7 +163,7 @@ kind cluster on `ubuntu-latest`, brought up through hosted's
 `make substrate ENV=kind` and `make recreate ENV=kind` (charts `main`,
 `RUNG=ci`) with Envoy, Zitadel, SPIRE and a test-mode daemon. Per ADR-0012
 these workflows run on `main` and on a schedule, never on a pull request.
-They feed the launch scorecard and block nothing.
+They block nothing.
 
 Two ways a suite reaches the cluster:
 
