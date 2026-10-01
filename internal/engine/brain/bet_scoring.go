@@ -4,10 +4,21 @@
 package brain
 
 // bet_scoring.go is gibson#277: score a settled bet under a proper scoring
-// rule (ADR-0022) — the training signal braintrain consumes, and the same
-// rule B's read-side reliability metric already reports in aggregate
-// (calibration.go, gibson#284, TechniqueCalibration.BrierScore is the mean
-// of exactly the per-bet values this file computes).
+// rule (ADR-0022) — the CALIBRATION/reliability signal ("does 0.8 mean 80%?"),
+// the same rule B's read-side reliability metric reports in aggregate
+// (calibration.go, gibson#284, TechniqueCalibration.BrierScore is the mean of
+// exactly the per-bet values this file computes).
+//
+// The Brier score is NOT a braintrain training input, and must not become one:
+// the offline trainer learns from OUTCOMES, not from scores — Beta-Bernoulli
+// over recorded (evidence → outcome) rows and per-edge-type outcomes
+// (braintrain/train.go, braintrain/edge_posterior.go), never a squared-error
+// score. The settled-bet learning loop is reputation (gibson#267): a settled
+// bet updates its technique×environment reputation (reputation_worker.go),
+// which feeds new hypotheses' priors and the fleet's pursuit priority. Emitting
+// the score as a second "settled-bet → training row" path would be a forbidden
+// parallel codepath (ADR-0027) duplicating that loop. Scoring here answers "how
+// well-calibrated was the stake", a separate question from "what to learn".
 //
 // The score is computed HERE, at settlement time, from the confidence the
 // caller declares was staked (BetSettlement.PredictedProbability) and the
