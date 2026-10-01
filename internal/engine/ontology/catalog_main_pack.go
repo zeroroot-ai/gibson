@@ -53,6 +53,11 @@ func MainDomainPack() DomainPack {
 		TaxonomyNodeLabels:        []string{"WebEndpoint"},
 		TaxonomyRelationshipTypes: []string{"EXPOSES"},
 
+		// The written key form of each node label (gibson#484). A web endpoint
+		// is identified by its URL — unique by construction, so two producers of
+		// one endpoint merge on the same node instead of splitting it.
+		TaxonomyNodeIdentity: map[string]string{"WebEndpoint": "url"},
+
 		// A skeleton, representative set of technique -> CEL bindings —
 		// enough to prove the enable path end to end, not a fully-fleshed
 		// vertical (gibson#382 scope). Keyed by ValidIdentifier-shaped
