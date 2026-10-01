@@ -38,6 +38,14 @@ type recordingVaultAdmin struct {
 	postgresWritten map[string]pdataplane.PostgresCredentials
 	redisWritten    map[string]pdataplane.RedisCredentials
 	vectorWritten   map[string]pdataplane.VectorCredentials
+	// vectorWrites counts WriteInfraVector calls per tenant. A test that only
+	// asserts presence cannot tell "written once" from "written on every
+	// reconcile", and that difference is the whole contract.
+	vectorWrites map[string]int
+	// vectorWriteErr, when set, fails the next WriteInfraVector call and then
+	// clears itself. It reproduces the saga retry: the index is created, the
+	// credential write fails, the step runs again.
+	vectorWriteErr error
 }
 
 func newRecordingVaultAdmin() *recordingVaultAdmin {
@@ -45,6 +53,7 @@ func newRecordingVaultAdmin() *recordingVaultAdmin {
 		postgresWritten: map[string]pdataplane.PostgresCredentials{},
 		redisWritten:    map[string]pdataplane.RedisCredentials{},
 		vectorWritten:   map[string]pdataplane.VectorCredentials{},
+		vectorWrites:    map[string]int{},
 	}
 }
 
@@ -87,7 +96,12 @@ func (r *recordingVaultAdmin) DeleteInfraRedis(_ context.Context, _ string) erro
 func (r *recordingVaultAdmin) WriteInfraVector(_ context.Context, tenantID string, creds pdataplane.VectorCredentials) error {
 	r.mu.Lock()
 	defer r.mu.Unlock()
+	if err := r.vectorWriteErr; err != nil {
+		r.vectorWriteErr = nil
+		return err
+	}
 	r.vectorWritten[tenantID] = creds
+	r.vectorWrites[tenantID]++
 	return nil
 }
 func (r *recordingVaultAdmin) DeleteInfraVector(_ context.Context, _ string) error { return nil }

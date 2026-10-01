@@ -5,6 +5,7 @@ package dataplane
 
 import (
 	"context"
+	"errors"
 	"strings"
 	"testing"
 
@@ -188,7 +189,15 @@ func TestRedisVSSProvisionRequiresAddr(t *testing.T) {
 	}
 }
 
-func TestRedisVSSVaultWriteSkippedOnIdempotentProvision(t *testing.T) {
+// TestRedisVSSVaultWriteRepeatsOnIdempotentProvision pins the contract that
+// every successful Provision records the index name, including the attempt that
+// finds the index already there.
+//
+// This test replaces TestRedisVSSVaultWriteSkippedOnIdempotentProvision, which
+// was named for the opposite behavior and asserted neither: it only checked that
+// the map held a key, so it passed whether the write happened once, twice or on
+// every reconcile. It could not fail.
+func TestRedisVSSVaultWriteRepeatsOnIdempotentProvision(t *testing.T) {
 	t.Parallel()
 	mr := miniredis.RunT(t)
 	registerFTCommands(t, mr)
@@ -204,20 +213,59 @@ func TestRedisVSSVaultWriteSkippedOnIdempotentProvision(t *testing.T) {
 	t.Cleanup(func() { _ = p.Close() })
 
 	ctx := context.Background()
-	// First call: creates index + writes Vault.
-	if err := p.Provision(ctx, "acme-corp"); err != nil {
-		t.Fatalf("first Provision: %v", err)
-	}
-	// Second call: index already exists — Vault write must be skipped.
-	if err := p.Provision(ctx, "acme-corp"); err != nil {
-		t.Fatalf("second Provision: %v", err)
+	for i := 1; i <= 2; i++ {
+		if err := p.Provision(ctx, "acme-corp"); err != nil {
+			t.Fatalf("Provision attempt %d: %v", i, err)
+		}
 	}
 
 	rec.mu.Lock()
 	defer rec.mu.Unlock()
-	// Must be recorded exactly once.
-	if _, ok := rec.vectorWritten["acme-corp"]; !ok {
-		t.Fatalf("WriteInfraVector was never called for acme-corp")
+	if got := rec.vectorWrites["acme-corp"]; got != 2 {
+		t.Fatalf("WriteInfraVector calls = %d, want 2 (the already-exists path must still record the name)", got)
+	}
+	if got := rec.vectorWritten["acme-corp"].IndexName; got != "vector_idx:tenant_acme_corp" {
+		t.Fatalf("recorded index name = %q", got)
+	}
+}
+
+// TestRedisVSSProvisionRecordsIndexAfterVaultWriteRetry is the reachable state
+// that the old early return made permanent.
+//
+// Attempt 1 creates the index and fails the Vault write, so the saga retries.
+// Attempt 2 finds the index already there. If the step returns early on that
+// path, the index exists forever with no recorded name, and the daemon reports
+// the tenant unprovisioned for every vector-backed read (gibson#468).
+func TestRedisVSSProvisionRecordsIndexAfterVaultWriteRetry(t *testing.T) {
+	t.Parallel()
+	mr := miniredis.RunT(t)
+	registerFTCommands(t, mr)
+
+	rec := newRecordingVaultAdmin()
+	rec.vectorWriteErr = errors.New("vault unreachable")
+	p, err := NewRedisVSSProvisioner(RedisVSSConfig{
+		Addr:        mr.Addr(),
+		VaultClient: rec,
+	})
+	if err != nil {
+		t.Fatalf("NewRedisVSSProvisioner: %v", err)
+	}
+	t.Cleanup(func() { _ = p.Close() })
+
+	ctx := context.Background()
+	if err := p.Provision(ctx, "acme-corp"); err == nil {
+		t.Fatal("attempt 1: expected the injected Vault write failure")
+	}
+
+	// The retry: the index is already there.
+	if err := p.Provision(ctx, "acme-corp"); err != nil {
+		t.Fatalf("attempt 2: %v", err)
+	}
+
+	rec.mu.Lock()
+	defer rec.mu.Unlock()
+	if got := rec.vectorWritten["acme-corp"].IndexName; got != "vector_idx:tenant_acme_corp" {
+		t.Fatalf("index name after retry = %q, want it recorded", got)
 	}
 }
 

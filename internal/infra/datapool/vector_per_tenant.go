@@ -5,6 +5,7 @@ package datapool
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"strings"
 
@@ -12,36 +13,89 @@ import (
 	"github.com/zeroroot-ai/sdk/auth"
 )
 
-// vectorPerTenant wraps the vectordb.Driver to provide per-tenant collection
-// access. The collection name is tenant_<sanitized_tenantID>.
-type vectorPerTenant struct {
-	driver vectordb.Driver
+// VectorIndexResolver resolves the RediSearch index name for one tenant.
+//
+// The tenant-operator creates the index and records its name in Vault at
+// tenant/<id>/infra/vector (pkg/platform/dataplane.VectorCredentials). Vault is
+// the one source of truth for the name: the datapool layer must not derive it,
+// because a second derivation is a second thing to keep in step with the
+// operator (gibson#106 keeps Vault reads out of this layer, so the daemon
+// supplies the closure).
+type VectorIndexResolver interface {
+	// VectorIndex returns the full index name, for example
+	// "vector_idx:tenant_acme". An empty name means the tenant has no vector
+	// collection, which the caller reports as *NotProvisionedError.
+	VectorIndex(ctx context.Context, tenant auth.TenantID) (string, error)
 }
 
-func newVectorPerTenant(driver vectordb.Driver) *vectorPerTenant {
-	return &vectorPerTenant{driver: driver}
+// VectorIndexResolverFunc adapts a function to VectorIndexResolver.
+type VectorIndexResolverFunc func(ctx context.Context, tenant auth.TenantID) (string, error)
+
+// VectorIndex implements VectorIndexResolver.
+func (f VectorIndexResolverFunc) VectorIndex(ctx context.Context, tenant auth.TenantID) (string, error) {
+	return f(ctx, tenant)
+}
+
+// validateVectorConfig refuses a half-configured vector store.
+//
+// An address with no resolver cannot name an index, and a resolver with no
+// address has nothing to dial. Either way every vector-backed read refuses,
+// and it refuses with "no vector collection provisioned", which reads as a
+// provisioning gap on the tenant rather than a configuration gap on the
+// daemon. That mistranslation is gibson#468, so the config fails loudly
+// instead.
+func validateVectorConfig(cfg Config) error {
+	hasAddr := cfg.VectorStoreAddr != ""
+	hasResolver := cfg.VectorIndexResolver != nil
+	if hasAddr == hasResolver {
+		return nil
+	}
+	return fmt.Errorf(
+		"VectorStoreAddr and VectorIndexResolver must be set together (addr set: %t, resolver set: %t)",
+		hasAddr, hasResolver)
+}
+
+// vectorPerTenant wraps the vectordb.Driver to provide per-tenant index
+// access. The index name comes from the resolver, never from this package.
+type vectorPerTenant struct {
+	driver   vectordb.Driver
+	resolver VectorIndexResolver
+}
+
+func newVectorPerTenant(driver vectordb.Driver, resolver VectorIndexResolver) *vectorPerTenant {
+	return &vectorPerTenant{driver: driver, resolver: resolver}
 }
 
 // ForTenant returns a vectordb.Client bound to the tenant's dedicated
-// collection (tenant_<sanitized>).
+// RediSearch index.
 //
-// Returns *NotProvisionedError if the collection does not exist.
+// Returns *NotProvisionedError when the tenant has no index recorded, and when
+// the recorded index does not exist in the store.
 func (v *vectorPerTenant) ForTenant(ctx context.Context, tenant auth.TenantID) (vectordb.Client, error) {
-	sanitized, err := sanitizeForVector(tenant.String())
+	index, err := v.resolver.VectorIndex(ctx, tenant)
 	if err != nil {
-		return nil, err
+		var np *NotProvisionedError
+		if errors.As(err, &np) {
+			return nil, err
+		}
+		return nil, fmt.Errorf("datapool: vector: resolve index for tenant %s: %w", tenant, err)
 	}
-	collection := "tenant_" + sanitized
+	if index == "" {
+		return nil, &NotProvisionedError{
+			Tenant: tenant.String(),
+			Reason: "no vector index recorded at infra/vector",
+		}
+	}
 
-	client, err := v.driver.For(ctx, collection)
+	client, err := v.driver.For(ctx, index)
 	if err != nil {
-		if isVectorCollectionNotExist(err, collection) {
+		if isVectorCollectionNotExist(err, index) {
 			return nil, &NotProvisionedError{
 				Tenant: tenant.String(),
-				Reason: fmt.Sprintf("vector collection %q does not exist", collection),
+				Reason: fmt.Sprintf("vector index %q does not exist", index),
 			}
 		}
-		return nil, fmt.Errorf("datapool: vector: failed to get client for tenant %s (collection %s): %w", tenant, collection, err)
+		return nil, fmt.Errorf("datapool: vector: failed to get client for tenant %s (index %s): %w", tenant, index, err)
 	}
 	return client, nil
 }
@@ -51,32 +105,15 @@ func (v *vectorPerTenant) Close() error {
 	return v.driver.Close()
 }
 
-// sanitizeForVector converts a tenant ID string to a safe vector collection
-// name component. Collection names follow the same rules as Neo4j database
-// names: lowercase letters, digits, and underscores.
-func sanitizeForVector(tenantID string) (string, error) {
-	if tenantID == "" {
-		return "", fmt.Errorf("datapool: vector: empty tenant ID")
-	}
-	replaced := strings.ReplaceAll(tenantID, "-", "_")
-	for _, c := range replaced {
-		if !((c >= 'a' && c <= 'z') || (c >= '0' && c <= '9') || c == '_') {
-			return "", fmt.Errorf("datapool: vector: tenant ID %q contains character %q unsafe for vector collection names", tenantID, c)
-		}
-	}
-	return replaced, nil
-}
-
 // isVectorCollectionNotExist returns true if the error indicates the vector
-// collection does not exist. The exact check depends on the underlying vector
-// store; the Redis VSS adapter populates errors with the collection name
-// in a detectable way.
-func isVectorCollectionNotExist(err error, collection string) bool {
+// index does not exist. The Redis VSS adapter populates errors with the index
+// name in a detectable way.
+func isVectorCollectionNotExist(err error, index string) bool {
 	if err == nil {
 		return false
 	}
 	msg := err.Error()
 	return strings.Contains(msg, "not found") ||
 		strings.Contains(msg, "does not exist") ||
-		strings.Contains(msg, fmt.Sprintf("collection %q", collection))
+		strings.Contains(msg, fmt.Sprintf("index %q", index))
 }

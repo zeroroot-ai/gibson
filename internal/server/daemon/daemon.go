@@ -1386,6 +1386,49 @@ func (d *daemonImpl) Start(ctx context.Context) error {
 				}
 				return creds.DSN, creds.Database, nil
 			})
+
+			// The vector handle (gibson#468). The tenant-operator creates the
+			// per-tenant RediSearch index on the same Redis Stack instance the
+			// cache and the Timeline use, and records its name in Vault at
+			// tenant/<id>/infra/vector. Both halves must be set: NewPool refuses
+			// a config that carries an address and no resolver, because the
+			// half-configured case is exactly how every vector-backed graph read
+			// came to answer "no vector collection provisioned" on a cluster
+			// whose index existed.
+			//
+			// Without this, `recall`, QueryNodes, FindSimilarAttacks,
+			// FindSimilarFindings, GetRelatedFindings and GetAttackChains refuse
+			// for every tenant, so an agent can write a memory and never read
+			// one back.
+			// No Redis address means no vector store to reach, and the XOR check
+			// in NewPool refuses a resolver with no address, so both stay unset.
+			if poolCfg.RedisAddr == "" {
+				d.logger.Warn(ctx, "vector store not wired: no redis address resolved (vector-backed graph reads will refuse)")
+			} else {
+				poolCfg.VectorStoreAddr = poolCfg.RedisAddr
+				poolCfg.VectorIndexResolver = datapool.VectorIndexResolverFunc(func(ctx context.Context, tenant auth.TenantID) (string, error) {
+					if d.secretsService == nil {
+						return "", &datapool.NotProvisionedError{
+							Tenant: tenant.String(),
+							Reason: "vector index resolver: secrets broker not yet initialized",
+						}
+					}
+					ctxWithTenant := auth.WithTenant(ctx, tenant)
+					raw, getErr := d.secretsService.Resolve(ctxWithTenant, pdataplane.VaultPathInfraVector)
+					if getErr != nil {
+						return "", &datapool.NotProvisionedError{
+							Tenant: tenant.String(),
+							Reason: fmt.Sprintf("vault read of %s failed: %v", pdataplane.VaultPathInfraVector, getErr),
+						}
+					}
+					var creds pdataplane.VectorCredentials
+					if jsonErr := json.Unmarshal(raw, &creds); jsonErr != nil {
+						return "", fmt.Errorf("vector index resolver: malformed VectorCredentials JSON in Vault: %w", jsonErr)
+					}
+					return creds.IndexName, nil
+				})
+			}
+
 			p, poolErr := datapool.NewPool(ctx, poolCfg, keyProvider, nil)
 			if poolErr != nil {
 				d.logger.Warn(ctx, "data-plane pool initialization failed (per-tenant store ops will be unavailable)",

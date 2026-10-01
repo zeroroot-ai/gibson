@@ -71,8 +71,21 @@ type Config struct {
 	// Neo4jPassword is the Neo4j password.
 	Neo4jPassword string
 
-	// VectorStoreAddr is the host:port of the vector store.
+	// VectorStoreAddr is the host:port of the vector store. The RediSearch
+	// index shares the Redis Stack instance the cache and the Timeline use, so
+	// this is normally the same address as RedisAddr.
+	//
+	// Set it together with VectorIndexResolver. NewPool refuses a config that
+	// carries one and not the other, because the half-configured case is how
+	// every vector-backed graph read came to answer "no vector collection
+	// provisioned" on a cluster whose index existed (gibson#468).
 	VectorStoreAddr string
+
+	// VectorIndexResolver resolves the per-tenant RediSearch index name. The
+	// daemon wires a closure that reads VectorCredentials from the secrets
+	// broker at tenant/<id>/infra/vector, the same layering as
+	// PostgresDSNResolver (gibson#106).
+	VectorIndexResolver VectorIndexResolver
 
 	// Neo4jResolver is the per-tenant endpoint resolver used to construct
 	// per-tenant Neo4j drivers. When set, Neo4jURI/Neo4jUser/Neo4jPassword are
