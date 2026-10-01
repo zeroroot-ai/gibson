@@ -213,5 +213,5 @@ asserts lifecycle and deliverables rather than model text: two members reach
 `idle`, a job turns one member `busy`, the worktree exists on the job branch,
 the verifier fails pass one and the same session takes pass two, `CloseJob`
 lands, the worktree is gone, the push and the merge request are recorded, the
-member is `idle` again, and a sender without `can_send` is refused. It feeds
-the launch scorecard and blocks nothing.
+member is `idle` again, and a sender without `can_send` is refused. It blocks
+nothing.
