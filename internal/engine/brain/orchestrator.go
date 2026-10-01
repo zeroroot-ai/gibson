@@ -125,6 +125,7 @@ type MissionCreated struct {
 	CreatedBy   principal.Principal
 }
 
+// Kind names the event in the timeline.
 func (MissionCreated) Kind() string { return "mission.created" }
 
 func applyMissionCreated(w *World, e MissionCreated) {
