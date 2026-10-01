@@ -1,5 +1,12 @@
 # Changelog
 
+## [0.148.1](https://github.com/zeroroot-ai/gibson/compare/v0.148.0...v0.148.1) (2026-10-01)
+
+
+### Bug Fixes
+
+* **daemon:** the tenant header is required only where the rule needs the tenant ([#460](https://github.com/zeroroot-ai/gibson/issues/460)) ([041d6aa](https://github.com/zeroroot-ai/gibson/commit/041d6aafffc24460bfa347e3bad00e5ec9d1bbd4))
+
 ## [0.148.0](https://github.com/zeroroot-ai/gibson/compare/v0.147.0...v0.148.0) (2026-10-01)
 
 
