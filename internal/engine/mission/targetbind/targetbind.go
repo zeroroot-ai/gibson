@@ -274,16 +274,19 @@ func walkMap(fd protoreflect.FieldDescriptor, at string, mp protoreflect.Map, vi
 				rekeys = append(rekeys, rekey{from: k, to: protoreflect.ValueOfString(out).MapKey(), value: v})
 			}
 		}
-		// Two kinds of the seventeen matter, and they are tested for rather than
-		// switched on: a placeholder is text, so a number, a bool or an enum has
-		// nothing to bind, and listing fifteen no-op cases would be noise that
+		// An if chain, not a switch. Two kinds of the seventeen matter: a
+		// placeholder is text, so a number, a bool or an enum has nothing to
+		// bind. A tagged switch makes `exhaustive` demand all seventeen cases
+		// (default-signifies-exhaustive is false here), and a tagless one makes
+		// staticcheck QF1002 ask for the tagged form back. The two cannot both
+		// be satisfied by a switch, and fifteen no-op cases would be noise that
 		// goes stale the next time protobuf adds a kind.
-		switch kind := fd.MapValue().Kind(); {
-		case kind == protoreflect.StringKind:
+		kind := fd.MapValue().Kind()
+		if kind == protoreflect.StringKind {
 			if out, ok := visit(where, v.String()); ok {
 				mp.Set(k, protoreflect.ValueOfString(out))
 			}
-		case kind == protoreflect.MessageKind || kind == protoreflect.GroupKind:
+		} else if kind == protoreflect.MessageKind || kind == protoreflect.GroupKind {
 			walkStrings(v.Message(), where, visit)
 		}
 		return true
@@ -297,13 +300,13 @@ func walkMap(fd protoreflect.FieldDescriptor, at string, mp protoreflect.Map, vi
 func walkList(fd protoreflect.FieldDescriptor, at string, list protoreflect.List, visit func(path, in string) (string, bool)) {
 	for i := range list.Len() {
 		where := fmt.Sprintf("%s[%d]", at, i)
-		// Tested rather than switched on, for the reason walkMap gives.
-		switch kind := fd.Kind(); {
-		case kind == protoreflect.StringKind:
+		// An if chain for the reason walkMap gives.
+		kind := fd.Kind()
+		if kind == protoreflect.StringKind {
 			if out, ok := visit(where, list.Get(i).String()); ok {
 				list.Set(i, protoreflect.ValueOfString(out))
 			}
-		case kind == protoreflect.MessageKind || kind == protoreflect.GroupKind:
+		} else if kind == protoreflect.MessageKind || kind == protoreflect.GroupKind {
 			walkStrings(list.Get(i).Message(), where, visit)
 		}
 	}
