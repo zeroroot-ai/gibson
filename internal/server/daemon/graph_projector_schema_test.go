@@ -335,3 +335,23 @@ func TestNeo4jGraphWriter_EnsuresSchemaOnceBeforeFirstWrite(t *testing.T) {
 		t.Errorf("statements after the schema are not the two data writes")
 	}
 }
+
+// constraintGaps reports every label of reg that no statement in stmts
+// constrains or indexes. An empty result is the invariant.
+func constraintGaps(reg *taxonomy.Registry, stmts []string) []string {
+	var gaps []string
+	for _, label := range reg.NodeLabels() {
+		needle := "(n:" + label + ")"
+		covered := false
+		for _, s := range stmts {
+			if strings.Contains(s, needle) {
+				covered = true
+				break
+			}
+		}
+		if !covered {
+			gaps = append(gaps, label)
+		}
+	}
+	return gaps
+}

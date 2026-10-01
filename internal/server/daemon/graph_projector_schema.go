@@ -62,6 +62,15 @@ func identityForLabel(label string) labelIdentity {
 	case "Mission":
 		return labelIdentity{props: []string{"id"}, unique: true}
 	}
+	// This MUST mirror entityIdentity in graph_projector_neo4j.go. The schema
+	// constrains the property the projector merges on; if the two disagree the
+	// constraint covers no node the projector writes, which is the defect this
+	// file exists to fix, inverted.
+	//
+	// So a runtime-promoted label (taxonomy discovery, gibson#484/#489) is keyed
+	// on brain_id by REGISTERING it in entityIdentityProperty, never by
+	// defaulting here: a default that said brain_id while the projector still
+	// merged on key would recreate exactly that mismatch.
 	prop := entityIdentityProperty[label]
 	if prop == "" {
 		prop = "key"
@@ -149,26 +158,6 @@ func schemaDDL(reg *taxonomy.Registry) []string {
 	ddl := constraintStatements(reg)
 	ddl = append(ddl, indexStatements()...)
 	return append(ddl, versionConstraint)
-}
-
-// constraintGaps reports every label of reg that no statement in stmts
-// constrains or indexes. An empty result is the invariant.
-func constraintGaps(reg *taxonomy.Registry, stmts []string) []string {
-	var gaps []string
-	for _, label := range reg.NodeLabels() {
-		needle := "(n:" + label + ")"
-		covered := false
-		for _, s := range stmts {
-			if strings.Contains(s, needle) {
-				covered = true
-				break
-			}
-		}
-		if !covered {
-			gaps = append(gaps, label)
-		}
-	}
-	return gaps
 }
 
 // cypherExec runs one statement in its own transaction. DDL cannot share a
