@@ -147,9 +147,10 @@ type BetSettlement struct {
 	// BrierScore is this one bet's proper-scoring-rule score (ADR-0022):
 	// the squared error between PredictedProbability and the observed
 	// outcome (1.0 for TRUE, 0.0 for FALSE), computed once at settlement
-	// time by whichever of the three orchestrators settled it. This is the
-	// training signal braintrain consumes and the per-bet value gibson#284's
-	// TechniqueCalibration.BrierScore aggregate is a mean of. See
+	// time by whichever of the three orchestrators settled it. It is the
+	// per-bet CALIBRATION signal gibson#284's TechniqueCalibration.BrierScore
+	// aggregate is a mean of — NOT a braintrain training input (the offline
+	// trainer learns from outcomes, not scores; see bet_scoring.go). See
 	// bet_scoring.go.
 	BrierScore float64
 	ScopeID    string
