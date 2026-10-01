@@ -5,6 +5,8 @@ package taxonomy
 
 import (
 	"errors"
+	"fmt"
+	"sync"
 	"testing"
 
 	"github.com/stretchr/testify/assert"
@@ -377,4 +379,114 @@ func TestPromotedIdentityProperty_AccountsForEveryKind(t *testing.T) {
 
 	// Relationship types are edges: no node identity, accounted for as empty.
 	require.Empty(t, PromotedIdentityProperty(ProposedRelationshipType))
+}
+
+// -----------------------------------------------------------------------
+// Identity accessor + promotion hook (gibson#484): the seam the graph
+// projector consults. IdentityProperty resolves a promoted node label's key
+// form on the entity-write hot path; OnPromote notifies subscribers so they
+// can re-ensure the uniqueness constraint.
+// -----------------------------------------------------------------------
+
+func TestIdentityProperty_ResolvesAPromotedNodeLabel(t *testing.T) {
+	const label = "AccessorContainer"
+	gate := NewPromotionGate(testBase(t))
+	for range MinRecurrenceForSettlement {
+		gate.Observe(ProposedNodeLabel, label)
+	}
+	require.NoError(t, gate.Confirm(ProposedNodeLabel, label, "reviewer"))
+	_, err := gate.Promote(ProposedNodeLabel, label)
+	require.NoError(t, err)
+
+	prop, ok := IdentityProperty(label)
+	require.True(t, ok)
+	assert.Equal(t, DiscoveredNodeIdentityProperty, prop)
+
+	// A label that was never promoted is not accounted for.
+	_, ok = IdentityProperty("NeverPromotedLabel")
+	assert.False(t, ok)
+}
+
+// OnPromote fires with the label of a promoted node label.
+func TestOnPromote_FiresForPromotedNodeLabel(t *testing.T) {
+	const label = "HookContainer"
+	got := make(chan string, 1)
+	OnPromote(func(l string) {
+		if l == label {
+			select {
+			case got <- l:
+			default:
+			}
+		}
+	})
+
+	gate := NewPromotionGate(testBase(t))
+	for range MinRecurrenceForSettlement {
+		gate.Observe(ProposedNodeLabel, label)
+	}
+	require.NoError(t, gate.Confirm(ProposedNodeLabel, label, "reviewer"))
+	_, err := gate.Promote(ProposedNodeLabel, label)
+	require.NoError(t, err)
+
+	select {
+	case l := <-got:
+		assert.Equal(t, label, l)
+	default:
+		t.Fatal("OnPromote hook did not fire for the promoted node label")
+	}
+}
+
+// A relationship type is an edge: not published to the registry, and it does
+// not fire OnPromote (no node identity, no node uniqueness constraint).
+func TestOnPromote_DoesNotFireForRelationshipType(t *testing.T) {
+	const rel = "HOOK_RUNS_ON"
+	fired := false
+	OnPromote(func(l string) {
+		if l == rel {
+			fired = true
+		}
+	})
+
+	gate := NewPromotionGate(testBase(t))
+	for range MinRecurrenceForSettlement {
+		gate.Observe(ProposedRelationshipType, rel)
+	}
+	require.NoError(t, gate.Confirm(ProposedRelationshipType, rel, "reviewer"))
+	_, err := gate.Promote(ProposedRelationshipType, rel)
+	require.NoError(t, err)
+
+	assert.False(t, fired, "a relationship type must not fire OnPromote")
+	_, ok := IdentityProperty(rel)
+	assert.False(t, ok, "a relationship type has no node identity")
+}
+
+// IdentityProperty is safe for concurrent reads while promotions write the
+// registry. Run with -race.
+func TestIdentityProperty_ConcurrentReadsDuringPromotion(t *testing.T) {
+	const readLabel = "RaceReadLabel"
+	var wg sync.WaitGroup
+
+	for w := range 8 {
+		wg.Add(1)
+		go func(w int) {
+			defer wg.Done()
+			for i := range 300 {
+				recordPromotion(fmt.Sprintf("RaceLabel_%d_%d", w, i), DiscoveredNodeIdentityProperty)
+			}
+		}(w)
+	}
+	for range 8 {
+		wg.Add(1)
+		go func() {
+			defer wg.Done()
+			for range 300 {
+				_, _ = IdentityProperty(readLabel)
+			}
+		}()
+	}
+	wg.Wait()
+
+	// The concurrently-written labels are all recorded afterward.
+	_, ok := IdentityProperty("RaceLabel_0_0")
+	require.True(t, ok, "a concurrently-promoted label must be recorded")
 }

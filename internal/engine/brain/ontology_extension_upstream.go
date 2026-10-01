@@ -109,6 +109,17 @@ func (e *Engine) SubmitOntologyExtensionUpstream(_ context.Context, kind taxonom
 	switch kind {
 	case taxonomy.ProposedNodeLabel:
 		pack.TaxonomyNodeLabels = []string{label}
+		// Carry the label's written key form so the receiving install keys it
+		// exactly as this one did (gibson#484). Resolve it from the authoritative
+		// promotion registry (the label is promoted, so it is recorded there);
+		// fall back to the deterministic default if absent. A runtime-promoted
+		// node label is identified by DiscoveredNodeIdentityProperty, so an
+		// imported contribution never splits into a duplicate node (gibson#1669).
+		identity, ok := taxonomy.IdentityProperty(label)
+		if !ok {
+			identity = taxonomy.DiscoveredNodeIdentityProperty
+		}
+		pack.TaxonomyNodeIdentity = map[string]string{label: identity}
 	case taxonomy.ProposedRelationshipType:
 		pack.TaxonomyRelationshipTypes = []string{label}
 	default:

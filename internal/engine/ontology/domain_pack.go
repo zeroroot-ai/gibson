@@ -101,6 +101,22 @@ type DomainPack struct {
 	TaxonomyNodeLabels        []string `json:"taxonomy_node_labels,omitempty"`
 	TaxonomyRelationshipTypes []string `json:"taxonomy_relationship_types,omitempty"`
 
+	// TaxonomyNodeIdentity is the written key form of each node label in this
+	// pack (gibson#484): node label -> the Neo4j property its nodes are merged
+	// on. It travels WITH the pack so the receiving install keys an imported
+	// label exactly as the producing install did, instead of falling back to
+	// the projector's generic "key" default. Without it, two installs (or two
+	// producers) spell one label's key differently and split it into two nodes,
+	// each holding half the truth (the gibson#1669 defect class) — now a
+	// uniqueness-constraint violation under charts/hosted#486.
+	//
+	// A label discovered at runtime carries taxonomy.DiscoveredNodeIdentityProperty
+	// (brain_id, unique by construction); a curated label names its own
+	// natural key (e.g. a URL). Relationship types are edges and have no entry.
+	// Import requires every node label to have one — a pack never seeds another
+	// install's Cypher with an unaccounted label.
+	TaxonomyNodeIdentity map[string]string `json:"taxonomy_node_identity,omitempty"`
+
 	// Ontology is the set of registered ontology extensions this domain's
 	// discovery has produced, keyed by the same extension name they were
 	// registered under (e.g. gibson#274's "discovered/<proposer>/<hash>"),
@@ -143,11 +159,24 @@ type DomainPack struct {
 // if reasoner holds an extension carrying RawTriples that the caller did not
 // exclude: a Pack never ships unvalidated raw payload (see Validate).
 func ExportDomainPack(name string, version int, taxonomyBase, taxonomyNow *taxonomy.Registry, reasoner *Reasoner, excludeOntologyExtensions ...string) (*DomainPack, error) {
+	nodeLabels := diffSorted(taxonomyNow.NodeLabels(), taxonomyBase.NodeLabels())
 	pack := &DomainPack{
 		Name:                      name,
 		Version:                   version,
-		TaxonomyNodeLabels:        diffSorted(taxonomyNow.NodeLabels(), taxonomyBase.NodeLabels()),
+		TaxonomyNodeLabels:        nodeLabels,
 		TaxonomyRelationshipTypes: diffSorted(taxonomyNow.RelationshipTypes(), taxonomyBase.RelationshipTypes()),
+	}
+
+	// Every captured node label carries its written key form (gibson#484).
+	// A label captured from runtime discovery is identified the way the
+	// PromotionGate assigned it: DiscoveredNodeIdentityProperty (unique by
+	// construction). Export populates it here so the pack is accounted-for and
+	// Import never refuses what this platform produced.
+	if len(nodeLabels) > 0 {
+		pack.TaxonomyNodeIdentity = make(map[string]string, len(nodeLabels))
+		for _, l := range nodeLabels {
+			pack.TaxonomyNodeIdentity[l] = taxonomy.DiscoveredNodeIdentityProperty
+		}
 	}
 
 	exclude := make(map[string]struct{}, len(excludeOntologyExtensions))
@@ -187,7 +216,10 @@ func ExportDomainPack(name string, version int, taxonomyBase, taxonomyNow *taxon
 //     — non-empty, valid UTF-8, within MaxPredicateExpressionBytes; this
 //     never parses or type-checks the expression as CEL (gibson#388's job);
 //   - Author is valid UTF-8 within MaxAuthorBytes, and Visibility is one of
-//     the recognized [PackVisibility] values.
+//     the recognized [PackVisibility] values;
+//   - every TaxonomyNodeIdentity entry (gibson#484) names a node label the
+//     pack declares and a safe-identifier key-form property. Import, not
+//     Validate, is where a node label is REQUIRED to carry one.
 func (p *DomainPack) Validate() error {
 	for _, l := range p.TaxonomyNodeLabels {
 		if err := taxonomy.ValidIdentifier(l); err != nil {
@@ -198,6 +230,9 @@ func (p *DomainPack) Validate() error {
 		if err := taxonomy.ValidIdentifier(r); err != nil {
 			return fmt.Errorf("domain pack %q: taxonomy relationship type: %w", p.Name, err)
 		}
+	}
+	if err := p.validateNodeIdentity(); err != nil {
+		return err
 	}
 	for extName, ext := range p.Ontology {
 		if len(ext.RawTriples) > 0 {
@@ -229,6 +264,50 @@ func (p *DomainPack) Validate() error {
 	return nil
 }
 
+// validateNodeIdentity checks the written key forms a pack carries
+// (gibson#484). It is lenient on PRESENCE — a pack may name identities for
+// some, all, or none of its node labels — but strict on CONTENT: every entry
+// must name a node label this pack actually declares (no stray keys), and every
+// key-form property must be a safe, non-empty identifier (never a backtick
+// injection, never a secret, which taxonomy.ValidIdentifier's rules exclude).
+// Import, not Validate, is where a node label is REQUIRED to have an entry — a
+// pack can be captured incrementally, but it cannot seed another install until
+// every label it would add is accounted for (requireNodeIdentityAccounted).
+func (p *DomainPack) validateNodeIdentity() error {
+	if len(p.TaxonomyNodeIdentity) == 0 {
+		return nil
+	}
+	labels := make(map[string]struct{}, len(p.TaxonomyNodeLabels))
+	for _, l := range p.TaxonomyNodeLabels {
+		labels[l] = struct{}{}
+	}
+	for label, prop := range p.TaxonomyNodeIdentity {
+		if _, ok := labels[label]; !ok {
+			return fmt.Errorf("domain pack %q: node identity names %q, which is not one of the pack's node labels", p.Name, label)
+		}
+		if err := taxonomy.ValidIdentifier(prop); err != nil {
+			return fmt.Errorf("domain pack %q: node identity property for %q: %w", p.Name, label, err)
+		}
+	}
+	return nil
+}
+
+// requireNodeIdentityAccounted reports the first node label that carries no
+// written key form (gibson#484). Import calls it so a pack never seeds another
+// install's Cypher with a label whose identity is unwritten — the exact
+// condition that lets two producers split one label into two nodes (gibson#1669,
+// now a uniqueness-constraint violation under charts/hosted#486).
+func (p *DomainPack) requireNodeIdentityAccounted() error {
+	for _, label := range p.TaxonomyNodeLabels {
+		if _, ok := p.TaxonomyNodeIdentity[label]; !ok {
+			return fmt.Errorf(
+				"domain pack %q: node label %q has no written key form; a pack cannot seed an "+
+					"environment with an unaccounted label (gibson#484)", p.Name, label)
+		}
+	}
+	return nil
+}
+
 // validPredicateExpressionText reports whether expr is well-formed TEXT for
 // a Predicates CEL expression (ADR-0031 decision 1): non-empty after
 // trimming, valid UTF-8, and within MaxPredicateExpressionBytes. It never
@@ -256,7 +335,10 @@ func validPredicateExpressionText(expr string) error {
 // acceptance criterion 4). It returns the resulting taxonomy Registry;
 // reasoner is mutated in place, the same way RegisterExtension always works.
 //
-// Import re-validates p first (Validate), then registers every bundled
+// Import re-validates p first (Validate), then requires every node label to
+// carry a written key form (requireNodeIdentityAccounted, gibson#484) so the
+// receiving install keys it exactly as the producing install did. It then
+// registers every bundled
 // ontology extension through reasoner.RegisterExtension — so the SAME cycle
 // and unknown-prefix checks that gated the content at discovery time on the
 // exporting install gate it again at import time on the receiving one; a
@@ -265,6 +347,9 @@ func validPredicateExpressionText(expr string) error {
 // skipped rather than erroring, so Import is idempotent.
 func (p *DomainPack) Import(taxonomyBase *taxonomy.Registry, reasoner *Reasoner) (*taxonomy.Registry, error) {
 	if err := p.Validate(); err != nil {
+		return nil, fmt.Errorf("ontology: import domain pack %q: %w", p.Name, err)
+	}
+	if err := p.requireNodeIdentityAccounted(); err != nil {
 		return nil, fmt.Errorf("ontology: import domain pack %q: %w", p.Name, err)
 	}
 

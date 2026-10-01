@@ -79,6 +79,7 @@ func TestDomainPack_Validate_AcceptsCleanPack(t *testing.T) {
 		Name:                      "k8s",
 		Version:                   1,
 		TaxonomyNodeLabels:        []string{"Pod"},
+		TaxonomyNodeIdentity:      map[string]string{"Pod": taxonomy.DiscoveredNodeIdentityProperty},
 		TaxonomyRelationshipTypes: []string{"MANAGES"},
 		Ontology:                  map[string]sdkgraphrag.OntologyExtension{"discovered/x": k8sVerticalExtension()},
 	}
@@ -136,6 +137,7 @@ func TestDomainPack_Import_SeedsNewEnvironment(t *testing.T) {
 		Name:                      "k8s",
 		Version:                   1,
 		TaxonomyNodeLabels:        []string{"Pod"},
+		TaxonomyNodeIdentity:      map[string]string{"Pod": taxonomy.DiscoveredNodeIdentityProperty},
 		TaxonomyRelationshipTypes: []string{"MANAGES"},
 		Ontology:                  map[string]sdkgraphrag.OntologyExtension{"discovered/x": k8sVerticalExtension()},
 	}
@@ -179,10 +181,11 @@ func TestDomainPack_Import_IsIdempotentOnReimport(t *testing.T) {
 	r := NewReasoner(NewMetrics())
 
 	pack := &DomainPack{
-		Name:               "k8s",
-		Version:            1,
-		TaxonomyNodeLabels: []string{"Pod"},
-		Ontology:           map[string]sdkgraphrag.OntologyExtension{"discovered/x": k8sVerticalExtension()},
+		Name:                 "k8s",
+		Version:              1,
+		TaxonomyNodeLabels:   []string{"Pod"},
+		TaxonomyNodeIdentity: map[string]string{"Pod": taxonomy.DiscoveredNodeIdentityProperty},
+		Ontology:             map[string]sdkgraphrag.OntologyExtension{"discovered/x": k8sVerticalExtension()},
 	}
 
 	tax1, err := pack.Import(tax, r)
@@ -198,6 +201,7 @@ func TestDomainPack_ExportImport_RoundTripsThroughJSON(t *testing.T) {
 		Name:                      "k8s",
 		Version:                   3,
 		TaxonomyNodeLabels:        []string{"Pod"},
+		TaxonomyNodeIdentity:      map[string]string{"Pod": taxonomy.DiscoveredNodeIdentityProperty},
 		TaxonomyRelationshipTypes: []string{"MANAGES"},
 		Ontology:                  map[string]sdkgraphrag.OntologyExtension{"discovered/x": k8sVerticalExtension()},
 	}
@@ -227,10 +231,11 @@ func TestDomainPack_ImportThenExportAgain_DiscoveryExtendsThePack(t *testing.T) 
 	freshReasoner := NewReasoner(NewMetrics())
 
 	v1 := &DomainPack{
-		Name:               "k8s",
-		Version:            1,
-		TaxonomyNodeLabels: []string{"Pod"},
-		Ontology:           map[string]sdkgraphrag.OntologyExtension{"discovered/x": k8sVerticalExtension()},
+		Name:                 "k8s",
+		Version:              1,
+		TaxonomyNodeLabels:   []string{"Pod"},
+		TaxonomyNodeIdentity: map[string]string{"Pod": taxonomy.DiscoveredNodeIdentityProperty},
+		Ontology:             map[string]sdkgraphrag.OntologyExtension{"discovered/x": k8sVerticalExtension()},
 	}
 	seededTax, err := v1.Import(freshTax, freshReasoner)
 	require.NoError(t, err)
@@ -313,10 +318,11 @@ func TestDomainPack_Import_WrapsATaxonomyConstructionFailure(t *testing.T) {
 	r := NewReasoner(NewMetrics())
 
 	pack := &DomainPack{
-		Name:               "k8s",
-		Version:            1,
-		TaxonomyNodeLabels: []string{"Pod"},
-		Ontology:           map[string]sdkgraphrag.OntologyExtension{"discovered/x": k8sVerticalExtension()},
+		Name:                 "k8s",
+		Version:              1,
+		TaxonomyNodeLabels:   []string{"Pod"},
+		TaxonomyNodeIdentity: map[string]string{"Pod": taxonomy.DiscoveredNodeIdentityProperty},
+		Ontology:             map[string]sdkgraphrag.OntologyExtension{"discovered/x": k8sVerticalExtension()},
 	}
 
 	newTax, err := pack.Import(overflowingBase, r)
@@ -338,6 +344,7 @@ func catalogPack() *DomainPack {
 		Name:                      "k8s",
 		Version:                   1,
 		TaxonomyNodeLabels:        []string{"Pod"},
+		TaxonomyNodeIdentity:      map[string]string{"Pod": taxonomy.DiscoveredNodeIdentityProperty},
 		TaxonomyRelationshipTypes: []string{"MANAGES"},
 		Ontology:                  map[string]sdkgraphrag.OntologyExtension{"discovered/x": k8sVerticalExtension()},
 		Predicates: map[string]string{
@@ -502,4 +509,104 @@ func TestDomainPack_Import_RefusesAnInvalidPredicateBinding(t *testing.T) {
 	require.Error(t, err)
 	assert.Nil(t, newTax)
 	assert.Contains(t, err.Error(), "import domain pack")
+}
+
+// -----------------------------------------------------------------------
+// Written key form (gibson#484): a pack carries each node label's identity
+// property, so a receiving install keys an imported label exactly as the
+// producing install did — never the collision-prone generic "key" default.
+// -----------------------------------------------------------------------
+
+// The required failing fixture: a pack whose node label has NO written key form
+// is refused at import, so it can never seed another install's Cypher with an
+// unaccounted label (the gibson#1669 duplicate-node condition, now a
+// uniqueness-constraint violation under charts/hosted#486).
+func TestDomainPack_Import_RefusesANodeLabelWithNoKeyForm(t *testing.T) {
+	tax, err := taxonomy.New(1, []string{taxonomy.ObservationLabel}, nil)
+	require.NoError(t, err)
+	r := NewReasoner(NewMetrics())
+
+	pack := &DomainPack{
+		Name:               "k8s",
+		Version:            1,
+		TaxonomyNodeLabels: []string{"Pod"},
+		// TaxonomyNodeIdentity deliberately omitted.
+	}
+
+	newTax, err := pack.Import(tax, r)
+	require.Error(t, err)
+	assert.Nil(t, newTax)
+	assert.Contains(t, err.Error(), "no written key form")
+	assert.Contains(t, err.Error(), "Pod")
+}
+
+// Export accounts for every captured node label (criterion: a pack is
+// exportable/importable collision-safe). ExportDomainPack writes a key form for
+// each label, and the result imports cleanly into a fresh install.
+func TestExportDomainPack_PopulatesNodeIdentityForEveryLabel(t *testing.T) {
+	base, err := taxonomy.New(1, []string{taxonomy.ObservationLabel, "Host"}, nil)
+	require.NoError(t, err)
+	now, err := taxonomy.New(2, []string{taxonomy.ObservationLabel, "Host", "Pod", "Service"}, nil)
+	require.NoError(t, err)
+
+	pack, err := ExportDomainPack("k8s", 1, base, now, NewReasoner(NewMetrics()))
+	require.NoError(t, err)
+
+	for _, label := range pack.TaxonomyNodeLabels {
+		prop, ok := pack.TaxonomyNodeIdentity[label]
+		require.True(t, ok, "export must account for node label %q", label)
+		assert.Equal(t, taxonomy.DiscoveredNodeIdentityProperty, prop)
+	}
+
+	// An exported pack is accounted-for, so it imports without refusal.
+	freshTax, err := taxonomy.New(1, []string{taxonomy.ObservationLabel}, nil)
+	require.NoError(t, err)
+	_, err = pack.Import(freshTax, NewReasoner(NewMetrics()))
+	require.NoError(t, err)
+}
+
+// Validate is strict on identity CONTENT: a key form that names a label the
+// pack does not declare is a mistake and is refused.
+func TestDomainPack_Validate_RejectsStrayNodeIdentity(t *testing.T) {
+	pack := &DomainPack{
+		Name:                 "k8s",
+		Version:              1,
+		TaxonomyNodeLabels:   []string{"Pod"},
+		TaxonomyNodeIdentity: map[string]string{"Service": "brain_id"},
+	}
+	err := pack.Validate()
+	require.Error(t, err)
+	assert.Contains(t, err.Error(), "not one of the pack's node labels")
+}
+
+// A key-form PROPERTY is itself a Cypher identifier, so an unsafe one (a
+// backtick injection) is refused — a pack never smuggles an injection or a
+// secret through the identity map.
+func TestDomainPack_Validate_RejectsUnsafeNodeIdentityProperty(t *testing.T) {
+	pack := &DomainPack{
+		Name:                 "k8s",
+		Version:              1,
+		TaxonomyNodeLabels:   []string{"Pod"},
+		TaxonomyNodeIdentity: map[string]string{"Pod": "id`; DETACH DELETE n; //"},
+	}
+	err := pack.Validate()
+	require.Error(t, err)
+	assert.Contains(t, err.Error(), "node identity property")
+}
+
+// The identity map survives a JSON export/import round-trip losslessly.
+func TestDomainPack_ExportImport_RoundTripsNodeIdentity(t *testing.T) {
+	original := &DomainPack{
+		Name:                 "k8s",
+		Version:              1,
+		TaxonomyNodeLabels:   []string{"Pod"},
+		TaxonomyNodeIdentity: map[string]string{"Pod": taxonomy.DiscoveredNodeIdentityProperty},
+	}
+
+	data, err := json.Marshal(original)
+	require.NoError(t, err)
+
+	var roundTripped DomainPack
+	require.NoError(t, json.Unmarshal(data, &roundTripped))
+	assert.Equal(t, original.TaxonomyNodeIdentity, roundTripped.TaxonomyNodeIdentity)
 }

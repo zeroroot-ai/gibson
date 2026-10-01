@@ -5,6 +5,7 @@ package taxonomy
 
 import (
 	"fmt"
+	"log/slog"
 	"sync"
 )
 
@@ -95,6 +96,74 @@ func PromotedIdentityProperty(kind ProposalKind) string {
 	default:
 		return ""
 	}
+}
+
+// promotedIdentities is the process-wide registry of runtime-promoted node
+// labels and their written key form (gibson#484), plus the OnPromote hooks.
+//
+// It is package-global on purpose. A promoted node label's identity is
+// deterministic (DiscoveredNodeIdentityProperty) and does not vary by tenant,
+// and the graph projector resolves it on EVERY entity write — a hot path that
+// must not hold a PromotionGate or allocate. A single guarded map answers that
+// in one read. PromotionGate.Promote is the only writer.
+var promotedIdentities = struct {
+	mu       sync.RWMutex
+	identity map[string]string
+	hooks    []func(label string)
+}{identity: make(map[string]string)}
+
+// IdentityProperty reports the property a runtime-promoted label is identified
+// by (gibson#484). ok is false for a label that was never promoted. The graph
+// projector calls this on every entity write to resolve an imported or
+// discovered node label's Neo4j merge/constraint property (brain_id) from the
+// authoritative promotion record, instead of re-deriving it. It is safe for
+// concurrent reads while a promotion writes.
+func IdentityProperty(label string) (prop string, ok bool) {
+	promotedIdentities.mu.RLock()
+	defer promotedIdentities.mu.RUnlock()
+	prop, ok = promotedIdentities.identity[label]
+	return prop, ok
+}
+
+// OnPromote registers fn to be called with the label of every node label that
+// is subsequently promoted (gibson#484). It is the event seam the graph
+// projector uses to invalidate its per-tenant constraint tracker and re-ensure
+// the uniqueness constraint on the next tick. fn runs synchronously inside
+// Promote, after the label is recorded, holding no lock — fn may itself call
+// IdentityProperty. Relationship-type promotions do not fire it: an edge has no
+// node identity and so no node uniqueness constraint. Registration is additive
+// and process-wide; register once (not per tenant).
+func OnPromote(fn func(label string)) {
+	promotedIdentities.mu.Lock()
+	defer promotedIdentities.mu.Unlock()
+	promotedIdentities.hooks = append(promotedIdentities.hooks, fn)
+}
+
+// recordPromotion writes label's key form into the global registry and fires
+// the OnPromote hooks (gibson#484). PromotionGate.Promote calls it for a node
+// label after the promotion succeeds. Hooks fire without the lock held, so a
+// hook may read back through IdentityProperty without deadlocking.
+func recordPromotion(label, prop string) {
+	promotedIdentities.mu.Lock()
+	promotedIdentities.identity[label] = prop
+	hooks := make([]func(label string), len(promotedIdentities.hooks))
+	copy(hooks, promotedIdentities.hooks)
+	promotedIdentities.mu.Unlock()
+	for _, fn := range hooks {
+		fn(label)
+	}
+}
+
+// A promotion is always visible in the logs (gibson#484). External subscribers
+// (the graph projector's constraint re-ensure) add their own via OnPromote;
+// this default observer is registered once, from package init, so OnPromote has
+// a reachable registrant and every promotion is observable out of the box.
+func init() {
+	OnPromote(func(label string) {
+		slog.Info("taxonomy node label promoted",
+			"label", label,
+			"identity_property", DiscoveredNodeIdentityProperty)
+	})
 }
 
 // InvalidProposalError is returned by Confirm and Promote when a proposed
@@ -250,13 +319,20 @@ func (g *PromotionGate) Promote(kind ProposalKind, label string) (*Registry, err
 		return nil, fmt.Errorf("taxonomy: promote %s %q (confirmed by %s): %w", kind, label, reviewer, err)
 	}
 
+	identity := PromotedIdentityProperty(kind)
 	g.base = promoted
 	g.promotions = append(g.promotions, PromotionRecord{
 		Kind:             kind,
 		Label:            label,
 		Version:          promoted.Version(),
-		IdentityProperty: PromotedIdentityProperty(kind),
+		IdentityProperty: identity,
 	})
+	// Publish a node label's key form to the process-wide registry and notify
+	// subscribers (gibson#484). Relationship types carry no node identity, so
+	// they are not published and do not fire OnPromote.
+	if identity != "" {
+		recordPromotion(label, identity)
+	}
 	return promoted, nil
 }
 

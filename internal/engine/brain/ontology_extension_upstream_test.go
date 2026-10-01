@@ -10,6 +10,7 @@ import (
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 
+	"github.com/zeroroot-ai/gibson/internal/engine/ontology"
 	"github.com/zeroroot-ai/gibson/internal/engine/taxonomy"
 )
 
@@ -106,7 +107,19 @@ func TestSubmitOntologyExtensionUpstream_RendersNodeLabelFragment(t *testing.T) 
 	assert.Equal(t, []string{"Container"}, pack.TaxonomyNodeLabels)
 	assert.Empty(t, pack.TaxonomyRelationshipTypes)
 	assert.Empty(t, pack.Visibility, "a contribution candidate is not yet classified public/private")
+
+	// The rendered fragment carries the node label's written key form
+	// (gibson#484), so another install imports it without splitting the label
+	// into a duplicate node.
+	assert.Equal(t, map[string]string{"Container": taxonomy.DiscoveredNodeIdentityProperty}, pack.TaxonomyNodeIdentity)
 	require.NoError(t, pack.Validate())
+
+	// The contribution is accounted-for: it imports into a fresh install
+	// without refusal (ontology.DomainPack.Import requires a key form).
+	freshTax, err := taxonomy.New(1, []string{taxonomy.ObservationLabel}, nil)
+	require.NoError(t, err)
+	_, err = pack.Import(freshTax, ontology.NewReasoner(ontology.NewMetrics()))
+	require.NoError(t, err)
 }
 
 // TestSubmitOntologyExtensionUpstream_RendersRelationshipTypeFragment mirrors
