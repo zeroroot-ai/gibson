@@ -159,6 +159,10 @@ func RestoreWorld(snap WorldSnapshot, tenant string) (*World, error) {
 	// Replay missions — carry display metadata (ADR-0011/gibson#1118) so the
 	// restored World is the single source of truth for status + identity.
 	for _, m := range data.Missions {
+		if m.Status == MissionPending {
+			Reduce(w, MissionCreated{ID: m.ID, Name: m.Name, Description: m.Description, TargetID: m.TargetID, TenantID: m.TenantID, CreatedBy: m.CreatedBy})
+			continue
+		}
 		startEv := MissionStarted{
 			ID:          m.ID,
 			Goal:        m.Goal,

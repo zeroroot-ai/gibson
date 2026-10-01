@@ -3046,6 +3046,20 @@ func (d *daemonImpl) CreateMission(ctx context.Context, req api.CreateMissionDat
 		"mission_definition_id", m.MissionDefinitionID.String(),
 	)
 
+	// The World learns of the mission now, as pending with its creator, so
+	// ListMissions and the dashboard show it before it runs (hosted#205).
+	// MissionStarted moves the same entity to running when it does.
+	if d.brainRegistry != nil {
+		d.brainRegistry.For(tenantForMission.String()).Submit(brain.MissionCreated{
+			ID:          m.ID.String(),
+			Name:        m.Name,
+			Description: m.Description,
+			TargetID:    m.TargetID.String(),
+			TenantID:    m.TenantID,
+			CreatedBy:   m.CreatedBy,
+		})
+	}
+
 	// Daemon-side Mission node materialization (non-fatal on failure) — spec D6.
 	// After the authoritative Redis state is persisted, mirror the Mission node
 	// into per-tenant Neo4j and publish a GraphUpdate{NODE_ADDED} on the bus so

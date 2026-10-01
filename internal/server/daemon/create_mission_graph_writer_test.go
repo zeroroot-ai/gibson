@@ -8,6 +8,8 @@ import (
 	"testing"
 	"time"
 
+	"github.com/zeroroot-ai/gibson/internal/engine/brain"
+
 	"github.com/zeroroot-ai/gibson/internal/platform/principal"
 
 	goredis "github.com/redis/go-redis/v9"
@@ -90,11 +92,13 @@ func TestCreateMission_MaterializesViaGraphWriter(t *testing.T) {
 	pool := &mockPool{conn: &datapool.Conn{Redis: rdb}}
 	writer := newFakeGraphWriter()
 
+	reg := brain.NewRegistry(ctx, brain.BeliefSystem)
 	d := &daemonImpl{
-		logger:      testObsLogger(),
-		targetStore: targets,
-		pool:        pool,
-		graphWriter: writer,
+		logger:        testObsLogger(),
+		targetStore:   targets,
+		pool:          pool,
+		graphWriter:   writer,
+		brainRegistry: reg,
 	}
 
 	missionDefinitionID := types.NewID().String()
@@ -128,6 +132,23 @@ func TestCreateMission_MaterializesViaGraphWriter(t *testing.T) {
 	writer.mu.Unlock()
 	if got.ID != res.MissionID {
 		t.Errorf("UpsertMission got ID %q, want %q", got.ID, res.MissionID)
+	}
+	// The World knows the mission from creation: pending, attributed, so
+	// ListMissions serves it before it runs (hosted#205, run 36795001822).
+	eng := reg.For(tenant.String())
+	eng.Tick()
+	var inWorld *brain.MissionSnapshot
+	for _, ms := range eng.Missions() {
+		if ms.ID == res.MissionID {
+			m := ms
+			inWorld = &m
+		}
+	}
+	if inWorld == nil {
+		t.Fatalf("the World does not know mission %s; ListMissions would not list it", res.MissionID)
+	}
+	if inWorld.Status != brain.MissionPending || inWorld.CreatedBy != (principal.Principal{Kind: principal.User, ID: "123456789012345678"}) || inWorld.Name != "recon-1" {
+		t.Fatalf("World mission = %+v, want pending, named recon-1, created by the caller", *inWorld)
 	}
 	if got.CreatedBy != "user:123456789012345678" {
 		t.Errorf("UpsertMission got CreatedBy %q, want the principal ref, not the mission name", got.CreatedBy)

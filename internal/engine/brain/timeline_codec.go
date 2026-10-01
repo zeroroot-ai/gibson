@@ -70,6 +70,7 @@ func init() {
 	registerEvent("token.used", func() Event { return &TokenUsed{} })
 
 	// orchestrator.go
+	registerEvent("mission.created", func() Event { return &MissionCreated{} })
 	registerEvent("mission.started", func() Event { return &MissionStarted{} })
 	registerEvent("mission.projected", func() Event { return &MissionProjected{} })
 	registerEvent("mission.pause", func() Event { return &MissionPauseRequested{} })
@@ -216,6 +217,8 @@ func dereferenceEvent(ev Event) Event {
 	case *DecisionCompleted:
 		return *v
 	case *TokenUsed:
+		return *v
+	case *MissionCreated:
 		return *v
 	case *MissionStarted:
 		return *v
