@@ -1,5 +1,12 @@
 # Changelog
 
+## [0.148.0](https://github.com/zeroroot-ai/gibson/compare/v0.147.0...v0.148.0) (2026-10-01)
+
+
+### Features
+
+* **platform-operator:** let an OIDC client reference set a display name ([#458](https://github.com/zeroroot-ai/gibson/issues/458)) ([b2abfc6](https://github.com/zeroroot-ai/gibson/commit/b2abfc6d5c79a8a57e62a3381f9a749aee5e9581))
+
 ## [0.147.0](https://github.com/zeroroot-ai/gibson/compare/v0.146.5...v0.147.0) (2026-10-01)
 
 
