@@ -9,7 +9,7 @@ package ontology
 // MainDomainPack is a skeleton, not a fully-fleshed vertical: a small,
 // representative set of technique -> CEL predicate bindings, plus the
 // taxonomy structure they reference, curated by the platform owner
-// (Visibility public, Entitlement empty — free). It exists so the catalog
+// (Visibility public — free, like every pack). It exists so the catalog
 // gibson#381 built the enablement mechanism for is non-empty from the first
 // daemon that ships it, and so EnableDomainPack has real, compiling content
 // to fold into a tenant's World end to end.

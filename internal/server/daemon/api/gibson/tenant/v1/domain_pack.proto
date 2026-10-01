@@ -84,16 +84,18 @@ service DomainPackService {
 message DomainPackCatalogEntry {
   string name = 1;
   int32 version = 2;
-  // author identifies who curates this pack (ADR-0033 decision 5): the
+  // author identifies who curates this pack (ADR-0033 decision 1): the
   // platform owner for a catalog pack.
   string author = 3;
-  // visibility is "public" or "private" (ADR-0033 decisions 1 and 5). A
-  // catalog entry is always "public" in practice — a "private" pack is a
-  // tenant extension, which this service does not list.
+  // visibility is "public" or "private" (ADR-0033 decision 1). A catalog
+  // entry is always "public" in practice — a "private" pack is a tenant
+  // extension, which this service does not list.
   string visibility = 4;
-  // entitlement is the optional billing entitlement key gating this pack
-  // (ADR-0033 decision 5). Empty means free — no entitlement check applies.
-  string entitlement = 5;
+  // Field 5 held an entitlement key while ADR-0033 decision 5 (paid packs)
+  // was planned. Every pack is free (gibson#384), so the field is gone and
+  // its number is reserved against reuse.
+  reserved 5;
+  reserved "entitlement";
   repeated string taxonomy_node_labels = 6;
   repeated string taxonomy_relationship_types = 7;
   // techniques is the sorted set of technique names this pack binds a

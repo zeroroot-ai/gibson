@@ -106,7 +106,6 @@ func TestSubmitOntologyExtensionUpstream_RendersNodeLabelFragment(t *testing.T) 
 	assert.Equal(t, []string{"Container"}, pack.TaxonomyNodeLabels)
 	assert.Empty(t, pack.TaxonomyRelationshipTypes)
 	assert.Empty(t, pack.Visibility, "a contribution candidate is not yet classified public/private")
-	assert.Empty(t, pack.Entitlement)
 	require.NoError(t, pack.Validate())
 }
 

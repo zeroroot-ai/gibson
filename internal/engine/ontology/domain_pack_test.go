@@ -329,8 +329,8 @@ func TestDomainPack_Import_WrapsATaxonomyConstructionFailure(t *testing.T) {
 
 // -----------------------------------------------------------------------
 // Phase 2 (gibson#378, ADR-0031 / ADR-0033): a Pack carries technique -> CEL
-// predicate bindings plus commercial metadata (author, visibility,
-// entitlement), and Validate covers every new field.
+// predicate bindings plus catalog metadata (author, visibility), and Validate
+// covers every new field. Every pack is free (gibson#384).
 // -----------------------------------------------------------------------
 
 func catalogPack() *DomainPack {
@@ -343,9 +343,8 @@ func catalogPack() *DomainPack {
 		Predicates: map[string]string{
 			"exposed_dashboard": `evidence.exists(e, e.type == "http_response" && e.status == 200)`,
 		},
-		Author:      "Zero Root AI",
-		Visibility:  PackVisibilityPublic,
-		Entitlement: "pack_k8s_pro",
+		Author:     "Zero Root AI",
+		Visibility: PackVisibilityPublic,
 	}
 }
 
@@ -430,20 +429,6 @@ func TestDomainPack_Validate_RejectsNonUTF8Author(t *testing.T) {
 	assert.Contains(t, err.Error(), "UTF-8")
 }
 
-func TestDomainPack_Validate_RejectsInvalidEntitlementKey(t *testing.T) {
-	pack := catalogPack()
-	pack.Entitlement = "pack`; DETACH DELETE n; //"
-	err := pack.Validate()
-	require.Error(t, err)
-	assert.Contains(t, err.Error(), "entitlement key")
-}
-
-func TestDomainPack_Validate_AcceptsEmptyEntitlement(t *testing.T) {
-	pack := catalogPack()
-	pack.Entitlement = ""
-	require.NoError(t, pack.Validate())
-}
-
 func TestPackVisibility_Validate(t *testing.T) {
 	tests := []struct {
 		name    string
@@ -484,12 +469,11 @@ func TestDomainPack_ExportImport_RoundTripsCommercialAndPredicateFields(t *testi
 	assert.Equal(t, original.Predicates, roundTripped.Predicates)
 	assert.Equal(t, original.Author, roundTripped.Author)
 	assert.Equal(t, original.Visibility, roundTripped.Visibility)
-	assert.Equal(t, original.Entitlement, roundTripped.Entitlement)
 
-	// Importing a pack that carries predicates/commercial metadata still
-	// only touches taxonomy + ontology (Predicates/Author/Visibility/
-	// Entitlement are not yet consumed anywhere — gibson#388 and a future
-	// DomainPackService do that), and it must not error or drop them.
+	// Importing a pack that carries predicates/catalog metadata still only
+	// touches taxonomy + ontology (Predicates/Author/Visibility are consumed
+	// by gibson#388 and DomainPackService, not Import), and it must not error
+	// or drop them.
 	tax, err := taxonomy.New(1, []string{taxonomy.ObservationLabel}, nil)
 	require.NoError(t, err)
 	r := NewReasoner(NewMetrics())
@@ -498,7 +482,6 @@ func TestDomainPack_ExportImport_RoundTripsCommercialAndPredicateFields(t *testi
 	assert.Equal(t, original.Predicates, roundTripped.Predicates)
 	assert.Equal(t, original.Author, roundTripped.Author)
 	assert.Equal(t, original.Visibility, roundTripped.Visibility)
-	assert.Equal(t, original.Entitlement, roundTripped.Entitlement)
 }
 
 func TestDomainPack_Import_RefusesAnInvalidPredicateBinding(t *testing.T) {

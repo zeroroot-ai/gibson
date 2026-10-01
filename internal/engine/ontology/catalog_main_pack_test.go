@@ -17,7 +17,6 @@ func TestMainDomainPack_IsValid(t *testing.T) {
 	assert.Equal(t, "main", pack.Name)
 	assert.NotZero(t, pack.Version)
 	assert.Equal(t, PackVisibilityPublic, pack.Visibility)
-	assert.Empty(t, pack.Entitlement, "the seed pack must be free — no entitlement gate")
 	assert.NotEmpty(t, pack.Predicates, "a skeleton pack still needs at least one binding")
 }
 
