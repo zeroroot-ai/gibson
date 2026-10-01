@@ -32,6 +32,7 @@ LOG_TAIL="${DIAG_LOG_TAIL:-200}"
 KUBECTL="${KUBECTL:-kubectl}"
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 JQ_PROGRAM="${JQ_PROGRAM:-$SCRIPT_DIR/argo-app-problems.jq}"
+POD_SELECTOR="${POD_SELECTOR:-$SCRIPT_DIR/pod-needs-dump.jq}"
 
 group() { echo "::group::$*"; }
 endgroup() { echo "::endgroup::"; }
@@ -124,6 +125,89 @@ dump_pods() {
   endgroup
 }
 
+# dump_misbehaving_pods prints the logs of every pod that misbehaved, whether or
+# not it is unhealthy by the time anyone looks.
+#
+# The selector is deliberately NOT "not ready". The OpenBao outage that cost
+# three days of blind exit-test failures read `2/2 Running` at dump time: its
+# readiness and liveness probes had been timing out since minute one, the
+# bringup had already given up, and by the time this script ran the pod looked
+# perfect. "Not ready" would have skipped it and printed nothing.
+#
+# So a pod is dumped when ANY of these is true:
+#   - a container has restarted
+#   - a container is not ready, or the pod is not Running/Succeeded
+#   - the pod is named in a Warning event
+#
+# The third is what catches the probe case. A probe failure is an event about a
+# pod that may be perfectly healthy now, and it is the only trace left of a
+# window that has closed. Job pods are skipped here because dump_jobs already
+# prints them with their spec and conditions.
+dump_misbehaving_pods() {
+  local ns=$1
+  local named restarted selected pod
+
+  # Pods named in Warning events. `-o custom-columns` on the involved object is
+  # steadier than parsing the human table, which pads and truncates names.
+  named=$($KUBECTL -n "$ns" get events --field-selector type=Warning \
+    -o custom-columns=NAME:.involvedObject.name,KIND:.involvedObject.kind \
+    --no-headers 2>/dev/null | awk '$2 == "Pod" { print $1 }' | sort -u)
+
+  # Pods with a restart, a not-ready container, or a non-running phase. The
+  # selector lives in its own jq file so the fixtures can exercise it; see the
+  # header there for why Succeeded pods are excluded before the readiness tests.
+  restarted=$($KUBECTL -n "$ns" get pods -o json 2>/dev/null \
+    | jq -r -f "$POD_SELECTOR" 2>/dev/null | sort -u)
+
+  selected=$(printf '%s\n%s\n' "$named" "$restarted" | sed '/^$/d' | sort -u)
+  if [ -z "$selected" ]; then
+    echo "no pod in $ns restarted, went unready, or drew a warning event"
+    return 0
+  fi
+
+  local dumped=0
+  for pod in $selected; do
+    # Already covered with its spec and conditions by dump_jobs.
+    if $KUBECTL -n "$ns" get pod "$pod" \
+        -o jsonpath='{.metadata.labels.job-name}' 2>/dev/null | grep -q .; then
+      continue
+    fi
+    dumped=$((dumped + 1))
+
+    group "Pod $ns/$pod — restarted, unready, or warned about"
+    $KUBECTL -n "$ns" get pod "$pod" -o json 2>/dev/null \
+      | jq -r '"phase=\(.status.phase)  node=\(.spec.nodeName // "-")",
+               "ready=\((.status.conditions // []) | map(select(.type == "Ready")) | .[0].status // "?")",
+               ((.status.initContainerStatuses // [])[] | "init \(.name): ready=\(.ready) restarts=\(.restartCount) \(.state | keys[0])"),
+               ((.status.containerStatuses // [])[] | "\(.name): ready=\(.ready) restarts=\(.restartCount) \(.state | keys[0])")' 2>&1 || true
+
+    echo "--- probes as declared, because a missing timeoutSeconds is 1 second"
+    $KUBECTL -n "$ns" get pod "$pod" -o json 2>/dev/null \
+      | jq -r '(.spec.containers // [])[]
+                 | . as $c
+                 | (["livenessProbe", "readinessProbe", "startupProbe"][]
+                     | select($c[.] != null)
+                     | "\($c.name).\(.): timeout=\($c[.].timeoutSeconds // 1) period=\($c[.].periodSeconds // 10) initialDelay=\($c[.].initialDelaySeconds // 0) failureThreshold=\($c[.].failureThreshold // 3)")' 2>&1 || true
+
+    echo "--- resources, because a CPU limit throttles even on an idle node"
+    $KUBECTL -n "$ns" get pod "$pod" -o json 2>/dev/null \
+      | jq -r '(.spec.containers // [])[] | "\(.name): requests=\(.resources.requests // {} | tojson) limits=\(.resources.limits // {} | tojson)"' 2>&1 || true
+
+    echo "--- logs (all containers, last $LOG_TAIL)"
+    $KUBECTL -n "$ns" logs "$pod" --all-containers --tail="$LOG_TAIL" 2>&1 || true
+    echo "--- previous logs, if it restarted"
+    $KUBECTL -n "$ns" logs "$pod" --all-containers --previous --tail="$LOG_TAIL" 2>/dev/null || true
+    echo "--- events"
+    $KUBECTL -n "$ns" describe pod "$pod" 2>/dev/null | sed -n '/^Events/,$p' || true
+    endgroup
+  done
+
+  # Silence must never look like "the check did not run".
+  if [ "$dumped" -eq 0 ]; then
+    echo "every pod selected in $ns belongs to a Job; dump_jobs covers those"
+  fi
+}
+
 main() {
   echo "bringup diagnostics: NS=$NS ARGOCD_NS=$ARGOCD_NS"
   if ! have_cluster; then
@@ -138,6 +222,7 @@ main() {
     dump_pods "$ns"
     dump_jobs "$ns"
     dump_events "$ns"
+    dump_misbehaving_pods "$ns"
   done
 }
 
@@ -199,6 +284,62 @@ selftest() {
     fails=1
   else
     echo "selftest PASS: a failed hook Job and a degraded resource are both named"
+  fi
+
+  # The pod selector, against one fixture carrying every case that matters.
+  local pods="$SCRIPT_DIR/testdata/pods-mixed.json"
+  if [ ! -f "$pods" ]; then
+    echo "selftest FAIL: $pods missing" >&2
+    return 1
+  fi
+  local picked
+  picked=$(jq -r -f "$POD_SELECTOR" "$pods" 2>&1)
+
+  local want
+  for want in gibson-daemon-0 gibson-envoy-7f9c-pending gibson-ext-authz-init-stuck; do
+    if ! printf '%s\n' "$picked" | grep -qx "$want"; then
+      echo "selftest FAIL: the pod selector missed $want. It picked:" >&2
+      printf '%s\n' "$picked" >&2
+      fails=1
+    fi
+  done
+
+  # A completed Job pod reports ready=false on a terminated container. Selecting
+  # it would dump every successful run on a cluster that has been up for days.
+  if printf '%s\n' "$picked" | grep -q "fga-init"; then
+    echo "selftest FAIL: a completed Job pod was selected" >&2
+    fails=1
+  fi
+  if printf '%s\n' "$picked" | grep -qx "cert-manager-655fccd6d9-2ks28"; then
+    echo "selftest FAIL: a healthy running pod was selected" >&2
+    fails=1
+  fi
+
+  # The case that cost three days: gibson-openbao-0 read 2/2 Running with zero
+  # restarts by the time anyone looked, so this selector CANNOT find it and must
+  # not pretend to. The Warning-event union is the half that does.
+  if printf '%s\n' "$picked" | grep -qx "gibson-openbao-0"; then
+    echo "selftest FAIL: the fixture's healthy-now OpenBao pod matched the status selector," >&2
+    echo "               which means the fixture no longer represents the case it was built for" >&2
+    fails=1
+  fi
+  if [ "$fails" -eq 0 ]; then
+    echo "selftest PASS: the pod selector picks the crashlooper, the pending pod and the stuck init"
+    echo "selftest PASS: it skips healthy pods, completed Jobs, and the healthy-now probe case"
+  fi
+
+  # And the event half, which is what finds a pod that looks fine now.
+  local events="$SCRIPT_DIR/testdata/warning-events.txt"
+  if [ -f "$events" ]; then
+    if awk '$2 == "Pod" { print $1 }' "$events" | grep -qx "gibson-openbao-0"; then
+      echo "selftest PASS: a pod named only in a Warning event is found by the event half"
+    else
+      echo "selftest FAIL: the Warning-event selector missed gibson-openbao-0" >&2
+      fails=1
+    fi
+  else
+    echo "selftest FAIL: $events missing" >&2
+    fails=1
   fi
 
   return "$fails"
