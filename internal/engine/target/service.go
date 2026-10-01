@@ -117,6 +117,9 @@ func (s *Service) Get(ctx context.Context, tenantID, id string) (*types.Target, 
 	}
 	t, err := s.store.Get(ctx, parsed)
 	if err != nil {
+		if errors.Is(err, types.ErrTargetNotFound) {
+			return nil, ErrNotFound
+		}
 		return nil, fmt.Errorf("get target: %w", err)
 	}
 	if t == nil || t.TenantID != tenantID {

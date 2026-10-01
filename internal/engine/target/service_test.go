@@ -5,6 +5,7 @@ package target_test
 
 import (
 	"context"
+	"fmt"
 	"testing"
 
 	"github.com/stretchr/testify/assert"
@@ -31,7 +32,8 @@ func (f *fakeStore) Create(_ context.Context, t *types.Target) error {
 func (f *fakeStore) Get(_ context.Context, id types.ID) (*types.Target, error) {
 	t, ok := f.byID[id]
 	if !ok {
-		return nil, nil
+		// Mirror the Redis DAO: a missing id is an error wrapping the sentinel.
+		return nil, fmt.Errorf("%w: %s", types.ErrTargetNotFound, id)
 	}
 	cp := *t
 	return &cp, nil
