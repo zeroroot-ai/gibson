@@ -150,7 +150,7 @@ coverage-html: test-coverage
 # own Go toolchain (GOTOOLCHAIN below) so its embedded Go version is never lower
 # than go.mod's `go` target — golangci v2 refuses to load a newer target,
 # the known v2 trap that bit sdk#355 / adk#154.
-GOLANGCI_LINT_VERSION := v2.4.0
+GOLANGCI_LINT_VERSION := v2.14.0
 
 # Toolchain used to BUILD golangci-lint (and deadcode), derived from go.mod's
 # `go` directive so it can never drift when go.mod bumps (gibson#1234 — a
@@ -191,16 +191,40 @@ $(GOLANGCI_LINT): $(GOLANGCI_LINT_STAMP)
 		$(GOLANGCI_LINT) version; \
 		exit 1; }
 
+# deadcode analyses the tree with its OWN vendored x/tools, so this pin, not the
+# toolchain that builds the binary, decides whether it understands the code.
+# Under Go 1.27.1 v0.44.0 panics: `panic: Int` out of
+# callgraph/rta.(*rta).addRuntimeType (rta.go:535), where the reachability pass
+# meets a type its switch does not handle. A Go panic exits 2, and that status
+# was the whole of what CI reported.
+#
+# Measured on this tree 2026-10-01, go1.27.1, ./cmd/... ./operators/...:
+# v0.44.0 panics and prints nothing on stdout; v0.50.0 returns 1035 unreachable
+# funcs, exit 0. adk proved v0.49.0 already clean, so the floor sits below this
+# pin. Raise it, never lower it, when the toolchain floor in go.mod moves.
 # x/tools whole-program deadcode binary (separate from golangci; used by the
 # blocking dead-code gate, which golangci's `unused` does not cover — `unused`
 # is per-package, `deadcode` is whole-program reachability from the cmd mains).
 DEADCODE := bin/tools/deadcode
+DEADCODE_VERSION := v0.50.0
 
-$(DEADCODE):
-	@echo "Installing deadcode to $(CURDIR)/bin/tools (toolchain $(GOLANGCI_BUILD_TOOLCHAIN))..."
+# Stamp recording which version+toolchain the installed binary was built with,
+# for the same reason golangci-lint has one. Without it `$(DEADCODE)` is a bare
+# file target: once bin/tools/deadcode exists, make treats it as up to date and
+# a version bump here changes nothing locally. The bump that fixes the export
+# data refusal would then take effect only on a fresh CI runner.
+DEADCODE_STAMP := bin/tools/.deadcode-$(DEADCODE_VERSION)-$(GOLANGCI_BUILD_TOOLCHAIN).stamp
+
+$(DEADCODE_STAMP):
+	@mkdir -p $(CURDIR)/bin/tools
+	@rm -f bin/tools/.deadcode-*.stamp $(DEADCODE)
+	@touch $@
+
+$(DEADCODE): $(DEADCODE_STAMP)
+	@echo "Installing deadcode $(DEADCODE_VERSION) to $(CURDIR)/bin/tools (toolchain $(GOLANGCI_BUILD_TOOLCHAIN))..."
 	@mkdir -p $(CURDIR)/bin/tools
 	@GOTOOLCHAIN=$(GOLANGCI_BUILD_TOOLCHAIN) GOBIN=$(CURDIR)/bin/tools GOFLAGS=-mod=mod \
-		$(GOCMD) install golang.org/x/tools/cmd/deadcode@v0.44.0
+		$(GOCMD) install golang.org/x/tools/cmd/deadcode@$(DEADCODE_VERSION)
 
 # Baseline revision for the incremental lint gate. PRs lint against the
 # merge-base with origin/main; override for local branches as needed.
@@ -229,6 +253,7 @@ lint-all: $(GOLANGCI_LINT)
 # NEW unreachable code vs .deadcode-baseline (deadcode has no diff-scoping).
 .PHONY: lint-deadcode
 lint-deadcode: $(DEADCODE)
+	@bash scripts/check-deadcode.sh --selftest
 	@bash scripts/check-deadcode.sh
 
 # lint-deadcode-baseline — regenerate .deadcode-baseline (run after a deliberate
