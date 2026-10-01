@@ -61,7 +61,7 @@ func (l *jobGraphLink) JobClosed(_ context.Context, c jobnode.ClosedJob) {
 // findings in the tenant World and counts the rest as skipped. The projector
 // creates a missing edge target, so an input that names a plan and carries the
 // Finding label would become a phantom :Finding node. Nothing is guessed.
-func fixedByEvents(c jobnode.ClosedJob, findings func(tenant string) map[string]string) ([]brain.Event, int) {
+func fixedByEvents(c jobnode.ClosedJob, findings func(tenant string) map[string]string) (events []brain.Event, skippedInputs int) {
 	var mrKey, mrURL, mrRef string
 	for _, d := range c.Deliverables {
 		if d.Kind != mergeRequestDeliverable {
@@ -77,9 +77,9 @@ func fixedByEvents(c jobnode.ClosedJob, findings func(tenant string) map[string]
 	}
 
 	known := findings(c.TenantID)
-	var events []brain.Event
-	skipped := 0
-	seen := map[string]bool{}
+	// prealloc: at most one event per input, plus the merge request itself.
+	events = make([]brain.Event, 0, len(c.Inputs)+1)
+	seen := make(map[string]bool, len(c.Inputs))
 	for _, id := range c.Inputs {
 		if seen[id] {
 			continue
@@ -87,7 +87,7 @@ func fixedByEvents(c jobnode.ClosedJob, findings func(tenant string) map[string]
 		seen[id] = true
 		scope, ok := known[id]
 		if !ok {
-			skipped++
+			skippedInputs++
 			continue
 		}
 		events = append(events, brain.EntityObserved{
@@ -98,7 +98,7 @@ func fixedByEvents(c jobnode.ClosedJob, findings func(tenant string) map[string]
 		})
 	}
 	if len(events) == 0 {
-		return nil, skipped
+		return nil, skippedInputs
 	}
 	props := map[string]string{"job_id": c.JobID}
 	if mrURL != "" {
@@ -108,7 +108,7 @@ func fixedByEvents(c jobnode.ClosedJob, findings func(tenant string) map[string]
 		props["ref"] = mrRef
 	}
 	mr := brain.EntityObserved{Label: labelMergeRequest, Key: mrKey, MissionID: c.MissionRunID, Props: props}
-	return append([]brain.Event{mr}, events...), skipped
+	return append([]brain.Event{mr}, events...), skippedInputs
 }
 
 func firstNonEmpty(vs ...string) string {

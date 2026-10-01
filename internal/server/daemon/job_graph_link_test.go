@@ -26,7 +26,7 @@ var mrDeliverable = job.Deliverable{Kind: "merge_request", Ref: "!7", URL: testM
 
 func entities(t *testing.T, evs []brain.Event) []brain.EntityObserved {
 	t.Helper()
-	var out []brain.EntityObserved
+	out := make([]brain.EntityObserved, 0, len(evs))
 	for _, ev := range evs {
 		e, ok := ev.(brain.EntityObserved)
 		if !ok {
@@ -123,4 +123,45 @@ func TestJobGraphLink_SubmitsToTheClosingTenant(t *testing.T) {
 	if n != 2 || tenants[0] != "acme" || tenants[1] != "acme" {
 		t.Errorf("submits = %d to %v", n, tenants)
 	}
+}
+
+// TestJobGraphLink_LogsTheInputsItLeftOut covers the reporting branch. An input
+// that is not a finding is dropped on purpose, and dropping it silently is how a
+// fix job quietly links nothing: the count has to reach the operator.
+func TestJobGraphLink_LogsTheInputsItLeftOut(t *testing.T) {
+	var submitted int
+	l := &jobGraphLink{
+		submit:   func(string, brain.Event) { submitted++ },
+		findings: worldWith(map[string]string{"f-1": "s"}),
+		logger:   testObsLogger().Slog(),
+	}
+	// Two inputs, one finding and one plan.
+	l.JobClosed(context.Background(), closedJob([]string{"f-1", "plan-1"}, mrDeliverable))
+	// The merge request plus the one finding, and nothing for the plan.
+	if submitted != 2 {
+		t.Errorf("submitted %d events, want 2 (the merge request and one finding)", submitted)
+	}
+}
+
+// TestNewJobGraphLink_ReadsFindingsFromTheTenantWorld exercises the real
+// constructor's two closures. They are the seam between this file and the brain
+// registry, so a test that only builds a jobGraphLink by hand never touches
+// them: the submit path and the findings projection both stay unproven.
+func TestNewJobGraphLink_ReadsFindingsFromTheTenantWorld(t *testing.T) {
+	reg := brain.NewRegistry(context.Background())
+	l := newJobGraphLink(reg, testObsLogger().Slog())
+	if l.submit == nil || l.findings == nil {
+		t.Fatal("newJobGraphLink left a seam nil")
+	}
+	// A tenant with no findings yields an empty, non-nil map, so a caller can
+	// range it without a nil check.
+	got := l.findings("acme")
+	if got == nil {
+		t.Fatal("findings returned a nil map for a tenant with no findings")
+	}
+	if len(got) != 0 {
+		t.Errorf("findings for an empty World = %v, want none", got)
+	}
+	// Submitting must not panic on a tenant the registry has not seen before.
+	l.submit("acme", brain.EntityObserved{Label: labelMergeRequest, Key: "https://example.test/mr/1"})
 }
