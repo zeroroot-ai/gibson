@@ -883,7 +883,7 @@ func TestEnumTypeIntegration(t *testing.T) {
 func TestEdgeCases(t *testing.T) {
 	t.Run("no secret named in target", func(t *testing.T) {
 		target := NewTarget("Test", "https://test.com", TargetTypeLLMChat)
-		assert.NoError(t, target.Validate()) // a target may need no secret
+		require.NoError(t, target.Validate()) // a target may need no secret
 
 		jsonData, err := json.Marshal(target)
 		require.NoError(t, err)

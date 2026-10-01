@@ -214,13 +214,13 @@ type Target struct {
 	// replaces, credential_id, was accepted only when it parsed as a UUID and
 	// dropped in silence otherwise, so a caller naming a secret had the name
 	// swallowed with no error (gibson#485).
-	SecretName string `json:"secret_name,omitempty"`
-	Status       TargetStatus           `json:"status"`
-	Description  string                 `json:"description,omitempty"`
-	Tags         []string               `json:"tags,omitempty"`
-	Timeout      int                    `json:"timeout"` // seconds
-	CreatedAt    time.Time              `json:"created_at"`
-	UpdatedAt    time.Time              `json:"updated_at"`
+	SecretName  string       `json:"secret_name,omitempty"`
+	Status      TargetStatus `json:"status"`
+	Description string       `json:"description,omitempty"`
+	Tags        []string     `json:"tags,omitempty"`
+	Timeout     int          `json:"timeout"` // seconds
+	CreatedAt   time.Time    `json:"created_at"`
+	UpdatedAt   time.Time    `json:"updated_at"`
 
 	// URL is the target endpoint. New code should use Connection["url"] instead;
 	// this field is read by mission_manager and attack/runner for backward compatibility.
