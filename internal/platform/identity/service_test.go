@@ -367,3 +367,49 @@ func TestFGALookup_HumanTargetUsesUserRef(t *testing.T) {
 		t.Errorf("record = %+v", rec)
 	}
 }
+
+// ctxWithCredential is ctxWithIdentity with an explicit credential class.
+func ctxWithCredential(t *testing.T, subject, tenant string, cred auth.CredentialType) context.Context {
+	t.Helper()
+	tid, err := auth.NewTenantID(tenant)
+	if err != nil {
+		t.Fatalf("NewTenantID(%q): %v", tenant, err)
+	}
+	return auth.WithIdentity(context.Background(), auth.Identity{
+		Subject: subject, Tenant: tid, CredentialType: cred,
+	})
+}
+
+// TestWhoAmI_SelfKind: the self case reports the kind of the caller. A person
+// who signed in through OIDC is USER. A typed component principal keeps its
+// prefix kind. A caller that is neither stays UNSPECIFIED.
+func TestWhoAmI_SelfKind(t *testing.T) {
+	for _, tc := range []struct {
+		name    string
+		subject string
+		cred    auth.CredentialType
+		want    identitypb.PrincipalKind
+	}{
+		{"oidc person", "392845542176063539", auth.CredentialOIDCUser, identitypb.PrincipalKind_PRINCIPAL_KIND_USER},
+		{"service account", "svc-sub-1", auth.CredentialClientCredentials, identitypb.PrincipalKind_PRINCIPAL_KIND_UNSPECIFIED},
+		{"agent principal", "agent_principal:a1", auth.CredentialClientCredentials, identitypb.PrincipalKind_PRINCIPAL_KIND_AGENT},
+		{"typed principal over oidc credential", "tool_principal:t1", auth.CredentialOIDCUser, identitypb.PrincipalKind_PRINCIPAL_KIND_TOOL},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			srv, err := NewServer(Config{Authorizer: &fakeAuthorizer{
+				listObjectsFn: func(_, _, _ string) ([]string, error) { return nil, nil },
+				checkFn:       func(_, _, _ string) (bool, error) { return false, nil },
+			}, Lookup: &fakeLookup{}})
+			if err != nil {
+				t.Fatalf("NewServer: %v", err)
+			}
+			resp, err := srv.WhoAmI(ctxWithCredential(t, tc.subject, "tenant-a", tc.cred), &identitypb.WhoAmIRequest{})
+			if err != nil {
+				t.Fatalf("WhoAmI: %v", err)
+			}
+			if got := resp.GetKind(); got != tc.want {
+				t.Errorf("kind = %s, want %s", got, tc.want)
+			}
+		})
+	}
+}
