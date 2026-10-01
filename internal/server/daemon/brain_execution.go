@@ -66,6 +66,10 @@ type brainExecutor struct {
 	// jobClosed links a closed job's deliverables into the graph
 	// (gibson#477). dispatchJob hands it to jobnode, which refuses a nil.
 	jobClosed jobnode.CloseObserver
+	// jobFindings resolves a job node's {{findings.open}} to the open findings on
+	// the run's target (gibson#497). A mission definition cannot name finding
+	// ids, because the run is what produces them.
+	jobFindings jobnode.FindingsResolver
 
 	mu       sync.RWMutex
 	bindings map[string]*missionBinding

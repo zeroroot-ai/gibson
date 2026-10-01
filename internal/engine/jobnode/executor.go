@@ -89,6 +89,10 @@ type Input struct {
 	Verifier Verifier
 	// Closed hears about each accomplished close. Required.
 	Closed CloseObserver
+	// Findings resolves the {{findings.open}} input reference to real finding
+	// ids, server-side, from the run's own target. Required only when a spec
+	// uses the reference; a spec that names its inputs outright needs none.
+	Findings FindingsResolver
 	// PollInterval is how often the loop reads the job's events. Zero takes
 	// DefaultPollInterval.
 	PollInterval time.Duration
@@ -129,7 +133,17 @@ func Run(ctx context.Context, in Input) (Outcome, error) {
 		interval = DefaultPollInterval
 	}
 
-	spec := stampContext(in.Spec, in.MissionRunID, in.NodeID)
+	// Resolve the input references, then make the resolved spec THE spec for the
+	// rest of the run. closeWith used to read in.Spec while judge read the
+	// stamped copy, so a resolution applied to one would have been invisible to
+	// the other, and the inputs the job was opened with are exactly the inputs
+	// the FIXED_BY link is built from (gibson#497).
+	resolved, err := resolveInputs(ctx, in, in.Spec)
+	if err != nil {
+		return Outcome{}, err
+	}
+	in.Spec = stampContext(resolved, in.MissionRunID, in.NodeID)
+	spec := in.Spec
 	opened, err := in.Ops.Open(ctx, in.TenantID, job.OpenInput{BankID: in.BankID, Spec: spec, OpenedBy: in.Opener})
 	if err != nil {
 		return Outcome{}, fmt.Errorf("jobnode: open a job on bank %s: %w", in.BankID, err)
