@@ -5,7 +5,9 @@ package daemon
 
 import (
 	"context"
+	"strings"
 	"testing"
+	"time"
 
 	"github.com/zeroroot-ai/gibson/internal/engine/brain"
 	"github.com/zeroroot-ai/gibson/internal/engine/jobnode"
@@ -164,4 +166,112 @@ func TestNewJobGraphLink_ReadsFindingsFromTheTenantWorld(t *testing.T) {
 	}
 	// Submitting must not panic on a tenant the registry has not seen before.
 	l.submit("acme", brain.EntityObserved{Label: labelMergeRequest, Key: "https://example.test/mr/1"})
+}
+
+// seedWorld submits the events and waits until the World has applied them.
+// Submit is a channel send, so a read straight after it races the apply.
+func seedFindingsWorld(t *testing.T, eng *brain.Engine, want int, evs ...brain.Event) {
+	t.Helper()
+	for _, ev := range evs {
+		eng.Submit(ev)
+	}
+	deadline := time.Now().Add(2 * time.Second)
+	for time.Now().Before(deadline) {
+		if len(eng.Findings()) >= want && len(eng.Missions()) > 0 {
+			return
+		}
+		time.Sleep(5 * time.Millisecond)
+	}
+	t.Fatalf("the World applied %d findings and %d missions, want %d findings",
+		len(eng.Findings()), len(eng.Missions()), want)
+}
+
+// TestOpenFindingsResolver_ScopesToTheRunsTarget is the other half of the
+// gibson#497 fixture. The resolver must answer from the World's own mission
+// record, so a fix job gets the open findings on the target it is fixing and
+// nothing else — a tenant may hold three clusters.
+func TestOpenFindingsResolver_ScopesToTheRunsTarget(t *testing.T) {
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+	reg := brain.NewRegistry(ctx)
+	eng := reg.For("acme")
+
+	seedFindingsWorld(t, eng, 3,
+		brain.MissionCreated{ID: "run-1", TenantID: "acme", TargetID: "target-a"},
+		brain.MissionCreated{ID: "run-2", TenantID: "acme", TargetID: "target-b"},
+		brain.FindingRaised{ID: "f-a1", ScopeID: "target-a", Title: "x", Status: brain.FindingStatusOpen},
+		brain.FindingRaised{ID: "f-a2", ScopeID: "target-a", Title: "y", Status: brain.FindingStatusFixed},
+		brain.FindingRaised{ID: "f-b1", ScopeID: "target-b", Title: "z", Status: brain.FindingStatusOpen},
+	)
+
+	got, err := openFindingsResolver(reg).OpenFindings(ctx, "acme", "run-1")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(got) != 1 || got[0] != "f-a1" {
+		t.Errorf("open findings = %v, want only the open one on target-a", got)
+	}
+}
+
+// A mission the World does not know cannot have its findings scoped. Answering
+// "none" would read as "nothing to fix" and the job would link nothing in
+// silence, which is the gibson#497 defect wearing a different hat.
+func TestOpenFindingsResolver_RefusesAnUnknownRun(t *testing.T) {
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+	reg := brain.NewRegistry(ctx)
+
+	_, err := openFindingsResolver(reg).OpenFindings(ctx, "acme", "run-nope")
+	if err == nil {
+		t.Fatal("an unknown run must fail, not resolve to no findings")
+	}
+	if !strings.Contains(err.Error(), "names no target") {
+		t.Errorf("error = %v", err)
+	}
+}
+
+func TestOpenFindingsResolver_RefusesAnEmptyRunID(t *testing.T) {
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+	if _, err := openFindingsResolver(brain.NewRegistry(ctx)).OpenFindings(ctx, "acme", ""); err == nil {
+		t.Fatal("a job with no mission run has no target to scope by")
+	}
+}
+
+// A target with nothing open resolves to nothing, and that IS the answer: the
+// job opens with no inputs and closes having linked nothing.
+func TestOpenFindingsResolver_NoOpenFindingsIsNotAnError(t *testing.T) {
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+	reg := brain.NewRegistry(ctx)
+	eng := reg.For("acme")
+
+	seedFindingsWorld(t, eng, 1,
+		brain.MissionCreated{ID: "run-1", TenantID: "acme", TargetID: "target-a"},
+		brain.FindingRaised{ID: "f-a1", ScopeID: "target-a", Title: "x", Status: brain.FindingStatusFixed},
+	)
+
+	got, err := openFindingsResolver(reg).OpenFindings(ctx, "acme", "run-1")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(got) != 0 {
+		t.Errorf("open findings = %v, want none", got)
+	}
+}
+
+// One tenant's World never answers for another's.
+func TestOpenFindingsResolver_DoesNotCrossTenants(t *testing.T) {
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+	reg := brain.NewRegistry(ctx)
+
+	seedFindingsWorld(t, reg.For("acme"), 1,
+		brain.MissionCreated{ID: "run-1", TenantID: "acme", TargetID: "target-a"},
+		brain.FindingRaised{ID: "f-a1", ScopeID: "target-a", Title: "x", Status: brain.FindingStatusOpen},
+	)
+
+	if _, err := openFindingsResolver(reg).OpenFindings(ctx, "other", "run-1"); err == nil {
+		t.Fatal("another tenant's World does not know this run, so it must refuse")
+	}
 }

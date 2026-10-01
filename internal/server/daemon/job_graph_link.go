@@ -5,6 +5,8 @@ package daemon
 
 import (
 	"context"
+	"errors"
+	"fmt"
 	"log/slog"
 
 	"github.com/zeroroot-ai/gibson/internal/engine/brain"
@@ -118,4 +120,43 @@ func firstNonEmpty(vs ...string) string {
 		}
 	}
 	return ""
+}
+
+// openFindingsResolver answers jobnode's {{findings.open}} from the tenant
+// World: the open findings on the target the run is against (gibson#497).
+//
+// The target is read from the World's own mission record, not from the request,
+// for the reason CONTEXT.md gives for ScopeID: a caller that could name the
+// scope could point a fix job at findings it was never granted. A Finding's
+// ScopeID IS the target UUID (ADR-0002 makes host identity the (ScopeID,
+// Address) coordinate), so the match needs no new provenance.
+func openFindingsResolver(reg *brain.Registry) jobnode.FindingsResolver {
+	return jobnode.FindingsResolverFunc(func(_ context.Context, tenant, missionRunID string) ([]string, error) {
+		if missionRunID == "" {
+			return nil, errors.New("a job with no mission run has no target, so no findings to fix")
+		}
+		w := reg.For(tenant)
+
+		var scope string
+		for _, m := range w.Missions() {
+			if m.ID == missionRunID {
+				scope = m.TargetID
+				break
+			}
+		}
+		if scope == "" {
+			// Not an empty result. A mission the World does not know, or one with
+			// no target, cannot have its findings scoped, and answering "none"
+			// would read as "nothing to fix" (gibson#497).
+			return nil, fmt.Errorf("mission run %q names no target in the tenant World", missionRunID)
+		}
+
+		var ids []string
+		for _, f := range w.Findings() {
+			if f.ScopeID == scope && f.Status == brain.FindingStatusOpen {
+				ids = append(ids, f.ID)
+			}
+		}
+		return ids, nil
+	})
 }

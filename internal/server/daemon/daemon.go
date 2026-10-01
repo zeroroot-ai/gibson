@@ -1126,6 +1126,7 @@ func (d *daemonImpl) Start(ctx context.Context) error {
 		// A job node's jobs live in the tenant's data plane, which is built
 		// later in Start, so the store is read per dispatch (gibson#1713).
 		d.brainExecutor.jobClosed = newJobGraphLink(d.brainRegistry, d.logger.WithComponent("job-graph-link").Slog())
+		d.brainExecutor.jobFindings = openFindingsResolver(d.brainRegistry)
 		d.brainExecutor.jobs = func() (job.Store, error) {
 			if d.pool == nil {
 				return nil, errors.New("the data-plane pool is not up, so this daemon serves no jobs")
