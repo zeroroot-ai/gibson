@@ -140,19 +140,30 @@ func TestRedisTargetDAO_Create(t *testing.T) {
 		assert.Contains(t, err.Error(), "validation failed")
 	})
 
-	t.Run("create_with_credential_id", func(t *testing.T) {
-		target := createTestTarget("target-with-cred")
-		credID := types.NewID()
-		target.CredentialID = &credID
+	// The name round-trips verbatim. The field this replaces was an id against a
+	// name-keyed store, accepted only when it parsed as a UUID, so a target
+	// naming "goat-kubeconfig" stored nothing at all (gibson#485).
+	t.Run("create_with_secret_name", func(t *testing.T) {
+		target := createTestTarget("target-with-secret")
+		target.SecretName = "goat-kubeconfig"
 
 		err := dao.Create(ctx, target)
 		require.NoError(t, err)
 
-		// Verify credential ID was stored
 		retrieved, err := dao.Get(ctx, target.ID)
 		require.NoError(t, err)
-		require.NotNil(t, retrieved.CredentialID)
-		assert.Equal(t, credID, *retrieved.CredentialID)
+		assert.Equal(t, "goat-kubeconfig", retrieved.SecretName,
+			"a secret name is not a UUID and must survive the round trip as written")
+	})
+
+	t.Run("create_with_no_secret", func(t *testing.T) {
+		target := createTestTarget("target-no-secret")
+		err := dao.Create(ctx, target)
+		require.NoError(t, err)
+
+		retrieved, err := dao.Get(ctx, target.ID)
+		require.NoError(t, err)
+		assert.Empty(t, retrieved.SecretName, "a target that needs no secret names none")
 	})
 
 	t.Run("create_with_complex_connection", func(t *testing.T) {
@@ -437,32 +448,27 @@ func TestRedisTargetDAO_Update(t *testing.T) {
 		assert.Contains(t, err.Error(), "not found")
 	})
 
-	t.Run("update_credential_id", func(t *testing.T) {
-		target := createTestTarget("update-cred-id")
+	t.Run("update_secret_name", func(t *testing.T) {
+		target := createTestTarget("update-secret-name")
 		err := dao.Create(ctx, target)
 		require.NoError(t, err)
 
-		// Add credential ID
-		credID := types.NewID()
-		target.CredentialID = &credID
-
+		target.SecretName = "goat-kubeconfig"
 		err = dao.Update(ctx, target)
 		require.NoError(t, err)
 
-		// Verify update
 		retrieved, err := dao.Get(ctx, target.ID)
 		require.NoError(t, err)
-		require.NotNil(t, retrieved.CredentialID)
-		assert.Equal(t, credID, *retrieved.CredentialID)
+		assert.Equal(t, "goat-kubeconfig", retrieved.SecretName)
 
-		// Remove credential ID
-		target.CredentialID = nil
+		// Clearing it is how a target stops needing a secret.
+		target.SecretName = ""
 		err = dao.Update(ctx, target)
 		require.NoError(t, err)
 
 		retrieved, err = dao.Get(ctx, target.ID)
 		require.NoError(t, err)
-		assert.Nil(t, retrieved.CredentialID)
+		assert.Empty(t, retrieved.SecretName)
 	})
 
 	t.Run("update_connection_parameters", func(t *testing.T) {

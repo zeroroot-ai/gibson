@@ -205,7 +205,16 @@ type Target struct {
 	Config       map[string]interface{} `json:"config,omitempty"`
 	Capabilities []string               `json:"capabilities,omitempty"`
 	AuthType     AuthType               `json:"auth_type,omitempty"`
-	CredentialID *ID                    `json:"credential_id,omitempty"` // Pointer for nullable FK
+	// SecretName is the tenant secret this target authenticates with, by name.
+	// Empty means the target needs no secret.
+	//
+	// A name, because the live store is name-keyed: tenant_secrets has `name`
+	// as its primary key and no id column at all (migration 006 dropped the
+	// credentials table this field used to reference as an id). The field it
+	// replaces, credential_id, was accepted only when it parsed as a UUID and
+	// dropped in silence otherwise, so a caller naming a secret had the name
+	// swallowed with no error (gibson#485).
+	SecretName string `json:"secret_name,omitempty"`
 	Status       TargetStatus           `json:"status"`
 	Description  string                 `json:"description,omitempty"`
 	Tags         []string               `json:"tags,omitempty"`
@@ -321,11 +330,11 @@ func (t *Target) Validate() error {
 		return fmt.Errorf("invalid auth type: %s", t.AuthType)
 	}
 
-	// Validate CredentialID if set
-	if t.CredentialID != nil {
-		if err := t.CredentialID.Validate(); err != nil {
-			return fmt.Errorf("invalid credential ID: %w", err)
-		}
+	// Validate SecretName if set. The name is a tenant_secrets primary key and
+	// the AAD of its envelope (`secret:<name>`), so a name with surrounding
+	// whitespace is a different key than the one its author meant to write.
+	if t.SecretName != "" && strings.TrimSpace(t.SecretName) != t.SecretName {
+		return fmt.Errorf("secret name %q has leading or trailing whitespace", t.SecretName)
 	}
 
 	// Validate Timeout

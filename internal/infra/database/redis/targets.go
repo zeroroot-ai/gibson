@@ -42,7 +42,7 @@ type targetDocument struct {
 	Config       map[string]interface{} `json:"config,omitempty"`
 	Capabilities []string               `json:"capabilities,omitempty"`
 	AuthType     string                 `json:"auth_type,omitempty"`
-	CredentialID *string                `json:"credential_id,omitempty"` // String pointer for nullable FK
+	SecretName   string                 `json:"secret_name,omitempty"`
 	Status       string                 `json:"status"`
 	Description  string                 `json:"description,omitempty"`
 	Tags         []string               `json:"tags,omitempty"`
@@ -91,14 +91,9 @@ func toTargetDocument(target *types.Target) *targetDocument {
 		Timeout:      target.Timeout,
 		CreatedAt:    target.CreatedAt.UnixMilli(),
 		UpdatedAt:    target.UpdatedAt.UnixMilli(),
+		SecretName:   target.SecretName,
 		URL:          target.URL,
 		Headers:      target.Headers,
-	}
-
-	// Convert credential ID if present
-	if target.CredentialID != nil {
-		credID := target.CredentialID.String()
-		doc.CredentialID = &credID
 	}
 
 	// Ensure non-nil maps and slices for JSON consistency
@@ -146,17 +141,9 @@ func fromTargetDocument(doc *targetDocument) (*types.Target, error) {
 		Timeout:      doc.Timeout,
 		CreatedAt:    time.UnixMilli(doc.CreatedAt),
 		UpdatedAt:    time.UnixMilli(doc.UpdatedAt),
+		SecretName:   doc.SecretName,
 		URL:          doc.URL,
 		Headers:      doc.Headers,
-	}
-
-	// Parse credential ID if present
-	if doc.CredentialID != nil {
-		credID, err := types.ParseID(*doc.CredentialID)
-		if err != nil {
-			return nil, fmt.Errorf("failed to parse credential ID: %w", err)
-		}
-		target.CredentialID = &credID
 	}
 
 	// Ensure non-nil maps and slices

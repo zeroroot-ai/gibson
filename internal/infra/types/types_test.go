@@ -337,8 +337,7 @@ func TestTargetEntityIntegration(t *testing.T) {
 				target.Provider = ProviderOpenAI
 				target.Model = "gpt-4"
 				target.AuthType = AuthTypeAPIKey
-				credID := NewID()
-				target.CredentialID = &credID
+				target.SecretName = "test-llm-api-key"
 				target.Description = "Test target for integration"
 				target.Tags = []string{"test", "integration"}
 				target.Headers = map[string]string{"X-Custom": "value"}
@@ -351,7 +350,7 @@ func TestTargetEntityIntegration(t *testing.T) {
 				assert.Equal(t, string(TargetTypeLLMAPI), target.Type)
 				assert.Equal(t, ProviderOpenAI, target.Provider)
 				assert.Equal(t, "gpt-4", target.Model)
-				assert.NotNil(t, target.CredentialID)
+				assert.Equal(t, "test-llm-api-key", target.SecretName)
 				assert.Len(t, target.Tags, 2)
 			},
 		},
@@ -677,15 +676,14 @@ func TestCrossTypeIntegration(t *testing.T) {
 		cred.KeyDerivationSalt = []byte("mock-salt-value!")
 		require.NoError(t, cred.Validate())
 
-		// Create target referencing credential
+		// Create target naming its secret
 		target := NewTarget("OpenAI GPT-4", "https://api.openai.com/v1", TargetTypeLLMAPI)
-		target.CredentialID = &cred.ID
+		target.SecretName = "openai-api-key"
 		target.Provider = ProviderOpenAI
 		target.AuthType = AuthTypeAPIKey
 		require.NoError(t, target.Validate())
 
-		// Verify relationship
-		assert.Equal(t, cred.ID, *target.CredentialID)
+		assert.Equal(t, "openai-api-key", target.SecretName)
 
 		// JSON round-trip preserves relationship
 		jsonData, err := json.Marshal(target)
@@ -695,8 +693,7 @@ func TestCrossTypeIntegration(t *testing.T) {
 		err = json.Unmarshal(jsonData, &decoded)
 		require.NoError(t, err)
 
-		assert.NotNil(t, decoded.CredentialID)
-		assert.Equal(t, cred.ID, *decoded.CredentialID)
+		assert.Equal(t, "openai-api-key", decoded.SecretName)
 	})
 
 	t.Run("Error handling with entity validation", func(t *testing.T) {
@@ -884,10 +881,9 @@ func TestEnumTypeIntegration(t *testing.T) {
 
 // TestEdgeCases tests edge cases and corner scenarios
 func TestEdgeCases(t *testing.T) {
-	t.Run("nil credential ID in target", func(t *testing.T) {
+	t.Run("no secret named in target", func(t *testing.T) {
 		target := NewTarget("Test", "https://test.com", TargetTypeLLMChat)
-		target.CredentialID = nil
-		assert.NoError(t, target.Validate()) // nil credential is valid
+		assert.NoError(t, target.Validate()) // a target may need no secret
 
 		jsonData, err := json.Marshal(target)
 		require.NoError(t, err)
@@ -895,7 +891,18 @@ func TestEdgeCases(t *testing.T) {
 		var decoded Target
 		err = json.Unmarshal(jsonData, &decoded)
 		require.NoError(t, err)
-		assert.Nil(t, decoded.CredentialID)
+		assert.Empty(t, decoded.SecretName)
+	})
+
+	// The name is a tenant_secrets primary key and the AAD of its envelope, so
+	// " x " and "x" are different keys. Refuse rather than store a key the
+	// author did not mean to write.
+	t.Run("secret name with surrounding whitespace is refused", func(t *testing.T) {
+		target := NewTarget("Test", "https://test.com", TargetTypeLLMChat)
+		target.SecretName = " goat-kubeconfig "
+		err := target.Validate()
+		require.Error(t, err)
+		assert.Contains(t, err.Error(), "whitespace")
 	})
 
 	t.Run("empty maps and slices", func(t *testing.T) {
