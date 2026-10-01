@@ -311,3 +311,70 @@ func TestPromotionGate_PromoteRejectsUnrecognisedProposalKind(t *testing.T) {
 	assert.Nil(t, reg)
 	assert.Contains(t, err.Error(), "unknown proposal kind")
 }
+
+// -----------------------------------------------------------------------
+// Key form at promotion (gibson#484): every runtime-promoted label must carry
+// a written key form, assigned and recorded by the gate. A node label gets a
+// collision-proof identity property (brain_id, unique by construction); a
+// relationship type is an edge and carries no node identity (accounted for as
+// not-applicable). Nothing is ever promoted with an unwritten key, which is
+// what lets two producers of one label merge on the same node instead of
+// splitting it (gibson#1669) and keeps the per-label uniqueness constraint
+// (charts/hosted#486) satisfied.
+// -----------------------------------------------------------------------
+
+func TestPromotionGate_EveryPromotedLabelCarriesAnAccountedForKeyForm(t *testing.T) {
+	base := testBase(t)
+	gate := NewPromotionGate(base)
+
+	for range MinRecurrenceForSettlement {
+		gate.Observe(ProposedNodeLabel, "Container")
+	}
+	require.NoError(t, gate.Confirm(ProposedNodeLabel, "Container", "reviewer-1"))
+	_, err := gate.Promote(ProposedNodeLabel, "Container")
+	require.NoError(t, err)
+
+	for range MinRecurrenceForSettlement {
+		gate.Observe(ProposedRelationshipType, "MANAGES")
+	}
+	require.NoError(t, gate.Confirm(ProposedRelationshipType, "MANAGES", "reviewer-2"))
+	_, err = gate.Promote(ProposedRelationshipType, "MANAGES")
+	require.NoError(t, err)
+
+	records := gate.Promotions()
+	require.Len(t, records, 2)
+	for _, rec := range records {
+		switch rec.Kind {
+		case ProposedNodeLabel:
+			// A node label carries a written key form: non-empty, a valid
+			// identifier, unique by construction, never the collision-prone
+			// generic "key" default the projector falls back to.
+			require.Equal(t, DiscoveredNodeIdentityProperty, rec.IdentityProperty, "node label %q", rec.Label)
+			require.NotEmpty(t, rec.IdentityProperty)
+			require.NotEqual(t, "key", rec.IdentityProperty)
+			require.NoError(t, ValidIdentifier(rec.IdentityProperty))
+		case ProposedRelationshipType:
+			require.Empty(t, rec.IdentityProperty, "relationship type %q carries no node identity", rec.Label)
+		default:
+			t.Fatalf("unexpected proposal kind %v", rec.Kind)
+		}
+	}
+}
+
+// PromotedIdentityProperty accounts for every kind in the closed ProposalKind
+// vocabulary: a node label gets the unique-by-construction key form, a
+// relationship type gets the not-applicable (empty) form. This is the fixture
+// gibson#484 requires: a label that reached promotion with no written key form
+// would fail here, because PromotedIdentityProperty would hand back an unsafe
+// empty string for a node label.
+func TestPromotedIdentityProperty_AccountsForEveryKind(t *testing.T) {
+	// Node labels: a real, collision-proof key form.
+	nodeKey := PromotedIdentityProperty(ProposedNodeLabel)
+	require.NotEmpty(t, nodeKey, "a promoted node label must carry a written key form")
+	require.NotEqual(t, "key", nodeKey, "the generic key default is collision-prone and forbidden (gibson#484)")
+	require.NoError(t, ValidIdentifier(nodeKey), "the key form must itself be a safe identifier")
+	require.Equal(t, DiscoveredNodeIdentityProperty, nodeKey)
+
+	// Relationship types are edges: no node identity, accounted for as empty.
+	require.Empty(t, PromotedIdentityProperty(ProposedRelationshipType))
+}

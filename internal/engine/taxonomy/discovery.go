@@ -59,6 +59,44 @@ func (k ProposalKind) String() string {
 // proposed label are required before it can settle (ADR-0024 §2).
 const MinRecurrenceForSettlement = 3
 
+// DiscoveredNodeIdentityProperty is the Neo4j node property a runtime-promoted
+// node label is identified by (gibson#484). A label discovered at runtime has
+// no human-authored natural key, so the gate assigns the one identity that is
+// unique BY CONSTRUCTION: brain_id, the World entity id — the same property the
+// graph projector's first-class entities (Host, Finding, ...) already merge on.
+//
+// Mandating one identity for every discovered label is what makes discovery
+// collision-safe: two producers of the same label merge on the same property
+// instead of each creating a second node that wears the label and holds half
+// the truth (the gibson#1669 defect class), and the per-label uniqueness
+// constraint (charts/hosted#486) is satisfied rather than violated. The
+// collision-prone alternative — the projector's generic "key" default — is
+// exactly the unwritten key form gibson#484 forbids: a bare key repeats across
+// producers.
+const DiscoveredNodeIdentityProperty = "brain_id"
+
+// PromotedIdentityProperty reports the written key form a promotion of kind
+// assigns (gibson#484):
+//   - a node label is identified by DiscoveredNodeIdentityProperty;
+//   - a relationship type is an edge — it has no node identity of its own, so
+//     its key form is "" (accounted for as "not applicable", never "unwritten").
+//
+// PromotionGate.Promote records this on every PromotionRecord, so the promotion
+// log carries not just WHICH label was promoted but HOW it is identified. A new
+// ProposalKind added without a case here hands back "" for a node-bearing kind,
+// which TestPromotedIdentityProperty_AccountsForEveryKind fails on.
+func PromotedIdentityProperty(kind ProposalKind) string {
+	switch kind {
+	case ProposedNodeLabel:
+		return DiscoveredNodeIdentityProperty
+	case ProposedRelationshipType:
+		// An edge carries no node identity of its own.
+		return ""
+	default:
+		return ""
+	}
+}
+
 // InvalidProposalError is returned by Confirm and Promote when a proposed
 // label fails the automated ValidIdentifier safety check. It is always
 // returned regardless of recurrence or confirmation status — the automated
@@ -107,6 +145,14 @@ type PromotionRecord struct {
 	Kind    ProposalKind
 	Label   string
 	Version int
+
+	// IdentityProperty is the written key form the gate assigned this label at
+	// promotion (gibson#484). For a node label it is
+	// DiscoveredNodeIdentityProperty; for a relationship type it is "" (an edge
+	// carries no node identity). It is recorded here, not re-derived, so the
+	// replay log is self-describing: a reader of Promotions() knows how every
+	// promoted label is identified without consulting the gate's code.
+	IdentityProperty string
 }
 
 // PromotionGate is the taxonomy-discovery safety gate (ADR-0024 §2). A
@@ -179,7 +225,8 @@ func (g *PromotionGate) Confirm(kind ProposalKind, label, reviewer string) error
 //   - a reviewer has Confirmed it (HITL).
 //
 // On success, Promote returns a new *Registry (version = current base
-// version + 1) admitting the label, records the promotion (Promotions()),
+// version + 1) admitting the label, records the promotion (Promotions())
+// together with its assigned key form (PromotedIdentityProperty, gibson#484),
 // and that Registry becomes the gate's new Base() so a second promotion
 // compounds on top of the first. On any failure, the gate and its Base() are
 // unchanged, and the label never reaches the Taxonomy through this path.
@@ -204,7 +251,12 @@ func (g *PromotionGate) Promote(kind ProposalKind, label string) (*Registry, err
 	}
 
 	g.base = promoted
-	g.promotions = append(g.promotions, PromotionRecord{Kind: kind, Label: label, Version: promoted.Version()})
+	g.promotions = append(g.promotions, PromotionRecord{
+		Kind:             kind,
+		Label:            label,
+		Version:          promoted.Version(),
+		IdentityProperty: PromotedIdentityProperty(kind),
+	})
 	return promoted, nil
 }
 
