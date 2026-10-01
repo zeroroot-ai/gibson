@@ -2059,10 +2059,17 @@ func (d *daemonImpl) buildGRPCServer(ctx context.Context) (*grpcSubsystem, error
 // an error listing missing methods on mismatch. Called once at
 // daemon startup; safe to skip for tests via the daemon test scaffold.
 //
-// GIBSON_SKIP_REGISTRY_COVERAGE_CHECK=true bypasses the check entirely
-// — used in Kind dev clusters via values-kind.yaml where newly-added
-// operational RPCs may not yet have SDK registry entries.
-// Production overlays leave it unset; check stays fail-closed there.
+// GIBSON_SKIP_REGISTRY_COVERAGE_CHECK=true bypasses the check entirely.
+// NOTHING SETS IT. Measured 2026-10-01 across charts and hosted: the only
+// occurrence of the name is helm/contracts/gibson-env-readers.txt, which
+// declares that this daemon READS it, and no values file in either repo ships
+// it. There is no values-kind.yaml in charts at all — this comment used to name
+// one, and it is the file that does not exist rather than merely a file that
+// stopped setting the variable.
+//
+// So every environment, including kind, runs this check fail-closed. Keep it
+// that way: the bypass exists for a test scaffold, and a cluster that sets it
+// would boot a daemon serving RPCs ext-authz has no decision for.
 //
 // Spec: unified-identity-and-authorization Requirement 14.3.
 func assertRegistryCoverage(srv *grpc.Server) error {
