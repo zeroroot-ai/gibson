@@ -75,10 +75,20 @@ func (a ModelArtifact) KnownVars() map[string]struct{} {
 // Evidence is the deterministic evidence one host presents to a BeliefModel,
 // mirroring the sidecar wire evidence shape (open_ports / services /
 // reachable) that model.evidence_to_observations reads.
+//
+// FindingCritical, FindingHigh and ExploitDemonstrated are the finding-derived
+// evidence (gibson#478): a confirmed finding on the host at a severity, and an
+// exploit demonstrated against it. They map onto the model's noisy-OR parents
+// of exploitable (finding_critical / finding_high / exploit_demonstrated). A
+// false cause contributes nothing, so a host with no finding evidence scores
+// exactly as it did before gibson#478.
 type Evidence struct {
-	OpenPorts []int
-	Services  []string // "<port>/<name>"
-	Reachable bool
+	OpenPorts           []int
+	Services            []string // "<port>/<name>"
+	Reachable           bool
+	FindingCritical     bool
+	FindingHigh         bool
+	ExploitDemonstrated bool
 }
 
 // EvidenceToObservations maps host evidence onto observed network variables,
@@ -93,6 +103,21 @@ func EvidenceToObservations(ev Evidence, knownVars map[string]struct{}) (obs map
 
 	if _, ok := knownVars["reachable"]; ok {
 		obs["reachable"] = boolState(ev.Reachable)
+	}
+
+	// Finding-derived evidence is always observed when the model declares it
+	// (gibson#478), the same as reachable: a noisy-OR cause observed FALSE
+	// contributes nothing, which is what keeps a host with no finding evidence
+	// byte-identical to the pre-gibson#478 posteriors. A model that does not
+	// declare these variables (e.g. an older artifact) simply ignores them.
+	if _, ok := knownVars["finding_critical"]; ok {
+		obs["finding_critical"] = boolState(ev.FindingCritical)
+	}
+	if _, ok := knownVars["finding_high"]; ok {
+		obs["finding_high"] = boolState(ev.FindingHigh)
+	}
+	if _, ok := knownVars["exploit_demonstrated"]; ok {
+		obs["exploit_demonstrated"] = boolState(ev.ExploitDemonstrated)
 	}
 
 	ports := append([]int(nil), ev.OpenPorts...)

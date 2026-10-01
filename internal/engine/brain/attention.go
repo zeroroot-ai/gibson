@@ -15,11 +15,15 @@ import (
 // 0006: attention has two inputs — the goal-directed belief field AND surprise).
 const surpriseBoost = 1.0
 
-// attentionScore combines the two attention inputs: the belief field (goal-directed)
-// and the surprise signal (off-path anomaly). Derived at read time — not stored —
-// so it never needs an entity key and always reflects current belief + surprise.
-func attentionScore(juicy float64, surprised bool) float64 {
-	a := juicy
+// attentionScore combines the attention inputs: the belief field (goal-directed)
+// and the surprise signal (off-path anomaly). The belief field contributes both
+// how valuable a host is (juicy) and how attackable it is (exploitable,
+// gibson#478) — a host a scan has proved exploitable must rank above an equally
+// juicy host that is not, so the Decider spends its context budget on the hosts an
+// attack can actually land on. Derived at read time — not stored — so it never
+// needs an entity key and always reflects current belief + surprise.
+func attentionScore(juicy, exploitable float64, surprised bool) float64 {
+	a := juicy + exploitable
 	if surprised {
 		a += surpriseBoost
 	}

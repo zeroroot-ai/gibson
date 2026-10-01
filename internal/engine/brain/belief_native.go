@@ -48,7 +48,14 @@ func NativeBeliefProvider(model *beliefvi.BeliefModel, priors PriorProvider) Bel
 // provider's fail-quiet contract exactly; the belief gate asks again on the
 // next evidence change.
 func (p *nativeBelief) Score(ev BeliefEvidence) Belief {
-	biEv := beliefvi.Evidence{OpenPorts: ev.OpenPorts, Services: ev.Services, Reachable: ev.Reachable}
+	biEv := beliefvi.Evidence{
+		OpenPorts:           ev.OpenPorts,
+		Services:            ev.Services,
+		Reachable:           ev.Reachable,
+		FindingCritical:     ev.FindingCritical,
+		FindingHigh:         ev.FindingHigh,
+		ExploitDemonstrated: ev.ExploitDemonstrated,
+	}
 
 	result, err := p.model.Score(biEv, nil)
 	if err != nil {

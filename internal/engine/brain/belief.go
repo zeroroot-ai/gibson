@@ -10,6 +10,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"sort"
+	"strings"
 	"sync"
 	"time"
 
@@ -46,21 +47,34 @@ type Belief struct {
 }
 
 // BeliefEvidence is the deterministic, order-stable evidence one host presents to
-// the belief model. It is derived purely from the Host component, so the same Host
-// always yields the same evidence — and therefore the same posteriors, which exact
-// inference and 1:1 replay both require.
+// the belief model. It is derived from the Host component plus the findings and
+// demonstrated exploits that correlate to the same host (gibson#478), so the same
+// World always yields the same evidence — and therefore the same posteriors, which
+// exact inference and 1:1 replay both require.
+//
+// FindingCritical/FindingHigh/ExploitDemonstrated are discrete, order-stable and
+// JSON-native, so evidenceDigest stays canonical. They default false, so a host
+// with no finding evidence hashes and scores exactly as it did before gibson#478.
 type BeliefEvidence struct {
 	OpenPorts []int    `json:"open_ports"`
 	Services  []string `json:"services"`  // "<port>/<name>", sorted
 	Reachable bool     `json:"reachable"` // any open port observed
+
+	// FindingCritical / FindingHigh report the highest severity of a confirmed,
+	// still-active finding on this host (gibson#478). ExploitDemonstrated reports
+	// that a bet settled TRUE against this host — a proof-of-demonstration
+	// exploit (ADR-0027), the strongest evidence for exploitable.
+	FindingCritical     bool `json:"finding_critical"`
+	FindingHigh         bool `json:"finding_high"`
+	ExploitDemonstrated bool `json:"exploit_demonstrated"`
 }
 
 // evidenceOf derives the belief evidence from a Host. Only open ports count;
 // ports and services are sorted, so identical Hosts yield identical evidence.
 func evidenceOf(h Host) BeliefEvidence {
-	// Both slices are preallocated, so a host with no open ports sends `[]`
-	// rather than `null`. The sidecar reads them with
-	// `evidence.get("open_ports", [])`, which a JSON null defeats.
+	// Both slices are preallocated, so a host with no open ports yields `[]`
+	// rather than `null`, keeping the JSON encoding (and therefore the evidence
+	// digest) canonical: a nil and an empty slice must not hash differently.
 	ports := make([]int, 0, len(h.Ports))
 	svcs := make([]string, 0, len(h.Ports))
 	for _, port := range h.Ports {
@@ -156,16 +170,100 @@ func applyBeliefScored(w *World, e BeliefScored) {
 	h.Belief = e.Belief
 }
 
+// hostEvidenceKey is the scope-relative identity a finding or a demonstrated
+// exploit is correlated to a host by (gibson#478): the (ScopeID, Address) pair a
+// Finding carries and a Host is addressed by (ADR-0002, scope-relative identity).
+func hostEvidenceKey(scopeID, address string) string {
+	return scopeID + "\x00" + address
+}
+
+// findingSeverityByHost reports, per host key, whether a confirmed, still-active
+// finding of critical or high severity sits on that host (gibson#478). A finding
+// is active while its status is open or fixing: a fixed or verified finding is no
+// longer evidence that the host is exploitable, so it drops out of the evidence
+// (and the belief recomputes down, as a status change must).
+func findingSeverityByHost(w *World) (critical, high map[string]bool) {
+	critical = map[string]bool{}
+	high = map[string]bool{}
+	for _, f := range w.FindingSnapshot() {
+		if f.Address == "" {
+			continue // no host to correlate to
+		}
+		if f.Status == FindingStatusFixed || f.Status == FindingStatusVerified {
+			continue
+		}
+		key := hostEvidenceKey(f.ScopeID, f.Address)
+		switch strings.ToLower(f.Severity) {
+		case "critical":
+			critical[key] = true
+		case "high":
+			high[key] = true
+		}
+	}
+	return critical, high
+}
+
+// demonstratedExploitByHost reports, per host key, whether a bet settled TRUE on
+// that host — a demonstrated exploit, the strongest evidence for exploitable
+// (ADR-0027 proof-of-demonstration, gibson#478). A BetSettlement is keyed by
+// HypothesisID (bet_settlement.go), and a Hypothesis names the host its claim is
+// about through its References (hypothesis.go). The join is therefore
+// settlement -> (HypothesisID) hypothesis -> (a reference whose id-property value
+// is a host's scope-relative address) host. Matching on the property VALUE, not a
+// guessed key, keeps the join robust to the agent-supplied reference shape, and
+// the ScopeID bound plus the host lookup in BeliefSystem mean only a real host at
+// that address in that scope is ever marked.
+func demonstratedExploitByHost(w *World) map[string]bool {
+	hypByID := map[string]HypothesisSnapshot{}
+	for _, h := range w.HypothesisSnapshot() {
+		if h.HypothesisID != "" {
+			hypByID[h.HypothesisID] = h
+		}
+	}
+	out := map[string]bool{}
+	for _, s := range w.BetSettlementSnapshot() {
+		if s.Verdict != SettlementVerdictTrue {
+			continue
+		}
+		hyp, ok := hypByID[s.HypothesisID]
+		if !ok {
+			continue
+		}
+		for _, ref := range hyp.References {
+			for _, v := range ref.IDProperties {
+				if v == "" {
+					continue
+				}
+				out[hostEvidenceKey(hyp.ScopeID, v)] = true
+			}
+		}
+	}
+	return out
+}
+
 // BeliefSystem is the engine System that keeps the belief field current. It is
 // mechanical and quiescent: it emits a BeliefScoreRequested for a host only when
 // the host's evidence differs from the evidence its outstanding score was
 // requested for. It never calls the provider, so a tick never blocks on inference.
+//
+// Evidence is the host's own ports/services (evidenceOf) plus the finding-derived
+// evidence that correlates to the same host (gibson#478): a confirmed finding at a
+// severity, and a demonstrated exploit. A finding landing on a host changes that
+// host's evidence digest, so the belief recomputes; a finding on another host, or
+// a re-raise carrying nothing new, leaves the digest unchanged and is suppressed.
 func BeliefSystem(w *World) []Event {
+	critical, high := findingSeverityByHost(w)
+	exploited := demonstratedExploitByHost(w)
+
 	var out []Event
 	q := ecs.NewFilter1[Host](w.ecs).Query()
 	for q.Next() {
 		h := q.Get()
 		ev := evidenceOf(*h)
+		key := hostEvidenceKey(h.ScopeID, h.Address)
+		ev.FindingCritical = critical[key]
+		ev.FindingHigh = high[key]
+		ev.ExploitDemonstrated = exploited[key]
 		if evidenceDigest(ev) == h.EvidenceDigest {
 			continue
 		}
