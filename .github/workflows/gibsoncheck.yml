@@ -220,6 +220,12 @@ jobs:
       - name: Check no Redis tenant-prefix patterns
         run: bash scripts/check-no-redis-prefix.sh
 
+      # The bringup diagnostics dumper runs only on main, inside the exit tests,
+      # on a cluster that is then destroyed. Its selftest runs here so a broken
+      # dumper is caught on a PR and not on the one run that needed it.
+      - name: Check the bringup diagnostics dumper
+        run: bash scripts/ci/dump-bringup-diagnostics.sh --selftest
+
       # attic#15: on 2026-09-05 the tree tracked four ELF executables (92 MB).
       # Keyed by file magic, so a binary under any new name fails the same way.
       # Self-test first so a silently-broken guard cannot pass by finding nothing.

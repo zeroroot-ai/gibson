@@ -1,0 +1,76 @@
+{
+  "status": {
+    "sync": {
+      "status": "OutOfSync"
+    },
+    "health": {
+      "status": "Degraded"
+    },
+    "operationState": {
+      "phase": "Failed",
+      "message": "one or more synchronization tasks completed unsuccessfully (retried 5 times).",
+      "startedAt": "2026-10-01T18:35:00Z",
+      "syncResult": {
+        "resources": [
+          {
+            "kind": "ServiceAccount",
+            "name": "setec-preupgrade-runtime-check",
+            "status": null,
+            "hookPhase": "Succeeded",
+            "message": "setec-preupgrade-runtime-check created"
+          },
+          {
+            "kind": "Namespace",
+            "name": "setec-system",
+            "status": "Synced",
+            "hookPhase": "Succeeded",
+            "message": "namespace/setec-system serverside-applied"
+          },
+          {
+            "kind": "Job",
+            "name": "gibson-gibson-workloads-fga-init-63424631",
+            "status": null,
+            "hookPhase": "Failed",
+            "message": "job failed"
+          },
+          {
+            "kind": "StatefulSet",
+            "name": "gibson-daemon",
+            "status": "SyncFailed",
+            "hookPhase": "Succeeded",
+            "message": "error validating data"
+          }
+        ]
+      }
+    },
+    "conditions": [
+      {
+        "type": "SyncError",
+        "message": "Job.batch gibson-gibson-workloads-fga-init-63424631 failed"
+      }
+    ],
+    "resources": [
+      {
+        "kind": "ServiceAccount",
+        "name": "gibson-gibson-workloads-first-admin",
+        "status": null,
+        "health": null
+      },
+      {
+        "kind": "ConfigMap",
+        "name": "cnpg-controller-manager-config",
+        "status": "Synced",
+        "health": null
+      },
+      {
+        "kind": "StatefulSet",
+        "name": "gibson-daemon",
+        "status": "OutOfSync",
+        "health": {
+          "status": "Degraded",
+          "message": "0/1 ready"
+        }
+      }
+    ]
+  }
+}
