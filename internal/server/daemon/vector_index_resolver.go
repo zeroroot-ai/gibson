@@ -9,6 +9,7 @@ import (
 	"fmt"
 
 	"github.com/zeroroot-ai/gibson/internal/infra/datapool"
+	"github.com/zeroroot-ai/gibson/internal/platform/secrets"
 	pdataplane "github.com/zeroroot-ai/gibson/pkg/platform/dataplane"
 	"github.com/zeroroot-ai/sdk/auth"
 )
@@ -47,14 +48,25 @@ func wireVectorStore(cfg *datapool.Config, resolver datapool.VectorIndexResolver
 // call, because the broker stack sets that field after the pool exists.
 func (d *daemonImpl) vectorIndexResolver() datapool.VectorIndexResolverFunc {
 	return func(ctx context.Context, tenant auth.TenantID) (string, error) {
-		// Keep the interface nil when the service is nil. A nil *Service in
-		// an interface is not equal to nil.
-		var reader secretResolver
-		if d.secretsService != nil {
-			reader = d.secretsService
-		}
-		return resolveVectorIndex(ctx, reader, tenant)
+		return resolveVectorIndex(ctx, secretReaderOf(d.secretsService), tenant)
 	}
+}
+
+// secretReaderOf wraps the broker service as the narrow reader the resolver
+// takes, and returns a nil INTERFACE when the service pointer is nil.
+//
+// This is the typed-nil trap and it has to be a function rather than three
+// lines inline, because the whole point is that the obvious version is wrong:
+// assigning a nil *secrets.Service into an interface variable produces an
+// interface that is NOT equal to nil, so `reader != nil` is true, the resolver
+// calls through it, and the daemon panics on a path that reads as a nil check.
+// resolveVectorIndex returns *datapool.NotProvisionedError for a nil reader,
+// which is the behaviour this preserves.
+func secretReaderOf(s *secrets.Service) secretResolver {
+	if s == nil {
+		return nil
+	}
+	return s
 }
 
 // resolveVectorIndex reads VectorCredentials for the tenant from Vault and

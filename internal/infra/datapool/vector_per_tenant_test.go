@@ -4,9 +4,11 @@
 package datapool
 
 import (
+	"bytes"
 	"context"
 	"errors"
 	"fmt"
+	"github.com/zeroroot-ai/gibson/internal/infra/types"
 	"strings"
 	"testing"
 
@@ -251,5 +253,56 @@ func TestVectorPerTenant_ForTenant_DriverFaultIsNotNotProvisioned(t *testing.T) 
 	}
 	if !strings.Contains(err.Error(), "vector_idx:tenant_acme") {
 		t.Errorf("error = %v, want it to name the index it tried", err)
+	}
+}
+
+// fixedKeyProvider is a test double for crypto.KeyProvider that returns a fixed
+// master key. NewPool loads the KEK before it validates anything, so a config
+// test needs one.
+type fixedKeyProvider struct{}
+
+func (fixedKeyProvider) GetEncryptionKey(context.Context) ([]byte, error) {
+	return bytes.Repeat([]byte{0xA5}, 32), nil
+}
+func (fixedKeyProvider) Name() string { return "test" }
+func (fixedKeyProvider) Health(context.Context) types.HealthStatus {
+	return types.HealthStatus{State: types.HealthStateHealthy}
+}
+func (fixedKeyProvider) Close() error { return nil }
+
+// NewPool refuses a half-configured vector store, and refuses it BEFORE dialing
+// anything: the test passes no Redis and no Neo4j and still reaches the check.
+//
+// The half-configured state is the one that matters. An address with no resolver
+// is how every vector-backed graph read came to answer "no vector collection
+// provisioned" on a cluster whose index existed (gibson#468), so NewPool failing
+// loudly at startup is the behaviour that replaced it.
+func TestNewPool_RefusesHalfConfiguredVector(t *testing.T) {
+	cases := []struct {
+		name string
+		cfg  Config
+	}{
+		{
+			name: "resolver with no address",
+			cfg:  Config{VectorIndexResolver: staticIndex("vector_idx:tenant_acme")},
+		},
+		{
+			name: "address with no resolver",
+			cfg:  Config{VectorStoreAddr: "10.0.0.1:6379"},
+		},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			p, err := NewPool(context.Background(), tc.cfg, fixedKeyProvider{}, nil)
+			if err == nil {
+				if p != nil {
+					_ = p.Close()
+				}
+				t.Fatal("want NewPool to refuse a half-configured vector store")
+			}
+			if !strings.Contains(err.Error(), "must be set together") {
+				t.Errorf("error = %v, want it to say the two must be set together", err)
+			}
+		})
 	}
 }

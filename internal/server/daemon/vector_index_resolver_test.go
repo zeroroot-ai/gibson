@@ -11,6 +11,7 @@ import (
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 	"github.com/zeroroot-ai/gibson/internal/infra/datapool"
+	"github.com/zeroroot-ai/gibson/internal/platform/secrets"
 	pdataplane "github.com/zeroroot-ai/gibson/pkg/platform/dataplane"
 	"github.com/zeroroot-ai/sdk/auth"
 )
@@ -121,4 +122,36 @@ func TestWireVectorStore(t *testing.T) {
 			t.Fatal("want wired=false for a nil config")
 		}
 	})
+}
+
+// The typed-nil trap: a nil *secrets.Service assigned into an interface
+// produces an interface that is NOT nil, so the obvious `reader != nil` guard
+// passes and the resolver calls through it. secretReaderOf must return a nil
+// INTERFACE, not an interface holding a nil pointer.
+func TestSecretReaderOf_NilServiceYieldsNilInterface(t *testing.T) {
+	got := secretReaderOf(nil)
+	if got != nil {
+		t.Fatalf("secretReaderOf(nil) = %#v, want a nil interface", got)
+	}
+
+	// The trap itself, so the test states what it is defending against: this is
+	// what the inline version did, and it is not nil.
+	var trap secretResolver = (*secrets.Service)(nil)
+	if trap == nil {
+		t.Fatal("a nil *secrets.Service in an interface compared equal to nil; " +
+			"the trap this function exists for would be gone and so should the function")
+	}
+}
+
+// A non-nil service is passed through unchanged, or the resolver would report
+// every tenant unprovisioned on a daemon whose broker stack is wired.
+func TestSecretReaderOf_RealServicePassesThrough(t *testing.T) {
+	svc := &secrets.Service{}
+	got := secretReaderOf(svc)
+	if got == nil {
+		t.Fatal("secretReaderOf(non-nil) returned nil; the resolver would see no reader")
+	}
+	if got != secretResolver(svc) {
+		t.Error("secretReaderOf must pass the service through, not wrap it")
+	}
 }
