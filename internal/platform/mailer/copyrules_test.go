@@ -79,7 +79,7 @@ func TestCopy_NoContractions(t *testing.T) {
 		`here['\x{2019}]s|who['\x{2019}]s|let['\x{2019}]s` +
 		`)`)
 	for name, body := range renderedCopy(t) {
-		for _, m := range contraction.FindAllString(body, -1) {
+		for _, m := range contraction.FindAllString(flattened(body), -1) {
 			t.Errorf("%s: contraction %q; expand it", name, m)
 		}
 	}
@@ -143,7 +143,7 @@ func TestCopy_NoMetaCommentary(t *testing.T) {
 		"it is important to",
 	}
 	for name, body := range renderedCopy(t) {
-		low := strings.ToLower(body)
+		low := strings.ToLower(flattened(body))
 		for _, b := range banned {
 			if strings.Contains(low, b) {
 				t.Errorf("%s: meta-commentary %q; say the thing instead", name, b)
@@ -167,7 +167,7 @@ func TestCopy_NoMarketingAdjectives(t *testing.T) {
 		"twenty minutes", "20 minutes", "five minutes", "in minutes",
 	}
 	for name, body := range renderedCopy(t) {
-		low := strings.ToLower(body)
+		low := strings.ToLower(flattened(body))
 		for _, b := range banned {
 			if strings.Contains(low, b) {
 				t.Errorf("%s: marketing word %q", name, b)
@@ -186,7 +186,7 @@ func TestCopy_AmericanSpelling(t *testing.T) {
 		"centre", "defence", "favourite", "whilst", "amongst",
 	}
 	for name, body := range renderedCopy(t) {
-		low := strings.ToLower(body)
+		low := strings.ToLower(flattened(body))
 		for _, b := range british {
 			if strings.Contains(low, b) {
 				t.Errorf("%s: British spelling %q; use American", name, strings.TrimSpace(b))
@@ -200,7 +200,7 @@ func TestCopy_AmericanSpelling(t *testing.T) {
 func TestCopy_NoNameInCopy(t *testing.T) {
 	for name, body := range renderedCopy(t) {
 		for _, n := range []string{"Anthony", "anthony@"} {
-			if strings.Contains(body, n) {
+			if strings.Contains(flattened(body), n) {
 				t.Errorf("%s: names a person (%q); customer copy carries no personal name", name, n)
 			}
 		}
@@ -208,6 +208,17 @@ func TestCopy_NoNameInCopy(t *testing.T) {
 }
 
 // --- helpers -------------------------------------------------------------
+
+// flattened collapses every run of whitespace to one space.
+//
+// Phrase rules MUST match against this, never against the raw body. The text
+// part is hard-wrapped at 76 columns by indentWrap, so a banned phrase lands
+// either side of a newline often enough to matter: "twenty minutes" wrapped to
+// "twenty\nminutes" and the time-promise rule reported clean on copy that
+// contained it. A guard that cannot fail is worse than no guard.
+func flattened(body string) string {
+	return strings.Join(strings.Fields(body), " ")
+}
 
 // isCommandish reports whether a line is a command, a URL or a path rather
 // than prose. The copy rules apply to prose only.
@@ -250,6 +261,24 @@ func proseSentences(body string) []string {
 		}
 	}
 	return out
+}
+
+// TestCopy_RulesSeeThroughTheHardWrap is the failing fixture for the defect
+// the flattened() comment describes. The text part wraps at 76 columns, so a
+// banned phrase can land either side of a newline; this asserts the rules find
+// it anyway, by checking a body that is wrapped exactly through a banned
+// phrase. Without flattened(), this test fails and every phrase rule above is
+// decorative.
+func TestCopy_RulesSeeThroughTheHardWrap(t *testing.T) {
+	wrapped := "You will be up and running in twenty\nminutes from now, with no setup."
+	if !strings.Contains(strings.ToLower(flattened(wrapped)), "twenty minutes") {
+		t.Fatal("flattened() does not join a phrase split across a hard wrap; " +
+			"every phrase rule in this file is then blind to wrapped copy")
+	}
+	// And the raw form must NOT contain it, or the fixture proves nothing.
+	if strings.Contains(strings.ToLower(wrapped), "twenty minutes") {
+		t.Fatal("fixture is not actually wrapped through the phrase")
+	}
 }
 
 func firstN(s string, n int) string {
