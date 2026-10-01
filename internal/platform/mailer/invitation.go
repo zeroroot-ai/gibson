@@ -234,8 +234,15 @@ func invitationSteps(inv InvitationEmail) []onboardingStep {
 	return steps
 }
 
-// invitationTraps are the four things a new person hits before anyone thinks to
-// warn them. Each one reads as a broken install and is not one.
+// invitationTraps are the things a new person hits before anyone thinks to warn
+// them. Each one reads as a broken install and is not one.
+//
+// A trap leaves this list the moment the product stops setting it. The proxy
+// one did: the CLI ignored HTTPS_PROXY because deviceauth.HTTPClient built a
+// bare http.Transport, which inherits none of Go's defaults, and adk#79 fixed
+// it by cloning DefaultTransport and overriding only TLS. Warning a reader
+// about behavior the product no longer has is worse than silence, because they
+// plan around it.
 //
 // The list does not vary by role. The submit denial is here rather than in a
 // per-role body because it is the one way a single body can stay honest for a
@@ -247,8 +254,6 @@ func invitationTraps() [][2]string {
 			"fails until you register one. That is expected, and not a broken install."},
 		{"permission denied on submit", "Authoring a mission needs the Editor role. If someone " +
 			"invited you as a Viewer, ask them to raise it."},
-		{"behind a proxy", "The sign-in path ignores HTTPS_PROXY, and it has no proxy flag. " +
-			"Sign in away from the proxy."},
 		{"a private CA", "Pass the flag --ca-cert with your PEM path, or set GIBSON_CA_CERT. Do " +
 			"not set SSL_CERT_FILE, because it replaces the whole trust pool."},
 	}
