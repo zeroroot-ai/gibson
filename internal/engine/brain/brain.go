@@ -330,7 +330,7 @@ func (w *World) Snapshot() []HostSnapshot {
 			Certificates:   certs,
 			Surprise:       surprised[q.Entity()],
 			Belief:         h.Belief,
-			Attention:      attentionScore(h.Belief.Juicy, surprised[q.Entity()] != ""),
+			Attention:      attentionScore(h.Belief.Juicy, h.Belief.Exploitable, surprised[q.Entity()] != ""),
 			MissionID:      h.MissionID,
 			EvidenceDigest: h.EvidenceDigest,
 		})

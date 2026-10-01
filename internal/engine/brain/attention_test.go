@@ -41,8 +41,9 @@ func TestAttention_SurpriseBoost(t *testing.T) {
 	if surprised.Attention != normal.Attention+surpriseBoost {
 		t.Fatalf("surprised attention=%v, want normal(%v)+boost(%v)", surprised.Attention, normal.Attention, surpriseBoost)
 	}
-	if surprised.Attention != surprised.Belief.Juicy+surpriseBoost {
-		t.Fatalf("attention=%v, want juicy(%v)+boost", surprised.Attention, surprised.Belief.Juicy)
+	if surprised.Attention != surprised.Belief.Juicy+surprised.Belief.Exploitable+surpriseBoost {
+		t.Fatalf("attention=%v, want juicy(%v)+exploitable(%v)+boost",
+			surprised.Attention, surprised.Belief.Juicy, surprised.Belief.Exploitable)
 	}
 }
 

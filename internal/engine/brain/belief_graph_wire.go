@@ -72,8 +72,9 @@ func DefaultSliceSchedule() (sliceOpts, propagateOpts SliceOptions) {
 // timer.
 //
 // relevance for the deterministic over-budget prune (ADR-0029 §5) is each
-// host's OWN attention score (HostSnapshot.Attention — belief.Juicy + the
-// surprise boost, attention.go) — reused, not recomputed, matching the design
+// host's OWN attention score (HostSnapshot.Attention — belief.Juicy +
+// belief.Exploitable + the surprise boost, attention.go) — reused, not
+// recomputed, matching the design
 // note on ExtractBoundedSlice's relevance parameter.
 func SliceBeliefRound(
 	ctx context.Context,

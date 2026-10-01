@@ -1,34 +1,307 @@
 {
   "version": "base-v1",
-  "description": "Minimal OSS base belief network (gibson#750, ADR-0005). reachable+exposed services -> exploitable -> juicy. Not the curated commercial base model (vendor red-team + CVE/ATT&CK), which the commercial layer ships as additional model artifacts.",
-  "variables": ["reachable", "svc_ssh", "svc_https", "port_22", "port_443", "exploitable", "juicy"],
+  "description": "Minimal OSS base belief network (gibson#750, gibson#478, ADR-0005). reachable+exposed services, confirmed findings and a demonstrated exploit -> exploitable -> juicy. finding_critical/finding_high/exploit_demonstrated are noisy-OR parents of exploitable: a cause that is false contributes nothing, so a host with no finding evidence scores exactly as it did before gibson#478. Not the curated commercial base model (vendor red-team + CVE/ATT&CK), which the commercial layer ships as additional model artifacts.",
+  "variables": [
+    "reachable",
+    "svc_ssh",
+    "svc_https",
+    "port_22",
+    "port_443",
+    "finding_critical",
+    "finding_high",
+    "exploit_demonstrated",
+    "exploitable",
+    "juicy"
+  ],
   "edges": [
-    ["reachable", "exploitable"],
-    ["svc_ssh", "exploitable"],
-    ["svc_https", "exploitable"],
-    ["reachable", "juicy"],
-    ["exploitable", "juicy"]
+    [
+      "reachable",
+      "exploitable"
+    ],
+    [
+      "svc_ssh",
+      "exploitable"
+    ],
+    [
+      "svc_https",
+      "exploitable"
+    ],
+    [
+      "finding_critical",
+      "exploitable"
+    ],
+    [
+      "finding_high",
+      "exploitable"
+    ],
+    [
+      "exploit_demonstrated",
+      "exploitable"
+    ],
+    [
+      "reachable",
+      "juicy"
+    ],
+    [
+      "exploitable",
+      "juicy"
+    ]
   ],
   "cpds": {
-    "reachable": {"values": [[0.5], [0.5]]},
-    "svc_ssh": {"values": [[0.7], [0.3]]},
-    "svc_https": {"values": [[0.7], [0.3]]},
-    "port_22": {"values": [[0.7], [0.3]]},
-    "port_443": {"values": [[0.7], [0.3]]},
-    "exploitable": {
-      "evidence": ["reachable", "svc_ssh", "svc_https"],
-      "evidence_card": [2, 2, 2],
+    "reachable": {
       "values": [
-        [0.98, 0.85, 0.80, 0.65, 0.60, 0.40, 0.35, 0.20],
-        [0.02, 0.15, 0.20, 0.35, 0.40, 0.60, 0.65, 0.80]
+        [
+          0.5
+        ],
+        [
+          0.5
+        ]
+      ]
+    },
+    "svc_ssh": {
+      "values": [
+        [
+          0.7
+        ],
+        [
+          0.3
+        ]
+      ]
+    },
+    "svc_https": {
+      "values": [
+        [
+          0.7
+        ],
+        [
+          0.3
+        ]
+      ]
+    },
+    "port_22": {
+      "values": [
+        [
+          0.7
+        ],
+        [
+          0.3
+        ]
+      ]
+    },
+    "port_443": {
+      "values": [
+        [
+          0.7
+        ],
+        [
+          0.3
+        ]
+      ]
+    },
+    "finding_critical": {
+      "values": [
+        [
+          0.97
+        ],
+        [
+          0.03
+        ]
+      ]
+    },
+    "finding_high": {
+      "values": [
+        [
+          0.95
+        ],
+        [
+          0.05
+        ]
+      ]
+    },
+    "exploit_demonstrated": {
+      "values": [
+        [
+          0.99
+        ],
+        [
+          0.01
+        ]
+      ]
+    },
+    "exploitable": {
+      "evidence": [
+        "reachable",
+        "svc_ssh",
+        "svc_https",
+        "finding_critical",
+        "finding_high",
+        "exploit_demonstrated"
+      ],
+      "evidence_card": [
+        2,
+        2,
+        2,
+        2,
+        2,
+        2
+      ],
+      "values": [
+        [
+          0.98,
+          0.0196,
+          0.392,
+          0.00784,
+          0.098,
+          0.00196,
+          0.0392,
+          0.000784,
+          0.85,
+          0.017,
+          0.34,
+          0.0068,
+          0.085,
+          0.0017,
+          0.034,
+          0.00068,
+          0.8,
+          0.016,
+          0.32,
+          0.0064,
+          0.08,
+          0.0016,
+          0.032,
+          0.00064,
+          0.65,
+          0.013,
+          0.26,
+          0.0052,
+          0.065,
+          0.0013,
+          0.026,
+          0.00052,
+          0.6,
+          0.012,
+          0.24,
+          0.0048,
+          0.06,
+          0.0012,
+          0.024,
+          0.00048,
+          0.4,
+          0.008,
+          0.16,
+          0.0032,
+          0.04,
+          0.0008,
+          0.016,
+          0.00032,
+          0.35,
+          0.007,
+          0.14,
+          0.0028,
+          0.035,
+          0.0007,
+          0.014,
+          0.00028,
+          0.2,
+          0.004,
+          0.08,
+          0.0016,
+          0.02,
+          0.0004,
+          0.008,
+          0.00016
+        ],
+        [
+          0.02,
+          0.9804,
+          0.608,
+          0.99216,
+          0.902,
+          0.99804,
+          0.9608,
+          0.999216,
+          0.15,
+          0.983,
+          0.66,
+          0.9932,
+          0.915,
+          0.9983,
+          0.966,
+          0.99932,
+          0.2,
+          0.984,
+          0.68,
+          0.9936,
+          0.92,
+          0.9984,
+          0.968,
+          0.99936,
+          0.35,
+          0.987,
+          0.74,
+          0.9948,
+          0.935,
+          0.9987,
+          0.974,
+          0.99948,
+          0.4,
+          0.988,
+          0.76,
+          0.9952,
+          0.94,
+          0.9988,
+          0.976,
+          0.99952,
+          0.6,
+          0.992,
+          0.84,
+          0.9968,
+          0.96,
+          0.9992,
+          0.984,
+          0.99968,
+          0.65,
+          0.993,
+          0.86,
+          0.9972,
+          0.965,
+          0.9993,
+          0.986,
+          0.99972,
+          0.8,
+          0.996,
+          0.92,
+          0.9984,
+          0.98,
+          0.9996,
+          0.992,
+          0.99984
+        ]
       ]
     },
     "juicy": {
-      "evidence": ["reachable", "exploitable"],
-      "evidence_card": [2, 2],
+      "evidence": [
+        "reachable",
+        "exploitable"
+      ],
+      "evidence_card": [
+        2,
+        2
+      ],
       "values": [
-        [0.95, 0.55, 0.70, 0.20],
-        [0.05, 0.45, 0.30, 0.80]
+        [
+          0.95,
+          0.55,
+          0.7,
+          0.2
+        ],
+        [
+          0.05,
+          0.45,
+          0.3,
+          0.8
+        ]
       ]
     }
   }
