@@ -90,12 +90,15 @@ func (s *InvitationSender) SendInvitation(ctx context.Context, inv InvitationEma
 	}
 	subject := "You've been invited to Gibson"
 	steps := invitationSteps(inv)
-	return s.m.Send(ctx, Message{
+	if err := s.m.Send(ctx, Message{
 		To:      inv.To,
 		Subject: subject,
 		Text:    invitationText(inv, steps),
 		HTML:    invitationHTML(inv, steps),
-	})
+	}); err != nil {
+		return fmt.Errorf("mailer: send invitation: %w", err)
+	}
+	return nil
 }
 
 // adkCloneURL is the one repository an invitee clones. A bare binary leaves
