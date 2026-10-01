@@ -249,8 +249,15 @@ func TestRender_EveryTargetPlaceholderIsInTheVocabulary(t *testing.T) {
 			t.Fatalf("Render(%s): %v", name, err)
 		}
 		for _, left := range targetbind.Unbound(def) {
-			ref := left[strings.Index(left, targetbind.Open):]
-			ref = strings.TrimSuffix(strings.TrimPrefix(ref, targetbind.Open), targetbind.Close)
+			// Unbound formats "<field path>: {{name}}". Cut at the delimiter
+			// rather than indexing it: Index returns -1 when absent, and slicing
+			// on that panics instead of reporting the surprise.
+			_, ref, found := strings.Cut(left, targetbind.Open)
+			if !found {
+				t.Errorf("Unbound returned %q with no %s in it", left, targetbind.Open)
+				continue
+			}
+			ref = strings.TrimSuffix(ref, targetbind.Close)
 			if !strings.HasPrefix(ref, targetbind.Prefix) {
 				continue // another namespace, not this check's business
 			}

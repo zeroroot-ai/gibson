@@ -236,3 +236,90 @@ func TestUnbound_NamesTheFieldPath(t *testing.T) {
 func TestUnbound_IsEmptyForANilMessage(t *testing.T) {
 	assert.Empty(t, Unbound(nil))
 }
+
+// A repeated string field binds too. The walk reaches every string in the
+// message, and a list is one of the shapes a string arrives in: a condition's
+// branch list, a join's wait list, a mission's tags.
+func TestBind_BindsARepeatedStringField(t *testing.T) {
+	def := &missionv1.MissionDefinition{
+		Id: "branchy",
+		Nodes: map[string]*missionv1.MissionNode{
+			"gate": {
+				Id:   "gate",
+				Type: missionv1.NodeType_NODE_TYPE_CONDITION,
+				Config: &missionv1.MissionNode_ConditionConfig{
+					ConditionConfig: &missionv1.ConditionNodeConfig{
+						Expression: `host == "{{target.domain}}"`,
+						TrueBranch: []string{"scan-{{target.name}}", "plain"},
+					},
+				},
+			},
+		},
+	}
+
+	out, err := Bind(def, goatTarget())
+	require.NoError(t, err)
+
+	cfg := out.GetNodes()["gate"].GetConditionConfig()
+	assert.Equal(t, `host == "goat.internal"`, cfg.GetExpression())
+	assert.Equal(t, []string{"scan-kubernetes-goat", "plain"}, cfg.GetTrueBranch())
+}
+
+func TestBind_RefusesAnUnknownNameInARepeatedField(t *testing.T) {
+	def := &missionv1.MissionDefinition{
+		Id: "branchy",
+		Nodes: map[string]*missionv1.MissionNode{
+			"gate": {
+				Id:   "gate",
+				Type: missionv1.NodeType_NODE_TYPE_CONDITION,
+				Config: &missionv1.MissionNode_ConditionConfig{
+					ConditionConfig: &missionv1.ConditionNodeConfig{
+						TrueBranch: []string{"{{target.nope}}"},
+					},
+				},
+			},
+		},
+	}
+	_, err := Bind(def, goatTarget())
+	require.Error(t, err)
+	assert.Contains(t, err.Error(), "true_branch[0]", "the message names the position in the list")
+}
+
+func TestUnboundTarget_OnlyReportsTheTargetNamespace(t *testing.T) {
+	def := toolDef(map[string]string{
+		"host": "{{target.domain}}",
+		"ref":  "{{var.ref}}",
+	})
+	got := UnboundTarget(def)
+	require.Len(t, got, 1, "a {{var.*}} is somebody else's to resolve: %v", got)
+	assert.Contains(t, got[0], "{{target.domain}}")
+}
+
+func TestUnboundTarget_IsEmptyOnABoundDefinition(t *testing.T) {
+	out, err := Bind(toolDef(map[string]string{"host": "{{target.domain}}"}), goatTarget())
+	require.NoError(t, err)
+	assert.Empty(t, UnboundTarget(out))
+}
+
+func TestUnboundTarget_IsEmptyForANilMessage(t *testing.T) {
+	assert.Empty(t, UnboundTarget(nil))
+}
+
+// Names and Known are the vocabulary the validator reads. They must agree with
+// Bindings, or a name passes validation and then fails at submit.
+func TestNamesAndKnownAgreeWithBindings(t *testing.T) {
+	names := Names()
+	require.NotEmpty(t, names)
+	assert.Equal(t, len(Bindings(goatTarget())), len(names))
+
+	for _, n := range names {
+		assert.True(t, Known(n), "%s is in Names but not Known", n)
+		_, ok := Bindings(goatTarget())[n]
+		assert.True(t, ok, "%s is in Names but Bindings does not resolve it", n)
+	}
+	assert.Equal(t, names, Names(), "Names is sorted and stable")
+
+	assert.False(t, Known("target.hostname"))
+	assert.False(t, Known("var.ref"))
+	assert.True(t, Known(" target.domain "), "a name is trimmed before it is looked up")
+}

@@ -135,8 +135,8 @@ func TestValidate_RefusesAnUnknownTargetBinding(t *testing.T) {
 	}
 	require.NotNil(t, found, "no diagnostic named the unknown binding: %+v", diags)
 	assert.Equal(t, "error", found.Severity)
-	assert.Greater(t, found.Line, int32(0), "the author needs the line")
-	assert.Greater(t, found.Col, int32(0), "and the column")
+	assert.Positive(t, found.Line, "the author needs the line")
+	assert.Positive(t, found.Col, "and the column")
 	assert.Contains(t, found.Message, "{{target.domain}}", "the message lists the vocabulary")
 }
 
@@ -144,7 +144,6 @@ func TestValidate_RefusesAnUnknownTargetBinding(t *testing.T) {
 func TestValidate_AcceptsEveryTargetBinding(t *testing.T) {
 	t.Parallel()
 	for _, name := range targetbind.Names() {
-		name := name
 		t.Run(name, func(t *testing.T) {
 			t.Parallel()
 			source := strings.Replace(reconCUE, "{{target.domain}}", "{{"+name+"}}", 1)

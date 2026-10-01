@@ -391,7 +391,7 @@ func (m *missionManager) Run(ctx context.Context, missionDefinitionID, targetID 
 	// "{{target.domain}}" as its hostname (gibson#495).
 	def, err = targetbind.Bind(def, target)
 	if err != nil {
-		return "", err
+		return "", fmt.Errorf("mission run: bind target: %w", err)
 	}
 
 	// Build an internal mission ID for tracking this run.

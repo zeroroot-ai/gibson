@@ -25,6 +25,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"io/fs"
+	"math"
 	"path"
 	"strings"
 	"sync"
@@ -432,32 +433,45 @@ func targetPlaceholderDiags(source string) []Diagnostic {
 	for i, line := range strings.Split(source, "\n") {
 		rest, col := line, 1
 		for {
-			open := strings.Index(rest, targetbind.Open)
-			if open < 0 {
+			start := strings.Index(rest, targetbind.Open)
+			if start < 0 {
 				break
 			}
-			close := strings.Index(rest[open:], targetbind.Close)
-			if close < 0 {
+			end := strings.Index(rest[start:], targetbind.Close)
+			if end < 0 {
 				break
 			}
-			close += open
-			name := strings.TrimSpace(rest[open+len(targetbind.Open) : close])
+			end += start
+			name := strings.TrimSpace(rest[start+len(targetbind.Open) : end])
 			if strings.HasPrefix(name, targetbind.Prefix) && !targetbind.Known(name) {
 				diags = append(diags, Diagnostic{
-					Line: int32(i + 1),
-					Col:  int32(col + open),
+					Line: lineCol(i + 1),
+					Col:  lineCol(col + start),
 					Message: fmt.Sprintf("%s%s%s names no target field; the bindings are %s",
 						targetbind.Open, name, targetbind.Close,
 						strings.Join(bracedNames(), ", ")),
 					Severity: "error",
 				})
 			}
-			consumed := close + len(targetbind.Close)
+			consumed := end + len(targetbind.Close)
 			col += consumed
 			rest = rest[consumed:]
 		}
 	}
 	return diags
+}
+
+// lineCol narrows a source position to the int32 a Diagnostic carries. A source
+// longer than two billion lines or columns is not a thing, but a silent wrap
+// would put the diagnostic on a negative line, so it clamps instead.
+func lineCol(n int) int32 {
+	if n > math.MaxInt32 {
+		return math.MaxInt32
+	}
+	if n < 1 {
+		return 1
+	}
+	return int32(n)
 }
 
 // bracedNames is the vocabulary written the way it appears in a mission, so the

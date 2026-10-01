@@ -18,6 +18,7 @@
 package targetbind
 
 import (
+	"errors"
 	"fmt"
 	"net"
 	"net/url"
@@ -111,7 +112,7 @@ func hostAndDomain(raw string) (host, domain string) {
 // definition is a run that does part of its work against the wrong host.
 func Bind(def *missionv1.MissionDefinition, t *types.Target) (*missionv1.MissionDefinition, error) {
 	if def == nil {
-		return nil, fmt.Errorf("targetbind: nil mission definition")
+		return nil, errors.New("targetbind: nil mission definition")
 	}
 	if t == nil {
 		return nil, fmt.Errorf("targetbind: mission %q names no target to bind against", def.GetId())
@@ -142,12 +143,11 @@ func Bind(def *missionv1.MissionDefinition, t *types.Target) (*missionv1.Mission
 // substitute replaces every {{target.*}} in s, collecting one message per
 // placeholder it cannot resolve. A placeholder in another namespace is left in
 // place and is not an error here; Unbound reports what survived.
-func substitute(s string, bindings map[string]string) (string, []string) {
+func substitute(s string, bindings map[string]string) (bound string, errs []string) {
 	if !strings.Contains(s, Open) {
 		return s, nil
 	}
 	var b strings.Builder
-	var errs []string
 	rest := s
 	for {
 		i := strings.Index(rest, Open)
@@ -247,7 +247,7 @@ func walkStrings(m protoreflect.Message, path string, visit func(path, in string
 		}
 		switch {
 		case fd.IsMap():
-			walkMap(m, fd, at, v.Map(), visit)
+			walkMap(fd, at, v.Map(), visit)
 		case fd.IsList():
 			walkList(fd, at, v.List(), visit)
 		case fd.Kind() == protoreflect.StringKind:
@@ -261,7 +261,7 @@ func walkStrings(m protoreflect.Message, path string, visit func(path, in string
 	})
 }
 
-func walkMap(m protoreflect.Message, fd protoreflect.FieldDescriptor, at string, mp protoreflect.Map, visit func(path, in string) (string, bool)) {
+func walkMap(fd protoreflect.FieldDescriptor, at string, mp protoreflect.Map, visit func(path, in string) (string, bool)) {
 	type rekey struct {
 		from, to protoreflect.MapKey
 		value    protoreflect.Value
@@ -281,6 +281,9 @@ func walkMap(m protoreflect.Message, fd protoreflect.FieldDescriptor, at string,
 			}
 		case protoreflect.MessageKind, protoreflect.GroupKind:
 			walkStrings(v.Message(), where, visit)
+		default:
+			// Every other kind is a non-string scalar. A placeholder is text, so
+			// there is nothing in a number, a bool or an enum to bind.
 		}
 		return true
 	})
@@ -291,7 +294,7 @@ func walkMap(m protoreflect.Message, fd protoreflect.FieldDescriptor, at string,
 }
 
 func walkList(fd protoreflect.FieldDescriptor, at string, list protoreflect.List, visit func(path, in string) (string, bool)) {
-	for i := 0; i < list.Len(); i++ {
+	for i := range list.Len() {
 		where := fmt.Sprintf("%s[%d]", at, i)
 		switch fd.Kind() {
 		case protoreflect.StringKind:
@@ -300,6 +303,8 @@ func walkList(fd protoreflect.FieldDescriptor, at string, list protoreflect.List
 			}
 		case protoreflect.MessageKind, protoreflect.GroupKind:
 			walkStrings(list.Get(i).Message(), where, visit)
+		default:
+			// A non-string scalar carries no placeholder.
 		}
 	}
 }
