@@ -15,6 +15,10 @@ import (
 type MissionStatus string
 
 const (
+	// MissionPending is a mission a person created that has not run yet. It
+	// is listed, attributed to its creator, and inert: no System acts on it
+	// until MissionStarted moves it to running (hosted#205).
+	MissionPending   MissionStatus = "pending"
 	MissionRunning   MissionStatus = "running"
 	MissionCompleted MissionStatus = "completed"
 	MissionFailed    MissionStatus = "failed"
@@ -108,6 +112,38 @@ type MissionStarted struct {
 
 func (MissionStarted) Kind() string { return "mission.started" }
 
+// MissionCreated records a mission a person created before it runs, so the
+// World, and ListMissions with it, know the mission and its creator from
+// creation. MissionStarted later moves the same entity to running; a
+// MissionStarted for an unknown id still creates it, as before.
+type MissionCreated struct {
+	ID          string
+	Name        string
+	Description string
+	TargetID    string
+	TenantID    string
+	CreatedBy   principal.Principal
+}
+
+// Kind names the event in the timeline.
+func (MissionCreated) Kind() string { return "mission.created" }
+
+func applyMissionCreated(w *World, e MissionCreated) {
+	if _, ok := findMission(w, e.ID); ok {
+		return
+	}
+	w.missions.NewEntity(&Mission{
+		ID:             e.ID,
+		Status:         MissionPending,
+		DecisionCursor: -1,
+		Name:           e.Name,
+		Description:    e.Description,
+		TargetID:       e.TargetID,
+		TenantID:       e.TenantID,
+		CreatedBy:      e.CreatedBy,
+	})
+}
+
 // MissionDone marks a mission terminal with an outcome and reason. Outcome
 // defaults to MissionCompleted when empty (back-compat with the minimal launch
 // path); the Scheduler emits MissionFailed when the scripted graph stalls on a
@@ -133,7 +169,31 @@ func findMission(w *World, id string) (ecs.Entity, bool) {
 }
 
 func applyMissionStarted(w *World, e MissionStarted) {
-	if _, ok := findMission(w, e.ID); ok {
+	if ent, ok := findMission(w, e.ID); ok {
+		// A pending mission starts: it keeps what creation recorded and
+		// takes what the start adds. Any other status is a replay.
+		m := w.missions.Get(ent)
+		if m.Status != MissionPending {
+			return
+		}
+		m.Status = MissionRunning
+		m.Goal = e.Goal
+		m.BeliefModel = e.BeliefModel
+		if e.Name != "" {
+			m.Name = e.Name
+		}
+		if e.Description != "" {
+			m.Description = e.Description
+		}
+		if e.TargetID != "" {
+			m.TargetID = e.TargetID
+		}
+		if e.TenantID != "" {
+			m.TenantID = e.TenantID
+		}
+		if !e.CreatedBy.IsZero() {
+			m.CreatedBy = e.CreatedBy
+		}
 		return
 	}
 	w.missions.NewEntity(&Mission{

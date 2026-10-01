@@ -82,6 +82,8 @@ func MissionSlice(events []Event, missionID string) []Event {
 // of WorkItem ids the mission owns (from MissionSlice's first pass).
 func eventInMission(ev Event, missionID string, owned map[string]bool) bool {
 	switch e := ev.(type) {
+	case MissionCreated:
+		return e.ID == missionID
 	case MissionStarted:
 		return e.ID == missionID
 	case MissionProjected:
