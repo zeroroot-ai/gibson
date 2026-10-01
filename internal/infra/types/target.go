@@ -143,53 +143,6 @@ func (p *Provider) UnmarshalJSON(data []byte) error {
 	return nil
 }
 
-// AuthType represents the authentication method for a target
-type AuthType string
-
-const (
-	AuthTypeNone   AuthType = "none"
-	AuthTypeAPIKey AuthType = "api_key"
-	AuthTypeBearer AuthType = "bearer"
-	AuthTypeBasic  AuthType = "basic"
-	AuthTypeOAuth  AuthType = "oauth"
-)
-
-// String returns the string representation of AuthType
-func (a AuthType) String() string {
-	return string(a)
-}
-
-// IsValid checks if the AuthType is a valid value
-func (a AuthType) IsValid() bool {
-	switch a {
-	case AuthTypeNone, AuthTypeAPIKey, AuthTypeBearer, AuthTypeBasic, AuthTypeOAuth:
-		return true
-	default:
-		return false
-	}
-}
-
-// MarshalJSON implements json.Marshaler
-func (a AuthType) MarshalJSON() ([]byte, error) {
-	return json.Marshal(string(a))
-}
-
-// UnmarshalJSON implements json.Unmarshaler
-func (a *AuthType) UnmarshalJSON(data []byte) error {
-	var str string
-	if err := json.Unmarshal(data, &str); err != nil {
-		return err
-	}
-
-	authType := AuthType(str)
-	if !authType.IsValid() {
-		return fmt.Errorf("invalid auth type: %s", str)
-	}
-
-	*a = authType
-	return nil
-}
-
 // Target represents a target LLM system to be tested
 type Target struct {
 	ID   ID     `json:"id"`
@@ -204,17 +157,16 @@ type Target struct {
 	Model        string                 `json:"model,omitempty"`
 	Config       map[string]interface{} `json:"config,omitempty"`
 	Capabilities []string               `json:"capabilities,omitempty"`
-	AuthType     AuthType               `json:"auth_type,omitempty"`
-	// SecretName is the tenant secret this target authenticates with, by name.
-	// Empty means the target needs no secret.
+	// A Target carries NO credential and NO authentication shape, by owner
+	// decision 2026-10-01. It names WHAT a mission assesses, never how to
+	// authenticate to it. Secrets live in OpenBao under an explicit scope and
+	// `gibson secret` is the one surface that manages them.
 	//
-	// A name, because the live store is name-keyed: tenant_secrets has `name`
-	// as its primary key and no id column at all (migration 006 dropped the
-	// credentials table this field used to reference as an id). The field it
-	// replaces, credential_id, was accepted only when it parsed as a UUID and
-	// dropped in silence otherwise, so a caller naming a secret had the name
-	// swallowed with no error (gibson#485).
-	SecretName  string       `json:"secret_name,omitempty"`
+	// Three fields were removed rather than deprecated, because ADR-0027
+	// forbids shipping a dead path: `credential_id` (an id against a store that
+	// has no id column, silently dropped unless it parsed as a UUID),
+	// `secret_name` (gibson#511, the name-shaped replacement) and `auth_type`
+	// (a free-form string nothing consumed). Do not re-add any of them.
 	Status      TargetStatus `json:"status"`
 	Description string       `json:"description,omitempty"`
 	Tags        []string     `json:"tags,omitempty"`
@@ -323,18 +275,6 @@ func (t *Target) Validate() error {
 	// Validate Provider if set
 	if t.Provider != "" && !t.Provider.IsValid() {
 		return fmt.Errorf("invalid provider: %s", t.Provider)
-	}
-
-	// Validate AuthType if set
-	if t.AuthType != "" && !t.AuthType.IsValid() {
-		return fmt.Errorf("invalid auth type: %s", t.AuthType)
-	}
-
-	// Validate SecretName if set. The name is a tenant_secrets primary key and
-	// the AAD of its envelope (`secret:<name>`), so a name with surrounding
-	// whitespace is a different key than the one its author meant to write.
-	if t.SecretName != "" && strings.TrimSpace(t.SecretName) != t.SecretName {
-		return fmt.Errorf("secret name %q has leading or trailing whitespace", t.SecretName)
 	}
 
 	// Validate Timeout
