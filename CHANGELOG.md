@@ -1,5 +1,13 @@
 # Changelog
 
+## [0.148.3](https://github.com/zeroroot-ai/gibson/compare/v0.148.2...v0.148.3) (2026-10-01)
+
+
+### Bug Fixes
+
+* **daemon:** report kind user for a person in WhoAmI ([#466](https://github.com/zeroroot-ai/gibson/issues/466)) ([f1b72d5](https://github.com/zeroroot-ai/gibson/commit/f1b72d54cd1f20e80cb25cc75e3641a8c4500c7b))
+* **daemon:** WhoAmI reports kind user for a person ([f1b72d5](https://github.com/zeroroot-ai/gibson/commit/f1b72d54cd1f20e80cb25cc75e3641a8c4500c7b))
+
 ## [0.148.2](https://github.com/zeroroot-ai/gibson/compare/v0.148.1...v0.148.2) (2026-10-01)
 
 
