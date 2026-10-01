@@ -27,26 +27,22 @@ import (
 // mission ran against. This is a deliberate, documented reading; nothing
 // else in this codebase defines "environment" as its own concept.
 //
-// Scope boundary (coordination note, 2026-09-28): this file reads settled
-// bets ONLY through Engine.BetSettlements()/BetSettlementSnapshot and writes
-// ONLY through BeliefSubstrate. It never touches hypothesis.go's or
-// bet_settlement.go's own identity/keying, which another lane is
-// reconciling concurrently (brain.Hypothesis's uint64 identity vs the
-// Bet/settlement path's agent-supplied HypothesisID string do not currently
-// join). A settlement with no recorded Technique — bet_settlement.go's own
-// documented gap: only the TRUE/predicate path records one today, the
-// exhaustion and HITL paths do not — cannot update any technique's
-// reputation and is skipped, the same "surfaced, not hidden" choice
-// calibration.go's Unscored count makes for its own equivalent gap.
+// Scope boundary: this file reads settled bets ONLY through
+// Engine.BetSettlements()/BetSettlementSnapshot and writes ONLY through
+// BeliefSubstrate. All three settlement paths now record a Technique:
+// predicate from the proof's own technique, and exhaustion/HITL resolved from
+// the bet's Hypothesis by the settle orchestrators (bet_settlement.go). A
+// settlement that STILL has no recorded Technique — its Hypothesis is unknown,
+// or named none — cannot update any technique's reputation and is skipped, the
+// same "surfaced, not hidden" choice calibration.go's Unscored count makes.
 //
-// The technique×environment node key (TechniqueEnvironmentRef) is built to
-// be exactly what voi_plan.go's resolveReputation already expects to
-// receive the day a candidate carries a resolvable technique×environment
-// key (see that file's own "one-line change here, not a new lookup to
-// invent" comment, and gibson#333's blocked-by list) — tenant-prefixed the
-// same way hypothesisClaimRef scopes a claim-node lookup. voi_plan.go is
-// left untouched here: that wiring needs a Technique field on Hypothesis/Bet
-// that does not exist yet (gibson#333), which is out of this file's scope.
+// The technique×environment node key (TechniqueEnvironmentRef) is exactly what
+// voi_plan.go's resolveReputation and ReadReputation build from each
+// hypothesis's Technique × ScopeID (gibson#267): the reputation written here is
+// read back there as both a new hypothesis's prior and its pursuit-priority
+// multiplier. It is tenant-prefixed the same way hypothesisClaimRef scopes a
+// claim-node lookup. The write side is driven live by reputation_worker.go,
+// which taps a settled bet and calls Engine.UpdateReputation off the tick.
 //
 // Reputation is exact and recomputed fresh from the full settled-bet
 // history on every UpdateReputation call, never blended — this mirrors

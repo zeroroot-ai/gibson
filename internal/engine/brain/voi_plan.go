@@ -20,16 +20,16 @@ import (
 // of its own, so it is directly testable and does not care whether its
 // caller is a live worker (voi_planner.go) or a test.
 //
-// Reputation (ADR-0026 §3, ADR-0029 §3's technique×environment view) is
-// genuinely wired — resolveReputation reads NodeKindTechniqueEnvironment
-// belief through the SAME BeliefSubstrate the market view uses — and is
-// called live from PlanVoI (the whole-program deadcode gate confirms it:
-// wired at epic->main via wireBrainRegistry/WireVoIPlanner). Every candidate
-// this file produces still resolves reputation to the neutral prior today,
-// though: resolveReputation's technique×environment key stays "" (see its own
-// doc comment) — that is a SEPARATE resolution from the technique ->
-// capability bridge below, and gibson#347/reputation-by-technique remains
-// future work, tracked independently of this file's own #387 scope.
+// Reputation (ADR-0026 §3, ADR-0029 §3's technique×environment view) is wired
+// end to end (gibson#267): resolveReputation reads NodeKindTechniqueEnvironment
+// belief through the SAME BeliefSubstrate the market view uses, keyed by each
+// hypothesis's own Technique × ScopeID (TechniqueEnvironmentRef) — the key the
+// reputation write loop (reputation_worker.go) updates when a bet settles. It
+// feeds BOTH places ADR-0022 names: a new hypothesis's prior P(claim valid)
+// starts from its technique's track record (ReadReputation, AC3), and pursuit
+// priority is multiplied by that reputation (resolveReputation, AC4). A
+// hypothesis that names no technique, and a bare evidence move, both resolve to
+// the neutral prior exactly as before, so untracked candidates are unchanged.
 //
 // The technique -> capability bridge (ADR-0035 decision 4, gibson#387) IS
 // wired here: each candidate's Technique (carried from Hypothesis.Technique,
@@ -112,13 +112,35 @@ func PlanVoI(ctx context.Context, in VoIPlanInput, substrate BeliefSubstrate, sc
 		if err != nil {
 			return nil, fmt.Errorf("voi plan: read claim belief for hypothesis %s: %w", id, err)
 		}
-		confidence := voiUnstakedConfidence
+		// A new hypothesis of a technique with a track record starts from that
+		// technique×environment reputation as its prior P(claim valid), rather
+		// than the flat max-uncertainty default — "reputation raises the prior
+		// on new hypotheses of that technique" (gibson#267 AC3). ReadReputation
+		// returns DefaultReputationPrior (== voiUnstakedConfidence) when the
+		// technique has no track record, so an untracked or technique-less
+		// hypothesis keeps exactly today's behavior. A placed bet's own staked
+		// confidence (ok) still overrides this prior — the market has spoken for
+		// THIS hypothesis.
+		unstakedPrior := voiUnstakedConfidence
+		reputationKey := ""
+		if hyp.Technique != "" {
+			reputationKey = TechniqueEnvironmentRef(in.Tenant, hyp.Technique, hyp.ScopeID).ID
+			prior, _, rerr := ReadReputation(ctx, in.Tenant, hyp.Technique, hyp.ScopeID, substrate)
+			if rerr != nil {
+				return nil, rerr
+			}
+			unstakedPrior = prior
+		}
+		confidence := unstakedPrior
 		if ok {
 			confidence = nb.Belief.Exploitable
 		}
-		// "" : no technique×environment key is resolvable from a Hypothesis
-		// yet — see file doc comment.
-		reputation, err := resolveReputation(ctx, substrate, "")
+		// Pursuit priority reflects the technique×environment reputation
+		// (gibson#267 AC4): a hypothesis of a higher-reputation technique
+		// outranks a lower-reputation one, all else equal. An empty key (a
+		// hypothesis naming no technique) resolves to the neutral prior, exactly
+		// as before.
+		reputation, err := resolveReputation(ctx, substrate, reputationKey)
 		if err != nil {
 			return nil, err
 		}
@@ -158,12 +180,11 @@ func hypothesisClaimRef(tenant, hypothesisID string) NodeRef {
 
 // resolveReputation reads technique×environment belief (ADR-0029 §3:
 // "P(technique works here)", the same Belief.Exploitable convention
-// harness.PlaceBet uses for a claim-node's P(claim valid)) through substrate.
-// An empty key or no recorded belief both resolve to the neutral
-// optimism-under-uncertainty prior (ADR-0026 §6) — not yet reachable from
-// PlanVoI today (see file doc comment) but kept as its own function so the
-// day a candidate DOES carry a technique×environment key, wiring it in is a
-// one-line change here, not a new lookup to invent.
+// harness.PlaceBet uses for a claim-node's P(claim valid)) through substrate,
+// as the pursuit-priority multiplier (gibson#267 AC4). An empty key or no
+// recorded belief both resolve to the neutral optimism-under-uncertainty prior
+// (ADR-0026 §6): a technique with a track record is weighted by it, while one
+// without is neither rewarded nor penalized.
 func resolveReputation(ctx context.Context, substrate BeliefSubstrate, techniqueEnvKey string) (float64, error) {
 	if techniqueEnvKey == "" {
 		return voiNeutralReputationPrior, nil
