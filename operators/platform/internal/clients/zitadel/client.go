@@ -64,6 +64,11 @@ type Client interface {
 	// Returns ErrNotFound when no match.
 	GetOIDCClientByName(ctx context.Context, projectID, name string) (*OIDCClient, error)
 
+	// UpdateOIDCClientName renames an existing application in place. The
+	// app keeps its appID, clientID and secret. The parameter is the
+	// management-API app id, NOT the OAuth client_id.
+	UpdateOIDCClientName(ctx context.Context, projectID, appID, name string) error
+
 	// RotateClientSecret regenerates the client secret for an existing
 	// OIDC application and returns the new secret. The parameter is the
 	// management-API app id, NOT the OAuth client_id.
@@ -525,6 +530,20 @@ func (c *httpClient) GetOIDCClient(ctx context.Context, projectID, appID string)
 	return out, nil
 }
 
+// UpdateOIDCClientName implements Client.
+//
+// Zitadel v4: PUT /management/v1/projects/{projectID}/apps/{appID} with
+// {"name": ...} (the management UpdateApp call). Only the display name
+// changes. The OIDC config, client_id and secret stay as they are.
+func (c *httpClient) UpdateOIDCClientName(ctx context.Context, projectID, appID, name string) error {
+	path := fmt.Sprintf("/management/v1/projects/%s/apps/%s",
+		url.PathEscape(projectID), url.PathEscape(appID))
+	if err := c.doJSON(ctx, http.MethodPut, path, map[string]any{"name": name}, nil); err != nil {
+		return fmt.Errorf("UpdateOIDCClientName project=%s app=%s: %w", projectID, appID, err)
+	}
+	return nil
+}
+
 // RotateClientSecret implements Client. The path parameter is the
 // management-API app id, NOT the OAuth client_id.
 //
@@ -882,6 +901,9 @@ func (e *errClient) VerifyClientSecret(ctx context.Context, issuerURL, clientID,
 }
 func (e *errClient) EnsureJWTAccessToken(ctx context.Context, projectID, appID string) (bool, error) {
 	return false, e.err
+}
+func (e *errClient) UpdateOIDCClientName(_ context.Context, _, _, _ string) error {
+	return e.err
 }
 func (e *errClient) RotateClientSecret(ctx context.Context, projectID, appID string) (string, error) {
 	return "", e.err

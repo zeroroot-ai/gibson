@@ -1726,3 +1726,46 @@ func TestFindHumanUserByEmail_SendsTheV2FieldName(t *testing.T) {
 		t.Fatalf("request must not carry the unknown field emailQuery.email, got %s", body)
 	}
 }
+
+// TestUpdateOIDCClientName_PutsNameToAppPath pins the wire shape of the
+// in-place rename: PUT /management/v1/projects/{project}/apps/{app} with only
+// the name in the body.
+func TestUpdateOIDCClientName_PutsNameToAppPath(t *testing.T) {
+	var gotMethod, gotPath string
+	var gotBody map[string]any
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		gotMethod, gotPath = r.Method, r.URL.Path
+		_ = json.NewDecoder(r.Body).Decode(&gotBody)
+		_, _ = w.Write([]byte(`{}`))
+	}))
+	t.Cleanup(srv.Close)
+
+	c := New(srv.URL, "pat", "")
+	if err := c.UpdateOIDCClientName(context.Background(), "PROJ-1", "APP-1", "Gibson CLI"); err != nil {
+		t.Fatalf("UpdateOIDCClientName: %v", err)
+	}
+	if gotMethod != http.MethodPut || gotPath != "/management/v1/projects/PROJ-1/apps/APP-1" {
+		t.Fatalf("request = %s %s", gotMethod, gotPath)
+	}
+	if !reflect.DeepEqual(gotBody, map[string]any{"name": "Gibson CLI"}) {
+		t.Fatalf("body = %v", gotBody)
+	}
+}
+
+// TestUpdateOIDCClientName_ErrorsAreReturned covers the failure legs: a server
+// error from Zitadel, and the errClient that New returns for bad input.
+func TestUpdateOIDCClientName_ErrorsAreReturned(t *testing.T) {
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+		w.WriteHeader(http.StatusForbidden)
+		_, _ = w.Write([]byte(`{"message":"no"}`))
+	}))
+	t.Cleanup(srv.Close)
+	if err := New(srv.URL, "pat", "").UpdateOIDCClientName(context.Background(), "P", "A", "n"); err == nil {
+		t.Fatal("expected an error from a 403 response")
+	}
+
+	want := errors.New("bad config")
+	if err := (&errClient{err: want}).UpdateOIDCClientName(context.Background(), "P", "A", "n"); !errors.Is(err, want) {
+		t.Fatalf("errClient err = %v, want %v", err, want)
+	}
+}

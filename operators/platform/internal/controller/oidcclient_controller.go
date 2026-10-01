@@ -217,7 +217,9 @@ func (r *OIDCClientReconciler) Reconcile(ctx context.Context, req ctrl.Request) 
 	// the client; ensure the K8s Secret exists. AppID is what hits the
 	// management URL — older CRs from before the AppID/ClientID split
 	// persisted only ClientID, so fall back to a NAME-based lookup
-	// (clientName is in the spec) which returns both fields.
+	// (clientName is in the spec) which returns both fields. Once
+	// status.AppID is known the app is always found by that ID, never by
+	// name, so spec.clientName is free to change (see the rename below).
 	appID := oc.Status.AppID
 	if appID == "" {
 		found, lerr := zc.GetOIDCClientByName(ctx, projectID, oc.Spec.ClientName)
@@ -251,7 +253,21 @@ func (r *OIDCClientReconciler) Reconcile(ctx context.Context, req ctrl.Request) 
 		}
 		return r.handleTransientOrPermanent(ctx, &oc, "GetOIDCClient", err, logger)
 	}
-	_ = existing
+
+	// spec.clientName is the Zitadel display name only. When it differs from
+	// the live app name, rename the app in place. The app keeps its appID,
+	// clientID and secret, so no second app is created.
+	if existing.Name != oc.Spec.ClientName {
+		if rerr := zc.UpdateOIDCClientName(ctx, projectID, appID, oc.Spec.ClientName); rerr != nil {
+			return r.handleTransientOrPermanent(ctx, &oc, "UpdateOIDCClientName", rerr, logger)
+		}
+		logger.Info("renamed Zitadel OIDC app to match spec.clientName",
+			"appID", appID, "from", existing.Name, "to", oc.Spec.ClientName)
+		if r.Recorder != nil {
+			r.Recorder.Eventf(&oc, corev1.EventTypeNormal, "OIDCClientRenamed",
+				"Zitadel app %s renamed from %q to %q", appID, existing.Name, oc.Spec.ClientName)
+		}
+	}
 
 	return r.reconcileSteadyState(ctx, &oc, zc, projectID, appID, logger)
 }
