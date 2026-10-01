@@ -9,60 +9,75 @@ import (
 	"github.com/zeroroot-ai/gibson/internal/platform/principal"
 )
 
-// A created mission is in the World before it runs: pending, with its
-// metadata and creator, so ListMissions serves it (hosted#205). The start
-// moves the same entity to running and keeps the creator; a start for an
-// unknown id still creates a running mission, as before; a World snapshot
-// restore keeps a pending mission pending.
-func TestMissionCreated_PendingUntilStarted(t *testing.T) {
-	creator := principal.Principal{Kind: principal.User, ID: "123456789012345678"}
-	w := NewWorld("t")
-	Reduce(w, MissionCreated{ID: "m1", Name: "scan", Description: "d", TargetID: "tg", TenantID: "t", CreatedBy: creator})
+var testCreator = principal.Principal{Kind: principal.User, ID: "123456789012345678"}
 
-	ms := w.MissionSnapshot()
-	if len(ms) != 1 || ms[0].Status != MissionPending || ms[0].CreatedBy != creator || ms[0].Name != "scan" {
-		t.Fatalf("after creation: %+v, want one pending mission by %+v", ms, creator)
-	}
-
-	// A second creation of the same id is a replay and changes nothing.
-	Reduce(w, MissionCreated{ID: "m1", Name: "other"})
-	if ms := w.MissionSnapshot(); len(ms) != 1 || ms[0].Name != "scan" {
-		t.Fatalf("replayed creation must be ignored: %+v", ms)
-	}
-
-	// The run starts: same entity, now running; the start's goal, name,
-	// description, target, tenant and creator are taken when present.
-	other := principal.Principal{Kind: principal.Service, ID: "scheduler"}
-	Reduce(w, MissionStarted{ID: "m1", Goal: "find it", BeliefModel: "bm-1", Name: "scan-run", Description: "d2", TargetID: "tg2", TenantID: "t", CreatedBy: other})
-	ms = w.MissionSnapshot()
-	if len(ms) != 1 || ms[0].Status != MissionRunning || ms[0].Goal != "find it" || ms[0].Name != "scan-run" || ms[0].Description != "d2" || ms[0].TargetID != "tg2" || ms[0].CreatedBy != other {
-		t.Fatalf("after start: %+v, want one running mission carrying the start's fields", ms)
-	}
-
-	// A start on a mission that already runs is a replay and changes nothing.
-	Reduce(w, MissionStarted{ID: "m1", Goal: "again"})
-	if ms := w.MissionSnapshot(); ms[0].Goal != "find it" {
-		t.Fatalf("replayed start must be ignored: %+v", ms)
-	}
-
-	// A start that names nothing keeps what creation recorded.
-	Reduce(w, MissionCreated{ID: "m3", Name: "kept", Description: "kd", TargetID: "ktg", TenantID: "t", CreatedBy: creator})
-	Reduce(w, MissionStarted{ID: "m3"})
+func missionByID(w *World, id string) (MissionSnapshot, bool) {
 	for _, m := range w.MissionSnapshot() {
-		if m.ID == "m3" && (m.Status != MissionRunning || m.Name != "kept" || m.Description != "kd" || m.TargetID != "ktg" || m.TenantID != "t" || m.CreatedBy != creator) {
-			t.Fatalf("empty start must keep creation's fields: %+v", m)
+		if m.ID == id {
+			return m, true
 		}
 	}
+	return MissionSnapshot{}, false
+}
 
-	// A start for a mission the World never saw created still creates it.
-	Reduce(w, MissionStarted{ID: "m2", Goal: "g2", CreatedBy: creator})
-	if ms := w.MissionSnapshot(); len(ms) != 3 {
-		t.Fatalf("a start for an unknown id must create the mission: %+v", ms)
+// A created mission is in the World before it runs: pending, with its
+// metadata and creator, so ListMissions serves it (hosted#205). A second
+// creation of the same id is a replay.
+func TestMissionCreated_PendingWithCreator(t *testing.T) {
+	w := NewWorld("t")
+	Reduce(w, MissionCreated{ID: "m1", Name: "scan", Description: "d", TargetID: "tg", TenantID: "t", CreatedBy: testCreator})
+	Reduce(w, MissionCreated{ID: "m1", Name: "other"})
+
+	m, ok := missionByID(w, "m1")
+	if !ok || m.Status != MissionPending || m.CreatedBy != testCreator || m.Name != "scan" || len(w.MissionSnapshot()) != 1 {
+		t.Fatalf("after creation: %+v (found %v), want one pending mission named scan by %+v", m, ok, testCreator)
+	}
+}
+
+// The start moves the created entity to running and takes the start's
+// fields when present; a start on a running mission is a replay.
+func TestMissionStarted_MovesPendingToRunning(t *testing.T) {
+	w := NewWorld("t")
+	Reduce(w, MissionCreated{ID: "m1", Name: "scan", TenantID: "t", CreatedBy: testCreator})
+	other := principal.Principal{Kind: principal.Service, ID: "scheduler"}
+	Reduce(w, MissionStarted{ID: "m1", Goal: "find it", BeliefModel: "bm-1", Name: "scan-run", Description: "d2", TargetID: "tg2", TenantID: "t", CreatedBy: other})
+
+	m, _ := missionByID(w, "m1")
+	if m.Status != MissionRunning || m.Goal != "find it" || m.Name != "scan-run" || m.Description != "d2" || m.TargetID != "tg2" || m.CreatedBy != other {
+		t.Fatalf("after start: %+v, want running with the start's fields", m)
+	}
+
+	Reduce(w, MissionStarted{ID: "m1", Goal: "again"})
+	if m, _ := missionByID(w, "m1"); m.Goal != "find it" {
+		t.Fatalf("replayed start must be ignored: %+v", m)
+	}
+}
+
+// A start that names nothing keeps what creation recorded.
+func TestMissionStarted_EmptyStartKeepsCreation(t *testing.T) {
+	w := NewWorld("t")
+	Reduce(w, MissionCreated{ID: "m3", Name: "kept", Description: "kd", TargetID: "ktg", TenantID: "t", CreatedBy: testCreator})
+	Reduce(w, MissionStarted{ID: "m3"})
+
+	m, _ := missionByID(w, "m3")
+	if m.Status != MissionRunning || m.Name != "kept" || m.Description != "kd" || m.TargetID != "ktg" || m.TenantID != "t" || m.CreatedBy != testCreator {
+		t.Fatalf("empty start must keep creation's fields: %+v", m)
+	}
+}
+
+// A start for a mission the World never saw created still creates it.
+func TestMissionStarted_UnknownIDCreates(t *testing.T) {
+	w := NewWorld("t")
+	Reduce(w, MissionStarted{ID: "m2", Goal: "g2", CreatedBy: testCreator})
+
+	m, ok := missionByID(w, "m2")
+	if !ok || m.Status != MissionRunning || m.CreatedBy != testCreator {
+		t.Fatalf("start for an unknown id: %+v (found %v), want a running mission by the creator", m, ok)
 	}
 }
 
 func TestMissionCreated_SurvivesRestoreAsPending(t *testing.T) {
-	creator := principal.Principal{Kind: principal.User, ID: "123456789012345678"}
+	creator := testCreator
 	w := NewWorld("t")
 	Reduce(w, MissionCreated{ID: "m1", Name: "scan", TenantID: "t", CreatedBy: creator})
 	Reduce(w, MissionCreated{ID: "m2", Name: "ran", TenantID: "t", CreatedBy: creator})
