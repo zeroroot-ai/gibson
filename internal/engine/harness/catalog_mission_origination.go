@@ -73,16 +73,13 @@ func resolveMissionDefinitionJSON(ctx context.Context, req *harnesspb.CreateMiss
 		return graph, nil
 	}
 
-	// Unknown keys are refused here, inside ParamsFromMap. That refusal is the
-	// smuggling defence: Params carries no target or host, so a dropped
+	// Render validates the map against what THIS mission declares in its own
+	// CUE: an unknown key is refused, never dropped, and that refusal is the
+	// smuggling defence. No mission declares a target or a host, so a dropped
 	// `host:` key would leave a caller believing it had redirected the scan.
-	params, err := missioncatalog.ParamsFromMap(req.GetCatalogParams())
-	if err != nil {
-		return "", fmt.Errorf("originate %q: %w", name, err)
-	}
-	// Render reports every missing parameter at once, in declaration order, so
-	// a caller wiring this up sees all of them rather than one per attempt.
-	def, err := missioncatalog.Render(ctx, name, params)
+	// Missing keys are reported together, so a caller wiring this up sees every
+	// field it forgot rather than one per attempt.
+	def, err := missioncatalog.Render(ctx, name, req.GetCatalogParams())
 	if err != nil {
 		return "", fmt.Errorf("originate %q: %w", name, err)
 	}

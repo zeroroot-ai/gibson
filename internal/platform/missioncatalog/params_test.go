@@ -7,20 +7,35 @@
 package missioncatalog
 
 import (
+	"context"
 	"strings"
 	"testing"
+
+	"github.com/zeroroot-ai/gibson/internal/engine/mission/cueruntime"
 )
 
-// ParamNames is the one declaration every other use reads. If it ever returned
-// a short list, validation would stop checking a field, rendering would emit it
-// empty, and decoding would refuse it as unknown — three different symptoms of
-// one cause.
-func TestParamNames_MatchesTheStructItDescribes(t *testing.T) {
+// completeParams builds a full parameter set for one mission from its own
+// declaration, so a parameter added to the mission shows up here as a value
+// rather than as a test that quietly stops covering it.
+func completeParams(t *testing.T, mission string) map[string]string {
+	t.Helper()
+	names := declaredParams(t, mission)
+	out := make(map[string]string, len(names))
+	for _, n := range names {
+		out[n] = "v-" + n
+	}
+	return out
+}
+
+// ParamNames reads the mission's own CUE. It used to read a Go struct shared by
+// every mission in the catalog, which is why Render demanded a pipeline id of a
+// mission that has no pipeline (gibson#499).
+func TestDeclaredParams_ComesFromTheMissionsOwnDeclaration(t *testing.T) {
 	t.Parallel()
 
-	names := ParamNames()
+	names := declaredParams(t, "scan")
 	if len(names) == 0 {
-		t.Fatal("ParamNames is empty")
+		t.Fatal("scan declares no parameters")
 	}
 	seen := map[string]bool{}
 	for _, n := range names {
@@ -32,91 +47,132 @@ func TestParamNames_MatchesTheStructItDescribes(t *testing.T) {
 		}
 		seen[n] = true
 	}
-	// Every declared name must round-trip through the decoder, which is what
-	// proves the two halves of the declaration agree.
-	in := map[string]string{}
-	for _, n := range names {
-		in[n] = "v-" + n
+	// The names must be the ones the mission source actually writes, not a list
+	// from somewhere else that happens to be the same length.
+	src, err := Source("scan")
+	if err != nil {
+		t.Fatal(err)
 	}
-	if _, err := ParamsFromMap(in); err != nil {
-		t.Fatalf("a map built from ParamNames must decode: %v", err)
+	for _, n := range names {
+		if !strings.Contains(src, n+":") {
+			t.Errorf("ParamNames reported %q, which scan.cue does not declare", n)
+		}
 	}
 }
 
-// The smuggling defence, tested where it lives. Params has no target or host
-// field, so the runtime target can only come from the mission's target. A
-// decoder that dropped unrecognised keys would let a caller send
-// `host: evil.example.com`, receive no error, and reasonably believe it bound.
-func TestParamsFromMap_UnknownKeyIsRefusedNotDropped(t *testing.T) {
+func TestRender_UnknownMissionIsAnError(t *testing.T) {
 	t.Parallel()
-
-	in := map[string]string{}
-	for _, n := range ParamNames() {
-		in[n] = "v"
+	if _, err := Render(context.Background(), "no-such-mission", nil); err == nil {
+		t.Fatal("an unknown mission must be an error, not an empty render")
 	}
+}
+
+// Every name the mission declares must render, which is what proves the reading
+// and the writing halves agree.
+func TestRender_AParameterSetBuiltFromTheDeclarationRenders(t *testing.T) {
+	t.Parallel()
+	if _, err := Render(context.Background(), "scan", completeParams(t, "scan")); err != nil {
+		t.Fatalf("a map built from ParamNames must render: %v", err)
+	}
+}
+
+// The unknown-key refusal is the whole smuggling defence: no mission declares a
+// target or a host, so a dropped key would leave a caller believing it had
+// redirected the scan.
+func TestRender_UnknownKeyIsRefusedNotDropped(t *testing.T) {
+	t.Parallel()
+	in := completeParams(t, "scan")
 	in["host"] = "evil.example.com"
 
-	_, err := ParamsFromMap(in)
+	_, err := Render(context.Background(), "scan", in)
 	if err == nil {
-		t.Fatal("an unknown parameter must be refused")
+		t.Fatal("an unknown parameter must be refused, not dropped")
 	}
 	if !strings.Contains(err.Error(), "host") {
-		t.Errorf("error %q does not name the refused key", err.Error())
+		t.Errorf("the error does not name the offending key: %v", err)
 	}
-	// The known set is listed, so a caller with a typo can see what was meant
-	// without opening the source.
-	if !strings.Contains(err.Error(), ParamNames()[0]) {
-		t.Errorf("error %q does not list the known parameters", err.Error())
+	// And it names what the mission does take, so the caller can correct it.
+	names := declaredParams(t, "scan")
+	if !strings.Contains(err.Error(), names[0]) {
+		t.Errorf("the error does not name what the mission takes: %v", err)
 	}
 }
 
-// Several typos are reported together and in a stable order, so a caller fixes
-// them in one pass rather than one attempt each.
-func TestParamsFromMap_UnknownKeysReportedTogetherAndSorted(t *testing.T) {
+func TestRender_UnknownKeysReportedTogetherAndSorted(t *testing.T) {
 	t.Parallel()
+	in := completeParams(t, "scan")
+	in["zeta"] = "1"
+	in["alpha"] = "2"
 
-	_, err := ParamsFromMap(map[string]string{"zeta": "1", "alpha": "2"})
+	_, err := Render(context.Background(), "scan", in)
 	if err == nil {
-		t.Fatal("unknown parameters must be refused")
+		t.Fatal("want a refusal")
 	}
 	msg := err.Error()
-	ai, zi := strings.Index(msg, "alpha"), strings.Index(msg, "zeta")
-	if ai < 0 || zi < 0 {
-		t.Fatalf("error %q does not name both unknown keys", msg)
+	ia, iz := strings.Index(msg, "alpha"), strings.Index(msg, "zeta")
+	if ia < 0 || iz < 0 {
+		t.Fatalf("both unknown keys must be reported: %v", err)
 	}
-	if ai > zi {
-		t.Errorf("unknown keys are not sorted in %q", msg)
-	}
-}
-
-// A partial map decodes what it was given; the emptiness of the rest is
-// Render's business, reported all at once. Splitting that here would report a
-// missing parameter twice with different wording.
-func TestParamsFromMap_PartialMapDecodesWithoutError(t *testing.T) {
-	t.Parallel()
-
-	p, err := ParamsFromMap(map[string]string{"application": "portal"})
-	if err != nil {
-		t.Fatalf("a partial map is not a decoding error: %v", err)
-	}
-	if p.Application != "portal" {
-		t.Errorf("Application = %q; want portal", p.Application)
-	}
-	if missing := p.missing(); len(missing) == 0 {
-		t.Error("the unset parameters must still be reported as missing")
+	if ia > iz {
+		t.Errorf("unknown keys must be sorted: %v", err)
 	}
 }
 
-// An empty map is not an error either, and reports every parameter as missing —
-// the answer a caller wiring this up for the first time needs.
-func TestParamsFromMap_EmptyMapReportsEveryParameterMissing(t *testing.T) {
+// Missing keys are reported together too. A caller wiring this up for the first
+// time should see every field it forgot in one error.
+func TestRender_MissingKeysReportedTogether(t *testing.T) {
 	t.Parallel()
+	names := declaredParams(t, "scan")
+	in := completeParams(t, "scan")
+	delete(in, names[0])
+	in[names[1]] = "   " // whitespace is as absent as absent
 
-	p, err := ParamsFromMap(nil)
+	_, err := Render(context.Background(), "scan", in)
+	if err == nil {
+		t.Fatal("a missing parameter must be refused rather than rendered empty")
+	}
+	for _, want := range names[:2] {
+		if !strings.Contains(err.Error(), want) {
+			t.Errorf("the error does not name the missing %q: %v", want, err)
+		}
+	}
+}
+
+func TestRender_NoParametersAtAllIsRefusedForAMissionThatTakesSome(t *testing.T) {
+	t.Parallel()
+	if _, err := Render(context.Background(), "scan", nil); err == nil {
+		t.Fatal("a mission that declares parameters must refuse an empty map")
+	}
+}
+
+// A value carrying a quote or a backslash must not terminate the CUE string and
+// inject a field. %q is what stops it; this asserts it still does.
+func TestRender_AQuoteInAValueCannotInjectCUE(t *testing.T) {
+	t.Parallel()
+	in := completeParams(t, "scan")
+	names := declaredParams(t, "scan")
+	in[names[0]] = `x" , injected: "yes`
+
+	if _, err := Render(context.Background(), "scan", in); err != nil {
+		t.Fatalf("a quoted value must render, not fail: %v", err)
+	}
+}
+
+// declaredParams is the test's own reader of a mission's declaration.
+//
+// The catalog exports no ParamNames: nothing in the daemon asks "what does this
+// mission take" — Render validates and that is the whole production need — and an
+// exported helper reachable only from tests is dead code the gate rightly refuses
+// (ADR-0027). When a submission form needs the list, it gets an entry point then.
+func declaredParams(t *testing.T, mission string) []string {
+	t.Helper()
+	src, err := Source(mission)
 	if err != nil {
-		t.Fatalf("an empty map is not a decoding error: %v", err)
+		t.Fatalf("Source(%s): %v", mission, err)
 	}
-	if got, want := len(p.missing()), len(ParamNames()); got != want {
-		t.Errorf("missing = %d parameters; want all %d", got, want)
+	names, err := cueruntime.DeclaredParams(src)
+	if err != nil {
+		t.Fatalf("DeclaredParams(%s): %v", mission, err)
 	}
+	return names
 }

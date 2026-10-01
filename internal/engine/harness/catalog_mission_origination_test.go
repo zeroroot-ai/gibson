@@ -15,6 +15,7 @@ import (
 	commonpb "github.com/zeroroot-ai/sdk/api/gen/gibson/common/v1"
 	harnesspb "github.com/zeroroot-ai/sdk/api/gen/gibson/harness/v1"
 
+	"github.com/zeroroot-ai/gibson/internal/engine/mission/cueruntime"
 	"github.com/zeroroot-ai/gibson/internal/platform/missioncatalog"
 )
 
@@ -23,7 +24,15 @@ import (
 // here as a render failure rather than as a test that quietly stops covering it.
 func scanParams() map[string]string {
 	out := map[string]string{}
-	for _, name := range missioncatalog.ParamNames() {
+	src, err := missioncatalog.Source("scan")
+	if err != nil {
+		panic("scan is a checked-in mission: " + err.Error())
+	}
+	names, err := cueruntime.DeclaredParams(src)
+	if err != nil {
+		panic("scan declares its parameters: " + err.Error())
+	}
+	for _, name := range names {
 		out[name] = "v-" + name
 	}
 	return out
