@@ -30,16 +30,33 @@ func TestMissionCreated_PendingUntilStarted(t *testing.T) {
 		t.Fatalf("replayed creation must be ignored: %+v", ms)
 	}
 
-	// The run starts: same entity, now running, creator kept, goal taken.
-	Reduce(w, MissionStarted{ID: "m1", Goal: "find it", BeliefModel: "bm-1", TenantID: "t"})
+	// The run starts: same entity, now running; the start's goal, name,
+	// description, target, tenant and creator are taken when present.
+	other := principal.Principal{Kind: principal.Service, ID: "scheduler"}
+	Reduce(w, MissionStarted{ID: "m1", Goal: "find it", BeliefModel: "bm-1", Name: "scan-run", Description: "d2", TargetID: "tg2", TenantID: "t", CreatedBy: other})
 	ms = w.MissionSnapshot()
-	if len(ms) != 1 || ms[0].Status != MissionRunning || ms[0].Goal != "find it" || ms[0].CreatedBy != creator || ms[0].Name != "scan" {
-		t.Fatalf("after start: %+v, want one running mission, creator and name kept", ms)
+	if len(ms) != 1 || ms[0].Status != MissionRunning || ms[0].Goal != "find it" || ms[0].Name != "scan-run" || ms[0].Description != "d2" || ms[0].TargetID != "tg2" || ms[0].CreatedBy != other {
+		t.Fatalf("after start: %+v, want one running mission carrying the start's fields", ms)
+	}
+
+	// A start on a mission that already runs is a replay and changes nothing.
+	Reduce(w, MissionStarted{ID: "m1", Goal: "again"})
+	if ms := w.MissionSnapshot(); ms[0].Goal != "find it" {
+		t.Fatalf("replayed start must be ignored: %+v", ms)
+	}
+
+	// A start that names nothing keeps what creation recorded.
+	Reduce(w, MissionCreated{ID: "m3", Name: "kept", Description: "kd", TargetID: "ktg", TenantID: "t", CreatedBy: creator})
+	Reduce(w, MissionStarted{ID: "m3"})
+	for _, m := range w.MissionSnapshot() {
+		if m.ID == "m3" && (m.Status != MissionRunning || m.Name != "kept" || m.Description != "kd" || m.TargetID != "ktg" || m.TenantID != "t" || m.CreatedBy != creator) {
+			t.Fatalf("empty start must keep creation's fields: %+v", m)
+		}
 	}
 
 	// A start for a mission the World never saw created still creates it.
 	Reduce(w, MissionStarted{ID: "m2", Goal: "g2", CreatedBy: creator})
-	if ms := w.MissionSnapshot(); len(ms) != 2 {
+	if ms := w.MissionSnapshot(); len(ms) != 3 {
 		t.Fatalf("a start for an unknown id must create the mission: %+v", ms)
 	}
 }
@@ -82,5 +99,22 @@ func TestMissionCreated_CodecRoundTrip(t *testing.T) {
 	}
 	if got, ok := out.(MissionCreated); !ok || got != in {
 		t.Fatalf("round trip = %#v, want %#v", out, in)
+	}
+}
+
+// A mission's slice of the timeline includes its creation and not another
+// mission's.
+func TestMissionCreated_InMissionSlice(t *testing.T) {
+	events := []Event{
+		MissionCreated{ID: "m1", Name: "mine"},
+		MissionCreated{ID: "m2", Name: "theirs"},
+		MissionStarted{ID: "m1", Goal: "g"},
+	}
+	got := MissionSlice(events, "m1")
+	if len(got) != 2 {
+		t.Fatalf("slice = %+v, want m1's creation and start only", got)
+	}
+	if c, ok := got[0].(MissionCreated); !ok || c.ID != "m1" {
+		t.Fatalf("first event = %#v, want m1's MissionCreated", got[0])
 	}
 }
