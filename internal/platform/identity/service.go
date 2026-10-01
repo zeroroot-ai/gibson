@@ -146,7 +146,7 @@ func (s *IdentityServer) WhoAmI(ctx context.Context, req *identitypb.WhoAmIReque
 
 	componentGrants, truncatedComp, err := s.collectComponentGrants(ctx, target)
 	if err != nil {
-		return nil, fgaStatus("list component grants", err)
+		return nil, status.Errorf(codes.Internal, "list component grants: %v", err)
 	}
 
 	pluginGrants, truncatedPlug, err := s.collectPluginGrants(ctx, target)

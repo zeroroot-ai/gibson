@@ -324,6 +324,7 @@ func TestWhoAmI_FGAErrorStatus(t *testing.T) {
 		{"invalid", authz.ErrInvalidArgument, codes.InvalidArgument},
 		{"unavailable", authz.ErrFgaUnavailable, codes.Unavailable},
 		{"timeout", authz.ErrFgaTimeout, codes.DeadlineExceeded},
+		{"other", errors.New("boom"), codes.Internal},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
 			az := &fakeAuthorizer{listObjectsFn: func(_, relation, _ string) ([]string, error) {
@@ -342,5 +343,27 @@ func TestWhoAmI_FGAErrorStatus(t *testing.T) {
 				t.Fatalf("code = %v (%v), want %v", got, err, tc.want)
 			}
 		})
+	}
+}
+
+// TestFGALookup_HumanTargetUsesUserRef: the admin variant resolves a bare
+// human subject through FGALookup. FGA must see user:<sub>.
+func TestFGALookup_HumanTargetUsesUserRef(t *testing.T) {
+	var seen string
+	lk := &FGALookup{Authorizer: &fakeAuthorizer{
+		listObjectsFn: func(user, _, _ string) ([]string, error) {
+			seen = user
+			return []string{"tenant:acme"}, nil
+		},
+	}}
+	rec, err := lk.Resolve(context.Background(), "human-sub-1")
+	if err != nil {
+		t.Fatalf("Resolve: %v", err)
+	}
+	if seen != "user:human-sub-1" {
+		t.Errorf("FGA user = %q, want user:human-sub-1", seen)
+	}
+	if rec.TenantID != "acme" || rec.PrincipalID != "human-sub-1" {
+		t.Errorf("record = %+v", rec)
 	}
 }
