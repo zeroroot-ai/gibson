@@ -61,7 +61,7 @@ require (
 	github.com/testcontainers/testcontainers-go v0.42.0
 	github.com/tidwall/gjson v1.18.0
 	github.com/zeroroot-ai/ast-checks v0.3.1
-	github.com/zeroroot-ai/sdk v0.186.0
+	github.com/zeroroot-ai/sdk v0.187.0
 	github.com/zeroroot-ai/setec v0.114.0
 	github.com/zeroroot-ai/testfixtures v0.2.0
 	go.opentelemetry.io/contrib/instrumentation/google.golang.org/grpc/otelgrpc v0.71.0
@@ -78,7 +78,7 @@ require (
 	golang.org/x/crypto v0.56.0
 	golang.org/x/net v0.58.0
 	golang.org/x/oauth2 v0.37.0
-	golang.org/x/sync v0.22.0
+	golang.org/x/sync v0.23.0
 	golang.org/x/term v0.45.0
 	golang.org/x/time v0.15.0
 	golang.org/x/tools v0.49.0
@@ -96,7 +96,7 @@ require (
 )
 
 require (
-	buf.build/gen/go/bufbuild/protovalidate/protocolbuffers/go v1.36.11-20260709200747-435963d16310.1 // indirect
+	buf.build/gen/go/bufbuild/protovalidate/protocolbuffers/go v1.36.12-20260825204119-511051f7f437.2 // indirect
 	cel.dev/expr v0.25.2 // indirect
 	cloud.google.com/go v0.123.0 // indirect
 	cloud.google.com/go/auth v0.20.0 // indirect
