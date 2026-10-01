@@ -95,13 +95,24 @@ func (s *InvitationSender) SendInvitationConflict(ctx context.Context, c Invitat
 	return nil
 }
 
+// roleLabel renders an FGA relation name as the role name a person reads.
+//
+// The daemon speaks relations (`admin`, `writer`, `member`); ADR-0093 decision 2
+// names the roles Owner, Admin, Editor and Viewer, and the dashboard renders
+// those labels everywhere (dashboard `src/lib/auth/tenant-roles.ts`). This email
+// is the only surface that puts a role in front of a person outside the
+// dashboard, so it must use the same words. It said "a writer" and "a member",
+// which name no role the invitee can find in the product.
+//
+// `owner` is absent on purpose: ownership moves only through
+// TransferOwnership, never through an invitation.
 func roleLabel(role string) string {
 	switch role {
 	case "admin":
-		return "an admin"
+		return "an Admin"
 	case "writer":
-		return "a writer"
+		return "an Editor"
 	default:
-		return "a member"
+		return "a Viewer"
 	}
 }
