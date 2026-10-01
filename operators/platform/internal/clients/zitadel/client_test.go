@@ -1726,3 +1726,28 @@ func TestFindHumanUserByEmail_SendsTheV2FieldName(t *testing.T) {
 		t.Fatalf("request must not carry the unknown field emailQuery.email, got %s", body)
 	}
 }
+
+// TestUpdateOIDCClientName_PutsNameToAppPath pins the wire shape of the
+// in-place rename: PUT /management/v1/projects/{project}/apps/{app} with only
+// the name in the body.
+func TestUpdateOIDCClientName_PutsNameToAppPath(t *testing.T) {
+	var gotMethod, gotPath string
+	var gotBody map[string]any
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		gotMethod, gotPath = r.Method, r.URL.Path
+		_ = json.NewDecoder(r.Body).Decode(&gotBody)
+		_, _ = w.Write([]byte(`{}`))
+	}))
+	t.Cleanup(srv.Close)
+
+	c := New(srv.URL, "pat", "")
+	if err := c.UpdateOIDCClientName(context.Background(), "PROJ-1", "APP-1", "Gibson CLI"); err != nil {
+		t.Fatalf("UpdateOIDCClientName: %v", err)
+	}
+	if gotMethod != http.MethodPut || gotPath != "/management/v1/projects/PROJ-1/apps/APP-1" {
+		t.Fatalf("request = %s %s", gotMethod, gotPath)
+	}
+	if !reflect.DeepEqual(gotBody, map[string]any{"name": "Gibson CLI"}) {
+		t.Fatalf("body = %v", gotBody)
+	}
+}
