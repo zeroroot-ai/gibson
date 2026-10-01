@@ -350,10 +350,17 @@ type ZitadelSpec struct {
 // reconcile as a child OIDCClient CR.
 type OIDCClientReference struct {
 	// Name is the K8s name of the OIDCClient CR created by the
-	// orchestrator. Also the Zitadel client display name.
+	// orchestrator. Also the Zitadel client display name unless
+	// displayName is set.
 	// +kubebuilder:validation:Required
 	// +kubebuilder:validation:Pattern="^[a-z0-9]([-a-z0-9]*[a-z0-9])?$"
 	Name string `json:"name"`
+
+	// DisplayName is the name Zitadel shows for the client, for example on the
+	// device consent page. Empty means use name. The child OIDCClient CR keeps
+	// the name from `name`.
+	// +optional
+	DisplayName string `json:"displayName,omitempty"`
 
 	// ApplicationType controls the OAuth client class minted in Zitadel.
 	// Empty defaults to WEB when RedirectURIs is non-empty, else SERVICE.

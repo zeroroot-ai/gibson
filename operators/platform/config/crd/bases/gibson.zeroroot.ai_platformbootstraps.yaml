@@ -156,6 +156,12 @@ spec:
                       - SERVICE
                       - MACHINE_USER
                       type: string
+                    displayName:
+                      description: |-
+                        DisplayName is the name Zitadel shows for the client, for example on the
+                        device consent page. Empty means use name. The child OIDCClient CR keeps
+                        the name from `name`.
+                      type: string
                     grantTypes:
                       description: |-
                         GrantTypes overrides the OAuth grant types minted in Zitadel. When
@@ -177,7 +183,8 @@ spec:
                     name:
                       description: |-
                         Name is the K8s name of the OIDCClient CR created by the
-                        orchestrator. Also the Zitadel client display name.
+                        orchestrator. Also the Zitadel client display name unless
+                        displayName is set.
                       pattern: ^[a-z0-9]([-a-z0-9]*[a-z0-9])?$
                       type: string
                     postLogoutRedirectURIs:

@@ -382,6 +382,15 @@ func (r *PlatformBootstrapReconciler) reconcileZitadelProject(ctx context.Contex
 	return ctrl.Result{}, nil
 }
 
+// oidcClientDisplayName returns the Zitadel display name for a reference:
+// displayName when set, else name.
+func oidcClientDisplayName(ref gibsonv1alpha1.OIDCClientReference) string {
+	if ref.DisplayName != "" {
+		return ref.DisplayName
+	}
+	return ref.Name
+}
+
 // reconcileOIDCChildren creates one OIDCClient CR per spec.oidcClients[]
 // entry and watches their Ready conditions, aggregating into the parent.
 func (r *PlatformBootstrapReconciler) reconcileOIDCChildren(ctx context.Context, pb *gibsonv1alpha1.PlatformBootstrap, logger logr.Logger) (ctrl.Result, error) {
@@ -402,7 +411,7 @@ func (r *PlatformBootstrapReconciler) reconcileOIDCChildren(ctx context.Context,
 				ZitadelIssuer:              pb.Spec.Zitadel.Issuer,
 				AdminTokenRef:              pb.Spec.Zitadel.AdminTokenRef,
 				ProjectRef:                 gibsonv1alpha1.ProjectReference{Name: pb.Spec.Zitadel.Project.Name},
-				ClientName:                 ref.Name,
+				ClientName:                 oidcClientDisplayName(ref),
 				ApplicationType:            defaultAppType(ref),
 				Roles:                      ref.Roles,
 				RedirectURIs:               ref.RedirectURIs,
