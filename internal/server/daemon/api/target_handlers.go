@@ -142,9 +142,7 @@ func toProtoTarget(t *types.Target) (*targetpb.Target, error) {
 		Timeout:      int32(t.Timeout),
 		Url:          t.URL,
 		Headers:      t.Headers,
-	}
-	if t.CredentialID != nil {
-		p.CredentialId = t.CredentialID.String()
+		SecretName:   t.SecretName,
 	}
 	if len(t.Connection) > 0 {
 		conn, err := structpb.NewStruct(t.Connection)
@@ -190,11 +188,12 @@ func fromProtoTarget(p *targetpb.Target) *types.Target {
 		Timeout:      int(p.GetTimeout()),
 		URL:          p.GetUrl(),
 		Headers:      p.GetHeaders(),
-	}
-	if cid := p.GetCredentialId(); cid != "" {
-		if id, err := types.ParseID(cid); err == nil {
-			t.CredentialID = &id
-		}
+		// Carried verbatim. The field this replaces was accepted only when it
+		// parsed as a UUID and dropped in silence otherwise, so a caller naming
+		// a secret had the name swallowed with no error (gibson#485). A name
+		// that does not resolve must fail where it is used, loudly, not vanish
+		// here.
+		SecretName: p.GetSecretName(),
 	}
 	if p.GetConnection() != nil {
 		t.Connection = p.GetConnection().AsMap()
