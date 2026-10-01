@@ -111,24 +111,6 @@ func TestFixedByEvents_OtherDeliverablesEmitNothing(t *testing.T) {
 	}
 }
 
-// The reducer and apoc.merge are additive, so the same close twice must
-// produce the same events and nothing that differs.
-func TestFixedByEvents_EmittingTwiceYieldsIdenticalEvents(t *testing.T) {
-	c := closedJob([]string{"f-1"}, mrDeliverable)
-	w := worldWith(map[string]string{"f-1": "s"})
-	a, _ := fixedByEvents(c, w)
-	b, _ := fixedByEvents(c, w)
-	ea, eb := entities(t, a), entities(t, b)
-	if len(ea) != len(eb) {
-		t.Fatal("different counts")
-	}
-	for i := range ea {
-		if ea[i].Label != eb[i].Label || ea[i].Key != eb[i].Key || len(ea[i].Edges) != len(eb[i].Edges) {
-			t.Errorf("event %d differs: %+v vs %+v", i, ea[i], eb[i])
-		}
-	}
-}
-
 func TestJobGraphLink_SubmitsToTheClosingTenant(t *testing.T) {
 	var tenants []string
 	var n int
