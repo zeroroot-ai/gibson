@@ -33,7 +33,14 @@ type scriptedJobs struct {
 	turns  int
 	// closedElsewhere makes the job read as closed by someone else.
 	closedElsewhere bool
+	// deliverables is what Close returns. Nil keeps the default push branch.
+	deliverables []*jobpb.Deliverable
 }
+
+// recordingObserver keeps what the node reported.
+type recordingObserver struct{ got []ClosedJob }
+
+func (r *recordingObserver) JobClosed(_ context.Context, c ClosedJob) { r.got = append(r.got, c) }
 
 func (s *scriptedJobs) Open(_ context.Context, _ string, in job.OpenInput) (*job.Job, error) {
 	if s.openErr != nil {
@@ -71,8 +78,12 @@ func (s *scriptedJobs) Close(_ context.Context, _ string, in job.CloseInput) (*j
 	defer s.mu.Unlock()
 	s.closed = append(s.closed, in)
 	s.state = job.StateClosed
+	d := s.deliverables
+	if d == nil {
+		d = []*jobpb.Deliverable{{Kind: jobpb.DeliverableKind_DELIVERABLE_KIND_PUSH_BRANCH, Ref: "fix"}}
+	}
 	return &job.Job{ID: in.JobID, BankID: "bank-1", MemberID: "m-1", State: job.StateClosed, Verdict: in.Verdict, Score: in.Score,
-		Deliverables: []*jobpb.Deliverable{{Kind: jobpb.DeliverableKind_DELIVERABLE_KIND_PUSH_BRANCH, Ref: "fix"}}}, nil
+		Deliverables: d}, nil
 }
 
 func (s *scriptedJobs) Get(_ context.Context, _, id string) (*job.Job, error) {
@@ -140,6 +151,7 @@ func input(ops JobOps, v Verifier, s *jobpb.JobSpec) Input {
 		TenantID: "acme", MissionRunID: "run-1", NodeID: "fix", BankID: "bank-1", Spec: s,
 		Opener: job.Principal{Kind: job.PrincipalService, ID: "mission:run-1"},
 		Ops:    ops, Verifier: v, PollInterval: time.Millisecond,
+		Closed: &recordingObserver{},
 	}
 }
 
@@ -292,11 +304,76 @@ func TestRun_RefusesAnIncompleteInput(t *testing.T) {
 		"no bank":     func(in *Input) { in.BankID = "" },
 		"no goal":     func(in *Input) { in.Spec = &jobpb.JobSpec{} },
 		"no opener":   func(in *Input) { in.Opener = job.Principal{} },
+		// A missing observer would drop every FIXED_BY edge without a sound
+		// (gibson#477), so it is refused here.
+		"no close observer": func(in *Input) { in.Closed = nil },
 	} {
 		in := ok
 		mutate(&in)
 		if _, err := Run(context.Background(), in); err == nil {
 			t.Errorf("%s: must be refused", name)
 		}
+	}
+}
+
+func mergeRequestJobs() *scriptedJobs {
+	return &scriptedJobs{
+		onTurn: func(int) []*job.Event { return waiting() },
+		deliverables: []*jobpb.Deliverable{{
+			Kind: jobpb.DeliverableKind_DELIVERABLE_KIND_MERGE_REQUEST, Ref: "!7", Url: "https://forge.example/g/r/-/merge_requests/7",
+		}},
+	}
+}
+
+// TestRun_ReportsAnAccomplishedCloseToTheObserver passes the inputs and the
+// deliverables through unread: the node does not know what an input names.
+func TestRun_ReportsAnAccomplishedCloseToTheObserver(t *testing.T) {
+	obs := &recordingObserver{}
+	s := spec(1, "")
+	s.Inputs = []string{"finding-1", "plan-1"}
+	in := input(mergeRequestJobs(), &scriptedVerifier{}, s)
+	in.Closed = obs
+	if _, err := Run(context.Background(), in); err != nil {
+		t.Fatal(err)
+	}
+	if len(obs.got) != 1 {
+		t.Fatalf("observer calls = %d, want 1", len(obs.got))
+	}
+	c := obs.got[0]
+	if c.TenantID != "acme" || c.MissionRunID != "run-1" || c.JobID != "job-1" {
+		t.Errorf("closed = %+v", c)
+	}
+	if len(c.Inputs) != 2 || c.Inputs[0] != "finding-1" || c.Inputs[1] != "plan-1" {
+		t.Errorf("inputs = %v", c.Inputs)
+	}
+	if len(c.Deliverables) != 1 || c.Deliverables[0].Kind != "merge_request" {
+		t.Errorf("deliverables = %+v", c.Deliverables)
+	}
+}
+
+// TestRun_AnAbandonedJobIsNotReported: no work stood, so nothing links.
+func TestRun_AnAbandonedJobIsNotReported(t *testing.T) {
+	obs := &recordingObserver{}
+	in := input(mergeRequestJobs(), &scriptedVerifier{err: errors.New("down")}, spec(1, "tool/verify"))
+	in.Closed = obs
+	if _, err := Run(context.Background(), in); err == nil {
+		t.Fatal("want the verifier failure")
+	}
+	if len(obs.got) != 0 {
+		t.Errorf("an abandoned job was reported: %+v", obs.got)
+	}
+}
+
+// TestRun_AFailedVerdictIsNotReported: the deliverable did not pass acceptance.
+func TestRun_AFailedVerdictIsNotReported(t *testing.T) {
+	obs := &recordingObserver{}
+	v := &scriptedVerifier{reports: []Report{{Pass: false, Score: 0.1, Report: "no"}}}
+	in := input(mergeRequestJobs(), v, spec(1, "tool/verify"))
+	in.Closed = obs
+	if _, err := Run(context.Background(), in); err != nil {
+		t.Fatal(err)
+	}
+	if len(obs.got) != 0 {
+		t.Errorf("a failed job was reported: %+v", obs.got)
 	}
 }
