@@ -134,12 +134,16 @@ func TestSecretReaderOf_NilServiceYieldsNilInterface(t *testing.T) {
 		t.Fatalf("secretReaderOf(nil) = %#v, want a nil interface", got)
 	}
 
-	// The trap itself, so the test states what it is defending against: this is
-	// what the inline version did, and it is not nil.
+	// The trap itself, so the test states what it defends against rather than
+	// describing it. `trap` is what the inline version produced: an interface
+	// HOLDING a nil pointer, which is not a nil interface. Comparing the two
+	// interfaces asserts the distinction directly — and staticcheck flags
+	// `trap == nil` as never true, which is the same fact proved at compile
+	// time, so asserting that would be a tautology rather than a test.
 	var trap secretResolver = (*secrets.Service)(nil)
-	if trap == nil {
-		t.Fatal("a nil *secrets.Service in an interface compared equal to nil; " +
-			"the trap this function exists for would be gone and so should the function")
+	if got := secretReaderOf(nil); got == trap {
+		t.Fatal("secretReaderOf(nil) returned an interface holding a nil pointer; " +
+			"the resolver would call through it and panic on what reads as a nil check")
 	}
 }
 
