@@ -5,12 +5,14 @@ package authz
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"log/slog"
 	"net/http"
 	"strings"
 	"time"
 
+	fgasdk "github.com/openfga/go-sdk"
 	fgaclient "github.com/openfga/go-sdk/client"
 	"go.opentelemetry.io/otel"
 	"go.opentelemetry.io/otel/attribute"
@@ -210,6 +212,7 @@ func isTupleNotFoundError(err error) bool {
 // The FGA SDK returns errors as error strings. We check for common patterns:
 //   - context deadline exceeded → ErrFgaTimeout
 //   - connection refused / unavailable / EOF → ErrFgaUnavailable
+//   - FGA validation error (HTTP 400) → ErrInvalidArgument
 //   - everything else → ErrFgaUnavailable (conservative fail-closed)
 func mapSDKError(err error) error {
 	if err == nil {
@@ -218,6 +221,14 @@ func mapSDKError(err error) error {
 
 	msg := err.Error()
 	lower := strings.ToLower(msg)
+
+	// A 400 from FGA means the request itself is malformed (for example a
+	// user that is not type:id). That is a caller fault, not an outage, so
+	// it must not be reported as ErrFgaUnavailable.
+	var validationErr fgasdk.FgaApiValidationError
+	if errors.As(err, &validationErr) {
+		return &FgaError{Sentinel: ErrInvalidArgument, Message: "FGA rejected the request as invalid", Cause: err}
+	}
 
 	switch {
 	case strings.Contains(lower, "context deadline exceeded"),

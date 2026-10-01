@@ -186,3 +186,28 @@ func TestListUsers_ServerError_MapsToSDKError(t *testing.T) {
 		t.Fatal("ListUsers: expected error from a 500 response, got nil")
 	}
 }
+
+// TestListObjects_ValidationError_IsInvalidArgument pins that an FGA 400
+// validation response (for example a user that is not type:id) maps to
+// ErrInvalidArgument. It must not map to ErrFgaUnavailable: the service is
+// up, the request is wrong.
+func TestListObjects_ValidationError_IsInvalidArgument(t *testing.T) {
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+		w.Header().Set("Content-Type", "application/json")
+		w.WriteHeader(http.StatusBadRequest)
+		_, _ = w.Write([]byte(`{"code":"validation_error","message":"invalid 'user' value: the 'user' field must be an object"}`))
+	}))
+	defer srv.Close()
+
+	az := newTestFgaAuthorizer(t, srv.URL)
+	_, err := az.ListObjects(context.Background(), "abc", "can_invoke", "plugin")
+	if err == nil {
+		t.Fatal("ListObjects: expected an error from a 400 response, got nil")
+	}
+	if !IsInvalidArgument(err) {
+		t.Errorf("err = %v, want ErrInvalidArgument", err)
+	}
+	if IsUnavailable(err) {
+		t.Errorf("err = %v, must not be ErrFgaUnavailable", err)
+	}
+}

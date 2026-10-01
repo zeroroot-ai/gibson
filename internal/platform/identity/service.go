@@ -151,7 +151,7 @@ func (s *IdentityServer) WhoAmI(ctx context.Context, req *identitypb.WhoAmIReque
 
 	pluginGrants, truncatedPlug, err := s.collectPluginGrants(ctx, target)
 	if err != nil {
-		return nil, status.Errorf(codes.Internal, "list plugin grants: %v", err)
+		return nil, fgaStatus("list plugin grants", err)
 	}
 
 	// Coarse session-revocation capability (gibson#628). This gates the
@@ -238,7 +238,7 @@ func (s *IdentityServer) collectComponentGrants(ctx context.Context, target Prin
 		{"component_execute_enabled", func(g *identitypb.ComponentGrantEffective) { g.CanExecute = true }},
 	}
 
-	user := target.PrincipalID
+	user := fgaUserRef(target.PrincipalID)
 
 	byRef := make(map[string]*identitypb.ComponentGrantEffective)
 	truncated := false
@@ -288,7 +288,7 @@ func (s *IdentityServer) collectPluginGrants(ctx context.Context, target Princip
 	if target.Kind == identitypb.PrincipalKind_PRINCIPAL_KIND_AGENT {
 		return nil, false, nil
 	}
-	objects, err := s.authorizer.ListObjects(ctx, target.PrincipalID, "can_invoke", "plugin")
+	objects, err := s.authorizer.ListObjects(ctx, fgaUserRef(target.PrincipalID), "can_invoke", "plugin")
 	if err != nil {
 		return nil, false, fmt.Errorf("list plugin can_invoke: %w", err)
 	}
@@ -326,7 +326,7 @@ func (f *FGALookup) Resolve(ctx context.Context, principalID string) (PrincipalR
 	if f.Authorizer == nil {
 		return PrincipalRecord{}, errors.New("identity: FGALookup.Authorizer is nil")
 	}
-	objects, err := f.Authorizer.ListObjects(ctx, principalID, "belongs_to", "tenant")
+	objects, err := f.Authorizer.ListObjects(ctx, fgaUserRef(principalID), "belongs_to", "tenant")
 	if err != nil {
 		return PrincipalRecord{}, fmt.Errorf("identity: FGALookup ListObjects: %w", err)
 	}
@@ -344,6 +344,33 @@ func (f *FGALookup) Resolve(ctx context.Context, principalID string) (PrincipalR
 
 // kindFromPrincipalID extracts a PrincipalKind from a principal_id
 // prefix. Used for self-WhoAmI when we do not call the lookup.
+// fgaUserRef returns the OpenFGA user for a principal id. A typed component
+// principal already carries its type prefix (agent_principal:..., tool_principal:...).
+// A bare id is a human OIDC subject, which FGA stores as user:<sub>. OpenFGA
+// rejects a bare id with an "invalid 'user' value" validation error.
+func fgaUserRef(principalID string) string {
+	if strings.ContainsRune(principalID, ':') {
+		return principalID
+	}
+	return "user:" + principalID
+}
+
+// fgaStatus maps an authorizer error to a gRPC status. Only a real outage is
+// Unavailable. A request FGA rejects as invalid is InvalidArgument, so a
+// client-side validation fault is not reported as a service outage.
+func fgaStatus(op string, err error) error {
+	switch {
+	case errors.Is(err, authz.ErrInvalidArgument):
+		return status.Errorf(codes.InvalidArgument, "%s: %v", op, err)
+	case errors.Is(err, authz.ErrFgaTimeout):
+		return status.Errorf(codes.DeadlineExceeded, "%s: %v", op, err)
+	case errors.Is(err, authz.ErrFgaUnavailable):
+		return status.Errorf(codes.Unavailable, "%s: %v", op, err)
+	default:
+		return status.Errorf(codes.Internal, "%s: %v", op, err)
+	}
+}
+
 func kindFromPrincipalID(principalID string) identitypb.PrincipalKind {
 	switch {
 	case strings.HasPrefix(principalID, "agent_principal:"):
