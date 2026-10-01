@@ -217,7 +217,16 @@ func applyBetSettledTrue(w *World, e BetSettledTrue) {
 // outcome, not silence. Like BetSettledTrue, it folds through the normal
 // reducer path, so replay reproduces the settlement exactly.
 type BetSettledFalse struct {
-	HypothesisID         string
+	HypothesisID string
+	// Technique names the technique the exhausted bet exercised, resolved from
+	// the bet's Hypothesis (hypothesis.go) by SettleBetFalse. Unlike the TRUE
+	// path, exhaustion carries no predicate, so the technique cannot come from
+	// the settlement request — without it, a FALSE outcome could never update
+	// any technique's reputation (gibson#267 AC2). May be empty when the bet's
+	// Hypothesis is unknown or named no technique: the outcome still settles,
+	// it just contributes to no technique×environment bucket (the same
+	// "surfaced, not hidden" gap ComputeReputation already skips).
+	Technique            string
 	AttemptBudget        int
 	AttemptsMade         int
 	Reason               string
@@ -254,6 +263,7 @@ func applyBetSettledFalse(w *World, e BetSettledFalse) {
 		HypothesisID:         e.HypothesisID,
 		Verdict:              SettlementVerdictFalse,
 		Method:               SettlementMethodExhaustion,
+		Technique:            e.Technique,
 		AttemptBudget:        e.AttemptBudget,
 		AttemptsMade:         e.AttemptsMade,
 		Reason:               e.Reason,
@@ -276,8 +286,15 @@ func applyBetSettledFalse(w *World, e BetSettledFalse) {
 // event is submitted; Reduce never re-derives it, the same "evaluate once,
 // fold the fact" rule every settlement event in this file follows.
 type BetSettledByHITL struct {
-	HypothesisID         string
-	Verdict              SettlementVerdict
+	HypothesisID string
+	Verdict      SettlementVerdict
+	// Technique names the technique the settled bet exercised, resolved from
+	// the bet's Hypothesis (hypothesis.go) by SettleBetByHITL — a human verdict
+	// carries no predicate, so, like the exhaustion path, the technique cannot
+	// come from the settlement request. Without it a HITL outcome could never
+	// update any technique's reputation (gibson#267 AC2). May be empty, with
+	// the same meaning as on BetSettledFalse.
+	Technique            string
 	UserID               string
 	PredictedProbability float64
 	BrierScore           float64
@@ -311,6 +328,7 @@ func applyBetSettledByHITL(w *World, e BetSettledByHITL) {
 		HypothesisID:         e.HypothesisID,
 		Verdict:              e.Verdict,
 		Method:               SettlementMethodHITL,
+		Technique:            e.Technique,
 		UserID:               e.UserID,
 		PredictedProbability: e.PredictedProbability,
 		BrierScore:           e.BrierScore,
@@ -372,6 +390,24 @@ func (e *Engine) BetSettlements() []BetSettlementSnapshot {
 	e.mu.RLock()
 	defer e.mu.RUnlock()
 	return e.World.BetSettlementSnapshot()
+}
+
+// hypothesisTechniqueScope returns the Technique and ScopeID the Hypothesis
+// named by hypothesisID declared (hypothesis.go's HypothesisID join key). The
+// FALSE and HITL settle orchestrators use it to stamp the technique×environment
+// key onto a settlement whose request carries no predicate (and therefore no
+// technique of its own), so exhaustion and HITL outcomes update reputation the
+// same way the predicate path already does (gibson#267 AC2). Both returns are
+// empty when no folded Hypothesis carries this HypothesisID — a settlement with
+// no resolvable technique contributes to no reputation bucket, surfaced the
+// same way ComputeReputation skips a technique-less settlement, never a failure.
+func (e *Engine) hypothesisTechniqueScope(hypothesisID string) (technique, scopeID string) {
+	for _, h := range e.Hypotheses() {
+		if h.HypothesisID == hypothesisID {
+			return h.Technique, h.ScopeID
+		}
+	}
+	return "", ""
 }
 
 // BetSettlementRequest carries everything needed to attempt settling one bet
@@ -569,14 +605,24 @@ func (e *Engine) SettleBetFalse(_ context.Context, req BetExhaustionRequest) (bo
 		}
 	}
 
+	// Resolve the technique (and the scope, when the request omitted it) from
+	// the bet's Hypothesis: exhaustion carries no predicate, so this is the only
+	// place the technique×environment key can come from (gibson#267 AC2).
+	technique, hypScope := e.hypothesisTechniqueScope(req.HypothesisID)
+	scopeID := req.ScopeID
+	if scopeID == "" {
+		scopeID = hypScope
+	}
+
 	e.Submit(BetSettledFalse{
 		HypothesisID:         req.HypothesisID,
+		Technique:            technique,
 		AttemptBudget:        req.AttemptBudget,
 		AttemptsMade:         req.AttemptsMade,
 		Reason:               req.Reason,
 		PredictedProbability: req.PredictedProbability,
 		BrierScore:           brierScore(req.PredictedProbability, settlementOutcome(SettlementVerdictFalse)),
-		ScopeID:              req.ScopeID,
+		ScopeID:              scopeID,
 		MissionID:            req.MissionID,
 	})
 	return true, nil
@@ -684,13 +730,23 @@ func (e *Engine) SettleBetByHITL(_ context.Context, req BetHITLRequest) (bool, e
 		Verdict:  req.Verdict,
 		UserID:   req.UserID,
 	})
+	// Resolve the technique (and the scope, when the request omitted it) from
+	// the bet's Hypothesis: a human verdict carries no predicate, so this is the
+	// only place the technique×environment key can come from (gibson#267 AC2).
+	technique, hypScope := e.hypothesisTechniqueScope(req.HypothesisID)
+	scopeID := req.ScopeID
+	if scopeID == "" {
+		scopeID = hypScope
+	}
+
 	e.Submit(BetSettledByHITL{
 		HypothesisID:         req.HypothesisID,
 		Verdict:              verdict,
+		Technique:            technique,
 		UserID:               req.UserID,
 		PredictedProbability: req.PredictedProbability,
 		BrierScore:           brierScore(req.PredictedProbability, settlementOutcome(verdict)),
-		ScopeID:              req.ScopeID,
+		ScopeID:              scopeID,
 		MissionID:            req.MissionID,
 	})
 	return true, nil

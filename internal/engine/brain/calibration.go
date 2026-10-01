@@ -35,16 +35,14 @@ import (
 // report, regardless of input order (TestComputeCalibration_
 // DeterministicAcrossInputOrder).
 //
-// Known data-model gap, surfaced rather than hidden: BetSettlement only
-// records Technique for a TRUE verdict (bet_settlement.go's own comment:
-// "Set only for SettlementVerdictTrue"); gibson#279's FALSE path
-// (BetExhaustionRequest) carries no technique at all. A FALSE-settled bet
-// therefore still counts toward the tenant-wide Overall calibration (a miss
-// is real, recorded evidence, ADR-0023 — never dropped) but cannot be
-// attributed to any technique's own bucket, since none is recorded. Once a
-// technique is threaded onto the FALSE path (a Lane C concern, not this
-// file's), it flows through unchanged — the grouping key is simply
-// BetSettlementSnapshot.Technique, read as-is.
+// All three settlement paths now record a Technique (bet_settlement.go,
+// gibson#267): predicate from the proof, exhaustion and HITL resolved from the
+// bet's Hypothesis. So a FALSE- or HITL-settled bet is attributed to its
+// technique's own bucket here, not only to the tenant-wide Overall. A
+// settlement whose Hypothesis named no technique (or is unknown) still counts
+// toward Overall — a miss is real, recorded evidence (ADR-0023) — but falls
+// into no per-technique bucket, since the grouping key
+// (BetSettlementSnapshot.Technique) is empty; that is surfaced, not hidden.
 //
 // Exposure via a daemon API (the issue's second acceptance criterion) is
 // deliberately left to a follow-up: ComputeCalibration and Engine.

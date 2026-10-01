@@ -160,12 +160,15 @@ func wireBrainRegistry(
 	registry.OnEngine(func(e *brain.Engine) {
 		brain.WireBelief(ctx, e, beliefProvider, 0)
 		brain.WireSliceBelief(ctx, e, beliefSchemaRegistry, sliceBeliefProvider, 0, sliceOpts, propagateOpts)
+		// Reputation write loop (gibson#267): a settled bet recomputes its
+		// technique×environment reputation off the tick, which voi_plan.go then
+		// reads as both a new hypothesis's prior and its pursuit-priority
+		// multiplier. Tap + off-tick drain, the same pattern WireVoIPlanner uses.
+		brain.WireReputation(ctx, e, 0)
 		// gibson#333 ("complete the BAMCP sequential planner") is CLOSED,
 		// superseded by the phase-2 decomposition (epic gibson#376): its
 		// generative-simulator/Thompson-sampling item is this repo's
-		// gibson#396 (brain.BAMCPPlanner, wired below). Real technique x
-		// environment reputation (still the neutral prior, voi_plan.go's own
-		// doc comment) remains separate, still-open scope.
+		// gibson#396 (brain.BAMCPPlanner, wired below).
 		//
 		// catalog is nil here (no covering-capability resolution yet, ADR-0035
 		// decision 4/gibson#387): the live per-mission capability catalog

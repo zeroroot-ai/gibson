@@ -268,3 +268,58 @@ func TestWireBrainRegistry_InstallsVoIPlanner(t *testing.T) {
 	}
 	t.Fatalf("mission m1 never got a completed VoI plan within the deadline")
 }
+
+// TestWireBrainRegistry_InstallsReputationLoop proves wireBrainRegistry also
+// installs the reputation write loop (gibson#267) live: a settled bet updates
+// its technique×environment reputation, readable back through the belief
+// substrate within a few ticks — the same way the VoI test above proves VoI
+// planning is wired. Before this, Engine.UpdateReputation was reachable only by
+// false liveness (an exported method on a reachable type, no real caller).
+func TestWireBrainRegistry_InstallsReputationLoop(t *testing.T) {
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+
+	registry := brain.NewRegistry(ctx, append(
+		[]brain.System{brain.BeliefSystem},
+		brain.ExecutorSystems()...,
+	)...)
+	beliefSchemaRegistry, err := newBeliefSchemaRegistry()
+	if err != nil {
+		t.Fatalf("newBeliefSchemaRegistry: %v", err)
+	}
+	beliefProvider, err := resolveBeliefProvider()
+	if err != nil {
+		t.Fatalf("resolveBeliefProvider: %v", err)
+	}
+	wireBrainRegistry(ctx, registry, beliefProvider, resolveSliceBeliefProvider(beliefSchemaRegistry, nil), beliefSchemaRegistry, nil)
+
+	e := registry.For("tenant-reputation-wire-test") // triggers the OnEngine hook
+	e.Submit(brain.HypothesisObserved{HypothesisID: "hyp-1", ScopeID: "scope-a", Claim: "c", Technique: "t1190"})
+
+	// The engine's own tick loop folds the hypothesis asynchronously; the HITL
+	// settle path resolves the technique×environment key FROM that folded
+	// hypothesis, so wait for it before settling.
+	foldDeadline := time.Now().Add(2 * time.Second)
+	for time.Now().Before(foldDeadline) {
+		if len(e.Hypotheses()) == 1 {
+			break
+		}
+		time.Sleep(5 * time.Millisecond)
+	}
+
+	if _, err := e.SettleBetByHITL(ctx, brain.BetHITLRequest{
+		HypothesisID: "hyp-1", Verdict: brain.VerdictTruePositive, UserID: "reviewer-1",
+	}); err != nil {
+		t.Fatalf("SettleBetByHITL: %v", err)
+	}
+
+	substrate := brain.NewWorldBeliefSubstrate(e)
+	deadline := time.Now().Add(2 * time.Second)
+	for time.Now().Before(deadline) {
+		if _, ok, _ := brain.ReadReputation(ctx, e.World.Tenant, "t1190", "scope-a", substrate); ok {
+			return // the reputation write loop ran end to end
+		}
+		time.Sleep(5 * time.Millisecond)
+	}
+	t.Fatalf("a settled bet never updated its reputation within the deadline")
+}

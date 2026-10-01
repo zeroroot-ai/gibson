@@ -219,3 +219,32 @@ func TestSettleBetByHITL_InvalidPredictedProbability_Errors(t *testing.T) {
 		t.Fatal("want an error for an out-of-range predicted probability")
 	}
 }
+
+// TestBetSettledFalse_RecordsTechnique proves the exhaustion reducer now carries
+// the resolved technique onto the settlement (gibson#267 AC2) — the grouping key
+// reputation and calibration read.
+func TestBetSettledFalse_RecordsTechnique(t *testing.T) {
+	w := NewWorld("t")
+	Reduce(w, BetSettledFalse{
+		HypothesisID: "hyp-1", Technique: "t1190", ScopeID: "scope-a",
+		AttemptBudget: 1, AttemptsMade: 1, Reason: "exhausted",
+	})
+	got := w.BetSettlementSnapshot()
+	if len(got) != 1 || got[0].Technique != "t1190" {
+		t.Fatalf("want technique recorded on exhaustion settlement, got %+v", got)
+	}
+}
+
+// TestBetSettledByHITL_RecordsTechnique proves the HITL reducer now carries the
+// resolved technique onto the settlement (gibson#267 AC2).
+func TestBetSettledByHITL_RecordsTechnique(t *testing.T) {
+	w := NewWorld("t")
+	Reduce(w, BetSettledByHITL{
+		HypothesisID: "hyp-1", Technique: "t1190", ScopeID: "scope-a",
+		Verdict: SettlementVerdictTrue, UserID: "r1",
+	})
+	got := w.BetSettlementSnapshot()
+	if len(got) != 1 || got[0].Technique != "t1190" {
+		t.Fatalf("want technique recorded on HITL settlement, got %+v", got)
+	}
+}
