@@ -7,6 +7,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"strings"
 	"testing"
 
 	"github.com/stretchr/testify/assert"
@@ -25,10 +26,16 @@ type fakeVectorDriver struct {
 	asked []string
 	// closed tracks whether Close was called.
 	closed bool
+	// failWith, when set, is returned by For instead of consulting existing.
+	// It is how a fault that is NOT "index does not exist" is exercised.
+	failWith error
 }
 
 func (f *fakeVectorDriver) For(_ context.Context, collection string) (vectordb.Client, error) {
 	f.asked = append(f.asked, collection)
+	if f.failWith != nil {
+		return nil, f.failWith
+	}
 	if !f.existing[collection] {
 		return nil, errors.New("index not found: " + collection)
 	}
@@ -221,4 +228,28 @@ func TestAttachVector(t *testing.T) {
 		require.NoError(t, attachVector(context.Background(), fakeVectorSource{client: c}, conn))
 		assert.Same(t, c, conn.Vector)
 	})
+}
+
+// A driver fault that is NOT "index does not exist" is a real error and must
+// NOT be reported as NotProvisioned: a tenant whose Redis is unreachable has not
+// lost its provisioning, and treating the two alike would leave Conn.Vector nil
+// and the readers reporting the tenant unprovisioned for the life of the outage.
+func TestVectorPerTenant_ForTenant_DriverFaultIsNotNotProvisioned(t *testing.T) {
+	driver := &fakeVectorDriver{failWith: errors.New("dial tcp 10.0.0.1:6379: connect: connection refused")}
+	v := newVectorPerTenant(driver, staticIndex("vector_idx:tenant_acme"))
+
+	_, err := v.ForTenant(context.Background(), auth.MustNewTenantID("acme"))
+	if err == nil {
+		t.Fatal("want an error when the driver cannot be reached")
+	}
+	var np *NotProvisionedError
+	if errors.As(err, &np) {
+		t.Errorf("a connection fault was reported as NotProvisioned: %v", err)
+	}
+	if !strings.Contains(err.Error(), "connection refused") {
+		t.Errorf("error = %v, want the driver fault to survive wrapping", err)
+	}
+	if !strings.Contains(err.Error(), "vector_idx:tenant_acme") {
+		t.Errorf("error = %v, want it to name the index it tried", err)
+	}
 }

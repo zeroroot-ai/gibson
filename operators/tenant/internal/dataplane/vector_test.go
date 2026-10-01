@@ -284,3 +284,36 @@ func TestRedisVSSClientPing(t *testing.T) {
 		t.Fatalf("client PING: %v", err)
 	}
 }
+
+// An FT.CREATE failure that is NOT "already exists" must fail the saga. The
+// already-exists branch confirms with FT.INFO and continues, so a real fault
+// taking that same path would report a provisioned index that does not exist.
+func TestRedisVSSProvisionFailsOnRealCreateError(t *testing.T) {
+	t.Parallel()
+	// Register ONLY a failing FT.CREATE. registerFTCommands is not called first:
+	// miniredis refuses to re-register a command it already has, so a second
+	// Register over the helper's working stub is silently ignored.
+	mr := miniredis.RunT(t)
+	if regErr := mr.Server().Register("FT.CREATE", func(c *server.Peer, _ string, _ []string) {
+		c.WriteError("ERR Could not create index: out of memory")
+	}); regErr != nil {
+		t.Fatalf("register FT.CREATE: %v", regErr)
+	}
+
+	p, err := NewRedisVSSProvisioner(RedisVSSConfig{Addr: mr.Addr(), VectorDim: 1536})
+	if err != nil {
+		t.Fatalf("NewRedisVSSProvisioner: %v", err)
+	}
+	t.Cleanup(func() { _ = p.Close() })
+
+	err = p.Provision(context.Background(), "acme-corp")
+	if err == nil {
+		t.Fatal("want Provision to fail when FT.CREATE fails for a real reason")
+	}
+	if !strings.Contains(err.Error(), "FT.CREATE") {
+		t.Errorf("error = %v, want it to name FT.CREATE", err)
+	}
+	if !strings.Contains(err.Error(), "out of memory") {
+		t.Errorf("error = %v, want the server's own reason to survive", err)
+	}
+}

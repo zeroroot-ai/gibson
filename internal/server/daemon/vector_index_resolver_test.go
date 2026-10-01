@@ -58,7 +58,7 @@ func TestResolveVectorIndex(t *testing.T) {
 	t.Run("empty index name passes through", func(t *testing.T) {
 		got, err := resolveVectorIndex(context.Background(), &fakeSecretResolver{payload: []byte(`{"index_name":""}`)}, tenant)
 		require.NoError(t, err)
-		assert.Equal(t, "", got)
+		assert.Empty(t, got)
 	})
 
 	t.Run("happy path reads the infra/vector path as the tenant", func(t *testing.T) {
