@@ -358,6 +358,14 @@ jobs:
       # always(), not failure(): a job that hits timeout-minutes is
       # cancelled, and a cancelled job skips failure() steps, so the
       # 2026-09-18 timeout (run 35399104370) left nothing to read.
+      # The bringup dies before any of this test's own workloads exist, so the
+      # dumps below have nothing to show. This names the Application and the
+      # hook Job that failed, which no exit-test log has ever carried.
+      - name: Argo bringup diagnostics
+        if: always()
+        working-directory: gibson
+        run: bash scripts/ci/dump-bringup-diagnostics.sh
+
       - name: Diagnostics on failure
         if: always()
         run: |

@@ -1,0 +1,48 @@
+{
+  "status": {
+    "sync": {
+      "status": "Synced"
+    },
+    "health": {
+      "status": "Healthy"
+    },
+    "operationState": {
+      "phase": "Succeeded",
+      "message": "successfully synced (no more tasks)",
+      "startedAt": "2026-10-01T18:35:00Z",
+      "syncResult": {
+        "resources": [
+          {
+            "kind": "ServiceAccount",
+            "name": "setec-preupgrade-runtime-check",
+            "status": null,
+            "hookPhase": "Succeeded",
+            "message": "setec-preupgrade-runtime-check created"
+          },
+          {
+            "kind": "Namespace",
+            "name": "setec-system",
+            "status": "Synced",
+            "hookPhase": "Succeeded",
+            "message": "namespace/setec-system serverside-applied"
+          }
+        ]
+      }
+    },
+    "conditions": [],
+    "resources": [
+      {
+        "kind": "ServiceAccount",
+        "name": "gibson-gibson-workloads-first-admin",
+        "status": null,
+        "health": null
+      },
+      {
+        "kind": "ConfigMap",
+        "name": "cnpg-controller-manager-config",
+        "status": "Synced",
+        "health": null
+      }
+    ]
+  }
+}

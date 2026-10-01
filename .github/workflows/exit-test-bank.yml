@@ -488,6 +488,14 @@ jobs:
           echo "::error::the bank exit test did not finish"
           exit 1
 
+      # The bringup dies before any of this test's own workloads exist, so the
+      # dumps below have nothing to show. This names the Application and the
+      # hook Job that failed, which no exit-test log has ever carried.
+      - name: Argo bringup diagnostics
+        if: always()
+        working-directory: gibson
+        run: bash scripts/ci/dump-bringup-diagnostics.sh
+
       - name: Diagnostics on failure
         if: failure()
         run: |
