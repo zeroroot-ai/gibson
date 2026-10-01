@@ -62,20 +62,17 @@ func identityForLabel(label string) labelIdentity {
 	case "Mission":
 		return labelIdentity{props: []string{"id"}, unique: true}
 	}
-	// This MUST mirror entityIdentity in graph_projector_neo4j.go. The schema
-	// constrains the property the projector merges on; if the two disagree the
-	// constraint covers no node the projector writes, which is the defect this
-	// file exists to fix, inverted.
+	// identityPropertyFor is the ONE resolver, shared with entityIdentity in
+	// graph_projector_neo4j.go. The schema constrains the property the projector
+	// merges on; if the two disagree the constraint covers no node the projector
+	// writes, which is the defect this file exists to fix, inverted.
 	//
-	// So a runtime-promoted label (taxonomy discovery, gibson#484/#489) is keyed
-	// on brain_id by REGISTERING it in entityIdentityProperty, never by
-	// defaulting here: a default that said brain_id while the projector still
-	// merged on key would recreate exactly that mismatch.
-	prop := entityIdentityProperty[label]
-	if prop == "" {
-		prop = "key"
-	}
-	return labelIdentity{props: []string{prop}, unique: true}
+	// It used to be two copies of the same three lines, held together by this
+	// comment telling the next reader to keep them in step. They did not stay in
+	// step: both defaulted a runtime-promoted label to `key` while the promotion
+	// registry and the ontology pack an import carries both declared it as
+	// brain_id (gibson#515). One function cannot drift from itself.
+	return labelIdentity{props: []string{identityPropertyFor(label)}, unique: true}
 }
 
 // lookupIndexes are the indexes the read and match paths need beyond node
@@ -255,4 +252,29 @@ func (w *neo4jGraphWriter) ensureSchema(ctx context.Context, tenant string, sess
 		}
 		return nil
 	})
+}
+
+// invalidate forgets that every tenant's schema was ensured, so the next
+// projection tick runs the DDL again.
+//
+// It is called when a node label is promoted at run time. A promoted label needs
+// a uniqueness constraint it did not have when the DDL last ran, and the tracker
+// exists precisely to stop the DDL running again — so without this, a promoted
+// label never gets its constraint on a daemon that has already projected once,
+// and the duplicate-node defect the constraint prevents is back for that label.
+//
+// Every tenant, not the promoting one: promotion is process-wide
+// (taxonomy.promotedIdentities is a package global and the registry does not vary
+// by tenant), so the label becomes writable in every tenant's graph at once.
+//
+// The DDL is idempotent — every statement is IF NOT EXISTS — so re-running it
+// costs one round trip per tenant that writes again, and nothing else.
+func (t *schemaTracker) invalidate() {
+	t.mu.Lock()
+	defer t.mu.Unlock()
+	for _, e := range t.tenants {
+		e.mu.Lock()
+		e.done = false
+		e.mu.Unlock()
+	}
 }

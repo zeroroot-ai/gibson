@@ -93,7 +93,19 @@ func newNeo4jGraphWriter(poolGetter func() datapool.Pool) *neo4jGraphWriter {
 	if drift := checkProjectedVocabulary(); len(drift) > 0 {
 		panic("graph projector: vocabulary drifted from the Taxonomy: " + strings.Join(drift, "; "))
 	}
-	return &neo4jGraphWriter{poolGetter: poolGetter}
+	w := &neo4jGraphWriter{poolGetter: poolGetter}
+
+	// A promoted node label needs a uniqueness constraint the DDL did not create
+	// when it last ran, and the schema tracker exists to stop the DDL running
+	// again. So the promotion has to clear it, or a label promoted after the first
+	// projection tick never gets its constraint (gibson#515).
+	//
+	// The hook does NO I/O. taxonomy.OnPromote runs it synchronously inside
+	// Promote, so a hook that dialled Neo4j would hold up a promotion and fail it
+	// for a reason that has nothing to do with the promotion. It flips in-memory
+	// flags; the next write does the round trip.
+	taxonomy.OnPromote(func(string) { w.schema.invalidate() })
+	return w
 }
 
 // safeTaxonomyLabel matches the label names the projector is willing to emit:
@@ -366,11 +378,35 @@ func entityIdentity(label, key string) (map[string]any, error) {
 	if _, refused := entityIdentityRefused[label]; refused {
 		return nil, fmt.Errorf("graph projector: %s is identified by a composite key and cannot be addressed by an entity write", label)
 	}
-	prop := entityIdentityProperty[label]
-	if prop == "" {
-		prop = "key"
+	return map[string]any{identityPropertyFor(label): key}, nil
+}
+
+// identityPropertyFor resolves the property a label is merged and constrained on.
+//
+// Three sources, in this order, and the order is the whole point:
+//
+//  1. entityIdentityProperty, the compile-time map, for a first-class label whose
+//     projection this package owns.
+//  2. taxonomy.IdentityProperty, the promotion registry, for a label promoted at
+//     run time. That record is authoritative for a promoted label — the ontology
+//     pack an import carries declares the same property from the same place
+//     (brain/ontology_extension_upstream.go) — so reading it here is what stops an
+//     imported contribution and a locally discovered node of one label from
+//     splitting into two (gibson#1669, gibson#515).
+//  3. "key", for a label that is neither.
+//
+// The schema's identityForLabel resolves it through this same function, so the
+// uniqueness constraint is always on the property the projector merges on. The
+// two reading it differently is the failure graph_projector_schema.go's own
+// comment describes: a constraint that covers no node the projector writes.
+func identityPropertyFor(label string) string {
+	if prop := entityIdentityProperty[label]; prop != "" {
+		return prop
 	}
-	return map[string]any{prop: key}, nil
+	if prop, ok := taxonomy.IdentityProperty(label); ok && prop != "" {
+		return prop
+	}
+	return "key"
 }
 
 // entityReservedProps are the node properties upsertEntityCypher owns. A
