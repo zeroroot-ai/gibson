@@ -232,8 +232,8 @@ func TestInvitationSender_RoleLabels(t *testing.T) {
 		{role: "nonsense", want: "a Viewer"},
 	} {
 		t.Run(tc.role, func(t *testing.T) {
-			cap := &captureMailer{}
-			s := NewInvitationSender(cap)
+			sent := &captureMailer{}
+			s := NewInvitationSender(sent)
 			err := s.SendInvitation(context.Background(), InvitationEmail{
 				To:        "bob@example.com",
 				AcceptURL: "https://app.example.com/invite/tok123",
@@ -243,14 +243,14 @@ func TestInvitationSender_RoleLabels(t *testing.T) {
 			if err != nil {
 				t.Fatalf("SendInvitation: %v", err)
 			}
-			for _, body := range []string{cap.last.Text, cap.last.HTML} {
+			for _, body := range []string{sent.last.Text, sent.last.HTML} {
 				if !strings.Contains(body, tc.want) {
 					t.Errorf("role %q: body missing %q: %q", tc.role, tc.want, body)
 				}
 			}
 			for _, relation := range []string{"a writer", "a member"} {
-				if strings.Contains(cap.last.Text, relation) {
-					t.Errorf("role %q: body leaks the relation name %q: %q", tc.role, relation, cap.last.Text)
+				if strings.Contains(sent.last.Text, relation) {
+					t.Errorf("role %q: body leaks the relation name %q: %q", tc.role, relation, sent.last.Text)
 				}
 			}
 		})
