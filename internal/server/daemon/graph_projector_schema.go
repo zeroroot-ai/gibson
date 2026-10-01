@@ -199,11 +199,18 @@ func sessionExec(sess neo4j.SessionWithContext) cypherExec {
 		_, err := sess.ExecuteWrite(ctx, func(tx neo4j.ManagedTransaction) (any, error) {
 			res, txErr := tx.Run(ctx, cypher, params)
 			if txErr != nil {
-				return nil, txErr
+				return nil, fmt.Errorf("run schema statement: %w", txErr)
 			}
-			return res.Consume(ctx)
+			summary, consumeErr := res.Consume(ctx)
+			if consumeErr != nil {
+				return nil, fmt.Errorf("consume schema statement result: %w", consumeErr)
+			}
+			return summary, nil
 		})
-		return err
+		if err != nil {
+			return fmt.Errorf("apply schema statement: %w", err)
+		}
+		return nil
 	}
 }
 

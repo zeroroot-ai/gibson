@@ -173,7 +173,7 @@ func (f *fakeStore) count() int {
 
 func TestApplySchema_Idempotent(t *testing.T) {
 	store := newFakeStore()
-	for i := 0; i < 2; i++ {
+	for i := range 2 {
 		if err := applySchema(context.Background(), taxonomy.Global, store.run); err != nil {
 			t.Fatalf("run %d: %v", i+1, err)
 		}
@@ -215,7 +215,9 @@ func TestNeo4jSchemaVersionMatchesTaxonomy(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if int(got) != taxonomy.Version {
+	// taxonomy.Version is a positive constant, so the conversion is constant and
+	// cannot overflow. Converting the other way (uint -> int) trips gosec G115.
+	if got != uint(taxonomy.Version) {
 		t.Fatalf("migrations.Neo4jSchemaVersion = %d, taxonomy.Version = %d: bump both together", got, taxonomy.Version)
 	}
 }
@@ -228,7 +230,7 @@ func TestSchemaTracker_ConcurrentFirstTouchRunsOnce(t *testing.T) {
 
 	var wg sync.WaitGroup
 	start := make(chan struct{})
-	for i := 0; i < 32; i++ {
+	for range 32 {
 		wg.Add(1)
 		go func() {
 			defer wg.Done()
@@ -316,7 +318,7 @@ func TestNeo4jGraphWriter_EnsuresSchemaOnceBeforeFirstWrite(t *testing.T) {
 	pool := &mockPool{conn: &datapool.Conn{Neo4j: sess}}
 	w := newNeo4jGraphWriter(func() datapool.Pool { return pool })
 
-	for i := 0; i < 2; i++ {
+	for i := range 2 {
 		if err := w.UpsertMission(context.Background(), "acme", MissionProjection{ID: "m1"}); err != nil {
 			t.Fatalf("UpsertMission %d: %v", i+1, err)
 		}
