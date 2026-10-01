@@ -1,0 +1,108 @@
+{
+  "items": [
+    {
+      "metadata": {
+        "name": "cert-manager-655fccd6d9-2ks28",
+        "labels": {}
+      },
+      "status": {
+        "phase": "Running",
+        "containerStatuses": [
+          {
+            "name": "cert-manager",
+            "ready": true,
+            "restartCount": 0
+          }
+        ]
+      }
+    },
+    {
+      "metadata": {
+        "name": "gibson-openbao-0",
+        "labels": {}
+      },
+      "status": {
+        "phase": "Running",
+        "containerStatuses": [
+          {
+            "name": "openbao",
+            "ready": true,
+            "restartCount": 0
+          },
+          {
+            "name": "sidecar",
+            "ready": true,
+            "restartCount": 0
+          }
+        ]
+      }
+    },
+    {
+      "metadata": {
+        "name": "gibson-gibson-workloads-fga-init-63424631-5hgz9",
+        "labels": {
+          "job-name": "gibson-gibson-workloads-fga-init-63424631"
+        }
+      },
+      "status": {
+        "phase": "Succeeded",
+        "containerStatuses": [
+          {
+            "name": "fga-init",
+            "ready": false,
+            "restartCount": 0
+          }
+        ]
+      }
+    },
+    {
+      "metadata": {
+        "name": "gibson-daemon-0",
+        "labels": {}
+      },
+      "status": {
+        "phase": "Running",
+        "containerStatuses": [
+          {
+            "name": "gibson",
+            "ready": false,
+            "restartCount": 7
+          }
+        ]
+      }
+    },
+    {
+      "metadata": {
+        "name": "gibson-envoy-7f9c-pending",
+        "labels": {}
+      },
+      "status": {
+        "phase": "Pending",
+        "containerStatuses": []
+      }
+    },
+    {
+      "metadata": {
+        "name": "gibson-ext-authz-init-stuck",
+        "labels": {}
+      },
+      "status": {
+        "phase": "Running",
+        "initContainerStatuses": [
+          {
+            "name": "fetch-registry",
+            "ready": false,
+            "restartCount": 2
+          }
+        ],
+        "containerStatuses": [
+          {
+            "name": "ext-authz",
+            "ready": true,
+            "restartCount": 0
+          }
+        ]
+      }
+    }
+  ]
+}

@@ -1,0 +1,4 @@
+gibson-openbao-0   Pod
+gibson-openbao-0   Pod
+gibson-redis-rotation-28123456   Job
+gibson-control-plane   Node
