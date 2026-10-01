@@ -670,7 +670,7 @@ The node declares acceptance: verifier component and passing score. Each pass is
 in the run history.
 _Avoid_: loop node, retry edge, agent node (that one launches an ephemeral sandbox)
 
-### Users and roles (decided 2026-09-25, grill on hosted#185 follow-up)
+### Users and roles (decided 2026-09-25, ADR-0093)
 
 **Tenant user**:
 A person who belongs to exactly one tenant, as a user of that tenant's Zitadel org; Zitadel is the authority for who they are and whether they may sign in.
