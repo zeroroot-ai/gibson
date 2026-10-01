@@ -28,6 +28,9 @@ import (
 // brain-registry creation, before the pool is initialized.
 type neo4jGraphWriter struct {
 	poolGetter func() datapool.Pool
+	// schema remembers which tenants had their constraints, indexes and schema
+	// version ensured, so that runs once per tenant (graph_schema_neo4j.go).
+	schema schemaTracker
 }
 
 // projectedNodeLabels and projectedRelationshipTypes are the vocabulary this
@@ -570,6 +573,9 @@ func (w *neo4jGraphWriter) UpsertAgentRun(ctx context.Context, tenant string, r 
 		"agent":         r.AgentName,
 		"scope":         r.ScopeID,
 	}
+	if err := w.ensureSchema(ctx, tenant, conn.Neo4j); err != nil {
+		return err
+	}
 	_, err = conn.Neo4j.ExecuteWrite(ctx, func(tx neo4j.ManagedTransaction) (any, error) {
 		res, txErr := tx.Run(ctx, upsertAgentRunCypher, params)
 		if txErr != nil {
@@ -609,6 +615,9 @@ func (w *neo4jGraphWriter) UpsertLlmCall(ctx context.Context, tenant string, c b
 		"prompt_tokens":     c.PromptTokens,
 		"completion_tokens": c.CompletionTokens,
 		"total_tokens":      c.TotalTokens(),
+	}
+	if err := w.ensureSchema(ctx, tenant, conn.Neo4j); err != nil {
+		return err
 	}
 	_, err = conn.Neo4j.ExecuteWrite(ctx, func(tx neo4j.ManagedTransaction) (any, error) {
 		res, txErr := tx.Run(ctx, upsertLlmCallCypher, params)
@@ -674,6 +683,9 @@ func (w *neo4jGraphWriter) exec(ctx context.Context, tenant, cypher string, para
 		// its MERGE moved here, and it is the right answer for every projection.
 		return nil
 	}
+	if err := w.ensureSchema(ctx, tenant, conn.Neo4j); err != nil {
+		return err
+	}
 	_, err = conn.Neo4j.ExecuteWrite(ctx, func(tx neo4j.ManagedTransaction) (any, error) {
 		res, txErr := tx.Run(ctx, cypher, params)
 		if txErr != nil {
@@ -734,6 +746,9 @@ func (w *neo4jGraphWriter) UpsertFinding(ctx context.Context, tenant string, f b
 	defer conn.Release()
 
 	params := findingUpsertParams(f)
+	if err := w.ensureSchema(ctx, tenant, conn.Neo4j); err != nil {
+		return err
+	}
 	_, err = conn.Neo4j.ExecuteWrite(ctx, func(tx neo4j.ManagedTransaction) (any, error) {
 		res, txErr := tx.Run(ctx, upsertFindingCypher, params)
 		if txErr != nil {

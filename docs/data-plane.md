@@ -222,8 +222,9 @@ Migration files:
 
 - Postgres: [`pkg/platform/migrations/postgres/`](../pkg/platform/migrations/postgres/) (`*.up.sql` /
   `*.down.sql`, golang-migrate format).
-- Neo4j: [`migrations/neo4j/`](../migrations/neo4j/) (`*.up.cypher` files
-  applied in filename-sorted order).
+- Neo4j: no migration files. The graph projector creates the constraints and
+  indexes from the taxonomy, once per tenant, before its first write
+  (`internal/server/daemon/graph_schema_neo4j.go`).
 
 **Daemon startup behavior**: on first `Pool.For` for a given tenant, the
 daemon checks the tenant's migration version. If the tenant's schema is behind

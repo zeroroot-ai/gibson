@@ -22,7 +22,7 @@ type MissionContext struct {
 	Constraints  []string       `json:"constraints"`
 	Metadata     map[string]any `json:"metadata,omitempty"`
 	// MissionRunID is the unique identifier for this specific mission execution.
-	// Created by MissionGraphManager.CreateMissionRunNode() at mission start.
+	// Assigned when the mission run starts.
 	// Used for mission-scoped GraphRAG storage.
 	MissionRunID string `json:"mission_run_id,omitempty"`
 	// AgentRunID is the unique identifier for this specific agent execution.
