@@ -1,5 +1,12 @@
 # Changelog
 
+## [1.5.4](https://github.com/zeroroot-ai/gibson/compare/gibson-bootstrap-v1.5.3...gibson-bootstrap-v1.5.4) (2026-10-01)
+
+
+### Bug Fixes
+
+* **image:** every distroless runtime on Debian 13 static, tzdata 2026c ([#462](https://github.com/zeroroot-ai/gibson/issues/462)) ([8919f11](https://github.com/zeroroot-ai/gibson/commit/8919f119e21717e9ecaad465e005eed1b1fc1991))
+
 ## [1.5.3](https://github.com/zeroroot-ai/gibson/compare/gibson-bootstrap-v1.5.2...gibson-bootstrap-v1.5.3) (2026-09-18)
 
 

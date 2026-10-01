@@ -1,5 +1,12 @@
 # Changelog
 
+## [0.148.2](https://github.com/zeroroot-ai/gibson/compare/v0.148.1...v0.148.2) (2026-10-01)
+
+
+### Bug Fixes
+
+* **image:** every distroless runtime on Debian 13 static, tzdata 2026c ([#462](https://github.com/zeroroot-ai/gibson/issues/462)) ([8919f11](https://github.com/zeroroot-ai/gibson/commit/8919f119e21717e9ecaad465e005eed1b1fc1991))
+
 ## [0.148.1](https://github.com/zeroroot-ai/gibson/compare/v0.148.0...v0.148.1) (2026-10-01)
 
 
