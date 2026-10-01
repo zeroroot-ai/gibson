@@ -212,8 +212,48 @@ func TestInvitationSender_RendersAcceptLink(t *testing.T) {
 	if !strings.Contains(cap.last.HTML, "https://app.example.com/invite/tok123") {
 		t.Errorf("html body missing accept link")
 	}
-	if !strings.Contains(cap.last.Text, "an admin") {
+	if !strings.Contains(cap.last.Text, "an Admin") {
 		t.Errorf("text body missing role label: %q", cap.last.Text)
+	}
+}
+
+// TestInvitationSender_RoleLabels pins the invitation email to the role names
+// ADR-0093 decision 2 gives people. A relation name in this email names no role
+// the invitee can find in the dashboard.
+func TestInvitationSender_RoleLabels(t *testing.T) {
+	for _, tc := range []struct {
+		role string
+		want string
+	}{
+		{role: "admin", want: "an Admin"},
+		{role: "writer", want: "an Editor"},
+		{role: "member", want: "a Viewer"},
+		{role: "", want: "a Viewer"},
+		{role: "nonsense", want: "a Viewer"},
+	} {
+		t.Run(tc.role, func(t *testing.T) {
+			cap := &captureMailer{}
+			s := NewInvitationSender(cap)
+			err := s.SendInvitation(context.Background(), InvitationEmail{
+				To:        "bob@example.com",
+				AcceptURL: "https://app.example.com/invite/tok123",
+				Role:      tc.role,
+				ExpiresAt: time.Date(2026, 10, 1, 12, 0, 0, 0, time.UTC),
+			})
+			if err != nil {
+				t.Fatalf("SendInvitation: %v", err)
+			}
+			for _, body := range []string{cap.last.Text, cap.last.HTML} {
+				if !strings.Contains(body, tc.want) {
+					t.Errorf("role %q: body missing %q: %q", tc.role, tc.want, body)
+				}
+			}
+			for _, relation := range []string{"a writer", "a member"} {
+				if strings.Contains(cap.last.Text, relation) {
+					t.Errorf("role %q: body leaks the relation name %q: %q", tc.role, relation, cap.last.Text)
+				}
+			}
+		})
 	}
 }
 

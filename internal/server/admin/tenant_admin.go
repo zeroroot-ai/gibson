@@ -126,7 +126,7 @@ type TenantAdminServer struct {
 	roles         *tenantrole.Syncer       // optional; when nil, role-writing RPCs are Unavailable
 	invitations   *InvitationStore         // optional; when nil InviteMember is Unavailable + ListMembers omits invited
 	inviteMailer  InvitationMailer         // optional; when nil InviteMember/ResendInvitation send no email
-	inviteBaseURL string                   // accept-link origin (GIBSON_PUBLIC_URL); when empty no email is sent
+	inviteBaseURL string                   // accept-link origin (GIBSON_APP_URL); when empty no email is sent
 	reservedNames ReservedNamesProvider    // optional; GetReservedNames returns empty when nil
 	logger        *slog.Logger
 }
@@ -181,7 +181,9 @@ type TenantAdminConfig struct {
 	// accept-link email is sent.
 	InvitationMailer InvitationMailer
 	// InviteBaseURL is the origin for accept links (e.g. https://app.example.com,
-	// from GIBSON_PUBLIC_URL). When empty, no invitation email is sent.
+	// from GIBSON_APP_URL). It must be the product surface: the API origin
+	// serves no route for /invite/<token> (hosted#203). When empty, no
+	// invitation email is sent.
 	InviteBaseURL string
 	// ReservedNames is optional. When nil, GetReservedNames returns empty lists.
 	ReservedNames ReservedNamesProvider
