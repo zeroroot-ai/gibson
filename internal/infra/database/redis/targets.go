@@ -228,7 +228,7 @@ func (dao *RedisTargetDAO) Get(ctx context.Context, id types.ID) (*types.Target,
 	err := dao.client.JSONGet(ctx, key, "$", &doc)
 	if err != nil {
 		if err == state.ErrNotFound || err == goredis.Nil {
-			return nil, fmt.Errorf("target not found: %s", id)
+			return nil, fmt.Errorf("%w: %s", types.ErrTargetNotFound, id)
 		}
 		return nil, fmt.Errorf("failed to get target: %w", err)
 	}
@@ -251,7 +251,7 @@ func (dao *RedisTargetDAO) GetByName(ctx context.Context, name string) (*types.T
 	idStr, err := dao.client.Client().Get(ctx, nameKey).Result()
 	if err != nil {
 		if err == goredis.Nil {
-			return nil, fmt.Errorf("target not found: %s", name)
+			return nil, fmt.Errorf("%w: %s", types.ErrTargetNotFound, name)
 		}
 		return nil, fmt.Errorf("failed to lookup target by name: %w", err)
 	}
@@ -352,7 +352,7 @@ func (dao *RedisTargetDAO) Update(ctx context.Context, target *types.Target) err
 	// Get existing target to check if name changed
 	existing, err := dao.Get(ctx, target.ID)
 	if err != nil {
-		return fmt.Errorf("target not found: %w", err)
+		return fmt.Errorf("get existing target: %w", err)
 	}
 
 	// Update timestamp
@@ -408,7 +408,7 @@ func (dao *RedisTargetDAO) Delete(ctx context.Context, id types.ID) error {
 	// Get the target to find its name
 	target, err := dao.Get(ctx, id)
 	if err != nil {
-		return fmt.Errorf("target not found: %w", err)
+		return fmt.Errorf("get existing target: %w", err)
 	}
 
 	key := targetKey(id)

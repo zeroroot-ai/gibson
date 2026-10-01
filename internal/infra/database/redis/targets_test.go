@@ -198,8 +198,7 @@ func TestRedisTargetDAO_Get(t *testing.T) {
 	t.Run("get_nonexistent_target", func(t *testing.T) {
 		id := types.NewID()
 		_, err := dao.Get(ctx, id)
-		assert.Error(t, err)
-		assert.Contains(t, err.Error(), "not found")
+		assert.ErrorIs(t, err, types.ErrTargetNotFound)
 	})
 }
 

@@ -8,6 +8,10 @@ import (
 	"fmt"
 )
 
+// ErrTargetNotFound is returned by target stores when no target matches the
+// lookup key. Callers test for it with errors.Is.
+var ErrTargetNotFound = errors.New("target not found")
+
 // ErrorCode represents a namespaced error code for Gibson framework errors.
 type ErrorCode string
 
