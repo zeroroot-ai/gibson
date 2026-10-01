@@ -127,6 +127,7 @@ type TenantAdminServer struct {
 	invitations   *InvitationStore         // optional; when nil InviteMember is Unavailable + ListMembers omits invited
 	inviteMailer  InvitationMailer         // optional; when nil InviteMember/ResendInvitation send no email
 	inviteBaseURL string                   // accept-link origin (GIBSON_APP_URL); when empty no email is sent
+	inviteAPIURL  string                   // API-plane origin (GIBSON_PUBLIC_URL) the invitation email's CLI commands name; when empty the email points at Settings → CLI instead
 	reservedNames ReservedNamesProvider    // optional; GetReservedNames returns empty when nil
 	logger        *slog.Logger
 }
@@ -185,6 +186,14 @@ type TenantAdminConfig struct {
 	// serves no route for /invite/<token> (hosted#203). When empty, no
 	// invitation email is sent.
 	InviteBaseURL string
+	// InviteAPIURL is the API-plane origin (e.g. https://api.example.com, from
+	// GIBSON_PUBLIC_URL). The invitation email prints it in `gibson init
+	// --gibson-url`, so an invitee has a filled-in command instead of a URL
+	// they cannot guess. Deliberately NOT InviteBaseURL: the product surface
+	// serves no gRPC. Optional — when empty the email sends the reader to
+	// Settings → CLI, which renders the same commands from the dashboard's own
+	// copy of this value.
+	InviteAPIURL string
 	// ReservedNames is optional. When nil, GetReservedNames returns empty lists.
 	ReservedNames ReservedNamesProvider
 	// Logger is optional; falls back to slog.Default() when nil.
@@ -236,6 +245,7 @@ func NewTenantAdminServer(cfg TenantAdminConfig) (*TenantAdminServer, error) {
 		invitations:   cfg.Invitations,
 		inviteMailer:  cfg.InvitationMailer,
 		inviteBaseURL: cfg.InviteBaseURL,
+		inviteAPIURL:  cfg.InviteAPIURL,
 		reservedNames: cfg.ReservedNames,
 		logger:        logger,
 	}, nil

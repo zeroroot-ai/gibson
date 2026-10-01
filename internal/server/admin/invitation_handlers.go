@@ -54,13 +54,20 @@ func (s *TenantAdminServer) sendInvitationEmail(ctx context.Context, tenantID, t
 		return status.Error(codes.FailedPrecondition,
 			"transactional email is not configured; the invitation was recorded but no email was sent — configure the email provider and public URL, then resend")
 	}
-	acceptURL := strings.TrimRight(s.inviteBaseURL, "/") + "/invite/" + rawToken
+	appURL := strings.TrimRight(s.inviteBaseURL, "/")
+	acceptURL := appURL + "/invite/" + rawToken
 	if err := s.inviteMailer.SendInvitation(ctx, mailer.InvitationEmail{
 		To:        to,
 		AcceptURL: acceptURL,
 		TenantID:  tenantID,
 		Role:      role,
 		ExpiresAt: expiresAt,
+		// Both origins, so the email can print this workspace's own
+		// commands rather than a shape the invitee has to fill in. The
+		// tenant slug is the other value only the daemon knows, and
+		// TenantID above carries it.
+		AppURL: appURL,
+		APIURL: strings.TrimRight(s.inviteAPIURL, "/"),
 	}); err != nil {
 		return status.Errorf(codes.Internal, "send invitation email: %v", err)
 	}
