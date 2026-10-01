@@ -9,6 +9,8 @@ import (
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 	sdkgraphrag "github.com/zeroroot-ai/sdk/graphrag"
+
+	"github.com/zeroroot-ai/gibson/internal/engine/taxonomy"
 )
 
 // -----------------------------------------------------------------------
@@ -343,4 +345,73 @@ func TestProposeExtension_CanonicalHashIsOrderIndependentAcrossEveryField(t *tes
 	out3 := ProposeExtension(r3, StructuralHypothesis{Proposer: "agent", Claim: "c", Extension: extDifferentRaw})
 	require.True(t, out3.Accepted)
 	assert.NotEqual(t, out1.ExtensionName, out3.ExtensionName)
+}
+
+// -----------------------------------------------------------------------
+// Identity boundary (gibson#484): ontology discovery is DATA-LEVEL and never
+// produces a Neo4j node label, so it has no written key form to assign — the
+// natural-key rule gibson#484 enforces at promotion applies to taxonomy
+// node-label promotion (gibson#281, taxonomy.PromotionGate), not here.
+//
+// ADR-0024 §1 draws this line: a proposed ontology class is a prefix:localname
+// IRI the Reasoner reasons OVER, never a Cypher query token. These tests make
+// that boundary executable, so a later change that tried to route an ontology
+// class into node-label structure (where it WOULD need a collision-proof key,
+// gibson#1669/#486) fails here first.
+// -----------------------------------------------------------------------
+
+// An ontology class label is a prefix:localname IRI. The prefix separator is a
+// character taxonomy.ValidIdentifier refuses, so an ontology class is
+// structurally incapable of being a Neo4j node label: it can never reach Cypher
+// as an identifier and so never needs the gibson#484 key form.
+func TestProposeExtension_OntologyClassIsNotAValidTaxonomyNodeLabel(t *testing.T) {
+	r := NewReasoner(NewMetrics())
+
+	h := StructuralHypothesis{
+		Proposer: "agent-run-boundary",
+		Claim:    "iot devices subclass hosts",
+		Extension: sdkgraphrag.OntologyExtension{
+			Prefixes: map[string]string{"tech": "https://example.com/tech#"},
+			Hierarchies: []sdkgraphrag.HierarchyDef{
+				{NodeType: "technology", Label: "tech:IoTDevice", SubClassOf: "tech:Host"},
+			},
+		},
+	}
+
+	out := ProposeExtension(r, h)
+	require.True(t, out.Accepted)
+
+	// Every class label the accepted extension introduced is a prefixed IRI
+	// that cannot pass the taxonomy node-label safety gate.
+	for _, hier := range h.Extension.Hierarchies {
+		require.Error(t, taxonomy.ValidIdentifier(hier.Label),
+			"ontology class %q must NOT be a valid taxonomy node label", hier.Label)
+		require.Error(t, taxonomy.ValidIdentifier(hier.SubClassOf),
+			"ontology parent class %q must NOT be a valid taxonomy node label", hier.SubClassOf)
+	}
+}
+
+// Registering an ontology extension adds Reasoner vocabulary only. It does not
+// promote anything into the taxonomy node-label set, so the taxonomy's
+// collision-proof keying (gibson#484) is never engaged by ontology discovery.
+func TestProposeExtension_DoesNotTouchTaxonomyNodeLabels(t *testing.T) {
+	r := NewReasoner(NewMetrics())
+
+	before := append([]string(nil), taxonomy.Global.NodeLabels()...)
+
+	out := ProposeExtension(r, StructuralHypothesis{
+		Proposer: "agent-run-boundary",
+		Claim:    "a new technology class",
+		Extension: sdkgraphrag.OntologyExtension{
+			Prefixes: map[string]string{"tech": "https://example.com/tech#"},
+			Hierarchies: []sdkgraphrag.HierarchyDef{
+				{NodeType: "technology", Label: "tech:MessageQueue", SubClassOf: "tech:Service"},
+			},
+		},
+	})
+	require.True(t, out.Accepted)
+
+	// The global taxonomy node-label vocabulary is untouched: ontology and
+	// taxonomy are separate vocabularies (ADR-0024 §1).
+	assert.Equal(t, before, taxonomy.Global.NodeLabels())
 }
