@@ -39,10 +39,7 @@ func validParams() map[string]string {
 // file fail on a missing value, which is a confusing way to learn it; this says
 // it directly.
 func TestValidParams_CoversEveryDeclaredParameter(t *testing.T) {
-	names, err := ParamNames("scan")
-	if err != nil {
-		t.Fatal(err)
-	}
+	names := declaredParams(t, "scan")
 	got := validParams()
 	if len(got) != len(names) {
 		t.Fatalf("validParams has %d entries, scan declares %d: %v vs %v", len(got), len(names), got, names)

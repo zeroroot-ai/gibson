@@ -51,20 +51,6 @@ var missionFS embed.FS
 // believe it bound. The runtime target comes from the mission's target at submit
 // and from nowhere else.
 
-// ParamNames lists the parameters one checked-in mission takes, sorted, so a
-// caller or an error message can name them without restating the list.
-func ParamNames(mission string) ([]string, error) {
-	src, err := Source(mission)
-	if err != nil {
-		return nil, err
-	}
-	names, err := cueruntime.DeclaredParams(src)
-	if err != nil {
-		return nil, fmt.Errorf("missioncatalog: read the parameters of %q: %w", mission, err)
-	}
-	return names, nil
-}
-
 // checkParams refuses a caller's map against what the mission declares.
 //
 // Unknown keys and missing keys are each reported together, and sorted, so a

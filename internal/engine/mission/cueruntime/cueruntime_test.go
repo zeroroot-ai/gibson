@@ -156,6 +156,27 @@ func TestValidate_AcceptsEveryTargetBinding(t *testing.T) {
 	}
 }
 
+// The ADK templates take no parameters: recon and its siblings read
+// {{target.domain}} and nothing else, so DeclaredParams reporting none for them
+// is the real-file half of this. The synthetic cases below cover a mission that
+// does declare some.
+func TestDeclaredParams_TheShippedTemplatesDeclareNone(t *testing.T) {
+	t.Parallel()
+	for name, src := range map[string]string{
+		"recon":            reconCUE,
+		"webapp-scan":      webappScanCUE,
+		"secrets-audit":    secretsAuditCUE,
+		"compliance-check": complianceCheckCUE,
+	} {
+		t.Run(name, func(t *testing.T) {
+			t.Parallel()
+			got, err := cueruntime.DeclaredParams(src)
+			require.NoError(t, err)
+			assert.Empty(t, got, "%s declares no _params, so none must be reported", name)
+		})
+	}
+}
+
 // A placeholder in another namespace is somebody else's to resolve. Refusing it
 // here would make adding one a breaking change.
 func TestValidate_LeavesAnotherNamespaceAlone(t *testing.T) {
@@ -166,4 +187,84 @@ func TestValidate_LeavesAnotherNamespaceAlone(t *testing.T) {
 	for _, d := range diags {
 		assert.NotContains(t, d.Message, "names no target field")
 	}
+}
+
+// `_params` is a CUE HIDDEN field. cue.Str finds nothing and returns no error,
+// which reads as "this mission takes no parameters" — so a reader that addressed
+// it the wrong way would silently accept a call that supplied none. This asserts
+// the field is actually found.
+func TestDeclaredParams_FindsAHiddenFieldNotNothing(t *testing.T) {
+	t.Parallel()
+	const src = `
+import missionv1 "github.com/zeroroot-ai/sdk/api/proto/gibson/mission/v1"
+
+_params: {
+	alpha: string
+	beta:  string
+}
+
+mission: missionv1.#MissionDefinition & {
+	name: "t"
+	nodes: {}
+}
+`
+	got, err := cueruntime.DeclaredParams(src)
+	require.NoError(t, err)
+	assert.Equal(t, []string{"alpha", "beta"}, got)
+
+	// Sorted and unique, so the render order is stable, and unquoted, so a name
+	// goes straight into a CUE key.
+	assert.IsIncreasing(t, got)
+	seen := map[string]bool{}
+	for _, n := range got {
+		assert.False(t, seen[n], "%s reported twice", n)
+		seen[n] = true
+		assert.NotContains(t, n, `"`, "a name arrives unquoted")
+		assert.Contains(t, src, n+":", "%s is not declared in the source", n)
+	}
+}
+
+// A parameter the mission marks optional is still a parameter a caller may send,
+// so it is reported.
+func TestDeclaredParams_IncludesAnOptionalParameter(t *testing.T) {
+	t.Parallel()
+	const src = `
+import missionv1 "github.com/zeroroot-ai/sdk/api/proto/gibson/mission/v1"
+
+_params: {
+	alpha:  string
+	beta?:  string
+}
+
+mission: missionv1.#MissionDefinition & {
+	name: "t"
+	nodes: {}
+}
+`
+	got, err := cueruntime.DeclaredParams(src)
+	require.NoError(t, err)
+	assert.Equal(t, []string{"alpha", "beta"}, got)
+}
+
+// A mission whose graph is fully determined by its target takes no parameters,
+// and that is not an error.
+func TestDeclaredParams_NoParamsIsNotAnError(t *testing.T) {
+	t.Parallel()
+	const src = `
+import missionv1 "github.com/zeroroot-ai/sdk/api/proto/gibson/mission/v1"
+
+mission: missionv1.#MissionDefinition & {
+	name: "t"
+	nodes: {}
+}
+`
+	got, err := cueruntime.DeclaredParams(src)
+	require.NoError(t, err)
+	assert.Empty(t, got)
+}
+
+func TestDeclaredParams_SourceThatDoesNotCompileIsAnError(t *testing.T) {
+	t.Parallel()
+	_, err := cueruntime.DeclaredParams("mission: UNCLOSED {")
+	require.Error(t, err)
 }

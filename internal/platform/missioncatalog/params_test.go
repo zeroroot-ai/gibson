@@ -10,6 +10,8 @@ import (
 	"context"
 	"strings"
 	"testing"
+
+	"github.com/zeroroot-ai/gibson/internal/engine/mission/cueruntime"
 )
 
 // completeParams builds a full parameter set for one mission from its own
@@ -17,10 +19,7 @@ import (
 // rather than as a test that quietly stops covering it.
 func completeParams(t *testing.T, mission string) map[string]string {
 	t.Helper()
-	names, err := ParamNames(mission)
-	if err != nil {
-		t.Fatalf("ParamNames(%s): %v", mission, err)
-	}
+	names := declaredParams(t, mission)
 	out := make(map[string]string, len(names))
 	for _, n := range names {
 		out[n] = "v-" + n
@@ -31,13 +30,10 @@ func completeParams(t *testing.T, mission string) map[string]string {
 // ParamNames reads the mission's own CUE. It used to read a Go struct shared by
 // every mission in the catalog, which is why Render demanded a pipeline id of a
 // mission that has no pipeline (gibson#499).
-func TestParamNames_ComesFromTheMissionsOwnDeclaration(t *testing.T) {
+func TestDeclaredParams_ComesFromTheMissionsOwnDeclaration(t *testing.T) {
 	t.Parallel()
 
-	names, err := ParamNames("scan")
-	if err != nil {
-		t.Fatal(err)
-	}
+	names := declaredParams(t, "scan")
 	if len(names) == 0 {
 		t.Fatal("scan declares no parameters")
 	}
@@ -64,10 +60,10 @@ func TestParamNames_ComesFromTheMissionsOwnDeclaration(t *testing.T) {
 	}
 }
 
-func TestParamNames_UnknownMissionIsAnError(t *testing.T) {
+func TestRender_UnknownMissionIsAnError(t *testing.T) {
 	t.Parallel()
-	if _, err := ParamNames("no-such-mission"); err == nil {
-		t.Fatal("an unknown mission must be an error, not an empty parameter list")
+	if _, err := Render(context.Background(), "no-such-mission", nil); err == nil {
+		t.Fatal("an unknown mission must be an error, not an empty render")
 	}
 }
 
@@ -96,7 +92,7 @@ func TestRender_UnknownKeyIsRefusedNotDropped(t *testing.T) {
 		t.Errorf("the error does not name the offending key: %v", err)
 	}
 	// And it names what the mission does take, so the caller can correct it.
-	names, _ := ParamNames("scan")
+	names := declaredParams(t, "scan")
 	if !strings.Contains(err.Error(), names[0]) {
 		t.Errorf("the error does not name what the mission takes: %v", err)
 	}
@@ -126,15 +122,12 @@ func TestRender_UnknownKeysReportedTogetherAndSorted(t *testing.T) {
 // time should see every field it forgot in one error.
 func TestRender_MissingKeysReportedTogether(t *testing.T) {
 	t.Parallel()
-	names, err := ParamNames("scan")
-	if err != nil {
-		t.Fatal(err)
-	}
+	names := declaredParams(t, "scan")
 	in := completeParams(t, "scan")
 	delete(in, names[0])
 	in[names[1]] = "   " // whitespace is as absent as absent
 
-	_, err = Render(context.Background(), "scan", in)
+	_, err := Render(context.Background(), "scan", in)
 	if err == nil {
 		t.Fatal("a missing parameter must be refused rather than rendered empty")
 	}
@@ -157,10 +150,29 @@ func TestRender_NoParametersAtAllIsRefusedForAMissionThatTakesSome(t *testing.T)
 func TestRender_AQuoteInAValueCannotInjectCUE(t *testing.T) {
 	t.Parallel()
 	in := completeParams(t, "scan")
-	names, _ := ParamNames("scan")
+	names := declaredParams(t, "scan")
 	in[names[0]] = `x" , injected: "yes`
 
 	if _, err := Render(context.Background(), "scan", in); err != nil {
 		t.Fatalf("a quoted value must render, not fail: %v", err)
 	}
+}
+
+// declaredParams is the test's own reader of a mission's declaration.
+//
+// The catalog exports no ParamNames: nothing in the daemon asks "what does this
+// mission take" — Render validates and that is the whole production need — and an
+// exported helper reachable only from tests is dead code the gate rightly refuses
+// (ADR-0027). When a submission form needs the list, it gets an entry point then.
+func declaredParams(t *testing.T, mission string) []string {
+	t.Helper()
+	src, err := Source(mission)
+	if err != nil {
+		t.Fatalf("Source(%s): %v", mission, err)
+	}
+	names, err := cueruntime.DeclaredParams(src)
+	if err != nil {
+		t.Fatalf("DeclaredParams(%s): %v", mission, err)
+	}
+	return names
 }
