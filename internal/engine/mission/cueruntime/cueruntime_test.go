@@ -6,6 +6,8 @@ package cueruntime_test
 import (
 	"context"
 	_ "embed"
+	"github.com/zeroroot-ai/gibson/internal/engine/mission/targetbind"
+	"strings"
 	"testing"
 
 	"github.com/stretchr/testify/assert"
@@ -112,4 +114,56 @@ func TestHover_ReturnsString(t *testing.T) {
 	require.NoError(t, err, "Hover must not return an error")
 	// doc may be empty — the contract is no panic, no error.
 	_ = doc
+}
+
+// TestValidate_RefusesAnUnknownTargetBinding is the gibson#495 fixture at the
+// earliest point it can fail. Nothing in CUE knows what {{target.X}} means, so a
+// typo compiles cleanly and the mission registers. Before this check, the only
+// thing that noticed was the scan, by running against the literal text.
+func TestValidate_RefusesAnUnknownTargetBinding(t *testing.T) {
+	t.Parallel()
+	source := strings.Replace(reconCUE, "{{target.domain}}", "{{target.hostname}}", 1)
+
+	diags, err := cueruntime.Validate(context.Background(), source)
+	require.NoError(t, err, "a bad binding is a diagnostic, not a Go error")
+
+	var found *cueruntime.Diagnostic
+	for i := range diags {
+		if strings.Contains(diags[i].Message, "{{target.hostname}}") {
+			found = &diags[i]
+		}
+	}
+	require.NotNil(t, found, "no diagnostic named the unknown binding: %+v", diags)
+	assert.Equal(t, "error", found.Severity)
+	assert.Positive(t, found.Line, "the author needs the line")
+	assert.Positive(t, found.Col, "and the column")
+	assert.Contains(t, found.Message, "{{target.domain}}", "the message lists the vocabulary")
+}
+
+// The vocabulary itself must pass, or the check would refuse every real mission.
+func TestValidate_AcceptsEveryTargetBinding(t *testing.T) {
+	t.Parallel()
+	for _, name := range targetbind.Names() {
+		t.Run(name, func(t *testing.T) {
+			t.Parallel()
+			source := strings.Replace(reconCUE, "{{target.domain}}", "{{"+name+"}}", 1)
+			diags, err := cueruntime.Validate(context.Background(), source)
+			require.NoError(t, err)
+			for _, d := range diags {
+				assert.NotContains(t, d.Message, "names no target field", "%s was refused", name)
+			}
+		})
+	}
+}
+
+// A placeholder in another namespace is somebody else's to resolve. Refusing it
+// here would make adding one a breaking change.
+func TestValidate_LeavesAnotherNamespaceAlone(t *testing.T) {
+	t.Parallel()
+	source := strings.Replace(reconCUE, "{{target.domain}}", "{{var.ref}}", 1)
+	diags, err := cueruntime.Validate(context.Background(), source)
+	require.NoError(t, err)
+	for _, d := range diags {
+		assert.NotContains(t, d.Message, "names no target field")
+	}
 }

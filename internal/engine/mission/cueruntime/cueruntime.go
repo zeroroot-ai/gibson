@@ -25,6 +25,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"io/fs"
+	"math"
 	"path"
 	"strings"
 	"sync"
@@ -35,6 +36,7 @@ import (
 	"cuelang.org/go/cue/load"
 	"google.golang.org/protobuf/encoding/protojson"
 
+	"github.com/zeroroot-ai/gibson/internal/engine/mission/targetbind"
 	missionv1 "github.com/zeroroot-ai/sdk/api/gen/gibson/mission/v1"
 	"github.com/zeroroot-ai/sdk/cueschemas"
 )
@@ -250,7 +252,7 @@ func Validate(_ context.Context, source string) ([]Diagnostic, error) {
 		// inline diagnostic so the editor catches it before submission.
 		diags = []Diagnostic{{Line: 1, Col: 1, Message: "CUE source must contain a top-level 'mission' field", Severity: "error"}}
 	}
-	return diags, nil
+	return append(diags, targetPlaceholderDiags(source)...), nil
 }
 
 // collectErrorsDirect is like collectErrors but operates on a slice of cueerrors.Error
@@ -412,4 +414,74 @@ func Export(_ context.Context, source string) (*missionv1.MissionDefinition, err
 		return nil, fmt.Errorf("proto unmarshal from CUE JSON: %w", err)
 	}
 	return def, nil
+}
+
+// targetPlaceholderDiags reports every {{target.*}} in source whose name is not
+// in the binding vocabulary.
+//
+// The check belongs here because this is where the author is still looking at
+// the source. A typo caught at run submit is caught by whoever dispatched the
+// mission, hours later, with the line number lost; caught here it is an
+// underline in the editor. And a placeholder that no binding resolves is not a
+// cosmetic problem: before gibson#495 nothing substituted any of them, and the
+// tool ran against the literal text and reported a clean result.
+//
+// Only the name is checkable without a target. Whether the field is set on the
+// target a run actually names is targetbind.Bind's job, at submit.
+func targetPlaceholderDiags(source string) []Diagnostic {
+	var diags []Diagnostic
+	for i, line := range strings.Split(source, "\n") {
+		rest, col := line, 1
+		for {
+			start := strings.Index(rest, targetbind.Open)
+			if start < 0 {
+				break
+			}
+			end := strings.Index(rest[start:], targetbind.Close)
+			if end < 0 {
+				break
+			}
+			end += start
+			name := strings.TrimSpace(rest[start+len(targetbind.Open) : end])
+			if strings.HasPrefix(name, targetbind.Prefix) && !targetbind.Known(name) {
+				diags = append(diags, Diagnostic{
+					Line: lineCol(i + 1),
+					Col:  lineCol(col + start),
+					Message: fmt.Sprintf("%s%s%s names no target field; the bindings are %s",
+						targetbind.Open, name, targetbind.Close,
+						strings.Join(bracedNames(), ", ")),
+					Severity: "error",
+				})
+			}
+			consumed := end + len(targetbind.Close)
+			col += consumed
+			rest = rest[consumed:]
+		}
+	}
+	return diags
+}
+
+// lineCol narrows a source position to the int32 a Diagnostic carries. A source
+// longer than two billion lines or columns is not a thing, but a silent wrap
+// would put the diagnostic on a negative line, so it clamps instead.
+func lineCol(n int) int32 {
+	if n > math.MaxInt32 {
+		return math.MaxInt32
+	}
+	if n < 1 {
+		return 1
+	}
+	return int32(n)
+}
+
+// bracedNames is the vocabulary written the way it appears in a mission, so the
+// diagnostic reads the same as the error targetbind.Bind raises for the same
+// mistake at submit.
+func bracedNames() []string {
+	names := targetbind.Names()
+	out := make([]string, 0, len(names))
+	for _, n := range names {
+		out = append(out, targetbind.Open+n+targetbind.Close)
+	}
+	return out
 }

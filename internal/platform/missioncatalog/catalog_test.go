@@ -5,6 +5,8 @@ package missioncatalog
 
 import (
 	"context"
+	"github.com/zeroroot-ai/gibson/internal/engine/mission/targetbind"
+	"github.com/zeroroot-ai/gibson/internal/infra/types"
 	"strings"
 	"testing"
 
@@ -232,5 +234,66 @@ func TestRender_AQuoteInAParameterCannotInjectCUE(t *testing.T) {
 	got := def.GetNodes()["source"].GetAgentConfig().GetTask().GetContext()["application"].GetStringValue()
 	if got != p.Application {
 		t.Errorf("application = %q, want the value verbatim %q", got, p.Application)
+	}
+}
+
+// TestRender_EveryTargetPlaceholderIsInTheVocabulary closes the loop the test
+// above leaves open. That one asserts a placeholder is present, which a typo
+// satisfies just as well as a real binding. This one asserts each placeholder is
+// a name the binder resolves, so a catalog mission cannot ship a placeholder
+// that nothing will ever replace (gibson#495).
+func TestRender_EveryTargetPlaceholderIsInTheVocabulary(t *testing.T) {
+	for _, name := range Names() {
+		def, err := Render(context.Background(), name, validParams())
+		if err != nil {
+			t.Fatalf("Render(%s): %v", name, err)
+		}
+		for _, left := range targetbind.Unbound(def) {
+			// Unbound formats "<field path>: {{name}}". Cut at the delimiter
+			// rather than indexing it: Index returns -1 when absent, and slicing
+			// on that panics instead of reporting the surprise.
+			_, ref, found := strings.Cut(left, targetbind.Open)
+			if !found {
+				t.Errorf("Unbound returned %q with no %s in it", left, targetbind.Open)
+				continue
+			}
+			ref = strings.TrimSuffix(ref, targetbind.Close)
+			if !strings.HasPrefix(ref, targetbind.Prefix) {
+				continue // another namespace, not this check's business
+			}
+			if !targetbind.Known(ref) {
+				t.Errorf("mission %q: %s names no target field; the bindings are %v",
+					name, left, targetbind.Names())
+			}
+		}
+	}
+}
+
+// And the binder must actually resolve them, against a target shaped like the
+// one a run names. A vocabulary check passes on a placeholder the binder would
+// still refuse for being empty on the target.
+func TestRender_ScanBindsAgainstARegisteredTarget(t *testing.T) {
+	def, err := Render(context.Background(), "scan", validParams())
+	if err != nil {
+		t.Fatalf("Render: %v", err)
+	}
+	tgt := types.NewTarget("kubernetes-goat", "https://goat.internal:8080", types.TargetTypeCustom)
+
+	bound, err := targetbind.Bind(def, tgt)
+	if err != nil {
+		t.Fatalf("Bind: %v", err)
+	}
+	if left := targetbind.UnboundTarget(bound); len(left) > 0 {
+		t.Fatalf("placeholders survived binding: %v", left)
+	}
+	for _, id := range []string{"ports", "services", "web", "tls"} {
+		for key, value := range bound.GetNodes()[id].GetToolConfig().GetInput() {
+			if strings.Contains(value, "goat.internal") {
+				continue
+			}
+			if strings.Contains(value, targetbind.Open) {
+				t.Errorf("node %q input %q still carries a placeholder: %q", id, key, value)
+			}
+		}
 	}
 }

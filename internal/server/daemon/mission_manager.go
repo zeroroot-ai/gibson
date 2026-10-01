@@ -16,6 +16,7 @@ import (
 	"github.com/zeroroot-ai/gibson/internal/engine/harness"
 	"github.com/zeroroot-ai/gibson/internal/engine/llm"
 	"github.com/zeroroot-ai/gibson/internal/engine/mission"
+	"github.com/zeroroot-ai/gibson/internal/engine/mission/targetbind"
 	"github.com/zeroroot-ai/gibson/internal/infra/config"
 	"github.com/zeroroot-ai/gibson/internal/infra/datapool"
 	"github.com/zeroroot-ai/gibson/internal/infra/observability"
@@ -374,6 +375,24 @@ func (m *missionManager) Run(ctx context.Context, missionDefinitionID, targetID 
 	resolvedTargetID := target.ID
 	targetRef := runTargetRef(target)
 	m.logger.Debug("resolved target", "target_id", resolvedTargetID, "target_ref", targetRef)
+
+	// Bind the definition's {{target.*}} placeholders to this target, now that
+	// the daemon has resolved it and checked the caller owns it.
+	//
+	// This is the point the binding has to happen: after ownership, so a caller
+	// cannot name a host the tenant has not registered, and before the
+	// definition is serialized, so every consumer downstream — the stored run
+	// record, the projection, the dispatcher — reads one bound copy rather than
+	// each resolving the placeholder its own way.
+	//
+	// It used to happen nowhere. The catalog's scan mission said its host was
+	// "bound from the mission's target at submit" and nothing substituted
+	// anything, so the tool was dispatched with the seventeen characters
+	// "{{target.domain}}" as its hostname (gibson#495).
+	def, err = targetbind.Bind(def, target)
+	if err != nil {
+		return "", fmt.Errorf("mission run: bind target: %w", err)
+	}
 
 	// Build an internal mission ID for tracking this run.
 	missionID := types.NewID().String()
