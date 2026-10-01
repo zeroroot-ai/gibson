@@ -274,16 +274,17 @@ func walkMap(fd protoreflect.FieldDescriptor, at string, mp protoreflect.Map, vi
 				rekeys = append(rekeys, rekey{from: k, to: protoreflect.ValueOfString(out).MapKey(), value: v})
 			}
 		}
-		switch fd.MapValue().Kind() {
-		case protoreflect.StringKind:
+		// Two kinds of the seventeen matter, and they are tested for rather than
+		// switched on: a placeholder is text, so a number, a bool or an enum has
+		// nothing to bind, and listing fifteen no-op cases would be noise that
+		// goes stale the next time protobuf adds a kind.
+		switch kind := fd.MapValue().Kind(); {
+		case kind == protoreflect.StringKind:
 			if out, ok := visit(where, v.String()); ok {
 				mp.Set(k, protoreflect.ValueOfString(out))
 			}
-		case protoreflect.MessageKind, protoreflect.GroupKind:
+		case kind == protoreflect.MessageKind || kind == protoreflect.GroupKind:
 			walkStrings(v.Message(), where, visit)
-		default:
-			// Every other kind is a non-string scalar. A placeholder is text, so
-			// there is nothing in a number, a bool or an enum to bind.
 		}
 		return true
 	})
@@ -296,15 +297,14 @@ func walkMap(fd protoreflect.FieldDescriptor, at string, mp protoreflect.Map, vi
 func walkList(fd protoreflect.FieldDescriptor, at string, list protoreflect.List, visit func(path, in string) (string, bool)) {
 	for i := range list.Len() {
 		where := fmt.Sprintf("%s[%d]", at, i)
-		switch fd.Kind() {
-		case protoreflect.StringKind:
+		// Tested rather than switched on, for the reason walkMap gives.
+		switch kind := fd.Kind(); {
+		case kind == protoreflect.StringKind:
 			if out, ok := visit(where, list.Get(i).String()); ok {
 				list.Set(i, protoreflect.ValueOfString(out))
 			}
-		case protoreflect.MessageKind, protoreflect.GroupKind:
+		case kind == protoreflect.MessageKind || kind == protoreflect.GroupKind:
 			walkStrings(list.Get(i).Message(), where, visit)
-		default:
-			// A non-string scalar carries no placeholder.
 		}
 	}
 }

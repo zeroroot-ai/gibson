@@ -310,7 +310,7 @@ func TestUnboundTarget_IsEmptyForANilMessage(t *testing.T) {
 func TestNamesAndKnownAgreeWithBindings(t *testing.T) {
 	names := Names()
 	require.NotEmpty(t, names)
-	assert.Equal(t, len(Bindings(goatTarget())), len(names))
+	assert.Len(t, names, len(Bindings(goatTarget())))
 
 	for _, n := range names {
 		assert.True(t, Known(n), "%s is in Names but not Known", n)
