@@ -28,6 +28,7 @@ import (
 	"time"
 
 	"github.com/zeroroot-ai/gibson/internal/engine/brain"
+	"github.com/zeroroot-ai/gibson/internal/engine/mission/targetbind"
 	missionpb "github.com/zeroroot-ai/sdk/api/gen/gibson/mission/v1"
 )
 
@@ -197,6 +198,19 @@ func makeResolver(all map[string]*missionpb.MissionNode) func(string) []string {
 }
 
 func nodeKindTargetInput(n *missionpb.MissionNode) (kind, target, input string, err error) {
+	// A node reaching projection still carrying a {{target.*}} placeholder was
+	// never bound. Sending it on means dispatching a tool against the literal
+	// text, and a tool handed a hostname that is not one reports a clean run
+	// against a host that does not exist — the quietest way for a scan to find
+	// nothing (gibson#495). Refuse it here, where the node becomes work.
+	//
+	// This is a backstop, not the binding. targetbind.Bind runs at run submit,
+	// where the target is resolved and its ownership checked. If this ever
+	// fires, a path built a run definition without binding it.
+	if left := targetbind.UnboundTarget(n); len(left) > 0 {
+		return "", "", "", fmt.Errorf("node %q was never bound to a target: %s",
+			n.GetId(), strings.Join(left, ", "))
+	}
 	switch n.GetType() {
 	case missionpb.NodeType_NODE_TYPE_AGENT:
 		// The task goal IS the work; dropping it dispatched the agent with an

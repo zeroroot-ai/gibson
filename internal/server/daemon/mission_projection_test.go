@@ -6,6 +6,7 @@ package daemon
 import (
 	"encoding/json"
 	"sort"
+	"strings"
 	"testing"
 
 	"github.com/zeroroot-ai/gibson/internal/engine/brain"
@@ -374,5 +375,64 @@ func TestNodeKindTargetInput_JobNodeCarriesItsBankAndSpec(t *testing.T) {
 	n.GetJobConfig().BankRef = ""
 	if _, _, _, err := nodeKindTargetInput(n); err == nil {
 		t.Error("a job node with no bank must be refused")
+	}
+}
+
+// TestNodeKindTargetInput_RefusesAnUnboundTargetPlaceholder is the gibson#495
+// backstop. The catalog's scan mission declares `input: {host:
+// "{{target.domain}}"}` and nothing substituted it, so the tool was dispatched
+// with the literal text as its hostname. A tool handed a hostname that is not
+// one reports a clean run against a host that does not exist, which is the
+// quietest possible way for a scan to find nothing.
+func TestNodeKindTargetInput_RefusesAnUnboundTargetPlaceholder(t *testing.T) {
+	n := &missionpb.MissionNode{
+		Id:   "ports",
+		Type: missionpb.NodeType_NODE_TYPE_TOOL,
+		Config: &missionpb.MissionNode_ToolConfig{ToolConfig: &missionpb.ToolNodeConfig{
+			ToolName: "nmap",
+			Input:    map[string]string{"host": "{{target.domain}}", "ports": "1-1000"},
+		}},
+	}
+	_, _, _, err := nodeKindTargetInput(n)
+	if err == nil {
+		t.Fatal("an unbound {{target.*}} placeholder must not reach a dispatched tool")
+	}
+	for _, want := range []string{"ports", "never bound", "{{target.domain}}"} {
+		if !strings.Contains(err.Error(), want) {
+			t.Errorf("error %q does not name %q", err, want)
+		}
+	}
+}
+
+// A placeholder in an agent goal is the same defect in a different field, so the
+// check is on the node rather than on the tool input alone.
+func TestNodeKindTargetInput_RefusesAnUnboundPlaceholderInAnAgentGoal(t *testing.T) {
+	n := &missionpb.MissionNode{
+		Id:   "recon",
+		Type: missionpb.NodeType_NODE_TYPE_AGENT,
+		Config: &missionpb.MissionNode_AgentConfig{AgentConfig: &missionpb.AgentNodeConfig{
+			AgentName: "zerocool",
+			Task:      &agentpb.Task{Goal: "enumerate {{target.domain}}"},
+		}},
+	}
+	if _, _, _, err := nodeKindTargetInput(n); err == nil {
+		t.Fatal("an unbound placeholder in an agent goal must be refused too")
+	}
+}
+
+// Only the target namespace. Claiming every {{...}} would make adding another
+// namespace a breaking change, and would refuse a node over text that is not
+// this package's business.
+func TestNodeKindTargetInput_LeavesAnotherNamespaceAlone(t *testing.T) {
+	n := &missionpb.MissionNode{
+		Id:   "run",
+		Type: missionpb.NodeType_NODE_TYPE_TOOL,
+		Config: &missionpb.MissionNode_ToolConfig{ToolConfig: &missionpb.ToolNodeConfig{
+			ToolName: "sh",
+			Input:    map[string]string{"cmd": "echo {{var.ref}}"},
+		}},
+	}
+	if _, _, _, err := nodeKindTargetInput(n); err != nil {
+		t.Fatalf("a placeholder in another namespace must pass: %v", err)
 	}
 }
