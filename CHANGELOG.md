@@ -1,5 +1,17 @@
 # Changelog
 
+## [0.147.0](https://github.com/zeroroot-ai/gibson/compare/v0.146.5...v0.147.0) (2026-10-01)
+
+
+### Features
+
+* **missions:** a created mission is listed, pending, before it runs ([#450](https://github.com/zeroroot-ai/gibson/issues/450)) ([84b7dad](https://github.com/zeroroot-ai/gibson/commit/84b7dad7cf4a085a525a5cdb386ced2df703df9e))
+
+
+### Bug Fixes
+
+* **daemon:** return NotFound for a missing target ([#453](https://github.com/zeroroot-ai/gibson/issues/453)) ([2fbcc12](https://github.com/zeroroot-ai/gibson/commit/2fbcc12f04ff4c8700b9e73fbf0e4f1126402108))
+
 ## [0.146.5](https://github.com/zeroroot-ai/gibson/compare/v0.146.4...v0.146.5) (2026-09-30)
 
 
