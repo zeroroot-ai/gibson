@@ -19,6 +19,29 @@ type secretResolver interface {
 	Resolve(ctx context.Context, name string) ([]byte, error)
 }
 
+// wireVectorStore sets the two vector fields on a pool config, or neither.
+//
+// Both halves must be set together: NewPool refuses a config that carries an
+// address and no resolver, because the half-configured case is exactly how every
+// vector-backed graph read came to answer "no vector collection provisioned" on
+// a cluster whose index existed. No Redis address means no vector store to
+// reach, so both stay unset and the caller logs it.
+//
+// Extracted from the daemon's startup path so the decision can be tested. It is
+// one XOR rule that gates `recall`, QueryNodes, FindSimilarAttacks,
+// FindSimilarFindings, GetRelatedFindings and GetAttackChains for every tenant,
+// and inline in a 2000-line startup function nothing could reach it.
+//
+// Reports whether the vector store was wired.
+func wireVectorStore(cfg *datapool.Config, resolver datapool.VectorIndexResolver) bool {
+	if cfg == nil || cfg.RedisAddr == "" {
+		return false
+	}
+	cfg.VectorStoreAddr = cfg.RedisAddr
+	cfg.VectorIndexResolver = resolver
+	return true
+}
+
 // vectorIndexResolver returns the resolver the data-plane pool uses to find a
 // tenant's RediSearch index (gibson#468). It reads d.secretsService on each
 // call, because the broker stack sets that field after the pool exists.

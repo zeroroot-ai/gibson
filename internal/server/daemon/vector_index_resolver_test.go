@@ -79,3 +79,46 @@ func TestDaemonVectorIndexResolver_NilServiceIsNotProvisioned(t *testing.T) {
 	var np *datapool.NotProvisionedError
 	require.ErrorAs(t, err, &np)
 }
+
+// The XOR rule: both vector fields are set, or neither is. A config carrying an
+// address and no resolver is refused by NewPool, and that half-configured state
+// is how every vector-backed graph read answered "no vector collection
+// provisioned" on a cluster whose index existed (gibson#468).
+func TestWireVectorStore(t *testing.T) {
+	resolver := datapool.VectorIndexResolverFunc(
+		func(context.Context, auth.TenantID) (string, error) { return "idx", nil })
+
+	t.Run("a redis address wires both halves", func(t *testing.T) {
+		cfg := &datapool.Config{RedisAddr: "10.0.0.1:6379"}
+		if !wireVectorStore(cfg, resolver) {
+			t.Fatal("want wired=true when an address is present")
+		}
+		if cfg.VectorStoreAddr != "10.0.0.1:6379" {
+			t.Errorf("VectorStoreAddr = %q, want the redis address", cfg.VectorStoreAddr)
+		}
+		if cfg.VectorIndexResolver == nil {
+			t.Error("VectorIndexResolver must be set alongside the address")
+		}
+	})
+
+	t.Run("no redis address wires neither half", func(t *testing.T) {
+		cfg := &datapool.Config{}
+		if wireVectorStore(cfg, resolver) {
+			t.Fatal("want wired=false with no address")
+		}
+		if cfg.VectorStoreAddr != "" {
+			t.Errorf("VectorStoreAddr = %q, want empty", cfg.VectorStoreAddr)
+		}
+		if cfg.VectorIndexResolver != nil {
+			t.Error("a resolver with no address is the config NewPool refuses")
+		}
+	})
+
+	// Defensive: the caller passes &poolCfg from a long startup function, and a
+	// nil there must not panic the daemon on the way up.
+	t.Run("a nil config is not wired and does not panic", func(t *testing.T) {
+		if wireVectorStore(nil, resolver) {
+			t.Fatal("want wired=false for a nil config")
+		}
+	})
+}

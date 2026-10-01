@@ -1400,13 +1400,9 @@ func (d *daemonImpl) Start(ctx context.Context) error {
 			// FindSimilarFindings, GetRelatedFindings and GetAttackChains refuse
 			// for every tenant, so an agent can write a memory and never read
 			// one back.
-			// No Redis address means no vector store to reach, and the XOR check
-			// in NewPool refuses a resolver with no address, so both stay unset.
-			if poolCfg.RedisAddr == "" {
+			// The XOR rule lives in wireVectorStore so it is testable.
+			if !wireVectorStore(&poolCfg, d.vectorIndexResolver()) {
 				d.logger.Warn(ctx, "vector store not wired: no redis address resolved (vector-backed graph reads will refuse)")
-			} else {
-				poolCfg.VectorStoreAddr = poolCfg.RedisAddr
-				poolCfg.VectorIndexResolver = d.vectorIndexResolver()
 			}
 
 			p, poolErr := datapool.NewPool(ctx, poolCfg, keyProvider, nil)
