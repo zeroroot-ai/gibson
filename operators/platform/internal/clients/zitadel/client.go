@@ -902,7 +902,7 @@ func (e *errClient) VerifyClientSecret(ctx context.Context, issuerURL, clientID,
 func (e *errClient) EnsureJWTAccessToken(ctx context.Context, projectID, appID string) (bool, error) {
 	return false, e.err
 }
-func (e *errClient) UpdateOIDCClientName(ctx context.Context, projectID, appID, name string) error {
+func (e *errClient) UpdateOIDCClientName(_ context.Context, _, _, _ string) error {
 	return e.err
 }
 func (e *errClient) RotateClientSecret(ctx context.Context, projectID, appID string) (string, error) {

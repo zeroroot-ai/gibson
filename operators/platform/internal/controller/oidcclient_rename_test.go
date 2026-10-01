@@ -32,6 +32,7 @@ type fakeAppZitadel struct {
 	getByNameCalls []string // names passed to GetOIDCClientByName
 	createCalls    int
 	renames        []renameCall
+	renameErr      error // when set, UpdateOIDCClientName fails with it
 }
 
 type renameCall struct{ AppID, Name string }
@@ -61,14 +62,16 @@ func (f *fakeAppZitadel) GetOIDCClientByName(_ context.Context, _, name string) 
 	return nil, zitadel.ErrNotFound
 }
 
-func (f *fakeAppZitadel) CreateOIDCClient(_ context.Context, req zitadel.CreateOIDCClientRequest) (string, string, string, error) {
+func (f *fakeAppZitadel) CreateOIDCClient(_ context.Context, req zitadel.CreateOIDCClientRequest) (appID, clientID, clientSecret string, err error) {
 	f.createCalls++
-	id := "APP-NEW"
-	f.apps[id] = &zitadel.OIDCClient{AppID: id, ClientID: "CID-NEW", Name: req.Name}
-	return id, "CID-NEW", "SECRET-NEW", nil
+	f.apps["APP-NEW"] = &zitadel.OIDCClient{AppID: "APP-NEW", ClientID: "CID-NEW", Name: req.Name}
+	return "APP-NEW", "CID-NEW", "SECRET-NEW", nil
 }
 
 func (f *fakeAppZitadel) UpdateOIDCClientName(_ context.Context, _, appID, name string) error {
+	if f.renameErr != nil {
+		return f.renameErr
+	}
 	f.renames = append(f.renames, renameCall{appID, name})
 	f.apps[appID].Name = name
 	return nil
@@ -162,7 +165,7 @@ func TestOIDCClient_RenamesAppWhenClientNameChanges(t *testing.T) {
 func TestOIDCClient_RenameDoesNotCreateDuplicateApp(t *testing.T) {
 	r, fz, key := newOIDCClientRenameFixture(t, "Gibson CLI", "gibson-native-login", "APP-OLD")
 
-	for i := 0; i < 3; i++ {
+	for range 3 {
 		_, err := r.Reconcile(context.Background(), ctrlRequest(key))
 		require.NoError(t, err)
 	}
@@ -188,4 +191,22 @@ func TestOIDCClient_FirstLookupAdoptsAppByName(t *testing.T) {
 	var got gibsonv1alpha1.OIDCClient
 	require.NoError(t, r.Get(context.Background(), key, &got))
 	require.Equal(t, "APP-OLD", got.Status.AppID)
+}
+
+// A permanent Zitadel error on rename is surfaced on the Ready condition and
+// leaves the app and its status untouched.
+func TestOIDCClient_RenameErrorIsSurfaced(t *testing.T) {
+	r, fz, key := newOIDCClientRenameFixture(t, "Gibson CLI", "gibson-native-login", "APP-OLD")
+	fz.renameErr = zitadel.ErrPermanent
+
+	_, _ = r.Reconcile(context.Background(), ctrlRequest(key))
+
+	require.Empty(t, fz.renames)
+	require.Equal(t, "gibson-native-login", fz.apps["APP-OLD"].Name)
+	var got gibsonv1alpha1.OIDCClient
+	require.NoError(t, r.Get(context.Background(), key, &got))
+	cond := findStatusCondition(got.Status.Conditions, gibsonv1alpha1.ConditionReady)
+	require.NotNil(t, cond)
+	require.Equal(t, metav1.ConditionFalse, cond.Status)
+	require.Equal(t, "ZitadelPermanentError", cond.Reason)
 }
