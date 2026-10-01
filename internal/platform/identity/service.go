@@ -112,7 +112,7 @@ func (s *IdentityServer) WhoAmI(ctx context.Context, req *identitypb.WhoAmIReque
 			PrincipalID: callerID.Subject,
 			TenantID:    callerTenant,
 			Name:        callerID.Subject,
-			Kind:        kindFromPrincipalID(callerID.Subject),
+			Kind:        callerKind(callerID),
 		}
 	} else {
 		// Admin variant — caller MUST be tenant_admin on the target's
@@ -369,6 +369,21 @@ func fgaStatus(op string, err error) error {
 	default:
 		return status.Errorf(codes.Internal, "%s: %v", op, err)
 	}
+}
+
+// callerKind returns the kind of the authenticated caller. A typed component
+// principal keeps the kind its prefix names. A caller with no typed prefix is a
+// person only when the credential is an OIDC user session. A bare subject from
+// another credential class (a client-credentials service account) stays
+// UNSPECIFIED, because a bare subject alone does not prove a person.
+func callerKind(id auth.Identity) identitypb.PrincipalKind {
+	if kind := kindFromPrincipalID(id.Subject); kind != identitypb.PrincipalKind_PRINCIPAL_KIND_UNSPECIFIED {
+		return kind
+	}
+	if id.CredentialType == auth.CredentialOIDCUser && !strings.ContainsRune(id.Subject, ':') {
+		return identitypb.PrincipalKind_PRINCIPAL_KIND_USER
+	}
+	return identitypb.PrincipalKind_PRINCIPAL_KIND_UNSPECIFIED
 }
 
 func kindFromPrincipalID(principalID string) identitypb.PrincipalKind {
