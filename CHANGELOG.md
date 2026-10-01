@@ -1,5 +1,38 @@
 # Changelog
 
+## [0.149.0](https://github.com/zeroroot-ai/gibson/compare/v0.148.3...v0.149.0) (2026-10-01)
+
+
+### ⚠ BREAKING CHANGES
+
+* **target:** a Target carries no credential and no auth shape ([#521](https://github.com/zeroroot-ai/gibson/issues/521))
+
+### Features
+
+* **brain:** wire the technique×environment reputation loop ([#492](https://github.com/zeroroot-ai/gibson/issues/492)) ([ab863f8](https://github.com/zeroroot-ai/gibson/commit/ab863f87d855e5ef4c55e2df22f6dad7bcfc0fee))
+* **go:** move the toolchain floor to 1.27.1 ([#514](https://github.com/zeroroot-ai/gibson/issues/514)) ([5b5250e](https://github.com/zeroroot-ai/gibson/commit/5b5250e985312cb41f9890bd6fccb6ab5a0384d4))
+* **graph:** link a finding to the merge request that fixes it ([#483](https://github.com/zeroroot-ai/gibson/issues/483)) ([1a76cdb](https://github.com/zeroroot-ai/gibson/commit/1a76cdb1cd36ed82cc673fe6c31dc7170b1c1575))
+* **jobnode:** a fix job resolves the open findings on its run's target ([#512](https://github.com/zeroroot-ai/gibson/issues/512)) ([6072b71](https://github.com/zeroroot-ai/gibson/commit/6072b71a5f2f3f1190085cf147ed4995749e49d6)), closes [#497](https://github.com/zeroroot-ai/gibson/issues/497)
+* **mailer:** the invitation email is the onboarding, and there is only one ([#520](https://github.com/zeroroot-ai/gibson/issues/520)) ([a06ec60](https://github.com/zeroroot-ai/gibson/commit/a06ec60e5c5d52b4d68aae2ea2c60b8cdaa455f9))
+* **mission:** bind {{target.*}} to the run's target, server-side ([#509](https://github.com/zeroroot-ai/gibson/issues/509)) ([fcc73e7](https://github.com/zeroroot-ai/gibson/commit/fcc73e7db4c57cfc2aa99d7d194c9a530be801d2))
+* **target:** a Target carries no credential and no auth shape ([#521](https://github.com/zeroroot-ai/gibson/issues/521)) ([67795bf](https://github.com/zeroroot-ai/gibson/commit/67795bf4e0e18860c18114879735e6f5bd961736))
+* **target:** a target names its secret by name, not by a dropped id ([#511](https://github.com/zeroroot-ai/gibson/issues/511)) ([b882e75](https://github.com/zeroroot-ai/gibson/commit/b882e757157515af3e75cbfc39977aea39e7f6ff))
+* **taxonomy:** assign a collision-proof key form at promotion ([#281](https://github.com/zeroroot-ai/gibson/issues/281)) ([#489](https://github.com/zeroroot-ai/gibson/issues/489)) ([3fc21ea](https://github.com/zeroroot-ai/gibson/commit/3fc21ea051509560c9ec4724cd5239dc7da0694e))
+* **taxonomy:** carry node-label key form and expose the projector identity seam ([#491](https://github.com/zeroroot-ai/gibson/issues/491)) ([a675583](https://github.com/zeroroot-ai/gibson/commit/a675583db9f964da5fd5c9a212ead4972c3b519c)), closes [#484](https://github.com/zeroroot-ai/gibson/issues/484)
+
+
+### Bug Fixes
+
+* **belief:** wire findings and demonstrated exploits into the belief network ([#490](https://github.com/zeroroot-ai/gibson/issues/490)) ([94ebc03](https://github.com/zeroroot-ai/gibson/commit/94ebc03c63b3ac9a26a436db6fda822ded99da8d)), closes [#478](https://github.com/zeroroot-ai/gibson/issues/478)
+* **ci:** dump the pods that misbehaved, not only the ones unhealthy now ([#522](https://github.com/zeroroot-ai/gibson/issues/522)) ([f3ff3dc](https://github.com/zeroroot-ai/gibson/commit/f3ff3dcf4856536d7ecebfd8ae7d13c1c8824103))
+* **ci:** name the Argo task that fails an exit-test bringup ([#517](https://github.com/zeroroot-ai/gibson/issues/517)) ([dcfebc9](https://github.com/zeroroot-ai/gibson/commit/dcfebc9bc8853cae686aaa4a6f0d3e2a9978d9af))
+* **datapool:** wire the per-tenant vector handle so graph reads work ([#473](https://github.com/zeroroot-ai/gibson/issues/473)) ([36218f2](https://github.com/zeroroot-ai/gibson/commit/36218f215659cd9147b1e174b3fe2ecd9c24adce))
+* **domain-packs:** packs are free, remove the entitlement gate ([#475](https://github.com/zeroroot-ai/gibson/issues/475)) ([030e2ac](https://github.com/zeroroot-ai/gibson/commit/030e2ac76486c4782f6fa1248ea8cbe99cf8d6e7))
+* **graph:** ensure the tenant Neo4j schema from the projector ([#486](https://github.com/zeroroot-ai/gibson/issues/486)) ([e11554f](https://github.com/zeroroot-ai/gibson/commit/e11554fbd4aaa2ba407299ab4598687579060ad2))
+* **graph:** one resolver for a node label's identity, shared by the projector and the schema ([#516](https://github.com/zeroroot-ai/gibson/issues/516)) ([a735497](https://github.com/zeroroot-ai/gibson/commit/a735497200c3e2a0d6e68b9d3894c647785abca2)), closes [#515](https://github.com/zeroroot-ai/gibson/issues/515)
+* **invitations:** the invitation email names relations, not the roles people see ([#472](https://github.com/zeroroot-ai/gibson/issues/472)) ([39dac5d](https://github.com/zeroroot-ai/gibson/commit/39dac5d2666f10cf982e63fa8839d4b3c3cb0f56))
+* **mailer:** drop the proxy warning, because the CLI reads the proxy now ([#530](https://github.com/zeroroot-ai/gibson/issues/530)) ([9f85267](https://github.com/zeroroot-ai/gibson/commit/9f85267d4a25e1b4fe6088a7f0d39e78851d4b40))
+
 ## [0.148.3](https://github.com/zeroroot-ai/gibson/compare/v0.148.2...v0.148.3) (2026-10-01)
 
 
