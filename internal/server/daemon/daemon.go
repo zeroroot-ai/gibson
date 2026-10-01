@@ -1386,6 +1386,25 @@ func (d *daemonImpl) Start(ctx context.Context) error {
 				}
 				return creds.DSN, creds.Database, nil
 			})
+
+			// The vector handle (gibson#468). The tenant-operator creates the
+			// per-tenant RediSearch index on the same Redis Stack instance the
+			// cache and the Timeline use, and records its name in Vault at
+			// tenant/<id>/infra/vector. Both halves must be set: NewPool refuses
+			// a config that carries an address and no resolver, because the
+			// half-configured case is exactly how every vector-backed graph read
+			// came to answer "no vector collection provisioned" on a cluster
+			// whose index existed.
+			//
+			// Without this, `recall`, QueryNodes, FindSimilarAttacks,
+			// FindSimilarFindings, GetRelatedFindings and GetAttackChains refuse
+			// for every tenant, so an agent can write a memory and never read
+			// one back.
+			// The XOR rule lives in wireVectorStore so it is testable.
+			if !wireVectorStore(&poolCfg, d.vectorIndexResolver()) {
+				d.logger.Warn(ctx, "vector store not wired: no redis address resolved (vector-backed graph reads will refuse)")
+			}
+
 			p, poolErr := datapool.NewPool(ctx, poolCfg, keyProvider, nil)
 			if poolErr != nil {
 				d.logger.Warn(ctx, "data-plane pool initialization failed (per-tenant store ops will be unavailable)",

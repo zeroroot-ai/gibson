@@ -120,14 +120,23 @@ func (p *redisVSSProvisioner) Provision(ctx context.Context, tenantID string) er
 					infoErr,
 				)
 			}
-			// Already provisioned — skip Vault write (done on prior attempt).
-			return nil
+		} else {
+			return fmt.Errorf("dataplane/vector: FT.CREATE %s: %w", idxName, createErr)
 		}
-		return fmt.Errorf("dataplane/vector: FT.CREATE %s: %w", idxName, createErr)
 	}
 
-	// Write index name to Vault so the daemon can resolve it via the
-	// secrets broker without needing direct operator config access.
+	// Write the index name to Vault so the daemon can resolve it through the
+	// secrets broker without operator config access.
+	//
+	// This runs on EVERY attempt, including the one that found the index
+	// already there. The branch above used to return early with "skip Vault
+	// write (done on prior attempt)", and that assumption breaks on the one
+	// sequence that matters: attempt 1 creates the index and then fails the
+	// Vault write, so the saga retries, and attempt 2 sees "already exists" and
+	// returns success having written nothing. The index then exists forever with
+	// no recorded name, and the daemon reports the tenant unprovisioned for
+	// every vector-backed read (gibson#468). A Vault write of the same name is
+	// idempotent, so repeating it costs one request and removes the state.
 	if p.cfg.VaultClient != nil {
 		creds := pdataplane.VectorCredentials{IndexName: idxName}
 		if err := p.cfg.VaultClient.WriteInfraVector(ctx, tenantID, creds); err != nil {

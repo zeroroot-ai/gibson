@@ -154,6 +154,9 @@ func NewPool(ctx context.Context, cfg Config, keyProvider crypto.KeyProvider, ch
 	// VectorStoreAddr shares the same Redis Stack instance as the cache/session
 	// Redis (same addr, same password); the per-tenant index name is read from
 	// VectorCredentials at tenant/<id>/infra/vector by the caller's DSN resolver.
+	if err := validateVectorConfig(cfg); err != nil {
+		return nil, fmt.Errorf("datapool: NewPool: %w", err)
+	}
 	if cfg.VectorStoreAddr != "" {
 		vectorDriver, err := vectordb.NewRedisVSSDriver(vectordb.RedisConfig{
 			Addr:     cfg.VectorStoreAddr,
@@ -162,7 +165,7 @@ func NewPool(ctx context.Context, cfg Config, keyProvider crypto.KeyProvider, ch
 		if err != nil {
 			return nil, fmt.Errorf("datapool: NewPool: vector driver init: %w", err)
 		}
-		p.vector = newVectorPerTenant(vectorDriver)
+		p.vector = newVectorPerTenant(vectorDriver, cfg.VectorIndexResolver)
 	}
 
 	ev := newEvictor(p, cfg.EvictionCheckInterval, cfg.IdleTTL, realClock{})
@@ -244,6 +247,18 @@ func (p *pool) For(ctx context.Context, tenant auth.TenantID) (*Conn, error) {
 			return zeroKEKOnErr(fmt.Errorf("datapool: For: neo4j: %w", err))
 		}
 		conn.Neo4j = sess
+	}
+
+	// The vector handle is the one sub-store whose absence must not refuse the
+	// Conn. A tenant provisioned before the RediSearch step, or one whose index
+	// the operator has not reached yet, still needs Postgres, Redis and Neo4j.
+	// So a NotProvisionedError leaves Conn.Vector nil, and the vector-backed
+	// readers refuse on their own with a message that names the tenant. Any
+	// other error is a real fault and fails the acquisition.
+	if p.vector != nil {
+		if err := attachVector(ctx, p.vector, conn); err != nil {
+			return zeroKEKOnErr(err)
+		}
 	}
 
 	// Step 5: track active conn.
@@ -438,4 +453,25 @@ type staticNeo4jResolver struct {
 
 func (s *staticNeo4jResolver) Resolve(_ context.Context, _ auth.TenantID) (*Neo4jEndpoint, error) {
 	return s.endpoint, nil
+}
+
+// vectorSource is the part of vectorPerTenant that attachVector needs.
+type vectorSource interface {
+	ForTenant(ctx context.Context, tenant auth.TenantID) (vectordb.Client, error)
+}
+
+// attachVector sets conn.Vector for the conn's tenant. A *NotProvisionedError
+// leaves conn.Vector nil and returns nil, so the Conn stays usable without
+// vector reads. Any other failure returns an error.
+func attachVector(ctx context.Context, src vectorSource, conn *Conn) error {
+	vc, err := src.ForTenant(ctx, conn.Tenant)
+	if err != nil {
+		var np *NotProvisionedError
+		if errors.As(err, &np) {
+			return nil
+		}
+		return fmt.Errorf("datapool: For: vector: %w", err)
+	}
+	conn.Vector = vc
+	return nil
 }
