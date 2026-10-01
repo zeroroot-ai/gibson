@@ -291,7 +291,10 @@ func TestSendInvitationConflict_TellsTheInviteeOnly(t *testing.T) {
 	if !strings.Contains(m.Text, "taken@example.com") {
 		t.Errorf("body should name the address, got:\n%s", m.Text)
 	}
-	if !strings.Contains(strings.ToLower(m.Text), "different email address") ||
+	// Matched on the remedy, not on one phrasing of it: the copy says "a
+	// different address" now, and a test pinned to the older "different email
+	// address" fails a wording change that kept both remedies intact.
+	if !strings.Contains(strings.ToLower(m.Text), "different address") ||
 		!strings.Contains(strings.ToLower(m.Text), "owner") {
 		t.Errorf("body should offer both remedies (a different address, or the Owner removing them), got:\n%s", m.Text)
 	}

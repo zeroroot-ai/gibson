@@ -88,7 +88,7 @@ func (s *InvitationSender) SendInvitation(ctx context.Context, inv InvitationEma
 	if s == nil || s.m == nil {
 		return fmt.Errorf("mailer: invitation sender not configured")
 	}
-	subject := "You've been invited to Gibson"
+	subject := "Welcome to ZeroRoot AI"
 	steps := invitationSteps(inv)
 	if err := s.m.Send(ctx, Message{
 		To:      inv.To,
@@ -144,18 +144,18 @@ func invitationSteps(inv InvitationEmail) []onboardingStep {
 	api := strings.TrimRight(inv.APIURL, "/")
 
 	steps := []onboardingStep{{
-		Title: "Accept, set a password, enroll a second factor",
-		Body: "The link below accepts the invitation and then walks you into setting a " +
-			"password. That is the only credential step: this platform stores no password " +
-			"of its own, and it sends no other email. Have an authenticator app open — a " +
-			"second factor is required, and sign-in will not complete without one. One " +
-			"workspace means no picker, so you land on the dashboard.",
+		Title: "Accept, and set your password",
+		Body: "The link below does two things. It accepts the invitation, then it takes you " +
+			"to the page where you set a password. Gibson keeps no password of its own, so " +
+			"this is the only place you set one. Open your authenticator app first. A second " +
+			"factor is required, and sign-in does not finish without one. You have one " +
+			"workspace, so you land straight on the dashboard.",
 		Link: inv.AcceptURL,
 	}, {
-		Title: "Clone the ADK, not a bare binary",
-		Body: "The repository is the surface you work on. It carries the five mission " +
-			"templates with their ontologies, the component scaffolder, the toolchain pin " +
-			"and the agent context. A bare binary carries none of it.",
+		Title: "Clone the ADK. Do not install the binary.",
+		Body: "The repository is where you work. It carries the five mission templates and " +
+			"their ontologies, the component scaffolder, the Go pin and the agent context. " +
+			"The binary on its own carries none of that.",
 		Cmds: []string{
 			"git clone " + adkCloneURL,
 			"cd adk",
@@ -165,30 +165,30 @@ func invitationSteps(inv InvitationEmail) []onboardingStep {
 			"# once, for the pinned dev tools (cue, golangci-lint, deadcode)",
 			"make bootstrap",
 		},
-		After: "`.tool-versions` pins Go " + goToolchain + ", so asdf or mise selects the right " +
-			"toolchain when you enter the directory.",
+		After: "The file `.tool-versions` pins Go " + goToolchain + ". If you use asdf or mise, it " +
+			"picks that version up when you enter the directory.",
 	}}
 
 	if api == "" {
 		steps = append(steps, onboardingStep{
 			Title: "Sign the CLI in",
-			Body: "Open Settings, then CLI. That page prints the sign-in command with this " +
-				"workspace's platform URL and slug already filled in, and every member can " +
+			Body: "Open Settings, then CLI. That page prints the sign-in command with the " +
+				"address and the name of this workspace already filled in. Every member can " +
 				"reach it.",
 			Link: app + "/dashboard/pages/settings/cli",
 		})
 	} else {
 		steps = append(steps, onboardingStep{
 			Title: "Sign the CLI in",
-			Body: "Both values below are this workspace's. `init` pins the platform URL for the " +
-				"directory, so later commands need no flags.",
+			Body: "Both values below belong to this workspace. The `init` command pins the " +
+				"address for this directory, so later commands need no flags.",
 			Cmds: []string{
 				"gibson init --gibson-url " + api,
 				"gibson login --tenant " + inv.TenantID,
 			},
-			After: "`login` prints a URL and a short code, opens a browser once, and stores the " +
-				"session at `~/.gibson/auth/credentials`. It refreshes itself. `gibson logout` " +
-				"ends it.",
+			After: "The `login` command prints a URL and a short code. It opens a browser once, " +
+				"then stores your session in `~/.gibson/auth/credentials` and refreshes it for " +
+				"you. Run `gibson logout` to end it.",
 		})
 	}
 
@@ -196,9 +196,9 @@ func invitationSteps(inv InvitationEmail) []onboardingStep {
 	if api != "" {
 		steps = append(steps, onboardingStep{
 			Title: "Run your first mission",
-			Body: "A mission acts against a target, and the target is the scope boundary. " +
-				"Create one first: `mission new` then reads your targets and writes the only " +
-				"one into the scaffold, so `submit` needs no flag.",
+			Body: "A mission runs against a target, and the target sets the boundary. Create " +
+				"the target first. The `mission new` command then reads your targets and writes " +
+				"the one it finds into the file, so `submit` needs no flag.",
 			Cmds: []string{
 				"gibson target create --name first-target --type custom --url https://example.test",
 				"gibson mission new --from-template secrets-audit -o mission.cue",
@@ -208,26 +208,27 @@ func invitationSteps(inv InvitationEmail) []onboardingStep {
 				"# the other four templates",
 				"gibson mission new --list-templates",
 			},
-			After: "`validate` prints `ok` and nothing else. `submit` prints the mission id on " +
-				"standard output and streams events to standard error.",
+			After: "The `validate` command prints `ok` and nothing else. The `submit` command " +
+				"prints the mission id, and the event stream goes to standard error.",
 		})
 	}
 
 	steps = append(steps, onboardingStep{
 		Title: "Watch it land",
-		Body: "The run page carries the findings, the jobs, the flow and the terminal output. " +
-			"Read-only pages are empty until a mission has run. That is correct, not a fault.",
+		Body: "The run page holds the findings, the jobs, the flow and the terminal output. " +
+			"Pages stay empty until a mission has run. That is correct, and not a fault.",
 		Link: app + "/dashboard/results",
 	})
 
 	if api != "" {
 		steps = append(steps, onboardingStep{
 			Title: "Scaffold a component of your own",
-			Body:  "This writes a complete component directory, code and context together.",
-			Cmds:  []string{"gibson component init my-agent --kind agent"},
-			After: "Alongside the code it writes `CLAUDE.md`, `AGENTS.md`, `.claude/settings.json` " +
-				"and a `prompts/` folder, so your coding agent has the context from the first " +
-				"commit. That is the reason to clone rather than install a binary.",
+			Body: "One command writes a whole component directory, with the code and the " +
+				"context together.",
+			Cmds: []string{"gibson component init my-agent --kind agent"},
+			After: "It writes `CLAUDE.md`, `AGENTS.md`, `.claude/settings.json` and a `prompts` " +
+				"folder next to the code. Your coding agent has what it needs from the first " +
+				"commit. That is the real reason to clone.",
 		})
 	}
 	return steps
@@ -242,14 +243,14 @@ func invitationSteps(inv InvitationEmail) []onboardingStep {
 // step refused instead of a mystery.
 func invitationTraps() [][2]string {
 	return [][2]string{
-		{"gibson inspect", "Reports on a registered component, not on you. It fails until you " +
-			"register one. Expected, not a broken install."},
-		{"permission denied on submit", "Authoring a mission needs the Editor role. If you were " +
-			"invited as a Viewer, ask whoever invited you to raise it."},
-		{"behind a proxy", "The sign-in path ignores HTTPS_PROXY and has no proxy flag, so login " +
-			"just hangs. Sign in off the proxy."},
-		{"a private CA", "Pass --ca-cert <pem> or set GIBSON_CA_CERT. Never SSL_CERT_FILE, which " +
-			"replaces the whole trust pool instead of adding to it."},
+		{"gibson inspect", "This command reports on a registered component, not on you. It " +
+			"fails until you register one. That is expected, and not a broken install."},
+		{"permission denied on submit", "Authoring a mission needs the Editor role. If someone " +
+			"invited you as a Viewer, ask them to raise it."},
+		{"behind a proxy", "The sign-in path ignores HTTPS_PROXY, and it has no proxy flag. " +
+			"Sign in away from the proxy."},
+		{"a private CA", "Pass the flag --ca-cert with your PEM path, or set GIBSON_CA_CERT. Do " +
+			"not set SSL_CERT_FILE, because it replaces the whole trust pool."},
 	}
 }
 
@@ -262,12 +263,13 @@ func invitationText(inv InvitationEmail, steps []onboardingStep) string {
 	var b strings.Builder
 	b.WriteString("Hello,\n\n")
 	b.WriteString(indentWrap(fmt.Sprintf(
-		"You have been added to a Gibson workspace as %s. This is the only email you get, "+
-			"so it carries the whole path: accept, build the CLI, sign in, run one mission.",
+		"Someone added you to a Gibson workspace as %s. Every command below already "+
+			"carries the address and the name of this workspace, so you can paste them as "+
+			"they are.",
 		roleLabel(inv.Role)), "", 76) + "\n\n")
 	fmt.Fprintf(&b, "The link expires %s.\n\n", expiryLabel(inv.ExpiresAt))
-	b.WriteString("YOUR FIRST TWENTY MINUTES\n")
-	b.WriteString(strings.Repeat("-", 25) + "\n\n")
+	b.WriteString("START HERE\n")
+	b.WriteString(strings.Repeat("-", 10) + "\n\n")
 
 	for i, st := range steps {
 		fmt.Fprintf(&b, "%02d. %s\n\n", i+1, st.Title)
@@ -299,8 +301,8 @@ func invitationText(inv InvitationEmail, steps []onboardingStep) string {
 		b.WriteString(indentWrap(t[1], "    ", 72) + "\n\n")
 	}
 
-	b.WriteString("If you were not expecting this, ignore this email. Nothing is created until\n")
-	b.WriteString("you open the link.\n")
+	b.WriteString("If you did not expect this email, ignore it. Nothing exists until you open\n")
+	b.WriteString("the link.\n")
 	return b.String()
 }
 
@@ -336,7 +338,7 @@ func invitationHTML(inv InvitationEmail, steps []onboardingStep) string {
 	var b strings.Builder
 	b.WriteString(`<!doctype html><html lang="en"><head><meta charset="utf-8">`)
 	b.WriteString(`<meta name="viewport" content="width=device-width,initial-scale=1">`)
-	b.WriteString(`<title>You've been invited to Gibson</title></head>`)
+	b.WriteString(`<title>Welcome to ZeroRoot AI</title></head>`)
 	b.WriteString(`<body style="margin:0;padding:0;background:` + cGround + `;">`)
 	b.WriteString(`<table role="presentation" width="100%" cellpadding="0" cellspacing="0" border="0"` +
 		` style="background:` + cGround + `;"><tr><td align="center" style="padding:24px 12px 40px;">`)
@@ -345,17 +347,17 @@ func invitationHTML(inv InvitationEmail, steps []onboardingStep) string {
 
 	// Masthead.
 	b.WriteString(`<tr><td style="padding:0 0 14px;border-bottom:2px solid ` + cInk + `;">`)
-	b.WriteString(span(monoStack, "11px", cMuted, "letter-spacing:1.5px;text-transform:uppercase;", "Onboarding / ZeroRoot"))
+	b.WriteString(span(monoStack, "11px", cMuted, "letter-spacing:1.5px;text-transform:uppercase;", "ZeroRoot AI / Gibson"))
 	b.WriteString(`<div style="font-family:` + fontStack + `;font-size:28px;line-height:1.1;font-weight:700;` +
-		`letter-spacing:-0.5px;color:` + cInk + `;padding-top:6px;">You are in the workspace</div>`)
+		`letter-spacing:-0.5px;color:` + cInk + `;padding-top:6px;">Welcome to ZeroRoot AI</div>`)
 	b.WriteString(`</td></tr>`)
 
 	// Lede.
 	b.WriteString(`<tr><td style="padding:18px 0 0;font-family:` + fontStack + `;font-size:15px;` +
 		`line-height:1.6;color:` + cInk + `;">`)
-	b.WriteString(`Hello,<br><br>You have been added to a Gibson workspace as <strong>` +
-		html.EscapeString(roleLabel(inv.Role)) + `</strong>. This is the only email you get, so it ` +
-		`carries the whole path: accept, build the CLI, sign in, run one mission.`)
+	b.WriteString(`Hello,<br><br>Someone added you to a Gibson workspace as <strong>` +
+		html.EscapeString(roleLabel(inv.Role)) + `</strong>. Every command below already carries ` +
+		`the address and the name of this workspace, so you can paste them as they are.`)
 	b.WriteString(`</td></tr>`)
 	b.WriteString(`<tr><td style="padding:10px 0 0;font-family:` + fontStack + `;font-size:13px;` +
 		`line-height:1.5;color:` + cMuted + `;">The link expires ` + html.EscapeString(expiryLabel(inv.ExpiresAt)) + `.</td></tr>`)
@@ -363,7 +365,7 @@ func invitationHTML(inv InvitationEmail, steps []onboardingStep) string {
 	// Section rule.
 	b.WriteString(`<tr><td style="padding:30px 0 8px;border-bottom:1px solid ` + cRule + `;">`)
 	b.WriteString(span(monoStack, "12px", cInk, "font-weight:700;letter-spacing:1.3px;text-transform:uppercase;",
-		"Your first twenty minutes"))
+		"Start here"))
 	b.WriteString(`</td></tr>`)
 
 	for i, st := range steps {
@@ -414,7 +416,7 @@ func invitationHTML(inv InvitationEmail, steps []onboardingStep) string {
 	// Footer.
 	b.WriteString(`<tr><td style="padding:24px 0 0;border-top:1px solid ` + cRule + `;font-family:` + monoStack +
 		`;font-size:11px;line-height:1.7;color:` + cMuted + `;">`)
-	b.WriteString(`If you were not expecting this, ignore this email. Nothing is created until you open the link.`)
+	b.WriteString(`If you did not expect this email, ignore it. Nothing exists until you open the link.`)
 	b.WriteString(`</td></tr>`)
 
 	b.WriteString(`</table></td></tr></table></body></html>`)
@@ -457,7 +459,7 @@ func linkRow(url string, primary bool) string {
 		`<tr><td bgcolor="` + cAcid + `" style="background:` + cAcid + `;border-radius:2px;">` +
 		`<a href="` + esc + `" style="display:inline-block;padding:11px 20px;font-family:` + monoStack +
 		`;font-size:13px;font-weight:700;letter-spacing:1px;text-transform:uppercase;` +
-		`color:` + cAcidInk + `;text-decoration:none;">Accept and set a password</a>` +
+		`color:` + cAcidInk + `;text-decoration:none;">Accept and set your password</a>` +
 		`</td></tr><tr><td style="padding:8px 0 0;font-family:` + monoStack + `;font-size:11px;` +
 		`word-break:break-all;color:` + cMuted + `;">` + esc + `</td></tr></table>`
 }
@@ -538,21 +540,21 @@ func (s *InvitationSender) SendInvitationConflict(ctx context.Context, c Invitat
 	}
 	subject := "About your Gibson invitation"
 	text := fmt.Sprintf(
-		"Someone tried to invite this email address (%s) to a Gibson workspace, "+
-			"but it already belongs to a different one. Gibson accounts belong to "+
-			"one workspace at a time.\n\n"+
-			"To join the new workspace, use a different email address, or ask the "+
-			"current workspace's Owner to remove you first.\n\n"+
-			"If you weren't expecting this, you can ignore this email.",
+		"Someone tried to invite this address (%s) to a Gibson workspace, but it "+
+			"already belongs to a different one. An address belongs to one workspace "+
+			"at a time.\n\n"+
+			"You have two ways in. Use a different address, or ask the Owner of your "+
+			"current workspace to remove you first.\n\n"+
+			"If you did not expect this email, ignore it. Nothing changed.",
 		c.To,
 	)
 	html := fmt.Sprintf(
-		"<p>Someone tried to invite this email address (%s) to a Gibson workspace, "+
-			"but it already belongs to a different one. Gibson accounts belong to "+
-			"one workspace at a time.</p>"+
-			"<p>To join the new workspace, use a different email address, or ask the "+
-			"current workspace's Owner to remove you first.</p>"+
-			"<p>If you weren't expecting this, you can ignore this email.</p>",
+		"<p>Someone tried to invite this address (%s) to a Gibson workspace, but it "+
+			"already belongs to a different one. An address belongs to one workspace "+
+			"at a time.</p>"+
+			"<p>You have two ways in. Use a different address, or ask the Owner of your "+
+			"current workspace to remove you first.</p>"+
+			"<p>If you did not expect this email, ignore it. Nothing changed.</p>",
 		c.To,
 	)
 	if err := s.m.Send(ctx, Message{To: c.To, Subject: subject, Text: text, HTML: html}); err != nil {
