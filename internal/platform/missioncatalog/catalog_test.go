@@ -5,23 +5,52 @@ package missioncatalog
 
 import (
 	"context"
-	"github.com/zeroroot-ai/gibson/internal/engine/mission/targetbind"
-	"github.com/zeroroot-ai/gibson/internal/infra/types"
+	"encoding/json"
+	"flag"
+	"os"
 	"strings"
 	"testing"
 
+	"github.com/zeroroot-ai/gibson/internal/engine/mission/targetbind"
+	"github.com/zeroroot-ai/gibson/internal/infra/types"
 	missionv1 "github.com/zeroroot-ai/sdk/api/gen/gibson/mission/v1"
+	"google.golang.org/protobuf/encoding/protojson"
 )
 
-func validParams() Params {
-	return Params{
-		Application:   "customer-portal",
-		RepositoryURL: "https://gitlab.com/examplebank/customer-portal.git",
-		Ref:           "main",
-		Commit:        "0123456789abcdef0123456789abcdef01234567",
-		PipelineID:    "8891",
-		PipelineURL:   "https://gitlab.com/examplebank/customer-portal/-/pipelines/8891",
-		ImageRef:      "registry.gitlab.com/examplebank/customer-portal@sha256:abc",
+// updateGolden rewrites the recorded render instead of comparing against it.
+var updateGolden = flag.Bool("update", false, "rewrite testdata/scan-rendered.json from the current render")
+
+// validParams is a complete parameter set for the checked-in scan mission,
+// keyed by the names scan.cue itself declares.
+func validParams() map[string]string {
+	return map[string]string{
+		"application":   "customer-portal",
+		"repositoryUrl": "https://gitlab.com/examplebank/customer-portal.git",
+		"ref":           "main",
+		"commit":        "0123456789abcdef0123456789abcdef01234567",
+		"pipelineId":    "8891",
+		"pipelineUrl":   "https://gitlab.com/examplebank/customer-portal/-/pipelines/8891",
+		"imageRef":      "registry.gitlab.com/examplebank/customer-portal@sha256:abc",
+	}
+}
+
+// TestValidParams_CoversEveryDeclaredParameter keeps the literal above honest.
+// A parameter added to scan.cue and not here would make every other test in this
+// file fail on a missing value, which is a confusing way to learn it; this says
+// it directly.
+func TestValidParams_CoversEveryDeclaredParameter(t *testing.T) {
+	names, err := ParamNames("scan")
+	if err != nil {
+		t.Fatal(err)
+	}
+	got := validParams()
+	if len(got) != len(names) {
+		t.Fatalf("validParams has %d entries, scan declares %d: %v vs %v", len(got), len(names), got, names)
+	}
+	for _, n := range names {
+		if _, ok := got[n]; !ok {
+			t.Errorf("validParams does not set the declared parameter %q", n)
+		}
 	}
 }
 
@@ -67,7 +96,7 @@ func TestSource_UnknownMissionNamesWhatExists(t *testing.T) {
 }
 
 func TestRender_MissingParametersAreAllReportedAtOnce(t *testing.T) {
-	_, err := Render(context.Background(), "scan", Params{Application: "customer-portal"})
+	_, err := Render(context.Background(), "scan", map[string]string{"application": "customer-portal"})
 	if err == nil {
 		t.Fatal("an incomplete render was accepted; an empty commit would scan HEAD")
 	}
@@ -80,7 +109,7 @@ func TestRender_MissingParametersAreAllReportedAtOnce(t *testing.T) {
 
 func TestRender_WhitespaceIsNotAValue(t *testing.T) {
 	p := validParams()
-	p.Commit = "   "
+	p["commit"] = "   "
 	_, err := Render(context.Background(), "scan", p)
 	if err == nil || !strings.Contains(err.Error(), "commit") {
 		t.Fatalf("a blank commit was accepted as a value: %v", err)
@@ -171,21 +200,21 @@ func TestRender_ParametersReachTheNodesThatNeedThem(t *testing.T) {
 
 	// The image node scans the image the pipeline published. A parameter that
 	// does not arrive here scans the wrong thing rather than failing.
-	if got := def.GetNodes()["image"].GetToolConfig().GetInput()["image"]; got != p.ImageRef {
-		t.Errorf("image input = %q, want %q", got, p.ImageRef)
+	if got := def.GetNodes()["image"].GetToolConfig().GetInput()["image"]; got != p["imageRef"] {
+		t.Errorf("image input = %q, want %q", got, p["imageRef"])
 	}
 
 	// The agent inherits the provenance of the scan. Checked by key, because a
 	// context that silently loses a key produces an agent that scans HEAD.
 	ctxMap := def.GetNodes()["source"].GetAgentConfig().GetTask().GetContext()
 	for key, want := range map[string]string{
-		"application":       p.Application,
-		"repository.commit": p.Commit,
-		"repository.url":    p.RepositoryURL,
-		"repository.ref":    p.Ref,
-		"pipeline.id":       p.PipelineID,
-		"pipeline.url":      p.PipelineURL,
-		"image.ref":         p.ImageRef,
+		"application":       p["application"],
+		"repository.commit": p["commit"],
+		"repository.url":    p["repositoryUrl"],
+		"repository.ref":    p["ref"],
+		"pipeline.id":       p["pipelineId"],
+		"pipeline.url":      p["pipelineUrl"],
+		"image.ref":         p["imageRef"],
 		"zerocool.task":     "source-analysis",
 	} {
 		v, ok := ctxMap[key]
@@ -198,7 +227,7 @@ func TestRender_ParametersReachTheNodesThatNeedThem(t *testing.T) {
 		}
 	}
 
-	if goal := def.GetNodes()["source"].GetAgentConfig().GetTask().GetGoal(); !strings.Contains(goal, p.Commit) {
+	if goal := def.GetNodes()["source"].GetAgentConfig().GetTask().GetGoal(); !strings.Contains(goal, p["commit"]) {
 		t.Errorf("goal does not name the commit it must scan: %q", goal)
 	}
 }
@@ -226,14 +255,14 @@ func TestRender_RuntimeBranchTakesItsHostFromTheTargetNotAParameter(t *testing.T
 
 func TestRender_AQuoteInAParameterCannotInjectCUE(t *testing.T) {
 	p := validParams()
-	p.Application = `x" , injected: "yes`
+	p["application"] = `x" , injected: "yes`
 	def, err := Render(context.Background(), "scan", p)
 	if err != nil {
 		t.Fatalf("Render: %v", err)
 	}
 	got := def.GetNodes()["source"].GetAgentConfig().GetTask().GetContext()["application"].GetStringValue()
-	if got != p.Application {
-		t.Errorf("application = %q, want the value verbatim %q", got, p.Application)
+	if got != p["application"] {
+		t.Errorf("application = %q, want the value verbatim %q", got, p["application"])
 	}
 }
 
@@ -296,4 +325,62 @@ func TestRender_ScanBindsAgainstARegisteredTarget(t *testing.T) {
 			}
 		}
 	}
+}
+
+// TestRender_ScanMatchesItsRecordedRender pins the whole rendered definition,
+// not a field of it.
+//
+// It was added with the move to per-mission parameters (gibson#499) to prove
+// that change was a refactor: the bytes here were produced by the code BEFORE
+// it, and they did not move. After that, it keeps earning its place — a mission
+// is a work graph, and a change to it should be a change somebody chose, visible
+// as a diff in this file rather than discovered on a run.
+//
+// Regenerate deliberately, and read the diff as the review:
+//
+//	go test ./internal/platform/missioncatalog/ -run ScanMatchesItsRecordedRender -update
+func TestRender_ScanMatchesItsRecordedRender(t *testing.T) {
+	def, err := Render(context.Background(), "scan", validParams())
+	if err != nil {
+		t.Fatalf("Render: %v", err)
+	}
+	got, err := protojson.MarshalOptions{Multiline: true, Indent: "  "}.Marshal(def)
+	if err != nil {
+		t.Fatalf("marshal: %v", err)
+	}
+
+	const golden = "testdata/scan-rendered.json"
+	if *updateGolden {
+		if err := os.WriteFile(golden, got, 0o600); err != nil {
+			t.Fatalf("write %s: %v", golden, err)
+		}
+		t.Logf("updated %s", golden)
+		return
+	}
+	want, err := os.ReadFile(golden)
+	if err != nil {
+		t.Fatalf("read %s: %v", golden, err)
+	}
+	// protojson's output carries deliberate randomised whitespace (detrand), so
+	// the comparison normalises it rather than asserting on bytes nobody chose.
+	if normalizeJSON(t, got) != normalizeJSON(t, want) {
+		t.Errorf("the scan mission renders differently than recorded.\n"+
+			"If that is the change you meant, re-run with -update and the diff is the review.\n"+
+			"got:\n%s", got)
+	}
+}
+
+// normalizeJSON re-encodes through a generic map, which drops protojson's
+// randomised indentation and orders keys.
+func normalizeJSON(t *testing.T, b []byte) string {
+	t.Helper()
+	var v any
+	if err := json.Unmarshal(b, &v); err != nil {
+		t.Fatalf("the recorded render is not JSON: %v", err)
+	}
+	out, err := json.Marshal(v)
+	if err != nil {
+		t.Fatalf("re-encode: %v", err)
+	}
+	return string(out)
 }

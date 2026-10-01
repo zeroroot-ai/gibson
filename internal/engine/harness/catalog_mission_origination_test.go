@@ -23,7 +23,11 @@ import (
 // here as a render failure rather than as a test that quietly stops covering it.
 func scanParams() map[string]string {
 	out := map[string]string{}
-	for _, name := range missioncatalog.ParamNames() {
+	names, err := missioncatalog.ParamNames("scan")
+	if err != nil {
+		panic("scan is a checked-in mission: " + err.Error())
+	}
+	for _, name := range names {
 		out[name] = "v-" + name
 	}
 	return out

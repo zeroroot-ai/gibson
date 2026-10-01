@@ -35,126 +35,90 @@ import (
 //go:embed missions/*.cue
 var missionFS embed.FS
 
-// Params are the values a checked-in mission is rendered with. Every field is
-// required: CUE refuses an incomplete render rather than substituting an empty
-// string, so a missing commit fails loudly instead of scanning HEAD, and a
-// missing image fails instead of scanning nothing.
+// Parameters are declared by each mission, in its own CUE, and nowhere else.
 //
-// The runtime target is deliberately absent. It is bound from the mission's
-// target at submit, never from a parameter, so a caller cannot point a scan at
-// a host the tenant has not registered.
-type Params struct {
-	// Application is the Application key every observation of this scan hangs
-	// off, and the thing the findings are counted against.
-	Application string
-	// RepositoryURL is the git remote the source branch clones.
-	RepositoryURL string
-	// Ref is the branch the pipeline built.
-	Ref string
-	// Commit is the exact commit the pipeline built.
-	Commit string
-	// PipelineID identifies the pipeline that triggered this scan.
-	PipelineID string
-	// PipelineURL is that pipeline, for a human following the trail.
-	PipelineURL string
-	// ImageRef is the image the pipeline published, by digest.
-	ImageRef string
-}
-
-// paramField binds one wire name to the field it lands in. The pointer is what
-// lets a single declaration serve reading and writing both.
-type paramField struct {
-	name  string
-	value *string
-}
-
-// fields is the ONE declaration of this mission's parameter names and where
-// each one lands. Validation, rendering, and decoding a caller's map all read
-// it, so a parameter added to the struct cannot be wired into one of the three
-// and silently forgotten in the others — which would surface as a caller
-// sending a value that renders as empty, or as a key refused for being
-// unknown when it is not.
-func (p *Params) fields() []paramField {
-	return []paramField{
-		{"application", &p.Application},
-		{"repositoryUrl", &p.RepositoryURL},
-		{"ref", &p.Ref},
-		{"commit", &p.Commit},
-		{"pipelineId", &p.PipelineID},
-		{"pipelineUrl", &p.PipelineURL},
-		{"imageRef", &p.ImageRef},
-	}
-}
-
-// ParamNames lists the parameters a checked-in mission takes, in declaration
-// order, so a caller or an error message can name them without duplicating the
-// list.
-func ParamNames() []string {
-	var p Params
-	declared := p.fields()
-	out := make([]string, 0, len(declared))
-	for _, f := range declared {
-		out = append(out, f.name)
-	}
-	return out
-}
-
-// ParamsFromMap decodes a caller-supplied parameter map.
+// They used to be a flat Go struct shared by every mission in the catalog, with
+// Render requiring all seven fields for any mission name. That made a second
+// mission impossible unless its caller invented a pipeline id and an image
+// digest for work that has neither (gibson#499). It also carried the names three
+// times — struct, validation, decode — which is the drift the old fields()
+// comment was written to manage.
 //
-// An UNKNOWN key is refused, never ignored. That refusal is the whole of the
-// smuggling defence: Params has no target or host field, so a caller sending
-// `host: evil.example.com` into a map that quietly drops unrecognised keys
-// would receive no error and reasonably believe it bound. The runtime target
-// comes from the mission's target at submit and from nowhere else.
-//
-// Unknown keys are reported together, and sorted, so a caller with several
-// typos sees them in one answer rather than one per attempt.
-func ParamsFromMap(in map[string]string) (Params, error) {
-	var p Params
-	known := make(map[string]*string, len(p.fields()))
-	for _, f := range p.fields() {
-		known[f.name] = f.value
+// So the closed set is read from the mission. The refusal of an UNKNOWN key is
+// unchanged in kind and is the whole smuggling defence: no mission declares a
+// target or a host, so a caller sending `host: evil.example.com` into a map that
+// quietly dropped unrecognised keys would receive no error and reasonably
+// believe it bound. The runtime target comes from the mission's target at submit
+// and from nowhere else.
+
+// ParamNames lists the parameters one checked-in mission takes, sorted, so a
+// caller or an error message can name them without restating the list.
+func ParamNames(mission string) ([]string, error) {
+	src, err := Source(mission)
+	if err != nil {
+		return nil, err
 	}
+	names, err := cueruntime.DeclaredParams(src)
+	if err != nil {
+		return nil, fmt.Errorf("missioncatalog: read the parameters of %q: %w", mission, err)
+	}
+	return names, nil
+}
+
+// checkParams refuses a caller's map against what the mission declares.
+//
+// Unknown keys and missing keys are each reported together, and sorted, so a
+// caller with several typos or several omissions sees them in one answer rather
+// than one per attempt.
+func checkParams(mission string, declared []string, in map[string]string) error {
+	known := make(map[string]bool, len(declared))
+	for _, n := range declared {
+		known[n] = true
+	}
+
 	var unknown []string
-	for k, v := range in {
-		dst, ok := known[k]
-		if !ok {
+	for k := range in {
+		if !known[k] {
 			unknown = append(unknown, k)
-			continue
 		}
-		*dst = v
 	}
 	if len(unknown) > 0 {
 		sort.Strings(unknown)
-		return Params{}, fmt.Errorf(
-			"missioncatalog: unknown parameter %s (known: %s)",
-			strings.Join(unknown, ", "), strings.Join(ParamNames(), ", "))
+		return fmt.Errorf("missioncatalog: mission %q has no parameter %s (it takes %s)",
+			mission, strings.Join(unknown, ", "), namesOrNone(declared))
 	}
-	return p, nil
-}
 
-// missing returns the names of the parameters left empty, in declaration
-// order. Reporting all of them at once matters: a caller wiring this up for
-// the first time should see every field it forgot in one error, not discover
-// them one render at a time.
-func (p Params) missing() []string {
-	var out []string
-	for _, f := range p.fields() {
-		if strings.TrimSpace(*f.value) == "" {
-			out = append(out, f.name)
+	var missing []string
+	for _, n := range declared {
+		if strings.TrimSpace(in[n]) == "" {
+			missing = append(missing, n)
 		}
 	}
-	return out
+	if len(missing) > 0 {
+		return fmt.Errorf("missioncatalog: mission %q needs %s", mission, strings.Join(missing, ", "))
+	}
+	return nil
+}
+
+func namesOrNone(declared []string) string {
+	if len(declared) == 0 {
+		return "no parameters"
+	}
+	return strings.Join(declared, ", ")
 }
 
 // cueBlock renders the parameters as a CUE fragment that unifies with the
-// definition's `_params`. Values are quoted with %q so a value carrying a
-// quote or a backslash cannot terminate the string and inject CUE.
-func (p Params) cueBlock() string {
+// mission's `_params`. Values are quoted with %q so a value carrying a quote or
+// a backslash cannot terminate the string and inject CUE. Keys are emitted in
+// the declared (sorted) order, so the same inputs render the same bytes.
+func cueBlock(declared []string, in map[string]string) string {
+	if len(declared) == 0 {
+		return ""
+	}
 	var b strings.Builder
 	b.WriteString("\n_params: {\n")
-	for _, f := range p.fields() {
-		fmt.Fprintf(&b, "\t%s: %q\n", f.name, *f.value)
+	for _, n := range declared {
+		fmt.Fprintf(&b, "\t%s: %q\n", n, in[n])
 	}
 	b.WriteString("}\n")
 	return b.String()
@@ -193,15 +157,23 @@ func Source(name string) (string, error) {
 // parameters applied. The definition is authoritative: this is the single
 // place the graph is described, and the always-on agent references it rather
 // than rebuilding it (ADR-0018).
-func Render(ctx context.Context, name string, p Params) (*missionv1.MissionDefinition, error) {
-	if missing := p.missing(); len(missing) > 0 {
-		return nil, fmt.Errorf("missioncatalog: mission %q needs %s", name, strings.Join(missing, ", "))
-	}
+//
+// params is validated against what this mission declares, so an unknown key is
+// refused rather than dropped and a missing one is refused rather than rendered
+// as an empty string into a scan target.
+func Render(ctx context.Context, name string, params map[string]string) (*missionv1.MissionDefinition, error) {
 	src, err := Source(name)
 	if err != nil {
 		return nil, err
 	}
-	def, err := cueruntime.Export(ctx, src+p.cueBlock())
+	declared, err := cueruntime.DeclaredParams(src)
+	if err != nil {
+		return nil, fmt.Errorf("missioncatalog: read the parameters of %q: %w", name, err)
+	}
+	if err := checkParams(name, declared, params); err != nil {
+		return nil, err
+	}
+	def, err := cueruntime.Export(ctx, src+cueBlock(declared, params))
 	if err != nil {
 		return nil, fmt.Errorf("missioncatalog: render %q: %w", name, err)
 	}

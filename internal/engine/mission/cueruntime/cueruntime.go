@@ -27,6 +27,7 @@ import (
 	"io/fs"
 	"math"
 	"path"
+	"sort"
 	"strings"
 	"sync"
 
@@ -484,4 +485,45 @@ func bracedNames() []string {
 		out = append(out, targetbind.Open+n+targetbind.Close)
 	}
 	return out
+}
+
+// DeclaredParams returns the field names of a mission's top-level `_params`,
+// sorted, as the mission itself declares them.
+//
+// The declaration already exists, in CUE, at the top of every mission file.
+// Reading it is what keeps the Go side from carrying a second copy: a parameter
+// list restated in Go drifts from the one the mission unifies against, and the
+// symptom is a caller sending a value that renders as empty (gibson#499).
+//
+// A mission with no `_params` takes no parameters, which is not an error — it is
+// a mission whose graph is fully determined by its target.
+func DeclaredParams(source string) ([]string, error) {
+	ctx := cuecontext.New()
+	val, err := loadUserValue(ctx, source)
+	if err != nil {
+		return nil, fmt.Errorf("cueruntime: load the mission source: %w", err)
+	}
+	// `_params` is a CUE HIDDEN field, so it is addressed by cue.Hid and not by
+	// cue.Str, and its package is the one loadUserValue loads under ("_", the
+	// anonymous package every mission file uses). cue.Str finds nothing here and
+	// returns no error, which reads as "this mission takes no parameters" — so
+	// getting this wrong would silently accept a call that supplied none.
+	params := val.LookupPath(cue.MakePath(cue.Hid("_params", "_")))
+	if !params.Exists() {
+		return nil, nil
+	}
+
+	// The fields of _params are ordinary (visible) fields of a hidden struct, so
+	// no Hidden option is needed here. Optional ones are included: a parameter a
+	// mission marks optional is still a parameter a caller may send.
+	it, err := params.Fields(cue.Optional(true))
+	if err != nil {
+		return nil, fmt.Errorf("cueruntime: read _params: %w", err)
+	}
+	var out []string
+	for it.Next() {
+		out = append(out, it.Selector().Unquoted())
+	}
+	sort.Strings(out)
+	return out, nil
 }

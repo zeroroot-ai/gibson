@@ -1,0 +1,145 @@
+{
+  "name": "scan",
+  "description": "Scan one Application from three sides — its image, its source, and what it is actually running.",
+  "version": "1.0.0",
+  "nodes": {
+    "image": {
+      "id": "image",
+      "type": "NODE_TYPE_TOOL",
+      "toolConfig": {
+        "toolName": "trivy",
+        "input": {
+          "image": "registry.gitlab.com/examplebank/customer-portal@sha256:abc"
+        }
+      }
+    },
+    "ports": {
+      "id": "ports",
+      "type": "NODE_TYPE_TOOL",
+      "toolConfig": {
+        "toolName": "naabu",
+        "input": {
+          "target": "{{target.domain}}"
+        }
+      }
+    },
+    "report": {
+      "id": "report",
+      "type": "NODE_TYPE_JOIN",
+      "joinConfig": {
+        "waitFor": [
+          "image",
+          "source",
+          "tls"
+        ],
+        "strategy": "MERGE_STRATEGY_CONCAT"
+      },
+      "dependencies": [
+        "image",
+        "source",
+        "tls"
+      ]
+    },
+    "services": {
+      "id": "services",
+      "type": "NODE_TYPE_TOOL",
+      "toolConfig": {
+        "toolName": "httpx",
+        "input": {
+          "target": "{{target.domain}}"
+        }
+      }
+    },
+    "source": {
+      "id": "source",
+      "type": "NODE_TYPE_AGENT",
+      "agentConfig": {
+        "agentName": "zerocool",
+        "task": {
+          "id": "source",
+          "goal": "Scan the customer-portal repository at commit 0123456789abcdef0123456789abcdef01234567 and submit a Finding for every real weakness you can support with evidence.",
+          "context": {
+            "application": {
+              "stringValue": "customer-portal"
+            },
+            "image.ref": {
+              "stringValue": "registry.gitlab.com/examplebank/customer-portal@sha256:abc"
+            },
+            "pipeline.id": {
+              "stringValue": "8891"
+            },
+            "pipeline.url": {
+              "stringValue": "https://gitlab.com/examplebank/customer-portal/-/pipelines/8891"
+            },
+            "repository.commit": {
+              "stringValue": "0123456789abcdef0123456789abcdef01234567"
+            },
+            "repository.ref": {
+              "stringValue": "main"
+            },
+            "repository.url": {
+              "stringValue": "https://gitlab.com/examplebank/customer-portal.git"
+            },
+            "zerocool.task": {
+              "stringValue": "source-analysis"
+            }
+          }
+        }
+      }
+    },
+    "tls": {
+      "id": "tls",
+      "type": "NODE_TYPE_TOOL",
+      "toolConfig": {
+        "toolName": "tlsx",
+        "input": {
+          "host": "{{target.domain}}"
+        }
+      }
+    },
+    "web": {
+      "id": "web",
+      "type": "NODE_TYPE_TOOL",
+      "toolConfig": {
+        "toolName": "nuclei",
+        "input": {
+          "target": "{{target.domain}}"
+        }
+      }
+    }
+  },
+  "edges": [
+    {
+      "from": "ports",
+      "to": "services"
+    },
+    {
+      "from": "services",
+      "to": "web"
+    },
+    {
+      "from": "web",
+      "to": "tls"
+    },
+    {
+      "from": "image",
+      "to": "report"
+    },
+    {
+      "from": "source",
+      "to": "report"
+    },
+    {
+      "from": "tls",
+      "to": "report"
+    }
+  ],
+  "entryPoints": [
+    "image",
+    "source",
+    "ports"
+  ],
+  "exitPoints": [
+    "report"
+  ]
+}
