@@ -118,7 +118,25 @@ func (s *serverStreamCtxOverride) Context() context.Context { return s.ctx }
 // before the request reaches the daemon, and the handler is responsible for
 // self-scoping via caller.Subject. Spec: self-mode-authz Req 4.6.
 func looseModeForEntry(entry registry.Entry) bool {
-	return entry.Unauthenticated || entry.Self
+	return entry.Unauthenticated || entry.Self || !entryNeedsTenant(entry)
+}
+
+// entryNeedsTenant reports whether the entry's object is derived from the
+// caller's tenant. A rule whose object is the system tenant, a request
+// field or the caller's own component is decided without one, and the
+// Platform owner has no tenant by design (ADR-0093): ext-authz lets such a
+// call through with an empty x-gibson-identity-tenant (fga.Entry.NeedsTenant,
+// gibson#440), so the daemon must accept the empty header on the same rule
+// (identity run 36805241660 step 7, AdminProvisionTenant refused with
+// "identity headers absent: missing [x-gibson-identity-tenant]").
+func entryNeedsTenant(entry registry.Entry) bool {
+	switch {
+	case entry.ObjectDeriver == "tenant_from_identity":
+		return true
+	case strings.HasPrefix(entry.ObjectDeriver, "tenant_and_field("):
+		return true
+	}
+	return false
 }
 
 // looseModePlaceholderTenant is a syntactically valid TenantID string used
