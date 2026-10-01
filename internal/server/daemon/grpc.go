@@ -1368,6 +1368,12 @@ func (d *daemonImpl) buildGRPCServer(ctx context.Context) (*grpcSubsystem, error
 				// GIBSON_PUBLIC_URL here (the api.<domain> origin) built a
 				// link the dashboard serves no route for (hosted#203).
 				InviteBaseURL: os.Getenv(api.EnvAppURL),
+				// The API-plane origin, for the `gibson init --gibson-url`
+				// and `gibson login` lines the invitation email prints
+				// filled in. It is the one origin an invitee cannot guess,
+				// and it is NOT InviteBaseURL above — that is the product
+				// surface and serves no gRPC.
+				InviteAPIURL:  os.Getenv("GIBSON_PUBLIC_URL"),
 				ReservedNames: rnpForAdmin,
 				Logger:        d.logger.Slog(),
 			})
