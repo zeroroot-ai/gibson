@@ -31,6 +31,7 @@ import (
 	"github.com/zeroroot-ai/gibson/internal/engine/agent"
 	"github.com/zeroroot-ai/gibson/internal/engine/brain"
 	gibsonharness "github.com/zeroroot-ai/gibson/internal/engine/harness"
+	"github.com/zeroroot-ai/gibson/internal/engine/jobnode"
 	"github.com/zeroroot-ai/gibson/internal/engine/llm"
 	"github.com/zeroroot-ai/gibson/internal/engine/taxonomy"
 	"github.com/zeroroot-ai/gibson/internal/platform/component"
@@ -62,6 +63,9 @@ type brainExecutor struct {
 	// jobs is where a job node's jobs live (ADR-0019, gibson#1713). Read per
 	// dispatch because the data-plane pool is built after the executor.
 	jobs func() (job.Store, error)
+	// jobClosed links a closed job's deliverables into the graph
+	// (gibson#477). dispatchJob hands it to jobnode, which refuses a nil.
+	jobClosed jobnode.CloseObserver
 
 	mu       sync.RWMutex
 	bindings map[string]*missionBinding

@@ -55,6 +55,7 @@ func (b *brainExecutor) dispatchJob(bind *missionBinding, req brain.DispatchRequ
 		Opener:   job.Principal{Kind: job.PrincipalService, ID: "mission:" + req.MissionID},
 		Ops:      store,
 		Verifier: &harnessVerifier{harness: bind.harness, timeout: req.Timeout},
+		Closed:   b.jobClosed,
 	})
 	if err != nil && !errors.Is(err, jobnode.ErrClosedElsewhere) {
 		return "", fmt.Errorf("job node: run the job on bank %s: %w", req.Target, err)

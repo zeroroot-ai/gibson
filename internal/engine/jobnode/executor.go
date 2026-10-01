@@ -33,6 +33,26 @@ type JobOps interface {
 	Events(ctx context.Context, tenantID, jobID string, since int64, limit int32) ([]*job.Event, error)
 }
 
+// ClosedJob is what the node reports when it closes a job as accomplished: the
+// job, the work it started from and what it delivered. The node does not know
+// what the inputs name. The observer decides.
+type ClosedJob struct {
+	TenantID     string
+	MissionRunID string
+	NodeID       string
+	JobID        string
+	// Inputs are the ids the spec started from (JobSpec.inputs), verbatim.
+	Inputs       []string
+	Deliverables []job.Deliverable
+}
+
+// CloseObserver is told once for each job the node closes as accomplished.
+// The daemon backs it with the graph link. It is required, so a daemon that
+// forgets to wire it fails at the first job and not silently at the graph.
+type CloseObserver interface {
+	JobClosed(ctx context.Context, closed ClosedJob)
+}
+
 // Report is the verifier's structured answer.
 type Report struct {
 	Pass   bool    `json:"pass"`
@@ -67,6 +87,8 @@ type Input struct {
 	Opener   job.Principal
 	Ops      JobOps
 	Verifier Verifier
+	// Closed hears about each accomplished close. Required.
+	Closed CloseObserver
 	// PollInterval is how often the loop reads the job's events. Zero takes
 	// DefaultPollInterval.
 	PollInterval time.Duration
@@ -167,6 +189,8 @@ func (in Input) validate() error {
 		return errors.New("jobnode: Ops is required")
 	case in.Verifier == nil:
 		return errors.New("jobnode: Verifier is required")
+	case in.Closed == nil:
+		return errors.New("jobnode: Closed is required")
 	case in.TenantID == "" || in.BankID == "":
 		return errors.New("jobnode: a tenant and a bank are required")
 	case in.Spec == nil || in.Spec.GetGoal() == "":
@@ -262,6 +286,14 @@ func closeWith(ctx context.Context, in Input, jobID string, verdict job.Verdict,
 	result, err := job.ResultOf(closed)
 	if err != nil {
 		return Outcome{}, fmt.Errorf("jobnode: %w", err)
+	}
+	// Only accomplished work is reported. A failed job's deliverables did not
+	// pass acceptance, so they claim no fix.
+	if verdict == job.VerdictAccomplished {
+		in.Closed.JobClosed(ctx, ClosedJob{
+			TenantID: in.TenantID, MissionRunID: in.MissionRunID, NodeID: in.NodeID,
+			JobID: jobID, Inputs: in.Spec.GetInputs(), Deliverables: result.Deliverables,
+		})
 	}
 	return Outcome{Result: result, Passes: pass, Report: report}, nil
 }
