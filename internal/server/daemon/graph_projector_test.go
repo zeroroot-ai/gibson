@@ -114,8 +114,8 @@ func (f *fakeGraphWriter) UpsertAgentRun(_ context.Context, tenant string, r bra
 	return nil
 }
 
-// UpsertMission is driven by the CreateMission RPC rather than the projection
-// tick, so the loop tests never call it; it exists to satisfy GraphWriter.
+// UpsertMission records what the projection tick, the CreateMission RPC and the
+// per-run graph bootstrap each hand the sole :Mission writer.
 func (f *fakeGraphWriter) UpsertMission(_ context.Context, tenant string, m MissionProjection) error {
 	f.mu.Lock()
 	defer f.mu.Unlock()
