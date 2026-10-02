@@ -615,11 +615,12 @@ func (s *ComponentServiceServer) RegisterComponent(
 		slog.String("instance_id", instanceID),
 	)
 
-	// Bind can_resolve for a plugin's manifest-declared secrets so it can read
-	// them at runtime (ADR-0066). SVID pod plugins register here rather than via
-	// the old RegisterPlugin binding path.
+	// Bind can_resolve for a catalog plugin's declared secrets so it can read
+	// them at runtime (ADR-0066). For a component outside the signed catalog
+	// the declared list is advisory and writes nothing: a check-in never
+	// assigns its own trust (gibson#554, ADR-0097).
 	if req.Kind == "plugin" {
-		s.bindDeclaredSecrets(ctx, tenant, req.Metadata)
+		s.bindDeclaredSecrets(ctx, tenant, req.Kind, req.Name, req.Metadata)
 	}
 
 	// Spec plans-and-quotas-simplification: agent registration alone no

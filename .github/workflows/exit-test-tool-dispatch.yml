@@ -255,6 +255,10 @@ jobs:
           # WatchComponentEvents and its heartbeat reports the lifecycle
           # state (sdk#61), so a revoked secret reads DEGRADED. Bump it when
           # the integrations CI publishes a new digest.
+          # Equal to the digest in
+          # internal/platform/componentcatalog/manifests/github-plugin.yaml:
+          # the daemon binds the plugin's declared secret only for the catalog
+          # entry, and the seeder verifies exactly that image (gibson#554).
           PLUGIN_IMAGE_DIGEST: sha256:12a5cb2ae9b7ed4380b07d063bcac83caed8989bd18fd3c6633394aefeda093c
         run: |
           set -euo pipefail
