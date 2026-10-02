@@ -24,6 +24,7 @@ type fakeGraphWriter struct {
 	agentRuns    map[string][]brain.AgentRunSnapshot
 	llmCalls     map[string][]brain.LlmCallSnapshot
 	missions     map[string][]MissionProjection
+	targets      map[string][]TargetProjection
 	observations map[string][]brain.ObservationSnapshot
 	entities     map[string][]brain.EntitySnapshot
 }
@@ -39,6 +40,7 @@ func newFakeGraphWriter() *fakeGraphWriter {
 		agentRuns:    map[string][]brain.AgentRunSnapshot{},
 		llmCalls:     map[string][]brain.LlmCallSnapshot{},
 		missions:     map[string][]MissionProjection{},
+		targets:      map[string][]TargetProjection{},
 		observations: map[string][]brain.ObservationSnapshot{},
 		entities:     map[string][]brain.EntitySnapshot{},
 	}
@@ -111,6 +113,14 @@ func (f *fakeGraphWriter) UpsertAgentRun(_ context.Context, tenant string, r bra
 	f.mu.Lock()
 	defer f.mu.Unlock()
 	f.agentRuns[tenant] = append(f.agentRuns[tenant], r)
+	return nil
+}
+
+// UpsertTarget records the :Target nodes the per-run graph bootstrap writes.
+func (f *fakeGraphWriter) UpsertTarget(_ context.Context, tenant string, t TargetProjection) error {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	f.targets[tenant] = append(f.targets[tenant], t)
 	return nil
 }
 

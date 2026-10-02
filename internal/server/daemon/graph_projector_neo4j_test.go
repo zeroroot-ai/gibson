@@ -92,3 +92,40 @@ func TestNeo4jGraphWriter_Exec_ExecuteWriteError(t *testing.T) {
 		t.Errorf("err = %v, want it to wrap %v", err, writeErr)
 	}
 }
+
+// TestNeo4jGraphWriter_UpsertTarget_NilNeo4j_NoError exercises UpsertTarget
+// through the shared exec path. A tenant with no Neo4j configured must be a
+// no-op, like every other projection — a Target is written on every run, so an
+// error here would fail every run on such a tenant (gibson#550).
+func TestNeo4jGraphWriter_UpsertTarget_NilNeo4j_NoError(t *testing.T) {
+	pool := &mockPool{conn: minimalConn()}
+	w := newNeo4jGraphWriter(func() datapool.Pool { return pool })
+
+	err := w.UpsertTarget(context.Background(), "acme", TargetProjection{
+		ID:        "11111111-1111-1111-1111-111111111111",
+		Name:      "prod-cluster",
+		Type:      "kubernetes",
+		URL:       "https://10.0.0.1:6443",
+		Status:    "active",
+		MissionID: "m1",
+	})
+	if err != nil {
+		t.Fatalf("UpsertTarget with no Neo4j configured for the tenant: %v", err)
+	}
+}
+
+// TestNeo4jGraphWriter_UpsertTarget_SurfacesAWriteFailure: a failed Target
+// write must reach the bootstrap, which fails the run on it.
+func TestNeo4jGraphWriter_UpsertTarget_SurfacesAWriteFailure(t *testing.T) {
+	writeErr := errors.New("simulated neo4j write failure")
+	pool := &mockPool{conn: &datapool.Conn{Neo4j: failingSession{err: writeErr}}}
+	w := newNeo4jGraphWriter(func() datapool.Pool { return pool })
+
+	err := w.UpsertTarget(context.Background(), "acme", TargetProjection{ID: "t1"})
+	if err == nil {
+		t.Fatal("expected UpsertTarget to surface the ExecuteWrite failure")
+	}
+	if !errors.Is(err, writeErr) {
+		t.Errorf("err = %v, want it to wrap %v", err, writeErr)
+	}
+}

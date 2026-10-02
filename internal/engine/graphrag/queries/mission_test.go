@@ -6,6 +6,7 @@ package queries
 import (
 	"context"
 	"encoding/json"
+	"strings"
 	"testing"
 	"time"
 
@@ -1071,4 +1072,56 @@ func TestMissionQueries_GetMissionNodeDependencies_QueryError(t *testing.T) {
 	require.Error(t, err)
 	assert.Nil(t, depMap)
 	assert.Contains(t, err.Error(), "failed to query mission node dependencies")
+}
+
+// TestMissionQueries_CreateMissionRun_NoParentMission: CreateMissionRun MATCHes
+// its parent Mission and CREATEs the run only if that match succeeds, so zero
+// records means the Mission is not there. Treating that as success would leave
+// a run node that belongs to nothing, and gibson#550 is the reader that
+// traverses the edge this would not have drawn.
+func TestMissionQueries_CreateMissionRun_NoParentMission(t *testing.T) {
+	mock := graph.NewMockGraphClient()
+	ctx := context.Background()
+	require.NoError(t, mock.Connect(ctx))
+	defer func() { _ = mock.Close(ctx) }()
+
+	mq := NewMissionQueries(mock)
+
+	// The MATCH found no Mission, so the CREATE never ran and no row came back.
+	mock.AddQueryResult(graph.QueryResult{Records: []map[string]any{}})
+
+	err := mq.CreateMissionRun(ctx, types.NewID(), types.NewID(), 1)
+	require.Error(t, err, "a run with no parent Mission must be an error")
+	assert.Contains(t, err.Error(), "mission not found")
+}
+
+// TestMissionQueries_CreateMissionRun_UsesThePromotedLabel: the label was the
+// lowercase :mission_run, which no Taxonomy uniqueness constraint could ever
+// cover because Neo4j labels are case sensitive and constraintStatements only
+// emits PascalCase (gibson#550).
+func TestMissionQueries_CreateMissionRun_UsesThePromotedLabel(t *testing.T) {
+	mock := graph.NewMockGraphClient()
+	ctx := context.Background()
+	require.NoError(t, mock.Connect(ctx))
+	defer func() { _ = mock.Close(ctx) }()
+
+	mq := NewMissionQueries(mock)
+	runID := types.NewID()
+	mock.AddQueryResult(graph.QueryResult{Records: []map[string]any{{"run_id": runID.String()}}})
+
+	require.NoError(t, mq.CreateMissionRun(ctx, types.NewID(), runID, 1))
+
+	calls := mock.GetCallsByMethod("Query")
+	require.NotEmpty(t, calls, "CreateMissionRun issued no query")
+	var cypher string
+	for _, c := range calls {
+		if s, ok := c.Args[0].(string); ok && strings.Contains(s, "MissionRun") {
+			cypher = s
+		}
+	}
+	require.NotEmpty(t, cypher, "no query created a :MissionRun; calls were %+v", calls)
+	assert.Contains(t, cypher, "CREATE (r:MissionRun",
+		"the run is not created with the promoted PascalCase label")
+	assert.NotContains(t, cypher, ":mission_run",
+		"the lowercase label is back; it can carry no uniqueness constraint")
 }

@@ -23,14 +23,29 @@ import (
 // 0003_tenant_id_constraints.cypher is intentionally empty (no statements).
 //
 // Migration 0003 was originally the per-tenant NOT NULL constraints and RANGE
-// indexes. After the database-per-tenant data-plane refactor, those constraints
-// are now applied by the tenant-operator provisioner at database-creation time
-// (migrations/neo4j/), not by the daemon's schema migrator. The migration was
-// rewritten to a no-op comment block to preserve the migration ID sequence so
-// existing deployments don't re-run earlier migrations.
+// indexes. The migration was rewritten to a no-op comment block to preserve the
+// migration ID sequence so existing deployments do not re-run earlier
+// migrations.
 //
-// If you are adding constraints back here, delete this test and restore
-// TestMigration0003_ContainsConstraintAndIndexForEveryLabel.
+// This comment used to say those constraints "are now applied by the
+// tenant-operator provisioner at database-creation time (migrations/neo4j/)".
+// Both halves were false, and gibson#550 was written against them. Measured:
+// `operators/tenant/internal/dataplane/neo4j.go` contains no CONSTRAINT or
+// INDEX statement, and no `tenant-operator/migrations/neo4j/` directory exists
+// anywhere in the tree.
+//
+// The constraints are derived from the Taxonomy and applied by the graph
+// projector, once per tenant before its first write — `applySchema` in
+// internal/server/daemon/graph_projector_schema.go. See the package doc of
+// github.com/zeroroot-ai/gibson/migrations, which states the contract: the
+// tenant operator only COMPARES the recorded :_SchemaVersion against
+// LatestNeo4jVersion for a pending-migration metric. It applies nothing.
+//
+// Add a constraint by promoting its label into the Taxonomy, never here.
+//
+// SchemaMigrator itself is unreachable — every one of its methods is in
+// .deadcode-baseline — so this test and the file it covers are a dead second
+// migrator kept alive by their own tests.
 func TestMigration0003_IsIntentionalNoOp(t *testing.T) {
 	data, err := migrationsFS.ReadFile("migrations/0003_tenant_id_constraints.cypher")
 	require.NoError(t, err, "migration file must be readable from the embedded FS")
@@ -38,7 +53,8 @@ func TestMigration0003_IsIntentionalNoOp(t *testing.T) {
 	statements := parseCypherStatements(string(data))
 	assert.Empty(t, statements,
 		"migration 0003 was intentionally re-authored as a no-op (database-per-tenant refactor); "+
-			"the constraint+index statements now live in tenant-operator/migrations/neo4j/ instead")
+			"the constraint+index statements are derived from the Taxonomy and applied by the graph "+
+			"projector's applySchema, not by any migration file")
 }
 
 // ---------------------------------------------------------------------------

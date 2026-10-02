@@ -53,13 +53,20 @@ type labelIdentity struct {
 // MERGEd on (id, tenant_id) and tenant_id is constant inside a per-tenant
 // database, so id is unique. Observation is keyed by event_id. Entity labels
 // without a first-class projection are keyed by key (see entityIdentity).
+//
+// MissionNode, MissionRun and Target are keyed on `id` for the same reason as
+// Mission: each writer MERGEs on it, and inside a per-tenant database that is
+// unique. They are listed here rather than left to the default, because the
+// default resolves an unlisted label to `key` — and a constraint on `key`
+// covers no node any of these three writers creates, which is the exact defect
+// this file exists to prevent (gibson#550).
 func identityForLabel(label string) labelIdentity {
 	switch label {
 	case "Port":
 		return labelIdentity{props: []string{"brain_host_id", "number"}}
 	case "Service":
 		return labelIdentity{props: []string{"brain_host_id", "port"}}
-	case "Mission":
+	case "Mission", "MissionNode", "MissionRun", "Target":
 		return labelIdentity{props: []string{"id"}, unique: true}
 	}
 	// identityPropertyFor is the ONE resolver, shared with entityIdentity in

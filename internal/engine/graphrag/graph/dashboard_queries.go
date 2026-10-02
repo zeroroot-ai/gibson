@@ -107,6 +107,40 @@ func (q *DashboardQueries) GetFullGraph(
 	return nodes, edges, truncated, totalCount, nil
 }
 
+// missionGraphCypher is the node query behind GetMissionGraph. It is a package
+// const so a test can assert the edge DIRECTIONS it traverses against the ones
+// the writers actually produce, which is the whole defect it replaces.
+//
+// It used to be:
+//
+//	MATCH (run:mission_run {mission_id: $mission_id})
+//	MATCH (n)-[:BELONGS_TO]->(run)
+//
+// and that returned an empty graph for every mission, always. The only
+// BELONGS_TO anything writes is (MissionRun)-[:BELONGS_TO]->(Mission) — the
+// opposite direction. Nothing has ever written an edge INTO a run. The second
+// MATCH is not OPTIONAL, so zero matches meant zero rows, and this RPC answered
+// every call with nothing (gibson#550).
+//
+// The comment on CreateMissionRun records the cause: the direction was chosen to
+// match a GraphLoader that attached discovered nodes to a run, and that package
+// was deleted in gibson#1266 without this reader moving with it.
+//
+// It now traverses what the mission graph contains: the nodes of the run
+// (PART_OF), the runs themselves (BELONGS_TO, in its real direction) and the
+// targets the mission names (TARGETS). fetchEdges then draws every edge among
+// the returned nodes, so DEPENDS_ON arrives without being named here.
+const missionGraphCypher = `
+MATCH (m:Mission {id: $mission_id})
+OPTIONAL MATCH (mn:MissionNode)-[:PART_OF]->(m)
+OPTIONAL MATCH (r:MissionRun)-[:BELONGS_TO]->(m)
+OPTIONAL MATCH (m)-[:TARGETS]->(t:Target)
+WITH collect(DISTINCT m) + collect(DISTINCT mn) + collect(DISTINCT r) + collect(DISTINCT t) AS found
+UNWIND found AS n
+RETURN DISTINCT n, labels(n) AS lbls
+LIMIT 5000
+`
+
 // GetMissionGraph returns the subgraph for a specific mission within the
 // tenant. Tenant ownership is enforced by the per-tenant Neo4j database
 // (pool.For) plus the FGA check at ext-authz; no tenant_id predicate is used.
@@ -117,13 +151,7 @@ func (q *DashboardQueries) GetMissionGraph(
 ) ([]*graphpb.Node, []*graphpb.Edge, error) {
 	tenant := tenantID.String()
 
-	cypher := `
-MATCH (run:mission_run {mission_id: $mission_id})
-MATCH (n)-[:BELONGS_TO]->(run)
-RETURN DISTINCT n, labels(n) AS lbls
-LIMIT 5000
-`
-	nodes, err := q.runNodeFetch(ctx, cypher, map[string]any{
+	nodes, err := q.runNodeFetch(ctx, missionGraphCypher, map[string]any{
 		"mission_id": missionID,
 		"tenant":     tenant,
 	})

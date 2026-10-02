@@ -364,7 +364,7 @@ func waitFor(t *testing.T, cond func() bool) {
 // someone adds a MERGE for a label nobody promoted — the mechanism by which
 // Host / HOST / host_v2 would otherwise diverge unnoticed.
 func TestProjectedVocabularyMatchesTheTaxonomy(t *testing.T) {
-	if drift := checkProjectedVocabulary(); len(drift) > 0 {
+	if drift := vocabularyDrift(taxonomy.Global, projectedNodeLabels, projectedRelationshipTypes); len(drift) > 0 {
 		t.Fatalf("projector vocabulary drifted from the Taxonomy:\n  %s",
 			strings.Join(drift, "\n  "))
 	}

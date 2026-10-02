@@ -47,6 +47,9 @@ var projectedNodeLabels = []string{
 	// upsertFindingCypher's INSTANCE_OF merge.
 	"Application", "Control", "Deployment", "Image", "MergeRequest", "Package",
 	"Pipeline", "Repository", "Vulnerability",
+	// The registered target a mission assesses (gibson#550), materialised by
+	// upsertTargetCypher.
+	"Target",
 }
 
 var projectedRelationshipTypes = []string{
@@ -57,19 +60,19 @@ var projectedRelationshipTypes = []string{
 	// apoc.merge.relationship in upsertEntityCypher.
 	"BUILT_FROM", "CONTAINS", "EXPOSES", "FIXED_BY", "HAS_DEPLOYMENT",
 	"HAS_REPOSITORY", "INSTANCE_OF", "MERGED_INTO", "RUNS", "TOUCHES", "VERIFIED_BY",
+	// Target (gibson#550): TARGETS is a constant in upsertTargetCypher and
+	// FOUND_ON one in upsertFindingCypher.
+	"FOUND_ON", // Finding -> Target
+	"TARGETS",  // Mission -> Target
 }
 
-// checkProjectedVocabulary reports every label or relationship type this writer
-// emits that the global Taxonomy does not admit. An empty result is the
-// invariant: the sole graph writer writes only promoted shapes.
-func checkProjectedVocabulary() []string {
-	return vocabularyDrift(taxonomy.Global, projectedNodeLabels, projectedRelationshipTypes)
-}
-
-// vocabularyDrift is checkProjectedVocabulary against an explicit registry and
-// vocabulary. It is separate so the drift branches can be exercised without
-// mutating the global Taxonomy — whose invalid states take the package's init
-// down and cannot be reached from a test at all.
+// vocabularyDrift reports every label or relationship type in the given
+// vocabulary that reg does not admit. An empty result is the invariant: a graph
+// writer writes only promoted shapes.
+//
+// It takes the registry explicitly so the drift branches can be exercised
+// without mutating the global Taxonomy — whose invalid states take the
+// package's init down and cannot be reached from a test at all.
 func vocabularyDrift(reg *taxonomy.Registry, nodeLabels, relationshipTypes []string) []string {
 	var drift []string
 	for _, label := range nodeLabels {
@@ -87,13 +90,22 @@ func vocabularyDrift(reg *taxonomy.Registry, nodeLabels, relationshipTypes []str
 	return drift
 }
 
-func newNeo4jGraphWriter(poolGetter func() datapool.Pool) *neo4jGraphWriter {
-	// Fail loudly at wiring time rather than writing a shape the Taxonomy does
-	// not admit. This is a code-versioned invariant on both sides, so any
-	// mismatch is a programming error caught before the first projection tick.
-	if drift := checkProjectedVocabulary(); len(drift) > 0 {
-		panic("graph projector: vocabulary drifted from the Taxonomy: " + strings.Join(drift, "; "))
+// mustMatchTaxonomy panics when a writer's declared vocabulary contains a shape
+// the registry does not admit. Fail loudly at wiring time rather than writing an
+// unpromoted shape: both sides are code-versioned, so a mismatch is a
+// programming error caught before the first write and never a runtime condition.
+//
+// Shared by the projector and the per-run graph bootstrap, which each declare
+// their own vocabulary because they are two writers (gibson#550). who names the
+// writer, so the panic says which one drifted.
+func mustMatchTaxonomy(who string, reg *taxonomy.Registry, nodeLabels, relationshipTypes []string) {
+	if drift := vocabularyDrift(reg, nodeLabels, relationshipTypes); len(drift) > 0 {
+		panic(who + ": vocabulary drifted from the Taxonomy: " + strings.Join(drift, "; "))
 	}
+}
+
+func newNeo4jGraphWriter(poolGetter func() datapool.Pool) *neo4jGraphWriter {
+	mustMatchTaxonomy("graph projector", taxonomy.Global, projectedNodeLabels, projectedRelationshipTypes)
 	w := &neo4jGraphWriter{poolGetter: poolGetter}
 
 	// A promoted node label needs a uniqueness constraint the DDL did not create
@@ -284,6 +296,50 @@ func (w *neo4jGraphWriter) UpsertHost(ctx context.Context, tenant string, h brai
 // place. When the Finding names a Vulnerability, the one :Vulnerability node
 // per id per tenant is merged by key and linked INSTANCE_OF, so one CVE across
 // four Applications is one node with four edges.
+// upsertTargetCypher MERGEs a :Target node keyed by id, and attaches it to the
+// mission that named it.
+//
+// The Mission is OPTIONAL MATCHed, never merged. :Mission has exactly one
+// writer (gibson#551) and this is not it; merging here would re-create the
+// second writer that was just removed, on a third MERGE key. The bootstrap
+// calls UpsertMission before this, so the match succeeds on the run path — and
+// if it ever does not, the Target still lands and only the edge is missing,
+// which the next run repairs.
+const upsertTargetCypher = `
+MERGE (t:Target { id: $id })
+ON CREATE SET t.created_at = datetime()
+SET t.name   = CASE WHEN $name   = '' THEN t.name   ELSE $name   END,
+    t.type   = CASE WHEN $type   = '' THEN t.type   ELSE $type   END,
+    t.url    = CASE WHEN $url    = '' THEN t.url    ELSE $url    END,
+    t.status = CASE WHEN $status = '' THEN t.status ELSE $status END,
+    t.taxonomy_version = $taxonomy_version,
+    t.updated_at = datetime()
+WITH t
+OPTIONAL MATCH (m:Mission { id: $mission_id, tenant_id: $tenant })
+FOREACH (_ IN CASE WHEN m IS NULL THEN [] ELSE [1] END |
+  MERGE (m)-[:TARGETS]->(t))
+RETURN t.id
+`
+
+// UpsertTarget materializes one :Target node into the tenant's graph.
+func (w *neo4jGraphWriter) UpsertTarget(ctx context.Context, tenant string, t TargetProjection) error {
+	return w.exec(ctx, tenant, upsertTargetCypher, targetUpsertParams(tenant, t), "target", t.ID)
+}
+
+// targetUpsertParams builds the parameter set for upsertTargetCypher.
+func targetUpsertParams(tenant string, t TargetProjection) map[string]any {
+	return map[string]any{
+		"id":               t.ID,
+		"tenant":           tenant,
+		"name":             t.Name,
+		"type":             t.Type,
+		"url":              t.URL,
+		"status":           t.Status,
+		"mission_id":       t.MissionID,
+		"taxonomy_version": taxonomy.Version,
+	}
+}
+
 const upsertFindingCypher = `
 MERGE (f:Finding {brain_id: $id})
   ON CREATE SET f.created_at = datetime()
@@ -299,6 +355,10 @@ WITH f
 OPTIONAL MATCH (h:Host {scope: $scope, address: $address})
 FOREACH (_ IN CASE WHEN h IS NULL THEN [] ELSE [1] END |
   MERGE (f)-[:AFFECTS]->(h))
+WITH f
+OPTIONAL MATCH (tg:Target {id: $scope})
+FOREACH (_ IN CASE WHEN tg IS NULL THEN [] ELSE [1] END |
+  MERGE (f)-[:FOUND_ON]->(tg))
 WITH f
 FOREACH (_ IN CASE WHEN $vulnerability_id = '' THEN [] ELSE [1] END |
   MERGE (v:Vulnerability {key: $vulnerability_id})
@@ -362,22 +422,31 @@ var entityIdentityProperty = map[string]string{
 }
 
 // entityIdentityRefused are labels an entity write may not address at all,
-// because their first-class projection identifies them by a composite key that
-// a single-property merge cannot express. Refusing is the honest answer: a
+// mapped to the reason, because the reasons differ and a single blanket message
+// was wrong for half of them. Refusing is the honest answer either way: a
 // partial match would silently write to the wrong node.
-var entityIdentityRefused = map[string]struct{}{
-	"Mission": {},
+var entityIdentityRefused = map[string]string{
+	"Mission": "it is identified by (id, tenant_id), a composite key a single-property merge cannot express",
 	// Port and Service are identified by (brain_host_id, number/port): they
 	// belong to a Host and are projected with it.
-	"Port":    {},
-	"Service": {},
+	"Port":    "it is identified by (brain_host_id, number) and is projected with its Host",
+	"Service": "it is identified by (brain_host_id, port) and is projected with its Host",
+	// Mission-graph bookkeeping and the registered target (gibson#550). These
+	// are keyed on `id` and so a merge COULD express them — they are refused
+	// because of who owns them, not because of their shape. A run's structure
+	// comes from the projection of the mission that ran, and a Target is a
+	// registered entity read from the target store. An agent that could write
+	// either could invent a node that no run and no registration produced.
+	"MissionNode": "a run's structure is written from the mission projection, never by an agent",
+	"MissionRun":  "a run is written by the mission graph bootstrap, never by an agent",
+	"Target":      "a Target is a registered entity, written from the target store, never by an agent",
 }
 
 // entityIdentity builds the identity map for one label, or reports that the
 // label may not be addressed this way.
 func entityIdentity(label, key string) (map[string]any, error) {
-	if _, refused := entityIdentityRefused[label]; refused {
-		return nil, fmt.Errorf("graph projector: %s is identified by a composite key and cannot be addressed by an entity write", label)
+	if why := entityIdentityRefused[label]; why != "" {
+		return nil, fmt.Errorf("graph projector: %s cannot be addressed by an entity write: %s", label, why)
 	}
 	return map[string]any{identityPropertyFor(label): key}, nil
 }
