@@ -30,9 +30,11 @@ type SlotManager interface {
 type DefaultSlotManager struct {
 	registry LLMRegistry
 
-	// modelFilter, when non-nil, gates the resolved (provider, model)
-	// against the calling user's FGA `can_use` grants. Nil = permit-all
-	// (backwards compatible with pre-spec behavior).
+	// modelFilter gates the resolved (provider, model) against the calling
+	// user's FGA `can_use` grants. The daemon always wires it: FGA is required
+	// at boot (authz_init.go) and grpc.go attaches the filter to the slot
+	// manager. Nil means permit-all and occurs only in tests that build a
+	// slot manager without a daemon.
 	// Spec: llm-user-attribution-governance (Requirement 4).
 	modelFilter modelgate.Filter
 

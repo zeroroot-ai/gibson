@@ -137,12 +137,6 @@ CREATE TABLE IF NOT EXISTS provider_configs (
     created_at              TIMESTAMPTZ NOT NULL DEFAULT now(),
     updated_at              TIMESTAMPTZ NOT NULL DEFAULT now()
 );
-CREATE TABLE IF NOT EXISTS provider_config_meta (
-    key   TEXT PRIMARY KEY,
-    value TEXT NOT NULL
-);
--- The lazy-migration scan (List/Get/Resolve) reads the legacy credential blobs
--- from tenant_secrets; the table must exist even when there is nothing to migrate.
 CREATE TABLE IF NOT EXISTS tenant_secrets (
     name       TEXT        PRIMARY KEY,
     envelope   BYTEA       NOT NULL,

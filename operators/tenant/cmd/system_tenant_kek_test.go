@@ -24,7 +24,6 @@ func TestLoadSystemTenantKEK_FileMount_RawBytes(t *testing.T) {
 		t.Fatal(err)
 	}
 	t.Setenv("GIBSON_SYSTEM_TENANT_KEK_PATH", path)
-	t.Setenv("GIBSON_SYSTEM_TENANT_KEK", "")
 
 	got := loadSystemTenantKEK(testr.New(t))
 	if !bytes.Equal(got, want) {
@@ -42,7 +41,6 @@ func TestLoadSystemTenantKEK_FileMount_RawBytesWithNewline(t *testing.T) {
 		t.Fatal(err)
 	}
 	t.Setenv("GIBSON_SYSTEM_TENANT_KEK_PATH", path)
-	t.Setenv("GIBSON_SYSTEM_TENANT_KEK", "")
 
 	got := loadSystemTenantKEK(testr.New(t))
 	if !bytes.Equal(got, want) {
@@ -65,7 +63,6 @@ func TestLoadSystemTenantKEK_FileMount_RawBytesEndingInNewlineByte(t *testing.T)
 			t.Fatal(err)
 		}
 		t.Setenv("GIBSON_SYSTEM_TENANT_KEK_PATH", path)
-		t.Setenv("GIBSON_SYSTEM_TENANT_KEK", "")
 
 		got := loadSystemTenantKEK(testr.New(t))
 		if !bytes.Equal(got, want) {
@@ -84,7 +81,6 @@ func TestLoadSystemTenantKEK_FileMount_Base64WithNewline(t *testing.T) {
 		t.Fatal(err)
 	}
 	t.Setenv("GIBSON_SYSTEM_TENANT_KEK_PATH", path)
-	t.Setenv("GIBSON_SYSTEM_TENANT_KEK", "")
 
 	got := loadSystemTenantKEK(testr.New(t))
 	if !bytes.Equal(got, want) {
@@ -104,7 +100,6 @@ func TestLoadSystemTenantKEK_FileMount_Base64(t *testing.T) {
 		t.Fatal(err)
 	}
 	t.Setenv("GIBSON_SYSTEM_TENANT_KEK_PATH", path)
-	t.Setenv("GIBSON_SYSTEM_TENANT_KEK", "")
 
 	got := loadSystemTenantKEK(testr.New(t))
 	if !bytes.Equal(got, raw) {
@@ -121,7 +116,6 @@ func TestLoadSystemTenantKEK_FileMount_WrongLength(t *testing.T) {
 		t.Fatal(err)
 	}
 	t.Setenv("GIBSON_SYSTEM_TENANT_KEK_PATH", path)
-	t.Setenv("GIBSON_SYSTEM_TENANT_KEK", "")
 
 	got := loadSystemTenantKEK(testr.New(t))
 	if got != nil {
@@ -133,7 +127,6 @@ func TestLoadSystemTenantKEK_FileMount_WrongLength(t *testing.T) {
 // operator pod, the saga step just stays disabled).
 func TestLoadSystemTenantKEK_FileMount_Missing(t *testing.T) {
 	t.Setenv("GIBSON_SYSTEM_TENANT_KEK_PATH", "/tmp/this-path-does-not-exist-"+t.Name())
-	t.Setenv("GIBSON_SYSTEM_TENANT_KEK", "")
 
 	got := loadSystemTenantKEK(testr.New(t))
 	if got != nil {
@@ -141,46 +134,13 @@ func TestLoadSystemTenantKEK_FileMount_Missing(t *testing.T) {
 	}
 }
 
-// Legacy env-var path still works for overlays that haven't migrated to
-// file mount (backward compat is the explicit deploy#173 contract).
-func TestLoadSystemTenantKEK_EnvVar_Backcompat(t *testing.T) {
-	raw := bytes.Repeat([]byte{0x12}, 32)
-	t.Setenv("GIBSON_SYSTEM_TENANT_KEK_PATH", "")
-	t.Setenv("GIBSON_SYSTEM_TENANT_KEK", base64.StdEncoding.EncodeToString(raw))
-
-	got := loadSystemTenantKEK(testr.New(t))
-	if !bytes.Equal(got, raw) {
-		t.Errorf("env-var path mismatch: got % x want % x", got, raw)
-	}
-}
-
 // Neither set — graceful no-op (the existing default behaviour).
-func TestLoadSystemTenantKEK_BothUnset(t *testing.T) {
+func TestLoadSystemTenantKEK_PathUnset(t *testing.T) {
 	t.Setenv("GIBSON_SYSTEM_TENANT_KEK_PATH", "")
-	t.Setenv("GIBSON_SYSTEM_TENANT_KEK", "")
 
 	got := loadSystemTenantKEK(testr.New(t))
 	if got != nil {
 		t.Errorf("expected nil KEK when both unset, got % x", got)
-	}
-}
-
-// PATH takes precedence over env even when both are set — operators
-// migrating from env to file should not be surprised.
-func TestLoadSystemTenantKEK_PathWinsOverEnv(t *testing.T) {
-	dir := t.TempDir()
-	path := filepath.Join(dir, "master-key")
-	fileKEK := bytes.Repeat([]byte{0x55}, 32)
-	if err := os.WriteFile(path, fileKEK, 0o600); err != nil {
-		t.Fatal(err)
-	}
-	envKEK := bytes.Repeat([]byte{0xAA}, 32)
-	t.Setenv("GIBSON_SYSTEM_TENANT_KEK_PATH", path)
-	t.Setenv("GIBSON_SYSTEM_TENANT_KEK", base64.StdEncoding.EncodeToString(envKEK))
-
-	got := loadSystemTenantKEK(testr.New(t))
-	if !bytes.Equal(got, fileKEK) {
-		t.Errorf("file should win: got % x want % x", got, fileKEK)
 	}
 }
 
@@ -191,7 +151,6 @@ func TestLoadSystemTenantKEK_PathWinsOverEnv(t *testing.T) {
 // the Secret is populated and returns the KEK once available.
 func TestNewSystemTenantKEKProvider_Absent(t *testing.T) {
 	t.Setenv("GIBSON_SYSTEM_TENANT_KEK_PATH", "")
-	t.Setenv("GIBSON_SYSTEM_TENANT_KEK", "")
 
 	provider := newSystemTenantKEKProvider(testr.New(t))
 	if provider == nil {
@@ -214,7 +173,6 @@ func TestNewSystemTenantKEKProvider_Present(t *testing.T) {
 		t.Fatal(err)
 	}
 	t.Setenv("GIBSON_SYSTEM_TENANT_KEK_PATH", path)
-	t.Setenv("GIBSON_SYSTEM_TENANT_KEK", "")
 
 	provider := newSystemTenantKEKProvider(testr.New(t))
 	if provider == nil {

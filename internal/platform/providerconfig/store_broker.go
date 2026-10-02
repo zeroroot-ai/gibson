@@ -5,7 +5,6 @@ package providerconfig
 
 import (
 	"context"
-	"encoding/json"
 	"errors"
 	"fmt"
 	"strings"
@@ -14,7 +13,6 @@ import (
 	"github.com/zeroroot-ai/sdk/auth"
 
 	"github.com/zeroroot-ai/gibson/internal/infra/datapool"
-	"github.com/zeroroot-ai/gibson/internal/infra/datapool/envelope"
 )
 
 // secretsServiceIface is the narrow slice of secrets.Service that
@@ -33,13 +31,6 @@ type secretsServiceIface interface {
 //     provider_configs Postgres table via providerConfigDAO.
 //   - credentials to the secrets broker (secrets.Service) under keys
 //     "provider_cred:<name>:<field>", one key per credential field.
-//
-// Lazy migration: on the first read of a provider whose row is absent from
-// provider_configs but whose legacy key "provider_config:<name>" exists in
-// tenant_secrets, the store decrypts the blob using conn.KEK, writes metadata
-// to provider_configs, routes each credential field through secrets.Service.Put,
-// and deletes the legacy row. This is idempotent — ON CONFLICT DO NOTHING
-// protects against concurrent migration races.
 type brokerBackedStore struct {
 	pool datapool.Pool
 	svc  secretsServiceIface
@@ -141,64 +132,6 @@ func (s *brokerBackedStore) deleteCredentials(ctx context.Context, tenantID, nam
 // Lazy migration helpers
 // ---------------------------------------------------------------------------
 
-// maybeMigrateOne checks for a legacy tenant_secrets row ("provider_config:<name>").
-// If found, it decrypts the blob with conn.KEK, writes metadata to provider_configs,
-// routes each credential field through secrets.Service.Put, and deletes the old row.
-// Returns nil, nil when no legacy row exists (not an error).
-func (s *brokerBackedStore) maybeMigrateOne(ctx context.Context, conn *datapool.Conn, tenantID, name string) (*ProviderConfig, error) {
-	legacyKey := "provider_config:" + name
-	aad := []byte("secret:" + legacyKey)
-
-	var enc []byte
-	err := conn.Postgres.QueryRow(ctx,
-		`SELECT envelope FROM tenant_secrets WHERE name = $1`, legacyKey,
-	).Scan(&enc)
-	if err != nil {
-		return nil, nil // no legacy row
-	}
-
-	plain, err := envelope.Decrypt(conn.KEK, enc, aad)
-	if err != nil {
-		return nil, fmt.Errorf("providerconfig: migrate: decrypt legacy %q: %w", name, err)
-	}
-	var p legacyProviderPayload
-	if err := json.Unmarshal(plain, &p); err != nil {
-		return nil, fmt.Errorf("providerconfig: migrate: unmarshal legacy %q: %w", name, err)
-	}
-
-	dao := newProviderConfigDAO(conn.Postgres)
-	cfg, err := dao.insertMigrated(ctx, tenantID, name, &p)
-	if err != nil {
-		return nil, fmt.Errorf("providerconfig: migrate: insert metadata %q: %w", name, err)
-	}
-
-	if err := s.putCredentials(ctx, tenantID, name, p.Credentials); err != nil {
-		return nil, fmt.Errorf("providerconfig: migrate: write credentials %q: %w", name, err)
-	}
-
-	// Best-effort cleanup: if this fails the migration is still correct — the
-	// legacy row will be re-migrated on next read (ON CONFLICT DO NOTHING).
-	_ = dao.deleteLegacyRow(ctx, name)
-
-	return cfg, nil
-}
-
-// maybeMigrateAll migrates all legacy tenant_secrets rows not yet present in
-// provider_configs. Called at the top of List to surface every provider.
-func (s *brokerBackedStore) maybeMigrateAll(ctx context.Context, conn *datapool.Conn, tenantID string) error {
-	dao := newProviderConfigDAO(conn.Postgres)
-	names, err := dao.legacyProviderNames(ctx)
-	if err != nil {
-		return err
-	}
-	for _, name := range names {
-		if _, err := s.maybeMigrateOne(ctx, conn, tenantID, name); err != nil {
-			return err
-		}
-	}
-	return nil
-}
-
 // ---------------------------------------------------------------------------
 // ProviderConfigStore implementation
 // ---------------------------------------------------------------------------
@@ -209,10 +142,6 @@ func (s *brokerBackedStore) List(ctx context.Context, tenantID string) ([]*Provi
 		return nil, err
 	}
 	defer conn.Release()
-
-	if err := s.maybeMigrateAll(ctx, conn, tenantID); err != nil {
-		return nil, err
-	}
 
 	dao := newProviderConfigDAO(conn.Postgres)
 	metas, err := dao.list(ctx, tenantID)
@@ -241,15 +170,9 @@ func (s *brokerBackedStore) Get(ctx context.Context, tenantID, name string) (*Pr
 	dao := newProviderConfigDAO(conn.Postgres)
 	meta, err := dao.get(ctx, tenantID, name)
 	if errors.Is(err, ErrNotFound) {
-		migrated, migrErr := s.maybeMigrateOne(ctx, conn, tenantID, name)
-		if migrErr != nil {
-			return nil, migrErr
-		}
-		if migrated == nil {
-			return nil, fmt.Errorf("provider %q: %w", name, ErrNotFound)
-		}
-		meta = migrated
-	} else if err != nil {
+		return nil, fmt.Errorf("provider %q: %w", name, ErrNotFound)
+	}
+	if err != nil {
 		return nil, err
 	}
 
@@ -301,13 +224,6 @@ func (s *brokerBackedStore) Update(ctx context.Context, tenantID, name string, i
 	defer conn.Release()
 
 	dao := newProviderConfigDAO(conn.Postgres)
-	// Trigger migration if the metadata row is absent but a legacy row exists.
-	if _, lookupErr := dao.get(ctx, tenantID, name); errors.Is(lookupErr, ErrNotFound) {
-		if _, migrErr := s.maybeMigrateOne(ctx, conn, tenantID, name); migrErr != nil {
-			return nil, migrErr
-		}
-	}
-
 	meta, err := dao.update(ctx, tenantID, name, input)
 	if err != nil {
 		return nil, err
@@ -336,14 +252,7 @@ func (s *brokerBackedStore) Delete(ctx context.Context, tenantID, name string) e
 		return err
 	}
 
-	if err := s.deleteCredentials(ctx, tenantID, name); err != nil {
-		return err
-	}
-
-	// Clean up any surviving legacy row (best effort).
-	_ = dao.deleteLegacyRow(ctx, name)
-
-	return nil
+	return s.deleteCredentials(ctx, tenantID, name)
 }
 
 func (s *brokerBackedStore) GetDefault(ctx context.Context, tenantID string) (*ProviderConfig, error) {
@@ -360,7 +269,7 @@ func (s *brokerBackedStore) GetDefault(ctx context.Context, tenantID string) (*P
 }
 
 func (s *brokerBackedStore) SetDefault(ctx context.Context, tenantID, name string) error {
-	// Verify the provider exists (or migrate it) before setting default.
+	// Verify the provider exists before setting default.
 	if _, err := s.Get(ctx, tenantID, name); err != nil {
 		return err
 	}
@@ -384,15 +293,9 @@ func (s *brokerBackedStore) Resolve(ctx context.Context, tenantID, name string) 
 	dao := newProviderConfigDAO(conn.Postgres)
 	meta, err := dao.get(ctx, tenantID, name)
 	if errors.Is(err, ErrNotFound) {
-		migrated, migrErr := s.maybeMigrateOne(ctx, conn, tenantID, name)
-		if migrErr != nil {
-			return nil, migrErr
-		}
-		if migrated == nil {
-			return nil, fmt.Errorf("provider %q: %w", name, ErrNotFound)
-		}
-		meta = migrated
-	} else if err != nil {
+		return nil, fmt.Errorf("provider %q: %w", name, ErrNotFound)
+	}
+	if err != nil {
 		return nil, err
 	}
 

@@ -12,15 +12,17 @@ import (
 
 func TestEmbed_TenantHasExpectedFiles(t *testing.T) {
 	t.Parallel()
-	// 11: 009 is session_context (component session-context store,
+	// 12: 009 is session_context (component session-context store,
 	// gibson#1184), 010 is banks (banks of always-on coding agents, ADR-0019,
-	// gibson#1708), 011 is jobs (the job queue, gibson#1710).
+	// gibson#1708), 011 is jobs (the job queue, gibson#1710), 012 drops
+	// provider_config_meta, the default-provider pointer that shadowed
+	// provider_configs.is_default (gibson#505).
 	upCount, downCount := countSQL(t, Tenant, tenantDir)
-	if upCount != 11 {
-		t.Errorf("tenant: expected 11 up.sql files, got %d", upCount)
+	if upCount != 12 {
+		t.Errorf("tenant: expected 12 up.sql files, got %d", upCount)
 	}
-	if downCount != 11 {
-		t.Errorf("tenant: expected 11 down.sql files, got %d", downCount)
+	if downCount != 12 {
+		t.Errorf("tenant: expected 12 down.sql files, got %d", downCount)
 	}
 }
 
@@ -100,8 +102,8 @@ func TestTenantMaxVersion(t *testing.T) {
 	if err != nil {
 		t.Fatalf("TenantMaxVersion: %v", err)
 	}
-	if v != 11 {
-		t.Errorf("TenantMaxVersion: got %d, want 11", v)
+	if v != 12 {
+		t.Errorf("TenantMaxVersion: got %d, want 12", v)
 	}
 }
 
