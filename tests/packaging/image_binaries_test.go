@@ -39,7 +39,6 @@ var shippedTools = []string{
 	// rollout.
 	"bootstrap-tenant-owner",
 	"gibson-migrate",
-	"lowercase-tenant-owner",
 	"sandbox-eviction-handler",
 }
 
