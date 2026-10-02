@@ -174,9 +174,7 @@ rules:
     exempt:
       - "internal/infra/datapool/**"
       - "internal/server/admin/**"
-      - "internal/migrate/**"
       - "cmd/gibson-migrate/**"
-      - "cmd/daemon/**"
       - "internal/server/daemon/**"
       - "tools/gibsoncheck/**"
       - "**/*_test.go"
@@ -225,8 +223,13 @@ rules:
       Per-tenant database isolation removes the need; the column would
       be dead weight.
     scope:
-      - "migrations/postgres/**/*.sql"
-      - "migrations/neo4j/**/*.cypher"
+      # The PER-TENANT forward migrations, which is exactly what
+      # scripts/check-no-tenant-id-column.sh scans. The platform migrations
+      # build the SHARED control-plane database, where tenant_id is correct.
+      # A down migration restores a legacy schema, so it is not in scope.
+      # There are no Neo4j migration files: the graph schema is derived from
+      # the Taxonomy and applied by the projector's applySchema.
+      - "pkg/platform/migrations/postgres/tenant/**/*.up.sql"
     pattern:
       kind: forbidden_string
       target: "tenant_id"
@@ -249,7 +252,6 @@ rules:
       - "internal/server/daemon/**"
       - "internal/platform/audit/**"
       - "internal/platform/component/**"
-      - "internal/migrate/**"
       - "cmd/gibson-migrate/**"
       - "tools/gibsoncheck/**"
     pattern:
@@ -272,7 +274,6 @@ rules:
     exempt:
       - "internal/infra/datapool/admin/**"
       - "internal/server/admin/**"
-      - "internal/migrate/**"
       - "cmd/gibson-migrate/**"
       - "tools/gibsoncheck/**"
       - "**/*_test.go"
@@ -294,10 +295,8 @@ rules:
       datapool/envelope/Encrypt(conn.KEK, plaintext, aad). aad must
       bind the record to its context (record_type + identifier).
     scope:
-      - "internal/credentials/**"
       - "internal/platform/providerconfig/**"
       - "internal/infra/database/**"
-      - "internal/infra/datapool/conn_credentials.go"
     pattern:
       kind: required_call
       target: "envelope.Encrypt"
@@ -314,8 +313,6 @@ rules:
       bound to the tenant's dedicated database.
     scope:
       - "internal/engine/graphrag/**/*.go"
-      - "internal/orchestrator/**/*.go"
-      - "migrations/neo4j/**/*.cypher"
     pattern:
       kind: forbidden_string
       target: "(?i)(WHERE\\s+\\w+\\.tenant_id|\\.tenant_id\\s*=)"
@@ -324,7 +321,11 @@ rules:
       Remove the tenant_id filter. Conn.Neo4j is bound to the tenant's
       dedicated database; standard Cypher works without a tenant filter.
     enforced_by:
-      - "script:scripts/check-no-tenant-id-column.sh"
+      # Was "script:scripts/check-no-tenant-id-column.sh", which that script
+      # has never done: it scans .sql migrations, never Go files. The
+      # enforced_by contract can only prove the script EXISTS, not what it
+      # reads, so this one has to be honest instead.
+      - "manual"
 
   - id: gibson-dp-008
     description: |

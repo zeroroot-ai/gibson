@@ -660,8 +660,10 @@ check-comment-paths:
 	@python3 scripts/check-comment-paths.py
 
 # check-rules-enforced asserts every docs/rules.yaml conforms to the shared
-# schema in the SDK, and that each rule's enforced_by names a guard that exists:
-# a registered gibsoncheck analyzer, a script that is present, or a real CI job.
+# schema in the SDK, that each rule's enforced_by names a guard that exists —
+# a registered gibsoncheck analyzer, a script that is present, or a real CI job
+# — and that every scope and exempt glob matches at least one tracked file, so
+# a rule cannot read as coverage of a path that was moved or deleted.
 # One rule named `ci:gibson-make-check`, a job in no workflow, and six used a
 # pre-schema shape the file's own header promised to migrate (gibson#559).
 #

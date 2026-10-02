@@ -45,6 +45,10 @@ import (
 const (
 	MinRulesFiles = 2
 	MinRules      = 10
+	// MinTreePaths floors the file walk the scope check matches against. An
+	// empty or tiny list would make every glob look dead, or — worse, since
+	// the check is skipped on an empty list — make every glob look alive.
+	MinTreePaths = 500
 )
 
 // PatternKinds are the pattern.kind values the shared schema enumerates.
@@ -95,6 +99,55 @@ type File struct {
 
 var versionRe = regexp.MustCompile(`^\d+(\.\d+){0,2}$`)
 
+// globToRegexp translates a rules.yaml scope glob into a regexp anchored at
+// both ends. `**/` matches any number of leading directories (including none),
+// a bare `**` matches anything, `*` and `?` stop at a separator.
+//
+// A translator rather than filepath.Match, because filepath.Match has no `**`
+// and would quietly fail to match every pattern that uses one — which is most
+// of them, and would make the scope check pass by never matching anything.
+//
+// MustCompile, with no error return, because every piece written here is either
+// regexp.QuoteMeta of one byte or one of four fixed character classes. There is
+// no input that makes the result uncompilable, so an error return would be a
+// branch no test could reach and no caller could act on.
+func globToRegexp(pat string) *regexp.Regexp {
+	var b strings.Builder
+	b.WriteString("^")
+	for i := 0; i < len(pat); {
+		switch {
+		case strings.HasPrefix(pat[i:], "**/"):
+			b.WriteString("(?:.*/)?")
+			i += 3
+		case strings.HasPrefix(pat[i:], "**"):
+			b.WriteString(".*")
+			i += 2
+		case pat[i] == '*':
+			b.WriteString("[^/]*")
+			i++
+		case pat[i] == '?':
+			b.WriteString("[^/]")
+			i++
+		default:
+			b.WriteString(regexp.QuoteMeta(pat[i : i+1]))
+			i++
+		}
+	}
+	b.WriteString("$")
+	return regexp.MustCompile(b.String())
+}
+
+// matchesAny reports whether pat matches at least one of paths.
+func matchesAny(pat string, paths []string) bool {
+	re := globToRegexp(pat)
+	for _, p := range paths {
+		if re.MatchString(p) {
+			return true
+		}
+	}
+	return false
+}
+
 // Enforcement is what a repo can point enforced_by at.
 type Enforcement struct {
 	// Analyzers are the registered gibsoncheck analyzer names.
@@ -103,6 +156,12 @@ type Enforcement struct {
 	Jobs map[string]bool
 	// Anchors are the directories a script: path may be relative to.
 	Anchors []string
+	// Paths are the repo-relative tracked files a scope or exempt glob may
+	// match, plus the same paths relative to the rules file's own subtree. A
+	// glob matching none of them covers nothing, so the rule is inert however
+	// well its enforced_by resolves. Empty disables the check, so a harness
+	// that failed to list files does not fail every rule.
+	Paths []string
 }
 
 // Check returns every problem with one rule. Empty means it conforms and every
@@ -137,6 +196,25 @@ func Check(r Rule, env Enforcement) []string {
 
 	if strings.TrimSpace(r.Message) == "" {
 		out = append(out, "has no message, so a violation cannot say what to do instead")
+	}
+
+	// A scope or exempt glob that matches nothing is dead weight: it reads as
+	// coverage and provides none. Ten of gibson's 88 entries named paths that
+	// had been moved or deleted, including two whole rules that covered no file
+	// at all, and gibson#550 was written against one of them.
+	if len(env.Paths) > 0 {
+		for _, field := range []struct {
+			name string
+			pats []string
+		}{{"scope", r.Scope}, {"exempt", r.Exempt}} {
+			for _, pat := range field.pats {
+				if !matchesAny(pat, env.Paths) {
+					out = append(out, fmt.Sprintf(
+						"%s %q matches no tracked file; the path was moved or deleted, "+
+							"so this entry claims coverage it does not have", field.name, pat))
+				}
+			}
+		}
 	}
 
 	if len(r.EnforcedBy) == 0 {
