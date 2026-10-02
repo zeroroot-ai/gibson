@@ -402,6 +402,14 @@ jobs:
           make check-ci-lane-parity
           make check-build-tags
           make check-queue-gate
+      - name: Guard first-party module versions exist as tags
+        # gibson#196: go.mod named setec v0.114.0 for weeks after the history
+        # reset deleted the tag; only the module proxy's cache kept builds
+        # green. The lookup uses the workflow token so a private module
+        # resolves too.
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: make check-first-party-tags
       - name: Guard gofmt cleanliness
         # gibson#1415: no lane ever CHECKED formatting -- `make fmt` rewrites
         # instead of failing, and .golangci.yml enables no formatter -- so
