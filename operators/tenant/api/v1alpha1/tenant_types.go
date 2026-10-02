@@ -177,58 +177,6 @@ type TenantDataPlaneStatus struct {
 	Stores DataPlaneSummary `json:"stores,omitempty"`
 }
 
-// BillingSubscriptionStatus mirrors the Stripe subscription state for a Tenant.
-// Written by the dashboard webhook handlers and read by the operator's billing
-// reconciler. All fields are optional; absent means no billing has occurred.
-//
-// Spec: stripe-billing-integration R4.2, R5.1.
-type BillingSubscriptionStatus struct {
-	// SubscriptionID is the Stripe subscription ID (sub_...).
-	// +optional
-	SubscriptionID string `json:"subscriptionId,omitempty"`
-
-	// CustomerID is the Stripe customer ID (cus_...).
-	// +optional
-	CustomerID string `json:"customerId,omitempty"`
-
-	// PriceID is the Stripe price ID currently active on the subscription.
-	// +optional
-	PriceID string `json:"priceId,omitempty"`
-
-	// Status mirrors Stripe's subscription status field.
-	// +kubebuilder:validation:Enum=trialing;active;past_due;cancelled;incomplete;incomplete_expired
-	// +optional
-	Status string `json:"status,omitempty"`
-
-	// TrialEnd is the ISO 8601 UTC timestamp when the trial period ends.
-	// +optional
-	TrialEnd string `json:"trialEnd,omitempty"`
-
-	// TrialEndsSoon is true when the customer.subscription.trial_will_end
-	// event fires (3 days before trialEnd). Reset to false on invoice.paid.
-	// +optional
-	TrialEndsSoon bool `json:"trialEndsSoon,omitempty"`
-
-	// CurrentPeriodEnd is the ISO 8601 UTC timestamp for end of billing period.
-	// +optional
-	CurrentPeriodEnd string `json:"currentPeriodEnd,omitempty"`
-
-	// PastDueSince is the ISO 8601 UTC timestamp when the subscription first
-	// entered past_due state. Only written on first transition; preserved on
-	// retries. The operator uses this to enforce the 7-day dunning window.
-	// +optional
-	PastDueSince string `json:"pastDueSince,omitempty"`
-
-	// LastWebhookEventID is the Stripe event ID of the last webhook that
-	// mutated this status. Used for debugging and drift detection.
-	// +optional
-	LastWebhookEventID string `json:"lastWebhookEventId,omitempty"`
-
-	// LastUpdated is the ISO 8601 UTC timestamp of the last status write.
-	// +optional
-	LastUpdated string `json:"lastUpdated,omitempty"`
-}
-
 // TenantStatus defines the observed state of a Tenant.
 type TenantStatus struct {
 	// Phase is the current lifecycle phase.
@@ -279,12 +227,6 @@ type TenantStatus struct {
 	// status.dataPlane.ready before opening data connections for a tenant.
 	// +optional
 	DataPlane TenantDataPlaneStatus `json:"dataPlane,omitempty"`
-
-	// Billing holds the Stripe subscription state for this tenant.
-	// Written by the dashboard webhook handlers and read by the operator's
-	// billing reconciler and entitlements gating logic.
-	// +optional
-	Billing BillingSubscriptionStatus `json:"billing,omitempty"`
 }
 
 // +kubebuilder:object:root=true

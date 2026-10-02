@@ -68,10 +68,9 @@ func (NoopTenantStatusReporter) ReportTenantStatus(context.Context, provision.Te
 func (r *TenantReconciler) reportStatusToDaemon(ctx context.Context, tenant *gibsonv1alpha1.Tenant) {
 	logger := log.FromContext(ctx).WithName("tenant-status-report")
 
-	stripeID := tenant.Status.Billing.CustomerID
-	if stripeID == "" {
-		stripeID = tenant.Status.StripeCustomerID
-	}
+	// status.stripeCustomerId is the one field the billing webhook writes.
+	// status.billing never had a writer and is gone (gibson#566).
+	stripeID := tenant.Status.StripeCustomerID
 	billingActive, err := r.StatusReporter.ReportTenantStatus(ctx, provision.TenantStatusReport{
 		TenantID:         tenant.Name,
 		Phase:            string(tenant.Status.Phase),

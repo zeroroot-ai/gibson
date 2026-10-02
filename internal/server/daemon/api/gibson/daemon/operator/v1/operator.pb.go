@@ -1295,7 +1295,7 @@ type ReportTenantStatusRequest struct {
 	StoreNeo4J    string `protobuf:"bytes,6,opt,name=store_neo4j,json=storeNeo4j,proto3" json:"store_neo4j,omitempty"`
 	// zitadel_org_slug mirrors status.zitadelOrgSlug.
 	ZitadelOrgSlug string `protobuf:"bytes,7,opt,name=zitadel_org_slug,json=zitadelOrgSlug,proto3" json:"zitadel_org_slug,omitempty"`
-	// stripe_customer_id mirrors status.billing.customerId.
+	// stripe_customer_id mirrors status.stripeCustomerId.
 	StripeCustomerId string `protobuf:"bytes,8,opt,name=stripe_customer_id,json=stripeCustomerId,proto3" json:"stripe_customer_id,omitempty"`
 }
 

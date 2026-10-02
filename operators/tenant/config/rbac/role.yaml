@@ -46,6 +46,7 @@ rules:
   - gibson.zeroroot.ai
   resources:
   - agentenrollments/finalizers
+  - connectorinstances/finalizers
   - tenantdataplanes/finalizers
   - tenantgrants/finalizers
   - tenantidentities/finalizers
@@ -68,3 +69,12 @@ rules:
   - get
   - patch
   - update
+- apiGroups:
+  - gibson.zeroroot.ai
+  resources:
+  - connectorinstances
+  verbs:
+  - get
+  - list
+  - update
+  - watch

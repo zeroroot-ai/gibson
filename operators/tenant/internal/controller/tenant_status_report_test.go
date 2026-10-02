@@ -37,7 +37,7 @@ func tenantWithStatus() *gibsonv1alpha1.Tenant {
 	t.Status.DataPlane.Stores.Postgres.State = "ready"
 	t.Status.DataPlane.Stores.Redis.State = "provisioning"
 	t.Status.ZitadelOrgSlug = "acme-org"
-	t.Status.Billing.CustomerID = "cus_9"
+	t.Status.StripeCustomerID = "cus_9"
 	return t
 }
 
@@ -87,8 +87,7 @@ func TestReportStatusToDaemon_MapsStatusFields(t *testing.T) {
 func TestReportStatusToDaemon_StripeCustomerIDFallback(t *testing.T) {
 	scheme := setupScheme(t)
 	tenant := tenantWithStatus()
-	// Billing.CustomerID empty → reporter falls back to Status.StripeCustomerID.
-	tenant.Status.Billing.CustomerID = ""
+	// status.stripeCustomerId is the one source the reporter reads (gibson#566).
 	tenant.Status.StripeCustomerID = "cus_fallback"
 	c := fake.NewClientBuilder().WithScheme(scheme).WithObjects(tenant).Build()
 	rep := &stubReporter{}

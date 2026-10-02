@@ -210,7 +210,7 @@ type GetTenantProvisioningStatusResponse struct {
 	// .GetTenantBilling (own tenant) or AdminTenantService.AdminGetTenantBilling
 	// (cross-tenant). Use zitadel_org_ready (field 8) for the org-created edge.
 	ZitadelOrgSlug string `protobuf:"bytes,5,opt,name=zitadel_org_slug,json=zitadelOrgSlug,proto3" json:"zitadel_org_slug,omitempty"`
-	// stripe_customer_id mirrors status.billing.customerId. RETAINED for wire
+	// stripe_customer_id mirrors status.stripeCustomerId. RETAINED for wire
 	// compatibility but NO LONGER POPULATED here (gibson#1339) — read it via
 	// TenantService.GetTenantBilling / AdminTenantService.AdminGetTenantBilling.
 	StripeCustomerId string `protobuf:"bytes,6,opt,name=stripe_customer_id,json=stripeCustomerId,proto3" json:"stripe_customer_id,omitempty"`
