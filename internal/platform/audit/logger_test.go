@@ -12,6 +12,7 @@ import (
 	"time"
 
 	"github.com/alicebob/miniredis/v2"
+	"github.com/prometheus/client_golang/prometheus/testutil"
 	dto "github.com/prometheus/client_model/go"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
@@ -135,7 +136,7 @@ func TestAuditLogger_Log_WritesEntryToStream(t *testing.T) {
 
 func TestAuditLogger_LogWithResult_RecordsSuccess(t *testing.T) {
 	al, _ := newTestLogger(t)
-	ctx := ctxWithTenant("acme")
+	ctx := ctxWithTenantAndIdentity("acme", "user-1", "")
 
 	al.LogWithResult(ctx, "mission.start", "mission", "m-1", resultSuccess, nil)
 	require.True(t, waitForQueue(al, 200*time.Millisecond), "write queue did not drain")
@@ -149,7 +150,7 @@ func TestAuditLogger_LogWithResult_RecordsSuccess(t *testing.T) {
 
 func TestAuditLogger_LogWithResult_RecordsFailure(t *testing.T) {
 	al, _ := newTestLogger(t)
-	ctx := ctxWithTenant("acme")
+	ctx := ctxWithTenantAndIdentity("acme", "user-1", "")
 
 	al.LogWithResult(ctx, "mission.start", "mission", "m-1", resultFailure, map[string]any{
 		"reason": "quota exceeded",
@@ -165,13 +166,14 @@ func TestAuditLogger_LogWithResult_RecordsFailure(t *testing.T) {
 }
 
 // ---------------------------------------------------------------------------
-// Log — missing identity falls back to "unknown"
+// Log — an entry with no actor is refused, not recorded as "unknown"
 // ---------------------------------------------------------------------------
 
-func TestAuditLogger_Log_MissingIdentity_UsesUnknown(t *testing.T) {
+func TestAuditLogger_Log_MissingIdentity_IsRefused(t *testing.T) {
 	al, _ := newTestLogger(t)
 	// Context has a tenant but no identity.
 	ctx := ctxWithTenant("acme")
+	before := testutil.ToFloat64(auditActorlessTotal)
 
 	al.Log(ctx, "tenant.list", "tenant", "", nil)
 	require.True(t, waitForQueue(al, 200*time.Millisecond), "write queue did not drain")
@@ -179,9 +181,8 @@ func TestAuditLogger_Log_MissingIdentity_UsesUnknown(t *testing.T) {
 
 	entries, err := al.Query(ctx, "acme", AuditQueryOptions{})
 	require.NoError(t, err)
-	require.Len(t, entries, 1)
-	assert.Equal(t, "unknown", entries[0].ActorID)
-	assert.Equal(t, "unknown", entries[0].ActorEmail)
+	assert.Empty(t, entries, "an actorless entry must not reach the stream")
+	assert.InDelta(t, before+1, testutil.ToFloat64(auditActorlessTotal), 0, "the refusal is counted")
 }
 
 // ---------------------------------------------------------------------------
@@ -190,7 +191,7 @@ func TestAuditLogger_Log_MissingIdentity_UsesUnknown(t *testing.T) {
 
 func TestAuditLogger_Query_TimeFiltering(t *testing.T) {
 	al, _ := newTestLogger(t)
-	ctx := ctxWithTenant("acme")
+	ctx := ctxWithTenantAndIdentity("acme", "user-1", "")
 
 	// Write first entry.
 	al.Log(ctx, "event.a", "res", "r1", nil)
@@ -223,7 +224,7 @@ func TestAuditLogger_Query_TimeFiltering(t *testing.T) {
 
 func TestAuditLogger_Query_EndTimeFiltering(t *testing.T) {
 	al, _ := newTestLogger(t)
-	ctx := ctxWithTenant("acme")
+	ctx := ctxWithTenantAndIdentity("acme", "user-1", "")
 
 	// Write first entry.
 	al.Log(ctx, "event.early", "res", "r1", nil)
@@ -260,7 +261,7 @@ func TestAuditLogger_Query_EndTimeFiltering(t *testing.T) {
 
 func TestAuditLogger_Query_FiltersByActionPrefix(t *testing.T) {
 	al, _ := newTestLogger(t)
-	ctx := ctxWithTenant("acme")
+	ctx := ctxWithTenantAndIdentity("acme", "user-1", "")
 
 	al.Log(ctx, "apikey.create", "apikey", "k1", nil)
 	al.Log(ctx, "apikey.revoke", "apikey", "k2", nil)
@@ -283,7 +284,7 @@ func TestAuditLogger_Query_FiltersByActionPrefix(t *testing.T) {
 
 func TestAuditLogger_Query_ExactActionMatch(t *testing.T) {
 	al, _ := newTestLogger(t)
-	ctx := ctxWithTenant("acme")
+	ctx := ctxWithTenantAndIdentity("acme", "user-1", "")
 
 	al.Log(ctx, "apikey.create", "apikey", "k1", nil)
 	al.Log(ctx, "apikey.revoke", "apikey", "k2", nil)
@@ -315,7 +316,7 @@ func TestAuditLogger_Query_FiltersByActor(t *testing.T) {
 	require.True(t, waitForQueue(al, 200*time.Millisecond), "write queue did not drain")
 	time.Sleep(10 * time.Millisecond)
 
-	queryCtx := ctxWithTenant("acme")
+	queryCtx := ctxWithTenantAndIdentity("acme", "user-1", "")
 	entries, err := al.Query(queryCtx, "acme", AuditQueryOptions{
 		ActorID: "alice",
 		Limit:   10,
@@ -365,7 +366,7 @@ func TestAuditLogger_TenantIsolation(t *testing.T) {
 
 func TestAuditLogger_Query_LimitIsRespected(t *testing.T) {
 	al, _ := newTestLogger(t)
-	ctx := ctxWithTenant("acme")
+	ctx := ctxWithTenantAndIdentity("acme", "user-1", "")
 
 	// Write 20 entries.
 	for i := 0; i < 20; i++ {
@@ -381,7 +382,7 @@ func TestAuditLogger_Query_LimitIsRespected(t *testing.T) {
 
 func TestAuditLogger_Query_DefaultLimitApplied(t *testing.T) {
 	al, _ := newTestLogger(t)
-	ctx := ctxWithTenant("acme")
+	ctx := ctxWithTenantAndIdentity("acme", "user-1", "")
 
 	// Limit = 0 should use defaultQueryLimit (100).
 	// We can only meaningfully test that Limit 0 doesn't panic and returns entries.
@@ -410,7 +411,7 @@ func TestAuditLogger_StreamKey_Format(t *testing.T) {
 
 func TestAuditLogger_Query_EmptyStream_ReturnsEmpty(t *testing.T) {
 	al, _ := newTestLogger(t)
-	ctx := ctxWithTenant("acme")
+	ctx := ctxWithTenantAndIdentity("acme", "user-1", "")
 
 	entries, err := al.Query(ctx, "acme", AuditQueryOptions{})
 	require.NoError(t, err)
@@ -478,7 +479,7 @@ func TestAuditLogger_DropOnXADDError(t *testing.T) {
 
 	before := drainCounter()
 
-	ctx := ctxWithTenant("acme")
+	ctx := ctxWithTenantAndIdentity("acme", "user-1", "")
 	al.Log(ctx, "test.action", "resource", "r1", nil)
 
 	// Wait for the drain goroutine to process the item and increment the counter.
@@ -527,7 +528,7 @@ func TestAuditLogger_DropOnQueueFull(t *testing.T) {
 	}
 
 	// Fill the queue to capacity with dummy items.
-	ctx := ctxWithTenant("acme")
+	ctx := ctxWithTenantAndIdentity("acme", "user-1", "")
 	dummy := auditWrite{
 		streamKey: "tenant:acme:audit:log",
 		values:    map[string]any{"id": "dummy"},
@@ -552,7 +553,7 @@ func TestAuditLogger_DropOnQueueFull(t *testing.T) {
 func TestAuditLogger_NoErrorPropagated(t *testing.T) {
 	al, _ := newBrokenLogger(t)
 
-	ctx := ctxWithTenant("acme")
+	ctx := ctxWithTenantAndIdentity("acme", "user-1", "")
 
 	// Must not panic.
 	require.NotPanics(t, func() {

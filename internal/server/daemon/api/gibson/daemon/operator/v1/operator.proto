@@ -338,7 +338,11 @@ message SeedCatalogTenantEnabledResponse {
 message AuditEventMessage {
   string type = 1;
   string actor_subject = 2;
-  string actor_source = 3;
+  // Field 3 was actor_source. The daemon derives the source from the caller's
+  // identity (classifyActorSource) and never read the wire value, so a caller
+  // cannot claim a source it does not have (gibson#544).
+  reserved 3;
+  reserved "actor_source";
   string tuple = 4;
   string action_class = 5;
   string scope_type = 6;

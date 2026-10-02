@@ -78,6 +78,16 @@ var auditWriteDropsTotal = promauto.NewCounter(prometheus.CounterOpts{
 	Help: "Total number of audit write drops due to full queue or XADD error.",
 })
 
+// auditActorlessTotal counts entries refused because the caller's context
+// carried no identity. An audit record with no actor is not an audit record
+// (gibson#544): the refusal is logged at ERROR with the action and resource,
+// so the actorless code path is found and fixed instead of recorded as
+// "unknown".
+var auditActorlessTotal = promauto.NewCounter(prometheus.CounterOpts{
+	Name: "gibson_audit_actorless_refused_total",
+	Help: "Total number of audit entries refused because the context carried no actor identity.",
+})
+
 // AuditEntry is a single immutable audit record. All fields are serialised as
 // individual Redis Stream fields so they can be indexed and filtered without
 // deserialising a JSON blob.
@@ -275,17 +285,23 @@ func (a *AuditLogger) LogWithResult(
 		tenantID = "unknown"
 	}
 
-	actorID := "unknown"
-	actorEmail := "unknown"
-	if id, err := auth.IdentityFromContext(ctx); err == nil {
-		if id.Subject != "" {
-			actorID = id.Subject
-			// For OIDC/Zitadel callers, Subject is the stable user identifier.
-			// Email is not separately propagated in the signed header set;
-			// use Subject as the audit actor for all credential types.
-			actorEmail = id.Subject
-		}
+	// The actor is the identity on the context. For OIDC/Zitadel callers,
+	// Subject is the stable user identifier. Email is not separately
+	// propagated in the signed header set, so Subject is the audit actor for
+	// all credential types. ListAuditEvents serves it as actor_user_id.
+	id, err := auth.IdentityFromContext(ctx)
+	if err != nil || id.Subject == "" {
+		auditActorlessTotal.Inc()
+		a.logger.ErrorContext(ctx, "audit: entry refused, the context carries no actor identity",
+			slog.String("action", action),
+			slog.String("resource", resource),
+			slog.String("resource_id", resourceID),
+			slog.String("tenant_id", tenantID),
+		)
+		return
 	}
+	actorID := id.Subject
+	actorEmail := id.Subject
 
 	now := time.Now().UTC()
 	entry := AuditEntry{
