@@ -466,10 +466,10 @@ func (s *ComponentServiceServer) WithComponentInstallRegistry(pr ComponentInstal
 // RegisterComponent can call reasoner.RegisterExtension when an enrolling
 // component contributes an OntologyExtension payload.
 //
-// When or is nil (the default), any OntologyExtension in the registration
-// request is silently ignored — no error is returned to the caller. This
-// preserves backward compatibility until the proto change that carries
-// OntologyExtension over the enrollment RPC is merged.
+// When or is nil, an OntologyExtension in the registration request is
+// ignored and no error is returned. grpc.go wires the reasoner whenever the
+// daemon built one and logs a warning when it did not, so nil is the
+// reasoner-less daemon, not a compatibility shim.
 //
 // Added by the ontology-extension-system epic.
 func (s *ComponentServiceServer) WithOntologyReasoner(or OntologyReasoner) *ComponentServiceServer {
@@ -542,9 +542,10 @@ func (s *ComponentServiceServer) RegisterComponent(
 	for _, method := range req.Methods {
 		info.Metadata["method:"+method] = "true"
 	}
-	// Structured per-method descriptors (name + description + input schema) so the
-	// connector catalog / SearchTools can surface descriptions. The names-only
-	// metadata above is kept for back-compat. Per ADR-0047 facet 5.
+	// Two readers, two shapes. The names-only "method:<name>" metadata keys
+	// above are what component_access.extractMethods and health.go read; the
+	// structured descriptors (name + description + input schema) are what the
+	// catalog lister surfaces so SearchTools can show descriptions (ADR-0065).
 	for _, md := range req.GetMethodDescriptors() {
 		info.Methods = append(info.Methods, MethodInfo{
 			Name:            md.GetName(),

@@ -113,30 +113,3 @@ func TestGet_IncludesCUESource(t *testing.T) {
 	assert.Equal(t, cue, draft.CueSource)
 	assert.Equal(t, "Get Test", draft.Name)
 }
-
-func TestGet_LegacyYAMLField_Fallback(t *testing.T) {
-	// Simulates a draft written before the cue_source rename: the Redis hash
-	// has a "yaml" field but no "cue_source" field. Get must fall back to it.
-	store := newTestStore(t)
-	ctx := context.Background()
-
-	const legacyCUE = "name: legacy\nversion: 0"
-	draftID := "legacy-draft-id"
-	key := draftKey("tenant-h", draftID)
-
-	// Write directly with the old "yaml" field, bypassing Save.
-	err := store.client.HMSet(ctx, key, map[string]any{
-		"id":         draftID,
-		"name":       "Legacy Draft",
-		"yaml":       legacyCUE,
-		"created_at": "2025-01-01T00:00:00Z",
-		"updated_at": "2025-01-01T00:00:00Z",
-	}).Err()
-	require.NoError(t, err)
-	err = store.client.ZAdd(ctx, indexKey("tenant-h"), goredis.Z{Score: 1, Member: draftID}).Err()
-	require.NoError(t, err)
-
-	draft, err := store.Get(ctx, "tenant-h", draftID)
-	require.NoError(t, err)
-	assert.Equal(t, legacyCUE, draft.CueSource)
-}

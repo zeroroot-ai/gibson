@@ -49,14 +49,8 @@ const (
 	// secrets-only to the full 8-resource set (secrets, configmaps,
 	// services, PVCs, resourcequotas, statefulsets, networkpolicies,
 	// roles+rolebindings).
-	//
-	// Backwards-compat: the previous name `gibson-tenant-operator-secrets`
-	// is preserved as a Role const so the chart's pre-upgrade backfill
-	// Job can identify and delete the old narrow Role on existing
-	// tenant namespaces.
 	tenantOperatorRoleName        = "gibson-tenant-operator"
 	tenantOperatorRoleBindingName = "gibson-tenant-operator"
-	legacyTenantSecretRoleName    = "gibson-tenant-operator-secrets"
 
 	// tenantOperatorNamespaceClusterRole is the chart-rendered
 	// ClusterRole every per-tenant RoleBinding references. Holds the
@@ -126,8 +120,9 @@ func NewNamespaceProvisioner(c client.Client, platformNamespace string, daemonPo
 	}
 }
 
-// Step is kept for backward compatibility with existing callers — it
-// returns the receiver, since the receiver itself implements saga.Step.
+// Step returns the receiver as a saga.Step. The provisioner implements the
+// interface itself; tenant_controller appends this to the provisioning
+// steps.
 func (p *NamespaceProvisioner) Step() saga.Step { return p }
 
 // Provision implements saga.Step.
@@ -443,18 +438,6 @@ func (p *NamespaceProvisioner) ensureTenantNamespaceRBAC(ctx context.Context, ns
 		return fmt.Errorf("upsert RoleBinding %s/%s: %w", nsName, daemonConnectorCredsRoleBindingName, err)
 	}
 
-	// Best-effort delete the legacy narrow Role+RoleBinding from
-	// pre-spec installs AND the per-tenant Role from the earlier
-	// "mint a tenant-local Role" design. Idempotent: NotFound is success.
-	_ = p.Client.Delete(ctx, &rbacv1.Role{ObjectMeta: metav1.ObjectMeta{
-		Name: tenantOperatorRoleName, Namespace: nsName,
-	}})
-	_ = p.Client.Delete(ctx, &rbacv1.Role{ObjectMeta: metav1.ObjectMeta{
-		Name: legacyTenantSecretRoleName, Namespace: nsName,
-	}})
-	_ = p.Client.Delete(ctx, &rbacv1.RoleBinding{ObjectMeta: metav1.ObjectMeta{
-		Name: legacyTenantSecretRoleName + "-binding", Namespace: nsName,
-	}})
 	return nil
 }
 

@@ -11,24 +11,28 @@ import (
 	"time"
 
 	"github.com/jackc/pgx/v5"
-	"github.com/jackc/pgx/v5/pgxpool"
+	"github.com/jackc/pgx/v5/pgconn"
 
 	"github.com/zeroroot-ai/gibson/internal/engine/llm"
 	"github.com/zeroroot-ai/gibson/internal/infra/types"
 )
 
-const (
-	metaKeyDefault = "__default"
-)
-
 // providerConfigDAO is an unexported Postgres DAO for provider config metadata.
-// It operates against provider_configs and provider_config_meta tables (migration 007).
+// It operates against the provider_configs tables (migration 007).
 // It does NOT handle credentials — those flow through secrets.Service.
 type providerConfigDAO struct {
-	pg *pgxpool.Pool
+	pg pgQuerier
 }
 
-func newProviderConfigDAO(pg *pgxpool.Pool) *providerConfigDAO {
+// pgQuerier is the slice of *pgxpool.Pool the DAO uses. A test hands in a
+// fake; production hands in the tenant's pool.
+type pgQuerier interface {
+	Exec(ctx context.Context, sql string, args ...any) (pgconn.CommandTag, error)
+	Query(ctx context.Context, sql string, args ...any) (pgx.Rows, error)
+	QueryRow(ctx context.Context, sql string, args ...any) pgx.Row
+}
+
+func newProviderConfigDAO(pg pgQuerier) *providerConfigDAO {
 	return &providerConfigDAO{pg: pg}
 }
 
@@ -61,35 +65,6 @@ func (d *providerConfigDAO) insert(ctx context.Context, tenantID string, input *
 		DefaultEmbeddingModel: input.DefaultEmbeddingModel,
 		CreatedAt:             now,
 		UpdatedAt:             now,
-	}, nil
-}
-
-// insertMigrated inserts a provider config row from migrated legacy data.
-// ON CONFLICT DO NOTHING so repeated migration attempts are idempotent.
-func (d *providerConfigDAO) insertMigrated(ctx context.Context, tenantID, name string, p *legacyProviderPayload) (*ProviderConfig, error) {
-	id := types.NewID()
-	_, err := d.pg.Exec(ctx,
-		`INSERT INTO provider_configs (id, name, type, default_model, is_default, enabled, capabilities, default_embedding_model, created_at, updated_at)
-		 VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10)
-		 ON CONFLICT (name) DO NOTHING`,
-		string(id), name, p.Type, p.DefaultModel, p.IsDefault, p.Enabled,
-		capabilitiesParam(p.Capabilities), p.DefaultEmbeddingModel, p.CreatedAt, p.UpdatedAt,
-	)
-	if err != nil {
-		return nil, fmt.Errorf("dao: migrate insert %q: %w", name, err)
-	}
-	return &ProviderConfig{
-		ID:                    id,
-		TenantID:              tenantID,
-		Name:                  name,
-		Type:                  llm.ProviderType(p.Type),
-		DefaultModel:          p.DefaultModel,
-		IsDefault:             p.IsDefault,
-		Enabled:               p.Enabled,
-		Capabilities:          normalizeCapabilities(p.Capabilities),
-		DefaultEmbeddingModel: p.DefaultEmbeddingModel,
-		CreatedAt:             p.CreatedAt,
-		UpdatedAt:             p.UpdatedAt,
 	}, nil
 }
 
@@ -213,42 +188,24 @@ func (d *providerConfigDAO) delete(ctx context.Context, name string) error {
 	return nil
 }
 
-func (d *providerConfigDAO) getMetaValue(ctx context.Context, key string) (string, error) {
-	var value string
+// getDefault returns the name of the provider flagged is_default. The column
+// is the one source: the provider_config_meta key/value pointer that used to
+// shadow it left with gibson#505 (tenant migration 012).
+func (d *providerConfigDAO) getDefault(ctx context.Context) (string, error) {
+	var name string
 	err := d.pg.QueryRow(ctx,
-		`SELECT value FROM provider_config_meta WHERE key = $1`, key,
-	).Scan(&value)
+		`SELECT name FROM provider_configs WHERE is_default ORDER BY updated_at DESC LIMIT 1`,
+	).Scan(&name)
 	if err != nil {
 		if errors.Is(err, pgx.ErrNoRows) {
 			return "", ErrNotFound
 		}
-		return "", fmt.Errorf("dao: get meta %q: %w", key, err)
+		return "", fmt.Errorf("dao: get default: %w", err)
 	}
-	return value, nil
-}
-
-func (d *providerConfigDAO) setMetaValue(ctx context.Context, key, value string) error {
-	_, err := d.pg.Exec(ctx,
-		`INSERT INTO provider_config_meta (key, value) VALUES ($1, $2)
-		 ON CONFLICT (key) DO UPDATE SET value = EXCLUDED.value`,
-		key, value,
-	)
-	if err != nil {
-		return fmt.Errorf("dao: set meta %q: %w", key, err)
-	}
-	return nil
-}
-
-func (d *providerConfigDAO) getDefault(ctx context.Context) (string, error) {
-	return d.getMetaValue(ctx, metaKeyDefault)
+	return name, nil
 }
 
 func (d *providerConfigDAO) setDefault(ctx context.Context, name string) error {
-	// Keep the meta pointer (legacy path + GetDefault).
-	if err := d.setMetaValue(ctx, metaKeyDefault, name); err != nil {
-		return err
-	}
-	// Also sync provider_configs.is_default so list() returns the right value.
 	_, err := d.pg.Exec(ctx,
 		`UPDATE provider_configs SET is_default = (name = $1)`,
 		name,
@@ -257,37 +214,6 @@ func (d *providerConfigDAO) setDefault(ctx context.Context, name string) error {
 		return fmt.Errorf("dao: sync is_default column: %w", err)
 	}
 	return nil
-}
-
-// legacyProviderNames returns provider names that still exist in tenant_secrets
-// under the old "provider_config:<name>" key format. Meta keys are excluded.
-func (d *providerConfigDAO) legacyProviderNames(ctx context.Context) ([]string, error) {
-	rows, err := d.pg.Query(ctx,
-		`SELECT name FROM tenant_secrets
-		 WHERE starts_with(name, 'provider_config:')
-		   AND name != 'provider_config:__default'
-		 ORDER BY name`,
-	)
-	if err != nil {
-		return nil, fmt.Errorf("dao: list legacy provider names: %w", err)
-	}
-	defer rows.Close()
-
-	var names []string
-	for rows.Next() {
-		var key string
-		if err := rows.Scan(&key); err != nil {
-			return nil, fmt.Errorf("dao: scan legacy key: %w", err)
-		}
-		names = append(names, strings.TrimPrefix(key, "provider_config:"))
-	}
-	return names, rows.Err()
-}
-
-// deleteLegacyRow removes the old tenant_secrets row for the provider.
-func (d *providerConfigDAO) deleteLegacyRow(ctx context.Context, name string) error {
-	_, err := d.pg.Exec(ctx, `DELETE FROM tenant_secrets WHERE name = $1`, "provider_config:"+name)
-	return err
 }
 
 // isPgUniqueViolation reports whether err is a Postgres unique constraint
@@ -304,24 +230,10 @@ func isPgUniqueViolation(err error) bool {
 	return false
 }
 
-// legacyProviderPayload is the JSON blob from old tenant_secrets rows written
-// by store_postgres.go (now deleted). Used only in the lazy migration path.
-type legacyProviderPayload struct {
-	Type                  string            `json:"type"`
-	DefaultModel          string            `json:"default_model"`
-	IsDefault             bool              `json:"is_default"`
-	Enabled               bool              `json:"enabled"`
-	Capabilities          []string          `json:"capabilities,omitempty"`
-	DefaultEmbeddingModel string            `json:"default_embedding_model,omitempty"`
-	Credentials           map[string]string `json:"credentials"`
-	CreatedAt             time.Time         `json:"created_at"`
-	UpdatedAt             time.Time         `json:"updated_at"`
-}
-
 // normalizeCapabilities lower-cases, trims, de-duplicates and drops empty
-// capability strings. A nil/empty input yields nil (the legacy chat-only
-// default), so round-tripping a provider with no declared capabilities is a
-// no-op rather than persisting an empty array.
+// capability strings. A nil/empty input yields nil, which means chat-only,
+// so round-tripping a provider with no declared capabilities is a no-op
+// rather than persisting an empty array.
 func normalizeCapabilities(caps []string) []string {
 	if len(caps) == 0 {
 		return nil

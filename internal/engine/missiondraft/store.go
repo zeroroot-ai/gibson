@@ -21,10 +21,6 @@ package missiondraft
 // at any time (gibson#505). Earlier records were written with a 30-day TTL;
 // rewriting one via Save clears the TTL (PERSIST) so reopened missions stop
 // expiring.
-//
-// Migration note: drafts written before the cue_source rename carry a "yaml"
-// field instead. Get falls back to "yaml" when "cue_source" is absent; Save
-// writes "cue_source" and deletes the legacy "yaml" field in one pipeline.
 
 import (
 	"context"
@@ -134,8 +130,7 @@ func (s *RedisMissionDraftStore) Save(ctx context.Context, tenantID, name, cueSo
 
 	pipe := s.client.Pipeline()
 	pipe.HMSet(ctx, key, fields)
-	pipe.HDel(ctx, key, "yaml") // remove legacy field from pre-rename drafts
-	pipe.Persist(ctx, key)      // clear any TTL a pre-#505 record carried — authored records are durable
+	pipe.Persist(ctx, key) // clear any TTL a pre-#505 record carried — authored records are durable
 	pipe.ZAdd(ctx, idx, goredis.Z{Score: score, Member: draftID})
 	if _, pipeErr := pipe.Exec(ctx); pipeErr != nil {
 		return "", fmt.Errorf("failed to save mission draft: %w", pipeErr)
@@ -214,9 +209,6 @@ func (s *RedisMissionDraftStore) Get(ctx context.Context, tenantID, draftID stri
 	}
 
 	cueSource := fields["cue_source"]
-	if cueSource == "" {
-		cueSource = fields["yaml"] // legacy fallback for drafts written before the rename
-	}
 	return &MissionDraft{
 		ID:                  fields["id"],
 		Name:                fields["name"],

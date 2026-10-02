@@ -160,27 +160,6 @@ func (n *GraphNode) GetRunNumber() int {
 	return 0
 }
 
-// RunMetadata contains run provenance information for a graph node.
-type RunMetadata struct {
-	MissionName  string    `json:"mission_name"`
-	RunNumber    int       `json:"run_number"`
-	DiscoveredAt time.Time `json:"discovered_at"`
-}
-
-// GetRunMetadata extracts run metadata from node properties.
-// Returns nil if no mission_name is set (backwards compatibility).
-func (n *GraphNode) GetRunMetadata() *RunMetadata {
-	name := n.GetMissionName()
-	if name == "" {
-		return nil
-	}
-	return &RunMetadata{
-		MissionName:  name,
-		RunNumber:    n.GetRunNumber(),
-		DiscoveredAt: n.CreatedAt,
-	}
-}
-
 // Validate validates the GraphNode fields.
 func (n *GraphNode) Validate() error {
 	if err := n.ID.Validate(); err != nil {

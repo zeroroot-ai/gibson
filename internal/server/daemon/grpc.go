@@ -1918,10 +1918,7 @@ func (d *daemonImpl) buildGRPCServer(ctx context.Context) (*grpcSubsystem, error
 
 			// Wire the ontology reasoner so RegisterComponent can call
 			// RegisterExtension when an enrolling component contributes an
-			// OntologyExtension payload (proto field deferred — see TODO in
-			// service.go). The capability is wired now so the daemon has the
-			// plumbing; the actual proto field will activate it without a
-			// daemon change.
+			// OntologyExtension payload.
 			if d.reasoner != nil {
 				compSvc.WithOntologyReasoner(d.reasoner)
 				d.logger.Info(ctx, "ontology reasoner wired into ComponentService for extension registration")

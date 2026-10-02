@@ -1,10 +1,10 @@
 // SPDX-License-Identifier: Elastic-2.0
 // Copyright 2026 Zero Root AI
 
-// system_tenant_kek.go — load the system-tenant KEK from either a file
-// (preferred — works for both base64-text and raw-bytes Secret values)
-// or an env var (legacy path, kept for backward compat with overlays
-// whose Secret values are pre-base64-encoded text).
+// system_tenant_kek.go — load the system-tenant KEK from the file the chart
+// mounts (works for both base64-text and raw-bytes Secret values). The env
+// var path that took the KEK inline (GIBSON_SYSTEM_TENANT_KEK) was deleted
+// with gibson#505: no chart or overlay set it.
 //
 // deploy#173: the daemon's k8s key_provider reads the same Secret via
 // the Kubernetes API at runtime. The operator now does the equivalent
@@ -77,22 +77,8 @@ func loadSystemTenantKEK(log logr.Logger) []byte {
 		}
 	}
 
-	kekB64 := os.Getenv("GIBSON_SYSTEM_TENANT_KEK")
-	if kekB64 == "" {
-		log.Info("GIBSON_SYSTEM_TENANT_KEK / _PATH both unset — WriteTenantBrokerConfig step will no-op")
-		return nil
-	}
-	kek, err := base64.StdEncoding.DecodeString(kekB64)
-	if err != nil {
-		log.Error(err, "GIBSON_SYSTEM_TENANT_KEK is not valid base64 — WriteTenantBrokerConfig step disabled")
-		return nil
-	}
-	if len(kek) != 32 {
-		log.Info("GIBSON_SYSTEM_TENANT_KEK must decode to 32 bytes — WriteTenantBrokerConfig step disabled",
-			"got", len(kek))
-		return nil
-	}
-	return kek
+	log.Info("GIBSON_SYSTEM_TENANT_KEK_PATH unset — WriteTenantBrokerConfig step will no-op")
+	return nil
 }
 
 // newSystemTenantKEKProvider builds the lazy KEK provider used by

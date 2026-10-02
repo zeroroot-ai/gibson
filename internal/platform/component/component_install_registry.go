@@ -74,8 +74,8 @@ type ComponentInstall struct {
 	ID string
 	// TenantID is the tenant that owns this install.
 	TenantID auth.TenantID
-	// Kind is the component kind: agent | tool | plugin (gibson#662). Empty is
-	// treated as "plugin" for back-compat.
+	// Kind is the component kind: agent | tool | plugin (gibson#662). Required:
+	// CheckIn refuses an empty kind before an install reaches the registry.
 	Kind string
 	// Name is the component name from the manifest metadata.name field.
 	Name string
@@ -279,11 +279,8 @@ func (r *postgresComponentInstallRegistry) Register(ctx context.Context, install
 
 	// gibson#662: one install registry for every component kind. `kind`
 	// discriminates agent/tool/plugin; uniqueness is per (tenant, kind, name,
-	// host). Default to plugin when unset for back-compat with existing callers.
+	// host). CheckIn refuses an empty kind before an install reaches here.
 	kind := install.Kind
-	if kind == "" {
-		kind = "plugin"
-	}
 
 	descriptorSet := descriptorSetForDB(install.ProtoDescriptorSet)
 
