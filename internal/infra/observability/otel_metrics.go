@@ -82,7 +82,6 @@ type OTelMetricsRecorder struct {
 	memoryOpsTotal       metric.Int64Counter
 	graphOpsTotal        metric.Int64Counter
 	decisionsTotal       metric.Int64Counter
-	authzDecisionsTotal  metric.Int64Counter
 
 	// FGA-specific counters.
 	fgaUnavailableTotal metric.Int64Counter
@@ -211,17 +210,6 @@ func NewOTelMetricsRecorder(mp metric.MeterProvider) (*OTelMetricsRecorder, erro
 	recorder.decisionsTotal, err = meter.Int64Counter(
 		"gibson.orchestrator.decisions.total",
 		metric.WithDescription("Total orchestrator decisions"),
-	)
-	if err != nil {
-		return nil, err
-	}
-
-	// Authz decisions: counter for every RPC the authz interceptor
-	// evaluates, labeled by decision (allow|deny), method, and permission.
-	// Added by the declarative-rbac-framework spec (Requirement 9.5).
-	recorder.authzDecisionsTotal, err = meter.Int64Counter(
-		"gibson.authz.decisions.total",
-		metric.WithDescription("Total RPC authorization decisions by decision (allow|deny), method, and permission"),
 	)
 	if err != nil {
 		return nil, err
@@ -690,53 +678,6 @@ func (r *OTelMetricsRecorder) RecordDecision(ctx context.Context, action string)
 			attribute.String("tenant_id", tenantID),
 		),
 	)
-}
-
-// RecordAuthzDecision records metrics for a single RPC authorization decision.
-//
-// NOT CALLED. The RPC authz interceptor it was written for does not exist, and
-// `grep '.Enforce('` finds no caller anywhere: authorization moved to ext-authz,
-// which records its own counters. gibson#558 deletes this or names the
-// enforcement point that will call it.
-//
-// Only the tests in otel_metrics_authz_test.go reach it. Labeled by decision, method, and permission so
-// operators can drill into "which roles are failing to call which RPCs for
-// which permissions" without grepping logs.
-//
-// Added by the declarative-rbac-framework spec (Requirement 9.5).
-//
-// Parameters:
-//   - ctx: gRPC request context (provides tenant_id label)
-//   - decision: "allow" or "deny"
-//   - method: fully-qualified gRPC method path
-//   - permission: the permission name evaluated (e.g. "tenants:provision"), or
-//     "rpc_not_in_schema" for default-deny on unmapped methods, or empty for
-//     RPCs with no required permissions
-//
-// Example:
-//
-//	recorder.RecordAuthzDecision(ctx, "allow", "/gibson.tenant.v1.TenantAdminService/CreateAgentIdentity", "tenants:provision")
-//	recorder.RecordAuthzDecision(ctx, "deny", "/gibson.tenant.v1.TenantAdminService/ListAgentIdentities", "tenants:list-all")
-func (r *OTelMetricsRecorder) RecordAuthzDecision(ctx context.Context, decision, method, permission string) {
-	if r == nil || r.authzDecisionsTotal == nil {
-		return
-	}
-
-	tenantID := auth.TenantStringFromContext(ctx)
-	if tenantID == "" {
-		tenantID = "default"
-	}
-
-	attrs := []attribute.KeyValue{
-		attribute.String("decision", decision),
-		attribute.String("method", method),
-		attribute.String("tenant_id", tenantID),
-	}
-	if permission != "" {
-		attrs = append(attrs, attribute.String("permission", permission))
-	}
-
-	r.authzDecisionsTotal.Add(ctx, 1, metric.WithAttributes(attrs...))
 }
 
 // RecordFgaUnavailable increments the FGA-unavailable counter.
