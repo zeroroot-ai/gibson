@@ -290,8 +290,6 @@ type SagaAuditEvent struct {
 	ErrorMessage string `json:"errorMessage,omitempty"`
 	// StepName is the saga step identifier, for debuggability.
 	StepName string `json:"stepName"`
-	// InputKeys lists the field names present in the step's input — never values.
-	InputKeys []string `json:"inputKeys,omitempty"`
 }
 
 // SagaEmitter writes SagaAuditEvents to an io.Writer with a configurable prefix.
