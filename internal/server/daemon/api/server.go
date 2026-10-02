@@ -22,6 +22,7 @@ import (
 
 	"github.com/zeroroot-ai/gibson/internal/engine/llm"
 	"github.com/zeroroot-ai/gibson/internal/engine/memory/embedder"
+	"github.com/zeroroot-ai/gibson/internal/engine/mission/graph"
 	"github.com/zeroroot-ai/gibson/internal/engine/missiondraft"
 	"github.com/zeroroot-ai/gibson/internal/engine/target"
 	"github.com/zeroroot-ai/gibson/internal/infra/datapool"
@@ -2774,8 +2775,9 @@ func (s *DaemonServer) CreateMission(ctx context.Context, req *daemonpb.CreateMi
 }
 
 // CreateMissionDefinition registers a structured mission definition with the
-// daemon. The definition is validated via mission.Validate and persisted to the
-// definition store; no YAML parsing, git cloning, or dependency resolution runs.
+// daemon. Its topology is validated by graph.Validate, the analyser the mission
+// view uses, and the definition is persisted to the definition store; no YAML
+// parsing, git cloning, or dependency resolution runs.
 func (s *DaemonServer) CreateMissionDefinition(ctx context.Context, req *daemonpb.CreateMissionDefinitionRequest) (*daemonpb.CreateMissionDefinitionResponse, error) {
 	if req == nil || req.Definition == nil {
 		return nil, status_grpc.Errorf(codes.InvalidArgument, "definition is required")
@@ -2786,11 +2788,20 @@ func (s *DaemonServer) CreateMissionDefinition(ctx context.Context, req *daemonp
 		return nil, status_grpc.Errorf(codes.InvalidArgument, "invalid mission definition: definition is nil")
 	}
 
-	// Minimal validation at the wire boundary. Full structural validation
-	// happens at the protovalidate gRPC interceptor; this guard catches the
-	// summary envelope's required fields the runtime needs immediately.
+	// The envelope's required fields the runtime needs immediately.
 	if def.GetName() == "" {
 		return nil, status_grpc.Errorf(codes.InvalidArgument, "definition name is required")
+	}
+
+	// Topology, from the same analyser the mission view uses (gibson#547).
+	// protovalidate checks one message against its own constraints and cannot
+	// see across nodes, so a cycle, an orphan or an edge naming a node that
+	// does not exist passed it, was stored, and ran as a mission that
+	// completed having dispatched nothing. Refused here, before the store, so
+	// only NEW definitions are held to it: definitions already stored were
+	// never validated and keep running as they do today.
+	if err := graph.Validate(def); err != nil {
+		return nil, status_grpc.Errorf(codes.InvalidArgument, "invalid mission definition: %v", err)
 	}
 
 	result, err := s.daemon.CreateMissionDefinition(ctx, CreateMissionDefinitionData{

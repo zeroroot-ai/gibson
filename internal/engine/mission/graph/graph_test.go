@@ -458,3 +458,36 @@ func TestProject_NestedForEachIsRefused(t *testing.T) {
 		t.Errorf("error text does not name the problem: %v", err)
 	}
 }
+
+// TestValidate_RefusesACycle: Validate reports the same cycle Project does,
+// so the write path and the mission view refuse the same definition
+// (gibson#547).
+func TestValidate_RefusesACycle(t *testing.T) {
+	def := &missionv1.MissionDefinition{
+		Nodes: map[string]*missionv1.MissionNode{"a": agent("a", "x"), "b": agent("b", "y"), "c": agent("c", "z")},
+		Edges: []*missionv1.MissionEdge{{From: "a", To: "b"}, {From: "b", To: "c"}, {From: "c", To: "a"}},
+	}
+	err := graph.Validate(def)
+	ve, ok := err.(*graph.ValidationError)
+	if !ok || len(ve.Cycles) != 1 || !reflect.DeepEqual(ve.Cycles[0], []string{"a", "b", "c"}) {
+		t.Fatalf("want cycle [a b c], got %T %v", err, err)
+	}
+	if _, perr := graph.Project(def, nil); perr == nil || perr.Error() != err.Error() {
+		t.Fatalf("Validate and Project disagree: %v vs %v", err, perr)
+	}
+}
+
+// TestValidate_SoundDefinitionIsNil: a definition Project renders passes
+// Validate with a nil error, never a typed nil.
+func TestValidate_SoundDefinitionIsNil(t *testing.T) {
+	def := &missionv1.MissionDefinition{
+		Nodes: map[string]*missionv1.MissionNode{"a": agent("a", "x"), "b": agent("b", "y")},
+		Edges: []*missionv1.MissionEdge{{From: "a", To: "b"}},
+	}
+	if err := graph.Validate(def); err != nil {
+		t.Fatalf("sound definition refused: %v", err)
+	}
+	if err := graph.Validate(nil); err == nil {
+		t.Fatal("nil definition must be refused")
+	}
+}

@@ -5,6 +5,7 @@ package api
 
 import (
 	"context"
+	"strings"
 	"testing"
 	"time"
 
@@ -406,5 +407,45 @@ func TestRunMission_ClientDisconnectIsNotAnError(t *testing.T) {
 		}
 	case <-time.After(5 * time.Second):
 		t.Fatal("handler did not return after the client disconnected")
+	}
+}
+
+// TestCreateMissionDefinition_RefusesACycle: a definition whose nodes wait on
+// each other in a ring is refused before the store, with the analyser's own
+// message, and the daemon is never asked to persist it (gibson#547). On main
+// this definition was accepted, stored, and ran as a mission that completed
+// having dispatched nothing.
+func TestCreateMissionDefinition_RefusesACycle(t *testing.T) {
+	daemon := &mockDaemon{
+		createMissionDefinitionFn: func(context.Context, CreateMissionDefinitionData) (CreateMissionDefinitionResultData, error) {
+			t.Fatal("a cyclic definition reached the store")
+			return CreateMissionDefinitionResultData{}, nil
+		},
+	}
+	server := NewDaemonServer(daemon, nil, nil)
+
+	agentNode := func(id string) *missionpb.MissionNode {
+		return &missionpb.MissionNode{
+			Id:     id,
+			Type:   missionpb.NodeType_NODE_TYPE_AGENT,
+			Config: &missionpb.MissionNode_AgentConfig{AgentConfig: &missionpb.AgentNodeConfig{AgentName: "zerocool"}},
+		}
+	}
+	_, err := server.CreateMissionDefinition(context.Background(), &daemonpb.CreateMissionDefinitionRequest{
+		Definition: &missionpb.MissionDefinition{
+			Name:    "ring",
+			Version: "1.0.0",
+			Nodes:   map[string]*missionpb.MissionNode{"a": agentNode("a"), "b": agentNode("b"), "c": agentNode("c")},
+			Edges:   []*missionpb.MissionEdge{{From: "a", To: "b"}, {From: "b", To: "c"}, {From: "c", To: "a"}},
+		},
+	})
+	if err == nil {
+		t.Fatal("want InvalidArgument for a cyclic definition, got nil")
+	}
+	if st, _ := status.FromError(err); st.Code() != codes.InvalidArgument {
+		t.Fatalf("want InvalidArgument, got %v: %v", st.Code(), err)
+	}
+	if !strings.Contains(err.Error(), "cycle: a->b->c") {
+		t.Fatalf("the refusal must carry the analyser's message, got: %v", err)
 	}
 }

@@ -64,11 +64,19 @@ type edge struct {
 	role      string
 }
 
-// Project derives the renderable MissionGraph from def, overlaying saved
-// positions from layout (may be nil). On any structural problem (dangling
-// edges, orphan nodes, illegal cycles) it returns a nil graph and a typed
-// *ValidationError enumerating every problem.
-func Project(def *missionv1.MissionDefinition, layout *daemonpb.MissionLayout) (*daemonpb.MissionGraph, error) {
+// analysis is what Validate and Project share: the indexed node set, the edge
+// set, the derived endpoints, and every structural problem found. One
+// implementation, so the write path and the mission view cannot disagree.
+type analysis struct {
+	nodes map[string]*missionv1.MissionNode
+	edges []edge
+	entry []string
+	exit  []string
+}
+
+// analyse indexes def and runs the structural checks. It returns a typed
+// *ValidationError enumerating every problem, or nil with the analysis.
+func analyse(def *missionv1.MissionDefinition) (*analysis, *ValidationError) {
 	if def == nil {
 		return nil, &ValidationError{Empty: true}
 	}
@@ -104,6 +112,35 @@ func Project(def *missionv1.MissionDefinition, layout *daemonpb.MissionLayout) (
 			FanOutJoinMerge: joinMerge,
 		}
 	}
+	return &analysis{nodes: nodes, edges: edges, entry: entry, exit: exit}, nil
+}
+
+// Validate reports every structural problem in def: dangling edges, orphan
+// nodes, cycles, and the fan-out declarations the daemon does not support. Nil
+// means the definition is sound. The write path calls it before a definition
+// is stored (gibson#547); before that, these checks ran only in the mission
+// view, so a cyclic definition was accepted, stored and run, where the
+// scheduler dispatched none of its nodes and the mission settled as completed.
+//
+// It is the same analysis Project performs. A second implementation of the
+// same rule would be the defect, not the fix.
+func Validate(def *missionv1.MissionDefinition) error {
+	if _, verr := analyse(def); verr != nil {
+		return verr // typed nil never escapes: verr is checked before return
+	}
+	return nil
+}
+
+// Project derives the renderable MissionGraph from def, overlaying saved
+// positions from layout (may be nil). On any structural problem (dangling
+// edges, orphan nodes, illegal cycles) it returns a nil graph and a typed
+// *ValidationError enumerating every problem.
+func Project(def *missionv1.MissionDefinition, layout *daemonpb.MissionLayout) (*daemonpb.MissionGraph, error) {
+	a, verr := analyse(def)
+	if verr != nil {
+		return nil, verr
+	}
+	nodes, edges, entry, exit := a.nodes, a.edges, a.entry, a.exit
 
 	// 5. Rank + lay out.
 	ranks := layerNodes(nodes, edges)
