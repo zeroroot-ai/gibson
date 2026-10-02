@@ -468,8 +468,8 @@ func TestValidate_RefusesACycle(t *testing.T) {
 		Edges: []*missionv1.MissionEdge{{From: "a", To: "b"}, {From: "b", To: "c"}, {From: "c", To: "a"}},
 	}
 	err := graph.Validate(def)
-	ve, ok := err.(*graph.ValidationError)
-	if !ok || len(ve.Cycles) != 1 || !reflect.DeepEqual(ve.Cycles[0], []string{"a", "b", "c"}) {
+	var ve *graph.ValidationError
+	if !errors.As(err, &ve) || len(ve.Cycles) != 1 || !reflect.DeepEqual(ve.Cycles[0], []string{"a", "b", "c"}) {
 		t.Fatalf("want cycle [a b c], got %T %v", err, err)
 	}
 	if _, perr := graph.Project(def, nil); perr == nil || perr.Error() != err.Error() {
