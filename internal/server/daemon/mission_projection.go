@@ -55,23 +55,29 @@ func missionDefinitionToProjected(
 		return brain.MissionProjected{}, nil, errors.New("nil mission definition")
 	}
 
-	// 0. Refuse the fan-out declarations the daemon does not support, from the
-	// same finder the mission-view analyser uses. This is on the run path on
-	// purpose: a nested for_each that reached expansion would have its inner
-	// for_each collapsed and never expanded, so the work it declares would
-	// vanish without a word (gibson#527).
-	if err := graph.RefuseUnsupportedFanOut(def.GetNodes()); err != nil {
-		return brain.MissionProjected{}, nil, fmt.Errorf("mission %q: %w", def.GetId(), err)
-	}
-
 	// 1. Flatten parallel sub-nodes into the node set (they become real nodes).
 	allNodes, err := flattenParallel(def)
 	if err != nil {
 		return brain.MissionProjected{}, nil, err
 	}
 
-	// 1b. Expand each for_each into one instance per target.
-	forEachInstances, origins, err := expandForEachNodes(def, targets, allNodes)
+	// 1a. Refuse the fan-out declarations the daemon does not support, from the
+	// same finder the mission-view analyser uses, over the flattened set so a
+	// for_each declared as a parallel sub-node is judged the same as one at the
+	// top level. This is on the run path on purpose: a nested for_each that
+	// reached expansion would have its inner for_each collapsed and never
+	// expanded, so the work it declares would vanish without a word
+	// (gibson#527).
+	if err := graph.RefuseUnsupportedFanOut(allNodes); err != nil {
+		return brain.MissionProjected{}, nil, fmt.Errorf("mission %q: %w", def.GetId(), err)
+	}
+
+	// 1b. Expand each for_each into one instance per target, wherever it is
+	// declared: a for_each that is a parallel sub-node is in allNodes by now,
+	// and before gibson#548 this pass walked the top level only, so such a
+	// for_each collapsed into DependsOn with no instances and its work
+	// vanished.
+	forEachInstances, origins, err := expandForEachNodes(targets, allNodes)
 	if err != nil {
 		return brain.MissionProjected{}, nil, err
 	}
@@ -111,7 +117,7 @@ func missionDefinitionToProjected(
 			}
 		}
 	}
-	boundFanOut(def, forEachInstances, deps)
+	boundFanOut(allNodes, forEachInstances, deps)
 
 	// 3. condition branch gating: every branch node depends on its condition node.
 	for id, n := range allNodes {
@@ -180,20 +186,30 @@ func flattenParallel(def *missionpb.MissionDefinition) (map[string]*missionpb.Mi
 }
 
 // expandForEachNodes adds one bound instance per target to allNodes for every
-// for_each node, and returns the instance ids keyed by for_each node id.
+// for_each node in the flattened set, and returns the instance ids keyed by
+// for_each node id.
 //
 // The template itself never becomes a WorkNode — only its bound instances do,
 // which is why the template's placeholders survive submit-time binding
 // (targetbind.Bind skips them) and are bound here against each instance's own
 // target.
+//
+// The walk is over a sorted snapshot of the ids, because expansion writes
+// instances into the same map and a for_each declared as a parallel sub-node
+// (gibson#548) sits beside its instances there.
 func expandForEachNodes(
-	def *missionpb.MissionDefinition,
 	targets []forEachTarget,
 	allNodes map[string]*missionpb.MissionNode,
 ) (map[string][]string, fanOutOrigins, error) {
 	forEachInstances := map[string][]string{}
 	origins := fanOutOrigins{}
-	for id, n := range def.GetNodes() {
+	ids := make([]string, 0, len(allNodes))
+	for id := range allNodes {
+		ids = append(ids, id)
+	}
+	sort.Strings(ids)
+	for _, id := range ids {
+		n := allNodes[id]
 		if n.GetType() != missionpb.NodeType_NODE_TYPE_FOR_EACH {
 			continue
 		}
@@ -252,14 +268,16 @@ type fanOutOrigins map[string]fanOutOrigin
 // targets, instances 4..9 each wait on the one four places ahead, so at most
 // four are ever ready. It costs ordering the author did not ask for, which is
 // the honest trade for not launching fifty sandboxes at once.
-func boundFanOut(def *missionpb.MissionDefinition, forEachInstances map[string][]string, deps nodeDeps) {
+func boundFanOut(allNodes map[string]*missionpb.MissionNode, forEachInstances map[string][]string, deps nodeDeps) {
 	for id, instIDs := range forEachInstances {
 		for _, inst := range instIDs {
 			for d := range deps[id] {
 				deps.add(inst, d)
 			}
 		}
-		limit := int(def.GetNodes()[id].GetForEachConfig().GetMaxConcurrency())
+		// The for_each is read from the flattened set, so a sub-node for_each
+		// keeps its own bound; the top-level map would answer nil for it.
+		limit := int(allNodes[id].GetForEachConfig().GetMaxConcurrency())
 		if limit <= 0 || limit >= len(instIDs) {
 			continue
 		}
