@@ -412,3 +412,104 @@ func TestForEach_OneTargetWithoutAForEachIsAccepted(t *testing.T) {
 		t.Errorf("a single-target mission with no for_each must still project: %v", err)
 	}
 }
+
+// TestMissionDefinitionToProjected_ForEachInsideParallelExpands: a for_each
+// declared as a parallel sub-node expands to one instance per target, the
+// instances carry the parallel node's dependencies, its own concurrency bound
+// applies, and a join naming the parallel waits for every instance
+// (gibson#548). Before the fix the expansion pass walked the top level only, so
+// the for_each collapsed into DependsOn with no instances: the projection held
+// neither the for_each nor its template, and the run reported success with one
+// branch missing.
+func TestMissionDefinitionToProjected_ForEachInsideParallelExpands(t *testing.T) {
+	targets := []forEachTarget{
+		fanTarget("11111111-1111-1111-1111-111111111111", "a", "https://10.0.0.1:6443"),
+		fanTarget("22222222-2222-2222-2222-222222222222", "b", "https://10.0.0.2:6443"),
+		fanTarget("33333333-3333-3333-3333-333333333333", "c", "https://10.0.0.3:6443"),
+	}
+	tpl := toolNode("scan")
+	tpl.Id = "scan"
+	forEach := &missionpb.MissionNode{
+		Id:   "fan",
+		Type: missionpb.NodeType_NODE_TYPE_FOR_EACH,
+		Config: &missionpb.MissionNode_ForEachConfig{ForEachConfig: &missionpb.ForEachNodeConfig{
+			Source:         missionpb.ForEachNodeConfig_SOURCE_TARGET_SET,
+			Template:       tpl,
+			MaxConcurrency: 2,
+		}},
+	}
+	branch := toolNode("other")
+	branch.Id = "other"
+	def := &missionpb.MissionDefinition{
+		Id: "m-parallel-fan",
+		Nodes: map[string]*missionpb.MissionNode{
+			"prep": toolNode("prep"),
+			"p": {
+				Type:         missionpb.NodeType_NODE_TYPE_PARALLEL,
+				Dependencies: []string{"prep"},
+				Config: &missionpb.MissionNode_ParallelConfig{ParallelConfig: &missionpb.ParallelNodeConfig{
+					SubNodes: []*missionpb.MissionNode{branch, forEach},
+				}},
+			},
+			"j": {
+				Type:   missionpb.NodeType_NODE_TYPE_JOIN,
+				Config: &missionpb.MissionNode_JoinConfig{JoinConfig: &missionpb.JoinNodeConfig{WaitFor: []string{"p"}}},
+			},
+			"report": toolNode("report", "j"),
+		},
+	}
+
+	got, origins, err := missionDefinitionToProjected(def, "", targets)
+	if err != nil {
+		t.Fatalf("translate: %v", err)
+	}
+	byID := map[string]brain.WorkNode{}
+	for _, n := range got.Nodes {
+		byID[n.ID] = n
+	}
+	for _, collapsed := range []string{"p", "j", "fan", "scan"} {
+		if _, ok := byID[collapsed]; ok {
+			t.Errorf("%q must collapse into DependsOn, not become a WorkNode", collapsed)
+		}
+	}
+
+	inst := make([]string, 0, len(targets))
+	for _, tg := range targets {
+		inst = append(inst, instanceID("scan", tg.ID))
+	}
+	for _, id := range inst {
+		if _, ok := byID[id]; !ok {
+			t.Fatalf("instance %q missing from the projection: %v", id, sortedWorkIDs(got.Nodes))
+		}
+		if o, ok := origins[id]; !ok || o.ForEachNodeID != "fan" || o.TemplateID != "scan" {
+			t.Errorf("origin of %q = %+v, want for_each fan / template scan", id, o)
+		}
+	}
+
+	// The parallel's dependency reaches both the plain branch and every instance.
+	if !eqStrs(byID["other"].DependsOn, []string{"prep"}) {
+		t.Errorf("other deps = %v, want [prep]", byID["other"].DependsOn)
+	}
+	if !eqStrs(byID[inst[0]].DependsOn, []string{"prep"}) || !eqStrs(byID[inst[1]].DependsOn, []string{"prep"}) {
+		t.Errorf("first two instances deps = %v / %v, want [prep]", byID[inst[0]].DependsOn, byID[inst[1]].DependsOn)
+	}
+	// MaxConcurrency 2 over three targets chains the third behind the first.
+	if !eqStrs(byID[inst[2]].DependsOn, []string{inst[0], "prep"}) {
+		t.Errorf("third instance deps = %v, want [%s prep]", byID[inst[2]].DependsOn, inst[0])
+	}
+	// The join on the parallel waits for the plain branch and every instance.
+	wantReport := append([]string{"other"}, inst...)
+	if !eqStrs(byID["report"].DependsOn, wantReport) {
+		t.Errorf("report deps = %v, want %v", byID["report"].DependsOn, wantReport)
+	}
+}
+
+// sortedWorkIDs names the projected work for a failure message.
+func sortedWorkIDs(nodes []brain.WorkNode) []string {
+	out := make([]string, 0, len(nodes))
+	for _, n := range nodes {
+		out = append(out, n.ID)
+	}
+	sort.Strings(out)
+	return out
+}

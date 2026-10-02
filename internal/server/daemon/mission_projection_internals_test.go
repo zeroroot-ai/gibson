@@ -207,17 +207,15 @@ func TestFlattenParallel_RefusesASubNodeWithNoID(t *testing.T) {
 // A for_each whose config carries no template is refused by name. An empty
 // template would expand to instances with nothing in them.
 func TestExpandForEachNodes_RefusesAMissingTemplate(t *testing.T) {
-	_, _, err := expandForEachNodes(&missionpb.MissionDefinition{
-		Id: "m1",
-		Nodes: map[string]*missionpb.MissionNode{
+	_, _, err := expandForEachNodes(
+		[]forEachTarget{fanTarget("11111111-1111-1111-1111-111111111111", "a", "https://10.0.0.1:6443")},
+		map[string]*missionpb.MissionNode{
 			"each": {
 				Id:     "each",
 				Type:   missionpb.NodeType_NODE_TYPE_FOR_EACH,
 				Config: &missionpb.MissionNode_ForEachConfig{ForEachConfig: &missionpb.ForEachNodeConfig{}},
 			},
-		},
-	}, []forEachTarget{fanTarget("11111111-1111-1111-1111-111111111111", "a", "https://10.0.0.1:6443")},
-		map[string]*missionpb.MissionNode{})
+		})
 	if err == nil {
 		t.Fatal("want a refusal for a for_each with no template")
 	}
