@@ -5,6 +5,7 @@ package controller
 
 import (
 	"context"
+	"errors"
 	"testing"
 
 	"github.com/go-logr/logr/testr"
@@ -18,6 +19,7 @@ import (
 	"k8s.io/client-go/tools/events"
 	"sigs.k8s.io/controller-runtime/pkg/client"
 	"sigs.k8s.io/controller-runtime/pkg/client/fake"
+	"sigs.k8s.io/controller-runtime/pkg/client/interceptor"
 	"sigs.k8s.io/controller-runtime/pkg/reconcile"
 
 	gibsonv1alpha1 "github.com/zeroroot-ai/gibson/operators/tenant/api/v1alpha1"
@@ -427,5 +429,33 @@ func TestChildOrchestration_DataPlaneMirrorsTenantResources(t *testing.T) {
 	reconcileTenant(t, r)
 	if got := dataPlane().Spec.Resources; got == nil || got.PostgresConnectionLimit != 9 {
 		t.Fatalf("TenantDataPlane resources after the edit = %+v, want PostgresConnectionLimit 9", got)
+	}
+}
+
+// A failed update of the data plane's resources is a reconcile error, never a
+// silent loss: the next pass would otherwise run the data plane on the old
+// limit while the Tenant says otherwise.
+func TestEnsureChild_DataPlaneResourceUpdateFailureSurfaces(t *testing.T) {
+	tenant := childOrchestrationTenant()
+	tenant.Status.Namespace = "tenant-acme"
+	tenant.Spec.Resources = &gibsonv1alpha1.TenantDataPlaneResources{PostgresConnectionLimit: 9}
+	existing := &gibsonv1alpha1.TenantDataPlane{
+		ObjectMeta: metav1.ObjectMeta{Name: childName(tenant), Namespace: "tenant-acme"},
+		Spec:       gibsonv1alpha1.TenantDataPlaneSpec{TenantID: tenant.Name},
+	}
+	boom := errors.New("boom")
+	c := fake.NewClientBuilder().
+		WithScheme(childOrchestrationScheme(t)).
+		WithObjects(tenant, existing).
+		WithInterceptorFuncs(interceptor.Funcs{
+			Update: func(_ context.Context, _ client.WithWatch, _ client.Object, _ ...client.UpdateOption) error {
+				return boom
+			},
+		}).Build()
+	r := &TenantReconciler{Client: c}
+
+	_, err := r.ensureChild(context.Background(), childDataPlane, tenant)
+	if !errors.Is(err, boom) {
+		t.Fatalf("ensureChild err = %v, want the update failure", err)
 	}
 }

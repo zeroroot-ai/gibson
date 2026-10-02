@@ -246,8 +246,10 @@ func (r *TenantReconciler) ensureChild(ctx context.Context, kind childKind, tena
 	getErr := r.Get(ctx, key, existing)
 	switch {
 	case getErr == nil:
-		if syncErr := r.syncChildSpec(ctx, kind, existing, tenant); syncErr != nil {
-			return false, syncErr
+		if tdp, ok := existing.(*gibsonv1alpha1.TenantDataPlane); ok {
+			if syncErr := r.syncDataPlaneResources(ctx, tdp, tenant); syncErr != nil {
+				return false, syncErr
+			}
 		}
 		aggregateChildStatus(existing, tenant)
 		return childReady(existing), nil
@@ -326,18 +328,12 @@ func (r *TenantReconciler) deleteChild(ctx context.Context, kind childKind, tena
 	return false, nil
 }
 
-// syncChildSpec carries a Tenant spec edit onto the child that consumes it.
-// Only the data plane has such a field: TenantDataPlane.spec.resources mirrors
-// Tenant.spec.resources, and the data-plane reconciler applies it on the
-// generation bump (gibson#545). Every other child's spec is fixed at creation.
-func (r *TenantReconciler) syncChildSpec(ctx context.Context, kind childKind, existing client.Object, tenant *gibsonv1alpha1.Tenant) error {
-	if kind != childDataPlane {
-		return nil
-	}
-	tdp, ok := existing.(*gibsonv1alpha1.TenantDataPlane)
-	if !ok {
-		return nil
-	}
+// syncDataPlaneResources carries a Tenant spec edit onto the child that
+// consumes it. Only the data plane has such a field: TenantDataPlane.spec.resources
+// mirrors Tenant.spec.resources, and the data-plane reconciler applies it on
+// the generation bump (gibson#545). Every other child's spec is fixed at
+// creation.
+func (r *TenantReconciler) syncDataPlaneResources(ctx context.Context, tdp *gibsonv1alpha1.TenantDataPlane, tenant *gibsonv1alpha1.Tenant) error {
 	if equality.Semantic.DeepEqual(tdp.Spec.Resources, tenant.Spec.Resources) {
 		return nil
 	}

@@ -5,6 +5,8 @@ package dataplane
 
 import (
 	"context"
+	"errors"
+	"strings"
 	"testing"
 
 	gibsonv1alpha1 "github.com/zeroroot-ai/gibson/operators/tenant/api/v1alpha1"
@@ -59,5 +61,30 @@ func TestLimitsFrom(t *testing.T) {
 	got := LimitsFrom(&gibsonv1alpha1.TenantDataPlaneResources{PostgresConnectionLimit: 7})
 	if got.PostgresConnectionLimit != 7 {
 		t.Fatalf("LimitsFrom = %+v, want PostgresConnectionLimit 7", got)
+	}
+}
+
+// A refused ALTER ROLE surfaces as the step's error, named.
+func TestApplyConnectionLimit_ExecErrorSurfaces(t *testing.T) {
+	p := &pgProvisioner{cfg: PostgresConfig{DefaultConnectionLimit: 50}}
+	conn := &fakeAdminConn{execErr: errors.New("permission denied")}
+	err := p.applyConnectionLimit(context.Background(), conn, "t_acme_app", Limits{})
+	if err == nil || !strings.Contains(err.Error(), "set connection limit") {
+		t.Fatalf("err = %v, want the connection-limit step named", err)
+	}
+}
+
+// The Postgres step hands the limits to the Postgres provisioner. A
+// provisioner with no reachable server fails at connect, which is enough to
+// prove the step called it with the pipeline's limits rather than skipping.
+func TestPipeline_PostgresStepCallsTheProvisioner(t *testing.T) {
+	pg, err := NewPostgresProvisioner(PostgresConfig{AdminDSN: "postgres://nobody@127.0.0.1:1/postgres?connect_timeout=1", KEKDeriver: fixedKEKDeriver{}})
+	if err != nil {
+		t.Fatalf("NewPostgresProvisioner: %v", err)
+	}
+	p := New(PipelineConfig{Postgres: pg})
+	err = p.steps[0].Provision(context.Background(), "acme", Limits{PostgresConnectionLimit: 7})
+	if err == nil || !strings.Contains(err.Error(), "admin connect") {
+		t.Fatalf("err = %v, want the Postgres provisioner's connect failure", err)
 	}
 }

@@ -16,7 +16,7 @@ import (
 func stubStep(name string, called *[]string, provErr, rbErr error) Step {
 	return Step{
 		Name: name,
-		Provision: func(_ context.Context, tenantID string, _ Limits) error {
+		Provision: func(_ context.Context, _ string, _ Limits) error {
 			*called = append(*called, "provision:"+name)
 			return provErr
 		},

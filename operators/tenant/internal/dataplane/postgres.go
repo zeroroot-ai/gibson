@@ -178,34 +178,8 @@ func (p *pgProvisioner) Provision(ctx context.Context, tenantID string, limits L
 	}
 
 	// --- Step 4: CREATE ROLE IF NOT EXISTS with derived password ---
-	var roleExists bool
-	roleRow := adminConn.QueryRow(ctx, "SELECT EXISTS(SELECT 1 FROM pg_roles WHERE rolname = $1)", roleName)
-	if err := roleRow.Scan(&roleExists); err != nil {
-		return fmt.Errorf("dataplane/postgres: check role exists: %w", err)
-	}
-	if !roleExists {
-		// Build the SQL safely — role name is sanitized above, password must be
-		// interpolated (pg does not support $1 for identifiers/passwords in CREATE ROLE).
-		// We use pgx.Identifier for the role name and quote the password with
-		// single-quote escaping. Since password is hex-encoded, no quoting is needed.
-		roleSQL := fmt.Sprintf(
-			"CREATE ROLE %s WITH LOGIN PASSWORD '%s'",
-			pgx.Identifier{roleName}.Sanitize(),
-			password,
-		)
-		if _, err := adminConn.Exec(ctx, roleSQL); err != nil {
-			return fmt.Errorf("dataplane/postgres: create role %q: %w", roleName, err)
-		}
-	} else {
-		// Role exists — update the password so rotation works.
-		alterSQL := fmt.Sprintf(
-			"ALTER ROLE %s WITH LOGIN PASSWORD '%s'",
-			pgx.Identifier{roleName}.Sanitize(),
-			password,
-		)
-		if _, err := adminConn.Exec(ctx, alterSQL); err != nil {
-			return fmt.Errorf("dataplane/postgres: alter role %q: %w", roleName, err)
-		}
+	if err := ensureRole(ctx, adminConn, roleName, password); err != nil {
+		return err
 	}
 
 	// --- Step 5: apply per-tenant resource limit ---
@@ -251,19 +225,8 @@ func (p *pgProvisioner) Provision(ctx context.Context, tenantID string, limits L
 		return fmt.Errorf("dataplane/postgres: create pg_trgm extension: %w", err)
 	}
 
-	// Grant USAGE on public schema and CRUD on all tables/sequences.
-	schemaGrants := []string{
-		fmt.Sprintf("GRANT USAGE ON SCHEMA public TO %s", pgx.Identifier{roleName}.Sanitize()),
-		fmt.Sprintf("GRANT SELECT, INSERT, UPDATE, DELETE ON ALL TABLES IN SCHEMA public TO %s", pgx.Identifier{roleName}.Sanitize()),
-		fmt.Sprintf("GRANT USAGE, SELECT ON ALL SEQUENCES IN SCHEMA public TO %s", pgx.Identifier{roleName}.Sanitize()),
-		// Future tables/sequences — ALTER DEFAULT PRIVILEGES
-		fmt.Sprintf("ALTER DEFAULT PRIVILEGES IN SCHEMA public GRANT SELECT, INSERT, UPDATE, DELETE ON TABLES TO %s", pgx.Identifier{roleName}.Sanitize()),
-		fmt.Sprintf("ALTER DEFAULT PRIVILEGES IN SCHEMA public GRANT USAGE, SELECT ON SEQUENCES TO %s", pgx.Identifier{roleName}.Sanitize()),
-	}
-	for _, grant := range schemaGrants {
-		if _, err := tenantConn.Exec(ctx, grant); err != nil {
-			return fmt.Errorf("dataplane/postgres: grant %q: %w", grant, err)
-		}
+	if err := grantSchemaPrivileges(ctx, tenantConn, roleName); err != nil {
+		return err
 	}
 
 	// --- Step 8: run migrations ---
@@ -282,6 +245,58 @@ func (p *pgProvisioner) Provision(ctx context.Context, tenantID string, limits L
 		}
 	}
 
+	return nil
+}
+
+// ensureRole creates the per-tenant role with the derived password, or resets
+// the password on an existing role so rotation works.
+func ensureRole(ctx context.Context, adminConn pgAdminConn, roleName, password string) error {
+	var roleExists bool
+	roleRow := adminConn.QueryRow(ctx, "SELECT EXISTS(SELECT 1 FROM pg_roles WHERE rolname = $1)", roleName)
+	if err := roleRow.Scan(&roleExists); err != nil {
+		return fmt.Errorf("dataplane/postgres: check role exists: %w", err)
+	}
+	// Build the SQL safely: the role name is sanitized and the password must be
+	// interpolated (pg does not support $1 for identifiers/passwords in CREATE
+	// ROLE). The password is hex-encoded, so it needs no quoting.
+	if !roleExists {
+		roleSQL := fmt.Sprintf(
+			"CREATE ROLE %s WITH LOGIN PASSWORD '%s'",
+			pgx.Identifier{roleName}.Sanitize(),
+			password,
+		)
+		if _, err := adminConn.Exec(ctx, roleSQL); err != nil {
+			return fmt.Errorf("dataplane/postgres: create role %q: %w", roleName, err)
+		}
+		return nil
+	}
+	alterSQL := fmt.Sprintf(
+		"ALTER ROLE %s WITH LOGIN PASSWORD '%s'",
+		pgx.Identifier{roleName}.Sanitize(),
+		password,
+	)
+	if _, err := adminConn.Exec(ctx, alterSQL); err != nil {
+		return fmt.Errorf("dataplane/postgres: alter role %q: %w", roleName, err)
+	}
+	return nil
+}
+
+// grantSchemaPrivileges grants USAGE on the public schema and CRUD on every
+// table and sequence, present and future, to the per-tenant role.
+func grantSchemaPrivileges(ctx context.Context, tenantConn pgAdminConn, roleName string) error {
+	role := pgx.Identifier{roleName}.Sanitize()
+	schemaGrants := []string{
+		fmt.Sprintf("GRANT USAGE ON SCHEMA public TO %s", role),
+		fmt.Sprintf("GRANT SELECT, INSERT, UPDATE, DELETE ON ALL TABLES IN SCHEMA public TO %s", role),
+		fmt.Sprintf("GRANT USAGE, SELECT ON ALL SEQUENCES IN SCHEMA public TO %s", role),
+		fmt.Sprintf("ALTER DEFAULT PRIVILEGES IN SCHEMA public GRANT SELECT, INSERT, UPDATE, DELETE ON TABLES TO %s", role),
+		fmt.Sprintf("ALTER DEFAULT PRIVILEGES IN SCHEMA public GRANT USAGE, SELECT ON SEQUENCES TO %s", role),
+	}
+	for _, grant := range schemaGrants {
+		if _, err := tenantConn.Exec(ctx, grant); err != nil {
+			return fmt.Errorf("dataplane/postgres: grant %q: %w", grant, err)
+		}
+	}
 	return nil
 }
 
