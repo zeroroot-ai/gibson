@@ -1,5 +1,12 @@
 # Changelog
 
+## [1.6.0](https://github.com/zeroroot-ai/gibson/compare/gibson-bootstrap-v1.5.4...gibson-bootstrap-v1.6.0) (2026-10-01)
+
+
+### Features
+
+* **go:** move the toolchain floor to 1.27.1 ([#514](https://github.com/zeroroot-ai/gibson/issues/514)) ([5b5250e](https://github.com/zeroroot-ai/gibson/commit/5b5250e985312cb41f9890bd6fccb6ab5a0384d4))
+
 ## [1.5.4](https://github.com/zeroroot-ai/gibson/compare/gibson-bootstrap-v1.5.3...gibson-bootstrap-v1.5.4) (2026-10-01)
 
 
