@@ -197,6 +197,7 @@ for types_dir, fname in types_files:
 # displayed: a column on .status.stores[*].state shows the stores container
 # as much as the leaf.
 displayed = set()
+resolved_columns = 0
 for root, path in printcolumns:
     cur, ok, hops = root, True, []
     for seg in [re.sub(r'\[.*$', '', s) for s in path.split('.') if s]:
@@ -211,6 +212,7 @@ for root, path in printcolumns:
         cur = fields[cur][hit]['type']
     if ok:
         displayed.update(hops)
+        resolved_columns += 1
 
 # ---------------------------------------------------------------------------
 # 3. Exemptions. Keyed <pkg>.<Type>.<Field>, reason and reference required.
@@ -319,7 +321,7 @@ if blocking:
 
 if rc == 0:
     print('ok  %d served field(s) checked, %d print column(s) resolved, '
-          '%d verdict(s) recorded' % (len(served), len(displayed), len(exempt)))
+          '%d verdict(s) recorded' % (len(served), resolved_columns, len(exempt)))
     # A floor. A walk that resolves nothing would otherwise read as a clean run,
     # which is the shape of every guard in this repo that could not fail.
     if len(served) < min_served:
