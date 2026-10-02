@@ -464,13 +464,6 @@ func applyInterpolation(cfg *Config, interpolated map[string]interface{}) error 
 		}
 	}
 
-	// Apply Observability config interpolation
-	if observability, ok := interpolated["observability"].(map[string]interface{}); ok {
-		if neo4jBrowserURL, ok := observability["neo4j_browser_url"].(string); ok {
-			cfg.Observability.Neo4jBrowserURL = interpolateString(neo4jBrowserURL)
-		}
-	}
-
 	// Apply Checkpoint config interpolation
 	if checkpoint, ok := interpolated["checkpoint"].(map[string]interface{}); ok {
 		if keyPrefix, ok := checkpoint["key_prefix"].(string); ok {

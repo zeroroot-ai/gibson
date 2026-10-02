@@ -12,7 +12,7 @@
 // (ctx, span) should be able to enrich uniformly without holding a tracer
 // reference, and keeping it pure lets callers instrument custom span paths
 // (e.g., future budget.Enforcer spans, modelgate.Filter spans) without a
-// dependency on OTelMissionTracer.
+// dependency on any tracer object.
 //
 // Unknown-user fallback: when no user identity is resolvable, the `user_id`
 // attribute is set to "unknown" and the `gibson_span_unknown_user_total`

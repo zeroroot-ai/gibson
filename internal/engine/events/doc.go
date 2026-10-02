@@ -1,11 +1,15 @@
 // SPDX-License-Identifier: Elastic-2.0
 // Copyright 2026 Zero Root AI
 
-// Package events provides a unified event bus for Gibson observability.
+// Package events is the typed event vocabulary the harness middleware and
+// the daemon's EventBusAdapter share: Event, EventType, Filter and the
+// payload structs the adapter fills from daemon events.
 //
-// The events package replaces both the daemon EventBus and VerboseEventBus
-// with a single, unified implementation that serves as the central hub for
-// all observability events in the Gibson system.
+// The daemon's own EventBus (internal/server/daemon) is the live bus. It
+// carries api.EventData with string event types, and the harness callback
+// service publishes string-typed events onto it. This package never replaced
+// it. The constants and payload types that nothing outside the package read
+// were deleted (gibson#504); what remains has a reader.
 //
 // # Overview
 //
@@ -97,18 +101,13 @@
 //
 // # Event Types
 //
-// Events are organized into categories:
-//   - Mission Lifecycle: mission.started, mission.completed, mission.failed
-//   - Node Execution: node.started, node.completed, node.failed
-//   - Agent Lifecycle: agent.registered, agent.started, agent.completed
-//   - LLM Requests: llm.request.started, llm.stream.chunk, etc.
-//   - Tool Calls: tool.call.started, tool.call.completed
-//   - Findings: finding.discovered, agent.finding_submitted
-//   - Memory: memory.get, memory.set, memory.search
-//   - System: system.daemon_started, system.component_registered
-//
-// Each event type has a corresponding payload type (e.g., MissionStartedPayload)
-// that defines the structured data for that event.
+// EventMissionStarted and EventMissionCompleted are the named types. Every
+// other event type travels as its string, the same string the daemon's
+// EventBus carries in api.EventData.EventType: node.started, agent.started,
+// llm.request.completed, tool.call.started, agent.finding_submitted and the
+// rest. The payload structs here (MissionStartedPayload, NodeStartedPayload,
+// AgentStartedPayload, ToolCallStartedPayload, ...) are what the daemon's
+// EventBusAdapter and the harness middleware fill.
 //
 // # Filtering
 //
@@ -130,18 +129,4 @@
 //   - ~400K events/sec with 10 subscribers (2.7 µs/op, 0 allocs)
 //   - Non-blocking publish prevents contention
 //   - Zero allocations per publish (after warmup)
-//
-// # Migration Guide
-//
-// Migrating from daemon.EventBus:
-//   - Replace api.EventData with events.Event
-//   - Use events.EventType constants instead of string literals
-//   - Update Subscribe signature (now includes Filter and bufferSize)
-//   - Use typed payloads instead of embedded structs
-//
-// Migrating from verbose.VerboseEventBus:
-//   - Replace VerboseEvent with events.Event
-//   - Use events.EventType constants for verbose events
-//   - Add filtering if needed (previously not supported)
-//   - Update Emit() calls to Publish()
 package events

@@ -163,7 +163,7 @@ func TestEventBus_FilterByAgentName(t *testing.T) {
 
 	// Publish event for the target agent (should be received)
 	event1 := Event{
-		Type:      EventAgentStarted,
+		Type:      EventType("agent.started"),
 		Timestamp: time.Now(),
 		AgentName: "test-agent",
 	}
@@ -171,7 +171,7 @@ func TestEventBus_FilterByAgentName(t *testing.T) {
 
 	// Publish event for a different agent (should NOT be received)
 	event2 := Event{
-		Type:      EventAgentStarted,
+		Type:      EventType("agent.started"),
 		Timestamp: time.Now(),
 		AgentName: "other-agent",
 	}

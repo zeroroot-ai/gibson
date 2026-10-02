@@ -15,7 +15,6 @@
 //   - Metrics: Counter, gauge, and histogram metrics with OpenTelemetry integration
 //   - Logging: Structured logging with automatic trace correlation
 //   - Health: Component health monitoring with state change detection
-//   - Cost: LLM cost tracking and budget management
 //   - Middleware: Harness middleware for automatic instrumentation (see harness/middleware package)
 //
 // # Distributed Tracing
@@ -263,40 +262,6 @@
 //   - Recovery (degraded/unhealthy → healthy): INFO log
 //   - Other transitions: WARN log
 //
-// # Cost Tracking
-//
-// CostTracker monitors LLM costs and enforces budgets:
-//
-//	tracker := NewCostTracker(tokenTracker, logger)
-//
-//	// Calculate cost for a completion
-//	cost := tracker.CalculateCost(
-//	    "anthropic",
-//	    "claude-3-opus-20240229",
-//	    1000, // input tokens
-//	    500,  // output tokens
-//	)
-//
-//	// Get mission cost
-//	missionCost, err := tracker.GetMissionCost(missionID)
-//
-//	// Get agent cost within mission
-//	agentCost, err := tracker.GetAgentCost(missionID, "recon_agent")
-//
-//	// Set cost threshold
-//	err = tracker.SetThreshold(missionID, 10.0) // $10 USD
-//
-//	// Check if threshold exceeded
-//	if tracker.CheckThreshold(missionID, currentCost) {
-//	    log.Warn("Cost threshold exceeded!")
-//	}
-//
-// Cost tracking integrates with OpenTelemetry:
-//
-//	tracker.RecordCostOnSpan(span, cost)
-//
-// This adds the "gibson.llm.cost" attribute to spans for cost analysis in traces.
-//
 // # Usage Examples
 //
 // Complete observability setup for production:
@@ -333,10 +298,6 @@
 //	monitor := NewHealthMonitor(recorder, logger)
 //	monitor.Register("database", dbHealthChecker)
 //	go monitor.StartPeriodicCheck(ctx, 30*time.Second)
-//
-//	// 5. Create cost tracker
-//	costTracker := NewCostTracker(tokenTracker, logger)
-//	costTracker.SetThreshold(missionID, 100.0)
 //
 //	// 6. Configure harness with middleware
 //	mw := middleware.Chain(
