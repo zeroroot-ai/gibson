@@ -65,7 +65,12 @@ if [ -n "${FIELD_READS:-}" ]; then
 elif [ -n "${FIELD_READS_FILE:-}" ]; then
   reads_out="$(cat "$FIELD_READS_FILE")"
 else
-  reads_out="$(go run "github.com/zeroroot-ai/ast-checks/cmd/unwired@${UNWIRED_VERSION}" \
+  # The published daemon image is built with -tags=setec_integration
+  # (Dockerfile), so code behind that tag is production code and its reads
+  # count. GOFLAGS carries the tag into the analyzer's package load; without
+  # it the first run reported sandbox.setec.agent_run_timeout as unread while
+  # sandboxed_setec_agent.go read it.
+  reads_out="$(GOFLAGS=-tags=setec_integration go run "github.com/zeroroot-ai/ast-checks/cmd/unwired@${UNWIRED_VERSION}" \
     -dir . -kinds field -all 2>/dev/null)"
 fi
 
