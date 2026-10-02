@@ -255,7 +255,6 @@ func (d *daemonImpl) initOTelObservability(ctx context.Context) *observability.O
 		RetryInitial:    d.config.OTelObservability.Retry.InitialInterval,
 		RetryMax:        d.config.OTelObservability.Retry.MaxInterval,
 		RetryMaxElapsed: d.config.OTelObservability.Retry.MaxElapsedTime,
-		Neo4jBrowserURL: d.config.Observability.Neo4jBrowserURL,
 		MetricsEnabled:  metricsEnabled,
 	}
 

@@ -58,7 +58,7 @@ func TestConvertToAPIEventData(t *testing.T) {
 		{
 			name: "MissionProgressPayload",
 			event: events.Event{
-				Type:      events.EventMissionProgress,
+				Type:      events.EventType("mission.progress"),
 				Timestamp: now,
 				MissionID: testMissionID,
 				TraceID:   testTraceID,
@@ -111,7 +111,7 @@ func TestConvertToAPIEventData(t *testing.T) {
 		{
 			name: "MissionFailedPayload",
 			event: events.Event{
-				Type:      events.EventMissionFailed,
+				Type:      events.EventType("mission.failed"),
 				Timestamp: now,
 				MissionID: testMissionID,
 				Payload: events.MissionFailedPayload{
@@ -135,7 +135,7 @@ func TestConvertToAPIEventData(t *testing.T) {
 		{
 			name: "NodeStartedPayload",
 			event: events.Event{
-				Type:      events.EventNodeStarted,
+				Type:      events.EventType("node.started"),
 				Timestamp: now,
 				MissionID: testMissionID,
 				Payload: events.NodeStartedPayload{
@@ -157,7 +157,7 @@ func TestConvertToAPIEventData(t *testing.T) {
 		{
 			name: "NodeCompletedPayload",
 			event: events.Event{
-				Type:      events.EventNodeCompleted,
+				Type:      events.EventType("node.completed"),
 				Timestamp: now,
 				MissionID: testMissionID,
 				Payload: events.NodeCompletedPayload{
@@ -179,7 +179,7 @@ func TestConvertToAPIEventData(t *testing.T) {
 		{
 			name: "NodeFailedPayload",
 			event: events.Event{
-				Type:      events.EventNodeFailed,
+				Type:      events.EventType("node.failed"),
 				Timestamp: now,
 				MissionID: testMissionID,
 				Payload: events.NodeFailedPayload{
@@ -202,7 +202,7 @@ func TestConvertToAPIEventData(t *testing.T) {
 		{
 			name: "NodeSkippedPayload",
 			event: events.Event{
-				Type:      events.EventNodeSkipped,
+				Type:      events.EventType("node.skipped"),
 				Timestamp: now,
 				MissionID: testMissionID,
 				Payload: events.NodeSkippedPayload{
@@ -223,7 +223,7 @@ func TestConvertToAPIEventData(t *testing.T) {
 		{
 			name: "AgentStartedPayload",
 			event: events.Event{
-				Type:      events.EventAgentStarted,
+				Type:      events.EventType("agent.started"),
 				Timestamp: now,
 				MissionID: testMissionID,
 				AgentName: testAgentName,
@@ -244,7 +244,7 @@ func TestConvertToAPIEventData(t *testing.T) {
 		{
 			name: "AgentCompletedPayload",
 			event: events.Event{
-				Type:      events.EventAgentCompleted,
+				Type:      events.EventType("agent.completed"),
 				Timestamp: now,
 				MissionID: testMissionID,
 				AgentName: testAgentName,
@@ -268,7 +268,7 @@ func TestConvertToAPIEventData(t *testing.T) {
 		{
 			name: "AgentFailedPayload",
 			event: events.Event{
-				Type:      events.EventAgentFailed,
+				Type:      events.EventType("agent.failed"),
 				Timestamp: now,
 				MissionID: testMissionID,
 				AgentName: testAgentName,
@@ -291,7 +291,7 @@ func TestConvertToAPIEventData(t *testing.T) {
 		{
 			name: "AgentDelegatedPayload",
 			event: events.Event{
-				Type:      events.EventAgentDelegated,
+				Type:      events.EventType("agent.delegated"),
 				Timestamp: now,
 				MissionID: testMissionID,
 				AgentName: testAgentName,
@@ -320,7 +320,7 @@ func TestConvertToAPIEventData(t *testing.T) {
 		{
 			name: "FindingDiscoveredPayload",
 			event: events.Event{
-				Type:      events.EventFindingDiscovered,
+				Type:      events.EventType("finding.discovered"),
 				Timestamp: now,
 				MissionID: testMissionID,
 				Payload: events.FindingDiscoveredPayload{
@@ -351,7 +351,7 @@ func TestConvertToAPIEventData(t *testing.T) {
 		{
 			name: "FindingSubmittedPayload",
 			event: events.Event{
-				Type:      events.EventFindingSubmitted,
+				Type:      events.EventType("agent.finding_submitted"),
 				Timestamp: now,
 				MissionID: testMissionID,
 				Payload: events.FindingSubmittedPayload{
@@ -372,7 +372,7 @@ func TestConvertToAPIEventData(t *testing.T) {
 		{
 			name: "ToolCallStartedPayload",
 			event: events.Event{
-				Type:      events.EventToolCallStarted,
+				Type:      events.EventType("tool.call.started"),
 				Timestamp: now,
 				MissionID: testMissionID,
 				AgentName: testAgentName,
@@ -396,7 +396,7 @@ func TestConvertToAPIEventData(t *testing.T) {
 		{
 			name: "ToolCallCompletedPayload",
 			event: events.Event{
-				Type:      events.EventToolCallCompleted,
+				Type:      events.EventType("tool.call.completed"),
 				Timestamp: now,
 				MissionID: testMissionID,
 				AgentName: testAgentName,
@@ -422,7 +422,7 @@ func TestConvertToAPIEventData(t *testing.T) {
 		{
 			name: "ToolCallFailedPayload",
 			event: events.Event{
-				Type:      events.EventToolCallFailed,
+				Type:      events.EventType("tool.call.failed"),
 				Timestamp: now,
 				MissionID: testMissionID,
 				AgentName: testAgentName,
@@ -447,7 +447,7 @@ func TestConvertToAPIEventData(t *testing.T) {
 		{
 			name: "LLMRequestStartedPayload",
 			event: events.Event{
-				Type:      events.EventLLMRequestStarted,
+				Type:      events.EventType("llm.request.started"),
 				Timestamp: now,
 				MissionID: testMissionID,
 				AgentName: testAgentName,
@@ -472,7 +472,7 @@ func TestConvertToAPIEventData(t *testing.T) {
 		{
 			name: "LLMRequestCompletedPayload",
 			event: events.Event{
-				Type:      events.EventLLMRequestCompleted,
+				Type:      events.EventType("llm.request.completed"),
 				Timestamp: now,
 				MissionID: testMissionID,
 				AgentName: testAgentName,
@@ -504,7 +504,7 @@ func TestConvertToAPIEventData(t *testing.T) {
 		{
 			name: "LLMRequestFailedPayload",
 			event: events.Event{
-				Type:      events.EventLLMRequestFailed,
+				Type:      events.EventType("llm.request.failed"),
 				Timestamp: now,
 				MissionID: testMissionID,
 				AgentName: testAgentName,

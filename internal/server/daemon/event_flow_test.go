@@ -204,7 +204,7 @@ func TestEventFlow_ToolCallStarted(t *testing.T) {
 
 			// Create event from mission orchestrator
 			event := events.Event{
-				Type:      events.EventToolCallStarted,
+				Type:      events.EventType("tool.call.started"),
 				Timestamp: time.Now(),
 				MissionID: tt.missionID,
 				AgentName: tt.agentName,
@@ -305,7 +305,7 @@ func TestEventFlow_LLMRequestCompleted(t *testing.T) {
 
 			// Create event from mission orchestrator
 			event := events.Event{
-				Type:      events.EventLLMRequestCompleted,
+				Type:      events.EventType("llm.request.completed"),
 				Timestamp: time.Now(),
 				AgentName: tt.agentName,
 				TraceID:   tt.traceID,
@@ -400,7 +400,7 @@ func TestEventFlow_FindingSubmitted(t *testing.T) {
 
 			// Create event from mission orchestrator
 			event := events.Event{
-				Type:      events.EventFindingSubmitted,
+				Type:      events.EventType("agent.finding_submitted"),
 				Timestamp: time.Now(),
 				MissionID: tt.missionID,
 				TraceID:   tt.traceID,
@@ -477,7 +477,7 @@ func TestEventFlow_MultipleEventTypes(t *testing.T) {
 			},
 		},
 		{
-			Type:      events.EventToolCallStarted,
+			Type:      events.EventType("tool.call.started"),
 			Timestamp: time.Now(),
 			MissionID: missionID,
 			AgentName: "test-agent",
@@ -488,7 +488,7 @@ func TestEventFlow_MultipleEventTypes(t *testing.T) {
 			},
 		},
 		{
-			Type:      events.EventLLMRequestCompleted,
+			Type:      events.EventType("llm.request.completed"),
 			Timestamp: time.Now(),
 			AgentName: "test-agent",
 			TraceID:   traceID,
@@ -501,7 +501,7 @@ func TestEventFlow_MultipleEventTypes(t *testing.T) {
 			},
 		},
 		{
-			Type:      events.EventFindingSubmitted,
+			Type:      events.EventType("agent.finding_submitted"),
 			Timestamp: time.Now(),
 			MissionID: missionID,
 			TraceID:   traceID,
@@ -632,27 +632,27 @@ func TestEventFlow_NoUnknownEvents(t *testing.T) {
 		payload   interface{}
 	}{
 		{events.EventMissionStarted, events.MissionStartedPayload{MissionID: types.ID("m1"), NodeCount: 1}},
-		{events.EventMissionProgress, events.MissionProgressPayload{MissionID: types.ID("m1"), TotalNodes: 1}},
+		{events.EventType("mission.progress"), events.MissionProgressPayload{MissionID: types.ID("m1"), TotalNodes: 1}},
 		{events.EventMissionCompleted, events.MissionCompletedPayload{MissionID: types.ID("m1")}},
-		{events.EventMissionFailed, events.MissionFailedPayload{MissionID: types.ID("m1"), Error: "test"}},
-		{events.EventNodeStarted, events.NodeStartedPayload{MissionID: types.ID("m1"), NodeID: "n1"}},
-		{events.EventNodeCompleted, events.NodeCompletedPayload{MissionID: types.ID("m1"), NodeID: "n1"}},
-		{events.EventNodeFailed, events.NodeFailedPayload{MissionID: types.ID("m1"), NodeID: "n1", Error: "test"}},
-		{events.EventNodeSkipped, events.NodeSkippedPayload{MissionID: types.ID("m1"), NodeID: "n1", SkipReason: "test"}},
-		{events.EventAgentStarted, events.AgentStartedPayload{AgentName: "test"}},
-		{events.EventAgentCompleted, events.AgentCompletedPayload{AgentName: "test"}},
-		{events.EventAgentFailed, events.AgentFailedPayload{AgentName: "test", Error: "test"}},
-		{events.EventAgentDelegated, events.AgentDelegatedPayload{FromAgent: "a1", ToAgent: "a2"}},
-		{events.EventToolCallStarted, events.ToolCallStartedPayload{ToolName: "test"}},
-		{events.EventToolCallCompleted, events.ToolCallCompletedPayload{ToolName: "test"}},
-		{events.EventToolCallFailed, events.ToolCallFailedPayload{ToolName: "test", Error: "test"}},
-		{events.EventToolProgress, events.ToolProgressPayload{ToolName: "test", CallID: "c1"}},
-		{events.EventToolWarning, events.ToolWarningPayload{ToolName: "test", CallID: "c1", WarningMessage: "test"}},
-		{events.EventLLMRequestStarted, events.LLMRequestStartedPayload{Model: "test", SlotName: "primary"}},
-		{events.EventLLMRequestCompleted, events.LLMRequestCompletedPayload{Model: "test", SlotName: "primary"}},
-		{events.EventLLMRequestFailed, events.LLMRequestFailedPayload{Model: "test", SlotName: "primary", Error: "test"}},
-		{events.EventFindingDiscovered, events.FindingDiscoveredPayload{FindingID: types.ID("f1"), Title: "test", Severity: "low"}},
-		{events.EventFindingSubmitted, events.FindingSubmittedPayload{FindingID: types.ID("f1"), Title: "test", Severity: "low"}},
+		{events.EventType("mission.failed"), events.MissionFailedPayload{MissionID: types.ID("m1"), Error: "test"}},
+		{events.EventType("node.started"), events.NodeStartedPayload{MissionID: types.ID("m1"), NodeID: "n1"}},
+		{events.EventType("node.completed"), events.NodeCompletedPayload{MissionID: types.ID("m1"), NodeID: "n1"}},
+		{events.EventType("node.failed"), events.NodeFailedPayload{MissionID: types.ID("m1"), NodeID: "n1", Error: "test"}},
+		{events.EventType("node.skipped"), events.NodeSkippedPayload{MissionID: types.ID("m1"), NodeID: "n1", SkipReason: "test"}},
+		{events.EventType("agent.started"), events.AgentStartedPayload{AgentName: "test"}},
+		{events.EventType("agent.completed"), events.AgentCompletedPayload{AgentName: "test"}},
+		{events.EventType("agent.failed"), events.AgentFailedPayload{AgentName: "test", Error: "test"}},
+		{events.EventType("agent.delegated"), events.AgentDelegatedPayload{FromAgent: "a1", ToAgent: "a2"}},
+		{events.EventType("tool.call.started"), events.ToolCallStartedPayload{ToolName: "test"}},
+		{events.EventType("tool.call.completed"), events.ToolCallCompletedPayload{ToolName: "test"}},
+		{events.EventType("tool.call.failed"), events.ToolCallFailedPayload{ToolName: "test", Error: "test"}},
+		{events.EventType("tool.progress"), events.ToolProgressPayload{ToolName: "test", CallID: "c1"}},
+		{events.EventType("tool.warning"), events.ToolWarningPayload{ToolName: "test", CallID: "c1", WarningMessage: "test"}},
+		{events.EventType("llm.request.started"), events.LLMRequestStartedPayload{Model: "test", SlotName: "primary"}},
+		{events.EventType("llm.request.completed"), events.LLMRequestCompletedPayload{Model: "test", SlotName: "primary"}},
+		{events.EventType("llm.request.failed"), events.LLMRequestFailedPayload{Model: "test", SlotName: "primary", Error: "test"}},
+		{events.EventType("finding.discovered"), events.FindingDiscoveredPayload{FindingID: types.ID("f1"), Title: "test", Severity: "low"}},
+		{events.EventType("agent.finding_submitted"), events.FindingSubmittedPayload{FindingID: types.ID("f1"), Title: "test", Severity: "low"}},
 	}
 
 	// Publish all test events

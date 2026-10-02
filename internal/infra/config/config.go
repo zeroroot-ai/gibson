@@ -121,7 +121,6 @@ type Config struct {
 	Plugins           PluginsConfig           `mapstructure:"plugins" yaml:"plugins,omitempty"`
 	ActivityLogging   ActivityLoggingConfig   `mapstructure:"activity_logging" yaml:"activity_logging"`
 	Shutdown          ShutdownConfig          `mapstructure:"shutdown" yaml:"shutdown"`
-	Observability     ObservabilityConfig     `mapstructure:"observability" yaml:"observability"`
 	OTelObservability OTelObservabilityConfig `mapstructure:"otel_observability" yaml:"otel_observability"`
 	Auth              AuthConfig              `mapstructure:"auth" yaml:"auth"`
 	Checkpoint        CheckpointConfig        `mapstructure:"checkpoint" yaml:"checkpoint"`
@@ -456,17 +455,6 @@ type ShutdownConfig struct {
 	AgentTimeout time.Duration `mapstructure:"agent_timeout" yaml:"agent_timeout"`
 }
 
-// ObservabilityConfig contains configuration for observability dashboard integrations.
-// This includes the Neo4j Browser URL used for generating deep links from traces
-// to knowledge graph visualizations.
-type ObservabilityConfig struct {
-	// Neo4jBrowserURL is the base URL for Neo4j Browser UI
-	// Used to generate deep links from traces to graph views
-	// Default: http://localhost:7474
-	// Environment variable: GIBSON_OBSERVABILITY_NEO4J_BROWSER_URL
-	Neo4jBrowserURL string `mapstructure:"neo4j_browser_url" yaml:"neo4j_browser_url"`
-}
-
 // ApplyDefaults fills in zero-valued fields with sensible defaults.
 func (c *ShutdownConfig) ApplyDefaults() {
 	if c.Timeout == 0 {
@@ -483,13 +471,6 @@ func (c *ShutdownConfig) ApplyDefaults() {
 
 	if c.AgentTimeout == 0 {
 		c.AgentTimeout = 15 * time.Second
-	}
-}
-
-// ApplyDefaults fills in zero-valued fields with sensible defaults.
-func (c *ObservabilityConfig) ApplyDefaults() {
-	if c.Neo4jBrowserURL == "" {
-		c.Neo4jBrowserURL = "http://localhost:7474"
 	}
 }
 

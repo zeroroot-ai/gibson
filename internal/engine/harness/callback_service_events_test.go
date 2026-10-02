@@ -131,7 +131,7 @@ func TestAgentStartedEvent(t *testing.T) {
 			taskDescription: "Scan target for vulnerabilities",
 			missionID:       types.NewID(),
 			validatePayload: func(t *testing.T, event events.Event) {
-				assert.Equal(t, events.EventAgentStarted, event.Type)
+				assert.Equal(t, events.EventType("agent.started"), event.Type)
 				assert.NotZero(t, event.Timestamp)
 
 				payload, ok := event.Payload.(events.AgentStartedPayload)
@@ -163,7 +163,7 @@ func TestAgentStartedEvent(t *testing.T) {
 
 			// Simulate agent.started event emission as in callback_service.go line 1063-1070
 			mockBus.Publish(ctx, events.Event{
-				Type:      events.EventAgentStarted,
+				Type:      events.EventType("agent.started"),
 				Timestamp: time.Now(),
 				MissionID: tt.missionID,
 				AgentName: tt.agentName,
@@ -173,7 +173,7 @@ func TestAgentStartedEvent(t *testing.T) {
 				},
 			})
 
-			publishedEvents := mockBus.GetEventsByType(events.EventAgentStarted)
+			publishedEvents := mockBus.GetEventsByType(events.EventType("agent.started"))
 			require.Len(t, publishedEvents, 1, "Expected exactly one agent.started event")
 
 			if tt.validatePayload != nil {
@@ -200,7 +200,7 @@ func TestAgentCompletedEvent(t *testing.T) {
 			findingCount: 3,
 			success:      true,
 			validatePayload: func(t *testing.T, event events.Event) {
-				assert.Equal(t, events.EventAgentCompleted, event.Type)
+				assert.Equal(t, events.EventType("agent.completed"), event.Type)
 				assert.NotZero(t, event.Timestamp)
 
 				payload, ok := event.Payload.(events.AgentCompletedPayload)
@@ -236,7 +236,7 @@ func TestAgentCompletedEvent(t *testing.T) {
 
 			// Simulate agent.completed event emission as in callback_service.go line 1111-1117
 			mockBus.Publish(ctx, events.Event{
-				Type:      events.EventAgentCompleted,
+				Type:      events.EventType("agent.completed"),
 				Timestamp: time.Now(),
 				AgentName: tt.agentName,
 				Payload: events.AgentCompletedPayload{
@@ -247,7 +247,7 @@ func TestAgentCompletedEvent(t *testing.T) {
 				},
 			})
 
-			publishedEvents := mockBus.GetEventsByType(events.EventAgentCompleted)
+			publishedEvents := mockBus.GetEventsByType(events.EventType("agent.completed"))
 			require.Len(t, publishedEvents, 1, "Expected exactly one agent.completed event")
 
 			if tt.validatePayload != nil {
@@ -274,7 +274,7 @@ func TestAgentFailedEvent(t *testing.T) {
 			duration:     10 * time.Second,
 			findingCount: 1,
 			validatePayload: func(t *testing.T, event events.Event) {
-				assert.Equal(t, events.EventAgentFailed, event.Type)
+				assert.Equal(t, events.EventType("agent.failed"), event.Type)
 				assert.NotZero(t, event.Timestamp)
 
 				payload, ok := event.Payload.(events.AgentFailedPayload)
@@ -310,7 +310,7 @@ func TestAgentFailedEvent(t *testing.T) {
 
 			// Simulate agent.failed event emission as in callback_service.go line 1093-1099
 			mockBus.Publish(ctx, events.Event{
-				Type:      events.EventAgentFailed,
+				Type:      events.EventType("agent.failed"),
 				Timestamp: time.Now(),
 				AgentName: tt.agentName,
 				Payload: events.AgentFailedPayload{
@@ -321,76 +321,8 @@ func TestAgentFailedEvent(t *testing.T) {
 				},
 			})
 
-			publishedEvents := mockBus.GetEventsByType(events.EventAgentFailed)
+			publishedEvents := mockBus.GetEventsByType(events.EventType("agent.failed"))
 			require.Len(t, publishedEvents, 1, "Expected exactly one agent.failed event")
-
-			if tt.validatePayload != nil {
-				tt.validatePayload(t, publishedEvents[0])
-			}
-		})
-	}
-}
-
-// TestAgentCancelledEvent tests that agent.cancelled events are emitted correctly
-func TestAgentCancelledEvent(t *testing.T) {
-	tests := []struct {
-		name            string
-		agentName       string
-		cancelReason    string
-		duration        time.Duration
-		validatePayload func(*testing.T, events.Event)
-	}{
-		{
-			name:         "agent cancelled via context",
-			agentName:    "scanner",
-			cancelReason: "context cancelled",
-			duration:     3 * time.Second,
-			validatePayload: func(t *testing.T, event events.Event) {
-				assert.Equal(t, events.EventAgentCancelled, event.Type)
-				assert.NotZero(t, event.Timestamp)
-
-				payload, ok := event.Payload.(events.AgentCancelledPayload)
-				require.True(t, ok, "Expected AgentCancelledPayload")
-
-				assert.Equal(t, "scanner", payload.AgentName)
-				assert.Equal(t, "context cancelled", payload.CancelReason)
-				assert.Equal(t, 3*time.Second, payload.Duration)
-			},
-		},
-		{
-			name:         "agent cancelled by user",
-			agentName:    "analyzer",
-			cancelReason: "user requested cancellation",
-			duration:     1 * time.Second,
-			validatePayload: func(t *testing.T, event events.Event) {
-				payload, ok := event.Payload.(events.AgentCancelledPayload)
-				require.True(t, ok)
-
-				assert.Equal(t, "analyzer", payload.AgentName)
-				assert.Equal(t, "user requested cancellation", payload.CancelReason)
-			},
-		},
-	}
-
-	for _, tt := range tests {
-		t.Run(tt.name, func(t *testing.T) {
-			mockBus := newMockEventBus()
-			ctx := context.Background()
-
-			// Simulate agent.cancelled event emission as in callback_service.go line 1085-1090
-			mockBus.Publish(ctx, events.Event{
-				Type:      events.EventAgentCancelled,
-				Timestamp: time.Now(),
-				AgentName: tt.agentName,
-				Payload: events.AgentCancelledPayload{
-					AgentName:    tt.agentName,
-					CancelReason: tt.cancelReason,
-					Duration:     tt.duration,
-				},
-			})
-
-			publishedEvents := mockBus.GetEventsByType(events.EventAgentCancelled)
-			require.Len(t, publishedEvents, 1, "Expected exactly one agent.cancelled event")
 
 			if tt.validatePayload != nil {
 				tt.validatePayload(t, publishedEvents[0])
@@ -408,7 +340,7 @@ func TestAgentEventSequence(t *testing.T) {
 
 	// Emit agent.started
 	mockBus.Publish(ctx, events.Event{
-		Type:      events.EventAgentStarted,
+		Type:      events.EventType("agent.started"),
 		Timestamp: time.Now(),
 		MissionID: missionID,
 		AgentName: agentName,
@@ -423,7 +355,7 @@ func TestAgentEventSequence(t *testing.T) {
 
 	// Emit agent.completed
 	mockBus.Publish(ctx, events.Event{
-		Type:      events.EventAgentCompleted,
+		Type:      events.EventType("agent.completed"),
 		Timestamp: time.Now(),
 		MissionID: missionID,
 		AgentName: agentName,
@@ -439,8 +371,8 @@ func TestAgentEventSequence(t *testing.T) {
 	require.Len(t, allEvents, 2, "Expected two events in sequence")
 
 	// Verify event order
-	assert.Equal(t, events.EventAgentStarted, allEvents[0].Type)
-	assert.Equal(t, events.EventAgentCompleted, allEvents[1].Type)
+	assert.Equal(t, events.EventType("agent.started"), allEvents[0].Type)
+	assert.Equal(t, events.EventType("agent.completed"), allEvents[1].Type)
 
 	// Verify both events have the same mission ID and agent name
 	assert.Equal(t, missionID, allEvents[0].MissionID)
@@ -456,7 +388,7 @@ func TestAgentEventsPayloadNotNil(t *testing.T) {
 
 	// Emit various agent events
 	mockBus.Publish(ctx, events.Event{
-		Type:      events.EventAgentStarted,
+		Type:      events.EventType("agent.started"),
 		Timestamp: time.Now(),
 		Payload: events.AgentStartedPayload{
 			AgentName: "test",
@@ -464,7 +396,7 @@ func TestAgentEventsPayloadNotNil(t *testing.T) {
 	})
 
 	mockBus.Publish(ctx, events.Event{
-		Type:      events.EventAgentCompleted,
+		Type:      events.EventType("agent.completed"),
 		Timestamp: time.Now(),
 		Payload: events.AgentCompletedPayload{
 			AgentName: "test",
@@ -474,22 +406,12 @@ func TestAgentEventsPayloadNotNil(t *testing.T) {
 	})
 
 	mockBus.Publish(ctx, events.Event{
-		Type:      events.EventAgentFailed,
+		Type:      events.EventType("agent.failed"),
 		Timestamp: time.Now(),
 		Payload: events.AgentFailedPayload{
 			AgentName: "test",
 			Error:     "test error",
 			Duration:  1 * time.Second,
-		},
-	})
-
-	mockBus.Publish(ctx, events.Event{
-		Type:      events.EventAgentCancelled,
-		Timestamp: time.Now(),
-		Payload: events.AgentCancelledPayload{
-			AgentName:    "test",
-			CancelReason: "test",
-			Duration:     1 * time.Second,
 		},
 	})
 
@@ -518,7 +440,7 @@ func TestConcurrentAgentEventEmission(t *testing.T) {
 
 			// Emit started event
 			mockBus.Publish(ctx, events.Event{
-				Type:      events.EventAgentStarted,
+				Type:      events.EventType("agent.started"),
 				Timestamp: time.Now(),
 				AgentName: agentName,
 				Payload: events.AgentStartedPayload{
@@ -528,7 +450,7 @@ func TestConcurrentAgentEventEmission(t *testing.T) {
 
 			// Emit completed event
 			mockBus.Publish(ctx, events.Event{
-				Type:      events.EventAgentCompleted,
+				Type:      events.EventType("agent.completed"),
 				Timestamp: time.Now(),
 				AgentName: agentName,
 				Payload: events.AgentCompletedPayload{
@@ -546,8 +468,8 @@ func TestConcurrentAgentEventEmission(t *testing.T) {
 	allEvents := mockBus.GetPublishedEvents()
 	assert.Len(t, allEvents, numAgents*2, "Should have started and completed events for all agents")
 
-	startedEvents := mockBus.GetEventsByType(events.EventAgentStarted)
-	completedEvents := mockBus.GetEventsByType(events.EventAgentCompleted)
+	startedEvents := mockBus.GetEventsByType(events.EventType("agent.started"))
+	completedEvents := mockBus.GetEventsByType(events.EventType("agent.completed"))
 
 	assert.Len(t, startedEvents, numAgents, "Should have started event for each agent")
 	assert.Len(t, completedEvents, numAgents, "Should have completed event for each agent")

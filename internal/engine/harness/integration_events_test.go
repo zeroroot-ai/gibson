@@ -37,7 +37,7 @@ func TestFullEventFlowSequence(t *testing.T) {
 		},
 		// 2. First node starts
 		{
-			Type:      events.EventNodeStarted,
+			Type:      events.EventType("node.started"),
 			Timestamp: time.Now(),
 			MissionID: missionID,
 			Payload: events.NodeStartedPayload{
@@ -48,7 +48,7 @@ func TestFullEventFlowSequence(t *testing.T) {
 		},
 		// 3. Agent starts
 		{
-			Type:      events.EventAgentStarted,
+			Type:      events.EventType("agent.started"),
 			Timestamp: time.Now(),
 			MissionID: missionID,
 			AgentName: "scanner",
@@ -59,7 +59,7 @@ func TestFullEventFlowSequence(t *testing.T) {
 		},
 		// 4. Tool call starts
 		{
-			Type:      events.EventToolCallStarted,
+			Type:      events.EventType("tool.call.started"),
 			Timestamp: time.Now(),
 			MissionID: missionID,
 			AgentName: "scanner",
@@ -70,7 +70,7 @@ func TestFullEventFlowSequence(t *testing.T) {
 		},
 		// 5. Tool call completes
 		{
-			Type:      events.EventToolCallCompleted,
+			Type:      events.EventType("tool.call.completed"),
 			Timestamp: time.Now(),
 			MissionID: missionID,
 			AgentName: "scanner",
@@ -83,7 +83,7 @@ func TestFullEventFlowSequence(t *testing.T) {
 		},
 		// 6. Agent completes
 		{
-			Type:      events.EventAgentCompleted,
+			Type:      events.EventType("agent.completed"),
 			Timestamp: time.Now(),
 			MissionID: missionID,
 			AgentName: "scanner",
@@ -96,7 +96,7 @@ func TestFullEventFlowSequence(t *testing.T) {
 		},
 		// 7. Node completes
 		{
-			Type:      events.EventNodeCompleted,
+			Type:      events.EventType("node.completed"),
 			Timestamp: time.Now(),
 			MissionID: missionID,
 			Payload: events.NodeCompletedPayload{
@@ -107,7 +107,7 @@ func TestFullEventFlowSequence(t *testing.T) {
 		},
 		// 8. Second node is skipped
 		{
-			Type:      events.EventNodeSkipped,
+			Type:      events.EventType("node.skipped"),
 			Timestamp: time.Now(),
 			MissionID: missionID,
 			Payload: events.NodeSkippedPayload{
@@ -145,13 +145,13 @@ func TestFullEventFlowSequence(t *testing.T) {
 	// Verify expected event sequence
 	expectedTypes := []events.EventType{
 		events.EventMissionStarted,
-		events.EventNodeStarted,
-		events.EventAgentStarted,
-		events.EventToolCallStarted,
-		events.EventToolCallCompleted,
-		events.EventAgentCompleted,
-		events.EventNodeCompleted,
-		events.EventNodeSkipped,
+		events.EventType("node.started"),
+		events.EventType("agent.started"),
+		events.EventType("tool.call.started"),
+		events.EventType("tool.call.completed"),
+		events.EventType("agent.completed"),
+		events.EventType("node.completed"),
+		events.EventType("node.skipped"),
 		events.EventMissionCompleted,
 	}
 
@@ -179,7 +179,7 @@ func TestToolCallCorrelationInEventFlow(t *testing.T) {
 
 	// Emit tool.call.started event with callID
 	err := mockBus.Publish(ctx, events.Event{
-		Type:      events.EventToolCallStarted,
+		Type:      events.EventType("tool.call.started"),
 		Timestamp: time.Now(),
 		MissionID: missionID,
 		AgentName: agentName,
@@ -201,7 +201,7 @@ func TestToolCallCorrelationInEventFlow(t *testing.T) {
 
 	// Emit tool.call.completed event with same callID
 	err = mockBus.Publish(ctx, events.Event{
-		Type:      events.EventToolCallCompleted,
+		Type:      events.EventType("tool.call.completed"),
 		Timestamp: time.Now(),
 		MissionID: missionID,
 		AgentName: agentName,
@@ -225,8 +225,8 @@ func TestToolCallCorrelationInEventFlow(t *testing.T) {
 	startEvent := publishedEvents[0]
 	completeEvent := publishedEvents[1]
 
-	assert.Equal(t, events.EventToolCallStarted, startEvent.Type)
-	assert.Equal(t, events.EventToolCallCompleted, completeEvent.Type)
+	assert.Equal(t, events.EventType("tool.call.started"), startEvent.Type)
+	assert.Equal(t, events.EventType("tool.call.completed"), completeEvent.Type)
 
 	// Extract callID from Attrs
 	startCallID, ok := startEvent.Attrs["call_id"].(string)
@@ -265,7 +265,7 @@ func TestMultipleToolCallsWithCorrelation(t *testing.T) {
 
 			// Emit tool.call.started
 			mockBus.Publish(ctx, events.Event{
-				Type:      events.EventToolCallStarted,
+				Type:      events.EventType("tool.call.started"),
 				Timestamp: time.Now(),
 				MissionID: missionID,
 				AgentName: agentName,
@@ -283,7 +283,7 @@ func TestMultipleToolCallsWithCorrelation(t *testing.T) {
 
 			// Emit tool.call.completed
 			mockBus.Publish(ctx, events.Event{
-				Type:      events.EventToolCallCompleted,
+				Type:      events.EventType("tool.call.completed"),
 				Timestamp: time.Now(),
 				MissionID: missionID,
 				AgentName: agentName,
@@ -323,9 +323,9 @@ func TestMultipleToolCallsWithCorrelation(t *testing.T) {
 		// Verify one is started and one is completed
 		var hasStarted, hasCompleted bool
 		for _, event := range eventPair {
-			if event.Type == events.EventToolCallStarted {
+			if event.Type == events.EventType("tool.call.started") {
 				hasStarted = true
-			} else if event.Type == events.EventToolCallCompleted {
+			} else if event.Type == events.EventType("tool.call.completed") {
 				hasCompleted = true
 			}
 		}
@@ -353,7 +353,7 @@ func TestNoNilPayloadsInEventFlow(t *testing.T) {
 			},
 		},
 		{
-			Type:      events.EventNodeStarted,
+			Type:      events.EventType("node.started"),
 			Timestamp: time.Now(),
 			MissionID: missionID,
 			Payload: events.NodeStartedPayload{
@@ -362,7 +362,7 @@ func TestNoNilPayloadsInEventFlow(t *testing.T) {
 			},
 		},
 		{
-			Type:      events.EventNodeSkipped,
+			Type:      events.EventType("node.skipped"),
 			Timestamp: time.Now(),
 			MissionID: missionID,
 			Payload: events.NodeSkippedPayload{
@@ -372,7 +372,7 @@ func TestNoNilPayloadsInEventFlow(t *testing.T) {
 			},
 		},
 		{
-			Type:      events.EventAgentStarted,
+			Type:      events.EventType("agent.started"),
 			Timestamp: time.Now(),
 			MissionID: missionID,
 			Payload: events.AgentStartedPayload{
@@ -380,7 +380,7 @@ func TestNoNilPayloadsInEventFlow(t *testing.T) {
 			},
 		},
 		{
-			Type:      events.EventAgentCompleted,
+			Type:      events.EventType("agent.completed"),
 			Timestamp: time.Now(),
 			MissionID: missionID,
 			Payload: events.AgentCompletedPayload{
@@ -390,7 +390,7 @@ func TestNoNilPayloadsInEventFlow(t *testing.T) {
 			},
 		},
 		{
-			Type:      events.EventAgentFailed,
+			Type:      events.EventType("agent.failed"),
 			Timestamp: time.Now(),
 			MissionID: missionID,
 			Payload: events.AgentFailedPayload{
@@ -400,17 +400,7 @@ func TestNoNilPayloadsInEventFlow(t *testing.T) {
 			},
 		},
 		{
-			Type:      events.EventAgentCancelled,
-			Timestamp: time.Now(),
-			MissionID: missionID,
-			Payload: events.AgentCancelledPayload{
-				AgentName:    "agent",
-				CancelReason: "cancelled",
-				Duration:     1 * time.Second,
-			},
-		},
-		{
-			Type:      events.EventToolCallStarted,
+			Type:      events.EventType("tool.call.started"),
 			Timestamp: time.Now(),
 			MissionID: missionID,
 			Payload: events.ToolCallStartedPayload{
@@ -419,7 +409,7 @@ func TestNoNilPayloadsInEventFlow(t *testing.T) {
 			},
 		},
 		{
-			Type:      events.EventToolCallCompleted,
+			Type:      events.EventType("tool.call.completed"),
 			Timestamp: time.Now(),
 			MissionID: missionID,
 			Payload: events.ToolCallCompletedPayload{
@@ -454,9 +444,9 @@ func TestEventTimestampOrdering(t *testing.T) {
 	// Emit events with deliberate time spacing
 	eventTypes := []events.EventType{
 		events.EventMissionStarted,
-		events.EventNodeStarted,
-		events.EventAgentStarted,
-		events.EventAgentCompleted,
+		events.EventType("node.started"),
+		events.EventType("agent.started"),
+		events.EventType("agent.completed"),
 		events.EventMissionCompleted,
 	}
 
@@ -552,7 +542,7 @@ func TestEventFilteringByAgentName(t *testing.T) {
 
 	// Publish events for both agents
 	mockBus.Publish(ctx, events.Event{
-		Type:      events.EventAgentStarted,
+		Type:      events.EventType("agent.started"),
 		Timestamp: time.Now(),
 		MissionID: missionID,
 		AgentName: agent1,
@@ -562,7 +552,7 @@ func TestEventFilteringByAgentName(t *testing.T) {
 	})
 
 	mockBus.Publish(ctx, events.Event{
-		Type:      events.EventAgentStarted,
+		Type:      events.EventType("agent.started"),
 		Timestamp: time.Now(),
 		MissionID: missionID,
 		AgentName: agent2,
@@ -597,29 +587,29 @@ func TestEventFilteringByType(t *testing.T) {
 	// Subscribe to only started events
 	eventsChan, cleanup := mockBus.Subscribe(ctx, events.Filter{
 		Types: []events.EventType{
-			events.EventAgentStarted,
-			events.EventNodeStarted,
+			events.EventType("agent.started"),
+			events.EventType("node.started"),
 		},
 	}, 10)
 	defer cleanup()
 
 	// Publish various events
 	mockBus.Publish(ctx, events.Event{
-		Type:      events.EventAgentStarted,
+		Type:      events.EventType("agent.started"),
 		Timestamp: time.Now(),
 		MissionID: missionID,
 		Payload:   events.AgentStartedPayload{AgentName: "agent"},
 	})
 
 	mockBus.Publish(ctx, events.Event{
-		Type:      events.EventAgentCompleted,
+		Type:      events.EventType("agent.completed"),
 		Timestamp: time.Now(),
 		MissionID: missionID,
 		Payload:   events.AgentCompletedPayload{AgentName: "agent", Duration: 1 * time.Second, Success: true},
 	})
 
 	mockBus.Publish(ctx, events.Event{
-		Type:      events.EventNodeStarted,
+		Type:      events.EventType("node.started"),
 		Timestamp: time.Now(),
 		MissionID: missionID,
 		Payload:   events.NodeStartedPayload{MissionID: missionID, NodeID: "node-1"},
@@ -635,7 +625,7 @@ eventLoop:
 		case event := <-eventsChan:
 			receivedCount++
 			assert.True(t,
-				event.Type == events.EventAgentStarted || event.Type == events.EventNodeStarted,
+				event.Type == events.EventType("agent.started") || event.Type == events.EventType("node.started"),
 				"Should only receive started events")
 		case <-timeout:
 			break eventLoop

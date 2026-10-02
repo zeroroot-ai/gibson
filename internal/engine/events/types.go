@@ -18,131 +18,7 @@ type EventType string
 // These events track the overall mission execution lifecycle.
 const (
 	EventMissionStarted   EventType = "mission.started"
-	EventMissionProgress  EventType = "mission.progress"
-	EventMissionNode      EventType = "mission.node"
 	EventMissionCompleted EventType = "mission.completed"
-	EventMissionFailed    EventType = "mission.failed"
-	EventMissionPaused    EventType = "mission.paused"
-	EventMissionResumed   EventType = "mission.resumed"
-)
-
-// Node Execution Events
-// These events track individual mission node execution within a mission.
-const (
-	EventNodeStarted   EventType = "node.started"
-	EventNodeCompleted EventType = "node.completed"
-	EventNodeFailed    EventType = "node.failed"
-	EventNodeSkipped   EventType = "node.skipped"
-)
-
-// Agent Lifecycle Events
-// These events track agent registration, execution, and termination.
-const (
-	EventAgentRegistered   EventType = "agent.registered"
-	EventAgentUnregistered EventType = "agent.unregistered"
-	EventAgentStarted      EventType = "agent.started"
-	EventAgentCompleted    EventType = "agent.completed"
-	EventAgentFailed       EventType = "agent.failed"
-	EventAgentDelegated    EventType = "agent.delegated"
-	EventAgentCancelled    EventType = "agent.cancelled"
-)
-
-// LLM Request Events
-// These events track LLM API interactions for both streaming and non-streaming.
-const (
-	EventLLMRequestStarted   EventType = "llm.request.started"
-	EventLLMRequestCompleted EventType = "llm.request.completed"
-	EventLLMRequestFailed    EventType = "llm.request.failed"
-	EventLLMStreamStarted    EventType = "llm.stream.started"
-	EventLLMStreamChunk      EventType = "llm.stream.chunk"
-	EventLLMStreamCompleted  EventType = "llm.stream.completed"
-)
-
-// Tool Execution Events
-// These events track tool calls made by agents during mission execution.
-const (
-	EventToolCallStarted   EventType = "tool.call.started"
-	EventToolCallCompleted EventType = "tool.call.completed"
-	EventToolCallFailed    EventType = "tool.call.failed"
-	EventToolNotFound      EventType = "tool.not_found"
-)
-
-// Tool Progress Events
-// These events track tool execution progress, partial results, and warnings.
-const (
-	EventToolProgress        EventType = "tool.progress"
-	EventToolPartialResult   EventType = "tool.partial_result"
-	EventToolWarning         EventType = "tool.warning"
-	EventToolProgressStalled EventType = "tool.progress_stalled"
-)
-
-// Plugin Lifecycle Events
-// These events track plugin initialization, health, and shutdown.
-const (
-	EventPluginInitialized          EventType = "plugin.initialized"
-	EventPluginInitializationFailed EventType = "plugin.initialization_failed"
-	EventPluginShutdown             EventType = "plugin.shutdown"
-	EventPluginHealthChanged        EventType = "plugin.health_changed"
-)
-
-// Plugin Query Events
-// These events track plugin query execution.
-const (
-	EventPluginQueryStarted   EventType = "plugin.query.started"
-	EventPluginQueryCompleted EventType = "plugin.query.completed"
-	EventPluginQueryFailed    EventType = "plugin.query.failed"
-)
-
-// Finding Events
-// These events track security finding discovery and submission.
-const (
-	EventFindingDiscovered EventType = "finding.discovered"
-	EventFindingSubmitted  EventType = "agent.finding_submitted"
-)
-
-// Memory Events
-// These events track memory tier operations (working, mission, long-term).
-const (
-	EventMemoryGet    EventType = "memory.get"
-	EventMemorySet    EventType = "memory.set"
-	EventMemorySearch EventType = "memory.search"
-)
-
-// System Events
-// These events track daemon and component lifecycle.
-const (
-	EventSystemComponentRegistered EventType = "system.component_registered"
-	EventSystemComponentHealth     EventType = "system.component_health"
-	EventSystemDaemonStarted       EventType = "system.daemon_started"
-)
-
-// Abort Events
-// These events track mission abort and cleanup operations.
-const (
-	EventMissionAborted  EventType = "mission.aborted"
-	EventCleanupRequired EventType = "mission.cleanup_required"
-)
-
-// Rollback Events
-// These events track checkpoint creation and mission rollback.
-const (
-	EventCheckpointCreated EventType = "checkpoint.created"
-	EventRollbackStarted   EventType = "rollback.started"
-	EventRollbackCompleted EventType = "rollback.completed"
-)
-
-// Reflection Events
-// These events track self-evaluation LLM calls.
-const (
-	EventReflectionStarted   EventType = "reflection.started"
-	EventReflectionCompleted EventType = "reflection.completed"
-)
-
-// Recall Events
-// These events track memory query operations.
-const (
-	EventRecallStarted   EventType = "recall.started"
-	EventRecallCompleted EventType = "recall.completed"
 )
 
 // String returns the string representation of the event type.
@@ -249,15 +125,6 @@ type MissionProgressPayload struct {
 	Message        string   `json:"message,omitempty"`
 }
 
-// MissionNodePayload contains data for mission.node events.
-type MissionNodePayload struct {
-	NodeID   string        `json:"node_id"`
-	NodeType string        `json:"node_type"`
-	Status   string        `json:"status"`
-	Duration time.Duration `json:"duration,omitempty"`
-	Error    string        `json:"error,omitempty"`
-}
-
 // MissionCompletedPayload contains data for mission.completed events.
 type MissionCompletedPayload struct {
 	MissionID     types.ID      `json:"mission_id"`
@@ -307,20 +174,6 @@ type NodeSkippedPayload struct {
 	SkipReason string   `json:"skip_reason"`
 }
 
-// AgentRegisteredPayload contains data for agent.registered events.
-type AgentRegisteredPayload struct {
-	AgentID   string `json:"agent_id"`
-	AgentName string `json:"agent_name"`
-	Message   string `json:"message,omitempty"`
-}
-
-// AgentUnregisteredPayload contains data for agent.unregistered events.
-type AgentUnregisteredPayload struct {
-	AgentID   string `json:"agent_id"`
-	AgentName string `json:"agent_name"`
-	Message   string `json:"message,omitempty"`
-}
-
 // AgentStartedPayload contains data for agent.started events.
 type AgentStartedPayload struct {
 	AgentName       string   `json:"agent_name"`
@@ -357,15 +210,6 @@ type AgentDelegatedPayload struct {
 	// Trace context for the delegated agent's run
 	ToTraceID string `json:"to_trace_id,omitempty"`
 	ToSpanID  string `json:"to_span_id,omitempty"`
-}
-
-// AgentCancelledPayload contains data for agent.cancelled events.
-type AgentCancelledPayload struct {
-	AgentName        string        `json:"agent_name"`
-	TaskID           string        `json:"task_id,omitempty"`
-	CancelReason     string        `json:"cancel_reason"`
-	ProgressAtCancel string        `json:"progress_at_cancel,omitempty"`
-	Duration         time.Duration `json:"duration"`
 }
 
 // LLMRequestStartedPayload contains data for llm.request.started events.
@@ -406,34 +250,6 @@ type LLMRequestFailedPayload struct {
 	RetryAttempt int           `json:"retry_attempt,omitempty"` // Which retry attempt failed
 }
 
-// LLMStreamStartedPayload contains data for llm.stream.started events.
-type LLMStreamStartedPayload struct {
-	Provider     string `json:"provider"`
-	Model        string `json:"model"`
-	SlotName     string `json:"slot_name"`
-	MessageCount int    `json:"message_count"`
-}
-
-// LLMStreamChunkPayload contains data for llm.stream.chunk events.
-type LLMStreamChunkPayload struct {
-	Provider      string `json:"provider"`
-	ChunkIndex    int    `json:"chunk_index"`
-	ContentDelta  string `json:"content_delta"`
-	ContentLength int    `json:"content_length"`
-}
-
-// LLMStreamCompletedPayload contains data for llm.stream.completed events.
-type LLMStreamCompletedPayload struct {
-	Provider           string        `json:"provider"`
-	Model              string        `json:"model"`
-	SlotName           string        `json:"slot_name"`
-	Duration           time.Duration `json:"duration"`
-	TotalChunks        int           `json:"total_chunks"`
-	InputTokens        int           `json:"input_tokens"`
-	OutputTokens       int           `json:"output_tokens"`
-	FinalContentLength int           `json:"final_content_length"`
-}
-
 // ToolCallStartedPayload contains data for tool.call.started events.
 type ToolCallStartedPayload struct {
 	ToolName      string         `json:"tool_name"`
@@ -456,12 +272,6 @@ type ToolCallFailedPayload struct {
 	Duration time.Duration `json:"duration"`
 }
 
-// ToolNotFoundPayload contains data for tool.not_found events.
-type ToolNotFoundPayload struct {
-	ToolName    string `json:"tool_name"`
-	RequestedBy string `json:"requested_by,omitempty"`
-}
-
 // ToolProgressPayload contains data for tool.progress events.
 type ToolProgressPayload struct {
 	ToolName        string `json:"tool_name"`
@@ -471,82 +281,12 @@ type ToolProgressPayload struct {
 	Message         string `json:"message"`
 }
 
-// ToolPartialResultPayload contains data for tool.partial_result events.
-type ToolPartialResultPayload struct {
-	ToolName      string `json:"tool_name"`
-	CallID        string `json:"call_id"`
-	PartialOutput string `json:"partial_output"`
-	IsIncremental bool   `json:"is_incremental"`
-}
-
 // ToolWarningPayload contains data for tool.warning events.
 type ToolWarningPayload struct {
 	ToolName       string `json:"tool_name"`
 	CallID         string `json:"call_id"`
 	WarningMessage string `json:"warning_message"`
 	WarningContext string `json:"warning_context,omitempty"`
-}
-
-// ToolProgressStalledPayload contains data for tool.progress_stalled events.
-type ToolProgressStalledPayload struct {
-	ToolName            string        `json:"tool_name"`
-	CallID              string        `json:"call_id"`
-	LastProgressPercent int           `json:"last_progress_percent"`
-	StallDuration       time.Duration `json:"stall_duration"`
-}
-
-// PluginInitializedPayload contains data for plugin.initialized events.
-type PluginInitializedPayload struct {
-	PluginName             string        `json:"plugin_name"`
-	Version                string        `json:"version"`
-	MethodsAvailable       []string      `json:"methods_available"`
-	InitializationDuration time.Duration `json:"initialization_duration"`
-}
-
-// PluginInitializationFailedPayload contains data for plugin.initialization_failed events.
-type PluginInitializationFailedPayload struct {
-	PluginName string `json:"plugin_name"`
-	Error      string `json:"error"`
-	ErrorCode  string `json:"error_code,omitempty"`
-}
-
-// PluginShutdownPayload contains data for plugin.shutdown events.
-type PluginShutdownPayload struct {
-	PluginName     string `json:"plugin_name"`
-	ShutdownReason string `json:"shutdown_reason"`
-	QueriesServed  int64  `json:"queries_served"`
-}
-
-// PluginHealthChangedPayload contains data for plugin.health_changed events.
-type PluginHealthChangedPayload struct {
-	PluginName     string `json:"plugin_name"`
-	PreviousStatus string `json:"previous_status"`
-	CurrentStatus  string `json:"current_status"`
-	HealthDetails  string `json:"health_details,omitempty"`
-}
-
-// PluginQueryStartedPayload contains data for plugin.query.started events.
-type PluginQueryStartedPayload struct {
-	PluginName     string         `json:"plugin_name"`
-	Method         string         `json:"method"`
-	Parameters     map[string]any `json:"parameters,omitempty"`
-	ParameterCount int            `json:"parameter_count"`
-}
-
-// PluginQueryCompletedPayload contains data for plugin.query.completed events.
-type PluginQueryCompletedPayload struct {
-	PluginName string        `json:"plugin_name"`
-	Method     string        `json:"method"`
-	Duration   time.Duration `json:"duration"`
-	Success    bool          `json:"success"`
-}
-
-// PluginQueryFailedPayload contains data for plugin.query.failed events.
-type PluginQueryFailedPayload struct {
-	PluginName string        `json:"plugin_name"`
-	Method     string        `json:"method"`
-	Error      string        `json:"error"`
-	Duration   time.Duration `json:"duration"`
 }
 
 // FindingDiscoveredPayload contains data for finding.discovered events.
@@ -568,51 +308,4 @@ type FindingSubmittedPayload struct {
 	Severity     string   `json:"severity"`
 	AgentName    string   `json:"agent_name"`
 	TechniqueIDs []string `json:"technique_ids,omitempty"`
-}
-
-// MemoryGetPayload contains data for memory.get events.
-type MemoryGetPayload struct {
-	Tier  string `json:"tier"`
-	Key   string `json:"key"`
-	Found bool   `json:"found"`
-}
-
-// MemorySetPayload contains data for memory.set events.
-type MemorySetPayload struct {
-	Tier      string `json:"tier"`
-	Key       string `json:"key"`
-	ValueSize int    `json:"value_size"`
-}
-
-// MemorySearchPayload contains data for memory.search events.
-type MemorySearchPayload struct {
-	Tier        string        `json:"tier"`
-	Query       string        `json:"query"`
-	ResultCount int           `json:"result_count"`
-	Duration    time.Duration `json:"duration"`
-}
-
-// ComponentRegisteredPayload contains data for system.component_registered events.
-type ComponentRegisteredPayload struct {
-	ComponentType string   `json:"component_type"`
-	ComponentName string   `json:"component_name"`
-	Version       string   `json:"version,omitempty"`
-	Capabilities  []string `json:"capabilities,omitempty"`
-}
-
-// ComponentHealthPayload contains data for system.component_health events.
-type ComponentHealthPayload struct {
-	ComponentType string        `json:"component_type"`
-	ComponentName string        `json:"component_name"`
-	Healthy       bool          `json:"healthy"`
-	Status        string        `json:"status,omitempty"`
-	ResponseTime  time.Duration `json:"response_time,omitempty"`
-}
-
-// DaemonStartedPayload contains data for system.daemon_started events.
-type DaemonStartedPayload struct {
-	Version       string `json:"version"`
-	ConfigPath    string `json:"config_path,omitempty"`
-	DataDir       string `json:"data_dir,omitempty"`
-	ListenAddress string `json:"listen_address,omitempty"`
 }

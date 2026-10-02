@@ -50,10 +50,6 @@ type OTelObservabilityStack struct {
 	// Used by metrics recorder to track LLM usage, tool calls, etc.
 	MeterProvider *metric.MeterProvider
 
-	// MissionTracer provides mission-aware tracing with LLM semantic conventions.
-	// Used by the orchestrator and harness for structured observability.
-	MissionTracer *OTelMissionTracer
-
 	// MetricsRecorder records operational metrics (counters, histograms).
 	// Used throughout the system to track resource usage and performance.
 	MetricsRecorder *OTelMetricsRecorder
@@ -106,9 +102,6 @@ type OTelConfig struct {
 	// RetryMaxElapsed is the maximum total time to spend retrying (default: 5m)
 	RetryMaxElapsed time.Duration
 
-	// Neo4jBrowserURL is the URL for Neo4j Browser (used for deep links in traces)
-	Neo4jBrowserURL string
-
 	// MetricsEnabled controls the OTel metric exporter independently of
 	// traces. Default: true. Set to false when the OTLP target is a
 	// trace-only backend — the daemon installs a no-op
@@ -127,7 +120,6 @@ type OTelConfig struct {
 //  3. Create TracerProvider with batch span processor
 //  4. Create OTLP metric exporter
 //  5. Create MeterProvider with periodic reader
-//  6. Create OTelMissionTracer for mission-aware tracing
 //  7. Create OTelMetricsRecorder for operational metrics
 //  8. Set global OTel providers for library instrumentation
 //
@@ -304,16 +296,6 @@ func InitOTelObservability(ctx context.Context, cfg OTelConfig) (*OTelObservabil
 
 	slog.Info("set global otel providers and propagators")
 
-	// Create OTelMissionTracer with the providers
-	missionTracer := NewOTelMissionTracer(tracerProvider, meterProvider, cfg.ContentLogging)
-	if cfg.Neo4jBrowserURL != "" {
-		missionTracer.WithNeo4jBrowserURL(cfg.Neo4jBrowserURL)
-	}
-	missionTracer.WithServiceName(cfg.ServiceName)
-
-	slog.Info("created otel mission tracer",
-		"neo4j_browser_url", cfg.Neo4jBrowserURL)
-
 	// Create OTelMetricsRecorder with the meter provider
 	metricsRecorder, err := NewOTelMetricsRecorder(meterProvider)
 	if err != nil {
@@ -328,7 +310,6 @@ func InitOTelObservability(ctx context.Context, cfg OTelConfig) (*OTelObservabil
 	stack := &OTelObservabilityStack{
 		TracerProvider:  tracerProvider,
 		MeterProvider:   meterProvider,
-		MissionTracer:   missionTracer,
 		MetricsRecorder: metricsRecorder,
 		ContentConfig:   cfg.ContentLogging,
 	}
