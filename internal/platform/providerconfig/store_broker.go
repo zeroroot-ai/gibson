@@ -5,7 +5,6 @@ package providerconfig
 
 import (
 	"context"
-	"errors"
 	"fmt"
 	"strings"
 
@@ -169,9 +168,6 @@ func (s *brokerBackedStore) Get(ctx context.Context, tenantID, name string) (*Pr
 
 	dao := newProviderConfigDAO(conn.Postgres)
 	meta, err := dao.get(ctx, tenantID, name)
-	if errors.Is(err, ErrNotFound) {
-		return nil, fmt.Errorf("provider %q: %w", name, ErrNotFound)
-	}
 	if err != nil {
 		return nil, err
 	}
@@ -252,7 +248,11 @@ func (s *brokerBackedStore) Delete(ctx context.Context, tenantID, name string) e
 		return err
 	}
 
-	return s.deleteCredentials(ctx, tenantID, name)
+	if err := s.deleteCredentials(ctx, tenantID, name); err != nil {
+		return err
+	}
+
+	return nil
 }
 
 func (s *brokerBackedStore) GetDefault(ctx context.Context, tenantID string) (*ProviderConfig, error) {
@@ -292,9 +292,6 @@ func (s *brokerBackedStore) Resolve(ctx context.Context, tenantID, name string) 
 
 	dao := newProviderConfigDAO(conn.Postgres)
 	meta, err := dao.get(ctx, tenantID, name)
-	if errors.Is(err, ErrNotFound) {
-		return nil, fmt.Errorf("provider %q: %w", name, ErrNotFound)
-	}
 	if err != nil {
 		return nil, err
 	}

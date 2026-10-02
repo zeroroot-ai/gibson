@@ -2,7 +2,6 @@
 // Copyright 2026 Zero Root AI
 
 //go:build integration
-// +build integration
 
 // store_broker_integration_test.go exercises brokerBackedStore end-to-end against
 // a real Postgres (via testcontainers) for the metadata table and an in-memory

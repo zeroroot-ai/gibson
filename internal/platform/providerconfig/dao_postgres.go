@@ -11,7 +11,7 @@ import (
 	"time"
 
 	"github.com/jackc/pgx/v5"
-	"github.com/jackc/pgx/v5/pgxpool"
+	"github.com/jackc/pgx/v5/pgconn"
 
 	"github.com/zeroroot-ai/gibson/internal/engine/llm"
 	"github.com/zeroroot-ai/gibson/internal/infra/types"
@@ -21,10 +21,18 @@ import (
 // It operates against the provider_configs tables (migration 007).
 // It does NOT handle credentials — those flow through secrets.Service.
 type providerConfigDAO struct {
-	pg *pgxpool.Pool
+	pg pgQuerier
 }
 
-func newProviderConfigDAO(pg *pgxpool.Pool) *providerConfigDAO {
+// pgQuerier is the slice of *pgxpool.Pool the DAO uses. A test hands in a
+// fake; production hands in the tenant's pool.
+type pgQuerier interface {
+	Exec(ctx context.Context, sql string, args ...any) (pgconn.CommandTag, error)
+	Query(ctx context.Context, sql string, args ...any) (pgx.Rows, error)
+	QueryRow(ctx context.Context, sql string, args ...any) pgx.Row
+}
+
+func newProviderConfigDAO(pg pgQuerier) *providerConfigDAO {
 	return &providerConfigDAO{pg: pg}
 }
 
