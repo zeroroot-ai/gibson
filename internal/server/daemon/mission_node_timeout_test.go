@@ -24,7 +24,7 @@ func TestMissionDefinitionToProjected_CarriesTheNodeTimeout(t *testing.T) {
 	proj, err := missionDefinitionToProjected(&missionpb.MissionDefinition{
 		Id:    "m1",
 		Nodes: map[string]*missionpb.MissionNode{"watch": node},
-	}, "")
+	}, "", nil)
 	if err != nil {
 		t.Fatalf("project: %v", err)
 	}
@@ -43,7 +43,7 @@ func TestMissionDefinitionToProjected_NoTimeoutIsZeroNotAnExpiry(t *testing.T) {
 	proj, err := missionDefinitionToProjected(&missionpb.MissionDefinition{
 		Id:    "m1",
 		Nodes: map[string]*missionpb.MissionNode{"a": toolNode("nmap")},
-	}, "")
+	}, "", nil)
 	if err != nil {
 		t.Fatalf("project: %v", err)
 	}

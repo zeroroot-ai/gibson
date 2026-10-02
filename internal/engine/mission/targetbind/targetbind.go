@@ -239,6 +239,80 @@ func placeholders(s string) []string {
 // Map KEYS are visited too. A node whose input key is built from a placeholder
 // is strange, but a key that silently keeps its placeholder while its value
 // resolves is stranger, and costs one branch to rule out.
+// isForEachTemplate reports whether fd is ForEachNodeConfig.template.
+//
+// Full-name comparison, so it cannot match a differently-parented field called
+// "template" and it breaks loudly if the message is renamed rather than quietly
+// binding what it should skip.
+func isForEachTemplate(fd protoreflect.FieldDescriptor) bool {
+	return fd.FullName() == forEachTemplateField
+}
+
+// forEachTemplateField is ForEachNodeConfig.template's fully-qualified name.
+const forEachTemplateField protoreflect.FullName = "gibson.mission.v1.ForEachNodeConfig.template"
+
+// BindNode binds one node against one target, for a for_each instance.
+//
+// Bind() deliberately skips for_each templates, so this is how an instance gets
+// its own values: the caller clones the template per item in the source set and
+// binds each copy against that item. Returns an error when a placeholder cannot
+// be resolved, for the same reason Bind does — a tool handed the literal text
+// "{{target.host}}" reports a clean run against a host that does not exist.
+func BindNode(n *missionv1.MissionNode, t *types.Target) (*missionv1.MissionNode, error) {
+	if n == nil {
+		return nil, errors.New("targetbind: nil mission node")
+	}
+	if t == nil {
+		return nil, fmt.Errorf("targetbind: node %q names no target to bind against", n.GetId())
+	}
+	out, ok := proto.Clone(n).(*missionv1.MissionNode)
+	if !ok {
+		return nil, fmt.Errorf("targetbind: clone of node %q is not a MissionNode", n.GetId())
+	}
+	bindings := Bindings(t)
+	var problems []string
+	// The instance's own body IS bound, including a nested for_each template —
+	// which cannot occur, because graph.Project refuses a nested for_each before
+	// a run reaches here (gibson#524).
+	walkStringsAll(out.ProtoReflect(), "", func(path, in string) (string, bool) {
+		bound, errs := substitute(in, bindings)
+		for _, e := range errs {
+			problems = append(problems, fmt.Sprintf("%s: %s", path, e))
+		}
+		return bound, len(errs) == 0
+	})
+	if len(problems) > 0 {
+		sort.Strings(problems)
+		return nil, fmt.Errorf("targetbind: node %q has unresolved bindings against target %q:\n  %s",
+			n.GetId(), t.Name, strings.Join(problems, "\n  "))
+	}
+	return out, nil
+}
+
+// walkStringsAll is walkStrings without the for_each-template skip. It exists
+// for BindNode, which is binding one instance and must reach every string in it.
+func walkStringsAll(m protoreflect.Message, path string, visit func(path, in string) (string, bool)) {
+	m.Range(func(fd protoreflect.FieldDescriptor, v protoreflect.Value) bool {
+		at := fd.TextName()
+		if path != "" {
+			at = path + "." + at
+		}
+		switch {
+		case fd.IsMap():
+			walkMap(fd, at, v.Map(), visit)
+		case fd.IsList():
+			walkList(fd, at, v.List(), visit)
+		case fd.Kind() == protoreflect.StringKind:
+			if out, ok := visit(at, v.String()); ok {
+				m.Set(fd, protoreflect.ValueOfString(out))
+			}
+		case fd.Kind() == protoreflect.MessageKind || fd.Kind() == protoreflect.GroupKind:
+			walkStringsAll(v.Message(), at, visit)
+		}
+		return true
+	})
+}
+
 func walkStrings(m protoreflect.Message, path string, visit func(path, in string) (string, bool)) {
 	m.Range(func(fd protoreflect.FieldDescriptor, v protoreflect.Value) bool {
 		at := fd.TextName()
@@ -255,6 +329,19 @@ func walkStrings(m protoreflect.Message, path string, visit func(path, in string
 				m.Set(fd, protoreflect.ValueOfString(out))
 			}
 		case fd.Kind() == protoreflect.MessageKind || fd.Kind() == protoreflect.GroupKind:
+			// A for_each template is NOT bound here. Its `{{target.*}}` belong to
+			// each instance and are bound per instance against that instance's own
+			// target, at projection. Binding them to the mission's primary target
+			// here would make every instance of a fan-out scan the first target
+			// and report as though it had covered them all — the exact failure the
+			// fan-out epic exists to remove (gibson#525).
+			//
+			// Matched on the descriptor rather than on a field name string: a
+			// rename moves this with the proto instead of silently re-enabling the
+			// binding.
+			if isForEachTemplate(fd) {
+				return true
+			}
 			walkStrings(v.Message(), at, visit)
 		}
 		return true
