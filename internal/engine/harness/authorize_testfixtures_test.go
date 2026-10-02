@@ -16,9 +16,12 @@ package harness
 //
 // The testfixtures fakes used here:
 //   - testfixtures/fga.FakeStore — powers the componentAuthorizer fake
-//   - testfixtures/audit.FakeEmitter — validates no Emit error is returned
-//     (the Authorize handler uses slog, not the FakeEmitter directly, but
-//     the fake proves the wiring pattern for future callers that need it).
+//
+// testfixtures/audit.FakeEmitter used to be listed here too, constructed and
+// immediately discarded "to exercise the import path for future callers". It
+// asserted nothing: the Authorize handler audits through slog and gibson has no
+// Emit interface the fake could satisfy, so there were no future callers to
+// prepare for. The package is deleted in testfixtures v0.3.0.
 //
 // Slice 5.6 of the production-readiness epic (gibson#183).
 
@@ -33,7 +36,6 @@ import (
 	"github.com/stretchr/testify/require"
 	"github.com/zeroroot-ai/gibson/internal/platform/authz"
 	harnesspb "github.com/zeroroot-ai/sdk/api/gen/gibson/harness/v1"
-	tfxaudit "github.com/zeroroot-ai/testfixtures/audit"
 	tfxfga "github.com/zeroroot-ai/testfixtures/fga"
 	"google.golang.org/grpc/codes"
 	"google.golang.org/grpc/status"
@@ -190,16 +192,7 @@ func TestAuthorize_HappyPath(t *testing.T) {
 // when the FGA store does NOT hold the relevant tuple (no seed → deny).
 //
 // Expected result: AuthorizeResponse{Allowed:false, Reason:"not_authorized"}.
-// Using testfixtures/audit.FakeEmitter to confirm no Emit error bubbles up
-// from the audit-log layer (it is wired via slog in the handler, not via the
-// emitter interface, but we declare the emitter here to exercise the import
-// path for future callers that do use it).
 func TestAuthorize_FGADenied(t *testing.T) {
-	// Declare the audit emitter to validate the import path; Authorize uses
-	// slog internally, so we just confirm it constructs without error.
-	emitter := tfxaudit.NewFakeEmitter()
-	_ = emitter // used below if extended; silences unused-var linter
-
 	az := newFGABackedAuthorizer()
 	// Do NOT seed any tuple → Check returns false → denied.
 
