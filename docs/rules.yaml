@@ -55,7 +55,7 @@ rules:
       allowlist with a code comment citing the spec phase.
     enforced_by:
       - "gibsoncheck:forbiddenimports"
-      - "ci:gibson-make-check"
+      - "ci:gibsoncheck"
 
   - id: gibson-auth-002
     description: |
