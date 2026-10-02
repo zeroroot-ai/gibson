@@ -65,4 +65,3 @@ func (m *mockComponentStore) Delete(context.Context, component.ComponentKind, st
 func (m *mockComponentStore) ListInstances(context.Context, component.ComponentKind, string) ([]component.ComponentInfo, error) {
 	return nil, errors.New("not implemented")
 }
-
