@@ -4,6 +4,7 @@
 package rulescontract
 
 import (
+	"fmt"
 	"os"
 	"path/filepath"
 	"regexp"
@@ -31,6 +32,51 @@ func repoRoot(t *testing.T) string {
 		}
 		dir = parent
 	}
+}
+
+// treePaths lists every tracked-looking file as a path relative to root,
+// skipping the same directories rulesFiles skips. It is what a scope glob is
+// matched against, so a glob naming a moved or deleted path is reported.
+func treePaths(t *testing.T, root string) []string {
+	t.Helper()
+	var out []string
+	err := filepath.WalkDir(root, func(path string, d os.DirEntry, err error) error {
+		if err != nil {
+			return err
+		}
+		if d.IsDir() {
+			switch d.Name() {
+			case ".git", ".tmp", "node_modules", "bin", "attic", ".worktrees":
+				return filepath.SkipDir
+			}
+			return nil
+		}
+		rel, relErr := filepath.Rel(root, path)
+		if relErr != nil {
+			return fmt.Errorf("relativize %s against %s: %w", path, root, relErr)
+		}
+		out = append(out, filepath.ToSlash(rel))
+		return nil
+	})
+	if err != nil {
+		t.Fatalf("walk %s: %v", root, err)
+	}
+	return out
+}
+
+// pathsUnder returns the subset of paths inside sub, re-rooted at sub, so a
+// rules file in a subtree can name a glob relative to its own module.
+func pathsUnder(paths []string, prefix string) []string {
+	if prefix == "" {
+		return nil
+	}
+	var out []string
+	for _, p := range paths {
+		if rest, ok := strings.CutPrefix(p, prefix+"/"); ok {
+			out = append(out, rest)
+		}
+	}
+	return out
 }
 
 // rulesFiles finds every docs/rules.yaml in the tree.
@@ -153,6 +199,15 @@ func TestRulesFilesConformAndEveryEnforcementPointResolves(t *testing.T) {
 	}
 	jobs := workflowJobs(t, root)
 
+	paths := treePaths(t, root)
+	// The floor exists for the same reason every other floor here does: an
+	// empty list disables the scope check silently, so a broken walk would
+	// look like a repo with no dead globs.
+	if len(paths) < MinTreePaths {
+		t.Fatalf("walked %d file(s), below the floor of %d — the scope check would "+
+			"pass by matching nothing", len(paths), MinTreePaths)
+	}
+
 	total := 0
 	for _, path := range files {
 		f, err := Load(path)
@@ -166,15 +221,25 @@ func TestRulesFilesConformAndEveryEnforcementPointResolves(t *testing.T) {
 
 		// A rules file inside a subtree may name scripts relative to that
 		// subtree, so both anchors are tried.
+		sub := filepath.Dir(filepath.Dir(path))
 		anchors := []string{root}
-		if sub := filepath.Dir(filepath.Dir(path)); sub != root {
+		if sub != root {
 			anchors = append(anchors, sub)
+		}
+
+		// A rules file in a subtree may name globs relative to that subtree,
+		// so both spellings of every path are offered.
+		scopePaths := paths
+		if subRel, err := filepath.Rel(root, sub); err == nil && subRel != "." {
+			scopePaths = append(append([]string{}, paths...),
+				pathsUnder(paths, filepath.ToSlash(subRel))...)
 		}
 
 		for _, p := range CheckFile(f, Enforcement{
 			Analyzers: analyzers,
 			Jobs:      jobs,
 			Anchors:   anchors,
+			Paths:     scopePaths,
 		}) {
 			t.Errorf("%s", p)
 		}
@@ -209,6 +274,12 @@ func TestCheck_Fixtures(t *testing.T) {
 		Analyzers: map[string]bool{"tenantfromcontext": true},
 		Jobs:      map[string]bool{"analyze": true},
 		Anchors:   []string{"."},
+		Paths: []string{
+			"internal/server/daemon/grpc.go",
+			"internal/engine/brain/orchestrator.go",
+			"pkg/platform/migrations/postgres/tenant/003_missions.up.sql",
+			"docs/rules.yaml",
+		},
 	}
 
 	cases := []struct {
@@ -233,6 +304,31 @@ func TestCheck_Fixtures(t *testing.T) {
 			"no target",
 		},
 		{"a bad severity fails", func(r *Rule) { r.Severity = "fatal" }, "severity"},
+		{
+			"a scope glob matching no file fails, because it claims coverage it lacks",
+			func(r *Rule) { r.Scope = []string{"internal/orchestrator/**/*.go"} },
+			"matches no tracked file",
+		},
+		{
+			"an exempt glob matching no file fails for the same reason",
+			func(r *Rule) { r.Exempt = []string{"internal/migrate/**"} },
+			"matches no tracked file",
+		},
+		{
+			"a scope glob that does match passes",
+			func(r *Rule) { r.Scope = []string{"internal/**/*.go"} },
+			"",
+		},
+		{
+			"a doublestar-free scope glob that matches passes",
+			func(r *Rule) { r.Scope = []string{"docs/rules.yaml"} },
+			"",
+		},
+		{
+			"a scope glob is anchored, so a bare suffix does not match",
+			func(r *Rule) { r.Scope = []string{"grpc.go"} },
+			"matches no tracked file",
+		},
 		{"an empty message fails", func(r *Rule) { r.Message = "   " }, "no message"},
 		{
 			"an empty enforced_by fails",
