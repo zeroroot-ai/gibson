@@ -286,11 +286,11 @@ func ensureRole(ctx context.Context, adminConn pgAdminConn, roleName, password s
 func grantSchemaPrivileges(ctx context.Context, tenantConn pgAdminConn, roleName string) error {
 	role := pgx.Identifier{roleName}.Sanitize()
 	schemaGrants := []string{
-		fmt.Sprintf("GRANT USAGE ON SCHEMA public TO %s", role),
-		fmt.Sprintf("GRANT SELECT, INSERT, UPDATE, DELETE ON ALL TABLES IN SCHEMA public TO %s", role),
-		fmt.Sprintf("GRANT USAGE, SELECT ON ALL SEQUENCES IN SCHEMA public TO %s", role),
-		fmt.Sprintf("ALTER DEFAULT PRIVILEGES IN SCHEMA public GRANT SELECT, INSERT, UPDATE, DELETE ON TABLES TO %s", role),
-		fmt.Sprintf("ALTER DEFAULT PRIVILEGES IN SCHEMA public GRANT USAGE, SELECT ON SEQUENCES TO %s", role),
+		"GRANT USAGE ON SCHEMA public TO " + role,
+		"GRANT SELECT, INSERT, UPDATE, DELETE ON ALL TABLES IN SCHEMA public TO " + role,
+		"GRANT USAGE, SELECT ON ALL SEQUENCES IN SCHEMA public TO " + role,
+		"ALTER DEFAULT PRIVILEGES IN SCHEMA public GRANT SELECT, INSERT, UPDATE, DELETE ON TABLES TO " + role,
+		"ALTER DEFAULT PRIVILEGES IN SCHEMA public GRANT USAGE, SELECT ON SEQUENCES TO " + role,
 	}
 	for _, grant := range schemaGrants {
 		if _, err := tenantConn.Exec(ctx, grant); err != nil {
