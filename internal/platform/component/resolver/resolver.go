@@ -6,7 +6,6 @@ package resolver
 import (
 	"context"
 	"fmt"
-	"strings"
 	"sync"
 	"time"
 
@@ -24,7 +23,7 @@ import (
 //
 // Example usage:
 //
-//	resolver := NewResolver(componentStore, lifecycle, manifestLoader)
+//	resolver := NewResolver(componentStore, lifecycle)
 //	tree, err := resolver.ResolveFromMission(ctx, missionDef)
 //	if err != nil {
 //	    return err
@@ -41,7 +40,7 @@ import (
 type DependencyResolver interface {
 	// ResolveFromMission builds a complete dependency tree from a mission definition.
 	// It walks through all nodes in the mission, extracts agent/tool/plugin references,
-	// loads their manifests, and recursively resolves transitive dependencies.
+	// resolves each against the component store.
 	//
 	// The returned tree contains:
 	//  - All direct dependencies (agents, tools, plugins referenced in nodes)
@@ -136,31 +135,13 @@ type MissionDependency interface {
 	Version() string
 }
 
-// ManifestLoader is an interface for loading component manifests.
-// This abstraction allows for testing with mock loaders and provides flexibility
-// in how manifests are loaded (from disk, from store, from network, etc.).
-type ManifestLoader interface {
-	// LoadManifest loads a component manifest by kind and name.
-	// The manifest may be loaded from:
-	//  - The component store (if the component is installed)
-	//  - The filesystem (if the component is in development)
-	//  - A remote registry (if the component needs to be fetched)
-	//
-	// Returns nil, nil if the component is not found.
-	// Returns an error only if there is a failure during loading.
-	LoadManifest(ctx context.Context, kind component.ComponentKind, name string) (*component.Manifest, error)
-}
-
 // resolver is the default implementation of DependencyResolver.
-// It uses a three-tier storage system for component information:
+// It uses two stores for component information:
 //  1. componentStore: persistent component metadata and installation state
 //  2. lifecycle: runtime process management and health checking
-//  3. manifestCache: in-memory cache to avoid repeated manifest loads
 type resolver struct {
 	componentStore component.ComponentStore
 	lifecycle      component.LifecycleManager
-	manifestLoader ManifestLoader
-	manifestCache  sync.Map // map[string]*component.Manifest, key is "kind:name"
 }
 
 // NewResolver creates a new dependency resolver with the given dependencies.
@@ -168,24 +149,22 @@ type resolver struct {
 // Parameters:
 //   - componentStore: provides access to installed component metadata
 //   - lifecycle: manages component start/stop operations
-//   - manifestLoader: loads component manifests for dependency analysis
 //
-// All parameters are required and must not be nil.
+// Both parameters are required and must not be nil.
 func NewResolver(
 	componentStore component.ComponentStore,
 	lifecycle component.LifecycleManager,
-	manifestLoader ManifestLoader,
 ) DependencyResolver {
 	return &resolver{
 		componentStore: componentStore,
 		lifecycle:      lifecycle,
-		manifestLoader: manifestLoader,
 	}
 }
 
 // ResolveFromMission builds a complete dependency tree from a mission definition.
 // It walks through all nodes in the mission, extracts agent/tool/plugin references,
-// loads their manifests, and recursively resolves transitive dependencies using BFS.
+// resolves each against the component store. A component declares itself at
+// check-in (ADR-0097); there is no manifest to walk for transitive dependencies.
 func (r *resolver) ResolveFromMission(ctx context.Context, mission MissionDefinition) (*DependencyTree, error) {
 	// Create empty dependency tree - use mission nodes as MissionRef fallback
 	missionRef := "mission"
@@ -313,39 +292,6 @@ func (r *resolver) ResolveFromMission(ctx context.Context, mission MissionDefini
 			// Note: Healthy status will be populated by ValidateState
 		}
 
-		// Load manifest to resolve transitive dependencies
-		manifest, err := r.getCachedManifest(ctx, entry.kind, entry.name)
-		if err != nil {
-			// Non-fatal: log warning but continue resolution
-			// The dependency tree will be incomplete but still usable
-			continue
-		}
-		if manifest == nil {
-			// Component has no manifest or manifest not found
-			continue
-		}
-
-		// Parse dependencies.components from manifest
-		if manifest.Dependencies != nil && len(manifest.Dependencies.Components) > 0 {
-			for _, depStr := range manifest.Dependencies.Components {
-				// Parse dependency string: "name@version" or "kind:name@version"
-				depKind, depName, depVersion := parseComponentDependency(depStr)
-				if depKind == "" || depName == "" {
-					// Invalid dependency format - skip
-					continue
-				}
-
-				// Add to queue for resolution
-				queue = append(queue, queueEntry{
-					kind:       depKind,
-					name:       depName,
-					version:    depVersion,
-					requiredBy: node,
-					source:     SourceManifest,
-					sourceRef:  entry.name,
-				})
-			}
-		}
 	}
 
 	// Phase 4: Detect circular dependencies using topological sort
@@ -360,41 +306,6 @@ func (r *resolver) ResolveFromMission(ctx context.Context, mission MissionDefini
 	}
 
 	return tree, nil
-}
-
-// parseComponentDependency parses a dependency string into kind, name, and version.
-// Supported formats:
-//   - "name@version" (kind inferred as agent)
-//   - "kind:name@version" (explicit kind)
-//
-// Returns empty strings if the format is invalid.
-func parseComponentDependency(depStr string) (component.ComponentKind, string, string) {
-	// Split by @ to separate name and version
-	parts := strings.Split(depStr, "@")
-	if len(parts) != 2 {
-		return "", "", ""
-	}
-
-	nameWithKind := parts[0]
-	version := parts[1]
-
-	// Check if kind is specified (kind:name)
-	kindParts := strings.SplitN(nameWithKind, ":", 2)
-	if len(kindParts) == 2 {
-		// Explicit kind specified
-		kindStr := kindParts[0]
-		name := kindParts[1]
-
-		kind, err := component.ParseComponentKind(kindStr)
-		if err != nil {
-			return "", "", ""
-		}
-
-		return kind, name, version
-	}
-
-	// No kind specified - default to agent
-	return component.ComponentKindAgent, nameWithKind, version
 }
 
 // ValidateState checks the current state of all components in the dependency tree.
@@ -650,32 +561,4 @@ func (r *resolver) EnsureRunning(ctx context.Context, tree *DependencyTree) erro
 	}
 
 	return nil
-}
-
-// getCachedManifest retrieves a manifest from cache or loads it via the manifest loader.
-// This helper avoids repeated manifest loads by caching results keyed on kind and name.
-func (r *resolver) getCachedManifest(ctx context.Context, kind component.ComponentKind, name string) (*component.Manifest, error) {
-	// Check cache first
-	key := manifestCacheKey(kind, name)
-	if cached, ok := r.manifestCache.Load(key); ok {
-		return cached.(*component.Manifest), nil
-	}
-
-	// Load from manifest loader
-	manifest, err := r.manifestLoader.LoadManifest(ctx, kind, name)
-	if err != nil {
-		return nil, err
-	}
-
-	// Cache for future use
-	if manifest != nil {
-		r.manifestCache.Store(key, manifest)
-	}
-
-	return manifest, nil
-}
-
-// manifestCacheKey generates a cache key for a component manifest.
-func manifestCacheKey(kind component.ComponentKind, name string) string {
-	return kind.String() + ":" + name
 }

@@ -288,34 +288,6 @@ message PermissionRequest {
   string justification = 5;
 }
 
-message ValidateComponentRequest {
-  // component_yaml and permissions_yaml are raw YAML bytes. The daemon
-  // parses them server-side to avoid schema-version drift between clients.
-  bytes component_yaml = 1;
-  bytes permissions_yaml = 2;
-}
-
-message ValidateComponentResponse {
-  repeated ValidationError schema_errors = 1;
-  repeated AccessError access_errors = 2;
-  repeated string slot_errors = 3;
-  repeated string proto_violations = 4;
-  // ok is true iff all four error lists are empty. Included for quick
-  // branching in MCP tools.
-  bool ok = 5;
-}
-
-message ValidationError {
-  string path = 1;                  // JSON-pointer-style path in the YAML
-  string message = 2;
-}
-
-message AccessError {
-  string target_ref = 1;            // "plugin:gitlab", "tool:nmap", etc.
-  string requested_action = 2;      // "read" | "write" | "execute"
-  repeated string failing_gates = 3; // tuple identifiers for the UI to display
-}
-
 message SlotInfo {
   string name = 1;
   string description = 2;
@@ -471,21 +443,9 @@ service DiscoveryService {
       };
     }
 
-  // ValidateComponent dry-runs a draft component.yaml + permissions.yaml
-  // against the caller's current access. Never mutates state.
-  // Tenant member discovery: USER+SERVICE+COMPONENT (spec discovery-bitfield-coherence)
-  rpc ValidateComponent(ValidateComponentRequest) returns (ValidateComponentResponse) {
-      option (gibson.auth.v1.authz) = {
-        relation: "member"
-        object_type: "tenant"
-        object_deriver: "tenant_from_identity"
-        allowed_identities: 7  // USER | SERVICE | COMPONENT
-      };
-    }
-
-  // SuggestMissingCapability is the bridge Claude uses when
-  // ValidateComponent reports an access error — returns human-readable
-  // next-step hints for the missing plugin / tool / agent.
+  // SuggestMissingCapability returns human-readable next-step hints for a
+  // missing plugin / tool / agent, for a component author whose check-in
+  // was refused a capability.
   // Tenant member discovery: USER+SERVICE+COMPONENT (spec discovery-bitfield-coherence)
   rpc SuggestMissingCapability(SuggestMissingCapabilityRequest) returns (SuggestMissingCapabilityResponse) {
       option (gibson.auth.v1.authz) = {

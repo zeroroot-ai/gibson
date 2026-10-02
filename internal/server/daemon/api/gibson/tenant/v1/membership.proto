@@ -258,20 +258,6 @@ service MembershipService {
       allowed_identities: 1  // USER
     };
   }
-  // GrantComponentPermissions records the agent installation's approved
-  // component capabilities. The server enforces caller-access intersection:
-  // only capabilities the caller already holds (component_read/write/execute_enabled)
-  // may be granted. Writes component_*_enabled FGA tuples for the agent
-  // installation principal.
-  rpc GrantComponentPermissions(GrantComponentPermissionsRequest) returns (GrantComponentPermissionsResponse) {
-    option (gibson.auth.v1.authz) = {
-      relation: "writer"
-      object_type: "tenant"
-      object_deriver: "tenant_from_identity"
-      allowed_identities: 1  // USER
-    };
-  }
-
   // ---------------------------------------------------------------------------
   // Utility
   // ---------------------------------------------------------------------------
@@ -605,27 +591,6 @@ message SetComponentAccessRequest {
 message SetComponentAccessResponse {
   int32 tuples_written = 1;
   int32 tuples_deleted = 2;
-}
-
-// ComponentApproval records the caller's approval for a single capability on a component.
-message ComponentApproval {
-  // target is the FGA component reference (e.g. "component:plugin/gitlab").
-  string target = 1;
-  // action is one of "read", "write", or "execute".
-  string action = 2;
-}
-
-message GrantComponentPermissionsRequest {
-  // agent_installation_id is the FGA agent installation principal id
-  // (without type prefix) that the approved capabilities are granted to.
-  string agent_installation_id = 1;
-  repeated ComponentApproval approvals = 2;
-  // reason is a human-readable audit note for why these capabilities were granted.
-  string reason = 3;
-}
-
-message GrantComponentPermissionsResponse {
-  string agent_installation_id = 1;
 }
 
 // ---------------------------------------------------------------------------

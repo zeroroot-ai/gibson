@@ -101,7 +101,6 @@ const (
 // DefaultComponentScorer implements ComponentScorer with configurable criteria.
 type DefaultComponentScorer struct {
 	criteria          *ScoringCriteria
-	capabilityMatcher CapabilityMatcher
 	lifecycleManager  component.LifecycleManager
 	prometheusQuerier PrometheusQuerier // optional; nil uses status-based fallback
 }
@@ -114,9 +113,8 @@ func NewComponentScorer(criteria *ScoringCriteria, lifecycle component.Lifecycle
 	criteria = criteria.Normalize()
 
 	return &DefaultComponentScorer{
-		criteria:          criteria,
-		capabilityMatcher: NewCapabilityMatcher(),
-		lifecycleManager:  lifecycle,
+		criteria:         criteria,
+		lifecycleManager: lifecycle,
 	}
 }
 
@@ -208,18 +206,15 @@ func (s *DefaultComponentScorer) ScoreMultiple(ctx context.Context, components [
 	return results, nil
 }
 
-// scoreCapabilities calculates the capability match score.
-func (s *DefaultComponentScorer) scoreCapabilities(comp *component.Component, required []string) float64 {
-	if comp.Manifest == nil {
-		// No manifest means no capability information
-		if len(required) == 0 {
-			return 1.0 // No requirements, so it's a match
-		}
-		return 0.0 // Has requirements but no capabilities
+// scoreCapabilities calculates the capability match score. A component
+// declares no capability list: the manifest that carried one never loaded in
+// production and is gone (gibson#555, ADR-0097). So a request with no
+// requirement matches, and any requirement cannot be met.
+func (s *DefaultComponentScorer) scoreCapabilities(_ *component.Component, required []string) float64 {
+	if len(required) == 0 {
+		return 1.0
 	}
-
-	actual := comp.Manifest.Capabilities
-	return s.capabilityMatcher.Score(required, actual)
+	return 0.0
 }
 
 // scoreVersion calculates the version preference score.

@@ -773,16 +773,6 @@ var Registry = map[string]Entry{
 		Unauthenticated:   false,
 		Self:              false,
 	},
-	"/gibson.daemon.discovery.v1.DiscoveryService/ValidateComponent": {
-		Method:            "/gibson.daemon.discovery.v1.DiscoveryService/ValidateComponent",
-		Service:           "gibson.daemon.discovery.v1.DiscoveryService",
-		Relation:          "member",
-		ObjectType:        "tenant",
-		ObjectDeriver:     "tenant_from_identity",
-		AllowedIdentities: IdentityUser | IdentityService | IdentityComponent,
-		Unauthenticated:   false,
-		Self:              false,
-	},
 	"/gibson.daemon.discovery.v1.DiscoveryService/WhoAmI": {
 		Method:            "/gibson.daemon.discovery.v1.DiscoveryService/WhoAmI",
 		Service:           "gibson.daemon.discovery.v1.DiscoveryService",
@@ -2721,16 +2711,6 @@ var Registry = map[string]Entry{
 		ObjectDeriver:     "",
 		AllowedIdentities: 0,
 		Unauthenticated:   true,
-		Self:              false,
-	},
-	"/gibson.tenant.v1.MembershipService/GrantComponentPermissions": {
-		Method:            "/gibson.tenant.v1.MembershipService/GrantComponentPermissions",
-		Service:           "gibson.tenant.v1.MembershipService",
-		Relation:          "writer",
-		ObjectType:        "tenant",
-		ObjectDeriver:     "tenant_from_identity",
-		AllowedIdentities: IdentityUser,
-		Unauthenticated:   false,
 		Self:              false,
 	},
 	"/gibson.tenant.v1.MembershipService/InviteMember": {

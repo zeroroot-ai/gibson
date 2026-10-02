@@ -93,3 +93,17 @@ func TestScore_Full_WithPrometheus(t *testing.T) {
 	assert.GreaterOrEqual(t, s, 0.0)
 	assert.LessOrEqual(t, s, 1.0)
 }
+
+// TestScoreCapabilities_NoDeclaredCapabilities: a component declares no
+// capability list (gibson#555), so a request with no requirement matches and
+// any requirement cannot be met.
+func TestScoreCapabilities_NoDeclaredCapabilities(t *testing.T) {
+	s := &DefaultComponentScorer{criteria: DefaultScoringCriteria().Normalize()}
+	comp := &component.Component{Kind: component.ComponentKindTool, Name: "nmap", Version: "1.0.0"}
+	if got := s.scoreCapabilities(comp, nil); got != 1.0 {
+		t.Errorf("no requirement: score = %v, want 1.0", got)
+	}
+	if got := s.scoreCapabilities(comp, []string{"port-scan"}); got != 0.0 {
+		t.Errorf("one requirement: score = %v, want 0.0", got)
+	}
+}

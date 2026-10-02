@@ -760,16 +760,6 @@ export const AuthRegistry: Record<string, AuthEntry> = {
     unauthenticated: false,
     self: false,
   },
-  "/gibson.daemon.discovery.v1.DiscoveryService/ValidateComponent": {
-    method: "/gibson.daemon.discovery.v1.DiscoveryService/ValidateComponent",
-    service: "gibson.daemon.discovery.v1.DiscoveryService",
-    relation: "member",
-    objectType: "tenant",
-    objectDeriver: "tenant_from_identity",
-    allowedIdentities: IdentityClass.USER | IdentityClass.SERVICE | IdentityClass.COMPONENT,
-    unauthenticated: false,
-    self: false,
-  },
   "/gibson.daemon.discovery.v1.DiscoveryService/WhoAmI": {
     method: "/gibson.daemon.discovery.v1.DiscoveryService/WhoAmI",
     service: "gibson.daemon.discovery.v1.DiscoveryService",
@@ -2708,16 +2698,6 @@ export const AuthRegistry: Record<string, AuthEntry> = {
     objectDeriver: "",
     allowedIdentities: 0,
     unauthenticated: true,
-    self: false,
-  },
-  "/gibson.tenant.v1.MembershipService/GrantComponentPermissions": {
-    method: "/gibson.tenant.v1.MembershipService/GrantComponentPermissions",
-    service: "gibson.tenant.v1.MembershipService",
-    relation: "writer",
-    objectType: "tenant",
-    objectDeriver: "tenant_from_identity",
-    allowedIdentities: IdentityClass.USER,
-    unauthenticated: false,
     self: false,
   },
   "/gibson.tenant.v1.MembershipService/InviteMember": {

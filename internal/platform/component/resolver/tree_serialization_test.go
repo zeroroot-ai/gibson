@@ -38,7 +38,7 @@ func TestDependencyNode_JSONSerialization(t *testing.T) {
 				Kind:      component.ComponentKindTool,
 				Name:      "minimal-tool",
 				Version:   "2.0.0",
-				Source:    SourceManifest,
+				Source:    SourceMissionNode,
 				SourceRef: "parent",
 			},
 		},
@@ -108,7 +108,7 @@ func TestDependencyNode_YAMLSerialization(t *testing.T) {
 				Kind:      component.ComponentKindTool,
 				Name:      "yaml-tool",
 				Version:   "2.0.0",
-				Source:    SourceManifest,
+				Source:    SourceMissionNode,
 				SourceRef: "parent-component",
 				Installed: false,
 				Running:   false,
@@ -162,7 +162,7 @@ func TestDependencyTree_JSONSerialization(t *testing.T) {
 			Kind:      component.ComponentKindTool,
 			Name:      "tool1",
 			Version:   "2.0.0",
-			Source:    SourceManifest,
+			Source:    SourceMissionNode,
 			SourceRef: "agent1",
 			Installed: true,
 			Running:   false,
@@ -348,7 +348,7 @@ func TestDependencyTree_SerializationWithRelationships(t *testing.T) {
 			Kind:    component.ComponentKindTool,
 			Name:    "B",
 			Version: "2.0",
-			Source:  SourceManifest,
+			Source:  SourceMissionNode,
 		}
 
 		tree.AddNode(nodeA)
@@ -387,7 +387,7 @@ func TestDependencyTree_SerializationWithRelationships(t *testing.T) {
 			Kind:    component.ComponentKindTool,
 			Name:    "B",
 			Version: "2.0",
-			Source:  SourceManifest,
+			Source:  SourceMissionNode,
 		}
 
 		tree.AddNode(nodeA)

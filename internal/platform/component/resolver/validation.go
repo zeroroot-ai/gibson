@@ -160,9 +160,6 @@ const (
 	// ErrCircularDependency indicates a circular dependency was detected in the dependency graph
 	ErrCircularDependency DependencyErrorCode = "CIRCULAR_DEPENDENCY"
 
-	// ErrManifestNotFound indicates a component manifest could not be found
-	ErrManifestNotFound DependencyErrorCode = "MANIFEST_NOT_FOUND"
-
 	// ErrVersionConstraintViolation indicates a version constraint is not satisfied
 	ErrVersionConstraintViolation DependencyErrorCode = "VERSION_CONSTRAINT_VIOLATION"
 
@@ -187,16 +184,6 @@ func NewCircularDependencyError(cyclePath []string) *DependencyError {
 		Code:    ErrCircularDependency,
 		Message: fmt.Sprintf("circular dependency detected: %s", cycleStr),
 		Node:    nil, // Circular dependencies involve multiple nodes
-	}
-}
-
-// NewManifestNotFoundError creates a dependency error for missing component manifests.
-// This error is non-fatal for validation but indicates that the dependency tree may be incomplete.
-func NewManifestNotFoundError(kind, name string) *DependencyError {
-	return &DependencyError{
-		Code:    ErrManifestNotFound,
-		Message: fmt.Sprintf("manifest not found for %s/%s - dependency tree may be incomplete", kind, name),
-		Node:    nil, // Node can be set by caller if available
 	}
 }
 

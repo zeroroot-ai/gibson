@@ -73,10 +73,10 @@ func (s *Server) DescribeAgent(ctx context.Context, req *discoverypb.DescribeAge
 	if err != nil {
 		return nil, err
 	}
-	// Slots and requested_permissions are not yet stored on ComponentInfo
-	// — they would come from the agent's component.yaml manifest. The
-	// install flow pulls these from the manifest directly; this handler
-	// surfaces what the registry already knows (name, version, rwx).
+	// Slots and requested_permissions are not stored on ComponentInfo. A
+	// component declares itself at check-in (ADR-0097) and no manifest file
+	// carries them; this handler surfaces what the registry knows (name,
+	// version, rwx).
 	return &discoverypb.DescribeAgentResponse{
 		Name:                 info.Name,
 		DisplayName:          firstNonEmpty(info.Metadata["display_name"], info.Name),
@@ -121,8 +121,8 @@ func (s *Server) lookupSingle(ctx context.Context, kind, name string) (*componen
 // ListLLMSlots returns the union of slot shapes the caller's tenant can
 // satisfy via its BYOK LLM providers. v1 returns an empty list — the
 // daemon's LLM provider registry does not yet expose a per-slot
-// satisfaction query, so the dashboard falls back to rendering the
-// provider list from component.yaml slot declarations.
+// satisfaction query, so the dashboard renders the provider list on its
+// own.
 func (s *Server) ListLLMSlots(ctx context.Context, _ *discoverypb.ListLLMSlotsRequest) (*discoverypb.ListLLMSlotsResponse, error) {
 	// Placeholder until the LLM provider registry grows a
 	// SatisfySlot(requirements) surface. Returning an empty list is safe:

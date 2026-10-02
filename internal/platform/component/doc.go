@@ -47,54 +47,6 @@
 // The lifecycle manager starts components as processes, assigns ports, monitors
 // process health, and performs graceful shutdown (SIGTERM followed by SIGKILL).
 //
-// # Manifest Format
-//
-// Components are described by a manifest file (component.yaml) that defines
-// their metadata, build configuration, runtime requirements, and dependencies.
-//
-// Example manifest:
-//
-//	name: scanner
-//	version: 1.0.0
-//	description: Network vulnerability scanner agent
-//	author: Security Team
-//	license: MIT
-//	repository: https://github.com/org/gibson-agent-scanner
-//
-// Note: Component kind is no longer stored in the manifest. Instead, it is determined
-// by the installation command (e.g., 'gibson agent install' for agents). This allows
-// the same component to be used in different contexts if needed.
-//
-//	build:
-//	  command: make build
-//	  artifacts:
-//	    - bin/scanner
-//	  workdir: .
-//	  env:
-//	    CGO_ENABLED: "0"
-//	    GOOS: linux
-//
-//	runtime:
-//	  type: go
-//	  entrypoint: ./bin/scanner
-//	  args:
-//	    - --verbose
-//	  env:
-//	    LOG_LEVEL: info
-//	  port: 50000
-//	  health_url: /health
-//	  workdir: /opt/scanner
-//
-//	dependencies:
-//	  gibson: ">=1.0.0"
-//	  components:
-//	    - nmap-tool@2.0.0
-//	  system:
-//	    - docker
-//	    - nmap
-//	  env:
-//	    SCANNER_API_KEY: required
-//
 // # Component Lifecycle
 //
 // Components follow a well-defined lifecycle from registration to removal:
@@ -282,49 +234,6 @@
 //	        totalCount += len(components)
 //	    }
 //	    fmt.Printf("Total components: %d\n", totalCount)
-//	}
-//
-// ## Loading and Validating Manifests
-//
-// Load component manifests and access their configuration:
-//
-//	func loadManifest() {
-//	    manifestPath := "/path/to/component.yaml"
-//	    manifest, err := component.LoadManifest(manifestPath)
-//	    if err != nil {
-//	        log.Fatalf("Failed to load manifest: %v", err)
-//	    }
-//
-//	    // Access manifest fields
-//	    fmt.Printf("Component: %s v%s\n",
-//	        manifest.Name,
-//	        manifest.Version)
-//	    // Note: Kind is not stored in manifest, it's provided during installation
-//
-//	    // Check runtime configuration
-//	    if manifest.Runtime.IsNetworkBased() {
-//	        fmt.Printf("Network component on port %d\n", manifest.Runtime.Port)
-//	    }
-//
-//	    // Check dependencies
-//	    if manifest.Dependencies != nil && manifest.Dependencies.HasDependencies() {
-//	        fmt.Printf("Dependencies:\n")
-//	        fmt.Printf("  Gibson: %s\n", manifest.Dependencies.Gibson)
-//	        for _, dep := range manifest.Dependencies.GetComponents() {
-//	            fmt.Printf("  Component: %s\n", dep)
-//	        }
-//	        for _, dep := range manifest.Dependencies.GetSystem() {
-//	            fmt.Printf("  System: %s\n", dep)
-//	        }
-//	    }
-//
-//	    // Access build configuration
-//	    if manifest.Build != nil {
-//	        fmt.Printf("Build command: %s\n", manifest.Build.Command)
-//	        for _, artifact := range manifest.Build.GetBuildArtifacts() {
-//	            fmt.Printf("  Artifact: %s\n", artifact)
-//	        }
-//	    }
 //	}
 //
 // ## Using the Logging Subsystem

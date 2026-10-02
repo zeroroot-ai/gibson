@@ -32,12 +32,6 @@ func TestDependencySource(t *testing.T) {
 			expectString: "mission_node",
 		},
 		{
-			name:         "manifest is valid",
-			source:       SourceManifest,
-			valid:        true,
-			expectString: "manifest",
-		},
-		{
 			name:         "empty is invalid",
 			source:       DependencySource(""),
 			valid:        false,

@@ -297,8 +297,7 @@ func (s *GrantsAdminServer) WriteAgentGrants(ctx context.Context, req *tenantv1.
 	}
 	callerRef := "user:" + callerIdentity.Subject
 
-	// Caller-access intersection check, mirroring GrantComponentPermissions
-	// (tenant_admin_component_ops.go): a caller may only forward a relation
+	// Caller-access intersection check: a caller may only forward a relation
 	// on an object that the caller already holds themselves. component.can_
 	// read/can_configure/can_execute and plugin.can_invoke are relations the
 	// FGA model grants to BOTH user and agent/tool principal types on the

@@ -35,27 +35,26 @@ import (
 const _ = grpc.SupportPackageIsVersion9
 
 const (
-	MembershipService_ListMembers_FullMethodName               = "/gibson.tenant.v1.MembershipService/ListMembers"
-	MembershipService_SetTenantRole_FullMethodName             = "/gibson.tenant.v1.MembershipService/SetTenantRole"
-	MembershipService_TransferOwnership_FullMethodName         = "/gibson.tenant.v1.MembershipService/TransferOwnership"
-	MembershipService_RemoveMember_FullMethodName              = "/gibson.tenant.v1.MembershipService/RemoveMember"
-	MembershipService_LeaveTenant_FullMethodName               = "/gibson.tenant.v1.MembershipService/LeaveTenant"
-	MembershipService_InviteMember_FullMethodName              = "/gibson.tenant.v1.MembershipService/InviteMember"
-	MembershipService_AcceptInvitation_FullMethodName          = "/gibson.tenant.v1.MembershipService/AcceptInvitation"
-	MembershipService_ResendInvitation_FullMethodName          = "/gibson.tenant.v1.MembershipService/ResendInvitation"
-	MembershipService_CancelInvitation_FullMethodName          = "/gibson.tenant.v1.MembershipService/CancelInvitation"
-	MembershipService_ListTeams_FullMethodName                 = "/gibson.tenant.v1.MembershipService/ListTeams"
-	MembershipService_CreateTeam_FullMethodName                = "/gibson.tenant.v1.MembershipService/CreateTeam"
-	MembershipService_DeleteTeam_FullMethodName                = "/gibson.tenant.v1.MembershipService/DeleteTeam"
-	MembershipService_ListTeamMembers_FullMethodName           = "/gibson.tenant.v1.MembershipService/ListTeamMembers"
-	MembershipService_AddTeamMember_FullMethodName             = "/gibson.tenant.v1.MembershipService/AddTeamMember"
-	MembershipService_RemoveTeamMember_FullMethodName          = "/gibson.tenant.v1.MembershipService/RemoveTeamMember"
-	MembershipService_SetTeamAdmin_FullMethodName              = "/gibson.tenant.v1.MembershipService/SetTeamAdmin"
-	MembershipService_SetComponentAccess_FullMethodName        = "/gibson.tenant.v1.MembershipService/SetComponentAccess"
-	MembershipService_GrantComponentPermissions_FullMethodName = "/gibson.tenant.v1.MembershipService/GrantComponentPermissions"
-	MembershipService_SetCatalogEnabled_FullMethodName         = "/gibson.tenant.v1.MembershipService/SetCatalogEnabled"
-	MembershipService_SetCatalogPublished_FullMethodName       = "/gibson.tenant.v1.MembershipService/SetCatalogPublished"
-	MembershipService_GetReservedNames_FullMethodName          = "/gibson.tenant.v1.MembershipService/GetReservedNames"
+	MembershipService_ListMembers_FullMethodName         = "/gibson.tenant.v1.MembershipService/ListMembers"
+	MembershipService_SetTenantRole_FullMethodName       = "/gibson.tenant.v1.MembershipService/SetTenantRole"
+	MembershipService_TransferOwnership_FullMethodName   = "/gibson.tenant.v1.MembershipService/TransferOwnership"
+	MembershipService_RemoveMember_FullMethodName        = "/gibson.tenant.v1.MembershipService/RemoveMember"
+	MembershipService_LeaveTenant_FullMethodName         = "/gibson.tenant.v1.MembershipService/LeaveTenant"
+	MembershipService_InviteMember_FullMethodName        = "/gibson.tenant.v1.MembershipService/InviteMember"
+	MembershipService_AcceptInvitation_FullMethodName    = "/gibson.tenant.v1.MembershipService/AcceptInvitation"
+	MembershipService_ResendInvitation_FullMethodName    = "/gibson.tenant.v1.MembershipService/ResendInvitation"
+	MembershipService_CancelInvitation_FullMethodName    = "/gibson.tenant.v1.MembershipService/CancelInvitation"
+	MembershipService_ListTeams_FullMethodName           = "/gibson.tenant.v1.MembershipService/ListTeams"
+	MembershipService_CreateTeam_FullMethodName          = "/gibson.tenant.v1.MembershipService/CreateTeam"
+	MembershipService_DeleteTeam_FullMethodName          = "/gibson.tenant.v1.MembershipService/DeleteTeam"
+	MembershipService_ListTeamMembers_FullMethodName     = "/gibson.tenant.v1.MembershipService/ListTeamMembers"
+	MembershipService_AddTeamMember_FullMethodName       = "/gibson.tenant.v1.MembershipService/AddTeamMember"
+	MembershipService_RemoveTeamMember_FullMethodName    = "/gibson.tenant.v1.MembershipService/RemoveTeamMember"
+	MembershipService_SetTeamAdmin_FullMethodName        = "/gibson.tenant.v1.MembershipService/SetTeamAdmin"
+	MembershipService_SetComponentAccess_FullMethodName  = "/gibson.tenant.v1.MembershipService/SetComponentAccess"
+	MembershipService_SetCatalogEnabled_FullMethodName   = "/gibson.tenant.v1.MembershipService/SetCatalogEnabled"
+	MembershipService_SetCatalogPublished_FullMethodName = "/gibson.tenant.v1.MembershipService/SetCatalogPublished"
+	MembershipService_GetReservedNames_FullMethodName    = "/gibson.tenant.v1.MembershipService/GetReservedNames"
 )
 
 // MembershipServiceClient is the client API for MembershipService service.
@@ -142,12 +141,6 @@ type MembershipServiceClient interface {
 	// tuple-set atomically; any existing access tuples for the component are
 	// deleted before the new set is written.
 	SetComponentAccess(ctx context.Context, in *SetComponentAccessRequest, opts ...grpc.CallOption) (*SetComponentAccessResponse, error)
-	// GrantComponentPermissions records the agent installation's approved
-	// component capabilities. The server enforces caller-access intersection:
-	// only capabilities the caller already holds (component_read/write/execute_enabled)
-	// may be granted. Writes component_*_enabled FGA tuples for the agent
-	// installation principal.
-	GrantComponentPermissions(ctx context.Context, in *GrantComponentPermissionsRequest, opts ...grpc.CallOption) (*GrantComponentPermissionsResponse, error)
 	// SetCatalogEnabled adds or removes a component from the calling tenant's
 	// catalog by writing or deleting the FGA tenant_enabled tuple for the
 	// (tenant, component) pair. This is the daemon-side replacement for the
@@ -357,16 +350,6 @@ func (c *membershipServiceClient) SetComponentAccess(ctx context.Context, in *Se
 	return out, nil
 }
 
-func (c *membershipServiceClient) GrantComponentPermissions(ctx context.Context, in *GrantComponentPermissionsRequest, opts ...grpc.CallOption) (*GrantComponentPermissionsResponse, error) {
-	cOpts := append([]grpc.CallOption{grpc.StaticMethod()}, opts...)
-	out := new(GrantComponentPermissionsResponse)
-	err := c.cc.Invoke(ctx, MembershipService_GrantComponentPermissions_FullMethodName, in, out, cOpts...)
-	if err != nil {
-		return nil, err
-	}
-	return out, nil
-}
-
 func (c *membershipServiceClient) SetCatalogEnabled(ctx context.Context, in *SetCatalogEnabledRequest, opts ...grpc.CallOption) (*SetCatalogEnabledResponse, error) {
 	cOpts := append([]grpc.CallOption{grpc.StaticMethod()}, opts...)
 	out := new(SetCatalogEnabledResponse)
@@ -481,12 +464,6 @@ type MembershipServiceServer interface {
 	// tuple-set atomically; any existing access tuples for the component are
 	// deleted before the new set is written.
 	SetComponentAccess(context.Context, *SetComponentAccessRequest) (*SetComponentAccessResponse, error)
-	// GrantComponentPermissions records the agent installation's approved
-	// component capabilities. The server enforces caller-access intersection:
-	// only capabilities the caller already holds (component_read/write/execute_enabled)
-	// may be granted. Writes component_*_enabled FGA tuples for the agent
-	// installation principal.
-	GrantComponentPermissions(context.Context, *GrantComponentPermissionsRequest) (*GrantComponentPermissionsResponse, error)
 	// SetCatalogEnabled adds or removes a component from the calling tenant's
 	// catalog by writing or deleting the FGA tenant_enabled tuple for the
 	// (tenant, component) pair. This is the daemon-side replacement for the
@@ -576,9 +553,6 @@ func (UnimplementedMembershipServiceServer) SetTeamAdmin(context.Context, *SetTe
 }
 func (UnimplementedMembershipServiceServer) SetComponentAccess(context.Context, *SetComponentAccessRequest) (*SetComponentAccessResponse, error) {
 	return nil, status.Error(codes.Unimplemented, "method SetComponentAccess not implemented")
-}
-func (UnimplementedMembershipServiceServer) GrantComponentPermissions(context.Context, *GrantComponentPermissionsRequest) (*GrantComponentPermissionsResponse, error) {
-	return nil, status.Error(codes.Unimplemented, "method GrantComponentPermissions not implemented")
 }
 func (UnimplementedMembershipServiceServer) SetCatalogEnabled(context.Context, *SetCatalogEnabledRequest) (*SetCatalogEnabledResponse, error) {
 	return nil, status.Error(codes.Unimplemented, "method SetCatalogEnabled not implemented")
@@ -916,24 +890,6 @@ func _MembershipService_SetComponentAccess_Handler(srv interface{}, ctx context.
 	return interceptor(ctx, in, info, handler)
 }
 
-func _MembershipService_GrantComponentPermissions_Handler(srv interface{}, ctx context.Context, dec func(interface{}) error, interceptor grpc.UnaryServerInterceptor) (interface{}, error) {
-	in := new(GrantComponentPermissionsRequest)
-	if err := dec(in); err != nil {
-		return nil, err
-	}
-	if interceptor == nil {
-		return srv.(MembershipServiceServer).GrantComponentPermissions(ctx, in)
-	}
-	info := &grpc.UnaryServerInfo{
-		Server:     srv,
-		FullMethod: MembershipService_GrantComponentPermissions_FullMethodName,
-	}
-	handler := func(ctx context.Context, req interface{}) (interface{}, error) {
-		return srv.(MembershipServiceServer).GrantComponentPermissions(ctx, req.(*GrantComponentPermissionsRequest))
-	}
-	return interceptor(ctx, in, info, handler)
-}
-
 func _MembershipService_SetCatalogEnabled_Handler(srv interface{}, ctx context.Context, dec func(interface{}) error, interceptor grpc.UnaryServerInterceptor) (interface{}, error) {
 	in := new(SetCatalogEnabledRequest)
 	if err := dec(in); err != nil {
@@ -1062,10 +1018,6 @@ var MembershipService_ServiceDesc = grpc.ServiceDesc{
 		{
 			MethodName: "SetComponentAccess",
 			Handler:    _MembershipService_SetComponentAccess_Handler,
-		},
-		{
-			MethodName: "GrantComponentPermissions",
-			Handler:    _MembershipService_GrantComponentPermissions_Handler,
 		},
 		{
 			MethodName: "SetCatalogEnabled",

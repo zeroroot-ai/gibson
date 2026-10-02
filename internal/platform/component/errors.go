@@ -32,7 +32,6 @@ const (
 	ErrCodeComponentNotFound    ComponentErrorCode = "COMPONENT_NOT_FOUND"
 	ErrCodeComponentExists      ComponentErrorCode = "COMPONENT_EXISTS"
 	ErrCodeInvalidManifest      ComponentErrorCode = "INVALID_MANIFEST"
-	ErrCodeManifestNotFound     ComponentErrorCode = "MANIFEST_NOT_FOUND"
 	ErrCodeLoadFailed           ComponentErrorCode = "LOAD_FAILED"
 	ErrCodeStartFailed          ComponentErrorCode = "START_FAILED"
 	ErrCodeStopFailed           ComponentErrorCode = "STOP_FAILED"
@@ -193,19 +192,6 @@ func NewInvalidManifestError(message string, cause error) *ComponentError {
 		Message:   message,
 		Cause:     cause,
 		Context:   make(map[string]any),
-		Retryable: false,
-	}
-}
-
-// NewManifestNotFoundError creates a manifest not found error.
-// This is non-retryable as retrying won't make the manifest exist.
-func NewManifestNotFoundError(path string) *ComponentError {
-	return &ComponentError{
-		Code:    ErrCodeManifestNotFound,
-		Message: fmt.Sprintf("manifest not found at path: %s", path),
-		Context: map[string]any{
-			"path": path,
-		},
 		Retryable: false,
 	}
 }

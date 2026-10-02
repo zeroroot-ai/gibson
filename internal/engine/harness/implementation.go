@@ -2874,9 +2874,9 @@ func (h *DefaultAgentHarness) Resolver() protoresolver.ProtoResolver {
 // Returns "" when no minter is wired (test mode or pre-Phase-3
 // daemons) — callers omit the workCtx entry rather than fail the
 // dispatch. The allowed_rpcs list is the broad superset of methods
-// agents typically need on harness callbacks; per-component-yaml
-// scoping is a future iteration that requires the manifest to be
-// loaded by this code path. Spec: Requirement 13.1, 13.2.
+// agents typically need on harness callbacks; per-component scoping
+// is a future iteration that needs the check-in declaration (ADR-0097)
+// on this code path. Spec: Requirement 13.1, 13.2.
 func (h *DefaultAgentHarness) mintCGForWork(componentName, kind string) string {
 	if h.cgMinter == nil {
 		return ""
