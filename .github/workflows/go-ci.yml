@@ -415,6 +415,7 @@ jobs:
         run: |
           make check-comment-paths
           make check-operator-rbac-scope
+          make check-rules-enforced
 
   # ---- container-backed integration suite (both lanes) ----
   # gibson#1236: moved onto pull_request. It was the other merge_group-only

@@ -2,7 +2,7 @@
 # Stage 1 - Foundation
 
 .PHONY: check-no-tracked-binaries
-.PHONY: all build bin gibson-migrate sandbox-eviction-handler test test-coverage test-race lint lint-all lint-deadcode lint-deadcode-baseline clean install help proto proto-deps proto-clean check-authz check-coverage test-daemon-identity-roundtrip check-no-tenant-id check-fga-headers check-oss-boundary check-airgap-build check-rpc-test-walker coverage-profile check-coverage-floor check-diff-coverage check-coverage-gates check-critical-paths check-ci-lane-parity check-build-tags check-bringup-diagnostics check-comment-paths check-operator-rbac-scope check-queue-gate vet-e2e vet-tags test-integration test-openbao test-merge-queue test-setec-roundtrip authz-registry tool-manifests tool-catalog-capture
+.PHONY: all build bin gibson-migrate sandbox-eviction-handler test test-coverage test-race lint lint-all lint-deadcode lint-deadcode-baseline clean install help proto proto-deps proto-clean check-authz check-coverage test-daemon-identity-roundtrip check-no-tenant-id check-fga-headers check-oss-boundary check-airgap-build check-rpc-test-walker coverage-profile check-coverage-floor check-diff-coverage check-coverage-gates check-critical-paths check-ci-lane-parity check-build-tags check-bringup-diagnostics check-comment-paths check-operator-rbac-scope check-rules-enforced check-queue-gate vet-e2e vet-tags test-integration test-openbao test-merge-queue test-setec-roundtrip authz-registry tool-manifests tool-catalog-capture
 
 # Go parameters
 GOCMD=go
@@ -658,6 +658,19 @@ check: fmt check-fmt vet test-race check-no-tenant-id check-fga-headers check-no
 check-comment-paths:
 	@python3 scripts/check-comment-paths.py --selftest
 	@python3 scripts/check-comment-paths.py
+
+# check-rules-enforced asserts every docs/rules.yaml conforms to the shared
+# schema in the SDK, and that each rule's enforced_by names a guard that exists:
+# a registered gibsoncheck analyzer, a script that is present, or a real CI job.
+# One rule named `ci:gibson-make-check`, a job in no workflow, and six used a
+# pre-schema shape the file's own header promised to migrate (gibson#559).
+#
+# A Go test rather than a script, like check-critical-paths: it runs in the
+# normal unit lane too, so it cannot be forgotten, and it uses the module's own
+# yaml dependency instead of assuming a CI runner ships PyYAML.
+check-rules-enforced:
+	@echo "Checking the rules.yaml contract..."
+	$(GOTEST) -count=1 ./tests/rulescontract/
 
 # check-operator-rbac-scope asserts the tenant-operator's ClusterRole stays
 # cluster-scope-only. The invariant is stated above the kubebuilder:rbac markers
