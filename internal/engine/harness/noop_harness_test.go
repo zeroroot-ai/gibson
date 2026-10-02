@@ -90,10 +90,14 @@ func (*noopInnerHarness) GetPreviousRunFindings(context.Context, FindingFilter) 
 func (*noopInnerHarness) GetAllRunFindings(context.Context, FindingFilter) ([]agent.Finding, error) {
 	return nil, nil
 }
-func (*noopInnerHarness) Target() TargetInfo       { return TargetInfo{} }
-func (*noopInnerHarness) Tracer() trace.Tracer     { return nil }
-func (*noopInnerHarness) Logger() *slog.Logger     { return slog.Default() }
-func (*noopInnerHarness) Metrics() MetricsRecorder { return nil }
+func (*noopInnerHarness) Target() TargetInfo { return TargetInfo{} }
+
+// ForTarget: a stub has no per-target view to give, and returning itself keeps
+// every caller's behaviour identical to before the method existed.
+func (h *noopInnerHarness) ForTarget(string) AgentHarness { return h }
+func (*noopInnerHarness) Tracer() trace.Tracer            { return nil }
+func (*noopInnerHarness) Logger() *slog.Logger            { return slog.Default() }
+func (*noopInnerHarness) Metrics() MetricsRecorder        { return nil }
 
 // The pointer return is dictated by the Harness interface
 // (harness.go: TokenUsage() *llm.TokenTracker), so gocritic's suggestion to

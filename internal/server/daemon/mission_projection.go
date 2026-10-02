@@ -470,6 +470,22 @@ func instanceID(templateID, targetUUID string) string {
 	return templateID + instanceIDPrefix + targetUUID
 }
 
+// instanceTargetID recovers the target an instance runs against from its work
+// id, or "" when the id is not a for_each instance.
+//
+// Derived rather than carried. The alternative is threading the target through
+// WorkNode, WorkItem, WorkDispatched and DispatchRequest, which is four places
+// that can disagree with the id for one fact that the id already states. A
+// finding attributed from a copy that drifted from the id would be attributed to
+// the wrong host, which is precisely what this is for.
+func instanceTargetID(workID string) string {
+	i := strings.LastIndex(workID, instanceIDPrefix)
+	if i < 0 || i == len(workID)-1 {
+		return ""
+	}
+	return workID[i+len(instanceIDPrefix):]
+}
+
 // expandForEach clones the template once per target and binds each copy against
 // that target. Order follows the target set, primary first, so the instance list
 // is deterministic and the concurrency chain is stable between runs.

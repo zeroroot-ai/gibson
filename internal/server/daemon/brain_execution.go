@@ -187,9 +187,33 @@ func (b *brainExecutor) dispatchTool(bind *missionBinding, req brain.DispatchReq
 	if req.Target == "" {
 		return "", fmt.Errorf("tool node has no tool name")
 	}
+	// A for_each instance runs against its OWN target, so the harness it gets
+	// must report that target: every scope reader — observationAttribution,
+	// SubmitProof, the destructive-authz callback — resolves the finding's scope
+	// from h.Target().ID. Without this, instance B's findings would carry the
+	// mission's primary target and several hosts would merge onto one coordinate,
+	// which is the exact failure observationAttribution refuses an empty scope to
+	// prevent (gibson#526).
+	//
+	// The target is DERIVED from the work id rather than carried beside it: the
+	// id already states it, and a second copy threaded through WorkNode,
+	// WorkItem, WorkDispatched and DispatchRequest is four places that can
+	// disagree about which host a finding belongs to.
+	//
+	// Guarded rather than relying on ForTarget("") being identity. A harness that
+	// embeds the AgentHarness interface to inherit its method set — which the
+	// test stubs here do, and a wrapper elsewhere may — has a nil embedded
+	// interface, so calling ANY method it does not implement panics. Calling the
+	// new method only when there is a target to switch to means an ordinary
+	// dispatch never touches it, and the fan-out path is the only one that
+	// requires a real implementation.
+	h := bind.harness
+	if instTarget := instanceTargetID(req.WorkID); instTarget != "" {
+		h = h.ForTarget(instTarget)
+	}
 	toolReq := &toolpb.ExecuteRequest{InputJson: req.Input}
 	toolResp := &toolpb.ExecuteResponse{}
-	if err := bind.harness.CallToolProto(bind.ctx, req.Target, toolReq, toolResp); err != nil {
+	if err := h.CallToolProto(bind.ctx, req.Target, toolReq, toolResp); err != nil {
 		return "", fmt.Errorf("tool %q: %w", req.Target, err)
 	}
 	if e := toolResp.GetError(); e != nil && e.GetMessage() != "" {

@@ -187,13 +187,31 @@ func (h *MiddlewareHarness) SubmitFinding(ctx context.Context, finding agent.Fin
 	return err
 }
 
-// Pass-through methods
+// Pass-through methods. Each reads state the middleware has no reason to
+// intercept, so it answers from the inner harness unchanged.
+
+// GetFindings returns the inner harness's findings.
 func (h *MiddlewareHarness) GetFindings(ctx context.Context, filter FindingFilter) ([]agent.Finding, error) {
 	return h.inner.GetFindings(ctx, filter)
 }
-func (h *MiddlewareHarness) Mission() MissionContext     { return h.inner.Mission() }
-func (h *MiddlewareHarness) MissionID() types.ID         { return h.inner.MissionID() }
-func (h *MiddlewareHarness) Target() TargetInfo          { return h.inner.Target() }
+
+// Mission returns the inner harness's mission context.
+func (h *MiddlewareHarness) Mission() MissionContext { return h.inner.Mission() }
+
+// MissionID returns the inner harness's mission id.
+func (h *MiddlewareHarness) MissionID() types.ID { return h.inner.MissionID() }
+
+// Target returns the inner harness's target.
+func (h *MiddlewareHarness) Target() TargetInfo { return h.inner.Target() }
+
+// ForTarget scopes THIS harness, not its inner one. A view built around the
+// inner harness would answer every call from the inner harness and silently drop
+// whatever middleware this one adds — for exactly the dispatches that most need
+// it, since a fan-out instance is still subject to the same policy as the
+// mission's primary.
+func (h *MiddlewareHarness) ForTarget(targetID string) AgentHarness {
+	return scopeToTarget(h, h.Target(), targetID)
+}
 func (h *MiddlewareHarness) ListTools() []ToolDescriptor { return h.inner.ListTools() }
 func (h *MiddlewareHarness) GetToolDescriptor(ctx context.Context, name string) (*ToolDescriptor, error) {
 	return h.inner.GetToolDescriptor(ctx, name)

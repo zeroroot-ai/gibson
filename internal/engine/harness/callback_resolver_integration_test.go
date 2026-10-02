@@ -255,6 +255,11 @@ func (m *mockHarnessForResolver) Target() TargetInfo {
 	return TargetInfo{}
 }
 
+// ForTarget returns the stub itself. This suite is about tool resolution, not
+// about scope, and a stub that scoped would be asserting something it does not
+// test. The method exists because AgentHarness requires it (gibson#526).
+func (m *mockHarnessForResolver) ForTarget(string) AgentHarness { return m }
+
 func (m *mockHarnessForResolver) Logger() *slog.Logger {
 	return slog.New(slog.NewTextHandler(os.Stdout, nil))
 }

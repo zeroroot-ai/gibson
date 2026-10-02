@@ -2649,6 +2649,25 @@ func (h *DefaultAgentHarness) Target() TargetInfo {
 	return h.targetInfo
 }
 
+// ForTarget returns a view that answers Target() with targetID and delegates
+// everything else to h, so every scope reader — observationAttribution,
+// SubmitProof, the destructive-authz callback — resolves the target this unit of
+// work actually ran against.
+//
+// It delegates rather than copying the struct. A copy would duplicate
+// inFlightTasksMu while sharing the inFlightTasks map it guards, so two
+// harnesses would protect one map with two mutexes and the agent-concurrency
+// quota would race. `go vet`'s copylocks says so, and it is right: the harness
+// owns locked state, which makes it a thing to point at and not a thing to
+// duplicate.
+//
+// Only the ID differs. The rest of TargetInfo describes the mission's primary
+// and is not read for scope; a view that invented a name or a URL would be a
+// second, wrong description of a target the daemon already has.
+func (h *DefaultAgentHarness) ForTarget(targetID string) AgentHarness {
+	return scopeToTarget(h, h.targetInfo, targetID)
+}
+
 // MissionID returns the mission ID for the current execution context.
 func (h *DefaultAgentHarness) MissionID() types.ID {
 	return h.missionCtx.ID
