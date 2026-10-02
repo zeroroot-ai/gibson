@@ -13,8 +13,9 @@
 // 12-byte nonce. The GCM tag is appended by the standard library to the end of
 // the ciphertext, so the total overhead is 40 + 12 + 16 = 68 bytes.
 //
-// KEK derivation is done outside this package (see internal/dataplane/kek.go in
-// the tenant-operator module). The caller passes the derived 32-byte KEK.
+// KEK derivation is done outside this package (see
+// operators/tenant/internal/dataplane/kek_deriver.go). The caller passes the
+// derived 32-byte KEK.
 package envelope
 
 import (

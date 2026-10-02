@@ -20,8 +20,9 @@ const (
 )
 
 // TenantTier represents the canonical plan id of a Tenant. The set of
-// constants below mirrors plans.yaml; the operator's
-// internal/webhook/tier_drift_test.go fails CI if the two drift apart.
+// constants below mirrors plans.yaml. The drift guard this comment used to
+// name does not exist -- there is no tier_drift_test.go anywhere in the tree --
+// so nothing fails CI when the two diverge (gibson#557).
 type TenantTier string
 
 const (

@@ -19,8 +19,10 @@ import (
 )
 
 // IdentityDebugLine is a parsed [identity-debug] log line from the daemon.
-// The daemon emits these when GIBSON_IDENTITY_TRACE=1 is set on the pod.
-// See internal/identity/interceptor.go for the exact format.
+// NOTHING EMITS THESE. The daemon-side identity-debug line is gone -- the only
+// readers of GIBSON_IDENTITY_TRACE left are the e2e tests that skip when it is
+// unset -- so the assertions built on this helper cannot run (gibson#557).
+// The header names below are still correct; the log format is not produced.
 type IdentityDebugLine struct {
 	// Method is the gRPC full method name, e.g. "/gibson.platform.v1.PlatformOperatorService/UpsertTenantQuota"
 	Method string
@@ -40,7 +42,8 @@ type IdentityDebugLine struct {
 }
 
 // identityHeaders is the list of x-gibson-identity-* headers the daemon
-// expects to receive.  Must match the constants in internal/identity/headers.go.
+// expects to receive. Must match the constants in
+// internal/server/extauthz/headers/build.go (HeaderSubject and siblings).
 var identityHeaders = []string{
 	"x-gibson-identity-subject",
 	"x-gibson-identity-issuer",

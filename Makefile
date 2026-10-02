@@ -2,7 +2,7 @@
 # Stage 1 - Foundation
 
 .PHONY: check-no-tracked-binaries
-.PHONY: all build bin gibson-migrate sandbox-eviction-handler test test-coverage test-race lint lint-all lint-deadcode lint-deadcode-baseline clean install help proto proto-deps proto-clean check-authz check-coverage test-daemon-identity-roundtrip check-no-tenant-id check-fga-headers check-oss-boundary check-airgap-build check-rpc-test-walker coverage-profile check-coverage-floor check-diff-coverage check-coverage-gates check-critical-paths check-ci-lane-parity check-build-tags check-bringup-diagnostics check-queue-gate vet-e2e vet-tags test-integration test-openbao test-merge-queue test-setec-roundtrip authz-registry tool-manifests tool-catalog-capture
+.PHONY: all build bin gibson-migrate sandbox-eviction-handler test test-coverage test-race lint lint-all lint-deadcode lint-deadcode-baseline clean install help proto proto-deps proto-clean check-authz check-coverage test-daemon-identity-roundtrip check-no-tenant-id check-fga-headers check-oss-boundary check-airgap-build check-rpc-test-walker coverage-profile check-coverage-floor check-diff-coverage check-coverage-gates check-critical-paths check-ci-lane-parity check-build-tags check-bringup-diagnostics check-comment-paths check-operator-rbac-scope check-queue-gate vet-e2e vet-tags test-integration test-openbao test-merge-queue test-setec-roundtrip authz-registry tool-manifests tool-catalog-capture
 
 # Go parameters
 GOCMD=go
@@ -647,8 +647,26 @@ test-merge-queue:
 # CI runs both directly (`.github/workflows/go-ci.yml` calls `make lint
 # LINT_BASE=…` and `make lint-deadcode`), so nothing is lost by keeping them out
 # of the local aggregate. Run `make lint` by hand when you actually want it.
-check: fmt check-fmt vet test-race check-no-tenant-id check-fga-headers check-no-tracked-binaries check-no-skipped-tests check-no-mcp-bridge check-signin-policy-callers check-test-images-mirrored check-noun-contract check-rpc-test-walker check-critical-paths check-ci-lane-parity check-build-tags check-queue-gate check-bringup-diagnostics
+check: fmt check-fmt vet test-race check-no-tenant-id check-fga-headers check-no-tracked-binaries check-no-skipped-tests check-no-mcp-bridge check-signin-policy-callers check-test-images-mirrored check-noun-contract check-rpc-test-walker check-critical-paths check-ci-lane-parity check-build-tags check-queue-gate check-bringup-diagnostics check-comment-paths check-operator-rbac-scope
 	@echo "All checks passed! (golangci-lint not included — run 'make lint' separately)"
+
+# check-comment-paths asserts that a repo-relative path named in a comment exists.
+# A comment naming a CI guard reads as coverage: two of them named scripts that
+# did not exist, so the invariants they described were held by review alone
+# (gibson#557). Runs its own fixtures first — a guard that cannot fail is worse
+# than no guard.
+check-comment-paths:
+	@python3 scripts/check-comment-paths.py --selftest
+	@python3 scripts/check-comment-paths.py
+
+# check-operator-rbac-scope asserts the tenant-operator's ClusterRole stays
+# cluster-scope-only. The invariant is stated above the kubebuilder:rbac markers
+# in operators/tenant/internal/controller/tenant_controller.go, which has claimed
+# this script enforces it since the secrets-blast-radius-reduction spec landed.
+# It did not exist until gibson#557.
+check-operator-rbac-scope:
+	@bash scripts/check-operator-rbac-scope.sh --selftest
+	@bash scripts/check-operator-rbac-scope.sh
 
 # Run authorization-specific checks: vet + unit tests + integration tests (requires Docker)
 # Usage:

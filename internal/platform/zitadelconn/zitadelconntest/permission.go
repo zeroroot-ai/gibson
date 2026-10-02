@@ -5,8 +5,9 @@ package zitadelconntest
 
 import "net/http"
 
-// Permission is a Zitadel permission string exactly as it appears in Zitadel
-// v4.18.0's cmd/defaults.yaml RolePermissionMappings (e.g. "user.grant.write").
+// Permission is a Zitadel permission string exactly as it appears in upstream
+// Zitadel v4.18.0's cmd/defaults.yaml RolePermissionMappings (e.g.
+// "user.grant.write").
 type Permission string
 
 // Permissions this fake's handlers currently gate. Not every permission

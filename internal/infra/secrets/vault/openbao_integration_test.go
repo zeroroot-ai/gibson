@@ -32,7 +32,9 @@
 //
 //	go test -tags openbao_integration ./secrets/providers/vault/...
 //
-// CI: `openbao-integration` job in .github/workflows/ci.yaml.
+// CI: the `openbao` job in .github/workflows/go-ci.yml ("openbao suites
+// (testcontainers)"), which runs `make test-openbao` on both the pull_request
+// and merge_group lanes.
 //
 // Each test creates its own OpenBao container for hermeticity. This
 // is slower than sharing a container across the suite, but matches

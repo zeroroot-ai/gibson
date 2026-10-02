@@ -23,7 +23,9 @@
 //
 //	go test -tags openbao_smoke ./secrets/providers/vault/...
 //
-// CI: gated by the `openbao-smoke` job in .github/workflows/ci.yaml.
+// CI: the `openbao` job in .github/workflows/go-ci.yml ("openbao suites
+// (testcontainers)"), which runs `make test-openbao` on both the pull_request
+// and merge_group lanes.
 //
 // Skipped gracefully when Docker is unavailable, matching the existing
 // integration_test.go pattern.

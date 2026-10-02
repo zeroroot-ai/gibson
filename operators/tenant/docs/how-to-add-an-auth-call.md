@@ -150,10 +150,12 @@ header — the FGA tuple it just wrote authorizes this call.
   agent credentials come from the dashboard's Register Agent UI only.
 - **Never** dial the daemon directly. The address in `deps.Daemon` is
   the Envoy edge.
-- **Never** log the Zitadel admin PAT or any client_secret. The pre-
-  commit gitleaks config catches accidental commits; the
-  `tenant-operator-auth-002` and `tenant-operator-auth-003` rules
-  enforce sanitization in source.
+- **Never** log the Zitadel admin PAT or any client_secret. Nothing
+  automated checks this yet: `.gitleaks.toml` has no runner in this
+  repository, and the `tenant-operator-auth-002` /
+  `tenant-operator-auth-003` rules in [`rules.yaml`](rules.yaml) record
+  the invariant with `enforced_by: manual`. Review is the control, and
+  gibson#559 turns those rules into a gate.
 
 ## Step 7 — Run the build guards
 

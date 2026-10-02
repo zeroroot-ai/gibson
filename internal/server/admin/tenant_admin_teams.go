@@ -29,9 +29,9 @@
 //	authority on team ownership.
 //
 // Pagination uses an opaque base64 URL-encoded JSON cursor ({"o": offset}).
-// This mirrors the DaemonServer.ListTeams pattern in
-// internal/server/daemon/api/platform_operator_list_teams.go so the two surfaces
-// behave identically from the dashboard's perspective.
+// The cursor shape was shared with a DaemonServer.ListTeams that no longer
+// exists -- TenantAdminServer.ListTeams below is now the only implementation, so
+// there is no second surface to stay identical to.
 //
 // Spec: tenant-service-admin-handlers issues #395 and #396.
 package admin
@@ -56,7 +56,7 @@ import (
 )
 
 // ---------------------------------------------------------------------------
-// Pagination helpers (mirrors internal/server/daemon/api/platform_operator_list_teams.go)
+// Pagination helpers (the DaemonServer surface they mirrored is gone)
 // ---------------------------------------------------------------------------
 
 const (

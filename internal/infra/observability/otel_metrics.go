@@ -694,8 +694,12 @@ func (r *OTelMetricsRecorder) RecordDecision(ctx context.Context, action string)
 
 // RecordAuthzDecision records metrics for a single RPC authorization decision.
 //
-// Called from the RPC authz interceptor (internal/platform/auth/rpc_authz_interceptor.go)
-// after every Enforce call. Labeled by decision, method, and permission so
+// NOT CALLED. The RPC authz interceptor it was written for does not exist, and
+// `grep '.Enforce('` finds no caller anywhere: authorization moved to ext-authz,
+// which records its own counters. gibson#558 deletes this or names the
+// enforcement point that will call it.
+//
+// Only the tests in otel_metrics_authz_test.go reach it. Labeled by decision, method, and permission so
 // operators can drill into "which roles are failing to call which RPCs for
 // which permissions" without grepping logs.
 //

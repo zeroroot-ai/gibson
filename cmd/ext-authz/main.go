@@ -165,7 +165,7 @@ func main() {
 	} else {
 		log = obsProvider.Logger
 		// Set global OTel providers so auto-instrumented libraries (including
-		// the ext-authz FGA OTel histogram in internal/fga/platform_client.go
+		// the ext-authz FGA OTel histogram in internal/server/extauthz/fga/platform_client.go
 		// which calls otel.GetMeterProvider()) pick up this instance's providers.
 		obsProvider.SetGlobal()
 	}

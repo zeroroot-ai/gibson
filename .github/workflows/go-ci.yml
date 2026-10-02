@@ -407,6 +407,14 @@ jobs:
         # instead of failing, and .golangci.yml enables no formatter -- so
         # gofmt drift accumulated on main (2 files when filed, 6 when fixed).
         run: make check-fmt
+      - name: Guard comment paths + the operator ClusterRole scope
+        # gibson#557: two comments claimed a CI guard enforced an invariant and
+        # named a script that did not exist, so both invariants were held by
+        # review alone. Both guards run their own fixtures first; a guard that
+        # cannot fail is worse than no guard.
+        run: |
+          make check-comment-paths
+          make check-operator-rbac-scope
 
   # ---- container-backed integration suite (both lanes) ----
   # gibson#1236: moved onto pull_request. It was the other merge_group-only

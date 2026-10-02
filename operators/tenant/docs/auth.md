@@ -61,9 +61,14 @@ The dial target is the Envoy edge (the chart wires it via the
 traffic. SPIFFE X509-SVID mTLS is composed automatically when the
 Workload API socket is present.
 
-The credentials never appear in any log line; the
-`scripts/check-no-legacy-auth.sh` and pre-commit gitleaks both catch
-accidental references.
+The credentials never appear in any log line. Nothing automated enforces
+that today: `scripts/check-no-legacy-auth.sh` does not exist, and
+`.gitleaks.toml` has no runner in this repository -- no pre-commit hook,
+no Makefile target and no workflow references it. GitHub push protection
+is the live control. The sanitization rules in
+[`rules.yaml`](rules.yaml) (`tenant-operator-auth-002`,
+`tenant-operator-auth-003`) record the invariant and say
+`enforced_by: manual`. gibson#559 turns them into a gate.
 
 ## Tenant lifecycle saga
 
