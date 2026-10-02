@@ -40,29 +40,29 @@ func (m *mockComponentStore) GetByName(_ context.Context, kind component.Compone
 	return m.components[m.key(kind, name)], nil
 }
 
-// Implement remaining ComponentStore interface methods (not used in tests)
-func (m *mockComponentStore) Create(_ context.Context, comp *component.Component) error {
+// The remaining ComponentStore methods are not exercised by the resolver tests;
+// each answers with an error rather than a silent nil.
+func (m *mockComponentStore) Create(context.Context, *component.Component) error {
 	return errors.New("not implemented")
 }
 
-func (m *mockComponentStore) List(_ context.Context, kind component.ComponentKind) ([]*component.Component, error) {
+func (m *mockComponentStore) List(context.Context, component.ComponentKind) ([]*component.Component, error) {
 	return nil, errors.New("not implemented")
 }
 
-func (m *mockComponentStore) ListAll(_ context.Context) (map[component.ComponentKind][]*component.Component, error) {
+func (m *mockComponentStore) ListAll(context.Context) (map[component.ComponentKind][]*component.Component, error) {
 	return nil, errors.New("not implemented")
 }
 
-func (m *mockComponentStore) Update(_ context.Context, comp *component.Component) error {
+func (m *mockComponentStore) Update(context.Context, *component.Component) error {
 	return errors.New("not implemented")
 }
 
-func (m *mockComponentStore) Delete(_ context.Context, kind component.ComponentKind, name string) error {
+func (m *mockComponentStore) Delete(context.Context, component.ComponentKind, string) error {
 	return errors.New("not implemented")
 }
 
-func (m *mockComponentStore) ListInstances(_ context.Context, kind component.ComponentKind, name string) ([]component.ComponentInfo, error) {
+func (m *mockComponentStore) ListInstances(context.Context, component.ComponentKind, string) ([]component.ComponentInfo, error) {
 	return nil, errors.New("not implemented")
 }
 
-// TestNewManifestLoader tests the constructor
