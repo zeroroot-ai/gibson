@@ -742,7 +742,7 @@ func buildVectorDSN(cfg *runtimeConfig, tenantID string) string {
 }
 
 // --------------------------------------------------------------------------
-// KEK derivation (mirrors internal/dataplane/kek.go)
+// KEK derivation (mirrors operators/tenant/internal/dataplane/kek_deriver.go)
 // --------------------------------------------------------------------------
 
 const (

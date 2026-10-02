@@ -178,7 +178,8 @@ const maxDiscoveryResults = 200
 
 // systemComponentName is the synthetic client/mission backplane object. It is
 // deliberately excluded from catalog enumerations (see the CatalogFanout note in
-// internal/infra/reconciler/catalog_fanout.go) and must stay out of discovery.
+// internal/infra/reconciler/connector_catalog_gate.go) and must stay out of
+// discovery.
 const systemComponentName = "_system"
 
 // catalogCaller builds the catalog caller from the request identity.

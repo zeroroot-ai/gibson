@@ -6,7 +6,8 @@
 //
 // The tenant Neo4j schema is not a set of migration files. The graph projector
 // derives the constraints and indexes from the taxonomy and applies them once
-// per tenant before its first write (internal/server/daemon/graph_schema_neo4j.go).
+// per tenant before its first write
+// (internal/server/daemon/graph_projector_schema.go, applySchema).
 // It records Neo4jSchemaVersion in the :_SchemaVersion node, and the tenant
 // operator compares that node with LatestNeo4jVersion for its pending-migration
 // metric.

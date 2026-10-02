@@ -12,8 +12,14 @@ import (
 
 // Authorization span attributes.
 //
-// Set by the RPC authz interceptor (internal/platform/auth/rpc_authz_interceptor.go)
-// on the active gRPC request span, making every authorization decision
+// NOTHING SETS THESE. They were written for an in-daemon RPC authz interceptor
+// that does not exist: `grep '.Enforce('` finds no caller, and authorization
+// moved to ext-authz, which records its own counters
+// (internal/server/extauthz/server/envoy_extauthz.go). gibson#558 deletes them
+// or names the enforcement point that will feed them.
+//
+// Were they to be set, it would be on the active gRPC request span, making every
+// authorization decision
 // visible in Jaeger alongside every other span attribute,
 // with no configuration changes required.
 //

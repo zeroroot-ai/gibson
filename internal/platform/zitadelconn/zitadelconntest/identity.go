@@ -324,7 +324,8 @@ func decode(r *http.Request, v any) error {
 
 // --- v1 Management: org members ---------------------------------------
 
-// validOrgRoles is the v4.18.0 default org role mapping (cmd/defaults.yaml).
+// validOrgRoles is Zitadel v4.18.0's default org role mapping (upstream
+// cmd/defaults.yaml).
 // AddOrgMember refuses any role outside it.
 var validOrgRoles = map[string]bool{
 	"ORG_OWNER":                     true,

@@ -23,8 +23,9 @@ import (
 // authenticating the request. The auth.UnaryServerInterceptor / StreamInterceptor
 // verifies the HMAC signature on those headers.
 //
-// Integration tests for the identity interceptor live in:
-//   internal/identity/interceptor_test.go
+// The identity interceptor these tests were written beside is gone; header
+// construction now lives in internal/server/extauthz/headers/build.go and is
+// covered by that package's own tests.
 
 // TestAuthConfig_Validation verifies auth configuration validation.
 func TestAuthConfig_Validation(t *testing.T) {

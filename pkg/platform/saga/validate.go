@@ -46,7 +46,8 @@ func (e *ValidationError) Error() string {
 // On failure it returns the same *ValidationError that ValidateAtStartup
 // returns; the summary string in that case is empty.
 //
-// Use this from cmd/main.go so production-mode startup logs explicitly
+// Use this from an operator's entrypoint (operators/tenant/cmd/main.go) so
+// production-mode startup logs explicitly
 // state "validated N steps, all M capabilities satisfied" instead of
 // leaving operators to infer success from absence-of-error.
 //

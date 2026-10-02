@@ -253,7 +253,8 @@ func indexByte(s string, c byte) int {
 
 // ensureTenantQuotasTable is an idempotent CREATE TABLE IF NOT EXISTS for
 // deployments that haven't run the migration file
-// (internal/db/migrations/2026041801_create_tenant_quotas.sql) yet. The
+// (pkg/platform/migrations/postgres/platform/003_tenant_quotas_simplify.up.sql)
+// yet. The
 // migration is still the authoritative source in schema-managed environments.
 func ensureTenantQuotasTable(ctx context.Context, db *sql.DB) error {
 	const create = `
