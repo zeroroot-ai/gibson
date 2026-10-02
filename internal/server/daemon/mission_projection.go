@@ -444,7 +444,11 @@ func nodeKindTargetInput(n *missionpb.MissionNode) (kind, target, input string, 
 		}
 		return "tool", n.GetToolConfig().GetToolName(), in, nil
 	case missionpb.NodeType_NODE_TYPE_PLUGIN:
-		return "plugin", n.GetPluginConfig().GetPluginName(), n.GetPluginConfig().GetMethod(), nil
+		in, mErr := pluginInputJSON(n.GetPluginConfig().GetMethod(), n.GetPluginConfig().GetParams())
+		if mErr != nil {
+			return "", "", "", mErr
+		}
+		return "plugin", n.GetPluginConfig().GetPluginName(), in, nil
 	case missionpb.NodeType_NODE_TYPE_JOB:
 		// The bank is the target and the whole node config is the input, as
 		// protojson, so the job node executor reads the spec and the bounds
@@ -497,6 +501,36 @@ func sortedKeys(m map[string]struct{}) []string {
 	}
 	sort.Strings(out)
 	return out
+}
+
+// pluginInput is the wire shape of a plugin node's WorkNode.Input: the method
+// the node names and the params it declared, as one JSON document. It is what
+// the dispatcher decodes (brain_execution.go dispatchPlugin) and the same shape
+// the harness already sends a plugin over the work queue
+// (callPluginViaWorkQueue), so a plugin sees a method and params whether an
+// agent asked for them or a mission node did.
+//
+// Before gibson#556 the input was the bare method name and the params were
+// dropped at projection, while the graph bootstrap recorded them in the
+// :MissionNode's task_config as though they had been used.
+type pluginInput struct {
+	Method string          `json:"method"`
+	Params json.RawMessage `json:"params,omitempty"`
+}
+
+// pluginInputJSON encodes a plugin node's method and params. Params go through
+// the same typing as a tool's input (toolInputJSON): a value that is a JSON
+// object or array is embedded as that, anything else travels as a string.
+func pluginInputJSON(method string, params map[string]string) (string, error) {
+	if method == "" {
+		return "", errors.New("plugin node names no method")
+	}
+	encoded, err := toolInputJSON(params)
+	if err != nil {
+		return "", fmt.Errorf("plugin params: %w", err)
+	}
+	b, err := json.Marshal(pluginInput{Method: method, Params: json.RawMessage(encoded)})
+	return string(b), err
 }
 
 // toolInputJSON encodes a tool node's declared input as the JSON object the tool

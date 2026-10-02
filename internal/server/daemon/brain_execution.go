@@ -21,6 +21,8 @@ package daemon
 
 import (
 	"context"
+	"encoding/json"
+	"errors"
 	"fmt"
 	"log/slog"
 	"strings"
@@ -165,15 +167,65 @@ func (b *brainExecutor) Dispatch(req brain.DispatchRequest) {
 				return
 			}
 			bind.eng.Submit(brain.WorkCompleted{ID: req.WorkID, Result: out})
+		case "plugin":
+			// A plugin node names a plugin, a method and its params; the harness
+			// routes the call over the component work queue the same way an
+			// agent's QueryPlugin does (gibson#556). Before this the kind fell
+			// through to the refusal below and a mission with a plugin node
+			// failed that node by name.
+			out, err := b.dispatchPlugin(bind, req)
+			if err != nil {
+				bind.eng.Submit(brain.WorkCompleted{ID: req.WorkID, Err: err.Error()})
+				return
+			}
+			bind.eng.Submit(brain.WorkCompleted{ID: req.WorkID, Result: out})
+
 		default:
-			// Plugin dispatch still needs method routing from the projected node;
-			// name what is unsupported rather than letting the mission hang.
+			// Name what is unsupported rather than letting the mission hang.
 			bind.eng.Submit(brain.WorkCompleted{
 				ID:  req.WorkID,
-				Err: "direct " + req.Kind + " dispatch not supported (agent, tool and job nodes are)",
+				Err: "direct " + req.Kind + " dispatch not supported (agent, tool, plugin and job nodes are)",
 			})
 		}
 	}()
+}
+
+// dispatchPlugin invokes a plugin node through the mission harness.
+//
+// req.Input is the node's method and params as JSON (see pluginInputJSON). The
+// method is required; params may be absent. The result the plugin returns is
+// re-encoded as JSON so the work record carries what the plugin said.
+func (b *brainExecutor) dispatchPlugin(bind *missionBinding, req brain.DispatchRequest) (string, error) {
+	if req.Target == "" {
+		return "", errors.New("plugin node has no plugin name")
+	}
+	var in pluginInput
+	if err := json.Unmarshal([]byte(req.Input), &in); err != nil {
+		return "", fmt.Errorf("plugin %q: decode node input: %w", req.Target, err)
+	}
+	if in.Method == "" {
+		return "", fmt.Errorf("plugin %q: node input names no method", req.Target)
+	}
+	var params map[string]any
+	if len(in.Params) > 0 {
+		if err := json.Unmarshal(in.Params, &params); err != nil {
+			return "", fmt.Errorf("plugin %q: params are not an object: %w", req.Target, err)
+		}
+	}
+	// Same per-instance target switch as dispatchTool, for the same reason.
+	h := bind.harness
+	if instTarget := instanceTargetID(req.WorkID); instTarget != "" {
+		h = h.ForTarget(instTarget)
+	}
+	result, err := h.QueryPlugin(bind.ctx, req.Target, in.Method, params)
+	if err != nil {
+		return "", fmt.Errorf("plugin %q.%s: %w", req.Target, in.Method, err)
+	}
+	out, err := json.Marshal(result)
+	if err != nil {
+		return "", fmt.Errorf("plugin %q.%s: encode result: %w", req.Target, in.Method, err)
+	}
+	return string(out), nil
 }
 
 // dispatchTool invokes a tool node through the mission harness.
