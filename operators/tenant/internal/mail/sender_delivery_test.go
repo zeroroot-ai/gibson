@@ -179,7 +179,7 @@ func (f *fakeSMTP) pool(t *testing.T) *x509.CertPool {
 }
 
 // startFakeSMTP listens in the given mode and returns the server plus its port.
-func startFakeSMTP(t *testing.T, mode TLSMode) (*fakeSMTP, int) {
+func startFakeSMTP(t *testing.T, mode TLSMode) (srv *fakeSMTP, port int) {
 	t.Helper()
 	f := &fakeSMTP{t: t, cert: selfSignedCert(t)}
 
