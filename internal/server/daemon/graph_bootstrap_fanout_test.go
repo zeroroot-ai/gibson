@@ -14,6 +14,7 @@ import (
 	"github.com/zeroroot-ai/gibson/internal/engine/graphrag/schema"
 	"github.com/zeroroot-ai/gibson/internal/engine/mission"
 	"github.com/zeroroot-ai/gibson/internal/infra/types"
+	commonpb "github.com/zeroroot-ai/sdk/api/gen/gibson/common/v1"
 	missionpb "github.com/zeroroot-ai/sdk/api/gen/gibson/mission/v1"
 	typespb "github.com/zeroroot-ai/sdk/api/gen/gibson/types/v1"
 	"google.golang.org/protobuf/types/known/durationpb"
@@ -284,7 +285,15 @@ func TestConvertToSchemaNode_MapsEveryKind(t *testing.T) {
 		Description: "the recon step",
 		Config: &missionpb.MissionNode_AgentConfig{AgentConfig: &missionpb.AgentNodeConfig{
 			AgentName: "nmap-agent",
-			Task:      &typespb.Task{Goal: "map the surface"},
+			Task: &typespb.Task{
+				Goal: "map the surface",
+				// A task context exercises the map conversion, which is its own
+				// branch: a dropped context would leave the agent without the
+				// facts the author attached to the step.
+				Context: map[string]*commonpb.TypedValue{
+					"scope": {Kind: &commonpb.TypedValue_StringValue{StringValue: "internal"}},
+				},
+			},
 		}},
 	}, "scan", false, fanOutOrigin{}, false)
 	if agent.AgentName != "nmap-agent" {
@@ -295,6 +304,9 @@ func TestConvertToSchemaNode_MapsEveryKind(t *testing.T) {
 	}
 	if agent.TaskConfig["goal"] != "map the surface" {
 		t.Errorf("the task goal was dropped: %v", agent.TaskConfig["goal"])
+	}
+	if agent.TaskConfig["context"] == nil {
+		t.Errorf("the task context was dropped: %v", agent.TaskConfig)
 	}
 	if agent.Status != schema.MissionNodeStatusReady {
 		t.Errorf("a node with no dependencies is an entry point and starts ready, got %q", agent.Status)
