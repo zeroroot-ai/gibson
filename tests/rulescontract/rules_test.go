@@ -78,6 +78,7 @@ func analyzerNames(t *testing.T, root string) map[string]bool {
 		if !strings.HasSuffix(e.Name(), ".go") {
 			continue
 		}
+		// #nosec G304 -- dir is this repo's own tools/gibsoncheck/checks.
 		b, rerr := os.ReadFile(filepath.Join(dir, e.Name()))
 		if rerr != nil {
 			t.Fatalf("read %s: %v", e.Name(), rerr)
@@ -103,6 +104,7 @@ func workflowJobs(t *testing.T, root string) map[string]bool {
 		if !strings.HasSuffix(e.Name(), ".yml") && !strings.HasSuffix(e.Name(), ".yaml") {
 			continue
 		}
+		// #nosec G304 -- dir is this repo's own .github/workflows.
 		b, rerr := os.ReadFile(filepath.Join(dir, e.Name()))
 		if rerr != nil {
 			t.Fatalf("read %s: %v", e.Name(), rerr)

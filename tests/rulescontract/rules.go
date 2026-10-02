@@ -65,7 +65,7 @@ var Severities = map[string]bool{"error": true, "warning": true, "info": true}
 // name, but the legacy dp-op-* rules predate that and renaming them would break
 // every reference. The schema has `replaces` for that migration; doing it is its
 // own change, not a side effect of this guard. What is enforced is the shape.
-var idRe = regexp.MustCompile(`^[a-z0-9-]+-[a-z]{2,8}-\d{3}$`)
+var idRe = regexp.MustCompile(`^[a-z\d-]+-[a-z]{2,8}-\d{3}$`)
 
 // Rule is one entry in a rules.yaml `rules` array.
 type Rule struct {
@@ -93,7 +93,7 @@ type File struct {
 	Rules   []Rule `yaml:"rules"`
 }
 
-var versionRe = regexp.MustCompile(`^[0-9]+(\.[0-9]+){0,2}$`)
+var versionRe = regexp.MustCompile(`^\d+(\.\d+){0,2}$`)
 
 // Enforcement is what a repo can point enforced_by at.
 type Enforcement struct {
@@ -117,11 +117,10 @@ func Check(r Rule, env Enforcement) []string {
 		out = append(out, fmt.Sprintf("id %q is not <repo-slug>-<area>-<NNN>", r.ID))
 	}
 
-	switch {
-	case r.Pattern == nil:
+	if r.Pattern == nil {
 		out = append(out,
 			"pattern is missing or is not an object; the schema requires an object with kind and target")
-	default:
+	} else {
 		if !PatternKinds[r.Pattern.Kind] {
 			out = append(out, fmt.Sprintf(
 				"pattern.kind %q is not one of forbidden_import, forbidden_call, "+
@@ -208,7 +207,7 @@ func CheckFile(f File, env Enforcement) []string {
 			f.Path, f.Version))
 	}
 	if len(f.Rules) == 0 {
-		return append(out, fmt.Sprintf("%s: has no rules", f.Path))
+		return append(out, f.Path+": has no rules")
 	}
 	seen := map[string]bool{}
 	for _, r := range f.Rules {
@@ -236,6 +235,8 @@ func orUnnamed(id string) string {
 // an object) must be reported as that rule's shape problem, not as a YAML type
 // error over the whole document — so the decode is two-stage.
 func Load(path string) (File, error) {
+	// #nosec G304 -- path comes from a walk of the repo's own tracked tree, not
+	// from a caller or a request.
 	b, err := os.ReadFile(path)
 	if err != nil {
 		return File{}, fmt.Errorf("read %s: %w", path, err)
