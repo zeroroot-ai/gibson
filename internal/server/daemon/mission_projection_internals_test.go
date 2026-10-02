@@ -121,7 +121,10 @@ func TestNodeKindTargetInput_PluginAndCondition(t *testing.T) {
 	if kind != "plugin" || target != "burp" {
 		t.Errorf("plugin projected kind=%q target=%q, want plugin/burp", kind, target)
 	}
-	var in pluginInput
+	var in struct {
+		Method string         `json:"method"`
+		Params map[string]any `json:"params"`
+	}
 	if err := json.Unmarshal([]byte(input), &in); err != nil {
 		t.Fatalf("plugin input %q is not JSON: %v", input, err)
 	}
@@ -130,11 +133,24 @@ func TestNodeKindTargetInput_PluginAndCondition(t *testing.T) {
 	}
 	// Same typing rule as a tool's input: a scalar stays a string, a JSON
 	// object or array is embedded as it is.
-	if got := string(in.Params["depth"]); got != `"2"` {
-		t.Errorf("plugin input params.depth = %s, want the string \"2\"", got)
+	if got, ok := in.Params["depth"].(string); !ok || got != "2" {
+		t.Errorf("plugin input params.depth = %#v, want the string \"2\"", in.Params["depth"])
 	}
-	if got := string(in.Params["scope"]); got != `{"hosts":["a"]}` {
-		t.Errorf("plugin input params.scope = %s, want the embedded object", got)
+	scope, _ := in.Params["scope"].(map[string]any)
+	if hosts, _ := scope["hosts"].([]any); len(hosts) != 1 || hosts[0] != "a" {
+		t.Errorf("plugin input params.scope = %#v, want the embedded object", in.Params["scope"])
+	}
+
+	// A plugin node that names no method cannot be dispatched, so projection
+	// refuses it rather than handing the dispatcher an empty method.
+	if _, _, _, err := nodeKindTargetInput(&missionpb.MissionNode{
+		Id:   "p0",
+		Type: missionpb.NodeType_NODE_TYPE_PLUGIN,
+		Config: &missionpb.MissionNode_PluginConfig{PluginConfig: &missionpb.PluginNodeConfig{
+			PluginName: "burp",
+		}},
+	}); err == nil || !strings.Contains(err.Error(), "names no method") {
+		t.Errorf("plugin without a method: err = %v, want a refusal naming the method", err)
 	}
 
 	// No params: the input still names the method and carries no params key.

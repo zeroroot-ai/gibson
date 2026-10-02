@@ -145,10 +145,20 @@ func TestDispatchPlugin_Refusals(t *testing.T) {
 			h:    &pluginHarness{},
 			want: "names no method",
 		},
+		"params not an object": {
+			req:  brain.DispatchRequest{WorkID: "w", Kind: "plugin", Target: "burp", Input: `{"method":"Scan","params":3}`},
+			h:    &pluginHarness{},
+			want: "params are not an object",
+		},
 		"plugin error": {
 			req:  brain.DispatchRequest{WorkID: "w", Kind: "plugin", Target: "burp", Input: `{"method":"Scan"}`},
 			h:    &pluginHarness{err: errors.New("boom")},
 			want: `plugin "burp".Scan: boom`,
+		},
+		"result not encodable": {
+			req:  brain.DispatchRequest{WorkID: "w", Kind: "plugin", Target: "burp", Input: `{"method":"Scan"}`},
+			h:    &pluginHarness{result: make(chan int)},
+			want: "encode result",
 		},
 	}
 	for name, tc := range cases {
@@ -182,5 +192,16 @@ func TestDispatch_PluginNodeCompletesThroughTheHarness(t *testing.T) {
 	}
 	if got, _ := h.gotParams["depth"].(float64); got != 2 {
 		t.Errorf("params.depth = %#v, want 2", h.gotParams["depth"])
+	}
+}
+
+// A kind the executor does not dispatch is refused by name, and the refusal
+// lists the kinds it does.
+func TestDispatch_UnknownKindIsRefusedByName(t *testing.T) {
+	wc := dispatchOutcome(t, &pluginHarness{}, brain.DispatchRequest{
+		WorkID: "w1", Kind: "widget", Target: "x",
+	})
+	if !strings.Contains(wc.Err, "direct widget dispatch not supported") || !strings.Contains(wc.Err, "plugin") {
+		t.Fatalf("err = %q, want a refusal naming widget and listing plugin among the supported kinds", wc.Err)
 	}
 }

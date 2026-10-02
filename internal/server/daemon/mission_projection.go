@@ -514,8 +514,8 @@ func sortedKeys(m map[string]struct{}) []string {
 // dropped at projection, while the graph bootstrap recorded them in the
 // :MissionNode's task_config as though they had been used.
 type pluginInput struct {
-	Method string                     `json:"method"`
-	Params map[string]json.RawMessage `json:"params,omitempty"`
+	Method string          `json:"method"`
+	Params json.RawMessage `json:"params,omitempty"`
 }
 
 // pluginInputJSON encodes a plugin node's method and params. Params go through
@@ -525,21 +525,12 @@ func pluginInputJSON(method string, params map[string]string) (string, error) {
 	if method == "" {
 		return "", errors.New("plugin node names no method")
 	}
-	in := pluginInput{Method: method}
-	if len(params) > 0 {
-		encoded, err := toolInputJSON(params)
-		if err != nil {
-			return "", fmt.Errorf("plugin params: %w", err)
-		}
-		if err := json.Unmarshal([]byte(encoded), &in.Params); err != nil {
-			return "", fmt.Errorf("plugin params: %w", err)
-		}
-	}
-	b, err := json.Marshal(in)
+	encoded, err := toolInputJSON(params)
 	if err != nil {
-		return "", fmt.Errorf("marshal plugin input: %w", err)
+		return "", fmt.Errorf("plugin params: %w", err)
 	}
-	return string(b), nil
+	b, err := json.Marshal(pluginInput{Method: method, Params: json.RawMessage(encoded)})
+	return string(b), err
 }
 
 // toolInputJSON encodes a tool node's declared input as the JSON object the tool

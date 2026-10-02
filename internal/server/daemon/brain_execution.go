@@ -206,13 +206,11 @@ func (b *brainExecutor) dispatchPlugin(bind *missionBinding, req brain.DispatchR
 	if in.Method == "" {
 		return "", fmt.Errorf("plugin %q: node input names no method", req.Target)
 	}
-	params := make(map[string]any, len(in.Params))
-	for k, raw := range in.Params {
-		var v any
-		if err := json.Unmarshal(raw, &v); err != nil {
-			return "", fmt.Errorf("plugin %q: param %q: %w", req.Target, k, err)
+	var params map[string]any
+	if len(in.Params) > 0 {
+		if err := json.Unmarshal(in.Params, &params); err != nil {
+			return "", fmt.Errorf("plugin %q: params are not an object: %w", req.Target, err)
 		}
-		params[k] = v
 	}
 	// Same per-instance target switch as dispatchTool, for the same reason.
 	h := bind.harness
