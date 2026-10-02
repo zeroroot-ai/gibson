@@ -1,5 +1,35 @@
 # Changelog
 
+## [0.150.0](https://github.com/zeroroot-ai/gibson/compare/v0.149.0...v0.150.0) (2026-10-02)
+
+
+### Features
+
+* **graph:** a :Target node, and the mission graph promoted into the Taxonomy ([#570](https://github.com/zeroroot-ai/gibson/issues/570)) ([e0f3363](https://github.com/zeroroot-ai/gibson/commit/e0f33638b3d0723a25042e1593750854ab3043ee)), closes [#550](https://github.com/zeroroot-ai/gibson/issues/550)
+* **graph:** the mission graph records a fan-out instance and the target it ran against ([#549](https://github.com/zeroroot-ai/gibson/issues/549)) ([c664fdb](https://github.com/zeroroot-ai/gibson/commit/c664fdbffd0ea7a8dfed990c16937d8edeab8b3f))
+* **guards:** every rules.yaml conforms, and every enforced_by names a real guard ([#563](https://github.com/zeroroot-ai/gibson/issues/563)) ([e3d0f80](https://github.com/zeroroot-ai/gibson/commit/e3d0f80de6cb087767db902c670add2d390ec3d8))
+* **mission:** a finding from a fan-out instance is attributed to its own target ([#542](https://github.com/zeroroot-ai/gibson/issues/542)) ([f599512](https://github.com/zeroroot-ai/gibson/commit/f5995124b369e4c1d694ffcb7c3716e986532f77))
+* **mission:** a for_each runs once per target, each bound to its own ([#539](https://github.com/zeroroot-ai/gibson/issues/539)) ([ddc8ca2](https://github.com/zeroroot-ai/gibson/commit/ddc8ca28cbd681108f826c90b745a0fd7a5ab08d))
+* **mission:** a join after a partially failed fan-out still reports the targets that answered ([#546](https://github.com/zeroroot-ai/gibson/issues/546)) ([ac67ed7](https://github.com/zeroroot-ai/gibson/commit/ac67ed7274049e3c80a691b4436a06af2ebcd0ea))
+* **mission:** an originated child runs, bound to its own target ([#552](https://github.com/zeroroot-ai/gibson/issues/552)) ([0eaaf68](https://github.com/zeroroot-ai/gibson/commit/0eaaf680e645cb8144de8f3c6ab934898cbba801))
+* **mission:** the for_each node kind, on sdk v0.189.1 ([#537](https://github.com/zeroroot-ai/gibson/issues/537)) ([1a80ff3](https://github.com/zeroroot-ai/gibson/commit/1a80ff3681d4e50233c66341dee6e7f29023eda1))
+
+
+### Bug Fixes
+
+* **authz:** a check-in binds a declared secret only for a catalog component ([#577](https://github.com/zeroroot-ai/gibson/issues/577)) ([5db2291](https://github.com/zeroroot-ai/gibson/commit/5db2291e097d8a8ac933090dcf0d9548b9b7ee51))
+* **ci:** record WHEN each pod became ready, and the sync's retry budget ([3e6707d](https://github.com/zeroroot-ai/gibson/commit/3e6707d387ccc5624e5c8b90336a9dc59e8a64be))
+* **ci:** record when each pod became ready, and the sync's retry budget ([#533](https://github.com/zeroroot-ai/gibson/issues/533)) ([3e6707d](https://github.com/zeroroot-ai/gibson/commit/3e6707d387ccc5624e5c8b90336a9dc59e8a64be))
+* **ci:** the bringup dump prints Argo's truncated message and stops there ([#575](https://github.com/zeroroot-ai/gibson/issues/575)) ([e159712](https://github.com/zeroroot-ai/gibson/commit/e1597121cec27f3c8edd874ec8c331472bd8048b))
+* **ci:** the tenant_id guard scanned two paths that do not exist ([#567](https://github.com/zeroroot-ai/gibson/issues/567)) ([937d698](https://github.com/zeroroot-ai/gibson/commit/937d698cd5cfc760ed162023508b55400463690d)), closes [#559](https://github.com/zeroroot-ai/gibson/issues/559)
+* **graph:** a :Mission node has one writer ([#565](https://github.com/zeroroot-ai/gibson/issues/565)) ([4e6eace](https://github.com/zeroroot-ai/gibson/commit/4e6eace0559e3838d5fac7730f84940f53ebdae9)), closes [#551](https://github.com/zeroroot-ai/gibson/issues/551)
+* **graph:** the projection tick projects a mission, so its status stays true ([#569](https://github.com/zeroroot-ai/gibson/issues/569)) ([cbd3f7a](https://github.com/zeroroot-ai/gibson/commit/cbd3f7a4a023e2ac4b7807c81e3ce98bf7bcdfd9))
+* **guards:** the OSS-boundary denylist names a repo that no longer exists ([#540](https://github.com/zeroroot-ai/gibson/issues/540)) ([c7ce2b3](https://github.com/zeroroot-ai/gibson/commit/c7ce2b365c91707380fc681edf9c22046fbf73cf))
+* **guards:** two comments claimed a CI guard that did not exist; one is now written ([#560](https://github.com/zeroroot-ai/gibson/issues/560)) ([69848b4](https://github.com/zeroroot-ai/gibson/commit/69848b4c5b297b7556d2c278e36e0c93d9d64caf)), closes [#557](https://github.com/zeroroot-ai/gibson/issues/557)
+* **mission:** a for_each inside a parallel sub-node expands ([#579](https://github.com/zeroroot-ai/gibson/issues/579)) ([688051e](https://github.com/zeroroot-ai/gibson/commit/688051ea1a45eaa11f486cf930f9f70e6a6a799a)), closes [#548](https://github.com/zeroroot-ai/gibson/issues/548)
+* **rework:** a plaintext TLS mode, which gibson[#561](https://github.com/zeroroot-ai/gibson/issues/561) removed by accident ([#574](https://github.com/zeroroot-ai/gibson/issues/574)) ([aa74370](https://github.com/zeroroot-ai/gibson/commit/aa7437040bed98eaee7c979daa4595ea9a9a23e3)), closes [#553](https://github.com/zeroroot-ai/gibson/issues/553)
+* **tenant-operator:** name the TLS mode instead of a boolean that reads backwards ([#561](https://github.com/zeroroot-ai/gibson/issues/561)) ([94bc0b9](https://github.com/zeroroot-ai/gibson/commit/94bc0b9f7a7eeba17c635eef8a8bee90eccf5792))
+
 ## [0.149.0](https://github.com/zeroroot-ai/gibson/compare/v0.148.3...v0.149.0) (2026-10-01)
 
 
