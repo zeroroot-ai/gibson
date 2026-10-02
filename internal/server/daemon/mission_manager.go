@@ -44,6 +44,27 @@ type targetGetter interface {
 	Get(ctx context.Context, id types.ID) (*types.Target, error)
 }
 
+// resolveForEachTargets resolves the run's target set into the form for_each
+// expansion takes, in TargetSet() order.
+//
+// Today every submitted mission carries exactly one target: missionRun resolves
+// one and AdditionalTargetIDs is only ever populated on the originate path. So
+// this returns a one-element slice for an ordinary run, which expands a for_each
+// to one instance and is indistinguishable from the pre-fan-out behaviour.
+func (m *missionManager) resolveForEachTargets(ctx context.Context, active *activeMission) ([]forEachTarget, error) {
+	ids := active.mission.TargetSet()
+	caller := resolveTargetCallerTenant(ctx)
+	out := make([]forEachTarget, 0, len(ids))
+	for _, id := range ids {
+		t, err := resolveTargetUUID(ctx, m.targetStore, id.String(), caller)
+		if err != nil {
+			return nil, fmt.Errorf("target %s: %w", id, err)
+		}
+		out = append(out, forEachTarget{ID: id.String(), Target: t})
+	}
+	return out, nil
+}
+
 // resolveTargetCallerTenant returns the caller-tenant string resolveTargetUUID
 // should compare against, for a target-read caller. A missing tenant on the
 // context is reported here as "" — it never defaults to
@@ -922,7 +943,19 @@ func (m *missionManager) executeMission(ctx context.Context, missionID string, d
 
 	// Project the mission. A goal (if any) drives the Decider; absent → the scripted
 	// graph runs deterministically and the mission completes mechanically.
-	proj, projErr := missionDefinitionToProjected(def, missionGoal(active.mission))
+	// The run's target set, resolved, for for_each expansion. Primary first, as
+	// Mission.TargetSet() orders it, so instance identity and the concurrency
+	// chain are stable between runs (gibson#525).
+	//
+	// A target in the set that will not resolve fails the projection rather than
+	// degrading: expanding over the ones that did resolve would run a fan-out
+	// that silently covered less than the author asked for, which is the class of
+	// failure this epic exists to remove.
+	var proj brain.MissionProjected
+	fanTargets, projErr := m.resolveForEachTargets(ctx, active)
+	if projErr == nil {
+		proj, projErr = missionDefinitionToProjected(def, missionGoal(active.mission), fanTargets)
+	}
 	// Pin the belief-model version onto the mission (ADR-0005 §5): the mission
 	// records the model it ran under so replay re-loads the exact artifact.
 	proj.BeliefModel = m.beliefVersion

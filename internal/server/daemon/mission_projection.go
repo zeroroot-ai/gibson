@@ -29,6 +29,7 @@ import (
 
 	"github.com/zeroroot-ai/gibson/internal/engine/brain"
 	"github.com/zeroroot-ai/gibson/internal/engine/mission/targetbind"
+	"github.com/zeroroot-ai/gibson/internal/infra/types"
 	missionpb "github.com/zeroroot-ai/sdk/api/gen/gibson/mission/v1"
 )
 
@@ -36,80 +37,201 @@ import (
 // goal is the mission objective for the Decider (empty for a no-goal mission that
 // runs its script deterministically and stops); it is supplied by the caller
 // (dispatch request / mission metadata), not carried in the definition.
-func missionDefinitionToProjected(def *missionpb.MissionDefinition, goal string) (brain.MissionProjected, error) {
+// targets is the mission run's resolved target set, primary first, as
+// Mission.TargetSet() orders it. It is a RUN fact rather than a definition fact,
+// which is why it is a parameter: the same definition fans out to two instances
+// for a two-target run and one for a single-target run (gibson#525).
+//
+// An empty set is the pre-fan-out behaviour and is not an error — every mission
+// before this took exactly one target and bound it at submit.
+func missionDefinitionToProjected(def *missionpb.MissionDefinition, goal string, targets []forEachTarget) (brain.MissionProjected, error) {
 	if def == nil {
 		return brain.MissionProjected{}, fmt.Errorf("nil mission definition")
 	}
 
 	// 1. Flatten parallel sub-nodes into the node set (they become real nodes).
-	allNodes := map[string]*missionpb.MissionNode{}
-	for id, n := range def.GetNodes() {
-		allNodes[id] = n
+	allNodes, err := flattenParallel(def)
+	if err != nil {
+		return brain.MissionProjected{}, err
 	}
-	for id, n := range def.GetNodes() {
-		if n.GetType() == missionpb.NodeType_NODE_TYPE_PARALLEL {
-			for _, sub := range n.GetParallelConfig().GetSubNodes() {
-				if sub.GetId() == "" {
-					return brain.MissionProjected{}, fmt.Errorf("parallel node %q: sub-node missing id", id)
-				}
-				allNodes[sub.GetId()] = sub
-			}
-		}
+
+	// 1b. Expand each for_each into one instance per target.
+	forEachInstances, err := expandForEachNodes(def, targets, allNodes)
+	if err != nil {
+		return brain.MissionProjected{}, err
 	}
 
 	// 2. Raw deps: per-node `dependencies` ∪ incoming `edges`. Parallel sub-nodes
-	// inherit the parallel node's deps.
-	deps := map[string]map[string]struct{}{}
-	addDep := func(node, on string) {
-		if node == on || on == "" {
-			return
-		}
-		if deps[node] == nil {
-			deps[node] = map[string]struct{}{}
-		}
-		deps[node][on] = struct{}{}
-	}
+	// and for_each instances inherit their container node's deps.
+	deps := nodeDeps{}
 	for id, n := range allNodes {
 		for _, d := range n.GetDependencies() {
-			addDep(id, d)
+			deps.add(id, d)
 		}
 	}
 	for _, e := range def.GetEdges() {
-		addDep(e.GetTo(), e.GetFrom())
+		deps.add(e.GetTo(), e.GetFrom())
 	}
 	for id, n := range def.GetNodes() {
 		if n.GetType() == missionpb.NodeType_NODE_TYPE_PARALLEL {
 			for _, sub := range n.GetParallelConfig().GetSubNodes() {
 				for d := range deps[id] {
-					addDep(sub.GetId(), d)
+					deps.add(sub.GetId(), d)
 				}
 			}
 		}
 	}
+	boundFanOut(def, forEachInstances, deps)
 
 	// 3. condition branch gating: every branch node depends on its condition node.
 	for id, n := range allNodes {
 		if n.GetType() == missionpb.NodeType_NODE_TYPE_CONDITION {
 			for _, b := range append(append([]string{}, n.GetConditionConfig().GetTrueBranch()...), n.GetConditionConfig().GetFalseBranch()...) {
-				addDep(b, id)
+				deps.add(b, id)
 			}
 		}
 	}
 
-	// 4. resolve(id) → the real (agent/tool/plugin/condition) node ids that a
-	// dependency on `id` stands for. parallel → its sub-nodes; join → its wait_for.
-	resolve := makeResolver(allNodes)
+	// 4/5. Build WorkNodes for real nodes, rewriting deps through the resolver.
+	nodes, err := buildWorkNodes(allNodes, deps)
+	if err != nil {
+		return brain.MissionProjected{}, err
+	}
 
-	// 5. Build WorkNodes for real nodes, rewriting deps through resolve.
+	return brain.MissionProjected{
+		ID:          def.GetId(),
+		Goal:        goal,
+		Budget:      budgetFromConstraints(def.GetConstraints()),
+		Nodes:       nodes,
+		DeciderSlot: deciderSlotFrom(def.GetDeciderSlot()),
+	}, nil
+}
+
+// nodeDeps accumulates the raw dependency sets the projection builds before it
+// rewrites them through the resolver. It is a set rather than a slice because
+// the same edge arrives by three routes — a node's own `dependencies`, the
+// definition's `edges`, and branch or fan-out gating added here.
+type nodeDeps map[string]map[string]struct{}
+
+// add records that `node` waits on `on`. A self-edge and an empty id are
+// dropped: a node cannot wait on itself, and an empty id would create a
+// dependency on a node that does not exist, which the resolver would then
+// silently resolve to nothing.
+func (d nodeDeps) add(node, on string) {
+	if node == on || on == "" {
+		return
+	}
+	if d[node] == nil {
+		d[node] = map[string]struct{}{}
+	}
+	d[node][on] = struct{}{}
+}
+
+// flattenParallel returns one flat node set: every declared node, plus each
+// parallel node's sub-nodes promoted to real nodes. The parallel node itself
+// stays in the set but never becomes work — it collapses into DependsOn.
+func flattenParallel(def *missionpb.MissionDefinition) (map[string]*missionpb.MissionNode, error) {
+	allNodes := map[string]*missionpb.MissionNode{}
+	for id, n := range def.GetNodes() {
+		allNodes[id] = n
+	}
+	for id, n := range def.GetNodes() {
+		if n.GetType() != missionpb.NodeType_NODE_TYPE_PARALLEL {
+			continue
+		}
+		for _, sub := range n.GetParallelConfig().GetSubNodes() {
+			if sub.GetId() == "" {
+				return nil, fmt.Errorf("parallel node %q: sub-node missing id", id)
+			}
+			allNodes[sub.GetId()] = sub
+		}
+	}
+	return allNodes, nil
+}
+
+// expandForEachNodes adds one bound instance per target to allNodes for every
+// for_each node, and returns the instance ids keyed by for_each node id.
+//
+// The template itself never becomes a WorkNode — only its bound instances do,
+// which is why the template's placeholders survive submit-time binding
+// (targetbind.Bind skips them) and are bound here against each instance's own
+// target.
+func expandForEachNodes(
+	def *missionpb.MissionDefinition,
+	targets []forEachTarget,
+	allNodes map[string]*missionpb.MissionNode,
+) (map[string][]string, error) {
+	forEachInstances := map[string][]string{}
+	for id, n := range def.GetNodes() {
+		if n.GetType() != missionpb.NodeType_NODE_TYPE_FOR_EACH {
+			continue
+		}
+		tpl := n.GetForEachConfig().GetTemplate()
+		if tpl == nil || tpl.GetId() == "" {
+			return nil, fmt.Errorf("for_each node %q: template missing or has no id", id)
+		}
+		if len(targets) == 0 {
+			return nil, fmt.Errorf(
+				"for_each node %q: the run resolved no targets, so it would expand to nothing; "+
+					"a mission that fans out needs at least one target", id)
+		}
+		insts, err := expandForEach(id, n, targets)
+		if err != nil {
+			return nil, err
+		}
+		for _, inst := range insts {
+			allNodes[inst.GetId()] = inst
+			forEachInstances[id] = append(forEachInstances[id], inst.GetId())
+		}
+	}
+	return forEachInstances, nil
+}
+
+// boundFanOut gives every instance the for_each node's own dependencies, then
+// bounds how many instances run at once.
+//
+// The bound is built on DependsOn because nothing in the brain honours
+// MaxConcurrency — ParallelNodeConfig has carried that field since it was
+// written and `grep MaxConcurrency` over internal/engine/brain and
+// internal/server/daemon finds no consumer (gibson#536).
+//
+// Chaining instance k behind instance k-limit bounds how many are runnable at
+// once using the scheduler that already exists: with a limit of 4 and ten
+// targets, instances 4..9 each wait on the one four places ahead, so at most
+// four are ever ready. It costs ordering the author did not ask for, which is
+// the honest trade for not launching fifty sandboxes at once.
+func boundFanOut(def *missionpb.MissionDefinition, forEachInstances map[string][]string, deps nodeDeps) {
+	for id, instIDs := range forEachInstances {
+		for _, inst := range instIDs {
+			for d := range deps[id] {
+				deps.add(inst, d)
+			}
+		}
+		limit := int(def.GetNodes()[id].GetForEachConfig().GetMaxConcurrency())
+		if limit <= 0 || limit >= len(instIDs) {
+			continue
+		}
+		for k := limit; k < len(instIDs); k++ {
+			deps.add(instIDs[k], instIDs[k-limit])
+		}
+	}
+}
+
+// buildWorkNodes turns the flat node set into the brain's WorkNodes, rewriting
+// each dependency through the resolver so a dependency on a parallel, join or
+// for_each node becomes a dependency on the real nodes it stands for.
+func buildWorkNodes(allNodes map[string]*missionpb.MissionNode, deps nodeDeps) ([]brain.WorkNode, error) {
+	resolve := makeResolver(allNodes)
 	var nodes []brain.WorkNode
 	for id, n := range allNodes {
 		switch n.GetType() {
-		case missionpb.NodeType_NODE_TYPE_PARALLEL, missionpb.NodeType_NODE_TYPE_JOIN:
+		case missionpb.NodeType_NODE_TYPE_PARALLEL, missionpb.NodeType_NODE_TYPE_JOIN,
+			missionpb.NodeType_NODE_TYPE_FOR_EACH:
 			continue // collapsed into DependsOn; no entity
 		}
 		kind, target, input, err := nodeKindTargetInput(n)
 		if err != nil {
-			return brain.MissionProjected{}, fmt.Errorf("node %q: %w", id, err)
+			return nil, fmt.Errorf("node %q: %w", id, err)
 		}
 		resolved := map[string]struct{}{}
 		for d := range deps[id] {
@@ -130,14 +252,7 @@ func missionDefinitionToProjected(def *missionpb.MissionDefinition, goal string)
 		})
 	}
 	sort.Slice(nodes, func(i, j int) bool { return nodes[i].ID < nodes[j].ID })
-
-	return brain.MissionProjected{
-		ID:          def.GetId(),
-		Goal:        goal,
-		Budget:      budgetFromConstraints(def.GetConstraints()),
-		Nodes:       nodes,
-		DeciderSlot: deciderSlotFrom(def.GetDeciderSlot()),
-	}, nil
+	return nodes, nil
 }
 
 // nodeTimeout reads MissionNode.timeout as a duration. It is the only place the
@@ -188,6 +303,15 @@ func makeResolver(all map[string]*missionpb.MissionNode) func(string) []string {
 			var out []string
 			for _, w := range n.GetJoinConfig().GetWaitFor() {
 				out = append(out, resolve(w, seen)...)
+			}
+			return out
+		case missionpb.NodeType_NODE_TYPE_FOR_EACH:
+			// Every instance, not the first: a join naming a for_each waits for
+			// the whole fan-out (gibson#527). The instances are in `all` because
+			// expansion put them there before the resolver was built.
+			var out []string
+			for _, cand := range instanceIDsOf(id, all) {
+				out = append(out, resolve(cand, seen)...)
 			}
 			return out
 		default:
@@ -323,4 +447,74 @@ func toolInputJSON(in map[string]string) (string, error) {
 		return "", fmt.Errorf("marshal tool input: %w", err)
 	}
 	return string(b), nil
+}
+
+// forEachTarget is one item of a for_each's source set: the target an instance
+// runs against. It carries the resolved Target because binding needs its URL,
+// host and name, and the UUID because that is the instance's identity.
+type forEachTarget struct {
+	ID     string
+	Target *types.Target
+}
+
+// instanceIDPrefix separates a template's id from the target UUID that
+// identifies one instance of it: `<templateID>#<targetUUID>`.
+//
+// The UUID and not an index. TargetSet() order is stable today, but an index
+// survives a changed target set and then silently names a different host, which
+// is the failure the whole fan-out design is built to avoid (gibson#524).
+const instanceIDPrefix = "#"
+
+// instanceID is the addressable identity of one for_each instance.
+func instanceID(templateID, targetUUID string) string {
+	return templateID + instanceIDPrefix + targetUUID
+}
+
+// expandForEach clones the template once per target and binds each copy against
+// that target. Order follows the target set, primary first, so the instance list
+// is deterministic and the concurrency chain is stable between runs.
+func expandForEach(nodeID string, n *missionpb.MissionNode, targets []forEachTarget) ([]*missionpb.MissionNode, error) {
+	tpl := n.GetForEachConfig().GetTemplate()
+	out := make([]*missionpb.MissionNode, 0, len(targets))
+	for _, t := range targets {
+		if t.Target == nil {
+			return nil, fmt.Errorf("for_each node %q: target %q did not resolve", nodeID, t.ID)
+		}
+		bound, err := targetbind.BindNode(tpl, t.Target)
+		if err != nil {
+			return nil, fmt.Errorf("for_each node %q: %w", nodeID, err)
+		}
+		bound.Id = instanceID(tpl.GetId(), t.ID)
+		// An instance's own dependencies are the for_each's, applied by the
+		// caller. Whatever the template declared would name nodes that mean
+		// something to the author, not to one instance.
+		bound.Dependencies = nil
+		out = append(out, bound)
+	}
+	return out, nil
+}
+
+// instanceIDsOf returns the instance ids expansion produced for a for_each,
+// in target-set order, by matching the `<templateID>#` prefix in the node set.
+//
+// Derived from the node set rather than carried in a side map, so the resolver
+// cannot disagree with what was actually projected.
+func instanceIDsOf(nodeID string, all map[string]*missionpb.MissionNode) []string {
+	n, ok := all[nodeID]
+	if !ok {
+		return nil
+	}
+	tplID := n.GetForEachConfig().GetTemplate().GetId()
+	if tplID == "" {
+		return nil
+	}
+	prefix := tplID + instanceIDPrefix
+	var out []string
+	for id := range all {
+		if strings.HasPrefix(id, prefix) {
+			out = append(out, id)
+		}
+	}
+	sort.Strings(out)
+	return out
 }

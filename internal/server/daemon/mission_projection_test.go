@@ -46,7 +46,7 @@ func TestMissionDefinitionToProjected_NodesEdgesConstraints(t *testing.T) {
 		Constraints: &missionpb.MissionConstraints{MaxTokens: 1000},
 	}
 
-	got, err := missionDefinitionToProjected(def, "")
+	got, err := missionDefinitionToProjected(def, "", nil)
 	if err != nil {
 		t.Fatalf("translate: %v", err)
 	}
@@ -88,7 +88,7 @@ func TestMissionDefinitionToProjected_DeciderSlot(t *testing.T) {
 		Nodes:       map[string]*missionpb.MissionNode{"a": toolNode("ta")},
 		DeciderSlot: &missionpb.LLMSlotConfig{Provider: "anthropic", Model: "claude-opus-4-8"},
 	}
-	got, err := missionDefinitionToProjected(def, "find flag")
+	got, err := missionDefinitionToProjected(def, "find flag", nil)
 	if err != nil {
 		t.Fatalf("translate: %v", err)
 	}
@@ -98,7 +98,7 @@ func TestMissionDefinitionToProjected_DeciderSlot(t *testing.T) {
 
 	// Absent decider_slot → empty (tenant default).
 	def.DeciderSlot = nil
-	got, _ = missionDefinitionToProjected(def, "")
+	got, _ = missionDefinitionToProjected(def, "", nil)
 	if (got.DeciderSlot != brain.DeciderSlot{}) {
 		t.Errorf("absent slot should be empty, got %+v", got.DeciderSlot)
 	}
@@ -115,7 +115,7 @@ func TestMissionDefinitionToProjected_JoinCollapsesToDeps(t *testing.T) {
 			"c": toolNode("tc", "j"),
 		},
 	}
-	got, err := missionDefinitionToProjected(def, "")
+	got, err := missionDefinitionToProjected(def, "", nil)
 	if err != nil {
 		t.Fatalf("translate: %v", err)
 	}
@@ -148,7 +148,7 @@ func TestMissionDefinitionToProjected_ParallelFlattensSubNodes(t *testing.T) {
 			"d": toolNode("td", "p"),
 		},
 	}
-	got, err := missionDefinitionToProjected(def, "")
+	got, err := missionDefinitionToProjected(def, "", nil)
 	if err != nil {
 		t.Fatalf("translate: %v", err)
 	}
@@ -179,7 +179,7 @@ func TestMissionDefinitionToProjected_ConditionGatesBranches(t *testing.T) {
 			"no":   toolNode("tn"),
 		},
 	}
-	got, err := missionDefinitionToProjected(def, "")
+	got, err := missionDefinitionToProjected(def, "", nil)
 	if err != nil {
 		t.Fatalf("translate: %v", err)
 	}
@@ -209,7 +209,7 @@ func TestMissionDefinitionToProjected_RunsThroughEngine(t *testing.T) {
 			"b": agentNode("scan", "a"),
 		},
 	}
-	proj, err := missionDefinitionToProjected(def, "") // no-goal
+	proj, err := missionDefinitionToProjected(def, "", nil) // no-goal
 	if err != nil {
 		t.Fatalf("translate: %v", err)
 	}
