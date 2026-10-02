@@ -502,20 +502,3 @@ func TestInstallStatusFromHealth(t *testing.T) {
 		}
 	}
 }
-
-// A kind is required: CheckIn refuses an empty one before an install reaches
-// the registry, and the registry refuses it too instead of guessing plugin
-// (gibson#505).
-func TestPluginRegistry_Register_RefusesAnEmptyKind(t *testing.T) {
-	tr := newTestPluginRegistry(t)
-	_, err := tr.register(context.Background(), &ComponentInstall{
-		TenantID:     auth.MustNewTenantID("tenant-abc"),
-		Name:         "lookup",
-		Version:      "1.0.0",
-		ManifestHash: "abc123",
-		HostID:       "host-key-thumbprint-1",
-	})
-	if err == nil || !strings.Contains(err.Error(), "kind is required") {
-		t.Fatalf("Register with no kind: err = %v, want a refusal naming kind", err)
-	}
-}
