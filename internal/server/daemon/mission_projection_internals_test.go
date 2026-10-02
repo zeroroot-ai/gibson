@@ -207,7 +207,7 @@ func TestFlattenParallel_RefusesASubNodeWithNoID(t *testing.T) {
 // A for_each whose config carries no template is refused by name. An empty
 // template would expand to instances with nothing in them.
 func TestExpandForEachNodes_RefusesAMissingTemplate(t *testing.T) {
-	_, err := expandForEachNodes(&missionpb.MissionDefinition{
+	_, _, err := expandForEachNodes(&missionpb.MissionDefinition{
 		Id: "m1",
 		Nodes: map[string]*missionpb.MissionNode{
 			"each": {
@@ -229,7 +229,7 @@ func TestExpandForEachNodes_RefusesAMissingTemplate(t *testing.T) {
 // A nil definition is refused rather than projected as an empty mission, which
 // would complete immediately and report success.
 func TestMissionDefinitionToProjected_RefusesANilDefinition(t *testing.T) {
-	_, err := missionDefinitionToProjected(nil, "", nil)
+	_, _, err := missionDefinitionToProjected(nil, "", nil)
 	if err == nil {
 		t.Fatal("want a refusal for a nil definition")
 	}

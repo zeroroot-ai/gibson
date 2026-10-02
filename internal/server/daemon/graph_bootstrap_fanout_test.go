@@ -8,10 +8,15 @@ import (
 	"log/slog"
 	"strings"
 	"testing"
+	"time"
 
 	"github.com/zeroroot-ai/gibson/internal/engine/graphrag/graph"
+	"github.com/zeroroot-ai/gibson/internal/engine/graphrag/schema"
 	"github.com/zeroroot-ai/gibson/internal/engine/mission"
 	"github.com/zeroroot-ai/gibson/internal/infra/types"
+	missionpb "github.com/zeroroot-ai/sdk/api/gen/gibson/mission/v1"
+	typespb "github.com/zeroroot-ai/sdk/api/gen/gibson/types/v1"
+	"google.golang.org/protobuf/types/known/durationpb"
 )
 
 // recordingGraphClient captures every Cypher statement and its parameters, so a
@@ -62,16 +67,16 @@ func bootstrapFixture(t *testing.T) (*mission.Mission, *mission.MissionRun) {
 	t.Helper()
 	missionID := types.NewID()
 	return &mission.Mission{
-			ID:       missionID,
-			Name:     "fanout",
-			TenantID: "tenant-a",
-			TargetID: types.NewID(),
-			Status:   mission.MissionStatusRunning,
-		}, &mission.MissionRun{
-			ID:        types.NewID(),
-			MissionID: missionID,
-			RunNumber: 1,
-		}
+		ID:       missionID,
+		Name:     "fanout",
+		TenantID: "tenant-a",
+		TargetID: types.NewID(),
+		Status:   mission.MissionStatusRunning,
+	}, &mission.MissionRun{
+		ID:        types.NewID(),
+		MissionID: missionID,
+		RunNumber: 1,
+	}
 }
 
 // The whole of gibson#528: a two-target fan-out writes one graph node per
@@ -264,4 +269,133 @@ func nodeNames(nodes map[string]map[string]any) []string {
 		out = append(out, name)
 	}
 	return out
+}
+
+// convertToSchemaNode maps every node kind the projection can produce. A kind
+// mapped wrong writes a graph node that describes different work than ran — and
+// the default branch exists precisely so a kind the graph schema has no type for
+// is still recorded rather than dropped.
+func TestConvertToSchemaNode_MapsEveryKind(t *testing.T) {
+	missionID := types.NewID()
+
+	agent := convertToSchemaNode(missionID, &missionpb.MissionNode{
+		Id:          "scan",
+		Type:        missionpb.NodeType_NODE_TYPE_AGENT,
+		Description: "the recon step",
+		Config: &missionpb.MissionNode_AgentConfig{AgentConfig: &missionpb.AgentNodeConfig{
+			AgentName: "nmap-agent",
+			Task:      &typespb.Task{Goal: "map the surface"},
+		}},
+	}, "scan", false, fanOutOrigin{}, false)
+	if agent.AgentName != "nmap-agent" {
+		t.Errorf("agent node carries agent_name %q", agent.AgentName)
+	}
+	if agent.Description != "the recon step" {
+		t.Errorf("the description was dropped: %q", agent.Description)
+	}
+	if agent.TaskConfig["goal"] != "map the surface" {
+		t.Errorf("the task goal was dropped: %v", agent.TaskConfig["goal"])
+	}
+	if agent.Status != schema.MissionNodeStatusReady {
+		t.Errorf("a node with no dependencies is an entry point and starts ready, got %q", agent.Status)
+	}
+
+	tool := convertToSchemaNode(missionID, &missionpb.MissionNode{
+		Id:   "probe",
+		Type: missionpb.NodeType_NODE_TYPE_TOOL,
+		Config: &missionpb.MissionNode_ToolConfig{ToolConfig: &missionpb.ToolNodeConfig{
+			ToolName: "nmap",
+			Input:    map[string]string{"target": "10.0.0.1"},
+		}},
+		RetryPolicy: &missionpb.RetryPolicy{
+			MaxRetries:      3,
+			BackoffStrategy: missionpb.BackoffStrategy_BACKOFF_STRATEGY_EXPONENTIAL,
+			InitialDelay:    durationpb.New(2 * time.Second),
+			MaxDelay:        durationpb.New(30 * time.Second),
+		},
+		Timeout: durationpb.New(45 * time.Second),
+	}, "probe", true, fanOutOrigin{}, false)
+	if tool.ToolName != "nmap" {
+		t.Errorf("tool node carries tool_name %q", tool.ToolName)
+	}
+	if tool.TaskConfig["target"] != "10.0.0.1" {
+		t.Errorf("the tool input was dropped: %v", tool.TaskConfig)
+	}
+	if tool.Timeout != 45*time.Second {
+		t.Errorf("timeout = %v, want 45s", tool.Timeout)
+	}
+	if tool.RetryPolicy == nil || tool.RetryPolicy.MaxRetries != 3 {
+		t.Fatalf("retry policy = %+v, want max_retries 3", tool.RetryPolicy)
+	}
+	if tool.RetryPolicy.Strategy == "" {
+		t.Error("the backoff strategy has no name; a graph reader sees an empty string")
+	}
+	if tool.RetryPolicy.Backoff != 2*time.Second || tool.RetryPolicy.MaxBackoff != 30*time.Second {
+		t.Errorf("backoff bounds = %v/%v, want 2s/30s", tool.RetryPolicy.Backoff, tool.RetryPolicy.MaxBackoff)
+	}
+	if tool.Status != schema.MissionNodeStatusPending {
+		t.Errorf("a node with dependencies waits, got status %q", tool.Status)
+	}
+
+	plugin := convertToSchemaNode(missionID, &missionpb.MissionNode{
+		Id:   "burp",
+		Type: missionpb.NodeType_NODE_TYPE_PLUGIN,
+		Config: &missionpb.MissionNode_PluginConfig{PluginConfig: &missionpb.PluginNodeConfig{
+			PluginName: "burp",
+			Method:     "Scan",
+			Params:     map[string]string{"depth": "2"},
+		}},
+	}, "burp", false, fanOutOrigin{}, false)
+	if plugin.TaskConfig["plugin_method"] != "Scan" {
+		t.Errorf("the plugin method was dropped: %v", plugin.TaskConfig)
+	}
+	if plugin.TaskConfig["depth"] != "2" {
+		t.Errorf("the plugin params were dropped: %v", plugin.TaskConfig)
+	}
+
+	// A kind the graph schema has no type for is recorded as a tool whose
+	// tool_name NAMES the kind, so the node is in the graph and a reader can see
+	// what it really was.
+	join := convertToSchemaNode(missionID, &missionpb.MissionNode{
+		Id:   "report",
+		Type: missionpb.NodeType_NODE_TYPE_JOIN,
+		Config: &missionpb.MissionNode_JoinConfig{JoinConfig: &missionpb.JoinNodeConfig{
+			WaitFor: []string{"scan"},
+		}},
+		Metadata: map[string]string{"owner": "recon-team"},
+	}, "report", true, fanOutOrigin{}, false)
+	if join.ToolName != "join" {
+		t.Errorf("an unmapped kind projected tool_name %q, want the kind's name", join.ToolName)
+	}
+	if join.TaskConfig["owner"] != "recon-team" {
+		t.Errorf("metadata was dropped for an unmapped kind: %v", join.TaskConfig)
+	}
+}
+
+// definitionNodeFor falls back to an empty node rather than erroring. A parallel
+// sub-node is promoted by the projection and is not in def.GetNodes(), and a node
+// absent from the graph is worse than a node with thin metadata.
+func TestDefinitionNodeFor_Fallbacks(t *testing.T) {
+	def := forEachDef(0)
+
+	// An instance whose for_each is not in the definition — which cannot happen
+	// from the projection, and must not panic if it ever does.
+	got := definitionNodeFor(def, "scan#x", fanOutOrigin{ForEachNodeID: "nope"}, true)
+	if got == nil {
+		t.Fatal("definitionNodeFor returned nil; every caller dereferences it")
+	}
+	if got.GetId() != "" {
+		t.Errorf("want an empty node for a missing for_each, got %q", got.GetId())
+	}
+
+	// A node the definition does not hold: a promoted parallel sub-node.
+	if got := definitionNodeFor(def, "promoted-sub-node", fanOutOrigin{}, false); got.GetId() != "" {
+		t.Errorf("want an empty node for an id the definition does not hold, got %q", got.GetId())
+	}
+
+	// An instance resolves to its for_each's TEMPLATE, which is where its
+	// description, timeout and retry policy live.
+	if got := definitionNodeFor(def, "scan#x", fanOutOrigin{ForEachNodeID: "each"}, true); got.GetId() != "scan" {
+		t.Errorf("an instance resolved to %q, want the template %q", got.GetId(), "scan")
+	}
 }

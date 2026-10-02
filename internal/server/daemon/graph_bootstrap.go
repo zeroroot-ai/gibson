@@ -210,52 +210,7 @@ func convertToSchemaNode(
 	// canonical types were lifted into the SDK; only Goal and Context
 	// survive on the proto Task. Tool/plugin inputs are typed map<string,
 	// string> on the proto so values flow through unchanged.
-	taskConfig := make(map[string]any)
-	switch nodeDef.GetType() {
-	case missionpb.NodeType_NODE_TYPE_AGENT:
-		if t := nodeDef.GetAgentConfig().GetTask(); t != nil {
-			taskConfig["goal"] = t.GetGoal()
-			if ctx := t.GetContext(); len(ctx) > 0 {
-				taskConfig["context"] = typedValueMapToAnyMap(ctx)
-			}
-		}
-		// Persist per-slot LLM bindings (AgentNodeConfig.llm_slots, field 5)
-		// using a sentinel key so executeAgent can rebuild the override map at
-		// dispatch time without touching the proto definition again.
-		// Each entry is {"slot":…,"provider":…,"model":…}; entries with an
-		// empty provider are omitted because they carry no override intent.
-		// Spec: per-node-slot-override (gibson#539).
-		if slots := nodeDef.GetAgentConfig().GetLlmSlots(); len(slots) > 0 {
-			serialized := make([]map[string]string, 0, len(slots))
-			for _, s := range slots {
-				if s.GetProvider() == "" {
-					continue // no override intent — skip
-				}
-				serialized = append(serialized, map[string]string{
-					"slot":     s.GetSlot(),
-					"provider": s.GetProvider(),
-					"model":    s.GetModel(),
-				})
-			}
-			if len(serialized) > 0 {
-				taskConfig["__llm_slots"] = serialized
-			}
-		}
-	case missionpb.NodeType_NODE_TYPE_TOOL:
-		for k, v := range nodeDef.GetToolConfig().GetInput() {
-			taskConfig[k] = v
-		}
-	case missionpb.NodeType_NODE_TYPE_PLUGIN:
-		for k, v := range nodeDef.GetPluginConfig().GetParams() {
-			taskConfig[k] = v
-		}
-		taskConfig["plugin_method"] = nodeDef.GetPluginConfig().GetMethod()
-	default:
-		for k, v := range nodeDef.GetMetadata() {
-			taskConfig[k] = v
-		}
-	}
-	node.TaskConfig = taskConfig
+	node.TaskConfig = taskConfigFor(nodeDef)
 
 	// Set initial status based on dependencies
 	// Nodes without dependencies are entry points and can start immediately (ready)
@@ -436,6 +391,73 @@ func (b *GraphBootstrapper) Bootstrap(
 	return &BootstrapResult{
 		MissionRunID: run.ID.String(),
 	}, nil
+}
+
+// taskConfigFor builds the graph node's task_config from the definition node.
+//
+// Split out of convertToSchemaNode because that function reached a cyclomatic
+// complexity of 21 against a limit of 20: it was doing two jobs, mapping the
+// node kind and encoding the node config, and this is the second one.
+//
+// The default branch carries metadata rather than nothing, so a kind the graph
+// schema has no type for still records what the author attached to it.
+func taskConfigFor(nodeDef *missionpb.MissionNode) map[string]any {
+	taskConfig := make(map[string]any)
+	switch nodeDef.GetType() {
+	case missionpb.NodeType_NODE_TYPE_AGENT:
+		if t := nodeDef.GetAgentConfig().GetTask(); t != nil {
+			taskConfig["goal"] = t.GetGoal()
+			if ctx := t.GetContext(); len(ctx) > 0 {
+				taskConfig["context"] = typedValueMapToAnyMap(ctx)
+			}
+		}
+		// Persist per-slot LLM bindings (AgentNodeConfig.llm_slots, field 5)
+		// using a sentinel key so executeAgent can rebuild the override map at
+		// dispatch time without touching the proto definition again.
+		// Each entry is {"slot":…,"provider":…,"model":…}; entries with an
+		// empty provider are omitted because they carry no override intent.
+		// Spec: per-node-slot-override (gibson#539).
+		if slots := nodeDef.GetAgentConfig().GetLlmSlots(); len(slots) > 0 {
+			serialized := make([]map[string]string, 0, len(slots))
+			for _, s := range slots {
+				if s.GetProvider() == "" {
+					continue // no override intent — skip
+				}
+				serialized = append(serialized, map[string]string{
+					"slot":     s.GetSlot(),
+					"provider": s.GetProvider(),
+					"model":    s.GetModel(),
+				})
+			}
+			if len(serialized) > 0 {
+				taskConfig["__llm_slots"] = serialized
+			}
+		}
+	case missionpb.NodeType_NODE_TYPE_TOOL:
+		for k, v := range nodeDef.GetToolConfig().GetInput() {
+			taskConfig[k] = v
+		}
+	case missionpb.NodeType_NODE_TYPE_PLUGIN:
+		for k, v := range nodeDef.GetPluginConfig().GetParams() {
+			taskConfig[k] = v
+		}
+		taskConfig["plugin_method"] = nodeDef.GetPluginConfig().GetMethod()
+	// Every remaining kind, named rather than defaulted: the linter's
+	// `default-signifies-exhaustive: false` means a new NodeType fails the build
+	// here instead of landing silently in a default arm, which is the behaviour
+	// worth having — a kind whose config this function does not know how to
+	// encode should be a review conversation, not a quiet metadata copy.
+	case missionpb.NodeType_NODE_TYPE_CONDITION,
+		missionpb.NodeType_NODE_TYPE_PARALLEL,
+		missionpb.NodeType_NODE_TYPE_JOIN,
+		missionpb.NodeType_NODE_TYPE_JOB,
+		missionpb.NodeType_NODE_TYPE_FOR_EACH,
+		missionpb.NodeType_NODE_TYPE_UNSPECIFIED:
+		for k, v := range nodeDef.GetMetadata() {
+			taskConfig[k] = v
+		}
+	}
+	return taskConfig
 }
 
 // definitionNodeFor returns the definition node a projected work node came from.
