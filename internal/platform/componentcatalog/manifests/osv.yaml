@@ -10,6 +10,12 @@ egressAllow:
 spec:
   vendor: osv
   shape: Hosted
-  image: ghcr.io/stackloklabs/osv-mcp/server
+  # Tag 0.1.3 of StacklokLabs/osv-mcp, resolved 2026-10-02. The upstream
+  # publishes no cosign signature for this tag (its .sig referrers stop at
+  # older digests), so the pin is the digest alone. Resolve a new tag with
+  #   skopeo inspect docker://ghcr.io/stackloklabs/osv-mcp/server:<tag> | jq -r .Digest
+  # and bump by hand, the way claude.yaml is bumped per release. No tool
+  # tracks a digest inside a catalog manifest, so the bump is a reviewed PR.
+  image: ghcr.io/stackloklabs/osv-mcp/server@sha256:52c1696532737f1c3dd4a4b4f5c0ea29ca366f93cf445ab804ac8e9c3cdd93f6
   transport: streamable-http
   auth: none

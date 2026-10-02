@@ -71,6 +71,7 @@ func TestLoad_FailLoud(t *testing.T) {
 		"connector remote+image": {"id: x\nkind: connector\nspec:\n  shape: Remote\n  endpoint: https://x\n  image: y\n  auth: none\n", "must not set image"},
 		"connector bad auth":     {"id: x\nkind: connector\nspec:\n  shape: Remote\n  endpoint: https://x\n  auth: bogus\n", "must be none, secret, or oauth"},
 		"hosted first-party tag": {"id: x\nkind: connector\nspec:\n  shape: Hosted\n  image: ghcr.io/zeroroot-ai/foo:v1\n  auth: none\n", "digest-pinned"},
+		"hosted third-party tag": {"id: x\nkind: connector\nspec:\n  shape: Hosted\n  image: ghcr.io/stackloklabs/osv-mcp/server\n  auth: none\n", "digest-pinned"},
 	}
 	for name, tc := range cases {
 		t.Run(name, func(t *testing.T) {
@@ -82,19 +83,25 @@ func TestLoad_FailLoud(t *testing.T) {
 	}
 }
 
-// TestLoad_FirstPartyImagePolicy: a first-party image (ghcr.io/zeroroot-ai/…)
-// must be digest-pinned so a tenant runs exactly the pipeline-signed build; a
-// third-party vendor image on any other registry is the allowed vendor seam.
-func TestLoad_FirstPartyImagePolicy(t *testing.T) {
+// TestLoad_HostedConnectorImagePolicy: every Hosted connector image is
+// digest-pinned, first-party or not (gibson#479). A third-party tag resolved
+// to whatever the publisher pushed last, with no record of what ran in the
+// tenant data plane.
+func TestLoad_HostedConnectorImagePolicy(t *testing.T) {
 	if _, err := load(manifestFSWith(map[string]string{
 		"a.yaml": "id: fp\nkind: connector\nspec:\n  shape: Hosted\n  image: ghcr.io/zeroroot-ai/foo@sha256:abc\n  auth: none\n",
 	})); err != nil {
 		t.Fatalf("first-party digest-pinned image should load: %v", err)
 	}
 	if _, err := load(manifestFSWith(map[string]string{
-		"b.yaml": "id: tp\nkind: connector\nspec:\n  shape: Hosted\n  image: ghcr.io/stackloklabs/osv-mcp/server\n  auth: none\n",
+		"b.yaml": "id: tp\nkind: connector\nspec:\n  shape: Hosted\n  image: ghcr.io/stackloklabs/osv-mcp/server@sha256:abc\n  auth: none\n",
 	})); err != nil {
-		t.Fatalf("third-party vendor image should load (vendor seam): %v", err)
+		t.Fatalf("third-party digest-pinned image should load: %v", err)
+	}
+	if _, err := load(manifestFSWith(map[string]string{
+		"c.yaml": "id: tp\nkind: connector\nspec:\n  shape: Hosted\n  image: ghcr.io/stackloklabs/osv-mcp/server:0.1.3\n  auth: none\n",
+	})); err == nil || !strings.Contains(err.Error(), "digest-pinned") {
+		t.Fatalf("third-party tag must be refused: err = %v", err)
 	}
 }
 

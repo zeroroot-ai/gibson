@@ -188,25 +188,6 @@ const DispatchModeSandboxed = "sandboxed"
 
 const digestMarker = "@sha256:"
 
-// firstPartyRegistry is the image-name prefix of components gibson builds from
-// source and cosign-signs in the release pipeline (reusable-image-build.yml,
-// keyless OIDC + SLSA attestation). A first-party image MUST be pinned by digest
-// so a tenant runs exactly the signed build; a third-party vendor image (any
-// other registry, e.g. a hosted connector wrapping a vendor container) is a
-// separate trust seam and is not held to this rule.
-const firstPartyRegistry = "ghcr.io/zeroroot-ai/"
-
-// requireFirstPartyImageDigest fails loud when a first-party image is not
-// digest-pinned (ADR-0015 decision 9). Third-party images pass.
-func requireFirstPartyImageDigest(id, image string) error {
-	if strings.HasPrefix(image, firstPartyRegistry) && !strings.Contains(image, digestMarker) {
-		return fmt.Errorf(
-			"%s: a first-party image (%s…) must be built-from-source and digest-pinned (…%s…), got %q",
-			id, firstPartyRegistry, digestMarker, image)
-	}
-	return nil
-}
-
 // validate checks the envelope and the kind-specific spec, decoding the spec
 // into its typed form. A bad manifest fails the load loudly.
 func (m *Manifest) validate() error {
@@ -449,8 +430,12 @@ func validateConnector(id string, s ConnectorSpec) error {
 		if s.Endpoint != "" {
 			return fmt.Errorf("%s: a Hosted connector must not set endpoint", id)
 		}
-		if err := requireFirstPartyImageDigest(id, s.Image); err != nil {
-			return err
+		// A Hosted connector image runs inside the tenant data plane and sees
+		// the tenant's tool calls, so a third-party image is pinned the same
+		// way a first-party one is (gibson#479). A tag resolves to whatever
+		// the publisher pushed last, with no record of what ran.
+		if !strings.Contains(s.Image, digestMarker) {
+			return fmt.Errorf("%s: a Hosted connector image must be digest-pinned (…%s…), got %q", id, digestMarker, s.Image)
 		}
 	default:
 		return fmt.Errorf("%s: shape %q must be Hosted or Remote", id, s.Shape)
