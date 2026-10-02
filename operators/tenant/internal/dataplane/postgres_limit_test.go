@@ -88,3 +88,65 @@ func TestPipeline_PostgresStepCallsTheProvisioner(t *testing.T) {
 		t.Fatalf("err = %v, want the Postgres provisioner's connect failure", err)
 	}
 }
+
+// ensureRole creates a missing role and resets the password on an existing one.
+func TestEnsureRole_CreatesOrAlters(t *testing.T) {
+	conn := &fakeAdminConn{exists: false}
+	if err := ensureRole(context.Background(), conn, "t_acme_app", "deadbeef"); err != nil {
+		t.Fatalf("ensureRole (missing): %v", err)
+	}
+	if len(conn.execs) != 1 || conn.execs[0] != `CREATE ROLE "t_acme_app" WITH LOGIN PASSWORD 'deadbeef'` {
+		t.Fatalf("execs = %q, want one CREATE ROLE", conn.execs)
+	}
+
+	conn = &fakeAdminConn{exists: true}
+	if err := ensureRole(context.Background(), conn, "t_acme_app", "deadbeef"); err != nil {
+		t.Fatalf("ensureRole (existing): %v", err)
+	}
+	if len(conn.execs) != 1 || conn.execs[0] != `ALTER ROLE "t_acme_app" WITH LOGIN PASSWORD 'deadbeef'` {
+		t.Fatalf("execs = %q, want one ALTER ROLE", conn.execs)
+	}
+}
+
+func TestEnsureRole_Errors(t *testing.T) {
+	boom := errors.New("boom")
+	cases := map[string]struct {
+		conn *fakeAdminConn
+		want string
+	}{
+		"catalog check fails": {&fakeAdminConn{existsErr: boom}, "check role exists"},
+		"create fails":        {&fakeAdminConn{exists: false, execErr: boom}, "create role"},
+		"alter fails":         {&fakeAdminConn{exists: true, execErr: boom}, "alter role"},
+	}
+	for name, tc := range cases {
+		t.Run(name, func(t *testing.T) {
+			err := ensureRole(context.Background(), tc.conn, "t_acme_app", "deadbeef")
+			if err == nil || !strings.Contains(err.Error(), tc.want) || !errors.Is(err, boom) {
+				t.Fatalf("err = %v, want %q wrapping boom", err, tc.want)
+			}
+		})
+	}
+}
+
+// grantSchemaPrivileges issues the five grants in order and names a refused one.
+func TestGrantSchemaPrivileges(t *testing.T) {
+	conn := &fakeAdminConn{}
+	if err := grantSchemaPrivileges(context.Background(), conn, "t_acme_app"); err != nil {
+		t.Fatalf("grantSchemaPrivileges: %v", err)
+	}
+	if len(conn.execs) != 5 || conn.execs[0] != `GRANT USAGE ON SCHEMA public TO "t_acme_app"` {
+		t.Fatalf("execs = %q, want five grants starting with USAGE ON SCHEMA", conn.execs)
+	}
+	for _, g := range conn.execs {
+		if !strings.HasSuffix(g, `TO "t_acme_app"`) {
+			t.Fatalf("grant %q does not name the role", g)
+		}
+	}
+
+	boom := errors.New("boom")
+	conn = &fakeAdminConn{execErr: boom}
+	err := grantSchemaPrivileges(context.Background(), conn, "t_acme_app")
+	if err == nil || !strings.Contains(err.Error(), "grant") || !errors.Is(err, boom) {
+		t.Fatalf("err = %v, want the grant named and boom wrapped", err)
+	}
+}
