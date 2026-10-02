@@ -77,15 +77,13 @@ RUN --mount=type=cache,target=/root/.cache/go-build \
         go build -ldflags="$LDFLAGS" -o /out/gibson ./cmd/gibson; \
     fi
 
-# Build the auxiliary one-shot tools shipped alongside the daemon. They take
-# identical flags, so one `go build` produces all six: the packages they share
-# with each other compile once instead of six times. `-o /out/` names each
-# binary after its command directory, which is the name the runtime stage and
-# every chart Job already use.
+# Build the auxiliary tools shipped alongside the daemon. They take identical
+# flags, so one `go build` produces all of them: the packages they share with
+# each other compile once. `-o /out/` names each binary after its command
+# directory, which is the name the runtime stage and every chart Job already
+# use. A tool listed here has a chart Job, DaemonSet or documented `kubectl
+# exec` that runs it (gibson#507): a binary nothing invokes is not shipped.
 #
-# - lowercase-tenant-owner (spec auth-resolution-hardening R4) runs as a Helm
-#   post-install/post-upgrade Hook Job to lowercase any pre-existing
-#   Tenant.spec.owner values. Idempotent.
 # - active-session-backfill (spec instant-session-revocation, gibson#627 Slice 2
 #   / gibson#1302) is the chart's pre-upgrade Job that seeds the FGA
 #   active_session conditional tuple for every existing human tenant member.
@@ -114,7 +112,6 @@ RUN --mount=type=cache,target=/root/.cache/go-build \
 RUN --mount=type=cache,target=/root/.cache/go-build \
     --mount=type=cache,target=/go/pkg/mod \
     go build -ldflags="-s -w" -o /out/ \
-        ./cmd/lowercase-tenant-owner \
         ./cmd/active-session-backfill \
         ./cmd/gibson-migrate \
         ./cmd/sandbox-eviction-handler \
@@ -148,7 +145,6 @@ RUN echo "apk refresh ${APT_CACHE_BUST}" >/dev/null \
 
 # Copy gibson binary + auxiliary tools from builder
 COPY --from=builder /out/gibson /usr/local/bin/gibson
-COPY --from=builder /out/lowercase-tenant-owner /usr/local/bin/lowercase-tenant-owner
 COPY --from=builder /out/active-session-backfill /usr/local/bin/active-session-backfill
 COPY --from=builder /out/gibson-migrate /usr/local/bin/gibson-migrate
 COPY --from=builder /out/sandbox-eviction-handler /usr/local/bin/sandbox-eviction-handler

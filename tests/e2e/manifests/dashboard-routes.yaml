@@ -81,16 +81,6 @@ routes:
     excluded_reason: ""
     excluded_tracking_issue: ""
 
-  - path: "/pricing"
-    kind: page
-    method: GET
-    auth: public
-    landmark: "h1"
-    shape_schema: null
-    perf_budget_ms: 3000
-    excluded: false
-    excluded_reason: ""
-    excluded_tracking_issue: ""
 
   - path: "/contact-sales"
     kind: page
@@ -305,16 +295,6 @@ routes:
     excluded_reason: ""
     excluded_tracking_issue: ""
 
-  - path: "/dashboard/users"
-    kind: page
-    method: GET
-    auth: required
-    landmark: "h1"
-    shape_schema: null
-    perf_budget_ms: 3000
-    excluded: false
-    excluded_reason: ""
-    excluded_tracking_issue: ""
 
   - path: "/dashboard/users/{userId}"
     kind: page
@@ -727,27 +707,7 @@ routes:
     excluded_reason: ""
     excluded_tracking_issue: ""
 
-  - path: "/dashboard/register/v1"
-    kind: page
-    method: GET
-    auth: public
-    landmark: "form"
-    shape_schema: null
-    perf_budget_ms: 3000
-    excluded: false
-    excluded_reason: ""
-    excluded_tracking_issue: ""
 
-  - path: "/dashboard/register/v2"
-    kind: page
-    method: GET
-    auth: public
-    landmark: "form"
-    shape_schema: null
-    perf_budget_ms: 3000
-    excluded: false
-    excluded_reason: ""
-    excluded_tracking_issue: ""
 
   - path: "/dashboard/forgot-password"
     kind: page
