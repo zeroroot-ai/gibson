@@ -540,10 +540,17 @@ func main() {
 		Username: os.Getenv("SMTP_USERNAME"),
 		Password: os.Getenv("SMTP_PASSWORD"),
 		From:     os.Getenv("SMTP_FROM"),
-		// SMTP_TLS_MODE selects starttls or implicit. Absent means starttls,
-		// which is what port 587 and SES want. It replaces SMTP_TLS, whose
-		// `false` was the ENCRYPTED setting for SES and read as a downgrade
-		// (gibson#553). An unknown value is refused by NewSMTPSender.
+		// SMTP_TLS_MODE selects starttls, implicit or plaintext. Absent means
+		// starttls, which is what port 587 and SES want — never plaintext, since
+		// not encrypting is a choice an operator makes explicitly. It replaces
+		// SMTP_TLS, whose `false` was the ENCRYPTED setting for SES and read as a
+		// downgrade (gibson#553).
+		//
+		// plaintext exists because `false` had actually meant smtp.SendMail,
+		// which upgrades only when the server offers it — so an in-cluster sink
+		// with no certificate used to work and briefly could not be reached by
+		// any mode at all. NewSMTPSender refuses an unknown value, and refuses
+		// plaintext when SMTP_USERNAME is set.
 		TLSMode: mail.TLSMode(os.Getenv("SMTP_TLS_MODE")),
 	})
 	if err != nil {
