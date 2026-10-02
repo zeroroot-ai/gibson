@@ -27,6 +27,10 @@ import (
 // for semantic querying and graph-based reasoning.
 type GraphBootstrapper struct {
 	graphClient graph.GraphClient
+	// graphWriter is the sole writer of a :Mission node (ADR-0012). The
+	// bootstrap used to MERGE its own, on a different key and a different
+	// property name than the projector's; see gibson#551.
+	graphWriter GraphWriter
 	logger      *slog.Logger
 }
 
@@ -38,87 +42,39 @@ type BootstrapResult struct {
 }
 
 // NewGraphBootstrapper creates a new GraphBootstrapper instance.
-// The graph client must be connected before use.
-func NewGraphBootstrapper(client graph.GraphClient, logger *slog.Logger) *GraphBootstrapper {
+// The graph client must be connected before use. writer is the graph projector,
+// which owns every :Mission write; a nil writer makes Bootstrap fail rather than
+// skip, because a run whose Mission node is missing cannot hang its MissionRun
+// off anything.
+func NewGraphBootstrapper(client graph.GraphClient, writer GraphWriter, logger *slog.Logger) *GraphBootstrapper {
 	return &GraphBootstrapper{
 		graphClient: client,
+		graphWriter: writer,
 		logger:      logger,
 	}
 }
 
-// convertToSchemaMission converts mission state from SQLite format to graph schema format.
-// This performs the data mapping needed to bootstrap mission data into Neo4j.
-//
-// Parameters:
-//   - m: The mission state from SQLite
-//   - def: The mission definition containing mission metadata
-//
-// Returns a schema.Mission ready for insertion into Neo4j.
-func convertToSchemaMission(m *mission.Mission, def *missionpb.MissionDefinition) *schema.Mission {
-	// Extract objective from mission definition description
-	// Use first sentence as objective, or full description if no sentence boundary
+// missionObjective reduces a mission description to its first sentence, the
+// node's `objective` property: enough for a graph reader to see what a mission
+// was for without fetching the definition. A description with no sentence
+// boundary is used whole.
+func missionObjective(def *missionpb.MissionDefinition) string {
 	description := def.GetDescription()
-	objective := description
 	if idx := strings.Index(description, "."); idx > 0 {
-		objective = strings.TrimSpace(description[:idx+1])
+		return strings.TrimSpace(description[:idx+1])
 	}
+	return description
+}
 
-	// Get target reference - prefer metadata value (URL) over TargetID
-	targetRef := ""
-	if m.Metadata != nil {
-		if ref, ok := m.Metadata["target_ref"].(string); ok && ref != "" {
-			targetRef = ref
-		}
+// missionYAMLSource is the definition the run was projected from, stored on the
+// node so a graph reader can see the authored mission. An empty definition
+// stores an empty JSON object rather than an empty string, so a reader that
+// parses the property never has to special-case "".
+func missionYAMLSource(m *mission.Mission) string {
+	if m.MissionDefinitionJSON == "" {
+		return "{}"
 	}
-	// Fallback to TargetID as string if no metadata target_ref
-	if targetRef == "" && !m.TargetID.IsZero() {
-		targetRef = string(m.TargetID)
-	}
-
-	// Use MissionDefinitionJSON as YAML source (it contains the original mission definition)
-	yamlSource := m.MissionDefinitionJSON
-	if yamlSource == "" {
-		yamlSource = "{}" // Empty JSON object as fallback
-	}
-
-	// Create new schema mission with core fields
-	schemaMission := schema.NewMission(
-		m.ID,
-		m.Name,
-		m.Description,
-		objective,
-		targetRef,
-		yamlSource,
-	)
-
-	// Set status to running since bootstrap happens at execution time
-	// The mission is being bootstrapped because it's actively executing
-	schemaMission.Status = schema.MissionStatusRunning
-
-	// Mark as started and set start timestamp
-	// Bootstrap occurs when mission begins execution, so we mark it started
-	if !m.StartedAt.IsNil() {
-		schemaMission.StartedAt = m.StartedAt.Time
-	} else {
-		// If somehow StartedAt is nil, use current time
-		now := time.Now()
-		schemaMission.StartedAt = &now
-	}
-
-	// If mission is already completed/failed in SQLite, reflect that state
-	if m.Status == mission.MissionStatusCompleted {
-		schemaMission.MarkCompleted()
-		if !m.CompletedAt.IsNil() {
-			schemaMission.CompletedAt = m.CompletedAt.Time
-		}
-	} else if m.Status == mission.MissionStatusFailed {
-		schemaMission.MarkFailed()
-		if !m.CompletedAt.IsNil() {
-			schemaMission.CompletedAt = m.CompletedAt.Time
-		}
-	}
-
-	return schemaMission
+	return m.MissionDefinitionJSON
 }
 
 // convertToSchemaNode converts a MissionNode from the mission definition to a schema.MissionNode
@@ -288,6 +244,7 @@ func missionNodeGraphID(missionID types.ID, workNodeID string) types.ID {
 // MissionRuns always use CREATE to ensure each execution is tracked uniquely.
 func (b *GraphBootstrapper) Bootstrap(
 	ctx context.Context,
+	tenant string,
 	m *mission.Mission,
 	def *missionpb.MissionDefinition,
 	run *mission.MissionRun,
@@ -304,10 +261,31 @@ func (b *GraphBootstrapper) Bootstrap(
 		"run_id", run.ID,
 		"run_number", run.RunNumber)
 
-	// Step 1: Create/ensure Mission node with full SQLite metadata
-	// Uses MERGE on SQLite ID for idempotency - same mission returns same node
-	schemaMission := convertToSchemaMission(m, def)
-	if err := missionQueries.CreateMission(ctx, schemaMission); err != nil {
+	// Step 1: ask the sole writer to ensure the :Mission node, so the
+	// MissionRun below has something to hang off. The write is idempotent and
+	// order-independent: the CreateMission RPC fires the same call from a
+	// goroutine, and either may land first (gibson#551).
+	if b.graphWriter == nil {
+		return nil, fmt.Errorf("graph bootstrap: no graph writer — cannot ensure the :Mission node for %s", m.ID)
+	}
+	var startedAt *time.Time
+	if !m.StartedAt.IsNil() {
+		startedAt = m.StartedAt.Time
+	} else {
+		now := time.Now()
+		startedAt = &now
+	}
+	if err := b.graphWriter.UpsertMission(ctx, tenant, MissionProjection{
+		ID:          m.ID.String(),
+		Name:        m.Name,
+		Description: m.Description,
+		TargetID:    m.TargetID.String(),
+		// The mission is being bootstrapped because it is starting to run.
+		Status:     string(mission.MissionStatusRunning),
+		Objective:  missionObjective(def),
+		YAMLSource: missionYAMLSource(m),
+		StartedAt:  startedAt,
+	}); err != nil {
 		return nil, fmt.Errorf("failed to create mission in graph: %w", err)
 	}
 

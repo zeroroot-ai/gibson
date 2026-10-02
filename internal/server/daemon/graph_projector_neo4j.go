@@ -15,6 +15,7 @@ import (
 	"fmt"
 	"regexp"
 	"strings"
+	"time"
 
 	"github.com/neo4j/neo4j-go-driver/v5/neo4j"
 	"github.com/zeroroot-ai/gibson/internal/engine/brain"
@@ -668,34 +669,69 @@ func (w *neo4jGraphWriter) UpsertLlmCall(ctx context.Context, tenant string, c b
 	return nil
 }
 
-// upsertMissionCypher MERGEs a :Mission node keyed by (id, tenant_id). It moved
-// here verbatim from the CreateMission RPC handler, which used to run it inline
-// against a pool connection — a second writer the graph is not supposed to have
-// (ADR-0012). `created_at` is re-stamped on every merge, as it was before; the
-// move is behaviour-preserving, not a fix.
+// upsertMissionCypher MERGEs a :Mission node keyed by (id, tenant_id).
+//
+// It is the ONLY place a :Mission node is written. It moved here from the
+// CreateMission RPC handler, which used to run it inline against a pool
+// connection; the per-run graph bootstrap then kept a SECOND writer in the
+// queries package, which MERGEd on {id} alone. Two writers on two keys is not
+// a cosmetic duplication — the bootstrap's CREATE produced a node with no
+// `tenant_id`, which this MERGE then failed to match, so the tenant got two
+// :Mission nodes with the same id and the one its reads could see carried no
+// run (gibson#551). The two also disagreed on the property name: `target_ref`
+// there against `target` here.
+//
+// Every SET keeps the stored value when the parameter is empty, because the
+// create-time caller runs in a goroutine and can land after the run-time one.
+// Without that, whichever write arrived second erased what the first knew.
+//
+// `created_at` is set ON CREATE only. It used to be re-stamped on every merge,
+// which the previous comment here recorded as behaviour-preserving rather than
+// correct: a mission's `created_at` was the time of the last merge, so the graph
+// could not answer when a mission was created. The merge stamps `updated_at`.
 const upsertMissionCypher = `
 MERGE (m:Mission { id: $id, tenant_id: $tenant })
-SET m.name = $name,
-    m.target = $target,
-    m.status = $status,
-    m.created_by = $created_by,
-    m.created_at = datetime()
+ON CREATE SET m.created_at = datetime()
+SET m.name        = CASE WHEN $name        = '' THEN m.name        ELSE $name        END,
+    m.description = CASE WHEN $description = '' THEN m.description ELSE $description END,
+    m.target      = CASE WHEN $target      = '' THEN m.target      ELSE $target      END,
+    m.status      = CASE WHEN $status      = '' THEN m.status      ELSE $status      END,
+    m.created_by  = CASE WHEN $created_by  = '' THEN m.created_by  ELSE $created_by  END,
+    m.objective   = CASE WHEN $objective   = '' THEN m.objective   ELSE $objective   END,
+    m.yaml_source = CASE WHEN $yaml_source = '' THEN m.yaml_source ELSE $yaml_source END,
+    m.started_at  = CASE WHEN $started_at IS NULL THEN m.started_at ELSE datetime($started_at) END,
+    m.updated_at  = datetime()
 RETURN m
 `
 
 // UpsertMission materializes one :Mission node into the tenant's graph. It runs
-// off the CreateMission RPC rather than the projection tick, but goes through
-// the same write path as every other projection so the projector stays the one
-// place a Neo4j write transaction is opened.
+// off the CreateMission RPC and off the per-run graph bootstrap rather than the
+// projection tick, but goes through the projector so this stays the only place
+// a Neo4j write transaction is opened.
 func (w *neo4jGraphWriter) UpsertMission(ctx context.Context, tenant string, m MissionProjection) error {
-	return w.exec(ctx, tenant, upsertMissionCypher, map[string]any{
-		"id":         m.ID,
-		"tenant":     tenant,
-		"name":       m.Name,
-		"target":     m.TargetID,
-		"status":     m.Status,
-		"created_by": m.CreatedBy,
-	}, "mission", m.ID)
+	return w.exec(ctx, tenant, upsertMissionCypher, missionUpsertParams(tenant, m), "mission", m.ID)
+}
+
+// missionUpsertParams builds the parameter set for upsertMissionCypher. A nil
+// StartedAt is passed as a nil parameter, which the Cypher reads as "the caller
+// does not know when this run began" and leaves the stored value alone.
+func missionUpsertParams(tenant string, m MissionProjection) map[string]any {
+	var startedAt any
+	if m.StartedAt != nil {
+		startedAt = m.StartedAt.UTC().Format(time.RFC3339Nano)
+	}
+	return map[string]any{
+		"id":          m.ID,
+		"tenant":      tenant,
+		"name":        m.Name,
+		"description": m.Description,
+		"target":      m.TargetID,
+		"status":      m.Status,
+		"created_by":  m.CreatedBy,
+		"objective":   m.Objective,
+		"yaml_source": m.YAMLSource,
+		"started_at":  startedAt,
+	}
 }
 
 // exec runs an idempotent projection write against the tenant's Neo4j.

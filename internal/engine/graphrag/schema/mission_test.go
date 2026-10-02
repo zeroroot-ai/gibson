@@ -233,26 +233,19 @@ func TestRetryPolicy_ToJSON(t *testing.T) {
 	assert.Equal(t, policy.Strategy, decoded.Strategy)
 }
 
-func TestNewMission(t *testing.T) {
-	id := types.NewID()
-	name := "test-mission"
-	description := "Test mission description"
-	objective := "Test objective"
-	targetRef := "test-target"
-	yamlSource := "mission:\n  name: test"
-
-	mission := NewMission(id, name, description, objective, targetRef, yamlSource)
-
-	assert.Equal(t, id, mission.ID)
-	assert.Equal(t, name, mission.Name)
-	assert.Equal(t, description, mission.Description)
-	assert.Equal(t, objective, mission.Objective)
-	assert.Equal(t, targetRef, mission.TargetRef)
-	assert.Equal(t, yamlSource, mission.YAMLSource)
-	assert.Equal(t, MissionStatusPending, mission.Status)
-	assert.NotZero(t, mission.CreatedAt)
-	assert.Nil(t, mission.StartedAt)
-	assert.Nil(t, mission.CompletedAt)
+// testMission is the shape a :Mission read decodes into. The package has no
+// constructor: nothing here writes a :Mission node (see doc.go).
+func testMission() *Mission {
+	return &Mission{
+		ID:          types.NewID(),
+		Name:        "test-mission",
+		Description: "description",
+		Objective:   "objective",
+		TargetRef:   "target",
+		Status:      MissionStatusPending,
+		CreatedAt:   time.Now(),
+		YAMLSource:  "yaml",
+	}
 }
 
 func TestMission_Validate(t *testing.T) {
@@ -331,14 +324,7 @@ func TestMission_Validate(t *testing.T) {
 }
 
 func TestMission_StatusTransitions(t *testing.T) {
-	mission := NewMission(
-		types.NewID(),
-		"test-mission",
-		"description",
-		"objective",
-		"target",
-		"yaml",
-	)
+	mission := testMission()
 
 	// Initially pending
 	assert.Equal(t, MissionStatusPending, mission.Status)
@@ -359,14 +345,7 @@ func TestMission_StatusTransitions(t *testing.T) {
 }
 
 func TestMission_FailedTransition(t *testing.T) {
-	mission := NewMission(
-		types.NewID(),
-		"test-mission",
-		"description",
-		"objective",
-		"target",
-		"yaml",
-	)
+	mission := testMission()
 
 	mission.MarkStarted()
 	mission.MarkFailed()
@@ -376,14 +355,7 @@ func TestMission_FailedTransition(t *testing.T) {
 }
 
 func TestMission_WithMethods(t *testing.T) {
-	mission := NewMission(
-		types.NewID(),
-		"test-mission",
-		"description",
-		"objective",
-		"target",
-		"yaml",
-	)
+	mission := testMission()
 
 	startTime := time.Now()
 	completedTime := time.Now().Add(time.Hour)

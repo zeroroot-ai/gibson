@@ -159,6 +159,10 @@ type missionManager struct {
 	// tenant's World and the brain (scheduler + Decider) drives it.
 	brainRegistry *brain.Registry
 	brainExecutor *brainExecutor
+	// graphWriter is the graph projector — the sole writer of the per-tenant
+	// knowledge graph (ADR-0012). The per-run graph bootstrap needs it to ensure
+	// the run's :Mission node; it used to MERGE its own (gibson#551).
+	graphWriter GraphWriter
 	// beliefVersion is the belief-model version the brain currently scores against
 	// (ADR-0005 §5). Stamped onto each mission at projection so the mission records
 	// the model it ran under and replay reproduces. Empty → no pinned model.
@@ -218,6 +222,7 @@ func newMissionManager(
 	quotaCounter mission.QuotaCounter,
 	brainRegistry *brain.Registry,
 	brainExecutor *brainExecutor,
+	graphWriter GraphWriter,
 ) *missionManager {
 	return &missionManager{
 		config:          cfg,
@@ -236,6 +241,7 @@ func newMissionManager(
 		quotaCounter:    quotaCounter,
 		brainRegistry:   brainRegistry,
 		brainExecutor:   brainExecutor,
+		graphWriter:     graphWriter,
 		activeMissions:  make(map[auth.TenantID]map[string]*activeMission),
 	}
 }
@@ -1050,8 +1056,8 @@ func (m *missionManager) executeMission(ctx context.Context, missionID string, d
 	// Bootstrap mission graph structure before execution, from the projection:
 	// one graph node per unit of work that will actually run, each fan-out
 	// instance naming its own target (gibson#528).
-	bootstrapper := NewGraphBootstrapper(graphClient, m.logger)
-	bootstrapResult, err := bootstrapper.Bootstrap(ctx, active.mission, def, missionRun, proj, fanOrigins)
+	bootstrapper := NewGraphBootstrapper(graphClient, m.graphWriter, m.logger)
+	bootstrapResult, err := bootstrapper.Bootstrap(ctx, active.tenantID.String(), active.mission, def, missionRun, proj, fanOrigins)
 	if err != nil {
 		m.logger.Error("failed to bootstrap mission graph", "error", err, "mission_id", missionID)
 		m.failBeforeStart(active.tenantID, missionID, def.GetName(), fmt.Sprintf("failed to initialize mission graph: %v", err))

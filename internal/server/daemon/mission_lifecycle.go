@@ -78,6 +78,7 @@ func (d *daemonImpl) ensureMissionManager() error {
 			d.quotaManager,      // Spec plans-and-quotas-simplification: may be nil in dev
 			d.brainRegistry,     // ECS brain engine (gibson#851)
 			d.brainExecutor,     // concrete Dispatcher + DeciderLLM bindings (gibson#851)
+			d.graphWriter,       // sole writer of the knowledge graph (ADR-0012, gibson#551)
 		)
 		// Pin the active belief-model version so each mission records the model it
 		// ran under (ADR-0005 §5, gibson#750). Resolved here (after the provider is

@@ -146,22 +146,6 @@ type Mission struct {
 	YAMLSource  string        `json:"yaml_source"`            // Original YAML for reconstruction
 }
 
-// NewMission creates a new Mission with the given parameters.
-// The mission is initialized with pending status and current timestamp.
-func NewMission(id types.ID, name, description, objective, targetRef, yamlSource string) *Mission {
-	now := time.Now()
-	return &Mission{
-		ID:          id,
-		Name:        name,
-		Description: description,
-		Objective:   objective,
-		TargetRef:   targetRef,
-		Status:      MissionStatusPending,
-		CreatedAt:   now,
-		YAMLSource:  yamlSource,
-	}
-}
-
 // Validate checks that all required fields are set correctly.
 // Note: target_ref is optional to support orchestration/discovery missions without specific targets.
 func (m *Mission) Validate() error {

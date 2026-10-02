@@ -37,7 +37,7 @@ func TestMissionQueries_GetMission(t *testing.T) {
 					"name":        "test-mission",
 					"description": "Test description",
 					"objective":   "Test objective",
-					"target_ref":  "test-target",
+					"target":      "test-target",
 					"status":      "pending",
 					"yaml_source": "yaml: test",
 					"created_at":  time.Now(),
@@ -444,7 +444,7 @@ func TestMissionQueries_IntegrationScenario(t *testing.T) {
 					"name":        "integration-mission",
 					"description": "Integration test mission",
 					"objective":   "Test integration",
-					"target_ref":  "test-target",
+					"target":      "test-target",
 					"status":      "running",
 					"yaml_source": "yaml: test",
 					"created_at":  time.Now(),
@@ -699,146 +699,6 @@ func TestMissionQueries_CreateNodeDependency_Idempotent(t *testing.T) {
 
 	err = mq.CreateNodeDependency(ctx, fromNodeID, toNodeID)
 	require.NoError(t, err, "MERGE should make CreateNodeDependency idempotent")
-}
-
-// TestMissionQueries_CreateMission tests creating a mission node.
-func TestMissionQueries_CreateMission(t *testing.T) {
-	mock := graph.NewMockGraphClient()
-	ctx := context.Background()
-
-	err := mock.Connect(ctx)
-	require.NoError(t, err)
-	defer mock.Close(ctx)
-
-	mq := NewMissionQueries(mock)
-	missionID := types.NewID()
-	now := time.Now()
-
-	mission := &schema.Mission{
-		ID:          missionID,
-		Name:        "test-mission",
-		Description: "Test mission description",
-		Objective:   "Test objective",
-		TargetRef:   "target-123",
-		Status:      schema.MissionStatusPending,
-		YAMLSource:  "mission: test",
-		CreatedAt:   now,
-		StartedAt:   nil,
-	}
-
-	// Mock successful creation
-	mock.AddQueryResult(graph.QueryResult{
-		Records: []map[string]any{
-			{"id": missionID.String()},
-		},
-	})
-
-	err = mq.CreateMission(ctx, mission)
-	require.NoError(t, err)
-
-	// Verify query was called
-	assert.Greater(t, mock.CallCount(), 0)
-}
-
-// TestMissionQueries_CreateMission_NilMission tests error handling for nil mission.
-func TestMissionQueries_CreateMission_NilMission(t *testing.T) {
-	mock := graph.NewMockGraphClient()
-	ctx := context.Background()
-
-	err := mock.Connect(ctx)
-	require.NoError(t, err)
-	defer mock.Close(ctx)
-
-	mq := NewMissionQueries(mock)
-
-	err = mq.CreateMission(ctx, nil)
-	require.Error(t, err)
-	assert.Contains(t, err.Error(), "mission cannot be nil")
-}
-
-// TestMissionQueries_CreateMission_Idempotent tests MERGE idempotency.
-func TestMissionQueries_CreateMission_Idempotent(t *testing.T) {
-	mock := graph.NewMockGraphClient()
-	ctx := context.Background()
-
-	err := mock.Connect(ctx)
-	require.NoError(t, err)
-	defer mock.Close(ctx)
-
-	mq := NewMissionQueries(mock)
-	missionID := types.NewID()
-	now := time.Now()
-
-	mission := &schema.Mission{
-		ID:          missionID,
-		Name:        "test-mission",
-		Description: "Test mission",
-		Objective:   "Test objective",
-		TargetRef:   "target-123",
-		Status:      schema.MissionStatusPending,
-		YAMLSource:  "mission: test",
-		CreatedAt:   now,
-	}
-
-	// First call - creates mission
-	mock.AddQueryResult(graph.QueryResult{
-		Records: []map[string]any{
-			{"id": missionID.String()},
-		},
-	})
-
-	err = mq.CreateMission(ctx, mission)
-	require.NoError(t, err)
-
-	// Second call - updates mission status, should not error (MERGE)
-	mission.Status = schema.MissionStatusRunning
-	startedAt := now.Add(time.Minute)
-	mission.StartedAt = &startedAt
-
-	mock.AddQueryResult(graph.QueryResult{
-		Records: []map[string]any{
-			{"id": missionID.String()},
-		},
-	})
-
-	err = mq.CreateMission(ctx, mission)
-	require.NoError(t, err, "MERGE should make CreateMission idempotent")
-}
-
-// TestMissionQueries_CreateMission_WithStartedAt tests creating mission with started_at timestamp.
-func TestMissionQueries_CreateMission_WithStartedAt(t *testing.T) {
-	mock := graph.NewMockGraphClient()
-	ctx := context.Background()
-
-	err := mock.Connect(ctx)
-	require.NoError(t, err)
-	defer mock.Close(ctx)
-
-	mq := NewMissionQueries(mock)
-	missionID := types.NewID()
-	now := time.Now()
-	startedAt := now.Add(time.Second)
-
-	mission := &schema.Mission{
-		ID:          missionID,
-		Name:        "test-mission",
-		Description: "Test mission",
-		Objective:   "Test objective",
-		TargetRef:   "target-123",
-		Status:      schema.MissionStatusRunning,
-		YAMLSource:  "mission: test",
-		CreatedAt:   now,
-		StartedAt:   &startedAt,
-	}
-
-	mock.AddQueryResult(graph.QueryResult{
-		Records: []map[string]any{
-			{"id": missionID.String()},
-		},
-	})
-
-	err = mq.CreateMission(ctx, mission)
-	require.NoError(t, err)
 }
 
 // TestMissionQueries_CreateMissionNode tests creating a mission node.
