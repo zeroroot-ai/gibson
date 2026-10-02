@@ -55,12 +55,12 @@ func TestPostgresProvisionIdempotent(t *testing.T) {
 	const tenantID = "test-idempotent-pg-001"
 
 	// First provision — creates DB + role + runs migrations.
-	if err := p.Provision(ctx, tenantID); err != nil {
+	if err := p.Provision(ctx, tenantID, Limits{}); err != nil {
 		t.Fatalf("first Provision: %v", err)
 	}
 
 	// Second provision — catalog checks detect existing objects; must succeed.
-	if err := p.Provision(ctx, tenantID); err != nil {
+	if err := p.Provision(ctx, tenantID, Limits{}); err != nil {
 		t.Errorf("second Provision (idempotency): %v", err)
 	}
 

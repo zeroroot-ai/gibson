@@ -33,20 +33,20 @@ const (
 )
 
 // TenantDataPlaneResources carries per-tenant data-plane resource limits that
-// override the Helm-chart defaults. All fields are optional; zero values mean
-// "use operator default".
+// override the operator defaults. The Tenant reconciler copies the block onto
+// the TenantDataPlane, and the data-plane provisioner applies it on every
+// Provision. All fields are optional; a zero value means "use operator
+// default".
+//
+// Redis has no per-tenant limit. A tenant owns one logical database on a
+// shared server, and MAXMEMORY is a server-wide setting, so a per-tenant
+// Redis memory cap cannot be applied and is not declared here (gibson#545).
 type TenantDataPlaneResources struct {
 	// PostgresConnectionLimit overrides the default per-role Postgres connection
-	// limit (ALTER ROLE ... CONNECTION LIMIT N). 0 = use operator default (50).
+	// limit (ALTER ROLE ... CONNECTION LIMIT N). 0 = use operator default.
 	// +optional
 	// +kubebuilder:validation:Minimum=0
 	PostgresConnectionLimit int `json:"postgresConnectionLimit,omitempty"`
-
-	// RedisMaxMemoryBytes overrides the per-DB MAXMEMORY value in bytes for
-	// Redis >= 7.4 that supports per-DB CONFIG SET. 0 = no explicit limit.
-	// +optional
-	// +kubebuilder:validation:Minimum=0
-	RedisMaxMemoryBytes int64 `json:"redisMaxMemoryBytes,omitempty"`
 }
 
 // TenantSpec defines the desired state of a Tenant.

@@ -115,7 +115,7 @@ func run(ctx context.Context, dryRun bool) error {
 			skipped++
 			continue
 		}
-		if err := pl.Provision(ctx, t.Name); err != nil {
+		if err := pl.Provision(ctx, t.Name, dataplane.LimitsFrom(t.Spec.Resources)); err != nil {
 			slog.Error("backfill tenant failed", "tenant", t.Name, "err", err)
 			failed++
 			continue

@@ -92,7 +92,8 @@ type PostgresConfig struct {
 	KEKDeriver KEKDeriver
 
 	// DefaultConnectionLimit is applied as ALTER ROLE ... CONNECTION LIMIT N
-	// when provisioning. 0 means no limit (Postgres default -1).
+	// when provisioning and the tenant declares no limit of its own
+	// (Limits.PostgresConnectionLimit). 0 means no limit (Postgres default -1).
 	DefaultConnectionLimit int
 
 	// VaultClient writes per-tenant Postgres credentials to
@@ -142,7 +143,7 @@ func NewPostgresProvisioner(cfg PostgresConfig) (*pgProvisioner, error) {
 // Provision creates the per-tenant Postgres database, applies all migrations,
 // creates the per-tenant role with a derived password, and grants privileges.
 // All steps are idempotent.
-func (p *pgProvisioner) Provision(ctx context.Context, tenantID string) error {
+func (p *pgProvisioner) Provision(ctx context.Context, tenantID string, limits Limits) error {
 	dbName, err := tenantDBName(tenantID)
 	if err != nil {
 		return err
@@ -208,15 +209,8 @@ func (p *pgProvisioner) Provision(ctx context.Context, tenantID string) error {
 	}
 
 	// --- Step 5: apply per-tenant resource limit ---
-	if p.cfg.DefaultConnectionLimit > 0 {
-		limitSQL := fmt.Sprintf(
-			"ALTER ROLE %s CONNECTION LIMIT %d",
-			pgx.Identifier{roleName}.Sanitize(),
-			p.cfg.DefaultConnectionLimit,
-		)
-		if _, err := adminConn.Exec(ctx, limitSQL); err != nil {
-			return fmt.Errorf("dataplane/postgres: set connection limit: %w", err)
-		}
+	if err := p.applyConnectionLimit(ctx, adminConn, roleName, limits); err != nil {
+		return err
 	}
 
 	// --- Step 6: GRANT CONNECT on the tenant DB to the role ---
@@ -288,6 +282,29 @@ func (p *pgProvisioner) Provision(ctx context.Context, tenantID string) error {
 		}
 	}
 
+	return nil
+}
+
+// applyConnectionLimit sets the role's CONNECTION LIMIT to the tenant's declared
+// limit, or to the operator default when the tenant declares none. A limit of 0
+// on both leaves the role at the Postgres default (no limit). Idempotent: ALTER
+// ROLE sets the value, it does not accumulate.
+func (p *pgProvisioner) applyConnectionLimit(ctx context.Context, adminConn pgAdminConn, roleName string, limits Limits) error {
+	limit := limits.PostgresConnectionLimit
+	if limit <= 0 {
+		limit = p.cfg.DefaultConnectionLimit
+	}
+	if limit <= 0 {
+		return nil
+	}
+	limitSQL := fmt.Sprintf(
+		"ALTER ROLE %s CONNECTION LIMIT %d",
+		pgx.Identifier{roleName}.Sanitize(),
+		limit,
+	)
+	if _, err := adminConn.Exec(ctx, limitSQL); err != nil {
+		return fmt.Errorf("dataplane/postgres: set connection limit: %w", err)
+	}
 	return nil
 }
 

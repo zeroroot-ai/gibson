@@ -16,7 +16,7 @@ import (
 func stubStep(name string, called *[]string, provErr, rbErr error) Step {
 	return Step{
 		Name: name,
-		Provision: func(_ context.Context, tenantID string) error {
+		Provision: func(_ context.Context, tenantID string, _ Limits) error {
 			*called = append(*called, "provision:"+name)
 			return provErr
 		},
@@ -49,7 +49,7 @@ func TestPipelineProvisionHappyPath(t *testing.T) {
 	}
 	p := buildTestPipeline(steps)
 
-	if err := p.Provision(context.Background(), "tenant-abc"); err != nil {
+	if err := p.Provision(context.Background(), "tenant-abc", Limits{}); err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
 
@@ -75,7 +75,7 @@ func TestPipelineRollbackOnStep2Failure(t *testing.T) {
 	}
 	p := buildTestPipeline(steps)
 
-	err := p.Provision(context.Background(), "tenant-xyz")
+	err := p.Provision(context.Background(), "tenant-xyz", Limits{})
 	if err == nil {
 		t.Fatal("expected error, got nil")
 	}
@@ -116,7 +116,7 @@ func TestPipelineRollbackLIFOOrder(t *testing.T) {
 	}
 	p := buildTestPipeline(steps)
 
-	if err := p.Provision(context.Background(), "tenant-def"); err == nil {
+	if err := p.Provision(context.Background(), "tenant-def", Limits{}); err == nil {
 		t.Fatal("expected error")
 	}
 
@@ -207,7 +207,7 @@ func TestPipelineReReconcileNoRollbackOnPreExisting(t *testing.T) {
 	}
 	p := buildTestPipeline(steps)
 
-	err := p.Provision(context.Background(), "tenant-recon")
+	err := p.Provision(context.Background(), "tenant-recon", Limits{})
 	if err == nil {
 		t.Fatal("expected error, got nil")
 	}
@@ -252,7 +252,7 @@ func TestPipelineFirstPassRollbackOnFailure(t *testing.T) {
 	}
 	p := buildTestPipeline(steps)
 
-	err := p.Provision(context.Background(), "tenant-first")
+	err := p.Provision(context.Background(), "tenant-first", Limits{})
 	if err == nil {
 		t.Fatal("expected error, got nil")
 	}
@@ -304,10 +304,10 @@ func TestPipelineDoubleProvisionIdempotent(t *testing.T) {
 	p := buildTestPipeline(steps)
 
 	ctx := context.Background()
-	if err := p.Provision(ctx, "tenant-idem"); err != nil {
+	if err := p.Provision(ctx, "tenant-idem", Limits{}); err != nil {
 		t.Fatalf("first Provision error: %v", err)
 	}
-	if err := p.Provision(ctx, "tenant-idem"); err != nil {
+	if err := p.Provision(ctx, "tenant-idem", Limits{}); err != nil {
 		t.Fatalf("second Provision error: %v", err)
 	}
 	// Both provisions should succeed (stubs are always idempotent).

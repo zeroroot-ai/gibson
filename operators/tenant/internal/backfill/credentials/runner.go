@@ -61,7 +61,7 @@ func Run(ctx context.Context, cl client.Client, pl dataplane.Provisioner, opts O
 			skipped++
 			continue
 		}
-		if err := pl.Provision(ctx, t.Name); err != nil {
+		if err := pl.Provision(ctx, t.Name, dataplane.LimitsFrom(t.Spec.Resources)); err != nil {
 			slog.Error("credentials-backfill: tenant failed", "tenant", t.Name, "err", err)
 			failed++
 			continue

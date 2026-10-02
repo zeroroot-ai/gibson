@@ -7,6 +7,7 @@ import (
 	"context"
 	"fmt"
 
+	"k8s.io/apimachinery/pkg/api/equality"
 	apierrors "k8s.io/apimachinery/pkg/api/errors"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/types"
@@ -127,7 +128,10 @@ func newChild(kind childKind, tenant *gibsonv1alpha1.Tenant) client.Object {
 	case childDataPlane:
 		return &gibsonv1alpha1.TenantDataPlane{
 			ObjectMeta: meta,
-			Spec:       gibsonv1alpha1.TenantDataPlaneSpec{TenantID: tenant.Name},
+			Spec: gibsonv1alpha1.TenantDataPlaneSpec{
+				TenantID:  tenant.Name,
+				Resources: tenant.Spec.Resources.DeepCopy(),
+			},
 		}
 	default:
 		return nil
@@ -242,6 +246,9 @@ func (r *TenantReconciler) ensureChild(ctx context.Context, kind childKind, tena
 	getErr := r.Get(ctx, key, existing)
 	switch {
 	case getErr == nil:
+		if syncErr := r.syncChildSpec(ctx, kind, existing, tenant); syncErr != nil {
+			return false, syncErr
+		}
 		aggregateChildStatus(existing, tenant)
 		return childReady(existing), nil
 	case apierrors.IsNotFound(getErr):
@@ -317,4 +324,26 @@ func (r *TenantReconciler) deleteChild(ctx context.Context, kind childKind, tena
 	}
 	// Present (deleting or just issued) → its finalizer is still running.
 	return false, nil
+}
+
+// syncChildSpec carries a Tenant spec edit onto the child that consumes it.
+// Only the data plane has such a field: TenantDataPlane.spec.resources mirrors
+// Tenant.spec.resources, and the data-plane reconciler applies it on the
+// generation bump (gibson#545). Every other child's spec is fixed at creation.
+func (r *TenantReconciler) syncChildSpec(ctx context.Context, kind childKind, existing client.Object, tenant *gibsonv1alpha1.Tenant) error {
+	if kind != childDataPlane {
+		return nil
+	}
+	tdp, ok := existing.(*gibsonv1alpha1.TenantDataPlane)
+	if !ok {
+		return nil
+	}
+	if equality.Semantic.DeepEqual(tdp.Spec.Resources, tenant.Spec.Resources) {
+		return nil
+	}
+	tdp.Spec.Resources = tenant.Spec.Resources.DeepCopy()
+	if err := r.Update(ctx, tdp); err != nil {
+		return fmt.Errorf("update TenantDataPlane resources for tenant %q: %w", tenant.Name, err)
+	}
+	return nil
 }

@@ -385,3 +385,47 @@ func TestAggregateChildStatus_LiftsZitadelOrgID(t *testing.T) {
 		t.Errorf("non-identity child must not change org id, got %q", tenant.Status.ZitadelOrgID)
 	}
 }
+
+// Tenant.spec.resources is copied onto the TenantDataPlane at creation and
+// follows a later edit, so the data-plane reconciler can apply it
+// (gibson#545). Before this the block stopped at the Tenant.
+func TestChildOrchestration_DataPlaneMirrorsTenantResources(t *testing.T) {
+	tenant := childOrchestrationTenant()
+	tenant.Spec.Resources = &gibsonv1alpha1.TenantDataPlaneResources{PostgresConnectionLimit: 7}
+	r, c := newChildOrchestrationReconciler(t, tenant)
+
+	reconcileTenant(t, r)
+	reconcileTenant(t, r)
+	markIdentityReadyFlag(t, c)
+	reconcileTenant(t, r)
+	markSecretsReadyFlag(t, c)
+	reconcileTenant(t, r)
+	markGrantsReadyFlag(t, c)
+	reconcileTenant(t, r)
+
+	dataPlane := func() gibsonv1alpha1.TenantDataPlane {
+		t.Helper()
+		var list gibsonv1alpha1.TenantDataPlaneList
+		if err := c.List(context.Background(), &list); err != nil || len(list.Items) != 1 {
+			t.Fatalf("list TenantDataPlane: err=%v items=%d, want exactly one", err, len(list.Items))
+		}
+		return list.Items[0]
+	}
+	if got := dataPlane().Spec.Resources; got == nil || got.PostgresConnectionLimit != 7 {
+		t.Fatalf("TenantDataPlane resources = %+v, want the Tenant's PostgresConnectionLimit 7", got)
+	}
+
+	// The operator raises the limit on the Tenant: the child follows.
+	var live gibsonv1alpha1.Tenant
+	if err := c.Get(context.Background(), client.ObjectKeyFromObject(tenant), &live); err != nil {
+		t.Fatalf("get tenant: %v", err)
+	}
+	live.Spec.Resources = &gibsonv1alpha1.TenantDataPlaneResources{PostgresConnectionLimit: 9}
+	if err := c.Update(context.Background(), &live); err != nil {
+		t.Fatalf("update tenant: %v", err)
+	}
+	reconcileTenant(t, r)
+	if got := dataPlane().Spec.Resources; got == nil || got.PostgresConnectionLimit != 9 {
+		t.Fatalf("TenantDataPlane resources after the edit = %+v, want PostgresConnectionLimit 9", got)
+	}
+}
