@@ -13,6 +13,17 @@
       "syncResult": {
         "resources": [
           {
+            "group": "external-secrets.io",
+            "version": "v1",
+            "kind": "ClusterSecretStore",
+            "namespace": "",
+            "name": "gibson-secrets",
+            "status": "Synced",
+            "message": "unable to create client",
+            "hookPhase": "Failed",
+            "syncPhase": "Sync"
+          },
+          {
             "kind": "ServiceAccount",
             "name": "setec-preupgrade-runtime-check",
             "status": null,

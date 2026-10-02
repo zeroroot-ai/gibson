@@ -32,6 +32,7 @@ LOG_TAIL="${DIAG_LOG_TAIL:-200}"
 KUBECTL="${KUBECTL:-kubectl}"
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 JQ_PROGRAM="${JQ_PROGRAM:-$SCRIPT_DIR/argo-app-problems.jq}"
+FAILED_REFS="${FAILED_REFS:-$SCRIPT_DIR/argo-failed-resource-refs.jq}"
 POD_SELECTOR="${POD_SELECTOR:-$SCRIPT_DIR/pod-needs-dump.jq}"
 
 group() { echo "::group::$*"; }
@@ -74,7 +75,113 @@ dump_applications() {
       | jq -r -f "$JQ_PROGRAM" 2>&1 \
       || $KUBECTL -n "$ARGOCD_NS" get application "$app" -o yaml 2>&1 | tail -60
     endgroup
+
+    # The Application's view is truncated by construction. Go ask each failed
+    # resource and its controller.
+    dump_failed_resource_detail "$app"
   done
+}
+
+# controller_selector maps a resource kind to the label selector of the
+# controller that reconciles it, and the namespace to look in.
+#
+# Why a table and not a guess: when a sync task fails, the Application's message
+# is the controller's error TRUNCATED, and the untruncated one is in the
+# controller's log. The log was never dumped, because dump_pods only selects a
+# pod that "restarted, is unready, or was warned about" — and
+# `external-secrets-5c8cbfb48d-mqkkp` was 1/1 Running the whole time. Healthy
+# controller, failing resource, and the one log that said why went unread for
+# five days (gibson#575).
+#
+# Emits "<namespace> <selector>", or nothing when the kind is unmapped. An
+# unmapped kind is REPORTED by the caller rather than skipped: silence is what
+# this whole function exists to stop.
+controller_selector() {
+  case "$1" in
+    ClusterSecretStore|SecretStore|ExternalSecret|ClusterExternalSecret|PushSecret)
+      echo "external-secrets app.kubernetes.io/name=external-secrets" ;;
+    Cluster|Pooler|Backup|ScheduledBackup)
+      echo "cnpg-system app.kubernetes.io/name=cloudnative-pg" ;;
+    BackupStorageLocation|Schedule|Restore)
+      echo "velero app.kubernetes.io/name=velero" ;;
+    ClusterSPIFFEID|ClusterFederatedTrustDomain)
+      echo "spire-system app.kubernetes.io/name=spire-controller-manager" ;;
+    Certificate|ClusterIssuer|Issuer)
+      echo "cert-manager app.kubernetes.io/name=cert-manager" ;;
+    *) return 0 ;;
+  esac
+}
+
+# dump_failed_resource_detail asks each resource the sync could not settle WHY,
+# from the live object, and dumps its controller's log.
+#
+# Two things the Application object cannot tell you, both of which this prints:
+#
+#   1. the untruncated condition message. ESO reports "unable to create client"
+#      to Argo and the cause after it on its own status.conditions.
+#   2. the controller's log, where the underlying API error appears in full.
+#
+# Conditions are printed with NO truncation and no field filtering. A diagnostic
+# that trims the one string carrying the answer is worse than no diagnostic,
+# because it reads like the answer.
+dump_failed_resource_detail() {
+  local app=$1
+  local refs
+  refs=$($KUBECTL -n "$ARGOCD_NS" get application "$app" -o json 2>/dev/null \
+          | jq -r -f "$FAILED_REFS" 2>/dev/null)
+  if [ -z "$refs" ]; then
+    return 0
+  fi
+
+  local kind ns name seen=""
+  while IFS=$'\t' read -r kind ns name; do
+    [ -z "$kind" ] && continue
+    [ "$kind" = "?" ] && continue
+
+    group "Failed resource $kind/$name — its OWN status, untruncated"
+    local args=(get "$kind" "$name" -o json)
+    if [ "$ns" != "-" ] && [ -n "$ns" ]; then
+      args=(-n "$ns" "${args[@]}")
+    fi
+    # Print every condition in full, then the whole status as a fallback: a kind
+    # whose cause is not in a condition (a .status.error, a .status.phase) still
+    # gets its answer into the log.
+    if ! $KUBECTL "${args[@]}" 2>/dev/null | jq -r '
+          "conditions:",
+          ((.status.conditions // []) | if length == 0 then "  none reported" else
+            (.[] | "  \(.type)=\(.status) reason=\(.reason // "-")",
+                   "    message: \(.message // "-")") end),
+          "",
+          "full .status, in case the cause is not a condition:",
+          ((.status // {}) | del(.conditions) | tojson)
+        ' 2>&1; then
+      echo "could not read the live $kind/$name (it may never have been created)"
+    fi
+    endgroup
+
+    # The controller's log, regardless of whether its pod looks healthy.
+    local mapping
+    mapping=$(controller_selector "$kind")
+    if [ -z "$mapping" ]; then
+      echo "NOTE: no controller mapping for kind $kind — add one to"
+      echo "      controller_selector() in $(basename "${BASH_SOURCE[0]}") so the next"
+      echo "      failure of this kind dumps the log that explains it."
+      continue
+    fi
+    local cns csel
+    cns=${mapping%% *}
+    csel=${mapping#* }
+    case " $seen " in *" $cns/$csel "*) continue ;; esac
+    seen="$seen $cns/$csel"
+
+    group "Controller for $kind — $cns ($csel), dumped even though it is healthy"
+    $KUBECTL -n "$cns" get pods -l "$csel" -o wide 2>&1 || true
+    $KUBECTL -n "$cns" logs -l "$csel" --tail="$LOG_TAIL" --all-containers 2>&1 \
+      || echo "no log for $csel in $cns"
+    endgroup
+  done <<EOF
+$refs
+EOF
 }
 
 # Every hook Job and every Job in the namespace, because "a hook Job keeps
@@ -302,6 +409,58 @@ selftest() {
     fails=1
   else
     echo "selftest PASS: a failed hook Job and a degraded resource are both named"
+  fi
+
+  # The failed-resource refs. This is the half that was missing: the refs are
+  # what let the dumper go and ask the LIVE object why, instead of reprinting
+  # Argo's truncated message.
+  if [ ! -f "$FAILED_REFS" ]; then
+    echo "selftest FAIL: $FAILED_REFS missing" >&2
+    return 1
+  fi
+  local refs
+  refs=$(jq -r -f "$FAILED_REFS" "$failed" 2>&1)
+
+  # The ClusterSecretStore is the exact shape that stranded exit-test-bank for
+  # five days: cluster-scoped, status Synced, hookPhase Failed, and a message
+  # truncated to "unable to create client".
+  if ! printf '%s\n' "$refs" | grep -qP '^ClusterSecretStore\t-\tgibson-secrets$'; then
+    echo "selftest FAIL: the failed ClusterSecretStore was not emitted as a ref. Got:" >&2
+    printf '%s\n' "$refs" >&2
+    fails=1
+  else
+    echo "selftest PASS: a failed cluster-scoped resource becomes a ref, namespace normalised to -"
+  fi
+
+  # And the same green-cluster trap the prose filter had: a hook with
+  # status: null and hookPhase: "Succeeded" must not become a ref, or the dumper
+  # fetches 31 healthy objects and dumps every controller in the cluster.
+  local healthy_refs
+  healthy_refs=$(jq -r -f "$FAILED_REFS" "$healthy" 2>&1)
+  if [ -n "$healthy_refs" ]; then
+    echo "selftest FAIL: a synced Application produced failed-resource refs:" >&2
+    printf '%s\n' "$healthy_refs" >&2
+    fails=1
+  else
+    echo "selftest PASS: a synced Application produces no refs"
+  fi
+
+  # The controller map. The ESO kinds are the ones that mattered here; an
+  # unmapped kind must return nothing so the caller can SAY it is unmapped
+  # rather than skip in silence, which is the failure mode being fixed.
+  local m
+  m=$(controller_selector ClusterSecretStore)
+  if [ "$m" != "external-secrets app.kubernetes.io/name=external-secrets" ]; then
+    echo "selftest FAIL: ClusterSecretStore maps to '$m'" >&2
+    fails=1
+  else
+    echo "selftest PASS: ClusterSecretStore maps to the external-secrets controller"
+  fi
+  if [ -n "$(controller_selector SomeKindNobodyMapped)" ]; then
+    echo "selftest FAIL: an unmapped kind returned a selector" >&2
+    fails=1
+  else
+    echo "selftest PASS: an unmapped kind returns nothing, so the caller can name it"
   fi
 
   # The pod selector, against one fixture carrying every case that matters.
