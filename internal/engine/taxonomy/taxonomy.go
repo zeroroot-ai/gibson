@@ -52,7 +52,7 @@ import (
 // Version is the Taxonomy's platform-wide version. Bump it in the same change
 // that promotes a shape, so a projected graph can be attributed to the schema
 // that produced it.
-const Version = 3
+const Version = 4
 
 // ObservationLabel is the label every out-of-taxonomy shape lands on. It is a
 // compile-time constant and a plain identifier, so it is never caller-influenced.
@@ -98,6 +98,21 @@ var coreNodeLabels = []string{
 	// RollsUpToRelationshipType.
 	CategoryLabel,
 	TechniqueLabel,
+
+	// Mission graph (v4, gibson#550). These were materialised on every mission
+	// run without being promoted, so they got no uniqueness constraint and the
+	// derived node identity gibson#528 introduced was convention rather than
+	// enforcement. Their writer is the per-run graph bootstrap
+	// (internal/server/daemon/graph_bootstrap.go), not the projector tick —
+	// promoted all the same, because this list tracks what is WRITTEN.
+	"MissionNode",
+	"MissionRun",
+
+	// Target (v4, gibson#550). The registered entity a mission assesses, as
+	// distinct from a Host, which is discovered. Finding.scope and a fan-out
+	// instance's target_id both already hold this node's id, so a Target node
+	// is what turns "what did we learn about target X" into one traversal.
+	"Target",
 }
 
 // coreRelationshipTypes is the promoted edge vocabulary, likewise tracking the
@@ -126,6 +141,15 @@ var coreRelationshipTypes = []string{
 
 	// Technique hierarchy (v3, ADR-0035, gibson#379).
 	RollsUpToRelationshipType, // Technique -> Category
+
+	// Mission graph (v4, gibson#550). Written by the per-run graph bootstrap.
+	"BELONGS_TO", // MissionRun -> Mission
+	"DEPENDS_ON", // MissionNode -> MissionNode
+	"PART_OF",    // MissionNode -> Mission
+
+	// Target (v4, gibson#550).
+	"FOUND_ON", // Finding    -> Target
+	"TARGETS",  // Mission    -> Target, MissionNode -> Target
 }
 
 // Registry is a Taxonomy: a version plus the labels and relationship types it

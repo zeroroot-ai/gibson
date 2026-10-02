@@ -55,6 +55,33 @@ type MissionProjection struct {
 	StartedAt *time.Time
 }
 
+// TargetProjection is the :Target-node shape — the registered entity a mission
+// assesses, as distinct from a :Host, which is discovered (gibson#550).
+//
+// A Target is not a World entity. It is read from the target store when a run
+// resolves its target set, so the projection tick does not produce one and the
+// per-run graph bootstrap does. Empty fields keep their stored value, like
+// every other write through this writer.
+type TargetProjection struct {
+	// ID is the target UUID. It is the node's identity, and it is already the
+	// value of Finding.scope and of a fan-out instance's target_id, which is
+	// what makes a Target node a join rather than a new fact.
+	ID string
+	// Name is the target's display name.
+	Name string
+	// Type is the target's schema-based type.
+	Type string
+	// URL is the target endpoint, by the same precedence a run uses:
+	// URL, then Connection["url"], then the name.
+	URL string
+	// Status is the target's registration status.
+	Status string
+	// MissionID, when set, draws Mission -[:TARGETS]-> Target. The Mission node
+	// is MATCHed, never merged: it has one writer and this is not it
+	// (gibson#551).
+	MissionID string
+}
+
 // GraphWriter upserts World entities into a tenant's knowledge graph. Abstracted
 // so the projection loop is unit-testable without Neo4j.
 type GraphWriter interface {
@@ -65,6 +92,10 @@ type GraphWriter interface {
 	// so does the projection tick, which is what keeps a mission's status
 	// current for its whole life.
 	UpsertMission(ctx context.Context, tenant string, m MissionProjection) error
+	// UpsertTarget materializes a :Target — the registered entity a mission
+	// assesses. Called from the per-run graph bootstrap, because a Target is
+	// read from the target store rather than folded out of the World.
+	UpsertTarget(ctx context.Context, tenant string, t TargetProjection) error
 	UpsertFinding(ctx context.Context, tenant string, f brain.FindingSnapshot) error
 	UpsertDomain(ctx context.Context, tenant string, d brain.DomainSnapshot) error
 	UpsertSubdomain(ctx context.Context, tenant string, s brain.SubdomainSnapshot) error

@@ -213,7 +213,7 @@ func TestProjectedVocabularyCoversTheLifecycle(t *testing.T) {
 			t.Errorf("%q is in the Taxonomy but the projector does not declare it", want)
 		}
 	}
-	if drift := checkProjectedVocabulary(); len(drift) > 0 {
+	if drift := vocabularyDrift(taxonomy.Global, projectedNodeLabels, projectedRelationshipTypes); len(drift) > 0 {
 		t.Errorf("projected vocabulary drifted from the Taxonomy: %v", drift)
 	}
 }

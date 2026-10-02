@@ -44,7 +44,7 @@ func TestBootstrap_WritesTheMissionNodeThroughTheSoleWriter(t *testing.T) {
 	client := &recordingGraphClient{}
 	writer := newFakeGraphWriter()
 	b := NewGraphBootstrapper(client, writer, slog.New(slog.DiscardHandler))
-	if _, err := b.Bootstrap(context.Background(), m.TenantID, m, def, run, proj, origins); err != nil {
+	if _, err := b.Bootstrap(context.Background(), m.TenantID, m, def, run, proj, origins, targets); err != nil {
 		t.Fatalf("bootstrap: %v", err)
 	}
 
@@ -105,7 +105,7 @@ func TestBootstrap_WithoutAGraphWriter_Fails(t *testing.T) {
 	}
 
 	b := NewGraphBootstrapper(&recordingGraphClient{}, nil, slog.New(slog.DiscardHandler))
-	_, err = b.Bootstrap(context.Background(), m.TenantID, m, def, run, proj, origins)
+	_, err = b.Bootstrap(context.Background(), m.TenantID, m, def, run, proj, origins, targets)
 	if err == nil {
 		t.Fatal("bootstrap succeeded with no graph writer; the run's :Mission node would never exist")
 	}

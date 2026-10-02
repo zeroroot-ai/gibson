@@ -1057,7 +1057,7 @@ func (m *missionManager) executeMission(ctx context.Context, missionID string, d
 	// one graph node per unit of work that will actually run, each fan-out
 	// instance naming its own target (gibson#528).
 	bootstrapper := NewGraphBootstrapper(graphClient, m.graphWriter, m.logger)
-	bootstrapResult, err := bootstrapper.Bootstrap(ctx, active.tenantID.String(), active.mission, def, missionRun, proj, fanOrigins)
+	bootstrapResult, err := bootstrapper.Bootstrap(ctx, active.tenantID.String(), active.mission, def, missionRun, proj, fanOrigins, fanTargets)
 	if err != nil {
 		m.logger.Error("failed to bootstrap mission graph", "error", err, "mission_id", missionID)
 		m.failBeforeStart(active.tenantID, missionID, def.GetName(), fmt.Sprintf("failed to initialize mission graph: %v", err))

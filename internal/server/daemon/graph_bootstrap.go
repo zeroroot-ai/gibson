@@ -17,6 +17,7 @@ import (
 	"github.com/zeroroot-ai/gibson/internal/engine/graphrag/queries"
 	"github.com/zeroroot-ai/gibson/internal/engine/graphrag/schema"
 	"github.com/zeroroot-ai/gibson/internal/engine/mission"
+	"github.com/zeroroot-ai/gibson/internal/engine/taxonomy"
 	"github.com/zeroroot-ai/gibson/internal/infra/types"
 	commonpb "github.com/zeroroot-ai/sdk/api/gen/gibson/common/v1"
 	missionpb "github.com/zeroroot-ai/sdk/api/gen/gibson/mission/v1"
@@ -41,12 +42,31 @@ type BootstrapResult struct {
 	MissionRunID string
 }
 
+// bootstrapNodeLabels and bootstrapRelationshipTypes are the vocabulary the
+// per-run graph writes materialize. They are declared here for the same reason
+// the projector declares its own (graph_projector_neo4j.go): so the Taxonomy and
+// the writer cannot drift apart unnoticed.
+//
+// The projector's drift check could not cover these. It reads the projector's
+// list, and this writer is a different one — which is how MissionNode came to
+// be MERGEd on every mission run while sitting outside the Taxonomy, with no
+// uniqueness constraint behind the derived identity gibson#528 introduced
+// (gibson#550).
+var bootstrapNodeLabels = []string{"Mission", "MissionNode", "MissionRun"}
+
+var bootstrapRelationshipTypes = []string{
+	"BELONGS_TO", // MissionRun  -> Mission
+	"DEPENDS_ON", // MissionNode -> MissionNode
+	"PART_OF",    // MissionNode -> Mission
+}
+
 // NewGraphBootstrapper creates a new GraphBootstrapper instance.
 // The graph client must be connected before use. writer is the graph projector,
 // which owns every :Mission write; a nil writer makes Bootstrap fail rather than
 // skip, because a run whose Mission node is missing cannot hang its MissionRun
 // off anything.
 func NewGraphBootstrapper(client graph.GraphClient, writer GraphWriter, logger *slog.Logger) *GraphBootstrapper {
+	mustMatchTaxonomy("graph bootstrap", taxonomy.Global, bootstrapNodeLabels, bootstrapRelationshipTypes)
 	return &GraphBootstrapper{
 		graphClient: client,
 		graphWriter: writer,
@@ -250,6 +270,7 @@ func (b *GraphBootstrapper) Bootstrap(
 	run *mission.MissionRun,
 	proj brain.MissionProjected,
 	origins fanOutOrigins,
+	targets []forEachTarget,
 ) (*BootstrapResult, error) {
 	// Create MissionQueries instance for graph operations
 	missionQueries := queries.NewMissionQueries(b.graphClient)
@@ -291,6 +312,30 @@ func (b *GraphBootstrapper) Bootstrap(
 
 	b.logger.Info("created/ensured Mission node in graph",
 		"mission_id", m.ID)
+
+	// Step 1b: a :Target node per target the run resolved, each attached to the
+	// mission that named it. A Target is a registered entity, not a World one,
+	// so the projection tick never produces it and this is where it comes from
+	// (gibson#550).
+	//
+	// The whole resolved set, not just the primary: a fan-out instance names its
+	// own target, and a finding carries that target's UUID in Finding.scope, so
+	// every target in the set has to exist as a node for the join to work.
+	for _, tgt := range targets {
+		if tgt.Target == nil {
+			continue
+		}
+		if err := b.graphWriter.UpsertTarget(ctx, tenant, TargetProjection{
+			ID:        tgt.ID,
+			Name:      tgt.Target.Name,
+			Type:      tgt.Target.Type,
+			URL:       runTargetRef(tgt.Target),
+			Status:    string(tgt.Target.Status),
+			MissionID: m.ID.String(),
+		}); err != nil {
+			return nil, fmt.Errorf("failed to create target %s in graph: %w", tgt.ID, err)
+		}
+	}
 
 	// Step 2: Create a new MissionRun node for this execution
 	// Uses SQLite run ID for consistency between SQLite and Neo4j

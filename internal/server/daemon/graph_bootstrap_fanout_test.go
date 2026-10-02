@@ -99,7 +99,7 @@ func TestBootstrap_WritesOneNodePerFanOutInstanceWithItsTarget(t *testing.T) {
 
 	client := &recordingGraphClient{}
 	b := NewGraphBootstrapper(client, newFakeGraphWriter(), slog.New(slog.DiscardHandler))
-	if _, err := b.Bootstrap(context.Background(), m.TenantID, m, def, run, proj, origins); err != nil {
+	if _, err := b.Bootstrap(context.Background(), m.TenantID, m, def, run, proj, origins, targets); err != nil {
 		t.Fatalf("bootstrap: %v", err)
 	}
 
@@ -151,7 +151,7 @@ func TestBootstrap_NodeIdentityIsStableAcrossRuns(t *testing.T) {
 	ids := func() map[string]any {
 		client := &recordingGraphClient{}
 		b := NewGraphBootstrapper(client, newFakeGraphWriter(), slog.New(slog.DiscardHandler))
-		if _, err := b.Bootstrap(context.Background(), m.TenantID, m, def, run, proj, origins); err != nil {
+		if _, err := b.Bootstrap(context.Background(), m.TenantID, m, def, run, proj, origins, targets); err != nil {
 			t.Fatalf("bootstrap: %v", err)
 		}
 		out := map[string]any{}
@@ -212,7 +212,7 @@ func TestBootstrap_DependenciesComeFromTheResolvedProjection(t *testing.T) {
 
 	client := &recordingGraphClient{}
 	b := NewGraphBootstrapper(client, newFakeGraphWriter(), slog.New(slog.DiscardHandler))
-	if _, err := b.Bootstrap(context.Background(), m.TenantID, m, def, run, proj, origins); err != nil {
+	if _, err := b.Bootstrap(context.Background(), m.TenantID, m, def, run, proj, origins, targets); err != nil {
 		t.Fatalf("bootstrap: %v", err)
 	}
 
@@ -241,7 +241,7 @@ func TestBootstrap_AMissionWithoutFanOutIsUnchangedInShape(t *testing.T) {
 
 	client := &recordingGraphClient{}
 	b := NewGraphBootstrapper(client, newFakeGraphWriter(), slog.New(slog.DiscardHandler))
-	if _, err := b.Bootstrap(context.Background(), m.TenantID, m, def, run, proj, origins); err != nil {
+	if _, err := b.Bootstrap(context.Background(), m.TenantID, m, def, run, proj, origins, nil); err != nil {
 		t.Fatalf("bootstrap: %v", err)
 	}
 

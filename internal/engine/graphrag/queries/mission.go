@@ -635,19 +635,24 @@ func recordToDecision(data any) (*schema.Decision, error) {
 	return decision, nil
 }
 
-// CreateMissionRun creates a new mission_run node and links it to its Mission.
+// CreateMissionRun creates a new :MissionRun node and links it to its Mission.
 // Each call creates a NEW node - run numbers must be unique per mission.
 // Returns the generated mission run ID.
 //
-// The label is the lowercase :mission_run. It was chosen to match the GraphLoader,
-// which attached discovered nodes to a run via BELONGS_TO; that package is gone
-// (gibson#1266) and discovered entities now reach the graph through the World and
-// the projector. The label stays lowercase because existing graphs use it.
+// The label was the lowercase :mission_run, chosen to match a GraphLoader that
+// attached discovered nodes to a run via BELONGS_TO. That package was deleted in
+// gibson#1266, and the comment here then justified the case with "existing
+// graphs use it" — an estate that no longer exists.
+//
+// A lowercase label can never carry a Taxonomy uniqueness constraint: Neo4j
+// labels are case sensitive and constraintStatements only emits the Taxonomy's
+// PascalCase labels, so `:mission_run` was outside the schema by construction.
+// It is :MissionRun now, promoted into the Taxonomy at v4 (gibson#550).
 //
 // Parameters:
 //   - ctx: Context for cancellation
 //   - missionID: The stable SQLite mission ID (used to match Mission node)
-//   - runID: The SQLite mission_run ID (stored on mission_run node)
+//   - runID: The SQLite mission_run ID (stored on the MissionRun node)
 //   - runNumber: Sequential run number (1, 2, 3...)
 //
 // Returns:
@@ -666,7 +671,7 @@ func (mq *MissionQueries) CreateMissionRun(ctx context.Context, missionID types.
 	// Match Mission by ID (stable SQLite ID)
 	cypher := `
 		MATCH (m:Mission {id: $mission_id})
-		CREATE (r:mission_run {
+		CREATE (r:MissionRun {
 			id: $run_id,
 			mission_id: $mission_id,
 			run_number: $run_number,
@@ -691,7 +696,7 @@ func (mq *MissionQueries) CreateMissionRun(ctx context.Context, missionID types.
 
 	if len(result.Records) == 0 {
 		return types.NewError(graph.ErrCodeGraphNodeCreateFailed,
-			"mission not found - cannot create mission_run without parent Mission")
+			"mission not found - cannot create MissionRun without parent Mission")
 	}
 
 	return nil
@@ -710,9 +715,8 @@ func (mq *MissionQueries) UpdateMissionRunStatus(ctx context.Context, runID stri
 		return types.NewError(graph.ErrCodeGraphInvalidQuery, "invalid status: "+status)
 	}
 
-	// Use lowercase :mission_run to match CreateMissionRun
 	cypher := `
-		MATCH (r:mission_run {id: $run_id})
+		MATCH (r:MissionRun {id: $run_id})
 		SET r.status = $status, r.updated_at = datetime()
 	`
 
