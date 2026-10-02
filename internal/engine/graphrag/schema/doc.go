@@ -15,19 +15,9 @@
 //   - Temporal lifecycle (created_at, started_at, completed_at)
 //   - Original YAML source for reconstruction
 //
-// Example usage:
-//
-//	mission := schema.NewMission(
-//	    types.NewID(),
-//	    "web-api-scan",
-//	    "Scan web API for vulnerabilities",
-//	    "Identify security weaknesses",
-//	    "target-123",
-//	    yamlSource,
-//	)
-//	mission.MarkStarted()
-//	// ... execute mission ...
-//	mission.MarkCompleted()
+// A :Mission node is NOT written through this package. The graph projector
+// (internal/server/daemon, GraphWriter.UpsertMission) is its sole writer
+// (ADR-0012, gibson#551); schema.Mission is the shape a read decodes into.
 //
 // # MissionNode Node
 //

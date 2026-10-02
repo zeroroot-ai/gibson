@@ -19,32 +19,47 @@ import (
 	"github.com/zeroroot-ai/gibson/internal/engine/brain"
 )
 
-// MissionProjection is the Mission-node shape the RPC layer hands the projector
-// when a mission is created. It exists because a Mission node is materialized at
-// CreateMission time rather than folded out of the World on the projection tick,
-// and the projector is nonetheless the only code allowed to write it (ADR-0012).
+// MissionProjection is the complete Mission-node shape. Every caller describes
+// the whole node, because a Mission node is materialized when a mission is
+// created and again when a run bootstraps its graph, and the projector is the
+// only code allowed to write it (ADR-0012).
+//
+// An empty string field means "the caller does not know this yet", not "set it
+// to empty": the create-time write runs in a goroutine, so it can land either
+// side of the run-time write, and a blank must never erase a known value. The
+// Cypher keeps the stored value in that case.
 type MissionProjection struct {
 	// ID is the mission id, the node's identity together with the tenant.
 	ID string
 	// Name is the mission's display name.
 	Name string
-	// TargetID is the mission's target, stored as the node's `target` property.
+	// Description is the mission's full description.
+	Description string
+	// TargetID is the mission's primary target, stored as the node's `target`
+	// property. A fan-out run's per-target work hangs off its MissionNodes
+	// (gibson#549), not off this.
 	TargetID string
-	// Status is the mission's lifecycle status at creation time.
+	// Status is the mission's lifecycle status.
 	Status string
 	// CreatedBy is the creating principal. Today the RPC layer passes the mission
 	// name as a proxy; it becomes real once user attribution is wired.
 	CreatedBy string
+	// Objective is the mission's goal in one sentence, so a graph reader can see
+	// what a mission was for without fetching its definition.
+	Objective string
+	// YAMLSource is the mission definition the run was projected from.
+	YAMLSource string
+	// StartedAt is when the run began. nil at create time.
+	StartedAt *time.Time
 }
 
 // GraphWriter upserts World entities into a tenant's knowledge graph. Abstracted
 // so the projection loop is unit-testable without Neo4j.
 type GraphWriter interface {
 	UpsertHost(ctx context.Context, tenant string, h brain.HostSnapshot) error
-	// UpsertMission materializes a :Mission node. Called from the CreateMission
-	// RPC rather than from the projection tick — the RPC layer used to run this
-	// MERGE inline, which made it a second writer; folding it here keeps the
-	// projector the sole owner of entity materialization (ADR-0012 step 2).
+	// UpsertMission materializes a :Mission node. It is the ONLY writer of one:
+	// the CreateMission RPC and the per-run graph bootstrap both used to MERGE
+	// their own, which is what ADR-0012 step 2 forbids. Both now call this.
 	UpsertMission(ctx context.Context, tenant string, m MissionProjection) error
 	UpsertFinding(ctx context.Context, tenant string, f brain.FindingSnapshot) error
 	UpsertDomain(ctx context.Context, tenant string, d brain.DomainSnapshot) error

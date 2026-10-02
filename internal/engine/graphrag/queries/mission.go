@@ -45,77 +45,6 @@ func NewMissionQueries(client graph.GraphClient) *MissionQueries {
 	}
 }
 
-// CreateMission creates or updates a mission node in the graph.
-// Uses MERGE on ID for idempotency - the SQLite mission ID is stable (same across runs).
-// All runs of the same mission share one Mission node in Neo4j with the same stable ID.
-// On create, sets all properties. On match, updates status and latest run info.
-// Returns an error if validation fails or if the database operation fails.
-func (mq *MissionQueries) CreateMission(ctx context.Context, m *schema.Mission) error {
-	if m == nil {
-		return types.NewError(graph.ErrCodeGraphInvalidQuery, "mission cannot be nil")
-	}
-
-	// Validate mission before creating
-	if err := m.Validate(); err != nil {
-		return types.WrapError(graph.ErrCodeGraphInvalidQuery,
-			"invalid mission", err)
-	}
-
-	// Build Cypher query with MERGE on ID (SQLite mission ID is stable across runs)
-	// This ensures all runs of the same mission share one Mission node
-	cypher := `
-		MERGE (m:Mission {id: $id})
-		ON CREATE SET
-			m.name = $name,
-			m.description = $description,
-			m.objective = $objective,
-			m.target_ref = $target_ref,
-			m.status = $status,
-			m.yaml_source = $yaml_source,
-			m.created_at = datetime($created_at),
-			m.started_at = CASE WHEN $started_at IS NOT NULL THEN datetime($started_at) ELSE NULL END
-		ON MATCH SET
-			m.status = $status,
-			m.target_ref = $target_ref,
-			m.started_at = CASE WHEN $started_at IS NOT NULL THEN datetime($started_at) ELSE m.started_at END
-		RETURN m.id as id
-	`
-
-	// Build parameters map
-	params := map[string]any{
-		graphrag.PropID:          m.ID.String(),
-		graphrag.PropName:        m.Name,
-		graphrag.PropDescription: m.Description,
-		"objective":              m.Objective,
-		"target_ref":             m.TargetRef,
-		graphrag.PropStatus:      m.Status.String(),
-		"yaml_source":            m.YAMLSource,
-		graphrag.PropCreatedAt:   m.CreatedAt.UTC().Format(time.RFC3339Nano),
-	}
-
-	// Add optional started_at timestamp
-	if m.StartedAt != nil {
-		params["started_at"] = m.StartedAt.UTC().Format(time.RFC3339Nano)
-	} else {
-		params["started_at"] = nil
-	}
-
-	// Execute query
-	result, err := mq.client.Query(ctx, cypher, params)
-	if err != nil {
-		return types.WrapError(graph.ErrCodeGraphNodeCreateFailed,
-			fmt.Sprintf("failed to create mission %s", m.Name), err)
-	}
-
-	// Verify result (should always have one record with MERGE)
-	if len(result.Records) == 0 {
-		return types.NewError(graph.ErrCodeGraphNodeCreateFailed,
-			fmt.Sprintf("no result returned when creating mission %s", m.Name))
-	}
-
-	return nil
-}
-
 // GetMission retrieves a mission by ID.
 func (mq *MissionQueries) GetMission(ctx context.Context, missionID types.ID) (*schema.Mission, error) {
 	cypher := `
@@ -545,9 +474,13 @@ func recordToMission(data any) (*schema.Mission, error) {
 		Name:        mapStr(m, "name"),
 		Description: mapStr(m, "description"),
 		Objective:   mapStr(m, "objective"),
-		TargetRef:   mapStr(m, "target_ref"),
-		Status:      schema.MissionStatus(mapStr(m, "status")),
-		YAMLSource:  mapStr(m, "yaml_source"),
+		// The node property is `target` — the target's UUID. It used to be
+		// `target_ref`, written by a second :Mission writer in this package
+		// that MERGEd on a different key; that writer is gone and the graph
+		// projector's `target` is the one spelling (gibson#551).
+		TargetRef:  mapStr(m, "target"),
+		Status:     schema.MissionStatus(mapStr(m, "status")),
+		YAMLSource: mapStr(m, "yaml_source"),
 	}
 
 	if createdAt, ok := m["created_at"].(time.Time); ok {
