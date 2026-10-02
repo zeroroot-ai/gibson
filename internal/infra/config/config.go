@@ -6,7 +6,6 @@ package config
 import (
 	"time"
 
-	"github.com/zeroroot-ai/gibson/internal/engine/memory/embedder"
 	"github.com/zeroroot-ai/gibson/internal/platform/crypto"
 )
 
@@ -80,26 +79,9 @@ type TenantPostgresConfig struct {
 	// Default: 5432
 	Port int `mapstructure:"port" yaml:"port"`
 
-	// AdminDatabase is the name of the admin/maintenance database.
-	// Default: "postgres"
-	AdminDatabase string `mapstructure:"admin_database" yaml:"admin_database"`
-
 	// AdminUsername is the PostgreSQL role used to authenticate.
 	// This role must have CREATEDB privilege for tenant provisioning.
 	AdminUsername string `mapstructure:"admin_username" yaml:"admin_username"`
-
-	// AdminPassword is the PostgreSQL password. Store in a Kubernetes Secret.
-	// The chart injects this via ${TENANT_POSTGRES_ADMIN_PASSWORD} env var.
-	AdminPassword string `mapstructure:"admin_password" yaml:"admin_password"`
-
-	// SSLMode controls the SSL/TLS negotiation mode.
-	// Valid values: disable, require, verify-ca, verify-full.
-	// Default: "disable" (suitable for in-cluster communication).
-	SSLMode string `mapstructure:"ssl_mode" yaml:"ssl_mode"`
-
-	// MaxConns is the maximum number of open connections in the admin pool.
-	// Default: 5
-	MaxConns int `mapstructure:"max_conns" yaml:"max_conns"`
 }
 
 // Config is the root configuration for the Gibson Framework.
@@ -108,14 +90,12 @@ type Config struct {
 	Security          SecurityConfig          `mapstructure:"security" yaml:"security" validate:"required"`
 	LLM               LLMConfig               `mapstructure:"llm" yaml:"llm"`
 	Logging           LoggingConfig           `mapstructure:"logging" yaml:"logging"`
-	Tracing           TracingConfig           `mapstructure:"tracing" yaml:"tracing"`
 	Metrics           MetricsConfig           `mapstructure:"metrics" yaml:"metrics"`
 	Registration      RegistrationConfig      `mapstructure:"registration" yaml:"registration,omitempty"`
 	Registry          RegistryConfig          `mapstructure:"registry" yaml:"registry"`
 	Callback          CallbackConfig          `mapstructure:"callback" yaml:"callback,omitempty"`
 	Daemon            DaemonConfig            `mapstructure:"daemon" yaml:"daemon,omitempty"`
 	Health            HealthConfig            `mapstructure:"health" yaml:"health,omitempty"`
-	Embedder          embedder.EmbedderConfig `mapstructure:"embedder" yaml:"embedder"`
 	GraphRAG          GraphRAGConfig          `mapstructure:"graphrag" yaml:"graphrag"`
 	Redis             RedisConfig             `mapstructure:"redis" yaml:"redis" validate:"required"`
 	Plugins           PluginsConfig           `mapstructure:"plugins" yaml:"plugins,omitempty"`
@@ -165,21 +145,12 @@ type PluginsConfig map[string]map[string]string
 
 // CoreConfig contains core application settings.
 type CoreConfig struct {
-	HomeDir       string        `mapstructure:"home_dir" yaml:"home_dir"`
-	DataDir       string        `mapstructure:"data_dir" yaml:"data_dir"`
-	CacheDir      string        `mapstructure:"cache_dir" yaml:"cache_dir"`
-	ParallelLimit int           `mapstructure:"parallel_limit" yaml:"parallel_limit" validate:"min=1,max=100"`
-	Timeout       time.Duration `mapstructure:"timeout" yaml:"timeout" validate:"min=1s"`
-	Debug         bool          `mapstructure:"debug" yaml:"debug"`
+	HomeDir string `mapstructure:"home_dir" yaml:"home_dir"`
 }
 
 // SecurityConfig contains security-related settings.
 type SecurityConfig struct {
-	EncryptionAlgorithm string                    `mapstructure:"encryption_algorithm" yaml:"encryption_algorithm"`
-	KeyDerivation       string                    `mapstructure:"key_derivation" yaml:"key_derivation"`
-	SSLValidation       bool                      `mapstructure:"ssl_validation" yaml:"ssl_validation"`
-	AuditLogging        bool                      `mapstructure:"audit_logging" yaml:"audit_logging"`
-	KeyProvider         *crypto.KeyProviderConfig `mapstructure:"key_provider" yaml:"key_provider,omitempty"`
+	KeyProvider *crypto.KeyProviderConfig `mapstructure:"key_provider" yaml:"key_provider,omitempty"`
 
 	// AllowPrivateLLMEndpoints disables the SSRF guard on self-hosted LLM and
 	// embedding endpoints whose host resolves to a private/link-local/metadata
@@ -234,14 +205,7 @@ type LLMConfig struct {
 
 // LoggingConfig contains logging configuration.
 type LoggingConfig struct {
-	Level  string `mapstructure:"level" yaml:"level"`
-	Format string `mapstructure:"format" yaml:"format"`
-}
-
-// TracingConfig contains distributed tracing configuration.
-type TracingConfig struct {
-	Enabled  bool   `mapstructure:"enabled" yaml:"enabled"`
-	Endpoint string `mapstructure:"endpoint" yaml:"endpoint"`
+	Level string `mapstructure:"level" yaml:"level"`
 }
 
 // MetricsConfig contains metrics export configuration.
@@ -300,14 +264,6 @@ type RegistrationConfig struct {
 	// Port is the TCP port for the registration gRPC server (default: 50100)
 	// Validation only applies when Enabled is true
 	Port int `mapstructure:"port" yaml:"port"`
-
-	// AuthToken is an optional authentication token that agents must provide when registering
-	// If empty, no authentication is required (not recommended for production)
-	AuthToken string `mapstructure:"auth_token" yaml:"auth_token,omitempty"`
-
-	// HeartbeatTimeout is the duration after which an agent is considered dead if no heartbeat
-	// is received (default: 30s)
-	HeartbeatTimeout time.Duration `mapstructure:"heartbeat_timeout" yaml:"heartbeat_timeout,omitempty"`
 }
 
 // RegistryConfig contains configuration for the component registry.
@@ -316,10 +272,6 @@ type RegistrationConfig struct {
 type RegistryConfig struct {
 	// Namespace is the key prefix for all registry entries (default: "gibson")
 	Namespace string `mapstructure:"namespace" yaml:"namespace"`
-
-	// TTL is the time-to-live for runtime service registrations (default: "30s")
-	// Persistent component metadata (installed agents/tools/plugins) has no TTL.
-	TTL string `mapstructure:"ttl" yaml:"ttl"`
 }
 
 // DaemonConfig contains configuration for the Gibson daemon process.
@@ -329,9 +281,6 @@ type DaemonConfig struct {
 	// Default: "localhost:50002"
 	// Can be overridden via GIBSON_DAEMON_GRPC_ADDR environment variable.
 	GRPCAddress string `mapstructure:"grpc_address" yaml:"grpc_address"`
-
-	// Executor configuration for mission execution
-	Executor ExecutorConfig `mapstructure:"executor" yaml:"executor"`
 }
 
 // HealthConfig contains HTTP health endpoint configuration.
@@ -340,35 +289,6 @@ type HealthConfig struct {
 	// Default: 8080
 	// Can be overridden via GIBSON_HEALTH_PORT environment variable.
 	Port int `mapstructure:"port" yaml:"port"`
-}
-
-// ExecutorConfig contains configuration for mission execution.
-type ExecutorConfig struct {
-	// MaxConcurrentMissions limits parallel mission execution
-	MaxConcurrentMissions int `mapstructure:"max_concurrent_missions" yaml:"max_concurrent_missions"`
-
-	// DefaultTimeout for mission execution
-	DefaultTimeout time.Duration `mapstructure:"default_timeout" yaml:"default_timeout"`
-
-	// RetryPolicy for failed nodes
-	RetryPolicy RetryConfig `mapstructure:"retry_policy" yaml:"retry_policy"`
-
-	// ResourceLimits for agent execution
-	ResourceLimits ResourceLimitsConfig `mapstructure:"resource_limits" yaml:"resource_limits"`
-}
-
-// RetryConfig contains retry policy configuration.
-type RetryConfig struct {
-	MaxRetries int           `mapstructure:"max_retries" yaml:"max_retries"`
-	BackoffMin time.Duration `mapstructure:"backoff_min" yaml:"backoff_min"`
-	BackoffMax time.Duration `mapstructure:"backoff_max" yaml:"backoff_max"`
-}
-
-// ResourceLimitsConfig contains resource limit configuration for agent execution.
-type ResourceLimitsConfig struct {
-	MaxMemoryMB int           `mapstructure:"max_memory_mb" yaml:"max_memory_mb"`
-	MaxCPUCores float64       `mapstructure:"max_cpu_cores" yaml:"max_cpu_cores"`
-	MaxDuration time.Duration `mapstructure:"max_duration" yaml:"max_duration"`
 }
 
 // Neo4jConfig contains Neo4j connection settings for per-tenant GraphRAG.
@@ -401,8 +321,7 @@ type Neo4jConfig struct {
 
 // GraphRAGConfig contains Neo4j knowledge graph configuration.
 type GraphRAGConfig struct {
-	Enabled bool        `mapstructure:"enabled" yaml:"enabled"`
-	Neo4j   Neo4jConfig `mapstructure:"neo4j" yaml:"neo4j"`
+	Neo4j Neo4jConfig `mapstructure:"neo4j" yaml:"neo4j"`
 }
 
 // RedisConfig contains Redis connection settings for tool execution and state management.
@@ -411,7 +330,6 @@ type GraphRAGConfig struct {
 type RedisConfig struct {
 	// Basic connection settings
 	URL      string `mapstructure:"url" yaml:"url"`
-	Password string `mapstructure:"password" yaml:"password"`
 	Database int    `mapstructure:"database" yaml:"database"`
 
 	// Connection pooling
@@ -432,12 +350,6 @@ type RedisConfig struct {
 	// Sentinel mode configuration
 	SentinelMaster string   `mapstructure:"sentinel_master" yaml:"sentinel_master"`
 	SentinelAddrs  []string `mapstructure:"sentinel_addrs" yaml:"sentinel_addrs"`
-
-	// TLS configuration
-	TLSEnabled  bool   `mapstructure:"tls_enabled" yaml:"tls_enabled"`
-	TLSCertFile string `mapstructure:"tls_cert_file" yaml:"tls_cert_file"`
-	TLSKeyFile  string `mapstructure:"tls_key_file" yaml:"tls_key_file"`
-	TLSCAFile   string `mapstructure:"tls_ca_file" yaml:"tls_ca_file"`
 }
 
 // ShutdownConfig contains configuration for graceful shutdown behavior.
@@ -732,12 +644,6 @@ func (c *RedisConfig) ApplyDefaults() {
 type AuthzConfig struct {
 	// Provider is the authorization provider name. Only "openfga" is supported.
 	Provider string `mapstructure:"provider" yaml:"provider"`
-
-	// EnforcementSource is retained for config-file backwards compatibility.
-	// The only valid value is "fga"; the daemon ignores any other value and
-	// always uses FGA as the sole authorization backend.
-	// Override via env: GIBSON_AUTHZ_ENFORCEMENT_SOURCE
-	EnforcementSource string `mapstructure:"enforcement_source" yaml:"enforcement_source"`
 
 	// Fga holds OpenFGA-specific settings.
 	Fga FgaClientConfig `mapstructure:"fga" yaml:"fga"`

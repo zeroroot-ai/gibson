@@ -86,11 +86,6 @@ type SandboxSetecConfig struct {
 	// per-agent manifest (gibson#1597) overrides it per launch.
 	AgentSandboxClass string `mapstructure:"agent_sandbox_class" yaml:"agent_sandbox_class"`
 
-	// AgentRunTimeout bounds one ephemeral agent mission run. An agent runs a
-	// whole mission, so this is far longer than CallTimeout. Zero defers to
-	// the launcher default (30m).
-	AgentRunTimeout time.Duration `mapstructure:"agent_run_timeout" yaml:"agent_run_timeout"`
-
 	// PlatformCAFile is the platform edge CA, as a PEM file, handed to
 	// every sandboxed agent and member launch in GIBSON_PLATFORM_CA_PEM. A
 	// sandbox cannot mount the Secret in-cluster consumers trust the edge

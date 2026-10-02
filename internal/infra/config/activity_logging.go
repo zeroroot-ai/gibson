@@ -12,8 +12,6 @@ import (
 // Activity logging provides real-time structured logging of agent decisions,
 // LLM interactions, and tool executions for observability in Grafana/Loki.
 type ActivityLoggingConfig struct {
-	// Enabled controls whether activity logging is active
-	Enabled bool `mapstructure:"enabled" yaml:"enabled"`
 
 	// Level sets the verbosity level (quiet, normal, verbose, debug)
 	Level string `mapstructure:"level" yaml:"level"`
@@ -35,18 +33,11 @@ type ActivityLoggingConfig struct {
 // the config values if they are set.
 //
 // Supported environment variables:
-//   - GIBSON_ACTIVITY_LOG_ENABLED: overrides Enabled (default: true)
 //   - GIBSON_ACTIVITY_LOG_LEVEL: overrides Level (default: normal)
 //   - GIBSON_ACTIVITY_LOG_MAX_CONTENT: overrides MaxContentLength (default: 500)
 //   - GIBSON_ACTIVITY_LOG_OUTPUT: overrides Output (default: stdout)
 //   - GIBSON_ACTIVITY_LOG_FILE: overrides FilePath (default: "")
 func (c *ActivityLoggingConfig) ApplyEnvironmentOverrides() {
-	if enabled := os.Getenv("GIBSON_ACTIVITY_LOG_ENABLED"); enabled != "" {
-		if val, err := strconv.ParseBool(enabled); err == nil {
-			c.Enabled = val
-		}
-	}
-
 	if level := os.Getenv("GIBSON_ACTIVITY_LOG_LEVEL"); level != "" {
 		c.Level = level
 	}

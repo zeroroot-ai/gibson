@@ -415,6 +415,10 @@ jobs:
         # target, offline, so a rule that stopped working fails here rather
         # than passing quietly below.
         run: make check-crd-field-consumers
+      - name: Every config key the loader fills has a reader
+        # gibson#501, ADR-0094 layer 1. The fixture runs first inside the make
+        # target, offline.
+        run: make check-config-field-readers
       - name: Guard gofmt cleanliness
         # gibson#1415: no lane ever CHECKED formatting -- `make fmt` rewrites
         # instead of failing, and .golangci.yml enables no formatter -- so

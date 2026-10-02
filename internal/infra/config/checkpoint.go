@@ -12,10 +12,7 @@ import (
 // This controls checkpoint creation, serialization, compression, encryption,
 // retention, and human-in-the-loop approval missions.
 type CheckpointConfig struct {
-	// Core settings
-	Enabled        bool   `mapstructure:"enabled" yaml:"enabled"`
-	AutoCheckpoint bool   `mapstructure:"auto_checkpoint" yaml:"auto_checkpoint"`
-	KeyPrefix      string `mapstructure:"key_prefix" yaml:"key_prefix"`
+	KeyPrefix string `mapstructure:"key_prefix" yaml:"key_prefix"`
 
 	// Serialization
 	Format      string            `mapstructure:"format" yaml:"format"` // msgpack or json
@@ -31,9 +28,6 @@ type CheckpointConfig struct {
 	MaxCheckpointSize    int64 `mapstructure:"max_checkpoint_size" yaml:"max_checkpoint_size"`
 	LargeObjectThreshold int64 `mapstructure:"large_object_threshold" yaml:"large_object_threshold"`
 
-	// Performance
-	RequireCheckpoints bool `mapstructure:"require_checkpoints" yaml:"require_checkpoints"`
-
 	// Human-in-the-loop
 	ApprovalTimeout time.Duration `mapstructure:"approval_timeout" yaml:"approval_timeout"`
 }
@@ -46,9 +40,8 @@ type CompressionConfig struct {
 
 // EncryptionConfig contains configuration for checkpoint encryption.
 type EncryptionConfig struct {
-	Enabled       bool   `mapstructure:"enabled" yaml:"enabled"`
-	KeyProvider   string `mapstructure:"key_provider" yaml:"key_provider"` // kubernetes, vault, aws_kms, etc.
-	KeySecretName string `mapstructure:"key_secret_name" yaml:"key_secret_name"`
+	Enabled     bool   `mapstructure:"enabled" yaml:"enabled"`
+	KeyProvider string `mapstructure:"key_provider" yaml:"key_provider"` // kubernetes, vault, aws_kms, etc.
 }
 
 // RetentionConfigYAML contains configuration for checkpoint retention policies
@@ -64,10 +57,8 @@ type RetentionConfigYAML struct {
 // These defaults balance storage costs with debugging needs and are production-ready.
 func DefaultCheckpointConfig() *CheckpointConfig {
 	return &CheckpointConfig{
-		Enabled:        true,
-		AutoCheckpoint: true,
-		KeyPrefix:      "gibson:checkpoint",
-		Format:         "msgpack",
+		KeyPrefix: "gibson:checkpoint",
+		Format:    "msgpack",
 		Compression: CompressionConfig{
 			Enabled:   true,
 			Threshold: 10485760, // 10MB
@@ -83,7 +74,6 @@ func DefaultCheckpointConfig() *CheckpointConfig {
 		},
 		MaxCheckpointSize:    104857600, // 100MB
 		LargeObjectThreshold: 1048576,   // 1MB
-		RequireCheckpoints:   false,
 		ApprovalTimeout:      24 * time.Hour,
 	}
 }

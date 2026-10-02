@@ -83,27 +83,6 @@ tenant_postgres:
 	assert.Equal(t, "tenant-pg.gibson.svc.cluster.local", cfg.TenantPostgres.Host)
 }
 
-// TestTenantPostgresInterpolation_AdminPassword verifies the security-sensitive
-// admin_password field expands from ${PG_ADMIN_PASSWORD}. This is the primary
-// reason for the interpolation block — the chart injects the password via a
-// Kubernetes Secret rather than rendering it in plaintext into the ConfigMap.
-func TestTenantPostgresInterpolation_AdminPassword(t *testing.T) {
-	os.Setenv("PG_ADMIN_PASSWORD", "s3cr3t-admin-pw")
-	defer os.Unsetenv("PG_ADMIN_PASSWORD")
-
-	cfg := loadConfigWithTenantPostgres(t, `
-tenant_postgres:
-  host: tenant-postgresql
-  port: 5432
-  admin_database: postgres
-  admin_username: gibson_admin
-  admin_password: ${PG_ADMIN_PASSWORD}
-  ssl_mode: disable
-`)
-
-	assert.Equal(t, "s3cr3t-admin-pw", cfg.TenantPostgres.AdminPassword)
-}
-
 // TestTenantPostgresInterpolation_LiteralPassthrough verifies that a literal
 // host value (no ${…} placeholder) passes through without modification.
 func TestTenantPostgresInterpolation_LiteralPassthrough(t *testing.T) {
@@ -118,32 +97,6 @@ tenant_postgres:
 `)
 
 	assert.Equal(t, "localhost", cfg.TenantPostgres.Host)
-	assert.Equal(t, "gibson_admin", cfg.TenantPostgres.AdminDatabase)
-	assert.Equal(t, "literal-password", cfg.TenantPostgres.AdminPassword)
-}
-
-// TestTenantPostgresInterpolation_MissingEnvVar verifies that a missing env var
-// resolves to empty string (the interpolateString behavior for undefined vars).
-// The daemon will fail to connect at runtime when the password is empty, which
-// is the intended fail-closed behavior (operator misconfiguration).
-func TestTenantPostgresInterpolation_MissingEnvVar(t *testing.T) {
-	// Ensure the var is definitely not set.
-	os.Unsetenv("NONEXISTENT_TENANT_PG_PASS")
-
-	cfg := loadConfigWithTenantPostgres(t, `
-tenant_postgres:
-  host: tenant-postgresql
-  port: 5432
-  admin_database: postgres
-  admin_username: gibson_admin
-  admin_password: ${NONEXISTENT_TENANT_PG_PASS}
-  ssl_mode: disable
-`)
-
-	// Missing env var → interpolateString preserves the original placeholder.
-	// The daemon will refuse to connect at runtime when the placeholder is
-	// not a valid password.
-	assert.Equal(t, "${NONEXISTENT_TENANT_PG_PASS}", cfg.TenantPostgres.AdminPassword)
 }
 
 // TestTenantPostgresInterpolation_AbsentSection verifies that omitting the
@@ -151,7 +104,6 @@ tenant_postgres:
 func TestTenantPostgresInterpolation_AbsentSection(t *testing.T) {
 	cfg := loadConfigWithTenantPostgres(t, "") // no tenant_postgres block
 	assert.Empty(t, cfg.TenantPostgres.Host)
-	assert.Empty(t, cfg.TenantPostgres.AdminPassword)
 }
 
 // TestTenantPostgresInterpolation_AdminUsername verifies admin_username resolves.

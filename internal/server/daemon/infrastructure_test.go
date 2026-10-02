@@ -25,7 +25,6 @@ func TestInfrastructureInitialization(t *testing.T) {
 	cfg := &config.Config{
 		Registry: config.RegistryConfig{
 			Namespace: "gibson-test",
-			TTL:       "30s",
 		},
 		Callback: config.CallbackConfig{
 			Enabled:          false,

@@ -7,8 +7,6 @@ import (
 	"os"
 	"path/filepath"
 	"time"
-
-	"github.com/zeroroot-ai/gibson/internal/engine/memory/embedder"
 )
 
 // DefaultConfig returns a Config with sensible default values.
@@ -17,27 +15,12 @@ func DefaultConfig() *Config {
 
 	return &Config{
 		Core: CoreConfig{
-			HomeDir:       homeDir,
-			DataDir:       filepath.Join(homeDir, "data"),
-			CacheDir:      filepath.Join(homeDir, "cache"),
-			ParallelLimit: 10,
-			Timeout:       5 * time.Minute,
-			Debug:         false,
+			HomeDir: homeDir,
 		},
-		Security: SecurityConfig{
-			EncryptionAlgorithm: "aes-256-gcm",
-			KeyDerivation:       "scrypt",
-			SSLValidation:       true,
-			AuditLogging:        true,
-		},
+		Security: SecurityConfig{},
 
 		Logging: LoggingConfig{
-			Level:  "info",
-			Format: "json",
-		},
-		Tracing: TracingConfig{
-			Enabled:  false,
-			Endpoint: "",
+			Level: "info",
 		},
 		Metrics: MetricsConfig{
 			Enabled:       false,
@@ -53,14 +36,11 @@ func DefaultConfig() *Config {
 			},
 		},
 		Registration: RegistrationConfig{
-			Enabled:          false,
-			Port:             50100,
-			AuthToken:        "",
-			HeartbeatTimeout: 30 * time.Second,
+			Enabled: false,
+			Port:    50100,
 		},
 		Registry: RegistryConfig{
 			Namespace: "gibson",
-			TTL:       "30s",
 		},
 		Callback: CallbackConfig{
 			Enabled:          true,
@@ -70,10 +50,8 @@ func DefaultConfig() *Config {
 		Daemon: DaemonConfig{
 			GRPCAddress: "localhost:50002",
 		},
-		Embedder: embedder.DefaultEmbedderConfig(),
 		Redis: RedisConfig{
 			URL:            "redis://localhost:6379",
-			Password:       "",
 			Database:       0,
 			PoolSize:       10,
 			ConnectTimeout: 5 * time.Second,
@@ -84,13 +62,8 @@ func DefaultConfig() *Config {
 			ClusterAddrs:   []string{},
 			SentinelMaster: "",
 			SentinelAddrs:  []string{},
-			TLSEnabled:     false,
-			TLSCertFile:    "",
-			TLSKeyFile:     "",
-			TLSCAFile:      "",
 		},
 		ActivityLogging: ActivityLoggingConfig{
-			Enabled:          true,
 			Level:            "normal",
 			MaxContentLength: 500,
 			Output:           "stdout",
@@ -98,7 +71,6 @@ func DefaultConfig() *Config {
 			BufferSize:       10000,
 		},
 		Shutdown: ShutdownConfig{
-			Timeout:           30 * time.Second,
 			DrainTimeout:      10 * time.Second,
 			CheckpointTimeout: 5 * time.Second,
 			AgentTimeout:      15 * time.Second,
@@ -111,8 +83,7 @@ func DefaultConfig() *Config {
 		Authz: AuthzConfig{
 			// One-code-path slice deploy#195: FGA is always required.
 			// No more `enabled` or `require_ready` toggles.
-			Provider:          "openfga",
-			EnforcementSource: "fga", // Only valid value
+			Provider: "openfga",
 			Fga: FgaClientConfig{
 				Endpoint:  "gibson-fga:8080",
 				StoreID:   "", // resolved from ConfigMap at startup if empty

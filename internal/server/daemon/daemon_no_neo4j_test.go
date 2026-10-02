@@ -26,7 +26,6 @@ func TestDaemonNew_NoNeo4jSharedConfig(t *testing.T) {
 	// Explicitly set TenantMode=instance (the default post-refactor).
 	// No URI, Username, Password — those fields are gone from config.Neo4jConfig.
 	cfg.GraphRAG = config.GraphRAGConfig{
-		Enabled: true,
 		Neo4j: config.Neo4jConfig{
 			TenantMode: "instance",
 			// SharedClusterURI intentionally empty (instance mode doesn't use it).
