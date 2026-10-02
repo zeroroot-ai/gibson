@@ -8,7 +8,7 @@
 #     graph (`go list -m all` = every module needed to build the main module
 #     and its tests) must not contain any ELv2 module (gibson, dashboard,
 #     deploy), the closed module (billing), or a private one (gitops,
-#     zda-ast, testharness). Additionally every go.mod in each repo
+#     testharness). Additionally every go.mod in each repo
 #     (examples, tooling) is require-line greped for the same set.
 #     This is the gibson-side sweep complementing each repo's local guard
 #     (e.g. sdk's `make check-no-gibson`).
@@ -34,7 +34,7 @@ REPO_ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 # Forbidden module namespaces for the Apache layer.
 # `gibson` is matched exactly (trailing space, / or EOL) so that the Apache
 # module github.com/zeroroot-ai/gibson-executor does NOT match.
-FORBIDDEN_RE='github\.com/zeroroot-ai/(gibson|billing|dashboard|deploy|gitops|zda-ast|testharness)([[:space:]/]|$)'
+FORBIDDEN_RE='github\.com/zeroroot-ai/(gibson|billing|dashboard|deploy|gitops|testharness)([[:space:]/]|$)'
 
 # Apache repos and the path of their primary Go module within the repo.
 APACHE_REPOS=(sdk adk setec gibson-executor)
