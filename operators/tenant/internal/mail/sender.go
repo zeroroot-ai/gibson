@@ -8,6 +8,7 @@ import (
 	"bytes"
 	"context"
 	"crypto/tls"
+	"crypto/x509"
 	"fmt"
 	"net"
 	"net/smtp"
@@ -63,6 +64,17 @@ type Config struct {
 	// because that is what port 587 and SES want and what nearly every
 	// deployment uses.
 	TLSMode TLSMode
+
+	// RootCAs is the trust anchor for the SMTP server's certificate. Nil means
+	// the system pool, which is what SES and every public relay need.
+	//
+	// It exists for the self-hosted tier: a deployment whose SMTP relay presents
+	// a certificate from an internal CA could not send mail at all, in either
+	// mode, because both verify and neither had a way to be told what to trust.
+	// The alternative an operator reaches for in that situation is to disable
+	// verification, so the knob that exists should be the one that keeps it on.
+	RootCAs *x509.CertPool
+
 	Timeout time.Duration
 }
 
@@ -192,6 +204,16 @@ func (s *SMTPSender) send(to string, tpl *template.Template, data any) error {
 	return s.sendSTARTTLS(addr, auth, to, buf.Bytes())
 }
 
+// tlsConfig is the TLS settings both modes share, so neither can drift from the
+// other on verification or minimum version.
+func (s *SMTPSender) tlsConfig() *tls.Config {
+	return &tls.Config{
+		ServerName: s.cfg.Host,
+		MinVersion: tls.VersionTLS12,
+		RootCAs:    s.cfg.RootCAs,
+	}
+}
+
 // dial opens a bounded TCP connection and sets a deadline covering the whole
 // exchange.
 //
@@ -203,11 +225,11 @@ func (s *SMTPSender) send(to string, tpl *template.Template, data any) error {
 func (s *SMTPSender) dial(addr string) (net.Conn, error) {
 	conn, err := net.DialTimeout("tcp", addr, s.cfg.Timeout)
 	if err != nil {
-		return nil, err
+		return nil, fmt.Errorf("dial %s within %s: %w", addr, s.cfg.Timeout, err)
 	}
 	if err := conn.SetDeadline(time.Now().Add(s.cfg.Timeout)); err != nil {
 		_ = conn.Close()
-		return nil, err
+		return nil, fmt.Errorf("set deadline on %s: %w", addr, err)
 	}
 	return conn, nil
 }
@@ -226,7 +248,7 @@ func (s *SMTPSender) sendSTARTTLS(addr string, auth smtp.Auth, to string, body [
 		return s.wrapSendErr(fmt.Errorf("read greeting: %w", err))
 	}
 	defer func() { _ = client.Close() }()
-	if err := client.StartTLS(&tls.Config{ServerName: s.cfg.Host, MinVersion: tls.VersionTLS12}); err != nil {
+	if err := client.StartTLS(s.tlsConfig()); err != nil {
 		return s.wrapSendErr(fmt.Errorf("starttls: %w", err))
 	}
 	return s.deliver(client, auth, to, body)
@@ -256,7 +278,7 @@ func (s *SMTPSender) sendImplicitTLS(addr string, auth smtp.Auth, to string, bod
 	if err != nil {
 		return s.wrapSendErr(fmt.Errorf("dial: %w", err))
 	}
-	conn := tls.Client(raw, &tls.Config{ServerName: s.cfg.Host, MinVersion: tls.VersionTLS12})
+	conn := tls.Client(raw, s.tlsConfig())
 	defer func() { _ = conn.Close() }()
 	if err := conn.Handshake(); err != nil {
 		return s.wrapSendErr(fmt.Errorf("tls handshake: %w", err))

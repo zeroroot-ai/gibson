@@ -4,6 +4,7 @@
 package mail
 
 import (
+	"bufio"
 	"context"
 	"crypto/rand"
 	"crypto/rsa"
@@ -92,9 +93,9 @@ func plainListener(t *testing.T) (host string, port int) {
 	return "127.0.0.1", ln.Addr().(*net.TCPAddr).Port
 }
 
-// tlsListener accepts TLS connections and nothing else. It stands in for an
-// implicit-TLS port (465): a server that expects a ClientHello first.
-func tlsListener(t *testing.T) (host string, port int) {
+// selfSignedCert mints a throwaway 127.0.0.1 certificate. Shared with
+// sender_delivery_test.go, which needs one to terminate TLS.
+func selfSignedCert(t *testing.T) tls.Certificate {
 	t.Helper()
 	key, err := rsa.GenerateKey(rand.Reader, 2048)
 	if err != nil {
@@ -111,9 +112,15 @@ func tlsListener(t *testing.T) (host string, port int) {
 	if err != nil {
 		t.Fatalf("cert: %v", err)
 	}
-	cert := tls.Certificate{Certificate: [][]byte{der}, PrivateKey: key}
+	return tls.Certificate{Certificate: [][]byte{der}, PrivateKey: key}
+}
+
+// tlsListener accepts TLS connections and nothing else. It stands in for an
+// implicit-TLS port (465): a server that expects a ClientHello first.
+func tlsListener(t *testing.T) (host string, port int) {
+	t.Helper()
 	ln, err := tls.Listen("tcp", "127.0.0.1:0", &tls.Config{
-		Certificates: []tls.Certificate{cert},
+		Certificates: []tls.Certificate{selfSignedCert(t)},
 		MinVersion:   tls.VersionTLS12,
 	})
 	if err != nil {
@@ -201,5 +208,127 @@ func TestSendInvitation_AlsoNamesTheMode(t *testing.T) {
 	}
 	if !strings.Contains(err.Error(), `"implicit"`) {
 		t.Errorf("the invitation failure does not name the mode: %v", err)
+	}
+}
+
+// Required fields are refused by name. A sender constructed without a From would
+// fail at the first MAIL FROM, from inside a reconcile, instead of at startup.
+func TestNewSMTPSender_RefusesMissingRequiredFields(t *testing.T) {
+	cases := map[string]Config{
+		"no host": {Port: 587, From: "a@b.test"},
+		"no port": {Host: "smtp.example.test", From: "a@b.test"},
+		"no from": {Host: "smtp.example.test", Port: 587},
+	}
+	for name, cfg := range cases {
+		t.Run(name, func(t *testing.T) {
+			if _, err := NewSMTPSender(cfg); err == nil {
+				t.Fatal("want a refusal")
+			} else if !strings.Contains(err.Error(), "required") {
+				t.Errorf("the refusal does not say what is required: %v", err)
+			}
+		})
+	}
+}
+
+// A zero Timeout becomes 30s rather than staying zero. Zero would mean "no
+// timeout" to net.DialTimeout, which is the unbounded reconcile this change
+// exists to remove.
+func TestNewSMTPSender_ZeroTimeoutBecomesABound(t *testing.T) {
+	s, err := NewSMTPSender(Config{Host: "smtp.example.test", Port: 587, From: "a@b.test"})
+	if err != nil {
+		t.Fatalf("construct: %v", err)
+	}
+	if s.cfg.Timeout != 30*time.Second {
+		t.Errorf("default timeout = %v, want 30s — zero means no timeout to net.DialTimeout",
+			s.cfg.Timeout)
+	}
+}
+
+// A refused connection fails in both modes with the mode named, rather than
+// surfacing a bare "connection refused" that says nothing about configuration.
+func TestSend_DialFailureNamesTheMode(t *testing.T) {
+	// Bind and close, so the port is almost certainly free and refusing.
+	ln, err := net.Listen("tcp", "127.0.0.1:0")
+	if err != nil {
+		t.Fatalf("listen: %v", err)
+	}
+	port := ln.Addr().(*net.TCPAddr).Port
+	_ = ln.Close()
+
+	for _, mode := range []TLSMode{TLSModeSTARTTLS, TLSModeImplicit} {
+		t.Run(string(mode), func(t *testing.T) {
+			s, cerr := NewSMTPSender(testConfig(mode, "127.0.0.1", port))
+			if cerr != nil {
+				t.Fatalf("construct: %v", cerr)
+			}
+			serr := s.SendWelcome(context.Background(), WelcomeMessage{
+				To: "owner@example.test", TenantName: "acme", DashboardURL: "https://app.example.test",
+			})
+			if serr == nil {
+				t.Fatal("want a failure dialling a closed port")
+			}
+			if !strings.Contains(serr.Error(), string(mode)) {
+				t.Errorf("the failure does not name the mode %q: %v", mode, serr)
+			}
+			if !strings.Contains(serr.Error(), "dial") {
+				t.Errorf("the failure does not say it was the dial: %v", serr)
+			}
+		})
+	}
+}
+
+// A server that greets but does not offer STARTTLS fails with "starttls" named.
+// net/smtp will not send PlainAuth over the un-upgraded link, so this is the
+// failure that protects the credentials — it should say so.
+func TestSend_ServerWithoutSTARTTLS_NamesTheUpgrade(t *testing.T) {
+	ln, err := net.Listen("tcp", "127.0.0.1:0")
+	if err != nil {
+		t.Fatalf("listen: %v", err)
+	}
+	t.Cleanup(func() { _ = ln.Close() })
+	go func() {
+		for {
+			conn, aerr := ln.Accept()
+			if aerr != nil {
+				return
+			}
+			go func(c net.Conn) {
+				defer func() { _ = c.Close() }()
+				_ = c.SetDeadline(time.Now().Add(5 * time.Second))
+				br := bufio.NewReader(c)
+				_, _ = c.Write([]byte("220 nostarttls.example.test ESMTP\r\n"))
+				for {
+					line, rerr := br.ReadString('\n')
+					if rerr != nil {
+						return
+					}
+					up := strings.ToUpper(strings.TrimRight(line, "\r\n"))
+					switch {
+					case strings.HasPrefix(up, "EHLO"), strings.HasPrefix(up, "HELO"):
+						// No STARTTLS in the capability list.
+						_, _ = c.Write([]byte("250-nostarttls.example.test\r\n250 AUTH PLAIN\r\n"))
+					case strings.HasPrefix(up, "QUIT"):
+						_, _ = c.Write([]byte("221 2.0.0 Bye\r\n"))
+						return
+					default:
+						_, _ = c.Write([]byte("502 5.5.1 Not implemented\r\n"))
+					}
+				}
+			}(conn)
+		}
+	}()
+
+	s, err := NewSMTPSender(testConfig(TLSModeSTARTTLS, "127.0.0.1", ln.Addr().(*net.TCPAddr).Port))
+	if err != nil {
+		t.Fatalf("construct: %v", err)
+	}
+	serr := s.SendWelcome(context.Background(), WelcomeMessage{
+		To: "owner@example.test", TenantName: "acme", DashboardURL: "https://app.example.test",
+	})
+	if serr == nil {
+		t.Fatal("want a failure against a server that does not offer STARTTLS")
+	}
+	if !strings.Contains(serr.Error(), "starttls") {
+		t.Errorf("the failure does not name the upgrade: %v", serr)
 	}
 }
