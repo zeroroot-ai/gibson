@@ -55,6 +55,18 @@ dump_applications() {
 
   local app
   for app in $apps; do
+    group "Application $app — retry budget and sync windows"
+    # The configured ordering and retry budget, so a reader does not have to go
+    # read the chart to know what Argo was told. A sync that exhausts its retries
+    # inside a dependency's startup window looks identical to a broken
+    # dependency unless both numbers are here.
+    $KUBECTL -n "$ARGOCD_NS" get application "$app" -o json 2>/dev/null \
+      | jq -r '"retry: \(.spec.syncPolicy.retry // "none configured")",
+               "operation startedAt: \(.status.operationState.startedAt // "?")",
+               "operation finishedAt: \(.status.operationState.finishedAt // "?")",
+               "revision: \(.status.operationState.syncResult.revision // "?")"' 2>&1 || true
+    endgroup
+
     group "Application $app — phase, message, failed resources"
     # The message is the sentence Argo wrote when the sync gave up. It is the
     # single most useful line and nothing printed it before.
@@ -178,6 +190,12 @@ dump_misbehaving_pods() {
     $KUBECTL -n "$ns" get pod "$pod" -o json 2>/dev/null \
       | jq -r '"phase=\(.status.phase)  node=\(.spec.nodeName // "-")",
                "ready=\((.status.conditions // []) | map(select(.type == "Ready")) | .[0].status // "?")",
+               "--- WHEN each condition last flipped, which is the only way a",
+               "--- post-mortem dump can say whether this pod was usable at the",
+               "--- moment something else depended on it",
+               ((.status.conditions // [])[] | "condition \(.type)=\(.status) at \(.lastTransitionTime // "?")"),
+               "startedAt=\(.status.startTime // "?")",
+               ((.status.containerStatuses // [])[] | "\(.name) running since \(.state.running.startedAt // .state.terminated.finishedAt // "?")"),
                ((.status.initContainerStatuses // [])[] | "init \(.name): ready=\(.ready) restarts=\(.restartCount) \(.state | keys[0])"),
                ((.status.containerStatuses // [])[] | "\(.name): ready=\(.ready) restarts=\(.restartCount) \(.state | keys[0])")' 2>&1 || true
 
