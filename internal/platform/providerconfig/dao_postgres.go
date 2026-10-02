@@ -17,8 +17,6 @@ import (
 	"github.com/zeroroot-ai/gibson/internal/infra/types"
 )
 
-const ()
-
 // providerConfigDAO is an unexported Postgres DAO for provider config metadata.
 // It operates against the provider_configs tables (migration 007).
 // It does NOT handle credentials — those flow through secrets.Service.

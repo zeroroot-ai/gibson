@@ -282,7 +282,7 @@ func (r *postgresComponentInstallRegistry) Register(ctx context.Context, install
 	// host).
 	kind := install.Kind
 	if kind == "" {
-		return fmt.Errorf("plugin registry register: kind is required")
+		return errors.New("plugin registry register: kind is required")
 	}
 
 	descriptorSet := descriptorSetForDB(install.ProtoDescriptorSet)
