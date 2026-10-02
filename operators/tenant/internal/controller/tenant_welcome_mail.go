@@ -31,6 +31,14 @@ const welcomeRetryInterval = 60 * time.Second
 // Status().Patch, so the condition set here rides that same patch and is
 // durable — a spec write would be discarded (tenant-operator#354).
 //
+// A durable write is necessary and not sufficient: the guard below reads the
+// condition off the Tenant the pass fetched, and a cached read can lag the
+// patch by up to a second (gibson#535). Reconcile fetches the Tenant through
+// r.reader(), the uncached API reader, so the guard sees the write it made.
+// This is the operator's only side effect guarded on a status condition:
+// `grep -rn IsStatusConditionTrue operators/tenant --include='*.go'` finds
+// this call alone outside tests (2026-10-02).
+//
 // Delivery is best-effort. A send failure is logged, surfaced as a Warning
 // event and reported back as a retry request; it never fails the reconcile
 // and never flips the tenant out of Ready. The condition stays unset so the
