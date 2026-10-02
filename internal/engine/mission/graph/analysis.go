@@ -27,6 +27,15 @@ type ValidationError struct {
 	DanglingEdges []DanglingEdge
 	OrphanNodes   []string
 	Cycles        [][]string
+	// NestedForEach names every for_each node whose template is itself a
+	// for_each. protovalidate cannot express "this nested MissionNode's config
+	// is not this variant", so the refusal has to live here (gibson#524).
+	//
+	// It is refused rather than supported because the instance count would be a
+	// product: a for_each over three targets whose template fans out over the
+	// same set is nine dispatches from a definition that reads like three, and
+	// `{{target.*}}` inside it would have two instance targets to mean.
+	NestedForEach []string
 }
 
 func (e *ValidationError) Error() string {
@@ -42,6 +51,10 @@ func (e *ValidationError) Error() string {
 	}
 	for _, c := range e.Cycles {
 		parts = append(parts, "cycle: "+strings.Join(c, "->"))
+	}
+	if len(e.NestedForEach) > 0 {
+		parts = append(parts, "for_each nodes whose template is itself a for_each: "+
+			strings.Join(e.NestedForEach, ", "))
 	}
 	return "mission graph: " + strings.Join(parts, "; ")
 }

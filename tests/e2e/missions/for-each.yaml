@@ -1,0 +1,55 @@
+# E2E mission fixture — FOR_EACH node running one template per target.
+#
+# Spec: per-target mission fan-out (gibson#524, epic gibson#496).
+#
+# FOR_EACH is NOT parallel. PARALLEL runs N *different* declared sub_nodes;
+# FOR_EACH runs ONE template node once per item in its source set, so the
+# mission author writes the work once and the daemon decides how many
+# instances exist from the mission's resolved target set.
+#
+# `{{target.*}}` inside the template binds to THAT INSTANCE's target, which is
+# the whole point: a two-target mission scans two hosts, and each finding
+# carries the target it came from. Outside a FOR_EACH the placeholder still
+# binds to the mission's primary target.
+#
+# The join is here on purpose. A FOR_EACH node has N instances but is still one
+# node in the graph, so a JOIN naming it waits for every instance rather than
+# the first — and the merge sees one result per target.
+
+name: e2e-for-each
+description: FOR_EACH noun e2e fixture (one tool node per target in the set).
+version: "1.0.0"
+target_ref: ""
+
+nodes:
+  scan_each_target:
+    id: scan_each_target
+    type: NODE_TYPE_FOR_EACH
+    for_each_config:
+      source: SOURCE_TARGET_SET
+      # Bounded from the start. An unbounded fan-out over a large target set
+      # would launch one sandbox per target at once.
+      max_concurrency: 4
+      template:
+        id: scan
+        type: NODE_TYPE_TOOL
+        tool_config:
+          tool_name: nmap
+          input:
+            # Bound per instance, server-side, to that instance's target.
+            target: "{{target.host}}"
+
+  report:
+    id: report
+    type: NODE_TYPE_JOIN
+    join_config:
+      wait_for: ["scan_each_target"]
+      strategy: MERGE_STRATEGY_CONCAT
+    dependencies: ["scan_each_target"]
+
+edges:
+  - from: scan_each_target
+    to: report
+
+entry_points: ["scan_each_target"]
+exit_points: ["report"]
