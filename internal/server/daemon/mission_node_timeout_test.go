@@ -21,7 +21,7 @@ func TestMissionDefinitionToProjected_CarriesTheNodeTimeout(t *testing.T) {
 	node := agentNode("zerocool")
 	node.Timeout = durationpb.New(8 * time.Hour)
 
-	proj, err := missionDefinitionToProjected(&missionpb.MissionDefinition{
+	proj, _, err := missionDefinitionToProjected(&missionpb.MissionDefinition{
 		Id:    "m1",
 		Nodes: map[string]*missionpb.MissionNode{"watch": node},
 	}, "", nil)
@@ -40,7 +40,7 @@ func TestMissionDefinitionToProjected_NoTimeoutIsZeroNotAnExpiry(t *testing.T) {
 	// Zero has to mean "the node declared none" so the dispatch boundary can
 	// decide per kind. Reading it as "expire now" would fail every node that
 	// does not set one.
-	proj, err := missionDefinitionToProjected(&missionpb.MissionDefinition{
+	proj, _, err := missionDefinitionToProjected(&missionpb.MissionDefinition{
 		Id:    "m1",
 		Nodes: map[string]*missionpb.MissionNode{"a": toolNode("nmap")},
 	}, "", nil)

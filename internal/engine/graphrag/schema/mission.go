@@ -236,8 +236,19 @@ type MissionNode struct {
 	Status      MissionNodeStatus `json:"status"`                 // Current execution status
 	IsDynamic   bool              `json:"is_dynamic"`             // True if spawned at runtime
 	SpawnedBy   string            `json:"spawned_by,omitempty"`   // ID of execution that spawned this
-	CreatedAt   time.Time         `json:"created_at"`             // When node was created
-	UpdatedAt   time.Time         `json:"updated_at"`             // When node was last updated
+	// TargetID is the target this node ran against, as a UUID string.
+	//
+	// It is the node's target and not the mission's. A fan-out mission runs one
+	// instance per target, so the mission's own target cannot answer "which
+	// target did this node assess" — and without an answer the graph shows one
+	// node for a ten-target scan and findings that cannot be split by host
+	// (gibson#528).
+	//
+	// Empty when the node is not bound to a target, which is every node in a
+	// mission authored before fan-out.
+	TargetID  string    `json:"target_id,omitempty"`
+	CreatedAt time.Time `json:"created_at"` // When node was created
+	UpdatedAt time.Time `json:"updated_at"` // When node was last updated
 }
 
 // NewMissionNode creates a new MissionNode with the given parameters.
@@ -341,6 +352,15 @@ func (n *MissionNode) WithTaskConfig(config map[string]any) *MissionNode {
 func (n *MissionNode) MarkDynamic(spawnedBy string) *MissionNode {
 	n.IsDynamic = true
 	n.SpawnedBy = spawnedBy
+	n.UpdatedAt = time.Now()
+	return n
+}
+
+// WithTargetID records the target this node ran against. A fan-out instance uses
+// it so the graph can answer "what did we learn about target X" without guessing
+// (gibson#528).
+func (n *MissionNode) WithTargetID(targetID string) *MissionNode {
+	n.TargetID = targetID
 	n.UpdatedAt = time.Now()
 	return n
 }

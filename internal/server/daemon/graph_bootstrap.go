@@ -10,6 +10,9 @@ import (
 	"strings"
 	"time"
 
+	"github.com/google/uuid"
+
+	"github.com/zeroroot-ai/gibson/internal/engine/brain"
 	"github.com/zeroroot-ai/gibson/internal/engine/graphrag/graph"
 	"github.com/zeroroot-ai/gibson/internal/engine/graphrag/queries"
 	"github.com/zeroroot-ai/gibson/internal/engine/graphrag/schema"
@@ -134,9 +137,23 @@ func convertToSchemaMission(m *mission.Mission, def *missionpb.MissionDefinition
 // and sets up all execution parameters including timeout, retry policy, and task configuration.
 // Nodes with dependencies start in "pending" status, while nodes without dependencies (entry points)
 // start in "ready" status.
-func convertToSchemaNode(missionID types.ID, nodeDef *missionpb.MissionNode, hasDependencies bool) *schema.MissionNode {
-	// Generate a new unique ID for this mission node instance
-	nodeID := types.NewID()
+func convertToSchemaNode(
+	missionID types.ID,
+	nodeDef *missionpb.MissionNode,
+	workNodeID string,
+	hasDependencies bool,
+	origin fanOutOrigin,
+	isInstance bool,
+) *schema.MissionNode {
+	// The node's identity is DERIVED from the mission and the projected work-node
+	// id, not minted fresh.
+	//
+	// It used to be types.NewID() per call, so the MERGE on `id` never matched
+	// anything: every run wrote a second :MissionNode for the same step, and a
+	// uniqueness constraint on `id` would have covered nothing a reader could
+	// use. A derived id is stable across runs and distinct per fan-out instance,
+	// because the work-node id carries the target (gibson#528).
+	nodeID := missionNodeGraphID(missionID, workNodeID)
 
 	// Determine the node type and create the appropriate schema node
 	var node *schema.MissionNode
@@ -145,7 +162,7 @@ func convertToSchemaNode(missionID types.ID, nodeDef *missionpb.MissionNode, has
 		node = schema.NewAgentNode(
 			nodeID,
 			missionID,
-			nodeDef.GetId(),
+			workNodeID,
 			nodeDef.GetDescription(),
 			nodeDef.GetAgentConfig().GetAgentName(),
 		)
@@ -153,7 +170,7 @@ func convertToSchemaNode(missionID types.ID, nodeDef *missionpb.MissionNode, has
 		node = schema.NewToolNode(
 			nodeID,
 			missionID,
-			nodeDef.GetId(),
+			workNodeID,
 			nodeDef.GetDescription(),
 			nodeDef.GetToolConfig().GetToolName(),
 		)
@@ -164,7 +181,7 @@ func convertToSchemaNode(missionID types.ID, nodeDef *missionpb.MissionNode, has
 		node = schema.NewToolNode(
 			nodeID,
 			missionID,
-			nodeDef.GetId(),
+			workNodeID,
 			nodeDef.GetDescription(),
 			nodeTypeName(nodeDef.GetType()),
 		)
@@ -193,6 +210,198 @@ func convertToSchemaNode(missionID types.ID, nodeDef *missionpb.MissionNode, has
 	// canonical types were lifted into the SDK; only Goal and Context
 	// survive on the proto Task. Tool/plugin inputs are typed map<string,
 	// string> on the proto so values flow through unchanged.
+	node.TaskConfig = taskConfigFor(nodeDef)
+
+	// Set initial status based on dependencies
+	// Nodes without dependencies are entry points and can start immediately (ready)
+	// Nodes with dependencies must wait for their dependencies to complete (pending)
+	if hasDependencies {
+		node.Status = schema.MissionNodeStatusPending
+	} else {
+		node.Status = schema.MissionNodeStatusReady
+	}
+
+	// A fan-out instance is a runtime-spawned node, which is exactly what
+	// IsDynamic/SpawnedBy already describe — so it goes in that paradigm rather
+	// than a new one. SpawnedBy names the for_each that produced it, and the
+	// target is the instance's own, not the mission's (gibson#528).
+	//
+	// Everything else is a static definition node: IsDynamic stays false and
+	// SpawnedBy stays empty, as it always has.
+	if isInstance {
+		node.MarkDynamic(origin.ForEachNodeID).WithTargetID(origin.TargetID)
+	}
+
+	return node
+}
+
+// missionNodeNamespace seeds the derivation of a :MissionNode's identity. It is a
+// fixed, arbitrary UUID: its only job is to keep these derived ids from colliding
+// with ids derived elsewhere from the same inputs.
+var missionNodeNamespace = uuid.MustParse("6f1b9f9a-6c2a-4a1e-9a5e-2f7a1c3d4b50")
+
+// missionNodeGraphID derives a :MissionNode's identity from the mission and the
+// projected work-node id.
+//
+// Deterministic, so the MERGE on `id` matches the node a previous run wrote
+// instead of adding another. A fan-out instance's work-node id carries its
+// target, so instances derive distinct ids without the target being mixed in
+// separately.
+func missionNodeGraphID(missionID types.ID, workNodeID string) types.ID {
+	return types.ID(uuid.NewSHA1(missionNodeNamespace, []byte(missionID.String()+"\x00"+workNodeID)).String())
+}
+
+// Bootstrap creates the complete mission graph structure in Neo4j.
+// This includes the Mission node (with full SQLite metadata), MissionRun node,
+// all MissionNodes, and their dependency relationships.
+//
+// The method is idempotent for Mission/MissionNodes - calling it multiple times is safe.
+// However, each call creates a NEW MissionRun node to track individual executions.
+//
+// Parameters:
+//   - ctx: Context for cancellation and timeouts
+//   - m: The mission state from SQLite (has stable ID across runs)
+//   - def: The mission definition, for the Mission node's own metadata
+//   - run: The mission run from SQLite (unique per execution)
+//   - proj: the PROJECTED work graph, which is the structure that actually runs
+//   - origins: where each fan-out instance came from
+//
+// Returns:
+//   - *BootstrapResult: Contains the MissionRunID for GraphRAG operations
+//   - error: Any error encountered during bootstrapping
+//
+// The bootstrap process follows these steps:
+//  1. Create/ensure the Mission node with full SQLite metadata (uses stable SQLite ID)
+//  2. Create a new MissionRun node linked to Mission (uses SQLite run ID)
+//  3. Create all MissionNodes and link them to Mission
+//  4. Create dependency relationships between nodes based on DependsOn fields
+//
+// The node set comes from the PROJECTION, not from def.GetNodes(). The projection
+// is what runs: it expands each for_each into one instance per target, flattens
+// parallel sub-nodes, and resolves every dependency through joins and conditions.
+// Writing def.GetNodes() instead recorded a graph that did not match the run — one
+// node for a whole fan-out, with no target on it, and dependencies that ignored
+// `edges`, a join's `wait_for` and a condition's branches because it read only
+// each node's own `dependencies` list (gibson#528).
+//
+// All operations use MERGE for Mission/MissionNodes to ensure idempotency.
+// MissionRuns always use CREATE to ensure each execution is tracked uniquely.
+func (b *GraphBootstrapper) Bootstrap(
+	ctx context.Context,
+	m *mission.Mission,
+	def *missionpb.MissionDefinition,
+	run *mission.MissionRun,
+	proj brain.MissionProjected,
+	origins fanOutOrigins,
+) (*BootstrapResult, error) {
+	// Create MissionQueries instance for graph operations
+	missionQueries := queries.NewMissionQueries(b.graphClient)
+
+	b.logger.Info("bootstrapping mission to graph",
+		"mission_id", m.ID,
+		"mission_name", m.Name,
+		"target_id", m.TargetID,
+		"run_id", run.ID,
+		"run_number", run.RunNumber)
+
+	// Step 1: Create/ensure Mission node with full SQLite metadata
+	// Uses MERGE on SQLite ID for idempotency - same mission returns same node
+	schemaMission := convertToSchemaMission(m, def)
+	if err := missionQueries.CreateMission(ctx, schemaMission); err != nil {
+		return nil, fmt.Errorf("failed to create mission in graph: %w", err)
+	}
+
+	b.logger.Info("created/ensured Mission node in graph",
+		"mission_id", m.ID)
+
+	// Step 2: Create a new MissionRun node for this execution
+	// Uses SQLite run ID for consistency between SQLite and Neo4j
+	if err := missionQueries.CreateMissionRun(ctx, m.ID, run.ID, run.RunNumber); err != nil {
+		return nil, fmt.Errorf("failed to create mission run node: %w", err)
+	}
+
+	b.logger.Info("created MissionRun node in graph",
+		"mission_id", m.ID,
+		"mission_run_id", run.ID,
+		"run_number", run.RunNumber)
+
+	// Step 3: Create one MissionNode per PROJECTED work node, and build the id
+	// mapping the dependency edges need.
+	nodeIDMap := make(map[string]types.ID, len(proj.Nodes))
+
+	for _, wn := range proj.Nodes {
+		origin, isInstance := origins[wn.ID]
+		// An instance's definition is its for_each's template; every other work
+		// node is its own definition node. A node with neither (a parallel
+		// sub-node, which the projection promotes) falls back to an empty
+		// definition, so the graph still records the node rather than dropping it.
+		defNode := definitionNodeFor(def, wn.ID, origin, isInstance)
+
+		schemaNode := convertToSchemaNode(m.ID, defNode, wn.ID, len(wn.DependsOn) > 0, origin, isInstance)
+
+		if err := missionQueries.CreateMissionNode(ctx, schemaNode); err != nil {
+			return nil, fmt.Errorf("failed to create mission node %s: %w", wn.ID, err)
+		}
+
+		nodeIDMap[wn.ID] = schemaNode.ID
+
+		b.logger.Debug("created mission node in graph",
+			"work_node_id", wn.ID,
+			"node_graph_id", schemaNode.ID,
+			"node_kind", wn.Kind,
+			"is_instance", isInstance,
+			"target_id", schemaNode.TargetID)
+	}
+
+	b.logger.Info("created mission nodes in graph",
+		"mission_id", m.ID,
+		"node_count", len(proj.Nodes))
+
+	// Step 4: Create dependency relationships, from the projection's resolved
+	// DependsOn. A dependency naming a node the projection did not produce is an
+	// internal invariant failure, not a user error: the projection resolves every
+	// dependency through joins, conditions and parallel groups before it returns.
+	dependencyCount := 0
+	for _, wn := range proj.Nodes {
+		fromNodeID := nodeIDMap[wn.ID]
+		for _, depID := range wn.DependsOn {
+			toNodeID, ok := nodeIDMap[depID]
+			if !ok {
+				return nil, fmt.Errorf("projected node %s depends on %s, which the projection did not produce", wn.ID, depID)
+			}
+
+			if err := missionQueries.CreateNodeDependency(ctx, fromNodeID, toNodeID); err != nil {
+				return nil, fmt.Errorf("failed to create dependency %s->%s: %w", wn.ID, depID, err)
+			}
+
+			dependencyCount++
+		}
+	}
+
+	b.logger.Info("created dependency relationships in graph",
+		"mission_id", m.ID,
+		"dependency_count", dependencyCount)
+
+	b.logger.Info("bootstrap complete",
+		"mission_id", m.ID,
+		"mission_run_id", run.ID,
+		"nodes_created", len(proj.Nodes),
+		"dependencies_created", dependencyCount)
+
+	return &BootstrapResult{
+		MissionRunID: run.ID.String(),
+	}, nil
+}
+
+// taskConfigFor builds the graph node's task_config from the definition node.
+//
+// Split out of convertToSchemaNode because that function reached a cyclomatic
+// complexity of 21 against a limit of 20: it was doing two jobs, mapping the
+// node kind and encoding the node config, and this is the second one.
+//
+// The default branch carries metadata rather than nothing, so a kind the graph
+// schema has no type for still records what the author attached to it.
+func taskConfigFor(nodeDef *missionpb.MissionNode) map[string]any {
 	taskConfig := make(map[string]any)
 	switch nodeDef.GetType() {
 	case missionpb.NodeType_NODE_TYPE_AGENT:
@@ -233,153 +442,52 @@ func convertToSchemaNode(missionID types.ID, nodeDef *missionpb.MissionNode, has
 			taskConfig[k] = v
 		}
 		taskConfig["plugin_method"] = nodeDef.GetPluginConfig().GetMethod()
-	default:
+	// Every remaining kind, named rather than defaulted: the linter's
+	// `default-signifies-exhaustive: false` means a new NodeType fails the build
+	// here instead of landing silently in a default arm, which is the behaviour
+	// worth having — a kind whose config this function does not know how to
+	// encode should be a review conversation, not a quiet metadata copy.
+	case missionpb.NodeType_NODE_TYPE_CONDITION,
+		missionpb.NodeType_NODE_TYPE_PARALLEL,
+		missionpb.NodeType_NODE_TYPE_JOIN,
+		missionpb.NodeType_NODE_TYPE_JOB,
+		missionpb.NodeType_NODE_TYPE_FOR_EACH,
+		missionpb.NodeType_NODE_TYPE_UNSPECIFIED:
 		for k, v := range nodeDef.GetMetadata() {
 			taskConfig[k] = v
 		}
 	}
-	node.TaskConfig = taskConfig
-
-	// Set initial status based on dependencies
-	// Nodes without dependencies are entry points and can start immediately (ready)
-	// Nodes with dependencies must wait for their dependencies to complete (pending)
-	if hasDependencies {
-		node.Status = schema.MissionNodeStatusPending
-	} else {
-		node.Status = schema.MissionNodeStatusReady
-	}
-
-	// Mark as static mission node (not dynamically spawned)
-	node.IsDynamic = false
-	// SpawnedBy is intentionally left empty for static nodes
-	// Only dynamic nodes spawned at runtime will have this field set
-
-	return node
+	return taskConfig
 }
 
-// Bootstrap creates the complete mission graph structure in Neo4j.
-// This includes the Mission node (with full SQLite metadata), MissionRun node,
-// all MissionNodes, and their dependency relationships.
+// definitionNodeFor returns the definition node a projected work node came from.
 //
-// The method is idempotent for Mission/MissionNodes - calling it multiple times is safe.
-// However, each call creates a NEW MissionRun node to track individual executions.
+// A fan-out instance came from its for_each's template, which is the only node
+// that holds its description, timeout and retry policy — the instance id names
+// the template but the definition map is keyed by the for_each. Everything else
+// is keyed by its own id.
 //
-// Parameters:
-//   - ctx: Context for cancellation and timeouts
-//   - m: The mission state from SQLite (has stable ID across runs)
-//   - def: The mission definition containing mission structure
-//   - run: The mission run from SQLite (unique per execution)
-//
-// Returns:
-//   - *BootstrapResult: Contains the MissionRunID for GraphRAG operations
-//   - error: Any error encountered during bootstrapping
-//
-// The bootstrap process follows these steps:
-//  1. Create/ensure the Mission node with full SQLite metadata (uses stable SQLite ID)
-//  2. Create a new MissionRun node linked to Mission (uses SQLite run ID)
-//  3. Create all MissionNodes and link them to Mission
-//  4. Create dependency relationships between nodes based on DependsOn fields
-//
-// All operations use MERGE for Mission/MissionNodes to ensure idempotency.
-// MissionRuns always use CREATE to ensure each execution is tracked uniquely.
-func (b *GraphBootstrapper) Bootstrap(ctx context.Context, m *mission.Mission, def *missionpb.MissionDefinition, run *mission.MissionRun) (*BootstrapResult, error) {
-	// Create MissionQueries instance for graph operations
-	missionQueries := queries.NewMissionQueries(b.graphClient)
-
-	b.logger.Info("bootstrapping mission to graph",
-		"mission_id", m.ID,
-		"mission_name", m.Name,
-		"target_id", m.TargetID,
-		"run_id", run.ID,
-		"run_number", run.RunNumber)
-
-	// Step 1: Create/ensure Mission node with full SQLite metadata
-	// Uses MERGE on SQLite ID for idempotency - same mission returns same node
-	schemaMission := convertToSchemaMission(m, def)
-	if err := missionQueries.CreateMission(ctx, schemaMission); err != nil {
-		return nil, fmt.Errorf("failed to create mission in graph: %w", err)
-	}
-
-	b.logger.Info("created/ensured Mission node in graph",
-		"mission_id", m.ID)
-
-	// Step 2: Create a new MissionRun node for this execution
-	// Uses SQLite run ID for consistency between SQLite and Neo4j
-	if err := missionQueries.CreateMissionRun(ctx, m.ID, run.ID, run.RunNumber); err != nil {
-		return nil, fmt.Errorf("failed to create mission run node: %w", err)
-	}
-
-	b.logger.Info("created MissionRun node in graph",
-		"mission_id", m.ID,
-		"mission_run_id", run.ID,
-		"run_number", run.RunNumber)
-
-	// Step 3: Create MissionNodes and build ID mapping
-	// Map YAML node IDs to generated types.IDs for dependency creation
-	nodeIDMap := make(map[string]types.ID)
-
-	for _, nodeDef := range def.GetNodes() {
-		hasDependencies := len(nodeDef.GetDependencies()) > 0
-
-		schemaNode := convertToSchemaNode(m.ID, nodeDef, hasDependencies)
-
-		if err := missionQueries.CreateMissionNode(ctx, schemaNode); err != nil {
-			return nil, fmt.Errorf("failed to create mission node %s: %w", nodeDef.GetId(), err)
-		}
-
-		nodeIDMap[nodeDef.GetId()] = schemaNode.ID
-
-		b.logger.Debug("created mission node in graph",
-			"node_yaml_id", nodeDef.GetId(),
-			"node_graph_id", schemaNode.ID,
-			"node_type", nodeDef.GetType())
-	}
-
-	b.logger.Info("created mission nodes in graph",
-		"mission_id", m.ID,
-		"node_count", len(def.GetNodes()))
-
-	// Step 4: Create dependency relationships
-	dependencyCount := 0
-	for _, nodeDef := range def.GetNodes() {
-		fromNodeID, ok := nodeIDMap[nodeDef.GetId()]
-		if !ok {
-			return nil, fmt.Errorf("node ID %s not found in mapping", nodeDef.GetId())
-		}
-
-		for _, depID := range nodeDef.GetDependencies() {
-			toNodeID, ok := nodeIDMap[depID]
-			if !ok {
-				return nil, fmt.Errorf("dependency node ID %s not found in mapping", depID)
+// A missing entry returns an empty node rather than an error. A parallel
+// sub-node is promoted by the projection and is not in def.GetNodes(), and a
+// node absent from the graph is worse than a node with thin metadata.
+func definitionNodeFor(
+	def *missionpb.MissionDefinition,
+	workNodeID string,
+	origin fanOutOrigin,
+	isInstance bool,
+) *missionpb.MissionNode {
+	if isInstance {
+		if fe := def.GetNodes()[origin.ForEachNodeID]; fe != nil {
+			if tpl := fe.GetForEachConfig().GetTemplate(); tpl != nil {
+				return tpl
 			}
-
-			if err := missionQueries.CreateNodeDependency(ctx, fromNodeID, toNodeID); err != nil {
-				return nil, fmt.Errorf("failed to create dependency %s->%s: %w", nodeDef.GetId(), depID, err)
-			}
-
-			b.logger.Debug("created dependency relationship",
-				"from_yaml_id", nodeDef.GetId(),
-				"to_yaml_id", depID,
-				"from_graph_id", fromNodeID,
-				"to_graph_id", toNodeID)
-
-			dependencyCount++
 		}
+		return &missionpb.MissionNode{}
 	}
-
-	b.logger.Info("created dependency relationships in graph",
-		"mission_id", m.ID,
-		"dependency_count", dependencyCount)
-
-	b.logger.Info("bootstrap complete",
-		"mission_id", m.ID,
-		"mission_run_id", run.ID,
-		"nodes_created", len(def.GetNodes()),
-		"dependencies_created", dependencyCount)
-
-	return &BootstrapResult{
-		MissionRunID: run.ID.String(),
-	}, nil
+	if n := def.GetNodes()[workNodeID]; n != nil {
+		return n
+	}
+	return &missionpb.MissionNode{}
 }
 
 // nodeTypeName returns a stable lower-case label for a proto NodeType,

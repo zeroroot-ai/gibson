@@ -21,6 +21,7 @@ package daemon
 
 import (
 	"encoding/json"
+	"errors"
 	"fmt"
 	"google.golang.org/protobuf/encoding/protojson"
 	"sort"
@@ -45,9 +46,13 @@ import (
 //
 // An empty set is the pre-fan-out behaviour and is not an error — every mission
 // before this took exactly one target and bound it at submit.
-func missionDefinitionToProjected(def *missionpb.MissionDefinition, goal string, targets []forEachTarget) (brain.MissionProjected, error) {
+func missionDefinitionToProjected(
+	def *missionpb.MissionDefinition,
+	goal string,
+	targets []forEachTarget,
+) (brain.MissionProjected, fanOutOrigins, error) {
 	if def == nil {
-		return brain.MissionProjected{}, fmt.Errorf("nil mission definition")
+		return brain.MissionProjected{}, nil, errors.New("nil mission definition")
 	}
 
 	// 0. Refuse the fan-out declarations the daemon does not support, from the
@@ -56,19 +61,19 @@ func missionDefinitionToProjected(def *missionpb.MissionDefinition, goal string,
 	// for_each collapsed and never expanded, so the work it declares would
 	// vanish without a word (gibson#527).
 	if err := graph.RefuseUnsupportedFanOut(def.GetNodes()); err != nil {
-		return brain.MissionProjected{}, fmt.Errorf("mission %q: %w", def.GetId(), err)
+		return brain.MissionProjected{}, nil, fmt.Errorf("mission %q: %w", def.GetId(), err)
 	}
 
 	// 1. Flatten parallel sub-nodes into the node set (they become real nodes).
 	allNodes, err := flattenParallel(def)
 	if err != nil {
-		return brain.MissionProjected{}, err
+		return brain.MissionProjected{}, nil, err
 	}
 
 	// 1b. Expand each for_each into one instance per target.
-	forEachInstances, err := expandForEachNodes(def, targets, allNodes)
+	forEachInstances, origins, err := expandForEachNodes(def, targets, allNodes)
 	if err != nil {
-		return brain.MissionProjected{}, err
+		return brain.MissionProjected{}, nil, err
 	}
 
 	// 2. Raw deps: per-node `dependencies` ∪ incoming `edges`. Parallel sub-nodes
@@ -105,7 +110,7 @@ func missionDefinitionToProjected(def *missionpb.MissionDefinition, goal string,
 	// 4/5. Build WorkNodes for real nodes, rewriting deps through the resolver.
 	nodes, err := buildWorkNodes(allNodes, deps, instanceSet(forEachInstances))
 	if err != nil {
-		return brain.MissionProjected{}, err
+		return brain.MissionProjected{}, nil, err
 	}
 
 	return brain.MissionProjected{
@@ -114,7 +119,7 @@ func missionDefinitionToProjected(def *missionpb.MissionDefinition, goal string,
 		Budget:      budgetFromConstraints(def.GetConstraints()),
 		Nodes:       nodes,
 		DeciderSlot: deciderSlotFrom(def.GetDeciderSlot()),
-	}, nil
+	}, origins, nil
 }
 
 // nodeDeps accumulates the raw dependency sets the projection builds before it
@@ -170,32 +175,54 @@ func expandForEachNodes(
 	def *missionpb.MissionDefinition,
 	targets []forEachTarget,
 	allNodes map[string]*missionpb.MissionNode,
-) (map[string][]string, error) {
+) (map[string][]string, fanOutOrigins, error) {
 	forEachInstances := map[string][]string{}
+	origins := fanOutOrigins{}
 	for id, n := range def.GetNodes() {
 		if n.GetType() != missionpb.NodeType_NODE_TYPE_FOR_EACH {
 			continue
 		}
 		tpl := n.GetForEachConfig().GetTemplate()
 		if tpl == nil || tpl.GetId() == "" {
-			return nil, fmt.Errorf("for_each node %q: template missing or has no id", id)
+			return nil, nil, fmt.Errorf("for_each node %q: template missing or has no id", id)
 		}
 		if len(targets) == 0 {
-			return nil, fmt.Errorf(
+			return nil, nil, fmt.Errorf(
 				"for_each node %q: the run resolved no targets, so it would expand to nothing; "+
 					"a mission that fans out needs at least one target", id)
 		}
 		insts, err := expandForEach(id, n, targets)
 		if err != nil {
-			return nil, err
+			return nil, nil, err
 		}
-		for _, inst := range insts {
+		for k, inst := range insts {
 			allNodes[inst.GetId()] = inst
 			forEachInstances[id] = append(forEachInstances[id], inst.GetId())
+			origins[inst.GetId()] = fanOutOrigin{
+				ForEachNodeID: id,
+				TemplateID:    tpl.GetId(),
+				TargetID:      targets[k].ID,
+			}
 		}
 	}
-	return forEachInstances, nil
+	return forEachInstances, origins, nil
 }
+
+// fanOutOrigin records where one fan-out instance came from.
+//
+// Every field is an output of expansion that the instance id cannot answer on its
+// own: the id names the TEMPLATE and the target, not the for_each node that holds
+// the template. The graph writer needs the for_each for SpawnedBy and the
+// template for the definition metadata it still reads from the proto (gibson#528).
+type fanOutOrigin struct {
+	ForEachNodeID string
+	TemplateID    string
+	TargetID      string
+}
+
+// fanOutOrigins maps an instance's work-node id to where it came from. Empty for
+// a mission with no for_each, which is every mission authored before fan-out.
+type fanOutOrigins map[string]fanOutOrigin
 
 // boundFanOut gives every instance the for_each node's own dependencies, then
 // bounds how many instances run at once.

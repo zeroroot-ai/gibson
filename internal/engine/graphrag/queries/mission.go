@@ -411,6 +411,7 @@ func (mq *MissionQueries) CreateMissionNode(ctx context.Context, node *schema.Mi
 			n.status = $status,
 			n.is_dynamic = $is_dynamic,
 			n.spawned_by = $spawned_by,
+			n.target_id = $target_id,
 			n.created_at = $created_at,
 			n.updated_at = $updated_at
 		WITH n
@@ -433,6 +434,7 @@ func (mq *MissionQueries) CreateMissionNode(ctx context.Context, node *schema.Mi
 		"status":       string(node.Status),
 		"is_dynamic":   node.IsDynamic,
 		"spawned_by":   node.SpawnedBy,
+		"target_id":    node.TargetID,
 		"created_at":   node.CreatedAt.UTC().Format(time.RFC3339Nano),
 		"updated_at":   node.UpdatedAt.UTC().Format(time.RFC3339Nano),
 	}

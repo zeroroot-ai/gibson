@@ -677,3 +677,47 @@ func TestConstants(t *testing.T) {
 	assert.Equal(t, "agent", MissionNodeTypeAgent.String())
 	assert.Equal(t, "tool", MissionNodeTypeTool.String())
 }
+
+// WithTargetID records the target a node ran against. A fan-out mission runs one
+// instance per target, so the mission's own target cannot answer "which target
+// did this node assess" — without it the graph shows one node for a ten-target
+// scan and findings that cannot be split by host (gibson#528).
+func TestMissionNode_WithTargetID(t *testing.T) {
+	node := NewToolNode(types.NewID(), types.NewID(), "scan", "probe one host", "nmap")
+	if node.TargetID != "" {
+		t.Fatalf("a fresh node carries target_id %q, want empty", node.TargetID)
+	}
+	before := node.UpdatedAt
+
+	target := types.NewID().String()
+	got := node.WithTargetID(target)
+
+	if got != node {
+		t.Error("WithTargetID must return the same node so it chains")
+	}
+	if node.TargetID != target {
+		t.Errorf("target_id = %q, want %q", node.TargetID, target)
+	}
+	if !node.UpdatedAt.After(before) && !node.UpdatedAt.Equal(before) {
+		t.Error("UpdatedAt went backwards")
+	}
+}
+
+// Chained with MarkDynamic, which is how a fan-out instance is built: spawned at
+// runtime by its for_each, and bound to one target.
+func TestMissionNode_MarkDynamicThenWithTargetID(t *testing.T) {
+	node := NewToolNode(types.NewID(), types.NewID(), "scan", "probe one host", "nmap")
+	target := types.NewID().String()
+
+	node.MarkDynamic("each").WithTargetID(target)
+
+	if !node.IsDynamic {
+		t.Error("the instance is not marked dynamic")
+	}
+	if node.SpawnedBy != "each" {
+		t.Errorf("spawned_by = %q, want the for_each node id", node.SpawnedBy)
+	}
+	if node.TargetID != target {
+		t.Errorf("target_id = %q, want %q", node.TargetID, target)
+	}
+}
