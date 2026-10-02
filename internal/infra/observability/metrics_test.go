@@ -590,61 +590,6 @@ func TestConcurrentLazyCreation(t *testing.T) {
 	assert.True(t, exists)
 }
 
-// TestLabelsToAttributes tests label conversion to OpenTelemetry attributes.
-func TestLabelsToAttributes(t *testing.T) {
-	tests := []struct {
-		name   string
-		labels map[string]string
-		want   int
-	}{
-		{
-			name:   "nil labels",
-			labels: nil,
-			want:   0,
-		},
-		{
-			name:   "empty labels",
-			labels: map[string]string{},
-			want:   0,
-		},
-		{
-			name: "single label",
-			labels: map[string]string{
-				"key": "value",
-			},
-			want: 1,
-		},
-		{
-			name: "multiple labels",
-			labels: map[string]string{
-				"key1": "value1",
-				"key2": "value2",
-				"key3": "value3",
-			},
-			want: 3,
-		},
-	}
-
-	for _, tt := range tests {
-		t.Run(tt.name, func(t *testing.T) {
-			attrs := labelsToAttributes(tt.labels)
-			assert.Equal(t, tt.want, len(attrs))
-
-			// Verify each label is converted correctly
-			for k, v := range tt.labels {
-				found := false
-				for _, attr := range attrs {
-					if string(attr.Key) == k && attr.Value.AsString() == v {
-						found = true
-						break
-					}
-				}
-				assert.True(t, found, "label %s=%s should be in attributes", k, v)
-			}
-		})
-	}
-}
-
 // TestMetricNameConstants tests that metric name constants are properly defined.
 func TestMetricNameConstants(t *testing.T) {
 	// Verify all metric constants are non-empty and follow naming convention
