@@ -480,6 +480,136 @@ func (m *missionManager) Run(ctx context.Context, missionDefinitionID, targetID 
 		return "", err
 	}
 
+	return m.startRun(ctx, callingTenant, missionRecord, def)
+}
+
+// RunExisting starts a mission the store already holds, bound to that mission's
+// own target.
+//
+// This is the path an originated child mission takes (ADR on origination;
+// gibson#529). It exists because the child is a mission RECORD, not a definition
+// plus a target: it carries its own definition JSON, its own target set, a budget
+// already clamped and reserved against its parent, and its lineage metadata. Run
+// cannot start it — Run looks a definition up by id and creates a NEW record,
+// which would abandon the child's record along with its reservation and lineage.
+//
+// What the adapter did before: write the child's definition JSON to a temp file,
+// pass that file PATH where Run expects a definition id, and pass the child's
+// mission UUID where Run expects a target id. The file was never read — Run
+// resolves a definition through the store, never from disk — so the lookup failed
+// on a path that is not a definition name and the child never ran. The temp file,
+// and the comment saying Run "requires a file path", described a Run that does
+// not exist.
+//
+// The target is the mission's own primary, resolved and ownership-checked through
+// the same resolveRunTarget the submit path uses, and the definition is bound
+// against it before it is projected. A child whose target set holds more than one
+// fans out through a for_each like any other mission, because the projection
+// resolves Mission.TargetSet() and knows nothing about how the mission was
+// created.
+func (m *missionManager) RunExisting(ctx context.Context, missionID string) (string, error) {
+	callingTenant, tenantErr := tenantFromCtx(ctx)
+	if tenantErr != nil {
+		return "", tenantErr
+	}
+
+	id, parseErr := types.ParseID(missionID)
+	if parseErr != nil {
+		return "", fmt.Errorf("mission run: invalid mission id %q: %w", missionID, parseErr)
+	}
+
+	mStore, mStoreRelease, mStoreErr := m.missionStoreFor(ctx, callingTenant)
+	if mStoreErr != nil {
+		return "", fmt.Errorf("mission run: acquire mission store: %w", mStoreErr)
+	}
+	defer mStoreRelease()
+	if mStore == nil {
+		return "", errors.New("mission store not initialized (pool not configured)")
+	}
+
+	missionRecord, getErr := mStore.Get(ctx, id)
+	if getErr != nil {
+		return "", fmt.Errorf("mission run: mission %s not found: %w", missionID, getErr)
+	}
+	if missionRecord.MissionDefinitionJSON == "" {
+		return "", fmt.Errorf("mission run: mission %s has no definition", missionID)
+	}
+
+	def, bindErr := m.bindStoredDefinition(ctx, missionRecord)
+	if bindErr != nil {
+		return "", bindErr
+	}
+	if saveErr := mStore.Save(ctx, missionRecord); saveErr != nil {
+		return "", fmt.Errorf("mission run: save bound definition of mission %s: %w", missionID, saveErr)
+	}
+
+	if _, running := m.getActive(callingTenant, missionRecord.ID.String()); running {
+		return "", fmt.Errorf("mission %s is already running", missionRecord.ID)
+	}
+
+	return m.startRun(ctx, callingTenant, missionRecord, def)
+}
+
+// bindStoredDefinition parses a stored mission's definition, resolves that
+// mission's OWN target, and binds the definition against it. It writes the bound
+// definition and the target reference back onto rec, so the caller persists one
+// bound copy.
+//
+// The parent's binding is never reused. A child narrowed to a different target in
+// the parent's set has to reach its own host, and a child dispatched against the
+// parent's target would assess the wrong one and report the result as the
+// child's (gibson#529).
+//
+// The target is read through resolveTargetUUID, the same path the submit flow
+// uses, so ownership is checked here too — a stored TargetID is not a licence to
+// read a target the tenant does not hold.
+func (m *missionManager) bindStoredDefinition(ctx context.Context, rec *mission.Mission) (*missionpb.MissionDefinition, error) {
+	if rec.MissionDefinitionJSON == "" {
+		return nil, fmt.Errorf("mission run: mission %s has no definition", rec.ID)
+	}
+	def, unmarshalErr := mission.UnmarshalDefinitionJSON([]byte(rec.MissionDefinitionJSON))
+	if unmarshalErr != nil {
+		return nil, fmt.Errorf("mission run: parse stored definition of mission %s: %w", rec.ID, unmarshalErr)
+	}
+	if rec.TargetID.IsZero() {
+		return nil, fmt.Errorf("mission run: mission %s names no target to bind against", rec.ID)
+	}
+	target, targetErr := resolveTargetUUID(ctx, m.targetStore, rec.TargetID.String(), resolveTargetCallerTenant(ctx))
+	if targetErr != nil {
+		return nil, fmt.Errorf("mission run: resolve target of mission %s: %w", rec.ID, targetErr)
+	}
+	def, bindErr := targetbind.Bind(def, target)
+	if bindErr != nil {
+		return nil, fmt.Errorf("mission run: bind target of mission %s: %w", rec.ID, bindErr)
+	}
+	boundJSON, marshalErr := mission.MarshalDefinitionJSON(def)
+	if marshalErr != nil {
+		return nil, fmt.Errorf("mission run: serialize bound definition of mission %s: %w", rec.ID, marshalErr)
+	}
+	rec.MissionDefinitionJSON = string(boundJSON)
+	if ref := runTargetRef(target); ref != "" {
+		if rec.Metadata == nil {
+			rec.Metadata = make(map[string]any)
+		}
+		rec.Metadata["target_ref"] = ref
+	}
+	return def, nil
+}
+
+// startRun takes a mission record that already exists and starts one execution of
+// it: a new MissionRun, the authz state the component callbacks resolve against,
+// the active-mission entry, and the executor goroutine.
+//
+// It is shared by every way a mission starts. Run reaches it after resolving a
+// definition and a target from a caller's arguments; RunExisting reaches it after
+// reading a mission the store already holds. One tail, so the two cannot diverge
+// on what starting a mission means (gibson#529).
+func (m *missionManager) startRun(
+	ctx context.Context,
+	callingTenant auth.TenantID,
+	missionRecord *mission.Mission,
+	def *missionpb.MissionDefinition,
+) (string, error) {
 	// Create new MissionRun for this execution
 	rStore, rStoreRelease, rStoreErr := m.runStoreFor(ctx, callingTenant)
 	defer rStoreRelease()

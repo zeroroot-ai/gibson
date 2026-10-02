@@ -370,3 +370,45 @@ func TestForEach_MergeRuleOverAFanOutSourceIsRefusedOnTheRunPath(t *testing.T) {
 		}
 	}
 }
+
+// A run that resolved more than one target but declares no for_each is refused.
+// It would bind every node to the primary and assess only that one, while the
+// mission record, the authorization scope and the report all say N.
+//
+// The originate path is the first to produce N>1 — Originator.buildChild puts
+// req.TargetIDs[0] in TargetID and the rest in AdditionalTargetIDs — so this
+// guard could not fire before fan-out existed (gibson#529).
+func TestForEach_MultipleTargetsWithoutAForEachIsRefused(t *testing.T) {
+	def := forEachDef(0)
+	delete(def.Nodes, "each")
+	delete(def.Nodes, "report")
+	def.Nodes["scan"] = agentNode("nmap-agent")
+
+	_, _, err := missionDefinitionToProjected(def, "", []forEachTarget{
+		fanTarget("11111111-1111-1111-1111-111111111111", "a", "https://10.0.0.1:6443"),
+		fanTarget("22222222-2222-2222-2222-222222222222", "b", "https://10.0.0.2:6443"),
+	})
+	if err == nil {
+		t.Fatal("want a refusal for a two-target run that fans out over nothing")
+	}
+	for _, want := range []string{"2 targets", "no for_each"} {
+		if !strings.Contains(err.Error(), want) {
+			t.Errorf("the refusal does not say %q: %v", want, err)
+		}
+	}
+}
+
+// One target and no for_each is every mission authored before fan-out, and stays
+// accepted.
+func TestForEach_OneTargetWithoutAForEachIsAccepted(t *testing.T) {
+	def := forEachDef(0)
+	delete(def.Nodes, "each")
+	delete(def.Nodes, "report")
+	def.Nodes["scan"] = agentNode("nmap-agent")
+
+	if _, _, err := missionDefinitionToProjected(def, "", []forEachTarget{
+		fanTarget("11111111-1111-1111-1111-111111111111", "a", "https://10.0.0.1:6443"),
+	}); err != nil {
+		t.Errorf("a single-target mission with no for_each must still project: %v", err)
+	}
+}
