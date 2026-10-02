@@ -205,3 +205,26 @@ func TestUnboundTarget_SaysNothingAboutABoundNode(t *testing.T) {
 		t.Errorf("a bound node reported unbound placeholders: %v", left)
 	}
 }
+
+// A repeated string field is walked too. The walker has a separate branch for
+// lists, and a node whose list fields were skipped would keep its placeholders
+// there while the rest of the node bound — the half-bound shape that is hardest
+// to notice.
+func TestBindNode_WalksRepeatedStringFields(t *testing.T) {
+	node := toolNode("scan", map[string]string{"target": "{{target.host}}"})
+	node.Dependencies = []string{"setup", "{{target.name}}-probe"}
+
+	out, err := BindNode(node, fanTarget("goat-a", "https://10.0.0.1:6443"))
+	if err != nil {
+		t.Fatalf("bind: %v", err)
+	}
+	if len(out.GetDependencies()) != 2 {
+		t.Fatalf("dependencies = %v, want both entries kept", out.GetDependencies())
+	}
+	if out.GetDependencies()[0] != "setup" {
+		t.Errorf("a dependency with no placeholder was rewritten: %q", out.GetDependencies()[0])
+	}
+	if out.GetDependencies()[1] != "goat-a-probe" {
+		t.Errorf("a placeholder in a list entry was not bound: %q", out.GetDependencies()[1])
+	}
+}
