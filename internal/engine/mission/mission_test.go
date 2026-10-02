@@ -159,7 +159,10 @@ func TestMission_Validate(t *testing.T) {
 			errMsg:  "target ID is required",
 		},
 		{
-			name: "missing mission ID",
+			// The message says "mission definition ID", not "mission ID". The two
+			// used to read the same, so a Save refused for a missing
+			// MissionDefinitionID sent the reader looking at Mission.ID.
+			name: "missing mission definition ID",
 			mission: &Mission{
 				ID:       types.NewID(),
 				Name:     "Test",
@@ -167,7 +170,7 @@ func TestMission_Validate(t *testing.T) {
 				Status:   MissionStatusPending,
 			},
 			wantErr: true,
-			errMsg:  "mission ID is required",
+			errMsg:  "mission definition ID is required",
 		},
 		{
 			name: "missing status",

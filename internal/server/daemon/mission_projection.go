@@ -76,6 +76,21 @@ func missionDefinitionToProjected(
 		return brain.MissionProjected{}, nil, err
 	}
 
+	// 1c. A run that resolved more than one target but fans out over none would
+	// bind every node to the primary and assess only that one, while the mission
+	// record, the authorization scope and the report all say N.
+	//
+	// The originate path is the first to produce N>1: Originator.buildChild puts
+	// req.TargetIDs[0] in TargetID and the rest in AdditionalTargetIDs. No submit
+	// path does, which is why this could not fire before (gibson#529).
+	if len(targets) > 1 && len(forEachInstances) == 0 {
+		return brain.MissionProjected{}, nil, fmt.Errorf(
+			"mission %q resolved %d targets but declares no for_each, so it would "+
+				"assess only the first and report as though it covered all of them; "+
+				"fan out with a for_each node, or run it against one target",
+			def.GetId(), len(targets))
+	}
+
 	// 2. Raw deps: per-node `dependencies` ∪ incoming `edges`. Parallel sub-nodes
 	// and for_each instances inherit their container node's deps.
 	deps := nodeDeps{}

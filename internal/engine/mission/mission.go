@@ -5,6 +5,7 @@ package mission
 
 import (
 	"encoding/json"
+	"errors"
 	"fmt"
 	"time"
 
@@ -470,7 +471,7 @@ func (m *Mission) Validate() error {
 		return fmt.Errorf("target ID is required")
 	}
 	if m.MissionDefinitionID.IsZero() {
-		return fmt.Errorf("mission ID is required")
+		return errors.New("mission definition ID is required")
 	}
 	if m.Status == "" {
 		return fmt.Errorf("mission status is required")

@@ -17,7 +17,6 @@ package daemon
 
 import (
 	"context"
-	"os"
 	"time"
 
 	"google.golang.org/grpc/codes"
@@ -156,58 +155,25 @@ func (a *missionHarnessAdapter) CreateMission(ctx context.Context, req *harness.
 	}, nil
 }
 
-// Run implements harness.MissionClientIface.
-// Loads the mission's MissionDefinitionJSON from the store, writes it to a temp file,
-// and delegates to missionManager.Run (which requires a file path).
-// The temp file is removed after Run returns. Agents can poll via GetStatus.
+// Run implements harness.MissionClientIface. It starts a mission the store
+// already holds — the path an originated child mission takes.
+//
+// It delegates to missionManager.RunExisting, which reads the mission, resolves
+// and binds ITS target, and reuses its record. What this did before was write the
+// mission's definition JSON to a temp file, pass the file PATH where
+// missionManager.Run expects a definition id, and pass the mission's UUID where
+// Run expects a target id. Run resolves definitions through the store and never
+// reads a file, so the lookup failed on a path that is not a definition name and
+// the mission never started. The temp file was written and never read
+// (gibson#529).
 func (a *missionHarnessAdapter) Run(ctx context.Context, missionID string) error {
 	mgr, mgrErr := a.mgr(ctx)
 	if mgrErr != nil {
 		return mgrErr
 	}
-
-	store, storeRelease, storeErr := a.storeForCtx(ctx)
-	if storeErr != nil {
-		return storeErr
-	}
-	defer storeRelease()
-
-	id, parseErr := types.ParseID(missionID)
-	if parseErr != nil {
-		return status.Errorf(codes.InvalidArgument, "invalid mission ID: %v", parseErr)
-	}
-
-	m, getErr := store.Get(ctx, id)
-	if getErr != nil {
-		return status.Errorf(codes.NotFound, "mission %s not found: %v", missionID, getErr)
-	}
-
-	// Write the MissionDefinitionJSON to a temp file so missionManager.Run can parse it.
-	missionDefinitionJSON := m.MissionDefinitionJSON
-	if missionDefinitionJSON == "" {
-		// No mission JSON — mission cannot be executed.
-		return status.Errorf(codes.FailedPrecondition, "mission %s has no mission definition", missionID)
-	}
-
-	tmpFile, tmpErr := os.CreateTemp("", "gibson-sub-mission-*.yaml")
-	if tmpErr != nil {
-		return status.Errorf(codes.Internal, "failed to create temp mission file: %v", tmpErr)
-	}
-	defer os.Remove(tmpFile.Name())
-
-	if _, writeErr := tmpFile.WriteString(missionDefinitionJSON); writeErr != nil {
-		tmpFile.Close()
-		return status.Errorf(codes.Internal, "failed to write mission to temp file: %v", writeErr)
-	}
-	tmpFile.Close()
-
-	// Use missionManager.Run with the temp file path and the existing mission ID.
-	// The manager will re-parse the definition and create a new activeMission entry.
-	_, runErr := mgr.Run(ctx, tmpFile.Name(), missionID, nil, m.MemoryContinuity)
-	if runErr != nil {
+	if _, runErr := mgr.RunExisting(ctx, missionID); runErr != nil {
 		return status.Errorf(codes.Internal, "failed to start mission %s: %v", missionID, runErr)
 	}
-
 	return nil
 }
 
