@@ -56,7 +56,7 @@ func missionDefinitionToProjected(def *missionpb.MissionDefinition, goal string,
 	// for_each collapsed and never expanded, so the work it declares would
 	// vanish without a word (gibson#527).
 	if err := graph.RefuseUnsupportedFanOut(def.GetNodes()); err != nil {
-		return brain.MissionProjected{}, err
+		return brain.MissionProjected{}, fmt.Errorf("mission %q: %w", def.GetId(), err)
 	}
 
 	// 1. Flatten parallel sub-nodes into the node set (they become real nodes).

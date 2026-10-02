@@ -4,6 +4,7 @@
 package graph
 
 import (
+	"errors"
 	"strings"
 	"testing"
 
@@ -159,12 +160,10 @@ func TestProject_RefusesAMergeRuleOverAFanOutSource(t *testing.T) {
 	}
 }
 
-// asValidationError keeps the assertion in one place; errors.As would need the
-// type to implement Unwrap, which a leaf validation error has no reason to.
+// asValidationError keeps the unwrapping in one place. errors.As rather than a
+// type assertion: an assertion fails the moment a caller wraps the error, and a
+// test that stops matching when its subject is wrapped is a test that stops
+// testing.
 func asValidationError(err error, out **ValidationError) bool {
-	v, ok := err.(*ValidationError)
-	if ok {
-		*out = v
-	}
-	return ok
+	return errors.As(err, out)
 }
