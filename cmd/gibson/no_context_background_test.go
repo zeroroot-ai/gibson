@@ -42,7 +42,9 @@ func TestNoContextBackgroundInRPCHandlers(t *testing.T) {
 		),
 	}
 
-	// CONTENT-KEYED (ast-checks v0.2.0, AllowlistByContent below; gibson#1384).
+	// CONTENT-KEYED (the only keying since ast-checks v0.5.0; gibson#1384).
+	// There is no switch to look for: Allowlist.Validate rejects a
+	// coordinate-shaped key outright.
 	// Each key is "<relpath> :: <snippet>" — the guard text, NOT a line
 	// number — so an unrelated edit shifting a line can never red this gate.
 	// See no_time_now_test.go's allowlist comment for the file-level
@@ -65,13 +67,12 @@ func TestNoContextBackgroundInRPCHandlers(t *testing.T) {
 	}
 
 	opts := astchecks.WalkOpts{
-		ScopeDirs:          []string{filepath.Join(repoRoot, "internal", "server", "daemon", "api")},
-		RepoRoot:           repoRoot,
-		Matchers:           matchers,
-		Allowlist:          allowlist,
-		SkipTestFiles:      true,
-		SkipGenerated:      true,
-		AllowlistByContent: true,
+		ScopeDirs:     []string{filepath.Join(repoRoot, "internal", "server", "daemon", "api")},
+		RepoRoot:      repoRoot,
+		Matchers:      matchers,
+		Allowlist:     allowlist,
+		SkipTestFiles: true,
+		SkipGenerated: true,
 	}
 
 	findings, err := astchecks.Walk(opts)
