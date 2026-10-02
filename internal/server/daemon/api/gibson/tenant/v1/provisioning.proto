@@ -144,7 +144,7 @@ message GetTenantProvisioningStatusResponse {
   // (cross-tenant). Use zitadel_org_ready (field 8) for the org-created edge.
   string zitadel_org_slug = 5;
 
-  // stripe_customer_id mirrors status.billing.customerId. RETAINED for wire
+  // stripe_customer_id mirrors status.stripeCustomerId. RETAINED for wire
   // compatibility but NO LONGER POPULATED here (gibson#1339) — read it via
   // TenantService.GetTenantBilling / AdminTenantService.AdminGetTenantBilling.
   string stripe_customer_id = 6;

@@ -107,61 +107,6 @@ spec:
           status:
             description: status defines the observed state of Tenant.
             properties:
-              billing:
-                description: |-
-                  Billing holds the Stripe subscription state for this tenant.
-                  Written by the dashboard webhook handlers and read by the operator's
-                  billing reconciler and entitlements gating logic.
-                properties:
-                  currentPeriodEnd:
-                    description: CurrentPeriodEnd is the ISO 8601 UTC timestamp for
-                      end of billing period.
-                    type: string
-                  customerId:
-                    description: CustomerID is the Stripe customer ID (cus_...).
-                    type: string
-                  lastUpdated:
-                    description: LastUpdated is the ISO 8601 UTC timestamp of the
-                      last status write.
-                    type: string
-                  lastWebhookEventId:
-                    description: |-
-                      LastWebhookEventID is the Stripe event ID of the last webhook that
-                      mutated this status. Used for debugging and drift detection.
-                    type: string
-                  pastDueSince:
-                    description: |-
-                      PastDueSince is the ISO 8601 UTC timestamp when the subscription first
-                      entered past_due state. Only written on first transition; preserved on
-                      retries. The operator uses this to enforce the 7-day dunning window.
-                    type: string
-                  priceId:
-                    description: PriceID is the Stripe price ID currently active on
-                      the subscription.
-                    type: string
-                  status:
-                    description: Status mirrors Stripe's subscription status field.
-                    enum:
-                    - trialing
-                    - active
-                    - past_due
-                    - cancelled
-                    - incomplete
-                    - incomplete_expired
-                    type: string
-                  subscriptionId:
-                    description: SubscriptionID is the Stripe subscription ID (sub_...).
-                    type: string
-                  trialEnd:
-                    description: TrialEnd is the ISO 8601 UTC timestamp when the trial
-                      period ends.
-                    type: string
-                  trialEndsSoon:
-                    description: |-
-                      TrialEndsSoon is true when the customer.subscription.trial_will_end
-                      event fires (3 days before trialEnd). Reset to false on invoice.paid.
-                    type: boolean
-                type: object
               conditions:
                 description: |-
                   Conditions represent the current state of the Tenant resource.

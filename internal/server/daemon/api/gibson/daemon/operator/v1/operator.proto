@@ -466,7 +466,7 @@ message ReportTenantStatusRequest {
   string store_neo4j = 6;
   // zitadel_org_slug mirrors status.zitadelOrgSlug.
   string zitadel_org_slug = 7;
-  // stripe_customer_id mirrors status.billing.customerId.
+  // stripe_customer_id mirrors status.stripeCustomerId.
   string stripe_customer_id = 8;
 }
 
