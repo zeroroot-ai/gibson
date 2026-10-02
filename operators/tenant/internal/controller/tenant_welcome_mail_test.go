@@ -6,13 +6,17 @@ package controller
 import (
 	"context"
 	"errors"
+	"fmt"
 	"sync"
 	"testing"
 
 	apimeta "k8s.io/apimachinery/pkg/api/meta"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/types"
+	"k8s.io/client-go/rest"
 	"sigs.k8s.io/controller-runtime/pkg/client"
+	"sigs.k8s.io/controller-runtime/pkg/manager"
+	metricsserver "sigs.k8s.io/controller-runtime/pkg/metrics/server"
 
 	gibsonv1alpha1 "github.com/zeroroot-ai/gibson/operators/tenant/api/v1alpha1"
 	"github.com/zeroroot-ai/gibson/operators/tenant/internal/mail"
@@ -247,7 +251,7 @@ type staleTenantClient struct {
 
 func (s staleTenantClient) Get(ctx context.Context, key client.ObjectKey, obj client.Object, opts ...client.GetOption) error {
 	if err := s.Client.Get(ctx, key, obj, opts...); err != nil {
-		return err
+		return fmt.Errorf("stale get: %w", err)
 	}
 	if tenant, ok := obj.(*gibsonv1alpha1.Tenant); ok {
 		apimeta.RemoveStatusCondition(&tenant.Status.Conditions, gibsonv1alpha1.ConditionWelcomeEmailSent)
@@ -271,5 +275,24 @@ func TestWelcomeEmail_StaleCacheReadDoesNotResend(t *testing.T) {
 	}
 	if got := len(sender.calls()); got != 1 {
 		t.Fatalf("SendWelcome called %d times behind a stale cache, want 1", got)
+	}
+}
+
+// SetupWithManager wires the uncached reader from the manager, the way it
+// wires the recorder and the saga runner, so main.go cannot forget it.
+func TestTenantReconciler_SetupWithManagerWiresTheAPIReader(t *testing.T) {
+	mgr, err := manager.New(&rest.Config{Host: "localhost:1"}, manager.Options{
+		Scheme:  childOrchestrationScheme(t),
+		Metrics: metricsserver.Options{BindAddress: "0"},
+	})
+	if err != nil {
+		t.Fatalf("manager.New: %v", err)
+	}
+	r := &TenantReconciler{Client: mgr.GetClient(), Scheme: mgr.GetScheme()}
+	if err := r.SetupWithManager(mgr); err != nil {
+		t.Fatalf("SetupWithManager: %v", err)
+	}
+	if r.APIReader == nil {
+		t.Fatal("APIReader is nil after SetupWithManager; the Tenant would be read through the cache")
 	}
 }

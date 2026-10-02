@@ -46,8 +46,8 @@ type TenantReconciler struct {
 	// could read stale status and repeat a side effect it had already
 	// recorded: the welcome email's idempotence guard reads
 	// WelcomeEmailSent off this object (gibson#535, the gibson#442 shape).
-	// Nil in tests, where the fake client has no cache and Client serves
-	// both reads.
+	// SetupWithManager fills it from mgr.GetAPIReader(). Nil in tests, where
+	// the fake client has no cache and Client serves both reads.
 	APIReader client.Reader
 	Scheme    *runtime.Scheme
 	Recorder  events.EventRecorder
@@ -462,6 +462,9 @@ func (r *TenantReconciler) SetupWithManager(mgr ctrl.Manager) error {
 	}
 	if r.Recorder == nil {
 		r.Recorder = mgr.GetEventRecorder("tenant-operator")
+	}
+	if r.APIReader == nil {
+		r.APIReader = mgr.GetAPIReader()
 	}
 	if r.NamespaceProvisioner == nil {
 		r.NamespaceProvisioner = NewNamespaceProvisioner(r.Client, r.PlatformNamespace, nil)
