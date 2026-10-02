@@ -38,7 +38,7 @@ func TestConvertToSchemaNode_LLMSlotsSerialised(t *testing.T) {
 		{Slot: "fast", Provider: "openai", Model: "gpt-4o-mini"},
 	})
 
-	node := convertToSchemaNode(missionID, nodeDef, false)
+	node := convertToSchemaNode(missionID, nodeDef, nodeDef.GetId(), false, fanOutOrigin{}, false)
 	require.NotNil(t, node)
 
 	rawSlots, ok := node.TaskConfig["__llm_slots"]
@@ -66,7 +66,7 @@ func TestConvertToSchemaNode_EmptyProviderSkipped(t *testing.T) {
 		{Slot: "fast", Provider: "openai", Model: "gpt-4o-mini"},
 	})
 
-	node := convertToSchemaNode(missionID, nodeDef, false)
+	node := convertToSchemaNode(missionID, nodeDef, nodeDef.GetId(), false, fanOutOrigin{}, false)
 	require.NotNil(t, node)
 
 	rawSlots, ok := node.TaskConfig["__llm_slots"]
@@ -82,7 +82,7 @@ func TestConvertToSchemaNode_NoSlotsNoKey(t *testing.T) {
 	missionID := types.NewID()
 	nodeDef := makeAgentNodeProto("my-agent", nil) // no llm_slots at all
 
-	node := convertToSchemaNode(missionID, nodeDef, false)
+	node := convertToSchemaNode(missionID, nodeDef, nodeDef.GetId(), false, fanOutOrigin{}, false)
 	require.NotNil(t, node)
 
 	_, ok := node.TaskConfig["__llm_slots"]
@@ -96,7 +96,7 @@ func TestConvertToSchemaNode_AllEmptyProvidersNoKey(t *testing.T) {
 		{Slot: "fast", Provider: ""},
 	})
 
-	node := convertToSchemaNode(missionID, nodeDef, false)
+	node := convertToSchemaNode(missionID, nodeDef, nodeDef.GetId(), false, fanOutOrigin{}, false)
 	require.NotNil(t, node)
 
 	_, ok := node.TaskConfig["__llm_slots"]

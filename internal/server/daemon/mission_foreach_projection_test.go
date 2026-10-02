@@ -72,7 +72,7 @@ func TestForEach_TwoTargetsTwoDispatchesEachBoundToItsOwn(t *testing.T) {
 		fanTarget("22222222-2222-2222-2222-222222222222", "goat-b", "https://10.60.0.12:6443"),
 	}
 
-	proj, err := missionDefinitionToProjected(forEachDef(0), "", targets)
+	proj, _, err := missionDefinitionToProjected(forEachDef(0), "", targets)
 	if err != nil {
 		t.Fatalf("project: %v", err)
 	}
@@ -125,7 +125,7 @@ func TestForEach_SingleTargetIsOneInstance(t *testing.T) {
 	targets := []forEachTarget{
 		fanTarget("33333333-3333-3333-3333-333333333333", "only", "https://10.0.0.1:6443"),
 	}
-	proj, err := missionDefinitionToProjected(forEachDef(0), "", targets)
+	proj, _, err := missionDefinitionToProjected(forEachDef(0), "", targets)
 	if err != nil {
 		t.Fatalf("project: %v", err)
 	}
@@ -153,7 +153,7 @@ func TestForEach_JoinWaitsForEveryInstance(t *testing.T) {
 	// in a work node's DependsOn.
 	def.Nodes["after"] = agentNode("writer", "report")
 
-	proj, err := missionDefinitionToProjected(def, "", targets)
+	proj, _, err := missionDefinitionToProjected(def, "", targets)
 	if err != nil {
 		t.Fatalf("project: %v", err)
 	}
@@ -191,7 +191,7 @@ func TestForEach_MaxConcurrencyChainsInstances(t *testing.T) {
 		targets = append(targets, fanTarget(id, fmt.Sprintf("t%d", i), fmt.Sprintf("https://10.0.0.%d:6443", i)))
 	}
 
-	proj, err := missionDefinitionToProjected(forEachDef(2), "", targets)
+	proj, _, err := missionDefinitionToProjected(forEachDef(2), "", targets)
 	if err != nil {
 		t.Fatalf("project: %v", err)
 	}
@@ -241,7 +241,7 @@ func TestForEach_MaxConcurrencyAtOrAboveCountChainsNothing(t *testing.T) {
 		fanTarget("22222222-2222-2222-2222-222222222222", "b", "https://10.0.0.2:6443"),
 	}
 	for _, limit := range []int32{2, 9} {
-		proj, err := missionDefinitionToProjected(forEachDef(limit), "", targets)
+		proj, _, err := missionDefinitionToProjected(forEachDef(limit), "", targets)
 		if err != nil {
 			t.Fatalf("limit %d: project: %v", limit, err)
 		}
@@ -262,7 +262,7 @@ func TestForEach_MaxConcurrencyAtOrAboveCountChainsNothing(t *testing.T) {
 // to nothing. Silently projecting zero instances would complete a mission that
 // scanned nothing and report success.
 func TestForEach_NoTargetsIsRefused(t *testing.T) {
-	_, err := missionDefinitionToProjected(forEachDef(0), "", nil)
+	_, _, err := missionDefinitionToProjected(forEachDef(0), "", nil)
 	if err == nil {
 		t.Fatal("want a refusal when a for_each run resolved no targets")
 	}
@@ -279,7 +279,7 @@ func TestForEach_UnresolvedTargetIsRefused(t *testing.T) {
 		fanTarget("11111111-1111-1111-1111-111111111111", "a", "https://10.0.0.1:6443"),
 		{ID: "22222222-2222-2222-2222-222222222222"}, // resolved to nil
 	}
-	_, err := missionDefinitionToProjected(forEachDef(0), "", targets)
+	_, _, err := missionDefinitionToProjected(forEachDef(0), "", targets)
 	if err == nil {
 		t.Fatal("want a refusal when a target in the set did not resolve")
 	}
@@ -311,7 +311,7 @@ func TestForEach_InstancesReleaseTheirDependentsOnFailure(t *testing.T) {
 	def := forEachDef(0)
 	def.Nodes["after"] = agentNode("writer", "report")
 
-	proj, err := missionDefinitionToProjected(def, "", targets)
+	proj, _, err := missionDefinitionToProjected(def, "", targets)
 	if err != nil {
 		t.Fatalf("project: %v", err)
 	}
@@ -340,7 +340,7 @@ func TestForEach_NestedForEachIsRefusedOnTheRunPath(t *testing.T) {
 	inner := forEachDef(0).Nodes["each"]
 	def.Nodes["each"].GetForEachConfig().Template = inner
 
-	_, err := missionDefinitionToProjected(def, "", []forEachTarget{
+	_, _, err := missionDefinitionToProjected(def, "", []forEachTarget{
 		fanTarget("11111111-1111-1111-1111-111111111111", "a", "https://10.0.0.1:6443"),
 	})
 	if err == nil {
@@ -358,7 +358,7 @@ func TestForEach_MergeRuleOverAFanOutSourceIsRefusedOnTheRunPath(t *testing.T) {
 	def := forEachDef(0)
 	def.Nodes["report"].GetJoinConfig().Strategy = missionpb.MergeStrategy_MERGE_STRATEGY_CONCAT
 
-	_, err := missionDefinitionToProjected(def, "", []forEachTarget{
+	_, _, err := missionDefinitionToProjected(def, "", []forEachTarget{
 		fanTarget("11111111-1111-1111-1111-111111111111", "a", "https://10.0.0.1:6443"),
 	})
 	if err == nil {

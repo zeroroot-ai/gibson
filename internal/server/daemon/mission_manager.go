@@ -888,9 +888,40 @@ func (m *missionManager) executeMission(ctx context.Context, missionID string, d
 		return
 	}
 
-	// Bootstrap mission graph structure before execution.
+	// Project the mission BEFORE the graph bootstrap, because the projection is the
+	// structure that runs and the graph records what ran. A goal (if any) drives
+	// the Decider; absent → the scripted graph runs deterministically and the
+	// mission completes mechanically.
+	//
+	// The run's target set is resolved first, primary first as Mission.TargetSet()
+	// orders it, so instance identity and the concurrency chain are stable between
+	// runs (gibson#525).
+	//
+	// A target in the set that will not resolve fails the projection rather than
+	// degrading: expanding over the ones that did resolve would run a fan-out that
+	// silently covered less than the author asked for, which is the class of
+	// failure this epic exists to remove.
+	var proj brain.MissionProjected
+	var fanOrigins fanOutOrigins
+	fanTargets, projErr := m.resolveForEachTargets(ctx, active)
+	if projErr == nil {
+		proj, fanOrigins, projErr = missionDefinitionToProjected(def, missionGoal(active.mission), fanTargets)
+	}
+	if projErr != nil {
+		errorMsg := fmt.Sprintf("failed to project mission into the World: %v", projErr)
+		if span != nil {
+			span.RecordError(projErr)
+			span.SetStatus(codes.Error, errorMsg)
+		}
+		m.failBeforeStart(active.tenantID, missionID, def.GetName(), errorMsg)
+		return
+	}
+
+	// Bootstrap mission graph structure before execution, from the projection:
+	// one graph node per unit of work that will actually run, each fan-out
+	// instance naming its own target (gibson#528).
 	bootstrapper := NewGraphBootstrapper(graphClient, m.logger)
-	bootstrapResult, err := bootstrapper.Bootstrap(ctx, active.mission, def, missionRun)
+	bootstrapResult, err := bootstrapper.Bootstrap(ctx, active.mission, def, missionRun, proj, fanOrigins)
 	if err != nil {
 		m.logger.Error("failed to bootstrap mission graph", "error", err, "mission_id", missionID)
 		m.failBeforeStart(active.tenantID, missionID, def.GetName(), fmt.Sprintf("failed to initialize mission graph: %v", err))
@@ -941,21 +972,6 @@ func (m *missionManager) executeMission(ctx context.Context, missionID string, d
 	})
 	defer m.brainExecutor.unregister(missionID)
 
-	// Project the mission. A goal (if any) drives the Decider; absent → the scripted
-	// graph runs deterministically and the mission completes mechanically.
-	// The run's target set, resolved, for for_each expansion. Primary first, as
-	// Mission.TargetSet() orders it, so instance identity and the concurrency
-	// chain are stable between runs (gibson#525).
-	//
-	// A target in the set that will not resolve fails the projection rather than
-	// degrading: expanding over the ones that did resolve would run a fan-out
-	// that silently covered less than the author asked for, which is the class of
-	// failure this epic exists to remove.
-	var proj brain.MissionProjected
-	fanTargets, projErr := m.resolveForEachTargets(ctx, active)
-	if projErr == nil {
-		proj, projErr = missionDefinitionToProjected(def, missionGoal(active.mission), fanTargets)
-	}
 	// Pin the belief-model version onto the mission (ADR-0005 §5): the mission
 	// records the model it ran under so replay re-loads the exact artifact.
 	proj.BeliefModel = m.beliefVersion
@@ -965,50 +981,39 @@ func (m *missionManager) executeMission(ctx context.Context, missionID string, d
 	proj.Description = active.mission.Description
 	proj.TargetID = active.mission.TargetID.String()
 	proj.TenantID = active.mission.TenantID
-	if projErr != nil {
-		finalStatus = mission.MissionStatusFailed
-		errorMsg = fmt.Sprintf("failed to project mission into the World: %v", projErr)
-		if span != nil {
-			span.RecordError(projErr)
-			span.SetStatus(codes.Error, errorMsg)
-		}
-		m.failBeforeStart(active.tenantID, missionID, def.GetName(), errorMsg)
-	} else {
-		// Key the projected mission by the RUN id (missionID) — the same id the
-		// per-mission binding, awaitBrainMission, and the Decider lookup all use.
-		// missionDefinitionToProjected defaults ID to the mission DEFINITION id,
-		// which made the engine dispatch/decide under an id no binding is
-		// registered for ("brain dispatch for unknown mission") and stranded the
-		// terminal-state wait. Unify on missionID so execution actually resolves.
-		proj.ID = missionID
-		eng.Submit(proj)
+	// Key the projected mission by the RUN id (missionID) — the same id the
+	// per-mission binding, awaitBrainMission, and the Decider lookup all use.
+	// missionDefinitionToProjected defaults ID to the mission DEFINITION id,
+	// which made the engine dispatch/decide under an id no binding is
+	// registered for ("brain dispatch for unknown mission") and stranded the
+	// terminal-state wait. Unify on missionID so execution actually resolves.
+	proj.ID = missionID
+	eng.Submit(proj)
 
-		// Emit MissionStarted into the brain Timeline so the lifecycle projector
-		// derives "status:running" on the Subscribe stream (ADR-0011 decision 4,
-		// gibson#1116). Carry display metadata so that even the minimal-launch
-		// path has the full mission identity in the World (gibson#1118).
-		eng.Submit(brain.MissionStarted{
-			ID:          missionID,
-			BeliefModel: m.beliefVersion,
-			Name:        active.mission.Name,
-			Description: active.mission.Description,
-			TargetID:    active.mission.TargetID.String(),
-			TenantID:    active.mission.TenantID,
-			CreatedBy:   active.mission.CreatedBy,
-		})
+	// Emit MissionStarted into the brain Timeline so the lifecycle projector
+	// derives "status:running" on the Subscribe stream (ADR-0011 decision 4,
+	// gibson#1116). Carry display metadata so that even the minimal-launch
+	// path has the full mission identity in the World (gibson#1118).
+	eng.Submit(brain.MissionStarted{
+		ID:          missionID,
+		BeliefModel: m.beliefVersion,
+		Name:        active.mission.Name,
+		Description: active.mission.Description,
+		TargetID:    active.mission.TargetID.String(),
+		TenantID:    active.mission.TenantID,
+		CreatedBy:   active.mission.CreatedBy,
+	})
 
-		// Block until the brain reaches a terminal mission state (or ctx is cancelled).
-		// The projector derives status:completed/failed from brain.MissionDone —
-		// no emitEvent calls here (ADR-0011 decision 4, gibson#1116).
-		finalStatus, errorMsg = m.awaitBrainMission(ctx, eng, missionID)
-		missionDuration = time.Since(active.startTime)
+	// Block until the brain reaches a terminal mission state (or ctx is cancelled).
+	// The projector derives status:completed/failed from brain.MissionDone —
+	// no emitEvent calls here (ADR-0011 decision 4, gibson#1116).
+	finalStatus, errorMsg = m.awaitBrainMission(ctx, eng, missionID)
+	missionDuration = time.Since(active.startTime)
 
-		m.logger.Info("brain mission execution finished",
-			"mission_id", missionID, "status", finalStatus, "duration", missionDuration)
+	m.logger.Info("brain mission execution finished",
+		"mission_id", missionID, "status", finalStatus, "duration", missionDuration)
 
-		recordMissionOutcomeSpan(span, finalStatus, errorMsg, missionDuration)
-	}
-	_ = missionDuration
+	recordMissionOutcomeSpan(span, finalStatus, errorMsg, missionDuration)
 
 	// Transition authz state so that late-arriving component callbacks receive a
 	// proper inactive-mission error rather than stale "active" state. Errors are
