@@ -20,14 +20,16 @@ import (
 )
 
 // MissionProjection is the complete Mission-node shape. Every caller describes
-// the whole node, because a Mission node is materialized when a mission is
-// created and again when a run bootstraps its graph, and the projector is the
-// only code allowed to write it (ADR-0012).
+// the whole node, because a Mission node is written three times — when a mission
+// is created, when a run bootstraps its graph, and on every projection tick for
+// as long as the mission is in the World — and the projector is the only code
+// allowed to write it (ADR-0012).
 //
 // An empty string field means "the caller does not know this yet", not "set it
-// to empty": the create-time write runs in a goroutine, so it can land either
-// side of the run-time write, and a blank must never erase a known value. The
-// Cypher keeps the stored value in that case.
+// to empty", and a blank must never erase a known value: the create-time write
+// runs in a goroutine, so it can land either side of the run-time write, and the
+// tick knows a mission's status but not its objective or definition. The Cypher
+// keeps the stored value in that case.
 type MissionProjection struct {
 	// ID is the mission id, the node's identity together with the tenant.
 	ID string
@@ -59,7 +61,9 @@ type GraphWriter interface {
 	UpsertHost(ctx context.Context, tenant string, h brain.HostSnapshot) error
 	// UpsertMission materializes a :Mission node. It is the ONLY writer of one:
 	// the CreateMission RPC and the per-run graph bootstrap both used to MERGE
-	// their own, which is what ADR-0012 step 2 forbids. Both now call this.
+	// their own, which is what ADR-0012 step 2 forbids. Both now call this, and
+	// so does the projection tick, which is what keeps a mission's status
+	// current for its whole life.
 	UpsertMission(ctx context.Context, tenant string, m MissionProjection) error
 	UpsertFinding(ctx context.Context, tenant string, f brain.FindingSnapshot) error
 	UpsertDomain(ctx context.Context, tenant string, d brain.DomainSnapshot) error
@@ -168,6 +172,35 @@ func (p *GraphProjector) project(ctx context.Context) {
 					"tenant", tenant, "label", e.Label, "key", e.Key, "error", err)
 			}
 		}
+		// Missions are projected on the tick like every other entity, so the
+		// graph tracks a mission's status for its whole life. Before this, the
+		// two eager writers both ran when a mission STARTED, so :Mission.status
+		// was "running" forever and GetGraphSummary reported every mission as
+		// running. The tick does not know the objective, the
+		// definition or the start time; the upsert keeps the stored value for a
+		// field whose parameter is empty, which is what makes that safe.
+		for _, m := range eng.Missions() {
+			if err := p.writer.UpsertMission(ctx, tenant, missionProjectionOf(m)); err != nil {
+				p.logger.Warn("graph projection: mission upsert failed",
+					"tenant", tenant, "mission_id", m.ID, "error", err)
+			}
+		}
+	}
+}
+
+// missionProjectionOf is the World's view of a mission as the graph's Mission
+// node. It carries only what a MissionSnapshot knows: the fields it leaves
+// empty (objective, the definition source, the start time) are the ones only
+// the create RPC and the run bootstrap know, and the upsert keeps whatever they
+// already stored.
+func missionProjectionOf(m brain.MissionSnapshot) MissionProjection {
+	return MissionProjection{
+		ID:          m.ID,
+		Name:        m.Name,
+		Description: m.Description,
+		TargetID:    m.TargetID,
+		Status:      string(m.Status),
+		CreatedBy:   m.CreatedBy.Ref(),
 	}
 }
 
