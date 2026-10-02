@@ -85,7 +85,7 @@ func unreadTables(sqlFS fs.FS, dir string, goFS fs.FS) ([]string, error) {
 		}
 		b, err := fs.ReadFile(goFS, p)
 		if err != nil {
-			return err
+			return fmt.Errorf("read %s: %w", p, err)
 		}
 		src := string(b)
 		for _, t := range tables {
