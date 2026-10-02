@@ -85,10 +85,7 @@ func ComponentAttributes(component *Component) []attribute.KeyValue {
 		attribute.String(AttrComponentStatus, component.Status.String()),
 	)
 
-	// Add paths if present
-	if component.RepoPath != "" {
-		attrs = append(attrs, attribute.String("gibson.component.repo_path", component.RepoPath))
-	}
+	// Add the binary path if present
 	if component.BinPath != "" {
 		attrs = append(attrs, attribute.String("gibson.component.bin_path", component.BinPath))
 	}
@@ -120,11 +117,6 @@ func ComponentAttributes(component *Component) []attribute.KeyValue {
 		attrs = append(attrs, attribute.String("gibson.component.stopped_at", component.StoppedAt.Format("2006-01-02T15:04:05Z07:00")))
 	}
 
-	// Add manifest metadata if available
-	if component.Manifest != nil {
-		attrs = append(attrs, ManifestAttributes(component.Manifest)...)
-	}
-
 	return attrs
 }
 
@@ -136,53 +128,6 @@ func AddComponentAttributes(span trace.Span, component *Component) {
 	}
 
 	span.SetAttributes(ComponentAttributes(component)...)
-}
-
-// ManifestAttributes creates OpenTelemetry attributes from a component Manifest.
-// Includes manifest metadata and configuration details.
-func ManifestAttributes(manifest *Manifest) []attribute.KeyValue {
-	if manifest == nil {
-		return []attribute.KeyValue{}
-	}
-
-	attrs := make([]attribute.KeyValue, 0, 5)
-
-	// Add manifest metadata
-	if manifest.Description != "" {
-		attrs = append(attrs, attribute.String("gibson.component.description", manifest.Description))
-	}
-
-	if manifest.Author != "" {
-		attrs = append(attrs, attribute.String("gibson.component.author", manifest.Author))
-	}
-
-	if manifest.License != "" {
-		attrs = append(attrs, attribute.String("gibson.component.license", manifest.License))
-	}
-
-	// Add runtime configuration
-	if manifest.Runtime != nil {
-		if manifest.Runtime.Entrypoint != "" {
-			attrs = append(attrs, attribute.String("gibson.component.entrypoint", manifest.Runtime.Entrypoint))
-		}
-
-		if manifest.Runtime.HealthURL != "" {
-			attrs = append(attrs, attribute.String("gibson.component.health_url", manifest.Runtime.HealthURL))
-		}
-	}
-
-	// Add build configuration
-	if manifest.Build != nil && manifest.Build.Command != "" {
-		attrs = append(attrs, attribute.String(AttrBuildCommand, manifest.Build.Command))
-	}
-
-	// Add capabilities count
-	// TODO: Uncomment when Capabilities field is added to Manifest
-	// if len(manifest.Capabilities) > 0 {
-	// 	attrs = append(attrs, attribute.Int("gibson.component.capabilities_count", len(manifest.Capabilities)))
-	// }
-
-	return attrs
 }
 
 // LifecycleAttributes creates OpenTelemetry attributes for lifecycle operations.

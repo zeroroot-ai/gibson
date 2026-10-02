@@ -53,7 +53,6 @@ const (
 	DiscoveryService_DescribeAgent_FullMethodName            = "/gibson.daemon.discovery.v1.DiscoveryService/DescribeAgent"
 	DiscoveryService_ListLLMSlots_FullMethodName             = "/gibson.daemon.discovery.v1.DiscoveryService/ListLLMSlots"
 	DiscoveryService_ListReportSurfaces_FullMethodName       = "/gibson.daemon.discovery.v1.DiscoveryService/ListReportSurfaces"
-	DiscoveryService_ValidateComponent_FullMethodName        = "/gibson.daemon.discovery.v1.DiscoveryService/ValidateComponent"
 	DiscoveryService_SuggestMissingCapability_FullMethodName = "/gibson.daemon.discovery.v1.DiscoveryService/SuggestMissingCapability"
 )
 
@@ -91,13 +90,9 @@ type DiscoveryServiceClient interface {
 	// Workspace, future Report) an agent can emit.
 	// Tenant member discovery: USER+SERVICE+COMPONENT (spec discovery-bitfield-coherence)
 	ListReportSurfaces(ctx context.Context, in *ListReportSurfacesRequest, opts ...grpc.CallOption) (*ListReportSurfacesResponse, error)
-	// ValidateComponent dry-runs a draft component.yaml + permissions.yaml
-	// against the caller's current access. Never mutates state.
-	// Tenant member discovery: USER+SERVICE+COMPONENT (spec discovery-bitfield-coherence)
-	ValidateComponent(ctx context.Context, in *ValidateComponentRequest, opts ...grpc.CallOption) (*ValidateComponentResponse, error)
-	// SuggestMissingCapability is the bridge Claude uses when
-	// ValidateComponent reports an access error — returns human-readable
-	// next-step hints for the missing plugin / tool / agent.
+	// SuggestMissingCapability returns human-readable next-step hints for a
+	// missing plugin / tool / agent, for a component author whose check-in
+	// was refused a capability.
 	// Tenant member discovery: USER+SERVICE+COMPONENT (spec discovery-bitfield-coherence)
 	SuggestMissingCapability(ctx context.Context, in *SuggestMissingCapabilityRequest, opts ...grpc.CallOption) (*SuggestMissingCapabilityResponse, error)
 }
@@ -210,16 +205,6 @@ func (c *discoveryServiceClient) ListReportSurfaces(ctx context.Context, in *Lis
 	return out, nil
 }
 
-func (c *discoveryServiceClient) ValidateComponent(ctx context.Context, in *ValidateComponentRequest, opts ...grpc.CallOption) (*ValidateComponentResponse, error) {
-	cOpts := append([]grpc.CallOption{grpc.StaticMethod()}, opts...)
-	out := new(ValidateComponentResponse)
-	err := c.cc.Invoke(ctx, DiscoveryService_ValidateComponent_FullMethodName, in, out, cOpts...)
-	if err != nil {
-		return nil, err
-	}
-	return out, nil
-}
-
 func (c *discoveryServiceClient) SuggestMissingCapability(ctx context.Context, in *SuggestMissingCapabilityRequest, opts ...grpc.CallOption) (*SuggestMissingCapabilityResponse, error) {
 	cOpts := append([]grpc.CallOption{grpc.StaticMethod()}, opts...)
 	out := new(SuggestMissingCapabilityResponse)
@@ -264,13 +249,9 @@ type DiscoveryServiceServer interface {
 	// Workspace, future Report) an agent can emit.
 	// Tenant member discovery: USER+SERVICE+COMPONENT (spec discovery-bitfield-coherence)
 	ListReportSurfaces(context.Context, *ListReportSurfacesRequest) (*ListReportSurfacesResponse, error)
-	// ValidateComponent dry-runs a draft component.yaml + permissions.yaml
-	// against the caller's current access. Never mutates state.
-	// Tenant member discovery: USER+SERVICE+COMPONENT (spec discovery-bitfield-coherence)
-	ValidateComponent(context.Context, *ValidateComponentRequest) (*ValidateComponentResponse, error)
-	// SuggestMissingCapability is the bridge Claude uses when
-	// ValidateComponent reports an access error — returns human-readable
-	// next-step hints for the missing plugin / tool / agent.
+	// SuggestMissingCapability returns human-readable next-step hints for a
+	// missing plugin / tool / agent, for a component author whose check-in
+	// was refused a capability.
 	// Tenant member discovery: USER+SERVICE+COMPONENT (spec discovery-bitfield-coherence)
 	SuggestMissingCapability(context.Context, *SuggestMissingCapabilityRequest) (*SuggestMissingCapabilityResponse, error)
 	mustEmbedUnimplementedDiscoveryServiceServer()
@@ -312,9 +293,6 @@ func (UnimplementedDiscoveryServiceServer) ListLLMSlots(context.Context, *ListLL
 }
 func (UnimplementedDiscoveryServiceServer) ListReportSurfaces(context.Context, *ListReportSurfacesRequest) (*ListReportSurfacesResponse, error) {
 	return nil, status.Error(codes.Unimplemented, "method ListReportSurfaces not implemented")
-}
-func (UnimplementedDiscoveryServiceServer) ValidateComponent(context.Context, *ValidateComponentRequest) (*ValidateComponentResponse, error) {
-	return nil, status.Error(codes.Unimplemented, "method ValidateComponent not implemented")
 }
 func (UnimplementedDiscoveryServiceServer) SuggestMissingCapability(context.Context, *SuggestMissingCapabilityRequest) (*SuggestMissingCapabilityResponse, error) {
 	return nil, status.Error(codes.Unimplemented, "method SuggestMissingCapability not implemented")
@@ -520,24 +498,6 @@ func _DiscoveryService_ListReportSurfaces_Handler(srv interface{}, ctx context.C
 	return interceptor(ctx, in, info, handler)
 }
 
-func _DiscoveryService_ValidateComponent_Handler(srv interface{}, ctx context.Context, dec func(interface{}) error, interceptor grpc.UnaryServerInterceptor) (interface{}, error) {
-	in := new(ValidateComponentRequest)
-	if err := dec(in); err != nil {
-		return nil, err
-	}
-	if interceptor == nil {
-		return srv.(DiscoveryServiceServer).ValidateComponent(ctx, in)
-	}
-	info := &grpc.UnaryServerInfo{
-		Server:     srv,
-		FullMethod: DiscoveryService_ValidateComponent_FullMethodName,
-	}
-	handler := func(ctx context.Context, req interface{}) (interface{}, error) {
-		return srv.(DiscoveryServiceServer).ValidateComponent(ctx, req.(*ValidateComponentRequest))
-	}
-	return interceptor(ctx, in, info, handler)
-}
-
 func _DiscoveryService_SuggestMissingCapability_Handler(srv interface{}, ctx context.Context, dec func(interface{}) error, interceptor grpc.UnaryServerInterceptor) (interface{}, error) {
 	in := new(SuggestMissingCapabilityRequest)
 	if err := dec(in); err != nil {
@@ -602,10 +562,6 @@ var DiscoveryService_ServiceDesc = grpc.ServiceDesc{
 		{
 			MethodName: "ListReportSurfaces",
 			Handler:    _DiscoveryService_ListReportSurfaces_Handler,
-		},
-		{
-			MethodName: "ValidateComponent",
-			Handler:    _DiscoveryService_ValidateComponent_Handler,
 		},
 		{
 			MethodName: "SuggestMissingCapability",

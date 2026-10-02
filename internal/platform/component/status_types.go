@@ -37,6 +37,27 @@ func (p ProcessState) IsValid() bool {
 	}
 }
 
+// HealthCheckProtocol is the protocol a health check used. It lived in the
+// component.yaml schema until gibson#555; the status checker is its one
+// remaining producer.
+type HealthCheckProtocol string
+
+const (
+	// HealthCheckProtocolHTTP uses HTTP GET requests for health checks
+	HealthCheckProtocolHTTP HealthCheckProtocol = "http"
+
+	// HealthCheckProtocolGRPC uses gRPC health checking protocol (grpc_health_v1)
+	HealthCheckProtocolGRPC HealthCheckProtocol = "grpc"
+
+	// HealthCheckProtocolAuto automatically detects the protocol (tries gRPC first, then HTTP)
+	HealthCheckProtocolAuto HealthCheckProtocol = "auto"
+)
+
+// String returns the string representation of the HealthCheckProtocol.
+func (p HealthCheckProtocol) String() string {
+	return string(p)
+}
+
 // HealthCheckResult represents the result of a health check operation.
 // It contains detailed information about the health check status,
 // protocol used, timing, and any errors encountered.

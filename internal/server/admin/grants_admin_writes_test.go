@@ -144,7 +144,7 @@ func (s *stubLookup) Resolve(_ context.Context, principalID string) (identity.Pr
 // production Identity semantics: auth.Identity.Subject is the bare
 // principal ID ext-authz forwards (e.g. a Zitadel sub), never pre-prefixed
 // with "user:" — handler code adds that FGA-object-reference prefix itself
-// (see e.g. GetMyPermissions, GrantComponentPermissions). WriteAgentGrants'
+// (see e.g. GetMyPermissions, WriteAgentGrants). WriteAgentGrants'
 // caller-access intersection check (identity-assertion-gaps finding 4) is
 // the first code path in this file to actually build an FGA ref from this
 // test's identity, which is what surfaces the convention here.

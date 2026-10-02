@@ -479,14 +479,6 @@ entries:
       - USER
       - SERVICE
       - COMPONENT
-  "/gibson.daemon.discovery.v1.DiscoveryService/ValidateComponent":
-    relation: "member"
-    object_type: "tenant"
-    object_deriver: "tenant_from_identity"
-    allowed_identities:
-      - USER
-      - SERVICE
-      - COMPONENT
   "/gibson.daemon.discovery.v1.DiscoveryService/WhoAmI":
     relation: "member"
     object_type: "tenant"
@@ -1714,12 +1706,6 @@ entries:
       - USER
   "/gibson.tenant.v1.MembershipService/GetReservedNames":
     unauthenticated: true
-  "/gibson.tenant.v1.MembershipService/GrantComponentPermissions":
-    relation: "writer"
-    object_type: "tenant"
-    object_deriver: "tenant_from_identity"
-    allowed_identities:
-      - USER
   "/gibson.tenant.v1.MembershipService/InviteMember":
     relation: "admin"
     object_type: "tenant"

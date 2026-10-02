@@ -91,11 +91,11 @@ func TestDependencyError_Error(t *testing.T) {
 		{
 			name: "error with cause",
 			err: &DependencyError{
-				Code:    ErrManifestNotFound,
-				Message: "manifest not found",
+				Code:    ErrStartFailed,
+				Message: "start failed",
 				Cause:   errors.New("file not found"),
 			},
-			contains: []string{"MANIFEST_NOT_FOUND", "manifest not found", "file not found"},
+			contains: []string{"START_FAILED", "start failed", "file not found"},
 		},
 	}
 
@@ -140,19 +140,6 @@ func TestNewCircularDependencyError(t *testing.T) {
 	errMsg := err.Error()
 	if !strings.Contains(errMsg, "agent-a -> tool-b -> plugin-c -> agent-a") {
 		t.Errorf("error should contain cycle path, got: %s", errMsg)
-	}
-}
-
-func TestNewManifestNotFoundError(t *testing.T) {
-	err := NewManifestNotFoundError("agent", "test-agent")
-
-	if err.Code != ErrManifestNotFound {
-		t.Errorf("expected code %s, got %s", ErrManifestNotFound, err.Code)
-	}
-
-	errMsg := err.Error()
-	if !strings.Contains(errMsg, "agent/test-agent") {
-		t.Errorf("error should contain component kind and name, got: %s", errMsg)
 	}
 }
 
@@ -279,7 +266,6 @@ func TestDependencyErrorCode_String(t *testing.T) {
 		expected string
 	}{
 		{ErrCircularDependency, "CIRCULAR_DEPENDENCY"},
-		{ErrManifestNotFound, "MANIFEST_NOT_FOUND"},
 		{ErrVersionConstraintViolation, "VERSION_CONSTRAINT_VIOLATION"},
 		{ErrStartFailed, "START_FAILED"},
 		{ErrValidationFailed, "VALIDATION_FAILED"},

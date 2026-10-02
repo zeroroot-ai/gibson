@@ -19,9 +19,6 @@ const (
 
 	// SourceMissionNode indicates the dependency was referenced by a mission node (agent/tool in a mission step)
 	SourceMissionNode DependencySource = "mission_node"
-
-	// SourceManifest indicates the dependency came from a component's manifest dependencies.components section
-	SourceManifest DependencySource = "manifest"
 )
 
 // String returns the string representation of the DependencySource.
@@ -32,7 +29,7 @@ func (s DependencySource) String() string {
 // IsValid checks if the DependencySource is a valid enum value.
 func (s DependencySource) IsValid() bool {
 	switch s {
-	case SourceMissionExplicit, SourceMissionNode, SourceManifest:
+	case SourceMissionExplicit, SourceMissionNode:
 		return true
 	default:
 		return false

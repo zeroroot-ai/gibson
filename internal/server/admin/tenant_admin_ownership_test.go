@@ -306,7 +306,7 @@ func (s *TenantAdminServer) withAuthorizer(az authz.Authorizer) *TenantAdminServ
 // check (gibsoncheck's privileged-fallback analyzer, G3): a context that
 // carries no Identity at all must be refused explicitly, never fall through
 // with a zero-value subject. TransferOwnership checks identity before tenant
-// scoping (same order as GrantComponentPermissions) specifically so this
+// scoping specifically so this
 // branch is reachable: auth.TenantFromContext derives the tenant from the
 // SAME Identity, so an identity-less context also has no tenant, and
 // checking identity first is what makes IT the branch that fires.

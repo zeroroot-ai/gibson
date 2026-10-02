@@ -46,7 +46,6 @@ func TestComponentAttributes(t *testing.T) {
 			Kind:      ComponentKindTool,
 			Name:      "test-tool",
 			Version:   "2.0.0",
-			RepoPath:  "/path/to/tool",
 			BinPath:   "/path/to/bin/tool",
 			Source:    ComponentSourceExternal,
 			Status:    ComponentStatusRunning,
@@ -67,81 +66,9 @@ func TestComponentAttributes(t *testing.T) {
 		assertHasAttribute(t, attrs, AttrComponentStatus, "running")
 		assertHasIntAttribute(t, attrs, AttrComponentPort, 8080)
 		assertHasIntAttribute(t, attrs, AttrComponentPID, 12345)
-		assertHasAttribute(t, attrs, "gibson.component.repo_path", "/path/to/tool")
 		assertHasAttribute(t, attrs, "gibson.component.bin_path", "/path/to/bin/tool")
 	})
 
-	t.Run("component with manifest", func(t *testing.T) {
-		manifest := &Manifest{
-			Name:        "test-plugin",
-			Version:     "1.0.0",
-			Description: "Test plugin description",
-			Author:      "Test Author",
-			License:     "MIT",
-			Runtime: &RuntimeConfig{
-				Type:       RuntimeTypeGo,
-				Entrypoint: "./plugin",
-				HealthURL:  "/health",
-			},
-			Build: &BuildConfig{
-				Command: "make build",
-			},
-		}
-
-		comp := &Component{
-			Kind:     ComponentKindPlugin,
-			Name:     "test-plugin",
-			Version:  "1.0.0",
-			Source:   ComponentSourceExternal,
-			Status:   ComponentStatusAvailable,
-			Manifest: manifest,
-		}
-
-		attrs := ComponentAttributes(comp)
-
-		// Verify manifest attributes are included
-		assertHasAttribute(t, attrs, "gibson.component.description", "Test plugin description")
-		assertHasAttribute(t, attrs, "gibson.component.author", "Test Author")
-		assertHasAttribute(t, attrs, "gibson.component.license", "MIT")
-		assertHasAttribute(t, attrs, "gibson.component.entrypoint", "./plugin")
-		assertHasAttribute(t, attrs, "gibson.component.health_url", "/health")
-		assertHasAttribute(t, attrs, AttrBuildCommand, "make build")
-	})
-}
-
-// TestManifestAttributes tests the ManifestAttributes function
-func TestManifestAttributes(t *testing.T) {
-	t.Run("nil manifest returns empty attributes", func(t *testing.T) {
-		attrs := ManifestAttributes(nil)
-		assert.Empty(t, attrs)
-	})
-
-	t.Run("complete manifest attributes", func(t *testing.T) {
-		manifest := &Manifest{
-			Name:        "test-agent",
-			Version:     "1.0.0",
-			Description: "Test agent",
-			Author:      "Test Author",
-			License:     "Apache-2.0",
-			Runtime: &RuntimeConfig{
-				Type:       RuntimeTypeGo,
-				Entrypoint: "./agent",
-				HealthURL:  "/healthz",
-			},
-			Build: &BuildConfig{
-				Command: "go build",
-			},
-		}
-
-		attrs := ManifestAttributes(manifest)
-
-		assertHasAttribute(t, attrs, "gibson.component.description", "Test agent")
-		assertHasAttribute(t, attrs, "gibson.component.author", "Test Author")
-		assertHasAttribute(t, attrs, "gibson.component.license", "Apache-2.0")
-		assertHasAttribute(t, attrs, "gibson.component.entrypoint", "./agent")
-		assertHasAttribute(t, attrs, "gibson.component.health_url", "/healthz")
-		assertHasAttribute(t, attrs, AttrBuildCommand, "go build")
-	})
 }
 
 // TestLifecycleAttributes tests the LifecycleAttributes function

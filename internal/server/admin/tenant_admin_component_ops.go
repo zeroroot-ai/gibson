@@ -23,20 +23,12 @@
 //	grants the caller admin, in one FGA write. Only the current Owner may
 //	call it (hosted#190, ADR-0093 §5).
 //
-// GrantComponentPermissions (member on tenant, issue #398):
-//
-//	Enforces caller-access intersection: only capabilities the caller already
-//	holds (component_*_enabled tuples on agent_principal:<agent_installation_id>)
-//	may be forwarded to the agent installation principal. The server checks each
-//	requested action against the caller's own access before writing tuples.
-//
 // Spec: tenant-service-admin-handlers issues #397 and #398.
 package admin
 
 import (
 	"context"
 	"errors"
-	"log/slog"
 	"strings"
 
 	"google.golang.org/grpc/codes"
@@ -526,8 +518,8 @@ func (s *TenantAdminServer) TransferOwnership(ctx context.Context, req *tenantv1
 	if s.authorizer == nil {
 		return nil, status.Error(codes.Unavailable, "authorizer not configured")
 	}
-	// Identity is fetched and checked before tenant scoping (same order as
-	// GrantComponentPermissions): a fail-closed check on this specific error,
+	// Identity is fetched and checked before tenant scoping: a fail-closed
+	// check on this specific error,
 	// not a discard, so an absent identity can never flow on as a zero-value
 	// tenant/subject.
 	identity, identityErr := auth.IdentityFromContext(ctx)
@@ -591,222 +583,6 @@ func (s *TenantAdminServer) TransferOwnership(ctx context.Context, req *tenantv1
 	}
 
 	return &tenantv1.TransferOwnershipResponse{}, nil
-}
-
-// ---------------------------------------------------------------------------
-// GrantComponentPermissions (#398)
-// ---------------------------------------------------------------------------
-
-// actionToComponentRelation maps the human-readable action name to the FGA
-// component_*_enabled relation on the agent_principal.
-var actionToComponentRelation = map[string]string{
-	"read":    "component_read_enabled",
-	"write":   "component_write_enabled",
-	"execute": "component_execute_enabled",
-}
-
-// actionToCallerRelation maps the action name to the FGA relation the caller
-// must hold on the component object for the caller-access intersection check.
-var actionToCallerRelation = map[string]string{
-	"read":    "can_read",
-	"write":   "can_configure",
-	"execute": "can_execute",
-}
-
-// agentInstallationUUIDLen is the length of the canonical 8-4-4-4-12 UUID
-// string emitted by the dashboard's crypto.randomUUID() (installAgent.ts).
-const agentInstallationUUIDLen = 36
-
-// agentInstallationTenantSuffix splits a dashboard-minted agent_installation_id
-// of the form "<uuid>-<tenantId>" (installAgent.ts: `${randomUUID()}-${tenantId}`)
-// into its tenant portion. It reports ok=false if the id is not at least
-// long enough to carry a UUID plus a "-" separator.
-//
-// This is a fixed-offset split, not a suffix search: index [0:36] is treated
-// as the UUID and [37:] as the WHOLE remainder, compared for exact equality
-// by the caller — never a strings.HasSuffix/Contains check. Tenant slugs may
-// themselves contain hyphens (auth.NewTenantID's grammar allows it), so a
-// naive "ends with '-'+tenant" test is ambiguous: an id mistakenly minted
-// under a tenant whose slug itself ends in another tenant's slug (e.g.
-// "my-acme" ending in "acme") would satisfy a suffix check for tenant "acme"
-// too. Exact equality of the entire post-UUID remainder has no such
-// collision, regardless of what hyphens either tenant slug contains.
-func agentInstallationTenantSuffix(installationID string) (tenant string, ok bool) {
-	if len(installationID) <= agentInstallationUUIDLen+1 {
-		return "", false
-	}
-	if installationID[agentInstallationUUIDLen] != '-' {
-		return "", false
-	}
-	return installationID[agentInstallationUUIDLen+1:], true
-}
-
-// GrantComponentPermissions writes component_*_enabled FGA tuples for an agent
-// installation principal after enforcing caller-access intersection. Only
-// capabilities the caller already holds on each target component may be
-// forwarded to the agent installation principal.
-//
-// The caller-access intersection check prevents privilege escalation: a tenant
-// admin who cannot execute component:gitlab cannot grant execute access on that
-// component to any agent installation.
-func (s *TenantAdminServer) GrantComponentPermissions(ctx context.Context, req *tenantv1.GrantComponentPermissionsRequest) (*tenantv1.GrantComponentPermissionsResponse, error) {
-	if s.authorizer == nil {
-		return nil, status.Error(codes.Unavailable, "authorizer not configured")
-	}
-	identity, identityErr := auth.IdentityFromContext(ctx)
-	if identityErr != nil {
-		return nil, status.Error(codes.PermissionDenied, "no identity in context")
-	}
-	tenant, ok := auth.TenantFromContext(ctx)
-	if !ok {
-		return nil, status.Error(codes.PermissionDenied, "no tenant in context")
-	}
-	if req.GetAgentInstallationId() == "" {
-		return nil, status.Error(codes.InvalidArgument, "agent_installation_id required")
-	}
-	if len(req.GetApprovals()) == 0 {
-		// Trivially a no-op, but we return early rather than error — the
-		// caller may be testing the endpoint or clearing all grants.
-		return &tenantv1.GrantComponentPermissionsResponse{
-			AgentInstallationId: req.GetAgentInstallationId(),
-		}, nil
-	}
-
-	// Validate all actions before touching FGA.
-	for i, approval := range req.GetApprovals() {
-		if approval.GetTarget() == "" {
-			return nil, status.Errorf(codes.InvalidArgument, "approvals[%d].target is required", i)
-		}
-		if _, valid := actionToComponentRelation[approval.GetAction()]; !valid {
-			return nil, status.Errorf(codes.InvalidArgument,
-				"approvals[%d].action %q not allowed; must be one of read, write, execute", i, approval.GetAction())
-		}
-	}
-
-	// Normalise the caller's user ref.
-	callerRef := "user:" + identity.Subject
-	agentPrincipalRef := "agent_principal:" + req.GetAgentInstallationId()
-
-	// Bind the grant RECIPIENT to the caller's tenant. The caller-access
-	// intersection below bounds WHICH capability may be forwarded; without this
-	// check it does not bound WHO receives it, so a caller could forward their
-	// own component access to a principal in another tenant.
-	//
-	// This is NOT GrantsAdminServer.validateTargetAndTenant's shape: that path
-	// resolves an ALREADY-PROVISIONED principal through the identity lookup
-	// service, which only knows principals CreateAgentIdentity provisioned
-	// through the IdP. An agent-installation principal is different — it is
-	// minted client-side by the dashboard install flow (installAgent.ts:
-	// `${randomUUID()}-${tenantId}`) and nothing writes a `belongs_to` tuple
-	// for it ahead of a grant, so an FGA Check here can never succeed; it
-	// denied every real caller (the regression this replaces).
-	//
-	// The actual anchor is the id's own tenant suffix, verified against the
-	// CALLER'S authenticated tenant (ctx-derived — ext-authz sets it from the
-	// caller's verified membership, never from anything the request body or
-	// the id string itself asserts). A caller authenticated as tenant A can
-	// only ever compute wantTenant="A" here, so they cannot construct an id
-	// that resolves to tenant B's suffix while acting as A: the check is an
-	// equality against A, not a property of the id alone. See
-	// agentInstallationTenantSuffix for why this is an exact split on the
-	// fixed-width UUID prefix rather than a suffix/Contains match (tenant
-	// slugs may themselves contain hyphens).
-	//
-	// Once the suffix is verified, the belongs_to tuple is queued for the same
-	// atomic Write as the component grants below (self-healing, mirroring the
-	// belongs_to-heal pattern in mission_handlers.go) — nothing is written
-	// yet if the caller-access intersection check below still has to reject
-	// the request. Write is idempotent (a no-op if the tuple already exists
-	// per the authz.Authorizer contract), so queuing it unconditionally here
-	// is safe and turns the principal's tenancy into a real, queryable FGA
-	// fact from its first successful grant onward (visible to ListPrincipals
-	// / a later CreateAgentIdentity reconciliation) rather than leaving a
-	// Check here that could never be satisfied.
-	gotTenant, suffixOK := agentInstallationTenantSuffix(req.GetAgentInstallationId())
-	if !suffixOK || gotTenant != tenant.String() {
-		s.logger.WarnContext(ctx, "GrantComponentPermissions: agent_installation_id does not belong to the caller's tenant",
-			slog.String("caller", callerRef),
-			slog.String("agent_installation_id", req.GetAgentInstallationId()),
-		)
-		return nil, status.Error(codes.PermissionDenied, "target principal is not in your tenant")
-	}
-	belongsToTuple := authz.Tuple{User: tenantRefFromID(tenant.String()), Relation: "belongs_to", Object: agentPrincipalRef}
-
-	// Caller-access intersection check: batch-check the caller's access on
-	// every (target, action) pair before writing any tuples. This prevents
-	// privilege escalation.
-	checks := make([]authz.CheckRequest, len(req.GetApprovals()))
-	for i, approval := range req.GetApprovals() {
-		targetRef, refErr := componentObjectRef(approval.GetTarget())
-		if refErr != nil {
-			return nil, refErr
-		}
-		callerRelation := actionToCallerRelation[approval.GetAction()]
-		checks[i] = authz.CheckRequest{
-			User:     callerRef,
-			Relation: callerRelation,
-			Object:   targetRef,
-		}
-	}
-	callerHasAccess, err := s.authorizer.BatchCheck(ctx, checks)
-	if err != nil {
-		return nil, status.Errorf(codes.Internal, "fga BatchCheck caller access: %v", err)
-	}
-
-	// Reject if the caller lacks access to any approval.
-	for i, allowed := range callerHasAccess {
-		if !allowed {
-			s.logger.WarnContext(ctx, "GrantComponentPermissions: caller-access intersection failed",
-				slog.String("caller", callerRef),
-				slog.String("target", req.GetApprovals()[i].GetTarget()),
-				slog.String("action", req.GetApprovals()[i].GetAction()),
-			)
-			return nil, status.Errorf(codes.PermissionDenied,
-				"caller does not have %s access on %s",
-				req.GetApprovals()[i].GetAction(), req.GetApprovals()[i].GetTarget())
-		}
-	}
-
-	// Build the tuples to write. Check which already exist to avoid errors.
-	candidateTuples := make([]authz.Tuple, len(req.GetApprovals()))
-	for i, approval := range req.GetApprovals() {
-		targetRef, refErr := componentObjectRef(approval.GetTarget())
-		if refErr != nil {
-			return nil, refErr
-		}
-		candidateTuples[i] = authz.Tuple{
-			User:     agentPrincipalRef,
-			Relation: actionToComponentRelation[approval.GetAction()],
-			Object:   targetRef,
-		}
-	}
-
-	existChecks := make([]authz.CheckRequest, len(candidateTuples))
-	for i, t := range candidateTuples {
-		existChecks[i] = authz.CheckRequest{User: t.User, Relation: t.Relation, Object: t.Object}
-	}
-	alreadyPresent, err := s.authorizer.BatchCheck(ctx, existChecks)
-	if err != nil {
-		return nil, status.Errorf(codes.Internal, "fga BatchCheck existing grants: %v", err)
-	}
-
-	// belongs_to is queued unconditionally (Write is idempotent), so it is
-	// (re)established on every successful grant even if it was somehow
-	// deleted since the principal's last grant.
-	toWrite := []authz.Tuple{belongsToTuple}
-	for i, present := range alreadyPresent {
-		if !present {
-			toWrite = append(toWrite, candidateTuples[i])
-		}
-	}
-
-	if err := s.authorizer.Write(ctx, toWrite); err != nil {
-		return nil, status.Errorf(codes.Internal, "fga Write component grants: %v", err)
-	}
-
-	return &tenantv1.GrantComponentPermissionsResponse{
-		AgentInstallationId: req.GetAgentInstallationId(),
-	}, nil
 }
 
 // SetCatalogPublished writes or deletes the FGA tenant_published tuple for a

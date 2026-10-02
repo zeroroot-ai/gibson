@@ -194,15 +194,6 @@ func TestNewInvalidManifestError(t *testing.T) {
 	assert.False(t, err.Retryable)
 }
 
-// TestNewManifestNotFoundError tests the NewManifestNotFoundError function
-func TestNewManifestNotFoundError(t *testing.T) {
-	err := NewManifestNotFoundError("/path/to/manifest.json")
-	assert.NotNil(t, err)
-	assert.Equal(t, ErrCodeManifestNotFound, err.Code)
-	assert.Contains(t, err.Message, "/path/to/manifest.json")
-	assert.False(t, err.Retryable)
-}
-
 // TestNewLoadFailedError tests the NewLoadFailedError function
 func TestNewLoadFailedError(t *testing.T) {
 	cause := errors.New("file error")

@@ -253,55 +253,6 @@ func TestStatusChecker_performHealthCheck(t *testing.T) {
 	}
 }
 
-func TestStatusChecker_performHealthCheck_WithManifestConfig(t *testing.T) {
-	tmpDir := t.TempDir()
-	checker := NewStatusChecker(tmpDir)
-
-	// Create a component with explicit gRPC health check config
-	comp := &Component{
-		ID:      1,
-		Kind:    ComponentKindAgent,
-		Name:    "test-agent",
-		Version: "1.0.0",
-		Port:    50051,
-		PID:     os.Getpid(),
-		Status:  ComponentStatusRunning,
-		Manifest: &Manifest{
-			Name:    "test-agent",
-			Version: "1.0.0",
-			Runtime: &RuntimeConfig{
-				Type:       RuntimeTypeGRPC,
-				Entrypoint: "./test-agent",
-				Port:       50051,
-				HealthCheck: &HealthCheckConfig{
-					Protocol:    HealthCheckProtocolGRPC,
-					Timeout:     2 * time.Second,
-					ServiceName: "test.Service",
-				},
-			},
-		},
-	}
-
-	ctx := context.Background()
-	result := checker.performHealthCheck(ctx, comp)
-
-	// Verify result structure
-	if result == nil {
-		t.Fatal("performHealthCheck returned nil")
-	}
-
-	// Health check should fail (no server listening)
-	if result.Status == "SERVING" {
-		t.Error("Health check should fail for non-existent server")
-	}
-
-	// Verify protocol is set (performHealthCheck currently uses TCP regardless of manifest)
-	// Note: Current implementation uses simple TCP dial, not gRPC health check protocol
-	if result.Protocol == "" {
-		t.Error("Protocol should not be empty")
-	}
-}
-
 func TestStatusChecker_isHealthCheckError(t *testing.T) {
 	tests := []struct {
 		name string

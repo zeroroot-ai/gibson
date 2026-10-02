@@ -16,7 +16,7 @@
 // decision is COMPOSED here from existing FGA relations rather than a single
 // model relation, because FGA cannot express "admin over a user" without
 // maintaining reverse-edge tuples on every user object. Mirrors the in-handler
-// caller-access intersection MembershipService.GrantComponentPermissions does.
+// caller-access intersection GrantsService.WriteAgentGrants does.
 //
 // v1 model (DECIDED): revoking blocks NEW tokens immediately; the target's
 // current stateless access JWT ages out within the access-token TTL (bounded to

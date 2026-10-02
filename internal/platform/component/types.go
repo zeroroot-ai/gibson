@@ -226,11 +226,9 @@ type Component struct {
 	Kind      ComponentKind   `json:"kind" yaml:"kind" db:"kind"`                                       // Type of component (agent, tool, plugin)
 	Name      string          `json:"name" yaml:"name" db:"name"`                                       // Component name
 	Version   string          `json:"version" yaml:"version" db:"version"`                              // Semantic version
-	RepoPath  string          `json:"repo_path" db:"repo_path"`                                         // Path to cloned source repository in _repos/
 	BinPath   string          `json:"bin_path" db:"bin_path"`                                           // Path to installed binary in bin/
 	Source    ComponentSource `json:"source" yaml:"source" db:"source"`                                 // Where the component originates
 	Status    ComponentStatus `json:"status" yaml:"status" db:"status"`                                 // Current runtime status
-	Manifest  *Manifest       `json:"manifest,omitempty" yaml:"manifest,omitempty" db:"manifest"`       // Component manifest (stored as JSON in DB)
 	Port      int             `json:"port,omitempty" yaml:"port,omitempty" db:"port"`                   // Network port for remote components
 	PID       int             `json:"pid,omitempty" yaml:"pid,omitempty" db:"pid"`                      // Process ID for running components
 	CreatedAt time.Time       `json:"created_at" yaml:"created_at" db:"created_at"`                     // When the component was registered
@@ -254,10 +252,11 @@ func (c *Component) Validate() error {
 		return fmt.Errorf("component version is required")
 	}
 
-	// Validate that either RepoPath or BinPath is set (or both)
-	// Components need at least one path to be functional
-	if c.RepoPath == "" && c.BinPath == "" {
-		return fmt.Errorf("component must have either repo_path or bin_path set")
+	// A component needs its binary path to be functional. The repository
+	// path left with the component.yaml schema (gibson#555): nothing ever
+	// wrote it in production.
+	if c.BinPath == "" {
+		return fmt.Errorf("component must have bin_path set")
 	}
 
 	if !c.Source.IsValid() {
@@ -282,13 +281,6 @@ func (c *Component) Validate() error {
 		}
 		if c.StartedAt == nil {
 			return fmt.Errorf("started_at is required for running components")
-		}
-	}
-
-	// Validate manifest if present
-	if c.Manifest != nil {
-		if err := c.Manifest.Validate(); err != nil {
-			return fmt.Errorf("manifest validation failed: %w", err)
 		}
 	}
 

@@ -147,7 +147,7 @@ func TestSetComponentAccess_RejectsARelationItDoesNotOwn(t *testing.T) {
 		"can_execute",            // a computed relation, not a settable deny
 		"team_admin",             // not a component deny relation
 		"bogus_relation",         // unknown
-		"component_read_enabled", // a GRANT, owned by GrantComponentPermissions
+		"component_read_enabled", // a GRANT relation, not a settable deny
 	} {
 		t.Run(relation, func(t *testing.T) {
 			// The team IS the caller's, so an InvalidArgument here can only

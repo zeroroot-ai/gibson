@@ -77,33 +77,6 @@ func (m *mockLifecycleManager) GetStatus(ctx context.Context, comp *component.Co
 	return status, nil
 }
 
-// mockManifestLoader is a test double for ManifestLoader
-type mockManifestLoader struct {
-	manifests map[string]*component.Manifest
-	err       error
-}
-
-func newMockManifestLoader() *mockManifestLoader {
-	return &mockManifestLoader{
-		manifests: make(map[string]*component.Manifest),
-	}
-}
-
-func (m *mockManifestLoader) key(kind component.ComponentKind, name string) string {
-	return string(kind) + ":" + name
-}
-
-func (m *mockManifestLoader) addManifest(kind component.ComponentKind, name string, manifest *component.Manifest) {
-	m.manifests[m.key(kind, name)] = manifest
-}
-
-func (m *mockManifestLoader) LoadManifest(ctx context.Context, kind component.ComponentKind, name string) (*component.Manifest, error) {
-	if m.err != nil {
-		return nil, m.err
-	}
-	return m.manifests[m.key(kind, name)], nil
-}
-
 // mockMissionDefinition is a test double for MissionDefinition
 type mockMissionDefinition struct {
 	nodes        []MissionNode
@@ -156,24 +129,15 @@ func (m *mockMissionDependency) Version() string {
 	return m.version
 }
 
-// Helper functions for creating test components and manifests
+// Helper functions for creating test components
 func createTestComponent(kind component.ComponentKind, name, version string, status component.ComponentStatus) *component.Component {
 	return &component.Component{
-		Kind:     kind,
-		Name:     name,
-		Version:  version,
-		Status:   status,
-		RepoPath: "/test/repo/" + name,
-		BinPath:  "/test/bin/" + name,
-		Source:   component.ComponentSourceExternal,
-	}
-}
-
-func createManifestWithDeps(deps []string) *component.Manifest {
-	return &component.Manifest{
-		Dependencies: &component.ComponentDependencies{
-			Components: deps,
-		},
+		Kind:    kind,
+		Name:    name,
+		Version: version,
+		Status:  status,
+		BinPath: "/test/bin/" + name,
+		Source:  component.ComponentSourceExternal,
 	}
 }
 
@@ -181,9 +145,8 @@ func createManifestWithDeps(deps []string) *component.Manifest {
 func TestNewResolver(t *testing.T) {
 	store := newMockComponentStore()
 	lifecycle := newMockLifecycleManager()
-	loader := newMockManifestLoader()
 
-	resolver := NewResolver(store, lifecycle, loader)
+	resolver := NewResolver(store, lifecycle)
 
 	assert.NotNil(t, resolver)
 }
@@ -195,7 +158,6 @@ func TestResolveFromMission_SingleAgent(t *testing.T) {
 	// Setup
 	store := newMockComponentStore()
 	lifecycle := newMockLifecycleManager()
-	loader := newMockManifestLoader()
 
 	// Add agent to store
 	agent := createTestComponent(component.ComponentKindAgent, "test-agent", "1.0.0", component.ComponentStatusRunning)
@@ -214,7 +176,7 @@ func TestResolveFromMission_SingleAgent(t *testing.T) {
 	}
 
 	// Execute
-	resolver := NewResolver(store, lifecycle, loader)
+	resolver := NewResolver(store, lifecycle)
 	tree, err := resolver.ResolveFromMission(ctx, mission)
 
 	// Assert
@@ -236,153 +198,6 @@ func TestResolveFromMission_SingleAgent(t *testing.T) {
 	assert.True(t, agentNode.Running)
 }
 
-// TestResolveFromMission_AgentWithToolDependencies tests resolving an agent that depends on tools
-func TestResolveFromMission_AgentWithToolDependencies(t *testing.T) {
-	ctx := context.Background()
-
-	// Setup
-	store := newMockComponentStore()
-	lifecycle := newMockLifecycleManager()
-	loader := newMockManifestLoader()
-
-	// Add components to store
-	agent := createTestComponent(component.ComponentKindAgent, "recon-agent", "1.0.0", component.ComponentStatusRunning)
-	tool1 := createTestComponent(component.ComponentKindTool, "port-scanner", "1.0.0", component.ComponentStatusRunning)
-	tool2 := createTestComponent(component.ComponentKindTool, "nmap", "2.0.0", component.ComponentStatusRunning)
-
-	store.add(agent)
-	store.add(tool1)
-	store.add(tool2)
-
-	lifecycle.setStatus(component.ComponentKindAgent, "recon-agent", component.ComponentStatusRunning)
-	lifecycle.setStatus(component.ComponentKindTool, "port-scanner", component.ComponentStatusRunning)
-	lifecycle.setStatus(component.ComponentKindTool, "nmap", component.ComponentStatusRunning)
-
-	// Add manifest for agent with tool dependencies
-	agentManifest := createManifestWithDeps([]string{
-		"tool:port-scanner@^1.0.0",
-		"tool:nmap@>=2.0.0",
-	})
-	loader.addManifest(component.ComponentKindAgent, "recon-agent", agentManifest)
-
-	// Create mission
-	mission := &mockMissionDefinition{
-		nodes: []MissionNode{
-			&mockMissionNode{
-				id:           "recon",
-				nodeType:     "agent",
-				componentRef: "recon-agent",
-			},
-		},
-	}
-
-	// Execute
-	resolver := NewResolver(store, lifecycle, loader)
-	tree, err := resolver.ResolveFromMission(ctx, mission)
-
-	// Assert
-	require.NoError(t, err)
-	require.NotNil(t, tree)
-	assert.Equal(t, 3, len(tree.Nodes), "Should have agent + 2 tools")
-	assert.Equal(t, 1, len(tree.Agents))
-	assert.Equal(t, 2, len(tree.Tools))
-	assert.Equal(t, 0, len(tree.Plugins))
-
-	// Check agent node has dependencies
-	agentNode := tree.GetNode(component.ComponentKindAgent, "recon-agent")
-	require.NotNil(t, agentNode)
-	assert.Equal(t, 2, len(agentNode.DependsOn), "Agent should depend on 2 tools")
-
-	// Check tool nodes
-	tool1Node := tree.GetNode(component.ComponentKindTool, "port-scanner")
-	require.NotNil(t, tool1Node)
-	assert.Equal(t, "^1.0.0", tool1Node.Version)
-	assert.Equal(t, SourceManifest, tool1Node.Source)
-	assert.Equal(t, "recon-agent", tool1Node.SourceRef)
-
-	tool2Node := tree.GetNode(component.ComponentKindTool, "nmap")
-	require.NotNil(t, tool2Node)
-	assert.Equal(t, ">=2.0.0", tool2Node.Version)
-}
-
-// TestResolveFromMission_TransitiveDependencies tests resolving transitive dependencies (agent -> tool -> plugin)
-func TestResolveFromMission_TransitiveDependencies(t *testing.T) {
-	ctx := context.Background()
-
-	// Setup
-	store := newMockComponentStore()
-	lifecycle := newMockLifecycleManager()
-	loader := newMockManifestLoader()
-
-	// Add components
-	agent := createTestComponent(component.ComponentKindAgent, "k8s-agent", "1.0.0", component.ComponentStatusRunning)
-	tool := createTestComponent(component.ComponentKindTool, "kubectl", "1.0.0", component.ComponentStatusRunning)
-	plugin := createTestComponent(component.ComponentKindPlugin, "k8s-plugin", "1.0.0", component.ComponentStatusRunning)
-
-	store.add(agent)
-	store.add(tool)
-	store.add(plugin)
-
-	lifecycle.setStatus(component.ComponentKindAgent, "k8s-agent", component.ComponentStatusRunning)
-	lifecycle.setStatus(component.ComponentKindTool, "kubectl", component.ComponentStatusRunning)
-	lifecycle.setStatus(component.ComponentKindPlugin, "k8s-plugin", component.ComponentStatusRunning)
-
-	// Agent depends on tool
-	agentManifest := createManifestWithDeps([]string{"tool:kubectl@^1.0.0"})
-	loader.addManifest(component.ComponentKindAgent, "k8s-agent", agentManifest)
-
-	// Tool depends on plugin
-	toolManifest := createManifestWithDeps([]string{"plugin:k8s-plugin@^1.0.0"})
-	loader.addManifest(component.ComponentKindTool, "kubectl", toolManifest)
-
-	// Create mission
-	mission := &mockMissionDefinition{
-		nodes: []MissionNode{
-			&mockMissionNode{
-				id:           "k8s-scan",
-				nodeType:     "agent",
-				componentRef: "k8s-agent",
-			},
-		},
-	}
-
-	// Execute
-	resolver := NewResolver(store, lifecycle, loader)
-	tree, err := resolver.ResolveFromMission(ctx, mission)
-
-	// Assert
-	require.NoError(t, err)
-	require.NotNil(t, tree)
-	assert.Equal(t, 3, len(tree.Nodes), "Should have agent + tool + plugin")
-	assert.Equal(t, 1, len(tree.Agents))
-	assert.Equal(t, 1, len(tree.Tools))
-	assert.Equal(t, 1, len(tree.Plugins))
-
-	// Check dependency chain: agent -> tool -> plugin
-	agentNode := tree.GetNode(component.ComponentKindAgent, "k8s-agent")
-	require.NotNil(t, agentNode)
-	assert.Equal(t, 1, len(agentNode.DependsOn))
-
-	toolNode := tree.GetNode(component.ComponentKindTool, "kubectl")
-	require.NotNil(t, toolNode)
-	assert.Equal(t, 1, len(toolNode.DependsOn))
-	assert.Equal(t, 1, len(toolNode.RequiredBy))
-
-	pluginNode := tree.GetNode(component.ComponentKindPlugin, "k8s-plugin")
-	require.NotNil(t, pluginNode)
-	assert.Equal(t, 0, len(pluginNode.DependsOn))
-	assert.Equal(t, 1, len(pluginNode.RequiredBy))
-
-	// Verify topological order
-	order, err := tree.TopologicalOrder()
-	require.NoError(t, err)
-	assert.Equal(t, 3, len(order))
-	// Plugin should come first (no dependencies), then tool, then agent
-	assert.Equal(t, "plugin", string(order[0].Kind))
-	assert.Equal(t, "tool", string(order[1].Kind))
-	assert.Equal(t, "agent", string(order[2].Kind))
-}
-
 // TestResolveFromMission_ParallelNodes tests resolving a mission with parallel nodes
 func TestResolveFromMission_ParallelNodes(t *testing.T) {
 	ctx := context.Background()
@@ -390,7 +205,6 @@ func TestResolveFromMission_ParallelNodes(t *testing.T) {
 	// Setup
 	store := newMockComponentStore()
 	lifecycle := newMockLifecycleManager()
-	loader := newMockManifestLoader()
 
 	// Add multiple agents
 	agent1 := createTestComponent(component.ComponentKindAgent, "agent-1", "1.0.0", component.ComponentStatusRunning)
@@ -411,7 +225,7 @@ func TestResolveFromMission_ParallelNodes(t *testing.T) {
 	}
 
 	// Execute
-	resolver := NewResolver(store, lifecycle, loader)
+	resolver := NewResolver(store, lifecycle)
 	tree, err := resolver.ResolveFromMission(ctx, mission)
 
 	// Assert
@@ -422,97 +236,6 @@ func TestResolveFromMission_ParallelNodes(t *testing.T) {
 	assert.Equal(t, 3, len(tree.Roots), "All agents should be root nodes")
 }
 
-// TestResolveFromMission_CircularDependencies tests that circular dependencies are detected
-func TestResolveFromMission_CircularDependencies(t *testing.T) {
-	ctx := context.Background()
-
-	// Setup
-	store := newMockComponentStore()
-	lifecycle := newMockLifecycleManager()
-	loader := newMockManifestLoader()
-
-	// Add components
-	agent := createTestComponent(component.ComponentKindAgent, "agent-a", "1.0.0", component.ComponentStatusRunning)
-	tool := createTestComponent(component.ComponentKindTool, "tool-b", "1.0.0", component.ComponentStatusRunning)
-	plugin := createTestComponent(component.ComponentKindPlugin, "plugin-c", "1.0.0", component.ComponentStatusRunning)
-
-	store.add(agent)
-	store.add(tool)
-	store.add(plugin)
-
-	// Create circular dependency: agent -> tool -> plugin -> agent
-	agentManifest := createManifestWithDeps([]string{"tool:tool-b@1.0.0"})
-	toolManifest := createManifestWithDeps([]string{"plugin:plugin-c@1.0.0"})
-	pluginManifest := createManifestWithDeps([]string{"agent:agent-a@1.0.0"})
-
-	loader.addManifest(component.ComponentKindAgent, "agent-a", agentManifest)
-	loader.addManifest(component.ComponentKindTool, "tool-b", toolManifest)
-	loader.addManifest(component.ComponentKindPlugin, "plugin-c", pluginManifest)
-
-	// Create mission
-	mission := &mockMissionDefinition{
-		nodes: []MissionNode{
-			&mockMissionNode{
-				id:           "start",
-				nodeType:     "agent",
-				componentRef: "agent-a",
-			},
-		},
-	}
-
-	// Execute
-	resolver := NewResolver(store, lifecycle, loader)
-	tree, err := resolver.ResolveFromMission(ctx, mission)
-
-	// Assert - should return error for circular dependency
-	require.Error(t, err)
-	assert.Nil(t, tree)
-	var depErr *DependencyError
-	require.ErrorAs(t, err, &depErr)
-	assert.Equal(t, ErrCircularDependency, depErr.Code)
-}
-
-// TestResolveFromMission_MissingManifest tests that missing manifests continue with warning
-func TestResolveFromMission_MissingManifest(t *testing.T) {
-	ctx := context.Background()
-
-	// Setup
-	store := newMockComponentStore()
-	lifecycle := newMockLifecycleManager()
-	loader := newMockManifestLoader()
-
-	// Add agent to store but no manifest
-	agent := createTestComponent(component.ComponentKindAgent, "test-agent", "1.0.0", component.ComponentStatusRunning)
-	store.add(agent)
-	lifecycle.setStatus(component.ComponentKindAgent, "test-agent", component.ComponentStatusRunning)
-
-	// Don't add manifest to loader - it will return nil
-
-	// Create mission
-	mission := &mockMissionDefinition{
-		nodes: []MissionNode{
-			&mockMissionNode{
-				id:           "node1",
-				nodeType:     "agent",
-				componentRef: "test-agent",
-			},
-		},
-	}
-
-	// Execute
-	resolver := NewResolver(store, lifecycle, loader)
-	tree, err := resolver.ResolveFromMission(ctx, mission)
-
-	// Assert - should succeed but with incomplete tree
-	require.NoError(t, err)
-	require.NotNil(t, tree)
-	assert.Equal(t, 1, len(tree.Nodes))
-
-	agentNode := tree.GetNode(component.ComponentKindAgent, "test-agent")
-	require.NotNil(t, agentNode)
-	assert.Equal(t, 0, len(agentNode.DependsOn), "Agent should have no dependencies without manifest")
-}
-
 // TestResolveFromMission_ExplicitDependencies tests resolving explicit mission dependencies
 func TestResolveFromMission_ExplicitDependencies(t *testing.T) {
 	ctx := context.Background()
@@ -520,7 +243,6 @@ func TestResolveFromMission_ExplicitDependencies(t *testing.T) {
 	// Setup
 	store := newMockComponentStore()
 	lifecycle := newMockLifecycleManager()
-	loader := newMockManifestLoader()
 
 	// Add components
 	agent := createTestComponent(component.ComponentKindAgent, "required-agent", "2.0.0", component.ComponentStatusRunning)
@@ -539,7 +261,7 @@ func TestResolveFromMission_ExplicitDependencies(t *testing.T) {
 	}
 
 	// Execute
-	resolver := NewResolver(store, lifecycle, loader)
+	resolver := NewResolver(store, lifecycle)
 	tree, err := resolver.ResolveFromMission(ctx, mission)
 
 	// Assert
@@ -560,7 +282,6 @@ func TestValidateState_AllComponentsHealthy(t *testing.T) {
 	// Setup
 	store := newMockComponentStore()
 	lifecycle := newMockLifecycleManager()
-	loader := newMockManifestLoader()
 
 	// Create tree with healthy components
 	tree := NewDependencyTree("test-mission")
@@ -588,7 +309,7 @@ func TestValidateState_AllComponentsHealthy(t *testing.T) {
 	tree.AddNode(toolNode)
 
 	// Execute
-	resolver := NewResolver(store, lifecycle, loader)
+	resolver := NewResolver(store, lifecycle)
 	result, err := resolver.ValidateState(ctx, tree)
 
 	// Assert
@@ -613,7 +334,6 @@ func TestValidateState_SomeNotInstalled(t *testing.T) {
 	// Setup
 	store := newMockComponentStore()
 	lifecycle := newMockLifecycleManager()
-	loader := newMockManifestLoader()
 
 	// Create tree with one installed and one missing component
 	tree := NewDependencyTree("test-mission")
@@ -639,7 +359,7 @@ func TestValidateState_SomeNotInstalled(t *testing.T) {
 	tree.AddNode(toolNode)
 
 	// Execute
-	resolver := NewResolver(store, lifecycle, loader)
+	resolver := NewResolver(store, lifecycle)
 	result, err := resolver.ValidateState(ctx, tree)
 
 	// Assert
@@ -663,7 +383,6 @@ func TestValidateState_SomeNotRunning(t *testing.T) {
 	// Setup
 	store := newMockComponentStore()
 	lifecycle := newMockLifecycleManager()
-	loader := newMockManifestLoader()
 
 	// Create tree with one running and one stopped component
 	tree := NewDependencyTree("test-mission")
@@ -691,7 +410,7 @@ func TestValidateState_SomeNotRunning(t *testing.T) {
 	tree.AddNode(toolNode)
 
 	// Execute
-	resolver := NewResolver(store, lifecycle, loader)
+	resolver := NewResolver(store, lifecycle)
 	result, err := resolver.ValidateState(ctx, tree)
 
 	// Assert
@@ -715,7 +434,6 @@ func TestValidateState_VersionMismatch(t *testing.T) {
 	// Setup
 	store := newMockComponentStore()
 	lifecycle := newMockLifecycleManager()
-	loader := newMockManifestLoader()
 
 	// Create tree with version constraint
 	tree := NewDependencyTree("test-mission")
@@ -734,7 +452,7 @@ func TestValidateState_VersionMismatch(t *testing.T) {
 	tree.AddNode(agentNode)
 
 	// Execute
-	resolver := NewResolver(store, lifecycle, loader)
+	resolver := NewResolver(store, lifecycle)
 	result, err := resolver.ValidateState(ctx, tree)
 
 	// Assert
@@ -758,10 +476,9 @@ func TestValidateState_NilTree(t *testing.T) {
 	// Setup
 	store := newMockComponentStore()
 	lifecycle := newMockLifecycleManager()
-	loader := newMockManifestLoader()
 
 	// Execute
-	resolver := NewResolver(store, lifecycle, loader)
+	resolver := NewResolver(store, lifecycle)
 	result, err := resolver.ValidateState(ctx, nil)
 
 	// Assert
@@ -779,7 +496,6 @@ func TestEnsureRunning_StartsStoppedComponents(t *testing.T) {
 	// Setup
 	store := newMockComponentStore()
 	lifecycle := newMockLifecycleManager()
-	loader := newMockManifestLoader()
 
 	// Create tree with one running and one stopped component
 	tree := NewDependencyTree("test-mission")
@@ -813,7 +529,7 @@ func TestEnsureRunning_StartsStoppedComponents(t *testing.T) {
 	tree.AddNode(stoppedNode)
 
 	// Execute
-	resolver := NewResolver(store, lifecycle, loader)
+	resolver := NewResolver(store, lifecycle)
 	err := resolver.EnsureRunning(ctx, tree)
 
 	// Assert
@@ -831,7 +547,6 @@ func TestEnsureRunning_RespectsTopologicalOrder(t *testing.T) {
 	// Setup
 	store := newMockComponentStore()
 	lifecycle := newMockLifecycleManager()
-	loader := newMockManifestLoader()
 
 	// Create tree with dependencies: agent -> tool -> plugin
 	tree := NewDependencyTree("test-mission")
@@ -875,7 +590,7 @@ func TestEnsureRunning_RespectsTopologicalOrder(t *testing.T) {
 	toolNode.AddDependency(pluginNode)
 
 	// Execute
-	resolver := NewResolver(store, lifecycle, loader)
+	resolver := NewResolver(store, lifecycle)
 	err := resolver.EnsureRunning(ctx, tree)
 
 	// Assert
@@ -895,7 +610,6 @@ func TestEnsureRunning_SkipsAlreadyRunning(t *testing.T) {
 	// Setup
 	store := newMockComponentStore()
 	lifecycle := newMockLifecycleManager()
-	loader := newMockManifestLoader()
 
 	// Create tree with all components already running
 	tree := NewDependencyTree("test-mission")
@@ -916,7 +630,7 @@ func TestEnsureRunning_SkipsAlreadyRunning(t *testing.T) {
 	tree.AddNode(agentNode)
 
 	// Execute
-	resolver := NewResolver(store, lifecycle, loader)
+	resolver := NewResolver(store, lifecycle)
 	err := resolver.EnsureRunning(ctx, tree)
 
 	// Assert
@@ -931,7 +645,6 @@ func TestEnsureRunning_FailsFastOnStartError(t *testing.T) {
 	// Setup
 	store := newMockComponentStore()
 	lifecycle := newMockLifecycleManager()
-	loader := newMockManifestLoader()
 
 	// Configure lifecycle manager to fail on start
 	lifecycle.startError = errors.New("failed to start component")
@@ -953,7 +666,7 @@ func TestEnsureRunning_FailsFastOnStartError(t *testing.T) {
 	tree.AddNode(agentNode)
 
 	// Execute
-	resolver := NewResolver(store, lifecycle, loader)
+	resolver := NewResolver(store, lifecycle)
 	err := resolver.EnsureRunning(ctx, tree)
 
 	// Assert
@@ -971,7 +684,6 @@ func TestEnsureRunning_SkipsNotInstalledComponents(t *testing.T) {
 	// Setup
 	store := newMockComponentStore()
 	lifecycle := newMockLifecycleManager()
-	loader := newMockManifestLoader()
 
 	// Create tree with not-installed component
 	tree := NewDependencyTree("test-mission")
@@ -987,138 +699,10 @@ func TestEnsureRunning_SkipsNotInstalledComponents(t *testing.T) {
 	tree.AddNode(agentNode)
 
 	// Execute
-	resolver := NewResolver(store, lifecycle, loader)
+	resolver := NewResolver(store, lifecycle)
 	err := resolver.EnsureRunning(ctx, tree)
 
 	// Assert
 	require.NoError(t, err)
 	assert.Equal(t, 0, len(lifecycle.startedComps), "Should not attempt to start not-installed components")
-}
-
-// TestResolveFromMission_ComplexScenario tests a complex mission with multiple dependencies
-func TestResolveFromMission_ComplexScenario(t *testing.T) {
-	ctx := context.Background()
-
-	// Setup: Complex mission with:
-	// - 2 agents in parallel
-	// - Each agent has different tool dependencies
-	// - Tools share a common plugin dependency
-	store := newMockComponentStore()
-	lifecycle := newMockLifecycleManager()
-	loader := newMockManifestLoader()
-
-	// Add components
-	agent1 := createTestComponent(component.ComponentKindAgent, "recon-agent", "1.0.0", component.ComponentStatusRunning)
-	agent2 := createTestComponent(component.ComponentKindAgent, "exploit-agent", "1.0.0", component.ComponentStatusRunning)
-	tool1 := createTestComponent(component.ComponentKindTool, "nmap", "1.0.0", component.ComponentStatusRunning)
-	tool2 := createTestComponent(component.ComponentKindTool, "metasploit", "1.0.0", component.ComponentStatusRunning)
-	plugin := createTestComponent(component.ComponentKindPlugin, "network-plugin", "1.0.0", component.ComponentStatusRunning)
-
-	store.add(agent1)
-	store.add(agent2)
-	store.add(tool1)
-	store.add(tool2)
-	store.add(plugin)
-
-	// Set up manifests
-	// recon-agent -> nmap -> network-plugin
-	// exploit-agent -> metasploit -> network-plugin
-	agent1Manifest := createManifestWithDeps([]string{"tool:nmap@^1.0.0"})
-	agent2Manifest := createManifestWithDeps([]string{"tool:metasploit@^1.0.0"})
-	tool1Manifest := createManifestWithDeps([]string{"plugin:network-plugin@^1.0.0"})
-	tool2Manifest := createManifestWithDeps([]string{"plugin:network-plugin@^1.0.0"})
-
-	loader.addManifest(component.ComponentKindAgent, "recon-agent", agent1Manifest)
-	loader.addManifest(component.ComponentKindAgent, "exploit-agent", agent2Manifest)
-	loader.addManifest(component.ComponentKindTool, "nmap", tool1Manifest)
-	loader.addManifest(component.ComponentKindTool, "metasploit", tool2Manifest)
-
-	// Create mission
-	mission := &mockMissionDefinition{
-		nodes: []MissionNode{
-			&mockMissionNode{id: "recon", nodeType: "agent", componentRef: "recon-agent"},
-			&mockMissionNode{id: "exploit", nodeType: "agent", componentRef: "exploit-agent"},
-		},
-	}
-
-	// Execute
-	resolver := NewResolver(store, lifecycle, loader)
-	tree, err := resolver.ResolveFromMission(ctx, mission)
-
-	// Assert
-	require.NoError(t, err)
-	require.NotNil(t, tree)
-	assert.Equal(t, 5, len(tree.Nodes), "Should have 2 agents + 2 tools + 1 plugin")
-	assert.Equal(t, 2, len(tree.Agents))
-	assert.Equal(t, 2, len(tree.Tools))
-	assert.Equal(t, 1, len(tree.Plugins))
-
-	// Check that plugin is shared between both tools
-	pluginNode := tree.GetNode(component.ComponentKindPlugin, "network-plugin")
-	require.NotNil(t, pluginNode)
-	assert.Equal(t, 2, len(pluginNode.RequiredBy), "Plugin should be required by both tools")
-
-	// Verify topological order
-	order, err := tree.TopologicalOrder()
-	require.NoError(t, err)
-	assert.Equal(t, 5, len(order))
-	// Plugin should come first (no dependencies)
-	assert.Equal(t, "plugin", string(order[0].Kind))
-	assert.Equal(t, "network-plugin", order[0].Name)
-}
-
-// TestParseComponentDependency tests the parseComponentDependency helper function
-func TestParseComponentDependency(t *testing.T) {
-	tests := []struct {
-		name            string
-		depStr          string
-		expectedKind    component.ComponentKind
-		expectedName    string
-		expectedVersion string
-	}{
-		{
-			name:            "explicit kind with version",
-			depStr:          "tool:nmap@^1.0.0",
-			expectedKind:    component.ComponentKindTool,
-			expectedName:    "nmap",
-			expectedVersion: "^1.0.0",
-		},
-		{
-			name:            "implicit kind (agent) with version",
-			depStr:          "test-agent@>=2.0.0",
-			expectedKind:    component.ComponentKindAgent,
-			expectedName:    "test-agent",
-			expectedVersion: ">=2.0.0",
-		},
-		{
-			name:            "plugin with version",
-			depStr:          "plugin:k8s-plugin@~1.5.0",
-			expectedKind:    component.ComponentKindPlugin,
-			expectedName:    "k8s-plugin",
-			expectedVersion: "~1.5.0",
-		},
-		{
-			name:            "invalid format no version",
-			depStr:          "tool:nmap",
-			expectedKind:    "",
-			expectedName:    "",
-			expectedVersion: "",
-		},
-		{
-			name:            "invalid format no name",
-			depStr:          "@1.0.0",
-			expectedKind:    component.ComponentKindAgent, // Parser treats "@1.0.0" as "agent:@1.0.0" -> agent with version 1.0.0
-			expectedName:    "",                           // Empty name before @
-			expectedVersion: "1.0.0",
-		},
-	}
-
-	for _, tt := range tests {
-		t.Run(tt.name, func(t *testing.T) {
-			kind, name, version := parseComponentDependency(tt.depStr)
-			assert.Equal(t, tt.expectedKind, kind)
-			assert.Equal(t, tt.expectedName, name)
-			assert.Equal(t, tt.expectedVersion, version)
-		})
-	}
 }
