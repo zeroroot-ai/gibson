@@ -427,3 +427,78 @@ func TestRunExisting_RefusesAMissionAlreadyRunning(t *testing.T) {
 		t.Error("the stored definition still carries a placeholder")
 	}
 }
+
+// A daemon with no pool refuses by name rather than dereferencing a nil store.
+// missionStoreFor returns (nil, noop, nil) when the pool is absent, so the nil
+// check is the only thing between here and a panic on the reconcile path.
+func TestRunExisting_RefusesWhenThePoolIsNotConfigured(t *testing.T) {
+	m := &missionManager{
+		logger:         slog.New(slog.DiscardHandler),
+		activeMissions: make(map[auth.TenantID]map[string]*activeMission),
+	}
+	_, err := m.RunExisting(tenantCtx(t, "tenant-a"), types.NewID().String())
+	if err == nil {
+		t.Fatal("want a refusal when no pool is configured")
+	}
+	if !strings.Contains(err.Error(), "not initialized") {
+		t.Errorf("the refusal does not name the cause: %v", err)
+	}
+}
+
+// A pool that cannot hand out a connection fails the run, naming the step. A
+// tenant whose data plane is not provisioned reaches this.
+func TestRunExisting_PoolFailurePropagates(t *testing.T) {
+	m := &missionManager{
+		logger:         slog.New(slog.DiscardHandler),
+		pool:           &runExistingPool{err: errTargetNotFoundForTest},
+		activeMissions: make(map[auth.TenantID]map[string]*activeMission),
+	}
+	_, err := m.RunExisting(tenantCtx(t, "tenant-a"), types.NewID().String())
+	if err == nil {
+		t.Fatal("want a failure when the pool cannot hand out a connection")
+	}
+	if !strings.Contains(err.Error(), "acquire mission store") {
+		t.Errorf("the failure does not name the step: %v", err)
+	}
+}
+
+// A stored definition that is not valid protojson fails by name. It would
+// otherwise reach the projection as a zero definition and run a mission with no
+// nodes, which completes and reports success.
+func TestBindStoredDefinition_RefusesAMalformedStoredDefinition(t *testing.T) {
+	rec := childWithPlaceholder(t, types.NewID())
+	rec.MissionDefinitionJSON = `{"id":"child","nodes":`
+	m := bindTestManager(rec.TargetID, &types.Target{
+		ID: rec.TargetID, TenantID: "tenant-a", Name: "h", URL: "https://10.0.0.1:6443",
+	})
+
+	_, err := m.bindStoredDefinition(tenantCtx(t, "tenant-a"), rec)
+	if err == nil {
+		t.Fatal("want a refusal for a stored definition that is not valid JSON")
+	}
+	if !strings.Contains(err.Error(), "parse stored definition") {
+		t.Errorf("the refusal does not name the step: %v", err)
+	}
+}
+
+// A placeholder the binder cannot resolve fails the run rather than reaching
+// dispatch as literal text. The child path has no submit-time binding, so this
+// is the only place it can be caught before the projection backstop.
+func TestBindStoredDefinition_RefusesAnUnresolvablePlaceholder(t *testing.T) {
+	target := types.NewID()
+	rec := childWithPlaceholder(t, target)
+	// A placeholder that names nothing targetbind knows.
+	rec.MissionDefinitionJSON = strings.Replace(
+		rec.MissionDefinitionJSON, "{{target.host}}", "{{target.nope}}", 1)
+
+	m := bindTestManager(target, &types.Target{
+		ID: target, TenantID: "tenant-a", Name: "h", URL: "https://10.0.0.1:6443",
+	})
+	_, err := m.bindStoredDefinition(tenantCtx(t, "tenant-a"), rec)
+	if err == nil {
+		t.Fatal("want a refusal for a placeholder that names nothing")
+	}
+	if !strings.Contains(err.Error(), "bind target") {
+		t.Errorf("the refusal does not name the step: %v", err)
+	}
+}
