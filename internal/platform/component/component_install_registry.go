@@ -279,11 +279,8 @@ func (r *postgresComponentInstallRegistry) Register(ctx context.Context, install
 
 	// gibson#662: one install registry for every component kind. `kind`
 	// discriminates agent/tool/plugin; uniqueness is per (tenant, kind, name,
-	// host).
+	// host). CheckIn refuses an empty kind before an install reaches here.
 	kind := install.Kind
-	if kind == "" {
-		return errors.New("plugin registry register: kind is required")
-	}
 
 	descriptorSet := descriptorSetForDB(install.ProtoDescriptorSet)
 
