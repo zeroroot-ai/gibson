@@ -8,9 +8,25 @@
 // calls Permitted() after shape-matching; if the result is empty, the
 // resolver returns codes.PermissionDenied.
 //
-// Absent tuples = permit-all (backwards compat): when no grants exist
-// for any model/provider in the tenant, every candidate is returned
-// unchanged. Gating kicks in once any tuple exists.
+// THIS FILTER IS NOT WIRED. `WithModelFilter` is declared on both slot
+// managers and called nowhere, and the live one is built without it
+// (internal/server/daemon/infrastructure.go). So Permitted is never reached on
+// the dispatch path, every user can use every model regardless of grants, and
+// the tuples ModelAccessService.GrantAccess writes are read by nothing. The
+// repo's own deadcode gate found this and it was baselined
+// (.deadcode-baseline, DefaultSlotManager.WithModelFilter). Tracked privately;
+// wiring it is not a one-line change, because nothing seeds a grant at
+// provisioning and a wired gate would deny every model to every tenant.
+//
+// This doc used to say "Absent tuples = permit-all (backwards compat)". It had
+// not been true for some time — hasAnyTuple returned true on BOTH branches, as
+// its own comment said — and that sentence is what two separate readings of
+// this package got wrong. The dead branch is gone with it.
+//
+// The permit-alls that remain are deliberate and narrow: a nil Authorizer at
+// construction, and a request with no acting user (a scheduled mission with an
+// empty identity context). The second is a hole that has to be closed with the
+// wiring, not after it.
 package modelgate
 
 import (
@@ -18,7 +34,6 @@ import (
 	"fmt"
 	"log/slog"
 	"sync"
-	"sync/atomic"
 	"time"
 
 	"github.com/zeroroot-ai/gibson/internal/platform/authz"
@@ -74,12 +89,6 @@ type fgaFilter struct {
 	logger   *slog.Logger
 	cacheTTL time.Duration
 	cache    sync.Map // key = "tenant|user|model" → cacheEntry
-
-	// anyTupleExists is populated lazily the first time Permitted is
-	// called. If no provider/model tuples exist for the tenant, we fall
-	// through permit-all. Checked via ListObjects.
-	anyTupleKnown atomic.Bool
-	anyTupleValue atomic.Bool
 }
 
 type cacheEntry struct {
@@ -114,12 +123,6 @@ func (f *fgaFilter) Permitted(ctx context.Context, candidates []Candidate) ([]Ca
 		return candidates, nil
 	}
 	tenantID := auth.TenantStringFromContext(ctx)
-
-	// Permit-all shortcut: if no tenant has written any provider/model
-	// tuples, skip the per-candidate checks.
-	if !f.hasAnyTuple(ctx) {
-		return candidates, nil
-	}
 
 	subject := fmt.Sprintf("user:%s", userID)
 	reqs := make([]authz.CheckRequest, 0, len(candidates))
@@ -180,35 +183,6 @@ func (f *fgaFilter) Permitted(ctx context.Context, candidates []Candidate) ([]Ca
 		}
 	}
 	return out, nil
-}
-
-// hasAnyTuple returns true when the tenant has written any provider or
-// model tuple. Cached once per daemon lifetime — callers that want the
-// permit-all shortcut disabled can invoke InvalidatePermitAll.
-func (f *fgaFilter) hasAnyTuple(ctx context.Context) bool {
-	if f.anyTupleKnown.Load() {
-		return f.anyTupleValue.Load()
-	}
-	// Sample once: is there any tuple with relation can_use on any model?
-	// Cheap ListObjects call — returns quickly if no tuples exist.
-	// Using a sentinel user "user:_" — we don't care about the result set,
-	// only whether the index has any entries. On error, assume gated
-	// (the safer default once the knob has been turned on).
-	_, err := f.az.ListObjects(ctx, "user:_probe", "can_use", "model")
-	if err != nil {
-		f.logger.WarnContext(ctx, "modelgate: tuple-existence probe failed; treating as gated",
-			slog.String("error", err.Error()))
-		f.anyTupleValue.Store(true)
-	} else {
-		// If ListObjects succeeds, we can't distinguish empty-store from
-		// empty-for-this-user. Default to "gated" once the probe returns
-		// cleanly — this means operators who configure FGA opt into
-		// gating automatically. Permit-all is only used when the
-		// Authorizer is nil at construction time.
-		f.anyTupleValue.Store(true)
-	}
-	f.anyTupleKnown.Store(true)
-	return f.anyTupleValue.Load()
 }
 
 // InvalidateCache clears the per-(user, model) cache. Dashboard mutations
