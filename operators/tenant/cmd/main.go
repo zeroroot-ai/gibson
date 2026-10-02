@@ -540,7 +540,11 @@ func main() {
 		Username: os.Getenv("SMTP_USERNAME"),
 		Password: os.Getenv("SMTP_PASSWORD"),
 		From:     os.Getenv("SMTP_FROM"),
-		UseTLS:   os.Getenv("SMTP_TLS") == "true",
+		// SMTP_TLS_MODE selects starttls or implicit. Absent means starttls,
+		// which is what port 587 and SES want. It replaces SMTP_TLS, whose
+		// `false` was the ENCRYPTED setting for SES and read as a downgrade
+		// (gibson#553). An unknown value is refused by NewSMTPSender.
+		TLSMode: mail.TLSMode(os.Getenv("SMTP_TLS_MODE")),
 	})
 	if err != nil {
 		setupLog.Error(err, "mail sender init")
