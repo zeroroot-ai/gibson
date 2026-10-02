@@ -31,7 +31,7 @@ func minimalCfg() *config.Config {
 			GRPCAddress: "localhost:0",
 		},
 		Logging: config.LoggingConfig{
-			Level:  "info",
+			Level: "info",
 		},
 	}
 }
