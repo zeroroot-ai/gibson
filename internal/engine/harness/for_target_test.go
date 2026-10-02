@@ -59,19 +59,53 @@ func TestForTarget_SharesMissionState(t *testing.T) {
 		missionCtx: MissionContext{ID: types.NewID(), Name: "fanout", CurrentAgent: "recon"},
 	}
 
-	view, ok := h.ForTarget(types.NewID().String()).(*DefaultAgentHarness)
+	view := h.ForTarget(types.NewID().String())
+	scoped, ok := view.(*targetScopedHarness)
 	if !ok {
-		t.Fatal("ForTarget must return a *DefaultAgentHarness view")
+		t.Fatalf("ForTarget returned %T, want a *targetScopedHarness view", view)
 	}
-	if view.missionCtx.ID != h.missionCtx.ID {
+	if scoped.AgentHarness != AgentHarness(h) {
+		t.Fatal("the view must delegate to the harness it came from, not to a copy " +
+			"of it: a copy duplicates inFlightTasksMu while sharing the map it " +
+			"guards, and the agent-concurrency quota then races")
+	}
+	if view.Mission().ID != h.Mission().ID {
 		t.Error("the view must carry the same mission; a different one would file " +
 			"findings against nothing")
 	}
-	if view.missionCtx.CurrentAgent != h.missionCtx.CurrentAgent {
+	if view.Mission().CurrentAgent != h.Mission().CurrentAgent {
 		t.Error("the view must keep the dispatching agent: it is the same turn")
 	}
-	if view.tokenUsage != h.tokenUsage {
-		t.Error("the token tracker must be SHARED, not copied — a copy per instance " +
-			"would give each one a fresh budget")
+}
+
+// Re-scoping a view scopes from its parent rather than wrapping the view again.
+// A chain would grow one link per re-scope, and each link would be another
+// Target() that could disagree.
+func TestForTarget_ReScopingDoesNotNest(t *testing.T) {
+	h := &DefaultAgentHarness{targetInfo: TargetInfo{ID: types.NewID()}}
+	second := types.NewID()
+
+	again := h.ForTarget(types.NewID().String()).ForTarget(second.String())
+
+	scoped, ok := again.(*targetScopedHarness)
+	if !ok {
+		t.Fatalf("re-scope returned %T, want a *targetScopedHarness", again)
+	}
+	if scoped.AgentHarness != AgentHarness(h) {
+		t.Errorf("the re-scoped view delegates to %T, want the original harness", scoped.AgentHarness)
+	}
+	if got := again.Target().ID; got != second {
+		t.Errorf("re-scoped target = %q, want %q", got, second)
+	}
+}
+
+// Re-scoping a view to the target it already reports returns that same view, so
+// the identity rule holds one level down too.
+func TestForTarget_ReScopingToTheSameTargetIsIdentity(t *testing.T) {
+	h := &DefaultAgentHarness{targetInfo: TargetInfo{ID: types.NewID()}}
+	id := types.NewID()
+	view := h.ForTarget(id.String())
+	if got := view.ForTarget(id.String()); got != view {
+		t.Error("re-scoping a view to its own target must return that view")
 	}
 }

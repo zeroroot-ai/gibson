@@ -195,16 +195,13 @@ func (h *MiddlewareHarness) Mission() MissionContext { return h.inner.Mission() 
 func (h *MiddlewareHarness) MissionID() types.ID     { return h.inner.MissionID() }
 func (h *MiddlewareHarness) Target() TargetInfo      { return h.inner.Target() }
 
-// ForTarget re-wraps, so a per-target view keeps this middleware's behaviour.
-// Returning the inner view would silently drop whatever this harness adds.
+// ForTarget scopes THIS harness, not its inner one. A view built around the
+// inner harness would answer every call from the inner harness and silently drop
+// whatever middleware this one adds — for exactly the dispatches that most need
+// it, since a fan-out instance is still subject to the same policy as the
+// mission's primary.
 func (h *MiddlewareHarness) ForTarget(targetID string) AgentHarness {
-	inner := h.inner.ForTarget(targetID)
-	if inner == h.inner {
-		return h
-	}
-	view := *h
-	view.inner = inner
-	return &view
+	return scopeToTarget(h, h.Target(), targetID)
 }
 func (h *MiddlewareHarness) ListTools() []ToolDescriptor { return h.inner.ListTools() }
 func (h *MiddlewareHarness) GetToolDescriptor(ctx context.Context, name string) (*ToolDescriptor, error) {
