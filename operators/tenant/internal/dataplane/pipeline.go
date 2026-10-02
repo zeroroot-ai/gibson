@@ -24,8 +24,9 @@ type Step struct {
 	// Name is a short identifier used in log messages and Kubernetes events.
 	Name string
 
-	// Provision is the forward action. Must be idempotent.
-	Provision func(ctx context.Context, tenantID string) error
+	// Provision is the forward action. Must be idempotent. limits carries the
+	// per-tenant limits the step applies; a step with no limit ignores it.
+	Provision func(ctx context.Context, tenantID string, limits Limits) error
 
 	// Rollback is the compensating action run on failure. Must be idempotent.
 	// Called LIFO for steps that completed successfully before the failure.
@@ -94,11 +95,11 @@ func (p *pipelineProvisioner) buildSteps() []Step {
 	steps := []Step{
 		{
 			Name: "Postgres",
-			Provision: func(ctx context.Context, tenantID string) error {
+			Provision: func(ctx context.Context, tenantID string, limits Limits) error {
 				if p.cfg.Postgres == nil {
 					return nil
 				}
-				return p.cfg.Postgres.Provision(ctx, tenantID)
+				return p.cfg.Postgres.Provision(ctx, tenantID, limits)
 			},
 			Rollback: func(ctx context.Context, tenantID string) error {
 				if p.cfg.Postgres == nil {
@@ -115,7 +116,7 @@ func (p *pipelineProvisioner) buildSteps() []Step {
 		},
 		{
 			Name: "Neo4j",
-			Provision: func(ctx context.Context, tenantID string) error {
+			Provision: func(ctx context.Context, tenantID string, _ Limits) error {
 				if p.cfg.Neo4j == nil {
 					return nil
 				}
@@ -136,7 +137,7 @@ func (p *pipelineProvisioner) buildSteps() []Step {
 		},
 		{
 			Name: "Redis",
-			Provision: func(ctx context.Context, tenantID string) error {
+			Provision: func(ctx context.Context, tenantID string, _ Limits) error {
 				if p.cfg.Redis == nil {
 					return nil
 				}
@@ -157,7 +158,7 @@ func (p *pipelineProvisioner) buildSteps() []Step {
 		},
 		{
 			Name: "Vector",
-			Provision: func(ctx context.Context, tenantID string) error {
+			Provision: func(ctx context.Context, tenantID string, _ Limits) error {
 				if p.cfg.Vector == nil {
 					return nil
 				}
@@ -178,7 +179,7 @@ func (p *pipelineProvisioner) buildSteps() []Step {
 		},
 		{
 			Name: "KEKInit",
-			Provision: func(ctx context.Context, tenantID string) error {
+			Provision: func(ctx context.Context, tenantID string, _ Limits) error {
 				if p.cfg.KEK == nil {
 					return nil
 				}
@@ -204,7 +205,7 @@ func (p *pipelineProvisioner) buildSteps() []Step {
 // run). Steps whose AlreadyProvisioned flag returned true before this call are
 // excluded from rollback — their artifacts are live and depended on by other
 // systems (gibson#279).
-func (p *pipelineProvisioner) Provision(ctx context.Context, tenantID string) error {
+func (p *pipelineProvisioner) Provision(ctx context.Context, tenantID string, limits Limits) error {
 	p.log.InfoContext(ctx, "dataplane: provision start", "tenant", tenantID)
 
 	tenant, err := p.getTenant(ctx, tenantID)
@@ -241,7 +242,7 @@ func (p *pipelineProvisioner) Provision(ctx context.Context, tenantID string) er
 		p.log.InfoContext(ctx, "dataplane: step start", "tenant", tenantID, "step", step.Name)
 		p.emitEvent(ctx, tenant, corev1.EventTypeNormal, "StepStarted", fmt.Sprintf("data-plane step %q started", step.Name))
 
-		if err := step.Provision(ctx, tenantID); err != nil {
+		if err := step.Provision(ctx, tenantID, limits); err != nil {
 			p.log.ErrorContext(ctx, "dataplane: step failed", "tenant", tenantID, "step", step.Name, "error", err)
 			p.emitEvent(ctx, tenant, corev1.EventTypeWarning, "StepFailed", fmt.Sprintf("data-plane step %q failed: %v", step.Name, err))
 

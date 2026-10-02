@@ -19,6 +19,7 @@ type fakeAdminConn struct {
 	exists     bool
 	backends   []fakeBackend
 	execs      []string
+	execErr    error
 	queryErr   error
 	existsErr  error
 	scanErr    error
@@ -32,7 +33,7 @@ type fakeBackend struct {
 
 func (f *fakeAdminConn) Exec(_ context.Context, sql string, _ ...any) (pgconn.CommandTag, error) {
 	f.execs = append(f.execs, sql)
-	return pgconn.CommandTag{}, nil
+	return pgconn.CommandTag{}, f.execErr
 }
 
 func (f *fakeAdminConn) QueryRow(_ context.Context, _ string, _ ...any) pgx.Row {

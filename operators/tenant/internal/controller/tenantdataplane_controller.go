@@ -107,7 +107,7 @@ func (r *TenantDataPlaneReconciler) Reconcile(ctx context.Context, req ctrl.Requ
 		}
 	}
 
-	if err := r.Provisioner.Provision(ctx, tdp.Spec.TenantID); err != nil {
+	if err := r.Provisioner.Provision(ctx, tdp.Spec.TenantID, dataplane.LimitsFrom(tdp.Spec.Resources)); err != nil {
 		log.Error(err, "data-plane provision failed", "tenant", tdp.Spec.TenantID)
 		r.emit(&tdp, "Warning", "ProvisionFailed", err.Error())
 		if _, ferr := r.fail(ctx, &tdp, err.Error()); ferr != nil {

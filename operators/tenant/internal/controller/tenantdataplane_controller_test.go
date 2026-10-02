@@ -17,6 +17,7 @@ import (
 
 	gibsonv1alpha1 "github.com/zeroroot-ai/gibson/operators/tenant/api/v1alpha1"
 	"github.com/zeroroot-ai/gibson/operators/tenant/internal/clients"
+	"github.com/zeroroot-ai/gibson/operators/tenant/internal/dataplane"
 )
 
 // stubProvisioner is a fake dataplane.Provisioner that records the tenant ids
@@ -26,10 +27,13 @@ type stubProvisioner struct {
 	deprovisionErr error
 	provisioned    []string
 	deprovisioned  []string
+	// limits records the Limits each Provision call carried, in call order.
+	limits []dataplane.Limits
 }
 
-func (s *stubProvisioner) Provision(_ context.Context, tenantID string) error {
+func (s *stubProvisioner) Provision(_ context.Context, tenantID string, limits dataplane.Limits) error {
 	s.provisioned = append(s.provisioned, tenantID)
+	s.limits = append(s.limits, limits)
 	return s.provisionErr
 }
 
@@ -276,4 +280,28 @@ func findCond(conds []metav1.Condition, t string) *metav1.Condition {
 		}
 	}
 	return nil
+}
+
+// The tenant's declared resources reach the provisioner as Limits on every
+// Provision call (gibson#545).
+func TestTenantDataPlane_PassesDeclaredLimitsToTheProvisioner(t *testing.T) {
+	scheme := setupScheme(t)
+	tdp := newTenantDataPlane("acme-dp", "acme")
+	tdp.Spec.Resources = &gibsonv1alpha1.TenantDataPlaneResources{PostgresConnectionLimit: 7}
+	c := fake.NewClientBuilder().
+		WithScheme(scheme).
+		WithStatusSubresource(&gibsonv1alpha1.TenantDataPlane{}).
+		WithObjects(tdp).
+		Build()
+
+	stub := &stubProvisioner{}
+	r := &TenantDataPlaneReconciler{Client: c, Scheme: scheme, Recorder: events.NewFakeRecorder(100), Provisioner: stub}
+	for pass := 1; pass <= 2; pass++ {
+		if _, err := reconcileTDP(t, r, "acme-dp"); err != nil {
+			t.Fatalf("reconcile pass %d: %v", pass, err)
+		}
+	}
+	if len(stub.limits) != 1 || stub.limits[0].PostgresConnectionLimit != 7 {
+		t.Fatalf("provisioner saw limits %+v, want one call with PostgresConnectionLimit 7", stub.limits)
+	}
 }

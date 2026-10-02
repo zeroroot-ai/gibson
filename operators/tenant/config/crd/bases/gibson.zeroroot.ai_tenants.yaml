@@ -75,14 +75,7 @@ spec:
                   postgresConnectionLimit:
                     description: |-
                       PostgresConnectionLimit overrides the default per-role Postgres connection
-                      limit (ALTER ROLE ... CONNECTION LIMIT N). 0 = use operator default (50).
-                    minimum: 0
-                    type: integer
-                  redisMaxMemoryBytes:
-                    description: |-
-                      RedisMaxMemoryBytes overrides the per-DB MAXMEMORY value in bytes for
-                      Redis >= 7.4 that supports per-DB CONFIG SET. 0 = no explicit limit.
-                    format: int64
+                      limit (ALTER ROLE ... CONNECTION LIMIT N). 0 = use operator default.
                     minimum: 0
                     type: integer
                 type: object
