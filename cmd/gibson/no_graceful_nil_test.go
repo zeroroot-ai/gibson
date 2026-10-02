@@ -121,7 +121,7 @@ func TestNoGracefulNilInRequestPaths(t *testing.T) {
 	// after the gibson slices for one-code-path/195 (#111),
 	// one-code-path/205 (#112), one-code-path/207 (#113) merged.
 	requestPathAllowlist := astchecks.Allowlist{
-		// CONTENT-KEYED (ast-checks v0.2.0, AllowlistByContent below). Each key is
+		// CONTENT-KEYED (the only keying since ast-checks v0.5.0). Each key is
 		// "<relpath> :: <snippet>" — the guard text, NOT a line number — so line
 		// shifts (license headers, added imports/comments) can never red this gate
 		// (the brittleness that hit it in gibson#1025/#1043/#1044/#1041). Identical
@@ -213,11 +213,14 @@ func TestNoGracefulNilInRequestPaths(t *testing.T) {
 			Allowlist:     requestPathAllowlist,
 			SkipTestFiles: true,
 			SkipGenerated: true,
-			// Content-keyed (ast-checks v0.2.0): match the allowlist on the guard
-			// itself (file + snippet), not its line number, so unrelated line
-			// shifts (license headers, added imports/comments) can't red this gate
-			// — the brittleness that hit it repeatedly (gibson#1025/#1043/#1044).
-			AllowlistByContent: true,
+			// The allowlist is matched on the guard itself (file + snippet),
+			// never on its line number, so unrelated line shifts — a license
+			// header, an added import or comment — cannot red this gate. That
+			// brittleness hit it repeatedly (gibson#1025/#1043/#1044).
+			//
+			// There is no switch to look for: content keying is the only keying
+			// since ast-checks v0.5.0, and Allowlist.Validate now rejects a
+			// coordinate-shaped key outright.
 		}
 
 		// One-shot migration generator (GEN_CK=1): emit the content-keyed
