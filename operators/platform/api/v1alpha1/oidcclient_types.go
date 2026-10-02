@@ -180,6 +180,7 @@ type OIDCClientStatus struct {
 // +kubebuilder:printcolumn:name="Ready",type=string,JSONPath=`.status.conditions[?(@.type=="Ready")].status`
 // +kubebuilder:printcolumn:name="ClientID",type=string,JSONPath=`.status.clientID`
 // +kubebuilder:printcolumn:name="Age",type=date,JSONPath=`.metadata.creationTimestamp`
+// +kubebuilder:printcolumn:name="Observed",type=integer,JSONPath=`.status.observedGeneration`,priority=1
 
 // OIDCClient is one Zitadel OIDC client owned by the platform.
 // Typically created as a child of a PlatformBootstrap CR, but can also

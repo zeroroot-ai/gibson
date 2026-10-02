@@ -410,6 +410,11 @@ jobs:
         env:
           GH_TOKEN: ${{ github.token }}
         run: make check-first-party-tags
+      - name: Every served CRD field has a consumer or a recorded verdict
+        # gibson#503, ADR-0094 layer 6. The fixture runs first inside the make
+        # target, offline, so a rule that stopped working fails here rather
+        # than passing quietly below.
+        run: make check-crd-field-consumers
       - name: Guard gofmt cleanliness
         # gibson#1415: no lane ever CHECKED formatting -- `make fmt` rewrites
         # instead of failing, and .golangci.yml enables no formatter -- so

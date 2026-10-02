@@ -104,15 +104,6 @@ type TenantDataPlaneStoreCondition struct {
 	// State is the current provisioning state of the store.
 	// +kubebuilder:validation:Enum=provisioning;ready;failed
 	State string `json:"state"`
-
-	// Reason carries a human-readable description, especially when
-	// state=failed.
-	// +optional
-	Reason string `json:"reason,omitempty"`
-
-	// LastUpdated is the time this store's state was last written.
-	// +optional
-	LastUpdated metav1.Time `json:"lastUpdated,omitempty"`
 }
 
 // DataPlaneStatus defines the observed state of a TenantDataPlane. It carries
@@ -163,6 +154,9 @@ type DataPlaneStatus struct {
 // +kubebuilder:printcolumn:name="Phase",type=string,JSONPath=`.status.phase`
 // +kubebuilder:printcolumn:name="Ready",type=boolean,JSONPath=`.status.ready`
 // +kubebuilder:printcolumn:name="Age",type=date,JSONPath=`.metadata.creationTimestamp`
+// +kubebuilder:printcolumn:name="LastError",type=string,JSONPath=`.status.lastError`,priority=1
+// +kubebuilder:printcolumn:name="Stores",type=string,JSONPath=`.status.stores[*].name`,priority=1
+// +kubebuilder:printcolumn:name="StoreStates",type=string,JSONPath=`.status.stores[*].state`,priority=1
 
 // TenantDataPlane is the Schema for the tenantdataplanes API. It declaratively
 // composes the per-tenant CNPG Postgres, Neo4j, and Redis (plus the vector

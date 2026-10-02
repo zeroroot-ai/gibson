@@ -175,11 +175,6 @@ spec:
                   InvitationSecretRef is the name of the Secret holding the plaintext
                   invitation token. Deleted when accepted or expired.
                 type: string
-              invitationTokenHash:
-                description: |-
-                  InvitationTokenHash is the SHA-256 hash of the invitation token.
-                  The plaintext token lives only in the Secret referenced below.
-                type: string
               lastResendAt:
                 description: |-
                   LastResendAt tracks the most recent invitation email sent for

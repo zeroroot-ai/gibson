@@ -224,9 +224,8 @@ func (r *TenantSecretsBackendReconciler) emit(tsb *gibsonv1alpha1.TenantSecretsB
 // broker-config row. All three always participate (the pipeline always runs
 // them), so there is no per-component toggle.
 func readyComponents() []gibsonv1alpha1.TenantSecretsBackendComponentCondition {
-	now := metav1.Now()
 	ready := func(name string) gibsonv1alpha1.TenantSecretsBackendComponentCondition {
-		return gibsonv1alpha1.TenantSecretsBackendComponentCondition{Name: name, State: "ready", LastUpdated: now}
+		return gibsonv1alpha1.TenantSecretsBackendComponentCondition{Name: name, State: "ready"}
 	}
 	return []gibsonv1alpha1.TenantSecretsBackendComponentCondition{
 		ready("vault-namespace"),

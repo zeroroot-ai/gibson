@@ -21,6 +21,18 @@ spec:
     - jsonPath: .metadata.creationTimestamp
       name: Age
       type: date
+    - jsonPath: .status.observedGeneration
+      name: Observed
+      priority: 1
+      type: integer
+    - jsonPath: .status.oidcClients[*].name
+      name: OIDCClients
+      priority: 1
+      type: string
+    - jsonPath: .status.oidcClients[*].clientID
+      name: ClientIDs
+      priority: 1
+      type: string
     name: v1alpha1
     schema:
       openAPIV3Schema:

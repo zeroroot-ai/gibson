@@ -766,6 +766,9 @@ type PlatformBootstrapStatus struct {
 // +kubebuilder:subresource:status
 // +kubebuilder:printcolumn:name="Ready",type=string,JSONPath=`.status.conditions[?(@.type=="Ready")].status`
 // +kubebuilder:printcolumn:name="Age",type=date,JSONPath=`.metadata.creationTimestamp`
+// +kubebuilder:printcolumn:name="Observed",type=integer,JSONPath=`.status.observedGeneration`,priority=1
+// +kubebuilder:printcolumn:name="OIDCClients",type=string,JSONPath=`.status.oidcClients[*].name`,priority=1
+// +kubebuilder:printcolumn:name="ClientIDs",type=string,JSONPath=`.status.oidcClients[*].clientID`,priority=1
 
 // PlatformBootstrap is the cluster-scoped orchestrator for the gibson
 // platform's bootstrap handshakes. One per cluster.

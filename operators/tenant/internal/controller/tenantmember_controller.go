@@ -212,7 +212,6 @@ func (r *TenantMemberReconciler) issueInvitation(ctx context.Context, tm *gibson
 	now := metav1.Now()
 	expMeta := metav1.NewTime(expiresAt)
 	tm.Status.Phase = gibsonv1alpha1.TenantMemberPhaseInvited
-	tm.Status.InvitationTokenHash = hash
 	tm.Status.InvitationExpiresAt = &expMeta
 	tm.Status.InvitationSecretRef = secretName
 	tm.Status.LastResendAt = &now
@@ -326,7 +325,6 @@ func (r *TenantMemberReconciler) acceptInvitation(ctx context.Context, tm *gibso
 	tm.Status.Phase = gibsonv1alpha1.TenantMemberPhaseActive
 	tm.Status.UserID = tm.Spec.AcceptedByUserID
 	tm.Status.InvitationSecretRef = ""
-	tm.Status.InvitationTokenHash = ""
 	tm.Status.ObservedGeneration = tm.Generation
 	return ctrl.Result{}, r.Status().Update(ctx, tm)
 }
