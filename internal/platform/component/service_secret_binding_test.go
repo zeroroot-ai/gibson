@@ -46,6 +46,12 @@ func (r *secretBindRecorder) Write(_ context.Context, tuples []authz.Tuple) erro
 	return nil
 }
 
+// declaring builds the RegisterComponent metadata that names the given
+// secret refs. The values are names, never secret material.
+func declaring(refs string) map[string]string {
+	return map[string]string{metadataDeclaredSecrets: refs}
+}
+
 // offering returns a recorder whose platform catalog offers exactly one
 // (kind, id).
 func offering(kind, id string) *secretBindRecorder {
@@ -61,9 +67,7 @@ func TestBindDeclaredSecrets_OutsideCatalogWritesNothing(t *testing.T) {
 	svc := newParityServer().WithAuthorizer(rec)
 	ctx := credCallerCtx(t, "plugin_principal:7f3c1b2e-dev", "primary")
 
-	svc.bindDeclaredSecrets(ctx, "primary", "plugin", "my-own-plugin", map[string]string{
-		metadataDeclaredSecrets: "cred:github_token, cred:tenant_master_key",
-	})
+	svc.bindDeclaredSecrets(ctx, "primary", "plugin", "my-own-plugin", declaring("cred:github_token, cred:tenant_master_key"))
 	if rec.calls != 0 || len(rec.written) != 0 {
 		t.Fatalf("a non-catalog check-in wrote %d tuple(s) in %d call(s); want none: %+v",
 			len(rec.written), rec.calls, rec.written)
@@ -78,9 +82,7 @@ func TestBindDeclaredSecrets_GateErrorWritesNothing(t *testing.T) {
 	svc := newParityServer().WithAuthorizer(rec)
 	ctx := credCallerCtx(t, "plugin_principal:github", "primary")
 
-	svc.bindDeclaredSecrets(ctx, "primary", "plugin", "github", map[string]string{
-		metadataDeclaredSecrets: "cred:github_token",
-	})
+	svc.bindDeclaredSecrets(ctx, "primary", "plugin", "github", declaring("cred:github_token"))
 	if rec.calls != 0 {
 		t.Fatalf("a failed gate check wrote %d call(s); want none", rec.calls)
 	}
@@ -92,9 +94,7 @@ func TestBindDeclaredSecrets_NoAuthorizerWritesNothing(t *testing.T) {
 	svc := newParityServer()
 	ctx := credCallerCtx(t, "plugin_principal:github", "primary")
 	// Must return normally with nothing to write to.
-	svc.bindDeclaredSecrets(ctx, "primary", "plugin", "github", map[string]string{
-		metadataDeclaredSecrets: "cred:github_token",
-	})
+	svc.bindDeclaredSecrets(ctx, "primary", "plugin", "github", declaring("cred:github_token"))
 }
 
 // TestBindDeclaredSecrets_PluginGrantsCanResolve: a plugin_principal caller with
@@ -105,9 +105,7 @@ func TestBindDeclaredSecrets_PluginGrantsCanResolve(t *testing.T) {
 	svc := newParityServer().WithAuthorizer(rec)
 	ctx := credCallerCtx(t, "plugin_principal:github", "primary")
 
-	svc.bindDeclaredSecrets(ctx, "primary", "plugin", "github", map[string]string{
-		metadataDeclaredSecrets: "cred:github_token, cred:other , cred:github_token",
-	})
+	svc.bindDeclaredSecrets(ctx, "primary", "plugin", "github", declaring("cred:github_token, cred:other , cred:github_token"))
 
 	// Deduped to two, one Write batch.
 	if rec.calls != 1 {
@@ -141,9 +139,7 @@ func TestBindDeclaredSecrets_NonPluginSkipped(t *testing.T) {
 	svc := newParityServer().WithAuthorizer(rec)
 	ctx := credCallerCtx(t, "agent_principal:x", "primary")
 
-	svc.bindDeclaredSecrets(ctx, "primary", "plugin", "github", map[string]string{
-		metadataDeclaredSecrets: "cred:github_token",
-	})
+	svc.bindDeclaredSecrets(ctx, "primary", "plugin", "github", declaring("cred:github_token"))
 	if rec.calls != 0 {
 		t.Errorf("wrote for a non-plugin caller (%d calls) — must skip", rec.calls)
 	}
@@ -156,7 +152,7 @@ func TestBindDeclaredSecrets_NoDeclaredSecretsNoOp(t *testing.T) {
 	ctx := credCallerCtx(t, "plugin_principal:github", "primary")
 
 	svc.bindDeclaredSecrets(ctx, "primary", "plugin", "github", map[string]string{})
-	svc.bindDeclaredSecrets(ctx, "primary", "plugin", "github", map[string]string{metadataDeclaredSecrets: "  "})
+	svc.bindDeclaredSecrets(ctx, "primary", "plugin", "github", declaring("  "))
 	if rec.calls != 0 {
 		t.Errorf("wrote with no declared secrets (%d calls) — must no-op", rec.calls)
 	}
@@ -170,7 +166,5 @@ func TestBindDeclaredSecrets_WriteErrorIsNonFatal(t *testing.T) {
 	svc := newParityServer().WithAuthorizer(rec)
 	ctx := credCallerCtx(t, "plugin_principal:github", "primary")
 	// Must not panic and must return normally (void).
-	svc.bindDeclaredSecrets(ctx, "primary", "plugin", "github", map[string]string{
-		metadataDeclaredSecrets: "cred:github_token",
-	})
+	svc.bindDeclaredSecrets(ctx, "primary", "plugin", "github", declaring("cred:github_token"))
 }
