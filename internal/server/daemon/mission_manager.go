@@ -52,13 +52,7 @@ type targetGetter interface {
 // this returns a one-element slice for an ordinary run, which expands a for_each
 // to one instance and is indistinguishable from the pre-fan-out behaviour.
 func (m *missionManager) resolveForEachTargets(ctx context.Context, active *activeMission) ([]forEachTarget, error) {
-	if active == nil || active.mission == nil {
-		return nil, nil
-	}
 	ids := active.mission.TargetSet()
-	if len(ids) == 0 {
-		return nil, nil
-	}
 	caller := resolveTargetCallerTenant(ctx)
 	out := make([]forEachTarget, 0, len(ids))
 	for _, id := range ids {
