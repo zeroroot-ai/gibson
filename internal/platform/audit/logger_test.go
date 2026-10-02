@@ -182,7 +182,7 @@ func TestAuditLogger_Log_MissingIdentity_IsRefused(t *testing.T) {
 	entries, err := al.Query(ctx, "acme", AuditQueryOptions{})
 	require.NoError(t, err)
 	assert.Empty(t, entries, "an actorless entry must not reach the stream")
-	assert.Equal(t, before+1, testutil.ToFloat64(auditActorlessTotal), "the refusal is counted")
+	assert.InDelta(t, before+1, testutil.ToFloat64(auditActorlessTotal), 0, "the refusal is counted")
 }
 
 // ---------------------------------------------------------------------------
