@@ -237,3 +237,39 @@ func TestWelcomeEmail_ConditionRecordsGenerationAndTime(t *testing.T) {
 		t.Error("condition LastTransitionTime must be set")
 	}
 }
+
+// staleTenantClient serves every Tenant read with the WelcomeEmailSent
+// condition stripped, the way the informer cache does in the lag window after
+// the reconciler's own status patch (gibson#535, the gibson#442 shape).
+type staleTenantClient struct {
+	client.Client
+}
+
+func (s staleTenantClient) Get(ctx context.Context, key client.ObjectKey, obj client.Object, opts ...client.GetOption) error {
+	if err := s.Client.Get(ctx, key, obj, opts...); err != nil {
+		return err
+	}
+	if tenant, ok := obj.(*gibsonv1alpha1.Tenant); ok {
+		apimeta.RemoveStatusCondition(&tenant.Status.Conditions, gibsonv1alpha1.ConditionWelcomeEmailSent)
+	}
+	return nil
+}
+
+// TestWelcomeEmail_StaleCacheReadDoesNotResend asserts the idempotence guard
+// reads the Tenant uncached. With the cached client alone the guard sees the
+// condition unset on every pass and the welcome email goes out again.
+func TestWelcomeEmail_StaleCacheReadDoesNotResend(t *testing.T) {
+	sender := &fakeMailSender{}
+	r, c := newChildOrchestrationReconciler(t, welcomeTenant("owner@acme.com"))
+	r.Mail = sender
+	r.APIReader = c
+	r.Client = staleTenantClient{Client: c}
+
+	driveTenantToReady(t, r, c)
+	for range 3 {
+		reconcileTenant(t, r)
+	}
+	if got := len(sender.calls()); got != 1 {
+		t.Fatalf("SendWelcome called %d times behind a stale cache, want 1", got)
+	}
+}

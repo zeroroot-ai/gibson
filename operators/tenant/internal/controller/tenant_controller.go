@@ -40,8 +40,17 @@ const childRequeueInterval = 5 * time.Second
 // specs (tenant-lifecycle-flows for Zitadel/Stripe/FGA).
 type TenantReconciler struct {
 	client.Client
-	Scheme   *runtime.Scheme
-	Recorder events.EventRecorder
+	// APIReader reads the Tenant straight from the API server. The manager's
+	// default client reads through the informer cache, which lags the
+	// reconciler's own status write by up to a second, so the very next pass
+	// could read stale status and repeat a side effect it had already
+	// recorded: the welcome email's idempotence guard reads
+	// WelcomeEmailSent off this object (gibson#535, the gibson#442 shape).
+	// Nil in tests, where the fake client has no cache and Client serves
+	// both reads.
+	APIReader client.Reader
+	Scheme    *runtime.Scheme
+	Recorder  events.EventRecorder
 
 	// Runner executes provisioning and teardown sagas.
 	Runner *saga.Runner
@@ -120,12 +129,22 @@ type TenantReconciler struct {
 // +kubebuilder:rbac:groups=core,resources=events,verbs=create;patch
 // +kubebuilder:rbac:groups=events.k8s.io,resources=events,verbs=create;patch
 
+// reader is the client that fetches the Tenant at the start of a pass: the
+// uncached API reader when the manager gave us one, else Client. Same shape
+// as the platform operator's PlatformBootstrapReconciler.reader.
+func (r *TenantReconciler) reader() client.Reader {
+	if r.APIReader != nil {
+		return r.APIReader
+	}
+	return r.Client
+}
+
 // Reconcile is the main reconcile loop.
 func (r *TenantReconciler) Reconcile(ctx context.Context, req ctrl.Request) (ctrl.Result, error) {
 	log := logf.FromContext(ctx).WithValues("tenant", req.Name)
 
 	var tenant gibsonv1alpha1.Tenant
-	if err := r.Get(ctx, req.NamespacedName, &tenant); err != nil {
+	if err := r.reader().Get(ctx, req.NamespacedName, &tenant); err != nil {
 		return ctrl.Result{}, client.IgnoreNotFound(err)
 	}
 

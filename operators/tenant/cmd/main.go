@@ -822,6 +822,7 @@ func main() {
 
 	if err := (&controller.TenantReconciler{
 		Client:            mgr.GetClient(),
+		APIReader:         mgr.GetAPIReader(),
 		Scheme:            mgr.GetScheme(),
 		PlatformNamespace: os.Getenv("OPERATOR_NAMESPACE"),
 		ProvisionSteps:    provisionSteps,
