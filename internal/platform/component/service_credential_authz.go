@@ -142,8 +142,8 @@ func (s *ComponentServiceServer) authorizeCredentialResolve(ctx context.Context,
 			slog.String("fga_user", fgaUser),
 			slog.String("fga_object", fgaObject),
 		)
-		return status.Error(codes.PermissionDenied,
-			"credential resolution denied: caller has no can_resolve on this secret")
+		return status.Errorf(codes.PermissionDenied,
+			"credential resolution denied: no can_resolve grant on secret %q for this caller; a tenant admin grants it", name)
 	}
 	return nil
 }

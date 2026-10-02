@@ -18,29 +18,65 @@ import (
 // never a comma, so comma is a safe separator.
 const metadataDeclaredSecrets = "plugin:secrets"
 
-// bindDeclaredSecrets grants the registering plugin can_resolve on each secret
-// it declared in its manifest (ADR-0066). This is the SVID pod-plugin
-// replacement for the old RegisterPlugin binding, which bound can_resolve from a
-// binding list a human tenant-admin submitted at install; RegisterComponent
-// carries no such list, so without this a plugin cannot read its own declared
-// secret (the GetCredential path denies with no can_resolve tuple).
+// systemTenantRef is the FGA user the startup seeder writes platform_enabled
+// from (reconciler.SeedComponentCatalogGate). relationPlatformEnabled is that
+// tuple's relation on a component object (model.fga `type component`).
+const (
+	systemTenantRef         = "system_tenant:_system"
+	relationPlatformEnabled = "platform_enabled"
+)
+
+// bindDeclaredSecrets grants a registering CATALOG plugin can_resolve on each
+// secret it declared (ADR-0066). It binds the plugin's own principal, only on
+// secrets the plugin declared, only in the caller's tenant.
 //
-// It binds the plugin's OWN principal (from the caller's signed identity), only
-// on secrets the plugin declared, only in the caller's tenant. Safe for
-// first-party SVID plugins: they are operator-deployed via GitOps from the
-// operator's own integrations fork, so the manifest — and its declared secrets —
-// is operator-approved; and can_resolve only reads a value the operator
-// separately provisions.
+// The gate is the signed platform catalog (gibson#554, ADR-0097): the
+// component object must carry platform_enabled from the system tenant, which
+// the startup seeder writes only for an embedded catalog entry whose image
+// passed release-signature verification (reconciler.SeedComponentCatalogGate).
+// A check-in must never assign its own trust: a component a developer authored
+// has no reviewed declaration behind it, so for every (kind, name) outside the
+// catalog the declared list is advisory and this writes nothing. Such a
+// component reaches a secret only through a tenant admin's grant.
+//
+// The gate keys on the name the check-in registers under, not on the caller's
+// principal, because no record yet links a plugin principal to the catalog
+// entry it was deployed for (gibson#576). A plugin principal is minted only by
+// a tenant admin (TenantAdminService.CreateAgentIdentity), so the residual
+// reach is an admin-created identity registering under a catalog plugin's name
+// inside its own tenant, on that tenant's own secrets.
 //
 // Best-effort + idempotent: FGA Write is idempotent, and a plugin re-registers
 // on every restart, so a transient write failure self-heals on the next start
 // (and surfaces meanwhile as a clear can_resolve deny plus this WARN). It never
 // fails registration.
-func (s *ComponentServiceServer) bindDeclaredSecrets(ctx context.Context, tenant string, md map[string]string) {
+func (s *ComponentServiceServer) bindDeclaredSecrets(ctx context.Context, tenant, kind, name string, md map[string]string) {
 	// Reading a nil map is safe in Go, so no md-nil guard is needed; an absent
 	// or empty key ends the work here.
 	raw := strings.TrimSpace(md[metadataDeclaredSecrets])
 	if raw == "" {
+		return
+	}
+
+	// Positive gate: no authorizer, a check error, or a component the platform
+	// does not offer, writes nothing. An undecidable gate is a closed gate.
+	if s.authorizer == nil {
+		s.logger.WarnContext(ctx, "declared-secret binding skipped: no authorizer wired, the catalog gate cannot be asked")
+		return
+	}
+	object := authz.ComponentObject(kind, name)
+	offered, err := s.authorizer.Check(ctx, systemTenantRef, relationPlatformEnabled, object)
+	if err != nil {
+		s.logger.WarnContext(ctx, "declared-secret binding skipped: catalog gate check failed",
+			slog.String("fga_object", object),
+			slog.String("error", err.Error()))
+		return
+	}
+	if !offered {
+		s.logger.InfoContext(ctx, "declared secrets are advisory: component is not in the platform catalog, no can_resolve written",
+			slog.String("kind", kind),
+			slog.String("name", name),
+			slog.String("tenant", tenant))
 		return
 	}
 
@@ -79,21 +115,14 @@ func (s *ComponentServiceServer) bindDeclaredSecrets(ctx context.Context, tenant
 		return
 	}
 
-	// FGA write only when the authorizer is wired — a nil authorizer is
-	// noop/disabled mode (WithAuthorizer). Positive guard, mirroring the
-	// established component-ownership write in service.go, so a plugin with an
-	// unwired authorizer simply gets no binding and later fails closed with a
-	// clear can_resolve deny rather than this path silently returning early.
-	if s.authorizer != nil {
-		if err := s.authorizer.Write(ctx, tuples); err != nil {
-			s.logger.WarnContext(ctx, "failed to bind plugin can_resolve on declared secrets",
-				slog.String("fga_user", fgaUser),
-				slog.Int("count", len(tuples)),
-				slog.String("error", err.Error()))
-			return
-		}
-		s.logger.InfoContext(ctx, "bound plugin can_resolve on declared secrets",
+	if err := s.authorizer.Write(ctx, tuples); err != nil {
+		s.logger.WarnContext(ctx, "failed to bind plugin can_resolve on declared secrets",
 			slog.String("fga_user", fgaUser),
-			slog.Int("count", len(tuples)))
+			slog.Int("count", len(tuples)),
+			slog.String("error", err.Error()))
+		return
 	}
+	s.logger.InfoContext(ctx, "bound plugin can_resolve on declared secrets",
+		slog.String("fga_user", fgaUser),
+		slog.Int("count", len(tuples)))
 }

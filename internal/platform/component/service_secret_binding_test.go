@@ -6,6 +6,7 @@ package component
 import (
 	"context"
 	"errors"
+	"fmt"
 	"testing"
 
 	"github.com/zeroroot-ai/gibson/internal/platform/authz"
@@ -19,6 +20,21 @@ type secretBindRecorder struct {
 	written []authz.Tuple
 	err     error
 	calls   int
+	// offered is the set of component objects carrying platform_enabled from
+	// the system tenant, the way the startup seeder leaves FGA.
+	offered map[string]bool
+	// checkErr makes Check fail, modelling an unreachable FGA.
+	checkErr error
+}
+
+func (r *secretBindRecorder) Check(_ context.Context, user, relation, object string) (bool, error) {
+	if r.checkErr != nil {
+		return false, r.checkErr
+	}
+	if user != "system_tenant:_system" || relation != "platform_enabled" {
+		return false, fmt.Errorf("unexpected gate question: Check(%s, %s, %s)", user, relation, object)
+	}
+	return r.offered[object], nil
 }
 
 func (r *secretBindRecorder) Write(_ context.Context, tuples []authz.Tuple) error {
@@ -30,15 +46,66 @@ func (r *secretBindRecorder) Write(_ context.Context, tuples []authz.Tuple) erro
 	return nil
 }
 
+// offering returns a recorder whose platform catalog offers exactly one
+// (kind, id).
+func offering(kind, id string) *secretBindRecorder {
+	return &secretBindRecorder{offered: map[string]bool{authz.ComponentObject(kind, id): true}}
+}
+
+// TestBindDeclaredSecrets_OutsideCatalogWritesNothing: a check-in from a
+// component the signed catalog does not list writes zero can_resolve tuples,
+// whatever secret names it declares (gibson#554, ADR-0097). Before the gate
+// this wrote two tuples for the caller's own principal.
+func TestBindDeclaredSecrets_OutsideCatalogWritesNothing(t *testing.T) {
+	rec := offering("plugin", "github")
+	svc := newParityServer().WithAuthorizer(rec)
+	ctx := credCallerCtx(t, "plugin_principal:7f3c1b2e-dev", "primary")
+
+	svc.bindDeclaredSecrets(ctx, "primary", "plugin", "my-own-plugin", map[string]string{
+		metadataDeclaredSecrets: "cred:github_token, cred:tenant_master_key",
+	})
+	if rec.calls != 0 || len(rec.written) != 0 {
+		t.Fatalf("a non-catalog check-in wrote %d tuple(s) in %d call(s); want none: %+v",
+			len(rec.written), rec.calls, rec.written)
+	}
+}
+
+// TestBindDeclaredSecrets_GateErrorWritesNothing: when FGA cannot answer the
+// catalog question, nothing is written. An undecidable gate is a closed gate.
+func TestBindDeclaredSecrets_GateErrorWritesNothing(t *testing.T) {
+	rec := offering("plugin", "github")
+	rec.checkErr = errors.New("fga unreachable")
+	svc := newParityServer().WithAuthorizer(rec)
+	ctx := credCallerCtx(t, "plugin_principal:github", "primary")
+
+	svc.bindDeclaredSecrets(ctx, "primary", "plugin", "github", map[string]string{
+		metadataDeclaredSecrets: "cred:github_token",
+	})
+	if rec.calls != 0 {
+		t.Fatalf("a failed gate check wrote %d call(s); want none", rec.calls)
+	}
+}
+
+// TestBindDeclaredSecrets_NoAuthorizerWritesNothing: with no authorizer wired
+// the gate cannot be asked, so the binding is skipped rather than assumed.
+func TestBindDeclaredSecrets_NoAuthorizerWritesNothing(t *testing.T) {
+	svc := newParityServer()
+	ctx := credCallerCtx(t, "plugin_principal:github", "primary")
+	// Must return normally with nothing to write to.
+	svc.bindDeclaredSecrets(ctx, "primary", "plugin", "github", map[string]string{
+		metadataDeclaredSecrets: "cred:github_token",
+	})
+}
+
 // TestBindDeclaredSecrets_PluginGrantsCanResolve: a plugin_principal caller with
 // declared secrets gets a can_resolve tuple per secret, on its own principal, in
 // its tenant (ADR-0066).
 func TestBindDeclaredSecrets_PluginGrantsCanResolve(t *testing.T) {
-	rec := &secretBindRecorder{}
+	rec := offering("plugin", "github")
 	svc := newParityServer().WithAuthorizer(rec)
 	ctx := credCallerCtx(t, "plugin_principal:github", "primary")
 
-	svc.bindDeclaredSecrets(ctx, "primary", map[string]string{
+	svc.bindDeclaredSecrets(ctx, "primary", "plugin", "github", map[string]string{
 		metadataDeclaredSecrets: "cred:github_token, cred:other , cred:github_token",
 	})
 
@@ -70,11 +137,11 @@ func TestBindDeclaredSecrets_PluginGrantsCanResolve(t *testing.T) {
 // TestBindDeclaredSecrets_NonPluginSkipped: a non-plugin_principal caller writes
 // nothing — only plugin_principal may hold can_resolve (model.fga).
 func TestBindDeclaredSecrets_NonPluginSkipped(t *testing.T) {
-	rec := &secretBindRecorder{}
+	rec := offering("plugin", "github")
 	svc := newParityServer().WithAuthorizer(rec)
 	ctx := credCallerCtx(t, "agent_principal:x", "primary")
 
-	svc.bindDeclaredSecrets(ctx, "primary", map[string]string{
+	svc.bindDeclaredSecrets(ctx, "primary", "plugin", "github", map[string]string{
 		metadataDeclaredSecrets: "cred:github_token",
 	})
 	if rec.calls != 0 {
@@ -84,12 +151,12 @@ func TestBindDeclaredSecrets_NonPluginSkipped(t *testing.T) {
 
 // TestBindDeclaredSecrets_NoDeclaredSecretsNoOp: absent/empty metadata is a no-op.
 func TestBindDeclaredSecrets_NoDeclaredSecretsNoOp(t *testing.T) {
-	rec := &secretBindRecorder{}
+	rec := offering("plugin", "github")
 	svc := newParityServer().WithAuthorizer(rec)
 	ctx := credCallerCtx(t, "plugin_principal:github", "primary")
 
-	svc.bindDeclaredSecrets(ctx, "primary", map[string]string{})
-	svc.bindDeclaredSecrets(ctx, "primary", map[string]string{metadataDeclaredSecrets: "  "})
+	svc.bindDeclaredSecrets(ctx, "primary", "plugin", "github", map[string]string{})
+	svc.bindDeclaredSecrets(ctx, "primary", "plugin", "github", map[string]string{metadataDeclaredSecrets: "  "})
 	if rec.calls != 0 {
 		t.Errorf("wrote with no declared secrets (%d calls) — must no-op", rec.calls)
 	}
@@ -98,11 +165,12 @@ func TestBindDeclaredSecrets_NoDeclaredSecretsNoOp(t *testing.T) {
 // TestBindDeclaredSecrets_WriteErrorIsNonFatal: a Write failure is logged, not
 // returned (best-effort; the plugin re-binds idempotently on its next start).
 func TestBindDeclaredSecrets_WriteErrorIsNonFatal(t *testing.T) {
-	rec := &secretBindRecorder{err: errors.New("fga down")}
+	rec := offering("plugin", "github")
+	rec.err = errors.New("fga down")
 	svc := newParityServer().WithAuthorizer(rec)
 	ctx := credCallerCtx(t, "plugin_principal:github", "primary")
 	// Must not panic and must return normally (void).
-	svc.bindDeclaredSecrets(ctx, "primary", map[string]string{
+	svc.bindDeclaredSecrets(ctx, "primary", "plugin", "github", map[string]string{
 		metadataDeclaredSecrets: "cred:github_token",
 	})
 }

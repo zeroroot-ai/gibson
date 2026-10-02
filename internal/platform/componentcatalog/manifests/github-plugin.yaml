@@ -1,0 +1,24 @@
+# GitHub plugin — the first-party Go plugin from zeroroot-ai/integrations
+# (plugins/github), hosted as a SVID pod beside Envoy (ADR-0066).
+#
+# Listing it here is what lets its check-in bind can_resolve on the secret it
+# declares (cred:github_token): the daemon writes that binding only for a
+# component carrying platform_enabled, which the startup seeder grants to a
+# catalog entry whose image passes release-signature verification (gibson#554,
+# ADR-0097). A plugin outside this table gets no binding from its own
+# declaration; a tenant admin grants it.
+#
+# The digest is the one .github/workflows/exit-test-tool-dispatch.yml deploys
+# (PLUGIN_IMAGE_DIGEST). Move both together.
+id: github
+kind: plugin
+displayName: GitHub
+description: >-
+  Curated read/write over the GitHub REST API: repositories, issues and pull
+  requests, authenticated with the tenant's GitHub token.
+egressAllow:
+  - api.github.com:443
+spec:
+  runtime: pod
+  image: ghcr.io/zeroroot-ai/integrations/github@sha256:12a5cb2ae9b7ed4380b07d063bcac83caed8989bd18fd3c6633394aefeda093c
+  svid: spiffe://zeroroot.ai/plugin/github

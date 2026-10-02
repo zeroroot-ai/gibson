@@ -616,3 +616,29 @@ func TestAgentStaticEnv(t *testing.T) {
 		t.Fatal("env off a sandboxed dispatch does nothing and must be refused")
 	}
 }
+
+// TestGithubPluginManifest: the first-party GitHub plugin is a catalog entry,
+// so the seeder enables it platform-wide and the check-in secret binding
+// (gibson#554) admits it. Its image is digest-pinned and first-party, so the
+// startup verifier checks its release signature before the seed.
+func TestGithubPluginManifest(t *testing.T) {
+	var ref *Ref
+	for _, r := range Refs() {
+		if r.Kind == "plugin" && r.ID == "github" {
+			rr := r
+			ref = &rr
+		}
+	}
+	if ref == nil {
+		t.Fatal("Refs() must include plugin/github so the seeder enables it and its check-in can bind its declared secret")
+	}
+	var image string
+	for _, ir := range ImageRefs() {
+		if ir.Kind == "plugin" && ir.ID == "github" {
+			image = ir.Image
+		}
+	}
+	if !strings.HasPrefix(image, "ghcr.io/zeroroot-ai/integrations/github@sha256:") {
+		t.Errorf("plugin/github image = %q; want the first-party integrations image pinned by digest", image)
+	}
+}
