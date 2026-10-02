@@ -61,14 +61,25 @@ The dial target is the Envoy edge (the chart wires it via the
 traffic. SPIFFE X509-SVID mTLS is composed automatically when the
 Workload API socket is present.
 
-The credentials never appear in any log line. Nothing automated enforces
-that today: `scripts/check-no-legacy-auth.sh` does not exist, and
-`.gitleaks.toml` has no runner in this repository -- no pre-commit hook,
-no Makefile target and no workflow references it. GitHub push protection
-is the live control. The sanitization rules in
+The credentials never appear in any log line. Two controls are live.
+
+`.gitleaks.toml` **does** have a runner. The reusable Go CI
+(`zeroroot-ai/.github` -> `reusable-go-ci.yml`, which `go-ci.yml` calls)
+scans the whole checkout on every PR, before anything is installed, and
+honors the repo-local config: `[ -f .gitleaks.toml ] && cfg=(-c
+.gitleaks.toml)`, then `gitleaks dir . --exit-code 1`. A finding fails
+the build. There is no pre-commit hook and no Makefile target, which is
+what this paragraph used to describe -- but the CI gate is the control
+that matters, and this page previously said it did not exist.
+
+GitHub push protection is the second control.
+
+What is genuinely unenforced is the SHAPE of a log line: gitleaks matches
+credential-shaped strings, so it catches a PAT written into source, not a
+`slog` call that interpolates one at run time. The sanitization rules in
 [`rules.yaml`](rules.yaml) (`tenant-operator-auth-002`,
-`tenant-operator-auth-003`) record the invariant and say
-`enforced_by: manual`. gibson#559 turns them into a gate.
+`tenant-operator-auth-003`) record that invariant and say
+`enforced_by: manual` honestly.
 
 ## Tenant lifecycle saga
 

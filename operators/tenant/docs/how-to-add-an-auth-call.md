@@ -150,12 +150,15 @@ header — the FGA tuple it just wrote authorizes this call.
   agent credentials come from the dashboard's Register Agent UI only.
 - **Never** dial the daemon directly. The address in `deps.Daemon` is
   the Envoy edge.
-- **Never** log the Zitadel admin PAT or any client_secret. Nothing
-  automated checks this yet: `.gitleaks.toml` has no runner in this
-  repository, and the `tenant-operator-auth-002` /
-  `tenant-operator-auth-003` rules in [`rules.yaml`](rules.yaml) record
-  the invariant with `enforced_by: manual`. Review is the control, and
-  gibson#559 turns those rules into a gate.
+- **Never** log the Zitadel admin PAT or any client_secret. A credential
+  written into source is caught: the reusable Go CI runs `gitleaks dir .`
+  over the whole checkout on every PR with this repo's `.gitleaks.toml`,
+  and a finding fails the build. What it cannot catch is a `slog` call
+  that interpolates a credential at run time, because there is no
+  credential-shaped string in the source to match. That is why
+  `tenant-operator-auth-002` / `tenant-operator-auth-003` in
+  [`rules.yaml`](rules.yaml) say `enforced_by: manual` -- review is the
+  control for the shape of the call, not for the secret in the tree.
 
 ## Step 7 — Run the build guards
 
