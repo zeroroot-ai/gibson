@@ -47,6 +47,17 @@ func TestAgentHarnessMethodSetUnchanged(t *testing.T) {
 		"ListPlugins", "QueryPlugin",
 		"Logger", "Metrics", "Mission", "MissionExecutionContext", "MissionID",
 		"SubmitFinding", "Target", "TokenUsage", "Tracer",
+		// ForTarget is a per-unit-of-work VIEW of this harness, added deliberately
+		// (#526) so a for_each instance's findings carry the target that instance
+		// assessed. Every scope reader in the callback surface resolves from
+		// Target().ID, so without it a fan-out attributes every instance's
+		// findings to the mission's primary target and several hosts merge onto
+		// one coordinate.
+		//
+		// It returns an AgentHarness rather than mutating, because the mission's
+		// harness is shared across a turn and a scope rewritten in place would
+		// follow every later dispatch.
+		"ForTarget",
 		"Workspace", "Workspaces",
 	}
 	sort.Strings(want)

@@ -738,6 +738,17 @@ type AgentHarness interface {
 	//   }
 	Target() TargetInfo
 
+	// ForTarget returns a view of this harness whose Target() is the given
+	// target, for one unit of work that runs against something other than the
+	// mission's primary. A for_each instance uses it so a finding's scope is the
+	// target the instance actually assessed (gibson#526).
+	//
+	// A VIEW, not a new harness: the token tracker, the memory manager, the
+	// callback manager and every registry are shared, because this is the same
+	// mission doing the same turn against a different host. An empty id returns
+	// the harness unchanged, so a caller does not have to branch.
+	ForTarget(targetID string) AgentHarness
+
 	// ────────────────────────────────────────────────────────────────────────────
 	// Observability
 	// ────────────────────────────────────────────────────────────────────────────

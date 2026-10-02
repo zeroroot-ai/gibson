@@ -480,6 +480,9 @@ type mockHarnessWithResolver struct {
 	UnimplementedKnowledgeReader // knowledge reads report unavailable; explicit methods below still win.
 	toolDescriptors              map[string]*ToolDescriptor
 	toolHandler                  func(ctx context.Context, name string, request proto.Message, response proto.Message) error
+	// forTargetID records what ForTarget was asked for, so a test can assert a
+	// scope reader followed the per-target view.
+	forTargetID string
 }
 
 func (m *mockHarnessWithResolver) GetToolDescriptor(ctx context.Context, name string) (*ToolDescriptor, error) {
@@ -601,6 +604,17 @@ func (m *mockHarnessWithResolver) GetToolCapabilities(ctx context.Context, toolN
 
 func (m *mockHarnessWithResolver) Target() TargetInfo {
 	return TargetInfo{}
+}
+
+// ForTarget returns a copy whose target id is overridden, so a test can assert
+// that a scope reader follows the per-target view rather than the mission's.
+func (m *mockHarnessWithResolver) ForTarget(targetID string) AgentHarness {
+	if targetID == "" {
+		return m
+	}
+	view := *m
+	view.forTargetID = targetID
+	return &view
 }
 
 func (m *mockHarnessWithResolver) Logger() *slog.Logger {

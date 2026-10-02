@@ -31,6 +31,18 @@ type toolHarness struct {
 	output  string
 	toolErr string
 	err     error
+
+	// forTargetID records what dispatchTool asked the harness to re-scope to, so
+	// a test can assert a for_each instance is dispatched against its own target.
+	forTargetID string
+}
+
+// ForTarget records the request and returns the same stub, so the assertions
+// below see one object. The real implementation returns a view; what matters
+// here is WHICH target the dispatcher asked for.
+func (h *toolHarness) ForTarget(targetID string) gibsonharness.AgentHarness {
+	h.forTargetID = targetID
+	return h
 }
 
 func (h *toolHarness) CallToolProto(_ context.Context, name string, request proto.Message, response proto.Message) error {
@@ -189,5 +201,56 @@ func TestDispatch_UnsupportedKindFailsFastWithAReason(t *testing.T) {
 	wc := dispatchOutcome(t, &toolHarness{}, brain.DispatchRequest{WorkID: "w1", Kind: "plugin", Target: "p"})
 	if !strings.Contains(wc.Err, "plugin") {
 		t.Errorf("WorkCompleted.Err = %q, want it to name the unsupported kind", wc.Err)
+	}
+}
+
+// A for_each instance is dispatched against ITS OWN target, so the findings it
+// produces carry that target's scope rather than the mission's primary.
+//
+// This is the assertion the attribution slice rests on: every scope reader in
+// the callback surface resolves from h.Target().ID, so if the dispatcher hands
+// over the mission's harness unchanged, instance B's findings land on instance
+// A's host and several machines merge onto one coordinate (gibson#526).
+func TestDispatchTool_ForEachInstanceIsScopedToItsOwnTarget(t *testing.T) {
+	const target = "22222222-2222-2222-2222-222222222222"
+	h := &toolHarness{output: `{"status":200}`}
+	b := newBrainExecutor(nil, slog.Default())
+	bind := &missionBinding{ctx: context.Background(), harness: h}
+
+	if _, err := b.dispatchTool(bind, brain.DispatchRequest{
+		WorkID: "scan#" + target,
+		Kind:   "tool",
+		Target: "nmap",
+		Input:  `{"target":"10.0.0.2"}`,
+	}); err != nil {
+		t.Fatalf("dispatchTool: %v", err)
+	}
+
+	if h.forTargetID != target {
+		t.Errorf("dispatched against target %q, want %q — a fan-out instance must "+
+			"be scoped to the target its work id names", h.forTargetID, target)
+	}
+}
+
+// An ordinary node does not re-scope, and must not call ForTarget at all: a
+// harness that embeds the AgentHarness interface has a nil embedded value, so an
+// unconditional call would panic on every dispatch in the system.
+func TestDispatchTool_OrdinaryNodeDoesNotRescope(t *testing.T) {
+	h := &toolHarness{output: `{"status":200}`}
+	b := newBrainExecutor(nil, slog.Default())
+	bind := &missionBinding{ctx: context.Background(), harness: h}
+
+	if _, err := b.dispatchTool(bind, brain.DispatchRequest{
+		WorkID: "scan",
+		Kind:   "tool",
+		Target: "nmap",
+		Input:  `{}`,
+	}); err != nil {
+		t.Fatalf("dispatchTool: %v", err)
+	}
+
+	if h.forTargetID != "" {
+		t.Errorf("ForTarget was called with %q for a non-instance node; it must not "+
+			"be called at all", h.forTargetID)
 	}
 }

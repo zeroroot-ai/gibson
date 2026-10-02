@@ -2649,6 +2649,27 @@ func (h *DefaultAgentHarness) Target() TargetInfo {
 	return h.targetInfo
 }
 
+// ForTarget returns a shallow copy whose targetInfo names targetID, so every
+// scope reader — observationAttribution, SubmitProof, the destructive-authz
+// callback — resolves the target this unit of work actually ran against.
+//
+// Shallow on purpose. Everything else is shared state belonging to the mission
+// turn: copying the token tracker would unbound the budget, and copying the
+// callback manager would orphan the in-flight registrations.
+//
+// Only the ID is replaced. The rest of TargetInfo describes the mission's
+// primary and is not read for scope; a view that invented a name or a URL would
+// be a second, wrong description of a target the daemon already has.
+func (h *DefaultAgentHarness) ForTarget(targetID string) AgentHarness {
+	if targetID == "" || targetID == h.targetInfo.ID.String() {
+		return h
+	}
+	view := *h
+	view.targetInfo = h.targetInfo
+	view.targetInfo.ID = types.ID(targetID)
+	return &view
+}
+
 // MissionID returns the mission ID for the current execution context.
 func (h *DefaultAgentHarness) MissionID() types.ID {
 	return h.missionCtx.ID

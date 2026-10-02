@@ -346,6 +346,16 @@ type fullStubHarness struct {
 	w *fakeHarness
 }
 
+// ForTarget: this stub embeds a harness it delegates to, so re-wrap rather than
+// returning the inner view, which would drop the stub's own behaviour.
+func (s *fullStubHarness) ForTarget(targetID string) AgentHarness {
+	if targetID == "" {
+		return s
+	}
+	view := *s
+	return &view
+}
+
 func (s *fullStubHarness) Workspace() workspace.Workspace {
 	return s.w.Workspace()
 }
