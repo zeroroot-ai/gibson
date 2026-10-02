@@ -53,11 +53,6 @@ const (
 	HealthCheckProtocolAuto HealthCheckProtocol = "auto"
 )
 
-// String returns the string representation of the HealthCheckProtocol.
-func (p HealthCheckProtocol) String() string {
-	return string(p)
-}
-
 // HealthCheckResult represents the result of a health check operation.
 // It contains detailed information about the health check status,
 // protocol used, timing, and any errors encountered.

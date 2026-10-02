@@ -5,6 +5,7 @@ package component
 
 import (
 	"encoding/json"
+	"errors"
 	"fmt"
 	"time"
 )
@@ -256,7 +257,7 @@ func (c *Component) Validate() error {
 	// path left with the component.yaml schema (gibson#555): nothing ever
 	// wrote it in production.
 	if c.BinPath == "" {
-		return fmt.Errorf("component must have bin_path set")
+		return errors.New("component must have bin_path set")
 	}
 
 	if !c.Source.IsValid() {

@@ -33,7 +33,7 @@ func (m *mockComponentStore) add(comp *component.Component) {
 	m.components[m.key(comp.Kind, comp.Name)] = comp
 }
 
-func (m *mockComponentStore) GetByName(ctx context.Context, kind component.ComponentKind, name string) (*component.Component, error) {
+func (m *mockComponentStore) GetByName(_ context.Context, kind component.ComponentKind, name string) (*component.Component, error) {
 	if m.err != nil {
 		return nil, m.err
 	}
@@ -41,27 +41,27 @@ func (m *mockComponentStore) GetByName(ctx context.Context, kind component.Compo
 }
 
 // Implement remaining ComponentStore interface methods (not used in tests)
-func (m *mockComponentStore) Create(ctx context.Context, comp *component.Component) error {
+func (m *mockComponentStore) Create(_ context.Context, comp *component.Component) error {
 	return errors.New("not implemented")
 }
 
-func (m *mockComponentStore) List(ctx context.Context, kind component.ComponentKind) ([]*component.Component, error) {
+func (m *mockComponentStore) List(_ context.Context, kind component.ComponentKind) ([]*component.Component, error) {
 	return nil, errors.New("not implemented")
 }
 
-func (m *mockComponentStore) ListAll(ctx context.Context) (map[component.ComponentKind][]*component.Component, error) {
+func (m *mockComponentStore) ListAll(_ context.Context) (map[component.ComponentKind][]*component.Component, error) {
 	return nil, errors.New("not implemented")
 }
 
-func (m *mockComponentStore) Update(ctx context.Context, comp *component.Component) error {
+func (m *mockComponentStore) Update(_ context.Context, comp *component.Component) error {
 	return errors.New("not implemented")
 }
 
-func (m *mockComponentStore) Delete(ctx context.Context, kind component.ComponentKind, name string) error {
+func (m *mockComponentStore) Delete(_ context.Context, kind component.ComponentKind, name string) error {
 	return errors.New("not implemented")
 }
 
-func (m *mockComponentStore) ListInstances(ctx context.Context, kind component.ComponentKind, name string) ([]component.ComponentInfo, error) {
+func (m *mockComponentStore) ListInstances(_ context.Context, kind component.ComponentKind, name string) ([]component.ComponentInfo, error) {
 	return nil, errors.New("not implemented")
 }
 
