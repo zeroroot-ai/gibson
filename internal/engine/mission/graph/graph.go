@@ -32,6 +32,7 @@ const (
 	kindParallel  = "parallel"
 	kindJoin      = "join"
 	kindJob       = "job"
+	kindForEach   = "for_each"
 	kindUnknown   = "unknown"
 )
 
@@ -91,8 +92,14 @@ func Project(def *missionv1.MissionDefinition, layout *daemonpb.MissionLayout) (
 	// 4. Structural analysis.
 	cycles := findCycles(nodes, edges)
 	orphans := findOrphans(nodes, edges, entry)
-	if len(dangling) > 0 || len(orphans) > 0 || len(cycles) > 0 {
-		return nil, &ValidationError{DanglingEdges: dangling, OrphanNodes: orphans, Cycles: cycles}
+	nested := findNestedForEach(nodes)
+	if len(dangling) > 0 || len(orphans) > 0 || len(cycles) > 0 || len(nested) > 0 {
+		return nil, &ValidationError{
+			DanglingEdges: dangling,
+			OrphanNodes:   orphans,
+			Cycles:        cycles,
+			NestedForEach: nested,
+		}
 	}
 
 	// 5. Rank + lay out.
@@ -173,6 +180,42 @@ func collectNode(id string, n *missionv1.MissionNode, into map[string]*missionv1
 			collectNode(cid, child, into, synth)
 		}
 	}
+	// A for_each's template is flattened the same way a parallel sub-node is,
+	// so it appears in the index and carries a parent edge. ONE template, not a
+	// list: a for_each runs one node per item in its source, where parallel runs
+	// N different declared nodes. The N instances a run produces are a runtime
+	// concern and are not nodes in the definition graph (gibson#524).
+	if f := n.GetForEachConfig(); f != nil {
+		if tpl := f.GetTemplate(); tpl != nil {
+			if tid := tpl.GetId(); tid != "" {
+				*synth = append(*synth, edge{from: id, to: tid})
+				collectNode(tid, tpl, into, synth)
+			}
+		}
+	}
+}
+
+// findNestedForEach names every for_each whose template is itself a for_each.
+//
+// protovalidate cannot express "this nested MissionNode's config is not this
+// variant", so this is the only place the refusal can live, and the proto's
+// field comment says as much rather than leaving it to look like an omission.
+//
+// Sorted, because a validation message that reorders between runs is a diff
+// nobody can review.
+func findNestedForEach(nodes map[string]*missionv1.MissionNode) []string {
+	var out []string
+	for id, n := range nodes {
+		f := n.GetForEachConfig()
+		if f == nil {
+			continue
+		}
+		if f.GetTemplate().GetForEachConfig() != nil {
+			out = append(out, id)
+		}
+	}
+	sort.Strings(out)
+	return out
 }
 
 // buildEdges assembles the deterministic edge list and reports dangling
@@ -300,6 +343,8 @@ func kindOf(t missionv1.NodeType) string {
 		return kindJoin
 	case missionv1.NodeType_NODE_TYPE_JOB:
 		return kindJob
+	case missionv1.NodeType_NODE_TYPE_FOR_EACH:
+		return kindForEach
 	default:
 		return kindUnknown
 	}
@@ -331,6 +376,13 @@ func summarize(n *missionv1.MissionNode) string {
 			return "max_concurrency=" + strconv.Itoa(int(c))
 		}
 		return ""
+	case n.GetForEachConfig() != nil:
+		f := n.GetForEachConfig()
+		detail := strings.TrimPrefix(f.GetSource().String(), "SOURCE_")
+		if c := f.GetMaxConcurrency(); c > 0 {
+			detail += " max_concurrency=" + strconv.Itoa(int(c))
+		}
+		return detail
 	case n.GetJoinConfig() != nil:
 		return strings.Join(n.GetJoinConfig().GetWaitFor(), ", ")
 	case n.GetJobConfig() != nil:

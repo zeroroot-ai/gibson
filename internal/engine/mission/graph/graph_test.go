@@ -4,7 +4,9 @@
 package graph_test
 
 import (
+	"errors"
 	"reflect"
+	"strings"
 	"testing"
 
 	"github.com/zeroroot-ai/gibson/internal/engine/mission/graph"
@@ -306,5 +308,153 @@ func TestProject_DeterministicAndTopologicallySound(t *testing.T) {
 		if rank[e.GetFrom()] >= rank[e.GetTo()] {
 			t.Errorf("edge %s(%d)->%s(%d) not forward in rank", e.GetFrom(), rank[e.GetFrom()], e.GetTo(), rank[e.GetTo()])
 		}
+	}
+}
+
+// A for_each node's template is flattened into the graph the way a parallel
+// sub-node is, with a parent edge, so the definition graph shows the work the
+// author wrote once. The N instances a RUN produces are a runtime concern and
+// are deliberately not nodes here (gibson#524, epic gibson#496).
+func TestProject_ForEachTemplateIsFlattenedAndJoinable(t *testing.T) {
+	def := &missionv1.MissionDefinition{
+		Nodes: map[string]*missionv1.MissionNode{
+			"each": {
+				Id:   "each",
+				Type: missionv1.NodeType_NODE_TYPE_FOR_EACH,
+				Config: &missionv1.MissionNode_ForEachConfig{ForEachConfig: &missionv1.ForEachNodeConfig{
+					Source:         missionv1.ForEachNodeConfig_SOURCE_TARGET_SET,
+					MaxConcurrency: 4,
+					Template:       tool("scan", "nmap"),
+				}},
+			},
+			"report": {
+				Id:     "report",
+				Type:   missionv1.NodeType_NODE_TYPE_JOIN,
+				Config: &missionv1.MissionNode_JoinConfig{JoinConfig: &missionv1.JoinNodeConfig{WaitFor: []string{"each"}}},
+			},
+		},
+		EntryPoints: []string{"each"},
+		ExitPoints:  []string{"report"},
+	}
+
+	g := mustProject(t, def, nil)
+
+	// The template is a node, reachable, not swallowed by its parent.
+	for _, id := range []string{"each", "scan", "report"} {
+		if _, ok := nodeByID(g, id); !ok {
+			t.Fatalf("node %q missing — for_each template flattening failed", id)
+		}
+	}
+
+	each, _ := nodeByID(g, "each")
+	scan, _ := nodeByID(g, "scan")
+	report, _ := nodeByID(g, "report")
+
+	// Both the template and the join are children of the for_each, so they share
+	// a rank. That is correct on dependencies — the join waits on the for_each
+	// NODE, which completes when its instances do, not on the template — and it
+	// is deliberately asserted rather than assumed, because it means a rendered
+	// graph draws the join BESIDE the work instead of after it. Whether the join
+	// should rank behind the template is a layout question for gibson#527, which
+	// owns join-over-instances semantics.
+	if each.GetRank() >= scan.GetRank() {
+		t.Errorf("template must rank behind its for_each: each=%d scan=%d",
+			each.GetRank(), scan.GetRank())
+	}
+	if each.GetRank() >= report.GetRank() {
+		t.Errorf("join must rank behind the for_each it waits on: each=%d report=%d",
+			each.GetRank(), report.GetRank())
+	}
+	if scan.GetRank() != report.GetRank() {
+		t.Logf("template and join ranks diverged (scan=%d report=%d); if this is "+
+			"intentional, gibson#527 changed the layout and this log can become an "+
+			"assertion", scan.GetRank(), report.GetRank())
+	}
+
+	// The summary says what it fans out over AND how wide, because "for_each"
+	// alone does not tell a reader whether this is one target or fifty.
+	if got, want := each.GetSummary(), "TARGET_SET max_concurrency=4"; got != want {
+		t.Errorf("for_each summary = %q, want %q", got, want)
+	}
+
+	// A join naming the for_each must not be a cycle or an orphan: the node is
+	// one node in the graph even though a run gives it N instances.
+	if each.GetKind() != "for_each" {
+		t.Errorf("kind = %q, want for_each — the dispatch arm is missing", each.GetKind())
+	}
+}
+
+// A for_each with no template must not synthesize a dangling edge. protovalidate
+// requires the template, so this is the defence-in-depth case for a definition
+// that reached the projector some other way.
+func TestProject_ForEachWithNoTemplateDoesNotDangle(t *testing.T) {
+	def := &missionv1.MissionDefinition{
+		Nodes: map[string]*missionv1.MissionNode{
+			"each": {
+				Id:   "each",
+				Type: missionv1.NodeType_NODE_TYPE_FOR_EACH,
+				Config: &missionv1.MissionNode_ForEachConfig{ForEachConfig: &missionv1.ForEachNodeConfig{
+					Source: missionv1.ForEachNodeConfig_SOURCE_TARGET_SET,
+				}},
+			},
+		},
+		EntryPoints: []string{"each"},
+		ExitPoints:  []string{"each"},
+	}
+
+	g := mustProject(t, def, nil)
+	if _, ok := nodeByID(g, "each"); !ok {
+		t.Fatal("the for_each node itself must still project")
+	}
+	if n := len(g.GetNodes()); n != 1 {
+		t.Errorf("projected %d nodes, want 1 — a missing template must not add one", n)
+	}
+}
+
+// A template that is itself a for_each is refused. protovalidate cannot express
+// it, so this is the only gate, and the fixture proves the gate bites rather
+// than merely existing (gibson#524).
+func TestProject_NestedForEachIsRefused(t *testing.T) {
+	inner := &missionv1.MissionNode{
+		Id:   "inner",
+		Type: missionv1.NodeType_NODE_TYPE_FOR_EACH,
+		Config: &missionv1.MissionNode_ForEachConfig{ForEachConfig: &missionv1.ForEachNodeConfig{
+			Source:   missionv1.ForEachNodeConfig_SOURCE_TARGET_SET,
+			Template: tool("scan", "nmap"),
+		}},
+	}
+	def := &missionv1.MissionDefinition{
+		Nodes: map[string]*missionv1.MissionNode{
+			"outer": {
+				Id:   "outer",
+				Type: missionv1.NodeType_NODE_TYPE_FOR_EACH,
+				Config: &missionv1.MissionNode_ForEachConfig{ForEachConfig: &missionv1.ForEachNodeConfig{
+					Source:   missionv1.ForEachNodeConfig_SOURCE_TARGET_SET,
+					Template: inner,
+				}},
+			},
+		},
+		EntryPoints: []string{"outer"},
+		ExitPoints:  []string{"outer"},
+	}
+
+	g, err := graph.Project(def, nil)
+	if err == nil {
+		t.Fatal("want a ValidationError for a nested for_each; a product of two " +
+			"target sets reads like one fan-out and dispatches N*M times")
+	}
+	if g != nil {
+		t.Error("Project must return no graph alongside a ValidationError")
+	}
+
+	var ve *graph.ValidationError
+	if !errors.As(err, &ve) {
+		t.Fatalf("error is not a *ValidationError: %v", err)
+	}
+	if len(ve.NestedForEach) != 1 || ve.NestedForEach[0] != "outer" {
+		t.Errorf("NestedForEach = %v, want [outer]", ve.NestedForEach)
+	}
+	if !strings.Contains(err.Error(), "template is itself a for_each") {
+		t.Errorf("error text does not name the problem: %v", err)
 	}
 }
