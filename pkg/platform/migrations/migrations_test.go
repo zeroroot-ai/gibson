@@ -36,15 +36,16 @@ func TestEmbed_PlatformHasExpectedFiles(t *testing.T) {
 	// user a component registered as, which the secret-binding admin RPCs
 	// address (gibson#154), 027 makes tenant_zitadel_orgs.zitadel_org_id
 	// unique so ext-authz's org->tenant lookup is unambiguous (ADR-0093
-	// decision 4, hosted#195).
+	// decision 4, hosted#195), 028 drops connector_sandbox and
+	// webhook_idempotency, which no Go code read (gibson#506).
 	// golang-migrate tracks a single integer and only moves forward, so
 	// leaving a gap would let a later-landing migration be skipped forever.
 	upCount, downCount := countSQL(t, Platform, platformDir)
-	if upCount != 27 {
-		t.Errorf("platform: expected 27 up.sql files, got %d", upCount)
+	if upCount != 28 {
+		t.Errorf("platform: expected 28 up.sql files, got %d", upCount)
 	}
-	if downCount != 27 {
-		t.Errorf("platform: expected 27 down.sql files, got %d", downCount)
+	if downCount != 28 {
+		t.Errorf("platform: expected 28 down.sql files, got %d", downCount)
 	}
 }
 
@@ -114,8 +115,8 @@ func TestTenantMaxVersion(t *testing.T) {
 //	...
 //	011 — component_install (ADR-0046)
 //	012 — connector_manifest (gibson#722)
-//	013 — connector_sandbox (gibson#722)
-//	014 — connector_sandbox_principal (gibson#723)
+//	013 — connector_sandbox (gibson#722; dropped by 028)
+//	014 — connector_sandbox_principal (gibson#723; dropped by 028)
 //	015 — webhook_idempotency (dashboard#780/#785)
 //	016 — pending_tenant_provisioning (operator-pull provisioning, gibson#948)
 //	017 — tenant_status
@@ -149,8 +150,8 @@ func TestPlatformMaxVersion(t *testing.T) {
 	if err != nil {
 		t.Fatalf("PlatformMaxVersion: %v", err)
 	}
-	if v != 27 {
-		t.Errorf("PlatformMaxVersion: got %d, want 27", v)
+	if v != 28 {
+		t.Errorf("PlatformMaxVersion: got %d, want 28", v)
 	}
 }
 
