@@ -97,9 +97,6 @@ type AgentEnrollmentSpec struct {
 	// +kubebuilder:default:="24h"
 	// +optional
 	MaxRuntime metav1.Duration `json:"maxRuntime,omitempty"`
-
-	// +optional
-	Notes string `json:"notes,omitempty"`
 }
 
 // AgentEnrollmentStatus defines the observed state.
@@ -126,6 +123,7 @@ type AgentEnrollmentStatus struct {
 // +kubebuilder:printcolumn:name="Agent",type=string,JSONPath=`.spec.agentName`
 // +kubebuilder:printcolumn:name="Phase",type=string,JSONPath=`.status.phase`
 // +kubebuilder:printcolumn:name="Age",type=date,JSONPath=`.metadata.creationTimestamp`
+// +kubebuilder:printcolumn:name="Grants",type=integer,JSONPath=`.status.grantsAppliedCount`,priority=1
 
 // AgentEnrollment represents an external agent registration.
 //

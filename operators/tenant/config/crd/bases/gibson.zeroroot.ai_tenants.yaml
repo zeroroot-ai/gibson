@@ -29,6 +29,14 @@ spec:
     - jsonPath: .metadata.creationTimestamp
       name: Age
       type: date
+    - jsonPath: .status.dataPlane.phase
+      name: DataPlane
+      priority: 1
+      type: string
+    - jsonPath: .status.dataPlane.lastError
+      name: DataPlaneError
+      priority: 1
+      type: string
     name: v1alpha1
     schema:
       openAPIV3Schema:
@@ -184,12 +192,6 @@ spec:
                       Neo4jProvisioned is true after the per-tenant Neo4j database and schema
                       migrations have been applied.
                     type: boolean
-                  observedGeneration:
-                    description: |-
-                      ObservedGeneration is the Tenant.metadata.generation that was current
-                      when the dataPlane status was last updated.
-                    format: int64
-                    type: integer
                   phase:
                     description: Phase describes the current provisioning phase.
                     enum:
@@ -226,16 +228,6 @@ spec:
                           Neo4j reports the provisioning state of the per-tenant Neo4j
                           StatefulSet instance.
                         properties:
-                          lastUpdated:
-                            description: LastUpdated is the time this store's status
-                              was last written.
-                            format: date-time
-                            type: string
-                          reason:
-                            description: |-
-                              Reason contains a human-readable description of the current state,
-                              especially useful when State is "failed".
-                            type: string
                           state:
                             description: State is the current provisioning state.
                             enum:
@@ -249,16 +241,6 @@ spec:
                           Postgres reports the provisioning state of the per-tenant Postgres
                           database and role.
                         properties:
-                          lastUpdated:
-                            description: LastUpdated is the time this store's status
-                              was last written.
-                            format: date-time
-                            type: string
-                          reason:
-                            description: |-
-                              Reason contains a human-readable description of the current state,
-                              especially useful when State is "failed".
-                            type: string
                           state:
                             description: State is the current provisioning state.
                             enum:
@@ -272,16 +254,6 @@ spec:
                           Redis reports the provisioning state of the per-tenant Redis logical
                           database index.
                         properties:
-                          lastUpdated:
-                            description: LastUpdated is the time this store's status
-                              was last written.
-                            format: date-time
-                            type: string
-                          reason:
-                            description: |-
-                              Reason contains a human-readable description of the current state,
-                              especially useful when State is "failed".
-                            type: string
                           state:
                             description: State is the current provisioning state.
                             enum:
@@ -323,10 +295,6 @@ spec:
                   persisted by the reconciler's Status().Patch) — it was previously a
                   spec field whose mid-saga write was silently discarded, so every
                   reconcile created a fresh Stripe customer (tenant-operator#354).
-                type: string
-              tierObserved:
-                description: TierObserved is the tier last reconciled. Used to detect
-                  tier changes.
                 type: string
               zitadelOrgID:
                 description: |-

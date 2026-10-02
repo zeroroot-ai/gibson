@@ -32,6 +32,18 @@ spec:
     - jsonPath: .metadata.creationTimestamp
       name: Age
       type: date
+    - jsonPath: .status.lastError
+      name: LastError
+      priority: 1
+      type: string
+    - jsonPath: .status.components[*].name
+      name: Components
+      priority: 1
+      type: string
+    - jsonPath: .status.components[*].state
+      name: ComponentStates
+      priority: 1
+      type: string
     name: v1alpha1
     schema:
       openAPIV3Schema:
@@ -156,11 +168,6 @@ spec:
                     grant component. The aggregate Ready condition (and the scalar Ready field) is
                     True only when every participating component has reached state=ready.
                   properties:
-                    lastUpdated:
-                      description: LastUpdated is the time this component's state
-                        was last written.
-                      format: date-time
-                      type: string
                     name:
                       description: |-
                         Name identifies the component: platform-registration (the canonical
@@ -168,10 +175,6 @@ spec:
                       enum:
                       - platform-registration
                       - extra-tuples
-                      type: string
-                    reason:
-                      description: Reason carries a human-readable description, especially
-                        when state=failed.
                       type: string
                     state:
                       description: State is the current reconciliation state of the

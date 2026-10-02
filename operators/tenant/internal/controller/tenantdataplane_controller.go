@@ -221,9 +221,8 @@ func (r *TenantDataPlaneReconciler) emit(tdp *gibsonv1alpha1.TenantDataPlane, ev
 // which skips a store whose sub-provisioner is unset). KEK init always
 // participates because the pipeline always runs it.
 func readyStores(sel gibsonv1alpha1.TenantDataPlaneStores) []gibsonv1alpha1.TenantDataPlaneStoreCondition {
-	now := metav1.Now()
 	ready := func(name string) gibsonv1alpha1.TenantDataPlaneStoreCondition {
-		return gibsonv1alpha1.TenantDataPlaneStoreCondition{Name: name, State: "ready", LastUpdated: now}
+		return gibsonv1alpha1.TenantDataPlaneStoreCondition{Name: name, State: "ready"}
 	}
 	var out []gibsonv1alpha1.TenantDataPlaneStoreCondition
 	if sel.Postgres {

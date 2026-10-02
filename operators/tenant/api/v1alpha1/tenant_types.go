@@ -87,15 +87,6 @@ type DataPlaneStoreStatus struct {
 	// +kubebuilder:validation:Enum=provisioning;ready;failed
 	// +optional
 	State string `json:"state,omitempty"`
-
-	// Reason contains a human-readable description of the current state,
-	// especially useful when State is "failed".
-	// +optional
-	Reason string `json:"reason,omitempty"`
-
-	// LastUpdated is the time this store's status was last written.
-	// +optional
-	LastUpdated metav1.Time `json:"lastUpdated,omitempty"`
 }
 
 // DataPlaneSummary holds the per-store provisioning status for the four
@@ -164,11 +155,6 @@ type TenantDataPlaneStatus struct {
 	// +optional
 	LastError string `json:"lastError,omitempty"`
 
-	// ObservedGeneration is the Tenant.metadata.generation that was current
-	// when the dataPlane status was last updated.
-	// +optional
-	ObservedGeneration int64 `json:"observedGeneration"`
-
 	// Stores provides per-store granular provisioning state for the
 	// onboarding UX (spec per-tenant-data-plane-completion D8). Added by
 	// Task 21; optional, zero-value is backward compatible with existing
@@ -208,10 +194,6 @@ type TenantStatus struct {
 	// +optional
 	ObservedGeneration int64 `json:"observedGeneration,omitempty"`
 
-	// TierObserved is the tier last reconciled. Used to detect tier changes.
-	// +optional
-	TierObserved TenantTier `json:"tierObserved,omitempty"`
-
 	// ZitadelOrgID is the Zitadel organization ID provisioned for this tenant.
 	// Populated by the EnsureZitadelOrg saga step.
 	// +optional
@@ -236,6 +218,8 @@ type TenantStatus struct {
 // +kubebuilder:printcolumn:name="Phase",type=string,JSONPath=`.status.phase`
 // +kubebuilder:printcolumn:name="Namespace",type=string,JSONPath=`.status.namespace`
 // +kubebuilder:printcolumn:name="Age",type=date,JSONPath=`.metadata.creationTimestamp`
+// +kubebuilder:printcolumn:name="DataPlane",type=string,JSONPath=`.status.dataPlane.phase`,priority=1
+// +kubebuilder:printcolumn:name="DataPlaneError",type=string,JSONPath=`.status.dataPlane.lastError`,priority=1
 
 // Tenant is the Schema for the tenants API. Represents a single Gibson
 // customer's declarative state across all identity and data subsystems.

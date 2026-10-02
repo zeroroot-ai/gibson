@@ -1,0 +1,29 @@
+# Verdicts for served CRD fields that no controller reads.
+#
+# Format, three pipe-separated columns:
+#
+#   <pkg>.<Type>.<Field> | <#issue or ADR> | <why this is the right state today>
+#
+# Keyed by qualified name, never by line, so an unrelated edit never needs a
+# re-pin. The reference column must name an issue or an ADR: a verdict with
+# nowhere to read it is an opinion. The gate FAILS when an entry names a field
+# that no longer exists, and when an entry names a field that now HAS a
+# consumer, because either way the verdict is about nothing.
+#
+# ADR-0094 rule 5: every entry is "build the consumer" or "delete the producer",
+# never defaulted to deletion. An entry here says which, and that the work is
+# tracked. It does not say the promise is kept.
+#
+# First run, 2026-10-02 (gibson#503): 54 fields. Thirteen never written and
+# never read were deleted. Twenty-six display-only status fields got the print
+# column that is their consumer. The nine below are spec fields an operator can
+# set that the cluster ignores: wiring gaps, tracked in #597.
+v1alpha1.AgentEnrollmentSpec.Mode | #597 | BUILD THE CONSUMER. Required, autonomous or supervised, and the enrollment controller reads no spec field, so a supervised agent runs as autonomous.
+v1alpha1.AgentEnrollmentSpec.MaxRuntime | #597 | BUILD THE CONSUMER. A runtime cap nothing enforces.
+v1alpha1.ConnectorInstanceSpec.CatalogRef | #597 | BUILD THE CONSUMER OR DELETE. The daemon writes it on enable and nothing reads it back.
+v1alpha1.ConnectorInstanceSpec.Credentials | #597 | BUILD THE CONSUMER. The connector-operator asks the daemon for a credential by connector name; the declared refs steer nothing.
+v1alpha1.CredentialRef.Key | #597 | BUILD THE CONSUMER. Child of ConnectorInstanceSpec.Credentials; same verdict.
+v1alpha1.CredentialRef.Property | #597 | BUILD THE CONSUMER. Child of ConnectorInstanceSpec.Credentials; same verdict.
+v1alpha1.CredentialRef.TargetEnv | #597 | BUILD THE CONSUMER. Child of ConnectorInstanceSpec.Credentials; same verdict.
+v1alpha1.TenantIdentityOIDCClient.Name | #597 | BUILD THE CONSUMER. The identity controller counts the declared OIDC clients and never reads an entry.
+v1alpha1.TenantIdentityOIDCClient.RedirectURIs | #597 | BUILD THE CONSUMER. Same as Name.

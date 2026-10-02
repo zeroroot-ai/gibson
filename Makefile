@@ -2,7 +2,7 @@
 # Stage 1 - Foundation
 
 .PHONY: check-no-tracked-binaries
-.PHONY: all build bin gibson-migrate sandbox-eviction-handler test test-coverage test-race lint lint-all lint-deadcode lint-deadcode-baseline clean install help proto proto-deps proto-clean check-authz check-coverage test-daemon-identity-roundtrip check-no-tenant-id check-fga-headers check-oss-boundary check-airgap-build check-rpc-test-walker coverage-profile check-coverage-floor check-diff-coverage check-coverage-gates check-critical-paths check-ci-lane-parity check-build-tags check-first-party-tags check-bringup-diagnostics check-comment-paths check-operator-rbac-scope check-rules-enforced check-queue-gate vet-e2e vet-tags test-integration test-openbao test-merge-queue test-setec-roundtrip authz-registry tool-manifests tool-catalog-capture
+.PHONY: all build bin gibson-migrate sandbox-eviction-handler test test-coverage test-race lint lint-all lint-deadcode lint-deadcode-baseline clean install help proto proto-deps proto-clean check-authz check-coverage test-daemon-identity-roundtrip check-no-tenant-id check-fga-headers check-oss-boundary check-airgap-build check-rpc-test-walker coverage-profile check-coverage-floor check-diff-coverage check-coverage-gates check-critical-paths check-ci-lane-parity check-build-tags check-first-party-tags check-crd-field-consumers check-bringup-diagnostics check-comment-paths check-operator-rbac-scope check-rules-enforced check-queue-gate vet-e2e vet-tags test-integration test-openbao test-merge-queue test-setec-roundtrip authz-registry tool-manifests tool-catalog-capture
 
 # Go parameters
 GOCMD=go
@@ -557,6 +557,14 @@ check-build-tags:
 check-first-party-tags:
 	@bash scripts/check-first-party-tags.sh --selftest
 	@bash scripts/check-first-party-tags.sh
+# check-crd-field-consumers — every served CRD spec or status field has a Go
+# reader, a print column, or a recorded verdict (gibson#503, ADR-0094 layer 6).
+# Reads come from ast-checks/cmd/unwired at the go.mod pin; the script is the
+# setec one with the three api directories here.
+.PHONY: check-crd-field-consumers
+check-crd-field-consumers:
+	@bash scripts/__tests__/check-crd-field-consumers.test.sh
+	@bash scripts/check-crd-field-consumers.sh
 
 # check-queue-gate: `queue-gate` is the ONE context the merge queue requires
 # from go-ci.yml, so every other job in that file is only as blocking as its

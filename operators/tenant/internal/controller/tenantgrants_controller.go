@@ -240,9 +240,8 @@ func (r *TenantGrantsReconciler) emitGrants(tg *gibsonv1alpha1.TenantGrants, eve
 // platform-registration component participates whenever the spec requests it;
 // the extra-tuples component participates only when ExtraTuples are declared.
 func readyGrantsComponents(tg *gibsonv1alpha1.TenantGrants) []gibsonv1alpha1.TenantGrantsComponentCondition {
-	now := metav1.Now()
 	ready := func(name string) gibsonv1alpha1.TenantGrantsComponentCondition {
-		return gibsonv1alpha1.TenantGrantsComponentCondition{Name: name, State: "ready", LastUpdated: now}
+		return gibsonv1alpha1.TenantGrantsComponentCondition{Name: name, State: "ready"}
 	}
 	var comps []gibsonv1alpha1.TenantGrantsComponentCondition
 	if tg.Spec.PlatformRegistration {

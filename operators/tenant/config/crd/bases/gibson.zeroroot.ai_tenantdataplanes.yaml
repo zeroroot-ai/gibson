@@ -29,6 +29,18 @@ spec:
     - jsonPath: .metadata.creationTimestamp
       name: Age
       type: date
+    - jsonPath: .status.lastError
+      name: LastError
+      priority: 1
+      type: string
+    - jsonPath: .status.stores[*].name
+      name: Stores
+      priority: 1
+      type: string
+    - jsonPath: .status.stores[*].state
+      name: StoreStates
+      priority: 1
+      type: string
     name: v1alpha1
     schema:
       openAPIV3Schema:
@@ -228,11 +240,6 @@ spec:
                     store. The aggregate Ready condition (and the scalar Ready field) is True
                     only when every requested store has reached state=ready.
                   properties:
-                    lastUpdated:
-                      description: LastUpdated is the time this store's state was
-                        last written.
-                      format: date-time
-                      type: string
                     name:
                       description: 'Name identifies the store: postgres, neo4j, redis,
                         vector, or kek.'
@@ -242,11 +249,6 @@ spec:
                       - redis
                       - vector
                       - kek
-                      type: string
-                    reason:
-                      description: |-
-                        Reason carries a human-readable description, especially when
-                        state=failed.
                       type: string
                     state:
                       description: State is the current provisioning state of the

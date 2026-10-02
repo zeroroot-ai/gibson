@@ -273,9 +273,8 @@ func (r *TenantIdentityReconciler) emitIdentity(ti *gibsonv1alpha1.TenantIdentit
 // slice (gibson#803 scope: per-tenant OIDC clients are minted daemon-side), a
 // requested oidc-client is reported ready once the org backing it exists.
 func readyIdentityComponents(ti *gibsonv1alpha1.TenantIdentity) []gibsonv1alpha1.TenantIdentityComponentCondition {
-	now := metav1.Now()
 	ready := func(name string) gibsonv1alpha1.TenantIdentityComponentCondition {
-		return gibsonv1alpha1.TenantIdentityComponentCondition{Name: name, State: "ready", LastUpdated: now}
+		return gibsonv1alpha1.TenantIdentityComponentCondition{Name: name, State: "ready"}
 	}
 	comps := []gibsonv1alpha1.TenantIdentityComponentCondition{ready("zitadel-org")}
 	if len(ti.Spec.OIDCClients) > 0 {

@@ -166,11 +166,6 @@ type ConnectorInstanceSpec struct {
 	// Environment injection from this list is not wired yet.
 	// +optional
 	Credentials []CredentialRef `json:"credentials,omitempty"`
-
-	// RegistryCredential resolves a private-registry pull secret from the
-	// customer's store, for a Hosted connector on a private image.
-	// +optional
-	RegistryCredential *CredentialRef `json:"registryCredential,omitempty"`
 }
 
 // ConnectorInstancePhase is the scalar lifecycle phase.
@@ -247,6 +242,10 @@ type ConnectorInstanceStatus struct {
 // +kubebuilder:printcolumn:name="Phase",type=string,JSONPath=`.status.phase`
 // +kubebuilder:printcolumn:name="Tools",type=integer,JSONPath=`.status.discoveredTools`
 // +kubebuilder:printcolumn:name="Age",type=date,JSONPath=`.metadata.creationTimestamp`
+// +kubebuilder:printcolumn:name="ToolHive",type=string,JSONPath=`.status.toolHiveKind`,priority=1
+// +kubebuilder:printcolumn:name="ToolHiveName",type=string,JSONPath=`.status.toolHiveName`,priority=1
+// +kubebuilder:printcolumn:name="ProxyURL",type=string,JSONPath=`.status.proxyURL`,priority=1
+// +kubebuilder:printcolumn:name="Observed",type=integer,JSONPath=`.status.observedGeneration`,priority=1
 
 // ConnectorInstance is one connector enabled for one tenant. The connector-
 // operator reconciles it into ToolHive resources in the tenant namespace

@@ -76,11 +76,6 @@ type TenantMemberStatus struct {
 	// +optional
 	Conditions []metav1.Condition `json:"conditions,omitempty"`
 
-	// InvitationTokenHash is the SHA-256 hash of the invitation token.
-	// The plaintext token lives only in the Secret referenced below.
-	// +optional
-	InvitationTokenHash string `json:"invitationTokenHash,omitempty"`
-
 	// InvitationExpiresAt is when the pending invitation expires.
 	// +optional
 	InvitationExpiresAt *metav1.Time `json:"invitationExpiresAt,omitempty"`

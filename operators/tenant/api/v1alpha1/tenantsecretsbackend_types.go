@@ -54,22 +54,6 @@ type TenantSecretsBackendSpec struct {
 	// +kubebuilder:validation:XValidation:rule="self == oldSelf",message="tenantID is immutable"
 	// +required
 	TenantID string `json:"tenantID"`
-
-	// MountPath optionally overrides the Vault KV v2 mount that holds the
-	// tenant's secrets. When empty the operator's Helm-chart default applies
-	// (GIBSON_VAULT_MOUNT_PATH, conventionally "secret"). Informational: the
-	// underlying vault.AdminClient mounts KV at the operator-configured path;
-	// this records the intended value on the CR for observability and a future
-	// per-tenant override.
-	// +optional
-	MountPath string `json:"mountPath,omitempty"`
-
-	// AuthRole optionally overrides the per-tenant JWT-auth role name. When
-	// empty the operator derives the conventional "gibson-plugin-<tenantID>"
-	// role (ADR-0009), matching the saga. Informational today; recorded on the
-	// CR for observability.
-	// +optional
-	AuthRole string `json:"authRole,omitempty"`
 }
 
 // TenantSecretsBackendComponentCondition reports the provisioning state of a
@@ -85,15 +69,6 @@ type TenantSecretsBackendComponentCondition struct {
 	// State is the current provisioning state of the component.
 	// +kubebuilder:validation:Enum=provisioning;ready;failed
 	State string `json:"state"`
-
-	// Reason carries a human-readable description, especially when
-	// state=failed.
-	// +optional
-	Reason string `json:"reason,omitempty"`
-
-	// LastUpdated is the time this component's state was last written.
-	// +optional
-	LastUpdated metav1.Time `json:"lastUpdated,omitempty"`
 }
 
 // TenantSecretsBackendStatus defines the observed state of a
@@ -141,6 +116,9 @@ type TenantSecretsBackendStatus struct {
 // +kubebuilder:printcolumn:name="Phase",type=string,JSONPath=`.status.phase`
 // +kubebuilder:printcolumn:name="Ready",type=boolean,JSONPath=`.status.ready`
 // +kubebuilder:printcolumn:name="Age",type=date,JSONPath=`.metadata.creationTimestamp`
+// +kubebuilder:printcolumn:name="LastError",type=string,JSONPath=`.status.lastError`,priority=1
+// +kubebuilder:printcolumn:name="Components",type=string,JSONPath=`.status.components[*].name`,priority=1
+// +kubebuilder:printcolumn:name="ComponentStates",type=string,JSONPath=`.status.components[*].state`,priority=1
 
 // TenantSecretsBackend is the Schema for the tenantsecretsbackends API. It
 // declaratively composes the per-tenant secrets backend — the OpenBao/Vault

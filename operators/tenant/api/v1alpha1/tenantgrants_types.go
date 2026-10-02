@@ -107,14 +107,6 @@ type TenantGrantsComponentCondition struct {
 	// State is the current reconciliation state of the component.
 	// +kubebuilder:validation:Enum=provisioning;ready;failed
 	State string `json:"state"`
-
-	// Reason carries a human-readable description, especially when state=failed.
-	// +optional
-	Reason string `json:"reason,omitempty"`
-
-	// LastUpdated is the time this component's state was last written.
-	// +optional
-	LastUpdated metav1.Time `json:"lastUpdated,omitempty"`
 }
 
 // TenantGrantsStatus defines the observed state of a TenantGrants. It carries a
@@ -166,6 +158,9 @@ type TenantGrantsStatus struct {
 // +kubebuilder:printcolumn:name="Phase",type=string,JSONPath=`.status.phase`
 // +kubebuilder:printcolumn:name="Ready",type=boolean,JSONPath=`.status.ready`
 // +kubebuilder:printcolumn:name="Age",type=date,JSONPath=`.metadata.creationTimestamp`
+// +kubebuilder:printcolumn:name="LastError",type=string,JSONPath=`.status.lastError`,priority=1
+// +kubebuilder:printcolumn:name="Components",type=string,JSONPath=`.status.components[*].name`,priority=1
+// +kubebuilder:printcolumn:name="ComponentStates",type=string,JSONPath=`.status.components[*].state`,priority=1
 
 // TenantGrants is the Schema for the tenantgrants API. It declaratively
 // reconciles a tenant's platform-level FGA tuples — the relationships that
