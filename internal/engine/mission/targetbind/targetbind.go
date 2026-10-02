@@ -272,8 +272,9 @@ func BindNode(n *missionv1.MissionNode, t *types.Target) (*missionv1.MissionNode
 	bindings := Bindings(t)
 	var problems []string
 	// The instance's own body IS bound, including a nested for_each template —
-	// which cannot occur, because graph.Project refuses a nested for_each before
-	// a run reaches here (gibson#524).
+	// which cannot occur, because the mission projection calls
+	// graph.RefuseUnsupportedFanOut before it expands anything, so a nested
+	// for_each fails the run before binding sees it (gibson#524/#527).
 	walkStringsAll(out.ProtoReflect(), "", func(path, in string) (string, bool) {
 		bound, errs := substitute(in, bindings)
 		for _, e := range errs {

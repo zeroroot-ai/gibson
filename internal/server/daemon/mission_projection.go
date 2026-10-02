@@ -28,6 +28,7 @@ import (
 	"time"
 
 	"github.com/zeroroot-ai/gibson/internal/engine/brain"
+	"github.com/zeroroot-ai/gibson/internal/engine/mission/graph"
 	"github.com/zeroroot-ai/gibson/internal/engine/mission/targetbind"
 	"github.com/zeroroot-ai/gibson/internal/infra/types"
 	missionpb "github.com/zeroroot-ai/sdk/api/gen/gibson/mission/v1"
@@ -47,6 +48,15 @@ import (
 func missionDefinitionToProjected(def *missionpb.MissionDefinition, goal string, targets []forEachTarget) (brain.MissionProjected, error) {
 	if def == nil {
 		return brain.MissionProjected{}, fmt.Errorf("nil mission definition")
+	}
+
+	// 0. Refuse the fan-out declarations the daemon does not support, from the
+	// same finder the mission-view analyser uses. This is on the run path on
+	// purpose: a nested for_each that reached expansion would have its inner
+	// for_each collapsed and never expanded, so the work it declares would
+	// vanish without a word (gibson#527).
+	if err := graph.RefuseUnsupportedFanOut(def.GetNodes()); err != nil {
+		return brain.MissionProjected{}, fmt.Errorf("mission %q: %w", def.GetId(), err)
 	}
 
 	// 1. Flatten parallel sub-nodes into the node set (they become real nodes).
@@ -93,7 +103,7 @@ func missionDefinitionToProjected(def *missionpb.MissionDefinition, goal string,
 	}
 
 	// 4/5. Build WorkNodes for real nodes, rewriting deps through the resolver.
-	nodes, err := buildWorkNodes(allNodes, deps)
+	nodes, err := buildWorkNodes(allNodes, deps, instanceSet(forEachInstances))
 	if err != nil {
 		return brain.MissionProjected{}, err
 	}
@@ -217,10 +227,27 @@ func boundFanOut(def *missionpb.MissionDefinition, forEachInstances map[string][
 	}
 }
 
+// instanceSet flattens the per-for_each instance lists into one membership set,
+// which is what the WorkNode builder needs: it asks whether one id is an
+// instance, never which for_each produced it.
+func instanceSet(forEachInstances map[string][]string) map[string]bool {
+	out := map[string]bool{}
+	for _, ids := range forEachInstances {
+		for _, id := range ids {
+			out[id] = true
+		}
+	}
+	return out
+}
+
 // buildWorkNodes turns the flat node set into the brain's WorkNodes, rewriting
 // each dependency through the resolver so a dependency on a parallel, join or
 // for_each node becomes a dependency on the real nodes it stands for.
-func buildWorkNodes(allNodes map[string]*missionpb.MissionNode, deps nodeDeps) ([]brain.WorkNode, error) {
+func buildWorkNodes(
+	allNodes map[string]*missionpb.MissionNode,
+	deps nodeDeps,
+	instances map[string]bool,
+) ([]brain.WorkNode, error) {
 	resolve := makeResolver(allNodes)
 	var nodes []brain.WorkNode
 	for id, n := range allNodes {
@@ -249,6 +276,13 @@ func buildWorkNodes(allNodes map[string]*missionpb.MissionNode, deps nodeDeps) (
 			DependsOn:  sortedKeys(resolved),
 			MaxRetries: int(n.GetRetryPolicy().GetMaxRetries()),
 			Timeout:    nodeTimeout(n),
+			// A fan-out instance's terminal failure releases whatever waits on
+			// it, so a join after a partially failed fan-out still reports the
+			// targets that succeeded (gibson#527). Membership comes from the
+			// expansion rather than from reading the id, because the id's shape
+			// is an implementation detail and a node the author named with the
+			// separator would otherwise be mistaken for an instance.
+			DependentsRunOnFailure: instances[id],
 		})
 	}
 	sort.Slice(nodes, func(i, j int) bool { return nodes[i].ID < nodes[j].ID })

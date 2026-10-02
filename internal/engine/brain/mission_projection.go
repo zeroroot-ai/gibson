@@ -12,12 +12,29 @@ import "time"
 // need no node kind here (gibson#846), so Kind is one of "agent"|"tool"|"plugin"
 // (plus "condition" once gibson#846 lands).
 type WorkNode struct {
-	ID         string
-	Kind       string
-	Target     string   // capability name (agent/tool/plugin)
-	Input      string   // opaque dispatch input (the node config), carried for dispatch
-	DependsOn  []string // node IDs this one depends on
-	MaxRetries int      // CUE RetryPolicy.max_retries (0 = no retry)
+	ID        string
+	Kind      string
+	Target    string   // capability name (agent/tool/plugin)
+	Input     string   // opaque dispatch input (the node config), carried for dispatch
+	DependsOn []string // node IDs this one depends on
+
+	// DependentsRunOnFailure lets this node's terminal failure satisfy the nodes
+	// that wait on it, instead of stranding them.
+	//
+	// It is false for every ordinary node: a step whose dependency failed must
+	// not run. It is true for a for_each instance, by the fan-out decision
+	// (gibson#524) that every instance runs and the fan-out as a whole fails if
+	// any instance failed. A mission that scans ten targets and finds one
+	// unreachable still has nine targets' worth of findings, and a join that
+	// cannot run leaves them unreported — the mission would record a failure and
+	// throw away the work that succeeded.
+	//
+	// The flag lives on the dependency rather than the dependent because that is
+	// where the fact lives. An instance is one of N over a target set whatever
+	// waits on it, so every dependent gets the same answer and no two can
+	// disagree.
+	DependentsRunOnFailure bool
+	MaxRetries             int // CUE RetryPolicy.max_retries (0 = no retry)
 	// Timeout is MissionNode.timeout. Zero means the node declared none; the
 	// dispatch boundary decides what that means per kind (gibson#1602).
 	Timeout time.Duration
@@ -77,15 +94,16 @@ func applyMissionProjected(w *World, e MissionProjected) {
 			deps = append(deps, WorkID(e.ID, d))
 		}
 		w.work.NewEntity(&WorkItem{
-			ID:         id,
-			MissionID:  e.ID,
-			Kind:       n.Kind,
-			Target:     n.Target,
-			Input:      n.Input,
-			DependsOn:  deps,
-			State:      WorkPending,
-			MaxRetries: n.MaxRetries,
-			Timeout:    n.Timeout,
+			ID:                     id,
+			MissionID:              e.ID,
+			Kind:                   n.Kind,
+			Target:                 n.Target,
+			Input:                  n.Input,
+			DependsOn:              deps,
+			State:                  WorkPending,
+			MaxRetries:             n.MaxRetries,
+			Timeout:                n.Timeout,
+			DependentsRunOnFailure: n.DependentsRunOnFailure,
 		})
 	}
 }
