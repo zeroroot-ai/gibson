@@ -66,7 +66,7 @@ func applyConditionResolved(w *World, e ConditionResolved) {
 // ConditionSystem resolves any pending condition node whose deps are all done.
 func ConditionSystem(w *World) []Event {
 	work := w.WorkSnapshot()
-	state := workStateIndex(work)
+	idx := workIndex(work)
 
 	// `nodes` bag: completed NODE name → result string.
 	//
@@ -85,7 +85,7 @@ func ConditionSystem(w *World) []Event {
 		if wi.Kind != "condition" || wi.State != WorkPending {
 			continue
 		}
-		if !depsAllDone(wi.DependsOn, state) {
+		if !depsSatisfied(wi.DependsOn, idx) {
 			continue
 		}
 		var spec ConditionSpec

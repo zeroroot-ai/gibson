@@ -298,3 +298,75 @@ func sortedIDs(nodes []brain.WorkNode) []string {
 	sort.Strings(out)
 	return out
 }
+
+// Each instance releases whatever waits on it when it fails terminally, so the
+// join after a partially failed fan-out still reports the targets that answered
+// (gibson#527). An ordinary node must not carry the flag — a step whose
+// dependency failed has no business running.
+func TestForEach_InstancesReleaseTheirDependentsOnFailure(t *testing.T) {
+	targets := []forEachTarget{
+		fanTarget("11111111-1111-1111-1111-111111111111", "a", "https://10.0.0.1:6443"),
+		fanTarget("22222222-2222-2222-2222-222222222222", "b", "https://10.0.0.2:6443"),
+	}
+	def := forEachDef(0)
+	def.Nodes["after"] = agentNode("writer", "report")
+
+	proj, err := missionDefinitionToProjected(def, "", targets)
+	if err != nil {
+		t.Fatalf("project: %v", err)
+	}
+
+	instances := 0
+	for _, n := range proj.Nodes {
+		isInstance := strings.HasPrefix(n.ID, "scan#")
+		if isInstance {
+			instances++
+		}
+		if n.DependentsRunOnFailure != isInstance {
+			t.Errorf("node %q: DependentsRunOnFailure = %v, want %v", n.ID, n.DependentsRunOnFailure, isInstance)
+		}
+	}
+	if instances != 2 {
+		t.Fatalf("want 2 instances, got %d", instances)
+	}
+}
+
+// A nested for_each fails the run before expansion. Left alone, the inner
+// for_each would be collapsed like any other for_each and never expanded, so the
+// work it declares would vanish and the mission would report success having run
+// none of it (gibson#524/#527).
+func TestForEach_NestedForEachIsRefusedOnTheRunPath(t *testing.T) {
+	def := forEachDef(0)
+	inner := forEachDef(0).Nodes["each"]
+	def.Nodes["each"].GetForEachConfig().Template = inner
+
+	_, err := missionDefinitionToProjected(def, "", []forEachTarget{
+		fanTarget("11111111-1111-1111-1111-111111111111", "a", "https://10.0.0.1:6443"),
+	})
+	if err == nil {
+		t.Fatal("want a refusal for a for_each whose template is a for_each")
+	}
+	if !strings.Contains(err.Error(), "for_each") {
+		t.Errorf("the refusal does not say what it refused: %v", err)
+	}
+}
+
+// A merge rule over a fan-out source fails the run, with the same message the
+// mission view shows. Both come from graph.RefuseUnsupportedFanOut, so a refusal
+// cannot exist in the authoring path and be absent from the run.
+func TestForEach_MergeRuleOverAFanOutSourceIsRefusedOnTheRunPath(t *testing.T) {
+	def := forEachDef(0)
+	def.Nodes["report"].GetJoinConfig().Strategy = missionpb.MergeStrategy_MERGE_STRATEGY_CONCAT
+
+	_, err := missionDefinitionToProjected(def, "", []forEachTarget{
+		fanTarget("11111111-1111-1111-1111-111111111111", "a", "https://10.0.0.1:6443"),
+	})
+	if err == nil {
+		t.Fatal("want a refusal for a merge strategy declared over a for_each source")
+	}
+	for _, want := range []string{"MERGE_STRATEGY_CONCAT", "gibson#543"} {
+		if !strings.Contains(err.Error(), want) {
+			t.Errorf("the refusal does not name %q: %v", want, err)
+		}
+	}
+}

@@ -51,6 +51,12 @@ type WorkItem struct {
 	MaxRetries int // CUE RetryPolicy.max_retries; the retry System re-dispatches on failure up to this
 	Attempts   int // dispatch attempts so far (count-based, deterministic for replay)
 
+	// DependentsRunOnFailure means a terminal failure of this item satisfies the
+	// items that depend on it, rather than stranding them. See
+	// MissionProjected.WorkNode for why it lives on the dependency and which
+	// nodes set it (gibson#527).
+	DependentsRunOnFailure bool
+
 	// Timeout is the node's own execution bound, from MissionNode.timeout.
 	// Zero means the node declared none, which is NOT the same as "expire
 	// immediately": what a zero means is decided at the dispatch boundary, per
@@ -195,6 +201,10 @@ type WorkSnapshot struct {
 	MaxRetries int
 	Attempts   int
 	Timeout    time.Duration
+	// DependentsRunOnFailure mirrors WorkItem.DependentsRunOnFailure. The
+	// scheduler reads dependency satisfaction off this snapshot, so the flag has
+	// to travel with it (gibson#527).
+	DependentsRunOnFailure bool
 }
 
 // WorkSnapshot returns the current work items in deterministic (ID) order.
@@ -204,18 +214,19 @@ func (w *World) WorkSnapshot() []WorkSnapshot {
 	for q.Next() {
 		wi := q.Get()
 		out = append(out, WorkSnapshot{
-			ID:         wi.ID,
-			MissionID:  wi.MissionID,
-			Kind:       wi.Kind,
-			Target:     wi.Target,
-			Input:      wi.Input,
-			DependsOn:  append([]string(nil), wi.DependsOn...),
-			State:      wi.State,
-			Result:     wi.Result,
-			Err:        wi.Err,
-			MaxRetries: wi.MaxRetries,
-			Attempts:   wi.Attempts,
-			Timeout:    wi.Timeout,
+			ID:                     wi.ID,
+			MissionID:              wi.MissionID,
+			Kind:                   wi.Kind,
+			Target:                 wi.Target,
+			Input:                  wi.Input,
+			DependsOn:              append([]string(nil), wi.DependsOn...),
+			State:                  wi.State,
+			Result:                 wi.Result,
+			Err:                    wi.Err,
+			MaxRetries:             wi.MaxRetries,
+			Attempts:               wi.Attempts,
+			Timeout:                wi.Timeout,
+			DependentsRunOnFailure: wi.DependentsRunOnFailure,
 		})
 	}
 	sort.Slice(out, func(i, j int) bool { return out[i].ID < out[j].ID })

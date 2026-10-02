@@ -8,7 +8,7 @@ package brain
 // quiescent so a tick settles:
 //
 //   - SchedulerSystem dispatches any `pending` WorkItem whose DependsOn are all
-//     `done`. No LLM — this is the deterministic scheduler that honors the CUE
+//     satisfied. No LLM — this is the deterministic scheduler that honors the CUE
 //     graph's deferred ordering.
 //   - MissionCompletionSystem completes a **no-goal** mission mechanically once
 //     no further progress is possible (nothing running, nothing dispatchable).
@@ -29,7 +29,7 @@ func pausedMissions(w *World) map[string]bool {
 // SchedulerSystem dispatches pending work whose dependencies are satisfied.
 func SchedulerSystem(w *World) []Event {
 	work := w.WorkSnapshot()
-	state := workStateIndex(work)
+	idx := workIndex(work)
 	halted := pausedMissions(w)
 	var out []Event
 	for _, wi := range work {
@@ -42,7 +42,7 @@ func SchedulerSystem(w *World) []Event {
 		if wi.MissionID != "" && halted[wi.MissionID] {
 			continue // mission paused/terminal — do not dispatch its work
 		}
-		if depsAllDone(wi.DependsOn, state) {
+		if depsSatisfied(wi.DependsOn, idx) {
 			out = append(out, WorkDispatched{
 				ID:        wi.ID,
 				MissionID: wi.MissionID,
@@ -63,7 +63,7 @@ func SchedulerSystem(w *World) []Event {
 // else MissionCompleted.
 func MissionCompletionSystem(w *World) []Event {
 	work := w.WorkSnapshot()
-	state := workStateIndex(work)
+	idx := workIndex(work)
 	byMission := map[string][]WorkSnapshot{}
 	for _, wi := range work {
 		if wi.MissionID != "" {
@@ -84,7 +84,7 @@ func MissionCompletionSystem(w *World) []Event {
 			case WorkFailed:
 				anyFailed = true
 			case WorkPending:
-				if depsAllDone(wi.DependsOn, state) {
+				if depsSatisfied(wi.DependsOn, idx) {
 					ready = true
 				}
 			}
@@ -101,19 +101,40 @@ func MissionCompletionSystem(w *World) []Event {
 	return out
 }
 
-func workStateIndex(work []WorkSnapshot) map[string]WorkState {
-	idx := make(map[string]WorkState, len(work))
+func workIndex(work []WorkSnapshot) map[string]WorkSnapshot {
+	idx := make(map[string]WorkSnapshot, len(work))
 	for _, wi := range work {
-		idx[wi.ID] = wi.State
+		idx[wi.ID] = wi
 	}
 	return idx
 }
 
-func depsAllDone(deps []string, state map[string]WorkState) bool {
+// depsSatisfied reports whether every dependency of an item has reached a state
+// that lets the item run.
+//
+// `done` satisfies a dependency, as it always has. A dependency that failed
+// satisfies it only when the dependency says so — DependentsRunOnFailure, which
+// a for_each instance sets and an ordinary node does not — and only when that
+// failure is terminal. A failure with retries left is re-armed by RetrySystem in
+// the same tick cycle, so treating it as settled would release the dependents
+// one tick before the retry it is still owed (gibson#527).
+//
+// An unknown dependency id is not satisfied. The zero WorkSnapshot has no state,
+// so a dependency on work that does not exist blocks rather than passing, which
+// is the fail-closed reading.
+func depsSatisfied(deps []string, idx map[string]WorkSnapshot) bool {
 	for _, d := range deps {
-		if state[d] != WorkDone {
+		dep, ok := idx[d]
+		if !ok {
 			return false
 		}
+		if dep.State == WorkDone {
+			continue
+		}
+		if dep.State == WorkFailed && dep.DependentsRunOnFailure && dep.Attempts > dep.MaxRetries {
+			continue
+		}
+		return false
 	}
 	return true
 }
