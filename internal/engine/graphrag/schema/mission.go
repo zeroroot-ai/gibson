@@ -31,21 +31,6 @@ const (
 	MissionStatusFailed    MissionStatus = "failed"
 )
 
-// String returns the string representation of MissionStatus
-func (s MissionStatus) String() string {
-	return string(s)
-}
-
-// Validate checks if the MissionStatus is valid
-func (s MissionStatus) Validate() error {
-	switch s {
-	case MissionStatusPending, MissionStatusRunning, MissionStatusCompleted, MissionStatusFailed:
-		return nil
-	default:
-		return fmt.Errorf("invalid mission status: %s", s)
-	}
-}
-
 // MissionNodeStatus represents the execution status of a mission node
 type MissionNodeStatus string
 
@@ -144,64 +129,6 @@ type Mission struct {
 	StartedAt   *time.Time    `json:"started_at,omitempty"`   // When execution started
 	CompletedAt *time.Time    `json:"completed_at,omitempty"` // When execution completed
 	YAMLSource  string        `json:"yaml_source"`            // Original YAML for reconstruction
-}
-
-// Validate checks that all required fields are set correctly.
-// Note: target_ref is optional to support orchestration/discovery missions without specific targets.
-func (m *Mission) Validate() error {
-	if err := m.ID.Validate(); err != nil {
-		return fmt.Errorf("invalid mission ID: %w", err)
-	}
-	if m.Name == "" {
-		return fmt.Errorf("mission name is required")
-	}
-	// target_ref is optional - some missions (discovery, orchestration) don't target a specific system
-	if err := m.Status.Validate(); err != nil {
-		return err
-	}
-	if m.YAMLSource == "" {
-		return fmt.Errorf("mission yaml_source is required")
-	}
-	return nil
-}
-
-// WithStatus sets the status and returns the mission for method chaining.
-func (m *Mission) WithStatus(status MissionStatus) *Mission {
-	m.Status = status
-	return m
-}
-
-// WithStartedAt sets the started_at timestamp and returns the mission for method chaining.
-func (m *Mission) WithStartedAt(t time.Time) *Mission {
-	m.StartedAt = &t
-	return m
-}
-
-// WithCompletedAt sets the completed_at timestamp and returns the mission for method chaining.
-func (m *Mission) WithCompletedAt(t time.Time) *Mission {
-	m.CompletedAt = &t
-	return m
-}
-
-// MarkStarted sets status to running and records the start time.
-func (m *Mission) MarkStarted() {
-	now := time.Now()
-	m.Status = MissionStatusRunning
-	m.StartedAt = &now
-}
-
-// MarkCompleted sets status to completed and records the completion time.
-func (m *Mission) MarkCompleted() {
-	now := time.Now()
-	m.Status = MissionStatusCompleted
-	m.CompletedAt = &now
-}
-
-// MarkFailed sets status to failed and records the completion time.
-func (m *Mission) MarkFailed() {
-	now := time.Now()
-	m.Status = MissionStatusFailed
-	m.CompletedAt = &now
 }
 
 // MissionNode represents a task node in a mission.
@@ -305,31 +232,6 @@ func (n *MissionNode) Validate() error {
 	}
 
 	return nil
-}
-
-// WithStatus sets the status and updates the timestamp.
-func (n *MissionNode) WithStatus(status MissionNodeStatus) *MissionNode {
-	n.Status = status
-	n.UpdatedAt = time.Now()
-	return n
-}
-
-// WithTimeout sets the timeout duration.
-func (n *MissionNode) WithTimeout(timeout time.Duration) *MissionNode {
-	n.Timeout = timeout
-	return n
-}
-
-// WithRetryPolicy sets the retry policy.
-func (n *MissionNode) WithRetryPolicy(policy *RetryPolicy) *MissionNode {
-	n.RetryPolicy = policy
-	return n
-}
-
-// WithTaskConfig sets the task configuration.
-func (n *MissionNode) WithTaskConfig(config map[string]any) *MissionNode {
-	n.TaskConfig = config
-	return n
 }
 
 // MarkDynamic marks the node as dynamically spawned.
