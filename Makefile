@@ -2,7 +2,7 @@
 # Stage 1 - Foundation
 
 .PHONY: check-no-tracked-binaries
-.PHONY: all build bin gibson-migrate sandbox-eviction-handler test test-coverage test-race lint lint-all lint-deadcode lint-deadcode-baseline clean install help proto proto-deps proto-clean check-authz check-coverage test-daemon-identity-roundtrip check-no-tenant-id check-fga-headers check-oss-boundary check-airgap-build check-rpc-test-walker coverage-profile check-coverage-floor check-diff-coverage check-coverage-gates check-critical-paths check-ci-lane-parity check-build-tags check-first-party-tags check-crd-field-consumers check-bringup-diagnostics check-comment-paths check-operator-rbac-scope check-rules-enforced check-queue-gate vet-e2e vet-tags test-integration test-openbao test-merge-queue test-setec-roundtrip authz-registry tool-manifests tool-catalog-capture
+.PHONY: all build bin gibson-migrate sandbox-eviction-handler test test-coverage test-race lint lint-all lint-deadcode lint-deadcode-baseline clean install help proto proto-deps proto-clean check-authz check-coverage test-daemon-identity-roundtrip check-no-tenant-id check-fga-headers check-oss-boundary check-airgap-build check-rpc-test-walker coverage-profile check-coverage-floor check-diff-coverage check-coverage-gates check-critical-paths check-ci-lane-parity check-build-tags check-first-party-tags check-crd-field-consumers check-config-field-readers check-bringup-diagnostics check-comment-paths check-operator-rbac-scope check-rules-enforced check-queue-gate vet-e2e vet-tags test-integration test-openbao test-merge-queue test-setec-roundtrip authz-registry tool-manifests tool-catalog-capture
 
 # Go parameters
 GOCMD=go
@@ -565,6 +565,13 @@ check-first-party-tags:
 check-crd-field-consumers:
 	@bash scripts/__tests__/check-crd-field-consumers.test.sh
 	@bash scripts/check-crd-field-consumers.sh
+# check-config-field-readers — every config key the loader fills has a reader
+# outside internal/infra/config (gibson#501, ADR-0094 layer 1). Reads come
+# from ast-checks/cmd/unwired at the go.mod pin.
+.PHONY: check-config-field-readers
+check-config-field-readers:
+	@bash scripts/__tests__/check-config-field-readers.test.sh
+	@bash scripts/check-config-field-readers.sh
 
 # check-queue-gate: `queue-gate` is the ONE context the merge queue requires
 # from go-ci.yml, so every other job in that file is only as blocking as its

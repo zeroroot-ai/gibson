@@ -15,7 +15,6 @@ import (
 func TestActivityLoggingConfig_Defaults(t *testing.T) {
 	cfg := DefaultConfig()
 
-	assert.True(t, cfg.ActivityLogging.Enabled, "Activity logging should be enabled by default")
 	assert.Equal(t, "normal", cfg.ActivityLogging.Level, "Default level should be normal")
 	assert.Equal(t, 500, cfg.ActivityLogging.MaxContentLength, "Default max content length should be 500")
 	assert.Equal(t, "stdout", cfg.ActivityLogging.Output, "Default output should be stdout")
@@ -25,13 +24,11 @@ func TestActivityLoggingConfig_Defaults(t *testing.T) {
 
 func TestActivityLoggingConfig_EnvironmentOverrides(t *testing.T) {
 	// Save original env vars
-	origEnabled := os.Getenv("GIBSON_ACTIVITY_LOG_ENABLED")
 	origLevel := os.Getenv("GIBSON_ACTIVITY_LOG_LEVEL")
 	origMaxContent := os.Getenv("GIBSON_ACTIVITY_LOG_MAX_CONTENT")
 	origOutput := os.Getenv("GIBSON_ACTIVITY_LOG_OUTPUT")
 	origFile := os.Getenv("GIBSON_ACTIVITY_LOG_FILE")
 	defer func() {
-		os.Setenv("GIBSON_ACTIVITY_LOG_ENABLED", origEnabled)
 		os.Setenv("GIBSON_ACTIVITY_LOG_LEVEL", origLevel)
 		os.Setenv("GIBSON_ACTIVITY_LOG_MAX_CONTENT", origMaxContent)
 		os.Setenv("GIBSON_ACTIVITY_LOG_OUTPUT", origOutput)
@@ -39,14 +36,12 @@ func TestActivityLoggingConfig_EnvironmentOverrides(t *testing.T) {
 	}()
 
 	// Test with environment variables set
-	os.Setenv("GIBSON_ACTIVITY_LOG_ENABLED", "false")
 	os.Setenv("GIBSON_ACTIVITY_LOG_LEVEL", "debug")
 	os.Setenv("GIBSON_ACTIVITY_LOG_MAX_CONTENT", "1000")
 	os.Setenv("GIBSON_ACTIVITY_LOG_OUTPUT", "file")
 	os.Setenv("GIBSON_ACTIVITY_LOG_FILE", "/tmp/activity.log")
 
 	cfg := ActivityLoggingConfig{
-		Enabled:          true,
 		Level:            "normal",
 		MaxContentLength: 500,
 		Output:           "stdout",
@@ -56,7 +51,6 @@ func TestActivityLoggingConfig_EnvironmentOverrides(t *testing.T) {
 
 	cfg.ApplyEnvironmentOverrides()
 
-	assert.False(t, cfg.Enabled, "Enabled should be overridden by env var")
 	assert.Equal(t, "debug", cfg.Level, "Level should be overridden by env var")
 	assert.Equal(t, 1000, cfg.MaxContentLength, "MaxContentLength should be overridden by env var")
 	assert.Equal(t, "file", cfg.Output, "Output should be overridden by env var")
@@ -65,13 +59,11 @@ func TestActivityLoggingConfig_EnvironmentOverrides(t *testing.T) {
 
 func TestActivityLoggingConfig_EnvironmentOverrides_EmptyEnv(t *testing.T) {
 	// Save original env vars
-	origEnabled := os.Getenv("GIBSON_ACTIVITY_LOG_ENABLED")
 	origLevel := os.Getenv("GIBSON_ACTIVITY_LOG_LEVEL")
 	origMaxContent := os.Getenv("GIBSON_ACTIVITY_LOG_MAX_CONTENT")
 	origOutput := os.Getenv("GIBSON_ACTIVITY_LOG_OUTPUT")
 	origFile := os.Getenv("GIBSON_ACTIVITY_LOG_FILE")
 	defer func() {
-		os.Setenv("GIBSON_ACTIVITY_LOG_ENABLED", origEnabled)
 		os.Setenv("GIBSON_ACTIVITY_LOG_LEVEL", origLevel)
 		os.Setenv("GIBSON_ACTIVITY_LOG_MAX_CONTENT", origMaxContent)
 		os.Setenv("GIBSON_ACTIVITY_LOG_OUTPUT", origOutput)
@@ -86,7 +78,6 @@ func TestActivityLoggingConfig_EnvironmentOverrides_EmptyEnv(t *testing.T) {
 	os.Unsetenv("GIBSON_ACTIVITY_LOG_FILE")
 
 	cfg := ActivityLoggingConfig{
-		Enabled:          true,
 		Level:            "normal",
 		MaxContentLength: 500,
 		Output:           "stdout",
@@ -96,7 +87,6 @@ func TestActivityLoggingConfig_EnvironmentOverrides_EmptyEnv(t *testing.T) {
 
 	cfg.ApplyEnvironmentOverrides()
 
-	assert.True(t, cfg.Enabled, "Enabled should not change when env var is empty")
 	assert.Equal(t, "normal", cfg.Level, "Level should not change when env var is empty")
 	assert.Equal(t, 500, cfg.MaxContentLength, "MaxContentLength should not change when env var is empty")
 	assert.Equal(t, "stdout", cfg.Output, "Output should not change when env var is empty")
@@ -105,19 +95,15 @@ func TestActivityLoggingConfig_EnvironmentOverrides_EmptyEnv(t *testing.T) {
 
 func TestActivityLoggingConfig_EnvironmentOverrides_InvalidValues(t *testing.T) {
 	// Save original env vars
-	origEnabled := os.Getenv("GIBSON_ACTIVITY_LOG_ENABLED")
 	origMaxContent := os.Getenv("GIBSON_ACTIVITY_LOG_MAX_CONTENT")
 	defer func() {
-		os.Setenv("GIBSON_ACTIVITY_LOG_ENABLED", origEnabled)
 		os.Setenv("GIBSON_ACTIVITY_LOG_MAX_CONTENT", origMaxContent)
 	}()
 
 	// Test with invalid environment variables
-	os.Setenv("GIBSON_ACTIVITY_LOG_ENABLED", "invalid")
 	os.Setenv("GIBSON_ACTIVITY_LOG_MAX_CONTENT", "notanumber")
 
 	cfg := ActivityLoggingConfig{
-		Enabled:          true,
 		Level:            "normal",
 		MaxContentLength: 500,
 		Output:           "stdout",
@@ -126,7 +112,6 @@ func TestActivityLoggingConfig_EnvironmentOverrides_InvalidValues(t *testing.T) 
 	cfg.ApplyEnvironmentOverrides()
 
 	// Invalid values should be ignored, original values should remain
-	assert.True(t, cfg.Enabled, "Enabled should not change with invalid env var")
 	assert.Equal(t, 500, cfg.MaxContentLength, "MaxContentLength should not change with invalid env var")
 }
 
@@ -324,7 +309,6 @@ activity_logging:
 	require.NoError(t, err)
 
 	// Verify activity logging config was loaded correctly
-	assert.True(t, cfg.ActivityLogging.Enabled)
 	assert.Equal(t, "verbose", cfg.ActivityLogging.Level)
 	assert.Equal(t, 1000, cfg.ActivityLogging.MaxContentLength)
 	assert.Equal(t, "both", cfg.ActivityLogging.Output)
@@ -362,7 +346,6 @@ security:
 	require.NoError(t, err)
 
 	// Verify activity logging config has defaults
-	assert.True(t, cfg.ActivityLogging.Enabled)
 	assert.Equal(t, "normal", cfg.ActivityLogging.Level)
 	assert.Equal(t, 500, cfg.ActivityLogging.MaxContentLength)
 	assert.Equal(t, "stdout", cfg.ActivityLogging.Output)

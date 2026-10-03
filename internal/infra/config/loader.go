@@ -281,38 +281,12 @@ func applyInterpolation(cfg *Config, interpolated map[string]interface{}) error 
 		if homeDir, ok := core["home_dir"].(string); ok {
 			cfg.Core.HomeDir = interpolateString(homeDir)
 		}
-		if dataDir, ok := core["data_dir"].(string); ok {
-			cfg.Core.DataDir = interpolateString(dataDir)
-		}
-		if cacheDir, ok := core["cache_dir"].(string); ok {
-			cfg.Core.CacheDir = interpolateString(cacheDir)
-		}
-	}
-
-	// Apply Security config interpolation
-	if security, ok := interpolated["security"].(map[string]interface{}); ok {
-		if algo, ok := security["encryption_algorithm"].(string); ok {
-			cfg.Security.EncryptionAlgorithm = interpolateString(algo)
-		}
-		if kd, ok := security["key_derivation"].(string); ok {
-			cfg.Security.KeyDerivation = interpolateString(kd)
-		}
 	}
 
 	// Apply Logging config interpolation
 	if logging, ok := interpolated["logging"].(map[string]interface{}); ok {
 		if level, ok := logging["level"].(string); ok {
 			cfg.Logging.Level = interpolateString(level)
-		}
-		if format, ok := logging["format"].(string); ok {
-			cfg.Logging.Format = interpolateString(format)
-		}
-	}
-
-	// Apply Tracing config interpolation
-	if tracing, ok := interpolated["tracing"].(map[string]interface{}); ok {
-		if endpoint, ok := tracing["endpoint"].(string); ok {
-			cfg.Tracing.Endpoint = interpolateString(endpoint)
 		}
 	}
 
@@ -358,9 +332,6 @@ func applyInterpolation(cfg *Config, interpolated map[string]interface{}) error 
 		if namespace, ok := registry["namespace"].(string); ok {
 			cfg.Registry.Namespace = interpolateString(namespace)
 		}
-		if ttl, ok := registry["ttl"].(string); ok {
-			cfg.Registry.TTL = interpolateString(ttl)
-		}
 	}
 
 	// Apply GraphRAG/Neo4j config interpolation (tenant_mode and shared_cluster_uri only;
@@ -381,18 +352,6 @@ func applyInterpolation(cfg *Config, interpolated map[string]interface{}) error 
 	if redis, ok := interpolated["redis"].(map[string]interface{}); ok {
 		if url, ok := redis["url"].(string); ok {
 			cfg.Redis.URL = interpolateString(url)
-		}
-		if password, ok := redis["password"].(string); ok {
-			cfg.Redis.Password = interpolateString(password)
-		}
-		if tlsCertFile, ok := redis["tls_cert_file"].(string); ok {
-			cfg.Redis.TLSCertFile = interpolateString(tlsCertFile)
-		}
-		if tlsKeyFile, ok := redis["tls_key_file"].(string); ok {
-			cfg.Redis.TLSKeyFile = interpolateString(tlsKeyFile)
-		}
-		if tlsCAFile, ok := redis["tls_ca_file"].(string); ok {
-			cfg.Redis.TLSCAFile = interpolateString(tlsCAFile)
 		}
 		if sentinelMaster, ok := redis["sentinel_master"].(string); ok {
 			cfg.Redis.SentinelMaster = interpolateString(sentinelMaster)
@@ -450,17 +409,8 @@ func applyInterpolation(cfg *Config, interpolated map[string]interface{}) error 
 		if host, ok := tp["host"].(string); ok {
 			cfg.TenantPostgres.Host = interpolateString(host)
 		}
-		if adminDatabase, ok := tp["admin_database"].(string); ok {
-			cfg.TenantPostgres.AdminDatabase = interpolateString(adminDatabase)
-		}
 		if adminUsername, ok := tp["admin_username"].(string); ok {
 			cfg.TenantPostgres.AdminUsername = interpolateString(adminUsername)
-		}
-		if adminPassword, ok := tp["admin_password"].(string); ok {
-			cfg.TenantPostgres.AdminPassword = interpolateString(adminPassword)
-		}
-		if sslMode, ok := tp["ssl_mode"].(string); ok {
-			cfg.TenantPostgres.SSLMode = interpolateString(sslMode)
 		}
 	}
 
@@ -475,9 +425,6 @@ func applyInterpolation(cfg *Config, interpolated map[string]interface{}) error 
 		if encryption, ok := checkpoint["encryption"].(map[string]interface{}); ok {
 			if keyProvider, ok := encryption["key_provider"].(string); ok {
 				cfg.Checkpoint.Encryption.KeyProvider = interpolateString(keyProvider)
-			}
-			if keySecretName, ok := encryption["key_secret_name"].(string); ok {
-				cfg.Checkpoint.Encryption.KeySecretName = interpolateString(keySecretName)
 			}
 		}
 		if retention, ok := checkpoint["retention"].(map[string]interface{}); ok {

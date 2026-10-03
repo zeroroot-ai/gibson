@@ -15,8 +15,6 @@ func TestDefaultCheckpointConfig(t *testing.T) {
 	cfg := DefaultCheckpointConfig()
 	require.NotNil(t, cfg)
 
-	assert.True(t, cfg.Enabled)
-	assert.True(t, cfg.AutoCheckpoint)
 	assert.Equal(t, "gibson:checkpoint", cfg.KeyPrefix)
 	assert.Equal(t, "msgpack", cfg.Format)
 	assert.True(t, cfg.Compression.Enabled)
@@ -28,7 +26,6 @@ func TestDefaultCheckpointConfig(t *testing.T) {
 	assert.Equal(t, 100, cfg.Retention.MaxCheckpoints)
 	assert.Equal(t, int64(104857600), cfg.MaxCheckpointSize)
 	assert.Equal(t, int64(1048576), cfg.LargeObjectThreshold)
-	assert.False(t, cfg.RequireCheckpoints)
 	assert.Equal(t, 24*time.Hour, cfg.ApprovalTimeout)
 }
 

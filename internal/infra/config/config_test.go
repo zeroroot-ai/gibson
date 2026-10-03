@@ -19,15 +19,9 @@ func TestDefaultConfig(t *testing.T) {
 	// Test Core defaults
 	assert.NotEmpty(t, cfg.Core.HomeDir, "HomeDir should not be empty")
 	assert.Contains(t, cfg.Core.HomeDir, ".gibson", "HomeDir should contain .gibson")
-	assert.Equal(t, filepath.Join(cfg.Core.HomeDir, "data"), cfg.Core.DataDir)
-	assert.Equal(t, filepath.Join(cfg.Core.HomeDir, "cache"), cfg.Core.CacheDir)
-	assert.Equal(t, 10, cfg.Core.ParallelLimit)
-	assert.Equal(t, 5*time.Minute, cfg.Core.Timeout)
-	assert.False(t, cfg.Core.Debug)
 
 	// Test Redis defaults
 	assert.Equal(t, "redis://localhost:6379", cfg.Redis.URL)
-	assert.Equal(t, "", cfg.Redis.Password)
 	assert.Equal(t, 0, cfg.Redis.Database)
 	assert.Equal(t, 10, cfg.Redis.PoolSize)
 	assert.Equal(t, 5*time.Second, cfg.Redis.ConnectTimeout)
@@ -35,21 +29,11 @@ func TestDefaultConfig(t *testing.T) {
 	assert.Equal(t, 3*time.Second, cfg.Redis.WriteTimeout)
 	assert.Equal(t, 3, cfg.Redis.MaxRetries)
 	assert.False(t, cfg.Redis.ClusterMode)
-	assert.False(t, cfg.Redis.TLSEnabled)
 
 	// Test Security defaults
-	assert.Equal(t, "aes-256-gcm", cfg.Security.EncryptionAlgorithm)
-	assert.Equal(t, "scrypt", cfg.Security.KeyDerivation)
-	assert.True(t, cfg.Security.SSLValidation)
-	assert.True(t, cfg.Security.AuditLogging)
 
 	// Test Logging defaults
 	assert.Equal(t, "info", cfg.Logging.Level)
-	assert.Equal(t, "json", cfg.Logging.Format)
-
-	// Test Tracing defaults
-	assert.False(t, cfg.Tracing.Enabled)
-	assert.Empty(t, cfg.Tracing.Endpoint)
 
 	// Test Metrics defaults
 	assert.False(t, cfg.Metrics.Enabled)
@@ -118,26 +102,12 @@ activity_logging:
 
 	// Verify loaded values
 	assert.Equal(t, "/tmp/gibson-test", cfg.Core.HomeDir)
-	assert.Equal(t, "/tmp/gibson-test/data", cfg.Core.DataDir)
-	assert.Equal(t, "/tmp/gibson-test/cache", cfg.Core.CacheDir)
-	assert.Equal(t, 20, cfg.Core.ParallelLimit)
-	assert.Equal(t, 10*time.Minute, cfg.Core.Timeout)
-	assert.True(t, cfg.Core.Debug)
 
 	assert.Equal(t, "redis://localhost:6379", cfg.Redis.URL)
 	assert.Equal(t, 20, cfg.Redis.PoolSize)
 	assert.Equal(t, 5*time.Second, cfg.Redis.ConnectTimeout)
 
-	assert.Equal(t, "aes-256-gcm", cfg.Security.EncryptionAlgorithm)
-	assert.Equal(t, "scrypt", cfg.Security.KeyDerivation)
-	assert.True(t, cfg.Security.SSLValidation)
-	assert.False(t, cfg.Security.AuditLogging)
-
 	assert.Equal(t, "debug", cfg.Logging.Level)
-	assert.Equal(t, "text", cfg.Logging.Format)
-
-	assert.True(t, cfg.Tracing.Enabled)
-	assert.Equal(t, "http://localhost:4318", cfg.Tracing.Endpoint)
 
 	assert.True(t, cfg.Metrics.Enabled)
 	assert.Equal(t, 8080, cfg.Metrics.Port)
@@ -206,8 +176,6 @@ activity_logging:
 
 	// Verify environment variable interpolation
 	assert.Equal(t, "/custom/gibson", cfg.Core.HomeDir)
-	assert.Equal(t, "/custom/gibson/data", cfg.Core.DataDir)
-	assert.Equal(t, "/custom/gibson/cache", cfg.Core.CacheDir)
 }
 
 func TestLoadWithMissingEnvironmentVariables(t *testing.T) {
@@ -272,9 +240,7 @@ func TestLoadWithDefaults_FileNotFound(t *testing.T) {
 
 	// Should return default configuration
 	defaultCfg := DefaultConfig()
-	assert.Equal(t, defaultCfg.Core.ParallelLimit, cfg.Core.ParallelLimit)
 	assert.Equal(t, defaultCfg.Redis.PoolSize, cfg.Redis.PoolSize)
-	assert.Equal(t, defaultCfg.Security.EncryptionAlgorithm, cfg.Security.EncryptionAlgorithm)
 }
 
 func TestLoadWithDefaults_FileExists(t *testing.T) {
@@ -318,9 +284,7 @@ security:
 	require.NotNil(t, cfg)
 
 	// Should load from file, not defaults
-	assert.Equal(t, 50, cfg.Core.ParallelLimit)
 	assert.Equal(t, 50, cfg.Redis.PoolSize)
-	assert.True(t, cfg.Core.Debug)
 }
 
 func TestValidation_Success(t *testing.T) {
@@ -337,53 +301,6 @@ func TestValidation_NilConfig(t *testing.T) {
 	err := validator.Validate(nil)
 	require.Error(t, err)
 	assert.Contains(t, err.Error(), "configuration is nil")
-}
-
-func TestValidation_ParallelLimitTooLow(t *testing.T) {
-	validator := NewValidator()
-	cfg := DefaultConfig()
-	cfg.Core.ParallelLimit = 0
-
-	err := validator.Validate(cfg)
-	require.Error(t, err)
-	assert.Contains(t, err.Error(), "parallel_limit")
-	assert.Contains(t, err.Error(), "must be at least 1")
-}
-
-func TestValidation_ParallelLimitTooHigh(t *testing.T) {
-	validator := NewValidator()
-	cfg := DefaultConfig()
-	cfg.Core.ParallelLimit = 101
-
-	err := validator.Validate(cfg)
-	require.Error(t, err)
-	assert.Contains(t, err.Error(), "parallel_limit")
-	assert.Contains(t, err.Error(), "must be at most 100")
-}
-
-func TestValidation_CoreTimeoutTooLow(t *testing.T) {
-	validator := NewValidator()
-	cfg := DefaultConfig()
-	cfg.Core.Timeout = 500 * time.Millisecond
-
-	err := validator.Validate(cfg)
-	require.Error(t, err)
-	assert.Contains(t, err.Error(), "timeout")
-	assert.Contains(t, err.Error(), "must be at least 1s")
-}
-
-func TestValidation_MultipleErrors(t *testing.T) {
-	validator := NewValidator()
-	cfg := DefaultConfig()
-	cfg.Core.ParallelLimit = 0
-	cfg.Core.Timeout = 0
-
-	err := validator.Validate(cfg)
-	require.Error(t, err)
-
-	// Should contain all validation errors
-	assert.Contains(t, err.Error(), "parallel_limit")
-	assert.Contains(t, err.Error(), "timeout")
 }
 
 func TestLoadInvalidYAML(t *testing.T) {
@@ -510,18 +427,6 @@ func TestFormatFieldPath(t *testing.T) {
 	}
 }
 
-func TestFormatValidationError(t *testing.T) {
-	validator := NewValidator()
-	cfg := DefaultConfig()
-
-	// Test URL validation error
-	cfg.Core.ParallelLimit = -1
-
-	err := validator.Validate(cfg)
-	require.Error(t, err)
-	assert.Contains(t, err.Error(), "parallel_limit")
-}
-
 func TestInterpolateEnvVars(t *testing.T) {
 	os.Setenv("TEST_VAR", "test_value")
 	defer os.Unsetenv("TEST_VAR")
@@ -637,9 +542,8 @@ security:
 	// Should load the file successfully
 	validator := NewValidator()
 	loader := NewConfigLoader(validator)
-	cfg, err := loader.LoadWithDefaults(configPath)
+	_, err = loader.LoadWithDefaults(configPath)
 	require.NoError(t, err)
-	assert.Equal(t, 10, cfg.Core.ParallelLimit)
 }
 
 func TestLoad_UnmarshalError(t *testing.T) {
@@ -652,7 +556,6 @@ core:
   home_dir: /tmp/test
   data_dir: /tmp/test/data
   cache_dir: /tmp/test/cache
-  parallel_limit: "not a number"
   timeout: 5m
   debug: false
 
@@ -660,7 +563,7 @@ redis:
   url: redis://localhost:6379
   password: ""
   database: 0
-  pool_size: 10
+  pool_size: "not a number"
   connect_timeout: 5s
   read_timeout: 3s
   write_timeout: 3s
@@ -691,7 +594,6 @@ core:
   home_dir: /tmp/test
   data_dir: /tmp/test/data
   cache_dir: /tmp/test/cache
-  parallel_limit: "invalid"
   timeout: 5m
   debug: false
 
@@ -699,7 +601,7 @@ redis:
   url: redis://localhost:6379
   password: ""
   database: 0
-  pool_size: 10
+  pool_size: "invalid"
   connect_timeout: 5s
   read_timeout: 3s
   write_timeout: 3s

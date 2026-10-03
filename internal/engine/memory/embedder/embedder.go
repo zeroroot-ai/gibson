@@ -45,27 +45,3 @@ type EmbedderConfig struct {
 	// Timeout is the request timeout in seconds.
 	Timeout int `yaml:"timeout" json:"timeout" mapstructure:"timeout"`
 }
-
-// Validate checks if the EmbedderConfig is valid.
-func (c *EmbedderConfig) Validate() error {
-	if c.MaxRetries < 0 {
-		return types.NewError(ErrCodeInvalidConfig, "max_retries must be non-negative")
-	}
-
-	if c.Timeout < 0 {
-		return types.NewError(ErrCodeInvalidConfig, "timeout must be non-negative")
-	}
-
-	return nil
-}
-
-// DefaultEmbedderConfig returns the default embedder transport configuration.
-// Provider is intentionally empty: there is no bundled embedder, so vector
-// recall is gated until a BYO embedding provider is configured (ADR-0059).
-func DefaultEmbedderConfig() EmbedderConfig {
-	return EmbedderConfig{
-		Provider:   "",
-		MaxRetries: 3,
-		Timeout:    30,
-	}
-}

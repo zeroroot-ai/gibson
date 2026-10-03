@@ -21,7 +21,6 @@ func minimalCfg() *config.Config {
 	return &config.Config{
 		Registry: config.RegistryConfig{
 			Namespace: "test",
-			TTL:       "30s",
 		},
 		Callback: config.CallbackConfig{
 			Enabled:          false,
@@ -32,8 +31,7 @@ func minimalCfg() *config.Config {
 			GRPCAddress: "localhost:0",
 		},
 		Logging: config.LoggingConfig{
-			Level:  "info",
-			Format: "json",
+			Level: "info",
 		},
 	}
 }

@@ -22,11 +22,6 @@ type SPIFFEConfig struct {
 	// Default: "/run/spire/sockets/agent.sock"
 	WorkloadAPISocket string `mapstructure:"workload_api_socket" yaml:"workload_api_socket"`
 
-	// InfrastructureIDs lists the SPIFFE IDs that bypass OpenFGA authorization.
-	// These are platform services (dashboard, daemon) that need system-wide access.
-	// Default: ["spiffe://zeroroot.ai/platform/dashboard", "spiffe://zeroroot.ai/platform/daemon"]
-	InfrastructureIDs []string `mapstructure:"infrastructure_ids" yaml:"infrastructure_ids,omitempty"`
-
 	// EnvoyID is the expected SPIFFE ID of the Envoy sidecar that presents its
 	// SVID on the mTLS connection to the daemon's gRPC listener.
 	// When set, the daemon pins mTLS to accept this SVID.
@@ -69,12 +64,6 @@ type AuthConfig struct {
 	// Supports dot notation for nested claims: "custom.tenant.id"
 	// Default: "tenant_id"
 	TenantClaim string `mapstructure:"tenant_claim" yaml:"tenant_claim"`
-
-	// DefaultTenant is the fallback tenant ID when no tenant claim is present.
-	// Used in "enterprise" mode for single-tenant deployments.
-	// In "saas" mode, missing tenant claims result in authentication failure.
-	// Optional - no default value
-	DefaultTenant string `mapstructure:"default_tenant" yaml:"default_tenant"`
 
 	// Enabled is deprecated. Use Mode instead.
 	// Ignored when Mode is set. Removed in a future release.

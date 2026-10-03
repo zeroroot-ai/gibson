@@ -16,7 +16,6 @@ func TestRedisConfig_Defaults(t *testing.T) {
 	cfg := DefaultConfig()
 
 	assert.Equal(t, "redis://localhost:6379", cfg.Redis.URL)
-	assert.Equal(t, "", cfg.Redis.Password)
 	assert.Equal(t, 0, cfg.Redis.Database)
 	assert.Equal(t, 10, cfg.Redis.PoolSize)
 	assert.Equal(t, 5*time.Second, cfg.Redis.ConnectTimeout)
@@ -27,10 +26,6 @@ func TestRedisConfig_Defaults(t *testing.T) {
 	assert.Empty(t, cfg.Redis.ClusterAddrs)
 	assert.Equal(t, "", cfg.Redis.SentinelMaster)
 	assert.Empty(t, cfg.Redis.SentinelAddrs)
-	assert.False(t, cfg.Redis.TLSEnabled)
-	assert.Equal(t, "", cfg.Redis.TLSCertFile)
-	assert.Equal(t, "", cfg.Redis.TLSKeyFile)
-	assert.Equal(t, "", cfg.Redis.TLSCAFile)
 }
 
 func TestRedisConfig_ApplyDefaults(t *testing.T) {
@@ -185,10 +180,6 @@ activity_logging:
 
 	// Verify environment variable interpolation
 	assert.Equal(t, "redis://prod:6379", cfg.Redis.URL, "URL should be interpolated")
-	assert.Equal(t, "secret123", cfg.Redis.Password, "Password should be interpolated")
-	assert.Equal(t, "/path/to/cert.pem", cfg.Redis.TLSCertFile, "TLS cert file should be interpolated")
-	assert.Equal(t, "/path/to/key.pem", cfg.Redis.TLSKeyFile)
-	assert.Equal(t, "/path/to/ca.pem", cfg.Redis.TLSCAFile)
 
 	// Verify other fields
 	assert.Equal(t, 1, cfg.Redis.Database)
@@ -197,7 +188,6 @@ activity_logging:
 	assert.Equal(t, 5*time.Second, cfg.Redis.ReadTimeout)
 	assert.Equal(t, 5*time.Second, cfg.Redis.WriteTimeout)
 	assert.Equal(t, 5, cfg.Redis.MaxRetries)
-	assert.True(t, cfg.Redis.TLSEnabled)
 }
 
 func TestRedisConfig_ClusterModeInterpolation(t *testing.T) {
@@ -268,7 +258,6 @@ activity_logging:
 	assert.Equal(t, "node1.example.com:6379", cfg.Redis.ClusterAddrs[0], "First cluster address should be interpolated")
 	assert.Equal(t, "node2.example.com:6379", cfg.Redis.ClusterAddrs[1], "Second cluster address should be interpolated")
 	assert.Equal(t, "node3.example.com:6379", cfg.Redis.ClusterAddrs[2])
-	assert.Equal(t, "clusterpass", cfg.Redis.Password)
 	assert.Equal(t, 30, cfg.Redis.PoolSize)
 }
 
@@ -337,7 +326,6 @@ activity_logging:
 	assert.Len(t, cfg.Redis.SentinelAddrs, 2)
 	assert.Equal(t, "sentinel1.example.com:26379", cfg.Redis.SentinelAddrs[0], "First sentinel address should be interpolated")
 	assert.Equal(t, "sentinel2.example.com:26379", cfg.Redis.SentinelAddrs[1])
-	assert.Equal(t, "sentinelpass", cfg.Redis.Password)
 }
 
 func TestRedisConfig_DeprecationWarning(t *testing.T) {
