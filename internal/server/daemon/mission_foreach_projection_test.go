@@ -181,10 +181,11 @@ func TestForEach_JoinWaitsForEveryInstance(t *testing.T) {
 	}
 }
 
-// The concurrency bound is built on DependsOn, because nothing in the brain
-// honours MaxConcurrency (gibson#536). With a limit of 2 and five targets,
-// instance k waits on instance k-2, so at most two are ever runnable.
-func TestForEach_MaxConcurrencyChainsInstances(t *testing.T) {
+// max_concurrency is the scheduler's ceiling, not a dependency (gibson#538):
+// every instance carries the for_each as its Group and the limit as its Limit,
+// and no instance waits on another. With a limit of 2 and five targets the
+// brain dispatches at most two at once (TestScheduler_AGroupNeverExceedsItsLimit).
+func TestForEach_MaxConcurrencyIsASchedulerCeiling(t *testing.T) {
 	var targets []forEachTarget
 	for i := 1; i <= 5; i++ {
 		id := fmt.Sprintf("%08d-0000-0000-0000-000000000000", i)
@@ -196,51 +197,38 @@ func TestForEach_MaxConcurrencyChainsInstances(t *testing.T) {
 		t.Fatalf("project: %v", err)
 	}
 
-	deps := map[string][]string{}
+	instances := 0
 	for _, n := range proj.Nodes {
-		if strings.HasPrefix(n.ID, "scan#") {
-			deps[n.ID] = n.DependsOn
+		if !strings.HasPrefix(n.ID, "scan#") {
+			if n.Group != "" || n.Limit != 0 {
+				t.Errorf("%q is outside the fan-out and must carry no ceiling: group=%q limit=%d", n.ID, n.Group, n.Limit)
+			}
+			continue
 		}
-	}
-	if len(deps) != 5 {
-		t.Fatalf("want 5 instances, got %d", len(deps))
-	}
-
-	ids := make([]string, 0, len(deps))
-	for id := range deps {
-		ids = append(ids, id)
-	}
-	sort.Strings(ids)
-
-	// The first `limit` instances are unchained; every later one waits on the
-	// instance `limit` places ahead.
-	for k, id := range ids {
-		chained := false
-		for _, d := range deps[id] {
+		instances++
+		if n.Group != "each" || n.Limit != 2 {
+			t.Errorf("instance %q ceiling = (%q, %d), want (each, 2)", n.ID, n.Group, n.Limit)
+		}
+		for _, d := range n.DependsOn {
 			if strings.HasPrefix(d, "scan#") {
-				chained = true
-				if k >= 2 && d != ids[k-2] {
-					t.Errorf("instance %d chains to %q, want %q", k, d, ids[k-2])
-				}
+				t.Errorf("instance %q waits on %q; the ceiling must not be an ordering", n.ID, d)
 			}
 		}
-		if k < 2 && chained {
-			t.Errorf("instance %d is within the limit and must not be chained: %v", k, deps[id])
-		}
-		if k >= 2 && !chained {
-			t.Errorf("instance %d is beyond the limit and must be chained: %v", k, deps[id])
-		}
+	}
+	if instances != 5 {
+		t.Fatalf("want 5 instances, got %d", instances)
 	}
 }
 
-// A limit at or above the instance count chains nothing: the author asked for a
-// ceiling, not an ordering.
-func TestForEach_MaxConcurrencyAtOrAboveCountChainsNothing(t *testing.T) {
+// A zero max_concurrency is unlimited, so no group is recorded; a limit at or
+// above the instance count is still recorded as the author wrote it, because
+// the ceiling is a count the scheduler compares, not an ordering to skip.
+func TestForEach_MaxConcurrencyZeroIsUnlimited(t *testing.T) {
 	targets := []forEachTarget{
 		fanTarget("11111111-1111-1111-1111-111111111111", "a", "https://10.0.0.1:6443"),
 		fanTarget("22222222-2222-2222-2222-222222222222", "b", "https://10.0.0.2:6443"),
 	}
-	for _, limit := range []int32{2, 9} {
+	for _, limit := range []int32{0, 2, 9} {
 		proj, _, err := missionDefinitionToProjected(forEachDef(limit), "", targets)
 		if err != nil {
 			t.Fatalf("limit %d: project: %v", limit, err)
@@ -251,8 +239,14 @@ func TestForEach_MaxConcurrencyAtOrAboveCountChainsNothing(t *testing.T) {
 			}
 			for _, d := range n.DependsOn {
 				if strings.HasPrefix(d, "scan#") {
-					t.Errorf("limit %d: instance %q chained to %q, want no chain", limit, n.ID, d)
+					t.Errorf("limit %d: instance %q waits on %q, want no ordering", limit, n.ID, d)
 				}
+			}
+			if limit == 0 && (n.Group != "" || n.Limit != 0) {
+				t.Errorf("limit 0: instance %q carries a ceiling (%q, %d), want none", n.ID, n.Group, n.Limit)
+			}
+			if limit > 0 && (n.Group != "each" || n.Limit != int(limit)) {
+				t.Errorf("limit %d: instance %q ceiling = (%q, %d)", limit, n.ID, n.Group, n.Limit)
 			}
 		}
 	}
@@ -493,9 +487,19 @@ func TestMissionDefinitionToProjected_ForEachInsideParallelExpands(t *testing.T)
 	if !eqStrs(byID[inst[0]].DependsOn, []string{"prep"}) || !eqStrs(byID[inst[1]].DependsOn, []string{"prep"}) {
 		t.Errorf("first two instances deps = %v / %v, want [prep]", byID[inst[0]].DependsOn, byID[inst[1]].DependsOn)
 	}
-	// MaxConcurrency 2 over three targets chains the third behind the first.
-	if !eqStrs(byID[inst[2]].DependsOn, []string{inst[0], "prep"}) {
-		t.Errorf("third instance deps = %v, want [%s prep]", byID[inst[2]].DependsOn, inst[0])
+	// MaxConcurrency 2 over three targets is a ceiling on every instance, never
+	// an ordering (gibson#538): the third depends on prep alone.
+	if !eqStrs(byID[inst[2]].DependsOn, []string{"prep"}) {
+		t.Errorf("third instance deps = %v, want [prep]", byID[inst[2]].DependsOn)
+	}
+	for _, id := range inst {
+		if byID[id].Group != "fan" || byID[id].Limit != 2 {
+			t.Errorf("instance %q ceiling = (%q, %d), want (fan, 2)", id, byID[id].Group, byID[id].Limit)
+		}
+	}
+	// The parallel declared no max_concurrency, so its plain branch has no ceiling.
+	if byID["other"].Group != "" || byID["other"].Limit != 0 {
+		t.Errorf("other carries a ceiling (%q, %d), want none", byID["other"].Group, byID["other"].Limit)
 	}
 	// The join on the parallel waits for the plain branch and every instance.
 	wantReport := append([]string{"other"}, inst...)
@@ -512,4 +516,58 @@ func sortedWorkIDs(nodes []brain.WorkNode) []string {
 	}
 	sort.Strings(out)
 	return out
+}
+
+// A parallel node's max_concurrency reaches the scheduler the same way a
+// for_each's does (gibson#538): every sub-node carries the parallel as its
+// Group and the limit as its Limit, with no ordering among the sub-nodes. Before
+// this the field was rendered in the graph summary and read by nothing.
+func TestParallel_MaxConcurrencyIsASchedulerCeiling(t *testing.T) {
+	subIDs := []string{"s1", "s2", "s3"}
+	subs := make([]*missionpb.MissionNode, 0, len(subIDs))
+	for _, id := range subIDs {
+		n := toolNode(id)
+		n.Id = id
+		subs = append(subs, n)
+	}
+	def := &missionpb.MissionDefinition{
+		Id: "m-parallel-limit",
+		Nodes: map[string]*missionpb.MissionNode{
+			"prep": toolNode("prep"),
+			"p": {
+				Type:         missionpb.NodeType_NODE_TYPE_PARALLEL,
+				Dependencies: []string{"prep"},
+				Config: &missionpb.MissionNode_ParallelConfig{ParallelConfig: &missionpb.ParallelNodeConfig{
+					SubNodes:       subs,
+					MaxConcurrency: 2,
+				}},
+			},
+			"report": toolNode("report", "p"),
+		},
+	}
+	got, _, err := missionDefinitionToProjected(def, "", nil)
+	if err != nil {
+		t.Fatalf("translate: %v", err)
+	}
+	byID := map[string]brain.WorkNode{}
+	for _, n := range got.Nodes {
+		byID[n.ID] = n
+	}
+	for _, id := range []string{"s1", "s2", "s3"} {
+		n, ok := byID[id]
+		if !ok {
+			t.Fatalf("sub-node %q missing: %v", id, sortedWorkIDs(got.Nodes))
+		}
+		if n.Group != "p" || n.Limit != 2 {
+			t.Errorf("%q ceiling = (%q, %d), want (p, 2)", id, n.Group, n.Limit)
+		}
+		if !eqStrs(n.DependsOn, []string{"prep"}) {
+			t.Errorf("%q deps = %v, want [prep]: a ceiling is not an ordering", id, n.DependsOn)
+		}
+	}
+	for _, id := range []string{"prep", "report"} {
+		if byID[id].Group != "" || byID[id].Limit != 0 {
+			t.Errorf("%q carries a ceiling (%q, %d), want none", id, byID[id].Group, byID[id].Limit)
+		}
+	}
 }

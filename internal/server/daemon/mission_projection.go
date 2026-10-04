@@ -117,7 +117,7 @@ func missionDefinitionToProjected(
 			}
 		}
 	}
-	boundFanOut(allNodes, forEachInstances, deps)
+	inheritForEachDeps(forEachInstances, deps)
 
 	// 3. condition branch gating: every branch node depends on its condition node.
 	for id, n := range allNodes {
@@ -129,7 +129,7 @@ func missionDefinitionToProjected(
 	}
 
 	// 4/5. Build WorkNodes for real nodes, rewriting deps through the resolver.
-	nodes, err := buildWorkNodes(allNodes, deps, instanceSet(forEachInstances))
+	nodes, err := buildWorkNodes(allNodes, deps, instanceSet(forEachInstances), concurrencyGroups(allNodes, forEachInstances))
 	if err != nil {
 		return brain.MissionProjected{}, nil, err
 	}
@@ -255,36 +255,58 @@ type fanOutOrigin struct {
 // a mission with no for_each, which is every mission authored before fan-out.
 type fanOutOrigins map[string]fanOutOrigin
 
-// boundFanOut gives every instance the for_each node's own dependencies, then
-// bounds how many instances run at once.
-//
-// The bound is built on DependsOn because nothing in the brain honours
-// MaxConcurrency — ParallelNodeConfig has carried that field since it was
-// written and `grep MaxConcurrency` over internal/engine/brain and
-// internal/server/daemon finds no consumer (gibson#536).
-//
-// Chaining instance k behind instance k-limit bounds how many are runnable at
-// once using the scheduler that already exists: with a limit of 4 and ten
-// targets, instances 4..9 each wait on the one four places ahead, so at most
-// four are ever ready. It costs ordering the author did not ask for, which is
-// the honest trade for not launching fifty sandboxes at once.
-func boundFanOut(allNodes map[string]*missionpb.MissionNode, forEachInstances map[string][]string, deps nodeDeps) {
+// inheritForEachDeps gives every instance the for_each node's own
+// dependencies. How many instances run at once is the scheduler's ceiling
+// (concurrencyGroups), not a dependency: the gibson#525 chain of instance k
+// behind instance k-limit bounded the count but forced an order the author
+// never asked for, and left parallel's max_concurrency unbound (gibson#538).
+func inheritForEachDeps(forEachInstances map[string][]string, deps nodeDeps) {
 	for id, instIDs := range forEachInstances {
 		for _, inst := range instIDs {
 			for d := range deps[id] {
 				deps.add(inst, d)
 			}
 		}
-		// The for_each is read from the flattened set, so a sub-node for_each
-		// keeps its own bound; the top-level map would answer nil for it.
-		limit := int(allNodes[id].GetForEachConfig().GetMaxConcurrency())
-		if limit <= 0 || limit >= len(instIDs) {
+	}
+}
+
+// concurrencyGroup is the scheduler ceiling a real node is counted under: the
+// parallel or for_each node that holds it, and that node's max_concurrency.
+type concurrencyGroup struct {
+	ID    string
+	Limit int
+}
+
+// concurrencyGroups maps every parallel sub-node and every for_each instance
+// to its container's ceiling. A zero max_concurrency is unlimited, which is the
+// documented meaning, so such a container records no group at all. A for_each
+// declared as a parallel sub-node (gibson#548) keeps its own ceiling for its
+// instances; the parallel's ceiling counts the for_each's siblings only,
+// because the for_each itself never becomes work.
+func concurrencyGroups(allNodes map[string]*missionpb.MissionNode, forEachInstances map[string][]string) map[string]concurrencyGroup {
+	groups := map[string]concurrencyGroup{}
+	for id, n := range allNodes {
+		if n.GetType() != missionpb.NodeType_NODE_TYPE_PARALLEL {
 			continue
 		}
-		for k := limit; k < len(instIDs); k++ {
-			deps.add(instIDs[k], instIDs[k-limit])
+		limit := int(n.GetParallelConfig().GetMaxConcurrency())
+		if limit <= 0 {
+			continue
+		}
+		for _, sub := range n.GetParallelConfig().GetSubNodes() {
+			groups[sub.GetId()] = concurrencyGroup{ID: id, Limit: limit}
 		}
 	}
+	for id, instIDs := range forEachInstances {
+		limit := int(allNodes[id].GetForEachConfig().GetMaxConcurrency())
+		if limit <= 0 {
+			continue
+		}
+		for _, inst := range instIDs {
+			groups[inst] = concurrencyGroup{ID: id, Limit: limit}
+		}
+	}
+	return groups
 }
 
 // instanceSet flattens the per-for_each instance lists into one membership set,
@@ -307,6 +329,7 @@ func buildWorkNodes(
 	allNodes map[string]*missionpb.MissionNode,
 	deps nodeDeps,
 	instances map[string]bool,
+	groups map[string]concurrencyGroup,
 ) ([]brain.WorkNode, error) {
 	resolve := makeResolver(allNodes)
 	var nodes []brain.WorkNode
@@ -343,6 +366,11 @@ func buildWorkNodes(
 			// is an implementation detail and a node the author named with the
 			// separator would otherwise be mistaken for an instance.
 			DependentsRunOnFailure: instances[id],
+			// The container's max_concurrency, enforced by the scheduler
+			// (gibson#538). Both parallel and for_each use this one path, so
+			// the two fields with one documented meaning have one implementation.
+			Group: groups[id].ID,
+			Limit: groups[id].Limit,
 		})
 	}
 	sort.Slice(nodes, func(i, j int) bool { return nodes[i].ID < nodes[j].ID })

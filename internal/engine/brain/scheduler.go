@@ -26,11 +26,16 @@ func pausedMissions(w *World) map[string]bool {
 	return notRunning
 }
 
-// SchedulerSystem dispatches pending work whose dependencies are satisfied.
+// SchedulerSystem dispatches pending work whose dependencies are satisfied,
+// under each group's concurrency ceiling (gibson#538): a group with Limit N
+// has at most N members running at once, counting the ones already running
+// and the ones this pass dispatches. The walk is in id order, so which
+// members go first is deterministic and replay folds the same way.
 func SchedulerSystem(w *World) []Event {
 	work := w.WorkSnapshot()
 	idx := workIndex(work)
 	halted := pausedMissions(w)
+	running := runningPerGroup(work)
 	var out []Event
 	for _, wi := range work {
 		if wi.State != WorkPending {
@@ -42,15 +47,49 @@ func SchedulerSystem(w *World) []Event {
 		if wi.MissionID != "" && halted[wi.MissionID] {
 			continue // mission paused/terminal — do not dispatch its work
 		}
-		if depsSatisfied(wi.DependsOn, idx) {
-			out = append(out, WorkDispatched{
-				ID:        wi.ID,
-				MissionID: wi.MissionID,
-				ItemKind:  wi.Kind,
-				Target:    wi.Target,
-				Input:     wi.Input,
-				Timeout:   wi.Timeout,
-			})
+		if !depsSatisfied(wi.DependsOn, idx) {
+			continue
+		}
+		if key, ok := groupKey(wi); ok {
+			if running[key] >= wi.Limit {
+				continue // the ceiling is reached; a completion frees the slot
+			}
+			running[key]++
+		}
+		out = append(out, WorkDispatched{
+			ID:        wi.ID,
+			MissionID: wi.MissionID,
+			ItemKind:  wi.Kind,
+			Target:    wi.Target,
+			Input:     wi.Input,
+			Timeout:   wi.Timeout,
+			Group:     wi.Group,
+			Limit:     wi.Limit,
+		})
+	}
+	return out
+}
+
+// groupKey is the ceiling an item is counted under: its group, scoped to its
+// mission so two missions that both name a container "scan" never share a
+// ceiling. False when the item has no ceiling.
+func groupKey(wi WorkSnapshot) (string, bool) {
+	if wi.Group == "" || wi.Limit <= 0 {
+		return "", false
+	}
+	return wi.MissionID + "/" + wi.Group, true
+}
+
+// runningPerGroup counts the members of each group that are dispatched and
+// not yet completed.
+func runningPerGroup(work []WorkSnapshot) map[string]int {
+	out := map[string]int{}
+	for _, wi := range work {
+		if wi.State != WorkRunning {
+			continue
+		}
+		if key, ok := groupKey(wi); ok {
+			out[key]++
 		}
 	}
 	return out

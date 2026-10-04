@@ -193,6 +193,8 @@ func RestoreWorld(snap WorldSnapshot, tenant string) (*World, error) {
 			Target:    wi.Target,
 			Input:     wi.Input,
 			Timeout:   wi.Timeout,
+			Group:     wi.Group,
+			Limit:     wi.Limit,
 		}
 		Reduce(w, dsp)
 		switch wi.State {
