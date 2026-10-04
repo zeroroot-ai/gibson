@@ -5,193 +5,31 @@ package component
 
 import (
 	"testing"
-	"time"
 
 	"github.com/stretchr/testify/assert"
-	"github.com/stretchr/testify/require"
+
 	"go.opentelemetry.io/otel/attribute"
-	sdktrace "go.opentelemetry.io/otel/sdk/trace"
-	"go.opentelemetry.io/otel/sdk/trace/tracetest"
 )
 
-// TestComponentAttributes tests the ComponentAttributes function
-func TestComponentAttributes(t *testing.T) {
-	t.Run("nil component returns empty attributes", func(t *testing.T) {
-		attrs := ComponentAttributes(nil)
-		assert.Empty(t, attrs)
-	})
+// Verify core attributes are present
 
-	t.Run("minimal component attributes", func(t *testing.T) {
-		comp := &Component{
-			Kind:    ComponentKindAgent,
-			Name:    "test-agent",
-			Version: "1.0.0",
-			Source:  ComponentSourceExternal,
-			Status:  ComponentStatusAvailable,
-		}
+// Verify all attributes including runtime info
 
-		attrs := ComponentAttributes(comp)
+// Port should not be present
 
-		// Verify core attributes are present
-		assertHasAttribute(t, attrs, AttrComponentKind, "agent")
-		assertHasAttribute(t, attrs, AttrComponentName, "test-agent")
-		assertHasAttribute(t, attrs, AttrComponentVersion, "1.0.0")
-		assertHasAttribute(t, attrs, AttrComponentSource, "external")
-		assertHasAttribute(t, attrs, AttrComponentStatus, "available")
-	})
+// Create a test span exporter
 
-	t.Run("running component with PID and port", func(t *testing.T) {
-		now := time.Now()
-		comp := &Component{
-			Kind:      ComponentKindTool,
-			Name:      "test-tool",
-			Version:   "2.0.0",
-			BinPath:   "/path/to/bin/tool",
-			Source:    ComponentSourceExternal,
-			Status:    ComponentStatusRunning,
-			Port:      8080,
-			PID:       12345,
-			CreatedAt: now,
-			UpdatedAt: now,
-			StartedAt: &now,
-		}
+// Create and start a span
 
-		attrs := ComponentAttributes(comp)
+// Add component attributes
 
-		// Verify all attributes including runtime info
-		assertHasAttribute(t, attrs, AttrComponentKind, "tool")
-		assertHasAttribute(t, attrs, AttrComponentName, "test-tool")
-		assertHasAttribute(t, attrs, AttrComponentVersion, "2.0.0")
-		assertHasAttribute(t, attrs, AttrComponentSource, "external")
-		assertHasAttribute(t, attrs, AttrComponentStatus, "running")
-		assertHasIntAttribute(t, attrs, AttrComponentPort, 8080)
-		assertHasIntAttribute(t, attrs, AttrComponentPID, 12345)
-		assertHasAttribute(t, attrs, "gibson.component.bin_path", "/path/to/bin/tool")
-	})
+// Get the recorded span
 
-}
+// Verify attributes were added
 
-// TestLifecycleAttributes tests the LifecycleAttributes function
-func TestLifecycleAttributes(t *testing.T) {
-	t.Run("lifecycle attributes with port", func(t *testing.T) {
-		attrs := LifecycleAttributes("start", 8080, 1500)
+// Should not panic
 
-		assertHasAttribute(t, attrs, "gibson.component.operation", "start")
-		assertHasIntAttribute(t, attrs, AttrComponentPort, 8080)
-		assertHasInt64Attribute(t, attrs, "gibson.component.operation_duration_ms", 1500)
-	})
-
-	t.Run("lifecycle attributes without port", func(t *testing.T) {
-		attrs := LifecycleAttributes("stop", 0, 500)
-
-		assertHasAttribute(t, attrs, "gibson.component.operation", "stop")
-		assertHasInt64Attribute(t, attrs, "gibson.component.operation_duration_ms", 500)
-		// Port should not be present
-		for _, attr := range attrs {
-			assert.NotEqual(t, AttrComponentPort, string(attr.Key))
-		}
-	})
-}
-
-// TestErrorAttributes tests the ErrorAttributes function
-func TestErrorAttributes(t *testing.T) {
-	t.Run("nil error returns empty attributes", func(t *testing.T) {
-		attrs := ErrorAttributes(nil, "test_operation")
-		assert.Empty(t, attrs)
-	})
-
-	t.Run("standard error attributes", func(t *testing.T) {
-		err := assert.AnError
-		attrs := ErrorAttributes(err, "install")
-
-		assertHasBoolAttribute(t, attrs, "error", true)
-		assertHasAttribute(t, attrs, "error.message", err.Error())
-		assertHasAttribute(t, attrs, "gibson.component.failed_operation", "install")
-	})
-
-	t.Run("component error attributes", func(t *testing.T) {
-		compErr := NewComponentNotFoundError("test-component").
-			WithContext("path", "/test/path")
-
-		attrs := ErrorAttributes(compErr, "uninstall")
-
-		assertHasBoolAttribute(t, attrs, "error", true)
-		assertHasAttribute(t, attrs, "error.code", string(ErrCodeComponentNotFound))
-		assertHasAttribute(t, attrs, "error.type", "ComponentError")
-		assertHasAttribute(t, attrs, AttrComponentName, "test-component")
-	})
-}
-
-// TestAddComponentAttributes tests the AddComponentAttributes function
-func TestAddComponentAttributes(t *testing.T) {
-	t.Run("adds attributes to span", func(t *testing.T) {
-		// Create a test span exporter
-		exporter := tracetest.NewInMemoryExporter()
-		tp := sdktrace.NewTracerProvider(
-			sdktrace.WithSyncer(exporter),
-		)
-		tracer := tp.Tracer("test")
-
-		// Create and start a span
-		_, span := tracer.Start(t.Context(), "test-span")
-
-		comp := &Component{
-			Kind:    ComponentKindAgent,
-			Name:    "test-agent",
-			Version: "1.0.0",
-			Source:  ComponentSourceExternal,
-			Status:  ComponentStatusAvailable,
-		}
-
-		// Add component attributes
-		AddComponentAttributes(span, comp)
-		span.End()
-
-		// Get the recorded span
-		spans := exporter.GetSpans()
-		require.Len(t, spans, 1)
-
-		spanData := spans[0]
-		attrs := spanData.Attributes
-
-		// Verify attributes were added
-		assertHasAttributeInSlice(t, attrs, AttrComponentKind, "agent")
-		assertHasAttributeInSlice(t, attrs, AttrComponentName, "test-agent")
-		assertHasAttributeInSlice(t, attrs, AttrComponentVersion, "1.0.0")
-	})
-
-	t.Run("handles nil span gracefully", func(t *testing.T) {
-		comp := &Component{
-			Kind:    ComponentKindAgent,
-			Name:    "test-agent",
-			Version: "1.0.0",
-			Source:  ComponentSourceExternal,
-			Status:  ComponentStatusAvailable,
-		}
-
-		// Should not panic
-		assert.NotPanics(t, func() {
-			AddComponentAttributes(nil, comp)
-		})
-	})
-
-	t.Run("handles nil component gracefully", func(t *testing.T) {
-		exporter := tracetest.NewInMemoryExporter()
-		tp := sdktrace.NewTracerProvider(
-			sdktrace.WithSyncer(exporter),
-		)
-		tracer := tp.Tracer("test")
-
-		_, span := tracer.Start(t.Context(), "test-span")
-
-		// Should not panic
-		assert.NotPanics(t, func() {
-			AddComponentAttributes(span, nil)
-		})
-
-		span.End()
-	})
-}
+// Should not panic
 
 // TestSpanNameConstants tests that span name constants are properly defined
 func TestSpanNameConstants(t *testing.T) {

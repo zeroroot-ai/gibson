@@ -4,7 +4,6 @@
 package component
 
 import (
-	"fmt"
 	"os"
 	"sync"
 )
@@ -50,107 +49,25 @@ type DefaultLogRotator struct {
 	maxBackups int        // Maximum number of backup files to keep
 }
 
-// NewDefaultLogRotator creates a new DefaultLogRotator with the specified configuration.
-// If maxSize is <= 0, DefaultLogMaxSize is used.
-// If maxBackups is <= 0, DefaultLogMaxBackups is used.
-func NewDefaultLogRotator(maxSize int64, maxBackups int) *DefaultLogRotator {
-	if maxSize <= 0 {
-		maxSize = DefaultLogMaxSize
-	}
-	if maxBackups <= 0 {
-		maxBackups = DefaultLogMaxBackups
-	}
+// File doesn't exist, no rotation needed
 
-	return &DefaultLogRotator{
-		maxSize:    maxSize,
-		maxBackups: maxBackups,
-	}
-}
+// Delete the oldest backup if it exists
 
-// ShouldRotate checks if the log file at path exceeds maxSize.
-// Returns false if the file doesn't exist or is smaller than maxSize.
-// Returns an error only if stat fails for reasons other than file not existing.
-func (r *DefaultLogRotator) ShouldRotate(path string) (bool, error) {
-	r.mu.Lock()
-	defer r.mu.Unlock()
+// Shift all existing backups up by one (.log.N-1 → .log.N)
+// Start from the highest number and work backwards to avoid conflicts
 
-	info, err := os.Stat(path)
-	if err != nil {
-		if os.IsNotExist(err) {
-			// File doesn't exist, no rotation needed
-			return false, nil
-		}
-		return false, fmt.Errorf("failed to stat log file %s: %w", path, err)
-	}
+// Check if the source file exists before attempting rename
 
-	return info.Size() >= r.maxSize, nil
-}
+// This backup doesn't exist, skip it
 
-// Rotate performs the log rotation process atomically where possible.
-// The rotation is thread-safe and handles missing intermediate backup files gracefully.
-func (r *DefaultLogRotator) Rotate(path string) (*os.File, error) {
-	r.mu.Lock()
-	defer r.mu.Unlock()
+// Rename the backup file
 
-	// Delete the oldest backup if it exists
-	oldestBackup := fmt.Sprintf("%s.%d", path, r.maxBackups)
-	if err := os.Remove(oldestBackup); err != nil && !os.IsNotExist(err) {
-		return nil, fmt.Errorf("failed to remove oldest backup %s: %w", oldestBackup, err)
-	}
+// Rename current log to .log.1 (if it exists)
 
-	// Shift all existing backups up by one (.log.N-1 → .log.N)
-	// Start from the highest number and work backwards to avoid conflicts
-	for i := r.maxBackups - 1; i >= 1; i-- {
-		oldPath := fmt.Sprintf("%s.%d", path, i)
-		newPath := fmt.Sprintf("%s.%d", path, i+1)
+// Current log exists, rename it
 
-		// Check if the source file exists before attempting rename
-		if _, err := os.Stat(oldPath); err != nil {
-			if os.IsNotExist(err) {
-				// This backup doesn't exist, skip it
-				continue
-			}
-			return nil, fmt.Errorf("failed to stat backup %s: %w", oldPath, err)
-		}
+// Some other error occurred
 
-		// Rename the backup file
-		if err := os.Rename(oldPath, newPath); err != nil {
-			return nil, fmt.Errorf("failed to rotate backup %s to %s: %w", oldPath, newPath, err)
-		}
-	}
+// If current log doesn't exist, that's fine - we'll create a new one
 
-	// Rename current log to .log.1 (if it exists)
-	firstBackup := fmt.Sprintf("%s.1", path)
-	if _, err := os.Stat(path); err == nil {
-		// Current log exists, rename it
-		if err := os.Rename(path, firstBackup); err != nil {
-			return nil, fmt.Errorf("failed to rotate current log %s to %s: %w", path, firstBackup, err)
-		}
-	} else if !os.IsNotExist(err) {
-		// Some other error occurred
-		return nil, fmt.Errorf("failed to stat current log %s: %w", path, err)
-	}
-	// If current log doesn't exist, that's fine - we'll create a new one
-
-	// Create new empty log file with appropriate permissions
-	newFile, err := os.OpenFile(path, os.O_CREATE|os.O_WRONLY|os.O_APPEND, DefaultLogFilePerms)
-	if err != nil {
-		return nil, fmt.Errorf("failed to create new log file %s: %w", path, err)
-	}
-
-	return newFile, nil
-}
-
-// MaxSize returns the configured maximum file size before rotation.
-func (r *DefaultLogRotator) MaxSize() int64 {
-	r.mu.Lock()
-	defer r.mu.Unlock()
-	return r.maxSize
-}
-
-// MaxBackups returns the configured maximum number of backup files.
-func (r *DefaultLogRotator) MaxBackups() int {
-	r.mu.Lock()
-	defer r.mu.Unlock()
-	return r.maxBackups
-}
+// Create new empty log file with appropriate permissions

@@ -3,11 +3,6 @@
 
 package component
 
-import (
-	"go.opentelemetry.io/otel/attribute"
-	"go.opentelemetry.io/otel/trace"
-)
-
 // Component attribute keys for observability.
 // Following Gibson's "gibson.component.*" convention for consistency.
 const (
@@ -67,114 +62,14 @@ const (
 	SpanComponentUpdate = "gibson.component.update"
 )
 
-// ComponentAttributes creates OpenTelemetry attributes from a Component.
-// Includes component metadata, runtime status, and resource information.
-func ComponentAttributes(component *Component) []attribute.KeyValue {
-	if component == nil {
-		return []attribute.KeyValue{}
-	}
+// Core component attributes
 
-	attrs := make([]attribute.KeyValue, 0, 10)
+// Add the binary path if present
 
-	// Core component attributes
-	attrs = append(attrs,
-		attribute.String(AttrComponentKind, component.Kind.String()),
-		attribute.String(AttrComponentName, component.Name),
-		attribute.String(AttrComponentVersion, component.Version),
-		attribute.String(AttrComponentSource, component.Source.String()),
-		attribute.String(AttrComponentStatus, component.Status.String()),
-	)
+// Add port if set (for running components)
 
-	// Add the binary path if present
-	if component.BinPath != "" {
-		attrs = append(attrs, attribute.String("gibson.component.bin_path", component.BinPath))
-	}
+// Add PID if set (for running components)
 
-	// Add port if set (for running components)
-	if component.Port > 0 {
-		attrs = append(attrs, attribute.Int(AttrComponentPort, component.Port))
-	}
+// Add timestamps
 
-	// Add PID if set (for running components)
-	if component.PID > 0 {
-		attrs = append(attrs, attribute.Int(AttrComponentPID, component.PID))
-	}
-
-	// Add timestamps
-	if !component.CreatedAt.IsZero() {
-		attrs = append(attrs, attribute.String("gibson.component.created_at", component.CreatedAt.Format("2006-01-02T15:04:05Z07:00")))
-	}
-
-	if !component.UpdatedAt.IsZero() {
-		attrs = append(attrs, attribute.String("gibson.component.updated_at", component.UpdatedAt.Format("2006-01-02T15:04:05Z07:00")))
-	}
-
-	if component.StartedAt != nil {
-		attrs = append(attrs, attribute.String("gibson.component.started_at", component.StartedAt.Format("2006-01-02T15:04:05Z07:00")))
-	}
-
-	if component.StoppedAt != nil {
-		attrs = append(attrs, attribute.String("gibson.component.stopped_at", component.StoppedAt.Format("2006-01-02T15:04:05Z07:00")))
-	}
-
-	return attrs
-}
-
-// AddComponentAttributes adds component attributes to an existing span.
-// This is a convenience function for adding attributes to spans created elsewhere.
-func AddComponentAttributes(span trace.Span, component *Component) {
-	if span == nil || component == nil {
-		return
-	}
-
-	span.SetAttributes(ComponentAttributes(component)...)
-}
-
-// LifecycleAttributes creates OpenTelemetry attributes for lifecycle operations.
-// Includes operation-specific metadata like port assignments and startup times.
-func LifecycleAttributes(operation string, port int, duration int64) []attribute.KeyValue {
-	attrs := []attribute.KeyValue{
-		attribute.String("gibson.component.operation", operation),
-	}
-
-	if port > 0 {
-		attrs = append(attrs, attribute.Int(AttrComponentPort, port))
-	}
-
-	if duration > 0 {
-		attrs = append(attrs, attribute.Int64("gibson.component.operation_duration_ms", duration))
-	}
-
-	return attrs
-}
-
-// ErrorAttributes creates OpenTelemetry attributes for component errors.
-// Includes error details and context for debugging.
-func ErrorAttributes(err error, operation string) []attribute.KeyValue {
-	if err == nil {
-		return []attribute.KeyValue{}
-	}
-
-	attrs := []attribute.KeyValue{
-		attribute.Bool("error", true),
-		attribute.String("error.message", err.Error()),
-	}
-
-	if operation != "" {
-		attrs = append(attrs, attribute.String("gibson.component.failed_operation", operation))
-	}
-
-	// Add component-specific error details if it's a ComponentError
-	if compErr, ok := err.(*ComponentError); ok {
-		attrs = append(attrs,
-			attribute.String("error.code", string(compErr.Code)),
-			attribute.String("error.type", "ComponentError"),
-		)
-
-		if compErr.Component != "" {
-			attrs = append(attrs, attribute.String(AttrComponentName, compErr.Component))
-		}
-	}
-
-	return attrs
-}
+// Add component-specific error details if it's a ComponentError

@@ -648,26 +648,6 @@ func (a *RegistryAdapter) getAvailableToolNames(ctx context.Context) ([]string, 
 	return names, nil
 }
 
-func (a *RegistryAdapter) getAvailablePluginNames(ctx context.Context) ([]string, error) {
-	tenant, err := a.resolveTenant(ctx)
-	if err != nil {
-		return nil, err
-	}
-	instances, err := a.registry.DiscoverAll(ctx, tenant, "plugin")
-	if err != nil {
-		return []string{}, err
-	}
-	nameSet := make(map[string]struct{})
-	for _, inst := range instances {
-		nameSet[inst.Name] = struct{}{}
-	}
-	names := make([]string, 0, len(nameSet))
-	for name := range nameSet {
-		names = append(names, name)
-	}
-	return names, nil
-}
-
 // AgentNotFoundError is returned when an agent is requested but no instances are registered.
 type AgentNotFoundError struct {
 	Name      string
