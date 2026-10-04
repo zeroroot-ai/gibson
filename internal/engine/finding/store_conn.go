@@ -13,6 +13,7 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
+	"strings"
 
 	goredis "github.com/redis/go-redis/v9"
 	"github.com/zeroroot-ai/gibson/internal/engine/agent"
@@ -66,3 +67,153 @@ func (s *ConnBoundFindingStore) Store(ctx context.Context, finding EnhancedFindi
 
 // Ensure ConnBoundFindingStore implements FindingStore at compile time.
 var _ FindingStore = (*ConnBoundFindingStore)(nil)
+
+// Get retrieves a finding by ID. Returns an error (not found) for IDs that do not exist
+// in the connected tenant's DB — IDOR is impossible by construction (C15 closure).
+func (s *ConnBoundFindingStore) Get(ctx context.Context, id types.ID) (*EnhancedFinding, error) {
+	result, err := s.rdb.Do(ctx, "JSON.GET", cbFindingKey(id), "$").Result()
+	if err == goredis.Nil || result == nil {
+		return nil, fmt.Errorf("finding not found: %s", id)
+	}
+	if err != nil {
+		return nil, fmt.Errorf("failed to get finding: %w", err)
+	}
+	finding, err := unmarshalFindingJSON(result)
+	if err != nil {
+		return nil, err
+	}
+	return finding, nil
+}
+
+// List retrieves findings for a mission with optional filtering.
+// All results belong to the connected tenant — no cross-tenant access (C14 closure).
+func (s *ConnBoundFindingStore) List(ctx context.Context, missionID types.ID, filter *FindingFilter) ([]EnhancedFinding, error) {
+	if filter == nil || s.isEmptyFilter(filter) {
+		return s.listByMission(ctx, missionID)
+	}
+	// Fetch candidate IDs from the mission set, then apply filters.
+	ids, err := s.rdb.SMembers(ctx, cbFindingMissionSetKey(missionID)).Result()
+	if err != nil {
+		return nil, fmt.Errorf("failed to list findings: %w", err)
+	}
+	var results []EnhancedFinding
+	for _, idStr := range ids {
+		parsedID, err := types.ParseID(idStr)
+		if err != nil {
+			continue
+		}
+		f, err := s.Get(ctx, parsedID)
+		if err != nil || f == nil {
+			continue
+		}
+		if !findingMatchesFilter(*f, filter) {
+			continue
+		}
+		results = append(results, *f)
+	}
+	return results, nil
+}
+
+// ListBySeverity retrieves all findings with a specific severity level (C14 closure).
+// Results are restricted to the connected tenant's data by the per-tenant client.
+func (s *ConnBoundFindingStore) ListBySeverity(ctx context.Context, severity agent.FindingSeverity) ([]EnhancedFinding, error) {
+	ids, err := s.rdb.SMembers(ctx, cbFindingSeveritySetKey(severity)).Result()
+	if err != nil {
+		return nil, fmt.Errorf("failed to list by severity: %w", err)
+	}
+	findings := make([]EnhancedFinding, 0, len(ids))
+	for _, idStr := range ids {
+		parsedID, err := types.ParseID(idStr)
+		if err != nil {
+			continue
+		}
+		f, err := s.Get(ctx, parsedID)
+		if err != nil || f == nil {
+			continue
+		}
+		findings = append(findings, *f)
+	}
+	return findings, nil
+}
+
+func (s *ConnBoundFindingStore) listByMission(ctx context.Context, missionID types.ID) ([]EnhancedFinding, error) {
+	ids, err := s.rdb.SMembers(ctx, cbFindingMissionSetKey(missionID)).Result()
+	if err != nil {
+		return nil, fmt.Errorf("failed to get mission set: %w", err)
+	}
+	findings := make([]EnhancedFinding, 0, len(ids))
+	for _, idStr := range ids {
+		parsedID, err := types.ParseID(idStr)
+		if err != nil {
+			continue
+		}
+		f, err := s.Get(ctx, parsedID)
+		if err != nil || f == nil {
+			continue
+		}
+		findings = append(findings, *f)
+	}
+	return findings, nil
+}
+
+func (s *ConnBoundFindingStore) isEmptyFilter(filter *FindingFilter) bool {
+	return filter.Severity == nil &&
+		filter.Category == nil &&
+		filter.Status == nil &&
+		filter.MinRisk == nil &&
+		filter.MaxRisk == nil &&
+		filter.AgentName == nil &&
+		filter.SearchText == nil
+}
+
+func findingMatchesFilter(f EnhancedFinding, filter *FindingFilter) bool {
+	if filter == nil {
+		return true
+	}
+	if filter.Severity != nil && f.Severity != *filter.Severity {
+		return false
+	}
+	if filter.Category != nil && f.Category != string(*filter.Category) {
+		return false
+	}
+	if filter.Status != nil && f.Status != *filter.Status {
+		return false
+	}
+	if filter.MinRisk != nil && f.RiskScore < *filter.MinRisk {
+		return false
+	}
+	if filter.MaxRisk != nil && f.RiskScore > *filter.MaxRisk {
+		return false
+	}
+	if filter.AgentName != nil && f.AgentName != *filter.AgentName {
+		return false
+	}
+	if filter.SearchText != nil {
+		text := strings.ToLower(*filter.SearchText)
+		if !strings.Contains(strings.ToLower(f.Title), text) &&
+			!strings.Contains(strings.ToLower(f.Description), text) {
+			return false
+		}
+	}
+	return true
+}
+
+func unmarshalFindingJSON(result any) (*EnhancedFinding, error) {
+	raw, ok := result.(string)
+	if !ok {
+		return nil, fmt.Errorf("unexpected result type %T", result)
+	}
+	var docs []json.RawMessage
+	if err := json.Unmarshal([]byte(raw), &docs); err == nil && len(docs) > 0 {
+		var f EnhancedFinding
+		if err := json.Unmarshal(docs[0], &f); err != nil {
+			return nil, fmt.Errorf("failed to unmarshal finding: %w", err)
+		}
+		return &f, nil
+	}
+	var f EnhancedFinding
+	if err := json.Unmarshal([]byte(raw), &f); err != nil {
+		return nil, fmt.Errorf("failed to unmarshal finding: %w", err)
+	}
+	return &f, nil
+}
