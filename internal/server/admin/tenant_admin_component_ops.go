@@ -258,10 +258,7 @@ func (s *TenantAdminServer) SetComponentAccess(ctx context.Context, req *tenantv
 		}
 	}
 
-	return &tenantv1.SetComponentAccessResponse{
-		TuplesWritten: int32(len(toWrite)),
-		TuplesDeleted: int32(len(toDelete)),
-	}, nil
+	return &tenantv1.SetComponentAccessResponse{}, nil
 }
 
 // ---------------------------------------------------------------------------

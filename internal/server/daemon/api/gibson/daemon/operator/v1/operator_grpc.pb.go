@@ -8,6 +8,7 @@ package daemonoperatorv1
 
 import (
 	context "context"
+	v1 "github.com/zeroroot-ai/gibson/internal/server/daemon/api/gibson/tenant/v1"
 	grpc "google.golang.org/grpc"
 	codes "google.golang.org/grpc/codes"
 	status "google.golang.org/grpc/status"
@@ -149,7 +150,7 @@ type DaemonOperatorServiceClient interface {
 	// semantics as gibson.tenant.v1.ConnectorAuthService.RevokeConnectorGrant,
 	// with the tenant carried explicitly: best-effort vendor revocation, then
 	// local deletion, idempotent.
-	RevokeConnectorGrant(ctx context.Context, in *RevokeConnectorGrantRequest, opts ...grpc.CallOption) (*RevokeConnectorGrantResponse, error)
+	RevokeConnectorGrant(ctx context.Context, in *RevokeConnectorGrantRequest, opts ...grpc.CallOption) (*v1.RevokeConnectorGrantResponse, error)
 	// GetConnectorAuthStatus reports one tenant connector's grant and token
 	// state to the connector-operator, so the ConnectorInstance carries a
 	// Degraded condition instead of a silent Active when the credential is
@@ -293,9 +294,9 @@ func (c *daemonOperatorServiceClient) AckTenantOp(ctx context.Context, in *AckTe
 	return out, nil
 }
 
-func (c *daemonOperatorServiceClient) RevokeConnectorGrant(ctx context.Context, in *RevokeConnectorGrantRequest, opts ...grpc.CallOption) (*RevokeConnectorGrantResponse, error) {
+func (c *daemonOperatorServiceClient) RevokeConnectorGrant(ctx context.Context, in *RevokeConnectorGrantRequest, opts ...grpc.CallOption) (*v1.RevokeConnectorGrantResponse, error) {
 	cOpts := append([]grpc.CallOption{grpc.StaticMethod()}, opts...)
-	out := new(RevokeConnectorGrantResponse)
+	out := new(v1.RevokeConnectorGrantResponse)
 	err := c.cc.Invoke(ctx, DaemonOperatorService_RevokeConnectorGrant_FullMethodName, in, out, cOpts...)
 	if err != nil {
 		return nil, err
@@ -427,7 +428,7 @@ type DaemonOperatorServiceServer interface {
 	// semantics as gibson.tenant.v1.ConnectorAuthService.RevokeConnectorGrant,
 	// with the tenant carried explicitly: best-effort vendor revocation, then
 	// local deletion, idempotent.
-	RevokeConnectorGrant(context.Context, *RevokeConnectorGrantRequest) (*RevokeConnectorGrantResponse, error)
+	RevokeConnectorGrant(context.Context, *RevokeConnectorGrantRequest) (*v1.RevokeConnectorGrantResponse, error)
 	// GetConnectorAuthStatus reports one tenant connector's grant and token
 	// state to the connector-operator, so the ConnectorInstance carries a
 	// Degraded condition instead of a silent Active when the credential is
@@ -487,7 +488,7 @@ func (UnimplementedDaemonOperatorServiceServer) ListPendingTenantOps(context.Con
 func (UnimplementedDaemonOperatorServiceServer) AckTenantOp(context.Context, *AckTenantOpRequest) (*AckTenantOpResponse, error) {
 	return nil, status.Error(codes.Unimplemented, "method AckTenantOp not implemented")
 }
-func (UnimplementedDaemonOperatorServiceServer) RevokeConnectorGrant(context.Context, *RevokeConnectorGrantRequest) (*RevokeConnectorGrantResponse, error) {
+func (UnimplementedDaemonOperatorServiceServer) RevokeConnectorGrant(context.Context, *RevokeConnectorGrantRequest) (*v1.RevokeConnectorGrantResponse, error) {
 	return nil, status.Error(codes.Unimplemented, "method RevokeConnectorGrant not implemented")
 }
 func (UnimplementedDaemonOperatorServiceServer) GetConnectorAuthStatus(context.Context, *GetConnectorAuthStatusRequest) (*GetConnectorAuthStatusResponse, error) {

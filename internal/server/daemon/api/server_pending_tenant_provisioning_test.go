@@ -187,12 +187,9 @@ func TestAckTenantProvisioned_MarksDone(t *testing.T) {
 		WithArgs("acme").
 		WillReturnResult(sqlmock.NewResult(0, 1))
 
-	resp, err := srv.AckTenantProvisioned(context.Background(), &daemonoperatorv1.AckTenantProvisionedRequest{TenantId: "acme"})
+	_, err = srv.AckTenantProvisioned(context.Background(), &daemonoperatorv1.AckTenantProvisionedRequest{TenantId: "acme"})
 	if err != nil {
 		t.Fatalf("ack: %v", err)
-	}
-	if !resp.GetAcked() {
-		t.Errorf("expected acked=true when a row transitioned to done")
 	}
 	if err := mock.ExpectationsWereMet(); err != nil {
 		t.Errorf("expectations: %v", err)
@@ -215,12 +212,9 @@ func TestAckTenantProvisioned_UnknownOrAlreadyDone_NoOp(t *testing.T) {
 		WithArgs("ghost").
 		WillReturnResult(sqlmock.NewResult(0, 0))
 
-	resp, err := srv.AckTenantProvisioned(context.Background(), &daemonoperatorv1.AckTenantProvisionedRequest{TenantId: "ghost"})
+	_, err = srv.AckTenantProvisioned(context.Background(), &daemonoperatorv1.AckTenantProvisionedRequest{TenantId: "ghost"})
 	if err != nil {
 		t.Fatalf("ack: %v", err)
-	}
-	if resp.GetAcked() {
-		t.Errorf("expected acked=false for unknown/already-done tenant")
 	}
 	if err := mock.ExpectationsWereMet(); err != nil {
 		t.Errorf("expectations: %v", err)

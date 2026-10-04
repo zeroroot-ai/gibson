@@ -240,13 +240,14 @@ message GetTenantQuotaUsageResponse {
 
 // AuditEvent represents a single audit log entry.
 message AuditEvent {
+  // Removed in gibson#502: served and never read by any consumer.
+  reserved 3, 7;
+  reserved "actor_user_id", "target_resource";
   string event_type = 1;
   string timestamp = 2;
-  string actor_user_id = 3;
   string actor_email = 4;
   string tenant_id = 5;
   string target_user_id = 6;
-  string target_resource = 7;
   map<string, string> details = 8;
   string trace_id = 9;
 }

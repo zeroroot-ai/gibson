@@ -46,11 +46,9 @@ var allowedUnauthenticated = map[string]bool{
 	// the response carries only step names + error codes, never PII.
 	// Spec: dashboard-no-backing-store-clients (Module 2 — Signup Progress RPC).
 	// ADR-0039: promoted from daemon-local gibson.user.v1.UserService to
-	// sdk gibson.tenant.v1.UserService; both appear in the registry until the
-	// daemon-local proto is cleaned up in a follow-up (the old service is no
-	// longer registered on the gRPC server).
+	// gibson.tenant.v1.UserService. The daemon-local user/v1 proto package was
+	// deleted in gibson#502, so tenant.v1 is the only entry.
 	"/gibson.tenant.v1.UserService/GetSignupProgress": true,
-	"/gibson.user.v1.UserService/GetSignupProgress":   true, // daemon-local proto retained for registry until cleanup
 
 	// SetSignupProgress is intentionally unauthenticated, matching its Get
 	// sibling above. Signup writes progress before any tenant/membership

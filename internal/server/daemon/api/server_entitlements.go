@@ -157,7 +157,7 @@ func (s *DaemonServer) SeedCatalogTenantEnabled(ctx context.Context, req *daemon
 		return nil, status.Errorf(codes.Internal, "list platform_enabled: %v", err)
 	}
 	if len(ids) == 0 {
-		return &daemonoperatorv1.SeedCatalogTenantEnabledResponse{TuplesWritten: 0}, nil
+		return &daemonoperatorv1.SeedCatalogTenantEnabledResponse{}, nil
 	}
 	tenantRef := "tenant:" + tenantID
 	tuples := make([]authz.Tuple, 0, len(ids))
@@ -173,7 +173,7 @@ func (s *DaemonServer) SeedCatalogTenantEnabled(ctx context.Context, req *daemon
 	if err := s.authorizer.Write(ctx, tuples); err != nil {
 		return nil, status.Errorf(codes.Internal, "fga write: %v", err)
 	}
-	return &daemonoperatorv1.SeedCatalogTenantEnabledResponse{TuplesWritten: int32(len(tuples))}, nil
+	return &daemonoperatorv1.SeedCatalogTenantEnabledResponse{}, nil
 }
 
 func hasPrefix(s, prefix string) bool {

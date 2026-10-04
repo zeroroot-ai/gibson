@@ -198,7 +198,8 @@ type RegisterResponse struct {
 	unknownFields protoimpl.UnknownFields
 
 	// registration_id identifies the pending registration to an administrator.
-	// It is the id an approval or a rejection names.
+	// It is the id an approval or a rejection names. Held under gibson#620: no
+	// consumer reads it yet.
 	RegistrationId string `protobuf:"bytes,1,opt,name=registration_id,json=registrationId,proto3" json:"registration_id,omitempty"`
 }
 

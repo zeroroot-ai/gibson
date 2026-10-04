@@ -49,37 +49,44 @@ func TestGetReputation_TenantScoped(t *testing.T) {
 	tctx := auth.WithTenant(context.Background(), auth.MustNewTenantID("acme"))
 
 	// SetBelief is itself async (WorldBeliefSubstrate.SetBelief submits a
-	// NodeBeliefSet event, processed on the next tick), so poll the RPC
-	// itself -- the same idiom TestGetCalibration_TenantScoped uses.
-	var resp *worldpb.GetReputationResponse
+	// NodeBeliefSet event, processed on the next tick), so poll the read the
+	// RPC performs. The response carries no measures (gibson#502), so the
+	// engine read is the observable and the RPC call proves the path.
+	var (
+		prior float64
+		ok    bool
+	)
 	deadline = time.Now().Add(2 * time.Second)
 	for time.Now().Before(deadline) {
 		var err error
-		if resp, err = srv.GetReputation(tctx, &worldpb.GetReputationRequest{Technique: "T1190", ScopeId: "net-a"}); err != nil {
-			t.Fatalf("GetReputation: %v", err)
+		if prior, ok, err = brain.ReadReputation(context.Background(), "acme", "T1190", "net-a", substrate); err != nil {
+			t.Fatalf("ReadReputation: %v", err)
 		}
-		if resp.GetHasTrackRecord() {
+		if ok {
 			break
 		}
 		time.Sleep(10 * time.Millisecond)
 	}
-	if !resp.GetHasTrackRecord() {
+	if !ok {
 		t.Fatal("expected a track record for acme")
 	}
-	if resp.GetPriorStrength() != 1.0 {
-		t.Fatalf("prior_strength = %v, want 1.0", resp.GetPriorStrength())
+	if prior != 1.0 {
+		t.Fatalf("prior_strength = %v, want 1.0", prior)
+	}
+	if _, err := srv.GetReputation(tctx, &worldpb.GetReputationRequest{Technique: "T1190", ScopeId: "net-a"}); err != nil {
+		t.Fatalf("GetReputation: %v", err)
 	}
 
 	// A different tenant querying the exact same technique/scope key must
 	// see no track record -- proof this reads through the caller's own
 	// engine, never another tenant's.
 	gctx := auth.WithTenant(context.Background(), auth.MustNewTenantID("globex"))
-	gresp, err := srv.GetReputation(gctx, &worldpb.GetReputationRequest{Technique: "T1190", ScopeId: "net-a"})
-	if err != nil {
+	if _, err := srv.GetReputation(gctx, &worldpb.GetReputationRequest{Technique: "T1190", ScopeId: "net-a"}); err != nil {
 		t.Fatalf("GetReputation (globex): %v", err)
 	}
-	if gresp.GetHasTrackRecord() {
-		t.Fatal("globex must not see acme's reputation")
+	globex := reg.For("globex")
+	if _, gok, err := brain.ReadReputation(context.Background(), "globex", "T1190", "net-a", brain.NewWorldBeliefSubstrate(globex)); err != nil || gok {
+		t.Fatalf("globex must not see acme's reputation: ok=%v err=%v", gok, err)
 	}
 
 	if _, err := srv.GetReputation(context.Background(), &worldpb.GetReputationRequest{Technique: "T1190", ScopeId: "net-a"}); err == nil {
@@ -88,8 +95,9 @@ func TestGetReputation_TenantScoped(t *testing.T) {
 }
 
 // TestGetReputation_NoTrackRecord_ReturnsNeutralPrior proves a technique x
-// environment key nothing has settled yet reports has_track_record=false
-// with the neutral DefaultReputationPrior, never a bare zero.
+// environment key nothing has settled yet reads as no track record with the
+// neutral DefaultReputationPrior, never a bare zero, and that the RPC path
+// over it succeeds.
 func TestGetReputation_NoTrackRecord_ReturnsNeutralPrior(t *testing.T) {
 	ctx, cancel := context.WithCancel(context.Background())
 	defer cancel()
@@ -97,14 +105,18 @@ func TestGetReputation_NoTrackRecord_ReturnsNeutralPrior(t *testing.T) {
 	srv := NewWorldServer(reg, nil)
 
 	tctx := auth.WithTenant(context.Background(), auth.MustNewTenantID("acme"))
-	resp, err := srv.GetReputation(tctx, &worldpb.GetReputationRequest{Technique: "never-seen", ScopeId: "net-a"})
-	if err != nil {
+	if _, err := srv.GetReputation(tctx, &worldpb.GetReputationRequest{Technique: "never-seen", ScopeId: "net-a"}); err != nil {
 		t.Fatalf("GetReputation: %v", err)
 	}
-	if resp.GetHasTrackRecord() {
+	acme := reg.For("acme")
+	prior, ok, err := brain.ReadReputation(context.Background(), "acme", "never-seen", "net-a", brain.NewWorldBeliefSubstrate(acme))
+	if err != nil {
+		t.Fatalf("ReadReputation: %v", err)
+	}
+	if ok {
 		t.Fatal("expected no track record")
 	}
-	if resp.GetPriorStrength() != brain.DefaultReputationPrior {
-		t.Fatalf("prior_strength = %v, want the neutral default %v", resp.GetPriorStrength(), brain.DefaultReputationPrior)
+	if prior != brain.DefaultReputationPrior {
+		t.Fatalf("prior_strength = %v, want the neutral default %v", prior, brain.DefaultReputationPrior)
 	}
 }

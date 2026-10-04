@@ -419,6 +419,12 @@ jobs:
         # gibson#501, ADR-0094 layer 1. The fixture runs first inside the make
         # target, offline.
         run: make check-config-field-readers
+      - name: The proto field consumer gate can fail
+        # gibson#502, ADR-0094 layer 5. The measurement needs six other
+        # checkouts and runs nightly (proto-field-consumers.yml); this is the
+        # offline fixture that proves each rule of the decision half is red
+        # for its stated reason.
+        run: make check-proto-field-consumers-fixture
       - name: Guard gofmt cleanliness
         # gibson#1415: no lane ever CHECKED formatting -- `make fmt` rewrites
         # instead of failing, and .golangci.yml enables no formatter -- so

@@ -195,12 +195,10 @@ func (s *DaemonServer) AckTenantProvisioned(ctx context.Context, req *daemonoper
 		SET status = 'done', updated_at = NOW()
 		WHERE tenant_id = $1 AND status <> 'done'
 	`
-	res, err := db.ExecContext(ctx, q, req.GetTenantId())
-	if err != nil {
+	if _, err := db.ExecContext(ctx, q, req.GetTenantId()); err != nil {
 		return nil, status.Errorf(codes.Internal, "update pending_tenant_provisioning: %v", err)
 	}
-	n, _ := res.RowsAffected()
-	return &daemonoperatorv1.AckTenantProvisionedResponse{Acked: n > 0}, nil
+	return &daemonoperatorv1.AckTenantProvisionedResponse{}, nil
 }
 
 // ensurePendingTenantProvisioningTable creates pending_tenant_provisioning if it

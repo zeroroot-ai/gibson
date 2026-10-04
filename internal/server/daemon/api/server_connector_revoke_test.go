@@ -36,14 +36,13 @@ func TestRevokeConnectorGrant_DelegatesWithTheRequestTenant(t *testing.T) {
 	rev := &fakeGrantRevoker{hadGrant: true}
 	srv := NewDaemonServer(&mockDaemon{}, nil, nil).WithConnectorGrantRevoker(rev)
 
-	resp, err := srv.RevokeConnectorGrant(context.Background(), &daemonoperatorv1.RevokeConnectorGrantRequest{
+	if _, err := srv.RevokeConnectorGrant(context.Background(), &daemonoperatorv1.RevokeConnectorGrantRequest{
 		TenantId: "acme", Connector: "github",
-	})
-	if err != nil {
+	}); err != nil {
 		t.Fatalf("RevokeConnectorGrant: %v", err)
 	}
-	if !resp.GetHadGrant() || rev.tenant != "acme" || rev.connector != "github" {
-		t.Errorf("delegated (%q, %q) had_grant=%v; want (acme, github) true", rev.tenant, rev.connector, resp.GetHadGrant())
+	if rev.tenant != "acme" || rev.connector != "github" {
+		t.Errorf("delegated (%q, %q); want (acme, github)", rev.tenant, rev.connector)
 	}
 }
 

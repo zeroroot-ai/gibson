@@ -66,14 +66,14 @@ func (s *stubDaemonOperator) AckTenantProvisioned(_ context.Context, req *operat
 	if req.GetTenantId() == "deny" {
 		return nil, status.Error(codes.PermissionDenied, "ack denied")
 	}
-	return &operatorv1.AckTenantProvisionedResponse{Acked: true}, nil
+	return &operatorv1.AckTenantProvisionedResponse{}, nil
 }
 
 func (s *stubDaemonOperator) AckTenantOp(_ context.Context, req *operatorv1.AckTenantOpRequest) (*operatorv1.AckTenantOpResponse, error) {
 	if req.GetOpId() == "missing" {
 		return nil, status.Error(codes.NotFound, "tenant op not found")
 	}
-	return &operatorv1.AckTenantOpResponse{Acked: true}, nil
+	return &operatorv1.AckTenantOpResponse{}, nil
 }
 
 // DiscoveryService: ListAgents(query=nil) → ok, ListAgents(query.PageSize=999) →

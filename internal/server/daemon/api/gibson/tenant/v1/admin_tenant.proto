@@ -162,7 +162,12 @@ service AdminTenantService {
 // PendingRegistration is one registration awaiting an administrator's
 // decision. It carries what a person needs to decide and nothing more.
 message PendingRegistration {
+  // Removed in gibson#502: served and never read by any consumer.
+  reserved 7;
+  reserved "registered_at";
   // registration_id names this registration in an approve or reject call.
+  // Held under gibson#620: no consumer reads it yet, and AdminApproveRegistration
+  // requires it.
   string registration_id = 1;
   // owner_email is the address that registered.
   string owner_email = 2;
@@ -174,8 +179,6 @@ message PendingRegistration {
   // owner_first_name / owner_last_name are the profile fields they supplied.
   string owner_first_name = 5;
   string owner_last_name = 6;
-  // registered_at is when the registration arrived, RFC 3339.
-  string registered_at = 7;
 }
 
 // AdminListPendingRegistrationsRequest asks for the queue.

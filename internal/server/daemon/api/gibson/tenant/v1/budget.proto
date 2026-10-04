@@ -174,5 +174,7 @@ message SetTenantBudgetDefaultsRequest {
 }
 
 message SetTenantBudgetDefaultsResponse {
-  int64 applied_at_unix = 1;
+  // Removed in gibson#502: served and never read by any consumer.
+  reserved 1;
+  reserved "applied_at_unix";
 }

@@ -9,7 +9,7 @@
 // Why: authz-registry-gen takes a single -input FDS, but the daemon
 // registers RPC methods from both the pinned-SDK protos
 // (gibson.admin.v1.*, gibson.daemon.v1.*) AND a set of daemon-local
-// protos that aren't in the SDK (gibson.tenant.v1.*, gibson.user.v1.*,
+// protos that aren't in the SDK (gibson.tenant.v1.*,
 // gibson.platform.v1.*). The runtime registry coverage check fails fast
 // on any registered method that's missing from the registry, so both
 // sets must be in the FDS the codegen tool processes.

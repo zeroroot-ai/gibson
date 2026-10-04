@@ -355,17 +355,17 @@ func TestRedis_AuthzRegistry(t *testing.T) {
 	t.Parallel()
 
 	memberRPCs := []string{
-		"/gibson.user.v1.UserService/GetUserOnboardingState",
-		"/gibson.user.v1.UserService/UpdateUserOnboardingState",
-		"/gibson.user.v1.UserService/ResetUserOnboardingState",
-		"/gibson.user.v1.UserService/GetUserLayout",
-		"/gibson.user.v1.UserService/SaveUserLayout",
-		"/gibson.user.v1.UserService/ResetUserLayout",
-		"/gibson.user.v1.UserService/GetUserActivity",
-		"/gibson.user.v1.UserService/RecordUserActivity",
-		"/gibson.user.v1.UserService/StageAttachment",
-		"/gibson.user.v1.UserService/ConsumeAttachment",
-		"/gibson.user.v1.UserService/InvalidateMembershipCache",
+		"/gibson.tenant.v1.UserService/GetUserOnboardingState",
+		"/gibson.tenant.v1.UserService/UpdateUserOnboardingState",
+		"/gibson.tenant.v1.UserService/ResetUserOnboardingState",
+		"/gibson.tenant.v1.UserService/GetUserLayout",
+		"/gibson.tenant.v1.UserService/SaveUserLayout",
+		"/gibson.tenant.v1.UserService/ResetUserLayout",
+		"/gibson.tenant.v1.UserService/GetUserActivity",
+		"/gibson.tenant.v1.UserService/RecordUserActivity",
+		"/gibson.tenant.v1.UserService/StageAttachment",
+		"/gibson.tenant.v1.UserService/ConsumeAttachment",
+		"/gibson.tenant.v1.UserService/InvalidateMembershipCache",
 	}
 	for _, m := range memberRPCs {
 		m := m
@@ -383,7 +383,7 @@ func TestRedis_AuthzRegistry(t *testing.T) {
 	// GetSignupProgress is deliberately unauthenticated (pre-login signup flow).
 	t.Run("GetSignupProgress_legitimately_unauthenticated", func(t *testing.T) {
 		t.Parallel()
-		entry, ok := registry.Registry["/gibson.user.v1.UserService/GetSignupProgress"]
+		entry, ok := registry.Registry["/gibson.tenant.v1.UserService/GetSignupProgress"]
 		require.True(t, ok, "GetSignupProgress must be in authz registry")
 		assert.True(t, entry.Unauthenticated,
 			"GetSignupProgress is legitimately unauthenticated (pre-login signup flow)")

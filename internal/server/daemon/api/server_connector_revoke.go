@@ -18,6 +18,7 @@ import (
 	"google.golang.org/grpc/status"
 
 	daemonoperatorv1 "github.com/zeroroot-ai/gibson/internal/server/daemon/api/gibson/daemon/operator/v1"
+	tenantv1 "github.com/zeroroot-ai/gibson/internal/server/daemon/api/gibson/tenant/v1"
 	"github.com/zeroroot-ai/sdk/auth"
 )
 
@@ -40,12 +41,12 @@ func (s *DaemonServer) WithConnectorGrantRevoker(r ConnectorGrantRevoker) *Daemo
 // RevokeConnectorGrant revokes the named tenant's connector grant for the
 // connector-operator finalizer. Operator-only (platform_operator on
 // system_tenant at ext-authz, plus the SPIFFE peer method policy). Idempotent:
-// a connector with no grant is had_grant=false.
+// a connector with no grant succeeds too.
 //
 // gibsoncheck:allow tenant-from-request — DaemonOperatorService: platform_operator on
 // system_tenant at ext-authz, plus the SPIFFE peer method policy. The operator
 // finalizes ConnectorInstances in every tenant namespace by design.
-func (s *DaemonServer) RevokeConnectorGrant(ctx context.Context, req *daemonoperatorv1.RevokeConnectorGrantRequest) (*daemonoperatorv1.RevokeConnectorGrantResponse, error) {
+func (s *DaemonServer) RevokeConnectorGrant(ctx context.Context, req *daemonoperatorv1.RevokeConnectorGrantRequest) (*tenantv1.RevokeConnectorGrantResponse, error) {
 	if s.connectorGrantRevoker == nil {
 		return nil, status.Error(codes.Unavailable, "connector grant revocation is not configured on this daemon")
 	}
@@ -66,5 +67,7 @@ func (s *DaemonServer) RevokeConnectorGrant(ctx context.Context, req *daemonoper
 	s.logger.Info("connector grant revoked by operator finalizer",
 		"tenant", tenant.String(), "connector", connector,
 		"had_grant", hadGrant, "vendor_revoked", vendorRevoked)
-	return &daemonoperatorv1.RevokeConnectorGrantResponse{HadGrant: hadGrant, VendorRevoked: vendorRevoked}, nil
+	// The response carries no fields (gibson#502): the finalizer only needs
+	// the call to succeed. The log line above is the record of what it found.
+	return &tenantv1.RevokeConnectorGrantResponse{}, nil
 }

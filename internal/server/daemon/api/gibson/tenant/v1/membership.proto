@@ -589,8 +589,9 @@ message SetComponentAccessRequest {
 }
 
 message SetComponentAccessResponse {
-  int32 tuples_written = 1;
-  int32 tuples_deleted = 2;
+  // Removed in gibson#502: served and never read by any consumer.
+  reserved 1, 2;
+  reserved "tuples_written", "tuples_deleted";
 }
 
 // ---------------------------------------------------------------------------

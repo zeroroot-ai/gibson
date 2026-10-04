@@ -1,0 +1,70 @@
+# ----------------------------------------------------------------------------
+# proto-field-consumers — every daemon-owned proto field has a consumer.
+#
+# ADR-0094 layer 5 (gibson#502). The consumer set spans seven repositories,
+# so this runs on main and daily, never on a pull request. The decision half
+# of the gate is proven on every PR by scripts/__tests__/
+# check-proto-field-consumers.test.sh (go-ci); this workflow is the
+# measurement half, against checked-out consumers at their main.
+#
+# Every consumer is public, so the default token reads them all. A private
+# consumer would need GH_PAT_PLATFORM_RO like the exit tests use for hosted.
+# ----------------------------------------------------------------------------
+name: proto-field-consumers
+
+on:
+  push:
+    branches: [main]
+    paths:
+      - 'internal/server/daemon/api/**/*.proto'
+      - 'scripts/check-proto-field-consumers.sh'
+      - 'scripts/proto-field-consumers-exempt.txt'
+      - 'tools/protofieldreads/**'
+      - '.github/workflows/proto-field-consumers.yml'
+  schedule:
+    # Daily. A consumer that drops its last read of a field changes nothing
+    # in this repo, so only a schedule sees it.
+    - cron: '45 5 * * *'
+  workflow_dispatch: {}
+
+concurrency:
+  group: proto-field-consumers-${{ github.ref }}
+  cancel-in-progress: true
+
+permissions:
+  contents: read
+
+jobs:
+  scan:
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    steps:
+      - name: Checkout gibson
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          path: gibson
+
+      - name: Checkout the six other consumers
+        # Each at its main. The gate fails when a root is missing, so a
+        # checkout that silently skipped would be caught, not ignored.
+        run: |
+          set -euo pipefail
+          for r in sdk adk gibson-executor setec dashboard sdk-ts; do
+            git clone --quiet --depth 1 "https://x-access-token:${GH_TOKEN}@github.com/zeroroot-ai/${r}.git" "consumers/${r}"
+            echo "${r} $(git -C "consumers/${r}" rev-parse --short HEAD)"
+          done
+        env:
+          GH_TOKEN: ${{ github.token }}
+
+      - name: Set up Go
+        uses: actions/setup-go@b7ad1dad31e06c5925ef5d2fc7ad053ef454303e # v5
+        with:
+          go-version-file: gibson/go.mod
+          cache-dependency-path: gibson/go.sum
+
+      - name: Every served proto field has a consumer or a recorded verdict
+        working-directory: gibson
+        run: |
+          bash scripts/__tests__/check-proto-field-consumers.test.sh
+          CONSUMER_ROOTS=". ../consumers/sdk ../consumers/adk ../consumers/gibson-executor ../consumers/setec ../consumers/dashboard ../consumers/sdk-ts" \
+            bash scripts/check-proto-field-consumers.sh

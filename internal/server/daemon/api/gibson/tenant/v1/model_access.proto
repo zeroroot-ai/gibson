@@ -95,6 +95,9 @@ message CandidateOutcome {
 
 // ModelResolutionEvent records every slot resolution, regardless of outcome.
 message ModelResolutionEvent {
+  // Removed in gibson#502: served and never read by any consumer.
+  reserved 9;
+  reserved "considered";
   string tenant_id = 1;
   string user_id = 2;
   string mission_id = 3;
@@ -103,7 +106,6 @@ message ModelResolutionEvent {
   string slot_name = 6;
   string chosen_provider = 7;
   string chosen_model = 8;
-  repeated CandidateOutcome considered = 9;
   int64 timestamp_unix = 10;
 }
 
@@ -127,7 +129,9 @@ message RevokeAccessRequest {
 }
 
 message RevokeAccessResponse {
-  int64 revoked_at_unix = 1;
+  // Removed in gibson#502: served and never read by any consumer.
+  reserved 1;
+  reserved "revoked_at_unix";
 }
 
 message ListAccessRequest {

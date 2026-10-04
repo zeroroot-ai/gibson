@@ -115,9 +115,6 @@ func TestRegister_CreatesADeactivatedAccountAndNoTenant(t *testing.T) {
 	if got.GetOwnerEmail() != "owner@example.com" || got.GetWorkspaceName() != "Acme Research" {
 		t.Errorf("queue entry = %+v, want the registered address and workspace", got)
 	}
-	if got.GetRegisteredAt() == "" {
-		t.Error("an administrator deciding a queue needs to see when each entry arrived")
-	}
 }
 
 // If the account cannot be put beyond use it is DELETED. An account nobody

@@ -5,9 +5,7 @@ package api
 
 import (
 	"context"
-	"encoding/json"
 	"errors"
-	"fmt"
 
 	"google.golang.org/grpc/codes"
 	status_grpc "google.golang.org/grpc/status"
@@ -88,34 +86,6 @@ func ontologyProposalKind(k tenantv1.OntologyProposalKind) (taxonomy.ProposalKin
 	}
 }
 
-// ontologyProposalKindPB converts the taxonomy vocabulary back to its wire
-// enum for ListOntologyExtensionProposals' response view.
-func ontologyProposalKindPB(k taxonomy.ProposalKind) tenantv1.OntologyProposalKind {
-	switch k {
-	case taxonomy.ProposedNodeLabel:
-		return tenantv1.OntologyProposalKind_ONTOLOGY_PROPOSAL_KIND_NODE_LABEL
-	case taxonomy.ProposedRelationshipType:
-		return tenantv1.OntologyProposalKind_ONTOLOGY_PROPOSAL_KIND_RELATIONSHIP_TYPE
-	default:
-		return tenantv1.OntologyProposalKind_ONTOLOGY_PROPOSAL_KIND_UNSPECIFIED
-	}
-}
-
-// ontologyProposalStatusPB converts brain.OntologyProposalStatus to its wire
-// enum.
-func ontologyProposalStatusPB(s brain.OntologyProposalStatus) tenantv1.OntologyProposalStatus {
-	switch s {
-	case brain.OntologyProposalPending:
-		return tenantv1.OntologyProposalStatus_ONTOLOGY_PROPOSAL_STATUS_PENDING
-	case brain.OntologyProposalApproved:
-		return tenantv1.OntologyProposalStatus_ONTOLOGY_PROPOSAL_STATUS_APPROVED
-	case brain.OntologyProposalRejected:
-		return tenantv1.OntologyProposalStatus_ONTOLOGY_PROPOSAL_STATUS_REJECTED
-	default:
-		return tenantv1.OntologyProposalStatus_ONTOLOGY_PROPOSAL_STATUS_UNSPECIFIED
-	}
-}
-
 // ListOntologyExtensionProposals returns every ontology/taxonomy extension
 // proposal this tenant's agents have made, pending and decided alike, so the
 // tenant owner has full visibility into what agents are proposing
@@ -127,23 +97,11 @@ func (s *OntologyExtensionService) ListOntologyExtensionProposals(
 	if err != nil {
 		return nil, err
 	}
-	snapshot := e.OntologyProposals()
-	out := make([]*tenantv1.OntologyExtensionProposal, 0, len(snapshot))
-	for _, p := range snapshot {
-		out = append(out, &tenantv1.OntologyExtensionProposal{
-			Kind:                    ontologyProposalKindPB(p.ProposalKind),
-			Label:                   p.Label,
-			Recurrence:              int32Count(p.Recurrence),
-			LastProposer:            p.LastProposer,
-			LastClaim:               p.LastClaim,
-			Status:                  ontologyProposalStatusPB(p.Status),
-			Reviewer:                p.Reviewer,
-			RejectReason:            p.RejectReason,
-			Promoted:                p.Promoted,
-			PromotedTaxonomyVersion: int32Count(p.PromotedVersion),
-		})
-	}
-	return &tenantv1.ListOntologyExtensionProposalsResponse{Proposals: out}, nil
+	// The response carries no proposals (gibson#502): no consumer ever read
+	// the list. The engine call stays so an unavailable tenant engine is
+	// still reported.
+	_ = e
+	return &tenantv1.ListOntologyExtensionProposalsResponse{}, nil
 }
 
 // ApproveOntologyExtensionProposal is the tenant owner's explicit approval of
@@ -227,21 +185,9 @@ func (s *OntologyExtensionService) SubmitOntologyExtensionUpstream(
 	if err != nil {
 		return nil, ontologyDecisionError("SubmitOntologyExtensionUpstream", err)
 	}
-	packJSON, err := json.MarshalIndent(pack, "", "  ")
-	if err != nil {
-		return nil, status_grpc.Errorf(codes.Internal, "SubmitOntologyExtensionUpstream: encode pack fragment: %v", err)
-	}
-	return &tenantv1.SubmitOntologyExtensionUpstreamResponse{
-		PackJson:          packJSON,
-		SuggestedFilePath: "packs/" + pack.Name + ".json",
-		SuggestedPrTitle:  "Add domain pack contribution: " + pack.Name,
-		SuggestedPrBody: fmt.Sprintf(
-			"Contributed by tenant %q via submit-upstream (gibson#393, ADR-0033).\n\n"+
-				"This adds %s %q as a candidate Domain Pack fragment for platform-owner review. "+
-				"See packs/%s.json for the rendered content.",
-			pack.Author, kind, label, pack.Name,
-		),
-	}, nil
+	// The rendered pack is not returned (gibson#502): no consumer read it.
+	_ = pack
+	return &tenantv1.SubmitOntologyExtensionUpstreamResponse{}, nil
 }
 
 // ontologyDecisionError maps Engine.ApproveOntologyExtension/RejectOntologyExtension's

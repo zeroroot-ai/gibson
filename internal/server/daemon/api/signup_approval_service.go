@@ -45,7 +45,6 @@ import (
 	"encoding/json"
 	"errors"
 	"strings"
-	"time"
 
 	"google.golang.org/grpc/codes"
 	"google.golang.org/grpc/status"
@@ -224,7 +223,6 @@ func (s *DaemonServer) AdminListPendingRegistrations(ctx context.Context, req *t
 			Tier:           r.Tier,
 			OwnerFirstName: r.OwnerFirstName,
 			OwnerLastName:  r.OwnerLastName,
-			RegisteredAt:   r.CreatedAt.UTC().Format(time.RFC3339),
 		})
 	}
 	return resp, nil
