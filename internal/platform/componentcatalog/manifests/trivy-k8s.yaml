@@ -2,12 +2,16 @@
 # Source: `gibson-runner --list-tools` from the image below.
 # Regenerate with `make tool-manifests`; capture a new image with
 # `make tool-catalog-capture IMAGE=…@sha256:…`.
-id: nmap
+id: trivy-k8s
 kind: tool
-displayName: nmap
+displayName: trivy-k8s
 description: >-
-  TCP/UDP port scanner with service + OS detection. Returns typed
-  Host/Port/Service nodes for the knowledge graph.
+  Kubernetes workload misconfiguration checks through the Kubernetes API:
+  privileged containers, host namespaces, hostPath mounts, added
+  capabilities, missing security contexts. Emits one Finding per failed
+  check at the severity trivy reports, a Workload node per resource audited,
+  and a ClusterAudit node listing every resource that could not be read.
+  Needs a kubeconfig that the daemon supplies from a tenant secret.
 # A scanner reaches the mission's targets. The effective egress of a tool
 # launch is bounded by the dispatching agent's ceiling (ADR-0016), so this
 # is a ceiling, not a grant.
@@ -19,5 +23,5 @@ spec:
   image: ghcr.io/zeroroot-ai/gibson-executor@sha256:1e244f2c4eb91d0cd3e83b565faf230457da65f57e0103f3d3a39cddd113684a
   command: gibson-runner
   resources:
-    vcpu: 2
-    memory: 512Mi
+    vcpu: 1
+    memory: 1Gi

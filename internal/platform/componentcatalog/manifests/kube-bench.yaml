@@ -2,12 +2,15 @@
 # Source: `gibson-runner --list-tools` from the image below.
 # Regenerate with `make tool-manifests`; capture a new image with
 # `make tool-catalog-capture IMAGE=…@sha256:…`.
-id: nmap
+id: kube-bench
 kind: tool
-displayName: nmap
+displayName: kube-bench
 description: >-
-  TCP/UDP port scanner with service + OS detection. Returns typed
-  Host/Port/Service nodes for the knowledge graph.
+  CIS Kubernetes Benchmark, policies section (RBAC, pod security, network
+  policy, secrets), run through the Kubernetes API. Emits one Finding per
+  control that failed and a BenchmarkRun node that lists every control not
+  assessed. Needs a kubeconfig that the daemon supplies from a tenant
+  secret.
 # A scanner reaches the mission's targets. The effective egress of a tool
 # launch is bounded by the dispatching agent's ceiling (ADR-0016), so this
 # is a ceiling, not a grant.
@@ -19,5 +22,5 @@ spec:
   image: ghcr.io/zeroroot-ai/gibson-executor@sha256:1e244f2c4eb91d0cd3e83b565faf230457da65f57e0103f3d3a39cddd113684a
   command: gibson-runner
   resources:
-    vcpu: 2
+    vcpu: 1
     memory: 512Mi
