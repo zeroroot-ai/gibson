@@ -42,6 +42,7 @@ import (
 	"github.com/zeroroot-ai/gibson/internal/platform/tenantrole"
 
 	connectorv1alpha1 "github.com/zeroroot-ai/gibson/operators/connector/api/v1alpha1"
+	platformv1alpha1 "github.com/zeroroot-ai/gibson/operators/platform/api/v1alpha1"
 	gibsonv1alpha1 "github.com/zeroroot-ai/gibson/operators/tenant/api/v1alpha1"
 	"github.com/zeroroot-ai/gibson/operators/tenant/internal/clients"
 	"github.com/zeroroot-ai/gibson/operators/tenant/internal/clients/fga"
@@ -84,6 +85,9 @@ func init() {
 	// ConnectorInstance is the connector-operator's CRD; the tenant-operator
 	// watches it to converge the connector's FGA component tuples (ADR-0067).
 	utilruntime.Must(connectorv1alpha1.AddToScheme(scheme))
+	// The declared OIDC clients of a TenantIdentity are minted through the
+	// platform-operator's OIDCClient kind (gibson#597).
+	utilruntime.Must(platformv1alpha1.AddToScheme(scheme))
 	// +kubebuilder:scaffold:scheme
 
 	gibsonmetrics.Register()

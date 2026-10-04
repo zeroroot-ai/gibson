@@ -28,6 +28,7 @@ rules:
   - gibson.zeroroot.ai
   resources:
   - agentenrollments
+  - oidcclients
   - tenantdataplanes
   - tenantgrants
   - tenantidentities
@@ -77,4 +78,12 @@ rules:
   - get
   - list
   - update
+  - watch
+- apiGroups:
+  - gibson.zeroroot.ai
+  resources:
+  - platformbootstraps
+  verbs:
+  - get
+  - list
   - watch
