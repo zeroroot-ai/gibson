@@ -278,15 +278,6 @@ internal/engine/harness/sandboxed/executor.go	New
 internal/engine/harness/schema_gen.go	SchemaFromType
 internal/engine/harness/schema_gen.go	TypeName
 internal/engine/harness/structured.go	CompleteStructured
-internal/engine/harness/tool_validator.go	IsDiscoveryTool
-internal/engine/harness/tool_validator.go	ListDiscoveryTools
-internal/engine/harness/tool_validator.go	NewToolValidator
-internal/engine/harness/tool_validator.go	RegisterDiscoveryTool
-internal/engine/harness/tool_validator.go	ToolValidator.ValidateDiscoveryCompliance
-internal/engine/harness/tool_validator.go	ToolValidator.countEntities
-internal/engine/harness/tool_validator.go	ToolValidator.isDiscoveryTool
-internal/engine/harness/tool_validator.go	ToolValidator.recordMetrics
-internal/engine/harness/tool_validator.go	UnregisterDiscoveryTool
 internal/engine/llm/errors.go	IsRetryable
 internal/engine/llm/errors.go	NewCompletionError
 internal/engine/llm/errors.go	NewContextExceededError

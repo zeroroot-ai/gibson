@@ -11,6 +11,8 @@ import (
 	"github.com/prometheus/client_golang/prometheus/promauto"
 	sdkgraphrag "github.com/zeroroot-ai/sdk/graphrag"
 	"google.golang.org/protobuf/proto"
+
+	"github.com/zeroroot-ai/gibson/internal/platform/componentcatalog"
 )
 
 // Prometheus metrics for tool validation
@@ -38,21 +40,19 @@ var (
 // Tools in this category are expected to populate field 100 DiscoveryResult.
 const DiscoveryCategory = "discovery"
 
-// knownDiscoveryTools is the set of tools known to be in the discovery category.
-// These tools are expected to populate field 100 DiscoveryResult in their response proto.
-// If they don't, a warning is logged but execution continues.
-var knownDiscoveryTools = map[string]bool{
-	"nmap":      true,
-	"httpx":     true,
-	"nuclei":    true,
-	"subfinder": true,
-	"dnsx":      true,
-	"masscan":   true,
-	"amass":     true,
-	"ffuf":      true,
-	"gobuster":  true,
-	"katana":    true,
-}
+// Which tools are expected to populate field 100 DiscoveryResult is a CATALOG
+// question, answered by componentcatalog.IsDiscoveryTool.
+//
+// It used to be a hand-written map here, and it had drifted both ways: it named
+// amass, ffuf, gobuster and katana, which the executor does not ship and which
+// could therefore never be looked up, and it omitted naabu, tlsx, trivy,
+// kube-bench and trivy-k8s, which it does. A list of tool names kept beside the
+// dispatch path, rather than derived from the manifests generated out of the
+// executor image, drifts the moment a tool ships.
+//
+// The map was also mutable at package scope, with exported Register/Unregister
+// functions whose only callers were this package's own tests — an unsynchronised
+// global waiting for its first concurrent writer.
 
 // ToolValidator validates tool response protos for compliance with extraction requirements.
 // It checks if discovery-category tools properly populate field 100 DiscoveryResult
@@ -161,9 +161,9 @@ func (v *ToolValidator) ValidateDiscoveryCompliance(ctx context.Context, toolNam
 	return result
 }
 
-// isDiscoveryTool checks if a tool is in the discovery category.
+// isDiscoveryTool asks the catalog whether this tool emits a DiscoveryResult.
 func (v *ToolValidator) isDiscoveryTool(toolName string) bool {
-	return knownDiscoveryTools[toolName]
+	return componentcatalog.IsDiscoveryTool(toolName)
 }
 
 // countEntities counts the total number of entities in a DiscoveryResult.
@@ -202,30 +202,4 @@ func (v *ToolValidator) recordMetrics(result ToolValidationResult, missionRunID 
 	if result.SkipReason != "" {
 		toolExtractionSkippedTotal.WithLabelValues(result.ToolName, result.SkipReason, missionRunID).Inc()
 	}
-}
-
-// RegisterDiscoveryTool adds a tool to the known discovery tools set.
-// This is useful for dynamically registering tools that should comply with
-// discovery requirements.
-func RegisterDiscoveryTool(toolName string) {
-	knownDiscoveryTools[toolName] = true
-}
-
-// UnregisterDiscoveryTool removes a tool from the known discovery tools set.
-func UnregisterDiscoveryTool(toolName string) {
-	delete(knownDiscoveryTools, toolName)
-}
-
-// IsDiscoveryTool checks if a tool is in the known discovery tools set.
-func IsDiscoveryTool(toolName string) bool {
-	return knownDiscoveryTools[toolName]
-}
-
-// ListDiscoveryTools returns a list of all known discovery tools.
-func ListDiscoveryTools() []string {
-	tools := make([]string, 0, len(knownDiscoveryTools))
-	for tool := range knownDiscoveryTools {
-		tools = append(tools, tool)
-	}
-	return tools
 }
