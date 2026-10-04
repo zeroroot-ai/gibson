@@ -78,9 +78,10 @@ func engineWithHeldDispatch() *Engine {
 // report node after them. No instance depends on another: the ceiling is the
 // only thing that holds them back.
 func boundedFanOut(id string, limit int) MissionProjected {
-	nodes := make([]WorkNode, 0, 6)
-	var ids []string
-	for _, k := range []string{"a", "b", "c", "d", "e"} {
+	keys := []string{"a", "b", "c", "d", "e"}
+	nodes := make([]WorkNode, 0, len(keys)+1)
+	ids := make([]string, 0, len(keys))
+	for _, k := range keys {
 		nodes = append(nodes, WorkNode{ID: "scan#" + k, Kind: "tool", Target: "nmap", DependentsRunOnFailure: true, Group: "each", Limit: limit})
 		ids = append(ids, "scan#"+k)
 	}

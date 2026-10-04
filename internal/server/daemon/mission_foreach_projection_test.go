@@ -523,8 +523,9 @@ func sortedWorkIDs(nodes []brain.WorkNode) []string {
 // Group and the limit as its Limit, with no ordering among the sub-nodes. Before
 // this the field was rendered in the graph summary and read by nothing.
 func TestParallel_MaxConcurrencyIsASchedulerCeiling(t *testing.T) {
-	subs := []*missionpb.MissionNode{}
-	for _, id := range []string{"s1", "s2", "s3"} {
+	subIDs := []string{"s1", "s2", "s3"}
+	subs := make([]*missionpb.MissionNode, 0, len(subIDs))
+	for _, id := range subIDs {
 		n := toolNode(id)
 		n.Id = id
 		subs = append(subs, n)
