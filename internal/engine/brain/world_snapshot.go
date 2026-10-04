@@ -75,6 +75,7 @@ type worldSnapshotData struct {
 	NextObservationID uint64 `json:"next_observation_id"`
 	NextEntityID      uint64 `json:"next_entity_id"`
 	NextHypothesisID  uint64 `json:"next_hypothesis_id"`
+	NextCompletedSeq  uint64 `json:"next_completed_seq"`
 }
 
 // SnapshotWorld serializes the current World into a WorldSnapshot at atSeq.
@@ -113,6 +114,7 @@ func SnapshotWorld(w *World, atSeq string) WorldSnapshot {
 		NextObservationID: w.nextObservationID,
 		NextEntityID:      w.nextEntityID,
 		NextHypothesisID:  w.nextHypothesisID,
+		NextCompletedSeq:  w.nextCompletedSeq,
 	}
 	b, _ := json.Marshal(data)
 	return WorldSnapshot{AtSeq: atSeq, Data: b}
@@ -212,6 +214,11 @@ func RestoreWorld(snap WorldSnapshot, tenant string) (*World, error) {
 			// tail replay will correct any scheduler state that depends on this).
 			Reduce(w, WorkCompleted{ID: wi.ID, Result: wi.Result})
 			// WorkRunning: already created as running by WorkDispatched — no extra event.
+		}
+		// The restore replays completions in snapshot order, which is not the
+		// Timeline order a join's FIRST/LAST read. Put the recorded order back.
+		if ent, ok := findWork(w, wi.ID); ok {
+			w.work.Get(ent).CompletedSeq = wi.CompletedSeq
 		}
 	}
 
@@ -490,6 +497,7 @@ func RestoreWorld(snap WorldSnapshot, tenant string) (*World, error) {
 		})
 	}
 	w.nextHypothesisID = data.NextHypothesisID
+	w.nextCompletedSeq = data.NextCompletedSeq
 
 	return w, nil
 }

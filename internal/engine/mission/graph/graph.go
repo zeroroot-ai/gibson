@@ -102,14 +102,13 @@ func analyse(def *missionv1.MissionDefinition) (*analysis, *ValidationError) {
 	orphans := findOrphans(nodes, edges, entry)
 	// The fan-out refusals come from the same finder the run path calls, so the
 	// mission view and a submitted run cannot disagree about what is supported.
-	nested, joinMerge := findFanOutRefusals(nodes)
-	if len(dangling) > 0 || len(orphans) > 0 || len(cycles) > 0 || len(nested) > 0 || len(joinMerge) > 0 {
+	nested := findNestedForEach(nodes)
+	if len(dangling) > 0 || len(orphans) > 0 || len(cycles) > 0 || len(nested) > 0 {
 		return nil, &ValidationError{
-			DanglingEdges:   dangling,
-			OrphanNodes:     orphans,
-			Cycles:          cycles,
-			NestedForEach:   nested,
-			FanOutJoinMerge: joinMerge,
+			DanglingEdges: dangling,
+			OrphanNodes:   orphans,
+			Cycles:        cycles,
+			NestedForEach: nested,
 		}
 	}
 	return &analysis{nodes: nodes, edges: edges, entry: entry, exit: exit}, nil
@@ -249,18 +248,11 @@ func collectNode(id string, n *missionv1.MissionNode, into map[string]*missionv1
 // how already-stored definitions behave and that is not this function's call to
 // make.
 func RefuseUnsupportedFanOut(nodes map[string]*missionv1.MissionNode) error {
-	nested, joinMerge := findFanOutRefusals(nodes)
-	if len(nested) == 0 && len(joinMerge) == 0 {
+	nested := findNestedForEach(nodes)
+	if len(nested) == 0 {
 		return nil // a nil literal, so no caller meets a typed nil in an error
 	}
-	return &ValidationError{NestedForEach: nested, FanOutJoinMerge: joinMerge}
-}
-
-// findFanOutRefusals is the one implementation of the two fan-out refusals,
-// returning them separately so Project can report them alongside topology and
-// RefuseUnsupportedFanOut can report them alone.
-func findFanOutRefusals(nodes map[string]*missionv1.MissionNode) ([]string, []FanOutJoinMerge) {
-	return findNestedForEach(nodes), findFanOutJoinMerge(nodes)
+	return &ValidationError{NestedForEach: nested}
 }
 
 // findNestedForEach names every for_each whose template is itself a for_each.
@@ -284,60 +276,6 @@ func findNestedForEach(nodes map[string]*missionv1.MissionNode) []string {
 	}
 	sort.Strings(out)
 	return out
-}
-
-// findFanOutJoinMerge names every join that declares a merge rule over a for_each
-// source.
-//
-// The refusal is here and not in protovalidate because it is a cross-node
-// property: whether a join's merge rule is meaningful depends on the type of the
-// node its wait_for names, which the join's own message cannot see.
-//
-// Sorted by join id then source, so a message with several does not reorder
-// between runs.
-func findFanOutJoinMerge(nodes map[string]*missionv1.MissionNode) []FanOutJoinMerge {
-	var out []FanOutJoinMerge
-	for _, id := range sortedNodeKeys(nodes) {
-		j := nodes[id].GetJoinConfig()
-		if j == nil {
-			continue
-		}
-		rule := declaredMergeRule(j)
-		if rule == "" {
-			continue
-		}
-		for _, w := range j.GetWaitFor() {
-			src, ok := nodes[w]
-			if !ok || src.GetForEachConfig() == nil {
-				continue
-			}
-			out = append(out, FanOutJoinMerge{Join: id, Source: w, Strategy: rule})
-		}
-	}
-	sort.Slice(out, func(i, k int) bool {
-		if out[i].Join != out[k].Join {
-			return out[i].Join < out[k].Join
-		}
-		return out[i].Source < out[k].Source
-	})
-	return out
-}
-
-// declaredMergeRule names the merge rule a join declares, or "" when it declares
-// none.
-//
-// MERGE_STRATEGY_UNSPECIFIED with an empty aggregator is "no rule" — the join is
-// pure ordering, which is what a join is. An aggregator is reported even without
-// MERGE_STRATEGY_CUSTOM, because an author who wrote an expression expects it to
-// run whatever the strategy field says.
-func declaredMergeRule(j *missionv1.JoinNodeConfig) string {
-	if j.GetAggregator() != "" {
-		return "a custom aggregator"
-	}
-	if j.GetStrategy() != missionv1.MergeStrategy_MERGE_STRATEGY_UNSPECIFIED {
-		return "merge strategy " + j.GetStrategy().String()
-	}
-	return ""
 }
 
 // buildEdges assembles the deterministic edge list and reports dangling

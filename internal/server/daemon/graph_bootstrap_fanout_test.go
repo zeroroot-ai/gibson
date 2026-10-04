@@ -200,9 +200,9 @@ func TestBootstrap_DependenciesComeFromTheResolvedProjection(t *testing.T) {
 		fanTarget("22222222-2222-2222-2222-222222222222", "b", "https://10.0.0.2:6443"),
 	}
 	def := forEachDef(0)
-	// `after` depends on the join, which waits on the for_each. Its dependencies
-	// list names "report", a node that is never work — so the only way the edge
-	// reaches the graph is through the projection's resolution.
+	// `after` depends on the join, which waits on the for_each. The join is a
+	// node of its own (gibson#543), so the edges the graph gets are the ones the
+	// projection resolved: after → report, and report → each instance.
 	def.Nodes["after"] = agentNode("writer", "report")
 
 	proj, origins, err := missionDefinitionToProjected(def, "", targets)
@@ -216,9 +216,9 @@ func TestBootstrap_DependenciesComeFromTheResolvedProjection(t *testing.T) {
 		t.Fatalf("bootstrap: %v", err)
 	}
 
-	// `after` waits on both instances, so two edges — one per target.
-	if got := client.dependencyWriteCount(); got != 2 {
-		t.Errorf("wrote %d dependency edges, want 2 (one per fan-out instance)", got)
+	// after → report, plus report → one edge per fan-out instance.
+	if got := client.dependencyWriteCount(); got != 3 {
+		t.Errorf("wrote %d dependency edges, want 3 (after → join, join → each of two instances)", got)
 	}
 }
 

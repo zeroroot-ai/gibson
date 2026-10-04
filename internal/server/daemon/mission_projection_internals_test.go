@@ -69,10 +69,11 @@ func TestMakeResolver_UnknownIDIsLiteral(t *testing.T) {
 	}
 }
 
-// A join that waits on itself, directly or through another join, terminates. The
-// resolver walks wait_for lists, so a cycle there would recurse forever and take
-// the whole projection with it.
-func TestMakeResolver_JoinCycleTerminates(t *testing.T) {
+// A join resolves to itself: it is a node of its own since gibson#543, so a
+// dependency on a join waits for the merged value, not for the join's sources.
+// Two joins that wait on each other still terminate in the resolver; they are
+// a cycle the brain leaves dead, which fails the mission mechanically.
+func TestMakeResolver_JoinResolvesToItself(t *testing.T) {
 	all := map[string]*missionpb.MissionNode{
 		"j1": {
 			Id:   "j1",
@@ -92,8 +93,8 @@ func TestMakeResolver_JoinCycleTerminates(t *testing.T) {
 	}
 	got := makeResolver(all)("j1")
 	sort.Strings(got)
-	if len(got) != 1 || got[0] != "a" {
-		t.Errorf("resolve(j1) = %v, want the one real node behind the cycle", got)
+	if len(got) != 1 || got[0] != "j1" {
+		t.Errorf("resolve(j1) = %v, want the join itself", got)
 	}
 }
 
