@@ -119,7 +119,7 @@ func (p *nativeSliceBelief) ScoreSlice(slice AttackGraph) map[string]NodeBelief 
 		if vb, ok := byVar["juicy"]; ok {
 			b.Juicy = vb.True
 		}
-		out[n.ID] = NodeBelief{Belief: b}
+		out[n.ID] = NodeBelief{Belief: b, CauseEdgeTypes: sliceCauseEdgeTypes(slice, n.ID)}
 	}
 	return out
 }

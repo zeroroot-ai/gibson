@@ -5,6 +5,7 @@ package brain
 
 import (
 	"context"
+	"reflect"
 	"sync"
 	"testing"
 )
@@ -54,7 +55,7 @@ func TestBeliefSubstrate_UnknownRefIsNotFound(t *testing.T) {
 	if ok {
 		t.Fatalf("Belief reported ok=true for an unscored node: %+v", got)
 	}
-	if got != (NodeBelief{}) {
+	if !reflect.DeepEqual(got, NodeBelief{}) {
 		t.Fatalf("Belief returned a non-zero value for an unscored node: %+v", got)
 	}
 }
@@ -103,7 +104,7 @@ func TestBeliefSubstrate_RoundTrip(t *testing.T) {
 			if !ok {
 				t.Fatalf("Belief reported ok=false right after SetBelief")
 			}
-			if got != tc.nb {
+			if !reflect.DeepEqual(got, tc.nb) {
 				t.Fatalf("Belief = %+v, want %+v", got, tc.nb)
 			}
 		})
@@ -136,7 +137,7 @@ func TestBeliefSubstrate_KindsAreIndependent(t *testing.T) {
 	if err != nil || !ok {
 		t.Fatalf("Belief(claim): got=%+v ok=%v err=%v", got, ok, err)
 	}
-	if got != claimBelief {
+	if !reflect.DeepEqual(got, claimBelief) {
 		t.Fatalf("Belief(claim) = %+v, want %+v", got, claimBelief)
 	}
 }
@@ -164,7 +165,7 @@ func TestBeliefSubstrate_OverwriteReplacesExactly(t *testing.T) {
 	if err != nil || !ok {
 		t.Fatalf("Belief: got=%+v ok=%v err=%v", got, ok, err)
 	}
-	if got != second {
+	if !reflect.DeepEqual(got, second) {
 		t.Fatalf("Belief = %+v, want the later write %+v (not a blend of both)", got, second)
 	}
 }

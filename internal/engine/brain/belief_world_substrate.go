@@ -118,13 +118,13 @@ func (s *WorldBeliefSubstrate) SetBelief(_ context.Context, ref NodeRef, nb Node
 		if err != nil {
 			return err
 		}
-		s.eng.Submit(BeliefScored{HostID: id, Belief: nb.Belief, EvidenceDigest: nb.EvidenceDigest})
+		s.eng.Submit(BeliefScored{HostID: id, Belief: nb.Belief, EvidenceDigest: nb.EvidenceDigest, CauseEdgeTypes: nb.CauseEdgeTypes})
 		return nil
 	}
 	if ref.Kind == "" || ref.ID == "" {
 		return fmt.Errorf("belief world substrate: ref %+v has no addressable kind/id", ref)
 	}
-	s.eng.Submit(NodeBeliefSet{Ref: ref, Belief: nb.Belief, EvidenceDigest: nb.EvidenceDigest})
+	s.eng.Submit(NodeBeliefSet{Ref: ref, Belief: nb.Belief, EvidenceDigest: nb.EvidenceDigest, CauseEdgeTypes: nb.CauseEdgeTypes})
 	return nil
 }
 

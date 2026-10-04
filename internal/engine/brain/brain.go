@@ -35,6 +35,10 @@ type Host struct {
 	CloudID    string // strong identity signal
 	Ports      []PortObservation
 	Belief     Belief // attack-path belief (derived; ADR-0005)
+	// CauseEdgeTypes are the enablement-edge types that fed this host in the
+	// slice its Belief was scored from (gibson#613): the causes a settled bet
+	// on a hypothesis about this host credits or blames. Sorted, unique.
+	CauseEdgeTypes []string
 	// EvidenceDigest fingerprints the evidence the outstanding belief score was
 	// requested for (belief.go). The gate re-requests a score only when the
 	// host's current evidence digest differs from this one, and the reducer
@@ -109,6 +113,11 @@ type World struct {
 	// of the SAME (kind, label) updates its entry in place rather than
 	// adding a new one.
 	ontologyProposals map[ontologyProposalKey]OntologyProposalState
+
+	// edgeOutcomes is the per-enablement-edge-type Beta-Bernoulli statistic
+	// ADR-0037 decision 2 learns from (gibson#613), folded from
+	// EdgeOutcomeObserved and carried by WorldSnapshot so TrimTo loses none.
+	edgeOutcomes map[string]EdgeOutcomeCount
 
 	// observations holds out-of-taxonomy shapes (ADR-0012). Keyed by Timeline
 	// event id rather than by content, so repeat sightings stay distinct.
@@ -238,6 +247,7 @@ func NewWorld(tenant string) *World {
 		domainPacks:        make(map[string]DomainPackState),
 		ontologyGate:       taxonomy.NewPromotionGate(taxonomy.Global),
 		ontologyProposals:  make(map[ontologyProposalKey]OntologyProposalState),
+		edgeOutcomes:       make(map[string]EdgeOutcomeCount),
 	}
 }
 
@@ -254,10 +264,12 @@ type HostSnapshot struct {
 	Endpoints    map[int][]EndpointInfo
 	Technologies map[int][]TechnologyInfo
 	Certificates map[int]CertificateInfo
-	Surprise     string  // non-empty if the entity carries a Surprise
-	Belief       Belief  // attack-path belief (zero until a BeliefSystem scores it)
-	Attention    float64 // derived: belief.Juicy + surprise boost (ADR-0005/0006)
-	MissionID    string  // the mission that discovered this host (gibson#1075); empty if none
+	Surprise     string // non-empty if the entity carries a Surprise
+	Belief       Belief // attack-path belief (zero until a BeliefSystem scores it)
+	// CauseEdgeTypes mirrors Host.CauseEdgeTypes (gibson#613).
+	CauseEdgeTypes []string
+	Attention      float64 // derived: belief.Juicy + surprise boost (ADR-0005/0006)
+	MissionID      string  // the mission that discovered this host (gibson#1075); empty if none
 	// EvidenceDigest fingerprints the evidence Belief was scored against
 	// (belief.go). Belief is a first-class property of the node (gibson#272), so
 	// the digest that gates its recompute travels with the node's snapshot
@@ -330,6 +342,7 @@ func (w *World) Snapshot() []HostSnapshot {
 			Certificates:   certs,
 			Surprise:       surprised[q.Entity()],
 			Belief:         h.Belief,
+			CauseEdgeTypes: append([]string(nil), h.CauseEdgeTypes...),
 			Attention:      attentionScore(h.Belief.Juicy, h.Belief.Exploitable, surprised[q.Entity()] != ""),
 			MissionID:      h.MissionID,
 			EvidenceDigest: h.EvidenceDigest,
@@ -457,6 +470,8 @@ func Reduce(w *World, ev Event) {
 		applyVoIPlanRequested(w, e)
 	case VoIPlanned:
 		applyVoIPlanned(w, e)
+	case EdgeOutcomeObserved:
+		applyEdgeOutcomeObserved(w, e)
 	case NodeBeliefSet:
 		applyNodeBeliefSet(w, e)
 	case DomainPackEnabled:

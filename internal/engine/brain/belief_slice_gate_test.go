@@ -463,7 +463,7 @@ func TestSliceGate_ReplayReproducesTheSameSubstrateState(t *testing.T) {
 		if err != nil {
 			t.Fatalf("replayed.Belief(%s): %v", id, err)
 		}
-		if liveOK != replayOK || live != replayed {
+		if liveOK != replayOK || !reflect.DeepEqual(live, replayed) {
 			t.Fatalf("%s diverged: live=%+v(%v) replayed=%+v(%v)", id, live, liveOK, replayed, replayOK)
 		}
 	}

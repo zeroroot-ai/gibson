@@ -119,6 +119,9 @@ func init() {
 	registerEvent("bet.settled_false", func() Event { return &BetSettledFalse{} })
 	registerEvent("bet.settled_by_hitl", func() Event { return &BetSettledByHITL{} })
 
+	// edge_outcome.go
+	registerEvent("edge.outcome_observed", func() Event { return &EdgeOutcomeObserved{} })
+
 	// destructive_authz.go
 	registerEvent("destructive_action.requested", func() Event { return &DestructiveActionRequested{} })
 	registerEvent("destructive_action.decided", func() Event { return &DestructiveActionDecided{} })
@@ -251,6 +254,8 @@ func dereferenceEvent(ev Event) Event {
 	case *BetSettledFalse:
 		return *v
 	case *BetSettledByHITL:
+		return *v
+	case *EdgeOutcomeObserved:
 		return *v
 	case *DestructiveActionRequested:
 		return *v

@@ -41,6 +41,9 @@ type worldSnapshotData struct {
 	// substrate seam). Externally-keyed by NodeRef, like BetSettlements — no
 	// monotonic id counter of its own.
 	NodeBeliefs []NodeBeliefSnapshot `json:"node_beliefs"`
+	// EdgeOutcomes is the per-enablement-edge-type outcome statistic
+	// (gibson#613), keyed by edge type like NodeBeliefs is keyed by ref.
+	EdgeOutcomes []EdgeOutcomeSnapshot `json:"edge_outcomes"`
 	// DestructiveActions is the destructive-proof authorization queue
 	// (ADR-0028, gibson#336), pending and decided alike. Snapshotted like
 	// BetSettlements — an externally-keyed record with no monotonic id
@@ -98,6 +101,7 @@ func SnapshotWorld(w *World, atSeq string) WorldSnapshot {
 		Hypotheses:         w.HypothesisSnapshot(),
 		BetSettlements:     w.BetSettlementSnapshot(),
 		NodeBeliefs:        w.NodeBeliefSnapshot(),
+		EdgeOutcomes:       w.EdgeOutcomeSnapshot(),
 		DestructiveActions: w.DestructiveActionSnapshot(),
 		VoIPlans:           w.VoIPlanSnapshot(),
 
@@ -334,6 +338,12 @@ func RestoreWorld(snap WorldSnapshot, tenant string) (*World, error) {
 	// world-assigned counter, same as BetSettlements above.
 	for _, nb := range data.NodeBeliefs {
 		Reduce(w, NodeBeliefSet(nb))
+	}
+
+	// Restore the edge outcome counts (gibson#613). They are a folded
+	// statistic, not a record list, so they are set rather than replayed.
+	for _, eo := range data.EdgeOutcomes {
+		w.edgeOutcomes[eo.EdgeType] = EdgeOutcomeCount{Alpha: eo.Alpha, Beta: eo.Beta}
 	}
 
 	// Replay destructive-proof authorization actions (ADR-0028, gibson#336):

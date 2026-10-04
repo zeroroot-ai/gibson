@@ -529,6 +529,7 @@ func (e *Engine) SettleBetTrue(ctx context.Context, registry *settlement.Registr
 		ScopeID:              req.ScopeID,
 		MissionID:            req.MissionID,
 	})
+	e.submitEdgeOutcomes(req.HypothesisID, true, req.MissionID, req.ScopeID)
 	return true, nil
 }
 
@@ -625,6 +626,7 @@ func (e *Engine) SettleBetFalse(_ context.Context, req BetExhaustionRequest) (bo
 		ScopeID:              scopeID,
 		MissionID:            req.MissionID,
 	})
+	e.submitEdgeOutcomes(req.HypothesisID, false, req.MissionID, scopeID)
 	return true, nil
 }
 
@@ -749,6 +751,7 @@ func (e *Engine) SettleBetByHITL(_ context.Context, req BetHITLRequest) (bool, e
 		ScopeID:              scopeID,
 		MissionID:            req.MissionID,
 	})
+	e.submitEdgeOutcomes(req.HypothesisID, verdict == SettlementVerdictTrue, req.MissionID, scopeID)
 	return true, nil
 }
 
