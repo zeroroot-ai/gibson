@@ -18,6 +18,7 @@ import (
 	"github.com/zeroroot-ai/gibson/internal/engine/harness/dispatchpolicy"
 	"github.com/zeroroot-ai/gibson/internal/engine/harness/sandboxed"
 	"github.com/zeroroot-ai/gibson/internal/engine/llm"
+	"github.com/zeroroot-ai/gibson/internal/engine/mission/targetbind"
 	"github.com/zeroroot-ai/gibson/internal/engine/tool"
 	"github.com/zeroroot-ai/gibson/internal/infra/contextkeys"
 	sdkqueue "github.com/zeroroot-ai/gibson/internal/infra/queue"
@@ -118,6 +119,13 @@ type DefaultAgentHarness struct {
 	// When non-nil, CallToolProto and QueryPlugin consult this registry first before
 	// falling back to the registryAdapter. Nil means use the registryAdapter path only.
 	componentRegistry component.ComponentRegistry
+
+	// targetFacts resolves the dispatched unit of work's target at dispatch, so
+	// a sandboxed tool is told what it acts against. nil when the daemon wires
+	// no target store, and a tool then receives no GIBSON_TARGET_* at all —
+	// absent rather than guessed, because the alternative is a tool scanning a
+	// host the mission did not name.
+	targetFacts TargetFactsLookup
 
 	// graphrag serves the knowledge-graph reads. The SAME querier the daemon
 	// hands to ComponentService — one implementation reached two ways, which is
@@ -800,6 +808,7 @@ func (h *DefaultAgentHarness) CallToolProto(ctx context.Context, name string, re
 				fmt.Sprintf("tool %q is a sandboxed manifest tool but no sandboxed executor is wired", name), nil)
 		}
 		spec.Live = h.liveScope(ctx)
+		h.addTargetFacts(ctx, &spec)
 		//nolint:wrapcheck // ExecuteWithSpec already returns a typed gibson error; re-wrapping would double-wrap it (same as the registry path below).
 		return h.sandboxedExecutor.ExecuteWithSpec(ctx, name, spec, request, response)
 	}
@@ -2095,6 +2104,55 @@ func (h *DefaultAgentHarness) liveScope(ctx context.Context) sandboxed.LiveScope
 		Tenant:       auth.TenantStringFromContext(ctx),
 		MissionID:    h.missionCtx.ID.String(),
 		MissionRunID: h.missionCtx.MissionRunID,
+	}
+}
+
+// addTargetFacts tells a sandboxed tool what it is acting against, as
+// GIBSON_TARGET_ID, _NAME, _TYPE, _URL, _HOST and _DOMAIN.
+//
+// The tool path did not know its target at all: `grep TargetID` over
+// internal/engine/tool and internal/engine/harness/sandboxed was empty, so a
+// tool could only act on whatever the mission author typed into its input, and
+// an authenticated tool had nowhere to learn its endpoint from (gibson#485).
+//
+// Resolved from the STORE by id, not from h.targetInfo. For a fan-out instance
+// ForTarget swaps only the id and leaves the primary's name and URL in place —
+// deliberately, since nothing reading it for scope needs the rest — so deriving
+// facts from that view would pair the instance's id with another target's host.
+// A tool handed that scans the wrong machine and reports a clean result for it.
+//
+// The values come from targetbind.Env, the same derivation {{target.*}} uses, so
+// a mission author and the tool it dispatches cannot disagree about which host
+// was scanned.
+//
+// Every failure is silent and total: no lookup wired, no target id, a store that
+// errors, a target that has gone. The tool then receives no GIBSON_TARGET_* at
+// all, which is what it received before this existed. An EMPTY or PARTIAL set
+// would be worse than none — a tool cannot tell "this target has no host" from
+// "the platform did not tell me", and the two call for opposite behaviour.
+func (h *DefaultAgentHarness) addTargetFacts(ctx context.Context, spec *sandboxed.ToolSpec) {
+	if h.targetFacts == nil {
+		return
+	}
+	id := h.Target().ID
+	if id.IsZero() {
+		return
+	}
+	t, err := h.targetFacts.Get(ctx, id)
+	if err != nil || t == nil {
+		h.logger.Warn("tool dispatch: target facts unavailable, dispatching without them",
+			"tool_target_id", id.String(), "error", err)
+		return
+	}
+	env := targetbind.Env(t.ID.String(), t.Name, t.Type, targetbind.URLOf(t))
+	if len(env) == 0 {
+		return
+	}
+	if spec.Env == nil {
+		spec.Env = make(map[string]string, len(env))
+	}
+	for k, v := range env {
+		spec.Env[k] = v
 	}
 }
 

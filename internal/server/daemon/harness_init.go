@@ -98,6 +98,11 @@ func (d *daemonImpl) newHarnessFactory(ctx context.Context) (harness.HarnessFact
 		// the daemon cannot serve graph reads, and the harness then reports
 		// ErrKnowledgeUnavailable rather than an empty result.
 		GraphRAGQuerier: func() component.GraphRAGQuerier { return d.graphragQuerier },
+
+		// What a dispatched tool is acting against (gibson#485). A provider, not
+		// a value: d.targetStore is assigned during the Redis init phase, after
+		// this factory is built, so reading it here would capture nil forever.
+		TargetFacts: d.targetFactsLookup,
 		RegistryAdapter: d.registryAdapter,
 		WorkQueue:       workQueue,
 
@@ -313,4 +318,19 @@ func agentLauncherWiring(launcher *sandboxed.AgentLauncher, launchErr error) (wi
 // rather than let through unchecked.
 func (d *daemonImpl) taskGrantVerifier() harness.TaskGrantVerifier {
 	return capabilitygrant.NewLocalVerifier(func() *capabilitygrant.Minter { return d.cgMinter })
+}
+
+// targetFactsLookup is what a dispatched tool's target facts are read through,
+// read at harness creation rather than captured at factory construction.
+//
+// A nil store returns a nil INTERFACE and not a typed nil: the harness checks
+// `h.targetFacts == nil` to decide whether to look a target up at all, and a
+// typed nil wrapped in a non-nil interface passes that check and then panics on
+// the call. Returning d.targetStore unconditionally would do exactly that
+// whenever the daemon runs without Redis.
+func (d *daemonImpl) targetFactsLookup() harness.TargetFactsLookup {
+	if d.targetStore == nil {
+		return nil
+	}
+	return d.targetStore
 }
