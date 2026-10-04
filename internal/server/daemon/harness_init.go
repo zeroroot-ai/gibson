@@ -98,6 +98,16 @@ func (d *daemonImpl) newHarnessFactory(ctx context.Context) (harness.HarnessFact
 		// the daemon cannot serve graph reads, and the harness then reports
 		// ErrKnowledgeUnavailable rather than an empty result.
 		GraphRAGQuerier: func() component.GraphRAGQuerier { return d.graphragQuerier },
+
+		// What a dispatched tool is acting against (gibson#485). A provider, not
+		// a value: d.targetStore is assigned during the Redis init phase, after
+		// this factory is built, so reading it here would capture nil forever.
+		TargetFacts: d.targetFactsLookup,
+
+		// The VALUE of a secret a mission declared (gibson#485). The daemon
+		// resolves it as itself, so no FGA relation reaches the component and
+		// secret.can_resolve stays plugin-only.
+		MissionSecrets:  d.missionSecretsStore,
 		RegistryAdapter: d.registryAdapter,
 		WorkQueue:       workQueue,
 
@@ -313,4 +323,35 @@ func agentLauncherWiring(launcher *sandboxed.AgentLauncher, launchErr error) (wi
 // rather than let through unchecked.
 func (d *daemonImpl) taskGrantVerifier() harness.TaskGrantVerifier {
 	return capabilitygrant.NewLocalVerifier(func() *capabilitygrant.Minter { return d.cgMinter })
+}
+
+// targetFactsLookup is what a dispatched tool's target facts are read through,
+// read at harness creation rather than captured at factory construction.
+//
+// A nil store returns a nil INTERFACE and not a typed nil: the harness checks
+// `h.targetFacts == nil` to decide whether to look a target up at all, and a
+// typed nil wrapped in a non-nil interface passes that check and then panics on
+// the call. Returning d.targetStore unconditionally would do exactly that
+// whenever the daemon runs without Redis.
+func (d *daemonImpl) targetFactsLookup() harness.TargetFactsLookup {
+	if d.targetStore == nil {
+		return nil
+	}
+	return d.targetStore
+}
+
+// missionSecretsStore is how a declared secret's value is resolved at dispatch,
+// read at harness creation rather than captured at factory construction: the
+// broker stack that backs d.credentialStore is built later in boot.
+//
+// Returns a nil INTERFACE and not a typed nil when the store is absent, for the
+// reason targetFactsLookup does — the harness checks `h.missionSecrets == nil`,
+// and a typed nil passes that check and then panics on the call. Here the
+// consequence would be worse than a panic on dispatch: a mission that declared
+// a secret must be REFUSED, and refusing needs the nil to be visible.
+func (d *daemonImpl) missionSecretsStore() harness.CredentialStore {
+	if d.credentialStore == nil {
+		return nil
+	}
+	return d.credentialStore
 }

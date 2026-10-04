@@ -34,6 +34,16 @@ type MissionContext struct {
 	// TenantID is the tenant identifier for multi-tenant isolation.
 	// Used by the callback harness to prevent cross-tenant access.
 	TenantID string `json:"tenant_id,omitempty"`
+	// Secrets is the mission's declaration of which named tenant secrets its
+	// components may be handed at dispatch (gibson#485). Names only; the daemon
+	// resolves the value as itself at dispatch. Zero value hands nothing to
+	// anything, which is the behaviour before missions could declare secrets.
+	//
+	// json:"-" on purpose. A MissionContext is serialised into places a
+	// component can read, and while these are names rather than values, a name
+	// is a hint about what a tenant holds and the component already receives
+	// exactly the subset it is entitled to.
+	Secrets MissionSecretScopes `json:"-"`
 	// DelegationDepth tracks how many delegation hops have occurred to reach
 	// this agent. Zero means this is a top-level agent (no delegation). Each
 	// DelegateToAgent call increments this by one in the child mission context.

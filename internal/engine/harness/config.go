@@ -21,6 +21,13 @@ import (
 	"go.opentelemetry.io/otel/trace"
 )
 
+// TargetFactsLookup reads one target by id. Satisfied by the daemon's target
+// store; the narrowest surface the dispatch path needs, so a harness cannot
+// create, list or delete a target.
+type TargetFactsLookup interface {
+	Get(ctx context.Context, id types.ID) (*types.Target, error)
+}
+
 // HarnessConfig contains all dependencies needed to create an AgentHarness.
 // All fields use interface types to support dependency injection and testing.
 //
@@ -79,6 +86,29 @@ type HarnessConfig struct {
 	// ErrKnowledgeUnavailable rather than answering empty — so an agent can tell
 	// "cannot read" from "nothing known".
 	GraphRAGQuerier func() component.GraphRAGQuerier
+
+	// TargetFacts resolves a target by id when a component is dispatched, so a
+	// sandboxed tool learns what it is acting against.
+	//
+	// A provider rather than a value, for the reason GraphRAGQuerier is one: the
+	// daemon wires its target store after the factory exists, so reading it at
+	// factory time captures nil permanently.
+	//
+	// Resolved at DISPATCH and not at harness construction, because a fan-out
+	// instance's harness answers Target() with the instance's id and the
+	// PRIMARY's name and URL — ForTarget deliberately swaps only the id, since
+	// nothing reading it for scope needs the rest. Deriving a tool's facts from
+	// that view would hand it the instance's id beside another target's host,
+	// and the tool would scan the wrong machine and report a clean result for it.
+	TargetFacts func() TargetFactsLookup
+
+	// MissionSecrets resolves a declared secret's VALUE at dispatch.
+	//
+	// A provider for the reason the others are: the broker stack, and the
+	// credential store it backs, are built after the harness factory — a store
+	// captured at construction is always nil. agent_credentials.go is the
+	// feature that learned that.
+	MissionSecrets func() CredentialStore
 
 	// Tracer for distributed tracing (OpenTelemetry).
 	// Used for creating spans around LLM operations, tool execution, etc.

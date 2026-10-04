@@ -52,16 +52,65 @@ const (
 // tool that received either would run against the literal text or against
 // nothing, and report a clean result for a scan that never happened.
 func Bindings(t *types.Target) map[string]string {
-	raw := targetURL(t)
-	host, domain := hostAndDomain(raw)
-	return map[string]string{
-		"target.id":     t.ID.String(),
-		"target.name":   t.Name,
-		"target.type":   t.Type,
-		"target.url":    raw,
-		"target.host":   host,   // host[:port], what a dialer takes
-		"target.domain": domain, // host alone, what a certificate or a scanner takes
+	out := make(map[string]string, len(facts("", "", "", "")))
+	for k, v := range Facts(t.ID.String(), t.Name, t.Type, targetURL(t)) {
+		out["target."+k] = v
 	}
+	return out
+}
+
+// Facts is the six target facts under their bare names, the single derivation
+// {{target.*}} and a dispatched tool's environment both read.
+//
+// It takes the four scalars rather than a *types.Target so the dispatch path,
+// which holds a harness TargetInfo and not a store record, resolves the SAME
+// values. Two derivations of target.host would mean a mission author and the
+// tool it dispatches could disagree about which host was scanned, and the
+// report would not say which one was right.
+func Facts(id, name, typ, rawURL string) map[string]string {
+	return facts(id, name, typ, rawURL)
+}
+
+func facts(id, name, typ, rawURL string) map[string]string {
+	host, domain := hostAndDomain(rawURL)
+	return map[string]string{
+		"id":     id,
+		"name":   name,
+		"type":   typ,
+		"url":    rawURL,
+		"host":   host,   // host[:port], what a dialer takes
+		"domain": domain, // host alone, what a certificate or a scanner takes
+	}
+}
+
+// EnvPrefix is the environment namespace a dispatched component receives its
+// target facts under.
+const EnvPrefix = "GIBSON_TARGET_"
+
+// Env is the six facts as the environment a sandboxed component receives:
+// GIBSON_TARGET_ID, _NAME, _TYPE, _URL, _HOST, _DOMAIN.
+//
+// A fact with an empty value is OMITTED rather than exported empty. An exported
+// empty variable reads, to a tool, as "this target has no host" — which is
+// indistinguishable from "this platform did not tell me", and the two call for
+// opposite behaviour. Absent is the honest answer, and a tool that needs a fact
+// can fail naming it.
+func Env(id, name, typ, rawURL string) map[string]string {
+	out := make(map[string]string, 6)
+	for k, v := range facts(id, name, typ, rawURL) {
+		if v == "" {
+			continue
+		}
+		out[EnvPrefix+strings.ToUpper(k)] = v
+	}
+	return out
+}
+
+// URLOf is the target's endpoint, from whichever field carries it. Exported so
+// the dispatch path reads it the same way binding does — two readings of "the
+// target's URL" would let a mission author and the tool it dispatches disagree.
+func URLOf(t *types.Target) string {
+	return targetURL(t)
 }
 
 // targetURL is the target's endpoint, from whichever field carries it.
