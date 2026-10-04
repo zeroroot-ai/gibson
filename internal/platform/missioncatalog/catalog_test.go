@@ -8,22 +8,32 @@ import (
 	"encoding/json"
 	"flag"
 	"os"
+	"sort"
 	"strings"
 	"testing"
 
 	"github.com/zeroroot-ai/gibson/internal/engine/mission/targetbind"
 	"github.com/zeroroot-ai/gibson/internal/infra/types"
+	"github.com/zeroroot-ai/gibson/internal/platform/authz"
+	"github.com/zeroroot-ai/gibson/internal/platform/componentcatalog"
 	missionv1 "github.com/zeroroot-ai/sdk/api/gen/gibson/mission/v1"
 	"google.golang.org/protobuf/encoding/protojson"
 )
 
-// updateGolden rewrites the recorded render instead of comparing against it.
-var updateGolden = flag.Bool("update", false, "rewrite testdata/scan-rendered.json from the current render")
+// updateGolden rewrites the recorded renders instead of comparing against them.
+var updateGolden = flag.Bool("update", false, "rewrite testdata/<mission>-rendered.json from the current render")
 
-// validParams is a complete parameter set for the checked-in scan mission,
-// keyed by the names scan.cue itself declares.
-func validParams() map[string]string {
-	return map[string]string{
+// paramsByMission is a complete parameter set PER mission, keyed by the names
+// each mission's own CUE declares.
+//
+// Per mission, not one flat map. Every mission in the catalog declares its own
+// closed set (ADR-0018), and a second mission was impossible while Render
+// demanded one caller's seven fields for any name — a cluster assessment has no
+// pipeline id and no image digest. A shared map would also have made the
+// cross-mission tests below pass for the wrong reason: they would have rendered
+// every mission with the union of everybody's parameters, which no caller sends.
+var paramsByMission = map[string]map[string]string{
+	"scan": {
 		"application":   "customer-portal",
 		"repositoryUrl": "https://gitlab.com/examplebank/customer-portal.git",
 		"ref":           "main",
@@ -31,22 +41,60 @@ func validParams() map[string]string {
 		"pipelineId":    "8891",
 		"pipelineUrl":   "https://gitlab.com/examplebank/customer-portal/-/pipelines/8891",
 		"imageRef":      "registry.gitlab.com/examplebank/customer-portal@sha256:abc",
-	}
+	},
+	"cluster-assessment": {
+		"kubeconfigSecret": "cred:goat-cluster",
+		"bank":             "bank/core-banking",
+		"forgeConnector":   "gitlab-core",
+		"manifestsProject": "examplebank/cluster-manifests",
+	},
 }
 
-// TestValidParams_CoversEveryDeclaredParameter keeps the literal above honest.
-// A parameter added to scan.cue and not here would make every other test in this
-// file fail on a missing value, which is a confusing way to learn it; this says
-// it directly.
-func TestValidParams_CoversEveryDeclaredParameter(t *testing.T) {
-	names := declaredParams(t, "scan")
-	got := validParams()
-	if len(got) != len(names) {
-		t.Fatalf("validParams has %d entries, scan declares %d: %v vs %v", len(got), len(names), got, names)
+// validParams is the parameter set for the scan mission, which most tests in
+// this file are written against by name.
+//
+// A COPY, because callers mutate what they get back to build a bad input — a
+// shared map would let one test's extra key break the next one.
+func validParams() map[string]string { return copyParams(paramsByMission["scan"]) }
+
+// paramsFor is the set for one mission, and fails rather than rendering a
+// mission with nothing. A mission added to the catalog and not to the table
+// above would otherwise make the cross-mission tests report a missing-parameter
+// error, which reads as a defect in the mission.
+func paramsFor(t *testing.T, mission string) map[string]string {
+	t.Helper()
+	p, ok := paramsByMission[mission]
+	if !ok {
+		t.Fatalf("no parameter set for the checked-in mission %q; add one to paramsByMission", mission)
 	}
-	for _, n := range names {
-		if _, ok := got[n]; !ok {
-			t.Errorf("validParams does not set the declared parameter %q", n)
+	return copyParams(p)
+}
+
+func copyParams(in map[string]string) map[string]string {
+	out := make(map[string]string, len(in))
+	for k, v := range in {
+		out[k] = v
+	}
+	return out
+}
+
+// TestValidParams_CoversEveryDeclaredParameter keeps the table above honest, for
+// EVERY mission. A parameter added to a mission and not here would make the
+// other tests fail on a missing value, which is a confusing way to learn it;
+// this says it directly.
+func TestValidParams_CoversEveryDeclaredParameter(t *testing.T) {
+	for _, mission := range Names() {
+		names := declaredParams(t, mission)
+		got := paramsFor(t, mission)
+		if len(got) != len(names) {
+			t.Errorf("%s: the parameter set has %d entries, the mission declares %d: %v vs %v",
+				mission, len(got), len(names), got, names)
+			continue
+		}
+		for _, n := range names {
+			if _, ok := got[n]; !ok {
+				t.Errorf("%s: the parameter set does not set the declared parameter %q", mission, n)
+			}
 		}
 	}
 }
@@ -170,22 +218,55 @@ func TestRender_ScanFansOutAcrossImageSourceAndRuntime(t *testing.T) {
 func TestRender_EveryToolItNamesIsInTheCatalog(t *testing.T) {
 	// A mission naming a tool the platform does not ship fails at dispatch,
 	// per node, at runtime — long after the render looked fine. Catch it here.
-	def, err := Render(context.Background(), "scan", validParams())
-	if err != nil {
-		t.Fatalf("Render: %v", err)
+	//
+	// The shipped set comes FROM the component catalog, which is generated from
+	// the captured executor image, rather than from a literal. The literal this
+	// replaces had drifted: it named nine tools while the executor shipped
+	// eleven, so a mission naming kube-bench or trivy-k8s would have passed this
+	// check by being unknown to it in the same way a typo is.
+	shipped := shippedTools(t)
+	if len(shipped) == 0 {
+		t.Fatal("the component catalog lists no tools; the check would pass on anything")
 	}
-	shipped := map[string]bool{
-		"nmap": true, "naabu": true, "masscan": true, "httpx": true,
-		"nuclei": true, "subfinder": true, "dnsx": true, "trivy": true, "tlsx": true,
-	}
-	for id, n := range def.GetNodes() {
-		if n.GetType() != missionv1.NodeType_NODE_TYPE_TOOL {
-			continue
+
+	for _, mission := range Names() {
+		def, err := Render(context.Background(), mission, paramsFor(t, mission))
+		if err != nil {
+			t.Fatalf("Render(%s): %v", mission, err)
 		}
-		if name := n.GetToolConfig().GetToolName(); !shipped[name] {
-			t.Errorf("node %q names tool %q, which the executor does not ship", id, name)
+		for id, n := range def.GetNodes() {
+			if n.GetType() != missionv1.NodeType_NODE_TYPE_TOOL {
+				continue
+			}
+			if name := n.GetToolConfig().GetToolName(); !shipped[name] {
+				t.Errorf("mission %q node %q names tool %q, which the executor does not ship (it ships %v)",
+					mission, id, name, sortedKeys(shipped))
+			}
 		}
 	}
+}
+
+// shippedTools is the kind:tool ids the component catalog lists. Those
+// manifests are generated from one digest-pinned executor image, so this is
+// what a dispatch can actually launch.
+func shippedTools(t *testing.T) map[string]bool {
+	t.Helper()
+	out := map[string]bool{}
+	for _, r := range componentcatalog.Refs() {
+		if r.Kind == authz.KindTool {
+			out[r.ID] = true
+		}
+	}
+	return out
+}
+
+func sortedKeys(m map[string]bool) []string {
+	out := make([]string, 0, len(m))
+	for k := range m {
+		out = append(out, k)
+	}
+	sort.Strings(out)
+	return out
 }
 
 func TestRender_ParametersReachTheNodesThatNeedThem(t *testing.T) {
@@ -270,7 +351,7 @@ func TestRender_AQuoteInAParameterCannotInjectCUE(t *testing.T) {
 // that nothing will ever replace (gibson#495).
 func TestRender_EveryTargetPlaceholderIsInTheVocabulary(t *testing.T) {
 	for _, name := range Names() {
-		def, err := Render(context.Background(), name, validParams())
+		def, err := Render(context.Background(), name, paramsFor(t, name))
 		if err != nil {
 			t.Fatalf("Render(%s): %v", name, err)
 		}
@@ -335,35 +416,40 @@ func TestRender_ScanBindsAgainstARegisteredTarget(t *testing.T) {
 //
 // Regenerate deliberately, and read the diff as the review:
 //
-//	go test ./internal/platform/missioncatalog/ -run ScanMatchesItsRecordedRender -update
-func TestRender_ScanMatchesItsRecordedRender(t *testing.T) {
-	def, err := Render(context.Background(), "scan", validParams())
-	if err != nil {
-		t.Fatalf("Render: %v", err)
-	}
-	got, err := protojson.MarshalOptions{Multiline: true, Indent: "  "}.Marshal(def)
-	if err != nil {
-		t.Fatalf("marshal: %v", err)
-	}
+//	go test ./internal/platform/missioncatalog/ -run MatchesItsRecordedRender -update
+func TestRender_EveryMissionMatchesItsRecordedRender(t *testing.T) {
+	for _, mission := range Names() {
+		t.Run(mission, func(t *testing.T) {
+			def, err := Render(context.Background(), mission, paramsFor(t, mission))
+			if err != nil {
+				t.Fatalf("Render: %v", err)
+			}
+			got, err := protojson.MarshalOptions{Multiline: true, Indent: "  "}.Marshal(def)
+			if err != nil {
+				t.Fatalf("marshal: %v", err)
+			}
 
-	const golden = "testdata/scan-rendered.json"
-	if *updateGolden {
-		if err := os.WriteFile(golden, got, 0o600); err != nil {
-			t.Fatalf("write %s: %v", golden, err)
-		}
-		t.Logf("updated %s", golden)
-		return
-	}
-	want, err := os.ReadFile(golden)
-	if err != nil {
-		t.Fatalf("read %s: %v", golden, err)
-	}
-	// protojson's output carries deliberate randomised whitespace (detrand), so
-	// the comparison normalises it rather than asserting on bytes nobody chose.
-	if normalizeJSON(t, got) != normalizeJSON(t, want) {
-		t.Errorf("the scan mission renders differently than recorded.\n"+
-			"If that is the change you meant, re-run with -update and the diff is the review.\n"+
-			"got:\n%s", got)
+			golden := "testdata/" + mission + "-rendered.json"
+			if *updateGolden {
+				if err := os.WriteFile(golden, got, 0o600); err != nil {
+					t.Fatalf("write %s: %v", golden, err)
+				}
+				t.Logf("updated %s", golden)
+				return
+			}
+			want, err := os.ReadFile(golden)
+			if err != nil {
+				t.Fatalf("read %s: %v (a new mission needs a recorded render; re-run with -update)", golden, err)
+			}
+			// protojson's output carries deliberate randomised whitespace
+			// (detrand), so the comparison normalises it rather than asserting
+			// on bytes nobody chose.
+			if normalizeJSON(t, got) != normalizeJSON(t, want) {
+				t.Errorf("the %s mission renders differently than recorded.\n"+
+					"If that is the change you meant, re-run with -update and the diff is the review.\n"+
+					"got:\n%s", mission, got)
+			}
+		})
 	}
 }
 
@@ -380,4 +466,128 @@ func normalizeJSON(t *testing.T, b []byte) string {
 		t.Fatalf("re-encode: %v", err)
 	}
 	return string(out)
+}
+
+// ── cluster-assessment ──────────────────────────────────────────────────────
+
+// The demo mission (gibson#499): two tool branches that ask different
+// questions of one cluster, two jobs on a bank, one join.
+func TestRender_ClusterAssessmentHasFourBranchesAndOneCompletion(t *testing.T) {
+	def, err := Render(context.Background(), "cluster-assessment", paramsFor(t, "cluster-assessment"))
+	if err != nil {
+		t.Fatalf("Render: %v", err)
+	}
+	nodes := def.GetNodes()
+
+	for id, want := range map[string]missionv1.NodeType{
+		"benchmark": missionv1.NodeType_NODE_TYPE_TOOL,
+		"workloads": missionv1.NodeType_NODE_TYPE_TOOL,
+		"exploit":   missionv1.NodeType_NODE_TYPE_JOB,
+		"fix":       missionv1.NodeType_NODE_TYPE_JOB,
+		"report":    missionv1.NodeType_NODE_TYPE_JOIN,
+	} {
+		n, ok := nodes[id]
+		if !ok {
+			t.Errorf("node %q is missing", id)
+			continue
+		}
+		if got := n.GetType(); got != want {
+			t.Errorf("node %q type = %v, want %v", id, got, want)
+		}
+	}
+
+	// ONE completion. A rescan may only decide a `fixed` finding is `verified`
+	// if it knows every branch finished looking, and that is what the join is
+	// for — so an exit point per branch would quietly break the verify step.
+	if got := def.GetExitPoints(); len(got) != 1 || got[0] != "report" {
+		t.Errorf("exitPoints = %v, want exactly [report]", got)
+	}
+	if got := nodes["report"].GetJoinConfig().GetWaitFor(); len(got) != 2 {
+		t.Errorf("the join waits for %v, want both jobs", got)
+	}
+
+	// Both tool branches are entry points: a cluster's controls and its
+	// workloads are different questions and neither narrows the other, so
+	// ordering them would only make the run longer.
+	if got := def.GetEntryPoints(); len(got) != 2 {
+		t.Errorf("entryPoints = %v, want both tool branches", got)
+	}
+}
+
+// Both tools are handed the kubeconfig by NAME, declared tool-wide, and the
+// mission carries no value anywhere (gibson#485).
+func TestRender_ClusterAssessmentDeclaresTheKubeconfigByName(t *testing.T) {
+	p := paramsFor(t, "cluster-assessment")
+	secret := p["kubeconfigSecret"]
+
+	def, err := Render(context.Background(), "cluster-assessment", p)
+	if err != nil {
+		t.Fatalf("Render: %v", err)
+	}
+
+	// Declared tool-wide: both branches need it and neither can be told apart
+	// from the other by kind.
+	if got := def.GetSecrets().GetTools(); len(got) != 1 || got[0] != secret {
+		t.Errorf("secrets.tools = %v, want [%s]", got, secret)
+	}
+
+	// And each tool node names it in its input, because the tool resolves
+	// GIBSON_SECRET_<name> and cannot guess which secret it was handed.
+	for _, id := range []string{"benchmark", "workloads"} {
+		in := def.GetNodes()[id].GetToolConfig().GetInput()
+		if got := in["kubeconfigSecret"]; got != secret {
+			t.Errorf("node %q input kubeconfigSecret = %q, want %q", id, got, secret)
+		}
+		// The cluster is named by the target binding, never by a parameter: a
+		// caller who could supply it could point the run at a cluster the
+		// tenant never registered.
+		if got := in["target"]; got != "{{target.name}}" {
+			t.Errorf("node %q input target = %q, want the target binding", id, got)
+		}
+	}
+
+	// Both jobs declare it through credentialNames, the job's own per-turn
+	// grant. A job member is not a tool dispatch and does not read the tool
+	// environment.
+	for _, id := range []string{"exploit", "fix"} {
+		got := def.GetNodes()[id].GetJobConfig().GetSpec().GetCredentialNames()
+		if len(got) != 1 || got[0] != secret {
+			t.Errorf("node %q credentialNames = %v, want [%s]", id, got, secret)
+		}
+	}
+}
+
+// Neither job names a finding id. The mission is written before the run, and
+// the run is what produces the findings, so {{findings.open}} is resolved
+// server-side at job open (gibson#497). An id pasted in here would be a mock.
+func TestRender_ClusterAssessmentJobsAskForTheOpenFindings(t *testing.T) {
+	def, err := Render(context.Background(), "cluster-assessment", paramsFor(t, "cluster-assessment"))
+	if err != nil {
+		t.Fatalf("Render: %v", err)
+	}
+	for _, id := range []string{"exploit", "fix"} {
+		got := def.GetNodes()[id].GetJobConfig().GetSpec().GetInputs()
+		if len(got) != 1 || got[0] != "{{findings.open}}" {
+			t.Errorf("node %q inputs = %v, want [{{findings.open}}]", id, got)
+		}
+	}
+}
+
+// Only the fix branch is allowed to change anything. The exploit branch proves
+// what is reachable; a job that also edited the manifests would make the
+// FIXED_BY link ambiguous about which branch did the work.
+func TestRender_ClusterAssessmentOnlyTheFixBranchOpensAMergeRequest(t *testing.T) {
+	def, err := Render(context.Background(), "cluster-assessment", paramsFor(t, "cluster-assessment"))
+	if err != nil {
+		t.Fatalf("Render: %v", err)
+	}
+	goal := def.GetNodes()["exploit"].GetJobConfig().GetSpec().GetGoal()
+	for _, must := range []string{"Do not change the cluster", "do not change the manifests"} {
+		if !strings.Contains(goal, must) {
+			t.Errorf("the exploit goal does not say %q: %s", must, goal)
+		}
+	}
+	if got := def.GetNodes()["fix"].GetJobConfig().GetSpec().GetGoal(); !strings.Contains(got, "merge request") {
+		t.Errorf("the fix goal does not ask for a merge request: %s", got)
+	}
 }

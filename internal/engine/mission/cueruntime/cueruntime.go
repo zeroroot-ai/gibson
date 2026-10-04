@@ -27,6 +27,7 @@ import (
 	"io/fs"
 	"math"
 	"path"
+	"regexp"
 	"sort"
 	"strings"
 	"sync"
@@ -104,8 +105,10 @@ func initOverlay() {
 			return fmt.Errorf("read embedded %s: %w", p, err)
 		}
 		// Rewrite the package declaration to match the last path component so
-		// that CUE's implied-qualifier import resolution works correctly.
-		data = rewritePackageDecl(p, data)
+		// that CUE's implied-qualifier import resolution works correctly, and
+		// then rewrite any colon import OF a rewritten package into the alias
+		// form, which still resolves after the rename.
+		data = rewriteColonImports(rewritePackageDecl(p, data))
 		absPath := path.Join(schemaModuleRoot, p)
 		overlay[absPath] = load.FromBytes(data)
 		return nil
@@ -135,10 +138,60 @@ func initOverlay() {
 // declared package names.
 //
 // The set of paths to rewrite is kept narrow and explicit to avoid surprises.
+// Every entry here is a package a MISSION AUTHOR imports by path, which is why
+// it needs the implied qualifier. rewriteColonImports then repairs the schema's
+// own colon imports of these packages.
 var packageRewrites = map[string]string{
 	// User code: import missionv1 "github.com/zeroroot-ai/sdk/api/proto/gibson/mission/v1"
-	// Needs package v1 (implied qualifier). Internal imports already use :typespb.
+	// Needs package v1 (implied qualifier).
 	"api/proto/gibson/mission/v1": "v1",
+
+	// User code: import jobv1 "github.com/zeroroot-ai/sdk/api/proto/gibson/job/v1"
+	//
+	// A mission that drives a bank names a DeliverableKind — there is no other
+	// way to say "open a merge request", and writing the enum's number instead
+	// would put a magic 2 in a first-party mission. Before this entry the
+	// import failed with `no files in package directory with package name
+	// "v1"`, so a catalog mission could not author a JOB node at all, while
+	// the ADK's own templates could (their bundle applies the same two
+	// rewrites). The daemon's catalog and the CLI must accept the same CUE.
+	"api/proto/gibson/job/v1": "v1",
+}
+
+// colonImport matches the CUE colon-qualifier import form the SDK's generated
+// schema uses for a sibling package:
+//
+//	"github.com/zeroroot-ai/sdk/api/proto/gibson/job/v1:jobpb"
+//
+// Group 1 is the path, group 2 the qualifier.
+var colonImport = regexp.MustCompile(`"(github\.com/zeroroot-ai/sdk/([^":]+)):([A-Za-z_][A-Za-z0-9_]*)"`)
+
+// rewriteColonImports turns a colon import of a REWRITTEN package into the
+// Go-style alias form.
+//
+// rewritePackageDecl renames `package jobpb` to `package v1` so a mission
+// author's `import jobv1 ".../job/v1"` resolves. That rename breaks the
+// schema's own `".../job/v1:jobpb"`, which asks for a package named jobpb in
+// that directory — and the file that asks is mission/v1, the one every mission
+// imports. CUE resolves imports lazily, so this stayed invisible while nothing
+// loaded the affected file.
+//
+// The alias form `jobpb ".../job/v1"` binds the same local name to the package
+// at that path whatever the package is called, so every reference inside the
+// schema keeps working. This is the transform the ADK's regen pipeline applies
+// to the same files, for the same reason.
+//
+// Only paths in packageRewrites are touched. A colon import of a package whose
+// declaration was not renamed still resolves and is left alone.
+func rewriteColonImports(data []byte) []byte {
+	return colonImport.ReplaceAllFunc(data, func(m []byte) []byte {
+		groups := colonImport.FindSubmatch(m)
+		fullPath, relPath, qualifier := groups[1], string(groups[2]), groups[3]
+		if _, rewritten := packageRewrites[relPath]; !rewritten {
+			return m
+		}
+		return []byte(fmt.Sprintf("%s %q", qualifier, fullPath))
+	})
 }
 
 func rewritePackageDecl(filePath string, data []byte) []byte {

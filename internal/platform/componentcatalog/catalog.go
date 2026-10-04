@@ -507,8 +507,6 @@ type Ref struct {
 	ID   string
 }
 
-// List returns every parsed manifest, all kinds.
-
 // Refs returns the (kind, id) of every catalog component — the input to the
 // platform_enabled seeder, which seeds one tuple per ref.
 func Refs() []Ref {

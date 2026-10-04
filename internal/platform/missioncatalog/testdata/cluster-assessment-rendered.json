@@ -1,0 +1,138 @@
+{
+  "name": "cluster-assessment",
+  "description": "Assess one Kubernetes cluster from its controls and its workloads, prove what is exploitable, and open a merge request per finding fixed.",
+  "version": "1.0.0",
+  "nodes": {
+    "benchmark": {
+      "id": "benchmark",
+      "type": "NODE_TYPE_TOOL",
+      "toolConfig": {
+        "toolName": "kube-bench",
+        "input": {
+          "kubeconfigSecret": "cred:goat-cluster",
+          "target": "{{target.name}}"
+        }
+      }
+    },
+    "exploit": {
+      "id": "exploit",
+      "type": "NODE_TYPE_JOB",
+      "jobConfig": {
+        "bankRef": "bank/core-banking",
+        "spec": {
+          "goal": "For each finding you are given, decide whether it is genuinely exploitable on this cluster, and record what you did as evidence. Do not change the cluster and do not change the manifests. A finding you cannot exploit is a result worth recording.",
+          "repositories": [
+            {
+              "name": "manifests",
+              "connectorRef": "connector/gitlab-core",
+              "project": "examplebank/cluster-manifests",
+              "deliverable": "DELIVERABLE_KIND_MERGE_REQUEST"
+            }
+          ],
+          "credentialNames": [
+            "cred:goat-cluster"
+          ],
+          "inputs": [
+            "{{findings.open}}"
+          ]
+        }
+      },
+      "dependencies": [
+        "benchmark",
+        "workloads"
+      ]
+    },
+    "fix": {
+      "id": "fix",
+      "type": "NODE_TYPE_JOB",
+      "jobConfig": {
+        "bankRef": "bank/core-banking",
+        "spec": {
+          "goal": "For each finding you are given that the manifests in this repository can fix, change the manifests and open one merge request per finding. Name the finding in the merge request. Leave a finding alone when the fix is not in this repository.",
+          "repositories": [
+            {
+              "name": "manifests",
+              "connectorRef": "connector/gitlab-core",
+              "project": "examplebank/cluster-manifests",
+              "deliverable": "DELIVERABLE_KIND_MERGE_REQUEST"
+            }
+          ],
+          "credentialNames": [
+            "cred:goat-cluster"
+          ],
+          "inputs": [
+            "{{findings.open}}"
+          ]
+        }
+      },
+      "dependencies": [
+        "benchmark",
+        "workloads"
+      ]
+    },
+    "report": {
+      "id": "report",
+      "type": "NODE_TYPE_JOIN",
+      "joinConfig": {
+        "waitFor": [
+          "exploit",
+          "fix"
+        ],
+        "strategy": "MERGE_STRATEGY_CONCAT"
+      },
+      "dependencies": [
+        "exploit",
+        "fix"
+      ]
+    },
+    "workloads": {
+      "id": "workloads",
+      "type": "NODE_TYPE_TOOL",
+      "toolConfig": {
+        "toolName": "trivy-k8s",
+        "input": {
+          "kubeconfigSecret": "cred:goat-cluster",
+          "target": "{{target.name}}"
+        }
+      }
+    }
+  },
+  "edges": [
+    {
+      "from": "benchmark",
+      "to": "exploit"
+    },
+    {
+      "from": "benchmark",
+      "to": "fix"
+    },
+    {
+      "from": "workloads",
+      "to": "exploit"
+    },
+    {
+      "from": "workloads",
+      "to": "fix"
+    },
+    {
+      "from": "exploit",
+      "to": "report"
+    },
+    {
+      "from": "fix",
+      "to": "report"
+    }
+  ],
+  "entryPoints": [
+    "benchmark",
+    "workloads"
+  ],
+  "exitPoints": [
+    "report"
+  ],
+  "secrets": {
+    "tools": [
+      "cred:goat-cluster"
+    ]
+  }
+}
