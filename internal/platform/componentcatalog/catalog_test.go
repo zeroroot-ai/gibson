@@ -649,3 +649,20 @@ func TestGithubPluginManifest(t *testing.T) {
 		t.Errorf("plugin/github image = %q; want the first-party integrations image pinned by digest", image)
 	}
 }
+
+// TestIsDiscoveryTool: the answer comes from the manifest's outputProtoType, so
+// a tool the executor ships is a discovery tool and a name the catalog does not
+// hold is not (gibson#625).
+func TestIsDiscoveryTool(t *testing.T) {
+	for _, id := range []string{"nmap", "naabu", "kube-bench", "trivy-k8s"} {
+		if !IsDiscoveryTool(id) {
+			t.Errorf("IsDiscoveryTool(%q) = false; its manifest declares %s", id, DiscoveryResultProtoType)
+		}
+	}
+	// amass was in the hand-written map this replaces; the executor never shipped it.
+	for _, id := range []string{"amass", "zerocool", ""} {
+		if IsDiscoveryTool(id) {
+			t.Errorf("IsDiscoveryTool(%q) = true; the catalog lists no such tool", id)
+		}
+	}
+}

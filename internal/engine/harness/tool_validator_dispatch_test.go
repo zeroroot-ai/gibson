@@ -95,11 +95,11 @@ func TestCallToolProto_ADiscoveryToolWithNoDiscoveryResultIsCounted(t *testing.T
 
 	dispatchToolCall(t, tool, "testtool", createTestFileDescriptorSetForCallback(), setResult)
 
-	assert.Equal(t, before+1,
-		testutil.ToFloat64(toolExtractionSkippedTotal.WithLabelValues(tool, "missing_discovery_field", "run-625")),
+	assert.InDelta(t, before+1,
+		testutil.ToFloat64(toolExtractionSkippedTotal.WithLabelValues(tool, "missing_discovery_field", "run-625")), 0.5,
 		"the skip metric did not move; the validator is not on the dispatch path")
-	assert.Equal(t, beforeCompliance+1,
-		testutil.ToFloat64(toolDiscoveryComplianceTotal.WithLabelValues(tool, "false", "run-625")),
+	assert.InDelta(t, beforeCompliance+1,
+		testutil.ToFloat64(toolDiscoveryComplianceTotal.WithLabelValues(tool, "false", "run-625")), 0.5,
 		"the compliance metric did not record a non-compliant dispatch")
 }
 
@@ -130,8 +130,8 @@ func TestCallToolProto_ADiscoveryToolWithADiscoveryResultIsCompliant(t *testing.
 		refl.Set(field, protoreflect.ValueOfMessage(disc))
 	})
 
-	assert.Equal(t, before+1,
-		testutil.ToFloat64(toolDiscoveryComplianceTotal.WithLabelValues(tool, "true", "run-625")),
+	assert.InDelta(t, before+1,
+		testutil.ToFloat64(toolDiscoveryComplianceTotal.WithLabelValues(tool, "true", "run-625")), 0.5,
 		"a compliant dispatch was not recorded")
 }
 
@@ -147,13 +147,13 @@ func TestCallToolProto_ANonDiscoveryToolIsNotCountedAsMissing(t *testing.T) {
 
 	dispatchToolCall(t, tool, "testtool", createTestFileDescriptorSetForCallback(), setResult)
 
-	assert.Equal(t, before,
-		testutil.ToFloat64(toolExtractionSkippedTotal.WithLabelValues(tool, "missing_discovery_field", "run-625")),
+	assert.InDelta(t, before,
+		testutil.ToFloat64(toolExtractionSkippedTotal.WithLabelValues(tool, "missing_discovery_field", "run-625")), 0.5,
 		"a non-discovery tool was counted as missing a DiscoveryResult")
 	// It is still RECORDED, under its own reason, so the metric distinguishes
 	// "this tool does not produce graph nodes" from "it should have and did not".
-	assert.Equal(t, beforeNotOne+1,
-		testutil.ToFloat64(toolExtractionSkippedTotal.WithLabelValues(tool, "not_discovery_tool", "run-625")),
+	assert.InDelta(t, beforeNotOne+1,
+		testutil.ToFloat64(toolExtractionSkippedTotal.WithLabelValues(tool, "not_discovery_tool", "run-625")), 0.5,
 		"the dispatch was not recorded at all")
 }
 
