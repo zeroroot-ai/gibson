@@ -253,6 +253,7 @@ lint-all: $(GOLANGCI_LINT)
 # NEW unreachable code vs .deadcode-baseline (deadcode has no diff-scoping).
 .PHONY: lint-deadcode
 lint-deadcode: $(DEADCODE)
+	@bash scripts/run-capped.sh --selftest
 	@bash scripts/check-deadcode.sh --selftest
 	@bash scripts/check-deadcode.sh
 
