@@ -9,6 +9,7 @@ package harness
 import (
 	"context"
 	"errors"
+	"sort"
 	"strings"
 	"testing"
 
@@ -19,19 +20,26 @@ import (
 	"github.com/zeroroot-ai/gibson/internal/platform/missioncatalog"
 )
 
-// scanParams is a complete parameter set for the checked-in scan mission,
-// built from the catalog's own declaration so a parameter added there shows up
+// catalogParams is a complete parameter set for one checked-in mission, built
+// from THAT mission's own declaration. A parameter added to a mission shows up
 // here as a render failure rather than as a test that quietly stops covering it.
-func scanParams() map[string]string {
-	out := map[string]string{}
-	src, err := missioncatalog.Source("scan")
+//
+// Per mission, not one set reused for all of them. These tests used to take
+// missioncatalog.Names()[0] and feed it the scan mission's seven parameters;
+// Names() is sorted, so adding cluster-assessment moved position 0 and three
+// tests failed on parameters the mission does not take. A set that happened to
+// fit whichever mission sorts first is a test that measures the sort order.
+func catalogParams(t *testing.T, mission string) map[string]string {
+	t.Helper()
+	src, err := missioncatalog.Source(mission)
 	if err != nil {
-		panic("scan is a checked-in mission: " + err.Error())
+		t.Fatalf("Source(%s): %v", mission, err)
 	}
 	names, err := cueruntime.DeclaredParams(src)
 	if err != nil {
-		panic("scan declares its parameters: " + err.Error())
+		t.Fatalf("DeclaredParams(%s): %v", mission, err)
 	}
+	out := make(map[string]string, len(names))
 	for _, name := range names {
 		out[name] = "v-" + name
 	}
@@ -52,16 +60,25 @@ func TestResolveMissionDefinitionJSON_CatalogMissionRendersTheCheckedInGraph(t *
 	if len(names) == 0 {
 		t.Skip("no checked-in missions to render")
 	}
-	body, err := resolveMissionDefinitionJSON(context.Background(), catalogReq(names[0], scanParams()))
-	if err != nil {
-		t.Fatalf("resolveMissionDefinitionJSON: %v", err)
-	}
-	if !suppliedGraph(body) {
-		t.Fatalf("rendered body is empty or null: %q", body)
-	}
-	// The rendered graph must carry the parameters, not placeholders.
-	if !strings.Contains(body, "v-application") {
-		t.Errorf("rendered graph does not carry the application parameter: %s", truncate(body))
+	for _, mission := range names {
+		params := catalogParams(t, mission)
+		body, err := resolveMissionDefinitionJSON(context.Background(), catalogReq(mission, params))
+		if err != nil {
+			t.Fatalf("resolveMissionDefinitionJSON(%s): %v", mission, err)
+		}
+		if !suppliedGraph(body) {
+			t.Fatalf("%s: rendered body is empty or null: %q", mission, body)
+		}
+		// The rendered graph must carry EVERY parameter's value, not
+		// placeholders. A declared parameter whose value does not appear is
+		// either a substitution that did not happen or a parameter the mission
+		// declares and never uses; both are worth a failure.
+		for name, value := range params {
+			if !strings.Contains(body, value) {
+				t.Errorf("%s: the rendered graph does not carry the %q parameter: %s",
+					mission, name, truncate(body))
+			}
+		}
 	}
 }
 
@@ -74,7 +91,7 @@ func TestResolveMissionDefinitionJSON_UnknownParameterIsRefusedNotDropped(t *tes
 	if len(names) == 0 {
 		t.Skip("no checked-in missions")
 	}
-	params := scanParams()
+	params := catalogParams(t, names[0])
 	params["host"] = "evil.example.com"
 
 	_, err := resolveMissionDefinitionJSON(context.Background(), catalogReq(names[0], params))
@@ -95,15 +112,27 @@ func TestResolveMissionDefinitionJSON_AllMissingParametersReportedTogether(t *te
 	if len(names) == 0 {
 		t.Skip("no checked-in missions")
 	}
-	params := scanParams()
-	delete(params, "ref")
-	delete(params, "commit")
+	params := catalogParams(t, names[0])
+	if len(params) < 2 {
+		t.Skipf("%s declares %d parameters; this asserts two missing at once", names[0], len(params))
+	}
+	// Two of the mission's OWN names, sorted so the choice does not depend on
+	// map iteration order.
+	declared := make([]string, 0, len(params))
+	for name := range params {
+		declared = append(declared, name)
+	}
+	sort.Strings(declared)
+	missing := declared[:2]
+	for _, name := range missing {
+		delete(params, name)
+	}
 
 	_, err := resolveMissionDefinitionJSON(context.Background(), catalogReq(names[0], params))
 	if err == nil {
 		t.Fatal("a missing parameter must fail the render")
 	}
-	for _, want := range []string{"ref", "commit"} {
+	for _, want := range missing {
 		if !strings.Contains(err.Error(), want) {
 			t.Errorf("error %q does not name the missing parameter %q", err.Error(), want)
 		}
@@ -150,7 +179,7 @@ func TestResolveMissionDefinitionJSON_NullBodyIsAbsenceNotAGraph(t *testing.T) {
 	if len(names) == 0 {
 		t.Skip("no checked-in missions")
 	}
-	req := catalogReq(names[0], scanParams())
+	req := catalogReq(names[0], catalogParams(t, names[0]))
 	req.MissionDefinitionJson = []byte("null")
 
 	if _, err := resolveMissionDefinitionJSON(context.Background(), req); err != nil {
@@ -199,7 +228,7 @@ func TestResolveMissionDefinitionJSON_SuppliedGraphPassesThrough(t *testing.T) {
 func TestResolveMissionDefinitionJSON_UnknownMissionNameIsRefused(t *testing.T) {
 	t.Parallel()
 
-	_, err := resolveMissionDefinitionJSON(context.Background(), catalogReq("no-such-mission", scanParams()))
+	_, err := resolveMissionDefinitionJSON(context.Background(), catalogReq("no-such-mission", catalogParams(t, missioncatalog.Names()[0])))
 	if err == nil {
 		t.Fatal("an unknown mission name must be refused")
 	}

@@ -14,6 +14,7 @@ import (
 	"github.com/stretchr/testify/require"
 
 	"github.com/zeroroot-ai/gibson/internal/engine/mission/cueruntime"
+	jobv1 "github.com/zeroroot-ai/sdk/api/gen/gibson/job/v1"
 )
 
 //go:embed testdata/recon.cue
@@ -267,4 +268,64 @@ func TestDeclaredParams_SourceThatDoesNotCompileIsAnError(t *testing.T) {
 	t.Parallel()
 	_, err := cueruntime.DeclaredParams("mission: UNCLOSED {")
 	require.Error(t, err)
+}
+
+// A mission author must be able to name a DeliverableKind. There is no other
+// way to say "open a merge request", and writing the enum's number instead
+// would put a magic 2 in a first-party mission.
+//
+// Before packageRewrites covered job/v1 this failed with
+//
+//	cannot find package "github.com/zeroroot-ai/sdk/api/proto/gibson/job/v1":
+//	no files in package directory with package name "v1"
+//
+// so the daemon's own catalog could not author a JOB node at all, while the
+// ADK's templates could. The two must accept the same CUE.
+func TestExport_AMissionMayImportTheJobPackage(t *testing.T) {
+	const src = `
+import (
+	missionv1 "github.com/zeroroot-ai/sdk/api/proto/gibson/mission/v1"
+	jobv1 "github.com/zeroroot-ai/sdk/api/proto/gibson/job/v1"
+)
+
+mission: missionv1.#MissionDefinition & {
+	name:    "job-import"
+	version: "1.0.0"
+	nodes: {
+		fix: {
+			id:   "fix"
+			type: missionv1.#NODE_TYPE_JOB
+			jobConfig: {
+				bankRef: "bank/core"
+				spec: {
+					goal: "Fix it."
+					repositories: [{
+						name:         "repo"
+						connectorRef: "connector/forge"
+						project:      "group/repo"
+						deliverable:  jobv1.#DELIVERABLE_KIND_MERGE_REQUEST
+					}]
+				}
+			}
+		}
+	}
+	entryPoints: ["fix"]
+	exitPoints: ["fix"]
+}
+`
+	def, err := cueruntime.Export(context.Background(), src)
+	if err != nil {
+		t.Fatalf("Export: %v", err)
+	}
+
+	repos := def.GetNodes()["fix"].GetJobConfig().GetSpec().GetRepositories()
+	if len(repos) != 1 {
+		t.Fatalf("repositories = %d, want 1", len(repos))
+	}
+	// Through protojson into the Go type, so this is a drift guard on the SDK
+	// job proto as well: a renamed or retyped field fails here, not at a
+	// mission author's submit.
+	if got := repos[0].GetDeliverable(); got != jobv1.DeliverableKind_DELIVERABLE_KIND_MERGE_REQUEST {
+		t.Errorf("deliverable = %v, want MERGE_REQUEST", got)
+	}
 }

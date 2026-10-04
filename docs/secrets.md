@@ -56,6 +56,21 @@ Tenant→provider routing happens in `Registry.For(tenant)`, which reads the ten
 
 The operator's admin token has unrestricted access to both `user/*` and `infra/*`.
 
+**Hand-over to a dispatched component.** A mission declares which named tenant
+secrets its components may receive (`MissionDefinition.secrets`, gibson#485).
+The daemon resolves each name through the broker **as itself**, at dispatch, and
+hands the value to the component in its environment, under the variable
+`sdk/secretenv.Key` derives. The component never names a secret — the same
+property ScopeID has, where a component-supplied value would make the decision
+attacker-influenceable. This does not widen FGA: `secret.can_resolve` still
+admits only `plugin_principal`, and a component still cannot ask for a secret.
+
+The value goes in the **environment** and the name in the input. A tool's input
+JSON is captured with the tool call, and a mission definition is stored, listed,
+rendered and displayed, so a credential in either would outlive the dispatch in
+a place people read. `docs/how-to-point-a-mission-at-a-cluster.md` walks the
+whole path.
+
 ### Layer 2 — Per-tenant computed credentials (no storage)
 
 | Credential | Source | Read by | Notes |
@@ -124,6 +139,7 @@ If none of the above fits, you've found a sixth pattern — **stop and discuss**
 | Provider registry + factory map | `internal/platform/secrets/registry.go` |
 | User secret stored-name and category helpers | `internal/server/admin/secrets_admin.go` (`storedName`, `categoryPrefix`, `parseCategory`) |
 | Plugin credential resolution | `internal/server/daemon/credential_store.go` (`GetCredential`) |
+| Mission-declared hand-over to a component | `internal/engine/harness/mission_secrets.go` |
 | Master KEK provider abstraction | `internal/platform/crypto/providers/` |
 | Per-tenant Postgres password derivation | `internal/infra/datapool/pgxpool_per_tenant.go` (`derivePostgresPassword`) |
 | Per-tenant Neo4j credential resolver | `internal/infra/datapool/neo4j_endpoint_resolver_instance.go` |
@@ -134,6 +150,7 @@ If none of the above fits, you've found a sixth pattern — **stop and discuss**
 
 ## Related docs
 
+- `docs/how-to-point-a-mission-at-a-cluster.md` — the three records a run against a cluster needs
 - `core/gibson/docs/data-plane.md` — per-tenant data isolation (Postgres, Neo4j, Redis, Vector)
 - `core/gibson/docs/auth.md` — workload identity (SPIFFE) and Zitadel OIDC
 - Spec `per-tenant-data-plane-completion` — the in-flight work that established the Vault-based Neo4j credential path
