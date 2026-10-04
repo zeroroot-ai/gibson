@@ -153,6 +153,53 @@ func TestRenderCatalogMission_UnknownParameterIsRefusedNotDropped(t *testing.T) 
 	assertGRPCStatusCode(t, err, "InvalidArgument")
 }
 
+// The property the closed set exists for, said as its own test: a parameter
+// cannot supply the target.
+//
+// The runtime target binds from the mission's target at submit and from nowhere
+// else, so a caller that could smuggle one through a parameter could point a
+// run at a cluster the tenant never registered. No mission declares `target`,
+// `host`, `url` or `targetRef`, and each is refused by name rather than
+// dropped.
+func TestRenderCatalogMission_AParameterCannotSupplyTheTarget(t *testing.T) {
+	t.Parallel()
+
+	srv := catalogServer()
+	for _, mission := range missioncatalog.Names() {
+		src, serr := missioncatalog.Source(mission)
+		if serr != nil {
+			t.Fatalf("Source(%s): %v", mission, serr)
+		}
+		declared, derr := cueruntime.DeclaredParams(src)
+		if derr != nil {
+			t.Fatalf("DeclaredParams(%s): %v", mission, derr)
+		}
+
+		for _, smuggled := range []string{"target", "targetRef", "host", "url"} {
+			// A mission that DID declare one of these would make the check
+			// vacuous, so say so rather than passing quietly.
+			if slices.Contains(declared, smuggled) {
+				t.Fatalf("mission %q declares a parameter named %q; the runtime target must not be caller-supplied",
+					mission, smuggled)
+			}
+
+			params := map[string]string{smuggled: "evil.example.com"}
+			for _, d := range declared {
+				params[d] = "v-" + d
+			}
+			_, err := srv.RenderCatalogMission(context.Background(),
+				&daemonpb.RenderCatalogMissionRequest{Name: mission, Params: params})
+			if err == nil {
+				t.Errorf("mission %q accepted a %q parameter", mission, smuggled)
+				continue
+			}
+			if !strings.Contains(err.Error(), smuggled) {
+				t.Errorf("mission %q: the refusal does not name %q: %v", mission, smuggled, err)
+			}
+		}
+	}
+}
+
 // Every missing parameter at once. A caller wiring this up should not discover
 // them one render at a time.
 func TestRenderCatalogMission_MissingParametersReportedTogether(t *testing.T) {
