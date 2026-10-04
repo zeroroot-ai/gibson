@@ -150,7 +150,7 @@ func TestTenantIdentity_OIDCClientComponentReported(t *testing.T) {
 	c := fake.NewClientBuilder().
 		WithScheme(scheme).
 		WithStatusSubresource(&gibsonv1alpha1.TenantIdentity{}).
-		WithObjects(ti).
+		WithObjects(ti, platformBootstrap()).
 		Build()
 
 	stub := &stubIdentityProvisioner{result: identity.Result{OrgID: "org-123", Slug: "acme"}}
@@ -165,6 +165,11 @@ func TestTenantIdentity_OIDCClientComponentReported(t *testing.T) {
 	}
 	if len(got.Status.Components) != 2 {
 		t.Fatalf("want zitadel-org + oidc-client components, got %+v", got.Status.Components)
+	}
+	// The child is minted but its Zitadel-side client does not exist yet, so
+	// the component is pending and the identity is not ready (gibson#597).
+	if componentState(got, "oidc-client") != "pending" || got.Status.Ready {
+		t.Fatalf("oidc-client must read pending until the child exists: ready=%v components=%+v", got.Status.Ready, got.Status.Components)
 	}
 }
 

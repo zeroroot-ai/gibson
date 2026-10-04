@@ -6,10 +6,14 @@ package controller
 import (
 	"context"
 	"errors"
+	"fmt"
 	"time"
 
+	apierrors "k8s.io/apimachinery/pkg/api/errors"
+	apimeta "k8s.io/apimachinery/pkg/api/meta"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/runtime"
+	"k8s.io/apimachinery/pkg/types"
 	"k8s.io/client-go/tools/events"
 	ctrl "sigs.k8s.io/controller-runtime"
 	"sigs.k8s.io/controller-runtime/pkg/builder"
@@ -18,6 +22,7 @@ import (
 	logf "sigs.k8s.io/controller-runtime/pkg/log"
 	"sigs.k8s.io/controller-runtime/pkg/predicate"
 
+	platformv1alpha1 "github.com/zeroroot-ai/gibson/operators/platform/api/v1alpha1"
 	gibsonv1alpha1 "github.com/zeroroot-ai/gibson/operators/tenant/api/v1alpha1"
 	"github.com/zeroroot-ai/gibson/operators/tenant/internal/clients"
 	"github.com/zeroroot-ai/gibson/operators/tenant/internal/identity"
@@ -67,6 +72,8 @@ type TenantIdentityReconciler struct {
 // +kubebuilder:rbac:groups=gibson.zeroroot.ai,resources=tenantidentities,verbs=get;list;watch;create;update;patch;delete
 // +kubebuilder:rbac:groups=gibson.zeroroot.ai,resources=tenantidentities/status,verbs=get;update;patch
 // +kubebuilder:rbac:groups=gibson.zeroroot.ai,resources=tenantidentities/finalizers,verbs=update
+// +kubebuilder:rbac:groups=gibson.zeroroot.ai,resources=platformbootstraps,verbs=get;list;watch
+// +kubebuilder:rbac:groups=gibson.zeroroot.ai,resources=oidcclients,verbs=get;list;watch;create;update;patch;delete
 
 // Reconcile drives a TenantIdentity toward its desired state. The flow:
 //
@@ -162,7 +169,24 @@ func (r *TenantIdentityReconciler) Reconcile(ctx context.Context, req ctrl.Reque
 		return ctrl.Result{}, err //nolint:wrapcheck // see comment
 	}
 
-	r.markIdentityReady(ctx, &ti, res)
+	// The declared OIDC clients (spec.oidcClients, gibson#597) are minted
+	// through the platform-operator's OIDCClient kind, one child per entry,
+	// once the org they belong to exists.
+	oidcReady, err := r.reconcileOIDCClients(ctx, &ti)
+	if err != nil {
+		log.Error(err, "oidc clients failed", "tenant", ti.Spec.TenantID)
+		r.emitIdentity(&ti, "Warning", "OIDCClientsFailed", err.Error())
+		if _, ferr := r.failIdentity(ctx, &ti, "oidc clients: "+err.Error()); ferr != nil {
+			return ctrl.Result{}, ferr
+		}
+		return ctrl.Result{}, err
+	}
+
+	r.markIdentityReady(ctx, &ti, res, oidcReady)
+	if !oidcReady {
+		log.V(1).Info("tenant identity waiting for oidc clients", "tenant", ti.Spec.TenantID)
+		return ctrl.Result{RequeueAfter: oidcClientPollInterval}, nil
+	}
 	r.emitIdentity(&ti, "Normal", "Provisioned", "tenant identity is ready")
 	log.V(1).Info("tenant identity ready", "tenant", ti.Spec.TenantID, "org", res.OrgID)
 
@@ -219,16 +243,22 @@ func (r *TenantIdentityReconciler) markIdentityProvisioning(ctx context.Context,
 // Ready true, every component ready, and the Ready condition flipped True. The
 // org id/slug are written the SAME way the saga writes Tenant.Status, so
 // downstream readers see identical data regardless of codepath.
-func (r *TenantIdentityReconciler) markIdentityReady(ctx context.Context, ti *gibsonv1alpha1.TenantIdentity, res identity.Result) {
+func (r *TenantIdentityReconciler) markIdentityReady(ctx context.Context, ti *gibsonv1alpha1.TenantIdentity, res identity.Result, oidcReady bool) {
 	base := ti.DeepCopy()
-	ti.Status.Phase = gibsonv1alpha1.TenantIdentityPhaseReady
-	ti.Status.Ready = true
-	ti.Status.LastError = ""
 	ti.Status.ZitadelOrgID = res.OrgID
 	ti.Status.ZitadelOrgSlug = res.Slug
 	ti.Status.ObservedGeneration = ti.Generation
-	ti.Status.Components = readyIdentityComponents(ti)
-	setIdentityReadyCondition(ti, metav1.ConditionTrue, "Provisioned", "tenant identity is ready")
+	ti.Status.Components = identityComponents(ti, oidcReady)
+	if oidcReady {
+		ti.Status.Phase = gibsonv1alpha1.TenantIdentityPhaseReady
+		ti.Status.Ready = true
+		ti.Status.LastError = ""
+		setIdentityReadyCondition(ti, metav1.ConditionTrue, "Provisioned", "tenant identity is ready")
+	} else {
+		ti.Status.Phase = gibsonv1alpha1.TenantIdentityPhaseProvisioning
+		ti.Status.Ready = false
+		setIdentityReadyCondition(ti, metav1.ConditionFalse, "OIDCClientsPending", "declared oidc clients are not minted yet")
+	}
 	_ = r.patchIdentityStatus(ctx, ti, base)
 }
 
@@ -266,21 +296,119 @@ func (r *TenantIdentityReconciler) emitIdentity(ti *gibsonv1alpha1.TenantIdentit
 	r.Recorder.Eventf(ti, nil, eventType, reason, reason, "%s", msg)
 }
 
-// readyIdentityComponents returns the per-component ready conditions. The
-// zitadel-org component always participates (the operator always provisions the
-// org). The oidc-client component participates only when the spec requests one;
-// since the operator does not itself mint the Zitadel OIDC application in this
-// slice (gibson#803 scope: per-tenant OIDC clients are minted daemon-side), a
-// requested oidc-client is reported ready once the org backing it exists.
-func readyIdentityComponents(ti *gibsonv1alpha1.TenantIdentity) []gibsonv1alpha1.TenantIdentityComponentCondition {
-	ready := func(name string) gibsonv1alpha1.TenantIdentityComponentCondition {
-		return gibsonv1alpha1.TenantIdentityComponentCondition{Name: name, State: "ready"}
-	}
-	comps := []gibsonv1alpha1.TenantIdentityComponentCondition{ready("zitadel-org")}
+// identityComponents returns the per-component conditions. The zitadel-org
+// component always participates (the operator always provisions the org).
+// The oidc-client component participates when the spec declares clients,
+// and reads ready only once every declared OIDCClient child reports its
+// Zitadel-side client exists (gibson#597).
+func identityComponents(ti *gibsonv1alpha1.TenantIdentity, oidcReady bool) []gibsonv1alpha1.TenantIdentityComponentCondition {
+	comps := []gibsonv1alpha1.TenantIdentityComponentCondition{{Name: "zitadel-org", State: "ready"}}
 	if len(ti.Spec.OIDCClients) > 0 {
-		comps = append(comps, ready("oidc-client"))
+		state := "pending"
+		if oidcReady {
+			state = "ready"
+		}
+		comps = append(comps, gibsonv1alpha1.TenantIdentityComponentCondition{Name: "oidc-client", State: state})
 	}
 	return comps
+}
+
+// oidcClientPollInterval is how often a TenantIdentity waiting on its
+// declared OIDC clients looks again.
+const oidcClientPollInterval = 15 * time.Second
+
+// reconcileOIDCClients mints one platform OIDCClient per declared entry in
+// spec.oidcClients, owned by the TenantIdentity, with the Zitadel issuer,
+// admin token and project copied from the cluster's PlatformBootstrap (the
+// same source the platform-operator's own children use). An entry removed
+// from the spec takes its child with it. It returns whether every declared
+// client exists on the Zitadel side.
+func (r *TenantIdentityReconciler) reconcileOIDCClients(ctx context.Context, ti *gibsonv1alpha1.TenantIdentity) (bool, error) {
+	if len(ti.Spec.OIDCClients) == 0 {
+		return true, r.pruneOIDCClients(ctx, ti, nil)
+	}
+	var boots platformv1alpha1.PlatformBootstrapList
+	if err := r.List(ctx, &boots); err != nil {
+		return false, fmt.Errorf("list PlatformBootstrap: %w", err)
+	}
+	if len(boots.Items) != 1 {
+		return false, fmt.Errorf("spec.oidcClients needs exactly one PlatformBootstrap to copy the Zitadel issuer, admin token and project from; found %d", len(boots.Items))
+	}
+	pb := boots.Items[0]
+
+	ready := true
+	keep := make(map[string]struct{}, len(ti.Spec.OIDCClients))
+	for _, entry := range ti.Spec.OIDCClients {
+		name := oidcClientChildName(ti, entry)
+		keep[name] = struct{}{}
+		child := &platformv1alpha1.OIDCClient{ObjectMeta: metav1.ObjectMeta{Name: name, Namespace: ti.Namespace}}
+		if _, err := controllerutil.CreateOrUpdate(ctx, r.Client, child, func() error {
+			if err := controllerutil.SetControllerReference(ti, child, r.Scheme); err != nil {
+				return fmt.Errorf("own OIDCClient %s: %w", name, err)
+			}
+			child.Spec = oidcClientSpecFor(ti, entry, pb)
+			return nil
+		}); err != nil {
+			return false, fmt.Errorf("apply OIDCClient %s: %w", name, err)
+		}
+		var current platformv1alpha1.OIDCClient
+		if err := r.Get(ctx, types.NamespacedName{Namespace: ti.Namespace, Name: name}, &current); err != nil {
+			return false, fmt.Errorf("get OIDCClient %s: %w", name, err)
+		}
+		if !apimeta.IsStatusConditionTrue(current.Status.Conditions, platformv1alpha1.ConditionOIDCClientExists) {
+			ready = false
+		}
+	}
+	return ready, r.pruneOIDCClients(ctx, ti, keep)
+}
+
+// pruneOIDCClients deletes the OIDCClient children this TenantIdentity owns
+// that no declared entry names any more.
+func (r *TenantIdentityReconciler) pruneOIDCClients(ctx context.Context, ti *gibsonv1alpha1.TenantIdentity, keep map[string]struct{}) error {
+	var owned platformv1alpha1.OIDCClientList
+	if err := r.List(ctx, &owned, client.InNamespace(ti.Namespace)); err != nil {
+		return fmt.Errorf("list OIDCClients: %w", err)
+	}
+	for i := range owned.Items {
+		oc := &owned.Items[i]
+		if !metav1.IsControlledBy(oc, ti) {
+			continue
+		}
+		if _, ok := keep[oc.Name]; ok {
+			continue
+		}
+		if err := r.Delete(ctx, oc); err != nil && !apierrors.IsNotFound(err) {
+			return fmt.Errorf("delete OIDCClient %s: %w", oc.Name, err)
+		}
+	}
+	return nil
+}
+
+func oidcClientChildName(ti *gibsonv1alpha1.TenantIdentity, entry gibsonv1alpha1.TenantIdentityOIDCClient) string {
+	return ti.Name + "-" + entry.Name
+}
+
+// oidcClientSpecFor is the OIDCClient the platform-operator mints for one
+// declared entry: a web client when the entry has redirect URIs (the
+// authorization-code flow), a service client otherwise, in the platform
+// project every tenant org is granted (ADR-0093). The minted client secret
+// lands in a Secret beside the TenantIdentity.
+func oidcClientSpecFor(ti *gibsonv1alpha1.TenantIdentity, entry gibsonv1alpha1.TenantIdentityOIDCClient, pb platformv1alpha1.PlatformBootstrap) platformv1alpha1.OIDCClientSpec {
+	spec := platformv1alpha1.OIDCClientSpec{
+		ZitadelIssuer:   pb.Spec.Zitadel.Issuer,
+		AdminTokenRef:   pb.Spec.Zitadel.AdminTokenRef,
+		ProjectRef:      platformv1alpha1.ProjectReference{Name: pb.Spec.Zitadel.Project.Name},
+		ClientName:      ti.Spec.TenantID + "/" + entry.Name,
+		ApplicationType: platformv1alpha1.OIDCAppTypeService,
+		SecretRef:       platformv1alpha1.SecretKeyRef{Name: oidcClientChildName(ti, entry) + "-oidc", Namespace: ti.Namespace},
+	}
+	if len(entry.RedirectURIs) > 0 {
+		spec.ApplicationType = platformv1alpha1.OIDCAppTypeWeb
+		spec.RedirectURIs = append([]string(nil), entry.RedirectURIs...)
+		spec.GrantTypes = []platformv1alpha1.OIDCGrantType{"AUTHORIZATION_CODE", "REFRESH_TOKEN"}
+		spec.ResponseTypes = []platformv1alpha1.OIDCResponseType{"CODE"}
+	}
+	return spec
 }
 
 // setIdentityReadyCondition upserts the aggregate Ready condition.
