@@ -94,6 +94,32 @@ STUB
     echo "selftest PASS: new dead code fails the gate and is named"
   fi
 
+  # Fixture 3 — the tool must be invoked with the image's build tag. A stub
+  # that refuses unless GOFLAGS carries -tags=setec_integration proves the
+  # gate loads the same files the Dockerfile compiles.
+  stub="$tmp/tag-asserting-tool"
+  cat > "$stub" <<'STUB'
+#!/usr/bin/env bash
+case " ${GOFLAGS:-} " in
+  *" -tags=setec_integration "*) exit 0 ;;
+esac
+echo "stub: GOFLAGS lacks -tags=setec_integration (got '${GOFLAGS:-}')" >&2
+exit 1
+STUB
+  chmod +x "$stub"
+  set +e
+  out="$(DEADCODE_SKIP= GITHUB_BASE_REF=main GOFLAGS= \
+    DEADCODE_BIN="$stub" DEADCODE_BASELINE="$tmp/empty-baseline" \
+    bash "${BASH_SOURCE[0]}" 2>&1)"
+  status=$?
+  set -e
+  if [ "$status" -ne 0 ]; then
+    echo "selftest FAIL: the gate did not pass the image build tag to the tool. Gate said:" >&2
+    printf '%s\n' "$out" >&2; fails=1
+  else
+    echo "selftest PASS: the tool runs with the image build tag (setec_integration)"
+  fi
+
   return "$fails"
 }
 
@@ -132,7 +158,12 @@ TOOL_ERR="$(mktemp)"
 RAW="$(mktemp)"
 trap 'rm -f "$CURRENT" "$TOOL_ERR" "$RAW"' EXIT
 set +e
-bash scripts/run-capped.sh "$DEADCODE_BIN" -test=false ./cmd/... ./operators/... >"$RAW" 2>"$TOOL_ERR"
+# The published daemon image is built with -tags=setec_integration (Dockerfile
+# BUILD_TAGS), so the reachability walk must load the same files. An untagged
+# walk reports the readers that only exist under that tag as dead and then
+# deletes code the image runs (gibson#508, #601).
+GOFLAGS="${GOFLAGS:-} -tags=${DEADCODE_BUILD_TAGS:-setec_integration}" \
+  bash scripts/run-capped.sh "$DEADCODE_BIN" -test=false ./cmd/... ./operators/... >"$RAW" 2>"$TOOL_ERR"
 TOOL_STATUS=$?
 set -e
 if [ "$TOOL_STATUS" -ne 0 ]; then
@@ -146,10 +177,10 @@ if [ "$TOOL_STATUS" -ne 0 ]; then
   exit "$TOOL_STATUS"
 fi
 sed -E 's/^([^:]+):[0-9]+:[0-9]+: unreachable func: (.+)$/\1\t\2/' "$RAW" \
-  | sort -u > "$CURRENT"
+  | LC_ALL=C sort -u > "$CURRENT"
 
 # NEW dead code = lines in CURRENT not present in BASELINE.
-NEW="$(comm -23 "$CURRENT" <(sort -u "$BASELINE") || true)"
+NEW="$(LC_ALL=C comm -23 "$CURRENT" <(LC_ALL=C sort -u "$BASELINE") || true)"
 
 if [ -n "$NEW" ]; then
   echo "FAIL: new dead (unreachable) code introduced — not present in $BASELINE:" >&2

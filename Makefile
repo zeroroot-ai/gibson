@@ -258,12 +258,15 @@ lint-deadcode: $(DEADCODE)
 
 # lint-deadcode-baseline — regenerate .deadcode-baseline (run after a deliberate
 # keep, or after burning down dead code in gibson#918).
+# Walks with the image build tag (setec_integration) so the baseline matches
+# the gate. Sorted under LC_ALL=C so a regen on a workstation with another
+# locale does not reorder every line.
 .PHONY: lint-deadcode-baseline
 lint-deadcode-baseline: $(DEADCODE)
 	@echo "Regenerating .deadcode-baseline..."
-	@bash scripts/run-capped.sh $(DEADCODE) -test=false ./cmd/... ./operators/... 2>/dev/null \
+	@GOFLAGS="$(GOFLAGS) -tags=setec_integration" bash scripts/run-capped.sh $(DEADCODE) -test=false ./cmd/... ./operators/... 2>/dev/null \
 		| sed -E 's/^([^:]+):[0-9]+:[0-9]+: unreachable func: (.+)$$/\1\t\2/' \
-		| sort -u > .deadcode-baseline
+		| LC_ALL=C sort -u > .deadcode-baseline
 	@echo "Wrote .deadcode-baseline ($$(wc -l < .deadcode-baseline | tr -d ' ') entries)"
 
 # Format code
