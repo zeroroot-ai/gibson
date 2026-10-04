@@ -488,23 +488,22 @@ func joinSourcesFor(id string, all map[string]*missionpb.MissionNode, resolve fu
 	if !ok {
 		return []brain.JoinSource{{ID: id, Nodes: []string{id}}}
 	}
-	switch n.GetType() {
-	case missionpb.NodeType_NODE_TYPE_FOR_EACH:
+	if n.GetType() == missionpb.NodeType_NODE_TYPE_FOR_EACH {
 		ids := instanceIDsOf(id, all)
 		targets := make(map[string]string, len(ids))
 		for _, inst := range ids {
 			targets[inst] = instanceTargetID(inst)
 		}
 		return []brain.JoinSource{{ID: id, Nodes: ids, FanOut: true, Targets: targets}}
-	case missionpb.NodeType_NODE_TYPE_PARALLEL:
+	}
+	if n.GetType() == missionpb.NodeType_NODE_TYPE_PARALLEL {
 		var out []brain.JoinSource
 		for _, sub := range n.GetParallelConfig().GetSubNodes() {
 			out = append(out, joinSourcesFor(sub.GetId(), all, resolve)...)
 		}
 		return out
-	default:
-		return []brain.JoinSource{{ID: id, Nodes: []string{id}}}
 	}
+	return []brain.JoinSource{{ID: id, Nodes: []string{id}}}
 }
 
 func nodeKindTargetInput(n *missionpb.MissionNode) (kind, target, input string, err error) {

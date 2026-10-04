@@ -6,6 +6,7 @@ package brain
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"reflect"
 	"sort"
@@ -117,42 +118,54 @@ func mergeJoin(spec JoinSpec, missionID string, idx map[string]WorkSnapshot) (an
 	sources := map[string]any{}
 	var leaves []joinLeaf
 	for _, src := range spec.Sources {
-		if src.FanOut {
-			entries := make([]joinLeaf, 0, len(src.Nodes))
-			for _, n := range src.Nodes {
-				wi, ok := idx[WorkID(missionID, n)]
-				if !ok {
-					return nil, fmt.Errorf("source %q names unknown work %q", src.ID, n)
-				}
-				entries = append(entries, joinLeaf{
-					seq:    wi.CompletedSeq,
-					source: src.ID,
-					fanOut: true,
-					entry:  joinEntry{Target: src.Targets[n], Result: decodeResult(wi), Error: wi.Err},
-				})
-			}
-			// Timeline order, so FIRST/LAST and CONCAT read as the run happened.
-			sort.SliceStable(entries, func(i, j int) bool { return entries[i].seq < entries[j].seq })
-			vals := make([]any, 0, len(entries))
-			for _, e := range entries {
-				vals = append(vals, e.entry)
-			}
-			sources[src.ID] = vals
-			leaves = append(leaves, entries...)
-			continue
+		val, srcLeaves, err := readJoinSource(src, missionID, idx)
+		if err != nil {
+			return nil, err
 		}
+		sources[src.ID] = val
+		leaves = append(leaves, srcLeaves...)
+	}
+	return foldJoin(spec, sources, leaves)
+}
+
+// readJoinSource reads one source: the value the `sources` map holds for it,
+// and its completed work items. A fan-out source is one entry per instance in
+// Timeline order, so FIRST/LAST and CONCAT read as the run happened.
+func readJoinSource(src JoinSource, missionID string, idx map[string]WorkSnapshot) (any, []joinLeaf, error) {
+	if !src.FanOut {
 		if len(src.Nodes) != 1 {
-			return nil, fmt.Errorf("source %q resolves to %d nodes, want one", src.ID, len(src.Nodes))
+			return nil, nil, fmt.Errorf("source %q resolves to %d nodes, want one", src.ID, len(src.Nodes))
 		}
 		wi, ok := idx[WorkID(missionID, src.Nodes[0])]
 		if !ok {
-			return nil, fmt.Errorf("source %q names unknown work %q", src.ID, src.Nodes[0])
+			return nil, nil, fmt.Errorf("source %q names unknown work %q", src.ID, src.Nodes[0])
 		}
 		val := decodeResult(wi)
-		sources[src.ID] = val
-		leaves = append(leaves, joinLeaf{seq: wi.CompletedSeq, source: src.ID, entry: joinEntry{Result: val, Error: wi.Err}})
+		return val, []joinLeaf{{seq: wi.CompletedSeq, source: src.ID, entry: joinEntry{Result: val, Error: wi.Err}}}, nil
 	}
+	entries := make([]joinLeaf, 0, len(src.Nodes))
+	for _, n := range src.Nodes {
+		wi, ok := idx[WorkID(missionID, n)]
+		if !ok {
+			return nil, nil, fmt.Errorf("source %q names unknown work %q", src.ID, n)
+		}
+		entries = append(entries, joinLeaf{
+			seq:    wi.CompletedSeq,
+			source: src.ID,
+			fanOut: true,
+			entry:  joinEntry{Target: src.Targets[n], Result: decodeResult(wi), Error: wi.Err},
+		})
+	}
+	sort.SliceStable(entries, func(i, j int) bool { return entries[i].seq < entries[j].seq })
+	vals := make([]any, 0, len(entries))
+	for _, e := range entries {
+		vals = append(vals, e.entry)
+	}
+	return vals, entries, nil
+}
 
+// foldJoin folds the sources by the declared strategy.
+func foldJoin(spec JoinSpec, sources map[string]any, leaves []joinLeaf) (any, error) {
 	switch spec.Strategy {
 	case JoinStrategyNone:
 		// No rule declared: the join is the ordering it always was, and its
@@ -251,7 +264,7 @@ func toSlice(v any) []any {
 // silently merged value.
 func evalAggregator(expr string, sources map[string]any) (any, error) {
 	if expr == "" {
-		return nil, fmt.Errorf("strategy CUSTOM declares no aggregator")
+		return nil, errors.New("strategy CUSTOM declares no aggregator")
 	}
 	env, err := cel.NewEnv(cel.Variable("sources", cel.MapType(cel.StringType, cel.DynType)))
 	if err != nil {
