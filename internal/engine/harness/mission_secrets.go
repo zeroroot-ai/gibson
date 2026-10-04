@@ -41,13 +41,14 @@ type MissionSecretScopes struct {
 	Plugin map[string][]string
 }
 
-// ForTool, ForAgent and ForPlugin are the names one named component may be
-// handed: the union of the mission-wide list, its kind's list and its own.
+// ForTool is the names the named tool may be handed: the union of the
+// mission-wide list, the tool-wide list and its own.
 //
 // A UNION and not a narrowing. "Tool-wide" means every tool sees it, so a
 // per-name entry adds to that rather than replacing it — a declaration that
 // silently removed access granted one line above would be the kind of rule
-// nobody can read off the file.
+// nobody can read off the file. ForAgent and ForPlugin are the same for their
+// kinds.
 //
 // The result is sorted and de-duplicated so a caller's iteration order, and so
 // the environment a tool receives, does not depend on map ordering. Two runs of
