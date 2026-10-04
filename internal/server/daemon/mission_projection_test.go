@@ -104,8 +104,10 @@ func TestMissionDefinitionToProjected_DeciderSlot(t *testing.T) {
 	}
 }
 
-func TestMissionDefinitionToProjected_JoinCollapsesToDeps(t *testing.T) {
-	// a, b run; join j waits for both; c depends on j → c should depend on {a,b}.
+func TestMissionDefinitionToProjected_JoinIsANodeBetweenItsSourcesAndItsDependents(t *testing.T) {
+	// a, b run; join j waits for both; c depends on j. The join is a node of
+	// its own (gibson#543): j depends on {a,b}, c depends on j, and j carries
+	// the JoinSpec the brain merges by.
 	def := &missionpb.MissionDefinition{
 		Id: "m1",
 		Nodes: map[string]*missionpb.MissionNode{
@@ -123,11 +125,22 @@ func TestMissionDefinitionToProjected_JoinCollapsesToDeps(t *testing.T) {
 	for _, n := range got.Nodes {
 		byID[n.ID] = n
 	}
-	if _, ok := byID["j"]; ok {
-		t.Error("join node should not appear as a WorkNode")
+	j, ok := byID["j"]
+	if !ok || j.Kind != "join" {
+		t.Fatalf("join must project as a WorkNode of kind join, got %+v", j)
 	}
-	if !eqStrs(byID["c"].DependsOn, []string{"a", "b"}) {
-		t.Errorf("c deps: got %v want [a b]", byID["c"].DependsOn)
+	if !eqStrs(j.DependsOn, []string{"a", "b"}) {
+		t.Errorf("j deps: got %v want [a b]", j.DependsOn)
+	}
+	if !eqStrs(byID["c"].DependsOn, []string{"j"}) {
+		t.Errorf("c deps: got %v want [j]", byID["c"].DependsOn)
+	}
+	var spec brain.JoinSpec
+	if err := json.Unmarshal([]byte(j.Input), &spec); err != nil {
+		t.Fatalf("join input is not a JoinSpec: %v", err)
+	}
+	if len(spec.Sources) != 2 || spec.Sources[0].ID != "a" || spec.Sources[1].ID != "b" || spec.Strategy != brain.JoinStrategyNone {
+		t.Errorf("join spec: got %+v", spec)
 	}
 }
 

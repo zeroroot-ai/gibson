@@ -24,7 +24,8 @@ func TestWork_AsyncLifecycle(t *testing.T) {
 
 	want := []WorkSnapshot{
 		{ID: "w1", Kind: "tool", Target: "nmap", State: WorkRunning, Attempts: 1},
-		{ID: "w2", Kind: "agent", Target: "exploit-jenkins", State: WorkDone, Result: "shell", Attempts: 1},
+		// The first completion the World folded carries CompletedSeq 1 (gibson#543).
+		{ID: "w2", Kind: "agent", Target: "exploit-jenkins", State: WorkDone, Result: "shell", Attempts: 1, CompletedSeq: 1},
 	}
 	if got := w.WorkSnapshot(); !reflect.DeepEqual(got, want) {
 		t.Fatalf("work snapshot:\n got %+v\nwant %+v", got, want)

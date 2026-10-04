@@ -29,6 +29,7 @@ func ExecutorSystems() []System {
 		BudgetSystem,
 		SchedulerSystem,
 		ConditionSystem,
+		JoinSystem,
 		RetrySystem,
 		SurpriseFindingSystem, // promote identity-contradiction anomalies → Findings (gibson#751)
 		DeciderGateSystem,

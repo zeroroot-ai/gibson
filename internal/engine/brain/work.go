@@ -57,6 +57,12 @@ type WorkItem struct {
 	// nodes set it (gibson#527).
 	DependentsRunOnFailure bool
 
+	// CompletedSeq orders completions on the Timeline: the n-th WorkCompleted
+	// the World folded, done or failed, carries n. Zero means not completed.
+	// A join's FIRST and LAST strategies read it, so "first to complete" is a
+	// fact of the fold and replays the same (gibson#543).
+	CompletedSeq uint64
+
 	// Timeout is the node's own execution bound, from MissionNode.timeout.
 	// Zero means the node declared none, which is NOT the same as "expire
 	// immediately": what a zero means is decided at the dispatch boundary, per
@@ -197,6 +203,8 @@ func applyWorkCompleted(w *World, e WorkCompleted) {
 	case WorkFailed, WorkDone, WorkSkipped:
 		return
 	}
+	w.nextCompletedSeq++
+	wi.CompletedSeq = w.nextCompletedSeq
 	if e.Err != "" {
 		wi.State, wi.Err = WorkFailed, e.Err
 		return
@@ -226,6 +234,8 @@ type WorkSnapshot struct {
 	// members off this snapshot (gibson#538).
 	Group string
 	Limit int
+	// CompletedSeq mirrors WorkItem.CompletedSeq (gibson#543).
+	CompletedSeq uint64
 }
 
 // WorkSnapshot returns the current work items in deterministic (ID) order.
@@ -250,6 +260,7 @@ func (w *World) WorkSnapshot() []WorkSnapshot {
 			DependentsRunOnFailure: wi.DependentsRunOnFailure,
 			Group:                  wi.Group,
 			Limit:                  wi.Limit,
+			CompletedSeq:           wi.CompletedSeq,
 		})
 	}
 	sort.Slice(out, func(i, j int) bool { return out[i].ID < out[j].ID })

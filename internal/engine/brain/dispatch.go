@@ -111,8 +111,8 @@ func RetrySystem(w *World) []Event {
 	halted := pausedMissions(w)
 	var out []Event
 	for _, wi := range w.WorkSnapshot() {
-		if wi.Kind == "condition" {
-			continue // conditions are evaluated, not dispatched — never retried
+		if wi.Kind == "condition" || wi.Kind == "join" {
+			continue // evaluated in-brain, not dispatched — never retried
 		}
 		if wi.MissionID != "" && halted[wi.MissionID] {
 			continue // mission paused/terminal — do not re-arm its work

@@ -108,6 +108,16 @@ func missionDefinitionToProjected(
 	for _, e := range def.GetEdges() {
 		deps.add(e.GetTo(), e.GetFrom())
 	}
+	// A join waits for what its wait_for names. It is a node of its own now
+	// (gibson#543): it depends on its sources and its dependents depend on it,
+	// so the merged value it records is what they read.
+	for id, n := range allNodes {
+		if n.GetType() == missionpb.NodeType_NODE_TYPE_JOIN {
+			for _, w := range n.GetJoinConfig().GetWaitFor() {
+				deps.add(id, w)
+			}
+		}
+	}
 	for id, n := range def.GetNodes() {
 		if n.GetType() == missionpb.NodeType_NODE_TYPE_PARALLEL {
 			for _, sub := range n.GetParallelConfig().GetSubNodes() {
@@ -334,12 +344,18 @@ func buildWorkNodes(
 	resolve := makeResolver(allNodes)
 	var nodes []brain.WorkNode
 	for id, n := range allNodes {
+		var kind, target, input string
+		var err error
 		switch n.GetType() {
-		case missionpb.NodeType_NODE_TYPE_PARALLEL, missionpb.NodeType_NODE_TYPE_JOIN,
-			missionpb.NodeType_NODE_TYPE_FOR_EACH:
+		case missionpb.NodeType_NODE_TYPE_PARALLEL, missionpb.NodeType_NODE_TYPE_FOR_EACH:
 			continue // collapsed into DependsOn; no entity
+		case missionpb.NodeType_NODE_TYPE_JOIN:
+			// A join is a node of its own: the brain's JoinSystem merges its
+			// sources and records the merged value as its result (gibson#543).
+			kind, input, err = joinKindInput(n, allNodes, resolve)
+		default:
+			kind, target, input, err = nodeKindTargetInput(n)
 		}
-		kind, target, input, err := nodeKindTargetInput(n)
 		if err != nil {
 			return nil, fmt.Errorf("node %q: %w", id, err)
 		}
@@ -401,8 +417,9 @@ func deciderSlotFrom(s *missionpb.LLMSlotConfig) brain.DeciderSlot {
 	return brain.DeciderSlot{Provider: s.GetProvider(), Model: s.GetModel()}
 }
 
-// makeResolver returns resolve(id) → real node ids. parallel/join expand to their
-// members (transitively); real nodes resolve to themselves. Cycles are guarded.
+// makeResolver returns resolve(id) → real node ids. parallel expands to its
+// members and for_each to its instances (transitively); real nodes, joins
+// included (gibson#543), resolve to themselves. Cycles are guarded.
 func makeResolver(all map[string]*missionpb.MissionNode) func(string) []string {
 	var resolve func(string, map[string]bool) []string
 	resolve = func(id string, seen map[string]bool) []string {
@@ -421,12 +438,6 @@ func makeResolver(all map[string]*missionpb.MissionNode) func(string) []string {
 				out = append(out, resolve(sub.GetId(), seen)...)
 			}
 			return out
-		case missionpb.NodeType_NODE_TYPE_JOIN:
-			var out []string
-			for _, w := range n.GetJoinConfig().GetWaitFor() {
-				out = append(out, resolve(w, seen)...)
-			}
-			return out
 		case missionpb.NodeType_NODE_TYPE_FOR_EACH:
 			// Every instance, not the first: a join naming a for_each waits for
 			// the whole fan-out (gibson#527). The instances are in `all` because
@@ -441,6 +452,58 @@ func makeResolver(all map[string]*missionpb.MissionNode) func(string) []string {
 		}
 	}
 	return func(id string) []string { return resolve(id, map[string]bool{}) }
+}
+
+// joinKindInput projects a join into the brain's JoinSpec: each wait_for entry
+// becomes a source keyed by the id the author wrote. A for_each source lists
+// every instance with the target it ran against, so the merged value can say
+// which target produced what. A parallel source contributes one plain source
+// per member, because its members are the real work and a parallel node has
+// no result of its own.
+func joinKindInput(n *missionpb.MissionNode, all map[string]*missionpb.MissionNode, resolve func(string) []string) (kind, input string, err error) {
+	j := n.GetJoinConfig()
+	spec := brain.JoinSpec{
+		Strategy:   strings.TrimPrefix(j.GetStrategy().String(), "MERGE_STRATEGY_"),
+		Aggregator: j.GetAggregator(),
+	}
+	if spec.Strategy == "UNSPECIFIED" {
+		spec.Strategy = brain.JoinStrategyNone
+	}
+	for _, w := range j.GetWaitFor() {
+		spec.Sources = append(spec.Sources, joinSourcesFor(w, all, resolve)...)
+	}
+	b, mErr := json.Marshal(spec)
+	if mErr != nil {
+		return "", "", fmt.Errorf("marshal join spec: %w", mErr)
+	}
+	return "join", string(b), nil
+}
+
+// joinSourcesFor resolves one wait_for entry to its sources. A for_each is one
+// fan-out source; a parallel yields one source per sub-node, each resolved the
+// same way, so a for_each inside a parallel keeps its instances grouped under
+// its own id with their targets.
+func joinSourcesFor(id string, all map[string]*missionpb.MissionNode, resolve func(string) []string) []brain.JoinSource {
+	n, ok := all[id]
+	if !ok {
+		return []brain.JoinSource{{ID: id, Nodes: []string{id}}}
+	}
+	if n.GetType() == missionpb.NodeType_NODE_TYPE_FOR_EACH {
+		ids := instanceIDsOf(id, all)
+		targets := make(map[string]string, len(ids))
+		for _, inst := range ids {
+			targets[inst] = instanceTargetID(inst)
+		}
+		return []brain.JoinSource{{ID: id, Nodes: ids, FanOut: true, Targets: targets}}
+	}
+	if n.GetType() == missionpb.NodeType_NODE_TYPE_PARALLEL {
+		var out []brain.JoinSource
+		for _, sub := range n.GetParallelConfig().GetSubNodes() {
+			out = append(out, joinSourcesFor(sub.GetId(), all, resolve)...)
+		}
+		return out
+	}
+	return []brain.JoinSource{{ID: id, Nodes: []string{id}}}
 }
 
 func nodeKindTargetInput(n *missionpb.MissionNode) (kind, target, input string, err error) {

@@ -172,6 +172,8 @@ type World struct {
 	nextObservationID uint64
 	nextEntityID      uint64
 	nextHypothesisID  uint64
+	// nextCompletedSeq counts folded WorkCompleted events (gibson#543).
+	nextCompletedSeq uint64
 }
 
 func (w *World) newCredentialID() uint64 {

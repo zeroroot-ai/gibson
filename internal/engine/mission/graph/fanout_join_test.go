@@ -42,40 +42,30 @@ func joinNode(id string, waitFor []string, strategy missionv1.MergeStrategy, agg
 	}
 }
 
-// A merge rule over a fan-out source is refused, and the message names the
-// strategy. Nothing in the daemon evaluates JoinNodeConfig.strategy or
-// .aggregator (gibson#543), so accepting one would tell the author their rule
-// ran when it never did.
-func TestRefuseUnsupportedFanOut_MergeStrategyOverAFanOutSource(t *testing.T) {
+// A merge rule over a fan-out source is accepted: the brain's JoinSystem
+// evaluates JoinNodeConfig.strategy and .aggregator (gibson#543), so the
+// refusal gibson#527 added as a stopgap is gone. The merge itself is asserted
+// in the brain's join tests and the daemon's projection tests.
+func TestRefuseUnsupportedFanOut_MergeStrategyOverAFanOutSourceIsAccepted(t *testing.T) {
 	nodes := map[string]*missionv1.MissionNode{
 		"each":   forEachNode("each", "scan"),
 		"report": joinNode("report", []string{"each"}, missionv1.MergeStrategy_MERGE_STRATEGY_CONCAT, ""),
 	}
-	err := RefuseUnsupportedFanOut(nodes)
-	if err == nil {
-		t.Fatal("want a refusal for a merge strategy declared over a for_each source")
-	}
-	msg := err.Error()
-	for _, want := range []string{"report", "each", "MERGE_STRATEGY_CONCAT", "gibson#543"} {
-		if !strings.Contains(msg, want) {
-			t.Errorf("the refusal does not name %q: %s", want, msg)
-		}
+	if err := RefuseUnsupportedFanOut(nodes); err != nil {
+		t.Errorf("a merge strategy over a for_each source must be accepted: %v", err)
 	}
 }
 
-// An aggregator is refused even without MERGE_STRATEGY_CUSTOM: an author who
-// wrote a CEL expression expects it to run whatever the strategy field says.
-func TestRefuseUnsupportedFanOut_AggregatorWithoutCustomStrategy(t *testing.T) {
+// An aggregator over a fan-out source is accepted too, whatever the strategy
+// field says: the brain evaluates it under MERGE_STRATEGY_CUSTOM and ignores
+// it otherwise, and neither is a reason to refuse the mission.
+func TestRefuseUnsupportedFanOut_AggregatorOverAFanOutSourceIsAccepted(t *testing.T) {
 	nodes := map[string]*missionv1.MissionNode{
 		"each":   forEachNode("each", "scan"),
-		"report": joinNode("report", []string{"each"}, missionv1.MergeStrategy_MERGE_STRATEGY_UNSPECIFIED, "sources.values()"),
+		"report": joinNode("report", []string{"each"}, missionv1.MergeStrategy_MERGE_STRATEGY_CUSTOM, "sources.each.map(e, e.target)"),
 	}
-	err := RefuseUnsupportedFanOut(nodes)
-	if err == nil {
-		t.Fatal("want a refusal for an aggregator declared over a for_each source")
-	}
-	if !strings.Contains(err.Error(), "custom aggregator") {
-		t.Errorf("the refusal does not say an aggregator was declared: %s", err)
+	if err := RefuseUnsupportedFanOut(nodes); err != nil {
+		t.Errorf("an aggregator over a for_each source must be accepted: %v", err)
 	}
 }
 
@@ -133,9 +123,9 @@ func TestRefuseUnsupportedFanOut_NothingToRefuseIsATrueNil(t *testing.T) {
 	}
 }
 
-// The analyser reports the same refusal, so an author sees it in the mission view
-// and not only when the run fails.
-func TestProject_RefusesAMergeRuleOverAFanOutSource(t *testing.T) {
+// The analyser accepts the same shape the run path accepts, so the mission
+// view and a submitted run cannot disagree about a merge rule over a fan-out.
+func TestProject_AcceptsAMergeRuleOverAFanOutSource(t *testing.T) {
 	def := &missionv1.MissionDefinition{
 		Id: "m1",
 		Nodes: map[string]*missionv1.MissionNode{
@@ -143,20 +133,8 @@ func TestProject_RefusesAMergeRuleOverAFanOutSource(t *testing.T) {
 			"report": joinNode("report", []string{"each"}, missionv1.MergeStrategy_MERGE_STRATEGY_CONCAT, ""),
 		},
 	}
-	_, err := Project(def, nil)
-	if err == nil {
-		t.Fatal("Project accepted a merge rule over a for_each source")
-	}
-	var verr *ValidationError
-	if !asValidationError(err, &verr) {
-		t.Fatalf("want a *ValidationError, got %T: %v", err, err)
-	}
-	if len(verr.FanOutJoinMerge) != 1 {
-		t.Fatalf("want one FanOutJoinMerge finding, got %d: %+v", len(verr.FanOutJoinMerge), verr.FanOutJoinMerge)
-	}
-	got := verr.FanOutJoinMerge[0]
-	if got.Join != "report" || got.Source != "each" {
-		t.Errorf("finding names join %q over source %q, want report over each", got.Join, got.Source)
+	if _, err := Project(def, nil); err != nil {
+		t.Fatalf("Project refused a merge rule over a for_each source: %v", err)
 	}
 }
 

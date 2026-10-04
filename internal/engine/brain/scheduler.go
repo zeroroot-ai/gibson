@@ -41,8 +41,8 @@ func SchedulerSystem(w *World) []Event {
 		if wi.State != WorkPending {
 			continue
 		}
-		if wi.Kind == "condition" {
-			continue // resolved by ConditionSystem, not dispatched to infra
+		if wi.Kind == "condition" || wi.Kind == "join" {
+			continue // resolved in-brain by ConditionSystem / JoinSystem, not dispatched to infra
 		}
 		if wi.MissionID != "" && halted[wi.MissionID] {
 			continue // mission paused/terminal — do not dispatch its work

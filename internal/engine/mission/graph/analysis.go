@@ -36,24 +36,6 @@ type ValidationError struct {
 	// same set is nine dispatches from a definition that reads like three, and
 	// `{{target.*}}` inside it would have two instance targets to mean.
 	NestedForEach []string
-	// FanOutJoinMerge names every join that declares a merge rule over a for_each
-	// source. JoinNodeConfig.strategy and .aggregator have no consumer anywhere
-	// in the daemon — a join is purely topological today, and an author who
-	// writes a strategy gets silence (gibson#543).
-	//
-	// An ordinary join still accepts and ignores one, because missions in the
-	// field already declare CONCAT and refusing them would break runs that work.
-	// Fan-out is new surface with nothing to break, so it refuses instead of
-	// accumulating authors who believe their merge rule ran.
-	FanOutJoinMerge []FanOutJoinMerge
-}
-
-// FanOutJoinMerge describes one join that declares a merge rule the daemon does
-// not evaluate, over a source that fans out.
-type FanOutJoinMerge struct {
-	Join     string // the join node's id
-	Source   string // the for_each node named in its wait_for
-	Strategy string // the declared strategy, or "a custom aggregator"
 }
 
 func (e *ValidationError) Error() string {
@@ -73,13 +55,6 @@ func (e *ValidationError) Error() string {
 	if len(e.NestedForEach) > 0 {
 		parts = append(parts, "for_each nodes whose template is itself a for_each: "+
 			strings.Join(e.NestedForEach, ", "))
-	}
-	for _, m := range e.FanOutJoinMerge {
-		parts = append(parts, fmt.Sprintf(
-			"join %q declares %s over for_each node %q, and nothing evaluates it: "+
-				"JoinNodeConfig.strategy and .aggregator have no consumer in the daemon (gibson#543). "+
-				"Remove the merge rule, so the join stays the ordering it actually is",
-			m.Join, m.Strategy, m.Source))
 	}
 	return "mission graph: " + strings.Join(parts, "; ")
 }

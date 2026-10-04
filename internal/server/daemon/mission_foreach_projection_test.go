@@ -4,6 +4,7 @@
 package daemon
 
 import (
+	"encoding/json"
 	"fmt"
 	"sort"
 	"strings"
@@ -149,8 +150,8 @@ func TestForEach_JoinWaitsForEveryInstance(t *testing.T) {
 		fanTarget("33333333-3333-3333-3333-333333333333", "c", "https://10.0.0.3:6443"),
 	}
 	def := forEachDef(0)
-	// Something downstream of the join, so the join's resolution is observable
-	// in a work node's DependsOn.
+	// Something downstream of the join, so the join's place in the graph is
+	// observable in a work node's DependsOn.
 	def.Nodes["after"] = agentNode("writer", "report")
 
 	proj, _, err := missionDefinitionToProjected(def, "", targets)
@@ -158,26 +159,34 @@ func TestForEach_JoinWaitsForEveryInstance(t *testing.T) {
 		t.Fatalf("project: %v", err)
 	}
 
-	var after []string
+	var after, report []string
 	for _, n := range proj.Nodes {
-		if n.ID == "after" {
+		switch n.ID {
+		case "after":
 			after = n.DependsOn
+		case "report":
+			report = n.DependsOn
 		}
 	}
-	if after == nil {
-		t.Fatal("the downstream node did not project")
+	if after == nil || report == nil {
+		t.Fatal("the join or its downstream node did not project")
 	}
+	// The join is a node of its own (gibson#543): it waits for every instance,
+	// and the node after it waits for the join's merged value.
 	for _, id := range targets {
 		want := "scan#" + id.ID
 		found := false
-		for _, d := range after {
+		for _, d := range report {
 			if d == want {
 				found = true
 			}
 		}
 		if !found {
-			t.Errorf("a node after the join does not depend on instance %q; DependsOn = %v", want, after)
+			t.Errorf("the join does not depend on instance %q; DependsOn = %v", want, report)
 		}
+	}
+	if len(after) != 1 || after[0] != "report" {
+		t.Errorf("the node after the join must depend on the join alone, got %v", after)
 	}
 }
 
@@ -345,22 +354,42 @@ func TestForEach_NestedForEachIsRefusedOnTheRunPath(t *testing.T) {
 	}
 }
 
-// A merge rule over a fan-out source fails the run, with the same message the
-// mission view shows. Both come from graph.RefuseUnsupportedFanOut, so a refusal
-// cannot exist in the authoring path and be absent from the run.
-func TestForEach_MergeRuleOverAFanOutSourceIsRefusedOnTheRunPath(t *testing.T) {
+// A merge rule over a fan-out source projects into the join's spec: the
+// fan-out is one source keyed by the id the author wrote, listing every
+// instance with the target it ran against, so the brain's merge can say which
+// target produced what (gibson#543; the gibson#527 refusal is gone).
+func TestForEach_MergeRuleOverAFanOutSourceProjectsIntoTheJoinSpec(t *testing.T) {
 	def := forEachDef(0)
 	def.Nodes["report"].GetJoinConfig().Strategy = missionpb.MergeStrategy_MERGE_STRATEGY_CONCAT
 
-	_, _, err := missionDefinitionToProjected(def, "", []forEachTarget{
+	proj, _, err := missionDefinitionToProjected(def, "", []forEachTarget{
 		fanTarget("11111111-1111-1111-1111-111111111111", "a", "https://10.0.0.1:6443"),
+		fanTarget("22222222-2222-2222-2222-222222222222", "b", "https://10.0.0.2:6443"),
 	})
-	if err == nil {
-		t.Fatal("want a refusal for a merge strategy declared over a for_each source")
+	if err != nil {
+		t.Fatalf("a merge rule over a for_each source must project: %v", err)
 	}
-	for _, want := range []string{"MERGE_STRATEGY_CONCAT", "gibson#543"} {
-		if !strings.Contains(err.Error(), want) {
-			t.Errorf("the refusal does not name %q: %v", want, err)
+	var spec brain.JoinSpec
+	for _, n := range proj.Nodes {
+		if n.ID == "report" {
+			if n.Kind != "join" {
+				t.Fatalf("report projected as %q, want join", n.Kind)
+			}
+			if err := json.Unmarshal([]byte(n.Input), &spec); err != nil {
+				t.Fatalf("join input is not a JoinSpec: %v", err)
+			}
+		}
+	}
+	if spec.Strategy != brain.JoinStrategyConcat || len(spec.Sources) != 1 {
+		t.Fatalf("join spec: got %+v", spec)
+	}
+	src := spec.Sources[0]
+	if src.ID != "each" || !src.FanOut || len(src.Nodes) != 2 {
+		t.Fatalf("fan-out source: got %+v", src)
+	}
+	for _, id := range src.Nodes {
+		if src.Targets[id] == "" || !strings.HasSuffix(id, "#"+src.Targets[id]) {
+			t.Errorf("instance %q does not carry its target: %v", id, src.Targets)
 		}
 	}
 }
@@ -461,7 +490,7 @@ func TestMissionDefinitionToProjected_ForEachInsideParallelExpands(t *testing.T)
 	for _, n := range got.Nodes {
 		byID[n.ID] = n
 	}
-	for _, collapsed := range []string{"p", "j", "fan", "scan"} {
+	for _, collapsed := range []string{"p", "fan", "scan"} {
 		if _, ok := byID[collapsed]; ok {
 			t.Errorf("%q must collapse into DependsOn, not become a WorkNode", collapsed)
 		}
@@ -501,10 +530,26 @@ func TestMissionDefinitionToProjected_ForEachInsideParallelExpands(t *testing.T)
 	if byID["other"].Group != "" || byID["other"].Limit != 0 {
 		t.Errorf("other carries a ceiling (%q, %d), want none", byID["other"].Group, byID["other"].Limit)
 	}
-	// The join on the parallel waits for the plain branch and every instance.
-	wantReport := append([]string{"other"}, inst...)
-	if !eqStrs(byID["report"].DependsOn, wantReport) {
-		t.Errorf("report deps = %v, want %v", byID["report"].DependsOn, wantReport)
+	// The join on the parallel is a node of its own (gibson#543): it waits for
+	// the plain branch and every instance, and report waits for the join.
+	wantJoin := append([]string{"other"}, inst...)
+	if !eqStrs(byID["j"].DependsOn, wantJoin) {
+		t.Errorf("j deps = %v, want %v", byID["j"].DependsOn, wantJoin)
+	}
+	if !eqStrs(byID["report"].DependsOn, []string{"j"}) {
+		t.Errorf("report deps = %v, want [j]", byID["report"].DependsOn)
+	}
+	// A parallel source contributes one source per sub-node: the plain branch
+	// as itself, the for_each as one fan-out source with its instances.
+	var spec brain.JoinSpec
+	if err := json.Unmarshal([]byte(byID["j"].Input), &spec); err != nil {
+		t.Fatalf("join input is not a JoinSpec: %v", err)
+	}
+	if len(spec.Sources) != 2 || spec.Sources[0].ID != "other" || spec.Sources[1].ID != "fan" {
+		t.Fatalf("join sources = %+v, want [other fan]", spec.Sources)
+	}
+	if !spec.Sources[1].FanOut || !eqStrs(spec.Sources[1].Nodes, inst) {
+		t.Errorf("fan source = %+v, want the three instances grouped under fan", spec.Sources[1])
 	}
 }
 
