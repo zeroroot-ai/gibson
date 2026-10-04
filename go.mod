@@ -45,7 +45,7 @@ require (
 	github.com/onsi/ginkgo/v2 v2.27.4
 	github.com/onsi/gomega v1.43.0
 	github.com/openbao/openbao/api/auth/approle/v2 v2.5.1
-	github.com/openbao/openbao/api/v2 v2.6.0
+	github.com/openbao/openbao/api/v2 v2.7.0
 	github.com/openfga/api/proto v0.0.0-20260319214821-f153694bfc20
 	github.com/openfga/go-sdk v0.8.1
 	github.com/openfga/language/pkg/go v0.2.1
