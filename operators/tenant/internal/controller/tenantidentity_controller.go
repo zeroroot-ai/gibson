@@ -344,7 +344,7 @@ func (r *TenantIdentityReconciler) reconcileOIDCClients(ctx context.Context, ti 
 		child := &platformv1alpha1.OIDCClient{ObjectMeta: metav1.ObjectMeta{Name: name, Namespace: ti.Namespace}}
 		if _, err := controllerutil.CreateOrUpdate(ctx, r.Client, child, func() error {
 			if err := controllerutil.SetControllerReference(ti, child, r.Scheme); err != nil {
-				return err
+				return fmt.Errorf("own OIDCClient %s: %w", name, err)
 			}
 			child.Spec = oidcClientSpecFor(ti, entry, pb)
 			return nil
