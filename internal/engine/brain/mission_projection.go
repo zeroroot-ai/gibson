@@ -38,6 +38,20 @@ type WorkNode struct {
 	// Timeout is MissionNode.timeout. Zero means the node declared none; the
 	// dispatch boundary decides what that means per kind (gibson#1602).
 	Timeout time.Duration
+
+	// Group names the parallel or for_each node this one belongs to, and Limit
+	// is that node's max_concurrency: the scheduler dispatches at most Limit
+	// members of a Group at once (gibson#538). A zero Limit means unlimited,
+	// which is the documented meaning of an unset max_concurrency. Both are
+	// empty for a node that belongs to no container.
+	//
+	// The ceiling lives in the scheduler rather than in DependsOn because a
+	// dependency is an ordering and a ceiling is not: chaining instance k
+	// behind instance k-limit (the gibson#525 stopgap) bounded the count but
+	// also forced an order the author never asked for, and parallel's own
+	// max_concurrency bounded nothing at all.
+	Group string
+	Limit int
 }
 
 // MissionProjected is the launch event for a scripted CUE mission (ADR-0001): the
@@ -104,6 +118,8 @@ func applyMissionProjected(w *World, e MissionProjected) {
 			MaxRetries:             n.MaxRetries,
 			Timeout:                n.Timeout,
 			DependentsRunOnFailure: n.DependentsRunOnFailure,
+			Group:                  n.Group,
+			Limit:                  n.Limit,
 		})
 	}
 }

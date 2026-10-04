@@ -68,6 +68,13 @@ type WorkItem struct {
 	// the World is the single source of truth for what a mission is doing, and
 	// a snapshot restore has to hand the same bound back to the dispatcher.
 	Timeout time.Duration
+
+	// Group and Limit are the concurrency ceiling this item is scheduled under:
+	// at most Limit items of the same Group run at once. See
+	// MissionProjected.WorkNode (gibson#538). Empty Group or zero Limit means
+	// no ceiling.
+	Group string
+	Limit int
 }
 
 // WorkDispatched records that a unit of work was launched. It does not block;
@@ -84,6 +91,11 @@ type WorkDispatched struct {
 	// so it does not have to read the World back inside the locked tick — the
 	// same reason MissionID and Input are carried here (gibson#1602).
 	Timeout time.Duration
+	// Group and Limit travel with the dispatch for the same reason Timeout
+	// does: a snapshot restore re-creates the item through this event and
+	// must hand the scheduler the same ceiling (gibson#538).
+	Group string
+	Limit int
 }
 
 func (WorkDispatched) Kind() string { return "work.dispatched" }
@@ -135,6 +147,9 @@ func applyWorkDispatched(w *World, e WorkDispatched) {
 		if e.Timeout > 0 {
 			wi.Timeout = e.Timeout
 		}
+		if e.Limit > 0 {
+			wi.Group, wi.Limit = e.Group, e.Limit
+		}
 		return
 	}
 	w.work.NewEntity(&WorkItem{
@@ -146,6 +161,8 @@ func applyWorkDispatched(w *World, e WorkDispatched) {
 		State:     WorkRunning,
 		Attempts:  1,
 		Timeout:   e.Timeout,
+		Group:     e.Group,
+		Limit:     e.Limit,
 	})
 	// A fresh dispatch under an open Decider decision is one of that decision's
 	// chosen actions (gibson#1062). Only first dispatches link — a retry re-arms an
@@ -205,6 +222,10 @@ type WorkSnapshot struct {
 	// scheduler reads dependency satisfaction off this snapshot, so the flag has
 	// to travel with it (gibson#527).
 	DependentsRunOnFailure bool
+	// Group and Limit mirror WorkItem's; the scheduler counts a Group's running
+	// members off this snapshot (gibson#538).
+	Group string
+	Limit int
 }
 
 // WorkSnapshot returns the current work items in deterministic (ID) order.
@@ -227,6 +248,8 @@ func (w *World) WorkSnapshot() []WorkSnapshot {
 			Attempts:               wi.Attempts,
 			Timeout:                wi.Timeout,
 			DependentsRunOnFailure: wi.DependentsRunOnFailure,
+			Group:                  wi.Group,
+			Limit:                  wi.Limit,
 		})
 	}
 	sort.Slice(out, func(i, j int) bool { return out[i].ID < out[j].ID })
