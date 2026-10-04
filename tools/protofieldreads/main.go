@@ -156,6 +156,10 @@ func fieldRead(info *types.Info, sel *ast.SelectorExpr, prefix string) (string, 
 			return "", false
 		}
 		field = name[3:]
+	case types.MethodExpr:
+		// A method expression (T.GetFoo) names the getter without calling it
+		// on a value; nothing in the tree reads a field that way.
+		return "", false
 	default:
 		return "", false
 	}
@@ -171,7 +175,7 @@ func receiverNamed(t types.Type) (*types.Named, bool) {
 }
 
 func hasField(st *types.Struct, name string) bool {
-	for i := 0; i < st.NumFields(); i++ {
+	for i := range st.NumFields() {
 		if st.Field(i).Name() == name {
 			return true
 		}
