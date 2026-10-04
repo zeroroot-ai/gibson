@@ -1064,8 +1064,9 @@ func (d *daemonImpl) buildGRPCServer(ctx context.Context) (*grpcSubsystem, error
 	// operator JWT requirement.
 	daemonoperatorv1.RegisterDaemonOperatorServiceServer(srv, daemonSvc)
 	// ADR-0039: UserService promoted from daemon-local gibson.user.v1 to
-	// sdk gibson.tenant.v1.UserService. Types are field-identical; the new
-	// service name is what the authz registry and ext-authz expect.
+	// gibson.tenant.v1.UserService; the user/v1 package was deleted in
+	// gibson#502. The service name is what the authz registry and ext-authz
+	// expect.
 	tenantv1.RegisterUserServiceServer(srv, daemonSvc)
 
 	// Register SignupService — the unauthenticated, pre-tenant self-serve signup

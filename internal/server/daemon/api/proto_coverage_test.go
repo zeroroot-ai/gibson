@@ -50,7 +50,6 @@ var coveredProtoPackages = map[string]struct{}{
 	"gibson.agentidentity.v1":   {},
 	"gibson.pluginadmin.v1":     {},
 	"gibson.daemon.operator.v1": {},
-	"gibson.user.v1":            {},
 }
 
 // discoverGibsonRPCs walks protoregistry.GlobalFiles and returns the
