@@ -132,7 +132,7 @@ func NewCatalogAgentResolver(sandboxClass string, credentials CredentialSource) 
 // AgentRunLimitSource answers the runtime cap an enrollment declared for one
 // agent of the caller's tenant (gibson#597). ok is false when none did.
 type AgentRunLimitSource interface {
-	AgentRunLimit(ctx context.Context, tenant, agentName string) (max time.Duration, ok bool, err error)
+	AgentRunLimit(ctx context.Context, tenant, agentName string) (limit time.Duration, ok bool, err error)
 }
 
 // WithRunLimits wires the enrollment runtime caps the operator reports
@@ -229,12 +229,12 @@ func (r *CatalogAgentResolver) ResolveAgentLaunchSpec(ctx context.Context, req A
 	// gibson#597), reported by the tenant-operator. A cap nothing reported
 	// leaves the dispatch's own bound and the launcher default in force.
 	if r.limits != nil {
-		cap, ok, err := r.limits.AgentRunLimit(ctx, tenant, agentName)
+		limit, ok, err := r.limits.AgentRunLimit(ctx, tenant, agentName)
 		if err != nil {
 			return sandboxed.AgentLaunchSpec{}, fmt.Errorf("%q: read enrollment runtime cap: %w", agentName, err)
 		}
 		if ok {
-			spec.MaxRuntime = cap
+			spec.MaxRuntime = limit
 		}
 	}
 	return spec, nil

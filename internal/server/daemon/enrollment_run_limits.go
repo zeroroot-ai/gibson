@@ -4,6 +4,7 @@ import (
 	"context"
 	"database/sql"
 	"errors"
+	"fmt"
 	"time"
 
 	"github.com/zeroroot-ai/gibson/internal/server/daemon/api"
@@ -25,5 +26,9 @@ func (l *enrollmentRunLimits) AgentRunLimit(ctx context.Context, tenant, agentNa
 	if db == nil {
 		return 0, false, errPlatformDBUnset
 	}
-	return api.AgentRunLimit(ctx, db, tenant, agentName)
+	limit, ok, err := api.AgentRunLimit(ctx, db, tenant, agentName)
+	if err != nil {
+		return 0, false, fmt.Errorf("enrollment run limits: %w", err)
+	}
+	return limit, ok, nil
 }

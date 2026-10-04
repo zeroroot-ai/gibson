@@ -181,12 +181,12 @@ func (h *DefaultAgentHarness) delegateToAgentViaSandbox(
 // capRunTimeout bounds a dispatch's run timeout by the enrollment cap
 // (gibson#597): the cap wins when the node asked for nothing or for more
 // than the cap allows, and a zero cap changes nothing.
-func capRunTimeout(requested, cap time.Duration) time.Duration {
-	if cap <= 0 {
+func capRunTimeout(requested, limit time.Duration) time.Duration {
+	if limit <= 0 {
 		return requested
 	}
-	if requested <= 0 || requested > cap {
-		return cap
+	if requested <= 0 || requested > limit {
+		return limit
 	}
 	return requested
 }

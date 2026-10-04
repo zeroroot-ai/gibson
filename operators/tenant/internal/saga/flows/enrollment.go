@@ -340,7 +340,7 @@ func (s *reportRuntimeLimitStep) Provision(ctx context.Context, obj saga.Conditi
 	}
 	// The namespace is the tenant id, the same key the FGA tuples use.
 	if err := s.deps.Limits.SetAgentEnrollmentLimits(ctx, ae.Namespace, ae.Spec.AgentName, ae.Spec.MaxRuntime.Duration); err != nil {
-		return false, err
+		return false, fmt.Errorf("report the runtime limit of %s/%s: %w", ae.Namespace, ae.Spec.AgentName, err)
 	}
 	return true, nil
 }
@@ -374,7 +374,7 @@ func (s *clearRuntimeLimitStep) Provision(ctx context.Context, obj saga.Conditio
 		return false, fmt.Errorf("agent limits reporter unset (operator misconfigured): %w", clients.ErrInvalidInput)
 	}
 	if err := s.deps.Limits.SetAgentEnrollmentLimits(ctx, ae.Namespace, ae.Spec.AgentName, 0); err != nil {
-		return false, err
+		return false, fmt.Errorf("clear the runtime limit of %s/%s: %w", ae.Namespace, ae.Spec.AgentName, err)
 	}
 	return true, nil
 }

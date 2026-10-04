@@ -2,6 +2,8 @@ package api
 
 import (
 	"context"
+	"errors"
+	"strings"
 	"testing"
 	"time"
 
@@ -17,7 +19,7 @@ func TestSetAgentEnrollmentLimits_UpsertsTheCap(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	defer db.Close()
+	t.Cleanup(func() { _ = db.Close() })
 	srv := newPendingServer()
 	srv.platformDB = db
 
@@ -60,14 +62,14 @@ func TestAgentRunLimit_ReadsTheCapBack(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	defer db.Close()
+	t.Cleanup(func() { _ = db.Close() })
 
 	mock.ExpectQuery("SELECT max_runtime_seconds FROM agent_enrollment_limits").
 		WithArgs("acme", "breach-checker").
 		WillReturnRows(sqlmock.NewRows([]string{"max_runtime_seconds"}).AddRow(int64(900)))
-	max, ok, err := AgentRunLimit(context.Background(), db, "acme", "breach-checker")
-	if err != nil || !ok || max != 15*time.Minute {
-		t.Fatalf("AgentRunLimit = (%v, %v, %v), want (15m, true, nil)", max, ok, err)
+	limit, ok, err := AgentRunLimit(context.Background(), db, "acme", "breach-checker")
+	if err != nil || !ok || limit != 15*time.Minute {
+		t.Fatalf("AgentRunLimit = (%v, %v, %v), want (15m, true, nil)", limit, ok, err)
 	}
 
 	mock.ExpectQuery("SELECT max_runtime_seconds FROM agent_enrollment_limits").
@@ -85,5 +87,32 @@ func TestAgentRunLimit_ReadsTheCapBack(t *testing.T) {
 	}
 	if err := mock.ExpectationsWereMet(); err != nil {
 		t.Errorf("expectations: %v", err)
+	}
+}
+
+// TestAgentEnrollmentLimits_DatabaseFailuresAreNamed proves a failed write is
+// an Internal status that names the table, and a failed read names the tenant
+// and the agent. Neither is a silently uncapped run.
+func TestAgentEnrollmentLimits_DatabaseFailuresAreNamed(t *testing.T) {
+	db, mock, err := sqlmock.New()
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() { _ = db.Close() })
+	srv := newPendingServer()
+	srv.platformDB = db
+
+	mock.ExpectExec("INSERT INTO agent_enrollment_limits").WillReturnError(errors.New("connection reset"))
+	_, err = srv.SetAgentEnrollmentLimits(context.Background(), &daemonoperatorv1.SetAgentEnrollmentLimitsRequest{
+		TenantId: "acme", AgentName: "breach-checker", MaxRuntimeSeconds: 900,
+	})
+	if status.Code(err) != codes.Internal || !strings.Contains(err.Error(), "agent_enrollment_limits") {
+		t.Errorf("write failure = %v, want Internal naming the table", err)
+	}
+
+	mock.ExpectQuery("SELECT max_runtime_seconds FROM agent_enrollment_limits").WillReturnError(errors.New("connection reset"))
+	_, ok, err := AgentRunLimit(context.Background(), db, "acme", "breach-checker")
+	if err == nil || ok || !strings.Contains(err.Error(), "acme/breach-checker") {
+		t.Errorf("read failure = (ok=%v, %v), want an error naming acme/breach-checker", ok, err)
 	}
 }

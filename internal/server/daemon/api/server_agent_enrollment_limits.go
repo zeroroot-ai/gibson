@@ -4,6 +4,7 @@ import (
 	"context"
 	"database/sql"
 	"errors"
+	"fmt"
 	"time"
 
 	"google.golang.org/grpc/codes"
@@ -50,14 +51,14 @@ func (s *DaemonServer) SetAgentEnrollmentLimits(ctx context.Context, req *daemon
 
 // AgentRunLimit reads the runtime cap recorded for one agent of one tenant.
 // ok is false when no enrollment reported a cap, or the cap is zero.
-func AgentRunLimit(ctx context.Context, db *sql.DB, tenantID, agentName string) (max time.Duration, ok bool, err error) {
+func AgentRunLimit(ctx context.Context, db *sql.DB, tenantID, agentName string) (limit time.Duration, ok bool, err error) {
 	const q = `SELECT max_runtime_seconds FROM agent_enrollment_limits WHERE tenant_id = $1 AND agent_name = $2`
 	var seconds int64
 	if err := db.QueryRowContext(ctx, q, tenantID, agentName).Scan(&seconds); err != nil {
 		if errors.Is(err, sql.ErrNoRows) {
 			return 0, false, nil
 		}
-		return 0, false, err
+		return 0, false, fmt.Errorf("read agent_enrollment_limits %s/%s: %w", tenantID, agentName, err)
 	}
 	if seconds <= 0 {
 		return 0, false, nil
