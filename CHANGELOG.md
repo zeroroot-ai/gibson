@@ -1,5 +1,27 @@
 # Changelog
 
+## [0.150.1](https://github.com/zeroroot-ai/gibson/compare/v0.150.0...v0.150.1) (2026-10-04)
+
+
+### Bug Fixes
+
+* **adr-0027:** delete the no-op cypher stub and the legacy branches that declared their own violation ([#595](https://github.com/zeroroot-ai/gibson/issues/595)) ([aa56a79](https://github.com/zeroroot-ai/gibson/commit/aa56a79b4118548c68409b591ce6796a562b6bef))
+* **audit:** an audit entry names its actor, and actor_source leaves the wire ([#585](https://github.com/zeroroot-ai/gibson/issues/585)) ([1178f26](https://github.com/zeroroot-ai/gibson/commit/1178f26c7a6ec75c4cdab44e055abec2420fd947))
+* **catalog:** the osv connector image is digest-pinned, and the loader refuses any unpinned hosted image ([#587](https://github.com/zeroroot-ai/gibson/issues/587)) ([84b1fea](https://github.com/zeroroot-ai/gibson/commit/84b1fead48080040abf07e0b34a6017b9c1f5cd3)), closes [#479](https://github.com/zeroroot-ai/gibson/issues/479)
+* **config:** delete the 46 config keys nothing reads, and guard every keyed field for a reader ([#599](https://github.com/zeroroot-ai/gibson/issues/599)) ([80c6612](https://github.com/zeroroot-ai/gibson/commit/80c66125871d24c223c99f251f3a38eeca678c58))
+* **crd:** every served crd field has a reader, a print column or a recorded verdict ([#598](https://github.com/zeroroot-ai/gibson/issues/598)) ([48d49c7](https://github.com/zeroroot-ai/gibson/commit/48d49c780d989fb700d4856d4104f83251a2e557))
+* **db:** drop connector_sandbox and webhook_idempotency, and guard every table for a reader ([#589](https://github.com/zeroroot-ai/gibson/issues/589)) ([9b2997c](https://github.com/zeroroot-ai/gibson/commit/9b2997ce8991dbbb98918a19144b2830e8549d0c))
+* **deadcode:** delete the mission tracer's dead subgraph ([#600](https://github.com/zeroroot-ai/gibson/issues/600)) ([10f2209](https://github.com/zeroroot-ai/gibson/commit/10f220998c970f448df4d35324f947770fd976f2))
+* **deps:** go.mod names setec v0.118.0, a tag that exists, and CI proves every first-party tag ([64c5ff3](https://github.com/zeroroot-ai/gibson/commit/64c5ff3d642abf72ad2902e0cbeb0f7630fe3151)), closes [#196](https://github.com/zeroroot-ai/gibson/issues/196)
+* **deps:** go.mod names setec v0.118.0, a tag that exists, and ci proves every first-party tag ([#596](https://github.com/zeroroot-ai/gibson/issues/596)) ([64c5ff3](https://github.com/zeroroot-ai/gibson/commit/64c5ff3d642abf72ad2902e0cbeb0f7630fe3151))
+* **events:** delete the two event taxonomies nothing emits, the uncalled mission tracer and the cost tracker ([#594](https://github.com/zeroroot-ai/gibson/issues/594)) ([a79a600](https://github.com/zeroroot-ai/gibson/commit/a79a600a07f1c87c5d42f5b71f37ce1b82c83859))
+* **guard:** the CRD field guard loads packages with the image's build tag ([b867a61](https://github.com/zeroroot-ai/gibson/commit/b867a618ed275e6d27af7dafaab8f2e484462a37)), closes [#503](https://github.com/zeroroot-ai/gibson/issues/503)
+* **guard:** the crd field guard loads packages with the image's build tag ([#601](https://github.com/zeroroot-ai/gibson/issues/601)) ([b867a61](https://github.com/zeroroot-ai/gibson/commit/b867a618ed275e6d27af7dafaab8f2e484462a37))
+* **mission:** a plugin node reaches the dispatcher with its params ([#582](https://github.com/zeroroot-ai/gibson/issues/582)) ([9672feb](https://github.com/zeroroot-ai/gibson/commit/9672febcd220e22d40d5ba9f6c55a0ff8c14fbaf))
+* **quotas:** a tenant's postgres connection limit reaches the role ([#584](https://github.com/zeroroot-ai/gibson/issues/584)) ([13bb3b8](https://github.com/zeroroot-ai/gibson/commit/13bb3b8803788d030187f56ce46e6759456989ae))
+* **tenant-operator:** a pass reads the tenant uncached, so the welcome email cannot repeat ([#586](https://github.com/zeroroot-ai/gibson/issues/586)) ([922ab2c](https://github.com/zeroroot-ai/gibson/commit/922ab2c513c1771519f1c99e8cb004e89cf6ac3b))
+* **tooling:** delete the six cmd binaries nothing builds or runs ([#592](https://github.com/zeroroot-ai/gibson/issues/592)) ([cec816e](https://github.com/zeroroot-ai/gibson/commit/cec816e97c20c04ef09d697ff9e0eed8f38167cf))
+
 ## [0.150.0](https://github.com/zeroroot-ai/gibson/compare/v0.149.0...v0.150.0) (2026-10-02)
 
 
