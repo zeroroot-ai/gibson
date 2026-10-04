@@ -146,33 +146,6 @@ type MissionContextResolver struct {
 	logger *slog.Logger
 }
 
-// NewMissionContextResolver creates a resolver that uses the provided
-// StateClient for work-context lookups and TenantScopedStore for slot-override
-// lookups.
-//
-// Both arguments must be non-nil. The logger may be nil; slog.Default() is
-// used in that case.
-func NewMissionContextResolver(
-	stateClient *state.StateClient,
-	tenantStore *state.TenantScopedStore,
-	logger *slog.Logger,
-) *MissionContextResolver {
-	if stateClient == nil {
-		panic("component.NewMissionContextResolver: stateClient must not be nil")
-	}
-	if tenantStore == nil {
-		panic("component.NewMissionContextResolver: tenantStore must not be nil")
-	}
-	if logger == nil {
-		logger = slog.Default()
-	}
-	return &MissionContextResolver{
-		stateClient: stateClient,
-		tenantStore: tenantStore,
-		logger:      logger,
-	}
-}
-
 // missionSlotOverridesKey returns the tenant-scoped Redis key where per-mission
 // slot overrides are stored.
 //

@@ -129,13 +129,3 @@ func TestComponentKind_Constants_StillDefined(t *testing.T) {
 	assert.Equal(t, "plugin", string(ComponentKindPlugin))
 	assert.Equal(t, "repository", string(ComponentKindRepository))
 }
-
-// TestAllComponentKinds_StillDefined verifies that AllComponentKinds function still exists
-func TestAllComponentKinds_StillDefined(t *testing.T) {
-	kinds := AllComponentKinds()
-	assert.Len(t, kinds, 4)
-	assert.Contains(t, kinds, ComponentKindAgent)
-	assert.Contains(t, kinds, ComponentKindTool)
-	assert.Contains(t, kinds, ComponentKindPlugin)
-	assert.Contains(t, kinds, ComponentKindRepository)
-}

@@ -72,16 +72,6 @@ type HealthCheckResult struct {
 	Error string
 }
 
-// IsHealthy returns true if the health check status is SERVING.
-func (h *HealthCheckResult) IsHealthy() bool {
-	return h.Status == "SERVING"
-}
-
-// HasError returns true if the health check resulted in an error.
-func (h *HealthCheckResult) HasError() bool {
-	return h.Error != ""
-}
-
 // LogError represents an error found in component logs.
 // This is used to track recent errors for debugging purposes.
 type LogError struct {
@@ -114,19 +104,4 @@ type StatusResult struct {
 	// Uptime is the duration the component has been running.
 	// Zero if the component is not running.
 	Uptime time.Duration
-}
-
-// IsRunning returns true if the component process is in running state.
-func (s *StatusResult) IsRunning() bool {
-	return s.ProcessState == ProcessStateRunning
-}
-
-// IsHealthy returns true if the component is running and healthy.
-func (s *StatusResult) IsHealthy() bool {
-	return s.IsRunning() && s.HealthCheck != nil && s.HealthCheck.IsHealthy()
-}
-
-// HasRecentErrors returns true if there are any recent errors.
-func (s *StatusResult) HasRecentErrors() bool {
-	return len(s.RecentErrors) > 0
 }
