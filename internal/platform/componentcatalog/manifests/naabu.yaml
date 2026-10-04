@@ -16,7 +16,7 @@ egressAllow:
 spec:
   contentTrust: untrusted
   dispatchMode: sandboxed
-  image: ghcr.io/zeroroot-ai/gibson-executor@sha256:f7885d19cb602d44ca0f62c8a7744e0d0529a2f811c2bd361c2996153e0ae470
+  image: ghcr.io/zeroroot-ai/gibson-executor@sha256:1e244f2c4eb91d0cd3e83b565faf230457da65f57e0103f3d3a39cddd113684a
   command: gibson-runner
   resources:
     vcpu: 2

@@ -1,5 +1,5 @@
 {
-  "image": "ghcr.io/zeroroot-ai/gibson-executor@sha256:f7885d19cb602d44ca0f62c8a7744e0d0529a2f811c2bd361c2996153e0ae470",
+  "image": "ghcr.io/zeroroot-ai/gibson-executor@sha256:1e244f2c4eb91d0cd3e83b565faf230457da65f57e0103f3d3a39cddd113684a",
   "tools": [
     {
       "name": "dnsx",
@@ -70,6 +70,45 @@
         "memory": "256Mi"
       },
       "default_timeout_seconds": 180
+    },
+    {
+      "name": "kube-bench",
+      "version": "0.1.0",
+      "description": "CIS Kubernetes Benchmark, policies section (RBAC, pod security, network policy, secrets), run through the Kubernetes API. Emits one Finding per control that failed and a BenchmarkRun node that lists every control not assessed. Needs a kubeconfig that the daemon supplies from a tenant secret.",
+      "tags": [
+        "kubernetes",
+        "cis",
+        "compliance",
+        "configuration",
+        "rbac"
+      ],
+      "input_schema": {
+        "properties": {
+          "benchmark": {
+            "description": "Optional CIS benchmark version, for example cis-1.12. When absent, the version is chosen from the Kubernetes version the cluster reports.",
+            "type": "string"
+          },
+          "kubeconfig": {
+            "description": "Content of a kubeconfig file. The daemon fills this field from the tenant secret the target names (gibson#485). Do not set it in a mission definition: a mission definition is stored and displayed. The tool fails with a named error when the field is empty.",
+            "type": "string"
+          },
+          "target": {
+            "description": "Name of the cluster, as a DNS-style label. It names the result. It is never used to find the cluster: the kubeconfig does that.",
+            "type": "string"
+          }
+        },
+        "required": [
+          "target"
+        ],
+        "type": "object"
+      },
+      "output_proto_type": "gibson.graphrag.v1.DiscoveryResult",
+      "default_parse_quality": 1,
+      "resources": {
+        "vcpu": 1,
+        "memory": "512Mi"
+      },
+      "default_timeout_seconds": 600
     },
     {
       "name": "masscan",
@@ -340,6 +379,45 @@
         "memory": "1Gi"
       },
       "default_timeout_seconds": 600
+    },
+    {
+      "name": "trivy-k8s",
+      "version": "0.1.0",
+      "description": "Kubernetes workload misconfiguration checks through the Kubernetes API: privileged containers, host namespaces, hostPath mounts, added capabilities, missing security contexts. Emits one Finding per failed check at the severity trivy reports, a Workload node per resource audited, and a ClusterAudit node listing every resource that could not be read. Needs a kubeconfig that the daemon supplies from a tenant secret.",
+      "tags": [
+        "kubernetes",
+        "misconfiguration",
+        "workload",
+        "configuration",
+        "privilege"
+      ],
+      "input_schema": {
+        "properties": {
+          "kubeconfig": {
+            "description": "Content of a kubeconfig file. The daemon fills this field from the tenant secret the target names (gibson#485). Do not set it in a mission definition: a mission definition is stored and displayed. The tool fails with a named error when the field is empty.",
+            "type": "string"
+          },
+          "namespace": {
+            "description": "Optional single namespace to audit. When absent, every namespace the credential can read is audited.",
+            "type": "string"
+          },
+          "target": {
+            "description": "Name of the cluster, as a DNS-style label. It names the result. It is never used to find the cluster: the kubeconfig does that.",
+            "type": "string"
+          }
+        },
+        "required": [
+          "target"
+        ],
+        "type": "object"
+      },
+      "output_proto_type": "gibson.graphrag.v1.DiscoveryResult",
+      "default_parse_quality": 1,
+      "resources": {
+        "vcpu": 1,
+        "memory": "1Gi"
+      },
+      "default_timeout_seconds": 900
     }
   ]
 }
