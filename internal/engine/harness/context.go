@@ -123,6 +123,17 @@ func (m MissionContext) WithTenant(tenantID string) MissionContext {
 	return m
 }
 
+// WithSecrets sets the mission's declaration of which named tenant secrets its
+// components may be handed at dispatch (gibson#485).
+//
+// Mission-level, so a delegated child inherits it unchanged — a child
+// MissionContext is a value copy. A child that could declare its own would be a
+// component naming a secret, which is the property this design does not have.
+func (m MissionContext) WithSecrets(s MissionSecretScopes) MissionContext {
+	m.Secrets = s
+	return m
+}
+
 // WithDelegationDepth sets the delegation depth for sub-agent execution tracking.
 func (m MissionContext) WithDelegationDepth(depth int) MissionContext {
 	m.DelegationDepth = depth
