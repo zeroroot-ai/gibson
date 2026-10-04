@@ -38,6 +38,13 @@ func mkTool(name, desc string, vcpu int32, mem string) tool {
 	tl.Description = desc
 	tl.Resources.VCPU = vcpu
 	tl.Resources.Memory = mem
+	tl.OutputProtoType = "gibson.graphrag.v1.DiscoveryResult"
+	return tl
+}
+
+// withoutOutputType clears the output type, which mkTool sets on every tool.
+func withoutOutputType(tl tool) tool {
+	tl.OutputProtoType = ""
 	return tl
 }
 
@@ -104,6 +111,7 @@ func TestRun_IncompleteToolRefused(t *testing.T) {
 		"no description": mkTool("nmap", "", 2, "512Mi"),
 		"no vcpu":        mkTool("nmap", "Scanner.", 0, "512Mi"),
 		"no memory":      mkTool("nmap", "Scanner.", 2, ""),
+		"no output type": withoutOutputType(mkTool("nmap", "Scanner.", 2, "512Mi")),
 	} {
 		t.Run(name, func(t *testing.T) {
 			if err := run(envelope(t, digestImage, tl), t.TempDir()); err == nil {
@@ -201,7 +209,7 @@ func TestRun_Deterministic(t *testing.T) {
 func TestCapture_RejectsTaggedImage(t *testing.T) {
 	dir := t.TempDir()
 	tools := filepath.Join(dir, "tools.json")
-	if err := os.WriteFile(tools, []byte(`[{"name":"nmap","description":"d","resources":{"vcpu":2,"memory":"512Mi"}}]`), 0o600); err != nil {
+	if err := os.WriteFile(tools, []byte(`[{"name":"nmap","description":"d","output_proto_type":"gibson.graphrag.v1.DiscoveryResult","resources":{"vcpu":2,"memory":"512Mi"}}]`), 0o600); err != nil {
 		t.Fatalf("write tools: %v", err)
 	}
 	out := filepath.Join(dir, "catalog.json")
@@ -222,6 +230,7 @@ func TestCapture_WritesGeneratableEnvelope(t *testing.T) {
 	// a subset and must not choke on the rest.
 	raw := `[{"name":"nmap","description":"Port scanner.","tags":["recon"],
 	          "input_schema":{"type":"object"},"default_timeout_seconds":300,
+	          "output_proto_type":"gibson.graphrag.v1.DiscoveryResult",
 	          "resources":{"vcpu":2,"memory":"512Mi"}}]`
 	if err := os.WriteFile(tools, []byte(raw), 0o600); err != nil {
 		t.Fatalf("write tools: %v", err)
@@ -264,7 +273,7 @@ func TestRunCLI_CaptureThenGenerate(t *testing.T) {
 	dir := t.TempDir()
 	tools := filepath.Join(dir, "tools.json")
 	if err := os.WriteFile(tools, []byte(
-		`[{"name":"naabu","description":"Port scanner.","resources":{"vcpu":2,"memory":"512Mi"}}]`), 0o600); err != nil {
+		`[{"name":"naabu","description":"Port scanner.","output_proto_type":"gibson.graphrag.v1.DiscoveryResult","resources":{"vcpu":2,"memory":"512Mi"}}]`), 0o600); err != nil {
 		t.Fatalf("write tools: %v", err)
 	}
 	catalog := filepath.Join(dir, "catalog.json")
