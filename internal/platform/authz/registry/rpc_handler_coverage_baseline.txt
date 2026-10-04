@@ -94,7 +94,6 @@
 /gibson.tenant.v1.UserService/UpdateUserOnboardingState
 /gibson.tool.v1.ToolService/GetDescriptor
 /gibson.tool.v1.ToolService/StreamExecute
-/gibson.user.v1.UserService/UpdateUserOnboardingState
 /gibson.world.v1.WorldService/GetFrameAt
 /gibson.world.v1.WorldService/GetLlmCall
 /gibson.world.v1.WorldService/GetTimeline
