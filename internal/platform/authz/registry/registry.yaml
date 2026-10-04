@@ -715,6 +715,13 @@ entries:
     allowed_identities:
       - USER
       - SERVICE
+  "/gibson.daemon.v1.DaemonService/ListCatalogMissions":
+    relation: "member"
+    object_type: "tenant"
+    object_deriver: "tenant_from_identity"
+    allowed_identities:
+      - USER
+      - SERVICE
   "/gibson.daemon.v1.DaemonService/ListMissionDefinitions":
     relation: "member"
     object_type: "tenant"
@@ -764,6 +771,13 @@ entries:
   "/gibson.daemon.v1.DaemonService/Ping":
     unauthenticated: true
   "/gibson.daemon.v1.DaemonService/QueryPlugin":
+    relation: "member"
+    object_type: "tenant"
+    object_deriver: "tenant_from_identity"
+    allowed_identities:
+      - USER
+      - SERVICE
+  "/gibson.daemon.v1.DaemonService/RenderCatalogMission":
     relation: "member"
     object_type: "tenant"
     object_deriver: "tenant_from_identity"
