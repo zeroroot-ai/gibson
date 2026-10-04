@@ -143,7 +143,7 @@ func TestReaper_PreservesUnknownFinalizers(t *testing.T) {
 			Name: "ae-1", Namespace: "tenant-acme",
 			Finalizers: []string{"foreign.example.com/cleanup"},
 		},
-		Spec: gibsonv1alpha1.AgentEnrollmentSpec{AgentName: "x", Mode: "autonomous"},
+		Spec: gibsonv1alpha1.AgentEnrollmentSpec{AgentName: "x"},
 	}
 	c := fake.NewClientBuilder().WithScheme(scheme).WithObjects(ns, ae).Build()
 	rec := events.NewFakeRecorder(10)
