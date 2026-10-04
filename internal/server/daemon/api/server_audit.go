@@ -193,14 +193,12 @@ func (s *DaemonServer) auditEntriesToResponse(entries []audit.AuditEntry, nextCu
 		}
 
 		events = append(events, &tenantv1.AuditEvent{
-			EventType:      e.Action,
-			Timestamp:      e.Timestamp.Format(time.RFC3339),
-			ActorUserId:    e.ActorID,
-			ActorEmail:     e.ActorEmail,
-			TenantId:       e.TenantID,
-			TargetResource: e.ResourceID,
-			Details:        details,
-			TraceId:        e.ID,
+			EventType:  e.Action,
+			Timestamp:  e.Timestamp.Format(time.RFC3339),
+			ActorEmail: e.ActorEmail,
+			TenantId:   e.TenantID,
+			Details:    details,
+			TraceId:    e.ID,
 		})
 	}
 	return &tenantv1.ListAuditEventsResponse{

@@ -167,9 +167,7 @@ func (s *DaemonServer) RevokeAccess(ctx context.Context, req *tenantv1.RevokeAcc
 		s.modelGateInvalidator.InvalidateCache()
 	}
 
-	return &tenantv1.RevokeAccessResponse{
-		RevokedAtUnix: timeNowUnix(),
-	}, nil
+	return &tenantv1.RevokeAccessResponse{}, nil
 }
 
 // ListAccess returns all grants for the tenant, optionally narrowed to a

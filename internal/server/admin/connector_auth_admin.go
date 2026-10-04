@@ -157,9 +157,6 @@ func (s *ConnectorAuthAdminServer) buildStatus(ctx context.Context, tenant auth.
 	resp.State = tenantv1.ConnectorAuthState_CONNECTOR_AUTH_STATE_AUTHORIZED
 	resp.AuthorizedBy = grant.AuthorizedBy
 	resp.Scope = grant.Scope
-	if !grant.AuthorizedAt.IsZero() {
-		resp.AuthorizedAt = timestamppb.New(grant.AuthorizedAt)
-	}
 
 	if meta, err := s.secrets.Resolve(ctx, connectorauth.AccessMetaSecretName(connector)); err == nil {
 		if tok, err := connectorauth.UnmarshalAccessToken(meta); err == nil && !tok.ExpiresAt.IsZero() {
@@ -357,8 +354,7 @@ func (s *ConnectorAuthAdminServer) storeAndProve(ctx context.Context, tenant aut
 
 // RevokeConnectorGrant revokes at the vendor when the grant recorded a
 // revocation endpoint, then deletes the grant and the published access pair.
-// Idempotent: revoking an unauthorized connector succeeds with
-// had_grant=false.
+// Idempotent: revoking an unauthorized connector succeeds.
 func (s *ConnectorAuthAdminServer) RevokeConnectorGrant(ctx context.Context, req *tenantv1.RevokeConnectorGrantRequest) (*tenantv1.RevokeConnectorGrantResponse, error) {
 	tenant, ok := auth.TenantFromContext(ctx)
 	if !ok {
@@ -368,11 +364,10 @@ func (s *ConnectorAuthAdminServer) RevokeConnectorGrant(ctx context.Context, req
 	if connector == "" {
 		return nil, status.Error(codes.InvalidArgument, "connector is required")
 	}
-	hadGrant, vendorRevoked, err := s.Revoke(ctx, tenant, connector)
-	if err != nil {
+	if _, _, err := s.Revoke(ctx, tenant, connector); err != nil {
 		return nil, err
 	}
-	return &tenantv1.RevokeConnectorGrantResponse{HadGrant: hadGrant, VendorRevoked: vendorRevoked}, nil
+	return &tenantv1.RevokeConnectorGrantResponse{}, nil
 }
 
 // AuthStatus is the status view itself, shared by the tenant-scoped RPC above

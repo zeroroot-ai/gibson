@@ -180,9 +180,6 @@ func TestGetConnectorAuthStatus_ReportsTheAuthorizingHuman(t *testing.T) {
 	if resp.GetAuthorizedBy() != "user:user-1" {
 		t.Errorf("authorized_by = %q, want user:user-1", resp.GetAuthorizedBy())
 	}
-	if resp.GetAuthorizedAt() == nil {
-		t.Error("authorized_at must be set")
-	}
 }
 
 // The status surface must never leak credential material — it is what renders
@@ -553,13 +550,10 @@ func TestRevokeConnectorGrant_DeletesTheGrantAndAccessPair(t *testing.T) {
 	ctx := ctxWithTenant(t, "acme")
 
 	seedGrant(ctx, t, store, prover, "connector-gitlab", nil)
-	resp, err := srv.RevokeConnectorGrant(ctx,
+	_, err := srv.RevokeConnectorGrant(ctx,
 		&tenantv1.RevokeConnectorGrantRequest{Connector: "connector-gitlab"})
 	if err != nil {
 		t.Fatal(err)
-	}
-	if !resp.GetHadGrant() {
-		t.Error("had_grant must be true")
 	}
 	for _, name := range []string{
 		connectorauth.GrantSecretName("connector-gitlab"),
@@ -585,13 +579,10 @@ func TestRevokeConnectorGrant_IsIdempotent(t *testing.T) {
 	store := newFakeConnectorSecrets()
 	srv := newConnectorAuthServer(t, store, &fakeProver{store: store})
 
-	resp, err := srv.RevokeConnectorGrant(ctxWithTenant(t, "acme"),
+	_, err := srv.RevokeConnectorGrant(ctxWithTenant(t, "acme"),
 		&tenantv1.RevokeConnectorGrantRequest{Connector: "connector-gitlab"})
 	if err != nil {
 		t.Fatal(err)
-	}
-	if resp.GetHadGrant() {
-		t.Error("revoking an unauthorized connector must report had_grant=false")
 	}
 }
 
@@ -626,13 +617,10 @@ func TestRevokeConnectorGrant_RevokesAtTheVendor(t *testing.T) {
 	seedGrant(ctx, t, store, prover, "connector-gitlab", func(g *connectorauth.Grant) {
 		g.RevocationEndpoint = vendor.URL
 	})
-	resp, err := srv.RevokeConnectorGrant(ctx,
+	_, err = srv.RevokeConnectorGrant(ctx,
 		&tenantv1.RevokeConnectorGrantRequest{Connector: "connector-gitlab"})
 	if err != nil {
 		t.Fatal(err)
-	}
-	if !resp.GetVendorRevoked() {
-		t.Error("vendor_revoked must be true when the vendor acknowledged")
 	}
 	formMu.Lock()
 	form := gotForm
@@ -653,13 +641,10 @@ func TestRevokeConnectorGrant_LocalDeletionSurvivesAVendorFailure(t *testing.T) 
 	seedGrant(ctx, t, store, prover, "connector-gitlab", func(g *connectorauth.Grant) {
 		g.RevocationEndpoint = "http://127.0.0.1:1/unreachable"
 	})
-	resp, err := srv.RevokeConnectorGrant(ctx,
+	_, err := srv.RevokeConnectorGrant(ctx,
 		&tenantv1.RevokeConnectorGrantRequest{Connector: "connector-gitlab"})
 	if err != nil {
 		t.Fatal(err)
-	}
-	if resp.GetVendorRevoked() {
-		t.Error("vendor_revoked must be false when the vendor call failed")
 	}
 	if store.has(connectorauth.GrantSecretName("connector-gitlab")) {
 		t.Error("the local grant must be deleted regardless")
@@ -750,13 +735,10 @@ func TestRevokeConnectorGrant_ToleratesAMalformedRevocationEndpoint(t *testing.T
 	seedGrant(ctx, t, store, prover, "connector-gitlab", func(g *connectorauth.Grant) {
 		g.RevocationEndpoint = "::not a url::"
 	})
-	resp, err := srv.RevokeConnectorGrant(ctx,
+	_, err := srv.RevokeConnectorGrant(ctx,
 		&tenantv1.RevokeConnectorGrantRequest{Connector: "connector-gitlab"})
 	if err != nil {
 		t.Fatal(err)
-	}
-	if resp.GetVendorRevoked() {
-		t.Error("an unusable revocation endpoint cannot have been acknowledged")
 	}
 	if store.has(connectorauth.GrantSecretName("connector-gitlab")) {
 		t.Error("local deletion must proceed regardless")
@@ -979,12 +961,9 @@ func TestSetConnectorSecret_RevokeRemovesTheCredential(t *testing.T) {
 		t.Fatalf("SetConnectorSecret: %v", err)
 	}
 
-	resp, err := srv.RevokeConnectorGrant(ctx, &tenantv1.RevokeConnectorGrantRequest{Connector: "github"})
+	_, err := srv.RevokeConnectorGrant(ctx, &tenantv1.RevokeConnectorGrantRequest{Connector: "github"})
 	if err != nil {
 		t.Fatalf("RevokeConnectorGrant: %v", err)
-	}
-	if !resp.GetHadGrant() || resp.GetVendorRevoked() {
-		t.Errorf("had_grant=%v vendor_revoked=%v, want true/false", resp.GetHadGrant(), resp.GetVendorRevoked())
 	}
 	if store.has(connectorauth.AccessSecretName("github")) || store.has(connectorauth.GrantSecretName("github")) {
 		t.Error("credential and grant must be gone after revoke")
@@ -1124,9 +1103,8 @@ func TestRevokeConnectorGrant_EmptyGrantAndDeleteFailure(t *testing.T) {
 	ctx := ctxWithTenant(t, "acme")
 	srv := newConnectorAuthServer(t, store, &fakeProver{store: store})
 	_ = store.Put(ctx, connectorauth.GrantSecretName("github"), nil)
-	resp, err := srv.RevokeConnectorGrant(ctx, &tenantv1.RevokeConnectorGrantRequest{Connector: "github"})
-	if err != nil || resp.GetHadGrant() {
-		t.Fatalf("an empty grant blob must read as no grant: had=%v err=%v", resp.GetHadGrant(), err)
+	if _, err := srv.RevokeConnectorGrant(ctx, &tenantv1.RevokeConnectorGrantRequest{Connector: "github"}); err != nil {
+		t.Fatalf("an empty grant blob must read as no grant: err=%v", err)
 	}
 
 	prover := &fakeProver{store: store}

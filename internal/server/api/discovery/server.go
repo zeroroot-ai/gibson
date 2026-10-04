@@ -119,7 +119,6 @@ func (s *Server) WhoAmI(ctx context.Context, _ *discoverypb.WhoAmIRequest) (*dis
 		Tenants:        prefixAll("tenant", tenantIDs),
 		Teams:          prefixAll("team", teamIDs),
 		Relations:      relations,
-		IsAgentAuth:    id.Issuer == "capability-grant",
 		ComponentScope: auth.ComponentScopeFromContext(ctx),
 	}
 	return resp, nil

@@ -607,11 +607,13 @@ message WidgetPosition {
 }
 
 message WidgetConfig {
+  // Removed in gibson#502: served and never read by any consumer.
+  reserved 5;
+  reserved "settings_json";
   string id = 1;
   string type = 2;
   WidgetPosition position = 3;
   bool visible = 4;
-  string settings_json = 5;
 }
 
 message UserLayoutPreferences {

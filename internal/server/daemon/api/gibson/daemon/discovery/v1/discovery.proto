@@ -154,6 +154,9 @@ message WhoAmIRequest {}
 // WhoAmIResponse mirrors the dashboard's existing /api/auth/me + FGA lookup
 // into a single RPC so gibson-mcp doesn't have to reimplement the join.
 message WhoAmIResponse {
+  // Removed in gibson#502: served and never read by any consumer.
+  reserved 6;
+  reserved "is_agent_auth";
   string user_id = 1;
   string active_tenant = 2;
   repeated string tenants = 3;
@@ -162,9 +165,6 @@ message WhoAmIResponse {
   // Each entry is formatted "<object>:<id>#<relation>" (e.g.
   // "tenant:acme#admin").
   repeated string relations = 5;
-  // is_agent_auth indicates whether the RPC came in on the capability-grant path.
-  // When true, component_scope is populated.
-  bool is_agent_auth = 6;
   string component_scope = 7;
 }
 
@@ -233,55 +233,44 @@ message DescribePluginResponse {
 }
 
 message MethodDescriptor {
+  // Removed in gibson#502: served and never read by any consumer.
+  reserved 3, 5;
+  reserved "action_class", "output_schema_json";
   string name = 1;                  // e.g. "list_mrs"
   string description = 2;
-  // action_class classifies the method so the interceptor knows which
-  // action's deny layer applies. "read" | "write" | "execute".
-  string action_class = 3;
   // JSON Schema for the method's params map — surfaces field names, types,
   // and required-ness to Claude without a separate fetch.
   string input_schema_json = 4;
-  string output_schema_json = 5;
 }
 
 message DescribeToolResponse {
+  // Removed in gibson#502: served and never read by any consumer.
+  reserved 5, 6, 7, 8;
+  reserved "input_proto_type", "output_proto_type", "reserves_field_100_discovery_result", "action_class";
   string name = 1;
   string display_name = 2;
   string description = 3;
   string version = 4;
-  // Fully-qualified proto input/output types. Tool message types are
-  // resolved at runtime via FileDescriptorSet metadata; callers generate
-  // code against these string references, not Go types.
-  string input_proto_type = 5;
-  string output_proto_type = 6;
-  // reserves_field_100_discovery_result reflects whether the tool's response
-  // proto honours the gibson.graphrag.DiscoveryResult field-100 convention
-  // (it should; callers MUST NOT repurpose the field).
-  bool reserves_field_100_discovery_result = 7;
-  string action_class = 8;          // "read" | "write" | "execute"
   ActionCapabilities rwx = 9;
   repeated string denying_gates = 10;
 }
 
 message DescribeAgentResponse {
+  // Removed in gibson#502: served and never read by any consumer.
+  reserved 5, 6;
+  reserved "llm_slots", "requested_permissions";
   string name = 1;
   string display_name = 2;
   string description = 3;
   string version = 4;
-  // Required LLM slots this agent declares via its component.yaml
-  // llm_slots block. Each entry is a compact "<slot>:<min_ctx>/<features>"
-  // string; full structured detail is retrievable via ListLLMSlots with a
-  // filter on this agent.
-  repeated string llm_slots = 5;
-  // requested_permissions lists entries from the agent's permissions.yaml
-  // so the install flow can pre-populate its approval checklist.
-  repeated PermissionRequest requested_permissions = 6;
   ActionCapabilities rwx = 7;
   repeated string denying_gates = 8;
 }
 
 message PermissionRequest {
-  string target_name = 1;           // e.g., "gitlab", "nmap"
+  // Removed in gibson#502: served and never read by any consumer.
+  reserved 1;
+  reserved "target_name";
   string target_kind = 2;           // "plugin" | "tool" | "agent"
   string action = 3;                // "read" | "write" | "execute"
   bool required = 4;
@@ -289,16 +278,11 @@ message PermissionRequest {
 }
 
 message SlotInfo {
+  // Removed in gibson#502: served and never read by any consumer.
+  reserved 3, 4, 5, 6;
+  reserved "min_context_window", "required_features", "preferred_models", "satisfied_by";
   string name = 1;
   string description = 2;
-  int32 min_context_window = 3;
-  repeated string required_features = 4;
-  repeated string preferred_models = 5;
-  // satisfied_by lists the provider/model pairs currently available to the
-  // caller's tenant that meet the constraints. Empty means "licensed
-  // providers cannot satisfy this slot" — surfacing a slot_error at
-  // ValidateComponent time.
-  repeated string satisfied_by = 6;
 }
 
 message ListLLMSlotsResponse {
@@ -320,22 +304,21 @@ message ListReportSurfacesResponse {
 }
 
 message SuggestMissingCapabilityRequest {
-  // needed_target is the fully-qualified catalog reference the caller (or
-  // Claude) has determined they need (e.g., "plugin:servicenow"). The
-  // daemon returns install hints or marketplace links.
-  string needed_target = 1;
+  // Removed in gibson#502: served and never read by any consumer.
+  reserved 1;
+  reserved "needed_target";
   string action = 2;                // "read" | "write" | "execute"
 }
 
 message SuggestMissingCapabilityResponse {
+  // Removed in gibson#502: served and never read by any consumer.
+  reserved 2;
+  reserved "actionable_paths";
   // Human-readable suggestion. Example:
   //   "plugin:servicenow is not installed in tenant:acme. The org plan
   //    includes it — request your tenant admin enable it from Security
   //    Policy, or install it from the platform catalog."
   string message = 1;
-  // actionable_paths enumerates machine-readable next steps (dashboard
-  // URLs, marketplace SKUs). Empty for this version; reserved for later.
-  repeated string actionable_paths = 2;
 }
 
 service DiscoveryService {

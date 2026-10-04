@@ -295,7 +295,6 @@ func (c *EntitlementsGRPCClient) ReportTenantStatus(ctx context.Context, r Tenan
 		DataPlaneReady:   r.DataPlaneReady,
 		StorePostgres:    r.StorePostgres,
 		StoreRedis:       r.StoreRedis,
-		StoreNeo4J:       r.StoreNeo4j,
 		ZitadelOrgSlug:   r.ZitadelOrgSlug,
 		StripeCustomerId: r.StripeCustomerID,
 	})

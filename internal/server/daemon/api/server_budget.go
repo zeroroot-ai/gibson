@@ -7,7 +7,6 @@ import (
 	"context"
 	"fmt"
 	"log/slog"
-	"time"
 
 	"google.golang.org/grpc/codes"
 	status_grpc "google.golang.org/grpc/status"
@@ -351,7 +350,5 @@ func (s *DaemonServer) SetTenantBudgetDefaults(ctx context.Context, req *tenantv
 			slog.String("error", err.Error()), slog.String("tenant", tenantID))
 		return nil, status_grpc.Error(codes.Internal, "failed to persist tenant defaults")
 	}
-	return &tenantv1.SetTenantBudgetDefaultsResponse{
-		AppliedAtUnix: time.Now().Unix(),
-	}, nil
+	return &tenantv1.SetTenantBudgetDefaultsResponse{}, nil
 }

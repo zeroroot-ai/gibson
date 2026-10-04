@@ -56,12 +56,8 @@ func (s *Server) DescribeTool(ctx context.Context, req *discoverypb.DescribeTool
 		// InputProto/OutputProto live on sandboxed ComponentInfo only;
 		// non-sandboxed tools leave these empty and Claude falls back to
 		// the tool's own proto repo.
-		InputProtoType:                   info.Metadata["input_proto_type"],
-		OutputProtoType:                  info.OutputProtoType,
-		ReservesField_100DiscoveryResult: true, // convention; all in-tree tools comply
-		ActionClass:                      firstNonEmpty(info.Metadata["action_class"], "execute"),
-		Rwx:                              rwx,
-		DenyingGates:                     gates,
+		Rwx:          rwx,
+		DenyingGates: gates,
 	}, nil
 }
 
@@ -78,14 +74,12 @@ func (s *Server) DescribeAgent(ctx context.Context, req *discoverypb.DescribeAge
 	// carries them; this handler surfaces what the registry knows (name,
 	// version, rwx).
 	return &discoverypb.DescribeAgentResponse{
-		Name:                 info.Name,
-		DisplayName:          firstNonEmpty(info.Metadata["display_name"], info.Name),
-		Description:          info.Description,
-		Version:              info.Version,
-		LlmSlots:             []string{},
-		RequestedPermissions: []*discoverypb.PermissionRequest{},
-		Rwx:                  rwx,
-		DenyingGates:         gates,
+		Name:         info.Name,
+		DisplayName:  firstNonEmpty(info.Metadata["display_name"], info.Name),
+		Description:  info.Description,
+		Version:      info.Version,
+		Rwx:          rwx,
+		DenyingGates: gates,
 	}, nil
 }
 

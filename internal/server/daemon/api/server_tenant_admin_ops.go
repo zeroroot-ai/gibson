@@ -279,12 +279,10 @@ func (s *DaemonServer) AckTenantOp(ctx context.Context, req *daemonoperatorv1.Ac
 		SET status = 'done', updated_at = NOW()
 		WHERE op_id = $1 AND status <> 'done'
 	`
-	res, err := db.ExecContext(ctx, q, req.GetOpId())
-	if err != nil {
+	if _, err := db.ExecContext(ctx, q, req.GetOpId()); err != nil {
 		return nil, status.Errorf(codes.Internal, "update tenant_admin_ops: %v", err)
 	}
-	n, _ := res.RowsAffected()
-	return &daemonoperatorv1.AckTenantOpResponse{Acked: n > 0}, nil
+	return &daemonoperatorv1.AckTenantOpResponse{}, nil
 }
 
 // ensureTenantAdminOpsTable creates tenant_admin_ops if it does not yet exist.

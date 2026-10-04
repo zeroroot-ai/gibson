@@ -147,11 +147,13 @@ message StartConnectorAuthorizationResponse {
 }
 
 message GetConnectorAuthStatusResponse {
+  // Removed in gibson#502: served and never read by any consumer.
+  reserved 3;
+  reserved "authorized_at";
   ConnectorAuthState state = 1;
   // authorized_by is the FGA user reference of the human who ran the
   // authorization, e.g. "user:312909193121301". Empty when unauthorized.
   string authorized_by = 2;
-  google.protobuf.Timestamp authorized_at = 3;
   // scope is what the authorizing human consented to at the vendor.
   string scope = 4;
   // access_token_expires_at is the expiry of the currently published access
@@ -191,14 +193,9 @@ message RevokeConnectorGrantRequest {
 }
 
 message RevokeConnectorGrantResponse {
-  // had_grant reports whether a grant existed. Revoking an unauthorized
-  // connector is a successful no-op.
-  bool had_grant = 1;
-  // vendor_revoked reports whether the vendor acknowledged the revocation.
-  // False when the grant recorded no revocation endpoint or the vendor call
-  // failed; the local deletion happens regardless, so the platform mints no
-  // further tokens either way.
-  bool vendor_revoked = 2;
+  // Removed in gibson#502: served and never read by any consumer.
+  reserved 1, 2;
+  reserved "had_grant", "vendor_revoked";
 }
 
 message SetConnectorSecretRequest {

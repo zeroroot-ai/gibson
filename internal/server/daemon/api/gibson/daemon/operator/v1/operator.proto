@@ -226,7 +226,7 @@ service DaemonOperatorService {
   // semantics as gibson.tenant.v1.ConnectorAuthService.RevokeConnectorGrant,
   // with the tenant carried explicitly: best-effort vendor revocation, then
   // local deletion, idempotent.
-  rpc RevokeConnectorGrant(RevokeConnectorGrantRequest) returns (RevokeConnectorGrantResponse) {
+  rpc RevokeConnectorGrant(RevokeConnectorGrantRequest) returns (gibson.tenant.v1.RevokeConnectorGrantResponse) {
     option (gibson.auth.v1.authz) = {
       relation: "platform_operator",
       object_type: "system_tenant",
@@ -331,7 +331,9 @@ message SeedCatalogTenantEnabledRequest {
 
 // SeedCatalogTenantEnabledResponse reports how many tuples were written.
 message SeedCatalogTenantEnabledResponse {
-  int32 tuples_written = 1;
+  // Removed in gibson#502: served and never read by any consumer.
+  reserved 1;
+  reserved "tuples_written";
 }
 
 // AuditEventMessage is the wire shape for EmitAuditEvent.
@@ -425,9 +427,9 @@ message AckTenantProvisionedRequest {
 
 // AckTenantProvisionedResponse confirms the ack.
 message AckTenantProvisionedResponse {
-  // acked is true when a pending row transitioned to done; false when the row
-  // was unknown or already done (both are idempotent successes).
-  bool acked = 1;
+  // Removed in gibson#502: served and never read by any consumer.
+  reserved 1;
+  reserved "acked";
 }
 
 // EnqueueTenantProvisioningRequest carries the first tenant to seed. Fields
@@ -535,9 +537,9 @@ message AckTenantOpRequest {
 
 // AckTenantOpResponse confirms the ack.
 message AckTenantOpResponse {
-  // acked is true when a pending row transitioned to done; false when the row
-  // was unknown or already done (both are idempotent successes).
-  bool acked = 1;
+  // Removed in gibson#502: served and never read by any consumer.
+  reserved 1;
+  reserved "acked";
 }
 
 // RevokeConnectorGrantRequest names the tenant and connector whose grant the
@@ -565,15 +567,4 @@ message GetConnectorAuthStatusResponse {
   // status is the same view the dashboard reads, reused rather than copied so
   // the two surfaces can never disagree about what a connector's state is.
   gibson.tenant.v1.GetConnectorAuthStatusResponse status = 1;
-}
-
-// RevokeConnectorGrantResponse reports what the revoke found.
-message RevokeConnectorGrantResponse {
-  // had_grant reports whether a grant existed. Revoking an unauthorized
-  // connector is a successful no-op.
-  bool had_grant = 1;
-  // vendor_revoked reports whether the vendor acknowledged the revocation.
-  // False when the grant recorded no revocation endpoint (a static credential
-  // never does) or the vendor call failed; local deletion happens regardless.
-  bool vendor_revoked = 2;
 }

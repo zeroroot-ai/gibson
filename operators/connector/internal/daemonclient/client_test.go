@@ -37,12 +37,12 @@ func (f *fakeOperatorService) GetConnectorAuthStatus(_ context.Context, req *dae
 	return &daemonoperatorv1.GetConnectorAuthStatusResponse{Status: f.statusResp}, nil
 }
 
-func (f *fakeOperatorService) RevokeConnectorGrant(_ context.Context, req *daemonoperatorv1.RevokeConnectorGrantRequest) (*daemonoperatorv1.RevokeConnectorGrantResponse, error) {
+func (f *fakeOperatorService) RevokeConnectorGrant(_ context.Context, req *daemonoperatorv1.RevokeConnectorGrantRequest) (*tenantv1.RevokeConnectorGrantResponse, error) {
 	f.got = req
 	if f.err != nil {
 		return nil, f.err
 	}
-	return &daemonoperatorv1.RevokeConnectorGrantResponse{HadGrant: true}, nil
+	return &tenantv1.RevokeConnectorGrantResponse{}, nil
 }
 
 // dialFake serves the fake over bufconn and returns a Client on it.

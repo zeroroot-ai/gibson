@@ -58,33 +58,23 @@ enum OntologyProposalStatus {
 // an agent proposed in the caller's tenant, with its recurrence so far and
 // the tenant owner's decision (if any).
 message OntologyExtensionProposal {
+  // Removed in gibson#502: served and never read by any consumer.
+  reserved 3, 4, 5, 8, 9, 10;
+  reserved "recurrence", "last_proposer", "last_claim", "reject_reason", "promoted", "promoted_taxonomy_version";
   OntologyProposalKind kind = 1;
   string label = 2;
-  // recurrence is how many independent times this exact (kind, label) has
-  // been sighted (taxonomy.PromotionGate.Observe's running count).
-  int32 recurrence = 3;
-  string last_proposer = 4;
-  string last_claim = 5;
   OntologyProposalStatus status = 6;
   // reviewer is the tenant owner who approved or rejected this proposal.
   // Empty while status is PENDING.
   string reviewer = 7;
-  // reject_reason is set only when status is REJECTED.
-  string reject_reason = 8;
-  // promoted is true once this proposal has actually been admitted into the
-  // tenant's live Taxonomy — the authoritative "is this a live tenant
-  // extension yet" signal. status == APPROVED alone does not imply promoted:
-  // the proposal may still be short of the recurrence settlement requires.
-  bool promoted = 9;
-  // promoted_taxonomy_version is the resulting Taxonomy registry version
-  // once promoted is true; zero otherwise.
-  int32 promoted_taxonomy_version = 10;
 }
 
 message ListOntologyExtensionProposalsRequest {}
 
 message ListOntologyExtensionProposalsResponse {
-  repeated OntologyExtensionProposal proposals = 1;
+  // Removed in gibson#502: served and never read by any consumer.
+  reserved 1;
+  reserved "proposals";
 }
 
 message ApproveOntologyExtensionProposalRequest {
@@ -131,17 +121,9 @@ message SubmitOntologyExtensionUpstreamRequest {
 // be pasted directly into that PR once the tenant owner (or whoever opens it)
 // commits pack_json at suggested_file_path.
 message SubmitOntologyExtensionUpstreamResponse {
-  // pack_json is the ontology.DomainPack fragment, JSON-encoded exactly as
-  // Export/Import already round-trip it (gibson#378) — never a new,
-  // one-off format invented for this RPC.
-  bytes pack_json = 1;
-  // suggested_file_path is where this fragment belongs in the SDK's pack
-  // source tree, e.g. "packs/<name>.json".
-  string suggested_file_path = 2;
-  // suggested_pr_title and suggested_pr_body are ready-to-paste PR text for
-  // whoever opens the contribution PR.
-  string suggested_pr_title = 3;
-  string suggested_pr_body = 4;
+  // Removed in gibson#502: served and never read by any consumer.
+  reserved 1, 2, 3, 4;
+  reserved "pack_json", "suggested_file_path", "suggested_pr_title", "suggested_pr_body";
 }
 
 service OntologyExtensionService {

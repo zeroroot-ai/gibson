@@ -1,0 +1,19 @@
+# Verdicts for served proto fields that no consumer reads.
+#
+# Format, three pipe-separated columns:
+#
+#   <proto package>.<Message>.<field> | <#issue or ADR> | <why this is the right state today>
+#
+# Nested messages join with a dot: gibson.tenant.v1.Outer.Inner.field.
+#
+# Keyed by qualified name, never by line, so an unrelated edit never needs a
+# re-pin. The reference column must name an issue or an ADR: a verdict with
+# nowhere to read it is an opinion. The gate FAILS when an entry names a field
+# that no longer exists, and when an entry names a field that now HAS a
+# consumer, because either way the verdict is about nothing.
+#
+# ADR-0094 rule 5: build the consumer or delete the producer. A verdict here
+# is a dated hold, never a resting state.
+
+gibson.tenant.v1.RegisterResponse.registration_id | #620 | AdminApproveRegistration requires this id and no surface reads it yet; deleting it breaks the flow rather than trimming it
+gibson.tenant.v1.PendingRegistration.registration_id | #620 | same hold: the administrator view that reads it is the decision in #620

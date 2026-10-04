@@ -523,12 +523,7 @@ message GetReputationRequest {
 }
 
 message GetReputationResponse {
-  // prior_strength is the confidence a NEW hypothesis of this technique, in
-  // this scope, should start from (brain.Reputation.PriorStrength): the
-  // observed TRUE frequency once settled bets exist, or the neutral
-  // DefaultReputationPrior (0.5) when has_track_record is false.
-  double prior_strength = 1;
-  // has_track_record is false when nothing has been recorded for this key
-  // yet — "no data", never hidden behind a bare zero value.
-  bool has_track_record = 2;
+  // Removed in gibson#502: served and never read by any consumer.
+  reserved 1, 2;
+  reserved "prior_strength", "has_track_record";
 }
