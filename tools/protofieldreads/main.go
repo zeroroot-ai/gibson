@@ -55,11 +55,15 @@ func run(args []string, stdout, stderr io.Writer) int {
 	}
 	reads, err := collect(*dir, *prefix, *tags)
 	if err != nil {
-		fmt.Fprintln(stderr, "protofieldreads:", err)
+		_, _ = fmt.Fprintln(stderr, "protofieldreads:", err)
 		return 1
 	}
 	for _, r := range reads {
-		fmt.Fprintln(stdout, r)
+		if _, err := fmt.Fprintln(stdout, r); err != nil {
+			// A read that could not be printed is a read the gate never saw.
+			_, _ = fmt.Fprintln(stderr, "protofieldreads: write:", err)
+			return 1
+		}
 	}
 	return 0
 }
