@@ -167,6 +167,19 @@ service DaemonOperatorService {
   // Note: billing_active is NOT carried here — it is owned by the dashboard
   // billing webhook via TenantProvisioningService.SetTenantBillingActive and
   // must not be clobbered by an operator status report.
+  // SetAgentEnrollmentLimits records the runtime cap an AgentEnrollment
+  // declares (spec.maxRuntime) so the daemon can bound that agent's
+  // sandboxed runs. The daemon cannot read the CR itself (ADR-0023), so the
+  // tenant-operator reports it on every enrollment pass. Idempotent upsert.
+  rpc SetAgentEnrollmentLimits(SetAgentEnrollmentLimitsRequest) returns (SetAgentEnrollmentLimitsResponse) {
+    option (gibson.auth.v1.authz) = {
+      relation: "platform_operator",
+      object_type: "system_tenant",
+      object_deriver: "system_tenant",
+      allowed_identities: 3  // USER | SERVICE
+    };
+  }
+
   rpc ReportTenantStatus(ReportTenantStatusRequest) returns (ReportTenantStatusResponse) {
     option (gibson.auth.v1.authz) = {
       relation: "platform_operator",
@@ -480,6 +493,19 @@ message ReportTenantStatusRequest {
 // dashboard-owned billing_active flag back so the operator can stamp the
 // gibson.zeroroot.ai/billing-active CR annotation the saga waits on — without a
 // second round trip and without the operator ever owning that flag.
+// SetAgentEnrollmentLimitsRequest carries one enrollment's runtime cap.
+message SetAgentEnrollmentLimitsRequest {
+  // tenant_id is the tenant slug (Tenant CR name). Required.
+  string tenant_id = 1;
+  // agent_name is the enrolled agent's catalog id (spec.agentName). Required.
+  string agent_name = 2;
+  // max_runtime_seconds bounds one sandboxed run of this agent. Zero clears
+  // the cap, so the launcher default applies again.
+  int64 max_runtime_seconds = 3;
+}
+
+message SetAgentEnrollmentLimitsResponse {}
+
 message ReportTenantStatusResponse {
   // updated is true when the row was inserted or any reported field changed.
   bool updated = 1;

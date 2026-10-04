@@ -107,6 +107,10 @@ var operatorMethodPolicy = map[string]operatorMethodDecision{
 		allowed: true,
 		reason:  "operator reports tenant status back to the daemon (gibson#948/dashboard#813)",
 	},
+	daemonoperatorv1.DaemonOperatorService_SetAgentEnrollmentLimits_FullMethodName: {
+		allowed: true,
+		reason:  "operator reports an enrollment's runtime cap so the daemon bounds that agent's sandboxed runs (gibson#597)",
+	},
 	daemonoperatorv1.DaemonOperatorService_ListPendingTenantOps_FullMethodName: {
 		allowed: true,
 		reason:  "operator drains the tenant_admin_ops queue (migration 018)",

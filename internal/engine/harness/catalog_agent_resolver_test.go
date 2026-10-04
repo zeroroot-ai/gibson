@@ -8,6 +8,7 @@ import (
 	"errors"
 	"fmt"
 	"testing"
+	"time"
 
 	"github.com/zeroroot-ai/gibson/internal/platform/componentcatalog"
 	"github.com/zeroroot-ai/sdk/auth"
@@ -215,5 +216,52 @@ func TestCatalogAgentResolver_StaticEnv(t *testing.T) {
 	}
 	if entry.Env["ANTHROPIC_API_KEY"] != "from-the-manifest" {
 		t.Fatal("the manifest entry must not be mutated by a resolve")
+	}
+}
+
+type stubRunLimits struct {
+	max time.Duration
+	ok  bool
+	err error
+	got []string
+}
+
+func (s *stubRunLimits) AgentRunLimit(_ context.Context, tenant, agent string) (time.Duration, bool, error) {
+	s.got = append(s.got, tenant+"/"+agent)
+	return s.max, s.ok, s.err
+}
+
+// TestCatalogAgentResolver_EnrollmentRuntimeCap proves the cap an enrollment
+// reported (gibson#597) lands on the launch spec for the caller's tenant,
+// that no reported cap leaves it zero, and that a read failure refuses the
+// launch rather than running uncapped.
+func TestCatalogAgentResolver_EnrollmentRuntimeCap(t *testing.T) {
+	lookup := func(string) (componentcatalog.AgentEntry, bool) {
+		return componentcatalog.AgentEntry{ID: "zerocool", Image: "img@sha256:abc"}, true
+	}
+	ctx := auth.ContextWithTenantString(context.Background(), "tenant-acme")
+
+	limits := &stubRunLimits{max: 10 * time.Minute, ok: true}
+	r := (&CatalogAgentResolver{sandboxClass: "agent", lookup: lookup}).WithRunLimits(limits)
+	spec, err := r.ResolveAgentLaunchSpec(ctx, AgentLaunchRequest{AgentName: "zerocool"})
+	if err != nil {
+		t.Fatalf("resolve: %v", err)
+	}
+	if spec.MaxRuntime != 10*time.Minute {
+		t.Errorf("MaxRuntime = %v, want 10m", spec.MaxRuntime)
+	}
+	if len(limits.got) != 1 || limits.got[0] != "tenant-acme/zerocool" {
+		t.Errorf("limits asked for %v, want the caller's tenant and the agent", limits.got)
+	}
+
+	r = (&CatalogAgentResolver{sandboxClass: "agent", lookup: lookup}).WithRunLimits(&stubRunLimits{})
+	spec, err = r.ResolveAgentLaunchSpec(ctx, AgentLaunchRequest{AgentName: "zerocool"})
+	if err != nil || spec.MaxRuntime != 0 {
+		t.Errorf("no cap reported: MaxRuntime=%v err=%v, want 0, nil", spec.MaxRuntime, err)
+	}
+
+	r = (&CatalogAgentResolver{sandboxClass: "agent", lookup: lookup}).WithRunLimits(&stubRunLimits{err: errors.New("db down")})
+	if _, err := r.ResolveAgentLaunchSpec(ctx, AgentLaunchRequest{AgentName: "zerocool"}); err == nil {
+		t.Error("a cap read failure must refuse the launch")
 	}
 }

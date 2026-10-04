@@ -913,6 +913,16 @@ var Registry = map[string]Entry{
 		Unauthenticated:   false,
 		Self:              false,
 	},
+	"/gibson.daemon.operator.v1.DaemonOperatorService/SetAgentEnrollmentLimits": {
+		Method:            "/gibson.daemon.operator.v1.DaemonOperatorService/SetAgentEnrollmentLimits",
+		Service:           "gibson.daemon.operator.v1.DaemonOperatorService",
+		Relation:          "platform_operator",
+		ObjectType:        "system_tenant",
+		ObjectDeriver:     "system_tenant",
+		AllowedIdentities: IdentityUser | IdentityService,
+		Unauthenticated:   false,
+		Self:              false,
+	},
 	"/gibson.daemon.operator.v1.DaemonOperatorService/SetTenantZitadelOrg": {
 		Method:            "/gibson.daemon.operator.v1.DaemonOperatorService/SetTenantZitadelOrg",
 		Service:           "gibson.daemon.operator.v1.DaemonOperatorService",
