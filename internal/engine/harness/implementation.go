@@ -10,7 +10,6 @@ import (
 	"fmt"
 	harnesspb "github.com/zeroroot-ai/sdk/api/gen/gibson/harness/v1"
 	"log/slog"
-	"strings"
 	"sync"
 	"time"
 
@@ -35,6 +34,7 @@ import (
 	"github.com/zeroroot-ai/sdk/codegen/workspace"
 	sdkgraphrag "github.com/zeroroot-ai/sdk/graphrag"
 	"github.com/zeroroot-ai/sdk/protoresolver"
+	"github.com/zeroroot-ai/sdk/secretenv"
 	sdktypes "github.com/zeroroot-ai/sdk/types"
 	"go.opentelemetry.io/otel/attribute"
 	otelcodes "go.opentelemetry.io/otel/codes"
@@ -2166,32 +2166,21 @@ func (h *DefaultAgentHarness) addTargetFacts(ctx context.Context, spec *sandboxe
 	}
 }
 
-// SecretEnvPrefix is the environment namespace a component receives its
-// declared secrets under. A secret named "goat-kubeconfig" arrives as
-// GIBSON_SECRET_GOAT_KUBECONFIG.
-const SecretEnvPrefix = "GIBSON_SECRET_"
-
-// secretEnvKey is a secret's name as an environment variable. Upper-cased with
-// every character outside [A-Z0-9_] replaced by _, because a secret name is
-// free-form ("cred:openai-prod") and an env key is not.
+// secretEnvKey is a secret's name as an environment variable, from the one copy
+// of that rule: sdk/secretenv.
 //
-// Two different names could collide here ("a-b" and "a.b" both become A_B).
-// addDeclaredSecrets refuses a collision rather than letting one silently win:
-// a component handed the wrong credential under the right name is worse than a
-// mission that fails to start.
+// The daemon WRITES the variable and the dispatched component READS it, and the
+// component lives in another repository — gibson-executor's kube-bench and
+// trivy-k8s both resolve a kubeconfig this way. The fold used to live here, so
+// the two sides could have disagreed about which variable holds which
+// credential. It is in the SDK both of them already depend on instead.
+//
+// The fold is not injective: "a-b" and "a.b" both become A_B.
+// addDeclaredSecrets refuses that collision rather than letting one name
+// silently win, and it can only refuse the same collision the component would
+// see because both compute the key the same way.
 func secretEnvKey(name string) string {
-	var b strings.Builder
-	b.Grow(len(SecretEnvPrefix) + len(name))
-	b.WriteString(SecretEnvPrefix)
-	for _, r := range strings.ToUpper(name) {
-		switch {
-		case r >= 'A' && r <= 'Z', r >= '0' && r <= '9', r == '_':
-			b.WriteRune(r)
-		default:
-			b.WriteRune('_')
-		}
-	}
-	return b.String()
+	return secretenv.Key(name)
 }
 
 // addDeclaredSecrets hands a dispatched tool the secrets its mission declared

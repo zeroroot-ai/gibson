@@ -1066,10 +1066,16 @@ func (m *missionManager) executeMission(ctx context.Context, missionID string, d
 
 	// Create mission context and target info for harness
 	// Include MissionRunID for GraphRAG mission-scoped storage
+	//
+	// The secrets declaration is translated here, once, from the definition
+	// this function already holds (gibson#485). Every harness in the run
+	// inherits it: a delegated child copies the MissionContext, so a sub-agent
+	// is handed what the mission declared and nothing more.
 	missionCtx := harness.NewMissionContext(active.mission.ID, active.mission.Name, "").
 		WithMissionRunID(bootstrapResult.MissionRunID).
 		WithRunNumber(missionRun.RunNumber).
-		WithTenant(active.mission.TenantID)
+		WithTenant(active.mission.TenantID).
+		WithSecrets(harness.MissionSecretScopesFromProto(def.GetSecrets()))
 
 	// Load target entity to get connection details
 	targetInfo, targetInfoErr := m.resolveRunTargetInfo(ctx, active.mission.TargetID)
