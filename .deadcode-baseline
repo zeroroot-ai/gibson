@@ -47,6 +47,13 @@ internal/engine/finding/evidence.go	NewConversationMessage
 internal/engine/finding/evidence.go	NewEnhancedEvidence
 internal/engine/finding/evidence.go	NewHTTPRequestEvidence
 internal/engine/finding/evidence.go	NewHTTPResponseEvidence
+internal/engine/finding/store_conn.go	ConnBoundFindingStore.Get
+internal/engine/finding/store_conn.go	ConnBoundFindingStore.List
+internal/engine/finding/store_conn.go	ConnBoundFindingStore.ListBySeverity
+internal/engine/finding/store_conn.go	ConnBoundFindingStore.isEmptyFilter
+internal/engine/finding/store_conn.go	ConnBoundFindingStore.listByMission
+internal/engine/finding/store_conn.go	findingMatchesFilter
+internal/engine/finding/store_conn.go	unmarshalFindingJSON
 internal/engine/graphrag/api.go	NewGraphRAGStoreWithProvider
 internal/engine/graphrag/attributes.go	AttackChainAttributes
 internal/engine/graphrag/attributes.go	ProviderAttributes
