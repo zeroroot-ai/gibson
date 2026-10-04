@@ -59,17 +59,41 @@ as a value that bound:
 | `forgeConnector` | the connector holding the forge credential |
 | `manifestsProject` | the project path holding the cluster's manifests |
 
-**Today only an agent can submit it.** `catalog_mission` and `catalog_params`
-exist on the harness callback `CreateMissionRequest` and nowhere else, so the
-caller is an agent reaching the daemon through
-`mission.CreateMissionOpts{CatalogMission: ..., CatalogParams: ...}` in the SDK.
-`gibson mission submit` takes a FILE and has no catalog flags; the customer-facing
-`DaemonService.CreateMission` has no catalog field. There is no dashboard screen
-for it either.
+Read what the platform ships, and what each mission needs:
 
-Do not work around that by copying the mission's CUE out of this repository and
-submitting the copy. The checked-in definition is the authoritative one
-(ADR-0018), and a second copy is what ADR-0027 forbids. The gap is gibson#631.
+```bash
+gibson mission catalog list
+gibson mission catalog show cluster-assessment
+```
+
+`show` prints the mission's CUE verbatim, so what the daemon will run can be
+read rather than trusted.
+
+Then submit it:
+
+```bash
+gibson mission submit \
+  --catalog cluster-assessment \
+  --target <target-uuid> \
+  --param kubeconfigSecret=cred:<cluster>-kubeconfig \
+  --param bank=<bank> \
+  --param forgeConnector=<connector> \
+  --param manifestsProject=<group>/<repo>
+```
+
+The daemon renders it from the definition compiled into its own binary
+(ADR-0018), so the graph is the checked-in one and not a copy. Never copy the
+mission's CUE out of this repository and submit the copy: a second definition of
+one mission is what ADR-0027 forbids, and it would silently stop tracking the
+checked-in one.
+
+`--target` is required here. A catalog mission declares no target, which is what
+makes it reusable across clusters, and the target binds from the id you pass and
+from nowhere else — no parameter can supply one.
+
+An agent submits the same mission through
+`mission.CreateMissionOpts{CatalogMission: ..., CatalogParams: ...}` in the SDK.
+Both paths call the same renderer, so both run the same graph.
 
 Inside the mission, the declaration is one line:
 
@@ -124,4 +148,5 @@ cannot reach the cluster must never report a clean scan.
 
 - `docs/secrets.md` — where every credential in the control plane lives
 - `internal/platform/missioncatalog/missions/cluster-assessment.cue` — the mission
+- `internal/server/daemon/api/catalog_missions.go` — the two reads the CLI calls
 - `internal/infra/types/target.go` — why a Target carries no credential
