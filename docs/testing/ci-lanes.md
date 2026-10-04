@@ -140,7 +140,6 @@ now and execute in the default lane on every gate:
 | `tests/e2e/health_test.go` | `/healthz` + `/readyz` over an in-process `httptest` server |
 | `tests/e2e/dashboard_test.go` | OTel span emission against an in-memory exporter |
 | `tests/e2e/helpers/console_filter{,_test}.go` | the browser-console allowlist filter |
-| `tests/e2e/helpers/manifest_loader{,_test}.go` | the dashboard route-manifest loader |
 
 First execution found three real defects, all of which had been latent since the
 files were written:
@@ -187,7 +186,7 @@ Two ways a suite reaches the cluster:
 | `plugin_e2e_test.go` | `exit-test-e2e-cluster.yml` | SKIP by design: needs a debug-plugin subprocess and a human-minted bootstrap token. The plugin path is proven by `plugin_secret_revocation_test.go` |
 | `mission_finding_per_tenant_e2e_test.go` | `exit-test-e2e-cluster.yml` | on the runner, `kubectl`-driven |
 | `audit_v4_foundation_test.go` `live_*` | `exit-test-e2e-cluster.yml` | on the runner, port-forwards at the suite's NodePort constants. Reads FAIL until gibson#214 makes the suite drive its own mission |
-| `signup_full_chain_test.go`, `login_full_chain_test.go`, `dashboard_smoke_test.go` | `exit-test-e2e-cluster.yml` | SKIP: the Go half reads files the dashboard repository's Playwright specs write, and no browser runs on the venue yet (gibson#215). hosted's `exit-test-signup.yml` proves the signup chain |
+| `signup_full_chain_test.go`, `login_full_chain_test.go` | `exit-test-e2e-cluster.yml` | SKIP: the Go half reads files the dashboard repository's Playwright specs write, and no browser runs on the venue yet (gibson#215). hosted's `exit-test-signup.yml` proves the signup chain |
 | `operators/tenant/test/e2e` | `exit-test-e2e-cluster.yml` | on the runner through `make test-e2e`, on a kind cluster of its own, with `plans.yaml` copied from the charts checkout |
 
 `exit-test-e2e-cluster.yml` writes one verdict row per suite
