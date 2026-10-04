@@ -330,3 +330,84 @@ func TestConnectorTokenMaterializer_DefaultClockIsNow(t *testing.T) {
 		t.Fatal("the default clock must return a real time")
 	}
 }
+
+// TestConnectorTokenMaterializer_DeclaredCredentialsArePublished proves each
+// declared credential ref (ConnectorInstanceSpec.Credentials, gibson#597) is
+// resolved from the tenant store, narrowed to its property when the secret
+// is structured, and published under the env var name beside the bearer
+// header. Without the reader the refs steered nothing.
+func TestConnectorTokenMaterializer_DeclaredCredentialsArePublished(t *testing.T) {
+	kube := materializerKube(t)
+	store := fakeAccessStore{data: map[string][]byte{
+		connectorauth.AccessMetaSecretName("connector-gitlab"): accessMeta(t, time.Hour),
+		connectorauth.AccessSecretName("connector-gitlab"):     []byte("tok-1"),
+		"gitlab-pat":    []byte("glpat-xyz"),
+		"vendor-creds":  []byte(`{"token":"vt-1","region":"eu"}`),
+		"vendor-number": []byte(`{"port":8443}`),
+	}}
+	m := &connectorTokenMaterializer{kube: kube, secrets: store, now: func() time.Time { return materializerNow }}
+	d := gitlabSandbox()
+	d.Credentials = []reconciler.ConnectorCredentialRef{
+		{Key: "gitlab-pat", TargetEnv: "GITLAB_PAT"},
+		{Key: "vendor-creds", Property: "token", TargetEnv: "VENDOR_TOKEN"},
+		{Key: "vendor-number", Property: "port", TargetEnv: "VENDOR_PORT"},
+	}
+	if err := m.Materialize(context.Background(), d); err != nil {
+		t.Fatalf("Materialize: %v", err)
+	}
+	sec := credSecret(t, kube, d)
+	for k, want := range map[string]string{
+		"authorization": "Bearer tok-1",
+		"GITLAB_PAT":    "glpat-xyz",
+		"VENDOR_TOKEN":  "vt-1",
+		"VENDOR_PORT":   "8443",
+	} {
+		if got := string(sec.Data[k]); got != want {
+			t.Errorf("Data[%s] = %q, want %q", k, got, want)
+		}
+	}
+
+	// A ref whose secret is missing fails the pass, never publishes empty.
+	d.Credentials = append(d.Credentials, reconciler.ConnectorCredentialRef{Key: "absent", TargetEnv: "ABSENT"})
+	if err := m.Materialize(context.Background(), d); err == nil {
+		t.Fatal("a missing credential secret must be an error")
+	}
+	// A property the structured secret lacks fails the same way.
+	d.Credentials = []reconciler.ConnectorCredentialRef{{Key: "vendor-creds", Property: "nope", TargetEnv: "X"}}
+	if err := m.Materialize(context.Background(), d); err == nil {
+		t.Fatal("a missing property must be an error")
+	}
+}
+
+// TestConnectorTokenMaterializer_CredentialsWithoutATokenStillPublish proves
+// a connector with auth none and declared credentials gets its Secret: the
+// refs do not depend on an OAuth token existing.
+func TestConnectorTokenMaterializer_CredentialsWithoutATokenStillPublish(t *testing.T) {
+	kube := materializerKube(t)
+	store := fakeAccessStore{data: map[string][]byte{"api-key": []byte("k-1")}}
+	m := &connectorTokenMaterializer{kube: kube, secrets: store, now: func() time.Time { return materializerNow }}
+	d := gitlabSandbox()
+	d.Connector, d.InstanceName = "connector-public", "connector-public"
+	d.Credentials = []reconciler.ConnectorCredentialRef{{Key: "api-key", TargetEnv: "API_KEY"}}
+	if err := m.Materialize(context.Background(), d); err != nil {
+		t.Fatalf("Materialize: %v", err)
+	}
+	sec := credSecret(t, kube, d)
+	if string(sec.Data["API_KEY"]) != "k-1" {
+		t.Errorf("Data[API_KEY] = %q, want k-1", sec.Data["API_KEY"])
+	}
+	if _, has := sec.Data["authorization"]; has {
+		t.Error("no token minted, so no authorization key")
+	}
+}
+
+// credSecret reads the connector-cred Secret the materializer wrote for d.
+func credSecret(t *testing.T, kube client.Client, d reconciler.ConnectorSandbox) corev1.Secret {
+	t.Helper()
+	var sec corev1.Secret
+	key := client.ObjectKey{Namespace: d.Namespace, Name: connectorCredSecretName(d.InstanceName)}
+	if err := kube.Get(context.Background(), key, &sec); err != nil {
+		t.Fatalf("get materialized Secret %s: %v", key, err)
+	}
+	return sec
+}

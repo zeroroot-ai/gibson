@@ -33,6 +33,21 @@ type ConnectorSandbox struct {
 	// InstanceUID is the ConnectorInstance CR UID, required on the Secret's
 	// ownerReference so Kubernetes garbage-collects the Secret with the CR.
 	InstanceUID types.UID
+
+	// Credentials are the vendor credentials the instance declares beyond its
+	// OAuth or static token (ConnectorInstanceSpec.Credentials): the tenant
+	// secret each comes from and the env var it reaches the pod as.
+	Credentials []ConnectorCredentialRef
+}
+
+// ConnectorCredentialRef is one declared vendor credential: Key names the
+// tenant secret, Property the field inside a structured secret, TargetEnv
+// the env var the connector reads (empty means the derived default,
+// connectorv1alpha1.CredentialRef.EnvName).
+type ConnectorCredentialRef struct {
+	Key       string
+	Property  string
+	TargetEnv string
 }
 
 // CatalogSource enumerates the connectors each tenant has enabled — the

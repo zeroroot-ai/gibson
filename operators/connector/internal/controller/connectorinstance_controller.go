@@ -443,6 +443,23 @@ func (r *ConnectorInstanceReconciler) desiredToolHive(
 			"proxyPort":         int64(proxyPort),
 			"permissionProfile": permProfile,
 		}
+		// The declared vendor credentials (spec.credentials, gibson#597): the
+		// daemon publishes each one as a key of the same connector-cred
+		// Secret, named by CredentialRef.EnvName, and ToolHive maps each key
+		// into the pod env under that name. One function names the key on
+		// both sides, so the daemon and the operator cannot disagree.
+		if len(ci.Spec.Credentials) > 0 {
+			secrets := make([]interface{}, 0, len(ci.Spec.Credentials))
+			for _, ref := range ci.Spec.Credentials {
+				env := ref.EnvName()
+				secrets = append(secrets, map[string]interface{}{
+					"name":          credentialSecretName(ci.Name),
+					"key":           env,
+					"targetEnvName": env,
+				})
+			}
+			spec["secrets"] = secrets
+		}
 		_ = unstructured.SetNestedMap(th.Object, spec, "spec")
 		return th, nil
 

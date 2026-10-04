@@ -23,6 +23,7 @@ package daemon
 
 import (
 	"context"
+	"encoding/json"
 	"fmt"
 	"time"
 
@@ -97,43 +98,35 @@ func (m *connectorTokenMaterializer) clock() time.Time {
 func (m *connectorTokenMaterializer) Materialize(ctx context.Context, d reconciler.ConnectorSandbox) error {
 	tctx := auth.WithTenant(ctx, d.Tenant)
 
-	meta, err := m.secrets.Resolve(tctx, connectorauth.AccessMetaSecretName(d.Connector))
+	data := make(map[string][]byte, 1+len(d.Credentials))
+
+	header, expired, err := m.bearerHeader(tctx, d)
 	if err != nil {
-		if status.Code(err) == codes.NotFound {
-			return nil // nothing minted yet; nothing to publish or withdraw
-		}
-		return fmt.Errorf("resolve access metadata for connector %q: %w", d.Connector, err)
+		return err
 	}
-	if len(meta) == 0 {
-		return nil
-	}
-	tok, err := connectorauth.UnmarshalAccessToken(meta)
-	if err != nil {
-		// Unreadable bookkeeping proves neither freshness nor death, so the
-		// adapter publishes nothing and says why. The refresher rewrites both
-		// secrets on its next pass, because it reads unreadable metadata as
-		// "needs refresh" too.
-		return fmt.Errorf("connector %q: %w", d.Connector, err)
-	}
-	if tok.Expired(m.clock()) {
-		return m.withdraw(ctx, d)
+	if header != nil {
+		data[connectorCredSecretKey] = header
 	}
 
-	raw, err := m.secrets.Resolve(tctx, connectorauth.AccessSecretName(d.Connector))
-	if err != nil {
-		if status.Code(err) == codes.NotFound {
-			return nil // no token published yet; nothing to materialize
+	// The declared credential refs (ConnectorInstanceSpec.Credentials,
+	// gibson#597): each one is a tenant secret the daemon resolves by name,
+	// narrowed to one property when the secret is structured, and published
+	// under the env var the connector reads it as. The operator maps every
+	// key of this Secret into the pod env by the same name.
+	for _, ref := range d.Credentials {
+		value, err := m.resolveCredentialRef(tctx, d.Connector, ref)
+		if err != nil {
+			return err
 		}
-		// The error names the connector, never the token bytes.
-		return fmt.Errorf("resolve access token for connector %q: %w", d.Connector, err)
-	}
-	if len(raw) == 0 {
-		return nil
+		data[ref.TargetEnv] = value
 	}
 
-	// The proxy presents this value verbatim as the Authorization header, so it
-	// is the full "Bearer <token>" header, not the raw token.
-	header := append([]byte("Bearer "), raw...)
+	if len(data) == 0 {
+		if expired {
+			return m.withdraw(ctx, d)
+		}
+		return nil // nothing minted and nothing declared; nothing to publish
+	}
 
 	sec := &corev1.Secret{
 		ObjectMeta: metav1.ObjectMeta{
@@ -149,10 +142,9 @@ func (m *connectorTokenMaterializer) Materialize(ctx context.Context, d reconcil
 	}
 	if _, err := controllerutil.CreateOrUpdate(ctx, m.kube, sec, func() error {
 		sec.Type = corev1.SecretTypeOpaque
-		if sec.Data == nil {
-			sec.Data = make(map[string][]byte, 1)
-		}
-		sec.Data[connectorCredSecretKey] = header
+		// The whole data set is replaced, so a withdrawn token or a removed
+		// ref leaves the Secret on the next pass instead of lingering.
+		sec.Data = data
 		sec.OwnerReferences = []metav1.OwnerReference{owner}
 		return nil
 	}); err != nil {
@@ -162,13 +154,69 @@ func (m *connectorTokenMaterializer) Materialize(ctx context.Context, d reconcil
 	return nil
 }
 
-// withdraw removes a connector's credential Secret, so an access token the
-// platform can no longer renew stops being served the moment it expires
-// (ADR-0015 decision 4, "no fallback cache"). The connector's proxy loses its
-// credential and the ConnectorInstance reports Degraded, which is the honest
-// state: the vendor would reject the expired token anyway, and leaving it
-// mounted only hides that from the operator. Deleting an absent Secret is a
-// success, so the withdrawal is idempotent across passes.
+// bearerHeader resolves the connector's minted access token as the
+// "Bearer <token>" header value. It returns nil when nothing is minted or
+// published yet, and expired=true when the token's lifetime has passed, in
+// which case the header is withheld.
+func (m *connectorTokenMaterializer) bearerHeader(tctx context.Context, d reconciler.ConnectorSandbox) (header []byte, expired bool, err error) {
+	meta, err := m.secrets.Resolve(tctx, connectorauth.AccessMetaSecretName(d.Connector))
+	if err != nil {
+		if status.Code(err) == codes.NotFound {
+			return nil, false, nil // nothing minted yet
+		}
+		return nil, false, fmt.Errorf("resolve access metadata for connector %q: %w", d.Connector, err)
+	}
+	if len(meta) == 0 {
+		return nil, false, nil
+	}
+	tok, err := connectorauth.UnmarshalAccessToken(meta)
+	if err != nil {
+		return nil, false, fmt.Errorf("connector %q: %w", d.Connector, err)
+	}
+	if tok.Expired(m.clock()) {
+		return nil, true, nil
+	}
+
+	raw, err := m.secrets.Resolve(tctx, connectorauth.AccessSecretName(d.Connector))
+	if err != nil {
+		if status.Code(err) == codes.NotFound {
+			return nil, false, nil // no token published yet
+		}
+		return nil, false, fmt.Errorf("resolve access token for connector %q: %w", d.Connector, err)
+	}
+	if len(raw) == 0 {
+		return nil, false, nil
+	}
+	return append([]byte("Bearer "), raw...), false, nil
+}
+
+// resolveCredentialRef reads the tenant secret a CredentialRef names and
+// narrows it to ref.Property when set. A missing secret or a missing
+// property is an error, never an empty value: a connector started with an
+// empty credential fails later and further from the cause.
+func (m *connectorTokenMaterializer) resolveCredentialRef(tctx context.Context, connector string, ref reconciler.ConnectorCredentialRef) ([]byte, error) {
+	raw, err := m.secrets.Resolve(tctx, ref.Key)
+	if err != nil {
+		return nil, fmt.Errorf("connector %q: resolve credential %q for %s: %w", connector, ref.Key, ref.TargetEnv, err)
+	}
+	if ref.Property == "" {
+		return raw, nil
+	}
+	var fields map[string]json.RawMessage
+	if err := json.Unmarshal(raw, &fields); err != nil {
+		return nil, fmt.Errorf("connector %q: credential %q is not a JSON object, cannot read property %q: %w", connector, ref.Key, ref.Property, err)
+	}
+	v, ok := fields[ref.Property]
+	if !ok {
+		return nil, fmt.Errorf("connector %q: credential %q has no property %q", connector, ref.Key, ref.Property)
+	}
+	var str string
+	if err := json.Unmarshal(v, &str); err == nil {
+		return []byte(str), nil
+	}
+	return []byte(v), nil
+}
+
 func (m *connectorTokenMaterializer) withdraw(ctx context.Context, d reconciler.ConnectorSandbox) error {
 	sec := &corev1.Secret{
 		ObjectMeta: metav1.ObjectMeta{
