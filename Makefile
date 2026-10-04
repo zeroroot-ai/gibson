@@ -563,12 +563,18 @@ check-first-party-tags:
 	@bash scripts/check-first-party-tags.sh
 # check-crd-field-consumers — every served CRD spec or status field has a Go
 # reader, a print column, or a recorded verdict (gibson#503, ADR-0094 layer 6).
-# Reads come from ast-checks/cmd/unwired at the go.mod pin; the script is the
-# setec one with the three api directories here.
+# The gate is ast-checks/cmd/crdfields at the go.mod pin, the one copy that
+# setec runs too. Its fixtures are the crdfields package tests in ast-checks.
+AST_CHECKS_VERSION := $(shell awk '$$1=="github.com/zeroroot-ai/ast-checks"{print $$2; exit}' go.mod)
 .PHONY: check-crd-field-consumers
 check-crd-field-consumers:
-	@bash scripts/__tests__/check-crd-field-consumers.test.sh
-	@bash scripts/check-crd-field-consumers.sh
+	@case "$(AST_CHECKS_VERSION)" in v*) ;; *) echo "::error::no ast-checks version in go.mod, so the CRD field gate has no pinned measurer" >&2; exit 1 ;; esac
+	@go run github.com/zeroroot-ai/ast-checks/cmd/crdfields@$(AST_CHECKS_VERSION) \
+		-dir . \
+		-types operators/tenant/api/v1alpha1,operators/connector/api/v1alpha1,operators/platform/api/v1alpha1 \
+		-exempt scripts/crd-field-consumers-exempt.txt \
+		-min-served 50 \
+		-tags setec_integration
 # check-proto-field-consumers — every daemon-owned proto field has a consumer
 # in one of seven repositories (gibson#502, ADR-0094 layer 5). The fixture runs
 # on every PR; the measurement needs the six other checkouts and runs nightly
