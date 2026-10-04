@@ -42,7 +42,7 @@ require (
 	github.com/mlange-42/ark v0.8.3
 	github.com/moby/moby/api v1.56.0
 	github.com/neo4j/neo4j-go-driver/v5 v5.28.4
-	github.com/onsi/ginkgo/v2 v2.27.4
+	github.com/onsi/ginkgo/v2 v2.33.0
 	github.com/onsi/gomega v1.43.0
 	github.com/openbao/openbao/api/auth/approle/v2 v2.5.1
 	github.com/openbao/openbao/api/v2 v2.6.0
