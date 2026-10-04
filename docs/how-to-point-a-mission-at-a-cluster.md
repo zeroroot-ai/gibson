@@ -47,19 +47,29 @@ kubeconfig does that.
 
 ## 3. Submit the mission, naming the secret
 
-```bash
-gibson mission submit \
-  --catalog cluster-assessment \
-  --target <cluster> \
-  --param kubeconfigSecret=cred:<cluster>-kubeconfig \
-  --param bank=<bank> \
-  --param forgeConnector=<connector> \
-  --param manifestsProject=<group>/<repo>
-```
-
+The mission takes four parameters and no others.
 `internal/platform/missioncatalog/missions/cluster-assessment.cue` declares
-those four parameters and no others; an unknown key is refused rather than
-dropped, so a typo cannot read as a value that bound.
+them, and an unknown key is refused rather than dropped, so a typo cannot read
+as a value that bound:
+
+| parameter | value |
+|---|---|
+| `kubeconfigSecret` | `cred:<cluster>-kubeconfig`, from step 1 |
+| `bank` | the bank of always-on members the two jobs run on |
+| `forgeConnector` | the connector holding the forge credential |
+| `manifestsProject` | the project path holding the cluster's manifests |
+
+**Today only an agent can submit it.** `catalog_mission` and `catalog_params`
+exist on the harness callback `CreateMissionRequest` and nowhere else, so the
+caller is an agent reaching the daemon through
+`mission.CreateMissionOpts{CatalogMission: ..., CatalogParams: ...}` in the SDK.
+`gibson mission submit` takes a FILE and has no catalog flags; the customer-facing
+`DaemonService.CreateMission` has no catalog field. There is no dashboard screen
+for it either.
+
+Do not work around that by copying the mission's CUE out of this repository and
+submitting the copy. The checked-in definition is the authoritative one
+(ADR-0018), and a second copy is what ADR-0027 forbids. The gap is gibson#631.
 
 Inside the mission, the declaration is one line:
 
