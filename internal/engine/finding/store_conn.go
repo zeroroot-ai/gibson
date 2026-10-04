@@ -61,13 +61,6 @@ func (s *ConnBoundFindingStore) Store(ctx context.Context, finding EnhancedFindi
 	return nil
 }
 
-// ---------------------------------------------------------------------------
-// Helpers
-// ---------------------------------------------------------------------------
-
-// Ensure ConnBoundFindingStore implements FindingStore at compile time.
-var _ FindingStore = (*ConnBoundFindingStore)(nil)
-
 // Get retrieves a finding by ID. Returns an error (not found) for IDs that do not exist
 // in the connected tenant's DB — IDOR is impossible by construction (C15 closure).
 func (s *ConnBoundFindingStore) Get(ctx context.Context, id types.ID) (*EnhancedFinding, error) {
@@ -135,6 +128,10 @@ func (s *ConnBoundFindingStore) ListBySeverity(ctx context.Context, severity age
 	}
 	return findings, nil
 }
+
+// ---------------------------------------------------------------------------
+// Helpers
+// ---------------------------------------------------------------------------
 
 func (s *ConnBoundFindingStore) listByMission(ctx context.Context, missionID types.ID) ([]EnhancedFinding, error) {
 	ids, err := s.rdb.SMembers(ctx, cbFindingMissionSetKey(missionID)).Result()
@@ -217,3 +214,6 @@ func unmarshalFindingJSON(result any) (*EnhancedFinding, error) {
 	}
 	return &f, nil
 }
+
+// Ensure ConnBoundFindingStore implements FindingStore at compile time.
+var _ FindingStore = (*ConnBoundFindingStore)(nil)

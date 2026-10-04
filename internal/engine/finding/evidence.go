@@ -59,6 +59,55 @@ type ConversationMessage struct {
 	Timestamp time.Time `json:"timestamp"`
 }
 
+// NewEnhancedEvidence creates a new enhanced evidence object
+func NewEnhancedEvidence(evidenceType EvidenceType, title string, content any) EnhancedEvidence {
+	return EnhancedEvidence{
+		Type:      evidenceType,
+		Title:     title,
+		Content:   content,
+		Timestamp: time.Now(),
+	}
+}
+
+// NewHTTPRequestEvidence creates HTTP request evidence
+func NewHTTPRequestEvidence(title, method, url string, headers map[string]string, body string) EnhancedEvidence {
+	content := HTTPRequestEvidence{
+		Method:  method,
+		URL:     url,
+		Headers: headers,
+		Body:    body,
+	}
+	return NewEnhancedEvidence(EvidenceHTTPRequest, title, content)
+}
+
+// NewHTTPResponseEvidence creates HTTP response evidence
+func NewHTTPResponseEvidence(title string, statusCode int, headers map[string]string, body string, duration time.Duration) EnhancedEvidence {
+	content := HTTPResponseEvidence{
+		StatusCode: statusCode,
+		Headers:    headers,
+		Body:       body,
+		Duration:   duration,
+	}
+	return NewEnhancedEvidence(EvidenceHTTPResponse, title, content)
+}
+
+// NewConversationEvidence creates conversation evidence
+func NewConversationEvidence(title string, messages []ConversationMessage) EnhancedEvidence {
+	content := ConversationEvidence{
+		Messages: messages,
+	}
+	return NewEnhancedEvidence(EvidenceConversation, title, content)
+}
+
+// NewConversationMessage creates a new conversation message
+func NewConversationMessage(role, content string) ConversationMessage {
+	return ConversationMessage{
+		Role:      role,
+		Content:   content,
+		Timestamp: time.Now(),
+	}
+}
+
 // Validate validates the evidence based on its type
 func (e EnhancedEvidence) Validate() error {
 	if e.Title == "" {
@@ -205,53 +254,4 @@ func (e EnhancedEvidence) GetConversation() (*ConversationEvidence, error) {
 	}
 
 	return &conv, nil
-}
-
-// NewEnhancedEvidence creates a new enhanced evidence object
-func NewEnhancedEvidence(evidenceType EvidenceType, title string, content any) EnhancedEvidence {
-	return EnhancedEvidence{
-		Type:      evidenceType,
-		Title:     title,
-		Content:   content,
-		Timestamp: time.Now(),
-	}
-}
-
-// NewHTTPResponseEvidence creates HTTP response evidence
-func NewHTTPResponseEvidence(title string, statusCode int, headers map[string]string, body string, duration time.Duration) EnhancedEvidence {
-	content := HTTPResponseEvidence{
-		StatusCode: statusCode,
-		Headers:    headers,
-		Body:       body,
-		Duration:   duration,
-	}
-	return NewEnhancedEvidence(EvidenceHTTPResponse, title, content)
-}
-
-// NewConversationEvidence creates conversation evidence
-func NewConversationEvidence(title string, messages []ConversationMessage) EnhancedEvidence {
-	content := ConversationEvidence{
-		Messages: messages,
-	}
-	return NewEnhancedEvidence(EvidenceConversation, title, content)
-}
-
-// NewConversationMessage creates a new conversation message
-func NewConversationMessage(role, content string) ConversationMessage {
-	return ConversationMessage{
-		Role:      role,
-		Content:   content,
-		Timestamp: time.Now(),
-	}
-}
-
-// NewHTTPRequestEvidence creates HTTP request evidence
-func NewHTTPRequestEvidence(title, method, url string, headers map[string]string, body string) EnhancedEvidence {
-	content := HTTPRequestEvidence{
-		Method:  method,
-		URL:     url,
-		Headers: headers,
-		Body:    body,
-	}
-	return NewEnhancedEvidence(EvidenceHTTPRequest, title, content)
 }
