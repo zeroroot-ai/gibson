@@ -256,8 +256,6 @@ func TestComponentStatus_IsValid(t *testing.T) {
 	}
 }
 
-// BinPath is empty - should fail validation
-
 // TestComponent_JSONMarshaling tests JSON marshaling/unmarshaling for Component
 func TestComponent_JSONMarshaling(t *testing.T) {
 	now := time.Now()

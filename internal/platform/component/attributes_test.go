@@ -11,26 +11,6 @@ import (
 	"go.opentelemetry.io/otel/attribute"
 )
 
-// Verify core attributes are present
-
-// Verify all attributes including runtime info
-
-// Port should not be present
-
-// Create a test span exporter
-
-// Create and start a span
-
-// Add component attributes
-
-// Get the recorded span
-
-// Verify attributes were added
-
-// Should not panic
-
-// Should not panic
-
 // TestSpanNameConstants tests that span name constants are properly defined
 func TestSpanNameConstants(t *testing.T) {
 	tests := []struct {

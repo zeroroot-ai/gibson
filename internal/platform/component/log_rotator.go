@@ -48,26 +48,3 @@ type DefaultLogRotator struct {
 	maxSize    int64      // Maximum file size before rotation
 	maxBackups int        // Maximum number of backup files to keep
 }
-
-// File doesn't exist, no rotation needed
-
-// Delete the oldest backup if it exists
-
-// Shift all existing backups up by one (.log.N-1 → .log.N)
-// Start from the highest number and work backwards to avoid conflicts
-
-// Check if the source file exists before attempting rename
-
-// This backup doesn't exist, skip it
-
-// Rename the backup file
-
-// Rename current log to .log.1 (if it exists)
-
-// Current log exists, rename it
-
-// Some other error occurred
-
-// If current log doesn't exist, that's fine - we'll create a new one
-
-// Create new empty log file with appropriate permissions

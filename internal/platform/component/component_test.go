@@ -134,9 +134,3 @@ func TestTargetType_UnmarshalJSON(t *testing.T) {
 		})
 	}
 }
-
-// Number of defined target types
-
-// Verify all returned types are valid
-
-// Verify specific types are present

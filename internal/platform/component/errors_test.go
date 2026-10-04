@@ -103,15 +103,3 @@ func TestComponentError_Is(t *testing.T) {
 		assert.False(t, err1.Is(err2))
 	})
 }
-
-// Should return same instance for chaining
-
-// Should return same instance for chaining
-
-// Should match by code
-
-// Should not match different code
-
-// Should match the wrapper's code
-
-// Can also unwrap to find the base error

@@ -197,15 +197,3 @@ type Component struct {
 	StartedAt *time.Time      `json:"started_at,omitempty" yaml:"started_at,omitempty" db:"started_at"` // When the component started running
 	StoppedAt *time.Time      `json:"stopped_at,omitempty" yaml:"stopped_at,omitempty" db:"stopped_at"` // When the component stopped
 }
-
-// A component needs its binary path to be functional. The repository
-// path left with the component.yaml schema (gibson#555): nothing ever
-// wrote it in production.
-
-// Validate port for remote components
-
-// Validate PID for running components
-
-// Set started_at when transitioning to running
-
-// Set stopped_at when transitioning to stopped

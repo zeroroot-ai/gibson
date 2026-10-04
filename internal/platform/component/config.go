@@ -45,44 +45,8 @@ type ComponentsConfig struct {
 	Plugins []ComponentConfig `yaml:"plugins,omitempty" json:"plugins,omitempty"`
 }
 
-// Validate name
-
-// Validate source
-
-// Source-specific validation
-
-// Either branch or tag can be specified, but not both
-
-// Track component names to ensure uniqueness across all kinds
-
-// Validate agents
-
-// Validate tools
-
-// Validate plugins
-
-// Parse the full YAML structure
-
-// Extract components section
-
-// No components section - return empty config (not an error)
-
-// Convert back to YAML for unmarshaling into ComponentsConfig
-
-// Validate each component kind separately to handle errors gracefully
-
-// Final validation to check for duplicate names across kinds
-
 // Logger is an interface for logging warnings during component loading.
 // This allows the caller to provide their own logger implementation.
 type Logger interface {
 	Warnf(format string, args ...interface{})
 }
-
-// Regex: starts with letter or underscore, followed by alphanumeric, underscore, or hyphen
-
-// Search in agents
-
-// Search in tools
-
-// Search in plugins

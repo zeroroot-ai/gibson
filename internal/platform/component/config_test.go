@@ -37,13 +37,3 @@ func stringContains(s, substr string) bool {
 	}
 	return false
 }
-
-// missing path
-
-// Only valid ones
-
-// Invalid source should be caught during validation and skipped
-
-// Invalid one skipped silently
-
-// This is valid - will use default branch

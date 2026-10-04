@@ -42,18 +42,6 @@ type DefaultLogWriter struct {
 	writers map[string][]*bufferedPrefixWriter
 }
 
-// Create the log directory if it doesn't exist
-
-// Use default rotator if none provided
-
-// Use default values
-
-// Open the log file in append mode, creating it if it doesn't exist
-
-// Create a buffered writer with stream prefix and rotation support
-
-// Track the writer for cleanup
-
 const (
 	// rotationCheckInterval defines how often to check if rotation is needed.
 	// We check every 1MB of data written to avoid checking on every write.
@@ -80,39 +68,3 @@ type bufferedPrefixWriter struct {
 	// bytesWritten tracks bytes written since last rotation check
 	bytesWritten int64
 }
-
-// Check if rotation is needed (every rotationCheckInterval bytes)
-
-// Log warning but continue writing to current file
-// We don't want to lose data due to rotation failures
-
-// Reset counter regardless of rotation result
-
-// Write prefix at the start of a new line
-
-// Find the next newline
-
-// Write up to and including the newline (if found)
-
-// Include the newline
-
-// Next write needs a prefix
-
-// Track bytes written for rotation checking
-
-// Check if rotation is needed
-
-// Flush the buffer before rotation
-
-// Close the current file
-
-// Perform rotation - this returns a new file handle
-
-// Rotation failed - try to reopen the original file to continue writing
-// This prevents data loss if rotation fails
-
-// Update the writer to use the new file
-
-// Flush any remaining buffered data
-
-// Still try to close the file

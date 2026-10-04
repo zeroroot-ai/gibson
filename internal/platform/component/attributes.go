@@ -61,15 +61,3 @@ const (
 	// SpanComponentUpdate represents a component update operation
 	SpanComponentUpdate = "gibson.component.update"
 )
-
-// Core component attributes
-
-// Add the binary path if present
-
-// Add port if set (for running components)
-
-// Add PID if set (for running components)
-
-// Add timestamps
-
-// Add component-specific error details if it's a ComponentError

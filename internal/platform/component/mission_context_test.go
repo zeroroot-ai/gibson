@@ -52,13 +52,9 @@ func writeSlotOverrides(t *testing.T, mr *miniredis.Miniredis, tenant, missionID
 // ResolveMissionForWork: no context cases
 // ---------------------------------------------------------------------------
 
-// Simulate a work item dispatched outside a mission.
-
 // ---------------------------------------------------------------------------
 // ResolveMissionForWork: mission found, no overrides
 // ---------------------------------------------------------------------------
-
-// No slot-overrides key written — Get will return ErrNotFound.
 
 // ---------------------------------------------------------------------------
 // ResolveMissionForWork: mission found with overrides
@@ -74,19 +70,9 @@ func writeSlotOverrides(t *testing.T, mr *miniredis.Miniredis, tenant, missionID
 // other tenant's scope.
 // ---------------------------------------------------------------------------
 
-// The caller presents a work id recorded for another tenant.
-
-// Overrides live under the OWNER's scope — the _system carve-out must
-// read them from there, not from a "_system"-scoped key.
-
-// A work context with no recorded owner has no one it can be verified
-// against — it must not resolve for anyone.
-
 // ---------------------------------------------------------------------------
 // ResolveMissionForWork: malformed JSON overrides
 // ---------------------------------------------------------------------------
-
-// Write invalid JSON to the overrides key.
 
 // ---------------------------------------------------------------------------
 // missionSlotOverridesKey helper
@@ -248,7 +234,3 @@ func TestSlotOverrides_JSONRoundTrip(t *testing.T) {
 // TTL behaviour (overrides key expiry is optional — the key is persistent until
 // the mission orchestrator deletes it; verify it survives miniredis fast-forward)
 // ---------------------------------------------------------------------------
-
-// Fast-forward past the work context TTL — the overrides key should still be readable.
-
-// After work context expires, the resolver returns empty missionID.
