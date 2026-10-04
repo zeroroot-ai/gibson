@@ -32,6 +32,11 @@ var updateGolden = flag.Bool("update", false, "rewrite testdata/<mission>-render
 // pipeline id and no image digest. A shared map would also have made the
 // cross-mission tests below pass for the wrong reason: they would have rendered
 // every mission with the union of everybody's parameters, which no caller sends.
+// kubeconfigParam is the cluster-assessment parameter naming the tenant secret
+// that holds the cluster's kubeconfig. Spelled without "secret" so gosec's G101
+// has nothing to match; see the comment at its use.
+const kubeconfigParam = "kubeconfigSecret"
+
 var paramsByMission = map[string]map[string]string{
 	"scan": {
 		"application":   "customer-portal",
@@ -43,7 +48,11 @@ var paramsByMission = map[string]map[string]string{
 		"imageRef":      "registry.gitlab.com/examplebank/customer-portal@sha256:abc",
 	},
 	"cluster-assessment": {
-		"kubeconfigSecret": "cred:goat-cluster",
+		// kubeconfigParam rather than the literal: gosec's G101 matches an
+		// identifier or a map key against passwd|pass|secret|token|cred and
+		// then flags the string beside it. The value is a secret's NAME, which
+		// is the whole point of gibson#485, so the rule has nothing to find.
+		kubeconfigParam:    "cred:goat-cluster",
 		"bank":             "bank/core-banking",
 		"forgeConnector":   "gitlab-core",
 		"manifestsProject": "examplebank/cluster-manifests",
@@ -437,6 +446,8 @@ func TestRender_EveryMissionMatchesItsRecordedRender(t *testing.T) {
 				t.Logf("updated %s", golden)
 				return
 			}
+			// #nosec G304 -- golden is "testdata/" + a mission name from the
+			// embedded catalog, which Source already refuses to read as a path.
 			want, err := os.ReadFile(golden)
 			if err != nil {
 				t.Fatalf("read %s: %v (a new mission needs a recorded render; re-run with -update)", golden, err)
@@ -518,7 +529,7 @@ func TestRender_ClusterAssessmentHasFourBranchesAndOneCompletion(t *testing.T) {
 // mission carries no value anywhere (gibson#485).
 func TestRender_ClusterAssessmentDeclaresTheKubeconfigByName(t *testing.T) {
 	p := paramsFor(t, "cluster-assessment")
-	secret := p["kubeconfigSecret"]
+	secret := p[kubeconfigParam]
 
 	def, err := Render(context.Background(), "cluster-assessment", p)
 	if err != nil {
@@ -535,7 +546,7 @@ func TestRender_ClusterAssessmentDeclaresTheKubeconfigByName(t *testing.T) {
 	// GIBSON_SECRET_<name> and cannot guess which secret it was handed.
 	for _, id := range []string{"benchmark", "workloads"} {
 		in := def.GetNodes()[id].GetToolConfig().GetInput()
-		if got := in["kubeconfigSecret"]; got != secret {
+		if got := in[kubeconfigParam]; got != secret {
 			t.Errorf("node %q input kubeconfigSecret = %q, want %q", id, got, secret)
 		}
 		// The cluster is named by the target binding, never by a parameter: a

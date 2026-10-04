@@ -186,11 +186,10 @@ var colonImport = regexp.MustCompile(`"(github\.com/zeroroot-ai/sdk/([^":]+)):([
 func rewriteColonImports(data []byte) []byte {
 	return colonImport.ReplaceAllFunc(data, func(m []byte) []byte {
 		groups := colonImport.FindSubmatch(m)
-		fullPath, relPath, qualifier := groups[1], string(groups[2]), groups[3]
-		if _, rewritten := packageRewrites[relPath]; !rewritten {
+		if _, rewritten := packageRewrites[string(groups[2])]; !rewritten {
 			return m
 		}
-		return []byte(fmt.Sprintf("%s %q", qualifier, fullPath))
+		return []byte(fmt.Sprintf("%s %q", groups[3], groups[1]))
 	})
 }
 
