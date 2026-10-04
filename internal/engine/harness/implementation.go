@@ -10,6 +10,7 @@ import (
 	"fmt"
 	harnesspb "github.com/zeroroot-ai/sdk/api/gen/gibson/harness/v1"
 	"log/slog"
+	"strings"
 	"sync"
 	"time"
 
@@ -126,6 +127,12 @@ type DefaultAgentHarness struct {
 	// absent rather than guessed, because the alternative is a tool scanning a
 	// host the mission did not name.
 	targetFacts TargetFactsLookup
+
+	// missionSecrets resolves a declared secret's value at dispatch. nil when
+	// the daemon wires no credential store, and a component then receives no
+	// GIBSON_SECRET_* — a mission that declared one gets a refusal rather than
+	// a silent dispatch without it.
+	missionSecrets CredentialStore
 
 	// graphrag serves the knowledge-graph reads. The SAME querier the daemon
 	// hands to ComponentService — one implementation reached two ways, which is
@@ -809,6 +816,9 @@ func (h *DefaultAgentHarness) CallToolProto(ctx context.Context, name string, re
 		}
 		spec.Live = h.liveScope(ctx)
 		h.addTargetFacts(ctx, &spec)
+		if err := h.addDeclaredSecrets(ctx, name, &spec); err != nil {
+			return err
+		}
 		//nolint:wrapcheck // ExecuteWithSpec already returns a typed gibson error; re-wrapping would double-wrap it (same as the registry path below).
 		return h.sandboxedExecutor.ExecuteWithSpec(ctx, name, spec, request, response)
 	}
@@ -2154,6 +2164,90 @@ func (h *DefaultAgentHarness) addTargetFacts(ctx context.Context, spec *sandboxe
 	for k, v := range env {
 		spec.Env[k] = v
 	}
+}
+
+// SecretEnvPrefix is the environment namespace a component receives its
+// declared secrets under. A secret named "goat-kubeconfig" arrives as
+// GIBSON_SECRET_GOAT_KUBECONFIG.
+const SecretEnvPrefix = "GIBSON_SECRET_"
+
+// secretEnvKey is a secret's name as an environment variable. Upper-cased with
+// every character outside [A-Z0-9_] replaced by _, because a secret name is
+// free-form ("cred:openai-prod") and an env key is not.
+//
+// Two different names could collide here ("a-b" and "a.b" both become A_B).
+// addDeclaredSecrets refuses a collision rather than letting one silently win:
+// a component handed the wrong credential under the right name is worse than a
+// mission that fails to start.
+func secretEnvKey(name string) string {
+	var b strings.Builder
+	b.Grow(len(SecretEnvPrefix) + len(name))
+	b.WriteString(SecretEnvPrefix)
+	for _, r := range strings.ToUpper(name) {
+		switch {
+		case r >= 'A' && r <= 'Z', r >= '0' && r <= '9', r == '_':
+			b.WriteRune(r)
+		default:
+			b.WriteRune('_')
+		}
+	}
+	return b.String()
+}
+
+// addDeclaredSecrets hands a dispatched tool the secrets its mission declared
+// for it, resolved server-side at dispatch (gibson#485).
+//
+// The tool never named them: the mission declared them, and the union of
+// mission-wide, tool-wide and per-tool is computed here. The daemon resolves
+// each value AS ITSELF through the credential store, so no FGA relation is
+// granted to the tool and `secret.can_resolve` stays plugin-only — the
+// non-plugin-secret-isolation property is preserved exactly.
+//
+// Every failure REFUSES the dispatch rather than running without the secret. A
+// tool that was promised a credential and silently ran without one does not
+// fail: it authenticates to nothing, finds nothing, and reports a clean result
+// for a scan that never happened. That is the failure mode this whole issue
+// exists to remove, and it is worse than a mission that will not start.
+func (h *DefaultAgentHarness) addDeclaredSecrets(ctx context.Context, toolName string, spec *sandboxed.ToolSpec) error {
+	names := h.missionCtx.Secrets.ForTool(toolName)
+	if len(names) == 0 {
+		return nil
+	}
+	if h.missionSecrets == nil {
+		return types.WrapError(types.SANDBOX_POLICY_DENIED,
+			fmt.Sprintf("tool %q was declared %d secret(s) by its mission but this daemon wires no credential store; "+
+				"refusing to dispatch it without them", toolName, len(names)), nil)
+	}
+
+	resolved := make(map[string]string, len(names))
+	for _, n := range names {
+		key := secretEnvKey(n)
+		if prior, dup := resolved[key]; dup {
+			return types.WrapError(types.SANDBOX_POLICY_DENIED,
+				fmt.Sprintf("tool %q: secrets %q and %q both map to %s; rename one, "+
+					"because a tool handed the wrong credential under the right name is worse than a refusal",
+					toolName, prior, n, key), nil)
+		}
+		_, value, err := h.missionSecrets.GetCredential(ctx, n)
+		if err != nil {
+			// The name, never the value, and never the error's own body — a
+			// store error can quote what it was handed.
+			return types.WrapError(types.SANDBOX_POLICY_DENIED,
+				fmt.Sprintf("tool %q: mission declared secret %q, which did not resolve; refusing to dispatch without it",
+					toolName, n), nil)
+		}
+		if value == "" {
+			return types.WrapError(types.SANDBOX_POLICY_DENIED,
+				fmt.Sprintf("tool %q: mission declared secret %q, which resolved empty; refusing to dispatch with a blank credential",
+					toolName, n), nil)
+		}
+		resolved[key] = n
+		if spec.Env == nil {
+			spec.Env = make(map[string]string, len(names))
+		}
+		spec.Env[key] = value
+	}
+	return nil
 }
 
 func (h *DefaultAgentHarness) sandboxedToolSpecFromManifest(name string) (sandboxed.ToolSpec, bool) {

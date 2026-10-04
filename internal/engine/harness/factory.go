@@ -249,6 +249,7 @@ func (f *DefaultHarnessFactory) Create(agentName string, missionCtx MissionConte
 		componentRegistry:       f.config.ComponentRegistry,
 		graphrag:                resolveGraphRAG(f.config.GraphRAGQuerier),
 		targetFacts:             resolveTargetFacts(f.config.TargetFacts),
+		missionSecrets:          resolveMissionSecrets(f.config.MissionSecrets),
 		workQueue:               f.config.WorkQueue,
 		callbackManager:         f.config.CallbackManager,
 		cgMinter:                minterFrom(f.config.CGMinter),
@@ -379,6 +380,15 @@ func resolveGraphRAG(provide func() component.GraphRAGQuerier) component.GraphRA
 // Same reason resolveGraphRAG exists: the daemon wires the store after the
 // factory is built.
 func resolveTargetFacts(provide func() TargetFactsLookup) TargetFactsLookup {
+	if provide == nil {
+		return nil
+	}
+	return provide()
+}
+
+// resolveMissionSecrets calls the credential-store provider, tolerating an
+// unset one. Same reason resolveTargetFacts exists.
+func resolveMissionSecrets(provide func() CredentialStore) CredentialStore {
 	if provide == nil {
 		return nil
 	}

@@ -102,6 +102,14 @@ type HarnessConfig struct {
 	// and the tool would scan the wrong machine and report a clean result for it.
 	TargetFacts func() TargetFactsLookup
 
+	// MissionSecrets resolves a declared secret's VALUE at dispatch.
+	//
+	// A provider for the reason the others are: the broker stack, and the
+	// credential store it backs, are built after the harness factory — a store
+	// captured at construction is always nil. agent_credentials.go is the
+	// feature that learned that.
+	MissionSecrets func() CredentialStore
+
 	// Tracer for distributed tracing (OpenTelemetry).
 	// Used for creating spans around LLM operations, tool execution, etc.
 	// Optional: defaults to no-op tracer if nil.
