@@ -329,3 +329,63 @@ mission: missionv1.#MissionDefinition & {
 		t.Errorf("deliverable = %v, want MERGE_REQUEST", got)
 	}
 }
+
+// Meta reads a mission's identity WITHOUT its parameters, which is what lets a
+// listing describe the catalog when it has no values to render with.
+func TestMeta_ReadsIdentityWithoutParameters(t *testing.T) {
+	const src = `
+import missionv1 "github.com/zeroroot-ai/sdk/api/proto/gibson/mission/v1"
+
+_params: {
+	kubeconfigSecret: string
+	bank:             string
+}
+
+mission: missionv1.#MissionDefinition & {
+	name:        "cluster-assessment"
+	description: "Assess one Kubernetes cluster."
+	version:     "1.2.3"
+	nodes: {
+		benchmark: {
+			id:   "benchmark"
+			type: missionv1.#NODE_TYPE_TOOL
+			toolConfig: {
+				toolName: "kube-bench"
+				input: {kubeconfigSecret: _params.kubeconfigSecret}
+			}
+		}
+	}
+	entryPoints: ["benchmark"]
+	exitPoints: ["benchmark"]
+}
+`
+	got, err := cueruntime.Meta(src)
+	require.NoError(t, err)
+	assert.Equal(t, "cluster-assessment", got.Name)
+	assert.Equal(t, "Assess one Kubernetes cluster.", got.Description)
+	assert.Equal(t, "1.2.3", got.Version)
+}
+
+// A source with no `mission` is an error, not an empty identity. Returning the
+// zero value would let a listing show a nameless mission.
+func TestMeta_NoMissionIsAnError(t *testing.T) {
+	_, err := cueruntime.Meta(`_params: {a: string}`)
+	require.Error(t, err)
+	assert.Contains(t, err.Error(), "declares no `mission`")
+}
+
+// A field that is absent comes back empty rather than guessed, and the caller
+// decides whether that matters.
+func TestMeta_AnAbsentFieldIsEmptyNotAnError(t *testing.T) {
+	got, err := cueruntime.Meta(`mission: {name: "bare"}`)
+	require.NoError(t, err)
+	assert.Equal(t, "bare", got.Name)
+	assert.Empty(t, got.Description)
+	assert.Empty(t, got.Version)
+}
+
+// Source that does not parse is an error from the load, not a silent empty.
+func TestMeta_UnparseableSourceIsAnError(t *testing.T) {
+	_, err := cueruntime.Meta(`mission: {`)
+	require.Error(t, err)
+}

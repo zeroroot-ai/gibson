@@ -1110,6 +1110,16 @@ export const AuthRegistry: Record<string, AuthEntry> = {
     unauthenticated: false,
     self: false,
   },
+  "/gibson.daemon.v1.DaemonService/ListCatalogMissions": {
+    method: "/gibson.daemon.v1.DaemonService/ListCatalogMissions",
+    service: "gibson.daemon.v1.DaemonService",
+    relation: "member",
+    objectType: "tenant",
+    objectDeriver: "tenant_from_identity",
+    allowedIdentities: IdentityClass.USER | IdentityClass.SERVICE,
+    unauthenticated: false,
+    self: false,
+  },
   "/gibson.daemon.v1.DaemonService/ListMissionDefinitions": {
     method: "/gibson.daemon.v1.DaemonService/ListMissionDefinitions",
     service: "gibson.daemon.v1.DaemonService",
@@ -1192,6 +1202,16 @@ export const AuthRegistry: Record<string, AuthEntry> = {
   },
   "/gibson.daemon.v1.DaemonService/QueryPlugin": {
     method: "/gibson.daemon.v1.DaemonService/QueryPlugin",
+    service: "gibson.daemon.v1.DaemonService",
+    relation: "member",
+    objectType: "tenant",
+    objectDeriver: "tenant_from_identity",
+    allowedIdentities: IdentityClass.USER | IdentityClass.SERVICE,
+    unauthenticated: false,
+    self: false,
+  },
+  "/gibson.daemon.v1.DaemonService/RenderCatalogMission": {
+    method: "/gibson.daemon.v1.DaemonService/RenderCatalogMission",
     service: "gibson.daemon.v1.DaemonService",
     relation: "member",
     objectType: "tenant",

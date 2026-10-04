@@ -1123,6 +1123,16 @@ var Registry = map[string]Entry{
 		Unauthenticated:   false,
 		Self:              false,
 	},
+	"/gibson.daemon.v1.DaemonService/ListCatalogMissions": {
+		Method:            "/gibson.daemon.v1.DaemonService/ListCatalogMissions",
+		Service:           "gibson.daemon.v1.DaemonService",
+		Relation:          "member",
+		ObjectType:        "tenant",
+		ObjectDeriver:     "tenant_from_identity",
+		AllowedIdentities: IdentityUser | IdentityService,
+		Unauthenticated:   false,
+		Self:              false,
+	},
 	"/gibson.daemon.v1.DaemonService/ListMissionDefinitions": {
 		Method:            "/gibson.daemon.v1.DaemonService/ListMissionDefinitions",
 		Service:           "gibson.daemon.v1.DaemonService",
@@ -1205,6 +1215,16 @@ var Registry = map[string]Entry{
 	},
 	"/gibson.daemon.v1.DaemonService/QueryPlugin": {
 		Method:            "/gibson.daemon.v1.DaemonService/QueryPlugin",
+		Service:           "gibson.daemon.v1.DaemonService",
+		Relation:          "member",
+		ObjectType:        "tenant",
+		ObjectDeriver:     "tenant_from_identity",
+		AllowedIdentities: IdentityUser | IdentityService,
+		Unauthenticated:   false,
+		Self:              false,
+	},
+	"/gibson.daemon.v1.DaemonService/RenderCatalogMission": {
+		Method:            "/gibson.daemon.v1.DaemonService/RenderCatalogMission",
 		Service:           "gibson.daemon.v1.DaemonService",
 		Relation:          "member",
 		ObjectType:        "tenant",
