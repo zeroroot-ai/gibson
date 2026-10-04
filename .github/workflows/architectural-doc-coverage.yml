@@ -72,6 +72,6 @@ jobs:
   architectural-doc-coverage:
     needs: changes
     if: needs.changes.outputs.relevant == 'true'
-    uses: zeroroot-ai/.github/.github/workflows/architectural-doc-coverage.yml@1366fb5a29590e522bf5a74308f55bb39a4edb56 # v0.5.1
+    uses: zeroroot-ai/.github/.github/workflows/architectural-doc-coverage.yml@40c67fd77152f2c4924abccbd992dbca065f325b # v0.8.2
     secrets:
       DOCS_REPO_READ_TOKEN: ${{ secrets.DOCS_REPO_READ_TOKEN }}
