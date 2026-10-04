@@ -16,6 +16,8 @@
 package v1alpha1
 
 import (
+	"strings"
+
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 )
 
@@ -74,9 +76,44 @@ type CredentialRef struct {
 	// +optional
 	Property string `json:"property,omitempty"`
 	// TargetEnv is the environment variable the connector reads. Defaults to
-	// the vendor's conventional name when unset.
+	// the Key upper-cased with every non-alphanumeric run folded to one
+	// underscore (see EnvName).
 	// +optional
 	TargetEnv string `json:"targetEnv,omitempty"`
+}
+
+// EnvName is the environment variable this credential reaches the connector
+// as: TargetEnv when set, else the Key upper-cased with every run of
+// non-alphanumeric characters folded to one underscore and a leading digit
+// guarded by an underscore ("gitlab.token" -> "GITLAB_TOKEN", "2fa-secret" ->
+// "_2FA_SECRET"). The daemon writes the Secret key and the operator maps it
+// to the pod env with this one function, so the two sides cannot disagree.
+func (r CredentialRef) EnvName() string {
+	if r.TargetEnv != "" {
+		return r.TargetEnv
+	}
+	var b strings.Builder
+	underscore := false
+	for _, c := range r.Key {
+		switch {
+		case c >= 'a' && c <= 'z':
+			b.WriteRune(c - 'a' + 'A')
+			underscore = false
+		case (c >= 'A' && c <= 'Z') || (c >= '0' && c <= '9'):
+			b.WriteRune(c)
+			underscore = false
+		default:
+			if !underscore && b.Len() > 0 {
+				b.WriteByte('_')
+			}
+			underscore = true
+		}
+	}
+	name := strings.TrimSuffix(b.String(), "_")
+	if name != "" && name[0] >= '0' && name[0] <= '9' {
+		name = "_" + name
+	}
+	return name
 }
 
 // ConnectorAuthKind is how the connector authenticates to the vendor.

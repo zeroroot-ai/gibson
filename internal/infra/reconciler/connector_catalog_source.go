@@ -52,6 +52,19 @@ type ConnectorInstanceCatalogSource struct {
 // carriesVendorCredential reports whether a connector of this auth kind has a
 // credential in the tenant store for the materializer to publish: an OAuth
 // access token (oauth) or a customer-supplied static credential (secret).
+// credentialRefs copies the declared credential refs onto the desired set so
+// the materializer resolves each one (gibson#597).
+func credentialRefs(in []connectorv1alpha1.CredentialRef) []ConnectorCredentialRef {
+	if len(in) == 0 {
+		return nil
+	}
+	out := make([]ConnectorCredentialRef, 0, len(in))
+	for _, r := range in {
+		out = append(out, ConnectorCredentialRef{Key: r.Key, Property: r.Property, TargetEnv: r.EnvName()})
+	}
+	return out
+}
+
 func carriesVendorCredential(kind connectorv1alpha1.ConnectorAuthKind) bool {
 	return kind == connectorv1alpha1.ConnectorAuthOAuth || kind == connectorv1alpha1.ConnectorAuthSecret
 }
@@ -76,7 +89,7 @@ func (s *ConnectorInstanceCatalogSource) DesiredConnectors(ctx context.Context) 
 	desired := make([]ConnectorSandbox, 0, len(list.Items))
 	for i := range list.Items {
 		ci := &list.Items[i]
-		if !carriesVendorCredential(ci.Spec.Auth) {
+		if !carriesVendorCredential(ci.Spec.Auth) && len(ci.Spec.Credentials) == 0 {
 			continue
 		}
 		ns := ci.GetNamespace()
@@ -105,6 +118,7 @@ func (s *ConnectorInstanceCatalogSource) DesiredConnectors(ctx context.Context) 
 			Namespace:    ns,
 			InstanceName: ci.GetName(),
 			InstanceUID:  ci.GetUID(),
+			Credentials:  credentialRefs(ci.Spec.Credentials),
 		})
 	}
 	return desired, nil

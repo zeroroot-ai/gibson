@@ -1102,3 +1102,41 @@ func TestCheckCredential_UnknownStateIsDegraded(t *testing.T) {
 		t.Errorf("phase = %q, want Failed", got.phase)
 	}
 }
+
+// TestDesiredToolHive_HostedCredentialsReachThePodEnv proves every declared
+// credential ref becomes a ToolHive secret mapping from the connector-cred
+// Secret key to the env var the connector reads (gibson#597). Without the
+// reader, spec.credentials steered nothing.
+func TestDesiredToolHive_HostedCredentialsReachThePodEnv(t *testing.T) {
+	r := &ConnectorInstanceReconciler{}
+	ci := hostedInstance("osv", "tenant-acme")
+	ci.Spec.Credentials = []connectorv1alpha1.CredentialRef{
+		{Key: "osv-api-key"},
+		{Key: "vendor-creds", Property: "token", TargetEnv: "VENDOR_TOKEN"},
+	}
+
+	th, err := r.desiredToolHive(ci)
+	if err != nil {
+		t.Fatalf("desiredToolHive: %v", err)
+	}
+	secrets, found, _ := unstructured.NestedSlice(th.Object, "spec", "secrets")
+	if !found || len(secrets) != 2 {
+		t.Fatalf("spec.secrets = %v, want two mappings", secrets)
+	}
+	want := []string{"OSV_API_KEY", "VENDOR_TOKEN"}
+	for i, s := range secrets {
+		m := s.(map[string]interface{})
+		if m["name"] != credentialSecretName("osv") || m["key"] != want[i] || m["targetEnvName"] != want[i] {
+			t.Errorf("secrets[%d] = %v, want key and targetEnvName %q from %s", i, m, want[i], credentialSecretName("osv"))
+		}
+	}
+
+	ci.Spec.Credentials = nil
+	th, err = r.desiredToolHive(ci)
+	if err != nil {
+		t.Fatalf("desiredToolHive: %v", err)
+	}
+	if _, found, _ := unstructured.NestedSlice(th.Object, "spec", "secrets"); found {
+		t.Error("no declared credentials must mean no secrets block")
+	}
+}
