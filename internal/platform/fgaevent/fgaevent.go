@@ -135,13 +135,34 @@ func (p *publisher) Publish(ctx context.Context, evt Event) {
 	}
 }
 
+// Backoff bounds for the resubscribe loop. MinBackoff is the first gap after a
+// subscription that had been up; MaxBackoff is the ceiling a run of failures
+// climbs to. Exported so a test can assert the loop against the schedule it
+// actually has rather than against a number somebody guessed.
+const (
+	MinBackoff = 500 * time.Millisecond
+	MaxBackoff = 10 * time.Second
+)
+
 // Subscribe delivers every event on Channel to handle until ctx ends. A lost
-// subscription is retried with backoff up to maxBackoff; each gap is logged,
-// because during a gap the cache TTL is the only bound.
+// subscription is retried with backoff from MinBackoff up to MaxBackoff; each
+// gap is logged, because during a gap the cache TTL is the only bound.
+//
+// The backoff RESETS once a subscription has been up for at least MinBackoff.
+// It used to only grow, for the lifetime of the process: a subscription that
+// held for a week and then dropped waited the full MaxBackoff before its first
+// retry, because earlier reconnects had already climbed the ceiling. During
+// that gap a demoted user keeps their rights, and the TTL is the only bound —
+// which is the exact failure this package exists to shorten.
+//
+// "Has been up" is measured as how long SubscribeMessages blocked. A call that
+// returns at once never established; one that held longer than the shortest
+// retry gap did, so the next outage starts its own schedule rather than
+// inheriting the last one's.
 func Subscribe(ctx context.Context, ms MessageSubscriber, log *slog.Logger, handle func(Event)) {
-	backoff := 500 * time.Millisecond
-	const maxBackoff = 10 * time.Second
+	backoff := MinBackoff
 	for {
+		started := time.Now()
 		err := ms.SubscribeMessages(ctx, Channel, func(payload string) {
 			var evt Event
 			if uerr := json.Unmarshal([]byte(payload), &evt); uerr != nil {
@@ -156,6 +177,9 @@ func Subscribe(ctx context.Context, ms MessageSubscriber, log *slog.Logger, hand
 		if ctx.Err() != nil {
 			return
 		}
+		if time.Since(started) >= MinBackoff {
+			backoff = MinBackoff
+		}
 		log.Warn("fgaevent: subscription ended; the cache TTL bounds changes until it is back",
 			"error", errString(err), "retry_in", backoff.String())
 		select {
@@ -164,8 +188,8 @@ func Subscribe(ctx context.Context, ms MessageSubscriber, log *slog.Logger, hand
 		case <-time.After(backoff):
 		}
 		backoff *= 2
-		if backoff > maxBackoff {
-			backoff = maxBackoff
+		if backoff > MaxBackoff {
+			backoff = MaxBackoff
 		}
 	}
 }
