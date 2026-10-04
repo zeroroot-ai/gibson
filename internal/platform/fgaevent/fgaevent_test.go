@@ -272,8 +272,12 @@ func (h *heldSubscriber) SubscribeMessages(ctx context.Context, _ string, _ func
 		}
 		return errors.New("dropped after being up")
 	}
+	// Blocks until the test cancels, which is how the real subscriber behaves
+	// while it is healthy. A nil return, rather than ctx.Err(): Subscribe
+	// returns on ctx.Err() before it reads this, so the value is never looked
+	// at, and wrapping an error nobody reads is noise.
 	<-ctx.Done()
-	return ctx.Err()
+	return nil
 }
 
 // TestSubscribeBackoffResetsAfterAHealthySubscription is the defect, not the
