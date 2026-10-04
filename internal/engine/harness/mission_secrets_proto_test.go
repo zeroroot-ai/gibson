@@ -9,6 +9,8 @@ import (
 
 	missionv1 "github.com/zeroroot-ai/sdk/api/gen/gibson/mission/v1"
 	"github.com/zeroroot-ai/sdk/secretenv"
+
+	"github.com/zeroroot-ai/gibson/internal/infra/types"
 )
 
 // A nil block hands nothing to anything. That is the behaviour before a mission
@@ -90,5 +92,36 @@ func TestSecretEnvKey_IsTheSDKRule(t *testing.T) {
 	}
 	if got := secretEnvKey("cred:goat-cluster"); got != "GIBSON_SECRET_CRED_GOAT_CLUSTER" {
 		t.Errorf("secretEnvKey = %q; the exact bytes a dispatched tool reads changed", got)
+	}
+}
+
+// WithSecrets is how the declaration reaches a harness, and a child inherits it
+// unchanged because a MissionContext is a value. A child that could declare its
+// own would be a component naming a secret.
+func TestMissionContext_WithSecretsIsInheritedByAChild(t *testing.T) {
+	parent := NewMissionContext(types.NewID(), "cluster-assessment", "orchestrator").
+		WithSecrets(MissionSecretScopes{Tools: []string{"cred:goat-cluster"}})
+
+	if names := parent.Secrets.ForTool("kube-bench"); len(names) != 1 || names[0] != "cred:goat-cluster" {
+		t.Fatalf("the parent's declaration = %v, want the tool-wide name", names)
+	}
+
+	// The copy a delegation makes.
+	child := parent
+	child.CurrentAgent = "zerocool"
+	child.DelegationDepth = parent.DelegationDepth + 1
+
+	if names := child.Secrets.ForTool("kube-bench"); len(names) != 1 || names[0] != "cred:goat-cluster" {
+		t.Errorf("the child's declaration = %v, want what the mission declared", names)
+	}
+
+	// And setting it on the child does not reach back up: WithSecrets returns a
+	// value, so a sub-agent cannot widen what the run was granted.
+	widened := child.WithSecrets(MissionSecretScopes{Tools: []string{"cred:something-else"}})
+	if names := parent.Secrets.ForTool("kube-bench"); len(names) != 1 || names[0] != "cred:goat-cluster" {
+		t.Errorf("the parent changed when the child set its own: %v", names)
+	}
+	if names := widened.Secrets.ForTool("kube-bench"); len(names) != 1 || names[0] != "cred:something-else" {
+		t.Errorf("the returned value did not carry the new declaration: %v", names)
 	}
 }

@@ -1064,18 +1064,7 @@ func (m *missionManager) executeMission(ctx context.Context, missionID string, d
 		return
 	}
 
-	// Create mission context and target info for harness
-	// Include MissionRunID for GraphRAG mission-scoped storage
-	//
-	// The secrets declaration is translated here, once, from the definition
-	// this function already holds (gibson#485). Every harness in the run
-	// inherits it: a delegated child copies the MissionContext, so a sub-agent
-	// is handed what the mission declared and nothing more.
-	missionCtx := harness.NewMissionContext(active.mission.ID, active.mission.Name, "").
-		WithMissionRunID(bootstrapResult.MissionRunID).
-		WithRunNumber(missionRun.RunNumber).
-		WithTenant(active.mission.TenantID).
-		WithSecrets(harness.MissionSecretScopesFromProto(def.GetSecrets()))
+	missionCtx := newRunMissionContext(active.mission, missionRun, def, bootstrapResult.MissionRunID)
 
 	// Load target entity to get connection details
 	targetInfo, targetInfoErr := m.resolveRunTargetInfo(ctx, active.mission.TargetID)
@@ -1440,4 +1429,32 @@ func (m *missionManager) awaitBrainMission(ctx context.Context, eng *brain.Engin
 			}
 		}
 	}
+}
+
+// newRunMissionContext is the MissionContext every harness in one run starts
+// from.
+//
+// Extracted from startMissionExecution so it can be asserted directly. It
+// carries four things a wrong value would break silently rather than loudly:
+// the tenant (a wrong one shows a run on another tenant's console), the run id
+// (mission-scoped GraphRAG storage), the run number (mission memory queries),
+// and the secrets declaration.
+//
+// The secrets declaration is translated HERE, once, from the definition the
+// caller already holds (gibson#485). Every harness in the run inherits it: a
+// delegated child copies the MissionContext, so a sub-agent is handed what the
+// mission declared and nothing more. A child that could declare its own would
+// be a component naming a secret, which is the property this design does not
+// have.
+func newRunMissionContext(
+	m *mission.Mission,
+	run *mission.MissionRun,
+	def *missionpb.MissionDefinition,
+	missionRunID string,
+) harness.MissionContext {
+	return harness.NewMissionContext(m.ID, m.Name, "").
+		WithMissionRunID(missionRunID).
+		WithRunNumber(run.RunNumber).
+		WithTenant(m.TenantID).
+		WithSecrets(harness.MissionSecretScopesFromProto(def.GetSecrets()))
 }
