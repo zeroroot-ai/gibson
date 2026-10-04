@@ -4,6 +4,7 @@
 package helpers_test
 
 import (
+	"os"
 	"testing"
 
 	"github.com/stretchr/testify/assert"
@@ -14,7 +15,12 @@ import (
 // writeAllowlistTemp writes an allowlist YAML to a temp file.
 func writeAllowlistTemp(t *testing.T, content string) string {
 	t.Helper()
-	return writeTemp(t, content)
+	f, err := os.CreateTemp(t.TempDir(), "allowlist-*.yaml")
+	require.NoError(t, err)
+	_, err = f.WriteString(content)
+	require.NoError(t, err)
+	require.NoError(t, f.Close())
+	return f.Name()
 }
 
 // ---------------------------------------------------------------------------

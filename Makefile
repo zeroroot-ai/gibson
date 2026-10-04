@@ -637,14 +637,6 @@ test-login-e2e: ## Run the login full-chain e2e suite against a live kind cluste
 	$(call require_env,SIGNUP_EMAIL,login_full_chain_test.go)
 	$(GOCMD) test -tags=e2e -run 'TestLogin' -v -timeout $(E2E_TIMEOUT) ./tests/e2e/...
 
-.PHONY: test-dashboard-smoke-e2e
-test-dashboard-smoke-e2e: ## Run the dashboard smoke e2e suite (two tenants) against a live kind cluster
-	$(call require_env,SIGNUP_SLUG_A,dashboard_smoke_test.go)
-	$(call require_env,SIGNUP_EMAIL_A,dashboard_smoke_test.go)
-	$(call require_env,SIGNUP_SLUG_B,dashboard_smoke_test.go)
-	$(call require_env,SIGNUP_EMAIL_B,dashboard_smoke_test.go)
-	$(GOCMD) test -tags=e2e -run 'TestDashboard' -v -timeout $(E2E_TIMEOUT) ./tests/e2e/...
-
 # vet-tags: the local equivalent of the CI `vet-tags` matrix — type-checks the
 # module once per declared build-tag variant. Roughly a minute per leg.
 # `default` is the sentinel for the untagged leg; every other word is passed
