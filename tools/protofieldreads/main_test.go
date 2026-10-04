@@ -1,8 +1,10 @@
 package main
 
 import (
+	"bytes"
 	"os"
 	"path/filepath"
+	"strings"
 	"testing"
 )
 
@@ -39,15 +41,35 @@ func (x *AckResponse) GetWritten() int    { return x.Written }
 type Other struct{ Acked bool }
 
 func (x *Other) GetAcked() bool { return x.Acked }
+
+// Count is a named non-struct with a getter: not a message, never reported.
+type Count int
+
+func (c Count) GetValue() int { return int(c) }
+
+// GetSynthetic has no field behind it, so it is not a field read.
+func (x *AckResponse) GetSynthetic() string { return "" }
+`)
+	write("other/other.go", `package other
+
+// Outside is declared outside the prefix and must not be reported.
+type Outside struct{ Field int }
 `)
 	write("consumer/consumer.go", `package consumer
 
 import v1 "example.com/fixture/api/v1"
 
-func Use(r *v1.AckResponse, o *v1.Other) int {
+import "example.com/fixture/other"
+
+func Use(r *v1.AckResponse, o *v1.Other, c v1.Count, out *other.Outside) int {
 	_ = r.GetAcked()          // getter: read
 	r.Ignored = "set"         // assignment: write
+	r.Written++               // increment: write
 	_ = &v1.AckResponse{Written: 1} // literal key: write
+	_ = c.GetValue()          // getter on a non-struct: not a message
+	_ = r.GetSynthetic()      // getter with no field behind it
+	_ = (*v1.AckResponse).GetAcked // method expression: not a read
+	_ = out.Field             // outside the prefix
 	if o.Acked {              // selector on a different type: read of Other.Acked
 		return r.Written      // selector: read
 	}
@@ -77,5 +99,36 @@ func testOnly(r *v1.AckResponse) string { return r.GetIgnored() }
 		if got[i] != want[i] {
 			t.Fatalf("got %v, want %v", got, want)
 		}
+	}
+
+	// run prints the same set, one per line, and exits 0.
+	var stdout, stderr bytes.Buffer
+	if code := run([]string{"-dir", dir, "-prefix", "example.com/fixture/api/", "-tags", ""}, &stdout, &stderr); code != 0 {
+		t.Fatalf("run exited %d: %s", code, stderr.String())
+	}
+	if got := strings.TrimSpace(stdout.String()); got != strings.Join(want, "\n") {
+		t.Fatalf("run printed %q", got)
+	}
+}
+
+// TestRunReportsALoadFailure proves a module that does not type-check is an
+// error with its reason, never an empty read set that reads as "all dead".
+func TestRunReportsALoadFailure(t *testing.T) {
+	dir := t.TempDir()
+	if err := os.WriteFile(filepath.Join(dir, "go.mod"), []byte("module example.com/broken\n\ngo 1.22\n"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(dir, "broken.go"), []byte("package broken\n\nfunc f() { undefinedName() }\n"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	var stdout, stderr bytes.Buffer
+	if code := run([]string{"-dir", dir, "-tags", ""}, &stdout, &stderr); code != 1 {
+		t.Fatalf("run exited %d, want 1; stderr=%s", code, stderr.String())
+	}
+	if !strings.Contains(stderr.String(), "load errors") {
+		t.Fatalf("stderr %q does not name the load failure", stderr.String())
+	}
+	if code := run([]string{"-no-such-flag"}, &stdout, &stderr); code != 2 {
+		t.Fatalf("bad flag exited %d, want 2", code)
 	}
 }

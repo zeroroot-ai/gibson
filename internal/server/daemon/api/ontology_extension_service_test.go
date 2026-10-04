@@ -129,6 +129,20 @@ func TestOntologyDecisionError_MapsEachErrorKind(t *testing.T) {
 // ListOntologyExtensionProposals
 // -----------------------------------------------------------------------
 
+// TestListOntologyExtensionProposals_ReturnsAnEmptyListForATenant proves the
+// RPC path reaches the tenant engine and answers: the response carries no
+// proposals (gibson#502, gibson#618), and a tenant with proposals in its
+// engine still gets an empty answer rather than an error.
+func TestListOntologyExtensionProposals_ReturnsAnEmptyListForATenant(t *testing.T) {
+	s, reg := newOntologyExtensionService(t)
+	proposeNTimes(context.Background(), t, reg.For("acme"), taxonomy.ProposedNodeLabel, "Container", 1)
+
+	resp, err := s.ListOntologyExtensionProposals(tenantCtx("acme"), &tenantv1.ListOntologyExtensionProposalsRequest{})
+	require.NoError(t, err)
+	require.NotNil(t, resp)
+	require.Len(t, reg.For("acme").OntologyProposals(), 1, "the engine holds the proposal the RPC does not carry")
+}
+
 func TestListOntologyExtensionProposals_MissingTenantIsDenied(t *testing.T) {
 	s, _ := newOntologyExtensionService(t)
 	_, err := s.ListOntologyExtensionProposals(context.Background(), &tenantv1.ListOntologyExtensionProposalsRequest{})

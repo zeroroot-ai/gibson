@@ -30,6 +30,7 @@ import (
 	"fmt"
 	"go/ast"
 	"go/types"
+	"io"
 	"os"
 	"sort"
 	"strings"
@@ -38,19 +39,29 @@ import (
 )
 
 func main() {
-	dir := flag.String("dir", ".", "module root to load")
-	prefix := flag.String("prefix", "", "only report types whose import path starts with this")
-	tags := flag.String("tags", "setec_integration", "build tags, the image's by default")
-	flag.Parse()
+	os.Exit(run(os.Args[1:], os.Stdout, os.Stderr))
+}
 
+// run parses args, collects the reads and prints them, returning the exit
+// code. It is main without os.Exit so the test can drive it.
+func run(args []string, stdout, stderr io.Writer) int {
+	fs := flag.NewFlagSet("protofieldreads", flag.ContinueOnError)
+	fs.SetOutput(stderr)
+	dir := fs.String("dir", ".", "module root to load")
+	prefix := fs.String("prefix", "", "only report types whose import path starts with this")
+	tags := fs.String("tags", "setec_integration", "build tags, the image's by default")
+	if err := fs.Parse(args); err != nil {
+		return 2
+	}
 	reads, err := collect(*dir, *prefix, *tags)
 	if err != nil {
-		fmt.Fprintln(os.Stderr, "protofieldreads:", err)
-		os.Exit(1)
+		fmt.Fprintln(stderr, "protofieldreads:", err)
+		return 1
 	}
 	for _, r := range reads {
-		fmt.Println(r)
+		fmt.Fprintln(stdout, r)
 	}
+	return 0
 }
 
 // collect loads every package under dir and returns the sorted, unique set
