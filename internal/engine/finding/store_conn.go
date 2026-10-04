@@ -107,57 +107,6 @@ func (s *ConnBoundFindingStore) List(ctx context.Context, missionID types.ID, fi
 	return results, nil
 }
 
-// Update modifies an existing finding and adjusts secondary indexes.
-func (s *ConnBoundFindingStore) Update(ctx context.Context, finding EnhancedFinding) error {
-	old, err := s.Get(ctx, finding.ID)
-	if err != nil {
-		return fmt.Errorf("finding not found: %w", err)
-	}
-	data, err := json.Marshal(finding)
-	if err != nil {
-		return fmt.Errorf("failed to marshal finding: %w", err)
-	}
-	pipe := s.rdb.Pipeline()
-	pipe.Do(ctx, "JSON.SET", cbFindingKey(finding.ID), "$", string(data))
-	if old.MissionID != finding.MissionID {
-		pipe.SRem(ctx, cbFindingMissionSetKey(old.MissionID), finding.ID.String())
-		pipe.SAdd(ctx, cbFindingMissionSetKey(finding.MissionID), finding.ID.String())
-	}
-	if old.Severity != finding.Severity {
-		pipe.SRem(ctx, cbFindingSeveritySetKey(old.Severity), finding.ID.String())
-		pipe.SAdd(ctx, cbFindingSeveritySetKey(finding.Severity), finding.ID.String())
-	}
-	if _, err := pipe.Exec(ctx); err != nil {
-		return fmt.Errorf("failed to update finding: %w", err)
-	}
-	return nil
-}
-
-// Delete removes a finding and cleans up secondary indexes.
-func (s *ConnBoundFindingStore) Delete(ctx context.Context, id types.ID) error {
-	finding, err := s.Get(ctx, id)
-	if err != nil {
-		return fmt.Errorf("finding not found: %w", err)
-	}
-	pipe := s.rdb.Pipeline()
-	pipe.Do(ctx, "JSON.DEL", cbFindingKey(id), "$")
-	pipe.SRem(ctx, cbFindingMissionSetKey(finding.MissionID), id.String())
-	pipe.SRem(ctx, cbFindingSeveritySetKey(finding.Severity), id.String())
-	if _, err := pipe.Exec(ctx); err != nil {
-		return fmt.Errorf("failed to delete finding: %w", err)
-	}
-	return nil
-}
-
-// Count returns the total number of findings for a mission.
-func (s *ConnBoundFindingStore) Count(ctx context.Context, missionID types.ID) (int, error) {
-	n, err := s.rdb.SCard(ctx, cbFindingMissionSetKey(missionID)).Result()
-	if err != nil {
-		return 0, fmt.Errorf("failed to count findings: %w", err)
-	}
-	return int(n), nil
-}
-
 // ListBySeverity retrieves all findings with a specific severity level (C14 closure).
 // Results are restricted to the connected tenant's data by the per-tenant client.
 func (s *ConnBoundFindingStore) ListBySeverity(ctx context.Context, severity agent.FindingSeverity) ([]EnhancedFinding, error) {
@@ -178,37 +127,6 @@ func (s *ConnBoundFindingStore) ListBySeverity(ctx context.Context, severity age
 		findings = append(findings, *f)
 	}
 	return findings, nil
-}
-
-// ScanAll retrieves all findings in this tenant's DB.
-func (s *ConnBoundFindingStore) ScanAll(ctx context.Context) ([]EnhancedFinding, error) {
-	var results []EnhancedFinding
-	var cursor uint64
-	for {
-		keys, nextCursor, err := s.rdb.Scan(ctx, cursor, "gibson:finding:*", 100).Result()
-		if err != nil {
-			return nil, fmt.Errorf("scan failed: %w", err)
-		}
-		for _, key := range keys {
-			if strings.Contains(key, ":by_mission:") || strings.Contains(key, ":by_severity:") {
-				continue
-			}
-			result, err := s.rdb.Do(ctx, "JSON.GET", key, "$").Result()
-			if err != nil || result == nil {
-				continue
-			}
-			f, err := unmarshalFindingJSON(result)
-			if err != nil || f == nil {
-				continue
-			}
-			results = append(results, *f)
-		}
-		cursor = nextCursor
-		if cursor == 0 {
-			break
-		}
-	}
-	return results, nil
 }
 
 // ---------------------------------------------------------------------------

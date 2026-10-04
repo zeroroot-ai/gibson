@@ -21,7 +21,6 @@ package finding
 
 import (
 	"context"
-	"fmt"
 
 	"github.com/zeroroot-ai/sdk/finding"
 )
@@ -75,90 +74,4 @@ type ComplianceUpdate struct {
 	FindingID string
 	Mode      UpdateMode
 	Mappings  []finding.ComplianceMapping
-}
-
-// UpdateComplianceMappings applies a curator update to the finding's
-// compliance_mappings list and writes an audit log entry with the diff.
-// Returns the updated finding or an error.
-//
-// Semantics:
-//   - tenant scoping: the finding must exist under the calling tenant;
-//     a cross-tenant lookup returns the same error as "not found" so
-//     tenant boundaries cannot be probed.
-//   - APPEND mode: dedupes via finding.HasMapping, invalid mappings fail
-//     the whole update (atomic).
-//   - REPLACE mode: wipes existing mappings first, then applies the
-//     incoming set; invalid mappings still fail atomically.
-//   - audit log: written AFTER the store commit succeeds; the entry
-//     contains action="finding.compliance_mappings.update", with a
-//     details map showing the diff.
-func UpdateComplianceMappings(
-	ctx context.Context,
-	store ComplianceFindingStore,
-	logger ComplianceAuditLogger,
-	tenantID string,
-	req ComplianceUpdate,
-) (*finding.Finding, error) {
-	if store == nil {
-		return nil, fmt.Errorf("UpdateComplianceMappings: store is required")
-	}
-	if tenantID == "" {
-		return nil, fmt.Errorf("UpdateComplianceMappings: tenantID is required")
-	}
-	if req.FindingID == "" {
-		return nil, fmt.Errorf("UpdateComplianceMappings: FindingID is required")
-	}
-
-	// Validate every incoming mapping before touching the store, so an
-	// atomic rejection happens on bad input.
-	for i, m := range req.Mappings {
-		if err := m.Validate(); err != nil {
-			return nil, fmt.Errorf("mapping #%d: %w", i+1, err)
-		}
-	}
-
-	f, err := store.GetFinding(ctx, tenantID, req.FindingID)
-	if err != nil {
-		return nil, fmt.Errorf("load finding: %w", err)
-	}
-	if f == nil {
-		return nil, fmt.Errorf("finding not found: %s", req.FindingID)
-	}
-
-	// Capture the before-snapshot for the audit diff.
-	before := append([]finding.ComplianceMapping{}, f.ComplianceMappings...)
-
-	switch req.Mode {
-	case UpdateModeReplace:
-		f.ComplianceMappings = nil
-		for _, m := range req.Mappings {
-			if err := f.AddComplianceMapping(m); err != nil {
-				return nil, err
-			}
-		}
-	case UpdateModeAppend:
-		for _, m := range req.Mappings {
-			if err := f.AddComplianceMapping(m); err != nil {
-				return nil, err
-			}
-		}
-	default:
-		return nil, fmt.Errorf("unsupported update mode: %v", req.Mode)
-	}
-
-	if err := store.UpdateFinding(ctx, tenantID, f); err != nil {
-		return nil, fmt.Errorf("persist finding: %w", err)
-	}
-
-	if logger != nil {
-		// Fire-and-forget: Log() enqueues the write asynchronously.
-		logger.Log(ctx, "finding.compliance_mappings.update", "finding", req.FindingID, map[string]any{
-			"mode":      req.Mode.String(),
-			"before":    before,
-			"after":     f.ComplianceMappings,
-			"tenant_id": tenantID,
-		})
-	}
-
-	return f, nil
 }
