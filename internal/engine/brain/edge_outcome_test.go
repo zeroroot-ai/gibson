@@ -183,7 +183,7 @@ func (s *memTimelineStore) Append(_ context.Context, _ string, ev Event) (string
 	return seqString(s.next), nil
 }
 
-func (s *memTimelineStore) LoadForReplay(_ context.Context, _ string, afterSeq string) ([]Event, error) {
+func (s *memTimelineStore) LoadForReplay(_ context.Context, _, afterSeq string) ([]Event, error) {
 	s.mu.Lock()
 	defer s.mu.Unlock()
 	after := 0
@@ -217,7 +217,7 @@ func (s *memTimelineStore) LoadSnapshot(_ context.Context, _ string) (*WorldSnap
 	return &cp, nil
 }
 
-func (s *memTimelineStore) TrimTo(_ context.Context, _ string, handle string) error {
+func (s *memTimelineStore) TrimTo(_ context.Context, _, handle string) error {
 	s.mu.Lock()
 	defer s.mu.Unlock()
 	upTo := parseSeq(handle)

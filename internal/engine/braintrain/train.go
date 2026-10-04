@@ -1,11 +1,16 @@
 // SPDX-License-Identifier: Elastic-2.0
 // Copyright 2026 Zero Root AI
 
+// Package braintrain holds the belief-training surface: the per-tenant
+// edge-posterior artifact the runtime loads (edge_posterior.go) and the
+// training-row derivation from a folded World (train.go). The fitting half
+// returns with gibson#614.
 package braintrain
 
 import (
 	"fmt"
 	"sort"
+	"strings"
 
 	"github.com/zeroroot-ai/gibson/internal/engine/brain"
 )
@@ -142,13 +147,14 @@ func rowKey(r Row) string {
 		keys = append(keys, k)
 	}
 	sort.Strings(keys)
-	s := ""
+	var b strings.Builder
 	for _, k := range keys {
+		b.WriteString(k)
 		if r[k] {
-			s += k + "=1;"
+			b.WriteString("=1;")
 		} else {
-			s += k + "=0;"
+			b.WriteString("=0;")
 		}
 	}
-	return s
+	return b.String()
 }
