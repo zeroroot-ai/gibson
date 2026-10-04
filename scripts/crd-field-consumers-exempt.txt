@@ -23,5 +23,3 @@ v1alpha1.ConnectorInstanceSpec.Credentials | #597 | BUILD THE CONSUMER. The conn
 v1alpha1.CredentialRef.Key | #597 | BUILD THE CONSUMER. Child of ConnectorInstanceSpec.Credentials; same verdict.
 v1alpha1.CredentialRef.Property | #597 | BUILD THE CONSUMER. Child of ConnectorInstanceSpec.Credentials; same verdict.
 v1alpha1.CredentialRef.TargetEnv | #597 | BUILD THE CONSUMER. Child of ConnectorInstanceSpec.Credentials; same verdict.
-v1alpha1.TenantIdentityOIDCClient.Name | #597 | BUILD THE CONSUMER. The identity controller counts the declared OIDC clients and never reads an entry.
-v1alpha1.TenantIdentityOIDCClient.RedirectURIs | #597 | BUILD THE CONSUMER. Same as Name.
