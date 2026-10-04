@@ -23,6 +23,7 @@ import (
 	"bytes"
 	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"io/fs"
 	"math"
@@ -577,5 +578,54 @@ func DeclaredParams(source string) ([]string, error) {
 		out = append(out, it.Selector().Unquoted())
 	}
 	sort.Strings(out)
+	return out, nil
+}
+
+// MissionMeta is a mission's identity, readable WITHOUT its parameters.
+type MissionMeta struct {
+	Name        string
+	Description string
+	Version     string
+}
+
+// Meta reads a mission's name, description and version from its source.
+//
+// Without rendering. The listing that needs these fields has no parameters to
+// render with, and the alternative — rendering each mission with placeholder
+// values just to read its description — is three failure modes and a set of
+// fake values in exchange for three string literals.
+//
+// It works because these three fields are concrete whatever `_params` holds: a
+// mission that interpolated a parameter into its own name or version would
+// describe itself differently per caller, which is not a thing any mission
+// does. A field that is not concrete is returned empty rather than guessed, and
+// the caller decides whether that matters.
+func Meta(source string) (MissionMeta, error) {
+	ctx := cuecontext.New()
+	val, err := loadUserValue(ctx, source)
+	if err != nil {
+		return MissionMeta{}, fmt.Errorf("cueruntime: load the mission source: %w", err)
+	}
+	mission := val.LookupPath(cue.MakePath(cue.Str("mission")))
+	if !mission.Exists() {
+		return MissionMeta{}, errors.New("cueruntime: the source declares no `mission`")
+	}
+
+	var out MissionMeta
+	for _, f := range []struct {
+		field string
+		into  *string
+	}{
+		{"name", &out.Name},
+		{"description", &out.Description},
+		{"version", &out.Version},
+	} {
+		s, serr := mission.LookupPath(cue.MakePath(cue.Str(f.field))).String()
+		if serr != nil {
+			// Absent or not yet concrete. Left empty rather than guessed.
+			continue
+		}
+		*f.into = s
+	}
 	return out, nil
 }

@@ -165,3 +165,65 @@ func Render(ctx context.Context, name string, params map[string]string) (*missio
 	}
 	return def, nil
 }
+
+// Entry is one checked-in mission as a caller needs to see it before running
+// it: what it is, and what it requires.
+type Entry struct {
+	Name        string
+	Description string
+	Version     string
+	// DeclaredParams is the closed set, sorted. Render refuses a key that is
+	// not here and refuses a render that omits one, so a caller builds its
+	// request from this list.
+	DeclaredParams []string
+}
+
+// Describe reads one mission's identity and its parameter set.
+//
+// Without rendering. A listing has no parameter values to render with, and
+// rendering each mission against placeholder values just to read its
+// description would be three failure modes and a set of fake values in
+// exchange for three string literals.
+func Describe(name string) (Entry, error) {
+	src, err := Source(name)
+	if err != nil {
+		return Entry{}, err
+	}
+	meta, err := cueruntime.Meta(src)
+	if err != nil {
+		return Entry{}, fmt.Errorf("missioncatalog: read the identity of %q: %w", name, err)
+	}
+	declared, err := cueruntime.DeclaredParams(src)
+	if err != nil {
+		return Entry{}, fmt.Errorf("missioncatalog: read the parameters of %q: %w", name, err)
+	}
+	sort.Strings(declared)
+
+	// The catalog NAME is authoritative, not the name inside the CUE. They
+	// agree today and a test says so; if they ever disagree, the name a caller
+	// passes to Render is the one that must come back.
+	return Entry{
+		Name:           name,
+		Description:    meta.Description,
+		Version:        meta.Version,
+		DeclaredParams: declared,
+	}, nil
+}
+
+// Entries describes every checked-in mission, sorted by name.
+//
+// A mission that cannot be described fails the whole listing rather than being
+// skipped: silently missing from the list is how a person concludes the
+// platform does not ship it.
+func Entries() ([]Entry, error) {
+	names := Names()
+	out := make([]Entry, 0, len(names))
+	for _, name := range names {
+		e, err := Describe(name)
+		if err != nil {
+			return nil, err
+		}
+		out = append(out, e)
+	}
+	return out, nil
+}

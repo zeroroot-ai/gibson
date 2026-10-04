@@ -24,7 +24,6 @@ package api
 
 import (
 	"context"
-	"sort"
 	"strings"
 
 	"google.golang.org/grpc/codes"
@@ -32,7 +31,6 @@ import (
 
 	daemonpb "github.com/zeroroot-ai/sdk/api/gen/gibson/daemon/v1"
 
-	"github.com/zeroroot-ai/gibson/internal/engine/mission/cueruntime"
 	"github.com/zeroroot-ai/gibson/internal/platform/missioncatalog"
 )
 
@@ -41,59 +39,28 @@ import (
 // Nothing here is per-tenant: the catalog is identical for every tenant, and a
 // mission is not gated — the components it dispatches are.
 func (s *DaemonServer) ListCatalogMissions(
-	ctx context.Context,
+	_ context.Context,
 	_ *daemonpb.ListCatalogMissionsRequest,
 ) (*daemonpb.ListCatalogMissionsResponse, error) {
-	names := missioncatalog.Names()
-	out := make([]*daemonpb.CatalogMission, 0, len(names))
+	entries, err := missioncatalog.Entries()
+	if err != nil {
+		// Reported rather than returning a short list. A mission silently
+		// missing is how a person concludes the platform does not ship it.
+		return nil, status_grpc.Error(codes.Internal, err.Error())
+	}
 
-	for _, name := range names {
-		src, err := missioncatalog.Source(name)
-		if err != nil {
-			// Unreachable: Names() lists what the embed holds. Reported rather
-			// than skipped, because a mission silently missing from the list is
-			// how a person concludes the platform does not ship it.
-			return nil, status_grpc.Errorf(codes.Internal,
-				"the catalog lists %q but cannot read it: %v", name, err)
-		}
-		declared, err := cueruntime.DeclaredParams(src)
-		if err != nil {
-			return nil, status_grpc.Errorf(codes.Internal,
-				"read the parameters of %q: %v", name, err)
-		}
-		sort.Strings(declared)
-
-		def, err := missioncatalog.Render(ctx, name, placeholders(declared))
-		if err != nil {
-			return nil, status_grpc.Errorf(codes.Internal,
-				"render %q to read its description: %v", name, err)
-		}
-
+	out := make([]*daemonpb.CatalogMission, 0, len(entries))
+	for _, e := range entries {
 		out = append(out, &daemonpb.CatalogMission{
-			Name:           name,
-			Description:    def.GetDescription(),
-			Version:        def.GetVersion(),
-			DeclaredParams: declared,
+			Name:           e.Name,
+			Description:    e.Description,
+			Version:        e.Version,
+			DeclaredParams: e.DeclaredParams,
 		})
 	}
 
 	s.logger.Debug("listed catalog missions", "count", len(out))
 	return &daemonpb.ListCatalogMissionsResponse{Missions: out}, nil
-}
-
-// placeholders satisfies a mission's required parameters so the listing can
-// read its name, description and version out of the rendered definition.
-//
-// Reading them from the render rather than from a second table is deliberate:
-// a hand-kept list of descriptions is a copy that drifts from the mission it
-// describes. The values never leave this function — the listing returns only
-// the parameter NAMES, and a caller supplies its own values to render for real.
-func placeholders(declared []string) map[string]string {
-	out := make(map[string]string, len(declared))
-	for _, name := range declared {
-		out[name] = "placeholder"
-	}
-	return out
 }
 
 // RenderCatalogMission implements DaemonServiceServer.RenderCatalogMission.

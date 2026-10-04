@@ -73,20 +73,34 @@ func TestListCatalogMissions_ListsEveryCheckedInMissionWithItsParameters(t *test
 	}
 }
 
-// The listing must not leak the values it renders with. It renders each mission
-// to read its description, and those placeholder values are not a caller's.
-func TestListCatalogMissions_ReturnsNamesNotValues(t *testing.T) {
+// The listing is assembled from missioncatalog.Entries and nothing else, so
+// the two cannot answer the same question differently. It used to render each
+// mission against PLACEHOLDER parameter values just to read its description,
+// which was three failure modes and a set of fake values in exchange for three
+// string literals.
+func TestListCatalogMissions_IsExactlyWhatTheCatalogDescribes(t *testing.T) {
 	t.Parallel()
 
 	resp, err := catalogServer().ListCatalogMissions(context.Background(), &daemonpb.ListCatalogMissionsRequest{})
 	if err != nil {
 		t.Fatalf("ListCatalogMissions: %v", err)
 	}
-	for _, m := range resp.GetMissions() {
-		for _, p := range m.GetDeclaredParams() {
-			if p == "placeholder" {
-				t.Errorf("%s: a rendered placeholder value reached declared_params", m.GetName())
-			}
+	entries, err := missioncatalog.Entries()
+	if err != nil {
+		t.Fatalf("missioncatalog.Entries: %v", err)
+	}
+	if len(resp.GetMissions()) != len(entries) {
+		t.Fatalf("the RPC listed %d missions, the catalog describes %d",
+			len(resp.GetMissions()), len(entries))
+	}
+	for i, m := range resp.GetMissions() {
+		e := entries[i]
+		if m.GetName() != e.Name || m.GetDescription() != e.Description || m.GetVersion() != e.Version {
+			t.Errorf("entry %d = %q/%q/%q, want %q/%q/%q", i,
+				m.GetName(), m.GetDescription(), m.GetVersion(), e.Name, e.Description, e.Version)
+		}
+		if !slices.Equal(m.GetDeclaredParams(), e.DeclaredParams) {
+			t.Errorf("%s: declared_params = %v, want %v", m.GetName(), m.GetDeclaredParams(), e.DeclaredParams)
 		}
 	}
 }

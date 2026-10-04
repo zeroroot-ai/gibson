@@ -8,6 +8,7 @@ import (
 	"encoding/json"
 	"flag"
 	"os"
+	"slices"
 	"sort"
 	"strings"
 	"testing"
@@ -600,5 +601,108 @@ func TestRender_ClusterAssessmentOnlyTheFixBranchOpensAMergeRequest(t *testing.T
 	}
 	if got := def.GetNodes()["fix"].GetJobConfig().GetSpec().GetGoal(); !strings.Contains(got, "merge request") {
 		t.Errorf("the fix goal does not ask for a merge request: %s", got)
+	}
+}
+
+// ── Describe / Entries ──────────────────────────────────────────────────────
+
+// Describe answers what a caller needs BEFORE it has any parameter values, so
+// it must not need any. The handler that lists the catalog has none, and the
+// alternative — rendering each mission against placeholder values to read its
+// description — is three failure modes and a set of fake values in exchange for
+// three string literals.
+func TestDescribe_ReadsEveryMissionWithoutParameters(t *testing.T) {
+	names := Names()
+	if len(names) == 0 {
+		t.Fatal("the embedded catalog is empty; this test would pass on anything")
+	}
+
+	for _, name := range names {
+		e, err := Describe(name)
+		if err != nil {
+			t.Fatalf("Describe(%s): %v", name, err)
+		}
+		// The CATALOG name comes back, which is the name Render takes.
+		if e.Name != name {
+			t.Errorf("%s: Name = %q", name, e.Name)
+		}
+		if e.Description == "" {
+			t.Errorf("%s: no description", name)
+		}
+		if e.Version == "" {
+			t.Errorf("%s: no version", name)
+		}
+		// The parameter set is what a caller builds its request from, so it must
+		// BE the declared set — a short list sends a render that fails on a
+		// missing key, a long one fails on an unknown key.
+		want := declaredParams(t, name)
+		sort.Strings(want)
+		if !slices.Equal(e.DeclaredParams, want) {
+			t.Errorf("%s: DeclaredParams = %v, want %v", name, e.DeclaredParams, want)
+		}
+	}
+}
+
+// The name inside the CUE and the catalog name agree. They are separate things —
+// the file name is the catalog key — and a caller that read one and passed the
+// other would get a confusing refusal.
+func TestDescribe_TheCatalogNameAndTheMissionNameAgree(t *testing.T) {
+	for _, name := range Names() {
+		def, err := Render(context.Background(), name, paramsFor(t, name))
+		if err != nil {
+			t.Fatalf("Render(%s): %v", name, err)
+		}
+		if def.GetName() != name {
+			t.Errorf("mission %q declares the name %q; the catalog key and the mission's own name must agree",
+				name, def.GetName())
+		}
+	}
+}
+
+// An unknown name is refused, and the refusal names what the catalog does ship —
+// which is what a person needs after a typo.
+func TestDescribe_UnknownNameNamesWhatExists(t *testing.T) {
+	_, err := Describe("no-such-mission")
+	if err == nil {
+		t.Fatal("Describe accepted a mission the catalog does not hold")
+	}
+	for _, name := range Names() {
+		if !strings.Contains(err.Error(), name) {
+			t.Errorf("the refusal does not name the checked-in mission %q: %v", name, err)
+		}
+	}
+}
+
+// A path is not a name, so a caller cannot read a file outside the embedded
+// catalog through the listing either.
+func TestDescribe_APathIsNotAName(t *testing.T) {
+	for _, name := range []string{"../scan", "missions/scan", "scan.cue"} {
+		if _, err := Describe(name); err == nil {
+			t.Errorf("Describe(%q) was accepted", name)
+		}
+	}
+}
+
+// Entries is every mission, in Names() order, and each entry equals what
+// Describe returns for it. A listing assembled differently from the single
+// lookup is two answers to one question.
+func TestEntries_IsEveryMissionInOrder(t *testing.T) {
+	got, err := Entries()
+	if err != nil {
+		t.Fatalf("Entries: %v", err)
+	}
+	names := Names()
+	if len(got) != len(names) {
+		t.Fatalf("Entries returned %d, the catalog holds %d", len(got), len(names))
+	}
+	for i, e := range got {
+		want, derr := Describe(names[i])
+		if derr != nil {
+			t.Fatalf("Describe(%s): %v", names[i], derr)
+		}
+		if e.Name != want.Name || e.Description != want.Description ||
+			e.Version != want.Version || !slices.Equal(e.DeclaredParams, want.DeclaredParams) {
+			t.Errorf("entry %d = %+v, want %+v", i, e, want)
+		}
 	}
 }
