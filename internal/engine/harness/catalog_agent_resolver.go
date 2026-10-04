@@ -8,6 +8,7 @@ import (
 	"errors"
 	"fmt"
 	"strings"
+	"time"
 
 	"github.com/zeroroot-ai/gibson/internal/engine/harness/sandboxed"
 	"github.com/zeroroot-ai/gibson/internal/platform/componentcatalog"
@@ -103,6 +104,7 @@ type CatalogAgentResolver struct {
 	sandboxClass string
 	credentials  CredentialSource
 	models       TenantModelResolver
+	limits       AgentRunLimitSource
 }
 
 // NewCatalogAgentResolver builds the catalog-backed resolver. sandboxClass is
@@ -127,6 +129,19 @@ func NewCatalogAgentResolver(sandboxClass string, credentials CredentialSource) 
 // agent that DOES declare a floor is refused at resolve time rather than
 // launched unchecked, because an unverifiable floor and a satisfied one must
 // not look the same.
+// AgentRunLimitSource answers the runtime cap an enrollment declared for one
+// agent of the caller's tenant (gibson#597). ok is false when none did.
+type AgentRunLimitSource interface {
+	AgentRunLimit(ctx context.Context, tenant, agentName string) (limit time.Duration, ok bool, err error)
+}
+
+// WithRunLimits wires the enrollment runtime caps the operator reports
+// (DaemonOperatorService.SetAgentEnrollmentLimits) into the launch spec.
+func (r *CatalogAgentResolver) WithRunLimits(src AgentRunLimitSource) *CatalogAgentResolver {
+	r.limits = src
+	return r
+}
+
 func (r *CatalogAgentResolver) WithTenantModelResolver(m TenantModelResolver) *CatalogAgentResolver {
 	r.models = m
 	return r
@@ -208,6 +223,18 @@ func (r *CatalogAgentResolver) ResolveAgentLaunchSpec(ctx context.Context, req A
 		}
 		for k, v := range env {
 			spec.Env[k] = v
+		}
+	}
+	// The enrollment's runtime cap (AgentEnrollmentSpec.maxRuntime,
+	// gibson#597), reported by the tenant-operator. A cap nothing reported
+	// leaves the dispatch's own bound and the launcher default in force.
+	if r.limits != nil {
+		limit, ok, err := r.limits.AgentRunLimit(ctx, tenant, agentName)
+		if err != nil {
+			return sandboxed.AgentLaunchSpec{}, fmt.Errorf("%q: read enrollment runtime cap: %w", agentName, err)
+		}
+		if ok {
+			spec.MaxRuntime = limit
 		}
 	}
 	return spec, nil

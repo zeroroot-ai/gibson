@@ -9,6 +9,7 @@ import (
 	"log/slog"
 	"strings"
 	"testing"
+	"time"
 
 	"go.opentelemetry.io/otel/trace/noop"
 	"google.golang.org/protobuf/encoding/protojson"
@@ -277,3 +278,21 @@ var (
 type errStr string
 
 func (e errStr) Error() string { return string(e) }
+
+// TestCapRunTimeout pins how an enrollment cap (gibson#597) bounds a
+// dispatch: the cap wins over no bound and over a larger bound, a smaller
+// bound stays, and no cap changes nothing.
+func TestCapRunTimeout(t *testing.T) {
+	cases := []struct{ requested, cap, want time.Duration }{
+		{0, 0, 0},
+		{10 * time.Minute, 0, 10 * time.Minute},
+		{0, 5 * time.Minute, 5 * time.Minute},
+		{10 * time.Minute, 5 * time.Minute, 5 * time.Minute},
+		{2 * time.Minute, 5 * time.Minute, 2 * time.Minute},
+	}
+	for _, c := range cases {
+		if got := capRunTimeout(c.requested, c.cap); got != c.want {
+			t.Errorf("capRunTimeout(%v, %v) = %v, want %v", c.requested, c.cap, got, c.want)
+		}
+	}
+}

@@ -21,6 +21,7 @@ import (
 	"context"
 	"fmt"
 	"strings"
+	"time"
 
 	"google.golang.org/grpc/codes"
 	"google.golang.org/grpc/metadata"
@@ -386,3 +387,22 @@ func parseAccessTuples(tuples []string) []*operatorv1.AccessTuple {
 
 func itoa(n int) string        { return fmt.Sprintf("%d", n) }
 func itoaInt64(n int64) string { return fmt.Sprintf("%d", n) }
+
+// SetAgentEnrollmentLimits reports the runtime cap an AgentEnrollment
+// declares (spec.maxRuntime, gibson#597) so the daemon can bound that
+// agent's sandboxed runs. Zero clears the cap.
+func (c *EntitlementsGRPCClient) SetAgentEnrollmentLimits(ctx context.Context, tenantID, agentName string, maxRuntime time.Duration) error {
+	authedCtx, err := c.authCtx(ctx)
+	if err != nil {
+		return err
+	}
+	_, err = c.client.SetAgentEnrollmentLimits(authedCtx, &operatorv1.SetAgentEnrollmentLimitsRequest{
+		TenantId:          tenantID,
+		AgentName:         agentName,
+		MaxRuntimeSeconds: int64(maxRuntime / time.Second),
+	})
+	if err != nil {
+		return fmt.Errorf("set agent enrollment limits %s/%s: %w", tenantID, agentName, err)
+	}
+	return nil
+}

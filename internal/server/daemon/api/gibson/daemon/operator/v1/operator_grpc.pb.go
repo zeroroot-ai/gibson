@@ -29,6 +29,7 @@ const (
 	DaemonOperatorService_ListPendingTenantProvisioning_FullMethodName = "/gibson.daemon.operator.v1.DaemonOperatorService/ListPendingTenantProvisioning"
 	DaemonOperatorService_EnqueueTenantProvisioning_FullMethodName     = "/gibson.daemon.operator.v1.DaemonOperatorService/EnqueueTenantProvisioning"
 	DaemonOperatorService_AckTenantProvisioned_FullMethodName          = "/gibson.daemon.operator.v1.DaemonOperatorService/AckTenantProvisioned"
+	DaemonOperatorService_SetAgentEnrollmentLimits_FullMethodName      = "/gibson.daemon.operator.v1.DaemonOperatorService/SetAgentEnrollmentLimits"
 	DaemonOperatorService_ReportTenantStatus_FullMethodName            = "/gibson.daemon.operator.v1.DaemonOperatorService/ReportTenantStatus"
 	DaemonOperatorService_ListPendingTenantOps_FullMethodName          = "/gibson.daemon.operator.v1.DaemonOperatorService/ListPendingTenantOps"
 	DaemonOperatorService_AckTenantOp_FullMethodName                   = "/gibson.daemon.operator.v1.DaemonOperatorService/AckTenantOp"
@@ -123,6 +124,11 @@ type DaemonOperatorServiceClient interface {
 	// Note: billing_active is NOT carried here — it is owned by the dashboard
 	// billing webhook via TenantProvisioningService.SetTenantBillingActive and
 	// must not be clobbered by an operator status report.
+	// SetAgentEnrollmentLimits records the runtime cap an AgentEnrollment
+	// declares (spec.maxRuntime) so the daemon can bound that agent's
+	// sandboxed runs. The daemon cannot read the CR itself (ADR-0023), so the
+	// tenant-operator reports it on every enrollment pass. Idempotent upsert.
+	SetAgentEnrollmentLimits(ctx context.Context, in *SetAgentEnrollmentLimitsRequest, opts ...grpc.CallOption) (*SetAgentEnrollmentLimitsResponse, error)
 	ReportTenantStatus(ctx context.Context, in *ReportTenantStatusRequest, opts ...grpc.CallOption) (*ReportTenantStatusResponse, error)
 	// ListPendingTenantOps returns the daemon-owned queue of admin tenant CRUD
 	// operations (provision/update/delete) awaiting application to the Tenant CR.
@@ -258,6 +264,16 @@ func (c *daemonOperatorServiceClient) AckTenantProvisioned(ctx context.Context, 
 	cOpts := append([]grpc.CallOption{grpc.StaticMethod()}, opts...)
 	out := new(AckTenantProvisionedResponse)
 	err := c.cc.Invoke(ctx, DaemonOperatorService_AckTenantProvisioned_FullMethodName, in, out, cOpts...)
+	if err != nil {
+		return nil, err
+	}
+	return out, nil
+}
+
+func (c *daemonOperatorServiceClient) SetAgentEnrollmentLimits(ctx context.Context, in *SetAgentEnrollmentLimitsRequest, opts ...grpc.CallOption) (*SetAgentEnrollmentLimitsResponse, error) {
+	cOpts := append([]grpc.CallOption{grpc.StaticMethod()}, opts...)
+	out := new(SetAgentEnrollmentLimitsResponse)
+	err := c.cc.Invoke(ctx, DaemonOperatorService_SetAgentEnrollmentLimits_FullMethodName, in, out, cOpts...)
 	if err != nil {
 		return nil, err
 	}
@@ -401,6 +417,11 @@ type DaemonOperatorServiceServer interface {
 	// Note: billing_active is NOT carried here — it is owned by the dashboard
 	// billing webhook via TenantProvisioningService.SetTenantBillingActive and
 	// must not be clobbered by an operator status report.
+	// SetAgentEnrollmentLimits records the runtime cap an AgentEnrollment
+	// declares (spec.maxRuntime) so the daemon can bound that agent's
+	// sandboxed runs. The daemon cannot read the CR itself (ADR-0023), so the
+	// tenant-operator reports it on every enrollment pass. Idempotent upsert.
+	SetAgentEnrollmentLimits(context.Context, *SetAgentEnrollmentLimitsRequest) (*SetAgentEnrollmentLimitsResponse, error)
 	ReportTenantStatus(context.Context, *ReportTenantStatusRequest) (*ReportTenantStatusResponse, error)
 	// ListPendingTenantOps returns the daemon-owned queue of admin tenant CRUD
 	// operations (provision/update/delete) awaiting application to the Tenant CR.
@@ -478,6 +499,9 @@ func (UnimplementedDaemonOperatorServiceServer) EnqueueTenantProvisioning(contex
 }
 func (UnimplementedDaemonOperatorServiceServer) AckTenantProvisioned(context.Context, *AckTenantProvisionedRequest) (*AckTenantProvisionedResponse, error) {
 	return nil, status.Error(codes.Unimplemented, "method AckTenantProvisioned not implemented")
+}
+func (UnimplementedDaemonOperatorServiceServer) SetAgentEnrollmentLimits(context.Context, *SetAgentEnrollmentLimitsRequest) (*SetAgentEnrollmentLimitsResponse, error) {
+	return nil, status.Error(codes.Unimplemented, "method SetAgentEnrollmentLimits not implemented")
 }
 func (UnimplementedDaemonOperatorServiceServer) ReportTenantStatus(context.Context, *ReportTenantStatusRequest) (*ReportTenantStatusResponse, error) {
 	return nil, status.Error(codes.Unimplemented, "method ReportTenantStatus not implemented")
@@ -677,6 +701,24 @@ func _DaemonOperatorService_AckTenantProvisioned_Handler(srv interface{}, ctx co
 	return interceptor(ctx, in, info, handler)
 }
 
+func _DaemonOperatorService_SetAgentEnrollmentLimits_Handler(srv interface{}, ctx context.Context, dec func(interface{}) error, interceptor grpc.UnaryServerInterceptor) (interface{}, error) {
+	in := new(SetAgentEnrollmentLimitsRequest)
+	if err := dec(in); err != nil {
+		return nil, err
+	}
+	if interceptor == nil {
+		return srv.(DaemonOperatorServiceServer).SetAgentEnrollmentLimits(ctx, in)
+	}
+	info := &grpc.UnaryServerInfo{
+		Server:     srv,
+		FullMethod: DaemonOperatorService_SetAgentEnrollmentLimits_FullMethodName,
+	}
+	handler := func(ctx context.Context, req interface{}) (interface{}, error) {
+		return srv.(DaemonOperatorServiceServer).SetAgentEnrollmentLimits(ctx, req.(*SetAgentEnrollmentLimitsRequest))
+	}
+	return interceptor(ctx, in, info, handler)
+}
+
 func _DaemonOperatorService_ReportTenantStatus_Handler(srv interface{}, ctx context.Context, dec func(interface{}) error, interceptor grpc.UnaryServerInterceptor) (interface{}, error) {
 	in := new(ReportTenantStatusRequest)
 	if err := dec(in); err != nil {
@@ -809,6 +851,10 @@ var DaemonOperatorService_ServiceDesc = grpc.ServiceDesc{
 		{
 			MethodName: "AckTenantProvisioned",
 			Handler:    _DaemonOperatorService_AckTenantProvisioned_Handler,
+		},
+		{
+			MethodName: "SetAgentEnrollmentLimits",
+			Handler:    _DaemonOperatorService_SetAgentEnrollmentLimits_Handler,
 		},
 		{
 			MethodName: "ReportTenantStatus",

@@ -95,7 +95,7 @@ func canResolveTuples(tuples []fga.Tuple) []fga.Tuple {
 // production saga.Run loop.
 func runIssuanceSteps(t *testing.T, ae *gibsonv1alpha1.AgentEnrollment, fgaClient fga.Client) {
 	t.Helper()
-	deps := EnrollmentDeps{FGA: fgaClient}
+	deps := EnrollmentDeps{FGA: fgaClient, Limits: &fakeLimits{}}
 	steps := EnrollmentIssuanceSteps(deps)
 	ctx := context.Background()
 	for _, step := range steps {

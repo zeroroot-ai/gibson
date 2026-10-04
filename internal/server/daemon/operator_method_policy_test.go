@@ -128,7 +128,7 @@ func TestConnectorOperatorMethodPolicy_AllowedSetIsExactlyTheConnectorRPCs(t *te
 // classification in operatorMethodPolicy together — this test is the tripwire
 // that forces both edits.
 func TestOperatorMethodPolicy_AllowedSetEqualsActualCallSet(t *testing.T) {
-	// The 10 DaemonOperatorService RPCs the tenant-operator (operators/tenant)
+	// The 11 DaemonOperatorService RPCs the tenant-operator (operators/tenant)
 	// actually calls over the SPIFFE direct-dial path. UpsertTenantQuota and
 	// EmitAuditEvent are deliberately ABSENT: no caller is wired, so granting
 	// them would be an over-grant (least privilege).
@@ -143,6 +143,7 @@ func TestOperatorMethodPolicy_AllowedSetEqualsActualCallSet(t *testing.T) {
 		daemonoperatorv1.DaemonOperatorService_ReportTenantStatus_FullMethodName,
 		daemonoperatorv1.DaemonOperatorService_ListPendingTenantOps_FullMethodName,
 		daemonoperatorv1.DaemonOperatorService_AckTenantOp_FullMethodName,
+		daemonoperatorv1.DaemonOperatorService_SetAgentEnrollmentLimits_FullMethodName,
 	}
 
 	want := append([]string(nil), operatorActualCallSet...)

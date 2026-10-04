@@ -139,7 +139,7 @@ func (h *DefaultAgentHarness) delegateToAgentViaSandbox(
 		// The node's declared timeout bounds the sandbox too, or the launcher's
 		// thirty-minute default would cap a live session that declared eight
 		// hours (gibson#1602).
-		RunTimeout: task.Timeout,
+		RunTimeout: capRunTimeout(task.Timeout, spec.MaxRuntime),
 	}
 
 	h.logger.Info("dispatching agent to ephemeral sandbox",
@@ -176,4 +176,17 @@ func (h *DefaultAgentHarness) delegateToAgentViaSandbox(
 	result.Status = agent.ResultStatusCompleted
 	result.CompletedAt = time.Now()
 	return result, nil
+}
+
+// capRunTimeout bounds a dispatch's run timeout by the enrollment cap
+// (gibson#597): the cap wins when the node asked for nothing or for more
+// than the cap allows, and a zero cap changes nothing.
+func capRunTimeout(requested, limit time.Duration) time.Duration {
+	if limit <= 0 {
+		return requested
+	}
+	if requested <= 0 || requested > limit {
+		return limit
+	}
+	return requested
 }

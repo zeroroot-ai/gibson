@@ -26,6 +26,10 @@ type EnrollmentDeps struct {
 	K8sClient   client.Client
 	FGA         fga.Client
 	PlatformURL string
+	// Limits reports spec.maxRuntime to the daemon (gibson#597). Required:
+	// cmd/main.go wires the daemon gRPC client, and an enrollment whose cap
+	// the daemon never heard of runs on the launcher default.
+	Limits AgentLimitsReporter
 }
 
 // EnrollmentIssuanceSteps writes FGA grants for an AgentEnrollment.
@@ -41,6 +45,7 @@ func EnrollmentIssuanceSteps(deps EnrollmentDeps) []saga.Step {
 		newWriteAgentGrantsStep(deps),
 		newWriteSecretResolveGrantStep(deps),
 		newWritePluginCanInvokeGrantStep(deps),
+		newReportRuntimeLimitStep(deps),
 	}
 }
 
@@ -48,6 +53,7 @@ func EnrollmentIssuanceSteps(deps EnrollmentDeps) []saga.Step {
 func EnrollmentRevocationSteps(deps EnrollmentDeps) []saga.Step {
 	return []saga.Step{
 		newDeleteAgentFGAStep(deps),
+		newClearRuntimeLimitStep(deps),
 	}
 }
 
@@ -295,3 +301,80 @@ func (s *deleteAgentFGAStep) Provision(ctx context.Context, obj saga.Conditioned
 
 // AgentEnrollment ConditionedObject conformance check.
 var _ saga.ConditionedObject = (*gibsonv1alpha1.AgentEnrollment)(nil)
+
+// AgentLimitsReporter is the daemon seam the runtime cap is reported through
+// (DaemonOperatorService.SetAgentEnrollmentLimits).
+type AgentLimitsReporter interface {
+	SetAgentEnrollmentLimits(ctx context.Context, tenantID, agentName string, maxRuntime time.Duration) error
+}
+
+// reportRuntimeLimitStep reports spec.maxRuntime to the daemon so the cap
+// the schema promises is the cap the sandboxed run gets (gibson#597). The
+// daemon cannot read the CR (ADR-0023); this step is the only way the value
+// leaves the cluster API.
+type reportRuntimeLimitStep struct {
+	saga.StepBase
+	deps EnrollmentDeps
+}
+
+func newReportRuntimeLimitStep(deps EnrollmentDeps) *reportRuntimeLimitStep {
+	return &reportRuntimeLimitStep{
+		StepBase: saga.StepBase{
+			N:     "ReportRuntimeLimit",
+			C:     "RuntimeLimitReported",
+			Caps:  []saga.ClientCapability{saga.CapabilityDaemonGRPC},
+			Owner: "daemon-integration",
+			P99:   5 * time.Second,
+		},
+		deps: deps,
+	}
+}
+
+func (s *reportRuntimeLimitStep) Provision(ctx context.Context, obj saga.ConditionedObject, _ *saga.Deps) (bool, error) {
+	ae, err := agentEnrollmentOf(obj)
+	if err != nil {
+		return false, err
+	}
+	if s.deps.Limits == nil {
+		return false, fmt.Errorf("agent limits reporter unset (operator misconfigured): %w", clients.ErrInvalidInput)
+	}
+	// The namespace is the tenant id, the same key the FGA tuples use.
+	if err := s.deps.Limits.SetAgentEnrollmentLimits(ctx, ae.Namespace, ae.Spec.AgentName, ae.Spec.MaxRuntime.Duration); err != nil {
+		return false, fmt.Errorf("report the runtime limit of %s/%s: %w", ae.Namespace, ae.Spec.AgentName, err)
+	}
+	return true, nil
+}
+
+// clearRuntimeLimitStep clears the cap on revocation and deletion so an
+// agent of the same name enrolled later does not inherit it.
+type clearRuntimeLimitStep struct {
+	saga.StepBase
+	deps EnrollmentDeps
+}
+
+func newClearRuntimeLimitStep(deps EnrollmentDeps) *clearRuntimeLimitStep {
+	return &clearRuntimeLimitStep{
+		StepBase: saga.StepBase{
+			N:     "ClearRuntimeLimit",
+			C:     "RuntimeLimitCleared",
+			Caps:  []saga.ClientCapability{saga.CapabilityDaemonGRPC},
+			Owner: "daemon-integration",
+			P99:   5 * time.Second,
+		},
+		deps: deps,
+	}
+}
+
+func (s *clearRuntimeLimitStep) Provision(ctx context.Context, obj saga.ConditionedObject, _ *saga.Deps) (bool, error) {
+	ae, err := agentEnrollmentOf(obj)
+	if err != nil {
+		return false, err
+	}
+	if s.deps.Limits == nil {
+		return false, fmt.Errorf("agent limits reporter unset (operator misconfigured): %w", clients.ErrInvalidInput)
+	}
+	if err := s.deps.Limits.SetAgentEnrollmentLimits(ctx, ae.Namespace, ae.Spec.AgentName, 0); err != nil {
+		return false, fmt.Errorf("clear the runtime limit of %s/%s: %w", ae.Namespace, ae.Spec.AgentName, err)
+	}
+	return true, nil
+}

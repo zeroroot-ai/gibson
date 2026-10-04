@@ -96,6 +96,7 @@ func TestEnrollmentIssuanceSteps_NamesStableContract(t *testing.T) {
 		"WriteComponentGrantsFGA",
 		"WriteSecretResolveGrantFGA",
 		"WritePluginCanInvokeGrantFGA",
+		"ReportRuntimeLimit",
 	}
 	if !reflect.DeepEqual(got, want) {
 		t.Errorf(
@@ -118,6 +119,7 @@ func TestEnrollmentRevocationSteps_NamesStableContract(t *testing.T) {
 	}
 	want := []string{
 		"DeleteAgentFGATuples",
+		"ClearRuntimeLimit",
 	}
 	if !reflect.DeepEqual(got, want) {
 		t.Errorf(

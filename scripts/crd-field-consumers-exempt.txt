@@ -18,7 +18,6 @@
 # never read were deleted. Twenty-six display-only status fields got the print
 # column that is their consumer. The nine below are spec fields an operator can
 # set that the cluster ignores: wiring gaps, tracked in #597.
-v1alpha1.AgentEnrollmentSpec.MaxRuntime | #597 | BUILD THE CONSUMER. A runtime cap nothing enforces.
 v1alpha1.ConnectorInstanceSpec.Credentials | #597 | BUILD THE CONSUMER. The connector-operator asks the daemon for a credential by connector name; the declared refs steer nothing.
 v1alpha1.CredentialRef.Key | #597 | BUILD THE CONSUMER. Child of ConnectorInstanceSpec.Credentials; same verdict.
 v1alpha1.CredentialRef.Property | #597 | BUILD THE CONSUMER. Child of ConnectorInstanceSpec.Credentials; same verdict.

@@ -5,6 +5,7 @@ package daemon
 
 import (
 	"context"
+	"database/sql"
 	"errors"
 	"fmt"
 	"github.com/zeroroot-ai/gibson/internal/platform/capabilitygrant"
@@ -222,7 +223,10 @@ func (d *daemonImpl) newHarnessFactory(ctx context.Context) (harness.HarnessFact
 			// rather than resolving a second way is the point.
 			config.AgentLaunchSpecResolver = harness.
 				NewCatalogAgentResolver(d.config.Sandbox.Setec.AgentSandboxClass, credentials).
-				WithTenantModelResolver(&slotModelResolver{forTenant: slotManagerForTenant})
+				WithTenantModelResolver(&slotModelResolver{forTenant: slotManagerForTenant}).
+				// The enrollment runtime caps the tenant-operator reports
+				// (gibson#597) bound each agent's sandboxed run.
+				WithRunLimits(&enrollmentRunLimits{db: func() *sql.DB { return d.platformDB }})
 			config.AgentCallbackEndpoint = d.config.Callback.AdvertiseAddress
 			// The bank reconciler launches members outside any mission harness,
 			// so it needs the same three seams the harness gets (gibson#1709).

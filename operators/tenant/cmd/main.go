@@ -721,6 +721,9 @@ func main() {
 	// same as a nil Provisioner, rather than mark a tenant Ready with no
 	// mapping ext-authz can resolve.
 	var orgMappingSeeder controller.TenantOrgSeeder
+	// The enrollment runtime cap reaches the daemon through the same gRPC
+	// client (gibson#597); without it the enrollment saga fails loudly.
+	var agentLimits flows.AgentLimitsReporter
 	if grpcAddr := os.Getenv("GIBSON_DAEMON_GRPC_ADDRESS"); grpcAddr != "" {
 		daemonSVID := os.Getenv("GIBSON_DAEMON_SPIFFE_ID")
 		if daemonSVID == "" {
@@ -736,6 +739,7 @@ func main() {
 		psagaDeps.DaemonGRPC = grpcClient
 		tenantStatusReporter = grpcClient
 		orgMappingSeeder = grpcClient
+		agentLimits = grpcClient
 
 		// Operator-pull tenant provisioning (E9, gibson#948, enables
 		// dashboard#813): drain the daemon's pending-provisioning queue and
@@ -865,6 +869,7 @@ func main() {
 		K8sClient:   mgr.GetClient(),
 		FGA:         fgaClient,
 		PlatformURL: os.Getenv("GIBSON_PLATFORM_URL"),
+		Limits:      agentLimits,
 	}
 	if err := (&controller.AgentEnrollmentReconciler{
 		Client:          mgr.GetClient(),

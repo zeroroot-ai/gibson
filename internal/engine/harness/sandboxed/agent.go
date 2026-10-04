@@ -124,6 +124,10 @@ type AgentLaunchSpec struct {
 	// Mode is the instance shape this launch runs: "oneshot" (the default) or
 	// "member". Injected as GIBSON_INSTANCE_MODE.
 	Mode string
+	// MaxRuntime is the cap the agent's enrollment declares for one run
+	// (AgentEnrollmentSpec.maxRuntime, gibson#597). Zero means no enrollment
+	// cap; the dispatch's own RunTimeout and the launcher default apply.
+	MaxRuntime time.Duration
 }
 
 // AgentDispatch is the per-dispatch runtime scope injected into the sandbox:
