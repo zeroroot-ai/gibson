@@ -7,14 +7,6 @@ import (
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 )
 
-// AgentMode is the autonomy mode of an enrolled agent.
-type AgentMode string
-
-const (
-	AgentModeAutonomous AgentMode = "autonomous"
-	AgentModeSupervised AgentMode = "supervised"
-)
-
 // ComponentKind is the kind of a platform component referenced by a grant.
 type ComponentKind string
 
@@ -77,10 +69,6 @@ type AgentEnrollmentSpec struct {
 	// +kubebuilder:validation:Pattern=`^[a-z0-9]([-a-z0-9]*[a-z0-9])?$`
 	// +required
 	AgentName string `json:"agentName"`
-
-	// +kubebuilder:validation:Enum=autonomous;supervised
-	// +required
-	Mode AgentMode `json:"mode"`
 
 	// PrincipalKind identifies the FGA principal type for this enrollment.
 	// Defaults to "agent" when absent. Set to "plugin" to grant the enrollment's

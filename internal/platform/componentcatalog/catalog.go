@@ -778,7 +778,6 @@ func (e ConnectorEntry) BuildConnectorInstance(namespace string) *connectorv1alp
 		},
 		Spec: connectorv1alpha1.ConnectorInstanceSpec{
 			Connector:   e.ID,
-			CatalogRef:  e.ID,
 			Shape:       e.Shape,
 			Image:       e.Image,
 			Endpoint:    e.Endpoint,

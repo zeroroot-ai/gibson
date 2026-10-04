@@ -76,7 +76,6 @@ func makeEnrollment(uid types.UID, namespace string, kind gibsonv1alpha1.Princip
 		},
 		Spec: gibsonv1alpha1.AgentEnrollmentSpec{
 			AgentName:     "test-agent",
-			Mode:          gibsonv1alpha1.AgentModeAutonomous,
 			PrincipalKind: kind,
 		},
 	}

@@ -120,7 +120,6 @@ func makeEnrollmentForKind(uid types.UID, tenantID string, kind gibsonv1alpha1.P
 		},
 		Spec: gibsonv1alpha1.AgentEnrollmentSpec{
 			AgentName:     "regression-agent",
-			Mode:          gibsonv1alpha1.AgentModeAutonomous,
 			PrincipalKind: kind,
 			ComponentGrants: []gibsonv1alpha1.ComponentRef{
 				{Kind: "tool", Name: "noop"},

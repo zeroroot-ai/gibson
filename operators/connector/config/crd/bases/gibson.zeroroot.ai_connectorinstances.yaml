@@ -81,11 +81,10 @@ spec:
             description: |-
               ConnectorInstanceSpec is the desired state of one connector for one tenant.
 
-              A product caller sets CatalogRef and nothing else — the catalog entry
-              supplies the image or endpoint, the transport, the egress allow-list, and the
-              auth kind (ADR-0014: "http = catalog + button, not YAML"). The inline fields
-              are the advanced escape hatch for a custom connector; the catalog entry fills
-              them when CatalogRef is set.
+              The daemon writes the instance from the catalog entry on enable (ADR-0014:
+              "http = catalog + button, not YAML"): the image or endpoint, the transport,
+              the egress allow-list and the auth kind come from the entry. The inline
+              fields are also the escape hatch for a custom connector authored by hand.
             properties:
               auth:
                 default: none
@@ -94,11 +93,6 @@ spec:
                 - none
                 - secret
                 - oauth
-                type: string
-              catalogRef:
-                description: |-
-                  CatalogRef selects a curated catalog entry. When set, the operator fills
-                  the inline fields from the entry; the caller does not author them.
                 type: string
               connector:
                 description: |-

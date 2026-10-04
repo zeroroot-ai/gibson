@@ -103,12 +103,6 @@ spec:
               maxRuntime:
                 default: 24h
                 type: string
-              mode:
-                description: AgentMode is the autonomy mode of an enrolled agent.
-                enum:
-                - autonomous
-                - supervised
-                type: string
               principalKind:
                 description: |-
                   PrincipalKind identifies the FGA principal type for this enrollment.
@@ -122,7 +116,6 @@ spec:
                 type: string
             required:
             - agentName
-            - mode
             type: object
           status:
             description: AgentEnrollmentStatus defines the observed state.

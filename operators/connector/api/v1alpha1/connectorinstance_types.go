@@ -100,22 +100,16 @@ const (
 
 // ConnectorInstanceSpec is the desired state of one connector for one tenant.
 //
-// A product caller sets CatalogRef and nothing else — the catalog entry
-// supplies the image or endpoint, the transport, the egress allow-list, and the
-// auth kind (ADR-0014: "http = catalog + button, not YAML"). The inline fields
-// are the advanced escape hatch for a custom connector; the catalog entry fills
-// them when CatalogRef is set.
+// The daemon writes the instance from the catalog entry on enable (ADR-0014:
+// "http = catalog + button, not YAML"): the image or endpoint, the transport,
+// the egress allow-list and the auth kind come from the entry. The inline
+// fields are also the escape hatch for a custom connector authored by hand.
 type ConnectorInstanceSpec struct {
 	// Connector is the connector name, used for the tool id namespace
 	// (mcp:<connector>:<tool>) and the OAuth grant key. For example
 	// "connector-gitlab".
 	// +kubebuilder:validation:Required
 	Connector string `json:"connector"`
-
-	// CatalogRef selects a curated catalog entry. When set, the operator fills
-	// the inline fields from the entry; the caller does not author them.
-	// +optional
-	CatalogRef string `json:"catalogRef,omitempty"`
 
 	// Shape decides the ToolHive primitive: Hosted (container) or Remote
 	// (vendor-hosted).

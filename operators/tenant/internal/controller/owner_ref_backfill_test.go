@@ -52,7 +52,7 @@ func TestAgentEnrollment_OwnerRefBackfill(t *testing.T) {
 	scheme := setupScheme(t)
 	ae := &gibsonv1alpha1.AgentEnrollment{
 		ObjectMeta: metav1.ObjectMeta{Name: "scanner-01", Namespace: "tenant-acme"},
-		Spec:       gibsonv1alpha1.AgentEnrollmentSpec{AgentName: "breach-checker", Mode: "autonomous"},
+		Spec:       gibsonv1alpha1.AgentEnrollmentSpec{AgentName: "breach-checker"},
 	}
 	c := fake.NewClientBuilder().
 		WithScheme(scheme).
@@ -81,7 +81,7 @@ func TestAgentEnrollment_NoBackfillWhenAnnotationMissing(t *testing.T) {
 	scheme := setupScheme(t)
 	ae := &gibsonv1alpha1.AgentEnrollment{
 		ObjectMeta: metav1.ObjectMeta{Name: "scanner-01", Namespace: "random-ns"},
-		Spec:       gibsonv1alpha1.AgentEnrollmentSpec{AgentName: "x", Mode: "autonomous"},
+		Spec:       gibsonv1alpha1.AgentEnrollmentSpec{AgentName: "x"},
 	}
 	c := fake.NewClientBuilder().
 		WithScheme(scheme).
