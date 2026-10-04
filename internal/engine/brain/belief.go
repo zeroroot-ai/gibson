@@ -151,6 +151,9 @@ type BeliefScored struct {
 	HostID         uint64
 	Belief         Belief
 	EvidenceDigest string
+	// CauseEdgeTypes are the slice edge types that fed the host when this
+	// belief was scored (gibson#613); empty for a single-host slice.
+	CauseEdgeTypes []string
 }
 
 // Kind is the event's Timeline kind.
@@ -168,6 +171,7 @@ func applyBeliefScored(w *World, e BeliefScored) {
 		return
 	}
 	h.Belief = e.Belief
+	h.CauseEdgeTypes = append([]string(nil), e.CauseEdgeTypes...)
 }
 
 // hostEvidenceKey is the scope-relative identity a finding or a demonstrated

@@ -66,6 +66,9 @@ type NodeRef struct {
 type NodeBelief struct {
 	Belief         Belief
 	EvidenceDigest string
+	// CauseEdgeTypes are the enablement-edge types that fed the node in the
+	// slice this belief was scored from (gibson#613). Sorted, unique.
+	CauseEdgeTypes []string
 }
 
 // BeliefSubstrate is the seam ADR-0029 §3 describes: read and write belief on

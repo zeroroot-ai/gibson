@@ -44,6 +44,7 @@ type NodeBeliefRecord struct {
 	Ref            NodeRef
 	Belief         Belief
 	EvidenceDigest string
+	CauseEdgeTypes []string
 }
 
 // NodeBeliefSet records a belief write for a non-Host node. Kind identifies
@@ -52,6 +53,8 @@ type NodeBeliefSet struct {
 	Ref            NodeRef
 	Belief         Belief
 	EvidenceDigest string
+	// CauseEdgeTypes mirrors NodeBelief.CauseEdgeTypes (gibson#613).
+	CauseEdgeTypes []string
 }
 
 // Kind identifies the node_belief.set brain event.
@@ -86,6 +89,7 @@ func applyNodeBeliefSet(w *World, e NodeBeliefSet) {
 	rec := w.nodeBeliefs.Get(ent)
 	rec.Belief = e.Belief
 	rec.EvidenceDigest = e.EvidenceDigest
+	rec.CauseEdgeTypes = append([]string(nil), e.CauseEdgeTypes...)
 }
 
 // NodeBeliefSnapshot is a stable, comparable view of a NodeBeliefRecord.
@@ -93,6 +97,7 @@ type NodeBeliefSnapshot struct {
 	Ref            NodeRef
 	Belief         Belief
 	EvidenceDigest string
+	CauseEdgeTypes []string
 }
 
 // NodeBeliefSnapshot returns every recorded non-Host node belief in
@@ -102,7 +107,7 @@ func (w *World) NodeBeliefSnapshot() []NodeBeliefSnapshot {
 	q := ecs.NewFilter1[NodeBeliefRecord](w.ecs).Query()
 	for q.Next() {
 		r := q.Get()
-		out = append(out, NodeBeliefSnapshot{Ref: r.Ref, Belief: r.Belief, EvidenceDigest: r.EvidenceDigest})
+		out = append(out, NodeBeliefSnapshot{Ref: r.Ref, Belief: r.Belief, EvidenceDigest: r.EvidenceDigest, CauseEdgeTypes: append([]string(nil), r.CauseEdgeTypes...)})
 	}
 	sort.Slice(out, func(i, j int) bool {
 		if out[i].Ref.Kind != out[j].Ref.Kind {
