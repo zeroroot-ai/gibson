@@ -105,11 +105,15 @@ type PluginSpec struct {
 // runtime `--list-tools` refresher is retired (ADR-0017), so the manifest is
 // the only source of a tool's runtime shape.
 type ToolSpec struct {
-	ContentTrust string         `yaml:"contentTrust"` // trusted | untrusted
-	DispatchMode string         `yaml:"dispatchMode"` // sandboxed | agent | plugin
-	Command      string         `yaml:"command"`
-	Image        string         `yaml:"image"` // required; must be a signed digest
-	Resources    AgentResources `yaml:"resources"`
+	ContentTrust string `yaml:"contentTrust"` // trusted | untrusted
+	DispatchMode string `yaml:"dispatchMode"` // sandboxed | agent | plugin
+	Command      string `yaml:"command"`
+	Image        string `yaml:"image"` // required; must be a signed digest
+	// OutputProtoType is the response message the tool emits, from the
+	// captured executor catalog. It is what makes "is this a discovery tool" a
+	// catalog question with one answer (gibson#625).
+	OutputProtoType string         `yaml:"outputProtoType"`
+	Resources       AgentResources `yaml:"resources"`
 }
 
 // AgentSpec is an agent workload: the SAME hosting as a plugin (ADR-0015
@@ -720,6 +724,8 @@ type ToolEntry struct {
 	EgressAllow []string
 	// Resources is the manifest's sandbox size; zero fields take defaults.
 	Resources AgentResources
+	// OutputProtoType is the response message this tool emits.
+	OutputProtoType string
 }
 
 func (m Manifest) toToolEntry() ToolEntry {
@@ -734,7 +740,30 @@ func (m Manifest) toToolEntry() ToolEntry {
 		DispatchMode: s.DispatchMode,
 		EgressAllow:  m.EgressAllow,
 		Resources:    s.Resources,
+
+		OutputProtoType: s.OutputProtoType,
 	}
+}
+
+// DiscoveryResultProtoType is the response message a tool emits when it
+// produces taxonomy-aligned graph nodes.
+const DiscoveryResultProtoType = "gibson.graphrag.v1.DiscoveryResult"
+
+// IsDiscoveryTool reports whether the catalog says this tool emits a
+// DiscoveryResult, and therefore whether a response without one is worth
+// reporting (gibson#625).
+//
+// A catalog question with one answer. It replaces a hand-written map in the
+// harness that had drifted both ways: it named amass, ffuf, gobuster and katana,
+// which the executor does not ship and which could therefore never be looked
+// up, and omitted naabu, tlsx, trivy, kube-bench and trivy-k8s, which it does.
+//
+// An unknown tool is NOT a discovery tool. That is the same answer the map gave
+// for a name it did not hold, and it is the safe direction: a tool the catalog
+// does not list cannot be dispatched at all.
+func IsDiscoveryTool(id string) bool {
+	e, ok := LookupTool(id)
+	return ok && e.OutputProtoType == DiscoveryResultProtoType
 }
 
 func lookupTool(entries []Manifest, id string) (ToolEntry, bool) {

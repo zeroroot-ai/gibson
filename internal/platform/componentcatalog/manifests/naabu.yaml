@@ -18,6 +18,7 @@ spec:
   dispatchMode: sandboxed
   image: ghcr.io/zeroroot-ai/gibson-executor@sha256:9b22942410cb12517334f3705256ed77fd0fa9f356334ac1aee85e495ba27054
   command: gibson-runner
+  outputProtoType: gibson.graphrag.v1.DiscoveryResult
   resources:
     vcpu: 2
     memory: 512Mi

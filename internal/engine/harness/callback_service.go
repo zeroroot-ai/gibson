@@ -118,6 +118,12 @@ type HarnessCallbackService struct {
 	observeCountsOnce sync.Once
 	observeCounts     *emitbounds.TaskCounter
 
+	// toolValidator checks whether a discovery tool's response carried the
+	// DiscoveryResult the catalog says it emits (gibson#625). Built on first
+	// use by validator(), because this service has several construction paths.
+	validatorOnce sync.Once
+	toolValidator *ToolValidator
+
 	// worldViewSource projects the mission-Scope-limited World slice the
 	// WorldView RPC returns (ADR-0012 read half, gibson#1377); the daemon wires
 	// it to the per-tenant brain. nil means the WorldView read is disabled and
@@ -813,6 +819,18 @@ func toLLMCallToolCalls(calls []llm.ToolCall) []LLMCallToolCall {
 	return out
 }
 
+// validator is the discovery-compliance validator, built once.
+//
+// Lazily rather than in the constructor: HarnessCallbackService has several
+// construction paths and a field set in one of them is a nil dereference in the
+// others. It holds only a logger, so building it on first use costs nothing.
+func (s *HarnessCallbackService) validator() *ToolValidator {
+	s.validatorOnce.Do(func() {
+		s.toolValidator = NewToolValidator(s.logger)
+	})
+	return s.toolValidator
+}
+
 // captureToolCall folds a completed CallToolProto invocation into the
 // per-tenant World via the wired toolCallSink (ADR-0020, gibson#271) — the
 // tool-I/O half of the flight recorder, alongside captureLLMCall's transcript
@@ -1364,6 +1382,19 @@ func (s *HarnessCallbackService) CallToolProto(ctx context.Context, req *harness
 		"task_id":        req.Context.TaskId,
 		"parent_span_id": req.Context.SpanId,
 	})
+
+	// Discovery compliance (gibson#625). A tool the catalog says emits a
+	// DiscoveryResult, whose response carries none, produced no graph nodes —
+	// which is how a parser that quietly stopped emitting them looks. Recorded
+	// as a metric and a warning, never a failure: the tool DID run, and its
+	// output is already on its way to the Timeline below.
+	//
+	// Measured here because this is the only place that holds both the tool
+	// name and the response proto. Before it, the validator had no caller at
+	// all, so gibson_tool_discovery_compliance_total and
+	// gibson_tool_extraction_skipped_total were exported and always zero —
+	// indistinguishable from "nothing was ever skipped".
+	s.validator().ValidateDiscoveryCompliance(ctx, req.Name, responseMsg, req.Context.GetMissionRunId())
 
 	// Flight recorder (ADR-0020, gibson#271): capture the full arguments +
 	// result — the tool-I/O half of the flight recorder, alongside the LLM

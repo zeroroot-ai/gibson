@@ -42,7 +42,14 @@ type catalogEnvelope struct {
 type tool struct {
 	Name        string `json:"name"`
 	Description string `json:"description"`
-	Resources   struct {
+	// OutputProtoType is the response message the tool emits. It is the
+	// catalog's answer to "does this tool produce graph nodes": a tool whose
+	// output is gibson.graphrag.v1.DiscoveryResult is expected to populate it,
+	// and the dispatch path reports one that does not (gibson#625). Carried
+	// into the manifest rather than inferred, because "every tool in the
+	// catalog emits DiscoveryResult" is true today and is not a declaration.
+	OutputProtoType string `json:"output_proto_type"`
+	Resources       struct {
 		VCPU   int32  `json:"vcpu"`
 		Memory string `json:"memory"`
 	} `json:"resources"`
@@ -190,6 +197,11 @@ func validate(env catalogEnvelope) error {
 			return fmt.Errorf("tool %q listed twice", t.Name)
 		case t.Description == "":
 			return fmt.Errorf("tool %q has no description", t.Name)
+		case t.OutputProtoType == "":
+			// Not defaulted. A tool whose output type is unknown would be
+			// classified as "not a discovery tool", which is the quiet answer
+			// that makes a missing DiscoveryResult invisible.
+			return fmt.Errorf("tool %q declares no output_proto_type", t.Name)
 		case t.Resources.VCPU <= 0:
 			return fmt.Errorf("tool %q declares vcpu %d", t.Name, t.Resources.VCPU)
 		case t.Resources.Memory == "":
@@ -241,6 +253,7 @@ func manifest(image string, t tool) []byte {
 	fmt.Fprintf(&b, "  dispatchMode: sandboxed\n")
 	fmt.Fprintf(&b, "  image: %s\n", image)
 	fmt.Fprintf(&b, "  command: gibson-runner\n")
+	fmt.Fprintf(&b, "  outputProtoType: %s\n", t.OutputProtoType)
 	fmt.Fprintf(&b, "  resources:\n")
 	fmt.Fprintf(&b, "    vcpu: %d\n", t.Resources.VCPU)
 	fmt.Fprintf(&b, "    memory: %s\n", t.Resources.Memory)

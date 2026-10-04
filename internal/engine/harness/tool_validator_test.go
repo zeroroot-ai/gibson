@@ -9,10 +9,14 @@ import (
 	"testing"
 
 	"github.com/stretchr/testify/assert"
+	"github.com/stretchr/testify/require"
 	graphragpb "github.com/zeroroot-ai/sdk/api/gen/gibson/graphrag/v1"
 	"google.golang.org/protobuf/proto"
 	"google.golang.org/protobuf/types/dynamicpb"
 	"google.golang.org/protobuf/types/known/anypb"
+
+	"github.com/zeroroot-ai/gibson/internal/platform/authz"
+	"github.com/zeroroot-ai/gibson/internal/platform/componentcatalog"
 )
 
 // mockProtoWithDiscovery creates a mock proto message with a DiscoveryResult in field 100.
@@ -39,61 +43,53 @@ func TestNewToolValidator(t *testing.T) {
 	})
 }
 
-func TestIsDiscoveryTool(t *testing.T) {
-	tests := []struct {
-		name        string
-		toolName    string
-		isDiscovery bool
-	}{
-		{"nmap is discovery", "nmap", true},
-		{"httpx is discovery", "httpx", true},
-		{"nuclei is discovery", "nuclei", true},
-		{"subfinder is discovery", "subfinder", true},
-		{"dnsx is discovery", "dnsx", true},
-		{"masscan is discovery", "masscan", true},
-		{"amass is discovery", "amass", true},
-		{"ffuf is discovery", "ffuf", true},
-		{"gobuster is discovery", "gobuster", true},
-		{"katana is discovery", "katana", true},
-		{"unknown is not discovery", "unknown_tool", false},
-		{"curl is not discovery", "curl", false},
-		{"jq is not discovery", "jq", false},
-	}
+// Which tools are discovery tools comes from the CATALOG now, so the test asks
+// the catalog rather than restating a list.
+//
+// The test this replaces asserted that amass, ffuf, gobuster and katana ARE
+// discovery tools. The executor ships none of them, so those four cases were
+// asserting the drift rather than catching it — and the same test said nothing
+// about naabu, tlsx, trivy, kube-bench or trivy-k8s, which it does ship.
+func TestIsDiscoveryTool_ComesFromTheCatalog(t *testing.T) {
+	v := NewToolValidator(slog.Default())
 
-	for _, tt := range tests {
-		t.Run(tt.name, func(t *testing.T) {
-			result := IsDiscoveryTool(tt.toolName)
-			assert.Equal(t, tt.isDiscovery, result)
-		})
+	tools := 0
+	for _, ref := range componentcatalog.Refs() {
+		if ref.Kind != authz.KindTool {
+			continue
+		}
+		tools++
+		entry, ok := componentcatalog.LookupTool(ref.ID)
+		require.True(t, ok, "the catalog lists tool %q but cannot resolve it", ref.ID)
+		want := entry.OutputProtoType == componentcatalog.DiscoveryResultProtoType
+		assert.Equal(t, want, v.isDiscoveryTool(ref.ID),
+			"tool %q emits %q", ref.ID, entry.OutputProtoType)
+	}
+	require.NotZero(t, tools, "the catalog lists no tools; this test would pass on anything")
+}
+
+// A tool the catalog does not list is not a discovery tool. Same answer the old
+// map gave for a name it did not hold, and the safe direction: a tool the
+// catalog does not list cannot be dispatched at all.
+func TestIsDiscoveryTool_AnUnknownToolIsNotOne(t *testing.T) {
+	v := NewToolValidator(slog.Default())
+	for _, name := range []string{"unknown_tool", "curl", "jq", "amass", "ffuf", "gobuster", "katana"} {
+		assert.False(t, v.isDiscoveryTool(name), "tool %q", name)
 	}
 }
 
-func TestRegisterDiscoveryTool(t *testing.T) {
-	// Test registering a new tool
-	toolName := "custom_scanner_test"
-
-	// Ensure it's not registered initially
-	assert.False(t, IsDiscoveryTool(toolName))
-
-	// Register it
-	RegisterDiscoveryTool(toolName)
-	assert.True(t, IsDiscoveryTool(toolName))
-
-	// Clean up
-	UnregisterDiscoveryTool(toolName)
-	assert.False(t, IsDiscoveryTool(toolName))
-}
-
-func TestListDiscoveryTools(t *testing.T) {
-	tools := ListDiscoveryTools()
-
-	// Should contain the known discovery tools
-	assert.Contains(t, tools, "nmap")
-	assert.Contains(t, tools, "httpx")
-	assert.Contains(t, tools, "nuclei")
-
-	// Should be at least 10 tools
-	assert.GreaterOrEqual(t, len(tools), 10)
+// Every tool the executor ships today emits a DiscoveryResult, so the catalog
+// answer is "yes" for all of them. Asserted so the day one does not, this test
+// says so rather than the classification quietly changing.
+func TestIsDiscoveryTool_EveryShippedToolEmitsADiscoveryResult(t *testing.T) {
+	v := NewToolValidator(slog.Default())
+	for _, ref := range componentcatalog.Refs() {
+		if ref.Kind != authz.KindTool {
+			continue
+		}
+		assert.True(t, v.isDiscoveryTool(ref.ID),
+			"tool %q no longer emits a DiscoveryResult; update this test and check the dispatch path still reports it", ref.ID)
+	}
 }
 
 func TestValidateDiscoveryCompliance(t *testing.T) {
