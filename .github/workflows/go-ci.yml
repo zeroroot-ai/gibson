@@ -468,7 +468,7 @@ jobs:
       # on all attempts still fails the job. Suspected flakes get tracked
       # issues (e.g. gibson#1392) instead of blind reruns.
       - name: Run integration lane (flake-quarantined)
-        uses: zeroroot-ai/.github/actions/flake-quarantine@1366fb5a29590e522bf5a74308f55bb39a4edb56 # v0.5.1
+        uses: zeroroot-ai/.github/actions/flake-quarantine@40c67fd77152f2c4924abccbd992dbca065f325b # v0.8.2
         with:
           cmd: make test-integration
 
