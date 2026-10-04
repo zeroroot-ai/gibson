@@ -1,5 +1,24 @@
 # Changelog
 
+## [0.151.0](https://github.com/zeroroot-ai/gibson/compare/v0.150.1...v0.151.0) (2026-10-04)
+
+
+### Features
+
+* **catalog:** capture the executor release that ships the two cluster tools ([#624](https://github.com/zeroroot-ai/gibson/issues/624)) ([04042fa](https://github.com/zeroroot-ai/gibson/commit/04042fac6f62ce2cbaa5e530161fb22a5b72a7be))
+* **catalog:** capture the executor release whose cluster tools read the environment ([#632](https://github.com/zeroroot-ai/gibson/issues/632)) ([47a8d1f](https://github.com/zeroroot-ai/gibson/commit/47a8d1fcc4e04de5a8f5627e22565de43ead7e55))
+* **daemon:** the mission catalog is readable and renderable by a person ([#634](https://github.com/zeroroot-ai/gibson/issues/634)) ([25d2c2b](https://github.com/zeroroot-ai/gibson/commit/25d2c2b7965972be4a1c2acfab89b28ac72d0fd0))
+* **mission:** a mission's declared secrets reach the tool it dispatches ([#628](https://github.com/zeroroot-ai/gibson/issues/628)) ([0af9b8b](https://github.com/zeroroot-ai/gibson/commit/0af9b8beb67a6ccf167a9f5d0d27fc551157b30d))
+* **mission:** the cluster assessment mission ([#630](https://github.com/zeroroot-ai/gibson/issues/630)) ([b0d95cf](https://github.com/zeroroot-ai/gibson/commit/b0d95cfa0fd1bb5cd09d167e6a6d0e69a3c3a8bd))
+* **tools:** a dispatched tool is told what it is acting against ([#623](https://github.com/zeroroot-ai/gibson/issues/623)) ([395fdd3](https://github.com/zeroroot-ai/gibson/commit/395fdd3ce447ae5c95c68c4cb975a43dff5327c6))
+
+
+### Bug Fixes
+
+* **deadcode:** the gate walks with the image build tag ([#617](https://github.com/zeroroot-ai/gibson/issues/617)) ([67c84ac](https://github.com/zeroroot-ai/gibson/commit/67c84acc0d569f0bc9722f25f77effa22ff2f26e))
+* **fgaevent:** the resubscribe backoff resets after a healthy subscription ([#627](https://github.com/zeroroot-ai/gibson/issues/627)) ([4b875b0](https://github.com/zeroroot-ai/gibson/commit/4b875b0a0644dc6330c348f439d283077c905596))
+* **proto:** delete 58 served proto fields nothing reads, and gate every daemon field for a consumer ([#622](https://github.com/zeroroot-ai/gibson/issues/622)) ([302fbfa](https://github.com/zeroroot-ai/gibson/commit/302fbfa3d18c972976cff693e42d3b1f916ef1cf))
+
 ## [0.150.1](https://github.com/zeroroot-ai/gibson/compare/v0.150.0...v0.150.1) (2026-10-04)
 
 
