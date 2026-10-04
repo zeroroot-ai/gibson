@@ -32,7 +32,6 @@
 /gibson.daemon.logs.v1.LogsService/QueryMissionLogs
 /gibson.daemon.operator.v1.DaemonOperatorService/EmitAuditEvent
 /gibson.daemon.operator.v1.DaemonOperatorService/ListFeatureTuples
-/gibson.daemon.operator.v1.DaemonOperatorService/SeedCatalogTenantEnabled
 /gibson.daemon.operator.v1.DaemonOperatorService/WriteAccessTuples
 /gibson.daemon.v1.DaemonService/BuildComponent
 /gibson.daemon.v1.DaemonService/Connect
@@ -72,7 +71,6 @@
 /gibson.tenant.v1.BudgetService/GetTenantBudgetDefaults
 /gibson.tenant.v1.BudgetService/ListBudgets
 /gibson.tenant.v1.BudgetService/ListBudgetStatus
-/gibson.tenant.v1.BudgetService/SetTenantBudgetDefaults
 /gibson.tenant.v1.MembershipService/DeleteTeam
 /gibson.tenant.v1.MembershipService/GetReservedNames
 /gibson.tenant.v1.MembershipService/RemoveTeamMember
@@ -81,7 +79,6 @@
 /gibson.tenant.v1.ModelAccessService/GrantAccess
 /gibson.tenant.v1.ModelAccessService/ListAccess
 /gibson.tenant.v1.ModelAccessService/ListModelResolutionEvents
-/gibson.tenant.v1.ModelAccessService/RevokeAccess
 /gibson.tenant.v1.ProviderService/ListProviderModels
 /gibson.tenant.v1.TenantService/DeleteMissionDraft
 /gibson.tenant.v1.TenantService/GetMissionDraft
