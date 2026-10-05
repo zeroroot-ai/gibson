@@ -94,6 +94,31 @@ func (s *ComponentServiceServer) bindDeclaredSecrets(ctx context.Context, tenant
 		return
 	}
 
+	// A catalog name is not a catalog component. Only a workload the platform
+	// attests holds the catalog identity (ADR-0066). A principal that enrolled
+	// with a bootstrap token can check in under the same kind and name, and
+	// its declared list stays advisory. No reader, or a failed read, also
+	// writes nothing.
+	if s.enrollment == nil {
+		s.logger.WarnContext(ctx, "declared-secret binding skipped: no enrollment reader wired, the caller's enrollment cannot be read")
+		return
+	}
+	attested, err := s.enrollment.PrincipalIsAttested(ctx, tenant, fgaUser)
+	if err != nil {
+		s.logger.WarnContext(ctx, "declared-secret binding skipped: enrollment read failed",
+			slog.String("fga_user", fgaUser),
+			slog.String("error", err.Error()))
+		return
+	}
+	if !attested {
+		s.logger.InfoContext(ctx, "declared secrets are advisory: the caller did not enroll with an attested workload identity",
+			slog.String("fga_user", fgaUser),
+			slog.String("kind", kind),
+			slog.String("name", name),
+			slog.String("tenant", tenant))
+		return
+	}
+
 	seen := make(map[string]struct{})
 	tuples := make([]authz.Tuple, 0)
 	for _, ref := range strings.Split(raw, ",") {

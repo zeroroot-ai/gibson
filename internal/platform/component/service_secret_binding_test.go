@@ -64,7 +64,7 @@ func offering(kind, id string) *secretBindRecorder {
 // this wrote two tuples for the caller's own principal.
 func TestBindDeclaredSecrets_OutsideCatalogWritesNothing(t *testing.T) {
 	rec := offering("plugin", "github")
-	svc := newParityServer().WithAuthorizer(rec)
+	svc := newParityServer().WithAuthorizer(rec).WithEnrollmentReader(attestedCaller{})
 	ctx := credCallerCtx(t, "plugin_principal:7f3c1b2e-dev", "primary")
 
 	svc.bindDeclaredSecrets(ctx, "primary", "plugin", "my-own-plugin", declaring("cred:github_token, cred:tenant_master_key"))
@@ -79,7 +79,7 @@ func TestBindDeclaredSecrets_OutsideCatalogWritesNothing(t *testing.T) {
 func TestBindDeclaredSecrets_GateErrorWritesNothing(t *testing.T) {
 	rec := offering("plugin", "github")
 	rec.checkErr = errors.New("fga unreachable")
-	svc := newParityServer().WithAuthorizer(rec)
+	svc := newParityServer().WithAuthorizer(rec).WithEnrollmentReader(attestedCaller{})
 	ctx := credCallerCtx(t, "plugin_principal:github", "primary")
 
 	svc.bindDeclaredSecrets(ctx, "primary", "plugin", "github", declaring("cred:github_token"))
@@ -102,7 +102,7 @@ func TestBindDeclaredSecrets_NoAuthorizerWritesNothing(t *testing.T) {
 // its tenant (ADR-0066).
 func TestBindDeclaredSecrets_PluginGrantsCanResolve(t *testing.T) {
 	rec := offering("plugin", "github")
-	svc := newParityServer().WithAuthorizer(rec)
+	svc := newParityServer().WithAuthorizer(rec).WithEnrollmentReader(attestedCaller{})
 	ctx := credCallerCtx(t, "plugin_principal:github", "primary")
 
 	svc.bindDeclaredSecrets(ctx, "primary", "plugin", "github", declaring("cred:github_token, cred:other , cred:github_token"))
@@ -136,7 +136,7 @@ func TestBindDeclaredSecrets_PluginGrantsCanResolve(t *testing.T) {
 // nothing — only plugin_principal may hold can_resolve (model.fga).
 func TestBindDeclaredSecrets_NonPluginSkipped(t *testing.T) {
 	rec := offering("plugin", "github")
-	svc := newParityServer().WithAuthorizer(rec)
+	svc := newParityServer().WithAuthorizer(rec).WithEnrollmentReader(attestedCaller{})
 	ctx := credCallerCtx(t, "agent_principal:x", "primary")
 
 	svc.bindDeclaredSecrets(ctx, "primary", "plugin", "github", declaring("cred:github_token"))
@@ -148,7 +148,7 @@ func TestBindDeclaredSecrets_NonPluginSkipped(t *testing.T) {
 // TestBindDeclaredSecrets_NoDeclaredSecretsNoOp: absent/empty metadata is a no-op.
 func TestBindDeclaredSecrets_NoDeclaredSecretsNoOp(t *testing.T) {
 	rec := offering("plugin", "github")
-	svc := newParityServer().WithAuthorizer(rec)
+	svc := newParityServer().WithAuthorizer(rec).WithEnrollmentReader(attestedCaller{})
 	ctx := credCallerCtx(t, "plugin_principal:github", "primary")
 
 	svc.bindDeclaredSecrets(ctx, "primary", "plugin", "github", map[string]string{})
@@ -163,8 +163,54 @@ func TestBindDeclaredSecrets_NoDeclaredSecretsNoOp(t *testing.T) {
 func TestBindDeclaredSecrets_WriteErrorIsNonFatal(t *testing.T) {
 	rec := offering("plugin", "github")
 	rec.err = errors.New("fga down")
-	svc := newParityServer().WithAuthorizer(rec)
+	svc := newParityServer().WithAuthorizer(rec).WithEnrollmentReader(attestedCaller{})
 	ctx := credCallerCtx(t, "plugin_principal:github", "primary")
 	// Must not panic and must return normally (void).
 	svc.bindDeclaredSecrets(ctx, "primary", "plugin", "github", declaring("cred:github_token"))
+}
+
+// attestedCaller answers that every principal enrolled with an attested
+// workload identity, the state of a catalog plugin on the platform.
+type attestedCaller struct{}
+
+func (attestedCaller) PrincipalIsAttested(context.Context, string, string) (bool, error) {
+	return true, nil
+}
+
+// enrollmentAnswer is a reader with one fixed answer.
+type enrollmentAnswer struct {
+	attested bool
+	err      error
+}
+
+func (e enrollmentAnswer) PrincipalIsAttested(context.Context, string, string) (bool, error) {
+	return e.attested, e.err
+}
+
+// TestBindDeclaredSecrets_TokenEnrolledCallerWritesNothing is the failing
+// fixture for the rule that a catalog name is not a catalog identity
+// (ADR-0066). The caller checks in as the catalog plugin, with a
+// plugin_principal, but it enrolled with a bootstrap token. No reader, a
+// failed read and a token enrollment all write zero tuples.
+func TestBindDeclaredSecrets_TokenEnrolledCallerWritesNothing(t *testing.T) {
+	ctx := credCallerCtx(t, "plugin_principal:310000000000000001", "primary")
+	cases := map[string]func(*ComponentServiceServer) *ComponentServiceServer{
+		"no reader": func(s *ComponentServiceServer) *ComponentServiceServer { return s },
+		"read failed": func(s *ComponentServiceServer) *ComponentServiceServer {
+			return s.WithEnrollmentReader(enrollmentAnswer{attested: true, err: errors.New("db down")})
+		},
+		"token enrollment": func(s *ComponentServiceServer) *ComponentServiceServer {
+			return s.WithEnrollmentReader(enrollmentAnswer{attested: false})
+		},
+	}
+	for name, wire := range cases {
+		t.Run(name, func(t *testing.T) {
+			rec := offering("plugin", "github")
+			svc := wire(newParityServer().WithAuthorizer(rec))
+			svc.bindDeclaredSecrets(ctx, "primary", "plugin", "github", declaring("cred:github_token"))
+			if rec.calls != 0 || len(rec.written) != 0 {
+				t.Fatalf("wrote %d tuples in %d calls, want none", len(rec.written), rec.calls)
+			}
+		})
+	}
 }

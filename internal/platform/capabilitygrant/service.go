@@ -367,7 +367,9 @@ func (s *CapabilityGrantService) RegisterCapabilityGrant(
 			PublicKeyJWK: hostPublicKeyJWK,
 			Status:       "active",
 			PrincipalRef: principalRef,
+			Attested:     bootstrapType == BootstrapTypeSPIFFESVID,
 		},
+		KeepHostAttestation: reRegistration,
 		Agent: Agent{
 			ID:           agentID,
 			HostID:       hostID,

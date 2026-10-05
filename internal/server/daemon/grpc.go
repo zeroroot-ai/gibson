@@ -1911,6 +1911,7 @@ func (d *daemonImpl) buildGRPCServer(ctx context.Context) (*grpcSubsystem, error
 			// One-code-path slice deploy#195: d.authorizer is always a real
 			// FGA client after initAuthorizer.
 			compSvc.WithAuthorizer(d.authorizer)
+			compSvc.WithEnrollmentReader(capabilitygrant.NewCapabilityGrantStore(d.platformDB))
 			d.logger.Info(ctx, "FGA authorizer wired into ComponentService for ownership tuple writes")
 
 			// Wire the ontology reasoner so RegisterComponent can call
