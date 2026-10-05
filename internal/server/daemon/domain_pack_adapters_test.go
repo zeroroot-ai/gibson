@@ -124,3 +124,19 @@ func testPlatformDB(t *testing.T) *sql.DB {
 	t.Cleanup(func() { _ = db.Close() })
 	return db
 }
+
+// TestRegisterDomainPack_RegistersTheComplianceService: the compliance
+// reader is served next to the Domain Pack service (gibson#674).
+func TestRegisterDomainPack_RegistersTheComplianceService(t *testing.T) {
+	d := &daemonImpl{
+		logger:        testObservabilityLogger(),
+		brainRegistry: brain.NewRegistry(context.Background()),
+		authorizer:    wiringAuthorizer{},
+		platformDB:    testPlatformDB(t),
+	}
+	srv := grpc.NewServer()
+	d.registerDomainPack(context.Background(), srv)
+	if _, ok := srv.GetServiceInfo()["gibson.tenant.v1.ComplianceService"]; !ok {
+		t.Fatal("ComplianceService must be registered with the Domain Pack service")
+	}
+}
