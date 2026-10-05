@@ -14,7 +14,6 @@ import (
 	"github.com/zeroroot-ai/gibson/internal/infra/types"
 	"github.com/zeroroot-ai/gibson/internal/platform/component"
 	componentpb "github.com/zeroroot-ai/sdk/api/gen/gibson/component/v1"
-	"github.com/zeroroot-ai/sdk/auth"
 	"go.opentelemetry.io/otel/trace/noop"
 	"google.golang.org/protobuf/types/known/wrapperspb"
 )
@@ -48,6 +47,9 @@ func newNoFallbackHarness(t *testing.T, trust componentpb.ContentTrust, shape di
 	h := &DefaultAgentHarness{
 		logger: slog.New(slog.NewTextHandler(noopWriter{}, nil)),
 		tracer: noop.NewTracerProvider().Tracer("test"),
+		// The execute gate runs first. The tenant has the tool enabled, so
+		// these tests still measure the trust gate and not the execute gate.
+		componentAuthorizer: &recordingAuthorizer{allow: true},
 		componentRegistry: &gateFakeRegistry{
 			tenantInstances: []component.ComponentInfo{{
 				Kind:         "tool",
@@ -74,7 +76,7 @@ func newNoFallbackHarness(t *testing.T, trust componentpb.ContentTrust, shape di
 // in-process direct-gRPC path — the spy adapter's DiscoverTool is not called.
 func TestDispatchGate_UntrustedSetecOnly_NoInProcessFallback(t *testing.T) {
 	h, spy := newNoFallbackHarness(t, componentpb.ContentTrust_CONTENT_TRUST_UNTRUSTED, dispatchpolicy.ShapeSetecOnly)
-	ctx := auth.ContextWithTenantString(context.Background(), "acme")
+	ctx := callerCtx(t, "user-42", "acme")
 
 	err := h.CallToolProto(ctx, "acme-registry-tool", wrapperspb.String("in"), &wrapperspb.StringValue{})
 	if code := gibsonCode(t, err); code != types.SANDBOX_POLICY_DENIED {
@@ -91,7 +93,7 @@ func TestDispatchGate_UntrustedSetecOnly_NoInProcessFallback(t *testing.T) {
 // path is genuinely reachable and only the gate stops the untrusted case.
 func TestDispatchGate_TrustedSetecOnly_ReachesInProcess(t *testing.T) {
 	h, spy := newNoFallbackHarness(t, componentpb.ContentTrust_CONTENT_TRUST_TRUSTED, dispatchpolicy.ShapeSetecOnly)
-	ctx := auth.ContextWithTenantString(context.Background(), "acme")
+	ctx := callerCtx(t, "user-42", "acme")
 
 	// Error is expected (the spy returns one); we only assert the path was taken.
 	_ = h.CallToolProto(ctx, "acme-registry-tool", wrapperspb.String("in"), &wrapperspb.StringValue{})

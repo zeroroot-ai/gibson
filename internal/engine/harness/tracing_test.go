@@ -91,6 +91,8 @@ func TestCallToolProto_TracingAttributes(t *testing.T) {
 		SlotManager:     slotManager,
 		RegistryAdapter: discovery,
 		Tracer:          tracer,
+		// The tenant has the tool enabled, so the execute gate passes.
+		ComponentAuthorizer: &recordingAuthorizer{allow: true},
 	}
 	cfg.ApplyDefaults()
 
@@ -101,7 +103,7 @@ func TestCallToolProto_TracingAttributes(t *testing.T) {
 	require.NoError(t, err)
 
 	// Execute tool
-	ctx := context.Background()
+	ctx := callerCtx(t, "user-42", "acme")
 	request := wrapperspb.String("input")
 	response := &wrapperspb.StringValue{}
 
@@ -176,6 +178,8 @@ func TestCallToolProto_TracingError(t *testing.T) {
 		SlotManager:     slotManager,
 		RegistryAdapter: discovery,
 		Tracer:          tracer,
+		// The tenant has the tool enabled, so the execute gate passes.
+		ComponentAuthorizer: &recordingAuthorizer{allow: true},
 	}
 	cfg.ApplyDefaults()
 
@@ -186,7 +190,7 @@ func TestCallToolProto_TracingError(t *testing.T) {
 	require.NoError(t, err)
 
 	// Execute tool (should fail)
-	ctx := context.Background()
+	ctx := callerCtx(t, "user-42", "acme")
 	request := &emptypb.Empty{}
 	response := &emptypb.Empty{}
 
@@ -247,6 +251,8 @@ func TestCallToolProto_TracingWithNoopTracer(t *testing.T) {
 	cfg := &HarnessConfig{
 		SlotManager:     slotManager,
 		RegistryAdapter: discovery,
+		// The tenant has the tool enabled, so the execute gate passes.
+		ComponentAuthorizer: &recordingAuthorizer{allow: true},
 		// Tracer is nil - will use no-op tracer
 	}
 	cfg.ApplyDefaults()
@@ -258,7 +264,7 @@ func TestCallToolProto_TracingWithNoopTracer(t *testing.T) {
 	require.NoError(t, err)
 
 	// Execute tool - should not panic or error due to tracing
-	ctx := context.Background()
+	ctx := callerCtx(t, "user-42", "acme")
 	request := &emptypb.Empty{}
 	response := &emptypb.Empty{}
 
