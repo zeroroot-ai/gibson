@@ -138,7 +138,6 @@ func TestNoGracefulNilInRequestPaths(t *testing.T) {
 		"internal/engine/harness/callback_service.go :: if s.eventBus == nil { ... }":                                         astchecks.Entry{Category: astchecks.CategoryLegacyOptional, Reason: "event bus optional; remove with eventbus-required slice"},
 		"internal/engine/harness/callback_service.go :: if s.llmCallSink == nil || resp == nil || contextInfo == nil { ... }": astchecks.Entry{Category: astchecks.CategoryDefensiveGuard, Reason: "best-effort World capture (gibson#1083); llmCallSink conditionally wired and resp/contextInfo are value-shape guards — nil means nothing to capture"},
 		"internal/engine/harness/callback_service.go :: if s.toolCallSink == nil || contextInfo == nil { ... }":               astchecks.Entry{Category: astchecks.CategoryDefensiveGuard, Reason: "best-effort World capture (ADR-0120, gibson#271) — the tool-I/O flight-recorder half of the llmCallSink guard above; toolCallSink conditionally wired and contextInfo is a value-shape guard — nil means nothing to capture"},
-		"internal/engine/harness/compliance_rule_registry.go :: if r.loader == nil { ... }":                                   astchecks.Entry{Category: astchecks.CategoryLegacyOptional, Reason: "rule loader optional in unit-test boot path"},
 		"internal/engine/harness/filter.go :: if finding.CVSS == nil || finding.CVSS.Score < *f.MinCVSS { ... }":              astchecks.Entry{Category: astchecks.CategoryDefensiveGuard, Reason: "nil CVSS means no min-score match"},
 		"internal/engine/harness/filter.go :: if finding.CVSS == nil || finding.CVSS.Score > *f.MaxCVSS { ... }":              astchecks.Entry{Category: astchecks.CategoryDefensiveGuard, Reason: "nil CVSS means no max-score match"},
 		"internal/engine/harness/filter.go :: if finding.TargetID == nil || *finding.TargetID != *f.TargetID { ... }":         astchecks.Entry{Category: astchecks.CategoryDefensiveGuard, Reason: "nil target ID means no filter match"},
@@ -148,16 +147,12 @@ func TestNoGracefulNilInRequestPaths(t *testing.T) {
 		"internal/engine/llm/config.go :: if p.Models == nil { ... }":                                                         astchecks.Entry{Category: astchecks.CategoryDefensiveGuard, Reason: "Models field on llm config, legitimately nil-able"},
 		"internal/engine/llm/pricing.go :: if other == nil || other.Pricing == nil { ... }":                                   astchecks.Entry{Category: astchecks.CategoryDefensiveGuard, Reason: "composite nil-check on other-side comparison"},
 		"internal/engine/llm/pricing.go :: if p.Pricing == nil { ... }":                                                       astchecks.Entry{Category: astchecks.CategoryDefensiveGuard, Reason: "Pricing field, legitimately nil-able when provider has no pricing config"},
-		"internal/engine/llm/ratelimit.go :: if p.requestLimit == nil { ... }":                                                astchecks.Entry{Category: astchecks.CategoryDefensiveGuard, Reason: "requestLimit nil means unlimited (legitimate semantic)"},
-		"internal/engine/llm/ratelimit.go :: if p.tokenLimit == nil || usage.TotalTokens <= 0 { ... }":                        astchecks.Entry{Category: astchecks.CategoryDefensiveGuard, Reason: "tokenLimit nil means unlimited (legitimate semantic)"},
-		"internal/engine/memory/vector/embedded.go :: if record.Metadata == nil { ... }":                                      astchecks.Entry{Category: astchecks.CategoryDefensiveGuard, Reason: "Metadata field on vector record, legitimately nil-able"},
 		"internal/engine/mission/definitionutil/definitionutil.go :: if def == nil || def.Nodes == nil { ... }":               astchecks.Entry{Category: astchecks.CategoryDefensiveGuard, Reason: "nil definition means empty traverse"},
 		"internal/engine/mission/state.go :: if ms.Definition == nil { ... }":                                                 astchecks.Entry{Category: astchecks.CategoryDefensiveGuard, Reason: "nil Definition means no-op"},
 		"internal/engine/state/client.go :: if c.client == nil { ... }":                                                       astchecks.Entry{Category: astchecks.CategoryReceiverNilGuard, Reason: "nil-client shim for tests"},
 		"internal/infra/datapool/conn_ops_mission.go :: if m.rdb == nil { ... }":                                              astchecks.Entry{Category: astchecks.CategoryLegacyOptional, Reason: "redis client nil-guard predates pool-required hardening"},
 		"internal/infra/datapool/recovery_hook.go :: if conn.Redis == nil { ... }":                                            astchecks.Entry{Category: astchecks.CategoryDefensiveGuard, Reason: "Redis nil guard in recovery hook; conn.Redis nil means Redis not configured for this tenant — silent return is correct"},
 		"internal/infra/observability/otel_metrics.go :: if r == nil || r.agentExecutionsTotal == nil { ... }":                astchecks.Entry{Category: astchecks.CategoryReceiverNilGuard, Reason: "composite nil-receiver shim"},
-		"internal/infra/observability/otel_metrics.go :: if r == nil || r.authzDecisionsTotal == nil { ... }":                 astchecks.Entry{Category: astchecks.CategoryReceiverNilGuard, Reason: "composite nil-receiver shim"},
 		"internal/infra/observability/otel_metrics.go :: if r == nil || r.classificationsTotal == nil { ... }":                astchecks.Entry{Category: astchecks.CategoryReceiverNilGuard, Reason: "composite nil-receiver shim"},
 		"internal/infra/observability/otel_metrics.go :: if r == nil || r.componentAuthzFailOpenTotal == nil { ... }":         astchecks.Entry{Category: astchecks.CategoryReceiverNilGuard, Reason: "composite nil-receiver shim"},
 		"internal/infra/observability/otel_metrics.go :: if r == nil || r.componentAuthzTotal == nil { ... }":                 astchecks.Entry{Category: astchecks.CategoryReceiverNilGuard, Reason: "composite nil-receiver shim"},
@@ -178,9 +173,6 @@ func TestNoGracefulNilInRequestPaths(t *testing.T) {
 		"internal/platform/secrets/jwtsource/spire.go :: if s == nil || s.src == nil { ... }":                                 astchecks.Entry{Category: astchecks.CategoryReceiverNilGuard, Reason: "composite nil-receiver shim for SPIRE JWT source"},
 		"internal/server/admin/invitation_store.go :: if s == nil || s.db == nil { ... }":                                     astchecks.Entry{Category: astchecks.CategoryReceiverNilGuard, Reason: "composite nil-receiver/nil-db shim in ListPending; store is always wired with a db in production (nil-safe for test injection)"},
 		"internal/server/admin/secrets_plugin_associations.go :: if f.authorizer == nil { ... }":                              astchecks.Entry{Category: astchecks.CategoryLegacyOptional, Reason: "FGASecretsPluginAssociations nil-authorizer shim; authorizer is always non-nil in production (nil-safe for test injection)"},
-		"internal/server/daemon/api/mission_handlers.go :: if s.authorizer == nil { ... }":                                    astchecks.Entry{Category: astchecks.CategoryLegacyOptional, Reason: "s.authorizer nil-check in callerIsPlatformOperator; predates noopAuthorizer deletion"},
-		"internal/server/daemon/api/server_audit.go :: if s.authorizer == nil { ... }":                                        astchecks.Entry{Category: astchecks.CategoryLegacyOptional, Reason: "s.authorizer nil-check predates noopAuthorizer deletion"},
-		"internal/server/daemon/api/server_entitlements.go :: if s.platformDB == nil { ... }":                                 astchecks.Entry{Category: astchecks.CategoryLegacyOptional, Reason: "s.platformDB nil-guard in deleteSharedConnectorManifest; platformDB optional in non-platform deployments (mirrors :374)"},
 		"internal/server/daemon/api/server_provider_config.go :: if s.auditLogger == nil { ... }":                             astchecks.Entry{Category: astchecks.CategoryLegacyOptional, Reason: "audit logger conditionally wired"},
 		"internal/server/daemon/api/signup_janitor.go :: if s.signupVerifications == nil { ... }":                             astchecks.Entry{Category: astchecks.CategoryLegacyOptional, Reason: "RunSignupJanitor is only launched (grpc.go) when platformDB is non-nil, and the store is wired from that same platformDB — the guard is defense-in-depth for that ordering, documented at the call site as 'a nil store makes the loop a no-op'; the RPCs that actually serve signup fail closed with Unavailable when the store is missing, this is only the background sweep"},
 		"internal/server/daemon/api/server_provider_exec.go :: if s.budgetEnforcer == nil { ... }":                            astchecks.Entry{Category: astchecks.CategoryLegacyOptional, Reason: "budget enforcer conditionally wired; remove with budget-required slice"},
@@ -189,10 +181,6 @@ func TestNoGracefulNilInRequestPaths(t *testing.T) {
 		"internal/server/daemon/graph_projector.go :: if p.reg == nil || p.writer == nil { ... }":                             astchecks.Entry{Category: astchecks.CategoryReceiverNilGuard, Reason: "composite reg/writer nil-guard in background projection loop (ADR-0107); both wired by NewGraphProjector in production — nil-safe for zero-value test construction"},
 		"internal/server/daemon/graph_projector_neo4j.go :: if conn.Neo4j == nil { ... }":                                     astchecks.Entry{Category: astchecks.CategoryLegacyOptional, Reason: "Neo4j not configured for this tenant; nothing to project into — mirrors grpc.go's neoConn.Neo4j == nil, the same answer the pre-single-writer CreateMission handler gave"},
 		"internal/server/daemon/grpc.go :: if d.graphWriter == nil { ... }":                                                   astchecks.Entry{Category: astchecks.CategoryLegacyOptional, Reason: "graph writer nil-guard in CreateMission's best-effort, non-fatal background Neo4j mirror (ADR-0112 single writer); the RPC's own success never depends on it"},
-		"internal/server/daemon/grpc.go :: if d.pool == nil { ... }":                                                          astchecks.Entry{Category: astchecks.CategoryLegacyOptional, Reason: "pool nil-guard in populateCheckpointPayload; pool-required follow-up (one-code-path#195)"},
-		"internal/server/daemon/grpc.go :: if err != nil || m == nil || m.Checkpoint == nil { ... }":                          astchecks.Entry{Category: astchecks.CategoryDefensiveGuard, Reason: "compound nil-check on mission store Get result + Checkpoint proto field in populateCheckpointPayload"},
-		"internal/server/daemon/grpc.go :: if neoConn.Neo4j == nil { ... }":                                                   astchecks.Entry{Category: astchecks.CategoryLegacyOptional, Reason: "Neo4j connection nil-guard; Neo4j not configured for this tenant — skip silently"},
-		"internal/server/daemon/infrastructure.go :: if i.semanticQuerierFactory == nil { ... }":                              astchecks.Entry{Category: astchecks.CategoryLegacyOptional, Reason: "semantic querier factory optional in non-graphrag deployments"},
 		"internal/server/daemon/log_watcher.go :: if w.file == nil { ... }":                                                   astchecks.Entry{Category: astchecks.CategoryDefensiveGuard, Reason: "log watcher file handle nil-guard during teardown"},
 		"internal/server/daemon/otel_adapter.go :: if d.infrastructure == nil || d.infrastructure.otelStack == nil { ... }":   astchecks.Entry{Category: astchecks.CategoryLegacyOptional, Reason: "OTel infrastructure conditionally wired"},
 		"internal/server/extauthz/fga/check.go :: if resp.Allowed == nil { ... }":                                             astchecks.Entry{Category: astchecks.CategoryDefensiveGuard, Reason: "OpenFGA *bool Allowed response field, legitimately nil-able; nil maps to fail-closed DENY in CanInvokeTool"},
@@ -231,10 +219,15 @@ func TestNoGracefulNilInRequestPaths(t *testing.T) {
 		// the (passing) Coord allowlist, so map its Entry to the finding's
 		// ContentKey; dedupe (identical guards in a file share one key).
 
-		findings, err := astchecks.Walk(opts)
+		report, err := astchecks.WalkReport(opts)
 		if err != nil {
 			t.Fatalf("Walk: %v", err)
 		}
+		findings := report.Findings
+		// An entry that allows nothing is a decision about a guard that is
+		// gone. It must be deleted, or it would silently allow the next guard
+		// with the same text in the same file.
+		astchecks.AssertNoStaleAllowlist(t, report)
 
 		if len(findings) > 0 {
 			t.Errorf("NEW graceful-nil branches in request paths (forbidden by [[0003]]):\n%s\n\n"+

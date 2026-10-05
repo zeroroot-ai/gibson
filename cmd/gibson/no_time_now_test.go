@@ -93,11 +93,12 @@ func TestNoTimeNowInRPCHandlers(t *testing.T) {
 		SkipGenerated: true,
 	}
 
-	findings, err := astchecks.Walk(opts)
+	report, err := astchecks.WalkReport(opts)
 	if err != nil {
 		t.Fatalf("Walk: %v", err)
 	}
-	assertNoOrphanedContentKeys(t, opts)
+	findings := report.Findings
+	astchecks.AssertNoStaleAllowlist(t, report)
 
 	if len(findings) > 0 {
 		t.Errorf("NEW time.Now() in internal/server/daemon/api/:\n%s\n\n"+
