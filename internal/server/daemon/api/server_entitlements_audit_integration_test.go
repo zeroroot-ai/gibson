@@ -30,6 +30,7 @@ import (
 
 	"github.com/zeroroot-ai/gibson/internal/engine/state"
 	"github.com/zeroroot-ai/gibson/internal/platform/audit"
+	"github.com/zeroroot-ai/gibson/internal/platform/audit/audittest"
 	"github.com/zeroroot-ai/sdk/auth"
 )
 
@@ -47,7 +48,7 @@ func TestAuditEmission_AccessTupleChange_EndToEnd(t *testing.T) {
 	}))
 	drainCtx, cancel := context.WithCancel(context.Background())
 	t.Cleanup(cancel)
-	al := audit.NewAuditLogger(drainCtx, stateClient, logger)
+	al := audit.NewAuditLogger(drainCtx, stateClient, &audittest.Recorder{}, logger)
 
 	// Identity: tenant admin via API key → classifyActorSource → "tenant_admin".
 	ident := auth.Identity{Subject: "gsk_test", Issuer: "apikey", Tenant: auth.MustNewTenantID("acme")}

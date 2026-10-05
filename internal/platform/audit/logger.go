@@ -1,32 +1,28 @@
 // SPDX-License-Identifier: Elastic-2.0
 // Copyright 2026 Zero Root AI
 
-// Package audit provides append-only audit logging to Redis Streams for compliance
-// requirements including SOC 2 and GDPR. Each tenant's audit log is stored in a
-// dedicated Redis Stream keyed as "tenant:{tenant_id}:audit:log".
+// Package audit writes and reads the audit record of the platform.
 //
-// The AuditLogger is designed to be safe for concurrent use and never exposes
-// delete or update operations — entries are strictly append-only.
+// Postgres audit_log is the durable copy of each audit record (writer.go,
+// chain.go, retention.go). An audit write never drops.
 //
-// Log() and LogWithResult() enqueue the write to a bounded in-memory channel
-// (capacity 1000) and return; a background goroutine drains the channel and
-// issues the XADD. Enqueue applies bounded backpressure — it waits up to
-// enqueueTimeout for space — and only then drops. A drop, or an XADD
-// failure, increments gibson_audit_write_drops_total and logs at ERROR with
-// the lost entry's identity. Alert on it; it means audit records were lost:
-//
-//	increase(gibson_audit_write_drops_total[5m]) > 0
+// AuditLogger is the entry point for a caller that has a request context.
+// It builds the record from the context, hands it to the durable writer, and
+// then puts a copy on the Redis Stream of the tenant, keyed
+// "tenant:{tenant_id}:audit:log". The stream is the live tail for the
+// console. Redis trims it, and the trim loses nothing, because Postgres has
+// each record.
 //
 // Usage:
 //
-//	logger := audit.NewAuditLogger(ctx, stateClient, slog.Default())
+//	logger := audit.NewAuditLogger(ctx, stateClient, writer, slog.Default())
 //
 //	// Log an action — tenant and actor are extracted from context automatically.
 //	logger.Log(ctx, "apikey.create", "apikey", keyID, map[string]any{
 //	    "name": "ci-runner",
 //	})
 //
-//	// Query recent entries for a tenant.
+//	// Read the live tail of a tenant.
 //	entries, err := logger.Query(ctx, "acme-corp", audit.AuditQueryOptions{
 //	    Limit:  50,
 //	    Action: "apikey",
@@ -67,15 +63,15 @@ const (
 	resultSuccess = "success"
 	resultFailure = "failure"
 
-	// writeQueueCap is the capacity of the in-memory write queue.
+	// writeQueueCap is the capacity of the in-memory queue of the live tail.
 	writeQueueCap = 1000
 )
 
-// auditWriteDropsTotal counts write drops — either because the queue is full
-// or because the XADD command failed.
-var auditWriteDropsTotal = promauto.NewCounter(prometheus.CounterOpts{
-	Name: "gibson_audit_write_drops_total",
-	Help: "Total number of audit write drops due to full queue or XADD error.",
+// auditTailErrorsTotal counts copies that did not reach the Redis live tail.
+// The record is not lost: Postgres has it. The console does not show it.
+var auditTailErrorsTotal = promauto.NewCounter(prometheus.CounterOpts{
+	Name: "gibson_audit_tail_errors_total",
+	Help: "Total number of audit records that did not reach the Redis live tail. Postgres holds each of them.",
 })
 
 // auditActorlessTotal counts entries refused because the caller's context
@@ -155,45 +151,49 @@ type AuditQueryOptions struct {
 type auditWrite struct {
 	streamKey string
 	values    map[string]any
-	// entry is retained after enqueue solely so drainLoop can name the record
-	// it lost when XADD fails. Dropping an audit record silently is the defect
-	// #1286 removed; the loud-drop log needs these fields to be actionable.
+	// entry names the record in the log line when XADD fails.
 	entry AuditEntry
 }
 
-// AuditLogger writes audit entries to tenant-scoped Redis Streams and supports
-// time-bounded, action-prefixed, and actor-scoped queries.
+// AuditLogger builds an audit record from a request context. It hands the
+// record to the durable writer (Postgres), then copies it to the Redis
+// Stream of the tenant, which is the live tail for the console.
 //
-// AuditLogger exposes no delete or update methods. That makes the API
-// append-only; it does NOT make the stored entries tamper-evident, and this
-// comment used to claim otherwise. Nothing here links one entry to the next,
-// so an entry edited or removed in Redis leaves no trace, and the stream is
-// additionally trimmed to auditStreamMaxLen (approximately) — the oldest
-// entries are discarded by design. Treat this stream as the queryable
-// operational tail of the audit record, not as the record itself.
+// The durable write comes first and never drops: when the queue of the
+// writer is full, Log blocks until there is room. The copy to the tail is
+// not the record. When Redis does not accept it, the logger counts the
+// miss in gibson_audit_tail_errors_total and goes on.
 //
-// The tamper-evident copy is the Postgres audit_log table, where each row is
-// chained to its predecessor by hash — see writer.go and chain.go, including
-// the note there on what an unkeyed chain does and does not detect.
-//
-// AuditLogger is safe for concurrent use. Log() and LogWithResult() apply
-// bounded backpressure on enqueue and then drop loudly; see the package
-// comment.
+// AuditLogger exposes no delete or update methods, and it is safe for
+// concurrent use.
 type AuditLogger struct {
 	client     *state.StateClient
+	durable    Emitter
 	logger     *slog.Logger
 	writeQueue chan auditWrite
 	done       chan struct{}
 }
 
-// NewAuditLogger constructs an AuditLogger backed by the provided StateClient
-// and starts the background drain goroutine. The goroutine runs until ctx is
-// cancelled.
+// NewAuditLogger constructs an AuditLogger and starts the goroutine that
+// feeds the live tail. The goroutine runs until ctx is cancelled.
 //
-// Both client and logger must be non-nil.
-func NewAuditLogger(ctx context.Context, client *state.StateClient, logger *slog.Logger) *AuditLogger {
+// durable receives each record. In production it is the *Writer on the
+// platform database. All three of client, durable and logger must be
+// non-nil: a logger with no durable writer would keep the audit record only
+// in a stream that Redis trims.
+func NewAuditLogger(ctx context.Context, client *state.StateClient, durable Emitter, logger *slog.Logger) *AuditLogger {
+	if client == nil {
+		panic("audit.NewAuditLogger: client must not be nil")
+	}
+	if durable == nil {
+		panic("audit.NewAuditLogger: durable writer must not be nil")
+	}
+	if logger == nil {
+		panic("audit.NewAuditLogger: logger must not be nil")
+	}
 	l := &AuditLogger{
 		client:     client,
+		durable:    durable,
 		logger:     logger.With("component", "audit_logger"),
 		writeQueue: make(chan auditWrite, writeQueueCap),
 		done:       make(chan struct{}),
@@ -202,22 +202,20 @@ func NewAuditLogger(ctx context.Context, client *state.StateClient, logger *slog
 	return l
 }
 
-// drainLoop is the background goroutine that issues XADD commands. It exits
-// when ctx is cancelled, closing l.done.
+// drainLoop is the background goroutine that issues the XADD commands of the
+// live tail. It exits when ctx is cancelled, closing l.done.
 func (l *AuditLogger) drainLoop(ctx context.Context) {
 	defer close(l.done)
 	for {
 		select {
 		case item := <-l.writeQueue:
 			if err := l.doXAdd(ctx, item); err != nil {
-				auditWriteDropsTotal.Inc()
-				l.logger.Error("audit: ENTRY LOST — XADD failed, entry not persisted",
+				auditTailErrorsTotal.Inc()
+				l.logger.Warn("audit: the record did not reach the live tail, Postgres holds it",
 					slog.String("stream", item.streamKey),
 					slog.String("entry_id", item.entry.ID),
 					slog.String("tenant_id", item.entry.TenantID),
-					slog.String("actor_id", item.entry.ActorID),
 					slog.String("action", item.entry.Action),
-					slog.String("resource_id", item.entry.ResourceID),
 					slog.String("error", err.Error()),
 				)
 			}
@@ -246,17 +244,13 @@ func (l *AuditLogger) doXAdd(ctx context.Context, item auditWrite) error {
 	return nil
 }
 
-// Log enqueues an audit entry with result "success" for asynchronous write to
-// the tenant's Redis Stream.
+// Log records an audit entry with result "success".
 //
 // The tenant is extracted from ctx via auth.TenantStringFromContext; the actor is
-// extracted via auth.IdentityFromContext. If no tenant or identity is found in
-// the context, sensible defaults ("unknown") are used so that logging never
-// blocks the calling operation.
+// extracted via auth.IdentityFromContext. An entry with no actor is refused.
 //
-// Log blocks for at most enqueueTimeout. If the queue is still full when
-// that expires the entry is LOST: gibson_audit_write_drops_total is
-// incremented and the entry's identity is logged at ERROR.
+// Log hands the entry to the durable writer and blocks while the queue of
+// that writer is full. It drops nothing.
 func (a *AuditLogger) Log(
 	ctx context.Context,
 	action, resource, resourceID string,
@@ -265,16 +259,10 @@ func (a *AuditLogger) Log(
 	a.LogWithResult(ctx, action, resource, resourceID, resultSuccess, details)
 }
 
-// LogWithResult enqueues an audit entry with the given result string for
-// asynchronous write to the tenant's Redis Stream. Use "success" or "failure"
-// as the result value; the constants audit.ResultSuccess and
-// audit.ResultFailure are provided for convenience.
+// LogWithResult records an audit entry with the given result string. Use
+// "success" or "failure" as the result value.
 //
 // Tenant and actor are extracted from ctx — see Log for details.
-//
-// LogWithResult blocks for at most enqueueTimeout. If the queue is still
-// full when that expires the entry is LOST: gibson_audit_write_drops_total
-// is incremented and the entry's identity is logged at ERROR.
 func (a *AuditLogger) LogWithResult(
 	ctx context.Context,
 	action, resource, resourceID, result string,
@@ -328,6 +316,10 @@ func (a *AuditLogger) LogWithResult(
 		detailsJSON = []byte("{}")
 	}
 
+	// The durable copy first. This call blocks while the queue of the
+	// writer is full.
+	a.durable.Log(durableEvent(entry, actorTypeFor(id.CredentialType), detailsJSON))
+
 	item := auditWrite{
 		streamKey: a.streamKey(tenantID),
 		entry:     entry,
@@ -345,33 +337,42 @@ func (a *AuditLogger) LogWithResult(
 		},
 	}
 
-	// Bounded backpressure: try to enqueue immediately, and if the queue is
-	// full wait a little for the drain goroutine to make room. Dropping an
-	// audit record because of a transient burst is not acceptable; blocking
-	// a request path indefinitely on Redis is not acceptable either, so the
-	// wait is bounded and expiring it is treated as data loss.
+	// The copy for the live tail. The record is already with the durable
+	// writer, so a tail that cannot take the copy does not hold the caller.
 	select {
 	case a.writeQueue <- item:
-		return
 	default:
-	}
-
-	timer := time.NewTimer(enqueueTimeout)
-	defer timer.Stop()
-
-	select {
-	case a.writeQueue <- item:
-	case <-timer.C:
-		auditWriteDropsTotal.Inc()
-		a.logger.Error("audit: ENTRY LOST — queue full past the backpressure deadline, entry not persisted",
+		auditTailErrorsTotal.Inc()
+		a.logger.Warn("audit: the live tail queue is full, the record is not in the tail, Postgres holds it",
 			slog.String("entry_id", entry.ID),
 			slog.String("tenant_id", tenantID),
-			slog.String("actor_id", entry.ActorID),
 			slog.String("action", action),
-			slog.String("resource", resource),
-			slog.String("resource_id", resourceID),
-			slog.String("result", result),
 		)
+	}
+}
+
+// durableEvent maps an entry of the logger onto a row of audit_log. The
+// metadata holds the entry id, the result and the details, so the row has
+// each field that the live tail has.
+func durableEvent(entry AuditEntry, actorType string, detailsJSON []byte) Event {
+	meta, err := json.Marshal(struct {
+		EntryID string          `json:"entry_id"`
+		Result  string          `json:"result"`
+		Details json.RawMessage `json:"details"`
+	}{EntryID: entry.ID, Result: entry.Result, Details: detailsJSON})
+	if err != nil {
+		// detailsJSON is valid JSON from json.Marshal, so this cannot fail.
+		// Keep the record with the fields that always encode.
+		meta = []byte(`{"entry_id":"` + entry.ID + `"}`)
+	}
+	return Event{
+		TenantID:   entry.TenantID,
+		ActorID:    entry.ActorID,
+		ActorType:  actorType,
+		Action:     entry.Action,
+		TargetType: entry.Resource,
+		TargetID:   entry.ResourceID,
+		Metadata:   meta,
 	}
 }
 
@@ -504,4 +505,17 @@ func entryFromStreamValues(values map[string]any) (AuditEntry, error) {
 		Details:    details,
 		Result:     getString("result"),
 	}, nil
+}
+
+// actorTypeFor maps the credential class of the caller onto the actor_type
+// column of audit_log.
+func actorTypeFor(c auth.CredentialType) string {
+	switch c {
+	case auth.CredentialClientCredentials:
+		return "system"
+	case auth.CredentialCapabilityGrant:
+		return "agent"
+	default:
+		return "user"
+	}
 }

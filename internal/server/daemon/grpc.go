@@ -689,7 +689,10 @@ func (d *daemonImpl) buildGRPCServer(ctx context.Context) (*grpcSubsystem, error
 	// Create and register daemon service.
 	// Attach the quota manager so RunMission enforces per-tenant mission limits.
 	daemonSvc := api.NewDaemonServer(d, d.credentialHandler, d.logger.Slog())
-	auditLogger := wireDaemonAudit(ctx, d.stateClient, d.logger.Slog(), daemonSvc)
+	auditLogger, err := wireDaemonAudit(ctx, d.stateClient, d.platformDB, d.logger.Slog(), daemonSvc)
+	if err != nil {
+		return nil, err
+	}
 	// SSRF egress policy for every LLM provider this server constructs from a
 	// tenant-supplied base_url. Off by default (guard on); operators running an
 	// in-cluster or air-gapped model server opt in via

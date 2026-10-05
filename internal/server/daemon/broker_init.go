@@ -54,12 +54,16 @@ var brokerHealthGauge = promauto.NewGaugeVec(
 // failure or registry construction failure).
 func (d *daemonImpl) initBrokerStack(ctx context.Context, compSvc *component.ComponentServiceServer) error {
 	// --- 1. Audit writer ---
-	// The audit writer requires the Redis Streams AuditLogger already
-	// constructed in grpc.go and stored in d.stateClient.
+	// The audit logger hands each record to a writer on the platform
+	// database (the durable copy) and copies it to the Redis live tail.
 	if d.stateClient == nil {
 		return fmt.Errorf("broker stack: state client is nil; cannot construct audit writer")
 	}
-	auditLogger := audit.NewAuditLogger(ctx, d.stateClient, d.logger.Slog())
+	if d.platformDB == nil {
+		return fmt.Errorf("broker stack: platform database is nil; cannot construct audit writer")
+	}
+	auditLogger := audit.NewAuditLogger(
+		ctx, d.stateClient, newStartedAuditWriter(ctx, d.platformDB, d.logger.Slog()), d.logger.Slog())
 	auditWriter := secrets.NewAuditWriter(auditLogger, d.logger.Slog())
 	d.brokerAuditWriter = auditWriter
 	d.logger.Info(ctx, "broker stack: audit writer initialized")

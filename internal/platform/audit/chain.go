@@ -7,7 +7,14 @@
 //
 // Every row carries chain_seq (1-based, gapless within a tenant), prev_hash
 // (the preceding row's entry_hash) and entry_hash (SHA-256 over prev_hash
-// plus the row's own fields). Two kinds of tampering become detectable:
+// plus the row's own fields).
+//
+// Retention (retention.go) removes the oldest rows of a chain. It records
+// where the chain now starts in audit_chain_anchor: the position of the
+// oldest row that remains, and the hash that this row points at. The writer
+// and the verifier both start from that anchor.
+//
+// Two kinds of tampering become detectable:
 //
 //   - editing a stored field changes that row's canonical encoding, so its
 //     recomputed entry_hash no longer matches the stored one;
@@ -25,7 +32,8 @@
 // to where the chain currently ends. Closing either gap requires anchoring
 // the chain head somewhere the actor cannot reach — external notarisation,
 // or an HMAC key held off-box. Neither is implemented here; do not describe
-// this table as tamper-proof.
+// this table as tamper-proof. The retention anchor has the same limit: an
+// actor who can write the table can also write the anchor.
 package audit
 
 import (
@@ -140,9 +148,31 @@ type chainQuerier interface {
 	QueryRowContext(ctx context.Context, query string, args ...interface{}) *sql.Row
 }
 
+// chainAnchor returns where the chain of a tenant starts: the position that
+// the oldest row must have, and the hash that this row must point at. A
+// tenant that retention never pruned starts at position 1 with the genesis
+// hash.
+func chainAnchor(ctx context.Context, q chainQuerier, tenantID string) (firstSeq int64, prevHash []byte, err error) {
+	const query = `SELECT first_seq, prev_hash FROM audit_chain_anchor WHERE tenant_id = $1`
+
+	switch scanErr := q.QueryRowContext(ctx, query, tenantID).Scan(&firstSeq, &prevHash); {
+	case errors.Is(scanErr, sql.ErrNoRows):
+		return 1, chainGenesis(), nil
+	case scanErr != nil:
+		return 0, nil, fmt.Errorf("audit: read chain anchor for tenant %q: %w", tenantID, scanErr)
+	}
+	if firstSeq < 1 || len(prevHash) != chainHashLen {
+		return 0, nil, fmt.Errorf(
+			"audit: chain anchor for tenant %q is corrupt (first_seq %d, %d-byte prev_hash)",
+			tenantID, firstSeq, len(prevHash))
+	}
+	return firstSeq, prevHash, nil
+}
+
 // chainHead returns the tenant's current chain position and the entry_hash
 // the next row must point at. For a tenant with no chained rows it returns
-// (0, genesis) so the first row lands at chain_seq 1.
+// the position before the chain anchor, so the next row lands on the anchor.
+// With no anchor that is (0, genesis), and the first row lands at chain_seq 1.
 //
 // Callers must already hold the tenant's advisory lock — otherwise the value
 // is stale the moment it is read.
@@ -159,8 +189,14 @@ LIMIT  1`
 		gotHash []byte
 	)
 	switch scanErr := q.QueryRowContext(ctx, query, tenantID).Scan(&gotSeq, &gotHash); {
-	case scanErr == sql.ErrNoRows:
-		return 0, chainGenesis(), nil
+	case errors.Is(scanErr, sql.ErrNoRows):
+		// No row: the chain is new, or retention removed each row. The
+		// anchor tells the two apart.
+		firstSeq, prevHash, anchorErr := chainAnchor(ctx, q, tenantID)
+		if anchorErr != nil {
+			return 0, nil, anchorErr
+		}
+		return firstSeq - 1, prevHash, nil
 	case scanErr != nil:
 		return 0, nil, fmt.Errorf("audit: read chain head for tenant %q: %w", tenantID, scanErr)
 	}
@@ -213,6 +249,11 @@ type ChainReport struct {
 	// a non-zero count is a statement about coverage, not about integrity.
 	Unchained int
 
+	// FirstSeq is the position at which the stored chain starts. It is 1
+	// until retention removes the oldest rows. After that it is the position
+	// of the oldest row that remains.
+	FirstSeq int64
+
 	// Break is the failure kind, or ChainIntact.
 	Break ChainBreak
 
@@ -253,16 +294,19 @@ FROM   audit_log
 WHERE  tenant_id = $1 AND chain_seq IS NOT NULL
 ORDER  BY chain_seq ASC`
 
+	// Start from the retention anchor. Rows before it are gone by design.
+	expectedSeq, prevHash, err := chainAnchor(ctx, q.db, tenantID)
+	if err != nil {
+		return ChainReport{}, fmt.Errorf("audit.Query.VerifyChain: %w", err)
+	}
+	report.FirstSeq = expectedSeq
+
 	rows, err := q.db.QueryContext(ctx, rowQuery, tenantID)
 	if err != nil {
 		return ChainReport{}, fmt.Errorf("audit.Query.VerifyChain: read chain: %w", err)
 	}
 	defer func() { _ = rows.Close() }()
 
-	var (
-		expectedSeq int64 = 1
-		prevHash          = chainGenesis()
-	)
 	for rows.Next() {
 		r := chainRow{TenantID: tenantID}
 		if err := rows.Scan(
