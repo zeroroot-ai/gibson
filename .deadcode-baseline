@@ -413,8 +413,6 @@ operators/tenant/internal/health/downstream.go	PingFGA
 operators/tenant/internal/health/downstream.go	PingNeo4j
 operators/tenant/internal/health/downstream.go	PingRedis
 operators/tenant/internal/health/downstream.go	PingStripe
-operators/tenant/internal/mail/sender.go	NullSender.SendInvitation
-operators/tenant/internal/mail/sender.go	NullSender.SendWelcome
 operators/tenant/internal/migrations/migrations.go	EmbeddedFiles
 operators/tenant/internal/migrations/migrations.go	RunWithDB
 operators/tenant/internal/provision/entitlements_client.go	EntitlementsHTTPClient.ListFeatureTuples

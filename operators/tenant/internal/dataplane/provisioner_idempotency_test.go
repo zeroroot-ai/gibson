@@ -45,7 +45,6 @@ func TestPostgresProvisionIdempotent(t *testing.T) {
 	p, err := NewPostgresProvisioner(PostgresConfig{
 		AdminDSN:   pgDSN,
 		KEKDeriver: fixedKEKDeriver{},
-		DevMode:    true, // auto-recover dirty migrations in test environment
 	})
 	if err != nil {
 		t.Fatalf("NewPostgresProvisioner: %v", err)

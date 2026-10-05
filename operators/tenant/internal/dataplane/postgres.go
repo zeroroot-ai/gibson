@@ -12,7 +12,6 @@ import (
 	"time"
 
 	"github.com/golang-migrate/migrate/v4"
-	"github.com/golang-migrate/migrate/v4/database"
 	migratepg "github.com/golang-migrate/migrate/v4/database/postgres"
 	"github.com/jackc/pgx/v5"
 	"github.com/jackc/pgx/v5/pgconn"
@@ -103,24 +102,6 @@ type PostgresConfig struct {
 	// Vault is not used; the credential write is then skipped.
 	// Spec: tenant-provisioning-unification-phase2 Requirement 1.1.
 	VaultClient vaultadmin.AdminClient
-
-	// DevMode enables auto-recovery of dirty schema_migrations state
-	// (issue #46). When a tenant DB's golang-migrate run aborts midway,
-	// schema_migrations.dirty stays true and every subsequent Up()
-	// returns `Dirty database version N`. With DevMode=true the
-	// provisioner force-rolls the version back by one and re-applies
-	// migrations so the saga converges automatically. With DevMode=false
-	// (the default since the one-code-path epic deploy#205 hardcoded it)
-	// it is a permanent failure surfaced via WrapPermanent so the saga
-	// sets a recovery-required condition and a human runs the documented
-	// recovery flow.
-	//
-	// The two paths exist because dirty state on a real tenant DB may
-	// contain partially-applied user data; auto-clean there would
-	// silently corrupt it. The field is retained as a guard for the
-	// internal test fixtures only — the operator binary always sets it
-	// to false.
-	DevMode bool
 }
 
 // pgProvisioner provisions and deprovisions per-tenant Postgres databases.
@@ -516,41 +497,16 @@ func (p *pgProvisioner) runMigrations(ctx context.Context, tenantDSN, dbName str
 }
 
 // recoverFromDirtyMigrations handles a `schema_migrations.dirty=true`
-// state encountered by m.Up(). In DevMode it force-rolls the version
-// back by one and re-applies; in production it returns a permanent
-// error so the saga sets the manual-recovery condition and stops
-// retrying.
-func (p *pgProvisioner) recoverFromDirtyMigrations(m *migrate.Migrate, dirty migrate.ErrDirty, dbName string) error {
-	if !p.cfg.DevMode {
-		// Production-safe path: do nothing automatically. A real tenant
-		// DB may contain partially-applied user data; auto-clean here
-		// could silently corrupt it. Surface as permanent so the saga
-		// sets a DataPlaneNeedsManualRecovery condition; the operator
-		// runs the documented recovery flow.
-		return clients.WrapPermanent(fmt.Errorf(
-			"dataplane/postgres: %q has dirty schema_migrations at version %d (manual recovery required — see runbook): %w",
-			dbName, dirty.Version, dirty,
-		))
-	}
-
-	// Dev path: roll back to the prior version and re-apply. dirty.Version
-	// is the version that was partially applied when the previous run
-	// aborted; force-rolling to dirty.Version-1 lets the embedded source
-	// re-attempt N from a clean state.
-	target := dirty.Version - 1
-	if target < 0 {
-		// Edge case: the very first migration (version 1) went dirty.
-		// Force to the migrate "no version applied" sentinel so the
-		// next Up() runs from scratch.
-		target = database.NilVersion
-	}
-	if err := m.Force(target); err != nil {
-		return fmt.Errorf("dataplane/postgres: dev-mode dirty recovery: force(%d): %w", target, err)
-	}
-	if err := m.Up(); err != nil && !errors.Is(err, migrate.ErrNoChange) {
-		return fmt.Errorf("dataplane/postgres: dev-mode dirty recovery: up after force(%d): %w", target, err)
-	}
-	return nil
+// state encountered by m.Up(). It never cleans the state by itself: a real
+// tenant DB may contain partially-applied user data, and an automatic clean
+// could corrupt it silently. It returns a permanent error, so the saga sets
+// the manual-recovery condition and the operator runs the documented
+// recovery flow (ADR-0003: one behavior in every environment).
+func (p *pgProvisioner) recoverFromDirtyMigrations(_ *migrate.Migrate, dirty migrate.ErrDirty, dbName string) error {
+	return clients.WrapPermanent(fmt.Errorf(
+		"dataplane/postgres: %q has dirty schema_migrations at version %d (manual recovery required — see runbook): %w",
+		dbName, dirty.Version, dirty,
+	))
 }
 
 // buildTenantAdminDSN replaces the database component in the admin DSN with

@@ -1098,12 +1098,6 @@ func buildDataPlaneProvisioner(
 		// dataplane-readiness check at first authenticated RPC
 		// returns FailedPrecondition (tenant-operator#189).
 		VaultClient: vaultClient,
-		// DevMode is always false after the one-code-path epic
-		// (deploy#205): the operator boots identically in every
-		// environment. Dirty schema_migrations rows now ALWAYS
-		// require human intervention so partial user data isn't
-		// silently overwritten. Issue #46.
-		DevMode: false,
 	})
 	if err != nil {
 		log.Error(err, "postgres provisioner init failed")
