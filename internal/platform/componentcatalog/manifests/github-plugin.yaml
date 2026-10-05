@@ -22,3 +22,8 @@ spec:
   runtime: pod
   image: ghcr.io/zeroroot-ai/integrations/github@sha256:12a5cb2ae9b7ed4380b07d063bcac83caed8989bd18fd3c6633394aefeda093c
   svid: spiffe://zeroroot.ai/plugin/github
+  # Trusted, and four facts make it so. We wrote the code. The image is signed
+  # and pinned by digest. The plugin passes the content it handles through and
+  # does not execute or interpret it. Its egress is the one host above. An
+  # entry for which one of these is false states untrusted.
+  contentTrust: trusted
