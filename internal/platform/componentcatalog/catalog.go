@@ -34,6 +34,7 @@ import (
 
 	"gopkg.in/yaml.v3"
 
+	"github.com/zeroroot-ai/gibson/internal/engine/taxonomy"
 	"github.com/zeroroot-ai/gibson/internal/platform/authz"
 	connectorv1alpha1 "github.com/zeroroot-ai/gibson/operators/connector/api/v1alpha1"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
@@ -62,6 +63,10 @@ type Manifest struct {
 	// agent it maps to the setec Launch.Egress of its tool dispatches; for a
 	// workload it maps to the L7 profile + L3 NetworkPolicy.
 	EgressAllow []string `yaml:"egressAllow"`
+	// Coverage is what the component covers, as technique categories and
+	// techniques (ADR-0135, gibson#716). An agent, a tool or a plugin can
+	// state it; the planner reads it to select a capability for a candidate.
+	Coverage *CoverageDecl `yaml:"coverage"`
 	// Spec is the kind-discriminated runtime block, decoded into exactly one of
 	// the typed specs below.
 	Spec yaml.Node `yaml:"spec"`
@@ -238,6 +243,9 @@ func (m *Manifest) validate() error {
 	}
 	if !slices.Contains(manifestKinds, m.Kind) {
 		return fmt.Errorf("%s: kind %q must be one of %s", m.ID, m.Kind, strings.Join(manifestKinds, ", "))
+	}
+	if err := validateCoverage(m.ID, m.Kind, m.Coverage); err != nil {
+		return err
 	}
 	switch m.Kind {
 	case authz.KindConnector:
@@ -938,4 +946,50 @@ func (e ConnectorEntry) BuildConnectorInstance(namespace string) *connectorv1alp
 			Auth:        e.Auth,
 		},
 	}
+}
+
+// CoverageDecl is the coverage block of a manifest (ADR-0135): technique
+// category ids and technique ids.
+type CoverageDecl struct {
+	Categories []string `yaml:"categories"`
+	Techniques []string `yaml:"techniques"`
+}
+
+// validateCoverage refuses a coverage block on a connector, a category that
+// is not a core category, and a technique id that is not a plain identifier.
+// A technique comes from a Domain Pack (ADR-0133), so the loader checks only
+// its form; the planner checks it against the hierarchy of the mission.
+func validateCoverage(id, kind string, c *CoverageDecl) error {
+	if c == nil {
+		return nil
+	}
+	if kind == authz.KindConnector {
+		return fmt.Errorf("%s: a connector states no coverage; the planner does not dispatch one", id)
+	}
+	for _, cat := range c.Categories {
+		if !taxonomy.GlobalTechniques.HasCategory(taxonomy.CategoryID(cat)) {
+			return fmt.Errorf("%s: coverage category %q is not a core technique category", id, cat)
+		}
+	}
+	for _, tech := range c.Techniques {
+		if err := taxonomy.ValidIdentifier(tech); err != nil {
+			return fmt.Errorf("%s: coverage technique %q: %w", id, tech, err)
+		}
+	}
+	return nil
+}
+
+// LookupCoverage returns the coverage block of the catalog entry of kind and
+// id. ok is false when the catalog has no such entry or the entry states no
+// coverage.
+func LookupCoverage(kind, id string) (CoverageDecl, bool) {
+	for _, m := range catalog {
+		if m.Kind == kind && m.ID == id && m.Coverage != nil {
+			return CoverageDecl{
+				Categories: append([]string(nil), m.Coverage.Categories...),
+				Techniques: append([]string(nil), m.Coverage.Techniques...),
+			}, true
+		}
+	}
+	return CoverageDecl{}, false
 }

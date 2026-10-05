@@ -24,6 +24,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"github.com/zeroroot-ai/gibson/internal/platform/componentcatalog"
 	"log/slog"
 	"strings"
 	"sync"
@@ -362,7 +363,10 @@ func (b *brainExecutor) catalog(missionID string) []brain.Capability {
 	}
 	if tools, err := b.registry.ListTools(ctx); err == nil {
 		for _, t := range tools {
-			caps = append(caps, brain.Capability{Kind: "tool", Name: t.Name, Description: t.Description})
+			caps = append(caps, brain.Capability{
+				Kind: "tool", Name: t.Name, Description: t.Description,
+				Coverage: b.coverage("tool", t.Name, nil),
+			})
 		}
 	}
 	if plugins, err := b.registry.ListPlugins(ctx); err == nil {
@@ -371,32 +375,63 @@ func (b *brainExecutor) catalog(missionID string) []brain.Capability {
 			if len(p.Methods) > 0 {
 				desc = strings.TrimSpace(desc + " methods: " + strings.Join(p.Methods, ","))
 			}
-			caps = append(caps, brain.Capability{Kind: "plugin", Name: p.Name, Description: desc})
+			caps = append(caps, brain.Capability{
+				Kind: "plugin", Name: p.Name, Description: desc,
+				Coverage: b.coverage("plugin", p.Name, nil),
+			})
 		}
 	}
 	return caps
 }
 
-// agentCoverage converts an enrolled agent's declared technique types
-// (component.AgentInfo.TechniqueTypes — raw, unvalidated registry-metadata
-// strings) into a validated taxonomy.Coverage (ADR-0135,
-// gibson#386). An agent that declares no technique types, or one whose
-// declared category is not in GlobalTechniques, gets empty coverage rather
-// than breaking the whole catalog listing — the same "an agent can always
-// write, and can never invent schema" fallback the taxonomy package itself
-// uses for out-of-taxonomy shapes.
+// agentCoverage is the coverage of an enrolled agent: the technique types it
+// declares when it registers (component.AgentInfo.TechniqueTypes, raw
+// registry-metadata strings), plus the categories and techniques of its
+// catalog entry (ADR-0135, gibson#716).
 func (b *brainExecutor) agentCoverage(a component.AgentInfo) taxonomy.Coverage {
-	if len(a.TechniqueTypes) == 0 {
+	return b.coverage("agent", a.Name, a.TechniqueTypes)
+}
+
+// coverage builds the validated coverage of one capability: the extra
+// categories, and the coverage block of its catalog entry when it has one
+// (ADR-0135, gibson#716).
+//
+// Each id is checked on its own against the technique hierarchy. An id
+// outside it is dropped with a warning, and the rest stays: one stale id must
+// not hide what a capability does cover. A technique comes from a Domain Pack
+// (ADR-0133), so a technique that no pack of the hierarchy defines is
+// dropped the same way.
+func (b *brainExecutor) coverage(kind, name string, extraCategories []string) taxonomy.Coverage {
+	categories := append([]string(nil), extraCategories...)
+	var techniques []string
+	if decl, ok := componentcatalog.LookupCoverage(kind, name); ok {
+		categories = append(categories, decl.Categories...)
+		techniques = decl.Techniques
+	}
+	if len(categories) == 0 && len(techniques) == 0 {
 		return taxonomy.EmptyCoverage()
 	}
-	categories := make([]taxonomy.CategoryID, len(a.TechniqueTypes))
-	for i, t := range a.TechniqueTypes {
-		categories[i] = taxonomy.CategoryID(t)
+	h := taxonomy.GlobalTechniques
+	var cats []taxonomy.CategoryID
+	for _, c := range categories {
+		if !h.HasCategory(taxonomy.CategoryID(c)) {
+			b.logger.Warn("capability declares a category outside the taxonomy", "kind", kind, "name", name, "category", c)
+			continue
+		}
+		cats = append(cats, taxonomy.CategoryID(c))
 	}
-	coverage, err := taxonomy.NewCoverage(taxonomy.GlobalTechniques, categories, nil)
+	var techs []taxonomy.TechniqueID
+	for _, t := range techniques {
+		if !h.HasTechnique(taxonomy.TechniqueID(t)) {
+			b.logger.Warn("capability declares a technique outside the taxonomy", "kind", kind, "name", name, "technique", t)
+			continue
+		}
+		techs = append(techs, taxonomy.TechniqueID(t))
+	}
+	coverage, err := taxonomy.NewCoverage(h, cats, techs)
 	if err != nil {
-		b.logger.Warn("agent declares technique coverage outside the taxonomy",
-			"agent", a.Name, "technique_types", a.TechniqueTypes, "error", err)
+		// Each id was checked above, so this is a fault of the hierarchy.
+		b.logger.Warn("capability coverage could not be built", "kind", kind, "name", name, "error", err)
 		return taxonomy.EmptyCoverage()
 	}
 	return coverage

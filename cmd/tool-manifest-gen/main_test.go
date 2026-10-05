@@ -398,3 +398,14 @@ func TestWrap_KeepsEveryWord(t *testing.T) {
 		t.Error("an empty description wraps to nothing, not to one empty line")
 	}
 }
+
+// A tag the map knows becomes a category, once; a tag it does not know
+// becomes nothing (gibson#716).
+func TestCoverageCategories(t *testing.T) {
+	if got := coverageCategories([]string{"recon", "network", "recon"}); len(got) != 1 || got[0] != "reconnaissance" {
+		t.Errorf("recon tags = %v, want [reconnaissance]", got)
+	}
+	if got := coverageCategories([]string{"web", "vulnerability"}); len(got) != 0 {
+		t.Errorf("unknown tags = %v, want none", got)
+	}
+}

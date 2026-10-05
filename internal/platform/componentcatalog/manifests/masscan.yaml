@@ -11,6 +11,9 @@ description: >-
 # A scanner reaches the targets of its mission node. The network scope of
 # the node decides the egress of the tool sandbox (owner decision S6,
 # gibson#865), so the manifest states no ceiling. The catalog holds no "*".
+coverage:
+  categories:
+    - reconnaissance
 spec:
   contentTrust: untrusted
   dispatchMode: sandboxed

@@ -42,6 +42,9 @@ type catalogEnvelope struct {
 type tool struct {
 	Name        string `json:"name"`
 	Description string `json:"description"`
+	// Tags are the executor's labels for the tool. tagCategories turns the
+	// ones it knows into technique categories (gibson#716).
+	Tags []string `json:"tags"`
 	// OutputProtoType is the response message the tool emits. It is the
 	// catalog's answer to "does this tool produce graph nodes": a tool whose
 	// output is gibson.graphrag.v1.DiscoveryResult is expected to populate it,
@@ -245,6 +248,14 @@ func manifest(image string, t tool) []byte {
 	fmt.Fprintf(&b, "# A scanner reaches the targets of its mission node. The network scope of\n")
 	fmt.Fprintf(&b, "# the node decides the egress of the tool sandbox (owner decision S6,\n")
 	fmt.Fprintf(&b, "# gibson#865), so the manifest states no ceiling. The catalog holds no \"*\".\n")
+	if cats := coverageCategories(t.Tags); len(cats) > 0 {
+		// The technique categories the tool covers (ADR-0135, gibson#716),
+		// derived from its tags by tagCategories.
+		fmt.Fprintf(&b, "coverage:\n  categories:\n")
+		for _, c := range cats {
+			fmt.Fprintf(&b, "    - %s\n", c)
+		}
+	}
 	fmt.Fprintf(&b, "spec:\n")
 	// Third-party scanners parsing attacker-influenced output: untrusted, and
 	// therefore always sandboxed (ADR-0110).
@@ -277,4 +288,27 @@ func wrap(s string, width int) []string {
 		cur += " " + w
 	}
 	return append(lines, cur)
+}
+
+// tagCategories maps an executor tool tag to the core technique category it
+// names (ADR-0135, gibson#716). A tag with no entry names no category. The
+// map is the one place where a tool tag becomes coverage, so a new category
+// for a tool is one line here and a regeneration.
+var tagCategories = map[string]string{
+	"recon": "reconnaissance",
+}
+
+// coverageCategories returns the categories of the tags, sorted and without
+// repeats.
+func coverageCategories(tags []string) []string {
+	seen := map[string]bool{}
+	var out []string
+	for _, tag := range tags {
+		if c, ok := tagCategories[tag]; ok && !seen[c] {
+			seen[c] = true
+			out = append(out, c)
+		}
+	}
+	sort.Strings(out)
+	return out
 }
