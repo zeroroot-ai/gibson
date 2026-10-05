@@ -1,5 +1,12 @@
 # Changelog
 
+## [0.153.2](https://github.com/zeroroot-ai/gibson/compare/v0.153.1...v0.153.2) (2026-10-05)
+
+
+### Bug Fixes
+
+* **platform-operator:** a reconcile that succeeds says the client exists ([#801](https://github.com/zeroroot-ai/gibson/issues/801)) ([806c8e7](https://github.com/zeroroot-ai/gibson/commit/806c8e70e2e2ae34694482c3c94ebc4ef84967dd))
+
 ## [0.153.1](https://github.com/zeroroot-ai/gibson/compare/v0.153.0...v0.153.1) (2026-10-05)
 
 
