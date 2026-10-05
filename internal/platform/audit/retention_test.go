@@ -263,6 +263,24 @@ func TestRetention_Prune_ListFailure(t *testing.T) {
 	require.Error(t, err)
 }
 
+func TestRetention_Prune_ScanFailure(t *testing.T) {
+	r, mock := newTestRetention(t, 13, time.Now())
+	mock.ExpectQuery("SELECT DISTINCT tenant_id FROM audit_log").
+		WillReturnRows(sqlmock.NewRows([]string{"tenant_id"}).AddRow(nil))
+	before := testutil.ToFloat64(auditRetentionErrorsTotal)
+	_, err := r.Prune(context.Background())
+	require.ErrorContains(t, err, "scan tenant")
+	assert.InDelta(t, 1, testutil.ToFloat64(auditRetentionErrorsTotal)-before, 0.001)
+}
+
+func TestRetention_Prune_RowErrorFailsTheList(t *testing.T) {
+	r, mock := newTestRetention(t, 13, time.Now())
+	mock.ExpectQuery("SELECT DISTINCT tenant_id FROM audit_log").
+		WillReturnRows(sqlmock.NewRows([]string{"tenant_id"}).AddRow("acme").RowError(0, assert.AnError))
+	_, err := r.Prune(context.Background())
+	require.ErrorIs(t, err, assert.AnError)
+}
+
 // TestRetention_Run_PrunesAtStartAndStopsWithTheContext: Run makes one run
 // at once, and it returns when its context ends.
 func TestRetention_Run_PrunesAtStartAndStopsWithTheContext(t *testing.T) {

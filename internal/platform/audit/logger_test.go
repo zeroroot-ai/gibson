@@ -629,6 +629,12 @@ func TestNewAuditLogger_RequiresTheDurableWriter(t *testing.T) {
 	require.Panics(t, func() {
 		NewAuditLogger(context.Background(), stateClient, nil, slog.Default())
 	})
+	require.Panics(t, func() {
+		NewAuditLogger(context.Background(), nil, &recordingEmitter{}, slog.Default())
+	}, "a nil state client")
+	require.Panics(t, func() {
+		NewAuditLogger(context.Background(), stateClient, &recordingEmitter{}, nil)
+	}, "a nil logger")
 }
 
 // TestActorTypeFor maps each credential class onto the actor_type column.
