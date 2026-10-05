@@ -6,6 +6,7 @@ package api
 import (
 	"context"
 	"errors"
+	"strings"
 	"testing"
 
 	"github.com/DATA-DOG/go-sqlmock"
@@ -27,14 +28,20 @@ func TestListDesiredCatalogPlugins_ReturnsEveryPair(t *testing.T) {
 	mock.ExpectQuery("FROM   tenant_catalog_plugins").
 		WillReturnRows(sqlmock.NewRows([]string{"tenant_id", "plugin_id", "phase", "last_error"}).
 			AddRow("acme", "github", "Ready", "").
+			AddRow("acme", "left-the-catalog", "Ready", "").
 			AddRow("globex", "github", "Pending", ""))
 
 	resp, err := srv.ListDesiredCatalogPlugins(context.Background(), &daemonoperatorv1.ListDesiredCatalogPluginsRequest{})
 	if err != nil {
 		t.Fatalf("ListDesiredCatalogPlugins: %v", err)
 	}
+	// The row of a plugin the catalog no longer lists is not in the answer.
 	if len(resp.GetPlugins()) != 2 || resp.GetPlugins()[1].GetTenantId() != "globex" || resp.GetPlugins()[1].GetPluginId() != "github" {
 		t.Fatalf("plugins = %v", resp.GetPlugins())
+	}
+	first := resp.GetPlugins()[0]
+	if !strings.Contains(first.GetImage(), "@sha256:") || len(first.GetEgressAllow()) == 0 {
+		t.Fatalf("the answer must carry the catalog image and egress list, got %v", first)
 	}
 	if err := mock.ExpectationsWereMet(); err != nil {
 		t.Errorf("expectations: %v", err)

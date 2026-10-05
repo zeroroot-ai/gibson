@@ -10,6 +10,7 @@ import (
 	"google.golang.org/grpc/status"
 
 	"github.com/zeroroot-ai/gibson/internal/platform/catalogplugin"
+	"github.com/zeroroot-ai/gibson/internal/platform/componentcatalog"
 	daemonoperatorv1 "github.com/zeroroot-ai/gibson/internal/server/daemon/api/gibson/daemon/operator/v1"
 )
 
@@ -31,9 +32,21 @@ func (s *DaemonServer) ListDesiredCatalogPlugins(
 	if err != nil {
 		return nil, status.Errorf(codes.Internal, "list desired catalog plugins: %v", err)
 	}
+	// The image and the egress list come from the catalog of this daemon. A
+	// row whose plugin left the catalog is not desired any more: the operator
+	// does not get it, and it removes the instance.
 	out := make([]*daemonoperatorv1.DesiredCatalogPlugin, 0, len(plugins))
 	for _, p := range plugins {
-		out = append(out, &daemonoperatorv1.DesiredCatalogPlugin{TenantId: p.TenantID, PluginId: p.PluginID})
+		entry, listed := componentcatalog.LookupPlugin(p.PluginID)
+		if !listed {
+			continue
+		}
+		out = append(out, &daemonoperatorv1.DesiredCatalogPlugin{
+			TenantId:    p.TenantID,
+			PluginId:    p.PluginID,
+			Image:       entry.Image,
+			EgressAllow: entry.EgressAllow,
+		})
 	}
 	return &daemonoperatorv1.ListDesiredCatalogPluginsResponse{Plugins: out}, nil
 }

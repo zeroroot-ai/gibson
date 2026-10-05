@@ -840,6 +840,12 @@ message DesiredCatalogPlugin {
   string tenant_id = 1;
   // plugin_id is the catalog id of the plugin, for example "github".
   string plugin_id = 2;
+  // image is the image of the plugin, pinned by digest, from the catalog
+  // entry of the daemon. The operator runs this image and no other, so the
+  // catalog of the daemon is the one source of what runs.
+  string image = 3;
+  // egress_allow is the egress list of the catalog entry, as "host:port".
+  repeated string egress_allow = 4;
 }
 
 message ListDesiredCatalogPluginsResponse {
