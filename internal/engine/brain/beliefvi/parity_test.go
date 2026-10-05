@@ -144,7 +144,7 @@ func TestCheckParityFixtureCurrent_FailsOnAChangedReference(t *testing.T) {
 				if err := os.MkdirAll(filepath.Dir(dst), 0o750); err != nil {
 					t.Fatal(err)
 				}
-				if err := os.WriteFile(dst, body, 0o600); err != nil {
+				if err := os.WriteFile(dst, body, 0o600); err != nil { // #nosec G703 -- dst is under t.TempDir()
 					t.Fatal(err)
 				}
 			}
@@ -157,7 +157,7 @@ func TestCheckParityFixtureCurrent_FailsOnAChangedReference(t *testing.T) {
 			if err != nil {
 				t.Fatal(err)
 			}
-			if err := os.WriteFile(path, append(body, '\n'), 0o600); err != nil {
+			if err := os.WriteFile(path, append(body, '\n'), 0o600); err != nil { // #nosec G703 -- path is under t.TempDir()
 				t.Fatal(err)
 			}
 			err = checkParityFixtureCurrent(fixture.ReferenceDigest, dir)
