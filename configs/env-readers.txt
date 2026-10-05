@@ -6,6 +6,7 @@
 # token in a string literal and every env-shaped selector, from every tracked
 # Go file that is not a test. zeroroot-ai/charts vendors this file.
 AAD
+ACCESS_TOKEN_TYPE_BEARER
 ACCESS_TOKEN_TYPE_JWT
 ACTION_EXECUTE
 ACTION_READ
