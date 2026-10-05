@@ -8,10 +8,11 @@
 // calls Permitted() after shape-matching; if the result is empty, the
 // resolver returns codes.PermissionDenied.
 //
-// The filter is wired. Both slot managers install it when the daemon has an
-// authorizer: buildSlotManagerForSet (internal/server/daemon/harness_init.go)
-// for each per-tenant slot manager, and internal/server/daemon/grpc.go for the
-// infrastructure slot manager.
+// The filter is wired on the daemon's slot manager (DaemonSlotManager) at two
+// sites, when the daemon has an authorizer: buildSlotManagerForSet
+// (internal/server/daemon/harness_init.go) for each per-tenant slot manager,
+// and internal/server/daemon/grpc.go for the infrastructure slot manager.
+// DefaultSlotManager.WithModelFilter in internal/engine/llm has no caller.
 //
 // With an acting user, the gate fails closed: a user with no can_use grant on
 // a candidate's model, directly or through its provider, gets no candidate.
