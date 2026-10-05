@@ -81,7 +81,7 @@ type VaultTokenSource interface {
 //     VaultTransitReady
 //  5. Plan sync (hash-based) → PlanSyncComplete
 //  6. Register cluster-internal Zitadel Service hostname as trusted domain →
-//     TrustedDomainReady (ADR-0006)
+//     TrustedDomainReady (ADR-0092)
 //  7. Top-level Ready = AND(above)
 //
 // Children (OIDCClient CRs) are owned via ownerReferences so K8s GC
@@ -212,7 +212,7 @@ func (r *PlatformBootstrapReconciler) Reconcile(ctx context.Context, req ctrl.Re
 		// sa-identity-map-populator Sync Job (gitops#170).
 		r.reconcileSAIdentityMap,
 		// Step 3: Register cluster-internal Zitadel Service hostname as a trusted
-		// domain so in-cluster consumers can dial it directly (ADR-0008).
+		// domain so in-cluster consumers can dial it directly (ADR-0092).
 		//
 		// Ordering rationale: trusted-domain registration depends only on
 		// reconcileZitadelProject (Step 1) + reconcileOIDCChildren (Step 2)

@@ -59,7 +59,7 @@ type SecretsAdminAuditQuery interface {
 	List(ctx context.Context, tenantID string, filters audit.Filters, limit, offset int) ([]audit.PgEntry, int, error)
 }
 
-// SecretsAdminServer implements the secrets-CRUD portion of tenantv1.SecretsServiceServer (ADR-0039).
+// SecretsAdminServer implements the secrets-CRUD portion of tenantv1.SecretsServiceServer (ADR-0058).
 // Broker-config methods (GetBrokerConfig/ProbeBrokerConfig/SetBrokerConfig/CountSecrets) are
 // handled by CombinedSecretsServer, which delegates to TenantAdminServer for those RPCs.
 //

@@ -93,7 +93,7 @@ type ComponentInfo struct {
 	// RegisterComponentRequest.method_descriptors. Empty for tool/agent kinds and
 	// for plugins registered by SDKs that predate the field. The connector
 	// catalog (SearchTools) reads the descriptions from here so an agent can
-	// disambiguate a connector's tools. Per ADR-0047 facet 5.
+	// disambiguate a connector's tools. Per ADR-0065.
 	Methods []MethodInfo `json:"methods,omitempty"`
 }
 

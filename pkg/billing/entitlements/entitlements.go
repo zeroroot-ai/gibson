@@ -17,7 +17,7 @@
 // pkg/billing/entitlements/v1 to implement the server side without violating
 // Go's internal/ import restriction.
 //
-// Runtime seam (ADR-0003 / ADR-0054 / gibson#1026 / gibson#1028 / gibson#1087):
+// Runtime seam (ADR-0003 / ADR-0089 / gibson#1026 / gibson#1028 / gibson#1087):
 //
 //   - When ENTITLEMENTS_ENDPOINT is set (hosted daemon build), New returns a
 //     caching gRPC client that calls the closed billing service's
@@ -34,7 +34,7 @@
 // layer — never behind this seam.
 //
 // The resolution logic is implemented using the reusable [pkg/seam] primitive
-// (deploy ADR-0006, gibson#1087) so the knob-set/fail-safe semantics and the
+// (ADR-0074, gibson#1087) so the knob-set/fail-safe semantics and the
 // observable degradation signals are consistent across all seams.
 //
 // # SaaS fail-closed (Invariants 3 and 4, gibson#1097 + gibson#1098)
@@ -137,7 +137,7 @@ const SeamKnob = "ENTITLEMENTS_ENDPOINT"
 
 func init() {
 	// Register the entitlements seam in the process-wide seam registry so it
-	// appears in the daemon's startup seam-state log (deploy ADR-0006,
+	// appears in the daemon's startup seam-state log (ADR-0074,
 	// gibson#1087).
 	seam.Register(SeamName, SeamKnob, "billing/entitlements-svc")
 }
@@ -176,7 +176,7 @@ func init() {
 // (unchanged). Usage is still metered; nothing is enforced.
 //
 // The resolution is implemented on top of the reusable [pkg/seam] primitive
-// (deploy ADR-0006, gibson#1087) — the same knob-set→remote / knob-absent→
+// (ADR-0074, gibson#1087) — the same knob-set→remote / knob-absent→
 // fail-safe / fail-safe-emits-observable semantics apply to all seams.
 func New(db *sql.DB) Provider {
 	required := Required()

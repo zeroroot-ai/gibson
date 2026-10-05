@@ -508,7 +508,7 @@ func TestCompleteConnectorAuthorization_RequiresAnIdentity(t *testing.T) {
 	seedPending(pending, "state-1", "connector-gitlab", vendor.URL, "acme")
 
 	// A context with no identity: a grant with no recorded human is the thing
-	// ADR-0064 refuses to create.
+	// ADR-0061 refuses to create.
 	_, err := srv.CompleteConnectorAuthorization(context.Background(),
 		&tenantv1.CompleteConnectorAuthorizationRequest{Code: "c", State: "state-1"})
 	if status.Code(err) != codes.PermissionDenied {

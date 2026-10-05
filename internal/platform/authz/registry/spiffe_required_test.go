@@ -36,7 +36,7 @@ var allowedUnauthenticated = map[string]bool{
 	// GetReservedNames is intentionally unauthenticated on MembershipService.
 	// It returns the chart-managed denylist for the signup form — a pre-auth
 	// surface where no tenant JWT can be present. Spec: issue #395
-	// (tenant-service-admin-handlers: GetReservedNames). ADR-0039: moved from
+	// (tenant-service-admin-handlers: GetReservedNames). ADR-0058: moved from
 	// gibson.admin.v1.TenantAdminService to gibson.tenant.v1.MembershipService.
 	"/gibson.tenant.v1.MembershipService/GetReservedNames": true,
 
@@ -45,7 +45,7 @@ var allowedUnauthenticated = map[string]bool{
 	// The attempt_id is an opaque UUID-v4 capability functioning as a single-use token;
 	// the response carries only step names + error codes, never PII.
 	// Spec: dashboard-no-backing-store-clients (Module 2 — Signup Progress RPC).
-	// ADR-0039: promoted from daemon-local gibson.user.v1.UserService to
+	// ADR-0058: promoted from daemon-local gibson.user.v1.UserService to
 	// gibson.tenant.v1.UserService. The daemon-local user/v1 proto package was
 	// deleted in gibson#502, so tenant.v1 is the only entry.
 	"/gibson.tenant.v1.UserService/GetSignupProgress": true,
@@ -65,7 +65,7 @@ var allowedUnauthenticated = map[string]bool{
 	// (internal/server/admin/invitation_handlers.go: GetByTokenHash + pending +
 	// expiry checks; PermissionDenied on an unknown/invalid token). Same
 	// token-capability pattern as SetSignupProgress above. The annotation
-	// shipped in the SDK proto (gibson/tenant/v1/membership.proto, ADR-0039
+	// shipped in the proto (gibson/tenant/v1/membership.proto, ADR-0058
 	// decomposed MembershipService); this guard list lagged it.
 	"/gibson.tenant.v1.MembershipService/AcceptInvitation": true,
 
@@ -76,11 +76,11 @@ var allowedUnauthenticated = map[string]bool{
 	// provisioning privilege so the caller no longer needs the Zitadel
 	// signup-bot IAM PAT or cluster write (dashboard#812/#813). The handler
 	// validates the attempt_id and rate-limits the request.
-	// Spec: E9 signup-rpc-zitadel-move (gibson#812, ADR-0043/0044).
+	// Spec: E9 signup-rpc-zitadel-move (gibson#812, ADR-0093/0058).
 	"/gibson.tenant.v1.SignupService/Signup": true,
 
 	// Register is intentionally unauthenticated for the same reason Signup is:
-	// it is the admin-approval registration rung's one door (ADR-0006,
+	// it is the admin-approval registration rung's one door (ADR-0074,
 	// gibson#22), and it runs before any tenant, membership or session exists,
 	// so there is no principal to FGA-check. It creates a DEACTIVATED account
 	// and a pending row and nothing else; what turns that into a tenant is

@@ -37,7 +37,7 @@ func TestGrantValidate_RefusesEachMissingField(t *testing.T) {
 		{"token_endpoint", func(g *Grant) { g.TokenEndpoint = "" }},
 		{"client_id", func(g *Grant) { g.ClientID = "" }},
 		// Not cosmetic: a grant with no recorded human is a service account
-		// nobody is accountable for, which ADR-0064 refuses outright.
+		// nobody is accountable for, which ADR-0061 refuses outright.
 		{"authorized_by", func(g *Grant) { g.AuthorizedBy = "" }},
 	}
 	for _, tc := range cases {

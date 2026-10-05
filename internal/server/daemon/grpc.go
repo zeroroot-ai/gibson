@@ -1058,12 +1058,12 @@ func (d *daemonImpl) buildGRPCServer(ctx context.Context) (*grpcSubsystem, error
 
 	daemonpb.RegisterDaemonServiceServer(srv, daemonSvc)
 	// Register DaemonOperatorService — the platform-sdk-published internal
-	// operator RPC surface (ADR-0037). Replaces PlatformOperatorService from
+	// operator RPC surface (ADR-0058). Replaces PlatformOperatorService from
 	// platform-sdk v0.7 and below. Same DaemonServer instance so all RPCs share
 	// orchestration state. Envoy gates /gibson.daemon.operator.v1.* with the
 	// operator JWT requirement.
 	daemonoperatorv1.RegisterDaemonOperatorServiceServer(srv, daemonSvc)
-	// ADR-0039: UserService promoted from daemon-local gibson.user.v1 to
+	// ADR-0058: UserService promoted from daemon-local gibson.user.v1 to
 	// gibson.tenant.v1.UserService; the user/v1 package was deleted in
 	// gibson#502. The service name is what the authz registry and ext-authz
 	// expect.
@@ -1077,7 +1077,7 @@ func (d *daemonImpl) buildGRPCServer(ctx context.Context) (*grpcSubsystem, error
 	// SetSignupProgress), so ext-authz lets it through pre-tenant.
 	tenantv1.RegisterSignupServiceServer(srv, daemonSvc)
 
-	// Resolve and wire the signup seam policy (deploy ADR-0006, gibson#1094).
+	// Resolve and wire the signup seam policy (ADR-0074, gibson#1094).
 	// signup.Resolve reads SIGNUP_SELF_SERVE from the environment: any non-empty
 	// value activates PolicySelfServe (SaaS profile); absent → PolicyAdminOnly
 	// (self-hosted fail-safe, fail-closed). The seam.LogStartupState call below
@@ -1266,7 +1266,7 @@ func (d *daemonImpl) buildGRPCServer(ctx context.Context) (*grpcSubsystem, error
 	// registry annotation; ADR-0023 preserved (the daemon never touches K8s).
 	tenantv1.RegisterAdminTenantServiceServer(srv, daemonSvc)
 
-	// Register TenantService — the OSS SDK tenant-management surface (ADR-0037).
+	// Register TenantService — the tenant-management surface (ADR-0058).
 	// Replaces gibson.tenant.v1.TenantAdminService (platform-sdk). Customer-
 	// callable: FGA enforces the tenant member relation. Initialise the IdP admin
 	// client from env vars; fail-closed if the env is set but invalid.
@@ -1304,7 +1304,7 @@ func (d *daemonImpl) buildGRPCServer(ctx context.Context) (*grpcSubsystem, error
 	tenantv1.RegisterTenantServiceServer(srv, daemonSvc)
 	d.logger.Info(ctx, "registered TenantService gRPC endpoint")
 
-	// ADR-0039: Register gibson.tenant.v1.MembershipService + SecretsService in place of
+	// ADR-0058: Register gibson.tenant.v1.MembershipService + SecretsService in place of
 	// the deleted platform-sdk admin.v1.TenantAdminService + admin.v1.SecretsAdminService.
 	//
 	// MembershipService: owns member/team/component-access RPCs — backed by TenantAdminServer.
@@ -1314,7 +1314,7 @@ func (d *daemonImpl) buildGRPCServer(ctx context.Context) (*grpcSubsystem, error
 	// Both services share the same broker-stack availability gate. When the gate fails we
 	// register Unavailable stubs so the dashboard gets codes.Unavailable (actionable) rather
 	// than codes.Unimplemented (looks like a daemon-version mismatch).
-	// Spec: tenant-secrets-broker-completion (Task 11, design D2); ADR-0039.
+	// Spec: tenant-secrets-broker-completion (Task 11, design D2); ADR-0058.
 	// The component event wire (gibson#154): one publisher for the admin
 	// servers, one hub per replica for the WatchComponentEvents streams.
 	// Both ride the daemon's Redis, so a revocation on one replica reaches
@@ -1468,7 +1468,7 @@ func (d *daemonImpl) buildGRPCServer(ctx context.Context) (*grpcSubsystem, error
 
 	// Register ConnectorAuthService (gibson.tenant.v1) and build the
 	// connector-token refresher loop — the platform half of connector OAuth
-	// (ADR-0064, gibson#1487): the dashboard delivers a finished browser
+	// (ADR-0061, gibson#1487): the dashboard delivers a finished browser
 	// authorization as a grant; the loop mints fresh vendor access tokens
 	// ahead of expiry for every enabled connector holding one.
 	d.registerConnectorAuth(ctx, srv)
@@ -1505,7 +1505,7 @@ func (d *daemonImpl) buildGRPCServer(ctx context.Context) (*grpcSubsystem, error
 		}
 
 		// Register GrantsService (gibson.tenant.v1.GrantsService) — replaces
-		// the deleted platform-sdk admin.v1.GrantsAdminService (ADR-0039).
+		// the deleted platform-sdk admin.v1.GrantsAdminService (ADR-0058).
 		// Spec: component-bootstrap-e2e Requirement 9. platformDB is always
 		// non-nil after Start() (gibson#246).
 		grantsAuditWriter := audit.NewWriter(d.platformDB, d.logger.Slog())
@@ -1525,7 +1525,7 @@ func (d *daemonImpl) buildGRPCServer(ctx context.Context) (*grpcSubsystem, error
 		}
 
 		// Register ModelAccessService (gibson.tenant.v1.ModelAccessService) —
-		// replaces the deleted platform-sdk authz.v1.ModelAccessService (ADR-0039).
+		// replaces the deleted platform-sdk authz.v1.ModelAccessService (ADR-0058).
 		// Same DaemonServer instance; implements the interface via server_model_access.go.
 		// Spec: llm-user-attribution-governance (Requirement 4).
 		tenantv1.RegisterModelAccessServiceServer(srv, daemonSvc)
@@ -1581,23 +1581,23 @@ func (d *daemonImpl) buildGRPCServer(ctx context.Context) (*grpcSubsystem, error
 
 	// Register AgentIdentityService (gibson.tenant.v1.AgentIdentityService).
 	// Handlers live in internal/server/daemon/api/tenant_admin_create.go,
-	// tenant_admin_list.go, tenant_admin_revoke.go (ADR-0039).
+	// tenant_admin_list.go, tenant_admin_revoke.go (ADR-0058).
 	agentidentityv1.RegisterAgentIdentityServiceServer(srv, daemonSvc)
 	d.logger.Info(ctx, "registered gibson.tenant.v1.AgentIdentityService gRPC endpoint")
 
 	// Register ProviderService (gibson.tenant.v1.ProviderService).
 	// DaemonServer implements all provider CRUD RPCs via server_provider_config.go
-	// and server_provider_exec.go (ADR-0039).
+	// and server_provider_exec.go (ADR-0058).
 	tenantv1.RegisterProviderServiceServer(srv, daemonSvc)
 	d.logger.Info(ctx, "registered gibson.tenant.v1.ProviderService gRPC endpoint")
 
 	// Register BudgetService (gibson.tenant.v1.BudgetService) — replaces
-	// the deleted platform-sdk budget.v1.BudgetService (ADR-0039).
+	// the deleted platform-sdk budget.v1.BudgetService (ADR-0058).
 	tenantv1.RegisterBudgetServiceServer(srv, daemonSvc)
 	d.logger.Info(ctx, "registered gibson.tenant.v1.BudgetService gRPC endpoint")
 
 	// Register UsageService (gibson.tenant.v1.UsageService) — replaces
-	// the deleted platform-sdk usage.v1.UsageService (ADR-0039).
+	// the deleted platform-sdk usage.v1.UsageService (ADR-0058).
 	tenantv1.RegisterUsageServiceServer(srv, daemonSvc)
 	d.logger.Info(ctx, "registered gibson.tenant.v1.UsageService gRPC endpoint")
 

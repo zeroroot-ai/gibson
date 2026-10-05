@@ -13,7 +13,7 @@
 // the existing (plugin_name, method) dispatch key.
 //
 // The Engine depends only on the narrow ToolLister and Authorizer interfaces, so
-// it is unit-testable in isolation. See ADR-0047 facet 5.
+// it is unit-testable in isolation. See ADR-0065.
 package catalog
 
 import (
@@ -69,7 +69,7 @@ type Candidate struct {
 type Query struct {
 	// Text is a case-insensitive substring matched against the tool name and
 	// description. Empty matches everything. (Semantic ranking is a later
-	// enhancement; see ADR-0047.)
+	// enhancement; see ADR-0065.)
 	Text string
 	// Sources restricts results to the given sources. Empty means all.
 	Sources []toolid.Source

@@ -108,7 +108,7 @@ type AdminClient interface {
 
 	// DeactivateHumanUser blocks a human user from signing in, without
 	// deleting them or their credential. It is what "registered but not yet
-	// approved" means on the admin-approval registration rung (ADR-0006): the
+	// approved" means on the admin-approval registration rung (ADR-0074): the
 	// person chose a password at registration, the credential went straight to
 	// the IdP where credentials belong, and the account cannot be used until
 	// an administrator approves it.

@@ -36,7 +36,7 @@ type SecretStore interface {
 //
 // It never runs an interactive OAuth flow. Authorization is a human act that
 // happens once, in the operator's browser, against the customer's own vendor
-// instance (ADR-0064) — this only exercises the refresh_token grant, which is
+// instance (ADR-0061) — this only exercises the refresh_token grant, which is
 // machine-to-machine.
 type Refresher struct {
 	store  SecretStore

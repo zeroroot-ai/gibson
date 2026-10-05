@@ -26,7 +26,7 @@
 # The bring-up (stage 0, recreate, gvisor check, test-mode daemon) is the
 # tool-dispatch one, copied. ONE bring-up path.
 #
-# ADR-0012: NEVER on pull_request. It needs a live cluster, so it cannot gate
+# ADR-0080: NEVER on pull_request. It needs a live cluster, so it cannot gate
 # a PR. The merge gate is the ten-minute set in go-ci.yml.
 # ----------------------------------------------------------------------------
 name: exit-test-e2e-cluster
@@ -131,7 +131,7 @@ jobs:
           terraform_version: "1.9.8"
           terraform_wrapper: false
 
-      # Stage 0 writes the bringup keyring the install reads (ADR-0015). The
+      # Stage 0 writes the bringup keyring the install reads (ADR-0083). The
       # registry pull token is the keyring member GHCR_PULL_TOKEN. The state
       # dir is the runner's temp, because nothing here owns /bulk.
       - name: Stage 0, the substrate and the bringup keyring

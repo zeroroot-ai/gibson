@@ -18,7 +18,7 @@ import (
 // dependencies and is untestable in practice — the repo says so in
 // discovery_wiring_test.go. Nothing could assert that the keepalive options
 // were installed at all while they lived in there, which is precisely how the
-// main listener went without them (ADR-0063). Out here, a test can.
+// main listener went without them. Out here, a test can.
 //
 // It takes its inputs as arguments and reads no daemon state, so it stays
 // callable from a test with nothing constructed.
@@ -31,7 +31,7 @@ func baseServerOptions(
 	// scrubbing, correlation and validation all run outside it: they are fast and
 	// non-blocking, and a validation rejection should not be racing a timeout.
 	// It is on the UNARY chain only — a Mission has no bounded duration, so no
-	// streaming handler may ever acquire a deadline (ADR-0063).
+	// streaming handler may ever acquire a deadline.
 	unary = append(unary, newUnaryDeadlineInterceptor(defaultUnaryDeadline))
 
 	return []grpc.ServerOption{
@@ -46,7 +46,7 @@ func baseServerOptions(
 		grpc.MaxSendMsgSize(maxDaemonSendMsgBytes),
 		// Shared with the harness callback listener. Envoy PINGs both on the
 		// same interval; grpc-go's default enforcement answers that with GOAWAY
-		// too_many_pings and tears down live mission streams. ADR-0063.
+		// too_many_pings and tears down live mission streams.
 		grpckeepalive.Params(),
 		grpckeepalive.Enforcement(),
 	}

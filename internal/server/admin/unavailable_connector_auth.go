@@ -9,7 +9,7 @@
 // surfaces an actionable "service unavailable" message instead of the
 // misleading codes.Unimplemented an unregistered service would return.
 //
-// ADR-0064: gibson.tenant.v1.ConnectorAuthService.
+// ADR-0061: gibson.tenant.v1.ConnectorAuthService.
 package admin
 
 import (

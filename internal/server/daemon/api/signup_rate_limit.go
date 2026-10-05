@@ -111,7 +111,7 @@ var (
 	signupAttachGlobalHour   = ratelimit.Window{Max: 300, Period: hour}
 	signupCompleteGlobalHour = ratelimit.Window{Max: 300, Period: hour}
 
-	// Registration on the approval rung (ADR-0006, gibson#22). One call does
+	// Registration on the approval rung (ADR-0074, gibson#22). One call does
 	// the work the open rung's three do, so it carries the per-address budget
 	// of the first and the global breaker of the last.
 	//

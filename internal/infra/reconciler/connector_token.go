@@ -55,7 +55,7 @@ type ConnectorTokenConfig struct {
 }
 
 // ConnectorTokenReconciler mints fresh vendor access tokens ahead of expiry
-// for every enabled connector with a grant (ADR-0064). A per-connector
+// for every enabled connector with a grant (ADR-0061). A per-connector
 // refresh failure is logged and isolated so one revoked grant never stalls
 // the others.
 type ConnectorTokenReconciler struct {

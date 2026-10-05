@@ -17,7 +17,7 @@ import (
 	"github.com/zeroroot-ai/gibson/internal/platform/component"
 )
 
-// SearchTools implements the connector-catalog discovery RPC (ADR-0047 facet 5):
+// SearchTools implements the connector-catalog discovery RPC (ADR-0065):
 // it returns a small, ranked, authz-filtered set of tools matching the query.
 //
 // The caller subject is derived exactly as the Authorize handler does —

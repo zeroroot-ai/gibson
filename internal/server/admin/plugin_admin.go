@@ -156,7 +156,7 @@ type BootstrapTokenAuditor interface {
 	Audit(ctx context.Context, event secrets.AuditEvent)
 }
 
-// PluginsAdminServer implements tenantv1.PluginAdminServiceServer (ADR-0039).
+// PluginsAdminServer implements tenantv1.PluginAdminServiceServer (ADR-0058).
 type PluginsAdminServer struct {
 	tenantv1.UnimplementedPluginAdminServiceServer
 

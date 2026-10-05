@@ -16,7 +16,7 @@ type RefreshStatus struct {
 }
 
 // StatusBook records refresh outcomes so the status RPC can show an operator
-// why a connector's token is stale — ADR-0064 requires a refresh failure to
+// why a connector's token is stale — ADR-0061 requires a refresh failure to
 // be visible rather than silently leaving a dying token.
 //
 // In-memory by choice: the durable truth is the pair of secrets, and an error

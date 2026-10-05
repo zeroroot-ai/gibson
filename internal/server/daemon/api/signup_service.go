@@ -592,7 +592,7 @@ func (s *DaemonServer) Signup(ctx context.Context, req *tenantv1.SignupRequest) 
 //     customer and subscription BEFORE calling Signup and passes the customer
 //     id here, so an empty id in SaaS mode means the caller skipped payment
 //     setup entirely. Self-hosted installs leave the knob unset and are
-//     unaffected: ADR-0006 makes the billing seam bypassable on-prem by
+//     unaffected: ADR-0074 makes the billing seam bypassable on-prem by
 //     design, and this gate must not turn Stripe into an on-prem dependency.
 //
 // Rule 3 is a presence check, not a proof of payment — the daemon cannot talk

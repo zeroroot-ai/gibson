@@ -2,7 +2,7 @@
 // Copyright 2026 Zero Root AI
 
 // Package signup declares the self-serve signup seam for the gibson platform's
-// self-hosted vs SaaS deployment-profile model (deploy ADR-0006).
+// self-hosted vs SaaS deployment-profile model (ADR-0074).
 //
 // # Seam shape
 //
@@ -12,7 +12,7 @@
 // unset means "self-hosted fail-safe — admin-provision only, no public signup".
 //
 // The seam resolves a [Policy] value. The three values are the three
-// registration rungs of ADR-0006, which match what a GitLab self-managed
+// registration rungs of ADR-0074, which match what a GitLab self-managed
 // operator already knows:
 //
 //   - [PolicyAdminOnly] — the CLOSED rung, and the fail-safe when the knob is

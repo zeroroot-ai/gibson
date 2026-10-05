@@ -1,7 +1,7 @@
 # Coverage gates
 
 Two blocking CI gates govern test coverage in this repo (E3 /
-QUALITY-BARS §4). Together they supersede the former flat 60% bar (ADR-0021).
+QUALITY-BARS §4). Together they supersede the former flat 60% bar.
 
 | Gate | What it checks | Where | Blocking |
 |------|----------------|-------|----------|

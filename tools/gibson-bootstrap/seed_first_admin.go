@@ -7,7 +7,7 @@ package main
 // gibson-bootstrap.
 //
 // This subcommand is the bootstrap mechanism for fresh self-hosted installs
-// (deploy ADR-0006, gibson#1088). When SIGNUP_SELF_SERVE is unset, the only
+// (ADR-0074, gibson#1088). When SIGNUP_SELF_SERVE is unset, the only
 // way to create the initial principal is via AdminTenantService.AdminProvisionTenant.
 // This subcommand calls that RPC from a helm post-install Job (or on-demand CLI)
 // using the daemon's gRPC endpoint, seeding the first admin user + tenant.

@@ -12,7 +12,7 @@ import (
 
 // requiredTenantServices returns every gibson.tenant.v1.* service in the
 // registry that is NOT a known gap — i.e. the set the daemon must register.
-// Formerly only gibson.admin.v1.* was checked; ADR-0039 moved services to
+// Formerly only gibson.admin.v1.* was checked; ADR-0058 moved services to
 // the tenant surface.
 func requiredTenantServices() map[string]struct{} {
 	out := make(map[string]struct{})

@@ -4,7 +4,7 @@
 // Package admin — combined_secrets.go
 //
 // CombinedSecretsServer implements tenantv1.SecretsServiceServer by composing
-// two existing handler structs (ADR-0039):
+// two existing handler structs (ADR-0058):
 //
 //   - broker-config RPCs (GetBrokerConfig / ProbeBrokerConfig / SetBrokerConfig
 //     / CountSecrets) — delegated to *TenantAdminServer, which has always owned
@@ -12,7 +12,7 @@
 //   - secrets-CRUD RPCs (ListSecrets / GetSecret / SetSecret / RotateSecret /
 //     DeleteSecret / GetMissionAudit) — delegated to *SecretsAdminServer.
 //
-// The two structs are kept separate (ADR-0039 says "re-point handler structs,
+// The two structs are kept separate ("re-point handler structs,
 // swap types") so the existing FGA gating, probe logic, and audit pipelines
 // are untouched.
 //

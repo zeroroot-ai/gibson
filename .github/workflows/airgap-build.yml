@@ -1,4 +1,4 @@
-# airgap-build — E14 cutover gate (gibson#818, ADR-0050): a clean-room clone
+# airgap-build — E14 cutover gate (gibson#818, ADR-0089): a clean-room clone
 # of every public Go repo (sdk, adk, setec, gibson-executor, cve-triage,
 # integrations, gibson) builds air-gapped with zero external fetch — the
 # self-hostable/defense promise.
@@ -13,7 +13,7 @@
 # and there is no license client in any public repo to begin with.
 #
 # Triggers (deliberately off the per-PR fast tier — cicd-efficiency
-# ADR-0060: gibson PR content cannot change the OSS repos, so this runs
+# epic: gibson PR content cannot change the OSS repos, so this runs
 # path-filtered, weekly, and on demand):
 #   - pull_request, path-filtered to this workflow + its script
 #   - weekly schedule (drift watch over the OSS repos' default branches)

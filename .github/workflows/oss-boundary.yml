@@ -1,4 +1,4 @@
-# oss-boundary — E14 cutover invariant (gibson#817, ADR-0050/ADR-0054):
+# oss-boundary — E14 cutover invariant (gibson#817, ADR-0089):
 # the open (Apache-2.0) layer — sdk, adk, setec, gibson-executor — builds
 # with ZERO closed/ELv2 dependency, and gibson (ELv2) never requires the
 # closed billing repo (pkg/billing stays a no-op seam by default).
@@ -10,7 +10,7 @@
 # local guard, e.g. sdk's `make check-no-gibson`.
 #
 # Triggers (kept off the per-PR fast tier deliberately — cicd-efficiency
-# ADR-0060: gibson PR content cannot change the OSS repos' dependency
+# epic: gibson PR content cannot change the OSS repos' dependency
 # graphs, so running this on every PR would be pure spend):
 #   - pull_request, path-filtered to this workflow + its script + go.mod
 #     (go.mod: the gibson->billing direction IS gibson-content-dependent)

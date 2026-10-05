@@ -8,7 +8,7 @@
 // the ConnectorAuthService wiring. The reconciler walks the enabled set on a
 // clock; the adapter scopes the secret store to each tenant, treats "no grant
 // stored" as a quiet no-op, and records outcomes for the status RPC
-// (ADR-0064).
+// (ADR-0061).
 package daemon
 
 import (
@@ -80,7 +80,7 @@ func (d *daemonImpl) registerConnectorAuth(ctx context.Context, srv *grpc.Server
 	// against this same server (they share connectorPending above).
 	d.connectorAuthSrv = connAuthSrv
 	tenantv1.RegisterConnectorAuthServiceServer(srv, connAuthSrv)
-	d.logger.Info(ctx, "registered gibson.tenant.v1.ConnectorAuthService gRPC endpoint (ADR-0064)")
+	d.logger.Info(ctx, "registered gibson.tenant.v1.ConnectorAuthService gRPC endpoint (ADR-0061)")
 
 	// The loop walks the tenant's ConnectorInstance CRs (ADR-0065): the OAuth
 	// freshener's connector set comes from the ToolHive path, not from

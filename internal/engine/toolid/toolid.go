@@ -20,7 +20,7 @@
 //
 // An MCP id decomposes to the existing (plugin_name, method) dispatch key via
 // PluginRef, so connectors route through the daemon's existing PluginInvoke path
-// with no new mechanism. See ADR-0047 facet 5.
+// with no new mechanism. See ADR-0065.
 package toolid
 
 import (

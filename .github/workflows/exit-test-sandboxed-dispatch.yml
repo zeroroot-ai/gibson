@@ -19,7 +19,7 @@
 # daemon directly — the test-mode model every cluster-bound e2e suite uses.
 # Authentication itself is covered by login_full_chain / auth e2e, not here.
 #
-# ADR-0012: NEVER on pull_request. An exit test measures state on `main` for the
+# ADR-0080: NEVER on pull_request. An exit test measures state on `main` for the
 # launch scorecard; it needs a live cluster, so it cannot gate a PR. The merge
 # gate is the ten-minute set in go-ci.yml.
 # ----------------------------------------------------------------------------
@@ -125,7 +125,7 @@ jobs:
           terraform_version: "1.9.8"
           terraform_wrapper: false
 
-      # Stage 0 writes the bringup keyring the install reads (ADR-0015,
+      # Stage 0 writes the bringup keyring the install reads (ADR-0083,
       # deploy#1730, deploy#1732). The registry pull token is the keyring
       # member GHCR_PULL_TOKEN now; baseline-up.sh refuses the environment
       # variable it used to take, so there is one path and no second one. The

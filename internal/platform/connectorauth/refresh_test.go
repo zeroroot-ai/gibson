@@ -232,7 +232,7 @@ func TestRefresh_ErrorsNeverCarryTheRefreshToken(t *testing.T) {
 func TestRefresh_IncompleteGrantIsRefused(t *testing.T) {
 	s := newStore()
 	// A grant with no authorizing human is a service account nobody is
-	// accountable for, which ADR-0064 refuses.
+	// accountable for, which ADR-0061 refuses.
 	_ = s.Put(context.Background(), GrantSecretName("gitlab"),
 		[]byte(`{"refresh_token":"r","token_endpoint":"https://x/","client_id":"c"}`))
 

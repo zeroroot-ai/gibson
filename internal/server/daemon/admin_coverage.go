@@ -19,7 +19,7 @@ import (
 // registering the service should delete its line here. A NEW tenant service must
 // be registered in grpc.go — not added here.
 //
-// ADR-0039: prefix changed from gibson.admin.v1.* to gibson.tenant.v1.* following
+// ADR-0058: prefix changed from gibson.admin.v1.* to gibson.tenant.v1.* following
 // the customer-surface recategorisation.
 //
 // gibson#565 resolved: PluginAdminService is now registered in grpc.go.
@@ -36,7 +36,7 @@ var knownUnregisteredTenantServices = map[string]string{}
 // which boots cleanly and only fails (Unimplemented) when a client calls it
 // (see gibson#564, where SecretsAdminService had been unregistered since inception).
 //
-// ADR-0039: coverage now checks gibson.tenant.v1.* in addition to the
+// ADR-0058: coverage now checks gibson.tenant.v1.* in addition to the
 // remaining gibson.admin.v1.* services (the latter set should be empty after
 // the migration; the prefix is kept for forward-compatibility until the
 // authz-registry is regenerated and confirmed clean).

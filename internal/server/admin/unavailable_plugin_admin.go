@@ -10,7 +10,7 @@
 // dashboard surfaces an actionable "service unavailable" message instead of
 // the misleading codes.Unimplemented that an unregistered service would return.
 //
-// ADR-0039: gibson.tenant.v1.PluginAdminService. Closes gibson#565.
+// ADR-0058: gibson.tenant.v1.PluginAdminService. Closes gibson#565.
 package admin
 
 import (

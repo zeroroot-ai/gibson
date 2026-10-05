@@ -305,7 +305,7 @@ type DaemonServer struct {
 	// It is set via WithSignupPolicy during daemon startup after Resolve() is
 	// called on the signup seam. The zero value ("") is treated as
 	// PolicyAdminOnly (self-hosted fail-safe: no public self-serve signup).
-	// Spec: seam-signup-saas-only (gibson#1088, deploy ADR-0006).
+	// Spec: seam-signup-saas-only (gibson#1088, ADR-0074).
 	signupPolicy signup.Policy
 
 	// billingWebhookSecret is the shared secret the billing-webhook caller
@@ -1250,7 +1250,7 @@ func (s *DaemonServer) WithTenantAdminAuditWriter(w auditWriterIface) *DaemonSer
 // The explicit default-to-denied ensures a misconfigured SaaS deploy fails
 // closed rather than accidentally opening self-serve on a self-hosted install.
 //
-// Spec: seam-signup-saas-only (gibson#1088, deploy ADR-0006).
+// Spec: seam-signup-saas-only (gibson#1088, ADR-0074).
 func (s *DaemonServer) WithSignupPolicy(p signup.Policy) *DaemonServer {
 	s.signupPolicy = p
 	return s

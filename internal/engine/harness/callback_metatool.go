@@ -47,7 +47,7 @@ func (s *HarnessCallbackService) metaToolsWired() bool {
 	return s.componentRegistry != nil && s.componentAuthorizer != nil && s.authzStore != nil
 }
 
-// metaToolDescriptors returns the two synthetic tools (ADR-0047 facet 5) that
+// metaToolDescriptors returns the two synthetic tools (ADR-0065) that
 // the harness presents to the LLM in place of the full connector surface:
 // search_tools for discovery and invoke_tool for invocation by canonical id.
 func metaToolDescriptors() []ToolDescriptor {

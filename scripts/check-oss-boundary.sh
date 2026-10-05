@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-# check-oss-boundary.sh — CI guard (gibson#817, E14 / ADR-0050, ADR-0054):
+# check-oss-boundary.sh — CI guard (gibson#817, E14 / ADR-0089):
 # the open (Apache-2.0) layer builds with ZERO closed/ELv2 dependency.
 #
 # Directional lint, both ways across the open-core boundary:
@@ -16,7 +16,7 @@
 #  2. gibson itself (ELv2): go.mod must not require the closed billing
 #     repo — the pkg/billing seam stays a link-time no-op by default and
 #     the closed Stripe provider is injected only in the hosted build
-#     (ADR-0054). go.mod lists all direct+indirect requirements (Go 1.17+
+#     (ADR-0089). go.mod lists all direct+indirect requirements (Go 1.17+
 #     graph pruning), so a require-line grep is exact at this layer.
 #
 # Usage: scripts/check-oss-boundary.sh [workdir]
@@ -49,7 +49,7 @@ violation() { printf 'BOUNDARY VIOLATION: %s\n' "$*" >&2; fail=1; }
 # --- Direction 2: gibson (ELv2) must not require closed billing ------------
 note "== gibson (ELv2) -> closed: go.mod must not require zeroroot-ai/billing"
 if grep -nE 'github\.com/zeroroot-ai/billing([[:space:]/]|$)' "${REPO_ROOT}/go.mod"; then
-  violation "gibson go.mod requires the closed billing repo (pkg/billing seam must stay a no-op; ADR-0054)"
+  violation "gibson go.mod requires the closed billing repo (pkg/billing seam must stay a no-op; ADR-0089)"
 else
   note "   OK: gibson go.mod has no billing requirement"
 fi
@@ -114,7 +114,7 @@ for repo in "${APACHE_REPOS[@]}"; do
 done
 
 if [[ ${fail} -ne 0 ]]; then
-  echo "check-oss-boundary: FAILED — open-core boundary violated (ADR-0050/0054, gibson#817)" >&2
+  echo "check-oss-boundary: FAILED — open-core boundary violated (ADR-0089, gibson#817)" >&2
   exit 1
 fi
 if (( ${#SKIPPED[@]} > 0 )); then

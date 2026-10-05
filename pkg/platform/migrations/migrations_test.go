@@ -32,7 +32,7 @@ func TestEmbed_PlatformHasExpectedFiles(t *testing.T) {
 	// (gibson#1228, merged), 022 is audit_log hash chain, 023 indexes
 	// capability_grant_agents(tenant_id, principal_ref) for the mission:delegate
 	// / mission:originate capability check (gibson#1186 slice C), 024 adds the
-	// admin-approval registration rung's state (ADR-0006, gibson#22), 025 adds
+	// admin-approval registration rung's state (ADR-0074, gibson#22), 025 adds
 	// tenant_quotas.concurrent_connectors, which the entitlements reader
 	// selects (gibson#13), 026 adds component_install.principal_ref, the FGA
 	// user a component registered as, which the secret-binding admin RPCs
@@ -130,7 +130,7 @@ func TestTenantMaxVersion(t *testing.T) {
 //	023 — capability_grant_principal_index (indexes capability_grant_agents on
 //	      (tenant_id, principal_ref) for the mission:delegate / mission:originate
 //	      capability check, gibson#1186 slice C)
-//	024 — signup_admin_approval (the ADR-0006 approval registration rung: a
+//	024 — signup_admin_approval (the ADR-0074 approval registration rung: a
 //	      deactivated owner account plus an attributable decision, gibson#22)
 //	025 — add_concurrent_connectors_to_tenant_quotas (the entitlements reader's
 //	      ceiling, gibson#13)

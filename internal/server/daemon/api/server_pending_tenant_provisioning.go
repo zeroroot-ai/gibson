@@ -91,7 +91,7 @@ func (s *DaemonServer) enqueuePendingTenantProvisioning(ctx context.Context, p *
 // withheld: an unrecognised tier cannot be priced, so it fails closed.
 //
 // Self-hosted installs leave GIBSON_ENTITLEMENTS_REQUIRED unset and are
-// unaffected (ADR-0006: the billing seam is bypassable on-prem by design).
+// unaffected (ADR-0074: the billing seam is bypassable on-prem by design).
 func (s *DaemonServer) ListPendingTenantProvisioning(ctx context.Context, _ *daemonoperatorv1.ListPendingTenantProvisioningRequest) (*daemonoperatorv1.ListPendingTenantProvisioningResponse, error) {
 	db := s.entitlementsDB()
 	if db == nil {
@@ -160,7 +160,7 @@ func (s *DaemonServer) ListPendingTenantProvisioning(ctx context.Context, _ *dae
 // database. enforceBilling is entitlements.Required() at the call site.
 func withholdPendingTenant(tier string, billingActive, enforceBilling bool) (reason string, withhold bool) {
 	if !enforceBilling {
-		// Self-hosted / OSS: no billing to enforce (ADR-0006).
+		// Self-hosted / OSS: no billing to enforce (ADR-0074).
 		return "", false
 	}
 	plan, ok := plans.Lookup(tier)

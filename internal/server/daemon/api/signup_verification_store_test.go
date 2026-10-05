@@ -727,7 +727,7 @@ func TestAttachStripeCustomer_RefusalIsIndistinguishable(t *testing.T) {
 // approval a decision rather than a race. Drop `status = 'pending_approval'`
 // from either statement and two administrators can both believe they decided
 // one registration, which is a silent failure at runtime, so it is pinned at
-// build time instead (ADR-0006, gibson#22).
+// build time instead (ADR-0074, gibson#22).
 func TestRegistrationDecisionsAreOneShot(t *testing.T) {
 	assertStatementContains(t, claimApprovalStatement,
 		`status = 'pending_approval'`,
@@ -776,7 +776,7 @@ func TestIssuePendingApproval_RequiresTheDeactivatedAccount(t *testing.T) {
 }
 
 // ---------------------------------------------------------------------------
-// Admin-approval registration rung (ADR-0006, gibson#22)
+// Admin-approval registration rung (ADR-0074, gibson#22)
 // ---------------------------------------------------------------------------
 
 // A pending registration is written with the owner account already created and

@@ -192,7 +192,7 @@ func TestPluginPrincipalAdapter_DeleteStripsPrefix(t *testing.T) {
 	}
 }
 
-// Approval-rung sign-in-state changes (ADR-0006, gibson#22). This stub does not
+// Approval-rung sign-in-state changes (ADR-0074, gibson#22). This stub does not
 // exercise them; the registration and approval paths are covered in
 // internal/server/daemon/api.
 func (*stubIDP) DeactivateHumanUser(context.Context, idp.HumanUserStateRequest) error { return nil }

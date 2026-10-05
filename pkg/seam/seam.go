@@ -2,7 +2,7 @@
 // Copyright 2026 Zero Root AI
 
 // Package seam is the reusable seam-resolution primitive for the gibson
-// platform's self-hosted vs SaaS deployment-profile model (deploy ADR-0006).
+// platform's self-hosted vs SaaS deployment-profile model (ADR-0074).
 //
 // A seam is the point where a SaaS-only component replaces the free/open
 // self-hosted default. At deployment time a single env-var knob selects which

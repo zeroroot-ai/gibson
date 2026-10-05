@@ -208,7 +208,7 @@ loop edge in the graph.
 ## The exit test
 
 `exit-test-bank.yml` runs on `main` and on a schedule, never on a pull request
-(ADR-0012). It uses a real model on a real key from a repository secret, and it
+(ADR-0080). It uses a real model on a real key from a repository secret, and it
 asserts lifecycle and deliverables rather than model text: two members reach
 `idle`, a job turns one member `busy`, the worktree exists on the job branch,
 the verifier fails pass one and the same session takes pass two, `CloseJob`

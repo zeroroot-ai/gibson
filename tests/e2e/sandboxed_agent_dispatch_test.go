@@ -19,7 +19,7 @@
 //     instances, and a run id it does not own returns NOT_FOUND — indistinguishable
 //     from one that never existed.
 //
-// Per ADR-0012 this runs on `main` and on a schedule, never on a PR: it needs a
+// Per ADR-0080 this runs on `main` and on a schedule, never on a PR: it needs a
 // live cluster, so it cannot gate a PR. The workflow is
 // .github/workflows/exit-test-sandboxed-dispatch.yml.
 //

@@ -2,7 +2,7 @@
 // Copyright 2026 Zero Root AI
 
 // signup_approval_service_test.go — the admin-approval registration rung
-// (ADR-0006, gibson#22).
+// (ADR-0074, gibson#22).
 //
 // The rung's whole claim is that a self-hosted install with no mail server can
 // have a working front door without opening an unverified one. These tests pin
@@ -341,7 +341,7 @@ func TestAdminRejectRegistration_LeavesTheAccountUnusable(t *testing.T) {
 	}
 }
 
-// A decision nobody can be named for is not attributable, which ADR-0006
+// A decision nobody can be named for is not attributable, which ADR-0074
 // requires it to be.
 func TestAdminRegistrationDecisions_RequireAnIdentity(t *testing.T) {
 	h, _ := newApprovalHarness(t)

@@ -118,7 +118,7 @@ separate question per tag:
 | `integration` | `vet-tags`, both lanes | `make test-integration`, both lanes (scoped `INTEGRATION_PKG`) |
 | `setec_integration` | `vet-tags`, both lanes | `e2e-setec-roundtrip.yml`, self-hosted KVM runner |
 | `openbao_smoke`, `openbao_integration` | `vet-tags`, both lanes | `make test-openbao` via the `openbao` job, both lanes (hermetic testcontainers, no live infra) |
-| `e2e` | `vet-tags`, both lanes | the cluster-free part was untagged and runs in the default lane. The cluster-bound part runs on `main` and daily in the exit-test workflows (see "Where the cluster-bound `e2e` suites run" below), never on a PR (ADR-0012) |
+| `e2e` | `vet-tags`, both lanes | the cluster-free part was untagged and runs in the default lane. The cluster-bound part runs on `main` and daily in the exit-test workflows (see "Where the cluster-bound `e2e` suites run" below), never on a PR (ADR-0080) |
 | `test_fixtures` | `vet-tags`, both lanes | fixture-enabled image build (Dockerfile build-arg) |
 | `llm_integration` | `vet-tags`, both lanes | **compile-only, deliberately** — needs a live LLM key (`ANTHROPIC_API_KEY`); spend + secret is an owner decision |
 | `integration_spire` | `vet-tags`, both lanes | **compile-only, deliberately** — needs a live SPIRE Workload API socket, only reachable from inside a pod with the spire-agent socket mounted |
@@ -160,7 +160,7 @@ files were written:
 The rest of the `e2e` tag needs a live cluster. The venue is an ephemeral
 kind cluster on `ubuntu-latest`, brought up through hosted's
 `make substrate ENV=kind` and `make recreate ENV=kind` (charts `main`,
-`RUNG=ci`) with Envoy, Zitadel, SPIRE and a test-mode daemon. Per ADR-0012
+`RUNG=ci`) with Envoy, Zitadel, SPIRE and a test-mode daemon. Per ADR-0080
 these workflows run on `main` and on a schedule, never on a pull request.
 They block nothing.
 

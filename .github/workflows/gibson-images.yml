@@ -1,9 +1,7 @@
 name: gibson-images
 
 # Collapses gibson's six independent image-build workflows into ONE matrix
-# workflow (Epic: cicd-efficiency, board #44, slice S4, gibson#1129). See
-# docs/architecture/CICD-CONTEXT.md decision #8 and
-# docs/adr/0060-ci-runner-split-hosted-default-ephemeral-metal.md.
+# workflow (Epic: cicd-efficiency, board #44, slice S4, gibson#1129).
 #
 # Superseded workflows (deleted by this change):
 #   - build.yaml                        (its image-build portion; the

@@ -92,7 +92,7 @@ func (p *configProvider) Limits(ctx context.Context, tenantID string) (Limits, e
 //
 //   - OSS / self-hosted (GIBSON_ENTITLEMENTS_REQUIRED unset): unlimited, no
 //     error. Absence of config means "no enforcement", the documented
-//     permissive default (ADR-0006).
+//     permissive default (ADR-0074).
 //   - Entitlements required: DENY. In a deployment that has declared
 //     entitlements mandatory, "no row" is indistinguishable from "the row was
 //     never written" — treating it as unlimited hands every dimension to a

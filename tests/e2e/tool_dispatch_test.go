@@ -28,7 +28,7 @@
 // cutover) and the manifest is now the single source of truth. Assertions 2 and
 // 3 are what keep it that way: they fail if a second path ever returns.
 //
-// Per ADR-0012 this runs on `main` and on a schedule, never on a PR: it needs a
+// Per ADR-0080 this runs on `main` and on a schedule, never on a PR: it needs a
 // live cluster, so it cannot gate a PR. The workflow is
 // .github/workflows/exit-test-tool-dispatch.yml.
 //

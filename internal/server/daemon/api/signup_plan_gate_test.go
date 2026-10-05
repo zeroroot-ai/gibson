@@ -138,7 +138,7 @@ func TestSignup_PaidPlanRequiresBillingCustomerWhenEntitlementsRequired(t *testi
 	}
 }
 
-// TestSignup_PaidPlanAllowedOnPremWithoutBilling pins ADR-0006: the billing
+// TestSignup_PaidPlanAllowedOnPremWithoutBilling pins ADR-0074: the billing
 // seam is bypassable on-prem, so a self-hosted install (entitlements knob
 // unset) must not need a Stripe customer to sign up.
 func TestSignup_PaidPlanAllowedOnPremWithoutBilling(t *testing.T) {
@@ -246,7 +246,7 @@ func TestListPendingTenantProvisioning_WithholdsUnpaidPaidTier(t *testing.T) {
 	}
 }
 
-// TestListPendingTenantProvisioning_SelfHostedDrainsEverything pins ADR-0006:
+// TestListPendingTenantProvisioning_SelfHostedDrainsEverything pins ADR-0074:
 // with the entitlements knob unset there is no billing to enforce and the
 // queue drains unchanged.
 func TestListPendingTenantProvisioning_SelfHostedDrainsEverything(t *testing.T) {
