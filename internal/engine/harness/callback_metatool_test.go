@@ -13,8 +13,6 @@ import (
 
 	commonpb "github.com/zeroroot-ai/sdk/api/gen/gibson/common/v1"
 	harnesspb "github.com/zeroroot-ai/sdk/api/gen/gibson/harness/v1"
-	"google.golang.org/protobuf/proto"
-	"google.golang.org/protobuf/reflect/protoreflect"
 
 	"github.com/zeroroot-ai/gibson/internal/engine/catalog"
 	"github.com/zeroroot-ai/gibson/internal/engine/metatool"
@@ -337,36 +335,7 @@ func TestMetaToolDescriptors_Shape(t *testing.T) {
 // tool, and the native caller that invoke_tool uses for it.
 func newNativeMetaSvc(t *testing.T, captured *[]capturedTool, toolErr error) (*HarnessCallbackService, *mockHarnessWithResolver, *harnesspb.ContextInfo) {
 	t.Helper()
-	mockHarness := &mockHarnessWithResolver{
-		toolDescriptors: map[string]*ToolDescriptor{
-			"test-external-tool": {
-				Name:            "test-external-tool",
-				InputProtoType:  "testtool.ToolInput",
-				OutputProtoType: "testtool.ToolOutput",
-				Metadata:        map[string]string{"file_descriptor_set": createTestFileDescriptorSetForCallback()},
-			},
-		},
-		toolHandler: func(_ context.Context, _ string, _, response proto.Message) error {
-			if toolErr != nil {
-				return toolErr
-			}
-			out := response.ProtoReflect()
-			out.Set(out.Descriptor().Fields().ByName("result"), protoreflect.ValueOfString("success"))
-			return nil
-		},
-	}
-	registry := NewCallbackHarnessRegistry()
-	registry.Register("test-mission-123", "test-agent", mockHarness)
-	svc := NewHarnessCallbackServiceWithRegistry(slog.Default(), registry,
-		WithToolCallSink(func(_ context.Context, tn string, call ToolCallRecord) {
-			*captured = append(*captured, capturedTool{tenant: tn, call: call})
-		}),
-	)
-	contextInfo := &harnesspb.ContextInfo{
-		TaskId: "task-123", AgentName: "test-agent", MissionId: "test-mission-123",
-		MissionRunId: "run-1", ToolExecutionId: "tool-exec-native-1",
-	}
-	return svc, mockHarness, contextInfo
+	return newStreamCaptureSvc(t, captured, toolErr)
 }
 
 // TestMetaInvoke_NativeToolRunsThroughTheDirectHandler proves that invoke_tool
