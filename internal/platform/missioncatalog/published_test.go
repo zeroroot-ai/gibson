@@ -97,7 +97,8 @@ func TestPublishedParams_FileIsFresh(t *testing.T) {
 	}
 	// -update is the flag of catalog_test.go. It writes this file too.
 	if *updateGolden {
-		if err := os.WriteFile(publishedFile, generated, 0o644); err != nil { //nolint:gosec // a checked-in data file, not a secret
+		//nolint:gosec // G306: a checked-in data file, not a secret.
+		if err := os.WriteFile(publishedFile, generated, 0o644); err != nil {
 			t.Fatalf("write %s: %v", publishedFile, err)
 		}
 	}
