@@ -119,7 +119,7 @@ var _ = Describe("OIDCClient reconciler", func() {
 			Client: k8sClient,
 			Scheme: k8sClient.Scheme(),
 			ZitadelFactory: func(issuer, pat string) zitadel.Client {
-				return zitadel.New(fake.URL, pat, "")
+				return zitadel.New(fake.URL, pat, "app.example.test")
 			},
 		}
 	})
@@ -261,7 +261,7 @@ var _ = Describe("OIDCClient reconciler", func() {
 			Client: k8sClient,
 			Scheme: k8sClient.Scheme(),
 			ZitadelFactory: func(issuer, pat string) zitadel.Client {
-				return zitadel.New(machineFake.URL, pat, "")
+				return zitadel.New(machineFake.URL, pat, "app.example.test")
 			},
 		}
 
@@ -357,7 +357,7 @@ var _ = Describe("OIDCClient reconciler", func() {
 			Client: k8sClient,
 			Scheme: k8sClient.Scheme(),
 			ZitadelFactory: func(issuer, pat string) zitadel.Client {
-				return zitadel.New(botFake.URL, pat, "")
+				return zitadel.New(botFake.URL, pat, "app.example.test")
 			},
 		}
 
