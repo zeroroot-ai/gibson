@@ -191,17 +191,7 @@ func (s *SecretsAdminServer) ListSecrets(ctx context.Context, req *secretsv1.Lis
 
 	out := make([]*secretsv1.SecretMetadata, 0, len(names))
 	for _, stored := range names {
-		md, mdErr := s.buildMetadata(ctx, tenant, stored)
-		if mdErr != nil {
-			// A metadata-build failure for a single row should not poison
-			// the whole list response; surface a degraded entry that has
-			// at least the name + category populated.
-			md = &secretsv1.SecretMetadata{
-				Name:     callerName(stored),
-				Category: parseCategory(stored),
-			}
-		}
-		out = append(out, md)
+		out = append(out, s.buildMetadata(ctx, tenant, stored))
 	}
 
 	return &secretsv1.ListSecretsResponse{
@@ -247,11 +237,7 @@ func (s *SecretsAdminServer) GetSecret(ctx context.Context, req *secretsv1.GetSe
 		return nil, status.Errorf(codes.NotFound, "secret %q not found", callerReq)
 	}
 
-	md, err := s.buildMetadata(ctx, tenant, storedReq)
-	if err != nil {
-		return nil, status.Errorf(codes.Internal, "build metadata: %v", err)
-	}
-	return &secretsv1.GetSecretResponse{Metadata: md}, nil
+	return &secretsv1.GetSecretResponse{Metadata: s.buildMetadata(ctx, tenant, storedReq)}, nil
 }
 
 // SetSecret creates or overwrites a secret with the supplied value bytes.
@@ -279,17 +265,7 @@ func (s *SecretsAdminServer) SetSecret(ctx context.Context, req *secretsv1.SetSe
 		return nil, err
 	}
 
-	md, err := s.buildMetadata(ctx, tenant, stored)
-	if err != nil {
-		// Write succeeded; metadata read-back failed. Return a minimal
-		// metadata so the dashboard can still render its toast.
-		md = &secretsv1.SecretMetadata{
-			Name:          stored,
-			Category:      req.GetCategory(),
-			UpdatedAtUnix: s.now().UTC().Unix(),
-		}
-	}
-	return &secretsv1.SetSecretResponse{Metadata: md}, nil
+	return &secretsv1.SetSecretResponse{Metadata: s.buildMetadata(ctx, tenant, stored)}, nil
 }
 
 // RotateSecret writes a new value to an existing secret. It additionally
@@ -360,15 +336,7 @@ func (s *SecretsAdminServer) RotateSecret(ctx context.Context, req *secretsv1.Ro
 			slog.Default().WarnContext(ctx, "secret rotated but a plugin was not told", "secret", callerReq, "principal", id, "error", err)
 		}
 	}
-	md, err := s.buildMetadata(ctx, tenant, storedReq)
-	if err != nil {
-		md = &secretsv1.SecretMetadata{
-			Name:          callerReq,
-			Category:      parseCategory(storedReq),
-			UpdatedAtUnix: s.now().UTC().Unix(),
-		}
-	}
-	return &secretsv1.RotateSecretResponse{Metadata: md}, nil
+	return &secretsv1.RotateSecretResponse{Metadata: s.buildMetadata(ctx, tenant, storedReq)}, nil
 }
 
 // DeleteSecret removes a secret and emits a secret_revoked audit event.
@@ -528,11 +496,7 @@ func (s *SecretsAdminServer) GetMissionAudit(ctx context.Context, req *secretsv1
 //
 // Tenant secrets are stored colon-flat at the KV root, so the stored name is
 // already the caller-facing name; callerName is an identity normaliser.
-func (s *SecretsAdminServer) buildMetadata(ctx context.Context, tenant auth.TenantID, stored string) (*secretsv1.SecretMetadata, error) {
-	if stored == "" {
-		return nil, errors.New("name must not be empty")
-	}
-
+func (s *SecretsAdminServer) buildMetadata(ctx context.Context, tenant auth.TenantID, stored string) *secretsv1.SecretMetadata {
 	cat := parseCategory(stored)
 	name := callerName(stored)
 
@@ -552,7 +516,7 @@ func (s *SecretsAdminServer) buildMetadata(ctx context.Context, tenant auth.Tena
 		UpdatedBy:          "",
 		LastAccessedAtUnix: 0,
 		PluginAssociations: plugins,
-	}, nil
+	}
 }
 
 // Tenant secrets are stored colon-flat at the KV root, keyed by

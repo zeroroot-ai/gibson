@@ -240,6 +240,40 @@ func TestProbeBrokerConfig_Failure(t *testing.T) {
 	}
 }
 
+// TestProbeBrokerConfig_ConstructFailure proves that a candidate the factory
+// cannot build gives a failed probe result, not a gRPC error.
+func TestProbeBrokerConfig_ConstructFailure(t *testing.T) {
+	srv, _, _, p, _, _, _ := newTenantTestServer(t)
+	p.constructErr = errors.New("unknown provider")
+	ctx := ctxWithTenant(t, "acme")
+
+	resp, err := srv.ProbeBrokerConfig(ctx, &secretsv1.ProbeBrokerConfigRequest{
+		Candidate: &secretsv1.CandidateConfig{
+			Provider:   secretsv1.BrokerProvider_BROKER_PROVIDER_VAULT_HOSTED,
+			AuthMethod: "token",
+		},
+	})
+	if err != nil {
+		t.Fatalf("ProbeBrokerConfig should not return gRPC error on construct failure: %v", err)
+	}
+	if resp.GetResult().GetOk() {
+		t.Errorf("expected ok=false")
+	}
+	if got := resp.GetResult().GetErrorClass(); got != "provider_construct_failed" {
+		t.Errorf("expected provider_construct_failed error_class, got %q", got)
+	}
+}
+
+func TestCandidateProvider(t *testing.T) {
+	if got := candidateProvider(nil); got != secretsv1.BrokerProvider_BROKER_PROVIDER_UNSPECIFIED {
+		t.Errorf("candidateProvider(nil) = %v, want UNSPECIFIED", got)
+	}
+	c := &secretsv1.CandidateConfig{Provider: secretsv1.BrokerProvider_BROKER_PROVIDER_VAULT_BYO}
+	if got := candidateProvider(c); got != secretsv1.BrokerProvider_BROKER_PROVIDER_VAULT_BYO {
+		t.Errorf("candidateProvider(byo) = %v, want VAULT_BYO", got)
+	}
+}
+
 func TestProbeBrokerConfig_RequiresCandidate(t *testing.T) {
 	srv, _, _, _, _, _, _ := newTenantTestServer(t)
 	ctx := ctxWithTenant(t, "acme")
