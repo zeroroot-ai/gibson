@@ -41,10 +41,8 @@ import (
 //     (operator-shared library; tenant-operator imports it)
 //   - any file path containing "/testdata/"      (analysistest fixtures)
 //
-// Deferred-deletion file paths: NONE. S10 (gibson#212) landed and
-// deleted both K8s key/crypto providers. The file-grained exemption
-// list below is intentionally empty; new entries should not be added
-// unless a future slice has a similar staged-rip need.
+// Deferred-deletion file paths: six, the staged removal of gibson#659.
+// See noK8sAPIInDaemonExemptFiles. New entries are not added.
 //
 // Forbidden imports (the rule flags any of these in an in-scope file):
 //   - k8s.io/client-go/                  (any subpackage)
@@ -98,10 +96,26 @@ var noK8sAPIInDaemonExemptSubstrings = []string{
 // the parent package contains other files that should stay in scope.
 //
 // REMOVE entries from this list as the corresponding deletion slices
-// land. Each entry should reference its tracking issue in the comment.
-// Currently empty: S10 (gibson#212) deleted the two K8s key/crypto
-// provider files that previously needed an exemption.
-var noK8sAPIInDaemonExemptFiles = []string{}
+// land. Each entry names its tracking issue. The list only shrinks:
+// TestNoK8sAPIInDaemon_ExemptionsAreLive fails on an entry whose file is
+// gone or no longer imports a forbidden package.
+//
+// The six entries below are the staged removal of gibson#659. The owner
+// decided on 2026-10-05 that the daemon holds no Kubernetes client. Until
+// each part lands, its files are exempt, and every OTHER file is checked.
+var noK8sAPIInDaemonExemptFiles = []string{
+	// gibson#661: the bank reconciler lists Tenant resources.
+	"internal/server/daemon/bank_member_launcher.go",
+
+	// gibson#662: the daemon reads and writes ConnectorInstance resources.
+	"internal/server/daemon/connector_adapters.go",
+	"internal/server/daemon/api/connector_service.go",
+	"internal/infra/reconciler/connector_catalog_source.go",
+	"internal/server/daemon/daemon.go",
+
+	// gibson#663: the daemon writes connector token Secrets.
+	"internal/server/daemon/connector_token_materializer.go",
+}
 
 // forbiddenK8sImportPrefixes lists the import-path prefixes that the
 // rule flags. Substring/prefix matching catches subpackages.
