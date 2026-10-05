@@ -2550,6 +2550,16 @@ export const AuthRegistry: Record<string, AuthEntry> = {
     unauthenticated: false,
     self: false,
   },
+  "/gibson.tenant.v1.ComplianceService/ListComplianceEvidence": {
+    method: "/gibson.tenant.v1.ComplianceService/ListComplianceEvidence",
+    service: "gibson.tenant.v1.ComplianceService",
+    relation: "admin",
+    objectType: "tenant",
+    objectDeriver: "tenant_from_identity",
+    allowedIdentities: IdentityClass.USER | IdentityClass.SERVICE,
+    unauthenticated: false,
+    self: false,
+  },
   "/gibson.tenant.v1.ConnectorAuthService/CompleteConnectorAuthorization": {
     method: "/gibson.tenant.v1.ConnectorAuthService/CompleteConnectorAuthorization",
     service: "gibson.tenant.v1.ConnectorAuthService",

@@ -1,0 +1,106 @@
+// Use of this source code is governed by the Elastic License 2.0
+// that can be found in the LICENSE file in the repo root.
+
+// ComplianceService is the first compliance reader (ADR-0113, gibson#674).
+// For the tenant of the caller, one enabled framework pack and one time
+// range, it returns the audit events that are evidence for each control.
+//
+// The response holds evidence only. No field holds a verdict, a score or a
+// percentage, and no text says that a tenant is compliant. An assessor makes
+// that decision.
+//
+// Authorization: every RPC carries a (gibson.auth.v1.authz) annotation.
+syntax = "proto3";
+
+package gibson.tenant.v1;
+
+option go_package = "github.com/zeroroot-ai/gibson/internal/server/daemon/api/gibson/tenant/v1;tenantv1";
+
+import "gibson/auth/v1/options.proto";
+import "google/protobuf/timestamp.proto";
+
+service ComplianceService {
+  // ListComplianceEvidence evaluates the mapping rules of the pack over the
+  // audit log of the tenant at read time. The tenant comes from the
+  // identity of the caller. Owner and Admin may call it: the "admin"
+  // relation on the tenant admits both and refuses Writer and Member.
+  rpc ListComplianceEvidence(ListComplianceEvidenceRequest) returns (ListComplianceEvidenceResponse) {
+    option (gibson.auth.v1.authz) = {
+      relation: "admin"
+      object_type: "tenant"
+      object_deriver: "tenant_from_identity"
+      allowed_identities: 3  // USER | SERVICE
+    };
+  }
+}
+
+message ListComplianceEvidenceRequest {
+  // pack is the catalog name of an enabled framework pack, for example
+  // "nist-800-53-r5".
+  string pack = 1;
+  // start_time is the start of the range. Unset means 90 days before
+  // end_time.
+  google.protobuf.Timestamp start_time = 2;
+  // end_time is the end of the range, exclusive. Unset means now.
+  google.protobuf.Timestamp end_time = 3;
+  // page_size bounds the events of one page. Unset means 100. The largest
+  // value is 500.
+  int32 page_size = 4;
+  // page_token is the next_page_token of the previous page of the same
+  // query. Empty for the first page.
+  string page_token = 5;
+}
+
+message ListComplianceEvidenceResponse {
+  string pack = 1;
+  int32 pack_version = 2;
+  // controls_with_rule and controls_total give the coverage of the pack:
+  // how many of its controls have an automated rule.
+  int32 controls_with_rule = 3;
+  int32 controls_total = 4;
+  // controls holds each control of the pack, in pack order, on each page.
+  // Its counts cover the whole range.
+  repeated ControlEvidence controls = 5;
+  // events is one page of evidence events, oldest first.
+  repeated EvidenceEvent events = 6;
+  // next_page_token is empty on the last page.
+  string next_page_token = 7;
+}
+
+// ControlEvidence is the evidence of one control in the range.
+message ControlEvidence {
+  string control_id = 1;
+  string title = 2;
+  string family = 3;
+  string family_title = 4;
+
+  // State is the evidence state of the control. It is never a verdict.
+  enum State {
+    STATE_UNSPECIFIED = 0;
+    // STATE_NO_RULE: the pack has no automated rule for the control.
+    STATE_NO_RULE = 1;
+    // STATE_NO_EVENTS: the control has a rule, and no event in the range
+    // matched it.
+    STATE_NO_EVENTS = 2;
+    // STATE_HAS_EVIDENCE: one event or more in the range matched the rule.
+    STATE_HAS_EVIDENCE = 3;
+  }
+  State state = 5;
+  int64 event_count = 6;
+  // last_event_time is unset when event_count is 0.
+  google.protobuf.Timestamp last_event_time = 7;
+}
+
+// EvidenceEvent is one audit record that is evidence for one control or
+// more.
+message EvidenceEvent {
+  // audit_record_id is the id of the record in the audit log, so that a
+  // client can link to it.
+  string audit_record_id = 1;
+  google.protobuf.Timestamp time = 2;
+  string action = 3;
+  string actor_id = 4;
+  string resource_type = 5;
+  string resource_id = 6;
+  repeated string control_ids = 7;
+}
