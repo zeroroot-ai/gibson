@@ -4,140 +4,86 @@
 package cgjwt
 
 import (
-	"sync"
+	"context"
+	"errors"
+	"fmt"
+	"strconv"
 	"time"
 
 	"github.com/prometheus/client_golang/prometheus"
 	"github.com/prometheus/client_golang/prometheus/promauto"
+	"github.com/redis/go-redis/v9"
 )
 
-// DefaultReplayCacheMaxEntries bounds the component-token replay cache.
-//
-// An entry is retained only until the token it records expires, and a
-// component token lives at most ComponentVerifier.maxLifetime (5 minutes by
-// default). So the working set is roughly (component RPCs per second) ×
-// (max token lifetime): 100k entries covers ~330 component RPCs/second
-// sustained for a full 5 minutes on one pod, which is far above any observed
-// component load. Each entry is a short string plus a deadline — on the order
-// of 10 MB at the bound.
-const DefaultReplayCacheMaxEntries = 100_000
+// ErrReplayStateUnavailable is returned when the replay store does not
+// answer. The verifier cannot prove that the token is new, so it refuses the
+// token. It is its own sentinel, because the token is not at fault: the
+// caller maps it to "unavailable", not to "unauthenticated".
+var ErrReplayStateUnavailable = errors.New("cgjwt: replay state unavailable")
 
-// replayCache remembers the (kid, jti) pairs of component tokens that have
-// already been accepted, so the same token cannot be presented twice.
-//
-// Scope of the guarantee — read this before trusting it:
-//
-//   - The cache is IN-PROCESS. ext-authz runs ≥2 replicas, so a token
-//     replayed against a different pod than the one that first accepted it
-//     is NOT caught. This narrows the replay window from "the token's whole
-//     ~55s lifetime, unlimited uses" to "at most once per ext-authz pod",
-//     which is a real reduction but not closure. Closing it needs either
-//     shared state (which ext-authz deliberately has none of today — every
-//     cache in this binary is per-pod) or a request binding minted by the
-//     SDK (a method + body-digest claim, gibson#1246), which is the actual
-//     fix and is cross-repo.
-//   - An entry is only written AFTER the signature, descriptor and lifetime
-//     checks pass. An unauthenticated caller therefore cannot consume cache
-//     capacity, and cannot burn another component's jti to deny it service:
-//     inserting under a kid requires a valid signature from that kid's key.
-//
-// replayCache is safe for concurrent use.
-type replayCache struct {
-	maxEntries int
-
-	mu      sync.Mutex
-	entries map[replayKey]time.Time // key -> deadline (the token's exp)
+// ReplayStore records the (kid, jti) pair of each accepted component token.
+// All ext-authz replicas share one store, so a token is accepted one time by
+// the whole deployment.
+type ReplayStore interface {
+	// Admit records the pair and reports whether this is its first
+	// presentation. The record expires after ttl, which is the time that the
+	// token has left. Admit is one atomic set-if-absent operation.
+	//
+	// An error means that the store gave no answer. The caller must refuse
+	// the token.
+	Admit(ctx context.Context, kid, jti string, ttl time.Duration) (bool, error)
 }
 
-// replayKey namespaces the jti by the key that signed it. Two components
-// choosing the same jti string must not collide, and — more importantly —
-// no caller can pre-burn a jti it cannot sign for.
-type replayKey struct {
-	kid string
-	jti string
+// replayKeyPrefix namespaces the replay records in the shared Redis.
+const replayKeyPrefix = "extauthz:cgjwt:replay:"
+
+// replayKey builds the Redis key of a (kid, jti) pair. The key holds the kid,
+// so two components that pick the same jti do not collide, and a caller
+// cannot use up a jti that it cannot sign for. The length of the kid makes
+// the split between kid and jti unambiguous.
+func replayKey(kid, jti string) string {
+	return replayKeyPrefix + strconv.Itoa(len(kid)) + ":" + kid + ":" + jti
 }
 
-func newReplayCache(maxEntries int) *replayCache {
-	if maxEntries <= 0 {
-		maxEntries = DefaultReplayCacheMaxEntries
-	}
-	return &replayCache{
-		maxEntries: maxEntries,
-		entries:    map[replayKey]time.Time{},
-	}
+// RedisReplayStore is the ReplayStore on Redis.
+type RedisReplayStore struct {
+	client redis.Cmdable
 }
 
-// admit records (kid, jti) as seen and reports whether this is its first
-// presentation. It returns false when the pair is already recorded — that is,
-// when the token is a replay.
-//
-// deadline is the token's exp: past it the ordinary expiry check rejects the
-// token anyway, so the entry carries no value and is dropped.
-func (c *replayCache) admit(kid, jti string, deadline time.Time, now time.Time) bool {
-	key := replayKey{kid: kid, jti: jti}
-
-	c.mu.Lock()
-	defer c.mu.Unlock()
-
-	if seen, ok := c.entries[key]; ok && now.Before(seen) {
-		return false
+// NewRedisReplayStore returns a ReplayStore that keeps its records in the
+// given Redis.
+func NewRedisReplayStore(client redis.Cmdable) (*RedisReplayStore, error) {
+	if client == nil {
+		return nil, errors.New("cgjwt: NewRedisReplayStore: redis client required")
 	}
-
-	if len(c.entries) >= c.maxEntries {
-		c.evictLocked(now)
-	}
-
-	c.entries[key] = deadline
-	replayCacheSize.Set(float64(len(c.entries)))
-	return true
+	return &RedisReplayStore{client: client}, nil
 }
 
-// evictLocked frees room. It first drops every entry whose token has already
-// expired (those are pure garbage). If that is not enough it drops the entry
-// closest to expiring, which is the one whose remaining replay value is
-// smallest.
-//
-// Capacity eviction weakens the guarantee for the evicted entry — a token
-// whose jti was dropped early can be replayed once more on this pod. It is
-// counted separately so a deployment can tell "the bound is too low" apart
-// from ordinary expiry churn; sustained capacity evictions mean
-// EXT_AUTHZ_CGJWT_REPLAY_CACHE_MAX_ENTRIES needs raising.
-func (c *replayCache) evictLocked(now time.Time) {
-	var (
-		oldestKey      replayKey
-		oldestDeadline time.Time
-		haveOldest     bool
-	)
-	for k, deadline := range c.entries {
-		if !now.Before(deadline) {
-			delete(c.entries, k)
-			replayCacheEvictions.WithLabelValues("expired").Inc()
-			continue
-		}
-		if !haveOldest || deadline.Before(oldestDeadline) {
-			oldestKey, oldestDeadline, haveOldest = k, deadline, true
-		}
+// Admit writes the pair with SET NX and the given expiry. Redis runs the
+// command atomically, so exactly one of many concurrent callers gets true.
+func (s *RedisReplayStore) Admit(ctx context.Context, kid, jti string, ttl time.Duration) (bool, error) {
+	if ttl <= 0 {
+		return false, errors.New("cgjwt: replay record needs a positive ttl")
 	}
-	if len(c.entries) < c.maxEntries {
-		return
-	}
-	if haveOldest {
-		delete(c.entries, oldestKey)
-		replayCacheEvictions.WithLabelValues("capacity").Inc()
+	err := s.client.SetArgs(ctx, replayKey(kid, jti), "1", redis.SetArgs{Mode: "NX", TTL: ttl}).Err()
+	switch {
+	case err == nil:
+		return true, nil
+	case errors.Is(err, redis.Nil):
+		// SET NX answers nil when the key exists: the token is a replay.
+		return false, nil
+	default:
+		return false, fmt.Errorf("redis SET NX: %w", err)
 	}
 }
 
 var (
 	componentReplayedTotal = promauto.NewCounter(prometheus.CounterOpts{
 		Name: "extauthz_cgjwt_component_replay_rejected_total",
-		Help: "Component CG-JWTs rejected because their (kid, jti) was already seen on this pod.",
+		Help: "Component CG-JWTs rejected because their (kid, jti) was already in the replay store.",
 	})
-	replayCacheSize = promauto.NewGauge(prometheus.GaugeOpts{
-		Name: "extauthz_cgjwt_component_replay_cache_size",
-		Help: "Entries currently held in the component-token replay cache (per pod).",
+	componentReplayStateUnavailableTotal = promauto.NewCounter(prometheus.CounterOpts{
+		Name: "extauthz_cgjwt_component_replay_state_unavailable_total",
+		Help: "Component CG-JWTs refused because the replay store did not answer. These calls fail closed.",
 	})
-	replayCacheEvictions = promauto.NewCounterVec(prometheus.CounterOpts{
-		Name: "extauthz_cgjwt_component_replay_cache_evictions_total",
-		Help: "Component replay-cache evictions by reason. Sustained reason=capacity means the bound is too low and replay protection is degrading.",
-	}, []string{"reason"})
 )

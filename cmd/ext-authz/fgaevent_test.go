@@ -15,17 +15,22 @@ import (
 	"github.com/zeroroot-ai/gibson/internal/platform/fgaevent"
 )
 
-// TestFGAEventStateClient: no URL means no subscriber, a bad URL is an
-// error, a good URL gives a client.
-func TestFGAEventStateClient(t *testing.T) {
-	if c, err := fgaEventStateClient(context.Background(), "", "x"); c != nil || err != nil {
-		t.Fatalf("empty url: client=%v err=%v, want nil, nil", c, err)
-	}
-	if _, err := fgaEventStateClient(context.Background(), "not a url", ""); err == nil {
-		t.Fatal("a bad url must be an error, never a silent no-subscriber")
+// TestRequiredStateClient: an empty URL, a bad URL and a Redis that does not
+// answer are each an error. A good URL gives a client.
+func TestRequiredStateClient(t *testing.T) {
+	for name, rawURL := range map[string]string{
+		"empty":       "",
+		"blank":       "   ",
+		"not a url":   "not a url",
+		"unreachable": "redis://127.0.0.1:1",
+	} {
+		if c, err := requiredStateClient(context.Background(), rawURL, ""); err == nil {
+			_ = c.Close()
+			t.Fatalf("%s: got a client, want an error", name)
+		}
 	}
 	mr := miniredis.RunT(t)
-	c, err := fgaEventStateClient(context.Background(), "redis://"+mr.Addr(), "")
+	c, err := requiredStateClient(context.Background(), "redis://"+mr.Addr(), "")
 	if err != nil || c == nil {
 		t.Fatalf("good url: client=%v err=%v", c, err)
 	}
@@ -48,7 +53,7 @@ func (r *recordingEvicter) InvalidateSubject(subject string) int {
 // user, keyed on the bare Zitadel id the cache uses.
 func TestRunFGAEventSubscriber_EvictsTheUser(t *testing.T) {
 	mr := miniredis.RunT(t)
-	sc, err := fgaEventStateClient(context.Background(), "redis://"+mr.Addr(), "")
+	sc, err := requiredStateClient(context.Background(), "redis://"+mr.Addr(), "")
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -80,30 +85,5 @@ func TestRunFGAEventSubscriber_EvictsTheUser(t *testing.T) {
 	}
 	if ev.seen[0] != "100000000000000001" {
 		t.Fatalf("evicted %q, want the bare user id", ev.seen[0])
-	}
-}
-
-// TestStartFGAEventSubscriber: no URL and an unreachable URL start nothing
-// and say so; a reachable one subscribes.
-func TestStartFGAEventSubscriber(t *testing.T) {
-	ctx, cancel := context.WithCancel(context.Background())
-	t.Cleanup(cancel)
-	ev := &recordingEvicter{}
-	if startFGAEventSubscriber(ctx, slog.Default(), ev, "", "") {
-		t.Fatal("no URL must start no subscriber")
-	}
-	if startFGAEventSubscriber(ctx, slog.Default(), ev, "redis://127.0.0.1:1", "") {
-		t.Fatal("an unreachable Redis must start no subscriber")
-	}
-	mr := miniredis.RunT(t)
-	if !startFGAEventSubscriber(ctx, slog.Default(), ev, "redis://"+mr.Addr(), "") {
-		t.Fatal("a reachable Redis must start the subscriber")
-	}
-	deadline := time.Now().Add(5 * time.Second)
-	for mr.PubSubNumSub(fgaevent.Channel)[fgaevent.Channel] == 0 {
-		if time.Now().After(deadline) {
-			t.Fatal("subscriber never subscribed")
-		}
-		time.Sleep(10 * time.Millisecond)
 	}
 }

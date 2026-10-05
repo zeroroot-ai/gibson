@@ -32,7 +32,7 @@ var (
 )
 
 // ErrReplayed is returned when a component token's (kid, jti) pair has
-// already been accepted by this ext-authz process. It is deliberately its
+// already been accepted by an ext-authz replica. It is deliberately its
 // own sentinel rather than one of the SDK's: a replayed token is perfectly
 // well-formed and correctly signed, and conflating it with ErrMalformed
 // would hide replay attempts inside the ordinary parse-failure metric.
@@ -66,7 +66,7 @@ type ComponentVerifier struct {
 	ttl         time.Duration
 	maxLifetime time.Duration
 	audiences   []string
-	replay      *replayCache
+	replay      ReplayStore
 
 	mu    sync.RWMutex
 	cache map[string]cachedDescriptor // kid -> descriptor
@@ -158,10 +158,11 @@ type ComponentConfig struct {
 	// constructor keeps rejecting an empty list as defense in depth.
 	ExpectedAudiences []string
 
-	// ReplayCacheMaxEntries bounds the per-process (kid, jti) replay cache.
-	// Defaults to DefaultReplayCacheMaxEntries. See replayCache for what
-	// the cache does and does not guarantee across replicas.
-	ReplayCacheMaxEntries int
+	// ReplayStore records each accepted (kid, jti) pair. REQUIRED. All
+	// replicas must share one store, or a token is accepted one time for
+	// each replica. In production it is the RedisReplayStore that
+	// cmd/ext-authz builds.
+	ReplayStore ReplayStore
 }
 
 // NewComponentVerifier constructs a ComponentVerifier.
@@ -186,13 +187,18 @@ func NewComponentVerifier(cfg ComponentConfig) (*ComponentVerifier, error) {
 	if cfg.HTTPClient == nil {
 		return nil, errors.New("cgjwt: ComponentConfig.HTTPClient required (the descriptor is the identity assertion; its transport must authenticate the daemon)")
 	}
+	// A verifier with no replay store accepts a captured token again, so it
+	// is not a constructible state.
+	if cfg.ReplayStore == nil {
+		return nil, errors.New("cgjwt: ComponentConfig.ReplayStore required (a component token is single-use)")
+	}
 	v := &ComponentVerifier{
 		keysBaseURL: strings.TrimRight(cfg.KeysBaseURL, "/"),
 		httpClient:  cfg.HTTPClient,
 		ttl:         cfg.TTL,
 		maxLifetime: cfg.MaxLifetime,
 		audiences:   auds,
-		replay:      newReplayCache(cfg.ReplayCacheMaxEntries),
+		replay:      cfg.ReplayStore,
 		cache:       map[string]cachedDescriptor{},
 	}
 	if v.ttl <= 0 {
@@ -219,9 +225,9 @@ func NewComponentVerifier(cfg ComponentConfig) (*ComponentVerifier, error) {
 // an iat, and its lifetime may not exceed MaxLifetime. Absent expiry is not a
 // tolerated shape — a token with no exp would authenticate forever.
 //
-// It is also single-use: the token's jti is remembered until its exp and a
-// second presentation is refused (gibson#1246). The cache is per-process —
-// see replayCache for the limits of that.
+// It is also single-use: the replay store remembers the token's jti until its
+// exp, and a second presentation is refused at each replica (gibson#1246).
+// When the store does not answer, the token is refused.
 //
 // Errors mirror the SDK sentinels for caller metrics:
 //   - ErrMalformed       — unparseable, wrong typ, missing kid, missing iat,
@@ -230,7 +236,8 @@ func NewComponentVerifier(cfg ComponentConfig) (*ComponentVerifier, error) {
 //   - ErrUnknownKey       — descriptor lookup failed / agent not active
 //   - ErrSignature        — signature invalid
 //   - ErrExpired          — exp in the past, absent, or further out than MaxLifetime
-//   - ErrReplayed         — this (kid, jti) was already accepted by this process
+//   - ErrReplayed         — this (kid, jti) was already accepted
+//   - ErrReplayStateUnavailable — the replay store did not answer
 func (v *ComponentVerifier) Verify(ctx context.Context, token, method string) (ComponentIdentity, error) {
 	// Peek the header for kid + typ without trusting the signature yet.
 	kid, typ, err := peekHeader(token)
@@ -326,7 +333,7 @@ func (v *ComponentVerifier) Verify(ctx context.Context, token, method string) (C
 	if err := v.checkMethod(claimMethod, method); err != nil {
 		return ComponentIdentity{}, err
 	}
-	if err := v.checkReplay(kid, jti, parsed); err != nil {
+	if err := v.checkReplay(ctx, kid, jti, parsed); err != nil {
 		return ComponentIdentity{}, err
 	}
 	componentVerifiedTotal.Inc()
@@ -365,24 +372,21 @@ func (v *ComponentVerifier) checkMethod(claimMethod, requestMethod string) error
 
 // checkReplay enforces single use of a component token (gibson#1246).
 //
-// A component token is minted per RPC and carries no binding to the request
-// it travels with — no method claim, no body digest — so anything that
-// captures one in flight can present it again for the rest of its lifetime.
-// Binding it to the request needs the SDK to mint the extra claims, which is
-// cross-repo. This is the verifier-only half: the token's jti is remembered
-// until its exp, and a second presentation of the same (kid, jti) is refused.
+// The replay store remembers the token's jti until its exp. A second
+// presentation of the same (kid, jti) is refused, at this replica and at each
+// other replica, because all replicas share the store.
 //
-// It runs LAST, after signature, descriptor and lifetime all pass, so only a
-// token that would otherwise have been accepted consumes a cache slot.
+// It runs LAST, after signature, descriptor, lifetime and method all pass, so
+// only a token that would otherwise have been accepted writes a record.
 //
 // A token with no jti is rejected outright: without it there is nothing to
 // deduplicate on, so accepting one would be an opt-out of this check that
 // any captured token could take. Both SDKs that mint agent+jwt set jti to a
 // fresh UUID on every call, so nothing legitimate lacks it.
 //
-// This does NOT close the replay window — see replayCache for exactly what
-// multiple ext-authz replicas leave open.
-func (v *ComponentVerifier) checkReplay(kid, jti string, parsed *jwt.Token) error {
+// When the store does not answer, the token is refused. The verifier never
+// accepts a token that it cannot record.
+func (v *ComponentVerifier) checkReplay(ctx context.Context, kid, jti string, parsed *jwt.Token) error {
 	if jti == "" {
 		componentRejectedTotal.WithLabelValues("no_jti").Inc()
 		return fmt.Errorf("%w: token has no jti", ErrMalformed)
@@ -390,11 +394,25 @@ func (v *ComponentVerifier) checkReplay(kid, jti string, parsed *jwt.Token) erro
 	exp, err := parsed.Claims.GetExpirationTime()
 	if err != nil || exp == nil {
 		// checkLifetime has already established exp; belt and braces so a
-		// reordering cannot turn this into an unbounded cache entry.
+		// reordering cannot turn this into a record with no expiry.
 		componentRejectedTotal.WithLabelValues("no_expiry").Inc()
 		return fmt.Errorf("%w: token has no usable exp", ErrExpired)
 	}
-	if !v.replay.admit(kid, jti, exp.Time, time.Now()) {
+	// The record lives as long as the token does, never longer. The exp
+	// claim has a resolution of one second, so the remaining time is
+	// positive for a token that passed the expiry check. The floor covers
+	// the instant of expiry.
+	ttl := time.Until(exp.Time)
+	if ttl < time.Millisecond {
+		ttl = time.Millisecond
+	}
+	first, err := v.replay.Admit(ctx, kid, jti, ttl)
+	if err != nil {
+		componentRejectedTotal.WithLabelValues("replay_state_unavailable").Inc()
+		componentReplayStateUnavailableTotal.Inc()
+		return fmt.Errorf("%w: kid %s: %w", ErrReplayStateUnavailable, kid, err)
+	}
+	if !first {
 		componentRejectedTotal.WithLabelValues("replayed").Inc()
 		componentReplayedTotal.Inc()
 		return fmt.Errorf("%w: kid %s jti %s already used", ErrReplayed, kid, jti)

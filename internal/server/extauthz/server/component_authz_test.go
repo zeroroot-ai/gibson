@@ -17,9 +17,11 @@ import (
 	"testing"
 	"time"
 
+	"github.com/alicebob/miniredis/v2"
 	"github.com/golang-jwt/jwt/v5"
 	openfga "github.com/openfga/go-sdk"
 	fgaclient "github.com/openfga/go-sdk/client"
+	"github.com/redis/go-redis/v9"
 	"google.golang.org/genproto/googleapis/rpc/code"
 
 	authv3 "github.com/envoyproxy/go-control-plane/envoy/service/auth/v3"
@@ -130,7 +132,36 @@ func mintComponentJWT(t *testing.T, priv ed25519.PrivateKey, kid string) string 
 	return signed
 }
 
+// componentReplayStoreOn returns a replay store on the given Redis, with a
+// client of its own, as each ext-authz replica has.
+func componentReplayStoreOn(t *testing.T, mr *miniredis.Miniredis) cgjwt.ReplayStore {
+	t.Helper()
+	client := redis.NewClient(&redis.Options{Addr: mr.Addr()})
+	t.Cleanup(func() { _ = client.Close() })
+	store, err := cgjwt.NewRedisReplayStore(client)
+	if err != nil {
+		t.Fatal(err)
+	}
+	return store
+}
+
+// componentTestReplayStore returns a replay store on a Redis of its own.
+func componentTestReplayStore(t *testing.T) cgjwt.ReplayStore {
+	t.Helper()
+	return componentReplayStoreOn(t, miniredis.RunT(t))
+}
+
 func buildComponentServer(t *testing.T, mock fga.FGAClient, descBase string) *EnvoyAuthzServer {
+	t.Helper()
+	return buildComponentServerOn(t, mock, descBase, componentTestReplayStore(t))
+}
+
+func buildComponentServerOn(
+	t *testing.T,
+	mock fga.FGAClient,
+	descBase string,
+	replay cgjwt.ReplayStore,
+) *EnvoyAuthzServer {
 	t.Helper()
 	reg, err := fga.LoadRegistry([]byte(componentTestYAML))
 	if err != nil {
@@ -140,6 +171,7 @@ func buildComponentServer(t *testing.T, mock fga.FGAClient, descBase string) *En
 		KeysBaseURL:       descBase,
 		TTL:               time.Minute,
 		ExpectedAudiences: []string{componentTestAudience},
+		ReplayStore:       replay,
 		HTTPClient:        &http.Client{Timeout: 5 * time.Second},
 	})
 	if err != nil {
@@ -249,5 +281,59 @@ func TestComponentAuth_BadTokenIsUnauthenticated(t *testing.T) {
 	}
 	if resp.GetStatus().GetCode() != int32(code.Code_UNAUTHENTICATED) {
 		t.Errorf("status = %d, want Unauthenticated for a present-but-invalid component token", resp.GetStatus().GetCode())
+	}
+}
+
+// TestComponentAuth_SecondReplicaRefusesReplay: two servers, as two ext-authz
+// replicas, share one Redis. The second server refuses a token that the first
+// accepted, and FGA is not consulted for it.
+func TestComponentAuth_SecondReplicaRefusesReplay(t *testing.T) {
+	pub, priv := mustGenEd25519(t)
+	desc := componentDescriptorServer(t, pub, "agent-1", "agent_principal:9", "acme", "active")
+	mr := miniredis.RunT(t)
+	mockA, mockB := &capturingFGA{allowed: true}, &capturingFGA{allowed: true}
+	srvA := buildComponentServerOn(t, mockA, desc.URL+"/capabilitygrant/v1/keys", componentReplayStoreOn(t, mr))
+	srvB := buildComponentServerOn(t, mockB, desc.URL+"/capabilitygrant/v1/keys", componentReplayStoreOn(t, mr))
+
+	tok := mintComponentJWT(t, priv, "agent-1")
+	resp, err := srvA.Check(context.Background(), componentCheckRequest(componentTestMethod, tok))
+	if err != nil {
+		t.Fatalf("Check A: %v", err)
+	}
+	if resp.GetStatus().GetCode() != int32(code.Code_OK) {
+		t.Fatalf("replica A status = %d, want OK", resp.GetStatus().GetCode())
+	}
+	resp, err = srvB.Check(context.Background(), componentCheckRequest(componentTestMethod, tok))
+	if err != nil {
+		t.Fatalf("Check B: %v", err)
+	}
+	if resp.GetStatus().GetCode() != int32(code.Code_UNAUTHENTICATED) {
+		t.Fatalf("replica B status = %d, want Unauthenticated for a replayed token", resp.GetStatus().GetCode())
+	}
+	if mockB.lastUser != "" {
+		t.Errorf("FGA was consulted (user=%q) for a replayed token", mockB.lastUser)
+	}
+}
+
+// TestComponentAuth_RefusesWhenRedisIsDown: when Redis does not answer, a
+// component call is refused with Unavailable, and FGA is not consulted.
+func TestComponentAuth_RefusesWhenRedisIsDown(t *testing.T) {
+	pub, priv := mustGenEd25519(t)
+	desc := componentDescriptorServer(t, pub, "agent-1", "agent_principal:9", "acme", "active")
+	mr := miniredis.RunT(t)
+	mock := &capturingFGA{allowed: true}
+	srv := buildComponentServerOn(t, mock, desc.URL+"/capabilitygrant/v1/keys", componentReplayStoreOn(t, mr))
+	mr.Close()
+
+	tok := mintComponentJWT(t, priv, "agent-1")
+	resp, err := srv.Check(context.Background(), componentCheckRequest(componentTestMethod, tok))
+	if err != nil {
+		t.Fatalf("Check: %v", err)
+	}
+	if resp.GetStatus().GetCode() != int32(code.Code_UNAVAILABLE) {
+		t.Fatalf("status = %d, want Unavailable when the replay state is not reachable", resp.GetStatus().GetCode())
+	}
+	if mock.lastUser != "" {
+		t.Errorf("FGA was consulted (user=%q) for a token that could not be recorded", mock.lastUser)
 	}
 }
