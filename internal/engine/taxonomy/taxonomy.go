@@ -52,7 +52,7 @@ import (
 // Version is the Taxonomy's platform-wide version. Bump it in the same change
 // that promotes a shape, so a projected graph can be attributed to the schema
 // that produced it.
-const Version = 4
+const Version = 5
 
 // ObservationLabel is the label every out-of-taxonomy shape lands on. It is a
 // compile-time constant and a plain identifier, so it is never caller-influenced.
@@ -113,6 +113,11 @@ var coreNodeLabels = []string{
 	// instance's target_id both already hold this node's id, so a Target node
 	// is what turns "what did we learn about target X" into one traversal.
 	"Target",
+
+	// Hypothesis (v5, ADR-0121, gibson#670). The proposed, unproven claim of an
+	// agent. The World folds it, and the projector writes one node for each
+	// hypothesis, keyed by the id that the World assigned.
+	"Hypothesis",
 }
 
 // coreRelationshipTypes is the promoted edge vocabulary, likewise tracking the

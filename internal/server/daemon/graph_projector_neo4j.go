@@ -14,6 +14,7 @@ import (
 	"context"
 	"fmt"
 	"regexp"
+	"sort"
 	"strings"
 	"time"
 
@@ -50,6 +51,9 @@ var projectedNodeLabels = []string{
 	// The registered target a mission assesses (gibson#550), materialised by
 	// upsertTargetCypher.
 	"Target",
+	// The proposed claim of an agent (gibson#670), materialised by
+	// upsertHypothesisCypher.
+	"Hypothesis",
 }
 
 var projectedRelationshipTypes = []string{
@@ -415,6 +419,7 @@ var entityIdentityProperty = map[string]string{
 	"Domain":     "brain_id",
 	"Finding":    "brain_id",
 	"Host":       "brain_id",
+	"Hypothesis": "brain_id",
 	"LlmCall":    "brain_id",
 	"Subdomain":  "brain_id",
 	// The observation escape hatch is keyed by the event that carried it.
@@ -625,6 +630,65 @@ func (w *neo4jGraphWriter) UpsertAccount(ctx context.Context, tenant string, a b
 	return w.exec(ctx, tenant, upsertAccountCypher, map[string]any{
 		"id": int64(a.ID), "scope": a.ScopeID, "identifier": a.Identifier, "kind": a.Kind,
 	}, "account", a.ID)
+}
+
+// upsertHypothesisCypher MERGEs a :Hypothesis (ADR-0121, gibson#670), keyed by
+// the id that the World assigned. The id is the same after a replay of the
+// Timeline, so a second projection converges on the same node. The claim text
+// and the proposer are data in parameters, never query text.
+//
+// The node carries the references of the claim as two parallel lists and draws
+// no edge to them. A reference names an entity by label and identity
+// properties, and the World does not resolve it to a node (hypothesis.go).
+const upsertHypothesisCypher = `
+MERGE (h:Hypothesis {brain_id: $id})
+  SET h.scope = $scope, h.claim = $claim, h.proposer = $proposer,
+      h.confidence = $confidence, h.mission_id = $mission_id, h.run_id = $run_id,
+      h.hypothesis_id = $hypothesis_id, h.technique = $technique,
+      h.reference_labels = $reference_labels, h.reference_ids = $reference_ids,
+      h.updated_at = timestamp()
+RETURN h.brain_id`
+
+// hypothesisUpsertParams builds the parameter set for upsertHypothesisCypher.
+// It is separate from the write so a test can check the node shape without a
+// database. Each reference becomes one label and one identity string. The
+// identity string lists the properties in key order, so it is the same on each
+// projection.
+func hypothesisUpsertParams(h brain.HypothesisSnapshot) map[string]any {
+	labels := make([]string, 0, len(h.References))
+	ids := make([]string, 0, len(h.References))
+	for _, ref := range h.References {
+		keys := make([]string, 0, len(ref.IDProperties))
+		for k := range ref.IDProperties {
+			keys = append(keys, k)
+		}
+		sort.Strings(keys)
+		parts := make([]string, 0, len(keys))
+		for _, k := range keys {
+			parts = append(parts, k+"="+ref.IDProperties[k])
+		}
+		labels = append(labels, ref.Label)
+		ids = append(ids, strings.Join(parts, ","))
+	}
+	return map[string]any{
+		//nolint:gosec // G115: h.ID is a monotonic brain-assigned counter; it never approaches int64 max.
+		"id":               int64(h.ID),
+		"scope":            h.ScopeID,
+		"claim":            h.Claim,
+		"proposer":         h.Proposer,
+		"confidence":       h.Confidence,
+		"mission_id":       h.MissionID,
+		"run_id":           h.RunID,
+		"hypothesis_id":    h.HypothesisID,
+		"technique":        h.Technique,
+		"reference_labels": labels,
+		"reference_ids":    ids,
+	}
+}
+
+// UpsertHypothesis idempotently projects one hypothesis.
+func (w *neo4jGraphWriter) UpsertHypothesis(ctx context.Context, tenant string, h brain.HypothesisSnapshot) error {
+	return w.exec(ctx, tenant, upsertHypothesisCypher, hypothesisUpsertParams(h), "hypothesis", h.ID)
 }
 
 // upsertAgentRunCypher MERGEs an :AgentRun (run-provenance, ADR-0107) keyed by the

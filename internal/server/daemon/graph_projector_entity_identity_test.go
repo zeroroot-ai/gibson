@@ -33,7 +33,7 @@ func TestEntityUpsertParams_AFirstClassLabelIsIdentifiedTheSameWayItsProjectionI
 	// Finding, Host and the rest are merged by their projections on brain_id.
 	// An entity write naming one of them has to use the same property or the two
 	// writers of one label diverge into two nodes.
-	for _, label := range []string{"Finding", "Host", "Domain", "Subdomain", "Account", "Credential", "AgentRun", "LlmCall"} {
+	for _, label := range []string{"Finding", "Host", "Domain", "Subdomain", "Account", "Credential", "AgentRun", "LlmCall", "Hypothesis"} {
 		t.Run(label, func(t *testing.T) {
 			ident := identOf(t, label, "brain-1")
 			if got, ok := ident["brain_id"]; !ok || got != "brain-1" {

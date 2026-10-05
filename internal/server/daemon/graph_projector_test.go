@@ -27,6 +27,7 @@ type fakeGraphWriter struct {
 	targets      map[string][]TargetProjection
 	observations map[string][]brain.ObservationSnapshot
 	entities     map[string][]brain.EntitySnapshot
+	hypotheses   map[string][]brain.HypothesisSnapshot
 }
 
 func newFakeGraphWriter() *fakeGraphWriter {
@@ -43,6 +44,7 @@ func newFakeGraphWriter() *fakeGraphWriter {
 		targets:      map[string][]TargetProjection{},
 		observations: map[string][]brain.ObservationSnapshot{},
 		entities:     map[string][]brain.EntitySnapshot{},
+		hypotheses:   map[string][]brain.HypothesisSnapshot{},
 	}
 }
 
@@ -50,6 +52,13 @@ func (f *fakeGraphWriter) UpsertEntity(_ context.Context, tenant string, e brain
 	f.mu.Lock()
 	defer f.mu.Unlock()
 	f.entities[tenant] = append(f.entities[tenant], e)
+	return nil
+}
+
+func (f *fakeGraphWriter) UpsertHypothesis(_ context.Context, tenant string, h brain.HypothesisSnapshot) error {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	f.hypotheses[tenant] = append(f.hypotheses[tenant], h)
 	return nil
 }
 
