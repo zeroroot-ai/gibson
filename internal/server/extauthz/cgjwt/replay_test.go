@@ -13,6 +13,7 @@ import (
 	"time"
 
 	"github.com/alicebob/miniredis/v2"
+	"github.com/golang-jwt/jwt/v5"
 
 	"github.com/zeroroot-ai/gibson/internal/engine/state"
 )
@@ -248,5 +249,21 @@ func TestReplayTTL(t *testing.T) {
 	}
 	if _, ok := replayTTL(now.Add(-time.Second), now); ok {
 		t.Fatal("a token past its expiry has no time left")
+	}
+}
+
+// TestCheckReplay_TokenWithNoTimeLeftIsExpired: a token whose expiry passes
+// between the signature check and the replay check gets ErrExpired. It
+// writes no replay record.
+func TestCheckReplay_TokenWithNoTimeLeftIsExpired(t *testing.T) {
+	a, _, mr, _ := twoVerifiers(t)
+	parsed := &jwt.Token{Claims: jwt.MapClaims{"exp": float64(time.Now().Add(-time.Second).Unix())}}
+
+	err := a.checkReplay(context.Background(), "agent-1", "jti-late", parsed)
+	if !errors.Is(err, ErrExpired) {
+		t.Fatalf("err = %v, want ErrExpired", err)
+	}
+	if keys := mr.Keys(); len(keys) != 0 {
+		t.Fatalf("an expired token wrote a replay record: %v", keys)
 	}
 }

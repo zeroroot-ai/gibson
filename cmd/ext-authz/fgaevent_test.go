@@ -94,7 +94,8 @@ func TestInitRedis_RefusesToStartWithNoRedis(t *testing.T) {
 	ctx, cancel := context.WithCancel(context.Background())
 	t.Cleanup(cancel)
 	for name, rawURL := range map[string]string{"empty": "", "unreachable": "redis://127.0.0.1:1"} {
-		if _, _, err := initRedis(ctx, slog.Default(), &recordingEvicter{}, rawURL, ""); err == nil {
+		t.Setenv("EXT_AUTHZ_REDIS_URL", rawURL)
+		if _, _, err := initRedis(ctx, slog.Default(), &recordingEvicter{}); err == nil {
 			t.Fatalf("%s: initRedis returned no error", name)
 		}
 	}
@@ -108,7 +109,9 @@ func TestInitRedis_StartsTheSubscriberAndGivesAReplayStore(t *testing.T) {
 	t.Cleanup(cancel)
 	mr := miniredis.RunT(t)
 
-	sc, replay, err := initRedis(ctx, slog.Default(), &recordingEvicter{}, "redis://"+mr.Addr(), "")
+	t.Setenv("EXT_AUTHZ_REDIS_URL", "redis://"+mr.Addr())
+	t.Setenv("REDIS_PASSWORD", "")
+	sc, replay, err := initRedis(ctx, slog.Default(), &recordingEvicter{})
 	if err != nil {
 		t.Fatalf("initRedis: %v", err)
 	}

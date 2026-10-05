@@ -221,8 +221,7 @@ func main() {
 
 	// Redis is required. It holds the replay state of component tokens, which
 	// all replicas share, and it carries the FGA write events.
-	stateClient, replayStore, err := initRedis(ctx, log, cachedChecker,
-		os.Getenv("EXT_AUTHZ_REDIS_URL"), os.Getenv("REDIS_PASSWORD"))
+	stateClient, replayStore, err := initRedis(ctx, log, cachedChecker)
 	if err != nil {
 		log.Error("init Redis", "err", err)
 		os.Exit(1)
@@ -998,13 +997,15 @@ type subjectEvicter interface {
 // subscriber that evicts cached decisions on an FGA write event (hosted#204),
 // and it returns the store for the replay state of component tokens. The
 // caller closes the returned client.
+//
+// EXT_AUTHZ_REDIS_URL names the Redis. REDIS_PASSWORD is its password, when
+// it has one.
 func initRedis(
 	ctx context.Context,
 	log *slog.Logger,
 	cc subjectEvicter,
-	redisURL, password string,
 ) (*state.StateClient, cgjwt.ReplayStore, error) {
-	sc, err := requiredStateClient(ctx, redisURL, password)
+	sc, err := requiredStateClient(ctx, os.Getenv("EXT_AUTHZ_REDIS_URL"), os.Getenv("REDIS_PASSWORD"))
 	if err != nil {
 		return nil, nil, err
 	}
