@@ -286,7 +286,12 @@ func (e *Engine) apply(ev Event) bool {
 }
 
 // maybeSnapshot writes a snapshot of the current World and trims the Timeline
-// prefix it covers. Errors are logged but do not abort the engine.
+// prefix it covers: the durable stream first, then the in-memory Timeline, in
+// the same step (gibson#730). The snapshot covers each event that the engine
+// folded, so after a trim that worked the in-memory Timeline starts empty. The
+// full history is in the store (Engine.History). When the trim fails, the
+// in-memory Timeline keeps its events, and the next snapshot tries again.
+// Errors are logged but do not abort the engine.
 // Called from apply() under the write lock, so no additional locking is needed.
 func (e *Engine) maybeSnapshot() {
 	snap := SnapshotWorld(e.World, e.lastAppendedSeq)
@@ -298,13 +303,15 @@ func (e *Engine) maybeSnapshot() {
 		)
 		return
 	}
+	e.lastSnapshotSeq = handle
 	if err := e.store.TrimTo(context.Background(), e.World.Tenant, handle); err != nil {
 		slog.Error("brain/engine: stream trim failed",
 			"tenant", e.World.Tenant,
 			"err", err,
 		)
+		return
 	}
-	e.lastSnapshotSeq = handle
+	e.Timeline = &Timeline{}
 }
 
 func (e *Engine) drainIntake() int {
