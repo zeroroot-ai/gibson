@@ -49,9 +49,9 @@ type Emitter interface {
 	Log(event Event)
 }
 
-// EmitModelResolved appends a model_resolved event to the audit stream.
-// Non-blocking — failure to enqueue is logged and surfaced via the
-// writer's existing gibson_audit_dropped_total counter. Calls with a
+// EmitModelResolved hands a model_resolved event to the audit writer. A
+// model resolution is a read, so the event goes through the queue of the
+// writer: a full queue slows the caller and drops nothing. Calls with a
 // nil emitter are no-ops (simplifies wiring when audit is not configured).
 func EmitModelResolved(ctx context.Context, em Emitter, logger *slog.Logger, ev ModelResolutionEvent) {
 	if em == nil {

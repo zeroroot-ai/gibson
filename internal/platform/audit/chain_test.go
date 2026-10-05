@@ -115,6 +115,12 @@ func flushEvents(t *testing.T, tenant string, head *chainRow, events []Event) []
 	mock.ExpectQuery("ORDER  BY chain_seq DESC").
 		WithArgs(tenant).
 		WillReturnRows(headRows)
+	if head == nil {
+		// No row: the writer asks the retention anchor where the chain starts.
+		mock.ExpectQuery("audit_chain_anchor").
+			WithArgs(tenant).
+			WillReturnRows(sqlmock.NewRows([]string{"first_seq", "prev_hash"}))
+	}
 
 	mock.ExpectExec("INSERT INTO audit_log").
 		WithArgs(captureArgs(12*len(events), &seen)...).
@@ -128,8 +134,16 @@ func flushEvents(t *testing.T, tenant string, head *chainRow, events []Event) []
 	return capturedRows(t, seen)
 }
 
-// verify runs VerifyChain over a fixed set of rows.
+// verify runs VerifyChain over a fixed set of rows, with no retention anchor.
 func verify(t *testing.T, tenant string, unchained int, rows []chainRow) ChainReport {
+	t.Helper()
+	return verifyFrom(t, tenant, unchained, nil, rows)
+}
+
+// verifyFrom runs VerifyChain over a fixed set of rows. anchor is the
+// retention anchor of the tenant: the Seq and PrevHash of the oldest row that
+// must remain. nil means that retention never pruned the tenant.
+func verifyFrom(t *testing.T, tenant string, unchained int, anchor *chainRow, rows []chainRow) ChainReport {
 	t.Helper()
 
 	db, mock, err := sqlmock.New()
@@ -139,6 +153,13 @@ func verify(t *testing.T, tenant string, unchained int, rows []chainRow) ChainRe
 	mock.ExpectQuery("COUNT").
 		WithArgs(tenant).
 		WillReturnRows(sqlmock.NewRows([]string{"count"}).AddRow(unchained))
+	anchorRows := sqlmock.NewRows([]string{"first_seq", "prev_hash"})
+	if anchor != nil {
+		anchorRows.AddRow(anchor.Seq, anchor.PrevHash)
+	}
+	mock.ExpectQuery("audit_chain_anchor").
+		WithArgs(tenant).
+		WillReturnRows(anchorRows)
 	mock.ExpectQuery("ORDER  BY chain_seq ASC").
 		WithArgs(tenant).
 		WillReturnRows(chainRowsToSQL(rows))
@@ -397,6 +418,8 @@ func TestChain_MultiTenantBatchChainsEachTenantSeparately(t *testing.T) {
 		mock.ExpectQuery("ORDER  BY chain_seq DESC").
 			WithArgs(tenant).
 			WillReturnRows(sqlmock.NewRows([]string{"chain_seq", "entry_hash"}))
+		mock.ExpectQuery("audit_chain_anchor").
+			WillReturnRows(sqlmock.NewRows([]string{"first_seq", "prev_hash"}))
 	}
 	mock.ExpectExec("INSERT INTO audit_log").
 		WithArgs(captureArgs(12*3, &seen)...).
@@ -439,6 +462,8 @@ func TestChain_FlushRollsBackOnInsertFailure(t *testing.T) {
 	mock.ExpectExec("pg_advisory_xact_lock").WillReturnResult(sqlmock.NewResult(0, 0))
 	mock.ExpectQuery("ORDER  BY chain_seq DESC").
 		WillReturnRows(sqlmock.NewRows([]string{"chain_seq", "entry_hash"}))
+	mock.ExpectQuery("audit_chain_anchor").
+		WillReturnRows(sqlmock.NewRows([]string{"first_seq", "prev_hash"}))
 	mock.ExpectExec("INSERT INTO audit_log").WillReturnError(assert.AnError)
 	mock.ExpectRollback()
 

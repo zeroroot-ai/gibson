@@ -5,6 +5,9 @@ package daemon
 
 import (
 	"context"
+	"database/sql"
+	"errors"
+	"fmt"
 	"log/slog"
 
 	"github.com/zeroroot-ai/gibson/internal/engine/state"
@@ -20,23 +23,54 @@ type auditSink interface {
 // wireDaemonAudit builds the daemon's one audit logger and hands it to the
 // daemon service. The audit log is a required record for the tenant-admin
 // RPCs that change who can sign in: ResetUserMFA refuses to run without it
-// (hosted#206). The same logger serves the component service, so the stream
-// has one writer per process.
+// (hosted#206). The same logger serves the component service.
 //
-// Until this existed the daemon built an audit logger for the component
-// service only and never called WithAuditLogger, so every MFA reset skipped
-// its record in production while the unit tests, which set the field
-// themselves, stayed green.
+// The logger hands each record to a writer on the platform database.
+// Postgres audit_log is the durable copy, and the Redis stream is the live
+// tail for the console.
 //
-// A daemon with no state client has no audit stream, and returns nil: the
-// service then refuses the RPCs that need the record instead of pretending.
-func wireDaemonAudit(ctx context.Context, sc *state.StateClient, logger *slog.Logger, svc auditSink) *audit.AuditLogger {
+// It also starts audit retention on the platform database. The period comes
+// from GIBSON_AUDIT_RETENTION_MONTHS. A period under 13 months is an error,
+// and the daemon does not start.
+//
+// A daemon with no state client has no live tail, and returns a nil logger:
+// the service then refuses the RPCs that need the record instead of
+// pretending.
+func wireDaemonAudit(
+	ctx context.Context,
+	sc *state.StateClient,
+	db *sql.DB,
+	logger *slog.Logger,
+	svc auditSink,
+) (*audit.AuditLogger, error) {
+	if db == nil {
+		return nil, errors.New("audit wiring: the platform database is required, it holds the audit log")
+	}
+	months, err := audit.RetentionMonthsFromEnv()
+	if err != nil {
+		return nil, fmt.Errorf("audit wiring: %w", err)
+	}
+	retention, err := audit.NewRetention(db, months, logger)
+	if err != nil {
+		return nil, fmt.Errorf("audit wiring: %w", err)
+	}
+	go retention.Run(ctx, audit.DefaultRetentionInterval)
+	logger.InfoContext(ctx, "audit retention started", slog.Int("months", months))
+
 	if sc == nil {
 		logger.WarnContext(ctx, "no state client: the audit log is not wired, and the RPCs that require a record refuse")
-		return nil
+		return nil, nil
 	}
-	al := audit.NewAuditLogger(ctx, sc, logger)
+	al := audit.NewAuditLogger(ctx, sc, newStartedAuditWriter(ctx, db, logger), logger)
 	svc.WithAuditLogger(al)
 	logger.InfoContext(ctx, "audit logger wired into DaemonServer")
-	return al
+	return al, nil
+}
+
+// newStartedAuditWriter returns a running writer for the Postgres audit_log
+// table. It stops when ctx ends, after it wrote its queue.
+func newStartedAuditWriter(ctx context.Context, db *sql.DB, logger *slog.Logger) *audit.Writer {
+	w := audit.NewWriter(db, logger)
+	w.Start(ctx)
+	return w
 }

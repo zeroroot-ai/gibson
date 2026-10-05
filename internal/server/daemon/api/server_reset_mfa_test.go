@@ -18,6 +18,7 @@ import (
 
 	"github.com/zeroroot-ai/gibson/internal/engine/state"
 	"github.com/zeroroot-ai/gibson/internal/platform/audit"
+	"github.com/zeroroot-ai/gibson/internal/platform/audit/audittest"
 	"github.com/zeroroot-ai/gibson/internal/platform/idp"
 	"github.com/zeroroot-ai/gibson/internal/platform/mailer"
 	tenantv1 "github.com/zeroroot-ai/gibson/internal/server/daemon/api/gibson/tenant/v1"
@@ -60,7 +61,7 @@ func testAuditLogger(t *testing.T) *audit.AuditLogger {
 	t.Cleanup(func() { _ = sc.Close() })
 	ctx, cancel := context.WithCancel(context.Background())
 	t.Cleanup(cancel)
-	return audit.NewAuditLogger(ctx, sc, slog.Default())
+	return audit.NewAuditLogger(ctx, sc, &audittest.Recorder{}, slog.Default())
 }
 
 // fakeMFAResetMailer records SendMFAReset calls.
