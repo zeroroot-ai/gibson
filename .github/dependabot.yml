@@ -16,7 +16,6 @@ updates:
     labels: ["dependencies", "docker"]
     commit-message:
       prefix: chore(deps)
-      include: scope
     open-pull-requests-limit: 3
     groups:
       docker-deps:
@@ -34,7 +33,6 @@ updates:
     labels: ["dependencies", "go"]
     commit-message:
       prefix: chore(deps)
-      include: scope
     open-pull-requests-limit: 5
     groups:
       go-deps:
@@ -52,7 +50,6 @@ updates:
     labels: ["dependencies", "github-actions"]
     commit-message:
       prefix: chore(deps)
-      include: scope
     # github/codeql-action is one action with several sub-actions (init,
     # autobuild, analyze, upload-sarif). Dependabot sees each sub-action as
     # its own dependency and bumps them in separate PRs. One of those PRs
