@@ -1,13 +1,16 @@
-# oss-boundary — E14 cutover invariant (gibson#817, ADR-0089):
-# the open (Apache-2.0) layer — sdk, adk, setec, gibson-executor — builds
-# with ZERO closed/ELv2 dependency, and gibson (ELv2) never requires the
-# closed billing repo (pkg/billing stays a no-op seam by default).
+# oss-boundary: no repo links a module of a more closed license layer
+# (gibson#817, gibson#711, ADR-0089).
 #
-# This is the gibson-side cross-repo sweep: it clones the four public
-# Apache repos anonymously at their default branch and asserts their full
-# module graphs are free of gibson/billing/dashboard/deploy/gitops and the
-# private tooling modules. It complements (not replaces) each OSS repo's
-# local guard, e.g. sdk's `make check-no-gibson`.
+#   permissive  sdk, adk, setec           Apache-2.0
+#   ELv2        gibson, gibson-executor   Elastic License 2.0
+#   closed      billing, and the private repos
+#
+# This is the gibson-side sweep across repos. It clones the four public repos
+# with no token at their default branch. It asserts that each module graph
+# holds no module of a more closed layer, and that gibson requires neither
+# billing nor gibson-executor. scripts/check-oss-boundary.sh states the rule
+# of each layer. The sweep complements the local guard of each repo, for
+# example `make check-no-gibson` of the sdk.
 #
 # Triggers (kept off the per-PR fast tier deliberately — cicd-efficiency
 # epic: gibson PR content cannot change the OSS repos' dependency
@@ -72,5 +75,7 @@ jobs:
         with:
           go-version-file: go.mod
           cache: false # nothing here builds gibson; module-graph loads are tiny
-      - name: Check open-core boundary (Apache layer + billing seam)
+      - name: Prove that the guard fails for each layer
+        run: ./scripts/check-oss-boundary.sh --selftest
+      - name: Check the license layers (permissive, ELv2, closed)
         run: ./scripts/check-oss-boundary.sh "${RUNNER_TEMP}/oss-clones"
