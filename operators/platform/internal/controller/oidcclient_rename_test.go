@@ -81,7 +81,7 @@ func (f *fakeAppZitadel) EnsureJWTAccessToken(context.Context, string, string) (
 	return false, nil
 }
 
-func (f *fakeAppZitadel) VerifyClientSecret(context.Context, string, string, string) (bool, error) {
+func (f *fakeAppZitadel) VerifyClientSecret(context.Context, string, string) (bool, error) {
 	return true, nil
 }
 
@@ -97,7 +97,7 @@ func newOIDCClientRenameFixture(t *testing.T, specName, liveName, statusAppID st
 			Finalizers: []string{oidcClientFinalizer},
 		},
 		Spec: gibsonv1alpha1.OIDCClientSpec{
-			ZitadelIssuer:   "http://zitadel.invalid",
+			ZitadelURL:      "http://zitadel.invalid",
 			AdminTokenRef:   gibsonv1alpha1.SecretKeyRef{Name: "pat", Namespace: ns, Key: "pat"},
 			ProjectRef:      gibsonv1alpha1.ProjectReference{Name: "gibson"},
 			ClientName:      specName,

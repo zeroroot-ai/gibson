@@ -16,6 +16,7 @@ import (
 
 	"github.com/zeroroot-ai/gibson/internal/platform/idp"
 	"github.com/zeroroot-ai/gibson/internal/platform/tenantrole"
+	"github.com/zeroroot-ai/gibson/internal/platform/zitadelconn"
 )
 
 // Client is the Zitadel Management/Admin API surface the platform-operator
@@ -150,19 +151,19 @@ type Client interface {
 	GetOrgIDForProject(ctx context.Context, projectID string) (orgID string, err error)
 
 	// VerifyClientSecret checks whether the given (clientID, clientSecret)
-	// pair currently authenticates against the issuer at issuerURL. Returns
+	// pair currently authenticates against Zitadel. Returns
 	// (true, nil) when Zitadel accepts the credentials, (false, nil) when
 	// Zitadel rejects them as invalid (HTTP 401 / invalid_client), and
 	// (false, err) on transport / TLS / unexpected errors so the caller
 	// can distinguish "credentials are wrong" from "we couldn't tell."
 	//
 	// Implemented via the OIDC introspection endpoint
-	// (issuerURL + /oauth/v2/introspect) with HTTP Basic client auth and a
+	// (/oauth/v2/introspect on the connect base) with HTTP Basic client auth and a
 	// throwaway token body — the body content is irrelevant; what matters
 	// is that Zitadel validates the Basic header first and rejects with
 	// 401 + error="invalid_client" when the secret is wrong, regardless
 	// of the token value supplied.
-	VerifyClientSecret(ctx context.Context, issuerURL, clientID, clientSecret string) (bool, error)
+	VerifyClientSecret(ctx context.Context, clientID, clientSecret string) (bool, error)
 
 	// EnsureJWTAccessToken patches the OIDC app's accessTokenType to JWT
 	// when it is currently set to anything else (OIDC_TOKEN_TYPE_BEARER,
@@ -364,16 +365,23 @@ type OIDCClient struct {
 	ApplicationType string
 }
 
+// requestTimeout bounds one admin API request.
+const requestTimeout = 30 * time.Second
+
 // New constructs a Zitadel admin API client authenticated via PAT.
-// apiURL is the Zitadel base URL (e.g. "https://zitadel.example.com").
-// pat is the IAM_OWNER Personal Access Token. externalDomain is forged
-// onto the Host header on every request so in-cluster Service-name
-// callers route to the right Zitadel instance; pass empty to skip
-// forgery.
-func New(apiURL, pat, externalDomain string) Client {
-	u, err := url.Parse(apiURL)
+//
+// connectURL is the in-cluster Zitadel Service base URL and externalDomain is
+// the public host the client claims. Both go through zitadelconn (ADR-0092):
+// every request carries the x-zitadel-instance-host header, and no request
+// sets the Host header by hand. A connectURL that is not a base URL, or an
+// externalDomain that is empty or carries a port, yields a client whose every
+// call returns that construction error.
+//
+// pat is the IAM_OWNER Personal Access Token.
+func New(connectURL, pat, externalDomain string) Client {
+	ep, err := zitadelconn.New(connectURL, externalDomain)
 	if err != nil {
-		return &errClient{err: fmt.Errorf("zitadel: invalid apiURL %q: %w", apiURL, err)}
+		return &errClient{err: fmt.Errorf("zitadel: %w: %w", err, ErrInvalidInput)}
 	}
 	// Defensive trim. Go's net/http rejects header values containing CR/LF
 	// (CWE-93), so a single trailing 0x0a from `echo "$pat" | kubectl
@@ -381,18 +389,16 @@ func New(apiURL, pat, externalDomain string) Client {
 	// for Authorization" loop with no actual transient error. Trim once
 	// here so every caller benefits.
 	return &httpClient{
-		baseURL:        u,
-		pat:            strings.TrimSpace(pat),
-		externalDomain: externalDomain,
-		http:           &http.Client{Timeout: 30 * time.Second},
+		endpoint: ep,
+		pat:      strings.TrimSpace(pat),
+		http:     ep.HTTPClient(requestTimeout),
 	}
 }
 
 type httpClient struct {
-	baseURL        *url.URL
-	pat            string
-	externalDomain string
-	http           *http.Client
+	endpoint zitadelconn.Endpoint
+	pat      string
+	http     *http.Client
 }
 
 // EnsureProject implements Client.
@@ -626,7 +632,7 @@ func (c *httpClient) EnsureJWTAccessToken(ctx context.Context, projectID, appID 
 
 // VerifyClientSecret implements Client.
 //
-// POSTs to issuerURL + /oauth/v2/introspect with HTTP Basic auth using
+// POSTs to /oauth/v2/introspect on the connect base with HTTP Basic auth using
 // (clientID, clientSecret) and a throwaway token body. Returns:
 //   - (true, nil)   — HTTP 200 (token validation result irrelevant; what
 //     matters is that Zitadel accepted the Basic auth).
@@ -635,19 +641,11 @@ func (c *httpClient) EnsureJWTAccessToken(ctx context.Context, projectID, appID 
 //     Caller should treat as unknown and proceed with whatever
 //     fallback policy applies (typically: don't rotate, log, retry
 //     on next reconcile).
-func (c *httpClient) VerifyClientSecret(ctx context.Context, issuerURL, clientID, clientSecret string) (bool, error) {
-	base, err := url.Parse(issuerURL)
-	if err != nil {
-		return false, fmt.Errorf("VerifyClientSecret: parse issuerURL %q: %w", issuerURL, ErrInvalidInput)
-	}
-	full, err := base.Parse("/oauth/v2/introspect")
-	if err != nil {
-		return false, fmt.Errorf("VerifyClientSecret: build introspect path: %w", ErrInvalidInput)
-	}
+func (c *httpClient) VerifyClientSecret(ctx context.Context, clientID, clientSecret string) (bool, error) {
 	// A non-empty token body keeps Zitadel happy with the request shape;
 	// the actual value is never validated when Basic auth fails first.
 	form := url.Values{"token": []string{"verify-client-secret-probe"}}
-	req, err := http.NewRequestWithContext(ctx, http.MethodPost, full.String(),
+	req, err := http.NewRequestWithContext(ctx, http.MethodPost, c.endpoint.URL("/oauth/v2/introspect"),
 		strings.NewReader(form.Encode()))
 	if err != nil {
 		return false, fmt.Errorf("VerifyClientSecret: new request: %w", err)
@@ -655,9 +653,6 @@ func (c *httpClient) VerifyClientSecret(ctx context.Context, issuerURL, clientID
 	req.SetBasicAuth(clientID, clientSecret)
 	req.Header.Set("Content-Type", "application/x-www-form-urlencoded")
 	req.Header.Set("Accept", "application/json")
-	if c.externalDomain != "" {
-		req.Host = c.externalDomain
-	}
 	resp, err := c.http.Do(req)
 	if err != nil {
 		return false, fmt.Errorf("VerifyClientSecret: %v: %w", err, ErrUnreachable)
@@ -737,11 +732,11 @@ func (c *httpClient) doJSONWithHeaders(ctx context.Context, method, path string,
 		}
 		bodyReader = bytes.NewReader(buf)
 	}
-	full, err := c.baseURL.Parse(path)
+	full, err := url.Parse(path)
 	if err != nil {
 		return fmt.Errorf("zitadel: path %q: %w", path, ErrInvalidInput)
 	}
-	req, err := http.NewRequestWithContext(ctx, method, full.String(), bodyReader)
+	req, err := http.NewRequestWithContext(ctx, method, c.endpoint.URL(full.RequestURI()), bodyReader)
 	if err != nil {
 		return fmt.Errorf("zitadel: new request: %w", err)
 	}
@@ -750,9 +745,6 @@ func (c *httpClient) doJSONWithHeaders(ctx context.Context, method, path string,
 	req.Header.Set("Accept", "application/json")
 	for k, v := range headers {
 		req.Header.Set(k, v)
-	}
-	if c.externalDomain != "" {
-		req.Host = c.externalDomain
 	}
 
 	resp, err := c.http.Do(req)
@@ -896,7 +888,7 @@ func (e *errClient) GetOIDCClient(ctx context.Context, projectID, appID string) 
 func (e *errClient) GetOIDCClientByName(ctx context.Context, projectID, name string) (*OIDCClient, error) {
 	return nil, e.err
 }
-func (e *errClient) VerifyClientSecret(ctx context.Context, issuerURL, clientID, clientSecret string) (bool, error) {
+func (e *errClient) VerifyClientSecret(_ context.Context, _, _ string) (bool, error) {
 	return false, e.err
 }
 func (e *errClient) EnsureJWTAccessToken(ctx context.Context, projectID, appID string) (bool, error) {

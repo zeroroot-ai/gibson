@@ -119,7 +119,7 @@ var _ = Describe("OIDCClient reconciler", func() {
 			Client: k8sClient,
 			Scheme: k8sClient.Scheme(),
 			ZitadelFactory: func(issuer, pat string) zitadel.Client {
-				return zitadel.New(fake.URL, pat, "")
+				return zitadel.New(fake.URL, pat, "app.example.test")
 			},
 		}
 	})
@@ -132,7 +132,7 @@ var _ = Describe("OIDCClient reconciler", func() {
 		oc := &gibsonv1alpha1.OIDCClient{
 			ObjectMeta: metav1.ObjectMeta{Name: clientName, Namespace: ns},
 			Spec: gibsonv1alpha1.OIDCClientSpec{
-				ZitadelIssuer:   fake.URL,
+				ZitadelURL:      fake.URL,
 				AdminTokenRef:   gibsonv1alpha1.SecretKeyRef{Name: patSecret, Namespace: ns, Key: patKey},
 				ProjectRef:      gibsonv1alpha1.ProjectReference{Name: "gibson"},
 				ClientName:      clientName,
@@ -176,7 +176,7 @@ var _ = Describe("OIDCClient reconciler", func() {
 		oc := &gibsonv1alpha1.OIDCClient{
 			ObjectMeta: metav1.ObjectMeta{Name: "no-token", Namespace: isolatedNs},
 			Spec: gibsonv1alpha1.OIDCClientSpec{
-				ZitadelIssuer:   fake.URL,
+				ZitadelURL:      fake.URL,
 				AdminTokenRef:   gibsonv1alpha1.SecretKeyRef{Name: "missing", Namespace: isolatedNs, Key: "pat"},
 				ProjectRef:      gibsonv1alpha1.ProjectReference{Name: "gibson"},
 				ClientName:      "no-token",
@@ -261,14 +261,14 @@ var _ = Describe("OIDCClient reconciler", func() {
 			Client: k8sClient,
 			Scheme: k8sClient.Scheme(),
 			ZitadelFactory: func(issuer, pat string) zitadel.Client {
-				return zitadel.New(machineFake.URL, pat, "")
+				return zitadel.New(machineFake.URL, pat, "app.example.test")
 			},
 		}
 
 		oc := &gibsonv1alpha1.OIDCClient{
 			ObjectMeta: metav1.ObjectMeta{Name: "dashboard-service", Namespace: machineNs},
 			Spec: gibsonv1alpha1.OIDCClientSpec{
-				ZitadelIssuer:   machineFake.URL,
+				ZitadelURL:      machineFake.URL,
 				AdminTokenRef:   gibsonv1alpha1.SecretKeyRef{Name: "machine-pat", Namespace: machineNs, Key: "pat"},
 				ProjectRef:      gibsonv1alpha1.ProjectReference{Name: "gibson"},
 				ClientName:      "gibson-dashboard-service",
@@ -357,14 +357,14 @@ var _ = Describe("OIDCClient reconciler", func() {
 			Client: k8sClient,
 			Scheme: k8sClient.Scheme(),
 			ZitadelFactory: func(issuer, pat string) zitadel.Client {
-				return zitadel.New(botFake.URL, pat, "")
+				return zitadel.New(botFake.URL, pat, "app.example.test")
 			},
 		}
 
 		oc := &gibsonv1alpha1.OIDCClient{
 			ObjectMeta: metav1.ObjectMeta{Name: "signup-bot", Namespace: botNs},
 			Spec: gibsonv1alpha1.OIDCClientSpec{
-				ZitadelIssuer:   botFake.URL,
+				ZitadelURL:      botFake.URL,
 				AdminTokenRef:   gibsonv1alpha1.SecretKeyRef{Name: "bot-pat", Namespace: botNs, Key: "pat"},
 				ProjectRef:      gibsonv1alpha1.ProjectReference{Name: "gibson"},
 				ClientName:      "gibson-signup-bot",
@@ -657,7 +657,7 @@ var _ = Describe("OIDCClient reconciler: role changes reach an EXISTING machine 
 		oc := &gibsonv1alpha1.OIDCClient{
 			ObjectMeta: metav1.ObjectMeta{Name: clientName, Namespace: ns},
 			Spec: gibsonv1alpha1.OIDCClientSpec{
-				ZitadelIssuer:   "http://fake.invalid",
+				ZitadelURL:      "http://fake.invalid",
 				AdminTokenRef:   gibsonv1alpha1.SecretKeyRef{Name: "role-drift-pat", Namespace: ns, Key: "pat"},
 				ProjectRef:      gibsonv1alpha1.ProjectReference{Name: "gibson"},
 				ClientName:      clientName,

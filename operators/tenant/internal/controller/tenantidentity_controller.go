@@ -395,7 +395,7 @@ func oidcClientChildName(ti *gibsonv1alpha1.TenantIdentity, entry gibsonv1alpha1
 // lands in a Secret beside the TenantIdentity.
 func oidcClientSpecFor(ti *gibsonv1alpha1.TenantIdentity, entry gibsonv1alpha1.TenantIdentityOIDCClient, pb platformv1alpha1.PlatformBootstrap) platformv1alpha1.OIDCClientSpec {
 	spec := platformv1alpha1.OIDCClientSpec{
-		ZitadelIssuer:   pb.Spec.Zitadel.Issuer,
+		ZitadelURL:      pb.Spec.Zitadel.Issuer,
 		AdminTokenRef:   pb.Spec.Zitadel.AdminTokenRef,
 		ProjectRef:      platformv1alpha1.ProjectReference{Name: pb.Spec.Zitadel.Project.Name},
 		ClientName:      ti.Spec.TenantID + "/" + entry.Name,

@@ -148,7 +148,7 @@ func newOwnerTestReconciler(t *testing.T, zitadelURL, fgaURL string, objs ...cli
 		Scheme:   s,
 		Recorder: record.NewFakeRecorder(8),
 		ZitadelFactory: func(_, pat string) zitadel.Client {
-			return zitadel.New(zitadelURL, pat, "")
+			return zitadel.New(zitadelURL, pat, "app.example.test")
 		},
 		FGAFactory: func(_ string) (fgaclient.Client, error) {
 			return fgaclient.New(fgaURL)

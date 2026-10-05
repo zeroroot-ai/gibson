@@ -68,7 +68,7 @@ func newSMTPReconciler(t *testing.T, zitadelURL string, objs ...client.Object) *
 		Scheme:   s,
 		Recorder: record.NewFakeRecorder(8),
 		ZitadelFactory: func(_, pat string) zitadel.Client {
-			return zitadel.New(zitadelURL, pat, "")
+			return zitadel.New(zitadelURL, pat, "app.example.test")
 		},
 	}
 }

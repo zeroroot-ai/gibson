@@ -22,6 +22,7 @@ import (
 	"sigs.k8s.io/controller-runtime/pkg/controller/controllerutil"
 	"sigs.k8s.io/controller-runtime/pkg/log"
 
+	"github.com/zeroroot-ai/gibson/internal/platform/zitadelconn"
 	gibsonv1alpha1 "github.com/zeroroot-ai/gibson/operators/platform/api/v1alpha1"
 	zitadel "github.com/zeroroot-ai/gibson/operators/platform/internal/clients/zitadel"
 )
@@ -37,16 +38,29 @@ var (
 	requeueMedium = 30 * time.Second
 )
 
-// ZitadelClientFactory builds a Zitadel client from an admin-token PAT
-// string. Wired so tests can substitute a fake.
-type ZitadelClientFactory func(issuer, pat string) zitadel.Client
+// ZitadelClientFactory builds a Zitadel client from the connect URL (the
+// in-cluster Zitadel Service) and an admin-token PAT string. Wired so tests
+// can substitute a fake.
+type ZitadelClientFactory func(connectURL, pat string) zitadel.Client
 
-// DefaultZitadelClientFactory uses the real HTTP client. ZITADEL_EXTERNAL_DOMAIN
-// env var (when set) is forged onto the Host header on every request so the
-// operator can dial Zitadel's in-cluster Service name while still satisfying
-// Zitadel's instance router. Tenant-operator uses the same pattern.
-func DefaultZitadelClientFactory(issuer, pat string) zitadel.Client {
-	return zitadel.New(issuer, pat, os.Getenv("ZITADEL_EXTERNAL_DOMAIN"))
+// DefaultZitadelClientFactory uses the real HTTP client. It connects to
+// connectURL and claims ZITADEL_EXTERNAL_DOMAIN with the instance header
+// (ADR-0092). An unset or ported ZITADEL_EXTERNAL_DOMAIN yields a client whose
+// every call returns that configuration error.
+func DefaultZitadelClientFactory(connectURL, pat string) zitadel.Client {
+	return zitadel.New(connectURL, pat, os.Getenv(zitadelconn.EnvExternalDomain))
+}
+
+// ZitadelConnectURLFromEnv validates the operator's Zitadel configuration at
+// startup: ZITADEL_URL (the in-cluster Service the operator connects to) and
+// ZITADEL_EXTERNAL_DOMAIN (the public host it claims). Both are required
+// (ADR-0092). It returns the connect base, which the readiness probe dials.
+func ZitadelConnectURLFromEnv(getenv func(string) string) (string, error) {
+	ep, err := zitadelconn.New(getenv(zitadelconn.EnvURL), getenv(zitadelconn.EnvExternalDomain))
+	if err != nil {
+		return "", fmt.Errorf("zitadel endpoint (ADR-0092): %w", err)
+	}
+	return ep.BaseURL(), nil
 }
 
 // OIDCClientReconciler reconciles OIDCClient CRs.
@@ -130,7 +144,7 @@ func (r *OIDCClientReconciler) Reconcile(ctx context.Context, req ctrl.Request) 
 		return ctrl.Result{RequeueAfter: requeueMedium}, nil
 	}
 
-	zc := r.ZitadelFactory(oc.Spec.ZitadelIssuer, pat)
+	zc := r.ZitadelFactory(oc.Spec.ZitadelURL, pat)
 
 	// MACHINE_USER branch: skip the OIDC-app path entirely. The resource
 	// minted in Zitadel is a Service User (not an app); the K8s Secret
@@ -318,7 +332,7 @@ func (r *OIDCClientReconciler) reconcileSteadyState(
 		if rerr != nil {
 			return ctrl.Result{}, rerr
 		}
-		ok, verr := zc.VerifyClientSecret(ctx, oc.Spec.ZitadelIssuer, oc.Status.ClientID, liveSecret)
+		ok, verr := zc.VerifyClientSecret(ctx, oc.Status.ClientID, liveSecret)
 		if verr != nil {
 			// Verification error is unknown (transport/TLS). Don't rotate
 			// blindly — leave the Secret alone and surface the issue so a
@@ -481,7 +495,7 @@ func (r *OIDCClientReconciler) reconcileMachineUser(
 			return r.handleTransientOrPermanent(ctx, oc, "AddMachineUserClientSecret", err, logger)
 		}
 		// Step 5: write the K8s Secret with the full key set.
-		if err := r.writeMachineUserSecret(ctx, oc, clientID, clientSecret, oc.Spec.ZitadelIssuer, orgID, projectID); err != nil {
+		if err := r.writeMachineUserSecret(ctx, oc, clientID, clientSecret, oc.Spec.ZitadelURL, orgID, projectID); err != nil {
 			return ctrl.Result{}, err
 		}
 		r.setCondition(oc, gibsonv1alpha1.ConditionOIDCSecretMaterialised, metav1.ConditionTrue,
@@ -544,7 +558,7 @@ func (r *OIDCClientReconciler) reconcileMachineUser(
 	if err != nil {
 		return r.handleTransientOrPermanent(ctx, oc, "AddMachineUserClientSecret", err, logger)
 	}
-	if err := r.writeMachineUserSecret(ctx, oc, clientID, clientSecret, oc.Spec.ZitadelIssuer, orgID, projectID); err != nil {
+	if err := r.writeMachineUserSecret(ctx, oc, clientID, clientSecret, oc.Spec.ZitadelURL, orgID, projectID); err != nil {
 		return ctrl.Result{}, err
 	}
 	r.setCondition(oc, gibsonv1alpha1.ConditionOIDCSecretMaterialised, metav1.ConditionTrue,
@@ -673,7 +687,7 @@ func (r *OIDCClientReconciler) reconcileDeletion(ctx context.Context, oc *gibson
 	if oc.Status.ClientID != "" {
 		pat, ok, err := r.readSecretKey(ctx, oc.Namespace, oc.Spec.AdminTokenRef)
 		if err == nil && ok {
-			zc := r.ZitadelFactory(oc.Spec.ZitadelIssuer, pat)
+			zc := r.ZitadelFactory(oc.Spec.ZitadelURL, pat)
 			projectID, perr := zc.GetProjectIDByName(ctx, oc.Spec.ProjectRef.Name)
 			if perr == nil {
 				// DeleteOIDCClient takes the management-API app id, NOT

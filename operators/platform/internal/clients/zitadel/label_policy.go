@@ -163,20 +163,17 @@ func (c *httpClient) ActivateLabelPolicy(ctx context.Context) error {
 // doRaw sends one request with the client's auth and host, and returns the
 // status and body. Only a transport failure is an error.
 func (c *httpClient) doRaw(ctx context.Context, method, path, contentType string, body io.Reader) (status int, respBody []byte, err error) {
-	full, err := c.baseURL.Parse(path)
+	full, err := url.Parse(path)
 	if err != nil {
 		return 0, nil, fmt.Errorf("zitadel: path %q: %w", path, ErrInvalidInput)
 	}
-	req, err := http.NewRequestWithContext(ctx, method, full.String(), body)
+	req, err := http.NewRequestWithContext(ctx, method, c.endpoint.URL(full.RequestURI()), body)
 	if err != nil {
 		return 0, nil, fmt.Errorf("zitadel: new request: %w", err)
 	}
 	req.Header.Set("Authorization", "Bearer "+c.pat)
 	if contentType != "" {
 		req.Header.Set("Content-Type", contentType)
-	}
-	if c.externalDomain != "" {
-		req.Host = c.externalDomain
 	}
 	resp, err := c.http.Do(req)
 	if err != nil {

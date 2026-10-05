@@ -18,6 +18,7 @@ import (
 	"time"
 
 	"github.com/zeroroot-ai/gibson/internal/platform/tenantrole"
+	"github.com/zeroroot-ai/gibson/internal/platform/zitadelconn"
 )
 
 // TestNew_TrimsPATWhitespace pins the defensive trim that prevents Go's
@@ -26,6 +27,42 @@ import (
 // cluster bringup, where `echo "$pat" | kubectl create secret` minted an
 // iam-admin-pat with a trailing 0x0a and the OIDCClient reconciler logged
 // "transient Zitadel error" forever.
+// testDomain is the public host the test clients claim.
+const testDomain = "app.example.test"
+
+// TestNew_RefusesABadClaimedHost: an empty or ported claimed host yields a
+// client whose every call returns the construction error (ADR-0092).
+func TestNew_RefusesABadClaimedHost(t *testing.T) {
+	for _, host := range []string{"", "app.example.test:30443", "https://app.example.test"} {
+		c := New("http://gibson-zitadel:8080", "pat", host)
+		if _, err := c.EnsureLoginPolicy(context.Background(), signInPolicyWant); !errors.Is(err, ErrInvalidInput) {
+			t.Errorf("New(host %q): call error = %v, want ErrInvalidInput", host, err)
+		}
+	}
+}
+
+// TestRequests_ClaimTheHostByHeader: every admin API request carries the
+// instance header, and the client does not set the Host header by hand.
+func TestRequests_ClaimTheHostByHeader(t *testing.T) {
+	var gotInstance, gotHost string
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		gotInstance = r.Header.Get(zitadelconn.InstanceHostHeader)
+		gotHost = r.Host
+		_, _ = w.Write([]byte(`{}`))
+	}))
+	t.Cleanup(srv.Close)
+	c := New(srv.URL, "pat", testDomain).(*httpClient)
+	if err := c.doJSON(context.Background(), http.MethodGet, "/probe", nil, &struct{}{}); err != nil {
+		t.Fatalf("doJSON: %v", err)
+	}
+	if gotInstance != testDomain {
+		t.Errorf("instance header = %q, want %q", gotInstance, testDomain)
+	}
+	if gotHost == testDomain {
+		t.Errorf("Host = %q: the client must not forge the Host header", gotHost)
+	}
+}
+
 func TestNew_TrimsPATWhitespace(t *testing.T) {
 	const cleanPAT = "token-abc"
 
@@ -52,7 +89,7 @@ func TestNew_TrimsPATWhitespace(t *testing.T) {
 			}))
 			t.Cleanup(srv.Close)
 
-			c := New(srv.URL, tc.pat, "").(*httpClient)
+			c := New(srv.URL, tc.pat, testDomain).(*httpClient)
 			if err := c.doJSON(context.Background(), http.MethodGet, "/probe", nil, &struct{}{}); err != nil {
 				t.Fatalf("doJSON: %v", err)
 			}
@@ -88,7 +125,7 @@ func TestAddOrgMember_PinsOrgIDHeader(t *testing.T) {
 	}))
 	t.Cleanup(srv.Close)
 
-	c := New(srv.URL, "pat", "")
+	c := New(srv.URL, "pat", testDomain)
 	if err := c.AddOrgMember(context.Background(), orgID, "UID-1", []string{"ORG_OWNER"}); err != nil {
 		t.Fatalf("AddOrgMember: %v", err)
 	}
@@ -129,7 +166,7 @@ func TestCreateOIDCClient_SetsAccessTokenLifetime(t *testing.T) {
 			}))
 			t.Cleanup(srv.Close)
 
-			c := New(srv.URL, "pat", "")
+			c := New(srv.URL, "pat", testDomain)
 			_, _, _, err := c.CreateOIDCClient(context.Background(), CreateOIDCClientRequest{
 				ProjectID:           "PROJ-1",
 				Name:                "gibson-cli",
@@ -165,7 +202,7 @@ func TestCreateOIDCClient_TranslatesGrantAndResponseTypes(t *testing.T) {
 	}))
 	t.Cleanup(srv.Close)
 
-	c := New(srv.URL, "pat", "")
+	c := New(srv.URL, "pat", testDomain)
 	_, _, _, err := c.CreateOIDCClient(context.Background(), CreateOIDCClientRequest{
 		ProjectID:       "PROJ-1",
 		Name:            "gibson-native-login",
@@ -196,7 +233,7 @@ func TestCreateOIDCClient_TranslatesGrantAndResponseTypes(t *testing.T) {
 // TestAddOrgMember_EmptyOrgIDIsInvalidInput pins the guard that rejects an
 // empty orgID rather than POSTing to a malformed /orgs//members path.
 func TestAddOrgMember_EmptyOrgIDIsInvalidInput(t *testing.T) {
-	c := New("http://example.invalid", "pat", "")
+	c := New("http://example.invalid", "pat", testDomain)
 	err := c.AddOrgMember(context.Background(), "", "UID-1", []string{"ORG_OWNER"})
 	if err == nil {
 		t.Fatal("expected error for empty orgID, got nil")
@@ -211,7 +248,7 @@ func TestAddOrgMember_EmptyOrgIDIsInvalidInput(t *testing.T) {
 // (including the sign-in policy methods) surfaces the construction error,
 // rather than a nil Client that panics on first use.
 func TestNew_InvalidURL_ErrClientSurfacesEveryMethod(t *testing.T) {
-	c := New("://bad-url", "pat", "")
+	c := New("://bad-url", "pat", testDomain)
 	if _, err := c.EnsureLoginPolicy(context.Background(), signInPolicyWant); err == nil {
 		t.Error("EnsureLoginPolicy: expected the construction error, got nil")
 	}
@@ -425,7 +462,7 @@ func TestEnsureLoginPolicy_FreshInstanceDefaultsCorrected(t *testing.T) {
 		"isDefault":             true,
 	}, []string{"SECOND_FACTOR_TYPE_OTP", "SECOND_FACTOR_TYPE_U2F"}, []string{"MULTI_FACTOR_TYPE_U2F_WITH_PIN"})
 
-	c := New(srv.URL, "pat", "")
+	c := New(srv.URL, "pat", testDomain)
 	corrected, err := c.EnsureLoginPolicy(context.Background(), signInPolicyWant)
 	if err != nil {
 		t.Fatalf("EnsureLoginPolicy: %v", err)
@@ -478,7 +515,7 @@ func TestEnsureLoginPolicy_AlreadyEqualIsNoOp(t *testing.T) {
 		"mfaInitSkipLifetime":   "0s",
 	}, signInPolicyWant.SecondFactors, signInPolicyWant.MultiFactors)
 
-	c := New(srv.URL, "pat", "")
+	c := New(srv.URL, "pat", testDomain)
 	corrected, err := c.EnsureLoginPolicy(context.Background(), signInPolicyWant)
 	if err != nil {
 		t.Fatalf("EnsureLoginPolicy: %v", err)
@@ -502,7 +539,7 @@ func TestEnsureLoginPolicy_SecondFactorsExtrasRemoved(t *testing.T) {
 		[]string{"SECOND_FACTOR_TYPE_OTP", "SECOND_FACTOR_TYPE_U2F", "SECOND_FACTOR_TYPE_OTP_EMAIL", "SECOND_FACTOR_TYPE_OTP_SMS"},
 		signInPolicyWant.MultiFactors)
 
-	c := New(srv.URL, "pat", "")
+	c := New(srv.URL, "pat", testDomain)
 	if _, err := c.EnsureLoginPolicy(context.Background(), signInPolicyWant); err != nil {
 		t.Fatalf("EnsureLoginPolicy: %v", err)
 	}
@@ -532,7 +569,7 @@ func TestEnsureLoginPolicy_SecondFactorsMissingAdded(t *testing.T) {
 	srv, f := newLoginPolicyFakeServer(t, map[string]any{"forceMfa": true},
 		[]string{"SECOND_FACTOR_TYPE_OTP"}, signInPolicyWant.MultiFactors)
 
-	c := New(srv.URL, "pat", "")
+	c := New(srv.URL, "pat", testDomain)
 	if _, err := c.EnsureLoginPolicy(context.Background(), signInPolicyWant); err != nil {
 		t.Fatalf("EnsureLoginPolicy: %v", err)
 	}
@@ -547,7 +584,7 @@ func TestEnsureLoginPolicy_MultiFactorsEmptyGetsPasskeyAdded(t *testing.T) {
 	srv, f := newLoginPolicyFakeServer(t, map[string]any{"forceMfa": true},
 		signInPolicyWant.SecondFactors, nil)
 
-	c := New(srv.URL, "pat", "")
+	c := New(srv.URL, "pat", testDomain)
 	if _, err := c.EnsureLoginPolicy(context.Background(), signInPolicyWant); err != nil {
 		t.Fatalf("EnsureLoginPolicy: %v", err)
 	}
@@ -565,7 +602,7 @@ func TestEnsureLoginPolicy_NoPolicyIsPermanentError(t *testing.T) {
 	}))
 	t.Cleanup(srv.Close)
 
-	c := New(srv.URL, "pat", "")
+	c := New(srv.URL, "pat", testDomain)
 	_, err := c.EnsureLoginPolicy(context.Background(), signInPolicyWant)
 	if err == nil {
 		t.Fatal("expected error for empty policy response, got nil")
@@ -583,7 +620,7 @@ func TestEnsureLoginPolicy_GETError(t *testing.T) {
 	}))
 	t.Cleanup(srv.Close)
 
-	c := New(srv.URL, "pat", "")
+	c := New(srv.URL, "pat", testDomain)
 	if _, err := c.EnsureLoginPolicy(context.Background(), signInPolicyWant); err == nil {
 		t.Fatal("expected error from a failing GET, got nil")
 	}
@@ -596,7 +633,7 @@ func TestEnsureLoginPolicy_PUTError(t *testing.T) {
 		signInPolicyWant.SecondFactors, signInPolicyWant.MultiFactors)
 	f.putErr = true
 
-	c := New(srv.URL, "pat", "")
+	c := New(srv.URL, "pat", testDomain)
 	if _, err := c.EnsureLoginPolicy(context.Background(), signInPolicyWant); err == nil {
 		t.Fatal("expected error from a failing PUT, got nil")
 	}
@@ -612,7 +649,7 @@ func TestEnsureLoginPolicy_SecondFactorsListError(t *testing.T) {
 	}, signInPolicyWant.SecondFactors, signInPolicyWant.MultiFactors)
 	f.secondFactorsErr = true
 
-	c := New(srv.URL, "pat", "")
+	c := New(srv.URL, "pat", testDomain)
 	if _, err := c.EnsureLoginPolicy(context.Background(), signInPolicyWant); err == nil {
 		t.Fatal("expected error from a failing second_factors list, got nil")
 	}
@@ -628,7 +665,7 @@ func TestEnsureLoginPolicy_MultiFactorsListError(t *testing.T) {
 	}, signInPolicyWant.SecondFactors, signInPolicyWant.MultiFactors)
 	f.multiFactorsErr = true
 
-	c := New(srv.URL, "pat", "")
+	c := New(srv.URL, "pat", testDomain)
 	if _, err := c.EnsureLoginPolicy(context.Background(), signInPolicyWant); err == nil {
 		t.Fatal("expected error from a failing multi_factors list, got nil")
 	}
@@ -641,7 +678,7 @@ func TestEnsureLoginPolicy_FactorAddError(t *testing.T) {
 		[]string{"SECOND_FACTOR_TYPE_OTP"}, signInPolicyWant.MultiFactors)
 	f.addErr = true
 
-	c := New(srv.URL, "pat", "")
+	c := New(srv.URL, "pat", testDomain)
 	if _, err := c.EnsureLoginPolicy(context.Background(), signInPolicyWant); err == nil {
 		t.Fatal("expected error from a failing factor add, got nil")
 	}
@@ -655,7 +692,7 @@ func TestEnsureLoginPolicy_FactorRemoveError(t *testing.T) {
 		signInPolicyWant.MultiFactors)
 	f.removeErr = true
 
-	c := New(srv.URL, "pat", "")
+	c := New(srv.URL, "pat", testDomain)
 	if _, err := c.EnsureLoginPolicy(context.Background(), signInPolicyWant); err == nil {
 		t.Fatal("expected error from a failing factor remove, got nil")
 	}
@@ -710,7 +747,7 @@ func TestEnsureLoginPolicy_AddsBeforeRemoves(t *testing.T) {
 	srv := httptest.NewServer(mux)
 	t.Cleanup(srv.Close)
 
-	c := New(srv.URL, "pat", "")
+	c := New(srv.URL, "pat", testDomain)
 	if _, err := c.EnsureLoginPolicy(context.Background(), signInPolicyWant); err != nil {
 		t.Fatalf("EnsureLoginPolicy: %v", err)
 	}
@@ -753,7 +790,7 @@ func TestEnsureDomainPolicy_FlipsAndPreservesLiveBooleans(t *testing.T) {
 	}))
 	t.Cleanup(srv.Close)
 
-	c := New(srv.URL, "pat", "")
+	c := New(srv.URL, "pat", testDomain)
 	changed, err := c.EnsureDomainPolicy(context.Background(), DomainPolicy{UserLoginMustBeDomain: false})
 	if err != nil {
 		t.Fatalf("EnsureDomainPolicy: %v", err)
@@ -791,7 +828,7 @@ func TestEnsureDomainPolicy_NoOpWhenAlreadyEqual(t *testing.T) {
 	}))
 	t.Cleanup(srv.Close)
 
-	c := New(srv.URL, "pat", "")
+	c := New(srv.URL, "pat", testDomain)
 	changed, err := c.EnsureDomainPolicy(context.Background(), DomainPolicy{UserLoginMustBeDomain: false})
 	if err != nil {
 		t.Fatalf("EnsureDomainPolicy: %v", err)
@@ -811,7 +848,7 @@ func TestEnsureDomainPolicy_GETError(t *testing.T) {
 	}))
 	t.Cleanup(srv.Close)
 
-	c := New(srv.URL, "pat", "")
+	c := New(srv.URL, "pat", testDomain)
 	if _, err := c.EnsureDomainPolicy(context.Background(), DomainPolicy{UserLoginMustBeDomain: false}); err == nil {
 		t.Fatal("expected error from a failing GET, got nil")
 	}
@@ -830,7 +867,7 @@ func TestEnsureDomainPolicy_PUTError(t *testing.T) {
 	}))
 	t.Cleanup(srv.Close)
 
-	c := New(srv.URL, "pat", "")
+	c := New(srv.URL, "pat", testDomain)
 	if _, err := c.EnsureDomainPolicy(context.Background(), DomainPolicy{UserLoginMustBeDomain: false}); err == nil {
 		t.Fatal("expected error from a failing PUT, got nil")
 	}
@@ -879,7 +916,7 @@ func TestRemoveIAMMember_DeletesAndIsIdempotentOn404(t *testing.T) {
 			}))
 			t.Cleanup(srv.Close)
 
-			c := New(srv.URL, "pat", "")
+			c := New(srv.URL, "pat", testDomain)
 			if err := c.RemoveIAMMember(context.Background(), "UID-1"); err != nil {
 				t.Fatalf("RemoveIAMMember: %v", err)
 			}
@@ -914,7 +951,7 @@ func TestRemoveOrgMember_PinsOrgIDHeader(t *testing.T) {
 	}))
 	t.Cleanup(srv.Close)
 
-	c := New(srv.URL, "pat", "")
+	c := New(srv.URL, "pat", testDomain)
 	if err := c.RemoveOrgMember(context.Background(), orgID, "UID-1"); err != nil {
 		t.Fatalf("RemoveOrgMember: %v", err)
 	}
@@ -935,7 +972,7 @@ func TestRemoveOrgMember_PinsOrgIDHeader(t *testing.T) {
 // TestRemoveOrgMember_EmptyOrgIDIsInvalidInput mirrors
 // TestAddOrgMember_EmptyOrgIDIsInvalidInput.
 func TestRemoveOrgMember_EmptyOrgIDIsInvalidInput(t *testing.T) {
-	c := New("http://example.invalid", "pat", "")
+	c := New("http://example.invalid", "pat", testDomain)
 	err := c.RemoveOrgMember(context.Background(), "", "UID-1")
 	if err == nil {
 		t.Fatal("expected error for empty orgID, got nil")
@@ -951,7 +988,7 @@ func TestRemoveOrgMember_EmptyOrgIDIsInvalidInput(t *testing.T) {
 // url.Parse error when apiURL cannot be parsed at all. A malformed percent-
 // escape ("%zz") is the simplest input net/url reliably rejects.
 func TestRemoveIAMMember_ConstructionErrorPropagates(t *testing.T) {
-	c := New("http://example.invalid/%zz", "pat", "")
+	c := New("http://example.invalid/%zz", "pat", testDomain)
 	err := c.RemoveIAMMember(context.Background(), "UID-1")
 	if err == nil {
 		t.Fatal("expected the construction error to propagate, got nil")
@@ -959,7 +996,7 @@ func TestRemoveIAMMember_ConstructionErrorPropagates(t *testing.T) {
 }
 
 func TestRemoveOrgMember_ConstructionErrorPropagates(t *testing.T) {
-	c := New("http://example.invalid/%zz", "pat", "")
+	c := New("http://example.invalid/%zz", "pat", testDomain)
 	err := c.RemoveOrgMember(context.Background(), "ORG-1", "UID-1")
 	if err == nil {
 		t.Fatal("expected the construction error to propagate, got nil")
@@ -977,7 +1014,7 @@ func TestRemoveIAMMember_PropagatesNonNotFoundError(t *testing.T) {
 	}))
 	t.Cleanup(srv.Close)
 
-	c := New(srv.URL, "pat", "")
+	c := New(srv.URL, "pat", testDomain)
 	err := c.RemoveIAMMember(context.Background(), "UID-1")
 	if err == nil {
 		t.Fatal("expected a 500 to propagate as an error, got nil")
@@ -991,7 +1028,7 @@ func TestRemoveOrgMember_PropagatesNonNotFoundError(t *testing.T) {
 	}))
 	t.Cleanup(srv.Close)
 
-	c := New(srv.URL, "pat", "")
+	c := New(srv.URL, "pat", testDomain)
 	err := c.RemoveOrgMember(context.Background(), "ORG-1", "UID-1")
 	if err == nil {
 		t.Fatal("expected a 500 to propagate as an error, got nil")
@@ -1007,7 +1044,7 @@ func TestEnsureProjectRoles_AddsMissingRenamesAndRemovesExtra(t *testing.T) {
 	srv := httptest.NewServer(f.handler())
 	t.Cleanup(srv.Close)
 
-	c := New(srv.URL, "pat", "")
+	c := New(srv.URL, "pat", testDomain)
 	changed, err := c.EnsureProjectRoles(context.Background(), "PROJ-1", tenantrole.All)
 	if err != nil {
 		t.Fatalf("EnsureProjectRoles: %v", err)
@@ -1043,7 +1080,7 @@ func TestEnsureProjectRoles_NoOpOnASecondCall(t *testing.T) {
 	srv := httptest.NewServer(f.handler())
 	t.Cleanup(srv.Close)
 
-	c := New(srv.URL, "pat", "")
+	c := New(srv.URL, "pat", testDomain)
 	if _, err := c.EnsureProjectRoles(context.Background(), "PROJ-1", tenantrole.All); err != nil {
 		t.Fatalf("first EnsureProjectRoles: %v", err)
 	}
@@ -1112,7 +1149,7 @@ func TestEnsureProjectRoles_PropagatesEachUpstreamError(t *testing.T) {
 			srv := httptest.NewServer(f.handler())
 			t.Cleanup(srv.Close)
 
-			c := New(srv.URL, "pat", "")
+			c := New(srv.URL, "pat", testDomain)
 			if _, err := c.EnsureProjectRoles(context.Background(), "PROJ-1", tenantrole.All); err == nil {
 				t.Fatal("EnsureProjectRoles: got nil error, want one naming the failing call")
 			} else if !strings.Contains(err.Error(), tt.wantErrSubstr) {
@@ -1123,17 +1160,17 @@ func TestEnsureProjectRoles_PropagatesEachUpstreamError(t *testing.T) {
 }
 
 // TestEnsureProjectRoles_ErrClientReturnsConstructionError covers the
-// errClient stub: New returns an errClient when it cannot parse apiURL,
+// errClient stub: New returns an errClient when the connect URL is not a URL,
 // and every method on it — including EnsureProjectRoles — must return
 // that same construction error rather than panic or silently succeed.
 func TestEnsureProjectRoles_ErrClientReturnsConstructionError(t *testing.T) {
-	c := New("http://%zz", "pat", "")
+	c := New("http://%zz", "pat", testDomain)
 	_, err := c.EnsureProjectRoles(context.Background(), "PROJ-1", tenantrole.All)
 	if err == nil {
 		t.Fatal("EnsureProjectRoles on an errClient: got nil error, want the construction error")
 	}
-	if !strings.Contains(err.Error(), "invalid apiURL") {
-		t.Errorf("EnsureProjectRoles error = %q, want it to mention the invalid apiURL", err)
+	if !errors.Is(err, ErrInvalidInput) || !strings.Contains(err.Error(), "ZITADEL_URL") {
+		t.Errorf("EnsureProjectRoles error = %q, want ErrInvalidInput that names the connect URL", err)
 	}
 }
 
@@ -1251,7 +1288,7 @@ func TestEnsureProjectRoles_DecodesTheRecordedZitadelResponse(t *testing.T) {
 	}))
 	t.Cleanup(srv.Close)
 
-	c := New(srv.URL, "pat", "")
+	c := New(srv.URL, "pat", testDomain)
 	changed, err := c.EnsureProjectRoles(context.Background(), "392527900672262186", tenantrole.All)
 	if err != nil {
 		t.Fatalf("EnsureProjectRoles: %v", err)
@@ -1286,7 +1323,7 @@ func TestEnsureHumanUserNoPassword_NeverSendsPassword(t *testing.T) {
 	}))
 	t.Cleanup(srv.Close)
 
-	c := New(srv.URL, "pat", "")
+	c := New(srv.URL, "pat", testDomain)
 	id, err := c.EnsureHumanUserNoPassword(context.Background(), "ORG-1", "owner@example.com", "Platform", "Owner")
 	if err != nil {
 		t.Fatalf("EnsureHumanUserNoPassword: %v", err)
@@ -1324,7 +1361,7 @@ func TestEnsureHumanUserNoPassword_AlreadyExists_ResolvesByEmail(t *testing.T) {
 	srv := httptest.NewServer(mux)
 	t.Cleanup(srv.Close)
 
-	c := New(srv.URL, "pat", "")
+	c := New(srv.URL, "pat", testDomain)
 	id, err := c.EnsureHumanUserNoPassword(context.Background(), "ORG-1", "owner@example.com", "Platform", "Owner")
 	if err != nil {
 		t.Fatalf("EnsureHumanUserNoPassword: %v", err)
@@ -1346,7 +1383,7 @@ func TestEnsureHumanUserNoPassword_AlreadyExists_LookupFails(t *testing.T) {
 	srv := httptest.NewServer(mux)
 	t.Cleanup(srv.Close)
 
-	c := New(srv.URL, "pat", "")
+	c := New(srv.URL, "pat", testDomain)
 	if _, err := c.EnsureHumanUserNoPassword(context.Background(), "ORG-1", "owner@example.com", "Platform", "Owner"); err == nil {
 		t.Fatal("EnsureHumanUserNoPassword: expected an error when the conflict lookup itself fails, got nil")
 	}
@@ -1358,7 +1395,7 @@ func TestFindHumanUserByEmail_NotFound(t *testing.T) {
 	}))
 	t.Cleanup(srv.Close)
 
-	c := New(srv.URL, "pat", "")
+	c := New(srv.URL, "pat", testDomain)
 	if _, err := c.FindHumanUserByEmail(context.Background(), "nobody@example.com"); !IsNotFound(err) {
 		t.Fatalf("FindHumanUserByEmail: err = %v, want ErrNotFound", err)
 	}
@@ -1377,7 +1414,7 @@ func TestCreateSetupInviteCode_ReturnCodeVsSendCode(t *testing.T) {
 		_, _ = w.Write([]byte(`{}`))
 	}))
 	t.Cleanup(srv.Close)
-	c := New(srv.URL, "pat", "")
+	c := New(srv.URL, "pat", testDomain)
 
 	code, err := c.CreateSetupInviteCode(context.Background(), "UID-1", "https://app.example.com/invite", false)
 	if err != nil {
@@ -1431,7 +1468,7 @@ func TestClearHumanFactors_RemovesEveryRegisteredType(t *testing.T) {
 	srv := httptest.NewServer(mux)
 	t.Cleanup(srv.Close)
 
-	c := New(srv.URL, "pat", "")
+	c := New(srv.URL, "pat", testDomain)
 	if err := c.ClearHumanFactors(context.Background(), "UID-1"); err != nil {
 		t.Fatalf("ClearHumanFactors: %v", err)
 	}
@@ -1450,7 +1487,7 @@ func TestClearHumanFactors_NoFactors_NoOp(t *testing.T) {
 	}))
 	t.Cleanup(srv.Close)
 
-	c := New(srv.URL, "pat", "")
+	c := New(srv.URL, "pat", testDomain)
 	if err := c.ClearHumanFactors(context.Background(), "UID-1"); err != nil {
 		t.Fatalf("ClearHumanFactors: %v", err)
 	}
@@ -1463,7 +1500,7 @@ func TestEnsureHumanUserNoPassword_PermanentErrorOn403(t *testing.T) {
 	}))
 	t.Cleanup(srv.Close)
 
-	c := New(srv.URL, "pat", "")
+	c := New(srv.URL, "pat", testDomain)
 	_, err := c.EnsureHumanUserNoPassword(context.Background(), "ORG-1", "owner@example.com", "Platform", "Owner")
 	if !IsPermanent(err) {
 		t.Fatalf("EnsureHumanUserNoPassword: err = %v, want a permanent error on 403", err)
@@ -1475,7 +1512,7 @@ func TestEnsureHumanUserNoPassword_PermanentErrorOn403(t *testing.T) {
 func TestErrClient_PlatformOwnerStubsPropagateConstructionError(t *testing.T) {
 	// An invalid apiURL makes New return an errClient wrapping the parse
 	// error; every method on the real interface must surface it.
-	c := New("://bad-url", "pat", "")
+	c := New("://bad-url", "pat", testDomain)
 	if _, err := c.EnsureHumanUserNoPassword(context.Background(), "ORG-1", "e@x.test", "P", "O"); err == nil {
 		t.Fatal("EnsureHumanUserNoPassword: expected the construction error")
 	}
@@ -1497,7 +1534,7 @@ func TestClearHumanFactors_ListError(t *testing.T) {
 		w.WriteHeader(http.StatusInternalServerError)
 	}))
 	t.Cleanup(srv.Close)
-	c := New(srv.URL, "pat", "")
+	c := New(srv.URL, "pat", testDomain)
 	if err := c.ClearHumanFactors(context.Background(), "UID-1"); err == nil {
 		t.Fatal("ClearHumanFactors: expected an error when ListAuthenticationMethodTypes fails")
 	}
@@ -1513,7 +1550,7 @@ func TestClearHumanFactors_RemoveTOTPNonNotFoundError(t *testing.T) {
 	})
 	srv := httptest.NewServer(mux)
 	t.Cleanup(srv.Close)
-	c := New(srv.URL, "pat", "")
+	c := New(srv.URL, "pat", testDomain)
 	if err := c.ClearHumanFactors(context.Background(), "UID-1"); err == nil {
 		t.Fatal("ClearHumanFactors: expected an error when RemoveTOTP fails with a non-404 status")
 	}
@@ -1529,7 +1566,7 @@ func TestClearHumanFactors_ListU2FError(t *testing.T) {
 	})
 	srv := httptest.NewServer(mux)
 	t.Cleanup(srv.Close)
-	c := New(srv.URL, "pat", "")
+	c := New(srv.URL, "pat", testDomain)
 	if err := c.ClearHumanFactors(context.Background(), "UID-1"); err == nil {
 		t.Fatal("ClearHumanFactors: expected an error when ListU2F fails")
 	}
@@ -1548,7 +1585,7 @@ func TestClearHumanFactors_RemoveU2FNonNotFoundError(t *testing.T) {
 	})
 	srv := httptest.NewServer(mux)
 	t.Cleanup(srv.Close)
-	c := New(srv.URL, "pat", "")
+	c := New(srv.URL, "pat", testDomain)
 	if err := c.ClearHumanFactors(context.Background(), "UID-1"); err == nil {
 		t.Fatal("ClearHumanFactors: expected an error when RemoveU2F fails with a non-404 status")
 	}
@@ -1564,7 +1601,7 @@ func TestClearHumanFactors_PasskeyErrorPath(t *testing.T) {
 	})
 	srv := httptest.NewServer(mux)
 	t.Cleanup(srv.Close)
-	c := New(srv.URL, "pat", "")
+	c := New(srv.URL, "pat", testDomain)
 	if err := c.ClearHumanFactors(context.Background(), "UID-1"); err == nil {
 		t.Fatal("ClearHumanFactors: expected an error when ListPasskeys fails")
 	}
@@ -1610,7 +1647,7 @@ func TestSearchIAMMembers_DecodesFields(t *testing.T) {
 	}))
 	t.Cleanup(srv.Close)
 
-	c := New(srv.URL, "pat", "")
+	c := New(srv.URL, "pat", testDomain)
 	members, err := c.SearchIAMMembers(context.Background())
 	if err != nil {
 		t.Fatalf("SearchIAMMembers: %v", err)
@@ -1645,7 +1682,7 @@ func TestSearchIAMMembers_Error(t *testing.T) {
 	}))
 	t.Cleanup(srv.Close)
 
-	c := New(srv.URL, "pat", "")
+	c := New(srv.URL, "pat", testDomain)
 	if _, err := c.SearchIAMMembers(context.Background()); err == nil {
 		t.Fatal("SearchIAMMembers: expected an error on 500")
 	}
@@ -1662,7 +1699,7 @@ func TestDeleteUser_Success(t *testing.T) {
 	}))
 	t.Cleanup(srv.Close)
 
-	c := New(srv.URL, "pat", "")
+	c := New(srv.URL, "pat", testDomain)
 	if err := c.DeleteUser(context.Background(), "UID-1"); err != nil {
 		t.Fatalf("DeleteUser: %v", err)
 	}
@@ -1682,7 +1719,7 @@ func TestDeleteUser_NotFoundIsIdempotent(t *testing.T) {
 	}))
 	t.Cleanup(srv.Close)
 
-	c := New(srv.URL, "pat", "")
+	c := New(srv.URL, "pat", testDomain)
 	if err := c.DeleteUser(context.Background(), "UID-1"); err != nil {
 		t.Fatalf("DeleteUser: expected nil on 404, got %v", err)
 	}
@@ -1694,7 +1731,7 @@ func TestDeleteUser_Error(t *testing.T) {
 	}))
 	t.Cleanup(srv.Close)
 
-	c := New(srv.URL, "pat", "")
+	c := New(srv.URL, "pat", testDomain)
 	if err := c.DeleteUser(context.Background(), "UID-1"); err == nil {
 		t.Fatal("DeleteUser: expected an error on 500")
 	}
@@ -1713,7 +1750,7 @@ func TestFindHumanUserByEmail_SendsTheV2FieldName(t *testing.T) {
 	}))
 	t.Cleanup(srv.Close)
 
-	c := New(srv.URL, "pat", "")
+	c := New(srv.URL, "pat", testDomain)
 	id, err := c.FindHumanUserByEmail(context.Background(), "owner@example.com")
 	if err != nil || id != "UID-9" {
 		t.Fatalf("FindHumanUserByEmail: id=%q err=%v", id, err)
@@ -1740,7 +1777,7 @@ func TestUpdateOIDCClientName_PutsNameToAppPath(t *testing.T) {
 	}))
 	t.Cleanup(srv.Close)
 
-	c := New(srv.URL, "pat", "")
+	c := New(srv.URL, "pat", testDomain)
 	if err := c.UpdateOIDCClientName(context.Background(), "PROJ-1", "APP-1", "Gibson CLI"); err != nil {
 		t.Fatalf("UpdateOIDCClientName: %v", err)
 	}
@@ -1760,12 +1797,47 @@ func TestUpdateOIDCClientName_ErrorsAreReturned(t *testing.T) {
 		_, _ = w.Write([]byte(`{"message":"no"}`))
 	}))
 	t.Cleanup(srv.Close)
-	if err := New(srv.URL, "pat", "").UpdateOIDCClientName(context.Background(), "P", "A", "n"); err == nil {
+	if err := New(srv.URL, "pat", testDomain).UpdateOIDCClientName(context.Background(), "P", "A", "n"); err == nil {
 		t.Fatal("expected an error from a 403 response")
 	}
 
 	want := errors.New("bad config")
 	if err := (&errClient{err: want}).UpdateOIDCClientName(context.Background(), "P", "A", "n"); !errors.Is(err, want) {
 		t.Fatalf("errClient err = %v, want %v", err, want)
+	}
+}
+
+// TestVerifyClientSecret_AsksTheClientsOwnEndpoint: the check goes to
+// /oauth/v2/introspect on the connect base of the client, with the instance
+// header and HTTP Basic client credentials. It takes no issuer URL: the
+// caller cannot send it to another address (gibson#223). 200 means the secret
+// is good, 401 means it is wrong, and any other status is an error.
+func TestVerifyClientSecret_AsksTheClientsOwnEndpoint(t *testing.T) {
+	status := http.StatusOK
+	var gotPath, gotInstance, gotID, gotSecret string
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		gotPath = r.URL.Path
+		gotInstance = r.Header.Get(zitadelconn.InstanceHostHeader)
+		gotID, gotSecret, _ = r.BasicAuth()
+		w.WriteHeader(status)
+	}))
+	t.Cleanup(srv.Close)
+	c := New(srv.URL, "pat", testDomain)
+
+	ok, err := c.VerifyClientSecret(context.Background(), "client-1", "s3cret")
+	if err != nil || !ok {
+		t.Fatalf("VerifyClientSecret on 200 = %v, %v; want true", ok, err)
+	}
+	if gotPath != "/oauth/v2/introspect" || gotInstance != testDomain || gotID != "client-1" || gotSecret != "s3cret" {
+		t.Errorf("request = path %q, instance %q, client %q/%q", gotPath, gotInstance, gotID, gotSecret)
+	}
+
+	status = http.StatusUnauthorized
+	if ok, err := c.VerifyClientSecret(context.Background(), "client-1", "wrong"); err != nil || ok {
+		t.Errorf("VerifyClientSecret on 401 = %v, %v; want false with no error", ok, err)
+	}
+	status = http.StatusBadGateway
+	if ok, err := c.VerifyClientSecret(context.Background(), "client-1", "s3cret"); err == nil || ok {
+		t.Errorf("VerifyClientSecret on 502 = %v, %v; want an error", ok, err)
 	}
 }

@@ -16,7 +16,7 @@ func emailServer(t *testing.T, h http.HandlerFunc) Client {
 	t.Helper()
 	srv := httptest.NewServer(h)
 	t.Cleanup(srv.Close)
-	return New(srv.URL, "test-pat", "")
+	return New(srv.URL, "test-pat", testDomain)
 }
 
 func TestToSMTPProviderBody_NoAuthVsPlainAuth(t *testing.T) {

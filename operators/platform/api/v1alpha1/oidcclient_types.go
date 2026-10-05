@@ -69,11 +69,14 @@ type ProjectReference struct {
 
 // OIDCClientSpec is the desired state of one Zitadel OIDC client.
 type OIDCClientSpec struct {
-	// ZitadelIssuer is the OIDC issuer URL. Identical to the parent
-	// PlatformBootstrap's spec.zitadel.issuer.
+	// ZitadelURL is the in-cluster Zitadel Service base URL the reconciler
+	// connects to, for example "http://gibson-zitadel:8080". It is a connect
+	// address and never an issuer: the public host is claimed with the
+	// x-zitadel-instance-host header (ADR-0092). The field was named
+	// zitadelIssuer while it held this same connect address.
 	// +kubebuilder:validation:Required
 	// +kubebuilder:validation:Pattern="^https?://"
-	ZitadelIssuer string `json:"zitadelIssuer"`
+	ZitadelURL string `json:"zitadelURL"`
 
 	// AdminTokenRef points at the IAM_OWNER PAT Secret.
 	// +kubebuilder:validation:Required

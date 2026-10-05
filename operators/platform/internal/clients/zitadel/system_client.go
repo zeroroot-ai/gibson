@@ -20,6 +20,8 @@ import (
 	"time"
 
 	"github.com/golang-jwt/jwt/v5"
+
+	"github.com/zeroroot-ai/gibson/internal/platform/zitadelconn"
 )
 
 const (
@@ -52,13 +54,19 @@ type SystemClient interface {
 	ListInstanceDomains(ctx context.Context) ([]string, error)
 }
 
-// NewSystemClient constructs a SystemClient. apiURL is the Zitadel base URL
-// (e.g. "http://gibson-zitadel.gibson.svc.cluster.local:8080"). systemUserName
-// is the SYSTEM_OWNER machine user name used as JWT iss/sub.
-// externalDomain is forged onto the Host header on every request (same
-// pattern as New). keyPath is the file-system path of the RSA private key PEM;
-// pass "" to fall back to DefaultSystemKeyPath / ZITADEL_SYSTEM_KEY_PATH env.
-func NewSystemClient(apiURL, systemUserName, externalDomain, keyPath string) (SystemClient, error) {
+// NewSystemClient constructs a SystemClient.
+//
+// connectURL is the in-cluster Zitadel Service base URL (for example
+// "http://gibson-zitadel.gibson.svc.cluster.local:8080") and externalDomain is
+// the public host the client claims. Both go through zitadelconn (ADR-0092):
+// every request carries the x-zitadel-instance-host header, and no request
+// sets the Host header by hand. A ported externalDomain is refused, which
+// also keeps the JWT audience portless (see audience).
+//
+// systemUserName is the SYSTEM_OWNER machine user name used as JWT iss/sub.
+// keyPath is the file-system path of the RSA private key PEM; pass "" to fall
+// back to DefaultSystemKeyPath / ZITADEL_SYSTEM_KEY_PATH env.
+func NewSystemClient(connectURL, systemUserName, externalDomain, keyPath string) (SystemClient, error) {
 	if keyPath == "" {
 		keyPath = os.Getenv("ZITADEL_SYSTEM_KEY_PATH")
 	}
@@ -71,17 +79,16 @@ func NewSystemClient(apiURL, systemUserName, externalDomain, keyPath string) (Sy
 		return nil, fmt.Errorf("zitadel system client: load key %q: %w", keyPath, err)
 	}
 
-	u, err := url.Parse(apiURL)
+	ep, err := zitadelconn.New(connectURL, externalDomain)
 	if err != nil {
-		return nil, fmt.Errorf("zitadel system client: invalid apiURL %q: %w", apiURL, err)
+		return nil, fmt.Errorf("zitadel system client: %w: %w", err, ErrInvalidInput)
 	}
-
 	return &systemHTTPClient{
-		baseURL:        u,
+		endpoint:       ep,
 		systemUserName: systemUserName,
-		externalDomain: externalDomain,
+		audience:       "https://" + ep.Host(),
 		key:            key,
-		http:           &http.Client{Timeout: 30 * time.Second},
+		http:           ep.HTTPClient(requestTimeout),
 	}, nil
 }
 
@@ -120,11 +127,15 @@ func loadRSAKey(path string) (*rsa.PrivateKey, error) {
 
 // systemHTTPClient implements SystemClient.
 type systemHTTPClient struct {
-	baseURL        *url.URL
+	endpoint       zitadelconn.Endpoint
 	systemUserName string
-	externalDomain string
-	key            *rsa.PrivateKey
-	http           *http.Client
+	// audience is the JWT aud claim: the portless public origin
+	// "https://<ZITADEL_EXTERNAL_DOMAIN>". Zitadel requires the exact string,
+	// and a port in it made every System API call answer 401 (deploy#1633).
+	// It is a claimed string and is never dialed.
+	audience string
+	key      *rsa.PrivateKey
+	http     *http.Client
 
 	mu               sync.Mutex
 	cachedToken      string
@@ -166,7 +177,7 @@ func (c *systemHTTPClient) token(ctx context.Context) (string, error) {
 // round-trip — Zitadel verifies the signature against the public key
 // loaded from the SystemAPIUsers config block on every request.
 func (c *systemHTTPClient) mintAssertion() (string, time.Time, error) {
-	aud := c.issuerURL()
+	aud := c.audience
 
 	now := time.Now()
 	exp := now.Add(systemJWTTTL)
@@ -187,24 +198,6 @@ func (c *systemHTTPClient) mintAssertion() (string, time.Time, error) {
 	return assertion, exp.Add(-10 * time.Second), nil
 }
 
-// issuerURL returns the Zitadel issuer URL the JWT aud claim should name.
-// For System API JWT-bearer flows, aud is the full token endpoint URL of
-// the issuer (the public external domain, not the in-cluster service name).
-func (c *systemHTTPClient) issuerURL() string {
-	if c.externalDomain != "" {
-		// Re-build the issuer from the public domain by cloning baseURL's
-		// scheme and port but swapping the host.
-		scheme := c.baseURL.Scheme
-		if scheme == "http" {
-			// In-cluster URL is plain HTTP; public issuer is always HTTPS.
-			scheme = "https"
-		}
-		// externalDomain may include a port (e.g. "auth.zeroroot.local:30443").
-		return scheme + "://" + c.externalDomain
-	}
-	return c.baseURL.Scheme + "://" + c.baseURL.Host
-}
-
 // resolveInstanceID returns the numeric ID of the single Zitadel instance
 // reachable by this SystemAPIUser. Zitadel's System API addresses each
 // instance by its concrete ID — there is no `/me` alias. The mapping is
@@ -223,7 +216,7 @@ func (c *systemHTTPClient) issuerURL() string {
 // For a single-instance deployment (the standard self-hosted shape — the
 // SystemAPIUser is bound to one Zitadel instance), we expect exactly one
 // entry in `result` and return its `id`. Multi-instance deployments would
-// need to disambiguate by `domain` matching c.externalDomain — wire that
+// need to disambiguate by `domain` matching the claimed host — wire that
 // in when the multi-instance use case actually exists.
 func (c *systemHTTPClient) resolveInstanceID(ctx context.Context) (string, error) {
 	c.mu.Lock()
@@ -338,21 +331,18 @@ func (c *systemHTTPClient) doJSON(ctx context.Context, token, method, path strin
 		bodyReader = bytes.NewReader(buf)
 	}
 
-	full, err := c.baseURL.Parse(path)
+	full, err := url.Parse(path)
 	if err != nil {
 		return fmt.Errorf("zitadel system: path %q: %w", path, ErrInvalidInput)
 	}
 
-	req, err := http.NewRequestWithContext(ctx, method, full.String(), bodyReader)
+	req, err := http.NewRequestWithContext(ctx, method, c.endpoint.URL(full.RequestURI()), bodyReader)
 	if err != nil {
 		return fmt.Errorf("zitadel system: new request: %w", err)
 	}
 	req.Header.Set("Authorization", "Bearer "+token)
 	req.Header.Set("Content-Type", "application/json")
 	req.Header.Set("Accept", "application/json")
-	if c.externalDomain != "" {
-		req.Host = c.externalDomain
-	}
 
 	resp, err := c.http.Do(req)
 	if err != nil {

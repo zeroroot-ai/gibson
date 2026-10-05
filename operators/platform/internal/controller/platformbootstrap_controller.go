@@ -408,7 +408,7 @@ func (r *PlatformBootstrapReconciler) reconcileOIDCChildren(ctx context.Context,
 				return err
 			}
 			child.Spec = gibsonv1alpha1.OIDCClientSpec{
-				ZitadelIssuer:              pb.Spec.Zitadel.Issuer,
+				ZitadelURL:                 pb.Spec.Zitadel.Issuer,
 				AdminTokenRef:              pb.Spec.Zitadel.AdminTokenRef,
 				ProjectRef:                 gibsonv1alpha1.ProjectReference{Name: pb.Spec.Zitadel.Project.Name},
 				ClientName:                 oidcClientDisplayName(ref),

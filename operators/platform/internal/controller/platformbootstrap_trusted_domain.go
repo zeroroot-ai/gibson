@@ -7,13 +7,13 @@ import (
 	"context"
 	"fmt"
 	"net"
-	"net/url"
 	"os"
 
 	"github.com/go-logr/logr"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	ctrl "sigs.k8s.io/controller-runtime"
 
+	"github.com/zeroroot-ai/gibson/internal/platform/zitadelconn"
 	gibsonv1alpha1 "github.com/zeroroot-ai/gibson/operators/platform/api/v1alpha1"
 	zitadel "github.com/zeroroot-ai/gibson/operators/platform/internal/clients/zitadel"
 )
@@ -35,7 +35,7 @@ func DefaultSystemClientFactory(apiURL, systemUserName, externalDomain, keyPath 
 // instance-superuser surface. It is dialled at a cluster-internal address
 // (see systemAPIBaseURL) so that traffic never leaves the cluster and no
 // ingress route has to publish "/system/v1/". The Host header is still
-// forged to the public domain (see systemAPIHostHeader) because Zitadel
+// claimed with the instance header (see systemAPIClaimedHost) because Zitadel
 // selects the instance by Host — dialling in-cluster while presenting the
 // public host is what makes both properties hold at once.
 //
@@ -87,13 +87,11 @@ func (r *PlatformBootstrapReconciler) reconcileTrustedDomain(
 	if factory == nil {
 		factory = DefaultSystemClientFactory
 	}
-	// externalDomain for Host header forging — same pattern as
-	// DefaultZitadelClientFactory reading ZITADEL_EXTERNAL_DOMAIN. The
-	// forged Host is load-bearing now that the dial target is in-cluster:
-	// Zitadel routes to an instance by Host, so presenting the public
-	// domain over an in-cluster connection is what keeps the call landing
-	// on the right instance.
-	externalDomain := systemAPIHostHeader(pb.Spec.Zitadel.ExternalDomain, pb.Spec.Zitadel.Issuer)
+	// The claimed host (ADR-0092). The connection goes to the in-cluster
+	// Service, and the x-zitadel-instance-host header names the public
+	// domain, so the call lands on the right instance before the
+	// cluster-internal hostname is a trusted domain.
+	externalDomain := systemAPIClaimedHost(pb.Spec.Zitadel.ExternalDomain)
 	sysCli, err := factory(apiURL, systemUserName, externalDomain, sc.KeyPath)
 	if err != nil {
 		setBootstrapCond(pb, gibsonv1alpha1.ConditionTrustedDomainReady, metav1.ConditionFalse,
@@ -144,7 +142,7 @@ func (r *PlatformBootstrapReconciler) reconcileTrustedDomain(
 
 // defaultSystemAPIPort is the Zitadel Service port the chart exposes
 // in-cluster. Only used when neither spec.zitadel.systemClient.apiURL nor
-// ZITADEL_INTERNAL_ADDRESS names a full URL.
+// ZITADEL_URL names a full URL.
 const defaultSystemAPIPort = "8080"
 
 // systemAPIBaseURL resolves the base URL for Zitadel System API calls.
@@ -156,8 +154,8 @@ const defaultSystemAPIPort = "8080"
 //
 // Resolution order:
 //  1. specAPIURL — spec.zitadel.systemClient.apiURL, set by the chart.
-//  2. ZITADEL_INTERNAL_ADDRESS — the operator Pod env the readiness probe
-//     already consumes for the same Service.
+//  2. ZITADEL_URL — the operator Pod env that names the in-cluster
+//     Zitadel Service (ADR-0092).
 //  3. "http://<clusterDomain>:8080" — derived from the same cluster Service
 //     hostname the reconciler is about to register as a trusted domain.
 //
@@ -168,31 +166,20 @@ func systemAPIBaseURL(specAPIURL, clusterDomain string) string {
 	if specAPIURL != "" {
 		return specAPIURL
 	}
-	if env := os.Getenv("ZITADEL_INTERNAL_ADDRESS"); env != "" {
+	if env := os.Getenv(zitadelconn.EnvURL); env != "" {
 		return env
 	}
 	return "http://" + net.JoinHostPort(clusterDomain, defaultSystemAPIPort)
 }
 
-// systemAPIHostHeader resolves the public host the System API client forges
-// onto the Host header of every request.
-//
-// Zitadel selects an instance by Host, so dialling in-cluster while
-// presenting the public domain is what keeps the call on the right instance
-// — and it works before the cluster-internal hostname has been registered as
-// a trusted domain, which is exactly the state this reconciler is fixing.
-//
-// externalDomain is authoritative. When it is unset (older PlatformBootstrap
-// CRs that never needed it, because the operator dialled the public issuer
-// directly) the host is derived from the issuer, preserving the pre-change
-// Host header byte-for-byte.
-func systemAPIHostHeader(externalDomain, issuer string) string {
-	if externalDomain != "" {
-		return externalDomain
+// systemAPIClaimedHost resolves the public host the System API client claims
+// with the x-zitadel-instance-host header: spec.zitadel.externalDomain, and
+// ZITADEL_EXTERNAL_DOMAIN when the spec leaves it empty. It is never derived
+// from spec.zitadel.issuer, which holds a connect address on every profile.
+// An empty or ported result is refused by the client constructor.
+func systemAPIClaimedHost(specExternalDomain string) string {
+	if specExternalDomain != "" {
+		return specExternalDomain
 	}
-	u, err := url.Parse(issuer)
-	if err != nil || u.Host == "" {
-		return ""
-	}
-	return u.Host
+	return os.Getenv(zitadelconn.EnvExternalDomain)
 }

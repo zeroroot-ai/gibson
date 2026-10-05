@@ -144,7 +144,9 @@ func (f *fakeLabelZitadel) serve(w http.ResponseWriter, r *http.Request) {
 	}
 }
 
-func (f *fakeLabelZitadel) client() zitadel.Client { return zitadel.New(f.srv.URL, "test-pat", "") }
+func (f *fakeLabelZitadel) client() zitadel.Client {
+	return zitadel.New(f.srv.URL, "test-pat", "app.example.test")
+}
 
 func testBrand() brand {
 	return brand{
@@ -346,7 +348,7 @@ func brandingReconciler(t *testing.T, zitadelURL string, withPAT bool, cms ...*c
 		Scheme:   s,
 		Recorder: record.NewFakeRecorder(8),
 		ZitadelFactory: func(_, pat string) zitadel.Client {
-			return zitadel.New(zitadelURL, pat, "")
+			return zitadel.New(zitadelURL, pat, "app.example.test")
 		},
 	}
 }

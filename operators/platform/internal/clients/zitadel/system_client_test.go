@@ -21,6 +21,8 @@ import (
 	"time"
 
 	"github.com/golang-jwt/jwt/v5"
+
+	"github.com/zeroroot-ai/gibson/internal/platform/zitadelconn"
 )
 
 // generateTestRSAKey returns a 2048-bit RSA key seeded deterministically.
@@ -126,7 +128,7 @@ func TestSystemClient_HappyPath_AddInstanceDomain(t *testing.T) {
 		},
 	})
 
-	sc, err := NewSystemClient(srv.URL, systemUser, "", keyPath)
+	sc, err := NewSystemClient(srv.URL, systemUser, testDomain, keyPath)
 	if err != nil {
 		t.Fatalf("NewSystemClient: %v", err)
 	}
@@ -205,7 +207,7 @@ func TestSystemClient_Idempotent_409(t *testing.T) {
 		},
 	})
 
-	sc, err := NewSystemClient(srv.URL, "gibson-system-bot", "", keyPath)
+	sc, err := NewSystemClient(srv.URL, "gibson-system-bot", testDomain, keyPath)
 	if err != nil {
 		t.Fatalf("NewSystemClient: %v", err)
 	}
@@ -230,7 +232,7 @@ func TestSystemClient_Idempotent_AlreadyExistsBody(t *testing.T) {
 		},
 	})
 
-	sc, err := NewSystemClient(srv.URL, "gibson-system-bot", "", keyPath)
+	sc, err := NewSystemClient(srv.URL, "gibson-system-bot", testDomain, keyPath)
 	if err != nil {
 		t.Fatalf("NewSystemClient: %v", err)
 	}
@@ -254,7 +256,7 @@ func TestSystemClient_Unauthorized(t *testing.T) {
 		},
 	})
 
-	sc, err := NewSystemClient(srv.URL, "gibson-system-bot", "", keyPath)
+	sc, err := NewSystemClient(srv.URL, "gibson-system-bot", testDomain, keyPath)
 	if err != nil {
 		t.Fatalf("NewSystemClient: %v", err)
 	}
@@ -284,7 +286,7 @@ func TestSystemClient_ServerError_5xx(t *testing.T) {
 		},
 	})
 
-	sc, err := NewSystemClient(srv.URL, "gibson-system-bot", "", keyPath)
+	sc, err := NewSystemClient(srv.URL, "gibson-system-bot", testDomain, keyPath)
 	if err != nil {
 		t.Fatalf("NewSystemClient: %v", err)
 	}
@@ -325,7 +327,7 @@ func TestSystemClient_ListInstanceDomains(t *testing.T) {
 		},
 	})
 
-	sc, err := NewSystemClient(srv.URL, "gibson-system-bot", "", keyPath)
+	sc, err := NewSystemClient(srv.URL, "gibson-system-bot", testDomain, keyPath)
 	if err != nil {
 		t.Fatalf("NewSystemClient: %v", err)
 	}
@@ -368,7 +370,7 @@ func TestSystemClient_AssertionCaching(t *testing.T) {
 		},
 	})
 
-	sc, err := NewSystemClient(srv.URL, "gibson-system-bot", "", keyPath)
+	sc, err := NewSystemClient(srv.URL, "gibson-system-bot", testDomain, keyPath)
 	if err != nil {
 		t.Fatalf("NewSystemClient: %v", err)
 	}
@@ -416,27 +418,26 @@ func TestLoadRSAKey_NotFound(t *testing.T) {
 	}
 }
 
-// TestSystemClient_ExternalDomain_HostHeader verifies that externalDomain
-// is forged onto the Host header for every System API request — Zitadel
-// routes by vhost, so cluster-internal Service-name dialing requires the
-// Host header to match the registered ExternalDomain.
-func TestSystemClient_ExternalDomain_HostHeader(t *testing.T) {
+// TestSystemClient_ClaimsTheHostByHeader verifies that every System API
+// request carries the claimed public host in x-zitadel-instance-host and that
+// the client does not set the Host header by hand (ADR-0092, gibson#223).
+func TestSystemClient_ClaimsTheHostByHeader(t *testing.T) {
 	key := generateTestRSAKey(t)
 	keyPath := writeKeyFile(t, key)
 
-	const externalDomain = "auth.zeroroot.local:30443"
-	var domainHost string
+	var gotInstance, gotHost string
 
 	srv := newFakeServer(t, map[string]http.HandlerFunc{
 		"POST /system/v1/instances/_search": instanceSearchHandler(),
 		"POST /system/v1/instances/372802942115250284/domains": func(w http.ResponseWriter, r *http.Request) {
-			domainHost = r.Host
+			gotInstance = r.Header.Get(zitadelconn.InstanceHostHeader)
+			gotHost = r.Host
 			w.WriteHeader(http.StatusOK)
 			_, _ = w.Write([]byte(`{}`))
 		},
 	})
 
-	sc, err := NewSystemClient(srv.URL, "gibson-system-bot", externalDomain, keyPath)
+	sc, err := NewSystemClient(srv.URL, "gibson-system-bot", testDomain, keyPath)
 	if err != nil {
 		t.Fatalf("NewSystemClient: %v", err)
 	}
@@ -444,7 +445,39 @@ func TestSystemClient_ExternalDomain_HostHeader(t *testing.T) {
 		t.Fatalf("AddInstanceDomain: %v", err)
 	}
 
-	if domainHost != externalDomain {
-		t.Errorf("domains request Host = %q, want %q", domainHost, externalDomain)
+	if gotInstance != testDomain {
+		t.Errorf("instance header = %q, want %q", gotInstance, testDomain)
+	}
+	if gotHost == testDomain {
+		t.Errorf("Host = %q: the client must not forge the Host header", gotHost)
+	}
+}
+
+// TestSystemClient_AudienceIsThePortlessPublicOrigin pins the JWT audience.
+// Zitadel requires the exact string, and a port in it made every System API
+// call answer 401 (deploy#1633). The connect address must never appear in it.
+func TestSystemClient_AudienceIsThePortlessPublicOrigin(t *testing.T) {
+	keyPath := writeKeyFile(t, generateTestRSAKey(t))
+	sc, err := NewSystemClient("http://gibson-zitadel.gibson.svc.cluster.local:8080", "gibson-system-bot", testDomain, keyPath)
+	if err != nil {
+		t.Fatalf("NewSystemClient: %v", err)
+	}
+	if got, want := sc.(*systemHTTPClient).audience, "https://"+testDomain; got != want {
+		t.Errorf("audience = %q, want %q", got, want)
+	}
+}
+
+// TestSystemClient_RefusesABadEndpoint: a ported or empty claimed host, or a
+// connect address that is not a base URL, is refused at construction time.
+func TestSystemClient_RefusesABadEndpoint(t *testing.T) {
+	keyPath := writeKeyFile(t, generateTestRSAKey(t))
+	for name, tc := range map[string]struct{ url, host string }{
+		"ported host": {"http://gibson-zitadel:8080", "app.example.test:30443"},
+		"empty host":  {"http://gibson-zitadel:8080", ""},
+		"bad URL":     {"://bad", testDomain},
+	} {
+		if _, err := NewSystemClient(tc.url, "gibson-system-bot", tc.host, keyPath); !errors.Is(err, ErrInvalidInput) {
+			t.Errorf("%s: NewSystemClient error = %v, want ErrInvalidInput", name, err)
+		}
 	}
 }
