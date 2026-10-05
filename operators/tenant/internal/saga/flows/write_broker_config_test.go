@@ -10,7 +10,7 @@ import (
 	"testing"
 
 	"github.com/zeroroot-ai/gibson/internal/infra/secrets/vault/brokercodec"
-	tenantv1 "github.com/zeroroot-ai/gibson/internal/server/daemon/api/gibson/tenant/v1"
+	secretsv1 "github.com/zeroroot-ai/sdk/api/gen/gibson/secrets/v1"
 	"github.com/zeroroot-ai/sdk/auth"
 )
 
@@ -222,7 +222,7 @@ func TestEncodeHostedBrokerConfig_SeedsVaultHosted(t *testing.T) {
 	if err != nil {
 		t.Fatalf("Redact: %v", err)
 	}
-	if redacted.GetProvider() != tenantv1.BrokerProvider_BROKER_PROVIDER_VAULT_HOSTED {
+	if redacted.GetProvider() != secretsv1.BrokerProvider_BROKER_PROVIDER_VAULT_HOSTED {
 		t.Errorf("seed provider enum: got %v, want VAULT_HOSTED", redacted.GetProvider())
 	}
 	// Namespace mode: the tenant-scoped namespace is carried, not a path prefix.

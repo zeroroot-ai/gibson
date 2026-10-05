@@ -15,7 +15,7 @@ import (
 	"testing"
 
 	"github.com/zeroroot-ai/gibson/internal/infra/secrets/vault"
-	tenantv1 "github.com/zeroroot-ai/gibson/internal/server/daemon/api/gibson/tenant/v1"
+	secretsv1 "github.com/zeroroot-ai/sdk/api/gen/gibson/secrets/v1"
 	"github.com/zeroroot-ai/sdk/auth"
 )
 
@@ -32,8 +32,8 @@ func mustTenant(t *testing.T, s string) auth.TenantID {
 // namespace mode with the nested auth block intact.
 func TestEncodeCandidate_Hosted_RoundTrip(t *testing.T) {
 	tenant := mustTenant(t, "acme")
-	provider, blob, err := EncodeCandidate(&tenantv1.CandidateConfig{
-		Provider:        tenantv1.BrokerProvider_BROKER_PROVIDER_VAULT_HOSTED,
+	provider, blob, err := EncodeCandidate(&secretsv1.CandidateConfig{
+		Provider:        secretsv1.BrokerProvider_BROKER_PROVIDER_VAULT_HOSTED,
 		Address:         "https://vault.internal:8200",
 		NamespaceOrPath: "tenant/acme",
 		Mount:           "secret",
@@ -77,8 +77,8 @@ func TestEncodeCandidate_Hosted_RoundTrip(t *testing.T) {
 // path-prefix mode with AppRole auth intact.
 func TestEncodeCandidate_BYO_RoundTrip(t *testing.T) {
 	tenant := mustTenant(t, "acme")
-	_, blob, err := EncodeCandidate(&tenantv1.CandidateConfig{
-		Provider:        tenantv1.BrokerProvider_BROKER_PROVIDER_VAULT_BYO,
+	_, blob, err := EncodeCandidate(&secretsv1.CandidateConfig{
+		Provider:        secretsv1.BrokerProvider_BROKER_PROVIDER_VAULT_BYO,
 		Address:         "https://byo.example:8200",
 		NamespaceOrPath: "team/acme-secrets",
 		Mount:           "kv",
@@ -115,8 +115,8 @@ func TestEncodeCandidate_BYO_RoundTrip(t *testing.T) {
 // path defaults to the tenant-scoped prefix tenant/<tenant-id>.
 func TestEncodeCandidate_BYO_DefaultPathPrefix(t *testing.T) {
 	tenant := mustTenant(t, "wonka")
-	_, blob, err := EncodeCandidate(&tenantv1.CandidateConfig{
-		Provider:   tenantv1.BrokerProvider_BROKER_PROVIDER_VAULT_BYO,
+	_, blob, err := EncodeCandidate(&secretsv1.CandidateConfig{
+		Provider:   secretsv1.BrokerProvider_BROKER_PROVIDER_VAULT_BYO,
 		Address:    "https://byo.example:8200",
 		AuthMethod: "token",
 		VaultToken: []byte("hvs.byo"),
@@ -139,8 +139,8 @@ func TestEncodeCandidate_BYO_DefaultPathPrefix(t *testing.T) {
 // TestEncodeCandidate_UnsupportedProvider rejects UNSPECIFIED / retired enums.
 func TestEncodeCandidate_UnsupportedProvider(t *testing.T) {
 	tenant := mustTenant(t, "acme")
-	if _, _, err := EncodeCandidate(&tenantv1.CandidateConfig{
-		Provider: tenantv1.BrokerProvider_BROKER_PROVIDER_UNSPECIFIED,
+	if _, _, err := EncodeCandidate(&secretsv1.CandidateConfig{
+		Provider: secretsv1.BrokerProvider_BROKER_PROVIDER_UNSPECIFIED,
 	}, tenant); err == nil {
 		t.Fatal("expected error for UNSPECIFIED provider, got nil")
 	}
@@ -157,8 +157,8 @@ func TestSingleSourceOfTruth_DaemonAndOperatorAgree(t *testing.T) {
 	tenant := mustTenant(t, "acme")
 
 	// Daemon path: a dashboard-shaped Hosted candidate.
-	_, daemonBlob, err := EncodeCandidate(&tenantv1.CandidateConfig{
-		Provider:        tenantv1.BrokerProvider_BROKER_PROVIDER_VAULT_HOSTED,
+	_, daemonBlob, err := EncodeCandidate(&secretsv1.CandidateConfig{
+		Provider:        secretsv1.BrokerProvider_BROKER_PROVIDER_VAULT_HOSTED,
 		Address:         "https://vault.internal:8200",
 		NamespaceOrPath: "tenant/acme",
 		Mount:           "secret",
@@ -199,7 +199,7 @@ func TestRedact_Hosted(t *testing.T) {
 	if err != nil {
 		t.Fatalf("Redact: %v", err)
 	}
-	if out.GetProvider() != tenantv1.BrokerProvider_BROKER_PROVIDER_VAULT_HOSTED {
+	if out.GetProvider() != secretsv1.BrokerProvider_BROKER_PROVIDER_VAULT_HOSTED {
 		t.Errorf("Provider = %v, want VAULT_HOSTED", out.GetProvider())
 	}
 	if out.GetNamespaceOrPath() != "tenant/acme" {
@@ -229,7 +229,7 @@ func TestRedact_BYO(t *testing.T) {
 	if err != nil {
 		t.Fatalf("Redact: %v", err)
 	}
-	if out.GetProvider() != tenantv1.BrokerProvider_BROKER_PROVIDER_VAULT_BYO {
+	if out.GetProvider() != secretsv1.BrokerProvider_BROKER_PROVIDER_VAULT_BYO {
 		t.Errorf("Provider = %v, want VAULT_BYO", out.GetProvider())
 	}
 	if out.GetNamespaceOrPath() != "tenant/acme" {
@@ -253,7 +253,7 @@ func TestRedact_EmptyBlob(t *testing.T) {
 	if err != nil {
 		t.Fatalf("Redact(nil): %v", err)
 	}
-	if out.GetProvider() != tenantv1.BrokerProvider_BROKER_PROVIDER_VAULT_HOSTED {
+	if out.GetProvider() != secretsv1.BrokerProvider_BROKER_PROVIDER_VAULT_HOSTED {
 		t.Errorf("empty blob Provider = %v, want VAULT_HOSTED default", out.GetProvider())
 	}
 }
@@ -273,8 +273,8 @@ func TestEncodeCandidateAuthMethodAllowlist(t *testing.T) {
 	accepted := []string{"token", "approle"}
 	for _, method := range accepted {
 		t.Run("accepts_"+method, func(t *testing.T) {
-			_, blob, err := EncodeCandidate(&tenantv1.CandidateConfig{
-				Provider:   tenantv1.BrokerProvider_BROKER_PROVIDER_VAULT_BYO,
+			_, blob, err := EncodeCandidate(&secretsv1.CandidateConfig{
+				Provider:   secretsv1.BrokerProvider_BROKER_PROVIDER_VAULT_BYO,
 				Address:    "https://vault.example.com",
 				AuthMethod: method,
 			}, tenant)
@@ -294,8 +294,8 @@ func TestEncodeCandidateAuthMethodAllowlist(t *testing.T) {
 	rejected := []string{"jwt", "aws_iam", "kubernetes", "TOKEN", ""}
 	for _, method := range rejected {
 		t.Run("rejects_"+method, func(t *testing.T) {
-			if _, _, err := EncodeCandidate(&tenantv1.CandidateConfig{
-				Provider:   tenantv1.BrokerProvider_BROKER_PROVIDER_VAULT_BYO,
+			if _, _, err := EncodeCandidate(&secretsv1.CandidateConfig{
+				Provider:   secretsv1.BrokerProvider_BROKER_PROVIDER_VAULT_BYO,
 				Address:    "https://vault.example.com",
 				AuthMethod: method,
 			}, tenant); err == nil {

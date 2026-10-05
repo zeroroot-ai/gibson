@@ -16,7 +16,7 @@ import (
 	"github.com/zeroroot-ai/gibson/internal/platform/secrets"
 
 	sdksecrets "github.com/zeroroot-ai/gibson/internal/infra/secrets"
-	tenantv1 "github.com/zeroroot-ai/gibson/internal/server/daemon/api/gibson/tenant/v1"
+	secretsv1 "github.com/zeroroot-ai/sdk/api/gen/gibson/secrets/v1"
 	"github.com/zeroroot-ai/sdk/auth"
 )
 
@@ -141,7 +141,7 @@ func newTenantTestServer(t *testing.T) (*TenantAdminServer, *fakeTenantConfigRea
 func TestGetBrokerConfig_NotConfigured(t *testing.T) {
 	srv, _, _, _, _, _, _ := newTenantTestServer(t)
 	ctx := ctxWithTenant(t, "acme")
-	resp, err := srv.GetBrokerConfig(ctx, &tenantv1.GetBrokerConfigRequest{})
+	resp, err := srv.GetBrokerConfig(ctx, &secretsv1.GetBrokerConfigRequest{})
 	if err != nil {
 		t.Fatalf("GetBrokerConfig: %v", err)
 	}
@@ -158,7 +158,7 @@ func TestGetBrokerConfig_Redacts(t *testing.T) {
 		ConfigBlob: []byte(`{"address":"https://vault","auth":{"method":"token","token":"xxx"}}`),
 	}
 	ctx := ctxWithTenant(t, "acme")
-	resp, err := srv.GetBrokerConfig(ctx, &tenantv1.GetBrokerConfigRequest{})
+	resp, err := srv.GetBrokerConfig(ctx, &secretsv1.GetBrokerConfigRequest{})
 	if err != nil {
 		t.Fatalf("GetBrokerConfig: %v", err)
 	}
@@ -166,7 +166,7 @@ func TestGetBrokerConfig_Redacts(t *testing.T) {
 		t.Errorf("expected configured=true")
 	}
 	cfg := resp.GetConfig()
-	if cfg.GetProvider() != tenantv1.BrokerProvider_BROKER_PROVIDER_VAULT_HOSTED {
+	if cfg.GetProvider() != secretsv1.BrokerProvider_BROKER_PROVIDER_VAULT_HOSTED {
 		t.Errorf("provider mismatch: %v", cfg.GetProvider())
 	}
 	if cfg.GetAddress() != "https://vault" {
@@ -188,7 +188,7 @@ func TestGetBrokerConfig_Redacts(t *testing.T) {
 
 func TestGetBrokerConfig_RequiresTenant(t *testing.T) {
 	srv, _, _, _, _, _, _ := newTenantTestServer(t)
-	_, err := srv.GetBrokerConfig(context.Background(), &tenantv1.GetBrokerConfigRequest{})
+	_, err := srv.GetBrokerConfig(context.Background(), &secretsv1.GetBrokerConfigRequest{})
 	if status.Code(err) != codes.PermissionDenied {
 		t.Errorf("want PermissionDenied, got %v", err)
 	}
@@ -202,9 +202,9 @@ func TestProbeBrokerConfig_Success(t *testing.T) {
 	srv, _, _, _, _, _, _ := newTenantTestServer(t)
 	ctx := ctxWithTenant(t, "acme")
 
-	resp, err := srv.ProbeBrokerConfig(ctx, &tenantv1.ProbeBrokerConfigRequest{
-		Candidate: &tenantv1.CandidateConfig{
-			Provider:   tenantv1.BrokerProvider_BROKER_PROVIDER_VAULT_HOSTED,
+	resp, err := srv.ProbeBrokerConfig(ctx, &secretsv1.ProbeBrokerConfigRequest{
+		Candidate: &secretsv1.CandidateConfig{
+			Provider:   secretsv1.BrokerProvider_BROKER_PROVIDER_VAULT_HOSTED,
 			Address:    "https://vault",
 			AuthMethod: "token",
 			VaultToken: []byte("hvs.xyz"),
@@ -223,9 +223,9 @@ func TestProbeBrokerConfig_Failure(t *testing.T) {
 	p.probeErr = errors.New("vault unauthorized: bad token")
 	ctx := ctxWithTenant(t, "acme")
 
-	resp, err := srv.ProbeBrokerConfig(ctx, &tenantv1.ProbeBrokerConfigRequest{
-		Candidate: &tenantv1.CandidateConfig{
-			Provider:   tenantv1.BrokerProvider_BROKER_PROVIDER_VAULT_HOSTED,
+	resp, err := srv.ProbeBrokerConfig(ctx, &secretsv1.ProbeBrokerConfigRequest{
+		Candidate: &secretsv1.CandidateConfig{
+			Provider:   secretsv1.BrokerProvider_BROKER_PROVIDER_VAULT_HOSTED,
 			AuthMethod: "token",
 		},
 	})
@@ -243,7 +243,7 @@ func TestProbeBrokerConfig_Failure(t *testing.T) {
 func TestProbeBrokerConfig_RequiresCandidate(t *testing.T) {
 	srv, _, _, _, _, _, _ := newTenantTestServer(t)
 	ctx := ctxWithTenant(t, "acme")
-	_, err := srv.ProbeBrokerConfig(ctx, &tenantv1.ProbeBrokerConfigRequest{})
+	_, err := srv.ProbeBrokerConfig(ctx, &secretsv1.ProbeBrokerConfigRequest{})
 	if status.Code(err) != codes.InvalidArgument {
 		t.Errorf("want InvalidArgument, got %v", err)
 	}
@@ -257,9 +257,9 @@ func TestSetBrokerConfig_ProbeSuccess_PersistsAndAudits(t *testing.T) {
 	srv, _, w, _, au, _, _ := newTenantTestServer(t)
 	ctx := ctxWithTenant(t, "acme")
 
-	resp, err := srv.SetBrokerConfig(ctx, &tenantv1.SetBrokerConfigRequest{
-		Candidate: &tenantv1.CandidateConfig{
-			Provider:   tenantv1.BrokerProvider_BROKER_PROVIDER_VAULT_HOSTED,
+	resp, err := srv.SetBrokerConfig(ctx, &secretsv1.SetBrokerConfigRequest{
+		Candidate: &secretsv1.CandidateConfig{
+			Provider:   secretsv1.BrokerProvider_BROKER_PROVIDER_VAULT_HOSTED,
 			Address:    "https://vault",
 			AuthMethod: "token",
 			VaultToken: []byte("hvs.xyz"),
@@ -287,9 +287,9 @@ func TestSetBrokerConfig_ProbeFailure_NoPersist(t *testing.T) {
 	p.probeErr = errors.New("connection refused")
 	ctx := ctxWithTenant(t, "acme")
 
-	resp, err := srv.SetBrokerConfig(ctx, &tenantv1.SetBrokerConfigRequest{
-		Candidate: &tenantv1.CandidateConfig{
-			Provider:   tenantv1.BrokerProvider_BROKER_PROVIDER_VAULT_HOSTED,
+	resp, err := srv.SetBrokerConfig(ctx, &secretsv1.SetBrokerConfigRequest{
+		Candidate: &secretsv1.CandidateConfig{
+			Provider:   secretsv1.BrokerProvider_BROKER_PROVIDER_VAULT_HOSTED,
 			AuthMethod: "token",
 		},
 	})
@@ -313,7 +313,7 @@ func TestSetBrokerConfig_ProbeFailure_NoPersist(t *testing.T) {
 func TestSetBrokerConfig_RequiresCandidate(t *testing.T) {
 	srv, _, _, _, _, _, _ := newTenantTestServer(t)
 	ctx := ctxWithTenant(t, "acme")
-	_, err := srv.SetBrokerConfig(ctx, &tenantv1.SetBrokerConfigRequest{})
+	_, err := srv.SetBrokerConfig(ctx, &secretsv1.SetBrokerConfigRequest{})
 	if status.Code(err) != codes.InvalidArgument {
 		t.Errorf("want InvalidArgument, got %v", err)
 	}
@@ -329,9 +329,9 @@ func TestSetBrokerConfig_CallsReloadOnSuccess(t *testing.T) {
 	srv, _, _, _, _, rl, _ := newTenantTestServer(t)
 	ctx := ctxWithTenant(t, "acme")
 
-	if _, err := srv.SetBrokerConfig(ctx, &tenantv1.SetBrokerConfigRequest{
-		Candidate: &tenantv1.CandidateConfig{
-			Provider:   tenantv1.BrokerProvider_BROKER_PROVIDER_VAULT_HOSTED,
+	if _, err := srv.SetBrokerConfig(ctx, &secretsv1.SetBrokerConfigRequest{
+		Candidate: &secretsv1.CandidateConfig{
+			Provider:   secretsv1.BrokerProvider_BROKER_PROVIDER_VAULT_HOSTED,
 			Address:    "https://vault",
 			AuthMethod: "token",
 			VaultToken: []byte("hvs.xyz"),
@@ -354,9 +354,9 @@ func TestSetBrokerConfig_NoReloadOnProbeFailure(t *testing.T) {
 	p.probeErr = errors.New("connection refused")
 	ctx := ctxWithTenant(t, "acme")
 
-	_, _ = srv.SetBrokerConfig(ctx, &tenantv1.SetBrokerConfigRequest{
-		Candidate: &tenantv1.CandidateConfig{
-			Provider:   tenantv1.BrokerProvider_BROKER_PROVIDER_VAULT_HOSTED,
+	_, _ = srv.SetBrokerConfig(ctx, &secretsv1.SetBrokerConfigRequest{
+		Candidate: &secretsv1.CandidateConfig{
+			Provider:   secretsv1.BrokerProvider_BROKER_PROVIDER_VAULT_HOSTED,
 			AuthMethod: "token",
 		},
 	})
@@ -372,9 +372,9 @@ func TestSetBrokerConfig_NoReloadOnPersistFailure(t *testing.T) {
 	w.err = errors.New("db down")
 	ctx := ctxWithTenant(t, "acme")
 
-	_, err := srv.SetBrokerConfig(ctx, &tenantv1.SetBrokerConfigRequest{
-		Candidate: &tenantv1.CandidateConfig{
-			Provider:   tenantv1.BrokerProvider_BROKER_PROVIDER_VAULT_HOSTED,
+	_, err := srv.SetBrokerConfig(ctx, &secretsv1.SetBrokerConfigRequest{
+		Candidate: &secretsv1.CandidateConfig{
+			Provider:   secretsv1.BrokerProvider_BROKER_PROVIDER_VAULT_HOSTED,
 			Address:    "https://vault",
 			AuthMethod: "token",
 			VaultToken: []byte("hvs.xyz"),
@@ -397,7 +397,7 @@ func TestCountSecrets_ReturnsLen(t *testing.T) {
 	sl.names = []string{"db_password", "stripe_key", "openai_key"}
 	ctx := ctxWithTenant(t, "acme")
 
-	resp, err := srv.CountSecrets(ctx, &tenantv1.CountSecretsRequest{})
+	resp, err := srv.CountSecrets(ctx, &secretsv1.CountSecretsRequest{})
 	if err != nil {
 		t.Fatalf("CountSecrets: %v", err)
 	}
@@ -410,7 +410,7 @@ func TestCountSecrets_Empty(t *testing.T) {
 	srv, _, _, _, _, _, _ := newTenantTestServer(t)
 	ctx := ctxWithTenant(t, "acme")
 
-	resp, err := srv.CountSecrets(ctx, &tenantv1.CountSecretsRequest{})
+	resp, err := srv.CountSecrets(ctx, &secretsv1.CountSecretsRequest{})
 	if err != nil {
 		t.Fatalf("CountSecrets: %v", err)
 	}
@@ -421,7 +421,7 @@ func TestCountSecrets_Empty(t *testing.T) {
 
 func TestCountSecrets_RequiresTenant(t *testing.T) {
 	srv, _, _, _, _, _, _ := newTenantTestServer(t)
-	_, err := srv.CountSecrets(context.Background(), &tenantv1.CountSecretsRequest{})
+	_, err := srv.CountSecrets(context.Background(), &secretsv1.CountSecretsRequest{})
 	if status.Code(err) != codes.PermissionDenied {
 		t.Errorf("want PermissionDenied, got %v", err)
 	}
@@ -432,7 +432,7 @@ func TestCountSecrets_ListErrorPropagates(t *testing.T) {
 	sl.err = errors.New("broker timeout")
 	ctx := ctxWithTenant(t, "acme")
 
-	_, err := srv.CountSecrets(ctx, &tenantv1.CountSecretsRequest{})
+	_, err := srv.CountSecrets(ctx, &secretsv1.CountSecretsRequest{})
 	if status.Code(err) != codes.Internal {
 		t.Errorf("want Internal, got %v", err)
 	}

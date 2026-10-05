@@ -32,7 +32,7 @@ import (
 	"fmt"
 
 	"github.com/zeroroot-ai/gibson/internal/infra/secrets/vault"
-	tenantv1 "github.com/zeroroot-ai/gibson/internal/server/daemon/api/gibson/tenant/v1"
+	secretsv1 "github.com/zeroroot-ai/sdk/api/gen/gibson/secrets/v1"
 	"github.com/zeroroot-ai/sdk/auth"
 )
 
@@ -128,7 +128,7 @@ func Decode(blob []byte) (vault.Config, error) {
 // EncodeCandidate maps a dashboard-supplied wire CandidateConfig onto the
 // canonical vault.Config blob. tenant is used to derive the BYO default path
 // prefix when the candidate supplies none.
-func EncodeCandidate(c *tenantv1.CandidateConfig, tenant auth.TenantID) (provider string, blob []byte, err error) {
+func EncodeCandidate(c *secretsv1.CandidateConfig, tenant auth.TenantID) (provider string, blob []byte, err error) {
 	f, err := fieldsFromCandidate(c, tenant)
 	if err != nil {
 		return "", nil, err
@@ -171,7 +171,7 @@ func candidateAuthMethod(raw string) (vault.AuthMethod, error) {
 // logical Fields, translating the proto's flat auth fields into the nested
 // vault.AuthConfig shape. The candidate carries only token / AppRole auth
 // (the two methods the dashboard offers); JWT / role auth is operator-side.
-func fieldsFromCandidate(c *tenantv1.CandidateConfig, tenant auth.TenantID) (Fields, error) {
+func fieldsFromCandidate(c *secretsv1.CandidateConfig, tenant auth.TenantID) (Fields, error) {
 	if c == nil {
 		return Fields{}, errors.New("brokercodec: nil candidate")
 	}
@@ -201,13 +201,13 @@ func fieldsFromCandidate(c *tenantv1.CandidateConfig, tenant auth.TenantID) (Fie
 // providerIsHosted maps the proto enum to a mode. Only the two Vault variants
 // are supported; every other value (UNSPECIFIED, the reserved retired
 // backends) is rejected.
-func providerIsHosted(p tenantv1.BrokerProvider) (bool, error) {
+func providerIsHosted(p secretsv1.BrokerProvider) (bool, error) {
 	switch p {
-	case tenantv1.BrokerProvider_BROKER_PROVIDER_VAULT_HOSTED:
+	case secretsv1.BrokerProvider_BROKER_PROVIDER_VAULT_HOSTED:
 		return true, nil
-	case tenantv1.BrokerProvider_BROKER_PROVIDER_VAULT_BYO:
+	case secretsv1.BrokerProvider_BROKER_PROVIDER_VAULT_BYO:
 		return false, nil
-	case tenantv1.BrokerProvider_BROKER_PROVIDER_UNSPECIFIED:
+	case secretsv1.BrokerProvider_BROKER_PROVIDER_UNSPECIFIED:
 		return false, errors.New("brokercodec: broker provider is unspecified")
 	default:
 		return false, fmt.Errorf("brokercodec: unsupported broker provider %v", p)
@@ -227,20 +227,20 @@ const (
 // is reported via sensitive_fields_set. The active mode (Hosted vs BYO) is
 // derived from the blob shape: a path_prefix (with no namespace) is BYO;
 // anything else is Hosted.
-func Redact(blob []byte) (*tenantv1.RedactedConfig, error) {
+func Redact(blob []byte) (*secretsv1.RedactedConfig, error) {
 	cfg, err := Decode(blob)
 	if err != nil {
 		return nil, err
 	}
 
-	provider := tenantv1.BrokerProvider_BROKER_PROVIDER_VAULT_HOSTED
+	provider := secretsv1.BrokerProvider_BROKER_PROVIDER_VAULT_HOSTED
 	nsOrPath := cfg.Namespace
 	if cfg.PathPrefix != "" && cfg.Namespace == "" {
-		provider = tenantv1.BrokerProvider_BROKER_PROVIDER_VAULT_BYO
+		provider = secretsv1.BrokerProvider_BROKER_PROVIDER_VAULT_BYO
 		nsOrPath = cfg.PathPrefix
 	}
 
-	out := &tenantv1.RedactedConfig{
+	out := &secretsv1.RedactedConfig{
 		Provider:        provider,
 		Address:         cfg.Address,
 		NamespaceOrPath: nsOrPath,
