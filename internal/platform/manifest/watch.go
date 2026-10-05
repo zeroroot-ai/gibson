@@ -32,29 +32,6 @@ type WatchHub struct {
 	stopCh    chan struct{}
 }
 
-// NewWatchHub constructs a WatchHub. Caller must invoke Start before
-// subscribers can receive events. heartbeatInterval <= 0 defaults to 30s.
-// perClientBuffer <= 0 defaults to 16 (oldest-dropped when full).
-func NewWatchHub(rdb redis.UniversalClient, log *slog.Logger, heartbeatInterval time.Duration, perClientBuffer int) *WatchHub {
-	if log == nil {
-		log = slog.Default()
-	}
-	if heartbeatInterval <= 0 {
-		heartbeatInterval = 30 * time.Second
-	}
-	if perClientBuffer <= 0 {
-		perClientBuffer = 16
-	}
-	return &WatchHub{
-		rdb:               rdb,
-		log:               log,
-		heartbeatInterval: heartbeatInterval,
-		perClientBuffer:   perClientBuffer,
-		perTenant:         make(map[string]map[chan *manifestpb.ManifestInvalidationEvent]struct{}),
-		stopCh:            make(chan struct{}),
-	}
-}
-
 // Start opens the shared psubscribe and spins the fan-out goroutine.
 // Idempotent — repeated calls are no-ops.
 func (h *WatchHub) Start(ctx context.Context) error {
