@@ -22,7 +22,7 @@ const (
 // first four values mirror Zitadel's OIDC-app enum; MACHINE_USER is
 // our own value that diverts the reconciler away from minting an OIDC
 // App and toward minting a Zitadel Machine User (Service User) with
-// an IAM_OWNER role and a client-credentials secret. Used by the
+// the roles that Spec.Roles lists and a client-credentials secret. Used by the
 // daemon's IDP admin client, which performs an OAuth2 client_credentials
 // grant against the issuer's /oauth/v2/token — Zitadel only honors
 // that flow for Machine Users (the OIDC-app flow it nominally supports
@@ -43,7 +43,7 @@ const (
 	OIDCAppTypeService OIDCApplicationType = "SERVICE"
 	// OIDCAppTypeMachineUser triggers the Machine-User reconciler path:
 	// the resource minted in Zitadel is a Service User (not an OIDC App),
-	// it gets IAM_OWNER membership, and the secretRef Secret receives
+	// it gets the roles that Spec.Roles lists, and the secretRef Secret receives
 	// {clientID, clientSecret} from the user's client-credentials grant.
 	// The clientID is the user's loginName (NOT the user id), per
 	// Zitadel's POST /management/v1/users/{userId}/secret response.

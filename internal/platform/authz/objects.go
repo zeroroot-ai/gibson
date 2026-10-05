@@ -18,14 +18,15 @@ import (
 // dash, tenant-qualified) and a can_execute check could silently never match
 // the seeded tuple. The canonical forms are:
 //
-//	component:<name>          — a component (agent | tool | plugin) in the
-//	                            registry. Tenant-LESS: tenant isolation comes
+//	component:<kind>/<name>   — a component in the registry; the kind is one
+//	                            of the Kind constants below (ADR-0136).
+//	                            Tenant-LESS: tenant isolation comes
 //	                            from the model's in_tenant_catalog gate
 //	                            (tenant_enabled tuples) plus the tenant-scoped
 //	                            membership of the checking subject, and from
 //	                            the data plane keying every registry lookup and
 //	                            dispatch by (tenant, name).
-//	plugin:<tenant>:<name>    — the plugin-invocation object checked by the
+//	plugin:<tenant>/<name>    — the plugin-invocation object checked by the
 //	                            PluginInvoke can_invoke annotation
 //	                            (object_deriver: tenant_and_field('PluginName'))
 //	                            and seeded by the tenant-operator
@@ -34,8 +35,8 @@ import (
 // NOT an FGA reference: the capability-grant JWT subject
 // "component:<kind>:<name>" (minted in internal/harness mintCGForWork). That
 // string is an identity-namespace value carried in the token's sub claim; the
-// FGA reference derived from a capability name is always the bare
-// ComponentObject form (see capabilitygrant.parseCapabilityName).
+// FGA reference derived from a capability name is always the ComponentObject
+// form (see capabilitygrant.parseCapabilityName).
 //
 // The (tool source → object, relation) mapping for the SearchTools catalog
 // filter lives in internal/catalog.FGAAuthorizer and is built on these
@@ -44,9 +45,11 @@ import (
 //	mcp:<connector>:<tool> → Check(subject, can_execute, ConnectorComponentObject(connector))
 //	native:<tool>          → Check(subject, can_execute, ComponentObject(tool))
 
-// Component kinds. The single FGA `component` object type carries all four
+// Component kinds. The single FGA `component` object type carries all five
 // kinds (ADR-0046/0067); the kind is part of the object id, never a separate
-// FGA type. These are the canonical kind qualifiers (ADR-0136).
+// FGA type. These are the canonical kind qualifiers (ADR-0136). domainpack is
+// an authorization object type only: the component catalog loader accepts
+// the other four (gibson#735).
 const (
 	KindAgent      = "agent"
 	KindTool       = "tool"

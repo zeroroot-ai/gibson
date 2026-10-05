@@ -98,8 +98,9 @@ type DecryptedConfig struct {
 }
 
 // ProviderConfigInput is the write-side representation used for Create and Update.
-// Credentials are plaintext on the way in; the store encrypts immediately before
-// persisting to Redis.
+// Credentials are plaintext on the way in. The store writes the config to the
+// tenant Postgres database and each credential to the secrets broker
+// (secrets.Service), which encrypts it.
 type ProviderConfigInput struct {
 	Name         string
 	Type         llm.ProviderType
