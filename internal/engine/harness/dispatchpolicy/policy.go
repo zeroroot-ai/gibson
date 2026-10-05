@@ -18,15 +18,15 @@ import (
 type Decision int
 
 const (
-	// Deny: the component must not execute.
+	// Deny means that the component must not execute.
 	Deny Decision = iota
 
-	// RequireSetec: the platform starts the code, and it starts it in a setec
-	// sandbox.
+	// RequireSetec means that the platform starts the code, and it starts it
+	// in a setec sandbox.
 	RequireSetec
 
-	// AllowWorkQueue: the platform does not start the code. The component
-	// runs already, and it pulls its work from the work queue.
+	// AllowWorkQueue means that the platform does not start the code. The
+	// component runs already, and it pulls its work from the work queue.
 	AllowWorkQueue
 )
 

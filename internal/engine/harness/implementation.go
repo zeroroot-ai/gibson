@@ -2998,7 +2998,7 @@ func (h *DefaultAgentHarness) resolveAgentStanding(ctx context.Context, name str
 	}
 	tenant := auth.TenantStringFromContext(ctx)
 	if tenant == "" {
-		return dispatchpolicy.PlacementCluster, noTrust, false, fmt.Errorf("no tenant in context")
+		return dispatchpolicy.PlacementCluster, noTrust, false, errors.New("no tenant in context")
 	}
 	instances, err := h.componentRegistry.Discover(ctx, tenant, authz.KindAgent, name)
 	if err != nil {
