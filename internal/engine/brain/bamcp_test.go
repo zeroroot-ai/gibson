@@ -286,3 +286,148 @@ func TestBamcpSampleWorld_ThompsonSamplesTheEdgePosterior(t *testing.T) {
 type constantEdgePosteriors struct{ p EdgeStrengthPosterior }
 
 func (c constantEdgePosteriors) Posterior(string) EdgeStrengthPosterior { return c.p }
+
+// -----------------------------------------------------------------------
+// The search tree (gibson#695)
+// -----------------------------------------------------------------------
+
+// bamcpGatewayInput builds the case where the best first move is not the move
+// with the highest one-step Value. Host 1 is a gateway: its belief is nearly
+// certain, so one more look at it gives little information. Host 2 is behind
+// it (host 1 enables host 2) and is fully uncertain, so it has the highest
+// one-step Value. A finding on host 2 needs the path through host 1.
+func bamcpGatewayInput(reg *ontology.BeliefSchemaRegistry) VoIPlanInput {
+	in := bamcpTestInput(reg)
+	in.Hosts = []HostSnapshot{
+		{ID: 1, Address: "10.0.0.1", Belief: Belief{Juicy: 0.95}},
+		{ID: 2, Address: "10.0.0.2", Belief: Belief{Juicy: 0.5}},
+	}
+	return in
+}
+
+// TestBAMCPPlanner_TreeFindsAFirstMoveThatTheOneStepRankMisses is the proof
+// that the search tree looks more than one move ahead. The one-step rank puts
+// host 2 first. The tree puts host 1 first, because the move on host 1 opens
+// the terminal reward of host 2 and the reverse order loses it.
+func TestBAMCPPlanner_TreeFindsAFirstMoveThatTheOneStepRankMisses(t *testing.T) {
+	reg := bamcpTestRegistry(t)
+	in := bamcpGatewayInput(reg)
+	substrate := newFakeBeliefSubstrate()
+
+	oneStep, err := PlanVoI(context.Background(), in, substrate, ExactVoIScorer(), 0)
+	require.NoError(t, err)
+	require.Len(t, oneStep, 2)
+	require.Equal(t, HostNodeID(2), oneStep[0].RefID, "the one-step rank must prefer the uncertain host: %+v", oneStep)
+
+	planner := NewBAMCPPlanner(reg, nil, DefaultBAMCPConfig())
+	for seed := uint64(1); seed <= 5; seed++ {
+		planned, err := planner.Plan(context.Background(), in, substrate, ExactVoIScorer(), 0, seed)
+		require.NoError(t, err)
+		require.Len(t, planned, 2)
+		assert.Equal(t, HostNodeID(1), planned[0].RefID,
+			"seed %d: the tree must take the gateway first: %+v", seed, planned)
+	}
+}
+
+// TestBamcpTree_WithNoEdgeEachCandidateIsUnlocked is the control of the
+// test above: the same two hosts with no edge between them. No host has an
+// enabler, so each candidate gives its terminal reward at each point of a
+// trajectory and the order of the moves is free.
+func TestBamcpTree_WithNoEdgeEachCandidateIsUnlocked(t *testing.T) {
+	reg := bamcpTestRegistry(t)
+	in := bamcpGatewayInput(reg)
+	in.Graph.Edges = nil
+	substrate := newFakeBeliefSubstrate()
+
+	tree := newBAMCPTree(DefaultBAMCPConfig(), mustPlanVoI(t, in, substrate), in.Graph, reg, nil)
+	for i := range tree.candidates {
+		assert.Empty(t, tree.enablers[i], "no edge means no enabler")
+		assert.True(t, tree.unlocked(i))
+	}
+}
+
+func mustPlanVoI(t *testing.T, in VoIPlanInput, substrate BeliefSubstrate) []VoICandidate {
+	t.Helper()
+	candidates, err := PlanVoI(context.Background(), in, substrate, ExactVoIScorer(), 0)
+	require.NoError(t, err)
+	return candidates
+}
+
+// TestBamcpTree_UnlocksATargetAfterItsEnabler proves the rule that makes the
+// order of the moves matter: the host behind the gateway gives its terminal
+// reward only after the trajectory took the gateway.
+func TestBamcpTree_UnlocksATargetAfterItsEnabler(t *testing.T) {
+	reg := bamcpTestRegistry(t)
+	in := bamcpGatewayInput(reg)
+	candidates := mustPlanVoI(t, in, newFakeBeliefSubstrate())
+	cfg := DefaultBAMCPConfig()
+	tree := newBAMCPTree(cfg, candidates, in.Graph, reg, nil)
+
+	gateway, target := -1, -1
+	for i, c := range candidates {
+		switch c.RefID {
+		case HostNodeID(1):
+			gateway = i
+		case HostNodeID(2):
+			target = i
+		}
+	}
+	require.NotEqual(t, -1, gateway)
+	require.NotEqual(t, -1, target)
+	require.Equal(t, []int{gateway}, tree.enablers[target])
+	require.Empty(t, tree.enablers[gateway])
+
+	// A world where the two hosts resolve true.
+	tree.outcome[gateway], tree.outcome[target] = true, true
+
+	shaping := cfg.InfoGainWeight * candidates[target].Value
+	assert.InDelta(t, shaping, tree.reward(target), 1e-9, "the target is locked: no terminal reward")
+
+	tree.taken[gateway] = true
+	assert.InDelta(t, shaping+cfg.TerminalReward, tree.reward(target), 1e-9, "the gateway was taken: the target gives its terminal reward")
+}
+
+// TestBamcpTree_ExpandsOneNodeForEachSimulation proves the UCT shape: a
+// simulation adds at most one node to the tree, and the root tries each
+// candidate before it selects by UCB1.
+func TestBamcpTree_ExpandsOneNodeForEachSimulation(t *testing.T) {
+	reg := bamcpTestRegistry(t)
+	in := bamcpBenchInput(reg, 4, 0)
+	candidates := mustPlanVoI(t, in, newFakeBeliefSubstrate())
+	tree := newBAMCPTree(DefaultBAMCPConfig(), candidates, in.Graph, reg, nil)
+
+	countNodes := func() int {
+		var walk func(*bamcpNode) int
+		walk = func(n *bamcpNode) int {
+			total := 1
+			for _, child := range n.children {
+				if child != nil {
+					total += walk(child)
+				}
+			}
+			return total
+		}
+		return walk(tree.root)
+	}
+
+	for sim := 1; sim <= 40; sim++ {
+		before := countNodes()
+		tree.simulate(tree.root, 0)
+		require.LessOrEqual(t, countNodes()-before, 1, "simulation %d added more than one node", sim)
+		if sim == len(candidates) {
+			for i := range candidates {
+				require.Equal(t, 1, tree.root.count[i], "the root must try each candidate one time first")
+			}
+		}
+	}
+	require.Equal(t, 40, tree.root.visits)
+	require.Greater(t, countNodes(), 1, "the tree must grow below the root")
+}
+
+// TestBAMCPConfig_SanitizedSetsTheExplorationDefault proves that a config with
+// no exploration constant gets the documented default.
+func TestBAMCPConfig_SanitizedSetsTheExplorationDefault(t *testing.T) {
+	assert.InDelta(t, DefaultBAMCPExploration, BAMCPConfig{}.sanitized().Exploration, 1e-12)
+	assert.InDelta(t, DefaultBAMCPExploration, DefaultBAMCPConfig().Exploration, 1e-12)
+	assert.InDelta(t, 2.5, BAMCPConfig{Exploration: 2.5}.sanitized().Exploration, 1e-12)
+}

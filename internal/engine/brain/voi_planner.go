@@ -310,7 +310,52 @@ func (vw *VoIWorker) buildInput(missionID string) VoIPlanInput {
 		Tenant:       vw.eng.World.Tenant,
 		Capabilities: vw.eng.Capabilities(missionID),
 		Hierarchy:    vw.hierarchy,
+
+		Budget:                vw.missionBudget(missionID),
+		DestructiveTechniques: destructiveTechniques(vw.eng.DomainPacks()),
 	}
+}
+
+// missionBudget reads the budget state of the mission from the World: the
+// limits of Mission.Budget, the dispatch attempts of the mission's work, and
+// its token count. These are the two numbers that BudgetSystem enforces
+// (budget.go), so the planner prices the same budget that stops the mission.
+// A mission that the World does not hold has no limit.
+func (vw *VoIWorker) missionBudget(missionID string) VoIBudget {
+	var b VoIBudget
+	for _, m := range vw.eng.Missions() {
+		if m.ID == missionID {
+			b.MaxExecutions = m.Budget.MaxExecutions
+			b.MaxTokens = m.Budget.MaxTokens
+			b.TokensUsed = m.TokensUsed
+			break
+		}
+	}
+	for _, wi := range vw.eng.Work() {
+		if wi.MissionID == missionID {
+			b.Executions += wi.Attempts
+		}
+	}
+	return b
+}
+
+// destructiveTechniques returns each technique whose predicate an enabled
+// Domain Pack marks as destructive (ADR-0132). When two packs bind the same
+// technique, one destructive mark is sufficient.
+func destructiveTechniques(packs []DomainPackSnapshot) map[string]bool {
+	var out map[string]bool
+	for _, pack := range packs {
+		for technique := range pack.Predicates {
+			if !pack.PredicateIsDestructive(technique) {
+				continue
+			}
+			if out == nil {
+				out = map[string]bool{}
+			}
+			out[technique] = true
+		}
+	}
+	return out
 }
 
 // WireVoIPlanner installs VoI planning against eng: VoIGateSystem must already
