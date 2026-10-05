@@ -1,8 +1,6 @@
 // SPDX-License-Identifier: Elastic-2.0
 // Copyright 2026 Zero Root AI
 
-//go:build !embedder_tests
-
 // Package brain — event codec for durable Timeline serialisation (ADR-0163).
 package brain
 
