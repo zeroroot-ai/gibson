@@ -805,8 +805,6 @@ jobs:
           - The \`anthropic\` entry is **not** updated automatically (no listing API); check the reminder comment on #295.
 
           Closes #295
-
-          Docs-PR: not-applicable: CI workflow only, no runtime architectural change
           BODY
           )" \
             --base main

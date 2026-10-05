@@ -45,13 +45,12 @@ on:
       - policy-guards
       - security
       - CodeQL
-      - architectural-doc-coverage
       - e2e-setec-roundtrip
       - pr-title-lint
       - tree-guards
     types: [completed]
     # Only merge-queue branches. Without this filter every pull_request and
-    # push completion of the ten workflows above created a run here whose one
+    # push completion of the nine workflows above created a run here whose one
     # job then skipped on its `if:`: 473 runs in 36 hours on 2026-09-27/28,
     # 47% of every run in this repo, and the 1000-run API window filled in a
     # day and a half (gibson#307). The job's `if:` stays as the second guard.
