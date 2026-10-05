@@ -170,7 +170,7 @@ const replayBatchSize = 1000
 
 // LoadForReplay returns all events after afterSeq (exclusive). Pass "" to
 // load from the beginning. Events are returned in Timeline order.
-func (s *TimelineStore) LoadForReplay(ctx context.Context, tenant string, afterSeq string) ([]brain.Event, error) {
+func (s *TimelineStore) LoadForReplay(ctx context.Context, tenant, afterSeq string) ([]brain.Event, error) {
 	conn, release, err := s.acquire(ctx)
 	if err != nil {
 		return nil, fmt.Errorf("datapool/redis-timeline: acquire conn for XRANGE tenant %q: %w", tenant, err)
@@ -312,8 +312,11 @@ func (s *TimelineStore) archive(ctx context.Context, conn TimelineConn, key, han
 			var envelope struct {
 				Kind string `json:"kind"`
 			}
-			if err := json.Unmarshal([]byte(raw), &envelope); err != nil || envelope.Kind == "" {
-				return fmt.Errorf("stream entry %q holds no event kind (%v)", msg.ID, err)
+			if err := json.Unmarshal([]byte(raw), &envelope); err != nil {
+				return fmt.Errorf("stream entry %q is not an event envelope: %w", msg.ID, err)
+			}
+			if envelope.Kind == "" {
+				return fmt.Errorf("stream entry %q holds no event kind", msg.ID)
 			}
 			ms = append(ms, entryMs)
 			seq = append(seq, entrySeq)

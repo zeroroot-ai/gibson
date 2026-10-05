@@ -5,10 +5,12 @@ package daemon
 
 import (
 	"context"
+	"errors"
 	"sort"
 	"testing"
 	"time"
 
+	"github.com/stretchr/testify/require"
 	"github.com/zeroroot-ai/gibson/internal/engine/brain"
 	worldpb "github.com/zeroroot-ai/gibson/internal/server/daemon/api/gibson/world/v1"
 	"github.com/zeroroot-ai/sdk/auth"
@@ -817,4 +819,33 @@ func TestWorldService_MissionViewCarriesTheBeliefModelPin(t *testing.T) {
 	if framePins["m2"] != "" {
 		t.Errorf("an unpinned mission must report an empty belief_model in a frame, got %q", framePins["m2"])
 	}
+}
+
+// historyDownStore is a Timeline store whose history read fails.
+type historyDownStore struct{ brain.TimelineStore }
+
+func (historyDownStore) LoadHistory(context.Context, string) ([]brain.Event, error) {
+	return nil, errors.New("the history is down")
+}
+func (historyDownStore) LoadSnapshot(context.Context, string) (*brain.WorldSnapshot, error) {
+	return nil, nil
+}
+func (historyDownStore) LoadForReplay(context.Context, string, string) ([]brain.Event, error) {
+	return nil, nil
+}
+
+// TestWorldService_HistoryErrorIsUnavailable: when the full history does not
+// load, GetTimeline and GetFrameAt return Unavailable, never a short history.
+func TestWorldService_HistoryErrorIsUnavailable(t *testing.T) {
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+	reg := brain.NewRegistry(ctx)
+	reg.WithStoreFactory(func(context.Context, string) brain.TimelineStore { return historyDownStore{} })
+	srv := NewWorldServer(reg, nil)
+	tctx := auth.WithTenant(context.Background(), auth.MustNewTenantID("acme"))
+
+	_, err := srv.GetTimeline(tctx, &worldpb.GetTimelineRequest{})
+	require.Equal(t, codes.Unavailable, status.Code(err))
+	_, err = srv.GetFrameAt(tctx, &worldpb.GetFrameAtRequest{Seq: 1})
+	require.Equal(t, codes.Unavailable, status.Code(err))
 }

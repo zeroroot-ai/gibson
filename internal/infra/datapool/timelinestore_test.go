@@ -1047,3 +1047,139 @@ func TestParseStreamID(t *testing.T) {
 		require.Error(t, err, "stream id %q", bad)
 	}
 }
+
+// TestTimelineStore_ArchiveCopiesMoreThanOneBatch covers the paging of the
+// copy and of the tail read: more entries than one XRANGE batch.
+func TestTimelineStore_ArchiveCopiesMoreThanOneBatch(t *testing.T) {
+	_, rdb := newTestRedis(t)
+	db := &fakeHistorySQL{}
+	store := NewTimelineStore(staticAcquireWith(rdb, db))
+	ctx := context.Background()
+	const tenant = "tenant-history-pages"
+
+	seqs := appendHosts(t, store, tenant, 0, replayBatchSize+5)
+	require.NoError(t, store.TrimTo(ctx, tenant, seqs[replayBatchSize+1]))
+	require.Len(t, db.kinds(), replayBatchSize+2)
+
+	history, err := store.LoadHistory(ctx, tenant)
+	require.NoError(t, err)
+	require.Len(t, history, replayBatchSize+5)
+
+	// A tail of more than one batch.
+	appendHosts(t, store, tenant, replayBatchSize+5, replayBatchSize+1)
+	live, err := store.LoadForReplay(ctx, tenant, "")
+	require.NoError(t, err)
+	require.Len(t, live, replayBatchSize+4)
+}
+
+// TestTimelineStore_BadStreamEntriesStopTheCopy proves that the copy refuses a
+// stream entry that it cannot read, and that the trim then removes nothing.
+func TestTimelineStore_BadStreamEntriesStopTheCopy(t *testing.T) {
+	ctx := context.Background()
+	cases := map[string]map[string]any{
+		"no ev field":     {"other": "x"},
+		"not an envelope": {"ev": "{not json"},
+		"no event kind":   {"ev": `{"payload":{}}`},
+	}
+	for name, values := range cases {
+		t.Run(name, func(t *testing.T) {
+			_, rdb := newTestRedis(t)
+			db := &fakeHistorySQL{}
+			store := NewTimelineStore(staticAcquireWith(rdb, db))
+			const tenant = "tenant-bad-entry"
+			id, err := rdb.XAdd(ctx, &goredis.XAddArgs{Stream: store.streamKey(tenant), Values: values}).Result()
+			require.NoError(t, err)
+
+			require.Error(t, store.TrimTo(ctx, tenant, id))
+			require.Empty(t, db.kinds())
+			n, err := rdb.XLen(ctx, store.streamKey(tenant)).Result()
+			require.NoError(t, err)
+			require.Equal(t, int64(1), n, "a failed copy must not trim")
+
+			_, err = store.LoadForReplay(ctx, tenant, "")
+			require.Error(t, err, "a replay of an unreadable entry fails")
+			_, err = store.LoadHistory(ctx, tenant)
+			require.Error(t, err, "a history read of an unreadable entry fails")
+		})
+	}
+}
+
+// TestTimelineStore_StreamErrorsAreReturned covers a Redis that is gone: the
+// copy, the replay and the history read each return the error.
+func TestTimelineStore_StreamErrorsAreReturned(t *testing.T) {
+	mr, rdb := newTestRedis(t)
+	store := NewTimelineStore(staticAcquireWith(rdb, &fakeHistorySQL{}))
+	ctx := context.Background()
+	const tenant = "tenant-redis-gone"
+	seqs := appendHosts(t, store, tenant, 0, 2)
+	mr.Close()
+
+	require.Error(t, store.TrimTo(ctx, tenant, seqs[0]))
+	_, err := store.LoadForReplay(ctx, tenant, "")
+	require.Error(t, err)
+	_, err = store.LoadHistory(ctx, tenant)
+	require.Error(t, err)
+}
+
+// historyQueryFails is a history table whose reads fail in one of three ways.
+type historyQueryFails struct {
+	fakeHistorySQL
+	mode string
+}
+
+func (h *historyQueryFails) Query(ctx context.Context, sql string, args ...any) (Rows, error) {
+	switch h.mode {
+	case "query":
+		return nil, errors.New("the query failed")
+	case "scan":
+		return &badRows{scanErr: errors.New("the scan failed")}, nil
+	case "rows":
+		return &badRows{iterErr: errors.New("the read failed")}, nil
+	}
+	return h.fakeHistorySQL.Query(ctx, sql, args...)
+}
+
+type badRows struct {
+	scanErr, iterErr error
+	done             bool
+}
+
+func (r *badRows) Next() bool {
+	if r.scanErr == nil || r.done {
+		return false
+	}
+	r.done = true
+	return true
+}
+func (r *badRows) Scan(...any) error { return r.scanErr }
+func (r *badRows) Err() error        { return r.iterErr }
+func (r *badRows) Close()            {}
+
+// TestTimelineStore_HistoryReadErrorsAreReturned covers each failure of the
+// Postgres read: the query, a row scan, the row iteration, a row that does not
+// decode, and an acquire that fails.
+func TestTimelineStore_HistoryReadErrorsAreReturned(t *testing.T) {
+	ctx := context.Background()
+	for _, mode := range []string{"query", "scan", "rows"} {
+		t.Run(mode, func(t *testing.T) {
+			_, rdb := newTestRedis(t)
+			store := NewTimelineStore(staticAcquireWith(rdb, &historyQueryFails{mode: mode}))
+			_, err := store.LoadHistory(ctx, "tenant-read-fails")
+			require.Error(t, err)
+		})
+	}
+
+	t.Run("a row that does not decode", func(t *testing.T) {
+		_, rdb := newTestRedis(t)
+		db := &fakeHistorySQL{rows: []fakeHistoryRow{{ms: 1, seq: 0, kind: "x", event: "{not json"}}}
+		store := NewTimelineStore(staticAcquireWith(rdb, db))
+		_, err := store.LoadHistory(ctx, "tenant-bad-row")
+		require.Error(t, err)
+	})
+
+	t.Run("the acquire fails", func(t *testing.T) {
+		store := NewTimelineStore(errAcquire(errors.New("pool evicted")))
+		_, err := store.LoadHistory(ctx, "tenant-acquire")
+		require.Error(t, err)
+	})
+}

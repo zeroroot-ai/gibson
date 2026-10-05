@@ -198,7 +198,8 @@ func (s *worldServer) GetFrameAt(ctx context.Context, req *worldpb.GetFrameAtReq
 
 	// The frame folds the full history of the tenant, so a frame before the
 	// last snapshot is still there after the stream trim (ADR-0163).
-	w, n, total, err := e.HistoryFrameAt(ctx, req.GetMissionId(), int(req.GetSeq()))
+	seq := min(req.GetSeq(), uint64(math.MaxInt))
+	w, n, total, err := e.HistoryFrameAt(ctx, req.GetMissionId(), int(seq)) //nolint:gosec // G115: seq is clamped to math.MaxInt above
 	if err != nil {
 		return nil, status.Errorf(codes.Unavailable, "the Timeline history is not available: %v", err)
 	}
