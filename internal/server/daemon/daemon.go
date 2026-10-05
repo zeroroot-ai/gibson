@@ -1886,7 +1886,7 @@ func (d *daemonImpl) Start(ctx context.Context) error {
 		d.logger.Debug(ctx, "registered authz FGA readiness check")
 	}
 
-	// Wire platform-clients/readiness probe implementations into the existing
+	// Wire internal/infra/readiness probe implementations into the existing
 	// /readyz handler (audit P1 finding, zeroroot-ai/.github#101).
 	//
 	// Each probe produced by newPlatformReadinessProbes() is registered with
@@ -1894,7 +1894,7 @@ func (d *daemonImpl) Start(ctx context.Context) error {
 	// conflicting with the existing "authz_fga" SDK probe.
 	//
 	// The local readinessProber interface matches pcreadiness.Probe without
-	// requiring daemon.go to import platform-clients/readiness directly.
+	// requiring daemon.go to import internal/infra/readiness directly.
 	type readinessProber interface {
 		Name() string
 		Check(ctx context.Context) error
@@ -1905,14 +1905,14 @@ func (d *daemonImpl) Start(ctx context.Context) error {
 		d.healthServer.RegisterReadinessCheck("pc_"+name, func(checkCtx context.Context) sdktypes.HealthStatus {
 			if err := p.Check(checkCtx); err != nil {
 				return sdktypes.NewDegradedStatus(
-					"platform-clients/readiness probe '"+name+"' failed: "+err.Error(),
+					"internal/infra/readiness probe '"+name+"' failed: "+err.Error(),
 					nil,
 				)
 			}
-			return sdktypes.NewHealthyStatus("platform-clients/readiness probe '" + name + "' passed")
+			return sdktypes.NewHealthyStatus("internal/infra/readiness probe '" + name + "' passed")
 		})
 	}
-	d.logger.Debug(ctx, "registered platform-clients readiness probes (pc_postgres, pc_authz_fga)")
+	d.logger.Debug(ctx, "registered internal/infra/readiness probes (pc_postgres, pc_authz_fga)")
 
 	// Start health server via healthSubsystem.
 	d.healthSys = newHealthSubsystem(d.healthServer, d.logger)

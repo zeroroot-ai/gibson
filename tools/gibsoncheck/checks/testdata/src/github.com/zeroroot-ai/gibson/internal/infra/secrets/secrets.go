@@ -1,5 +1,5 @@
 // Package secrets is a stub for analysistest fixtures used by the
-// secretsnolog analyzer tests (platform-clients surface).
+// secretsnolog analyzer tests (internal/infra/secrets surface).
 package secrets
 
 import "context"
@@ -7,7 +7,7 @@ import "context"
 // TenantID is a stub type matching auth.TenantID.
 type TenantID string
 
-// SecretsBroker is a stub matching the real platform-clients secrets interface.
+// SecretsBroker is a stub matching the real internal/infra/secrets interface.
 // The test fixtures depend on this type to give the type checker enough
 // information for the secretsnolog analyzer to resolve Get call sites.
 type SecretsBroker interface {
@@ -15,7 +15,7 @@ type SecretsBroker interface {
 	Put(ctx context.Context, tenant TenantID, name string, value []byte) error
 }
 
-// Service is a stub for the platform-clients secrets.Service type.
+// Service is a stub for the internal/infra/secrets Service type.
 type Service struct{}
 
 // Resolve is a stub for Service.Resolve.

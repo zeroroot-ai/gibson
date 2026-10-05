@@ -65,11 +65,11 @@ type WriteTenantBrokerConfigDeps struct {
 // VaultBrokerConfig is the Vault-provider config the operator writes to
 // the platform's tenant_secrets_broker_config table. The shape MUST
 // match `github.com/zeroroot-ai/gibson/internal/infra/secrets/vault.Config` so
-// the daemon can deserialise it on read. The platform-clients type gained
-// explicit JSON tags in sdk#79 (when it still lived in the OSS SDK) and
-// was migrated to platform-clients as part of the secrets purge; we mirror
-// the structure here so the operator can populate it without taking a hard
-// platform-clients dependency in the saga code path.
+// the daemon can deserialise it on read. That type gained explicit JSON
+// tags in sdk#79 (when it still lived in the OSS SDK) and moved to
+// internal/infra/secrets/vault in the secrets purge; we mirror the
+// structure here so the saga code path does not import the daemon's
+// secrets stack.
 //
 // Schema invariants (asserted by a round-trip test in
 // write_broker_config_test.go):

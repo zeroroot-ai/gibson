@@ -2,7 +2,7 @@
 // Copyright 2026 Zero Root AI
 
 // Package resilience provides shared circuit-breaker configuration and
-// factory helpers for platform-clients consumers.
+// factory helpers for internal/infra consumers.
 //
 // All circuit-breaking in the platform (secrets, pools/redis, authz) is
 // backed by github.com/sony/gobreaker. This package centralises the

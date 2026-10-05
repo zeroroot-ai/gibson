@@ -147,7 +147,7 @@ func main() {
 
 	ctrl.SetLogger(zap.New(zap.UseFlagOptions(&opts)))
 
-	// Initialise OpenTelemetry (traces + metrics) via platform-clients/otelinit.
+	// Initialise OpenTelemetry (traces + metrics) via internal/infra/otelinit.
 	// Each Init call returns an independent *Observability (no global state mutation).
 	// SetGlobal wires the global OTel TracerProvider + MeterProvider + propagator so
 	// auto-instrumented libraries pick them up. The OTLP endpoint is read from
@@ -984,7 +984,7 @@ func main() {
 		os.Exit(1)
 	}
 
-	// Readyz check: platform-clients/readiness.Aggregator probes every downstream
+	// Readyz check: internal/infra/readiness.Aggregator probes every downstream
 	// dependency concurrently. Vault is now included (P1 finding: it was absent from
 	// the previous buildReadyzDeps implementation). The aggregator is adapted to
 	// controller-runtime's healthz.Checker interface via a response-capture helper.
@@ -1276,7 +1276,7 @@ func (p pingAdapter) Check(ctx context.Context) error {
 	return nil
 }
 
-// buildReadyzAggregator constructs a platform-clients/readiness.Aggregator
+// buildReadyzAggregator constructs an internal/infra/readiness.Aggregator
 // probing every downstream dependency concurrently. Nil ping functions are
 // omitted so the aggregator never fails on unconfigured optional clients.
 // Vault is now included (P1 finding: it was absent from the previous
@@ -1335,7 +1335,7 @@ func buildReadyzAggregator(
 //     override runtime detection. Empty triggers /sys/health probe.
 //
 // buildVaultAdminClient constructs the Vault admin client with a
-// platform-clients/secrets/vault.Provider token source so the Vault token
+// internal/infra/secrets/vault.Provider token source so the Vault token
 // renews before its TTL expires (P1 finding: env-baked admin token, never
 // renewed — operator pod restart required after token rotation).
 //
@@ -1359,10 +1359,9 @@ func buildVaultAdminClient(log logr.Logger) vaultadmin.AdminClient {
 
 	// The admin token is a periodic renewable token (per ADR-0032): minted by
 	// the openbao-auto-init Job with period=1h, renewed by the sidecar renewal
-	// probe. The platform-clients/secrets/vault Provider that previously wrapped
-	// it for in-process LiveToken() renewal was removed in platform-clients
-	// v0.6.0 (the renewal responsibility moved fully to the ADR-0032 renewal
-	// probe). Use the static token directly.
+	// probe. No in-process LiveToken() renewal wraps it any more: the renewal
+	// responsibility moved fully to the ADR-0032 renewal probe. Use the
+	// static token directly.
 	// JWTBoundIssuer + JWKSURL + JWKSCAPEMPath wire the per-tenant
 	// auth/jwt/config writer (ConfigureSecretsJWTAuth step,
 	// tenant-operator#189). JWTBoundIssuer is REQUIRED — the step refuses

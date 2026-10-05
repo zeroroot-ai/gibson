@@ -1,12 +1,12 @@
 // SPDX-License-Identifier: Elastic-2.0
 // Copyright 2026 Zero Root AI
 
-// Package fga: platform-clients adapter.
+// Package fga: internal/infra/authz adapter.
 //
-// This file wires the platform-clients authz.FGAClient into the existing
+// This file wires the internal/infra/authz FGAClient into the existing
 // fga.FGAClient interface so the cache + checker code in this package is
 // unchanged while ext-authz picks up the per-call-timeout floor and
-// typed error sentinels from platform-clients.
+// typed error sentinels from internal/infra/authz.
 //
 // Audit findings closed by this file:
 //   - ext-authz had no per-call FGA timeout floor: a stalled OpenFGA would
@@ -18,7 +18,7 @@
 //     extauthz_allowed_total / extauthz_denied_total counters. This file
 //     adds an OTel histogram that records every Check round-trip
 //     (allow/deny/timeout/unavailable) and exposes it via the shared
-//     platform-clients/observability MeterProvider.
+//     internal/infra/observability MeterProvider.
 package fga
 
 import (
@@ -40,7 +40,7 @@ import (
 // nowFn is package-level so tests can stub. Defaults to time.Now.
 var nowFn = time.Now
 
-// classifyOutcome maps the platform-clients authz error sentinels +
+// classifyOutcome maps the internal/infra/authz error sentinels +
 // allow/deny result to a low-cardinality attribute value for the OTel
 // histogram and counter.
 func classifyOutcome(resp authz.CheckResponse, err error) string {
@@ -61,7 +61,7 @@ func classifyOutcome(resp authz.CheckResponse, err error) string {
 }
 
 // otelMeter / otelHistograms are lazily initialised on the first FGA
-// Check so package init order does not require the platform-clients
+// Check so package init order does not require the internal/infra/authz
 // observability.Init call to have completed.
 var (
 	otelOnce       sync.Once
@@ -95,7 +95,7 @@ func initOTel() {
 }
 
 // recordCacheHitOTel mirrors the Prometheus cache hit counter onto the
-// OTel meter so platform-clients/observability OTLP export carries the
+// OTel meter so internal/infra/observability OTLP export carries the
 // signal alongside Prometheus scrape.
 func recordCacheHitOTel(ctx context.Context, allowed bool) {
 	initOTel()
@@ -121,12 +121,12 @@ func recordCacheMissOTel(ctx context.Context) {
 type PlatformFGAOptions = authz.FGAClientOptions
 
 // NewPlatformFGAClient constructs an FGAClient backed by the
-// platform-clients authz package. The returned value implements this
+// internal/infra/authz package. The returned value implements this
 // package's FGAClient interface, so the existing cache + checker code
 // consumes it without modification.
 //
 // The PerCallTimeout floor in opts.PerCallTimeout is enforced inside
-// the underlying platform-clients.authz client; this adapter only adds
+// the underlying internal/infra/authz client; this adapter only adds
 // the OTel histogram + counter on top of every Check.
 func NewPlatformFGAClient(opts authz.FGAClientOptions) (FGAClient, error) {
 	inner, err := authz.NewFGAClient(opts)
@@ -137,7 +137,7 @@ func NewPlatformFGAClient(opts authz.FGAClientOptions) (FGAClient, error) {
 }
 
 // platformFGAAdapter satisfies fga.FGAClient by exposing a Check(ctx)
-// builder that drives the platform-clients FGAClient on Execute().
+// builder that drives the internal/infra/authz FGAClient on Execute().
 type platformFGAAdapter struct {
 	inner authz.FGAClient
 }
@@ -163,7 +163,7 @@ func (r *platformFGAReq) Body(b fgaclient.ClientCheckRequest) fgaclient.SdkClien
 
 func (r *platformFGAReq) Options(_ fgaclient.ClientCheckOptions) fgaclient.SdkClientCheckRequestInterface {
 	// Per-call options (model override, store override) aren't used by
-	// ext-authz; the platform-clients FGAClient is constructed with the
+	// ext-authz; the internal/infra/authz FGAClient is constructed with the
 	// fixed store + model.
 	return r
 }

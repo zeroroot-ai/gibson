@@ -57,7 +57,7 @@ type VaultClientFactory func(apiEndpoint string, tokenFn vault.TokenFunc) (vault
 // must be safe for concurrent use from multiple goroutines.
 //
 // The primary production implementation is vaulttoken.Renewer, which wraps
-// platform-clients vault.Provider and calls RenewSelf before the token TTL
+// internal/infra/secrets/vault Provider and calls RenewSelf before the token TTL
 // expires. Tests may substitute a static implementation.
 //
 // A non-nil error from Token signals that the token is stale or the renewal

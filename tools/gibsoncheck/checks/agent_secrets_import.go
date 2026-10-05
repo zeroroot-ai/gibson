@@ -59,7 +59,7 @@ var agentSecretsImportExemptSubstrings = []string{
 
 // brokerImportPrefixes are the import path prefixes that are disallowed.
 // Historical: sdk/secrets used to host the broker. The broker now lives in
-// platform-clients/secrets; sdk/secrets is being retired. Both paths remain
+// internal/infra/secrets; sdk/secrets is being retired. Both paths remain
 // in the deny-list during the transition so legacy and current imports are
 // equally forbidden from agent/tool packages.
 var brokerImportPrefixes = []string{

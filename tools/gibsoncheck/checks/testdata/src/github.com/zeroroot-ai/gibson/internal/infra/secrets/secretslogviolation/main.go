@@ -1,5 +1,5 @@
 // Package secretslogviolation is a synthetic test fixture for the
-// secretsnolog gibsoncheck rule (platform-clients surface). It deliberately
+// secretsnolog gibsoncheck rule (internal/infra/secrets surface). It deliberately
 // passes the return value of a secrets Get/Resolve call to several logging
 // sinks so that the analyzer fires a diagnostic on each flagged line.
 package secretslogviolation

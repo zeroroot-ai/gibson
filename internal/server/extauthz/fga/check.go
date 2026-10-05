@@ -443,7 +443,7 @@ func (c *CachedChecker) CheckPlatformOperator(ctx context.Context, subject strin
 // process's cache from outside (cache.go), so the only correct cache for
 // this gate is none.
 // The FGA network round-trip for this uncached call is within budget: the
-// per-call timeout floor from platform-clients applies, and active_session is a
+// per-call timeout floor from internal/infra/authz applies, and active_session is a
 // hot path that benefits from FGA's in-process LRU.
 //
 // ENFORCEMENT CONTRACT: this method assumes the backfill from slice 2 has run
@@ -502,7 +502,7 @@ func (c *Checker) CheckActiveSession(ctx context.Context, subject, tenant string
 // The result is deliberately NOT cached — see Checker.CheckActiveSession for
 // the full rationale. Calls that are in flight at the same moment for the
 // same subject, tenant and token share one FGA round-trip (see
-// CachedChecker.sessions); the per-call timeout from platform-clients
+// CachedChecker.sessions); the per-call timeout from internal/infra/authz
 // applies to that one call.
 func (c *CachedChecker) CheckActiveSession(ctx context.Context, subject, tenant string, tokenIssuedAt time.Time) (bool, error) {
 	key := sessionGateKey("tenant", subject, tenant, tokenIssuedAt)

@@ -114,7 +114,7 @@ type runConfig struct {
 // on both success and error returns, so goroutine cancellation and resource
 // cleanup are guaranteed regardless of which exit path fires.
 func run(cfg runConfig) error {
-	// --- Observability (platform-clients) ---
+	// --- Observability (internal/infra) ---
 	// Init OTel + structured slog. Each Init call returns an independent
 	// *Observability (no global state mutation). SetGlobal wires the global
 	// OTel TracerProvider + MeterProvider + propagator for auto-instrumented
@@ -137,8 +137,8 @@ func run(cfg runConfig) error {
 		}()
 	}
 
-	// --- Vault token renewer (platform-clients) ---
-	// The vaulttoken.Renewer wraps platform-clients vault.Provider which
+	// --- Vault token renewer (internal/infra) ---
+	// The vaulttoken.Renewer wraps internal/infra/secrets/vault Provider which
 	// calls RenewSelf in the background before the admin token's TTL expires.
 	// This fixes the P0 finding where the operator used a static token read
 	// once at startup — if Vault rotated or the TTL elapsed, every subsequent
@@ -213,7 +213,7 @@ func run(cfg runConfig) error {
 	}
 	// +kubebuilder:scaffold:builder
 
-	// --- Readiness aggregator (platform-clients) ---
+	// --- Readiness aggregator (internal/infra) ---
 	// /readyz runs all probes concurrently; returns 503 when any probe fails.
 	// Probes:
 	//   vault      — GET /v1/sys/health?standbyok=true (Vault reachability)

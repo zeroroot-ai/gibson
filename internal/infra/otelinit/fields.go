@@ -8,7 +8,7 @@ package otelinit
 
 // Structured-log and span-attribute field name constants.
 // Use these instead of inline strings so grep-ability is guaranteed across
-// all platform-clients consumers.
+// all internal/infra consumers.
 const (
 	// TraceIDField is the slog/span attribute key for the OpenTelemetry trace ID.
 	TraceIDField = "trace_id"
