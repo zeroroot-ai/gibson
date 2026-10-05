@@ -365,8 +365,10 @@ type mission
 # ----------------------------------------------------------------------
 #
 # provider and model types enable per-user / per-team / per-tenant gating
-# of slot resolution. Absent tuples = permit-all (backwards compatible
-# with today's behavior); gating kicks in once any tuple exists.
+# of slot resolution. A user with no can_use tuple on a model, directly or
+# through its provider, is denied that model (internal/engine/llm/modelgate).
+# No tuple is written at provisioning: GrantAccess and RevokeAccess are the
+# only writers.
 #
 # Tuple examples:
 #   tenant:acme               | owner   | provider:anthropic

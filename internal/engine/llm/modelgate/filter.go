@@ -8,25 +8,21 @@
 // calls Permitted() after shape-matching; if the result is empty, the
 // resolver returns codes.PermissionDenied.
 //
-// THIS FILTER IS NOT WIRED. `WithModelFilter` is declared on both slot
-// managers and called nowhere, and the live one is built without it
-// (internal/server/daemon/infrastructure.go). So Permitted is never reached on
-// the dispatch path, every user can use every model regardless of grants, and
-// the tuples ModelAccessService.GrantAccess writes are read by nothing. The
-// repo's own deadcode gate found this and it was baselined
-// (.deadcode-baseline, DefaultSlotManager.WithModelFilter). Tracked privately;
-// wiring it is not a one-line change, because nothing seeds a grant at
-// provisioning and a wired gate would deny every model to every tenant.
+// The filter is wired. Both slot managers install it when the daemon has an
+// authorizer: buildSlotManagerForSet (internal/server/daemon/harness_init.go)
+// for each per-tenant slot manager, and internal/server/daemon/grpc.go for the
+// infrastructure slot manager.
 //
-// This doc used to say "Absent tuples = permit-all (backwards compat)". It had
-// not been true for some time — hasAnyTuple returned true on BOTH branches, as
-// its own comment said — and that sentence is what two separate readings of
-// this package got wrong. The dead branch is gone with it.
+// With an acting user, the gate fails closed: a user with no can_use grant on
+// a candidate's model, directly or through its provider, gets no candidate.
+// There is no "no grant exists, so permit all" default. Nothing seeds a grant
+// at provisioning. The only writers of can_use tuples are GrantAccess and
+// RevokeAccess (internal/server/daemon/api/server_model_access.go).
 //
-// The permit-alls that remain are deliberate and narrow: a nil Authorizer at
-// construction, and a request with no acting user (a scheduled mission with an
-// empty identity context). The second is a hole that has to be closed with the
-// wiring, not after it.
+// Three cases permit every candidate, and each one is a recorded gap
+// (hosted#358): a nil Authorizer at construction, a request with no acting
+// user and no initiator user (a scheduled mission with an empty identity
+// context), and an error from the FGA BatchCheck.
 package modelgate
 
 import (
