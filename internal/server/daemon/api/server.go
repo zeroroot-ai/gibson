@@ -291,7 +291,7 @@ type DaemonServer struct {
 	tenantAdminAuditWriter auditWriterIface
 
 	// gibsonPublicURL is the public Envoy URL returned in CreateAgentIdentity
-	// responses as the gibson_url and in the enroll_command field.
+	// responses as the gibson_url.
 	// Populated from GIBSON_PUBLIC_URL env var at server construction time.
 	gibsonPublicURL string
 
