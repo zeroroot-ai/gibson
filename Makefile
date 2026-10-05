@@ -385,13 +385,16 @@ check-no-tracked-binaries:
 check-bringup-diagnostics:
 	@bash scripts/ci/dump-bringup-diagnostics.sh --selftest
 
-# check-oss-boundary asserts the open-core boundary (gibson#817, ADR-0089):
-# the Apache layer (sdk/adk/setec/gibson-executor) links zero ELv2/closed code,
-# and gibson's go.mod never requires the closed billing repo. Clones the public
-# OSS repos (network) unless OSS_BOUNDARY_REPOS_DIR points at existing checkouts.
+# check-oss-boundary asserts the license layers (gibson#817, gibson#711,
+# ADR-0089): the permissive layer (sdk/adk/setec) links zero ELv2/closed code,
+# gibson-executor (ELv2) links zero closed code, and gibson's go.mod never
+# requires the closed billing repo or gibson-executor. Runs its fixtures first.
+# Clones the public repos (network) unless OSS_BOUNDARY_REPOS_DIR points at
+# existing checkouts.
 # CI: .github/workflows/oss-boundary.yml (path-filtered PRs + weekly sweep).
 check-oss-boundary:
-	@echo "Checking open-core boundary (Apache layer vs ELv2/closed)..."
+	@echo "Checking the license layers (permissive, ELv2, closed)..."
+	@bash scripts/check-oss-boundary.sh --selftest
 	@bash scripts/check-oss-boundary.sh
 	@echo "check-oss-boundary PASSED"
 
