@@ -69,6 +69,11 @@ type worldSnapshotData struct {
 	// cycle even though the World fold never disabled them.
 	DomainPacks []DomainPackSnapshot `json:"domain_packs"`
 
+	// ProofReviews is the proofs with agent-typed evidence that wait for a
+	// human review (proof_review.go). Without it a pending review would
+	// vanish across a snapshot and trim cycle.
+	ProofReviews []ProofReviewSnapshot `json:"proof_reviews"`
+
 	// Monotonic ID counters (replay-deterministic; must be restored exactly).
 	NextHostID        uint64 `json:"next_host_id"`
 	NextDomainID      uint64 `json:"next_domain_id"`
@@ -109,6 +114,7 @@ func SnapshotWorld(w *World, atSeq string) WorldSnapshot {
 		AgentToolCalls:       w.AgentToolCallSnapshot(),
 		FlightRecorderPolicy: w.flightRecorderPolicy,
 		DomainPacks:          w.DomainPackSnapshot(),
+		ProofReviews:         w.ProofReviewSnapshot(),
 
 		NextHostID:        w.nextHostID,
 		NextDomainID:      w.nextDomainID,
@@ -393,6 +399,19 @@ func RestoreWorld(snap WorldSnapshot, tenant string) (*World, error) {
 				Candidates: p.Candidates,
 			})
 		}
+	}
+
+	// Replay the proofs that wait for a review. Content was redacted when it
+	// was first folded, and the redaction is stable on a second pass.
+	for _, r := range data.ProofReviews {
+		Reduce(w, BetProofSubmittedForReview{
+			HypothesisID:        r.HypothesisID,
+			MissionID:           r.MissionID,
+			ScopeID:             r.ScopeID,
+			Technique:           r.Technique,
+			Evidence:            append([]ProofReviewEvidence(nil), r.Evidence...),
+			SubmittedAtUnixNano: r.SubmittedAtUnixNano,
+		})
 	}
 
 	// Replay enabled Domain Packs (ADR-0133, gibson#381). Order does not

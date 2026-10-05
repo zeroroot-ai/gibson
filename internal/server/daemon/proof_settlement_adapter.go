@@ -114,6 +114,32 @@ func (s *tenantRoutedProofSettlement) RequestDestructiveAuthorization(
 	return id, nil
 }
 
+// RecordedToolCalls implements brain.ProofSettlementEngine on ctx's tenant's
+// own Engine, so a proof reads only the tool calls of its own tenant.
+func (s *tenantRoutedProofSettlement) RecordedToolCalls(
+	ctx context.Context, missionID string, ids []string,
+) (found []brain.AgentToolCallSnapshot, missing []string, err error) {
+	e, err := s.forTenant(ctx)
+	if err != nil {
+		return nil, nil, err
+	}
+	found, missing = e.RecordedToolCalls(missionID, ids)
+	return found, missing, nil
+}
+
+// SubmitProofForReview implements brain.ProofSettlementEngine on ctx's
+// tenant's own Engine.
+func (s *tenantRoutedProofSettlement) SubmitProofForReview(ctx context.Context, req brain.ProofReviewRequest) error {
+	e, err := s.forTenant(ctx)
+	if err != nil {
+		return err
+	}
+	if err := e.SubmitProofForReview(ctx, req); err != nil {
+		return fmt.Errorf("proof review: %w", err)
+	}
+	return nil
+}
+
 // wireProofSettlement wires SubmitProof's proof-settlement engine onto
 // callback (ADR-0131, gibson#389): before this, SubmitProof always
 // answered Unavailable — no daemon ever gave it an engine to resolve pack

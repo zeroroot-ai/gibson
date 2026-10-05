@@ -209,3 +209,49 @@ func TestTenantRoutedProofSettlement_DomainPackPredicate_ReadsThePackStatement(t
 		t.Fatalf("an unknown predicate: ok=%v destructive=%v, want false and true", ok, destructive)
 	}
 }
+
+// TestTenantRoutedProofSettlement_ReviewAndRecordsStayInTheTenant proves the
+// two proof reads and writes of the adapter reach only ctx's tenant: a tool
+// call and a review of acme are invisible to globex, and a call with no
+// tenant is refused.
+func TestTenantRoutedProofSettlement_ReviewAndRecordsStayInTheTenant(t *testing.T) {
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+	registry := brain.NewRegistry(ctx)
+	s := newTenantRoutedProofSettlement(registry)
+	acme := auth.ContextWithTenantString(context.Background(), "acme")
+	globex := auth.ContextWithTenantString(context.Background(), "globex")
+
+	registry.For("acme").Submit(brain.AgentToolCallObserved{ToolCallID: "call-1", MissionID: "m1", Result: "r"})
+	if err := s.SubmitProofForReview(acme, brain.ProofReviewRequest{
+		HypothesisID: "hyp-1", MissionID: "m1", Evidence: []brain.ProofReviewEvidence{{Content: "typed"}},
+	}); err != nil {
+		t.Fatalf("SubmitProofForReview: %v", err)
+	}
+	deadline := time.Now().Add(2 * time.Second)
+	for len(registry.For("acme").ProofReviews()) != 1 || len(registry.For("acme").AgentToolCalls()) != 1 {
+		if time.Now().After(deadline) {
+			t.Fatal("acme's record never reached its world")
+		}
+		time.Sleep(5 * time.Millisecond)
+	}
+
+	found, missing, err := s.RecordedToolCalls(acme, "m1", []string{"call-1"})
+	if err != nil || len(found) != 1 || len(missing) != 0 {
+		t.Fatalf("acme: found=%d missing=%v err=%v", len(found), missing, err)
+	}
+	found, missing, err = s.RecordedToolCalls(globex, "m1", []string{"call-1"})
+	if err != nil || len(found) != 0 || len(missing) != 1 {
+		t.Fatalf("globex must not read acme's tool call: found=%d missing=%v err=%v", len(found), missing, err)
+	}
+	if got := registry.For("globex").ProofReviews(); len(got) != 0 {
+		t.Fatalf("globex must not see acme's review, got %+v", got)
+	}
+
+	if _, _, err := s.RecordedToolCalls(context.Background(), "m1", []string{"call-1"}); err == nil {
+		t.Fatal("RecordedToolCalls with no tenant must be refused")
+	}
+	if err := s.SubmitProofForReview(context.Background(), brain.ProofReviewRequest{HypothesisID: "h", Evidence: []brain.ProofReviewEvidence{{Content: "x"}}}); err == nil {
+		t.Fatal("SubmitProofForReview with no tenant must be refused")
+	}
+}
