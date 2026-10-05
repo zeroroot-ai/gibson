@@ -294,6 +294,46 @@ service DaemonOperatorService {
     };
   }
 
+  // ListDesiredConnectors returns every (tenant, connector) pair a tenant
+  // enabled (gibson#662), with the fields of the catalog entry that the
+  // ConnectorInstance needs. The connector operator pulls it and converges
+  // the ConnectorInstances. The daemon holds the desired state in Postgres
+  // and makes no Kubernetes call (ADR-0023). A row whose connector left the
+  // catalog is not in the answer.
+  rpc ListDesiredConnectors(ListDesiredConnectorsRequest) returns (ListDesiredConnectorsResponse) {
+    option (gibson.auth.v1.authz) = {
+      relation: "platform_operator",
+      object_type: "system_tenant",
+      object_deriver: "system_tenant",
+      allowed_identities: 3  // USER | SERVICE
+    };
+  }
+
+  // ReportConnectorStatus records the state of one tenant connector, as the
+  // connector operator reads it from the ConnectorInstance. A report for a
+  // pair no tenant enabled changes nothing.
+  rpc ReportConnectorStatus(ReportConnectorStatusRequest) returns (ReportConnectorStatusResponse) {
+    option (gibson.auth.v1.authz) = {
+      relation: "platform_operator",
+      object_type: "system_tenant",
+      object_deriver: "system_tenant",
+      allowed_identities: 3  // USER | SERVICE
+    };
+  }
+
+  // AdoptConnector records a connector that a tenant enabled before the
+  // daemon kept the desired state (gibson#662). The connector operator calls
+  // it once for each ConnectorInstance that the daemon wrote in the past. A
+  // pair that is already recorded stays as it is.
+  rpc AdoptConnector(AdoptConnectorRequest) returns (AdoptConnectorResponse) {
+    option (gibson.auth.v1.authz) = {
+      relation: "platform_operator",
+      object_type: "system_tenant",
+      object_deriver: "system_tenant",
+      allowed_identities: 3  // USER | SERVICE
+    };
+  }
+
 }
 
 // ---------------------------------------------------------------------------
@@ -657,3 +697,63 @@ message StoreBeliefArtifactResponse {
   // version is the version the daemon gave the stored artifacts.
   int64 version = 1;
 }
+
+// ---------------------------------------------------------------------------
+// Connectors for each tenant (gibson#662)
+// ---------------------------------------------------------------------------
+
+message ListDesiredConnectorsRequest {}
+
+// DesiredConnector is one connector the platform must run: the catalog
+// connector connector_id, for the tenant tenant_id. The other fields come
+// from the catalog entry of the daemon, so the catalog of the daemon is the
+// one source of what runs.
+message DesiredConnector {
+  // tenant_id is the tenant slug.
+  string tenant_id = 1;
+  // connector_id is the catalog id of the connector, for example "gitlab".
+  string connector_id = 2;
+  // shape is Hosted or Remote.
+  string shape = 3;
+  // image is the image of a Hosted connector, pinned by digest.
+  string image = 4;
+  // endpoint is the MCP endpoint of a Remote connector.
+  string endpoint = 5;
+  // transport is the MCP transport.
+  string transport = 6;
+  // auth is none, oauth or secret.
+  string auth = 7;
+  // egress_allow is the egress list of the catalog entry, as "host:port".
+  repeated string egress_allow = 8;
+}
+
+message ListDesiredConnectorsResponse {
+  repeated DesiredConnector connectors = 1;
+}
+
+message ReportConnectorStatusRequest {
+  // tenant_id is the tenant slug. Required.
+  string tenant_id = 1;
+  // connector_id is the catalog id of the connector. Required.
+  string connector_id = 2;
+  // phase is the phase of the ConnectorInstance. Required.
+  string phase = 3;
+  // discovered_tools is the number of tools the connector serves.
+  int32 discovered_tools = 4;
+  // last_error is the last error of the connector, or empty.
+  string last_error = 5;
+}
+
+message ReportConnectorStatusResponse {
+  // updated is true when a row for the pair exists and took the report.
+  bool updated = 1;
+}
+
+message AdoptConnectorRequest {
+  // tenant_id is the tenant slug. Required.
+  string tenant_id = 1;
+  // connector_id is the catalog id of the connector. Required.
+  string connector_id = 2;
+}
+
+message AdoptConnectorResponse {}

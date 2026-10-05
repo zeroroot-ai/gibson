@@ -37,6 +37,9 @@ const (
 	DaemonOperatorService_GetConnectorAuthStatus_FullMethodName        = "/gibson.daemon.operator.v1.DaemonOperatorService/GetConnectorAuthStatus"
 	DaemonOperatorService_GetBeliefTrainingData_FullMethodName         = "/gibson.daemon.operator.v1.DaemonOperatorService/GetBeliefTrainingData"
 	DaemonOperatorService_StoreBeliefArtifact_FullMethodName           = "/gibson.daemon.operator.v1.DaemonOperatorService/StoreBeliefArtifact"
+	DaemonOperatorService_ListDesiredConnectors_FullMethodName         = "/gibson.daemon.operator.v1.DaemonOperatorService/ListDesiredConnectors"
+	DaemonOperatorService_ReportConnectorStatus_FullMethodName         = "/gibson.daemon.operator.v1.DaemonOperatorService/ReportConnectorStatus"
+	DaemonOperatorService_AdoptConnector_FullMethodName                = "/gibson.daemon.operator.v1.DaemonOperatorService/AdoptConnector"
 )
 
 // DaemonOperatorServiceClient is the client API for DaemonOperatorService service.
@@ -172,6 +175,22 @@ type DaemonOperatorServiceClient interface {
 	// The quality gate decides which version becomes current. The handler
 	// serves only the trainer identity of the tenant in the request.
 	StoreBeliefArtifact(ctx context.Context, in *StoreBeliefArtifactRequest, opts ...grpc.CallOption) (*StoreBeliefArtifactResponse, error)
+	// ListDesiredConnectors returns every (tenant, connector) pair a tenant
+	// enabled (gibson#662), with the fields of the catalog entry that the
+	// ConnectorInstance needs. The connector operator pulls it and converges
+	// the ConnectorInstances. The daemon holds the desired state in Postgres
+	// and makes no Kubernetes call (ADR-0023). A row whose connector left the
+	// catalog is not in the answer.
+	ListDesiredConnectors(ctx context.Context, in *ListDesiredConnectorsRequest, opts ...grpc.CallOption) (*ListDesiredConnectorsResponse, error)
+	// ReportConnectorStatus records the state of one tenant connector, as the
+	// connector operator reads it from the ConnectorInstance. A report for a
+	// pair no tenant enabled changes nothing.
+	ReportConnectorStatus(ctx context.Context, in *ReportConnectorStatusRequest, opts ...grpc.CallOption) (*ReportConnectorStatusResponse, error)
+	// AdoptConnector records a connector that a tenant enabled before the
+	// daemon kept the desired state (gibson#662). The connector operator calls
+	// it once for each ConnectorInstance that the daemon wrote in the past. A
+	// pair that is already recorded stays as it is.
+	AdoptConnector(ctx context.Context, in *AdoptConnectorRequest, opts ...grpc.CallOption) (*AdoptConnectorResponse, error)
 }
 
 type daemonOperatorServiceClient struct {
@@ -352,6 +371,36 @@ func (c *daemonOperatorServiceClient) StoreBeliefArtifact(ctx context.Context, i
 	return out, nil
 }
 
+func (c *daemonOperatorServiceClient) ListDesiredConnectors(ctx context.Context, in *ListDesiredConnectorsRequest, opts ...grpc.CallOption) (*ListDesiredConnectorsResponse, error) {
+	cOpts := append([]grpc.CallOption{grpc.StaticMethod()}, opts...)
+	out := new(ListDesiredConnectorsResponse)
+	err := c.cc.Invoke(ctx, DaemonOperatorService_ListDesiredConnectors_FullMethodName, in, out, cOpts...)
+	if err != nil {
+		return nil, err
+	}
+	return out, nil
+}
+
+func (c *daemonOperatorServiceClient) ReportConnectorStatus(ctx context.Context, in *ReportConnectorStatusRequest, opts ...grpc.CallOption) (*ReportConnectorStatusResponse, error) {
+	cOpts := append([]grpc.CallOption{grpc.StaticMethod()}, opts...)
+	out := new(ReportConnectorStatusResponse)
+	err := c.cc.Invoke(ctx, DaemonOperatorService_ReportConnectorStatus_FullMethodName, in, out, cOpts...)
+	if err != nil {
+		return nil, err
+	}
+	return out, nil
+}
+
+func (c *daemonOperatorServiceClient) AdoptConnector(ctx context.Context, in *AdoptConnectorRequest, opts ...grpc.CallOption) (*AdoptConnectorResponse, error) {
+	cOpts := append([]grpc.CallOption{grpc.StaticMethod()}, opts...)
+	out := new(AdoptConnectorResponse)
+	err := c.cc.Invoke(ctx, DaemonOperatorService_AdoptConnector_FullMethodName, in, out, cOpts...)
+	if err != nil {
+		return nil, err
+	}
+	return out, nil
+}
+
 // DaemonOperatorServiceServer is the server API for DaemonOperatorService service.
 // All implementations must embed UnimplementedDaemonOperatorServiceServer
 // for forward compatibility.
@@ -485,6 +534,22 @@ type DaemonOperatorServiceServer interface {
 	// The quality gate decides which version becomes current. The handler
 	// serves only the trainer identity of the tenant in the request.
 	StoreBeliefArtifact(context.Context, *StoreBeliefArtifactRequest) (*StoreBeliefArtifactResponse, error)
+	// ListDesiredConnectors returns every (tenant, connector) pair a tenant
+	// enabled (gibson#662), with the fields of the catalog entry that the
+	// ConnectorInstance needs. The connector operator pulls it and converges
+	// the ConnectorInstances. The daemon holds the desired state in Postgres
+	// and makes no Kubernetes call (ADR-0023). A row whose connector left the
+	// catalog is not in the answer.
+	ListDesiredConnectors(context.Context, *ListDesiredConnectorsRequest) (*ListDesiredConnectorsResponse, error)
+	// ReportConnectorStatus records the state of one tenant connector, as the
+	// connector operator reads it from the ConnectorInstance. A report for a
+	// pair no tenant enabled changes nothing.
+	ReportConnectorStatus(context.Context, *ReportConnectorStatusRequest) (*ReportConnectorStatusResponse, error)
+	// AdoptConnector records a connector that a tenant enabled before the
+	// daemon kept the desired state (gibson#662). The connector operator calls
+	// it once for each ConnectorInstance that the daemon wrote in the past. A
+	// pair that is already recorded stays as it is.
+	AdoptConnector(context.Context, *AdoptConnectorRequest) (*AdoptConnectorResponse, error)
 	mustEmbedUnimplementedDaemonOperatorServiceServer()
 }
 
@@ -545,6 +610,15 @@ func (UnimplementedDaemonOperatorServiceServer) GetBeliefTrainingData(context.Co
 }
 func (UnimplementedDaemonOperatorServiceServer) StoreBeliefArtifact(context.Context, *StoreBeliefArtifactRequest) (*StoreBeliefArtifactResponse, error) {
 	return nil, status.Error(codes.Unimplemented, "method StoreBeliefArtifact not implemented")
+}
+func (UnimplementedDaemonOperatorServiceServer) ListDesiredConnectors(context.Context, *ListDesiredConnectorsRequest) (*ListDesiredConnectorsResponse, error) {
+	return nil, status.Error(codes.Unimplemented, "method ListDesiredConnectors not implemented")
+}
+func (UnimplementedDaemonOperatorServiceServer) ReportConnectorStatus(context.Context, *ReportConnectorStatusRequest) (*ReportConnectorStatusResponse, error) {
+	return nil, status.Error(codes.Unimplemented, "method ReportConnectorStatus not implemented")
+}
+func (UnimplementedDaemonOperatorServiceServer) AdoptConnector(context.Context, *AdoptConnectorRequest) (*AdoptConnectorResponse, error) {
+	return nil, status.Error(codes.Unimplemented, "method AdoptConnector not implemented")
 }
 func (UnimplementedDaemonOperatorServiceServer) mustEmbedUnimplementedDaemonOperatorServiceServer() {}
 func (UnimplementedDaemonOperatorServiceServer) testEmbeddedByValue()                               {}
@@ -873,6 +947,60 @@ func _DaemonOperatorService_StoreBeliefArtifact_Handler(srv interface{}, ctx con
 	return interceptor(ctx, in, info, handler)
 }
 
+func _DaemonOperatorService_ListDesiredConnectors_Handler(srv interface{}, ctx context.Context, dec func(interface{}) error, interceptor grpc.UnaryServerInterceptor) (interface{}, error) {
+	in := new(ListDesiredConnectorsRequest)
+	if err := dec(in); err != nil {
+		return nil, err
+	}
+	if interceptor == nil {
+		return srv.(DaemonOperatorServiceServer).ListDesiredConnectors(ctx, in)
+	}
+	info := &grpc.UnaryServerInfo{
+		Server:     srv,
+		FullMethod: DaemonOperatorService_ListDesiredConnectors_FullMethodName,
+	}
+	handler := func(ctx context.Context, req interface{}) (interface{}, error) {
+		return srv.(DaemonOperatorServiceServer).ListDesiredConnectors(ctx, req.(*ListDesiredConnectorsRequest))
+	}
+	return interceptor(ctx, in, info, handler)
+}
+
+func _DaemonOperatorService_ReportConnectorStatus_Handler(srv interface{}, ctx context.Context, dec func(interface{}) error, interceptor grpc.UnaryServerInterceptor) (interface{}, error) {
+	in := new(ReportConnectorStatusRequest)
+	if err := dec(in); err != nil {
+		return nil, err
+	}
+	if interceptor == nil {
+		return srv.(DaemonOperatorServiceServer).ReportConnectorStatus(ctx, in)
+	}
+	info := &grpc.UnaryServerInfo{
+		Server:     srv,
+		FullMethod: DaemonOperatorService_ReportConnectorStatus_FullMethodName,
+	}
+	handler := func(ctx context.Context, req interface{}) (interface{}, error) {
+		return srv.(DaemonOperatorServiceServer).ReportConnectorStatus(ctx, req.(*ReportConnectorStatusRequest))
+	}
+	return interceptor(ctx, in, info, handler)
+}
+
+func _DaemonOperatorService_AdoptConnector_Handler(srv interface{}, ctx context.Context, dec func(interface{}) error, interceptor grpc.UnaryServerInterceptor) (interface{}, error) {
+	in := new(AdoptConnectorRequest)
+	if err := dec(in); err != nil {
+		return nil, err
+	}
+	if interceptor == nil {
+		return srv.(DaemonOperatorServiceServer).AdoptConnector(ctx, in)
+	}
+	info := &grpc.UnaryServerInfo{
+		Server:     srv,
+		FullMethod: DaemonOperatorService_AdoptConnector_FullMethodName,
+	}
+	handler := func(ctx context.Context, req interface{}) (interface{}, error) {
+		return srv.(DaemonOperatorServiceServer).AdoptConnector(ctx, req.(*AdoptConnectorRequest))
+	}
+	return interceptor(ctx, in, info, handler)
+}
+
 // DaemonOperatorService_ServiceDesc is the grpc.ServiceDesc for DaemonOperatorService service.
 // It's only intended for direct use with grpc.RegisterService,
 // and not to be introspected or modified (even as a copy)
@@ -947,6 +1075,18 @@ var DaemonOperatorService_ServiceDesc = grpc.ServiceDesc{
 		{
 			MethodName: "StoreBeliefArtifact",
 			Handler:    _DaemonOperatorService_StoreBeliefArtifact_Handler,
+		},
+		{
+			MethodName: "ListDesiredConnectors",
+			Handler:    _DaemonOperatorService_ListDesiredConnectors_Handler,
+		},
+		{
+			MethodName: "ReportConnectorStatus",
+			Handler:    _DaemonOperatorService_ReportConnectorStatus_Handler,
+		},
+		{
+			MethodName: "AdoptConnector",
+			Handler:    _DaemonOperatorService_AdoptConnector_Handler,
 		},
 	},
 	Streams:  []grpc.StreamDesc{},
