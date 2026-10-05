@@ -56,10 +56,10 @@ func repo(t *testing.T, filler int, files map[string]string) string {
 	dir := t.TempDir()
 	write := func(rel, body string) {
 		p := filepath.Join(dir, rel)
-		if err := os.MkdirAll(filepath.Dir(p), 0o755); err != nil {
+		if err := os.MkdirAll(filepath.Dir(p), 0o750); err != nil {
 			t.Fatal(err)
 		}
-		if err := os.WriteFile(p, []byte(body), 0o644); err != nil {
+		if err := os.WriteFile(p, []byte(body), 0o600); err != nil {
 			t.Fatal(err)
 		}
 	}
@@ -70,7 +70,7 @@ func repo(t *testing.T, filler int, files map[string]string) string {
 		write(rel, body)
 	}
 	for _, args := range [][]string{{"init", "-q"}, {"add", "-A"}} {
-		cmd := exec.Command("git", append([]string{"-C", dir}, args...)...)
+		cmd := exec.Command("git", append([]string{"-C", dir}, args...)...) //nolint:gosec // G204: fixed argv on a temp dir
 		if out, err := cmd.CombinedOutput(); err != nil {
 			t.Fatalf("git %v: %v: %s", args, err, out)
 		}
@@ -88,7 +88,7 @@ func TestScan_ReadsTrackedSourceOnly(t *testing.T) {
 		"vendor/dep/dep.go":        "package dep\nvar _ = \"VENDORED_NAME\"\n",
 		"operators/op/cmd/main.go": "package main\nvar _ = \"OPERATOR_NAME\"\n",
 	})
-	if err := os.WriteFile(filepath.Join(dir, "untracked.go"), []byte("package x\nvar _ = \"UNTRACKED_NAME\"\n"), 0o644); err != nil {
+	if err := os.WriteFile(filepath.Join(dir, "untracked.go"), []byte("package x\nvar _ = \"UNTRACKED_NAME\"\n"), 0o600); err != nil {
 		t.Fatal(err)
 	}
 	got, err := Scan(dir, 1, 1)

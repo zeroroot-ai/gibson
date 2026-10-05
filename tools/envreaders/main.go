@@ -80,8 +80,7 @@ func NamesInSource(filename string, src []byte) map[string]bool {
 		if tok == token.EOF {
 			break
 		}
-		switch tok {
-		case token.STRING, token.CHAR:
+		if tok == token.STRING || tok == token.CHAR {
 			for _, loc := range envToken.FindAllStringIndex(lit, -1) {
 				// A whole word only: FOO in "xFOO_BARy" is not a name.
 				if loc[0] > 0 && isWord(lit[loc[0]-1]) {
@@ -92,10 +91,9 @@ func NamesInSource(filename string, src []byte) map[string]bool {
 				}
 				out[lit[loc[0]:loc[1]]] = true
 			}
-		case token.IDENT:
-			if prev == token.PERIOD && envIdent.MatchString(lit) {
-				out[lit] = true
-			}
+		}
+		if tok == token.IDENT && prev == token.PERIOD && envIdent.MatchString(lit) {
+			out[lit] = true
 		}
 		prev = tok
 	}
@@ -106,7 +104,8 @@ func NamesInSource(filename string, src []byte) map[string]bool {
 // vendored code or test data. Tracked files only: CI checks sibling
 // repositories out inside the tree, and those are not this repository.
 func trackedGoFiles(dir string) ([]string, error) {
-	cmd := exec.Command("git", "-C", dir, "ls-files", "-z", "--", "*.go")
+	// The one variable is the repository root the caller named.
+	cmd := exec.Command("git", "-C", dir, "ls-files", "-z", "--", "*.go") //nolint:gosec // G204: fixed argv, dir is the scan root
 	var stderr bytes.Buffer
 	cmd.Stderr = &stderr
 	raw, err := cmd.Output()
@@ -142,7 +141,7 @@ func Scan(dir string, minFiles, minNames int) ([]string, error) {
 	}
 	set := map[string]bool{}
 	for _, f := range files {
-		src, err := os.ReadFile(filepath.Join(dir, f))
+		src, err := os.ReadFile(filepath.Join(dir, f)) //nolint:gosec // G304: f is a path git tracks under the scan root
 		if err != nil {
 			return nil, fmt.Errorf("read %s: %w", f, err)
 		}
@@ -200,6 +199,12 @@ func Drift(committed, scanned []string) (missing, stale []string) {
 	return missing, stale
 }
 
+// say prints one message. A failed write to stdout or stderr has no reader
+// to report it to, so the error is dropped.
+func say(w io.Writer, format string, args ...any) {
+	_, _ = fmt.Fprintf(w, format, args...)
+}
+
 func run(args []string, stdout, stderr io.Writer) int {
 	fs := flag.NewFlagSet("envreaders", flag.ContinueOnError)
 	fs.SetOutput(stderr)
@@ -210,44 +215,44 @@ func run(args []string, stdout, stderr io.Writer) int {
 		return 2
 	}
 	if *write == *check {
-		fmt.Fprintln(stderr, "envreaders: give exactly one of -write and -check")
+		say(stderr, "envreaders: give exactly one of -write and -check\n")
 		return 2
 	}
 	names, err := Scan(*dir, MinFiles, MinNames)
 	if err != nil {
-		fmt.Fprintln(stderr, "envreaders:", err)
+		say(stderr, "envreaders: %v\n", err)
 		return 2
 	}
 	path := filepath.Join(*dir, Artifact)
 	if *write {
-		if err := os.MkdirAll(filepath.Dir(path), 0o755); err != nil {
-			fmt.Fprintln(stderr, "envreaders:", err)
+		if err := os.MkdirAll(filepath.Dir(path), 0o750); err != nil {
+			say(stderr, "envreaders: %v\n", err)
 			return 2
 		}
-		if err := os.WriteFile(path, []byte(Render(names)), 0o644); err != nil {
-			fmt.Fprintln(stderr, "envreaders:", err)
+		if err := os.WriteFile(path, []byte(Render(names)), 0o600); err != nil {
+			say(stderr, "envreaders: %v\n", err)
 			return 2
 		}
-		fmt.Fprintf(stdout, "wrote %s (%d names)\n", Artifact, len(names))
+		say(stdout, "wrote %s (%d names)\n", Artifact, len(names))
 		return 0
 	}
-	raw, err := os.ReadFile(path)
+	raw, err := os.ReadFile(path) //nolint:gosec // G304: the artifact path under the scan root
 	if err != nil {
-		fmt.Fprintf(stderr, "envreaders: %s is missing. Run `make env-readers`.\n", Artifact)
+		say(stderr, "envreaders: %s is missing. Run `make env-readers`.\n", Artifact)
 		return 1
 	}
 	missing, stale := Drift(Parse(string(raw)), names)
 	if len(missing) == 0 && len(stale) == 0 && string(raw) == Render(names) {
-		fmt.Fprintf(stdout, "ok  %s matches the source (%d names)\n", Artifact, len(names))
+		say(stdout, "ok  %s matches the source (%d names)\n", Artifact, len(names))
 		return 0
 	}
 	for _, n := range missing {
-		fmt.Fprintf(stderr, "envreaders: the source reads %s and %s does not list it\n", n, Artifact)
+		say(stderr, "envreaders: the source reads %s and %s does not list it\n", n, Artifact)
 	}
 	for _, n := range stale {
-		fmt.Fprintf(stderr, "envreaders: %s lists %s and the source no longer reads it\n", Artifact, n)
+		say(stderr, "envreaders: %s lists %s and the source no longer reads it\n", Artifact, n)
 	}
-	fmt.Fprintf(stderr, "envreaders: %s is stale. Run `make env-readers` and commit the result.\n", Artifact)
+	say(stderr, "envreaders: %s is stale. Run `make env-readers` and commit the result.\n", Artifact)
 	return 1
 }
 
