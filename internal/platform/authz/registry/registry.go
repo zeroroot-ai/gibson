@@ -18,9 +18,14 @@ const (
 // Has reports whether c contains every bit set in want.
 func (c IdentityClass) Has(want IdentityClass) bool { return c&want == want }
 
-// Entry is the per-method authorization rule.
+// Entry is the per-method authorization rule. The map key is the method, so
+// the entry does not repeat it.
+//
+// The daemon enforcer reads Service, ObjectDeriver, Unauthenticated and Self.
+// ext-authz enforces Relation, ObjectType and AllowedIdentities from
+// registry.yaml. In Go their readers are the registry contract tests of the
+// consuming repo, which check every rule against the FGA model.
 type Entry struct {
-	Method            string
 	Service           string
 	Relation          string
 	ObjectType        string
@@ -34,7 +39,6 @@ type Entry struct {
 // mappings extracted from the SDK's proto annotations at codegen time.
 var Registry = map[string]Entry{
 	"/gibson.agent.v1.AgentService/Execute": {
-		Method:            "/gibson.agent.v1.AgentService/Execute",
 		Service:           "gibson.agent.v1.AgentService",
 		Relation:          "member",
 		ObjectType:        "tenant",
@@ -44,7 +48,6 @@ var Registry = map[string]Entry{
 		Self:              false,
 	},
 	"/gibson.agent.v1.AgentService/GetDescriptor": {
-		Method:            "/gibson.agent.v1.AgentService/GetDescriptor",
 		Service:           "gibson.agent.v1.AgentService",
 		Relation:          "member",
 		ObjectType:        "tenant",
@@ -54,7 +57,6 @@ var Registry = map[string]Entry{
 		Self:              false,
 	},
 	"/gibson.agent.v1.AgentService/GetSlotSchema": {
-		Method:            "/gibson.agent.v1.AgentService/GetSlotSchema",
 		Service:           "gibson.agent.v1.AgentService",
 		Relation:          "member",
 		ObjectType:        "tenant",
@@ -64,7 +66,6 @@ var Registry = map[string]Entry{
 		Self:              false,
 	},
 	"/gibson.agent.v1.AgentService/Health": {
-		Method:            "/gibson.agent.v1.AgentService/Health",
 		Service:           "gibson.agent.v1.AgentService",
 		Relation:          "member",
 		ObjectType:        "tenant",
@@ -74,7 +75,6 @@ var Registry = map[string]Entry{
 		Self:              false,
 	},
 	"/gibson.agentidentity.v1.AgentIdentityService/CreateAgentIdentity": {
-		Method:            "/gibson.agentidentity.v1.AgentIdentityService/CreateAgentIdentity",
 		Service:           "gibson.agentidentity.v1.AgentIdentityService",
 		Relation:          "writer",
 		ObjectType:        "tenant",
@@ -84,7 +84,6 @@ var Registry = map[string]Entry{
 		Self:              false,
 	},
 	"/gibson.agentidentity.v1.AgentIdentityService/ListAgentIdentities": {
-		Method:            "/gibson.agentidentity.v1.AgentIdentityService/ListAgentIdentities",
 		Service:           "gibson.agentidentity.v1.AgentIdentityService",
 		Relation:          "writer",
 		ObjectType:        "tenant",
@@ -94,7 +93,6 @@ var Registry = map[string]Entry{
 		Self:              false,
 	},
 	"/gibson.agentidentity.v1.AgentIdentityService/RevokeAgentIdentity": {
-		Method:            "/gibson.agentidentity.v1.AgentIdentityService/RevokeAgentIdentity",
 		Service:           "gibson.agentidentity.v1.AgentIdentityService",
 		Relation:          "writer",
 		ObjectType:        "tenant",
@@ -104,7 +102,6 @@ var Registry = map[string]Entry{
 		Self:              false,
 	},
 	"/gibson.bank.v1.BankService/CreateBank": {
-		Method:            "/gibson.bank.v1.BankService/CreateBank",
 		Service:           "gibson.bank.v1.BankService",
 		Relation:          "writer",
 		ObjectType:        "tenant",
@@ -114,7 +111,6 @@ var Registry = map[string]Entry{
 		Self:              false,
 	},
 	"/gibson.bank.v1.BankService/DeleteBank": {
-		Method:            "/gibson.bank.v1.BankService/DeleteBank",
 		Service:           "gibson.bank.v1.BankService",
 		Relation:          "owner",
 		ObjectType:        "bank",
@@ -124,7 +120,6 @@ var Registry = map[string]Entry{
 		Self:              false,
 	},
 	"/gibson.bank.v1.BankService/GetBank": {
-		Method:            "/gibson.bank.v1.BankService/GetBank",
 		Service:           "gibson.bank.v1.BankService",
 		Relation:          "can_read",
 		ObjectType:        "bank",
@@ -134,7 +129,6 @@ var Registry = map[string]Entry{
 		Self:              false,
 	},
 	"/gibson.bank.v1.BankService/ListBanks": {
-		Method:            "/gibson.bank.v1.BankService/ListBanks",
 		Service:           "gibson.bank.v1.BankService",
 		Relation:          "member",
 		ObjectType:        "tenant",
@@ -144,7 +138,6 @@ var Registry = map[string]Entry{
 		Self:              false,
 	},
 	"/gibson.bank.v1.BankService/ListMembers": {
-		Method:            "/gibson.bank.v1.BankService/ListMembers",
 		Service:           "gibson.bank.v1.BankService",
 		Relation:          "can_read",
 		ObjectType:        "bank",
@@ -154,7 +147,6 @@ var Registry = map[string]Entry{
 		Self:              false,
 	},
 	"/gibson.bank.v1.BankService/StartSignIn": {
-		Method:            "/gibson.bank.v1.BankService/StartSignIn",
 		Service:           "gibson.bank.v1.BankService",
 		Relation:          "owner",
 		ObjectType:        "bank",
@@ -164,7 +156,6 @@ var Registry = map[string]Entry{
 		Self:              false,
 	},
 	"/gibson.bank.v1.BankService/StreamSignIn": {
-		Method:            "/gibson.bank.v1.BankService/StreamSignIn",
 		Service:           "gibson.bank.v1.BankService",
 		Relation:          "owner",
 		ObjectType:        "bank",
@@ -174,7 +165,6 @@ var Registry = map[string]Entry{
 		Self:              false,
 	},
 	"/gibson.bank.v1.BankService/SubmitSignInCode": {
-		Method:            "/gibson.bank.v1.BankService/SubmitSignInCode",
 		Service:           "gibson.bank.v1.BankService",
 		Relation:          "owner",
 		ObjectType:        "bank",
@@ -184,7 +174,6 @@ var Registry = map[string]Entry{
 		Self:              false,
 	},
 	"/gibson.bank.v1.BankService/UpdateBank": {
-		Method:            "/gibson.bank.v1.BankService/UpdateBank",
 		Service:           "gibson.bank.v1.BankService",
 		Relation:          "owner",
 		ObjectType:        "bank",
@@ -194,7 +183,6 @@ var Registry = map[string]Entry{
 		Self:              false,
 	},
 	"/gibson.component.v1.ComponentService/CallTool": {
-		Method:            "/gibson.component.v1.ComponentService/CallTool",
 		Service:           "gibson.component.v1.ComponentService",
 		Relation:          "can_execute",
 		ObjectType:        "component",
@@ -204,7 +192,6 @@ var Registry = map[string]Entry{
 		Self:              false,
 	},
 	"/gibson.component.v1.ComponentService/CallToolStream": {
-		Method:            "/gibson.component.v1.ComponentService/CallToolStream",
 		Service:           "gibson.component.v1.ComponentService",
 		Relation:          "can_execute",
 		ObjectType:        "component",
@@ -214,7 +201,6 @@ var Registry = map[string]Entry{
 		Self:              false,
 	},
 	"/gibson.component.v1.ComponentService/CancelMission": {
-		Method:            "/gibson.component.v1.ComponentService/CancelMission",
 		Service:           "gibson.component.v1.ComponentService",
 		Relation:          "can_execute",
 		ObjectType:        "component",
@@ -224,7 +210,6 @@ var Registry = map[string]Entry{
 		Self:              false,
 	},
 	"/gibson.component.v1.ComponentService/Complete": {
-		Method:            "/gibson.component.v1.ComponentService/Complete",
 		Service:           "gibson.component.v1.ComponentService",
 		Relation:          "can_execute",
 		ObjectType:        "component",
@@ -234,7 +219,6 @@ var Registry = map[string]Entry{
 		Self:              false,
 	},
 	"/gibson.component.v1.ComponentService/CompleteStream": {
-		Method:            "/gibson.component.v1.ComponentService/CompleteStream",
 		Service:           "gibson.component.v1.ComponentService",
 		Relation:          "can_execute",
 		ObjectType:        "component",
@@ -244,7 +228,6 @@ var Registry = map[string]Entry{
 		Self:              false,
 	},
 	"/gibson.component.v1.ComponentService/CompleteStructured": {
-		Method:            "/gibson.component.v1.ComponentService/CompleteStructured",
 		Service:           "gibson.component.v1.ComponentService",
 		Relation:          "can_execute",
 		ObjectType:        "component",
@@ -254,7 +237,6 @@ var Registry = map[string]Entry{
 		Self:              false,
 	},
 	"/gibson.component.v1.ComponentService/CompleteWithTools": {
-		Method:            "/gibson.component.v1.ComponentService/CompleteWithTools",
 		Service:           "gibson.component.v1.ComponentService",
 		Relation:          "can_execute",
 		ObjectType:        "component",
@@ -264,7 +246,6 @@ var Registry = map[string]Entry{
 		Self:              false,
 	},
 	"/gibson.component.v1.ComponentService/CreateMission": {
-		Method:            "/gibson.component.v1.ComponentService/CreateMission",
 		Service:           "gibson.component.v1.ComponentService",
 		Relation:          "can_execute",
 		ObjectType:        "component",
@@ -274,7 +255,6 @@ var Registry = map[string]Entry{
 		Self:              false,
 	},
 	"/gibson.component.v1.ComponentService/DelegateToAgent": {
-		Method:            "/gibson.component.v1.ComponentService/DelegateToAgent",
 		Service:           "gibson.component.v1.ComponentService",
 		Relation:          "can_execute",
 		ObjectType:        "component",
@@ -284,7 +264,6 @@ var Registry = map[string]Entry{
 		Self:              false,
 	},
 	"/gibson.component.v1.ComponentService/DisablePlugin": {
-		Method:            "/gibson.component.v1.ComponentService/DisablePlugin",
 		Service:           "gibson.component.v1.ComponentService",
 		Relation:          "can_configure",
 		ObjectType:        "component",
@@ -294,7 +273,6 @@ var Registry = map[string]Entry{
 		Self:              false,
 	},
 	"/gibson.component.v1.ComponentService/EnablePlugin": {
-		Method:            "/gibson.component.v1.ComponentService/EnablePlugin",
 		Service:           "gibson.component.v1.ComponentService",
 		Relation:          "can_configure",
 		ObjectType:        "component",
@@ -304,7 +282,6 @@ var Registry = map[string]Entry{
 		Self:              false,
 	},
 	"/gibson.component.v1.ComponentService/FindSimilarAttacks": {
-		Method:            "/gibson.component.v1.ComponentService/FindSimilarAttacks",
 		Service:           "gibson.component.v1.ComponentService",
 		Relation:          "can_execute",
 		ObjectType:        "component",
@@ -314,7 +291,6 @@ var Registry = map[string]Entry{
 		Self:              false,
 	},
 	"/gibson.component.v1.ComponentService/FindSimilarFindings": {
-		Method:            "/gibson.component.v1.ComponentService/FindSimilarFindings",
 		Service:           "gibson.component.v1.ComponentService",
 		Relation:          "can_execute",
 		ObjectType:        "component",
@@ -324,7 +300,6 @@ var Registry = map[string]Entry{
 		Self:              false,
 	},
 	"/gibson.component.v1.ComponentService/GetAttackChains": {
-		Method:            "/gibson.component.v1.ComponentService/GetAttackChains",
 		Service:           "gibson.component.v1.ComponentService",
 		Relation:          "can_execute",
 		ObjectType:        "component",
@@ -334,7 +309,6 @@ var Registry = map[string]Entry{
 		Self:              false,
 	},
 	"/gibson.component.v1.ComponentService/GetCredential": {
-		Method:            "/gibson.component.v1.ComponentService/GetCredential",
 		Service:           "gibson.component.v1.ComponentService",
 		Relation:          "can_resolve",
 		ObjectType:        "secret",
@@ -344,7 +318,6 @@ var Registry = map[string]Entry{
 		Self:              false,
 	},
 	"/gibson.component.v1.ComponentService/GetFindings": {
-		Method:            "/gibson.component.v1.ComponentService/GetFindings",
 		Service:           "gibson.component.v1.ComponentService",
 		Relation:          "can_execute",
 		ObjectType:        "component",
@@ -354,7 +327,6 @@ var Registry = map[string]Entry{
 		Self:              false,
 	},
 	"/gibson.component.v1.ComponentService/GetMissionResults": {
-		Method:            "/gibson.component.v1.ComponentService/GetMissionResults",
 		Service:           "gibson.component.v1.ComponentService",
 		Relation:          "can_execute",
 		ObjectType:        "component",
@@ -364,7 +336,6 @@ var Registry = map[string]Entry{
 		Self:              false,
 	},
 	"/gibson.component.v1.ComponentService/GetMissionRunHistory": {
-		Method:            "/gibson.component.v1.ComponentService/GetMissionRunHistory",
 		Service:           "gibson.component.v1.ComponentService",
 		Relation:          "can_execute",
 		ObjectType:        "component",
@@ -374,7 +345,6 @@ var Registry = map[string]Entry{
 		Self:              false,
 	},
 	"/gibson.component.v1.ComponentService/GetMissionStatus": {
-		Method:            "/gibson.component.v1.ComponentService/GetMissionStatus",
 		Service:           "gibson.component.v1.ComponentService",
 		Relation:          "can_execute",
 		ObjectType:        "component",
@@ -384,7 +354,6 @@ var Registry = map[string]Entry{
 		Self:              false,
 	},
 	"/gibson.component.v1.ComponentService/GetPluginConfig": {
-		Method:            "/gibson.component.v1.ComponentService/GetPluginConfig",
 		Service:           "gibson.component.v1.ComponentService",
 		Relation:          "can_execute",
 		ObjectType:        "component",
@@ -394,7 +363,6 @@ var Registry = map[string]Entry{
 		Self:              false,
 	},
 	"/gibson.component.v1.ComponentService/GetRelatedFindings": {
-		Method:            "/gibson.component.v1.ComponentService/GetRelatedFindings",
 		Service:           "gibson.component.v1.ComponentService",
 		Relation:          "can_execute",
 		ObjectType:        "component",
@@ -404,7 +372,6 @@ var Registry = map[string]Entry{
 		Self:              false,
 	},
 	"/gibson.component.v1.ComponentService/GetRunFindings": {
-		Method:            "/gibson.component.v1.ComponentService/GetRunFindings",
 		Service:           "gibson.component.v1.ComponentService",
 		Relation:          "can_execute",
 		ObjectType:        "component",
@@ -414,7 +381,6 @@ var Registry = map[string]Entry{
 		Self:              false,
 	},
 	"/gibson.component.v1.ComponentService/GetTaxonomySchema": {
-		Method:            "/gibson.component.v1.ComponentService/GetTaxonomySchema",
 		Service:           "gibson.component.v1.ComponentService",
 		Relation:          "can_execute",
 		ObjectType:        "component",
@@ -424,7 +390,6 @@ var Registry = map[string]Entry{
 		Self:              false,
 	},
 	"/gibson.component.v1.ComponentService/Heartbeat": {
-		Method:            "/gibson.component.v1.ComponentService/Heartbeat",
 		Service:           "gibson.component.v1.ComponentService",
 		Relation:          "can_poll_work",
 		ObjectType:        "component",
@@ -434,7 +399,6 @@ var Registry = map[string]Entry{
 		Self:              false,
 	},
 	"/gibson.component.v1.ComponentService/ListAgents": {
-		Method:            "/gibson.component.v1.ComponentService/ListAgents",
 		Service:           "gibson.component.v1.ComponentService",
 		Relation:          "can_execute",
 		ObjectType:        "component",
@@ -444,7 +408,6 @@ var Registry = map[string]Entry{
 		Self:              false,
 	},
 	"/gibson.component.v1.ComponentService/ListAvailablePlugins": {
-		Method:            "/gibson.component.v1.ComponentService/ListAvailablePlugins",
 		Service:           "gibson.component.v1.ComponentService",
 		Relation:          "can_execute",
 		ObjectType:        "component",
@@ -454,7 +417,6 @@ var Registry = map[string]Entry{
 		Self:              false,
 	},
 	"/gibson.component.v1.ComponentService/ListMissions": {
-		Method:            "/gibson.component.v1.ComponentService/ListMissions",
 		Service:           "gibson.component.v1.ComponentService",
 		Relation:          "can_execute",
 		ObjectType:        "component",
@@ -464,7 +426,6 @@ var Registry = map[string]Entry{
 		Self:              false,
 	},
 	"/gibson.component.v1.ComponentService/ListTenantPlugins": {
-		Method:            "/gibson.component.v1.ComponentService/ListTenantPlugins",
 		Service:           "gibson.component.v1.ComponentService",
 		Relation:          "can_execute",
 		ObjectType:        "component",
@@ -474,7 +435,6 @@ var Registry = map[string]Entry{
 		Self:              false,
 	},
 	"/gibson.component.v1.ComponentService/ListTools": {
-		Method:            "/gibson.component.v1.ComponentService/ListTools",
 		Service:           "gibson.component.v1.ComponentService",
 		Relation:          "can_execute",
 		ObjectType:        "component",
@@ -484,7 +444,6 @@ var Registry = map[string]Entry{
 		Self:              false,
 	},
 	"/gibson.component.v1.ComponentService/PollWork": {
-		Method:            "/gibson.component.v1.ComponentService/PollWork",
 		Service:           "gibson.component.v1.ComponentService",
 		Relation:          "can_poll_work",
 		ObjectType:        "component",
@@ -494,7 +453,6 @@ var Registry = map[string]Entry{
 		Self:              false,
 	},
 	"/gibson.component.v1.ComponentService/QueryNodes": {
-		Method:            "/gibson.component.v1.ComponentService/QueryNodes",
 		Service:           "gibson.component.v1.ComponentService",
 		Relation:          "can_execute",
 		ObjectType:        "component",
@@ -504,7 +462,6 @@ var Registry = map[string]Entry{
 		Self:              false,
 	},
 	"/gibson.component.v1.ComponentService/QueryPlugin": {
-		Method:            "/gibson.component.v1.ComponentService/QueryPlugin",
 		Service:           "gibson.component.v1.ComponentService",
 		Relation:          "can_execute",
 		ObjectType:        "component",
@@ -514,7 +471,6 @@ var Registry = map[string]Entry{
 		Self:              false,
 	},
 	"/gibson.component.v1.ComponentService/QueueToolWork": {
-		Method:            "/gibson.component.v1.ComponentService/QueueToolWork",
 		Service:           "gibson.component.v1.ComponentService",
 		Relation:          "can_execute",
 		ObjectType:        "component",
@@ -524,7 +480,6 @@ var Registry = map[string]Entry{
 		Self:              false,
 	},
 	"/gibson.component.v1.ComponentService/RegisterComponent": {
-		Method:            "/gibson.component.v1.ComponentService/RegisterComponent",
 		Service:           "gibson.component.v1.ComponentService",
 		Relation:          "can_poll_work",
 		ObjectType:        "component",
@@ -534,7 +489,6 @@ var Registry = map[string]Entry{
 		Self:              false,
 	},
 	"/gibson.component.v1.ComponentService/ReportStepHints": {
-		Method:            "/gibson.component.v1.ComponentService/ReportStepHints",
 		Service:           "gibson.component.v1.ComponentService",
 		Relation:          "can_execute",
 		ObjectType:        "component",
@@ -544,7 +498,6 @@ var Registry = map[string]Entry{
 		Self:              false,
 	},
 	"/gibson.component.v1.ComponentService/RunMission": {
-		Method:            "/gibson.component.v1.ComponentService/RunMission",
 		Service:           "gibson.component.v1.ComponentService",
 		Relation:          "can_execute",
 		ObjectType:        "component",
@@ -554,7 +507,6 @@ var Registry = map[string]Entry{
 		Self:              false,
 	},
 	"/gibson.component.v1.ComponentService/SubmitFinding": {
-		Method:            "/gibson.component.v1.ComponentService/SubmitFinding",
 		Service:           "gibson.component.v1.ComponentService",
 		Relation:          "can_execute",
 		ObjectType:        "component",
@@ -564,7 +516,6 @@ var Registry = map[string]Entry{
 		Self:              false,
 	},
 	"/gibson.component.v1.ComponentService/SubmitResult": {
-		Method:            "/gibson.component.v1.ComponentService/SubmitResult",
 		Service:           "gibson.component.v1.ComponentService",
 		Relation:          "can_poll_work",
 		ObjectType:        "component",
@@ -574,7 +525,6 @@ var Registry = map[string]Entry{
 		Self:              false,
 	},
 	"/gibson.component.v1.ComponentService/TestPluginConnection": {
-		Method:            "/gibson.component.v1.ComponentService/TestPluginConnection",
 		Service:           "gibson.component.v1.ComponentService",
 		Relation:          "can_configure",
 		ObjectType:        "component",
@@ -584,7 +534,6 @@ var Registry = map[string]Entry{
 		Self:              false,
 	},
 	"/gibson.component.v1.ComponentService/ToolResults": {
-		Method:            "/gibson.component.v1.ComponentService/ToolResults",
 		Service:           "gibson.component.v1.ComponentService",
 		Relation:          "can_execute",
 		ObjectType:        "component",
@@ -594,7 +543,6 @@ var Registry = map[string]Entry{
 		Self:              false,
 	},
 	"/gibson.component.v1.ComponentService/UpdatePluginConfig": {
-		Method:            "/gibson.component.v1.ComponentService/UpdatePluginConfig",
 		Service:           "gibson.component.v1.ComponentService",
 		Relation:          "can_configure",
 		ObjectType:        "component",
@@ -604,7 +552,6 @@ var Registry = map[string]Entry{
 		Self:              false,
 	},
 	"/gibson.component.v1.ComponentService/WaitMission": {
-		Method:            "/gibson.component.v1.ComponentService/WaitMission",
 		Service:           "gibson.component.v1.ComponentService",
 		Relation:          "can_execute",
 		ObjectType:        "component",
@@ -614,7 +561,6 @@ var Registry = map[string]Entry{
 		Self:              false,
 	},
 	"/gibson.component.v1.ComponentService/WatchComponentEvents": {
-		Method:            "/gibson.component.v1.ComponentService/WatchComponentEvents",
 		Service:           "gibson.component.v1.ComponentService",
 		Relation:          "can_poll_work",
 		ObjectType:        "component",
@@ -624,7 +570,6 @@ var Registry = map[string]Entry{
 		Self:              false,
 	},
 	"/gibson.daemon.agentconsole.v1.AgentConsoleService/ListRunningAgents": {
-		Method:            "/gibson.daemon.agentconsole.v1.AgentConsoleService/ListRunningAgents",
 		Service:           "gibson.daemon.agentconsole.v1.AgentConsoleService",
 		Relation:          "member",
 		ObjectType:        "tenant",
@@ -634,7 +579,6 @@ var Registry = map[string]Entry{
 		Self:              false,
 	},
 	"/gibson.daemon.agentconsole.v1.AgentConsoleService/StreamAgentEvents": {
-		Method:            "/gibson.daemon.agentconsole.v1.AgentConsoleService/StreamAgentEvents",
 		Service:           "gibson.daemon.agentconsole.v1.AgentConsoleService",
 		Relation:          "member",
 		ObjectType:        "tenant",
@@ -644,7 +588,6 @@ var Registry = map[string]Entry{
 		Self:              false,
 	},
 	"/gibson.daemon.destructiveauthz.v1.DestructiveAuthorizationService/ApproveDestructiveAction": {
-		Method:            "/gibson.daemon.destructiveauthz.v1.DestructiveAuthorizationService/ApproveDestructiveAction",
 		Service:           "gibson.daemon.destructiveauthz.v1.DestructiveAuthorizationService",
 		Relation:          "admin",
 		ObjectType:        "tenant",
@@ -654,7 +597,6 @@ var Registry = map[string]Entry{
 		Self:              false,
 	},
 	"/gibson.daemon.destructiveauthz.v1.DestructiveAuthorizationService/DenyDestructiveAction": {
-		Method:            "/gibson.daemon.destructiveauthz.v1.DestructiveAuthorizationService/DenyDestructiveAction",
 		Service:           "gibson.daemon.destructiveauthz.v1.DestructiveAuthorizationService",
 		Relation:          "admin",
 		ObjectType:        "tenant",
@@ -664,7 +606,6 @@ var Registry = map[string]Entry{
 		Self:              false,
 	},
 	"/gibson.daemon.destructiveauthz.v1.DestructiveAuthorizationService/ListPendingDestructiveActions": {
-		Method:            "/gibson.daemon.destructiveauthz.v1.DestructiveAuthorizationService/ListPendingDestructiveActions",
 		Service:           "gibson.daemon.destructiveauthz.v1.DestructiveAuthorizationService",
 		Relation:          "admin",
 		ObjectType:        "tenant",
@@ -674,7 +615,6 @@ var Registry = map[string]Entry{
 		Self:              false,
 	},
 	"/gibson.daemon.discovery.v1.DiscoveryService/DescribeAgent": {
-		Method:            "/gibson.daemon.discovery.v1.DiscoveryService/DescribeAgent",
 		Service:           "gibson.daemon.discovery.v1.DiscoveryService",
 		Relation:          "member",
 		ObjectType:        "tenant",
@@ -684,7 +624,6 @@ var Registry = map[string]Entry{
 		Self:              false,
 	},
 	"/gibson.daemon.discovery.v1.DiscoveryService/DescribePlugin": {
-		Method:            "/gibson.daemon.discovery.v1.DiscoveryService/DescribePlugin",
 		Service:           "gibson.daemon.discovery.v1.DiscoveryService",
 		Relation:          "member",
 		ObjectType:        "tenant",
@@ -694,7 +633,6 @@ var Registry = map[string]Entry{
 		Self:              false,
 	},
 	"/gibson.daemon.discovery.v1.DiscoveryService/DescribeTool": {
-		Method:            "/gibson.daemon.discovery.v1.DiscoveryService/DescribeTool",
 		Service:           "gibson.daemon.discovery.v1.DiscoveryService",
 		Relation:          "member",
 		ObjectType:        "tenant",
@@ -704,7 +642,6 @@ var Registry = map[string]Entry{
 		Self:              false,
 	},
 	"/gibson.daemon.discovery.v1.DiscoveryService/ListAgents": {
-		Method:            "/gibson.daemon.discovery.v1.DiscoveryService/ListAgents",
 		Service:           "gibson.daemon.discovery.v1.DiscoveryService",
 		Relation:          "member",
 		ObjectType:        "tenant",
@@ -714,7 +651,6 @@ var Registry = map[string]Entry{
 		Self:              false,
 	},
 	"/gibson.daemon.discovery.v1.DiscoveryService/ListConnectors": {
-		Method:            "/gibson.daemon.discovery.v1.DiscoveryService/ListConnectors",
 		Service:           "gibson.daemon.discovery.v1.DiscoveryService",
 		Relation:          "member",
 		ObjectType:        "tenant",
@@ -724,7 +660,6 @@ var Registry = map[string]Entry{
 		Self:              false,
 	},
 	"/gibson.daemon.discovery.v1.DiscoveryService/ListLLMSlots": {
-		Method:            "/gibson.daemon.discovery.v1.DiscoveryService/ListLLMSlots",
 		Service:           "gibson.daemon.discovery.v1.DiscoveryService",
 		Relation:          "member",
 		ObjectType:        "tenant",
@@ -734,7 +669,6 @@ var Registry = map[string]Entry{
 		Self:              false,
 	},
 	"/gibson.daemon.discovery.v1.DiscoveryService/ListPlugins": {
-		Method:            "/gibson.daemon.discovery.v1.DiscoveryService/ListPlugins",
 		Service:           "gibson.daemon.discovery.v1.DiscoveryService",
 		Relation:          "member",
 		ObjectType:        "tenant",
@@ -744,7 +678,6 @@ var Registry = map[string]Entry{
 		Self:              false,
 	},
 	"/gibson.daemon.discovery.v1.DiscoveryService/ListReportSurfaces": {
-		Method:            "/gibson.daemon.discovery.v1.DiscoveryService/ListReportSurfaces",
 		Service:           "gibson.daemon.discovery.v1.DiscoveryService",
 		Relation:          "member",
 		ObjectType:        "tenant",
@@ -754,7 +687,6 @@ var Registry = map[string]Entry{
 		Self:              false,
 	},
 	"/gibson.daemon.discovery.v1.DiscoveryService/ListTools": {
-		Method:            "/gibson.daemon.discovery.v1.DiscoveryService/ListTools",
 		Service:           "gibson.daemon.discovery.v1.DiscoveryService",
 		Relation:          "member",
 		ObjectType:        "tenant",
@@ -764,7 +696,6 @@ var Registry = map[string]Entry{
 		Self:              false,
 	},
 	"/gibson.daemon.discovery.v1.DiscoveryService/SuggestMissingCapability": {
-		Method:            "/gibson.daemon.discovery.v1.DiscoveryService/SuggestMissingCapability",
 		Service:           "gibson.daemon.discovery.v1.DiscoveryService",
 		Relation:          "member",
 		ObjectType:        "tenant",
@@ -774,7 +705,6 @@ var Registry = map[string]Entry{
 		Self:              false,
 	},
 	"/gibson.daemon.discovery.v1.DiscoveryService/WhoAmI": {
-		Method:            "/gibson.daemon.discovery.v1.DiscoveryService/WhoAmI",
 		Service:           "gibson.daemon.discovery.v1.DiscoveryService",
 		Relation:          "member",
 		ObjectType:        "tenant",
@@ -784,7 +714,6 @@ var Registry = map[string]Entry{
 		Self:              false,
 	},
 	"/gibson.daemon.logs.v1.LogsService/QueryDaemonLogs": {
-		Method:            "/gibson.daemon.logs.v1.LogsService/QueryDaemonLogs",
 		Service:           "gibson.daemon.logs.v1.LogsService",
 		Relation:          "member",
 		ObjectType:        "tenant",
@@ -794,7 +723,6 @@ var Registry = map[string]Entry{
 		Self:              false,
 	},
 	"/gibson.daemon.logs.v1.LogsService/QueryMissionLogs": {
-		Method:            "/gibson.daemon.logs.v1.LogsService/QueryMissionLogs",
 		Service:           "gibson.daemon.logs.v1.LogsService",
 		Relation:          "member",
 		ObjectType:        "tenant",
@@ -804,7 +732,6 @@ var Registry = map[string]Entry{
 		Self:              false,
 	},
 	"/gibson.daemon.operator.v1.DaemonOperatorService/AckTenantOp": {
-		Method:            "/gibson.daemon.operator.v1.DaemonOperatorService/AckTenantOp",
 		Service:           "gibson.daemon.operator.v1.DaemonOperatorService",
 		Relation:          "platform_operator",
 		ObjectType:        "system_tenant",
@@ -814,7 +741,6 @@ var Registry = map[string]Entry{
 		Self:              false,
 	},
 	"/gibson.daemon.operator.v1.DaemonOperatorService/AckTenantProvisioned": {
-		Method:            "/gibson.daemon.operator.v1.DaemonOperatorService/AckTenantProvisioned",
 		Service:           "gibson.daemon.operator.v1.DaemonOperatorService",
 		Relation:          "platform_operator",
 		ObjectType:        "system_tenant",
@@ -824,7 +750,6 @@ var Registry = map[string]Entry{
 		Self:              false,
 	},
 	"/gibson.daemon.operator.v1.DaemonOperatorService/EmitAuditEvent": {
-		Method:            "/gibson.daemon.operator.v1.DaemonOperatorService/EmitAuditEvent",
 		Service:           "gibson.daemon.operator.v1.DaemonOperatorService",
 		Relation:          "platform_operator",
 		ObjectType:        "system_tenant",
@@ -834,7 +759,6 @@ var Registry = map[string]Entry{
 		Self:              false,
 	},
 	"/gibson.daemon.operator.v1.DaemonOperatorService/EnqueueTenantProvisioning": {
-		Method:            "/gibson.daemon.operator.v1.DaemonOperatorService/EnqueueTenantProvisioning",
 		Service:           "gibson.daemon.operator.v1.DaemonOperatorService",
 		Relation:          "platform_operator",
 		ObjectType:        "system_tenant",
@@ -844,7 +768,6 @@ var Registry = map[string]Entry{
 		Self:              false,
 	},
 	"/gibson.daemon.operator.v1.DaemonOperatorService/GetConnectorAuthStatus": {
-		Method:            "/gibson.daemon.operator.v1.DaemonOperatorService/GetConnectorAuthStatus",
 		Service:           "gibson.daemon.operator.v1.DaemonOperatorService",
 		Relation:          "platform_operator",
 		ObjectType:        "system_tenant",
@@ -854,7 +777,6 @@ var Registry = map[string]Entry{
 		Self:              false,
 	},
 	"/gibson.daemon.operator.v1.DaemonOperatorService/ListFeatureTuples": {
-		Method:            "/gibson.daemon.operator.v1.DaemonOperatorService/ListFeatureTuples",
 		Service:           "gibson.daemon.operator.v1.DaemonOperatorService",
 		Relation:          "platform_operator",
 		ObjectType:        "system_tenant",
@@ -864,7 +786,6 @@ var Registry = map[string]Entry{
 		Self:              false,
 	},
 	"/gibson.daemon.operator.v1.DaemonOperatorService/ListPendingTenantOps": {
-		Method:            "/gibson.daemon.operator.v1.DaemonOperatorService/ListPendingTenantOps",
 		Service:           "gibson.daemon.operator.v1.DaemonOperatorService",
 		Relation:          "platform_operator",
 		ObjectType:        "system_tenant",
@@ -874,7 +795,6 @@ var Registry = map[string]Entry{
 		Self:              false,
 	},
 	"/gibson.daemon.operator.v1.DaemonOperatorService/ListPendingTenantProvisioning": {
-		Method:            "/gibson.daemon.operator.v1.DaemonOperatorService/ListPendingTenantProvisioning",
 		Service:           "gibson.daemon.operator.v1.DaemonOperatorService",
 		Relation:          "platform_operator",
 		ObjectType:        "system_tenant",
@@ -884,7 +804,6 @@ var Registry = map[string]Entry{
 		Self:              false,
 	},
 	"/gibson.daemon.operator.v1.DaemonOperatorService/ReportTenantStatus": {
-		Method:            "/gibson.daemon.operator.v1.DaemonOperatorService/ReportTenantStatus",
 		Service:           "gibson.daemon.operator.v1.DaemonOperatorService",
 		Relation:          "platform_operator",
 		ObjectType:        "system_tenant",
@@ -894,7 +813,6 @@ var Registry = map[string]Entry{
 		Self:              false,
 	},
 	"/gibson.daemon.operator.v1.DaemonOperatorService/RevokeConnectorGrant": {
-		Method:            "/gibson.daemon.operator.v1.DaemonOperatorService/RevokeConnectorGrant",
 		Service:           "gibson.daemon.operator.v1.DaemonOperatorService",
 		Relation:          "platform_operator",
 		ObjectType:        "system_tenant",
@@ -904,7 +822,6 @@ var Registry = map[string]Entry{
 		Self:              false,
 	},
 	"/gibson.daemon.operator.v1.DaemonOperatorService/SeedCatalogTenantEnabled": {
-		Method:            "/gibson.daemon.operator.v1.DaemonOperatorService/SeedCatalogTenantEnabled",
 		Service:           "gibson.daemon.operator.v1.DaemonOperatorService",
 		Relation:          "platform_operator",
 		ObjectType:        "system_tenant",
@@ -914,7 +831,6 @@ var Registry = map[string]Entry{
 		Self:              false,
 	},
 	"/gibson.daemon.operator.v1.DaemonOperatorService/SetAgentEnrollmentLimits": {
-		Method:            "/gibson.daemon.operator.v1.DaemonOperatorService/SetAgentEnrollmentLimits",
 		Service:           "gibson.daemon.operator.v1.DaemonOperatorService",
 		Relation:          "platform_operator",
 		ObjectType:        "system_tenant",
@@ -924,7 +840,6 @@ var Registry = map[string]Entry{
 		Self:              false,
 	},
 	"/gibson.daemon.operator.v1.DaemonOperatorService/SetTenantZitadelOrg": {
-		Method:            "/gibson.daemon.operator.v1.DaemonOperatorService/SetTenantZitadelOrg",
 		Service:           "gibson.daemon.operator.v1.DaemonOperatorService",
 		Relation:          "platform_operator",
 		ObjectType:        "system_tenant",
@@ -934,7 +849,6 @@ var Registry = map[string]Entry{
 		Self:              false,
 	},
 	"/gibson.daemon.operator.v1.DaemonOperatorService/UpsertTenantQuota": {
-		Method:            "/gibson.daemon.operator.v1.DaemonOperatorService/UpsertTenantQuota",
 		Service:           "gibson.daemon.operator.v1.DaemonOperatorService",
 		Relation:          "platform_operator",
 		ObjectType:        "system_tenant",
@@ -944,7 +858,6 @@ var Registry = map[string]Entry{
 		Self:              false,
 	},
 	"/gibson.daemon.operator.v1.DaemonOperatorService/WriteAccessTuples": {
-		Method:            "/gibson.daemon.operator.v1.DaemonOperatorService/WriteAccessTuples",
 		Service:           "gibson.daemon.operator.v1.DaemonOperatorService",
 		Relation:          "platform_operator",
 		ObjectType:        "system_tenant",
@@ -954,7 +867,6 @@ var Registry = map[string]Entry{
 		Self:              false,
 	},
 	"/gibson.daemon.v1.DaemonService/BuildComponent": {
-		Method:            "/gibson.daemon.v1.DaemonService/BuildComponent",
 		Service:           "gibson.daemon.v1.DaemonService",
 		Relation:          "admin",
 		ObjectType:        "tenant",
@@ -964,7 +876,6 @@ var Registry = map[string]Entry{
 		Self:              false,
 	},
 	"/gibson.daemon.v1.DaemonService/CompleteMissionCUE": {
-		Method:            "/gibson.daemon.v1.DaemonService/CompleteMissionCUE",
 		Service:           "gibson.daemon.v1.DaemonService",
 		Relation:          "writer",
 		ObjectType:        "tenant",
@@ -974,7 +885,6 @@ var Registry = map[string]Entry{
 		Self:              false,
 	},
 	"/gibson.daemon.v1.DaemonService/Connect": {
-		Method:            "/gibson.daemon.v1.DaemonService/Connect",
 		Service:           "gibson.daemon.v1.DaemonService",
 		Relation:          "",
 		ObjectType:        "",
@@ -984,7 +894,6 @@ var Registry = map[string]Entry{
 		Self:              false,
 	},
 	"/gibson.daemon.v1.DaemonService/CreateMission": {
-		Method:            "/gibson.daemon.v1.DaemonService/CreateMission",
 		Service:           "gibson.daemon.v1.DaemonService",
 		Relation:          "writer",
 		ObjectType:        "tenant",
@@ -994,7 +903,6 @@ var Registry = map[string]Entry{
 		Self:              false,
 	},
 	"/gibson.daemon.v1.DaemonService/CreateMissionDefinition": {
-		Method:            "/gibson.daemon.v1.DaemonService/CreateMissionDefinition",
 		Service:           "gibson.daemon.v1.DaemonService",
 		Relation:          "writer",
 		ObjectType:        "tenant",
@@ -1004,7 +912,6 @@ var Registry = map[string]Entry{
 		Self:              false,
 	},
 	"/gibson.daemon.v1.DaemonService/CreateTarget": {
-		Method:            "/gibson.daemon.v1.DaemonService/CreateTarget",
 		Service:           "gibson.daemon.v1.DaemonService",
 		Relation:          "writer",
 		ObjectType:        "tenant",
@@ -1014,7 +921,6 @@ var Registry = map[string]Entry{
 		Self:              false,
 	},
 	"/gibson.daemon.v1.DaemonService/DeleteTarget": {
-		Method:            "/gibson.daemon.v1.DaemonService/DeleteTarget",
 		Service:           "gibson.daemon.v1.DaemonService",
 		Relation:          "writer",
 		ObjectType:        "tenant",
@@ -1024,7 +930,6 @@ var Registry = map[string]Entry{
 		Self:              false,
 	},
 	"/gibson.daemon.v1.DaemonService/GetAgentStatus": {
-		Method:            "/gibson.daemon.v1.DaemonService/GetAgentStatus",
 		Service:           "gibson.daemon.v1.DaemonService",
 		Relation:          "member",
 		ObjectType:        "tenant",
@@ -1034,7 +939,6 @@ var Registry = map[string]Entry{
 		Self:              false,
 	},
 	"/gibson.daemon.v1.DaemonService/GetCapabilityManifest": {
-		Method:            "/gibson.daemon.v1.DaemonService/GetCapabilityManifest",
 		Service:           "gibson.daemon.v1.DaemonService",
 		Relation:          "member",
 		ObjectType:        "tenant",
@@ -1044,7 +948,6 @@ var Registry = map[string]Entry{
 		Self:              false,
 	},
 	"/gibson.daemon.v1.DaemonService/GetComponentLogs": {
-		Method:            "/gibson.daemon.v1.DaemonService/GetComponentLogs",
 		Service:           "gibson.daemon.v1.DaemonService",
 		Relation:          "member",
 		ObjectType:        "tenant",
@@ -1054,7 +957,6 @@ var Registry = map[string]Entry{
 		Self:              false,
 	},
 	"/gibson.daemon.v1.DaemonService/GetMissionDefinition": {
-		Method:            "/gibson.daemon.v1.DaemonService/GetMissionDefinition",
 		Service:           "gibson.daemon.v1.DaemonService",
 		Relation:          "member",
 		ObjectType:        "tenant",
@@ -1064,7 +966,6 @@ var Registry = map[string]Entry{
 		Self:              false,
 	},
 	"/gibson.daemon.v1.DaemonService/GetMissionGraph": {
-		Method:            "/gibson.daemon.v1.DaemonService/GetMissionGraph",
 		Service:           "gibson.daemon.v1.DaemonService",
 		Relation:          "member",
 		ObjectType:        "tenant",
@@ -1074,7 +975,6 @@ var Registry = map[string]Entry{
 		Self:              false,
 	},
 	"/gibson.daemon.v1.DaemonService/GetMissionHistory": {
-		Method:            "/gibson.daemon.v1.DaemonService/GetMissionHistory",
 		Service:           "gibson.daemon.v1.DaemonService",
 		Relation:          "member",
 		ObjectType:        "tenant",
@@ -1084,7 +984,6 @@ var Registry = map[string]Entry{
 		Self:              false,
 	},
 	"/gibson.daemon.v1.DaemonService/GetMissionLayout": {
-		Method:            "/gibson.daemon.v1.DaemonService/GetMissionLayout",
 		Service:           "gibson.daemon.v1.DaemonService",
 		Relation:          "member",
 		ObjectType:        "tenant",
@@ -1094,7 +993,6 @@ var Registry = map[string]Entry{
 		Self:              false,
 	},
 	"/gibson.daemon.v1.DaemonService/GetMyPermissions": {
-		Method:            "/gibson.daemon.v1.DaemonService/GetMyPermissions",
 		Service:           "gibson.daemon.v1.DaemonService",
 		Relation:          "",
 		ObjectType:        "",
@@ -1104,7 +1002,6 @@ var Registry = map[string]Entry{
 		Self:              true,
 	},
 	"/gibson.daemon.v1.DaemonService/GetTarget": {
-		Method:            "/gibson.daemon.v1.DaemonService/GetTarget",
 		Service:           "gibson.daemon.v1.DaemonService",
 		Relation:          "member",
 		ObjectType:        "tenant",
@@ -1114,7 +1011,6 @@ var Registry = map[string]Entry{
 		Self:              false,
 	},
 	"/gibson.daemon.v1.DaemonService/HoverMissionCUE": {
-		Method:            "/gibson.daemon.v1.DaemonService/HoverMissionCUE",
 		Service:           "gibson.daemon.v1.DaemonService",
 		Relation:          "writer",
 		ObjectType:        "tenant",
@@ -1124,7 +1020,6 @@ var Registry = map[string]Entry{
 		Self:              false,
 	},
 	"/gibson.daemon.v1.DaemonService/ListAgents": {
-		Method:            "/gibson.daemon.v1.DaemonService/ListAgents",
 		Service:           "gibson.daemon.v1.DaemonService",
 		Relation:          "member",
 		ObjectType:        "tenant",
@@ -1134,7 +1029,6 @@ var Registry = map[string]Entry{
 		Self:              false,
 	},
 	"/gibson.daemon.v1.DaemonService/ListCatalogMissions": {
-		Method:            "/gibson.daemon.v1.DaemonService/ListCatalogMissions",
 		Service:           "gibson.daemon.v1.DaemonService",
 		Relation:          "member",
 		ObjectType:        "tenant",
@@ -1144,7 +1038,6 @@ var Registry = map[string]Entry{
 		Self:              false,
 	},
 	"/gibson.daemon.v1.DaemonService/ListMissionDefinitions": {
-		Method:            "/gibson.daemon.v1.DaemonService/ListMissionDefinitions",
 		Service:           "gibson.daemon.v1.DaemonService",
 		Relation:          "member",
 		ObjectType:        "tenant",
@@ -1154,7 +1047,6 @@ var Registry = map[string]Entry{
 		Self:              false,
 	},
 	"/gibson.daemon.v1.DaemonService/ListMissions": {
-		Method:            "/gibson.daemon.v1.DaemonService/ListMissions",
 		Service:           "gibson.daemon.v1.DaemonService",
 		Relation:          "member",
 		ObjectType:        "tenant",
@@ -1164,7 +1056,6 @@ var Registry = map[string]Entry{
 		Self:              false,
 	},
 	"/gibson.daemon.v1.DaemonService/ListMyMemberships": {
-		Method:            "/gibson.daemon.v1.DaemonService/ListMyMemberships",
 		Service:           "gibson.daemon.v1.DaemonService",
 		Relation:          "",
 		ObjectType:        "",
@@ -1174,7 +1065,6 @@ var Registry = map[string]Entry{
 		Self:              true,
 	},
 	"/gibson.daemon.v1.DaemonService/ListPlugins": {
-		Method:            "/gibson.daemon.v1.DaemonService/ListPlugins",
 		Service:           "gibson.daemon.v1.DaemonService",
 		Relation:          "member",
 		ObjectType:        "tenant",
@@ -1184,7 +1074,6 @@ var Registry = map[string]Entry{
 		Self:              false,
 	},
 	"/gibson.daemon.v1.DaemonService/ListTargets": {
-		Method:            "/gibson.daemon.v1.DaemonService/ListTargets",
 		Service:           "gibson.daemon.v1.DaemonService",
 		Relation:          "member",
 		ObjectType:        "tenant",
@@ -1194,7 +1083,6 @@ var Registry = map[string]Entry{
 		Self:              false,
 	},
 	"/gibson.daemon.v1.DaemonService/ListTools": {
-		Method:            "/gibson.daemon.v1.DaemonService/ListTools",
 		Service:           "gibson.daemon.v1.DaemonService",
 		Relation:          "member",
 		ObjectType:        "tenant",
@@ -1204,7 +1092,6 @@ var Registry = map[string]Entry{
 		Self:              false,
 	},
 	"/gibson.daemon.v1.DaemonService/PauseMission": {
-		Method:            "/gibson.daemon.v1.DaemonService/PauseMission",
 		Service:           "gibson.daemon.v1.DaemonService",
 		Relation:          "writer",
 		ObjectType:        "tenant",
@@ -1214,7 +1101,6 @@ var Registry = map[string]Entry{
 		Self:              false,
 	},
 	"/gibson.daemon.v1.DaemonService/Ping": {
-		Method:            "/gibson.daemon.v1.DaemonService/Ping",
 		Service:           "gibson.daemon.v1.DaemonService",
 		Relation:          "",
 		ObjectType:        "",
@@ -1224,7 +1110,6 @@ var Registry = map[string]Entry{
 		Self:              false,
 	},
 	"/gibson.daemon.v1.DaemonService/QueryPlugin": {
-		Method:            "/gibson.daemon.v1.DaemonService/QueryPlugin",
 		Service:           "gibson.daemon.v1.DaemonService",
 		Relation:          "member",
 		ObjectType:        "tenant",
@@ -1234,7 +1119,6 @@ var Registry = map[string]Entry{
 		Self:              false,
 	},
 	"/gibson.daemon.v1.DaemonService/RenderCatalogMission": {
-		Method:            "/gibson.daemon.v1.DaemonService/RenderCatalogMission",
 		Service:           "gibson.daemon.v1.DaemonService",
 		Relation:          "member",
 		ObjectType:        "tenant",
@@ -1244,7 +1128,6 @@ var Registry = map[string]Entry{
 		Self:              false,
 	},
 	"/gibson.daemon.v1.DaemonService/RenewCapabilityGrant": {
-		Method:            "/gibson.daemon.v1.DaemonService/RenewCapabilityGrant",
 		Service:           "gibson.daemon.v1.DaemonService",
 		Relation:          "member",
 		ObjectType:        "tenant",
@@ -1254,7 +1137,6 @@ var Registry = map[string]Entry{
 		Self:              false,
 	},
 	"/gibson.daemon.v1.DaemonService/ResumeMission": {
-		Method:            "/gibson.daemon.v1.DaemonService/ResumeMission",
 		Service:           "gibson.daemon.v1.DaemonService",
 		Relation:          "writer",
 		ObjectType:        "tenant",
@@ -1264,7 +1146,6 @@ var Registry = map[string]Entry{
 		Self:              false,
 	},
 	"/gibson.daemon.v1.DaemonService/RunMission": {
-		Method:            "/gibson.daemon.v1.DaemonService/RunMission",
 		Service:           "gibson.daemon.v1.DaemonService",
 		Relation:          "writer",
 		ObjectType:        "tenant",
@@ -1274,7 +1155,6 @@ var Registry = map[string]Entry{
 		Self:              false,
 	},
 	"/gibson.daemon.v1.DaemonService/SaveMissionLayout": {
-		Method:            "/gibson.daemon.v1.DaemonService/SaveMissionLayout",
 		Service:           "gibson.daemon.v1.DaemonService",
 		Relation:          "writer",
 		ObjectType:        "tenant",
@@ -1284,7 +1164,6 @@ var Registry = map[string]Entry{
 		Self:              false,
 	},
 	"/gibson.daemon.v1.DaemonService/ShowComponent": {
-		Method:            "/gibson.daemon.v1.DaemonService/ShowComponent",
 		Service:           "gibson.daemon.v1.DaemonService",
 		Relation:          "member",
 		ObjectType:        "tenant",
@@ -1294,7 +1173,6 @@ var Registry = map[string]Entry{
 		Self:              false,
 	},
 	"/gibson.daemon.v1.DaemonService/StartComponent": {
-		Method:            "/gibson.daemon.v1.DaemonService/StartComponent",
 		Service:           "gibson.daemon.v1.DaemonService",
 		Relation:          "admin",
 		ObjectType:        "tenant",
@@ -1304,7 +1182,6 @@ var Registry = map[string]Entry{
 		Self:              false,
 	},
 	"/gibson.daemon.v1.DaemonService/Status": {
-		Method:            "/gibson.daemon.v1.DaemonService/Status",
 		Service:           "gibson.daemon.v1.DaemonService",
 		Relation:          "member",
 		ObjectType:        "tenant",
@@ -1314,7 +1191,6 @@ var Registry = map[string]Entry{
 		Self:              false,
 	},
 	"/gibson.daemon.v1.DaemonService/StopComponent": {
-		Method:            "/gibson.daemon.v1.DaemonService/StopComponent",
 		Service:           "gibson.daemon.v1.DaemonService",
 		Relation:          "admin",
 		ObjectType:        "tenant",
@@ -1324,7 +1200,6 @@ var Registry = map[string]Entry{
 		Self:              false,
 	},
 	"/gibson.daemon.v1.DaemonService/StopMission": {
-		Method:            "/gibson.daemon.v1.DaemonService/StopMission",
 		Service:           "gibson.daemon.v1.DaemonService",
 		Relation:          "writer",
 		ObjectType:        "tenant",
@@ -1334,7 +1209,6 @@ var Registry = map[string]Entry{
 		Self:              false,
 	},
 	"/gibson.daemon.v1.DaemonService/Subscribe": {
-		Method:            "/gibson.daemon.v1.DaemonService/Subscribe",
 		Service:           "gibson.daemon.v1.DaemonService",
 		Relation:          "member",
 		ObjectType:        "tenant",
@@ -1344,7 +1218,6 @@ var Registry = map[string]Entry{
 		Self:              false,
 	},
 	"/gibson.daemon.v1.DaemonService/UpdateMissionDefinition": {
-		Method:            "/gibson.daemon.v1.DaemonService/UpdateMissionDefinition",
 		Service:           "gibson.daemon.v1.DaemonService",
 		Relation:          "writer",
 		ObjectType:        "tenant",
@@ -1354,7 +1227,6 @@ var Registry = map[string]Entry{
 		Self:              false,
 	},
 	"/gibson.daemon.v1.DaemonService/UpdateTarget": {
-		Method:            "/gibson.daemon.v1.DaemonService/UpdateTarget",
 		Service:           "gibson.daemon.v1.DaemonService",
 		Relation:          "writer",
 		ObjectType:        "tenant",
@@ -1364,7 +1236,6 @@ var Registry = map[string]Entry{
 		Self:              false,
 	},
 	"/gibson.daemon.v1.DaemonService/ValidateMissionCUE": {
-		Method:            "/gibson.daemon.v1.DaemonService/ValidateMissionCUE",
 		Service:           "gibson.daemon.v1.DaemonService",
 		Relation:          "writer",
 		ObjectType:        "tenant",
@@ -1374,7 +1245,6 @@ var Registry = map[string]Entry{
 		Self:              false,
 	},
 	"/gibson.daemon.v1.DaemonService/WatchManifestInvalidations": {
-		Method:            "/gibson.daemon.v1.DaemonService/WatchManifestInvalidations",
 		Service:           "gibson.daemon.v1.DaemonService",
 		Relation:          "member",
 		ObjectType:        "tenant",
@@ -1384,7 +1254,6 @@ var Registry = map[string]Entry{
 		Self:              false,
 	},
 	"/gibson.graph.v1.GraphService/GetFindingCounts": {
-		Method:            "/gibson.graph.v1.GraphService/GetFindingCounts",
 		Service:           "gibson.graph.v1.GraphService",
 		Relation:          "member",
 		ObjectType:        "tenant",
@@ -1394,7 +1263,6 @@ var Registry = map[string]Entry{
 		Self:              false,
 	},
 	"/gibson.graph.v1.GraphService/GetFindingTimeSeries": {
-		Method:            "/gibson.graph.v1.GraphService/GetFindingTimeSeries",
 		Service:           "gibson.graph.v1.GraphService",
 		Relation:          "member",
 		ObjectType:        "tenant",
@@ -1404,7 +1272,6 @@ var Registry = map[string]Entry{
 		Self:              false,
 	},
 	"/gibson.graph.v1.GraphService/GetFindings": {
-		Method:            "/gibson.graph.v1.GraphService/GetFindings",
 		Service:           "gibson.graph.v1.GraphService",
 		Relation:          "member",
 		ObjectType:        "tenant",
@@ -1414,7 +1281,6 @@ var Registry = map[string]Entry{
 		Self:              false,
 	},
 	"/gibson.graph.v1.GraphService/GetGraphContext": {
-		Method:            "/gibson.graph.v1.GraphService/GetGraphContext",
 		Service:           "gibson.graph.v1.GraphService",
 		Relation:          "member",
 		ObjectType:        "tenant",
@@ -1424,7 +1290,6 @@ var Registry = map[string]Entry{
 		Self:              false,
 	},
 	"/gibson.graph.v1.GraphService/GetGraphStats": {
-		Method:            "/gibson.graph.v1.GraphService/GetGraphStats",
 		Service:           "gibson.graph.v1.GraphService",
 		Relation:          "member",
 		ObjectType:        "tenant",
@@ -1434,7 +1299,6 @@ var Registry = map[string]Entry{
 		Self:              false,
 	},
 	"/gibson.graph.v1.GraphService/GetGraphSummary": {
-		Method:            "/gibson.graph.v1.GraphService/GetGraphSummary",
 		Service:           "gibson.graph.v1.GraphService",
 		Relation:          "member",
 		ObjectType:        "tenant",
@@ -1444,7 +1308,6 @@ var Registry = map[string]Entry{
 		Self:              false,
 	},
 	"/gibson.graph.v1.GraphService/GetMissionGraph": {
-		Method:            "/gibson.graph.v1.GraphService/GetMissionGraph",
 		Service:           "gibson.graph.v1.GraphService",
 		Relation:          "member",
 		ObjectType:        "tenant",
@@ -1454,7 +1317,6 @@ var Registry = map[string]Entry{
 		Self:              false,
 	},
 	"/gibson.graph.v1.GraphService/GetTenantGraph": {
-		Method:            "/gibson.graph.v1.GraphService/GetTenantGraph",
 		Service:           "gibson.graph.v1.GraphService",
 		Relation:          "member",
 		ObjectType:        "tenant",
@@ -1464,7 +1326,6 @@ var Registry = map[string]Entry{
 		Self:              false,
 	},
 	"/gibson.graph.v1.GraphService/QueryPaths": {
-		Method:            "/gibson.graph.v1.GraphService/QueryPaths",
 		Service:           "gibson.graph.v1.GraphService",
 		Relation:          "member",
 		ObjectType:        "tenant",
@@ -1474,7 +1335,6 @@ var Registry = map[string]Entry{
 		Self:              false,
 	},
 	"/gibson.graph.v1.GraphService/WatchGraphUpdates": {
-		Method:            "/gibson.graph.v1.GraphService/WatchGraphUpdates",
 		Service:           "gibson.graph.v1.GraphService",
 		Relation:          "member",
 		ObjectType:        "tenant",
@@ -1484,7 +1344,6 @@ var Registry = map[string]Entry{
 		Self:              false,
 	},
 	"/gibson.harness.v1.HarnessCallbackService/ApplicationFindings": {
-		Method:            "/gibson.harness.v1.HarnessCallbackService/ApplicationFindings",
 		Service:           "gibson.harness.v1.HarnessCallbackService",
 		Relation:          "can_use",
 		ObjectType:        "component",
@@ -1494,7 +1353,6 @@ var Registry = map[string]Entry{
 		Self:              false,
 	},
 	"/gibson.harness.v1.HarnessCallbackService/Authorize": {
-		Method:            "/gibson.harness.v1.HarnessCallbackService/Authorize",
 		Service:           "gibson.harness.v1.HarnessCallbackService",
 		Relation:          "can_use",
 		ObjectType:        "component",
@@ -1504,7 +1362,6 @@ var Registry = map[string]Entry{
 		Self:              false,
 	},
 	"/gibson.harness.v1.HarnessCallbackService/CallToolProto": {
-		Method:            "/gibson.harness.v1.HarnessCallbackService/CallToolProto",
 		Service:           "gibson.harness.v1.HarnessCallbackService",
 		Relation:          "can_use",
 		ObjectType:        "component",
@@ -1514,7 +1371,6 @@ var Registry = map[string]Entry{
 		Self:              false,
 	},
 	"/gibson.harness.v1.HarnessCallbackService/CallToolProtoStream": {
-		Method:            "/gibson.harness.v1.HarnessCallbackService/CallToolProtoStream",
 		Service:           "gibson.harness.v1.HarnessCallbackService",
 		Relation:          "can_use",
 		ObjectType:        "component",
@@ -1524,7 +1380,6 @@ var Registry = map[string]Entry{
 		Self:              false,
 	},
 	"/gibson.harness.v1.HarnessCallbackService/CancelMission": {
-		Method:            "/gibson.harness.v1.HarnessCallbackService/CancelMission",
 		Service:           "gibson.harness.v1.HarnessCallbackService",
 		Relation:          "can_use",
 		ObjectType:        "component",
@@ -1534,7 +1389,6 @@ var Registry = map[string]Entry{
 		Self:              false,
 	},
 	"/gibson.harness.v1.HarnessCallbackService/CloseJob": {
-		Method:            "/gibson.harness.v1.HarnessCallbackService/CloseJob",
 		Service:           "gibson.harness.v1.HarnessCallbackService",
 		Relation:          "can_use",
 		ObjectType:        "component",
@@ -1544,7 +1398,6 @@ var Registry = map[string]Entry{
 		Self:              false,
 	},
 	"/gibson.harness.v1.HarnessCallbackService/CreateMission": {
-		Method:            "/gibson.harness.v1.HarnessCallbackService/CreateMission",
 		Service:           "gibson.harness.v1.HarnessCallbackService",
 		Relation:          "can_use",
 		ObjectType:        "component",
@@ -1554,7 +1407,6 @@ var Registry = map[string]Entry{
 		Self:              false,
 	},
 	"/gibson.harness.v1.HarnessCallbackService/DelegateToAgent": {
-		Method:            "/gibson.harness.v1.HarnessCallbackService/DelegateToAgent",
 		Service:           "gibson.harness.v1.HarnessCallbackService",
 		Relation:          "can_use",
 		ObjectType:        "component",
@@ -1564,7 +1416,6 @@ var Registry = map[string]Entry{
 		Self:              false,
 	},
 	"/gibson.harness.v1.HarnessCallbackService/DeleteSessionContext": {
-		Method:            "/gibson.harness.v1.HarnessCallbackService/DeleteSessionContext",
 		Service:           "gibson.harness.v1.HarnessCallbackService",
 		Relation:          "can_use",
 		ObjectType:        "component",
@@ -1574,7 +1425,6 @@ var Registry = map[string]Entry{
 		Self:              false,
 	},
 	"/gibson.harness.v1.HarnessCallbackService/DevboxExec": {
-		Method:            "/gibson.harness.v1.HarnessCallbackService/DevboxExec",
 		Service:           "gibson.harness.v1.HarnessCallbackService",
 		Relation:          "can_use",
 		ObjectType:        "component",
@@ -1584,7 +1434,6 @@ var Registry = map[string]Entry{
 		Self:              false,
 	},
 	"/gibson.harness.v1.HarnessCallbackService/FindSimilarAttacks": {
-		Method:            "/gibson.harness.v1.HarnessCallbackService/FindSimilarAttacks",
 		Service:           "gibson.harness.v1.HarnessCallbackService",
 		Relation:          "can_use",
 		ObjectType:        "component",
@@ -1594,7 +1443,6 @@ var Registry = map[string]Entry{
 		Self:              false,
 	},
 	"/gibson.harness.v1.HarnessCallbackService/FindSimilarFindings": {
-		Method:            "/gibson.harness.v1.HarnessCallbackService/FindSimilarFindings",
 		Service:           "gibson.harness.v1.HarnessCallbackService",
 		Relation:          "can_use",
 		ObjectType:        "component",
@@ -1604,7 +1452,6 @@ var Registry = map[string]Entry{
 		Self:              false,
 	},
 	"/gibson.harness.v1.HarnessCallbackService/GenerateNodeID": {
-		Method:            "/gibson.harness.v1.HarnessCallbackService/GenerateNodeID",
 		Service:           "gibson.harness.v1.HarnessCallbackService",
 		Relation:          "can_use",
 		ObjectType:        "component",
@@ -1614,7 +1461,6 @@ var Registry = map[string]Entry{
 		Self:              false,
 	},
 	"/gibson.harness.v1.HarnessCallbackService/GetAttackChains": {
-		Method:            "/gibson.harness.v1.HarnessCallbackService/GetAttackChains",
 		Service:           "gibson.harness.v1.HarnessCallbackService",
 		Relation:          "can_use",
 		ObjectType:        "component",
@@ -1624,7 +1470,6 @@ var Registry = map[string]Entry{
 		Self:              false,
 	},
 	"/gibson.harness.v1.HarnessCallbackService/GetCredential": {
-		Method:            "/gibson.harness.v1.HarnessCallbackService/GetCredential",
 		Service:           "gibson.harness.v1.HarnessCallbackService",
 		Relation:          "can_resolve",
 		ObjectType:        "secret",
@@ -1634,7 +1479,6 @@ var Registry = map[string]Entry{
 		Self:              false,
 	},
 	"/gibson.harness.v1.HarnessCallbackService/GetFindings": {
-		Method:            "/gibson.harness.v1.HarnessCallbackService/GetFindings",
 		Service:           "gibson.harness.v1.HarnessCallbackService",
 		Relation:          "can_use",
 		ObjectType:        "component",
@@ -1644,7 +1488,6 @@ var Registry = map[string]Entry{
 		Self:              false,
 	},
 	"/gibson.harness.v1.HarnessCallbackService/GetMissionResults": {
-		Method:            "/gibson.harness.v1.HarnessCallbackService/GetMissionResults",
 		Service:           "gibson.harness.v1.HarnessCallbackService",
 		Relation:          "can_use",
 		ObjectType:        "component",
@@ -1654,7 +1497,6 @@ var Registry = map[string]Entry{
 		Self:              false,
 	},
 	"/gibson.harness.v1.HarnessCallbackService/GetMissionRunHistory": {
-		Method:            "/gibson.harness.v1.HarnessCallbackService/GetMissionRunHistory",
 		Service:           "gibson.harness.v1.HarnessCallbackService",
 		Relation:          "can_use",
 		ObjectType:        "component",
@@ -1664,7 +1506,6 @@ var Registry = map[string]Entry{
 		Self:              false,
 	},
 	"/gibson.harness.v1.HarnessCallbackService/GetMissionStatus": {
-		Method:            "/gibson.harness.v1.HarnessCallbackService/GetMissionStatus",
 		Service:           "gibson.harness.v1.HarnessCallbackService",
 		Relation:          "can_use",
 		ObjectType:        "component",
@@ -1674,7 +1515,6 @@ var Registry = map[string]Entry{
 		Self:              false,
 	},
 	"/gibson.harness.v1.HarnessCallbackService/GetPlanContext": {
-		Method:            "/gibson.harness.v1.HarnessCallbackService/GetPlanContext",
 		Service:           "gibson.harness.v1.HarnessCallbackService",
 		Relation:          "can_use",
 		ObjectType:        "component",
@@ -1684,7 +1524,6 @@ var Registry = map[string]Entry{
 		Self:              false,
 	},
 	"/gibson.harness.v1.HarnessCallbackService/GetRelatedFindings": {
-		Method:            "/gibson.harness.v1.HarnessCallbackService/GetRelatedFindings",
 		Service:           "gibson.harness.v1.HarnessCallbackService",
 		Relation:          "can_use",
 		ObjectType:        "component",
@@ -1694,7 +1533,6 @@ var Registry = map[string]Entry{
 		Self:              false,
 	},
 	"/gibson.harness.v1.HarnessCallbackService/GetRunFindings": {
-		Method:            "/gibson.harness.v1.HarnessCallbackService/GetRunFindings",
 		Service:           "gibson.harness.v1.HarnessCallbackService",
 		Relation:          "can_use",
 		ObjectType:        "component",
@@ -1704,7 +1542,6 @@ var Registry = map[string]Entry{
 		Self:              false,
 	},
 	"/gibson.harness.v1.HarnessCallbackService/GetSessionContext": {
-		Method:            "/gibson.harness.v1.HarnessCallbackService/GetSessionContext",
 		Service:           "gibson.harness.v1.HarnessCallbackService",
 		Relation:          "can_use",
 		ObjectType:        "component",
@@ -1714,7 +1551,6 @@ var Registry = map[string]Entry{
 		Self:              false,
 	},
 	"/gibson.harness.v1.HarnessCallbackService/GetTaxonomySchema": {
-		Method:            "/gibson.harness.v1.HarnessCallbackService/GetTaxonomySchema",
 		Service:           "gibson.harness.v1.HarnessCallbackService",
 		Relation:          "can_use",
 		ObjectType:        "component",
@@ -1724,7 +1560,6 @@ var Registry = map[string]Entry{
 		Self:              false,
 	},
 	"/gibson.harness.v1.HarnessCallbackService/LLMComplete": {
-		Method:            "/gibson.harness.v1.HarnessCallbackService/LLMComplete",
 		Service:           "gibson.harness.v1.HarnessCallbackService",
 		Relation:          "can_use",
 		ObjectType:        "component",
@@ -1734,7 +1569,6 @@ var Registry = map[string]Entry{
 		Self:              false,
 	},
 	"/gibson.harness.v1.HarnessCallbackService/LLMCompleteStructured": {
-		Method:            "/gibson.harness.v1.HarnessCallbackService/LLMCompleteStructured",
 		Service:           "gibson.harness.v1.HarnessCallbackService",
 		Relation:          "can_use",
 		ObjectType:        "component",
@@ -1744,7 +1578,6 @@ var Registry = map[string]Entry{
 		Self:              false,
 	},
 	"/gibson.harness.v1.HarnessCallbackService/LLMCompleteWithTools": {
-		Method:            "/gibson.harness.v1.HarnessCallbackService/LLMCompleteWithTools",
 		Service:           "gibson.harness.v1.HarnessCallbackService",
 		Relation:          "can_use",
 		ObjectType:        "component",
@@ -1754,7 +1587,6 @@ var Registry = map[string]Entry{
 		Self:              false,
 	},
 	"/gibson.harness.v1.HarnessCallbackService/LLMStream": {
-		Method:            "/gibson.harness.v1.HarnessCallbackService/LLMStream",
 		Service:           "gibson.harness.v1.HarnessCallbackService",
 		Relation:          "can_use",
 		ObjectType:        "component",
@@ -1764,7 +1596,6 @@ var Registry = map[string]Entry{
 		Self:              false,
 	},
 	"/gibson.harness.v1.HarnessCallbackService/ListAgents": {
-		Method:            "/gibson.harness.v1.HarnessCallbackService/ListAgents",
 		Service:           "gibson.harness.v1.HarnessCallbackService",
 		Relation:          "can_use",
 		ObjectType:        "component",
@@ -1774,7 +1605,6 @@ var Registry = map[string]Entry{
 		Self:              false,
 	},
 	"/gibson.harness.v1.HarnessCallbackService/ListMissions": {
-		Method:            "/gibson.harness.v1.HarnessCallbackService/ListMissions",
 		Service:           "gibson.harness.v1.HarnessCallbackService",
 		Relation:          "can_use",
 		ObjectType:        "component",
@@ -1784,7 +1614,6 @@ var Registry = map[string]Entry{
 		Self:              false,
 	},
 	"/gibson.harness.v1.HarnessCallbackService/ListPlugins": {
-		Method:            "/gibson.harness.v1.HarnessCallbackService/ListPlugins",
 		Service:           "gibson.harness.v1.HarnessCallbackService",
 		Relation:          "can_use",
 		ObjectType:        "component",
@@ -1794,7 +1623,6 @@ var Registry = map[string]Entry{
 		Self:              false,
 	},
 	"/gibson.harness.v1.HarnessCallbackService/ListTools": {
-		Method:            "/gibson.harness.v1.HarnessCallbackService/ListTools",
 		Service:           "gibson.harness.v1.HarnessCallbackService",
 		Relation:          "can_use",
 		ObjectType:        "component",
@@ -1804,7 +1632,6 @@ var Registry = map[string]Entry{
 		Self:              false,
 	},
 	"/gibson.harness.v1.HarnessCallbackService/Observe": {
-		Method:            "/gibson.harness.v1.HarnessCallbackService/Observe",
 		Service:           "gibson.harness.v1.HarnessCallbackService",
 		Relation:          "can_use",
 		ObjectType:        "component",
@@ -1814,7 +1641,6 @@ var Registry = map[string]Entry{
 		Self:              false,
 	},
 	"/gibson.harness.v1.HarnessCallbackService/OpenJob": {
-		Method:            "/gibson.harness.v1.HarnessCallbackService/OpenJob",
 		Service:           "gibson.harness.v1.HarnessCallbackService",
 		Relation:          "can_use",
 		ObjectType:        "component",
@@ -1824,7 +1650,6 @@ var Registry = map[string]Entry{
 		Self:              false,
 	},
 	"/gibson.harness.v1.HarnessCallbackService/PlaceBet": {
-		Method:            "/gibson.harness.v1.HarnessCallbackService/PlaceBet",
 		Service:           "gibson.harness.v1.HarnessCallbackService",
 		Relation:          "can_use",
 		ObjectType:        "component",
@@ -1834,7 +1659,6 @@ var Registry = map[string]Entry{
 		Self:              false,
 	},
 	"/gibson.harness.v1.HarnessCallbackService/ProposeOntologyExtension": {
-		Method:            "/gibson.harness.v1.HarnessCallbackService/ProposeOntologyExtension",
 		Service:           "gibson.harness.v1.HarnessCallbackService",
 		Relation:          "can_use",
 		ObjectType:        "component",
@@ -1844,7 +1668,6 @@ var Registry = map[string]Entry{
 		Self:              false,
 	},
 	"/gibson.harness.v1.HarnessCallbackService/PullJob": {
-		Method:            "/gibson.harness.v1.HarnessCallbackService/PullJob",
 		Service:           "gibson.harness.v1.HarnessCallbackService",
 		Relation:          "can_use",
 		ObjectType:        "component",
@@ -1854,7 +1677,6 @@ var Registry = map[string]Entry{
 		Self:              false,
 	},
 	"/gibson.harness.v1.HarnessCallbackService/PutSessionContext": {
-		Method:            "/gibson.harness.v1.HarnessCallbackService/PutSessionContext",
 		Service:           "gibson.harness.v1.HarnessCallbackService",
 		Relation:          "can_use",
 		ObjectType:        "component",
@@ -1864,7 +1686,6 @@ var Registry = map[string]Entry{
 		Self:              false,
 	},
 	"/gibson.harness.v1.HarnessCallbackService/QueryNodes": {
-		Method:            "/gibson.harness.v1.HarnessCallbackService/QueryNodes",
 		Service:           "gibson.harness.v1.HarnessCallbackService",
 		Relation:          "can_use",
 		ObjectType:        "component",
@@ -1874,7 +1695,6 @@ var Registry = map[string]Entry{
 		Self:              false,
 	},
 	"/gibson.harness.v1.HarnessCallbackService/QueryPlugin": {
-		Method:            "/gibson.harness.v1.HarnessCallbackService/QueryPlugin",
 		Service:           "gibson.harness.v1.HarnessCallbackService",
 		Relation:          "can_use",
 		ObjectType:        "component",
@@ -1884,7 +1704,6 @@ var Registry = map[string]Entry{
 		Self:              false,
 	},
 	"/gibson.harness.v1.HarnessCallbackService/QueueToolWork": {
-		Method:            "/gibson.harness.v1.HarnessCallbackService/QueueToolWork",
 		Service:           "gibson.harness.v1.HarnessCallbackService",
 		Relation:          "can_use",
 		ObjectType:        "component",
@@ -1894,7 +1713,6 @@ var Registry = map[string]Entry{
 		Self:              false,
 	},
 	"/gibson.harness.v1.HarnessCallbackService/RecordSpan": {
-		Method:            "/gibson.harness.v1.HarnessCallbackService/RecordSpan",
 		Service:           "gibson.harness.v1.HarnessCallbackService",
 		Relation:          "can_use",
 		ObjectType:        "component",
@@ -1904,7 +1722,6 @@ var Registry = map[string]Entry{
 		Self:              false,
 	},
 	"/gibson.harness.v1.HarnessCallbackService/RecordSpans": {
-		Method:            "/gibson.harness.v1.HarnessCallbackService/RecordSpans",
 		Service:           "gibson.harness.v1.HarnessCallbackService",
 		Relation:          "can_use",
 		ObjectType:        "component",
@@ -1914,7 +1731,6 @@ var Registry = map[string]Entry{
 		Self:              false,
 	},
 	"/gibson.harness.v1.HarnessCallbackService/ReportDeliverable": {
-		Method:            "/gibson.harness.v1.HarnessCallbackService/ReportDeliverable",
 		Service:           "gibson.harness.v1.HarnessCallbackService",
 		Relation:          "can_use",
 		ObjectType:        "component",
@@ -1924,7 +1740,6 @@ var Registry = map[string]Entry{
 		Self:              false,
 	},
 	"/gibson.harness.v1.HarnessCallbackService/ReportJobState": {
-		Method:            "/gibson.harness.v1.HarnessCallbackService/ReportJobState",
 		Service:           "gibson.harness.v1.HarnessCallbackService",
 		Relation:          "can_use",
 		ObjectType:        "component",
@@ -1934,7 +1749,6 @@ var Registry = map[string]Entry{
 		Self:              false,
 	},
 	"/gibson.harness.v1.HarnessCallbackService/ReportStepHints": {
-		Method:            "/gibson.harness.v1.HarnessCallbackService/ReportStepHints",
 		Service:           "gibson.harness.v1.HarnessCallbackService",
 		Relation:          "can_use",
 		ObjectType:        "component",
@@ -1944,7 +1758,6 @@ var Registry = map[string]Entry{
 		Self:              false,
 	},
 	"/gibson.harness.v1.HarnessCallbackService/RequestDestructiveAuthorization": {
-		Method:            "/gibson.harness.v1.HarnessCallbackService/RequestDestructiveAuthorization",
 		Service:           "gibson.harness.v1.HarnessCallbackService",
 		Relation:          "can_use",
 		ObjectType:        "component",
@@ -1954,7 +1767,6 @@ var Registry = map[string]Entry{
 		Self:              false,
 	},
 	"/gibson.harness.v1.HarnessCallbackService/RunMission": {
-		Method:            "/gibson.harness.v1.HarnessCallbackService/RunMission",
 		Service:           "gibson.harness.v1.HarnessCallbackService",
 		Relation:          "can_use",
 		ObjectType:        "component",
@@ -1964,7 +1776,6 @@ var Registry = map[string]Entry{
 		Self:              false,
 	},
 	"/gibson.harness.v1.HarnessCallbackService/SearchTools": {
-		Method:            "/gibson.harness.v1.HarnessCallbackService/SearchTools",
 		Service:           "gibson.harness.v1.HarnessCallbackService",
 		Relation:          "can_use",
 		ObjectType:        "component",
@@ -1974,7 +1785,6 @@ var Registry = map[string]Entry{
 		Self:              false,
 	},
 	"/gibson.harness.v1.HarnessCallbackService/SendInput": {
-		Method:            "/gibson.harness.v1.HarnessCallbackService/SendInput",
 		Service:           "gibson.harness.v1.HarnessCallbackService",
 		Relation:          "can_use",
 		ObjectType:        "component",
@@ -1984,7 +1794,6 @@ var Registry = map[string]Entry{
 		Self:              false,
 	},
 	"/gibson.harness.v1.HarnessCallbackService/SubmitFinding": {
-		Method:            "/gibson.harness.v1.HarnessCallbackService/SubmitFinding",
 		Service:           "gibson.harness.v1.HarnessCallbackService",
 		Relation:          "can_use",
 		ObjectType:        "component",
@@ -1994,7 +1803,6 @@ var Registry = map[string]Entry{
 		Self:              false,
 	},
 	"/gibson.harness.v1.HarnessCallbackService/SubmitProof": {
-		Method:            "/gibson.harness.v1.HarnessCallbackService/SubmitProof",
 		Service:           "gibson.harness.v1.HarnessCallbackService",
 		Relation:          "can_use",
 		ObjectType:        "component",
@@ -2004,7 +1812,6 @@ var Registry = map[string]Entry{
 		Self:              false,
 	},
 	"/gibson.harness.v1.HarnessCallbackService/SubscribeInput": {
-		Method:            "/gibson.harness.v1.HarnessCallbackService/SubscribeInput",
 		Service:           "gibson.harness.v1.HarnessCallbackService",
 		Relation:          "can_use",
 		ObjectType:        "component",
@@ -2014,7 +1821,6 @@ var Registry = map[string]Entry{
 		Self:              false,
 	},
 	"/gibson.harness.v1.HarnessCallbackService/ToolResults": {
-		Method:            "/gibson.harness.v1.HarnessCallbackService/ToolResults",
 		Service:           "gibson.harness.v1.HarnessCallbackService",
 		Relation:          "can_use",
 		ObjectType:        "component",
@@ -2024,7 +1830,6 @@ var Registry = map[string]Entry{
 		Self:              false,
 	},
 	"/gibson.harness.v1.HarnessCallbackService/ValidateFinding": {
-		Method:            "/gibson.harness.v1.HarnessCallbackService/ValidateFinding",
 		Service:           "gibson.harness.v1.HarnessCallbackService",
 		Relation:          "can_use",
 		ObjectType:        "component",
@@ -2034,7 +1839,6 @@ var Registry = map[string]Entry{
 		Self:              false,
 	},
 	"/gibson.harness.v1.HarnessCallbackService/ValidateGraphNode": {
-		Method:            "/gibson.harness.v1.HarnessCallbackService/ValidateGraphNode",
 		Service:           "gibson.harness.v1.HarnessCallbackService",
 		Relation:          "can_use",
 		ObjectType:        "component",
@@ -2044,7 +1848,6 @@ var Registry = map[string]Entry{
 		Self:              false,
 	},
 	"/gibson.harness.v1.HarnessCallbackService/ValidateRelationship": {
-		Method:            "/gibson.harness.v1.HarnessCallbackService/ValidateRelationship",
 		Service:           "gibson.harness.v1.HarnessCallbackService",
 		Relation:          "can_use",
 		ObjectType:        "component",
@@ -2054,7 +1857,6 @@ var Registry = map[string]Entry{
 		Self:              false,
 	},
 	"/gibson.harness.v1.HarnessCallbackService/WaitForMission": {
-		Method:            "/gibson.harness.v1.HarnessCallbackService/WaitForMission",
 		Service:           "gibson.harness.v1.HarnessCallbackService",
 		Relation:          "can_use",
 		ObjectType:        "component",
@@ -2064,7 +1866,6 @@ var Registry = map[string]Entry{
 		Self:              false,
 	},
 	"/gibson.harness.v1.HarnessCallbackService/WorkspaceCommit": {
-		Method:            "/gibson.harness.v1.HarnessCallbackService/WorkspaceCommit",
 		Service:           "gibson.harness.v1.HarnessCallbackService",
 		Relation:          "can_use",
 		ObjectType:        "component",
@@ -2074,7 +1875,6 @@ var Registry = map[string]Entry{
 		Self:              false,
 	},
 	"/gibson.harness.v1.HarnessCallbackService/WorkspaceGetInfo": {
-		Method:            "/gibson.harness.v1.HarnessCallbackService/WorkspaceGetInfo",
 		Service:           "gibson.harness.v1.HarnessCallbackService",
 		Relation:          "can_use",
 		ObjectType:        "component",
@@ -2084,7 +1884,6 @@ var Registry = map[string]Entry{
 		Self:              false,
 	},
 	"/gibson.harness.v1.HarnessCallbackService/WorkspaceList": {
-		Method:            "/gibson.harness.v1.HarnessCallbackService/WorkspaceList",
 		Service:           "gibson.harness.v1.HarnessCallbackService",
 		Relation:          "can_use",
 		ObjectType:        "component",
@@ -2094,7 +1893,6 @@ var Registry = map[string]Entry{
 		Self:              false,
 	},
 	"/gibson.harness.v1.HarnessCallbackService/WorkspaceListFiles": {
-		Method:            "/gibson.harness.v1.HarnessCallbackService/WorkspaceListFiles",
 		Service:           "gibson.harness.v1.HarnessCallbackService",
 		Relation:          "can_use",
 		ObjectType:        "component",
@@ -2104,7 +1902,6 @@ var Registry = map[string]Entry{
 		Self:              false,
 	},
 	"/gibson.harness.v1.HarnessCallbackService/WorkspacePush": {
-		Method:            "/gibson.harness.v1.HarnessCallbackService/WorkspacePush",
 		Service:           "gibson.harness.v1.HarnessCallbackService",
 		Relation:          "can_use",
 		ObjectType:        "component",
@@ -2114,7 +1911,6 @@ var Registry = map[string]Entry{
 		Self:              false,
 	},
 	"/gibson.harness.v1.HarnessCallbackService/WorkspaceReadFile": {
-		Method:            "/gibson.harness.v1.HarnessCallbackService/WorkspaceReadFile",
 		Service:           "gibson.harness.v1.HarnessCallbackService",
 		Relation:          "can_use",
 		ObjectType:        "component",
@@ -2124,7 +1920,6 @@ var Registry = map[string]Entry{
 		Self:              false,
 	},
 	"/gibson.harness.v1.HarnessCallbackService/WorkspaceWriteFile": {
-		Method:            "/gibson.harness.v1.HarnessCallbackService/WorkspaceWriteFile",
 		Service:           "gibson.harness.v1.HarnessCallbackService",
 		Relation:          "can_use",
 		ObjectType:        "component",
@@ -2134,7 +1929,6 @@ var Registry = map[string]Entry{
 		Self:              false,
 	},
 	"/gibson.harness.v1.HarnessCallbackService/WorldView": {
-		Method:            "/gibson.harness.v1.HarnessCallbackService/WorldView",
 		Service:           "gibson.harness.v1.HarnessCallbackService",
 		Relation:          "can_use",
 		ObjectType:        "component",
@@ -2144,7 +1938,6 @@ var Registry = map[string]Entry{
 		Self:              false,
 	},
 	"/gibson.identity.v1.IdentityService/WhoAmI": {
-		Method:            "/gibson.identity.v1.IdentityService/WhoAmI",
 		Service:           "gibson.identity.v1.IdentityService",
 		Relation:          "member",
 		ObjectType:        "tenant",
@@ -2154,7 +1947,6 @@ var Registry = map[string]Entry{
 		Self:              false,
 	},
 	"/gibson.job.v1.JobService/CloseJob": {
-		Method:            "/gibson.job.v1.JobService/CloseJob",
 		Service:           "gibson.job.v1.JobService",
 		Relation:          "can_close",
 		ObjectType:        "job",
@@ -2164,7 +1956,6 @@ var Registry = map[string]Entry{
 		Self:              false,
 	},
 	"/gibson.job.v1.JobService/GetJob": {
-		Method:            "/gibson.job.v1.JobService/GetJob",
 		Service:           "gibson.job.v1.JobService",
 		Relation:          "can_read",
 		ObjectType:        "job",
@@ -2174,7 +1965,6 @@ var Registry = map[string]Entry{
 		Self:              false,
 	},
 	"/gibson.job.v1.JobService/ListJobs": {
-		Method:            "/gibson.job.v1.JobService/ListJobs",
 		Service:           "gibson.job.v1.JobService",
 		Relation:          "member",
 		ObjectType:        "tenant",
@@ -2184,7 +1974,6 @@ var Registry = map[string]Entry{
 		Self:              false,
 	},
 	"/gibson.job.v1.JobService/OpenJob": {
-		Method:            "/gibson.job.v1.JobService/OpenJob",
 		Service:           "gibson.job.v1.JobService",
 		Relation:          "can_send",
 		ObjectType:        "bank",
@@ -2194,7 +1983,6 @@ var Registry = map[string]Entry{
 		Self:              false,
 	},
 	"/gibson.job.v1.JobService/SendInput": {
-		Method:            "/gibson.job.v1.JobService/SendInput",
 		Service:           "gibson.job.v1.JobService",
 		Relation:          "can_send",
 		ObjectType:        "job",
@@ -2204,7 +1992,6 @@ var Registry = map[string]Entry{
 		Self:              false,
 	},
 	"/gibson.job.v1.JobService/StreamJobEvents": {
-		Method:            "/gibson.job.v1.JobService/StreamJobEvents",
 		Service:           "gibson.job.v1.JobService",
 		Relation:          "can_read",
 		ObjectType:        "job",
@@ -2214,7 +2001,6 @@ var Registry = map[string]Entry{
 		Self:              false,
 	},
 	"/gibson.plugin.v1.PluginInvokeService/PluginInvoke": {
-		Method:            "/gibson.plugin.v1.PluginInvokeService/PluginInvoke",
 		Service:           "gibson.plugin.v1.PluginInvokeService",
 		Relation:          "can_invoke",
 		ObjectType:        "plugin",
@@ -2224,7 +2010,6 @@ var Registry = map[string]Entry{
 		Self:              false,
 	},
 	"/gibson.pluginadmin.v1.PluginAdminService/EditPluginSecretBinding": {
-		Method:            "/gibson.pluginadmin.v1.PluginAdminService/EditPluginSecretBinding",
 		Service:           "gibson.pluginadmin.v1.PluginAdminService",
 		Relation:          "admin",
 		ObjectType:        "tenant",
@@ -2234,7 +2019,6 @@ var Registry = map[string]Entry{
 		Self:              false,
 	},
 	"/gibson.pluginadmin.v1.PluginAdminService/GetPluginInstall": {
-		Method:            "/gibson.pluginadmin.v1.PluginAdminService/GetPluginInstall",
 		Service:           "gibson.pluginadmin.v1.PluginAdminService",
 		Relation:          "member",
 		ObjectType:        "tenant",
@@ -2244,7 +2028,6 @@ var Registry = map[string]Entry{
 		Self:              false,
 	},
 	"/gibson.pluginadmin.v1.PluginAdminService/ListPluginInstalls": {
-		Method:            "/gibson.pluginadmin.v1.PluginAdminService/ListPluginInstalls",
 		Service:           "gibson.pluginadmin.v1.PluginAdminService",
 		Relation:          "member",
 		ObjectType:        "tenant",
@@ -2254,7 +2037,6 @@ var Registry = map[string]Entry{
 		Self:              false,
 	},
 	"/gibson.pluginadmin.v1.PluginAdminService/RegisterPlugin": {
-		Method:            "/gibson.pluginadmin.v1.PluginAdminService/RegisterPlugin",
 		Service:           "gibson.pluginadmin.v1.PluginAdminService",
 		Relation:          "admin",
 		ObjectType:        "tenant",
@@ -2264,7 +2046,6 @@ var Registry = map[string]Entry{
 		Self:              false,
 	},
 	"/gibson.pluginadmin.v1.PluginAdminService/RevokePluginSecretBinding": {
-		Method:            "/gibson.pluginadmin.v1.PluginAdminService/RevokePluginSecretBinding",
 		Service:           "gibson.pluginadmin.v1.PluginAdminService",
 		Relation:          "admin",
 		ObjectType:        "tenant",
@@ -2274,7 +2055,6 @@ var Registry = map[string]Entry{
 		Self:              false,
 	},
 	"/gibson.secrets.v1.SecretsService/CountSecrets": {
-		Method:            "/gibson.secrets.v1.SecretsService/CountSecrets",
 		Service:           "gibson.secrets.v1.SecretsService",
 		Relation:          "admin",
 		ObjectType:        "tenant",
@@ -2284,7 +2064,6 @@ var Registry = map[string]Entry{
 		Self:              false,
 	},
 	"/gibson.secrets.v1.SecretsService/DeleteSecret": {
-		Method:            "/gibson.secrets.v1.SecretsService/DeleteSecret",
 		Service:           "gibson.secrets.v1.SecretsService",
 		Relation:          "admin",
 		ObjectType:        "tenant",
@@ -2294,7 +2073,6 @@ var Registry = map[string]Entry{
 		Self:              false,
 	},
 	"/gibson.secrets.v1.SecretsService/GetBrokerConfig": {
-		Method:            "/gibson.secrets.v1.SecretsService/GetBrokerConfig",
 		Service:           "gibson.secrets.v1.SecretsService",
 		Relation:          "admin",
 		ObjectType:        "tenant",
@@ -2304,7 +2082,6 @@ var Registry = map[string]Entry{
 		Self:              false,
 	},
 	"/gibson.secrets.v1.SecretsService/GetMissionAudit": {
-		Method:            "/gibson.secrets.v1.SecretsService/GetMissionAudit",
 		Service:           "gibson.secrets.v1.SecretsService",
 		Relation:          "member",
 		ObjectType:        "tenant",
@@ -2314,7 +2091,6 @@ var Registry = map[string]Entry{
 		Self:              false,
 	},
 	"/gibson.secrets.v1.SecretsService/GetSecret": {
-		Method:            "/gibson.secrets.v1.SecretsService/GetSecret",
 		Service:           "gibson.secrets.v1.SecretsService",
 		Relation:          "member",
 		ObjectType:        "tenant",
@@ -2324,7 +2100,6 @@ var Registry = map[string]Entry{
 		Self:              false,
 	},
 	"/gibson.secrets.v1.SecretsService/ListSecrets": {
-		Method:            "/gibson.secrets.v1.SecretsService/ListSecrets",
 		Service:           "gibson.secrets.v1.SecretsService",
 		Relation:          "member",
 		ObjectType:        "tenant",
@@ -2334,7 +2109,6 @@ var Registry = map[string]Entry{
 		Self:              false,
 	},
 	"/gibson.secrets.v1.SecretsService/ProbeBrokerConfig": {
-		Method:            "/gibson.secrets.v1.SecretsService/ProbeBrokerConfig",
 		Service:           "gibson.secrets.v1.SecretsService",
 		Relation:          "admin",
 		ObjectType:        "tenant",
@@ -2344,7 +2118,6 @@ var Registry = map[string]Entry{
 		Self:              false,
 	},
 	"/gibson.secrets.v1.SecretsService/RotateSecret": {
-		Method:            "/gibson.secrets.v1.SecretsService/RotateSecret",
 		Service:           "gibson.secrets.v1.SecretsService",
 		Relation:          "admin",
 		ObjectType:        "tenant",
@@ -2354,7 +2127,6 @@ var Registry = map[string]Entry{
 		Self:              false,
 	},
 	"/gibson.secrets.v1.SecretsService/SetBrokerConfig": {
-		Method:            "/gibson.secrets.v1.SecretsService/SetBrokerConfig",
 		Service:           "gibson.secrets.v1.SecretsService",
 		Relation:          "admin",
 		ObjectType:        "tenant",
@@ -2364,7 +2136,6 @@ var Registry = map[string]Entry{
 		Self:              false,
 	},
 	"/gibson.secrets.v1.SecretsService/SetSecret": {
-		Method:            "/gibson.secrets.v1.SecretsService/SetSecret",
 		Service:           "gibson.secrets.v1.SecretsService",
 		Relation:          "admin",
 		ObjectType:        "tenant",
@@ -2374,7 +2145,6 @@ var Registry = map[string]Entry{
 		Self:              false,
 	},
 	"/gibson.session.v1.SessionService/ListMySessions": {
-		Method:            "/gibson.session.v1.SessionService/ListMySessions",
 		Service:           "gibson.session.v1.SessionService",
 		Relation:          "member",
 		ObjectType:        "tenant",
@@ -2384,7 +2154,6 @@ var Registry = map[string]Entry{
 		Self:              false,
 	},
 	"/gibson.session.v1.SessionService/RevokeMySession": {
-		Method:            "/gibson.session.v1.SessionService/RevokeMySession",
 		Service:           "gibson.session.v1.SessionService",
 		Relation:          "member",
 		ObjectType:        "tenant",
@@ -2394,7 +2163,6 @@ var Registry = map[string]Entry{
 		Self:              false,
 	},
 	"/gibson.tenant.v1.AdminTenantService/AdminApproveRegistration": {
-		Method:            "/gibson.tenant.v1.AdminTenantService/AdminApproveRegistration",
 		Service:           "gibson.tenant.v1.AdminTenantService",
 		Relation:          "platform_owner",
 		ObjectType:        "system_tenant",
@@ -2404,7 +2172,6 @@ var Registry = map[string]Entry{
 		Self:              false,
 	},
 	"/gibson.tenant.v1.AdminTenantService/AdminDeleteTenant": {
-		Method:            "/gibson.tenant.v1.AdminTenantService/AdminDeleteTenant",
 		Service:           "gibson.tenant.v1.AdminTenantService",
 		Relation:          "platform_owner",
 		ObjectType:        "system_tenant",
@@ -2414,7 +2181,6 @@ var Registry = map[string]Entry{
 		Self:              false,
 	},
 	"/gibson.tenant.v1.AdminTenantService/AdminGetTenantBilling": {
-		Method:            "/gibson.tenant.v1.AdminTenantService/AdminGetTenantBilling",
 		Service:           "gibson.tenant.v1.AdminTenantService",
 		Relation:          "platform_owner",
 		ObjectType:        "system_tenant",
@@ -2424,7 +2190,6 @@ var Registry = map[string]Entry{
 		Self:              false,
 	},
 	"/gibson.tenant.v1.AdminTenantService/AdminListPendingRegistrations": {
-		Method:            "/gibson.tenant.v1.AdminTenantService/AdminListPendingRegistrations",
 		Service:           "gibson.tenant.v1.AdminTenantService",
 		Relation:          "platform_owner",
 		ObjectType:        "system_tenant",
@@ -2434,7 +2199,6 @@ var Registry = map[string]Entry{
 		Self:              false,
 	},
 	"/gibson.tenant.v1.AdminTenantService/AdminProvisionTenant": {
-		Method:            "/gibson.tenant.v1.AdminTenantService/AdminProvisionTenant",
 		Service:           "gibson.tenant.v1.AdminTenantService",
 		Relation:          "platform_owner",
 		ObjectType:        "system_tenant",
@@ -2444,7 +2208,6 @@ var Registry = map[string]Entry{
 		Self:              false,
 	},
 	"/gibson.tenant.v1.AdminTenantService/AdminRejectRegistration": {
-		Method:            "/gibson.tenant.v1.AdminTenantService/AdminRejectRegistration",
 		Service:           "gibson.tenant.v1.AdminTenantService",
 		Relation:          "platform_owner",
 		ObjectType:        "system_tenant",
@@ -2454,7 +2217,6 @@ var Registry = map[string]Entry{
 		Self:              false,
 	},
 	"/gibson.tenant.v1.AdminTenantService/AdminUpdateTenant": {
-		Method:            "/gibson.tenant.v1.AdminTenantService/AdminUpdateTenant",
 		Service:           "gibson.tenant.v1.AdminTenantService",
 		Relation:          "platform_owner",
 		ObjectType:        "system_tenant",
@@ -2464,7 +2226,6 @@ var Registry = map[string]Entry{
 		Self:              false,
 	},
 	"/gibson.tenant.v1.BudgetService/GetBudget": {
-		Method:            "/gibson.tenant.v1.BudgetService/GetBudget",
 		Service:           "gibson.tenant.v1.BudgetService",
 		Relation:          "member",
 		ObjectType:        "tenant",
@@ -2474,7 +2235,6 @@ var Registry = map[string]Entry{
 		Self:              false,
 	},
 	"/gibson.tenant.v1.BudgetService/GetTenantBudgetDefaults": {
-		Method:            "/gibson.tenant.v1.BudgetService/GetTenantBudgetDefaults",
 		Service:           "gibson.tenant.v1.BudgetService",
 		Relation:          "member",
 		ObjectType:        "tenant",
@@ -2484,7 +2244,6 @@ var Registry = map[string]Entry{
 		Self:              false,
 	},
 	"/gibson.tenant.v1.BudgetService/ListBudgetStatus": {
-		Method:            "/gibson.tenant.v1.BudgetService/ListBudgetStatus",
 		Service:           "gibson.tenant.v1.BudgetService",
 		Relation:          "member",
 		ObjectType:        "tenant",
@@ -2494,7 +2253,6 @@ var Registry = map[string]Entry{
 		Self:              false,
 	},
 	"/gibson.tenant.v1.BudgetService/ListBudgets": {
-		Method:            "/gibson.tenant.v1.BudgetService/ListBudgets",
 		Service:           "gibson.tenant.v1.BudgetService",
 		Relation:          "member",
 		ObjectType:        "tenant",
@@ -2504,7 +2262,6 @@ var Registry = map[string]Entry{
 		Self:              false,
 	},
 	"/gibson.tenant.v1.BudgetService/SetBudget": {
-		Method:            "/gibson.tenant.v1.BudgetService/SetBudget",
 		Service:           "gibson.tenant.v1.BudgetService",
 		Relation:          "member",
 		ObjectType:        "tenant",
@@ -2514,7 +2271,6 @@ var Registry = map[string]Entry{
 		Self:              false,
 	},
 	"/gibson.tenant.v1.BudgetService/SetTenantBudgetDefaults": {
-		Method:            "/gibson.tenant.v1.BudgetService/SetTenantBudgetDefaults",
 		Service:           "gibson.tenant.v1.BudgetService",
 		Relation:          "admin",
 		ObjectType:        "tenant",
@@ -2524,7 +2280,6 @@ var Registry = map[string]Entry{
 		Self:              false,
 	},
 	"/gibson.tenant.v1.ConnectorAuthService/CompleteConnectorAuthorization": {
-		Method:            "/gibson.tenant.v1.ConnectorAuthService/CompleteConnectorAuthorization",
 		Service:           "gibson.tenant.v1.ConnectorAuthService",
 		Relation:          "admin",
 		ObjectType:        "tenant",
@@ -2534,7 +2289,6 @@ var Registry = map[string]Entry{
 		Self:              false,
 	},
 	"/gibson.tenant.v1.ConnectorAuthService/GetConnectorAuthStatus": {
-		Method:            "/gibson.tenant.v1.ConnectorAuthService/GetConnectorAuthStatus",
 		Service:           "gibson.tenant.v1.ConnectorAuthService",
 		Relation:          "member",
 		ObjectType:        "tenant",
@@ -2544,7 +2298,6 @@ var Registry = map[string]Entry{
 		Self:              false,
 	},
 	"/gibson.tenant.v1.ConnectorAuthService/RevokeConnectorGrant": {
-		Method:            "/gibson.tenant.v1.ConnectorAuthService/RevokeConnectorGrant",
 		Service:           "gibson.tenant.v1.ConnectorAuthService",
 		Relation:          "admin",
 		ObjectType:        "tenant",
@@ -2554,7 +2307,6 @@ var Registry = map[string]Entry{
 		Self:              false,
 	},
 	"/gibson.tenant.v1.ConnectorAuthService/SetConnectorSecret": {
-		Method:            "/gibson.tenant.v1.ConnectorAuthService/SetConnectorSecret",
 		Service:           "gibson.tenant.v1.ConnectorAuthService",
 		Relation:          "admin",
 		ObjectType:        "tenant",
@@ -2564,7 +2316,6 @@ var Registry = map[string]Entry{
 		Self:              false,
 	},
 	"/gibson.tenant.v1.ConnectorAuthService/StartConnectorAuthorization": {
-		Method:            "/gibson.tenant.v1.ConnectorAuthService/StartConnectorAuthorization",
 		Service:           "gibson.tenant.v1.ConnectorAuthService",
 		Relation:          "admin",
 		ObjectType:        "tenant",
@@ -2574,7 +2325,6 @@ var Registry = map[string]Entry{
 		Self:              false,
 	},
 	"/gibson.tenant.v1.ConnectorService/DisableConnector": {
-		Method:            "/gibson.tenant.v1.ConnectorService/DisableConnector",
 		Service:           "gibson.tenant.v1.ConnectorService",
 		Relation:          "admin",
 		ObjectType:        "tenant",
@@ -2584,7 +2334,6 @@ var Registry = map[string]Entry{
 		Self:              false,
 	},
 	"/gibson.tenant.v1.ConnectorService/EnableConnector": {
-		Method:            "/gibson.tenant.v1.ConnectorService/EnableConnector",
 		Service:           "gibson.tenant.v1.ConnectorService",
 		Relation:          "admin",
 		ObjectType:        "tenant",
@@ -2594,7 +2343,6 @@ var Registry = map[string]Entry{
 		Self:              false,
 	},
 	"/gibson.tenant.v1.ConnectorService/ListCatalog": {
-		Method:            "/gibson.tenant.v1.ConnectorService/ListCatalog",
 		Service:           "gibson.tenant.v1.ConnectorService",
 		Relation:          "member",
 		ObjectType:        "tenant",
@@ -2604,7 +2352,6 @@ var Registry = map[string]Entry{
 		Self:              false,
 	},
 	"/gibson.tenant.v1.ConnectorService/ListConnectors": {
-		Method:            "/gibson.tenant.v1.ConnectorService/ListConnectors",
 		Service:           "gibson.tenant.v1.ConnectorService",
 		Relation:          "member",
 		ObjectType:        "tenant",
@@ -2614,7 +2361,6 @@ var Registry = map[string]Entry{
 		Self:              false,
 	},
 	"/gibson.tenant.v1.DomainPackService/DisableDomainPack": {
-		Method:            "/gibson.tenant.v1.DomainPackService/DisableDomainPack",
 		Service:           "gibson.tenant.v1.DomainPackService",
 		Relation:          "admin",
 		ObjectType:        "tenant",
@@ -2624,7 +2370,6 @@ var Registry = map[string]Entry{
 		Self:              false,
 	},
 	"/gibson.tenant.v1.DomainPackService/EnableDomainPack": {
-		Method:            "/gibson.tenant.v1.DomainPackService/EnableDomainPack",
 		Service:           "gibson.tenant.v1.DomainPackService",
 		Relation:          "admin",
 		ObjectType:        "tenant",
@@ -2634,7 +2379,6 @@ var Registry = map[string]Entry{
 		Self:              false,
 	},
 	"/gibson.tenant.v1.DomainPackService/ListDomainPackCatalog": {
-		Method:            "/gibson.tenant.v1.DomainPackService/ListDomainPackCatalog",
 		Service:           "gibson.tenant.v1.DomainPackService",
 		Relation:          "member",
 		ObjectType:        "tenant",
@@ -2644,7 +2388,6 @@ var Registry = map[string]Entry{
 		Self:              false,
 	},
 	"/gibson.tenant.v1.DomainPackService/ListDomainPacks": {
-		Method:            "/gibson.tenant.v1.DomainPackService/ListDomainPacks",
 		Service:           "gibson.tenant.v1.DomainPackService",
 		Relation:          "member",
 		ObjectType:        "tenant",
@@ -2654,7 +2397,6 @@ var Registry = map[string]Entry{
 		Self:              false,
 	},
 	"/gibson.tenant.v1.GrantsService/DeleteAgentGrants": {
-		Method:            "/gibson.tenant.v1.GrantsService/DeleteAgentGrants",
 		Service:           "gibson.tenant.v1.GrantsService",
 		Relation:          "admin",
 		ObjectType:        "tenant",
@@ -2664,7 +2406,6 @@ var Registry = map[string]Entry{
 		Self:              false,
 	},
 	"/gibson.tenant.v1.GrantsService/ListActiveGrants": {
-		Method:            "/gibson.tenant.v1.GrantsService/ListActiveGrants",
 		Service:           "gibson.tenant.v1.GrantsService",
 		Relation:          "admin",
 		ObjectType:        "tenant",
@@ -2674,7 +2415,6 @@ var Registry = map[string]Entry{
 		Self:              false,
 	},
 	"/gibson.tenant.v1.GrantsService/WriteAgentGrants": {
-		Method:            "/gibson.tenant.v1.GrantsService/WriteAgentGrants",
 		Service:           "gibson.tenant.v1.GrantsService",
 		Relation:          "admin",
 		ObjectType:        "tenant",
@@ -2684,7 +2424,6 @@ var Registry = map[string]Entry{
 		Self:              false,
 	},
 	"/gibson.tenant.v1.MembershipService/AcceptInvitation": {
-		Method:            "/gibson.tenant.v1.MembershipService/AcceptInvitation",
 		Service:           "gibson.tenant.v1.MembershipService",
 		Relation:          "",
 		ObjectType:        "",
@@ -2694,7 +2433,6 @@ var Registry = map[string]Entry{
 		Self:              false,
 	},
 	"/gibson.tenant.v1.MembershipService/AddTeamMember": {
-		Method:            "/gibson.tenant.v1.MembershipService/AddTeamMember",
 		Service:           "gibson.tenant.v1.MembershipService",
 		Relation:          "admin",
 		ObjectType:        "tenant",
@@ -2704,7 +2442,6 @@ var Registry = map[string]Entry{
 		Self:              false,
 	},
 	"/gibson.tenant.v1.MembershipService/CancelInvitation": {
-		Method:            "/gibson.tenant.v1.MembershipService/CancelInvitation",
 		Service:           "gibson.tenant.v1.MembershipService",
 		Relation:          "admin",
 		ObjectType:        "tenant",
@@ -2714,7 +2451,6 @@ var Registry = map[string]Entry{
 		Self:              false,
 	},
 	"/gibson.tenant.v1.MembershipService/CreateTeam": {
-		Method:            "/gibson.tenant.v1.MembershipService/CreateTeam",
 		Service:           "gibson.tenant.v1.MembershipService",
 		Relation:          "admin",
 		ObjectType:        "tenant",
@@ -2724,7 +2460,6 @@ var Registry = map[string]Entry{
 		Self:              false,
 	},
 	"/gibson.tenant.v1.MembershipService/DeleteTeam": {
-		Method:            "/gibson.tenant.v1.MembershipService/DeleteTeam",
 		Service:           "gibson.tenant.v1.MembershipService",
 		Relation:          "admin",
 		ObjectType:        "tenant",
@@ -2734,7 +2469,6 @@ var Registry = map[string]Entry{
 		Self:              false,
 	},
 	"/gibson.tenant.v1.MembershipService/GetReservedNames": {
-		Method:            "/gibson.tenant.v1.MembershipService/GetReservedNames",
 		Service:           "gibson.tenant.v1.MembershipService",
 		Relation:          "",
 		ObjectType:        "",
@@ -2744,7 +2478,6 @@ var Registry = map[string]Entry{
 		Self:              false,
 	},
 	"/gibson.tenant.v1.MembershipService/InviteMember": {
-		Method:            "/gibson.tenant.v1.MembershipService/InviteMember",
 		Service:           "gibson.tenant.v1.MembershipService",
 		Relation:          "admin",
 		ObjectType:        "tenant",
@@ -2754,7 +2487,6 @@ var Registry = map[string]Entry{
 		Self:              false,
 	},
 	"/gibson.tenant.v1.MembershipService/LeaveTenant": {
-		Method:            "/gibson.tenant.v1.MembershipService/LeaveTenant",
 		Service:           "gibson.tenant.v1.MembershipService",
 		Relation:          "member",
 		ObjectType:        "tenant",
@@ -2764,7 +2496,6 @@ var Registry = map[string]Entry{
 		Self:              false,
 	},
 	"/gibson.tenant.v1.MembershipService/ListMembers": {
-		Method:            "/gibson.tenant.v1.MembershipService/ListMembers",
 		Service:           "gibson.tenant.v1.MembershipService",
 		Relation:          "admin",
 		ObjectType:        "tenant",
@@ -2774,7 +2505,6 @@ var Registry = map[string]Entry{
 		Self:              false,
 	},
 	"/gibson.tenant.v1.MembershipService/ListTeamMembers": {
-		Method:            "/gibson.tenant.v1.MembershipService/ListTeamMembers",
 		Service:           "gibson.tenant.v1.MembershipService",
 		Relation:          "admin",
 		ObjectType:        "tenant",
@@ -2784,7 +2514,6 @@ var Registry = map[string]Entry{
 		Self:              false,
 	},
 	"/gibson.tenant.v1.MembershipService/ListTeams": {
-		Method:            "/gibson.tenant.v1.MembershipService/ListTeams",
 		Service:           "gibson.tenant.v1.MembershipService",
 		Relation:          "admin",
 		ObjectType:        "tenant",
@@ -2794,7 +2523,6 @@ var Registry = map[string]Entry{
 		Self:              false,
 	},
 	"/gibson.tenant.v1.MembershipService/RemoveMember": {
-		Method:            "/gibson.tenant.v1.MembershipService/RemoveMember",
 		Service:           "gibson.tenant.v1.MembershipService",
 		Relation:          "admin",
 		ObjectType:        "tenant",
@@ -2804,7 +2532,6 @@ var Registry = map[string]Entry{
 		Self:              false,
 	},
 	"/gibson.tenant.v1.MembershipService/RemoveTeamMember": {
-		Method:            "/gibson.tenant.v1.MembershipService/RemoveTeamMember",
 		Service:           "gibson.tenant.v1.MembershipService",
 		Relation:          "admin",
 		ObjectType:        "tenant",
@@ -2814,7 +2541,6 @@ var Registry = map[string]Entry{
 		Self:              false,
 	},
 	"/gibson.tenant.v1.MembershipService/ResendInvitation": {
-		Method:            "/gibson.tenant.v1.MembershipService/ResendInvitation",
 		Service:           "gibson.tenant.v1.MembershipService",
 		Relation:          "admin",
 		ObjectType:        "tenant",
@@ -2824,7 +2550,6 @@ var Registry = map[string]Entry{
 		Self:              false,
 	},
 	"/gibson.tenant.v1.MembershipService/SetCatalogEnabled": {
-		Method:            "/gibson.tenant.v1.MembershipService/SetCatalogEnabled",
 		Service:           "gibson.tenant.v1.MembershipService",
 		Relation:          "admin",
 		ObjectType:        "tenant",
@@ -2834,7 +2559,6 @@ var Registry = map[string]Entry{
 		Self:              false,
 	},
 	"/gibson.tenant.v1.MembershipService/SetCatalogPublished": {
-		Method:            "/gibson.tenant.v1.MembershipService/SetCatalogPublished",
 		Service:           "gibson.tenant.v1.MembershipService",
 		Relation:          "admin",
 		ObjectType:        "tenant",
@@ -2844,7 +2568,6 @@ var Registry = map[string]Entry{
 		Self:              false,
 	},
 	"/gibson.tenant.v1.MembershipService/SetComponentAccess": {
-		Method:            "/gibson.tenant.v1.MembershipService/SetComponentAccess",
 		Service:           "gibson.tenant.v1.MembershipService",
 		Relation:          "admin",
 		ObjectType:        "tenant",
@@ -2854,7 +2577,6 @@ var Registry = map[string]Entry{
 		Self:              false,
 	},
 	"/gibson.tenant.v1.MembershipService/SetTeamAdmin": {
-		Method:            "/gibson.tenant.v1.MembershipService/SetTeamAdmin",
 		Service:           "gibson.tenant.v1.MembershipService",
 		Relation:          "admin",
 		ObjectType:        "tenant",
@@ -2864,7 +2586,6 @@ var Registry = map[string]Entry{
 		Self:              false,
 	},
 	"/gibson.tenant.v1.MembershipService/SetTenantRole": {
-		Method:            "/gibson.tenant.v1.MembershipService/SetTenantRole",
 		Service:           "gibson.tenant.v1.MembershipService",
 		Relation:          "admin",
 		ObjectType:        "tenant",
@@ -2874,7 +2595,6 @@ var Registry = map[string]Entry{
 		Self:              false,
 	},
 	"/gibson.tenant.v1.MembershipService/TransferOwnership": {
-		Method:            "/gibson.tenant.v1.MembershipService/TransferOwnership",
 		Service:           "gibson.tenant.v1.MembershipService",
 		Relation:          "owner",
 		ObjectType:        "tenant",
@@ -2884,7 +2604,6 @@ var Registry = map[string]Entry{
 		Self:              false,
 	},
 	"/gibson.tenant.v1.ModelAccessService/GrantAccess": {
-		Method:            "/gibson.tenant.v1.ModelAccessService/GrantAccess",
 		Service:           "gibson.tenant.v1.ModelAccessService",
 		Relation:          "writer",
 		ObjectType:        "tenant",
@@ -2894,7 +2613,6 @@ var Registry = map[string]Entry{
 		Self:              false,
 	},
 	"/gibson.tenant.v1.ModelAccessService/ListAccess": {
-		Method:            "/gibson.tenant.v1.ModelAccessService/ListAccess",
 		Service:           "gibson.tenant.v1.ModelAccessService",
 		Relation:          "member",
 		ObjectType:        "tenant",
@@ -2904,7 +2622,6 @@ var Registry = map[string]Entry{
 		Self:              false,
 	},
 	"/gibson.tenant.v1.ModelAccessService/ListModelResolutionEvents": {
-		Method:            "/gibson.tenant.v1.ModelAccessService/ListModelResolutionEvents",
 		Service:           "gibson.tenant.v1.ModelAccessService",
 		Relation:          "member",
 		ObjectType:        "tenant",
@@ -2914,7 +2631,6 @@ var Registry = map[string]Entry{
 		Self:              false,
 	},
 	"/gibson.tenant.v1.ModelAccessService/RevokeAccess": {
-		Method:            "/gibson.tenant.v1.ModelAccessService/RevokeAccess",
 		Service:           "gibson.tenant.v1.ModelAccessService",
 		Relation:          "writer",
 		ObjectType:        "tenant",
@@ -2924,7 +2640,6 @@ var Registry = map[string]Entry{
 		Self:              false,
 	},
 	"/gibson.tenant.v1.OntologyExtensionService/ApproveOntologyExtensionProposal": {
-		Method:            "/gibson.tenant.v1.OntologyExtensionService/ApproveOntologyExtensionProposal",
 		Service:           "gibson.tenant.v1.OntologyExtensionService",
 		Relation:          "owner",
 		ObjectType:        "tenant",
@@ -2934,7 +2649,6 @@ var Registry = map[string]Entry{
 		Self:              false,
 	},
 	"/gibson.tenant.v1.OntologyExtensionService/ListOntologyExtensionProposals": {
-		Method:            "/gibson.tenant.v1.OntologyExtensionService/ListOntologyExtensionProposals",
 		Service:           "gibson.tenant.v1.OntologyExtensionService",
 		Relation:          "admin",
 		ObjectType:        "tenant",
@@ -2944,7 +2658,6 @@ var Registry = map[string]Entry{
 		Self:              false,
 	},
 	"/gibson.tenant.v1.OntologyExtensionService/RejectOntologyExtensionProposal": {
-		Method:            "/gibson.tenant.v1.OntologyExtensionService/RejectOntologyExtensionProposal",
 		Service:           "gibson.tenant.v1.OntologyExtensionService",
 		Relation:          "owner",
 		ObjectType:        "tenant",
@@ -2954,7 +2667,6 @@ var Registry = map[string]Entry{
 		Self:              false,
 	},
 	"/gibson.tenant.v1.OntologyExtensionService/SubmitOntologyExtensionUpstream": {
-		Method:            "/gibson.tenant.v1.OntologyExtensionService/SubmitOntologyExtensionUpstream",
 		Service:           "gibson.tenant.v1.OntologyExtensionService",
 		Relation:          "owner",
 		ObjectType:        "tenant",
@@ -2964,7 +2676,6 @@ var Registry = map[string]Entry{
 		Self:              false,
 	},
 	"/gibson.tenant.v1.ProviderService/CreateProvider": {
-		Method:            "/gibson.tenant.v1.ProviderService/CreateProvider",
 		Service:           "gibson.tenant.v1.ProviderService",
 		Relation:          "writer",
 		ObjectType:        "tenant",
@@ -2974,7 +2685,6 @@ var Registry = map[string]Entry{
 		Self:              false,
 	},
 	"/gibson.tenant.v1.ProviderService/DeleteProvider": {
-		Method:            "/gibson.tenant.v1.ProviderService/DeleteProvider",
 		Service:           "gibson.tenant.v1.ProviderService",
 		Relation:          "writer",
 		ObjectType:        "tenant",
@@ -2984,7 +2694,6 @@ var Registry = map[string]Entry{
 		Self:              false,
 	},
 	"/gibson.tenant.v1.ProviderService/ExecuteLLM": {
-		Method:            "/gibson.tenant.v1.ProviderService/ExecuteLLM",
 		Service:           "gibson.tenant.v1.ProviderService",
 		Relation:          "writer",
 		ObjectType:        "tenant",
@@ -2994,7 +2703,6 @@ var Registry = map[string]Entry{
 		Self:              false,
 	},
 	"/gibson.tenant.v1.ProviderService/GetDefaultProvider": {
-		Method:            "/gibson.tenant.v1.ProviderService/GetDefaultProvider",
 		Service:           "gibson.tenant.v1.ProviderService",
 		Relation:          "member",
 		ObjectType:        "tenant",
@@ -3004,7 +2712,6 @@ var Registry = map[string]Entry{
 		Self:              false,
 	},
 	"/gibson.tenant.v1.ProviderService/GetProvider": {
-		Method:            "/gibson.tenant.v1.ProviderService/GetProvider",
 		Service:           "gibson.tenant.v1.ProviderService",
 		Relation:          "member",
 		ObjectType:        "tenant",
@@ -3014,7 +2721,6 @@ var Registry = map[string]Entry{
 		Self:              false,
 	},
 	"/gibson.tenant.v1.ProviderService/GetProviderHealth": {
-		Method:            "/gibson.tenant.v1.ProviderService/GetProviderHealth",
 		Service:           "gibson.tenant.v1.ProviderService",
 		Relation:          "member",
 		ObjectType:        "tenant",
@@ -3024,7 +2730,6 @@ var Registry = map[string]Entry{
 		Self:              false,
 	},
 	"/gibson.tenant.v1.ProviderService/GetSupportedProviders": {
-		Method:            "/gibson.tenant.v1.ProviderService/GetSupportedProviders",
 		Service:           "gibson.tenant.v1.ProviderService",
 		Relation:          "member",
 		ObjectType:        "tenant",
@@ -3034,7 +2739,6 @@ var Registry = map[string]Entry{
 		Self:              false,
 	},
 	"/gibson.tenant.v1.ProviderService/ListProviderModels": {
-		Method:            "/gibson.tenant.v1.ProviderService/ListProviderModels",
 		Service:           "gibson.tenant.v1.ProviderService",
 		Relation:          "member",
 		ObjectType:        "tenant",
@@ -3044,7 +2748,6 @@ var Registry = map[string]Entry{
 		Self:              false,
 	},
 	"/gibson.tenant.v1.ProviderService/ListProviders": {
-		Method:            "/gibson.tenant.v1.ProviderService/ListProviders",
 		Service:           "gibson.tenant.v1.ProviderService",
 		Relation:          "member",
 		ObjectType:        "tenant",
@@ -3054,7 +2757,6 @@ var Registry = map[string]Entry{
 		Self:              false,
 	},
 	"/gibson.tenant.v1.ProviderService/ProbeProvider": {
-		Method:            "/gibson.tenant.v1.ProviderService/ProbeProvider",
 		Service:           "gibson.tenant.v1.ProviderService",
 		Relation:          "admin",
 		ObjectType:        "tenant",
@@ -3064,7 +2766,6 @@ var Registry = map[string]Entry{
 		Self:              false,
 	},
 	"/gibson.tenant.v1.ProviderService/SetDefaultProvider": {
-		Method:            "/gibson.tenant.v1.ProviderService/SetDefaultProvider",
 		Service:           "gibson.tenant.v1.ProviderService",
 		Relation:          "writer",
 		ObjectType:        "tenant",
@@ -3074,7 +2775,6 @@ var Registry = map[string]Entry{
 		Self:              false,
 	},
 	"/gibson.tenant.v1.ProviderService/TestProvider": {
-		Method:            "/gibson.tenant.v1.ProviderService/TestProvider",
 		Service:           "gibson.tenant.v1.ProviderService",
 		Relation:          "writer",
 		ObjectType:        "tenant",
@@ -3084,7 +2784,6 @@ var Registry = map[string]Entry{
 		Self:              false,
 	},
 	"/gibson.tenant.v1.ProviderService/UpdateProvider": {
-		Method:            "/gibson.tenant.v1.ProviderService/UpdateProvider",
 		Service:           "gibson.tenant.v1.ProviderService",
 		Relation:          "writer",
 		ObjectType:        "tenant",
@@ -3094,7 +2793,6 @@ var Registry = map[string]Entry{
 		Self:              false,
 	},
 	"/gibson.tenant.v1.SecretsService/CountSecrets": {
-		Method:            "/gibson.tenant.v1.SecretsService/CountSecrets",
 		Service:           "gibson.tenant.v1.SecretsService",
 		Relation:          "admin",
 		ObjectType:        "tenant",
@@ -3104,7 +2802,6 @@ var Registry = map[string]Entry{
 		Self:              false,
 	},
 	"/gibson.tenant.v1.SecretsService/DeleteSecret": {
-		Method:            "/gibson.tenant.v1.SecretsService/DeleteSecret",
 		Service:           "gibson.tenant.v1.SecretsService",
 		Relation:          "admin",
 		ObjectType:        "tenant",
@@ -3114,7 +2811,6 @@ var Registry = map[string]Entry{
 		Self:              false,
 	},
 	"/gibson.tenant.v1.SecretsService/GetBrokerConfig": {
-		Method:            "/gibson.tenant.v1.SecretsService/GetBrokerConfig",
 		Service:           "gibson.tenant.v1.SecretsService",
 		Relation:          "admin",
 		ObjectType:        "tenant",
@@ -3124,7 +2820,6 @@ var Registry = map[string]Entry{
 		Self:              false,
 	},
 	"/gibson.tenant.v1.SecretsService/GetMissionAudit": {
-		Method:            "/gibson.tenant.v1.SecretsService/GetMissionAudit",
 		Service:           "gibson.tenant.v1.SecretsService",
 		Relation:          "member",
 		ObjectType:        "tenant",
@@ -3134,7 +2829,6 @@ var Registry = map[string]Entry{
 		Self:              false,
 	},
 	"/gibson.tenant.v1.SecretsService/GetSecret": {
-		Method:            "/gibson.tenant.v1.SecretsService/GetSecret",
 		Service:           "gibson.tenant.v1.SecretsService",
 		Relation:          "member",
 		ObjectType:        "tenant",
@@ -3144,7 +2838,6 @@ var Registry = map[string]Entry{
 		Self:              false,
 	},
 	"/gibson.tenant.v1.SecretsService/ListSecrets": {
-		Method:            "/gibson.tenant.v1.SecretsService/ListSecrets",
 		Service:           "gibson.tenant.v1.SecretsService",
 		Relation:          "member",
 		ObjectType:        "tenant",
@@ -3154,7 +2847,6 @@ var Registry = map[string]Entry{
 		Self:              false,
 	},
 	"/gibson.tenant.v1.SecretsService/ProbeBrokerConfig": {
-		Method:            "/gibson.tenant.v1.SecretsService/ProbeBrokerConfig",
 		Service:           "gibson.tenant.v1.SecretsService",
 		Relation:          "admin",
 		ObjectType:        "tenant",
@@ -3164,7 +2856,6 @@ var Registry = map[string]Entry{
 		Self:              false,
 	},
 	"/gibson.tenant.v1.SecretsService/RotateSecret": {
-		Method:            "/gibson.tenant.v1.SecretsService/RotateSecret",
 		Service:           "gibson.tenant.v1.SecretsService",
 		Relation:          "admin",
 		ObjectType:        "tenant",
@@ -3174,7 +2865,6 @@ var Registry = map[string]Entry{
 		Self:              false,
 	},
 	"/gibson.tenant.v1.SecretsService/SetBrokerConfig": {
-		Method:            "/gibson.tenant.v1.SecretsService/SetBrokerConfig",
 		Service:           "gibson.tenant.v1.SecretsService",
 		Relation:          "admin",
 		ObjectType:        "tenant",
@@ -3184,7 +2874,6 @@ var Registry = map[string]Entry{
 		Self:              false,
 	},
 	"/gibson.tenant.v1.SecretsService/SetSecret": {
-		Method:            "/gibson.tenant.v1.SecretsService/SetSecret",
 		Service:           "gibson.tenant.v1.SecretsService",
 		Relation:          "admin",
 		ObjectType:        "tenant",
@@ -3194,7 +2883,6 @@ var Registry = map[string]Entry{
 		Self:              false,
 	},
 	"/gibson.tenant.v1.SignupService/AttachSignupCustomer": {
-		Method:            "/gibson.tenant.v1.SignupService/AttachSignupCustomer",
 		Service:           "gibson.tenant.v1.SignupService",
 		Relation:          "",
 		ObjectType:        "",
@@ -3204,7 +2892,6 @@ var Registry = map[string]Entry{
 		Self:              false,
 	},
 	"/gibson.tenant.v1.SignupService/RedeemEmailVerification": {
-		Method:            "/gibson.tenant.v1.SignupService/RedeemEmailVerification",
 		Service:           "gibson.tenant.v1.SignupService",
 		Relation:          "",
 		ObjectType:        "",
@@ -3214,7 +2901,6 @@ var Registry = map[string]Entry{
 		Self:              false,
 	},
 	"/gibson.tenant.v1.SignupService/Register": {
-		Method:            "/gibson.tenant.v1.SignupService/Register",
 		Service:           "gibson.tenant.v1.SignupService",
 		Relation:          "",
 		ObjectType:        "",
@@ -3224,7 +2910,6 @@ var Registry = map[string]Entry{
 		Self:              false,
 	},
 	"/gibson.tenant.v1.SignupService/RequestEmailVerification": {
-		Method:            "/gibson.tenant.v1.SignupService/RequestEmailVerification",
 		Service:           "gibson.tenant.v1.SignupService",
 		Relation:          "",
 		ObjectType:        "",
@@ -3234,7 +2919,6 @@ var Registry = map[string]Entry{
 		Self:              false,
 	},
 	"/gibson.tenant.v1.SignupService/Signup": {
-		Method:            "/gibson.tenant.v1.SignupService/Signup",
 		Service:           "gibson.tenant.v1.SignupService",
 		Relation:          "",
 		ObjectType:        "",
@@ -3244,7 +2928,6 @@ var Registry = map[string]Entry{
 		Self:              false,
 	},
 	"/gibson.tenant.v1.TenantProvisioningService/GetTenantProvisioningStatus": {
-		Method:            "/gibson.tenant.v1.TenantProvisioningService/GetTenantProvisioningStatus",
 		Service:           "gibson.tenant.v1.TenantProvisioningService",
 		Relation:          "",
 		ObjectType:        "",
@@ -3254,7 +2937,6 @@ var Registry = map[string]Entry{
 		Self:              false,
 	},
 	"/gibson.tenant.v1.TenantProvisioningService/SetTenantBillingActive": {
-		Method:            "/gibson.tenant.v1.TenantProvisioningService/SetTenantBillingActive",
 		Service:           "gibson.tenant.v1.TenantProvisioningService",
 		Relation:          "",
 		ObjectType:        "",
@@ -3264,7 +2946,6 @@ var Registry = map[string]Entry{
 		Self:              false,
 	},
 	"/gibson.tenant.v1.TenantService/DeleteMissionDraft": {
-		Method:            "/gibson.tenant.v1.TenantService/DeleteMissionDraft",
 		Service:           "gibson.tenant.v1.TenantService",
 		Relation:          "writer",
 		ObjectType:        "tenant",
@@ -3274,7 +2955,6 @@ var Registry = map[string]Entry{
 		Self:              false,
 	},
 	"/gibson.tenant.v1.TenantService/ExportFindings": {
-		Method:            "/gibson.tenant.v1.TenantService/ExportFindings",
 		Service:           "gibson.tenant.v1.TenantService",
 		Relation:          "member",
 		ObjectType:        "tenant",
@@ -3284,7 +2964,6 @@ var Registry = map[string]Entry{
 		Self:              false,
 	},
 	"/gibson.tenant.v1.TenantService/GetMissionDraft": {
-		Method:            "/gibson.tenant.v1.TenantService/GetMissionDraft",
 		Service:           "gibson.tenant.v1.TenantService",
 		Relation:          "writer",
 		ObjectType:        "tenant",
@@ -3294,7 +2973,6 @@ var Registry = map[string]Entry{
 		Self:              false,
 	},
 	"/gibson.tenant.v1.TenantService/GetOnboardingState": {
-		Method:            "/gibson.tenant.v1.TenantService/GetOnboardingState",
 		Service:           "gibson.tenant.v1.TenantService",
 		Relation:          "member",
 		ObjectType:        "tenant",
@@ -3304,7 +2982,6 @@ var Registry = map[string]Entry{
 		Self:              false,
 	},
 	"/gibson.tenant.v1.TenantService/GetTenantBilling": {
-		Method:            "/gibson.tenant.v1.TenantService/GetTenantBilling",
 		Service:           "gibson.tenant.v1.TenantService",
 		Relation:          "admin",
 		ObjectType:        "tenant",
@@ -3314,7 +2991,6 @@ var Registry = map[string]Entry{
 		Self:              false,
 	},
 	"/gibson.tenant.v1.TenantService/GetTenantQuota": {
-		Method:            "/gibson.tenant.v1.TenantService/GetTenantQuota",
 		Service:           "gibson.tenant.v1.TenantService",
 		Relation:          "admin",
 		ObjectType:        "tenant",
@@ -3324,7 +3000,6 @@ var Registry = map[string]Entry{
 		Self:              false,
 	},
 	"/gibson.tenant.v1.TenantService/GetTenantQuotaUsage": {
-		Method:            "/gibson.tenant.v1.TenantService/GetTenantQuotaUsage",
 		Service:           "gibson.tenant.v1.TenantService",
 		Relation:          "member",
 		ObjectType:        "tenant",
@@ -3334,7 +3009,6 @@ var Registry = map[string]Entry{
 		Self:              false,
 	},
 	"/gibson.tenant.v1.TenantService/ListAuditEvents": {
-		Method:            "/gibson.tenant.v1.TenantService/ListAuditEvents",
 		Service:           "gibson.tenant.v1.TenantService",
 		Relation:          "admin",
 		ObjectType:        "tenant",
@@ -3344,7 +3018,6 @@ var Registry = map[string]Entry{
 		Self:              false,
 	},
 	"/gibson.tenant.v1.TenantService/ListMissionDrafts": {
-		Method:            "/gibson.tenant.v1.TenantService/ListMissionDrafts",
 		Service:           "gibson.tenant.v1.TenantService",
 		Relation:          "writer",
 		ObjectType:        "tenant",
@@ -3354,7 +3027,6 @@ var Registry = map[string]Entry{
 		Self:              false,
 	},
 	"/gibson.tenant.v1.TenantService/SaveMissionDraft": {
-		Method:            "/gibson.tenant.v1.TenantService/SaveMissionDraft",
 		Service:           "gibson.tenant.v1.TenantService",
 		Relation:          "writer",
 		ObjectType:        "tenant",
@@ -3364,7 +3036,6 @@ var Registry = map[string]Entry{
 		Self:              false,
 	},
 	"/gibson.tenant.v1.TenantService/UpdateOnboardingState": {
-		Method:            "/gibson.tenant.v1.TenantService/UpdateOnboardingState",
 		Service:           "gibson.tenant.v1.TenantService",
 		Relation:          "writer",
 		ObjectType:        "tenant",
@@ -3374,7 +3045,6 @@ var Registry = map[string]Entry{
 		Self:              false,
 	},
 	"/gibson.tenant.v1.UsageService/ListUsage": {
-		Method:            "/gibson.tenant.v1.UsageService/ListUsage",
 		Service:           "gibson.tenant.v1.UsageService",
 		Relation:          "member",
 		ObjectType:        "tenant",
@@ -3384,7 +3054,6 @@ var Registry = map[string]Entry{
 		Self:              false,
 	},
 	"/gibson.tenant.v1.UserService/ConsumeAttachment": {
-		Method:            "/gibson.tenant.v1.UserService/ConsumeAttachment",
 		Service:           "gibson.tenant.v1.UserService",
 		Relation:          "member",
 		ObjectType:        "tenant",
@@ -3394,7 +3063,6 @@ var Registry = map[string]Entry{
 		Self:              false,
 	},
 	"/gibson.tenant.v1.UserService/DeleteConversation": {
-		Method:            "/gibson.tenant.v1.UserService/DeleteConversation",
 		Service:           "gibson.tenant.v1.UserService",
 		Relation:          "member",
 		ObjectType:        "tenant",
@@ -3404,7 +3072,6 @@ var Registry = map[string]Entry{
 		Self:              false,
 	},
 	"/gibson.tenant.v1.UserService/GetConversation": {
-		Method:            "/gibson.tenant.v1.UserService/GetConversation",
 		Service:           "gibson.tenant.v1.UserService",
 		Relation:          "member",
 		ObjectType:        "tenant",
@@ -3414,7 +3081,6 @@ var Registry = map[string]Entry{
 		Self:              false,
 	},
 	"/gibson.tenant.v1.UserService/GetSignupProgress": {
-		Method:            "/gibson.tenant.v1.UserService/GetSignupProgress",
 		Service:           "gibson.tenant.v1.UserService",
 		Relation:          "",
 		ObjectType:        "",
@@ -3424,7 +3090,6 @@ var Registry = map[string]Entry{
 		Self:              false,
 	},
 	"/gibson.tenant.v1.UserService/GetUserActivity": {
-		Method:            "/gibson.tenant.v1.UserService/GetUserActivity",
 		Service:           "gibson.tenant.v1.UserService",
 		Relation:          "member",
 		ObjectType:        "tenant",
@@ -3434,7 +3099,6 @@ var Registry = map[string]Entry{
 		Self:              false,
 	},
 	"/gibson.tenant.v1.UserService/GetUserLayout": {
-		Method:            "/gibson.tenant.v1.UserService/GetUserLayout",
 		Service:           "gibson.tenant.v1.UserService",
 		Relation:          "member",
 		ObjectType:        "tenant",
@@ -3444,7 +3108,6 @@ var Registry = map[string]Entry{
 		Self:              false,
 	},
 	"/gibson.tenant.v1.UserService/GetUserOnboardingState": {
-		Method:            "/gibson.tenant.v1.UserService/GetUserOnboardingState",
 		Service:           "gibson.tenant.v1.UserService",
 		Relation:          "member",
 		ObjectType:        "tenant",
@@ -3454,7 +3117,6 @@ var Registry = map[string]Entry{
 		Self:              false,
 	},
 	"/gibson.tenant.v1.UserService/GetUserProfile": {
-		Method:            "/gibson.tenant.v1.UserService/GetUserProfile",
 		Service:           "gibson.tenant.v1.UserService",
 		Relation:          "member",
 		ObjectType:        "tenant",
@@ -3464,7 +3126,6 @@ var Registry = map[string]Entry{
 		Self:              false,
 	},
 	"/gibson.tenant.v1.UserService/InvalidateMembershipCache": {
-		Method:            "/gibson.tenant.v1.UserService/InvalidateMembershipCache",
 		Service:           "gibson.tenant.v1.UserService",
 		Relation:          "member",
 		ObjectType:        "tenant",
@@ -3474,7 +3135,6 @@ var Registry = map[string]Entry{
 		Self:              false,
 	},
 	"/gibson.tenant.v1.UserService/ListAlerts": {
-		Method:            "/gibson.tenant.v1.UserService/ListAlerts",
 		Service:           "gibson.tenant.v1.UserService",
 		Relation:          "member",
 		ObjectType:        "tenant",
@@ -3484,7 +3144,6 @@ var Registry = map[string]Entry{
 		Self:              false,
 	},
 	"/gibson.tenant.v1.UserService/ListConversations": {
-		Method:            "/gibson.tenant.v1.UserService/ListConversations",
 		Service:           "gibson.tenant.v1.UserService",
 		Relation:          "member",
 		ObjectType:        "tenant",
@@ -3494,7 +3153,6 @@ var Registry = map[string]Entry{
 		Self:              false,
 	},
 	"/gibson.tenant.v1.UserService/MarkAlertRead": {
-		Method:            "/gibson.tenant.v1.UserService/MarkAlertRead",
 		Service:           "gibson.tenant.v1.UserService",
 		Relation:          "member",
 		ObjectType:        "tenant",
@@ -3504,7 +3162,6 @@ var Registry = map[string]Entry{
 		Self:              false,
 	},
 	"/gibson.tenant.v1.UserService/MarkAllAlertsRead": {
-		Method:            "/gibson.tenant.v1.UserService/MarkAllAlertsRead",
 		Service:           "gibson.tenant.v1.UserService",
 		Relation:          "member",
 		ObjectType:        "tenant",
@@ -3514,7 +3171,6 @@ var Registry = map[string]Entry{
 		Self:              false,
 	},
 	"/gibson.tenant.v1.UserService/RecordUserActivity": {
-		Method:            "/gibson.tenant.v1.UserService/RecordUserActivity",
 		Service:           "gibson.tenant.v1.UserService",
 		Relation:          "member",
 		ObjectType:        "tenant",
@@ -3524,7 +3180,6 @@ var Registry = map[string]Entry{
 		Self:              false,
 	},
 	"/gibson.tenant.v1.UserService/RenameConversation": {
-		Method:            "/gibson.tenant.v1.UserService/RenameConversation",
 		Service:           "gibson.tenant.v1.UserService",
 		Relation:          "member",
 		ObjectType:        "tenant",
@@ -3534,7 +3189,6 @@ var Registry = map[string]Entry{
 		Self:              false,
 	},
 	"/gibson.tenant.v1.UserService/ResetUserLayout": {
-		Method:            "/gibson.tenant.v1.UserService/ResetUserLayout",
 		Service:           "gibson.tenant.v1.UserService",
 		Relation:          "member",
 		ObjectType:        "tenant",
@@ -3544,7 +3198,6 @@ var Registry = map[string]Entry{
 		Self:              false,
 	},
 	"/gibson.tenant.v1.UserService/ResetUserMFA": {
-		Method:            "/gibson.tenant.v1.UserService/ResetUserMFA",
 		Service:           "gibson.tenant.v1.UserService",
 		Relation:          "admin",
 		ObjectType:        "tenant",
@@ -3554,7 +3207,6 @@ var Registry = map[string]Entry{
 		Self:              false,
 	},
 	"/gibson.tenant.v1.UserService/ResetUserOnboardingState": {
-		Method:            "/gibson.tenant.v1.UserService/ResetUserOnboardingState",
 		Service:           "gibson.tenant.v1.UserService",
 		Relation:          "member",
 		ObjectType:        "tenant",
@@ -3564,7 +3216,6 @@ var Registry = map[string]Entry{
 		Self:              false,
 	},
 	"/gibson.tenant.v1.UserService/ResolveUsers": {
-		Method:            "/gibson.tenant.v1.UserService/ResolveUsers",
 		Service:           "gibson.tenant.v1.UserService",
 		Relation:          "member",
 		ObjectType:        "tenant",
@@ -3574,7 +3225,6 @@ var Registry = map[string]Entry{
 		Self:              false,
 	},
 	"/gibson.tenant.v1.UserService/RevokeUserSessions": {
-		Method:            "/gibson.tenant.v1.UserService/RevokeUserSessions",
 		Service:           "gibson.tenant.v1.UserService",
 		Relation:          "member",
 		ObjectType:        "tenant",
@@ -3584,7 +3234,6 @@ var Registry = map[string]Entry{
 		Self:              false,
 	},
 	"/gibson.tenant.v1.UserService/SaveConversation": {
-		Method:            "/gibson.tenant.v1.UserService/SaveConversation",
 		Service:           "gibson.tenant.v1.UserService",
 		Relation:          "member",
 		ObjectType:        "tenant",
@@ -3594,7 +3243,6 @@ var Registry = map[string]Entry{
 		Self:              false,
 	},
 	"/gibson.tenant.v1.UserService/SaveUserLayout": {
-		Method:            "/gibson.tenant.v1.UserService/SaveUserLayout",
 		Service:           "gibson.tenant.v1.UserService",
 		Relation:          "member",
 		ObjectType:        "tenant",
@@ -3604,7 +3252,6 @@ var Registry = map[string]Entry{
 		Self:              false,
 	},
 	"/gibson.tenant.v1.UserService/SetSignupProgress": {
-		Method:            "/gibson.tenant.v1.UserService/SetSignupProgress",
 		Service:           "gibson.tenant.v1.UserService",
 		Relation:          "",
 		ObjectType:        "",
@@ -3614,7 +3261,6 @@ var Registry = map[string]Entry{
 		Self:              false,
 	},
 	"/gibson.tenant.v1.UserService/StageAttachment": {
-		Method:            "/gibson.tenant.v1.UserService/StageAttachment",
 		Service:           "gibson.tenant.v1.UserService",
 		Relation:          "member",
 		ObjectType:        "tenant",
@@ -3624,7 +3270,6 @@ var Registry = map[string]Entry{
 		Self:              false,
 	},
 	"/gibson.tenant.v1.UserService/UpdateUserOnboardingState": {
-		Method:            "/gibson.tenant.v1.UserService/UpdateUserOnboardingState",
 		Service:           "gibson.tenant.v1.UserService",
 		Relation:          "member",
 		ObjectType:        "tenant",
@@ -3634,7 +3279,6 @@ var Registry = map[string]Entry{
 		Self:              false,
 	},
 	"/gibson.tenant.v1.UserService/UpdateUserProfile": {
-		Method:            "/gibson.tenant.v1.UserService/UpdateUserProfile",
 		Service:           "gibson.tenant.v1.UserService",
 		Relation:          "member",
 		ObjectType:        "tenant",
@@ -3644,7 +3288,6 @@ var Registry = map[string]Entry{
 		Self:              false,
 	},
 	"/gibson.tool.v1.ToolService/Execute": {
-		Method:            "/gibson.tool.v1.ToolService/Execute",
 		Service:           "gibson.tool.v1.ToolService",
 		Relation:          "member",
 		ObjectType:        "tenant",
@@ -3654,7 +3297,6 @@ var Registry = map[string]Entry{
 		Self:              false,
 	},
 	"/gibson.tool.v1.ToolService/GetDescriptor": {
-		Method:            "/gibson.tool.v1.ToolService/GetDescriptor",
 		Service:           "gibson.tool.v1.ToolService",
 		Relation:          "member",
 		ObjectType:        "tenant",
@@ -3664,7 +3306,6 @@ var Registry = map[string]Entry{
 		Self:              false,
 	},
 	"/gibson.tool.v1.ToolService/Health": {
-		Method:            "/gibson.tool.v1.ToolService/Health",
 		Service:           "gibson.tool.v1.ToolService",
 		Relation:          "member",
 		ObjectType:        "tenant",
@@ -3674,7 +3315,6 @@ var Registry = map[string]Entry{
 		Self:              false,
 	},
 	"/gibson.tool.v1.ToolService/StreamExecute": {
-		Method:            "/gibson.tool.v1.ToolService/StreamExecute",
 		Service:           "gibson.tool.v1.ToolService",
 		Relation:          "member",
 		ObjectType:        "tenant",
@@ -3684,7 +3324,6 @@ var Registry = map[string]Entry{
 		Self:              false,
 	},
 	"/gibson.world.v1.WorldService/GetCalibration": {
-		Method:            "/gibson.world.v1.WorldService/GetCalibration",
 		Service:           "gibson.world.v1.WorldService",
 		Relation:          "member",
 		ObjectType:        "tenant",
@@ -3694,7 +3333,6 @@ var Registry = map[string]Entry{
 		Self:              false,
 	},
 	"/gibson.world.v1.WorldService/GetFrameAt": {
-		Method:            "/gibson.world.v1.WorldService/GetFrameAt",
 		Service:           "gibson.world.v1.WorldService",
 		Relation:          "member",
 		ObjectType:        "tenant",
@@ -3704,7 +3342,6 @@ var Registry = map[string]Entry{
 		Self:              false,
 	},
 	"/gibson.world.v1.WorldService/GetLlmCall": {
-		Method:            "/gibson.world.v1.WorldService/GetLlmCall",
 		Service:           "gibson.world.v1.WorldService",
 		Relation:          "member",
 		ObjectType:        "tenant",
@@ -3714,7 +3351,6 @@ var Registry = map[string]Entry{
 		Self:              false,
 	},
 	"/gibson.world.v1.WorldService/GetReputation": {
-		Method:            "/gibson.world.v1.WorldService/GetReputation",
 		Service:           "gibson.world.v1.WorldService",
 		Relation:          "member",
 		ObjectType:        "tenant",
@@ -3724,7 +3360,6 @@ var Registry = map[string]Entry{
 		Self:              false,
 	},
 	"/gibson.world.v1.WorldService/GetTimeline": {
-		Method:            "/gibson.world.v1.WorldService/GetTimeline",
 		Service:           "gibson.world.v1.WorldService",
 		Relation:          "member",
 		ObjectType:        "tenant",
@@ -3734,7 +3369,6 @@ var Registry = map[string]Entry{
 		Self:              false,
 	},
 	"/gibson.world.v1.WorldService/ListFindings": {
-		Method:            "/gibson.world.v1.WorldService/ListFindings",
 		Service:           "gibson.world.v1.WorldService",
 		Relation:          "member",
 		ObjectType:        "tenant",
@@ -3744,7 +3378,6 @@ var Registry = map[string]Entry{
 		Self:              false,
 	},
 	"/gibson.world.v1.WorldService/ListHosts": {
-		Method:            "/gibson.world.v1.WorldService/ListHosts",
 		Service:           "gibson.world.v1.WorldService",
 		Relation:          "member",
 		ObjectType:        "tenant",
@@ -3754,7 +3387,6 @@ var Registry = map[string]Entry{
 		Self:              false,
 	},
 	"/gibson.world.v1.WorldService/ListLabels": {
-		Method:            "/gibson.world.v1.WorldService/ListLabels",
 		Service:           "gibson.world.v1.WorldService",
 		Relation:          "member",
 		ObjectType:        "tenant",
@@ -3764,7 +3396,6 @@ var Registry = map[string]Entry{
 		Self:              false,
 	},
 	"/gibson.world.v1.WorldService/ListLlmCalls": {
-		Method:            "/gibson.world.v1.WorldService/ListLlmCalls",
 		Service:           "gibson.world.v1.WorldService",
 		Relation:          "member",
 		ObjectType:        "tenant",
@@ -3774,7 +3405,6 @@ var Registry = map[string]Entry{
 		Self:              false,
 	},
 	"/gibson.world.v1.WorldService/ListMissions": {
-		Method:            "/gibson.world.v1.WorldService/ListMissions",
 		Service:           "gibson.world.v1.WorldService",
 		Relation:          "member",
 		ObjectType:        "tenant",
@@ -3784,7 +3414,6 @@ var Registry = map[string]Entry{
 		Self:              false,
 	},
 	"/gibson.world.v1.WorldService/ListOpenBets": {
-		Method:            "/gibson.world.v1.WorldService/ListOpenBets",
 		Service:           "gibson.world.v1.WorldService",
 		Relation:          "member",
 		ObjectType:        "tenant",
@@ -3794,7 +3423,6 @@ var Registry = map[string]Entry{
 		Self:              false,
 	},
 	"/gibson.world.v1.WorldService/ListReviewQueue": {
-		Method:            "/gibson.world.v1.WorldService/ListReviewQueue",
 		Service:           "gibson.world.v1.WorldService",
 		Relation:          "member",
 		ObjectType:        "tenant",
@@ -3804,7 +3432,6 @@ var Registry = map[string]Entry{
 		Self:              false,
 	},
 	"/gibson.world.v1.WorldService/SettleBetByHITL": {
-		Method:            "/gibson.world.v1.WorldService/SettleBetByHITL",
 		Service:           "gibson.world.v1.WorldService",
 		Relation:          "writer",
 		ObjectType:        "tenant",
@@ -3814,7 +3441,6 @@ var Registry = map[string]Entry{
 		Self:              false,
 	},
 	"/gibson.world.v1.WorldService/SubmitLabel": {
-		Method:            "/gibson.world.v1.WorldService/SubmitLabel",
 		Service:           "gibson.world.v1.WorldService",
 		Relation:          "writer",
 		ObjectType:        "tenant",

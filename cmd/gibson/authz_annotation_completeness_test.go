@@ -59,11 +59,6 @@ func TestAuthzAnnotationCompleteness(t *testing.T) {
 	for _, method := range keys {
 		entry := registry.Registry[method]
 
-		// Method must be non-empty (registry-gen invariant)
-		if entry.Method == "" {
-			missing = append(missing, method+": empty Method")
-		}
-
 		// Unauthenticated entries are exempt — they're public RPCs with
 		// no authz dispatch.
 		if entry.Unauthenticated {
