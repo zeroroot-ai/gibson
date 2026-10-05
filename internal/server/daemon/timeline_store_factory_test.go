@@ -117,14 +117,17 @@ func TestTimelineStoreFactory_PoolForError(t *testing.T) {
 	assert.Nil(t, store)
 }
 
-// TestAssertTimelineDurability_SkipsWhenNoRedisConfigured verifies the one
-// tolerated skip: with no data-plane Redis addr there is no Redis-backed
-// Timeline to guard, so the boot guard passes (engines run in-memory only).
-func TestAssertTimelineDurability_SkipsWhenNoRedisConfigured(t *testing.T) {
+// TestAssertTimelineDurability_FailsWhenNoRedisConfigured verifies that a
+// daemon with no data-plane Redis address does not start (ADR-0163,
+// ADR-0003). The check function must not run: there is no server to ask.
+func TestAssertTimelineDurability_FailsWhenNoRedisConfigured(t *testing.T) {
 	t.Parallel()
 
-	err := assertTimelineDurability(context.Background(), "", "", datapool.AssertTimelineAOF, discardSlog())
-	assert.NoError(t, err, "empty redis addr must be a tolerated skip, not a boot failure")
+	called := false
+	check := func(context.Context, string, string) error { called = true; return nil }
+	err := assertTimelineDurability(context.Background(), "", "", check, discardSlog())
+	require.ErrorIs(t, err, errNoTimelineRedis)
+	assert.False(t, called, "the AOF check ran with no address")
 }
 
 // TestAssertTimelineDurability_FailsClosedWhenAOFUnverifiable verifies the
@@ -197,4 +200,11 @@ func TestTimelineStoreFactory_AcquireErrorIsReturned(t *testing.T) {
 	require.NotNil(t, store)
 	_, err = store.Append(context.Background(), "acme", "key-1", brain.HostObserved{ScopeID: "s", Address: "10.0.0.1"})
 	require.ErrorContains(t, err, "the pool is gone")
+}
+
+func TestRequireDurableTimeline(t *testing.T) {
+	t.Parallel()
+	require.Error(t, requireDurableTimeline(true, false), "a brain registry with no durable store must stop the start")
+	require.NoError(t, requireDurableTimeline(true, true))
+	require.NoError(t, requireDurableTimeline(false, false), "a daemon with no brain has no Timeline to require")
 }

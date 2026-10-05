@@ -5,6 +5,7 @@ package daemon
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"log/slog"
 
@@ -27,17 +28,17 @@ import (
 // is lost on the next Redis restart. deploy#1063 owns the chart side
 // (appendonly=yes on the shared redis-stack).
 //
-// redisAddr == "" is the one tolerated skip: with no data-plane Redis
-// configured there is no Redis-backed Timeline to guard — engines run
-// in-memory only, which is already loud in the store-factory logs.
+// redisAddr == "" is an error too. Each tenant has one durable Timeline
+// (ADR-0163), and a required dependency is never optional (ADR-0003), so a
+// daemon with no data-plane Redis does not start.
 //
 // check is the actual AOF probe — production passes
 // datapool.AssertTimelineAOF; tests substitute a stub because miniredis
 // cannot answer CONFIG GET appendonly=yes.
 func assertTimelineDurability(ctx context.Context, redisAddr, redisPassword string, check func(ctx context.Context, addr, password string) error, log *slog.Logger) error {
 	if redisAddr == "" {
-		log.WarnContext(ctx, "timeline durability boot guard skipped: no data-plane redis addr configured; engines will run in-memory only")
-		return nil
+		log.ErrorContext(ctx, "timeline durability boot guard FAILED: no data-plane Redis address is set; refusing to start, because each tenant needs a durable Timeline (ADR-0163)")
+		return errNoTimelineRedis
 	}
 	if err := check(ctx, redisAddr, redisPassword); err != nil {
 		log.ErrorContext(ctx, "timeline durability boot guard FAILED: cannot confirm Redis AOF persistence; refusing to start rather than serve a Timeline that would be lost on Redis restart (gibson#1119, ADR-0163)",
@@ -49,6 +50,23 @@ func assertTimelineDurability(ctx context.Context, redisAddr, redisPassword stri
 	log.InfoContext(ctx, "timeline durability boot guard: Redis AOF persistence confirmed (appendonly=yes)",
 		"redis_addr", redisAddr,
 	)
+	return nil
+}
+
+// errNoTimelineRedis reports a daemon with no data-plane Redis address. The
+// durable Timeline of each tenant lives in that Redis.
+var errNoTimelineRedis = errors.New("timeline durability boot guard: no data-plane Redis address is set; " +
+	"each tenant needs a durable Timeline (ADR-0163)")
+
+// requireDurableTimeline refuses a daemon whose brain registry has no durable
+// Timeline store. The store needs the key provider, the data-plane pool and a
+// data-plane Redis with AOF. A missing one is a start failure, never an engine
+// in memory only (ADR-0163, ADR-0003).
+func requireDurableTimeline(hasBrainRegistry, storeWired bool) error {
+	if hasBrainRegistry && !storeWired {
+		return errors.New("the durable Timeline store is not wired: the daemon needs security.key_provider, " +
+			"a data-plane pool and a data-plane Redis with appendonly=yes (ADR-0163)")
+	}
 	return nil
 }
 
