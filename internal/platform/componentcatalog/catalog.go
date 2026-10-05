@@ -223,6 +223,9 @@ func (m *Manifest) validate() error {
 	if m.ID == "" {
 		return errors.New("id is required")
 	}
+	if err := validateEgressAllow(m.ID, m.EgressAllow); err != nil {
+		return err
+	}
 	if !authz.IsComponentKind(m.Kind) {
 		return fmt.Errorf("%s: kind %q must be one of agent, tool, plugin, connector", m.ID, m.Kind)
 	}
@@ -324,6 +327,18 @@ func (m *Manifest) validate() error {
 // validateStaticEnv checks a manifest's static launch environment. Like
 // memberCommand and minContextWindow it is read only on a sandboxed launch,
 // so declaring it elsewhere would ship a field that silently does nothing.
+// validateEgressAllow refuses the value "*" (owner decision S6, gibson#865).
+// The network scope of a mission node decides the egress of each sandbox in
+// it. A manifest names hosts, or nothing.
+func validateEgressAllow(id string, allow []string) error {
+	for _, a := range allow {
+		if strings.TrimSpace(a) == "*" {
+			return fmt.Errorf(`%s: egressAllow holds "*": the catalog states no wildcard; the network scope of the mission node decides`, id)
+		}
+	}
+	return nil
+}
+
 func validateStaticEnv(id string, env map[string]string, dispatchMode string) error {
 	if len(env) == 0 {
 		return nil
