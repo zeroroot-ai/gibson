@@ -384,7 +384,7 @@ func TestProjectedVocabularyMatchesTheTaxonomy(t *testing.T) {
 		upsertHostCypher, upsertMissionCypher, upsertFindingCypher,
 		upsertDomainCypher, upsertSubdomainCypher, upsertCredentialCypher,
 		upsertAccountCypher, upsertAgentRunCypher, upsertLlmCallCypher,
-		upsertObservationCypher,
+		upsertObservationCypher, upsertHypothesisCypher,
 	}, "\n")
 	literalNode := func(label string) bool {
 		return strings.Contains(cyphers, ":"+label+" ") || strings.Contains(cyphers, ":"+label+"{") ||

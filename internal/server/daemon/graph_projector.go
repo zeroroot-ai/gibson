@@ -102,6 +102,10 @@ type GraphWriter interface {
 	UpsertCredential(ctx context.Context, tenant string, c brain.CredentialSnapshot) error
 	UpsertAccount(ctx context.Context, tenant string, a brain.AccountSnapshot) error
 	UpsertAgentRun(ctx context.Context, tenant string, r brain.AgentRunSnapshot) error
+	// UpsertHypothesis materializes a :Hypothesis: the proposed, unproven
+	// claim of an agent (ADR-0121). The node is keyed by the id that the World
+	// assigned, so a replay of the Timeline gives the same node.
+	UpsertHypothesis(ctx context.Context, tenant string, h brain.HypothesisSnapshot) error
 	UpsertLlmCall(ctx context.Context, tenant string, c brain.LlmCallSnapshot) error
 	// UpsertObservation materializes an :Observation — the node an
 	// out-of-taxonomy shape lands on (ADR-0112). Keyed by the Timeline event
@@ -183,6 +187,12 @@ func (p *GraphProjector) project(ctx context.Context) {
 			if err := p.writer.UpsertAgentRun(ctx, tenant, r); err != nil {
 				p.logger.Warn("graph projection: agent-run upsert failed",
 					"tenant", tenant, "run_id", r.RunID, "error", err)
+			}
+		}
+		for _, h := range eng.Hypotheses() {
+			if err := p.writer.UpsertHypothesis(ctx, tenant, h); err != nil {
+				p.logger.Warn("graph projection: hypothesis upsert failed",
+					"tenant", tenant, "hypothesis_id", h.ID, "error", err)
 			}
 		}
 		for _, o := range eng.Observations() {

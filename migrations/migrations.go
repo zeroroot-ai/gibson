@@ -19,7 +19,7 @@ package migrations
 // :_SchemaVersion node. It equals taxonomy.Version. This package cannot import
 // the taxonomy, because the tenant operator imports this package and never
 // internal/engine. A test in internal/server/daemon fails when the two differ.
-const Neo4jSchemaVersion uint = 4
+const Neo4jSchemaVersion uint = 5
 
 // LatestNeo4jVersion returns the schema version a tenant Neo4j database is
 // expected to report.
