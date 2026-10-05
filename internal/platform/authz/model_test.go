@@ -107,19 +107,17 @@ func TestModel_CatalogGating(t *testing.T) {
 
 	// allActions is iterated by cases that cover the three action classes.
 	type action struct {
-		name       string // "read" | "write" | "execute"
-		can        string // "can_read" | "can_configure" | "can_execute"
-		direct     string // writable direct relation backing `can`: "direct_read" | "direct_configure" | "direct_execute"
-		tenantDis  string
-		teamDis    string
-		userDis    string
-		compEnable string
-		canAsComp  string
+		name      string // "read" | "write" | "execute"
+		can       string // "can_read" | "can_configure" | "can_execute"
+		direct    string // writable direct relation backing `can`: "direct_read" | "direct_configure" | "direct_execute"
+		tenantDis string
+		teamDis   string
+		userDis   string
 	}
 	actions := []action{
-		{"read", "can_read", "direct_read", "tenant_read_disabled", "team_read_disabled", "user_read_disabled", "component_read_enabled", "can_read_as_component"},
-		{"write", "can_configure", "direct_configure", "tenant_write_disabled", "team_write_disabled", "user_write_disabled", "component_write_enabled", "can_write_as_component"},
-		{"execute", "can_execute", "direct_execute", "tenant_execute_disabled", "team_execute_disabled", "user_execute_disabled", "component_execute_enabled", "can_execute_as_component"},
+		{"read", "can_read", "direct_read", "tenant_read_disabled", "team_read_disabled", "user_read_disabled"},
+		{"write", "can_configure", "direct_configure", "tenant_write_disabled", "team_write_disabled", "user_write_disabled"},
+		{"execute", "can_execute", "direct_execute", "tenant_execute_disabled", "team_execute_disabled", "user_execute_disabled"},
 	}
 
 	// newClient produces a fresh client+store+model per subtest.
@@ -290,57 +288,101 @@ func TestModel_CatalogGating(t *testing.T) {
 			"alice in tenant:acme must NOT execute tenant:other's private item")
 	})
 
-	// -- Component-scope narrowing (R2) --------------------------------------
-
-	t.Run("component_scope/no_grant_denies_all_actions_as_component", func(t *testing.T) {
-		c := newClient(t)
+	// -- A component principal is checked like a user (ADR-0041) -------------
+	//
+	// One grant: the tuple on the direct_ relation is the approval. The model
+	// has no second per-component enablement. compPlat is in the catalog of
+	// acme and has no owner tuple, so membership of acme alone gives no
+	// action on it.
+	const compPlat = "component:comp-platform"
+	seedPlat := func(c *fgaclient.OpenFgaClient) {
+		t.Helper()
 		seed(c)
-		// agent_principal:aa-1 has NO component_X_enabled tuples yet.
+		addTuples(c, fgaclient.ClientTupleKey{User: tenantA, Relation: "tenant_enabled", Object: compPlat})
+	}
+
+	t.Run("component_principal/no_grant_denies_each_action", func(t *testing.T) {
+		c := newClient(t)
+		seedPlat(c)
 		for _, a := range actions {
-			require.False(t, checkAllow(c, agentAA, a.canAsComp, compOne),
-				"no component grant: %s should deny", a.canAsComp)
+			require.False(t, checkAllow(c, agentAA, a.can, compPlat),
+				"no grant: %s must deny", a.can)
 		}
 	})
 
 	for _, a := range actions {
 		a := a
-		t.Run(fmt.Sprintf("component_scope/grant_enables_%s_only", a.name), func(t *testing.T) {
+		t.Run(fmt.Sprintf("component_principal/one_grant_gives_%s_only", a.name), func(t *testing.T) {
 			c := newClient(t)
-			seed(c)
-			// Agent needs direct grant on the component to pass can_* via
-			// agent_principal subject. Give it tenant-scoped access too so
-			// the ownership gate + tenant_enabled gate passes.
-			addTuples(c,
-				fgaclient.ClientTupleKey{User: agentAA, Relation: a.direct, Object: compOne},
-				fgaclient.ClientTupleKey{User: agentAA, Relation: a.compEnable, Object: compOne},
-			)
-			// Only the granted action is allowed at the _as_component level.
+			seedPlat(c)
+			// The one tuple on the direct_ relation is the whole grant.
+			addTuples(c, fgaclient.ClientTupleKey{User: agentAA, Relation: a.direct, Object: compPlat})
 			for _, other := range actions {
-				got := checkAllow(c, agentAA, other.canAsComp, compOne)
+				got := checkAllow(c, agentAA, other.can, compPlat)
 				want := other.name == a.name
 				require.Equalf(t, want, got,
-					"agent granted %s only: checking %s (expected %v, got %v)", a.name, other.canAsComp, want, got)
+					"agent granted %s only: checking %s (expected %v, got %v)", a.name, other.can, want, got)
 			}
 		})
 	}
 
-	t.Run("component_scope/user_layer_deny_kills_agent_action", func(t *testing.T) {
+	for _, a := range actions {
+		a := a
+		t.Run(fmt.Sprintf("component_principal/tenant_deny_wins_for_%s", a.name), func(t *testing.T) {
+			c := newClient(t)
+			seedPlat(c)
+			addTuples(c, fgaclient.ClientTupleKey{User: agentAA, Relation: a.direct, Object: compPlat})
+			require.True(t, checkAllow(c, agentAA, a.can, compPlat), "precondition: the agent has %s", a.can)
+			// The principal is a member of its tenant, so the tenant deny
+			// reaches it.
+			addTuples(c, fgaclient.ClientTupleKey{User: tenantA, Relation: a.tenantDis, Object: compPlat})
+			require.False(t, checkAllow(c, agentAA, a.can, compPlat),
+				"%s must win over the grant of a component principal", a.tenantDis)
+		})
+	}
+
+	// The team deny and the user deny still win for each subject that they
+	// can name (the team_deny and user_deny subtests above). The model gives
+	// them no path to a component principal: a principal cannot be a member
+	// of a team, and a user deny takes a user only. OpenFGA refuses each
+	// such tuple, so no state exists in which a component principal escapes
+	// a team deny or a user deny that names it.
+	t.Run("component_principal/team_and_user_deny_cannot_name_a_principal", func(t *testing.T) {
 		c := newClient(t)
-		seed(c)
-		// Grant agent read via component-scope + direct.
-		addTuples(c,
-			fgaclient.ClientTupleKey{User: agentAA, Relation: "direct_read", Object: compOne},
-			fgaclient.ClientTupleKey{User: agentAA, Relation: "component_read_enabled", Object: compOne},
-		)
-		require.True(t, checkAllow(c, agentAA, "can_read_as_component", compOne),
-			"precondition: agent has read")
-		// Now the owner user loses read at tenant level → agent loses read
-		// transitively because can_read_as_component requires can_read.
-		// Here the agent is its own subject for can_read, but we demonstrate
-		// the deny-wins semantics by denying at the agent subject directly.
-		addTuples(c, fgaclient.ClientTupleKey{User: tenantA, Relation: "tenant_read_disabled", Object: compOne})
-		require.False(t, checkAllow(c, agentAA, "can_read_as_component", compOne),
-			"tenant_read_disabled kills agent's can_read_as_component")
+		seedPlat(c)
+		_, err := c.Write(ctx).Body(fgaclient.ClientWriteRequest{Writes: []fgaclient.ClientTupleKey{
+			{User: agentAA, Relation: "member", Object: teamRed},
+		}}).Execute()
+		require.Error(t, err, "a component principal must not be a team member")
+		for _, a := range actions {
+			_, err := c.Write(ctx).Body(fgaclient.ClientWriteRequest{Writes: []fgaclient.ClientTupleKey{
+				{User: agentAA, Relation: a.userDis, Object: compPlat},
+			}}).Execute()
+			require.Errorf(t, err, "%s must take a user only", a.userDis)
+		}
+	})
+
+	// The six relations of the second approval are gone (gibson#705). A
+	// tuple or a check on one of them is an error, not a silent deny.
+	t.Run("component_principal/second_approval_relations_are_gone", func(t *testing.T) {
+		c := newClient(t)
+		seedPlat(c)
+		for _, relation := range []string{
+			"component_read_enabled", "component_write_enabled", "component_execute_enabled",
+		} {
+			_, err := c.Write(ctx).Body(fgaclient.ClientWriteRequest{Writes: []fgaclient.ClientTupleKey{
+				{User: agentAA, Relation: relation, Object: compPlat},
+			}}).Execute()
+			require.Errorf(t, err, "the model must not have the relation %s", relation)
+		}
+		for _, relation := range []string{
+			"can_read_as_component", "can_write_as_component", "can_execute_as_component",
+		} {
+			_, err := c.Check(ctx).Body(fgaclient.ClientCheckRequest{
+				User: agentAA, Relation: relation, Object: compPlat,
+			}).Execute()
+			require.Errorf(t, err, "the model must not have the relation %s", relation)
+		}
 	})
 
 	// ADR-0046: the FGA model is symmetric across the three principal kinds.

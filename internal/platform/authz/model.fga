@@ -238,13 +238,6 @@ type component
     define user_read_disabled: [user]
     define user_write_disabled: [user]
     define user_execute_disabled: [user]
-    # Component-scope per-action grants for component-principal narrowing
-    # (owner approves at install time). Default absent = denied. Symmetric
-    # across the three principal kinds (ADR-0046): capability is policy
-    # (what enrollment grants per kind), not a type-system wall.
-    define component_read_enabled: [agent_principal, tool_principal, plugin_principal]
-    define component_write_enabled: [agent_principal, tool_principal, plugin_principal]
-    define component_execute_enabled: [agent_principal, tool_principal, plugin_principal]
     # Effective per-action evaluators — existing relation names preserved so
     # call sites keep compiling. Each layers the ownership/scope gate onto
     # the direct grant set and subtracts every matching deny relation.
@@ -297,13 +290,10 @@ type component
     # which a plugin_principal never holds.
     define can_receive_work: (direct_receive_work and in_tenant_catalog) but not any_execute_deny
     define can_poll_work: can_execute or can_receive_work
-    # Component-scope effective relations — evaluated when the caller is an
-    # agent_principal. Each requires both the owner-side action (via can_*)
-    # AND the per-component grant tuple. component_scope JWT claim narrowing
-    # (R2) is enforced at the interceptor against these relations.
-    define can_read_as_component: can_read and component_read_enabled
-    define can_write_as_component: can_configure and component_write_enabled
-    define can_execute_as_component: can_execute and component_execute_enabled
+    # One grant (ADR-0041). A component principal is checked on can_read,
+    # can_configure and can_execute, the same relations as a user. The tuple
+    # on the direct_ relation is the grant, and no second approval exists.
+    # The deny relations above apply to it through its tenant membership.
     define can_be_invoked_by: [agent_principal, component]
 
 type system_tenant

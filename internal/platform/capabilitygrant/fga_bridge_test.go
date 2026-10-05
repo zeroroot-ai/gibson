@@ -515,10 +515,9 @@ func TestCheckExecution_UntypedSubject_ReturnsError(t *testing.T) {
 	assert.Contains(t, err.Error(), "malformed subject")
 }
 
-// A component principal is checked against the narrowed component-scope
-// relation, so it needs the per-component enablement written for IT — not just
-// whatever its enroller can reach.
-func TestCheckExecution_ComponentPrincipal_UsesComponentScopeRelation(t *testing.T) {
+// A component principal is checked on can_execute, the same relation as a
+// user (ADR-0041). The subject of the check is the principal, not its enroller.
+func TestCheckExecution_ComponentPrincipal_UsesTheSameRelationAsAUser(t *testing.T) {
 	for _, principal := range []string{
 		"agent_principal:acct-1",
 		"tool_principal:acct-2",
@@ -538,7 +537,7 @@ func TestCheckExecution_ComponentPrincipal_UsesComponentScopeRelation(t *testing
 			require.NoError(t, err)
 			assert.True(t, allowed)
 			assert.Equal(t, principal, gotUser)
-			assert.Equal(t, "can_execute_as_component", gotRelation)
+			assert.Equal(t, "can_execute", gotRelation)
 		})
 	}
 }
@@ -547,9 +546,9 @@ func TestCheckExecution_ComponentPrincipal_UsesComponentScopeRelation(t *testing
 // Tests: ResolveComponentCapabilities
 // ---------------------------------------------------------------------------
 
-// resolveComponentFixture wires an authorizer where alice can execute+read two
-// components and the principal holds a per-component execute enablement on one
-// of them.
+// resolveComponentFixture wires an authorizer where alice can execute two
+// components and read one. principalGrants holds what the principal can reach
+// for each relation.
 func resolveComponentFixture(t *testing.T, principalGrants map[string][]string) (*FGABridge, *mockAuthorizer) {
 	t.Helper()
 	auth := &mockAuthorizer{
@@ -581,7 +580,7 @@ func resolveComponentFixture(t *testing.T, principalGrants map[string][]string) 
 // the intersection, registration recorded everything the enroller could reach.
 func TestResolveComponentCapabilities_RecordsPrincipalGrantsNotEnrollers(t *testing.T) {
 	bridge, _ := resolveComponentFixture(t, map[string][]string{
-		"component_execute_enabled": {"component:tool/nmap"},
+		"can_execute": {"component:tool/nmap"},
 	})
 
 	caps, err := bridge.ResolveComponentCapabilities(
@@ -600,8 +599,8 @@ func TestResolveComponentCapabilities_RecordsPrincipalGrantsNotEnrollers(t *test
 func TestResolveComponentCapabilities_IntersectsWithOwnerReach(t *testing.T) {
 	bridge, _ := resolveComponentFixture(t, map[string][]string{
 		// The owner can read nmap but NOT nuclei, and cannot configure anything.
-		"component_read_enabled":  {"component:tool/nmap", "component:tool/nuclei"},
-		"component_write_enabled": {"component:tool/nmap"},
+		"can_read":      {"component:tool/nmap", "component:tool/nuclei"},
+		"can_configure": {"component:tool/nmap"},
 	})
 
 	caps, err := bridge.ResolveComponentCapabilities(
@@ -620,7 +619,7 @@ func TestResolveComponentCapabilities_IntersectsWithOwnerReach(t *testing.T) {
 // falling back to the enroller's capabilities.
 func TestResolveComponentCapabilities_NoPrincipal_RecordsNothing(t *testing.T) {
 	bridge, _ := resolveComponentFixture(t, map[string][]string{
-		"component_execute_enabled": {"component:tool/nmap"},
+		"can_execute": {"component:tool/nmap"},
 	})
 
 	caps, err := bridge.ResolveComponentCapabilities(context.Background(), "", "alice", "acme")
@@ -632,7 +631,7 @@ func TestResolveComponentCapabilities_NoPrincipal_RecordsNothing(t *testing.T) {
 // records nothing rather than the enroller's whole set.
 func TestResolveComponentCapabilities_NonPrincipalSubject_RecordsNothing(t *testing.T) {
 	bridge, _ := resolveComponentFixture(t, map[string][]string{
-		"component_execute_enabled": {"component:tool/nmap"},
+		"can_execute": {"component:tool/nmap"},
 	})
 
 	caps, err := bridge.ResolveComponentCapabilities(
@@ -684,7 +683,7 @@ func TestResolveComponentCapabilities_PrincipalResolutionFailure_IsReported(t *t
 // capability nobody can name.
 func TestResolveComponentCapabilities_MalformedObjectRef_IsSkipped(t *testing.T) {
 	bridge, _ := resolveComponentFixture(t, map[string][]string{
-		"component_execute_enabled": {"not-a-component-ref", "component:tool/nmap"},
+		"can_execute": {"not-a-component-ref", "component:tool/nmap"},
 	})
 
 	caps, err := bridge.ResolveComponentCapabilities(
@@ -698,7 +697,7 @@ func TestResolveComponentCapabilities_MalformedObjectRef_IsSkipped(t *testing.T)
 // The same grant reachable twice is recorded once.
 func TestResolveComponentCapabilities_DeduplicatesRepeatedGrants(t *testing.T) {
 	bridge, _ := resolveComponentFixture(t, map[string][]string{
-		"component_execute_enabled": {"component:tool/nmap", "component:tool/nmap"},
+		"can_execute": {"component:tool/nmap", "component:tool/nmap"},
 	})
 
 	caps, err := bridge.ResolveComponentCapabilities(

@@ -199,7 +199,7 @@ func TestCachedChecker_UnresolvableObjectIsADenyNotAnOutage(t *testing.T) {
 	const method = "/gibson.daemon.discovery.v1.DiscoveryService/ListFindings"
 	reg, err := LoadRegistry([]byte(`entries:
   "` + method + `":
-    relation: "can_read_as_component"
+    relation: "can_read"
     object_type: "component"
     object_deriver: "component_from_identity"
     allowed_identities:
@@ -244,7 +244,7 @@ func TestLoadRegistry_AcceptsComponentFromIdentity(t *testing.T) {
 
 	const y = `entries:
   "/gibson.daemon.discovery.v1.DiscoveryService/ListFindings":
-    relation: "can_read_as_component"
+    relation: "can_read"
     object_type: "component"
     object_deriver: "component_from_identity"
     allowed_identities:
