@@ -60,7 +60,7 @@ require (
 	github.com/stretchr/testify v1.12.1
 	github.com/testcontainers/testcontainers-go v0.42.0
 	github.com/tidwall/gjson v1.18.0
-	github.com/zeroroot-ai/ast-checks v0.7.0
+	github.com/zeroroot-ai/ast-checks v0.8.0
 	github.com/zeroroot-ai/sdk v0.192.3
 	github.com/zeroroot-ai/setec v0.118.0
 	github.com/zeroroot-ai/testfixtures v0.3.0
