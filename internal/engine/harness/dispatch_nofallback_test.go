@@ -19,13 +19,9 @@ import (
 
 // spyAdapter is a component.ComponentDiscovery whose DiscoverTool records
 // whether it was reached. Every other method is inherited from the embedded
-// nil interface and panics if invoked — so any unexpected fan-out into the
-// in-process discovery surface fails the test loudly rather than silently.
-//
-// DiscoverTool deliberately returns a sentinel error (rather than a working
-// tool) so the test asserts on *reachability*, not on a full in-process
-// execution: reaching it at all is the violation we are guarding against for
-// untrusted components.
+// nil interface and panics if invoked. A tool has the sandbox path and the
+// work queue path only (ADR-0110), so a dispatch that reaches DiscoverTool is
+// a third path.
 type spyAdapter struct {
 	component.ComponentDiscovery
 	discoverToolCalled bool
@@ -33,13 +29,12 @@ type spyAdapter struct {
 
 func (s *spyAdapter) DiscoverTool(_ context.Context, _ string) (tool.Tool, error) {
 	s.discoverToolCalled = true
-	return nil, errors.New("spy: in-process gRPC path was selected")
+	return nil, errors.New("spy: the registry adapter was selected for a dispatch")
 }
 
-// newNoFallbackHarness wires a harness on the in-process direct-gRPC path: the
-// tenant instance carries a grpc_endpoint and a spyAdapter is installed, so a
-// component that clears the dispatch-policy gate WILL reach DiscoverTool. The
-// gate must stop an untrusted component before that happens.
+// newNoFallbackHarness wires a harness whose one tool instance reports a
+// grpc_endpoint, with a spyAdapter installed. Before gibson#755 such an
+// instance took a direct gRPC call through the adapter.
 func newNoFallbackHarness(t *testing.T, trust componentpb.ContentTrust) (*DefaultAgentHarness, *spyAdapter) {
 	t.Helper()
 	spy := &spyAdapter{}
@@ -47,7 +42,7 @@ func newNoFallbackHarness(t *testing.T, trust componentpb.ContentTrust) (*Defaul
 		logger: slog.New(slog.NewTextHandler(noopWriter{}, nil)),
 		tracer: noop.NewTracerProvider().Tracer("test"),
 		// The execute gate runs first. The tenant has the tool enabled, so
-		// these tests still measure the trust gate and not the execute gate.
+		// these tests still measure the dispatch and not the execute gate.
 		componentAuthorizer: &recordingAuthorizer{allow: true},
 		componentRegistry: &gateFakeRegistry{
 			tenantInstances: []component.ComponentInfo{{
@@ -69,13 +64,11 @@ func newNoFallbackHarness(t *testing.T, trust componentpb.ContentTrust) (*Defaul
 
 // The tool name must NOT be a kind:tool catalog manifest. A manifest tool takes
 // the earlier manifest path in CallToolProto (ADR-0117) and never reaches the
-// registry dispatch these tests cover — which would make the deny assertion
-// below pass for the wrong reason and the control test fail outright.
+// registry dispatch these tests cover.
 
-// TestDispatchGate_UntrustedSetecOnly_NoInProcessFallback is the AC-3 invariant
-// (gibson#999): an untrusted tool with no sandboxed dispatch is
-// denied with the typed SANDBOX_POLICY_DENIED code AND never reaches the
-// in-process direct-gRPC path — the spy adapter's DiscoverTool is not called.
+// TestDispatchGate_UntrustedSetecOnly_NoInProcessFallback: cluster code that
+// the catalog does not state as trusted is denied with the typed
+// SANDBOX_POLICY_DENIED code, and the registry adapter is not called.
 func TestDispatchGate_UntrustedSetecOnly_NoInProcessFallback(t *testing.T) {
 	h, spy := newNoFallbackHarness(t, componentpb.ContentTrust_CONTENT_TRUST_UNTRUSTED)
 	ctx := callerCtx(t, "user-42", "acme")
@@ -85,21 +78,68 @@ func TestDispatchGate_UntrustedSetecOnly_NoInProcessFallback(t *testing.T) {
 		t.Fatalf("code = %q; want SANDBOX_POLICY_DENIED", code)
 	}
 	if spy.discoverToolCalled {
-		t.Fatal("untrusted tool reached the in-process gRPC dispatch path; the gate must deny before any in-process fallback")
+		t.Fatal("a denied tool reached the registry adapter")
 	}
 }
 
-// TestDispatchGate_TrustedSetecOnly_ReachesInProcess is the control: a trusted
-// tool with the identical wiring DOES reach the in-process path (the spy is
-// invoked). This proves the no-fallback assertion above is load-bearing — the
-// path is genuinely reachable and only the gate stops the untrusted case.
-func TestDispatchGate_TrustedSetecOnly_ReachesInProcess(t *testing.T) {
+// TestCallToolProto_AReportedEndpointSelectsNoDirectCall: a tool that passes
+// the gate and reports a grpc_endpoint takes the work queue. The daemon dials
+// no address that a tool reports (gibson#755).
+func TestCallToolProto_AReportedEndpointSelectsNoDirectCall(t *testing.T) {
 	h, spy := newNoFallbackHarness(t, componentpb.ContentTrust_CONTENT_TRUST_TRUSTED)
-	ctx := callerCtx(t, "user-42", "acme")
+	q := &queueFake{waitErr: errors.New("stop after the enqueue")}
+	h.workQueue = q
+	h.metrics = &NoOpMetricsRecorder{}
 
-	// Error is expected (the spy returns one); we only assert the path was taken.
-	_ = h.CallToolProto(ctx, "acme-registry-tool", wrapperspb.String("in"), &wrapperspb.StringValue{})
-	if !spy.discoverToolCalled {
-		t.Fatal("trusted tool did not reach the in-process gRPC path; control wiring is wrong, the no-fallback test would be vacuous")
+	_ = h.CallToolProto(callerCtx(t, "user-42", "acme"), "acme-registry-tool", wrapperspb.String("in"), &wrapperspb.StringValue{})
+	if spy.discoverToolCalled {
+		t.Fatal("the tool reached the registry adapter; a tool has the sandbox and the work queue only")
+	}
+	if q.gotKind != "tool" || q.gotName != "acme-registry-tool" {
+		t.Fatalf("enqueued kind/name = %q/%q; want tool/acme-registry-tool", q.gotKind, q.gotName)
+	}
+}
+
+// TestCallToolProto_NoManifestAndNoQueueInstanceIsNotFound: a tool with no
+// sandbox manifest and no work queue instance gets the typed error, and the
+// registry adapter is no fallback (gibson#755).
+func TestCallToolProto_NoManifestAndNoQueueInstanceIsNotFound(t *testing.T) {
+	cases := map[string]func(h *DefaultAgentHarness){
+		"no instance":           func(h *DefaultAgentHarness) { h.componentRegistry = &gateFakeRegistry{}; h.workQueue = &queueFake{} },
+		"no component registry": func(h *DefaultAgentHarness) { h.componentRegistry = nil; h.workQueue = &queueFake{} },
+		"no work queue":         func(h *DefaultAgentHarness) { h.workQueue = nil },
+	}
+	for name, setup := range cases {
+		t.Run(name, func(t *testing.T) {
+			h, spy := newNoFallbackHarness(t, componentpb.ContentTrust_CONTENT_TRUST_TRUSTED)
+			setup(h)
+			err := h.CallToolProto(callerCtx(t, "user-42", "acme"), "acme-registry-tool", wrapperspb.String("in"), &wrapperspb.StringValue{})
+			if code := gibsonCode(t, err); code != ErrHarnessToolNotFound {
+				t.Fatalf("code = %q; want %q", code, ErrHarnessToolNotFound)
+			}
+			if spy.discoverToolCalled {
+				t.Fatal("the registry adapter was used as a fallback")
+			}
+		})
+	}
+}
+
+// TestCallToolProtoStream_UsesTheSameDispatch: a streamed call takes the work
+// queue like a unary call, and delivers the error through the callback.
+func TestCallToolProtoStream_UsesTheSameDispatch(t *testing.T) {
+	h, spy := newNoFallbackHarness(t, componentpb.ContentTrust_CONTENT_TRUST_TRUSTED)
+	q := &queueFake{waitErr: errors.New("stop after the enqueue")}
+	h.workQueue = q
+	h.metrics = &NoOpMetricsRecorder{}
+
+	err := h.CallToolProtoStream(callerCtx(t, "user-42", "acme"), "acme-registry-tool", wrapperspb.String("in"), &wrapperspb.StringValue{}, nil)
+	if err == nil {
+		t.Fatal("want the work queue error")
+	}
+	if spy.discoverToolCalled {
+		t.Fatal("a streamed call reached the registry adapter")
+	}
+	if q.gotKind != "tool" {
+		t.Fatalf("enqueued kind = %q; want tool", q.gotKind)
 	}
 }
