@@ -52,10 +52,6 @@ type ProvisionDeps struct {
 	// SignupProgressStore (Redis-backed, polled by the ProvisioningPanel).
 	SignupProgress signupprogress.Client
 
-	// FinalBackup carries the configuration for the pre-deprovision Velero
-	// backup step.
-	FinalBackup FinalBackupDeps
-
 	// WriteTenantBrokerConfig wires the new 11th saga step that writes a
 	// row to the platform tenant_secrets_broker_config table after
 	// data-plane provisioning completes. Without this row, the gibson

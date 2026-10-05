@@ -442,8 +442,6 @@ operators/tenant/internal/provision/entitlements_grpc_client.go	itoaInt64
 operators/tenant/internal/saga/conditions.go	FindCondition
 operators/tenant/internal/saga/conditions.go	IsConditionTrue
 operators/tenant/internal/saga/conditions.go	SetCondition
-operators/tenant/internal/saga/flows/final_backup.go	ExportedBuildVeleroBackup
-operators/tenant/internal/saga/flows/final_backup.go	ExportedFinalBackupStep
 operators/tenant/internal/saga/permanent.go	IsPermanent
 operators/tenant/internal/saga/permanent.go	WrapPermanent
 operators/tenant/internal/saga/runner.go	ValidateAtStartup

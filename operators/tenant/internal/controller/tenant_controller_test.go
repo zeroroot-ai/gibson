@@ -71,6 +71,9 @@ func newFakeReconciler(t *testing.T, tenant *gibsonv1alpha1.Tenant) (*TenantReco
 		// Production always injects a reporter (cmd/main.go). The no-op one
 		// is what it injects when report-back is off.
 		StatusReporter: NoopTenantStatusReporter{},
+		// Production always injects the backup gate (cmd/main.go). This stub
+		// reports a complete backup.
+		FinalBackup: &stubFinalBackup{done: true},
 	}
 	return r, fakeClient
 }
