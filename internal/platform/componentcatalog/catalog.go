@@ -28,6 +28,7 @@ import (
 	"fmt"
 	"io/fs"
 	"regexp"
+	"slices"
 	"sort"
 	"strings"
 
@@ -217,6 +218,15 @@ const DispatchModeSandboxed = "sandboxed"
 
 const digestMarker = "@sha256:"
 
+// manifestKinds lists the kinds of manifest that the catalog loader accepts.
+// Each kind has a spec check in validate.
+//
+// The list belongs to the loader. The authorization model has one more
+// component kind, domainpack, which is an authorization object type only. A
+// Domain Pack is not a catalog component: packs are in the ontology catalog
+// (internal/engine/ontology). The loader refuses a domainpack manifest.
+var manifestKinds = []string{authz.KindAgent, authz.KindTool, authz.KindPlugin, authz.KindConnector}
+
 // validate checks the envelope and the kind-specific spec, decoding the spec
 // into its typed form. A bad manifest fails the load loudly.
 func (m *Manifest) validate() error {
@@ -226,8 +236,8 @@ func (m *Manifest) validate() error {
 	if err := validateEgressAllow(m.ID, m.EgressAllow); err != nil {
 		return err
 	}
-	if !authz.IsComponentKind(m.Kind) {
-		return fmt.Errorf("%s: kind %q must be one of agent, tool, plugin, connector", m.ID, m.Kind)
+	if !slices.Contains(manifestKinds, m.Kind) {
+		return fmt.Errorf("%s: kind %q must be one of %s", m.ID, m.Kind, strings.Join(manifestKinds, ", "))
 	}
 	switch m.Kind {
 	case authz.KindConnector:
