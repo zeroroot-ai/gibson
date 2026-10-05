@@ -106,6 +106,7 @@ func buildComponentScopeServer(t *testing.T, mock fga.FGAClient, descBase string
 		KeysBaseURL:       descBase,
 		TTL:               time.Minute,
 		ExpectedAudiences: []string{componentTestAudience},
+		ReplayStore:       componentTestReplayStore(t),
 		HTTPClient:        &http.Client{Timeout: 5 * time.Second},
 	})
 	if err != nil {
@@ -271,6 +272,7 @@ func TestComponentScope_VerifierReadsClaimAfterSignature(t *testing.T) {
 		KeysBaseURL:       desc.URL + "/capabilitygrant/v1/keys",
 		TTL:               time.Minute,
 		ExpectedAudiences: []string{componentTestAudience},
+		ReplayStore:       componentTestReplayStore(t),
 		HTTPClient:        desc.Client(),
 	})
 	if err != nil {

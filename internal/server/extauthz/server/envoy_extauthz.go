@@ -423,6 +423,15 @@ func (s *EnvoyAuthzServer) tryComponentAuth(ctx context.Context, method string, 
 	// Bind the token to this exact request: Verify refuses a token whose
 	// `method` claim does not match the request method (gibson#1246).
 	cid, err := s.component.Verify(ctx, token, method)
+	if errors.Is(err, cgjwt.ErrReplayStateUnavailable) {
+		// The replay store did not answer, so the token cannot be proven
+		// new. Refuse the call (fail closed). The token is not at fault, so
+		// the answer is "unavailable" and the component can retry with a new
+		// token.
+		extauthzCGJWTRejectedTotal.WithLabelValues("component_replay_state_unavailable").Inc()
+		s.log.ErrorContext(ctx, "ext-authz: replay state unavailable (component)", "method", method, "err", err)
+		return denyResponse(codes.Unavailable, typev3.StatusCode_ServiceUnavailable, bodyUnavailable), true
+	}
 	if err != nil {
 		// A present-but-invalid component token is a hard authentication
 		// failure — never fall through to other auth paths.

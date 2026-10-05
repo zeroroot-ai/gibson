@@ -4,12 +4,16 @@
 package main
 
 import (
+	"context"
 	"io"
 	"log/slog"
 	"net/http"
 	"testing"
 
+	"github.com/alicebob/miniredis/v2"
 	"github.com/zeroroot-ai/sdk/capabilitygrant"
+
+	"github.com/zeroroot-ai/gibson/internal/server/extauthz/cgjwt"
 )
 
 func discardLogger() *slog.Logger {
@@ -25,7 +29,7 @@ func discardLogger() *slog.Logger {
 func TestBuildComponentVerifier_PinsStableAudience(t *testing.T) {
 	t.Setenv("EXT_AUTHZ_CGJWT_KEYS_URL", "https://daemon:8086/capabilitygrant/v1/keys")
 
-	v, err := buildComponentVerifier(discardLogger(), &http.Client{})
+	v, err := buildComponentVerifier(discardLogger(), &http.Client{}, testReplayStore(t))
 	if err != nil {
 		t.Fatalf("buildComponentVerifier: %v", err)
 	}
@@ -45,11 +49,33 @@ func TestBuildComponentVerifier_PinsStableAudience(t *testing.T) {
 func TestBuildComponentVerifier_DisabledPath(t *testing.T) {
 	t.Setenv("EXT_AUTHZ_CGJWT_KEYS_URL", "")
 
-	v, err := buildComponentVerifier(discardLogger(), &http.Client{})
+	v, err := buildComponentVerifier(discardLogger(), &http.Client{}, testReplayStore(t))
 	if err != nil {
 		t.Fatalf("buildComponentVerifier with the component path disabled: %v", err)
 	}
 	if v != nil {
 		t.Fatal("component verifier built despite EXT_AUTHZ_CGJWT_KEYS_URL being unset")
 	}
+}
+
+// TestBuildComponentVerifier_RefusesNoReplayStore: with the component path
+// enabled, a verifier with no replay store is not built.
+func TestBuildComponentVerifier_RefusesNoReplayStore(t *testing.T) {
+	t.Setenv("EXT_AUTHZ_CGJWT_KEYS_URL", "https://daemon:8086/capabilitygrant/v1/keys")
+
+	if v, err := buildComponentVerifier(discardLogger(), &http.Client{}, nil); err == nil {
+		t.Fatalf("buildComponentVerifier = %v, nil: a missing replay store must be an error", v)
+	}
+}
+
+// testReplayStore returns a replay store on a Redis of its own.
+func testReplayStore(t *testing.T) cgjwt.ReplayStore {
+	t.Helper()
+	mr := miniredis.RunT(t)
+	sc, err := requiredStateClient(context.Background(), "redis://"+mr.Addr(), "")
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() { _ = sc.Close() })
+	return cgjwt.NewRedisReplayStore(sc)
 }

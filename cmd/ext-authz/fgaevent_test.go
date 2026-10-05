@@ -15,17 +15,22 @@ import (
 	"github.com/zeroroot-ai/gibson/internal/platform/fgaevent"
 )
 
-// TestFGAEventStateClient: no URL means no subscriber, a bad URL is an
-// error, a good URL gives a client.
-func TestFGAEventStateClient(t *testing.T) {
-	if c, err := fgaEventStateClient(context.Background(), "", "x"); c != nil || err != nil {
-		t.Fatalf("empty url: client=%v err=%v, want nil, nil", c, err)
-	}
-	if _, err := fgaEventStateClient(context.Background(), "not a url", ""); err == nil {
-		t.Fatal("a bad url must be an error, never a silent no-subscriber")
+// TestRequiredStateClient: an empty URL, a bad URL and a Redis that does not
+// answer are each an error. A good URL gives a client.
+func TestRequiredStateClient(t *testing.T) {
+	for name, rawURL := range map[string]string{
+		"empty":       "",
+		"blank":       "   ",
+		"not a url":   "not a url",
+		"unreachable": "redis://127.0.0.1:1",
+	} {
+		if c, err := requiredStateClient(context.Background(), rawURL, ""); err == nil {
+			_ = c.Close()
+			t.Fatalf("%s: got a client, want an error", name)
+		}
 	}
 	mr := miniredis.RunT(t)
-	c, err := fgaEventStateClient(context.Background(), "redis://"+mr.Addr(), "")
+	c, err := requiredStateClient(context.Background(), "redis://"+mr.Addr(), "")
 	if err != nil || c == nil {
 		t.Fatalf("good url: client=%v err=%v", c, err)
 	}
@@ -48,7 +53,7 @@ func (r *recordingEvicter) InvalidateSubject(subject string) int {
 // user, keyed on the bare Zitadel id the cache uses.
 func TestRunFGAEventSubscriber_EvictsTheUser(t *testing.T) {
 	mr := miniredis.RunT(t)
-	sc, err := fgaEventStateClient(context.Background(), "redis://"+mr.Addr(), "")
+	sc, err := requiredStateClient(context.Background(), "redis://"+mr.Addr(), "")
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -83,27 +88,49 @@ func TestRunFGAEventSubscriber_EvictsTheUser(t *testing.T) {
 	}
 }
 
-// TestStartFGAEventSubscriber: no URL and an unreachable URL start nothing
-// and say so; a reachable one subscribes.
-func TestStartFGAEventSubscriber(t *testing.T) {
+// TestInitRedis_RefusesToStartWithNoRedis: an empty URL and a Redis that
+// does not answer each stop the start of ext-authz.
+func TestInitRedis_RefusesToStartWithNoRedis(t *testing.T) {
 	ctx, cancel := context.WithCancel(context.Background())
 	t.Cleanup(cancel)
-	ev := &recordingEvicter{}
-	if startFGAEventSubscriber(ctx, slog.Default(), ev, "", "") {
-		t.Fatal("no URL must start no subscriber")
+	for name, rawURL := range map[string]string{"empty": "", "unreachable": "redis://127.0.0.1:1"} {
+		t.Setenv("EXT_AUTHZ_REDIS_URL", rawURL)
+		if _, _, err := initRedis(ctx, slog.Default(), &recordingEvicter{}); err == nil {
+			t.Fatalf("%s: initRedis returned no error", name)
+		}
 	}
-	if startFGAEventSubscriber(ctx, slog.Default(), ev, "redis://127.0.0.1:1", "") {
-		t.Fatal("an unreachable Redis must start no subscriber")
-	}
+}
+
+// TestInitRedis_StartsTheSubscriberAndGivesAReplayStore: with a Redis that
+// answers, the FGA event subscriber runs, and the replay store records a
+// token id one time.
+func TestInitRedis_StartsTheSubscriberAndGivesAReplayStore(t *testing.T) {
+	ctx, cancel := context.WithCancel(context.Background())
+	t.Cleanup(cancel)
 	mr := miniredis.RunT(t)
-	if !startFGAEventSubscriber(ctx, slog.Default(), ev, "redis://"+mr.Addr(), "") {
-		t.Fatal("a reachable Redis must start the subscriber")
+
+	t.Setenv("EXT_AUTHZ_REDIS_URL", "redis://"+mr.Addr())
+	t.Setenv("REDIS_PASSWORD", "")
+	sc, replay, err := initRedis(ctx, slog.Default(), &recordingEvicter{})
+	if err != nil {
+		t.Fatalf("initRedis: %v", err)
 	}
+	t.Cleanup(func() { _ = sc.Close() })
+
 	deadline := time.Now().Add(5 * time.Second)
 	for mr.PubSubNumSub(fgaevent.Channel)[fgaevent.Channel] == 0 {
 		if time.Now().After(deadline) {
 			t.Fatal("subscriber never subscribed")
 		}
 		time.Sleep(10 * time.Millisecond)
+	}
+
+	first, err := replay.Admit(ctx, "kid-1", "jti-1", time.Minute)
+	if err != nil || !first {
+		t.Fatalf("first Admit: first=%v err=%v", first, err)
+	}
+	again, err := replay.Admit(ctx, "kid-1", "jti-1", time.Minute)
+	if err != nil || again {
+		t.Fatalf("second Admit: first=%v err=%v, want false", again, err)
 	}
 }
